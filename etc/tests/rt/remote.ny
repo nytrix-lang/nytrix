@@ -11,7 +11,7 @@ fn test_tube_fuzz() {
    def ctx = tube.context(log_level="quiet")
    assert_eq(ctx.get("log_level", ""), "quiet", "context log_level")
    mut i = 0
-   while(i < 128){
+   while i < 128 {
       def prefix = "case=" + to_str(i)
       def line = "line-" + to_str(i)
       def payload = prefix + "|" + line + "\nneedle-" + to_str(i) + "-END!tail"
@@ -73,7 +73,7 @@ fn test_process_tube() {
    } #endif
    def cmd = "printf 'ready\\n'; IFS= read line; printf 'echo:%s\\n' \"$line\""
    def io = tube.shell(cmd, "quiet", 0, 2)
-   if(io == 0){
+   if io == 0 {
       print("skip process tube(spawn unavailable)")
       return 0
    }
@@ -92,7 +92,7 @@ fn test_ssh_tube_smoke() {
       return 0
    } #endif
    def io = tube.ssh("127.0.0.1", "", 1, "", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=1"], "quiet", 1000, 64)
-   if(io == 0){
+   if io == 0 {
       print("skip ssh tube smoke(spawn unavailable)")
       return 0
    }
@@ -117,20 +117,20 @@ fn test_requests_parse_metadata() {
 }
 
 fn test_remote_fetch() {
-   if(!env("NYTRIX_TEST_REMOTE")){
+   if !env("NYTRIX_TEST_REMOTE") {
       print("skip remote fetch(set NYTRIX_TEST_REMOTE=1 to run)")
       return 0
    }
    print("Testing remote fetch...")
    def url = "https://example.com"
    def text = fetch(url)
-   if(text == nil || text == 0){
+   if text == nil || text == 0 {
       print("skip remote fetch(offline or libcurl unavailable)")
       return 0
    }
    def n = text.len
    print(f"Fetched URL: {url}, length: {n}")
-   if(n < 10){
+   if n < 10 {
       print(f"fetch returned: '{text}'")
       panic(f"Failed to fetch {url} or content too short.")
    }

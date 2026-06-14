@@ -3,7 +3,7 @@ use std.core
 
 fn bad_inference(x) {
    ;; This should challenge the HM-inference if types are contradictory
-   if(x > 0){
+   if x > 0 {
       return x + 1
    } else {
       return "not a number"
@@ -16,7 +16,7 @@ fn deeply_nested() {
 }
 
 fn mismatched_braces() {
-   if(true){
+   if true {
       {
          {
             print("missing braces")

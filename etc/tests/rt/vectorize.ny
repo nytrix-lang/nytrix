@@ -3,7 +3,7 @@ use std.core
 fn auto_numeric_sum(n) {
    mut i = 0
    mut acc = 0
-   while(i < n){
+   while i < n {
       acc += i
       i += 1
    }
@@ -12,7 +12,7 @@ fn auto_numeric_sum(n) {
 
 fn auto_numeric_for(n) {
    mut acc = 0
-   for(mut i = 0 i < n ++i){
+   for mut i = 0 i < n ++i {
       acc += i * 2
    }
    acc
@@ -21,13 +21,13 @@ fn auto_numeric_for(n) {
 fn auto_typed_buffer_sum(n) {
    def p = malloc(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       store8(p, i, i)
       i += 1
    }
    mut j = 0
    mut acc = 0
-   while(j < n){
+   while j < n {
       acc += load8(p, j)
       j += 1
    }

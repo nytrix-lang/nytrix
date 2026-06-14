@@ -36,10 +36,10 @@ fn _request_close(any win) any { window.set_should_close(win, true) }
 
 fn dbg(any tag, any msg) any {
    "Prints a bracketed debug line when NY_DEBUG is enabled."
-   if(ui_profile.debug_enabled()){
+   if ui_profile.debug_enabled() {
       def txt = "[" + to_str(tag) + "] " + to_str(msg)
       ui_profile.print_text(txt)
-      if(ui_term.is_open()){ ui_term.log(txt) }
+      if ui_term.is_open() { ui_term.log(txt) }
    }
 }
 
@@ -69,35 +69,35 @@ fn default_font_filter(any tag, int fallback=FONT_FILTER_DEFAULT, str suffix="FO
 }
 
 fn _resolve_font_candidate(any raw) str {
-   if(!raw || !is_str(raw)){ return "" }
+   if !raw || !is_str(raw) { return "" }
    def s = str.strip(raw)
-   if(s.len == 0){ return "" }
+   if s.len == 0 { return "" }
    def resolved = lib_path.resolve_repo_asset(s)
-   if(is_str(resolved) && resolved.len > 0){ return resolved }
+   if is_str(resolved) && resolved.len > 0 { return resolved }
    s
 }
 
 fn font_from_candidates(int size, any candidates, int font_filter=-1, str pixel_name="monocraft") int {
    "Loads the first available font from an explicit candidate list."
-   if(!is_list(candidates)){ return 0 }
+   if !is_list(candidates) { return 0 }
    mut i = 0
    def paths_n = candidates.len
-   while(i < paths_n){
+   while i < paths_n {
       def raw = candidates.get(i)
-      if(raw && is_str(raw) && raw.len > 0){
+      if raw && is_str(raw) && raw.len > 0 {
          def raw_s = to_str(raw)
          def resolved = _resolve_font_candidate(raw_s)
-         if(resolved.len == 0){
+         if resolved.len == 0 {
             i += 1
             continue
          }
          mut font = 0
-         if(str.find(str.lower(raw_s), str.lower(to_str(pixel_name))) >= 0){
+         if str.find(str.lower(raw_s), str.lower(to_str(pixel_name))) >= 0 {
             font = font_load(resolved, size, 0)
          } else {
             font = font_load(resolved, size, font_filter)
          }
-         if(font){ return font }
+         if font { return font }
       }
       i += 1
    }
@@ -115,7 +115,7 @@ fn ui_font_from_candidates(int size, any candidates=0, any fallback_candidates=0
 fn timeout_ns(int default_ns=0) int {
    "Returns the active timeout in nanoseconds from NY_UI_TIMEOUT, else `default_ns`."
    def env_t = common.env_trim("NY_UI_TIMEOUT")
-   if(env_t.len > 0){ return int(str.atof(env_t) * 1e9) }
+   if env_t.len > 0 { return int(str.atof(env_t) * 1e9) }
    default_ns
 }
 
@@ -126,7 +126,7 @@ fn timeout_hit(any start_ticks, int limit_ns) bool {
 
 fn close_on_timeout(any win, any start_ticks, int limit_ns) bool {
    "Closes `win` when a precomputed timeout limit has elapsed."
-   if(!timeout_hit(start_ticks, limit_ns)){ return false }
+   if !timeout_hit(start_ticks, limit_ns) { return false }
    _request_close(win)
    true
 }
@@ -139,7 +139,7 @@ fn deadline_passed(any start_ticks, int default_ns=0) bool {
 fn fps_begin() dict {
    "Creates a compact FPS counter for examples and viewer tools."
    def now = ticks()
-   {"start": now, "last": now, "frames": 0, "total": 0, "fps": 0}
+   {"start": now, "last": now, "frames": 0, "total": 0, "fps": 0, "min_fps": 0, "max_fps": 0}
 }
 
 fn fps_tick(dict state, f64 dt=0.0) dict {
@@ -149,11 +149,15 @@ fn fps_tick(dict state, f64 dt=0.0) dict {
    def now = ticks()
    state["frames"] = frames
    state["total"] = total
-   if(now - int(state.get("last", now)) >= 1000000000){
+   if now - int(state.get("last", now)) >= 1000000000 {
       state["fps"] = frames
+      def min_fps = int(state.get("min_fps", 0))
+      def max_fps = int(state.get("max_fps", 0))
+      if frames > 0 && (min_fps == 0 || frames < min_fps) { state["min_fps"] = frames }
+      if frames > max_fps { state["max_fps"] = frames }
       state["frames"] = 0
       state["last"] = now
-   } elif(dt > 0.00001 && int(state.get("fps", 0)) == 0){
+   } elif dt > 0.00001 && int(state.get("fps", 0)) == 0 {
       state["fps"] = int(1.0 / dt)
    }
    state
@@ -162,16 +166,16 @@ fn fps_tick(dict state, f64 dt=0.0) dict {
 fn fps_current(dict state, f64 dt=0.0) int {
    "Returns a stable FPS value, using delta-time until the first full-second sample."
    def sampled = int(state.get("fps", 0))
-   if(sampled > 0){ return sampled }
+   if sampled > 0 { return sampled }
    dt > 0.00001 ? int(1.0 / dt) : 0
 }
 
 fn fps_finish(str tag, dict state) bool {
    "Prints an average FPS line when NY_UI_FPS_LOG is enabled."
-   if(!common.env_truthy("NY_UI_FPS_LOG")){ return false }
+   if !common.env_truthy("NY_UI_FPS_LOG") { return false }
    def elapsed = max(0.000001, float(ticks() - int(state.get("start", ticks()))) / 1000000000.0)
    def avg = int(float(int(state.get("total", 0))) / elapsed)
-   ui_profile.print_text("[fps] " + tag + " avg=" + to_str(avg) + " frames=" + to_str(int(state.get("total", 0))))
+   ui_profile.print_text("[fps] " + tag + " avg=" + to_str(avg) + " min=" + to_str(int(state.get("min_fps", 0))) + " max=" + to_str(int(state.get("max_fps", 0))) + " frames=" + to_str(int(state.get("total", 0))))
    true
 }
 
@@ -183,8 +187,8 @@ fn auto_close(any win, any start_ticks, int default_ns=0) bool {
 fn auto_close_if_idle(any win, any last_ticks, int default_ns=0) bool {
    "Closes `win` once the configured timeout elapses since `last_ticks`."
    def limit = timeout_ns(default_ns)
-   if(limit <= 0){ return false }
-   if(ticks() - last_ticks < limit){ return false }
+   if limit <= 0 { return false }
+   if ticks() - last_ticks < limit { return false }
    _request_close(win)
    true
 }
@@ -203,17 +207,17 @@ fn _focus_immediately_after_open() bool {
 fn open_windowed(any title, int w, int h, int flags=0, bool raw=true, bool cpu=false, int msaa=0) any {
    "Opens an example window and focuses it when successful."
    def win = init_window(w, h, title, flags, raw, cpu, msaa)
-   if(win && !_headless_enabled() && _focus_immediately_after_open()){ window.focus(win) }
+   if win && !_headless_enabled() && _focus_immediately_after_open() { window.focus(win) }
    win
 }
 
 fn handle_close_events(any win) bool {
    "Drains pending close/escape events and requests window shutdown when needed."
    mut e = window.check_event(win)
-   while(e != 0){
-      if(window.quit(e)){
+   while e != 0 {
+      if window.quit(e) {
          window.set_should_close(win, true)
-      } elif(window.event_type(e) == EVENT_KEY_PRESSED &&
+      } elif (window.event_type(e) == EVENT_KEY_PRESSED &&
          window.event_data(e).get("key", 0) == KEY_ESCAPE){
          window.set_should_close(win, true)
       }
@@ -224,7 +228,7 @@ fn handle_close_events(any win) bool {
 
 fn step(any win, any start_ticks=0, int default_ns=0) bool {
    "Runs the shared event pump, timeout, and close pass."
-   if(start_ticks){ auto_close(win, start_ticks, default_ns) }
+   if start_ticks { auto_close(win, start_ticks, default_ns) }
    window.poll_events()
    handle_close_events(win)
 }
@@ -244,7 +248,7 @@ fn build_crosshair_mesh() list {
    "Builds the standard 5-quad crosshair mesh used by UI demos."
    def n = 30
    def buf = malloc(n * VERTEX_STRIDE)
-   if(!buf){ return [0, 0] }
+   if !buf { return [0, 0] }
    def cc, co = [1.0, 1.0, 1.0, 0.7], [1.0, 1.0, 1.0, 0.4]
    _push_mesh_quad(buf, 0, -1.0, -1.0, 1.0, 1.0, cc)
    _push_mesh_quad(buf, 6, -1.0, -9.0, 1.0, -5.0, co)
@@ -257,11 +261,11 @@ fn build_crosshair_mesh() list {
 fn load_equirect_skybox(any path) int {
    "Loads an equirectangular skybox texture from an explicit path."
    def p = str.strip(to_str(path))
-   if(p.len == 0 || !osfs.is_file(p)){ return -1 }
+   if p.len == 0 || !osfs.is_file(p) { return -1 }
    mut tex = -1
-   if(str.endswith(str.lower(p), ".exr")){
+   if str.endswith(str.lower(p), ".exr") {
       def exr_im = exr.load_path(p)
-      if(exr_im && is_dict(exr_im)){
+      if exr_im && is_dict(exr_im) {
          tex = texture_upload_image_ex(exr_im, p, 37, true, true, 1, 10497, 33071, "", true)
       } else {
          dbg("skybox", "exr decode failed: " + to_str(exr.last_error()))

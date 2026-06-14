@@ -14,7 +14,7 @@ use std.os.clock (ticks)
 mut _pc_mr64_bases_cache = nil
 
 fn _pc_mr64_bases() list {
-   if(_pc_mr64_bases_cache == nil){ _pc_mr64_bases_cache = [2, 325, 9375, 28178, 450775, 9780504, 1795265022] }
+   if _pc_mr64_bases_cache == nil { _pc_mr64_bases_cache = [2, 325, 9375, 28178, 450775, 9780504, 1795265022] }
    _pc_mr64_bases_cache
 }
 
@@ -28,13 +28,13 @@ fn _pc_abs(any x) bigint {
 fn _pc_mod(any x, any n) bigint {
    def nz = _pc_z(n)
    mut r = _pc_z(x) % nz
-   if(r < Z(0)){ r = r + nz }
+   if r < Z(0) { r = r + nz }
    r
 }
 
 fn _pc_mod_z(any x, bigint n) bigint {
    mut r = _pc_z(x) % n
-   if(r < Z(0)){ r = r + n }
+   if r < Z(0) { r = r + n }
    r
 }
 
@@ -45,20 +45,20 @@ fn _pc_nontrivial_factor(any g, any n) bool {
 
 fn _pc_odd_candidate_state(bigint nz) int {
    def z2 = Z(2)
-   if(nz < z2){ return -1 }
-   if(nz == z2){ return 1 }
-   if(nz % z2 == Z(0)){ return -1 }
+   if nz < z2 { return -1 }
+   if nz == z2 { return 1 }
+   if nz % z2 == Z(0) { return -1 }
    0
 }
 
 fn _pc_factor_product(list facs) bigint {
    mut out = Z(1)
    mut i = 0
-   while(i < facs.len){
+   while i < facs.len {
       def row = facs.get(i)
       def p, e = _pc_z(row.get(0, Z(1))), int(row.get(1, 1))
       mut j = 0
-      while(j < e){
+      while j < e {
          out = out * p
          j += 1
       }
@@ -70,9 +70,9 @@ fn _pc_factor_product(list facs) bigint {
 fn _pc_unique_primes(list facs) list {
    mut out = []
    mut i = 0
-   while(i < facs.len){
+   while i < facs.len {
       def p = _pc_z(facs.get(i).get(0, Z(1)))
-      if(p > Z(1)){ out = out.append(p) }
+      if p > Z(1) { out = out.append(p) }
       i += 1
    }
    out
@@ -81,9 +81,9 @@ fn _pc_unique_primes(list facs) list {
 fn _pc_find_subcertificate(list certs, any q) any {
    def qz = _pc_z(q)
    mut i = 0
-   while(i < certs.len){
+   while i < certs.len {
       def c = certs.get(i)
-      if(is_dict(c) && _pc_z(c.get("n", Z(0))) == qz){ return c }
+      if is_dict(c) && _pc_z(c.get("n", Z(0))) == qz { return c }
       i += 1
    }
    nil
@@ -108,15 +108,15 @@ fn _pc_factorization_fields(str factor_key, list facs, any expected) dict {
 
 fn _pc_verify_pratt_subcerts(list qs, list subs) dict {
    mut verified_nodes, i = 1, 0
-   while(i < qs.len){
+   while i < qs.len {
       def q = _pc_z(qs.get(i))
       def sub = _pc_find_subcertificate(subs, q)
-      if(sub == nil){
+      if sub == nil {
          return {"ok": false, "verified_nodes": verified_nodes, "reason": "missing recursive subcertificate", "missing_q": q}
       }
       def vr = verify_pratt_certificate_report(sub)
       verified_nodes += int(vr.get("verified_nodes", 0))
-      if(!vr.get("proof_valid", false)){
+      if !vr.get("proof_valid", false) {
          return {"ok": false, "verified_nodes": verified_nodes, "reason": "recursive subcertificate failed", "missing_q": q, "subproof": vr}
       }
       i += 1
@@ -126,10 +126,10 @@ fn _pc_verify_pratt_subcerts(list qs, list subs) dict {
 
 fn _pc_build_pratt_subcerts(list qs, int max_base, int max_depth) dict {
    mut subs, sub_size, i = [], 0, 0
-   while(i < qs.len){
+   while i < qs.len {
       def q = qs.get(i)
       def sub = pratt_certificate_report(q, max_base, max_depth - 1)
-      if(!sub.get("prime", false)){
+      if !sub.get("prime", false) {
          return {"ok": false, "reason": "recursive factor proof failed", "missing_q": q, "subproof": sub}
       }
       sub_size += int(sub.get("certificate_size", 1))
@@ -141,31 +141,31 @@ fn _pc_build_pratt_subcerts(list qs, int max_base, int max_depth) dict {
 
 fn _pc_finish_failed_subcert(dict out, any t0, dict vr, str status="invalid") dict {
    def reason, missing_q, subproof = vr.get("reason", "recursive subcertificate failed"), vr.get("missing_q", nil), vr.get("subproof", nil)
-   if(subproof != nil){
+   if subproof != nil {
       return _pc_finish(out.merge({"reason": reason, "missing_q": missing_q, "subproof": subproof}), t0, status)
    }
    _pc_finish(out.merge({"reason": reason, "missing_q": missing_q}), t0, status)
 }
 
 fn _pc_recursive_factor_setup(dict out, any t0, any nz, int max_base, int max_depth, str factor_key, any target, str incomplete_reason) dict {
-   if(max_depth <= 0){
+   if max_depth <= 0 {
       return {"done": true, "report": _pc_finish(out.set("reason", "recursive certificate depth exhausted"), t0, "inconclusive")}
    }
    def screen = bpsw_prp_report(nz)
    out = out.set("screen", screen)
-   if(!screen.get("probable_prime", false)){
+   if !screen.get("probable_prime", false) {
       out = out.set("factor", screen.get("factor", nil))
       return {"done": true, "report": _pc_finish(out.set("reason", screen.get("status", "screen-rejected")), t0, "composite")}
    }
    def facs = factor(target)
    def factor_fields = _pc_factorization_fields(factor_key, facs, target)
    out = out.merge(factor_fields)
-   if(!factor_fields.get("complete_factorization", false)){
+   if !factor_fields.get("complete_factorization", false) {
       return {"done": true, "report": _pc_finish(out.set("reason", incomplete_reason), t0, "inconclusive")}
    }
    def qs = _pc_unique_primes(facs)
    def subcerts = _pc_build_pratt_subcerts(qs, max_base, max_depth)
-   if(!subcerts.get("ok", false)){
+   if !subcerts.get("ok", false) {
       return {"done": true, "report": _pc_finish_failed_subcert(out, t0, subcerts, "inconclusive")}
    }
    {"done": false, "out": out, "qs": qs, "subcerts": subcerts}
@@ -173,16 +173,16 @@ fn _pc_recursive_factor_setup(dict out, any t0, any nz, int max_base, int max_de
 
 fn _pc_finish_verified_certificate(dict out, any t0, dict verified) dict {
    out = out.merge({"verification": verified, "verified": verified.get("proof_valid", false)})
-   if(!verified.get("proof_valid", false)){
+   if !verified.get("proof_valid", false) {
       return _pc_finish(out.set("reason", "internal certificate verification failed"), t0, "invalid")
    }
    _pc_finish(out.set("prime", true), t0, "proven-prime")
 }
 
 fn _pc_certificate_trivial_case(dict out, any t0, any nz, dict prime2_fields) any {
-   if(nz < Z(2)){ return _pc_finish_with(out, t0, "composite", {"reason": "n < 2"}) }
-   if(nz == Z(2)){ return _pc_finish_with(out, t0, "proven-prime", prime2_fields) }
-   if(nz % Z(2) == Z(0)){
+   if nz < Z(2) { return _pc_finish_with(out, t0, "composite", {"reason": "n < 2"}) }
+   if nz == Z(2) { return _pc_finish_with(out, t0, "proven-prime", prime2_fields) }
+   if nz % Z(2) == Z(0) {
       return _pc_finish_with(out, t0, "composite", {"factor": Z(2), "cofactor": nz / Z(2)})
    }
    nil
@@ -190,12 +190,12 @@ fn _pc_certificate_trivial_case(dict out, any t0, any nz, dict prime2_fields) an
 
 fn _pc_witness_setup_failure(dict out, any t0, dict w, str missing_reason, bool include_attempts=false) any {
    def status = w.get("status", "")
-   if(status == "factor"){
+   if status == "factor" {
       return _pc_finish_with(out, t0, "composite", {"factor": w.get("factor"), "cofactor": w.get("cofactor")})
    }
-   if(status != "witness"){
+   if status != "witness" {
       mut fields = {"reason": missing_reason}
-      if(include_attempts){ fields = fields.set("attempts", w.get("attempts", [])) }
+      if include_attempts { fields = fields.set("attempts", w.get("attempts", [])) }
       return _pc_finish_with(out, t0, "inconclusive", fields)
    }
    nil
@@ -203,14 +203,14 @@ fn _pc_witness_setup_failure(dict out, any t0, dict w, str missing_reason, bool 
 
 fn _pc_lucas_rank_checks(any nz, any P, any Q, list qs) dict {
    mut checks, i = [], 0
-   while(i < qs.len){
+   while i < qs.len {
       def q = _pc_z(qs.get(i))
       def idx = (nz + Z(1)) / q
       def uv = lucas.lucas_uv_mod(P, Q, idx, nz)
       def U = _pc_mod(uv.get(0), nz)
       def g = gcd(U, nz)
       checks = checks.append({"q": q, "index": idx, "U": U, "gcd": g, "ok": g == Z(1)})
-      if(g != Z(1)){
+      if g != Z(1) {
          return {"ok": false, "q": q, "gcd": g, "checks": checks, "factor": _pc_nontrivial_factor(g, nz) ? g : nil}
       }
       i += 1
@@ -219,37 +219,37 @@ fn _pc_lucas_rank_checks(any nz, any P, any Q, list qs) dict {
 }
 
 fn _pc_finish_certified_proof(dict out, any t0, str proof_system, dict proof, any certificate, bool include_verified=true) any {
-   if(!proof.get("prime", false)){ return nil }
+   if !proof.get("prime", false) { return nil }
    mut fields = {
       "prime": true, "proof_system": proof_system,
       "certificate": certificate, "certificate_size": proof.get("certificate_size", 0),
    }
-   if(include_verified){ fields = fields.set("verified", proof.get("verified", false)) }
+   if include_verified { fields = fields.set("verified", proof.get("verified", false)) }
    _pc_finish_with(out, t0, "proven-prime", fields)
 }
 
 fn _pc_verify_recursive_setup(any cert, dict out, any t0, str factor_key, int target_offset, str product_reason) dict {
-   if(!is_dict(cert)){
+   if !is_dict(cert) {
       return {"done": true, "report": _pc_finish_with(out, t0, "invalid", {"reason": "certificate is not a dict"})}
    }
    def nz = _pc_z(cert.get("n", Z(0)))
    out = out.set("n", nz)
-   if(nz == Z(2)){
+   if nz == Z(2) {
       return {"done": true, "report": _pc_finish_with(out, t0, "verified-prime", {"prime": true, "proof_valid": true, "verified_nodes": 1})}
    }
-   if(nz < Z(2) || nz % Z(2) == Z(0)){
+   if nz < Z(2) || nz % Z(2) == Z(0) {
       return {"done": true, "report": _pc_finish_with(out, t0, "invalid", {"reason": "n is not an odd integer > 2"})}
    }
    def facs = cert.get(factor_key, [])
    def target = nz + Z(target_offset)
    def factor_fields = _pc_factorization_fields(factor_key, facs, target)
    out = out.merge(factor_fields)
-   if(factor_fields.get("factor_product", Z(0)) != target){
+   if factor_fields.get("factor_product", Z(0)) != target {
       return {"done": true, "report": _pc_finish_with(out, t0, "invalid", {"reason": product_reason})}
    }
    def qs = _pc_unique_primes(facs)
    def subproofs = _pc_verify_pratt_subcerts(qs, cert.get("subcertificates", []))
-   if(!subproofs.get("ok", false)){
+   if !subproofs.get("ok", false) {
       return {"done": true, "report": _pc_finish_failed_subcert(out, t0, subproofs)}
    }
    {"done": false, "out": out, "n": nz, "factors": facs, "qs": qs, "verified_nodes": int(subproofs.get("verified_nodes", 1))}
@@ -258,35 +258,35 @@ fn _pc_verify_recursive_setup(any cert, dict out, any t0, str factor_key, int ta
 fn _pc_strong_prp_base_report(any n, any a) dict {
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("strong-prp", nz, {"base": _pc_z(a), "probable_prime": false})
-   if(nz < Z(2)){ return _pc_finish(out, t0, "composite") }
-   if(nz == Z(2)){ return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
-   if(nz % Z(2) == Z(0)){ return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
+   if nz < Z(2) { return _pc_finish(out, t0, "composite") }
+   if nz == Z(2) { return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
+   if nz % Z(2) == Z(0) { return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
    def az = _pc_mod(a, nz)
    out = out.set("base", az)
    def g = gcd(az, nz)
-   if(_pc_nontrivial_factor(g, nz)){
+   if _pc_nontrivial_factor(g, nz) {
       return _pc_finish_with(out, t0, "factor", {"factor": g, "cofactor": nz / g})
    }
-   if(g != Z(1)){
+   if g != Z(1) {
       return _pc_finish_with(out, t0, "non-coprime-base", {"gcd": g})
    }
    mut d, s = nz - Z(1), 0
-   while(d % Z(2) == Z(0)){
+   while d % Z(2) == Z(0) {
       d = d / Z(2)
       s += 1
    }
    mut x = power_mod(az, d, nz)
    out = out.merge({"d": d, "s": s})
-   if(x == Z(1) || x == nz - Z(1)){
+   if x == Z(1) || x == nz - Z(1) {
       return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true})
    }
    mut r = 1
-   while(r < s){
+   while r < s {
       x = _pc_mod(x * x, nz)
-      if(x == nz - Z(1)){
+      if x == nz - Z(1) {
          return _pc_finish_with(out, t0, "probable-prime", {"witness_round": r, "probable_prime": true})
       }
-      if(x == Z(1)){
+      if x == Z(1) {
          return _pc_finish(out, t0, "composite")
       }
       r += 1
@@ -298,20 +298,20 @@ fn prp_report(any n, any a=2) dict {
    "Fermat probable-prime test to base a."
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("fermat-prp", nz, {"base": _pc_z(a), "probable_prime": false})
-   if(nz < Z(2)){ return _pc_finish(out, t0, "composite") }
-   if(nz == Z(2)){ return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
-   if(nz % Z(2) == Z(0)){ return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
+   if nz < Z(2) { return _pc_finish(out, t0, "composite") }
+   if nz == Z(2) { return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
+   if nz % Z(2) == Z(0) { return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
    def az = _pc_mod(a, nz)
    out = out.set("base", az)
    def g = gcd(az, nz)
-   if(_pc_nontrivial_factor(g, nz)){
+   if _pc_nontrivial_factor(g, nz) {
       return _pc_finish_with(out, t0, "factor", {"factor": g, "cofactor": nz / g})
    }
-   if(g != Z(1)){
+   if g != Z(1) {
       return _pc_finish_with(out, t0, "non-coprime-base", {"gcd": g})
    }
    def value = power_mod(az, nz - Z(1), nz)
-   if(value == Z(1)){
+   if value == Z(1) {
       return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true, "value": value})
    }
    _pc_finish_with(out, t0, "composite", {"value": value})
@@ -321,9 +321,9 @@ fn prp(any n, any a=2) bool {
    "Runs the prp operation."
    def nz = _pc_z(n)
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
+   if state != 0 { return state > 0 }
    def az = _pc_mod(a, nz)
-   if(gcd(az, nz) != Z(1)){ return false }
+   if gcd(az, nz) != Z(1) { return false }
    power_mod(az, nz - Z(1), nz) == Z(1)
 }
 
@@ -331,22 +331,22 @@ fn euler_prp_report(any n, any a=2) dict {
    "Euler/Solovay-Strassen probable-prime test to base a."
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("euler-prp", nz, {"base": _pc_z(a), "probable_prime": false})
-   if(nz < Z(2)){ return _pc_finish(out, t0, "composite") }
-   if(nz == Z(2)){ return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
-   if(nz % Z(2) == Z(0)){ return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
+   if nz < Z(2) { return _pc_finish(out, t0, "composite") }
+   if nz == Z(2) { return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
+   if nz % Z(2) == Z(0) { return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
    def az = _pc_mod(a, nz)
    out = out.set("base", az)
    def g = gcd(az, nz)
-   if(_pc_nontrivial_factor(g, nz)){
+   if _pc_nontrivial_factor(g, nz) {
       return _pc_finish_with(out, t0, "factor", {"factor": g, "cofactor": nz / g})
    }
-   if(g != Z(1)){
+   if g != Z(1) {
       return _pc_finish_with(out, t0, "non-coprime-base", {"gcd": g})
    }
    def lhs = power_mod(az, (nz - Z(1)) / Z(2), nz)
    def j = jacobi(az, nz)
    def rhs = (j < 0) ? (nz - Z(1)) : Z(j)
-   if(lhs == rhs){
+   if lhs == rhs {
       return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true, "value": lhs, "jacobi": j})
    }
    _pc_finish_with(out, t0, "composite", {"value": lhs, "expected": rhs, "jacobi": j})
@@ -356,9 +356,9 @@ fn euler_prp(any n, any a=2) bool {
    "Runs the euler prp operation."
    def nz = _pc_z(n)
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
+   if state != 0 { return state > 0 }
    def az = _pc_mod(a, nz)
-   if(gcd(az, nz) != Z(1)){ return false }
+   if gcd(az, nz) != Z(1) { return false }
    def lhs = power_mod(az, (nz - Z(1)) / Z(2), nz)
    def j = jacobi(az, nz)
    def rhs = (j < 0) ? (nz - Z(1)) : Z(j)
@@ -374,17 +374,17 @@ fn _pc_strong_prp_odd_base_bool(bigint nz, any az) bool {
    def z0, z1, z2 = Z(0), Z(1), Z(2)
    mut d = nz - z1
    mut s = 0
-   while(d % z2 == z0){
+   while d % z2 == z0 {
       d = d / z2
       s += 1
    }
    mut x = power_mod(az, d, nz)
-   if(x == z1 || x == nz - z1){ return true }
+   if x == z1 || x == nz - z1 { return true }
    mut r = 1
-   while(r < s){
+   while r < s {
       x = (x * x) % nz
-      if(x == nz - z1){ return true }
-      if(x == z1){ return false }
+      if x == nz - z1 { return true }
+      if x == z1 { return false }
       r += 1
    }
    false
@@ -393,16 +393,16 @@ fn _pc_strong_prp_odd_base_bool(bigint nz, any az) bool {
 fn _pc_strong_prp_base_bool(any n, any a) bool {
    def nz = _pc_z(n)
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
+   if state != 0 { return state > 0 }
    def z1 = Z(1)
    def az = _pc_mod_z(a, nz)
-   if(gcd(az, nz) != z1){ return false }
+   if gcd(az, nz) != z1 { return false }
    _pc_strong_prp_odd_base_bool(nz, az)
 }
 
 fn _pc_strong_prp_base2_bool(bigint nz) bool {
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
+   if state != 0 { return state > 0 }
    _pc_strong_prp_odd_base_bool(nz, Z(2))
 }
 
@@ -421,24 +421,24 @@ fn deterministic_miller_rabin64_report(any n) dict {
          "domain_bits": 64, "bases": bases, "prime": false,
          "probable_prime": false, "deterministic": false,
    })
-   if(nz < Z(2)){ return _pc_finish(out, t0, "composite") }
-   if(nz == Z(2) || nz == Z(3)){
+   if nz < Z(2) { return _pc_finish(out, t0, "composite") }
+   if nz == Z(2) || nz == Z(3) {
       return _pc_finish_with(out, t0, "proven-prime", {"prime": true, "probable_prime": true, "deterministic": true})
    }
-   if(nz % Z(2) == Z(0)){
+   if nz % Z(2) == Z(0) {
       return _pc_finish_with(out, t0, "composite", {"factor": Z(2)})
    }
-   if(bit_length(nz) > 64){
+   if bit_length(nz) > 64 {
       return _pc_finish_with(out, t0, "out-of-domain", {"reason": "n exceeds deterministic 64-bit Miller-Rabin domain"})
    }
    mut checks = []
    mut i = 0
-   while(i < bases.len){
+   while i < bases.len {
       def b = bases.get(i)
-      if(b < nz){
+      if b < nz {
          def ok = _pc_strong_prp_base_bool(nz, b)
          checks = checks.append({"base": b, "status": ok ? "probable-prime" : "composite", "probable_prime": ok})
-         if(!ok){
+         if !ok {
             return _pc_finish_with(out, t0, "composite", {
                   "base": b, "checks": checks,
             })
@@ -454,18 +454,18 @@ fn deterministic_miller_rabin64_report(any n) dict {
 
 fn deterministic_miller_rabin64(any n) bool {
    "Return true when deterministic_miller_rabin64_report proves n prime."
-   if(is_int(n) && int(n) <= 2147483647){ return is_prime(n) }
+   if is_int(n) && int(n) <= 2147483647 { return is_prime(n) }
    def nz = _pc_z(n)
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
-   if(nz == Z(3)){ return true }
-   if(bit_length(nz) > 64){ return false }
-   if(bit_length(nz) <= 31){ return is_prime(nz) }
+   if state != 0 { return state > 0 }
+   if nz == Z(3) { return true }
+   if bit_length(nz) > 64 { return false }
+   if bit_length(nz) <= 31 { return is_prime(nz) }
    def bases = _pc_mr64_bases()
    mut i = 0
-   while(i < bases.len){
+   while i < bases.len {
       def b = bases[i]
-      if(b < nz && !_pc_strong_prp_base_bool(nz, b)){ return false }
+      if b < nz && !_pc_strong_prp_base_bool(nz, b) { return false }
       i += 1
    }
    true
@@ -474,7 +474,7 @@ fn deterministic_miller_rabin64(any n) bool {
 fn _pc_take(list xs, int count) list {
    mut out = []
    mut i = 0
-   while(i < count && i < xs.len){
+   while i < count && i < xs.len {
       out = out.append(xs.get(i))
       i += 1
    }
@@ -485,7 +485,7 @@ fn _pc_zero_coeffs(int n) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       out[i] = Z(0)
       i += 1
    }
@@ -496,7 +496,7 @@ fn _pc_jacobi_coeffs(list coeffs, int PK, any modulus) list {
    mut out = list(PK)
    __list_set_len(out, PK)
    mut i = 0
-   while(i < PK){
+   while i < PK {
       out[i] = i < coeffs.len ? _pc_mod(coeffs[i], modulus) : Z(0)
       i += 1
    }
@@ -510,11 +510,11 @@ fn _pc_aprcl_valid_params(int PK, int PL, int PM, int P, any modulus) bool {
 fn _pc_jacobi_normalize_coeffs(list coeffs, int PK, int PL, int PM, int P, any modulus) list {
    mut out = _pc_jacobi_coeffs(coeffs, PK, modulus)
    mut I = PL
-   while(I < PK){
+   while I < PK {
       def t = out[I]
-      if(t != Z(0)){
+      if t != Z(0) {
          mut J = 1
-         while(J < P){
+         while J < P {
             def idx = I - J * PM
             out[idx] = out[idx] - t
             J += 1
@@ -524,7 +524,7 @@ fn _pc_jacobi_normalize_coeffs(list coeffs, int PK, int PL, int PM, int P, any m
       I += 1
    }
    I = 0
-   while(I < PK){
+   while I < PK {
       out[I] = _pc_mod(out[I], modulus)
       I += 1
    }
@@ -536,13 +536,13 @@ fn _pc_jacobi_mul_coeffs(list lhs, list rhs, int PK, int PL, int PM, int P, any 
    def b = _pc_jacobi_coeffs(rhs, PK, modulus)
    mut tmp = _pc_zero_coeffs(PK)
    mut I = 0
-   while(I < PL){
+   while I < PL {
       def ai = a[I]
-      if(ai != Z(0)){
+      if ai != Z(0) {
          mut J = 0
-         while(J < PL){
+         while J < PL {
             def bj = b[J]
-            if(bj != Z(0)){
+            if bj != Z(0) {
                def K = (I + J) % PK
                tmp[K] = tmp[K] + ai * bj
             }
@@ -558,16 +558,16 @@ fn _pc_jacobi_square_coeffs(list coeffs, int PK, int PL, int PM, int P, any modu
    def a = _pc_jacobi_coeffs(coeffs, PK, modulus)
    mut tmp = _pc_zero_coeffs(PK)
    mut I = 0
-   while(I < PL){
+   while I < PL {
       def ai = a[I]
-      if(ai != Z(0)){
+      if ai != Z(0) {
          mut K = (2 * I) % PK
          tmp[K] = tmp[K] + ai * ai
          def twice = ai + ai
          mut J = I + 1
-         while(J < PL){
+         while J < PL {
             def aj = a[J]
-            if(aj != Z(0)){
+            if aj != Z(0) {
                K = (I + J) % PK
                tmp[K] = tmp[K] + twice * aj
             }
@@ -583,7 +583,7 @@ fn aprcl_jacobi_normalize_report(list coeffs, int PK, int PL, int PM, int P, any
    "Normalize APRCL Jacobi-sum coefficients."
    def t0 = ticks()
    mut out = {"method": "aprcl-jacobi-normalize-report", "source_model": "APRCL Jacobi-sum normalization", "PK": PK, "PL": PL, "PM": PM, "P": P, "modulus": _pc_z(modulus)}
-   if(!_pc_aprcl_valid_params(PK, PL, PM, P, modulus)){
+   if !_pc_aprcl_valid_params(PK, PL, PM, P, modulus) {
       return _pc_finish_with(out, t0, "invalid-parameters", {"ok": false})
    }
    def normalized = _pc_jacobi_normalize_coeffs(coeffs, PK, PL, PM, P, modulus)
@@ -594,7 +594,7 @@ fn aprcl_jacobi_mul_report(list lhs, list rhs, int PK, int PL, int PM, int P, an
    "Multiply APRCL Jacobi-sum coefficient vectors."
    def t0 = ticks()
    mut out = {"method": "aprcl-jacobi-mul-report", "source_model": "APRCL Jacobi-sum multiply", "PK": PK, "PL": PL, "PM": PM, "P": P, "modulus": _pc_z(modulus)}
-   if(!_pc_aprcl_valid_params(PK, PL, PM, P, modulus)){
+   if !_pc_aprcl_valid_params(PK, PL, PM, P, modulus) {
       return _pc_finish_with(out, t0, "invalid-parameters", {"ok": false})
    }
    def product = _pc_jacobi_mul_coeffs(lhs, rhs, PK, PL, PM, P, modulus)
@@ -605,7 +605,7 @@ fn aprcl_jacobi_square_report(list coeffs, int PK, int PL, int PM, int P, any mo
    "Square APRCL Jacobi-sum coefficient vectors."
    def t0 = ticks()
    mut out = {"method": "aprcl-jacobi-square-report", "source_model": "APRCL Jacobi-sum square", "PK": PK, "PL": PL, "PM": PM, "P": P, "modulus": _pc_z(modulus)}
-   if(!_pc_aprcl_valid_params(PK, PL, PM, P, modulus)){
+   if !_pc_aprcl_valid_params(PK, PL, PM, P, modulus) {
       return _pc_finish_with(out, t0, "invalid-parameters", {"ok": false})
    }
    def sq = _pc_jacobi_square_coeffs(coeffs, PK, PL, PM, P, modulus)
@@ -616,7 +616,7 @@ fn aprcl_jacobi_pow_report(list coeffs, any exponent, int PK, int PL, int PM, in
    "Raise an APRCL Jacobi-sum vector to exponent E using square-and-multiply over JS_2/JS_JW."
    def t0 = ticks()
    mut out = {"method": "aprcl-jacobi-pow-report", "source_model": "APRCL Jacobi-sum exponentiation", "PK": PK, "PL": PL, "PM": PM, "P": P, "modulus": _pc_z(modulus), "exponent": _pc_z(exponent)}
-   if(!_pc_aprcl_valid_params(PK, PL, PM, P, modulus) || _pc_z(exponent) < Z(0)){
+   if !_pc_aprcl_valid_params(PK, PL, PM, P, modulus) || _pc_z(exponent) < Z(0) {
       return _pc_finish_with(out, t0, "invalid-parameters", {"ok": false})
    }
    mut result = _pc_zero_coeffs(PK)
@@ -624,13 +624,13 @@ fn aprcl_jacobi_pow_report(list coeffs, any exponent, int PK, int PL, int PM, in
    mut base = _pc_jacobi_normalize_coeffs(coeffs, PK, PL, PM, P, modulus)
    mut e = _pc_z(exponent)
    mut squares, multiplies = 0, 0
-   while(e > Z(0)){
-      if(e % Z(2) == Z(1)){
+   while e > Z(0) {
+      if e % Z(2) == Z(1) {
          result = _pc_jacobi_mul_coeffs(result, base, PK, PL, PM, P, modulus)
          multiplies += 1
       }
       e = e / Z(2)
-      if(e > Z(0)){
+      if e > Z(0) {
          base = _pc_jacobi_square_coeffs(base, PK, PL, PM, P, modulus)
          squares += 1
       }
@@ -656,11 +656,11 @@ fn aprcl_jacobi_seed_report(int mode, int P, int PL, int Q) dict {
    ]
    mut out = {"method": "aprcl-jacobi-seed-report", "source_model": "APRCL JacobiSum sls/jpqs seed table", "mode": mode, "P": P, "lookup_p": myP, "PL": PL, "Q": Q}
    mut i = 0
-   while(i < seeds.len){
+   while i < seeds.len {
       def row = seeds.get(i)
-      if(int(row.get("p")) == myP && int(row.get("q")) == Q){
+      if int(row.get("p")) == myP && int(row.get("q")) == Q {
          def coeffs = row.get("coefficients")
-         if(coeffs.len < PL){
+         if coeffs.len < PL {
             return _pc_finish_with(out, t0, "insufficient-seed-length", {"ok": false, "available_len": coeffs.len})
          }
          return _pc_finish_with(out, t0, "ok", {"ok": true, "coefficients": _pc_take(coeffs, PL), "seed_index": i})
@@ -683,22 +683,22 @@ fn aprcl_parameter_plan_report(any n) dict {
    mut S = Z(2)
    mut trace = []
    mut i = 0
-   while(i < aiT.len && level < 0){
+   while i < aiT.len && level < 0 {
       S = Z(2)
       mut j = 0
       def limit = min(int(aiNQ.get(i)), aiQ.len)
-      while(j < limit && level < 0){
+      while j < limit && level < 0 {
          def Q = int(aiQ.get(j))
          def T = _pc_z(aiT.get(i))
-         if(T % Z(Q - 1) == Z(0)){
+         if T % Z(Q - 1) == Z(0) {
             mut U = T * Z(Q)
             mut keep = true
-            while(keep){
+            while keep {
                U = U / Z(Q)
                S = S * Z(Q)
                keep = U % Z(Q) == Z(0)
             }
-            if(S * S > nz){
+            if S * S > nz {
                level = i
                testing_qs = j
             }
@@ -733,17 +733,17 @@ fn aprcl_primality_report(any n, int max_base=128) dict {
    out = out.set("aprcl_parameter_plan", aprcl_parameter_plan_report(nz))
    def screen = bpsw_prp_report(nz)
    out = out.set("bpsw", screen)
-   if(!screen.get("probable_prime", false)){
+   if !screen.get("probable_prime", false) {
       return _pc_finish_with(out, t0, "composite", {
             "reason": screen.get("status", "screen-rejected"),
             "factor": screen.get("factor", nil),
       })
    }
    out = out.set("probable_prime", true)
-   if(bit_length(nz) <= 64){
+   if bit_length(nz) <= 64 {
       def mr = deterministic_miller_rabin64_report(nz)
       out = out.set("deterministic_miller_rabin64", mr)
-      if(mr.get("prime", false)){
+      if mr.get("prime", false) {
          return _pc_finish_with(out, t0, "proven-prime", {
                "prime": true, "proof_system": "deterministic-miller-rabin-64",
                "certificate": mr, "certificate_size": int(mr.get("checked_bases", 0)),
@@ -753,7 +753,7 @@ fn aprcl_primality_report(any n, int max_base=128) dict {
    }
    def cert = primality_certificate_report(nz, max_base)
    out = out.set("recursive_certificate", cert)
-   if(cert.get("prime", false)){
+   if cert.get("prime", false) {
       return _pc_finish_with(out, t0, "proven-prime", {
             "prime": true, "proof_system": cert.get("proof_system", "recursive-certificate"),
             "certificate": cert.get("certificate", cert),
@@ -762,14 +762,14 @@ fn aprcl_primality_report(any n, int max_base=128) dict {
    }
    def aprcl = aprcl_data.aprcl_proof_report(nz)
    out = out.set("aprcl_proof", aprcl)
-   if(aprcl.get("status", "") == "composite"){
+   if aprcl.get("status", "") == "composite" {
       return _pc_finish_with(out, t0, "composite", {
             "reason": aprcl.get("reason", "aprcl rejected"),
             "proof_system": "aprcl",
             "certificate": aprcl.get("certificate", aprcl),
       })
    }
-   if(aprcl.get("proof_valid", false)){
+   if aprcl.get("proof_valid", false) {
       return _pc_finish_with(out, t0, "proven-prime", {
             "prime": true, "proof_system": "aprcl",
             "certificate": aprcl.get("certificate", aprcl),
@@ -789,19 +789,19 @@ fn _pc_lucas_common_setup(str method, any n, any P, any Q) dict {
    def pz, qz = _pc_z(P), _pc_z(Q)
    def D = pz * pz - Z(4) * qz
    mut out = _pc_report(method, nz, {"P": pz, "Q": qz, "D": D, "probable_prime": false})
-   if(nz < Z(2)){ return {"done": true, "report": _pc_finish(out, t0, "composite")} }
-   if(nz == Z(2)){ return {"done": true, "report": _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true})} }
-   if(nz % Z(2) == Z(0)){ return {"done": true, "report": _pc_finish_with(out, t0, "composite", {"factor": Z(2)})} }
+   if nz < Z(2) { return {"done": true, "report": _pc_finish(out, t0, "composite")} }
+   if nz == Z(2) { return {"done": true, "report": _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true})} }
+   if nz % Z(2) == Z(0) { return {"done": true, "report": _pc_finish_with(out, t0, "composite", {"factor": Z(2)})} }
    def g = gcd(Z(2) * qz * D, nz)
    out = out.set("discriminant_gcd", g)
-   if(_pc_nontrivial_factor(g, nz)){
+   if _pc_nontrivial_factor(g, nz) {
       return {"done": true, "report": _pc_finish_with(out, t0, "factor", {"factor": g, "cofactor": nz / g})}
    }
-   if(g != Z(1)){
+   if g != Z(1) {
       return {"done": true, "report": _pc_finish_with(out, t0, "invalid-parameters", {"gcd": g})}
    }
    def j = jacobi(D, nz)
-   if(j == 0){
+   if j == 0 {
       return {"done": true, "report": _pc_finish_with(out, t0, "jacobi-zero", {"jacobi": j})}
    }
    {"done": false, "n": nz, "P": pz, "Q": qz, "D": D, "jacobi": j, "out": out.set("jacobi", j), "t0": t0}
@@ -812,14 +812,14 @@ fn fibonacci_prp_report(any n, any P=1, any Q=-1) dict {
    def t0, nz = ticks(), _pc_z(n)
    def pz, qz = _pc_z(P), _pc_z(Q)
    mut out = _pc_report("fibonacci-prp", nz, {"P": pz, "Q": qz, "probable_prime": false})
-   if(pz <= Z(0) || !(qz == Z(1) || qz == Z(-1))){
+   if pz <= Z(0) || !(qz == Z(1) || qz == Z(-1)) {
       return _pc_finish_with(out, t0, "invalid-parameters", {"reason": "expected P > 0 and Q = +/-1"})
    }
-   if(nz < Z(2)){ return _pc_finish(out, t0, "composite") }
-   if(nz == Z(2)){ return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
-   if(nz % Z(2) == Z(0)){ return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
+   if nz < Z(2) { return _pc_finish(out, t0, "composite") }
+   if nz == Z(2) { return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
+   if nz % Z(2) == Z(0) { return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
    def Vn = _pc_mod(lucas.lucas_v_mod(pz, nz, nz, qz), nz)
-   if(Vn == _pc_mod(pz, nz)){
+   if Vn == _pc_mod(pz, nz) {
       return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true, "V_n": Vn})
    }
    _pc_finish_with(out, t0, "composite", {"V_n": Vn, "expected": _pc_mod(pz, nz)})
@@ -828,21 +828,21 @@ fn fibonacci_prp_report(any n, any P=1, any Q=-1) dict {
 fn fibonacci_prp(any n, any P=1, any Q=-1) bool {
    "Runs the fibonacci prp operation."
    def nz, pz, qz = _pc_z(n), _pc_z(P), _pc_z(Q)
-   if(pz <= Z(0) || !(qz == Z(1) || qz == Z(-1))){ return false }
+   if pz <= Z(0) || !(qz == Z(1) || qz == Z(-1)) { return false }
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
+   if state != 0 { return state > 0 }
    _pc_mod(lucas.lucas_v_mod(pz, nz, nz, qz), nz) == _pc_mod(pz, nz)
 }
 
 fn lucas_prp_report(any n, any P, any Q) dict {
    "Lucas probable-prime test with explicit P,Q parameters."
    def setup = _pc_lucas_common_setup("lucas-prp", n, P, Q)
-   if(setup.get("done", false)){ return setup.get("report") }
+   if setup.get("done", false) { return setup.get("report") }
    def nz, pz, qz, j = setup.get("n"), setup.get("P"), setup.get("Q"), int(setup.get("jacobi"))
    def idx = nz - Z(j)
    def U = _pc_mod(lucas.lucas_u_mod(pz, idx, nz, qz), nz)
    def out = setup.get("out").merge({"index": idx, "U_index": U})
-   if(U == Z(0)){
+   if U == Z(0) {
       return _pc_finish_with(out, setup.get("t0"), "probable-prime", {"probable_prime": true})
    }
    _pc_finish(out, setup.get("t0"), "composite")
@@ -852,12 +852,12 @@ fn lucas_prp(any n, any P, any Q) bool {
    "Runs the lucas prp operation."
    def nz, pz, qz = _pc_z(n), _pc_z(P), _pc_z(Q)
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
+   if state != 0 { return state > 0 }
    def D = pz * pz - Z(4) * qz
    def g = gcd(Z(2) * qz * D, nz)
-   if(g != Z(1)){ return false }
+   if g != Z(1) { return false }
    def j = jacobi(D, nz)
-   if(j == 0){ return false }
+   if j == 0 { return false }
    _pc_mod(lucas.lucas_u_mod(pz, nz - Z(j), nz, qz), nz) == Z(0)
 }
 
@@ -866,7 +866,7 @@ fn _pc_strong_lucas_accept_bool(any n, any P, any Q, any d, int s) bool {
    def z0, z1, z2, z4 = Z(0), Z(1), Z(2), Z(4)
    def pz, qz = _pc_mod_z(P, nz), _pc_mod_z(Q, nz)
    def inv2 = inverse_mod(z2, nz)
-   if(inv2 == nil || inv2 == 0){
+   if inv2 == nil || inv2 == 0 {
       def uv = lucas.lucas_uv_mod(pz, qz, d, nz)
       return _pc_mod(uv[0], nz) == z0 || _pc_mod(uv[1], nz) == z0
    }
@@ -876,12 +876,12 @@ fn _pc_strong_lucas_accept_bool(any n, any P, any Q, any d, int s) bool {
    mut V = pz
    mut Qk = qz
    mut b = bit_length(dz) - 2
-   while(b >= 0){
+   while b >= 0 {
       U = (U * V) % nz
       V = (V * V - z2 * Qk) % nz
-      if(V < z0){ V = V + nz }
+      if V < z0 { V = V + nz }
       Qk = (Qk * Qk) % nz
-      if(((dz >> b) & z1) != z0){
+      if ((dz >> b) & z1) != z0 {
          def Uo = ((pz * U + V) * inv2) % nz
          def Vo = ((D * U + pz * V) * inv2) % nz
          U, V = Uo, Vo
@@ -889,13 +889,13 @@ fn _pc_strong_lucas_accept_bool(any n, any P, any Q, any d, int s) bool {
       }
       b -= 1
    }
-   if(U == z0 || V == z0){ return true }
+   if U == z0 || V == z0 { return true }
    mut r = 1
-   while(r < s){
+   while r < s {
       V = (V * V - z2 * Qk) % nz
-      if(V < z0){ V = V + nz }
+      if V < z0 { V = V + nz }
       Qk = (Qk * Qk) % nz
-      if(V == z0){ return true }
+      if V == z0 { return true }
       r += 1
    }
    false
@@ -906,7 +906,7 @@ fn _pc_strong_lucas_p1_accept_bool(any n, any Q, any D_raw, any d, int s) bool {
    def nz = _pc_z(n)
    def z0, z1, z2 = Z(0), Z(1), Z(2)
    def qz = _pc_mod_z(Q, nz)
-   if(nz % z2 == z0){
+   if nz % z2 == z0 {
       def uv = lucas.lucas_uv_mod(z1, qz, d, nz)
       return _pc_mod(uv[0], nz) == z0 || _pc_mod(uv[1], nz) == z0
    }
@@ -915,27 +915,27 @@ fn _pc_strong_lucas_p1_accept_bool(any n, any Q, any D_raw, any d, int s) bool {
    def dz = _pc_z(d)
    mut U, V, Qk = z1, z1, qz
    mut b = bit_length(dz) - 2
-   while(b >= 0){
+   while b >= 0 {
       U = (U * V) % nz
       V = (V * V - (Qk + Qk)) % nz
-      if(V < z0){ V = V + nz }
+      if V < z0 { V = V + nz }
       Qk = (Qk * Qk) % nz
-      if(((dz >> b) & z1) != z0){
+      if ((dz >> b) & z1) != z0 {
          def Uo = ((U + V) * inv2) % nz
          mut Vo = ((D * U + V) * inv2) % nz
-         if(Vo < z0){ Vo = Vo + nz }
+         if Vo < z0 { Vo = Vo + nz }
          U, V = Uo, Vo
          Qk = (Qk * qz) % nz
       }
       b -= 1
    }
-   if(U == z0 || V == z0){ return true }
+   if U == z0 || V == z0 { return true }
    mut r = 1
-   while(r < s){
+   while r < s {
       V = (V * V - (Qk + Qk)) % nz
-      if(V < z0){ V = V + nz }
+      if V < z0 { V = V + nz }
       Qk = (Qk * Qk) % nz
-      if(V == z0){ return true }
+      if V == z0 { return true }
       r += 1
    }
    false
@@ -944,10 +944,10 @@ fn _pc_strong_lucas_p1_accept_bool(any n, any Q, any D_raw, any d, int s) bool {
 fn strong_lucas_prp_report(any n, any P, any Q) dict {
    "Strong Lucas probable-prime test with explicit P,Q parameters."
    def setup = _pc_lucas_common_setup("strong-lucas-prp", n, P, Q)
-   if(setup.get("done", false)){ return setup.get("report") }
+   if setup.get("done", false) { return setup.get("report") }
    def nz, pz, qz, j = setup.get("n"), setup.get("P"), setup.get("Q"), int(setup.get("jacobi"))
    mut d, s = nz - Z(j), 0
-   while(d % Z(2) == Z(0)){
+   while d % Z(2) == Z(0) {
       d = d / Z(2)
       s += 1
    }
@@ -956,14 +956,14 @@ fn strong_lucas_prp_report(any n, any P, any Q) dict {
    mut V = _pc_mod(uv.get(1), nz)
    mut Qk = power_mod(_pc_mod(qz, nz), d, nz)
    mut out = setup.get("out").merge({"d": d, "s": s, "U_d": U, "V_d": V})
-   if(U == Z(0) || V == Z(0)){
+   if U == Z(0) || V == Z(0) {
       return _pc_finish_with(out, setup.get("t0"), "probable-prime", {"probable_prime": true})
    }
    mut r = 1
-   while(r < s){
+   while r < s {
       V = _pc_mod(V * V - Z(2) * Qk, nz)
       Qk = _pc_mod(Qk * Qk, nz)
-      if(V == Z(0)){
+      if V == Z(0) {
          return _pc_finish_with(out.set("witness_round", r), setup.get("t0"), "probable-prime", {"probable_prime": true})
       }
       r += 1
@@ -975,15 +975,15 @@ fn strong_lucas_prp(any n, any P, any Q) bool {
    "Runs the strong lucas prp operation."
    def nz, pz, qz = _pc_z(n), _pc_z(P), _pc_z(Q)
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
+   if state != 0 { return state > 0 }
    def D = pz * pz - Z(4) * qz
    def g = gcd(Z(2) * qz * D, nz)
-   if(g != Z(1)){ return false }
+   if g != Z(1) { return false }
    def j = jacobi(D, nz)
-   if(j == 0){ return false }
+   if j == 0 { return false }
    mut d = nz - Z(j)
    mut s = 0
-   while(d % Z(2) == Z(0)){
+   while d % Z(2) == Z(0) {
       d = d / Z(2)
       s += 1
    }
@@ -993,10 +993,10 @@ fn strong_lucas_prp(any n, any P, any Q) bool {
 fn extra_strong_lucas_prp_report(any n, any P=3) dict {
    "Extra-strong Lucas probable-prime test with Q fixed to 1."
    def setup = _pc_lucas_common_setup("extra-strong-lucas-prp", n, P, 1)
-   if(setup.get("done", false)){ return setup.get("report") }
+   if setup.get("done", false) { return setup.get("report") }
    def nz, pz, j = setup.get("n"), setup.get("P"), int(setup.get("jacobi"))
    mut d, s = nz - Z(j), 0
-   while(d % Z(2) == Z(0)){
+   while d % Z(2) == Z(0) {
       d = d / Z(2)
       s += 1
    }
@@ -1004,12 +1004,12 @@ fn extra_strong_lucas_prp_report(any n, any P=3) dict {
    def U = _pc_mod(uv.get(0), nz)
    mut V = _pc_mod(uv.get(1), nz)
    mut out = setup.get("out").merge({"d": d, "s": s, "U_d": U, "V_d": V})
-   if(U == Z(0) && (V == Z(2) || V == nz - Z(2))){
+   if U == Z(0) && (V == Z(2) || V == nz - Z(2)) {
       return _pc_finish_with(out, setup.get("t0"), "probable-prime", {"probable_prime": true, "witness": "extra-strong-u-v"})
    }
    mut r = 0
-   while(r < s - 1){
-      if(V == Z(0)){
+   while r < s - 1 {
+      if V == Z(0) {
          return _pc_finish_with(out.set("witness_round", r), setup.get("t0"), "probable-prime", {"probable_prime": true})
       }
       V = _pc_mod(V * V - Z(2), nz)
@@ -1022,25 +1022,25 @@ fn extra_strong_lucas_prp(any n, any P=3) bool {
    "Runs the extra strong lucas prp operation."
    def nz, pz = _pc_z(n), _pc_z(P)
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
+   if state != 0 { return state > 0 }
    def D = pz * pz - Z(4)
    def g = gcd(Z(2) * D, nz)
-   if(g != Z(1)){ return false }
+   if g != Z(1) { return false }
    def j = jacobi(D, nz)
-   if(j == 0){ return false }
+   if j == 0 { return false }
    mut d = nz - Z(j)
    mut s = 0
-   while(d % Z(2) == Z(0)){
+   while d % Z(2) == Z(0) {
       d = d / Z(2)
       s += 1
    }
    def uv = lucas.lucas_uv_mod(pz, Z(1), d, nz)
    def U = _pc_mod(uv[0], nz)
    mut V = _pc_mod(uv[1], nz)
-   if(U == Z(0) && (V == Z(2) || V == nz - Z(2))){ return true }
+   if U == Z(0) && (V == Z(2) || V == nz - Z(2)) { return true }
    mut r = 0
-   while(r < s - 1){
-      if(V == Z(0)){ return true }
+   while r < s - 1 {
+      if V == Z(0) { return true }
       V = _pc_mod(V * V - Z(2), nz)
       r += 1
    }
@@ -1050,16 +1050,16 @@ fn extra_strong_lucas_prp(any n, any P=3) bool {
 fn _pc_selfridge_params(any n) dict {
    def nz = _pc_z(n)
    mut D, tries = Z(5), 0
-   while(tries < 10000){
+   while tries < 10000 {
       def g = gcd(_pc_abs(D), nz)
-      if(_pc_nontrivial_factor(g, nz)){
+      if _pc_nontrivial_factor(g, nz) {
          return {"status": "factor", "factor": g, "cofactor": nz / g, "D": D}
       }
       def j = jacobi(D, nz)
-      if(j == -1){
+      if j == -1 {
          return {"status": "params", "D": D, "P": Z(1), "Q": (Z(1) - D) / Z(4), "tries": tries + 1}
       }
-      if(D > Z(0)){ D = -(D + Z(2)) } else { D = -D + Z(2) }
+      if D > Z(0) { D = -(D + Z(2)) } else { D = -D + Z(2) }
       tries += 1
    }
    {"status": "missing", "tries": tries}
@@ -1068,20 +1068,20 @@ fn _pc_selfridge_params(any n) dict {
 fn _pc_strong_lucas_selfridge_report(any n) dict {
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("strong-lucas-selfridge", nz, {"probable_prime": false})
-   if(nz < Z(2)){ return _pc_finish(out, t0, "composite") }
-   if(nz % Z(2) == Z(0)){ return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
+   if nz < Z(2) { return _pc_finish(out, t0, "composite") }
+   if nz % Z(2) == Z(0) { return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
    def params = _pc_selfridge_params(nz)
-   if(params.get("status", "") == "factor"){
+   if params.get("status", "") == "factor" {
       return _pc_finish_with(out, t0, "factor", {
             "D": params.get("D"), "factor": params.get("factor"), "cofactor": params.get("cofactor"),
       })
    }
-   if(params.get("status", "") != "params"){
+   if params.get("status", "") != "params" {
       return _pc_finish_with(out, t0, "no-selfridge-params", {"params": params})
    }
    def P, Q = params.get("P"), params.get("Q")
    mut d, s = nz + Z(1), 0
-   while(d % Z(2) == Z(0)){
+   while d % Z(2) == Z(0) {
       d = d / Z(2)
       s += 1
    }
@@ -1089,7 +1089,7 @@ fn _pc_strong_lucas_selfridge_report(any n) dict {
          "D": params.get("D"), "P": P, "Q": Q,
          "d": d, "s": s, "selfridge_tries": params.get("tries", 0),
    })
-   if(_pc_strong_lucas_p1_accept_bool(nz, Q, params.get("D"), d, s)){
+   if _pc_strong_lucas_p1_accept_bool(nz, Q, params.get("D"), d, s) {
       return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true})
    }
    _pc_finish(out, t0, "composite")
@@ -1098,28 +1098,28 @@ fn _pc_strong_lucas_selfridge_report(any n) dict {
 fn _pc_strong_lucas_selfridge_bool(any n) bool {
    def nz = _pc_z(n)
    def z0, z1, z2, z4, z5 = Z(0), Z(1), Z(2), Z(4), Z(5)
-   if(nz < z2){ return false }
-   if(nz % z2 == z0){ return false }
+   if nz < z2 { return false }
+   if nz % z2 == z0 { return false }
    mut D = z5
    mut tries = 0
    mut Q = z0
    mut found = false
-   while(tries < 10000 && !found){
+   while tries < 10000 && !found {
       def g = gcd(_pc_abs(D), nz)
-      if(_pc_nontrivial_factor(g, nz)){ return false }
+      if _pc_nontrivial_factor(g, nz) { return false }
       def j = jacobi(D, nz)
-      if(j == -1){
+      if j == -1 {
          Q = (z1 - D) / z4
          found = true
       } else {
-         if(D > z0){ D = -(D + z2) } else { D = -D + z2 }
+         if D > z0 { D = -(D + z2) } else { D = -D + z2 }
          tries += 1
       }
    }
-   if(!found){ return false }
+   if !found { return false }
    mut d = nz + z1
    mut s = 0
-   while(d % z2 == z0){
+   while d % z2 == z0 {
       d = d / z2
       s += 1
    }
@@ -1130,19 +1130,19 @@ fn selfridge_prp_report(any n) dict {
    "Lucas-Selfridge probable-prime test using the standard Selfridge D sequence."
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("selfridge-prp", nz, {"probable_prime": false})
-   if(nz < Z(2)){ return _pc_finish(out, t0, "composite") }
-   if(nz == Z(2)){ return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
-   if(nz % Z(2) == Z(0)){ return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
-   if(is_square(nz) == 1){
+   if nz < Z(2) { return _pc_finish(out, t0, "composite") }
+   if nz == Z(2) { return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true}) }
+   if nz % Z(2) == Z(0) { return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
+   if is_square(nz) == 1 {
       return _pc_finish_with(out, t0, "perfect-square", {"square_root": isqrt(nz)})
    }
    def params = _pc_selfridge_params(nz)
-   if(params.get("status", "") == "factor"){
+   if params.get("status", "") == "factor" {
       return _pc_finish_with(out, t0, "factor", {
             "D": params.get("D"), "factor": params.get("factor"), "cofactor": params.get("cofactor"),
       })
    }
-   if(params.get("status", "") != "params"){
+   if params.get("status", "") != "params" {
       return _pc_finish_with(out, t0, "no-selfridge-params", {"params": params})
    }
    def luc = lucas_prp_report(nz, params.get("P"), params.get("Q"))
@@ -1150,7 +1150,7 @@ fn selfridge_prp_report(any n) dict {
          "D": params.get("D"), "P": params.get("P"), "Q": params.get("Q"),
          "selfridge_tries": params.get("tries", 0), "lucas": luc,
    })
-   if(luc.get("probable_prime", false)){
+   if luc.get("probable_prime", false) {
       return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true})
    }
    _pc_finish_with(out, t0, "composite", {"factor": luc.get("factor", nil)})
@@ -1164,7 +1164,7 @@ fn selfridge_prp(any n) bool {
 fn strong_selfridge_prp_report(any n) dict {
    "Strong Lucas-Selfridge probable-prime test."
    def nz = _pc_z(n)
-   if(nz > Z(1) && is_square(nz) == 1){
+   if nz > Z(1) && is_square(nz) == 1 {
       def t0 = ticks()
       return _pc_finish_with(_pc_report("strong-selfridge-prp", nz, {"probable_prime": false}), t0, "perfect-square", {"square_root": isqrt(nz)})
    }
@@ -1180,12 +1180,12 @@ fn bpsw_prp_report(any n) dict {
    "Baillie-PSW probable-prime screen with strong base-2 and Lucas-Selfridge reports."
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("bpsw-prp", nz, {"probable_prime": false})
-   if(nz < Z(2)){ return _pc_finish(out, t0, "composite") }
-   if(nz == Z(2) || nz == Z(3)){
+   if nz < Z(2) { return _pc_finish(out, t0, "composite") }
+   if nz == Z(2) || nz == Z(3) {
       return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true})
    }
-   if(nz % Z(2) == Z(0)){ return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
-   if(is_square(nz) == 1){
+   if nz % Z(2) == Z(0) { return _pc_finish_with(out, t0, "composite", {"factor": Z(2)}) }
+   if is_square(nz) == 1 {
       return _pc_finish_with(out, t0, "perfect-square", {"square_root": isqrt(nz)})
    }
    def mr_ok = _pc_strong_prp_base2_bool(nz)
@@ -1195,12 +1195,12 @@ fn bpsw_prp_report(any n) dict {
       "elapsed_ms": 0.0,
    }
    out = out.merge({"strong_base2": mr})
-   if(!mr_ok){
+   if !mr_ok {
       return _pc_finish_with(out, t0, "base2-composite", {"factor": nil})
    }
    def luc = _pc_strong_lucas_selfridge_report(nz)
    out = out.merge({"strong_lucas_selfridge": luc})
-   if(!luc.get("probable_prime", false)){
+   if !luc.get("probable_prime", false) {
       return _pc_finish_with(out, t0, "lucas-composite", {"factor": luc.get("factor", nil)})
    }
    _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true})
@@ -1208,15 +1208,15 @@ fn bpsw_prp_report(any n) dict {
 
 fn bpsw_prp(any n) bool {
    "Return true when the Baillie-PSW probable-prime screen accepts n."
-   if(is_int(n) && int(n) <= 2147483647){ return is_prime(n) }
+   if is_int(n) && int(n) <= 2147483647 { return is_prime(n) }
    def nz = _pc_z(n)
    def state = _pc_odd_candidate_state(nz)
-   if(state != 0){ return state > 0 }
-   if(nz == Z(3)){ return true }
-   if(bit_length(nz) <= 31){ return is_prime(nz) }
-   if(bit_length(nz) <= 64){ return deterministic_miller_rabin64(nz) }
-   if(is_square(nz) == 1){ return false }
-   if(!_pc_strong_prp_base2_bool(nz)){ return false }
+   if state != 0 { return state > 0 }
+   if nz == Z(3) { return true }
+   if bit_length(nz) <= 31 { return is_prime(nz) }
+   if bit_length(nz) <= 64 { return deterministic_miller_rabin64(nz) }
+   if is_square(nz) == 1 { return false }
+   if !_pc_strong_prp_base2_bool(nz) { return false }
    _pc_strong_lucas_selfridge_bool(nz)
 }
 
@@ -1233,20 +1233,20 @@ fn strong_bpsw_prp(any n) bool {
 fn _pc_pratt_witness_report(any n, list qs, int max_base) dict {
    def nz = _pc_z(n)
    mut a = Z(2)
-   while(a <= Z(max_base) && a < nz){
+   while a <= Z(max_base) && a < nz {
       def g0 = gcd(a, nz)
-      if(_pc_nontrivial_factor(g0, nz)){
+      if _pc_nontrivial_factor(g0, nz) {
          return {"status": "factor", "a": a, "factor": g0, "cofactor": nz / g0}
       }
-      if(g0 == Z(1) && power_mod(a, nz - Z(1), nz) == Z(1)){
+      if g0 == Z(1) && power_mod(a, nz - Z(1), nz) == Z(1) {
          mut checks, ok, i = [], true, 0
-         while(i < qs.len){
+         while i < qs.len {
             def q = _pc_z(qs.get(i))
             def x = power_mod(a, (nz - Z(1)) / q, nz)
             def g = gcd(x - Z(1), nz)
             checks = checks.append({"q": q, "pow": x, "gcd": g, "ok": g == Z(1)})
-            if(g != Z(1)){ ok = false }
-            if(_pc_nontrivial_factor(g, nz)){
+            if g != Z(1) { ok = false }
+            if _pc_nontrivial_factor(g, nz) {
                return {
                   "status": "factor", "a": a, "q": q,
                   "factor": g, "cofactor": nz / g, "checks": checks,
@@ -1254,7 +1254,7 @@ fn _pc_pratt_witness_report(any n, list qs, int max_base) dict {
             }
             i += 1
          }
-         if(ok){
+         if ok {
             return {"status": "witness", "a": a, "checks": checks}
          }
       }
@@ -1268,28 +1268,28 @@ fn verify_pratt_certificate_report(any cert) dict {
    def t0 = ticks()
    mut out = {"method": "verify-pratt-certificate", "prime": false, "proof_valid": false}
    def setup = _pc_verify_recursive_setup(cert, out, t0, "factors_n_minus_1", -1, "factor product does not equal n-1")
-   if(setup.get("done", false)){ return setup.get("report") }
+   if setup.get("done", false) { return setup.get("report") }
    out = setup.get("out")
    def nz = setup.get("n")
    def qs = setup.get("qs", [])
    def verified_nodes = setup.get("verified_nodes", 1)
    def witness = cert.get("witness", nil)
-   if(witness == nil){
+   if witness == nil {
       return _pc_finish_with(out, t0, "invalid", {"reason": "missing witness"})
    }
    def a = _pc_z(witness)
-   if(gcd(a, nz) != Z(1)){
+   if gcd(a, nz) != Z(1) {
       return _pc_finish_with(out, t0, "invalid", {"reason": "witness not coprime to n", "a": a})
    }
-   if(power_mod(a, nz - Z(1), nz) != Z(1)){
+   if power_mod(a, nz - Z(1), nz) != Z(1) {
       return _pc_finish_with(out, t0, "invalid", {"reason": "witness fails Fermat relation", "a": a})
    }
    mut checks, i = [], 0
-   while(i < qs.len){
+   while i < qs.len {
       def q = _pc_z(qs.get(i))
       def g = gcd(power_mod(a, (nz - Z(1)) / q, nz) - Z(1), nz)
       checks = checks.append({"q": q, "gcd": g, "ok": g == Z(1)})
-      if(g != Z(1)){
+      if g != Z(1) {
          return _pc_finish_with(out, t0, "invalid", {"reason": "witness fails prime-factor order check", "a": a, "q": q, "gcd": g, "checks": checks})
       }
       i += 1
@@ -1315,16 +1315,16 @@ fn pratt_certificate_report(any n, int max_base=512, int max_depth=64) dict {
          "prime": true, "witness": Z(1), "factors_n_minus_1": [],
          "subcertificates": [], "certificate_size": 1, "verified": true,
    })
-   if(basic != nil){ return basic }
+   if basic != nil { return basic }
    def prep = _pc_recursive_factor_setup(out, t0, nz, max_base, max_depth, "factors_n_minus_1", nz - Z(1), "n-1 factorization incomplete")
-   if(prep.get("done", false)){ return prep.get("report") }
+   if prep.get("done", false) { return prep.get("report") }
    out = prep.get("out")
    def qs = prep.get("qs", [])
    def subcerts = prep.get("subcerts")
    def w = _pc_pratt_witness_report(nz, qs, max_base)
    out = out.set("witness_report", w)
    def wf = _pc_witness_setup_failure(out, t0, w, "no primitive-root witness within max_base")
-   if(wf != nil){ return wf }
+   if wf != nil { return wf }
    out = out.merge({
          "witness": w.get("a"),
          "witness_checks": w.get("checks", []),
@@ -1345,48 +1345,48 @@ fn _pc_lucas_nplus1_witness_report(any n, list qs, int max_tries) dict {
    mut D = Z(5)
    mut tries = 0
    mut attempts = []
-   while(tries < max_tries){
+   while tries < max_tries {
       def gD = gcd(_pc_abs(D), nz)
-      if(_pc_nontrivial_factor(gD, nz)){
+      if _pc_nontrivial_factor(gD, nz) {
          return {"status": "factor", "D": D, "factor": gD, "cofactor": nz / gD, "tries": tries + 1}
       }
-      if(jacobi(D, nz) == -1){
+      if jacobi(D, nz) == -1 {
          def P = Z(1)
          def Q = (Z(1) - D) / Z(4)
          def g0 = gcd(Z(2) * Q * D, nz)
-         if(_pc_nontrivial_factor(g0, nz)){
+         if _pc_nontrivial_factor(g0, nz) {
             return {
                "status": "factor", "D": D, "P": P, "Q": Q,
                "factor": g0, "cofactor": nz / g0, "tries": tries + 1,
             }
          }
-         if(g0 == Z(1)){
+         if g0 == Z(1) {
             def uvN = lucas.lucas_uv_mod(P, Q, nz + Z(1), nz)
             def UN = _pc_mod(uvN.get(0), nz)
             def rank = _pc_lucas_rank_checks(nz, P, Q, qs)
             def checks = rank.get("checks", [])
             def factor = rank.get("factor", nil)
-            if(factor != nil){
+            if factor != nil {
                return {
                   "status": "factor", "D": D, "P": P, "Q": Q, "q": rank.get("q"),
                   "factor": factor, "cofactor": nz / factor, "checks": checks,
                   "tries": tries + 1,
                }
             }
-            if(UN == Z(0) && rank.get("ok", false)){
+            if UN == Z(0) && rank.get("ok", false) {
                return {
                   "status": "witness", "D": D, "P": P, "Q": Q,
                   "U_n_plus_1": UN, "checks": checks, "tries": tries + 1,
                }
             }
-            if(attempts.len < 8){
+            if attempts.len < 8 {
                attempts = attempts.append({
                      "D": D, "P": P, "Q": Q, "U_n_plus_1": UN, "checks": checks,
                })
             }
          }
       }
-      if(D > Z(0)){ D = -(D + Z(2)) } else { D = -D + Z(2) }
+      if D > Z(0) { D = -(D + Z(2)) } else { D = -D + Z(2) }
       tries += 1
    }
    {"status": "missing", "max_tries": max_tries, "attempts": attempts}
@@ -1397,33 +1397,33 @@ fn verify_lucas_nplus1_certificate_report(any cert) dict {
    def t0 = ticks()
    mut out = {"method": "verify-lucas-nplus1-certificate", "prime": false, "proof_valid": false}
    def setup = _pc_verify_recursive_setup(cert, out, t0, "factors_n_plus_1", 1, "factor product does not equal n+1")
-   if(setup.get("done", false)){ return setup.get("report") }
+   if setup.get("done", false) { return setup.get("report") }
    out = setup.get("out")
    def nz = setup.get("n")
    def P, Q = _pc_z(cert.get("P", Z(0))), _pc_z(cert.get("Q", Z(0)))
    def D = _pc_z(cert.get("D", P * P - Z(4) * Q))
    out = out.merge({"P": P, "Q": Q, "D": D})
-   if(P * P - Z(4) * Q != D){
+   if P * P - Z(4) * Q != D {
       return _pc_finish_with(out, t0, "invalid", {"reason": "D does not match P^2 - 4Q"})
    }
-   if(jacobi(D, nz) != -1){
+   if jacobi(D, nz) != -1 {
       return _pc_finish_with(out, t0, "invalid", {"reason": "Jacobi(D,n) is not -1"})
    }
    def g0 = gcd(Z(2) * Q * D, nz)
    out = out.set("discriminant_gcd", g0)
-   if(g0 != Z(1)){
+   if g0 != Z(1) {
       return _pc_finish_with(out, t0, "invalid", {"reason": "gcd(2QD,n) is not 1", "factor": _pc_nontrivial_factor(g0, nz) ? g0 : nil})
    }
    def qs, verified_nodes = setup.get("qs", []), setup.get("verified_nodes", 1)
    def uvN = lucas.lucas_uv_mod(P, Q, nz + Z(1), nz)
    def UN = _pc_mod(uvN.get(0), nz)
    out = out.set("U_n_plus_1", UN)
-   if(UN != Z(0)){
+   if UN != Z(0) {
       return _pc_finish_with(out, t0, "invalid", {"reason": "U_(n+1) is not 0 mod n"})
    }
    def rank = _pc_lucas_rank_checks(nz, P, Q, qs)
    def checks = rank.get("checks", [])
-   if(!rank.get("ok", false)){
+   if !rank.get("ok", false) {
       return _pc_finish_with(out, t0, "invalid", {
             "reason": "Lucas rank check failed for a prime factor of n+1",
             "q": rank.get("q"), "gcd": rank.get("gcd"), "checks": checks,
@@ -1453,16 +1453,16 @@ fn lucas_nplus1_certificate_report(any n, int max_tries=128, int max_depth=64) d
          "subcertificates": [pratt_certificate_report(Z(3), max_tries, max_depth - 1)],
          "certificate_size": 2, "verified": true,
    })
-   if(basic != nil){ return basic }
+   if basic != nil { return basic }
    def prep = _pc_recursive_factor_setup(out, t0, nz, max_tries, max_depth, "factors_n_plus_1", nz + Z(1), "n+1 factorization incomplete")
-   if(prep.get("done", false)){ return prep.get("report") }
+   if prep.get("done", false) { return prep.get("report") }
    out = prep.get("out")
    def qs = prep.get("qs", [])
    def subcerts = prep.get("subcerts")
    def w = _pc_lucas_nplus1_witness_report(nz, qs, max_tries)
    out = out.set("witness_report", w)
    def wf = _pc_witness_setup_failure(out, t0, w, "no Lucas n+1 parameters within max_tries", true)
-   if(wf != nil){ return wf }
+   if wf != nil { return wf }
    out = out.merge({
          "D": w.get("D"), "P": w.get("P"), "Q": w.get("Q"),
          "U_n_plus_1": w.get("U_n_plus_1"),
@@ -1482,17 +1482,17 @@ fn lucas_nplus1_certificate(any n, int max_tries=128) bool {
 fn _pc_witness_for_q(any n, any q, int max_base) dict {
    def nz, qz = _pc_z(n), _pc_z(q)
    mut a = Z(2)
-   while(a <= Z(max_base) && a < nz){
-      if(gcd(a, nz) == Z(1) && power_mod(a, nz - Z(1), nz) == Z(1)){
+   while a <= Z(max_base) && a < nz {
+      if gcd(a, nz) == Z(1) && power_mod(a, nz - Z(1), nz) == Z(1) {
          def x = power_mod(a, (nz - Z(1)) / qz, nz)
          def g = gcd(x - Z(1), nz)
-         if(g == Z(1)){
+         if g == Z(1) {
             return {
                "q": qz, "a": a, "status": "witness",
                "pow_n_minus_1": Z(1), "gcd": g,
             }
          }
-         if(_pc_nontrivial_factor(g, nz)){
+         if _pc_nontrivial_factor(g, nz) {
             return {
                "q": qz, "a": a, "status": "factor",
                "factor": g, "cofactor": nz / g,
@@ -1508,18 +1508,18 @@ fn pocklington_certificate_report(any n, int max_base=128) dict {
    "Build a Pocklington-style primality certificate when n-1 factors enough."
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("pocklington-certificate", nz, {"max_base": max_base})
-   if(nz < Z(2)){
+   if nz < Z(2) {
       return _pc_finish_with(out, t0, "composite", {"prime": false, "reason": "n < 2"})
    }
-   if(nz == Z(2)){
+   if nz == Z(2) {
       return _pc_finish_with(out, t0, "proven-prime", {"prime": true, "certificate": []})
    }
-   if(nz % Z(2) == Z(0)){
+   if nz % Z(2) == Z(0) {
       return _pc_finish_with(out, t0, "composite", {
             "prime": false, "factor": Z(2), "cofactor": nz / Z(2),
       })
    }
-   if(!is_prime(nz)){
+   if !is_prime(nz) {
       return _pc_finish_with(out, t0, "composite", {
             "prime": false, "reason": "base primality screen rejected n",
       })
@@ -1528,22 +1528,22 @@ fn pocklington_certificate_report(any n, int max_base=128) dict {
    def factor_fields = _pc_factorization_fields("factors_n_minus_1", facs, nz - Z(1))
    def complete = factor_fields.get("complete_factorization", false)
    out = out.merge(factor_fields)
-   if(!complete){
+   if !complete {
       return _pc_finish_with(out, t0, "inconclusive", {
             "prime": false, "reason": "n-1 factorization incomplete",
       })
    }
    def qs = _pc_unique_primes(facs)
    mut cert, i = [], 0
-   while(i < qs.len){
+   while i < qs.len {
       def w = _pc_witness_for_q(nz, qs.get(i), max_base)
-      if(w.get("status", "") == "factor"){
+      if w.get("status", "") == "factor" {
          return _pc_finish_with(out, t0, "composite", {
                "prime": false, "factor": w.get("factor"),
                "cofactor": w.get("cofactor"), "certificate": cert,
          })
       }
-      if(w.get("status", "") != "witness"){
+      if w.get("status", "") != "witness" {
          return _pc_finish_with(out, t0, "inconclusive", {
                "prime": false, "missing_q": qs.get(i), "certificate": cert,
          })
@@ -1569,7 +1569,7 @@ fn primality_certificate_report(any n, int max_base=128) dict {
    })
    def screen = bpsw_prp_report(nz)
    out = out.set("screen", screen)
-   if(!screen.get("probable_prime", false)){
+   if !screen.get("probable_prime", false) {
       return _pc_finish_with(out, t0, "composite", {
             "reason": screen.get("status", "screen-rejected"),
             "factor": screen.get("factor", nil),
@@ -1579,15 +1579,15 @@ fn primality_certificate_report(any n, int max_base=128) dict {
    def pratt = pratt_certificate_report(nz, max_base)
    out = out.set("pratt", pratt)
    def pratt_done = _pc_finish_certified_proof(out, t0, "pratt", pratt, pratt)
-   if(pratt_done != nil){ return pratt_done }
+   if pratt_done != nil { return pratt_done }
    def lucas_np1 = lucas_nplus1_certificate_report(nz, max_base)
    out = out.set("lucas_nplus1", lucas_np1)
    def lucas_done = _pc_finish_certified_proof(out, t0, "lucas-nplus1", lucas_np1, lucas_np1)
-   if(lucas_done != nil){ return lucas_done }
+   if lucas_done != nil { return lucas_done }
    def proof = pocklington_certificate_report(nz, max_base)
    out = out.set("proof", proof)
    def proof_done = _pc_finish_certified_proof(out, t0, "pocklington", proof, proof.get("certificate", []), false)
-   if(proof_done != nil){ return proof_done }
+   if proof_done != nil { return proof_done }
    _pc_finish_with(out, t0, "probable-prime", {
          "proof_status": proof.get("status", "inconclusive"),
          "reason": "BPSW accepted but proof layer did not certify",

@@ -32,7 +32,7 @@ fn chacha20_block(list st) list {
 
 fn _chacha20_block_with_orig(list st, list st_orig) list {
    mut i = 0
-   while(i < 10){
+   while i < 10 {
       _quarter_round(st, 0, 4, 8, 12)
       _quarter_round(st, 1, 5, 9, 13)
       _quarter_round(st, 2, 6, 10, 14)
@@ -43,7 +43,7 @@ fn _chacha20_block_with_orig(list st, list st_orig) list {
       _quarter_round(st, 3, 4, 9, 14)
       i += 1
    }
-   mut j = 0 while(j < 16){
+   mut j = 0 while j < 16 {
       st[j] = (st[j] + st_orig[j]) & 0xffffffff
       j += 1
    }
@@ -54,7 +54,7 @@ fn _chacha20_base_ctx(list key) list {
    mut ctx = zero_list(16)
    ctx[0] = 0x61707865 ctx[1] = 0x3320646e
    ctx[2] = 0x79622d32 ctx[3] = 0x6b206574
-   mut i = 0 while(i < 8){
+   mut i = 0 while i < 8 {
       ctx[4 + i] = unpack_le32(key, i * 4)
       i += 1
    }
@@ -65,12 +65,12 @@ fn _chacha20_xor_words(list out, list data, int offset, list st) list {
    mut wi = 0
    mut j = 0
    def remaining = data.len - offset
-   while(wi < 16 && j < remaining){
+   while wi < 16 && j < remaining {
       def w = st[wi]
       out[offset + j] = data[offset + j] ^^ (w & 0xff)
-      if(j + 1 < remaining){ out[offset + j + 1] = data[offset + j + 1] ^^ ((w >> 8) & 0xff) }
-      if(j + 2 < remaining){ out[offset + j + 2] = data[offset + j + 2] ^^ ((w >> 16) & 0xff) }
-      if(j + 3 < remaining){ out[offset + j + 3] = data[offset + j + 3] ^^ ((w >> 24) & 0xff) }
+      if j + 1 < remaining { out[offset + j + 1] = data[offset + j + 1] ^^ ((w >> 8) & 0xff) }
+      if j + 2 < remaining { out[offset + j + 2] = data[offset + j + 2] ^^ ((w >> 16) & 0xff) }
+      if j + 3 < remaining { out[offset + j + 3] = data[offset + j + 3] ^^ ((w >> 24) & 0xff) }
       wi += 1
       j += 4
    }
@@ -84,9 +84,9 @@ fn _chacha20_crypt_ctx(list ctx, int counter, list data, bool wide_counter) list
    mut st_orig = zero_list(16)
    mut p = 0
    mut block_counter = counter
-   while(p < data.len){
+   while p < data.len {
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          def v = ctx[i]
          st[i] = v
          st_orig[i] = v
@@ -94,8 +94,8 @@ fn _chacha20_crypt_ctx(list ctx, int counter, list data, bool wide_counter) list
       }
       st[12] = wide_counter ? (block_counter & 0xffffffff) : block_counter
       st_orig[12] = st[12]
-      if(wide_counter){ st[13] = (block_counter >> 32) & 0xffffffff }
-      if(wide_counter){ st_orig[13] = st[13] }
+      if wide_counter { st[13] = (block_counter >> 32) & 0xffffffff }
+      if wide_counter { st_orig[13] = st[13] }
       _chacha20_block_with_orig(st, st_orig)
       _chacha20_xor_words(res, data, p, st)
       p += 64

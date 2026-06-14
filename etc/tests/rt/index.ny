@@ -44,7 +44,7 @@ assert(rg[0] == 2, "range index read")
 assert(rg[-1] == 6, "range negative index read")
 mut mix = 0
 mut i = 0
-while(i < xs.len){
+while i < xs.len {
    mix += xs[i] + tp[i] + rg[i]
    i += 1
 }
@@ -53,7 +53,7 @@ assert(mix == 87, "mixed indexed loop read")
 def raw_probe = [2, 3, 4, 5, 6, 7, 8, 9]
 mut int: raw_acc = 0
 mut int: raw_i = 0
-while(raw_i < 64){
+while raw_i < 64 {
    def int: raw_idx = (((raw_i * 3) + 1) % 8)
    raw_acc += get(raw_probe, raw_idx, 0) + (raw_i % 5)
    raw_i += 1
@@ -65,13 +65,13 @@ assert(raw_repr_probe == [0, 0, 1], "list representation valid")
 assert(repr(raw_repr_probe) == "[0, 0, 1]", "list repr")
 assert(to_str(raw_repr_probe) == "[0, 0, 1]", "list to_str")
 mut int: redecl_i = 0
-while(redecl_i < 3){
+while redecl_i < 3 {
    redecl_i += 1
 }
 
 mut int: redecl_i = 0
 mut int: redecl_sum = 0
-while(redecl_i < 4){
+while redecl_i < 4 {
    redecl_sum += redecl_i
    redecl_i += 1
 }
@@ -80,7 +80,7 @@ assert(redecl_sum == 6, "top-level mutable redeclaration resets value")
 def nested = [[1, 2], [3, 4], [5, 6]]
 mut nested_sum = 0
 mut ni = 0
-while(ni < nested.len){
+while ni < nested.len {
    nested_sum += nested[ni][0] + nested[ni][1]
    ni += 1
 }

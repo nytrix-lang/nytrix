@@ -47,20 +47,20 @@ fn worldfreq_stat_root() str {
 
 fn _alpha_token_ok(str token, int min_len=1, int max_len=24) bool {
    def n = token.len
-   if(n < min_len || n > max_len){ return false }
+   if n < min_len || n > max_len { return false }
    mut i = 0
-   while(i < n){
-      if(!_is_ascii_upper(load8(token, i))){ return false }
+   while i < n {
+      if !_is_ascii_upper(load8(token, i)) { return false }
       i += 1
    }
    true
 }
 
 fn _weight_bucket(int count, int bias=0) int {
-   if(count <= 0){ return 0 }
+   if count <= 0 { return 0 }
    mut bits = 0
    mut v = count
-   while(v > 1){
+   while v > 1 {
       v = v / 2
       bits += 1
    }
@@ -80,7 +80,7 @@ fn _packed_size_for_len(int n) int {
 fn _zero_int_table(int n) list {
    mut xs = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       xs[i] = 0
       i += 1
    }
@@ -91,42 +91,42 @@ fn _zero_int_table(int n) list {
 fn _load_weighted_alpha_table_pair(str path, int min_len=1, int max_len=24, int exact_len=0, int bias=0) list {
    def pack_size = _packed_size_for_len(exact_len)
    mut packed = pack_size > 0 ? _zero_int_table(pack_size) : []
-   if(path.len == 0 || !file_exists(path)){ return [dict(0), packed] }
-   match file_read(path){
+   if path.len == 0 || !file_exists(path) { return [dict(0), packed] }
+   match file_read(path) {
       ok(txt) -> {
          mut out = dict(1024)
          def n = txt.len
          mut i = 0
-         while(i < n){
-            while(i < n && (load8(txt, i) == 10 || load8(txt, i) == 13 || load8(txt, i) == 32 || load8(txt, i) == 9)){ i += 1 }
+         while i < n {
+            while i < n && (load8(txt, i) == 10 || load8(txt, i) == 13 || load8(txt, i) == 32 || load8(txt, i) == 9) { i += 1 }
             def start = i
             mut pack = 0
             mut token_len = 0
             mut alpha_ok = true
-            while(i < n){
+            while i < n {
                def v = _ascii_alpha_value(load8(txt, i))
-               if(v < 0){ break }
-               if(token_len < 4){ pack = pack * 26 + v }
+               if v < 0 { break }
+               if token_len < 4 { pack = pack * 26 + v }
                token_len += 1
                i += 1
             }
-            if(token_len == 0){ alpha_ok = false }
-            while(i < n && (load8(txt, i) == 32 || load8(txt, i) == 9)){ i += 1 }
+            if token_len == 0 { alpha_ok = false }
+            while i < n && (load8(txt, i) == 32 || load8(txt, i) == 9) { i += 1 }
             mut count = 0
-            while(i < n && load8(txt, i) >= 48 && load8(txt, i) <= 57){
+            while i < n && load8(txt, i) >= 48 && load8(txt, i) <= 57 {
                count = count * 10 + load8(txt, i) - 48
                i += 1
             }
             def expect_ok = (exact_len > 0) ? (token_len == exact_len) : (token_len >= min_len && token_len <= max_len)
-            if(alpha_ok && expect_ok && count > 0){
+            if alpha_ok && expect_ok && count > 0 {
                def weight = _weight_bucket(count, bias)
-               if(weight > 0){
+               if weight > 0 {
                   def token = str.str_slice(txt, start, start + token_len)
                   out = out.set(token, weight)
-                  if(pack_size > 0){ packed[pack] = weight }
+                  if pack_size > 0 { packed[pack] = weight }
                }
             }
-            while(i < n && load8(txt, i) != 10){ i += 1 }
+            while i < n && load8(txt, i) != 10 { i += 1 }
             i += 1
          }
          [out, packed]
@@ -146,33 +146,33 @@ fn _load_weighted_alpha_table(str path, int min_len=1, int max_len=24, int exact
 fn _load_weighted_alpha_packed(str path, int exact_len, int bias=0) list {
    def pack_size = _packed_size_for_len(exact_len)
    mut packed = _zero_int_table(pack_size)
-   if(path.len == 0 || !file_exists(path)){ return packed }
-   match file_read(path){
+   if path.len == 0 || !file_exists(path) { return packed }
+   match file_read(path) {
       ok(txt) -> {
          def n = txt.len
          mut i = 0
-         while(i < n){
-            while(i < n && (load8(txt, i) == 10 || load8(txt, i) == 13 || load8(txt, i) == 32 || load8(txt, i) == 9)){ i += 1 }
+         while i < n {
+            while i < n && (load8(txt, i) == 10 || load8(txt, i) == 13 || load8(txt, i) == 32 || load8(txt, i) == 9) { i += 1 }
             mut pack = 0
             mut token_len = 0
-            while(i < n){
+            while i < n {
                def v = _ascii_alpha_value(load8(txt, i))
-               if(v < 0){ break }
+               if v < 0 { break }
                pack = pack * 26 + v
                token_len += 1
                i += 1
             }
-            while(i < n && (load8(txt, i) == 32 || load8(txt, i) == 9)){ i += 1 }
+            while i < n && (load8(txt, i) == 32 || load8(txt, i) == 9) { i += 1 }
             mut count = 0
-            while(i < n && load8(txt, i) >= 48 && load8(txt, i) <= 57){
+            while i < n && load8(txt, i) >= 48 && load8(txt, i) <= 57 {
                count = count * 10 + load8(txt, i) - 48
                i += 1
             }
-            if(token_len == exact_len && count > 0){
+            if token_len == exact_len && count > 0 {
                def weight = _weight_bucket(count, bias)
-               if(weight > 0){ packed[pack] = weight }
+               if weight > 0 { packed[pack] = weight }
             }
-            while(i < n && load8(txt, i) != 10){ i += 1 }
+            while i < n && load8(txt, i) != 10 { i += 1 }
             i += 1
          }
          packed
@@ -183,7 +183,7 @@ fn _load_weighted_alpha_packed(str path, int exact_len, int bias=0) list {
 
 fn _worldfreq_load_ngram_cached(any lang="english") dict {
    def name = _normalize_lang(lang)
-   if(_worldfreq_ngram_profiles.contains(name)){ return _worldfreq_ngram_profiles.get(name, dict(0)) }
+   if _worldfreq_ngram_profiles.contains(name) { return _worldfreq_ngram_profiles.get(name, dict(0)) }
    def paths = worldfreq_profile_paths(name)
    def profile = {
       "lang": name,
@@ -197,18 +197,18 @@ fn _worldfreq_load_ngram_cached(any lang="english") dict {
 }
 
 fn _load_alpha_word_set(str path, int min_len=2, int max_len=24) dict {
-   if(path.len == 0 || !file_exists(path)){ return dict(0) }
-   match file_read(path){
+   if path.len == 0 || !file_exists(path) { return dict(0) }
+   match file_read(path) {
       ok(txt) -> {
          mut out = dict(1024)
          def n = txt.len
          mut line_start = 0
          mut i = 0
-         while(i <= n){
-            if(i == n || load8(txt, i) == 10){
+         while i <= n {
+            if i == n || load8(txt, i) == 10 {
                def token = upper(str.strip(str.str_slice(txt, line_start, i)))
                line_start = i + 1
-               if(_alpha_token_ok(token, min_len, max_len)){ out = out.set(token, true) }
+               if _alpha_token_ok(token, min_len, max_len) { out = out.set(token, true) }
             }
             i += 1
          }
@@ -222,7 +222,7 @@ fn _merge_word_set(dict base, dict extra) dict {
    mut out = base
    def keys = dict_keys(extra)
    mut i = 0
-   while(i < keys.len){
+   while i < keys.len {
       out = out.set(keys[i], true)
       i += 1
    }
@@ -230,9 +230,9 @@ fn _merge_word_set(dict base, dict extra) dict {
 }
 
 fn _profile_name_from_filename(str name) str {
-   if(!str.endswith(name, ".txt")){ return "" }
+   if !str.endswith(name, ".txt") { return "" }
    def dash = str.find(name, "-")
-   if(dash <= 0){ return "" }
+   if dash <= 0 { return "" }
    def suffix = str.str_slice(name, dash + 1, name.len)
    case suffix {
       "words.txt", "monograms.txt", "bigrams.txt", "trigrams.txt", "quadgrams.txt" -> str.str_slice(name, 0, dash)
@@ -243,10 +243,10 @@ fn _profile_name_from_filename(str name) str {
 fn _sort_strings(list xs) list {
    def out = clone(xs)
    mut i = 1
-   while(i < out.len){
+   while i < out.len {
       def item = out[i]
       mut j = i - 1
-      while(j >= 0 && out[j] > item){
+      while j >= 0 && out[j] > item {
          out[j + 1] = out[j]
          j -= 1
       }
@@ -259,11 +259,11 @@ fn _sort_strings(list xs) list {
 fn _sort_rows_desc(list rows) list {
    def out = clone(rows)
    mut i = 1
-   while(i < out.len){
+   while i < out.len {
       def row = out[i]
       def row_score = row[1]
       mut j = i - 1
-      while(j >= 0 && out[j][1] < row_score){
+      while j >= 0 && out[j][1] < row_score {
          out[j + 1] = out[j]
          j -= 1
       }
@@ -274,10 +274,10 @@ fn _sort_rows_desc(list rows) list {
 }
 
 fn _rows_limit(list rows, int limit) list {
-   if(limit <= 0 || rows.len <= limit){ return rows }
+   if limit <= 0 || rows.len <= limit { return rows }
    mut out = []
    mut i = 0
-   while(i < rows.len && i < limit){
+   while i < rows.len && i < limit {
       out = out.append(rows[i])
       i += 1
    }
@@ -286,16 +286,16 @@ fn _rows_limit(list rows, int limit) list {
 
 fn worldfreq_profile_names() list {
    "Lists discovered language profiles from `etc/assets/dict`."
-   if(is_list(_worldfreq_names_cache)){ return clone(_worldfreq_names_cache) }
+   if is_list(_worldfreq_names_cache) { return clone(_worldfreq_names_cache) }
    def root = worldfreq_stat_root()
-   if(!osfs.is_dir(root)){ return [] }
+   if !osfs.is_dir(root) { return [] }
    def entries = osfs.list_dir(root)
    mut seen = dict(8)
    mut names = []
    mut i = 0
-   while(i < entries.len){
+   while i < entries.len {
       def lang = _profile_name_from_filename(entries[i])
-      if(lang.len > 0 && !seen.contains(lang)){
+      if lang.len > 0 && !seen.contains(lang) {
          seen = seen.set(lang, true)
          names = names.append(lang)
       }
@@ -312,9 +312,9 @@ fn worldfreq_profile_paths(any lang="english") dict {
    def base = worldfreq_assets_root()
    def stat = worldfreq_stat_root()
    mut raw_words = ""
-   if(name == "english"){ raw_words = ospath.join(base, "words.txt") } else {
+   if name == "english" { raw_words = ospath.join(base, "words.txt") } else {
       def alt = ospath.join(base, name + "-words.txt")
-      if(file_exists(alt)){ raw_words = alt }
+      if file_exists(alt) { raw_words = alt }
    }
    {
       "lang": name,
@@ -341,7 +341,7 @@ fn worldfreq_profile_exists(any lang="english") bool {
 
 fn _worldfreq_load_cached(any lang="english") dict {
    def name = _normalize_lang(lang)
-   if(_worldfreq_profiles.contains(name)){ return _worldfreq_profiles.get(name, dict(0)) }
+   if _worldfreq_profiles.contains(name) { return _worldfreq_profiles.get(name, dict(0)) }
    def paths = worldfreq_profile_paths(name)
    def common_words = _load_weighted_alpha_table(paths.get("common_words_path", ""), 1, 24, 0, 12)
    def mono_pair = _load_weighted_alpha_table_pair(paths.get("monograms_path", ""), 1, 1, 1, 20)
@@ -374,7 +374,7 @@ fn worldfreq_load(any lang="english") dict {
 }
 
 fn _profile_resolve(any profile_or_lang) dict {
-   if(is_dict(profile_or_lang)){ return profile_or_lang }
+   if is_dict(profile_or_lang) { return profile_or_lang }
    _worldfreq_load_cached(profile_or_lang)
 }
 
@@ -382,9 +382,9 @@ fn worldfreq_alpha_upper(str text) str {
    "Uppercases and strips non-ASCII letters from `text`."
    mut out = str.Builder(max(16, text.len + 8))
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def c = load8(text, i)
-      if(c >= 97 && c <= 122){ out = str.builder_append(out, str.chr(c - 32)) } elif(_is_ascii_upper(c)){ out = str.builder_append(out, str.chr(c)) }
+      if c >= 97 && c <= 122 { out = str.builder_append(out, str.chr(c - 32)) } elif _is_ascii_upper(c) { out = str.builder_append(out, str.chr(c)) }
       i += 1
    }
    def s = str.builder_to_str(out)
@@ -398,13 +398,13 @@ fn worldfreq_word_counter(str text, int min_len=1, int max_len=24) dict {
    mut out = dict(16)
    def n = upper_text.len
    mut i = 0
-   while(i < n){
-      while(i < n && !_is_ascii_upper(load8(upper_text, i))){ i += 1 }
+   while i < n {
+      while i < n && !_is_ascii_upper(load8(upper_text, i)) { i += 1 }
       def start = i
-      while(i < n && _is_ascii_upper(load8(upper_text, i))){ i += 1 }
-      if(i > start){
+      while i < n && _is_ascii_upper(load8(upper_text, i)) { i += 1 }
+      if i > start {
          def token = str.str_slice(upper_text, start, i)
-         if(_alpha_token_ok(token, min_len, max_len)){ out = out.set(token, int(out.get(token, 0)) + 1) }
+         if _alpha_token_ok(token, min_len, max_len) { out = out.set(token, int(out.get(token, 0)) + 1) }
       }
    }
    out
@@ -420,7 +420,7 @@ fn worldfreq_rows_to_table(list rows) str {
    "Formats `[token, count]` rows into `TOKEN COUNT` lines."
    mut out = str.Builder(max(32, rows.len * 12))
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows[i]
       out = str.builder_append(out, to_str(row[0]))
       out = str.builder_append(out, " ")
@@ -450,24 +450,24 @@ fn worldfreq_word_stats(str text, any profile_or_lang="english") list {
    mut common_hits = 0
    def n = upper_text.len
    mut i = 0
-   while(i < n){
-      while(i < n && !_is_ascii_upper(load8(upper_text, i))){ i += 1 }
+   while i < n {
+      while i < n && !_is_ascii_upper(load8(upper_text, i)) { i += 1 }
       def start = i
-      while(i < n && _is_ascii_upper(load8(upper_text, i))){ i += 1 }
-      if(i > start){
+      while i < n && _is_ascii_upper(load8(upper_text, i)) { i += 1 }
+      if i > start {
          def token = str.str_slice(upper_text, start, i)
          token_count += 1
          def common_weight = int(common_words.get(token, 0))
-         if(common_weight > 0){
+         if common_weight > 0 {
             common_hits += 1
             dict_hits += 1
             score += common_weight * 24 + min(12, token.len)
-         } elif(word_set.contains(token)){
+         } elif word_set.contains(token) {
             dict_hits += 1
             score += 18 + min(10, token.len)
-         } elif(token.len >= 8){
+         } elif token.len >= 8 {
             score -= 14
-         } elif(token.len >= 5){
+         } elif token.len >= 5 {
             score -= 6
          }
       }
@@ -477,12 +477,12 @@ fn worldfreq_word_stats(str text, any profile_or_lang="english") list {
 
 fn worldfreq_ngram_counter(str text, int n, bool alpha_only=true) dict {
    "Counts `n`-grams from `text`. By default only A-Z characters are used."
-   if(n <= 0){ return dict(0) }
+   if n <= 0 { return dict(0) }
    def src = alpha_only ? worldfreq_alpha_upper(text) : upper(text)
-   if(src.len < n){ return dict(0) }
+   if src.len < n { return dict(0) }
    mut out = dict(16)
    mut i = 0
-   while(i + n <= src.len){
+   while i + n <= src.len {
       def gram = str.str_slice(src, i, i + n)
       out = out.set(gram, int(out.get(gram, 0)) + 1)
       i += 1
@@ -511,23 +511,23 @@ fn _ngram_score_dicts(str text, dict monograms, dict bigrams, dict trigrams, dic
    def n = alpha_text.len
    mut score = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       score += int(monograms.get(str.str_slice(alpha_text, i, i + 1), 0))
       i += 1
    }
    i = 0
-   while(i + 2 <= n){
+   while i + 2 <= n {
       score += int(bigrams.get(str.str_slice(alpha_text, i, i + 2), 0)) * 2 - 1
       i += 1
    }
    i = 0
-   while(i + 3 <= n){
+   while i + 3 <= n {
       def tri = int(trigrams.get(str.str_slice(alpha_text, i, i + 3), 0))
       score += (tri > 0) ? (tri * 4) : -2
       i += 1
    }
    i = 0
-   while(i + 4 <= n){
+   while i + 4 <= n {
       def quad = int(quadgrams.get(str.str_slice(alpha_text, i, i + 4), 0))
       score += (quad > 0) ? (quad * 6) : -3
       i += 1
@@ -542,18 +542,18 @@ fn _ngram_score_packed(str text, list monograms, list bigrams, list trigrams, li
    mut p1 = 0
    mut p2 = 0
    mut p3 = 0
-   while(i < text.len){
+   while i < text.len {
       def v = _ascii_alpha_value(load8(text, i))
-      if(v >= 0){
+      if v >= 0 {
          score += int(monograms[v])
-         if(count >= 1){
+         if count >= 1 {
             def b = p1 * 26 + v
             score += int(bigrams[b]) * 2 - 1
-            if(count >= 2){
+            if count >= 2 {
                def t = p2 * 26 + v
                def tw = int(trigrams[t])
                score += (tw > 0) ? (tw * 4) : -2
-               if(count >= 3){
+               if count >= 3 {
                   def q = p3 * 26 + v
                   def qw = int(quadgrams[q])
                   score += (qw > 0) ? (qw * 6) : -3
@@ -577,7 +577,7 @@ fn worldfreq_ngram_score(str text, any profile_or_lang="english") int {
    def bigrams = profile.get("bigrams_packed", [])
    def trigrams = profile.get("trigrams_packed", [])
    def quadgrams = profile.get("quadgrams_packed", [])
-   if(!_ngram_packed_ready(monograms, bigrams, trigrams, quadgrams)){
+   if !_ngram_packed_ready(monograms, bigrams, trigrams, quadgrams) {
       return _ngram_score_dicts(
          text,
          profile.get("monograms", dict(0)),
@@ -601,9 +601,9 @@ fn worldfreq_detect(str text, any langs=nil, int limit=8) list {
    def profile_names = is_list(langs) ? langs : worldfreq_profile_names()
    mut rows = []
    mut i = 0
-   while(i < profile_names.len){
+   while i < profile_names.len {
       def name = profile_names[i]
-      if(worldfreq_profile_exists(name)){
+      if worldfreq_profile_exists(name) {
          def profile = worldfreq_load(name)
          def word_stats = worldfreq_word_stats(text, profile)
          def score = int(word_stats[0]) + worldfreq_ngram_score(text, profile)

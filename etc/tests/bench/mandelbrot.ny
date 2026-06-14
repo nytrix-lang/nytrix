@@ -12,24 +12,24 @@ fn mandelbrot(w, h, max_iter) {
    def four = 4.0
    mut c_im = hh_sy
    mut y = 0
-   while(y < h){
+   while y < h {
       mut c_re = hw_sx
       mut x = 0
-      while(x < w){
+      while x < w {
          mut zr = 0.0
          mut zi = 0.0
          mut zr2 = 0.0
          mut zi2 = 0.0
          mut i = 0
-         while(i < max_iter){
+         while i < max_iter {
             zr2 = zr * zr
             zi2 = zi * zi
-            if(zr2 + zi2 > four){ break }
+            if zr2 + zi2 > four { break }
             zi = (zr + zr) * zi + c_im
             zr = zr2 - zi2 + c_re
             i += 1
          }
-         if(i == max_iter){ count += 1 }
+         if i == max_iter { count += 1 }
          c_re += sx
          x += 1
       }

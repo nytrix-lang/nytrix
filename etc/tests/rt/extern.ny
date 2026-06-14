@@ -4,11 +4,11 @@ use std.core.io
 use std.os.sys
 
 layout ExternDivResult {
-   i32: quot,
-   i32: rem
+   i32 quot,
+   i32 rem
 }
 
-if(comptime{ __os_name() == "windows" }){
+if comptime { __os_name() == "windows" } {
    extern {
       fn c_getpid() i32 as "GetCurrentProcessId"
       fn my_getpid() i32 as "GetCurrentProcessId"
@@ -33,7 +33,7 @@ def pid = c_getpid()
 def my_pid = my_getpid()
 assert(my_pid == pid, "my_getpid(aliased) works")
 
-if(comptime{ __os_name() != "windows" }){
+if comptime { __os_name() != "windows" }{
    def i32: block_pid = getpid()
    assert(block_pid > 0, "extern block getpid")
    assert(block_pid == pid, "extern block getpid matches aliased getpid")

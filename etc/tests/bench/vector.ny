@@ -7,7 +7,7 @@ fn hadamard_kernel(a, b) {
    def n = a.len
    mut out = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(out, i, __load_item_fast(a, i) * __load_item_fast(b, i))
       i += 1
    }
@@ -20,7 +20,7 @@ def rounds = 2
 mut a = list(n)
 mut b = list(n)
 mut i = 0
-while(i < n){
+while i < n {
    a = a.append(i + 1)
    b = b.append(i + 3)
    i += 1
@@ -30,7 +30,7 @@ print("Running", rounds, "rounds of size", n)
 def t0 = ticks()
 mut acc = 0
 mut r = 0
-while(r < rounds){
+while r < rounds {
    def c = hadamard_kernel(a, b)
    acc = acc + c.get(0, 0) + c.get(n - 1, 0)
    r += 1

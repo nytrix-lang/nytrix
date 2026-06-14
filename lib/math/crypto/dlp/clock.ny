@@ -21,7 +21,7 @@ fn _clock_point_key(list P) str {
 fn _clock_order_from_factors(list factors) any {
    mut order = Z(1)
    mut i = 0
-   while(i < factors.len){
+   while i < factors.len {
       def pair = factors[i]
       order *= bigint_pow(Z(pair[0]), pair[1])
       i += 1
@@ -51,15 +51,15 @@ fn clock_scalar_mult(any k, list P, any p, any order=nil) list {
    "Double-and-add scalar multiplication for clock-group points."
    def pp = Z(p)
    mut kk = Z(k)
-   if(order != nil){ kk = mod(kk, order) }
+   if order != nil { kk = mod(kk, order) }
    mut base = [mod(P[0], pp), mod(P[1], pp)]
-   if(kk < Z(0)){
+   if kk < Z(0) {
       kk = -kk
       base = clock_neg(base, pp)
    }
    mut acc = clock_identity()
-   while(kk > Z(0)){
-      if(mod(kk, Z(2)) == Z(1)){ acc = clock_add(acc, base, pp) }
+   while kk > Z(0) {
+      if mod(kk, Z(2)) == Z(1) { acc = clock_add(acc, base, pp) }
       base = clock_add(base, base, pp)
       kk = bigint_div(kk, Z(2))
    }
@@ -75,7 +75,7 @@ fn clock_recover_modulus(list points) any {
    "Recover a hidden modulus from points known to satisfy x^2 + y^2 = 1 mod p."
    mut acc = Z(0)
    mut i = 0
-   while(i < points.len){
+   while i < points.len {
       def P = points[i]
       def residue = bigint_abs(Z(P[0]) * Z(P[0]) + Z(P[1]) * Z(P[1]) - Z(1))
       acc = (acc == Z(0)) ? residue : gcd(acc, residue)
@@ -87,12 +87,12 @@ fn clock_recover_modulus(list points) any {
 fn clock_baby_step_giant_step(list P, list Q, any p, any order) any {
    "Solve Q = xP in a clock subgroup using baby-step giant-step."
    def n = Z(order)
-   if(_clock_point_key(Q) == _clock_point_key(clock_identity())){ return Z(0) }
+   if _clock_point_key(Q) == _clock_point_key(clock_identity()) { return Z(0) }
    def m = isqrt(n) + Z(1)
    mut table = dict()
    mut j = Z(0)
    mut baby = clock_identity()
-   while(j < m){
+   while j < m {
       table = table.set(_clock_point_key(baby), j)
       baby = clock_add(baby, P, p)
       j += Z(1)
@@ -100,9 +100,9 @@ fn clock_baby_step_giant_step(list P, list Q, any p, any order) any {
    def giant_step = clock_scalar_mult(m, P, p, n)
    mut i = Z(0)
    mut giant = [mod(Q[0], p), mod(Q[1], p)]
-   while(i < m){
+   while i < m {
       def hit = table.get(_clock_point_key(giant), nil)
-      if(hit != nil){ return mod(i * m + hit, n) }
+      if hit != nil { return mod(i * m + hit, n) }
       giant = clock_sub(giant, giant_step, p)
       i += Z(1)
    }
@@ -116,14 +116,14 @@ fn clock_pohlig_hellman(list P, list Q, any p, list order_factors) any {
    mut remainders = list(0)
    mut moduli = list(0)
    mut i = 0
-   while(i < order_factors.len){
+   while i < order_factors.len {
       def pair = order_factors[i]
       def q_power = bigint_pow(Z(pair[0]), pair[1])
       def cofactor = bigint_div(order, q_power)
       def PP = clock_scalar_mult(cofactor, P, p, order)
       def QQ = clock_scalar_mult(cofactor, Q, p, order)
       def xi = clock_baby_step_giant_step(PP, QQ, p, q_power)
-      if(xi == -1){ return -1 }
+      if xi == -1 { return -1 }
       remainders = remainders.append(xi)
       moduli = moduli.append(q_power)
       i += 1

@@ -14,33 +14,33 @@ fn fail(str message) int {
 
 fn assert_eq(any actual, any expected, str message="assert eq failed") int {
    "Fails unless `actual` and `expected` are structurally equal."
-   if(!eq(actual, expected)){ fail(message + ": expected " + to_str(expected) + ", got " + to_str(actual)) }
+   if !eq(actual, expected) { fail(message + ": expected " + to_str(expected) + ", got " + to_str(actual)) }
    0
 }
 
 fn assert_ne(any actual, any unexpected, str message="assert ne failed") int {
    "Fails when `actual` and `unexpected` are structurally equal."
-   if(eq(actual, unexpected)){ fail(message + ": did not expect " + to_str(unexpected)) }
+   if eq(actual, unexpected) { fail(message + ": did not expect " + to_str(unexpected)) }
    0
 }
 
 fn assert_gt(any actual, any threshold, str message="assert gt failed") int {
    "Fails unless `actual > threshold`."
-   if(!(actual > threshold)){ fail(message + ": expected " + to_str(actual) + " > " + to_str(threshold)) }
+   if !(actual > threshold) { fail(message + ": expected " + to_str(actual) + " > " + to_str(threshold)) }
    0
 }
 
 fn assert_lt(any actual, any threshold, str message="assert lt failed") int {
    "Fails unless `actual < threshold`."
-   if(!(actual < threshold)){ fail(message + ": expected " + to_str(actual) + " < " + to_str(threshold)) }
+   if !(actual < threshold) { fail(message + ": expected " + to_str(actual) + " < " + to_str(threshold)) }
    0
 }
 
 fn assert_approx_eq(number actual, number expected, number epsilon=0.000001, str message="assert approx eq failed") int {
    "Fails unless two numbers differ by at most `epsilon`."
    mut diff = actual - expected
-   if(diff < 0){ diff = 0 - diff }
-   if(diff > epsilon){ fail(message + ": expected " + to_str(expected) + " +/- " + to_str(epsilon) + ", got " + to_str(actual)) }
+   if diff < 0 { diff = 0 - diff }
+   if diff > epsilon { fail(message + ": expected " + to_str(expected) + " +/- " + to_str(epsilon) + ", got " + to_str(actual)) }
    0
 }
 

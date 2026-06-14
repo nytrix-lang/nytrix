@@ -13,17 +13,17 @@ mut _aprcl_jpqs_cache = nil
 mut _aprcl_aiq_cache = nil
 
 fn _aprcl_sls_table() list {
-   if(!is_list(_aprcl_sls_cache)){ _aprcl_sls_cache = _aprcl_sls() }
+   if !is_list(_aprcl_sls_cache) { _aprcl_sls_cache = _aprcl_sls() }
    _aprcl_sls_cache
 }
 
 fn _aprcl_jpqs_table() list {
-   if(!is_list(_aprcl_jpqs_cache)){ _aprcl_jpqs_cache = _aprcl_jpqs() }
+   if !is_list(_aprcl_jpqs_cache) { _aprcl_jpqs_cache = _aprcl_jpqs() }
    _aprcl_jpqs_cache
 }
 
 fn _aprcl_aiQ_table() list {
-   if(!is_list(_aprcl_aiq_cache)){ _aprcl_aiq_cache = _aprcl_aiQ() }
+   if !is_list(_aprcl_aiq_cache) { _aprcl_aiq_cache = _aprcl_aiQ() }
    _aprcl_aiq_cache
 }
 
@@ -37,7 +37,7 @@ fn _aprcl_take(list xs, int start, int count) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       out[i] = xs[start + i]
       i += 1
    }
@@ -49,7 +49,7 @@ fn _aprcl_z(any x) bigint { is_bigint(x) ? x : Z(x) }
 fn _aprcl_mod(any x, any n) bigint {
    def nz = _aprcl_z(n)
    mut r = _aprcl_z(x) % nz
-   if(r < Z(0)){ r = r + nz }
+   if r < Z(0) { r = r + nz }
    r
 }
 
@@ -57,7 +57,7 @@ fn _aprcl_zero(int n) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       out[i] = Z(0)
       i += 1
    }
@@ -68,7 +68,7 @@ fn _aprcl_coeffs(list coeffs, int PK, any modulus) list {
    mut out = list(PK)
    __list_set_len(out, PK)
    mut i = 0
-   while(i < PK){
+   while i < PK {
       out[i] = i < coeffs.len ? _aprcl_mod(coeffs[i], modulus) : Z(0)
       i += 1
    }
@@ -78,11 +78,11 @@ fn _aprcl_coeffs(list coeffs, int PK, any modulus) list {
 fn _aprcl_normalize(list coeffs, int PK, int PL, int PM, int P, any modulus) list {
    mut out = _aprcl_coeffs(coeffs, PK, modulus)
    mut I = PL
-   while(I < PK){
+   while I < PK {
       def t = out[I]
-      if(t != Z(0)){
+      if t != Z(0) {
          mut J = 1
-         while(J < P){
+         while J < P {
             def idx = I - J * PM
             out[idx] = out[idx] - t
             J += 1
@@ -92,7 +92,7 @@ fn _aprcl_normalize(list coeffs, int PK, int PL, int PM, int P, any modulus) lis
       I += 1
    }
    I = 0
-   while(I < PK){
+   while I < PK {
       out[I] = _aprcl_mod(out[I], modulus)
       I += 1
    }
@@ -104,13 +104,13 @@ fn _aprcl_mul(list lhs, list rhs, int PK, int PL, int PM, int P, any modulus) li
    def b = _aprcl_coeffs(rhs, PK, modulus)
    mut tmp = _aprcl_zero(PK)
    mut I = 0
-   while(I < PL){
+   while I < PL {
       def ai = a[I]
-      if(ai != Z(0)){
+      if ai != Z(0) {
          mut J = 0
-         while(J < PL){
+         while J < PL {
             def bj = b[J]
-            if(bj != Z(0)){
+            if bj != Z(0) {
                def K = (I + J) % PK
                tmp[K] = tmp[K] + ai * bj
             }
@@ -126,16 +126,16 @@ fn _aprcl_square(list coeffs, int PK, int PL, int PM, int P, any modulus) list {
    def a = _aprcl_coeffs(coeffs, PK, modulus)
    mut tmp = _aprcl_zero(PK)
    mut I = 0
-   while(I < PL){
+   while I < PL {
       def ai = a[I]
-      if(ai != Z(0)){
+      if ai != Z(0) {
          mut K = (2 * I) % PK
          tmp[K] = tmp[K] + ai * ai
          def twice = ai + ai
          mut J = I + 1
-         while(J < PL){
+         while J < PL {
             def aj = a[J]
-            if(aj != Z(0)){
+            if aj != Z(0) {
                K = (I + J) % PK
                tmp[K] = tmp[K] + twice * aj
             }
@@ -152,17 +152,17 @@ fn _aprcl_pow(list coeffs, any exponent, int PK, int PL, int PM, int P, any modu
    result[0] = Z(1)
    mut base = _aprcl_normalize(coeffs, PK, PL, PM, P, modulus)
    mut e = _aprcl_z(exponent)
-   while(e > Z(0)){
-      if(e % Z(2) == Z(1)){ result = _aprcl_mul(result, base, PK, PL, PM, P, modulus) }
+   while e > Z(0) {
+      if e % Z(2) == Z(1) { result = _aprcl_mul(result, base, PK, PL, PM, P, modulus) }
       e = e / Z(2)
-      if(e > Z(0)){ base = _aprcl_square(base, PK, PL, PM, P, modulus) }
+      if e > Z(0) { base = _aprcl_square(base, PK, PL, PM, P, modulus) }
    }
    result
 }
 
 fn _aprcl_inv_mod_int(int x, int m) int {
    mut u1, u3, v1, v3 = 1, x, 0, m
-   while(v3 != 0){
+   while v3 != 0 {
       def q = u3 / v3
       def t1, t3 = u1 - v1 * q, u3 - v3 * q
       u1 = v1
@@ -176,12 +176,12 @@ fn _aprcl_inv_mod_int(int x, int m) int {
 fn _aprcl_seed_from_tables(list sls, list jpqs, int mode, int P, int PL, int Q) any {
    def myP = mode == 1 ? 1 : (mode == 2 ? 4 : P)
    mut i = 0
-   while(i < jpqs.len){
+   while i < jpqs.len {
       def row = jpqs[i]
-      if(row == [0, 0, 0]){ return nil }
-      if(int(row[0]) == Q && int(row[2]) == myP){
+      if row == [0, 0, 0] { return nil }
+      if int(row[0]) == Q && int(row[2]) == myP {
          def start = int(row[1])
-         if(start + PL > sls.len){ return nil }
+         if start + PL > sls.len { return nil }
          return {"seed_index": i, "table_index": start, "coefficients": _aprcl_take(sls, start, PL)}
       }
       i += 1
@@ -196,22 +196,22 @@ fn _aprcl_initial_plan(any n) dict {
    mut S = Z(2)
    mut trace = []
    mut i = 0
-   while(i < aiT.len && level < 0){
+   while i < aiT.len && level < 0 {
       S = Z(2)
       mut j = 0
       def limit = min(int(aiNQ.get(i)), aiQ.len)
-      while(j < limit && level < 0){
+      while j < limit && level < 0 {
          def Q = int(aiQ.get(j))
          def T = _aprcl_z(aiT.get(i))
-         if(T % Z(Q - 1) == Z(0)){
+         if T % Z(Q - 1) == Z(0) {
             mut U = T * Z(Q)
             mut keep = true
-            while(keep){
+            while keep {
                U = U / Z(Q)
                S = S * Z(Q)
                keep = U % Z(Q) == Z(0)
             }
-            if(S * S > nz){
+            if S * S > nz {
                level = i
                testing_qs = j
             }
@@ -230,19 +230,19 @@ fn _aprcl_level_plan(any n, int level) dict {
    mut S, j, found = Z(2), 0, false
    def T = _aprcl_z(aiT.get(level))
    def limit = min(int(aiNQ.get(level)), aiQ.len)
-   while(j < limit && !found){
+   while j < limit && !found {
       def Q = int(aiQ.get(j))
-      if(T % Z(Q - 1) == Z(0)){
+      if T % Z(Q - 1) == Z(0) {
          mut U = T * Z(Q)
          mut keep = true
-         while(keep){
+         while keep {
             U = U / Z(Q)
             S = S * Z(Q)
             keep = U % Z(Q) == Z(0)
          }
-         if(S * S > nz){ found = true }
+         if S * S > nz { found = true }
       }
-      if(!found){ j += 1 }
+      if !found { j += 1 }
    }
    {"found": found, "level": level, "testing_qs": j, "S": S}
 }
@@ -772,12 +772,12 @@ fn aprcl_jacobi_seed_full_report(int mode, int P, int PL, int Q) dict {
    def jpqs = _aprcl_jpqs_table()
    mut out = {"method": "aprcl-jacobi-seed-full-report", "source_model": "complete APRCL JacobiSum sls/jpqs table", "mode": mode, "P": P, "lookup_p": myP, "PL": PL, "Q": Q, "complete_table": sls.len == 36149 && jpqs.len == 3494 && jpqs.get(jpqs.len - 1) == [0, 0, 0]}
    mut i = 0
-   while(i < jpqs.len){
+   while i < jpqs.len {
       def row = jpqs[i]
-      if(row == [0, 0, 0]){ break }
-      if(int(row[0]) == Q && int(row[2]) == myP){
+      if row == [0, 0, 0] { break }
+      if int(row[0]) == Q && int(row[2]) == myP {
          def start = int(row[1])
-         if(start + PL > sls.len){ return out.merge({"ok": false, "status": "invalid-table-range", "seed_index": i, "elapsed_ms": float(ticks() - t0) / 1000000.0}) }
+         if start + PL > sls.len { return out.merge({"ok": false, "status": "invalid-table-range", "seed_index": i, "elapsed_ms": float(ticks() - t0) / 1000000.0}) }
          return out.merge({"ok": true, "status": "ok", "seed_index": i, "table_index": start, "coefficients": _aprcl_take(sls, start, PL), "elapsed_ms": float(ticks() - t0) / 1000000.0})
       }
       i += 1
@@ -793,53 +793,53 @@ fn _aprcl_pair_congruence_report_with_tables(any n, int P, int Q, list sls, list
       "n": nz, "P": P, "Q": Q,
       "complete_table": sls.len == 36149 && jpqs.len == 3494 && jpqs.get(jpqs.len - 1) == [0, 0, 0],
    }
-   if(nz < Z(3) || nz % Z(2) == Z(0) || P < 2 || Q < 2 || (Q - 1) % P != 0){
+   if nz < Z(3) || nz % Z(2) == Z(0) || P < 2 || Q < 2 || (Q - 1) % P != 0 {
       return out.merge({"ok": false, "status": "invalid-parameters", "elapsed_ms": float(ticks() - t0) / 1000000.0})
    }
    mut qtmp, K = Q - 1, 0
-   while(qtmp % P == 0){
+   while qtmp % P == 0 {
       K += 1
       qtmp = qtmp / P
    }
    mut PM, i = 1, 1
-   while(i < K){ PM = PM * P i += 1 }
+   while i < K { PM = PM * P i += 1 }
    def PL, PK = (P - 1) * PM, P * PM
    out = out.merge({"K": K, "PM": PM, "PL": PL, "PK": PK, "VK": int(nz % Z(PK))})
    mut inv = _aprcl_zero(PK)
    i = 1
-   while(i < PK){
+   while i < PK {
       inv[i] = (i % P != 0) ? _aprcl_inv_mod_int(i, PK) : 0
       i += 1
    }
    mut seed0 = nil
    mut J0 = _aprcl_zero(PK)
-   if(P > 2 || K != 1){
+   if P > 2 || K != 1 {
       seed0 = _aprcl_seed_from_tables(sls, jpqs, 0, P, PL, Q)
-      if(seed0 == nil){
+      if seed0 == nil {
          return out.merge({"ok": false, "status": "missing-jacobi-seed", "elapsed_ms": float(ticks() - t0) / 1000000.0})
       }
       J0 = _aprcl_coeffs(seed0.get("coefficients"), PK, nz)
    }
    mut J1 = _aprcl_zero(PK)
    mut J2 = _aprcl_zero(PK)
-   if(P == 2 && K != 1){
-      if(K != 2){
+   if P == 2 && K != 1 {
+      if K != 2 {
          mut JW = _aprcl_zero(PK)
          i = 0
-         while(i < PM){ JW[i] = J0[i] i += 1 }
+         while i < PM { JW[i] = J0[i] i += 1 }
          def seed1 = _aprcl_seed_from_tables(sls, jpqs, 1, P, PL, Q)
          def seed2 = _aprcl_seed_from_tables(sls, jpqs, 2, P, PL, Q)
-         if(seed1 == nil || seed2 == nil){
+         if seed1 == nil || seed2 == nil {
             return out.merge({"ok": false, "status": "missing-mode-seed", "elapsed_ms": float(ticks() - t0) / 1000000.0})
          }
          mut JS = _aprcl_coeffs(seed1.get("coefficients"), PK, nz)
          JS = _aprcl_mul(JS, JW, PK, PL, PM, P, nz)
          i = 0
-         while(i < PM){ J1[i] = JS[i] i += 1 }
+         while i < PM { J1[i] = JS[i] i += 1 }
          JS = _aprcl_coeffs(J0, PK, nz)
          JS = _aprcl_square(JS, PK, PL, PM, P, nz)
          i = 0
-         while(i < PM){ J2[i] = JS[i] i += 1 }
+         while i < PM { J2[i] = JS[i] i += 1 }
          J0 = _aprcl_coeffs(seed2.get("coefficients"), PK, nz)
       }
    }
@@ -847,19 +847,19 @@ fn _aprcl_pair_congruence_report_with_tables(any n, int P, int Q, list sls, list
    J00[0] = Z(1)
    J01[0] = Z(1)
    def VK = int(nz % Z(PK))
-   if(P != 2){
+   if P != 2 {
       mut IV = 0
-      while(IV <= 1){
+      while IV <= 1 {
          mut X = 1
-         while(X < PK){
-            if(X % P != 0){
+         while X < PK {
+            if X % P != 0 {
                mut exp = IV == 0 ? Z(X) : Z((VK * X) / PK)
-               if(exp != Z(0)){
+               if exp != Z(0) {
                   mut JS = _aprcl_pow(J0, exp, PK, PL, PM, P, nz)
                   mut JW = _aprcl_zero(PK)
                   def InvX = int(inv[X])
                   i = 0
-                  while(i < PK){
+                  while i < PK {
                      def J = (i * InvX) % PK
                      JW[J] = JW[J] + JS[i]
                      i += 1
@@ -867,7 +867,7 @@ fn _aprcl_pair_congruence_report_with_tables(any n, int P, int Q, list sls, list
                   JW = _aprcl_normalize(JW, PK, PL, PM, P, nz)
                   JS = IV == 0 ? J00 : J01
                   JS = _aprcl_mul(JS, JW, PK, PL, PM, P, nz)
-                  if(IV == 0){ J00 = JS } else { J01 = JS }
+                  if IV == 0 { J00 = JS } else { J01 = JS }
                }
             }
             X += 1
@@ -875,13 +875,13 @@ fn _aprcl_pair_congruence_report_with_tables(any n, int P, int Q, list sls, list
          IV += 1
       }
    } else {
-      if(K == 1){
+      if K == 1 {
          J00[0] = _aprcl_mod(Q, nz)
          J01[0] = Z(1)
-      } else if(K == 2){
-         if(VK == 1){ J01[0] = Z(1) }
+      } else if K == 2 {
+         if VK == 1 { J01[0] = Z(1) }
          mut JS = _aprcl_square(J0, PK, PL, PM, P, nz)
-         if(VK == 3){
+         if VK == 3 {
             J01[0] = JS[0]
             J01[1] = JS[1]
          }
@@ -889,17 +889,17 @@ fn _aprcl_pair_congruence_report_with_tables(any n, int P, int Q, list sls, list
          J00[1] = _aprcl_mod(JS[1] * Z(Q), nz)
       } else {
          mut IV = 0
-         while(IV <= 1){
+         while IV <= 1 {
             mut X = 1
-            while(X < PK){
-               if(!(X % 8 == 5 || X % 8 == 7)){
+            while X < PK {
+               if !(X % 8 == 5 || X % 8 == 7) {
                   mut exp = IV == 0 ? Z(X) : Z((VK * X) / PK)
-                  if(exp != Z(0)){
+                  if exp != Z(0) {
                      mut JS = _aprcl_pow(J1, exp, PK, PL, PM, P, nz)
                      mut JW = _aprcl_zero(PK)
                      def InvX = int(inv[X])
                      i = 0
-                     while(i < PK){
+                     while i < PK {
                         def J = (i * InvX) % PK
                         JW[J] = JW[J] + JS[i]
                         i += 1
@@ -907,17 +907,17 @@ fn _aprcl_pair_congruence_report_with_tables(any n, int P, int Q, list sls, list
                      JW = _aprcl_normalize(JW, PK, PL, PM, P, nz)
                      JS = _aprcl_normalize(IV == 0 ? J00 : J01, PK, PL, PM, P, nz)
                      JS = _aprcl_mul(JS, JW, PK, PL, PM, P, nz)
-                     if(IV == 0){ J00 = JS } else { J01 = JS }
+                     if IV == 0 { J00 = JS } else { J01 = JS }
                   }
                }
                X += 2
             }
-            if(!(IV == 0 || VK % 8 == 1 || VK % 8 == 3)){
+            if !(IV == 0 || VK % 8 == 1 || VK % 8 == 3) {
                mut JS = J01
                mut JW = J2
                JS = _aprcl_mul(JS, JW, PK, PL, PM, P, nz)
                i = 0
-               while(i < PM){ J01[i] = JS[i] i += 1 }
+               while i < PM { J01[i] = JS[i] i += 1 }
             }
             IV += 1
          }
@@ -927,33 +927,33 @@ fn _aprcl_pair_congruence_report_with_tables(any n, int P, int Q, list sls, list
    mut JW = _aprcl_mul(JS, J01, PK, PL, PM, P, nz)
    mut H, W = -1, 0
    i = 0
-   while(i < PL){
+   while i < PL {
       def wi = JW[i]
-      if(wi != Z(0)){
-         if(H == -1 && wi == Z(1)){
+      if wi != Z(0) {
+         if H == -1 && wi == Z(1) {
             H = i
          } else {
             H = -2
-            if(_aprcl_mod(wi + Z(1), nz) == Z(0)){ W += 1 }
+            if _aprcl_mod(wi + Z(1), nz) == Z(0) { W += 1 }
          }
       }
       i += 1
    }
    mut ok, reason = false, ""
-   if(H >= 0){
+   if H >= 0 {
       ok = true
       reason = "single-root"
-   } else if(W == P - 1){
+   } else if W == P - 1 {
       i = 0
-      while(i < PM && _aprcl_mod(JW[i] + Z(1), nz) != Z(0)){ i += 1 }
-      if(i < PM){
+      while i < PM && _aprcl_mod(JW[i] + Z(1), nz) != Z(0) { i += 1 }
+      if i < PM {
          mut all = true
          mut J = 1
-         while(J <= P - 2){
-            if(_aprcl_mod(JW[i + J * PM] + Z(1), nz) != Z(0)){ all = false }
+         while J <= P - 2 {
+            if _aprcl_mod(JW[i + J * PM] + Z(1), nz) != Z(0) { all = false }
             J += 1
          }
-         if(all){
+         if all {
             H = i + PL
             ok = true
             reason = "negative-root-coset"
@@ -967,7 +967,7 @@ fn _aprcl_pair_congruence_report_with_tables(any n, int P, int Q, list sls, list
       reason = "W != P - 1"
    }
    mut result = out.merge({"ok": ok, "status": ok ? "ok" : "composite-witness", "reason": reason, "H": H, "W": W, "elapsed_ms": float(ticks() - t0) / 1000000.0})
-   if(include_vectors){
+   if include_vectors {
       result = result.merge({"J00": J00, "J01": J01, "final": JW})
    }
    result
@@ -984,13 +984,13 @@ fn aprcl_proof_report(any n, int max_pair_reports=4096) dict {
    def nz = _aprcl_z(n)
    def aiT, aiNP, aiP, aiQ, aiNQ = _aprcl_aiT(), _aprcl_aiNP(), _aprcl_aiP(), _aprcl_aiQ_table(), _aprcl_aiNQ()
    mut out = {"method": "aprcl-proof-report", "source_model": "APRCL all-P/all-Q driver", "n": nz, "prime": false, "proof_valid": false}
-   if(nz < Z(2)){ return out.merge({"status": "composite", "reason": "n < 2", "elapsed_ms": float(ticks() - t0) / 1000000.0}) }
-   if(nz == Z(2) || nz == Z(3) || nz == Z(7) || nz == Z(11)){
+   if nz < Z(2) { return out.merge({"status": "composite", "reason": "n < 2", "elapsed_ms": float(ticks() - t0) / 1000000.0}) }
+   if nz == Z(2) || nz == Z(3) || nz == Z(7) || nz == Z(11) {
       return out.merge({"status": "proven-prime", "prime": true, "proof_valid": true, "certificate": {"kind": "aprcl-trivial", "n": nz}, "elapsed_ms": float(ticks() - t0) / 1000000.0})
    }
-   if(nz % Z(2) == Z(0)){ return out.merge({"status": "composite", "factor": Z(2), "elapsed_ms": float(ticks() - t0) / 1000000.0}) }
+   if nz % Z(2) == Z(0) { return out.merge({"status": "composite", "factor": Z(2), "elapsed_ms": float(ticks() - t0) / 1000000.0}) }
    mut plan = _aprcl_initial_plan(nz)
-   if(!plan.get("found", false)){
+   if !plan.get("found", false) {
       return out.merge({"status": "inconclusive", "reason": "APRCL table levels exhausted", "plan": plan, "elapsed_ms": float(ticks() - t0) / 1000000.0})
    }
    mut level = int(plan.get("level"))
@@ -999,54 +999,54 @@ fn aprcl_proof_report(any n, int max_pair_reports=4096) dict {
    mut pairs, p_reports = [], []
    mut restart, done, composite = true, false, false
    mut reason = ""
-   while(restart && !done && !composite){
+   while restart && !done && !composite {
       restart = false
       def T = _aprcl_z(aiT.get(level))
       def NP = int(aiNP.get(level))
       mut pi = 0
-      while(pi < NP && !done && !composite && !restart){
+      while pi < NP && !done && !composite && !restart {
          def P = int(aiP.get(pi))
-         if(T % Z(P) == Z(0)){
+         if T % Z(P) == Z(0) {
             mut SW, tested_qs = 0, 0
             mut Qmod, W = int(nz % Z(P * P)), int(nz % Z(P * P))
             mut Jpow = P - 2
-            while(Jpow > 0){
+            while Jpow > 0 {
                W = (W * Qmod) % (P * P)
                Jpow -= 1
             }
-            if(P > 2 && W != 1){ SW = 1 }
+            if P > 2 && W != 1 { SW = 1 }
             mut p_report = {"P": P, "initial_SW": SW, "pairs": []}
             mut retry_p = true
-            while(retry_p && !done && !composite && !restart){
+            while retry_p && !done && !composite && !restart {
                retry_p = false
                mut j = tested_qs
-               while(j <= testing_qs && !composite){
+               while j <= testing_qs && !composite {
                   def Q = int(aiQ.get(j))
                   mut qtmp, K = Q - 1, 0
-                  while(qtmp % P == 0){
+                  while qtmp % P == 0 {
                      K += 1
                      qtmp = qtmp / P
                   }
-                  if(K > 0){
+                  if K > 0 {
                      def pair = _aprcl_pair_congruence_report_with_tables(nz, P, Q, sls, jpqs, ticks())
                      pairs = pairs.append({"P": P, "Q": Q, "K": K, "H": pair.get("H", -1), "W": pair.get("W", 0), "ok": pair.get("ok", false), "status": pair.get("status", "")})
                      p_report = p_report.set("pairs", p_report.get("pairs").append(pairs.get(pairs.len - 1)))
-                     if(pairs.len > max_pair_reports){
+                     if pairs.len > max_pair_reports {
                         done = true
                         reason = "pair report budget exhausted"
-                     } else if(!pair.get("ok", false)){
+                     } else if !pair.get("ok", false) {
                         composite = true
                         reason = "APRCL pair congruence rejected"
                      } else {
                         def H = int(pair.get("H", -1))
-                        if(!(SW == 1 || H % P == 0)){
-                           if(P != 2){
+                        if !(SW == 1 || H % P == 0) {
+                           if P != 2 {
                               SW = 1
-                           } else if(K == 1){
-                              if(int(nz % Z(4)) == 1){ SW = 1 }
+                           } else if K == 1 {
+                              if int(nz % Z(4)) == 1 { SW = 1 }
                            } else {
                               def euler = power_mod(Z(Q), (nz - Z(1)) / Z(2), nz)
-                              if(_aprcl_mod(euler + Z(1), nz) != Z(0)){
+                              if _aprcl_mod(euler + Z(1), nz) != Z(0) {
                                  composite = true
                                  reason = "APRCL Euler check rejected"
                               } else {
@@ -1058,19 +1058,19 @@ fn aprcl_proof_report(any n, int max_pair_reports=4096) dict {
                   }
                   j += 1
                }
-               if(!composite && !done && SW == 0){
+               if !composite && !done && SW == 0 {
                   tested_qs = testing_qs + 1
-                  if(testing_qs < int(aiNQ.get(level)) - 1){
+                  if testing_qs < int(aiNQ.get(level)) - 1 {
                      testing_qs += 1
                      retry_p = true
                   } else {
                      level += 1
-                     if(level >= aiT.len){
+                     if level >= aiT.len {
                         done = true
                         reason = "APRCL table levels exhausted"
                      } else {
                         def lp = _aprcl_level_plan(nz, level)
-                        if(!lp.get("found", false)){
+                        if !lp.get("found", false) {
                            done = true
                            reason = "APRCL level did not reach S^2 > n"
                         } else {
@@ -1086,13 +1086,13 @@ fn aprcl_proof_report(any n, int max_pair_reports=4096) dict {
          }
          pi += 1
       }
-      if(!restart && !composite && !done){ done = true }
+      if !restart && !composite && !done { done = true }
    }
    def cert = {"kind": "aprcl", "n": nz, "level": level, "testing_qs": testing_qs, "pairs": pairs, "p_reports": p_reports}
-   if(composite){
+   if composite {
       return out.merge({"status": "composite", "reason": reason, "certificate": cert, "elapsed_ms": float(ticks() - t0) / 1000000.0})
    }
-   if(reason != ""){
+   if reason != "" {
       return out.merge({"status": "inconclusive", "reason": reason, "certificate": cert, "elapsed_ms": float(ticks() - t0) / 1000000.0})
    }
    def verified = verify_aprcl_proof_report(cert)
@@ -1102,30 +1102,30 @@ fn aprcl_proof_report(any n, int max_pair_reports=4096) dict {
 fn verify_aprcl_proof_report(any cert) dict {
    "Verify an APRCL certificate by replaying every recorded JacobiSum pair congruence."
    def t0 = ticks()
-   if(!is_dict(cert)){
+   if !is_dict(cert) {
       return {"method": "verify-aprcl-proof-report", "proof_valid": false, "status": "invalid", "reason": "certificate is not a dict", "elapsed_ms": float(ticks() - t0) / 1000000.0}
    }
    def nz = _aprcl_z(cert.get("n", Z(0)))
    def pairs = cert.get("pairs", [])
-   if(nz == Z(2) || nz == Z(3) || nz == Z(7) || nz == Z(11)){
+   if nz == Z(2) || nz == Z(3) || nz == Z(7) || nz == Z(11) {
       return {"method": "verify-aprcl-proof-report", "proof_valid": true, "status": "verified-prime", "verified_pairs": 0, "elapsed_ms": float(ticks() - t0) / 1000000.0}
    }
-   if(nz < Z(2) || nz % Z(2) == Z(0) || !is_list(pairs) || pairs.len == 0){
+   if nz < Z(2) || nz % Z(2) == Z(0) || !is_list(pairs) || pairs.len == 0 {
       return {"method": "verify-aprcl-proof-report", "proof_valid": false, "status": "invalid", "reason": "invalid n or empty pair list", "elapsed_ms": float(ticks() - t0) / 1000000.0}
    }
    def sls, jpqs = _aprcl_sls_table(), _aprcl_jpqs_table()
    mut i = 0
-   while(i < pairs.len){
+   while i < pairs.len {
       def row = pairs.get(i)
-      if(!is_dict(row)){
+      if !is_dict(row) {
          return {"method": "verify-aprcl-proof-report", "proof_valid": false, "status": "invalid", "reason": "pair row is not a dict", "bad_index": i, "elapsed_ms": float(ticks() - t0) / 1000000.0}
       }
       def P, Q = int(row.get("P", 0)), int(row.get("Q", 0))
       def r = _aprcl_pair_congruence_report_with_tables(nz, P, Q, sls, jpqs, ticks())
-      if(!r.get("ok", false)){
+      if !r.get("ok", false) {
          return {"method": "verify-aprcl-proof-report", "proof_valid": false, "status": "invalid", "reason": "pair replay failed", "bad_index": i, "pair": row, "replay": r, "elapsed_ms": float(ticks() - t0) / 1000000.0}
       }
-      if(int(row.get("H", -999)) != int(r.get("H", -998)) || int(row.get("W", -999)) != int(r.get("W", -998))){
+      if int(row.get("H", -999)) != int(r.get("H", -998)) || int(row.get("W", -999)) != int(r.get("W", -998)) {
          return {"method": "verify-aprcl-proof-report", "proof_valid": false, "status": "invalid", "reason": "pair replay mismatch", "bad_index": i, "pair": row, "replay": r, "elapsed_ms": float(ticks() - t0) / 1000000.0}
       }
       i += 1

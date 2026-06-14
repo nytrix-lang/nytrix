@@ -23,7 +23,7 @@ render.apply_backend_env()
 render.apply_backend_argv()
 def win = render.init_window(START_W, START_H, "Nytrix Input", START_FLAGS, false, true, 1)
 
-if(!win){ panic("window init failed") }
+if !win { panic("window init failed") }
 window.set_exit_key(win, consts.KEY_NULL)
 def fonts = viewer.FONT_CANDIDATES
 def font_title = render.font_load_first(fonts, 28)
@@ -50,20 +50,20 @@ def PAD_SAMPLE_ACTIVE_NS = 4000000
 def PAD_SAMPLE_IDLE_NS = 12000000
 
 fn release_cached_pad() int {
-   if(pad_state_cache){ gamepad.release(pad_state_cache) }
+   if pad_state_cache { gamepad.release(pad_state_cache) }
    pad_state_cache = 0
    pad_state_jid = -1
    0
 }
 
 fn sampled_pad_state(int jid, bool active_view) any {
-   if(jid < 0){
+   if jid < 0 {
       release_cached_pad()
       pad_state_changed = true
       return 0
    }
    def now = ticks()
-   if(pad_state_cache && pad_state_jid == jid && now < next_pad_sample_ticks){
+   if pad_state_cache && pad_state_jid == jid && now < next_pad_sample_ticks {
       pad_state_changed = false
       return pad_state_cache
    }
@@ -76,17 +76,17 @@ fn sampled_pad_state(int jid, bool active_view) any {
 }
 
 fn cached_pad_info(any pad_state, list rows, int jid, str sig) dict {
-   if(!pad_state){ return dict(0) }
+   if !pad_state { return dict(0) }
    def key = sig + "|rows=" + to_str(rows.len) + "|jid=" + to_str(jid)
-   if(key == pad_info_sig && is_dict(pad_info_cache)){ return pad_info_cache }
+   if key == pad_info_sig && is_dict(pad_info_cache) { return pad_info_cache }
    pad_info_cache = input.pad_info(pad_state, rows, jid)
    pad_info_sig = key
    pad_info_cache
 }
 
-while(!render.window_should_close(win)){
+while !render.window_should_close(win) {
    gamepad.refresh(false)
-   if(!render.begin_frame_clear(widgets.C_BG)){ continue }
+   if !render.begin_frame_clear(widgets.C_BG) { continue }
    def dt = render.get_delta_time()
    fps_state = ui_runtime.fps_tick(fps_state, dt)
    def fps = ui_runtime.fps_current(fps_state, dt)
@@ -97,20 +97,20 @@ while(!render.window_should_close(win)){
    def rows = gamepad.rows()
    def jid = gamepad.best_jid()
    def pad_state = sampled_pad_state(jid, active == "gamepad")
-   if(pad_state){
+   if pad_state {
       def sig = (pad_state_changed || last_pad_sig == "") ? gamepad.signature(pad_state) : last_pad_sig
-      if(last_pad_sig == ""){ last_pad_sig = sig }
-      elif(input.pad_active(pad_state)){ active = "gamepad" }
+      if last_pad_sig == "" { last_pad_sig = sig }
+      elif input.pad_active(pad_state) { active = "gamepad" }
       last_pad_sig = sig
    } else { last_pad_sig = "" }
    def tab = window.key_pressed(win, consts.KEY_TAB)
    def pressed = tab ? 0 : keyboard.scan_pressed(win)
-   if(tab){
+   if tab {
       active = active == "gamepad" ? "keyboard" : "gamepad"
       last_code = consts.KEY_TAB
       last_key = "TAB"
       last_key_timer = 1.0
-   } elif(pressed){
+   } elif pressed {
       active = "keyboard"
       last_code = int(pressed.get("code", consts.KEY_NULL))
       last_key = to_str(pressed.get("label", "-"))
@@ -118,7 +118,7 @@ while(!render.window_should_close(win)){
    }
    last_key_timer = max(0.0, last_key_timer - dt)
    def pad = input.pad(sw, sh)
-   if(active == "gamepad"){
+   if active == "gamepad" {
       input.draw_gamepad(font_title, font_body, pad_state, rows, jid, fps, sw, sh, pad, cached_pad_info(pad_state, rows, jid, last_pad_sig))
    } else {
       input.draw_keyboard(win, font_title, font_body, font_key, last_key, last_code, last_key_timer, fps, sw, sh, pad)

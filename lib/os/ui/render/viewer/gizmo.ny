@@ -64,23 +64,23 @@ fn _draw_axis(px, py, pz, ax, ay, az, length, col, thickness, handle_size, compa
    def ey = py + ay * length
    def ez = pz + az * length
    render.draw_line([px, py, pz], [ex, ey, ez], col, thickness)
-   if(!compact){ render.draw_cube([ex, ey, ez], handle_size, col) }
+   if !compact { render.draw_cube([ex, ey, ez], handle_size, col) }
    true
 }
 
 fn _draw_move_tip(px, py, pz, ax, ay, az, length, col, thickness, size, compact) bool {
-   if(compact){ return true }
+   if compact { return true }
    def ex = px + ax * length
    def ey = py + ay * length
    def ez = pz + az * length
    def back = max(size * 1.8, length * 0.075)
    def side = back * 0.42
-   if(abs(ax) > 0.5){
+   if abs(ax) > 0.5 {
       render.draw_line([ex, ey, ez], [ex - ax * back, ey + side, ez], col, thickness)
       render.draw_line([ex, ey, ez], [ex - ax * back, ey - side, ez], col, thickness)
       render.draw_line([ex, ey, ez], [ex - ax * back, ey, ez + side], col, thickness)
       render.draw_line([ex, ey, ez], [ex - ax * back, ey, ez - side], col, thickness)
-   } elif(abs(ay) > 0.5){
+   } elif abs(ay) > 0.5 {
       render.draw_line([ex, ey, ez], [ex + side, ey - ay * back, ez], col, thickness)
       render.draw_line([ex, ey, ez], [ex - side, ey - ay * back, ez], col, thickness)
       render.draw_line([ex, ey, ez], [ex, ey - ay * back, ez + side], col, thickness)
@@ -103,12 +103,12 @@ fn _draw_move_axis(px, py, pz, ax, ay, az, length, col, thickness, handle_size, 
 }
 
 fn _ring_steps(win_w, win_h) int {
-   if(ui_profile.env_present_cached("NY_UI_GIZMO_RING_STEPS")){
+   if ui_profile.env_present_cached("NY_UI_GIZMO_RING_STEPS") {
       return ui_profile.env_int_cached("NY_UI_GIZMO_RING_STEPS", 48, 12, 96)
    }
    def px = max(1.0, min(float(win_w), float(win_h)))
-   if(px < 520.0){ return 24 }
-   if(px < 900.0){ return 36 }
+   if px < 520.0 { return 24 }
+   if px < 900.0 { return 36 }
    48
 }
 
@@ -116,13 +116,13 @@ fn _draw_ring(px, py, pz, radius, plane, col, thickness, win_w, win_h) bool {
    def steps = _ring_steps(win_w, win_h)
    mut i = 0
    mut prev = [px, py, pz]
-   while(i <= steps){
+   while i <= steps {
       def a = (float(i) / float(steps)) * (PI * 2.0)
       mut p = [px, py, pz]
-      if(plane == 0){ p = [px, py + cos(a) * radius, pz + sin(a) * radius] }
-      elif(plane == 1){ p = [px + cos(a) * radius, py, pz + sin(a) * radius] }
+      if plane == 0 { p = [px, py + cos(a) * radius, pz + sin(a) * radius] }
+      elif plane == 1 { p = [px + cos(a) * radius, py, pz + sin(a) * radius] }
       else { p = [px + cos(a) * radius, py + sin(a) * radius, pz] }
-      if(i > 0){ render.draw_line(prev, p, col, thickness) }
+      if i > 0 { render.draw_line(prev, p, col, thickness) }
       prev = p
       i += 1
    }
@@ -138,7 +138,7 @@ fn _draw_ring_band(px, py, pz, radius, plane, col, thickness, win_w, win_h) bool
 
 fn _screen_norm(f64 dx, f64 dy) list {
    def len2 = dx * dx + dy * dy
-   if(len2 <= 0.000001){ return [0.0, 0.0] }
+   if len2 <= 0.000001 { return [0.0, 0.0] }
    def inv = 1.0 / sqrt(len2)
    [dx * inv, dy * inv]
 }
@@ -149,7 +149,7 @@ fn _screen_dist2(f64 px, f64 py, f64 x0, f64 y0, f64 x1, f64 y1) f64 {
    def wx = px - x0
    def wy = py - y0
    def len2 = vx * vx + vy * vy
-   if(len2 <= 0.000001){ return wx * wx + wy * wy }
+   if len2 <= 0.000001 { return wx * wx + wy * wy }
    def t = clamp((wx * vx + wy * vy) / len2, 0.0, 1.0)
    def cx = x0 + vx * t
    def cy = y0 + vy * t
@@ -168,24 +168,30 @@ fn _pick_axis_line(any mvp, any win_w, any win_h, f64 mx, f64 my, f64 px, f64 py
    mut prev_p = project_point(mvp, win_w, win_h, px, py, pz)
    mut prev_t = 0.0
    mut out = {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0, "screen_world_per_pixel": 0.0}
-   while(i < steps){
+   while i < steps {
       i += 1
       def t = float(i) / float(steps)
       def cur_p = project_point(mvp, win_w, win_h, px + ax * length * t, py + ay * length * t, pz + az * length * t)
-      if(is_list(prev_p) && is_list(cur_p)){
-         def x0 = float(prev_p.get(0, 0.0))
-         def y0 = float(prev_p.get(1, 0.0))
-         def x1 = float(cur_p.get(0, 0.0))
-         def y1 = float(cur_p.get(1, 0.0))
-         def d2 = _screen_dist2(mx, my, x0, y0, x1, y1)
-         if(d2 < float(out.get("dist2", best_d2))){
-            def n = _screen_norm(x1 - x0, y1 - y0)
-            def seg_px = sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0))
-            def seg_world = abs(length * (t - prev_t))
-            def wpp = seg_px > 0.0001 ? seg_world / seg_px : 0.0
-            out = {"axis": axis, "dist2": d2, "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0)), "screen_world_per_pixel": wpp}
-         }
+      if !is_list(prev_p) || !is_list(cur_p) {
+         prev_p = cur_p
+         prev_t = t
+         continue
       }
+      def x0 = float(prev_p.get(0, 0.0))
+      def y0 = float(prev_p.get(1, 0.0))
+      def x1 = float(cur_p.get(0, 0.0))
+      def y1 = float(cur_p.get(1, 0.0))
+      def d2 = _screen_dist2(mx, my, x0, y0, x1, y1)
+      if d2 >= float(out.get("dist2", best_d2)) {
+         prev_p = cur_p
+         prev_t = t
+         continue
+      }
+      def n = _screen_norm(x1 - x0, y1 - y0)
+      def seg_px = sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0))
+      def seg_world = abs(length * (t - prev_t))
+      def wpp = seg_px > 0.0001 ? seg_world / seg_px : 0.0
+      out = {"axis": axis, "dist2": d2, "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0)), "screen_world_per_pixel": wpp}
       prev_p = cur_p
       prev_t = t
    }
@@ -198,11 +204,11 @@ fn axis_tangent(any mvp, any win_w, any win_h, f64 px, f64 py, f64 pz, f64 ax, f
    mut i = 0
    mut prev_p = project_point(mvp, win_w, win_h, px, py, pz)
    mut prev_t = 0.0
-   while(i < steps){
+   while i < steps {
       i += 1
       def t = float(i) / float(steps)
       def cur_p = project_point(mvp, win_w, win_h, px + ax * length * t, py + ay * length * t, pz + az * length * t)
-      if(is_list(prev_p) && is_list(cur_p)){
+      if is_list(prev_p) && is_list(cur_p) {
          return _screen_norm(float(cur_p.get(0, 0.0)) - float(prev_p.get(0, 0.0)), float(cur_p.get(1, 0.0)) - float(prev_p.get(1, 0.0)))
       }
       prev_p = cur_p
@@ -212,8 +218,8 @@ fn axis_tangent(any mvp, any win_w, any win_h, f64 px, f64 py, f64 pz, f64 ax, f
 }
 
 fn _ring_point(f64 px, f64 py, f64 pz, f64 r, int plane, f64 a) list {
-   if(plane == 0){ return [px, py + cos(a) * r, pz + sin(a) * r] }
-   if(plane == 1){ return [px + cos(a) * r, py, pz + sin(a) * r] }
+   if plane == 0 { return [px, py + cos(a) * r, pz + sin(a) * r] }
+   if plane == 1 { return [px + cos(a) * r, py, pz + sin(a) * r] }
    [px + cos(a) * r, py + sin(a) * r, pz]
 }
 
@@ -223,15 +229,15 @@ fn _pick_ring(any mvp, any win_w, any win_h, f64 mx, f64 my, f64 px, f64 py, f64
    mut prev_world = _ring_point(px, py, pz, radius, plane, 0.0)
    mut prev = project_point(mvp, win_w, win_h, prev_world.get(0, px), prev_world.get(1, py), prev_world.get(2, pz))
    mut out = {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0, "screen_world_per_pixel": 0.0}
-   while(i <= steps){
+   while i <= steps {
       def a = (float(i) / float(steps)) * (PI * 2.0)
       def cur_world = _ring_point(px, py, pz, radius, plane, a)
       def cur = project_point(mvp, win_w, win_h, cur_world.get(0, px), cur_world.get(1, py), cur_world.get(2, pz))
-      if(is_list(prev) && is_list(cur)){
+      if is_list(prev) && is_list(cur) {
          def x0, y0 = float(prev.get(0, 0.0)), float(prev.get(1, 0.0))
          def x1, y1 = float(cur.get(0, 0.0)), float(cur.get(1, 0.0))
          def d2 = _screen_dist2(mx, my, x0, y0, x1, y1)
-         if(d2 < float(out.get("dist2", best_d2))){
+         if d2 < float(out.get("dist2", best_d2)) {
             def n = _screen_norm(x1 - x0, y1 - y0)
             out = {"axis": axis, "dist2": d2, "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0)), "screen_world_per_pixel": 0.0}
          }
@@ -266,7 +272,7 @@ fn metrics(bounds, mode) list {
 }
 
 fn _axis_col(any col, int axis, int active_axis) list {
-   if(active_axis <= 0 || active_axis == axis){
+   if active_axis <= 0 || active_axis == axis {
       return col
    }
    [
@@ -285,20 +291,20 @@ fn draw_axes(px, py, pz, span, axis_len, axis_thick, handle_size, red, green, bl
    def red_c = _axis_col(red, 1, active_axis)
    def green_c = _axis_col(green, 2, active_axis)
    def blue_c = _axis_col(blue, 3, active_axis)
-   if(!compact){ render.draw_cube([px, py, pz], max(handle_size * 0.72, axis_thick * 2.4), center) }
-   if(int(mode) == 1){
+   if !compact { render.draw_cube([px, py, pz], max(handle_size * 0.72, axis_thick * 2.4), center) }
+   if int(mode) == 1 {
       def ring_r = max(axis_len * 0.92, span * 0.58)
       def ring_thick = axis_thick * 1.22
       _draw_ring_band(px, py, pz, ring_r, 0, red_c, ring_thick, win_w, win_h)
       _draw_ring_band(px, py, pz, ring_r, 1, green_c, ring_thick, win_w, win_h)
       _draw_ring_band(px, py, pz, ring_r, 2, blue_c, ring_thick, win_w, win_h)
-      if(compact){ return true }
+      if compact { return true }
       _draw_axis(px, py, pz, 1.0, 0.0, 0.0, axis_len * 0.30, red_c, axis_thick * 0.62, handle_size * 0.48, compact)
       _draw_axis(px, py, pz, 0.0, 1.0, 0.0, axis_len * 0.30, green_c, axis_thick * 0.62, handle_size * 0.48, compact)
       _draw_axis(px, py, pz, 0.0, 0.0, 1.0, axis_len * 0.30, blue_c, axis_thick * 0.62, handle_size * 0.48, compact)
       return true
    }
-   if(int(mode) == 0){
+   if int(mode) == 0 {
       _draw_move_axis(px, py, pz, 1.0, 0.0, 0.0, axis_len, red_c, axis_thick, handle_size, compact)
       _draw_move_axis(px, py, pz, 0.0, 1.0, 0.0, axis_len, green_c, axis_thick, handle_size, compact)
       _draw_move_axis(px, py, pz, 0.0, 0.0, 1.0, axis_len, blue_c, axis_thick, handle_size, compact)
@@ -307,7 +313,7 @@ fn draw_axes(px, py, pz, span, axis_len, axis_thick, handle_size, red, green, bl
    _draw_axis(px, py, pz, 1.0, 0.0, 0.0, axis_len, red_c, axis_thick, handle_size, compact)
    _draw_axis(px, py, pz, 0.0, 1.0, 0.0, axis_len, green_c, axis_thick, handle_size, compact)
    _draw_axis(px, py, pz, 0.0, 0.0, 1.0, axis_len, blue_c, axis_thick, handle_size, compact)
-   if(int(mode) == 2){
+   if int(mode) == 2 {
       _draw_axis(px, py, pz, -1.0, 0.0, 0.0, axis_len * 0.46, red_c, axis_thick * 0.72, handle_size * 0.82, compact)
       _draw_axis(px, py, pz, 0.0, -1.0, 0.0, axis_len * 0.46, green_c, axis_thick * 0.72, handle_size * 0.82, compact)
       _draw_axis(px, py, pz, 0.0, 0.0, -1.0, axis_len * 0.46, blue_c, axis_thick * 0.72, handle_size * 0.82, compact)
@@ -317,87 +323,80 @@ fn draw_axes(px, py, pz, span, axis_len, axis_thick, handle_size, red, green, bl
 
 fn hit_test(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, any mouse_y) dict {
    "Hit-tests the projected world gizmo. Returns mode, axis, and screen drag tangent."
-   if(!is_list(bounds) || bounds.len < 6){ return {"hit": false, "axis": 0, "mode": int(mode)} }
+   if !is_list(bounds) || bounds.len < 6 { return {"hit": false, "axis": 0, "mode": int(mode)} }
    def m = metrics(bounds, mode)
    def px = float(m.get(0, 0.0))
    def py = float(m.get(1, 0.0))
    def pz = float(m.get(2, 0.0))
    def axis_len = float(m.get(4, 1.0))
    def center = project_point(mvp, win_w, win_h, px, py, pz)
-   if(!is_list(center)){ return {"hit": false, "axis": 0, "mode": int(mode)} }
+   if !is_list(center) { return {"hit": false, "axis": 0, "mode": int(mode)} }
    def mx = float(mouse_x)
    def my = float(mouse_y)
    def cx = float(center.get(0, 0.0))
    def cy = float(center.get(1, 0.0))
    def threshold = _hit_threshold(win_w, win_h)
-   
    mut best_d2 = threshold * threshold
    mut best = {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0}
-
-   if(int(mode) == 1){
+   if int(mode) == 1 {
       def ring_r = max(axis_len * 0.92, float(m.get(3, 1.0)) * 0.58)
       def ry = _pick_ring(mvp, win_w, win_h, mx, my, px, py, pz, ring_r, 1, 2, best_d2)
-      if(int(ry.get("axis", -1)) >= 0){
+      if int(ry.get("axis", -1)) >= 0 {
          best = ry
          best_d2 = float(ry.get("dist2", best_d2))
       }
       def rx = _pick_ring(mvp, win_w, win_h, mx, my, px, py, pz, ring_r, 0, 1, best_d2)
-      if(int(rx.get("axis", -1)) >= 0){
+      if int(rx.get("axis", -1)) >= 0 {
          best = rx
          best_d2 = float(rx.get("dist2", best_d2))
       }
       def rz = _pick_ring(mvp, win_w, win_h, mx, my, px, py, pz, ring_r, 2, 3, best_d2)
-      if(int(rz.get("axis", -1)) >= 0){
+      if int(rz.get("axis", -1)) >= 0 {
          best = rz
       }
    } else {
       def ay = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 0.0, 1.0, 0.0, axis_len, 2, best_d2)
-      if(int(ay.get("axis", -1)) >= 0){
+      if int(ay.get("axis", -1)) >= 0 {
          best = ay
          best_d2 = float(ay.get("dist2", best_d2))
       }
       def ax = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 1.0, 0.0, 0.0, axis_len, 1, best_d2)
-      if(int(ax.get("axis", -1)) >= 0){
+      if int(ax.get("axis", -1)) >= 0 {
          best = ax
          best_d2 = float(ax.get("dist2", best_d2))
       }
       def az = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 0.0, 0.0, 1.0, axis_len, 3, best_d2)
-      if(int(az.get("axis", -1)) >= 0){
+      if int(az.get("axis", -1)) >= 0 {
          best = az
          best_d2 = float(az.get("dist2", best_d2))
       }
-      if(int(mode) == 2){
+      if int(mode) == 2 {
          def ny = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 0.0, -1.0, 0.0, axis_len * 0.46, 2, best_d2)
-         if(int(ny.get("axis", -1)) >= 0){
+         if int(ny.get("axis", -1)) >= 0 {
             best = ny
             best_d2 = float(ny.get("dist2", best_d2))
          }
          def nx = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, -1.0, 0.0, 0.0, axis_len * 0.46, 1, best_d2)
-         if(int(nx.get("axis", -1)) >= 0){
+         if int(nx.get("axis", -1)) >= 0 {
             best = nx
             best_d2 = float(nx.get("dist2", best_d2))
          }
          def nz = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 0.0, 0.0, -1.0, axis_len * 0.46, 3, best_d2)
-         if(int(nz.get("axis", -1)) >= 0){
+         if int(nz.get("axis", -1)) >= 0 {
             best = nz
          }
       }
    }
-
    def axis = int(best.get("axis", -1))
-   if(axis < 0){
+   if axis < 0 {
       def center_dx = mx - cx
       def center_dy = my - cy
       def center_r = max(8.0, threshold * 0.72)
-      if(center_dx * center_dx + center_dy * center_dy <= center_r * center_r){
+      if center_dx * center_dx + center_dy * center_dy <= center_r * center_r {
          return {"hit": true, "axis": 0, "mode": int(mode), "screen_axis_x": 0.0, "screen_axis_y": 0.0, "screen_world_per_pixel": 0.0, "dist2": 0.0}
-      }
-      if(int(mode) != 1 && abs(mx - cx) < threshold * 1.5 && my < cy && my > cy - axis_len * 200.0){
-         return {"hit": true, "axis": 2, "mode": int(mode), "screen_axis_x": 0.0, "screen_axis_y": -1.0, "screen_world_per_pixel": 0.0, "dist2": threshold}
       }
       return {"hit": false, "axis": 0, "mode": int(mode)}
    }
-
    {
       "hit": true,
       "axis": axis,
@@ -418,18 +417,18 @@ fn project_point(mvp, win_w, win_h, px, py, pz) any {
    def cy = x * float(mvp.get(3, 0.0)) + y * float(mvp.get(7, 1.0)) + z * float(mvp.get(11, 0.0)) + float(mvp.get(15, 0.0))
    def cz = x * float(mvp.get(4, 0.0)) + y * float(mvp.get(8, 0.0)) + z * float(mvp.get(12, 1.0)) + float(mvp.get(16, 0.0))
    def cw = x * float(mvp.get(5, 0.0)) + y * float(mvp.get(9, 0.0)) + z * float(mvp.get(13, 0.0)) + float(mvp.get(17, 1.0))
-   if(cw <= 0.000001 || abs(cw) <= 0.000001){ return 0 }
+   if cw <= 0.000001 || abs(cw) <= 0.000001 { return 0 }
    def nx, ny = cx / cw, cy / cw
    def sx = (nx * 0.5 + 0.5) * float(win_w)
    def sy = (1.0 - (ny * 0.5 + 0.5)) * float(win_h)
-   if(sx < -160.0 || sx > float(win_w) + 160.0 || sy < -160.0 || sy > float(win_h) + 160.0){ return 0 }
+   if sx < -160.0 || sx > float(win_w) + 160.0 || sy < -160.0 || sy > float(win_h) + 160.0 { return 0 }
    [sx, sy, cz / cw]
 }
 
 fn _draw_overlay_axis(mvp, win_w, win_h, px, py, pz, ax, ay, az, length, int col) bool {
    def a = project_point(mvp, win_w, win_h, px, py, pz)
    def b = project_point(mvp, win_w, win_h, px + ax * length, py + ay * length, pz + az * length)
-   if(!is_list(a) || !is_list(b)){ return false }
+   if !is_list(a) || !is_list(b) { return false }
    def x0, y0 = float(a.get(0, 0.0)), float(a.get(1, 0.0))
    def x1, y1 = float(b.get(0, 0.0)), float(b.get(1, 0.0))
    render.draw_line_2d(x0, y0, x1, y1, col, 2.0)
@@ -439,9 +438,9 @@ fn _draw_overlay_axis(mvp, win_w, win_h, px, py, pz, ax, ay, az, length, int col
 
 fn draw_overlay(mvp, win_w, win_h, px, py, pz, axis_len, mode) bool {
    "Draws a compact 2D gizmo overlay for small viewports."
-   if(!compact_view(win_w, win_h)){ return false }
+   if !compact_view(win_w, win_h) { return false }
    def c = project_point(mvp, win_w, win_h, px, py, pz)
-   if(!is_list(c)){ return false }
+   if !is_list(c) { return false }
    def cx = float(c.get(0, 0.0))
    def cy = float(c.get(1, 0.0))
    def red = render.color_pack(0.98, 0.18, 0.14, 0.92)
@@ -449,7 +448,7 @@ fn draw_overlay(mvp, win_w, win_h, px, py, pz, axis_len, mode) bool {
    def blue = render.color_pack(0.20, 0.50, 1.00, 0.92)
    def white = render.color_pack(0.92, 0.96, 0.96, 0.90)
    render.draw_circle(cx, cy, 3.8, white)
-   if(int(mode) == 1){
+   if int(mode) == 1 {
       render.draw_circle_lines(cx, cy, 17.0, red, 2.0, 40)
       render.draw_circle_lines(cx, cy, 21.0, green, 2.0, 40)
       render.draw_circle_lines(cx, cy, 25.0, blue, 2.0, 40)

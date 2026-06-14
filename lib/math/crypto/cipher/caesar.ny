@@ -28,7 +28,7 @@ fn caesar_encrypt(str text, int shift) str {
    mut n = text.len
    mut result = Builder(n + 8)
    mut i = 0
-   while(i < n){
+   while i < n {
       def c = load8(text, i)
       result = builder_append(result, _caesar_apply_shift(c, shift))
       i += 1
@@ -47,7 +47,7 @@ fn caesar_encrypt_alnum(str text, int shift) str {
    crypto_require(text != nil, "cipher.caesar_encrypt_alnum", "text is nil")
    mut result = Builder(text.len + 8)
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       result = builder_append(result, _caesar_apply_shift(load8(text, i), shift, true))
       i += 1
    }
@@ -65,7 +65,7 @@ fn caesar_bruteforce(str text) list {
    crypto_require_nonempty(text, "cipher.caesar_bruteforce", "text")
    mut results = list(0)
    mut s = 0
-   while(s < 26){
+   while s < 26 {
       def decrypted = caesar_decrypt(text, s)
       results = results.append([s, decrypted])
       s += 1
@@ -78,11 +78,11 @@ fn _caesar_progressive_apply(str text, int start_shift, bool step_all, int direc
    mut result = Builder(text.len + 8)
    mut shift = start_shift
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def c = load8(text, i)
       def is_alpha = (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
       result = builder_append(result, _caesar_apply_shift(c, direction * shift))
-      if(is_alpha || step_all){ shift += 1 }
+      if is_alpha || step_all { shift += 1 }
       i += 1
    }
    _caesar_builder_take(result)

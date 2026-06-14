@@ -26,7 +26,7 @@ fn convergents(any num, any den) list {
    mut k_prev2 = Z(1)
    mut k_prev1 = Z(0)
    mut idx = Z(0)
-   while(bigint_eq(a_den, Z(0)) == false){
+   while bigint_eq(a_den, Z(0)) == false {
       def a_q = a_num / a_den
       def a_rem = a_num % a_den
       def h = a_q * h_prev1 + h_prev2
@@ -59,22 +59,22 @@ fn _wiener_small_d_fallback(any N, any e, any limit=4096) any {
    "Bounded verifier for tiny private-exponent fixtures. The continued-fraction
    path above is the primary attack ; this keeps small known vectors strict even
    when callers pass mixed integer carriers."
-   if(!is_int(N) || !is_int(e)){ return nil }
+   if !is_int(N) || !is_int(e) { return nil }
    def NN = N
    def ee = e
    def base = power_mod(2, ee, NN)
    mut d = 1
-   while(d <= limit){
-      if(power_mod(base, d, NN) == 2){
+   while d <= limit {
+      if power_mod(base, d, NN) == 2 {
          mut k = 1
-         while(k <= d + 1){
-            if(((ee * d - 1) % k) == 0){
+         while k <= d + 1 {
+            if ((ee * d - 1) % k) == 0 {
                def phi = (ee * d - 1) / k
                def facs = factor_from_phi(NN, phi)
-               if(facs != nil){
+               if facs != nil {
                   def p_cand = facs[0]
                   def q_cand = facs[1]
-                  if(p_cand * q_cand == NN){
+                  if p_cand * q_cand == NN {
                      def p_final = p_cand > q_cand ? p_cand : q_cand
                      def q_final = p_cand > q_cand ? q_cand : p_cand
                      return [d, p_final, q_final]
@@ -107,17 +107,17 @@ fn _wiener_square_residue_filter_int(int n) bool {
 
 fn _wiener_attack_small_int(any N, any e) any {
    def NN_big = Z(N)
-   if(bit_length(NN_big) > 52){ return nil }
+   if bit_length(NN_big) > 52 { return nil }
    def NN = bigint_to_int(NN_big)
    def ee = bigint_to_int(Z(e))
-   if(NN <= 0 || ee <= 0){ return nil }
+   if NN <= 0 || ee <= 0 { return nil }
    mut a_num = ee
    mut a_den = NN
    mut h_prev2 = 0
    mut h_prev1 = 1
    mut k_prev2 = 1
    mut k_prev1 = 0
-   while(a_den != 0){
+   while a_den != 0 {
       def a_q = a_num / a_den
       def a_rem = a_num % a_den
       def k = a_q * h_prev1 + h_prev2
@@ -128,19 +128,19 @@ fn _wiener_attack_small_int(any N, any e) any {
       k_prev1 = d_cand
       a_num = a_den
       a_den = a_rem
-      if(k == 0){ continue }
+      if k == 0 { continue }
       def ed_minus_one = ee * d_cand - 1
-      if((ed_minus_one % k) != 0){ continue }
+      if (ed_minus_one % k) != 0 { continue }
       def phi_cand = ed_minus_one / k
       def sum_pq = NN - phi_cand + 1
       def disc = sum_pq * sum_pq - 4 * NN
-      if(disc < 0){ continue }
-      if(!_wiener_square_residue_filter_int(disc)){ continue }
+      if disc < 0 { continue }
+      if !_wiener_square_residue_filter_int(disc) { continue }
       def s = bigint_to_int(isqrt(Z(disc)))
-      if(s * s != disc){ continue }
+      if s * s != disc { continue }
       def p_cand = (sum_pq + s) / 2
       def q_cand = (sum_pq - s) / 2
-      if(p_cand * q_cand == NN){
+      if p_cand * q_cand == NN {
          def p_final = p_cand > q_cand ? p_cand : q_cand
          def q_final = p_cand > q_cand ? q_cand : p_cand
          return [Z(d_cand), Z(p_final), Z(q_final)]
@@ -153,7 +153,7 @@ fn wiener_attack(any N, any e) any {
    "Recover [d, p, q] from RSA public key(N, e) when d is small.
    Returns [d, p, q] on success or nil on failure."
    def small_hit = _wiener_attack_small_int(N, e)
-   if(small_hit != nil){ return small_hit }
+   if small_hit != nil { return small_hit }
    def NN = Z(N)
    def ee = Z(e)
    def zero = Z(0)
@@ -166,7 +166,7 @@ fn wiener_attack(any N, any e) any {
    mut h_prev1 = one
    mut k_prev2 = one
    mut k_prev1 = zero
-   while(bigint_eq(a_den, zero) == false){
+   while bigint_eq(a_den, zero) == false {
       def a_q = a_num / a_den
       def a_rem = a_num % a_den
       def k = a_q * h_prev1 + h_prev2
@@ -177,29 +177,29 @@ fn wiener_attack(any N, any e) any {
       k_prev1 = d_cand
       a_num = a_den
       a_den = a_rem
-      if(k == zero){
+      if k == zero {
          continue
       }
       def ed_minus_one = ee * d_cand - one
-      if((ed_minus_one % k) != zero){
+      if (ed_minus_one % k) != zero {
          continue
       }
       def phi_cand = ed_minus_one / k
       def sum_pq = NN - phi_cand + one
       def disc = sum_pq * sum_pq - four * NN
-      if(disc < zero){
+      if disc < zero {
          continue
       }
-      if(!_wiener_square_residue_filter(disc)){
+      if !_wiener_square_residue_filter(disc) {
          continue
       }
       def s = isqrt(disc)
-      if((s * s) != disc){
+      if (s * s) != disc {
          continue
       }
       def p_cand = (sum_pq + s) / two
       def q_cand = (sum_pq - s) / two
-      if((p_cand * q_cand) == NN){
+      if (p_cand * q_cand) == NN {
          def p_final = (p_cand > q_cand ? p_cand : q_cand)
          def q_final = (p_cand > q_cand ? q_cand : p_cand)
          return [d_cand, p_final, q_final]
@@ -216,29 +216,29 @@ fn wiener_attack_entry(any n, any e) any {
 fn _wl_abs(any x) any { bigint_lt(x, Z(0)) ? (-x) : x }
 
 fn _wl_try_small_d(any n, any e, any k, any d) any {
-   if(k == Z(0) || d <= Z(0)){ return nil }
-   if(((e * d - Z(1)) % k) != Z(0)){ return nil }
-   if(power_mod(power_mod(Z(2), e, n), d, n) != Z(2)){ return nil }
+   if k == Z(0) || d <= Z(0) { return nil }
+   if ((e * d - Z(1)) % k) != Z(0) { return nil }
+   if power_mod(power_mod(Z(2), e, n), d, n) != Z(2) { return nil }
    def phi = (e * d - Z(1)) / k
    def facs = factor_from_phi(n, phi)
-   if(facs == nil){ return nil }
+   if facs == nil { return nil }
    [facs[0], facs[1], d]
 }
 
 fn wiener_lattice_attack(any n, any e) any {
    "Nguyen-style lattice Wiener attack. Returns [p, q, d] or nil."
    def s = isqrt(n)
-   if(s <= Z(0)){ return nil }
+   if s <= Z(0) { return nil }
    def basis = Matrix([[Z(e), Z(s)], [Z(n), Z(0)]])
    def reduced = lll(basis)
-   if(reduced == nil){ return nil }
+   if reduced == nil { return nil }
    mut i = 0
-   while(i < int(reduced[0])){
+   while i < int(reduced[0]) {
       def row = reduced[2][i]
       def d = _wl_abs(row[1] / s)
       def k = _wl_abs((row[0] - Z(e) * d) / Z(n))
       def hit = _wl_try_small_d(Z(n), Z(e), k, d)
-      if(hit != nil){ return hit }
+      if hit != nil { return hit }
       i += 1
    }
    nil
@@ -251,10 +251,10 @@ fn wiener_attack_lattice_entry(any n, any e) any {
 
 fn _recover_d_with_wiener_fallback(any n, any e, any p, any q) any {
    def d = compute_d(e, compute_phi(p, q))
-   if(d != nil && d > 0){ return d }
-   if(e <= 0){ return nil }
+   if d != nil && d > 0 { return d }
+   if e <= 0 { return nil }
    def w = wiener_attack(n, e)
-   if(w != nil){ return w[0] }
+   if w != nil { return w[0] }
    nil
 }
 
@@ -263,16 +263,16 @@ fn wiener_attack_common_prime(any n1, any e1, any c1, any n2, any e2=0, any c2=0
    recovery and falling back to Wiener when one side still needs d recovery.
    Returns [m1, m2, p, q1, q2, d1, d2] or nil."
    def direct = common_prime_recover_pair(n1, e1, c1, n2, e2, c2)
-   if(direct != nil){ return direct }
+   if direct != nil { return direct }
    def fp = common_prime_factor_pair(n1, n2)
-   if(fp == nil){ return nil }
+   if fp == nil { return nil }
    def p = fp[0]
    def q1 = fp[1]
    def q2 = fp[2]
    def d1 = _recover_d_with_wiener_fallback(n1, e1, p, q1)
    def d2 = e2 > 0 ? _recover_d_with_wiener_fallback(n2, e2, p, q2) : nil
-   if(d1 == nil || d1 <= 0){ return nil }
-   if(e2 > 0 && (d2 == nil || d2 <= 0)){ return nil }
+   if d1 == nil || d1 <= 0 { return nil }
+   if e2 > 0 && (d2 == nil || d2 <= 0) { return nil }
    def m1, m2 = power_mod(c1, d1, n1), (e2 > 0 && c2 != 0) ? power_mod(c2, d2, n2) : nil
    [m1, m2, p, q1, q2, d1, d2]
 }

@@ -29,10 +29,10 @@ use std.math.integer (Z, gcd, mod, inverse_mod, xgcd)
 
 fn is_matrix(any x) bool {
    "Check if x is a matrix."
-   if(!is_ptr(x)){ return false }
-   if(!is_list(x)){ return false }
+   if !is_ptr(x) { return false }
+   if !is_list(x) { return false }
    def n = x.len
-   if(n < 3){ return false }
+   if n < 3 { return false }
    def first = x.get(0)
    is_int(first)
 }
@@ -62,10 +62,10 @@ fn mat_new(int rows, int cols, any init_val) list {
    "Create a plain matrix filled with `init_val`."
    mut data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(init_val)
          j += 1
       }
@@ -88,11 +88,11 @@ fn mat_set(any mat, int row, int col, any val) any {
 fn Matrix(list data) list {
    "Create matrix from list of lists."
    def rows = data.len
-   if(rows == 0){ return [0, 0, list(0)] }
+   if rows == 0 { return [0, 0, list(0)] }
    def cols = len(data.get(0))
    mut i = 0
-   while(i < rows){
-      if(len(data.get(i)) != cols){ panic("Matrix: all rows must have same length") }
+   while i < rows {
+      if len(data.get(i)) != cols { panic("Matrix: all rows must have same length") }
       i += 1
    }
    _matrix_make(rows, cols, data)
@@ -102,10 +102,10 @@ fn matrix_zero(int rows, int cols) any {
    "Create zero matrix."
    mut data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(Z(0))
          j += 1
       }
@@ -119,10 +119,10 @@ fn matrix_one(int rows, int cols) any {
    "Create matrix of all ones."
    mut data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(Z(1))
          j += 1
       }
@@ -136,11 +136,11 @@ fn matrix_identity(int n) any {
    "Create n x n identity matrix."
    mut data = list(0)
    mut i = 0
-   while(i < n){
+   while i < n {
       mut row = list(0)
       mut j = 0
-      while(j < n){
-         if(i == j){ row = row.append(Z(1)) } else { row = row.append(Z(0)) }
+      while j < n {
+         if i == j { row = row.append(Z(1)) } else { row = row.append(Z(0)) }
          j += 1
       }
       data = data.append(row)
@@ -168,24 +168,24 @@ fn mat4_identity() list {
 
 fn _mat4_offset(list m) int {
    def n = m.len
-   if(n >= 18 && m[0] == 4 && m[1] == 4){ return 2 }
-   if(n >= 16){ return 0 }
+   if n >= 18 && m[0] == 4 && m[1] == 4 { return 2 }
+   if n >= 16 { return 0 }
    -1
 }
 
 fn mat4_get(list m, int r, int c, f64 default=0.0) f64 {
    "Returns the flat row-major 4x4 matrix element at row `r`, column `c`, or `default` when out of bounds."
-   if(r < 0 || r >= 4 || c < 0 || c >= 4){ return default }
+   if r < 0 || r >= 4 || c < 0 || c >= 4 { return default }
    def off = _mat4_offset(m)
-   if(off < 0){ return default }
+   if off < 0 { return default }
    m[off + r * 4 + c]
 }
 
 fn mat4_set(list m, int r, int c, f64 v) list {
    "Stores `v` at row `r`, column `c` in a flat row-major 4x4 matrix and returns `m`."
-   if(r < 0 || r >= 4 || c < 0 || c >= 4){ return m }
+   if r < 0 || r >= 4 || c < 0 || c >= 4 { return m }
    def off = _mat4_offset(m)
-   if(off < 0){ return m }
+   if off < 0 { return m }
    m[off + r * 4 + c] = v
    m
 }
@@ -195,11 +195,11 @@ fn matrix_diagonal(list diag) any {
    def n = diag.len
    mut data = list(0)
    mut i = 0
-   while(i < n){
+   while i < n {
       mut row = list(0)
       mut j = 0
-      while(j < n){
-         if(i == j){ row = row.append(diag.get(i)) } else { row = row.append(Z(0)) }
+      while j < n {
+         if i == j { row = row.append(diag.get(i)) } else { row = row.append(Z(0)) }
          j += 1
       }
       data = data.append(row)
@@ -213,10 +213,10 @@ fn matrix_random(int rows, int cols, any bound) any {
    def bound_big = (is_bigint(bound) ? bound : bigint(bound))
    mut data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(bigint_random(bound_big))
          j += 1
       }
@@ -227,50 +227,50 @@ fn matrix_random(int rows, int cols, any bound) any {
 }
 
 fn __add(any a, any b) any {
-   if(!is_matrix(a) || !is_matrix(b)){ return nil }
+   if !is_matrix(a) || !is_matrix(b) { return nil }
    matrix_add(a, b)
 }
 
 fn __sub(any a, any b) any {
-   if(!is_matrix(a) || !is_matrix(b)){ return nil }
+   if !is_matrix(a) || !is_matrix(b) { return nil }
    matrix_sub(a, b)
 }
 
 fn __mul(any a, any b) any {
-   if(!is_matrix(a)){ return nil }
-   if(is_bigint(b) || is_int(b)){ return matrix_scale(a, b) }
-   if(is_matrix(b)){ return matrix_mul(a, b) }
+   if !is_matrix(a) { return nil }
+   if is_bigint(b) || is_int(b) { return matrix_scale(a, b) }
+   if is_matrix(b) { return matrix_mul(a, b) }
    nil
 }
 
 fn __pow(any a, any b) any {
-   if(!is_matrix(a)){ return nil }
-   if(is_bigint(b)){
+   if !is_matrix(a) { return nil }
+   if is_bigint(b) {
       def b_int = bigint_to_int(b)
-      if(b_int < 0){ return nil }
+      if b_int < 0 { return nil }
       return matrix_pow(a, b_int)
    }
-   if(is_int(b)){
-      if(b < 0){ return nil }
+   if is_int(b) {
+      if b < 0 { return nil }
       return matrix_pow(a, b)
    }
    nil
 }
 
 fn __neg(any a) any {
-   if(!is_matrix(a)){ return nil }
+   if !is_matrix(a) { return nil }
    matrix_neg(a)
 }
 
 fn __eq(any a, any b) bool {
-   if(!is_matrix(a) || !is_matrix(b)){ return false }
-   if(_matrix_rows(a) != _matrix_rows(b)){ return false }
-   if(_matrix_cols(a) != _matrix_cols(b)){ return false }
+   if !is_matrix(a) || !is_matrix(b) { return false }
+   if _matrix_rows(a) != _matrix_rows(b) { return false }
+   if _matrix_cols(a) != _matrix_cols(b) { return false }
    mut i = 0
-   while(i < _matrix_rows(a)){
+   while i < _matrix_rows(a) {
       mut j = 0
-      while(j < _matrix_cols(a)){
-         if(!bigint_eq(_matrix_get(a, i, j), _matrix_get(b, i, j))){ return false }
+      while j < _matrix_cols(a) {
+         if !bigint_eq(_matrix_get(a, i, j), _matrix_get(b, i, j)) { return false }
          j += 1
       }
       i += 1
@@ -281,16 +281,16 @@ fn __eq(any a, any b) bool {
 fn __neq(any a, any b) bool { !__eq(a, b) }
 
 fn _matrix_str(any a) any {
-   if(!is_matrix(a)){ return nil }
+   if !is_matrix(a) { return nil }
    mut b = str.Builder(128)
    b = str.builder_append(b, "[")
    mut i = 0
-   while(i < _matrix_rows(a)){
-      if(i > 0){ b = str.builder_append(b, ", ") }
+   while i < _matrix_rows(a) {
+      if i > 0 { b = str.builder_append(b, ", ") }
       b = str.builder_append(b, "[")
       mut j = 0
-      while(j < _matrix_cols(a)){
-         if(j > 0){ b = str.builder_append(b, ", ") }
+      while j < _matrix_cols(a) {
+         if j > 0 { b = str.builder_append(b, ", ") }
          b = str.builder_append(b, bigint_to_str(_matrix_get(a, i, j)))
          j += 1
       }
@@ -306,21 +306,21 @@ fn _matrix_str(any a) any {
 fn __str(any a) any { _matrix_str(a) }
 
 fn __len(any a) int {
-   if(!is_matrix(a)){ return 0 }
+   if !is_matrix(a) { return 0 }
    _matrix_rows(a)
 }
 
 fn matrix_add(any a, any b) any {
    "Add two matrices."
-   if(_matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b)){ panic("matrix_add: dimension mismatch") }
+   if _matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b) { panic("matrix_add: dimension mismatch") }
    def rows = _matrix_rows(a)
    def cols = _matrix_cols(a)
    mut data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          def sum = bigint_add(_matrix_get(a, i, j), _matrix_get(b, i, j))
          row = row.append(sum)
          j += 1
@@ -338,15 +338,15 @@ fn mat_add(any a, any b) any {
 
 fn matrix_sub(any a, any b) any {
    "Subtract two matrices."
-   if(_matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b)){ panic("matrix_sub: dimension mismatch") }
+   if _matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b) { panic("matrix_sub: dimension mismatch") }
    def rows = _matrix_rows(a)
    def cols = _matrix_cols(a)
    mut data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          def diff = bigint_sub(_matrix_get(a, i, j), _matrix_get(b, i, j))
          row = row.append(diff)
          j += 1
@@ -363,10 +363,10 @@ fn matrix_neg(any m) any {
    def cols = _matrix_cols(m)
    mut data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(bigint_neg(_matrix_get(m, i, j)))
          j += 1
       }
@@ -383,10 +383,10 @@ fn matrix_scale(any m, any c) any {
    def c_big = (is_bigint(c) ? c : bigint(c))
    mut data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(bigint_mul(_matrix_get(m, i, j), c_big))
          j += 1
       }
@@ -407,16 +407,16 @@ fn matrix_mul(any a, any b) any {
    def cols_a = _matrix_cols(a)
    def rows_b = _matrix_rows(b)
    def cols_b = _matrix_cols(b)
-   if(cols_a != rows_b){ panic("matrix_mul: dimension mismatch") }
+   if cols_a != rows_b { panic("matrix_mul: dimension mismatch") }
    mut data = list(0)
    mut i = 0
-   while(i < rows_a){
+   while i < rows_a {
       mut row = list(0)
       mut j = 0
-      while(j < cols_b){
+      while j < cols_b {
          mut sum = Z(0)
          mut k = 0
-         while(k < cols_a){
+         while k < cols_a {
             def prod = bigint_mul(_matrix_get(a, i, k), _matrix_get(b, k, j))
             sum = bigint_add(sum, prod)
             k += 1
@@ -439,14 +439,14 @@ fn matrix_pow(any m, int n) any {
    "Matrix power m^n using binary exponentiation."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
-   if(rows != cols){ panic("matrix_pow: matrix must be square") }
-   if(n == 0){ return matrix_identity(rows) }
-   if(n == 1){ return m }
+   if rows != cols { panic("matrix_pow: matrix must be square") }
+   if n == 0 { return matrix_identity(rows) }
+   if n == 1 { return m }
    mut result = matrix_identity(rows)
    mut base = m
    mut exp = n
-   while(exp > 0){
-      if(exp % 2 == 1){ result = matrix_mul(result, base) }
+   while exp > 0 {
+      if exp % 2 == 1 { result = matrix_mul(result, base) }
       base = matrix_mul(base, base)
       exp = exp / 2
    }
@@ -459,10 +459,10 @@ fn matrix_transpose(any m) list {
    def cols = _matrix_cols(m)
    mut data = list(0)
    mut i = 0
-   while(i < cols){
+   while i < cols {
       mut row = list(0)
       mut j = 0
-      while(j < rows){
+      while j < rows {
          row = row.append(_matrix_get(m, j, i))
          j += 1
       }
@@ -481,10 +481,10 @@ fn matrix_trace(any m) any {
    "Trace of square matrix(sum of diagonal)."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
-   if(rows != cols){ panic("matrix_trace: matrix must be square") }
+   if rows != cols { panic("matrix_trace: matrix must be square") }
    mut sum = Z(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       sum = bigint_add(sum, _matrix_get(m, i, i))
       i += 1
    }
@@ -495,19 +495,19 @@ fn matrix_det(any m) any {
    "Exact determinant using Bareiss fraction-free elimination."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
-   if(rows != cols){ panic("matrix_det: matrix must be square") }
-   if(rows == 0){ return Z(1) }
-   if(rows == 1){ return _matrix_get(m, 0, 0) }
-   if(rows == 2){
+   if rows != cols { panic("matrix_det: matrix must be square") }
+   if rows == 0 { return Z(1) }
+   if rows == 1 { return _matrix_get(m, 0, 0) }
+   if rows == 2 {
       def a, b = _matrix_get(m, 0, 0), _matrix_get(m, 0, 1)
       def c, d = _matrix_get(m, 1, 0), _matrix_get(m, 1, 1)
       return bigint_sub(bigint_mul(a, d), bigint_mul(b, c))
    }
    mut a, i = [], 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(Z(_matrix_get(m, i, j)))
          j += 1
       }
@@ -517,11 +517,11 @@ fn matrix_det(any m) any {
    mut sign = Z(1)
    mut denom = Z(1)
    mut k = 0
-   while(k < rows - 1){
+   while k < rows - 1 {
       mut piv = k
-      while(piv < rows && a.get(piv).get(k) == Z(0)){ piv += 1 }
-      if(piv >= rows){ return Z(0) }
-      if(piv != k){
+      while piv < rows && a.get(piv).get(k) == Z(0) { piv += 1 }
+      if piv >= rows { return Z(0) }
+      if piv != k {
          def tmp = a.get(k)
          a[k] = a.get(piv)
          a[piv] = tmp
@@ -529,9 +529,9 @@ fn matrix_det(any m) any {
       }
       def pivot = a.get(k).get(k)
       i = k + 1
-      while(i < rows){
+      while i < rows {
          mut j = k + 1
-         while(j < rows){
+         while j < rows {
             def v = (a.get(i).get(j) * pivot - a.get(i).get(k) * a.get(k).get(j)) / denom
             def rr = a.get(i)
             rr[j] = v
@@ -557,14 +557,14 @@ fn matrix_det_mod(any m, any modn) any {
    return nil so callers can fall back to an integer determinant if needed."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
-   if(rows != cols){ panic("matrix_det_mod: matrix must be square") }
-   if(rows == 0){ return Z(1) }
-   if(rows == 1){ return mod(_matrix_get(m, 0, 0), modn) }
+   if rows != cols { panic("matrix_det_mod: matrix must be square") }
+   if rows == 0 { return Z(1) }
+   if rows == 1 { return mod(_matrix_get(m, 0, 0), modn) }
    mut a, i = [], 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(mod(_matrix_get(m, i, j), modn))
          j += 1
       }
@@ -574,11 +574,11 @@ fn matrix_det_mod(any m, any modn) any {
    mut det = Z(1)
    mut sign = 0
    i = 0
-   while(i < rows){
+   while i < rows {
       mut piv = i
-      while(piv < rows && a.get(piv).get(i) == Z(0)){ piv += 1 }
-      if(piv >= rows){ return Z(0) }
-      if(piv != i){
+      while piv < rows && a.get(piv).get(i) == Z(0) { piv += 1 }
+      if piv >= rows { return Z(0) }
+      if piv != i {
          def tmp = a.get(i)
          a[i] = a.get(piv)
          a[piv] = tmp
@@ -586,16 +586,16 @@ fn matrix_det_mod(any m, any modn) any {
       }
       def pivot = a.get(i).get(i)
       def invp = inverse_mod(pivot, modn)
-      if(invp == nil){
+      if invp == nil {
          return nil
       }
       det = mod(det * pivot, modn)
       mut r = i + 1
-      while(r < rows){
+      while r < rows {
          def factor = mod(a.get(r).get(i) * invp, modn)
-         if(factor != Z(0)){
+         if factor != Z(0) {
             mut c = i
-            while(c < cols){
+            while c < cols {
                def v = mod(a.get(r).get(c) - factor * a.get(i).get(c), modn)
                def rr = a.get(r)
                rr[c] = v
@@ -607,7 +607,7 @@ fn matrix_det_mod(any m, any modn) any {
       }
       i += 1
    }
-   if(sign == 1){ det = mod(-det, modn) }
+   if sign == 1 { det = mod(-det, modn) }
    det
 }
 
@@ -630,17 +630,17 @@ fn matrix_rank(any m) int {
    def cols = _matrix_cols(U)
    mut rank = 0
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut is_zero = true
       mut j = 0
-      while(j < cols){
-         if(!bigint_eq(_matrix_get(U, i, j), Z(0))){
+      while j < cols {
+         if !bigint_eq(_matrix_get(U, i, j), Z(0)) {
             is_zero = false
             break
          }
          j += 1
       }
-      if(!is_zero){ rank += 1 }
+      if !is_zero { rank += 1 }
       i += 1
    }
    rank
@@ -650,9 +650,9 @@ fn matrix_inverse(any m) any {
    "Matrix inverse using adjugate method."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
-   if(rows != cols){ panic("matrix_inverse: matrix must be square") }
+   if rows != cols { panic("matrix_inverse: matrix must be square") }
    def det = matrix_det(m)
-   if(bigint_eq(det, Z(0))){ panic("matrix_inverse: singular matrix") }
+   if bigint_eq(det, Z(0)) { panic("matrix_inverse: singular matrix") }
    def adj = matrix_adjugate(m)
    matrix_scale(adj, bigint_div(Z(1), det))
 }
@@ -661,19 +661,19 @@ fn matrix_adjugate(any m) any {
    "Adjugate(classical adjoint) matrix."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
-   if(rows != cols){ panic("matrix_adjugate: matrix must be square") }
-   if(rows == 1){ return matrix_identity(1) }
-   if(rows == 2){
+   if rows != cols { panic("matrix_adjugate: matrix must be square") }
+   if rows == 1 { return matrix_identity(1) }
+   if rows == 2 {
       def a, b = _matrix_get(m, 0, 0), _matrix_get(m, 0, 1)
       def c, d = _matrix_get(m, 1, 0), _matrix_get(m, 1, 1)
       return Matrix([[d, bigint_neg(b)], [bigint_neg(c), a]])
    }
    mut cofactor_data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          def minor = _matrix_minor(m, i, j)
          def cofactor_sign = ((i + j) % 2 == 0 ? Z(1) : bigint_from_int(-1))
          def cofactor = bigint_mul(minor, cofactor_sign)
@@ -692,15 +692,15 @@ fn _matrix_minor(any m, int row, int col) any {
    def cols = _matrix_cols(m)
    mut sub_data = list(0)
    mut i = 0
-   while(i < rows){
-      if(i == row){
+   while i < rows {
+      if i == row {
          i += 1
          continue
       }
       mut sub_row = list(0)
       mut j = 0
-      while(j < cols){
-         if(j == col){
+      while j < cols {
+         if j == col {
             j += 1
             continue
          }
@@ -718,10 +718,10 @@ fn _matrix_submatrix_det(any m, list row_idx, list col_idx) any {
    def k = row_idx.len
    mut data = []
    mut i = 0
-   while(i < k){
+   while i < k {
       mut row = []
       mut j = 0
-      while(j < k){
+      while j < k {
          row = row.append(_matrix_get(m, int(row_idx[i]), int(col_idx[j])))
          j += 1
       }
@@ -734,7 +734,7 @@ fn _matrix_submatrix_det(any m, list row_idx, list col_idx) any {
 fn _matrix_first_combination(int k) list {
    mut out = []
    mut i = 0
-   while(i < k){
+   while i < k {
       out = out.append(i)
       i += 1
    }
@@ -745,11 +745,11 @@ fn _matrix_next_combination(list comb, int n) any {
    def k = comb.len
    mut out = clone(comb)
    mut i = k - 1
-   while(i >= 0){
-      if(out[i] < n - k + i){
+   while i >= 0 {
+      if out[i] < n - k + i {
          out[i] = out[i] + 1
          mut j = i + 1
-         while(j < k){
+         while j < k {
             out[j] = out[j - 1] + 1
             j += 1
          }
@@ -764,17 +764,17 @@ fn matrix_determinantal_divisor(any m, int k) any {
    "Return the gcd of all k x k minors of an integer matrix.
    By convention the 0th determinantal divisor is 1. Returns 0 when all
    k-minors vanish or k is outside the matrix shape."
-   if(k == 0){ return Z(1) }
+   if k == 0 { return Z(1) }
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
-   if(k < 0 || k > rows || k > cols){ return Z(0) }
+   if k < 0 || k > rows || k > cols { return Z(0) }
    mut g = Z(0)
    mut rs = _matrix_first_combination(k)
-   while(rs != nil){
+   while rs != nil {
       mut cs = _matrix_first_combination(k)
-      while(cs != nil){
+      while cs != nil {
          def d = bigint_abs(_matrix_submatrix_det(m, rs, cs))
-         if(d != Z(0)){ if(g == Z(0)){ g = d } else { g = gcd(g, d) } }
+         if d != Z(0) { if g == Z(0) { g = d } else { g = gcd(g, d) } }
          cs = _matrix_next_combination(cs, cols)
       }
       rs = _matrix_next_combination(rs, rows)
@@ -793,9 +793,9 @@ fn matrix_smith_invariants(any m) list {
    mut invs = []
    mut prev = Z(1)
    mut k = 1
-   while(k <= lim){
+   while k <= lim {
       def delta = matrix_determinantal_divisor(m, k)
-      if(delta == Z(0)){ break }
+      if delta == Z(0) { break }
       def di = bigint_div(delta, prev)
       invs = invs.append(bigint_abs(di))
       prev = delta
@@ -817,11 +817,11 @@ fn matrix_smith_form(any m) list {
    def invs = matrix_smith_invariants(m)
    mut data = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < cols){
-         if(i == j && i < invs.len){ row = row.append(invs[i]) } else { row = row.append(Z(0)) }
+      while j < cols {
+         if i == j && i < invs.len { row = row.append(invs[i]) } else { row = row.append(Z(0)) }
          j += 1
       }
       data = data.append(row)
@@ -839,7 +839,7 @@ fn _matrix_row_linear(list a, list b, any ca, any cb) list {
    def cols = a.len
    mut out = []
    mut j = 0
-   while(j < cols){
+   while j < cols {
       out = out.append(ca * a.get(j) + cb * b.get(j))
       j += 1
    }
@@ -849,7 +849,7 @@ fn _matrix_row_linear(list a, list b, any ca, any cb) list {
 fn _matrix_floor_div_pos(any a, any b) any {
    "Return floor(a / b) for positive integer b."
    def bb = Z(b)
-   if(bb <= Z(0)){ panic("_matrix_floor_div_pos: divisor must be positive") }
+   if bb <= Z(0) { panic("_matrix_floor_div_pos: divisor must be positive") }
    def aa = Z(a)
    def r = mod(aa, bb)
    (aa - r) / bb
@@ -864,7 +864,7 @@ fn _matrix_hermite_form_impl(any m) any {
    mut src = m
    mut nrows = 0
    mut ncols = 0
-   if(is_matrix(m)){
+   if is_matrix(m) {
       nrows = int(m.get(0))
       ncols = int(m.get(1))
       src = m.get(2)
@@ -874,10 +874,10 @@ fn _matrix_hermite_form_impl(any m) any {
    }
    mut rows_data = []
    mut ii = 0
-   while(ii < nrows){
+   while ii < nrows {
       mut row_copy = []
       mut jj = 0
-      while(jj < ncols){
+      while jj < ncols {
          row_copy = row_copy.append(Z(src.get(ii).get(jj)))
          jj += 1
       }
@@ -886,25 +886,25 @@ fn _matrix_hermite_form_impl(any m) any {
    }
    mut prow = 0
    mut col = 0
-   while(col < ncols && prow < nrows){
+   while col < ncols && prow < nrows {
       mut pivot_row = -1
       mut i = prow
-      while(i < nrows && pivot_row < 0){
-         if(rows_data.get(i).get(col) != Z(0)){ pivot_row = i }
+      while i < nrows && pivot_row < 0 {
+         if rows_data.get(i).get(col) != Z(0) { pivot_row = i }
          i += 1
       }
-      if(pivot_row >= 0){
-         if(pivot_row != prow){
+      if pivot_row >= 0 {
+         if pivot_row != prow {
             def tmp = rows_data.get(prow)
             rows_data[prow] = rows_data.get(pivot_row)
             rows_data[pivot_row] = tmp
          }
          mut changed = true
-         while(changed){
+         while changed {
             changed = false
             i = prow + 1
-            while(i < nrows && !changed){
-               if(rows_data.get(i).get(col) != Z(0)){
+            while i < nrows && !changed {
+               if rows_data.get(i).get(col) != Z(0) {
                   def rp, ri = rows_data.get(prow), rows_data.get(i)
                   def aa = rp.get(col)
                   def bb = ri.get(col)
@@ -912,7 +912,7 @@ fn _matrix_hermite_form_impl(any m) any {
                   mut g = eg.get(0)
                   mut s = eg.get(1)
                   mut t = eg.get(2)
-                  if(g < Z(0)){
+                  if g < Z(0) {
                      g, s = 0 - g, 0 - s
                      t = 0 - t
                   }
@@ -923,10 +923,10 @@ fn _matrix_hermite_form_impl(any m) any {
                i += 1
             }
          }
-         if(rows_data.get(prow).get(col) < Z(0)){
+         if rows_data.get(prow).get(col) < Z(0) {
             mut row = []
             mut j = 0
-            while(j < ncols){
+            while j < ncols {
                row = row.append(0 - rows_data.get(prow).get(j))
                j += 1
             }
@@ -934,9 +934,9 @@ fn _matrix_hermite_form_impl(any m) any {
          }
          def pivot = rows_data.get(prow).get(col)
          i = 0
-         while(i < prow){
+         while i < prow {
             def q = _matrix_floor_div_pos(rows_data.get(i).get(col), pivot)
-            if(q != Z(0)){ rows_data[i] = _matrix_row_linear(rows_data.get(i), rows_data.get(prow), Z(1), 0 - q) }
+            if q != Z(0) { rows_data[i] = _matrix_row_linear(rows_data.get(i), rows_data.get(prow), Z(1), 0 - q) }
             i += 1
          }
          prow += 1
@@ -954,7 +954,7 @@ fn matrix_hermite_form(any m) list {
    entries above each pivot are reduced into [0, pivot). This mirrors the
    Sage-style `hermite_form()` surface used by lattice and exact linear algebra workflows."
    def raw = _matrix_hermite_form_impl(m)
-   if(is_matrix(raw)){ return raw }
+   if is_matrix(raw) { return raw }
    def rows = len(raw)
    def cols = rows > 0 ? len(raw.get(0)) : 0
    return [rows, cols, raw]
@@ -987,27 +987,27 @@ fn matrix_change_ring(any m, any ring) list {
    def cols = _matrix_cols(m)
    mut kind = "zz"
    mut modulus = nil
-   if(is_dict(ring)){
+   if is_dict(ring) {
       def tag = ring.get("__type", "")
-      if(tag == "gf"){
+      if tag == "gf" {
          kind = "mod"
          modulus = ring.get("p", nil)
-      } elif(tag == "zmod_ring"){
+      } elif tag == "zmod_ring" {
          kind = "mod"
          modulus = ring.get("modulus", nil)
       }
    }
-   if(is_int(ring) || is_bigint(ring)){
+   if is_int(ring) || is_bigint(ring) {
       kind = "mod"
       modulus = ring
    }
-   if(is_str(ring) && (ring == "ZZ" || ring == "IntegerRing" || ring == "Integer Ring")){ kind = "zz" }
+   if is_str(ring) && (ring == "ZZ" || ring == "IntegerRing" || ring == "Integer Ring") { kind = "zz" }
    mut data = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < cols){
+      while j < cols {
          def v = _matrix_get(m, i, j)
          row = row.append(kind == "mod" ? mod(v, modulus) : Z(v))
          j += 1
@@ -1023,7 +1023,7 @@ fn matrix_is_hermite_form(any m) bool {
    mut src = m
    mut rows = 0
    mut cols = 0
-   if(is_matrix(m)){
+   if is_matrix(m) {
       rows = int(m.get(0))
       cols = int(m.get(1))
       src = m.get(2)
@@ -1034,29 +1034,29 @@ fn matrix_is_hermite_form(any m) bool {
    mut last_pivot = -1
    mut zero_tail = false
    mut r = 0
-   while(r < rows){
+   while r < rows {
       mut pc = -1
       mut c = 0
-      while(c < cols && pc < 0){
-         if(!bigint_eq(Z(src.get(r).get(c)), Z(0))){ pc = c }
+      while c < cols && pc < 0 {
+         if !bigint_eq(Z(src.get(r).get(c)), Z(0)) { pc = c }
          c += 1
       }
-      if(pc < 0){
+      if pc < 0 {
          zero_tail = true
       } else {
-         if(zero_tail){ return false }
-         if(pc <= last_pivot){ return false }
+         if zero_tail { return false }
+         if pc <= last_pivot { return false }
          def pivot = Z(src.get(r).get(pc))
-         if(bigint_le(pivot, Z(0))){ return false }
+         if bigint_le(pivot, Z(0)) { return false }
          mut rr = r + 1
-         while(rr < rows){
-            if(!bigint_eq(Z(src.get(rr).get(pc)), Z(0))){ return false }
+         while rr < rows {
+            if !bigint_eq(Z(src.get(rr).get(pc)), Z(0)) { return false }
             rr += 1
          }
          rr = 0
-         while(rr < r){
+         while rr < r {
             def v = Z(src.get(rr).get(pc))
-            if(bigint_lt(v, Z(0)) || bigint_ge(v, pivot)){ return false }
+            if bigint_lt(v, Z(0)) || bigint_ge(v, pivot) { return false }
             rr += 1
          }
          last_pivot = pc
@@ -1072,10 +1072,10 @@ fn matrix_lu(any m) list {
    def cols = _matrix_cols(m)
    mut U_data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(_matrix_get(m, i, j))
          j += 1
       }
@@ -1084,11 +1084,11 @@ fn matrix_lu(any m) list {
    }
    mut L_data = list(0)
    i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
-         if(i == j){ row = row.append(Z(1)) } else { row = row.append(Z(0)) }
+      while j < cols {
+         if i == j { row = row.append(Z(1)) } else { row = row.append(Z(0)) }
          j += 1
       }
       L_data = L_data.append(row)
@@ -1096,27 +1096,27 @@ fn matrix_lu(any m) list {
    }
    mut swaps = 0
    mut k = 0
-   while(k < rows - 1){
+   while k < rows - 1 {
       mut max_val = Z(0)
       mut max_row = k
       i = k
-      while(i < rows){
+      while i < rows {
          def val = bigint_abs(_matrix_get_from_data(U_data, i, k))
-         if(bigint_gt(val, max_val)){
+         if bigint_gt(val, max_val) {
             max_val = val
             max_row = i
          }
          i += 1
       }
-      if(max_row != k){
+      if max_row != k {
          mut temp = U_data.get(k)
          U_data = U_data.set(k, U_data.get(max_row))
          U_data = U_data.set(max_row, temp)
-         if(k > 0){
+         if k > 0 {
             temp = slice(L_data.get(k), 0, k)
             def temp2 = slice(L_data.get(max_row), 0, k)
             mut j = 0
-            while(j < k){
+            while j < k {
                L_data = L_data.set(k, L_data.get(k).set(j, temp2.get(j)))
                L_data = L_data.set(max_row, L_data.get(max_row).set(j, temp.get(j)))
                j += 1
@@ -1125,13 +1125,13 @@ fn matrix_lu(any m) list {
          swaps += 1
       }
       i = k + 1
-      while(i < rows){
+      while i < rows {
          def pivot = _matrix_get_from_data(U_data, k, k)
-         if(!bigint_eq(pivot, Z(0))){
+         if !bigint_eq(pivot, Z(0)) {
             def factor = bigint_div(_matrix_get_from_data(U_data, i, k), pivot)
             L_data = L_data.set(i, L_data.get(i).set(k, factor))
             mut j = k
-            while(j < cols){
+            while j < cols {
                def new_val = bigint_sub(_matrix_get_from_data(U_data, i, j),
                bigint_mul(factor, _matrix_get_from_data(U_data, k, j)))
                U_data = U_data.set(i, U_data.get(i).set(j, new_val))
@@ -1149,7 +1149,7 @@ fn _matrix_get_from_data(list data, int i, int j) any { data.get(i).get(j) }
 
 fn _matrix_modp(any x, any p) any {
    def r = x % p
-   if(r < 0){ return r + p }
+   if r < 0 { return r + p }
    r
 }
 
@@ -1158,10 +1158,10 @@ fn _matrix_clone_mod_data(any m, any p) list {
    def cols = _matrix_cols(m)
    mut out = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(_matrix_modp(_matrix_get(m, i, j), p))
          j += 1
       }
@@ -1178,12 +1178,12 @@ fn matrix_mod(any m, any p) any {
 
 fn matrix_eq_mod(any a, any b, any p) bool {
    "Return true when matrices `a` and `b` are equal over Z/pZ."
-   if(_matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b)){ return false }
+   if _matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b) { return false }
    mut i = 0
-   while(i < _matrix_rows(a)){
+   while i < _matrix_rows(a) {
       mut j = 0
-      while(j < _matrix_cols(a)){
-         if(_matrix_modp(_matrix_get(a, i, j), p) != _matrix_modp(_matrix_get(b, i, j), p)){ return false }
+      while j < _matrix_cols(a) {
+         if _matrix_modp(_matrix_get(a, i, j), p) != _matrix_modp(_matrix_get(b, i, j), p) { return false }
          j += 1
       }
       i += 1
@@ -1197,16 +1197,16 @@ fn matrix_mul_mod(any a, any b, any p) any {
    def cols_a = _matrix_cols(a)
    def rows_b = _matrix_rows(b)
    def cols_b = _matrix_cols(b)
-   if(cols_a != rows_b){ panic("matrix_mul_mod: dimension mismatch") }
+   if cols_a != rows_b { panic("matrix_mul_mod: dimension mismatch") }
    mut data = []
    mut i = 0
-   while(i < rows_a){
+   while i < rows_a {
       mut row = []
       mut j = 0
-      while(j < cols_b){
+      while j < cols_b {
          mut acc = 0
          mut k = 0
-         while(k < cols_a){
+         while k < cols_a {
             acc = _matrix_modp(acc + _matrix_get(a, i, k) * _matrix_get(b, k, j), p)
             k += 1
          }
@@ -1223,13 +1223,13 @@ fn matrix_pow_mod(any m, any e, any p) any {
    "Raise a square matrix to exponent `e` over Z/pZ."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
-   if(rows != cols){ panic("matrix_pow_mod: matrix must be square") }
+   if rows != cols { panic("matrix_pow_mod: matrix must be square") }
    mut ee = Z(e)
-   if(ee < Z(0)){ panic("matrix_pow_mod: negative exponent is not supported") }
+   if ee < Z(0) { panic("matrix_pow_mod: negative exponent is not supported") }
    mut result = matrix_mod(matrix_identity(rows), p)
    mut base = matrix_mod(m, p)
-   while(ee > Z(0)){
-      if(ee % Z(2) == Z(1)){ result = matrix_mul_mod(result, base, p) }
+   while ee > Z(0) {
+      if ee % Z(2) == Z(1) { result = matrix_mul_mod(result, base, p) }
       base = matrix_mul_mod(base, base, p)
       ee = ee / Z(2)
    }
@@ -1239,43 +1239,43 @@ fn matrix_pow_mod(any m, any e, any p) any {
 fn matrix_rref_mod(any m, any p) list {
    "Reduced row-echelon form over GF(p). Returns `[rref_matrix, pivot_columns]`.
    The modulus `p` must be prime, or at least every selected pivot must be invertible."
-   if(p <= 1){ panic("matrix_rref_mod: modulus must be > 1") }
+   if p <= 1 { panic("matrix_rref_mod: modulus must be > 1") }
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
    mut A = _matrix_clone_mod_data(m, p)
    mut pivots = []
    mut rank = 0
    mut col = 0
-   while(col < cols && rank < rows){
+   while col < cols && rank < rows {
       mut pivot = rank
-      while(pivot < rows && _matrix_modp(A[pivot][col], p) == 0){ pivot += 1 }
-      if(pivot >= rows){
+      while pivot < rows && _matrix_modp(A[pivot][col], p) == 0 { pivot += 1 }
+      if pivot >= rows {
          col += 1
          continue
       }
-      if(pivot != rank){
+      if pivot != rank {
          def tmp = A[rank]
          A[rank] = A[pivot]
          A[pivot] = tmp
       }
       def pivot_val = _matrix_modp(A[rank][col], p)
       def inv = inverse_mod(pivot_val, p)
-      if(inv == nil){ panic("matrix_rref_mod: non-invertible pivot; use a prime modulus") }
+      if inv == nil { panic("matrix_rref_mod: non-invertible pivot; use a prime modulus") }
       mut pivot_row = A[rank]
       mut j = col
-      while(j < cols){
+      while j < cols {
          pivot_row[j] = _matrix_modp(pivot_row[j] * inv, p)
          j += 1
       }
       A[rank] = pivot_row
       mut r = 0
-      while(r < rows){
-         if(r != rank){
+      while r < rows {
+         if r != rank {
             def factor = _matrix_modp(A[r][col], p)
-            if(factor != 0){
+            if factor != 0 {
                mut row_r = A[r]
                j = col
-               while(j < cols){
+               while j < cols {
                   row_r[j] = _matrix_modp(row_r[j] - factor * pivot_row[j], p)
                   j += 1
                }
@@ -1309,28 +1309,28 @@ fn matrix_nullspace_mod(any m, any p) list {
    def cols = _matrix_cols(m)
    mut is_pivot = []
    mut i = 0
-   while(i < cols){
+   while i < cols {
       is_pivot = is_pivot.append(false)
       i += 1
    }
    i = 0
-   while(i < pivots.len){
+   while i < pivots.len {
       is_pivot[pivots.get(i)] = true
       i += 1
    }
    mut basis = []
    mut free_col = 0
-   while(free_col < cols){
-      if(!is_pivot.get(free_col)){
+   while free_col < cols {
+      if !is_pivot.get(free_col) {
          mut v = []
          i = 0
-         while(i < cols){
+         while i < cols {
             v = v.append(0)
             i += 1
          }
          v[free_col] = 1
          mut row = 0
-         while(row < pivots.len){
+         while row < pivots.len {
             def pc = pivots.get(row)
             v[pc] = _matrix_modp(0 - _matrix_get(R, row, free_col), p)
             row += 1
@@ -1362,16 +1362,16 @@ fn matrix_solve_mod(any A, list b, any p) any {
    Returns one solution vector with free variables set to zero, or nil when the
    system is inconsistent. The modulus `p` must be prime, or at least every
    selected pivot must be invertible."
-   if(p <= 1){ panic("matrix_solve_mod: modulus must be > 1") }
+   if p <= 1 { panic("matrix_solve_mod: modulus must be > 1") }
    def rows = _matrix_rows(A)
    def cols = _matrix_cols(A)
-   if(b.len != rows){ panic("matrix_solve_mod: right-hand side length mismatch") }
+   if b.len != rows { panic("matrix_solve_mod: right-hand side length mismatch") }
    mut aug = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(_matrix_modp(_matrix_get(A, i, j), p))
          j += 1
       }
@@ -1383,17 +1383,17 @@ fn matrix_solve_mod(any A, list b, any p) any {
    def R = rr.get(0)
    def pivots = rr.get(1)
    i = 0
-   while(i < pivots.len){
-      if(pivots.get(i) == cols){ return nil }
+   while i < pivots.len {
+      if pivots.get(i) == cols { return nil }
       i += 1
    }
    mut x = []
    mut col = 0
-   while(col < cols){
+   while col < cols {
       mut value = 0
       mut row = 0
-      while(row < pivots.len){
-         if(pivots.get(row) == col){
+      while row < pivots.len {
+         if pivots.get(row) == col {
             value = _matrix_modp(_matrix_get(R, row, cols), p)
             row = pivots.len
          } else {
@@ -1423,10 +1423,10 @@ fn matrix_solve(any A, list b) list {
    def U = lu_result.get(1)
    def n = _matrix_rows(A)
    mut y, i = list(0), 0
-   while(i < n){
+   while i < n {
       mut sum = Z(0)
       mut j = 0
-      while(j < i){
+      while j < i {
          sum = bigint_add(sum, bigint_mul(_matrix_get(L, i, j), y.get(j)))
          j += 1
       }
@@ -1436,15 +1436,15 @@ fn matrix_solve(any A, list b) list {
    }
    mut x = list(0)
    i = 0
-   while(i < n){
+   while i < n {
       x = x.append(Z(0))
       i += 1
    }
    i = n - 1
-   while(i >= 0){
+   while i >= 0 {
       mut sum = Z(0)
       mut j = i + 1
-      while(j < n){
+      while j < n {
          sum = bigint_add(sum, bigint_mul(_matrix_get(U, i, j), x.get(j)))
          j += 1
       }
@@ -1461,10 +1461,10 @@ fn matrix_gauss_eliminate(any A, list b) list {
    def cols = _matrix_cols(A)
    mut aug_data = list(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(_matrix_get(A, i, j))
          j += 1
       }
@@ -1473,28 +1473,28 @@ fn matrix_gauss_eliminate(any A, list b) list {
       i += 1
    }
    mut k = 0
-   while(k < rows){
+   while k < rows {
       mut max_row = k
       i = k + 1
-      while(i < rows){
-         if(bigint_gt(bigint_abs(_matrix_get_from_data(aug_data, i, k)),
-            bigint_abs(_matrix_get_from_data(aug_data, max_row, k)))){
+      while i < rows {
+         if bigint_gt(bigint_abs(_matrix_get_from_data(aug_data, i, k)),
+            bigint_abs(_matrix_get_from_data(aug_data, max_row, k))){
             max_row = i
          }
          i += 1
       }
-      if(max_row != k){
+      if max_row != k {
          mut temp = aug_data.get(k)
          aug_data = aug_data.set(k, aug_data.get(max_row))
          aug_data = aug_data.set(max_row, temp)
       }
       i = k + 1
-      while(i < rows){
+      while i < rows {
          def pivot = _matrix_get_from_data(aug_data, k, k)
-         if(!bigint_eq(pivot, Z(0))){
+         if !bigint_eq(pivot, Z(0)) {
             def factor = bigint_div(_matrix_get_from_data(aug_data, i, k), pivot)
             mut j = k
-            while(j <= cols){
+            while j <= cols {
                def new_val = bigint_sub(_matrix_get_from_data(aug_data, i, j),
                bigint_mul(factor, _matrix_get_from_data(aug_data, k, j)))
                aug_data = aug_data.set(i, aug_data.get(i).set(j, new_val))
@@ -1508,10 +1508,10 @@ fn matrix_gauss_eliminate(any A, list b) list {
    mut A_data = list(0)
    mut b_vec = list(0)
    i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(0)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(_matrix_get_from_data(aug_data, i, j))
          j += 1
       }
@@ -1523,7 +1523,7 @@ fn matrix_gauss_eliminate(any A, list b) list {
 }
 
 fn _matrix_require(any m, str name) any {
-   if(!is_matrix(m)){ panic(name + ": expected Matrix") }
+   if !is_matrix(m) { panic(name + ": expected Matrix") }
    m
 }
 

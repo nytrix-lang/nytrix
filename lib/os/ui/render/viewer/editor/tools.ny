@@ -23,11 +23,11 @@ fn _env_key(str prefix, str path) str {
 
 fn _configured_argv(str key, str path) list {
    def raw = env(key)
-   if(!is_str(raw) || raw.len <= 0){ return [] }
+   if !is_str(raw) || raw.len <= 0 { return [] }
    mut out = []
    def parts = str.split_words(to_str(raw))
    mut i = 0
-   while(i < parts.len){
+   while i < parts.len {
       out = out.append(str.str_replace(to_str(parts.get(i, "")), "{file}", path))
       i += 1
    }
@@ -48,10 +48,10 @@ fn _fmt_command() str {
 
 fn check_file(str path) dict {
    "Runs Nytrix diagnostics for a source file."
-   if(path.len <= 0 || !file_exists(path)){ return {"ok": false, "code": 1, "stdout": "missing file: " + path, "argv": []} }
+   if path.len <= 0 || !file_exists(path) { return {"ok": false, "code": 1, "stdout": "missing file: " + path, "argv": []} }
    def argv = [ny_command(), "--diag-compact", "--collect-errors", "-emit-only", path]
    def first = run_capture(argv, [], nil, false)
-   if(str.lower(ospath.extname(path)) != ".ny"){ return first }
+   if str.lower(ospath.extname(path)) != ".ny" { return first }
    def strict_argv = [ny_command(), "--diag-compact", "--collect-errors", "--ownership-strict", "-emit-only", path]
    def strict = run_capture(strict_argv, [], nil, false)
    def ok = bool(first.get("ok", false)) && bool(strict.get("ok", false))
@@ -66,18 +66,18 @@ fn check_file(str path) dict {
 
 fn format_file(str path) dict {
    "Formats a source file using ny-fmt when available."
-   if(path.len <= 0 || !file_exists(path)){ return {"ok": false, "code": 1, "stdout": "missing file: " + path, "argv": []} }
+   if path.len <= 0 || !file_exists(path) { return {"ok": false, "code": 1, "stdout": "missing file: " + path, "argv": []} }
    def argv = [_fmt_command(), path]
    run_capture(argv, [], nil, false)
 }
 
 fn debug_command_for(str path) list {
    "Returns a configured debug command for a file. Override with NY_EDITOR_DAP_<EXT> or NY_EDITOR_DAP_COMMAND."
-   if(path.len <= 0){ return [] }
+   if path.len <= 0 { return [] }
    def specific = _configured_argv(_env_key("NY_EDITOR_DAP_", path), path)
-   if(specific.len > 0){ return specific }
+   if specific.len > 0 { return specific }
    def generic = _configured_argv("NY_EDITOR_DAP_COMMAND", path)
-   if(generic.len > 0){ return generic }
+   if generic.len > 0 { return generic }
    ["gdb", "--args", ny_command(), "-g", path]
 }
 
@@ -86,7 +86,7 @@ fn debug_file(str path) dict {
    def specific = _configured_argv(_env_key("NY_EDITOR_DAP_", path), path)
    def generic = _configured_argv("NY_EDITOR_DAP_COMMAND", path)
    def argv = specific.len > 0 ? specific : generic
-   if(argv.len <= 0){
+   if argv.len <= 0 {
       return {"ok": true, "code": 0, "stdout": "debug command: " + str.join(debug_command_for(path), " "), "argv": debug_command_for(path)}
    }
    run_capture(argv, [], nil, false)

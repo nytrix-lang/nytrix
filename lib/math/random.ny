@@ -23,10 +23,10 @@ fn seed(int n) any {
 
 fn random() any {
    "Return a random float in [0, 1) using the global system RNG."
-   def int: scale = 0x20000000000000
-   def int: r = rand()
-   def int: q = r / scale
-   def int: rem = r - (q * scale)
+   def int scale = 0x20000000000000
+   def int r = rand()
+   def int q = r / scale
+   def int rem = r - (q * scale)
    fdiv(flt.float(rem), flt.float(scale))
 }
 
@@ -36,12 +36,12 @@ fn uniform(any a, any b) any {
 }
 
 fn _rand_range(int a, int b, bool inclusive) int {
-   if(a == b){ return a }
+   if a == b { return a }
    def range = b - a + (inclusive ? 1 : 0)
-   if(range <= 0){ return a }
-   def int: r = rand()
-   def int: q = r / range
-   def int: rem = r - (q * range)
+   if range <= 0 { return a }
+   def int r = rand()
+   def int q = r / range
+   def int rem = r - (q * range)
    return a + rem
 }
 
@@ -58,23 +58,23 @@ fn randrange(int a, int b) int {
 fn choice(seq xs) any {
    "Return a random element from a non-empty sequence xs using the global system RNG."
    mut n = xs.len
-   if(n == 0){ return 0 }
-   def int: r = rand()
-   def int: q = r / n
-   def int: rem = r - (q * n)
+   if n == 0 { return 0 }
+   def int r = rand()
+   def int q = r / n
+   def int rem = r - (q * n)
    return xs.get(rem)
 }
 
 fn shuffle(list xs) list {
    "Shuffles the elements of list `xs` in-place using the Fisher-Yates algorithm."
    def n = xs.len
-   if(n <= 1){ return xs }
+   if n <= 1 { return xs }
    mut i = n - 1
-   while(i > 0){
-      def int: r = rand()
-      def int: span = i + 1
-      def int: q = r / span
-      def int: j = r - (q * span)
+   while i > 0 {
+      def int r = rand()
+      def int span = i + 1
+      def int q = r / span
+      def int j = r - (q * span)
       def tmp = xs.get(i)
       xs.set(i, xs.get(j))
       xs.set(j, tmp)
@@ -86,14 +86,14 @@ fn shuffle(list xs) list {
 fn sample(seq xs, int k) list {
    "Returns a new list containing `k` unique elements randomly chosen from sequence `xs`."
    def n = xs.len
-   if(k > n){ k = n }
+   if k > n { k = n }
    mut res = list(8)
    mut indices = list(n)
    mut i = 0
-   while(i < n){ indices = indices.append(i) i += 1 }
+   while i < n { indices = indices.append(i) i += 1 }
    shuffle(indices)
    i = 0
-   while(i < k){
+   while i < k {
       res = res.append(xs.get(indices.get(i)))
       i += 1
    }
@@ -107,7 +107,7 @@ fn new(int seed_val) list {
    mut s = (seed_val == 0) ? 0xDEADBEEF : seed_val
    mut s0 = s & 0xFFFFFFFF
    mut s1 = (s >> 32) & 0xFFFFFFFF
-   if(s1 == 0){ s1 = 0x12345678 }
+   if s1 == 0 { s1 = 0x12345678 }
    [s0, s1]
 }
 
@@ -129,6 +129,6 @@ fn float(list ctx) any {
 fn int(list ctx, int a, int b) int {
    "Returns a random integer in [a, b]."
    def range = b - a + 1
-   if(range <= 0){ return a }
+   if range <= 0 { return a }
    a + (next(ctx) % range)
 }

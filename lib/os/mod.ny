@@ -27,11 +27,11 @@ use std.os.subprocess as subprocess
 fn _clipboard_tool() str {
    #linux {
       def wd = env("WAYLAND_DISPLAY")
-      if(is_str(wd) && wd.len > 0){ if(file_exists("/usr/bin/wl-copy") || file_exists("/usr/local/bin/wl-copy")){ return "wl" } }
+      if is_str(wd) && wd.len > 0 { if file_exists("/usr/bin/wl-copy") || file_exists("/usr/local/bin/wl-copy") { return "wl" } }
       def xd = env("DISPLAY")
-      if(is_str(xd) && xd.len > 0){
-         if(file_exists("/usr/bin/xclip") || file_exists("/usr/local/bin/xclip")){ return "xclip" }
-         if(file_exists("/usr/bin/xsel") || file_exists("/usr/local/bin/xsel")){ return "xsel" }
+      if is_str(xd) && xd.len > 0 {
+         if file_exists("/usr/bin/xclip") || file_exists("/usr/local/bin/xclip") { return "xclip" }
+         if file_exists("/usr/bin/xsel") || file_exists("/usr/local/bin/xsel") { return "xsel" }
       }
    } #endif
    "none"
@@ -40,11 +40,11 @@ fn _clipboard_tool() str {
 fn _clipboard_env_prefix() str {
    mut p = ""
    def wd = env("WAYLAND_DISPLAY")
-   if(is_str(wd) && wd.len > 0){ p = p + "WAYLAND_DISPLAY=" + wd + " " }
+   if is_str(wd) && wd.len > 0 { p = p + "WAYLAND_DISPLAY=" + wd + " " }
    def xd = env("DISPLAY")
-   if(is_str(xd) && xd.len > 0){ p = p + "DISPLAY=" + xd + " " }
+   if is_str(xd) && xd.len > 0 { p = p + "DISPLAY=" + xd + " " }
    def xa = env("XAUTHORITY")
-   if(is_str(xa) && xa.len > 0){ p = p + "XAUTHORITY=" + xa + " " }
+   if is_str(xa) && xa.len > 0 { p = p + "XAUTHORITY=" + xa + " " }
    p
 }
 
@@ -60,12 +60,12 @@ fn set_clipboard_text(any text) bool {
    "Sets the system clipboard text."
    def tmp = _clipboard_tmp_file("w")
    def qtmp = "\"" + tmp + "\""
-   match file_write(tmp, text){
+   match file_write(tmp, text) {
       ok(ignoredok) -> { ignoredok }
       err(ignorederr) -> { ignorederr  return false }
    }
    defer {
-      match file_remove(tmp){
+      match file_remove(tmp) {
          ok(ignoredok) -> { ignoredok }
          err(ignorederr) -> { ignorederr }
       }
@@ -73,13 +73,13 @@ fn set_clipboard_text(any text) bool {
    #linux {
       def tool = _clipboard_tool()
       def pfx = _clipboard_env_prefix()
-      if(tool == "wl"){ subprocess.shell(pfx + "wl-copy < " + qtmp + " 2>/dev/null", false, false) return true }
-      if(tool == "xclip"){
+      if tool == "wl" { subprocess.shell(pfx + "wl-copy < " + qtmp + " 2>/dev/null", false, false) return true }
+      if tool == "xclip" {
          subprocess.shell(pfx + "xclip -selection clipboard -i " + qtmp + " 2>/dev/null", false, false)
          subprocess.shell(pfx + "xclip -selection primary -i " + qtmp + " 2>/dev/null", false, false)
          return true
       }
-      if(tool == "xsel"){ subprocess.shell(pfx + "xsel --clipboard --input < " + qtmp + " 2>/dev/null", false, false) return true }
+      if tool == "xsel" { subprocess.shell(pfx + "xsel --clipboard --input < " + qtmp + " 2>/dev/null", false, false) return true }
    } #elif macos {
       subprocess.shell("pbcopy < " + qtmp, false, false)
       return true
@@ -97,8 +97,8 @@ fn get_clipboard_text() str {
    def tmp = _clipboard_tmp_file("r")
    def qtmp = "\"" + tmp + "\""
    defer {
-      if(file_exists(tmp)){
-         match file_remove(tmp){
+      if file_exists(tmp) {
+         match file_remove(tmp) {
             ok(ignoredok) -> { ignoredok }
             err(ignorederr) -> { ignorederr }
          }
@@ -107,21 +107,21 @@ fn get_clipboard_text() str {
    #linux {
       def tool = _clipboard_tool()
       def pfx = _clipboard_env_prefix()
-      if(tool == "wl"){ subprocess.shell(pfx + "wl-paste > " + qtmp + " 2>/dev/null", false, false) }
-      elif(tool == "xclip"){ subprocess.shell(pfx + "xclip -o -selection clipboard > " + qtmp + " 2>/dev/null", false, false) }
-      elif(tool == "xsel"){ subprocess.shell(pfx + "xsel --clipboard --output > " + qtmp + " 2>/dev/null", false, false) }
+      if tool == "wl" { subprocess.shell(pfx + "wl-paste > " + qtmp + " 2>/dev/null", false, false) }
+      elif tool == "xclip" { subprocess.shell(pfx + "xclip -o -selection clipboard > " + qtmp + " 2>/dev/null", false, false) }
+      elif tool == "xsel" { subprocess.shell(pfx + "xsel --clipboard --output > " + qtmp + " 2>/dev/null", false, false) }
    } #elif macos {
       subprocess.shell("pbpaste > " + qtmp, false, false)
    } #elif windows {
       subprocess.shell("powershell -command \"Get-Clipboard\" > " + qtmp, false, false)
    } #endif
-   if(file_exists(tmp)){
+   if file_exists(tmp) {
       def rd = file_read(tmp)
-      if(is_ok(rd)){
+      if is_ok(rd) {
          res = unwrap(rd)
          def n = res.len
-         if(n >= 2 && load8(res, n - 2) == 13 && load8(res, n - 1) == 10){ res = str_slice(res, 0, n - 2) }
-         elif(n >= 1 && load8(res, n - 1) == 10){ res = str_slice(res, 0, n - 1) }
+         if n >= 2 && load8(res, n - 2) == 13 && load8(res, n - 1) == 10 { res = str_slice(res, 0, n - 2) }
+         elif n >= 1 && load8(res, n - 1) == 10 { res = str_slice(res, 0, n - 1) }
       }
    }
    res
@@ -131,10 +131,10 @@ fn fetch(any url) any {
    "Downloads content from `url` over HTTP/HTTPS and returns the response body.
    HTTPS and redirects use the libcurl-backed client when available.
    On failure returns 0(so runtime tests can skip cleanly)."
-   if(!is_str(url) || url.len == 0){ return 0 }
+   if !is_str(url) || url.len == 0 { return 0 }
    def r = requests_get_parsed(url)
-   if(r == nil){ return 0 }
-   if(r.get("ok", false)){ return r.get("body", "") }
+   if r == nil { return 0 }
+   if r.get("ok", false) { return r.get("body", "") }
    0
 }
 
@@ -186,28 +186,28 @@ fn cache_dir() str { ospath.cache_dir() }
 
 fn is_dir(any path) bool {
    "Returns true if `path` exists and is a directory."
-   if(!is_str(path)){ return false }
-   if(eq(path, ".") || eq(path, "..")){ return true }
+   if !is_str(path) { return false }
+   if eq(path, ".") || eq(path, "..") { return true }
    __is_dir(path_normalize(path)) == 1
 }
 
 fn is_file(any path) bool {
    "Returns true if `path` exists and is not a directory."
-   if(!is_str(path)){ return false }
+   if !is_str(path) { return false }
    def p = path_normalize(path)
    file_exists(p) && !is_dir(p)
 }
 
 fn list_dir(any path) list {
    "Returns directory entry names, excluding `.` and `..`."
-   if(!is_str(path)){ return list(0) }
+   if !is_str(path) { return list(0) }
    def h = __dir_open(path_normalize(path))
-   if(!h){ return list(0) }
+   if !h { return list(0) }
    mut files = list(8)
-   while(true){
+   while true {
       def name = __dir_read(h)
-      if(!name){ break }
-      if(eq(name, ".") || eq(name, "..")){ continue }
+      if !name { break }
+      if eq(name, ".") || eq(name, "..") { continue }
       files = files.append(name)
    }
    __dir_close(h)
@@ -216,19 +216,19 @@ fn list_dir(any path) list {
 
 fn walk(any root, fnptr cb, int max_depth=-1, any visited=nil) int {
    "Recursively visits `root` and calls `cb(path)` for every entry. Optional `max_depth` limits recursion."
-   if(!is_str(root)){ return 0 }
+   if !is_str(root) { return 0 }
    mut r = path_normalize(root)
-   if(r.len == 0){ r = "." }
-   if(!file_exists(r)){ return 0 }
-   if(visited == nil || !is_dict(visited)){ visited = dict(16) }
-   if(visited.contains(r)){ return 0 }
+   if r.len == 0 { r = "." }
+   if !file_exists(r) { return 0 }
+   if visited == nil || !is_dict(visited) { visited = dict(16) }
+   if visited.contains(r) { return 0 }
    visited = visited.set(r, true)
    cb(r)
-   if(max_depth == 0){ return 0 }
-   if(is_dir(r)){
+   if max_depth == 0 { return 0 }
+   if is_dir(r) {
       def items = list_dir(r)
       mut i = 0
-      while(i < items.len){
+      while i < items.len {
          def next_depth = max_depth > 0 ? max_depth - 1 : -1
          walk(path_join(r, items.get(i)), cb, next_depth, visited)
          i += 1
@@ -313,15 +313,15 @@ fn shell_lines(str command, bool keep_empty=false) list { subprocess.shell_lines
 
 fn _facade_env_str_or(str key, str fallback) str {
    def v = env(key)
-   if(is_str(v)){
+   if is_str(v) {
       def s = strip(v)
-      if(s.len > 0){ return s }
+      if s.len > 0 { return s }
    }
    fallback
 }
 
 fn _facade_bool_or(any v, bool fallback) bool {
-   if(!is_str(v)){ return fallback }
+   if !is_str(v) { return fallback }
    def s = lower(strip(v))
    case s {
       "1", "true", "yes", "on" -> true
@@ -340,7 +340,7 @@ fn _facade_gpu_mode(str v) str {
 
 fn _facade_gpu_backend(str v) str {
    mut s = lower(strip(v))
-   if(eq(s, "off")){ s = "none" }
+   if eq(s, "off") { s = "none" }
    case s {
       "none", "auto", "opencl", "cuda", "hip", "metal" -> s
       _ -> "auto"
@@ -349,8 +349,8 @@ fn _facade_gpu_backend(str v) str {
 
 fn _facade_gpu_offload(str v) str {
    mut s = lower(strip(v))
-   if(eq(s, "true") || eq(s, "yes")){ s = "on" }
-   if(eq(s, "false") || eq(s, "no")){ s = "off" }
+   if eq(s, "true") || eq(s, "yes") { s = "on" }
+   if eq(s, "false") || eq(s, "no") { s = "off" }
    case s {
       "off", "auto", "on", "force" -> s
       _ -> "auto"
@@ -359,14 +359,14 @@ fn _facade_gpu_offload(str v) str {
 
 fn _facade_accel_target(str v) str {
    mut s = lower(strip(v))
-   if(eq(s, "off")){ s = "none" }
-   if(eq(s, "cuda") || eq(s, "ptx")){
+   if eq(s, "off") { s = "none" }
+   if eq(s, "cuda") || eq(s, "ptx") {
       s = "nvptx"
-   } elif(eq(s, "hip") || eq(s, "rocm") || eq(s, "gcn") || eq(s, "rdna")){
+   } elif eq(s, "hip") || eq(s, "rocm") || eq(s, "gcn") || eq(s, "rdna") {
       s = "amdgpu"
-   } elif(eq(s, "opencl") || eq(s, "vulkan") || eq(s, "spv")){
+   } elif eq(s, "opencl") || eq(s, "vulkan") || eq(s, "spv") {
       s = "spirv"
-   } elif(eq(s, "hsa") || eq(s, "hsa_code_object") || eq(s, "hsa-code-object") || eq(s, "rocm_hsa")){
+   } elif eq(s, "hsa") || eq(s, "hsa_code_object") || eq(s, "hsa-code-object") || eq(s, "rocm_hsa") {
       s = "hsaco"
    }
    case s {
@@ -377,8 +377,8 @@ fn _facade_accel_target(str v) str {
 
 fn _facade_accel_object(str v) str {
    mut s = lower(strip(v))
-   if(eq(s, "obj")){ s = "o" }
-   if(eq(s, "cubin")){ s = "ptx" }
+   if eq(s, "obj") { s = "o" }
+   if eq(s, "cubin") { s = "ptx" }
    case s {
       "none", "auto", "ptx", "o", "spv", "hsaco" -> s
       _ -> "auto"
@@ -594,10 +594,10 @@ fn _is_transient_file_error(any code) bool {
 fn _open_with_retry(str path, int flags, int mode) Result {
    mut tries = 0
    mut last = err(-1)
-   while(tries < 5){
+   while tries < 5 {
       last = sys_open(path, flags, mode)
-      if(is_ok(last)){ return last }
-      if(_is_transient_file_error(__unwrap(last))){
+      if is_ok(last) { return last }
+      if _is_transient_file_error(__unwrap(last)) {
          msleep(10)
          tries += 1
          continue
@@ -610,17 +610,17 @@ fn _open_with_retry(str path, int flags, int mode) Result {
 fn _file_write_impl(str path, any content, int flags) Result<int, int> {
    def p = ospath.normalize(path)
    def open_res = _open_with_retry(p, flags, 420)
-   if(is_err(open_res)){ return open_res }
+   if is_err(open_res) { return open_res }
    def fd = unwrap(open_res)
    def n = content.len
    mut off = 0
-   while(off < n){
+   while off < n {
       def w = __write_off(fd, content, n - off, off)
-      if(w < 0){
+      if w < 0 {
          sys_close_quiet(fd)
          return err(w)
       }
-      if(w <= 0){
+      if w <= 0 {
          sys_close_quiet(fd)
          return err(-5)
       }
@@ -633,9 +633,9 @@ fn _file_write_impl(str path, any content, int flags) Result<int, int> {
 fn getcwd() str {
    "Returns the current working directory as a string; returns `\"\"` if `getcwd(2)` fails."
    mut buf = malloc(4096)
-   if(buf == 0){ return "" }
+   if buf == 0 { return "" }
    mut clen = __getcwd(buf, 4096)
-   if(clen <= 0){
+   if clen <= 0 {
       free(buf)
       return ""
    }
@@ -659,30 +659,30 @@ fn gid() int {
 fn file_read(str path) Result<str, int> {
    "Reads the whole file at `path`; returns `ok(content_string)` or `err(errno_like_code)`."
    def p = ospath.normalize(path)
-   match sys_open(p, 0, 0){
+   match sys_open(p, 0, 0) {
       ok(fd) -> {
          mut cap = 4096
          mut base = malloc(cap + 16)
-         if(base == 0){
+         if base == 0 {
             sys_close_quiet(fd)
             return err(-1)
          }
          mut buf = base + 16
          def tmp = malloc(4096)
-         if(tmp == 0){
+         if tmp == 0 {
             free(base)
             sys_close_quiet(fd)
             return err(-1)
          }
          mut tlen = 0
-         while(true){
-            match sys_read(fd, tmp, 4096){
+         while true {
+            match sys_read(fd, tmp, 4096) {
                ok(r) -> {
-                  if(r <= 0){ break }
-                  if(tlen + r >= cap){
-                     while(tlen + r >= cap){ cap = cap * 2 }
+                  if r <= 0 { break }
+                  if tlen + r >= cap {
+                     while tlen + r >= cap { cap = cap * 2 }
                      def nbase = realloc(base, cap + 16)
-                     if(nbase == 0){
+                     if nbase == 0 {
                         free(tmp, base)
                         sys_close_quiet(fd)
                         return err(-1)
@@ -731,10 +731,10 @@ fn file_remove(str path) Result<int, int> {
    def p = ospath.normalize(path)
    mut tries = 0
    mut res = -1
-   while(tries < 5){
+   while tries < 5 {
       res = __unlink(p)
-      if(res >= 0){ return ok(0) }
-      if(_is_transient_file_error(res)){
+      if res >= 0 { return ok(0) }
+      if _is_transient_file_error(res) {
          msleep(10)
          tries += 1
          continue
@@ -748,9 +748,9 @@ fn file_rename(str old_path, str new_path) Result<int, int> {
    "Renames or moves `old_path` to `new_path`; returns `ok(0)` on success or `err(errno_like_code)`."
    def src = ospath.normalize(old_path)
    def dst = ospath.normalize(new_path)
-   if(src.len <= 0 || dst.len <= 0){ return err(-1) }
+   if src.len <= 0 || dst.len <= 0 { return err(-1) }
    def res = __rename(src, dst)
-   if(res >= 0){ return ok(0) }
+   if res >= 0 { return ok(0) }
    err(res)
 }
 

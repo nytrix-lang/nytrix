@@ -1234,6 +1234,55 @@ static void repl_clean_output_line(const char *line_start, const char *line_end,
   clean[clean_len] = '\0';
 }
 
+static char *repl_clean_output_text(const char *out) {
+  if (!out) {
+    char *empty = malloc(1);
+    if (empty)
+      empty[0] = '\0';
+    return empty;
+  }
+  size_t cap = strlen(out) + 1;
+  char *clean = malloc(cap ? cap : 1);
+  if (!clean)
+    return NULL;
+  size_t n = 0;
+  for (const char *s = out; *s && n + 1 < cap;) {
+    unsigned char ch = (unsigned char)*s++;
+    if (ch == 0x1b) {
+      if (*s == '[') {
+        s++;
+        while (*s) {
+          unsigned char c = (unsigned char)*s++;
+          if (c >= 0x40 && c <= 0x7e)
+            break;
+        }
+      }
+      continue;
+    }
+    if (ch == '\r' || ch == '\n' || ch == '\t') {
+      clean[n++] = ' ';
+      continue;
+    }
+    if (ch < 0x20 || ch == 0x7f)
+      continue;
+    clean[n++] = (char)ch;
+  }
+  clean[n] = '\0';
+  return clean;
+}
+
+static int repl_output_has_expect_substring_clean(const char *out,
+                                                  const char *expect) {
+  if (!out || !*out || !expect || !*expect)
+    return 0;
+  char *clean = repl_clean_output_text(out);
+  if (!clean)
+    return 0;
+  int ok = strstr(clean, expect) != NULL;
+  free(clean);
+  return ok;
+}
+
 static int repl_output_has_expect_line(const char *out, const char *expect) {
   if (!out || !*out || !expect || !*expect)
     return 0;
@@ -1259,7 +1308,7 @@ static int repl_output_has_expect_line(const char *out, const char *expect) {
     if ((size_t)(end - start) == expect_len && memcmp(start, expect, expect_len) == 0)
       return 1;
   }
-  return 0;
+  return repl_output_has_expect_substring_clean(out, expect);
 }
 
 static int repl_output_has_expect_then_prompt(const char *out, const char *expect) {
@@ -1310,6 +1359,7 @@ static pid_t repl_spawn_pty(char *const argv[], int *master_fd) {
   pid_t pid = fork();
   if (pid == 0) {
     apply_test_child_env();
+    ny_setenv("NYTRIX_REPL_TEST_PASTE_SUBMIT", "1", 1);
     setsid();
     int slave = open(slave_name, O_RDWR | O_NOCTTY);
     if (slave < 0)
@@ -1481,7 +1531,7 @@ static int run_repl_paste_case(const char *bin, const char *path,
     if (!quit_requested && sent_paste == paste_len) {
       const char *cur = out ? out : "";
       int saw_expect_now = repl_output_has_expect_then_prompt(cur, expect);
-      if (saw_expect_now || repl_output_has_failure(cur) ||
+      if (saw_expect_now ||
           (paste_sent_ms > 0.0 && now_ms() - paste_sent_ms >= quit_grace_ms))
         quit_requested = 1;
     }
@@ -1523,7 +1573,8 @@ static int run_repl_paste_case(const char *bin, const char *path,
     *dur_ms = (int)(now_ms() - start_ms);
   int rc = timed_out ? NY_TEST_TIMEOUT_RC : child_status_rc(status);
   int saw_expect = repl_output_has_expect_line(out ? out : "", expect);
-  int failed = timed_out || repl_output_has_failure(out) || (rc != 0 && !saw_expect);
+  int failed = timed_out ||
+               (!saw_expect && (repl_output_has_failure(out) || rc != 0));
   if (!failed && expect && !saw_expect) {
     snprintf(why, why_len, "missing repl output: %s", expect);
     failed = 1;

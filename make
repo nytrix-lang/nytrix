@@ -265,6 +265,45 @@ def cmake_build_has_work(build_root: Path, kind: str, targets: list[str]) -> boo
                 return True
     return False
 
+
+def _vendor_env(build_root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    vendor_dir = _detect_vendor_lib_dir(build_root)
+    if vendor_dir:
+        old = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = f"{vendor_dir}{':' + old if old else ''}"
+    return env
+
+def tool_smoke_ok(build_root: Path, kind: str, name: str) -> bool:
+    if host_os() == "windows":
+        return True
+    try:
+        binp = resolve_tool_bin(build_root, kind, name)
+    except SystemExit:
+        return False
+    launch = tool_launch_path(binp)
+    probe = "--version" if name == "ny" else "--help"
+    try:
+        res = subprocess.run(
+            [launch, probe],
+            cwd=str(ROOT),
+            env=_vendor_env(build_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=4,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    # 132 is the common shell code for SIGILL; negative means direct signal.
+    return not (res.returncode == 132 or res.returncode < 0)
+
+def clean_bad_tool_build(build_root: Path, kind: str, name: str) -> None:
+    if tool_smoke_ok(build_root, kind, name):
+        return
+    bdir = cmake_build_dir(build_root, kind)
+    boot_notice(f"stale/cpu-incompatible {name} binary detected; cleaning {bdir.name} before rebuild")
+    shutil.rmtree(bdir, ignore_errors=True)
+
 def restore_tty_visuals() -> None:
     if not sys.stdout.isatty():
         return
@@ -3780,11 +3819,7 @@ def run_make_profile(build_root: Path, kind: str, jobs: int, args: list[str]) ->
 def run_tool(build_root: Path, kind: str, name: str, args: list[str], timeout: float | None = None) -> int:
     binp = resolve_tool_bin(build_root, kind, name)
     launch = tool_launch_path(binp)
-    env = os.environ.copy()
-    vendor_dir = _detect_vendor_lib_dir(build_root)
-    if vendor_dir:
-        old = env.get("LD_LIBRARY_PATH", "")
-        env["LD_LIBRARY_PATH"] = f"{vendor_dir}{':' + old if old else ''}"
+    env = _vendor_env(build_root)
     interactive_repl = False
     if name == "ny":
         # Keep the pure REPL path minimal. Pointing interactive startup at the
@@ -5322,6 +5357,8 @@ def main() -> int:
         elif cmd == "perf":
             targets = ["ny", "ny-perf"]
         if cmd not in ("uninstall", "static", "bin-static", "tar", "vendor"):
+            if cmd in ("ny", "repl") and not cmake_build_has_work(build_root, active_kind, targets):
+                clean_bad_tool_build(build_root, active_kind, "ny")
             if cmd in ("ny", "repl") and not cmake_build_has_work(build_root, active_kind, targets):
                 pass
             else:

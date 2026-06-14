@@ -50,7 +50,7 @@ assert(count == 5, "--pre-decrement")
 mut loop_i = 0
 mut loop_sum = 0
 mut i=0
-while(i<10 ++i){
+while i<10 ++i {
    loop_sum = loop_sum + i
 }
 

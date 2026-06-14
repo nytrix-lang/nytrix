@@ -30,7 +30,7 @@ fn rect_h(list r) int { max(1, int(r.get(3, 1))) }
 fn monitor_name(any mon, int idx) str {
    "Returns a monitor name with a stable fallback label."
    def name = window.get_monitor_name(mon)
-   if(name.len > 0){ return name }
+   if name.len > 0 { return name }
    "Monitor " + to_str(idx)
 }
 
@@ -55,23 +55,23 @@ fn monitor_row(any mon, int idx) dict {
 
 fn desktop_bounds(list rows) list {
    "Returns [min_x, min_y, max_x, max_y] for monitor rows."
-   if(rows.len == 0){ return [0, 0, 1, 1] }
+   if rows.len == 0 { return [0, 0, 1, 1] }
    def first = rows.get(0, {}).get("rect", [0, 0, 1, 1])
    mut min_x = rect_x(first)
    mut min_y = rect_y(first)
    mut max_x = min_x + rect_w(first)
    mut max_y = min_y + rect_h(first)
    mut i = 1
-   while(i < rows.len){
+   while i < rows.len {
       def r = rows.get(i, {}).get("rect", [0, 0, 1, 1])
       def x = rect_x(r)
       def y = rect_y(r)
       def w = rect_w(r)
       def h = rect_h(r)
-      if(x < min_x){ min_x = x }
-      if(y < min_y){ min_y = y }
-      if(x + w > max_x){ max_x = x + w }
-      if(y + h > max_y){ max_y = y + h }
+      if x < min_x { min_x = x }
+      if y < min_y { min_y = y }
+      if x + w > max_x { max_x = x + w }
+      if y + h > max_y { max_y = y + h }
       i += 1
    }
    [min_x, min_y, max_x, max_y]
@@ -178,7 +178,7 @@ fn draw_window_flags(any font_sm, f64 x, f64 y, f64 w, dict state) int {
    def cw = (w - gap) * 0.5
    def cy = y + 22.0
    mut i = 0
-   while(i < FLAG_CELLS.len){
+   while i < FLAG_CELLS.len {
       def row = FLAG_CELLS.get(i)
       def col = i % 2
       _draw_flag_cell(font_sm, x + float(col) * (cw + gap), cy + float(int(i / 2)) * 29.0, cw, row.get(0, ""), state.get(row.get(1, ""), false))
@@ -218,7 +218,7 @@ fn draw_monitor_info(any font_body, any font_sm, any row, f64 x, f64 y, f64 w, f
    def label_size = clamp(scale * 92.0, 14.0, 26.0)
    def info_size = clamp(scale * 62.0, 10.0, 16.0)
    render.draw_text(font_body, row.get("name", ""), x + 12.0, y + max(12.0, h * 0.18), active ? widgets.C_TEXT : render.color_alpha(widgets.C_TEXT, 0.82))
-   if(h > 92.0 && w > 180.0){
+   if h > 92.0 && w > 180.0 {
       render.draw_text(font_sm, row.get("info", ""), x + 12.0, y + max(42.0, h * 0.18 + label_size), widgets.C_MUTED)
       render.draw_text(font_sm, row.get("info2", ""), x + 12.0, y + max(62.0, h * 0.18 + label_size + info_size), widgets.C_MUTED)
       render.draw_text(font_sm, row.get("info3", ""), x + 12.0, y + max(82.0, h * 0.18 + label_size + info_size * 2.0), widgets.C_MUTED)
@@ -234,7 +234,7 @@ fn draw_window_marker(any font_sm, list rect, str label="window") int {
    def h = float(rect.get(3, 3.0))
    render.draw_rect(x, y, w, h, render.color_alpha(widgets.C_ACCENT_HI, 0.42))
    render.draw_rectangle_lines(x, y, w, h, widgets.C_ACCENT_HI, 2.0)
-   if(w > 54.0 && h > 24.0){ render.draw_text(font_sm, label, x + 8.0, y + 8.0, widgets.C_TEXT) }
+   if w > 54.0 && h > 24.0 { render.draw_text(font_sm, label, x + 8.0, y + 8.0, widgets.C_TEXT) }
    0
 }
 

@@ -42,8 +42,8 @@ fn _byte_list_store(list out, int i, int value) any { __store_item_fast(out, i, 
 
 @inline
 fn _bytes_like_len(any x) int {
-   if(is_str(x) || is_bytes(x)){ return load64(x, -16) }
-   if(is_list(x)){ return x.len }
+   if is_str(x) || is_bytes(x) { return load64(x, -16) }
+   if is_list(x) { return x.len }
    0
 }
 
@@ -132,7 +132,7 @@ fn bigint_to_bin_fixed(any x, int width) str {
    def two = bigint_from_int(2)
    mut out = Builder(_bin_max_int(16, width + 8))
    mut i = width - 1
-   while(i >= 0){
+   while i >= 0 {
       def bit = bigint_mod(bigint_div(bx, bigint_lshift(one, i)), two)
       out = builder_append(out, bigint_eq(bit, one) ? "1" : "0")
       i -= 1
@@ -144,9 +144,9 @@ fn bigint_to_bin_fixed(any x, int width) str {
 
 fn _pack_uint(int n, int width, bool little) str {
    mut out = malloc(width)
-   if(!out){ return "" }
+   if !out { return "" }
    mut i = 0
-   while(i < width){
+   while i < width {
       def byte_i = little ? i : (width - 1 - i)
       store8(out, (n >> (byte_i * 8)) & 255, i)
       i += 1
@@ -189,7 +189,7 @@ fn u16le_vec(any s) list {
    mut result = list(0)
    mut n = _bytes_like_len(s)
    mut i = 0
-   while(i + 1 < n){
+   while i + 1 < n {
       result = result.append(u16le(s, i))
       i += 2
    }
@@ -201,7 +201,7 @@ fn u32le_vec(any s) list {
    mut result = list(0)
    mut n = _bytes_like_len(s)
    mut i = 0
-   while(i + 3 < n){
+   while i + 3 < n {
       result = result.append(u32le(s, i))
       i += 4
    }
@@ -213,7 +213,7 @@ fn u64le_vec(any s) list {
    mut result = list(0)
    mut n = _bytes_like_len(s)
    mut i = 0
-   while(i + 7 < n){
+   while i + 7 < n {
       result = result.append(u64le(s, i))
       i += 8
    }
@@ -252,7 +252,7 @@ fn ror(int x, int n, int bits=32) int { rotr(x, n, bits) }
 
 fn _pow2_32(int n) int {
    mut v, i = 1, 0
-   while(i < n){
+   while i < n {
       v = v * 2
       i += 1
    }
@@ -280,8 +280,8 @@ fn _not32(int x) int { 4294967295 - (x & 4294967295) }
 fn _add32(int a, int b) int { (a + b) & 4294967295 }
 
 fn _lshr32(int x, int n) int {
-   if(n <= 0){ return _u32(x) }
-   if(n >= 32){ return 0 }
+   if n <= 0 { return _u32(x) }
+   if n >= 32 { return 0 }
    _u32(x) / _pow2_32(n)
 }
 
@@ -293,8 +293,8 @@ fn bit_reverse(int x, int bits=32) int {
    "Reverse the order of bits in x."
    mut result = 0
    mut i = 0
-   while(i < bits){
-      if((x >> i) & 1){ result = result | (1 << (bits - 1 - i)) }
+   while i < bits {
+      if (x >> i) & 1 { result = result | (1 << (bits - 1 - i)) }
       i += 1
    }
    result
@@ -330,10 +330,10 @@ fn toggle_bit(int x, int n) int {
 
 fn bit_count(int x) int {
    "Count number of set bits(population count)."
-   if(x >= 0){ return simmd.popcnt64(x) }
+   if x >= 0 { return simmd.popcnt64(x) }
    mut count = 0
    mut temp = x
-   while(temp > 0){
+   while temp > 0 {
       count += temp & 1
       temp = temp >> 1
    }
@@ -342,10 +342,10 @@ fn bit_count(int x) int {
 
 fn trailing_zeros(int x) int {
    "Count trailing zero bits."
-   if(x == 0){ return 0 }
-   if(x > 0){ return simmd.ctz64(x) }
+   if x == 0 { return 0 }
+   if x > 0 { return simmd.ctz64(x) }
    mut count = 0
-   while((x & 1) == 0){
+   while (x & 1) == 0 {
       count += 1
       x = x >> 1
    }
@@ -354,12 +354,12 @@ fn trailing_zeros(int x) int {
 
 fn leading_zeros(int x, int bits=32) int {
    "Count leading zero bits."
-   if(x == 0){ return bits }
-   if(bits == 32 && x > 0){ return simmd.clz32(x) }
-   if(bits == 64 && x > 0){ return simmd.clz64(x) }
+   if x == 0 { return bits }
+   if bits == 32 && x > 0 { return simmd.clz32(x) }
+   if bits == 64 && x > 0 { return simmd.clz64(x) }
    mut count = 0
    mut i = bits - 1
-   while(i >= 0 && ((x >> i) & 1) == 0){
+   while i >= 0 && ((x >> i) & 1) == 0 {
       count += 1
       i -= 1
    }
@@ -371,7 +371,7 @@ fn _bytes_to_long(list b) bigint {
    def base = bigint_from_int(256)
    mut result = bigint_from_int(0)
    mut i = 0
-   while(i < b.len){
+   while i < b.len {
       result = bigint_add(bigint_mul(result, base), bigint_from_int(b[i]))
       i += 1
    }
@@ -382,10 +382,10 @@ fn _long_to_bytes(any n, int length=0) list<int> {
    "Convert long integer to bytes list(big-endian)."
    def zero = bigint_from_int(0)
    def base = bigint_from_int(256)
-   if(bigint_eq(bigint(n), zero)){
-      if(length > 0){
+   if bigint_eq(bigint(n), zero) {
+      if length > 0 {
          mut z, i = list(0), 0
-         while(i < length){
+         while i < length {
             z = z.append(0)
             i += 1
          }
@@ -395,28 +395,28 @@ fn _long_to_bytes(any n, int length=0) list<int> {
    }
    mut result = list(0)
    mut temp = bigint(n)
-   while(bigint_gt(temp, zero)){
+   while bigint_gt(temp, zero) {
       result = result.append(bigint_to_int(bigint_mod(temp, base)))
       temp = bigint_div(temp, base)
    }
    mut i, j = 0, result.len - 1
-   while(i < j){
+   while i < j {
       def tmp = result[i]
       result[i] = result[j]
       result[j] = tmp
       i += 1
       j -= 1
    }
-   if(length > result.len){
+   if length > result.len {
       mut pad = length - result.len
       mut new_result = list(0)
       mut k = 0
-      while(k < pad){
+      while k < pad {
          new_result = new_result.append(0)
          k += 1
       }
       k = 0
-      while(k < result.len){
+      while k < result.len {
          new_result = new_result.append(result[k])
          k += 1
       }
@@ -428,12 +428,12 @@ fn _long_to_bytes(any n, int length=0) list<int> {
 fn _bytes_to_hex(list b) str {
    "Convert bytes list to hex string."
    def n = b.len
-   if(n <= 0){ return "" }
+   if n <= 0 { return "" }
    def out_len = n * 2
    def out = malloc(out_len + 1)
-   if(!out){ return "" }
+   if !out { return "" }
    mut i, p = 0, 0
-   while(i < n){
+   while i < n {
       def byte = b[i] & 255
       def hi = byte / 16
       def lo = byte % 16
@@ -449,17 +449,17 @@ fn _bytes_to_hex(list b) str {
 fn _hex_to_bytes(str hex_str) list<int> {
    "Convert hex string to bytes list."
    def n = _bytes_like_len(hex_str)
-   if(n <= 0){ return list(0) }
+   if n <= 0 { return list(0) }
    def out_n = (n + 1) >> 1
    mut result = _byte_list_new(out_n)
    mut out_i = 0
    mut i = 0
-   if(n % 2 == 1){
+   if n % 2 == 1 {
       _byte_list_store(result, out_i, _hex_nibble(load8(hex_str, 0)))
       out_i += 1
       i = 1
    }
-   while(i < n){
+   while i < n {
       def val1, val2 = _hex_nibble(load8(hex_str, i)), _hex_nibble(load8(hex_str, i + 1))
       _byte_list_store(result, out_i, val1 * 16 + val2)
       out_i += 1
@@ -479,11 +479,11 @@ fn hex_is_valid(str s, bool even=true) bool {
    By default, also requires an even number of digits."
    s = hex_normalize(s)
    def n = _bytes_like_len(s)
-   if(n <= 0){ return false }
-   if(even && (n % 2) != 0){ return false }
+   if n <= 0 { return false }
+   if even && (n % 2) != 0 { return false }
    mut i = 0
-   while(i < n){
-      if(!_hex_is_digit(load8(s, i))){ return false }
+   while i < n {
+      if !_hex_is_digit(load8(s, i)) { return false }
       i += 1
    }
    true
@@ -494,12 +494,12 @@ fn _bytes_concat(list a, list b) list {
    def an, bn = a.len, b.len
    mut out = _byte_list_new(an + bn)
    mut i = 0
-   while(i < an){
+   while i < an {
       _byte_list_store(out, i, a[i])
       i += 1
    }
    mut j = 0
-   while(j < bn){
+   while j < bn {
       _byte_list_store(out, an + j, b[j])
       j += 1
    }
@@ -512,17 +512,17 @@ fn bytes_concat3(list a, list b, list c) list {
    def cn = c.len
    mut out = _byte_list_new(an + bn + cn)
    mut i = 0
-   while(i < an){
+   while i < an {
       _byte_list_store(out, i, a[i])
       i += 1
    }
    mut j = 0
-   while(j < bn){
+   while j < bn {
       _byte_list_store(out, an + j, b[j])
       j += 1
    }
    mut k = 0
-   while(k < cn){
+   while k < cn {
       _byte_list_store(out, an + bn + k, c[k])
       k += 1
    }
@@ -533,10 +533,10 @@ fn _bytes_xor(list b1, list b2) list {
    "XOR two byte lists."
    mut n1, n2 = b1.len, b2.len
    mut n = n1
-   if(n2 < n){ n = n2 }
+   if n2 < n { n = n2 }
    mut result = _byte_list_new(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       _byte_list_store(result, i, bxor(b1[i], b2[i]))
       i += 1
    }
@@ -545,15 +545,15 @@ fn _bytes_xor(list b1, list b2) list {
 
 fn _bytes_repeat(list b, int n) list {
    "Repeat byte list b, n times."
-   if(n <= 0 || b.len <= 0){ return list(0) }
+   if n <= 0 || b.len <= 0 { return list(0) }
    def blen = b.len
    def out_n = blen * n
    mut result = _byte_list_new(out_n)
    mut i = 0
    mut pos = 0
-   while(i < n){
+   while i < n {
       mut j = 0
-      while(j < blen){
+      while j < blen {
          _byte_list_store(result, pos, b[j])
          j += 1
          pos += 1
@@ -568,7 +568,7 @@ fn _bytes_reverse(list b) list {
    def n = b.len
    mut result = _byte_list_new(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       _byte_list_store(result, i, b[n - 1 - i])
       i += 1
    }
@@ -578,7 +578,7 @@ fn _bytes_reverse(list b) list {
 fn _bytes_trim_leading_zeros(list b) list {
    "Remove leading zero bytes, preserving a single zero for an all-zero input."
    mut i = 0
-   while(i + 1 < b.len && b[i] == 0){ i += 1 }
+   while i + 1 < b.len && b[i] == 0 { i += 1 }
    slice(b, i, b.len)
 }
 
@@ -593,21 +593,21 @@ fn _bytes_to_base64(list b) str {
    def chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
    mut result = Builder(_bin_max_int(16, ((b.len + 2) / 3) * 4 + 8))
    mut i = 0
-   while(i < b.len){
+   while i < b.len {
       def b1 = b[i]
       mut b2, b3 = 0, 0
-      if(i + 1 < b.len){ b2 = b[i + 1] }
-      if(i + 2 < b.len){ b3 = b[i + 2] }
+      if i + 1 < b.len { b2 = b[i + 1] }
+      if i + 2 < b.len { b3 = b[i + 2] }
       def c1, c2 = b1 >> 2, ((b1 & 3) << 4) | (b2 >> 4)
       result = builder_append(result, slice(chars, c1, c1 + 1))
       result = builder_append(result, slice(chars, c2, c2 + 1))
-      if(i + 1 < b.len){
+      if i + 1 < b.len {
          def c3 = ((b2 & 15) << 2) | (b3 >> 6)
          result = builder_append(result, slice(chars, c3, c3 + 1))
       } else {
          result = builder_append(result, "=")
       }
-      if(i + 2 < b.len){
+      if i + 2 < b.len {
          def c4 = b3 & 63
          result = builder_append(result, slice(chars, c4, c4 + 1))
       } else {
@@ -630,7 +630,7 @@ fn _str_to_bytes(str s) list<int> {
    def n = _bytes_like_len(s)
    mut result = _byte_list_new(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       _byte_list_store(result, i, load8(s, i))
       i += 1
    }
@@ -639,11 +639,11 @@ fn _str_to_bytes(str s) list<int> {
 
 fn bytes_to_list(any s) list<int> {
    "Convert bytes to a byte list."
-   if(is_list(s)){ return s }
+   if is_list(s) { return s }
    def n = _bytes_like_len(s)
    mut result = _byte_list_new(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       _byte_list_store(result, i, load8(s, i))
       i += 1
    }
@@ -653,11 +653,11 @@ fn bytes_to_list(any s) list<int> {
 fn _bytes_to_str(list b) str {
    "Convert bytes list to string."
    def n = b.len
-   if(n <= 0){ return "" }
+   if n <= 0 { return "" }
    def out = malloc(n + 1)
-   if(!out){ return "" }
+   if !out { return "" }
    mut i = 0
-   while(i < n){
+   while i < n {
       store8(out, b[i] & 255, i)
       i += 1
    }
@@ -817,10 +817,10 @@ fn bytes_trim_leading_zeros(list b) list { b.trim0 }
 
 fn zero_list(int n) list {
    "Create list of n zeros."
-   if(n <= 0){ return list(0) }
+   if n <= 0 { return list(0) }
    mut out = _byte_list_new(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       _byte_list_store(out, i, 0)
       i += 1
    }
@@ -836,9 +836,9 @@ fn from_list(list xs) str {
    "Converts a list of byte values into a NUL-terminated byte string."
    def n = xs.len
    def out = malloc(n + 1)
-   if(!out){ return "" }
+   if !out { return "" }
    mut i = 0
-   while(i < n){
+   while i < n {
       store8(out, xs[i] & 255, i)
       i += 1
    }
@@ -851,7 +851,7 @@ fn pkcs7_pad(list data, int block_size=16) list {
    mut padding_len = block_size - (data.len % block_size)
    mut result = clone(data)
    mut i = 0
-   while(i < padding_len){
+   while i < padding_len {
       result = result.append(padding_len)
       i += 1
    }
@@ -860,12 +860,12 @@ fn pkcs7_pad(list data, int block_size=16) list {
 
 fn pkcs7_unpad(list data) list {
    "Remove PKCS#7 padding from bytes list."
-   if(data.len == 0){ return data }
+   if data.len == 0 { return data }
    def padding_len = data[data.len - 1]
-   if(padding_len > data.len){ return data }
+   if padding_len > data.len { return data }
    mut result = list(0)
    mut i = 0
-   while(i < data.len - padding_len){
+   while i < data.len - padding_len {
       result = result.append(data[i])
       i += 1
    }
@@ -875,10 +875,10 @@ fn pkcs7_unpad(list data) list {
 fn zero_pad(list data, int block_size=16) list {
    "Zero padding for bytes list."
    mut padding_len = block_size - (data.len % block_size)
-   if(padding_len == block_size){ padding_len = 0 }
+   if padding_len == block_size { padding_len = 0 }
    mut result = clone(data)
    mut i = 0
-   while(i < padding_len){
+   while i < padding_len {
       result = result.append(0)
       i += 1
    }
@@ -888,7 +888,7 @@ fn zero_pad(list data, int block_size=16) list {
 fn zero_unpad(list data) list {
    "Remove zero padding from bytes list."
    mut result = clone(data)
-   while(result.len > 0 && result[result.len - 1] == 0){ result = slice(result, 0, result.len - 1) }
+   while result.len > 0 && result[result.len - 1] == 0 { result = slice(result, 0, result.len - 1) }
    result
 }
 
@@ -896,15 +896,15 @@ fn bit_pad(list data, int block_bits=8) list {
    "Bit padding(1 followed by zeros)."
    mut result = clone(data)
    result = result.append(128)
-   while(result.len % (block_bits / 8) != 0){ result = result.append(0) }
+   while result.len % (block_bits / 8) != 0 { result = result.append(0) }
    result
 }
 
 fn bit_unpad(list data) list {
    "Remove bit padding."
    mut i = data.len - 1
-   while(i >= 0 && data[i] == 0){ i -= 1 }
-   if(i >= 0 && data[i] == 128){ return slice(data, 0, i) }
+   while i >= 0 && data[i] == 0 { i -= 1 }
+   if i >= 0 && data[i] == 128 { return slice(data, 0, i) }
    data
 }
 
@@ -954,22 +954,22 @@ fn mask_bits(int x, int start, int width) int {
 
 fn expand_bits(int x, list positions) int {
    "Expand bits of x to positions specified in list."
-   if(positions.len <= 64){
+   if positions.len <= 64 {
       mut mask = 0
       mut ok = true
       mut p = 0
-      while(p < positions.len){
+      while p < positions.len {
          def pos = positions[p]
-         if(!is_int(pos) || pos < 0 || pos >= 64){ ok = false }
+         if !is_int(pos) || pos < 0 || pos >= 64 { ok = false }
          else { mask = mask | (1 << pos) }
          p += 1
       }
-      if(ok){ return simmd.pdep64(x, mask) }
+      if ok { return simmd.pdep64(x, mask) }
    }
    mut result = 0
    mut i = 0
-   while(i < positions.len){
-      if((x >> i) & 1){ result = result | (1 << positions[i]) }
+   while i < positions.len {
+      if (x >> i) & 1 { result = result | (1 << positions[i]) }
       i += 1
    }
    result
@@ -977,23 +977,23 @@ fn expand_bits(int x, list positions) int {
 
 fn compress_bits(int x, list positions) int {
    "Compress bits from positions into consecutive bits."
-   if(positions.len <= 64){
+   if positions.len <= 64 {
       mut mask = 0
       mut ok = true
       mut p = 0
-      while(p < positions.len){
+      while p < positions.len {
          def pos = positions[p]
-         if(!is_int(pos) || pos < 0 || pos >= 64){ ok = false }
+         if !is_int(pos) || pos < 0 || pos >= 64 { ok = false }
          else { mask = mask | (1 << pos) }
          p += 1
       }
-      if(ok){ return simmd.pext64(x, mask) }
+      if ok { return simmd.pext64(x, mask) }
    }
    mut result = 0
    mut out_pos = 0
    mut i = 0
-   while(i < positions.len){
-      if((x >> positions[i]) & 1){ result = result | (1 << out_pos) }
+   while i < positions.len {
+      if (x >> positions[i]) & 1 { result = result | (1 << out_pos) }
       out_pos += 1
       i += 1
    }

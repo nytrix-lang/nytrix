@@ -1,5 +1,5 @@
 ;; expect: check for missing ';' or unmatched brace
 use std.core
 
-if(true){
+if true {
    print(1)

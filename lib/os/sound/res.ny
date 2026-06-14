@@ -51,14 +51,14 @@ fn _sf_available() bool {
 }
 
 fn _decode_sf(any data) any {
-   if(!_sf_available()){ return 0 }
-   if(!is_str(data) || data.len < 16){ return 0 }
+   if !_sf_available() { return 0 }
+   if !is_str(data) || data.len < 16 { return 0 }
    def debug = sound_debug.enabled()
    def tmp_fn = "ny_snd_" + to_str(ticks()) + "_" + to_str(malloc(1)) + ".tmp"
    def tmp_path = path.normalize(temp_dir() + "/" + tmp_fn)
-   match file_write(tmp_path, data){
+   match file_write(tmp_path, data) {
       err(e) -> {
-         if(debug){ print("RES: Sndfile temp write failed: " + to_str(e)) }
+         if debug { print("RES: Sndfile temp write failed: " + to_str(e)) }
          return 0
       }
       ok(ignoredok)  -> { ignoredok }
@@ -67,24 +67,24 @@ fn _decode_sf(any data) any {
    memset(info_ptr, 0, 64)
    def path_cstr = cstr(tmp_path)
    def sf = sf_open(path_cstr, SFM_READ, info_ptr)
-   if(!sf){
-      if(debug){
+   if !sf {
+      if debug {
          def err_code = sf_error(0)
          def err_msg = sf_error_number(err_code)
          print("RES: Sndfile sf_open failed: " + str.cstr_to_str(err_msg))
       }
       free(info_ptr)
-      match file_remove(tmp_path){ _ -> {} }
+      match file_remove(tmp_path) { _ -> {} }
       return 0
    }
    def frames   = load64(info_ptr, 0)
    def rate     = load32(info_ptr, 8)
    def channels = load32(info_ptr, 12)
-   if(debug){ print("RES: Sndfile opened " + tmp_path + " frames=" + to_str(frames) + " rate=" + to_str(rate) + " channels=" + to_str(channels)) }
-   if(frames <= 0 || channels <= 0 || channels > 32){
+   if debug { print("RES: Sndfile opened " + tmp_path + " frames=" + to_str(frames) + " rate=" + to_str(rate) + " channels=" + to_str(channels)) }
+   if frames <= 0 || channels <= 0 || channels > 32 {
       sf_close(sf)
       free(info_ptr)
-      match file_remove(tmp_path){ _ -> {} }
+      match file_remove(tmp_path) { _ -> {} }
       return 0
    }
    def n_samples = frames * channels
@@ -92,8 +92,8 @@ fn _decode_sf(any data) any {
    def got = sf_read_short(sf, out_ptr, n_samples)
    sf_close(sf)
    free(info_ptr)
-   match file_remove(tmp_path){ _ -> {} }
-   if(got <= 0){
+   match file_remove(tmp_path) { _ -> {} }
+   if got <= 0 {
       free(out_ptr)
       return 0
    }
@@ -105,20 +105,20 @@ mut _mtx = 0
 
 fn init() bool {
    "Initializes the shared resource cache."
-   if(_mtx == 0){ _mtx = mutex_new() }
+   if _mtx == 0 { _mtx = mutex_new() }
    true
 }
 
 fn shutdown() bool {
    "Clears cached resources and releases the cache mutex."
    clear_cache()
-   if(_mtx != 0){ mutex_free(_mtx) _mtx = 0 }
+   if _mtx != 0 { mutex_free(_mtx) _mtx = 0 }
    true
 }
 
 fn clear_cache() bool {
    "Drops all cached resource entries."
-   if(_mtx == 0){ return true }
+   if _mtx == 0 { return true }
    mutex_lock(_mtx)
    _cache = dict(64)
    mutex_unlock(_mtx)
@@ -127,7 +127,7 @@ fn clear_cache() bool {
 
 fn is_cached(any filepath) bool {
    "Returns whether `filepath` is already present in the resource cache."
-   if(_mtx == 0){ return false }
+   if _mtx == 0 { return false }
    def full = path.normalize(filepath)
    mutex_lock(_mtx)
    def exists = _cache.contains(full)
@@ -137,35 +137,35 @@ fn is_cached(any filepath) bool {
 
 fn load(any filepath) any {
    "Loads a sound or image asset from disk, caching successful results by normalized path."
-   if(_mtx == 0){ init() }
+   if _mtx == 0 { init() }
    def full = path.normalize(filepath)
    mutex_lock(_mtx)
    def cached = _cache.get(full)
    mutex_unlock(_mtx)
-   if(cached){ return cached }
-   if(!fs.is_file(full)){ return 0 }
+   if cached { return cached }
+   if !fs.is_file(full) { return 0 }
    def res = file_read(full)
-   if(is_err(res)){ return 0 }
+   if is_err(res) { return 0 }
    def data = unwrap(res)
    def ext = str.lower(path.extname(full))
    mut asset = 0
-   if(ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".aiff" || ext == ".aif" || ext == ".opus"){ asset = _decode_sf(data) } else { asset = image.decode(data, ext) }
-   if(asset != 0){
+   if ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".aiff" || ext == ".aif" || ext == ".opus" { asset = _decode_sf(data) } else { asset = image.decode(data, ext) }
+   if asset != 0 {
       mutex_lock(_mtx)
       _cache = _cache.set(full, asset)
       mutex_unlock(_mtx)
-      if(sound_debug.enabled()){ print("RES: successfully loaded " + full) }
+      if sound_debug.enabled() { print("RES: successfully loaded " + full) }
    } else {
-      if(sound_debug.enabled()){ print("RES: FAILED to load " + full) }
+      if sound_debug.enabled() { print("RES: FAILED to load " + full) }
    }
    asset
 }
 
 fn get_sound_info(any sound) any {
    "Returns normalized metadata for a loaded sound source."
-   if(!is_list(sound)){ return 0 }
+   if !is_list(sound) { return 0 }
    def tag = sound.get(0)
-   if(tag != "SOUND_SOURCE"){ return 0 }
+   if tag != "SOUND_SOURCE" { return 0 }
    def d = sound.get(1)
    mut info = dict(8)
    info = info.set("channels", d.get("channels"))

@@ -19,7 +19,7 @@ fn dual_ec_backdoor(list Q, any d, any p) any {
    p: prime modulus of the field
    Returns the point P = d * Q as [x, y] or nil if inputs are invalid."
    def qx, qy = Q.get(0), Q.get(1)
-   if(d == 0){ return [0, 0] }
+   if d == 0 { return [0, 0] }
    def P = _ec_scalar_mult(d, qx, qy, p)
    P
 }
@@ -44,19 +44,19 @@ fn dual_ec_backdoor_recover_tail(any observed, any d, list Q, any curve_a, any c
    def full_limit = Z(1) << missing_bits
    mut hi = max(Z(0), Z(high_start))
    def limit = min((high_stop == nil) ? full_limit : Z(high_stop), full_limit)
-   while(hi < limit){
+   while hi < limit {
       def x = current_low + (hi << emitted_bits)
       def y2 = mod(mod_mul(x, mod_mul(x, x, pp), pp) + mod_mul(curve_a, x, pp) + Z(curve_b), pp)
       def y = ecc_sqrt_mod(y2, pp)
-      if(y >= Z(0)){
+      if y >= Z(0) {
          def A = ecc_scalar_mult(d, [x, y], curve_a, pp)
-         if(A != nil){
+         if A != nil {
             def state = A[0]
             def B = ecc_scalar_mult(state, Q, curve_a, pp)
-            if(B != nil){
+            if B != nil {
                def next_low = B[0] & ((Z(1) << emitted_bits) - Z(1))
                def prefix = next_low >> (emitted_bits - check_bits)
-               if(prefix == next_check){ return next_low & ((Z(1) << tail_bits) - Z(1)) }
+               if prefix == next_check { return next_low & ((Z(1) << tail_bits) - Z(1)) }
             }
          }
       }
@@ -75,7 +75,7 @@ fn dual_ec_drbg_predict(list outputs, list P, list Q, any p) any {
    p: prime modulus
    Returns the predicted next output x-coordinate, or -1 if prediction fails."
    def n = outputs.len
-   if(n < 1){ return -1 }
+   if n < 1 { return -1 }
    def last_output = outputs.get(n - 1)
    def qx = Q.get(0)
    def qy = Q.get(1)
@@ -86,31 +86,31 @@ fn dual_ec_drbg_predict(list outputs, list P, list Q, any p) any {
    mut state_y = 0
    def y_sq = (state_x * state_x * state_x + state_x) % p
    def y_cand = tonelli_shanks(y_sq, p)
-   if(y_cand >= 0){
+   if y_cand >= 0 {
       def test_pt = _ec_point_add(px, py, qx, qy, p)
-      if(test_pt.get(0) == state_x){
+      if test_pt.get(0) == state_x {
          state_y = qy
          found_y = true
       }
    }
-   if(!found_y && y_cand >= 0){
+   if !found_y && y_cand >= 0 {
       def y2 = (p - y_cand) % p
       def test_pt2 = _ec_point_add(px, py, qx, y2, p)
-      if(test_pt2.get(0) == state_x){
+      if test_pt2.get(0) == state_x {
          state_y = y2
          found_y = true
       }
    }
-   if(!found_y){
+   if !found_y {
       mut trial = 0
-      while(trial < 2){
+      while trial < 2 {
          def ty = (trial == 0) ? y_cand : ((p - y_cand) % p)
-         if(ty >= 0){
+         if ty >= 0 {
             def test_pt = _ec_point_add(state_x, ty, qx, qy, p)
             def tx = test_pt.get(0)
             def ty2 = test_pt.get(1)
             def verify = _ec_point_add(tx, ty2, px, py, p)
-            if(verify.get(0) == state_x){
+            if verify.get(0) == state_x {
                state_y = ty
                found_y = true
                trial = 2
@@ -119,7 +119,7 @@ fn dual_ec_drbg_predict(list outputs, list P, list Q, any p) any {
          trial += 1
       }
    }
-   if(!found_y){ return -1 }
+   if !found_y { return -1 }
    def next_state = _ec_point_add(state_x, state_y, qx, qy, p)
    next_state.get(0)
 }
@@ -127,14 +127,14 @@ fn dual_ec_drbg_predict(list outputs, list P, list Q, any p) any {
 fn _ec_scalar_mult(any k, any px, any py, any p) list {
    "Internal: Multiply point P by scalar k using double-and-add on curve y^2 = x^3 + x over Fp.
    Returns the resulting point [x, y]."
-   if(k == 0){ return [0, 0] }
+   if k == 0 { return [0, 0] }
    mut qx, qy = 0, 0
    mut rx, ry = px, py
    mut has_result = false
    mut kb = k
-   while(kb > 0){
-      if(kb & 1 != 0){
-         if(has_result){
+   while kb > 0 {
+      if kb & 1 != 0 {
+         if has_result {
             def sum = _ec_point_add(qx, qy, rx, ry, p)
             qx, qy = sum.get(0), sum.get(1)
          } else {
@@ -146,17 +146,17 @@ fn _ec_scalar_mult(any k, any px, any py, any p) list {
       rx, ry = dbl.get(0), dbl.get(1)
       kb = kb >> 1
    }
-   if(has_result){ [qx, qy] } else { [0, 0] }
+   if has_result { [qx, qy] } else { [0, 0] }
 }
 
 fn _ec_point_add(any x1, any y1, any x2, any y2, any p) list {
    "Internal: Add two points on y^2 = x^3 + x over Fp(curve with a=1, b=0).
    Returns the resulting point [x3, y3]."
-   if(x1 == 0 && y1 == 0){ return [x2, y2] }
-   if(x2 == 0 && y2 == 0){ return [x1, y1] }
-   if(x1 == x2){
+   if x1 == 0 && y1 == 0 { return [x2, y2] }
+   if x2 == 0 && y2 == 0 { return [x1, y1] }
+   if x1 == x2 {
       def y_sum = (y1 + y2) % p
-      if(y_sum == 0){ return [0, 0] }
+      if y_sum == 0 { return [0, 0] }
       def num = (3 * x1 * x1 + 1) % p
       def den = (2 * y1) % p
       def inv_den = inverse_mod(den, p)

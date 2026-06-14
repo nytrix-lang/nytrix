@@ -24,13 +24,13 @@ mut _sss_weight_cache_weights = nil
 
 fn _sss_env_enabled(str name, bool fallback=false) bool {
    def v = env(name)
-   if(!is_str(v) || v.len == 0){ return fallback }
+   if !is_str(v) || v.len == 0 { return fallback }
    v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 fn _sss_env_int(str name, int fallback) int {
    def v = env(name)
-   if(is_str(v) && v.len > 0){ return atoi(v) }
+   if is_str(v) && v.len > 0 { return atoi(v) }
    fallback
 }
 
@@ -39,26 +39,26 @@ fn _sss_trace_enabled() bool {
 }
 
 fn _sss_trace(str label, any value=nil) any {
-   if(_sss_trace_enabled()){
+   if _sss_trace_enabled() {
       print("[shamir]", label, value)
    }
 }
 
 fn _sss_batch_inverse_mod(list vals, any p) list {
    def n = vals.len
-   if(n == 0){ return [] }
+   if n == 0 { return [] }
    mut prefix = list(n)
    __list_set_len(prefix, n)
    mut acc = Z(1)
    mut i = 0
-   while(i < n){
+   while i < n {
       prefix[i] = acc
       acc = mod(acc * vals[i], p)
       i += 1
    }
    mut inv_acc = inverse_mod(acc, p)
    i = n - 1
-   while(i >= 0){
+   while i >= 0 {
       def v = vals[i]
       vals[i] = mod(inv_acc * prefix[i], p)
       inv_acc = mod(inv_acc * v, p)
@@ -68,17 +68,17 @@ fn _sss_batch_inverse_mod(list vals, any p) list {
 }
 
 fn _sss_same_xs(list xs, any cached) bool {
-   if(cached == nil || xs.len != cached.len){ return false }
+   if cached == nil || xs.len != cached.len { return false }
    mut i = 0
-   while(i < xs.len){
-      if(xs[i] != cached[i]){ return false }
+   while i < xs.len {
+      if xs[i] != cached[i] { return false }
       i += 1
    }
    true
 }
 
 fn _sss_lagrange_weights_zero(list xs, any p) list {
-   if(_sss_weight_cache_weights != nil && _sss_weight_cache_prime == p && _sss_same_xs(xs, _sss_weight_cache_xs)){
+   if _sss_weight_cache_weights != nil && _sss_weight_cache_prime == p && _sss_same_xs(xs, _sss_weight_cache_xs) {
       return _sss_weight_cache_weights
    }
    def n = xs.len
@@ -88,16 +88,16 @@ fn _sss_lagrange_weights_zero(list xs, any p) list {
    __list_set_len(suffix, n + 1)
    suffix[n] = Z(1)
    mut i = n - 1
-   while(i >= 0){
+   while i >= 0 {
       suffix[i] = mod(suffix[i + 1] * mod(-xs[i], p), p)
       i -= 1
    }
    i = 0
-   while(i < n){
+   while i < n {
       mut den = Z(1)
       mut j = 0
-      while(j < n){
-         if(i != j){ den = mod(den * mod(xs[i] - xs[j], p), p) }
+      while j < n {
+         if i != j { den = mod(den * mod(xs[i] - xs[j], p), p) }
          j += 1
       }
       dens[i] = den
@@ -108,7 +108,7 @@ fn _sss_lagrange_weights_zero(list xs, any p) list {
    __list_set_len(weights, n)
    mut prefix = Z(1)
    i = 0
-   while(i < n){
+   while i < n {
       def neg_x = mod(-xs[i], p)
       weights[i] = mod(prefix * suffix[i + 1] * inv_dens[i], p)
       prefix = mod(prefix * neg_x, p)
@@ -128,10 +128,10 @@ fn lagrange_interpolate_mod(list points, number x, number prime) number {
    mut xs = list(n)
    __list_set_len(xs, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       def pi = points[i]
       xs[i] = mod(Z(pi[0]), p)
-      if(xs[i] == x0){ return mod(Z(pi[1]), p) }
+      if xs[i] == x0 { return mod(Z(pi[1]), p) }
       i += 1
    }
    mut dens = list(n)
@@ -140,16 +140,16 @@ fn lagrange_interpolate_mod(list points, number x, number prime) number {
    __list_set_len(suffix, n + 1)
    suffix[n] = Z(1)
    i = n - 1
-   while(i >= 0){
+   while i >= 0 {
       suffix[i] = mod(suffix[i + 1] * mod(x0 - xs[i], p), p)
       i -= 1
    }
    i = 0
-   while(i < n){
+   while i < n {
       mut den = Z(1)
       mut j = 0
-      while(j < n){
-         if(i != j){
+      while j < n {
+         if i != j {
             den = mod(den * mod(xs[i] - xs[j], p), p)
          }
          j += 1
@@ -161,7 +161,7 @@ fn lagrange_interpolate_mod(list points, number x, number prime) number {
    mut total = Z(0)
    mut prefix = Z(1)
    i = 0
-   while(i < n){
+   while i < n {
       def diff = mod(x0 - xs[i], p)
       total = mod(total + mod(Z(points[i][1]), p) * prefix * suffix[i + 1] * inv_dens[i], p)
       prefix = mod(prefix * diff, p)
@@ -177,16 +177,16 @@ fn lagrange_recover_secret(list points, number prime) number {
    mut xs = list(n)
    __list_set_len(xs, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       def pi = points[i]
       xs[i] = mod(Z(pi[0]), p)
-      if(xs[i] == Z(0)){ return mod(Z(pi[1]), p) }
+      if xs[i] == Z(0) { return mod(Z(pi[1]), p) }
       i += 1
    }
    def weights = _sss_lagrange_weights_zero(xs, p)
    mut total = Z(0)
    i = 0
-   while(i < n){
+   while i < n {
       total = mod(total + mod(Z(points[i][1]), p) * weights[i], p)
       i += 1
    }
@@ -196,11 +196,11 @@ fn lagrange_recover_secret(list points, number prime) number {
 fn int_to_charset(number x, str charset) str {
    "Convert a non-negative integer to a string using the given charset as the digit alphabet."
    def base = charset.len
-   if(base <= 1){ return "" }
+   if base <= 1 { return "" }
    mut n = Z(x)
-   if(bigint_eq(n, Z(0))){ return str_slice(charset, 0, 1, 1) }
+   if bigint_eq(n, Z(0)) { return str_slice(charset, 0, 1, 1) }
    mut out = ""
-   while(bigint_gt(n, Z(0))){
+   while bigint_gt(n, Z(0)) {
       def digit = mod(n, Z(base))
       def idx = atoi(bigint_to_str(digit))
       out = str_add(str_slice(charset, idx, idx + 1, 1), out)
@@ -216,18 +216,18 @@ fn shamir_generate_shares(number secret, int threshold, int n_shares, number pri
    __list_set_len(coeffs, threshold)
    coeffs[0] = Z(secret)
    mut i = 1
-   while(i < threshold){
+   while i < threshold {
       coeffs[i] = mod(Z(secret) * Z(i + 1) + Z(i * i + 7), p)
       i += 1
    }
    mut shares = list(n_shares)
    __list_set_len(shares, n_shares)
    mut x = 1
-   while(x <= n_shares){
+   while x <= n_shares {
       def xz = Z(x)
       mut j = coeffs.len - 1
       mut y = Z(0)
-      while(j >= 0){
+      while j >= 0 {
          y = mod(y * xz + coeffs[j], p)
          j -= 1
       }
@@ -254,7 +254,7 @@ fn shamir_recovery_weights(list shares, number prime) list {
    mut xs = list(n)
    __list_set_len(xs, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       def si = shares[i]
       xs[i] = mod(Z(si[0]), p)
       i += 1
@@ -266,10 +266,10 @@ fn shamir_recover_with_weights(list shares, list weights, number prime) number {
    "Recover a Shamir secret using weights from shamir_recovery_weights for the same share x coordinates."
    def p = Z(prime)
    def n = shares.len
-   if(weights.len < n){ return Z(0) }
+   if weights.len < n { return Z(0) }
    mut total = Z(0)
    mut i = 0
-   while(i < n){
+   while i < n {
       total = mod(total + mod(Z(shares[i][1]), p) * weights[i], p)
       i += 1
    }
@@ -290,7 +290,7 @@ fn shamir_lagrange_weight_zero(number x, list xs, number prime) number {
    mut weight = Z(1)
    mut den = Z(1)
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       def xi = Z(xs[i])
       weight = mod(weight * xi, p)
       den = mod(den * mod(xi - Z(x), p), p)
@@ -318,11 +318,11 @@ fn share_forgery(number p, number s_orig, number s_target, number x, number y, l
 fn shamir_verify_consistency(list shares, number prime) bool {
    "Check adjacent share pairs reconstruct the same secret."
    def n = shares.len
-   if(n < 2){ return true }
+   if n < 2 { return true }
    def ref_secret = shamir_recover([shares[0], shares[1]], prime)
    mut i = 1
-   while(i < n - 1){
-      if(shamir_recover([shares[i], shares[i + 1]], prime) != ref_secret){ return false }
+   while i < n - 1 {
+      if shamir_recover([shares[i], shares[i + 1]], prime) != ref_secret { return false }
       i += 1
    }
    true
@@ -332,7 +332,7 @@ fn deterministic_coefficients_recover(number p, int k, number a1, fnptr next_coe
    "Recover the Shamir secret when polynomial coefficients were generated deterministically."
    mut s, a = Z(y), Z(a1)
    mut i = 1
-   while(i < k){
+   while i < k {
       s -= a * (Z(x) ^ Z(i))
       a = Z(next_coeff_fn(a))
       i += 1
@@ -344,7 +344,7 @@ fn _sss_pow_row(any x, int degree, any p) list {
    mut row = []
    mut cur = Z(1)
    mut j = 0
-   while(j <= degree){
+   while j <= degree {
       row = row.append(cur)
       cur = mod(cur * Z(x), p)
       j += 1
@@ -355,10 +355,10 @@ fn _sss_pow_row(any x, int degree, any p) list {
 fn _sss_linear_affine_basis(list mat, list rhs, any p) list {
    mut rows = []
    mut i = 0
-   while(i < mat.len){
+   while i < mat.len {
       mut row = []
       mut j = 0
-      while(j < mat[i].len){
+      while j < mat[i].len {
          row = row.append(mod(Z(mat[i][j]), p))
          j += 1
       }
@@ -371,29 +371,29 @@ fn _sss_linear_affine_basis(list mat, list rhs, any p) list {
    mut pivots = []
    mut r = 0
    mut c = 0
-   while(c < n && r < m){
+   while c < n && r < m {
       mut pivot = -1
       mut scan = r
-      while(scan < m && pivot < 0){
-         if(rows[scan][c] != Z(0)){ pivot = scan }
+      while scan < m && pivot < 0 {
+         if rows[scan][c] != Z(0) { pivot = scan }
          scan += 1
       }
-      if(pivot >= 0){
+      if pivot >= 0 {
          def tmp = rows[r]
          rows[r] = rows[pivot]
          rows[pivot] = tmp
          def inv = inverse_mod(rows[r][c], p)
          mut j = c
-         while(j <= n){
+         while j <= n {
             rows[r][j] = mod(rows[r][j] * inv, p)
             j += 1
          }
          mut rr = 0
-         while(rr < m){
-            if(rr != r && rows[rr][c] != Z(0)){
+         while rr < m {
+            if rr != r && rows[rr][c] != Z(0) {
                def factor = rows[rr][c]
                j = c
-               while(j <= n){
+               while j <= n {
                   rows[rr][j] = mod(rows[rr][j] - factor * rows[r][j], p)
                   j += 1
                }
@@ -407,34 +407,34 @@ fn _sss_linear_affine_basis(list mat, list rhs, any p) list {
    }
    mut part = []
    i = 0
-   while(i < n){
+   while i < n {
       part = part.append(Z(0))
       i += 1
    }
    i = 0
-   while(i < pivots.len){
+   while i < pivots.len {
       part[pivots[i]] = rows[i][n]
       i += 1
    }
    mut kernel = []
    c = 0
-   while(c < n){
+   while c < n {
       mut is_pivot = false
       i = 0
-      while(i < pivots.len){
-         if(pivots[i] == c){ is_pivot = true }
+      while i < pivots.len {
+         if pivots[i] == c { is_pivot = true }
          i += 1
       }
-      if(!is_pivot){
+      if !is_pivot {
          mut v = []
          i = 0
-         while(i < n){
+         while i < n {
             v = v.append(Z(0))
             i += 1
          }
          v[c] = Z(1)
          i = 0
-         while(i < pivots.len){
+         while i < pivots.len {
             v[pivots[i]] = mod(-rows[i][c], p)
             i += 1
          }
@@ -449,7 +449,7 @@ fn _sss_eval_coeffs(list coeffs, any x, any p) any {
    mut acc = Z(0)
    mut pow = Z(1)
    mut i = 0
-   while(i < coeffs.len){
+   while i < coeffs.len {
       acc = mod(acc + Z(coeffs[i]) * pow, p)
       pow = mod(pow * Z(x), p)
       i += 1
@@ -459,8 +459,8 @@ fn _sss_eval_coeffs(list coeffs, any x, any p) any {
 
 fn _sss_shares_match(list shares, list coeffs, any p) bool {
    mut i = 0
-   while(i < shares.len){
-      if(_sss_eval_coeffs(coeffs, shares[i][0], p) != mod(Z(shares[i][1]), p)){ return false }
+   while i < shares.len {
+      if _sss_eval_coeffs(coeffs, shares[i][0], p) != mod(Z(shares[i][1]), p) { return false }
       i += 1
    }
    true
@@ -474,14 +474,14 @@ fn _sss_center(any x, any p) any {
 fn _sss_free_columns(int degree, list pivots) list {
    mut free_cols = []
    mut col = 0
-   while(col <= degree){
+   while col <= degree {
       mut is_pivot = false
       mut i = 0
-      while(i < pivots.len){
-         if(pivots[i] == col){ is_pivot = true }
+      while i < pivots.len {
+         if pivots[i] == col { is_pivot = true }
          i += 1
       }
-      if(!is_pivot){ free_cols = free_cols.append(col) }
+      if !is_pivot { free_cols = free_cols.append(col) }
       col += 1
    }
    free_cols
@@ -490,10 +490,10 @@ fn _sss_free_columns(int degree, list pivots) list {
 fn _sss_small_homogeneous_lattice(list kernel, list free_cols, int degree, any p) list {
    mut hom = []
    mut i = 0
-   while(i < kernel.len){
+   while i < kernel.len {
       mut row = []
       mut j = 1
-      while(j <= degree){
+      while j <= degree {
          row = row.append(_sss_center(kernel[i][j], p))
          j += 1
       }
@@ -501,18 +501,18 @@ fn _sss_small_homogeneous_lattice(list kernel, list free_cols, int degree, any p
       i += 1
    }
    i = 0
-   while(i <= degree){
+   while i <= degree {
       mut is_free = false
       mut fi = 0
-      while(fi < free_cols.len){
-         if(free_cols[fi] == i){ is_free = true }
+      while fi < free_cols.len {
+         if free_cols[fi] == i { is_free = true }
          fi += 1
       }
-      if(!is_free){
+      if !is_free {
          def coord = i - 1
          mut row = []
          mut j = 0
-         while(j < degree){
+         while j < degree {
             row = row.append(j == coord ? p : Z(0))
             j += 1
          }
@@ -527,7 +527,7 @@ fn _sss_part_small_and_target(list part, int degree, any p) list {
    mut part_small = []
    mut target = []
    mut i = 1
-   while(i <= degree){
+   while i <= degree {
       def pi = _sss_center(part[i], p)
       part_small = part_small.append(pi)
       target = target.append(-pi)
@@ -540,7 +540,7 @@ fn _sss_ascii_hex_center(int byte_count) any {
    mut out = Z(0)
    mut pow = Z(1)
    mut i = 0
-   while(i < byte_count){
+   while i < byte_count {
       out += Z(59) * pow
       pow *= Z(256)
       i += 1
@@ -552,7 +552,7 @@ fn _sss_ascii_hex_fill(int byte_count, int value) any {
    mut out = Z(0)
    mut pow = Z(1)
    mut i = 0
-   while(i < byte_count){
+   while i < byte_count {
       out += Z(value) * pow
       pow *= Z(256)
       i += 1
@@ -563,10 +563,10 @@ fn _sss_ascii_hex_fill(int byte_count, int value) any {
 fn _sss_full_homogeneous_lattice(list kernel, list free_cols, int degree, any p) list {
    mut hom = []
    mut i = 0
-   while(i < kernel.len){
+   while i < kernel.len {
       mut row = []
       mut j = 0
-      while(j <= degree){
+      while j <= degree {
          row = row.append(_sss_center(kernel[i][j], p))
          j += 1
       }
@@ -574,17 +574,17 @@ fn _sss_full_homogeneous_lattice(list kernel, list free_cols, int degree, any p)
       i += 1
    }
    i = 0
-   while(i <= degree){
+   while i <= degree {
       mut is_free = false
       mut fi = 0
-      while(fi < free_cols.len){
-         if(free_cols[fi] == i){ is_free = true }
+      while fi < free_cols.len {
+         if free_cols[fi] == i { is_free = true }
          fi += 1
       }
-      if(!is_free){
+      if !is_free {
          mut row = []
          mut j = 0
-         while(j <= degree){
+         while j <= degree {
             row = row.append(j == i ? p : Z(0))
             j += 1
          }
@@ -597,11 +597,11 @@ fn _sss_full_homogeneous_lattice(list kernel, list free_cols, int degree, any p)
 
 fn _sss_ascii_hex_bytes(any x, int byte_count) bool {
    def bs = Z(x).bytes
-   if(bs.len != byte_count){ return false }
+   if bs.len != byte_count { return false }
    mut i = 0
-   while(i < bs.len){
+   while i < bs.len {
       def c = bs[i]
-      if(!((c >= 48 && c <= 57) || (c >= 65 && c <= 70))){ return false }
+      if !((c >= 48 && c <= 57) || (c >= 65 && c <= 70)) { return false }
       i += 1
    }
    true
@@ -616,40 +616,40 @@ fn _sss_smt_hex_byte(any ctx, any solver, str name) any {
 }
 
 fn _sss_ascii_hex_affine_smt_recover(list shares, list part, list kernel, int degree, any p, int byte_count) any {
-   if(kernel.len == 0 || !smt.z3_available()){ return nil }
+   if kernel.len == 0 || !smt.z3_available() { return nil }
    mut selected = nil
    mut ki = 0
-   while(ki < kernel.len && selected == nil){
-      if(mod(kernel[ki][degree], p) != Z(0)){ selected = kernel[ki] }
+   while ki < kernel.len && selected == nil {
+      if mod(kernel[ki][degree], p) != Z(0) { selected = kernel[ki] }
       ki += 1
    }
-   if(selected == nil){ return nil }
+   if selected == nil { return nil }
    _sss_trace("affine-smt:start", {"degree": degree, "kernel": kernel.len})
    def inv_top = inverse_mod(selected[degree], p)
    mut g = []
    mut base = []
    mut i = 0
-   while(i <= degree){
+   while i <= degree {
       g = g.append(mod(selected[i] * inv_top, p))
       i += 1
    }
    i = 0
-   while(i <= degree){
+   while i <= degree {
       base = base.append(mod(part[i] - part[degree] * g[i], p))
       i += 1
    }
    smt.z3_global_timeout_ms(30000)
    def ctx = smt.z3_ctx_new()
-   if(!ctx){ return nil }
+   if !ctx { return nil }
    def solver = smt.z3_solver_new(ctx)
-   if(!solver){
+   if !solver {
       smt.z3_ctx_del(ctx)
       return nil
    }
    mut t_terms = []
    mut pow = Z(1)
    mut k = 0
-   while(k < byte_count){
+   while k < byte_count {
       def b = _sss_smt_hex_byte(ctx, solver, "t_" + to_str(k))
       t_terms = t_terms.append(smt.z3_int_mul(ctx, [b, smt.z3_int_val(ctx, pow)]))
       pow *= Z(256)
@@ -663,11 +663,11 @@ fn _sss_ascii_hex_affine_smt_recover(list shares, list part, list kernel, int de
    smt.z3_solver_assert(ctx, solver, smt.z3_int_le(ctx, t, smt.z3_int_val(ctx, hi)))
    mut coeffs = []
    i = 0
-   while(i <= degree){
+   while i <= degree {
       mut c_terms = []
       pow = Z(1)
       k = 0
-      while(k < byte_count){
+      while k < byte_count {
          def b = _sss_smt_hex_byte(ctx, solver, "c" + to_str(i) + "_" + to_str(k))
          c_terms = c_terms.append(smt.z3_int_mul(ctx, [b, smt.z3_int_val(ctx, pow)]))
          pow *= Z(256)
@@ -680,7 +680,7 @@ fn _sss_ascii_hex_affine_smt_recover(list shares, list part, list kernel, int de
       def wrap = smt.z3_int_const(ctx, "w" + to_str(i))
       def wrap_min = bigint_div(Z(base[i]) + Z(g[i]) * lo - hi, p) - Z(1)
       def wrap_max = bigint_div(Z(base[i]) + Z(g[i]) * hi - lo, p) + Z(1)
-      if(i == 0){ _sss_trace("affine-smt:wrap0", {"min": wrap_min, "max": wrap_max}) }
+      if i == 0 { _sss_trace("affine-smt:wrap0", {"min": wrap_min, "max": wrap_max}) }
       smt.z3_solver_assert(ctx, solver, smt.z3_int_ge(ctx, wrap, smt.z3_int_val(ctx, wrap_min)))
       smt.z3_solver_assert(ctx, solver, smt.z3_int_le(ctx, wrap, smt.z3_int_val(ctx, wrap_max)))
       def rhs = smt.z3_int_sub(ctx, [
@@ -690,7 +690,7 @@ fn _sss_ascii_hex_affine_smt_recover(list shares, list part, list kernel, int de
       smt.z3_solver_assert(ctx, solver, smt.z3_eq(ctx, c, rhs))
       i += 1
    }
-   if(!smt.z3_solver_check(ctx, solver)){
+   if !smt.z3_solver_check(ctx, solver) {
       _sss_trace("ascii-affine-smt:miss", {"reason": "unsat-or-timeout"})
       smt.z3_solver_del(ctx, solver)
       smt.z3_ctx_del(ctx)
@@ -698,9 +698,9 @@ fn _sss_ascii_hex_affine_smt_recover(list shares, list part, list kernel, int de
    }
    mut out = []
    i = 0
-   while(i <= degree){
+   while i <= degree {
       def v = smt.z3_model_eval_u64(ctx, solver, coeffs[i])
-      if(v == nil){
+      if v == nil {
          smt.z3_solver_del(ctx, solver)
          smt.z3_ctx_del(ctx)
          return nil
@@ -716,7 +716,7 @@ fn _sss_ascii_hex_affine_smt_recover(list shares, list part, list kernel, int de
 fn _sss_zero_row(int n) list {
    mut row = []
    mut i = 0
-   while(i < n){
+   while i < n {
       row = row.append(Z(0))
       i += 1
    }
@@ -729,34 +729,34 @@ fn _sss_ascii_hex_embedding_scan(list shares, any rows_or_basis, int const_idx, 
    mut share_fail = 0
    mut ascii_fail = 0
    mut r = 0
-   while(r < data.len){
+   while r < data.len {
       def row = data[r]
-      if(row[const_idx] == w_const || row[const_idx] == -w_const){
+      if row[const_idx] == w_const || row[const_idx] == -w_const {
          const_hits += 1
          def sign = row[const_idx] == w_const ? Z(1) : Z(-1)
          mut coeffs = []
          mut ci = 0
-         while(ci <= degree){
+         while ci <= degree {
             mut v = center
             mut k = 0
-            while(k < byte_count){
+            while k < byte_count {
                v += sign * row[ci * byte_count + k] * pow256[k]
                k += 1
             }
             coeffs = coeffs.append(v)
             ci += 1
          }
-         if(_sss_shares_match(shares, coeffs, p)){
+         if _sss_shares_match(shares, coeffs, p) {
             mut ok = true
             ci = 0
-            while(ci < coeffs.len){
-               if(!_sss_ascii_hex_bytes(coeffs[ci], byte_count)){ ok = false }
+            while ci < coeffs.len {
+               if !_sss_ascii_hex_bytes(coeffs[ci], byte_count) { ok = false }
                ci += 1
             }
-            if(ok){ return [coeffs[0], coeffs] }
+            if ok { return [coeffs[0], coeffs] }
             ascii_fail += 1
          } else {
-            if(share_fail == 0 && _sss_trace_enabled()){
+            if share_fail == 0 && _sss_trace_enabled() {
                _sss_trace("embedding:candidate-share-miss", {
                      "secret": coeffs.len > 0 ? coeffs[0] : nil,
                      "coeff1": coeffs.len > 1 ? coeffs[1] : nil,
@@ -770,31 +770,31 @@ fn _sss_ascii_hex_embedding_scan(list shares, any rows_or_basis, int const_idx, 
       }
       r += 1
    }
-   if(_sss_trace_enabled()){
+   if _sss_trace_enabled() {
       _sss_trace("embedding:scan-miss", {"const_hits": const_hits, "share_fail": share_fail, "ascii_fail": ascii_fail})
    }
    nil
 }
 
 fn _sss_ascii_hex_embedding_recover(list shares, list part, list kernel, int degree, any p, int byte_count) any {
-   if(kernel.len == 0){ return nil }
+   if kernel.len == 0 { return nil }
    mut ki = 0
    mut selected = nil
-   while(ki < kernel.len && selected == nil){
-      if(mod(kernel[ki][degree], p) != Z(0)){ selected = kernel[ki] }
+   while ki < kernel.len && selected == nil {
+      if mod(kernel[ki][degree], p) != Z(0) { selected = kernel[ki] }
       ki += 1
    }
-   if(selected == nil){ return nil }
+   if selected == nil { return nil }
    def inv_top = inverse_mod(selected[degree], p)
    mut g = []
    mut i = 0
-   while(i <= degree){
+   while i <= degree {
       g = g.append(mod(selected[i] * inv_top, p))
       i += 1
    }
    mut base = []
    i = 0
-   while(i <= degree){
+   while i <= degree {
       base = base.append(mod(part[i] - part[degree] * g[i], p))
       i += 1
    }
@@ -808,16 +808,16 @@ fn _sss_ascii_hex_embedding_recover(list shares, list part, list kernel, int deg
    mut pow256 = []
    i = 0
    mut cur = Z(1)
-   while(i < byte_count){
+   while i < byte_count {
       pow256 = pow256.append(cur)
       cur *= Z(256)
       i += 1
    }
    mut rows = []
    i = 0
-   while(i < degree){
+   while i < degree {
       mut k = 0
-      while(k < byte_count){
+      while k < byte_count {
          mut row = _sss_zero_row(dim)
          row[i * byte_count + k] = Z(1)
          row[eq_idx + i] = pow256[k] * w_eq
@@ -827,11 +827,11 @@ fn _sss_ascii_hex_embedding_recover(list shares, list part, list kernel, int deg
       i += 1
    }
    mut k = 0
-   while(k < byte_count){
+   while k < byte_count {
       mut row = _sss_zero_row(dim)
       row[degree * byte_count + k] = Z(1)
       i = 0
-      while(i < degree){
+      while i < degree {
          row[eq_idx + i] = mod(-g[i] * pow256[k], p) * w_eq
          i += 1
       }
@@ -841,14 +841,14 @@ fn _sss_ascii_hex_embedding_recover(list shares, list part, list kernel, int deg
    mut const_row = _sss_zero_row(dim)
    const_row[const_idx] = w_const
    i = 0
-   while(i < degree){
+   while i < degree {
       def target = mod(base[i] + center * g[i] - center, p)
       const_row[eq_idx + i] = mod(-target, p) * w_eq
       i += 1
    }
    rows = rows.append(const_row)
    i = 0
-   while(i < degree){
+   while i < degree {
       mut row = _sss_zero_row(dim)
       row[eq_idx + i] = p * w_eq
       rows = rows.append(row)
@@ -859,21 +859,21 @@ fn _sss_ascii_hex_embedding_recover(list shares, list part, list kernel, int deg
    def step_cap = _sss_env_int("NY_SHAMIR_LLL_STEPS", 2048)
    def max_passes = _sss_env_int("NY_SHAMIR_LLL_PASSES", 64)
    mut pass = 0
-   while(found == nil && pass < max_passes){
+   while found == nil && pass < max_passes {
       work = lllmod.lll_reduce_bounded(work, step_cap, 0.99, "bounded-fast-no-transform", 0.51)
       found = _sss_ascii_hex_embedding_scan(shares, work, const_idx, w_const, center, pow256, degree, byte_count, p)
       pass += 1
    }
-   if(found != nil){
-      if(_sss_trace_enabled()){ _sss_trace("embedding:lll-hit", {"passes": pass}) }
+   if found != nil {
+      if _sss_trace_enabled() { _sss_trace("embedding:lll-hit", {"passes": pass}) }
       return found
    }
-   if(_sss_env_enabled("NY_SHAMIR_FLATTER_FALLBACK")){
+   if _sss_env_enabled("NY_SHAMIR_FLATTER_FALLBACK") {
       def reduced = flattermod.flatter_reduce([dim, dim, rows], 0.99, 8, 0.51)
       found = _sss_ascii_hex_embedding_scan(shares, reduced, const_idx, w_const, center, pow256, degree, byte_count, p)
-      if(found != nil){ return found }
+      if found != nil { return found }
    }
-   if(_sss_trace_enabled()){ _sss_trace("embedding:miss", {"dim": dim, "passes": pass}) }
+   if _sss_trace_enabled() { _sss_trace("embedding:miss", {"dim": dim, "passes": pass}) }
    nil
 }
 
@@ -883,7 +883,7 @@ fn _sss_secret_from_small_coeffs(list shares, list coeffs, int degree, any p) li
    mut secret = mod(y0, p)
    mut pow = mod(x0, p)
    mut j = 1
-   while(j <= degree){
+   while j <= degree {
       secret = mod(secret - coeffs[j] * pow, p)
       pow = mod(pow * x0, p)
       j += 1
@@ -900,7 +900,7 @@ fn shamir_recover_small_coeff_secret(list shares, number prime, int degree, any 
    mut mat = []
    mut rhs = []
    mut i = 0
-   while(i < shares.len){
+   while i < shares.len {
       mat = mat.append(_sss_pow_row(shares[i][0], degree, p))
       rhs = rhs.append(Z(shares[i][1]))
       i += 1
@@ -915,21 +915,21 @@ fn shamir_recover_small_coeff_secret(list shares, number prime, int degree, any 
    def part_small = centered[0]
    def target = centered[1]
    def nearest = cvpmod.cvp(hom, target, true)
-   if(nearest.len == degree){
+   if nearest.len == degree {
       mut coeffs = [Z(0)]
       mut ok = true
       mut j = 0
-      while(j < degree){
+      while j < degree {
          def cj = part_small[j] + nearest[j]
-         if(bound != nil && (bigint_abs(cj) > bound)){ ok = false }
+         if bound != nil && (bigint_abs(cj) > bound) { ok = false }
          coeffs = coeffs.append(cj)
          j += 1
       }
-      if(ok){
+      if ok {
          def recovered = _sss_secret_from_small_coeffs(shares, coeffs, degree, p)
          def secret = recovered[0]
          coeffs = recovered[1]
-         if(_sss_shares_match(shares, coeffs, p)){ return [secret, coeffs] }
+         if _sss_shares_match(shares, coeffs, p) { return [secret, coeffs] }
       }
    }
    nil
@@ -943,43 +943,43 @@ fn shamir_recover_ascii_hex_coeffs(list shares, number prime, int degree, int by
    mut mat = []
    mut rhs = []
    mut i = 0
-   while(i < shares.len){
+   while i < shares.len {
       mat = mat.append(_sss_pow_row(shares[i][0], degree, p))
       rhs = rhs.append(Z(shares[i][1]))
       i += 1
    }
    def affine = _sss_linear_affine_basis(mat, rhs, p)
    def part = affine[0]
-   if(_sss_env_enabled("NY_SHAMIR_SMT")){
+   if _sss_env_enabled("NY_SHAMIR_SMT") {
       def affine_smt = _sss_ascii_hex_affine_smt_recover(shares, part, affine[1], degree, p, byte_count)
-      if(affine_smt != nil){ return affine_smt }
+      if affine_smt != nil { return affine_smt }
    }
-   if(_sss_env_enabled("NY_SHAMIR_CVP")){
+   if _sss_env_enabled("NY_SHAMIR_CVP") {
       def free_cols = _sss_free_columns(degree, affine[2])
       def hom = _sss_full_homogeneous_lattice(affine[1], free_cols, degree, p)
       def center = _sss_ascii_hex_center(byte_count)
       mut target = []
       i = 0
-      while(i <= degree){
+      while i <= degree {
          target = target.append(center - _sss_center(part[i], p))
          i += 1
       }
       def nearest = cvpmod.cvp(hom, target, true)
-      if(nearest.len == degree + 1){
+      if nearest.len == degree + 1 {
          mut coeffs = []
          i = 0
-         while(i <= degree){
+         while i <= degree {
             coeffs = coeffs.append(_sss_center(part[i], p) + nearest[i])
             i += 1
          }
-         if(_sss_shares_match(shares, coeffs, p)){
+         if _sss_shares_match(shares, coeffs, p) {
             mut ok = true
             i = 0
-            while(i < coeffs.len){
-               if(!_sss_ascii_hex_bytes(coeffs[i], byte_count)){ ok = false }
+            while i < coeffs.len {
+               if !_sss_ascii_hex_bytes(coeffs[i], byte_count) { ok = false }
                i += 1
             }
-            if(ok){ return [coeffs[0], coeffs] }
+            if ok { return [coeffs[0], coeffs] }
          }
       }
    }

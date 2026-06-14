@@ -22,12 +22,12 @@ fn _bytes_concat(list a, list b) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       __store_item_fast(out, i, a[i])
       i += 1
    }
    mut j = 0
-   while(j < b.len){
+   while j < b.len {
       __store_item_fast(out, i + j, b[j])
       j += 1
    }
@@ -39,7 +39,7 @@ fn _bigint_to_fixed_bytes(any value, int n) list {
    __list_set_len(out, n)
    mut x = Z(value)
    mut i = n
-   while(i > 0){
+   while i > 0 {
       i -= 1
       __store_item_fast(out, i, int(x & Z(255)))
       x = x >> Z(8)
@@ -48,16 +48,16 @@ fn _bigint_to_fixed_bytes(any value, int n) list {
 }
 
 fn _pkcs1_hash_bytes(str algo, any msg) any {
-   if(algo == "md5"){ return md5(msg).unhex }
-   if(algo == "sha1"){ return sha1(msg).unhex }
-   if(algo == "sha256"){ return sha256(msg) }
+   if algo == "md5" { return md5(msg).unhex }
+   if algo == "sha1" { return sha1(msg).unhex }
+   if algo == "sha256" { return sha256(msg) }
    nil
 }
 
 fn _pkcs1_digest_info_prefix(str algo) any {
-   if(algo == "md5"){ return _ASN1_MD5 }
-   if(algo == "sha1"){ return _ASN1_SHA1 }
-   if(algo == "sha256"){ return _ASN1_SHA256 }
+   if algo == "md5" { return _ASN1_MD5 }
+   if algo == "sha1" { return _ASN1_SHA1 }
+   if algo == "sha256" { return _ASN1_SHA256 }
    nil
 }
 
@@ -65,9 +65,9 @@ fn _nonzero_random_byte() int { int(rand() % 255) + 1 }
 
 fn _valid_nonzero_bytes(list ps) bool {
    mut i = 0
-   while(i < ps.len){
+   while i < ps.len {
       def b = ps[i]
-      if(b <= 0 || b > 255){ return false }
+      if b <= 0 || b > 255 { return false }
       i += 1
    }
    true
@@ -76,24 +76,24 @@ fn _valid_nonzero_bytes(list ps) bool {
 fn emsa_pkcs1_v15_encode(any msg, int em_len, str algo="sha256") any {
    "Encode msg using EMSA-PKCS1-v1_5 for the selected hash algorithm."
    def digest = _pkcs1_hash_bytes(algo, msg)
-   if(digest == nil){ return nil }
+   if digest == nil { return nil }
    def prefix = _pkcs1_digest_info_prefix(algo)
-   if(prefix == nil){ return nil }
+   if prefix == nil { return nil }
    def t = _bytes_concat(prefix, digest)
-   if(em_len < t.len + 11){ return nil }
+   if em_len < t.len + 11 { return nil }
    def ps_len = em_len - t.len - 3
    mut em = list(em_len)
    __list_set_len(em, em_len)
    __store_item_fast(em, 0, 0)
    __store_item_fast(em, 1, 1)
    mut i = 0
-   while(i < ps_len){
+   while i < ps_len {
       __store_item_fast(em, i + 2, 0xff)
       i += 1
    }
    __store_item_fast(em, ps_len + 2, 0)
    i = 0
-   while(i < t.len){
+   while i < t.len {
       __store_item_fast(em, ps_len + 3 + i, t[i])
       i += 1
    }
@@ -104,7 +104,7 @@ fn rsa_pkcs1_v15_sign(any msg, number d, number n, str algo="sha256") any {
    "Sign msg using RSA PKCS#1 v1.5."
    def k = (bit_length(n) + 7) / 8
    def em = emsa_pkcs1_v15_encode(msg, k, algo)
-   if(em == nil){ return nil }
+   if em == nil { return nil }
    power_mod(bytes_to_bigint(em), d, n)
 }
 
@@ -112,27 +112,27 @@ fn rsa_pkcs1_v15_verify(any msg, number sig, number e, number n, str algo="sha25
    "Verify an RSA PKCS#1 v1.5 signature."
    def k = (bit_length(n) + 7) / 8
    def em_expect = emsa_pkcs1_v15_encode(msg, k, algo)
-   if(em_expect == nil){ return false }
+   if em_expect == nil { return false }
    power_mod(sig, e, n) == bytes_to_bigint(em_expect)
 }
 
 fn eme_pkcs1_v15_encode(list message, int k, any ps=nil) any {
    "Encode byte list message as an RSAES-PKCS1-v1_5 block of k bytes.
    ps may be supplied for deterministic tests and must contain nonzero bytes."
-   if(k < message.len + 11){ return nil }
+   if k < message.len + 11 { return nil }
    def ps_len = int(k - message.len - 3)
    mut pad = []
-   if(ps == nil){
+   if ps == nil {
       pad = list(ps_len)
       __list_set_len(pad, ps_len)
       mut i = 0
-      while(i < ps_len){
+      while i < ps_len {
          __store_item_fast(pad, i, _nonzero_random_byte())
          i += 1
       }
    } else {
-      if(ps.len != ps_len){ return nil }
-      if(!_valid_nonzero_bytes(ps)){ return nil }
+      if ps.len != ps_len { return nil }
+      if !_valid_nonzero_bytes(ps) { return nil }
       pad = ps
    }
    mut out = list(k)
@@ -140,15 +140,15 @@ fn eme_pkcs1_v15_encode(list message, int k, any ps=nil) any {
    __store_item_fast(out, 0, 0)
    __store_item_fast(out, 1, 2)
    mut j = 0
-   while(j < pad.len){
+   while j < pad.len {
       __store_item_fast(out, j + 2, pad[j])
       j += 1
    }
    __store_item_fast(out, ps_len + 2, 0)
    j = 0
-   while(j < message.len){
+   while j < message.len {
       def b = message[j]
-      if(b < 0 || b > 255){ return nil }
+      if b < 0 || b > 255 { return nil }
       __store_item_fast(out, ps_len + 3 + j, b)
       j += 1
    }
@@ -157,18 +157,18 @@ fn eme_pkcs1_v15_encode(list message, int k, any ps=nil) any {
 
 fn eme_pkcs1_v15_decode(list em) any {
    "Decode an RSAES-PKCS1-v1_5 encoded block. Returns message bytes or nil."
-   if(em.len < 11){ return nil }
-   if(em[0] != 0 || em[1] != 2){ return nil }
+   if em.len < 11 { return nil }
+   if em[0] != 0 || em[1] != 2 { return nil }
    mut sep = -1
    mut i = 2
-   while(i < em.len){
-      if(em[i] == 0 && sep < 0){ sep = i }
+   while i < em.len {
+      if em[i] == 0 && sep < 0 { sep = i }
       i += 1
    }
-   if(sep < 10){ return nil }
+   if sep < 10 { return nil }
    i = 2
-   while(i < sep){
-      if(em[i] == 0){ return nil }
+   while i < sep {
+      if em[i] == 0 { return nil }
       i += 1
    }
    def msg_len = em.len - sep - 1
@@ -176,7 +176,7 @@ fn eme_pkcs1_v15_decode(list em) any {
    __list_set_len(msg, msg_len)
    i = sep + 1
    mut j = 0
-   while(i < em.len){
+   while i < em.len {
       __store_item_fast(msg, j, em[i])
       i += 1
       j += 1
@@ -188,7 +188,7 @@ fn rsa_pkcs1_v15_encrypt(list message, number e, number n, any ps=nil) any {
    "Encrypt byte list message with RSAES-PKCS1-v1_5. Returns integer ciphertext."
    def k = (bit_length(n) + 7) / 8
    def em = eme_pkcs1_v15_encode(message, k, ps)
-   if(em == nil){ return nil }
+   if em == nil { return nil }
    power_mod(bytes_to_bigint(em), e, n)
 }
 

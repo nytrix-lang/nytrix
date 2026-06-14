@@ -11,7 +11,7 @@ use std.os.ui.render.dump as ui_profile
 
 fn sample_fps(list samples, int frames, int last_tick, int now, int cap=256) dict {
    "Samples FPS once per second and appends it to history."
-   if(now - last_tick < 1000000000){
+   if now - last_tick < 1000000000 {
       return {"samples": samples, "frames": frames, "last": last_tick, "fps": 0, "sampled": false}
    }
    def fps = frames
@@ -26,11 +26,11 @@ fn sample_fps(list samples, int frames, int last_tick, int now, int cap=256) dic
 
 fn print_fps_summary(int log_enabled, int started_at, int total, list samples, bool show_median=false) bool {
    "Prints average and optional median FPS summary."
-   if(log_enabled != 1 || total <= 0){ return false }
+   if log_enabled != 1 || total <= 0 { return false }
    def elapsed_s = ui_profile.elapsed_s(started_at)
    def avg = int(float(total) / elapsed_s)
    ui_profile.print_text(f"[FPS] avg={avg}  frames={total}  time={elapsed_s:.2f}s")
-   if(show_median && samples.len > 0){
+   if show_median && samples.len > 0 {
       ui_profile.print_text("[ui] fps median=" + to_str(int(stat.median(samples))) + " samples=" + to_str(samples.len))
    }
    true
@@ -39,6 +39,26 @@ fn print_fps_summary(int log_enabled, int started_at, int total, list samples, b
 fn profile_dump_file() str {
    "Returns the active profile dump path, if frame tracing is enabled."
    ui_profile.profile_dump_enabled(ui_profile.trace_enabled()) ? ui_profile.profile_dump_file() : ""
+}
+
+fn _hot_stage(f64 up, f64 dr, f64 wo, f64 ui, f64 ev, f64 gp, f64 sm) str {
+   mut name = "update"
+   mut value = up
+   if dr > value { name = "draw" value = dr }
+   if wo > value { name = "world" value = wo }
+   if ui > value { name = "ui" value = ui }
+   if ev > value { name = "events" value = ev }
+   if gp > value { name = "prep" value = gp }
+   if sm > value { name = "sim" value = sm }
+   name + "=" + to_str(value) + "ms"
+}
+
+fn _budget_hint(f64 frame_ms, f64 draw_ms, f64 ui_ms, f64 event_ms) str {
+   def budget = float(ui_profile.env_int_cached("NY_UI_FRAME_BUDGET_MS", 16, 1, 1000))
+   if frame_ms <= budget { return "ok" }
+   if event_ms >= draw_ms && event_ms >= ui_ms { return "events: coalesce mouse/paste or lower per-frame event budget" }
+   if ui_ms >= draw_ms { return "ui: reduce visible widgets/text or enable idle reuse" }
+   "draw: inspect renderer batches/textures or switch backend/vsync"
 }
 
 fn record_frame_profile(
@@ -54,7 +74,7 @@ fn record_frame_profile(
    f64 last_sim_ms
 ) bool {
    "Records frame timings and prints the configured aggregate profile line."
-   if(!trace){ return false }
+   if !trace { return false }
    ui_profile.frame_record(
       last_update_ms,
       last_draw_ms,
@@ -65,7 +85,7 @@ fn record_frame_profile(
       last_gui_prep_ms,
    last_sim_ms)
    def nprint = ui_profile.frame_print_every()
-   if(ui_profile.frame_samples() < nprint){ return false }
+   if ui_profile.frame_samples() < nprint { return false }
    def n = ui_profile.frame_samples()
    def avg_up = ui_profile.frame_avg("update_ms")
    def avg_dr = ui_profile.frame_avg("draw_ms")
@@ -77,17 +97,21 @@ fn record_frame_profile(
    def avg_sm = ui_profile.frame_avg("sim_ms")
    def fps_est = ui_profile.frame_fps("frame_ms")
    mut deep_profile_msg = ""
-   if(ui_profile.deep_enabled()){
+   if ui_profile.deep_enabled() {
       deep_profile_msg = " evt=" + to_str(avg_ev) +
       "ms prep=" + to_str(avg_gp) +
       "ms sim=" + to_str(avg_sm) + "ms"
    }
+   def hot = _hot_stage(avg_up, avg_dr, avg_wo, avg_ui, avg_ev, avg_gp, avg_sm)
+   def hint = _budget_hint(avg_fr, avg_dr, avg_ui, avg_ev)
    ui_profile.print_text("[frame] fps~" + to_str(__flt_to_int(fps_est + 0.5)) +
       " frame=" + to_str(avg_fr) + "ms" +
       " upd=" + to_str(avg_up) + "ms" +
       " draw=" + to_str(avg_dr) + "ms" +
       " world=" + to_str(avg_wo) + "ms" +
       " ui=" + to_str(avg_ui) + "ms" +
+      " hot=" + hot +
+      " hint=" + hint +
    deep_profile_msg)
    ui_profile.profile_dump_row(total_frames, n, fps_est, avg_fr, avg_up, avg_dr, avg_wo, avg_ui, avg_ev, avg_gp, avg_sm)
    ui_profile.frame_reset()
@@ -106,7 +130,7 @@ fn print_bench_summary(
    bool with_desc=true
 ) bool {
    "Prints FPS summary followed by renderer benchmark stats."
-   if(!print_fps_summary(log_enabled, started_at, total, samples, show_median)){ return false }
+   if !print_fps_summary(log_enabled, started_at, total, samples, show_median) { return false }
    ui_profile.print_text(prefix + ui_app.app_renderer_stats_line(renderer_stats, with_verts, with_desc))
    true
 }

@@ -11,11 +11,19 @@ use std.core.mem (cstr)
 #linux {
    #link "libGL.so"
    #link "libX11.so"
-   #include <X11/Xlib.h>
-   #include <GL/glx.h>
-   fn XFree(any _data) any {
-      "Releases memory allocated by Xlib or GLX."
-      0
+   extern "GL" {
+      fn glXChooseFBConfig(ptr display, i32 screen, ptr attrs, ptr count) ptr
+      fn glXGetVisualFromFBConfig(ptr display, ptr fbconfig) ptr
+      fn glXGetFBConfigAttrib(ptr display, ptr config, i32 attr, ptr value) i32
+      fn glXCreateNewContext(ptr display, ptr fbconfig, i32 type, ptr share, i32 direct) ptr
+      fn glXDestroyContext(ptr display, ptr ctx) any
+      fn glXMakeCurrent(ptr display, u64 win, ptr ctx) i32
+      fn glXSwapBuffers(ptr display, u64 win) any
+      fn glXGetProcAddress(ptr name) ptr
+      fn glXGetProcAddressARB(ptr name) ptr
+   }
+   extern "X11" {
+      fn XFree(ptr data) i32
    }
 } #endif
 #windows {
@@ -97,10 +105,10 @@ use std.core.mem (cstr)
 
 fn choose_fb_config(any display, any screen, any attrs=0) any {
    "Runs the choose fb config operation."
-   if(!display){ return 0 }
+   if !display { return 0 }
    def count_ptr = zalloc(4)
    mut final_attrs = []
-   if(is_list(attrs) && attrs.len > 0){ final_attrs = attrs } else {
+   if is_list(attrs) && attrs.len > 0 { final_attrs = attrs } else {
       final_attrs = [
          0x8002, 1,
          0x8010, 0x01,
@@ -117,7 +125,7 @@ fn choose_fb_config(any display, any screen, any attrs=0) any {
    def final_attrs_n = final_attrs.len
    def attr_list = zalloc((final_attrs_n + 1) * 4)
    mut i = 0
-   while(i < final_attrs_n){
+   while i < final_attrs_n {
       store32(attr_list, int(final_attrs.get(i)), i * 4)
       i += 1
    }
@@ -125,10 +133,10 @@ fn choose_fb_config(any display, any screen, any attrs=0) any {
    def configs = glXChooseFBConfig(display, int(screen), attr_list, count_ptr)
    def count = load32(count_ptr, 0)
    mut res = 0
-   if(configs && count > 0){
+   if configs && count > 0 {
       res = load64(configs, 0)
    }
-   if(configs){ XFree(configs) }
+   if configs { XFree(configs) }
    free(count_ptr)
    free(attr_list)
    res
@@ -136,9 +144,9 @@ fn choose_fb_config(any display, any screen, any attrs=0) any {
 
 fn get_visual(any display, any fbconfig) any {
    "Returns the X11 Visual* for a GLX framebuffer config."
-   if(!fbconfig){ return 0 }
+   if !fbconfig { return 0 }
    def info = glXGetVisualFromFBConfig(display, fbconfig)
-   if(!info){ return 0 }
+   if !info { return 0 }
    def visual = load64(info, 0)
    XFree(info)
    visual
@@ -146,9 +154,9 @@ fn get_visual(any display, any fbconfig) any {
 
 fn get_visual_depth(any display, any fbconfig) int {
    "Returns the X11 visual depth for a GLX framebuffer config."
-   if(!fbconfig){ return 0 }
+   if !fbconfig { return 0 }
    def info = glXGetVisualFromFBConfig(display, fbconfig)
-   if(!info){ return 0 }
+   if !info { return 0 }
    def depth = load32_h(info, 20)
    XFree(info)
    depth
@@ -156,9 +164,9 @@ fn get_visual_depth(any display, any fbconfig) int {
 
 fn get_fbconfig_attrib(any display, any config, any attr) int {
    "Returns get fbconfig attrib."
-   if(!display || !config){ return 0 }
+   if !display || !config { return 0 }
    def value = malloc(4)
-   if(!value){ return 0 }
+   if !value { return 0 }
    store32(value, 0, 0)
    glXGetFBConfigAttrib(display, config, attr, value)
    def res = load32(value, 0)
@@ -168,13 +176,13 @@ fn get_fbconfig_attrib(any display, any config, any attr) int {
 
 fn create_context(any display, any fbconfig, any share=0, bool direct=true) any {
    "Creates create context."
-   if(!fbconfig){ return 0 }
+   if !fbconfig { return 0 }
    glXCreateNewContext(display, fbconfig, 0x8014, share, direct ? 1 : 0)
 }
 
 fn destroy_context(any display, any ctx) bool {
    "Destroys destroy context."
-   if(!ctx){ return false }
+   if !ctx { return false }
    glXDestroyContext(display, ctx)
    true
 }
@@ -186,7 +194,7 @@ fn make_current(any display, any win, any ctx) bool {
 
 fn swap_buffers(any display, any win) bool {
    "Runs the swap buffers operation."
-   if(!win){ return false }
+   if !win { return false }
    glXSwapBuffers(display, win)
    true
 }
@@ -196,10 +204,10 @@ fn swap_interval(any interval) bool {
    #linux {
       def name_mesa = cstr("glXSwapIntervalMESA")
       def proc_mesa = glXGetProcAddress(name_mesa)
-      if(proc_mesa){ __call1_ptr(proc_mesa, int(interval)) return true }
+      if proc_mesa { __call1_ptr(proc_mesa, int(interval)) return true }
       def name_sgi = cstr("glXSwapIntervalSGI")
       def proc_sgi = glXGetProcAddress(name_sgi)
-      if(proc_sgi){ __call1_ptr(proc_sgi, int(interval)) return true }
+      if proc_sgi { __call1_ptr(proc_sgi, int(interval)) return true }
    }
    false
 }
@@ -207,10 +215,10 @@ fn swap_interval(any interval) bool {
 fn get_proc_address(any name) any {
    "Returns get proc address."
    def proc_name = to_str(name)
-   if(!startswith(proc_name, "gl")){ return 0 }
+   if !startswith(proc_name, "gl") { return 0 }
    def s = cstr(proc_name)
    def addr = glXGetProcAddress(s)
-   if(addr){ return addr }
+   if addr { return addr }
    glXGetProcAddressARB(s)
 }
 

@@ -50,19 +50,19 @@ fn fps_skip_reuse(bool reuse_color, int fps_value) bool {
 
 fn draw_fps(int font, int fps_value, bool reuse_color=false) bool {
    "Draws the compact FPS badge."
-   if(!font){ return false }
+   if !font { return false }
    def fv = int(fps_value)
-   if(fv != _cached_fps){
+   if fv != _cached_fps {
       _cached_fps = fv
       _cached_fps_str = f"FPS {fv:04}"
       _refresh_frames = 8
    }
-   if(reuse_color && _refresh_frames <= 0){ return true }
+   if reuse_color && _refresh_frames <= 0 { return true }
    def col = (fv >= 100) ? _color_fps_g : ((fv >= 50) ? _color_fps_w : _color_fps_b)
    gfx.draw_rect_fast(3.0, 3.0, 112.0, 21.0, _color_diag_bg)
    gfx.draw_rect_fast(3.0, 3.0, 2.0, 21.0, _color_diag_bar)
    gfx.draw_text(font, _cached_fps_str, 5.0, 5.0, col)
-   if(reuse_color && _refresh_frames > 0){ _refresh_frames -= 1 }
+   if reuse_color && _refresh_frames > 0 { _refresh_frames -= 1 }
    true
 }
 
@@ -90,8 +90,8 @@ fn draw_crosshair(f64 ww, f64 wh, any mesh=0, any model_matrix=0, f64 last_x=-9e
    "Draws the cached mesh crosshair when available, otherwise draws the pixel fallback. Returns [center_x, center_y]."
    def cx = float(int(ww * 0.5))
    def cy = float(int(wh * 0.5))
-   if(mesh != 0 && model_matrix != 0){
-      if(cx != last_x || cy != last_y){
+   if mesh != 0 && model_matrix != 0 {
+      if cx != last_x || cy != last_y {
          rmat.mat4_translate_into(cx - 1.0, cy - 1.0, -1.0, model_matrix)
       }
       gfx.set_ortho_2d(0, ww, 0, wh)

@@ -60,19 +60,19 @@ use std.os.ui.window.platform as ui_backend
 
 fn _is_debug() bool { ui_profile.debug_enabled() }
 
-fn _dbg(any msg) any { if(_is_debug()){ ui_profile.print_text("[window:native] " + msg) } }
+fn _dbg(any msg) any { if _is_debug() { ui_profile.print_text("[window:native] " + msg) } }
 mut _title_buf = 0
 mut _title_cap = 0
 mut _ready = false
 
 fn init() bool {
    "Initializes the window system. Returns true on success."
-   if(_ready){
+   if _ready {
       _dbg("init: already ready")
       return true
    }
    _dbg("init: starting backend bootstrap")
-   if(!ui_backend.init()){
+   if !ui_backend.init() {
       _dbg("ERROR: backend init failed")
       return false
    }
@@ -83,7 +83,7 @@ fn init() bool {
 
 fn terminate() any {
    "Terminates the window system and frees resources."
-   if(_ready){
+   if _ready {
       _dbg("terminate: backend=" + ui_backend.get_backend_name())
       ui_backend.terminate()
       _ready = false
@@ -112,7 +112,7 @@ fn apply_hints(int flags) any {
 fn create_window(any title, int w, int h, int flags=0) any {
    "Creates a new window with Vulkan support and the specified hints."
    init()
-   if(!title){ title = "nytrix" }
+   if !title { title = "nytrix" }
    _dbg("create_window: title='" + title + "' size=" + to_str(w) + "x" + to_str(h) + " flags=0x" + to_hex(flags))
    apply_hints(flags)
    def win = ui_backend.create_window(title, 0, 0, w, h, flags)
@@ -122,7 +122,7 @@ fn create_window(any title, int w, int h, int flags=0) any {
 
 fn destroy_window(any win) any {
    "Destroys the specified window."
-   if(win){
+   if win {
       _dbg("destroy_window: win=0x" + to_hex(win))
       ui_backend.destroy_window(win)
    }
@@ -164,7 +164,7 @@ fn set_pos(any win, int x, int y) any {
 @jit
 fn poll_events() any {
    "Processes all pending window events."
-   if(_ready){
+   if _ready {
       _dbg("poll_events")
       ui_backend.poll_events()
    }
@@ -295,7 +295,7 @@ fn set_input_mode(any win, int mode, int value) any {
 
 fn focus_window(any win) any {
    "Brings the specified window to the foreground."
-   if(win){
+   if win {
       _dbg("focus_window: win=0x" + to_hex(win))
       ui_backend.focus_window(win)
    }
@@ -303,7 +303,7 @@ fn focus_window(any win) any {
 
 fn set_window_opacity(any win, any v) any {
    "Sets whole-window opacity when supported by the platform."
-   if(win){
+   if win {
       _dbg("set_window_opacity: win=0x" + to_hex(win) + " opacity=" + to_str(v))
       ui_backend.set_window_opacity(win, float(v))
    }
@@ -311,7 +311,7 @@ fn set_window_opacity(any win, any v) any {
 
 fn set_clipboard(any win, str s) any {
    "Sets the system clipboard content for the specified window context."
-   if(win){
+   if win {
       _dbg("set_clipboard: win=0x" + to_hex(win) + " bytes=" + to_str(s.len))
       ui_backend.set_clipboard(win, s)
    }
@@ -319,7 +319,7 @@ fn set_clipboard(any win, str s) any {
 
 fn get_clipboard(any win) str {
    "Retrieves the current system clipboard content."
-   if(!win){ return "" }
+   if !win { return "" }
    def s = ui_backend.get_clipboard(win)
    _dbg("get_clipboard: win=0x" + to_hex(win) + " bytes=" + to_str(s.len))
    s
@@ -402,20 +402,20 @@ fn get_instance_proc_address(any instance, any procname) any {
 
 fn get_osmesa_context(any win) any {
    "Returns the OSMesa context of the specified window."
-   if(!win){ return 0 }
+   if !win { return 0 }
    def ctx = win.get("offscreen_context", 0)
-   if(!ctx){ return 0 }
+   if !ctx { return 0 }
    ctx.get("context", 0)
 }
 
 fn get_osmesa_color_buffer(any win, any width_ptr, any height_ptr, any format_ptr, any buffer_ptr) bool {
    "Retrieves the color buffer associated with the specified OSMesa context attached to a window."
-   if(!win){ return false }
+   if !win { return false }
    def ctx = win.get("offscreen_context", 0)
-   if(!ctx){ return false }
-   if(buffer_ptr){ store64(buffer_ptr, ctx.get("buffer", 0)) }
-   if(width_ptr){ store64(width_ptr, ctx.get("width", 0)) }
-   if(height_ptr){ store64(height_ptr, ctx.get("height", 0)) }
+   if !ctx { return false }
+   if buffer_ptr { store64(buffer_ptr, ctx.get("buffer", 0)) }
+   if width_ptr { store64(width_ptr, ctx.get("width", 0)) }
+   if height_ptr { store64(height_ptr, ctx.get("height", 0)) }
    true
 }
 

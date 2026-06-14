@@ -11,19 +11,19 @@ module std.math.crypto.factorization.fermat(fermat_factor, fermat_factor_bounded
 use std.math.nt
 
 fn _fermat_isqrt_int(int n) int {
-   if(n <= 0){ return 0 }
+   if n <= 0 { return 0 }
    mut hi = 1
-   while(hi <= n / hi){ hi *= 2 }
+   while hi <= n / hi { hi *= 2 }
    mut lo = hi / 2
-   while(lo + 1 < hi){
+   while lo + 1 < hi {
       def mid = (lo + hi) / 2
-      if(mid <= n / mid){ lo = mid } else { hi = mid }
+      if mid <= n / mid { lo = mid } else { hi = mid }
    }
    lo
 }
 
 fn _fermat_is_square_int(int n) bool {
-   if(n < 0){ return false }
+   if n < 0 { return false }
    def r = _fermat_isqrt_int(n)
    r * r == n
 }
@@ -31,13 +31,13 @@ fn _fermat_is_square_int(int n) bool {
 fn _fermat_factor_bounded_i62(int n, int max_iter) any {
    mut a = _fermat_isqrt_int(n)
    mut count = 0
-   while(count < max_iter){
+   while count < max_iter {
       def diff = a * a - n
-      if(diff >= 0 && _fermat_is_square_int(diff)){
+      if diff >= 0 && _fermat_is_square_int(diff) {
          def b = _fermat_isqrt_int(diff)
          def p = a - b
          def q = a + b
-         if(p > 1 && q > 1){ return p < q ? [Z(p), Z(q)] : [Z(q), Z(p)] }
+         if p > 1 && q > 1 { return p < q ? [Z(p), Z(q)] : [Z(q), Z(p)] }
          return nil
       }
       a += 1
@@ -53,14 +53,14 @@ fn fermat_factor(any n) list {
    mut a = isqrt(n)
    mut a_sq = a * a
    def diff = a_sq - n
-   if(diff >= 0 && is_perfect_square(diff)){
+   if diff >= 0 && is_perfect_square(diff) {
       def b = isqrt(diff)
       mut p, q = a - b, a + b
       (p < q) ? [p, q] : [q, p]
    } else {
       mut aa = a + 1
       mut bb = aa * aa - n
-      while(!is_perfect_square(bb)){
+      while !is_perfect_square(bb) {
          aa += 1
          bb = aa * aa - n
       }
@@ -74,13 +74,13 @@ fn fermat_factor_bounded(any n, int max_iter) any {
    "Factor n using Fermat method with an iteration limit.
    Returns [p, q] if found within max_iter iterations,
    or nil if the factors are too far apart."
-   if(bit_length(n) <= 62){ return _fermat_factor_bounded_i62(bigint_to_int(Z(n)), max_iter) }
+   if bit_length(n) <= 62 { return _fermat_factor_bounded_i62(bigint_to_int(Z(n)), max_iter) }
    mut a = isqrt(n)
    mut count = 0
-   while(count < max_iter){
+   while count < max_iter {
       def a_sq = a * a
       def diff = a_sq - n
-      if(diff >= 0 && is_perfect_square(diff)){
+      if diff >= 0 && is_perfect_square(diff) {
          def b = isqrt(diff)
          mut p, q = a - b, a + b
          return(p > 1 && q > 1) ? ((p < q) ? [p, q] : [q, p]) : nil

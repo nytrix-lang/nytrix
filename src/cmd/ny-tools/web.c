@@ -50,11 +50,10 @@ static int mkdir_p(const char *path) {
   char tmp[PATH_MAX];
   snprintf(tmp, sizeof(tmp), "%s", path);
   for (char *p = tmp + 1; *p; p++) {
-    if (*p == '/') {
-      *p = '\0';
-      ny_mkdir_compat(tmp);
-      *p = '/';
-    }
+    if (*p != '/') continue;
+    *p = '\0';
+    ny_mkdir_compat(tmp);
+    *p = '/';
   }
   return ny_mkdir_compat(tmp) == 0 || ny_access(tmp, F_OK) == 0;
 }
@@ -271,10 +270,9 @@ static const char *find_nytrix_share_root(void) {
       "/opt/homebrew/share/nytrix",
   };
   for (size_t i = 0; i < sizeof(system_roots) / sizeof(system_roots[0]); i++) {
-    if (has_web_assets(system_roots[i])) {
-      snprintf(root, sizeof(root), "%s", system_roots[i]);
-      return root;
-    }
+    if (!has_web_assets(system_roots[i])) continue;
+    snprintf(root, sizeof(root), "%s", system_roots[i]);
+    return root;
   }
   return NULL;
 }
@@ -737,10 +735,9 @@ static char *dedent_clean_code(const char *code, size_t n) {
       p++;
     int blank = 1;
     for (size_t i = start; i < p; i++) {
-      if (code[i] != ' ' && code[i] != '\t' && code[i] != '\r') {
-        blank = 0;
-        break;
-      }
+      if (code[i] == ' ' || code[i] == '\t' || code[i] == '\r') continue;
+      blank = 0;
+      break;
     }
     if (!blank)
       break;
@@ -1144,21 +1141,19 @@ static char *extract_body_html(const char *html) {
   const char *lo = html;
   const char *body = NULL;
   for (const char *p = lo; *p; p++) {
-    if (strncasecmp(p, "<body", 5) == 0) {
-      body = strchr(p, '>');
-      if (body)
-        body++;
-      break;
-    }
+    if (strncasecmp(p, "<body", 5) != 0) continue;
+    body = strchr(p, '>');
+    if (body)
+      body++;
+    break;
   }
   if (!body)
     return strdup(html);
   const char *end = NULL;
   for (const char *p = body; *p; p++) {
-    if (strncasecmp(p, "</body>", 7) == 0) {
-      end = p;
-      break;
-    }
+    if (strncasecmp(p, "</body>", 7) != 0) continue;
+    end = p;
+    break;
   }
   return strndup0(body, end ? (size_t)(end - body) : strlen(body));
 }
@@ -5385,9 +5380,9 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
   write_api_seo_index(out_dir, site, docs_json, has_site ? &sitemap : NULL,
                       &plain, module_count, symbol_count);
   sb_add(&plain,
-	         "\n## Feed and social\n\n"
-	         "- [RSS](feed.xml): reader-ready feed for documentation, "
-	         "release notes, and API index changes.\n"
+            "\n## Feed and social\n\n"
+            "- [RSS](feed.xml): reader-ready feed for documentation, "
+            "release notes, and API index changes.\n"
          "- [Discord](https://discord.gg/XQDR6DZWb)\n"
          "- [Mastodon](https://mastodon.social/@nytrix)\n");
   if (has_site)

@@ -14,18 +14,18 @@ use std.core.str as str
 
 fn _strip_b64_padding(str s) str {
    mut n = s.len
-   while(n > 0 && slice(s, n - 1, n) == "="){ n -= 1 }
+   while n > 0 && slice(s, n - 1, n) == "=" { n -= 1 }
    slice(s, 0, n)
 }
 
 fn _b64url_to_b64(str s) str {
    mut out = str.str_replace(str.str_replace(s, "-", "+"), "_", "/")
    def rem = out.len % 4
-   if(rem == 2){
+   if rem == 2 {
       out = out + "=="
-   } elif(rem == 3){
+   } elif rem == 3 {
       out = out + "="
-   } elif(rem == 1){
+   } elif rem == 1 {
       panic("invalid base64url length")
    }
    out
@@ -59,11 +59,11 @@ fn _jwt_parts(str token) list {
 }
 
 fn _jwt_equal_fixed_time(str a, str b) bool {
-   if(a.len != b.len){ return false }
+   if a.len != b.len { return false }
    mut ok = true
    mut i = 0
-   while(i < a.len){
-      if(load8(a, i) != load8(b, i)){ ok = false }
+   while i < a.len {
+      if load8(a, i) != load8(b, i) { ok = false }
       i += 1
    }
    ok
@@ -115,9 +115,9 @@ fn jwt_hs256_confusion_json(str payload_json, str public_key_pem, str header_jso
 fn jwt_hs256_verify(str token, str secret) bool {
    "Verify a compact JWT with HS256 and return false for alg mismatches or bad signatures."
    def parts = str.split(token, ".")
-   if(parts.len != 3){ return false }
+   if parts.len != 3 { return false }
    def header = json_decode(jwt_base64url_decode_str(parts.get(0)))
-   if(header.get("alg", "") != "HS256"){ return false }
+   if header.get("alg", "") != "HS256" { return false }
    def signing_input = parts.get(0) + "." + parts.get(1)
    def expected = jwt_base64url_encode_bytes(sha256_hmac(secret, signing_input))
    _jwt_equal_fixed_time(expected, parts.get(2))

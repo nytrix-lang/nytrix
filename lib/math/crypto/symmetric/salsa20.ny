@@ -28,7 +28,7 @@ fn salsa20_block(list st) list {
 
 fn _salsa20_block_with_orig(list st, list st_orig) list {
    mut i = 0
-   while(i < 10){
+   while i < 10 {
       _quarter_round(st, 0, 4, 8, 12)
       _quarter_round(st, 5, 9, 13, 1)
       _quarter_round(st, 10, 14, 2, 6)
@@ -39,7 +39,7 @@ fn _salsa20_block_with_orig(list st, list st_orig) list {
       _quarter_round(st, 15, 12, 13, 14)
       i += 1
    }
-   mut j = 0 while(j < 16){
+   mut j = 0 while j < 16 {
       st[j] = (st[j] + st_orig[j]) & 0xffffffff
       j += 1
    }
@@ -50,8 +50,8 @@ fn _salsa20_base_ctx(list key, list nonce, int counter) list {
    mut ctx = list(16)
    ctx[0] = 0x61707865 ctx[5] = 0x3320646e
    ctx[10] = 0x79622d32 ctx[15] = 0x6b206574
-   mut i = 0 while(i < 4){ ctx[1 + i] = unpack_le32(key, i * 4) i += 1 }
-   i = 0 while(i < 4){ ctx[11 + i] = unpack_le32(key, 16 + i * 4) i += 1 }
+   mut i = 0 while i < 4 { ctx[1 + i] = unpack_le32(key, i * 4) i += 1 }
+   i = 0 while i < 4 { ctx[11 + i] = unpack_le32(key, 16 + i * 4) i += 1 }
    ctx[6] = unpack_le32(nonce, 0)
    ctx[7] = unpack_le32(nonce, 4)
    ctx[8] = counter & 0xffffffff
@@ -61,7 +61,7 @@ fn _salsa20_base_ctx(list key, list nonce, int counter) list {
 
 fn _salsa20_xor_block(list out, list data, int offset, list st) list {
    mut j = 0
-   while(j < 64 && (offset + j) < data.len){
+   while j < 64 && (offset + j) < data.len {
       def keystream_word = st[j / 4]
       def keystream_byte = (keystream_word >> (8 * (j % 4))) & 0xff
       out[offset + j] = data[offset + j] ^^ keystream_byte
@@ -81,9 +81,9 @@ fn salsa20_encrypt(list key, list nonce, int counter, list plaintext) list {
    store64(st_orig, 16, 0)
    mut p = 0
    mut block_counter = counter
-   while(p < plaintext.len){
+   while p < plaintext.len {
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          def v = ctx[i]
          st[i] = v
          st_orig[i] = v

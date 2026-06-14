@@ -37,8 +37,8 @@ fn reset() any {
 fn shutdown() any {
    "Flushes and releases the rectangle batch backing buffer."
    flush()
-   if(_rects){ free(_rects) }
-   if(_tex){ free(_tex) }
+   if _rects { free(_rects) }
+   if _tex { free(_tex) }
    _rects, _cap, _count = 0, 0, 0
    _tex, _tex_cap, _tex_count = 0, 0, 0
 }
@@ -49,23 +49,23 @@ fn queued_count() int {
 }
 
 fn _reserve(int need) bool {
-   if(need <= _cap){ return true }
+   if need <= _cap { return true }
    mut cap = _cap > 0 ? _cap : RECT_INITIAL_CAP
-   while(cap < need){ cap *= 2 }
+   while cap < need { cap *= 2 }
    def bytes = cap * RECT_STRIDE
    def p = _rects ? realloc(_rects, bytes) : malloc(bytes)
-   if(!p){ return false }
+   if !p { return false }
    _rects, _cap = p, cap
    true
 }
 
 fn _reserve_tex(int need) bool {
-   if(need <= _tex_cap){ return true }
+   if need <= _tex_cap { return true }
    mut cap = _tex_cap > 0 ? _tex_cap : RECT_INITIAL_CAP
-   while(cap < need){ cap *= 2 }
+   while cap < need { cap *= 2 }
    def bytes = cap * TEX_STRIDE
    def p = _tex ? realloc(_tex, bytes) : malloc(bytes)
-   if(!p){ return false }
+   if !p { return false }
    _tex, _tex_cap = p, cap
    true
 }
@@ -103,14 +103,14 @@ fn _write_tex(
 }
 
 fn _flush_tex() int {
-   if(_tex_count <= 0 || !_tex){
+   if _tex_count <= 0 || !_tex {
       _tex_count = 0
       return 0
    }
    def n = _tex_count
    _tex_count = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       def rec = _tex + i * TEX_STRIDE
       gfx.draw_rect_tex_uv(
          load32_f32(rec, 0), load32_f32(rec, 4),
@@ -129,7 +129,7 @@ fn _flush_tex() int {
 fn flush() int {
    "Submits queued packed rectangles/textures and returns the submitted count."
    mut n = 0
-   if(_count <= 0 || !_rects){
+   if _count <= 0 || !_rects {
       _count = 0
    } else {
       n = _count
@@ -141,21 +141,21 @@ fn flush() int {
 
 fn queue_rect(f64 x, f64 y, f64 w, f64 h, int color) bool {
    "Queues one packed solid rectangle."
-   if(w <= 0.0 || h <= 0.0){ return true }
-   if(!_reserve(_count + 1)){
+   if w <= 0.0 || h <= 0.0 { return true }
+   if !_reserve(_count + 1) {
       gfx.draw_rect_fast(x, y, w, h, color)
       return true
    }
    _write(_count, x, y, w, h, color)
    _count += 1
-   if(_count >= RECT_SOFT_FLUSH){ flush() }
+   if _count >= RECT_SOFT_FLUSH { flush() }
    true
 }
 
 fn queue_outline(f64 x, f64 y, f64 w, f64 h, int color) bool {
    "Queues a 1px outline as four packed solid rectangles."
-   if(w <= 0.0 || h <= 0.0){ return true }
-   if(!_reserve(_count + 4)){
+   if w <= 0.0 || h <= 0.0 { return true }
+   if !_reserve(_count + 4) {
       flush()
       gfx.draw_rect_outline_fast(x, y, w, h, color)
       return true
@@ -165,27 +165,27 @@ fn queue_outline(f64 x, f64 y, f64 w, f64 h, int color) bool {
    _write(_count + 2, x, y, 1.0, h, color)
    _write(_count + 3, x + w - 1.0, y, 1.0, h, color)
    _count += 4
-   if(_count >= RECT_SOFT_FLUSH){ flush() }
+   if _count >= RECT_SOFT_FLUSH { flush() }
    true
 }
 
 @jit
 fn checker(f64 world_left, f64 world_top, f64 sw, f64 sh, f64 cell, int color_a, int color_b) int {
    "Draws a camera-aligned checkerboard through the packed rectangle batch."
-   if(sw <= 0.0 || sh <= 0.0 || cell <= 0.0){ return 0 }
+   if sw <= 0.0 || sh <= 0.0 || cell <= 0.0 { return 0 }
    flush()
    def start_col, start_row = int(math.floor(world_left / cell)) - 1, int(math.floor(world_top / cell)) - 1
    def end_col = int(math.floor((world_left + sw) / cell)) + 2
    def end_row = int(math.floor((world_top + sh) / cell)) + 2
    def need = int(math.max(1, (end_col - start_col + 1) * (end_row - start_row + 1))) + 1
-   if(!_reserve(need)){
+   if !_reserve(need) {
       queue_rect(0.0, 0.0, sw, sh, color_b)
       mut row = start_row
-      while(row <= end_row){
+      while row <= end_row {
          def y0, y1 = math.floor(float(row) * cell - world_top), math.floor(float(row + 1) * cell - world_top)
          mut col = start_col
-         while(col <= end_col){
-            if((row + col) % 2 == 0){
+         while col <= end_col {
+            if (row + col) % 2 == 0 {
                def x0, x1 = math.floor(float(col) * cell - world_left), math.floor(float(col + 1) * cell - world_left)
                queue_rect(x0, y0, x1 - x0, y1 - y0, color_a)
             }
@@ -199,11 +199,11 @@ fn checker(f64 world_left, f64 world_top, f64 sw, f64 sh, f64 cell, int color_a,
    _write(_count, 0.0, 0.0, sw, sh, color_b)
    _count += 1
    mut row = start_row
-   while(row <= end_row){
+   while row <= end_row {
       def y0, y1 = math.floor(float(row) * cell - world_top), math.floor(float(row + 1) * cell - world_top)
       mut col = start_col
-      while(col <= end_col){
-         if((row + col) % 2 == 0){
+      while col <= end_col {
+         if (row + col) % 2 == 0 {
             def x0, x1 = math.floor(float(col) * cell - world_left), math.floor(float(col + 1) * cell - world_left)
             _write(_count, x0, y0, x1 - x0, y1 - y0, color_a)
             _count += 1
@@ -255,8 +255,8 @@ fn _put_quad(ptr p, int n, f64 x, f64 y, f64 w, f64 h, int color) int {
 fn release_static_checker(list cache) int {
    "Releases the buffers returned by `static_checker`."
    def sbuf = cache.get(0, 0)
-   if(is_dict(sbuf)){ gfx.mesh_destroy(sbuf) }
-   if(cache.get(6, 0)){ free(cache.get(6, 0)) }
+   if is_dict(sbuf) { gfx.mesh_destroy(sbuf) }
+   if cache.get(6, 0) { free(cache.get(6, 0)) }
    0
 }
 
@@ -272,10 +272,10 @@ fn _static_checker_dynamic(
 ) int {
    mut n = 0
    mut row = start_row
-   while(row <= end_row && n < cap){
+   while row <= end_row && n < cap {
       mut col = start_col
-      while(col <= end_col && n < cap){
-         if((row + col) % 2 == 0){
+      while col <= end_col && n < cap {
+         if (row + col) % 2 == 0 {
             def rec = buf + n * RECT_STRIDE
             store32_f32(rec, float(col) * cell, 0)
             store32_f32(rec, float(row) * cell, 4)
@@ -293,31 +293,31 @@ fn _static_checker_dynamic(
 
 fn static_checker(list cache, f64 world_left, f64 world_top, f64 sw, f64 sh, f64 cell, int color_a) list {
    "Draws a camera-aligned checkerboard through a cached static GPU mesh."
-   if(sw <= 0.0 || sh <= 0.0 || cell <= 0.0){ return cache }
+   if sw <= 0.0 || sh <= 0.0 || cell <= 0.0 { return cache }
    def start_col, start_row = int(math.floor(world_left / cell)) - 1, int(math.floor(world_top / cell)) - 1
    def end_col = int(math.floor((world_left + sw) / cell)) + 2
    def end_row = int(math.floor((world_top + sh) / cell)) + 2
    def changed = start_col != int(cache.get(1, 0)) ||
-      start_row != int(cache.get(2, 0)) ||
-      end_col != int(cache.get(3, 0)) ||
-      end_row != int(cache.get(4, 0))
+   start_row != int(cache.get(2, 0)) ||
+   end_col != int(cache.get(3, 0)) ||
+   end_row != int(cache.get(4, 0))
    mut sbuf = cache.get(0, 0)
    mut count = int(cache.get(5, 0))
    mut buf = cache.get(6, 0)
    mut cap = int(cache.get(7, 0))
    mut mode = int(cache.get(8, 0))
    def need = int(math.max(2, (end_col - start_col + 1) * (end_row - start_row + 1)))
-   if(changed || mode == 0){
-      if(is_dict(sbuf)){ gfx.mesh_destroy(sbuf) }
+   if changed || mode == 0 {
+      if is_dict(sbuf) { gfx.mesh_destroy(sbuf) }
       sbuf = 0
       count = 0
       def verts = malloc(need * 6 * VERTEX_STRIDE)
-      if(verts){
+      if verts {
          mut row = start_row
-         while(row <= end_row){
+         while row <= end_row {
             mut col = start_col
-            while(col <= end_col){
-               if((row + col) % 2 == 0){
+            while col <= end_col {
+               if (row + col) % 2 == 0 {
                   count = _put_quad(verts, count, float(col) * cell, float(row) * cell, cell, cell, color_a)
                }
                col += 1
@@ -329,14 +329,14 @@ fn static_checker(list cache, f64 world_left, f64 world_top, f64 sw, f64 sh, f64
          opts["vc_mode"] = 1
          opts["no_cull"] = true
          sbuf = gfx.mesh_create_static(verts, count, false, opts)
-         if(!is_dict(sbuf)){ free(verts) }
+         if !is_dict(sbuf) { free(verts) }
       }
-      if(is_dict(sbuf)){
+      if is_dict(sbuf) {
          mode = 1
       } else {
          mode = 2
-         if(need > cap){
-            if(buf){ free(buf) }
+         if need > cap {
+            if buf { free(buf) }
             buf = malloc(need * RECT_STRIDE)
             cap = need
          }
@@ -344,10 +344,10 @@ fn static_checker(list cache, f64 world_left, f64 world_top, f64 sw, f64 sh, f64
       }
    }
    gfx.set_ortho_2d(world_left, world_left + sw, world_top, world_top + sh)
-   if(mode == 1 && is_dict(sbuf)){
+   if mode == 1 && is_dict(sbuf) {
       gfx.set_unlit(true)
       gfx.draw_mesh(sbuf, false, 1.0)
-   } elif(buf && count > 0){
+   } elif buf && count > 0 {
       gfx.draw_rects_fast_ptr(buf, count, RECT_STRIDE)
    }
    [sbuf, start_col, start_row, end_col, end_row, count, buf, cap, mode]
@@ -355,26 +355,26 @@ fn static_checker(list cache, f64 world_left, f64 world_top, f64 sw, f64 sh, f64
 
 fn rgba_mesh(any data, int w, int h, int channels=4, f64 scale=1.0, int alpha_min=1) dict {
    "Builds a static colored-quad mesh from raw RGBA/RGB image pixels."
-   if(!data || w <= 0 || h <= 0 || channels <= 0 || scale <= 0.0){ return {} }
+   if !data || w <= 0 || h <= 0 || channels <= 0 || scale <= 0.0 { return {} }
    mut visible = 0
    mut p = 0
    def pixels = w * h
-   while(p < pixels){
+   while p < pixels {
       def a = channels > 3 ? load8(data, p * channels + 3) : 255
-      if(a >= alpha_min){ visible += 1 }
+      if a >= alpha_min { visible += 1 }
       p += 1
    }
-   if(visible <= 0){ return {} }
+   if visible <= 0 { return {} }
    def verts = malloc(visible * 6 * VERTEX_STRIDE)
-   if(!verts){ return {} }
+   if !verts { return {} }
    mut n = 0
    mut y = 0
-   while(y < h){
+   while y < h {
       mut x = 0
-      while(x < w){
+      while x < w {
          def si = (y * w + x) * channels
          def a = channels > 3 ? load8(data, si + 3) : 255
-         if(a >= alpha_min){
+         if a >= alpha_min {
             def r = load8(data, si)
             def g = channels > 1 ? load8(data, si + 1) : r
             def b = channels > 2 ? load8(data, si + 2) : r
@@ -398,15 +398,15 @@ fn rgba_mesh(any data, int w, int h, int channels=4, f64 scale=1.0, int alpha_mi
    opts["vc_mode"] = 1
    opts["no_cull"] = true
    def sbuf = gfx.mesh_create_static(verts, n, false, opts)
-   if(!is_dict(sbuf)){ free(verts) }
+   if !is_dict(sbuf) { free(verts) }
    is_dict(sbuf) ? {"mesh": sbuf, "count": n, "w": w, "h": h, "scale": scale} : {}
 }
 
 fn release_mesh(any mesh) int {
    "Releases a mesh returned by `rgba_mesh`."
-   if(is_dict(mesh)){
+   if is_dict(mesh) {
       def sbuf = mesh.get("mesh", 0)
-      if(is_dict(sbuf)){ gfx.mesh_destroy(sbuf) }
+      if is_dict(sbuf) { gfx.mesh_destroy(sbuf) }
    }
    0
 }
@@ -415,7 +415,7 @@ fn draw_mesh(dict mesh, f64 cx, f64 cy, f64 rot_deg=0.0, bool flip_x=false) bool
    "Draws a static colored mesh around `cx,cy` with optional rotation and X flip."
    def sbuf = mesh.get("mesh", 0)
    def count = int(mesh.get("count", 0))
-   if(!is_dict(sbuf) || count <= 0){ return false }
+   if !is_dict(sbuf) || count <= 0 { return false }
    rmat.mat4_translate_into(cx, cy, 0.0, _mesh_t)
    rmat.mat4_rotate_z_into(rot_deg * DEG_TO_RAD, _mesh_r)
    rmat.mat4_scale_into(flip_x ? -1.0 : 1.0, 1.0, 1.0, _mesh_s)
@@ -434,14 +434,14 @@ fn draw_tex_uv(
    f64 r=1.0, f64 g=1.0, f64 b=1.0, f64 a=1.0
 ) bool {
    "Queues a textured rectangle. Solids and textures are flushed together before text."
-   if(w <= 0.0 || h <= 0.0){ return true }
-   if(!_reserve_tex(_tex_count + 1)){
+   if w <= 0.0 || h <= 0.0 { return true }
+   if !_reserve_tex(_tex_count + 1) {
       flush()
       gfx.draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a)
       return true
    }
    _write_tex(_tex_count, x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a)
    _tex_count += 1
-   if(_tex_count >= RECT_SOFT_FLUSH){ flush() }
+   if _tex_count >= RECT_SOFT_FLUSH { flush() }
    true
 }

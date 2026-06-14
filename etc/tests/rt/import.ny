@@ -99,7 +99,7 @@ assert(get(b, 0) == 246, "generic get after aliased imports")
 assert(b.get(0) == 246, "method get after aliased imports")
 assert(min(3, 7) == 3, "core min is available")
 assert(max(3, 7) == 7, "core max is available")
-def any: waitpid_fn = os_waitpid
+def any waitpid_fn = os_waitpid
 assert(type(waitpid_fn) == "ptr", "std.os waitpid facade imports as function pointer")
 assert(!os_args.flag("--definitely-not-present"), "module wrapper resolves module-local helper under user shadow")
 mut a = [10, 20]

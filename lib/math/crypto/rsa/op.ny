@@ -24,7 +24,7 @@ fn compute_lambda_factors(list factors) any {
    "Compute Carmichael lambda for a list of distinct RSA prime factors."
    mut lam = Z(1)
    mut i = 0
-   while(i < factors.len){
+   while i < factors.len {
       lam = lcm(lam, Z(factors[i]) - Z(1))
       i += 1
    }
@@ -40,26 +40,26 @@ fn rsa_decrypt_with_factors(any c, any e, any n, list factors) ?bigint {
    "Decrypt RSA ciphertext c using public exponent e, modulus n, and the prime factors of n."
    mut prod = Z(1)
    mut i = 0
-   while(i < factors.len){
+   while i < factors.len {
       prod *= Z(factors[i])
       i += 1
    }
-   if(prod != Z(n)){ return nil }
+   if prod != Z(n) { return nil }
    def d = rsa_private_exponent_from_factors(e, factors)
-   if(d == nil || d == 0){ return nil }
+   if d == nil || d == 0 { return nil }
    rsa_decrypt(Z(c), d, Z(n))
 }
 
 fn rsa_decrypt_text_with_factors(any c, any e, any n, list factors) str {
    "Decrypt RSA ciphertext c with known factors and decode the plaintext integer as text."
    def m = rsa_decrypt_with_factors(c, e, n, factors)
-   if(m == nil){ return "" }
+   if m == nil { return "" }
    Z(m).bytes.text
 }
 
 fn is_perfect_square(any n) bool {
    "Return true if n is a perfect square."
-   if(n < 0){ return false }
+   if n < 0 { return false }
    def s = isqrt(n)
    s * s == n
 }
@@ -68,7 +68,7 @@ fn rsa_keygen(int bits) list {
    "Generate an RSA keypair with the given modulus bit size(min 16).
    Returns [n, e, d, p, q]."
    mut p, q = random_prime(bits / 2), random_prime(bits / 2)
-   while(p == q){ q = random_prime(bits / 2) }
+   while p == q { q = random_prime(bits / 2) }
    def n = p * q
    def phi_n = compute_phi(p, q)
    def e = 65537
@@ -81,7 +81,7 @@ fn rsa_gen_keypair(any p, any q, any e) any {
    Returns [n, e, d] or nil if e is not coprime to phi(n)."
    def n = p * q
    def phi_n = compute_phi(p, q)
-   if(gcd(e, phi_n) != 1){ return nil }
+   if gcd(e, phi_n) != 1 { return nil }
    def d = compute_d(e, phi_n)
    [n, e, d]
 }
@@ -110,7 +110,7 @@ fn rsa_combine_exponent_chain(list exponents, any phi_n) any {
    "Combine sequential RSA public exponents into one exponent modulo phi(n)."
    mut out = Z(1)
    mut i = 0
-   while(i < exponents.len){
+   while i < exponents.len {
       out = mod(out * Z(exponents[i]), phi_n)
       i += 1
    }
@@ -121,6 +121,6 @@ fn rsa_decrypt_exponent_chain(any c, list exponents, any n, any phi_n) any {
    "Decrypt a ciphertext produced by repeatedly applying RSA with the same n
    and each exponent in exponents."
    def e_all, d_all = rsa_combine_exponent_chain(exponents, phi_n), inverse_mod(e_all, phi_n)
-   if(d_all == nil || d_all == 0){ return nil }
+   if d_all == nil || d_all == 0 { return nil }
    power_mod(c, d_all, n)
 }

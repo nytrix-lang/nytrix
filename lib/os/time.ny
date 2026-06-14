@@ -27,7 +27,7 @@ fn _pad4(int n) str { pad_start(to_str(n), 4, "0") }
 
 fn format_time(int ts) str {
    "Format Unix seconds as `YYYY-MM-DD HH:MM:SS` in UTC."
-   if(ts < 0){ ts = 0 }
+   if ts < 0 { ts = 0 }
    mut days = ts / 86400
    mut rem = ts - days * 86400
    def hour = rem / 3600
@@ -35,16 +35,16 @@ fn format_time(int ts) str {
    def minute = rem / 60
    def second = rem - minute * 60
    mut year = 1970
-   while(1){
+   while 1 {
       def diy = _days_in_year(year)
-      if(days < diy){ break }
+      if days < diy { break }
       days = days - diy
       year += 1
    }
    mut month = 1
-   while(1){
+   while 1 {
       def dim = _days_in_month(year, month)
-      if(days < dim){ break }
+      if days < dim { break }
       days = days - dim
       month += 1
    }

@@ -11,8 +11,8 @@ fn inspect_str(any x) str {
    "Returns detailed information about value `x` as a string."
    def t = type(x)
    mut out = f"Type:  {t}\nValue: {repr(x)}"
-   if(t == "list" || t == "dict" || t == "set"){ out = out + f"\nLen:   {to_str(x.len)}" }
-   if(is_ptr(x)){ out = out + f"\nAddr:  0x{to_str(x)}" }
+   if t == "list" || t == "dict" || t == "set" { out = out + f"\nLen:   {to_str(x.len)}" }
+   if is_ptr(x) { out = out + f"\nAddr:  0x{to_str(x)}" }
    out
 }
 
@@ -24,7 +24,7 @@ fn inspect(any x) int {
 
 fn repl_show(any x) any {
    "Function used by the REPL to display values."
-   if(x || __is_int(x)){ print(repr(x)) }
+   if x || __is_int(x) { print(repr(x)) }
    x
 }
 

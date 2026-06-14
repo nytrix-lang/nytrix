@@ -10,7 +10,7 @@ mut u = list(N)
 mut v = list(N)
 mut tmp = list(N)
 mut i = 0
-while(i < N){
+while i < N {
    u = u.append(1.0)
    v = v.append(0.0)
    tmp = tmp.append(0.0)
@@ -24,10 +24,10 @@ fn A(i, j) {
 
 fn mul_Av(x, out) {
    mut i = 0
-   while(i < N){
+   while i < N {
       mut sum = 0.0
       mut j = 0
-      while(j < N){
+      while j < N {
          sum += A(i, j) * x.get(j)
          j += 1
       }
@@ -38,10 +38,10 @@ fn mul_Av(x, out) {
 
 fn mul_Atv(x, out) {
    mut i = 0
-   while(i < N){
+   while i < N {
       mut sum = 0.0
       mut j = 0
-      while(j < N){
+      while j < N {
          sum += A(j, i) * x.get(j)
          j += 1
       }
@@ -52,7 +52,7 @@ fn mul_Atv(x, out) {
 
 def start = ticks()
 i = 0
-while(i < ITERS){
+while i < ITERS {
    mul_Av(u, tmp)
    mul_Atv(tmp, v)
    mul_Av(v, tmp)
@@ -63,7 +63,7 @@ while(i < ITERS){
 mut vbv = 0.0
 mut vv = 0.0
 i = 0
-while(i < N){
+while i < N {
    vbv += u.get(i) * v.get(i)
    vv += v.get(i) * v.get(i)
    i += 1

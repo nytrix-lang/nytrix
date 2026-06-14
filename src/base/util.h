@@ -42,6 +42,7 @@ static inline char *ny_read_file_raw(const char *path, size_t *out_len) {
   return content;
 }
 char *ny_read_file(const char *path);
+char *ny_read_url(const char *url);
 int ny_write_file(const char *path, const char *content, size_t len);
 bool ny_write_if_changed(const char *path, const char *content, size_t len);
 void ny_write_text_file(const char *path, const char *contents);

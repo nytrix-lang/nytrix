@@ -18,9 +18,9 @@ fn _find_roots_of_xe_eq_x(any e, any p) list {
    e: public exponent, p: prime modulus."
    mut roots = list(0)
    mut x = 0
-   while(x < p){
+   while x < p {
       def xe = power_mod(x, e, p)
-      if(xe == x){ roots = roots.append(x) }
+      if xe == x { roots = roots.append(x) }
       x += 1
    }
    roots
@@ -48,10 +48,10 @@ fn find_fixed_points(any e, any p, any q) list {
    mut result = list(0)
    def p_inv, q_inv = inverse_mod(p, q), inverse_mod(q, p)
    mut i = 0
-   while(i < np){
+   while i < np {
       def a_p = roots_p.get(i)
       mut j = 0
-      while(j < nq){
+      while j < nq {
          def a_q = roots_q.get(j)
          def term1 = a_p * q * q_inv
          def term2 = a_q * p * p_inv

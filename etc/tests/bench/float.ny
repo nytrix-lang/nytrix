@@ -8,7 +8,7 @@ mut x = 1.0
 def y = 1.000001
 def iters = _bench_scale(500000, 1000)
 mut i = 0
-while(i < iters){
+while i < iters {
    x = x * y
    i += 1
 }

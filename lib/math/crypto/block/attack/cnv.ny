@@ -14,7 +14,7 @@ use std.math.crypto.symmetric.aes
 fn _cnv_xor_block(list a, list b) list {
    mut out = []
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       out = out.append(a[i] ^^ b[i])
       i += 1
    }
@@ -31,11 +31,11 @@ fn cnv_md5_cbc_encrypt(list key, list iv, list plaintext) list {
    mut h = clone(iv)
    mut out = clone(iv)
    mut p = 0
-   while(p < padded.len){
+   while p < padded.len {
       def block = slice(padded, p, p + 16)
       def ct = aes_encrypt_block(ctx, _cnv_xor_block(block, h))
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          out = out.append(ct[i])
          i += 1
       }
@@ -47,18 +47,18 @@ fn cnv_md5_cbc_encrypt(list key, list iv, list plaintext) list {
 
 fn cnv_md5_cbc_decrypt(list key, list ciphertext) ?list {
    "Decrypt iv || ciphertext from the AES-CNV MD5-chained CBC variant."
-   if(ciphertext.len < 32 || ciphertext.len % 16 != 0){ return nil }
+   if ciphertext.len < 32 || ciphertext.len % 16 != 0 { return nil }
    def ctx = aes_init(key)
    def iv = slice(ciphertext, 0, 16)
    mut h = clone(iv)
    mut out = []
    mut p = 16
-   while(p < ciphertext.len){
+   while p < ciphertext.len {
       def block = slice(ciphertext, p, p + 16)
       def dec = aes_decrypt_block(ctx, block)
       def pt = _cnv_xor_block(dec, h)
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          out = out.append(pt[i])
          i += 1
       }

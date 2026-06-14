@@ -86,11 +86,11 @@ fn hide_replace(dict st) dict {
 }
 
 fn toggle_replace(dict st) dict {
-   if(replace_on(st)){ hide_replace(st) } else { show_replace(st) }
+   if replace_on(st) { hide_replace(st) } else { show_replace(st) }
 }
 
 fn toggle_field(dict st) dict {
-   if(!replace_on(st)){ return st }
+   if !replace_on(st) { return st }
    st["field"] = active_field(st) == "replace" ? "find" : "replace"
    st
 }
@@ -117,24 +117,24 @@ fn _word_boundary(str line, int start, int end) bool {
 }
 
 fn _find_from(str text, str needle, int pos) int {
-   if(needle.len <= 0 || pos > text.len){ return -1 }
+   if needle.len <= 0 || pos > text.len { return -1 }
    def at = str.find(str.str_slice(text, pos, text.len), needle)
    at < 0 ? -1 : pos + at
 }
 
 fn _add_result(list out, int line, int start, int end, str text) list {
-   if(out.len >= MAX_RESULTS || end < start){ return out }
+   if out.len >= MAX_RESULTS || end < start { return out }
    out.append({"line": line, "start": start, "end": end, "text": text})
 }
 
 fn _literal_line(list out, str needle, str raw_needle, str line, int li, bool case_sensitive, bool whole_word) list {
    def hay = case_sensitive ? line : str.lower(line)
    mut pos = 0
-   while(pos <= hay.len && out.len < MAX_RESULTS){
+   while pos <= hay.len && out.len < MAX_RESULTS {
       def at = _find_from(hay, needle, pos)
-      if(at < 0){ break }
+      if at < 0 { break }
       def end = at + needle.len
-      if(!whole_word || _word_boundary(line, at, end)){
+      if !whole_word || _word_boundary(line, at, end) {
          out = _add_result(out, li, at, end, str.str_slice(line, at, end))
       }
       pos = max(end, at + 1)
@@ -145,11 +145,11 @@ fn _literal_line(list out, str needle, str raw_needle, str line, int li, bool ca
 fn _regex_line(list out, any rx, str line, int li, bool whole_word) list {
    def ms = regex.finditer(rx, line)
    mut i = 0
-   while(i < ms.len && out.len < MAX_RESULTS){
+   while i < ms.len && out.len < MAX_RESULTS {
       def m = ms.get(i)
       def start = regex.start(m, 0)
       def end = regex.end(m, 0)
-      if(end > start && (!whole_word || _word_boundary(line, start, end))){
+      if end > start && (!whole_word || _word_boundary(line, start, end)) {
          out = _add_result(out, li, start, end, regex.group(m, 0))
       }
       i += 1
@@ -158,13 +158,13 @@ fn _regex_line(list out, any rx, str line, int li, bool whole_word) list {
 }
 
 fn _nearest_index(list rs, int cursor_line, int cursor_col) int {
-   if(rs.len <= 0){ return 0 }
+   if rs.len <= 0 { return 0 }
    mut i = 0
-   while(i < rs.len){
+   while i < rs.len {
       def r = rs.get(i)
       def line = int(r.get("line", 0))
       def start = int(r.get("start", 0))
-      if(line > cursor_line || (line == cursor_line && start >= cursor_col)){ return i }
+      if line > cursor_line || (line == cursor_line && start >= cursor_col) { return i }
       i += 1
    }
    0
@@ -173,13 +173,13 @@ fn _nearest_index(list rs, int cursor_line, int cursor_col) int {
 fn refresh(dict st, list lines, int cursor_line=0, int cursor_col=0) dict {
    def q = query(st)
    st["error"] = ""
-   if(q.len <= 0){
+   if q.len <= 0 {
       st["results"] = []
       st["index"] = 0
       return st
    }
    mut out = []
-   if(regex_on(st)){
+   if regex_on(st) {
       mut rx = nil
       try {
          rx = regex.compile(q, case_on(st) ? 0 : regex.IGNORECASE)
@@ -190,14 +190,14 @@ fn refresh(dict st, list lines, int cursor_line=0, int cursor_col=0) dict {
          return st
       }
       mut i = 0
-      while(i < lines.len && out.len < MAX_RESULTS){
+      while i < lines.len && out.len < MAX_RESULTS {
          out = _regex_line(out, rx, to_str(lines.get(i, "")), i, word_on(st))
          i += 1
       }
    } else {
       def needle = case_on(st) ? q : str.lower(q)
       mut i = 0
-      while(i < lines.len && out.len < MAX_RESULTS){
+      while i < lines.len && out.len < MAX_RESULTS {
          out = _literal_line(out, needle, q, to_str(lines.get(i, "")), i, case_on(st), word_on(st))
          i += 1
       }
@@ -209,7 +209,7 @@ fn refresh(dict st, list lines, int cursor_line=0, int cursor_col=0) dict {
 
 fn _move(dict st, int dir) dict {
    def n = count(st)
-   if(n <= 0){ return st }
+   if n <= 0 { return st }
    st["index"] = (index(st) + dir + n) % n
    st
 }
@@ -219,7 +219,7 @@ fn next(dict st) dict { _move(st, 1) }
 fn prev(dict st) dict { _move(st, -1) }
 
 fn summary(dict st) str {
-   if(error(st).len > 0){ return "bad regex" }
+   if error(st).len > 0 { return "bad regex" }
    def n = count(st)
    n <= 0 ? "0/0" : to_str(index(st) + 1) + "/" + to_str(n)
 }
@@ -236,7 +236,7 @@ fn _replace_span(str line, int start, int end, str repl) str {
 
 fn _replacement_for(dict st, dict r, str line) dict {
    def repl = replacement(st)
-   if(!regex_on(st)){ return {"ok": true, "text": repl, "error": ""} }
+   if !regex_on(st) { return {"ok": true, "text": repl, "error": ""} }
    def start = min(max(int(r.get("start", 0)), 0), line.len)
    def end = min(max(int(r.get("end", start)), start), line.len)
    def segment = str.str_slice(line, start, end)
@@ -249,12 +249,12 @@ fn _replacement_for(dict st, dict r, str line) dict {
 
 fn _replace_result(dict st, list lines, dict r) dict {
    def li = int(r.get("line", -1))
-   if(li < 0 || li >= lines.len){ return {"ok": false, "lines": lines, "error": "match out of range", "line": 0, "col": 0} }
+   if li < 0 || li >= lines.len { return {"ok": false, "lines": lines, "error": "match out of range", "line": 0, "col": 0} }
    def line = to_str(lines.get(li, ""))
    def start = min(max(int(r.get("start", 0)), 0), line.len)
    def end = min(max(int(r.get("end", start)), start), line.len)
    def rr = _replacement_for(st, r, line)
-   if(!bool(rr.get("ok", false))){ return {"ok": false, "lines": lines, "error": to_str(rr.get("error", "replace failed")), "line": li, "col": start} }
+   if !bool(rr.get("ok", false)) { return {"ok": false, "lines": lines, "error": to_str(rr.get("error", "replace failed")), "line": li, "col": start} }
    mut out = clone(lines)
    def repl = to_str(rr.get("text", ""))
    out[li] = _replace_span(line, start, end, repl)
@@ -262,7 +262,7 @@ fn _replace_result(dict st, list lines, dict r) dict {
 }
 
 fn replace_current(dict st, list lines) dict {
-   if(count(st) <= 0){ return {"ok": true, "st": st, "lines": lines, "count": 0, "error": "", "line": 0, "col": 0} }
+   if count(st) <= 0 { return {"ok": true, "st": st, "lines": lines, "count": 0, "error": "", "line": 0, "col": 0} }
    def r = current(st)
    def rr = _replace_result(st, lines, r)
    st["error"] = to_str(rr.get("error", ""))
@@ -271,15 +271,15 @@ fn replace_current(dict st, list lines) dict {
 
 fn replace_all(dict st, list lines) dict {
    def rs = results(st)
-   if(rs.len <= 0){ return {"ok": true, "st": st, "lines": lines, "count": 0, "error": "", "line": 0, "col": 0} }
+   if rs.len <= 0 { return {"ok": true, "st": st, "lines": lines, "count": 0, "error": "", "line": 0, "col": 0} }
    mut out = clone(lines)
    mut count = 0
    mut last_line = 0
    mut last_col = 0
    mut i = rs.len - 1
-   while(i >= 0){
+   while i >= 0 {
       def rr = _replace_result(st, out, rs.get(i, dict(0)))
-      if(!bool(rr.get("ok", false))){
+      if !bool(rr.get("ok", false)) {
          st["error"] = to_str(rr.get("error", "replace failed"))
          return {"ok": false, "st": st, "lines": out, "count": count, "error": to_str(rr.get("error", "replace failed")), "line": last_line, "col": last_col}
       }
@@ -295,18 +295,18 @@ fn replace_all(dict st, list lines) dict {
 
 fn handle_key(dict st, any data) dict {
    mut action = ""
-   if(window.event_key_is(data, key.KEY_ESCAPE)){ st = close(st) action = "close" }
-   elif(window.event_key_is(data, key.KEY_TAB) && replace_on(st)){ st = toggle_field(st) action = "field" }
-   elif(window.event_key_is(data, key.KEY_ENTER)){
+   if window.event_key_is(data, key.KEY_ESCAPE) { st = close(st) action = "close" }
+   elif window.event_key_is(data, key.KEY_TAB) && replace_on(st) { st = toggle_field(st) action = "field" }
+   elif window.event_key_is(data, key.KEY_ENTER) {
       def mods = int(data.get("mods", data.get("mod", 0)))
-      if(replace_on(st) && (mods & key.MOD_CONTROL) != 0){ action = "replace-all" }
-      elif(replace_on(st) && active_field(st) == "replace"){ action = "replace-current" }
+      if replace_on(st) && (mods & key.MOD_CONTROL) != 0 { action = "replace-all" }
+      elif replace_on(st) && active_field(st) == "replace" { action = "replace-current" }
       else {
          st = (mods & key.MOD_SHIFT) != 0 ? prev(st) : next(st)
          action = "jump"
       }
-   } elif(window.event_key_is(data, key.KEY_BACKSPACE)){
-      if(active_field(st) == "replace"){
+   } elif window.event_key_is(data, key.KEY_BACKSPACE) {
+      if active_field(st) == "replace" {
          st = set_replacement(st, _drop_last(replacement(st)))
          action = "replace-text"
       } else {
@@ -319,10 +319,10 @@ fn handle_key(dict st, any data) dict {
 
 fn handle_char(dict st, any data) dict {
    def mods = int(data.get("mods", data.get("mod", 0)))
-   if((mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0){ return st }
+   if (mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 { return st }
    def cp = int(data.get("char", 0))
-   if(cp >= 32 && cp != 127){
-      if(active_field(st) == "replace"){ st = set_replacement(st, replacement(st) + chr(cp)) }
+   if cp >= 32 && cp != 127 {
+      if active_field(st) == "replace" { st = set_replacement(st, replacement(st) + chr(cp)) }
       else { st = set_query(st, query(st) + chr(cp)) }
    }
    st

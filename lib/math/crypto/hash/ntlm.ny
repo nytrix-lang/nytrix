@@ -25,7 +25,7 @@ fn _add32(int a, int b) int { (a + b) & 4294967295 }
 
 fn _rotl32(int x, int n) int {
    def k = n & 31
-   if(k == 0){ return _u32(x) }
+   if k == 0 { return _u32(x) }
    _u32((x << k) | ((x & 4294967295) >> (32 - k)))
 }
 
@@ -40,13 +40,13 @@ fn _sha1_bytes(list data) list {
    def msg_len = data_len + 1 + zero_len + 8
    mut msg = zero_list(msg_len)
    mut i = 0
-   while(i < data_len){
+   while i < data_len {
       __store_item_fast(msg, i, __load_item_fast(data, i))
       i += 1
    }
    __store_item_fast(msg, data_len, 0x80)
    mut k = 0
-   while(k < 8){
+   while k < 8 {
       __store_item_fast(msg, msg_len - 8 + k, (bit_len / (1 << (8 * (7 - k)))) % 256)
       k += 1
    }
@@ -55,13 +55,13 @@ fn _sha1_bytes(list data) list {
    mut h4 = 0xc3d2e1f0
    mut w = zero_list(80)
    mut off = 0
-   while(off < msg.len){
+   while off < msg.len {
       i = 0
-      while(i < 16){
+      while i < 16 {
          __store_item_fast(w, i, _be32_from_bytes(msg, off + i * 4))
          i += 1
       }
-      while(i < 80){
+      while i < 80 {
          __store_item_fast(w, i, _rotl32(_xor32(_xor32(__load_item_fast(w, i - 3), __load_item_fast(w, i - 8)), _xor32(__load_item_fast(w, i - 14), __load_item_fast(w, i - 16))), 1))
          i += 1
       }
@@ -69,16 +69,16 @@ fn _sha1_bytes(list data) list {
       mut c, d = h2, h3
       mut e = h4
       i = 0
-      while(i < 80){
+      while i < 80 {
          mut f = 0
          mut kk = 0
-         if(i < 20){
+         if i < 20 {
             f = _or32(_and32(b, c), _and32(_not32(b), d))
             kk = 0x5a827999
-         } elif(i < 40){
+         } elif i < 40 {
             f = _xor32(_xor32(b, c), d)
             kk = 0x6ed9eba1
-         } elif(i < 60){
+         } elif i < 60 {
             f = _or32(_or32(_and32(b, c), _and32(b, d)), _and32(c, d))
             kk = 0x8f1bbcdc
          } else {
@@ -123,24 +123,24 @@ fn _sha1_bytes(list data) list {
 fn _hmac_sha1_with_pads(list ipad, list opad, list message) list {
    mut inner = zero_list(64 + message.len)
    mut i = 0
-   while(i < 64){
+   while i < 64 {
       __store_item_fast(inner, i, __load_item_fast(ipad, i))
       i += 1
    }
    i = 0
-   while(i < message.len){
+   while i < message.len {
       __store_item_fast(inner, 64 + i, __load_item_fast(message, i))
       i += 1
    }
    def ih = _sha1_bytes(inner)
    mut outer = zero_list(84)
    i = 0
-   while(i < 64){
+   while i < 64 {
       __store_item_fast(outer, i, __load_item_fast(opad, i))
       i += 1
    }
    i = 0
-   while(i < ih.len){
+   while i < ih.len {
       __store_item_fast(outer, 64 + i, __load_item_fast(ih, i))
       i += 1
    }
@@ -151,13 +151,13 @@ fn _hmac_sha1_pads(list key) list {
    def src = (key.len > 64) ? _sha1_bytes(key) : key
    mut k = zero_list(64)
    mut i = 0
-   while(i < src.len && i < 64){
+   while i < src.len && i < 64 {
       __store_item_fast(k, i, __load_item_fast(src, i))
       i += 1
    }
    mut ipad, opad = zero_list(64), zero_list(64)
    i = 0
-   while(i < 64){
+   while i < 64 {
       def kb = __load_item_fast(k, i)
       __store_item_fast(ipad, i, kb ^^ 0x36)
       __store_item_fast(opad, i, kb ^^ 0x5c)
@@ -169,7 +169,7 @@ fn _hmac_sha1_pads(list key) list {
 fn _xor_bytes(list a, list b) list {
    mut out = zero_list(a.len)
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       __store_item_fast(out, i, __load_item_fast(a, i) ^^ __load_item_fast(b, i))
       i += 1
    }
@@ -179,7 +179,7 @@ fn _xor_bytes(list a, list b) list {
 fn _pbkdf2_hmac_sha1_16(list password, list salt, int iterations) list {
    mut block_salt = zero_list(salt.len + 4)
    mut si = 0
-   while(si < salt.len){
+   while si < salt.len {
       __store_item_fast(block_salt, si, __load_item_fast(salt, si))
       si += 1
    }
@@ -190,14 +190,14 @@ fn _pbkdf2_hmac_sha1_16(list password, list salt, int iterations) list {
    mut u = _hmac_sha1_with_pads(ipad, opad, block_salt)
    mut acc = clone(u)
    mut i = 1
-   while(i < iterations){
+   while i < iterations {
       u = _hmac_sha1_with_pads(ipad, opad, u)
       acc = _xor_bytes(acc, u)
       i += 1
    }
    mut out = zero_list(16)
    i = 0
-   while(i < 16){
+   while i < 16 {
       __store_item_fast(out, i, __load_item_fast(acc, i))
       i += 1
    }
@@ -208,7 +208,7 @@ fn _utf16le_bytes(str s) list {
    def n = s.len * 2
    mut out = zero_list(n)
    mut i = 0
-   while(i < s.len){
+   while i < s.len {
       __store_item_fast(out, i * 2, load8(s, i))
       i += 1
    }
@@ -223,13 +223,13 @@ fn md4_bytes(list data) list {
    def msg_len = data_len + 1 + zero_len + 8
    mut msg = zero_list(msg_len)
    mut i = 0
-   while(i < data_len){
+   while i < data_len {
       __store_item_fast(msg, i, __load_item_fast(data, i))
       i += 1
    }
    __store_item_fast(msg, data_len, 0x80)
    mut k = 0
-   while(k < 8){
+   while k < 8 {
       __store_item_fast(msg, msg_len - 8 + k, (bit_len / (1 << (8 * k))) % 256)
       k += 1
    }
@@ -237,9 +237,9 @@ fn md4_bytes(list data) list {
    mut C, D = 0x98badcfe, 0x10325476
    mut X = zero_list(16)
    mut off = 0
-   while(off < msg.len){
+   while off < msg.len {
       i = 0
-      while(i < 16){
+      while i < 16 {
          def p = off + i * 4
          __store_item_fast(X, i, __load_item_fast(msg, p) | (__load_item_fast(msg, p + 1) << 8) | (__load_item_fast(msg, p + 2) << 16) | (__load_item_fast(msg, p + 3) << 24))
          i += 1
@@ -249,15 +249,15 @@ fn md4_bytes(list data) list {
       def CC = C
       def DD = D
       i = 0
-      while(i < 16){
+      while i < 16 {
          def r = i % 4
-         if(r == 0){
+         if r == 0 {
             def f = ((B & C) | ((4294967295 - (B & 4294967295)) & D)) & 4294967295
             A = _rotl32((A + f + __load_item_fast(X, i)) & 4294967295, 3)
-         } elif(r == 1){
+         } elif r == 1 {
             def f = ((A & B) | ((4294967295 - (A & 4294967295)) & C)) & 4294967295
             D = _rotl32((D + f + __load_item_fast(X, i)) & 4294967295, 7)
-         } elif(r == 2){
+         } elif r == 2 {
             def f = ((D & A) | ((4294967295 - (D & 4294967295)) & B)) & 4294967295
             C = _rotl32((C + f + __load_item_fast(X, i)) & 4294967295, 11)
          } else {
@@ -267,16 +267,16 @@ fn md4_bytes(list data) list {
          i += 1
       }
       i = 0
-      while(i < 16){
+      while i < 16 {
          def r = i % 4
          def xi = r * 4 + (i / 4)
-         if(r == 0){
+         if r == 0 {
             def g = ((B & C) | (B & D) | (C & D)) & 4294967295
             A = _rotl32((A + g + __load_item_fast(X, xi) + 0x5a827999) & 4294967295, 3)
-         } elif(r == 1){
+         } elif r == 1 {
             def g = ((A & B) | (A & C) | (B & C)) & 4294967295
             D = _rotl32((D + g + __load_item_fast(X, xi) + 0x5a827999) & 4294967295, 5)
-         } elif(r == 2){
+         } elif r == 2 {
             def g = ((D & A) | (D & B) | (A & B)) & 4294967295
             C = _rotl32((C + g + __load_item_fast(X, xi) + 0x5a827999) & 4294967295, 9)
          } else {
@@ -286,26 +286,26 @@ fn md4_bytes(list data) list {
          i += 1
       }
       i = 0
-      while(i < 16){
+      while i < 16 {
          def r = i % 4
          def g3 = i / 4
          mut xi = 0
-         if(g3 == 0){
-            if(r == 0){ xi = 0 } elif(r == 1){ xi = 8 } elif(r == 2){ xi = 4 } else { xi = 12 }
-         } elif(g3 == 1){
-            if(r == 0){ xi = 2 } elif(r == 1){ xi = 10 } elif(r == 2){ xi = 6 } else { xi = 14 }
-         } elif(g3 == 2){
-            if(r == 0){ xi = 1 } elif(r == 1){ xi = 9 } elif(r == 2){ xi = 5 } else { xi = 13 }
+         if g3 == 0 {
+            if r == 0 { xi = 0 } elif r == 1 { xi = 8 } elif r == 2 { xi = 4 } else { xi = 12 }
+         } elif g3 == 1 {
+            if r == 0 { xi = 2 } elif r == 1 { xi = 10 } elif r == 2 { xi = 6 } else { xi = 14 }
+         } elif g3 == 2 {
+            if r == 0 { xi = 1 } elif r == 1 { xi = 9 } elif r == 2 { xi = 5 } else { xi = 13 }
          } else {
-            if(r == 0){ xi = 3 } elif(r == 1){ xi = 11 } elif(r == 2){ xi = 7 } else { xi = 15 }
+            if r == 0 { xi = 3 } elif r == 1 { xi = 11 } elif r == 2 { xi = 7 } else { xi = 15 }
          }
-         if(r == 0){
+         if r == 0 {
             def h = (B ^^ C ^^ D) & 4294967295
             A = _rotl32((A + h + __load_item_fast(X, xi) + 0x6ed9eba1) & 4294967295, 3)
-         } elif(r == 1){
+         } elif r == 1 {
             def h = (A ^^ B ^^ C) & 4294967295
             D = _rotl32((D + h + __load_item_fast(X, xi) + 0x6ed9eba1) & 4294967295, 9)
-         } elif(r == 2){
+         } elif r == 2 {
             def h = (D ^^ A ^^ B) & 4294967295
             C = _rotl32((C + h + __load_item_fast(X, xi) + 0x6ed9eba1) & 4294967295, 11)
          } else {
@@ -347,11 +347,11 @@ fn _set_odd_parity(int b) int {
    def base = b & 0xfe
    mut ones = 0
    mut i = 1
-   while(i < 8){
+   while i < 8 {
       ones += (base >> i) & 1
       i += 1
    }
-   if((ones % 2) == 0){ return base | 1 }
+   if (ones % 2) == 0 { return base | 1 }
    base
 }
 
@@ -379,7 +379,7 @@ fn lm_hash(str password) str {
    mut upper_pw = str.upper(password)
    mut buf = zero_list(14)
    mut i = 0
-   while(i < upper_pw.len && i < 14){
+   while i < upper_pw.len && i < 14 {
       __store_item_fast(buf, i, load8(upper_pw, i))
       i += 1
    }
@@ -403,12 +403,12 @@ fn dcc_hash(str password, str username) str {
    def user = _utf16le_bytes(str.lower(username))
    mut data = zero_list(nt.len + user.len)
    mut i = 0
-   while(i < nt.len){
+   while i < nt.len {
       __store_item_fast(data, i, __load_item_fast(nt, i))
       i += 1
    }
    i = 0
-   while(i < user.len){
+   while i < user.len {
       __store_item_fast(data, nt.len + i, __load_item_fast(user, i))
       i += 1
    }

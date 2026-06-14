@@ -22,15 +22,15 @@ fn make_memory_source(any data_ptr, any byte_len, any channels, any rate, any bi
 
 fn read(any src, any mix_buf, any frames) int {
    "Reads up to 'frames' from the source into 'mix_buf'."
-   if(!is_list(src) || src.len < 3){ return 0 }
+   if !is_list(src) || src.len < 3 { return 0 }
    mut data = src.get(1)
    def cursor = __flt_to_int(get_item(data, "cursor", 0.0) + 0.0)
    def total = data.get("total_frames")
    def frame_size = data.get("frame_size")
    def ptr = data.get("ptr")
    mut to_read = int(frames)
-   if(cursor + to_read > total){ to_read = total - cursor }
-   if(to_read <= 0){ return 0 }
+   if cursor + to_read > total { to_read = total - cursor }
+   if to_read <= 0 { return 0 }
    memcpy(mix_buf, ptr + (cursor * frame_size), to_read * frame_size)
    data = data.set("cursor", cursor + to_read)
    src.set(1, data)
@@ -39,12 +39,12 @@ fn read(any src, any mix_buf, any frames) int {
 
 fn seek(any src, any frame) bool {
    "Implements `seek`."
-   if(!is_list(src)){ return false }
+   if !is_list(src) { return false }
    mut data = src.get(1)
    def total = data.get("total_frames")
    mut f = frame
-   if(f < 0){ f = 0 }
-   if(f > total){ f = total }
+   if f < 0 { f = 0 }
+   if f > total { f = total }
    data = data.set("cursor", f)
    src.set(1, data)
    true
@@ -52,7 +52,7 @@ fn seek(any src, any frame) bool {
 
 fn tell(any src) int {
    "Implements `tell`."
-   if(!is_list(src)){ return 0 }
+   if !is_list(src) { return 0 }
    __flt_to_int(get_item(src.get(1), "cursor", 0.0) + 0.0)
 }
 
@@ -62,15 +62,15 @@ fn length(any src) any {
 }
 
 fn _source_meta(any src, str key) any {
-   if(!is_list(src)){ return 0 }
+   if !is_list(src) { return 0 }
    def data = src.get(1, 0)
-   if(!is_dict(data)){ return 0 }
+   if !is_dict(data) { return 0 }
    data.get(key, 0)
 }
 
 fn format(any src) list {
    "Returns list of channels, rate, bits"
-   if(!is_list(src)){ return [0, 0, 0] }
+   if !is_list(src) { return [0, 0, 0] }
    def d = src.get(1)
    [d.get("channels"), d.get("rate"), d.get("bits")]
 }
@@ -97,10 +97,10 @@ fn source_length(any src) any {
 
 fn sample_format(any src) int {
    "Returns source sample format enum."
-   if(!is_list(src)){ return 0 }
+   if !is_list(src) { return 0 }
    def d = src.get(1)
    def sf = d.get("sample_fmt", 0)
-   if(sf != 0){ return sf }
+   if sf != 0 { return sf }
    def bits = d.get("bits", 16)
    def tag = d.get("format_tag", 1)
    case int(bits){
@@ -114,7 +114,7 @@ fn sample_format(any src) int {
 
 fn _put_ascii(any buf, int off, str text) int {
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       store8(buf, load8(text, i), off + i)
       i += 1
    }
@@ -123,21 +123,21 @@ fn _put_ascii(any buf, int off, str text) int {
 
 fn wav_bytes(any src) str {
    "Serializes a memory-backed sound source as a WAV byte string."
-   if(!is_list(src)){ return "" }
+   if !is_list(src) { return "" }
    def data = src.get(1, 0)
-   if(!is_dict(data)){ return "" }
+   if !is_dict(data) { return "" }
    def pcm_ptr = data.get("ptr", 0)
    def pcm_len = int(data.get("len", 0))
    def channels = int(data.get("channels", 1))
    def rate = int(data.get("rate", 48000))
    def bits = int(data.get("bits", 16))
    def format_tag = int(data.get("format_tag", 1))
-   if(!pcm_ptr || pcm_len <= 0 || channels <= 0 || rate <= 0 || bits <= 0){ return "" }
+   if !pcm_ptr || pcm_len <= 0 || channels <= 0 || rate <= 0 || bits <= 0 { return "" }
    def bytes_per_frame = int((channels * bits) / 8)
-   if(bytes_per_frame <= 0){ return "" }
+   if bytes_per_frame <= 0 { return "" }
    def total = 44 + pcm_len
    def out = malloc(total + 1)
-   if(!out){ return "" }
+   if !out { return "" }
    _put_ascii(out, 0, "RIFF")
    store32(out, 36 + pcm_len, 4)
    _put_ascii(out, 8, "WAVE")
@@ -159,8 +159,8 @@ fn wav_bytes(any src) str {
 fn write_wav(any src, any file) bool {
    "Writes a memory-backed sound source to `file` as WAV."
    def wav = wav_bytes(src)
-   if(wav.len == 0){ return false }
-   match file_write(file, wav){
+   if wav.len == 0 { return false }
+   match file_write(file, wav) {
       ok(_) -> true
       err(_) -> false
    }
@@ -169,14 +169,14 @@ fn write_wav(any src, any file) bool {
 fn get_item(dict d, any key, any default) any {
    "Returns `d[key]` or `default` when the dictionary lookup yields 0."
    def v = d.get(key)
-   if(v == 0){ return default }
+   if v == 0 { return default }
    v
 }
 
 fn _sound_source_selftest_data(int n) ptr {
    def p = malloc(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       store8(p, (i * 7) % 251, i)
       i += 1
    }

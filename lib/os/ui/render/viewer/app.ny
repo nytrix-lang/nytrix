@@ -37,7 +37,7 @@ fn app_absf(any x) f64 {
 fn app_resolve_repo_asset(any rel) str {
    "Resolves a repository-relative asset path."
    def raw = str.strip(to_str(rel))
-   if(raw.len == 0){ return "" }
+   if raw.len == 0 { return "" }
    ospath.resolve_repo_asset(raw)
 }
 
@@ -54,8 +54,8 @@ fn app_key_is_ctrl(any k, any sc=0) bool {
 fn app_effective_mods(any mods, any k=0, any sc=0, any shift_down=false, any ctrl_down=false) int {
    "Adds inferred shift/control state to an input modifier mask."
    mut out = int(mods)
-   if(shift_down || app_key_is_shift(k, sc)){ out = out | MOD_SHIFT }
-   if(ctrl_down || app_key_is_ctrl(k, sc)){ out = out | MOD_CONTROL }
+   if shift_down || app_key_is_shift(k, sc) { out = out | MOD_SHIFT }
+   if ctrl_down || app_key_is_ctrl(k, sc) { out = out | MOD_CONTROL }
    out
 }
 
@@ -63,12 +63,12 @@ fn app_pick_font(any primary, any fallback) any { common.value_or(primary, fallb
 
 fn app_list_find_text(any items, any value) int {
    "Finds a case-insensitive text value inside a list."
-   if(!is_list(items)){ return -1 }
+   if !is_list(items) { return -1 }
    def want = str.lower(str.strip(to_str(value)))
    mut i = 0
    def n = items.len
-   while(i < n){
-      if(str.lower(str.strip(to_str(items.get(i, "")))) == want){ return i }
+   while i < n {
+      if str.lower(str.strip(to_str(items.get(i, "")))) == want { return i }
       i += 1
    }
    -1
@@ -78,17 +78,17 @@ fn app_push_hist_sample(any hist, any value, any limit=256) list {
    "Appends one numeric sample and clamps history length."
    mut out = is_list(hist) ? hist : []
    out = out.append(float(value))
-   if(out.len > int(limit)){ out = slice(out, out.len - int(limit), out.len) }
+   if out.len > int(limit) { out = slice(out, out.len - int(limit), out.len) }
    out
 }
 
 fn app_hist_mean(any hist) f64 {
    "Returns the mean of a numeric history list."
-   if(!is_list(hist) || hist.len <= 0){ return 0.0 }
+   if !is_list(hist) || hist.len <= 0 { return 0.0 }
    mut total = 0.0
    mut i = 0
    def n = hist.len
-   while(i < n){
+   while i < n {
       total += float(hist[i])
       i += 1
    }
@@ -97,13 +97,13 @@ fn app_hist_mean(any hist) f64 {
 
 fn app_hist_max(any hist) f64 {
    "Returns the maximum value in a numeric history list."
-   if(!is_list(hist) || hist.len <= 0){ return 0.0 }
+   if !is_list(hist) || hist.len <= 0 { return 0.0 }
    mut out = float(hist.get(0, 0.0))
    mut i = 1
    def n = hist.len
-   while(i < n){
+   while i < n {
       def v = float(hist[i])
-      if(v > out){ out = v }
+      if v > out { out = v }
       i += 1
    }
    out
@@ -115,12 +115,12 @@ fn app_flag_names(any mask, any flags, any fallback="") str {
    def m = int(mask)
    mut i = 0
    def n = is_list(flags) ? flags.len : 0
-   while(i < n){
+   while i < n {
       def row = flags.get(i, [])
-      if(is_list(row) && band(m, int(row.get(0, 0))) != 0){ out = out.append(to_str(row.get(1, ""))) }
+      if is_list(row) && band(m, int(row.get(0, 0))) != 0 { out = out.append(to_str(row.get(1, ""))) }
       i += 1
    }
-   if(out.len == 0){ return to_str(fallback) }
+   if out.len == 0 { return to_str(fallback) }
    str.join(out, ", ")
 }
 
@@ -134,25 +134,25 @@ fn app_vec3_text(any label, any x, any y, any z) str {
 fn app_msaa_index(any samples) int {
    "Maps MSAA sample count to a compact option index."
    def s = int(samples)
-   if(s >= 8){ return 3 }
-   if(s >= 4){ return 2 }
-   if(s >= 2){ return 1 }
+   if s >= 8 { return 3 }
+   if s >= 4 { return 2 }
+   if s >= 2 { return 1 }
    0
 }
 
 fn app_msaa_samples(any idx) int {
    "Maps a compact MSAA option index to sample count."
    def i = int(idx)
-   if(i >= 3){ return 8 }
-   if(i == 2){ return 4 }
-   if(i == 1){ return 2 }
+   if i >= 3 { return 8 }
+   if i == 2 { return 4 }
+   if i == 1 { return 2 }
    1
 }
 
 fn _app_clamp_f64(any value, any lo, any hi) f64 {
    mut out = float(value)
-   if(out < float(lo)){ out = float(lo) }
-   if(out > float(hi)){ out = float(hi) }
+   if out < float(lo) { out = float(lo) }
+   if out > float(hi) { out = float(hi) }
    out
 }
 
@@ -172,18 +172,15 @@ fn app_startup_render_config(any msaa, any vsync, any filter_linear) dict {
    mut out = dict(3)
    def trace_mode = common.env_lower("NY_TRACE")
    def perf_mode = trace_mode == "perf" || trace_mode == "bench" || trace_mode == "fast" || common.env_truthy("NY_TRACE_PERF")
-
    mut samples = int(msaa)
-   if(perf_mode && !common.env_present("NY_UI_MSAA")){ samples = 1 }
-   if(common.env_present("NY_UI_MSAA")){
+   if perf_mode && !common.env_present("NY_UI_MSAA") { samples = 1 }
+   if common.env_present("NY_UI_MSAA") {
       def v = common.env_int_clamped("NY_UI_MSAA", samples, 1, 8)
       samples = v <= 1 ? 1 : (v <= 2 ? 2 : (v <= 4 ? 4 : 8))
    }
-
    mut use_vsync = bool(vsync)
-   if(perf_mode && !common.env_present("NY_UI_VSYNC")){ use_vsync = false }
+   if perf_mode && !common.env_present("NY_UI_VSYNC") { use_vsync = false }
    use_vsync = common.env_toggle("NY_UI_VSYNC", use_vsync)
-
    out["msaa"] = samples
    out["vsync"] = use_vsync
    out["filter_linear"] = common.env_toggle("NY_UI_FILTER_LINEAR", bool(filter_linear))
@@ -193,10 +190,10 @@ fn app_startup_render_config(any msaa, any vsync, any filter_linear) dict {
 fn app_dpi_scale_from_env_or_metrics(any monitor_scale=1.0, any window_h=720.0) f64 {
    "Chooses UI DPI scale from env, monitor scale, or window size."
    def raw = common.env_trim("NY_UI_DPI_SCALE")
-   if(raw.len > 0){ return _app_clamp_f64(str.atof(raw), 0.70, 2.25) }
+   if raw.len > 0 { return _app_clamp_f64(str.atof(raw), 0.70, 2.25) }
    mut scale = float(monitor_scale)
-   if(scale > 1.05){
-      if(scale > 1.60){ scale = 1.60 }
+   if scale > 1.05 {
+      if scale > 1.60 { scale = 1.60 }
       return scale
    }
    (max(1.0, float(window_h)) >= 2000.0) ? 1.25 : 1.0
@@ -210,15 +207,15 @@ fn app_gui_scale_from_env() f64 {
 
 fn app_gui_scale_for_window(any window_w=1280.0, any window_h=720.0, any dpi_scale=1.0) f64 {
    "Returns a compact default UI scale unless NY_UI_SCALE explicitly overrides it."
-   if(common.env_present("NY_UI_SCALE")){ return app_gui_scale_from_env() }
+   if common.env_present("NY_UI_SCALE") { return app_gui_scale_from_env() }
    def w = float(window_w)
    def h = float(window_h)
    mut s = 1.0
-   if(w < 720.0 || h < 460.0){ s = 0.76 }
-   elif(w < 940.0 || h < 560.0){ s = 0.84 }
-   elif(w < 1220.0 || h < 720.0){ s = 0.91 }
-   elif(float(dpi_scale) > 1.18){ s = min(1.18, float(dpi_scale)) }
-   elif(w > 2200.0 && h > 1300.0){ s = 1.08 }
+   if w < 720.0 || h < 460.0 { s = 0.76 }
+   elif w < 940.0 || h < 560.0 { s = 0.84 }
+   elif w < 1220.0 || h < 720.0 { s = 0.91 }
+   elif float(dpi_scale) > 1.18 { s = min(1.18, float(dpi_scale)) }
+   elif w > 2200.0 && h > 1300.0 { s = 1.08 }
    _app_clamp_f64(s, 0.70, 1.35)
 }
 
@@ -230,11 +227,11 @@ fn app_renderer_hotspot_label(any rs) str {
    def pipeline_binds = int(rs.get("pipeline_binds", 0))
    def descriptor_binds = int(rs.get("descriptor_binds", 0))
    def submitted_vertices = int(rs.get("submitted_vertices", 0))
-   if(dynamic_draws > max(36, int(float(draws) * 0.60))){ return "dynamic draw pressure" }
-   if(pipeline_binds > max(28, int(float(draws) * 0.75)) || descriptor_binds > max(28, int(float(draws) * 0.80))){ return "state churn" }
-   if(flushes > max(18, int(float(draws) * 0.33))){ return "flush pressure" }
-   if(submitted_vertices > 1500000){ return "geometry throughput" }
-   if(draws > 420){ return "draw call pressure" }
+   if dynamic_draws > max(36, int(float(draws) * 0.60)) { return "dynamic draw pressure" }
+   if pipeline_binds > max(28, int(float(draws) * 0.75)) || descriptor_binds > max(28, int(float(draws) * 0.80)) { return "state churn" }
+   if flushes > max(18, int(float(draws) * 0.33)) { return "flush pressure" }
+   if submitted_vertices > 1500000 { return "geometry throughput" }
+   if draws > 420 { return "draw call pressure" }
    "steady"
 }
 
@@ -246,10 +243,10 @@ fn app_renderer_stats_line(dict rs, bool with_verts=true, bool with_desc=true) s
    " dyn=" + to_str(_app_renderer_stat_i(rs, "dynamic_draws", 0)) +
    " static=" + to_str(_app_renderer_stat_i(rs, "static_draws", 0)) +
    " indexed=" + to_str(_app_renderer_stat_i(rs, "indexed_draws", 0))
-   if(with_verts){ out += " verts=" + to_str(_app_renderer_stat_i(rs, "submitted_vertices", 0)) }
+   if with_verts { out += " verts=" + to_str(_app_renderer_stat_i(rs, "submitted_vertices", 0)) }
    out += " flushes=" + to_str(_app_renderer_stat_i(rs, "flushes", 0)) +
    " pipes=" + to_str(_app_renderer_stat_i(rs, "pipeline_binds", 0))
-   if(with_desc){ out += " desc=" + to_str(_app_renderer_stat_i(rs, "descriptor_binds", 0)) }
+   if with_desc { out += " desc=" + to_str(_app_renderer_stat_i(rs, "descriptor_binds", 0)) }
    out
 }
 
@@ -268,7 +265,7 @@ fn app_window_h(any window_id, any fallback=0.0) f64 {
 fn app_window_body_h(any window_id, any fallback=260.0, any overhead=126.0) f64 {
    "Returns available GUI window body height."
    def h = app_window_h(window_id, 0.0)
-   if(h <= 1.0){ return float(fallback) }
+   if h <= 1.0 { return float(fallback) }
    max(120.0, h - float(overhead))
 }
 
@@ -288,7 +285,7 @@ fn app_rect_text(any window_id) str {
 fn app_card_w(any window_id, any cols=2, any gap=12.0, any min_w=140.0) f64 {
    "Returns responsive card width for a GUI window."
    def w = app_window_w(window_id, 0.0)
-   if(w <= 1.0){ return max(float(min_w), 180.0) }
+   if w <= 1.0 { return max(float(min_w), 180.0) }
    max(float(min_w), (max(0.0, w - 24.0) - max(0.0, float(cols - 1)) * float(gap)) / float(max(cols, 1)))
 }
 

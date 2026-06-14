@@ -31,14 +31,14 @@ fn _set_error(str msg) str {
 fn decompress_zlib_limit(any s, int out_cap) str {
    "Inflates zlib data into a fixed-size buffer to avoid realloc loops."
    def n = s.len
-   if(out_cap < 256){ out_cap = 256 }
+   if out_cap < 256 { out_cap = 256 }
    mut raw_buf = malloc(out_cap + 1)
-   if(raw_buf == 0){ return _set_error("output alloc failed") }
+   if raw_buf == 0 { return _set_error("output alloc failed") }
    def out_len_p = zalloc(8)
-   if(out_len_p == 0){ free(raw_buf) return _set_error("output len alloc failed") }
+   if out_len_p == 0 { free(raw_buf) return _set_error("output len alloc failed") }
    store64_h(out_len_p, out_cap, 0)
    def r = __zlib_uncompress(raw_buf, out_len_p, to_int(s), n)
-   if(r != 0){
+   if r != 0 {
       def err_msg = "uncompress failed: " + to_str(r)
       _set_error(err_msg)
       free(out_len_p, raw_buf)
@@ -46,12 +46,12 @@ fn decompress_zlib_limit(any s, int out_cap) str {
    }
    def out_len = load64_h(out_len_p, 0)
    free(out_len_p)
-   if(out_len < 0 || out_len > out_cap){
+   if out_len < 0 || out_len > out_cap {
       free(raw_buf)
       return _set_error("invalid uncompressed size")
    }
    def m = malloc(out_len + 17)
-   if(m == 0){ free(raw_buf) return _set_error("output string alloc failed") }
+   if m == 0 { free(raw_buf) return _set_error("output string alloc failed") }
    def out = init_str(m, out_len)
    __copy_mem(to_int(out), raw_buf, out_len)
    store8(out, 0, out_len)
@@ -63,36 +63,36 @@ fn decompress_zlib_limit(any s, int out_cap) str {
 
 fn decompress_zlib(any s, int out_cap=0) str {
    "Inflates zlib data. If `out_cap` is 0, tries to guess or use incremental growth."
-   if(out_cap > 0){ return decompress_zlib_limit(s, out_cap) }
+   if out_cap > 0 { return decompress_zlib_limit(s, out_cap) }
    def n = s.len
    mut cap = n * 4
-   if(cap < 4096){ cap = 4096 }
+   if cap < 4096 { cap = 4096 }
    mut raw_buf = malloc(cap + 1)
-   if(raw_buf == 0){ return _set_error("output alloc failed") }
+   if raw_buf == 0 { return _set_error("output alloc failed") }
    def out_len_p = zalloc(8)
-   if(out_len_p == 0){ free(raw_buf) return _set_error("output len alloc failed") }
+   if out_len_p == 0 { free(raw_buf) return _set_error("output len alloc failed") }
    store64_h(out_len_p, cap, 0)
    mut r = __zlib_uncompress(raw_buf, out_len_p, to_int(s), n)
-   while(r == -5){
+   while r == -5 {
       cap = cap * 2
       def next_buf = realloc(raw_buf, cap + 1)
-      if(next_buf == 0){
+      if next_buf == 0 {
          free(out_len_p, raw_buf)
          return _set_error("output realloc failed")
       }
       raw_buf = next_buf
       store64_h(out_len_p, cap, 0)
       r = __zlib_uncompress(raw_buf, out_len_p, to_int(s), n)
-      if(cap > 1024 * 1024 * 128){ break }
+      if cap > 1024 * 1024 * 128 { break }
    }
-   if(r != 0){
+   if r != 0 {
       free(out_len_p, raw_buf)
       return _set_error("uncompress failed: " + to_str(r))
    }
    def out_len = load64_h(out_len_p, 0)
    free(out_len_p)
    def m = malloc(out_len + 17)
-   if(m == 0){ free(raw_buf) return _set_error("output string alloc failed") }
+   if m == 0 { free(raw_buf) return _set_error("output string alloc failed") }
    def out = init_str(m, out_len)
    __copy_mem(to_int(out), raw_buf, out_len)
    store8(out, 0, out_len)
@@ -104,13 +104,13 @@ fn decompress_zlib(any s, int out_cap=0) str {
 
 fn compress_zlib(any s, int level=6) str {
    "Deflates data using zlib."
-   if(level < -1){ level = -1 }
-   if(level > 9){ level = 9 }
+   if level < -1 { level = -1 }
+   if level > 9 { level = 9 }
    def n = s.len
-   if(env("NY_ZLIB_DEBUG")){ print("[zlib] n=" + to_str(n)) }
+   if env("NY_ZLIB_DEBUG") { print("[zlib] n=" + to_str(n)) }
    def out = __zlib_compress_str(to_int(s), n, level)
-   if(!out){ return _set_error("compress failed") }
-   if(env("NY_ZLIB_DEBUG")){ print("[zlib] out_len=" + to_str(out.len)) }
+   if !out { return _set_error("compress failed") }
+   if env("NY_ZLIB_DEBUG") { print("[zlib] out_len=" + to_str(out.len)) }
    _last_out_len = out.len
    _error = ""
    out

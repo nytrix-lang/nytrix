@@ -9,18 +9,18 @@ use std.core.reflect
 use std.core.dict_mod (dict_write)
 
 fn _attr_ensure_exact(str name, list args, int want) int {
-   if(args.len != want){ panic("@" + name + " expects " + to_str(want) + " argument(s)") }
+   if args.len != want { panic("@" + name + " expects " + to_str(want) + " argument(s)") }
    0
 }
 
 fn _attr_flag(any node, str key, any value=true) any {
-   if(type(node) != "dict"){ return node }
+   if type(node) != "dict" { return node }
    dict_write(node, key, value)
 }
 
 fn _attr_extern(any node, list args) any {
    _attr_ensure_exact("extern", args, 1)
-   if(!is_str(args[0])){ panic("@extern argument must be string") }
+   if !is_str(args[0]) { panic("@extern argument must be string") }
    node = _attr_flag(node, "is_extern", true)
    node = _attr_flag(node, "link_name", args[0])
    node
@@ -52,16 +52,16 @@ fn _attr_cache(any node, list args) any {
 }
 
 fn _attr_effects(any node, list args) any {
-   if(args.len == 0){ panic("@effects expects at least one argument") }
+   if args.len == 0 { panic("@effects expects at least one argument") }
    node = _attr_flag(node, "effect_contract_known", true)
    node = _attr_flag(node, "effect_contract", args)
    node
 }
 
 fn _attr_llvm(any node, list args) any {
-   if(args.len < 1 || args.len > 2){ panic("@llvm expects 1 or 2 argument(s)") }
+   if args.len < 1 || args.len > 2 { panic("@llvm expects 1 or 2 argument(s)") }
    node = _attr_flag(node, "llvm_attr", args[0])
-   if(args.len == 2){ node = _attr_flag(node, "llvm_value", args[1]) }
+   if args.len == 2 { node = _attr_flag(node, "llvm_value", args[1]) }
    node
 }
 
@@ -70,14 +70,14 @@ fn _builtin_attr_names() list {
 }
 
 fn _builtin_attr_handler(str name) any {
-   if(name == "extern"){ return _attr_extern }
-   if(name == "naked"){ return _attr_naked }
-   if(name == "jit"){ return _attr_jit }
-   if(name == "thread"){ return _attr_thread }
-   if(name == "pure"){ return _attr_pure }
-   if(name == "cache"){ return _attr_cache }
-   if(name == "effects"){ return _attr_effects }
-   if(name == "llvm"){ return _attr_llvm }
+   if name == "extern" { return _attr_extern }
+   if name == "naked" { return _attr_naked }
+   if name == "jit" { return _attr_jit }
+   if name == "thread" { return _attr_thread }
+   if name == "pure" { return _attr_pure }
+   if name == "cache" { return _attr_cache }
+   if name == "effects" { return _attr_effects }
+   if name == "llvm" { return _attr_llvm }
    nil
 }
 
@@ -194,7 +194,7 @@ fn get_macro_handler_in(dict reg, str name) any {
 fn get_attr_handler(str name) any {
    "Returns an attribute handler from the process-wide registry."
    def handler = syntax_impl.get_attr_handler(__registry, name)
-   if(handler){ return handler }
+   if handler { return handler }
    return _builtin_attr_handler(name)
 }
 
@@ -336,8 +336,8 @@ fn rewrite_fixpoint(dict rw, any value, int max_steps=64) any {
 fn apply_attribute(str name, any node, any args=0) any {
    "Applies an attribute handler using the process-wide registry."
    def handler = get_attr_handler(name)
-   if(!handler){ return node }
-   if(is_list(args)){ return handler(node, args) }
+   if !handler { return node }
+   if is_list(args) { return handler(node, args) }
    return handler(node, list(0))
 }
 

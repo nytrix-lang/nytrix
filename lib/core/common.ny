@@ -25,7 +25,7 @@ fn value_or(any value, any fallback) any {
 fn env_trim(str name) str {
    "Returns environment variable `name` stripped of surrounding whitespace, or empty string."
    def v = env(name)
-   if(!v){ return "" }
+   if !v { return "" }
    strip(to_str(v))
 }
 
@@ -70,7 +70,7 @@ fn env_toggle(str name, bool default_value=false) bool {
 fn env_int_clamped(str name, int fallback, int minimum=0, int maximum=1000000) int {
    "Parses integer env `name`, returning `fallback` when unset and clamping to [minimum, maximum]."
    def raw = env_trim(name)
-   if(raw.len == 0){ return fallback }
+   if raw.len == 0 { return fallback }
    min(max(int(atof(raw)), minimum), maximum)
 }
 
@@ -106,23 +106,23 @@ fn _cached_bool(int flag, bool value) int {
 
 fn parse_nonneg_int(any v) int {
    "Parses a non-negative integer from string `v`, returning 0 on invalid input."
-   if(!is_str(v)){ return 0 }
+   if !is_str(v) { return 0 }
    def s = strip(v)
-   if(s.len == 0){ return 0 }
+   if s.len == 0 { return 0 }
    def n = atoi(s)
-   if(n < 0){ return 0 }
+   if n < 0 { return 0 }
    n
 }
 
 fn env_hex(str name, int def_val) int {
    "Parses a hex color from environment variable `name` (e.g. '0xff123456' or '123456')."
    def v = env(name)
-   if(!v || v.len == 0){ return def_val }
+   if !v || v.len == 0 { return def_val }
    mut s = strip(v)
-   if(startswith(s, "0x")){ s = str_slice(s, 2, s.len) }
-   elif(startswith(s, "#")){ s = str_slice(s, 1, s.len) }
+   if startswith(s, "0x") { s = str_slice(s, 2, s.len) }
+   elif startswith(s, "#") { s = str_slice(s, 1, s.len) }
    mut res = 0
-   mut i = 0 while(i < s.len){
+   mut i = 0 while i < s.len {
       def c = load8(s, i)
       def val = case c {
          48..57 -> c - 48
@@ -130,7 +130,7 @@ fn env_hex(str name, int def_val) int {
          97..102 -> c - 87
          _ -> -1
       }
-      if(val < 0){ break }
+      if val < 0 { break }
       res = (res << 4) | val
       i += 1
    }
@@ -139,10 +139,10 @@ fn env_hex(str name, int def_val) int {
 
 fn last_index_byte(str s, int want) int {
    "Returns the last byte index of `want` in string `s`, or `-1` when not found."
-   if(!is_str(s)){ return -1 }
+   if !is_str(s) { return -1 }
    mut i = s.len - 1
-   while(i >= 0){
-      if(load8(s, i) == want){ return i }
+   while i >= 0 {
+      if load8(s, i) == want { return i }
       i -= 1
    }
    -1
@@ -150,7 +150,7 @@ fn last_index_byte(str s, int want) int {
 
 fn parse_toggle_arg(list parts, bool cur, bool default_next) bool {
    "Parses common on/off/toggle arguments from `parts`, otherwise returns `default_next`."
-   if(parts.len <= 1){ return default_next }
+   if parts.len <= 1 { return default_next }
    def arg = lower(parts.get(1, ""))
    case arg {
       "on", "1", "true", "yes" -> true

@@ -20,15 +20,15 @@ mut _print_history = nil
 mut print_to_stdout = true
 
 fn _ensure_print_history() list {
-   if(!_print_history){ _print_history = borrow([]) }
+   if !_print_history { _print_history = borrow([]) }
    _print_history
 }
 
 fn _append_print_history(any line) int {
-   if(!is_str(line)){ line = to_str(line) }
+   if !is_str(line) { line = to_str(line) }
    _ensure_print_history()
    _print_history = borrow(_print_history.append(line))
-   if(_print_history.len > 512){ _print_history = borrow(slice(_print_history, _print_history.len - 512, _print_history.len, 1)) }
+   if _print_history.len > 512 { _print_history = borrow(slice(_print_history, _print_history.len - 512, _print_history.len, 1)) }
    0
 }
 
@@ -48,16 +48,16 @@ fn print_history_clear() int {
 
 fn assert(any cond, str msg="assert failed") any {
    "Panics with `msg` if `cond` is false. Useful for core invariants and unit tests."
-   if(!cond){ panic(msg) }
+   if !cond { panic(msg) }
 }
 
 fn assert_eq(any a, any b, str msg="assert eq failed") any {
    "Panics with `msg` if `a` and `b` are not structurally equal. Uses the built-in `eq` operator."
-   if(!eq(a, b)){ panic(msg + ": expected " + to_str(b) + ", got " + to_str(a)) }
+   if !eq(a, b) { panic(msg + ": expected " + to_str(b) + ", got " + to_str(a)) }
 }
 
 fn _core_pow_float_arg(any x) any {
-   if(type(x) == "bigint"){ return from_int(__bigint_to_int(x)) }
+   if type(x) == "bigint" { return from_int(__bigint_to_int(x)) }
    x
 }
 
@@ -67,8 +67,8 @@ fn pow(any a, any b) any {
    def tb = type(b)
    def a_num = ta == "int" || ta == "float" || ta == "bigint"
    def b_num = tb == "int" || tb == "float" || tb == "bigint"
-   if(!a_num || !b_num){ panic("pow expects numeric operands") }
-   if(ta == "float" || tb == "float" || b < 0){
+   if !a_num || !b_num { panic("pow expects numeric operands") }
+   if ta == "float" || tb == "float" || b < 0 {
       return __flt_pow(_core_pow_float_arg(a), _core_pow_float_arg(b))
    }
    __bigint_pow(a, b)
@@ -103,21 +103,21 @@ fn endswith(any s, any suffix) bool {
 
 fn type(any x) str {
    "Returns a string describing the runtime value type."
-   if(__is_int(x)){ return "int" }
-   if(x == true || x == false){ return "bool" }
-   if(is_float(x)){ return "float" }
-   if(is_str(x)){ return "str" }
-   if(is_list(x)){ return "list" }
-   if(is_dict(x)){ return "dict" }
-   if(is_set(x)){ return "set" }
-   if(is_tuple(x)){ return "tuple" }
-   if(is_range(x)){ return "range" }
-   if(is_bytes(x)){ return "bytes" }
-   if(_core_has_tag(x, runtime_tag_raw("bigint"))){ return "bigint" }
-   if(_core_has_tag(x, runtime_tag_raw("complex"))){ return "complex" }
-   if(__tagof(x) == runtime_tag_raw("ffi_ptr")){ return "ffi_ptr" }
-   if(is_ptr(x)){ return "ptr" }
-   if(!x){ return "none" }
+   if __is_int(x) { return "int" }
+   if x == true || x == false { return "bool" }
+   if is_float(x) { return "float" }
+   if is_str(x) { return "str" }
+   if is_list(x) { return "list" }
+   if is_dict(x) { return "dict" }
+   if is_set(x) { return "set" }
+   if is_tuple(x) { return "tuple" }
+   if is_range(x) { return "range" }
+   if is_bytes(x) { return "bytes" }
+   if _core_has_tag(x, runtime_tag_raw("bigint")) { return "bigint" }
+   if _core_has_tag(x, runtime_tag_raw("complex")) { return "complex" }
+   if __tagof(x) == runtime_tag_raw("ffi_ptr") { return "ffi_ptr" }
+   if is_ptr(x) { return "ptr" }
+   if !x { return "none" }
    "unknown"
 }
 
@@ -158,7 +158,7 @@ fn values(any x) list {
 
 fn set(any obj=8, any key=nil, any val=nil) any {
    "Creates a set with set()/set(cap), or stores val with obj.set(key, val)."
-   if(key == nil && val == nil && is_int(obj)){ return core_set.set(obj) }
+   if key == nil && val == nil && is_int(obj) { return core_set.set(obj) }
    core_ref.set(obj, key, val)
 }
 
@@ -174,22 +174,22 @@ fn set_idx(any obj, any key, any val) any {
 
 fn delete(any obj, any key) any {
    "Removes `key` from a dict or set."
-   if(is_dict(obj)){ return dict_remove(obj, key) }
-   if(is_set(obj)){ return _set_remove(obj, key) }
+   if is_dict(obj) { return dict_remove(obj, key) }
+   if is_set(obj) { return _set_remove(obj, key) }
    obj
 }
 
 fn replace(any x, any old, any new) any {
    "Returns a copy of `x` with matching items replaced."
-   if(is_str(x)){
+   if is_str(x) {
       return core_str.str_replace(x, old, new)
    }
-   if(is_list(x) || is_tuple(x)){
+   if is_list(x) || is_tuple(x) {
       mut out = clone(x)
       mut i = 0
       def n = out.len
-      while(i < n){
-         if(eq(out.get(i, 0), old)){ out[i] = new }
+      while i < n {
+         if eq(out.get(i, 0), old) { out[i] = new }
          i += 1
       }
       return out
@@ -384,9 +384,9 @@ fn is_truthy(any x) bool {
    - `int`: true if not 0
    - `str/list/dict/set/tuple`: true if length > 0
    - `other`: true"
-   if(!x){ return false }
-   if(__is_int(x)){ return x != 0 }
-   if(is_str(x) || is_list(x) || is_dict(x) || is_set(x) || is_tuple(x)){ return core_ref.len(x) > 0 }
+   if !x { return false }
+   if __is_int(x) { return x != 0 }
+   if is_str(x) || is_list(x) || is_dict(x) || is_set(x) || is_tuple(x) { return core_ref.len(x) > 0 }
    true
 }
 
@@ -399,7 +399,7 @@ fn is_falsy(any x) bool {
 @inline
 fn not_none(any x, any fallback) any {
    "Returns `x` if it is not **none**; otherwise returns `fallback`."
-   if(x != 0 || __is_int(x)){ return x }
+   if x != 0 || __is_int(x) { return x }
    fallback
 }
 
@@ -454,7 +454,7 @@ fn is_err(any v) bool {
 @inline
 fn unwrap(any v) any {
    "Returns the Ok payload, or panics on Err."
-   if(__is_err(v)){ panic("unwrapped an Err: " + __to_str(__unwrap(v))) }
+   if __is_err(v) { panic("unwrapped an Err: " + __to_str(__unwrap(v))) }
    __unwrap(v)
 }
 
@@ -467,7 +467,7 @@ fn unwrap_or(any v, any default) any {
 @inline
 fn panic_if(any cond, str msg) any {
    "Panics with `msg` if `cond` is truthy."
-   if(is_truthy(cond)){ panic(msg) }
+   if is_truthy(cond) { panic(msg) }
 }
 
 fn print(...args) int {
@@ -476,13 +476,13 @@ fn print(...args) int {
    def n = args.len
    mut line = ""
    mut wrote = false
-   while(i < n){
+   while i < n {
       def v = args.get(i)
-      if(!is_none(v)){
+      if !is_none(v) {
          def s = to_str(v)
-         if(print_to_stdout){
-            if(wrote){ __print_str_raw(" ") }
-            if(__is_int(v)){ __print_int(v) }
+         if print_to_stdout {
+            if wrote { __print_str_raw(" ") }
+            if __is_int(v) { __print_int(v) }
             else { __print_str_raw(s) }
          }
          line = wrote ? (line + " " + s) : s
@@ -490,15 +490,15 @@ fn print(...args) int {
       }
       i += 1
    }
-   if(print_to_stdout){ __print_newline() }
+   if print_to_stdout { __print_newline() }
    _append_print_history(line)
    0
 }
 
 fn _eprint_raw(any s) int {
-   if(!is_str(s)){ return 0 }
+   if !is_str(s) { return 0 }
    def n = load64(s, -16)
-   if(n > 0){ __write_off(2, s, n, 0) }
+   if n > 0 { __write_off(2, s, n, 0) }
    0
 }
 
@@ -507,11 +507,11 @@ fn eprint(...args) int {
    mut i = 0
    def n = args.len
    mut line = ""
-   while(i < n){
+   while i < n {
       def s = to_str(args.get(i))
       _eprint_raw(s)
       line = (i > 0) ? (line + " " + s) : s
-      if(i < n - 1){ _eprint_raw(" ") }
+      if i < n - 1 { _eprint_raw(" ") }
       i += 1
    }
    _eprint_raw("\n")
@@ -547,21 +547,21 @@ fn load64(any p, int i=0) any {
 @jit
 fn load32_h(any p, int i=0) int {
    "Loads a 32-bit handle/scalar from address `p + i` and tags it as a Nytrix integer."
-   def any: addr = p
+   def any addr = p
    __load32_h(addr, i)
 }
 
 @jit
 fn load64_h(any p, int i=0) int {
    "Loads a 64-bit handle and tags it as a Nytrix integer."
-   def any: addr = p
+   def any addr = p
    __load64_h(addr, i)
 }
 
 @jit
 fn load64_i(any p, int i=0) int {
    "Loads a raw signed 64-bit scalar and returns it as an ordinary integer."
-   def any: addr = p
+   def any addr = p
    __load64_h(addr, i)
 }
 
@@ -580,21 +580,21 @@ fn store64(any p, any v, int i=0) any {
 @jit
 fn store32_h(any p, any v, int i=0) any {
    "Stores a 32-bit handle/scalar `v` at address `p + i`, untagging integers."
-   def any: addr = p
+   def any addr = p
    __store32_idx(addr, i, v)
 }
 
 @jit
 fn store64_h(any p, any v, int i=0) any {
    "Stores a 64-bit handle or value `v` at address `p + i`, untagging integers."
-   def any: addr = p
+   def any addr = p
    __store64_h(addr, i, v)
 }
 
 @jit
 fn store64_i(any p, any v, int i=0) any {
    "Stores an ordinary integer as a raw signed 64-bit scalar."
-   def any: addr = p
+   def any addr = p
    __store64_h(addr, i, v)
 }
 
@@ -631,12 +631,12 @@ fn load32_f32(any p, int i=0) any {
 @jit
 fn store32_f32(any p, any v, int i=0) any {
    "Unboxes float `v` and stores it as a 32-bit float at address `p + i`."
-   if(!p){ return 0 }
-   if(__is_int(v)){
+   if !p { return 0 }
+   if __is_int(v) {
       __store32_idx(p, i, __flt_unbox_val32(__flt_box_val(__flt_from_int(v))))
       return 0
    }
-   if(__is_float_obj(v)){
+   if __is_float_obj(v) {
       __store32_idx(p, i, __flt_unbox_val32(v))
       return 0
    }
@@ -699,9 +699,9 @@ fn malloc(int n) ptr {
 fn free(...ptrs) any {
    "Frees one or more heap memory blocks. Nil/zero pointers are ignored."
    mut i = 0
-   while(i < ptrs.len){
+   while i < ptrs.len {
       def p = ptrs.get(i)
-      if(p){ __free(p) }
+      if p { __free(p) }
       i += 1
    }
    nil
@@ -766,7 +766,7 @@ fn realloc(any p, int n) ptr {
 fn zalloc(int n) ptr {
    "Allocates `n` bytes of heap memory and zeroes it out."
    def p = malloc(n)
-   if(!p){ return 0 }
+   if !p { return 0 }
    memset(p, 0, n)
    p
 }
@@ -774,23 +774,23 @@ fn zalloc(int n) ptr {
 @returns_owned
 fn bytes(int n) bytes {
    "Allocates a native bytes buffer of length `n`."
-   if(n < 0){ n = 0 }
+   if n < 0 { n = 0 }
    def p = bytes_new_raw(n)
-   if(!p){ panic("bytes allocation failed") }
+   if !p { panic("bytes allocation failed") }
    p
 }
 
 fn bytes_get(bytes b, int i) int {
    "Returns byte at index `i`, or 0 for invalid access."
-   if(!is_bytes(b)){ return 0 }
-   if(i < 0 || i >= b.len){ return 0 }
+   if !is_bytes(b) { return 0 }
+   if i < 0 || i >= b.len { return 0 }
    load8(b, i)
 }
 
 fn bytes_set(bytes b, int i, int v) bytes {
    "Stores byte `v` at index `i` and returns the same buffer."
-   if(!is_bytes(b)){ return b }
-   if(i < 0 || i >= b.len){ return b }
+   if !is_bytes(b) { return b }
+   if i < 0 || i >= b.len { return b }
    store8(b, v, i)
    b
 }
@@ -799,7 +799,7 @@ fn bytes_set(bytes b, int i, int v) bytes {
 fn list(int cap=8) list {
    "Creates a new empty list with initial capacity `cap`."
    def p = __list_new(cap)
-   if(!p){ panic("list allocation failed") }
+   if !p { panic("list allocation failed") }
    p
 }
 
@@ -860,7 +860,7 @@ fn is_float(any x) bool {
 @inline
 fn to_int(any v) any {
    "Untags a Nytrix value into a raw integer."
-   if(__is_int(v)){ return __untag(v) }
+   if __is_int(v) { return __untag(v) }
    v
 }
 
@@ -884,7 +884,7 @@ fn _core_bytes_like_to_list(any x) list<int> {
    mut out = []
    mut i = 0
    def n = _core_bytes_like_len(x)
-   while(i < n){
+   while i < n {
       out = out.append(load8(x, i) & 255)
       i += 1
    }
@@ -903,14 +903,14 @@ fn _core_hex_nibble(int c) int {
 @returns_owned
 fn _core_unhex(str hex) list<int> {
    def n = _core_bytes_like_len(hex)
-   if(n <= 0){ return [] }
+   if n <= 0 { return [] }
    mut out = []
    mut i = 0
-   if((n % 2) == 1){
+   if (n % 2) == 1 {
       out = out.append(_core_hex_nibble(load8(hex, 0)))
       i = 1
    }
-   while(i < n){
+   while i < n {
       def hi = _core_hex_nibble(load8(hex, i))
       def lo = _core_hex_nibble(load8(hex, i + 1))
       out = out.append((hi << 4) | lo)
@@ -926,19 +926,19 @@ fn _core_bigint_to_bytes(bigint x) list<int> {
 
 fn atoi(any s) int {
    "Parses a base-10 integer from string `s`."
-   if(!is_str(s)){ return 0 }
+   if !is_str(s) { return 0 }
    def n = _core_bytes_like_len(s)
-   if(n == 0){ return 0 }
+   if n == 0 { return 0 }
    mut sign = 1
    mut i = 0
-   if(load8(s, 0) == 45){
+   if load8(s, 0) == 45 {
       sign = -1
       i = 1
    }
    mut out = 0
-   while(i < n){
+   while i < n {
       def c = load8(s, i)
-      if(c < 48 || c > 57){ break }
+      if c < 48 || c > 57 { break }
       out = out * 10 + (c - 48)
       i += 1
    }
@@ -955,18 +955,18 @@ fn str(any v) str {
 fn chr(int code) str {
    "Returns a single-character string from a Unicode code point."
    use std.core.str
-   if(code < 0 || code > 1114111){ return "" }
+   if code < 0 || code > 1114111 { return "" }
    def char_buf = malloc(5)
-   if(!char_buf){ return "" }
+   if !char_buf { return "" }
    mut n = 0
-   if(code <= 127){
+   if code <= 127 {
       store8(char_buf, code, 0)
       n = 1
-   } elif(code <= 2047){
+   } elif code <= 2047 {
       store8(char_buf, 192 | (code >> 6), 0)
       store8(char_buf, 128 | (code & 63), 1)
       n = 2
-   } elif(code <= 65535){
+   } elif code <= 65535 {
       store8(char_buf, 224 | (code >> 12), 0)
       store8(char_buf, 128 | ((code >> 6) & 63), 1)
       store8(char_buf, 128 | (code & 63), 2)
@@ -987,13 +987,13 @@ fn chr(int code) str {
 @returns_owned
 fn __kwarg(any k, any v) any {
    def p = kwarg_new_raw(k, v)
-   if(!p){ panic("kwarg allocation failed") }
+   if !p { panic("kwarg allocation failed") }
    p
 }
 
 fn is_kwargs(any x) bool {
    "Returns **true** if `x` is a keyword argument wrap object."
-   if(!x || __is_int(x)){ return false }
+   if !x || __is_int(x) { return false }
    _core_has_tag(x, runtime_tag_raw("kwarg"))
 }
 
@@ -1046,8 +1046,8 @@ fn extend(any lst, any other) any {
 @jit
 fn len(any x) int {
    "Returns the number of elements in a collection or the length of a string."
-   if(is_list(x) || is_dict(x) || is_set(x) || is_tuple(x)){ return __load64_idx(x, 0) }
-   if(is_str(x) || is_bytes(x)){ return __load64_idx(x, -16) }
+   if is_list(x) || is_dict(x) || is_set(x) || is_tuple(x) { return __load64_idx(x, 0) }
+   if is_str(x) || is_bytes(x) { return __load64_idx(x, -16) }
    core_ref.len(x)
 }
 
@@ -1056,18 +1056,18 @@ impl any {
    fn long(any self) bigint { __long(self) }
    @inline
    fn to_bytes(any self) list {
-      if(is_list(self)){ return self }
-      if(is_bytes(self) || is_str(self)){ return _core_bytes_like_to_list(self) }
+      if is_list(self) { return self }
+      if is_bytes(self) || is_str(self) { return _core_bytes_like_to_list(self) }
       []
    }
    @inline
    fn as_bytes(any self) list {
-      if(is_int(self)){ return _core_bigint_to_bytes(__bigint_from_int(self)) }
+      if is_int(self) { return _core_bigint_to_bytes(__bigint_from_int(self)) }
       self.to_bytes
    }
    @inline
    fn unhex(any self) list<int> {
-      if(is_str(self)){ return _core_unhex(self) }
+      if is_str(self) { return _core_unhex(self) }
       []
    }
    @inline
@@ -1078,8 +1078,8 @@ impl any {
    fn require_shape(any self, any spec, str msg="shape check failed", int max_depth=6) any { core_ref.require_shape(self, spec, msg, max_depth) }
    @inline
    fn len(any self) int {
-      if(is_list(self) || is_dict(self) || is_set(self) || is_tuple(self)){ return __load64_idx(self, 0) }
-      if(is_str(self) || is_bytes(self)){ return __load64_idx(self, -16) }
+      if is_list(self) || is_dict(self) || is_set(self) || is_tuple(self) { return __load64_idx(self, 0) }
+      if is_str(self) || is_bytes(self) { return __load64_idx(self, -16) }
       core_ref.len(self)
    }
    @inline
@@ -1090,8 +1090,8 @@ impl any {
    fn put(any self, any key, any val) any { core_ref.set(self, key, val) }
    @inline
    fn add(any self, any val) any {
-      if(is_set(self)){ return _set_add(self, val) }
-      if(is_list(self)){ return core_ref.append(self, val) }
+      if is_set(self) { return _set_add(self, val) }
+      if is_list(self) { return core_ref.append(self, val) }
       core_ref.add(self, val)
    }
    @inline
@@ -1142,17 +1142,17 @@ impl any {
    fn windowed(any self, int size, int step=1) list { core_iter.windowed(self, size, step) }
    @inline
    fn delete(any self, any key) any {
-      if(is_dict(self)){ return dict_remove(self, key) }
-      if(is_set(self)){ return _set_remove(self, key) }
+      if is_dict(self) { return dict_remove(self, key) }
+      if is_set(self) { return _set_remove(self, key) }
       self
    }
    @inline
    fn remove(any self, any key) any { self.delete(key) }
    @inline
    fn clear(any self) any {
-      if(is_dict(self)){ return dict_clear(self) }
-      if(is_set(self)){ return _set_clear(self) }
-      if(is_list(self)){
+      if is_dict(self) { return dict_clear(self) }
+      if is_set(self) { return _set_clear(self) }
+      if is_list(self) {
          store64(self, 0, 0)
          return self
       }
@@ -1252,11 +1252,11 @@ impl list {
    fn len(list self) int { core_ref.len(self) }
    @inline
    fn get(list self, any key, any default=0) any {
-      if(__is_int(key)){
+      if __is_int(key) {
          mut k = key
          def n = __load64_idx(self, 0)
-         if(__lt(k, 0)){ k = __add(k, n) }
-         if(__lt(k, 0) || __ge(k, n)){ return default }
+         if __lt(k, 0) { k = __add(k, n) }
+         if __lt(k, 0) || __ge(k, n) { return default }
          return __load_item(self, k)
       }
       core_ref.get(self, key, default)
@@ -1432,11 +1432,11 @@ impl range {
 
 @returns_owned
 fn _clone_list(any lst) any {
-   if(!is_list(lst)){ return 0 }
+   if !is_list(lst) { return 0 }
    def n = __load64_idx(lst, 0)
-   mut list: out = list(n)
+   mut list out = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       out[i] = __load_item(lst, i)
       i += 1
    }
@@ -1448,10 +1448,10 @@ fn _clone_list(any lst) any {
 fn clone(any x) any {
    "Returns a shallow copy of lists, tuples, and dicts.
    Strings are returned unchanged."
-   if(is_list(x)){ return _clone_list(x) }
-   if(is_tuple(x)){ return _sorted_list_copy(x) }
-   if(is_str(x)){ return x }
-   if(is_dict(x)){ return dict_clone(x) }
+   if is_list(x) { return _clone_list(x) }
+   if is_tuple(x) { return _sorted_list_copy(x) }
+   if is_str(x) { return x }
+   if is_dict(x) { return dict_clone(x) }
    x
 }
 
@@ -1470,12 +1470,12 @@ fn store_item(any lst, int i, any v) any {
 fn swap_items(any lst, int i, int j) any {
    "Swaps elements at indices `i` and `j` in list `lst`.
    Supports negative indices and returns the list."
-   if(!is_list(lst)){ return lst }
+   if !is_list(lst) { return lst }
    def n = __load64_idx(lst, 0)
-   if(i < 0){ i += n }
-   if(j < 0){ j += n }
-   if(i < 0 || i >= n || j < 0 || j >= n){ panic("swap index out of range") }
-   if(i == j){ return lst }
+   if i < 0 { i += n }
+   if j < 0 { j += n }
+   if i < 0 || i >= n || j < 0 || j >= n { panic("swap index out of range") }
+   if i == j { return lst }
    def tmp = __load_item(lst, i)
    lst[i] = __load_item(lst, j)
    lst[j] = tmp
@@ -1485,12 +1485,12 @@ fn swap_items(any lst, int i, int j) any {
 @inline
 fn swap(list lst, int i, int j) list {
    "Compatibility wrapper for list index swap."
-   if(!is_list(lst)){ return lst }
+   if !is_list(lst) { return lst }
    def n = __load64_idx(lst, 0)
-   if(i < 0){ i += n }
-   if(j < 0){ j += n }
-   if(i < 0 || i >= n || j < 0 || j >= n){ panic("swap index out of range") }
-   if(i == j){ return lst }
+   if i < 0 { i += n }
+   if j < 0 { j += n }
+   if i < 0 || i >= n || j < 0 || j >= n { panic("swap index out of range") }
+   if i == j { return lst }
    def tmp = __load_item(lst, i)
    lst[i] = __load_item(lst, j)
    lst[j] = tmp
@@ -1501,20 +1501,20 @@ fn swap(list lst, int i, int j) list {
 fn swapped(any xs, int i, int j) any {
    "Returns a copy of `xs` with indices `i` and `j` exchanged.
    Lists return a new list ; tuples and strings preserve their type."
-   if(is_list(xs)){
-      if(xs.len <= 1){ return _clone_list(xs) }
+   if is_list(xs) {
+      if xs.len <= 1 { return _clone_list(xs) }
       def out = _clone_list(xs)
       return swap_items(out, i, j)
    }
-   if(is_tuple(xs)){
-      if(xs.len <= 1){ return clone(xs) }
+   if is_tuple(xs) {
+      if xs.len <= 1 { return clone(xs) }
       def out = _sorted_list_copy(xs)
       swap_items(out, i, j)
       list_as_tuple_raw(out)
       return out
    }
-   if(is_str(xs)){
-      if(xs.len <= 1){ return xs }
+   if is_str(xs) {
+      if xs.len <= 1 { return xs }
       mut chars = _sorted_list_copy(xs)
       swap_items(chars, i, j)
       return _char_list_to_str(chars)
@@ -1527,7 +1527,7 @@ fn _sorted_list_copy(any xs) list {
    def n = xs.len
    mut out = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       out[i] = xs.get(i)
       i += 1
    }
@@ -1541,7 +1541,7 @@ fn _char_list_to_str(list chars) str {
    def n = chars.len
    mut out = Builder(n + 8)
    mut i = 0
-   while(i < n){
+   while i < n {
       out = builder_append(out, chars.get(i))
       i += 1
    }
@@ -1575,44 +1575,44 @@ fn clear(any x) any {
    "Clears a container.
    Lists, dicts, and sets are cleared in place.
    Strings and tuples return an empty value of the same outer shape."
-   if(is_list(x)){
+   if is_list(x) {
       store64(x, 0, 0)
       return x
    }
-   if(is_dict(x)){ return dict_clear(x) }
-   if(is_set(x)){ return _set_clear(x) }
-   if(is_str(x)){ return "" }
-   if(is_tuple(x)){ return _empty_tuple() }
+   if is_dict(x) { return dict_clear(x) }
+   if is_set(x) { return _set_clear(x) }
+   if is_str(x) { return "" }
+   if is_tuple(x) { return _empty_tuple() }
    x
 }
 
 fn add(any a, any b) any {
    "Generic addition for primitives and objects.
    Also appends to lists and inserts into sets."
-   if(is_list(a) && !(is_list(b) || is_tuple(b))){ return a.append(b) }
-   if(is_set(a)){ return _set_add(a, b) }
-   if(__is_int(a) && __is_int(b)){ return __add(a, b) }
+   if is_list(a) && !(is_list(b) || is_tuple(b)) { return a.append(b) }
+   if is_set(a) { return _set_add(a, b) }
+   if __is_int(a) && __is_int(b) { return __add(a, b) }
    core_ref.add(a, b)
 }
 
 fn sub(any a, any b) any {
    "Generic subtraction for primitives and objects.
    Also removes `b` from sets."
-   if(is_set(a)){ return _set_remove(a, b) }
-   if(__is_int(a) && __is_int(b)){ return __sub(a, b) }
+   if is_set(a) { return _set_remove(a, b) }
+   if __is_int(a) && __is_int(b) { return __sub(a, b) }
    core_ref.sub(a, b)
 }
 
 fn mul(any a, any b) any {
    "Generic multiplication for primitives and objects(handles bigint)."
-   if(__is_int(a) && __is_int(b)){ return __mul(a, b) }
+   if __is_int(a) && __is_int(b) { return __mul(a, b) }
    core_ref.mul(a, b)
 }
 
 fn div(any a, any b) any {
    "Generic division for primitives and objects(handles bigint)."
-   if(__is_int(a) && __is_int(b)){
-      if(b == 0){ panic("division by zero") }
+   if __is_int(a) && __is_int(b) {
+      if b == 0 { panic("division by zero") }
       return __div(a, b)
    }
    core_ref.div(a, b)
@@ -1658,7 +1658,7 @@ def IS_ARM     = arm
 
 fn _pow2(int n) int {
    mut v = 1
-   while(v < n){ v = v << 1 }
+   while v < n { v = v << 1 }
    v
 }
 

@@ -49,7 +49,7 @@ fn _gf_mul3(int x) int { (_gf_mul2(x) ^^ (x & 255)) & 255 }
 fn _rcon_word(int round_idx) list {
    error.crypto_require(round_idx >= 1 && round_idx < 256, "block.aes_square", "round_idx must be in [1,255]")
    mut v, i = 1, 1
-   while(i < round_idx){
+   while i < round_idx {
       v = _gf_mul2(v)
       i += 1
    }
@@ -70,7 +70,7 @@ fn _words_to_key(list words) list {
    error.crypto_require(words != nil && is_list(words), "block.aes_square", "words must be a list")
    mut out = []
    mut wi = 0
-   while(wi < words.len){
+   while wi < words.len {
       def w = words.get(wi, [])
       error.crypto_require_len(w, 4, "block.aes_square", "word")
       out = out.append(w.get(0, 0) & 255)
@@ -97,7 +97,7 @@ fn aes_square_key_expand(list key, int rounds=11) list {
    mut prev0, prev1 = init_words.get(0), init_words.get(1)
    mut prev2, prev3 = init_words.get(2), init_words.get(3)
    mut r = 1
-   while(r < rounds){
+   while r < rounds {
       def g = _word_xor(_word_sub(_word_rot(prev3)), _rcon_word(r))
       def n0 = _word_xor(prev0, g)
       def n1 = _word_xor(prev1, n0)
@@ -131,7 +131,7 @@ fn aes_square_reverse_key_expand(list last_round_words, int rounds) list {
    ]
    mut rev_keys = [current]
    mut r = rounds - 1
-   while(r >= 1){
+   while r >= 1 {
       def k0, k1 = current.get(0, []), current.get(1, [])
       def k2, k3 = current.get(2, []), current.get(3, [])
       def p3, p2 = _word_xor(k3, k2), _word_xor(k2, k1)
@@ -144,7 +144,7 @@ fn aes_square_reverse_key_expand(list last_round_words, int rounds) list {
    }
    mut out = []
    mut i = rev_keys.len - 1
-   while(i >= 0){
+   while i >= 0 {
       def rk = rev_keys.get(i, [])
       out = out.append(rk.get(0, []))
       out = out.append(rk.get(1, []))
@@ -169,7 +169,7 @@ fn aes_square_sub_bytes(list state) list {
    error.crypto_require_len(state, 16, "block.aes_square", "state")
    mut out = []
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       out = out.append(_SBOX.get(state.get(i, 0) & 255, 0))
       i += 1
    }
@@ -181,9 +181,9 @@ fn aes_square_shift_rows(list state) list {
    error.crypto_require_len(state, 16, "block.aes_square", "state")
    mut out = []
    mut c = 0
-   while(c < 4){
+   while c < 4 {
       mut r = 0
-      while(r < 4){
+      while r < 4 {
          def src_col = (c + r) % 4
          def src_idx = src_col * 4 + r
          out = out.append(state.get(src_idx, 0) & 255)
@@ -199,7 +199,7 @@ fn aes_square_mix_columns(list state) list {
    error.crypto_require_len(state, 16, "block.aes_square", "state")
    mut out = []
    mut c = 0
-   while(c < 4){
+   while c < 4 {
       def b0, b1 = state.get(c * 4 + 0, 0) & 255, state.get(c * 4 + 1, 0) & 255
       def b2, b3 = state.get(c * 4 + 2, 0) & 255, state.get(c * 4 + 3, 0) & 255
       out = out.append((_gf_mul2(b0) ^^ _gf_mul3(b1) ^^ b2 ^^ b3) & 255)
@@ -217,11 +217,11 @@ fn aes_square_add_round_key(list state, list round_key_words) list {
    error.crypto_require_len(round_key_words, 4, "block.aes_square", "round_key_words")
    mut out = []
    mut c = 0
-   while(c < 4){
+   while c < 4 {
       def w = round_key_words.get(c, [])
       error.crypto_require_len(w, 4, "block.aes_square", "round key word")
       mut r = 0
-      while(r < 4){
+      while r < 4 {
          def idx = c * 4 + r
          out = out.append((state.get(idx, 0) ^^ w.get(r, 0)) & 255)
          r += 1
@@ -239,7 +239,7 @@ fn aes_square_transform_state(list state, list key, int rounds=10) list {
    def key_words = aes_square_key_expand(key, rounds + 1)
    mut cur = aes_square_add_round_key(state, slice(key_words, 0, 4))
    mut r = 1
-   while(r < rounds){
+   while r < rounds {
       def round_key = slice(key_words, 4 * r, 4 * (r + 1))
       cur = aes_square_sub_bytes(cur)
       cur = aes_square_shift_rows(cur)
@@ -264,9 +264,9 @@ fn aes_square_state_from_rows(list rows) list {
    error.crypto_require_len(rows, 4, "block.aes_square", "rows")
    mut out = []
    mut c = 0
-   while(c < 4){
+   while c < 4 {
       mut r = 0
-      while(r < 4){
+      while r < 4 {
          def row = rows.get(r, [])
          error.crypto_require_len(row, 4, "block.aes_square", "row")
          out = out.append(row.get(c, 0) & 255)
@@ -294,10 +294,10 @@ fn aes_square_get_delta_set(int inactive_value) list {
    def iv = inactive_value & 255
    mut delta_set = []
    mut v = 0
-   while(v < 256){
+   while v < 256 {
       mut state = [v & 255]
       mut i = 1
-      while(i < 16){
+      while i < 16 {
          state = state.append(iv)
          i += 1
       }
@@ -311,7 +311,7 @@ fn aes_square_encrypt_delta_set(list key, list delta_set, int rounds=4) list {
    "Encrypt every state in a delta set with a fixed AES key."
    mut out = []
    mut i = 0
-   while(i < delta_set.len){
+   while i < delta_set.len {
       out = out.append(aes_square_transform_state(delta_set.get(i, []), key, rounds))
       i += 1
    }
@@ -322,7 +322,7 @@ fn aes_square_gather_encrypted_delta_sets(fnptr encrypt_delta_set_fn) list {
    "Gather encrypted delta sets for inactive values 0x00..0x0f."
    mut encrypted = []
    mut inactive = 0
-   while(inactive < 16){
+   while inactive < 16 {
       def ds = aes_square_get_delta_set(inactive)
       encrypted = encrypted.append(encrypt_delta_set_fn(ds))
       inactive += 1
@@ -335,7 +335,7 @@ fn aes_square_reverse_state(int guess, int position, list encrypted_delta_set) l
    error.crypto_require(position >= 0 && position < 16, "block.aes_square", "position must be in [0,15]")
    mut reversed = []
    mut i = 0
-   while(i < encrypted_delta_set.len){
+   while i < encrypted_delta_set.len {
       def s = encrypted_delta_set.get(i, [])
       error.crypto_require_len(s, 16, "block.aes_square", "state")
       def before_add = (s.get(position, 0) ^^ guess) & 255
@@ -348,7 +348,7 @@ fn aes_square_reverse_state(int guess, int position, list encrypted_delta_set) l
 fn aes_square_is_guess_correct(list reversed_bytes) bool {
    "Integral property check: XOR of reversed bytes must be zero."
    mut x, i = 0, 0
-   while(i < reversed_bytes.len){
+   while i < reversed_bytes.len {
       x = (x ^^ (reversed_bytes.get(i, 0) & 255)) & 255
       i += 1
    }
@@ -359,16 +359,16 @@ fn aes_square_guess_position(list encrypted_delta_sets, int position) int {
    "Guess one byte of the last round key for a fixed byte position."
    error.crypto_require(position >= 0 && position < 16, "block.aes_square", "position must be in [0,15]")
    mut ds_i = 0
-   while(ds_i < encrypted_delta_sets.len){
+   while ds_i < encrypted_delta_sets.len {
       def encrypted_ds = encrypted_delta_sets.get(ds_i, [])
       mut candidates = []
       mut guess = 0
-      while(guess < 256){
+      while guess < 256 {
          def reversed = aes_square_reverse_state(guess, position, encrypted_ds)
-         if(aes_square_is_guess_correct(reversed)){ candidates = candidates.append(guess) }
+         if aes_square_is_guess_correct(reversed) { candidates = candidates.append(guess) }
          guess += 1
       }
-      if(candidates.len == 1){ return candidates.get(0, 0) }
+      if candidates.len == 1 { return candidates.get(0, 0) }
       ds_i += 1
    }
    error.crypto_fail("block.aes_square", "could not determine key byte at position " + str(position))
@@ -379,7 +379,7 @@ fn aes_square_crack_last_key(fnptr encrypt_delta_set_fn) list {
    def encrypted_sets = aes_square_gather_encrypted_delta_sets(encrypt_delta_set_fn)
    mut last_key = []
    mut pos = 0
-   while(pos < 16){
+   while pos < 16 {
       last_key = last_key.append(aes_square_guess_position(encrypted_sets, pos))
       pos += 1
    }
