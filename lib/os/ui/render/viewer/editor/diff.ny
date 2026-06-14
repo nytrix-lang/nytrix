@@ -12,20 +12,20 @@ fn _clean(str s) str {
 }
 
 fn _clip(str s, int width) str {
-   if(width <= 0){ return "" }
-   if(s.len <= width){ return s }
+   if width <= 0 { return "" }
+   if s.len <= width { return s }
    str.str_slice(s, 0, max(0, width - 3)) + "..."
 }
 
 fn _pad(str s, int width) str {
    mut out = _clip(s, width)
-   while(out.len < width){ out += " " }
+   while out.len < width { out += " " }
    out
 }
 
 fn _line_mark(str a, str b, bool left_missing, bool right_missing) str {
-   if(left_missing){ return ">" }
-   if(right_missing){ return "<" }
+   if left_missing { return ">" }
+   if right_missing { return "<" }
    a == b ? " " : "|"
 }
 
@@ -36,12 +36,12 @@ fn _summary(list left, list right) list {
    mut removed = 0
    def n = max(left.len, right.len)
    mut i = 0
-   while(i < n){
+   while i < n {
       def lm = i >= left.len
       def rm = i >= right.len
-      if(lm){ added += 1 }
-      elif(rm){ removed += 1 }
-      elif(to_str(left.get(i, "")) == to_str(right.get(i, ""))){ same += 1 }
+      if lm { added += 1 }
+      elif rm { removed += 1 }
+      elif to_str(left.get(i, "")) == to_str(right.get(i, "")) { same += 1 }
       else { changed += 1 }
       i += 1
    }
@@ -59,7 +59,7 @@ fn side_by_side(str left_text, str right_text, str left_name="buffer", str right
    out += _pad("left: " + left_name, width) + "   !   " + "right: " + right_name + "\n"
    out += str.repeat("-", width) + "---+---" + str.repeat("-", width) + "\n"
    mut i = 0
-   while(i < n){
+   while i < n {
       def lm = i >= left.len
       def rm = i >= right.len
       def a = lm ? "" : to_str(left.get(i, ""))

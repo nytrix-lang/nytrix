@@ -41,16 +41,16 @@ fn is_playing(any inst) bool {
 
 fn set_volume(any inst_or_sound, any vol) any {
    "Sets the volume of a sound instance or the default volume of a sound object."
-   if(is_list(inst_or_sound)){
-      if(inst_or_sound.len > 3){ inst_or_sound[3] = vol + 0.0 }
+   if is_list(inst_or_sound) {
+      if inst_or_sound.len > 3 { inst_or_sound[3] = vol + 0.0 }
       else { inst_or_sound[6] = vol + 0.0 }
    }
 }
 
 fn get_volume(any inst_or_sound) any {
    "Returns the volume of a sound instance or a sound object."
-   if(is_list(inst_or_sound)){
-      if(inst_or_sound.len > 3){ return inst_or_sound.get(3) }
+   if is_list(inst_or_sound) {
+      if inst_or_sound.len > 3 { return inst_or_sound.get(3) }
       return inst_or_sound.get(6, 1.0)
    }
    1.0
@@ -58,23 +58,23 @@ fn get_volume(any inst_or_sound) any {
 
 fn set_pitch(any inst_or_sound, any pitch) any {
    "Sets the playback pitch of a sound instance."
-   if(is_list(inst_or_sound) && inst_or_sound.len > 2){ inst_or_sound[2] = pitch + 0.0 }
+   if is_list(inst_or_sound) && inst_or_sound.len > 2 { inst_or_sound[2] = pitch + 0.0 }
 }
 
 fn get_pitch(any inst_or_sound) any {
    "Returns the playback pitch of a sound instance."
-   if(is_list(inst_or_sound) && inst_or_sound.len > 2){ return inst_or_sound.get(2) }
+   if is_list(inst_or_sound) && inst_or_sound.len > 2 { return inst_or_sound.get(2) }
    1.0
 }
 
 fn set_pan(any inst, any pan) any {
    "Sets the stereo panning of a sound instance(-1.0 to 1.0)."
-   if(is_list(inst) && inst.len > 5){ inst[5] = pan + 0.0 }
+   if is_list(inst) && inst.len > 5 { inst[5] = pan + 0.0 }
 }
 
 fn get_pan(any inst) any {
    "Returns the stereo panning of a sound instance."
-   if(is_list(inst) && inst.len > 5){ return inst.get(5) }
+   if is_list(inst) && inst.len > 5 { return inst.get(5) }
    0.0
 }
 
@@ -113,5 +113,5 @@ fn print_probe() any {
 fn play_oneshot(any path, any pitch=1.0, any vol=1.0, any pan=0.0) any {
    "Loads and plays a sound once. Useful for simple effects."
    def s = load(path)
-   if(s){ play(s, pitch, vol, false, pan) }
+   if s { play(s, pitch, vol, false, pan) }
 }

@@ -28,9 +28,9 @@ fn aes_matrix_to_bytes(list matrix) list {
    "Flatten a CryptoHack-style AES state matrix into bytes."
    mut out = []
    mut i = 0
-   while(i < matrix.len){
+   while i < matrix.len {
       mut j = 0
-      while(j < matrix[i].len){
+      while j < matrix[i].len {
          out = out.append(matrix[i][j])
          j += 1
       }
@@ -42,7 +42,7 @@ fn aes_matrix_to_bytes(list matrix) list {
 fn _aes_bytes_to_matrix(list bytes) list {
    mut out = []
    mut i = 0
-   while(i < bytes.len){
+   while i < bytes.len {
       out = out.append(slice(bytes, i, i + 4))
       i += 4
    }
@@ -53,10 +53,10 @@ fn aes_add_round_key_matrix(list state, list round_key) list {
    "XOR two CryptoHack-style AES state matrices."
    mut out = []
    mut i = 0
-   while(i < state.len){
+   while i < state.len {
       mut row = []
       mut j = 0
-      while(j < state[i].len){
+      while j < state[i].len {
          row = row.append(state[i][j] ^^ round_key[i][j])
          j += 1
       }
@@ -70,10 +70,10 @@ fn aes_sub_bytes_matrix(list state, list sbox) list {
    "Apply an S-box to every byte in a CryptoHack-style AES state matrix."
    mut out = []
    mut i = 0
-   while(i < state.len){
+   while i < state.len {
       mut row = []
       mut j = 0
-      while(j < state[i].len){
+      while j < state[i].len {
          row = row.append(sbox[state[i][j]])
          j += 1
       }
@@ -123,13 +123,13 @@ fn aes_init(list key) list {
    def words = (nr + 1) * 4
    mut w = list(words)
    store64(w, words, 0)
-   mut i = 0 while(i < nk){
+   mut i = 0 while i < nk {
       w[i] = unpack_be32(key, i * 4)
       i += 1
    }
-   while(i < words){
+   while i < words {
       mut temp = w[i - 1]
-      if(i % nk == 0){ temp = _sub_word(_rot_word(temp)) ^^ (_AES_RCON[i / nk] << 24) } elif(nk > 6 && i % nk == 4){ temp = _sub_word(temp) }
+      if i % nk == 0 { temp = _sub_word(_rot_word(temp)) ^^ (_AES_RCON[i / nk] << 24) } elif nk > 6 && i % nk == 4 { temp = _sub_word(temp) }
       w[i] = w[i - nk] ^^ temp
       i += 1
    }
@@ -138,7 +138,7 @@ fn aes_init(list key) list {
 
 fn _sub_bytes(list st) any {
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       st[i] = _AES_SBOX[st[i]]
       i += 1
    }
@@ -152,7 +152,7 @@ fn _shift_rows(list st) any {
 }
 
 fn _mix_columns(list st) any {
-   mut i = 0 while(i < 4){
+   mut i = 0 while i < 4 {
       def b0 = st[i*4] def b1 = st[i*4+1] def b2 = st[i*4+2] def b3 = st[i*4+3]
       def t = b0 ^^ b1 ^^ b2 ^^ b3
       def u = b0
@@ -166,7 +166,7 @@ fn _mix_columns(list st) any {
 
 fn _inv_sub_bytes(list st) any {
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       st[i] = _AES_INV_SBOX[st[i]]
       i += 1
    }
@@ -180,7 +180,7 @@ fn _inv_shift_rows(list st) any {
 }
 
 fn _inv_mix_columns(list st) any {
-   mut i = 0 while(i < 4){
+   mut i = 0 while i < 4 {
       def b0 = st[i*4] def b1 = st[i*4+1] def b2 = st[i*4+2] def b3 = st[i*4+3]
       def u = _xtime(_xtime(b0 ^^ b2))
       def v = _xtime(_xtime(b1 ^^ b3))
@@ -194,7 +194,7 @@ fn _inv_mix_columns(list st) any {
 }
 
 fn _add_round_key(list st, list w, int r) any {
-   mut i = 0 while(i < 4){
+   mut i = 0 while i < 4 {
       def word = w[r*4 + i]
       st[i*4] = st[i*4] ^^ ((word >> 24) & 0xff)
       st[i*4+1] = st[i*4+1] ^^ ((word >> 16) & 0xff)
@@ -208,7 +208,7 @@ fn _aes_encrypt_state(list ctx, list st) list {
    def w = ctx[0]
    def nr = ctx[1]
    _add_round_key(st, w, 0)
-   mut r = 1 while(r < nr){
+   mut r = 1 while r < nr {
       _sub_bytes(st)
       _shift_rows(st)
       _mix_columns(st)
@@ -231,7 +231,7 @@ fn _aes_decrypt_state(list ctx, list st) list {
    def nr = ctx[1]
    _add_round_key(st, w, nr)
    mut r = nr - 1
-   while(r > 0){
+   while r > 0 {
       _inv_shift_rows(st)
       _inv_sub_bytes(st)
       _add_round_key(st, w, r)
@@ -251,22 +251,22 @@ fn aes_decrypt_block(list ctx, list block) list {
 
 fn aes_encrypt_ecb(list key, list plaintext) any {
    "Encrypt full AES blocks in ECB mode without padding. Returns nil on a partial block."
-   if(plaintext.len % 16 != 0){ return nil }
+   if plaintext.len % 16 != 0 { return nil }
    def ctx = aes_init(key)
    mut out = list(plaintext.len)
    mut block = list(16)
    store64(block, 16, 0)
    mut p = 0
    mut pos = 0
-   while(p < plaintext.len){
+   while p < plaintext.len {
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          block[i] = plaintext[p + i]
          i += 1
       }
       _aes_encrypt_state(ctx, block)
       i = 0
-      while(i < 16){
+      while i < 16 {
          out[pos] = block[i]
          pos += 1
          i += 1
@@ -279,22 +279,22 @@ fn aes_encrypt_ecb(list key, list plaintext) any {
 
 fn aes_decrypt_ecb(list key, list ciphertext) any {
    "Decrypt full AES blocks in ECB mode without unpadding. Returns nil on a partial block."
-   if(ciphertext.len % 16 != 0){ return nil }
+   if ciphertext.len % 16 != 0 { return nil }
    def ctx = aes_init(key)
    mut out = list(ciphertext.len)
    mut block = list(16)
    store64(block, 16, 0)
    mut p = 0
    mut pos = 0
-   while(p < ciphertext.len){
+   while p < ciphertext.len {
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          block[i] = ciphertext[p + i]
          i += 1
       }
       _aes_decrypt_state(ctx, block)
       i = 0
-      while(i < 16){
+      while i < 16 {
          out[pos] = block[i]
          pos += 1
          i += 1
@@ -314,16 +314,16 @@ fn aes_encrypt_cbc(list key, list iv, list plaintext) list {
    mut block = list(16)
    store64(block, 16, 0)
    mut out_pos = 0
-   mut p = 0 while(p < plaintext.len){
+   mut p = 0 while p < plaintext.len {
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          def src = p + i
          block[i] = (src < plaintext.len ? plaintext[src] : 0) ^^ prev[i]
          i += 1
       }
       _aes_encrypt_state(ctx, block)
       mut j = 0
-      while(j < 16){
+      while j < 16 {
          res[out_pos] = block[j]
          prev[j] = block[j]
          out_pos += 1
@@ -337,7 +337,7 @@ fn aes_encrypt_cbc(list key, list iv, list plaintext) list {
 
 fn aes_decrypt_cbc(list key, list iv, list ciphertext) any {
    "Decrypt AES-CBC ciphertext blocks with the given key and IV."
-   if(ciphertext.len % 16 != 0){ return nil }
+   if ciphertext.len % 16 != 0 { return nil }
    def ctx = aes_init(key)
    mut prev = clone(iv)
    mut next_prev = list(16)
@@ -347,9 +347,9 @@ fn aes_decrypt_cbc(list key, list iv, list ciphertext) any {
    mut res = list(ciphertext.len)
    mut p = 0
    mut pos = 0
-   while(p < ciphertext.len){
+   while p < ciphertext.len {
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          def b = ciphertext[p + i]
          block[i] = b
          next_prev[i] = b
@@ -357,7 +357,7 @@ fn aes_decrypt_cbc(list key, list iv, list ciphertext) any {
       }
       _aes_decrypt_state(ctx, block)
       i = 0
-      while(i < 16){
+      while i < 16 {
          res[pos] = block[i] ^^ prev[i]
          pos += 1
          i += 1
@@ -374,7 +374,7 @@ fn aes_decrypt_cbc(list key, list iv, list ciphertext) any {
 fn _aes_inc128_inplace(list block) any {
    mut i = 15
    mut carry = 1
-   while(i >= 0 && carry != 0){
+   while i >= 0 && carry != 0 {
       def v = block[i] + carry
       block[i] = v & 255
       carry = v >> 8
@@ -391,15 +391,15 @@ fn aes_encrypt_ctr(list key, list nonce_counter, list data) list {
    store64(block, 16, 0)
    mut p = 0
    mut pos = 0
-   while(p < data.len){
+   while p < data.len {
       mut j = 0
-      while(j < 16){
+      while j < 16 {
          block[j] = ctr[j]
          j += 1
       }
       _aes_encrypt_state(ctx, block)
       mut i = 0
-      while(i < 16 && p + i < data.len){
+      while i < 16 && p + i < data.len {
          out[pos] = data[p + i] ^^ block[i]
          pos += 1
          i += 1

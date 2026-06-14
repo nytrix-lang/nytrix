@@ -86,7 +86,7 @@ fn stream_open(any stream) any {
    store16(wfx, 0, 16)
    def res = waveOutOpen(hWaveOut, -1, wfx, 0, 0, CALLBACK_NULL)
    free(wfx)
-   if(res != MMSYSERR_NOERROR){
+   if res != MMSYSERR_NOERROR {
       free(hWaveOut)
       return false
    }
@@ -105,7 +105,7 @@ fn stream_start(any stream) bool {
 fn stream_stop(any stream) bool {
    "Stops and closes a WinMM playback stream."
    def handle = stream.get("handle")
-   if(handle){
+   if handle {
       waveOutReset(handle)
       waveOutClose(handle)
    }
@@ -115,22 +115,22 @@ fn stream_stop(any stream) bool {
 
 fn write(any h, any buf, int bytes) bool {
    "Writes `bytes` of PCM data to a WinMM output stream."
-   if(!h){ return false }
+   if !h { return false }
    def hdr_size = 32
    def hdr = malloc(hdr_size)
    memset(hdr, 0, hdr_size)
    store64(hdr, buf, 0)
    store32(hdr, bytes, 8)
-   if(waveOutPrepareHeader(h, hdr, hdr_size) != MMSYSERR_NOERROR){
+   if waveOutPrepareHeader(h, hdr, hdr_size) != MMSYSERR_NOERROR {
       free(hdr)
       return false
    }
-   if(waveOutWrite(h, hdr, hdr_size) != MMSYSERR_NOERROR){
+   if waveOutWrite(h, hdr, hdr_size) != MMSYSERR_NOERROR {
       waveOutUnprepareHeader(h, hdr, hdr_size)
       free(hdr)
       return false
    }
-   while((load32(hdr, 24) & 1) == 0){ msleep(1) }
+   while (load32(hdr, 24) & 1) == 0 { msleep(1) }
    waveOutUnprepareHeader(h, hdr, hdr_size)
    free(hdr)
    true

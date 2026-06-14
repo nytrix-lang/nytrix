@@ -7,11 +7,11 @@ module std.math.crypto.symmetric.composition(encrypt_and_mac_encrypt, encrypt_an
 use std.core
 
 fn _composition_equal(any a, any b) bool {
-   if(is_list(a) && is_list(b)){
-      if(a.len != b.len){ return false }
+   if is_list(a) && is_list(b) {
+      if a.len != b.len { return false }
       mut i = 0
-      while(i < a.len){
-         if(!_composition_equal(a.get(i), b.get(i))){ return false }
+      while i < a.len {
+         if !_composition_equal(a.get(i), b.get(i)) { return false }
          i += 1
       }
       return true
@@ -29,9 +29,9 @@ fn encrypt_and_mac_encrypt(any msg, fnptr enc_fn, fnptr mac_fn) list {
 fn encrypt_and_mac_decrypt(any ct, any tag, fnptr dec_fn, fnptr mac_fn) any {
    "Decrypt then authenticate the recovered plaintext."
    def msg = dec_fn(ct)
-   if(msg == nil){ return nil }
+   if msg == nil { return nil }
    def expected = mac_fn(msg)
-   if(_composition_equal(expected, tag)){ return msg }
+   if _composition_equal(expected, tag) { return msg }
    nil
 }
 
@@ -44,7 +44,7 @@ fn encrypt_then_mac_encrypt(any msg, fnptr enc_fn, fnptr mac_fn) list {
 
 fn encrypt_then_mac_decrypt(any ct, any tag, fnptr dec_fn, fnptr mac_fn) any {
    "Authenticate ciphertext before decryption."
-   if(!_composition_equal(mac_fn(ct), tag)){ return nil }
+   if !_composition_equal(mac_fn(ct), tag) { return nil }
    dec_fn(ct)
 }
 
@@ -57,10 +57,10 @@ fn mac_then_encrypt_encrypt(any msg, fnptr enc_fn, fnptr mac_fn) list {
 fn mac_then_encrypt_decrypt(any ct, fnptr dec_fn, fnptr mac_fn) any {
    "Decrypt, then split [msg, tag] and authenticate."
    def payload = dec_fn(ct)
-   if(!is_list(payload) || payload.len < 2){ return nil }
+   if !is_list(payload) || payload.len < 2 { return nil }
    def msg = payload.get(0)
    def tag = payload.get(1)
    def expected = mac_fn(msg)
-   if(_composition_equal(expected, tag)){ return msg }
+   if _composition_equal(expected, tag) { return msg }
    nil
 }

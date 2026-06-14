@@ -28,11 +28,11 @@ fn ige_bit_flipping(any iv1, any iv2, list ct, int pos, int old_byte, int new_by
    def ct_block = block_idx + 1
    def target_pos = (ct_block - 1) * block_size + byte_offset
    def ct_len = ct.len
-   if(target_pos < ct_len){
+   if target_pos < ct_len {
       def orig_ct_byte = modified_ct[target_pos]
       modified_ct[target_pos] = bxor(orig_ct_byte, diff)
    }
-   if(ct_block < (ct_len / block_size)){
+   if ct_block < (ct_len / block_size) {
       def next_block_start = ct_block * block_size + byte_offset
       def prev_next_byte = modified_ct[next_block_start]
       modified_ct[next_block_start] = bxor(prev_next_byte, diff)

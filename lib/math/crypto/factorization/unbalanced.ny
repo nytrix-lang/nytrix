@@ -18,25 +18,25 @@ fn unbalanced_factor(any n) any {
    Returns [p, q] with p <= q, or nil."
    def limit = isqrt(isqrt(n)) + 1
    mut p2 = 2
-   while(p2 <= limit && n % p2 != 0){ p2 += 1 }
-   if(p2 <= limit && n % p2 == 0){
+   while p2 <= limit && n % p2 != 0 { p2 += 1 }
+   if p2 <= limit && n % p2 == 0 {
       mut q = n / p2
       return [p2, q]
    }
    mut p3 = 3
-   while(p3 <= limit && n % p3 != 0){ p3 = p3 + 2 }
-   if(p3 <= limit && n % p3 == 0){
+   while p3 <= limit && n % p3 != 0 { p3 = p3 + 2 }
+   if p3 <= limit && n % p3 == 0 {
       mut q = n / p3
       return [p3, q]
    }
    mut p5 = 5
-   while(p5 * p5 <= limit && p5 * p5 <= n){
-      while(n % p5 == 0){
+   while p5 * p5 <= limit && p5 * p5 <= n {
+      while n % p5 == 0 {
          mut q = n / p5
          return [p5, q]
       }
       def p5p = p5 + 2
-      while(n % p5p == 0){
+      while n % p5p == 0 {
          mut q = n / p5p
          return [p5p, q]
       }
@@ -53,14 +53,14 @@ fn unbalanced_factor_fermat(any n) any {
    mut a = isqrt(n)
    mut count = 0
    def max_iter = isqrt(n) / 2
-   while(count < max_iter){
+   while count < max_iter {
       def a_sq = a * a
       def diff = a_sq - n
-      if(diff >= 0){
+      if diff >= 0 {
          mut s = isqrt(diff)
-         if(s * s == diff){
+         if s * s == diff {
             mut p, q = a - s, a + s
-            if(p > 1 && p * q == n){ return(p < q) ? [p, q] : [q, p] }
+            if p > 1 && p * q == n { return(p < q) ? [p, q] : [q, p] }
          }
       }
       a += 1
@@ -73,24 +73,24 @@ fn factor_unbalanced(any n, any small_bound) any {
    "Factor n assuming the smaller prime p < small_bound.
    Uses trial division up to small_bound.
    Returns [p, q] with p <= q, or nil if no small factor found."
-   if(small_bound < 2){ return nil }
-   if(n % 2 == 0){
+   if small_bound < 2 { return nil }
+   if n % 2 == 0 {
       mut q = n / 2
       return [2, q]
    }
-   if(n % 3 == 0){
+   if n % 3 == 0 {
       mut q = n / 3
       return [3, q]
    }
    mut p = 5
-   while(p < small_bound && p * p <= n){
-      while(n % p == 0){
+   while p < small_bound && p * p <= n {
+      while n % p == 0 {
          mut q = n / p
          return [p, q]
       }
       mut p2 = p + 2
-      if(p2 < small_bound){
-         while(n % p2 == 0){
+      if p2 < small_bound {
+         while n % p2 == 0 {
             mut q = n / p2
             return [p2, q]
          }
@@ -109,26 +109,26 @@ fn factor_unbalanced_wheels(any n, any small_bound) any {
    def small_primes = [2, 3, 5]
    def ns = small_primes.len
    mut i = 0
-   while(i < ns){
+   while i < ns {
       def sp = small_primes.get(i)
-      if(n % sp == 0){
+      if n % sp == 0 {
          mut q = n / sp
          return [sp, q]
       }
       i += 1
    }
    mut base = 0
-   while(base < small_bound){
+   while base < small_bound {
       mut j = 0
-      while(j < nw){
+      while j < nw {
          mut p = base + wheel.get(j)
-         if(p < 2){
+         if p < 2 {
             j += 1
             continue
          }
-         if(p >= small_bound){ break }
-         if(p * p > n){ return nil }
-         if(n % p == 0){
+         if p >= small_bound { break }
+         if p * p > n { return nil }
+         if n % p == 0 {
             mut q = n / p
             return [p, q]
          }
@@ -145,7 +145,7 @@ fn detect_unbalanced(any n) bool {
    Uses a threshold of sqrt(n)/100."
    def sqrt_n = isqrt(n)
    mut threshold = sqrt_n / 100
-   if(threshold < Z(2)){ threshold = Z(2) }
+   if threshold < Z(2) { threshold = Z(2) }
    mut result = factor_unbalanced(n, threshold)
    result != nil
 }
@@ -158,14 +158,14 @@ fn estimate_small_factor_bits(any n) int {
    mut a = sqrt_n
    mut count = 0
    def max_search = 1000000
-   while(count < max_search){
+   while count < max_search {
       def a_sq = a * a
       def diff = a_sq - n
-      if(diff >= 0){
+      if diff >= 0 {
          mut s = isqrt(diff)
-         if(s * s == diff){
+         if s * s == diff {
             mut p = a - s
-            if(p > 1){
+            if p > 1 {
                def bits = bit_length(p)
                return bits
             }
@@ -182,11 +182,11 @@ fn factor_three_unbalanced(any n, any bound1, any bound2) any {
    Finds the smallest factor first, then factors the quotient.
    Returns [p, q, r] or nil."
    def p_result = factor_unbalanced(n, bound1)
-   if(p_result == nil){ return nil }
+   if p_result == nil { return nil }
    mut p = p_result.get(0)
    def remaining = p_result.get(1)
    def q_result = factor_unbalanced(remaining, bound2)
-   if(q_result == nil){ return nil }
+   if q_result == nil { return nil }
    mut q, r = q_result.get(0), q_result.get(1)
    [p, q, r]
 }

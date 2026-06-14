@@ -21,7 +21,7 @@ fn args() list {
    def n = __argc()
    mut out = list(8)
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(__argv(i))
       i += 1
    }
@@ -39,9 +39,9 @@ fn positionals_from(list ag) list {
    mut out = list(8)
    mut i = 1
    mut passthrough = false
-   while(i < ag.len){
+   while i < ag.len {
       def item = to_str(ag.get(i))
-      if(!passthrough && item == "--"){
+      if !passthrough && item == "--" {
          passthrough = true
       } else {
          out = out.append(item)
@@ -58,19 +58,19 @@ fn positionals() list {
 
 fn _args_assignment_value(str tok, str name) any {
    def prefix = name + "="
-   if(str.startswith(tok, prefix)){ return str.str_slice(tok, prefix.len, tok.len) }
+   if str.startswith(tok, prefix) { return str.str_slice(tok, prefix.len, tok.len) }
    nil
 }
 
 fn _args_value_from(list ag, str name, str fallback="") str {
    "Returns the value from `--name value` or `--name=value` in argument list `ag`, or `fallback`."
    mut i = 1
-   while(i < ag.len){
+   while i < ag.len {
       def tok = to_str(ag.get(i))
-      if(tok == "--"){ return fallback }
+      if tok == "--" { return fallback }
       def assigned = _args_assignment_value(tok, name)
-      if(assigned != nil){ return to_str(assigned) }
-      if(tok == name){ return(i + 1 < ag.len) ? to_str(ag.get(i + 1)) : fallback }
+      if assigned != nil { return to_str(assigned) }
+      if tok == name { return(i + 1 < ag.len) ? to_str(ag.get(i + 1)) : fallback }
       i += 1
    }
    fallback
@@ -84,10 +84,10 @@ fn value_from(list ag, str name, str fallback="") str {
 fn _args_flag_from(list ag, str name) bool {
    "Returns whether `name` appears in argument list `ag`."
    mut i = 1
-   while(i < ag.len){
+   while i < ag.len {
       def tok = to_str(ag.get(i))
-      if(tok == "--"){ return false }
-      if(tok == name || _args_assignment_value(tok, name) != nil){ return true }
+      if tok == "--" { return false }
+      if tok == name || _args_assignment_value(tok, name) != nil { return true }
       i += 1
    }
    false
@@ -113,9 +113,9 @@ fn float_value_from(list ag, str name, f64 fallback=0.0) f64 {
 fn first_positive_int_from(list ag, int fallback=0) int {
    "Returns the first positive integer in `ag`, or `fallback`."
    mut i = 0
-   while(i < ag.len){
+   while i < ag.len {
       def n = str.atoi(to_str(ag.get(i, "")))
-      if(n > 0){ return n }
+      if n > 0 { return n }
       i += 1
    }
    fallback

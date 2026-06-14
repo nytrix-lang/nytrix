@@ -40,7 +40,7 @@ fn _dict_store_item(list xs, int index, any value) list {
 
 fn _pow2(int n) int {
    mut v = 1
-   while(v < n){ v = v << 1 }
+   while v < n { v = v << 1 }
    v
 }
 
@@ -49,17 +49,17 @@ fn _dict_str_eq(any a, any b) bool { __str_eq(a, b) }
 
 @inline
 fn _dict_key_eq(any a, any b) bool {
-   if(is_str(a) && is_str(b)){ return _dict_str_eq(a, b) }
+   if is_str(a) && is_str(b) { return _dict_str_eq(a, b) }
    return(a == b)
 }
 
 @inline
 fn _dict_hash(any x) int {
-   if(is_int(x)){ return x }
-   if(!x){ return 0 }
-   if(is_str(x)){ return __str_hash(x) }
-   if(__is_float_obj(x)){ return __flt_hash(x) }
-   if(is_ptr(x)){ return band(bshr(to_int(x), 3), 2147483647) }
+   if is_int(x) { return x }
+   if !x { return 0 }
+   if is_str(x) { return __str_hash(x) }
+   if __is_float_obj(x) { return __flt_hash(x) }
+   if is_ptr(x) { return band(bshr(to_int(x), 3), 2147483647) }
    return 0
 }
 
@@ -83,28 +83,28 @@ fn dict(int cap=8) dict {
 @inline
 fn dict_len(dict d) int {
    "Returns the number of entries in dictionary `d`."
-   if(!is_dict(d)){ return 0 }
+   if !is_dict(d) { return 0 }
    __load64_idx(d, 0)
 }
 
 @inline
 fn _dict_find_off(dict d, any key) int {
    def cap = __load64_idx(d, 8)
-   if(cap <= 0){ return -1 }
+   if cap <= 0 { return -1 }
    def mask = cap - 1
    def h = _dict_hash(key)
    mut idx = h & mask
    mut first_tomb = -1
    mut i = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + idx * 24
       def state = __load64_idx(d, off + 16)
-      if(!state){
-         if(first_tomb >= 0){ return first_tomb }
+      if !state {
+         if first_tomb >= 0 { return first_tomb }
          return off
       }
-      if(state == 1 && _dict_key_eq(__load64_idx(d, off), key)){ return off }
-      if(state == 2 && first_tomb < 0){ first_tomb = off }
+      if state == 1 && _dict_key_eq(__load64_idx(d, off), key) { return off }
+      if state == 2 && first_tomb < 0 { first_tomb = off }
       idx = (idx + 1) & mask
       i += 1
    }
@@ -117,9 +117,9 @@ fn _dict_resize(dict d) dict {
    def new_cap = old_cap < 8 ? 8 : old_cap * 2
    mut nd = _dict_new(new_cap)
    mut i = 0
-   while(i < old_cap){
+   while i < old_cap {
       def off = 16 + i * 24
-      if(__load64_idx(d, off + 16) == 1){ dict_write(nd, __load64_idx(d, off), __load64_idx(d, off + 8)) }
+      if __load64_idx(d, off + 16) == 1 { dict_write(nd, __load64_idx(d, off), __load64_idx(d, off + 8)) }
       i += 1
    }
    nd
@@ -127,15 +127,15 @@ fn _dict_resize(dict d) dict {
 
 fn dict_write(dict d, any key, any val) dict {
    "Inserts or updates a key/value pair in dictionary `d`."
-   if(!is_dict(d)){ return d }
+   if !is_dict(d) { return d }
    def tc = __load64_idx(d, 0)
    def tca = __load64_idx(d, 8)
    mut off = _dict_find_off(d, key)
-   if(off >= 0 && __load64_idx(d, off + 16) == 1){
+   if off >= 0 && __load64_idx(d, off + 16) == 1 {
       __store64_idx(d, off + 8, val)
       return d
    }
-   if(off < 0 || (tc + 1) * 2 > tca){
+   if off < 0 || (tc + 1) * 2 > tca {
       mut nd = _dict_resize(d)
       return dict_write(nd, key, val)
    }
@@ -149,18 +149,18 @@ fn dict_write(dict d, any key, any val) dict {
 @inline
 fn dict_read(dict d, any key, any default=0) any {
    "Retrieves the value for `key` in `d`, or returns `default` if not found."
-   if(!is_dict(d)){ return default }
+   if !is_dict(d) { return default }
    def off = _dict_find_off(d, key)
-   if(off < 0 || __load64_idx(d, off + 16) != 1){ return default }
+   if off < 0 || __load64_idx(d, off + 16) != 1 { return default }
    __load64_idx(d, off + 8)
 }
 
 @inline
 fn dict_exists(dict d, any key) bool {
    "Returns **true** if `key` exists in dictionary `d`."
-   if(!is_dict(d)){ return false }
+   if !is_dict(d) { return false }
    def off = _dict_find_off(d, key)
-   if(off < 0 || __load64_idx(d, off + 16) != 1){ return false }
+   if off < 0 || __load64_idx(d, off + 16) != 1 { return false }
    true
 }
 
@@ -173,9 +173,9 @@ fn dict_has(dict d, any key) bool {
 @inline
 fn dict_remove(dict d, any key) dict {
    "Removes `key` from dictionary `d`. Returns the dictionary."
-   if(!is_dict(d)){ return d }
+   if !is_dict(d) { return d }
    def off = _dict_find_off(d, key)
-   if(off >= 0 && __load64_idx(d, off + 16) == 1){
+   if off >= 0 && __load64_idx(d, off + 16) == 1 {
       __store64_idx(d, off, 0)
       __store64_idx(d, off + 8, 0)
       __store64_idx(d, off + 16, 2)
@@ -192,9 +192,9 @@ fn dict_del(dict d, any key) dict {
 
 fn dict_pop(dict d, any key, any default=0) any {
    "Removes and returns the value for `key`, or `default` if not found."
-   if(!is_dict(d)){ return default }
+   if !is_dict(d) { return default }
    def off = _dict_find_off(d, key)
-   if(off >= 0 && __load64_idx(d, off + 16) == 1){
+   if off >= 0 && __load64_idx(d, off + 16) == 1 {
       def val = __load64_idx(d, off + 8)
       __store64_idx(d, off, 0)
       __store64_idx(d, off + 8, 0)
@@ -207,12 +207,12 @@ fn dict_pop(dict d, any key, any default=0) any {
 
 fn dict_popitem(dict d) any {
    "Removes and returns the last inserted [key, value] pair, or 0 if empty."
-   if(!is_dict(d)){ return 0 }
+   if !is_dict(d) { return 0 }
    def cap = __load64_idx(d, 8)
    mut i = cap - 1
-   while(i >= 0){
+   while i >= 0 {
       def off = 16 + i * 24
-      if(__load64_idx(d, off + 16) == 1){
+      if __load64_idx(d, off + 16) == 1 {
          def key = __load64_idx(d, off)
          def val = __load64_idx(d, off + 8)
          __store64_idx(d, off, 0)
@@ -228,8 +228,8 @@ fn dict_popitem(dict d) any {
 
 fn dict_setdefault(dict d, any key, any default=0) any {
    "Returns the value for `key`, or sets and returns `default` if not found."
-   if(!is_dict(d)){ return default }
-   if(dict_exists(d, key)){ return dict_read(d, key, default) }
+   if !is_dict(d) { return default }
+   if dict_exists(d, key) { return dict_read(d, key, default) }
    d = dict_write(d, key, default)
    default
 }
@@ -237,14 +237,14 @@ fn dict_setdefault(dict d, any key, any default=0) any {
 @returns_owned
 fn dict_clone(dict d) dict {
    "Creates a shallow copy of dictionary `d`."
-   if(!is_dict(d)){ return d }
+   if !is_dict(d) { return d }
    def cap = __load64_idx(d, 8)
    mut nd = _dict_new(cap)
    __store64_idx(nd, 0, __load64_idx(d, 0))
    mut i = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
-      if(__load64_idx(d, off + 16) == 1){
+      if __load64_idx(d, off + 16) == 1 {
          __store64_idx(nd, off, __load64_idx(d, off))
          __store64_idx(nd, off + 8, __load64_idx(d, off + 8))
          __store64_idx(nd, off + 16, 1)
@@ -256,10 +256,10 @@ fn dict_clone(dict d) dict {
 
 fn dict_clear(dict d) dict {
    "Removes all entries from dictionary `d`."
-   if(!is_dict(d)){ return d }
+   if !is_dict(d) { return d }
    def cap = __load64_idx(d, 8)
    mut i = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
       __store64_idx(d, off, 0)
       __store64_idx(d, off + 8, 0)
@@ -272,12 +272,12 @@ fn dict_clear(dict d) dict {
 
 fn dict_merge(dict dst, dict src) dict {
    "Merges `src` into `dst` (overwriting duplicate keys). Returns merged dictionary."
-   if(!is_dict(dst) || !is_dict(src)){ return dst }
+   if !is_dict(dst) || !is_dict(src) { return dst }
    def cap = __load64_idx(src, 8)
    mut i = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
-      if(__load64_idx(src, off + 16) == 1){ dst = dict_write(dst, __load64_idx(src, off), __load64_idx(src, off + 8)) }
+      if __load64_idx(src, off + 16) == 1 { dst = dict_write(dst, __load64_idx(src, off), __load64_idx(src, off + 8)) }
       i += 1
    }
    dst
@@ -296,15 +296,15 @@ fn _dict_pair(any a, any b) list {
 @returns_owned
 fn dict_items(dict d) list {
    "Returns a list of [key, value] pairs."
-   if(!is_dict(d)){ return list() }
+   if !is_dict(d) { return list() }
    def n = __load64_idx(d, 0)
    mut out = list(n)
    def cap = __load64_idx(d, 8)
    mut i = 0
    mut pos = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
-      if(__load64_idx(d, off + 16) == 1){
+      if __load64_idx(d, off + 16) == 1 {
          _dict_store_item(out, pos, _dict_pair(__load64_idx(d, off), __load64_idx(d, off + 8)))
          pos += 1
       }
@@ -317,15 +317,15 @@ fn dict_items(dict d) list {
 @returns_owned
 fn dict_keys(dict d) list {
    "Returns a list of keys."
-   if(!is_dict(d)){ return list() }
+   if !is_dict(d) { return list() }
    def n = __load64_idx(d, 0)
    mut out = list(n)
    def cap = __load64_idx(d, 8)
    mut i = 0
    mut pos = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
-      if(__load64_idx(d, off + 16) == 1){
+      if __load64_idx(d, off + 16) == 1 {
          _dict_store_item(out, pos, __load64_idx(d, off))
          pos += 1
       }
@@ -338,15 +338,15 @@ fn dict_keys(dict d) list {
 @returns_owned
 fn dict_values(dict d) list {
    "Returns a list of values."
-   if(!is_dict(d)){ return list() }
+   if !is_dict(d) { return list() }
    def n = __load64_idx(d, 0)
    mut out = list(n)
    def cap = __load64_idx(d, 8)
    mut i = 0
    mut pos = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
-      if(__load64_idx(d, off + 16) == 1){
+      if __load64_idx(d, off + 16) == 1 {
          _dict_store_item(out, pos, __load64_idx(d, off + 8))
          pos += 1
       }
@@ -358,7 +358,7 @@ fn dict_values(dict d) list {
 
 #main {
    fn _dict_check(bool cond, str msg) int {
-      if(!cond){ __panic(msg) }
+      if !cond { __panic(msg) }
       0
    }
    mut d = dict(4)

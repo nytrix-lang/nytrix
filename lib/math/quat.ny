@@ -30,7 +30,7 @@ fn quat_dot(list a, list b) any {
 fn quat_norm(list q) list {
    "Returns a new normalized(unit-length) quaternion derived from `q`. If `q` has zero length, returns identity."
    def d2 = quat_dot(q, q)
-   if(d2 == 0){ return quat_identity() }
+   if d2 == 0 { return quat_identity() }
    def inv_l = 1 / sqrt(d2)
    quat(q.get(0) * inv_l, q.get(1) * inv_l, q.get(2) * inv_l, q.get(3) * inv_l)
 }
@@ -51,11 +51,11 @@ fn quat_slerp(list a, list b, any t) list {
    "Performs spherical linear interpolation(SLERP) between quaternions `a` and `b` by factor `t` [0, 1]."
    mut cos_theta = quat_dot(a, b)
    mut b_rot = b
-   if(cos_theta < 0){
+   if cos_theta < 0 {
       cos_theta = -cos_theta
       b_rot = quat(-b.get(0), -b.get(1), -b.get(2), -b.get(3))
    }
-   if(cos_theta > 0.9995){
+   if cos_theta > 0.9995 {
       def it = 1 - t
       return quat_norm(quat(
             a.get(0) * it + b_rot.get(0) * t,
@@ -99,7 +99,7 @@ fn quat_to_mat4(list q) list {
 
 fn mul(any a, any b) any {
    "Generic multiplication operator supporting quaternion-quaternion products."
-   if(is_list(a) && a.len == 4 && is_list(b) && b.len == 4){ return quat_mul(a, b) }
+   if is_list(a) && a.len == 4 && is_list(b) && b.len == 4 { return quat_mul(a, b) }
    a * b
 }
 

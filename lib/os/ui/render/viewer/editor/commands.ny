@@ -173,6 +173,7 @@ def _COMMANDS = [
 ]
 
 def _ALIASES = []
+
 fn commands() list { _COMMANDS }
 
 fn all_commands() list { _COMMANDS }
@@ -203,9 +204,9 @@ fn toggle(dict cfg, str tag) dict {
 fn enabled(dict cfg=config()) list {
    mut out = []
    mut i = 0
-   while(i < _COMMANDS.len){
+   while i < _COMMANDS.len {
       def row = _COMMANDS.get(i)
-      if(is_enabled(cfg, row)){ out = out.append(row) }
+      if is_enabled(cfg, row) { out = out.append(row) }
       i += 1
    }
    out
@@ -215,9 +216,9 @@ fn with_tag(str tag, dict cfg=config()) list {
    mut out = []
    def rows = enabled(cfg)
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows.get(i)
-      if(row_tag(row) == tag){ out = out.append(row) }
+      if row_tag(row) == tag { out = out.append(row) }
       i += 1
    }
    out
@@ -230,9 +231,9 @@ fn toggles(dict cfg=config()) list {
 fn by_id(str id) list {
    def rows = commands()
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows.get(i)
-      if(row_id(row) == id){ return row }
+      if row_id(row) == id { return row }
       i += 1
    }
    []
@@ -243,9 +244,9 @@ fn has_id(str id) bool { by_id(id).len > 0 }
 fn id_for_chord(str chord) str {
    def rows = all_commands()
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows.get(i)
-      if(row_key(row) == chord){ return row_id(row) }
+      if row_key(row) == chord { return row_id(row) }
       i += 1
    }
    ""
@@ -257,19 +258,19 @@ fn _suffix_head(str suffix) str {
 }
 
 fn _group_label(str head) str {
-   if(head == "SPC"){ return "command palette" }
-   if(head == "f"){ return "files" }
-   if(head == "b"){ return "buffers and pages" }
-   if(head == "d"){ return "debug and diff" }
-   if(head == "r"){ return "run and check" }
-   if(head == "g"){ return "project refresh" }
-   if(head == "y"){ return "copy helpers" }
-   if(head == "e"){ return "editing tools" }
-   if(head == "s"){ return "search" }
-   if(head == "t"){ return "toggles and terminal" }
-   if(head == "w"){ return "windows and panes" }
-   if(head == "m"){ return "movement" }
-   if(head == "l"){ return "language server" }
+   if head == "SPC" { return "command palette" }
+   if head == "f" { return "files" }
+   if head == "b" { return "buffers and pages" }
+   if head == "d" { return "debug and diff" }
+   if head == "r" { return "run and check" }
+   if head == "g" { return "project refresh" }
+   if head == "y" { return "copy helpers" }
+   if head == "e" { return "editing tools" }
+   if head == "s" { return "search" }
+   if head == "t" { return "toggles and terminal" }
+   if head == "w" { return "windows and panes" }
+   if head == "m" { return "movement" }
+   if head == "l" { return "language server" }
    head
 }
 
@@ -279,14 +280,14 @@ fn which_key(str prefix) list {
    mut seen = dict(32)
    mut i = 0
    def rows = all_commands()
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows.get(i)
       def key = row_key(row)
       def pre = p + " "
-      if(str.startswith(key, pre)){
+      if str.startswith(key, pre) {
          def suffix = str.str_slice(key, pre.len, key.len)
          def head = _suffix_head(suffix)
-         if(head.len > 0 && !seen.contains(head)){
+         if head.len > 0 && !seen.contains(head) {
             seen[head] = true
             out = out.append([head, suffix == head ? to_str(row.get(0, "")) : _group_label(head)])
          }

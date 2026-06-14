@@ -11,7 +11,7 @@ def text = "ny" + "trix"
 assert(text == "nytrix", "gc string concat")
 mut survivors = []
 mut i = 0
-while(i < 256){
+while i < 256 {
    def row = [i, i + 1, "ny" + to_str(i)]
    survivors = survivors.append(row)
    i += 1

@@ -28,9 +28,9 @@ fn rsa_blind_decrypt(any cipher, any e, any n, fnptr oracle_fn) any {
    Returns the recovered plaintext."
    mut s = 2
    mut done = false
-   while(!done){
+   while !done {
       def gcd_val = gcd(s, n)
-      if(gcd_val == 1){ done = true } else { s += 1 }
+      if gcd_val == 1 { done = true } else { s += 1 }
    }
    def blinded = rsa_malleable_multiply(cipher, s, e, n)
    def blinded_plain = oracle_fn(blinded)

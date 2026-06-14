@@ -17,21 +17,21 @@ fn factor_square_offsets_scan(any n, any p_offset, any q_offset, any scan) any {
    def root = isqrt(nn)
    mut x = root
    mut left = Z(scan)
-   while(left >= Z(0)){
+   while left >= Z(0) {
       def e1 = nn - x * x - sum_const
-      if(e1 > Z(0)){
+      if e1 > Z(0) {
          def disc = e1 * e1 - Z(4) * po * qo * x * x
-         if(disc >= Z(0)){
+         if disc >= Z(0) {
             def r = isqrt(disc)
-            if(r * r == disc){
+            if r * r == disc {
                def cands = [e1 + r, e1 - r]
                mut i = 0
-               while(i < cands.len){
+               while i < cands.len {
                   def cand = cands.get(i)
-                  if(cand % denom == Z(0)){
+                  if cand % denom == Z(0) {
                      def a2 = cand / denom
                      def p = a2 + po
-                     if(p > Z(1) && nn % p == Z(0)){ return [p, nn / p] }
+                     if p > Z(1) && nn % p == Z(0) { return [p, nn / p] }
                   }
                   i += 1
                }

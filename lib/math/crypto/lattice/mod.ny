@@ -32,9 +32,9 @@ fn _lattice_opts(any opts) dict { is_dict(opts) ? opts : dict(0) }
 fn _lattice_blockers(list rows) list {
    mut blockers = []
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows[i]
-      if(row.get("remove_blocker", false)){ blockers = blockers.append(row) }
+      if row.get("remove_blocker", false) { blockers = blockers.append(row) }
       i += 1
    }
    blockers
@@ -43,9 +43,9 @@ fn _lattice_blockers(list rows) list {
 fn _lattice_completed(list rows) list {
    mut completed = []
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows[i]
-      if(row.get("ny_default", false) && row.get("tested", false) && row.get("benchmarked", false) && !row.get("remove_blocker", true)){
+      if row.get("ny_default", false) && row.get("tested", false) && row.get("benchmarked", false) && !row.get("remove_blocker", true) {
          completed = completed.append(row)
       }
       i += 1
@@ -116,10 +116,10 @@ fn lattice_reduction_report(any basis, str strategy="auto", any opts=nil) dict {
    def flatter_threshold = int(o.get("flatter_threshold", 30))
    mut rep = nil
    mut selected = strategy
-   if(strategy == "bkz"){
+   if strategy == "bkz" {
       selected = "bkz"
       rep = bkz_report(input, int(o.get("block_size", 10)), delta, "ny", eta, int(o.get("max_tours", 0)), true, int(o.get("svp_coeff_bound", 1)), int(o.get("svp_max_nodes", 200000)))
-   } else if(strategy == "flatter" || (strategy == "auto" && rows >= flatter_threshold)){
+   } else if strategy == "flatter" || (strategy == "auto" && rows >= flatter_threshold) {
       selected = "flatter"
       rep = flatter_reduce_report(input, delta, int(o.get("max_rounds", 3)), eta)
    } else {

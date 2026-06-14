@@ -3758,8 +3758,13 @@ static char *ny_normalize_command_source(const char *src) {
 static char *load_user_source(const ny_options *opt) {
   if (opt->command_string)
     return ny_normalize_command_source(opt->command_string);
-  if (opt->input_file)
+  if (opt->input_file) {
+    if (strncmp(opt->input_file, "http://", 7) == 0 ||
+        strncmp(opt->input_file, "https://", 8) == 0) {
+      return ny_read_url(opt->input_file);
+    }
     return ny_read_file(opt->input_file);
+  }
   return ny_strdup("fn main() { return 0\n }");
 }
 
@@ -4906,10 +4911,16 @@ int ny_pipeline_run(ny_options *opt) {
 #endif
   user_src = load_user_source(opt);
   if (!user_src) {
-    if (opt->input_file)
-      NY_LOG_ERR("Failed to read file '%s'\n", opt->input_file);
-    else
+    if (opt->input_file) {
+      if (strncmp(opt->input_file, "http://", 7) == 0 ||
+          strncmp(opt->input_file, "https://", 8) == 0) {
+        NY_LOG_ERR("Failed to fetch URL '%s'\n", opt->input_file);
+      } else {
+        NY_LOG_ERR("Failed to read file '%s'\n", opt->input_file);
+      }
+    } else {
       NY_LOG_ERR("Failed to allocate source input\n");
+    }
     return 1;
   }
   maybe_log_phase_time(opt->do_timing, "Read file:", t0);
@@ -5286,25 +5297,25 @@ int ny_pipeline_run(ny_options *opt) {
             break;
           }
           for (size_t i = 0; i < started; i++) {
-            if (mod_jobs[i].pid == pid) {
-              if (WIFEXITED(status))
-                mod_jobs[i].exit_code = WEXITSTATUS(status);
-              else
-                mod_jobs[i].exit_code = 1;
-              if (mod_jobs[i].exit_code != 0)
-                parallel_modules = false;
-              break;
-            }
+            if (mod_jobs[i].pid != pid)
+              continue;
+            if (WIFEXITED(status))
+              mod_jobs[i].exit_code = WEXITSTATUS(status);
+            else
+              mod_jobs[i].exit_code = 1;
+            if (mod_jobs[i].exit_code != 0)
+              parallel_modules = false;
+            break;
           }
           running--;
           finished++;
         }
         if (!parallel_modules) {
           for (size_t i = 0; i < started; i++) {
-            if (mod_jobs[i].pid > 0) {
-              int st = 0;
-              (void)waitpid(mod_jobs[i].pid, &st, 0);
-            }
+            if (mod_jobs[i].pid <= 0)
+              continue;
+            int st = 0;
+            (void)waitpid(mod_jobs[i].pid, &st, 0);
           }
         }
       } else {

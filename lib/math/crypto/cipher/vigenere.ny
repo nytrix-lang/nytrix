@@ -16,7 +16,7 @@ def _VG_ENG_FREQ = [82, 15, 28, 43, 127, 22, 20, 61, 70, 2, 8, 40, 24, 67, 75, 1
 fn _vigenere_require_key(str key, str scope) bool {
    crypto_require_nonempty(key, scope, "key")
    mut i = 0
-   while(i < key.len){
+   while i < key.len {
       def c = load8(key, i)
       case c {
          65..90, 97..122 -> {}
@@ -36,7 +36,7 @@ fn _vg_builder_take(list b) str {
 fn _vg_zero_list(int n) list {
    mut xs = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       xs[i] = 0
       i += 1
    }
@@ -65,22 +65,22 @@ fn _vigenere_plain_score(str text) int {
    mut has_ing = false
    mut has_tion = false
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def c = load8(text, i)
       score += _vg_english_byte_score(c)
-      if(!has_ing && i + 2 < text.len && c == 73 && load8(text, i + 1) == 78 && load8(text, i + 2) == 71){ has_ing = true }
-      if(!has_tion && i + 3 < text.len && c == 84 && load8(text, i + 1) == 73 && load8(text, i + 2) == 79 && load8(text, i + 3) == 78){ has_tion = true }
+      if !has_ing && i + 2 < text.len && c == 73 && load8(text, i + 1) == 78 && load8(text, i + 2) == 71 { has_ing = true }
+      if !has_tion && i + 3 < text.len && c == 84 && load8(text, i + 1) == 73 && load8(text, i + 2) == 79 && load8(text, i + 3) == 78 { has_tion = true }
       i += 1
    }
-   if(has_ing){ score += 80 }
-   if(has_tion){ score += 120 }
+   if has_ing { score += 80 }
+   if has_tion { score += 120 }
    score
 }
 
 fn _vg_clean_alpha(str text) str {
    mut out = Builder(max(16, text.len + 8))
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def c = load8(text, i)
       case c {
          65..90 -> { out = builder_append_byte(out, c) }
@@ -93,13 +93,13 @@ fn _vg_clean_alpha(str text) str {
 }
 
 fn _vg_avg_ic_for_len(str text, int key_len) f64 {
-   if(key_len <= 0){ return 0.0 }
+   if key_len <= 0 { return 0.0 }
    def width = key_len * 26
    mut counts = _vg_zero_list(width)
    mut lens = _vg_zero_list(key_len)
    mut alpha_pos = 0
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def c = load8(text, i)
       case c {
          65..90 -> {
@@ -121,13 +121,13 @@ fn _vg_avg_ic_for_len(str text, int key_len) f64 {
    mut total = 0.0
    mut count = 0
    mut pos = 0
-   while(pos < key_len){
+   while pos < key_len {
       def n = lens[pos]
-      if(n > 1){
+      if n > 1 {
          mut sum = 0
          mut j = 0
          def base = pos * 26
-         while(j < 26){
+         while j < 26 {
             def f = counts[base + j]
             sum = sum + f * (f - 1)
             j += 1
@@ -141,14 +141,14 @@ fn _vg_avg_ic_for_len(str text, int key_len) f64 {
 }
 
 fn _vg_key_char_from_counts(list counts, int base, int n) str {
-   if(n <= 0){ return "A" }
+   if n <= 0 { return "A" }
    mut best_shift = 0
    mut best_chi = 999999999
    mut shift = 0
-   while(shift < 26){
+   while shift < 26 {
       mut chi = 0
       mut letter = 0
-      while(letter < 26){
+      while letter < 26 {
          def expected = _VG_ENG_FREQ[letter]
          def shifted = (letter + shift) % 26
          def count = counts[base + shifted]
@@ -156,7 +156,7 @@ fn _vg_key_char_from_counts(list counts, int base, int n) str {
          chi = chi + (obs - expected) * (obs - expected) / expected
          letter += 1
       }
-      if(chi < best_chi){
+      if chi < best_chi {
          best_chi = chi
          best_shift = shift
       }
@@ -170,7 +170,7 @@ fn _vg_key_for_len(str clean, int key_len) str {
    mut counts = _vg_zero_list(width)
    mut lens = _vg_zero_list(key_len)
    mut i = 0
-   while(i < clean.len){
+   while i < clean.len {
       def c = load8(clean, i)
       case c {
          65..90 -> {
@@ -184,7 +184,7 @@ fn _vg_key_for_len(str clean, int key_len) str {
    }
    mut guessed_key = Builder(max(16, key_len + 8))
    mut pos = 0
-   while(pos < key_len){
+   while pos < key_len {
       guessed_key = builder_append(guessed_key, _vg_key_char_from_counts(counts, pos * 26, lens[pos]))
       pos += 1
    }
@@ -194,11 +194,11 @@ fn _vg_key_for_len(str clean, int key_len) str {
 fn _vg_sort_score_rows_desc(list rows) list {
    def out = clone(rows)
    mut i = 1
-   while(i < out.len){
+   while i < out.len {
       def row = out.get(i)
       def score = row.get(0, 0)
       mut j = i - 1
-      while(j >= 0 && out.get(j).get(0, 0) < score){
+      while j >= 0 && out.get(j).get(0, 0) < score {
          out[j + 1] = out.get(j)
          j -= 1
       }
@@ -211,20 +211,20 @@ fn _vg_sort_score_rows_desc(list rows) list {
 fn _vg_kasiski_factor_counts(str text, int max_len) list {
    mut counts = _vg_zero_list(max_len + 1)
    def text_len = text.len
-   if(text_len < 3){ return counts }
+   if text_len < 3 { return counts }
    mut last3 = _vg_zero_list(26 * 26 * 26)
    mut pos = 0
-   while(pos + 2 < text_len){
+   while pos + 2 < text_len {
       def a = load8(text, pos) - 65
       def b = load8(text, pos + 1) - 65
       def c = load8(text, pos + 2) - 65
       def p3 = (a * 26 + b) * 26 + c
       def prev3 = last3[p3]
-      if(prev3 > 0){
+      if prev3 > 0 {
          def dist = pos - (prev3 - 1)
          mut k = 2
-         while(k <= max_len){
-            if(dist % k == 0){ counts[k] = counts[k] + 1 }
+         while k <= max_len {
+            if dist % k == 0 { counts[k] = counts[k] + 1 }
             k += 1
          }
       }
@@ -235,7 +235,7 @@ fn _vg_kasiski_factor_counts(str text, int max_len) list {
 }
 
 fn _vg_apply_shift(int value, int key_val, bool decrypt) int {
-   if(decrypt){ return(value - key_val + 26) % 26 }
+   if decrypt { return(value - key_val + 26) % 26 }
    (value + key_val) % 26
 }
 
@@ -246,7 +246,7 @@ fn _vg_transform(str text, str key, bool decrypt, str scope, str name) str {
    mut ki = 0
    def key_len = key.len
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def c = load8(text, i)
       case c {
          65..90 -> {
@@ -272,7 +272,7 @@ fn _vg_guess_key_len_rows_clean(str clean, int max_len) list {
    mut scores = list(max_len)
    def kasiski_counts = _vg_kasiski_factor_counts(clean, max_len)
    mut key_len = 1
-   while(key_len <= max_len){
+   while key_len <= max_len {
       def avg_ic = _vg_avg_ic_for_len(clean, key_len)
       def ic_score = int(avg_ic * 100000)
       def kasiski_score = kasiski_counts[key_len] * 250
@@ -288,11 +288,11 @@ fn vigenere_guess_key_lengths(str ciphertext, int max_len=20) list {
    Returns a list of candidate key lengths ordered best-first."
    crypto_require_nonempty(ciphertext, "cipher.vigenere_guess_key_lengths", "ciphertext")
    def clean = _vg_clean_alpha(ciphertext)
-   if(clean.len == 0){ return [] }
+   if clean.len == 0 { return [] }
    def scores = _vg_guess_key_len_rows_clean(clean, max_len)
    mut out = list(scores.len)
    mut i = 0
-   while(i < scores.len){
+   while i < scores.len {
       out[i] = scores[i][1]
       i += 1
    }
@@ -324,7 +324,7 @@ fn index_of_coincidence(str text) f64 {
    mut freq_table = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
    mut n = 0
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def c = load8(text, i)
       case c {
          65..90 -> {
@@ -341,10 +341,10 @@ fn index_of_coincidence(str text) f64 {
       }
       i += 1
    }
-   if(n <= 1){ return 0.0 }
+   if n <= 1 { return 0.0 }
    mut sum = 0
    mut j = 0
-   while(j < 26){
+   while j < 26 {
       def f = freq_table[j]
       sum = sum + f * (f - 1)
       j += 1
@@ -362,25 +362,25 @@ fn kasiski_test(str text) list {
    mut seq_len = 3
    mut match_cap = 256
    mut search_window = 2048
-   while(seq_len <= 5){
-      if(seq_len > text_len){ seq_len += 1 }
+   while seq_len <= 5 {
+      if seq_len > text_len { seq_len += 1 }
       mut pos = 0
-      while(pos <= text_len - seq_len){
+      while pos <= text_len - seq_len {
          mut next_pos = pos + seq_len
          mut hits = 0
-         while(next_pos <= text_len - seq_len && next_pos <= pos + search_window){
+         while next_pos <= text_len - seq_len && next_pos <= pos + search_window {
             mut is_match = true
             mut j = 0
-            while(j < seq_len){
+            while j < seq_len {
                def c1, c2 = load8(text, pos + j), load8(text, next_pos + j)
-               if(c1 != c2){ is_match = false }
+               if c1 != c2 { is_match = false }
                j += 1
             }
-            if(is_match){
+            if is_match {
                def dist = next_pos - pos
                distances = distances.append(dist)
                hits += 1
-               if(hits >= match_cap){ next_pos = text_len }
+               if hits >= match_cap { next_pos = text_len }
             }
             next_pos += 1
          }
@@ -403,15 +403,15 @@ fn vigenere_crack(str ciphertext) list {
    mut ranked_len = 0
    mut lens = _vg_guess_key_len_rows_clean(clean, 20)
    mut li = 0
-   while(li < lens.len && li < 8){
+   while li < lens.len && li < 8 {
       def key_len = lens[li][1]
-      if(key_len > 0 && key_len <= text_len){
+      if key_len > 0 && key_len <= text_len {
          def guessed_key_s = _vg_key_for_len(clean, key_len)
          def decrypted = vigenere_decrypt(clean, guessed_key_s)
          mut score = _vigenere_plain_score(decrypted)
          def ic_scaled = lens[li][2]
-         if(ic_scaled >= 550 && ic_scaled <= 750){ score += 350 }
-         if(ic_scaled < 350){ score -= 500 }
+         if ic_scaled >= 550 && ic_scaled <= 750 { score += 350 }
+         if ic_scaled < 350 { score -= 500 }
          ranked[ranked_len] = [score, key_len, guessed_key_s, decrypted]
          ranked_len += 1
       }
@@ -422,7 +422,7 @@ fn vigenere_crack(str ciphertext) list {
    def result_n = min(5, ranked.len)
    mut result = list(result_n)
    mut i = 0
-   while(i < result_n){
+   while i < result_n {
       def row = ranked[i]
       result[i] = [row[1], row[2], row[3]]
       i += 1
@@ -432,7 +432,7 @@ fn vigenere_crack(str ciphertext) list {
 }
 
 #main {
-   def f64: ic = index_of_coincidence("ABAB")
+   def f64 ic = index_of_coincidence("ABAB")
    assert(ic > 0.33 && ic < 0.34, "index_of_coincidence uses floating division")
    print("✓ std.math.crypto.cipher.vigenere self-test passed")
 }

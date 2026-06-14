@@ -13,11 +13,11 @@ assert(v2 == 0, "comptime fallthrough")
 mut v3 = comptime{
    mut sum = 0
    mut i = 0
-   while(i < 5){
+   while i < 5 {
       sum = sum + i
       i += 1
    }
-   if(sum == 10){ return sum }
+   if sum == 10 { return sum }
    return 0
 }
 
@@ -90,14 +90,14 @@ mut ct_pick = comptime{
 #endif
 mut v_guard_div0 = comptime{
    def d = [0][0]
-   if(d == 0){ return -99 }
+   if d == 0 { return -99 }
    return 100 / d
 }
 
 assert(v_guard_div0 == -99, "comptime guarded div0")
 mut v_guard_mod0 = comptime{
    def d = [0][0]
-   if(d == 0){ return 321 }
+   if d == 0 { return 321 }
    return 100 % d
 }
 
@@ -106,7 +106,7 @@ static_assert((3 * 7) == 21, "static_assert folded arithmetic")
 static_assert(comptime{ return 2 * 21 == 42 }, "static_assert comptime block")
 assert_compile((4 * 11) == 44, "assert_compile folded arithmetic")
 def ct_range_values = [10, 20, 30]
-def int: ct_range_idx = 1
+def int ct_range_idx = 1
 assert_compile(range_proven(ct_range_idx, 1, 1), "range_proven exact binding")
 assert_compile(index_proven(ct_range_values, ct_range_idx), "index_proven static list")
 assert_compile_range(ct_range_idx + 1, 2, 2, "assert_compile_range expression")
@@ -114,9 +114,9 @@ assert_compile_index(ct_range_values, ct_range_idx, "assert_compile_index static
 
 fn static_range_sum() int {
    def xs = [1, 2, 3, 4]
-   mut int: i = 0
-   mut int: acc = 0
-   while(i < xs.len){
+   mut int i = 0
+   mut int acc = 0
+   while i < xs.len {
       assert_compile_range(i, 0, 3, "loop index range proof")
       assert_compile_index(xs, i, "loop index bounds proof")
       acc += xs[i]
@@ -134,7 +134,7 @@ comptime diagnostic rule bad_layout_store {
 }
 
 fn static_branch_select() int {
-   if(comptime{ return true }){
+   if comptime { return true }{
       return 11
    } else {
       return missing_static_branch_symbol()
@@ -164,9 +164,9 @@ fn static_case_range_select() int {
 assert(static_case_range_select() == 33, "comptime case range emits selected arm only")
 
 layout CtReflectRecord {
-   a: i32
-   b: f64
-   c: bool
+   i32 a
+   f64 b
+   bool c
 }
 
 mut reflect_field_count = 0
@@ -177,7 +177,7 @@ comptime fields(CtReflectRecord) as f {
    emit assert(__layout_offset("CtReflectRecord", f.name) == f.offset, "comptime fields offset")
    emit reflect_field_count += 1
    emit reflect_field_index_sum += f.index
-   emit if(f.type == "i32" || f.type == "f64" || f.type == "bool"){
+   emit if f.type == "i32" || f.type == "f64" || f.type == "bool" {
       reflect_field_type_hits += 1
    }
 }
@@ -196,8 +196,8 @@ mut reflect_export_seen = 0
 
 comptime exports(CtReflectExports) as name {
    emit reflect_export_count += 1
-   emit if(name == "alpha"){ reflect_export_seen += 1 }
-   emit if(name == "beta"){ reflect_export_seen += 10 }
+   emit if name == "alpha" { reflect_export_seen += 1 }
+   emit if name == "beta" { reflect_export_seen += 10 }
 }
 
 assert(reflect_export_count == 2, "comptime exports count")
@@ -235,8 +235,8 @@ assert(ct_mul_5(7) == 35, "comptime function family int splice 5")
 
 comptime template clamp_num(T, name){
    fn name(T v, T lo, T hi) T {
-      if(v < lo){ return lo }
-      if(v > hi){ return hi }
+      if v < lo { return lo }
+      if v > hi { return hi }
       return v
    }
 }

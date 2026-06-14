@@ -72,8 +72,8 @@ mut _verbose_argv_mode = -1
 fn _key(any name) str { to_str(name) }
 
 fn _ny_trace_raw() bool {
-   if(is_dict(_env_bool_cache) && _env_bool_cache.contains("NY_TRACE")){ return bool(_env_bool_cache.get("NY_TRACE", false)) }
-   if(is_dict(_env_str_cache) && _env_str_cache.contains("trim:NY_TRACE")){
+   if is_dict(_env_bool_cache) && _env_bool_cache.contains("NY_TRACE") { return bool(_env_bool_cache.get("NY_TRACE", false)) }
+   if is_dict(_env_str_cache) && _env_str_cache.contains("trim:NY_TRACE") {
       def v = str.lower(str.strip(to_str(_env_str_cache.get("trim:NY_TRACE", ""))))
       return !(v == "" || v == "0" || v == "false" || v == "no" || v == "off")
    }
@@ -82,14 +82,14 @@ fn _ny_trace_raw() bool {
 
 fn _ny_trace_mode() str {
    mut v = ""
-   if(is_dict(_env_str_cache) && _env_str_cache.contains("lower:NY_TRACE")){
+   if is_dict(_env_str_cache) && _env_str_cache.contains("lower:NY_TRACE") {
       v = str.lower(str.strip(to_str(_env_str_cache.get("lower:NY_TRACE", ""))))
-   } elif(common.env_present("NY_TRACE")){
+   } elif common.env_present("NY_TRACE") {
       v = common.env_lower("NY_TRACE")
    } else {
       return ""
    }
-   if(v == "" || v == "1" || v == "true" || v == "yes" || v == "on"){ return "lite" }
+   if v == "" || v == "1" || v == "true" || v == "yes" || v == "on" { return "lite" }
    v
 }
 
@@ -110,46 +110,42 @@ fn _ny_trace_perf() bool {
 
 fn _ny_trace_value(str name) str {
    def k = _key(name)
-   if(!_ny_trace_raw()){ return "" }
-   if(common.env_present(k)){ return "" }
+   if !_ny_trace_raw() { return "" }
+   if common.env_present(k) { return "" }
    def deep = _ny_trace_deep()
    def spam = _ny_trace_spam()
    def perf = _ny_trace_perf()
-
    ;; NY_TRACE=1 is intentionally low-cost. It should not silently enable
    ;; texture tracing, startup spam, profile dumps, or per-frame diagnostics.
    ;; Expensive traces stay behind their explicit env vars or deep/spam modes.
-   if(k == "NY_UI_RENDER_BACKEND"){ return "vk" }
-   if(k == "NY_UI_VSYNC"){ return perf ? "0" : "1" }
-   if(k == "NY_VK_FRAME_SLEEP_MS"){ return "0" }
-   if(k == "NY_TEX_TRACE"){ return "0" }
-   if(k == "NY_UI_TEX_TRACE"){ return "0" }
-   if(k == "NY_UI_TEX_TRACE_SYNC_ALL"){ return spam ? "1" : "0" }
-   if(k == "NY_UI_STARTUP_TRACE"){ return "0" }
-   if(k == "NY_VK_PROFILE_DUMP"){ return "0" }
-   if(k == "NY_VK_PROFILE_EVERY"){ return perf ? "1000000" : "120" }
-   if(k == "NY_UI_SHADER_TRACE"){ return "0" }
-   if(k == "NYTRIX_VK_VERTEX_MB"){ return "16" }
-   if(k == "NYTRIX_VK_STAGING_MB"){ return "96" }
-   if(k == "NY_UI_KEEP_ENV_CPU_IMAGES"){ return "0" }
-   if(k == "NY_TRACE_PROC"){ return "0" }
-   if(k == "NY_TRACE_PROC_EVERY_MS"){ return "1000" }
-   if(k == "NY_TRACE_PROC_EVERY_FRAMES"){ return spam ? "1" : (deep ? "30" : "120") }
-   if(k == "NY_TRACE_PROC_SMAPS"){ return "0" }
-
+   if k == "NY_UI_RENDER_BACKEND" { return "vk" }
+   if k == "NY_UI_VSYNC" { return perf ? "0" : "1" }
+   if k == "NY_VK_FRAME_SLEEP_MS" { return "0" }
+   if k == "NY_TEX_TRACE" { return "0" }
+   if k == "NY_UI_TEX_TRACE" { return "0" }
+   if k == "NY_UI_TEX_TRACE_SYNC_ALL" { return spam ? "1" : "0" }
+   if k == "NY_UI_STARTUP_TRACE" { return "0" }
+   if k == "NY_VK_PROFILE_DUMP" { return "0" }
+   if k == "NY_VK_PROFILE_EVERY" { return perf ? "1000000" : "120" }
+   if k == "NY_UI_SHADER_TRACE" { return "0" }
+   if k == "NYTRIX_VK_VERTEX_MB" { return "16" }
+   if k == "NYTRIX_VK_STAGING_MB" { return "96" }
+   if k == "NY_UI_KEEP_ENV_CPU_IMAGES" { return "0" }
+   if k == "NY_TRACE_PROC" { return "0" }
+   if k == "NY_TRACE_PROC_EVERY_MS" { return "1000" }
+   if k == "NY_TRACE_PROC_EVERY_FRAMES" { return spam ? "1" : (deep ? "30" : "120") }
+   if k == "NY_TRACE_PROC_SMAPS" { return "0" }
    ;; Deep mode: detailed frame flow, GUI dump state, and begin diagnostics.
-   if(deep && k == "NY_RENDER_DEBUG"){ return "1" }
-   if(deep && k == "NY_VK_BEGIN_TRACE"){ return "1" }
-   if(deep && k == "NY_UI_GUI_DUMP_TRACE"){ return "1" }
-   if(deep && k == "NY_UI_PROFILE"){ return "1" }
-   if(deep && k == "NY_UI_PROFILE_TRACE"){ return "1" }
-   if(deep && k == "NY_VK_PROFILE_TRACE"){ return "1" }
-   if(deep && k == "NY_GFX_FRAME_TRACE"){ return "1" }
-
+   if deep && k == "NY_RENDER_DEBUG" { return "1" }
+   if deep && k == "NY_VK_BEGIN_TRACE" { return "1" }
+   if deep && k == "NY_UI_GUI_DUMP_TRACE" { return "1" }
+   if deep && k == "NY_UI_PROFILE" { return "1" }
+   if deep && k == "NY_UI_PROFILE_TRACE" { return "1" }
+   if deep && k == "NY_VK_PROFILE_TRACE" { return "1" }
+   if deep && k == "NY_GFX_FRAME_TRACE" { return "1" }
    ;; Spam mode: stage-by-stage Vulkan breadcrumbs.  This is very verbose.
-   if(spam && k == "NY_VK_STAGE_TRACE"){ return "1" }
-   if(spam && k == "NY_VK_DESCRIPTOR_TRACE"){ return "1" }
-
+   if spam && k == "NY_VK_STAGE_TRACE" { return "1" }
+   if spam && k == "NY_VK_DESCRIPTOR_TRACE" { return "1" }
    ""
 }
 
@@ -159,23 +155,22 @@ fn _ny_trace_has_value(str name) bool {
 
 fn _ny_trace_truthy(str name) bool {
    def v = str.lower(str.strip(_ny_trace_value(name)))
-   if(v == "" || v == "0" || v == "false" || v == "no" || v == "off"){ return false }
+   if v == "" || v == "0" || v == "false" || v == "no" || v == "off" { return false }
    true
 }
 
-
 fn _bool_cache() dict {
-   if(!is_dict(_env_bool_cache)){ _env_bool_cache = dict(64) }
+   if !is_dict(_env_bool_cache) { _env_bool_cache = dict(64) }
    _env_bool_cache
 }
 
 fn _int_cache() dict {
-   if(!is_dict(_env_int_cache)){ _env_int_cache = dict(32) }
+   if !is_dict(_env_int_cache) { _env_int_cache = dict(32) }
    _env_int_cache
 }
 
 fn _str_cache() dict {
-   if(!is_dict(_env_str_cache)){ _env_str_cache = dict(32) }
+   if !is_dict(_env_str_cache) { _env_str_cache = dict(32) }
    _env_str_cache
 }
 
@@ -200,15 +195,14 @@ fn set_bool(any name, any value) bool {
 
 fn set_bools(any names, any value=true) int {
    "Overrides a list of cached boolean profile/env flags for this process."
-   if(!is_list(names)){ return 0 }
+   if !is_list(names) { return 0 }
    mut i, n = 0, names.len
-   while(i < n){
+   while i < n {
       set_bool(names.get(i, ""), value)
       i += 1
    }
    n
 }
-
 
 fn set_str(any name, any value) bool {
    "Overrides a cached string profile/env value for this process."
@@ -224,9 +218,9 @@ fn set_str(any name, any value) bool {
 
 fn _argv_verbose_level(any token) int {
    def t = str.lower(str.strip(to_str(token)))
-   if(t == "-vv" || t == "--debug-deep" || t == "--trace-deep"){ return 2 }
-   if(t == "-vvv" || t == "--trace-spam" || t == "--debug-spam"){ return 3 }
-   if(t == "-v" || t == "--verbose" || t == "--debug" || t == "--trace" || t == "--trace-ui"){ return 1 }
+   if t == "-vv" || t == "--debug-deep" || t == "--trace-deep" { return 2 }
+   if t == "-vvv" || t == "--trace-spam" || t == "--debug-spam" { return 3 }
+   if t == "-v" || t == "--verbose" || t == "--debug" || t == "--trace" || t == "--trace-ui" { return 1 }
    0
 }
 
@@ -238,66 +232,64 @@ fn apply_verbose_argv(int start_index=1) bool {
    "Enables bounded UI/render/input diagnostics from argv; -vv and --trace-spam increase verbosity."
    mut i = int(max(0, start_index))
    mut level = 0
-   while(i < argc()){
+   while i < argc() {
       def lv = _argv_verbose_level(argv(i))
-      if(lv > level){ level = lv }
+      if lv > level { level = lv }
       i += 1
    }
-   if(level <= 0){ return false }
-   if(_verbose_argv_mode >= level){ return true }
+   if level <= 0 { return false }
+   if _verbose_argv_mode >= level { return true }
    _verbose_argv_mode = level
    ;; Keep -v and -vv bounded.  Only --trace-spam/-vvv maps to NY_TRACE=spam;
    ;; NY_TRACE=deep enables frame/stage breadcrumbs through _ny_trace_value(),
    ;; which is too noisy for normal diagnostics.
    set_str("NY_TRACE", level >= 3 ? "spam" : "verbose")
    set_bool("NY_TRACE", true)
-
    ;; Useful-by-default diagnostics: startup/backend choice, input events,
    ;; renderer failures, font loading, and Vulkan initialization timing.
    ;; Keep hot per-frame/per-stage/per-glyph logs out of -v and -vv; those
    ;; are slow enough to change the behavior being debugged.
    set_bools([
-      "NY_UI_TRACE", "NY_UI_STARTUP_TRACE", "NY_UI_INPUT_TRACE",
-      "NY_RENDER_DEBUG", "NY_VK_INIT_TRACE", "NY_FONT_LOAD_TRACE"
+         "NY_UI_TRACE", "NY_UI_STARTUP_TRACE", "NY_UI_INPUT_TRACE",
+         "NY_RENDER_DEBUG", "NY_VK_INIT_TRACE", "NY_FONT_LOAD_TRACE"
    ], true)
-
-   if(level < 3){
+   if level < 3 {
       ;; Explicitly suppress hot traces in useful/deep modes, even if a cached
       ;; previous run asked for them.  Users can still request full spam with
       ;; --trace-spam/-vvv or explicit env vars before startup.
       set_bools([
-         "NY_GFX_FRAME_TRACE", "NY_VK_BEGIN_TRACE", "NY_VK_STAGE_TRACE",
-         "NY_GL_TEXT_TRACE", "NY_VK_DESCRIPTOR_TRACE", "NY_UI_TEX_TRACE",
-         "NY_TEX_TRACE", "NY_UI_GUI_DUMP_TRACE", "NY_TRACE_SPAM"
+            "NY_GFX_FRAME_TRACE", "NY_VK_BEGIN_TRACE", "NY_VK_STAGE_TRACE",
+            "NY_GL_TEXT_TRACE", "NY_VK_DESCRIPTOR_TRACE", "NY_UI_TEX_TRACE",
+            "NY_TEX_TRACE", "NY_UI_GUI_DUMP_TRACE", "NY_TRACE_SPAM"
       ], false)
    }
-   if(level >= 2){
+   if level >= 2 {
       ;; Compact profiler summaries only.  No Vulkan stage breadcrumbs, no
       ;; per-frame begin/end tracing, and no per-glyph logs.
       set_bools(["NY_UI_PROFILE", "NY_VK_PROFILE_TRACE"], true)
       set_str("NY_VK_PROFILE_EVERY", "120")
    }
-   if(level >= 3){
+   if level >= 3 {
       ;; Last-resort spam mode: exact frame/stage breadcrumbs and hot draw logs.
       set_bools([
-         "NY_DEBUG", "NY_DEBUG_VERBOSE", "NY_DEBUG_DEEP",
-         "NY_GFX_FRAME_TRACE", "NY_VK_BEGIN_TRACE", "NY_VK_STAGE_TRACE",
-         "NY_UI_GUI_DUMP_TRACE", "NY_GL_TEXT_TRACE", "NY_VK_DESCRIPTOR_TRACE",
-         "NY_UI_TEX_TRACE", "NY_TEX_TRACE", "NY_TRACE_SPAM"
+            "NY_DEBUG", "NY_DEBUG_VERBOSE", "NY_DEBUG_DEEP",
+            "NY_GFX_FRAME_TRACE", "NY_VK_BEGIN_TRACE", "NY_VK_STAGE_TRACE",
+            "NY_UI_GUI_DUMP_TRACE", "NY_GL_TEXT_TRACE", "NY_VK_DESCRIPTOR_TRACE",
+            "NY_UI_TEX_TRACE", "NY_TEX_TRACE", "NY_TRACE_SPAM"
       ], true)
    }
    eprint_text(level >= 3 ? "[ui:verbose] enabled spam tracing by --trace-spam" :
       (level >= 2 ? "[ui:verbose] enabled compact deep diagnostics by -vv" :
-      "[ui:verbose] enabled useful diagnostics by -v/--verbose"))
+   "[ui:verbose] enabled useful diagnostics by -v/--verbose"))
    true
 }
 
 fn env_truthy_cached(any name) bool {
    "Returns a cached truthy environment flag."
    def k = _key(name)
-   if(_ny_trace_has_value(k)){ return _ny_trace_truthy(k) }
+   if _ny_trace_has_value(k) { return _ny_trace_truthy(k) }
    _bool_cache()
-   if(_env_bool_cache.contains(k)){ return bool(_env_bool_cache.get(k, false)) }
+   if _env_bool_cache.contains(k) { return bool(_env_bool_cache.get(k, false)) }
    def v = common.env_truthy(k)
    _env_bool_cache[k] = v
    v
@@ -306,10 +298,10 @@ fn env_truthy_cached(any name) bool {
 fn env_present_cached(any name) bool {
    "Returns a cached environment-presence flag."
    def raw = _key(name)
-   if(_ny_trace_has_value(raw)){ return true }
+   if _ny_trace_has_value(raw) { return true }
    def k = "present:" + raw
    _bool_cache()
-   if(_env_bool_cache.contains(k)){ return bool(_env_bool_cache.get(k, false)) }
+   if _env_bool_cache.contains(k) { return bool(_env_bool_cache.get(k, false)) }
    def v = common.env_present(_key(name))
    _env_bool_cache[k] = v
    v
@@ -318,10 +310,10 @@ fn env_present_cached(any name) bool {
 fn env_enabled_cached(any name) bool {
    "Returns a cached enabled environment flag."
    def raw = _key(name)
-   if(_ny_trace_has_value(raw)){ return _ny_trace_truthy(raw) }
+   if _ny_trace_has_value(raw) { return _ny_trace_truthy(raw) }
    def k = "enabled:" + raw
    _bool_cache()
-   if(_env_bool_cache.contains(k)){ return bool(_env_bool_cache.get(k, false)) }
+   if _env_bool_cache.contains(k) { return bool(_env_bool_cache.get(k, false)) }
    def v = common.env_enabled(_key(name))
    _env_bool_cache[k] = v
    v
@@ -330,10 +322,10 @@ fn env_enabled_cached(any name) bool {
 fn env_toggle_cached(any name, bool default_value=false) bool {
    "Returns a cached toggle environment flag with a default when unset."
    def raw = _key(name)
-   if(_ny_trace_has_value(raw)){ return _ny_trace_truthy(raw) }
+   if _ny_trace_has_value(raw) { return _ny_trace_truthy(raw) }
    def k = "toggle:" + raw + ":" + to_str(bool(default_value))
    _bool_cache()
-   if(_env_bool_cache.contains(k)){ return bool(_env_bool_cache.get(k, false)) }
+   if _env_bool_cache.contains(k) { return bool(_env_bool_cache.get(k, false)) }
    def v = common.env_toggle(_key(name), bool(default_value))
    _env_bool_cache[k] = v
    v
@@ -342,15 +334,15 @@ fn env_toggle_cached(any name, bool default_value=false) bool {
 fn env_int_cached(any name, int default_value=0, int min_value=-2147483648, int max_value=2147483647) int {
    "Returns a cached clamped integer environment value."
    def raw = _key(name)
-   if(_ny_trace_has_value(raw)){
+   if _ny_trace_has_value(raw) {
       def tv = int(_ny_trace_value(raw))
-      if(tv < int(min_value)){ return int(min_value) }
-      if(tv > int(max_value)){ return int(max_value) }
+      if tv < int(min_value) { return int(min_value) }
+      if tv > int(max_value) { return int(max_value) }
       return tv
    }
    def k = "int:" + raw + ":" + to_str(int(default_value)) + ":" + to_str(int(min_value)) + ":" + to_str(int(max_value))
    _int_cache()
-   if(_env_int_cache.contains(k)){ return int(_env_int_cache.get(k, default_value)) }
+   if _env_int_cache.contains(k) { return int(_env_int_cache.get(k, default_value)) }
    def v = common.env_int_clamped(_key(name), int(default_value), int(min_value), int(max_value))
    _env_int_cache[k] = v
    v
@@ -359,10 +351,10 @@ fn env_int_cached(any name, int default_value=0, int min_value=-2147483648, int 
 fn env_trim_cached(any name) str {
    "Returns a cached trimmed environment value."
    def raw = _key(name)
-   if(_ny_trace_has_value(raw)){ return _ny_trace_value(raw) }
+   if _ny_trace_has_value(raw) { return _ny_trace_value(raw) }
    def k = "trim:" + raw
    _str_cache()
-   if(_env_str_cache.contains(k)){ return to_str(_env_str_cache.get(k, "")) }
+   if _env_str_cache.contains(k) { return to_str(_env_str_cache.get(k, "")) }
    def v = common.env_trim(_key(name))
    _env_str_cache[k] = v
    v
@@ -371,10 +363,10 @@ fn env_trim_cached(any name) str {
 fn env_lower_cached(any name) str {
    "Returns a cached lower-cased environment value."
    def raw = _key(name)
-   if(_ny_trace_has_value(raw)){ return str.lower(_ny_trace_value(raw)) }
+   if _ny_trace_has_value(raw) { return str.lower(_ny_trace_value(raw)) }
    def k = "lower:" + raw
    _str_cache()
-   if(_env_str_cache.contains(k)){ return to_str(_env_str_cache.get(k, "")) }
+   if _env_str_cache.contains(k) { return to_str(_env_str_cache.get(k, "")) }
    def v = common.env_lower(_key(name))
    _env_str_cache[k] = v
    v
@@ -445,15 +437,15 @@ fn force_headless(bool nosurface=true, bool bench=false, bool sim=false) bool {
    "Forces UI headless policy flags for this process."
    _headless_mode = 1
    set_bool("NY_UI_HEADLESS", true)
-   if(nosurface){
+   if nosurface {
       _nosurface_mode = 1
       set_bool("NYTRIX_VK_ALLOW_HEADLESS", true)
    }
-   if(bench){
+   if bench {
       _ui_bench_mode = 1
       set_bool("NY_UI_BENCH", true)
    }
-   if(sim){
+   if sim {
       _headless_sim_mode = 1
       set_bools(["NY_UI_HEADLESS_SIM", "NY_UI_REAL_HEADLESS_SIM"])
    }
@@ -501,7 +493,7 @@ fn frame_hash_lock_enabled() bool {
 
 fn parity_lock_stats_enabled() bool {
    "Returns true when parity lock stats are enabled."
-   if(frame_hash_lock_enabled()){
+   if frame_hash_lock_enabled() {
       _parity_lock_stats_mode = 1
       return true
    }
@@ -528,18 +520,18 @@ fn editor_parity_trace_enabled() bool {
 
 fn visible_skybox_default() bool {
    "Returns the default visible-skybox policy."
-   if(env_present_cached("NY_UI_VISIBLE_SKYBOX")){
+   if env_present_cached("NY_UI_VISIBLE_SKYBOX") {
       return env_enabled_cached("NY_UI_VISIBLE_SKYBOX")
    }
-   if(env_present_cached("NY_UI_SHOW_SKYBOX")){
+   if env_present_cached("NY_UI_SHOW_SKYBOX") {
       return env_enabled_cached("NY_UI_SHOW_SKYBOX")
    }
-   if(
-      env_present_cached("NY_UI_SKYBOX") ||
-      env_present_cached("NY_UI_SKYBOX_SOURCE") ||
-      env_present_cached("NY_UI_SKYBOX_PATH") ||
-      env_present_cached("NY_DEMO_SKYBOX")
-   ){
+   if
+   env_present_cached("NY_UI_SKYBOX") ||
+   env_present_cached("NY_UI_SKYBOX_SOURCE") ||
+   env_present_cached("NY_UI_SKYBOX_PATH") ||
+   env_present_cached("NY_DEMO_SKYBOX")
+   {
       return true
    }
    false
@@ -552,7 +544,7 @@ fn startup_skybox_enabled() bool {
 
 fn frame_print_every() int {
    "Returns the UI frame-print interval."
-   if(_frame_print_every_cache > 0){ return _frame_print_every_cache }
+   if _frame_print_every_cache > 0 { return _frame_print_every_cache }
    _frame_print_every_cache = env_int_cached("NY_UI_FRAME_PRINT_EVERY", 120, 1, 1000000)
    _frame_print_every_cache
 }
@@ -571,7 +563,7 @@ fn headless_gui_enabled() bool {
 
 fn headless_sim_enabled() bool {
    "Returns true when headless simulation mode is enabled."
-   if(_headless_sim_mode != -1){ return _headless_sim_mode == 1 }
+   if _headless_sim_mode != -1 { return _headless_sim_mode == 1 }
    _headless_sim_mode = (env_truthy_cached("NY_UI_REAL_HEADLESS_SIM") ||
    env_truthy_cached("NY_UI_HEADLESS_SIM")) ? 1 : 0
    _headless_sim_mode == 1
@@ -585,10 +577,10 @@ fn ui_bench_enabled() bool {
 
 fn headless_visual_bench_enabled() bool {
    "Returns true when headless benchmark mode should render visual work."
-   if(_headless_visual_bench_mode != -1){ return _headless_visual_bench_mode == 1 }
-   if(env_truthy_cached("NY_UI_HEADLESS_MODEL_ONLY")){
+   if _headless_visual_bench_mode != -1 { return _headless_visual_bench_mode == 1 }
+   if env_truthy_cached("NY_UI_HEADLESS_MODEL_ONLY") {
       _headless_visual_bench_mode = 0
-   } elif(env_present_cached("NY_UI_HEADLESS_VISUAL")){
+   } elif env_present_cached("NY_UI_HEADLESS_VISUAL") {
       _headless_visual_bench_mode = env_truthy_cached("NY_UI_HEADLESS_VISUAL") ? 1 : 0
    } else {
       _headless_visual_bench_mode = 1
@@ -598,7 +590,7 @@ fn headless_visual_bench_enabled() bool {
 
 fn nosurface_enabled() bool {
    "Returns true when UI rendering should use a no-surface backend."
-   if(_nosurface_mode != -1){ return _nosurface_mode == 1 }
+   if _nosurface_mode != -1 { return _nosurface_mode == 1 }
    def backend = env_lower_cached("NY_UI_BACKEND")
    _nosurface_mode = (backend == "none" || env_truthy_cached("NYTRIX_VK_ALLOW_HEADLESS")) ? 1 : 0
    _nosurface_mode == 1
@@ -617,14 +609,14 @@ fn bench_loop_ready(int timeout_ns, int auto_dump_enabled, bool batch_dump_enabl
 
 fn fast_nosurface_bench_enabled(int timeout_ns, int auto_dump_enabled, bool batch_dump_enabled) bool {
    "Returns true when the no-surface fast benchmark path is enabled."
-   if(_fast_nosurface_bench_mode != -1){ return _fast_nosurface_bench_mode == 1 }
+   if _fast_nosurface_bench_mode != -1 { return _fast_nosurface_bench_mode == 1 }
    _fast_nosurface_bench_mode = (bench_loop_ready(timeout_ns, auto_dump_enabled, batch_dump_enabled) && nosurface_enabled() && !headless_sim_enabled()) ? 1 : 0
    _fast_nosurface_bench_mode == 1
 }
 
 fn fast_surface_bench_enabled(int timeout_ns, int auto_dump_enabled, bool batch_dump_enabled, bool gui_dump_suite_active) bool {
    "Returns true when the surfaced fast benchmark path is enabled."
-   if(_fast_surface_bench_mode != -1){ return _fast_surface_bench_mode == 1 }
+   if _fast_surface_bench_mode != -1 { return _fast_surface_bench_mode == 1 }
    _fast_surface_bench_mode = (bench_loop_ready(timeout_ns, auto_dump_enabled, batch_dump_enabled) &&
       !nosurface_enabled() &&
       !headless_sim_enabled() &&
@@ -634,21 +626,21 @@ fn fast_surface_bench_enabled(int timeout_ns, int auto_dump_enabled, bool batch_
 
 fn sim_nosurface_bench_enabled(int timeout_ns, int auto_dump_enabled, bool batch_dump_enabled) bool {
    "Returns true when the simulated no-surface benchmark path is enabled."
-   if(_sim_nosurface_bench_mode != -1){ return _sim_nosurface_bench_mode == 1 }
+   if _sim_nosurface_bench_mode != -1 { return _sim_nosurface_bench_mode == 1 }
    _sim_nosurface_bench_mode = (bench_loop_ready(timeout_ns, auto_dump_enabled, batch_dump_enabled) && nosurface_enabled() && headless_sim_enabled()) ? 1 : 0
    _sim_nosurface_bench_mode == 1
 }
 
 fn world_grid_enabled(bool gui_visible, bool scene_selected, bool gui_probe_enabled) bool {
    "Returns true when the viewer world grid should be drawn."
-   if(_world_grid_mode == -2){
-      if(env_present_cached("NY_UI_WORLD_GRID")){
+   if _world_grid_mode == -2 {
+      if env_present_cached("NY_UI_WORLD_GRID") {
          _world_grid_mode = env_truthy_cached("NY_UI_WORLD_GRID") ? 1 : 0
       } else {
          _world_grid_mode = -1
       }
    }
-   if(_world_grid_mode != -1){ return _world_grid_mode == 1 }
+   if _world_grid_mode != -1 { return _world_grid_mode == 1 }
    gui_visible || scene_selected || gui_probe_enabled
 }
 
@@ -665,7 +657,7 @@ fn gui_scale_env_present() bool {
 
 fn min_ms() f64 {
    "Returns the minimum profile mark duration to print, in milliseconds."
-   if(_min_ms_cache < 0){
+   if _min_ms_cache < 0 {
       _min_ms_cache = env_int_cached("NY_GUI_PROFILE_MIN_MS", 1, 0, 1000000)
    }
    float(_min_ms_cache)
@@ -698,7 +690,7 @@ fn elapsed_s(int t0) f64 {
 
 fn stage_ms_since(int t0) f64 {
    "Returns milliseconds elapsed since `t0`, or zero for inactive timestamps."
-   if(int(t0) <= 0){ return 0.0 }
+   if int(t0) <= 0 { return 0.0 }
    float(__ticks_ns() - int(t0)) / 1e6
 }
 
@@ -743,9 +735,9 @@ fn eprint_line(any tag, any msg="") bool {
 
 fn log(any label, any ms, any detail="") bool {
    "Prints a thresholded GUI profile sample."
-   if(!enabled()){ return false }
+   if !enabled() { return false }
    def v = float(ms)
-   if(v < min_ms()){ return false }
+   if v < min_ms() { return false }
    def suffix = (detail == nil) ? "" : to_str(detail)
    print_line("gui:prof", to_str(label) + "=" + str.to_fixed(v, 3) + "ms" + suffix)
    true
@@ -753,15 +745,15 @@ fn log(any label, any ms, any detail="") bool {
 
 fn mark(any label, int t0, any detail="") bool {
    "Prints a thresholded GUI profile sample from a start timestamp."
-   if(!enabled()){ return false }
+   if !enabled() { return false }
    def start = int(t0)
-   if(start <= 0){ return false }
+   if start <= 0 { return false }
    log(label, float(__ticks_ns() - start) / 1e6, detail)
 }
 
 fn mark_next(bool on, any label, int t0, any detail="") int {
    "Marks a profile sample and returns the next checkpoint timestamp."
-   if(on){
+   if on {
       mark(label, t0, detail)
       def next_t = __ticks_ns()
       return next_t
@@ -771,14 +763,14 @@ fn mark_next(bool on, any label, int t0, any detail="") int {
 
 fn mark_done(bool on, any label, int t0, any detail="") bool {
    "Marks a terminal profile sample when enabled."
-   if(!on){ return false }
+   if !on { return false }
    mark(label, t0, detail)
    true
 }
 
 fn trace(any label, any detail="") bool {
    "Prints a low-volume UI trace line."
-   if(!trace_enabled() && !enabled()){ return false }
+   if !trace_enabled() && !enabled() { return false }
    print_line("ui:trace", to_str(label) + to_str(detail))
    true
 }
@@ -790,7 +782,7 @@ fn event_trace_enabled() bool {
 
 fn event_trace(int typ, any data, any tag="event", bool close_state=false) bool {
    "Prints one normalized UI event trace line."
-   if(!event_trace_enabled()){ return false }
+   if !event_trace_enabled() { return false }
    def key, sc =
    is_dict(data) ? int(data.get("key", -1)) : -1,
    is_dict(data) ? int(data.get("scancode", data.get("raw_key", -1))) : -1
@@ -820,7 +812,7 @@ fn stage_enabled() bool {
 
 fn stage_log(any prefix, any model_name, any stage, int t0) bool {
    "Prints a batch/scene stage timing line."
-   if(!stage_enabled()){ return false }
+   if !stage_enabled() { return false }
    print_line(prefix, "model=" + to_str(model_name) +
    " stage=" + to_str(stage) + " ms=" + to_str(stage_ms_since(t0)))
    true
@@ -828,7 +820,7 @@ fn stage_log(any prefix, any model_name, any stage, int t0) bool {
 
 fn dump_enabled(str flag_env, bool default_on=false) bool {
    "Returns a cached dump toggle."
-   if(env_present_cached(flag_env)){
+   if env_present_cached(flag_env) {
       return env_enabled_cached(flag_env)
    }
    bool(default_on)
@@ -837,7 +829,7 @@ fn dump_enabled(str flag_env, bool default_on=false) bool {
 fn dump_path(str path_env, str fallback_name) str {
    "Returns a cached dump path, defaulting to the OS temp directory."
    def k = _key(path_env) + ":" + _key(fallback_name)
-   if(_dump_path_cache.contains(k)){ return to_str(_dump_path_cache.get(k, "")) }
+   if _dump_path_cache.contains(k) { return to_str(_dump_path_cache.get(k, "")) }
    def raw = env_trim_cached(path_env)
    def p = (raw.len > 0) ? raw : ospath.join(ospath.temp_dir(), _key(fallback_name))
    _dump_path_cache[k] = p
@@ -847,16 +839,16 @@ fn dump_path(str path_env, str fallback_name) str {
 fn append_line(str path, str line) bool {
    "Appends a single line to a profiling/debug dump."
    def p = ospath.normalize(to_str(path))
-   if(p.len <= 0){ return false }
+   if p.len <= 0 { return false }
    def s = to_str(line)
    def buf = s + ((s.len > 0 && load8(s, s.len - 1) == 10) ? "" : "\n")
    def open_res = ossys.sys_open(p, 1089, 420)
-   if(is_err(open_res)){ return false }
+   if is_err(open_res) { return false }
    def fd = unwrap(open_res)
    mut off = 0
-   while(off < buf.len){
+   while off < buf.len {
       def w = __write_off(fd, buf, buf.len - off, off)
-      if(w <= 0){
+      if w <= 0 {
          ossys.sys_close_quiet(fd)
          return false
       }
@@ -880,14 +872,14 @@ fn profile_dump_set_path(str path) str {
 
 fn profile_dump_enabled(bool default_on=false) bool {
    "Returns whether UI frame profile JSONL dumps are enabled."
-   if(_profile_dump_mode != -1){ return _profile_dump_mode == 1 }
+   if _profile_dump_mode != -1 { return _profile_dump_mode == 1 }
    _profile_dump_mode = dump_enabled("NY_UI_PROFILE_DUMP", bool(default_on)) ? 1 : 0
    _profile_dump_mode == 1
 }
 
 fn profile_dump_file() str {
    "Returns the UI frame profile JSONL dump path."
-   if(_profile_dump_path.len <= 0){
+   if _profile_dump_path.len <= 0 {
       _profile_dump_path = dump_path("NY_UI_PROFILE_DUMP_PATH", "nytrix_ui_profile.oasset.jsonl")
    }
    _profile_dump_path
@@ -895,7 +887,7 @@ fn profile_dump_file() str {
 
 fn profile_dump_row(int total_frame, int frames, f64 fps_est, f64 avg_fr, f64 avg_up, f64 avg_dr, f64 avg_wo, f64 avg_ui, f64 avg_ev, f64 avg_gp, f64 avg_sm) bool {
    "Writes one UI frame profile JSONL row."
-   if(!profile_dump_enabled(trace_enabled())){ return false }
+   if !profile_dump_enabled(trace_enabled()) { return false }
    def row = "{\"format\":\"nytrix.ui.profile.v1\"" +
    ",\"frame\":" + to_str(int(total_frame)) +
    ",\"samples\":" + to_str(int(frames)) +
@@ -926,8 +918,8 @@ fn bench_dump_set_path(str path) str {
 
 fn bench_enabled(bool default_on=false) bool {
    "Returns whether no-surface benchmark profiling is enabled."
-   if(_bench_mode != -1){ return _bench_mode == 1 }
-   if(env_present_cached("NY_UI_BENCH_PROFILE")){
+   if _bench_mode != -1 { return _bench_mode == 1 }
+   if env_present_cached("NY_UI_BENCH_PROFILE") {
       _bench_mode = env_truthy_cached("NY_UI_BENCH_PROFILE") ? 1 : 0
    } else {
       _bench_mode = bool(default_on) ? 1 : 0
@@ -937,11 +929,11 @@ fn bench_enabled(bool default_on=false) bool {
 
 fn bench_dump_file(str profile_file="") str {
    "Returns the benchmark JSONL dump path."
-   if(_bench_dump_path.len > 0){ return _bench_dump_path }
+   if _bench_dump_path.len > 0 { return _bench_dump_path }
    def raw = env_trim_cached("NY_UI_BENCH_PROFILE_DUMP_PATH")
-   if(raw.len > 0){
+   if raw.len > 0 {
       _bench_dump_path = raw
-   } elif(to_str(profile_file).len > 0){
+   } elif to_str(profile_file).len > 0 {
       _bench_dump_path = to_str(profile_file)
    } else {
       _bench_dump_path = dump_path("NY_UI_BENCH_PROFILE_DUMP_PATH", "nytrix_bench_profile.oasset.jsonl")
@@ -956,7 +948,7 @@ fn bench_reset() any {
 
 fn bench_record(int begin_ns, int draw_ns, int end_ns) int {
    "Accumulates one no-surface benchmark timing sample."
-   if(!bench_enabled(profile_dump_enabled(trace_enabled()))){ return _bench_frames }
+   if !bench_enabled(profile_dump_enabled(trace_enabled())) { return _bench_frames }
    _bench_frames = _bench_frames + 1
    _bench_begin_ns = _bench_begin_ns + int(begin_ns)
    _bench_draw_ns = _bench_draw_ns + int(draw_ns)
@@ -966,7 +958,7 @@ fn bench_record(int begin_ns, int draw_ns, int end_ns) int {
 
 fn bench_flush(int total_ns, dict renderer_stats, str profile_file="") bool {
    "Writes one no-surface benchmark JSONL row."
-   if(!bench_enabled(profile_dump_enabled(trace_enabled())) || _bench_frames <= 0){ return false }
+   if !bench_enabled(profile_dump_enabled(trace_enabled())) || _bench_frames <= 0 { return false }
    def frames = _bench_frames
    def row = "{\"format\":\"nytrix.ui.nosurface_bench.v1\"" +
    ",\"frames\":" + to_str(frames) +
@@ -992,15 +984,15 @@ fn bench_flush(int total_ns, dict renderer_stats, str profile_file="") bool {
 fn counter_reset(str prefix="") any {
    "Resets all counters, or counters with `prefix` when provided."
    def p = to_str(prefix)
-   if(p.len <= 0){
+   if p.len <= 0 {
       _counter_values = dict(64)
       return nil
    }
    def keys = _counter_values.keys()
    mut i = 0
-   while(i < keys.len){
+   while i < keys.len {
       def k = to_str(keys.get(i, ""))
-      if(str.startswith(k, p)){ _counter_values.remove(k) }
+      if str.startswith(k, p) { _counter_values.remove(k) }
       i += 1
    }
 }
@@ -1020,9 +1012,9 @@ fn counter_value(str name) f64 {
 fn counter_json_fields(str prefix, list names) str {
    "Formats selected counters as JSON fields."
    mut out, i = "", 0
-   while(i < names.len){
+   while i < names.len {
       def n = to_str(names.get(i, ""))
-      if(n.len > 0){
+      if n.len > 0 {
          out = out + ",\"" + to_str(prefix) + n + "\":" + to_str(counter_value(n))
       }
       i += 1
@@ -1065,51 +1057,50 @@ fn frame_samples() int {
 
 fn _frame_total(str name) f64 {
    def k = to_str(name)
-   if(k == "update_ms"){ return _frame_update_ms }
-   if(k == "draw_ms"){ return _frame_draw_ms }
-   if(k == "world_ms"){ return _frame_world_ms }
-   if(k == "ui_ms"){ return _frame_ui_ms }
-   if(k == "frame_ms"){ return _frame_frame_ms }
-   if(k == "event_ms"){ return _frame_event_ms }
-   if(k == "gui_prep_ms"){ return _frame_gui_prep_ms }
-   if(k == "sim_ms"){ return _frame_sim_ms }
+   if k == "update_ms" { return _frame_update_ms }
+   if k == "draw_ms" { return _frame_draw_ms }
+   if k == "world_ms" { return _frame_world_ms }
+   if k == "ui_ms" { return _frame_ui_ms }
+   if k == "frame_ms" { return _frame_frame_ms }
+   if k == "event_ms" { return _frame_event_ms }
+   if k == "gui_prep_ms" { return _frame_gui_prep_ms }
+   if k == "sim_ms" { return _frame_sim_ms }
    0.0
 }
 
 fn frame_avg(str name) f64 {
    "Returns an average value from accumulated frame timing samples."
-   if(_frame_samples <= 0){ return 0.0 }
+   if _frame_samples <= 0 { return 0.0 }
    _frame_total(name) / float(_frame_samples)
 }
 
 fn frame_fps(str name="frame_ms") f64 {
    "Returns FPS derived from an accumulated frame-millisecond field."
    def total = _frame_total(name)
-   if(_frame_samples <= 0 || total <= 0.0001){ return 0.0 }
+   if _frame_samples <= 0 || total <= 0.0001 { return 0.0 }
    (1000.0 * float(_frame_samples)) / total
 }
-
 
 fn trace_process_enabled() bool {
    "Returns true when NY_TRACE should emit in-process RSS/CPU samples."
    ;; Explicit NY_TRACE_PROC=0 must win.  Do not let generic NY_TRACE/UI_TRACE
    ;; silently re-enable the heavy /proc sampler in perf/debug runs.
-   if(env_present_cached("NY_TRACE_PROC")){ return env_truthy_cached("NY_TRACE_PROC") }
-   if(_ny_trace_perf()){ return false }
+   if env_present_cached("NY_TRACE_PROC") { return env_truthy_cached("NY_TRACE_PROC") }
+   if _ny_trace_perf() { return false }
    trace_enabled()
 }
 
 fn _proc_parse_first_int(str line) int {
    mut i = 0
-   while(i < line.len){
+   while i < line.len {
       def c = load8(line, i)
-      if(c >= 48 && c <= 57){ break }
+      if c >= 48 && c <= 57 { break }
       i += 1
    }
    mut v = 0
-   while(i < line.len){
+   while i < line.len {
       def c = load8(line, i)
-      if(c < 48 || c > 57){ break }
+      if c < 48 || c > 57 { break }
       v = v * 10 + (c - 48)
       i += 1
    }
@@ -1118,30 +1109,30 @@ fn _proc_parse_first_int(str line) int {
 
 fn _proc_status_value(list lines, str key) int {
    mut i = 0
-   while(i < lines.len){
+   while i < lines.len {
       def line = to_str(lines.get(i, ""))
-      if(str.startswith(line, key)){ return _proc_parse_first_int(line) }
+      if str.startswith(line, key) { return _proc_parse_first_int(line) }
       i += 1
    }
    0
 }
 
 fn _proc_status_lines() list {
-   match file_read("/proc/self/status"){
+   match file_read("/proc/self/status") {
       ok(v) -> str.split(to_str(v), "\n")
       err(_) -> list(0)
    }
 }
 
 fn _proc_cpu_ticks() int {
-   match file_read("/proc/self/stat"){
+   match file_read("/proc/self/stat") {
       ok(v) -> {
          def raw = to_str(v)
          def rp = str.find_last(raw, ")")
-         if(rp < 0){ return 0 }
+         if rp < 0 { return 0 }
          def rest = str.str_slice(raw, rp + 2, raw.len)
          def parts = str.split(rest, " ")
-         if(parts.len <= 12){ return 0 }
+         if parts.len <= 12 { return 0 }
          int(parts.get(11, "0")) + int(parts.get(12, "0"))
       }
       err(_) -> 0
@@ -1150,13 +1141,13 @@ fn _proc_cpu_ticks() int {
 
 fn _proc_fmt_kib(int kib) str {
    def mb = float(kib) / 1024.0
-   if(mb >= 1024.0){ return to_str(mb / 1024.0) + "G" }
+   if mb >= 1024.0 { return to_str(mb / 1024.0) + "G" }
    to_str(int(mb)) + "M"
 }
 
 fn _proc_smaps_extra(bool enabled) str {
-   if(!enabled){ return "" }
-   match file_read("/proc/self/smaps_rollup"){
+   if !enabled { return "" }
+   match file_read("/proc/self/smaps_rollup") {
       ok(v) -> {
          def lines = str.split(to_str(v), "\n")
          def pss = _proc_status_value(lines, "Pss:")
@@ -1170,66 +1161,57 @@ fn _proc_smaps_extra(bool enabled) str {
 
 fn trace_process_sample(int frame=0, str label="") bool {
    "Emits a bounded in-process RSS/CPU sample under NY_TRACE.  It is gated before any /proc read or string building."
-   if(!trace_process_enabled()){ return false }
+   if !trace_process_enabled() { return false }
    mut every_frames = env_int_cached("NY_TRACE_PROC_EVERY_FRAMES", 120, 1, 1000000)
-
    ;; If the user did not explicitly set a cadence, keep NY_TRACE=1 clean.
    ;; This avoids the proc sampler becoming the allocation/perf problem it is
    ;; trying to diagnose.
-   if(!common.env_present("NY_TRACE_PROC_EVERY_FRAMES")){
+   if !common.env_present("NY_TRACE_PROC_EVERY_FRAMES") {
       def tm = _ny_trace_mode()
-      if(tm == "spam" || tm == "3"){ every_frames = 1 }
-      elif(tm == "deep" || tm == "2" || tm == "full" || tm == "verbose"){ every_frames = 30 }
+      if tm == "spam" || tm == "3" { every_frames = 1 }
+      elif tm == "deep" || tm == "2" || tm == "full" || tm == "verbose" { every_frames = 30 }
       else { every_frames = 120 }
    }
-
    ;; Robust frame throttle.  Use a next-frame threshold, not modulo/division.
    ;; It is stable across lowering paths and rejects before any /proc read.
-   if(frame > 2 && every_frames > 1){
-      if(_proc_trace_next_frame > 0 && frame < _proc_trace_next_frame){ return false }
+   if frame > 2 && every_frames > 1 {
+      if _proc_trace_next_frame > 0 && frame < _proc_trace_next_frame { return false }
       _proc_trace_next_frame = frame + every_frames
    }
-
    def every_ms = env_int_cached("NY_TRACE_PROC_EVERY_MS", 1000, 50, 60000)
    def now_ns = __ticks_ns()
-   if(frame <= 0 && _proc_trace_last_ns > 0 && now_ns - _proc_trace_last_ns < every_ms * 1000000){ return false }
-
+   if frame <= 0 && _proc_trace_last_ns > 0 && now_ns - _proc_trace_last_ns < every_ms * 1000000 { return false }
    def lines = _proc_status_lines()
-   if(lines.len <= 0){ return false }
-
+   if lines.len <= 0 { return false }
    def rss = _proc_status_value(lines, "VmRSS:")
    def vsz = _proc_status_value(lines, "VmSize:")
    def anon = _proc_status_value(lines, "RssAnon:")
    def file = _proc_status_value(lines, "RssFile:") + _proc_status_value(lines, "RssShmem:")
    def data = _proc_status_value(lines, "VmData:")
    def threads = _proc_status_value(lines, "Threads:")
-   if(rss > _proc_trace_peak_rss){ _proc_trace_peak_rss = rss }
-
+   if rss > _proc_trace_peak_rss { _proc_trace_peak_rss = rss }
    mut delta = 0
-   if(_proc_trace_last_rss > 0){ delta = rss - _proc_trace_last_rss }
-
+   if _proc_trace_last_rss > 0 { delta = rss - _proc_trace_last_rss }
    def cpu_ticks = _proc_cpu_ticks()
    mut cpu_pct = 0.0
-   if(_proc_trace_last_ns > 0 && _proc_trace_last_cpu_ticks > 0 && cpu_ticks >= _proc_trace_last_cpu_ticks){
+   if _proc_trace_last_ns > 0 && _proc_trace_last_cpu_ticks > 0 && cpu_ticks >= _proc_trace_last_cpu_ticks {
       def dt_ns = now_ns - _proc_trace_last_ns
-      if(dt_ns > 0){
+      if dt_ns > 0 {
          ;; Linux USER_HZ is normally 100.  This is a debug estimate only.
          cpu_pct = (float(cpu_ticks - _proc_trace_last_cpu_ticks) / 100.0) * 100000000000.0 / float(dt_ns)
       }
    }
-
    _proc_trace_last_ns = now_ns
    _proc_trace_last_rss = rss
    _proc_trace_last_cpu_ticks = cpu_ticks
-   if(frame > 0){ _proc_trace_last_frame = frame }
-
+   if frame > 0 { _proc_trace_last_frame = frame }
    def smaps = _proc_smaps_extra(env_truthy_cached("NY_TRACE_PROC_SMAPS"))
    ;; Keep this one line small: it often runs while stdout is redirected.
    print_text("[proc] f=" + to_str(frame) + " rss=" + _proc_fmt_kib(rss) +
       " d=" + _proc_fmt_kib(delta) + " peak=" + _proc_fmt_kib(_proc_trace_peak_rss) +
       " vsz=" + _proc_fmt_kib(vsz) + " anon=" + _proc_fmt_kib(anon) +
       " file=" + _proc_fmt_kib(file) + " data=" + _proc_fmt_kib(data) +
-      " thr=" + to_str(threads) + " tag=" + to_str(label) + smaps)
+   " thr=" + to_str(threads) + " tag=" + to_str(label) + smaps)
    true
 }
 
@@ -1249,9 +1231,9 @@ fn _strip_ascii(str value) str {
    def n = str.len(value)
    mut lo = 0
    mut hi = n
-   while(lo < hi && _is_ascii_space(load8(value, lo))){ lo += 1 }
-   while(hi > lo && _is_ascii_space(load8(value, hi - 1))){ hi -= 1 }
-   if(lo == 0 && hi == n){ return value }
+   while lo < hi && _is_ascii_space(load8(value, lo)) { lo += 1 }
+   while hi > lo && _is_ascii_space(load8(value, hi - 1)) { hi -= 1 }
+   if lo == 0 && hi == n { return value }
    str.str_slice(value, lo, hi)
 }
 
@@ -1266,7 +1248,7 @@ fn safe_name(any name) str {
 fn root_dir(any cli_dump_dir="") str {
    "Returns the root directory used for UI dump artifacts."
    def cli = to_str(cli_dump_dir)
-   if(cli.len > 0){ return cli }
+   if cli.len > 0 { return cli }
    def env_dir = common.env_trim("NY_UI_DUMP_DIR")
    env_dir.len > 0 ? env_dir : path.join(path.cache_dir(), "probe/fb")
 }
@@ -1297,9 +1279,9 @@ fn parse_skip_list(any raw) list {
    def normalized = str.str_replace(to_str(raw), "|", ",")
    def parts = str.split(normalized, ",")
    mut i = 0
-   while(i < parts.len){
+   while i < parts.len {
       def item = str.strip(to_str(parts.get(i, "")))
-      if(item.len > 0){ out = out.append(item) }
+      if item.len > 0 { out = out.append(item) }
       i += 1
    }
    out
@@ -1310,11 +1292,11 @@ fn split_model_list(any raw) list { str.split(str.str_replace(to_str(raw), ",", 
 fn model_skipped(any name, any skip_models) bool {
    "Reports whether a model name is present in the skip list."
    def target = str.lower(str.strip(to_str(name)))
-   if(target.len == 0){ return false }
+   if target.len == 0 { return false }
    mut i = 0
    def n = is_list(skip_models) ? skip_models.len : 0
-   while(i < n){
-      if(str.lower(str.strip(to_str(skip_models.get(i, "")))) == target){ return true }
+   while i < n {
+      if str.lower(str.strip(to_str(skip_models.get(i, "")))) == target { return true }
       i += 1
    }
    false
@@ -1322,18 +1304,18 @@ fn model_skipped(any name, any skip_models) bool {
 
 fn suite_field(any spec, any idx, any fallback="") str {
    "Reads a normalized field from a dump suite row."
-   if(!is_list(spec) || int(idx) < 0 || int(idx) >= spec.len){ return to_str(fallback) }
+   if !is_list(spec) || int(idx) < 0 || int(idx) >= spec.len { return to_str(fallback) }
    to_str(spec.get(int(idx), fallback))
 }
 
 fn suite_parse_line(any line) list {
    "Parses one dump suite manifest line."
    def item = _strip_ascii(_text(line))
-   if(str.len(item) == 0 || str.startswith(item, "#")){ return [] }
+   if str.len(item) == 0 || str.startswith(item, "#") { return [] }
    def cols = str.split(item, "\t")
-   if(cols.len <= 0){ return [] }
+   if cols.len <= 0 { return [] }
    def filename = safe_name(_strip_ascii(_text(cols.get(0, ""))))
-   if(str.len(filename) == 0){ return [] }
+   if str.len(filename) == 0 { return [] }
    [
       filename,
       safe_name(str.lower(_strip_ascii(_text(cols.get(1, ""))))),
@@ -1347,7 +1329,7 @@ fn suite_parse_line(any line) list {
 
 fn suite_snapshot_path(any specs, any index, any suite_dir="", any cli_dump_dir="") str {
    "Builds the snapshot path for a dump suite entry."
-   if(!is_list(specs) || int(index) < 0 || int(index) >= specs.len){ return "" }
+   if !is_list(specs) || int(index) < 0 || int(index) >= specs.len { return "" }
    def spec = specs.get(int(index), [])
    def base_dir = to_str(suite_dir).len > 0 ? to_str(suite_dir) : root_dir(cli_dump_dir)
    base_dir + "/" + safe_name(suite_field(spec, 0, "gui_dump.png"))
@@ -1363,9 +1345,9 @@ fn auto_dump_path(str fallback) str {
 
 fn snapshot_once(any win, str out_path) bool {
    "Writes `out_path` once for a window id while auto-dump is enabled."
-   if(!auto_dump_enabled()){ return false }
+   if !auto_dump_enabled() { return false }
    def key = to_str(window.id(win)) + ":" + to_str(out_path)
-   if(_snapshot_once_seen.get(key, false)){ return false }
+   if _snapshot_once_seen.get(key, false) { return false }
    snapshot(out_path)
    _snapshot_once_seen[key] = true
    true
@@ -1385,8 +1367,8 @@ fn auto_dump_delay_frames(int fallback=8) int {
 fn auto_dump_pre_frame(bool done, int frame_count, int delay_frames=8) bool {
    "Requests framebuffer capture before the target auto-dump frame."
    mut effective_delay = delay_frames
-   if(common.env_truthy("NYTRIX_AUTO_DUMP_EXIT") && effective_delay < 2){ effective_delay = 2 }
-   if(!auto_dump_enabled() || done || frame_count + 1 < effective_delay){ return false }
+   if common.env_truthy("NYTRIX_AUTO_DUMP_EXIT") && effective_delay < 2 { effective_delay = 2 }
+   if !auto_dump_enabled() || done || frame_count + 1 < effective_delay { return false }
    request_frame_capture()
    true
 }
@@ -1395,20 +1377,20 @@ fn auto_dump_post_frame(any win, bool done, int frame_count, int delay_frames=8,
    "Writes a requested framebuffer dump after the target frame."
    def exit_after_dump = common.env_truthy("NYTRIX_AUTO_DUMP_EXIT")
    mut effective_delay = delay_frames
-   if(exit_after_dump && effective_delay < 2){ effective_delay = 2 }
-   if(!auto_dump_enabled() || done || frame_count < effective_delay){ return done }
-   if(!snapshot(auto_dump_path(dump_path))){
-      if(exit_after_dump){ window.set_should_close(win, true) }
+   if exit_after_dump && effective_delay < 2 { effective_delay = 2 }
+   if !auto_dump_enabled() || done || frame_count < effective_delay { return done }
+   if !snapshot(auto_dump_path(dump_path)) {
+      if exit_after_dump { window.set_should_close(win, true) }
       return false
    }
-   if(exit_after_dump){ window.set_should_close(win, true) }
+   if exit_after_dump { window.set_should_close(win, true) }
    true
 }
 
 fn gui_auto_dump_path(any cli_path="") str {
    "Returns the configured GUI auto-dump path."
    def cli = to_str(cli_path)
-   if(cli.len > 0){ return cli }
+   if cli.len > 0 { return cli }
    env_trim_cached("NY_UI_GUI_AUTO_DUMP")
 }
 
@@ -1424,25 +1406,25 @@ fn gui_auto_dump_exit_enabled() bool {
 
 fn suite_parse_text(any txt) list {
    "Parses dump suite rows from text."
-   if(!is_str(txt)){ return [] }
+   if !is_str(txt) { return [] }
    mut out = []
    mut line = ""
    mut i = 0
    def n = str.len(txt)
-   while(i < n){
+   while i < n {
       def c = load8(txt, i)
-      if(c == 10){
+      if c == 10 {
          def spec = suite_parse_line(line)
-         if(spec.len > 0){ out = out.append(spec) }
+         if spec.len > 0 { out = out.append(spec) }
          line = ""
-      } elif(c != 13){
+      } elif c != 13 {
          line += str.chr(c)
       }
       i += 1
    }
-   if(str.len(line) > 0){
+   if str.len(line) > 0 {
       def spec = suite_parse_line(line)
-      if(spec.len > 0){ out = out.append(spec) }
+      if spec.len > 0 { out = out.append(spec) }
    }
    out
 }
@@ -1452,19 +1434,19 @@ fn suite_parse_env(any cli_dump_dir="") dict {
    mut specs = []
    def suite_file = env_trim_cached("NY_UI_GUI_DUMP_SUITE_FILE")
    def suite_list = env_trim_cached("NY_UI_GUI_DUMP_SUITE_LIST")
-   if(suite_file.len > 0){
-      match file_read(suite_file){
+   if suite_file.len > 0 {
+      match file_read(suite_file) {
          ok(txt) -> { specs = suite_parse_text(txt) }
          err(_) -> { print_line("ui:gui-suite:warn", "failed to read spec=" + suite_file) }
       }
    }
-   if(specs.len == 0 && suite_list.len > 0){
+   if specs.len == 0 && suite_list.len > 0 {
       specs = suite_parse_text(suite_list)
    }
    mut out_dir = env_trim_cached("NY_UI_GUI_DUMP_SUITE_DIR")
-   if(out_dir.len == 0){ out_dir = root_dir(cli_dump_dir) }
+   if out_dir.len == 0 { out_dir = root_dir(cli_dump_dir) }
    mut settle = 4
-   if(env_present_cached("NY_UI_GUI_DUMP_SUITE_SETTLE_FRAMES")){
+   if env_present_cached("NY_UI_GUI_DUMP_SUITE_SETTLE_FRAMES") {
       settle = env_int_cached("NY_UI_GUI_DUMP_SUITE_SETTLE_FRAMES", 4, 0, 1000000)
    }
    {
@@ -1477,8 +1459,8 @@ fn suite_parse_env(any cli_dump_dir="") dict {
 
 fn suite_exit_enabled() bool {
    "Returns whether dump-suite completion should close the window."
-   if(_suite_exit_mode != -1){ return _suite_exit_mode == 1 }
-   if(env_present_cached("NY_UI_GUI_DUMP_SUITE_EXIT")){
+   if _suite_exit_mode != -1 { return _suite_exit_mode == 1 }
+   if env_present_cached("NY_UI_GUI_DUMP_SUITE_EXIT") {
       _suite_exit_mode = env_truthy_cached("NY_UI_GUI_DUMP_SUITE_EXIT") ? 1 : 0
    }
    else { _suite_exit_mode = 0 }
@@ -1498,30 +1480,30 @@ fn gizmo_mode(any name, any fallback) int {
 
 fn framebuffer_hash_line() str {
    "Returns a stable hash line for the current framebuffer."
-   if(_last_framebuffer_hash_line.len > 0){
+   if _last_framebuffer_hash_line.len > 0 {
       def cached = _last_framebuffer_hash_line
       _last_framebuffer_hash_line = ""
       return cached
    }
    def fb = read_framebuffer()
-   if(!is_dict(fb)){ return "" }
+   if !is_dict(fb) { return "" }
    def data = fb.get("data", 0)
    def fb_w = int(fb.get("width", 0))
    def fb_h = int(fb.get("height", 0))
    def fb_bpp = int(fb.get("bpp", 4))
    def fb_len = fb_w * fb_h * fb_bpp
-   if(data == 0 || fb_len <= 0){
-      if(data){ free(data) }
+   if data == 0 || fb_len <= 0 {
+      if data { free(data) }
       return ""
    }
    def fb_bytes = bytes(fb_len)
-   if(!fb_bytes){
-      if(data){ free(data) }
+   if !fb_bytes {
+      if data { free(data) }
       return ""
    }
    memcpy(fb_bytes, data, fb_len)
    def line = "FB_HASH: " + str.to_hex(hash.xxh32(fb_bytes, 0, 0, fb_len))
-   if(data){ free(data) }
+   if data { free(data) }
    line
 }
 

@@ -12,7 +12,7 @@ fn create_context(any share=0) any {
    "Creates a native NSOpenGLContext for Cocoa."
    def fmt_cls = cocoa.get_class("NSOpenGLPixelFormat")
    def ctx_cls = cocoa.get_class("NSOpenGLContext")
-   if(!fmt_cls || !ctx_cls){ return 0 }
+   if !fmt_cls || !ctx_cls { return 0 }
    def attrs = zalloc(40)
    store32(attrs, 73, 0)
    store32(attrs, 5, 4)
@@ -24,7 +24,7 @@ fn create_context(any share=0) any {
    mut fmt = cocoa.objc_msgSend_ptr(fmt_cls, cocoa.get_selector("alloc"), 0)
    fmt = cocoa.objc_msgSend_ptr(fmt, cocoa.get_selector("initWithAttributes:"), attrs)
    free(attrs)
-   if(!fmt){ return 0 }
+   if !fmt { return 0 }
    mut ctx = cocoa.objc_msgSend_ptr(ctx_cls, cocoa.get_selector("alloc"), 0)
    ctx = cocoa.objc_msgSend_ptr_ptr(ctx, cocoa.get_selector("initWithFormat:shareContext:"), fmt, share)
    cocoa.objc_msgSend(fmt, cocoa.get_selector("release"))
@@ -38,7 +38,7 @@ fn destroy_context(any ctx) bool {
 
 fn make_current(any ctx) bool {
    "Builds make current."
-   if(!ctx){
+   if !ctx {
       def cls = cocoa.get_class("NSOpenGLContext")
       cocoa.objc_msgSend(cls, cocoa.get_selector("clearCurrentContext"))
       return true
@@ -49,7 +49,7 @@ fn make_current(any ctx) bool {
 
 fn swap_buffers(any ctx) bool {
    "Runs the swap buffers operation."
-   if(!ctx){ return false }
+   if !ctx { return false }
    cocoa.objc_msgSend(ctx, cocoa.get_selector("flushBuffer"))
    true
 }

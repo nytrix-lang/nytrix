@@ -24,7 +24,7 @@ fn _len_return_source() { [7, 8, 9] }
 fn _len_modulo_index(xs) {
    mut i = 0
    mut total = 0
-   while(i < 10){
+   while i < 10 {
       total += xs[i % xs.len]
       i += 1
    }

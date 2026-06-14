@@ -85,29 +85,29 @@ fn fit_camera_space_pose_margin(f64 tcx, f64 tcy, f64 tcz, f64 span_x, f64 span_
    mut half_z = abs(float(span_z)) * 0.5
    def half_max = max(half_x, max(half_y, half_z))
    def half_eps = max(0.00001, half_max * 0.001)
-   if(half_x < half_eps){ half_x = half_eps }
-   if(half_y < half_eps){ half_y = half_eps }
-   if(half_z < half_eps){ half_z = half_eps }
+   if half_x < half_eps { half_x = half_eps }
+   if half_y < half_eps { half_y = half_eps }
+   if half_z < half_eps { half_z = half_eps }
    mut safe_aspect = float(aspect)
-   if(safe_aspect < 0.1){ safe_aspect = 16.0 / 9.0 }
+   if safe_aspect < 0.1 { safe_aspect = 16.0 / 9.0 }
    mut safe_fov = float(fit_fov_deg)
-   if(safe_fov <= 1.0 || safe_fov >= 179.0){ safe_fov = 120.0 }
+   if safe_fov <= 1.0 || safe_fov >= 179.0 { safe_fov = 120.0 }
    mut safe_yaw = float(yaw_deg)
    mut safe_pitch = float(pitch_deg)
-   if(is_nan(safe_yaw) || is_inf(safe_yaw) || abs(safe_yaw) > 360000.0){ safe_yaw = 0.0 }
-   if(is_nan(safe_pitch) || is_inf(safe_pitch) || abs(safe_pitch) > 360000.0){ safe_pitch = 0.0 }
-   while(safe_yaw > 180.0){ safe_yaw = safe_yaw - 360.0 }
-   while(safe_yaw < -180.0){ safe_yaw = safe_yaw + 360.0 }
-   if(abs(safe_yaw) < 0.000001){ safe_yaw = 0.0 }
-   if(abs(safe_pitch) < 0.000001){ safe_pitch = 0.0 }
-   if(safe_pitch > 89.0){ safe_pitch = 89.0 }
-   if(safe_pitch < -89.0){ safe_pitch = -89.0 }
+   if is_nan(safe_yaw) || is_inf(safe_yaw) || abs(safe_yaw) > 360000.0 { safe_yaw = 0.0 }
+   if is_nan(safe_pitch) || is_inf(safe_pitch) || abs(safe_pitch) > 360000.0 { safe_pitch = 0.0 }
+   while safe_yaw > 180.0 { safe_yaw = safe_yaw - 360.0 }
+   while safe_yaw < -180.0 { safe_yaw = safe_yaw + 360.0 }
+   if abs(safe_yaw) < 0.000001 { safe_yaw = 0.0 }
+   if abs(safe_pitch) < 0.000001 { safe_pitch = 0.0 }
+   if safe_pitch > 89.0 { safe_pitch = 89.0 }
+   if safe_pitch < -89.0 { safe_pitch = -89.0 }
    def ry, rp = safe_yaw * PI / 180.0, safe_pitch * PI / 180.0
    def cp = cos(rp)
    mut fx, fy = sin(ry) * cp, sin(rp)
    mut fz = 0.0 - cos(ry) * cp
    def fl = sqrt(fx * fx + fy * fy + fz * fz)
-   if(fl < 0.000001){
+   if fl < 0.000001 {
       fx, fy = 0.0, 0.0
       fz = 0.0 - 1.0
    }
@@ -115,7 +115,7 @@ fn fit_camera_space_pose_margin(f64 tcx, f64 tcy, f64 tcz, f64 span_x, f64 span_
    mut ryv = 0.0
    mut rz = sin(ry)
    def rl = sqrt(rx * rx + rz * rz)
-   if(rl < 0.000001){
+   if rl < 0.000001 {
       rx = 1.0
       ryv = 0.0
       rz = 0.0
@@ -123,7 +123,7 @@ fn fit_camera_space_pose_margin(f64 tcx, f64 tcy, f64 tcz, f64 span_x, f64 span_
    mut ux, uy = ryv * fz - rz * fy, rz * fx - rx * fz
    mut uz = rx * fy - ryv * fx
    def ul = sqrt(ux * ux + uy * uy + uz * uz)
-   if(ul < 0.000001){
+   if ul < 0.000001 {
       ux, uy = 0.0, 1.0
       uz = 0.0
    }
@@ -137,7 +137,7 @@ fn fit_camera_space_pose_margin(f64 tcx, f64 tcy, f64 tcz, f64 span_x, f64 span_
    def fit_pad = max(half_diag * pad_diag_mul, half_max * pad_max_mul)
    mut frame_distance = axis_distance * margin_mul + fit_pad
    def min_distance = half_diag * min_diag_mul + fit_pad
-   if(frame_distance < min_distance){ frame_distance = min_distance }
+   if frame_distance < min_distance { frame_distance = min_distance }
    {
       "x": tcx - fx * frame_distance,
       "y": tcy - fy * frame_distance,
@@ -161,7 +161,7 @@ fn fit_camera_space_pose(f64 tcx, f64 tcy, f64 tcz, f64 span_x, f64 span_y, f64 
 fn env_float_range(str name, f64 lo, f64 hi, f64 fallback) f64 {
    "Reads a bounded floating-point environment override."
    def raw = common.env_trim(name)
-   if(raw.len <= 0){ return fallback }
+   if raw.len <= 0 { return fallback }
    def v = str.atof(raw)
    (v >= lo && v <= hi) ? v : fallback
 }
@@ -172,19 +172,19 @@ fn _mesh_num(any mesh, str key, f64 fallback=0.0) f64 {
 
 fn fit_camera_sane(any mesh) bool {
    "Validates that cached mesh fit-camera values are finite and usable."
-   if(!is_dict(mesh)){ return false }
+   if !is_dict(mesh) { return false }
    def fit_scale = _mesh_num(mesh, "fit_scale", 0.0)
-   if(is_nan(fit_scale) || is_inf(fit_scale) || fit_scale <= 0.000001 || abs(fit_scale) > 1000000.0){ return false }
+   if is_nan(fit_scale) || is_inf(fit_scale) || fit_scale <= 0.000001 || abs(fit_scale) > 1000000.0 { return false }
    def cam_x, cam_y = _mesh_num(mesh, "fit_cam_x", 0.0), _mesh_num(mesh, "fit_cam_y", 0.0)
    def cam_z = _mesh_num(mesh, "fit_cam_z", 0.0)
    def target_x, target_y = _mesh_num(mesh, "fit_target_x", cam_x), _mesh_num(mesh, "fit_target_y", cam_y)
    def target_z = _mesh_num(mesh, "fit_target_z", cam_z)
-   if(is_nan(cam_x) || is_inf(cam_x) || abs(cam_x) > 100000000.0 ||
-      is_nan(cam_y) || is_inf(cam_y) || abs(cam_y) > 100000000.0 ||
-      is_nan(cam_z) || is_inf(cam_z) || abs(cam_z) > 100000000.0 ||
-      is_nan(target_x) || is_inf(target_x) || abs(target_x) > 100000000.0 ||
-      is_nan(target_y) || is_inf(target_y) || abs(target_y) > 100000000.0 ||
-      is_nan(target_z) || is_inf(target_z) || abs(target_z) > 100000000.0){
+   if is_nan(cam_x) || is_inf(cam_x) || abs(cam_x) > 100000000.0 ||
+   is_nan(cam_y) || is_inf(cam_y) || abs(cam_y) > 100000000.0 ||
+   is_nan(cam_z) || is_inf(cam_z) || abs(cam_z) > 100000000.0 ||
+   is_nan(target_x) || is_inf(target_x) || abs(target_x) > 100000000.0 ||
+   is_nan(target_y) || is_inf(target_y) || abs(target_y) > 100000000.0 ||
+   is_nan(target_z) || is_inf(target_z) || abs(target_z) > 100000000.0{
       return false
    }
    def dx, dy = target_x - cam_x, target_y - cam_y
@@ -207,7 +207,7 @@ fn angle_state(f64 sane_cam_x, f64 sane_cam_y, f64 sane_cam_z, f64 sane_target_x
    def fx, fy = sane_target_x - sane_cam_x, sane_target_y - sane_cam_y
    def fz, fh = sane_target_z - sane_cam_z, sqrt(fx * fx + fz * fz)
    mut fit_cam_yaw, fit_cam_pitch = yaw, pitch
-   if(fh > 0.000001 || abs(fy) > 0.000001){
+   if fh > 0.000001 || abs(fy) > 0.000001 {
       fit_cam_yaw = atan2(fx, -fz) * 180.0 / PI
       fit_cam_pitch = atan2(fy, max(0.000001, fh)) * 180.0 / PI
    }
@@ -225,28 +225,28 @@ fn _auto_bounds_shape(f64 span_x, f64 span_y, f64 span_z) dict {
    mut branch = tall ? "auto-tall" : "auto-bounds"
    mut sx, sy = span_x, span_y
    mut sz = span_z
-   if(thin_y){
+   if thin_y {
       sy = max(0.001, max_span * 0.015)
       yaw = 0.0
       pitch = -88.0
       margin = 1.55
       fov_mul = 1.12
       branch = "auto-flat-xz"
-   } elif(thin_x){
+   } elif thin_x {
       sx = max(0.001, max_span * 0.015)
       yaw = -90.0
       pitch = tall ? -4.0 : 0.0
       margin = 1.40
       branch = "auto-flat-yz"
-   } elif(thin_z){
+   } elif thin_z {
       sz = max(0.001, max_span * 0.015)
       yaw = 0.0
       pitch = tall ? -4.0 : 0.0
       margin = 1.40
       branch = "auto-flat-xy"
-   } elif(tall){
+   } elif tall {
       margin = 1.22
-   } elif(max(span_x, span_z) > span_y * 2.4){
+   } elif max(span_x, span_z) > span_y * 2.4 {
       yaw = -28.0
       pitch = -8.0
       margin = 1.24
@@ -262,11 +262,11 @@ fn _auto_fit_state(f64 min_x, f64 min_y, f64 min_z, f64 max_x, f64 max_y, f64 ma
    def shape = _auto_bounds_shape(span_x, span_y, span_z)
    mut yaw, pitch = float(shape.get("yaw", -35.0)), float(shape.get("pitch", -10.0))
    mut margin = float(shape.get("margin", 1.16))
-   if(wide_mode){ margin = max(1.08, margin * 0.94) }
-   if(dump_pose){
+   if wide_mode { margin = max(1.08, margin * 0.94) }
+   if dump_pose {
       safe_fov = env_float_range("NY_UI_DUMP_FOV", 15.0, 120.0, safe_fov)
       def fill = env_float_range("NY_UI_DUMP_FIT_FILL", 0.20, 0.98, 0.0)
-      if(fill > 0.0){ margin = clamp(1.0 / fill, 1.02, 4.0) }
+      if fill > 0.0 { margin = clamp(1.0 / fill, 1.02, 4.0) }
       yaw = env_float_range("NY_UI_DUMP_YAW", -360.0, 360.0, yaw)
       pitch = env_float_range("NY_UI_DUMP_PITCH", -89.0, 89.0, pitch)
    }
@@ -276,9 +276,9 @@ fn _auto_fit_state(f64 min_x, f64 min_y, f64 min_z, f64 max_x, f64 max_y, f64 ma
    safe_fov, safe_aspect, yaw, pitch, margin)
    mut cam_x, cam_y = float(pose.get("x", tcx)), float(pose.get("y", tcy))
    mut cam_z = float(pose.get("z", tcz + max(span_x, max(span_y, span_z))))
-   if(dump_pose){
+   if dump_pose {
       def dist_scale = env_float_range("NY_UI_DUMP_FIT_DIST_SCALE", 0.05, 4.0, 1.0)
-      if(abs(dist_scale - 1.0) > 0.000001){
+      if abs(dist_scale - 1.0) > 0.000001 {
          cam_x = tcx + (cam_x - tcx) * dist_scale
          cam_y = tcy + (cam_y - tcy) * dist_scale
          cam_z = tcz + (cam_z - tcz) * dist_scale
@@ -289,7 +289,7 @@ fn _auto_fit_state(f64 min_x, f64 min_y, f64 min_z, f64 max_x, f64 max_y, f64 ma
 
 fn fit_scene_state(any mesh, any opts=0) dict {
    "Builds a model-agnostic camera fit state for a scene mesh."
-   if(!is_dict(mesh)){ return dict(0) }
+   if !is_dict(mesh) { return dict(0) }
    def cfg = is_dict(opts) ? opts : dict(0)
    def dump_pose = bool(cfg.get("dump_pose", false))
    def wide_mode = bool(cfg.get("wide_mode", false))
@@ -309,9 +309,9 @@ fn fit_scene_state(any mesh, any opts=0) dict {
    def span_x, span_y = float(bounds.get(9, 0.001)), float(bounds.get(10, 0.001))
    def span_z = float(bounds.get(11, 0.001))
    mut safe_aspect = (win_h > 1.0) ? (win_w / win_h) : (16.0 / 9.0)
-   if(safe_aspect < 0.1){ safe_aspect = 16.0 / 9.0 }
+   if safe_aspect < 0.1 { safe_aspect = 16.0 / 9.0 }
    mut safe_fov = fit_cam_fov
-   if(safe_fov < 15.0 || safe_fov > 120.0){ safe_fov = 60.0 }
+   if safe_fov < 15.0 || safe_fov > 120.0 { safe_fov = 60.0 }
    mut fit_branch = "auto-bounds"
    def fit_state = _auto_fit_state(min_x, min_y, min_z, max_x, max_y, max_z, span_x, span_y, span_z, safe_fov, safe_aspect, dump_pose, wide_mode)
    mut sane_cam_x, sane_cam_y = 0.0, 0.0
@@ -351,9 +351,9 @@ fn simulate_frame_state(dict state) dict {
    mut look_dx, look_dy = 0.0, 0.0
    mut h_sinr = sin(yaw * (PI / 180.0))
    mut h_cosr = cos(yaw * (PI / 180.0))
-   if(!bool(state.get("gui_mouse", false)) && !bool(state.get("skip_look", false)) && (abs(dx) > 0.0001 || abs(dy) > 0.0001)){
+   if !bool(state.get("gui_mouse", false)) && !bool(state.get("skip_look", false)) && (abs(dx) > 0.0001 || abs(dy) > 0.0001) {
       look_dx, look_dy = dx, dy
-      if(fps_mouse_look){
+      if fps_mouse_look {
          look_dx, look_dy = clamp(look_dx, -48.0, 48.0), clamp(look_dy, -48.0, 48.0)
          ;; Raw/captured mouse should be direct by default.  The old 0.58
          ;; smoothing was frame-rate dependent and made Vulkan camera look jitter
@@ -362,18 +362,18 @@ fn simulate_frame_state(dict state) dict {
          ;; Make smoothing stable across 30/60/144Hz.  A fixed per-frame alpha
          ;; changes feel with present timing and can show as jitter when Vulkan
          ;; pacing varies.  Treat the configured alpha as the 60Hz response.
-         if(smooth_alpha > 0.0 && smooth_alpha < 0.999){
+         if smooth_alpha > 0.0 && smooth_alpha < 0.999 {
             def frame_scale = clamp(dt * 60.0, 0.25, 4.0)
             smooth_alpha = 1.0 - pow(1.0 - smooth_alpha, frame_scale)
          }
-         if(smooth_alpha >= 0.999){
+         if smooth_alpha >= 0.999 {
             rmb_dx_smooth, rmb_dy_smooth = look_dx, look_dy
          } else {
             rmb_dx_smooth = rmb_dx_smooth + (look_dx - rmb_dx_smooth) * smooth_alpha
             rmb_dy_smooth = rmb_dy_smooth + (look_dy - rmb_dy_smooth) * smooth_alpha
          }
          look_dx, look_dy = rmb_dx_smooth, rmb_dy_smooth
-      } elif(!bool(state.get("prep_gui", false))){
+      } elif !bool(state.get("prep_gui", false)) {
          look_dx, look_dy = clamp(look_dx, -60.0, 60.0), clamp(look_dy, -60.0, 60.0)
       }
       def look_sens = float(state.get("sens", 0.08)) * (fps_mouse_look ? float(state.get("rmb_sens_mul", 1.0)) : 1.0)
@@ -384,20 +384,20 @@ fn simulate_frame_state(dict state) dict {
       h_sinr = sin(yaw * (PI / 180.0))
       h_cosr = cos(yaw * (PI / 180.0))
       look_applied = true
-   } elif(bool(state.get("rmb_look_active", false))){
+   } elif bool(state.get("rmb_look_active", false)) {
       rmb_dx_smooth, rmb_dy_smooth = 0.0, 0.0
    }
    def fwd_x, fwd_z = h_sinr, 0.0 - h_cosr
    def rgt_x, rgt_z = h_cosr, h_sinr
    mut wx, wy, wz = 0.0, 0.0, 0.0
-   if(bool(state.get("key_w", false))){ wx += fwd_x wz += fwd_z }
-   if(bool(state.get("key_s", false))){ wx -= fwd_x wz -= fwd_z }
-   if(bool(state.get("key_a", false))){ wx -= rgt_x wz -= rgt_z }
-   if(bool(state.get("key_d", false))){ wx += rgt_x wz += rgt_z }
-   if(bool(state.get("key_space", false))){ wy += 1.0 }
-   if(bool(state.get("key_ctrl", false))){ wy -= 1.0 }
+   if bool(state.get("key_w", false)) { wx += fwd_x wz += fwd_z }
+   if bool(state.get("key_s", false)) { wx -= fwd_x wz -= fwd_z }
+   if bool(state.get("key_a", false)) { wx -= rgt_x wz -= rgt_z }
+   if bool(state.get("key_d", false)) { wx += rgt_x wz += rgt_z }
+   if bool(state.get("key_space", false)) { wy += 1.0 }
+   if bool(state.get("key_ctrl", false)) { wy -= 1.0 }
    def wlen2 = wx * wx + wy * wy + wz * wz
-   if(wlen2 > 0.0001){
+   if wlen2 > 0.0001 {
       def inv = 1.0 / sqrt(wlen2)
       wx *= inv
       wy *= inv
@@ -408,7 +408,7 @@ fn simulate_frame_state(dict state) dict {
    mut spdy = float(state.get("spdy", 0.0)) + (wy - float(state.get("spdy", 0.0))) * ms
    mut spdz = float(state.get("spdz", 0.0)) + (wz - float(state.get("spdz", 0.0))) * ms
    mut speed = float(state.get("speed", 500.0))
-   if(bool(state.get("key_shift", false))){ speed *= float(state.get("speed_mul", 3.0)) }
+   if bool(state.get("key_shift", false)) { speed *= float(state.get("speed_mul", 3.0)) }
    def drag_f = 1.0 / (1.0 + float(state.get("drag", 10.0)) * dt)
    mut vx = (float(state.get("vx", 0.0)) + spdx * speed * dt) * drag_f
    mut vy = (float(state.get("vy", 0.0)) + spdy * speed * dt) * drag_f
@@ -449,20 +449,20 @@ fn update(list cam, f64 dt, any win, bool skip_look=false, bool skip_move=false)
    def _cx = _ww * 0.5 def _cy = _wh * 0.5
    mut target_yaw = cam.get(8)
    mut target_pitch = cam.get(9)
-   if(!skip_look){
+   if !skip_look {
       def m_pos = ui_window.cursor_pos(win)
       def mx = m_pos.get(0, _cx)
       def my = m_pos.get(1, _cy)
       ui_window.set_cursor_pos(win, _cx, _cy)
       def dx, dy = mx - _cx, my - _cy
       def sens = cam.get(10)
-      if(abs(dx) > 0.0001 || abs(dy) > 0.0001){
+      if abs(dx) > 0.0001 || abs(dy) > 0.0001 {
          target_yaw += dx * sens
          target_pitch -= dy * sens
          def p_min = cam.get(22, -89.9)
          def p_max = cam.get(23, 89.9)
-         if(target_pitch < p_min){ target_pitch = p_min }
-         if(target_pitch > p_max){ target_pitch = p_max }
+         if target_pitch < p_min { target_pitch = p_min }
+         if target_pitch > p_max { target_pitch = p_max }
          cam[8] = target_yaw
          cam[9] = target_pitch
       }
@@ -479,16 +479,16 @@ fn update(list cam, f64 dt, any win, bool skip_look=false, bool skip_move=false)
    def fwd_x = sinr def fwd_z = 0.0 - cosr
    def rgt_x = cosr def rgt_z = sinr
    mut wx, wy, wz = 0.0, 0.0, 0.0
-   if(!skip_move){
-      if(ui_window.key_down(win, KEY_W)){ wx += fwd_x wz += fwd_z }
-      if(ui_window.key_down(win, KEY_S)){ wx -= fwd_x wz -= fwd_z }
-      if(ui_window.key_down(win, KEY_A)){ wx -= rgt_x wz -= rgt_z }
-      if(ui_window.key_down(win, KEY_D)){ wx += rgt_x wz += rgt_z }
-      if(ui_window.key_down(win, KEY_SPACE)){ wy += 1.0 }
-      if(ui_window.key_down(win, KEY_CTRL) || ui_window.mod_down(win, MOD_CONTROL)){ wy -= 1.0 }
+   if !skip_move {
+      if ui_window.key_down(win, KEY_W) { wx += fwd_x wz += fwd_z }
+      if ui_window.key_down(win, KEY_S) { wx -= fwd_x wz -= fwd_z }
+      if ui_window.key_down(win, KEY_A) { wx -= rgt_x wz -= rgt_z }
+      if ui_window.key_down(win, KEY_D) { wx += rgt_x wz += rgt_z }
+      if ui_window.key_down(win, KEY_SPACE) { wy += 1.0 }
+      if ui_window.key_down(win, KEY_CTRL) || ui_window.mod_down(win, MOD_CONTROL) { wy -= 1.0 }
    }
    def wlen2 = wx*wx + wy*wy + wz*wz
-   if(wlen2 > 0.0001){
+   if wlen2 > 0.0001 {
       def inv = 1.0 / sqrt(wlen2)
       wx *= inv wy *= inv wz *= inv
    }
@@ -501,7 +501,7 @@ fn update(list cam, f64 dt, any win, bool skip_look=false, bool skip_move=false)
    cam[18] = cy2
    cam[19] = cz
    mut speed = cam.get(11)
-   if(!skip_move && ui_window.key_down(win, KEY_SHIFT)){ speed *= cam.get(15) }
+   if !skip_move && ui_window.key_down(win, KEY_SHIFT) { speed *= cam.get(15) }
    def drag_f = 1.0 / (1.0 + cam.get(12) * dt)
    mut vx, vy, vz = cam.get(3), cam.get(4), cam.get(5)
    vx, vy = (vx + cx2 * speed * dt) * drag_f, (vy + cy2 * speed * dt) * drag_f
@@ -576,8 +576,8 @@ fn get_fov(list cam) f64 {
 fn set_fov(list cam, f64 fov) list {
    "Sets the field of view for the camera(degrees)."
    mut v = fov + 0.0
-   if(v < 15.0){ v = 15.0 }
-   if(v > 120.0){ v = 120.0 }
+   if v < 15.0 { v = 15.0 }
+   if v > 120.0 { v = 120.0 }
    cam[16] = v
    cam
 }
@@ -610,7 +610,7 @@ fn set_pitch_limits(list cam, f64 min_v, f64 max_v) list {
 
 fn reset_motion(list cam) list {
    "Clears current velocity and smoothed movement intent."
-   if(!cam || !is_list(cam) || cam.len < 20){ return cam }
+   if !cam || !is_list(cam) || cam.len < 20 { return cam }
    cam[3] = 0.0
    cam[4] = 0.0
    cam[5] = 0.0
@@ -665,9 +665,9 @@ fn camera_vectors(dict c) list {
 
 fn camera_free_look(dict c, any win, bool locked=true) dict {
    "Handles centered mouse-look for a dictionary camera."
-   if(!locked){ return c }
+   if !locked { return c }
    def handle = win.get("handle")
-   if(!handle){ return c }
+   if !handle { return c }
    def ws = ui_window.size(win)
    def cx = float(ws.get(0)) * 0.5
    def cy = float(ws.get(1)) * 0.5
@@ -680,8 +680,8 @@ fn camera_free_look(dict c, any win, bool locked=true) dict {
    mut pitch = float(c.get("pitch", 0.0))
    yaw += (mx - cx) * sens
    pitch -= (my - cy) * sens
-   if(pitch > 89.0){ pitch = 89.0 }
-   if(pitch < -89.0){ pitch = -89.0 }
+   if pitch > 89.0 { pitch = 89.0 }
+   if pitch < -89.0 { pitch = -89.0 }
    c["yaw"] = yaw
    c["pitch"] = pitch
    camera_update(c)
@@ -695,13 +695,13 @@ fn camera_free_move(dict c, any win, f64 dt) dict {
    def rgt_h = vec3(cos(ryaw), 0.0, sin(ryaw))
    def up_g = vec3(0.0, 1.0, 0.0)
    mut move = vec3(0, 0, 0)
-   if(ui_window.key_down(win, KEY_W)){ move = add(move, fwd_h) }
-   if(ui_window.key_down(win, KEY_S)){ move = sub(move, fwd_h) }
-   if(ui_window.key_down(win, KEY_A)){ move = sub(move, rgt_h) }
-   if(ui_window.key_down(win, KEY_D)){ move = add(move, rgt_h) }
-   if(ui_window.key_down(win, KEY_E)){ move = add(move, up_g) }
-   if(ui_window.key_down(win, KEY_Q)){ move = sub(move, up_g) }
-   if(len2(move) > 0.000001){
+   if ui_window.key_down(win, KEY_W) { move = add(move, fwd_h) }
+   if ui_window.key_down(win, KEY_S) { move = sub(move, fwd_h) }
+   if ui_window.key_down(win, KEY_A) { move = sub(move, rgt_h) }
+   if ui_window.key_down(win, KEY_D) { move = add(move, rgt_h) }
+   if ui_window.key_down(win, KEY_E) { move = add(move, up_g) }
+   if ui_window.key_down(win, KEY_Q) { move = sub(move, up_g) }
+   if len2(move) > 0.000001 {
       def nmove = normalize(move)
       def speed = float(c.get("speed", 400.0))
       mut pos = vec3(c.get("pos", [0, 0, 0]))

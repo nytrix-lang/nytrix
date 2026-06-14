@@ -59,7 +59,7 @@ mut _mapping_generation = 0
 
 fn _mapping_key(any guid, str platform_name="") str {
    def guid_key = _lower_hex_guid(guid)
-   if(!platform_name || platform_name.len == 0){ return guid_key }
+   if !platform_name || platform_name.len == 0 { return guid_key }
    str.lower(platform_name) + ":" + guid_key
 }
 
@@ -168,14 +168,14 @@ def _DEFAULT_MACOS_MAPPINGS = [
 ]
 
 fn _init_default_mappings(any mappings, str platform_name) bool {
-   if(is_str(mappings)){
+   if is_str(mappings) {
       update_mappings(mappings, platform_name)
       return true
    }
-   if(!is_list(mappings)){ return false }
+   if !is_list(mappings) { return false }
    mut i = 0
    def mappings_n = mappings.len
-   while(i < mappings_n){
+   while i < mappings_n {
       update_mappings(mappings[i], platform_name)
       i += 1
    }
@@ -184,7 +184,7 @@ fn _init_default_mappings(any mappings, str platform_name) bool {
 
 fn init_default_linux_mappings() bool {
    "Initializes init default linux mappings."
-   if(_defaults_linux_loaded){ return true }
+   if _defaults_linux_loaded { return true }
    _init_default_mappings(_DEFAULT_LINUX_MAPPINGS, "Linux")
    _defaults_linux_loaded = true
    true
@@ -192,7 +192,7 @@ fn init_default_linux_mappings() bool {
 
 fn init_default_windows_mappings() bool {
    "Initializes init default windows mappings."
-   if(_defaults_windows_loaded){ return true }
+   if _defaults_windows_loaded { return true }
    _init_default_mappings(_DEFAULT_WINDOWS_MAPPINGS, "Windows")
    _defaults_windows_loaded = true
    true
@@ -200,7 +200,7 @@ fn init_default_windows_mappings() bool {
 
 fn init_default_macos_mappings() bool {
    "Initializes init default macos mappings."
-   if(_defaults_macos_loaded){ return true }
+   if _defaults_macos_loaded { return true }
    _init_default_mappings(_DEFAULT_MACOS_MAPPINGS, "Mac OS X")
    _defaults_macos_loaded = true
    true
@@ -208,55 +208,55 @@ fn init_default_macos_mappings() bool {
 
 fn update_mappings(any s, str platform_name="Linux") int {
    "Parses SDL-style gamepad mapping rows into the active mapping table."
-   if(!s || !is_str(s)){ return 0 }
+   if !s || !is_str(s) { return 0 }
    def text = str.replace(s, "\\n", "\n")
    def lines = str.split(text, "\n")
-   if(!is_list(lines)){ return 0 }
+   if !is_list(lines) { return 0 }
    mut updated = 0
    mut li = 0
    def lines_n = lines.len
-   while(li < lines_n){
+   while li < lines_n {
       def raw = str.strip(lines[li])
       li += 1
-      if(!raw || raw.len == 0){ continue }
+      if !raw || raw.len == 0 { continue }
       def c0 = load8(raw, 0)
-      if(!((c0 >= 48 && c0 <= 57) || (c0 >= 65 && c0 <= 70) || (c0 >= 97 && c0 <= 102))){ continue }
+      if !((c0 >= 48 && c0 <= 57) || (c0 >= 65 && c0 <= 70) || (c0 >= 97 && c0 <= 102)) { continue }
       def parts = str.split(raw, ",")
-      if(!is_list(parts)){ continue }
+      if !is_list(parts) { continue }
       def parts_n = parts.len
-      if(parts_n < 3){ continue }
+      if parts_n < 3 { continue }
       def guid = parts[0]
       def name = parts[1]
-      if(guid.len != 32 || name.len == 0 || name.len >= 128){ continue }
+      if guid.len != 32 || name.len == 0 || name.len >= 128 { continue }
       def guid_key = _lower_hex_guid(guid)
       mut buttons = dict(32)
       mut axes = dict(16)
       mut ok = true
       mut i = 2
-      while(i < parts_n){
+      while i < parts_n {
          def token = parts[i]
          i += 1
-         if(!token || token.len == 0){ continue }
+         if !token || token.len == 0 { continue }
          def pair = _split_first(token, ":")
          def field = pair[0]
          def spec = pair[1]
-         if(field == "platform"){
-            if(spec != platform_name){
+         if field == "platform" {
+            if spec != platform_name {
                ok = false
                break
             }
             continue
          }
          def slot = _field_slot(field)
-         if(slot < 0){ continue }
+         if slot < 0 { continue }
          def element = _parse_element(spec)
-         if(!element){
+         if !element {
             ok = false
             break
          }
-         if(slot < 100){ buttons[slot] = element } else { axes[slot - 100] = element }
+         if slot < 100 { buttons[slot] = element } else { axes[slot - 100] = element }
       }
-      if(!ok){ continue }
+      if !ok { continue }
       def mapping = {
          "guid": guid_key,
          "platform": platform_name,
@@ -268,88 +268,88 @@ fn update_mappings(any s, str platform_name="Linux") int {
       _mappings[guid_key] = mapping
       updated += 1
    }
-   if(updated > 0){ _mapping_generation += 1 }
+   if updated > 0 { _mapping_generation += 1 }
    updated
 }
 
 fn _lower_hex_guid(any guid) str {
-   if(!guid || !is_str(guid)){ return "" }
+   if !guid || !is_str(guid) { return "" }
    str.lower(guid)
 }
 
 fn _split_first(str s, str sep) list {
-   if(!s || !is_str(s)){ return ["", ""] }
+   if !s || !is_str(s) { return ["", ""] }
    def idx = str.find(s, sep)
    def n = s.len
-   if(idx < 0){ return [s, ""] }
+   if idx < 0 { return [s, ""] }
    [str.str_slice(s, 0, idx), str.str_slice(s, idx + sep.len, n)]
 }
 
 fn _field_slot(str field) int {
-   if(!field || !is_str(field)){ return -1 }
+   if !field || !is_str(field) { return -1 }
    return comptime match GamepadFieldSlot(field, -1)
 }
 
 fn _parse_element(str spec) any {
-   if(!spec || !is_str(spec)){ return 0 }
+   if !spec || !is_str(spec) { return 0 }
    mut n = spec.len
-   if(n == 0){ return 0 }
+   if n == 0 { return 0 }
    mut scale = 1.0
    mut offset = 0.0
    mut invert = false
-   if(load8(spec, n - 1) == 126){
+   if load8(spec, n - 1) == 126 {
       invert = true
       spec = str.str_slice(spec, 0, n - 1)
       n -= 1
-      if(n == 0){ return 0 }
+      if n == 0 { return 0 }
    }
    mut c0 = load8(spec, 0)
-   if(c0 == 43){
+   if c0 == 43 {
       scale, offset = 2.0, -1.0
       spec = str.str_slice(spec, 1, n)
       n -= 1
-      if(n == 0){ return 0 }
+      if n == 0 { return 0 }
       c0 = load8(spec, 0)
-   } elif(c0 == 45 && n > 1 && (load8(spec, 1) == 97)){
+   } elif c0 == 45 && n > 1 && (load8(spec, 1) == 97) {
       scale, offset = 2.0, 1.0
       spec = str.str_slice(spec, 1, n)
       n -= 1
       c0 = load8(spec, 0)
    }
-   if(invert){
+   if invert {
       scale = 0.0 - scale
       offset = 0.0 - offset
    }
-   if(c0 == 98){
+   if c0 == 98 {
       def num = int(str.atof(str.str_slice(spec, 1, n)))
-      if(num < 0){ return 0 }
+      if num < 0 { return 0 }
       return [JOYSTICK_BUTTON, num, 1.0, 0.0]
    }
-   if(c0 == 97){
+   if c0 == 97 {
       def num = int(str.atof(str.str_slice(spec, 1, n)))
-      if(num < 0){ return 0 }
+      if num < 0 { return 0 }
       return [JOYSTICK_AXIS, num, scale, offset]
    }
-   if(c0 == 104){
+   if c0 == 104 {
       def dot = str.find(spec, ".")
-      if(dot < 0){ return 0 }
+      if dot < 0 { return 0 }
       def hat = int(str.atof(str.str_slice(spec, 1, dot)))
       def bit = int(str.atof(str.str_slice(spec, dot + 1, n)))
-      if(hat < 0 || bit < 0){ return 0 }
+      if hat < 0 || bit < 0 { return 0 }
       return [JOYSTICK_HATBIT, (hat << 4) | bit, 1.0, 0.0]
    }
    0
 }
 
 fn _is_valid_element_counts(any element, int button_count, int axis_count, int hat_count) bool {
-   if(!element){ return true }
-   if(!is_list(element)){ return true }
+   if !element { return true }
+   if !is_list(element) { return true }
    def typ = element[_E_TYPE]
-   if(typ == 0){ return true }
+   if typ == 0 { return true }
    def index = element[_E_INDEX]
-   if(typ == JOYSTICK_BUTTON){ return index >= 0 && index < button_count }
-   if(typ == JOYSTICK_AXIS){ return index >= 0 && index < axis_count }
-   if(typ == JOYSTICK_HATBIT){
+   if typ == JOYSTICK_BUTTON { return index >= 0 && index < button_count }
+   if typ == JOYSTICK_AXIS { return index >= 0 && index < axis_count }
+   if typ == JOYSTICK_HATBIT {
       def hat = index >> 4
       return hat >= 0 && hat < hat_count
    }
@@ -357,42 +357,42 @@ fn _is_valid_element_counts(any element, int button_count, int axis_count, int h
 }
 
 fn _get_axis_fast(any js, any reader, any axes_ptr, int axis_count, int index) f64 {
-   if(reader){
+   if reader {
       def v = fmath.float(reader(js, index))
-      if(fmath.is_nan(v) || fmath.is_inf(v)){ return 0.0 }
+      if fmath.is_nan(v) || fmath.is_inf(v) { return 0.0 }
       return v
    }
-   if(!axes_ptr || index < 0 || index >= axis_count){ return 0.0 }
+   if !axes_ptr || index < 0 || index >= axis_count { return 0.0 }
    def v = load32_f32(axes_ptr, index * 4)
-   if(fmath.is_nan(v) || fmath.is_inf(v)){ return 0.0 }
+   if fmath.is_nan(v) || fmath.is_inf(v) { return 0.0 }
    v
 }
 
 fn _get_button_fast(any js, any reader, any buttons_ptr, int button_count, int index) int {
-   if(reader){ return reader(js, index) }
-   if(!buttons_ptr || index < 0 || index >= button_count){ return 0 }
+   if reader { return reader(js, index) }
+   if !buttons_ptr || index < 0 || index >= button_count { return 0 }
    load8(buttons_ptr, index)
 }
 
 fn _get_hat_fast(any js, any reader, any hats_ptr, int hat_count, int hat) int {
-   if(reader){ return reader(js, hat) }
-   if(!hats_ptr || hat < 0 || hat >= hat_count){ return 0 }
+   if reader { return reader(js, hat) }
+   if !hats_ptr || hat < 0 || hat >= hat_count { return 0 }
    load8(hats_ptr, hat)
 }
 
 fn _clamp_axis(any v) f64 {
    def fv = fmath.float(v)
-   if(fmath.is_nan(fv) || fmath.is_inf(fv)){ return 0.0 }
+   if fmath.is_nan(fv) || fmath.is_inf(fv) { return 0.0 }
    v = fv
-   if(v < -1.0){ return -1.0 }
-   if(v > 1.0){ return 1.0 }
+   if v < -1.0 { return -1.0 }
+   if v > 1.0 { return 1.0 }
    v
 }
 
 fn _mapping_slots_valid(any slots, int last, int button_count, int axis_count, int hat_count) bool {
    mut i = 0
-   while(i <= last){
-      if(!_is_valid_element_counts(slots.get(i, 0), button_count, axis_count, hat_count)){ return false }
+   while i <= last {
+      if !_is_valid_element_counts(slots.get(i, 0), button_count, axis_count, hat_count) { return false }
       i += 1
    }
    true
@@ -401,7 +401,7 @@ fn _mapping_slots_valid(any slots, int last, int button_count, int axis_count, i
 fn _state_axis_offset(int i) int { 16 + i * 4 }
 
 fn _axis_button_pressed(any value, any scale, any offset) bool {
-   if(offset < 0.0 || (offset == 0.0 && scale > 0.0)){ return value >= 0.0 }
+   if offset < 0.0 || (offset == 0.0 && scale > 0.0) { return value >= 0.0 }
    value <= 0.0
 }
 
@@ -415,20 +415,20 @@ fn _mapped_state_value(
    any e, bool axis_mode, any js, any axis_reader, any button_reader, any hat_reader,
    any axes_ptr, any buttons_ptr, any hats_ptr, int axis_count, int button_count, int hat_count
 ) any {
-   if(!e){ return axis_mode ? 0.0 : 0 }
+   if !e { return axis_mode ? 0.0 : 0 }
    def typ = e[_E_TYPE]
    def idx = e[_E_INDEX]
-   if(typ == JOYSTICK_BUTTON){
+   if typ == JOYSTICK_BUTTON {
       def down = _get_button_fast(js, button_reader, buttons_ptr, button_count, idx)
       return axis_mode ? (down ? 1.0 : -1.0) : down
    }
-   if(typ == JOYSTICK_AXIS){
+   if typ == JOYSTICK_AXIS {
       def scale = e[_E_SCALE]
       def offset = e[_E_OFFSET]
       def value = _get_axis_fast(js, axis_reader, axes_ptr, axis_count, idx) * scale + offset
       return axis_mode ? _clamp_axis(value) : (_axis_button_pressed(value, scale, offset) ? backend_api.ACTION_PRESS : 0)
    }
-   if(typ == JOYSTICK_HATBIT){
+   if typ == JOYSTICK_HATBIT {
       def down = _hat_bit_set(js, hat_reader, hats_ptr, hat_count, idx)
       return axis_mode ? (down ? 1.0 : -1.0) : (down ? backend_api.ACTION_PRESS : 0)
    }
@@ -441,10 +441,10 @@ fn _mapped_trigger_axis_value(any js, any e, any value) f64 {
 
 fn find_mapping(any guid, str platform_name="") any {
    "Returns the registered gamepad mapping for `guid`, or 0."
-   if(!guid || !is_str(guid)){ return 0 }
-   if(platform_name && platform_name.len > 0){
+   if !guid || !is_str(guid) { return 0 }
+   if platform_name && platform_name.len > 0 {
       def scoped = _mappings.get(_mapping_key(guid, platform_name), 0)
-      if(scoped){ return scoped }
+      if scoped { return scoped }
    }
    _mappings.get(_mapping_key(guid, ""), 0)
 }
@@ -457,18 +457,18 @@ fn _remember_valid_mapping(any js, any mapping) any {
 
 fn find_valid_mapping(any js) any {
    "Returns a cached mapping that fits the connected joystick capabilities."
-   if(!js || !js.get("connected", false)){ return 0 }
-   if(js.get("_gamepad_mapping_gen", -1) == _mapping_generation){ return js.get("_gamepad_mapping", 0) }
+   if !js || !js.get("connected", false) { return 0 }
+   if js.get("_gamepad_mapping_gen", -1) == _mapping_generation { return js.get("_gamepad_mapping", 0) }
    def mapping = find_mapping(js.get("guid", ""), js.get("platform", ""))
-   if(!mapping){ return _remember_valid_mapping(js, 0) }
+   if !mapping { return _remember_valid_mapping(js, 0) }
    def buttons = mapping.get("buttons", 0)
    def axes = mapping.get("axes", 0)
-   if(!buttons || !axes){ return _remember_valid_mapping(js, 0) }
+   if !buttons || !axes { return _remember_valid_mapping(js, 0) }
    def button_count = int(js.get("button_count", 0))
    def axis_count = int(js.get("axis_count", 0))
    def hat_count = int(js.get("hat_count", 0))
-   if(!_mapping_slots_valid(buttons, GAMEPAD_BUTTON_LAST, button_count, axis_count, hat_count)){ return _remember_valid_mapping(js, 0) }
-   if(!_mapping_slots_valid(axes, GAMEPAD_AXIS_LAST, button_count, axis_count, hat_count)){ return _remember_valid_mapping(js, 0) }
+   if !_mapping_slots_valid(buttons, GAMEPAD_BUTTON_LAST, button_count, axis_count, hat_count) { return _remember_valid_mapping(js, 0) }
+   if !_mapping_slots_valid(axes, GAMEPAD_AXIS_LAST, button_count, axis_count, hat_count) { return _remember_valid_mapping(js, 0) }
    _remember_valid_mapping(js, mapping)
 }
 
@@ -480,19 +480,19 @@ fn joystick_is_gamepad(any js) bool {
 fn get_gamepad_name(any js) str {
    "Returns the mapped gamepad display name for joystick `js`."
    def mapping = find_valid_mapping(js)
-   if(!mapping){ return "" }
+   if !mapping { return "" }
    mapping.get("name", "")
 }
 
 fn get_gamepad_state(any js, any state_ptr) bool {
    "Writes the normalized gamepad state for joystick `js` into `state_ptr`."
-   if(!js || !state_ptr){ return false }
+   if !js || !state_ptr { return false }
    def mapping = find_valid_mapping(js)
    memset(state_ptr, 0, 64)
-   if(!mapping){ return false }
+   if !mapping { return false }
    def buttons = mapping.get("buttons", 0)
    def axes = mapping.get("axes", 0)
-   if(!buttons || !axes){ return false }
+   if !buttons || !axes { return false }
    def axis_reader = js.get("axis_reader", 0)
    def button_reader = js.get("button_reader", 0)
    def hat_reader = js.get("hat_reader", 0)
@@ -503,9 +503,9 @@ fn get_gamepad_state(any js, any state_ptr) bool {
    def button_count = int(js.get("button_count", 0))
    def hat_count = int(js.get("hat_count", 0))
    mut i = 0
-   while(i <= GAMEPAD_BUTTON_LAST){
+   while i <= GAMEPAD_BUTTON_LAST {
       def e = buttons.get(i, 0)
-      if(e){
+      if e {
          store8(state_ptr, _mapped_state_value(
                e, false, js, axis_reader, button_reader, hat_reader,
                axes_ptr, buttons_ptr, hats_ptr, axis_count, button_count, hat_count
@@ -514,14 +514,14 @@ fn get_gamepad_state(any js, any state_ptr) bool {
       i += 1
    }
    i = 0
-   while(i <= GAMEPAD_AXIS_LAST){
+   while i <= GAMEPAD_AXIS_LAST {
       def e = axes.get(i, 0)
-      if(e){
+      if e {
          mut value = _mapped_state_value(
             e, true, js, axis_reader, button_reader, hat_reader,
             axes_ptr, buttons_ptr, hats_ptr, axis_count, button_count, hat_count
          )
-         if(i == 4 || i == 5){ value = _mapped_trigger_axis_value(js, e, value) }
+         if i == 4 || i == 5 { value = _mapped_trigger_axis_value(js, e, value) }
          store32_f32(state_ptr, value, _state_axis_offset(i))
       }
       i += 1

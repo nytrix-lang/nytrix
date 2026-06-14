@@ -64,18 +64,18 @@ fn asset(str body, str ctype) dict {
 
 fn app(dict req) dict {
    def method = req.get("method", "GET")
-   if(method != "GET" && method != "HEAD"){ return web.method_not_allowed("GET, HEAD") }
+   if method != "GET" && method != "HEAD" { return web.method_not_allowed("GET, HEAD") }
    def path = req.get("path", "/")
-   if(path == "/" || path == "/index.html"){ return asset(HTML, "text/html; charset=utf-8") }
-   if(path == "/style.css"){ return asset(CSS, "text/css; charset=utf-8") }
-   if(path == "/plain"){ return web.text("ny host ok\n") }
-   if(path == "/health"){ return web.json({"ok": true, "service": "ny-server"}) }
+   if path == "/" || path == "/index.html" { return asset(HTML, "text/html; charset=utf-8") }
+   if path == "/style.css" { return asset(CSS, "text/css; charset=utf-8") }
+   if path == "/plain" { return web.text("ny host ok\n") }
+   if path == "/health" { return web.json({"ok": true, "service": "ny-server"}) }
    web.not_found("not found: " + path + "\n")
 }
 
 def result = web.serve_cli(app, {"name": "Ny Server", "port": 8080})
 
-if(!result.get("ok", false)){
+if !result.get("ok", false) {
    print("server failed: " + result.get("error", "unknown error"))
    exit(1)
 }

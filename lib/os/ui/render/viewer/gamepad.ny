@@ -29,9 +29,9 @@ def _BTN_SIDE_LABELS_SONY = ["X", "O", "SQ", "TR", "L1", "R1", "SH", "OP", "PS",
 
 fn axis_i100(any v) int {
    mut n = int(v * 100.0)
-   if(n > -4 && n < 4){ n = 0 }
-   if(n < -100){ n = -100 }
-   if(n > 100){ n = 100 }
+   if n > -4 && n < 4 { n = 0 }
+   if n < -100 { n = -100 }
+   if n > 100 { n = 100 }
    n
 }
 
@@ -44,8 +44,8 @@ fn fixed2(any v) str { to_str(axis_f(axis_i100(v))) }
 fn _name_has(any name, any terms) bool {
    def lname = str.lower(to_str(name))
    mut i = 0
-   while(i < terms.len){
-      if(str.find(lname, terms.get(i, "")) != -1){ return true }
+   while i < terms.len {
+      if str.find(lname, terms.get(i, "")) != -1 { return true }
       i += 1
    }
    false
@@ -55,7 +55,7 @@ fn is_sony_pad(any st) bool { _name_has(st.get("name", ""), ["sony", "dual", "pl
 
 fn _button_label_from(any st, any idx, any generic, any sony, any prefix) str {
    def fallback = prefix + to_str(idx)
-   if(!st.get("mapped", false)){ return "B" + to_str(idx) }
+   if !st.get("mapped", false) { return "B" + to_str(idx) }
    is_sony_pad(st) ? sony.get(idx, fallback) : generic.get(idx, fallback)
 }
 
@@ -74,8 +74,8 @@ fn _native_gamepad_name(any jid) str { input_gamepad.gamepad_name(jid) }
 fn _score_name_terms(str lname, list terms, list scores) int {
    mut score = 0
    mut i = 0
-   while(i < terms.len){
-      if(str.find(lname, terms.get(i, "")) != -1){ score += int(scores.get(i, 0)) }
+   while i < terms.len {
+      if str.find(lname, terms.get(i, "")) != -1 { score += int(scores.get(i, 0)) }
       i += 1
    }
    score
@@ -102,11 +102,11 @@ fn _best_jid_from_rows(any rows) int {
    mut best_score = -100000
    def rows_n = rows.len
    mut i = 0
-   while(i < rows_n){
+   while i < rows_n {
       def row = rows.get(i)
       def jid = row.get("jid", -1)
       def score = row.get("score", -100000)
-      if(score > best_score){
+      if score > best_score {
          best_score = score
          best_jid = jid
       }
@@ -118,14 +118,14 @@ fn _best_jid_from_rows(any rows) int {
 fn refresh(any force=false) int {
    def now = ticks()
    def scan_interval = _device_rows.len == 0 ? DEVICE_SCAN_EMPTY_INTERVAL_NS : DEVICE_SCAN_INTERVAL_NS
-   if(!force && _last_device_scan_ticks != 0 && (now - _last_device_scan_ticks) < scan_interval){
+   if !force && _last_device_scan_ticks != 0 && (now - _last_device_scan_ticks) < scan_interval {
       return 0
    }
    def jids = joysticks()
    def jids_n = jids.len
    mut rows = []
    mut i = 0
-   while(i < jids_n){
+   while i < jids_n {
       rows = rows.append(device_row(jids.get(i)))
       i += 1
    }
@@ -138,9 +138,9 @@ fn refresh(any force=false) int {
 fn _cached_device_row(any jid) any {
    def rows_n = _device_rows.len
    mut i = 0
-   while(i < rows_n){
+   while i < rows_n {
       def row = _device_rows.get(i)
-      if(row.get("jid", -1) == jid){ return row }
+      if row.get("jid", -1) == jid { return row }
       i += 1
    }
    0
@@ -159,11 +159,11 @@ fn _collect_pressed_buttons(any st) list {
    mut pressed_labels = []
    mut bi = 0
    def button_count = st.get("button_count", 0)
-   while(bi < button_count){
-      if(pad_button(st, bi)){
+   while bi < button_count {
+      if pad_button(st, bi) {
          last_btn = bi
          pressed_count += 1
-         if(pressed_labels.len < 8){ pressed_labels = pressed_labels.append(button_chip_label(st, bi)) }
+         if pressed_labels.len < 8 { pressed_labels = pressed_labels.append(button_chip_label(st, bi)) }
       }
       bi += 1
    }
@@ -187,17 +187,17 @@ fn release(any st) int { 0 }
 
 fn pad_button(any st, any button) bool {
    def buttons = st.get("buttons", nil)
-   if(is_list(buttons) && button >= 0 && button < buttons.len){ return bool(buttons.get(button, false)) }
+   if is_list(buttons) && button >= 0 && button < buttons.len { return bool(buttons.get(button, false)) }
    def jid = int(st.get("jid", -1))
-   if(st.get("mapped", false) && jid >= 0 && button >= 0 && button < 15){ return input_gamepad.gamepad_button(jid, button) }
+   if st.get("mapped", false) && jid >= 0 && button >= 0 && button < 15 { return input_gamepad.gamepad_button(jid, button) }
    input_gamepad.gamepad_raw_button(st, int(button))
 }
 
 fn pad_axis(any st, any axis) f64 {
    def axes = st.get("axes", nil)
-   if(is_list(axes) && axis >= 0 && axis < axes.len){ return safe_axis_value(axes.get(axis, 0.0)) }
+   if is_list(axes) && axis >= 0 && axis < axes.len { return safe_axis_value(axes.get(axis, 0.0)) }
    def jid = int(st.get("jid", -1))
-   if(st.get("mapped", false) && jid >= 0 && axis >= 0 && axis < 6){ return safe_axis_value(input_gamepad.gamepad_axis(jid, axis)) }
+   if st.get("mapped", false) && jid >= 0 && axis >= 0 && axis < 6 { return safe_axis_value(input_gamepad.gamepad_axis(jid, axis)) }
    input_gamepad.gamepad_raw_axis(st, int(axis))
 }
 
@@ -210,23 +210,23 @@ fn raw_button_down(any st, int idx) bool {
 }
 
 fn axes_text(any st, int max_axes, bool raw=false) str {
-   if(!st){ return raw ? "raw axes -" : "axes -" }
+   if !st { return raw ? "raw axes -" : "axes -" }
    mut out = raw ? "raw axes" : (st.get("mapped", false) ? "mapped axes" : "axes")
    def axis_count = raw ? st.get("raw_axis_count", st.get("axis_count", 0)) : st.get("axis_count", 0)
    def shown = axis_count < max_axes ? axis_count : max_axes
    mut i = 0
-   while(i < shown){
+   while i < shown {
       def label = raw ? ("A" + to_str(i)) : axis_label(i)
       def value = raw ? raw_axis_value(st, i) : display_axis_slot(st, i)
       out = out + " " + label + "=" + fixed2(value)
       i += 1
    }
-   if(axis_count > shown){ out = out + " +" + to_str(axis_count - shown) }
+   if axis_count > shown { out = out + " +" + to_str(axis_count - shown) }
    out
 }
 
 fn pad_text(any st) str {
-   if(!st){ return "pad none" }
+   if !st { return "pad none" }
    def last_btn = st.get("last_button", -1)
    "pad mapped " + (st.get("mapped", false) ? "1" : "0") +
    " axes " + to_str(st.get("axis_count", 0)) +
@@ -239,12 +239,12 @@ fn pad_text(any st) str {
 }
 
 fn button_text(any st) str {
-   if(!st){ return "buttons -" }
+   if !st { return "buttons -" }
    def pressed = st.get("pressed_labels", [])
-   if(pressed.len == 0){ return "buttons -" }
+   if pressed.len == 0 { return "buttons -" }
    mut out = "buttons"
    mut i = 0
-   while(i < pressed.len){
+   while i < pressed.len {
       out = out + " " + pressed.get(i, "")
       i += 1
    }
@@ -252,37 +252,37 @@ fn button_text(any st) str {
 }
 
 fn raw_button_text(any st, int max_buttons) str {
-   if(!st){ return "raw buttons -" }
+   if !st { return "raw buttons -" }
    def button_count = st.get("raw_button_count", st.get("button_count", 0))
    mut out = "raw buttons"
    mut shown = 0
    mut pressed = 0
    mut bi = 0
-   while(bi < button_count){
-      if(raw_button_down(st, bi)){
+   while bi < button_count {
+      if raw_button_down(st, bi) {
          pressed += 1
-         if(shown < max_buttons){
+         if shown < max_buttons {
             out = out + " B" + to_str(bi)
             shown += 1
          }
       }
       bi += 1
    }
-   if(pressed == 0){ return "raw buttons -" }
-   if(pressed > shown){ out = out + " +" + to_str(pressed - shown) }
+   if pressed == 0 { return "raw buttons -" }
+   if pressed > shown { out = out + " +" + to_str(pressed - shown) }
    out
 }
 
 fn hats_text(any st, str empty="hats -", str prefix="hats") str {
-   if(!st){ return empty }
+   if !st { return empty }
    def hat_count = st.get("hat_count", 0)
-   if(hat_count <= 0){ return empty }
+   if hat_count <= 0 { return empty }
    mut out = prefix
    mut hi = 0
    mut any_down = false
-   while(hi < hat_count){
+   while hi < hat_count {
       def hv = input_gamepad.gamepad_raw_hat(st, hi)
-      if(hv != 0){ any_down = true }
+      if hv != 0 { any_down = true }
       out = out + " H" + to_str(hi) + "=" + to_str(hv)
       hi += 1
    }
@@ -291,13 +291,13 @@ fn hats_text(any st, str empty="hats -", str prefix="hats") str {
 
 fn raw_device_text(any row) str {
    def jid = row.get("jid", -1)
-   if(jid < 0){ return "" }
+   if jid < 0 { return "" }
    def raw = input_gamepad.gamepad_raw_snapshot(jid)
    def ac, bc = int(raw.get("raw_axis_count", 0)), int(raw.get("raw_button_count", 0))
    mut pressed = 0
    mut bi = 0
-   while(bi < bc){
-      if(input_gamepad.gamepad_raw_button(raw, bi)){ pressed += 1 }
+   while bi < bc {
+      if input_gamepad.gamepad_raw_button(raw, bi) { pressed += 1 }
       bi += 1
    }
    def a0 = ac > 0 ? fixed2(input_gamepad.gamepad_raw_axis(raw, 0)) : "-"
@@ -312,11 +312,11 @@ fn devices_text(list rows, int best_jid) str {
    mut shown = 0
    mut remaining = 0
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows.get(i)
       def jid = row.get("jid", -1)
-      if(jid != best_jid){
-         if(shown < 3){
+      if jid != best_jid {
+         if shown < 3 {
             out = out + " " + raw_device_text(row)
             shown += 1
          } else {
@@ -325,45 +325,45 @@ fn devices_text(list rows, int best_jid) str {
       }
       i += 1
    }
-   if(shown == 0){ return "raw aux -" }
-   if(remaining > 0){ out = out + " +" + to_str(remaining) }
+   if shown == 0 { return "raw aux -" }
+   if remaining > 0 { out = out + " +" + to_str(remaining) }
    out
 }
 
 fn signature(any st) str {
-   if(!st){ return "none" }
+   if !st { return "none" }
    mut out = "jid=" + to_str(st.get("jid", -1)) +
    " name=" + st.get("name", "") +
    " mapped=" + (st.get("mapped", false) ? "1" : "0") +
    " mapped_axes"
    mut i = 0
-   while(i < st.get("axis_count", 0) && i < 6){
+   while i < st.get("axis_count", 0) && i < 6 {
       out = out + " " + axis_label(i) + "=" + to_str(axis_i100(display_axis_slot(st, i)))
       i += 1
    }
    out = out + " raw_axes"
    i = 0
-   while(i < st.get("raw_axis_count", st.get("axis_count", 0)) && i < 8){
+   while i < st.get("raw_axis_count", st.get("axis_count", 0)) && i < 8 {
       out = out + " A" + to_str(i) + "=" + to_str(axis_i100(raw_axis_value(st, i)))
       i += 1
    }
    out = out + " mapped_buttons"
    i = 0
-   while(i < st.get("button_count", 0)){
-      if(pad_button(st, i)){ out = out + " " + button_label(st, i) + "#" + to_str(i) }
+   while i < st.get("button_count", 0) {
+      if pad_button(st, i) { out = out + " " + button_label(st, i) + "#" + to_str(i) }
       i += 1
    }
    out = out + " raw_buttons"
    i = 0
-   while(i < st.get("raw_button_count", st.get("button_count", 0))){
-      if(raw_button_down(st, i)){ out = out + " B" + to_str(i) }
+   while i < st.get("raw_button_count", st.get("button_count", 0)) {
+      if raw_button_down(st, i) { out = out + " B" + to_str(i) }
       i += 1
    }
    def hat_count = st.get("hat_count", 0)
-   if(hat_count > 0){
+   if hat_count > 0 {
       out = out + " hats"
       i = 0
-      while(i < hat_count){
+      while i < hat_count {
          out = out + " H" + to_str(i) + "=" + to_str(input_gamepad.gamepad_raw_hat(st, i))
          i += 1
       }
@@ -378,9 +378,9 @@ fn _axis_from_raw_map(any st, any axis, any lx, any ly, any rx, any ry, any lt, 
 }
 
 fn display_axis_slot(any st, any axis) f64 {
-   if(st.get("mapped", false)){ return pad_axis(st, axis) }
+   if st.get("mapped", false) { return pad_axis(st, axis) }
    #windows {
-      if(is_sony_pad(st)){
+      if is_sony_pad(st) {
          return _axis_from_raw_map(st, axis, 0, 1, 2, 5, 3, 4)
       }
       return _axis_from_raw_map(st, axis, 0, 1, 2, 3, 5, 4)

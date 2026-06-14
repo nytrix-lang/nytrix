@@ -44,15 +44,15 @@ comptime table GamepadButtonName {
 
 fn _gamepad_alloc(i32 size) ptr {
    def p = zalloc(size)
-   if(!p){ panic("gamepad allocation failed") }
+   if !p { panic("gamepad allocation failed") }
    p
 }
 
 fn _sanitize_axis(any v) f64 {
    def fv = fmath.float(v)
-   if(fmath.is_nan(fv) || fmath.is_inf(fv)){ return 0.0 }
-   if(fv < -1.0){ return -1.0 }
-   if(fv > 1.0){ return 1.0 }
+   if fmath.is_nan(fv) || fmath.is_inf(fv) { return 0.0 }
+   if fv < -1.0 { return -1.0 }
+   if fv > 1.0 { return 1.0 }
    fv
 }
 
@@ -87,12 +87,12 @@ fn _query_hat_snapshot(i32 jid) list {
 }
 
 fn _joystick_connected(i32 jid) bool {
-   if(jid < 0 || jid >= _MAX_JOYSTICKS){ return false }
-   if(ui_backend.joystick_is_gamepad(jid)){ return true }
+   if jid < 0 || jid >= _MAX_JOYSTICKS { return false }
+   if ui_backend.joystick_is_gamepad(jid) { return true }
    def name = ui_backend.get_joystick_name(jid)
-   if(name.len > 0 && name != "Unknown"){ return true }
+   if name.len > 0 && name != "Unknown" { return true }
    def buttons = _query_button_snapshot(jid)
-   if(int(buttons.get(1, 0)) > 0){ return true }
+   if int(buttons.get(1, 0)) > 0 { return true }
    def axes = _query_axis_snapshot(jid)
    int(axes.get(1, 0)) > 0
 }
@@ -101,8 +101,8 @@ fn load_joysticks() i32 {
    "Returns the number of currently connected joysticks."
    mut jid = 0
    mut count = 0
-   while(jid < 16){
-      if(ui_backend.joystick_present(jid) || _joystick_connected(jid)){ count += 1 }
+   while jid < 16 {
+      if ui_backend.joystick_present(jid) || _joystick_connected(jid) { count += 1 }
       jid += 1
    }
    count
@@ -112,8 +112,8 @@ fn get_joysticks() list {
    "Returns a list of currently connected joystick IDs."
    mut out = []
    mut jid = 0
-   while(jid < 16){
-      if(ui_backend.joystick_present(jid) || _joystick_connected(jid)){ out = out.append(jid) }
+   while jid < 16 {
+      if ui_backend.joystick_present(jid) || _joystick_connected(jid) { out = out.append(jid) }
       jid += 1
    }
    out
@@ -136,7 +136,7 @@ fn is_gamepad_connected(i32 jid) bool {
 
 fn get_gamepad_name(i32 jid) str {
    "Returns mapped gamepad name when available, else raw joystick name."
-   if(ui_backend.joystick_is_gamepad(jid)){ return ui_backend.get_gamepad_name(jid) }
+   if ui_backend.joystick_is_gamepad(jid) { return ui_backend.get_gamepad_name(jid) }
    ui_backend.get_joystick_name(jid)
 }
 
@@ -146,12 +146,12 @@ fn get_gamepad_guid(i32 jid) str {
 }
 
 fn _ensure_state_ptr(i32 jid) ptr {
-   if(!_gamepad_states.get(jid, 0)){ _gamepad_states[jid] = _gamepad_alloc(64) }
+   if !_gamepad_states.get(jid, 0) { _gamepad_states[jid] = _gamepad_alloc(64) }
    _gamepad_states.get(jid)
 }
 
 fn _mapped_state_ptr(i32 jid) ptr {
-   if(!ui_backend.joystick_is_gamepad(jid)){ return 0 }
+   if !ui_backend.joystick_is_gamepad(jid) { return 0 }
    def p = _ensure_state_ptr(jid)
    ui_backend.get_gamepad_state(jid, p) ? p : 0
 }
@@ -167,39 +167,39 @@ fn _raw_axis_value(i32 jid, i32 idx) f64 {
    def raw = _query_axis_snapshot(jid)
    def raw_axes = raw.get(0, 0)
    def count = int(raw.get(1, 0))
-   if(!raw_axes || !_in_bounds(idx, count)){ return 0.0 }
+   if !raw_axes || !_in_bounds(idx, count) { return 0.0 }
    _sanitize_axis(load32_f32(raw_axes, idx * 4))
 }
 
 fn get_gamepad_axis_count(i32 jid) i32 {
    "Returns mapped axis count(6) or raw joystick axis count."
-   if(!_joystick_connected(jid)){ return 0 }
-   if(is_mapped(jid)){ return 6 }
+   if !_joystick_connected(jid) { return 0 }
+   if is_mapped(jid) { return 6 }
    int(_query_axis_snapshot(jid).get(1, 0))
 }
 
 fn get_gamepad_button_count(i32 jid) i32 {
    "Returns mapped button count(15) or raw joystick button count."
-   if(!_joystick_connected(jid)){ return 0 }
-   if(is_mapped(jid)){ return 15 }
+   if !_joystick_connected(jid) { return 0 }
+   if is_mapped(jid) { return 15 }
    int(_query_button_snapshot(jid).get(1, 0))
 }
 
 fn get_gamepad_button(i32 jid, any button) bool {
    "Returns mapped gamepad button state, with raw-joystick fallback."
-   if(!_joystick_connected(jid)){ return false }
+   if !_joystick_connected(jid) { return false }
    def idx = _resolve_button_index(button)
    def ptr = _mapped_state_ptr(jid)
-   if(ptr && _in_bounds(idx, _GAMEPAD_BUTTON_COUNT)){ return load8(ptr, idx) != 0 }
+   if ptr && _in_bounds(idx, _GAMEPAD_BUTTON_COUNT) { return load8(ptr, idx) != 0 }
    _raw_button_value(jid, idx)
 }
 
 fn get_gamepad_axis(i32 jid, any axis) f64 {
    "Returns mapped gamepad axis value in [-1, 1], with raw fallback."
-   if(!_joystick_connected(jid)){ return 0.0 }
+   if !_joystick_connected(jid) { return 0.0 }
    def idx = _resolve_axis_index(axis)
    def ptr = _mapped_state_ptr(jid)
-   if(ptr && _in_bounds(idx, _GAMEPAD_AXIS_COUNT)){ return _sanitize_axis(load32_f32(ptr, 16 + idx * 4)) }
+   if ptr && _in_bounds(idx, _GAMEPAD_AXIS_COUNT) { return _sanitize_axis(load32_f32(ptr, 16 + idx * 4)) }
    _raw_axis_value(jid, idx)
 }
 

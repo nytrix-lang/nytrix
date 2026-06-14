@@ -6,7 +6,7 @@ use benchmark.helpers
 def n = _bench_scale(4000, 500)
 mut xs = list(n)
 mut i = 0
-while(i < n){
+while i < n {
    store_item(xs, i, i)
    i += 1
 }
@@ -18,7 +18,7 @@ def reversed = it.reverse(mapped)
 def chained = it.chain(mapped, reversed)
 mut sum = 0
 i = 0
-while(i < len(chained)){
+while i < len(chained) {
    sum += chained.get(i)
    i += 1
 }

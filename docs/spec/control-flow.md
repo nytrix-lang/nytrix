@@ -40,14 +40,14 @@ while(mut i = 0 i < n ++i){ body }
 for item in iterable { body }
 for item, index in iterable { body }
 for(index in iterable){ body }
-for(mut i = 0; i < n; ++i){ body }
+for(mut i = 0 i < n ++i){ body }
 for item in lo..hi { body }
 break
 continue
 ```
 
 `while` repeats while the condition stays true. The parser accepts
-`while(init cond update)`. Prefer `for(init; cond; update)` for counter loops.
+`while(init cond update)`. Prefer `for(init cond update)` for counter loops.
 
 `for` iterates over iterable values such as lists, ranges, strings, and
 standard-library iterable helpers. The comma form binds the current value first
@@ -63,6 +63,24 @@ for ch, i in "test" {
    seen = seen.append(f"{ch}:{i}")
 }
 assert(seen == ["t:0", "e:1", "s:2", "t:3"], "indexed loop")
+```
+
+## Loop control: break and continue
+
+Use `break` to immediately exit the innermost enclosing loop.
+Use `continue` to skip the remainder of the innermost loop's body and proceed to the next iteration.
+
+```ny
+mut sum = 0
+for i in 1..10 {
+   if i % 2 == 0 {
+      continue
+   }
+   sum += i
+   if sum > 20 {
+      break
+   }
+}
 ```
 
 ## Case
@@ -145,7 +163,7 @@ loops make the control path harder to see. Prefer `while`, `for`, `break`, and
 ## With
 
 ```ny
-with Type: name = value { body }
+with Type name = value { body }
 ```
 
 `with` binds a scoped value and runs the body with API-defined setup and

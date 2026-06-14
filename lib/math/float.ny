@@ -15,23 +15,23 @@ fn _box(any bits) any {
 
 fn float(any x) any {
    "Converts `x` (integer, string, or box) to a boxed Nytrix float(double-precision)."
-   if(__is_int(x)){ return __flt_box_val(__flt_from_int(x)) }
-   if(__is_float_obj(x)){ return x }
-   if(__is_str_obj(x)){ return atof(x) }
+   if __is_int(x) { return __flt_box_val(__flt_from_int(x)) }
+   if __is_float_obj(x) { return x }
+   if __is_str_obj(x) { return atof(x) }
    __flt_box_val(0)
 }
 
 fn int(any x) int {
    "Converts float `x` to a tagged integer by truncating the fractional part."
-   if(is_int(x)){ x }
-   elif(!is_float(x)){ 0 }
+   if is_int(x) { x }
+   elif !is_float(x) { 0 }
    else { __flt_to_int(x) }
 }
 
 fn trunc(any x) int {
    "Truncates the fractional part of float `x`, returning the result as a tagged integer."
-   if(is_int(x)){ x }
-   elif(!is_float(x)){ 0 }
+   if is_int(x) { x }
+   elif !is_float(x) { 0 }
    else { __flt_trunc(x) }
 }
 
@@ -95,13 +95,13 @@ def INF_VAL = __flt_inf()
 
 fn round(any x) int {
    "Rounds float `x` to the nearest integer."
-   if(flt(x, float(0))){ ceil(fsub(float(x), HALF)) } else { floor(fadd(float(x), HALF)) }
+   if flt(x, float(0)) { ceil(fsub(float(x), HALF)) } else { floor(fadd(float(x), HALF)) }
 }
 
 fn abs(any x) any {
    "Returns the absolute value of `x` (works for both int and float types)."
-   if(is_int(x)){ return x < 0 ? -x : x }
-   if(flt(x, float(0))){ return fsub(float(0), x) }
+   if is_int(x) { return x < 0 ? -x : x }
+   if flt(x, float(0)) { return fsub(float(0), x) }
    x
 }
 
@@ -117,13 +117,13 @@ fn inf() any {
 
 fn is_nan(any x) bool {
    "Returns true if float `x` is Not-a-Number."
-   if(!is_float(x)){ return false }
+   if !is_float(x) { return false }
    __flt_is_nan(x)
 }
 
 fn is_inf(any x) bool {
    "Returns true if float `x` is positive or negative infinity."
-   if(!is_float(x)){ return false }
+   if !is_float(x) { return false }
    __flt_is_inf(x)
 }
 

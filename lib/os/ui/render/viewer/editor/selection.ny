@@ -37,7 +37,7 @@ fn selection_range(dict st) list {
    def ac = int(st.get("sel_a_col", 0))
    def bl = int(st.get("sel_b_line", 0))
    def bc = int(st.get("sel_b_col", 0))
-   if(al > bl || (al == bl && ac > bc)){ return [bl, bc, al, ac] }
+   if al > bl || (al == bl && ac > bc) { return [bl, bc, al, ac] }
    [al, ac, bl, bc]
 }
 
@@ -50,7 +50,7 @@ fn selection_valid(dict st) bool {
 
 fn selection_text(dict st) str {
    "Returns selected text or an empty string."
-   if(!selection_valid(st)){ return "" }
+   if !selection_valid(st) { return "" }
    def ord = selection_range(st)
    def sl = int(ord.get(0, 0))
    def sc = int(ord.get(1, 0))
@@ -59,7 +59,7 @@ fn selection_text(dict st) str {
    def lines = current_lines(st)
    mut out = []
    mut i = sl
-   while(i <= el && i < lines.len){
+   while i <= el && i < lines.len {
       def line = to_str(lines.get(i, ""))
       def a = i == sl ? min(sc, line.len) : 0
       def b = i == el ? min(ec, line.len) : line.len
@@ -71,7 +71,7 @@ fn selection_text(dict st) str {
 
 fn delete_selection(dict st) dict {
    "Deletes the active selection and moves the cursor to its start."
-   if(!selection_valid(st)){ return st }
+   if !selection_valid(st) { return st }
    def ord = selection_range(st)
    def sl = int(ord.get(0, 0))
    def sc = int(ord.get(1, 0))
@@ -82,10 +82,10 @@ fn delete_selection(dict st) dict {
    def last = to_str(lines.get(el, ""))
    mut out = []
    mut i = 0
-   while(i < sl){ out = out.append(lines.get(i, "")) i += 1 }
+   while i < sl { out = out.append(lines.get(i, "")) i += 1 }
    out = out.append(str.str_slice(first, 0, min(sc, first.len)) + str.str_slice(last, min(ec, last.len), last.len))
    i = el + 1
-   while(i < lines.len){ out = out.append(lines.get(i, "")) i += 1 }
+   while i < lines.len { out = out.append(lines.get(i, "")) i += 1 }
    st["cursor_line"] = sl
    st["cursor_col"] = sc
    st["sel_active"] = false

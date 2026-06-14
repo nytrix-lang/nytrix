@@ -7,15 +7,15 @@ use std.core
 
 fn _cache_reset_cap(int reset_cap, int max_items) int {
    "Chooses the capacity for a replacement cache dictionary."
-   if(reset_cap > 0){ return reset_cap }
-   if(max_items > 0){ return max_items }
+   if reset_cap > 0 { return reset_cap }
+   if max_items > 0 { return max_items }
    8
 }
 
 fn cache_reset_if_over(any c, int max_items, int reset_cap=0) dict {
    "Returns a fresh dict when `c` exceeds `max_items`; otherwise returns `c`."
-   if(!is_dict(c)){ return dict(_cache_reset_cap(reset_cap, max_items)) }
-   if(max_items > 0 && c.len > max_items){ return dict(_cache_reset_cap(reset_cap, max_items)) }
+   if !is_dict(c) { return dict(_cache_reset_cap(reset_cap, max_items)) }
+   if max_items > 0 && c.len > max_items { return dict(_cache_reset_cap(reset_cap, max_items)) }
    c
 }
 

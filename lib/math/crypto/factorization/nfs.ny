@@ -23,7 +23,7 @@ fn _nfs_abs(any x) bigint {
 fn _nfs_pow(any a, int e) bigint {
    mut out = Z(1)
    mut i = 0
-   while(i < e){
+   while i < e {
       out = out * _nfs_z(a)
       i += 1
    }
@@ -32,12 +32,12 @@ fn _nfs_pow(any a, int e) bigint {
 
 fn _nfs_pow_mod(any a, int e, any m) bigint {
    def mz = _nfs_z(m)
-   if(mz == Z(1)){ return Z(0) }
+   if mz == Z(1) { return Z(0) }
    mut out = Z(1)
    mut b = _nfs_z(a) % mz
    mut ee = e
-   while(ee > 0){
-      if((ee % 2) == 1){ out = (out * b) % mz }
+   while ee > 0 {
+      if (ee % 2) == 1 { out = (out * b) % mz }
       b = (b * b) % mz
       ee = ee / 2
    }
@@ -45,9 +45,9 @@ fn _nfs_pow_mod(any a, int e, any m) bigint {
 }
 
 fn _nfs_degree_for_bits(int bits) int {
-   if(bits < 80){ return 3 }
-   if(bits < 160){ return 4 }
-   if(bits < 320){ return 5 }
+   if bits < 80 { return 3 }
+   if bits < 160 { return 4 }
+   if bits < 320 { return 5 }
    6
 }
 
@@ -56,7 +56,7 @@ fn _nfs_coeffs_base_m(any n, any m, int degree) list {
    def mz = _nfs_z(m)
    mut coeffs = []
    mut i = 0
-   while(i <= degree || rem > Z(0)){
+   while i <= degree || rem > Z(0) {
       coeffs = coeffs.append(rem % mz)
       rem = rem / mz
       i += 1
@@ -68,7 +68,7 @@ fn _nfs_poly_eval(list coeffs, any x) bigint {
    mut acc = Z(0)
    def xz = _nfs_z(x)
    mut i = coeffs.len - 1
-   while(i >= 0){
+   while i >= 0 {
       acc = acc * xz + _nfs_z(coeffs.get(i))
       i -= 1
    }
@@ -79,11 +79,11 @@ fn _nfs_poly_homogeneous_eval(list coeffs, any a, any b) bigint {
    def az = _nfs_z(a)
    def bz = _nfs_z(b)
    def degree = coeffs.len - 1
-   if(degree < 0){ return Z(0) }
+   if degree < 0 { return Z(0) }
    mut acc = _nfs_z(coeffs.get(degree))
    mut bpow = Z(1)
    mut i = degree - 1
-   while(i >= 0){
+   while i >= 0 {
       bpow = bpow * bz
       acc = acc * az + _nfs_z(coeffs.get(i)) * bpow
       i -= 1
@@ -94,7 +94,7 @@ fn _nfs_poly_homogeneous_eval(list coeffs, any a, any b) bigint {
 fn _nfs_prime_base(int bound) list {
    mut out = []
    mut p = Z(2)
-   while(p <= Z(bound)){
+   while p <= Z(bound) {
       out = out.append(p)
       p = next_prime(p)
    }
@@ -104,7 +104,7 @@ fn _nfs_prime_base(int bound) list {
 fn _nfs_zero_counts(int width) list {
    mut out = []
    mut i = 0
-   while(i < width){
+   while i < width {
       out = out.append(0)
       i += 1
    }
@@ -115,10 +115,10 @@ fn _nfs_factor_over_base(any v, list base) dict {
    mut rem = _nfs_abs(v)
    mut exps = []
    mut i = 0
-   while(i < base.len){
+   while i < base.len {
       def p = _nfs_z(base.get(i))
       mut e = 0
-      while(rem > Z(0) && rem % p == Z(0)){
+      while rem > Z(0) && rem % p == Z(0) {
          rem = rem / p
          e += 1
       }
@@ -131,7 +131,7 @@ fn _nfs_factor_over_base(any v, list base) dict {
 fn _nfs_parity_row(any value, list exps) list {
    mut row = [(_nfs_z(value) < Z(0)) ? 1 : 0]
    mut i = 0
-   while(i < exps.len){
+   while i < exps.len {
       row = row.append(int(exps.get(i, 0)) % 2)
       i += 1
    }
@@ -143,12 +143,12 @@ fn _nfs_relation_parity(any rat_value, list rat_exps, any alg_value, list alg_ex
    def a = _nfs_parity_row(alg_value, alg_exps)
    mut out = []
    mut i = 0
-   while(i < r.len){
+   while i < r.len {
       out = out.append(r.get(i))
       i += 1
    }
    i = 0
-   while(i < a.len){
+   while i < a.len {
       out = out.append(a.get(i))
       i += 1
    }
@@ -176,9 +176,9 @@ fn nfs_polynomial_report(any n, int degree=0) dict {
    def bits = bit_length(nz)
    def d = degree > 0 ? degree : _nfs_degree_for_bits(bits)
    mut m = nth_root(nz, d)
-   if(m < Z(2)){ m = Z(2) }
-   while(_nfs_pow(m + Z(1), d) <= nz){ m += Z(1) }
-   while(_nfs_pow(m, d) > nz && m > Z(2)){ m -= Z(1) }
+   if m < Z(2) { m = Z(2) }
+   while _nfs_pow(m + Z(1), d) <= nz { m += Z(1) }
+   while _nfs_pow(m, d) > nz && m > Z(2) { m -= Z(1) }
    def coeffs = _nfs_coeffs_base_m(nz, m, d)
    def value = _nfs_poly_eval(coeffs, m)
    {
@@ -197,17 +197,17 @@ fn snfs_shape_report(any n, int max_degree=8, int max_base=100000) dict {
    mut best = nil
    mut best_score = nil
    mut k = 2
-   while(k <= max_degree){
+   while k <= max_degree {
       def a0 = nth_root(nz, k)
       mut candidates = [a0, a0 + Z(1)]
       mut i = 0
-      while(i < candidates.len){
+      while i < candidates.len {
          def a = candidates.get(i)
-         if(a > Z(1) && a <= Z(max_base)){
+         if a > Z(1) && a <= Z(max_base) {
             def val = _nfs_pow(a, k)
             def diff = nz - val
             def score = _nfs_abs(diff)
-            if(best == nil || score < best_score){
+            if best == nil || score < best_score {
                best = {
                   "base": a, "degree": k, "offset": diff,
                   "score": score, "form": diff >= Z(0) ? "a^k+c" : "a^k-c",
@@ -230,13 +230,13 @@ fn _nfs_line_relation(any a, any b, any m, list coeffs, list rbase, list abase) 
    def az = _nfs_z(a)
    def bz = _nfs_z(b)
    def rat = az - bz * _nfs_z(m)
-   if(rat == Z(0)){ return nil }
+   if rat == Z(0) { return nil }
    def alg = _nfs_poly_homogeneous_eval(coeffs, az, bz)
-   if(alg == Z(0)){ return nil }
+   if alg == Z(0) { return nil }
    def rf = _nfs_factor_over_base(rat, rbase)
-   if(!rf.get("smooth", false)){ return nil }
+   if !rf.get("smooth", false) { return nil }
    def af = _nfs_factor_over_base(alg, abase)
-   if(!af.get("smooth", false)){ return nil }
+   if !af.get("smooth", false) { return nil }
    def rexps = rf.get("exponents", [])
    def aexps = af.get("exponents", [])
    {
@@ -254,10 +254,10 @@ fn nfs_trial_relation_report(any n, int factor_base_bound=64, int sieve_radius=3
    def base = _nfs_prime_base(factor_base_bound)
    mut relations = []
    mut x = 0 - sieve_radius
-   while(x <= sieve_radius){
+   while x <= sieve_radius {
       def val = _nfs_poly_eval(coeffs, Z(x))
       def av = _nfs_abs(val)
-      if(av > Z(1) && is_smooth(av, factor_base_bound)){
+      if av > Z(1) && is_smooth(av, factor_base_bound) {
          relations = relations.append({"x": x, "value": val, "abs_value": av, "smooth": true})
       }
       x += 1
@@ -282,12 +282,12 @@ fn nfs_line_relation_report(any n, int rational_bound=64, int algebraic_bound=64
    def abase = fb.get("algebraic_base", [])
    mut relations = []
    mut b = 1
-   while(b <= max(1, b_bound)){
+   while b <= max(1, b_bound) {
       mut a = 0 - sieve_radius
-      while(a <= sieve_radius){
-         if(gcd(_nfs_abs(Z(a)), Z(b)) == Z(1)){
+      while a <= sieve_radius {
+         if gcd(_nfs_abs(Z(a)), Z(b)) == Z(1) {
             def rel = _nfs_line_relation(Z(a), Z(b), m, coeffs, rbase, abase)
-            if(rel != nil){ relations = relations.append(rel) }
+            if rel != nil { relations = relations.append(rel) }
          }
          a += 1
       }
@@ -324,7 +324,7 @@ fn nfs_lattice_sieve_report(any n, int rational_bound=64, int algebraic_bound=64
    mut algebraic_smooth = 0
    mut b0 = first_b
    mut stopped_early = false
-   while(b0 < stop_b && !stopped_early){
+   while b0 < stop_b && !stopped_early {
       def b1 = min(stop_b, b0 + seg)
       mut seg_candidates = 0
       mut seg_coprime = 0
@@ -332,25 +332,25 @@ fn nfs_lattice_sieve_report(any n, int rational_bound=64, int algebraic_bound=64
       mut seg_algebraic_smooth = 0
       mut seg_relations = 0
       mut b = b0
-      while(b < b1 && !stopped_early){
+      while b < b1 && !stopped_early {
          mut a = 0 - a_radius
-         while(a <= a_radius && !stopped_early){
+         while a <= a_radius && !stopped_early {
             candidates += 1
             seg_candidates += 1
-            if(gcd(_nfs_abs(Z(a)), Z(b)) == Z(1)){
+            if gcd(_nfs_abs(Z(a)), Z(b)) == Z(1) {
                coprime_pairs += 1
                seg_coprime += 1
                def az = Z(a)
                def bz = Z(b)
                def rat = az - bz * _nfs_z(m)
                def alg = _nfs_poly_homogeneous_eval(coeffs, az, bz)
-               if(rat != Z(0) && alg != Z(0)){
+               if rat != Z(0) && alg != Z(0) {
                   def rf = _nfs_factor_over_base(rat, rbase)
-                  if(rf.get("smooth", false)){
+                  if rf.get("smooth", false) {
                      rational_smooth += 1
                      seg_rational_smooth += 1
                      def af = _nfs_factor_over_base(alg, abase)
-                     if(af.get("smooth", false)){
+                     if af.get("smooth", false) {
                         algebraic_smooth += 1
                         seg_algebraic_smooth += 1
                         def rexps = rf.get("exponents", [])
@@ -362,7 +362,7 @@ fn nfs_lattice_sieve_report(any n, int rational_bound=64, int algebraic_bound=64
                               "segment_start_b": b0, "segment_end_b": b1 - 1,
                         })
                         seg_relations += 1
-                        if(target_relations > 0 && relations.len >= target_relations){ stopped_early = true }
+                        if target_relations > 0 && relations.len >= target_relations { stopped_early = true }
                      }
                   }
                }
@@ -401,31 +401,31 @@ fn _nfs_singleton_prune(list unique, int w, bool prune_singletons) dict {
    mut singleton_rounds = 0
    mut singleton_dropped = 0
    mut changed = prune_singletons
-   while(changed){
+   while changed {
       changed = false
       mut counts = _nfs_zero_counts(w)
       mut i = 0
-      while(i < kept.len){
+      while i < kept.len {
          def parity = kept.get(i).get("parity", [])
          mut j = 0
-         while(j < w){
-            if((int(parity.get(j, 0)) & 1) != 0){ counts[j] = counts.get(j, 0) + 1 }
+         while j < w {
+            if (int(parity.get(j, 0)) & 1) != 0 { counts[j] = counts.get(j, 0) + 1 }
             j += 1
          }
          i += 1
       }
       mut next = []
       i = 0
-      while(i < kept.len){
+      while i < kept.len {
          def rel = kept.get(i)
          def parity = rel.get("parity", [])
          mut drop = false
          mut j = 0
-         while(j < w && !drop){
-            if((int(parity.get(j, 0)) & 1) != 0 && counts.get(j, 0) <= 1){ drop = true }
+         while j < w && !drop {
+            if (int(parity.get(j, 0)) & 1) != 0 && counts.get(j, 0) <= 1 { drop = true }
             j += 1
          }
-         if(drop){
+         if drop {
             singleton_dropped += 1
             changed = true
          } else {
@@ -433,7 +433,7 @@ fn _nfs_singleton_prune(list unique, int w, bool prune_singletons) dict {
          }
          i += 1
       }
-      if(changed){
+      if changed {
          kept = next
          singleton_rounds += 1
       }
@@ -445,11 +445,11 @@ fn nfs_relation_filter_report(list relations, int width=0, bool prune_singletons
    "Filter NFS relations with duplicate(a,b) removal and singleton-column pruning."
    def t0 = ticks()
    mut w = width
-   if(w <= 0){
+   if w <= 0 {
       mut i = 0
-      while(i < relations.len){
+      while i < relations.len {
          def p = relations.get(i).get("parity", [])
-         if(p.len > w){ w = p.len }
+         if p.len > w { w = p.len }
          i += 1
       }
    }
@@ -458,18 +458,18 @@ fn nfs_relation_filter_report(list relations, int width=0, bool prune_singletons
    mut duplicate_ab = 0
    mut zero_parity = 0
    mut i = 0
-   while(i < relations.len){
+   while i < relations.len {
       def rel = relations.get(i)
       def key = to_str(rel.get("a", "")) + "," + to_str(rel.get("b", ""))
       def parity = rel.get("parity", [])
       mut wt = 0
       mut j = 0
-      while(j < parity.len){
-         if((int(parity.get(j, 0)) & 1) != 0){ wt += 1 }
+      while j < parity.len {
+         if (int(parity.get(j, 0)) & 1) != 0 { wt += 1 }
          j += 1
       }
-      if(wt == 0){ zero_parity += 1 }
-      if(seen.contains(key)){
+      if wt == 0 { zero_parity += 1 }
+      if seen.contains(key) {
          duplicate_ab += 1
       } else {
          seen = seen.set(key, true)
@@ -492,10 +492,10 @@ fn nfs_relation_filter_report(list relations, int width=0, bool prune_singletons
 fn _nfs_dependency_matrix(list relations, int width) list {
    mut rows = []
    mut j = 0
-   while(j < width){
+   while j < width {
       mut row = []
       mut i = 0
-      while(i < relations.len){
+      while i < relations.len {
          row = row.append(int(relations.get(i).get("parity", []).get(j, 0)) & 1)
          i += 1
       }
@@ -508,7 +508,7 @@ fn _nfs_dependency_matrix(list relations, int width) list {
 fn _nfs_zero_vec(int width) list {
    mut out = []
    mut i = 0
-   while(i < width){
+   while i < width {
       out = out.append(0)
       i += 1
    }
@@ -519,7 +519,7 @@ fn _nfs_xor_vec(list a, list b) list {
    mut out = []
    mut i = 0
    def n = max(a.len, b.len)
-   while(i < n){
+   while i < n {
       out = out.append((int(a.get(i, 0)) ^^ int(b.get(i, 0))) & 1)
       i += 1
    }
@@ -527,16 +527,16 @@ fn _nfs_xor_vec(list a, list b) list {
 }
 
 fn _nfs_dependency_candidates(list basis, int width, int max_count=4096) list {
-   if(basis.len == 0){ return [] }
-   if(basis.len > 14){ return basis }
+   if basis.len == 0 { return [] }
+   if basis.len > 14 { return basis }
    mut out = []
    def limit = 1 << basis.len
    mut mask = 1
-   while(mask < limit && out.len < max_count){
+   while mask < limit && out.len < max_count {
       mut dep = _nfs_zero_vec(width)
       mut i = 0
-      while(i < basis.len){
-         if(((mask >> i) & 1) == 1){ dep = _nfs_xor_vec(dep, basis.get(i)) }
+      while i < basis.len {
+         if ((mask >> i) & 1) == 1 { dep = _nfs_xor_vec(dep, basis.get(i)) }
          i += 1
       }
       out = out.append(dep)
@@ -548,8 +548,8 @@ fn _nfs_dependency_candidates(list basis, int width, int max_count=4096) list {
 fn _nfs_selected_relations(list relations, list dependency) list {
    mut out = []
    mut i = 0
-   while(i < dependency.len && i < relations.len){
-      if((int(dependency.get(i, 0)) & 1) != 0){ out = out.append(relations.get(i)) }
+   while i < dependency.len && i < relations.len {
+      if (int(dependency.get(i, 0)) & 1) != 0 { out = out.append(relations.get(i)) }
       i += 1
    }
    out
@@ -558,10 +558,10 @@ fn _nfs_selected_relations(list relations, list dependency) list {
 fn _nfs_sum_exponents(list relations, str key, int width) list {
    mut out = _nfs_zero_counts(width)
    mut i = 0
-   while(i < relations.len){
+   while i < relations.len {
       def exps = relations.get(i).get(key, [])
       mut j = 0
-      while(j < width){
+      while j < width {
          out[j] = int(out.get(j, 0)) + int(exps.get(j, 0))
          j += 1
       }
@@ -573,8 +573,8 @@ fn _nfs_sum_exponents(list relations, str key, int width) list {
 fn _nfs_negative_count(list relations, str key) int {
    mut out = 0
    mut i = 0
-   while(i < relations.len){
-      if(_nfs_z(relations.get(i).get(key, Z(1))) < Z(0)){ out += 1 }
+   while i < relations.len {
+      if _nfs_z(relations.get(i).get(key, Z(1))) < Z(0) { out += 1 }
       i += 1
    }
    out
@@ -582,8 +582,8 @@ fn _nfs_negative_count(list relations, str key) int {
 
 fn _nfs_exponents_even(list exps) bool {
    mut i = 0
-   while(i < exps.len){
-      if((int(exps.get(i, 0)) % 2) != 0){ return false }
+   while i < exps.len {
+      if (int(exps.get(i, 0)) % 2) != 0 { return false }
       i += 1
    }
    true
@@ -593,9 +593,9 @@ fn _nfs_sqrt_from_exponents_mod(list base, list exps, any modulus) bigint {
    def mz = _nfs_z(modulus)
    mut out = Z(1)
    mut i = 0
-   while(i < base.len && i < exps.len){
+   while i < base.len && i < exps.len {
       def e = int(exps.get(i, 0)) / 2
-      if(e > 0){ out = (out * _nfs_pow_mod(base.get(i), e, mz)) % mz }
+      if e > 0 { out = (out * _nfs_pow_mod(base.get(i), e, mz)) % mz }
       i += 1
    }
    out
@@ -604,7 +604,7 @@ fn _nfs_sqrt_from_exponents_mod(list base, list exps, any modulus) bigint {
 fn _nfs_zero_poly(int n) list {
    mut out = []
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(Z(0))
       i += 1
    }
@@ -613,23 +613,23 @@ fn _nfs_zero_poly(int n) list {
 
 fn _nfs_poly_mul_mod_monic(list p, list q, list mod_coeffs) list {
    def d = mod_coeffs.len - 1
-   if(d <= 0){ return [Z(0)] }
+   if d <= 0 { return [Z(0)] }
    mut prod = _nfs_zero_poly(p.len + q.len - 1)
    mut i = 0
-   while(i < p.len){
+   while i < p.len {
       mut j = 0
-      while(j < q.len){
+      while j < q.len {
          prod[i + j] = _nfs_z(prod.get(i + j)) + _nfs_z(p.get(i)) * _nfs_z(q.get(j))
          j += 1
       }
       i += 1
    }
    mut k = prod.len - 1
-   while(k >= d){
+   while k >= d {
       def lead = _nfs_z(prod.get(k))
-      if(lead != Z(0)){
+      if lead != Z(0) {
          mut j = 0
-         while(j < d){
+         while j < d {
             prod[k - d + j] = _nfs_z(prod.get(k - d + j)) - lead * _nfs_z(mod_coeffs.get(j))
             j += 1
          }
@@ -638,7 +638,7 @@ fn _nfs_poly_mul_mod_monic(list p, list q, list mod_coeffs) list {
    }
    mut out = []
    i = 0
-   while(i < d){
+   while i < d {
       out = out.append(_nfs_z(prod.get(i, Z(0))))
       i += 1
    }
@@ -649,7 +649,7 @@ fn _nfs_poly_eval_mod(list coeffs, any x, any modulus) bigint {
    def mz = _nfs_z(modulus)
    mut acc = Z(0)
    mut i = coeffs.len - 1
-   while(i >= 0){
+   while i >= 0 {
       acc = (acc * _nfs_z(x) + _nfs_z(coeffs.get(i))) % mz
       i -= 1
    }
@@ -659,14 +659,14 @@ fn _nfs_poly_eval_mod(list coeffs, any x, any modulus) bigint {
 fn _nfs_coeff_mod(any x, any modulus) bigint {
    def mz = _nfs_z(modulus)
    mut r = _nfs_z(x) % mz
-   if(r < Z(0)){ r += mz }
+   if r < Z(0) { r += mz }
    r
 }
 
 fn _nfs_poly_coeff_mod(list coeffs, any modulus) list {
    mut out = []
    mut i = 0
-   while(i < coeffs.len){
+   while i < coeffs.len {
       out = out.append(_nfs_coeff_mod(coeffs.get(i), modulus))
       i += 1
    }
@@ -682,9 +682,9 @@ fn _nfs_poly_centered_mod(list coeffs, any modulus) list {
    def half = mz / Z(2)
    mut out = []
    mut i = 0
-   while(i < coeffs.len){
+   while i < coeffs.len {
       mut c = _nfs_coeff_mod(coeffs.get(i), mz)
-      if(c > half){ c -= mz }
+      if c > half { c -= mz }
       out = out.append(c)
       i += 1
    }
@@ -694,7 +694,7 @@ fn _nfs_poly_centered_mod(list coeffs, any modulus) list {
 fn _nfs_poly_total_bits(list coeffs) int {
    mut total = 0
    mut i = 0
-   while(i < coeffs.len){
+   while i < coeffs.len {
       total += bit_length(_nfs_abs(coeffs.get(i)))
       i += 1
    }
@@ -704,7 +704,7 @@ fn _nfs_poly_total_bits(list coeffs) int {
 fn _nfs_poly_one(int degree) list {
    mut out = []
    mut i = 0
-   while(i < degree){
+   while i < degree {
       out = out.append(i == 0 ? Z(1) : Z(0))
       i += 1
    }
@@ -715,7 +715,7 @@ fn _nfs_poly_candidate_from_index(int index, int degree, int q) list {
    mut out = []
    mut x = index
    mut i = 0
-   while(i < degree){
+   while i < degree {
       out = out.append(Z(x % q))
       x = x / q
       i += 1
@@ -734,11 +734,11 @@ fn nfs_qadic_initial_inverse_sqrt_report(list product_poly, list monic_poly, any
    mut checked = 0
    mut found = nil
    mut idx = 0
-   while(monic && qi > 1 && idx < max_candidates && found == nil){
+   while monic && qi > 1 && idx < max_candidates && found == nil {
       def cand = _nfs_poly_candidate_from_index(idx, degree, qi)
       def check = _nfs_poly_mul_mod_monic_q(_nfs_poly_mul_mod_monic_q(_nfs_poly_coeff_mod(product_poly, qz), cand, monic_poly, qz), cand, monic_poly, qz)
       checked += 1
-      if(check == target){ found = cand }
+      if check == target { found = cand }
       idx += 1
    }
    {
@@ -754,8 +754,8 @@ fn nfs_qadic_initial_inverse_sqrt_report(list product_poly, list monic_poly, any
 fn _nfs_poly_has_root_mod_q(list poly, any q) bool {
    def qi = int(_nfs_z(q))
    mut x = 0
-   while(x < qi){
-      if(_nfs_poly_eval_mod(poly, Z(x), Z(qi)) == Z(0)){ return true }
+   while x < qi {
+      if _nfs_poly_eval_mod(poly, Z(x), Z(qi)) == Z(0) { return true }
       x += 1
    }
    false
@@ -770,10 +770,10 @@ fn nfs_qadic_prime_for_sqrt_report(list monic_poly, int min_q=3, int max_tries=6
    mut p = next_prime(max(2, min_q - 1))
    mut tries = 0
    mut selected = nil
-   while(monic && tries < max_tries && selected == nil){
+   while monic && tries < max_tries && selected == nil {
       def has_root = _nfs_poly_has_root_mod_q(monic_poly, p)
       attempts = attempts.append({"q": p, "root_free": !has_root})
-      if(!has_root){ selected = p }
+      if !has_root { selected = p }
       p = next_prime(p)
       tries += 1
    }
@@ -798,17 +798,17 @@ fn nfs_qadic_newton_sqrt_report(list product_poly, list monic_poly, list inverse
    mut R = _nfs_poly_coeff_mod(inverse_sqrt_mod_q, modulus)
    mut trace = []
    mut i = 0
-   while(i < iters && monic){
+   while i < iters && monic {
       modulus = modulus * modulus
       def prod_mod = _nfs_poly_coeff_mod(product_poly, modulus)
       mut tmp = _nfs_poly_mul_mod_monic_q(prod_mod, R, monic_poly, modulus)
       tmp = _nfs_poly_mul_mod_monic_q(tmp, R, monic_poly, modulus)
       mut corr = []
       mut j = 0
-      while(j < degree){
+      while j < degree {
          mut c = (j == 0 ? Z(3) : Z(0)) - _nfs_z(tmp.get(j, Z(0)))
          c = _nfs_coeff_mod(c, modulus)
-         if((c % Z(2)) != Z(0)){ c += modulus }
+         if (c % Z(2)) != Z(0) { c += modulus }
          corr = corr.append(_nfs_coeff_mod(c / Z(2), modulus))
          j += 1
       }
@@ -819,7 +819,7 @@ fn nfs_qadic_newton_sqrt_report(list product_poly, list monic_poly, list inverse
    }
    mut sqrt_poly = []
    mut verified = false
-   if(monic){
+   if monic {
       sqrt_poly = _nfs_poly_centered_mod(_nfs_poly_mul_mod_monic_q(R, _nfs_poly_coeff_mod(product_poly, modulus), monic_poly, modulus), modulus)
       def square = _nfs_poly_mul_mod_monic(sqrt_poly, sqrt_poly, monic_poly)
       def target = _nfs_poly_centered_mod(product_poly, modulus)
@@ -845,13 +845,13 @@ fn nfs_qadic_sqrt_report(list product_poly, list monic_poly, int min_q=3, int it
       "source_model": "GNFS combined square-root pipeline",
       "prime_report": prime, "success": false,
    }
-   if(!prime.get("found", false)){
+   if !prime.get("found", false) {
       return out.merge({"status": "no-sqrt-prime", "elapsed_ms": _nfs_elapsed_ms(t0)})
    }
    def q = prime.get("q")
    def init = nfs_qadic_initial_inverse_sqrt_report(product_poly, monic_poly, q, max_initial_candidates)
    out = out.set("initial_inverse_sqrt_report", init)
-   if(!init.get("found", false)){
+   if !init.get("found", false) {
       return out.merge({"status": "no-initial-inverse-sqrt", "elapsed_ms": _nfs_elapsed_ms(t0)})
    }
    def lift = nfs_qadic_newton_sqrt_report(product_poly, monic_poly, init.get("inverse_sqrt_mod_q"), q, iterations)
@@ -875,7 +875,7 @@ fn nfs_algebraic_product_report(any n, list relations, any polynomial=nil, list 
    def selected = dependency.len > 0 ? _nfs_selected_relations(relations, dependency) : relations
    mut prod = [Z(1)]
    mut i = 0
-   while(i < selected.len && monic){
+   while i < selected.len && monic {
       def r = selected.get(i)
       def rel_poly = [_nfs_z(r.get("a", Z(0))), Z(0) - _nfs_z(r.get("b", Z(1)))]
       prod = _nfs_poly_mul_mod_monic(prod, rel_poly, coeffs)
@@ -912,14 +912,14 @@ fn _nfs_try_square_root_candidate(any n, list relations, list dependency, list r
       "rational_exponents": rexps, "algebraic_exponents": aexps,
       "even_exponents": even, "factor": nil, "success": false,
    }
-   if(!even){ return out }
+   if !even { return out }
    def rroot = _nfs_sqrt_from_exponents_mod(rbase, rexps, nz)
    def aroot = _nfs_sqrt_from_exponents_mod(abase, aexps, nz)
    def g1 = gcd((rroot - aroot) % nz, nz)
    def g2 = gcd((rroot + aroot) % nz, nz)
    mut factor = nil
-   if(g1 > Z(1) && g1 < nz){ factor = g1 }
-   if(factor == nil && g2 > Z(1) && g2 < nz){ factor = g2 }
+   if g1 > Z(1) && g1 < nz { factor = g1 }
+   if factor == nil && g2 > Z(1) && g2 < nz { factor = g2 }
    out.merge({
          "rational_sqrt_mod_n": rroot, "algebraic_norm_sqrt_mod_n": aroot,
          "gcd_minus": g1, "gcd_plus": g2, "factor": factor, "success": factor != nil,
@@ -933,7 +933,7 @@ fn nfs_dependency_report(any n, int rational_bound=64, int algebraic_bound=64, i
    def width = rels.get("parity_width", 0)
    mut filter = nfs_relation_filter_report(rels.get("relations", []), width, true)
    mut used_unpruned_fallback = false
-   if(filter.get("filtered_count", 0) == 0 && rels.get("relation_count", 0) > 0){
+   if filter.get("filtered_count", 0) == 0 && rels.get("relation_count", 0) > 0 {
       filter = nfs_relation_filter_report(rels.get("relations", []), width, false)
       used_unpruned_fallback = true
    }
@@ -966,35 +966,35 @@ fn nfs_square_root_report(any n, int rational_bound=64, int algebraic_bound=64, 
    mut factor = nil
    mut qadic_success_count = 0
    mut i = 0
-   while(i < candidates.len && factor == nil){
+   while i < candidates.len && factor == nil {
       def a = _nfs_try_square_root_candidate(nz, rels, candidates.get(i), rbase, abase)
       def prod = nfs_algebraic_product_report(nz, rels, dep.get("relation_report").get("polynomial"), candidates.get(i))
       mut attempt = a.set("algebraic_product_report", prod)
-      if(prod.get("monic", false)){
+      if prod.get("monic", false) {
          def qadic0 = prod.get("qadic_sqrt_report", nil)
          def qadic = qadic0 == nil ? nfs_qadic_sqrt_report(prod.get("product_polynomial_mod_f", []), prod.get("polynomial").get("coefficients", []), 3, 2, 4096) : qadic0
          attempt = attempt.set("qadic_sqrt_report", qadic)
-         if(qadic.get("success", false)){
+         if qadic.get("success", false) {
             qadic_success_count += 1
             def qroot = _nfs_poly_eval_mod(qadic.get("sqrt_polynomial", []), prod.get("polynomial").get("m", Z(0)), nz)
             def rroot = attempt.get("rational_sqrt_mod_n", nil)
-            if(rroot != nil){
+            if rroot != nil {
                def g1q = gcd((rroot - qroot) % nz, nz)
                def g2q = gcd((rroot + qroot) % nz, nz)
                mut qfactor = nil
-               if(g1q > Z(1) && g1q < nz){ qfactor = g1q }
-               if(qfactor == nil && g2q > Z(1) && g2q < nz){ qfactor = g2q }
+               if g1q > Z(1) && g1q < nz { qfactor = g1q }
+               if qfactor == nil && g2q > Z(1) && g2q < nz { qfactor = g2q }
                attempt = attempt.merge({
                      "algebraic_qadic_sqrt_mod_n": qroot,
                      "qadic_gcd_minus": g1q, "qadic_gcd_plus": g2q,
                      "qadic_factor": qfactor,
                })
-               if(factor == nil && qfactor != nil){ factor = qfactor }
+               if factor == nil && qfactor != nil { factor = qfactor }
             }
          }
       }
       attempts = attempts.append(attempt)
-      if(factor == nil && a.get("success", false)){ factor = a.get("factor") }
+      if factor == nil && a.get("success", false) { factor = a.get("factor") }
       i += 1
    }
    {

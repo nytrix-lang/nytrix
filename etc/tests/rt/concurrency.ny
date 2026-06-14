@@ -25,14 +25,14 @@ def lh = async fn() { plus_one(11) }
 assert(await lh == 12, "async zero-arg lambda syntax")
 mut many = list(10000)
 mut mi = 0
-while(mi < 10000){
+while mi < 10000 {
    many = many.append(async plus_one(mi))
    mi += 1
 }
 
 mut many_sum = 0
 mi = 0
-while(mi < many.len){
+while mi < many.len {
    many_sum += await many.get(mi)
    mi += 1
 }
@@ -51,8 +51,8 @@ def wait_lh = async fn() {
 assert(await wait_lh == 21, "async lambda suspension")
 mut waiters = list(10000)
 mut wi = 0
-while(wi < 10000){
-   if((wi % 2) == 0){
+while wi < 10000 {
+   if wi % 2 == 0 {
       waiters = waiters.append(aio.yield_now())
    } else {
       waiters = waiters.append(aio.sleep_ms(0))
@@ -72,12 +72,12 @@ assert(effect_async_worker() == 42, "effect-directed async value call")
 def port = 55000 + ((ticks() / 1000000) % 1000)
 def server = sock.socket_bind("127.0.0.1", port)
 
-if(server >= 0){
+if server >= 0 {
    def accept_h = sock.socket_accept_async(server)
    def connect_h = sock.socket_connect_async("127.0.0.1", port)
    def client = await connect_h
    def peer = await accept_h
-   if(client >= 0 && peer >= 0){
+   if client >= 0 && peer >= 0 {
       assert(await sock.write_socket_all_async(client, "ping") == 4, "async socket client write")
       assert(await sock.read_socket_async(peer, 4) == "ping", "async socket server read")
       assert(await sock.write_socket_all_async(peer, "pong\n") == 5, "async socket server write")
@@ -93,7 +93,7 @@ if(server >= 0){
    def client2 = await connect_h2
    def peer1 = await accept_h1
    def peer2 = await accept_h2
-   if(client1 >= 0 && client2 >= 0 && peer1 >= 0 && peer2 >= 0){
+   if client1 >= 0 && client2 >= 0 && peer1 >= 0 && peer2 >= 0 {
       assert(await sock.write_socket_all_async(client1, "one") == 3, "async socket client1 write")
       assert(await sock.write_socket_all_async(client2, "two") == 3, "async socket client2 write")
       assert(await sock.read_socket_async(peer1, 3) == "one", "async socket peer1 read")
@@ -107,3 +107,54 @@ if(server >= 0){
 }
 
 print("✓ async tests passed")
+
+use std.core
+use std.os.thread
+use std.os.time
+
+fn _thread_counter_worker(any args) int {
+   def m, c = args.get(0), args.get(1)
+   mutex_lock(m)
+   store64(c, load64(c) + 1)
+   mutex_unlock(m)
+   0
+}
+
+fn _thread_add(any a, any b) any { a + b }
+
+fn _thread_typed_echo(any a, int b, int c) dict {
+   {"a": a, "b": b, "c": c}
+}
+
+fn _thread_launch_store(any ptr, int value) any {
+   store64(ptr, value, 0)
+   value
+}
+
+def counter_ptr = malloc(8)
+store64(counter_ptr, 0)
+def mtx = mutex_new()
+def args = [mtx, counter_ptr]
+def t1 = thread_spawn(_thread_counter_worker, args)
+def t2 = thread_spawn(_thread_counter_worker, args)
+def t3 = thread_spawn(_thread_counter_worker, args)
+thread_join(t1)
+thread_join(t2)
+thread_join(t3)
+assert(load64(counter_ptr) == 3, "thread mutex counter")
+def h = thread_spawn_call(_thread_add, [20, 22])
+assert(thread_join(h) == 42, "thread_spawn_call returns value")
+def typed_h = thread_spawn_call(_thread_typed_echo, [0, 3937, 7874])
+def typed_r = thread_join(typed_h)
+assert(typed_r.get("a") == 0, "thread_spawn_call any arg")
+assert(typed_r.get("b") == 3937, "thread_spawn_call typed arg")
+assert(typed_r.get("c") == 7874, "thread_spawn_call second typed arg")
+def launch_ptr = malloc(8)
+store64(launch_ptr, 0, 0)
+assert(thread_launch_call(_thread_launch_store, [launch_ptr, 17]) == 0, "thread_launch_call starts")
+msleep(30)
+assert(load64(launch_ptr, 0) == 17, "thread_launch_call worker ran")
+mutex_free(mtx)
+free(launch_ptr)
+free(counter_ptr)
+print("✓ thread tests passed")

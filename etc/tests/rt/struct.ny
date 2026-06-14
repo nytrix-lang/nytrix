@@ -1,19 +1,19 @@
 use std.core
 
 struct Vec2 {
-   x: i32,
-   y: i32
+   i32 x,
+   i32 y
 }
 
 struct Mixed {
-   flag: bool,
-   count: i32,
-   total: i64
+   bool flag,
+   i32 count,
+   i64 total
 }
 
-struct PackedPair pack(1){
-   left: i32,
-   right: i64
+struct PackedPair pack(1) {
+   i32 left,
+   i64 right
 }
 
 assert(__layout_size("Vec2") == 8, "Vec2 size")

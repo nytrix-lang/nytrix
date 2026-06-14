@@ -11,13 +11,13 @@ fn thread_spawn(fnptr target, any arg=0) any {
 }
 
 fn _thread_pack_args(any args) any {
-   if(!is_list(args)){ args = [args] }
+   if !is_list(args) { args = [args] }
    def n = args.len
-   if(n <= 0){ return 0 }
+   if n <= 0 { return 0 }
    def argv = malloc(n * 8)
-   if(!argv){ return 0 }
+   if !argv { return 0 }
    mut i = 0
-   while(i < n){
+   while i < n {
       store64(argv, args.get(i, 0), i * 8)
       i += 1
    }
@@ -26,25 +26,25 @@ fn _thread_pack_args(any args) any {
 
 fn thread_spawn_call(fnptr target, any args=[]) any {
    "Spawns a new thread executing `func(args...)`. Supports up to 15 arguments."
-   if(!is_list(args)){ args = [args] }
+   if !is_list(args) { args = [args] }
    def n = args.len
-   if(n > 15){ panic("thread_spawn_call: max 15 arguments(got " + to_str(n) + ")") }
+   if n > 15 { panic("thread_spawn_call: max 15 arguments(got " + to_str(n) + ")") }
    def argv = _thread_pack_args(args)
-   if(n > 0 && !argv){ return -1 }
+   if n > 0 && !argv { return -1 }
    def handle = __thread_spawn_call(target, n, argv)
-   if(argv){ free(argv) }
+   if argv { free(argv) }
    handle
 }
 
 fn thread_launch_call(fnptr target, any args=[]) int {
    "Launches a detached thread executing `func(args...)`. Supports up to 15 arguments."
-   if(!is_list(args)){ args = [args] }
+   if !is_list(args) { args = [args] }
    def n = args.len
-   if(n > 15){ panic("thread_launch_call: max 15 arguments(got " + to_str(n) + ")") }
+   if n > 15 { panic("thread_launch_call: max 15 arguments(got " + to_str(n) + ")") }
    def argv = _thread_pack_args(args)
-   if(n > 0 && !argv){ return -1 }
+   if n > 0 && !argv { return -1 }
    def rc = __thread_launch_call(target, n, argv)
-   if(argv){ free(argv) }
+   if argv { free(argv) }
    rc
 }
 
@@ -90,7 +90,7 @@ fn _thread_selftest_catches(fnptr thunk) bool {
 #main {
    mut too_many = []
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       too_many = too_many.append(i)
       i += 1
    }

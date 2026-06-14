@@ -16,34 +16,34 @@ fn mod_sqrt_all(number a, number p) list {
    "Find all square roots of a mod p using Tonelli-Shanks.
    Returns [r, p-r] if a is a quadratic residue mod p, empty list otherwise."
    def r = tonelli_shanks(a, p)
-   if(r == Z(-1)){ return list(0) }
+   if r == Z(-1) { return list(0) }
    def r2 = mod(p - r, p)
-   if(r == r2){ return [r] }
+   if r == r2 { return [r] }
    [r, r2]
 }
 
 fn _list_has(list xs, any x) bool {
    mut i = 0
-   while(i < xs.len){
-      if(xs.get(i) == x){ return true }
+   while i < xs.len {
+      if xs.get(i) == x { return true }
       i += 1
    }
    false
 }
 
 fn _find_2kth_roots_prime(number c, int k, number p) list {
-   if(k <= 0){ return [mod(c, p)] }
+   if k <= 0 { return [mod(c, p)] }
    mut roots = [mod(c, p)]
    mut depth = 0
-   while(depth < k && roots.len > 0){
+   while depth < k && roots.len > 0 {
       mut next = []
       mut i = 0
-      while(i < roots.len){
+      while i < roots.len {
          def srs = mod_sqrt_all(roots.get(i), p)
          mut j = 0
-         while(j < srs.len){
+         while j < srs.len {
             def v = srs.get(j)
-            if(!_list_has(next, v)){ next = next.append(v) }
+            if !_list_has(next, v) { next = next.append(v) }
             j += 1
          }
          i += 1
@@ -67,13 +67,13 @@ fn mod_2kth_roots(number c, int k, number p, number q) list {
    mut result = []
    def p_inv, q_inv = inverse_mod(p, q), inverse_mod(q, p)
    mut i = 0
-   while(i < np){
+   while i < np {
       def a_p = roots_p.get(i)
       mut j = 0
-      while(j < nq){
+      while j < nq {
          def a_q = roots_q.get(j)
          def root = mod(a_p * q * q_inv + a_q * p * p_inv, n_val)
-         if(!_list_has(result, root)){ result = result.append(root) }
+         if !_list_has(result, root) { result = result.append(root) }
          j += 1
       }
       i += 1

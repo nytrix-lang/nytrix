@@ -19,11 +19,11 @@ use std.os.ui.render (font_load, FONT_FILTER_NEAREST, FONT_FILTER_LINEAR)
 
 fn _fonts(any font) dict {
    def path = common.env_trim("NY_EDITOR_TERM_FONT")
-   if(path.len > 0){
+   if path.len > 0 {
       def mode = common.env_trim("NY_EDITOR_TERM_FONT_FILTER")
       def filter = (mode == "nearest") ? FONT_FILTER_NEAREST : FONT_FILTER_LINEAR
       def f = font_load(path, 15, filter)
-      if(f){ return {"regular": f, "bold": f, "italic": f, "emoji": f} }
+      if f { return {"regular": f, "bold": f, "italic": f, "emoji": f} }
    }
    {"regular": font, "bold": font, "italic": font, "emoji": font}
 }
@@ -47,7 +47,7 @@ fn tab_count(dict st) int { st.get("tabs", []).len }
 
 fn active_tab(dict st) int {
    def n = tab_count(st)
-   if(n <= 0){ return 0 }
+   if n <= 0 { return 0 }
    min(max(0, int(st.get("active", 0))), n - 1)
 }
 
@@ -62,13 +62,13 @@ fn _blank_vt(dict st) any {
 }
 
 fn _ensure_vt(dict st) dict {
-   if(is_dict(st.get("vt"))){ return st }
+   if is_dict(st.get("vt")) { return st }
    st["vt"] = _blank_vt(st)
    mut tabs = st.get("tabs", [])
-   if(tabs.len > 0){
+   if tabs.len > 0 {
       def idx = active_tab(st)
       mut tab = tabs.get(idx, {})
-      if(!is_dict(tab.get("vt", 0))){
+      if !is_dict(tab.get("vt", 0)) {
          tab["vt"] = st.get("vt")
          tabs[idx] = tab
          st["tabs"] = tabs
@@ -78,7 +78,7 @@ fn _ensure_vt(dict st) dict {
 }
 
 fn _tune_vt(any vt) any {
-   if(!is_dict(vt)){ return vt }
+   if !is_dict(vt) { return vt }
    vt
    .set("parse_bytes", common.env_int_clamped("NY_EDITOR_TERM_PARSE_BYTES", 65536, 4096, 262144))
    .set("max_history", common.env_int_clamped("NY_EDITOR_TERM_HISTORY", 2000, 128, 20000))
@@ -86,7 +86,7 @@ fn _tune_vt(any vt) any {
 
 fn _sync_active(dict st) dict {
    def tabs = st.get("tabs", [])
-   if(tabs.len <= 0){
+   if tabs.len <= 0 {
       st["open"] = false
       st["active"] = 0
       st["mode"] = "terminal"
@@ -96,7 +96,7 @@ fn _sync_active(dict st) dict {
    mut tab = tabs.get(idx, {})
    st["active"] = idx
    st["vt"] = tab.get("vt", st.get("vt", 0))
-   if(!is_dict(st.get("vt"))){
+   if !is_dict(st.get("vt")) {
       st["vt"] = _blank_vt(st)
       tab["vt"] = st.get("vt")
       tabs[idx] = tab
@@ -109,7 +109,7 @@ fn _sync_active(dict st) dict {
 
 fn _replace_active(dict st, any vt) dict {
    mut tabs = st.get("tabs", [])
-   if(tabs.len <= 0){
+   if tabs.len <= 0 {
       st["vt"] = vt
       return st
    }
@@ -121,32 +121,43 @@ fn _replace_active(dict st, any vt) dict {
    _sync_active(st)
 }
 
+fn _update_tab_vt(list tabs, int idx) list {
+   if idx < 0 || idx >= tabs.len { return tabs }
+   mut tab = tabs.get(idx, {})
+   def vt = tab.get("vt", 0)
+   if is_dict(vt) && int(vt.get("master_fd", -1)) >= 0 {
+      tab["vt"] = vterm.update(vt)
+      tabs[idx] = tab
+   }
+   tabs
+}
+
 fn _tab_label(str m, any vt) str {
    def t = is_dict(vt) ? to_str(vterm.get_title(vt)) : ""
-   if(t.len > 0 && t != "Terminal"){ return t }
-   if(m == "repl"){ return "ny repl" }
-   if(m == "debug"){ return "debug" }
+   if t.len > 0 && t != "Terminal" { return t }
+   if m == "repl" { return "ny repl" }
+   if m == "debug" { return "debug" }
    m == "terminal" ? "shell" : m
 }
 
 fn tab_title(dict st, int idx=-1) str {
    def tabs = st.get("tabs", [])
-   if(tabs.len <= 0){ return "" }
-   if(idx < 0){ idx = active_tab(st) }
-   if(idx < 0 || idx >= tabs.len){ return "" }
+   if tabs.len <= 0 { return "" }
+   if idx < 0 { idx = active_tab(st) }
+   if idx < 0 || idx >= tabs.len { return "" }
    def tab = tabs.get(idx, {})
    _tab_label(to_str(tab.get("mode", "terminal")), tab.get("vt"))
 }
 
 fn title(dict st) str {
-   if(!is_open(st)){ return "terminal" }
+   if !is_open(st) { return "terminal" }
    tab_title(st)
 }
 
 fn _spawn(dict st, str m, str path, list args, str banner, list child_env=[]) dict {
    mut vt = _blank_vt(st)
-   if(child_env.len > 0){ vt = vt.set("child_env", child_env) }
-   match vterm.open(vt, path, args){
+   if child_env.len > 0 { vt = vt.set("child_env", child_env) }
+   match vterm.open(vt, path, args) {
       ok(v) -> { vt = v }
       err(e) -> { vt = vterm.write(vt, "terminal start failed: " + to_str(e) + "\n") }
    }
@@ -167,17 +178,17 @@ fn open_shell(dict st) dict {
 
 fn open_repl(dict st) dict {
    _spawn(st, "repl", tools.ny_command(), [], "", [
-      "NYTRIX_REPL_QUIET=1",
-      "NYTRIX_REPL_PLAIN=1"
+         "NYTRIX_REPL_QUIET=1",
+         "NYTRIX_REPL_PLAIN=1"
    ])
 }
 
 fn _find_tab_mode(dict st, str m) int {
    def tabs = st.get("tabs", [])
    mut i = 0
-   while(i < tabs.len){
+   while i < tabs.len {
       def tab = tabs.get(i, dict(0))
-      if(is_dict(tab) && to_str(tab.get("mode", "terminal")) == m){ return i }
+      if is_dict(tab) && to_str(tab.get("mode", "terminal")) == m { return i }
       i += 1
    }
    -1
@@ -185,7 +196,7 @@ fn _find_tab_mode(dict st, str m) int {
 
 fn _show_or_open(dict st, str m) dict {
    def idx = _find_tab_mode(st, m)
-   if(idx >= 0){ return select_tab(st, idx) }
+   if idx >= 0 { return select_tab(st, idx) }
    m == "repl" ? open_repl(st) : open_shell(st)
 }
 
@@ -198,7 +209,7 @@ fn open_command(dict st, str title, str path, list args, str banner="") dict {
 }
 
 fn select_tab(dict st, int idx) dict {
-   if(tab_count(st) <= 0){ return st }
+   if tab_count(st) <= 0 { return st }
    st["active"] = min(max(0, idx), tab_count(st) - 1)
    st["open"] = true
    st["focus"] = true
@@ -218,21 +229,21 @@ fn prev_tab(dict st) dict {
 
 fn close_tab(dict st, int idx=-1) dict {
    mut tabs = st.get("tabs", [])
-   if(tabs.len <= 0){ return close(st) }
-   if(idx < 0){ idx = active_tab(st) }
-   if(idx < 0 || idx >= tabs.len){ return st }
+   if tabs.len <= 0 { return close(st) }
+   if idx < 0 { idx = active_tab(st) }
+   if idx < 0 || idx >= tabs.len { return st }
    def old_active = active_tab(st)
    def tab = tabs.get(idx, {})
    def vt = tab.get("vt", 0)
-   if(is_dict(vt)){ vterm.close(vt) }
+   if is_dict(vt) { vterm.close(vt) }
    mut out = []
    mut i = 0
-   while(i < tabs.len){
-      if(i != idx){ out = out.append(tabs.get(i)) }
+   while i < tabs.len {
+      if i != idx { out = out.append(tabs.get(i)) }
       i += 1
    }
    st["tabs"] = out
-   if(out.len <= 0){
+   if out.len <= 0 {
       st["open"] = false
       st["focus"] = false
       st["active"] = 0
@@ -241,15 +252,15 @@ fn close_tab(dict st, int idx=-1) dict {
       return st
    }
    st["active"] = idx < old_active ? old_active - 1 : old_active
-   if(int(st.get("active", 0)) >= out.len){ st["active"] = out.len - 1 }
+   if int(st.get("active", 0)) >= out.len { st["active"] = out.len - 1 }
    _sync_active(st)
 }
 
 fn send_text(dict st, str text) dict {
-   if(is_open(st)){
+   if is_open(st) {
       st = _ensure_vt(st)
       def vt = st.get("vt")
-      if(vterm.is_running(vt)){ vterm.send_input(vt, text) }
+      if vterm.is_running(vt) { vterm.send_input(vt, text) }
       else { st = _replace_active(st, vterm.write(vt, text)) }
    }
    st
@@ -258,9 +269,9 @@ fn send_text(dict st, str text) dict {
 fn _display_text(str text) str {
    mut b = Builder(max(16, text.len + 8))
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def c = load8(text, i) & 255
-      if(c == 10 && (i == 0 || (load8(text, i - 1) & 255) != 13)){
+      if c == 10 && (i == 0 || (load8(text, i - 1) & 255) != 13) {
          b = builder_append_byte(b, 13)
       }
       b = builder_append_byte(b, c)
@@ -272,7 +283,7 @@ fn _display_text(str text) str {
 }
 
 fn write_text(dict st, str text) dict {
-   if(is_open(st)){
+   if is_open(st) {
       st = _ensure_vt(st)
       st = _replace_active(st, vterm.write(st.get("vt"), _display_text(text)))
    }
@@ -280,7 +291,7 @@ fn write_text(dict st, str text) dict {
 }
 
 fn _set_vt_font(any vt, any font) any {
-   if(!is_dict(vt)){ return vt }
+   if !is_dict(vt) { return vt }
    _tune_vt(vterm.set_fonts(vt, _fonts(font)))
 }
 
@@ -289,67 +300,67 @@ fn set_font(dict st, any font) dict {
    st["font"] = font
    mut tabs = st.get("tabs", [])
    mut i = 0
-   while(i < tabs.len){
+   while i < tabs.len {
       mut tab = tabs.get(i, {})
       def vt = tab.get("vt", 0)
-      if(is_dict(vt)){
+      if is_dict(vt) {
          tab["vt"] = _set_vt_font(vt, font)
          tabs[i] = tab
       }
       i += 1
    }
    st["tabs"] = tabs
-   if(tabs.len <= 0 && is_dict(st.get("vt", 0))){ st["vt"] = _set_vt_font(st.get("vt"), font) }
+   if tabs.len <= 0 && is_dict(st.get("vt", 0)) { st["vt"] = _set_vt_font(st.get("vt"), font) }
    st = _sync_active(st)
    resize(st, float(st.get("x", 0.0)), float(st.get("y", 0.0)), float(st.get("w", 1.0)), float(st.get("h", 1.0)))
 }
 
 fn _vt_visible_cells(any vt) int {
-   if(!is_dict(vt)){ return 0 }
+   if !is_dict(vt) { return 0 }
    def g = vt.get("grid", 0)
-   if(!g){ return 0 }
+   if !g { return 0 }
    def co = max(0, int(vt.get("cols", 0)))
    def ro = max(0, int(vt.get("rows", 0)))
    mut n = 0
    mut i = 0
-   while(i < co * ro){
+   while i < co * ro {
       def cp = load32(g, i * 16)
-      if(cp > 32){ n += 1 }
+      if cp > 32 { n += 1 }
       i += 1
    }
    n
 }
 
 fn visible_cell_count(dict st) int {
-   if(!is_open(st)){ return 0 }
+   if !is_open(st) { return 0 }
    _vt_visible_cells(st.get("vt"))
 }
 
 fn debug_text(dict st, int max_rows=4, int max_cols=120) str {
-   if(!is_open(st)){ return "" }
+   if !is_open(st) { return "" }
    def vt = st.get("vt")
-   if(!is_dict(vt)){ return "" }
+   if !is_dict(vt) { return "" }
    def g = vt.get("grid", 0)
-   if(!g){ return "" }
+   if !g { return "" }
    def co = min(max(0, int(vt.get("cols", 0))), max_cols)
    def ro = min(max(0, int(vt.get("rows", 0))), max_rows)
    mut b = Builder(max(64, co * ro + ro))
    mut y = 0
-   while(y < ro){
+   while y < ro {
       mut last = -1
       mut x = 0
-      while(x < co){
+      while x < co {
          def cp = load32(g, (y * int(vt.get("cols", 0)) + x) * 16)
-         if(cp > 32){ last = x }
+         if cp > 32 { last = x }
          x += 1
       }
       x = 0
-      while(x <= last){
+      while x <= last {
          def cp = load32(g, (y * int(vt.get("cols", 0)) + x) * 16)
          b = builder_append_byte(b, (cp >= 32 && cp < 127) ? cp : 63)
          x += 1
       }
-      if(y + 1 < ro){ b = builder_append_byte(b, 10) }
+      if y + 1 < ro { b = builder_append_byte(b, 10) }
       y += 1
    }
    def out = builder_to_str(b)
@@ -360,13 +371,13 @@ fn debug_text(dict st, int max_rows=4, int max_cols=120) str {
 fn close(dict st) dict {
    def tabs = st.get("tabs", [])
    mut i = 0
-   while(i < tabs.len){
+   while i < tabs.len {
       def tab = tabs.get(i, dict(0))
       def vt = is_dict(tab) ? tab.get("vt", 0) : 0
-      if(is_dict(vt)){ vterm.close(vt) }
+      if is_dict(vt) { vterm.close(vt) }
       i += 1
    }
-   if(tabs.len <= 0 && is_dict(st.get("vt"))){ vterm.close(st.get("vt")) }
+   if tabs.len <= 0 && is_dict(st.get("vt")) { vterm.close(st.get("vt")) }
    st["tabs"] = []
    st["open"] = false
    st["focus"] = false
@@ -377,33 +388,25 @@ fn close(dict st) dict {
 }
 
 fn toggle_shell(dict st) dict {
-   if(!is_open(st)){ return open_shell(st) }
+   if !is_open(st) { return open_shell(st) }
    mode(st) == "terminal" ? close_tab(st) : show_shell(st)
 }
 
 fn toggle_repl(dict st) dict {
-   if(!is_open(st)){ return open_repl(st) }
+   if !is_open(st) { return open_repl(st) }
    mode(st) == "repl" ? close_tab(st) : show_repl(st)
 }
 
 fn update(dict st) dict {
-   if(!is_open(st)){ return st }
+   if !is_open(st) { return st }
    mut tabs = st.get("tabs", [])
    def n = tabs.len
-   if(n <= 0){ return _sync_active(st) }
+   if n <= 0 { return _sync_active(st) }
    def active = active_tab(st)
    def tick = int(st.get("update_tick", 0))
    def inactive = tick % n
-   mut i = 0
-   while(i < tabs.len){
-      mut tab = tabs.get(i, {})
-      def vt = tab.get("vt", 0)
-      if(is_dict(vt) && int(vt.get("master_fd", -1)) >= 0 && (i == active || i == inactive)){
-         tab["vt"] = vterm.update(vt)
-         tabs[i] = tab
-      }
-      i += 1
-   }
+   tabs = _update_tab_vt(tabs, active)
+   if inactive != active { tabs = _update_tab_vt(tabs, inactive) }
    st["tabs"] = tabs
    st["update_tick"] = tick + 1
    _sync_active(st)
@@ -414,21 +417,24 @@ fn resize(dict st, f64 x, f64 y, f64 w, f64 h) dict {
    st["y"] = y
    st["w"] = max(1.0, w)
    st["h"] = max(1.0, h)
-   if(!is_open(st) && st.get("tabs", []).len <= 0){ return st }
+   if !is_open(st) && st.get("tabs", []).len <= 0 { return st }
    st = _ensure_vt(st)
    def vt = st.get("vt")
    def cw = max(1.0, float(vt.get("char_w", 9.0)))
    def ch = max(1.0, float(vt.get("char_h", 18.0)))
    def cols = max(2, int(max(1.0, w - 12.0) / cw))
    def rows = max(2, int(max(1.0, h - 10.0) / ch))
+   def old_cols = int(st.get("cols", 0))
+   def old_rows = int(st.get("rows", 0))
    st["cols"] = cols
    st["rows"] = rows
+   if old_cols == cols && old_rows == rows && is_dict(st.get("vt", 0)) { return st }
    mut tabs = st.get("tabs", [])
    mut i = 0
-   while(i < tabs.len){
+   while i < tabs.len {
       mut tab = tabs.get(i, {})
       def tvt = tab.get("vt", 0)
-      if(is_dict(tvt)){
+      if is_dict(tvt) {
          mut rvt = vterm.resize(tvt, cols, rows)
          def rcw = max(1.0, float(rvt.get("char_w", cw)))
          def rch = max(1.0, float(rvt.get("char_h", ch)))
@@ -438,7 +444,7 @@ fn resize(dict st, f64 x, f64 y, f64 w, f64 h) dict {
       i += 1
    }
    st["tabs"] = tabs
-   if(tabs.len <= 0){
+   if tabs.len <= 0 {
       mut rvt = vterm.resize(vt, cols, rows)
       def rcw = max(1.0, float(rvt.get("char_w", cw)))
       def rch = max(1.0, float(rvt.get("char_h", ch)))
@@ -462,15 +468,15 @@ fn _event_data(dict st, any data) dict {
 }
 
 fn handle_event(dict st, int typ, any data) list {
-   if(!is_open(st)){ return [st, false] }
+   if !is_open(st) { return [st, false] }
    st = _ensure_vt(st)
    def d = _event_data(st, data)
    def mouse_event = typ == EVENT_MOUSE_BUTTON_PRESSED || typ == EVENT_MOUSE_BUTTON_RELEASED || typ == EVENT_MOUSE_POS_CHANGED || typ == EVENT_MOUSE_SCROLL
-   if(mouse_event){
+   if mouse_event {
       def inside = contains(st, float(d.get("x", -1.0)), float(d.get("y", -1.0)))
-      if(typ == EVENT_MOUSE_BUTTON_PRESSED){ st["focus"] = inside }
-      if(!inside){ return [st, false] }
-   } elif(!is_focused(st)){
+      if typ == EVENT_MOUSE_BUTTON_PRESSED { st["focus"] = inside }
+      if !inside { return [st, false] }
+   } elif !is_focused(st) {
       return [st, false]
    }
    st = _replace_active(st, vterm.handle_event(st.get("vt"), typ, d))
@@ -478,7 +484,7 @@ fn handle_event(dict st, int typ, any data) list {
 }
 
 fn draw(dict st) dict {
-   if(!is_open(st)){ return st }
+   if !is_open(st) { return st }
    st = _ensure_vt(st)
    vterm.set_viewport(float(st.get("x", 0.0)), float(st.get("y", 0.0)))
    st = _replace_active(st, vterm.draw(st.get("vt"), float(st.get("w", 1.0)), float(st.get("h", 1.0))))

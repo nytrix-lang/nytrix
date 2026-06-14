@@ -107,17 +107,17 @@ comptime table KeyPrefixMod {
 
 fn normalize_mod(any mod) i32 {
    "Masks a modifier bitset down to the supported std.os.ui modifier flags."
-   if(is_str(mod)){ return _prefix_mod(upper(strip(to_str(mod)))) & _MOD_MASK }
-   if(is_int(mod) || is_float(mod)){ return int(mod) & _MOD_MASK }
+   if is_str(mod) { return _prefix_mod(upper(strip(to_str(mod)))) & _MOD_MASK }
+   if is_int(mod) || is_float(mod) { return int(mod) & _MOD_MASK }
    0
 }
 
 fn _normalize_named_key(str name) i32 {
    def n = upper(strip(name))
-   if(n.len == 0){ return KEY_NULL }
-   if(n.len == 1){
+   if n.len == 0 { return KEY_NULL }
+   if n.len == 1 {
       def c = load8(n, 0)
-      if(c >= 97 && c <= 122){ return c - 32 }
+      if c >= 97 && c <= 122 { return c - 32 }
       return c
    }
    comptime match KeyNameCode(n, KEY_NULL)
@@ -125,8 +125,8 @@ fn _normalize_named_key(str name) i32 {
 
 fn normalize_key(any key) i32 {
    "Normalizes native key codes for stable comparisons across backends."
-   if(is_str(key)){ return _normalize_named_key(to_str(key)) }
-   if(!is_int(key) && !is_float(key)){ return KEY_NULL }
+   if is_str(key) { return _normalize_named_key(to_str(key)) }
+   if !is_int(key) && !is_float(key) { return KEY_NULL }
    def k = int(key)
    case k {
       97..122 -> k - 32
@@ -168,14 +168,14 @@ fn mod_bit_for_key(any key) i32 {
 
 fn mods_from_key_states(any ks) i32 {
    "Reconstructs the active modifier bitset from a key-state dictionary."
-   if(!is_dict(ks)){ return 0 }
+   if !is_dict(ks) { return 0 }
    mut mods = 0
    def items = dict_items(ks)
    mut i = 0
    def n = items.len
-   while(i < n){
+   while i < n {
       def kv = items.get(i, 0)
-      if(is_list(kv) && kv.len >= 2 && kv.get(1, false)){
+      if is_list(kv) && kv.len >= 2 && kv.get(1, false) {
          def key = normalize_key(kv.get(0, 0))
          mods = mods | mod_bit_for_key(key)
       }
@@ -190,9 +190,9 @@ fn _parse_single_key(str tok) list {
    mut mods = 0
    def parts = split(upper(tok), "-")
    def n = parts.len
-   if(n <= 0){ return [0, mods] }
+   if n <= 0 { return [0, mods] }
    mut i = 0
-   while(i + 1 < n){
+   while i + 1 < n {
       mods = mods | _prefix_mod(parts.get(i, ""))
       i += 1
    }
@@ -207,9 +207,9 @@ fn parse_notation(str notation) list {
    mut seq = []
    mut i = 0
    def toks_n = toks.len
-   while(i < toks_n){
+   while i < toks_n {
       def tok = toks.get(i)
-      if(tok.len > 0){ seq = seq.append(_parse_single_key(tok)) }
+      if tok.len > 0 { seq = seq.append(_parse_single_key(tok)) }
       i += 1
    }
    seq

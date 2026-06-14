@@ -15,7 +15,7 @@ use std.math.smt
 
 fn _untemper_right(any y, int shift) any {
    mut r, i = y & 0xFFFFFFFF, 0
-   while(i < 6){
+   while i < 6 {
       r = (y ^^ (r >> shift)) & 0xFFFFFFFF
       i += 1
    }
@@ -24,7 +24,7 @@ fn _untemper_right(any y, int shift) any {
 
 fn _untemper_left(any y, int shift, any mask) any {
    mut r, i = y & 0xFFFFFFFF, 0
-   while(i < 6){
+   while i < 6 {
       r = (y ^^ ((r << shift) & mask)) & 0xFFFFFFFF
       i += 1
    }
@@ -62,10 +62,10 @@ fn mt_twist_output_candidates(any output_i1, any output_i397) list {
    mut out = list(2)
    store64(out, 2, 0)
    mut msb = 0
-   while(msb < 2){
+   while msb < 2 {
       def y = (msb * 0x80000000) | (mt_i1 & 0x7FFFFFFF)
       mut word = mt_i397 ^^ (y >> 1)
-      if((y & 1) != 0){ word = word ^^ 0x9908B0DF }
+      if (y & 1) != 0 { word = word ^^ 0x9908B0DF }
       __store_item_fast(out, msb, mt_temper(word))
       msb += 1
    }
@@ -79,7 +79,7 @@ fn mt_clone(list outputs_624) list {
    mut state = list(n)
    store64(state, n, 0)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(state, i, mt_untemper(__load_item_fast(outputs_624, i)))
       i += 1
    }
@@ -90,12 +90,12 @@ fn mt_generate(list state) list {
    "Perform one MT19937 twist on state(624 words), returning the updated state.
    This generates the next 624 outputs."
    mut s, i = clone(state), 0
-   while(i < 624){
+   while i < 624 {
       def hi = __load_item_fast(s, i) & 0x80000000
       def lo = __load_item_fast(s, (i + 1) % 624) & 0x7FFFFFFF
       def y = hi | lo
       mut val = __load_item_fast(s, (i + 397) % 624) ^^ (y >> 1)
-      if(y & 1 != 0){ val = val ^^ 0x9908B0DF }
+      if y & 1 != 0 { val = val ^^ 0x9908B0DF }
       __store_item_fast(s, i, val)
       i += 1
    }
@@ -106,14 +106,14 @@ fn mt_predict(list state, int count) list {
    "Predict the next count MT19937 outputs from a cloned state(624 words).
    Returns list of predicted 32-bit values."
    def n = state.len
-   if(n < 624){ return [] }
+   if n < 624 { return [] }
    mut results = list(count)
    store64(results, count, 0)
    mut s = state
    mut generated = 0
    mut idx = 0
-   while(generated < count){
-      if(idx >= 624){
+   while generated < count {
+      if idx >= 624 {
          s = mt_generate(s)
          idx = 0
       }
@@ -129,7 +129,7 @@ fn mt19937_next(list state_orig, int idx_in) list {
    Returns [output_value, updated_state, new_index]."
    mut state = clone(state_orig)
    mut idx = int(idx_in)
-   if(idx >= 624){
+   if idx >= 624 {
       state = mt_generate(state)
       idx = 0
    }
@@ -165,38 +165,38 @@ fn mt19937_smt_recover_state_prefix(any constraints) dict {
    Returns dict:
    - sat: bool
    - model_words: list of u32 state words(length max_index+1) when sat."
-   if(constraints == nil || constraints.len == 0){ return dict().set("sat", false) }
-   if(!z3_available()){ return dict().set("sat", false) }
+   if constraints == nil || constraints.len == 0 { return dict().set("sat", false) }
+   if !z3_available() { return dict().set("sat", false) }
    def ctx = z3_ctx_new()
-   if(!ctx){ return dict().set("sat", false) }
+   if !ctx { return dict().set("sat", false) }
    def s = z3_solver_new(ctx)
-   if(!s){
+   if !s {
       z3_ctx_del(ctx)
       return dict().set("sat", false)
    }
    mut max_idx = 0
    mut i = 0
-   while(i < constraints.len){
+   while i < constraints.len {
       def c = constraints.get(i)
       def idx = int(c.get("index", 0))
-      if(idx > max_idx){ max_idx = idx }
+      if idx > max_idx { max_idx = idx }
       i += 1
    }
    def nwords = max_idx + 1
    mut words = []
    i = 0
-   while(i < nwords){
+   while i < nwords {
       words = words.append(_mt_smt_bv32(ctx, "s" + to_str(i)))
       i += 1
    }
    i = 0
-   while(i < constraints.len){
+   while i < constraints.len {
       def c = constraints.get(i)
       def idx = int(c.get("index", 0))
       def kind = c.get("kind", "")
       def v = int(c.get("value", 0))
       def out = _mt_smt_temper(ctx, words.get(idx))
-      if(kind == "eq"){ z3_solver_assert(ctx, s, z3_eq(ctx, out, _mt_smt_bv32u(ctx, v))) } elif(kind == "hi"){
+      if kind == "eq" { z3_solver_assert(ctx, s, z3_eq(ctx, out, _mt_smt_bv32u(ctx, v))) } elif kind == "hi" {
          def bits = int(c.get("bits", 0))
          def sh = 32 - bits
          def out_hi = _mt_smt_shr(ctx, out, sh)
@@ -207,14 +207,14 @@ fn mt19937_smt_recover_state_prefix(any constraints) dict {
    def sat = z3_solver_check(ctx, s)
    mut result = dict()
    result = result.set("sat", sat)
-   if(!sat){
+   if !sat {
       z3_solver_del(ctx, s)
       z3_ctx_del(ctx)
       return result
    }
    mut model_words = []
    i = 0
-   while(i < nwords){
+   while i < nwords {
       def mv = z3_model_eval_u64(ctx, s, words.get(i))
       model_words = model_words.append((mv == nil) ? 0 : (int(mv) & 0xFFFFFFFF))
       i += 1
@@ -229,7 +229,7 @@ fn _mt_init_genrand(any seed32) list {
    mut state = []
    state = state.append(seed32 & 0xFFFFFFFF)
    mut i = 1
-   while(i < 624){
+   while i < 624 {
       def prev = state.get(i - 1)
       def t = prev ^^ (prev >> 30)
       state = state.append((1812433253 * t + i) & 0xFFFFFFFF)
@@ -240,10 +240,10 @@ fn _mt_init_genrand(any seed32) list {
 
 fn _seed_int_to_key32(any seed_int) list {
    mut n = seed_int
-   if(n < 0){ n = -n }
-   if(n == 0){ return [0] }
+   if n < 0 { n = -n }
+   if n == 0 { return [0] }
    mut keys = []
-   while(n > 0){
+   while n > 0 {
       keys = keys.append(n & 0xFFFFFFFF)
       n = n >> 32
    }
@@ -256,29 +256,29 @@ fn _mt_init_by_array(list keys) list {
    mut i = 1
    mut j = 0
    mut k = 624
-   if(key_len > 624){ k = key_len }
-   while(k > 0){
+   if key_len > 624 { k = key_len }
+   while k > 0 {
       def prev = mt.get(i - 1)
       def t = prev ^^ (prev >> 30)
       def cur = mt.get(i)
       mt[i] = ((cur ^^ ((t * 1664525) & 0xFFFFFFFF)) + (keys.get(j) & 0xFFFFFFFF) + j) & 0xFFFFFFFF
       i += 1
       j += 1
-      if(i >= 624){
+      if i >= 624 {
          mt[0] = mt.get(623)
          i = 1
       }
-      if(j >= key_len){ j = 0 }
+      if j >= key_len { j = 0 }
       k -= 1
    }
    k = 623
-   while(k > 0){
+   while k > 0 {
       def prev = mt.get(i - 1)
       def t = prev ^^ (prev >> 30)
       def cur = mt.get(i)
       mt[i] = ((cur ^^ ((t * 1566083941) & 0xFFFFFFFF)) - i) & 0xFFFFFFFF
       i += 1
-      if(i >= 624){
+      if i >= 624 {
          mt[0] = mt.get(623)
          i = 1
       }
@@ -297,18 +297,18 @@ fn py_mt19937_seed_int(any seed_int) list {
 
 fn py_mt19937_getrandbits(list state_orig, int index, int k) list {
    "Python-compatible getrandbits(k). Returns [value, updated_state, new_index]."
-   if(k <= 0){ return [0, state_orig, index] }
+   if k <= 0 { return [0, state_orig, index] }
    def words = (k + 31) / 32
    mut state = state_orig
    mut idx = index
    mut out = Z(0)
    mut i = 0
    mut kk = k
-   while(i < words){
+   while i < words {
       def r = mt19937_next(state, idx)
       mut w = r.get(0) & 0xFFFFFFFF
       state, idx = r.get(1), r.get(2)
-      if(kk < 32){
+      if kk < 32 {
          w = w >> (32 - kk)
       }
       out = out + (Z(w) << (32 * i))
@@ -320,12 +320,12 @@ fn py_mt19937_getrandbits(list state_orig, int index, int k) list {
 
 fn py_mt19937_randbelow(list state_in, int idx_in, int n) list {
    "Python Random._randbelow(n). Returns [value, updated_state, new_index]."
-   if(n <= 0){ return [0, state_in, idx_in] }
+   if n <= 0 { return [0, state_in, idx_in] }
    def k = bit_length(Z(n))
    mut state = state_in
    mut idx = idx_in
    mut r = Z(n)
-   while(r >= Z(n)){
+   while r >= Z(n) {
       def got = py_mt19937_getrandbits(state, idx, k)
       r = Z(got[0])
       state, idx = got[1], got[2]
@@ -343,10 +343,10 @@ fn py_mt19937_randrange(list state_in, int idx_in, int start, int stop) list {
 fn py_mt19937_sample_range(list state_in, int idx_in, int n, int k) list {
    "Python Random.sample(range(n), k) index sequence for n <= CPython's pool threshold.
    Returns [indices, updated_state, new_index]."
-   if(k < 0 || k > n){ return [[], state_in, idx_in] }
+   if k < 0 || k > n { return [[], state_in, idx_in] }
    mut pool = []
    mut i = 0
-   while(i < n){
+   while i < n {
       pool = pool.append(i)
       i += 1
    }
@@ -354,7 +354,7 @@ fn py_mt19937_sample_range(list state_in, int idx_in, int n, int k) list {
    mut state = state_in
    mut idx = idx_in
    i = 0
-   while(i < k){
+   while i < k {
       def got = py_mt19937_randbelow(state, idx, n - i)
       def j = int(got[0])
       state, idx = got[1], got[2]
@@ -367,15 +367,15 @@ fn py_mt19937_sample_range(list state_in, int idx_in, int n, int k) list {
 
 fn py_getrandbits_unpack_words_full(any value, int k) list {
    "Invert Python getrandbits(k) packing, omitting the final partial word."
-   if(k <= 0){ return [] }
+   if k <= 0 { return [] }
    def words = (k + 31) / 32
    def rem = k % 32
    def acc = Z(value)
    mut out = []
    mut i = 0
-   while(i < words){
+   while i < words {
       def w = (acc >> Z(32 * i)) & Z(0xFFFFFFFF)
-      if(!(rem != 0 && i == words - 1)){ out = out.append(w) }
+      if !(rem != 0 && i == words - 1) { out = out.append(w) }
       i += 1
    }
    out
@@ -387,15 +387,15 @@ fn _py_mt_constraint(int index, str kind, any value, int bits) dict {
 
 fn py_getrandbits_word_constraints(any value, int k, int start_index=0) list {
    "Convert Python getrandbits(k) output into MT output constraints."
-   if(k <= 0){ return [] }
+   if k <= 0 { return [] }
    def words = (k + 31) / 32
    def rem = k % 32
    def acc = Z(value)
    mut out = []
    mut i = 0
-   while(i < words){
+   while i < words {
       def shift = Z(32 * i)
-      if(rem != 0 && i == words - 1){
+      if rem != 0 && i == words - 1 {
          def mask = (Z(1) << Z(rem)) - Z(1)
          out = out.append(_py_mt_constraint(start_index + i, "hi", (acc >> shift) & mask, rem))
       } else {
@@ -418,7 +418,7 @@ fn _fixed_little_endian_bytes(any value, int nbytes) list {
    def be = bigint_to_bytes(value)
    mut out = list(nbytes)
    mut i = 0
-   while(i < nbytes){
+   while i < nbytes {
       def src = be.len - 1 - i
       out[i] = src >= 0 ? be[src] : 0
       i += 1
@@ -428,14 +428,14 @@ fn _fixed_little_endian_bytes(any value, int nbytes) list {
 
 fn py_mt19937_randbytes(list state_in, int idx_in, int nbytes) list {
    "Reproduce CPython Random.randbytes(nbytes) from a cloned MT state."
-   if(nbytes <= 0){ return [[], state_in, idx_in] }
+   if nbytes <= 0 { return [[], state_in, idx_in] }
    def r = py_mt19937_getrandbits(state_in, idx_in, nbytes * 8)
    [_fixed_little_endian_bytes(r[0], nbytes), r[1], r[2]]
 }
 
 #main {
    fn _mt_check(bool cond, str msg) int {
-      if(!cond){ __panic(msg) }
+      if !cond { __panic(msg) }
       0
    }
    def sample = 2754794679

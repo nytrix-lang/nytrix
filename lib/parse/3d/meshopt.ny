@@ -30,25 +30,25 @@ fn _meshopt_trace_enabled() bool {
 }
 
 layout MeshletBounds {
-   center_x:  f32
-   center_y:  f32
-   center_z:  f32
-   radius:    f32
-   cone_ax:   f32
-   cone_ay:   f32
-   cone_az:   f32
-   cone_cutoff: f32
+   f32 center_x,
+   f32 center_y,
+   f32 center_z,
+   f32 radius,
+   f32 cone_ax,
+   f32 cone_ay,
+   f32 cone_az,
+   f32 cone_cutoff
 }
 
 layout Meshlet {
-   vertex_offset:   u32
-   triangle_offset: u32
-   vertex_count:    u32
-   triangle_count:  u32
-   bounds:          MeshletBounds
-   cluster_error:   f32
-   parent_error:    f32
-   lod_level:       u32
+   u32 vertex_offset,
+   u32 triangle_offset,
+   u32 vertex_count,
+   u32 triangle_count,
+   MeshletBounds bounds,
+   f32 cluster_error,
+   f32 parent_error,
+   u32 lod_level
 }
 
 fn _px(any vbuf, int vi, int stride) any { f32le(vbuf, vi * stride) }
@@ -202,7 +202,7 @@ fn meshopt_optimize_vertex_cache(list indices, int vertex_count) list {
          vscores[vi] = ns
          def base = offsets.get(vi)
          mut ai = 0
-         while ai < live.get(vi){
+         while ai < live.get(vi) {
             def t = int(adj_data.get(base+ai))
             if emitted.get(t) == 0 {
                def ts = tscores.get(t) + diff
@@ -340,10 +340,10 @@ fn meshopt_simplify(list indices, any vbuf, int pos_stride, int target_tris) dic
    "Runs the meshopt simplify operation."
    def tc = indices.len / 3
    if tc <= target_tris { return { "indices": indices, "error": 0.0 } }
-   if(_meshopt_trace_enabled()){ print("[meshopt:simplify] tri_count=" + to_str(tc) + " -> " + to_str(target_tris)) }
+   if _meshopt_trace_enabled() { print("[meshopt:simplify] tri_count=" + to_str(tc) + " -> " + to_str(target_tris)) }
    mut max_v = 0
    mut i = 0
-   while i < indices.len{
+   while i < indices.len {
       def v = int(indices.get(i))
       if v > max_v { max_v = v }
       i += 1
@@ -389,7 +389,7 @@ fn meshopt_simplify(list indices, any vbuf, int pos_stride, int target_tris) dic
    }
    mut cur_idx = list(0)
    i = 0
-   while i < indices.len{
+   while i < indices.len {
       cur_idx = vec_push(cur_idx, indices.get(i))
       i += 1
    }
@@ -506,7 +506,7 @@ fn _meshlet_best_neighbor(list indices, list adj_offsets, list adj_counts, list 
    mut best_pri = 5
    mut best_score = 0
    mut bvi = 0
-   while bvi < m_verts.len{
+   while bvi < m_verts.len {
       def bgv = m_verts.get(bvi)
       def b_base = adj_offsets.get(bgv)
       def b_cnt = adj_counts.get(bgv)
@@ -525,7 +525,7 @@ fn _meshlet_best_neighbor(list indices, list adj_offsets, list adj_counts, list 
                if extra == 0 { pri = 0 }
                elif live.get(bi0) == 1 || live.get(bi1) == 1 || live.get(bi2) == 1 { pri = 1 }
                def score = -extra
-               if pri < best_pri || (pri == best_pri && score > best_score){
+               if pri < best_pri || (pri == best_pri && score > best_score) {
                   best_pri = pri
                   best_score = score
                   nb = bt
@@ -542,7 +542,7 @@ fn _meshlet_best_neighbor(list indices, list adj_offsets, list adj_counts, list 
 fn _meshlet_flat_indices(list m_verts, list m_tris) list {
    mut flat = []
    mut ti_f = 0
-   while ti_f < m_tris.len{
+   while ti_f < m_tris.len {
       def packed = m_tris.get(ti_f)
       def li0 = packed & 255
       def li1 = (packed >> 8) & 255
@@ -581,14 +581,14 @@ fn _meshlet_flush(any vbuf, int pos_stride, int lod_level, any cluster_error, li
    }
    out_meshlets = vec_push(out_meshlets, m)
    mut vi_f = 0
-   while vi_f < m_verts.len{
+   while vi_f < m_verts.len {
       def gv = m_verts.get(vi_f)
       out_vert_data = vec_push(out_vert_data, gv)
       used[gv] = -1
       vi_f += 1
    }
    mut ti_emit = 0
-   while ti_emit < m_tris.len{
+   while ti_emit < m_tris.len {
       out_tri_data = vec_push(out_tri_data, m_tris.get(ti_emit))
       ti_emit += 1
    }
@@ -670,7 +670,7 @@ fn meshopt_build_lod_hierarchy(list indices, int vcnt, any vbuf, int pos_stride,
    lods = vec_push(lods, { "level": 0, "result": lod0, "error": 0.0 })
    mut cur = list(0)
    mut i = 0
-   while i < indices.len{
+   while i < indices.len {
       cur = vec_push(cur, indices.get(i))
       i += 1
    }
@@ -683,12 +683,12 @@ fn meshopt_build_lod_hierarchy(list indices, int vcnt, any vbuf, int pos_stride,
       mut new_idx = []
       mut stuck = true
       mut gi = 0
-      while gi < groups.len{
+      while gi < groups.len {
          def grp = groups.get(gi)
          def prev_result = prev_lod.result
          mut merged = []
          mut ci = 0
-         while ci < grp.len{
+         while ci < grp.len {
             def m_idx = grp.get(ci)
             def m     = prev_result.meshlets.get(m_idx)
             def voff  = m.vertex_offset
@@ -713,14 +713,14 @@ fn meshopt_build_lod_hierarchy(list indices, int vcnt, any vbuf, int pos_stride,
          def ratio = float(len(simp.indices)) / float(merged.len)
          if ratio < 0.92 {
             mut k = 0
-            while k < len(simp.indices){
+            while k < len(simp.indices) {
                new_idx = vec_push(new_idx, simp.indices.get(k))
                k += 1
             }
             stuck = false
          } else {
             mut k = 0
-            while k < merged.len{
+            while k < merged.len {
                new_idx = vec_push(new_idx, merged.get(k))
                k += 1
             }
@@ -729,13 +729,13 @@ fn meshopt_build_lod_hierarchy(list indices, int vcnt, any vbuf, int pos_stride,
       }
       if stuck || new_idx.len < 9 { break }
       def new_tris = new_idx.len / 3
-      if new_tris >= int(float(cur_tris) * 0.95){ break }
+      if new_tris >= int(float(cur_tris) * 0.95) { break }
       def opt_n = meshopt_optimize_vertex_cache(new_idx, vcnt)
       def simp_err = prev_err + 1.0
       def lod_n = meshopt_build_meshlets(opt_n, vcnt, vbuf, pos_stride, 128, 128, lod_level, prev_err)
       def prev_ms2 = prev_lod.result.meshlets
       mut mi = 0
-      while mi < prev_ms2.len{
+      while mi < prev_ms2.len {
          def m = prev_ms2.get(mi)
          def updated_m = {
             "vertex_offset":   m.vertex_offset,
@@ -761,11 +761,11 @@ fn meshopt_build_lod_hierarchy(list indices, int vcnt, any vbuf, int pos_stride,
 
 fn meshopt_process_mesh(list indices, int vcnt, any vbuf, int pos_stride, int max_levels) dict {
    "Runs the meshopt process mesh operation."
-   if(_meshopt_trace_enabled()){ print("[meshopt] Processing mesh: indices=" + to_str(indices.len) + " verts=" + to_str(vcnt)) }
+   if _meshopt_trace_enabled() { print("[meshopt] Processing mesh: indices=" + to_str(indices.len) + " verts=" + to_str(vcnt)) }
    def opt = meshopt_optimize_vertex_cache(indices, vcnt)
-   if(_meshopt_trace_enabled()){ print("[meshopt] Cache optimization complete.") }
+   if _meshopt_trace_enabled() { print("[meshopt] Cache optimization complete.") }
    def res = meshopt_build_lod_hierarchy(opt, vcnt, vbuf, pos_stride, max_levels)
-   if(_meshopt_trace_enabled()){ print("[meshopt] Hierarchy build complete.") }
+   if _meshopt_trace_enabled() { print("[meshopt] Hierarchy build complete.") }
    return res
 }
 
@@ -784,11 +784,11 @@ fn meshopt_select_lod_cut(dict lod_hierarchy, any cam_x, any cam_y, any cam_z, a
    def lods = lod_hierarchy.lods
    mut render_list = []
    mut li = 0
-   while li < lods.len{
+   while li < lods.len {
       def lod_rec = lods.get(li)
       def ms = lod_rec.result.meshlets
       mut mi = 0
-      while mi < ms.len{
+      while mi < ms.len {
          def m = ms.get(mi)
          def bnd = m.bounds
          def own_err = meshopt_cluster_screen_error(

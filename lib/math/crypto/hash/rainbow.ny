@@ -17,7 +17,7 @@ fn rainbow_chain(any start, fnptr hash_fn, fnptr reduce_fn, int chain_len) list 
    Returns [start, end]."
    mut cur = start
    mut i = 0
-   while(i < chain_len){
+   while i < chain_len {
       cur = reduce_fn(hash_fn(cur), i)
       i += 1
    }
@@ -29,7 +29,7 @@ fn build_rainbow_table(list starts, fnptr hash_fn, fnptr reduce_fn, int chain_le
    Returns a list of [start, end] chain entries."
    mut table = []
    mut i = 0
-   while(i < starts.len){
+   while i < starts.len {
       table = table.append(rainbow_chain(starts.get(i), hash_fn, reduce_fn, chain_len))
       i += 1
    }
@@ -41,24 +41,24 @@ fn rainbow_lookup(any target_hash, list table, fnptr hash_fn, fnptr reduce_fn, i
    For each table entry, walk backwards from the end to find a matching chain.
    Returns the cracked plaintext or nil."
    mut i = 0
-   while(i < table.len){
+   while i < table.len {
       def entry = table.get(i)
       def start = entry.get(0)
       def end = entry.get(1)
       mut step = chain_len - 1
-      while(step >= 0){
+      while step >= 0 {
          mut cur = target_hash
          mut j = step
-         while(j < chain_len){
+         while j < chain_len {
             cur = hash_fn(reduce_fn(cur, j))
             j += 1
          }
          def endpoint = reduce_fn(target_hash, chain_len - 1)
-         if(endpoint == end || step == 0){
+         if endpoint == end || step == 0 {
             mut pt = start
             mut k = 0
-            while(k < chain_len){
-               if(hash_fn(pt) == target_hash){ return pt }
+            while k < chain_len {
+               if hash_fn(pt) == target_hash { return pt }
                pt = reduce_fn(hash_fn(pt), k)
                k += 1
             }
@@ -76,7 +76,7 @@ fn build_dict_table(list words, fnptr hash_fn) dict {
    Returns a dict for fast O(1) lookup."
    mut table = dict(words.len + 8)
    mut i = 0
-   while(i < words.len){
+   while i < words.len {
       def w = words.get(i)
       table.set(hash_fn(w), w)
       i += 1

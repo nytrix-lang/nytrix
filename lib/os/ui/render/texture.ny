@@ -27,7 +27,7 @@ fn rgba_mip_level_count(int w, int h) int {
    mut levels = 1
    mut cw = max(1, int(w))
    mut ch = max(1, int(h))
-   while(cw > 1 || ch > 1){
+   while cw > 1 || ch > 1 {
       cw, ch = max(1, cw >> 1), max(1, ch >> 1)
       levels += 1
    }
@@ -39,9 +39,9 @@ fn rgba_mip_total_bytes(int w, int h) int {
    mut total = 0
    mut cw = max(1, int(w))
    mut ch = max(1, int(h))
-   while(cw > 0 && ch > 0){
+   while cw > 0 && ch > 0 {
       total += cw * ch * 4
-      if(cw == 1 && ch == 1){ break }
+      if cw == 1 && ch == 1 { break }
       cw, ch = max(1, cw >> 1), max(1, ch >> 1)
    }
    total
@@ -50,44 +50,44 @@ fn rgba_mip_total_bytes(int w, int h) int {
 fn generate_rgba_mips(ptr src_pixels, int w, int h, bool copy_single=false) any {
    "Generates packed RGBA mip levels from a source RGBA image."
    def iw, ih = int(w), int(h)
-   if(!src_pixels || iw <= 0 || ih <= 0){ return 0 }
+   if !src_pixels || iw <= 0 || ih <= 0 { return 0 }
    def levels = rgba_mip_level_count(iw, ih)
-   if(levels <= 1){
-      if(!copy_single){ return src_pixels }
+   if levels <= 1 {
+      if !copy_single { return src_pixels }
       def single_bytes = iw * ih * 4
       def copy = malloc(single_bytes)
-      if(!copy){ return 0 }
+      if !copy { return 0 }
       memcpy(copy, src_pixels, single_bytes)
       return copy
    }
    def total = rgba_mip_total_bytes(iw, ih)
    mut dst = malloc(total)
-   if(!dst){ return 0 }
+   if !dst { return 0 }
    memcpy(dst, src_pixels, iw * ih * 4)
    mut src_off = 0
    mut dst_off = iw * ih * 4
    mut prev_w = iw
    mut prev_h = ih
    mut i = 1
-   while(i < levels){
+   while i < levels {
       mut next_w, next_h = prev_w >> 1, prev_h >> 1
-      if(next_w < 1){ next_w = 1 }
-      if(next_h < 1){ next_h = 1 }
+      if next_w < 1 { next_w = 1 }
+      if next_h < 1 { next_h = 1 }
       mut y = 0
-      while(y < next_h){
+      while y < next_h {
          mut x = 0
-         while(x < next_w){
+         while x < next_w {
             mut sx0, sy0 = x << 1, y << 1
-            if(sx0 >= prev_w){ sx0 = prev_w - 1 }
-            if(sy0 >= prev_h){ sy0 = prev_h - 1 }
+            if sx0 >= prev_w { sx0 = prev_w - 1 }
+            if sy0 >= prev_h { sy0 = prev_h - 1 }
             mut sx1, sy1 = sx0 + 1, sy0 + 1
-            if(sx1 >= prev_w){ sx1 = prev_w - 1 }
-            if(sy1 >= prev_h){ sy1 = prev_h - 1 }
+            if sx1 >= prev_w { sx1 = prev_w - 1 }
+            if sy1 >= prev_h { sy1 = prev_h - 1 }
             def p00, p10 = src_off + (sy0 * prev_w + sx0) * 4, src_off + (sy0 * prev_w + sx1) * 4
             def p01, p11 = src_off + (sy1 * prev_w + sx0) * 4, src_off + (sy1 * prev_w + sx1) * 4
             def dp = dst_off + (y * next_w + x) * 4
             mut c = 0
-            while(c < 4){
+            while c < 4 {
                def sum = int(load8(dst, p00 + c)) + int(load8(dst, p10 + c)) + int(load8(dst, p01 + c)) + int(load8(dst, p11 + c))
                store8(dst, (sum + 2) / 4, dp + c)
                c += 1
@@ -106,22 +106,22 @@ fn generate_rgba_mips(ptr src_pixels, int w, int h, bool copy_single=false) any 
 
 fn resize(dict img, int new_w, int new_h) any {
    "Resizes an image dictionary using bilinear interpolation."
-   if(!is_dict(img)){ return 0 }
+   if !is_dict(img) { return 0 }
    def w, h = img.get("width"), img.get("height")
    def pixels = img.get("data")
    def new_pixels = malloc(new_w * new_h * 4)
-   if(!new_pixels){ return 0 }
+   if !new_pixels { return 0 }
    def x_ratio, y_ratio = float(w - 1) / float(new_w), float(h - 1) / float(new_h)
    mut y = 0
-   while(y < new_h){
+   while y < new_h {
       mut x = 0
-      while(x < new_w){
+      while x < new_w {
          def px, py = float(x) * x_ratio, float(y) * y_ratio
          def x_l, x_h = int(floor(px)), int(ceil(px))
          def y_l, y_h = int(floor(py)), int(ceil(py))
          def x_weight, y_weight = px - float(x_l), py - float(y_l)
          mut c = 0
-         while(c < 4){
+         while c < 4 {
             def a, b = float(load8(pixels, (y_l * w + x_l) * 4 + c)), float(load8(pixels, (y_l * w + x_h) * 4 + c))
             def d, e = float(load8(pixels, (y_h * w + x_l) * 4 + c)), float(load8(pixels, (y_h * w + x_h) * 4 + c))
             def val = a * (1 - x_weight) * (1 - y_weight) +
@@ -149,9 +149,13 @@ fn _node_new(list nodes, any x, any y, any nxt) int {
 }
 
 fn _nx(list nodes, any idx) any { nodes.get(idx).get(0) }
+
 fn _ny(list nodes, any idx) any { nodes.get(idx).get(1) }
+
 fn _nn(list nodes, any idx) any { nodes.get(idx).get(2) }
+
 fn _set_nxt(list nodes, any idx, any v) any { nodes.get(idx).set(2, v) }
+
 fn _set_x(list nodes, any idx, any v) any { nodes.get(idx).set(0, v) }
 
 fn rect_pack_init(any width, any height, any heuristic=0) dict {
@@ -176,17 +180,17 @@ fn _skyline_find_min_y(list nodes, any first_idx, any x0, any width) list {
    mut min_y = 0
    mut waste = 0
    mut visited_w = 0
-   while(_nx(nodes, node_idx) < x1){
+   while _nx(nodes, node_idx) < x1 {
       def ny = _ny(nodes, node_idx)
       def nn_idx = _nn(nodes, node_idx)
       def nx2 = _nx(nodes, nn_idx)
-      if(ny > min_y){
+      if ny > min_y {
          waste += visited_w * (ny - min_y)
          min_y = ny
-         if(_nx(nodes, node_idx) < x0){ visited_w += nx2 - x0 } else { visited_w += nx2 - _nx(nodes, node_idx) }
+         if _nx(nodes, node_idx) < x0 { visited_w += nx2 - x0 } else { visited_w += nx2 - _nx(nodes, node_idx) }
       } else {
          mut under_w = nx2 - _nx(nodes, node_idx)
-         if(under_w + visited_w > width){ under_w = width - visited_w }
+         if under_w + visited_w > width { under_w = width - visited_w }
          waste += under_w * (min_y - ny)
          visited_w += under_w
       }
@@ -203,26 +207,26 @@ fn _skyline_find_best_pos(dict ctx, any w, any h) list {
    def align  = ctx.get("align")
    mut aw = (w + align - 1)
    aw -= (aw % align)
-   if(aw > cw || h > ch){ return [0, 0, 0, -1] }
+   if aw > cw || h > ch { return [0, 0, 0, -1] }
    mut best_waste = 0x3FFFFFFF
    mut best_x = 0
    mut best_y = 0x3FFFFFFF
    mut best_prev = -2
    mut prev_idx = -1
    mut node_idx = ctx.get("active")
-   while(_nx(nodes, node_idx) + aw <= cw){
+   while _nx(nodes, node_idx) + aw <= cw {
       def res = _skyline_find_min_y(nodes, node_idx, _nx(nodes, node_idx), aw)
       def y   = res.get(0)
       def wst = res.get(1)
-      if(heur == RECT_PACK_HEURISTIC_BL){
-         if(y < best_y){
+      if heur == RECT_PACK_HEURISTIC_BL {
+         if y < best_y {
             best_y    = y
             best_prev = prev_idx
             best_x    = _nx(nodes, node_idx)
          }
       } else {
-         if(y + h <= ch){
-            if(y < best_y || (y == best_y && wst < best_waste)){
+         if y + h <= ch {
+            if y < best_y || (y == best_y && wst < best_waste) {
                best_y    = y
                best_waste = wst
                best_prev = prev_idx
@@ -233,23 +237,23 @@ fn _skyline_find_best_pos(dict ctx, any w, any h) list {
       prev_idx = node_idx
       node_idx = _nn(nodes, node_idx)
    }
-   if(heur == RECT_PACK_HEURISTIC_BF){
+   if heur == RECT_PACK_HEURISTIC_BF {
       mut tail_idx = ctx.get("active")
       mut pv2 = -1
       mut nd2 = ctx.get("active")
-      while(_nx(nodes, tail_idx) < aw){ tail_idx = _nn(nodes, tail_idx) }
-      while(tail_idx != -1){
+      while _nx(nodes, tail_idx) < aw { tail_idx = _nn(nodes, tail_idx) }
+      while tail_idx != -1 {
          def xpos = _nx(nodes, tail_idx) - aw
-         if(xpos < 0){ tail_idx = _nn(nodes, tail_idx) }
-         while(_nx(nodes, _nn(nodes, nd2)) <= xpos){
+         if xpos < 0 { tail_idx = _nn(nodes, tail_idx) }
+         while _nx(nodes, _nn(nodes, nd2)) <= xpos {
             pv2 = nd2
             nd2 = _nn(nodes, nd2)
          }
          def res = _skyline_find_min_y(nodes, nd2, xpos, aw)
          def y   = res.get(0)
          def wst = res.get(1)
-         if(y + h <= ch && y <= best_y){
-            if(y < best_y || wst < best_waste || (wst == best_waste && xpos < best_x)){
+         if y + h <= ch && y <= best_y {
+            if y < best_y || wst < best_waste || (wst == best_waste && xpos < best_x) {
                best_x, best_y = xpos, y
                best_waste = wst
                best_prev = pv2
@@ -258,7 +262,7 @@ fn _skyline_find_best_pos(dict ctx, any w, any h) list {
          tail_idx = _nn(nodes, tail_idx)
       }
    }
-   if(best_prev == -2){ return [0, 0, 0, -1] }
+   if best_prev == -2 { return [0, 0, 0, -1] }
    [1, best_x, best_y, best_prev]
 }
 
@@ -273,27 +277,27 @@ fn _skyline_pack_one(dict ctx, any w, any h) list {
    def rx      = res.get(1)
    def ry      = res.get(2)
    def prev_idx = res.get(3)
-   if(!found || ry + h > ch){ return [0, 0, 0] }
+   if !found || ry + h > ch { return [0, 0, 0] }
    def new_idx = _node_new(nodes, rx, ry + h, -1)
    def active = ctx.get("active")
    def cur_idx = (prev_idx == -1) ? active : _nn(nodes, prev_idx)
-   if(_nx(nodes, cur_idx) < rx){
+   if _nx(nodes, cur_idx) < rx {
       def after = _nn(nodes, cur_idx)
       _set_nxt(nodes, cur_idx, new_idx)
       _set_nxt(nodes, new_idx, after)
       mut scan = after
-      while(scan != -1 && _nn(nodes, scan) != -1 && _nx(nodes, _nn(nodes, scan)) <= rx + aw){
+      while scan != -1 && _nn(nodes, scan) != -1 && _nx(nodes, _nn(nodes, scan)) <= rx + aw {
          def next = _nn(nodes, scan)
          scan = next
       }
       _set_nxt(nodes, new_idx, scan)
    } else {
-      if(prev_idx == -1){ ctx.set("active", new_idx) } else { _set_nxt(nodes, prev_idx, new_idx) }
+      if prev_idx == -1 { ctx.set("active", new_idx) } else { _set_nxt(nodes, prev_idx, new_idx) }
       _set_nxt(nodes, new_idx, cur_idx)
       mut scan = cur_idx
-      while(scan != -1 && _nn(nodes, scan) != -1 && _nx(nodes, _nn(nodes, scan)) <= rx + aw){ scan = _nn(nodes, scan) }
+      while scan != -1 && _nn(nodes, scan) != -1 && _nx(nodes, _nn(nodes, scan)) <= rx + aw { scan = _nn(nodes, scan) }
       _set_nxt(nodes, new_idx, scan)
-      if(scan != -1 && _nx(nodes, scan) < rx + aw){ _set_x(nodes, scan, rx + aw) }
+      if scan != -1 && _nx(nodes, scan) < rx + aw { _set_x(nodes, scan, rx + aw) }
    }
    [1, rx, ry]
 }
@@ -301,16 +305,16 @@ fn _skyline_pack_one(dict ctx, any w, any h) list {
 fn _sort_by_height(list rects) any {
    def n = rects.len
    mut i = 1
-   while(i < n){
+   while i < n {
       def key = rects.get(i)
       def kh = key.get("h")
       def kw = key.get("w")
       mut j = i - 1
-      while(j >= 0){
+      while j >= 0 {
          def rj = rects.get(j)
          def rjh = rj.get("h")
          def rjw = rj.get("w")
-         if(rjh > kh || (rjh == kh && rjw >= kw)){ break }
+         if rjh > kh || (rjh == kh && rjw >= kw) { break }
          rects.set(j + 1, rj)
          j -= 1
       }
@@ -323,24 +327,24 @@ fn rect_pack(dict ctx, list rects) int {
    "Packs texture-atlas rect dicts {id, w, h} into ctx. Sets x, y, packed on each."
    def n = rects.len
    mut i = 0
-   while(i < n){
+   while i < n {
       rects.get(i).set("_ord", i)
       i += 1
    }
    _sort_by_height(rects)
    mut all_packed = 1
    i = 0
-   while(i < n){
+   while i < n {
       def r  = rects.get(i)
       def rw = r.get("w")
       def rh = r.get("h")
-      if(rw == 0 || rh == 0){
+      if rw == 0 || rh == 0 {
          r.set("x", 0)
          r.set("y", 0)
          r.set("packed", 1)
       } else {
          def res = _skyline_pack_one(ctx, rw, rh)
-         if(res.get(0)){
+         if res.get(0) {
             r.set("x", res.get(1))
             r.set("y", res.get(2))
             r.set("packed", 1)
@@ -355,15 +359,15 @@ fn rect_pack(dict ctx, list rects) int {
    }
    def sorted = list(n)
    i = 0
-   while(i < n){ sorted.append(0) i += 1 }
+   while i < n { sorted.append(0) i += 1 }
    i = 0
-   while(i < n){
+   while i < n {
       def r = rects.get(i)
       sorted.set(r.get("_ord"), r)
       i += 1
    }
    i = 0
-   while(i < n){ rects.set(i, sorted.get(i)) i += 1 }
+   while i < n { rects.set(i, sorted.get(i)) i += 1 }
    all_packed
 }
 
@@ -373,7 +377,7 @@ fn _v3_norm(any v) list {
    def y = float(v.get(1, 0.0))
    def z = float(v.get(2, 0.0))
    def l = sqrt(x * x + y * y + z * z)
-   if(l <= 0.000000001){ return [0.0, 0.0, 0.0] }
+   if l <= 0.000000001 { return [0.0, 0.0, 0.0] }
    [x / l, y / l, z / l]
 }
 
@@ -397,7 +401,7 @@ fn _v3_cross(any a, any b) list {
 fn srgb_to_linear_chan(any x) f64 {
    "Converts a normalized sRGB channel to linear."
    def c = clamp(float(x), 0.0, 1.0)
-   if(c <= 0.04045){ return c / 12.92 }
+   if c <= 0.04045 { return c / 12.92 }
    pow((c + 0.055) / 1.055, 2.4)
 }
 
@@ -405,9 +409,9 @@ fn srgb_to_linear_chan(any x) f64 {
 fn linear_to_srgb_chan(any x) f64 {
    "Converts a normalized linear channel to sRGB."
    mut c = float(x)
-   if(is_nan(c)){ c = 0.0 }
-   if(c < 0.0){ c = 0.0 } elif(c > 1.0){ c = 1.0 }
-   if(c <= 0.0031308){ return c * 12.92 }
+   if is_nan(c) { c = 0.0 }
+   if c < 0.0 { c = 0.0 } elif c > 1.0 { c = 1.0 }
+   if c <= 0.0031308 { return c * 12.92 }
    1.055 * pow(c, 1.0 / 2.4) - 0.055
 }
 
@@ -415,31 +419,31 @@ fn linear_to_srgb_chan(any x) f64 {
 fn linear_to_srgb_u8(any x) int {
    "Converts a normalized linear channel to an 8-bit sRGB channel."
    def y = linear_to_srgb_chan(x)
-   if(is_nan(y)){ return 0 }
+   if is_nan(y) { return 0 }
    clamp(int(y * 255.0 + 0.5), 0, 255)
 }
 
 @jit
 fn image_sample_linear_rgb_uv(any im, any u, any v) list {
    "Samples an RGBA image dictionary in linear RGB using wrapped U and clamped V."
-   if(!is_dict(im)){ return [0.0, 0.0, 0.0] }
+   if !is_dict(im) { return [0.0, 0.0, 0.0] }
    def data = im.get("data", 0)
    def w = int(im.get("width", 0))
    def h = int(im.get("height", 0))
-   if(!data || !is_str(data) || w <= 0 || h <= 0){ return [0.0, 0.0, 0.0] }
+   if !data || !is_str(data) || w <= 0 || h <= 0 { return [0.0, 0.0, 0.0] }
    mut uu = float(u) - floor(float(u))
    mut vv = clamp(float(v), 0.0, 1.0)
    def fx, fy = uu * float(w) - 0.5, vv * float(h) - 0.5
    mut x0, y0 = int(floor(fx)), int(floor(fy))
    mut x1, y1 = x0 + 1, y0 + 1
    def tx, ty = fx - float(x0), fy - float(y0)
-   while(x0 < 0){ x0 += w }
-   while(x1 < 0){ x1 += w }
+   while x0 < 0 { x0 += w }
+   while x1 < 0 { x1 += w }
    x0, x1 = x0 % w, x1 % w
-   if(y0 < 0){ y0 = 0 }
-   if(y1 < 0){ y1 = 0 }
-   if(y0 >= h){ y0 = h - 1 }
-   if(y1 >= h){ y1 = h - 1 }
+   if y0 < 0 { y0 = 0 }
+   if y1 < 0 { y1 = 0 }
+   if y0 >= h { y0 = h - 1 }
+   if y1 >= h { y1 = h - 1 }
    def i00, i10 = ((y0 * w) + x0) * 4, ((y0 * w) + x1) * 4
    def i01, i11 = ((y1 * w) + x0) * 4, ((y1 * w) + x1) * 4
    def c00 = [
@@ -522,50 +526,50 @@ fn _importance_sample_ggx(any xi_x, any xi_y, any roughness, any N) list {
 
 fn generate_spec_env_slab(any im, int base_w=256) any {
    "Generates a packed specular environment mip slab from an equirectangular RGBA image."
-   if(!is_dict(im)){ return 0 }
+   if !is_dict(im) { return 0 }
    def src_w, src_h = int(im.get("width", 0)), int(im.get("height", 0))
-   if(src_w <= 0 || src_h <= 0){ return 0 }
+   if src_w <= 0 || src_h <= 0 { return 0 }
    mut w0 = clamp(int(base_w), 64, 512)
-   if(w0 > src_w){ w0 = src_w }
+   if w0 > src_w { w0 = src_w }
    def h0 = max(1, w0 / 2)
    mut levels = 1
    mut tw = w0
    mut th = h0
    mut total = 0
-   while(true){
+   while true {
       total += tw * th * 4
-      if(tw <= 1 && th <= 1){ break }
+      if tw <= 1 && th <= 1 { break }
       tw, th = max(1, tw >> 1), max(1, th >> 1)
       levels += 1
    }
    def slab = malloc(total)
-   if(!slab){ return 0 }
+   if !slab { return 0 }
    mut off = 0
    mut level = 0
-   while(level < levels){
+   while level < levels {
       def w, h = max(1, w0 >> level), max(1, h0 >> level)
       def roughness = (levels > 1) ? float(level) / float(levels - 1) : 0.0
       mut sample_count = 1
-      if(level > 0){
-         if(roughness < 0.15){ sample_count = 64 }
-         elif(roughness < 0.5){ sample_count = 32 }
+      if level > 0 {
+         if roughness < 0.15 { sample_count = 64 }
+         elif roughness < 0.5 { sample_count = 32 }
          else { sample_count = 16 }
       }
       mut y = 0
-      while(y < h){
+      while y < h {
          def vv = (float(y) + 0.5) / float(h)
          def elev = (0.5 - vv) * 3.141592653589793
          def sin_e = sin(elev)
          def cos_e = cos(elev)
          mut x = 0
-         while(x < w){
+         while x < w {
             def uu = (float(x) + 0.5) / float(w)
             def phi = (uu - 0.5) * 6.283185307179586
             def N = _v3_norm([cos_e * cos(phi), sin_e, cos_e * sin(phi)])
             mut c0, c1 = 0.0, 0.0
             mut c2 = 0.0
             mut weight = 0.0
-            if(roughness <= 0.0 || sample_count <= 1){
+            if roughness <= 0.0 || sample_count <= 1 {
                def uv = env_dir_to_uv(N)
                def s = image_sample_linear_rgb_uv(im, uv.get(0, 0.0), uv.get(1, 0.0))
                c0, c1 = s.get(0, 0.0), s.get(1, 0.0)
@@ -573,7 +577,7 @@ fn generate_spec_env_slab(any im, int base_w=256) any {
                weight = 1.0
             } else {
                mut i = 0
-               while(i < sample_count){
+               while i < sample_count {
                   def xi_x, xi_y = float(i) / float(sample_count), _radical_inverse_vdc32(i)
                   def H = _importance_sample_ggx(xi_x, xi_y, roughness, N)
                   def VoH = max(_v3_dot(N, H), 0.0)
@@ -583,7 +587,7 @@ fn generate_spec_env_slab(any im, int base_w=256) any {
                         2.0 * VoH * H.get(2, 0.0) - N.get(2, 0.0)
                   ])
                   def NoL = max(_v3_dot(N, L), 0.0)
-                  if(NoL > 0.0){
+                  if NoL > 0.0 {
                      def uv = env_dir_to_uv(L)
                      def s = image_sample_linear_rgb_uv(im, uv.get(0, 0.0), uv.get(1, 0.0))
                      c0 += s.get(0, 0.0) * NoL
@@ -594,7 +598,7 @@ fn generate_spec_env_slab(any im, int base_w=256) any {
                   i += 1
                }
             }
-            if(weight > 0.0){
+            if weight > 0.0 {
                c0, c1 = c0 / weight, c1 / weight
                c2 = c2 / weight
             }
@@ -632,10 +636,10 @@ fn generate_env_image(int kind=0, int w=1024, int h=512) any {
    "Generates a procedural RGBA environment image."
    def iw, ih = max(1, int(w)), max(1, int(h))
    def pixels = malloc(iw * ih * 4)
-   if(!pixels){ return 0 }
+   if !pixels { return 0 }
    def fw, fh = float(iw), float(ih)
    mut y = 0
-   while(y < ih){
+   while y < ih {
       def v = (float(y) + 0.5) / fh
       def elev = (0.5 - v) * 3.141592653589793
       def dy = sin(elev)
@@ -644,11 +648,11 @@ fn generate_env_image(int kind=0, int w=1024, int h=512) any {
       def floor_t = clamp(-dy, 0.0, 1.0)
       def row = y * iw * 4
       mut x = 0
-      while(x < iw){
+      while x < iw {
          def u = (float(x) + 0.5) / fw
          mut c0, c1 = 0.0, 0.0
          mut c2 = 0.0
-         if(kind == 0){
+         if kind == 0 {
             c0, c1 = (0.58 * (1.0 - sky_t)) + ((0.78 + 0.035 * top_t) * sky_t), (0.60 * (1.0 - sky_t)) + ((0.80 + 0.036 * top_t) * sky_t)
             c2 = (0.66 * (1.0 - sky_t)) + ((0.86 + 0.040 * top_t) * sky_t)
             def key1_dx, key1_dy = (u - 0.74) / 0.055, (v - 0.27) / 0.085
@@ -661,7 +665,7 @@ fn generate_env_image(int kind=0, int w=1024, int h=512) any {
             c0 += key1 * 0.10 + key2 * 0.08 + top_strip * 0.034 + horizon
             c1 += key1 * 0.10 + key2 * 0.08 + top_strip * 0.034 + horizon
             c2 += key1 * 0.11 + key2 * 0.09 + top_strip * 0.038 + horizon
-         } elif(kind == 1){
+         } elif kind == 1 {
             c0, c1 = 0.70 + 0.15 * top_t - 0.08 * floor_t, 0.66 + 0.14 * top_t - 0.07 * floor_t
             c2 = 0.74 + 0.16 * top_t - 0.04 * floor_t
             def broad1_dx, broad1_dy = (u - 0.72) / 0.18, (v - 0.24) / 0.16
@@ -675,7 +679,7 @@ fn generate_env_image(int kind=0, int w=1024, int h=512) any {
             c0 += broad1 * 0.16 + broad2 * 0.12 + top_strip * 0.08 + horizon * 0.06 + warm_floor * 0.05
             c1 += broad1 * 0.12 + broad2 * 0.10 + top_strip * 0.06 + horizon * 0.04 + warm_floor * 0.03
             c2 += broad1 * 0.18 + broad2 * 0.16 + top_strip * 0.10 + horizon * 0.08 + warm_floor * 0.05
-         } elif(kind == 2){
+         } elif kind == 2 {
             mut l = 0.30 + 0.42 * top_t + 0.02 * floor_t
             def key_left_dx, key_left_dy = (u - 0.22) / 0.090, (v - 0.23) / 0.085
             def key_left = exp(-(key_left_dx * key_left_dx + key_left_dy * key_left_dy))
@@ -726,16 +730,25 @@ fn generate_env_image(int kind=0, int w=1024, int h=512) any {
 }
 
 fn generate_neutral_env_image(int w=1024, int h=512) any { generate_env_image(0, w, h) }
+
 fn generate_compare_visible_env_image(int w=1024, int h=512) any { generate_env_image(1, w, h) }
+
 fn generate_compare_reflect_env_image(int w=1024, int h=512) any { generate_env_image(2, w, h) }
+
 fn generate_studio_env_image(int w=1024, int h=512) any { generate_env_image(3, w, h) }
 
 fn scene_prefers_studio_env(any name) bool { render_env.scene_prefers_studio_env(name) }
+
 fn scene_prefers_neutral_env(any name) bool { render_env.scene_prefers_neutral_env(name) }
+
 fn scene_prefers_compare_reflect_env(any name) bool { render_env.scene_prefers_compare_reflect_env(name) }
+
 fn scene_prefers_compare_visible_env(any name) bool { render_env.scene_prefers_compare_visible_env(name) }
+
 fn scene_prefers_optical_spec_env(any name) bool { render_env.scene_prefers_optical_spec_env(name) }
+
 fn scene_prefers_black_visible_env(any name) bool { render_env.scene_prefers_black_visible_env(name) }
+
 fn scene_prefers_gray_proof_bg(any name) bool { render_env.scene_prefers_gray_proof_bg(name) }
 
 fn tex_job_make(int index, any uri, any mime="", any sampler=0, int material=-1, any slot="") dict {
@@ -755,7 +768,7 @@ fn tex_job_queue_make() dict {
 
 fn tex_job_queue_push(any q, any job) dict {
    "Pushes a texture job into a queue."
-   if(!is_dict(q)){ q = tex_job_queue_make() }
+   if !is_dict(q) { q = tex_job_queue_make() }
    def items = q.get("items", [])
    q["items"] = items.append(job)
    q
@@ -763,10 +776,10 @@ fn tex_job_queue_push(any q, any job) dict {
 
 fn tex_job_queue_pop(any q) any {
    "Pops the next texture job from a queue."
-   if(!is_dict(q)){ return 0 }
+   if !is_dict(q) { return 0 }
    def items = q.get("items", [])
    mut head = int(q.get("head", 0))
-   if(!is_list(items) || head >= items.len){ return 0 }
+   if !is_list(items) || head >= items.len { return 0 }
    def job = items.get(head, 0)
    q["head"] = head + 1
    job
@@ -798,13 +811,13 @@ fn tex_job_worker_plan(int worker_count=4) dict {
 
 fn tex_job_upload_plan(any results) list {
    "Filters completed texture job results down to uploadable records."
-   if(!is_list(results)){ return [] }
+   if !is_list(results) { return [] }
    mut out = list(0)
    mut i = 0
    def results_n = results.len
-   while(i < results_n){
+   while i < results_n {
       def r = results.get(i, 0)
-      if(is_dict(r) && r.get("ok", false)){ out = out.append(r) }
+      if is_dict(r) && r.get("ok", false) { out = out.append(r) }
       i += 1
    }
    out

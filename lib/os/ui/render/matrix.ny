@@ -24,14 +24,14 @@ fn mat4_identity() list {
 
 fn mat4_identity_into(list m) list {
    "Writes the 4x4 identity matrix into `m`."
-   mut i = 0 while(i < 16){ m[2 + i] = 0.0 i += 1 }
+   mut i = 0 while i < 16 { m[2 + i] = 0.0 i += 1 }
    m[2] = 1.0 m[7] = 1.0 m[12] = 1.0 m[17] = 1.0
    m
 }
 
 fn mat4_get(list m, int r, int c, f64 default=0.0) f64 {
    "Returns the 4x4 matrix element at row `r`, column `c`, or `default` when out of bounds."
-   if(r < 0 || r >= 4 || c < 0 || c >= 4){ return default }
+   if r < 0 || r >= 4 || c < 0 || c >= 4 { return default }
    m[2 + c * 4 + r]
 }
 
@@ -77,7 +77,7 @@ fn mat4_mul_vec4(list m, list v) list {
 fn mat4_add(list a, list b) list {
    "Returns the element-wise sum of 4x4 matrices `a` and `b`."
    mut o = _mat4_zero_raw()
-   mut i = 0 while(i < 16){ o[2 + i] = a[2+i] + b[2+i] i += 1 }
+   mut i = 0 while i < 16 { o[2 + i] = a[2+i] + b[2+i] i += 1 }
    o
 }
 
@@ -119,13 +119,13 @@ fn mat4_rotate(f64 angle, any axis) list {
 fn mat4_rotate_into(f64 angle, any axis, list m) list {
    "Writes an axis-angle rotation matrix into `m`."
    mut ax, ay, az = 0.0, 0.0, 0.0
-   if(is_list(axis) || is_tuple(axis)){
+   if is_list(axis) || is_tuple(axis) {
       def n = axis.len
-      if(n == 5 && is_int(axis[0]) && is_int(axis[1]) && axis[0]==1 && axis[1]==3){ ax = axis[2] ay = axis[3] az = axis[4] } else if(n >= 3){ ax, ay, az = axis[0], axis[1], axis[2] }
+      if n == 5 && is_int(axis[0]) && is_int(axis[1]) && axis[0]==1 && axis[1]==3 { ax = axis[2] ay = axis[3] az = axis[4] } else if n >= 3 { ax, ay, az = axis[0], axis[1], axis[2] }
    }
    def l = sqrt(ax*ax + ay*ay + az*az)
    mut x, y, z = ax, ay, az
-   if(l > 0.0001){ def il=1.0/l x *= il y *= il z *= il }
+   if l > 0.0001 { def il=1.0/l x *= il y *= il z *= il }
    def s=sin(angle) def c=cos(angle) def oc=1.0-c
    m[2] = x*x*oc + c   m[6] = x*y*oc + z*s m[10] = x*z*oc - y*s m[14] = 0.0
    m[3] = y*x*oc - z*s m[7] = y*y*oc + c   m[11] = y*z*oc + x*s m[15] = 0.0
@@ -187,7 +187,7 @@ fn mat4_perspective_into(f64 fovy, f64 aspect, f64 near, f64 far, list m) list {
    "Writes a perspective projection matrix into `m`."
    def f = 1.0 / tan(float(fovy) / 2.0)
    def nf = float(near) - float(far)
-   mut i = 0 while(i < 16){ m[2 + i] = 0.0 i += 1 }
+   mut i = 0 while i < 16 { m[2 + i] = 0.0 i += 1 }
    m[2] = f / float(aspect)
    m[7] = f
    m[12] = float(far) / nf
@@ -209,7 +209,7 @@ fn mat4_ortho_into(f64 l, f64 r, f64 b, f64 t, f64 n, f64 f, list m) list {
    def rl = float(r) - float(l)
    def tb = float(t) - float(b)
    def fn_ = float(f) - float(n)
-   mut i = 0 while(i < 16){ m[2 + i] = 0.0 i += 1 }
+   mut i = 0 while i < 16 { m[2 + i] = 0.0 i += 1 }
    m[2] = 2.0 / rl
    m[7] = 2.0 / tb
    m[12] = -1.0 / fn_
@@ -238,11 +238,11 @@ fn mat4_look_at_into_xyz(f64 ex, f64 ey, f64 ez, f64 cx, f64 cy, f64 cz, f64 ux,
    "Writes a view matrix into `m` from explicit eye, center, and up coordinates."
    def fx=cx-ex def fy=cy-ey def fz=cz-ez
    def fl = sqrt(fx*fx + fy*fy + fz*fz)
-   if(fl < 0.0001){ return mat4_identity_into(m) }
+   if fl < 0.0001 { return mat4_identity_into(m) }
    def ifl=1.0/fl def fnx=fx*ifl def fny=fy*ifl def fnz=fz*ifl
    mut sx, sy, sz = fny*uz-fnz*uy, fnz*ux-fnx*uz, fnx*uy-fny*ux
    def sl = sqrt(sx*sx + sy*sy + sz*sz)
-   if(sl > 0.0001){ def isl=1.0/sl sx *= isl sy *= isl sz *= isl }
+   if sl > 0.0001 { def isl=1.0/sl sx *= isl sy *= isl sz *= isl }
    def ux2=sy*fnz-sz*fny def uy2=sz*fnx-sx*fnz def uz2=sx*fny-sy*fnx
    m[2] = sx    m[6] = sy    m[10] = sz    m[14] = -(sx*ex + sy*ey + sz*ez)
    m[3] = ux2   m[7] = uy2   m[11] = uz2   m[15] = -(ux2*ex + uy2*ey + uz2*ez)
@@ -254,27 +254,27 @@ fn mat4_look_at_into_xyz(f64 ex, f64 ey, f64 ez, f64 cx, f64 cy, f64 cz, f64 ux,
 fn mat4_look_at_into(any eye, any center, any up, list m) list {
    "Writes a view matrix into `m` from vector inputs."
    mut ex, ey, ez = 0.0, 0.0, 0.0
-   if(is_list(eye) || is_tuple(eye)){
+   if is_list(eye) || is_tuple(eye) {
       def n = eye.len
-      if(n == 5 && is_int(eye[0]) && is_int(eye[1]) && eye[0]==1 && eye[1]==3){ ex = eye[2] ey = eye[3] ez = eye[4] } else if(n >= 3){ ex, ey, ez = eye[0], eye[1], eye[2] }
+      if n == 5 && is_int(eye[0]) && is_int(eye[1]) && eye[0]==1 && eye[1]==3 { ex = eye[2] ey = eye[3] ez = eye[4] } else if n >= 3 { ex, ey, ez = eye[0], eye[1], eye[2] }
    }
    mut cx, cy, cz = 0.0, 0.0, 0.0
-   if(is_list(center) || is_tuple(center)){
+   if is_list(center) || is_tuple(center) {
       def n = center.len
-      if(n == 5 && is_int(center[0]) && is_int(center[1]) && center[0]==1 && center[1]==3){ cx = center[2] cy = center[3] cz = center[4] } else if(n >= 3){ cx, cy, cz = center[0], center[1], center[2] }
+      if n == 5 && is_int(center[0]) && is_int(center[1]) && center[0]==1 && center[1]==3 { cx = center[2] cy = center[3] cz = center[4] } else if n >= 3 { cx, cy, cz = center[0], center[1], center[2] }
    }
    mut ux, uy, uz = 0.0, 0.0, 0.0
-   if(is_list(up) || is_tuple(up)){
+   if is_list(up) || is_tuple(up) {
       def n = up.len
-      if(n == 5 && is_int(up[0]) && is_int(up[1]) && up[0]==1 && up[1]==3){ ux = up[2] uy = up[3] uz = up[4] } else if(n >= 3){ ux, uy, uz = up[0], up[1], up[2] }
+      if n == 5 && is_int(up[0]) && is_int(up[1]) && up[0]==1 && up[1]==3 { ux = up[2] uy = up[3] uz = up[4] } else if n >= 3 { ux, uy, uz = up[0], up[1], up[2] }
    }
    mat4_look_at_into_xyz(ex, ey, ez, cx, cy, cz, ux, uy, uz, m)
 }
 
 fn mat4_transpose(list m) list {
    "Returns the transpose of 4x4 matrix `m`."
-   mut o, i = _mat4_zero_raw(), 0 while(i < 4){
-      mut j = 0 while(j < 4){
+   mut o, i = _mat4_zero_raw(), 0 while i < 4 {
+      mut j = 0 while j < 4 {
          o[2 + j*4 + i] = m[2 + i*4 + j]
          j += 1
       }
@@ -303,7 +303,7 @@ fn mat4_inverse_into(list src, list dst) list {
    def c08, c09 = m02*m33 - m32*m03, m12*m23 - m22*m13
    def c10, c11 = m12*m33 - m32*m13, m22*m33 - m32*m23
    def det = c00*c11 - c01*c10 + c02*c09 + c03*c08 - c04*c07 + c05*c06
-   if(abs(det) < 1e-12){ return dst }
+   if abs(det) < 1e-12 { return dst }
    def id = 1.0 / det
    dst[2]  = ( m11*c11 - m21*c10 + m31*c09) * id
    dst[3]  = (-m10*c11 + m20*c10 - m30*c09) * id

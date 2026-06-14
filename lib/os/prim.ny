@@ -19,23 +19,23 @@ fn ppid() int {
 fn env(str key) any {
    "Returns the value of environment variable `key`."
    def ep = __envp()
-   if(!ep){ return 0 }
+   if !ep { return 0 }
    else {
       def key_len = key.len
       mut i = 0
       mut res = 0
-      while(load64(ep, i*8)){
+      while load64(ep, i*8) {
          def env_entry = load64(ep, i*8)
          mut matches = 1
          mut j = 0
-         while(j < key_len){
-            if(load8(env_entry, j) != load8(key, j)){
+         while j < key_len {
+            if load8(env_entry, j) != load8(key, j) {
                matches = 0
                break
             }
             j += 1
          }
-         if(matches && load8(env_entry, key_len) == 61){
+         if matches && load8(env_entry, key_len) == 61 {
             res = core_str.cstr_to_str(env_entry, key_len + 1)
             break
          }
@@ -48,14 +48,14 @@ fn env(str key) any {
 fn environ() list {
    "Returns a list of environment entries."
    def ep = __envp()
-   if(!ep){ return list(8) }
+   if !ep { return list(8) }
    else {
       def n = envc()
-      if(n <= 0){ list(8) }
+      if n <= 0 { list(8) }
       else {
          mut xs = list(8)
          mut i = 0
-         while(i < n && load64(ep, i*8)){
+         while i < n && load64(ep, i*8) {
             def s_raw = load64(ep, i*8)
             xs = xs.append(core_str.cstr_to_str(s_raw))
             i += 1

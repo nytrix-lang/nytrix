@@ -144,8 +144,8 @@ fn envp(int i) ptr {
 @inline
 fn is_ptr(any x) bool {
    "Returns **true** if `x` appears to be a valid heap pointer."
-   if(!x){ return false }
-   if(__is_int(x)){ return false }
+   if !x { return false }
+   if __is_int(x) { return false }
    return(__and(x, 7) == 0)
 }
 
@@ -153,6 +153,6 @@ fn is_ptr(any x) bool {
 @inline
 fn is_none(any x) bool {
    "Returns **true** if `x` is **none**. Integer 0 is not **none**."
-   if(__is_int(x)){ return false }
+   if __is_int(x) { return false }
    return x == nil
 }

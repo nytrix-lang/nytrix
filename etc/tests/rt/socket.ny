@@ -15,5 +15,4 @@ assert(fails(__setsockopt(-1, 0, 0, 0, 0)), "setsockopt rejects invalid fd")
 assert(fails(__recv(-1, 0, 0, 0)), "recv rejects invalid fd")
 assert(fails(__send(-1, "x", 1, 0)), "send rejects invalid fd")
 assert(fails(__closesocket(-1)), "closesocket rejects invalid fd")
-
 print("✓ runtime socket tests passed")

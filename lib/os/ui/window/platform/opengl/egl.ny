@@ -11,7 +11,21 @@ use std.os.ui.window.platform.api as backend_api
 
 #linux {
    #link "libEGL.so"
-   #include <EGL/egl.h>
+   extern "EGL" {
+      fn eglGetDisplay(ptr native_display) ptr
+      fn eglInitialize(ptr display, ptr major, ptr minor) i32
+      fn eglChooseConfig(ptr display, ptr attrs, ptr configs, i32 config_size, ptr num_configs) i32
+      fn eglBindAPI(i32 api) i32
+      fn eglCreateContext(ptr display, ptr config, ptr share, ptr attrs) ptr
+      fn eglCreateWindowSurface(ptr display, ptr config, ptr native_window, ptr attrs) ptr
+      fn eglDestroySurface(ptr display, ptr surface) i32
+      fn eglGetConfigAttrib(ptr display, ptr config, i32 attrib, ptr value) i32
+      fn eglDestroyContext(ptr display, ptr ctx) i32
+      fn eglMakeCurrent(ptr display, ptr draw, ptr read, ptr ctx) i32
+      fn eglSwapBuffers(ptr display, ptr surface) i32
+      fn eglSwapInterval(ptr display, i32 interval) i32
+      fn eglGetProcAddress(ptr name) ptr
+   }
 } #endif
 #windows {
    fn eglGetDisplay(any _native_display) any {
@@ -125,10 +139,10 @@ use std.os.ui.window.platform.api as backend_api
 fn init_display(any native_display) any {
    "Initializes init display."
    def dpy = eglGetDisplay(native_display)
-   if(!dpy){ return 0 }
+   if !dpy { return 0 }
    def major = zalloc(4)
    def minor = zalloc(4)
-   if(eglInitialize(dpy, major, minor) == 0){
+   if eglInitialize(dpy, major, minor) == 0 {
       free(major, minor)
       return 0
    }
@@ -138,27 +152,27 @@ fn init_display(any native_display) any {
 
 fn choose_config(any display, list attrs) any {
    "Runs the choose config operation."
-   if(!display){ return 0 }
+   if !display { return 0 }
    def num_configs = zalloc(4)
    def config_ptr = zalloc(8)
    mut count = 0
-   while(attrs.get(count, 0x3038) != 0x3038){ count += 1 }
+   while attrs.get(count, 0x3038) != 0x3038 { count += 1 }
    def attr_list = zalloc((count + 1) * 4)
    mut i = 0
-   while(i < count){
+   while i < count {
       store32(attr_list, int(attrs.get(i)), i * 4)
       i += 1
    }
    store32(attr_list, 0x3038, count * 4)
    mut res = 0
-   if(eglChooseConfig(display, attr_list, config_ptr, 1, num_configs) != 0){ if(load32(num_configs, 0) > 0){ res = load64(config_ptr, 0) } }
+   if eglChooseConfig(display, attr_list, config_ptr, 1, num_configs) != 0 { if load32(num_configs, 0) > 0 { res = load64(config_ptr, 0) } }
    free(num_configs, config_ptr, attr_list)
    res
 }
 
 fn create_context(any display, any config, any share=0, int gles_ver=2) any {
    "Creates create context."
-   if(!display || !config){ return 0 }
+   if !display || !config { return 0 }
    eglBindAPI(0x30A0)
    def attrs = zalloc(12)
    store32(attrs, 0x3098, 0)
@@ -171,29 +185,29 @@ fn create_context(any display, any config, any share=0, int gles_ver=2) any {
 
 fn create_surface(any display, any config, any native_window) any {
    "Creates create surface."
-   if(!display || !config || !native_window){ return 0 }
+   if !display || !config || !native_window { return 0 }
    eglCreateWindowSurface(display, config, native_window, 0)
 }
 
 fn destroy_surface(any display, any surface) bool {
    "Destroys destroy surface."
-   if(!display || !surface){ return false }
+   if !display || !surface { return false }
    eglDestroySurface(display, surface) != 0
 }
 
 fn get_config_attrib(any display, any config, any attrib) int {
    "Returns get config attrib."
-   if(!display || !config){ return 0 }
+   if !display || !config { return 0 }
    def val = zalloc(4)
    mut res = 0
-   if(eglGetConfigAttrib(display, config, int(attrib), val) != 0){ res = int(load32(val, 0)) }
+   if eglGetConfigAttrib(display, config, int(attrib), val) != 0 { res = int(load32(val, 0)) }
    free(val)
    res
 }
 
 fn destroy_context(any display, any ctx) bool {
    "Destroys destroy context."
-   if(!ctx){ return false }
+   if !ctx { return false }
    eglDestroyContext(display, ctx)
    true
 }
@@ -205,7 +219,7 @@ fn make_current(any display, any draw, any read, any ctx) bool {
 
 fn swap_buffers(any display, any surface) bool {
    "Runs the swap buffers operation."
-   if(!surface){ return false }
+   if !surface { return false }
    eglSwapBuffers(display, surface)
    true
 }
@@ -219,7 +233,7 @@ fn swap_interval(any display, any interval) bool {
 fn get_proc_address(any name) any {
    "Returns get proc address."
    def proc_name = to_str(name)
-   if(!startswith(proc_name, "gl") && !startswith(proc_name, "egl")){ return 0 }
+   if !startswith(proc_name, "gl") && !startswith(proc_name, "egl") { return 0 }
    def s = cstr(proc_name)
    eglGetProcAddress(s)
 }

@@ -31,7 +31,7 @@ fn tea_encrypt_block(list key, list block) list {
    mut sum = 0
    def delta = 0x9e3779b9
    mut i = 0
-   while(i < 32){
+   while i < 32 {
       sum = _tea_u32(sum + delta)
       v0 = _tea_u32(v0 + (((v1 << 4) + k[0]) ^^ (v1 + sum) ^^ ((v1 >> 5) + k[1])))
       v1 = _tea_u32(v1 + (((v0 << 4) + k[2]) ^^ (v0 + sum) ^^ ((v0 >> 5) + k[3])))
@@ -49,7 +49,7 @@ fn tea_decrypt_block(list key, list block) list {
    def delta = 0x9e3779b9
    mut sum = _tea_u32(delta * 32)
    mut i = 0
-   while(i < 32){
+   while i < 32 {
       v1 = _tea_u32(v1 - (((v0 << 4) + k[2]) ^^ (v0 + sum) ^^ ((v0 >> 5) + k[3])))
       v0 = _tea_u32(v0 - (((v1 << 4) + k[0]) ^^ (v1 + sum) ^^ ((v1 >> 5) + k[1])))
       sum = _tea_u32(sum - delta)

@@ -12,7 +12,7 @@ fn debug_print_val(any val) any {
    _print_write(to_str(val))
    _print_write(", type: ")
    _print_write(type(val))
-   if(is_ptr(val)){
+   if is_ptr(val) {
       _print_write(", addr: ")
       _print_write(to_str(val))
    }
@@ -22,13 +22,13 @@ fn debug_print_val(any val) any {
 fn debug_print(...args) any {
    "Prints a detailed debug representation of one or more values."
    mut xs = args
-   if(args.len == 1){
+   if args.len == 1 {
       def first = args.get(0)
-      if(is_list(first)){ xs = first }
+      if is_list(first) { xs = first }
    }
    def n = xs.len
    mut i = 0
-   while(i < n){
+   while i < n {
       def v = xs.get(i)
       debug_print_val(v)
       i += 1

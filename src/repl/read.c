@@ -3353,6 +3353,15 @@ char *ny_readline(const char *prompt) {
         }
       }
       paste_start = -1;
+      if (ny_env_enabled("NYTRIX_REPL_TEST_PASTE_SUBMIT") && len > 0 &&
+          pos == len && is_input_complete(buf)) {
+        while (len > 0 && isspace((unsigned char)buf[len - 1]))
+          len--;
+        buf[len] = '\0';
+        pos = len;
+        repl_finish_submit_display(prompt, buf, len, pos, prompt_cols, 1);
+        break;
+      }
       if (!repl_is_input_pending())
         draw_line(prompt, buf, len, pos, prompt_cols);
       continue;

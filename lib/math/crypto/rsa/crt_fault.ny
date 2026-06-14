@@ -10,15 +10,15 @@ fn _normalize_pair(any p, any q) list { bigint_le(p, q) ? [p, q] : [q, p] }
 fn crt_fault_known_message(any n, any e, any m, any faulty_sig) any {
    "Recover [p, q] from a known message and a faulty CRT-RSA signature."
    def g = gcd(Z(m) - power_mod(Z(faulty_sig), Z(e), Z(n)), Z(n))
-   if(bigint_eq(g, Z(1)) || bigint_eq(g, Z(0)) || bigint_eq(g, Z(n))){ return nil }
+   if bigint_eq(g, Z(1)) || bigint_eq(g, Z(0)) || bigint_eq(g, Z(n)) { return nil }
    _normalize_pair(g, Z(n) / g)
 }
 
 fn crt_fault_unknown_message(any n, any e, any valid_sig, any faulty_sig) any {
    "Recover [p, q] from a valid/faulty CRT-RSA signature pair on the same unknown message."
-   if(Z(valid_sig) == Z(faulty_sig)){ return nil }
+   if Z(valid_sig) == Z(faulty_sig) { return nil }
    def g = gcd(Z(valid_sig) - Z(faulty_sig), Z(n))
-   if(bigint_eq(g, Z(1)) || bigint_eq(g, Z(0)) || bigint_eq(g, Z(n))){ return nil }
+   if bigint_eq(g, Z(1)) || bigint_eq(g, Z(0)) || bigint_eq(g, Z(n)) { return nil }
    _normalize_pair(g, Z(n) / g)
 }
 

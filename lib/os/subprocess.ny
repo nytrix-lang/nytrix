@@ -9,12 +9,12 @@ use std.core.str as str
 use std.os.io as pio
 
 fn _cmd_args(any cmd, any args=[]) list {
-   if(is_list(cmd)){ return cmd }
+   if is_list(cmd) { return cmd }
    mut out = []
    out = out.append(to_str(cmd))
-   if(is_list(args)){
+   if is_list(args) {
       mut i = 0
-      while(i < args.len){
+      while i < args.len {
          out = out.append(to_str(args.get(i)))
          i += 1
       }
@@ -28,8 +28,8 @@ fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
    def argv = _cmd_args(cmd, args)
    def path = to_str(argv.get(0, ""))
    def p = pio.spawn(path, argv)
-   if(p == 0){
-      if(check){ panic("spawn failed: " + repr(argv)) }
+   if p == 0 {
+      if check { panic("spawn failed: " + repr(argv)) }
       mut fail = dict(4)
       fail["code"] = 127
       fail["stdout"] = ""
@@ -37,7 +37,7 @@ fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
       fail["argv"] = argv
       return fail
    }
-   if(input != nil && input != 0){
+   if input != nil && input != 0 {
       def _ignored_send = pio.send(p, input)
       _ignored_send
    }
@@ -46,13 +46,13 @@ fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
    def stdout = pio.recv_all(p, 4096)
    def status = pio.close(p)
    mut code = 1
-   if(is_ok(status)){ code = unwrap(status) }
+   if is_ok(status) { code = unwrap(status) }
    mut out = dict(8)
    out["code"] = code
    out["stdout"] = stdout
    out["ok"] = code == 0
    out["argv"] = argv
-   if(check && code != 0){ panic("command failed(" + to_str(code) + "): " + repr(argv)) }
+   if check && code != 0 { panic("command failed(" + to_str(code) + "): " + repr(argv)) }
    out
 }
 
@@ -60,7 +60,7 @@ fn check_output(any cmd, any args=[], bool text=true, bool strip=false, any inpu
    "Python-style check_output. Returns stdout or panics on non-zero exit."
    def res = run_capture(cmd, args, input, true)
    mut out = res.get("stdout", "")
-   if(strip){ out = str.strip(out) }
+   if strip { out = str.strip(out) }
    out
 }
 
@@ -73,10 +73,10 @@ fn _split_lines(str text, bool keep_empty=false) list {
    mut raw = str.split(text, "\n")
    mut out = []
    mut i = 0
-   while(i < raw.len){
+   while i < raw.len {
       mut line = raw.get(i, "")
-      if(str.endswith(line, "\r")){ line = slice(line, 0, line.len - 1) }
-      if(keep_empty || line.len > 0 || i + 1 < raw.len){ out = out.append(line) }
+      if str.endswith(line, "\r") { line = slice(line, 0, line.len - 1) }
+      if keep_empty || line.len > 0 || i + 1 < raw.len { out = out.append(line) }
       i += 1
    }
    out
@@ -95,7 +95,7 @@ fn shell(str command, bool check=true, bool strip=false) str {
    } #endif
    def res = run_capture(argv, [], nil, check)
    mut out = res.get("stdout", "")
-   if(strip){ out = str.strip(out) }
+   if strip { out = str.strip(out) }
    out
 }
 

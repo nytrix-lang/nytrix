@@ -43,7 +43,7 @@ assert(to_str(big_sub) == "-4611686018427387905", "sub overflow value")
 assert(to_str(big_mul) == "9223372036854775806", "mul overflow value")
 
 fn fib(n) {
-   if(n < 2){ return n }
+   if n < 2 { return n }
    fib(n - 1) + fib(n - 2)
 }
 
@@ -75,7 +75,7 @@ assert(swapped([7], 0, 0) == [7], "swapped single list")
 mut idx_swap = [1, 2, 3, 4]
 mut si = 0
 mut sj = idx_swap.len - 1
-while(si < sj){
+while si < sj {
    def tmp = idx_swap[si]
    idx_swap[si] = idx_swap[sj]
    idx_swap[sj] = tmp
@@ -108,7 +108,7 @@ assert(!d.contains("b"), "clear dict")
 assert(keys(d) == [], "clear dict keys")
 mut half_full = dict(20)
 mut fill_i = 0
-while(fill_i < 16){
+while fill_i < 16 {
    half_full = half_full.set("k" + to_str(fill_i), fill_i)
    fill_i += 1
 }

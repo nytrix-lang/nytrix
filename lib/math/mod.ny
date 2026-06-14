@@ -18,43 +18,43 @@ use std.math.ring
 use std.math.backends
 use std.math.complex as cmplx
 
-def f64: PI   = 3.14159265358979323846
-def f64: PHI  = 1.61803398874989484820
-def f64: E    = 2.71828182845904523536
-def f64: TAU  = 2.0 * PI
-def f64: LN2  = 0.69314718055994530941
-def f64: LN10 = 2.30258509299404568402
+def f64 PI   = 3.14159265358979323846
+def f64 PHI  = 1.61803398874989484820
+def f64 E    = 2.71828182845904523536
+def f64 TAU  = 2.0 * PI
+def f64 LN2  = 0.69314718055994530941
+def f64 LN10 = 2.30258509299404568402
 
 fn abs(number x) number {
    "Absolute value."
-   if(is_float(x)){
-      if(flt(float(x), float(0))){ return fsub(float(0), float(x)) }
+   if is_float(x) {
+      if flt(float(x), float(0)) { return fsub(float(0), float(x)) }
       return float(x)
    }
-   if(x < 0){ return 0 - x }
+   if x < 0 { return 0 - x }
    return x
 }
 
 fn min(number a, number b) number {
    "Minimum of two values."
-   if(a < b){ return a }
+   if a < b { return a }
    return b
 }
 
 fn max(number a, number b) number {
    "Maximum of two values."
-   if(a > b){ return a }
+   if a > b { return a }
    return b
 }
 
 fn pow(number a, number b) number {
    "Power: a^b."
-   if(is_float(a) || is_float(b)){ return __flt_pow(float(a), float(b)) }
-   if(b == 0){ return 1.0 }
-   if(b < 0){ return 1.0 / pow(a, -b) }
+   if is_float(a) || is_float(b) { return __flt_pow(float(a), float(b)) }
+   if b == 0 { return 1.0 }
+   if b < 0 { return 1.0 / pow(a, -b) }
    mut res = 1.0
    mut i = 0
-   while(i < b){
+   while i < b {
       res = res * a
       i += 1
    }
@@ -63,44 +63,44 @@ fn pow(number a, number b) number {
 
 fn mod(number a, number b) number {
    "Modulo: a mod b."
-   if(is_float(a) || is_float(b)){ return __flt_fmod(float(a), float(b)) }
+   if is_float(a) || is_float(b) { return __flt_fmod(float(a), float(b)) }
    mut res = a - (a / b) * b
-   if(res < 0){ res = res + abs(b) }
+   if res < 0 { res = res + abs(b) }
    return res
 }
 
 fn clamp(number x, number lo, number hi) number {
    "Clamp x to [lo, hi]."
-   if(x < lo){ return lo }
-   if(x > hi){ return hi }
+   if x < lo { return lo }
+   if x > hi { return hi }
    return x
 }
 
 fn clamp01(number x) f64 {
    "Clamp x to [0.0, 1.0]."
    def v = float(x)
-   if(v < 0.0){ return 0.0 }
-   if(v > 1.0){ return 1.0 }
+   if v < 0.0 { return 0.0 }
+   if v > 1.0 { return 1.0 }
    v
 }
 
 fn sign(number x) int {
    "Sign of x: -1, 0, or 1."
-   if(x == 0){ return 0 }
-   if(x < 0){ return -1 }
+   if x == 0 { return 0 }
+   if x < 0 { return -1 }
    return 1
 }
 
 fn sqrt(number x) f64 {
    "Square root via Newton's method."
-   if(x == 0){ return 0.0 }
+   if x == 0 { return 0.0 }
    __flt_sqrt(float(x))
 }
 
 fn gcd(number a, number b) number {
    "Greatest common divisor."
    mut x, y = abs(a), abs(b)
-   while(y != 0){
+   while y != 0 {
       def t = x % y
       x, y = y, t
    }
@@ -109,16 +109,16 @@ fn gcd(number a, number b) number {
 
 fn lcm(number a, number b) number {
    "Least common multiple."
-   if(a == 0 || b == 0){ return 0 }
+   if a == 0 || b == 0 { return 0 }
    return abs((a / gcd(a, b)) * b)
 }
 
 fn factorial(number n) number {
    "Factorial: n!"
-   if(n <= 1){ return 1 }
+   if n <= 1 { return 1 }
    mut res = 1
    mut i = 2
-   while(i <= n){
+   while i <= n {
       res = res * i
       i += 1
    }
@@ -153,7 +153,7 @@ fn im(complex z) f64 { cmplx.im(z) }
 fn conj(complex z) complex { cmplx.conj(z) }
 
 fn abs2(complex z) f64 { cmplx.abs2(z) }
-def f64: _HALF_PI = PI / 2.0
+def f64 _HALF_PI = PI / 2.0
 
 fn sin(number x) f64 {
    "Sine(radians)."

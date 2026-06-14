@@ -15,7 +15,7 @@ fn seal_reverse_bytes(list bs) list {
    "Returns a byte list in reverse order."
    mut out = []
    mut i = bs.len - 1
-   while(i >= 0){
+   while i >= 0 {
       out = out.append(bs.get(i))
       i -= 1
    }
@@ -24,12 +24,12 @@ fn seal_reverse_bytes(list bs) list {
 
 fn seal_has_prefix(list bs, any prefix) bool {
    "Returns true when byte list `bs` starts with `prefix`."
-   if(bs == nil || prefix == nil){ return false }
+   if bs == nil || prefix == nil { return false }
    def p = is_str(prefix) ? prefix.to_bytes : prefix
-   if(bs.len < p.len){ return false }
+   if bs.len < p.len { return false }
    mut i = 0
-   while(i < p.len){
-      if((bs.get(i) & 255) != (p.get(i) & 255)){ return false }
+   while i < p.len {
+      if (bs.get(i) & 255) != (p.get(i) & 255) { return false }
       i += 1
    }
    true
@@ -37,13 +37,13 @@ fn seal_has_prefix(list bs, any prefix) bool {
 
 fn seal_has_suffix(list bs, any suffix) bool {
    "Returns true when byte list `bs` ends with `suffix`."
-   if(bs == nil || suffix == nil){ return false }
+   if bs == nil || suffix == nil { return false }
    def s = is_str(suffix) ? suffix.to_bytes : suffix
-   if(bs.len < s.len){ return false }
+   if bs.len < s.len { return false }
    mut i = 0
    def off = bs.len - s.len
-   while(i < s.len){
-      if((bs.get(off + i) & 255) != (s.get(i) & 255)){ return false }
+   while i < s.len {
+      if (bs.get(off + i) & 255) != (s.get(i) & 255) { return false }
       i += 1
    }
    true
@@ -51,12 +51,12 @@ fn seal_has_suffix(list bs, any suffix) bool {
 
 fn seal_mostly_printable_ascii(list bs, int min_pct=95) bool {
    "Returns true when at least `min_pct` percent of bytes are printable ASCII."
-   if(bs == nil || bs.len == 0){ return false }
+   if bs == nil || bs.len == 0 { return false }
    mut good = 0
    mut i = 0
-   while(i < bs.len){
+   while i < bs.len {
       def b = bs.get(i) & 255
-      if((b >= 32 && b <= 126) || b == 10 || b == 13 || b == 9){ good += 1 }
+      if (b >= 32 && b <= 126) || b == 10 || b == 13 || b == 9 { good += 1 }
       i += 1
    }
    good * 100 >= bs.len * min_pct
@@ -87,33 +87,33 @@ fn _seal_u64le(int n) list {
 
 fn seal_counter_bytes(int counter, str format) list {
    "Render a counter as bytes. format: byte, be4, le4, be8, le8, dec."
-   if(format == "byte"){ return [counter & 255] }
-   if(format == "be4"){ return _seal_u32be(counter) }
-   if(format == "le4"){ return _seal_u32le(counter) }
-   if(format == "be8"){ return _seal_u64be(counter) }
-   if(format == "le8"){ return _seal_u64le(counter) }
-   if(format == "dec"){ return to_str(counter).to_bytes }
+   if format == "byte" { return [counter & 255] }
+   if format == "be4" { return _seal_u32be(counter) }
+   if format == "le4" { return _seal_u32le(counter) }
+   if format == "be8" { return _seal_u64be(counter) }
+   if format == "le8" { return _seal_u64le(counter) }
+   if format == "dec" { return to_str(counter).to_bytes }
    panic("unknown counter format: " + format)
 }
 
 fn seal_digest_bytes(str name, any data) list {
    "Return digest bytes for hash functions whose local APIs differ."
-   if(name == "sha256"){ return hash.sha256(data) }
-   if(name == "md5"){ return hash.md5(data).unhex }
-   if(name == "sha1"){ return hash.sha1(data).unhex }
-   if(name == "sha512"){ return hash.sha512(data).unhex }
-   if(name == "sha3_256"){ return hash.sha3_256(data).unhex }
-   if(name == "sha3_512"){ return hash.sha3_512(data).unhex }
-   if(name == "blake2s"){ return hash.blake2s(data).unhex }
+   if name == "sha256" { return hash.sha256(data) }
+   if name == "md5" { return hash.md5(data).unhex }
+   if name == "sha1" { return hash.sha1(data).unhex }
+   if name == "sha512" { return hash.sha512(data).unhex }
+   if name == "sha3_256" { return hash.sha3_256(data).unhex }
+   if name == "sha3_512" { return hash.sha3_512(data).unhex }
+   if name == "blake2s" { return hash.blake2s(data).unhex }
    panic("unknown digest: " + name)
 }
 
 fn _seal_repeat_to_len(list key, int n) list {
    mut out = []
-   if(key == nil || key.len == 0){ return out }
-   while(out.len < n){
+   if key == nil || key.len == 0 { return out }
+   while out.len < n {
       mut i = 0
-      while(i < key.len && out.len < n){
+      while i < key.len && out.len < n {
          out = out.append(key.get(i) & 255)
          i += 1
       }
@@ -124,7 +124,7 @@ fn _seal_repeat_to_len(list key, int n) list {
 fn _seal_append_all(list out, list chunk) list {
    mut acc = out
    mut i = 0
-   while(i < chunk.len){
+   while i < chunk.len {
       acc = acc.append(chunk.get(i) & 255)
       i += 1
    }
@@ -133,7 +133,7 @@ fn _seal_append_all(list out, list chunk) list {
 
 fn seal_repeating_key_xor(list blob, list key) list {
    "XOR blob with a repeating key."
-   if(key == nil || key.len == 0){ return [] }
+   if key == nil || key.len == 0 { return [] }
    blob.xor(_seal_repeat_to_len(key, blob.len))
 }
 
@@ -146,7 +146,7 @@ fn seal_counter_xor(list blob, list seed, str digest_name, str counter_format="b
    "XOR blob with digest(seed||counter) or digest(counter||seed) blocks."
    mut stream = []
    mut ctr = start
-   while(stream.len < blob.len){
+   while stream.len < blob.len {
       def ctr_bytes = seal_counter_bytes(ctr, counter_format)
       def data = (order == "counter-seed") ? ctr_bytes.concat(seed) : seed.concat(ctr_bytes)
       stream = _seal_append_all(stream, seal_digest_bytes(digest_name, data))
@@ -159,7 +159,7 @@ fn seal_hmac_sha256_counter_xor(list blob, any key, str counter_format="be4", in
    "XOR blob with HMAC-SHA256(key, counter) blocks."
    mut stream = []
    mut ctr = start
-   while(stream.len < blob.len){
+   while stream.len < blob.len {
       stream = _seal_append_all(stream, hash.sha256_hmac(key, seal_counter_bytes(ctr, counter_format)))
       ctr += 1
    }
@@ -167,7 +167,7 @@ fn seal_hmac_sha256_counter_xor(list blob, any key, str counter_format="be4", in
 }
 
 fn _seal_key32(list key) list {
-   if(key.len <= 32){ return key }
+   if key.len <= 32 { return key }
    slice(key, 0, 32)
 }
 
@@ -176,7 +176,7 @@ fn seal_blake2s_keyed_counter_xor(list blob, list key, str counter_format="be4",
    mut stream = []
    mut ctr = start
    def k = _seal_key32(key)
-   while(stream.len < blob.len){
+   while stream.len < blob.len {
       stream = _seal_append_all(stream, hash.blake2s(seal_counter_bytes(ctr, counter_format), k, 32).unhex)
       ctr += 1
    }
@@ -187,7 +187,7 @@ fn seal_single_byte_xor(list blob, int k) list {
    "XORs every byte in `blob` with one byte key `k`."
    mut out = []
    mut i = 0
-   while(i < blob.len){
+   while i < blob.len {
       out = out.append((blob.get(i) ^^ k) & 255)
       i += 1
    }
@@ -198,7 +198,7 @@ fn seal_single_byte_add(list blob, int k) list {
    "Adds one byte key `k` to every byte in `blob` modulo 256."
    mut out = []
    mut i = 0
-   while(i < blob.len){
+   while i < blob.len {
       out = out.append((blob.get(i) + k) & 255)
       i += 1
    }
@@ -209,7 +209,7 @@ fn seal_single_byte_sub(list blob, int k) list {
    "Subtracts one byte key `k` from every byte in `blob` modulo 256."
    mut out = []
    mut i = 0
-   while(i < blob.len){
+   while i < blob.len {
       out = out.append((blob.get(i) - k) & 255)
       i += 1
    }

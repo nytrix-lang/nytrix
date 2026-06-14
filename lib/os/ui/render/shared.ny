@@ -52,9 +52,9 @@ def SCENE_LIGHT_MAX = 8
 
 fn safe_f32_limit(any v, f64 fallback=0.0, f64 limit=1048576.0) f64 {
    def fv = fmath.float(v)
-   if(fmath.is_nan(fv) || fmath.is_inf(fv)){ return fallback }
-   if(fv > limit){ return limit }
-   if(fv < 0.0 - limit){ return 0.0 - limit }
+   if fmath.is_nan(fv) || fmath.is_inf(fv) { return fallback }
+   if fv > limit { return limit }
+   if fv < 0.0 - limit { return 0.0 - limit }
    fv
 }
 
@@ -68,28 +68,28 @@ fn pack_rgba_u32(any r, any g, any b, any a) int {
 }
 
 fn color_u32(any c) int {
-   if(is_int(c)){ return c }
-   if(is_float(c)){ return __flt_to_int(c) }
-   if(!is_list(c)){ return 0xFFFFFFFF }
+   if is_int(c) { return c }
+   if is_float(c) { return __flt_to_int(c) }
+   if !is_list(c) { return 0xFFFFFFFF }
    pack_rgba_u32(c.get(0, 1.0), c.get(1, 1.0), c.get(2, 1.0), c.get(3, 1.0))
 }
 
 fn store_mat4_cm_raw(any dst, any mat, bool allow_plain16=false) bool {
    "Stores tagged column-major mat4, optionally accepting a plain 16-float list."
-   if(!dst || !is_list(mat)){ return false }
+   if !dst || !is_list(mat) { return false }
    def n = mat.len
-   if(n == 18){
-      if(int(__load_item_fast(mat, 0)) != 4 || int(__load_item_fast(mat, 1)) != 4){ return false }
+   if n == 18 {
+      if int(__load_item_fast(mat, 0)) != 4 || int(__load_item_fast(mat, 1)) != 4 { return false }
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          store32_f32(dst, __load_item_fast(mat, 2 + i), i * 4)
          i += 1
       }
       return true
    }
-   if(allow_plain16 && n == 16){
+   if allow_plain16 && n == 16 {
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          store32_f32(dst, __load_item_fast(mat, i), i * 4)
          i += 1
       }
@@ -121,6 +121,6 @@ fn store_vertex64(any base, int idx, any x, any y, any z, any u, any v, any colo
 
 @jit
 fn push_vertex64(any p, any x, any y, any z, any u, any v, any color, any tex_id=0, any nx=0.0, any ny=0.0, any nz=1.0) any {
-   if(!p){ return 0 }
+   if !p { return 0 }
    store_vertex64(p, 0, x, y, z, u, v, color, tex_id, nx, ny, nz)
 }

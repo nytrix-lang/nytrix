@@ -34,15 +34,15 @@ use std.os.prim (env)
 
 fn _accel_env_str_or(str key, str fallback) str {
    def v = env(key)
-   if(is_str(v)){
+   if is_str(v) {
       def s = strip(v)
-      if(s.len > 0){ return s }
+      if s.len > 0 { return s }
    }
    fallback
 }
 
 fn _accel_bool_or(any v, bool fallback) bool {
-   if(!is_str(v)){ return fallback }
+   if !is_str(v) { return fallback }
    def s = lower(strip(v))
    case s {
       "1", "true", "yes", "on" -> true
@@ -61,7 +61,7 @@ fn _accel_gpu_mode(str v) str {
 
 fn _accel_gpu_backend(str v) str {
    mut s = lower(strip(v))
-   if(eq(s, "off")){ s = "none" }
+   if eq(s, "off") { s = "none" }
    case s {
       "none", "auto", "opencl", "cuda", "hip", "metal" -> s
       _ -> "auto"
@@ -70,8 +70,8 @@ fn _accel_gpu_backend(str v) str {
 
 fn _accel_gpu_offload(str v) str {
    mut s = lower(strip(v))
-   if(eq(s, "true") || eq(s, "yes")){ s = "on" }
-   if(eq(s, "false") || eq(s, "no")){ s = "off" }
+   if eq(s, "true") || eq(s, "yes") { s = "on" }
+   if eq(s, "false") || eq(s, "no") { s = "off" }
    case s {
       "off", "auto", "on", "force" -> s
       _ -> "auto"
@@ -80,8 +80,8 @@ fn _accel_gpu_offload(str v) str {
 
 fn _accel_target_const(str v) str {
    mut s = lower(strip(v))
-   if(eq(s, "off")){ s = "none" }
-   if(eq(s, "cuda") || eq(s, "ptx")){ s = "nvptx" } elif(eq(s, "hip") || eq(s, "rocm") || eq(s, "gcn") || eq(s, "rdna")){ s = "amdgpu" } elif(eq(s, "opencl") || eq(s, "vulkan") || eq(s, "spv")){ s = "spirv" } elif(eq(s, "hsa") || eq(s, "hsa_code_object") || eq(s, "hsa-code-object") || eq(s, "rocm_hsa")){ s = "hsaco" }
+   if eq(s, "off") { s = "none" }
+   if eq(s, "cuda") || eq(s, "ptx") { s = "nvptx" } elif eq(s, "hip") || eq(s, "rocm") || eq(s, "gcn") || eq(s, "rdna") { s = "amdgpu" } elif eq(s, "opencl") || eq(s, "vulkan") || eq(s, "spv") { s = "spirv" } elif eq(s, "hsa") || eq(s, "hsa_code_object") || eq(s, "hsa-code-object") || eq(s, "rocm_hsa") { s = "hsaco" }
    case s {
       "none", "auto", "nvptx", "amdgpu", "spirv", "hsaco" -> s
       _ -> "auto"
@@ -90,8 +90,8 @@ fn _accel_target_const(str v) str {
 
 fn _accel_object_const(str v) str {
    mut s = lower(strip(v))
-   if(eq(s, "obj")){ s = "o" }
-   if(eq(s, "cubin")){ s = "ptx" }
+   if eq(s, "obj") { s = "o" }
+   if eq(s, "cubin") { s = "ptx" }
    case s {
       "none", "auto", "ptx", "o", "spv", "hsaco" -> s
       _ -> "auto"
@@ -110,44 +110,44 @@ fn _accel_path_exists(str path) bool { __access(path, 0) == 0 }
 
 fn _accel_has_cuda_runtime() bool {
    def vis = _accel_env_str_or("CUDA_VISIBLE_DEVICES", "")
-   if(eq(vis, "-1")){ return false }
-   if(_accel_env_str_or("CUDA_PATH", "").len > 0){ return true }
+   if eq(vis, "-1") { return false }
+   if _accel_env_str_or("CUDA_PATH", "").len > 0 { return true }
    #windows {
-      if(_accel_path_exists("C:\\Windows\\System32\\nvcuda.dll")){ return true }
+      if _accel_path_exists("C:\\Windows\\System32\\nvcuda.dll") { return true }
    } #else {
-      if(_accel_path_exists("/dev/nvidiactl")){ return true }
-      if(_accel_path_exists("/proc/driver/nvidia/version")){ return true }
-      if(_accel_path_exists("/usr/local/cuda/bin/ptxas")){ return true }
-      if(_accel_path_exists("/usr/local/cuda/bin/nvcc")){ return true }
+      if _accel_path_exists("/dev/nvidiactl") { return true }
+      if _accel_path_exists("/proc/driver/nvidia/version") { return true }
+      if _accel_path_exists("/usr/local/cuda/bin/ptxas") { return true }
+      if _accel_path_exists("/usr/local/cuda/bin/nvcc") { return true }
    } #endif
    false
 }
 
 fn _accel_has_hip_runtime() bool {
    def vis = _accel_env_str_or("HIP_VISIBLE_DEVICES", "")
-   if(eq(vis, "-1")){ return false }
-   if(_accel_env_str_or("ROCM_PATH", "").len > 0){ return true }
-   if(_accel_env_str_or("HIP_PATH", "").len > 0){ return true }
+   if eq(vis, "-1") { return false }
+   if _accel_env_str_or("ROCM_PATH", "").len > 0 { return true }
+   if _accel_env_str_or("HIP_PATH", "").len > 0 { return true }
    #linux {
-      if(_accel_path_exists("/dev/kfd")){ return true }
-      if(_accel_path_exists("/opt/rocm/bin/amdclang")){ return true }
-      if(_accel_path_exists("/opt/rocm/bin/clang")){ return true }
+      if _accel_path_exists("/dev/kfd") { return true }
+      if _accel_path_exists("/opt/rocm/bin/amdclang") { return true }
+      if _accel_path_exists("/opt/rocm/bin/clang") { return true }
    } #endif
    false
 }
 
 fn _accel_gpu_available_const() bool {
    def raw = _accel_env_str_or("NYTRIX_GPU_AVAILABLE", "")
-   if(raw.len > 0){ return _accel_bool_or(raw, false) }
-   if(eq(GPU_BACKEND, "none")){ return false }
-   if(eq(GPU_BACKEND, "cuda")){ return _accel_has_cuda_runtime() }
-   if(eq(GPU_BACKEND, "hip")){ return _accel_has_hip_runtime() }
-   if(eq(GPU_BACKEND, "opencl")){ return osgpu.opencl_available() }
-   if(eq(GPU_BACKEND, "metal")){ #macos { return true } #else { return false } #endif }
-   if(eq(GPU_BACKEND, "auto")){
-      if(_accel_has_cuda_runtime()){ return true }
-      if(_accel_has_hip_runtime()){ return true }
-      if(osgpu.opencl_available()){ return true }
+   if raw.len > 0 { return _accel_bool_or(raw, false) }
+   if eq(GPU_BACKEND, "none") { return false }
+   if eq(GPU_BACKEND, "cuda") { return _accel_has_cuda_runtime() }
+   if eq(GPU_BACKEND, "hip") { return _accel_has_hip_runtime() }
+   if eq(GPU_BACKEND, "opencl") { return osgpu.opencl_available() }
+   if eq(GPU_BACKEND, "metal") { #macos { return true } #else { return false } #endif }
+   if eq(GPU_BACKEND, "auto") {
+      if _accel_has_cuda_runtime() { return true }
+      if _accel_has_hip_runtime() { return true }
+      if osgpu.opencl_available() { return true }
       #macos { return true } #endif
    }
    false

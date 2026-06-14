@@ -11,7 +11,7 @@ use std.core.str as str
 
 fn decode(any data, str sep=",") list {
    "Decodes a CSV string into a list of lists."
-   if(!is_str(data)){ return [] }
+   if !is_str(data) { return [] }
    def n = data.len
    mut rows = []
    mut row = []
@@ -19,12 +19,12 @@ fn decode(any data, str sep=",") list {
    mut in_quote = false
    mut i = 0
    def s_code = load8(sep, 0)
-   while(i < n){
+   while i < n {
       def c = load8(data, i)
-      if(in_quote){
+      if in_quote {
          case c {
             34 -> { ; '"'
-               if(i + 1 < n && load8(data, i + 1) == 34){
+               if i + 1 < n && load8(data, i + 1) == 34 {
                   cell_b = builder_append(cell_b, "\"")
                   i += 1
                } else {
@@ -49,7 +49,7 @@ fn decode(any data, str sep=",") list {
                cell_b = Builder(64)
             }
             13 -> {
-               if(i + 1 < n && load8(data, i + 1) == 10){ i += 1 }
+               if i + 1 < n && load8(data, i + 1) == 10 { i += 1 }
                row = row.append(builder_to_str(cell_b))
                rows = rows.append(row)
                row = []
@@ -62,7 +62,7 @@ fn decode(any data, str sep=",") list {
       i += 1
    }
    def last_cell = builder_to_str(cell_b)
-   if(last_cell.len > 0 || row.len > 0){
+   if last_cell.len > 0 || row.len > 0 {
       row = row.append(last_cell)
       rows = rows.append(row)
    }
@@ -75,22 +75,22 @@ fn encode(list rows, str sep=",") str {
    mut out = Builder(256)
    mut i = 0
    def r_len = rows.len
-   while(i < r_len){
+   while i < r_len {
       def row = rows.get(i)
       mut j = 0
       def c_len = row.len
-      while(j < c_len){
+      while j < c_len {
          mut cell = to_str(row.get(j))
          def needs_quote = str.str_contains(cell, sep) || str.str_contains(cell, "\"") ||
          str.str_contains(cell, "\n") || str.str_contains(cell, "\r")
-         if(needs_quote){
+         if needs_quote {
             def cell_n = cell.len
             mut escaped = Builder(max(16, cell_n + 8))
             escaped = builder_append(escaped, "\"")
             mut k = 0
-            while(k < cell_n){
+            while k < cell_n {
                def c = load8(cell, k)
-               if(c == 34){ escaped = builder_append(escaped, "\"\"") }
+               if c == 34 { escaped = builder_append(escaped, "\"\"") }
                else { escaped = builder_append(escaped, chr(c)) }
                k += 1
             }
@@ -99,7 +99,7 @@ fn encode(list rows, str sep=",") str {
             builder_free(escaped)
          }
          out = builder_append(out, cell)
-         if(j + 1 < c_len){ out = builder_append(out, sep) }
+         if j + 1 < c_len { out = builder_append(out, sep) }
          j += 1
       }
       out = builder_append(out, "\n")

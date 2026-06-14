@@ -174,7 +174,9 @@ static const repl_lazy_std_hint_t k_repl_lazy_std_hints[] = {
     {"lerp", "std.math"},          {"gcd", "std.math"},
     {"lcm", "std.math"},           {"factorial", "std.math"},
     {"is_prime", "std.math.nt"},   {"next_prime", "std.math.nt"},
-    {"prev_prime", "std.math.nt"}, {NULL, NULL}};
+    {"prev_prime", "std.math.nt"}, {"range", "std.core"},
+    {"assert", "std.core"},        {"assert_eq", "std.core"},
+    {"to_str", "std.core"},        {NULL, NULL}};
 
 static void repl_enable_lazy_std_root(std_mode_t std_mode, doc_list_t *docs) {
   (void)std_mode;
@@ -868,7 +870,7 @@ static int repl_lazy_ident_ignored(const char *name) {
       "operator", "self",   "true",    "false",  "nil",      "none",
       "del",      "export", "type",    "std",    "int",      "float",
       "number",   "str",    "list",    "dict",   "set",      "tuple",
-      "bool",     "any",    "bytes",   "range",  "ptr",      "handle",
+      "bool",     "any",    "bytes",   "ptr",    "handle",
       "fnptr",    NULL};
   for (int i = 0; ignored[i]; ++i) {
     if (strcmp(ignored[i], name) == 0)
@@ -952,101 +954,60 @@ static char *repl_lazy_std_module_for_leaf(doc_list_t *docs, const char *leaf) {
   if (repl_lazy_std_hint(leaf, &hint_module) && hint_module &&
       ny_std_find_module_by_name(hint_module) >= 0)
     return ny_strdup(hint_module);
-
-  repl_lazy_load_all_std_docs(docs);
-  char *best = NULL;
-  int best_score = -1000000;
-  for (size_t i = 0; i < docs->len; ++i) {
-    const ny_doc_entry *e = &docs->data[i];
-    if (!e->name || strncmp(e->name, "std.", 4) != 0)
-      continue;
-    if (e->kind != 3 && e->kind != 4)
-      continue;
-    if (!repl_doc_leaf_equals(e->name, leaf))
-      continue;
-    char *module = repl_lazy_module_prefix_for_doc_name(e->name);
-    if (!module)
-      continue;
-    int score = repl_lazy_module_score(module);
-    if (!best || score > best_score) {
-      free(best);
-      best = module;
-      best_score = score;
-    } else {
-      free(module);
-    }
-  }
-  return best;
+  return NULL;
 }
 
 static char *repl_lazy_std_module_for_member_chain(doc_list_t *docs,
                                                    const char *chain) {
-  if (!docs || !chain || !*chain || !strchr(chain, '.'))
+  (void)docs;
+  if (!chain || !*chain || !strchr(chain, '.'))
     return NULL;
   if (strncmp(chain, "std.", 4) == 0)
     return NULL;
   const char *dot = strchr(chain, '.');
   if (!dot || dot == chain || !dot[1] || strchr(dot + 1, '.'))
     return NULL;
-
   size_t alias_len = (size_t)(dot - chain);
-  size_t leaf_len = strlen(dot + 1);
-  repl_lazy_load_all_std_docs(docs);
-  char *best = NULL;
-  int best_score = -1000000;
-  for (size_t i = 0; i < docs->len; ++i) {
-    const ny_doc_entry *e = &docs->data[i];
-    if (!e->name || strncmp(e->name, "std.", 4) != 0)
-      continue;
-    if (e->kind != 3 && e->kind != 4)
-      continue;
-    const char *doc_leaf = repl_name_leaf(e->name);
-    if (!doc_leaf || strlen(doc_leaf) != leaf_len ||
-        strcmp(doc_leaf, dot + 1) != 0)
-      continue;
-    char *module = repl_lazy_module_prefix_for_doc_name(e->name);
-    if (!module)
-      continue;
-    const char *module_alias = repl_name_leaf(module);
-    if (!module_alias || strlen(module_alias) != alias_len ||
-        strncmp(module_alias, chain, alias_len) != 0) {
-      free(module);
-      continue;
-    }
-    int score = repl_lazy_module_score(module);
-    if (!best || score > best_score) {
-      free(best);
-      best = module;
-      best_score = score;
-    } else {
-      free(module);
-    }
+  struct alias_map_t {
+    const char *alias;
+    const char *module;
+  };
+  static const struct alias_map_t aliases[] = {
+      {"math", "std.math"},     {"nt", "std.math.nt"},
+      {"bin", "std.math.bin"},  {"str", "std.core.str"},
+      {"os", "std.os"},         {NULL, NULL},
+  };
+  for (int i = 0; aliases[i].alias; ++i) {
+    if (strlen(aliases[i].alias) == alias_len &&
+        strncmp(chain, aliases[i].alias, alias_len) == 0 &&
+        ny_std_find_module_by_name(aliases[i].module) >= 0)
+      return ny_strdup(aliases[i].module);
   }
-  return best;
+  return NULL;
 }
 
 static int repl_lazy_std_rewrite_for_full_chain(doc_list_t *docs,
                                                 const char *chain, char *out,
                                                 size_t out_cap) {
-  if (!docs || !chain || strncmp(chain, "std.", 4) != 0 || !out || out_cap == 0)
+  (void)docs;
+  if (!chain || strncmp(chain, "std.", 4) != 0 || !out || out_cap == 0)
     return 0;
-  repl_lazy_load_all_std_docs(docs);
-  for (size_t i = 0; i < docs->len; ++i) {
-    const ny_doc_entry *e = &docs->data[i];
-    if (!e->name || strcmp(e->name, chain) != 0)
+  struct rewrite_map_t {
+    const char *prefix;
+    const char *alias;
+  };
+  static const struct rewrite_map_t rewrites[] = {
+      {"std.math.nt.", "nt."},      {"std.math.bin.", "bin."},
+      {"std.math.", "math."},      {"std.core.str.", "str."},
+      {"std.os.", "os."},          {"std.core.", ""},
+      {NULL, NULL},
+  };
+  for (int i = 0; rewrites[i].prefix; ++i) {
+    size_t n = strlen(rewrites[i].prefix);
+    if (strncmp(chain, rewrites[i].prefix, n) != 0 || !chain[n])
       continue;
-    if (e->kind != 3 && e->kind != 4)
-      continue;
-    char *module = repl_lazy_module_prefix_for_doc_name(e->name);
-    if (!module)
-      continue;
-    const char *alias = repl_name_leaf(module);
-    const char *leaf = repl_name_leaf(chain);
-    int ok = alias && leaf && *alias && *leaf &&
-             snprintf(out, out_cap, "%s.%s", alias, leaf) > 0 &&
-             strlen(out) < out_cap;
-    free(module);
-    return ok;
+    int wrote = snprintf(out, out_cap, "%s%s", rewrites[i].alias, chain + n);
+    return wrote > 0 && (size_t)wrote < out_cap;
   }
   return 0;
 }
@@ -2313,8 +2274,9 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       (std_mode != STD_MODE_NONE && tty_in) ? "use std.core.inspect\n" : "";
   const char *use_core = "";
   const char *use_os_prim = "";
-  if (std_mode != STD_MODE_NONE &&
-      repl_source_has_bare_std_use_text(eval_input))
+  int has_bare_std_use =
+      std_mode != STD_MODE_NONE && repl_source_has_bare_std_use_text(eval_input);
+  if (has_bare_std_use)
     g_repl_std_root_lazy = 1;
   const char *compile_input = eval_input;
   char *compile_input_owned = NULL;
@@ -2333,8 +2295,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       compile_input_owned = stripped;
       compile_input = compile_input_owned;
     }
-    if (repl_source_has_bare_std_use_text(eval_input) &&
-        *ltrim((char *)compile_input) == '\0') {
+    if (has_bare_std_use && *ltrim((char *)compile_input) == '\0') {
       repl_enable_lazy_std_root(std_mode, docs);
       free(compile_input_owned);
       free(eval_input_owned);

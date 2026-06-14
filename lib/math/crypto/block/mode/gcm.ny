@@ -60,9 +60,9 @@ fn _gf128_mult_words(int x0, int x1, int x2, int x3, int y0, int y1, int y2, int
    mut z0, z1, z2, z3 = 0, 0, 0, 0
    mut v0, v1, v2, v3 = y0, y1, y2, y3
    mut i = 0
-   while(i < 128){
+   while i < 128 {
       def bit = i < 32 ? ((x0 >> (31 - i)) & 1) : (i < 64 ? ((x1 >> (63 - i)) & 1) : (i < 96 ? ((x2 >> (95 - i)) & 1) : ((x3 >> (127 - i)) & 1)))
-      if(bit != 0){
+      if bit != 0 {
          z0 = (z0 ^^ v0) & 0xffffffff
          z1 = (z1 ^^ v1) & 0xffffffff
          z2 = (z2 ^^ v2) & 0xffffffff
@@ -73,7 +73,7 @@ fn _gf128_mult_words(int x0, int x1, int x2, int x3, int y0, int y1, int y2, int
       v2 = ((v2 >> 1) | ((v1 & 1) << 31)) & 0xffffffff
       v1 = ((v1 >> 1) | ((v0 & 1) << 31)) & 0xffffffff
       v0 = (v0 >> 1) & 0x7fffffff
-      if(reduce != 0){ v0 = (v0 ^^ 0xe1000000) & 0xffffffff }
+      if reduce != 0 { v0 = (v0 ^^ 0xe1000000) & 0xffffffff }
       i += 1
    }
    [z0, z1, z2, z3]
@@ -91,7 +91,7 @@ fn gf128_mult(list x, list y) list {
 fn _gf128_xor(list a, list b) list {
    mut out = []
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       out = out.append(a.get(i) ^^ b.get(i))
       i += 1
    }
@@ -100,8 +100,8 @@ fn _gf128_xor(list a, list b) list {
 
 fn _gf128_is_zero(list a) bool {
    mut i = 0
-   while(i < 16){
-      if(a.get(i) != 0){ return false }
+   while i < 16 {
+      if a.get(i) != 0 { return false }
       i += 1
    }
    true
@@ -109,12 +109,12 @@ fn _gf128_is_zero(list a) bool {
 
 fn gf128_inv(list x) any {
    "Multiplicative inverse in GF(2^128), or nil for zero."
-   if(_gf128_is_zero(x)){ return nil }
+   if _gf128_is_zero(x) { return nil }
    mut result = _gf128_one()
    mut i = 127
-   while(i >= 0){
+   while i >= 0 {
       result = gf128_mult(result, result)
-      if(i > 0){ result = gf128_mult(result, x) }
+      if i > 0 { result = gf128_mult(result, x) }
       i -= 1
    }
    result
@@ -123,7 +123,7 @@ fn gf128_inv(list x) any {
 fn gf128_sqrt(list x) list {
    "Square root in GF(2^128): x^(2^127)."
    mut y, i = clone(x), 0
-   while(i < 127){
+   while i < 127 {
       y = gf128_mult(y, y)
       i += 1
    }
@@ -140,7 +140,7 @@ fn ghash(list h, list blocks) list {
    def h2, h3 = __load_item_fast(hw, 2), __load_item_fast(hw, 3)
    mut y0, y1, y2, y3 = 0, 0, 0, 0
    mut j = 0
-   while(j < blocks.len){
+   while j < blocks.len {
       def block = __load_item_fast(blocks, j)
       y0 = (y0 ^^ _gcm_be32_at_padded(block, 0)) & 0xffffffff
       y1 = (y1 ^^ _gcm_be32_at_padded(block, 4)) & 0xffffffff
@@ -163,7 +163,7 @@ fn gcm_ghash(list h, list data) list {
    def h2, h3 = __load_item_fast(hw, 2), __load_item_fast(hw, 3)
    mut y0, y1, y2, y3 = 0, 0, 0, 0
    mut p = 0
-   while(p < data.len){
+   while p < data.len {
       y0 = (y0 ^^ _gcm_be32_at_padded(data, p)) & 0xffffffff
       y1 = (y1 ^^ _gcm_be32_at_padded(data, p + 4)) & 0xffffffff
       y2 = (y2 ^^ _gcm_be32_at_padded(data, p + 8)) & 0xffffffff
@@ -181,7 +181,7 @@ fn gcm_ghash(list h, list data) list {
 fn _gcm_ghash_update_data(int y0, int y1, int y2, int y3, int h0, int h1, int h2, int h3, list data) list {
    mut a0, a1, a2, a3 = y0, y1, y2, y3
    mut p = 0
-   while(p < data.len){
+   while p < data.len {
       a0 = (a0 ^^ _gcm_be32_at_padded(data, p)) & 0xffffffff
       a1 = (a1 ^^ _gcm_be32_at_padded(data, p + 4)) & 0xffffffff
       a2 = (a2 ^^ _gcm_be32_at_padded(data, p + 8)) & 0xffffffff
@@ -206,7 +206,7 @@ fn _gcm_u64_be_bits(any n) list {
 
 fn _gcm_pad16(list data) list {
    mut out = clone(data)
-   while(out.len % 16 != 0){ out = out.append(0) }
+   while out.len % 16 != 0 { out = out.append(0) }
    out
 }
 
@@ -214,7 +214,7 @@ fn _gcm_xor(list a, list b, any n=nil) list {
    def lim = n == nil ? (a.len < b.len ? a.len : b.len) : n
    mut out = []
    mut i = 0
-   while(i < lim){
+   while i < lim {
       out = out.append(a[i] ^^ b[i])
       i += 1
    }
@@ -224,7 +224,7 @@ fn _gcm_xor(list a, list b, any n=nil) list {
 fn _gcm_join(list a, list b) list {
    mut out = clone(a)
    mut i = 0
-   while(i < b.len){
+   while i < b.len {
       out = out.append(b[i])
       i += 1
    }
@@ -242,7 +242,7 @@ fn _gcm_inc32(list block) list {
 }
 
 fn _gcm_j0(list h, list nonce) list {
-   if(nonce.len == 12){ return clone(nonce).append(0).append(0).append(0).append(1) }
+   if nonce.len == 12 { return clone(nonce).append(0).append(0).append(0).append(1) }
    def len_block = _gcm_join([0,0,0,0,0,0,0,0], _gcm_u64_be_bits(nonce.len))
    gcm_ghash(h, _gcm_join(_gcm_pad16(nonce), len_block))
 }
@@ -251,7 +251,7 @@ fn _gcm_ctr_crypt(any ctx, list j0, list data) list {
    mut ctr = _gcm_inc32(j0)
    mut out = []
    mut p = 0
-   while(p < data.len){
+   while p < data.len {
       def stream = aes_encrypt_block(ctx, ctr)
       def block = slice(data, p, p + 16)
       out = _gcm_join(out, _gcm_xor(block, stream, block.len))
@@ -291,10 +291,10 @@ fn gcm_encrypt(list key, list nonce, list ad, list plaintext) list {
 
 fn gcm_verify_tag(list a, list b) bool {
    "Constant-shape tag comparison for GCM tags."
-   if(a.len != b.len){ return false }
+   if a.len != b.len { return false }
    mut diff = 0
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       diff = diff | (a[i] ^^ b[i])
       i += 1
    }
@@ -309,7 +309,7 @@ fn gcm_decrypt(list key, list nonce, list ad, list ciphertext, list tag) any {
    def s = gcm_auth_ghash(h, ad, ciphertext)
    def e0 = aes_encrypt_block(ctx, j0)
    def expected = _gcm_xor(s, e0, 16)
-   if(!gcm_verify_tag(expected, tag)){ return nil }
+   if !gcm_verify_tag(expected, tag) { return nil }
    _gcm_ctr_crypt(ctx, j0, ciphertext)
 }
 
@@ -320,7 +320,7 @@ fn gcm_recover_keystream(list ct, list known_pt) list {
    def n = known_pt.len
    mut ks = []
    mut i = 0
-   while(i < n){
+   while i < n {
       ks = ks.append(ct.get(i) ^^ known_pt.get(i))
       i += 1
    }
@@ -337,7 +337,7 @@ fn gcm_nonce_reuse_decrypt(list ct1, list tag1, list ct2, list tag2) list {
    def n = n1 < n2 ? n1 : n2
    mut ks_xor = []
    mut i = 0
-   while(i < n){
+   while i < n {
       ks_xor = ks_xor.append(ct1.get(i) ^^ ct2.get(i))
       i += 1
    }
@@ -353,7 +353,7 @@ fn gcm_forge_tag(list h, list assoc_data, list ct, list ectr0) list {
    def g = gcm_auth_ghash(h, assoc_data, ct)
    mut tag = []
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       tag = tag.append(g.get(i) ^^ ectr0.get(i))
       i += 1
    }
@@ -363,13 +363,13 @@ fn gcm_forge_tag(list h, list assoc_data, list ct, list ectr0) list {
 fn gcm_recover_ectr0_from_sample(any h, list assoc_data, list ct, any tag) any {
    "Recover E(K,J0) from one valid GCM tuple under a known H.
    ectr0 = tag XOR GHASH(H, A, C)."
-   if(!is_list(h) || h.len != 16){ return nil }
-   if(!is_list(tag) || tag.len != 16){ return nil }
+   if !is_list(h) || h.len != 16 { return nil }
+   if !is_list(tag) || tag.len != 16 { return nil }
    def forged = gcm_forge_tag(h, assoc_data, ct, _gf128_zero())
-   if(!is_list(forged) || forged.len != 16){ return nil }
+   if !is_list(forged) || forged.len != 16 { return nil }
    mut out = []
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       out = out.append(tag.get(i) ^^ forged.get(i))
       i += 1
    }
@@ -380,7 +380,7 @@ fn gcm_forge_tag_from_known_message(list h, list known_assoc_data, list known_ct
    "Forge a tag for target(A,C) using nonce reuse and known H from one valid tuple.
    Derives E(K,J0) from the known tuple and reuses it on the target."
    def ectr0 = gcm_recover_ectr0_from_sample(h, known_assoc_data, known_ct, known_tag)
-   if(ectr0 == nil){ return nil }
+   if ectr0 == nil { return nil }
    gcm_forge_tag(h, target_assoc_data, target_ct, ectr0)
 }
 
@@ -398,12 +398,12 @@ fn gcm_recover_auth_key_one_block(list a1, list c1, list t1, list a2, list c2, l
    "Recover the GCM authentication subkey H for the common Joux nonce-reuse case:
    no AAD, one equal-length ciphertext block, same nonce/key. Returns H or nil.
    For one-block messages with equal lengths, tag1^tag2 = (c1^c2) * H^2."
-   if(a1.len != 0 || a2.len != 0){ return nil }
-   if(c1.len != 16 || c2.len != 16 || t1.len != 16 || t2.len != 16){ return nil }
+   if a1.len != 0 || a2.len != 0 { return nil }
+   if c1.len != 16 || c2.len != 16 || t1.len != 16 || t2.len != 16 { return nil }
    def dc = _gf128_xor(c1, c2)
-   if(_gf128_is_zero(dc)){ return nil }
+   if _gf128_is_zero(dc) { return nil }
    def dt = _gf128_xor(t1, t2)
    def inv_dc = gf128_inv(dc)
-   if(inv_dc == nil){ return nil }
+   if inv_dc == nil { return nil }
    gf128_sqrt(gf128_mult(dt, inv_dc))
 }

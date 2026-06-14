@@ -14,7 +14,7 @@ def _MORSE_PAIRS = ["A", ".-", "B", "-...", "C", "-.-.", "D", "-..", "E", ".", "
 
 fn _morse_table() dict {
    mut t, i = dict(64), 0
-   while(i < _MORSE_PAIRS.len){
+   while i < _MORSE_PAIRS.len {
       t.set(_MORSE_PAIRS[i], _MORSE_PAIRS[i + 1])
       i += 2
    }
@@ -23,7 +23,7 @@ fn _morse_table() dict {
 
 fn _morse_reverse_table() dict {
    mut r, i = dict(64), 0
-   while(i < _MORSE_PAIRS.len){
+   while i < _MORSE_PAIRS.len {
       r.set(_MORSE_PAIRS[i + 1], _MORSE_PAIRS[i])
       i += 2
    }
@@ -46,18 +46,18 @@ fn morse_encode(str text) str {
    mut out = ""
    mut i = 0
    mut word_sep = false
-   while(i < text.len){
+   while i < text.len {
       def ch = utf8_slice(text, i, i + 1, 1)
-      if(ch == " "){
-         if(!word_sep){
+      if ch == " " {
+         if !word_sep {
             out = str_add(out, " / ")
             word_sep = true
          }
       } else {
          def uc = upper(ch)
          def sym = t.get(uc, "")
-         if(sym.len > 0){
-            if(out.len > 0 && !word_sep){ out = str_add(out, " ") }
+         if sym.len > 0 {
+            if out.len > 0 && !word_sep { out = str_add(out, " ") }
             out = str_add(out, sym)
             word_sep = false
          }
@@ -75,15 +75,15 @@ fn morse_decode(str morse) str {
    def words = split(morse, " / ")
    mut out = ""
    mut wi = 0
-   while(wi < words.len){
+   while wi < words.len {
       def word = words[wi]
-      if(word.len > 0){
-         if(wi > 0){ out = str_add(out, " ") }
+      if word.len > 0 {
+         if wi > 0 { out = str_add(out, " ") }
          def syms = split(word, " ")
          mut si = 0
-         while(si < syms.len){
+         while si < syms.len {
             def sym = syms[si]
-            if(sym.len > 0){
+            if sym.len > 0 {
                def ch = r.get(sym, "?")
                out = str_add(out, ch)
             }

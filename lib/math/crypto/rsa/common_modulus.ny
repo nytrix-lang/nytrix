@@ -19,23 +19,23 @@ fn common_modulus_attack_root(number N, number e1, number c1, number e2, number 
    def b_coeff = egcd_result.get(2)
    mut c1_mod, c2_mod = c1, c2
    mut a_use, b_use = a_coeff, b_coeff
-   if(a_coeff < 0){
-      if(gcd(c1, N) != 1){ return nil }
+   if a_coeff < 0 {
+      if gcd(c1, N) != 1 { return nil }
       c1_mod = inverse_mod(c1, N)
       a_use = 0 - a_coeff
    }
-   if(b_coeff < 0){
-      if(gcd(c2, N) != 1){ return nil }
+   if b_coeff < 0 {
+      if gcd(c2, N) != 1 { return nil }
       c2_mod = inverse_mod(c2, N)
       b_use = 0 - b_coeff
    }
    def part1, part2 = power_mod(c1_mod, a_use, N), power_mod(c2_mod, b_use, N)
    mut m = (part1 * part2) % N
-   if(g != 1){
+   if g != 1 {
       def g_int = bigint_to_int(Z(g))
-      if(g_int <= 0){ return nil }
+      if g_int <= 0 { return nil }
       def root = nth_root(m, g_int)
-      if(bigint_pow(root, Z(g_int)) != m){ return nil }
+      if bigint_pow(root, Z(g_int)) != m { return nil }
       m = root
    }
    m
@@ -55,13 +55,13 @@ fn common_modulus_attack_report(number N, number e1, number c1, number e2, numbe
    def c2_invertible = gcd(c2, N) == 1
    mut reason = ""
    mut m = nil
-   if(needs_c1_inverse && !c1_invertible){
+   if needs_c1_inverse && !c1_invertible {
       reason = "c1 is not invertible modulo N"
-   } else if(needs_c2_inverse && !c2_invertible){
+   } else if needs_c2_inverse && !c2_invertible {
       reason = "c2 is not invertible modulo N"
    } else {
       m = common_modulus_attack_root(N, e1, c1, e2, c2)
-      if(m == nil){
+      if m == nil {
          reason = g == 1 ? "recovery failed" : "g-th root was not exact"
       }
    }
@@ -89,29 +89,29 @@ fn common_modulus_attack(number N, number e1, number c1, number e2, number c2) a
 }
 
 fn _common_modulus_scan_pairs(list entries, bool require_non_coprime=false) list {
-   if(!is_list(entries) || entries.len < 2){ return [] }
+   if !is_list(entries) || entries.len < 2 { return [] }
    mut out = []
    mut i = 0
-   while(i < entries.len){
+   while i < entries.len {
       def a = entries.get(i, [])
       def n1 = a.get(0, 0)
       def e1 = a.get(1, 0)
       def c1 = a.get(2, 0)
       mut j = i + 1
-      while(j < entries.len){
+      while j < entries.len {
          def b = entries.get(j, [])
          def n2 = b.get(0, 0)
-         if(n1 == n2){
+         if n1 == n2 {
             def e2 = b.get(1, 0)
-            if(!require_non_coprime || extended_gcd(e1, e2).get(0, 1) != 1){
+            if !require_non_coprime || extended_gcd(e1, e2).get(0, 1) != 1 {
                def c2 = b.get(2, 0)
                mut m = nil
-               if(require_non_coprime){
+               if require_non_coprime {
                   m = common_modulus_related_message_attack(e1, e2, n1, c1, c2)
                } else {
                   m = common_modulus_attack_root(n1, e1, c1, e2, c2)
                }
-               if(m != nil){ out = out.append([i, j, m]) }
+               if m != nil { out = out.append([i, j, m]) }
             }
          }
          j += 1
@@ -144,7 +144,7 @@ fn common_modulus_related_message_attack(number e1, number e2, number N, number 
    This path is meaningful when gcd(e1,e2)=g>1 and m^g < N."
    def eg = extended_gcd(e1, e2)
    def g = eg.get(0, 0)
-   if(g == 1){ return nil }
+   if g == 1 { return nil }
    common_modulus_attack_root(N, e1, c1, e2, c2)
 }
 

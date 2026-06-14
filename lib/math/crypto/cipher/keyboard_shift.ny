@@ -11,12 +11,12 @@ use std.core.str
 
 fn _row_shift_char(str c, str normal_row, str shifted_row, int shift) str {
    mut i = 0
-   while(i < utf8_len(normal_row)){
-      if(str_slice(normal_row, i, i + 1, 1) == c){
+   while i < utf8_len(normal_row) {
+      if str_slice(normal_row, i, i + 1, 1) == c {
          def idx = (i + shift + utf8_len(normal_row)) % utf8_len(normal_row)
          return str_slice(normal_row, idx, idx + 1, 1)
       }
-      if(str_slice(shifted_row, i, i + 1, 1) == c){
+      if str_slice(shifted_row, i, i + 1, 1) == c {
          def idx = (i + shift + utf8_len(shifted_row)) % utf8_len(shifted_row)
          return str_slice(shifted_row, idx, idx + 1, 1)
       }
@@ -37,21 +37,21 @@ fn keyboard_shift_transform(str text, int shift) str {
    def row4s = "ZXCVBNM<>?"
    mut out = ""
    mut i = 0
-   while(i < utf8_len(text)){
+   while i < utf8_len(text) {
       def c, a = str_slice(text, i, i + 1, 1), _row_shift_char(c, row1, row1s, shift)
-      if(a != c){
+      if a != c {
          out = str_add(out, a)
          i += 1
          continue
       }
       def b = _row_shift_char(c, row2, row2s, shift)
-      if(b != c){
+      if b != c {
          out = str_add(out, b)
          i += 1
          continue
       }
       def d = _row_shift_char(c, row3, row3s, shift)
-      if(d != c){
+      if d != c {
          out = str_add(out, d)
          i += 1
          continue

@@ -2,7 +2,7 @@ use std.core
 
 mut strings = set()
 mut i = 0
-while(i < 300){
+while i < 300 {
    strings = strings.add("key-" + to_str(i))
    i += 1
 }

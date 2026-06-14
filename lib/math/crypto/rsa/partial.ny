@@ -13,7 +13,7 @@ fn partial_bit_length(any n) int {
    "Return the number of bits required to represent integer n."
    mut bl = 0
    mut v = n < 0 ? (0 - n) : n
-   while(v != 0){
+   while v != 0 {
       bl += 1
       v = v / 2
    }
@@ -22,7 +22,7 @@ fn partial_bit_length(any n) int {
 
 fn gcd(any a, any b) any {
    "Compute the greatest common divisor of a and b."
-   while(b != 0){
+   while b != 0 {
       mut t = b
       b, a = a % b, t
    }
@@ -32,9 +32,9 @@ fn gcd(any a, any b) any {
 fn _factor_from_phi(any n, any phi) any {
    def sum_pq = n - phi + 1
    def diff_sq = sum_pq * sum_pq - 4 * n
-   if(diff_sq < 0){ return 0 }
+   if diff_sq < 0 { return 0 }
    def diff = isqrt(diff_sq)
-   if(diff * diff != diff_sq){ return 0 }
+   if diff * diff != diff_sq { return 0 }
    def p, q = (sum_pq - diff) / 2, (sum_pq + diff) / 2
    (p > 1 && p * q == n) ? p : 0
 }
@@ -43,12 +43,12 @@ fn recover_p_from_d_partial(any e, any d_partial, any bit_mask, any n) any {
    "Attempt to recover prime factor p of n from partial knowledge of the
    private exponent d.  Returns p or 0 on failure."
    def ed_minus_1 = e * d_partial - 1
-   if(ed_minus_1 <= 0){ return 0 }
+   if ed_minus_1 <= 0 { return 0 }
    mut k = 1
-   while(k <= e){
-      if(ed_minus_1 % k == 0){
+   while k <= e {
+      if ed_minus_1 % k == 0 {
          def p = _factor_from_phi(n, ed_minus_1 / k)
-         if(p != 0){ return p }
+         if p != 0 { return p }
       }
       k += 1
    }
@@ -63,9 +63,9 @@ fn coppersmith_factor_known_bits(any n, any partial_p, any known_mask, any bits_
    def X = 1 << shift
    mut result = 0
    mut x = 0
-   while(x < X){
+   while x < X {
       def candidate = p0 + x
-      if(n % candidate == 0){
+      if n % candidate == 0 {
          result = candidate
          break
       }
@@ -82,14 +82,14 @@ fn partial_key_recovery(any e, any n, list known_d_bits, list bit_positions) lis
    def npos = bit_positions.len
    mut d_reconstructed = 0
    mut i = 0
-   while(i < npos){
+   while i < npos {
       def pos = bit_positions.get(i)
       def bit_val = (i < nbits) ? known_d_bits.get(i) : 0
       d_reconstructed = d_reconstructed + (bit_val << pos)
       i += 1
    }
    def p = recover_p_from_d_partial(e, d_reconstructed, 0, n)
-   if(p == 0){ return [0, 0, 0] }
+   if p == 0 { return [0, 0, 0] }
    def q = n / p
    (p * q == n) ? [p, q, d_reconstructed] : [0, 0, 0]
 }

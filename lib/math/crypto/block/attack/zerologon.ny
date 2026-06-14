@@ -15,7 +15,7 @@ use std.math.bin
 fn _zero_bytes(int n) list {
    mut out = []
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(0)
       i += 1
    }
@@ -24,8 +24,8 @@ fn _zero_bytes(int n) list {
 
 fn _all_zero(list bs) bool {
    mut i = 0
-   while(i < bs.len){
-      if(bs[i] != 0){ return false }
+   while i < bs.len {
+      if bs[i] != 0 { return false }
       i += 1
    }
    bs.len > 0
@@ -45,9 +45,9 @@ fn zerologon_attack_step(fnptr encrypt_oracle, int nonce_size) dict {
    mut attempts = 0
    mut found = false
    def max_attempts = 5000
-   while(attempts < max_attempts && !found){
+   while attempts < max_attempts && !found {
       def ct = encrypt_oracle(attempts, nonce)
-      if(_all_zero(ct)){ found = true }
+      if _all_zero(ct) { found = true }
       attempts += 1
    }
    def recovered = found ? 0 : -1
@@ -62,16 +62,16 @@ fn zerologon_verify(fnptr auth_oracle, list session_key) bool {
    session_key: recovered session key as byte list
    Returns true if authentication succeeds, false otherwise."
    def key_len = session_key.len
-   if(key_len == 0){ return false }
+   if key_len == 0 { return false }
    def challenge = _zero_bytes(8)
    def response = auth_oracle(session_key, challenge)
    def resp_len = response.len
-   if(resp_len == 0){ return false }
+   if resp_len == 0 { return false }
    mut all_match = true
    mut i = 0
-   while(i < resp_len){
+   while i < resp_len {
       def expected = bxor(session_key[i % key_len], challenge[i % 8])
-      if(response[i] != expected){
+      if response[i] != expected {
          all_match = false
          i = resp_len
       }
