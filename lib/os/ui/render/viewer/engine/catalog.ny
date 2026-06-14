@@ -28,19 +28,19 @@ fn invalidate_caches() int {
 
 fn refresh_names(any current, int limit=4096) list {
    "Returns the cached model catalog, or loads and sorts it once."
-   if(is_list(current) && current.len > 0){ return current }
+   if is_list(current) && current.len > 0 { return current }
    mut names = ui_assets.list_gltf_asset_names(limit)
-   if(is_list(names) && names.len > 1){ sort(names) }
+   if is_list(names) && names.len > 1 { sort(names) }
    is_list(names) ? names : []
 }
 
 fn model_index(any names, any loaded_name) int {
    "Finds the current model in a catalog by display name."
    def loaded = to_str(loaded_name)
-   if(!is_list(names) || loaded.len == 0){ return -1 }
+   if !is_list(names) || loaded.len == 0 { return -1 }
    mut i = 0
-   while(i < names.len){
-      if(to_str(names.get(i, "")) == loaded){ return i }
+   while i < names.len {
+      if to_str(names.get(i, "")) == loaded { return i }
       i += 1
    }
    -1
@@ -49,22 +49,22 @@ fn model_index(any names, any loaded_name) int {
 fn sync_selected(any selected_name, any loaded_name, any names) str {
    "Keeps the browser selection anchored to the loaded model or first catalog item."
    def selected = to_str(selected_name)
-   if(selected.len > 0){ return selected }
+   if selected.len > 0 { return selected }
    def loaded = to_str(loaded_name)
-   if(loaded.len > 0){ return loaded }
+   if loaded.len > 0 { return loaded }
    (is_list(names) && names.len > 0) ? to_str(names.get(0, "")) : ""
 }
 
 fn filter_cached(any names, any filter, any cache_key="\x00", int source_len=-1, any cached=[]) dict {
    "Filters model names and returns updated cache metadata."
-   if(!is_list(names)){
+   if !is_list(names) {
       return {"items": [], "key": "\x00", "source_len": -1}
    }
    def want = asset_catalog.catalog_filter_key(filter)
-   if(want.len == 0){
+   if want.len == 0 {
       return {"items": names, "key": "\x00", "source_len": names.len}
    }
-   if(to_str(cache_key) == want && int(source_len) == names.len && is_list(cached)){
+   if to_str(cache_key) == want && int(source_len) == names.len && is_list(cached) {
       return {"items": cached, "key": want, "source_len": names.len}
    }
    {"items": asset_catalog.catalog_filter(names, want), "key": want, "source_len": names.len}
@@ -83,7 +83,7 @@ fn pick_index_cached(any cache, any items, any value, any filter) dict {
 
 fn _row_id(name) str {
    def key = to_str(name)
-   if(_row_id_cache.contains(key)){ return to_str(_row_id_cache.get(key, key)) }
+   if _row_id_cache.contains(key) { return to_str(_row_id_cache.get(key, key)) }
    def safe = asset_catalog.catalog_row_id(key)
    _row_id_cache[key] = safe
    safe
@@ -91,7 +91,7 @@ fn _row_id(name) str {
 
 fn _icon_name(name) str {
    def key = to_str(name)
-   if(_icon_name_cache.contains(key)){ return to_str(_icon_name_cache.get(key, "asset_model")) }
+   if _icon_name_cache.contains(key) { return to_str(_icon_name_cache.get(key, "asset_model")) }
    def icon = asset_catalog.asset_icon_name(name)
    _icon_name_cache[key] = icon
    icon
@@ -99,16 +99,16 @@ fn _icon_name(name) str {
 
 fn _icon_sprite(name) any {
    def icon = _icon_name(name)
-   if(_icon_sprite_cache.contains(icon)){ return _icon_sprite_cache.get(icon, -1) }
+   if _icon_sprite_cache.contains(icon) { return _icon_sprite_cache.get(icon, -1) }
    def spr = icons.icon_sprite(icon)
    _icon_sprite_cache[icon] = spr
    spr
 }
 
 fn _detail(name, loaded=false) str {
-   if(bool(loaded)){ return "Loaded scene" }
+   if bool(loaded) { return "Loaded scene" }
    def key = to_str(name)
-   if(_detail_cache.contains(key)){ return to_str(_detail_cache.get(key, "Model")) }
+   if _detail_cache.contains(key) { return to_str(_detail_cache.get(key, "Model")) }
    def detail = asset_catalog.asset_detail(key, false)
    _detail_cache[key] = detail
    detail
@@ -123,12 +123,12 @@ fn grid_h(f64 requested_h, bool compact=false, bool standalone=false, f64 reserv
    ;; Do not cap embedded asset browsers to a fixed magic size.  The parent
    ;; panel already computed the available body height, so use that dynamic
    ;; budget and let the scroll area fill the vertical slot.
-   def floor = bool(compact) ? 96.0 : 120.0
+   def floor = bool(compact) ? 82.0 : 104.0
    def requested = max(1.0, float(requested_h))
    def remaining = max(0.0, gui.remaining_h(reserve))
    def budget = (remaining > 1.0) ? remaining : requested
    def out = min(requested, budget)
-   if(out < floor){ return max(1.0, out) }
+   if out < floor { return max(1.0, out) }
    out
 }
 
@@ -151,9 +151,9 @@ fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dic
    def catalog = options.get("catalog", 0)
    def grid_w = asset_catalog.asset_grid_usable_w(win_w, compact)
    def cols = max(1, file_list ? 1 : asset_catalog.asset_grid_cols(grid_w, compact))
-   def tile_gap = file_list ? 0.0 : 8.0
+   def tile_gap = file_list ? 0.0 : 4.0
    def detail_enabled = !hide_detail && !file_list
-   def tile_h = file_list ? 30.0 : (detail_enabled ? asset_catalog.asset_tile_h(show_paths) : (bool(compact) ? 36.0 : 42.0))
+   def tile_h = file_list ? 24.0 : (detail_enabled ? max(30.0, asset_catalog.asset_tile_h(show_paths) - 8.0) : (bool(compact) ? 28.0 : 34.0))
    def tile_w = bool(compact) ? grid_w : max(120.0, (grid_w - float(cols - 1) * tile_gap) / float(cols))
    def row_step = tile_h + (file_list ? 2.0 : gui.layout_gap())
    def total_items = items.len
@@ -161,11 +161,11 @@ fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dic
    def scroll_id = to_str(idp) + "_" + to_str(suffix) + "_model_catalog"
    def content_h = total_items <= 0 ? 58.0 : max(list_h + 1.0, float(total_rows) * row_step + 4.0)
    t_prof = ui_profile.mark_next(prof, "asset_grid_prep", t_prof)
-   if(selected_idx < 0 && selected_name.len > 0){ selected_idx = model_index(items, selected_name) }
+   if selected_idx < 0 && selected_name.len > 0 { selected_idx = model_index(items, selected_name) }
    gui.set_scroll_area_content_hint(scroll_id, content_h)
    ;; Only auto-scroll after keyboard/navigation requests.  Doing this every frame
    ;; fights the mouse wheel and makes the asset list snap back forever.
-   if(ensure_selected && selected_idx >= 0 && selected_idx < total_items){
+   if ensure_selected && selected_idx >= 0 && selected_idx < total_items {
       def row = selected_idx / max(1, cols)
       def top = float(row) * row_step
       gui.scroll_area_ensure_visible(scroll_id, top, top + tile_h, max(1.0, list_h - 8.0))
@@ -175,7 +175,7 @@ fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dic
    def range = asset_catalog.virtual_row_range(total_rows, row_step, gui.scroll_area_visible_h(), gui.scroll_area_scroll_y(), 2)
    def first_row = min(total_rows, max(0, int(range[0])))
    def last_row = min(total_rows, max(first_row + 1, int(range[1])))
-   if(first_row > 0){ gui.spacer_px(float(first_row) * row_step) }
+   if first_row > 0 { gui.spacer_px(float(first_row) * row_step) }
    t_prof = ui_profile.mark_next(prof, "asset_grid_range", t_prof,
    " rows=" + to_str(first_row) + ".." + to_str(last_row) + " cols=" + to_str(cols))
    def tile_id_prefix = to_str(idp) + "_" + to_str(suffix) + "_mdl_"
@@ -183,26 +183,26 @@ fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dic
    mut clicked = ""
    mut i = first_row * cols
    def end_i = min(total_items, last_row * cols)
-   while(i < end_i){
+   while i < end_i {
       def name = to_str(items[i])
       def is_loaded = scene_loaded && loaded_name == name
       def is_selected = selected_name == name
       def detail = detail_enabled ? (show_paths ? _path_detail(catalog, name) : _detail(name, is_loaded)) : ""
       def icon = (parity_lock || !show_icons) ? -1 : (is_loaded ? loaded_icon : _icon_sprite(name))
-      if(file_list){
-         if(gui.selectable_file(tile_id_prefix + _row_id(name), name, is_loaded || is_selected, tile_w, tile_h, icon)){
+      if file_list {
+         if gui.selectable_file(tile_id_prefix + _row_id(name), name, is_loaded || is_selected, tile_w, tile_h, icon) {
             clicked = name
          }
-      } elif(gui.selectable(tile_id_prefix + _row_id(name), name, is_loaded || is_selected, tile_w, tile_h, detail, icon, false)){
+      } elif gui.selectable(tile_id_prefix + _row_id(name), name, is_loaded || is_selected, tile_w, tile_h, detail, icon, false) {
          clicked = name
       }
       def next_i = i + 1
-      if(next_i < end_i && (next_i % cols) != 0){ gui.same_line(tile_gap) }
+      if next_i < end_i && (next_i % cols) != 0 { gui.same_line(tile_gap) }
       i += 1
    }
    t_prof = ui_profile.mark_next(prof, "asset_grid_items", t_prof, " count=" + to_str(max(0, end_i - first_row * cols)))
-   if(last_row < total_rows){ gui.spacer_px(float(total_rows - last_row) * row_step) }
-   if(total_items == 0){ gui.text_colored("No models match.", [0.86, 0.74, 0.55, 1.0]) }
+   if last_row < total_rows { gui.spacer_px(float(total_rows - last_row) * row_step) }
+   if total_items == 0 { gui.text_colored("No models match.", [0.72, 0.72, 0.72, 1.0]) }
    gui.end_scroll_area()
    ui_profile.mark_done(prof, "asset_grid_end_scroll", t_prof)
    {"clicked": clicked, "count": total_items}

@@ -11,16 +11,16 @@ use std.core.io
 use std.core.str (chr)
 
 fn _pfd(any p, any key) int {
-   if(!is_dict(p)){ return -1 }
+   if !is_dict(p) { return -1 }
    p.get(key, -1)
 }
 
 fn spawn(any path, any args) any {
    "Starts `path` with stdin/stdout pipes and returns a process object."
-   if(!is_str(path)){ return 0 }
-   if(!is_list(args)){ return 0 }
+   if !is_str(path) { return 0 }
+   if !is_list(args) { return 0 }
    def res = popen(path, args)
-   if(res == 0){ return 0 }
+   if res == 0 { return 0 }
    mut p = dict(4)
    p["pid"] = res.get(0)
    p["in"] = res.get(1)
@@ -31,17 +31,17 @@ fn spawn(any path, any args) any {
 
 fn send(any p, any data) any {
    "Sends `data` to process `p`'s stdin."
-   if(!is_dict(p)){ return err("not a process") }
+   if !is_dict(p) { return err("not a process") }
    def fd = _pfd(p, "in")
-   if(fd < 0){ return err("invalid fd") }
-   if(!is_str(data)){ data = to_str(data) }
+   if fd < 0 { return err("invalid fd") }
+   if !is_str(data) { data = to_str(data) }
    def n = data.len
-   if(n <= 0){ return ok(0) }
+   if n <= 0 { return ok(0) }
    mut off = 0
-   while(off < n){
-      match sys_write(fd, to_int(data) + off, n - off){
+   while off < n {
+      match sys_write(fd, to_int(data) + off, n - off) {
          ok(w) -> {
-            if(w <= 0){ return err("short write") }
+            if w <= 0 { return err("short write") }
             off += w
          }
          err(e) -> { return err(e) }
@@ -52,10 +52,10 @@ fn send(any p, any data) any {
 
 fn sendline(any p, any data) any {
    "Sends `data` followed by newline to process `p`'s stdin."
-   if(!is_str(data)){ data = to_str(data) }
-   match send(p, data){
+   if !is_str(data) { data = to_str(data) }
+   match send(p, data) {
       ok(w0) -> {
-         match send(p, "\n"){
+         match send(p, "\n") {
             ok(w1) -> { return ok(w0 + w1) }
             err(e1) -> { return err(e1) }
          }
@@ -67,14 +67,14 @@ fn sendline(any p, any data) any {
 fn recv(any p, any n=1024) any {
    "Receives up to `n` bytes from process `p`'s stdout."
    def fd = _pfd(p, "out")
-   if(fd < 0){ return 0 }
-   if(!is_int(n) || n <= 0){ n = 1024 }
-   if(n > 8 * 1024 * 1024){ n = 8 * 1024 * 1024 }
+   if fd < 0 { return 0 }
+   if !is_int(n) || n <= 0 { n = 1024 }
+   if n > 8 * 1024 * 1024 { n = 8 * 1024 * 1024 }
    mut buf = malloc(n + 1)
-   if(buf == 0){ return "" }
-   match sys_read(fd, buf, n){
+   if buf == 0 { return "" }
+   match sys_read(fd, buf, n) {
       ok(r) -> {
-         if(r <= 0){
+         if r <= 0 {
             free(buf)
             return ""
          }
@@ -91,37 +91,37 @@ fn recv(any p, any n=1024) any {
 fn recv_line(any p) str {
    "Receives a single line from process `p`'s stdout."
    def fd = _pfd(p, "out")
-   if(fd < 0){ return "" }
+   if fd < 0 { return "" }
    mut c_buf = malloc(2)
-   if(c_buf == 0){ return "" }
+   if c_buf == 0 { return "" }
    defer { free(c_buf) }
    init_str(c_buf, 1)
    mut b = Builder(128)
    defer { builder_free(b) }
-   while(1){
+   while 1 {
       def got = sys_read(fd, c_buf, 1)
       mut res = 0
       match got {
          ok(r) -> { res = r }
          err(ignorederr) -> { ignorederr  res = -1 }
       }
-      if(res <= 0){ break }
+      if res <= 0 { break }
       def c = chr(load8(c_buf, 0))
       b = builder_append(b, c)
-      if(c == "\n"){ break }
+      if c == "\n" { break }
    }
    builder_to_str(b)
 }
 
 fn recv_all(any p, any n=1024) str {
    "Receives all available data from process `p`'s stdout."
-   if(!is_int(n) || n <= 0){ n = 1024 }
-   if(n > 8 * 1024 * 1024){ n = 8 * 1024 * 1024 }
+   if !is_int(n) || n <= 0 { n = 1024 }
+   if n > 8 * 1024 * 1024 { n = 8 * 1024 * 1024 }
    mut b = Builder(4096)
    defer { builder_free(b) }
-   while(1){
+   while 1 {
       def chunk = recv(p, n)
-      if(chunk.len == 0){ break }
+      if chunk.len == 0 { break }
       b = builder_append(b, chunk)
    }
    builder_to_str(b)
@@ -129,7 +129,7 @@ fn recv_all(any p, any n=1024) str {
 
 fn shutdown_send(any p) any {
    "Closes process `p`'s stdin."
-   if(!is_dict(p)){ return err("not a process") }
+   if !is_dict(p) { return err("not a process") }
    def fd = _pfd(p, "in")
    sys_close_quiet(fd)
    p["in"] = -1
@@ -138,15 +138,15 @@ fn shutdown_send(any p) any {
 
 fn close(any p) any {
    "Closes all process pipes and waits for completion."
-   if(!is_dict(p)){ return err("not a process") }
+   if !is_dict(p) { return err("not a process") }
    sys_close_quiet(_pfd(p, "in"))
    sys_close_quiet(_pfd(p, "out"))
    p["in"] = -1
    p["out"] = -1
    def pid = _pfd(p, "pid")
-   if(pid < 0){ return err("invalid pid") }
+   if pid < 0 { return err("invalid pid") }
    def status = waitpid(pid, 0)
-   if(status < 0){ return err(status) }
+   if status < 0 { return err(status) }
    ok(status)
 }
 

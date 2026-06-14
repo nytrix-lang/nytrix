@@ -15,7 +15,7 @@ use std.os.ui.window.platform.api as backend_api
 use std.os.ui.render.vk.vulkan (vk_create_metal_surface_ext)
 
 fn _handle_from(any v) any {
-   if(is_dict(v)){ return v.get("handle", 0) }
+   if is_dict(v) { return v.get("handle", 0) }
    v
 }
 
@@ -52,7 +52,7 @@ fn get_backend_name() str {
 mut _cocoa_frameworks_loaded = false
 
 fn _load_cocoa_frameworks() bool {
-   if(_cocoa_frameworks_loaded){ return true }
+   if _cocoa_frameworks_loaded { return true }
    #macos {
       def flags = ffi.RTLD_NOW() | ffi.RTLD_GLOBAL()
       ffi.dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", flags)
@@ -316,34 +316,34 @@ fn get_selector(str name) any {
 
 fn shared_application() any {
    "Returns `[NSApplication sharedApplication]` when AppKit is available."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def cls = get_class("NSApplication")
-   if(!cls){ return 0 }
+   if !cls { return 0 }
    objc_msgSend(cls, get_selector("sharedApplication"))
 }
 
 fn create_autorelease_pool() any {
    "Creates a local `NSAutoreleasePool` for native Cocoa work."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def cls = get_class("NSAutoreleasePool")
-   if(!cls){ return 0 }
+   if !cls { return 0 }
    def pool = objc_msgSend(cls, get_selector("alloc"))
-   if(!pool){ return 0 }
+   if !pool { return 0 }
    objc_msgSend(pool, get_selector("init"))
 }
 
 fn drain_autorelease_pool(any pool) bool {
    "Drains a previously created `NSAutoreleasePool`."
-   if(!available() || !pool){ return false }
+   if !available() || !pool { return false }
    objc_msgSend(pool, get_selector("drain"))
    true
 }
 
 fn set_activation_policy_regular() bool {
    "Sets the app activation policy to regular AppKit-window behavior."
-   if(!available()){ return false }
+   if !available() { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    objc_msgSend_i64_arg(app, get_selector("setActivationPolicy:"), NSApplicationActivationPolicyRegular) != 0
 }
 
@@ -352,9 +352,9 @@ fn _app_delegate_should_terminate(any self, any sel, any sender) int {
    def keys = dict_keys(_windows)
    mut i = 0
    def keys_n = keys.len
-   while(i < keys_n){
+   while i < keys_n {
       def w = _windows.get(keys.get(i), 0)
-      if(is_dict(w)){ _push_event(w, 15, 0) }
+      if is_dict(w) { _push_event(w, 15, 0) }
       i += 1
    }
    1
@@ -363,18 +363,18 @@ fn _app_delegate_should_terminate(any self, any sel, any sender) int {
 fn _app_delegate_did_finish_launching(any self, any sel, any notification) any {
    "NSApplicationDelegate applicationDidFinishLaunching: — activates the application."
    def app = shared_application()
-   if(app){ objc_msgSend_i64_arg(app, get_selector("activateIgnoringOtherApps:"), 1) }
+   if app { objc_msgSend_i64_arg(app, get_selector("activateIgnoringOtherApps:"), 1) }
 }
 
 mut _app_delegate_class = 0
 
 fn _create_app_delegate() any {
    "Creates and registers a dynamic NytrixAppDelegate NSApplicationDelegate class."
-   if(_app_delegate_class){ return _app_delegate_class }
-   if(!available()){ return 0 }
+   if _app_delegate_class { return _app_delegate_class }
+   if !available() { return 0 }
    def base = get_class("NSObject")
    def cls = _ny_objc_allocateClassPair(base, cstr("NytrixAppDelegate"), 0)
-   if(cls){
+   if cls {
       _ny_class_addMethod(cls, get_selector("applicationShouldTerminate:"), _app_delegate_should_terminate, cstr("l@:@"))
       _ny_class_addMethod(cls, get_selector("applicationDidFinishLaunching:"), _app_delegate_did_finish_launching, cstr("v@:@"))
       _ny_objc_registerClassPair(cls)
@@ -385,24 +385,24 @@ fn _create_app_delegate() any {
 
 fn install_app_delegate() bool {
    "Installs a NytrixAppDelegate as the NSApplication delegate if not already set."
-   if(!available()){ return false }
+   if !available() { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    def existing = objc_msgSend(app, get_selector("delegate"))
-   if(existing){ return existing != 0 }
+   if existing { return existing != 0 }
    def cls = _create_app_delegate()
-   if(!cls){ return false }
+   if !cls { return false }
    def delegate = objc_msgSend(objc_msgSend(cls, get_selector("alloc")), get_selector("init"))
-   if(!delegate){ return false }
+   if !delegate { return false }
    objc_msgSend_ptr(app, get_selector("setDelegate:"), delegate)
    true
 }
 
 fn finish_launching() bool {
    "Finishes AppKit startup on the shared application."
-   if(!available()){ return false }
+   if !available() { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    install_app_delegate()
    objc_msgSend(app, get_selector("finishLaunching"))
    true
@@ -410,66 +410,66 @@ fn finish_launching() bool {
 
 fn activate_ignoring_other_apps(bool v=true) bool {
    "Activate the current app for Cocoa window presentation."
-   if(!available()){ return false }
+   if !available() { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    objc_msgSend_i64_arg(app, get_selector("activateIgnoringOtherApps:"), v ? 1 : 0)
    true
 }
 
 fn get_screens() any {
    "Returns the `NSScreen` array."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def cls = get_class("NSScreen")
-   if(!cls){ return 0 }
+   if !cls { return 0 }
    objc_msgSend(cls, get_selector("screens"))
 }
 
 fn get_screen_count(any screens=0) int {
    "Returns the number of active Cocoa screens."
    def arr = common.value_or(screens, get_screens())
-   if(!arr){ return 0 }
+   if !arr { return 0 }
    int(objc_msgSend_i64(arr, get_selector("count")))
 }
 
 fn get_screen_at(int index, any screens=0) any {
    "Returns the screen object at `index`."
    def arr = common.value_or(screens, get_screens())
-   if(!arr || index < 0){ return 0 }
+   if !arr || index < 0 { return 0 }
    objc_msgSend_ptr_i64_arg(arr, get_selector("objectAtIndex:"), index)
 }
 
 fn get_screen_name(any screen) str {
    "Returns an `NSScreen` localized name when available."
-   if(!available() || !screen){ return "" }
+   if !available() || !screen { return "" }
    def name_obj = objc_msgSend(screen, get_selector("localizedName"))
-   if(!name_obj){ return "" }
+   if !name_obj { return "" }
    def utf8 = objc_msgSend(name_obj, get_selector("UTF8String"))
-   if(!utf8){ return "" }
+   if !utf8 { return "" }
    to_str(utf8)
 }
 
 fn get_screen_display_id(any screen) int {
    "Returns the CoreGraphics display id for the given `NSScreen`."
-   if(!available() || !screen){ return 0 }
+   if !available() || !screen { return 0 }
    def key = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("NSScreenNumber"))
-   if(!key){ return 0 }
+   if !key { return 0 }
    def desc = objc_msgSend_ptr(screen, get_selector("deviceDescription"))
-   if(!desc){ return 0 }
+   if !desc { return 0 }
    def number = objc_msgSend_ptr(desc, get_selector("objectForKey:"), key)
-   if(!number){ return 0 }
+   if !number { return 0 }
    int(objc_msgSend_i64(number, get_selector("unsignedIntValue")))
 }
 
 fn get_screen_for_display_id(int display_id, any screens=0) any {
    "Returns the `NSScreen` matching the given CoreGraphics display id."
    def arr = common.value_or(screens, get_screens())
-   if(!arr){ return 0 }
+   if !arr { return 0 }
    mut i = 0
    def n = get_screen_count(arr)
-   while(i < n){
+   while i < n {
       def screen = get_screen_at(i, arr)
-      if(screen && get_screen_display_id(screen) == int(display_id)){ return screen }
+      if screen && get_screen_display_id(screen) == int(display_id) { return screen }
       i += 1
    }
    0
@@ -477,21 +477,21 @@ fn get_screen_for_display_id(int display_id, any screens=0) any {
 
 fn get_display_unit_number(int display_id) int {
    "Returns the CoreGraphics unit number for a display id."
-   if(!available() || !display_id){ return 0 }
+   if !available() || !display_id { return 0 }
    int(CGDisplayUnitNumber(display_id))
 }
 
 fn get_screen_for_unit_number(int unit_number, any screens=0) any {
    "Returns the `NSScreen` matching the given CoreGraphics unit number."
    def arr = common.value_or(screens, get_screens())
-   if(!arr){ return 0 }
+   if !arr { return 0 }
    mut i = 0
    def n = get_screen_count(arr)
-   while(i < n){
+   while i < n {
       def screen = get_screen_at(i, arr)
-      if(screen){
+      if screen {
          def display_id = get_screen_display_id(screen)
-         if(display_id && get_display_unit_number(display_id) == int(unit_number)){ return screen }
+         if display_id && get_display_unit_number(display_id) == int(unit_number) { return screen }
       }
       i += 1
    }
@@ -499,28 +499,28 @@ fn get_screen_for_unit_number(int unit_number, any screens=0) any {
 }
 
 fn _rect_dict_from_string(str s) any {
-   if(!s || s.len == 0){ return false }
+   if !s || s.len == 0 { return false }
    def s_n = s.len
    mut vals = []
    mut tok = str.Builder(32)
    mut i = 0
-   while(i < s_n){
+   while i < s_n {
       def c = load8(s, i)
       def numeric = (c >= 48 && c <= 57) || c == 45 || c == 46 || c == 43
-      if(numeric){ tok = str.builder_append(tok, str.chr(c)) } elif(tok.get(1, 0) > 0){
+      if numeric { tok = str.builder_append(tok, str.chr(c)) } elif tok.get(1, 0) > 0 {
          vals = vals.append(str.atof(str.builder_to_str(tok)))
          str.builder_free(tok)
          tok = str.Builder(32)
-         if(vals.len >= 4){
+         if vals.len >= 4 {
             str.builder_free(tok)
             break
          }
       }
       i += 1
    }
-   if(tok.get(1, 0) > 0 && vals.len < 4){ vals = vals.append(str.atof(str.builder_to_str(tok))) }
+   if tok.get(1, 0) > 0 && vals.len < 4 { vals = vals.append(str.atof(str.builder_to_str(tok))) }
    str.builder_free(tok)
-   if(vals.len < 4){ return false }
+   if vals.len < 4 { return false }
    return {
       "x": int(vals.get(0, 0.0)),
       "y": int(vals.get(1, 0.0)),
@@ -530,15 +530,15 @@ fn _rect_dict_from_string(str s) any {
 }
 
 fn _screen_rect_for_key(any screen, str key_name) any {
-   if(!available() || !screen){ return false }
+   if !available() || !screen { return false }
    def key = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(key_name))
-   if(!key){ return false }
+   if !key { return false }
    def boxed = objc_msgSend_ptr(screen, get_selector("valueForKey:"), key)
-   if(!boxed){ return false }
+   if !boxed { return false }
    def desc = objc_msgSend(boxed, get_selector("description"))
-   if(!desc){ return false }
+   if !desc { return false }
    def utf8 = objc_msgSend(desc, get_selector("UTF8String"))
-   if(!utf8){ return false }
+   if !utf8 { return false }
    _rect_dict_from_string(to_str(utf8))
 }
 
@@ -554,7 +554,7 @@ fn get_screen_visible_frame(any screen) any {
 
 fn get_screen_scale(any screen) f64 {
    "Returns the AppKit backing scale factor for an `NSScreen`."
-   if(!available() || !screen){ return 1.0 }
+   if !available() || !screen { return 1.0 }
    def scale = objc_msgSend_f64(screen, get_selector("backingScaleFactor"))
    scale > 0.0 ? scale : 1.0
 }
@@ -565,7 +565,7 @@ fn get_monitors() list {
    mut out = []
    mut i = 0
    def ids_n = ids.len
-   while(i < ids_n){
+   while i < ids_n {
       def display_id = ids.get(i, 0)
       mut m = dict(8)
       m = m.set("handle", display_id)
@@ -585,7 +585,7 @@ fn get_primary_monitor() any {
 
 fn get_monitor_name(any monitor) str {
    "Returns the localized name for a Cocoa monitor handle."
-   if(!monitor){ return "Unknown Monitor" }
+   if !monitor { return "Unknown Monitor" }
    def display_id = _handle_from(monitor)
    def screen = get_screen_for_display_id(display_id)
    screen ? get_screen_name(screen) : "Display " + to_str(display_id)
@@ -593,7 +593,7 @@ fn get_monitor_name(any monitor) str {
 
 fn get_monitor_pos(any monitor) list {
    "Returns the screen position [x, y] of a Cocoa monitor."
-   if(!monitor){ return [0, 0] }
+   if !monitor { return [0, 0] }
    def display_id = _handle_from(monitor)
    def screen = get_screen_for_display_id(display_id)
    def frame = get_screen_frame(screen)
@@ -602,7 +602,7 @@ fn get_monitor_pos(any monitor) list {
 
 fn get_monitor_workarea(any monitor) list {
    "Returns the visible workarea [x, y, w, h] of a Cocoa monitor."
-   if(!monitor){ return [0, 0, 0, 0] }
+   if !monitor { return [0, 0, 0, 0] }
    def display_id = _handle_from(monitor)
    def screen = get_screen_for_display_id(display_id)
    def frame = get_screen_visible_frame(screen)
@@ -611,19 +611,19 @@ fn get_monitor_workarea(any monitor) list {
 
 fn get_monitor_physical_size(any monitor) list {
    "Returns the approximate physical size [mm_w, mm_h] of a Cocoa monitor."
-   if(!monitor){ return [0, 0] }
+   if !monitor { return [0, 0] }
    def mode = get_video_mode(monitor)
-   if(!mode){ return [0, 0] }
+   if !mode { return [0, 0] }
    def scale = get_monitor_content_scale(monitor)
    def dpi = 96.0 * float(scale.get(0, 1.0))
-   if(dpi <= 0.0){ return [0, 0] }
+   if dpi <= 0.0 { return [0, 0] }
    [int(float(mode.get("width", 0)) * 25.4 / dpi),
    int(float(mode.get("height", 0)) * 25.4 / dpi)]
 }
 
 fn get_monitor_content_scale(any monitor) list {
    "Returns the backing scale factor(Retina scale) for a Cocoa monitor."
-   if(!monitor){ return [1.0, 1.0] }
+   if !monitor { return [1.0, 1.0] }
    def display_id = _handle_from(monitor)
    def screen = get_screen_for_display_id(display_id)
    def s = screen ? get_screen_scale(screen) : 1.0
@@ -632,36 +632,36 @@ fn get_monitor_content_scale(any monitor) list {
 
 fn get_video_mode(any monitor) any {
    "Returns the current video mode for a Cocoa monitor."
-   if(!monitor){ return false }
+   if !monitor { return false }
    def display_id = _handle_from(monitor)
    get_current_video_mode(display_id)
 }
 
 fn get_video_modes(any monitor) list {
    "Returns available video modes for a Cocoa monitor."
-   if(!monitor){ return [] }
+   if !monitor { return [] }
    def display_id = _handle_from(monitor)
    get_video_modes_native(display_id)
 }
 
 fn get_gamma_ramp(any monitor) any {
    "Returns the CoreGraphics gamma ramp for the given monitor."
-   if(!available() || !is_dict(monitor)){ return false }
+   if !available() || !is_dict(monitor) { return false }
    def display_id = monitor.get("handle", 0)
-   if(!display_id){ return false }
+   if !display_id { return false }
    def capacity = int(CGDisplayGammaTableCapacity(display_id))
-   if(capacity <= 0){ return false }
+   if capacity <= 0 { return false }
    def red_buf   = zalloc(capacity * 4)
    def green_buf = zalloc(capacity * 4)
    def blue_buf  = zalloc(capacity * 4)
    def count_ptr = zalloc(4)
-   if(!red_buf || !green_buf || !blue_buf || !count_ptr){ free(red_buf, green_buf, blue_buf, count_ptr) return false }
+   if !red_buf || !green_buf || !blue_buf || !count_ptr { free(red_buf, green_buf, blue_buf, count_ptr) return false }
    def ok = CGGetDisplayTransferByTable(display_id, capacity, red_buf, green_buf, blue_buf, count_ptr)
    def actual = load32(count_ptr, 0)
    free(count_ptr)
-   if(ok != 0 || actual <= 0){ free(red_buf, green_buf, blue_buf) return false }
+   if ok != 0 || actual <= 0 { free(red_buf, green_buf, blue_buf) return false }
    mut red, green, blue = [], [], []
-   mut i = 0 while(i < actual){
+   mut i = 0 while i < actual {
       def scale = 65535.0
       red   = red.append(int(load32_f32(red_buf,   i * 4) * scale + 0.5))
       green = green.append(int(load32_f32(green_buf, i * 4) * scale + 0.5))
@@ -674,21 +674,21 @@ fn get_gamma_ramp(any monitor) any {
 
 fn set_gamma_ramp(any monitor, any ramp) bool {
    "Applies a gamma ramp to the given monitor via CoreGraphics."
-   if(!available() || !is_dict(monitor) || !is_dict(ramp)){ return false }
+   if !available() || !is_dict(monitor) || !is_dict(ramp) { return false }
    def display_id = monitor.get("handle", 0)
-   if(!display_id){ return false }
+   if !display_id { return false }
    def size = ramp.get("size", 0)
-   if(size <= 0){ return false }
+   if size <= 0 { return false }
    def red   = ramp.get("red", [])
    def green = ramp.get("green", [])
    def blue  = ramp.get("blue", [])
-   if(red.len < size || green.len < size || blue.len < size){ return false }
+   if red.len < size || green.len < size || blue.len < size { return false }
    def red_buf   = zalloc(size * 4)
    def green_buf = zalloc(size * 4)
    def blue_buf  = zalloc(size * 4)
-   if(!red_buf || !green_buf || !blue_buf){ free(red_buf, green_buf, blue_buf) return false }
+   if !red_buf || !green_buf || !blue_buf { free(red_buf, green_buf, blue_buf) return false }
    def scale = 1.0 / 65535.0
-   mut i = 0 while(i < size){
+   mut i = 0 while i < size {
       store32_f32(red_buf,   red.get(i) * scale, i * 4)
       store32_f32(green_buf, green.get(i) * scale, i * 4)
       store32_f32(blue_buf,  blue.get(i) * scale, i * 4)
@@ -706,7 +706,7 @@ fn focus_window(any win) bool {
 
 fn set_clipboard(any win, any s) bool {
    "Sets the Cocoa system clipboard to string `s`."
-   if(!available()){ return false }
+   if !available() { return false }
    def pool = create_autorelease_pool()
    def pb = objc_msgSend_ptr(get_class("NSPasteboard"), get_selector("generalPasteboard"), 0)
    objc_msgSend_i64(pb, get_selector("clearContents"))
@@ -719,18 +719,18 @@ fn set_clipboard(any win, any s) bool {
 
 fn get_clipboard(any win) str {
    "Retrieves string contents from the Cocoa system clipboard."
-   if(!available()){ return "" }
+   if !available() { return "" }
    def pool = create_autorelease_pool()
    def pb = objc_msgSend_ptr(get_class("NSPasteboard"), get_selector("generalPasteboard"), 0)
    def type = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("public.utf8-plain-text"))
    def types = objc_msgSend_ptr(get_class("NSArray"), get_selector("arrayWithObject:"), type)
    def best = objc_msgSend_ptr(pb, get_selector("availableTypeFromArray:"), types)
    mut out = ""
-   if(best){
+   if best {
       def res = objc_msgSend_ptr(pb, get_selector("stringForType:"), best)
-      if(res){
+      if res {
          def utf8 = objc_msgSend_ptr(res, get_selector("UTF8String"), 0)
-         if(utf8){ out = to_str(utf8) }
+         if utf8 { out = to_str(utf8) }
       }
    }
    drain_autorelease_pool(pool)
@@ -739,25 +739,25 @@ fn get_clipboard(any win) str {
 
 fn set_input_mode(any win, int mode, int value) bool {
    "Sets input modes for a Cocoa window(cursor, sticky keys, etc.)."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    mut next_win = win
-   if(mode == CURSOR){
-      if(value == CURSOR_NORMAL || value == CURSOR_CAPTURED){
+   if mode == CURSOR {
+      if value == CURSOR_NORMAL || value == CURSOR_CAPTURED {
          objc_msgSend_ptr(get_class("NSCursor"), get_selector("unhide"), 0)
          CGAssociateMouseAndMouseCursorPosition(1)
-      } elif(value == CURSOR_HIDDEN){
+      } elif value == CURSOR_HIDDEN {
          objc_msgSend_ptr(get_class("NSCursor"), get_selector("hide"), 0)
          CGAssociateMouseAndMouseCursorPosition(1)
-      } elif(value == CURSOR_DISABLED){
+      } elif value == CURSOR_DISABLED {
          objc_msgSend_ptr(get_class("NSCursor"), get_selector("hide"), 0)
          CGAssociateMouseAndMouseCursorPosition(0)
       }
       next_win = next_win.set("cursor_mode", value)
-   } elif(mode == RAW_MOUSE_MOTION){
+   } elif mode == RAW_MOUSE_MOTION {
       next_win = next_win.set("raw_mouse_motion", value != 0)
-   } elif(mode == STICKY_KEYS){
+   } elif mode == STICKY_KEYS {
       next_win = next_win.set("sticky_keys", !!value)
-   } elif(mode == STICKY_MOUSE_BUTTONS){
+   } elif mode == STICKY_MOUSE_BUTTONS {
       next_win = next_win.set("sticky_mouse", !!value)
    }
    def hwnd = win.get("handle", 0)
@@ -767,19 +767,19 @@ fn set_input_mode(any win, int mode, int value) bool {
 
 fn create_surface(any instance, any win, any allocator, any surface_out) int {
    "Creates a native Vulkan Metal surface for the Cocoa window."
-   if(!available()){ return -1 }
+   if !available() { return -1 }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return -1 }
+   if !hwnd { return -1 }
    def layer_cls = get_class("CAMetalLayer")
-   if(!layer_cls){ return -1 }
+   if !layer_cls { return -1 }
    def layer = objc_msgSend(layer_cls, get_selector("layer"))
-   if(!layer){ return -1 }
+   if !layer { return -1 }
    def view = objc_msgSend(hwnd, get_selector("contentView"))
-   if(!view){ return -1 }
+   if !view { return -1 }
    objc_msgSend_ptr_i64(view, get_selector("setWantsLayer:"), 1)
    objc_msgSend_ptr(view, get_selector("setLayer:"), layer)
    def info = malloc(32)
-   if(!info){ return -1 }
+   if !info { return -1 }
    memset(info, 0, 32)
    store32(info, 1000217000, 0)
    store64_h(info, layer, 24)
@@ -790,30 +790,30 @@ fn create_surface(any instance, any win, any allocator, any surface_out) int {
 
 fn get_active_display_ids() list {
    "Returns the active CoreGraphics display ids."
-   if(!available()){ return [] }
+   if !available() { return [] }
    def count_ptr = zalloc(4)
-   if(!count_ptr){ return [] }
-   if(CGGetActiveDisplayList(0, 0, count_ptr) != 0){
+   if !count_ptr { return [] }
+   if CGGetActiveDisplayList(0, 0, count_ptr) != 0 {
       free(count_ptr)
       return []
    }
    def n = int(load32(count_ptr, 0))
-   if(n <= 0){
+   if n <= 0 {
       free(count_ptr)
       return []
    }
    def ids_buf = zalloc(n * 4)
-   if(!ids_buf){
+   if !ids_buf {
       free(count_ptr)
       return []
    }
-   if(CGGetActiveDisplayList(n, ids_buf, count_ptr) != 0){
+   if CGGetActiveDisplayList(n, ids_buf, count_ptr) != 0 {
       free(ids_buf, count_ptr)
       return []
    }
    mut out = []
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(load32(ids_buf, i * 4))
       i += 1
    }
@@ -823,7 +823,7 @@ fn get_active_display_ids() list {
 
 fn _cg_mode_to_dict(any mode) any {
    "Converts a `CGDisplayModeRef` to a Ny video-mode dictionary."
-   if(!mode){ return false }
+   if !mode { return false }
    return {
       "width": int(CGDisplayModeGetWidth(mode)),
       "height": int(CGDisplayModeGetHeight(mode)),
@@ -833,9 +833,9 @@ fn _cg_mode_to_dict(any mode) any {
 
 fn get_current_video_mode(any display_id) any {
    "Returns the current video mode for a CoreGraphics display id."
-   if(!available() || !display_id){ return false }
+   if !available() || !display_id { return false }
    def mode = CGDisplayCopyDisplayMode(display_id)
-   if(!mode){ return false }
+   if !mode { return false }
    def out = _cg_mode_to_dict(mode)
    CGDisplayModeRelease(mode)
    out
@@ -843,16 +843,16 @@ fn get_current_video_mode(any display_id) any {
 
 fn get_video_modes_native(any display_id) list {
    "Returns the advertised video modes for a CoreGraphics display id."
-   if(!available() || !display_id){ return [] }
+   if !available() || !display_id { return [] }
    def modes = CGDisplayCopyAllDisplayModes(display_id, 0)
-   if(!modes){ return [] }
+   if !modes { return [] }
    mut out = []
    mut i = 0
    def n = int(CFArrayGetCount(modes))
-   while(i < n){
+   while i < n {
       def mode = CFArrayGetValueAtIndex(modes, i)
       def item = _cg_mode_to_dict(mode)
-      if(item){ out = out.append(item) }
+      if item { out = out.append(item) }
       i += 1
    }
    CFRelease(modes)
@@ -860,47 +860,47 @@ fn get_video_modes_native(any display_id) list {
 }
 
 fn _find_display_mode(any display_id, int width, int height, int refresh_rate=0) any {
-   if(!available() || !display_id || width <= 0 || height <= 0){ return 0 }
+   if !available() || !display_id || width <= 0 || height <= 0 { return 0 }
    def modes = CGDisplayCopyAllDisplayModes(display_id, 0)
-   if(!modes){ return 0 }
+   if !modes { return 0 }
    mut found = 0
    mut i = 0
    def n = int(CFArrayGetCount(modes))
-   while(i < n){
+   while i < n {
       def mode = CFArrayGetValueAtIndex(modes, i)
-      if(mode &&
-         int(CGDisplayModeGetWidth(mode)) == width &&
-         int(CGDisplayModeGetHeight(mode)) == height &&
-         (refresh_rate <= 0 || int(CGDisplayModeGetRefreshRate(mode)) == refresh_rate)){
+      if mode &&
+      int(CGDisplayModeGetWidth(mode)) == width &&
+      int(CGDisplayModeGetHeight(mode)) == height &&
+      (refresh_rate <= 0 || int(CGDisplayModeGetRefreshRate(mode)) == refresh_rate){
          found = mode
          break
       }
       i += 1
    }
    def keep = found ? found : 0
-   if(!keep){ CFRelease(modes) }
+   if !keep { CFRelease(modes) }
    keep ? {"modes": modes, "mode": keep} : 0
 }
 
 fn _set_display_mode(any display_id, int width, int height, int refresh_rate=0) any {
-   if(!available() || !display_id || width <= 0 || height <= 0){ return 0 }
+   if !available() || !display_id || width <= 0 || height <= 0 { return 0 }
    def mode_match = _find_display_mode(display_id, width, height, refresh_rate)
-   if(!mode_match){ return 0 }
+   if !mode_match { return 0 }
    def modes = mode_match.get("modes", 0)
    def mode = mode_match.get("mode", 0)
    def previous = CGDisplayCopyDisplayMode(display_id)
    def ok = mode && CGDisplaySetDisplayMode(display_id, mode, 0) == 0
    CFRelease(modes)
-   if(ok){ return previous }
-   if(previous){ CGDisplayModeRelease(previous) }
+   if ok { return previous }
+   if previous { CGDisplayModeRelease(previous) }
    0
 }
 
 fn _restore_display_mode(any win) any {
-   if(!available() || !is_dict(win)){ return win }
+   if !available() || !is_dict(win) { return win }
    def previous = win.get("previous_mode", 0)
    def display_id = win.get("monitor_display_id", 0)
-   if(previous && display_id){
+   if previous && display_id {
       CGDisplaySetDisplayMode(display_id, previous, 0)
       CGDisplayModeRelease(previous)
       win = win.set("previous_mode", 0)
@@ -910,23 +910,23 @@ fn _restore_display_mode(any win) any {
 
 fn create_menu(str title="") any {
    "Creates and initializes an `NSMenu`."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def cls = get_class("NSMenu")
-   if(!cls){ return 0 }
+   if !cls { return 0 }
    mut menu = objc_msgSend(cls, get_selector("alloc"))
-   if(!menu){ return 0 }
+   if !menu { return 0 }
    menu = objc_msgSend(menu, get_selector("init"))
-   if(title && is_str(title) && title.len > 0){ objc_msgSend_ptr(menu, get_selector("setTitle:"), objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(title))) }
+   if title && is_str(title) && title.len > 0 { objc_msgSend_ptr(menu, get_selector("setTitle:"), objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(title))) }
    menu
 }
 
 fn create_menu_item(str title, any action=0, str key_equivalent="") any {
    "Creates and initializes an `NSMenuItem`."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def cls = get_class("NSMenuItem")
-   if(!cls){ return 0 }
+   if !cls { return 0 }
    def item = objc_msgSend(cls, get_selector("alloc"))
-   if(!item){ return 0 }
+   if !item { return 0 }
    def title_obj = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(to_str(title)))
    def key_obj = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(to_str(key_equivalent)))
    objc_msgSend_ptr_ptr_ptr(item, get_selector("initWithTitle:action:keyEquivalent:"), title_obj, action, key_obj)
@@ -934,55 +934,55 @@ fn create_menu_item(str title, any action=0, str key_equivalent="") any {
 
 fn add_menu_item(any menu, any item) bool {
    "Adds an item to an `NSMenu`."
-   if(!available() || !menu || !item){ return false }
+   if !available() || !menu || !item { return false }
    objc_msgSend_ptr(menu, get_selector("addItem:"), item)
    true
 }
 
 fn set_submenu(any menu, any submenu, any item) bool {
    "Assigns a submenu to a parent menu item."
-   if(!available() || !menu || !submenu || !item){ return false }
+   if !available() || !menu || !submenu || !item { return false }
    objc_msgSend_ptr_ptr(menu, get_selector("setSubmenu:forItem:"), submenu, item)
    true
 }
 
 fn set_main_menu(any menu) bool {
    "Sets the shared application's main menu."
-   if(!available() || !menu){ return false }
+   if !available() || !menu { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    objc_msgSend_ptr(app, get_selector("setMainMenu:"), menu)
    true
 }
 
 fn install_default_menu_bar(str app_name="Nytrix") bool {
    "Installs a minimal Cocoa menu bar with a Quit item."
-   if(!available()){ return false }
+   if !available() { return false }
    def main_menu = create_menu()
-   if(!main_menu){ return false }
+   if !main_menu { return false }
    def app_item = create_menu_item("", 0, "")
-   if(!app_item){ return false }
+   if !app_item { return false }
    add_menu_item(main_menu, app_item)
    def app_menu = create_menu(app_name)
-   if(!app_menu){ return false }
+   if !app_menu { return false }
    def quit_title = "Quit " + to_str(app_name)
    def quit_item = create_menu_item(quit_title, get_selector("terminate:"), "q")
-   if(!quit_item){ return false }
+   if !quit_item { return false }
    add_menu_item(app_menu, quit_item)
-   if(!set_submenu(main_menu, app_menu, app_item)){ return false }
+   if !set_submenu(main_menu, app_menu, app_item) { return false }
    set_main_menu(main_menu)
 }
 
 fn next_event(any timeout=0) any {
    "Pops the next event from the AppKit queue if available."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def app = shared_application()
-   if(!app || !is_ptr(app)){ return 0 }
+   if !app || !is_ptr(app) { return 0 }
    def date = (timeout > 0) ? objc_msgSend_ptr_f64(get_class("NSDate"), get_selector("dateWithTimeIntervalSinceNow:"), float(timeout)) :
    objc_msgSend(get_class("NSDate"), get_selector("distantPast"))
    def ev = objc_msgSend_ptr_u64_ptr_ptr_i64(app, get_selector("nextEventMatchingMask:untilDate:inMode:dequeue:"),
    NSEventMaskAny, date, objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("kCFRunLoopDefaultMode")), 1)
-   if(ev){ return _translate_event(ev) }
+   if ev { return _translate_event(ev) }
    0
 }
 
@@ -994,61 +994,61 @@ fn wait_events(int timeout_ms=-1) any {
 
 fn current_event() any {
    "Returns the current `NSEvent*` from the shared application."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def app = shared_application()
-   if(!app || !is_ptr(app)){ return 0 }
+   if !app || !is_ptr(app) { return 0 }
    objc_msgSend(app, get_selector("currentEvent"))
 }
 
 fn send_event(any event) bool {
    "Forwards an AppKit event to `NSApplication`."
-   if(!available() || !event){ return false }
+   if !available() || !event { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    objc_msgSend_ptr(app, get_selector("sendEvent:"), event)
    true
 }
 
 fn update_windows() bool {
    "Runs `-[NSApplication updateWindows]`."
-   if(!available()){ return false }
+   if !available() { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    objc_msgSend(app, get_selector("updateWindows"))
    true
 }
 
 fn run_app() bool {
    "Runs the shared AppKit application event loop."
-   if(!available()){ return false }
+   if !available() { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    objc_msgSend(app, get_selector("run"))
    true
 }
 
 fn stop_app(any sender=0) bool {
    "Stops the shared AppKit application event loop."
-   if(!available()){ return false }
+   if !available() { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    objc_msgSend_ptr(app, get_selector("stop:"), sender)
    true
 }
 
 fn request_user_attention(int kind=10) int {
    "Requests user attention via AppKit."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def app = shared_application()
-   if(!app){ return 0 }
+   if !app { return 0 }
    int(objc_msgSend_i64_arg(app, get_selector("requestUserAttention:"), kind))
 }
 
 fn post_event(any event, bool at_start=true) bool {
    "Posts an `NSEvent*` back into the AppKit queue."
-   if(!available() || !event){ return false }
+   if !available() || !event { return false }
    def app = shared_application()
-   if(!app){ return false }
+   if !app { return false }
    objc_msgSend_ptr_i64(app, get_selector("postEvent:atStart:"), event, at_start ? 1 : 0)
    true
 }
@@ -1059,7 +1059,7 @@ mut _known_display_ids = []
 mut _displays_initialized = false
 
 fn _push_event(any win, int typ, any data=0) any {
-   if(!win){ return 0 }
+   if !win { return 0 }
    _pending_events = _pending_events.append([typ, win, win.get("handle", 0), data])
 }
 
@@ -1067,10 +1067,10 @@ def _COCOA_KEY_MAP = [[0x00, backend_api.KEY_A], [0x01, backend_api.KEY_S], [0x0
 mut _cocoa_key_dict = 0
 
 fn _cocoa_key_dict_get() dict {
-   if(is_dict(_cocoa_key_dict)){ return _cocoa_key_dict }
+   if is_dict(_cocoa_key_dict) { return _cocoa_key_dict }
    mut d, i = dict(128), 0
    def key_map_n = _COCOA_KEY_MAP.len
-   while(i < key_map_n){
+   while i < key_map_n {
       def pair = _COCOA_KEY_MAP.get(i)
       d = d.set(pair.get(0), pair.get(1))
       i += 1
@@ -1081,43 +1081,43 @@ fn _cocoa_key_dict_get() dict {
 
 fn _cocoa_translate_keycode(any code) int {
    def key = _cocoa_key_dict_get().get(int(code), 0)
-   if(key){ return key }
-   if(code >= 0 && code <= 9){ return backend_api.KEY_0 + int(code) }
+   if key { return key }
+   if code >= 0 && code <= 9 { return backend_api.KEY_0 + int(code) }
    0
 }
 
 fn _mods_from_flags(any flags) int {
    mut mods = 0
-   if(band(flags, NSEventModifierFlagShift) != 0){ mods = bor(mods, backend_api.MOD_SHIFT) }
-   if(band(flags, NSEventModifierFlagControl) != 0){ mods = bor(mods, backend_api.MOD_CONTROL) }
-   if(band(flags, NSEventModifierFlagOption) != 0){ mods = bor(mods, backend_api.MOD_ALT) }
-   if(band(flags, NSEventModifierFlagCommand) != 0){ mods = bor(mods, backend_api.MOD_SUPER) }
-   if(band(flags, NSEventModifierFlagCapsLock) != 0){ mods = bor(mods, backend_api.MOD_CAPS_LOCK) }
+   if band(flags, NSEventModifierFlagShift) != 0 { mods = bor(mods, backend_api.MOD_SHIFT) }
+   if band(flags, NSEventModifierFlagControl) != 0 { mods = bor(mods, backend_api.MOD_CONTROL) }
+   if band(flags, NSEventModifierFlagOption) != 0 { mods = bor(mods, backend_api.MOD_ALT) }
+   if band(flags, NSEventModifierFlagCommand) != 0 { mods = bor(mods, backend_api.MOD_SUPER) }
+   if band(flags, NSEventModifierFlagCapsLock) != 0 { mods = bor(mods, backend_api.MOD_CAPS_LOCK) }
    mods
 }
 
 fn _push_utf8_char_events(any win, any utf8, int mods=0) any {
-   if(!utf8){ return 0 }
+   if !utf8 { return 0 }
    mut i = 0
-   while(true){
+   while true {
       def b0 = load8(utf8, i)
-      if(b0 == 0){ break }
+      if b0 == 0 { break }
       mut cp = -1
       mut next = i + 1
-      if(b0 < 0x80){ cp = b0 } elif(band(b0, 0xe0) == 0xc0 && load8(utf8, i + 1) != 0){
+      if b0 < 0x80 { cp = b0 } elif band(b0, 0xe0) == 0xc0 && load8(utf8, i + 1) != 0 {
          cp = bor(bshl(band(b0, 0x1f), 6), band(load8(utf8, i + 1), 0x3f))
          next = i + 2
-      } elif(band(b0, 0xf0) == 0xe0 && load8(utf8, i + 1) != 0 && load8(utf8, i + 2) != 0){
+      } elif band(b0, 0xf0) == 0xe0 && load8(utf8, i + 1) != 0 && load8(utf8, i + 2) != 0 {
          cp = bor(bshl(band(b0, 0x0f), 12),
          bor(bshl(band(load8(utf8, i + 1), 0x3f), 6), band(load8(utf8, i + 2), 0x3f)))
          next = i + 3
-      } elif(band(b0, 0xf8) == 0xf0 && load8(utf8, i + 1) != 0 && load8(utf8, i + 2) != 0 && load8(utf8, i + 3) != 0){
+      } elif band(b0, 0xf8) == 0xf0 && load8(utf8, i + 1) != 0 && load8(utf8, i + 2) != 0 && load8(utf8, i + 3) != 0 {
          cp = bor(bshl(band(b0, 0x07), 18),
             bor(bshl(band(load8(utf8, i + 1), 0x3f), 12),
          bor(bshl(band(load8(utf8, i + 2), 0x3f), 6), band(load8(utf8, i + 3), 0x3f))))
          next = i + 4
       }
-      if(cp > 0){
+      if cp > 0 {
          mut char_data = dict(8)
          char_data = char_data.set("char", cp)
          char_data = char_data.set("mod", mods)
@@ -1130,11 +1130,11 @@ fn _push_utf8_char_events(any win, any utf8, int mods=0) any {
 
 fn _translate_event(any event) any {
    "Translates a native Cocoa `NSEvent` into a Nytrix event dict."
-   if(!available() || !event){ return 0 }
+   if !available() || !event { return 0 }
    def type = int(objc_msgSend_i64(event, get_selector("type")))
    def hwnd = objc_msgSend_ptr(event, get_selector("window"))
    def win = _windows.get(hwnd, 0)
-   if(!win){ return 0 }
+   if !win { return 0 }
    match type {
       1, 3, 25 -> {
          def btn = (type == 1) ? 0 : (type == 3) ? 1 : int(objc_msgSend_i64(event, get_selector("buttonNumber")))
@@ -1172,9 +1172,9 @@ fn _translate_event(any event) any {
             "mods": mods
          }
          def nsstr = objc_msgSend_ptr(event, get_selector("characters"))
-         if(nsstr){
+         if nsstr {
             def utf8 = objc_msgSend_ptr(nsstr, get_selector("UTF8String"))
-            if(utf8){ _push_utf8_char_events(next_win, utf8, mods) }
+            if utf8 { _push_utf8_char_events(next_win, utf8, mods) }
          }
          return [EVENT_KEY_PRESSED, next_win, 0, data]
       }
@@ -1197,14 +1197,14 @@ fn _translate_event(any event) any {
       12 -> {
          def code = objc_msgSend_i64(event, get_selector("keyCode"))
          def key = _cocoa_translate_keycode(int(code))
-         if(!key){ return 0 }
+         if !key { return 0 }
          def flags = objc_msgSend_i64(event, get_selector("modifierFlags"))
          mut modifier_flag = 0
-         if(key == backend_api.KEY_LEFT_SHIFT || key == backend_api.KEY_RIGHT_SHIFT){ modifier_flag = NSEventModifierFlagShift }
-         elif(key == backend_api.KEY_LEFT_CONTROL || key == backend_api.KEY_RIGHT_CONTROL){ modifier_flag = NSEventModifierFlagControl }
-         elif(key == backend_api.KEY_LEFT_ALT || key == backend_api.KEY_RIGHT_ALT){ modifier_flag = NSEventModifierFlagOption }
-         elif(key == backend_api.KEY_LEFT_SUPER || key == backend_api.KEY_RIGHT_SUPER){ modifier_flag = NSEventModifierFlagCommand }
-         elif(key == backend_api.KEY_CAPS_LOCK){ modifier_flag = NSEventModifierFlagCapsLock }
+         if key == backend_api.KEY_LEFT_SHIFT || key == backend_api.KEY_RIGHT_SHIFT { modifier_flag = NSEventModifierFlagShift }
+         elif key == backend_api.KEY_LEFT_CONTROL || key == backend_api.KEY_RIGHT_CONTROL { modifier_flag = NSEventModifierFlagControl }
+         elif key == backend_api.KEY_LEFT_ALT || key == backend_api.KEY_RIGHT_ALT { modifier_flag = NSEventModifierFlagOption }
+         elif key == backend_api.KEY_LEFT_SUPER || key == backend_api.KEY_RIGHT_SUPER { modifier_flag = NSEventModifierFlagCommand }
+         elif key == backend_api.KEY_CAPS_LOCK { modifier_flag = NSEventModifierFlagCapsLock }
          def pressed = modifier_flag ? (band(flags, modifier_flag) != 0) : false
          def data = {
             "key": key,
@@ -1224,7 +1224,7 @@ fn _translate_event(any event) any {
          def dy = objc_msgSend_f64(event, get_selector("scrollingDeltaY"))
          def precise = objc_msgSend_i64(event, get_selector("hasPreciseScrollingDeltas"))
          mut sdx, sdy = dx, dy
-         if(!precise){ sdx, sdy = dx * 10.0, dy * 10.0 }
+         if !precise { sdx, sdy = dx * 10.0, dy * 10.0 }
          return [EVENT_MOUSE_SCROLL, win, 0, [sdx, sdy]]
       }
       _ -> { return 0 }
@@ -1233,14 +1233,14 @@ fn _translate_event(any event) any {
 
 fn _find_window_by_handle(any hwnd) any {
    "Looks up a tracked window by its native NSWindow handle."
-   if(!hwnd){ return 0 }
+   if !hwnd { return 0 }
    _windows.get(hwnd, 0)
 }
 
 fn _window_delegate_should_close(any self, any sel, any win_obj) bool {
    "NSWindowDelegate windowShouldClose: callback."
    def win = _find_window_by_handle(win_obj)
-   if(win){ _push_event(win, 15, 0) }
+   if win { _push_event(win, 15, 0) }
    true
 }
 
@@ -1248,7 +1248,7 @@ fn _window_delegate_did_resize(any self, any sel, any notification) any {
    "NSWindowDelegate windowDidResize: callback."
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
-   if(!win){ return 0 }
+   if !win { return 0 }
    def size = get_size(win)
    _push_event(win, EVENT_WINDOW_RESIZED, size)
 }
@@ -1256,31 +1256,31 @@ fn _window_delegate_did_resize(any self, any sel, any notification) any {
 fn _window_delegate_did_miniaturize(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
-   if(win){ _push_event(win, EVENT_WINDOW_MINIMIZED, 0) }
+   if win { _push_event(win, EVENT_WINDOW_MINIMIZED, 0) }
 }
 
 fn _window_delegate_did_deminiaturize(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
-   if(win){ _push_event(win, EVENT_WINDOW_RESTORED, 0) }
+   if win { _push_event(win, EVENT_WINDOW_RESTORED, 0) }
 }
 
 fn _window_delegate_did_become_key(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
-   if(win){ _push_event(win, EVENT_FOCUS_IN, 0) }
+   if win { _push_event(win, EVENT_FOCUS_IN, 0) }
 }
 
 fn _window_delegate_did_resign_key(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
-   if(win){ _push_event(win, EVENT_FOCUS_OUT, 0) }
+   if win { _push_event(win, EVENT_FOCUS_OUT, 0) }
 }
 
 fn _window_delegate_did_change_backing(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
-   if(win){
+   if win {
       def scale = get_window_content_scale(win)
       _push_event(win, EVENT_SCALE_UPDATED, scale)
    }
@@ -1290,7 +1290,7 @@ fn _window_delegate_did_move(any self, any sel, any notification) any {
    "NSWindowDelegate windowDidMove: callback — updates win[x/y] and emits EVENT_WINDOW_MOVED."
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
-   if(!win){ return 0 }
+   if !win { return 0 }
    def rect = _get_nswindow_rect(hwnd, "frame")
    def nx = rect.get(0)
    def ny = rect.get(1)
@@ -1302,18 +1302,18 @@ fn _window_delegate_did_move(any self, any sel, any notification) any {
 
 fn _ime_insert_text(any self, any sel, any string_obj, any replacement_range) any {
    "NSTextInputClient insertText:replacementRange: — pushes EVENT_KEY_CHAR for each codepoint."
-   if(!string_obj){ return 0 }
+   if !string_obj { return 0 }
    def cs = objc_msgSend_ptr(string_obj, get_selector("UTF8String"))
-   if(!cs){ return 0 }
+   if !cs { return 0 }
    def hwnd = _last_key_window()
    def win = _find_window_by_handle(hwnd)
-   if(win){ _push_utf8_char_events(win, cs) }
+   if win { _push_utf8_char_events(win, cs) }
 }
 
 fn _last_key_window() any {
    "Returns the NSWindow that currently has keyboard focus."
    def app = shared_application()
-   if(!app){ return 0 }
+   if !app { return 0 }
    objc_msgSend_ptr(app, get_selector("keyWindow"))
 }
 
@@ -1329,27 +1329,27 @@ fn _drag_updated(any self, any sel, any sender) int {
 
 fn _drag_performed(any self, any sel, any sender) bool {
    "NSDraggingDestination performDragOperation: — reads pasteboard, pushes EVENT_DROP."
-   if(!sender){ return false }
+   if !sender { return false }
    def pb = objc_msgSend_ptr(sender, get_selector("draggingPasteboard"))
-   if(!pb){ return false }
+   if !pb { return false }
    def fn_type = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("NSFilenamesPboardType"))
    def items = objc_msgSend_ptr(pb, get_selector("propertyListForType:"), fn_type)
    mut paths = []
-   if(items){
+   if items {
       def count = objc_msgSend_i64(items, get_selector("count"))
       mut idx = 0
-      while(idx < count){
+      while idx < count {
          def item = objc_msgSend_ptr_i64_arg(items, get_selector("objectAtIndex:"), idx)
-         if(item){
+         if item {
             def cs = objc_msgSend_ptr(item, get_selector("UTF8String"))
-            if(cs){ paths = paths.append(to_str(cs)) }
+            if cs { paths = paths.append(to_str(cs)) }
          }
          idx += 1
       }
    }
    def hwnd = _last_key_window()
    def win = _find_window_by_handle(hwnd)
-   if(win && paths.len > 0){
+   if win && paths.len > 0 {
       mut data = dict(8)
       data = data.set("paths", paths)
       _push_event(win, EVENT_DATA_DROP, data)
@@ -1361,10 +1361,10 @@ mut _delegate_class = 0
 
 fn create_window_delegate() any {
    "Creates and registers a dynamic `NytrixWindowDelegate` class."
-   if(_delegate_class){ return _delegate_class }
+   if _delegate_class { return _delegate_class }
    def base = get_class("NSObject")
    def cls = _ny_objc_allocateClassPair(base, cstr("NytrixWindowDelegate"), 0)
-   if(cls){
+   if cls {
       _ny_class_addMethod(cls, get_selector("windowShouldClose:"), _window_delegate_should_close, cstr("c@:@"))
       _ny_class_addMethod(cls, get_selector("windowDidResize:"), _window_delegate_did_resize, cstr("v@:@"))
       _ny_class_addMethod(cls, get_selector("windowDidMiniaturize:"), _window_delegate_did_miniaturize, cstr("v@:@"))
@@ -1385,27 +1385,27 @@ fn create_window_delegate() any {
 
 fn get_window_content_scale(any win) f64 {
    "Returns the backing scale factor for a Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return 1.0 }
+   if !available() || !win || !is_dict(win) { return 1.0 }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return 1.0 }
+   if !hwnd { return 1.0 }
    float(objc_msgSend_f64(hwnd, get_selector("backingScaleFactor")))
 }
 
 fn get_window_monitor(any win) any {
    "Returns the monitor dictionary that the Cocoa window is currently on."
-   if(!available() || !win || !is_dict(win)){ return 0 }
+   if !available() || !win || !is_dict(win) { return 0 }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return 0 }
+   if !hwnd { return 0 }
    def screen = objc_msgSend_ptr(hwnd, get_selector("screen"))
-   if(!screen){ return 0 }
+   if !screen { return 0 }
    def display_id = get_screen_display_id(screen)
-   if(!display_id){ return 0 }
+   if !display_id { return 0 }
    def monitors = get_monitors()
    mut i = 0
    def monitors_n = monitors.len
-   while(i < monitors_n){
+   while i < monitors_n {
       def m = monitors.get(i)
-      if(m.get("handle", 0) == display_id){ return m }
+      if m.get("handle", 0) == display_id { return m }
       i += 1
    }
    0
@@ -1413,12 +1413,12 @@ fn get_window_monitor(any win) any {
 
 fn _cocoa_window_style(bool decorated, bool resizable, bool fullscreen=false, bool transparent=false) int {
    mut style = NSWindowStyleMaskBorderless
-   if(!fullscreen && decorated){
+   if !fullscreen && decorated {
       style = bor(style, bor(NSWindowStyleMaskTitled,
       bor(NSWindowStyleMaskClosable, NSWindowStyleMaskMiniaturizable)))
    }
-   if(!fullscreen && resizable){ style = bor(style, NSWindowStyleMaskResizable) }
-   if(transparent){ style = bor(style, NSWindowStyleMaskFullSizeContentView) }
+   if !fullscreen && resizable { style = bor(style, NSWindowStyleMaskResizable) }
+   if transparent { style = bor(style, NSWindowStyleMaskFullSizeContentView) }
    style
 }
 
@@ -1430,65 +1430,65 @@ fn _cocoa_window_style_from_flags(int flags) int {
 }
 
 fn _cocoa_set_frame(any hwnd, any x, any y, any w, any h) bool {
-   if(!available() || !hwnd){ return false }
+   if !available() || !hwnd { return false }
    objc_msgSend_rect_u64_i64_i8(hwnd, get_selector("setFrame:display:"),
    float(x), float(y), float(w), float(h), 1, 1, 0)
    true
 }
 
 fn _cocoa_apply_style(any hwnd, int style) bool {
-   if(!available() || !hwnd){ return false }
+   if !available() || !hwnd { return false }
    objc_msgSend_i64_arg(hwnd, get_selector("setStyleMask:"), style)
    def view = objc_msgSend(hwnd, get_selector("contentView"))
-   if(view){ objc_msgSend_ptr(hwnd, get_selector("makeFirstResponder:"), view) }
+   if view { objc_msgSend_ptr(hwnd, get_selector("makeFirstResponder:"), view) }
    true
 }
 
 fn _icon_image_width(any image) int {
-   if(!is_dict(image)){ return 0 }
+   if !is_dict(image) { return 0 }
    int(image.get("width", image.get("w", 0)))
 }
 
 fn _icon_image_height(any image) int {
-   if(!is_dict(image)){ return 0 }
+   if !is_dict(image) { return 0 }
    int(image.get("height", image.get("h", 0)))
 }
 
 fn _icon_image_pixels(any image) any {
-   if(!is_dict(image)){ return 0 }
+   if !is_dict(image) { return 0 }
    image.get("pixels_ptr",
       image.get("pixels",
    image.get("data", 0)))
 }
 
 fn _icon_pixel_source_len(any pixels) int {
-   if(is_str(pixels) || is_bytes(pixels) || is_list(pixels) || is_tuple(pixels)){ return pixels.len }
-   if(is_ptr(pixels)){ return -1 }
+   if is_str(pixels) || is_bytes(pixels) || is_list(pixels) || is_tuple(pixels) { return pixels.len }
+   if is_ptr(pixels) { return -1 }
    0
 }
 
 fn _icon_pixel_byte(any pixels, int index) int {
-   if(is_ptr(pixels) || is_str(pixels) || is_bytes(pixels)){ return load8(pixels, index) }
-   if(is_list(pixels) || is_tuple(pixels)){ return pixels.get(index, 0) }
+   if is_ptr(pixels) || is_str(pixels) || is_bytes(pixels) { return load8(pixels, index) }
+   if is_list(pixels) || is_tuple(pixels) { return pixels.get(index, 0) }
    0
 }
 
 fn _abs_int(int x) int { x < 0 ? 0 - x : x }
 
 fn _choose_icon_image(any images, int wanted_w=128, int wanted_h=128) any {
-   if(is_dict(images)){ return images }
-   if(!is_list(images) && !is_tuple(images)){ return false }
+   if is_dict(images) { return images }
+   if !is_list(images) && !is_tuple(images) { return false }
    mut best = false
    mut best_score = 1 << 30
    mut i = 0
    def images_n = images.len
-   while(i < images_n){
+   while i < images_n {
       def image = images.get(i, 0)
       def iw = _icon_image_width(image)
       def ih = _icon_image_height(image)
-      if(iw > 0 && ih > 0){
+      if iw > 0 && ih > 0 {
          def score = _abs_int(iw - wanted_w) * 1000 + _abs_int(ih - wanted_h)
-         if(!best || score < best_score){
+         if !best || score < best_score {
             best = image
             best_score = score
          }
@@ -1499,14 +1499,14 @@ fn _choose_icon_image(any images, int wanted_w=128, int wanted_h=128) any {
 }
 
 fn _copy_rgba_pixels(any dst, any pixels, int bytes) bool {
-   if(!dst || !pixels || bytes <= 0){ return false }
-   if(is_ptr(pixels) || is_str(pixels) || is_bytes(pixels)){
+   if !dst || !pixels || bytes <= 0 { return false }
+   if is_ptr(pixels) || is_str(pixels) || is_bytes(pixels) {
       memcpy(dst, pixels, bytes)
       return true
    }
-   if(!is_list(pixels) && !is_tuple(pixels)){ return false }
+   if !is_list(pixels) && !is_tuple(pixels) { return false }
    mut i = 0
-   while(i < bytes){
+   while i < bytes {
       store8(dst, _icon_pixel_byte(pixels, i), i)
       i += 1
    }
@@ -1514,31 +1514,31 @@ fn _copy_rgba_pixels(any dst, any pixels, int bytes) bool {
 }
 
 fn _cocoa_nsimage_from_rgba(any image) any {
-   if(!available() || !is_dict(image)){ return 0 }
+   if !available() || !is_dict(image) { return 0 }
    def width = _icon_image_width(image)
    def height = _icon_image_height(image)
    def pixels = _icon_image_pixels(image)
    def bytes = width * height * 4
    def have = _icon_pixel_source_len(pixels)
-   if(width <= 0 || height <= 0 || !pixels || (have >= 0 && have < bytes)){ return 0 }
+   if width <= 0 || height <= 0 || !pixels || (have >= 0 && have < bytes) { return 0 }
    def rep_cls = get_class("NSBitmapImageRep")
    def img_cls = get_class("NSImage")
-   if(!rep_cls || !img_cls){ return 0 }
+   if !rep_cls || !img_cls { return 0 }
    def color_space = objc_msgSend_ptr(get_class("NSString"),
    get_selector("stringWithUTF8String:"), cstr("NSCalibratedRGBColorSpace"))
    def rep = objc_msgSend_bitmap_init(objc_msgSend(rep_cls, get_selector("alloc")),
       get_selector("initWithBitmapDataPlanes:pixelsWide:pixelsHigh:bitsPerSample:samplesPerPixel:hasAlpha:isPlanar:colorSpaceName:bitmapFormat:bytesPerRow:bitsPerPixel:"),
       0, width, height, 8, 4, 1, 0, color_space,
    NSBitmapFormatAlphaNonpremultiplied, width * 4, 32)
-   if(!rep){ return 0 }
+   if !rep { return 0 }
    def data = objc_msgSend(rep, get_selector("bitmapData"))
-   if(!data || !_copy_rgba_pixels(data, pixels, bytes)){
+   if !data || !_copy_rgba_pixels(data, pixels, bytes) {
       objc_msgSend(rep, get_selector("release"))
       return 0
    }
    def native = objc_msgSend_size(objc_msgSend(img_cls, get_selector("alloc")),
    get_selector("initWithSize:"), width, height)
-   if(!native){
+   if !native {
       objc_msgSend(rep, get_selector("release"))
       return 0
    }
@@ -1549,11 +1549,11 @@ fn _cocoa_nsimage_from_rgba(any image) any {
 
 fn set_window_monitor(any win, any monitor, int xpos, int ypos, int width, int height, int refresh_rate=0) any {
    "Moves a Cocoa window into borderless monitor mode or restores windowed placement."
-   if(!available() || !win || !is_dict(win)){ return win }
+   if !available() || !win || !is_dict(win) { return win }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return win }
+   if !hwnd { return win }
    def pool = create_autorelease_pool()
-   if(monitor){
+   if monitor {
       def display_id = _handle_from(monitor)
       def screen = get_screen_for_display_id(display_id)
       def frame = get_screen_frame(screen)
@@ -1562,7 +1562,7 @@ fn set_window_monitor(any win, any monitor, int xpos, int ypos, int width, int h
       def fallback_h = frame ? frame.get("height", win.get("h", 1)) : win.get("h", 1)
       def target_w = width > 0 ? width : (mode ? mode.get("width", fallback_w) : fallback_w)
       def target_h = height > 0 ? height : (mode ? mode.get("height", fallback_h) : fallback_h)
-      if(!win.get("monitor", 0)){
+      if !win.get("monitor", 0) {
          def pos = get_pos(win)
          def size = get_size(win)
          win = win.set("windowed_x", pos.get(0, win.get("x", xpos)))
@@ -1572,9 +1572,9 @@ fn set_window_monitor(any win, any monitor, int xpos, int ypos, int width, int h
          win = win.set("windowed_style", int(objc_msgSend_i64(hwnd, get_selector("styleMask"))))
          win = win.set("windowed_level", int(objc_msgSend_i64(hwnd, get_selector("level"))))
       }
-      if(display_id && target_w > 0 && target_h > 0 && !win.get("previous_mode", 0)){
+      if display_id && target_w > 0 && target_h > 0 && !win.get("previous_mode", 0) {
          def previous = _set_display_mode(display_id, target_w, target_h, refresh_rate)
-         if(previous){ win = win.set("previous_mode", previous) }
+         if previous { win = win.set("previous_mode", previous) }
       }
       _cocoa_apply_style(hwnd, NSWindowStyleMaskBorderless)
       objc_msgSend_i64_arg(hwnd, get_selector("setLevel:"), NSMainMenuWindowLevel + 1)
@@ -1617,14 +1617,14 @@ fn set_window_monitor(any win, any monitor, int xpos, int ypos, int width, int h
 
 fn get_key_name(any win, int key, int scancode) str {
    "Returns the keyboard-layout key name via the _COCOA_KEY_MAP reverse lookup."
-   if(key >= 32 && key <= 126){ return str.chr(key) }
+   if key >= 32 && key <= 126 { return str.chr(key) }
    mut i = 0
    def key_map_n = _COCOA_KEY_MAP.len
-   while(i < key_map_n){
+   while i < key_map_n {
       def entry = _COCOA_KEY_MAP.get(i)
-      if(entry && entry.get(1) == key){
+      if entry && entry.get(1) == key {
          def sc = entry.get(0)
-         if(sc >= 0 && key >= 32 && key < 127){ return str.chr(key) }
+         if sc >= 0 && key >= 32 && key < 127 { return str.chr(key) }
       }
       i += 1
    }
@@ -1633,29 +1633,29 @@ fn get_key_name(any win, int key, int scancode) str {
 
 fn set_window_icon(any win, any images) bool {
    "Applies a best-effort AppKit application icon from Ny RGBA image dictionaries."
-   if(!available()){ return false }
+   if !available() { return false }
    def pool = create_autorelease_pool()
    def app = shared_application()
-   if(!app){
+   if !app {
       drain_autorelease_pool(pool)
       return false
    }
    mut ok = true
-   if(!images || ((is_list(images) || is_tuple(images)) && images.len == 0)){
+   if !images || ((is_list(images) || is_tuple(images)) && images.len == 0) {
       objc_msgSend_ptr(app, get_selector("setApplicationIconImage:"), 0)
    } else {
       def image = _choose_icon_image(images, 128, 128)
       def native = _cocoa_nsimage_from_rgba(image)
-      if(native){
+      if native {
          objc_msgSend_ptr(app, get_selector("setApplicationIconImage:"), native)
          objc_msgSend(native, get_selector("release"))
       } else {
          ok = false
       }
    }
-   if(ok && is_dict(win)){
+   if ok && is_dict(win) {
       def hwnd = win.get("handle", 0)
-      if(hwnd){ _windows = _windows.set(hwnd, win.set("icon_images", images)) }
+      if hwnd { _windows = _windows.set(hwnd, win.set("icon_images", images)) }
    }
    drain_autorelease_pool(pool)
    ok
@@ -1663,25 +1663,25 @@ fn set_window_icon(any win, any images) bool {
 
 fn get_key_state(any win, int key) int {
    "Returns the Cocoa key state from the local dictionary."
-   if(!win || !is_dict(win)){ return 0 }
+   if !win || !is_dict(win) { return 0 }
    win.get(f"key_{key}", 0)
 }
 
 fn get_mouse_button_state(any win, int btn) int {
    "Returns the Cocoa mouse button state from the local dictionary."
-   if(!win || !is_dict(win)){ return 0 }
+   if !win || !is_dict(win) { return 0 }
    win.get(f"mouse_button_{btn}", 0)
 }
 
 fn get_cursor_pos(any win) list {
    "Returns the current cursor position relative to the Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return [0.0, 0.0] }
+   if !available() || !win || !is_dict(win) { return [0.0, 0.0] }
    [float(win.get("mouse_x", 0)), float(win.get("mouse_y", 0))]
 }
 
 fn set_cursor_pos(any win, any x, any y) bool {
    "Warps the cursor to(x, y) in window-local coordinates using CGWarpMouseCursorPosition."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def win_x, win_y = float(win.get("x", 0)), float(win.get("y", 0))
    def win_h = float(win.get("h", 600))
    def screen_y = win_y + win_h - float(y)
@@ -1691,22 +1691,22 @@ fn set_cursor_pos(any win, any x, any y) bool {
 
 fn create_cursor(any image, int xhot=0, int yhot=0) any {
    "Creates an AppKit NSCursor from a Ny RGBA8 image dictionary."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def pool = create_autorelease_pool()
    def native = _cocoa_nsimage_from_rgba(image)
-   if(!native){
+   if !native {
       drain_autorelease_pool(pool)
       return 0
    }
    def cls = get_class("NSCursor")
    mut handle = 0
-   if(cls){
+   if cls {
       handle = objc_msgSend_ptr_point(objc_msgSend(cls, get_selector("alloc")),
       get_selector("initWithImage:hotSpot:"), native, xhot, yhot)
    }
    objc_msgSend(native, get_selector("release"))
    drain_autorelease_pool(pool)
-   if(!handle){ return 0 }
+   if !handle { return 0 }
    mut c = dict(8)
    c = c.set("handle", handle)
    c = c.set("shared", false)
@@ -1718,9 +1718,9 @@ fn create_cursor(any image, int xhot=0, int yhot=0) any {
 
 fn create_standard_cursor(int shape) any {
    "Creates an AppKit-backed standard cursor object."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def cls = get_class("NSCursor")
-   if(!cls){ return 0 }
+   if !cls { return 0 }
    mut private_sel = ""
    match shape {
       RESIZE_EW_CURSOR -> { private_sel = "_windowResizeEastWestCursor" }
@@ -1730,14 +1730,14 @@ fn create_standard_cursor(int shape) any {
       _ -> { private_sel = "" }
    }
    mut handle = 0
-   if(private_sel != ""){
+   if private_sel != "" {
       def priv = get_selector(private_sel)
-      if(priv && objc_msgSend_i64_sel(cls, get_selector("respondsToSelector:"), priv) != 0){
+      if priv && objc_msgSend_i64_sel(cls, get_selector("respondsToSelector:"), priv) != 0 {
          handle = objc_msgSend_sel(cls, get_selector("performSelector:"), priv)
       }
    }
    mut sel = ""
-   if(!handle){
+   if !handle {
       match shape {
          ARROW_CURSOR -> { sel = "arrowCursor" }
          IBEAM_CURSOR -> { sel = "IBeamCursor" }
@@ -1753,7 +1753,7 @@ fn create_standard_cursor(int shape) any {
       }
       handle = objc_msgSend_ptr(cls, get_selector(sel), 0)
    }
-   if(!handle){ return 0 }
+   if !handle { return 0 }
    mut c = dict(8)
    c = c.set("handle", handle)
    c = c.set("shared", true)
@@ -1763,19 +1763,19 @@ fn create_standard_cursor(int shape) any {
 
 fn destroy_cursor(any cursor) bool {
    "Destroys a Cocoa cursor object when it owns native resources."
-   if(!cursor || !is_dict(cursor)){ return true }
-   if(!cursor.get("shared", false)){
+   if !cursor || !is_dict(cursor) { return true }
+   if !cursor.get("shared", false) {
       def handle = cursor.get("handle", 0)
-      if(handle){ objc_msgSend(handle, get_selector("release")) }
+      if handle { objc_msgSend(handle, get_selector("release")) }
    }
    true
 }
 
 fn set_cursor(any win, any cursor) bool {
    "Applies an AppKit cursor."
-   if(!available()){ return false }
+   if !available() { return false }
    def handle = _handle_from(cursor)
-   if(handle){
+   if handle {
       objc_msgSend_ptr(handle, get_selector("set"), 0)
       true
    } else { false }
@@ -1783,9 +1783,9 @@ fn set_cursor(any win, any cursor) bool {
 
 fn show_window(any win) bool {
    "Show a native Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    def pool = create_autorelease_pool()
    _windows = _windows.set(hwnd, 0)
    objc_msgSend_ptr(hwnd, get_selector("makeKeyAndOrderFront:"), 0)
@@ -1797,9 +1797,9 @@ fn show_window(any win) bool {
 
 fn hide_window(any win) bool {
    "Hide a native Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    def pool = create_autorelease_pool()
    objc_msgSend_ptr(hwnd, get_selector("orderOut:"), 0)
    _windows = _windows.set(hwnd, win.set("visible", false))
@@ -1809,9 +1809,9 @@ fn hide_window(any win) bool {
 
 fn iconify_window(any win) bool {
    "Iconify a native Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    def pool = create_autorelease_pool()
    objc_msgSend_ptr(hwnd, get_selector("miniaturize:"), 0)
    drain_autorelease_pool(pool)
@@ -1820,31 +1820,31 @@ fn iconify_window(any win) bool {
 
 fn maximize_window(any win) bool {
    "Maximize a native Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    def pool = create_autorelease_pool()
-   if(objc_msgSend_i64(hwnd, get_selector("isZoomed")) == 0){ objc_msgSend_ptr(hwnd, get_selector("zoom:"), 0) }
+   if objc_msgSend_i64(hwnd, get_selector("isZoomed")) == 0 { objc_msgSend_ptr(hwnd, get_selector("zoom:"), 0) }
    drain_autorelease_pool(pool)
    true
 }
 
 fn restore_window(any win) bool {
    "Restore a native Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    def pool = create_autorelease_pool()
-   if(objc_msgSend_i64(hwnd, get_selector("isMiniaturized")) != 0){ objc_msgSend_ptr(hwnd, get_selector("deminiaturize:"), 0) } elif(objc_msgSend_i64(hwnd, get_selector("isZoomed")) != 0){ objc_msgSend_ptr(hwnd, get_selector("zoom:"), 0) }
+   if objc_msgSend_i64(hwnd, get_selector("isMiniaturized")) != 0 { objc_msgSend_ptr(hwnd, get_selector("deminiaturize:"), 0) } elif objc_msgSend_i64(hwnd, get_selector("isZoomed")) != 0 { objc_msgSend_ptr(hwnd, get_selector("zoom:"), 0) }
    drain_autorelease_pool(pool)
    true
 }
 
 fn set_title(any win, str title) bool {
    "Updates the Cocoa native window title."
-   if(!available() || !win || !is_dict(win) || !title){ return false }
+   if !available() || !win || !is_dict(win) || !title { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    def pool = create_autorelease_pool()
    objc_msgSend_ptr(hwnd, get_selector("setTitle:"),
    objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(to_str(title))))
@@ -1856,9 +1856,9 @@ fn set_window_title(any win, str title) bool { set_title(win, title) }
 
 fn get_window_attrib(any win, int attrib) int {
    "Returns the value of the specified window attribute."
-   if(!available() || !win || !is_dict(win)){ return 0 }
+   if !available() || !win || !is_dict(win) { return 0 }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return 0 }
+   if !hwnd { return 0 }
    match attrib {
       FOCUSED -> { return objc_msgSend_i64(hwnd, get_selector("isKeyWindow")) != 0 ? 1 : 0 }
       ICONIFIED -> { return objc_msgSend_i64(hwnd, get_selector("isMiniaturized")) != 0 ? 1 : 0 }
@@ -1881,20 +1881,20 @@ fn get_window_attrib(any win, int attrib) int {
 
 fn set_window_opacity(any win, f64 opacity) bool {
    "Sets the whole-window alpha value for a Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    objc_msgSend_arg_f64(hwnd, get_selector("setAlphaValue:"), float(opacity))
    true
 }
 
 fn set_window_resizable(any win, bool enabled) bool {
    "Toggles the Cocoa window's resizable style mask bit."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    mut style = int(objc_msgSend_i64(hwnd, get_selector("styleMask")))
-   if(enabled){ style = bor(style, NSWindowStyleMaskResizable) }
+   if enabled { style = bor(style, NSWindowStyleMaskResizable) }
    else { style = band(style, bnot(NSWindowStyleMaskResizable)) }
    objc_msgSend_i64_arg(hwnd, get_selector("setStyleMask:"), style)
    _windows = _windows.set(hwnd, win.set("resizable", enabled))
@@ -1903,11 +1903,11 @@ fn set_window_resizable(any win, bool enabled) bool {
 
 fn set_window_decorated(any win, bool enabled) bool {
    "Toggles window decorations for a Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    mut style = int(objc_msgSend_i64(hwnd, get_selector("styleMask")))
-   if(enabled){
+   if enabled {
       style = bor(style, bor(NSWindowStyleMaskTitled, NSWindowStyleMaskClosable))
       style = band(style, bnot(NSWindowStyleMaskBorderless))
    } else {
@@ -1916,16 +1916,16 @@ fn set_window_decorated(any win, bool enabled) bool {
    }
    objc_msgSend_i64_arg(hwnd, get_selector("setStyleMask:"), style)
    def view = objc_msgSend(hwnd, get_selector("contentView"))
-   if(view){ objc_msgSend_ptr(hwnd, get_selector("makeFirstResponder:"), view) }
+   if view { objc_msgSend_ptr(hwnd, get_selector("makeFirstResponder:"), view) }
    _windows = _windows.set(hwnd, win.set("decorated", enabled))
    true
 }
 
 fn set_window_floating(any win, bool enabled) bool {
    "Toggles the always-on-top state of a Cocoa window."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    def level = enabled ? NSFloatingWindowLevel : NSNormalWindowLevel
    objc_msgSend_i64_arg(hwnd, get_selector("setLevel:"), level)
    _windows = _windows.set(hwnd, win.set("floating", enabled))
@@ -1933,13 +1933,13 @@ fn set_window_floating(any win, bool enabled) bool {
 }
 
 fn _get_nswindow_rect(any win, str key_name) list {
-   if(!available() || !win){ return [0, 0, 0, 0] }
+   if !available() || !win { return [0, 0, 0, 0] }
    def hwnd = _handle_from(win)
-   if(!hwnd){ return [0, 0, 0, 0] }
+   if !hwnd { return [0, 0, 0, 0] }
    def pool = create_autorelease_pool()
    def key = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(key_name))
    def boxed = objc_msgSend_ptr(hwnd, get_selector("valueForKey:"), key)
-   if(!boxed){
+   if !boxed {
       drain_autorelease_pool(pool)
       return [0, 0, 0, 0]
    }
@@ -1947,7 +1947,7 @@ fn _get_nswindow_rect(any win, str key_name) list {
    def utf8 = objc_msgSend(desc, get_selector("UTF8String"))
    def res = _rect_dict_from_string(to_str(utf8))
    drain_autorelease_pool(pool)
-   if(!res){ return [0, 0, 0, 0] }
+   if !res { return [0, 0, 0, 0] }
    [res.get("x", 0), res.get("y", 0), res.get("width", 0), res.get("height", 0)]
 }
 
@@ -1956,15 +1956,15 @@ fn get_pos(any win) list {
    def rect = _get_nswindow_rect(win, "contentLayoutRect")
    def x = rect.get(0)
    def y = rect.get(1)
-   if(x == 0 && y == 0 && is_dict(win)){ return [win.get("x", 0), win.get("y", 0)] }
+   if x == 0 && y == 0 && is_dict(win) { return [win.get("x", 0), win.get("y", 0)] }
    [x, y]
 }
 
 fn set_pos(any win, int x, int y) bool {
    "Moves a Cocoa window so its client area starts at screen coordinates [x, y]."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    def current = _get_nswindow_rect(win, "frame")
    def w = current.get(2)
    def h = current.get(3)
@@ -1977,15 +1977,15 @@ fn get_size(any win) list {
    def rect = _get_nswindow_rect(win, "contentLayoutRect")
    def w = rect.get(2)
    def h = rect.get(3)
-   if((w <= 0 || h <= 0) && is_dict(win)){ return [win.get("w", 0), win.get("h", 0)] }
+   if (w <= 0 || h <= 0) && is_dict(win) { return [win.get("w", 0), win.get("h", 0)] }
    [w, h]
 }
 
 fn set_size(any win, int w, int h) bool {
    "Resizes a Cocoa window so its client area has width `w` and height `h`."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    def current = _get_nswindow_rect(win, "frame")
    def x = current.get(0)
    def y = current.get(1)
@@ -2002,15 +2002,15 @@ fn get_framebuffer_size(any win) list {
 
 fn create_basic_window(str title, int width, int height, int x=0, int y=0, int flags=0) any {
    "Create a native `NSWindow` through AppKit."
-   if(!available()){ return 0 }
+   if !available() { return 0 }
    def pool = create_autorelease_pool()
    def cls = get_class("NSWindow")
-   if(!cls){
+   if !cls {
       drain_autorelease_pool(pool)
       return 0
    }
    def win_obj = objc_msgSend(cls, get_selector("alloc"))
-   if(!win_obj){
+   if !win_obj {
       drain_autorelease_pool(pool)
       return 0
    }
@@ -2018,18 +2018,18 @@ fn create_basic_window(str title, int width, int height, int x=0, int y=0, int f
    def hwnd = objc_msgSend_rect_u64_i64_i8(win_obj, get_selector("initWithContentRect:styleMask:backing:defer:"),
    float(x), float(y), float(width), float(height), style, 2, 0)
    mut delegate = 0
-   if(hwnd){
+   if hwnd {
       objc_msgSend_ptr(hwnd, get_selector("setTitle:"),
       objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(to_str(title))))
       def delegate_cls = create_window_delegate()
       delegate = objc_msgSend(objc_msgSend(delegate_cls, get_selector("alloc")), get_selector("init"))
       objc_msgSend_ptr(hwnd, get_selector("setDelegate:"), delegate)
       objc_msgSend_ptr_i64(hwnd, get_selector("setAcceptsMouseMovedEvents:"), 1)
-      if(band(flags, WINDOW_TRANSPARENT)){ objc_msgSend_i64_arg(hwnd, get_selector("setOpaque:"), 0) }
-      if(band(flags, WINDOW_FLOATING)){ objc_msgSend_i64_arg(hwnd, get_selector("setLevel:"), NSFloatingWindowLevel) }
-      if(!band(flags, WINDOW_HIDE)){ objc_msgSend_ptr(hwnd, get_selector("makeKeyAndOrderFront:"), 0) }
-      if(band(flags, WINDOW_MINIMIZE)){ objc_msgSend_ptr(hwnd, get_selector("miniaturize:"), 0) }
-      if(band(flags, WINDOW_MAXIMIZE)){ objc_msgSend_ptr(hwnd, get_selector("zoom:"), 0) }
+      if band(flags, WINDOW_TRANSPARENT) { objc_msgSend_i64_arg(hwnd, get_selector("setOpaque:"), 0) }
+      if band(flags, WINDOW_FLOATING) { objc_msgSend_i64_arg(hwnd, get_selector("setLevel:"), NSFloatingWindowLevel) }
+      if !band(flags, WINDOW_HIDE) { objc_msgSend_ptr(hwnd, get_selector("makeKeyAndOrderFront:"), 0) }
+      if band(flags, WINDOW_MINIMIZE) { objc_msgSend_ptr(hwnd, get_selector("miniaturize:"), 0) }
+      if band(flags, WINDOW_MAXIMIZE) { objc_msgSend_ptr(hwnd, get_selector("zoom:"), 0) }
    }
    drain_autorelease_pool(pool)
    def win = {
@@ -2053,23 +2053,23 @@ fn create_basic_window(str title, int width, int height, int x=0, int y=0, int f
 
 fn destroy_basic_window(any win) bool {
    "Closes and releases a native `NSWindow`."
-   if(!available() || !win || !is_dict(win)){ return false }
+   if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
-   if(!hwnd){ return false }
+   if !hwnd { return false }
    win = _restore_display_mode(win)
    _windows = _windows.set(hwnd, 0)
    objc_msgSend_ptr(hwnd, get_selector("setDelegate:"), 0)
    objc_msgSend_ptr(hwnd, get_selector("orderOut:"), 0)
    objc_msgSend(hwnd, get_selector("close"))
    def delegate = win.get("delegate", 0)
-   if(delegate){ objc_msgSend(delegate, get_selector("release")) }
+   if delegate { objc_msgSend(delegate, get_selector("release")) }
    true
 }
 
 fn _check_monitor_changes() any {
    "Diffs current display IDs against known list; emits CONNECTED/DISCONNECTED to all windows."
    def ids = get_active_display_ids()
-   if(!_displays_initialized){
+   if !_displays_initialized {
       _known_display_ids = ids
       _displays_initialized = true
       return 0
@@ -2077,46 +2077,46 @@ fn _check_monitor_changes() any {
    mut cur_set = dict(8)
    mut i = 0
    def ids_n = ids.len
-   while(i < ids_n){
+   while i < ids_n {
       cur_set = cur_set.set(ids.get(i), 1)
       i += 1
    }
    mut old_set = dict(8)
    i = 0
    def known_display_ids_n = _known_display_ids.len
-   while(i < known_display_ids_n){
+   while i < known_display_ids_n {
       old_set = old_set.set(_known_display_ids.get(i), 1)
       i += 1
    }
    i = 0
-   while(i < ids_n){
+   while i < ids_n {
       def did = ids.get(i)
-      if(!old_set.contains(did)){
+      if !old_set.contains(did) {
          mut data = dict(8)
          data = data.set("display_id", did)
          def keys = dict_keys(_windows)
          mut j = 0
          def keys_n = keys.len
-         while(j < keys_n){
+         while j < keys_n {
             def w = _windows.get(keys.get(j), 0)
-            if(is_dict(w)){ _push_event(w, EVENT_MONITOR_CONNECTED, data) }
+            if is_dict(w) { _push_event(w, EVENT_MONITOR_CONNECTED, data) }
             j += 1
          }
       }
       i += 1
    }
    i = 0
-   while(i < known_display_ids_n){
+   while i < known_display_ids_n {
       def did = _known_display_ids.get(i)
-      if(!cur_set.contains(did)){
+      if !cur_set.contains(did) {
          mut data = dict(8)
          data = data.set("display_id", did)
          def keys = dict_keys(_windows)
          mut j = 0
          def keys_n = keys.len
-         while(j < keys_n){
+         while j < keys_n {
             def w = _windows.get(keys.get(j), 0)
-            if(is_dict(w)){ _push_event(w, EVENT_MONITOR_DISCONNECTED, data) }
+            if is_dict(w) { _push_event(w, EVENT_MONITOR_DISCONNECTED, data) }
             j += 1
          }
       }
@@ -2127,21 +2127,21 @@ fn _check_monitor_changes() any {
 
 fn poll_window_events(any win, int max_events=64) list {
    "Drains Cocoa AppKit events for the given window and returns translated Nytrix events."
-   if(!available()){ return [win, []] }
+   if !available() { return [win, []] }
    _check_monitor_changes()
    def app = shared_application()
-   if(!app){ return [win, []] }
+   if !app { return [win, []] }
    def mode_str = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("kCFRunLoopDefaultMode"))
    def past_date = objc_msgSend(get_class("NSDate"), get_selector("distantPast"))
    mut drained = 0
-   while(drained < max_events){
+   while drained < max_events {
       def ev = objc_msgSend_ptr_u64_ptr_ptr_i64(app, get_selector("nextEventMatchingMask:untilDate:inMode:dequeue:"),
       NSEventMaskAny, past_date, mode_str, 1)
-      if(!ev){ break }
+      if !ev { break }
       def translated = _translate_event(ev)
-      if(translated && is_list(translated)){
+      if translated && is_list(translated) {
          def ev_win = translated.get(1, 0)
-         if(ev_win){ _push_event(ev_win, translated.get(0, 0), translated.get(3, 0)) }
+         if ev_win { _push_event(ev_win, translated.get(0, 0), translated.get(3, 0)) }
       }
       drained += 1
    }
@@ -2150,12 +2150,12 @@ fn poll_window_events(any win, int max_events=64) list {
    mut remaining = []
    mut i = 0
    def pending_events_n = _pending_events.len
-   while(i < pending_events_n){
+   while i < pending_events_n {
       def ev = _pending_events.get(i)
       def ev_handle = ev.get(2, 0)
       def ev_win = ev.get(1, 0)
       def matched = ev_handle == handle || (is_dict(ev_win) && ev_win.get("handle", 0) == handle)
-      if(matched && out.len < max_events){ out = out.append(ev) } else { remaining = remaining.append(ev) }
+      if matched && out.len < max_events { out = out.append(ev) } else { remaining = remaining.append(ev) }
       i += 1
    }
    _pending_events = remaining
@@ -2170,11 +2170,11 @@ fn vulkan_supported() bool {
 
 fn vulkan_required_extensions() list {
    "Returns the Vulkan instance extensions required for a macOS surface."
-   if(!_cocoa_vk_ext_ptrs){
+   if !_cocoa_vk_ext_ptrs {
       _cocoa_vk_ext_surface = cstr("VK_KHR_surface")
       _cocoa_vk_ext_metal = cstr("VK_EXT_metal_surface")
       def arr = malloc(16)
-      if(!arr){ return [0, 0] }
+      if !arr { return [0, 0] }
       store64_h(arr, _cocoa_vk_ext_surface, 0)
       store64_h(arr, _cocoa_vk_ext_metal, 8)
       _cocoa_vk_ext_ptrs = [2, arr]
@@ -2188,24 +2188,24 @@ mut _cocoa_vk_ext_metal = 0
 
 fn get_cocoa_window(any win) any {
    "Returns the native NSWindow pointer for the given window dict."
-   if(is_dict(win)){ win.get("handle", 0) } else { win }
+   if is_dict(win) { win.get("handle", 0) } else { win }
 }
 
 fn get_cocoa_monitor(any mon) any {
    "Returns the CGDirectDisplayID for the given monitor dict."
-   if(is_dict(mon)){ mon.get("handle", 0) } else { 0 }
+   if is_dict(mon) { mon.get("handle", 0) } else { 0 }
 }
 
 fn get_cocoa_view(any win) any {
    "Returns the NSView(content view) for the given window."
    def hwnd = _handle_from(win)
-   if(!hwnd){ return 0 }
+   if !hwnd { return 0 }
    objc_msgSend_ptr(hwnd, get_selector("contentView"))
 }
 
 #main {
    assert(get_backend_name() == "cocoa", "cocoa backend name")
-   if(!available()){
+   if !available() {
       assert(get_class("NSApplication") == 0 && get_selector("sharedApplication") == 0, "cocoa objc fallback")
       assert(shared_application() == 0 && create_autorelease_pool() == 0 && !drain_autorelease_pool(0), "cocoa app fallback")
       assert(!set_activation_policy_regular() && !finish_launching() && !activate_ignoring_other_apps(), "cocoa launch fallback")

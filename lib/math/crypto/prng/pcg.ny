@@ -58,8 +58,8 @@ fn pcg32_advance(any state, any inc, any delta) bigint {
    mut acc_mult = Z(1)
    mut acc_plus = Z(0)
    mut d = Z(delta)
-   while(d > Z(0)){
-      if((d & Z(1)) != Z(0)){
+   while d > Z(0) {
+      if (d & Z(1)) != Z(0) {
          acc_mult = _u64(acc_mult * cur_mult)
          acc_plus = _u64(acc_plus * cur_mult + cur_plus)
       }
@@ -75,7 +75,7 @@ fn pcg32_rewind(any state, any inc, any delta=1) bigint {
    def inv_mult = inverse_mod(_PCG32_MULT, _PCG64_MOD)
    mut cur = _u64(state)
    mut i = Z(0)
-   while(i < Z(delta)){
+   while i < Z(delta) {
       cur = _u64((cur - Z(inc)) * inv_mult)
       i += Z(1)
    }
@@ -87,9 +87,9 @@ fn _pcg_abs(any x) bigint { Z(x) < Z(0) ? Z(0) - Z(x) : Z(x) }
 fn _pcg_v2(any x) int {
    "Return the 2-adic valuation of a non-zero integer."
    mut y = _pcg_abs(x)
-   if(y == Z(0)){ return 1 << 30 }
+   if y == Z(0) { return 1 << 30 }
    mut n = 0
-   while((y & Z(1)) == Z(0)){
+   while (y & Z(1)) == Z(0) {
       y = y >> Z(1)
       n += 1
    }
@@ -99,7 +99,7 @@ fn _pcg_v2(any x) int {
 fn _rat_new(any num, any den) list {
    mut n, d = Z(num), Z(den)
    assert(d != Z(0), "rational denominator is non-zero")
-   if(d < Z(0)){ n = Z(0) - n d = Z(0) - d }
+   if d < Z(0) { n = Z(0) - n d = Z(0) - d }
    def g = gcd(_pcg_abs(n), d)
    [n / g, d / g]
 }
@@ -124,7 +124,7 @@ fn _rat_to_mod(list a, any modulus) bigint {
    "Map an exact rational to Z/modulus. Powers of two in the denominator must cancel."
    mut n, d = Z(a[0]), Z(a[1])
    def m = Z(modulus)
-   while((d & Z(1)) == Z(0)){
+   while (d & Z(1)) == Z(0) {
       assert((n & Z(1)) == Z(0), "rational denominator is not invertible modulo target")
       n = n >> Z(1)
       d = d >> Z(1)
@@ -134,15 +134,15 @@ fn _rat_to_mod(list a, any modulus) bigint {
 
 fn poly_pcg_choose_window(list states, any modulus, int min_window=16) int {
    "Choose a recent-state interpolation window for a polynomial congruential generator modulo a power of two."
-   if(states.len <= 1){ return 0 }
+   if states.len <= 1 { return 0 }
    def target = Z(states[states.len - 1])
    def need = max(1, bit_length(Z(modulus)) - 1)
    mut total, used = 0, 0
    mut i = states.len - 2
-   while(i >= 0){
+   while i >= 0 {
       total += _pcg_v2(target - Z(states[i]))
       used += 1
-      if(used >= min_window && total >= need){ return used }
+      if used >= min_window && total >= need { return used }
       i -= 1
    }
    max(1, min(states.len - 1, min_window))
@@ -153,14 +153,14 @@ fn poly_pcg_newton_coeffs(list xs, list ys) list {
    assert(xs.len == ys.len && xs.len > 0, "matching non-empty interpolation points")
    mut coeffs = []
    mut i = 0
-   while(i < ys.len){
+   while i < ys.len {
       coeffs = coeffs.append(_rat_new(ys[i], 1))
       i += 1
    }
    mut order = 1
-   while(order < xs.len){
+   while order < xs.len {
       i = xs.len - 1
-      while(i >= order){
+      while i >= order {
          coeffs[i] = _rat_div_int(_rat_sub(coeffs[i], coeffs[i - 1]), Z(xs[i]) - Z(xs[i - order]))
          i -= 1
       }
@@ -175,7 +175,7 @@ fn poly_pcg_eval_next(any state, list xs, list coeffs, any modulus) bigint {
    def x = Z(state)
    mut acc = coeffs[coeffs.len - 1]
    mut i = coeffs.len - 2
-   while(i >= 0){
+   while i >= 0 {
       acc = _rat_add(_rat_mul_int(acc, x - Z(xs[i])), coeffs[i])
       i -= 1
    }
@@ -192,7 +192,7 @@ fn poly_pcg_advance_from_states(list states, int steps, any modulus=(Z(1) << 128
    def coeffs = poly_pcg_newton_coeffs(xs, ys)
    mut cur = Z(states[states.len - 1])
    mut i = 0
-   while(i < steps){
+   while i < steps {
       cur = poly_pcg_eval_next(cur, xs, coeffs, modulus)
       i += 1
    }

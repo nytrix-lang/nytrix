@@ -15,7 +15,7 @@ fn cps_return(any v) fnptr {
 
 fn cps_run(fnptr c, ?fnptr k=nil) any {
    "Runs a CPS computation `c`. If no continuation `k` is provided, the computation's final value is returned directly."
-   if(!k){
+   if !k {
       return c(fn(v) {
             v
       })
@@ -77,7 +77,7 @@ fn cps_pipe(any v, list funcs) fnptr {
    "Threads an initial value `v` through a sequence of unary CPS functions in `funcs`."
    mut c, i = cps_return(v), 0
    def n = funcs.len
-   while(i < n){
+   while i < n {
       def f = funcs.get(i)
       c = cps_bind(c, f)
       i += 1
@@ -97,13 +97,13 @@ fn cps_step_more(fnptr thunk) list {
 
 fn cps_is_done(any step) bool {
    "Returns true if the given trampoline `step` is a terminal step."
-   if(!is_list(step) || step.len < 2){ return true }
+   if !is_list(step) || step.len < 2 { return true }
    step.get(0, 0) == 0
 }
 
 fn cps_step_value(any step) any {
    "Extracts the result value from a terminal step or the thunk from a continuation step."
-   if(!is_list(step) || step.len < 2){ return step }
+   if !is_list(step) || step.len < 2 { return step }
    step.get(1, 0)
 }
 
@@ -111,9 +111,9 @@ fn cps_trampoline(any step, int max_steps=0) any {
    "Executes trampoline steps iteratively until a terminal step is reached. Prevents stack overflow for deep recursion."
    mut cur = step
    mut iters = 0
-   while(true){
-      if(cps_is_done(cur)){ return cps_step_value(cur) }
-      if(max_steps > 0 && iters >= max_steps){ panic("cps_trampoline exceeded max_steps") }
+   while true {
+      if cps_is_done(cur) { return cps_step_value(cur) }
+      if max_steps > 0 && iters >= max_steps { panic("cps_trampoline exceeded max_steps") }
       def th = cps_step_value(cur)
       cur = th()
       iters += 1

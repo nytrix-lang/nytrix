@@ -48,17 +48,17 @@ def SAT     = 1
 def UNSAT   = -1
 def UNKNOWN = 0
 
-if(comptime{ __os_name() == "linux" }){
+if comptime { __os_name() == "linux" }{
    #link "libz3.so"
    #include <z3.h> as "Z3_"
 }
 
-if(comptime{ __os_name() == "macos" }){
+if comptime { __os_name() == "macos" }{
    #link "libz3.dylib"
    #include <z3.h> as "Z3_"
 }
 
-if(comptime{ __os_name() == "windows" }){
+if comptime { __os_name() == "windows" }{
    #link "z3.lib"
    #include <z3.h> as "Z3_"
 }
@@ -160,9 +160,9 @@ fn _ffi_int(any v) int {
 }
 
 fn _load() bool {
-   if(_z3){ return true }
+   if _z3 { return true }
    def h = backends.backend_dlopen_checked("z3", "z3", "Z3_mk_config")
-   if(!h){ return false }
+   if !h { return false }
    _z3 = h
    _p_global_param_set = dlsym(h, "Z3_global_param_set")
    _p_get_version = dlsym(h, "Z3_get_version")
@@ -262,28 +262,28 @@ fn z3_available() bool {
 
 fn z3_global_param_set(str name, str value) bool {
    "Set a Z3 global parameter, such as `timeout`, using the native Z3 API."
-   if(!_load() || !_p_global_param_set){ return false }
+   if !_load() || !_p_global_param_set { return false }
    call2(_p_global_param_set, cstr(name), cstr(value))
    true
 }
 
 fn z3_global_timeout_ms(any timeout_ms) bool {
    "Set Z3's process-wide timeout in milliseconds for subsequently created contexts/solvers."
-   if(timeout_ms <= 0){ return false }
+   if timeout_ms <= 0 { return false }
    z3_global_param_set("timeout", to_str(timeout_ms))
 }
 
 fn z3_version() any {
    "Return Z3 version as [major, minor, build, revision], or nil if unavailable."
-   if(!_load()){ return nil }
+   if !_load() { return nil }
    def a = malloc(4)
-   if(!a){ return nil }
+   if !a { return nil }
    def b = malloc(4)
-   if(!b){ free(a) return nil }
+   if !b { free(a) return nil }
    def c = malloc(4)
-   if(!c){ free(a, b) return nil }
+   if !c { free(a, b) return nil }
    def d = malloc(4)
-   if(!d){ free(a, b, c) return nil }
+   if !d { free(a, b, c) return nil }
    store32(a,0,0) store32(b,0,0) store32(c,0,0) store32(d,0,0)
    call4_ptr_ptr_ptr_ptr_void(_p_get_version, a, b, c, d)
    def out = [load32(a,0), load32(b,0), load32(c,0), load32(d,0)]
@@ -294,14 +294,14 @@ fn z3_version() any {
 fn z3_version_str() str {
    "Returns Z3 version as a human-readable string like `4.12.2.0`."
    def v = z3_version()
-   if(v == nil){ return "" }
-   if(v.len < 4){ return "" }
+   if v == nil { return "" }
+   if v.len < 4 { return "" }
    to_str(v.get(0)) + "." + to_str(v.get(1)) + "." + to_str(v.get(2)) + "." + to_str(v.get(3))
 }
 
 fn z3_ctx_new() any {
    "Create a Z3 context handle, or 0 when Z3 is unavailable."
-   if(!_load()){ return 0 }
+   if !_load() { return 0 }
    def cfg = call0_ptr(_p_mk_config)
    def ctx = call1_ptr(_p_mk_context, cfg)
    call1(_p_del_config, cfg)
@@ -310,22 +310,22 @@ fn z3_ctx_new() any {
 
 fn z3_ctx_del(any ctx) any {
    "Destroy a Z3 context handle created by z3_ctx_new."
-   if(!_load() || !_is_handle(ctx)){ return nil }
+   if !_load() || !_is_handle(ctx) { return nil }
    call1(_p_del_context, ctx)
 }
 
 fn z3_ctx_last_error(any ctx) str {
    "Returns last Z3 error string for `ctx`, or empty string if none."
-   if(!_load() || !_is_handle(ctx)){ return "" }
+   if !_load() || !_is_handle(ctx) { return "" }
    def code = to_int(call1(_p_get_error_code, ctx))
-   if(code == 0){ return "" }
+   if code == 0 { return "" }
    def msg_raw = call2_ptr(_p_get_error_msg, ctx, _ffi_int(code))
    msg_raw ? str.cstr_to_str(__untag(msg_raw)) : ""
 }
 
 fn z3_solver_new(any ctx) any {
    "Create and retain a Z3 solver for context `ctx`."
-   if(!_load() || !_is_handle(ctx)){ return 0 }
+   if !_load() || !_is_handle(ctx) { return 0 }
    def s = call1_ptr(_p_mk_solver, ctx)
    call2(_p_solver_inc_ref, ctx, s)
    s
@@ -333,67 +333,67 @@ fn z3_solver_new(any ctx) any {
 
 fn z3_solver_new_for_logic(any ctx, str logic) any {
    "Create and retain a Z3 solver specialized for `logic` such as `QF_BV`."
-   if(!_load() || !_is_handle(ctx)){ return 0 }
+   if !_load() || !_is_handle(ctx) { return 0 }
    def s = call2_ptr(_p_mk_solver_for_logic, ctx, z3_sym(ctx, logic))
-   if(_is_handle(s)){ call2(_p_solver_inc_ref, ctx, s) }
+   if _is_handle(s) { call2(_p_solver_inc_ref, ctx, s) }
    s
 }
 
 fn z3_tactic_new(any ctx, str name) any {
    "Create and retain a Z3 tactic by name, such as `simplify`, `bit-blast`, `sat`, or `qfbv`."
-   if(!_load() || !_is_handle(ctx) || !_p_mk_tactic){ return 0 }
+   if !_load() || !_is_handle(ctx) || !_p_mk_tactic { return 0 }
    def t = call2_ptr(_p_mk_tactic, ctx, cstr(name))
-   if(_is_handle(t) && _p_tactic_inc_ref){ call2(_p_tactic_inc_ref, ctx, t) }
+   if _is_handle(t) && _p_tactic_inc_ref { call2(_p_tactic_inc_ref, ctx, t) }
    t
 }
 
 fn z3_tactic_del(any ctx, any tactic) any {
    "Release a Z3 tactic handle created by z3_tactic_new."
-   if(!_load() || !_is_handle(ctx) || !_is_handle(tactic) || !_p_tactic_dec_ref){ return nil }
+   if !_load() || !_is_handle(ctx) || !_is_handle(tactic) || !_p_tactic_dec_ref { return nil }
    call2(_p_tactic_dec_ref, ctx, tactic)
 }
 
 fn z3_tactic_and_then(any ctx, any first, any second) any {
    "Compose two Z3 tactics so `second` runs after `first`."
-   if(!_load() || !_is_handle(ctx) || !_is_handle(first) || !_is_handle(second)){ return 0 }
+   if !_load() || !_is_handle(ctx) || !_is_handle(first) || !_is_handle(second) { return 0 }
    def t = call3_ptr(_p_tactic_and_then, ctx, first, second)
-   if(_is_handle(t) && _p_tactic_inc_ref){ call2(_p_tactic_inc_ref, ctx, t) }
+   if _is_handle(t) && _p_tactic_inc_ref { call2(_p_tactic_inc_ref, ctx, t) }
    t
 }
 
 fn z3_tactic_try_for(any ctx, any tactic, any timeout_ms) any {
    "Wrap a tactic with Z3's native tactic timeout."
-   if(!_load() || !_is_handle(ctx) || !_is_handle(tactic) || timeout_ms <= 0){ return tactic }
+   if !_load() || !_is_handle(ctx) || !_is_handle(tactic) || timeout_ms <= 0 { return tactic }
    def t = call3_ptr_ptr_u32(_p_tactic_try_for, ctx, tactic, int(timeout_ms))
-   if(_is_handle(t) && _p_tactic_inc_ref){ call2(_p_tactic_inc_ref, ctx, t) }
+   if _is_handle(t) && _p_tactic_inc_ref { call2(_p_tactic_inc_ref, ctx, t) }
    t
 }
 
 fn z3_tactic_using_params(any ctx, any tactic, any params) any {
    "Return a tactic configured with a Z3 params handle."
-   if(!_load() || !_is_handle(ctx) || !_is_handle(tactic) || !_is_handle(params)){ return 0 }
+   if !_load() || !_is_handle(ctx) || !_is_handle(tactic) || !_is_handle(params) { return 0 }
    def t = call3_ptr(_p_tactic_using_params, ctx, tactic, params)
-   if(_is_handle(t) && _p_tactic_inc_ref){ call2(_p_tactic_inc_ref, ctx, t) }
+   if _is_handle(t) && _p_tactic_inc_ref { call2(_p_tactic_inc_ref, ctx, t) }
    t
 }
 
 fn z3_solver_new_from_tactic(any ctx, any tactic) any {
    "Create and retain a solver backed by a Z3 tactic."
-   if(!_load() || !_is_handle(ctx) || !_is_handle(tactic) || !_p_mk_solver_from_tactic){ return 0 }
+   if !_load() || !_is_handle(ctx) || !_is_handle(tactic) || !_p_mk_solver_from_tactic { return 0 }
    def s = call2_ptr(_p_mk_solver_from_tactic, ctx, tactic)
-   if(_is_handle(s)){ call2(_p_solver_inc_ref, ctx, s) }
+   if _is_handle(s) { call2(_p_solver_inc_ref, ctx, s) }
    s
 }
 
 fn z3_solver_del(any ctx, any solver) any {
    "Release a Z3 solver created by z3_solver_new."
-   if(!_load() || !_is_handle(ctx) || !_is_handle(solver)){ return nil }
+   if !_load() || !_is_handle(ctx) || !_is_handle(solver) { return nil }
    call2(_p_solver_dec_ref, ctx, solver)
 }
 
 fn z3_solver_from_string(any ctx, any solver, str script) any {
    "Parse SMT-LIB2 commands in `script` and assert them into `solver`."
-   if(!_load() || !_is_handle(ctx) || !_is_handle(solver)){ return nil }
+   if !_load() || !_is_handle(ctx) || !_is_handle(solver) { return nil }
    call3(_p_solver_from_string, ctx, solver, cstr(script))
 }
 
@@ -452,10 +452,10 @@ fn z3_eq(any ctx, any a, any b) any {
 
 fn z3_int_add(any ctx, list args) any {
    "Create an n-ary integer addition AST."
-   if(args.len == 0){ return z3_int_val(ctx, 0) }
-   if(args.len == 1){ return args[0] }
+   if args.len == 0 { return z3_int_val(ctx, 0) }
+   if args.len == 1 { return args[0] }
    def p = _ast_array(args)
-   if(!p){ return 0 }
+   if !p { return 0 }
    def out = call3_ptr_u32_ptr(_p_mk_add, ctx, args.len, p)
    free_raw(p)
    out
@@ -463,10 +463,10 @@ fn z3_int_add(any ctx, list args) any {
 
 fn z3_int_sub(any ctx, list args) any {
    "Create an n-ary integer subtraction AST."
-   if(args.len == 0){ return z3_int_val(ctx, 0) }
-   if(args.len == 1){ return args[0] }
+   if args.len == 0 { return z3_int_val(ctx, 0) }
+   if args.len == 1 { return args[0] }
    def p = _ast_array(args)
-   if(!p){ return 0 }
+   if !p { return 0 }
    def out = call3_ptr_u32_ptr(_p_mk_sub, ctx, args.len, p)
    free_raw(p)
    out
@@ -474,10 +474,10 @@ fn z3_int_sub(any ctx, list args) any {
 
 fn z3_int_mul(any ctx, list args) any {
    "Create an n-ary integer multiplication AST."
-   if(args.len == 0){ return z3_int_val(ctx, 1) }
-   if(args.len == 1){ return args[0] }
+   if args.len == 0 { return z3_int_val(ctx, 1) }
+   if args.len == 1 { return args[0] }
    def p = _ast_array(args)
-   if(!p){ return 0 }
+   if !p { return 0 }
    def out = call3_ptr_u32_ptr(_p_mk_mul, ctx, args.len, p)
    free_raw(p)
    out
@@ -565,9 +565,9 @@ fn z3_sign_extend(any ctx, any extra_bits, any a) any {
 
 fn _ast_array(list args) any {
    def n, p = args.len, malloc_raw(max(1, n) * 8)
-   if(!p){ return 0 }
+   if !p { return 0 }
    mut i = 0
-   while(i < n){
+   while i < n {
       store64_h(p, args[i], i * 8)
       i += 1
    }
@@ -576,10 +576,10 @@ fn _ast_array(list args) any {
 
 fn z3_mk_or(any ctx, list args) any {
    "Create an n-ary boolean OR AST from a list of boolean ASTs."
-   if(args.len == 0){ return 0 }
-   if(args.len == 1){ return args[0] }
+   if args.len == 0 { return 0 }
+   if args.len == 1 { return args[0] }
    def p = _ast_array(args)
-   if(!p){ return 0 }
+   if !p { return 0 }
    def out = call3_ptr_u32_ptr(_p_mk_or, ctx, args.len, p)
    free_raw(p)
    out
@@ -587,10 +587,10 @@ fn z3_mk_or(any ctx, list args) any {
 
 fn z3_mk_and(any ctx, list args) any {
    "Create an n-ary boolean AND AST from a list of boolean ASTs."
-   if(args.len == 0){ return 0 }
-   if(args.len == 1){ return args[0] }
+   if args.len == 0 { return 0 }
+   if args.len == 1 { return args[0] }
    def p = _ast_array(args)
-   if(!p){ return 0 }
+   if !p { return 0 }
    def out = call3_ptr_u32_ptr(_p_mk_and, ctx, args.len, p)
    free_raw(p)
    out
@@ -669,18 +669,18 @@ fn z3_solver_check(any ctx, any solver) bool {
 
 fn z3_model_eval_u64(any ctx, any solver, any ast) any {
    "Evaluate a bitvector AST as an unsigned 64-bit integer in the current model."
-   if(!z3_solver_check(ctx, solver)){ return nil }
+   if !z3_solver_check(ctx, solver) { return nil }
    def m = call2_ptr(_p_solver_get_model, ctx, solver)
-   if(!_is_handle(m)){ return nil }
+   if !_is_handle(m) { return nil }
    call2(_p_model_inc_ref, ctx, m)
    def out_ptr = malloc_raw(8)
-   if(!out_ptr){
+   if !out_ptr {
       call2(_p_model_dec_ref, ctx, m)
       return nil
    }
    store64_h(out_ptr, 0, 0)
    def ok = call5(_p_model_eval, ctx, m, ast, _ffi_int(1), out_ptr)
-   if(ok == 0){
+   if ok == 0 {
       call2(_p_model_dec_ref, ctx, m)
       free_raw(out_ptr)
       return nil
@@ -688,7 +688,7 @@ fn z3_model_eval_u64(any ctx, any solver, any ast) any {
    def aval = load64_h(out_ptr, 0)
    free_raw(out_ptr)
    def u64_ptr = malloc_raw(8)
-   if(!u64_ptr){
+   if !u64_ptr {
       call2(_p_model_dec_ref, ctx, m)
       return nil
    }
@@ -757,20 +757,20 @@ fn tactic_and_then(any ctx, any first, any second) any {
 
 fn tactic_chain(any ctx, list names) any {
    "Compose a list of named Z3 tactics in order."
-   if(names.len == 0){ return 0 }
+   if names.len == 0 { return 0 }
    mut current = tactic_new(ctx, names[0])
-   if(!_is_handle(current)){ return 0 }
+   if !_is_handle(current) { return 0 }
    mut i = 1
-   while(i < names.len){
+   while i < names.len {
       def next = tactic_new(ctx, names[i])
-      if(!_is_handle(next)){
+      if !_is_handle(next) {
          tactic_del(ctx, current)
          return 0
       }
       def joined = tactic_and_then(ctx, current, next)
       tactic_del(ctx, current)
       tactic_del(ctx, next)
-      if(!_is_handle(joined)){ return 0 }
+      if !_is_handle(joined) { return 0 }
       current = joined
       i += 1
    }
@@ -795,10 +795,10 @@ fn solver_new_from_tactic(any ctx, any tactic) any {
 fn solver_new_tactic_named(any ctx, str name, any timeout_ms=0) any {
    "Create a solver backed by a named Z3 tactic, optionally wrapped in a native timeout."
    mut tactic = tactic_new(ctx, name)
-   if(!_is_handle(tactic)){ return 0 }
-   if(timeout_ms > 0){
+   if !_is_handle(tactic) { return 0 }
+   if timeout_ms > 0 {
       def timed = tactic_try_for(ctx, tactic, timeout_ms)
-      if(_is_handle(timed) && timed != tactic){
+      if _is_handle(timed) && timed != tactic {
          tactic_del(ctx, tactic)
          tactic = timed
       }
@@ -811,10 +811,10 @@ fn solver_new_tactic_named(any ctx, str name, any timeout_ms=0) any {
 fn solver_new_tactic_chain(any ctx, list names, any timeout_ms=0) any {
    "Create a solver backed by a composed Z3 tactic chain."
    mut tactic = tactic_chain(ctx, names)
-   if(!_is_handle(tactic)){ return 0 }
-   if(timeout_ms > 0){
+   if !_is_handle(tactic) { return 0 }
+   if timeout_ms > 0 {
       def timed = tactic_try_for(ctx, tactic, timeout_ms)
-      if(_is_handle(timed) && timed != tactic){
+      if _is_handle(timed) && timed != tactic {
          tactic_del(ctx, tactic)
          tactic = timed
       }
@@ -831,22 +831,22 @@ fn solver_new_qfbv_tactic(any ctx, any timeout_ms=0) any {
 
 fn _params_new(any ctx) any {
    def p = call1_ptr(_p_mk_params, ctx)
-   if(_is_handle(p)){ call2(_p_params_inc_ref, ctx, p) }
+   if _is_handle(p) { call2(_p_params_inc_ref, ctx, p) }
    p
 }
 
-fn _params_del(any ctx, any p) any { if(_is_handle(p)){ call2(_p_params_dec_ref, ctx, p) } }
+fn _params_del(any ctx, any p) any { if _is_handle(p) { call2(_p_params_dec_ref, ctx, p) } }
 
-fn _params_uint(any ctx, any p, str name, any value) any { if(_is_handle(p)){ call4(_p_params_set_uint, ctx, p, z3_sym(ctx, name), int(value)) } }
+fn _params_uint(any ctx, any p, str name, any value) any { if _is_handle(p) { call4(_p_params_set_uint, ctx, p, z3_sym(ctx, name), int(value)) } }
 
-fn _params_bool(any ctx, any p, str name, any value) any { if(_is_handle(p) && _p_params_set_bool){ call4(_p_params_set_bool, ctx, p, z3_sym(ctx, name), value ? 1 : 0) } }
+fn _params_bool(any ctx, any p, str name, any value) any { if _is_handle(p) && _p_params_set_bool { call4(_p_params_set_bool, ctx, p, z3_sym(ctx, name), value ? 1 : 0) } }
 
 fn solver_new_qfbv_sls(any ctx, any timeout_ms=0, any seed=0, any max_rounds=128) any {
    "Create a configured stochastic local-search solver for satisfiable QF_BV problems."
    mut tactic = tactic_new(ctx, "qfbv-sls")
-   if(!_is_handle(tactic)){ return 0 }
+   if !_is_handle(tactic) { return 0 }
    def params = _params_new(ctx)
-   if(_is_handle(params)){
+   if _is_handle(params) {
       _params_uint(ctx, params, "max_rounds", max_rounds)
       _params_uint(ctx, params, "max_steps", 4294967295)
       _params_uint(ctx, params, "max_restarts", 4294967295)
@@ -857,11 +857,11 @@ fn solver_new_qfbv_sls(any ctx, any timeout_ms=0, any seed=0, any max_rounds=128
       tactic_del(ctx, tactic)
       tactic = tuned
       _params_del(ctx, params)
-      if(!_is_handle(tactic)){ return 0 }
+      if !_is_handle(tactic) { return 0 }
    }
-   if(timeout_ms > 0){
+   if timeout_ms > 0 {
       def timed = tactic_try_for(ctx, tactic, timeout_ms)
-      if(_is_handle(timed) && timed != tactic){
+      if _is_handle(timed) && timed != tactic {
          tactic_del(ctx, tactic)
          tactic = timed
       }
@@ -927,8 +927,8 @@ fn bvconcat(any ctx, any hi, any lo) any {
 }
 
 fn _hex_digit(int c) int {
-   if(c >= 48 && c <= 57){ return c - 48 }
-   if(c >= 65 && c <= 70){ return c - 55 }
+   if c >= 48 && c <= 57 { return c - 48 }
+   if c >= 65 && c <= 70 { return c - 55 }
    c - 87
 }
 
@@ -937,13 +937,13 @@ fn _dec_mul16_add(str dec, int add) str {
    mut carry = add
    mut result = ""
    mut i = n - 1
-   while(i >= 0){
+   while i >= 0 {
       def prod = (load8(dec, i) - 48) * 16 + carry
       result = str.chr(48 + prod % 10) + result
       carry = prod / 10
       i = i - 1
    }
-   while(carry > 0){
+   while carry > 0 {
       result = str.chr(48 + carry % 10) + result
       carry = carry / 10
    }
@@ -954,7 +954,7 @@ fn _hex_to_dec(str hex) str {
    def n = hex.len
    mut dec = "0"
    mut i = 0
-   while(i < n){
+   while i < n {
       dec = _dec_mul16_add(dec, _hex_digit(load8(hex, i)))
       i += 1
    }
@@ -1148,9 +1148,9 @@ fn solver_check_result(any ctx, any s) int {
 
 fn solver_set_timeout_ms(any ctx, any s, any timeout_ms) bool {
    "Set a per-check Z3 timeout in milliseconds for solver `s`."
-   if(!_load() || !_is_handle(ctx) || !_is_handle(s) || timeout_ms <= 0){ return false }
+   if !_load() || !_is_handle(ctx) || !_is_handle(s) || timeout_ms <= 0 { return false }
    def p = call1_ptr(_p_mk_params, ctx)
-   if(!_is_handle(p)){ return false }
+   if !_is_handle(p) { return false }
    call2(_p_params_inc_ref, ctx, p)
    call4(_p_params_set_uint, ctx, p, z3_sym(ctx, "timeout"), int(timeout_ms))
    call3(_p_solver_set_params, ctx, s, p)
@@ -1172,15 +1172,15 @@ fn _bin_to_hex(str b) str {
    def n = b.len
    def rem = n % 4
    mut s = b
-   if(rem != 0){
+   if rem != 0 {
       mut j = 0
-      while(j < 4 - rem){ s = "0" + s j += 1 }
+      while j < 4 - rem { s = "0" + s j += 1 }
    }
    def hex_chars = "0123456789abcdef"
    mut out = str.Builder(max(16, (s.len / 4) + 8))
    mut i = 0
    def total = s.len
-   while(i < total){
+   while i < total {
       def nibble = (load8(s,i)-48)*8 + (load8(s,i+1)-48)*4 + (load8(s,i+2)-48)*2 + (load8(s,i+3)-48)
       out = str.builder_append(out, str.chr(load8(hex_chars, nibble)))
       i += 4
@@ -1193,7 +1193,7 @@ fn _bin_to_hex(str b) str {
 fn _slice_from(str s, int start) str {
    mut out = str.Builder(max(0, s.len - start))
    mut i = start
-   while(i < s.len){
+   while i < s.len {
       out = str.builder_append(out, str.chr(load8(s, i)))
       i += 1
    }
@@ -1203,30 +1203,30 @@ fn _slice_from(str s, int start) str {
 }
 
 fn _ast_to_hex(any ctx, any ast) str {
-   if(!_is_handle(ast)){ return "" }
+   if !_is_handle(ast) { return "" }
    def s_raw = call2_ptr(_p_ast_to_string, ctx, ast)
-   if(!s_raw){ return "" }
+   if !s_raw { return "" }
    def s = str.cstr_to_str(__untag(s_raw))
-   if(s.len >= 2 && load8(s, 0) == 35 && load8(s, 1) == 120){ return _slice_from(s, 2) }
-   if(s.len >= 2 && load8(s, 0) == 35 && load8(s, 1) == 98){ return _bin_to_hex(_slice_from(s, 2)) }
+   if s.len >= 2 && load8(s, 0) == 35 && load8(s, 1) == 120 { return _slice_from(s, 2) }
+   if s.len >= 2 && load8(s, 0) == 35 && load8(s, 1) == 98 { return _bin_to_hex(_slice_from(s, 2)) }
    s
 }
 
 fn model_eval_hex(any ctx, any solver, any ast) any {
    "Evaluate an AST in the current model and return its value as a hex string.
    Works for any bit width(8, 16, 32, 64, 128, ...)."
-   if(!z3_solver_check(ctx, solver)){ return nil }
+   if !z3_solver_check(ctx, solver) { return nil }
    def m = call2_ptr(_p_solver_get_model, ctx, solver)
-   if(!_is_handle(m)){ return nil }
+   if !_is_handle(m) { return nil }
    call2(_p_model_inc_ref, ctx, m)
    def out_ptr = malloc_raw(8)
-   if(!out_ptr){
+   if !out_ptr {
       call2(_p_model_dec_ref, ctx, m)
       return nil
    }
    store64_h(out_ptr, 0, 0)
    def ok = call5(_p_model_eval, ctx, m, ast, _ffi_int(1), out_ptr)
-   if(ok == 0){
+   if ok == 0 {
       call2(_p_model_dec_ref, ctx, m)
       free_raw(out_ptr)
       return nil
@@ -1239,19 +1239,19 @@ fn model_eval_hex(any ctx, any solver, any ast) any {
 
 fn hex_width(any hex, any bits) any {
    "Normalize a hex string to the low `bits` bits, padded to that exact nibble width."
-   if(hex == nil){ return nil }
+   if hex == nil { return nil }
    mut h = str.lower(str.strip(to_str(hex)))
-   if(h.len >= 2 && load8(h, 0) == 35 && load8(h, 1) == 120){
+   if h.len >= 2 && load8(h, 0) == 35 && load8(h, 1) == 120 {
       h = _slice_from(h, 2)
-   } elif(h.len >= 2 && load8(h, 0) == 35 && load8(h, 1) == 98){
+   } elif h.len >= 2 && load8(h, 0) == 35 && load8(h, 1) == 98 {
       h = _bin_to_hex(_slice_from(h, 2))
-   } elif(h.len >= 2 && load8(h, 0) == 48 && load8(h, 1) == 120){
+   } elif h.len >= 2 && load8(h, 0) == 48 && load8(h, 1) == 120 {
       h = _slice_from(h, 2)
    }
    def width = (int(bits) + 3) / 4
-   if(width <= 0){ return h }
-   if(h.len > width){ h = _slice_from(h, h.len - width) }
-   while(h.len < width){ h = "0" + h }
+   if width <= 0 { return h }
+   if h.len > width { h = _slice_from(h, h.len - width) }
+   while h.len < width { h = "0" + h }
    h
 }
 
@@ -1279,7 +1279,7 @@ fn bv_bytes(any ctx, str prefix, int n) list {
    "Create `n` symbolic 8-bit variables named `prefix0`, `prefix1`, ..."
    mut out = []
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(bv_const(ctx, to_str(prefix) + to_str(i), 8))
       i += 1
    }
@@ -1290,7 +1290,7 @@ fn bv_words(any ctx, str prefix, int n, any bits=32) list {
    "Create `n` symbolic bitvector variables named `prefix0`, `prefix1`, ... with `bits` width."
    mut out = []
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(bv_const(ctx, to_str(prefix) + to_str(i), bits))
       i += 1
    }
@@ -1298,21 +1298,21 @@ fn bv_words(any ctx, str prefix, int n, any bits=32) list {
 }
 
 fn _bytes_input_len(any values) int {
-   if(is_str(values) || is_bytes(values)){ return values.len }
-   if(is_list(values)){ return values.len }
+   if is_str(values) || is_bytes(values) { return values.len }
+   if is_list(values) { return values.len }
    0
 }
 
 fn _bytes_input_at(any values, int i) int {
-   if(is_str(values) || is_bytes(values)){ return load8(values, i) & 255 }
-   if(is_list(values)){ return int(values.get(i, 0)) & 255 }
+   if is_str(values) || is_bytes(values) { return load8(values, i) & 255 }
+   if is_list(values) { return int(values.get(i, 0)) & 255 }
    0
 }
 
 fn _bytes_key_at(any key, int i) int {
-   if(is_int(key)){ return int(key) & 255 }
+   if is_int(key) { return int(key) & 255 }
    def n = _bytes_input_len(key)
-   if(n <= 0){ return 0 }
+   if n <= 0 { return 0 }
    _bytes_input_at(key, i % n)
 }
 
@@ -1321,7 +1321,7 @@ fn solver_assert_bytes_eq(any ctx, any solver, list xs, any values) int {
    Returns the number of byte constraints asserted."
    def n = min(xs.len, _bytes_input_len(values))
    mut i = 0
-   while(i < n){
+   while i < n {
       solver_assert(ctx, solver, mk_eq(ctx, xs[i], bv_u8(ctx, _bytes_input_at(values, i))))
       i += 1
    }
@@ -1333,7 +1333,7 @@ fn solver_assert_bytes_xor_eq(any ctx, any solver, list xs, any key, any values)
    `key` may be a scalar byte, string/bytes, or integer list and repeats when shorter than `xs`."
    def n = min(xs.len, _bytes_input_len(values))
    mut i = 0
-   while(i < n){
+   while i < n {
       def lhs = bvxor(ctx, xs[i], bv_u8(ctx, _bytes_key_at(key, i)))
       solver_assert(ctx, solver, mk_eq(ctx, lhs, bv_u8(ctx, _bytes_input_at(values, i))))
       i += 1
@@ -1345,7 +1345,7 @@ fn solver_assert_bytes_xor_reduce8(any ctx, any solver, list xs, any value) int 
    "Assert the xor-reduction of a byte vector equals `value` modulo 256."
    mut acc = bv_u8(ctx, 0)
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       acc = bvxor(ctx, acc, xs[i])
       i += 1
    }
@@ -1357,7 +1357,7 @@ fn solver_assert_bytes_add_sum8(any ctx, any solver, list xs, any value) int {
    "Assert the byte-wise sum of a vector equals `value` modulo 256."
    mut acc = bv_u8(ctx, 0)
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       acc = bvadd(ctx, acc, xs[i])
       i += 1
    }
@@ -1369,13 +1369,13 @@ fn solver_assert_bytes_ascii_range(any ctx, any solver, list xs, any lo=32, any 
    "Constrain symbolic bytes to an inclusive ASCII byte range."
    mut low = max(0, int(lo))
    mut high = min(255, int(hi))
-   if(low > high){
+   if low > high {
       def tmp = low
       low = high
       high = tmp
    }
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       solver_assert(ctx, solver, bvuge(ctx, xs[i], bv_u8(ctx, low)))
       solver_assert(ctx, solver, bvule(ctx, xs[i], bv_u8(ctx, high)))
       i += 1
@@ -1388,7 +1388,7 @@ fn _bv_shift(any ctx, any shift, any bits) any { bv_u64(ctx, int(shift) % int(bi
 fn bvrotl(any ctx, any a, any shift, any bits) any {
    "Rotate bitvector `a` left by constant `shift` within `bits` bits."
    def s = int(shift) % int(bits)
-   if(s == 0){ return a }
+   if s == 0 { return a }
    def left = bvshl(ctx, a, _bv_shift(ctx, s, bits))
    def right = bvlshr(ctx, a, _bv_shift(ctx, int(bits) - s, bits))
    bvor(ctx, left, right)
@@ -1397,7 +1397,7 @@ fn bvrotl(any ctx, any a, any shift, any bits) any {
 fn bvrotr(any ctx, any a, any shift, any bits) any {
    "Rotate bitvector `a` right by constant `shift` within `bits` bits."
    def s = int(shift) % int(bits)
-   if(s == 0){ return a }
+   if s == 0 { return a }
    def right = bvlshr(ctx, a, _bv_shift(ctx, s, bits))
    def left = bvshl(ctx, a, _bv_shift(ctx, int(bits) - s, bits))
    bvor(ctx, left, right)
@@ -1405,12 +1405,12 @@ fn bvrotr(any ctx, any a, any shift, any bits) any {
 
 fn model_eval_bytes(any ctx, any solver, list xs) any {
    "Evaluate a list of 8-bit ASTs in the current model and return byte integers."
-   if(!solver_check(ctx, solver)){ return nil }
+   if !solver_check(ctx, solver) { return nil }
    mut out = []
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       def v = model_eval_u64(ctx, solver, xs[i])
-      if(v == nil){ return nil }
+      if v == nil { return nil }
       out = out.append(v & 255)
       i += 1
    }
@@ -1420,10 +1420,10 @@ fn model_eval_bytes(any ctx, any solver, list xs) any {
 fn model_eval_bytes_hex(any ctx, any solver, list xs) any {
    "Evaluate 8-bit ASTs and return a packed lowercase hex string."
    def bs = model_eval_bytes(ctx, solver, xs)
-   if(bs == nil){ return nil }
+   if bs == nil { return nil }
    mut out = str.Builder(max(16, bs.len * 2))
    mut i = 0
-   while(i < bs.len){
+   while i < bs.len {
       out = str.builder_append(out, str.to_hex(bs[i] & 255, 2))
       i += 1
    }
@@ -1435,10 +1435,10 @@ fn model_eval_bytes_hex(any ctx, any solver, list xs) any {
 fn model_eval_ascii(any ctx, any solver, list xs) any {
    "Evaluate a list of 8-bit ASTs and return an ASCII string."
    def bs = model_eval_bytes(ctx, solver, xs)
-   if(bs == nil){ return nil }
+   if bs == nil { return nil }
    mut out = str.Builder(bs.len)
    mut i = 0
-   while(i < bs.len){
+   while i < bs.len {
       out = str.builder_append(out, str.chr(bs[i]))
       i += 1
    }
@@ -1450,19 +1450,19 @@ fn model_eval_ascii(any ctx, any solver, list xs) any {
 fn model_eval_ascii_checked(any ctx, any solver, list xs, any lo=0, any hi=255) any {
    "Evaluate 8-bit ASTs as a string, returning nil if any byte is outside range."
    def bs = model_eval_bytes(ctx, solver, xs)
-   if(bs == nil){ return nil }
+   if bs == nil { return nil }
    mut low = max(0, int(lo))
    mut high = min(255, int(hi))
-   if(low > high){
+   if low > high {
       def tmp = low
       low = high
       high = tmp
    }
    mut out = str.Builder(bs.len)
    mut i = 0
-   while(i < bs.len){
+   while i < bs.len {
       def b = bs[i]
-      if(b < low || b > high){
+      if b < low || b > high {
          str.builder_free(out)
          return nil
       }
@@ -1476,9 +1476,9 @@ fn model_eval_ascii_checked(any ctx, any solver, list xs, any lo=0, any hi=255) 
 
 fn model_eval_decl_bv_hex(any ctx, any solver, any decl, any bits) any {
    "Evaluate a constant declaration in the current model and return its value as a hex string."
-   if(!z3_solver_check(ctx, solver)){ return nil }
+   if !z3_solver_check(ctx, solver) { return nil }
    def m = call2_ptr(_p_solver_get_model, ctx, solver)
-   if(!_is_handle(m)){ return nil }
+   if !_is_handle(m) { return nil }
    call2(_p_model_inc_ref, ctx, m)
    def val_ast = call3_ptr(_p_model_get_const_interp, ctx, m, decl)
    def result = _is_handle(val_ast) ? _ast_to_hex(ctx, val_ast) : nil
@@ -1496,7 +1496,7 @@ fn solver_assert_decl_not_hex(any ctx, any solver, any ast, str hex, any bits) a
 fn parser_ctx_new(any ctx) any {
    "Create a Z3 parser context for incremental SMT-LIB2 parsing with known declarations."
    def pc = call1_ptr(_p_parser_ctx_new, ctx)
-   if(_is_handle(pc)){ call2(_p_parser_ctx_inc_ref, ctx, pc) }
+   if _is_handle(pc) { call2(_p_parser_ctx_inc_ref, ctx, pc) }
    pc
 }
 
@@ -1513,7 +1513,7 @@ fn parser_ctx_add_decl(any ctx, any pc, any decl) any {
 fn parser_ctx_parse(any ctx, any pc, str script) any {
    "Parse SMT-LIB2 `script` with the parser context. Returns a Z3 ast_vector of assertions."
    def vec = call3_ptr(_p_parser_ctx_from_string, ctx, pc, cstr(script))
-   if(_is_handle(vec)){ call2(_p_ast_vector_inc_ref, ctx, vec) }
+   if _is_handle(vec) { call2(_p_ast_vector_inc_ref, ctx, vec) }
    vec
 }
 
@@ -1521,7 +1521,7 @@ fn solver_assert_ast_vector(any ctx, any solver, any vec) any {
    "Assert all ASTs in a Z3 ast_vector into the solver."
    def sz = call2(_p_ast_vector_size, ctx, vec)
    mut i = 0
-   while(i < sz){
+   while i < sz {
       def ast = call3_ptr(_p_ast_vector_get, ctx, vec, i)
       z3_solver_assert(ctx, solver, ast)
       i += 1
@@ -1536,15 +1536,15 @@ fn ast_vector_free(any ctx, any vec) any {
 fn session_new() any {
    "Create a session(context + solver pair) as a [ctx, solver] list."
    def ctx = z3_ctx_new()
-   if(!_is_handle(ctx)){ return nil }
+   if !_is_handle(ctx) { return nil }
    def s = z3_solver_new(ctx)
-   if(!_is_handle(s)){ z3_ctx_del(ctx) return nil }
+   if !_is_handle(s) { z3_ctx_del(ctx) return nil }
    [ctx, s]
 }
 
 fn session_free(any sess) any {
    "Destroy a session created by session_new."
-   if(sess == nil){ return nil }
+   if sess == nil { return nil }
    def ctx = sess.get(0)
    def s = sess.get(1)
    z3_solver_del(ctx, s)
@@ -1574,11 +1574,11 @@ fn solve_qf_bv_const_hex(str script, str name, any bits) any {
    and return the value of variable `name` (bitvector of `bits` width) as a hex string.
    Returns nil if UNSAT or Z3 is unavailable."
    def sess = session_new()
-   if(sess == nil){ return nil }
+   if sess == nil { return nil }
    def ctx = session_ctx(sess)
    def s = session_solver(sess)
    z3_solver_from_string(ctx, s, script)
-   if(session_check(sess) != SAT){
+   if session_check(sess) != SAT {
       session_free(sess)
       return nil
    }
@@ -1591,11 +1591,11 @@ fn solve_qf_bv_const_hex(str script, str name, any bits) any {
 fn solve_qf_bv_bytes(str script, str prefix, int n) any {
    "One-shot helper for byte-vector SMT-LIB problems; returns model bytes."
    def sess = session_new()
-   if(sess == nil){ return nil }
+   if sess == nil { return nil }
    def ctx = session_ctx(sess)
    def s = session_solver(sess)
    z3_solver_from_string(ctx, s, script)
-   if(session_check(sess) != SAT){
+   if session_check(sess) != SAT {
       session_free(sess)
       return nil
    }
@@ -1608,11 +1608,11 @@ fn solve_qf_bv_bytes(str script, str prefix, int n) any {
 fn solve_qf_bv_bytes_hex(str script, str prefix, int n) any {
    "One-shot helper for byte-vector SMT-LIB problems; returns packed model hex."
    def sess = session_new()
-   if(sess == nil){ return nil }
+   if sess == nil { return nil }
    def ctx = session_ctx(sess)
    def s = session_solver(sess)
    z3_solver_from_string(ctx, s, script)
-   if(session_check(sess) != SAT){
+   if session_check(sess) != SAT {
       session_free(sess)
       return nil
    }
@@ -1625,11 +1625,11 @@ fn solve_qf_bv_bytes_hex(str script, str prefix, int n) any {
 fn solve_qf_bv_ascii(str script, str prefix, int n) any {
    "One-shot helper for byte-vector SMT-LIB problems named prefix0..prefixN."
    def sess = session_new()
-   if(sess == nil){ return nil }
+   if sess == nil { return nil }
    def ctx = session_ctx(sess)
    def s = session_solver(sess)
    z3_solver_from_string(ctx, s, script)
-   if(session_check(sess) != SAT){
+   if session_check(sess) != SAT {
       session_free(sess)
       return nil
    }

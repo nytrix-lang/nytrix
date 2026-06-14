@@ -11,7 +11,7 @@ fn _xor_overlap(list a, list b) list {
    mut out = list(n)
    store64(out, n, 0)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(out, i, __load_item_fast(a, i) ^^ __load_item_fast(b, i))
       i += 1
    }
@@ -50,7 +50,7 @@ fn ctr_recover_keystream(list ciphertext, list known_plaintext) list {
 
 fn ctr_bit_flip_byte(list ciphertext, int pos, int old_byte, int new_byte) list {
    "Flip one plaintext byte under CTR by editing ciphertext at the same position."
-   if(pos < 0 || pos >= ciphertext.len){ return clone(ciphertext) }
+   if pos < 0 || pos >= ciphertext.len { return clone(ciphertext) }
    mut out = clone(ciphertext)
    out[pos] = out[pos] ^^ old_byte ^^ new_byte
    out
@@ -60,11 +60,11 @@ fn ctr_bit_flipping(list ciphertext, list edits) list {
    "Apply [pos, old_byte, new_byte] CTR bit-flip edits."
    mut out = clone(ciphertext)
    mut i = 0
-   while(i < edits.len){
+   while i < edits.len {
       def e = edits.get(i, [])
-      if(is_list(e) && e.len >= 3){
+      if is_list(e) && e.len >= 3 {
          def pos = int(e.get(0, -1))
-         if(pos >= 0 && pos < out.len){ out[pos] = out[pos] ^^ int(e.get(1, 0)) ^^ int(e.get(2, 0)) }
+         if pos >= 0 && pos < out.len { out[pos] = out[pos] ^^ int(e.get(1, 0)) ^^ int(e.get(2, 0)) }
       }
       i += 1
    }
@@ -78,26 +78,26 @@ fn ctr_score_english_byte(int b) int {
 
 fn ctr_recover_periodic_keystream_english(list ciphertexts, int period=16) list {
    "Recover a repeated keystream period by independently scoring each byte position."
-   if(period <= 0){ return [] }
+   if period <= 0 { return [] }
    mut keystream = list(period)
    mut pos = 0
-   while(pos < period){
+   while pos < period {
       mut best_key = 0
       mut best_score = -1000000000
       mut guess = 0
-      while(guess < 256){
+      while guess < 256 {
          mut score = 0
          mut ci = 0
-         while(ci < ciphertexts.len){
+         while ci < ciphertexts.len {
             def ct = ciphertexts[ci]
             mut j = pos
-            while(j < ct.len){
+            while j < ct.len {
                score += _printable_score(__load_item_fast(ct, j) ^^ guess)
                j += period
             }
             ci += 1
          }
-         if(score > best_score){
+         if score > best_score {
             best_score = score
             best_key = guess
          }
@@ -112,13 +112,13 @@ fn ctr_recover_periodic_keystream_english(list ciphertexts, int period=16) list 
 
 fn ctr_apply_periodic_keystream(list ciphertext, list keystream) list {
    "XOR ciphertext with a repeating keystream byte list."
-   if(keystream.len == 0){ return [] }
+   if keystream.len == 0 { return [] }
    def n = ciphertext.len
    def kn = keystream.len
    mut out = list(n)
    store64(out, n, 0)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(out, i, __load_item_fast(ciphertext, i) ^^ __load_item_fast(keystream, i % kn))
       i += 1
    }
@@ -130,9 +130,9 @@ fn mtp_xor_all(list ciphertexts) dict {
    def n = ciphertexts.len
    mut result = dict((n * (n - 1)) / 2)
    mut i = 0
-   while(i < n){
+   while i < n {
       mut j = i + 1
-      while(j < n){
+      while j < n {
          result.set(i * n + j, _xor_overlap(ciphertexts.get(i), ciphertexts.get(j)))
          j += 1
       }
@@ -150,15 +150,15 @@ fn mtp_guess_key_byte(list ciphertexts, int position, int guess) dict {
    store64(plaintexts, n, 0)
    store64(valid, n, false)
    mut i = 0
-   while(i < n){
+   while i < n {
       def ct = ciphertexts.get(i)
-      if(position >= ct.len){
+      if position >= ct.len {
          __store_item_fast(plaintexts, i, 0)
          __store_item_fast(valid, i, false)
       } else {
          def b = __load_item_fast(ct, position) ^^ guess
          def ok = b == 0 || b == 10 || b == 13 || (b >= 32 && b <= 126)
-         if(ok){ score += 1 }
+         if ok { score += 1 }
          __store_item_fast(plaintexts, i, b)
          __store_item_fast(valid, i, ok)
       }
@@ -169,26 +169,26 @@ fn mtp_guess_key_byte(list ciphertexts, int position, int guess) dict {
 
 fn mtp_crib_drag(list ciphertexts, list crib) list {
    "Drag a known byte-list crib across all ciphertext pairs and return likely keystream fragments."
-   if(ciphertexts.len < 2 || crib.len == 0){ return [] }
+   if ciphertexts.len < 2 || crib.len == 0 { return [] }
    mut matches = []
    mut i = 0
-   while(i < ciphertexts.len){
+   while i < ciphertexts.len {
       mut j = i + 1
-      while(j < ciphertexts.len){
+      while j < ciphertexts.len {
          def a, b = ciphertexts.get(i), ciphertexts.get(j)
          def limit = (a.len < b.len ? a.len : b.len) - crib.len
          mut pos = 0
-         while(pos <= limit && pos < 500){
+         while pos <= limit && pos < 500 {
             mut score = 0
             mut k = 0
-            while(k < crib.len){
-               if(_printable_score((a[pos + k] ^^ b[pos + k]) ^^ crib[k]) > 0){ score += 1 }
+            while k < crib.len {
+               if _printable_score((a[pos + k] ^^ b[pos + k]) ^^ crib[k]) > 0 { score += 1 }
                k += 1
             }
-            if(score >= crib.len - 1){
+            if score >= crib.len - 1 {
                mut ks = list(crib.len)
                k = 0
-               while(k < crib.len){
+               while k < crib.len {
                   ks[k] = a[pos + k] ^^ crib[k]
                   k += 1
                }

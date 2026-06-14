@@ -7,7 +7,7 @@ use std.core.str
 
 ;; Loop strict syntax (Test)
 mut i = 0
-while(i < 3){
+while i < 3 {
    i += 1
 }
 
@@ -22,9 +22,8 @@ assert(sum == 6, "for strict")
 mut pair_sum = 0
 def nums = [1721, 979, 366, 299, 675, 1456]
 mut seen = set()
-for(i in nums){
-   def x = nums[i]
-   if(seen.contains(2020 - x)){
+for x in nums {
+   if seen.contains(2020 - x) {
       pair_sum = x * (2020 - x)
       break
    }
@@ -32,8 +31,8 @@ for(i in nums){
 }
 
 assert(pair_sum == 514579, "indexed for loop with mutating add")
-mut loop=0
-while(mut i=0 i<10 ++i){
+mut loop = 0
+while mut i = 0 i < 10 ++i {
    loop = i
 }
 

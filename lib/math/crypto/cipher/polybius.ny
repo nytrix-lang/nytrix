@@ -23,18 +23,18 @@ fn polybius_make_grid(str key_phrase, str alphabet="ABCDEFGHIKLMNOPQRSTUVWXYZ", 
    mut seen = set(32)
    mut grid = ""
    mut i = 0
-   while(i < utf8_len(key_phrase)){
+   while i < utf8_len(key_phrase) {
       def ch = _pnormalize(_pchar(key_phrase, i))
-      if(!seen.contains(ch) && str_contains(alphabet, ch)){
+      if !seen.contains(ch) && str_contains(alphabet, ch) {
          grid = str_add(grid, ch)
          seen = seen.add(ch)
       }
       i += 1
    }
    mut j = 0
-   while(j < utf8_len(alphabet)){
+   while j < utf8_len(alphabet) {
       def ch = _pchar(alphabet, j)
-      if(!seen.contains(ch)){
+      if !seen.contains(ch) {
          grid = str_add(grid, ch)
          seen = seen.add(ch)
       }
@@ -47,8 +47,8 @@ fn polybius_encode_char(str ch, str grid, str row_labels="12345", str col_labels
    "Encode a single character as a(row, col) pair. Returns 2-char string or '' if not in grid."
    def lookup = _pnormalize(ch)
    mut i = 0
-   while(i < utf8_len(grid)){
-      if(_pchar(grid, i) == lookup){
+   while i < utf8_len(grid) {
+      if _pchar(grid, i) == lookup {
          def row = i / size
          def col = i % size
          return _pchar(row_labels, row) + _pchar(col_labels, col)
@@ -64,11 +64,11 @@ fn polybius_encode_text(str text, str grid, str row_labels="12345", str col_labe
    mut first = true
    def up = upper(text)
    mut i = 0
-   while(i < utf8_len(up)){
+   while i < utf8_len(up) {
       def ch = _pchar(up, i)
       def code = polybius_encode_char(ch, grid, row_labels, col_labels, size)
-      if(code.len > 0){
-         if(!first){ out = str_add(out, sep) }
+      if code.len > 0 {
+         if !first { out = str_add(out, sep) }
          out = str_add(out, code)
          first = false
       }
@@ -79,11 +79,11 @@ fn polybius_encode_text(str text, str grid, str row_labels="12345", str col_labe
 
 fn polybius_decode_pair(str pair, str grid, int row_base=49, int col_base=49, int size=5) str {
    "Decode a 2-char coordinate pair to a letter using the Polybius grid."
-   if(pair.len < 2){ return "?" }
+   if pair.len < 2 { return "?" }
    def row = ord_at(pair, 0) - row_base
    def col = ord_at(pair, 1) - col_base
    def idx = row * size + col
-   if(idx < 0 || idx >= utf8_len(grid)){ return "?" }
+   if idx < 0 || idx >= utf8_len(grid) { return "?" }
    _pchar(grid, idx)
 }
 
@@ -91,16 +91,16 @@ fn polybius_decode_text(str text, str grid, int row_min=49, int row_max=53, int 
    "Decode Polybius-encoded text. Strips spaces/commas and processes coordinate pairs."
    mut cleaned = ""
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def ch = load8(text, i)
-      if(ch != 32 && ch != 9 && ch != 44){ cleaned = str_add(cleaned, chr(ch)) }
+      if ch != 32 && ch != 9 && ch != 44 { cleaned = str_add(cleaned, chr(ch)) }
       i += 1
    }
    mut out = ""
    mut j = 0
-   while(j + 1 < cleaned.len){
+   while j + 1 < cleaned.len {
       def ch1, ch2 = ord_at(cleaned, j), ord_at(cleaned, j + 1)
-      if(ch1 >= row_min && ch1 <= row_max && ch2 >= col_min && ch2 <= col_max){
+      if ch1 >= row_min && ch1 <= row_max && ch2 >= col_min && ch2 <= col_max {
          out = str_add(out, polybius_decode_pair(str_slice(cleaned, j, j + 2, 1), grid, row_min, col_min, size))
          j = j + 2
       } else {

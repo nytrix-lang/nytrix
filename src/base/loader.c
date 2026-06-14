@@ -2190,17 +2190,15 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
     changed = false;
     size_t current_len = mods.len;
     for (size_t i = 0; i < current_len; ++i) {
-      if (!mods.entries[i].processed) {
-        scan_dependencies(&mods, i);
-        if (mods.len > current_len)
-          changed = true;
-      }
+      if (mods.entries[i].processed) continue;
+      scan_dependencies(&mods, i);
+      if (mods.len > current_len)
+        changed = true;
     }
   }
   for (size_t i = 0; i < mods.len; ++i) {
-    if (!mods.entries[i].processed) {
-      scan_dependencies(&mods, i);
-    }
+    if (mods.entries[i].processed) continue;
+    scan_dependencies(&mods, i);
   }
   mod_list_sort_for_bundle(&mods);
   if (mods.len == 0 && !prebuilt_src) {

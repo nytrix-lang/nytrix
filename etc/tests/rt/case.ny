@@ -177,7 +177,7 @@ assert(empty.len == 0, "empty string")
 mut l = list(0)
 assert(l.len == 0, "empty list")
 mut i = 0
-while(i < 100){
+while i < 100 {
    l = l.append(i)
    i += 1
 }

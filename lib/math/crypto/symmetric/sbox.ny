@@ -12,22 +12,22 @@ fn _sbox_pow2(int n) bool { n > 0 && (n & (n - 1)) == 0 }
 fn _sbox_bits_for_cardinality(int n) int {
    mut bits = 0
    mut p = 1
-   while(p < n){
+   while p < n {
       p = p << 1
       bits += 1
    }
    bits
 }
 
-fn _sbox_check(list S) any { if(S.len == 0 || !_sbox_pow2(S.len)){ panic("sbox: lookup table length must be a power of 2") } }
+fn _sbox_check(list S) any { if S.len == 0 || !_sbox_pow2(S.len) { panic("sbox: lookup table length must be a power of 2") } }
 
 fn _sbox_output_cardinality(list S) int {
    mut max_v = 0
    mut i = 0
-   while(i < S.len){
+   while i < S.len {
       def v = S[i]
-      if(v < 0){ panic("sbox: lookup values must be non-negative") }
-      if(v > max_v){ max_v = v }
+      if v < 0 { panic("sbox: lookup values must be non-negative") }
+      if v > max_v { max_v = v }
       i += 1
    }
    1 << _sbox_bits_for_cardinality(max_v + 1)
@@ -37,7 +37,7 @@ fn _sbox_zero_row(int n) list {
    mut row = list(n)
    __list_set_len(row, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(row, i, 0)
       i += 1
    }
@@ -49,7 +49,7 @@ fn _sbox_parity(int x) int { bin.bit_count(x) & 1 }
 fn _sbox_abs_int(int x) int { x < 0 ? 0 - x : x }
 
 fn _sbox_default_width(list S, any n, bool output) int {
-   if(n != nil){ return int(n) }
+   if n != nil { return int(n) }
    output ? sbox_output_size(S) : sbox_input_size(S)
 }
 
@@ -58,8 +58,8 @@ fn sbox_repr(list S) str {
    _sbox_check(S)
    mut out = "("
    mut i = 0
-   while(i < S.len){
-      if(i > 0){ out = out + ", " }
+   while i < S.len {
+      if i > 0 { out = out + ", " }
       out = out + to_str(S.get(i))
       i += 1
    }
@@ -73,11 +73,11 @@ fn sbox_len(list S) int {
 
 fn sbox_equal(list a, list b, bool a_big_endian=true, bool b_big_endian=true) bool {
    "Return Sage-compatible SBox equality over lookup table and endian flag."
-   if(a_big_endian != b_big_endian){ return false }
-   if(a.len != b.len){ return false }
+   if a_big_endian != b_big_endian { return false }
+   if a.len != b.len { return false }
    mut i = 0
-   while(i < a.len){
-      if(a.get(i) != b.get(i)){ return false }
+   while i < a.len {
+      if a.get(i) != b.get(i) { return false }
       i += 1
    }
    true
@@ -117,14 +117,14 @@ fn sbox_to_bits(list S, int x, any n=nil, bool big_endian=true) list {
    def width = _sbox_default_width(S, n, true)
    mut out = []
    mut i = 0
-   while(i < width){
+   while i < width {
       out = out.append((x >> i) & 1)
       i += 1
    }
-   if(big_endian){
+   if big_endian {
       mut rev = []
       i = out.len - 1
-      while(i >= 0){
+      while i >= 0 {
          rev = rev.append(out.get(i))
          i -= 1
       }
@@ -136,24 +136,24 @@ fn sbox_to_bits(list S, int x, any n=nil, bool big_endian=true) list {
 fn sbox_from_bits(list S, list bits, any n=nil, bool big_endian=true) int {
    "Return the integer represented by a bit list using Sage-compatible endian order."
    def width = _sbox_default_width(S, n, false)
-   if(bits.len > width){ panic("sbox_from_bits: bit list is wider than requested width") }
+   if bits.len > width { panic("sbox_from_bits: bit list is wider than requested width") }
    mut work = []
    mut i = 0
-   while(i < bits.len){
+   while i < bits.len {
       work = work.append(int(bits.get(i)))
       i += 1
    }
-   while(work.len < width){ work = work.append(0) }
+   while work.len < width { work = work.append(0) }
    mut out = 0
-   if(big_endian){
+   if big_endian {
       i = 0
-      while(i < width){
+      while i < width {
          out = (out << 1) | work.get(i)
          i += 1
       }
    } else {
       i = 0
-      while(i < width){
+      while i < width {
          out = out | (work.get(i) << i)
          i += 1
       }
@@ -163,11 +163,11 @@ fn sbox_from_bits(list S, list bits, any n=nil, bool big_endian=true) int {
 
 fn sbox_coeff_vector(int x, int width) list {
    "Return the GF(2^m) coefficient vector used by Sage finite-field SBox calls."
-   if(width < 0){ panic("sbox_coeff_vector: width must be non-negative") }
-   if(x < 0){ panic("sbox_coeff_vector: value must be non-negative") }
+   if width < 0 { panic("sbox_coeff_vector: width must be non-negative") }
+   if x < 0 { panic("sbox_coeff_vector: value must be non-negative") }
    mut out = []
    mut i = 0
-   while(i < width){
+   while i < width {
       out = out.append((x >> i) & 1)
       i += 1
    }
@@ -178,7 +178,7 @@ fn sbox_from_coeff_vector(list coeffs) int {
    "Return an integer from a GF(2^m) coefficient vector in Sage order."
    mut out = 0
    mut i = 0
-   while(i < coeffs.len){
+   while i < coeffs.len {
       out = out | ((int(coeffs.get(i)) & 1) << i)
       i += 1
    }
@@ -188,23 +188,23 @@ fn sbox_from_coeff_vector(list coeffs) int {
 fn sbox_apply_gf2m(list S, int x, bool big_endian=true) int {
    "Apply S using Sage finite-field element semantics over GF(2^m) coefficient vectors."
    def m = sbox_input_size(S)
-   if(sbox_output_size(S) > m){ panic("sbox_apply_gf2m: output does not fit the input extension degree") }
-   if(x < 0 || x >= (1 << m)){ panic("sbox_apply_gf2m: element outside GF(2^m) coefficient range") }
+   if sbox_output_size(S) > m { panic("sbox_apply_gf2m: output does not fit the input extension degree") }
+   if x < 0 || x >= (1 << m) { panic("sbox_apply_gf2m: element outside GF(2^m) coefficient range") }
    sbox_from_coeff_vector(sbox_apply(S, sbox_coeff_vector(x, m), big_endian))
 }
 
 fn sbox_apply(list S, any x, bool big_endian=true) any {
    "Apply an S-box to an integer or to an input-width bit list."
    _sbox_check(S)
-   if(is_list(x)){
-      if(x.len != sbox_input_size(S)){ panic("sbox_apply: bit input length must match input size") }
+   if is_list(x) {
+      if x.len != sbox_input_size(S) { panic("sbox_apply: bit input length must match input size") }
       def idx = sbox_from_bits(S, x, sbox_input_size(S), big_endian)
       return sbox_to_bits(S, S.get(idx), sbox_output_size(S), big_endian)
    }
-   if(is_str(x) || is_dict(x) || x == nil){ panic("sbox_apply: cannot apply SBox to provided element") }
+   if is_str(x) || is_dict(x) || x == nil { panic("sbox_apply: cannot apply SBox to provided element") }
    def idx = int(x)
-   if(is_float(x) && float(idx) != x){ panic("sbox_apply: cannot apply SBox to non-integral numeric input") }
-   if(idx >= S.len || idx < (0 - S.len)){ panic("sbox_apply: integer input out of range") }
+   if is_float(x) && float(idx) != x { panic("sbox_apply: cannot apply SBox to non-integral numeric input") }
+   if idx >= S.len || idx < (0 - S.len) { panic("sbox_apply: integer input out of range") }
    S.get(idx)
 }
 
@@ -213,7 +213,7 @@ fn sbox_solutions(list S, bool big_endian=true) list {
    _sbox_check(S)
    mut out = []
    mut x = 0
-   while(x < S.len){
+   while x < S.len {
       def xb = sbox_to_bits(S, x, sbox_input_size(S), big_endian)
       def yb = sbox_apply(S, xb, big_endian)
       out = out.append([xb, yb])
@@ -227,9 +227,9 @@ fn sbox_is_permutation(list S) bool {
    _sbox_check(S)
    mut seen = _sbox_zero_row(S.len)
    mut i = 0
-   while(i < S.len){
+   while i < S.len {
       def v = __load_item_fast(S, i)
-      if(v < 0 || v >= S.len || __load_item_fast(seen, v) != 0){ return false }
+      if v < 0 || v >= S.len || __load_item_fast(seen, v) != 0 { return false }
       __store_item_fast(seen, v, 1)
       i += 1
    }
@@ -238,10 +238,10 @@ fn sbox_is_permutation(list S) bool {
 
 fn sbox_inverse(list S) list {
    "Return the inverse lookup table for a permutation S-box."
-   if(!sbox_is_permutation(S)){ panic("sbox_inverse: table is not a permutation") }
+   if !sbox_is_permutation(S) { panic("sbox_inverse: table is not a permutation") }
    mut inv = _sbox_zero_row(S.len)
    mut i = 0
-   while(i < S.len){
+   while i < S.len {
       __store_item_fast(inv, __load_item_fast(S, i), i)
       i += 1
    }
@@ -253,8 +253,8 @@ fn sbox_fixed_points(list S) list {
    _sbox_check(S)
    mut out = []
    mut i = 0
-   while(i < S.len){
-      if(S.get(i) == i){ out = out.append(i) }
+   while i < S.len {
+      if S.get(i) == i { out = out.append(i) }
       i += 1
    }
    out
@@ -268,10 +268,10 @@ fn sbox_ddt(list S) any {
    mut rows = list(n)
    __list_set_len(rows, n)
    mut dx = 0
-   while(dx < n){
+   while dx < n {
       mut row = _sbox_zero_row(out_n)
       mut x = 0
-      while(x < n){
+      while x < n {
          def dy = __load_item_fast(S, x) ^^ __load_item_fast(S, x ^^ dx)
          __store_item_fast(row, dy, __load_item_fast(row, dy) + 1)
          x += 1
@@ -294,14 +294,14 @@ fn sbox_differential_uniformity(list S) int {
    def out_n = _sbox_output_cardinality(S)
    mut best = 0
    mut dx = 1
-   while(dx < n){
+   while dx < n {
       mut row = _sbox_zero_row(out_n)
       mut x = 0
-      while(x < n){
+      while x < n {
          def dy = __load_item_fast(S, x) ^^ __load_item_fast(S, x ^^ dx)
          def v = __load_item_fast(row, dy) + 1
          __store_item_fast(row, dy, v)
-         if(v > best){ best = v }
+         if v > best { best = v }
          x += 1
       }
       dx += 1
@@ -315,11 +315,11 @@ fn sbox_differential_uniformity_from_ddt(list S) int {
    def out_n = _sbox_output_cardinality(S)
    mut best = 0
    mut dx = 1
-   while(dx < S.len){
+   while dx < S.len {
       mut dy = 0
-      while(dy < out_n){
+      while dy < out_n {
          def v = matrix.mat_get(ddt, dx, dy)
-         if(v > best){ best = v }
+         if v > best { best = v }
          dy += 1
       }
       dx += 1
@@ -345,25 +345,25 @@ fn _sbox_walsh_table(list S) any {
    mut rows = list(in_n)
    __list_set_len(rows, in_n)
    mut a = 0
-   while(a < in_n){
+   while a < in_n {
       __store_item_fast(rows, a, _sbox_zero_row(out_n))
       a += 1
    }
    mut b = 0
-   while(b < out_n){
+   while b < out_n {
       mut vec = list(in_n)
       __list_set_len(vec, in_n)
       mut x = 0
-      while(x < in_n){
+      while x < in_n {
          __store_item_fast(vec, x, (_sbox_parity(b & S[x]) == 0) ? 1 : -1)
          x += 1
       }
       mut step = 1
-      while(step < in_n){
+      while step < in_n {
          mut base = 0
-         while(base < in_n){
+         while base < in_n {
             x = 0
-            while(x < step){
+            while x < step {
                def u = vec[base + x]
                def v = vec[base + x + step]
                __store_item_fast(vec, base + x, u + v)
@@ -375,7 +375,7 @@ fn _sbox_walsh_table(list S) any {
          step = step << 1
       }
       a = 0
-      while(a < in_n){
+      while a < in_n {
          rows[a][b] = vec[a]
          a += 1
       }
@@ -394,20 +394,20 @@ fn sbox_linear_approximation_table(list S, any scale="absolute_bias") any {
    mut rows = list(S.len)
    __list_set_len(rows, S.len)
    mut a = 0
-   while(a < S.len){
+   while a < S.len {
       def wrow = wdata[a]
       mut row = list(out_n)
       __list_set_len(row, out_n)
       mut b = 0
-      while(b < out_n){
+      while b < out_n {
          def v = wrow[b]
-         if(mode == "absolute_bias"){
+         if mode == "absolute_bias" {
             __store_item_fast(row, b, v / 2)
-         } elif(mode == "bias"){
+         } elif mode == "bias" {
             __store_item_fast(row, b, float(v) / float(1 << (in_bits + 1)))
-         } elif(mode == "correlation"){
+         } elif mode == "correlation" {
             __store_item_fast(row, b, float(v) / float(1 << in_bits))
-         } elif(mode == "fourier_coefficient"){
+         } elif mode == "fourier_coefficient" {
             __store_item_fast(row, b, v)
          } else {
             panic("sbox_linear_approximation_table: no such scaling for the LAT: " + mode)
@@ -432,20 +432,20 @@ fn sbox_linearity(list S) int {
    def out_n = _sbox_output_cardinality(S)
    mut best = 0
    mut b = 0
-   while(b < out_n){
+   while b < out_n {
       mut vec = list(in_n)
       __list_set_len(vec, in_n)
       mut x = 0
-      while(x < in_n){
+      while x < in_n {
          __store_item_fast(vec, x, (_sbox_parity(b & __load_item_fast(S, x)) == 0) ? 1 : -1)
          x += 1
       }
       mut step = 1
-      while(step < in_n){
+      while step < in_n {
          mut base = 0
-         while(base < in_n){
+         while base < in_n {
             x = 0
-            while(x < step){
+            while x < step {
                def u = __load_item_fast(vec, base + x)
                def v = __load_item_fast(vec, base + x + step)
                __store_item_fast(vec, base + x, u + v)
@@ -457,11 +457,11 @@ fn sbox_linearity(list S) int {
          step = step << 1
       }
       mut a = 0
-      while(a < in_n){
-         if(a != 0 || b != 0){
+      while a < in_n {
+         if a != 0 || b != 0 {
             mut v = __load_item_fast(vec, a)
-            if(v < 0){ v = 0 - v }
-            if(v > best){ best = v }
+            if v < 0 { v = 0 - v }
+            if v > best { best = v }
          }
          a += 1
       }
@@ -487,15 +487,15 @@ fn sbox_nonlinearity(list S) int {
 
 fn _sbox_input_mask(list S, any mask, bool big_endian=true) int {
    def in_bits = sbox_input_size(S)
-   if(is_list(mask)){
-      if(mask.len > in_bits){ panic("sbox input mask: bit list is wider than input size") }
+   if is_list(mask) {
+      if mask.len > in_bits { panic("sbox input mask: bit list is wider than input size") }
       return sbox_from_coeff_vector(mask)
    }
    int(mask)
 }
 
 fn _sbox_input_mask_loose(list S, any mask, bool big_endian=true) int {
-   if(is_list(mask)){ return sbox_from_coeff_vector(mask) }
+   if is_list(mask) { return sbox_from_coeff_vector(mask) }
    int(mask)
 }
 
@@ -505,7 +505,7 @@ fn sbox_derivative(list S, any u, bool big_endian=true) list {
    def v = _sbox_input_mask(S, u, big_endian)
    mut out = []
    mut x = 0
-   while(x < S.len){
+   while x < S.len {
       out = out.append(__load_item_fast(S, x) ^^ __load_item_fast(S, x ^^ v))
       x += 1
    }
@@ -514,8 +514,8 @@ fn sbox_derivative(list S, any u, bool big_endian=true) list {
 
 fn _sbox_component_mask(list S, any mask, bool big_endian=true) int {
    def out_bits = sbox_output_size(S)
-   if(is_list(mask)){
-      if(mask.len > out_bits){ panic("sbox component mask: bit list is wider than output size") }
+   if is_list(mask) {
+      if mask.len > out_bits { panic("sbox component mask: bit list is wider than output size") }
       return sbox_from_bits(S, mask, out_bits, big_endian)
    }
    int(mask)
@@ -527,7 +527,7 @@ fn sbox_component_function(list S, any mask, bool big_endian=true) list {
    def m = _sbox_component_mask(S, mask, big_endian)
    mut out = []
    mut x = 0
-   while(x < S.len){
+   while x < S.len {
       out = out.append(_sbox_parity(m & __load_item_fast(S, x)))
       x += 1
    }
@@ -535,26 +535,26 @@ fn sbox_component_function(list S, any mask, bool big_endian=true) list {
 }
 
 fn _sbox_anf_from_truth_table(list table) list {
-   if(table.len == 0 || !_sbox_pow2(table.len)){ panic("sbox ANF: truth table length must be a power of 2") }
+   if table.len == 0 || !_sbox_pow2(table.len) { panic("sbox ANF: truth table length must be a power of 2") }
    mut coeff = []
    mut i = 0
-   while(i < table.len){
+   while i < table.len {
       coeff = coeff.append(int(table.get(i)) & 1)
       i += 1
    }
    mut step = 1
-   while(step < coeff.len){
+   while step < coeff.len {
       mut mask = 0
-      while(mask < coeff.len){
-         if((mask & step) != 0){ coeff[mask] = coeff.get(mask) ^^ coeff.get(mask ^^ step) }
+      while mask < coeff.len {
+         if (mask & step) != 0 { coeff[mask] = coeff.get(mask) ^^ coeff.get(mask ^^ step) }
          mask += 1
       }
       step = step << 1
    }
    mut out = []
    i = 0
-   while(i < coeff.len){
-      if(coeff.get(i) != 0){ out = out.append(i) }
+   while i < coeff.len {
+      if coeff.get(i) != 0 { out = out.append(i) }
       i += 1
    }
    out
@@ -571,7 +571,7 @@ fn sbox_polynomials(list S) list {
    def out_bits = sbox_output_size(S)
    mut polys = []
    mut bit = 0
-   while(bit < out_bits){
+   while bit < out_bits {
       polys = polys.append(sbox_component_anf(S, 1 << bit))
       bit += 1
    }
@@ -584,21 +584,21 @@ fn sbox_interpolation_polynomial(list S) list {
 }
 
 fn _sbox_gf_modulus(int m) int {
-   if(m == 1){ return 0b11 }
-   if(m == 2){ return 0b111 }
-   if(m == 3){ return 0b1011 }
-   if(m == 4){ return 0b10011 }
-   if(m == 5){ return 0b100101 }
-   if(m == 6){ return 0b1000011 }
-   if(m == 7){ return 0b10000011 }
-   if(m == 8){ return 0b100011011 }
+   if m == 1 { return 0b11 }
+   if m == 2 { return 0b111 }
+   if m == 3 { return 0b1011 }
+   if m == 4 { return 0b10011 }
+   if m == 5 { return 0b100101 }
+   if m == 6 { return 0b1000011 }
+   if m == 7 { return 0b10000011 }
+   if m == 8 { return 0b100011011 }
    panic("sbox GF interpolation: supported extension degrees are 1..8")
 }
 
 fn _sbox_bit_reverse(int x, int width) int {
    mut out = 0
    mut i = 0
-   while(i < width){
+   while i < width {
       out = (out << 1) | ((x >> i) & 1)
       i += 1
    }
@@ -610,11 +610,11 @@ fn _sbox_gf_mul(int a, int b, int m, int poly) int {
    mut aa = a & mask
    mut bb = b & mask
    mut out = 0
-   while(bb != 0){
-      if((bb & 1) != 0){ out = out ^^ aa }
+   while bb != 0 {
+      if (bb & 1) != 0 { out = out ^^ aa }
       bb = bb >> 1
       aa = aa << 1
-      if((aa & (1 << m)) != 0){ aa = aa ^^ poly }
+      if (aa & (1 << m)) != 0 { aa = aa ^^ poly }
    }
    out & mask
 }
@@ -623,8 +623,8 @@ fn _sbox_gf_pow(int a, int e, int m, int poly) int {
    mut base = a
    mut exp = e
    mut out = 1
-   while(exp > 0){
-      if((exp & 1) != 0){ out = _sbox_gf_mul(out, base, m, poly) }
+   while exp > 0 {
+      if (exp & 1) != 0 { out = _sbox_gf_mul(out, base, m, poly) }
       base = _sbox_gf_mul(base, base, m, poly)
       exp = exp >> 1
    }
@@ -632,19 +632,19 @@ fn _sbox_gf_pow(int a, int e, int m, int poly) int {
 }
 
 fn _sbox_gf_inv(int a, int m, int poly) int {
-   if(a == 0){ panic("sbox GF interpolation: zero denominator") }
+   if a == 0 { panic("sbox GF interpolation: zero denominator") }
    _sbox_gf_pow(a, (1 << m) - 2, m, poly)
 }
 
 fn _sbox_poly_mul_linear_gf(list p, int root, int m, int poly) list {
    mut out = []
    mut i = 0
-   while(i <= p.len){
+   while i <= p.len {
       out = out.append(0)
       i += 1
    }
    i = 0
-   while(i < p.len){
+   while i < p.len {
       def c = int(p.get(i))
       out[i] = int(out.get(i)) ^^ _sbox_gf_mul(c, root, m, poly)
       out[i + 1] = int(out.get(i + 1)) ^^ c
@@ -655,11 +655,11 @@ fn _sbox_poly_mul_linear_gf(list p, int root, int m, int poly) list {
 
 fn sbox_eval_polynomial_gf2m(list coeffs, int x, int m) int {
    "Evaluate low-degree-first coefficients over GF(2^m) using Sage-compatible field constants."
-   if(coeffs.len == 0){ return 0 }
+   if coeffs.len == 0 { return 0 }
    def poly = _sbox_gf_modulus(m)
    mut out = 0
    mut i = coeffs.len - 1
-   while(i >= 0){
+   while i >= 0 {
       out = _sbox_gf_mul(out, x, m, poly) ^^ (int(coeffs.get(i)) & ((1 << m) - 1))
       i -= 1
    }
@@ -671,7 +671,7 @@ fn sbox_from_polynomial_gf2m(list coeffs, int m) list {
    def q = 1 << m
    mut out = []
    mut x = 0
-   while(x < q){
+   while x < q {
       out = out.append(sbox_eval_polynomial_gf2m(coeffs, x, m))
       x += 1
    }
@@ -683,7 +683,7 @@ fn sbox_from_interpolation_polynomial_gf2m(list coeffs, int m) list {
    def q = 1 << m
    mut out = []
    mut i = 0
-   while(i < q){
+   while i < q {
       def x = _sbox_bit_reverse(i, m)
       def y = sbox_eval_polynomial_gf2m(coeffs, x, m)
       out = out.append(_sbox_bit_reverse(y, m))
@@ -696,26 +696,26 @@ fn sbox_interpolation_polynomial_gf2m(list S) list {
    "Return Sage-compatible univariate GF(2^m) interpolation coefficients, low degree first."
    _sbox_check(S)
    def m = sbox_input_size(S)
-   if(sbox_output_size(S) != m){
+   if sbox_output_size(S) != m {
       panic("sbox GF interpolation: input and output sizes must match")
    }
    def q = 1 << m
    def poly = _sbox_gf_modulus(m)
    mut coeffs = []
    mut i = 0
-   while(i < q){
+   while i < q {
       coeffs = coeffs.append(0)
       i += 1
    }
    i = 0
-   while(i < q){
+   while i < q {
       def xi = _sbox_bit_reverse(i, m)
       def yi = _sbox_bit_reverse(int(S.get(i)), m)
       mut basis = [1]
       mut den = 1
       mut j = 0
-      while(j < q){
-         if(j != i){
+      while j < q {
+         if j != i {
             def xj = _sbox_bit_reverse(j, m)
             basis = _sbox_poly_mul_linear_gf(basis, xj, m, poly)
             den = _sbox_gf_mul(den, xi ^^ xj, m, poly)
@@ -724,27 +724,27 @@ fn sbox_interpolation_polynomial_gf2m(list S) list {
       }
       def scale = _sbox_gf_mul(yi, _sbox_gf_inv(den, m, poly), m, poly)
       j = 0
-      while(j < basis.len){
+      while j < basis.len {
          coeffs[j] = int(coeffs.get(j)) ^^ _sbox_gf_mul(int(basis.get(j)), scale, m, poly)
          j += 1
       }
       i += 1
    }
-   while(coeffs.len > 1 && int(coeffs.get(coeffs.len - 1)) == 0){
+   while coeffs.len > 1 && int(coeffs.get(coeffs.len - 1)) == 0 {
       coeffs = slice(coeffs, 0, coeffs.len - 1)
    }
    coeffs
 }
 
 fn _sbox_gf_coeff_str(int c, int m) str {
-   if(c == 0){ return "0" }
+   if c == 0 { return "0" }
    mut out = ""
    mut p = m - 1
-   while(p >= 0){
-      if(((c >> p) & 1) != 0){
+   while p >= 0 {
+      if ((c >> p) & 1) != 0 {
          mut part = ""
-         if(p == 0){ part = "1" }
-         else if(p == 1){ part = "a" }
+         if p == 0 { part = "1" }
+         else if p == 1 { part = "a" }
          else { part = "a^" + to_str(p) }
          out = out.len == 0 ? part : (out + " + " + part)
       }
@@ -755,9 +755,9 @@ fn _sbox_gf_coeff_str(int c, int m) str {
 
 fn _sbox_gf_poly_term_str(int coeff, int exp, int m, str variable) str {
    def c = _sbox_gf_coeff_str(coeff, m)
-   if(exp == 0){ return c }
+   if exp == 0 { return c }
    def x = exp == 1 ? variable : (variable + "^" + to_str(exp))
-   if(coeff == 1){ return x }
+   if coeff == 1 { return x }
    def cc = bin.bit_count(coeff) > 1 ? ("(" + c + ")") : c
    cc + "*" + x
 }
@@ -768,9 +768,9 @@ fn sbox_interpolation_polynomial_gf2m_str(list S, str variable="x") str {
    def m = sbox_input_size(S)
    mut out = ""
    mut e = coeffs.len - 1
-   while(e >= 0){
+   while e >= 0 {
       def c = int(coeffs.get(e))
-      if(c != 0){
+      if c != 0 {
          def term = _sbox_gf_poly_term_str(c, e, m, variable)
          out = out.len == 0 ? term : (out + " + " + term)
       }
@@ -784,8 +784,8 @@ fn sbox_is_monomial_function(list S) bool {
    def coeffs = sbox_interpolation_polynomial_gf2m(S)
    mut count = 0
    mut i = 0
-   while(i < coeffs.len){
-      if(int(coeffs.get(i)) != 0){ count += 1 }
+   while i < coeffs.len {
+      if int(coeffs.get(i)) != 0 { count += 1 }
       i += 1
    }
    count == 1
@@ -797,12 +797,12 @@ fn sbox_ring_str(list S, str x_prefix="x", str y_prefix="y") str {
    def n = sbox_output_size(S)
    mut vars = ""
    mut i = 0
-   while(i < m){
+   while i < m {
       vars = vars.len == 0 ? (x_prefix + to_str(i)) : (vars + ", " + x_prefix + to_str(i))
       i += 1
    }
    i = 0
-   while(i < n){
+   while i < n {
       vars = vars.len == 0 ? (y_prefix + to_str(i)) : (vars + ", " + y_prefix + to_str(i))
       i += 1
    }
@@ -816,12 +816,12 @@ fn sbox_ring(list S, str x_prefix="x", str y_prefix="y") str {
 
 fn sbox_monomial_str(int monomial_mask, int input_bits, str variable_prefix="x", bool big_endian=true) str {
    "Format one ANF monomial mask using Sage-style variable names."
-   if(monomial_mask == 0){ return "1" }
+   if monomial_mask == 0 { return "1" }
    mut out = ""
    mut pos = 0
-   while(pos < input_bits){
+   while pos < input_bits {
       def bit_pos = big_endian ? (input_bits - 1 - pos) : pos
-      if(((monomial_mask >> bit_pos) & 1) != 0){
+      if ((monomial_mask >> bit_pos) & 1) != 0 {
          def name = variable_prefix + to_str(pos)
          out = out.len == 0 ? name : (out + "*" + name)
       }
@@ -833,7 +833,7 @@ fn sbox_monomial_str(int monomial_mask, int input_bits, str variable_prefix="x",
 fn _sbox_terms_str_desc(list monomials, int input_bits, str variable_prefix, bool big_endian) str {
    mut out = ""
    mut idx = monomials.len - 1
-   while(idx >= 0){
+   while idx >= 0 {
       def term = sbox_monomial_str(int(monomials.get(idx)), input_bits, variable_prefix, big_endian)
       out = out.len == 0 ? term : (out + " + " + term)
       idx -= 1
@@ -851,7 +851,7 @@ fn sbox_polynomial_strs(list S, str variable_prefix="x", bool big_endian=true) l
    def out_bits = sbox_output_size(S)
    mut out = []
    mut pos = 0
-   while(pos < out_bits){
+   while pos < out_bits {
       def bit_pos = big_endian ? (out_bits - 1 - pos) : pos
       out = out.append(sbox_component_anf_str(S, 1 << bit_pos, variable_prefix, big_endian))
       pos += 1
@@ -860,13 +860,13 @@ fn sbox_polynomial_strs(list S, str variable_prefix="x", bool big_endian=true) l
 }
 
 fn _sbox_comb_masks_from(int total, int start, int need, int mask) list {
-   if(need == 0){ return [mask] }
+   if need == 0 { return [mask] }
    mut out = []
    mut i = start
-   while(i <= total - need){
+   while i <= total - need {
       def tail = _sbox_comb_masks_from(total, i + 1, need - 1, mask | (1 << i))
       mut j = 0
-      while(j < tail.len){
+      while j < tail.len {
          out = out.append(tail.get(j))
          j += 1
       }
@@ -876,14 +876,14 @@ fn _sbox_comb_masks_from(int total, int start, int need, int mask) list {
 }
 
 fn _sbox_monomial_masks_upto(int total, int degree) list {
-   if(degree < 0){ panic("sbox degree fit: degree must be non-negative") }
-   if(degree > total){ degree = total }
+   if degree < 0 { panic("sbox degree fit: degree must be non-negative") }
+   if degree > total { degree = total }
    mut out = []
    mut d = 0
-   while(d <= degree){
+   while d <= degree {
       def masks = _sbox_comb_masks_from(total, 0, d, 0)
       mut i = 0
-      while(i < masks.len){
+      while i < masks.len {
          out = out.append(masks.get(i))
          i += 1
       }
@@ -895,8 +895,8 @@ fn _sbox_monomial_masks_upto(int total, int degree) list {
 fn _sbox_eval_graph_monomial(list S, int x, int mask, int in_bits, int out_bits, bool big_endian) int {
    mut prod = 1
    mut idx = 0
-   while(idx < in_bits + out_bits){
-      if(((mask >> idx) & 1) != 0){
+   while idx < in_bits + out_bits {
+      if ((mask >> idx) & 1) != 0 {
          def bit = idx < in_bits ? _sbox_ordered_bit(x, idx, in_bits, big_endian) : _sbox_ordered_bit(S.get(x), idx - in_bits, out_bits, big_endian)
          prod = prod & bit
       }
@@ -908,7 +908,7 @@ fn _sbox_eval_graph_monomial(list S, int x, int mask, int in_bits, int out_bits,
 fn _sbox_row_xor(list a, list b) list {
    mut out = []
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       out = out.append(int(a.get(i)) ^^ int(b.get(i)))
       i += 1
    }
@@ -922,16 +922,16 @@ fn _sbox_degree_fit_rows(list S, int degree, bool big_endian) dict {
    def monomials = _sbox_monomial_masks_upto(in_bits + out_bits, degree)
    mut rows = []
    mut mi = 0
-   while(mi < monomials.len){
+   while mi < monomials.len {
       def mask = int(monomials.get(mi))
       mut row = []
       mut x = 0
-      while(x < S.len){
+      while x < S.len {
          row = row.append(_sbox_eval_graph_monomial(S, x, mask, in_bits, out_bits, big_endian))
          x += 1
       }
       x = 0
-      while(x < monomials.len){
+      while x < monomials.len {
          row = row.append(x == mi ? 1 : 0)
          x += 1
       }
@@ -940,22 +940,22 @@ fn _sbox_degree_fit_rows(list S, int degree, bool big_endian) dict {
    }
    mut rank = 0
    mut col = 0
-   while(col < S.len){
+   while col < S.len {
       mut pivot = -1
       mut r = rank
-      while(r < rows.len){
-         if(int(rows.get(r).get(col)) != 0 && pivot < 0){ pivot = r }
+      while r < rows.len {
+         if int(rows.get(r).get(col)) != 0 && pivot < 0 { pivot = r }
          r += 1
       }
-      if(pivot >= 0){
-         if(pivot != rank){
+      if pivot >= 0 {
+         if pivot != rank {
             def tmp = rows.get(rank)
             rows[rank] = rows.get(pivot)
             rows[pivot] = tmp
          }
          r = 0
-         while(r < rows.len){
-            if(r != rank && int(rows.get(r).get(col)) != 0){
+         while r < rows.len {
+            if r != rank && int(rows.get(r).get(col)) != 0 {
                rows[r] = _sbox_row_xor(rows.get(r), rows.get(rank))
             }
             r += 1
@@ -969,16 +969,16 @@ fn _sbox_degree_fit_rows(list S, int degree, bool big_endian) dict {
 }
 
 fn _sbox_graph_monomial_str(int mask, int in_bits, str x_prefix, str y_prefix) str {
-   if(mask == 0){ return "1" }
+   if mask == 0 { return "1" }
    mut out = ""
    mut v = 0
-   while(v < in_bits + 64){
-      if(((mask >> v) & 1) != 0){
+   while v < in_bits + 64 {
+      if ((mask >> v) & 1) != 0 {
          def name = v < in_bits ? (x_prefix + to_str(v)) : (y_prefix + to_str(v - in_bits))
          out = out.len == 0 ? name : (out + "*" + name)
       }
       v += 1
-      if((mask >> v) == 0 && v >= in_bits){ break }
+      if (mask >> v) == 0 && v >= in_bits { break }
    }
    out
 }
@@ -986,11 +986,11 @@ fn _sbox_graph_monomial_str(int mask, int in_bits, str x_prefix, str y_prefix) s
 fn _sbox_degree_fit_poly_str(list coeffs, list monomials, int in_bits, int out_bits, int degree, str x_prefix, str y_prefix) str {
    mut out = ""
    mut d = degree
-   while(d >= 0){
+   while d >= 0 {
       mut i = 0
-      while(i < monomials.len){
+      while i < monomials.len {
          def mask = int(monomials.get(i))
-         if(int(coeffs.get(i)) != 0 && bin.bit_count(mask) == d){
+         if int(coeffs.get(i)) != 0 && bin.bit_count(mask) == d {
             def term = _sbox_graph_monomial_str(mask, in_bits, x_prefix, y_prefix)
             out = out.len == 0 ? term : (out + " + " + term)
          }
@@ -1011,11 +1011,11 @@ fn sbox_degree_fit_polynomial_strs(list S, int degree=2, str x_prefix="x", str y
    def out_bits = sbox_output_size(S)
    mut out = []
    mut r = rank
-   while(r < rows.len){
+   while r < rows.len {
       def row = rows.get(r)
       mut coeffs = []
       mut i = 0
-      while(i < monomials.len){
+      while i < monomials.len {
          coeffs = coeffs.append(row.get(S.len + i))
          i += 1
       }
@@ -1048,7 +1048,7 @@ fn sbox_direct_polynomial_strs(list S, str x_prefix="x", str y_prefix="y", bool 
    def out_bits = sbox_output_size(S)
    mut out = []
    mut pos = 0
-   while(pos < out_bits){
+   while pos < out_bits {
       def bit_pos = big_endian ? (out_bits - 1 - pos) : pos
       def rhs = sbox_component_anf_str(S, 1 << bit_pos, x_prefix, big_endian)
       out = out.append(y_prefix + to_str(pos) + (rhs == "0" ? "" : (" + " + rhs)))
@@ -1082,9 +1082,9 @@ fn sbox_eval_anf(list monomials, int x) int {
    "Evaluate an ANF encoded as monomial masks at integer input x."
    mut out = 0
    mut i = 0
-   while(i < monomials.len){
+   while i < monomials.len {
       def m = int(monomials.get(i))
-      if((x & m) == m){ out = out ^^ 1 }
+      if (x & m) == m { out = out ^^ 1 }
       i += 1
    }
    out
@@ -1106,7 +1106,7 @@ fn _sbox_ordered_bit(int value, int pos, int width, bool big_endian) int {
 fn _sbox_default_indices(int start, int count) list {
    mut out = []
    mut i = 0
-   while(i < count){
+   while i < count {
       out = out.append(start + i)
       i += 1
    }
@@ -1114,12 +1114,12 @@ fn _sbox_default_indices(int start, int count) list {
 }
 
 fn _sbox_validate_indices(any raw, int count, str name) list {
-   if(raw == nil){ return _sbox_default_indices(name == "xi" ? 1 : 0, count) }
-   if(!is_list(raw)){ panic("sbox_cnf: " + name + " must be a list") }
-   if(raw.len != count){ panic("sbox_cnf: " + name + " has wrong length") }
+   if raw == nil { return _sbox_default_indices(name == "xi" ? 1 : 0, count) }
+   if !is_list(raw) { panic("sbox_cnf: " + name + " must be a list") }
+   if raw.len != count { panic("sbox_cnf: " + name + " has wrong length") }
    mut out = []
    mut i = 0
-   while(i < raw.len){
+   while i < raw.len {
       out = out.append(int(raw.get(i)))
       i += 1
    }
@@ -1131,21 +1131,21 @@ fn _sbox_cnf_clauses_with_indices(list S, list xi, list yi, bool big_endian) lis
    def out_bits = sbox_output_size(S)
    mut output_order = []
    mut i = 0
-   while(i < out_bits){
+   while i < out_bits {
       output_order = output_order.append(big_endian ? i : (out_bits - 1 - i))
       i += 1
    }
    mut clauses = []
    mut x = 0
-   while(x < S.len){
+   while x < S.len {
       def xbits = sbox_to_bits(S, x, in_bits, big_endian)
       def ybits = sbox_apply(S, xbits, big_endian)
       mut oi = 0
-      while(oi < output_order.len){
+      while oi < output_order.len {
          def output_bit = int(output_order.get(oi))
          mut clause = []
          i = 0
-         while(i < in_bits){
+         while i < in_bits {
             clause = clause.append(_sbox_clause_literal(int(xi.get(i)), int(xbits.get(i))))
             i += 1
          }
@@ -1161,11 +1161,11 @@ fn _sbox_cnf_clauses_with_indices(list S, list xi, list yi, bool big_endian) lis
 fn _sbox_cnf_dimacs(list clauses, int var_count, bool header) str {
    mut out = header ? ("p cnf " + to_str(var_count) + " " + to_str(clauses.len) + "\n") : ""
    mut i = 0
-   while(i < clauses.len){
+   while i < clauses.len {
       def clause = clauses.get(i)
       mut j = 0
-      while(j < clause.len){
-         if(j > 0){ out = out + " " }
+      while j < clause.len {
+         if j > 0 { out = out + " " }
          out = out + to_str(clause.get(j))
          j += 1
       }
@@ -1182,15 +1182,15 @@ fn _sbox_symbolic_var(int idx, int in_bits) str {
 fn _sbox_cnf_symbolic(list clauses, int in_bits) str {
    mut out = ""
    mut i = 0
-   while(i < clauses.len){
-      if(i > 0){ out = out + " & " }
+   while i < clauses.len {
+      if i > 0 { out = out + " & " }
       def clause = clauses.get(i)
       out = out + "("
       mut j = 0
-      while(j < clause.len){
-         if(j > 0){ out = out + "|" }
+      while j < clause.len {
+         if j > 0 { out = out + "|" }
          def lit = int(clause.get(j))
-         if(lit < 0){
+         if lit < 0 {
             out = out + "~" + _sbox_symbolic_var(0 - lit, in_bits)
          } else {
             out = out + _sbox_symbolic_var(lit, in_bits)
@@ -1206,13 +1206,13 @@ fn _sbox_cnf_symbolic(list clauses, int in_bits) str {
 fn _sbox_cnf_symbolic_sage_legacy(list clauses, int in_bits) str {
    mut out = ""
    mut i = 0
-   while(i < clauses.len){
-      if(i > 0){ out = out + " & " }
+   while i < clauses.len {
+      if i > 0 { out = out + " & " }
       def clause = clauses.get(i)
       out = out + "("
       mut j = 0
-      while(j < clause.len){
-         if(j > 0){ out = out + "|" }
+      while j < clause.len {
+         if j > 0 { out = out + "|" }
          out = out + _sbox_symbolic_var(_sbox_abs_int(int(clause.get(j))), in_bits)
          j += 1
       }
@@ -1230,12 +1230,12 @@ fn sbox_cnf(list S, any xi=nil, any yi=nil, any format=nil, bool big_endian=true
    def xin = xi == nil ? _sbox_default_indices(1, in_bits) : _sbox_validate_indices(xi, in_bits, "xi")
    def yin = yi == nil ? _sbox_default_indices(in_bits + 1, out_bits) : _sbox_validate_indices(yi, out_bits, "yi")
    def clauses = _sbox_cnf_clauses_with_indices(S, xin, yin, big_endian)
-   if(format == nil){ return clauses }
+   if format == nil { return clauses }
    def mode = to_str(format)
-   if(mode == "dimacs"){ return _sbox_cnf_dimacs(clauses, in_bits + out_bits, true) }
-   if(mode == "dimacs_headless"){ return _sbox_cnf_dimacs(clauses, in_bits + out_bits, false) }
-   if(mode == "symbolic"){ return _sbox_cnf_symbolic(clauses, in_bits) }
-   if(mode == "symbolic_sage" || mode == "symbolic_sage_legacy"){ return _sbox_cnf_symbolic_sage_legacy(clauses, in_bits) }
+   if mode == "dimacs" { return _sbox_cnf_dimacs(clauses, in_bits + out_bits, true) }
+   if mode == "dimacs_headless" { return _sbox_cnf_dimacs(clauses, in_bits + out_bits, false) }
+   if mode == "symbolic" { return _sbox_cnf_symbolic(clauses, in_bits) }
+   if mode == "symbolic_sage" || mode == "symbolic_sage_legacy" { return _sbox_cnf_symbolic_sage_legacy(clauses, in_bits) }
    panic("sbox_cnf: unsupported format " + mode)
 }
 
@@ -1247,19 +1247,19 @@ fn sbox_cnf_clauses(list S, bool big_endian=true) list {
 fn sbox_cnf_satisfied(list clauses, list assignment) bool {
    "Return true if a 0/1 assignment satisfies clauses returned by sbox_cnf_clauses."
    mut c = 0
-   while(c < clauses.len){
+   while c < clauses.len {
       def clause = clauses.get(c)
       mut ok = false
       mut i = 0
-      while(i < clause.len){
+      while i < clause.len {
          def lit = int(clause.get(i))
          def idx = _sbox_abs_int(lit) - 1
-         if(idx < 0 || idx >= assignment.len){ panic("sbox_cnf_satisfied: assignment is missing a variable") }
+         if idx < 0 || idx >= assignment.len { panic("sbox_cnf_satisfied: assignment is missing a variable") }
          def bit = int(assignment.get(idx)) & 1
-         if((lit > 0 && bit != 0) || (lit < 0 && bit == 0)){ ok = true }
+         if (lit > 0 && bit != 0) || (lit < 0 && bit == 0) { ok = true }
          i += 1
       }
-      if(!ok){ return false }
+      if !ok { return false }
       c += 1
    }
    true
@@ -1272,13 +1272,13 @@ fn sbox_autocorrelation_table(list S) any {
    def out_n = _sbox_output_cardinality(S)
    mut rows = []
    mut a = 0
-   while(a < in_n){
+   while a < in_n {
       mut row = []
       mut b = 0
-      while(b < out_n){
+      while b < out_n {
          mut acc = 0
          mut x = 0
-         while(x < in_n){
+         while x < in_n {
             def p = _sbox_parity(b & S.get(x)) ^^ _sbox_parity(b & S.get(x ^^ a))
             acc += p == 0 ? 1 : -1
             x += 1
@@ -1294,33 +1294,33 @@ fn sbox_autocorrelation_table(list S) any {
 
 fn sbox_boomerang_connectivity_table(list S) any {
    "Return the boomerang connectivity table for an invertible square S-box."
-   if(!sbox_is_permutation(S)){ panic("sbox_boomerang_connectivity_table: S-box must be a permutation") }
+   if !sbox_is_permutation(S) { panic("sbox_boomerang_connectivity_table: S-box must be a permutation") }
    def inv = sbox_inverse(S)
    def n = S.len
    mut rows = list(n)
    __list_set_len(rows, n)
    mut dx = 0
-   while(dx < n){
+   while dx < n {
       __store_item_fast(rows, dx, _sbox_zero_row(n))
       dx += 1
    }
    mut dy = 0
-   while(dy < n){
+   while dy < n {
       mut shifted = list(n)
       __list_set_len(shifted, n)
       mut x = 0
-      while(x < n){
+      while x < n {
          __store_item_fast(shifted, x, __load_item_fast(inv, __load_item_fast(S, x) ^^ dy))
          x += 1
       }
       x = 0
-      while(x < n){
+      while x < n {
          def sx = __load_item_fast(shifted, x)
          mut y = x + 1
-         while(y < n){
+         while y < n {
             def dx2 = x ^^ y
             def lhs = sx ^^ __load_item_fast(shifted, y)
-            if(lhs >= dx2 && lhs <= dx2){
+            if lhs >= dx2 && lhs <= dx2 {
                __store_item_fast(__load_item_fast(rows, dx2), dy, __load_item_fast(__load_item_fast(rows, dx2), dy) + 2)
             }
             y += 1
@@ -1335,31 +1335,31 @@ fn sbox_boomerang_connectivity_table(list S) any {
 
 fn sbox_boomerang_uniformity(list S) int {
    "Return maximum BCT entry excluding the first row and column."
-   if(!sbox_is_permutation(S)){ panic("sbox_boomerang_uniformity: S-box must be a permutation") }
+   if !sbox_is_permutation(S) { panic("sbox_boomerang_uniformity: S-box must be a permutation") }
    def inv = sbox_inverse(S)
    def n = S.len
    mut best = 0
    mut dy = 1
-   while(dy < n){
+   while dy < n {
       mut shifted = list(n)
       __list_set_len(shifted, n)
       mut x = 0
-      while(x < n){
+      while x < n {
          __store_item_fast(shifted, x, __load_item_fast(inv, __load_item_fast(S, x) ^^ dy))
          x += 1
       }
       mut counts = _sbox_zero_row(n)
       x = 0
-      while(x < n){
+      while x < n {
          def sx = __load_item_fast(shifted, x)
          mut y = x + 1
-         while(y < n){
+         while y < n {
             def dx = x ^^ y
             def lhs = sx ^^ __load_item_fast(shifted, y)
-            if(lhs >= dx && lhs <= dx){
+            if lhs >= dx && lhs <= dx {
                def c = __load_item_fast(counts, dx) + 2
                __store_item_fast(counts, dx, c)
-               if(c > best){ best = c }
+               if c > best { best = c }
             }
             y += 1
          }
@@ -1376,11 +1376,11 @@ fn sbox_linear_structures(list S) list {
    def out_n = _sbox_output_cardinality(S)
    mut out = []
    mut b = 1
-   while(b < out_n){
+   while b < out_n {
       mut a = 1
-      while(a < S.len){
+      while a < S.len {
          def v = matrix.mat_get(act, a, b)
-         if(_sbox_abs_int(v) == S.len){
+         if _sbox_abs_int(v) == S.len {
             def c = v == S.len ? 0 : 1
             out = out.append([b, a, c])
          }
@@ -1400,14 +1400,14 @@ fn sbox_is_linear_structure(list S, any a, any b, bool big_endian=true) bool {
    "Return true if a is a linear structure of component b dot S(x)."
    def ai = _sbox_input_mask_loose(S, a, big_endian)
    def bi = _sbox_component_mask(S, b, big_endian)
-   if(ai == 0 || bi == 0){ return false }
+   if ai == 0 || bi == 0 { return false }
    def act = sbox_autocorrelation_table(S)
    _sbox_abs_int(matrix.mat_get(act, ai, bi)) == S.len
 }
 
 fn sbox_is_apn(list S) bool {
    "Return true for square APN S-boxes."
-   if(sbox_input_size(S) != sbox_output_size(S)){ panic("sbox_is_apn: APN is defined for square S-boxes") }
+   if sbox_input_size(S) != sbox_output_size(S) { panic("sbox_is_apn: APN is defined for square S-boxes") }
    sbox_differential_uniformity(S) == 2
 }
 
@@ -1415,14 +1415,14 @@ fn sbox_is_balanced(list S) bool {
    "Return true when every non-zero component function is balanced."
    def out_n = _sbox_output_cardinality(S)
    mut b = 1
-   while(b < out_n){
+   while b < out_n {
       mut ones = 0
       mut x = 0
-      while(x < S.len){
+      while x < S.len {
          ones += _sbox_parity(b & S.get(x))
          x += 1
       }
-      if(ones * 2 != S.len){ return false }
+      if ones * 2 != S.len { return false }
       b += 1
    }
    true
@@ -1431,8 +1431,8 @@ fn sbox_is_balanced(list S) bool {
 fn sbox_is_almost_bent(list S) bool {
    "Return true when a square odd-dimensional S-box has optimal AB nonlinearity."
    def m = sbox_input_size(S)
-   if(m != sbox_output_size(S)){ panic("sbox_is_almost_bent: almost-bent is defined for square S-boxes") }
-   if((m & 1) == 0){ return false }
+   if m != sbox_output_size(S) { panic("sbox_is_almost_bent: almost-bent is defined for square S-boxes") }
+   if (m & 1) == 0 { return false }
    sbox_nonlinearity(S) == ((1 << (m - 1)) - (1 << ((m - 1) / 2)))
 }
 
@@ -1440,7 +1440,7 @@ fn sbox_is_bent(list S) bool {
    "Return true when the S-box reaches the bent nonlinearity bound."
    def m = sbox_input_size(S)
    def n = sbox_output_size(S)
-   if((m & 1) != 0 || n > m / 2){ return false }
+   if (m & 1) != 0 || n > m / 2 { return false }
    sbox_nonlinearity(S) == ((1 << (m - 1)) - (1 << (m / 2 - 1)))
 }
 
@@ -1449,14 +1449,14 @@ fn sbox_is_plateaued(list S) bool {
    def lat = _sbox_walsh_table(S)
    def out_n = _sbox_output_cardinality(S)
    mut b = 1
-   while(b < out_n){
+   while b < out_n {
       mut mag = 0
       mut a = 0
-      while(a < S.len){
+      while a < S.len {
          def v = _sbox_abs_int(matrix.mat_get(lat, a, b))
-         if(v != 0){
-            if(mag == 0){ mag = v }
-            elif(v != mag){ return false }
+         if v != 0 {
+            if mag == 0 { mag = v }
+            elif v != mag { return false }
          }
          a += 1
       }
@@ -1467,23 +1467,23 @@ fn sbox_is_plateaued(list S) bool {
 
 fn sbox_is_involution(list S) bool {
    "Return true if the S-box equals its inverse."
-   if(!sbox_is_permutation(S)){ return false }
+   if !sbox_is_permutation(S) { return false }
    def inv = sbox_inverse(S)
    mut i = 0
-   while(i < S.len){
-      if(inv.get(i) != S.get(i)){ return false }
+   while i < S.len {
+      if inv.get(i) != S.get(i) { return false }
       i += 1
    }
    true
 }
 
 fn _sbox_construction_check(list sboxes) int {
-   if(sboxes.len == 0){ panic("sbox construction: no input S-boxes") }
+   if sboxes.len == 0 { panic("sbox construction: no input S-boxes") }
    def width = sbox_input_size(sboxes.get(0))
-   if(width != sbox_output_size(sboxes.get(0))){ panic("sbox construction: S-boxes must be square") }
+   if width != sbox_output_size(sboxes.get(0)) { panic("sbox construction: S-boxes must be square") }
    mut i = 1
-   while(i < sboxes.len){
-      if(sbox_input_size(sboxes.get(i)) != width || sbox_output_size(sboxes.get(i)) != width){
+   while i < sboxes.len {
+      if sbox_input_size(sboxes.get(i)) != width || sbox_output_size(sboxes.get(i)) != width {
          panic("sbox construction: all S-boxes must share one square width")
       }
       i += 1
@@ -1498,11 +1498,11 @@ fn sbox_feistel_construction(list sboxes) list {
    def size = 1 << (2 * w)
    mut out = []
    mut x = 0
-   while(x < size){
+   while x < size {
       mut xl = (x >> w) & mask
       mut xr = x & mask
       mut r = 0
-      while(r < sboxes.len){
+      while r < sboxes.len {
          def sb = sboxes.get(r)
          def next_l = sb.get(xl) ^^ xr
          xr = xl
@@ -1522,11 +1522,11 @@ fn sbox_misty_construction(list sboxes) list {
    def size = 1 << (2 * w)
    mut out = []
    mut x = 0
-   while(x < size){
+   while x < size {
       mut xl = (x >> w) & mask
       mut xr = x & mask
       mut r = 0
-      while(r < sboxes.len){
+      while r < sboxes.len {
          def sb = sboxes.get(r)
          def next_l = sb.get(xr) ^^ xl
          xr = xl
@@ -1544,14 +1544,14 @@ fn sbox_differential_branch_number(list S) int {
    _sbox_check(S)
    mut best = S.len + _sbox_output_cardinality(S)
    mut dx = 1
-   while(dx < S.len){
+   while dx < S.len {
       def in_wt = bin.bit_count(dx)
       mut x = 0
-      while(x < S.len){
+      while x < S.len {
          def score = in_wt + bin.bit_count(__load_item_fast(S, x) ^^ __load_item_fast(S, x ^^ dx))
-         if(score < best){
+         if score < best {
             best = score
-            if(best <= 1){ return best }
+            if best <= 1 { return best }
          }
          x += 1
       }
@@ -1567,20 +1567,20 @@ fn sbox_linear_branch_number(list S) int {
    def out_n = _sbox_output_cardinality(S)
    mut best = S.len + out_n
    mut b = 1
-   while(b < out_n){
+   while b < out_n {
       mut vec = list(in_n)
       __list_set_len(vec, in_n)
       mut x = 0
-      while(x < in_n){
+      while x < in_n {
          __store_item_fast(vec, x, (_sbox_parity(b & __load_item_fast(S, x)) == 0) ? 1 : -1)
          x += 1
       }
       mut step = 1
-      while(step < in_n){
+      while step < in_n {
          mut base = 0
-         while(base < in_n){
+         while base < in_n {
             x = 0
-            while(x < step){
+            while x < step {
                def u = __load_item_fast(vec, base + x)
                def v = __load_item_fast(vec, base + x + step)
                __store_item_fast(vec, base + x, u + v)
@@ -1592,10 +1592,10 @@ fn sbox_linear_branch_number(list S) int {
          step = step << 1
       }
       mut a = 0
-      while(a < in_n){
-         if(__load_item_fast(vec, a) != 0){
+      while a < in_n {
+         if __load_item_fast(vec, a) != 0 {
             def score = bin.bit_count(a) + bin.bit_count(b)
-            if(score < best){ best = score }
+            if score < best { best = score }
          }
          a += 1
       }
@@ -1620,32 +1620,32 @@ fn sbox_min_degree(list S) int {
    def out_n = _sbox_output_cardinality(S)
    mut best = sbox_input_size(S)
    mut mask = 1
-   while(mask < out_n){
+   while mask < out_n {
       mut table = []
       mut x = 0
-      while(x < S.len){
+      while x < S.len {
          table = table.append(_sbox_parity(mask & S.get(x)))
          x += 1
       }
       mut step = 1
-      while(step < S.len){
+      while step < S.len {
          mut i = 0
-         while(i < S.len){
-            if((i & step) != 0){ table[i] = table.get(i) ^^ table.get(i ^^ step) }
+         while i < S.len {
+            if (i & step) != 0 { table[i] = table.get(i) ^^ table.get(i ^^ step) }
             i += 1
          }
          step = step << 1
       }
       mut deg = 0
       mut idx = 0
-      while(idx < S.len){
-         if(table.get(idx) != 0){
+      while idx < S.len {
+         if table.get(idx) != 0 {
             def d = bin.bit_count(idx)
-            if(d > deg){ deg = d }
+            if d > deg { deg = d }
          }
          idx += 1
       }
-      if(deg < best){ best = deg }
+      if deg < best { best = deg }
       mask += 1
    }
    best
@@ -1658,28 +1658,28 @@ fn sbox_algebraic_degree(list S) int {
    def out_bits = sbox_output_size(S)
    mut best = 0
    mut bit = 0
-   while(bit < out_bits){
+   while bit < out_bits {
       mut coeff = list(n)
       __list_set_len(coeff, n)
       mut x = 0
-      while(x < n){
+      while x < n {
          __store_item_fast(coeff, x, (__load_item_fast(S, x) >> bit) & 1)
          x += 1
       }
       mut step = 1
-      while(step < n){
+      while step < n {
          mut mask = 0
-         while(mask < n){
-            if((mask & step) != 0){ __store_item_fast(coeff, mask, __load_item_fast(coeff, mask) ^^ __load_item_fast(coeff, mask ^^ step)) }
+         while mask < n {
+            if (mask & step) != 0 { __store_item_fast(coeff, mask, __load_item_fast(coeff, mask) ^^ __load_item_fast(coeff, mask ^^ step)) }
             mask += 1
          }
          step = step << 1
       }
       mut mask = 0
-      while(mask < n){
-         if(__load_item_fast(coeff, mask) != 0){
+      while mask < n {
+         if __load_item_fast(coeff, mask) != 0 {
             def deg = bin.bit_count(mask)
-            if(deg > best){ best = deg }
+            if deg > best { best = deg }
          }
          mask += 1
       }

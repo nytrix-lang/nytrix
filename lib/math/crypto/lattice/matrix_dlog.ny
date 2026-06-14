@@ -35,8 +35,8 @@ fn matrix_dlog_brute(any A, any B, any p, any order) any {
    "Find l such that A^l = B over GF(p), by brute force up to order."
    mut cur = matrix.matrix_identity(A[0])
    mut l = Z(0)
-   while(l <= Z(order)){
-      if(_matrix_eq_mod(cur, B, p)){ return l }
+   while l <= Z(order) {
+      if _matrix_eq_mod(cur, B, p) { return l }
       cur = matrix_mul_mod(cur, A, p)
       l = l + Z(1)
    }

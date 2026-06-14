@@ -22,7 +22,7 @@ fn gcd(any a, any b) bigint {
    "Computes the greatest common divisor."
    mut x = _abs_z(a)
    mut y = _abs_z(b)
-   while(y != Z(0)){
+   while y != Z(0) {
       def r = x % y
       x = y
       y = r
@@ -34,16 +34,16 @@ fn lcm(any a, any b) bigint {
    "Computes the least common multiple."
    def za = Z(a)
    def zb = Z(b)
-   if(za == Z(0) || zb == Z(0)){ return Z(0) }
+   if za == Z(0) || zb == Z(0) { return Z(0) }
    _abs_z((za / gcd(za, zb)) * zb)
 }
 
 fn mod(any a, any b) bigint {
    "Returns a non-negative modular remainder."
    def bb = Z(b)
-   if(bb == Z(0)){ return Z(0) }
+   if bb == Z(0) { return Z(0) }
    mut r = Z(a) % bb
-   if(r < Z(0)){ r = r + _abs_z(bb) }
+   if r < Z(0) { r = r + _abs_z(bb) }
    r
 }
 
@@ -55,7 +55,7 @@ fn xgcd(any a, any b) list {
    mut s = Z(0)
    mut old_t = Z(0)
    mut t = Z(1)
-   while(r != Z(0)){
+   while r != Z(0) {
       def q = old_r / r
       def next_r = old_r - q * r
       old_r = r
@@ -75,8 +75,8 @@ fn egcd(any a, any b) list { xgcd(a, b) }
 fn inverse_mod(any a, any m) bigint {
    "Computes a modular inverse when it exists."
    def mm = Z(m)
-   if(mm == Z(0)){ return Z(0) }
+   if mm == Z(0) { return Z(0) }
    def eg = xgcd(a, mm)
-   if(_abs_z(eg.get(0, Z(0))) != Z(1)){ return Z(0) }
+   if _abs_z(eg.get(0, Z(0))) != Z(1) { return Z(0) }
    mod(eg.get(1, Z(0)), mm)
 }

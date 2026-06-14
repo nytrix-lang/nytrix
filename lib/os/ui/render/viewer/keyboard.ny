@@ -68,8 +68,8 @@ fn row_width(any row) f64 {
    def keys = row.get(1)
    mut out = 0.0
    mut i = 0
-   while(i < keys.len){
-      if(i > 0){ out += KEY_GAP }
+   while i < keys.len {
+      if i > 0 { out += KEY_GAP }
       out += float(keys.get(i).get(1))
       i += 1
    }
@@ -140,13 +140,13 @@ fn draw_board_at(any win, any font_key, f64 sw, f64 sh, f64 pad, f64 mx, f64 my)
    def start_x = float(geom.get("x", pad))
    mut y = float(geom.get("y", pad + 86.0))
    mut r = 0
-   while(r < ROWS.len){
+   while r < ROWS.len {
       def row = ROWS.get(r)
       def row_h = float(row.get(0)) * scale
       def keys = row.get(1)
       mut x = start_x
       mut i = 0
-      while(i < keys.len){
+      while i < keys.len {
          def item = keys.get(i)
          def kw = float(item.get(1)) * scale
          draw_keycap(win, font_key, item, x, y, kw, row_h, mx, my)
@@ -168,14 +168,14 @@ fn draw_board(any win, any font_key, f64 sw, f64 sh, f64 pad) int {
 fn scan_pressed(any win) any {
    "Returns the first newly pressed key in the keyboard layout."
    mut r = 0
-   while(r < ROWS.len){
+   while r < ROWS.len {
       def row = ROWS.get(r)
       def keys = row.get(1)
       mut i = 0
-      while(i < keys.len){
+      while i < keys.len {
          def item = keys.get(i)
          def code = int(item.get(0))
-         if(code != key.KEY_NULL && window.key_pressed(win, code)){
+         if code != key.KEY_NULL && window.key_pressed(win, code) {
             return {"code": code, "label": item.get(2)}
          }
          i += 1

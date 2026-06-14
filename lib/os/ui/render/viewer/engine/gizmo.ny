@@ -13,13 +13,13 @@ use std.os.ui.render.viewer.engine.selection as ui_selection
 use std.os.ui.render.viewer.engine.state
 
 fn _gizmo_selection_bounds() list {
-   if(!is_dict(active_scene)){ return [] }
-   if(_scene_drag_active && int(_scene_drag_mode) == 1){
+   if !is_dict(active_scene) { return [] }
+   if _scene_drag_active && int(_scene_drag_mode) == 1 {
       def drag_bounds = _scene_drag_state.get("bounds", [])
-      if(is_list(drag_bounds) && drag_bounds.len >= 6){ return drag_bounds }
+      if is_list(drag_bounds) && drag_bounds.len >= 6 { return drag_bounds }
    }
    def cache_key = _gizmo_selection_cache_key()
-   if(_scene_selection_cached_name == cache_key && is_list(_scene_selection_cached_bounds) && _scene_selection_cached_bounds.len >= 6){
+   if _scene_selection_cached_name == cache_key && is_list(_scene_selection_cached_bounds) && _scene_selection_cached_bounds.len >= 6 {
       return _scene_selection_cached_bounds
    }
    _scene_selection_cached_bounds = ui_selection.selection_bounds_from_scene(active_scene)
@@ -28,7 +28,7 @@ fn _gizmo_selection_bounds() list {
 }
 
 fn _gizmo_selection_cache_key() str {
-   if(!is_dict(active_scene)){ return _loaded_scene_name + "|none" }
+   if !is_dict(active_scene) { return _loaded_scene_name + "|none" }
    _loaded_scene_name + "|" +
    to_str(active_scene.get("fit_scale", 1.0)) + "|" +
    to_str(active_scene.get("fit_tx", 0.0)) + "|" +
@@ -70,20 +70,20 @@ fn _gizmo_draw_transform(list b) bool {
 }
 
 fn _scene_world_gizmo_pick(any x, any y) dict {
-   if(!_scene_selected || !_scene_selection_rect || !is_dict(active_scene) || !show_scene){
+   if !_scene_selected || !_scene_selection_rect || !is_dict(active_scene) || !show_scene {
       return {"hit": false, "axis": 0, "mode": _gizmo_mode}
    }
    def b = _gizmo_selection_bounds()
-   if(!is_list(b) || b.len < 6){ return {"hit": false, "axis": 0, "mode": _gizmo_mode} }
+   if !is_list(b) || b.len < 6 { return {"hit": false, "axis": 0, "mode": _gizmo_mode} }
    viewer_gizmo.hit_test(M_VP, _win_w, _win_h, b, _gizmo_mode, x, y)
 }
 
 fn _scene_world_gizmo_axis_tangent(any axis) dict {
-   if(!_scene_selected || !_scene_selection_rect || !is_dict(active_scene) || !show_scene){
+   if !_scene_selected || !_scene_selection_rect || !is_dict(active_scene) || !show_scene {
       return {"ok": false, "axis": int(axis), "screen_axis_x": 0.0, "screen_axis_y": 0.0}
    }
    def b = _gizmo_selection_bounds()
-   if(!is_list(b) || b.len < 6){ return {"ok": false, "axis": int(axis), "screen_axis_x": 0.0, "screen_axis_y": 0.0} }
+   if !is_list(b) || b.len < 6 { return {"ok": false, "axis": int(axis), "screen_axis_x": 0.0, "screen_axis_y": 0.0} }
    def m = viewer_gizmo.metrics(b, _gizmo_mode)
    def v = _gizmo_axis_vec(int(axis))
    def n = viewer_gizmo.axis_tangent(
@@ -96,14 +96,14 @@ fn _scene_world_gizmo_axis_tangent(any axis) dict {
 }
 
 fn _gizmo_axis_vec(int axis) list {
-   if(axis == 1){ return [1.0, 0.0, 0.0] }
-   if(axis == 2){ return [0.0, 1.0, 0.0] }
-   if(axis == 3){ return [0.0, 0.0, 1.0] }
+   if axis == 1 { return [1.0, 0.0, 0.0] }
+   if axis == 2 { return [0.0, 1.0, 0.0] }
+   if axis == 3 { return [0.0, 0.0, 1.0] }
    [0.0, 0.0, 0.0]
 }
 
 fn _gizmo_bounds_center(any bounds) list {
-   if(!is_list(bounds) || bounds.len < 6){ return [0.0, 0.0, 0.0] }
+   if !is_list(bounds) || bounds.len < 6 { return [0.0, 0.0, 0.0] }
    [
       (float(bounds.get(0, 0.0)) + float(bounds.get(3, 0.0))) * 0.5,
       (float(bounds.get(1, 0.0)) + float(bounds.get(4, 0.0))) * 0.5,
@@ -114,7 +114,7 @@ fn _gizmo_bounds_center(any bounds) list {
 fn _gizmo_unproject(list inv_vp, f64 ndc_x, f64 ndc_y, f64 ndc_z) any {
    def v = rmat.mat4_mul_vec4(inv_vp, [ndc_x, ndc_y, ndc_z, 1.0])
    def w = float(v.get(3, 0.0))
-   if(abs(w) <= 0.000001){ return 0 }
+   if abs(w) <= 0.000001 { return 0 }
    [float(v.get(0, 0.0)) / w, float(v.get(1, 0.0)) / w, float(v.get(2, 0.0)) / w]
 }
 
@@ -126,7 +126,7 @@ fn _gizmo_ray_from_screen(any x, any y) dict {
    def inv = rmat.mat4_inverse(M_VP)
    def near_p = _gizmo_unproject(inv, ndc_x, ndc_y, 0.0)
    def far_p = _gizmo_unproject(inv, ndc_x, ndc_y, 1.0)
-   if(!is_list(near_p) || !is_list(far_p)){
+   if !is_list(near_p) || !is_list(far_p) {
       return {"ok": false, "ox": 0.0, "oy": 0.0, "oz": 0.0, "dx": 0.0, "dy": 0.0, "dz": -1.0}
    }
    def ox, oy = float(near_p.get(0, 0.0)), float(near_p.get(1, 0.0))
@@ -134,17 +134,74 @@ fn _gizmo_ray_from_screen(any x, any y) dict {
    mut dx, dy = float(far_p.get(0, 0.0)) - ox, float(far_p.get(1, 0.0)) - oy
    mut dz = float(far_p.get(2, 0.0)) - oz
    def len = sqrt(dx * dx + dy * dy + dz * dz)
-   if(len <= 0.000001){ return {"ok": false, "ox": ox, "oy": oy, "oz": oz, "dx": 0.0, "dy": 0.0, "dz": -1.0} }
+   if len <= 0.000001 { return {"ok": false, "ox": ox, "oy": oy, "oz": oz, "dx": 0.0, "dy": 0.0, "dz": -1.0} }
    dx = dx / len
    dy = dy / len
    dz = dz / len
    {"ok": true, "ox": ox, "oy": oy, "oz": oz, "dx": dx, "dy": dy, "dz": dz}
 }
 
-fn _gizmo_axis_ray_coord(any bounds, int axis, any x, any y) dict {
-   if(axis < 1 || axis > 3){ return {"ok": false, "axis": axis, "coord": 0.0} }
-   def ray = _gizmo_ray_from_screen(x, y)
-   if(!bool(ray.get("ok", false))){ return {"ok": false, "axis": axis, "coord": 0.0} }
+fn _gizmo_norm3(f64 x, f64 y, f64 z, any fallback) list {
+   def len = sqrt(x * x + y * y + z * z)
+   if len <= 0.000001 { return fallback }
+   [x / len, y / len, z / len]
+}
+
+fn _gizmo_dot3(any a, any b) f64 {
+   float(a.get(0, 0.0)) * float(b.get(0, 0.0)) +
+   float(a.get(1, 0.0)) * float(b.get(1, 0.0)) +
+   float(a.get(2, 0.0)) * float(b.get(2, 0.0))
+}
+
+fn _gizmo_ray_plane_hit(any ray, list point, list normal) dict {
+   def ox, oy = float(ray.get("ox", 0.0)), float(ray.get("oy", 0.0))
+   def oz = float(ray.get("oz", 0.0))
+   def dx, dy = float(ray.get("dx", 0.0)), float(ray.get("dy", 0.0))
+   def dz = float(ray.get("dz", -1.0))
+   def px, py = float(point.get(0, 0.0)), float(point.get(1, 0.0))
+   def pz = float(point.get(2, 0.0))
+   def nx, ny = float(normal.get(0, 0.0)), float(normal.get(1, 0.0))
+   def nz = float(normal.get(2, 1.0))
+   def den = dx * nx + dy * ny + dz * nz
+   if abs(den) <= 0.00001 {
+      return {"ok": false, "wx": px, "wy": py, "wz": pz, "t": 0.0}
+   }
+   def t = ((px - ox) * nx + (py - oy) * ny + (pz - oz) * nz) / den
+   if t < 0.0 {
+      return {"ok": false, "wx": px, "wy": py, "wz": pz, "t": t}
+   }
+   {"ok": true, "wx": ox + dx * t, "wy": oy + dy * t, "wz": oz + dz * t, "t": t}
+}
+
+fn _gizmo_axis_drag_normal(int axis, list center) list {
+   def avec = _gizmo_axis_vec(axis)
+   def ax, ay = float(avec.get(0, 0.0)), float(avec.get(1, 0.0))
+   def az = float(avec.get(2, 0.0))
+   if axis < 1 || axis > 3 {
+      return _gizmo_norm3(
+         float(center.get(0, 0.0)) - _cam_px,
+         float(center.get(1, 0.0)) - _cam_py,
+         float(center.get(2, 0.0)) - _cam_pz,
+         [0.0, 0.0, 1.0]
+      )
+   }
+   def vx = float(center.get(0, 0.0)) - _cam_px
+   def vy = float(center.get(1, 0.0)) - _cam_py
+   def vz = float(center.get(2, 0.0)) - _cam_pz
+   def along = vx * ax + vy * ay + vz * az
+   mut nx, ny = vx - ax * along, vy - ay * along
+   mut nz = vz - az * along
+   def nlen = sqrt(nx * nx + ny * ny + nz * nz)
+   if nlen > 0.000001 { return [nx / nlen, ny / nlen, nz / nlen] }
+   ;; Looking almost exactly down the axis: choose a deterministic plane that
+   ;; still contains the axis instead of letting closest-point math explode.
+   if axis == 1 { return [0.0, 1.0, 0.0] }
+   if axis == 2 { return [1.0, 0.0, 0.0] }
+   [0.0, 1.0, 0.0]
+}
+
+fn _gizmo_axis_closest_coord(any bounds, int axis, any ray) dict {
+   if axis < 1 || axis > 3 { return {"ok": false, "axis": axis, "coord": 0.0} }
    def center = _gizmo_bounds_center(bounds)
    def avec = _gizmo_axis_vec(axis)
    def px, py = float(center.get(0, 0.0)), float(center.get(1, 0.0))
@@ -161,18 +218,70 @@ fn _gizmo_axis_ray_coord(any bounds, int axis, any x, any y) dict {
    def d = ax * wx + ay * wy + az * wz
    def e = dx * wx + dy * wy + dz * wz
    def den = 1.0 - b * b
-   if(abs(den) <= 0.00001){ return {"ok": false, "axis": axis, "coord": 0.0} }
+   if abs(den) <= 0.00001 { return {"ok": false, "axis": axis, "coord": 0.0} }
    def u = (b * e - d) / den
    {"ok": true, "axis": axis, "coord": u}
 }
 
-fn _scene_world_gizmo_axis_drag_coord(any axis, any x, any y, any bounds=[]) dict {
-   if(!_scene_selected || !_scene_selection_rect || !is_dict(active_scene) || !show_scene){
-      return {"ok": false, "axis": int(axis), "coord": 0.0}
+fn _gizmo_axis_ray_coord(any bounds, int axis, any x, any y) dict {
+   if axis < 1 || axis > 3 { return {"ok": false, "axis": axis, "coord": 0.0} }
+   def ray = _gizmo_ray_from_screen(x, y)
+   if !bool(ray.get("ok", false)) { return {"ok": false, "axis": axis, "coord": 0.0} }
+   _gizmo_axis_closest_coord(bounds, axis, ray)
+}
+
+fn _gizmo_drag_point(any bounds, int axis, any x, any y, any plane_normal=0) dict {
+   def ray = _gizmo_ray_from_screen(x, y)
+   if !bool(ray.get("ok", false)) {
+      return {"ok": false, "axis": axis, "coord": 0.0, "wx": 0.0, "wy": 0.0, "wz": 0.0}
+   }
+   def center = _gizmo_bounds_center(bounds)
+   mut normal = is_list(plane_normal) && plane_normal.len >= 3 ? plane_normal : _gizmo_axis_drag_normal(axis, center)
+   normal = _gizmo_norm3(float(normal.get(0, 0.0)), float(normal.get(1, 0.0)), float(normal.get(2, 0.0)), _gizmo_axis_drag_normal(axis, center))
+   def hit = _gizmo_ray_plane_hit(ray, center, normal)
+   if !bool(hit.get("ok", false)) && axis > 0 {
+      def coord = _gizmo_axis_closest_coord(bounds, axis, ray)
+      if bool(coord.get("ok", false)) {
+         def avec = _gizmo_axis_vec(axis)
+         def c = float(coord.get("coord", 0.0))
+         return {
+            "ok": true, "axis": axis, "coord": c,
+            "wx": float(center.get(0, 0.0)) + float(avec.get(0, 0.0)) * c,
+            "wy": float(center.get(1, 0.0)) + float(avec.get(1, 0.0)) * c,
+            "wz": float(center.get(2, 0.0)) + float(avec.get(2, 0.0)) * c,
+            "nx": float(normal.get(0, 0.0)),
+            "ny": float(normal.get(1, 0.0)),
+            "nz": float(normal.get(2, 0.0))
+         }
+      }
+   }
+   if !bool(hit.get("ok", false)) {
+      return {"ok": false, "axis": axis, "coord": 0.0, "wx": 0.0, "wy": 0.0, "wz": 0.0}
+   }
+   def wx, wy = float(hit.get("wx", 0.0)), float(hit.get("wy", 0.0))
+   def wz = float(hit.get("wz", 0.0))
+   mut coord = 0.0
+   if axis > 0 {
+      def avec = _gizmo_axis_vec(axis)
+      coord = (wx - float(center.get(0, 0.0))) * float(avec.get(0, 0.0)) +
+      (wy - float(center.get(1, 0.0))) * float(avec.get(1, 0.0)) +
+      (wz - float(center.get(2, 0.0))) * float(avec.get(2, 0.0))
+   }
+   {
+      "ok": true, "axis": axis, "coord": coord, "wx": wx, "wy": wy, "wz": wz,
+      "nx": float(normal.get(0, 0.0)),
+      "ny": float(normal.get(1, 0.0)),
+      "nz": float(normal.get(2, 0.0))
+   }
+}
+
+fn _scene_world_gizmo_axis_drag_coord(any axis, any x, any y, any bounds=[], any plane_normal=0) dict {
+   if !_scene_selected || !_scene_selection_rect || !is_dict(active_scene) || !show_scene {
+      return {"ok": false, "axis": int(axis), "coord": 0.0, "wx": 0.0, "wy": 0.0, "wz": 0.0}
    }
    def b = (is_list(bounds) && bounds.len >= 6) ? bounds : _gizmo_selection_bounds()
-   if(!is_list(b) || b.len < 6){ return {"ok": false, "axis": int(axis), "coord": 0.0} }
-   _gizmo_axis_ray_coord(b, int(axis), x, y)
+   if !is_list(b) || b.len < 6 { return {"ok": false, "axis": int(axis), "coord": 0.0, "wx": 0.0, "wy": 0.0, "wz": 0.0} }
+   _gizmo_drag_point(b, int(axis), x, y, plane_normal)
 }
 
 fn _gizmo_sync_overlay_rects() bool {
@@ -186,12 +295,12 @@ fn _gizmo_sync_overlay_rects() bool {
 }
 
 fn _draw_scene_world_gizmo() bool {
-   if(!_scene_selected || !_scene_selection_rect || !is_dict(active_scene) || !show_scene){
+   if !_scene_selected || !_scene_selection_rect || !is_dict(active_scene) || !show_scene {
       _gizmo_sync_overlay_rects()
       return false
    }
    def b = _gizmo_selection_bounds()
-   if(!is_list(b) || b.len < 6){
+   if !is_list(b) || b.len < 6 {
       _gizmo_sync_overlay_rects()
       return false
    }

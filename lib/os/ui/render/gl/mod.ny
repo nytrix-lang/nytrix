@@ -117,7 +117,6 @@ use std.os.ui.render.shared as render_shared
    fn glRectd(f64 _x1, f64 _y1, f64 _x2, f64 _y2) any { nil }
    fn glRecti(i32 _x1, i32 _y1, i32 _x2, i32 _y2) any { nil }
 } #endif
-
 def GL_FALSE = 0
 def GL_TRUE = 1
 def GL_POINTS = 0x0000
@@ -186,14 +185,12 @@ def GL_TEXTURE_COORD_ARRAY = 0x8078
 def GL_SRC_ALPHA = 0x0302
 def GL_ONE_MINUS_SRC_ALPHA = 0x0303
 def GL_LEQUAL = 0x0203
-
 def _STRIDE = render_shared.VERTEX_STRIDE
 def _OFF_X = render_shared.OFF_X
 def _OFF_U = render_shared.OFF_U
 def _OFF_U2 = render_shared.OFF_U2
 def _OFF_C = render_shared.OFF_C
 def _OFF_NX = render_shared.OFF_NX
-
 mut _win = 0
 mut _w = 0
 mut _h = 0
@@ -263,10 +260,10 @@ mut _mesh_cull_enabled = false
 mut _mesh_front_face = GL_CCW
 
 fn _soft_enabled() bool {
-   if(_soft_mode < 0){
-      if(common.env_truthy("NY_GL_SOFTWARE_DRAW") || common.env_truthy("NY_GL_SOFTWARE_UPLOAD")){
+   if _soft_mode < 0 {
+      if common.env_truthy("NY_GL_SOFTWARE_DRAW") || common.env_truthy("NY_GL_SOFTWARE_UPLOAD") {
          _soft_mode = 1
-      } elif(common.env_present("NY_GL_NATIVE_DRAW")){
+      } elif common.env_present("NY_GL_NATIVE_DRAW") {
          _soft_mode = common.env_truthy("NY_GL_NATIVE_DRAW") ? 0 : 1
       } else {
          _soft_mode = 0
@@ -283,8 +280,8 @@ fn _soft_color_chan(int c, int shift) int { (int(c) >> shift) & 255 }
 
 fn _soft_color_blend(int dst, int src) int {
    def sa = _soft_color_chan(src, 24)
-   if(sa >= 255){ return src }
-   if(sa <= 0){ return dst }
+   if sa >= 255 { return src }
+   if sa <= 0 { return dst }
    def inv = 255 - sa
    def dr, dg, db, da = _soft_color_chan(dst, 0), _soft_color_chan(dst, 8), _soft_color_chan(dst, 16), _soft_color_chan(dst, 24)
    def sr, sg, sb = _soft_color_chan(src, 0), _soft_color_chan(src, 8), _soft_color_chan(src, 16)
@@ -292,19 +289,19 @@ fn _soft_color_blend(int dst, int src) int {
 }
 
 fn _soft_put(int x, int y, int c) bool {
-   if(!_soft_buf || x < 0 || y < 0 || x >= _soft_w || y >= _soft_h){ return false }
-   if(_soft_scissor && (x < _soft_sx || y < _soft_sy || x >= _soft_sx + _soft_sw || y >= _soft_sy + _soft_sh)){ return false }
+   if !_soft_buf || x < 0 || y < 0 || x >= _soft_w || y >= _soft_h { return false }
+   if _soft_scissor && (x < _soft_sx || y < _soft_sy || x >= _soft_sx + _soft_sw || y >= _soft_sy + _soft_sh) { return false }
    def off = (y * _soft_w + x) * 4
    store32(_soft_buf, _soft_color_blend(load32(_soft_buf, off), c), off)
    true
 }
 
 fn _soft_ensure_surface() bool {
-   if(!_soft_enabled()){ return false }
-   if(_w <= 0 || _h <= 0){ return false }
+   if !_soft_enabled() { return false }
+   if _w <= 0 || _h <= 0 { return false }
    def need = _w * _h * 4
-   if(_soft_buf && _soft_w == _w && _soft_h == _h){ return true }
-   if(_soft_buf){ free(_soft_buf) _soft_buf = 0 }
+   if _soft_buf && _soft_w == _w && _soft_h == _h { return true }
+   if _soft_buf { free(_soft_buf) _soft_buf = 0 }
    _soft_buf = zalloc(need)
    _soft_w = _w
    _soft_h = _h
@@ -312,41 +309,41 @@ fn _soft_ensure_surface() bool {
 }
 
 fn _soft_fill_rect_raw(int x0, int y0, int x1, int y1, int c) bool {
-   if(!_soft_ensure_surface()){ return false }
-   if(_soft_scissor){
+   if !_soft_ensure_surface() { return false }
+   if _soft_scissor {
       x0 = max(x0, _soft_sx)
       y0 = max(y0, _soft_sy)
       x1 = min(x1, _soft_sx + _soft_sw)
       y1 = min(y1, _soft_sy + _soft_sh)
    }
-   if(x0 < 0){ x0 = 0 }
-   if(y0 < 0){ y0 = 0 }
-   if(x1 > _soft_w){ x1 = _soft_w }
-   if(y1 > _soft_h){ y1 = _soft_h }
-   if(x1 <= x0 || y1 <= y0){ return true }
+   if x0 < 0 { x0 = 0 }
+   if y0 < 0 { y0 = 0 }
+   if x1 > _soft_w { x1 = _soft_w }
+   if y1 > _soft_h { y1 = _soft_h }
+   if x1 <= x0 || y1 <= y0 { return true }
    def alpha = _soft_color_chan(c, 24)
-   if(alpha >= 255){
+   if alpha >= 255 {
       def row_pixels = x1 - x0
       def row_bytes = row_pixels * 4
       def first_off = (y0 * _soft_w + x0) * 4
       mut i = 0
       mut off = first_off
-      while(i < row_pixels){
+      while i < row_pixels {
          store32(_soft_buf, c, off)
          off += 4
          i += 1
       }
       mut yy = y0 + 1
-      while(yy < y1){
+      while yy < y1 {
          memcpy(_soft_buf + ((yy * _soft_w + x0) * 4), _soft_buf + first_off, row_bytes)
          yy += 1
       }
       return true
    }
    mut y = y0
-   while(y < y1){
+   while y < y1 {
       mut x = x0
-      while(x < x1){
+      while x < x1 {
          _soft_put(x, y, c)
          x += 1
       }
@@ -356,7 +353,7 @@ fn _soft_fill_rect_raw(int x0, int y0, int x1, int y1, int c) bool {
 }
 
 fn _soft_plot_line_sample(int x, int y, f64 width, int c) bool {
-   if(width <= 1.25){
+   if width <= 1.25 {
       return _soft_put(x, y, c)
    }
    def radius = max(0.5, (width - 1.0) * 0.5)
@@ -370,7 +367,7 @@ fn _soft_plot_line_sample(int x, int y, f64 width, int c) bool {
 }
 
 fn _soft_clear(int c) bool {
-   if(!_soft_ensure_surface()){ return false }
+   if !_soft_ensure_surface() { return false }
    def old_sc = _soft_scissor
    _soft_scissor = false
    _soft_fill_rect_raw(0, 0, _soft_w, _soft_h, c)
@@ -381,8 +378,8 @@ fn _soft_clear(int c) bool {
 fn _soft_rect(f64 x, f64 y, f64 w, f64 h, int c) bool {
    mut x0, y0 = int(x), int(y)
    mut x1, y1 = int(x + w), int(y + h)
-   if(float(x1) < x + w){ x1 += 1 }
-   if(float(y1) < y + h){ y1 += 1 }
+   if float(x1) < x + w { x1 += 1 }
+   if float(y1) < y + h { y1 += 1 }
    _soft_fill_rect_raw(x0, y0, x1, y1, c)
 }
 
@@ -390,17 +387,17 @@ fn _soft_tex_meta(int tex_id) any { _tex_live.get(tex_id, 0) }
 
 fn _soft_sample_tex(int tex_id, f64 u, f64 v) int {
    def meta = _soft_tex_meta(tex_id)
-   if(!is_dict(meta)){ return 0xffffffff }
+   if !is_dict(meta) { return 0xffffffff }
    def pix = _tex_pixels.get(tex_id, 0)
-   if(!pix){ return 0xffffffff }
+   if !pix { return 0xffffffff }
    def tw, th = int(meta.get("width", 0)), int(meta.get("height", 0))
-   if(tw <= 0 || th <= 0){ return 0xffffffff }
+   if tw <= 0 || th <= 0 { return 0xffffffff }
    mut uu, vv = u, v
-   if(uu < 0.0){ uu = 0.0 }
-   if(vv < 0.0){ vv = 0.0 }
-   if(uu > 1.0){ uu = 1.0 }
-   if(vv > 1.0){ vv = 1.0 }
-   if(int(meta.get("filter", 1)) == 0 || tw == 1 || th == 1){
+   if uu < 0.0 { uu = 0.0 }
+   if vv < 0.0 { vv = 0.0 }
+   if uu > 1.0 { uu = 1.0 }
+   if vv > 1.0 { vv = 1.0 }
+   if int(meta.get("filter", 1)) == 0 || tw == 1 || th == 1 {
       def tx = min(tw - 1, max(0, int(uu * float(tw - 1) + 0.5)))
       def ty = min(th - 1, max(0, int(vv * float(th - 1) + 0.5)))
       return load32(pix, (ty * tw + tx) * 4)
@@ -425,14 +422,14 @@ fn _soft_mul_color(int a, int b) int {
       (_soft_color_chan(a, 0) * _soft_color_chan(b, 0)) / 255,
       (_soft_color_chan(a, 8) * _soft_color_chan(b, 8)) / 255,
       (_soft_color_chan(a, 16) * _soft_color_chan(b, 16)) / 255,
-      (_soft_color_chan(a, 24) * _soft_color_chan(b, 24)) / 255)
+   (_soft_color_chan(a, 24) * _soft_color_chan(b, 24)) / 255)
 }
 
 fn _soft_project(f64 x, f64 y, f64 z) list {
    def m = mat4_mul(_mvp ? _mvp : _default_ortho(_w, _h), _model ? _model : mat4_identity())
    def v = mat4_mul_vec4(m, [x, y, z, 1.0])
    def cw = float(v.get(3, 1.0))
-   if(abs(cw) < 0.000001){ return [x, y, z, 1.0] }
+   if abs(cw) < 0.000001 { return [x, y, z, 1.0] }
    def nx, ny, nz = float(v.get(0, 0.0)) / cw, float(v.get(1, 0.0)) / cw, float(v.get(2, 0.0)) / cw
    [(nx * 0.5 + 0.5) * float(_w), (1.0 - (ny * 0.5 + 0.5)) * float(_h), nz, cw]
 }
@@ -442,7 +439,7 @@ fn _soft_color_lerp3(int c0, int c1, int c2, f64 w0, f64 w1, f64 w2) int {
       int(float(_soft_color_chan(c0, 0)) * w0 + float(_soft_color_chan(c1, 0)) * w1 + float(_soft_color_chan(c2, 0)) * w2),
       int(float(_soft_color_chan(c0, 8)) * w0 + float(_soft_color_chan(c1, 8)) * w1 + float(_soft_color_chan(c2, 8)) * w2),
       int(float(_soft_color_chan(c0, 16)) * w0 + float(_soft_color_chan(c1, 16)) * w1 + float(_soft_color_chan(c2, 16)) * w2),
-      int(float(_soft_color_chan(c0, 24)) * w0 + float(_soft_color_chan(c1, 24)) * w1 + float(_soft_color_chan(c2, 24)) * w2))
+   int(float(_soft_color_chan(c0, 24)) * w0 + float(_soft_color_chan(c1, 24)) * w1 + float(_soft_color_chan(c2, 24)) * w2))
 }
 
 fn _soft_color_lerp2(int c0, int c1, f64 t) int {
@@ -451,17 +448,17 @@ fn _soft_color_lerp2(int c0, int c1, f64 t) int {
       int(float(_soft_color_chan(c0, 0)) * u + float(_soft_color_chan(c1, 0)) * t),
       int(float(_soft_color_chan(c0, 8)) * u + float(_soft_color_chan(c1, 8)) * t),
       int(float(_soft_color_chan(c0, 16)) * u + float(_soft_color_chan(c1, 16)) * t),
-      int(float(_soft_color_chan(c0, 24)) * u + float(_soft_color_chan(c1, 24)) * t))
+   int(float(_soft_color_chan(c0, 24)) * u + float(_soft_color_chan(c1, 24)) * t))
 }
 
 fn _soft_active_tex(int tex_id=-1, bool use_material=false) int {
-   if(tex_id > 0){ return tex_id }
-   if(use_material && _current_base_tex_id > 0){ return _current_base_tex_id }
+   if tex_id > 0 { return tex_id }
+   if use_material && _current_base_tex_id > 0 { return _current_base_tex_id }
    -1
 }
 
 fn _soft_vertex_color(any off, bool use_material=false) int {
-   if(use_material && !_material_uses_vertex_color()){ return _current_base_color_u32 }
+   if use_material && !_material_uses_vertex_color() { return _current_base_color_u32 }
    load32(off, _OFF_C)
 }
 
@@ -474,31 +471,31 @@ fn _soft_draw_tri(any p, int i0, int i1, int i2, int tex_id=-1, bool use_materia
    def x1, y1 = float(p1.get(0, 0.0)), float(p1.get(1, 0.0))
    def x2, y2 = float(p2.get(0, 0.0)), float(p2.get(1, 0.0))
    def area = ((x1 - x0) * (y2 - y0)) - ((y1 - y0) * (x2 - x0))
-   if(abs(area) < 0.000001){ return false }
+   if abs(area) < 0.000001 { return false }
    mut min_x = int(min(x0, min(x1, x2)))
    mut max_x = int(max(x0, max(x1, x2)) + 1.0)
    mut min_y = int(min(y0, min(y1, y2)))
    mut max_y = int(max(y0, max(y1, y2)) + 1.0)
-   if(min_x < 0){ min_x = 0 }
-   if(min_y < 0){ min_y = 0 }
-   if(max_x > _soft_w){ max_x = _soft_w }
-   if(max_y > _soft_h){ max_y = _soft_h }
+   if min_x < 0 { min_x = 0 }
+   if min_y < 0 { min_y = 0 }
+   if max_x > _soft_w { max_x = _soft_w }
+   if max_y > _soft_h { max_y = _soft_h }
    def c0, c1, c2 = _soft_vertex_color(o0, use_material), _soft_vertex_color(o1, use_material), _soft_vertex_color(o2, use_material)
    def uv_off = _base_uv_offset()
    def u0, v0 = load32_f32(o0, uv_off), load32_f32(o0, uv_off + 4)
    def u1, v1 = load32_f32(o1, uv_off), load32_f32(o1, uv_off + 4)
    def u2, v2 = load32_f32(o2, uv_off), load32_f32(o2, uv_off + 4)
    mut y = min_y
-   while(y < max_y){
+   while y < max_y {
       mut x = min_x
-      while(x < max_x){
+      while x < max_x {
          def px, py = float(x) + 0.5, float(y) + 0.5
          def e0 = ((x1 - px) * (y2 - py) - (y1 - py) * (x2 - px)) / area
          def e1 = ((x2 - px) * (y0 - py) - (y2 - py) * (x0 - px)) / area
          def e2 = 1.0 - e0 - e1
-         if(e0 >= -0.00001 && e1 >= -0.00001 && e2 >= -0.00001){
+         if e0 >= -0.00001 && e1 >= -0.00001 && e2 >= -0.00001 {
             mut col = _soft_color_lerp3(c0, c1, c2, e0, e1, e2)
-            if(tex_id > 0){
+            if tex_id > 0 {
                def tu = u0 * e0 + u1 * e1 + u2 * e2
                def tv = v0 * e0 + v1 * e1 + v2 * e2
                col = _soft_mul_color(col, _soft_sample_tex(tex_id, tu, tv))
@@ -513,10 +510,10 @@ fn _soft_draw_tri(any p, int i0, int i1, int i2, int tex_id=-1, bool use_materia
 }
 
 fn _soft_draw_vertices(any p, int count, int tex_id=-1, bool use_material=false) bool {
-   if(!_soft_ensure_surface() || !p || count <= 0){ return false }
+   if !_soft_ensure_surface() || !p || count <= 0 { return false }
    tex_id = _soft_active_tex(tex_id, use_material)
    mut i = 0
-   while(i + 2 < count){
+   while i + 2 < count {
       _soft_draw_tri(p, i, i + 1, i + 2, tex_id, use_material)
       i += 3
    }
@@ -524,7 +521,7 @@ fn _soft_draw_vertices(any p, int count, int tex_id=-1, bool use_material=false)
 }
 
 fn _soft_draw_line_segment(any o0, any o1, f64 width=1.0, bool use_material=false) bool {
-   if(!_soft_ensure_surface() || !o0 || !o1){ return false }
+   if !_soft_ensure_surface() || !o0 || !o1 { return false }
    def p0 = _soft_project(load32_f32(o0, _OFF_X), load32_f32(o0, _OFF_X + 4), load32_f32(o0, _OFF_X + 8))
    def p1 = _soft_project(load32_f32(o1, _OFF_X), load32_f32(o1, _OFF_X + 4), load32_f32(o1, _OFF_X + 8))
    def x0, y0 = float(p0.get(0, 0.0)), float(p0.get(1, 0.0))
@@ -534,13 +531,13 @@ fn _soft_draw_line_segment(any o0, any o1, f64 width=1.0, bool use_material=fals
    def c0, c1 = _soft_vertex_color(o0, use_material), _soft_vertex_color(o1, use_material)
    mut last_x, last_y = -999999, -999999
    mut i = 0
-   while(i <= steps){
+   while i <= steps {
       def t = float(i) / float(steps)
       def x = x0 + dx * t
       def y = y0 + dy * t
       def c = _soft_color_lerp2(c0, c1, t)
       def ix, iy = int(x + 0.5), int(y + 0.5)
-      if(ix != last_x || iy != last_y){
+      if ix != last_x || iy != last_y {
          _soft_plot_line_sample(ix, iy, width, c)
          last_x, last_y = ix, iy
       }
@@ -550,9 +547,9 @@ fn _soft_draw_line_segment(any o0, any o1, f64 width=1.0, bool use_material=fals
 }
 
 fn _soft_draw_lines(any p, int line_count, f64 width=1.0, bool use_material=false) bool {
-   if(!_soft_ensure_surface() || !p || line_count <= 0){ return false }
+   if !_soft_ensure_surface() || !p || line_count <= 0 { return false }
    mut i = 0
-   while(i < line_count){
+   while i < line_count {
       def o0 = p + (i * 2) * _STRIDE
       def o1 = p + (i * 2 + 1) * _STRIDE
       _soft_draw_line_segment(o0, o1, width, use_material)
@@ -562,9 +559,9 @@ fn _soft_draw_lines(any p, int line_count, f64 width=1.0, bool use_material=fals
 }
 
 fn _soft_draw_points(any p, int point_count, bool use_material=false) bool {
-   if(!_soft_ensure_surface() || !p || point_count <= 0){ return false }
+   if !_soft_ensure_surface() || !p || point_count <= 0 { return false }
    mut i = 0
-   while(i < point_count){
+   while i < point_count {
       def off = p + i * _STRIDE
       def pt = _soft_project(load32_f32(off, _OFF_X), load32_f32(off, _OFF_X + 4), load32_f32(off, _OFF_X + 8))
       _soft_rect(float(pt.get(0, 0.0)) - 1.0, float(pt.get(1, 0.0)) - 1.0, 2.0, 2.0, _soft_vertex_color(off, use_material))
@@ -574,30 +571,30 @@ fn _soft_draw_points(any p, int point_count, bool use_material=false) bool {
 }
 
 fn _soft_index(any idx_base, int i, int index_type=0) int {
-   if(index_type == 1){ return int(load32(idx_base, i * 4)) }
+   if index_type == 1 { return int(load32(idx_base, i * 4)) }
    int(load16(idx_base, i * 2)) & 65535
 }
 
 fn _soft_draw_indexed(any p, int count, any idx_base, int idx_count, int index_type=0, int tex_id=-1, bool is_lines=false, f64 width=1.0, bool is_points=false, bool use_material=false) bool {
-   if(!_soft_ensure_surface() || !p || !idx_base || idx_count <= 0){ return false }
+   if !_soft_ensure_surface() || !p || !idx_base || idx_count <= 0 { return false }
    tex_id = _soft_active_tex(tex_id, use_material)
-   if(is_points){
+   if is_points {
       mut i = 0
-      while(i < idx_count){
+      while i < idx_count {
          def vi = _soft_index(idx_base, i, index_type)
-         if(count <= 0 || (vi >= 0 && vi < count)){
+         if count <= 0 || (vi >= 0 && vi < count) {
             _soft_draw_points(p + vi * _STRIDE, 1, use_material)
          }
          i += 1
       }
       return true
    }
-   if(is_lines){
+   if is_lines {
       mut i = 0
-      while(i + 1 < idx_count){
+      while i + 1 < idx_count {
          def a = _soft_index(idx_base, i, index_type)
          def b = _soft_index(idx_base, i + 1, index_type)
-         if(count <= 0 || (a >= 0 && b >= 0 && a < count && b < count)){
+         if count <= 0 || (a >= 0 && b >= 0 && a < count && b < count) {
             _soft_draw_line_segment(p + a * _STRIDE, p + b * _STRIDE, width, use_material)
          }
          i += 2
@@ -605,11 +602,11 @@ fn _soft_draw_indexed(any p, int count, any idx_base, int idx_count, int index_t
       return true
    }
    mut i = 0
-   while(i + 2 < idx_count){
+   while i + 2 < idx_count {
       def a = _soft_index(idx_base, i, index_type)
       def b = _soft_index(idx_base, i + 1, index_type)
       def c = _soft_index(idx_base, i + 2, index_type)
-      if(count <= 0 || (a >= 0 && b >= 0 && c >= 0 && a < count && b < count && c < count)){
+      if count <= 0 || (a >= 0 && b >= 0 && c >= 0 && a < count && b < count && c < count) {
          _soft_draw_tri(p, a, b, c, tex_id, use_material)
       }
       i += 3
@@ -620,11 +617,11 @@ fn _soft_draw_indexed(any p, int count, any idx_base, int idx_count, int index_t
 fn _soft_copy_texture_pixels(int width, int height, any pixels, int format=37) ptr {
    def bytes = width * height * 4
    def cp = malloc(bytes)
-   if(!cp){ return 0 }
-   if(format == 9){
+   if !cp { return 0 }
+   if format == 9 {
       def n = width * height
       mut i = 0
-      while(i < n){
+      while i < n {
          def a = load8(pixels, i) & 255
          store32(cp, _soft_pack(255, 255, 255, a), i * 4)
          i += 1
@@ -636,12 +633,12 @@ fn _soft_copy_texture_pixels(int width, int height, any pixels, int format=37) p
 }
 
 fn _soft_update_texture_pixels(any dst, int tw, int x, int y, int w, int h, any pixels, int format=37) bool {
-   if(!dst || !pixels){ return false }
+   if !dst || !pixels { return false }
    mut yy = 0
-   while(yy < h){
-      if(format == 9){
+   while yy < h {
+      if format == 9 {
          mut xx = 0
-         while(xx < w){
+         while xx < w {
             def a = load8(pixels, yy * w + xx) & 255
             store32(dst, _soft_pack(255, 255, 255, a), (((y + yy) * tw + x + xx) * 4))
             xx += 1
@@ -655,18 +652,18 @@ fn _soft_update_texture_pixels(any dst, int tw, int x, int y, int w, int h, any 
 }
 
 fn _ensure_libgl() any {
-   if(_libgl){ return _libgl }
+   if _libgl { return _libgl }
    _libgl = ffi.dlopen_any("GL")
-   if(!_libgl){ _libgl = ffi.dlopen_any("libGL.so.1") }
+   if !_libgl { _libgl = ffi.dlopen_any("libGL.so.1") }
    _libgl
 }
 
 fn _proc(str name) any {
-   if(_procs.contains(name)){ return _procs.get(name, 0) }
+   if _procs.contains(name) { return _procs.get(name, 0) }
    mut p = lib_uiw.get_proc_address(name)
-   if(!p){
+   if !p {
       def h = _ensure_libgl()
-      if(h){ p = ffi.dlsym(h, name) }
+      if h { p = ffi.dlsym(h, name) }
    }
    _procs[name] = p
    p
@@ -675,100 +672,100 @@ fn _proc(str name) any {
 fn _has(str name) bool { _proc(name) != 0 }
 
 fn _call_trace_enabled() bool {
-   if(_call_trace_mode < 0){ _call_trace_mode = common.env_truthy("NY_GL_CALL_TRACE") ? 1 : 0 }
+   if _call_trace_mode < 0 { _call_trace_mode = common.env_truthy("NY_GL_CALL_TRACE") ? 1 : 0 }
    _call_trace_mode == 1
 }
 
 fn _call0(str name) bool {
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call0_void(p)
    true
 }
 
 fn _call1(str name, any a) bool {
-   if(_call_trace_enabled()){ print("[gl] call1 " + name) }
+   if _call_trace_enabled() { print("[gl] call1 " + name) }
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call1_void(p, a)
    true
 }
 
 fn _call1u(str name, any a) bool {
-   if(_call_trace_enabled()){ print("[gl] call1u " + name) }
+   if _call_trace_enabled() { print("[gl] call1u " + name) }
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call1_u32_void(p, a)
    true
 }
 
 fn _call2(str name, any a, any b) bool {
-   if(_call_trace_enabled()){ print("[gl] call2 " + name) }
+   if _call_trace_enabled() { print("[gl] call2 " + name) }
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call2_void(p, a, b)
    true
 }
 
 fn _call3(str name, any a, any b, any c) bool {
-   if(_call_trace_enabled()){ print("[gl] call3 " + name) }
+   if _call_trace_enabled() { print("[gl] call3 " + name) }
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call3_void(p, a, b, c)
    true
 }
 
 fn _call4(str name, any a, any b, any c, any d) bool {
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call4_void(p, a, b, c, d)
    true
 }
 
 fn _call7(str name, any a, any b, any c, any d, any e, any f, any g) bool {
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call7_void(p, a, b, c, d, e, f, g)
    true
 }
 
 fn _call9(str name, any a, any b, any c, any d, any e, any f, any g, any h, any i) bool {
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call9_void(p, a, b, c, d, e, f, g, h, i)
    true
 }
 
 fn _call1f(str name, any a) bool {
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call1_f32_void(p, a)
    true
 }
 
 fn _call2f(str name, any a, any b) bool {
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call2_f32_void(p, a, b)
    true
 }
 
 fn _call3f(str name, any a, any b, any c) bool {
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call3_f32_void(p, a, b, c)
    true
 }
 
 fn _call4f(str name, any a, any b, any c, any d) bool {
    def p = _proc(name)
-   if(!p){ return false }
+   if !p { return false }
    ffi.call4_f32_void(p, a, b, c, d)
    true
 }
 
 fn _ensure_name_ptr() ptr {
-   if(!_name_ptr){ _name_ptr = zalloc(4) }
+   if !_name_ptr { _name_ptr = zalloc(4) }
    _name_ptr
 }
 
@@ -792,41 +789,41 @@ fn _publish_frame_stats() bool {
 
 fn _record_draw(int vertices, bool static_draw=false, bool indexed_draw=false) bool {
    _frame_draw_calls += 1
-   if(static_draw){ _frame_static_draw_calls += 1 } else { _frame_dynamic_draw_calls += 1 }
-   if(indexed_draw){ _frame_indexed_draw_calls += 1 }
+   if static_draw { _frame_static_draw_calls += 1 } else { _frame_dynamic_draw_calls += 1 }
+   if indexed_draw { _frame_indexed_draw_calls += 1 }
    _frame_submitted_vertices += int(max(0, vertices))
    true
 }
 
 fn _gen_name(str fn_name) int {
    def p = _ensure_name_ptr()
-   if(!p){ return 0 }
+   if !p { return 0 }
    store32(p, 0, 0)
-   if(!_call2(fn_name, 1, p)){ return 0 }
+   if !_call2(fn_name, 1, p) { return 0 }
    int(load32(p, 0))
 }
 
 fn _delete_name(str fn_name, int id) bool {
-   if(id <= 0){ return false }
+   if id <= 0 { return false }
    def p = _ensure_name_ptr()
-   if(!p){ return false }
+   if !p { return false }
    store32(p, id, 0)
    _call2(fn_name, 1, p)
 }
 
 fn _ensure_matrix_buf() ptr {
-   if(!_matrix_buf){ _matrix_buf = zalloc(64) }
+   if !_matrix_buf { _matrix_buf = zalloc(64) }
    _matrix_buf
 }
 
 fn _ensure_light_buf() ptr {
-   if(!_light_buf){ _light_buf = zalloc(64) }
+   if !_light_buf { _light_buf = zalloc(64) }
    _light_buf
 }
 
 fn _store_light_vec(int off, f64 x, f64 y, f64 z, f64 w) bool {
    def p = _ensure_light_buf()
-   if(!p){ return false }
+   if !p { return false }
    store32_f32(p, x, off + 0)
    store32_f32(p, y, off + 4)
    store32_f32(p, z, off + 8)
@@ -837,7 +834,7 @@ fn _store_light_vec(int off, f64 x, f64 y, f64 z, f64 w) bool {
 fn _load_mat(int mode, any mat) bool {
    _call1("glMatrixMode", mode)
    def p = _ensure_matrix_buf()
-   if(p && is_list(mat) && render_shared.store_mat4_cm_raw(p, mat, true)){
+   if p && is_list(mat) && render_shared.store_mat4_cm_raw(p, mat, true) {
       _call1("glLoadMatrixf", p)
       return true
    }
@@ -868,11 +865,11 @@ fn _decode_uv_rot8(int q) f64 {
 }
 
 fn _load_base_uv_texture_matrix(int xf0, int xf1) bool {
-   if(_last_texture_xf0 == xf0 && _last_texture_xf1 == xf1){ return true }
+   if _last_texture_xf0 == xf0 && _last_texture_xf1 == xf1 { return true }
    _last_texture_xf0 = xf0
    _last_texture_xf1 = xf1
    _call1("glMatrixMode", GL_TEXTURE)
-   if(_uv_xf_identity(xf0, xf1)){
+   if _uv_xf_identity(xf0, xf1) {
       _call0("glLoadIdentity")
       _call1("glMatrixMode", GL_MODELVIEW)
       return true
@@ -886,7 +883,7 @@ fn _load_base_uv_texture_matrix(int xf0, int xf1) bool {
    def cr = cos(rot)
    def sr = sin(rot)
    def p = _ensure_matrix_buf()
-   if(p){
+   if p {
       memset(p, 0, 64)
       store32_f32(p, cr * scl_x, 0)
       store32_f32(p, -sr * scl_x, 4)
@@ -909,11 +906,11 @@ fn _default_ortho(int w, int h) list {
 }
 
 fn _ensure_scratch(int bytes) ptr {
-   if(bytes <= 0){ return 0 }
-   if(_scratch && _scratch_cap >= bytes){ return _scratch }
-   if(_scratch){ free(_scratch) _scratch = 0 _scratch_cap = 0 }
+   if bytes <= 0 { return 0 }
+   if _scratch && _scratch_cap >= bytes { return _scratch }
+   if _scratch { free(_scratch) _scratch = 0 _scratch_cap = 0 }
    _scratch = zalloc(bytes)
-   if(_scratch){ _scratch_cap = bytes }
+   if _scratch { _scratch_cap = bytes }
    _scratch
 }
 
@@ -927,13 +924,13 @@ fn _draw_mode(bool lines=false, bool points=false) int {
 }
 
 fn _filter_value(int filter, bool min_filter=false, bool mips=false) int {
-   if(mips && min_filter){ return filter == 0 ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR }
+   if mips && min_filter { return filter == 0 ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR }
    filter == 0 ? GL_NEAREST : GL_LINEAR
 }
 
 fn _format_internal(int fmt) int {
-   if(fmt == 43){ return GL_SRGB8_ALPHA8 }
-   if(fmt == 9){ return GL_INTENSITY8 }
+   if fmt == 43 { return GL_SRGB8_ALPHA8 }
+   if fmt == 9 { return GL_INTENSITY8 }
    GL_RGBA8
 }
 
@@ -945,16 +942,16 @@ fn _bind_buffer(int target, any handle) bool {
 }
 
 fn _ensure_dynamic_vbo() int {
-   if(_dynamic_vbo > 0){ return _dynamic_vbo }
-   if(!_has("glGenBuffers")){ return 0 }
+   if _dynamic_vbo > 0 { return _dynamic_vbo }
+   if !_has("glGenBuffers") { return 0 }
    _dynamic_vbo = _gen_name("glGenBuffers")
    _dynamic_vbo
 }
 
 fn _upload_dynamic_vertices(any p, int count) bool {
-   if(!p || count <= 0){ return false }
+   if !p || count <= 0 { return false }
    def id = _ensure_dynamic_vbo()
-   if(id <= 0){ return false }
+   if id <= 0 { return false }
    _bind_buffer(GL_ARRAY_BUFFER, id)
    _ny_glBufferData(GL_ARRAY_BUFFER, count * _STRIDE, p, GL_DYNAMIC_DRAW)
    true
@@ -967,7 +964,7 @@ fn _gl_refresh_config() bool {
    _cfg_gl_lit_textures = !common.env_falsey("NY_GL_LIT_TEXTURES")
    ;; Default to lit textures in GL. The old albedo preview was too flat.
    _cfg_gl_preview_textures = common.env_truthy("NY_GL_PREVIEW_TEXTURES")
-   if(_cfg_gl_force_base_only){
+   if _cfg_gl_force_base_only {
       _cfg_gl_preview_textures = true
       _cfg_gl_lit_textures = false
    }
@@ -977,8 +974,11 @@ fn _gl_refresh_config() bool {
 }
 
 fn _gl_preview_textures() bool { _cfg_gl_preview_textures }
+
 fn _gl_lit_textures() bool { _cfg_gl_lit_textures }
+
 fn _gl_use_vertex_colors() bool { _cfg_gl_vertex_colors }
+
 fn _gl_finish_each_draw() bool { _cfg_gl_finish_each_draw }
 
 fn _base_uv_offset() int {
@@ -986,7 +986,7 @@ fn _base_uv_offset() int {
 }
 
 fn _set_tex_env_mode(int mode) bool {
-   if(_last_tex_env_mode == mode){ return true }
+   if _last_tex_env_mode == mode { return true }
    _ny_glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, mode)
    _last_tex_env_mode = mode
    true
@@ -1000,9 +1000,8 @@ fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
    ;; fixed-function material/lighting color, which made Avocado-style glTFs
    ;; appear as gray bands even when the texture id was valid.
    mut active_tex = tex_id
-   if(active_tex == -2 && _current_base_tex_id > 0){ active_tex = _current_base_tex_id }
-
-   if(active_tex > 0){
+   if active_tex == -2 && _current_base_tex_id > 0 { active_tex = _current_base_tex_id }
+   if active_tex > 0 {
       _ny_glEnable(GL_TEXTURE_2D)
       ;; Default textured path is now a cheap albedo preview: no fixed-function
       ;; lighting or vertex-color multiplication.  Use NY_GL_LIT_TEXTURES=1 to
@@ -1020,7 +1019,7 @@ fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
    ;; scene depth buffer completely.  Mesh draw paths pass depth_write=true;
    ;; otherwise GL draws indexed triangles in index order without updating depth,
    ;; so backfaces and darker shell triangles bleed over the albedo texture.
-   if(depth_write){ _call1u("glEnable", GL_DEPTH_TEST) }
+   if depth_write { _call1u("glEnable", GL_DEPTH_TEST) }
    else { _call1u("glDisable", GL_DEPTH_TEST) }
    _set_depth_mask(depth_write)
    true
@@ -1031,15 +1030,15 @@ fn _color_chan(int color_u32, int shift) f64 {
 }
 
 fn _apply_current_color() bool {
-   if(_current_base_tex_id > 0 && _gl_preview_textures()){
+   if _current_base_tex_id > 0 && _gl_preview_textures() {
       _call4f("glColor4f", 1.0, 1.0, 1.0, 1.0)
       return true
    }
    def mat = int(_current_material_u32)
    def rough = float((mat >> 8) & 255) / 255.0
    mut shade = 1.0
-   if(mat != 0x0000ff00){
-      if(_current_base_tex_id <= 0){
+   if mat != 0x0000ff00 {
+      if _current_base_tex_id <= 0 {
          shade = max(0.46, min(1.02, 1.02 - rough * 0.52))
       } else {
          shade = max(0.68, min(1.06, 1.03 - rough * 0.28))
@@ -1049,11 +1048,11 @@ fn _apply_current_color() bool {
       _color_chan(_current_base_color_u32, 0) * shade,
       _color_chan(_current_base_color_u32, 8) * shade,
       _color_chan(_current_base_color_u32, 16) * shade,
-      _color_chan(_current_base_color_u32, 24))
+   _color_chan(_current_base_color_u32, 24))
 }
 
 fn _apply_lighting(bool enabled) bool {
-   if(!enabled){
+   if !enabled {
       _call1u("glDisable", GL_LIGHTING)
       _call1u("glDisable", GL_LIGHT0)
       _call1u("glDisable", GL_COLOR_MATERIAL)
@@ -1061,7 +1060,7 @@ fn _apply_lighting(bool enabled) bool {
       return true
    }
    def p = _ensure_light_buf()
-   if(!p){ return false }
+   if !p { return false }
    _store_light_vec(0, 0.38, 0.38, 0.38, 1.0)
    _store_light_vec(16, 0.65, 0.65, 0.65, 1.0)
    _store_light_vec(32, 0.25, 0.25, 0.25, 1.0)
@@ -1081,14 +1080,14 @@ fn _apply_lighting(bool enabled) bool {
 
 fn _set_depth_mask(bool enabled) bool {
    "Sets glDepthMask to control whether depth buffer writes are enabled."
-   if(_depth_mask_enabled == enabled){ return true }
+   if _depth_mask_enabled == enabled { return true }
    _call1("glDepthMask", enabled ? 1 : 0)
    _depth_mask_enabled = enabled
    true
 }
 
 fn _material_uses_vertex_color() bool {
-   if(!_gl_use_vertex_colors()){ return false }
+   if !_gl_use_vertex_colors() { return false }
    band(int(_current_vc_mode), 1) != 0 || band(int(_current_vc_mode), 4) != 0
 }
 
@@ -1096,7 +1095,7 @@ fn _setup_arrays(any base, bool use_vertex_color=true, bool lit_material=false) 
    def material_preview = lit_material && _gl_preview_textures()
    _apply_lighting(lit_material && !material_preview)
    _ny_glEnableClientState(GL_VERTEX_ARRAY)
-   if(use_vertex_color && !material_preview){
+   if use_vertex_color && !material_preview {
       _ny_glEnableClientState(GL_COLOR_ARRAY)
       _ny_glColorPointer(4, GL_UNSIGNED_BYTE, _STRIDE, base + _OFF_C)
    } else {
@@ -1104,7 +1103,7 @@ fn _setup_arrays(any base, bool use_vertex_color=true, bool lit_material=false) 
       _apply_current_color()
    }
    _ny_glEnableClientState(GL_TEXTURE_COORD_ARRAY)
-   if(lit_material && !material_preview){
+   if lit_material && !material_preview {
       _ny_glEnableClientState(GL_NORMAL_ARRAY)
       _ny_glNormalPointer(GL_FLOAT, _STRIDE, base + _OFF_NX)
    } else {
@@ -1120,7 +1119,7 @@ fn _setup_arrays_vbo(any base, bool use_vertex_color=true, bool lit_material=fal
    def material_preview = lit_material && _gl_preview_textures()
    _apply_lighting(lit_material && !material_preview)
    _ny_glEnableClientState(GL_VERTEX_ARRAY)
-   if(use_vertex_color && !material_preview){
+   if use_vertex_color && !material_preview {
       _ny_glEnableClientState(GL_COLOR_ARRAY)
       _ny_glColorPointerOffset(4, GL_UNSIGNED_BYTE, _STRIDE, bo + _OFF_C)
    } else {
@@ -1128,7 +1127,7 @@ fn _setup_arrays_vbo(any base, bool use_vertex_color=true, bool lit_material=fal
       _apply_current_color()
    }
    _ny_glEnableClientState(GL_TEXTURE_COORD_ARRAY)
-   if(lit_material && !material_preview){
+   if lit_material && !material_preview {
       _ny_glEnableClientState(GL_NORMAL_ARRAY)
       _ny_glNormalPointerOffset(GL_FLOAT, _STRIDE, bo + _OFF_NX)
    } else {
@@ -1140,19 +1139,19 @@ fn _setup_arrays_vbo(any base, bool use_vertex_color=true, bool lit_material=fal
 }
 
 fn _draw_immediate_vertices(any p, int count, int mode, bool use_vertex_color=true, bool lit_material=false) bool {
-   if(!p || count <= 0){ return false }
+   if !p || count <= 0 { return false }
    _apply_lighting(lit_material)
    _ny_glBegin(mode)
    mut i = 0
-   while(i < count){
+   while i < count {
       def off = p + i * _STRIDE
-      if(use_vertex_color){
+      if use_vertex_color {
          def c = load32(off, _OFF_C)
          _ny_glColor4d(
             float(c & 255) / 255.0,
             float((c >> 8) & 255) / 255.0,
             float((c >> 16) & 255) / 255.0,
-            float((c >> 24) & 255) / 255.0)
+         float((c >> 24) & 255) / 255.0)
       } else {
          _apply_current_color()
       }
@@ -1167,7 +1166,7 @@ fn _draw_immediate_vertices(any p, int count, int mode, bool use_vertex_color=tr
 }
 
 fn _norm_i32(int v) int {
-   if(v > 2147483647){ return v - 4294967296 }
+   if v > 2147483647 { return v - 4294967296 }
    v
 }
 
@@ -1199,12 +1198,12 @@ fn set_ui_material(int base_tex_id=-1, int alpha_u32=0, int vc_mode=12) any {
    _current_material_u32 = 0x0000ff00
    _current_unlit = true
    _current_base_tex_id = _norm_i32(base_tex_id)
-   if(_current_base_tex_id <= 0){ _current_base_tex_id = -1 }
+   if _current_base_tex_id <= 0 { _current_base_tex_id = -1 }
    _current_alpha_u32 = alpha_u32
    _current_vc_mode = int(vc_mode)
    _current_base_uv_xf0 = 0
    _current_base_uv_xf1 = 0
-   if(_current_base_tex_id > 0){ bind_texture(_current_base_tex_id) }
+   if _current_base_tex_id > 0 { bind_texture(_current_base_tex_id) }
    0
 }
 
@@ -1248,17 +1247,17 @@ fn set_material_packed(
    _current_base_color_u32 = base_color_u32
    _current_material_u32 = material_u32
    _current_base_tex_id = _norm_i32(base_tex_id)
-   if(_current_base_tex_id <= 0){ _current_base_tex_id = -1 }
+   if _current_base_tex_id <= 0 { _current_base_tex_id = -1 }
    _current_alpha_u32 = alpha_u32
    _current_vc_mode = int(vc_mode)
    _current_base_uv_xf0 = base_uv_xf0
    _current_base_uv_xf1 = base_uv_xf1
-   if(_current_base_tex_id > 0){ bind_texture(_current_base_tex_id) }
+   if _current_base_tex_id > 0 { bind_texture(_current_base_tex_id) }
    0
 }
 
 fn set_material_from_slab(?ptr p, int vc_mode=0) any {
-   if(!p){ return 0 }
+   if !p { return 0 }
    set_material_packed(
       load32(p, 0),
       load32(p, 4),
@@ -1296,13 +1295,13 @@ fn set_material_from_slab(?ptr p, int vc_mode=0) any {
 }
 
 fn set_material_from_slab_base(?ptr p, int fallback_base_tex_id=-1, int vc_mode=0) any {
-   if(!p){ return 0 }
+   if !p { return 0 }
    ;; Some mesh records keep the correct base texture on the mesh/vertex path
    ;; while an older material slab can carry -1/0.  Preserve every material word
    ;; from the slab, but allow the caller to override only the base-color texture.
    mut base_tex_id = _norm_i32(load32(p, 20))
    def fb = _norm_i32(fallback_base_tex_id)
-   if(base_tex_id <= 0 && fb > 0){ base_tex_id = fb }
+   if base_tex_id <= 0 && fb > 0 { base_tex_id = fb }
    set_material_packed(
       load32(p, 0),
       load32(p, 4),
@@ -1337,23 +1336,23 @@ fn set_material_from_slab_base(?ptr p, int fallback_base_tex_id=-1, int vc_mode=
 
 fn init(any win) bool {
    "Initializes a real OpenGL renderer for a window."
-   if(!win){ return false }
+   if !win { return false }
    _gl_refresh_config()
    _win = win
    _w = int(win.get("w", 0))
    _h = int(win.get("h", 0))
-   if(_w <= 0 || _h <= 0){
+   if _w <= 0 || _h <= 0 {
       def fb = lib_uiw.get_framebuffer_size(win)
       _w, _h = int(fb.get(0, 0)), int(fb.get(1, 0))
    }
-   if(_soft_enabled()){
+   if _soft_enabled() {
       _mvp = _default_ortho(_w, _h)
       _model = mat4_identity()
       set_ui_material(-1, 0, 12)
       _soft_ensure_surface()
-      if(!_default_tex){
+      if !_default_tex {
          def px = zalloc(4)
-         if(px){
+         if px {
             store32(px, 0xffffffff, 0)
             _default_tex = create_texture(1, 1, px)
             free(px)
@@ -1361,10 +1360,10 @@ fn init(any win) bool {
       }
       return true
    }
-   if(!lib_uiw.make_current(win)){ return false }
-   if(_cfg_gl_perf){ lib_uiw.set_window_vsync(false) }
-   if(common.env_present("NY_GL_SWAP_INTERVAL")){ lib_uiw.set_window_vsync(common.env_int_clamped("NY_GL_SWAP_INTERVAL", 0, 0, 1) > 0) }
-   if(!_has("glClear") || !_has("glDrawArrays") || !_has("glVertexPointer") || !_has("glTexImage2D")){
+   if !lib_uiw.make_current(win) { return false }
+   if _cfg_gl_perf { lib_uiw.set_window_vsync(false) }
+   if common.env_present("NY_GL_SWAP_INTERVAL") { lib_uiw.set_window_vsync(common.env_int_clamped("NY_GL_SWAP_INTERVAL", 0, 0, 1) > 0) }
+   if !_has("glClear") || !_has("glDrawArrays") || !_has("glVertexPointer") || !_has("glTexImage2D") {
       shutdown()
       return false
    }
@@ -1381,9 +1380,9 @@ fn init(any win) bool {
    _call1("glEnable", GL_MULTISAMPLE)
    _call2("glPixelStorei", GL_UNPACK_ALIGNMENT, 1)
    set_ui_material(-1, 0, 12)
-   if(!_default_tex){
+   if !_default_tex {
       def px = zalloc(4)
-      if(px){
+      if px {
          store32(px, 0xffffffff, 0)
          _default_tex = create_texture(1, 1, px)
          free(px)
@@ -1394,39 +1393,39 @@ fn init(any win) bool {
 
 fn shutdown() bool {
    "Shuts down OpenGL backend state held by Nytrix."
-   if(_win && !_soft_enabled()){ lib_uiw.make_current(_win) }
+   if _win && !_soft_enabled() { lib_uiw.make_current(_win) }
    def keys = dict_keys(_tex_live)
    mut i = 0
-   while(i < keys.len){
+   while i < keys.len {
       def k = int(keys[i])
-      if(!_soft_enabled() && k > 0){ _delete_name("glDeleteTextures", k) }
+      if !_soft_enabled() && k > 0 { _delete_name("glDeleteTextures", k) }
       i += 1
    }
-	   _tex_live = dict(128)
-	   _tex_formats = dict(128)
-	   _default_tex = 0
-	   _bound_tex = -999999
-	   _lighting_enabled = false
-	   _last_tex_env_mode = -999999
-	   if(_dynamic_vbo > 0){ _delete_name("glDeleteBuffers", _dynamic_vbo) _dynamic_vbo = 0 }
-	   if(_scratch){ free(_scratch) _scratch = 0 _scratch_cap = 0 }
-   if(_soft_buf){ free(_soft_buf) _soft_buf = 0 _soft_w = 0 _soft_h = 0 }
+   _tex_live = dict(128)
+   _tex_formats = dict(128)
+   _default_tex = 0
+   _bound_tex = -999999
+   _lighting_enabled = false
+   _last_tex_env_mode = -999999
+   if _dynamic_vbo > 0 { _delete_name("glDeleteBuffers", _dynamic_vbo) _dynamic_vbo = 0 }
+   if _scratch { free(_scratch) _scratch = 0 _scratch_cap = 0 }
+   if _soft_buf { free(_soft_buf) _soft_buf = 0 _soft_w = 0 _soft_h = 0 }
    def pkeys = dict_keys(_tex_pixels)
    mut pi = 0
-   while(pi < pkeys.len){
+   while pi < pkeys.len {
       def pp = _tex_pixels.get(pkeys[pi], 0)
-      if(pp){ free(pp) }
+      if pp { free(pp) }
       pi += 1
    }
    _tex_pixels = dict(128)
-   if(_matrix_buf){ free(_matrix_buf) _matrix_buf = 0 }
-   if(_light_buf){ free(_light_buf) _light_buf = 0 }
-   if(_name_ptr){ free(_name_ptr) _name_ptr = 0 }
-   if(_libgl){ ffi.dlclose(_libgl) _libgl = 0 }
+   if _matrix_buf { free(_matrix_buf) _matrix_buf = 0 }
+   if _light_buf { free(_light_buf) _light_buf = 0 }
+   if _name_ptr { free(_name_ptr) _name_ptr = 0 }
+   if _libgl { ffi.dlclose(_libgl) _libgl = 0 }
    _procs = dict(128)
    _frame_open = false
    _win = 0
-   if(!_soft_enabled()){ lib_uiw.make_current(0) }
+   if !_soft_enabled() { lib_uiw.make_current(0) }
    true
 }
 
@@ -1445,21 +1444,21 @@ fn capabilities() dict {
 
 fn begin_frame(any win=0, int w=0, int h=0) bool {
    "Begins an OpenGL frame."
-   if(win){ _win = win }
-   if(!_win){ return false }
-   if(!_soft_enabled() && !lib_uiw.make_current(_win)){ return false }
-   if(w <= 0 || h <= 0){
+   if win { _win = win }
+   if !_win { return false }
+   if !_soft_enabled() && !lib_uiw.make_current(_win) { return false }
+   if w <= 0 || h <= 0 {
       def sz = _soft_enabled() ? lib_uiw.size(_win) : lib_uiw.get_framebuffer_size(_win)
       w, h = int(sz.get(0, _w)), int(sz.get(1, _h))
    }
-   if(w > 0){ _w = w }
-   if(h > 0){ _h = h }
+   if w > 0 { _w = w }
+   if h > 0 { _h = h }
    _reset_frame_stats()
-   if(_soft_enabled()){
-      if(!_mvp){ _mvp = _default_ortho(_w, _h) }
-      if(!_model){ _model = mat4_identity() }
+   if _soft_enabled() {
+      if !_mvp { _mvp = _default_ortho(_w, _h) }
+      if !_model { _model = mat4_identity() }
       _soft_ensure_surface()
-      if(!_next_frame_load_color){
+      if !_next_frame_load_color {
          _soft_clear(_soft_pack(int(_clear_r * 255.0), int(_clear_g * 255.0), int(_clear_b * 255.0), int(_clear_a * 255.0)))
       }
       _next_frame_load_color = false
@@ -1468,13 +1467,13 @@ fn begin_frame(any win=0, int w=0, int h=0) bool {
    }
    _call4("glViewport", 0, 0, _w, _h)
    _call1("glEnable", GL_MULTISAMPLE)
-   if(!_mvp){ _mvp = _default_ortho(_w, _h) }
-   if(!_model){ _model = mat4_identity() }
+   if !_mvp { _mvp = _default_ortho(_w, _h) }
+   if !_model { _model = mat4_identity() }
    _apply_matrices()
-   if(_wireframe){ _call2("glPolygonMode", GL_FRONT_AND_BACK, GL_LINE) }
+   if _wireframe { _call2("glPolygonMode", GL_FRONT_AND_BACK, GL_LINE) }
    else { _call2("glPolygonMode", GL_FRONT_AND_BACK, GL_FILL) }
    _set_depth_mask(true)
-   if(_next_frame_load_color){
+   if _next_frame_load_color {
       _call1("glClear", GL_DEPTH_BUFFER_BIT)
    } else {
       _call4f("glClearColor", _clear_r, _clear_g, _clear_b, _clear_a)
@@ -1487,10 +1486,10 @@ fn begin_frame(any win=0, int w=0, int h=0) bool {
 
 fn end_frame() bool {
    "Presents the OpenGL backbuffer."
-   if(!_win){ return false }
+   if !_win { return false }
    _publish_frame_stats()
-   if(_soft_enabled()){
-      if(_soft_buf){ lib_uiw.blit_software(_win, _soft_buf, _soft_w, _soft_h) }
+   if _soft_enabled() {
+      if _soft_buf { lib_uiw.blit_software(_win, _soft_buf, _soft_w, _soft_h) }
       _frame_open = false
       return true
    }
@@ -1500,15 +1499,17 @@ fn end_frame() bool {
 }
 
 fn notify_window_resize(int w, int h) bool {
-   if(w > 0){ _w = w }
-   if(h > 0){ _h = h }
-   if(_soft_enabled()){ return true }
+   if w > 0 { _w = w }
+   if h > 0 { _h = h }
+   if _soft_enabled() { return true }
    _call4("glViewport", 0, 0, _w, _h)
    true
 }
 
 fn get_swapchain_width() int { _w }
+
 fn get_swapchain_height() int { _h }
+
 fn get_swapchain_image_count() int { 2 }
 
 fn renderer_vertex_offset() int { _frame_submitted_vertices * _STRIDE }
@@ -1546,7 +1547,7 @@ fn set_clear_color(f64 r, f64 g, f64 b, f64 a=1.0) bool {
    "Sets the OpenGL clear color."
    _clear_r, _clear_g = float(r), float(g)
    _clear_b, _clear_a = float(b), float(a)
-   if(_soft_enabled()){ return true }
+   if _soft_enabled() { return true }
    _call4f("glClearColor", _clear_r, _clear_g, _clear_b, _clear_a)
 }
 
@@ -1559,52 +1560,52 @@ fn set_next_frame_load_color(any enabled) bool {
 fn clear(f64 r, f64 g, f64 b, f64 a=1.0) bool {
    "Clears the active OpenGL framebuffer with color and depth."
    set_clear_color(r, g, b, a)
-   if(_soft_enabled()){ return _soft_clear(_soft_pack(int(float(r) * 255.0), int(float(g) * 255.0), int(float(b) * 255.0), int(float(a) * 255.0))) }
+   if _soft_enabled() { return _soft_clear(_soft_pack(int(float(r) * 255.0), int(float(g) * 255.0), int(float(b) * 255.0), int(float(a) * 255.0))) }
    _set_depth_mask(true)
    _call1("glClear", GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 }
 
 fn clear_depth() bool {
    "Clears the OpenGL depth buffer."
-   if(_soft_enabled()){ return true }
+   if _soft_enabled() { return true }
    _set_depth_mask(true)
    _call1("glClear", GL_DEPTH_BUFFER_BIT)
 }
 
 fn set_mvp(any mat) bool {
    _mvp = mat
-   if(_frame_open && !_soft_enabled()){ _apply_matrices() }
+   if _frame_open && !_soft_enabled() { _apply_matrices() }
    true
 }
 
 fn set_model_matrix(any mat) bool {
    _model = mat
-   if(_frame_open && !_soft_enabled()){ _apply_matrices() }
+   if _frame_open && !_soft_enabled() { _apply_matrices() }
    true
 }
 
 fn set_ortho(f64 l, f64 r, f64 b, f64 t, f64 n, f64 f) bool {
    _mvp = mat4_ortho(l, r, b, t, n, f)
-   if(_frame_open && !_soft_enabled()){ _apply_matrices() }
+   if _frame_open && !_soft_enabled() { _apply_matrices() }
    true
 }
 
 fn set_perspective(f64 fovy, f64 aspect, f64 near, f64 far) bool {
    _mvp = mat4_perspective(fovy, aspect, near, far)
-   if(_frame_open && !_soft_enabled()){ _apply_matrices() }
+   if _frame_open && !_soft_enabled() { _apply_matrices() }
    true
 }
 
 fn set_scissor_rect(int x, int y, int w, int h) bool {
    "Applies a top-left-origin scissor rectangle."
    mut sx, sy, sw, sh = x, y, w, h
-   if(sx < 0){ sw += sx sx = 0 }
-   if(sy < 0){ sh += sy sy = 0 }
-   if(sw < 0){ sw = 0 }
-   if(sh < 0){ sh = 0 }
-   if(sx + sw > _w){ sw = max(0, _w - sx) }
-   if(sy + sh > _h){ sh = max(0, _h - sy) }
-   if(_soft_enabled()){
+   if sx < 0 { sw += sx sx = 0 }
+   if sy < 0 { sh += sy sy = 0 }
+   if sw < 0 { sw = 0 }
+   if sh < 0 { sh = 0 }
+   if sx + sw > _w { sw = max(0, _w - sx) }
+   if sy + sh > _h { sh = max(0, _h - sy) }
+   if _soft_enabled() {
       _soft_scissor = true
       _soft_sx, _soft_sy, _soft_sw, _soft_sh = sx, sy, sw, sh
       return true
@@ -1615,7 +1616,7 @@ fn set_scissor_rect(int x, int y, int w, int h) bool {
 
 fn reset_scissor_rect() bool {
    "Disables the OpenGL scissor test."
-   if(_soft_enabled()){
+   if _soft_enabled() {
       _soft_scissor = false
       return true
    }
@@ -1624,23 +1625,23 @@ fn reset_scissor_rect() bool {
 
 fn set_wireframe(bool enabled) bool {
    _wireframe = !!enabled
-   if(_soft_enabled()){ return true }
-   if(_wireframe){ _call2("glPolygonMode", GL_FRONT_AND_BACK, GL_LINE) }
+   if _soft_enabled() { return true }
+   if _wireframe { _call2("glPolygonMode", GL_FRONT_AND_BACK, GL_LINE) }
    else { _call2("glPolygonMode", GL_FRONT_AND_BACK, GL_FILL) }
    true
 }
 
 fn set_mesh_raster_state(bool nocull=false, bool flip_winding=false) bool {
    "Applies mesh culling and front-face state for GL mesh draws."
-   if(_soft_enabled()){ return true }
+   if _soft_enabled() { return true }
    def want_cull = !nocull
-   if(_mesh_cull_enabled != want_cull){
-      if(want_cull){ _ny_glEnable(GL_CULL_FACE) }
+   if _mesh_cull_enabled != want_cull {
+      if want_cull { _ny_glEnable(GL_CULL_FACE) }
       else { _ny_glDisable(GL_CULL_FACE) }
       _mesh_cull_enabled = want_cull
    }
    def face = flip_winding ? GL_CW : GL_CCW
-   if(_mesh_front_face != face){
+   if _mesh_front_face != face {
       _ny_glFrontFace(face)
       _mesh_front_face = face
    }
@@ -1664,21 +1665,21 @@ fn create_texture_ex(
 ) int {
    "Creates an OpenGL texture from raw pixels."
    _upload_prebaked_bytes
-   if(width <= 0 || height <= 0){ return -1 }
-   if(_soft_enabled()){
-      if(!pixels){ return -1 }
-      if(_last_tex < 0){ _last_tex = 0 }
+   if width <= 0 || height <= 0 { return -1 }
+   if _soft_enabled() {
+      if !pixels { return -1 }
+      if _last_tex < 0 { _last_tex = 0 }
       _last_tex += 1
       def id = _last_tex
       def cp = _soft_copy_texture_pixels(width, height, pixels, format)
-      if(!cp){ return -1 }
+      if !cp { return -1 }
       _tex_live[id] = {"width": width, "height": height, "format": format, "filter": filter}
       _tex_formats[id] = format
       _tex_pixels[id] = cp
       return id
    }
    def id = _gen_name("glGenTextures")
-   if(id <= 0){ return -1 }
+   if id <= 0 { return -1 }
    _bound_tex = -999999
    bind_texture(id)
    _call3("glTexParameteri", GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, _filter_value(filter, true, use_mipmaps))
@@ -1687,7 +1688,7 @@ fn create_texture_ex(
    _call3("glTexParameteri", GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t)
    _call2("glPixelStorei", GL_UNPACK_ALIGNMENT, 1)
    _call9("glTexImage2D", GL_TEXTURE_2D, 0, _format_internal(format), width, height, 0, _format_external(format), GL_UNSIGNED_BYTE, pixels)
-   if(use_mipmaps){ _call1("glGenerateMipmap", GL_TEXTURE_2D) }
+   if use_mipmaps { _call1("glGenerateMipmap", GL_TEXTURE_2D) }
    _tex_live[id] = {"width": width, "height": height, "format": format, "filter": filter}
    _tex_formats[id] = format
    _last_tex = id
@@ -1696,14 +1697,14 @@ fn create_texture_ex(
 
 fn update_texture_rect(int tex_id, int x, int y, int w, int h, any pixels) bool {
    "Updates a sub-rectangle of an existing OpenGL texture."
-   if(tex_id <= 0 || x < 0 || y < 0 || w <= 0 || h <= 0 || !pixels){ return false }
+   if tex_id <= 0 || x < 0 || y < 0 || w <= 0 || h <= 0 || !pixels { return false }
    def meta = _tex_live.get(tex_id, 0)
-   if(!is_dict(meta)){ return false }
+   if !is_dict(meta) { return false }
    def tw, th = int(meta.get("width", 0)), int(meta.get("height", 0))
-   if(x + w > tw || y + h > th){ return false }
-   if(_soft_enabled()){
+   if x + w > tw || y + h > th { return false }
+   if _soft_enabled() {
       def dst = _tex_pixels.get(tex_id, 0)
-      if(!dst){ return false }
+      if !dst { return false }
       return _soft_update_texture_pixels(dst, tw, x, y, w, h, pixels, int(meta.get("format", 37)))
    }
    bind_texture(tex_id)
@@ -1713,12 +1714,12 @@ fn update_texture_rect(int tex_id, int x, int y, int w, int h, any pixels) bool 
 
 fn bind_texture(int tex_id) bool {
    "Binds an OpenGL texture id."
-   if(_soft_enabled()){
+   if _soft_enabled() {
       _bound_tex = tex_id
       return true
    }
-   if(tex_id <= 0){ return bind_default_texture() }
-   if(_bound_tex == tex_id){ return true }
+   if tex_id <= 0 { return bind_default_texture() }
+   if _bound_tex == tex_id { return true }
    _call1("glActiveTexture", GL_TEXTURE0)
    _call2("glBindTexture", GL_TEXTURE_2D, tex_id)
    _bound_tex = tex_id
@@ -1726,55 +1727,57 @@ fn bind_texture(int tex_id) bool {
 }
 
 fn bind_default_texture() bool {
-   if(_soft_enabled()){
+   if _soft_enabled() {
       _bound_tex = _default_tex
       return true
    }
-   if(_default_tex > 0){ return bind_texture(_default_tex) }
+   if _default_tex > 0 { return bind_texture(_default_tex) }
    _call2("glBindTexture", GL_TEXTURE_2D, 0)
    _bound_tex = 0
    true
 }
 
 fn destroy_texture(int tex_id) bool {
-   if(tex_id <= 0){ return false }
-   if(!_soft_enabled()){ _delete_name("glDeleteTextures", tex_id) }
+   if tex_id <= 0 { return false }
+   if !_soft_enabled() { _delete_name("glDeleteTextures", tex_id) }
    def pix = _tex_pixels.get(tex_id, 0)
-   if(pix){ free(pix) }
+   if pix { free(pix) }
    _tex_pixels = _tex_pixels.delete(tex_id)
    _tex_live = _tex_live.delete(tex_id)
    _tex_formats = _tex_formats.delete(tex_id)
-   if(_bound_tex == tex_id){ _bound_tex = -999999 }
+   if _bound_tex == tex_id { _bound_tex = -999999 }
    true
 }
 
 fn texture_size(int tex_id) list {
    def t = _tex_live.get(tex_id, 0)
-   if(is_dict(t)){ return [int(t.get("width", 0)), int(t.get("height", 0))] }
+   if is_dict(t) { return [int(t.get("width", 0)), int(t.get("height", 0))] }
    [0, 0]
 }
 
 fn texture_format(int tex_id) int { int(_tex_formats.get(tex_id, 0)) }
+
 fn texture_count() int { dict_keys(_tex_live).len }
+
 fn last_created_texture_id() int { _last_tex }
 
 fn draw_vertices(any p, int count, int tex_id=-1, bool use_material=false) bool {
    "Draws packed 64-byte vertices through direct OpenGL calls."
-   if(!p || count <= 0){ return false }
-   if(_soft_enabled()){
+   if !p || count <= 0 { return false }
+   if _soft_enabled() {
       _soft_draw_vertices(p, count, tex_id, use_material)
       _record_draw(count, false, false)
       return true
    }
    _enable_draw_state(tex_id, use_material)
-   if(!_draw_immediate_vertices(p, count, GL_TRIANGLES, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit)){ return false }
+   if !_draw_immediate_vertices(p, count, GL_TRIANGLES, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit) { return false }
    _record_draw(count, false, false)
 }
 
 fn draw_lines_raw(any p, int line_count, f64 width=1.0, bool use_material=false) bool {
    "Draws packed 64-byte line vertices through OpenGL client arrays."
-   if(!p || line_count <= 0){ return false }
-   if(_soft_enabled()){
+   if !p || line_count <= 0 { return false }
+   if _soft_enabled() {
       _soft_draw_lines(p, line_count, width, use_material)
       _record_draw(line_count * 2, false, false)
       return true
@@ -1782,21 +1785,21 @@ fn draw_lines_raw(any p, int line_count, f64 width=1.0, bool use_material=false)
    _enable_draw_state(-1, use_material)
    _call1f("glLineWidth", max(1.0, width))
    def verts = line_count * 2
-   if(!_draw_immediate_vertices(p, verts, GL_LINES, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit)){ return false }
+   if !_draw_immediate_vertices(p, verts, GL_LINES, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit) { return false }
    _record_draw(verts, false, false)
 }
 
 fn draw_points_raw(any p, int point_count, int tex_id=-1, bool use_material=false) bool {
    "Draws packed 64-byte point vertices through OpenGL client arrays."
-   if(!p || point_count <= 0){ return false }
-   if(_soft_enabled()){
+   if !p || point_count <= 0 { return false }
+   if _soft_enabled() {
       _soft_draw_points(p, point_count, use_material)
       _record_draw(point_count, false, false)
       return true
    }
    _enable_draw_state(tex_id, use_material)
    _call1f("glPointSize", 1.0)
-   if(!_draw_immediate_vertices(p, point_count, GL_POINTS, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit)){ return false }
+   if !_draw_immediate_vertices(p, point_count, GL_POINTS, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit) { return false }
    _record_draw(point_count, false, false)
 }
 
@@ -1816,24 +1819,24 @@ fn draw_vertices_indexed_raw(
 ) bool {
    "Draws packed vertices with an OpenGL index buffer."
    _pipe_override
-   if(!p || idx_count <= 0){ return false }
-   if(_soft_enabled()){
+   if !p || idx_count <= 0 { return false }
+   if _soft_enabled() {
       def ibase = idx_buf ? idx_buf + int(idx_offset) : idx_offset
-      if(!ibase){ return false }
+      if !ibase { return false }
       _soft_draw_indexed(p, count, ibase, idx_count, index_type, tex_id, is_lines, width, is_points, use_material)
       _record_draw(idx_count, false, true)
       return true
    }
    _enable_draw_state(tex_id, use_material)
    _call1f("glLineWidth", max(1.0, width))
-   if(!_upload_dynamic_vertices(p, count)){ return false }
-   if(idx_buf){ _bind_buffer(GL_ELEMENT_ARRAY_BUFFER, idx_buf) } else { _bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0) }
+   if !_upload_dynamic_vertices(p, count) { return false }
+   if idx_buf { _bind_buffer(GL_ELEMENT_ARRAY_BUFFER, idx_buf) } else { _bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0) }
    _setup_arrays_vbo(0, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit)
    def idx_ty = index_type == 1 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT
-   if(idx_buf){ _ny_glDrawElementsOffset(_draw_mode(is_lines, is_points), idx_count, idx_ty, int(idx_offset)) }
+   if idx_buf { _ny_glDrawElementsOffset(_draw_mode(is_lines, is_points), idx_count, idx_ty, int(idx_offset)) }
    else { _ny_glDrawElements(_draw_mode(is_lines, is_points), idx_count, idx_ty, idx_offset) }
    _bind_buffer(GL_ARRAY_BUFFER, 0)
-   if(idx_buf){ _bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0) }
+   if idx_buf { _bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0) }
    _record_draw(idx_count, false, true)
 }
 
@@ -1850,7 +1853,7 @@ fn _store_rect(ptr p, f64 x, f64 y, f64 w, f64 h, int c, f64 u1=0.0, f64 v1=0.0,
 fn _store_line_quad(ptr p, f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, int c) bool {
    def dx, dy = x2 - x1, y2 - y1
    def len = sqrt(dx * dx + dy * dy)
-   if(len <= 0.000001){
+   if len <= 0.000001 {
       def s = max(1.0, thickness)
       return _store_rect(p, x1, y1, s, s, c)
    }
@@ -1866,15 +1869,15 @@ fn _store_line_quad(ptr p, f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, int c)
 
 fn draw_rect_fast(f64 x, f64 y, f64 w, f64 h, int color_u32) bool {
    "Draws a packed-color rectangle with OpenGL."
-   if(w == 0.0 || h == 0.0){ return false }
-   if(_soft_enabled()){
+   if w == 0.0 || h == 0.0 { return false }
+   if _soft_enabled() {
       _soft_rect(x, y, w, h, color_u32)
       _record_draw(6, false, false)
       return true
    }
    _reset_ui_draw_state()
    def p = _ensure_scratch(_STRIDE * 6)
-   if(!p){ return false }
+   if !p { return false }
    _store_rect(p, x, y, w, h, color_u32)
    draw_vertices(p, 6, -1)
 }
@@ -1885,7 +1888,7 @@ fn draw_rect(f64 x, f64 y, f64 w, f64 h, f64 r, f64 g, f64 b, f64 a) bool {
 
 fn draw_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int color_u32, f64 thickness=1.0) bool {
    def t = max(1.0, thickness)
-   if(_soft_enabled()){
+   if _soft_enabled() {
       draw_rect_fast(x, y, w, t, color_u32)
       draw_rect_fast(x, y + h - t, w, t, color_u32)
       draw_rect_fast(x, y, t, h, color_u32)
@@ -1894,7 +1897,7 @@ fn draw_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int color_u32, f64 thickne
    }
    _reset_ui_draw_state()
    def p = _ensure_scratch(_STRIDE * 24)
-   if(!p){ return false }
+   if !p { return false }
    _store_rect(p + _STRIDE * 0, x, y, w, t, color_u32)
    _store_rect(p + _STRIDE * 6, x, y + h - t, w, t, color_u32)
    _store_rect(p + _STRIDE * 12, x, y, t, h, color_u32)
@@ -1904,11 +1907,11 @@ fn draw_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int color_u32, f64 thickne
 
 fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
    "Draws packed rect records through a batched OpenGL vertex stream."
-   if(!rects || count <= 0){ return 0 }
-   if(stride < 20){ stride = 20 }
-   if(_soft_enabled()){
+   if !rects || count <= 0 { return 0 }
+   if stride < 20 { stride = 20 }
+   if _soft_enabled() {
       mut si = 0
-      while(si < count){
+      while si < count {
          def rec = rects + si * stride
          _soft_rect(load32_f32(rec, 0), load32_f32(rec, 4), load32_f32(rec, 8), load32_f32(rec, 12), load32(rec, 16))
          si += 1
@@ -1918,13 +1921,13 @@ fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
    }
    def max_batch = 2048
    mut done = 0
-   while(done < count){
+   while done < count {
       def batch = min(max_batch, count - done)
       _reset_ui_draw_state()
       def p = _ensure_scratch(batch * _STRIDE * 6)
-      if(!p){ return done }
+      if !p { return done }
       mut j = 0
-      while(j < batch){
+      while j < batch {
          def rec = rects + (done + j) * stride
          _store_rect(
             p + j * _STRIDE * 6,
@@ -1942,14 +1945,14 @@ fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
 
 fn draw_lines_2d_fast_ptr(any lines, int count, int stride=24) int {
    "Draws packed 2D line records through a batched OpenGL vertex stream."
-   if(!lines || count <= 0){ return 0 }
-   if(stride < 24){ stride = 24 }
-   if(_soft_enabled()){
+   if !lines || count <= 0 { return 0 }
+   if stride < 24 { stride = 24 }
+   if _soft_enabled() {
       mut si = 0
-      while(si < count){
+      while si < count {
          def rec = lines + si * stride
          def p2 = _ensure_scratch(_STRIDE * 2)
-         if(p2){
+         if p2 {
             _store_vertex(p2, 0, load32_f32(rec, 0), load32_f32(rec, 4), 0.0, 0.0, 0.0, load32(rec, 20))
             _store_vertex(p2, 1, load32_f32(rec, 8), load32_f32(rec, 12), 0.0, 0.0, 0.0, load32(rec, 20))
             _soft_draw_line_segment(p2, p2 + _STRIDE, load32_f32(rec, 16), false)
@@ -1961,13 +1964,13 @@ fn draw_lines_2d_fast_ptr(any lines, int count, int stride=24) int {
    }
    def max_batch = 2048
    mut done = 0
-   while(done < count){
+   while done < count {
       def batch = min(max_batch, count - done)
       _reset_ui_draw_state()
       def p = _ensure_scratch(batch * _STRIDE * 6)
-      if(!p){ return done }
+      if !p { return done }
       mut j = 0
-      while(j < batch){
+      while j < batch {
          def rec = lines + (done + j) * stride
          _store_line_quad(
             p + j * _STRIDE * 6,
@@ -2000,38 +2003,38 @@ fn draw_glyph_bitmap_scaled(
    bool is_color=false
 ) bool {
    "Draws a glyph bitmap directly into the software GL framebuffer."
-   if(!_soft_enabled() || !data || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0 || a <= 0.0){ return false }
-   if(!_soft_ensure_surface()){ return false }
+   if !_soft_enabled() || !data || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0 || a <= 0.0 { return false }
+   if !_soft_ensure_surface() { return false }
    def base_r = int(max(0.0, min(1.0, r)) * 255.0)
    def base_g = int(max(0.0, min(1.0, g)) * 255.0)
    def base_b = int(max(0.0, min(1.0, b)) * 255.0)
    mut drew = false
    mut yy = 0
-   while(yy < dst_h){
+   while yy < dst_h {
       mut sy0 = int(floor(float(yy) * float(src_h) / float(dst_h)))
       mut sy1 = int(ceil(float(yy + 1) * float(src_h) / float(dst_h)))
-      if(sy0 < 0){ sy0 = 0 }
-      if(sy1 <= sy0){ sy1 = sy0 + 1 }
-      if(sy1 > src_h){ sy1 = src_h }
+      if sy0 < 0 { sy0 = 0 }
+      if sy1 <= sy0 { sy1 = sy0 + 1 }
+      if sy1 > src_h { sy1 = src_h }
       mut xx = 0
-      while(xx < dst_w){
+      while xx < dst_w {
          mut sx0 = int(floor(float(xx) * float(src_w) / float(dst_w)))
          mut sx1 = int(ceil(float(xx + 1) * float(src_w) / float(dst_w)))
-         if(sx0 < 0){ sx0 = 0 }
-         if(sx1 <= sx0){ sx1 = sx0 + 1 }
-         if(sx1 > src_w){ sx1 = src_w }
+         if sx0 < 0 { sx0 = 0 }
+         if sx1 <= sx0 { sx1 = sx0 + 1 }
+         if sx1 > src_w { sx1 = src_w }
          mut sum_a = 0
          mut sum_r = 0
          mut sum_g = 0
          mut sum_b = 0
          mut samples = 0
          mut sy = sy0
-         while(sy < sy1){
+         while sy < sy1 {
             mut sx = sx0
-            while(sx < sx1){
+            while sx < sx1 {
                def px_off = (sy * src_w + sx) * bpp
                sum_a += load8(data, px_off + (bpp >= 4 ? 3 : 0)) & 255
-               if(is_color && bpp >= 4){
+               if is_color && bpp >= 4 {
                   sum_r += load8(data, px_off + 0) & 255
                   sum_g += load8(data, px_off + 1) & 255
                   sum_b += load8(data, px_off + 2) & 255
@@ -2041,11 +2044,11 @@ fn draw_glyph_bitmap_scaled(
             }
             sy += 1
          }
-         if(samples <= 0){ samples = 1 }
+         if samples <= 0 { samples = 1 }
          def alpha8 = int(float(sum_a / samples) * max(0.0, min(1.0, a)))
-         if(alpha8 > 0){
+         if alpha8 > 0 {
             mut rr, gg, bb = base_r, base_g, base_b
-            if(is_color && bpp >= 4){
+            if is_color && bpp >= 4 {
                rr = sum_r / samples
                gg = sum_g / samples
                bb = sum_b / samples
@@ -2067,7 +2070,7 @@ fn draw_rect_tex(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 r, f64 g, f64 b, f6
 fn draw_rect_tex_uv(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 u1, f64 v1, f64 u2, f64 v2, f64 r, f64 g, f64 b, f64 a) bool {
    _reset_ui_draw_state()
    def p = _ensure_scratch(_STRIDE * 6)
-   if(!p){ return false }
+   if !p { return false }
    _store_rect(p, x, y, w, h, render_shared.pack_rgba_u32(r, g, b, a), u1, v1, u2, v2)
    draw_vertices(p, 6, tex_id)
 }
@@ -2075,7 +2078,7 @@ fn draw_rect_tex_uv(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 u1, f64 v1, f64 
 fn draw_rect_tex_uv_rot(f64 cx, f64 cy, f64 w, f64 h, f64 rot_deg, int tex_id, f64 u1, f64 v1, f64 u2, f64 v2, f64 r, f64 g, f64 b, f64 a) bool {
    _reset_ui_draw_state()
    def p = _ensure_scratch(_STRIDE * 6)
-   if(!p){ return false }
+   if !p { return false }
    def hw, hh = w * 0.5, h * 0.5
    def rad = rot_deg * PI / 180.0
    def co, si = cos(rad), sin(rad)
@@ -2097,17 +2100,17 @@ fn draw_rect_tex_uv_rot(f64 cx, f64 cy, f64 w, f64 h, f64 rot_deg, int tex_id, f
 
 fn draw_line_fast(f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, int color_u32) bool {
    "Draws a packed-color thick 2D line with OpenGL triangles."
-   if(_soft_enabled()){
+   if _soft_enabled() {
       def dxs, dys = x2 - x1, y2 - y1
       def steps = max(1, int(max(abs(dxs), abs(dys))) + 1)
       mut last_x, last_y = -999999, -999999
       mut i = 0
-      while(i <= steps){
+      while i <= steps {
          def t = float(i) / float(steps)
          def x = x1 + dxs * t
          def y = y1 + dys * t
          def ix, iy = int(x + 0.5), int(y + 0.5)
-         if(ix != last_x || iy != last_y){
+         if ix != last_x || iy != last_y {
             _soft_plot_line_sample(ix, iy, thickness, color_u32)
             last_x, last_y = ix, iy
          }
@@ -2118,11 +2121,11 @@ fn draw_line_fast(f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, int color_u32) 
    }
    def dx, dy = x2 - x1, y2 - y1
    def len = sqrt(dx * dx + dy * dy)
-   if(len <= 0.000001){ return draw_rect_fast(x1, y1, max(1.0, thickness), max(1.0, thickness), color_u32) }
+   if len <= 0.000001 { return draw_rect_fast(x1, y1, max(1.0, thickness), max(1.0, thickness), color_u32) }
    def px, py = -dy / len * thickness * 0.5, dx / len * thickness * 0.5
    _reset_ui_draw_state()
    def p = _ensure_scratch(_STRIDE * 6)
-   if(!p){ return false }
+   if !p { return false }
    _store_vertex(p, 0, x1 + px, y1 + py, 0.0, 0.0, 0.0, color_u32)
    _store_vertex(p, 1, x1 - px, y1 - py, 0.0, 0.0, 0.0, color_u32)
    _store_vertex(p, 2, x2 - px, y2 - py, 0.0, 0.0, 0.0, color_u32)
@@ -2139,10 +2142,10 @@ fn draw_line(f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, f64 r, f64 g, f64 b,
 fn draw_line_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 thickness, f64 r, f64 g, f64 b, f64 a) bool {
    "Draws a 3D line through the active GL path."
    _set_depth_mask(true)
-   if(_soft_enabled()){
-      if(!_soft_ensure_surface()){ return false }
+   if _soft_enabled() {
+      if !_soft_ensure_surface() { return false }
       def p = _ensure_scratch(_STRIDE * 2)
-      if(!p){ return false }
+      if !p { return false }
       def c = render_shared.pack_rgba_u32(r, g, b, a)
       _store_vertex(p, 0, x1, y1, z1, 0.0, 0.0, c)
       _store_vertex(p, 1, x2, y2, z2, 0.0, 0.0, c)
@@ -2152,14 +2155,14 @@ fn draw_line_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 thickness, f
       return true
    }
    def dx, dy, dz = x2 - x1, y2 - y1, z2 - z1
-   if(sqrt(dx * dx + dy * dy + dz * dz) <= 0.0000001){ return false }
+   if sqrt(dx * dx + dy * dy + dz * dz) <= 0.0000001 { return false }
    mut nx, ny, nz = dy, 0.0 - dx, 0.0
    mut nl = sqrt(nx * nx + ny * ny + nz * nz)
-   if(nl <= 0.0000001){
+   if nl <= 0.0000001 {
       nx, ny, nz = 0.0 - dz, 0.0, dx
       nl = sqrt(nx * nx + ny * ny + nz * nz)
    }
-   if(nl <= 0.0000001){ return false }
+   if nl <= 0.0000001 { return false }
    def hs = thickness / (2.0 * nl)
    nx, ny, nz = nx * hs, ny * hs, nz * hs
    draw_quad_3d(
@@ -2174,7 +2177,7 @@ fn draw_line_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 thickness, f
 fn draw_triangle_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 x3, f64 y3, f64 z3, f64 r, f64 g, f64 b, f64 a) bool {
    _set_depth_mask(true)
    def p = _ensure_scratch(_STRIDE * 3)
-   if(!p){ return false }
+   if !p { return false }
    def c = render_shared.pack_rgba_u32(r, g, b, a)
    _store_vertex(p, 0, x1, y1, z1, 0.0, 0.0, c)
    _store_vertex(p, 1, x2, y2, z2, 0.0, 0.0, c)
@@ -2185,7 +2188,7 @@ fn draw_triangle_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 x3, f64 
 fn draw_quad_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 x3, f64 y3, f64 z3, f64 x4, f64 y4, f64 z4, f64 r, f64 g, f64 b, f64 a) bool {
    _set_depth_mask(true)
    def p = _ensure_scratch(_STRIDE * 6)
-   if(!p){ return false }
+   if !p { return false }
    def c = render_shared.pack_rgba_u32(r, g, b, a)
    _store_vertex(p, 0, x1, y1, z1, 0.0, 0.0, c)
    _store_vertex(p, 1, x2, y2, z2, 0.0, 0.0, c)
@@ -2198,17 +2201,17 @@ fn draw_quad_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 x3, f64 y3, 
 
 fn create_static_buffer(?ptr src_ptr, int count) any {
    "Uploads a packed vertex buffer to an OpenGL VBO."
-   if(_soft_enabled()){
-      if(!src_ptr || count <= 0){ return 0 }
+   if _soft_enabled() {
+      if !src_ptr || count <= 0 { return 0 }
       def bytes = count * _STRIDE
       def cp = malloc(bytes)
-      if(!cp){ return 0 }
+      if !cp { return 0 }
       memcpy(cp, src_ptr, bytes)
       return {"backend": "gl", "handle": cp, "offset": 0, "count": count, "soft": true, "soft_ptr": cp}
    }
-   if(!src_ptr || count <= 0 || !_has("glGenBuffers")){ return 0 }
+   if !src_ptr || count <= 0 || !_has("glGenBuffers") { return 0 }
    def id = _gen_name("glGenBuffers")
-   if(id <= 0){ return 0 }
+   if id <= 0 { return 0 }
    _bind_buffer(GL_ARRAY_BUFFER, id)
    _ny_glBufferData(GL_ARRAY_BUFFER, count * _STRIDE, ptr_add(src_ptr, 0), GL_STATIC_DRAW)
    _bind_buffer(GL_ARRAY_BUFFER, 0)
@@ -2217,18 +2220,18 @@ fn create_static_buffer(?ptr src_ptr, int count) any {
 
 fn create_static_index_buffer(?ptr idx_ptr, int idx_count, bool use_u32=false) any {
    "Uploads an index buffer to an OpenGL IBO."
-   if(_soft_enabled()){
-      if(!idx_ptr || idx_count <= 0){ return 0 }
+   if _soft_enabled() {
+      if !idx_ptr || idx_count <= 0 { return 0 }
       def stride = use_u32 ? 4 : 2
       def bytes = idx_count * stride
       def cp = malloc(bytes)
-      if(!cp){ return 0 }
+      if !cp { return 0 }
       memcpy(cp, idx_ptr, bytes)
       return {"backend": "gl", "ibuf": cp, "ioffset": 0, "index_count": idx_count, "index_type_u32": use_u32, "soft": true, "soft_ibuf": cp}
    }
-   if(!idx_ptr || idx_count <= 0 || !_has("glGenBuffers")){ return 0 }
+   if !idx_ptr || idx_count <= 0 || !_has("glGenBuffers") { return 0 }
    def id = _gen_name("glGenBuffers")
-   if(id <= 0){ return 0 }
+   if id <= 0 { return 0 }
    def stride = use_u32 ? 4 : 2
    _bind_buffer(GL_ELEMENT_ARRAY_BUFFER, id)
    _ny_glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx_count * stride, ptr_add(idx_ptr, 0), GL_STATIC_DRAW)
@@ -2238,16 +2241,16 @@ fn create_static_index_buffer(?ptr idx_ptr, int idx_count, bool use_u32=false) a
 
 fn create_static_indexed_buffer(?ptr vert_ptr, int count, ?ptr idx_ptr, int idx_count, any opts=0) any {
    def vb = create_static_buffer(vert_ptr, count)
-   if(!vb){ return 0 }
+   if !vb { return 0 }
    def use_u32 = is_dict(opts) && opts.get("index_type_u32", false)
    def ib = create_static_index_buffer(idx_ptr, idx_count, use_u32)
-   if(!ib){ destroy_static_buffer(vb) return 0 }
+   if !ib { destroy_static_buffer(vb) return 0 }
    vb["backend"] = "gl"
    vb["ibuf"] = ib.get("ibuf", 0)
    vb["ioffset"] = ib.get("ioffset", 0)
    vb["index_count"] = idx_count
    vb["index_type_u32"] = use_u32
-   if(ib.get("soft", false)){
+   if ib.get("soft", false) {
       vb["soft"] = true
       vb["soft_ibuf"] = ib.get("soft_ibuf", ib.get("ibuf", 0))
    }
@@ -2256,33 +2259,33 @@ fn create_static_indexed_buffer(?ptr vert_ptr, int count, ?ptr idx_ptr, int idx_
 
 fn destroy_static_buffer(any sbuf) bool {
    "Deletes OpenGL VBO/IBO resources."
-   if(!is_dict(sbuf)){ return false }
-   if(sbuf.get("soft", false)){
+   if !is_dict(sbuf) { return false }
+   if sbuf.get("soft", false) {
       def sp = sbuf.get("soft_ptr", 0)
       def sip = sbuf.get("soft_ibuf", 0)
-      if(sp){ free(sp) }
-      if(sip && sip != sp){ free(sip) }
+      if sp { free(sp) }
+      if sip && sip != sp { free(sip) }
       return true
    }
    def h = int(sbuf.get("handle", 0))
    def ib = int(sbuf.get("ibuf", 0))
-   if(h > 0){ _delete_name("glDeleteBuffers", h) }
-   if(ib > 0){ _delete_name("glDeleteBuffers", ib) }
+   if h > 0 { _delete_name("glDeleteBuffers", h) }
+   if ib > 0 { _delete_name("glDeleteBuffers", ib) }
    true
 }
 
 fn draw_static_buffer(dict sbuf, bool is_lines=false, f64 width=1.0, any pipe_override=0, bool is_points=false, bool use_material=false) bool {
-   if(!is_dict(sbuf)){ return false }
+   if !is_dict(sbuf) { return false }
    draw_static_buffer_raw(sbuf.get("handle", 0), sbuf.get("offset", 0), int(sbuf.get("count", 0)), is_lines, width, pipe_override, is_points, use_material)
 }
 
 fn draw_static_buffer_raw(any buf, any voff, int count, bool is_lines=false, f64 width=1.0, any _pipe_override=0, bool is_points=false, bool use_material=false) bool {
    _pipe_override
-   if(!buf || count <= 0){ return false }
-   if(_soft_enabled()){
+   if !buf || count <= 0 { return false }
+   if _soft_enabled() {
       def base = buf + int(voff)
-      if(is_points){ _soft_draw_points(base, count, use_material) }
-      elif(is_lines){ _soft_draw_lines(base, int(count / 2), width, use_material) }
+      if is_points { _soft_draw_points(base, count, use_material) }
+      elif is_lines { _soft_draw_lines(base, int(count / 2), width, use_material) }
       else { _soft_draw_vertices(base, count, -1, use_material) }
       _record_draw(count, true, false)
       return true
@@ -2298,14 +2301,14 @@ fn draw_static_buffer_raw(any buf, any voff, int count, bool is_lines=false, f64
 }
 
 fn draw_static_buffer_indexed(dict sbuf, any idx_buf, int index_count, bool is_lines=false, f64 width=1.0, any pipe_override=0, bool is_points=false, bool use_material=false) bool {
-   if(!is_dict(sbuf)){ return false }
+   if !is_dict(sbuf) { return false }
    draw_static_buffer_indexed_raw(sbuf.get("handle", 0), sbuf.get("offset", 0), idx_buf, sbuf.get("ioffset", 0), index_count, is_lines, width, pipe_override, sbuf.get("index_type_u32", false) ? 1 : 0, is_points, use_material)
 }
 
 fn draw_static_buffer_indexed_raw(any buf, any voff, any idx_buf, any ioff, int index_count, bool is_lines=false, f64 width=1.0, any _pipe_override=0, int index_type=0, bool is_points=false, bool use_material=false) bool {
    _pipe_override
-   if(!buf || !idx_buf || index_count <= 0){ return false }
-   if(_soft_enabled()){
+   if !buf || !idx_buf || index_count <= 0 { return false }
+   if _soft_enabled() {
       _soft_draw_indexed(buf + int(voff), 0, idx_buf + int(ioff), index_count, index_type, -1, is_lines, width, is_points, use_material)
       _record_draw(index_count, true, true)
       return true
@@ -2317,14 +2320,14 @@ fn draw_static_buffer_indexed_raw(any buf, any voff, any idx_buf, any ioff, int 
    _setup_arrays_vbo(voff, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit)
    def idx_ty = index_type == 1 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT
    _ny_glDrawElementsOffset(_draw_mode(is_lines, is_points), index_count, idx_ty, int(ioff))
-   if(_gl_finish_each_draw()){ _ny_glFinish() }
+   if _gl_finish_each_draw() { _ny_glFinish() }
    _record_draw(index_count, true, true)
    _bind_buffer(GL_ARRAY_BUFFER, 0)
    _bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0)
 }
 
 fn _read_pixels_buffer(int buffer, any raw) bool {
-   if(!raw || _w <= 0 || _h <= 0){ return false }
+   if !raw || _w <= 0 || _h <= 0 { return false }
    _ny_glReadBuffer(buffer)
    _ny_glFinish()
    _ny_glReadPixels(0, 0, _w, _h, GL_RGBA, GL_UNSIGNED_BYTE, raw)
@@ -2332,16 +2335,16 @@ fn _read_pixels_buffer(int buffer, any raw) bool {
 }
 
 fn _readback_rgb_score(any raw, int w, int h) int {
-   if(!raw || w <= 0 || h <= 0){ return 0 }
+   if !raw || w <= 0 || h <= 0 { return 0 }
    def pixels = w * h
-   if(pixels <= 0){ return 0 }
+   if pixels <= 0 { return 0 }
    mut step = int(pixels / 4096)
-   if(step < 1){ step = 1 }
+   if step < 1 { step = 1 }
    mut i = 0
    mut score = 0
-   while(i < pixels){
+   while i < pixels {
       def off = i * 4
-      if((load8(raw, off) & 255) != 0 || (load8(raw, off + 1) & 255) != 0 || (load8(raw, off + 2) & 255) != 0){
+      if (load8(raw, off) & 255) != 0 || (load8(raw, off + 1) & 255) != 0 || (load8(raw, off + 2) & 255) != 0 {
          score += 1
       }
       i += step
@@ -2350,19 +2353,19 @@ fn _readback_rgb_score(any raw, int w, int h) int {
 }
 
 fn _readback_detail_score(any raw, int w, int h) int {
-   if(!raw || w <= 0 || h <= 0){ return 0 }
+   if !raw || w <= 0 || h <= 0 { return 0 }
    def pixels = w * h
-   if(pixels <= 0){ return 0 }
+   if pixels <= 0 { return 0 }
    def r0 = load8(raw, 0) & 255
    def g0 = load8(raw, 1) & 255
    def b0 = load8(raw, 2) & 255
    mut step = int(pixels / 4096)
-   if(step < 1){ step = 1 }
+   if step < 1 { step = 1 }
    mut i = 0
    mut score = 0
-   while(i < pixels){
+   while i < pixels {
       def off = i * 4
-      if((load8(raw, off) & 255) != r0 || (load8(raw, off + 1) & 255) != g0 || (load8(raw, off + 2) & 255) != b0){
+      if (load8(raw, off) & 255) != r0 || (load8(raw, off + 1) & 255) != g0 || (load8(raw, off + 2) & 255) != b0 {
          score += 1
       }
       i += step
@@ -2372,50 +2375,50 @@ fn _readback_detail_score(any raw, int w, int h) int {
 
 fn read_framebuffer() any {
    "Reads the visible OpenGL framebuffer as top-left-origin RGBA pixels."
-   if(_w <= 0 || _h <= 0){ return 0 }
-   if(_soft_enabled()){
-      if(!_soft_ensure_surface()){ return 0 }
+   if _w <= 0 || _h <= 0 { return 0 }
+   if _soft_enabled() {
+      if !_soft_ensure_surface() { return 0 }
       def bytes = _soft_w * _soft_h * 4
       def out = malloc(bytes)
-      if(!out){ return 0 }
+      if !out { return 0 }
       memcpy(out, _soft_buf, bytes)
       return {"width": _soft_w, "height": _soft_h, "data": out, "channels": 4, "bpp": 4}
    }
    def bytes = _w * _h * 4
    mut raw = malloc(bytes)
    def out = malloc(bytes)
-   if(!raw || !out){
-      if(raw){ free(raw) }
-      if(out){ free(out) }
+   if !raw || !out {
+      if raw { free(raw) }
+      if out { free(out) }
       return 0
    }
    def primary_buffer = _frame_open ? GL_BACK : GL_FRONT
    _read_pixels_buffer(primary_buffer, raw)
    def primary_score = _readback_rgb_score(raw, _w, _h)
    def primary_detail = _readback_detail_score(raw, _w, _h)
-   if(primary_score == 0 || primary_detail == 0){
-         def alt = malloc(bytes)
-         if(alt){
-            _read_pixels_buffer(primary_buffer == GL_BACK ? GL_FRONT : GL_BACK, alt)
-            def alt_score = _readback_rgb_score(alt, _w, _h)
-            def alt_detail = _readback_detail_score(alt, _w, _h)
-            if(alt_detail > primary_detail || (primary_score == 0 && alt_score > primary_score)){
-               if(common.env_truthy("NY_GL_READBACK_TRACE")){
-                  print("[gl:readback] switched buffer primary_score=" + to_str(primary_score) +
-                     " primary_detail=" + to_str(primary_detail) +
-                     " alt_score=" + to_str(alt_score) +
-                     " alt_detail=" + to_str(alt_detail))
-               }
-               free(raw)
-               raw = alt
-            } else {
-               free(alt)
+   if primary_score == 0 || primary_detail == 0 {
+      def alt = malloc(bytes)
+      if alt {
+         _read_pixels_buffer(primary_buffer == GL_BACK ? GL_FRONT : GL_BACK, alt)
+         def alt_score = _readback_rgb_score(alt, _w, _h)
+         def alt_detail = _readback_detail_score(alt, _w, _h)
+         if alt_detail > primary_detail || (primary_score == 0 && alt_score > primary_score) {
+            if common.env_truthy("NY_GL_READBACK_TRACE") {
+               print("[gl:readback] switched buffer primary_score=" + to_str(primary_score) +
+                  " primary_detail=" + to_str(primary_detail) +
+                  " alt_score=" + to_str(alt_score) +
+               " alt_detail=" + to_str(alt_detail))
             }
+            free(raw)
+            raw = alt
+         } else {
+            free(alt)
          }
+      }
    }
    def row_bytes = _w * 4
    mut y = 0
-   while(y < _h){
+   while y < _h {
       __copy_mem(out + y * row_bytes, raw + (_h - 1 - y) * row_bytes, row_bytes)
       y += 1
    }

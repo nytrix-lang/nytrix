@@ -15,14 +15,14 @@ fn rc4_ksa(list key) list {
    mut state = list(256)
    store64(state, 256, 0)
    mut i = 0
-   while(i < 256){
+   while i < 256 {
       __store_item_fast(state, i, i)
       i += 1
    }
    def key_len = key.len
    mut j = 0
    i = 0
-   while(i < 256){
+   while i < 256 {
       def si = __load_item_fast(state, i)
       j = (j + si + __load_item_fast(key, i % key_len)) % 256
       __store_item_fast(state, i, __load_item_fast(state, j))
@@ -42,7 +42,7 @@ fn rc4_prga(list state, int n) list {
    mut keystream = list(n)
    store64(keystream, n, 0)
    mut k = 0
-   while(k < n){
+   while k < n {
       i = (i + 1) % 256
       def si = __load_item_fast(s, i)
       j = (j + si) % 256
@@ -68,7 +68,7 @@ fn rc4_decrypt_known_key(list ct, list key) list {
    mut i = 0
    mut j = 0
    mut k = 0
-   while(k < ct_len){
+   while k < ct_len {
       i = (i + 1) % 256
       def si = __load_item_fast(s, i)
       j = (j + si) % 256

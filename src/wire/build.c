@@ -182,10 +182,10 @@ static const char *ny_win_find_gmp_include_dir(void) {
       NULL,
   };
   for (size_t i = 0; candidates[i]; ++i) {
-    if (ny_win_join_exists(candidates[i], "gmp.h")) {
-      snprintf(result, sizeof(result), "%s", candidates[i]);
-      return result;
-    }
+    if (!ny_win_join_exists(candidates[i], "gmp.h"))
+      continue;
+    snprintf(result, sizeof(result), "%s", candidates[i]);
+    return result;
   }
   return NULL;
 }
@@ -623,10 +623,10 @@ static void append_host_flags(const char *env, const char *argv[], size_t *idx, 
   if (ny_env_enabled("NYTRIX_GPROF") && *idx + 1 < max) {
     bool seen_pg = false;
     for (size_t i = 0; i < *idx; ++i) {
-      if (argv[i] && strcmp(argv[i], "-pg") == 0) {
-        seen_pg = true;
-        break;
-      }
+      if (argv[i] && strcmp(argv[i], "-pg") != 0)
+        continue;
+      seen_pg = true;
+      break;
     }
     if (!seen_pg)
       argv[(*idx)++] = "-pg";

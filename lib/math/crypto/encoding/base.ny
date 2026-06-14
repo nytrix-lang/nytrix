@@ -17,7 +17,7 @@ fn _base_builder_take(list b) str {
 }
 
 fn _b64_unmap(int c, bool url=false) int {
-   if(url){
+   if url {
       return case c {
          65..90 -> c - 65
          97..122 -> c - 71
@@ -47,56 +47,56 @@ fn _base_hex_unmap(int c) int {
 }
 
 fn _encode64_internal(str data, str alphabet, bool padding=true) str {
-   if(!is_str(data)){ return "" }
+   if !is_str(data) { return "" }
    def n = data.len
    mut out = str.Builder(max(16, ((n + 2) / 3) * 4 + 8))
    mut i = 0
-   while(i < n){
+   while i < n {
       def b1 = load8(data, i) & 255
       def b2 = (i + 1 < n) ? (load8(data, i + 1) & 255) : 0
       def b3 = (i + 2 < n) ? (load8(data, i + 2) & 255) : 0
       out = str.builder_append(out, chr(load8(alphabet, b1 >> 2)))
       out = str.builder_append(out, chr(load8(alphabet, ((b1 & 3) << 4) | (b2 >> 4))))
-      if(i + 1 < n){ out = str.builder_append(out, chr(load8(alphabet, ((b2 & 15) << 2) | (b3 >> 6)))) } elif(padding){ out = str.builder_append(out, "=") }
-      if(i + 2 < n){ out = str.builder_append(out, chr(load8(alphabet, b3 & 63))) } elif(padding){ out = str.builder_append(out, "=") }
+      if i + 1 < n { out = str.builder_append(out, chr(load8(alphabet, ((b2 & 15) << 2) | (b3 >> 6)))) } elif padding { out = str.builder_append(out, "=") }
+      if i + 2 < n { out = str.builder_append(out, chr(load8(alphabet, b3 & 63))) } elif padding { out = str.builder_append(out, "=") }
       i += 3
    }
    _base_builder_take(out)
 }
 
 fn _decode64_internal(str s, bool url=false) str {
-   if(!is_str(s)){ return "" }
+   if !is_str(s) { return "" }
    def n = s.len
    mut out = malloc(n)
-   if(!out){ return "" }
+   if !out { return "" }
    mut p, i = 0, 0
-   while(i < n){
+   while i < n {
       def v1 = load8(s, i)
-      if(v1 == 0){ break }
+      if v1 == 0 { break }
       def c1 = _b64_unmap(v1, url)
-      if(c1 == -1){
-         if(v1 == 61){ break }
+      if c1 == -1 {
+         if v1 == 61 { break }
          i += 1
-         while(i < n && _b64_unmap(load8(s, i), url) == -1){ i += 1 }
+         while i < n && _b64_unmap(load8(s, i), url) == -1 { i += 1 }
          continue
       }
-      if(i + 1 >= n){ break }
+      if i + 1 >= n { break }
       def c2 = _b64_unmap(load8(s, i + 1), url)
-      if(c2 == -1){ break }
+      if c2 == -1 { break }
       store8(out, (c1 << 2) | (c2 >> 4), p)
       p += 1
-      if(i + 2 < n){
+      if i + 2 < n {
          def v3 = load8(s, i + 2)
-         if(v3 != 61){
+         if v3 != 61 {
             def c3 = _b64_unmap(v3, url)
-            if(c3 != -1){
+            if c3 != -1 {
                store8(out, ((c2 & 15) << 4) | (c3 >> 2), p)
                p += 1
-               if(i + 3 < n){
+               if i + 3 < n {
                   def v4 = load8(s, i + 3)
-                  if(v4 != 61){
+                  if v4 != 61 {
                      def c4 = _b64_unmap(v4, url)
-                     if(c4 != -1){
+                     if c4 != -1 {
                         store8(out, ((c3 & 3) << 6) | c4, p)
                         p += 1
                      }
@@ -132,7 +132,7 @@ fn decode64_url(str s) str {
 }
 
 fn _b32_unmap(int c, bool hex=false) int {
-   if(hex){
+   if hex {
       return case c {
          48..57 -> c - 48
          65..86 -> c - 55
@@ -149,11 +149,11 @@ fn _b32_unmap(int c, bool hex=false) int {
 }
 
 fn _encode32_internal(str data, str alphabet, bool padding=true) str {
-   if(!is_str(data)){ return "" }
+   if !is_str(data) { return "" }
    def n = data.len
    mut out = str.Builder(max(16, ((n + 4) / 5) * 8 + 8))
    mut i = 0
-   while(i < n){
+   while i < n {
       def b1 = load8(data, i) & 255
       def b2 = (i + 1 < n) ? (load8(data, i + 1) & 255) : 0
       def b3 = (i + 2 < n) ? (load8(data, i + 2) & 255) : 0
@@ -161,25 +161,25 @@ fn _encode32_internal(str data, str alphabet, bool padding=true) str {
       def b5 = (i + 4 < n) ? (load8(data, i + 4) & 255) : 0
       out = str.builder_append(out, chr(load8(alphabet, b1 >> 3)))
       out = str.builder_append(out, chr(load8(alphabet, ((b1 & 7) << 2) | (b2 >> 6))))
-      if(i + 1 < n){
+      if i + 1 < n {
          out = str.builder_append(out, chr(load8(alphabet, (b2 >> 1) & 31)))
          out = str.builder_append(out, chr(load8(alphabet, ((b2 & 1) << 4) | (b3 >> 4))))
-      } elif(padding){
+      } elif padding {
          out = str.builder_append(out, "======")
          break
       }
-      if(i + 2 < n){ out = str.builder_append(out, chr(load8(alphabet, ((b3 & 15) << 1) | (b4 >> 7)))) } elif(padding){
+      if i + 2 < n { out = str.builder_append(out, chr(load8(alphabet, ((b3 & 15) << 1) | (b4 >> 7)))) } elif padding {
          out = str.builder_append(out, "====")
          break
       }
-      if(i + 3 < n){
+      if i + 3 < n {
          out = str.builder_append(out, chr(load8(alphabet, (b4 >> 2) & 31)))
          out = str.builder_append(out, chr(load8(alphabet, ((b4 & 3) << 3) | (b5 >> 5))))
-      } elif(padding){
+      } elif padding {
          out = str.builder_append(out, "===")
          break
       }
-      if(i + 4 < n){ out = str.builder_append(out, chr(load8(alphabet, b5 & 31))) } elif(padding){
+      if i + 4 < n { out = str.builder_append(out, chr(load8(alphabet, b5 & 31))) } elif padding {
          out = str.builder_append(out, "=")
          break
       }
@@ -189,25 +189,25 @@ fn _encode32_internal(str data, str alphabet, bool padding=true) str {
 }
 
 fn _decode32_internal(str s, bool hex=false) str {
-   if(!is_str(s)){ return "" }
+   if !is_str(s) { return "" }
    def n = s.len
    mut out = malloc(n)
-   if(!out){ return "" }
+   if !out { return "" }
    mut p = 0
    mut bits = 0
    mut val = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       def c = load8(s, i)
-      if(c == 61){ break }
+      if c == 61 { break }
       def v = _b32_unmap(c, hex)
-      if(v == -1){
+      if v == -1 {
          i += 1
          continue
       }
       val = (val << 5) | v
       bits += 5
-      if(bits >= 8){
+      if bits >= 8 {
          store8(out, (val >> (bits - 8)) & 255, p)
          p += 1
          bits -= 8
@@ -240,11 +240,11 @@ fn decode32_hex(str s) str {
 
 fn encode16(str data) str {
    "Encodes a byte string into Base16(Hex) (RFC 4648 Section 8)."
-   if(!is_str(data)){ return "" }
+   if !is_str(data) { return "" }
    def n = data.len
    mut out = str.Builder(max(16, n * 2 + 8))
    mut i = 0
-   while(i < n){
+   while i < n {
       def b = load8(data, i) & 255
       out = str.builder_append(out, chr(load8(_BASE16_ALPHABET, b >> 4)))
       out = str.builder_append(out, chr(load8(_BASE16_ALPHABET, b & 15)))
@@ -255,15 +255,15 @@ fn encode16(str data) str {
 
 fn decode16(str s) str {
    "Decodes a Base16(Hex) string into bytes(RFC 4648 Section 8)."
-   if(!is_str(s)){ return "" }
+   if !is_str(s) { return "" }
    def n = s.len
    mut out = malloc(n / 2)
-   if(!out){ return "" }
+   if !out { return "" }
    mut p, i = 0, 0
-   while(i + 1 < n){
+   while i + 1 < n {
       def c1, c2 = load8(s, i), load8(s, i + 1)
       def v1, v2 = _base_hex_unmap(c1), _base_hex_unmap(c2)
-      if(v1 != -1 && v2 != -1){
+      if v1 != -1 && v2 != -1 {
          store8(out, (v1 << 4) | v2, p)
          p += 1
       }

@@ -8,25 +8,25 @@ use std.core.primitives as prim
 
 @inline
 fn _set_str_eq(any a, any b) bool {
-   if(!is_str(a) || !is_str(b)){ return false }
+   if !is_str(a) || !is_str(b) { return false }
    def n = a.len
-   if(n != b.len){ return false }
+   if n != b.len { return false }
    memcmp(a, b, n) == 0
 }
 
 @inline
 fn _set_key_eq(any a, any b) bool {
-   if(is_str(a) && is_str(b)){ return _set_str_eq(a, b) }
+   if is_str(a) && is_str(b) { return _set_str_eq(a, b) }
    return(a == b)
 }
 
 @inline
 fn _set_hash(any x) int {
-   if(is_int(x)){ return x }
-   if(is_str(x)){
+   if is_int(x) { return x }
+   if is_str(x) {
       mut h, i = 2166136261, 0
       def n = x.len
-      while(i < n){
+      while i < n {
          h = ((h ^^ load8(x, i)) * 16777619) & 2147483647
          i += 1
       }
@@ -39,9 +39,9 @@ fn _set_hash(any x) int {
 fn _set_find_existing_off(set s, any key) int {
    def cap = load64(s, 8)
    mut i = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
-      if(load64(s, off + 16) == 1 && _set_key_eq(load64(s, off), key)){ return off }
+      if load64(s, off + 16) == 1 && _set_key_eq(load64(s, off), key) { return off }
       i += 1
    }
    -1
@@ -60,15 +60,15 @@ fn _set_tombstone_at(set s, int off) set {
 
 @returns_owned
 fn _set_new(int cap) set {
-   if(cap < 8){ cap = 8 }
+   if cap < 8 { cap = 8 }
    cap = _pow2(cap)
    def p = __malloc(16 + cap * 24)
-   if(!p){ panic("set malloc failed") }
+   if !p { panic("set malloc failed") }
    store64(p, prim.runtime_tag_raw("set"), -8)
    store64(p, 0, 0)
    store64(p, cap, 8)
    mut i = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
       store64(p, 0, off)
       store64(p, 0, off + 8)
@@ -90,13 +90,13 @@ fn set(int cap=8) set {
 @consumes(s)
 fn _set_insert(set s, any key) set {
    def cap = load64(s, 8)
-   if(is_str(key) && _set_find_existing_off(s, key) >= 0){ return s }
+   if is_str(key) && _set_find_existing_off(s, key) >= 0 { return s }
    def h = _set_hash(key)
    def mask = cap - 1
    mut idx = h & mask
    mut perturb = h
    mut probes = 0
-   while(probes < cap){
+   while probes < cap {
       def off = 16 + idx * 24
       def st = load64(s, off + 16)
       case st {
@@ -123,10 +123,10 @@ fn _set_resize(set s, int newcap) set {
    mut ns = _set_new(newcap)
    def cap = load64(s, 8)
    mut i = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
       def st = load64(s, off + 16)
-      if(st == 1){ ns = _set_insert(ns, load64(s, off)) }
+      if st == 1 { ns = _set_insert(ns, load64(s, off)) }
       i += 1
    }
    free(s)
@@ -135,15 +135,15 @@ fn _set_resize(set s, int newcap) set {
 
 @inline
 fn _set_has_existing(any s, any key) bool {
-   if(!is_set(s)){ return false }
-   if(is_str(key)){ return _set_find_existing_off(s, key) >= 0 }
+   if !is_set(s) { return false }
+   if is_str(key) { return _set_find_existing_off(s, key) >= 0 }
    def cap = load64(s, 8)
    def h = _set_hash(key)
    def mask = cap - 1
    mut idx = h & mask
    mut perturb = h
    mut probes = 0
-   while(probes < cap){
+   while probes < cap {
       def off = 16 + idx * 24
       def st = load64(s, off + 16)
       case st {
@@ -160,12 +160,12 @@ fn _set_has_existing(any s, any key) bool {
 
 @returns_owned
 fn _set_add(any s, any key) set {
-   if(!s){ s = _set_new(8) }
-   if(!is_set(s)){ panic("add on non-set") }
-   if(_set_has_existing(s, key)){ return s }
+   if !s { s = _set_new(8) }
+   if !is_set(s) { panic("add on non-set") }
+   if _set_has_existing(s, key) { return s }
    def count = load64(s, 0)
    def cap = load64(s, 8)
-   if(count * 10 >= cap * 7){
+   if count * 10 >= cap * 7 {
       def ns = _set_resize(s, cap * 2)
       return _set_insert(ns, key)
    }
@@ -177,10 +177,10 @@ fn _set_contains(any s, any key) bool { _set_has_existing(s, key) }
 
 @returns_owned
 fn _set_remove(any s, any key) any {
-   if(!is_set(s)){ return s }
-   if(is_str(key)){
+   if !is_set(s) { return s }
+   if is_str(key) {
       def off = _set_find_existing_off(s, key)
-      if(off >= 0){ return _set_tombstone_at(s, off) }
+      if off >= 0 { return _set_tombstone_at(s, off) }
       return s
    }
    def cap = load64(s, 8)
@@ -189,7 +189,7 @@ fn _set_remove(any s, any key) any {
    mut idx = h & mask
    mut perturb = h
    mut probes = 0
-   while(probes < cap){
+   while probes < cap {
       def off = 16 + idx * 24
       def st = load64(s, off + 16)
       case st {
@@ -208,7 +208,7 @@ fn _set_remove(any s, any key) any {
 
 @inline
 fn _set_len(any s) int {
-   if(!is_set(s)){ return 0 }
+   if !is_set(s) { return 0 }
    load64(s, 0)
 }
 
@@ -226,16 +226,16 @@ fn is_empty(any s) bool {
 
 @returns_owned
 fn _set_values(any s) list {
-   if(!is_set(s)){ return list(0) }
+   if !is_set(s) { return list(0) }
    def cap = load64(s, 8)
    def count = load64(s, 0)
    mut out = list(count)
    mut idx = 0
    mut i = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
       def st = load64(s, off + 16)
-      if(st == 1){
+      if st == 1 {
          store64(out, load64(s, off), 16 + idx * 8)
          idx += 1
       }
@@ -247,10 +247,10 @@ fn _set_values(any s) list {
 
 @returns_owned
 fn _set_clear(any s) any {
-   if(!is_set(s)){ return s }
+   if !is_set(s) { return s }
    def cap = load64(s, 8)
    mut i = 0
-   while(i < cap){
+   while i < cap {
       def off = 16 + i * 24
       store64(s, 0, off)
       store64(s, 0, off + 8)

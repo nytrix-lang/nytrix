@@ -72,7 +72,7 @@ fn shutdown() any {
 fn wait_idle() bool {
    "Blocks until the Vulkan device has finished in-flight work."
    def dev = vk_state._device
-   if(!dev){ return true }
+   if !dev { return true }
    device_wait_idle(dev) == 0
 }
 
@@ -510,28 +510,28 @@ fn reset_scissor_rect() any {
 
 fn create_texture(int width, int height, any pixels) int {
    "Creates a GPU texture from raw RGBA8 pixels."
-   if(!_device){ return -1 }
+   if !_device { return -1 }
    def raw = vk_texture.create_texture(width, height, pixels)
-   if(raw >= 0 && raw < vk_state.MAX_TEXTURES){ return raw }
+   if raw >= 0 && raw < vk_state.MAX_TEXTURES { return raw }
    def stable = vk_texture.last_created_texture_id()
-   if(stable >= 0 && stable < vk_state.MAX_TEXTURES){ return stable }
-   if(raw >= 0){
+   if stable >= 0 && stable < vk_state.MAX_TEXTURES { return stable }
+   if raw >= 0 {
       def latest = vk_texture.texture_count() - 1
-      if(latest >= 0 && latest < vk_state.MAX_TEXTURES){ return latest }
+      if latest >= 0 && latest < vk_state.MAX_TEXTURES { return latest }
    }
    -1
 }
 
 fn create_texture_ex(int width, int height, any pixels, int format = 37, any filter = -1, any wrap_s = 10497, any wrap_t = 10497, bool use_mipmaps = false, int prebaked_mip_bytes = 0) int {
    "Creates a GPU texture with a specific format and optional sampler filter override."
-   if(!_device){ return -1 }
+   if !_device { return -1 }
    def raw = vk_texture.create_texture_ex(width, height, pixels, format, filter, wrap_s, wrap_t, use_mipmaps, prebaked_mip_bytes)
-   if(raw >= 0 && raw < vk_state.MAX_TEXTURES){ return raw }
+   if raw >= 0 && raw < vk_state.MAX_TEXTURES { return raw }
    def stable = vk_texture.last_created_texture_id()
-   if(stable >= 0 && stable < vk_state.MAX_TEXTURES){ return stable }
-   if(raw >= 0){
+   if stable >= 0 && stable < vk_state.MAX_TEXTURES { return stable }
+   if raw >= 0 {
       def latest = vk_texture.texture_count() - 1
-      if(latest >= 0 && latest < vk_state.MAX_TEXTURES){ return latest }
+      if latest >= 0 && latest < vk_state.MAX_TEXTURES { return latest }
    }
    -1
 }
@@ -557,7 +557,7 @@ fn update_texture_rect(int tex_id, int x, int y, int w, int h, any pixels) bool 
 
 fn bind_texture(int tex_id) any {
    "Binds a texture for subsequent draw calls."
-   if(_device && tex_id >= 0){ return vk_texture.bind_texture(tex_id) }
+   if _device && tex_id >= 0 { return vk_texture.bind_texture(tex_id) }
    0
 }
 
@@ -583,7 +583,7 @@ fn texture_descriptor(int tex_id) any {
 
 fn destroy_texture(int tex_id) any {
    "Releases GPU memory associated with a vk_texture."
-   if(_device && tex_id >= 0){ return vk_texture.destroy_texture(tex_id) }
+   if _device && tex_id >= 0 { return vk_texture.destroy_texture(tex_id) }
    0
 }
 
@@ -599,7 +599,7 @@ fn set_texture_debug_meta(int tex_id, str path = "", str cache_key = "") bool {
 
 fn blit_buffer(any pixels, int w, int h) any {
    "Blits raw pixels directly to the swapchain(for software rendering)."
-   if(_device){ return vk_texture.blit_buffer(pixels, w, h) }
+   if _device { return vk_texture.blit_buffer(pixels, w, h) }
    0
 }
 
@@ -670,20 +670,20 @@ fn create_static_indexed_buffer(any p, any count, any idx_ptr, any idx_count, an
 
 fn destroy_static_buffer(any sbuf) any {
    "Releases a static GPU vertex buffer created by `create_static_buffer`."
-   if(!is_dict(sbuf)){ return 0 }
-   if(sbuf.get("shared", false)){ return 0 }
+   if !is_dict(sbuf) { return 0 }
+   if sbuf.get("shared", false) { return 0 }
    def buf = sbuf.get("handle", 0)
    def mem = sbuf.get("memory", 0)
-   if(buf){ destroy_buffer(_device, buf, 0) }
-   if(mem){ free_memory(_device, mem, 0) }
+   if buf { destroy_buffer(_device, buf, 0) }
+   if mem { free_memory(_device, mem, 0) }
    def ibuf = sbuf.get("ibuf", 0)
    def imem = sbuf.get("imemory", 0)
-   if(ibuf){ destroy_buffer(_device, ibuf, 0) }
-   if(imem){ free_memory(_device, imem, 0) }
+   if ibuf { destroy_buffer(_device, ibuf, 0) }
+   if imem { free_memory(_device, imem, 0) }
    def cpu = sbuf.get("cpu_ptr", 0)
    def cpu_idx = sbuf.get("cpu_idx_ptr", 0)
-   if(cpu){ free(cpu) }
-   if(cpu_idx){ free(cpu_idx) }
+   if cpu { free(cpu) }
+   if cpu_idx { free(cpu_idx) }
    0
 }
 
@@ -929,15 +929,15 @@ fn gltf_pass_plan(int feature_mask, str alpha_mode="OPAQUE") list {
    "Runs the pass plan operation."
    mut passes = list(0)
    def am = to_str(alpha_mode)
-   if(am == "BLEND"){
-      if((feature_mask & 128) != 0 || (feature_mask & 8192) != 0){ passes = passes.append(GLTF_PASS_TRANSMISSIVE) }
-      if((feature_mask & 32768) != 0){ passes = passes.append(GLTF_PASS_REFRACTIVE) }
+   if am == "BLEND" {
+      if (feature_mask & 128) != 0 || (feature_mask & 8192) != 0 { passes = passes.append(GLTF_PASS_TRANSMISSIVE) }
+      if (feature_mask & 32768) != 0 { passes = passes.append(GLTF_PASS_REFRACTIVE) }
       passes = passes.append(GLTF_PASS_TRANSPARENT)
       return passes
    }
-   if(am == "MASK"){ passes = passes.append(GLTF_PASS_ALPHA_MASK) }
+   if am == "MASK" { passes = passes.append(GLTF_PASS_ALPHA_MASK) }
    else { passes = passes.append(GLTF_PASS_OPAQUE) }
-   if((feature_mask & COMPUTE_FEATURE_SPECULAR_GI) != 0 || (feature_mask & COMPUTE_FEATURE_TRANSMISSION) != 0 || (feature_mask & 32768) != 0){ passes = passes.append(GLTF_PASS_COMPUTE_GI) }
+   if (feature_mask & COMPUTE_FEATURE_SPECULAR_GI) != 0 || (feature_mask & COMPUTE_FEATURE_TRANSMISSION) != 0 || (feature_mask & 32768) != 0 { passes = passes.append(GLTF_PASS_COMPUTE_GI) }
    passes
 }
 
@@ -996,14 +996,14 @@ fn gltf_descriptor_plan() dict {
 fn gltf_shader_defines(int feature_mask) str {
    "Runs the shader defines operation."
    mut s = "#define NY_GLTF_FULL_PBR 1\n"
-   if((feature_mask & 64) != 0){ s = s + "#define NY_GLTF_CLEARCOAT 1\n" }
-   if((feature_mask & COMPUTE_FEATURE_TRANSMISSION) != 0){ s = s + "#define NY_GLTF_TRANSMISSION 1\n" }
-   if((feature_mask & COMPUTE_FEATURE_VOLUME) != 0){ s = s + "#define NY_GLTF_VOLUME 1\n" }
-   if((feature_mask & 1024) != 0){ s = s + "#define NY_GLTF_IRIDESCENCE 1\n" }
-   if((feature_mask & 2048) != 0){ s = s + "#define NY_GLTF_ANISOTROPY 1\n" }
-   if((feature_mask & COMPUTE_FEATURE_DIFFUSE_TRANSMISSION) != 0){ s = s + "#define NY_GLTF_DIFFUSE_TRANSMISSION 1\n" }
-   if((feature_mask & 32768) != 0){ s = s + "#define NY_GLTF_REFRACTION 1\n" }
-   if((feature_mask & 65536) != 0){ s = s + "#define NY_GLTF_SUBSURFACE 1\n" }
+   if (feature_mask & 64) != 0 { s = s + "#define NY_GLTF_CLEARCOAT 1\n" }
+   if (feature_mask & COMPUTE_FEATURE_TRANSMISSION) != 0 { s = s + "#define NY_GLTF_TRANSMISSION 1\n" }
+   if (feature_mask & COMPUTE_FEATURE_VOLUME) != 0 { s = s + "#define NY_GLTF_VOLUME 1\n" }
+   if (feature_mask & 1024) != 0 { s = s + "#define NY_GLTF_IRIDESCENCE 1\n" }
+   if (feature_mask & 2048) != 0 { s = s + "#define NY_GLTF_ANISOTROPY 1\n" }
+   if (feature_mask & COMPUTE_FEATURE_DIFFUSE_TRANSMISSION) != 0 { s = s + "#define NY_GLTF_DIFFUSE_TRANSMISSION 1\n" }
+   if (feature_mask & 32768) != 0 { s = s + "#define NY_GLTF_REFRACTION 1\n" }
+   if (feature_mask & 65536) != 0 { s = s + "#define NY_GLTF_SUBSURFACE 1\n" }
    s
 }
 
@@ -1054,7 +1054,7 @@ fn indirect_make_key(any index_buf, int index_off, any vertex_buf, int vertex_of
 
 fn indirect_write_draw_indexed_cmd(?ptr p, int off, int index_count, int instance_count, int first_index, int vertex_offset, int first_instance) bool {
    "Runs the indirect write draw indexed cmd operation."
-   if(!p){ return false }
+   if !p { return false }
    store32(p, int(index_count), off + 0)
    store32(p, int(instance_count), off + 4)
    store32(p, int(first_index), off + 8)
@@ -1065,7 +1065,7 @@ fn indirect_write_draw_indexed_cmd(?ptr p, int off, int index_count, int instanc
 
 fn indirect_write_draw_cmd(?ptr p, int off, int vertex_count, int instance_count, int first_vertex, int first_instance) bool {
    "Runs the indirect write draw cmd operation."
-   if(!p){ return false }
+   if !p { return false }
    store32(p, int(vertex_count), off + 0)
    store32(p, int(instance_count), off + 4)
    store32(p, int(first_vertex), off + 8)
@@ -1080,13 +1080,13 @@ fn indirect_group_command_bytes(bool indexed=true) int {
 
 fn indirect_write_group_cmds(?ptr out, any groups, bool indexed=true) int {
    "Runs the indirect write group cmds operation."
-   if(!out || !is_list(groups)){ return 0 }
+   if !out || !is_list(groups) { return 0 }
    def stride = indirect_group_command_bytes(indexed)
    mut i = 0
-   while(i < groups.len){
+   while i < groups.len {
       def g = groups.get(i, 0)
-      if(is_dict(g)){
-         if(indexed){
+      if is_dict(g) {
+         if indexed {
             indirect_write_draw_indexed_cmd(out, i * stride,
                int(g.get("index_count", 0)),
                int(g.get("instance_count", 0)),
@@ -1108,16 +1108,16 @@ fn indirect_write_group_cmds(?ptr out, any groups, bool indexed=true) int {
 
 fn indirect_count_groups(list parts) int {
    "Runs the indirect count groups operation."
-   if(!is_list(parts)){ return 0 }
+   if !is_list(parts) { return 0 }
    mut keys = dict(128)
    mut n = 0
    mut i = 0
    def parts_n = parts.len
-   while(i < parts_n){
+   while i < parts_n {
       def p = parts.get(i, 0)
-      if(is_dict(p)){
+      if is_dict(p) {
          def k = indirect_make_key(p.get("idx_buf",0), p.get("idx_off",0), p.get("vbuf",0), p.get("voff",0), p.get("material",-1), p.get("pipeline",0), p.get("index_count",0))
-         if(!keys.contains(k)){
+         if !keys.contains(k) {
             keys = keys.set(k, true)
             n += 1
          }
@@ -1129,17 +1129,17 @@ fn indirect_count_groups(list parts) int {
 
 fn indirect_build_groups(list parts) list {
    "Runs the indirect build groups operation."
-   if(!is_list(parts)){ return [] }
+   if !is_list(parts) { return [] }
    mut map = dict(128)
    mut groups = list(0)
    mut i = 0
    def parts_n = parts.len
-   while(i < parts_n){
+   while i < parts_n {
       def p = parts.get(i, 0)
-      if(is_dict(p)){
+      if is_dict(p) {
          def k = indirect_make_key(p.get("idx_buf",0), p.get("idx_off",0), p.get("vbuf",0), p.get("voff",0), p.get("material",-1), p.get("pipeline",0), p.get("index_count",0))
          mut gi = int(map.get(k, -1))
-         if(gi < 0){
+         if gi < 0 {
             gi = groups.len
             map = map.set(k, gi)
             def g = {
@@ -1157,7 +1157,7 @@ fn indirect_build_groups(list parts) list {
             groups = groups.append(g)
          }
          mut old = groups.get(gi, 0)
-         if(is_dict(old)){
+         if is_dict(old) {
             old = old.set("instance_count", int(old.get("instance_count",0)) + 1)
             groups.set(gi, old)
          }
@@ -1166,9 +1166,9 @@ fn indirect_build_groups(list parts) list {
    }
    mut first_instance = 0
    mut j = 0
-   while(j < groups.len){
+   while j < groups.len {
       mut g = groups.get(j, 0)
-      if(is_dict(g)){
+      if is_dict(g) {
          g = g.set("first_instance", first_instance)
          first_instance += int(g.get("instance_count", 0))
          groups.set(j, g)
@@ -1189,15 +1189,15 @@ fn indirect_shader_prepare() str {
    layout(push_constant) uniform PC { uint partCount ; uint drawCount; uint strideWords; uint visWord; uint groupWord; uint mode; } pc;
    void main(){
    uint i=gl_GlobalInvocationID.x ;
-   if(pc.mode == 0u){
-   if(i < pc.drawCount){ draws[i].instanceCount = 0u ; }
+   if pc.mode == 0u {
+   if i < pc.drawCount { draws[i].instanceCount = 0u ; }
    return ;
    }
-   if(i >= pc.partCount || pc.strideWords == 0u){ return ; }
+   if i >= pc.partCount || pc.strideWords == 0u { return ; }
    uint base = i * pc.strideWords ;
-   if(partWords[base + pc.visWord] == 0u){ return ; }
+   if partWords[base + pc.visWord] == 0u { return ; }
    uint group = partWords[base + pc.groupWord] ;
-   if(group >= pc.drawCount){ return ; }
+   if group >= pc.drawCount { return ; }
    uint slot = atomicAdd(draws[group].instanceCount, 1u) ;
    instanceIds[draws[group].firstInstance + slot] = i ;
    }
@@ -1206,7 +1206,7 @@ fn indirect_shader_prepare() str {
 
 fn cull_extract_frustum_planes(?ptr mvp_slab) list {
    "Runs the cull extract frustum planes operation."
-   if(!mvp_slab){ return [] }
+   if !mvp_slab { return [] }
    mut p = list(0)
    def m00, m01 = load32_f32(mvp_slab, 0), load32_f32(mvp_slab, 4)
    def m02, m03 = load32_f32(mvp_slab, 8), load32_f32(mvp_slab, 12)
@@ -1228,7 +1228,7 @@ fn cull_extract_frustum_planes(?ptr mvp_slab) list {
 fn cull_aabb_visible(any planes, f64 minx, f64 miny, f64 minz, f64 maxx, f64 maxy, f64 maxz) bool {
    "Returns whether cull aabb visible."
    mut i = 0
-   while(is_list(planes) && i < planes.len){
+   while is_list(planes) && i < planes.len {
       def pl = planes.get(i, 0)
       def a = float(pl.get(0, 0.0))
       def b = float(pl.get(1, 0.0))
@@ -1237,7 +1237,7 @@ fn cull_aabb_visible(any planes, f64 minx, f64 miny, f64 minz, f64 maxx, f64 max
       def px = a >= 0.0 ? maxx : minx
       def py = b >= 0.0 ? maxy : miny
       def pz = c >= 0.0 ? maxz : minz
-      if(a * px + b * py + c * pz + d < 0.0){ return false }
+      if a * px + b * py + c * pz + d < 0.0 { return false }
       i += 1
    }
    true
@@ -1245,10 +1245,10 @@ fn cull_aabb_visible(any planes, f64 minx, f64 miny, f64 minz, f64 maxx, f64 max
 
 fn cull_write_visibility_slab(?ptr parts_slab, int count, any planes, int stride = CULL_PART_STRIDE, int vis_off = CULL_PART_VIS_OFF, int aabb_off = CULL_PART_AABB_OFF) int {
    "Runs the cull write visibility slab operation."
-   if(!parts_slab || count <= 0){ return 0 }
+   if !parts_slab || count <= 0 { return 0 }
    mut visible = 0
    mut i = 0
-   while(i < count){
+   while i < count {
       def base = parts_slab + i * stride
       def minx = load32_f32(base, aabb_off + 0)
       def miny = load32_f32(base, aabb_off + 4)
@@ -1258,7 +1258,7 @@ fn cull_write_visibility_slab(?ptr parts_slab, int count, any planes, int stride
       def maxz = load32_f32(base, aabb_off + 20)
       def ok = cull_aabb_visible(planes, minx, miny, minz, maxx, maxy, maxz)
       store32(base, ok ? 1 : 0, vis_off)
-      if(ok){ visible += 1 }
+      if ok { visible += 1 }
       i += 1
    }
    visible
@@ -1276,15 +1276,15 @@ fn cull_shader() str {
    layout(std430,binding=1) readonly buffer Planes { vec4 planes[6] ; };
    layout(push_constant) uniform PC { uint count ; uint strideWords; uint visWord; uint aabbWord; } pc;
    bool visibleAabb(vec3 mn, vec3 mx){
-   for(int i=0 ;i<6;i++){
-   vec4 p=planes[i] ; vec3 v=vec3(p.x>=0?mx.x:mn.x,p.y>=0?mx.y:mn.y,p.z>=0?mx.z:mn.z); if(dot(p.xyz,v)+p.w<0) return false;
+   for int i=0 ;i<6;i++{
+   vec4 p=planes[i] ; vec3 v=vec3(p.x>=0?mx.x:mn.x,p.y>=0?mx.y:mn.y,p.z>=0?mx.z:mn.z); if dot(p.xyz,v)+p.w<0 return false;
    }
    return true ;
    }
    float f32(uint word){ return uintBitsToFloat(word) ; }
    void main(){
    uint i=gl_GlobalInvocationID.x ;
-   if(i>=pc.count || pc.strideWords == 0u) return ;
+   if i>=pc.count || pc.strideWords == 0u return ;
    uint b=i*pc.strideWords ;
    vec3 mn=vec3(f32(partWords[b+pc.aabbWord+0u]), f32(partWords[b+pc.aabbWord+1u]), f32(partWords[b+pc.aabbWord+2u])) ;
    vec3 mx=vec3(f32(partWords[b+pc.aabbWord+3u]), f32(partWords[b+pc.aabbWord+4u]), f32(partWords[b+pc.aabbWord+5u])) ;

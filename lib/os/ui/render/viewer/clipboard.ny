@@ -115,18 +115,18 @@ fn _event_ctrl(any win, any data) bool {
 fn _handle_event(any win, dict st, any e) dict {
    def typ = window.event_type(e)
    def data = window.event_data(e)
-   if(typ == key.EVENT_KEY_PRESSED && is_dict(data)){
+   if typ == key.EVENT_KEY_PRESSED && is_dict(data) {
       def ctrl = _event_ctrl(win, data)
-      if(editing(st) && window.event_key_is(data, key.KEY_BACKSPACE)){
+      if editing(st) && window.event_key_is(data, key.KEY_BACKSPACE) {
          st["input"] = _delete_last(input_text(st))
       }
-      if(ctrl && window.event_key_is(data, key.KEY_C)){ st = copy(win, st) }
-      if(editing(st) && ctrl && window.event_key_is(data, key.KEY_X)){ st = cut(win, st) }
-      if(editing(st) && ctrl && window.event_key_is(data, key.KEY_V)){ st = paste(win, st) }
-   } elif(typ == key.EVENT_KEY_CHAR && editing(st) && is_dict(data)){
+      if ctrl && window.event_key_is(data, key.KEY_C) { st = copy(win, st) }
+      if editing(st) && ctrl && window.event_key_is(data, key.KEY_X) { st = cut(win, st) }
+      if editing(st) && ctrl && window.event_key_is(data, key.KEY_V) { st = paste(win, st) }
+   } elif typ == key.EVENT_KEY_CHAR && editing(st) && is_dict(data) {
       def cp = int(data.get("char", 0))
       def mods = int(data.get("mods", data.get("mod", 0)))
-      if((mods & key.MOD_CONTROL) == 0 && cp >= 32 && cp != 127 && str.utf8_len(input_text(st)) < MAX_TEXT){
+      if (mods & key.MOD_CONTROL) == 0 && cp >= 32 && cp != 127 && str.utf8_len(input_text(st)) < MAX_TEXT {
          st["input"] = input_text(st) + chr(cp)
       }
    }
@@ -136,7 +136,7 @@ fn _handle_event(any win, dict st, any e) dict {
 fn process_events(any win, dict st) dict {
    "Consumes queued window events relevant to clipboard shortcuts and text input."
    mut e = window.check_event(win)
-   while(e){
+   while e {
       st = _handle_event(win, st, e)
       e = window.check_event(win)
    }
@@ -166,7 +166,7 @@ fn _run_action(any win, dict st, str label) dict {
 fn _action(any font, dict st, any win, int idx, int cols, str label, f64 x, f64 y, f64 bw, f64 bh, f64 gap, f64 mx, f64 my, bool click) dict {
    def col = idx % cols
    def row = int(idx / cols)
-   if(!widgets.button(font, label, x + float(col) * (bw + gap), y + float(row) * (bh + gap), bw, bh, mx, my, click, _action_color(label))){ return st }
+   if !widgets.button(font, label, x + float(col) * (bw + gap), y + float(row) * (bh + gap), bw, bh, mx, my, click, _action_color(label)) { return st }
    _run_action(win, st, label)
 }
 
@@ -179,7 +179,7 @@ fn draw_panel(any win, dict st, any font_body, any font_small, f64 x, f64 y, f64
    def field_y = y + 54.0
    def field_h = 44.0
    def content_w = max(90.0, w - inner * 2.0)
-   if(click){ st = set_editing(st, widgets.hit(mx, my, x + inner, field_y, content_w, field_h)) }
+   if click { st = set_editing(st, widgets.hit(mx, my, x + inner, field_y, content_w, field_h)) }
    widgets.text_box(font_body, font_small, "Input", input_text(st), x + inner, field_y, content_w, field_h, editing(st), caret)
    def gap = 7.0
    def cols = w < 300.0 ? 2 : 3
@@ -187,7 +187,7 @@ fn draw_panel(any win, dict st, any font_body, any font_small, f64 x, f64 y, f64
    def bh = 34.0
    def by = field_y + field_h + 20.0
    mut i = 0
-   while(i < ACTIONS.len){
+   while i < ACTIONS.len {
       st = _action(font_body, st, win, i, cols, ACTIONS.get(i, ""), x + inner, by, bw, bh, gap, mx, my, click)
       i += 1
    }

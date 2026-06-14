@@ -75,7 +75,7 @@ assert(o?.a == 777, "optional chaining value")
 assert(o_nil?.a == nil, "optional chaining nil")
 assert((o_nil?.a ?? 999) == 999, "optional chaining fallback")
 
-if(def a = 100 a == 100){
+if def a = 100 a == 100 {
    assert(a == 100, "if-def scope")
 } else {
    assert(false, "if-def failed")
@@ -83,7 +83,7 @@ if(def a = 100 a == 100){
 
 mut j = 0
 mut seen = false
-while(def k = 10 j < k){
+while def k = 10 j < k {
    seen = true
    assert(k == 10, "while-def binding")
    j = j + 5
@@ -92,7 +92,7 @@ while(def k = 10 j < k){
 assert(seen == true, "while-def entered")
 assert(j == 10, "while-def result")
 mut acc = 0
-while(mut i = 0 i < 5 ++i){
+while mut i = 0 i < 5 ++i {
    acc += i
 }
 

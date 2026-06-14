@@ -15,7 +15,7 @@ fn _xor_overlap(list a, list b) list {
    def n = a.len < b.len ? a.len : b.len
    mut out = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       out[i] = a[i] ^^ b[i]
       i += 1
    }
@@ -28,7 +28,7 @@ fn xor_with_single_byte(list data, int key_byte) list {
    def n = data.len
    mut out = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       out[i] = data[i] ^^ key_byte
       i += 1
    }
@@ -46,7 +46,7 @@ fn xor_with_repeating_key(list data, list key) list {
    def n = data.len
    mut out = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       out[i] = data[i] ^^ key[i % key_len]
       i += 1
    }
@@ -59,7 +59,7 @@ fn repeating_xor_key_from_prefix(list ciphertext, list known_prefix) list {
    def n = known_prefix.len
    mut key = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       key[i] = ciphertext[i] ^^ known_prefix[i]
       i += 1
    }
@@ -78,7 +78,7 @@ fn hamming_distance(list a, list b) int {
    def n = (a.len < b.len) ? a.len : b.len
    mut dist = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       dist += bit_count(a[i] ^^ b[i])
       i += 1
    }
@@ -106,7 +106,7 @@ fn english_score(list bytes) int {
    Considers etaoin shrdlu ordering, spaces, and printable chars."
    mut score = 0
    mut i = 0
-   while(i < bytes.len){
+   while i < bytes.len {
       score += _english_byte_score(int(bytes[i]))
       i += 1
    }
@@ -116,7 +116,7 @@ fn english_score(list bytes) int {
 fn _english_score_xor_key(list data, int key_byte) int {
    mut score = 0
    mut i = 0
-   while(i < data.len){
+   while i < data.len {
       score += _english_byte_score(int(data[i]) ^^ key_byte)
       i += 1
    }
@@ -126,7 +126,7 @@ fn _english_score_xor_key(list data, int key_byte) int {
 fn _english_score_xor_key_strided(list data, int start, int stride, int key_byte) int {
    mut score = 0
    mut i = start
-   while(i < data.len){
+   while i < data.len {
       score += _english_byte_score(int(data[i]) ^^ key_byte)
       i += stride
    }
@@ -137,9 +137,9 @@ fn _single_byte_xor_key(list data) int {
    mut best_key = 0
    mut best_score = -1000000
    mut k = 0
-   while(k < 256){
+   while k < 256 {
       def score = _english_score_xor_key(data, k)
-      if(score > best_score){
+      if score > best_score {
          best_score = score
          best_key = k
       }
@@ -154,9 +154,9 @@ fn single_byte_xor_bruteforce(list data) list {
    mut best_key = 0
    mut best_score = -1000000
    mut k = 0
-   while(k < 256){
+   while k < 256 {
       def score = _english_score_xor_key(data, k)
-      if(score > best_score){
+      if score > best_score {
          best_score = score
          best_key = k
       }
@@ -170,9 +170,9 @@ fn _single_byte_xor_key_strided(list data, int start, int stride) list {
    mut best_key = 0
    mut best_score = -1000000
    mut k = 0
-   while(k < 256){
+   while k < 256 {
       def score = _english_score_xor_key_strided(data, start, stride, k)
-      if(score > best_score){
+      if score > best_score {
          best_score = score
          best_key = k
       }
@@ -189,14 +189,14 @@ fn repeating_key_xor_keylength(list ct, int min_len=2, int max_len=40) int {
    mut best_len = min_len
    mut best_dist = 1000000
    mut ks = min_len
-   while(ks <= max_len){
-      if(ks * n_blocks > ct_len){ break }
+   while ks <= max_len {
+      if ks * n_blocks > ct_len { break }
       mut total_dist = 0
       mut pairs = 0
       mut bi = 0
-      while(bi + 1 < n_blocks){
+      while bi + 1 < n_blocks {
          mut j = 0
-         while(j < ks){
+         while j < ks {
             total_dist += bit_count(ct[bi * ks + j] ^^ ct[(bi + 1) * ks + j])
             j += 1
          }
@@ -204,7 +204,7 @@ fn repeating_key_xor_keylength(list ct, int min_len=2, int max_len=40) int {
          bi += 1
       }
       def norm = (total_dist * 1000) / (pairs * ks)
-      if(norm < best_dist){
+      if norm < best_dist {
          best_dist = norm
          best_len = ks
       }
@@ -219,7 +219,7 @@ fn repeating_key_xor_crack(list ct, int key_len=0) list {
    def kl = (key_len == 0) ? repeating_key_xor_keylength(ct) : key_len
    mut key = list(kl)
    mut i = 0
-   while(i < kl){
+   while i < kl {
       def res = _single_byte_xor_key_strided(ct, i, kl)
       key[i] = res[0]
       i += 1
@@ -232,23 +232,23 @@ fn repeating_key_xor_crack(list ct, int key_len=0) list {
 fn multi_text_xor_keystream(list ciphertexts) list {
    "Recover keystream bytes from multiple ciphertexts encrypted with the same key(multi-time pad).
    Uses per-position frequency analysis. Returns keystream as byte list."
-   if(ciphertexts.len == 0){ return [] }
+   if ciphertexts.len == 0 { return [] }
    mut max_len = 0
    mut i = 0
-   while(i < ciphertexts.len){
+   while i < ciphertexts.len {
       def l = ciphertexts[i].len
-      if(l > max_len){ max_len = l }
+      if l > max_len { max_len = l }
       i += 1
    }
    mut keystream = list(max_len)
    mut pos = 0
-   while(pos < max_len){
+   while pos < max_len {
       mut col_bytes = list(ciphertexts.len)
       mut ci = 0
       mut col_n = 0
-      while(ci < ciphertexts.len){
+      while ci < ciphertexts.len {
          def ct = ciphertexts[ci]
-         if(pos < ct.len){
+         if pos < ct.len {
             col_bytes[col_n] = ct[pos]
             col_n += 1
          }
@@ -277,10 +277,10 @@ fn crib_drag(list ciphertext, list crib) list {
    def out_n = c_len >= cr_len ? (c_len - cr_len + 1) : 0
    mut results = list(out_n)
    mut pos = 0
-   while(pos + cr_len <= c_len){
+   while pos + cr_len <= c_len {
       mut ks_bytes = list(cr_len)
       mut i = 0
-      while(i < cr_len){
+      while i < cr_len {
          ks_bytes[i] = ct[pos + i] ^^ crib[i]
          i += 1
       }

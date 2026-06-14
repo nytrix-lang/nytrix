@@ -75,23 +75,23 @@ fn _otp_insert_ranked(list ranked, list item) list {
    mut out = list(0)
    mut inserted = false
    mut i = 0
-   while(i < ranked.len){
+   while i < ranked.len {
       def cur = ranked.get(i)
-      if(!inserted && item.get(1) > cur.get(1)){
+      if !inserted && item.get(1) > cur.get(1) {
          out = out.append(item)
          inserted = true
       }
       out = out.append(cur)
       i += 1
    }
-   if(!inserted){ out = out.append(item) }
+   if !inserted { out = out.append(item) }
    out
 }
 
 fn _otp_max_ciphertext_len(list ciphertexts) int {
    mut max_len = 0
    mut ci = 0
-   while(ci < ciphertexts.len){
+   while ci < ciphertexts.len {
       max_len = max(max_len, len(ciphertexts.get(ci)))
       ci += 1
    }
@@ -103,7 +103,7 @@ fn otp_hamming_distance(list a, list b) int {
    def n = _otp_min(a.len, b.len)
    mut distance = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       distance += bit_count(__load_item_fast(a, i) ^^ __load_item_fast(b, i))
       i += 1
    }
@@ -113,10 +113,10 @@ fn otp_hamming_distance(list a, list b) int {
 fn _otp_key_size_blocks(list ciphertexts, int key_size) list {
    mut blocks = list(0)
    mut ci = 0
-   while(ci < ciphertexts.len){
+   while ci < ciphertexts.len {
       def chunks = ciphertexts.get(ci).windowed(key_size, key_size)
       mut bi = 0
-      while(bi < chunks.len){
+      while bi < chunks.len {
          blocks = blocks.append(chunks.get(bi))
          bi += 1
       }
@@ -126,10 +126,10 @@ fn _otp_key_size_blocks(list ciphertexts, int key_size) list {
 }
 
 fn _otp_normalized_block_distance(list blocks, int key_size) any {
-   if(blocks.len < 2){ return nil }
+   if blocks.len < 2 { return nil }
    mut total = 0
    mut bi = 0
-   while(bi + 1 < blocks.len){
+   while bi + 1 < blocks.len {
       total = total + otp_hamming_distance(blocks.get(bi), blocks.get(bi + 1))
       bi += 1
    }
@@ -140,24 +140,24 @@ fn otp_guess_key_sizes(list ciphertexts, any max_key_size=nil) list {
    "Rank likely repeated-OTP/repeating-XOR key sizes by normalized Hamming distance.
    Returns key sizes ordered from most likely to least likely."
    def nct = ciphertexts.len
-   if(nct == 0){ return [] }
+   if nct == 0 { return [] }
    def max_len = _otp_max_ciphertext_len(ciphertexts)
    def limit = min((max_key_size == nil) ? max_len : max_key_size, max_len)
-   if(limit < 2){ return [] }
+   if limit < 2 { return [] }
    mut ranked = list(0)
    mut prev_distance = nil
    mut key_size = 2
-   while(key_size <= limit){
+   while key_size <= limit {
       def distance = _otp_normalized_block_distance(_otp_key_size_blocks(ciphertexts, key_size), key_size)
-      if(distance != nil){
-         if(prev_distance != nil){ ranked = _otp_insert_ranked(ranked, [key_size, prev_distance - distance]) }
+      if distance != nil {
+         if prev_distance != nil { ranked = _otp_insert_ranked(ranked, [key_size, prev_distance - distance]) }
          prev_distance = distance
       }
       key_size += 1
    }
    mut out = list(0)
    mut i = 0
-   while(i < ranked.len){
+   while i < ranked.len {
       out = out.append(ranked.get(i).get(0))
       i += 1
    }
@@ -167,18 +167,18 @@ fn otp_guess_key_sizes(list ciphertexts, any max_key_size=nil) list {
 fn _otp_score_english_with_key(list bytes, int key, any char_frequencies, any char_floor) any {
    mut score = 0
    mut i = 0
-   if(char_frequencies == nil){
-      while(i < bytes.len){
+   if char_frequencies == nil {
+      while i < bytes.len {
          def w = _otp_default_printable_weight(__load_item_fast(bytes, i) ^^ key)
-         if(w < 0){ return nil }
+         if w < 0 { return nil }
          score += w
          i += 1
       }
       return score
    }
-   while(i < bytes.len){
+   while i < bytes.len {
       def b = __load_item_fast(bytes, i) ^^ key
-      if(!_otp_is_printable(b)){ return nil }
+      if !_otp_is_printable(b) { return nil }
       score = score + _otp_freq_weight(char_frequencies, b, char_floor)
       i += 1
    }
@@ -193,19 +193,19 @@ fn otp_score_english(list bytes, any char_frequencies=nil, any char_floor=-5) an
 fn _otp_transpose(list ciphertexts, int offset, int key_size) list {
    mut total = 0
    mut ci = 0
-   while(ci < ciphertexts.len){
+   while ci < ciphertexts.len {
       def ct = ciphertexts.get(ci)
-      if(offset < ct.len){ total += ((ct.len - offset + key_size - 1) / key_size) }
+      if offset < ct.len { total += ((ct.len - offset + key_size - 1) / key_size) }
       ci += 1
    }
    mut out = list(total)
    store64(out, total, 0)
    mut pos = 0
    ci = 0
-   while(ci < ciphertexts.len){
+   while ci < ciphertexts.len {
       def ct = ciphertexts.get(ci)
       mut j = offset
-      while(j < ct.len){
+      while j < ct.len {
          __store_item_fast(out, pos, __load_item_fast(ct, j))
          pos += 1
          j = j + key_size
@@ -219,9 +219,9 @@ fn _otp_frequency_key_byte(list bytes, any char_frequencies, any char_floor) any
    mut best_key = nil
    mut best_score = nil
    mut k = 0
-   while(k < 256){
+   while k < 256 {
       def score = _otp_score_english_with_key(bytes, k, char_frequencies, char_floor)
-      if(score != nil && (best_score == nil || score > best_score)){
+      if score != nil && (best_score == nil || score > best_score) {
          best_score = score
          best_key = k
       }
@@ -233,10 +233,10 @@ fn _otp_frequency_key_byte(list bytes, any char_frequencies, any char_floor) any
 fn _otp_recover_key_for_size(list ciphertexts, any key_size, any char_frequencies, any char_floor) any {
    mut key = list(0)
    mut i = 0
-   while(i < key_size){
+   while i < key_size {
       def column = _otp_transpose(ciphertexts, i, key_size)
       def kb = _otp_frequency_key_byte(column, char_frequencies, char_floor)
-      if(kb == nil){ return nil }
+      if kb == nil { return nil }
       key = key.append(kb)
       i += 1
    }
@@ -246,10 +246,10 @@ fn _otp_recover_key_for_size(list ciphertexts, any key_size, any char_frequencie
 fn _otp_score_reused_key(list ciphertexts, list key, any char_frequencies, any char_floor) any {
    mut total_score = 0
    mut ci = 0
-   while(ci < ciphertexts.len){
+   while ci < ciphertexts.len {
       def plain = otp_apply_key(ciphertexts.get(ci), key)
       def score = otp_score_english(plain, char_frequencies, char_floor)
-      if(score == nil){ return nil }
+      if score == nil { return nil }
       total_score = total_score + score
       ci += 1
    }
@@ -259,19 +259,19 @@ fn _otp_score_reused_key(list ciphertexts, list key, any char_frequencies, any c
 fn _otp_minimal_period(list key) list {
    def n = key.len
    mut period = 1
-   while(period <= n){
-      if(n % period == 0){
+   while period <= n {
+      if n % period == 0 {
          mut ok = true
          mut i = 0
-         while(i < n && ok){
-            if(__load_item_fast(key, i) != __load_item_fast(key, i % period)){ ok = false }
+         while i < n && ok {
+            if __load_item_fast(key, i) != __load_item_fast(key, i % period) { ok = false }
             i += 1
          }
-         if(ok){
+         if ok {
             mut out = list(period)
             store64(out, period, 0)
             mut j = 0
-            while(j < period){
+            while j < period {
                __store_item_fast(out, j, __load_item_fast(key, j))
                j += 1
             }
@@ -292,12 +292,12 @@ fn otp_recover_reused_key(list ciphertexts, any key_size=nil, any max_key_size=n
    mut best_key = nil
    mut best_score = nil
    mut si = 0
-   while(si < sizes.len){
+   while si < sizes.len {
       def ks = sizes.get(si)
       def key = _otp_recover_key_for_size(ciphertexts, ks, char_frequencies, char_floor)
-      if(key != nil){
+      if key != nil {
          def total_score = _otp_score_reused_key(ciphertexts, key, char_frequencies, char_floor)
-         if(total_score != nil && (best_score == nil || total_score > best_score)){
+         if total_score != nil && (best_score == nil || total_score > best_score) {
             best_score = total_score
             best_key = key
          }
@@ -311,11 +311,11 @@ fn otp_apply_key(list data, list key) list {
    "XOR data with a repeating key."
    def n = data.len
    def kn = key.len
-   if(kn == 0){ return clone(data) }
+   if kn == 0 { return clone(data) }
    mut out = list(n)
    store64(out, n, 0)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(out, i, __load_item_fast(data, i) ^^ __load_item_fast(key, i % kn))
       i += 1
    }
@@ -332,11 +332,11 @@ fn otp_timestamp_sha256_xor(list data, int timestamp) list {
    The input must fit in one digest block."
    def key = otp_timestamp_sha256_key(timestamp)
    def n = data.len
-   if(n > key.len){ panic("otp timestamp sha256: data too long for one digest") }
+   if n > key.len { panic("otp timestamp sha256: data too long for one digest") }
    mut out = list(n)
    store64(out, n, 0)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(out, i, (__load_item_fast(data, i) ^^ __load_item_fast(key, i)) & 255)
       i += 1
    }
@@ -345,7 +345,7 @@ fn otp_timestamp_sha256_xor(list data, int timestamp) list {
 
 fn _otp_timestamp_sha256_match(list ciphertext, int timestamp, str prefix, str suffix) any {
    def plain = otp_timestamp_sha256_xor(ciphertext, timestamp)
-   if(otp_score_english(plain) == nil){ return nil }
+   if otp_score_english(plain) == nil { return nil }
    def text = plain.text
    def prefix_ok = prefix.len == 0 || text.startswith(prefix)
    def suffix_ok = suffix.len == 0 || text.endswith(suffix)
@@ -357,14 +357,14 @@ fn otp_timestamp_sha256_bruteforce(list ciphertext, int center, int radius, str 
    Searches from center outward and returns the nearest printable plaintext whose
    optional prefix/suffix checks match, else nil."
    mut offset = 0
-   while(offset <= radius){
+   while offset <= radius {
       def lower = center - offset
       def lower_plain = _otp_timestamp_sha256_match(ciphertext, lower, prefix, suffix)
-      if(lower_plain != nil){ return [lower, lower_plain] }
-      if(offset != 0){
+      if lower_plain != nil { return [lower, lower_plain] }
+      if offset != 0 {
          def upper = center + offset
          def upper_plain = _otp_timestamp_sha256_match(ciphertext, upper, prefix, suffix)
-         if(upper_plain != nil){ return [upper, upper_plain] }
+         if upper_plain != nil { return [upper, upper_plain] }
       }
       offset += 1
    }
@@ -380,7 +380,7 @@ fn otp_reuse_attack(list ct1, list ct2) list {
    mut result = list(n)
    store64(result, n, 0)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(result, i, __load_item_fast(ct1, i) ^^ __load_item_fast(ct2, i))
       i += 1
    }
@@ -396,7 +396,7 @@ fn otp_decrypt_known_plaintext(list ct, list known_pt) list {
    mut result = list(ct_len)
    store64(result, ct_len, 0)
    mut i = 0
-   while(i < ct_len){
+   while i < ct_len {
       def p = (i < ks_len) ? __load_item_fast(known_pt, i) : __load_item_fast(ct, i)
       __store_item_fast(result, i, p)
       i += 1

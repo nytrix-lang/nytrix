@@ -53,28 +53,29 @@ mut _text_runs = []
 mut _text_run_count = 0
 mut _text_char_count = 0
 def C_BG = color_hex("#000000")
-def C_PANEL = color_hex("#080808")
-def C_PANEL_ALT = color_hex("#131318")
-def C_IDLE = color_hex("#15151b")
-def C_TEXT = color_hex("#f5f5f6")
-def C_MUTED = color_hex("#c6c6ca")
-def C_SUBTLE = color_hex("#808087")
-def C_ACCENT = color_hex("#9f86d9")
-def C_ACCENT_SOFT = color_hex("#181321")
-def C_ACTIVE = color_hex("#563d7c")
-def C_ACTIVE_SOFT = color_hex("#261b35")
-def C_ACTIVE_HI = color_hex("#bda9ec")
-def C_ACTIVE_RING = color_hex("#6e5a96")
+def C_PANEL = color_hex("#050505")
+def C_PANEL_ALT = color_hex("#0a0a0a")
+def C_IDLE = color_hex("#111111")
+def C_TEXT = color_hex("#eeeeee")
+def C_MUTED = color_hex("#b8b8b8")
+def C_SUBTLE = color_hex("#777777")
+def C_ACCENT = color_hex("#d0d0d0")
+def C_ACCENT_SOFT = color_hex("#181818")
+def C_ACTIVE = color_hex("#323232")
+def C_ACTIVE_SOFT = color_hex("#1c1c1c")
+def C_ACTIVE_HI = color_hex("#f0f0f0")
+def C_ACTIVE_RING = color_hex("#999999")
 def C_BLACK = color_hex("#000000")
-def C_MID = color_hex("#282531")
-def C_STICK = color_hex("#101014")
+def C_MID = color_hex("#242424")
+def C_STICK = color_hex("#0d0d0d")
+
 ;; Controller-only palette. Keep this isolated from generic GUI button colors.
 ;; Important: face/menu/bumper/D-pad/stick/trigger all reuse this same palette.
 ;; There are no per-button colors, so A/B/X/Y, menu buttons, and bumpers cannot drift
 ;; into green/blue/red depending on the control identity or a shared GUI theme tweak.
-def C_PAD_IDLE = color_hex("#141319")
-def C_PAD_EDGE = color_hex("#272432")
-def C_PAD_DOWN = color_hex("#5d3f8c")
+def C_PAD_IDLE = color_hex("#121212")
+def C_PAD_EDGE = color_hex("#282828")
+def C_PAD_DOWN = color_hex("#404040")
 def C_PAD_DOWN_EDGE = C_PAD_EDGE
 def C_PAD_AXIS = C_PAD_DOWN
 def C_PAD_MARK = C_PAD_DOWN
@@ -84,7 +85,7 @@ def TERMINAL_FONT_DEFAULT = assets.TERM_FONT_DEFAULT
 def TERMINAL_FONT_CANDIDATES = assets.TERM_FONT_CANDIDATES
 
 fn _packed_color(color) int {
-   if(is_int(color)){ return int(color) }
+   if is_int(color) { return int(color) }
    color_pack(
       float(color.get(0, 1.0)),
       float(color.get(1, 1.0)),
@@ -107,7 +108,7 @@ fn _disc(any cx, any cy, any radius, any color) bool {
 
 fn text_w(any label) f64 {
    def cached = _text_width_cache.get(label, -1.0)
-   if(cached >= 0.0){ return cached }
+   if cached >= 0.0 { return cached }
    def tw = float(measure_text_fast(font, label).get(0, 0.0))
    _text_width_cache[label] = tw
    tw
@@ -115,7 +116,7 @@ fn text_w(any label) f64 {
 
 fn queue_text(any label, any x, any y, any color) int {
    def s = to_str(label)
-   if(s.len <= 0){ return 0 }
+   if s.len <= 0 { return 0 }
    _text_run_count += 1
    _text_char_count += s.len
    mut runs = is_list(_text_runs) ? _text_runs : []
@@ -128,7 +129,7 @@ fn queue_text(any label, any x, any y, any color) int {
 }
 
 fn flush_text() int {
-   if(is_list(_text_runs) && _text_runs.len > 0){
+   if is_list(_text_runs) && _text_runs.len > 0 {
       draw_text_runs_flat_colors(font, _text_runs)
       _text_runs = []
    }
@@ -136,16 +137,16 @@ fn flush_text() int {
 }
 
 fn fit_text(any label, any max_w) str {
-   if(max_w <= 0.0){ return "" }
+   if max_w <= 0.0 { return "" }
    def s = to_str(label)
-   if(text_w(s) <= max_w){ return s }
+   if text_w(s) <= max_w { return s }
    def ell = "..."
    def ell_w = text_w(ell)
-   if(max_w <= ell_w){ return "" }
+   if max_w <= ell_w { return "" }
    mut hi = s.len
-   while(hi > 0){
+   while hi > 0 {
       def cand = str.str_slice(s, 0, hi) + ell
-      if(text_w(cand) <= max_w){ return cand }
+      if text_w(cand) <= max_w { return cand }
       hi -= 1
    }
    ell
@@ -153,13 +154,13 @@ fn fit_text(any label, any max_w) str {
 
 fn draw_text_fit(any label, any x, any y, any max_w, any color) int {
    def s = fit_text(label, max_w)
-   if(s.len > 0){ queue_text(s, x, y, color) }
+   if s.len > 0 { queue_text(s, x, y, color) }
    0
 }
 
 fn draw_text_right_fit(any label, any right_x, any y, any max_w, any color) int {
    def s = fit_text(label, max_w)
-   if(s.len > 0){ queue_text(s, right_x - text_w(s), y, color) }
+   if s.len > 0 { queue_text(s, right_x - text_w(s), y, color) }
    0
 }
 
@@ -175,7 +176,7 @@ fn _trigger01(any value) f64 {
    ;; Backends differ: some expose triggers as -1..1, others as 0..1.
    ;; Treat exact/near zero as rest so a resting trigger does not draw a half-lit bar.
    def v = clamp(float(value), -1.0, 1.0)
-   if(v <= -0.05){ return clamp((v + 1.0) * 0.5, 0.0, 1.0) }
+   if v <= -0.05 { return clamp((v + 1.0) * 0.5, 0.0, 1.0) }
    clamp(v, 0.0, 1.0)
 }
 
@@ -199,7 +200,7 @@ fn draw_axis_meter(any label, any value, any x, any y, any w) int {
    queue_text(label, x, y + 12.0, C_MUTED)
    rect(bar_x, y + 5.0, bar_w, 8.0, C_IDLE)
    rect(mid_x - 1.0, y + 4.0, 2.0, 10.0, C_SUBTLE)
-   if(axis_i >= 0){
+   if axis_i >= 0 {
       rect(mid_x, y + 5.0, (bar_w * 0.5) * gamepad.axis_f(axis_i), 8.0, fill_col)
    } else {
       def neg_w = (bar_w * 0.5) * gamepad.axis_f(-axis_i)
@@ -215,7 +216,7 @@ fn draw_button_chip(any label, any active, any x, any y, any w) int {
    def shown = fit_text(label, max(0.0, w - 8.0))
    def tw = text_w(shown)
    def tx = x + ((w - tw) * 0.5)
-   if(shown.len > 0){ queue_text(shown, tx, y + 15.0, C_TEXT) }
+   if shown.len > 0 { queue_text(shown, tx, y + 15.0, C_TEXT) }
    0
 }
 
@@ -250,11 +251,11 @@ fn _draw_pad_shell(f64 off_x, f64 off_y, f64 s, any st, f64 lt, f64 rt) int {
    def rt_t = _trigger01(rt)
    def lt_h = th * lt_t
    def rt_h = th * rt_t
-   if(lt_t > 0.01){
+   if lt_t > 0.01 {
       def fill = lt_h < _gs(s, 4) ? _gs(s, 4) : lt_h
       _round_rect(tx_l, ty + th - fill, tw, fill, _gs(s, 5), C_PAD_DOWN)
    }
-   if(rt_t > 0.01){
+   if rt_t > 0.01 {
       def fill = rt_h < _gs(s, 4) ? _gs(s, 4) : rt_h
       _round_rect(tx_r, ty + th - fill, tw, fill, _gs(s, 5), C_PAD_DOWN)
    }
@@ -295,22 +296,22 @@ fn _draw_dpad(f64 off_x, f64 off_y, f64 s, any st) int {
    _round_rect(_gx(off_x, s, 217), _gy(off_y, s, 176), _gs(s, 84), _gs(s, 25), _gs(s, 4), C_PAD_IDLE)
    def dc_x = _gx(off_x, s, 259)
    def dc_y = _gy(off_y, s, 188.5)
-   if(gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_UP)){
+   if gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_UP) {
       _round_rect(_gx(off_x, s, 247), _gy(off_y, s, 147), _gs(s, 24), _gs(s, 29), _gs(s, 4), C_PAD_DOWN)
       rect(_gx(off_x, s, 247), _gy(off_y, s, 158), _gs(s, 24), _gs(s, 18), C_PAD_DOWN)
       draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 176), 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 176), 0.0], C_PAD_DOWN)
    }
-   if(gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_DOWN)){
+   if gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_DOWN) {
       _round_rect(_gx(off_x, s, 247), _gy(off_y, s, 201), _gs(s, 24), _gs(s, 30), _gs(s, 4), C_PAD_DOWN)
       rect(_gx(off_x, s, 247), _gy(off_y, s, 201), _gs(s, 24), _gs(s, 16), C_PAD_DOWN)
       draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 201), 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 201), 0.0], C_PAD_DOWN)
    }
-   if(gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_LEFT)){
+   if gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_LEFT) {
       _round_rect(_gx(off_x, s, 217), _gy(off_y, s, 176), _gs(s, 30), _gs(s, 25), _gs(s, 4), C_PAD_DOWN)
       rect(_gx(off_x, s, 232), _gy(off_y, s, 176), _gs(s, 15), _gs(s, 25), C_PAD_DOWN)
       draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 201), 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 176), 0.0], C_PAD_DOWN)
    }
-   if(gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_RIGHT)){
+   if gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_RIGHT) {
       _round_rect(_gx(off_x, s, 271), _gy(off_y, s, 176), _gs(s, 30), _gs(s, 25), _gs(s, 4), C_PAD_DOWN)
       rect(_gx(off_x, s, 271), _gy(off_y, s, 176), _gs(s, 15), _gs(s, 25), C_PAD_DOWN)
       draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 176), 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 201), 0.0], C_PAD_DOWN)
@@ -331,7 +332,7 @@ fn _draw_stick(f64 off_x, f64 off_y, f64 s, any st, f64 cx, f64 cy, f64 ax, f64 
    _disc(center_x, center_y, _gs(s, 36), C_PAD_IDLE)
    rect(center_x - travel, center_y - max(1.0, _gs(s, 1)), travel * 2.0, max(1.0, _gs(s, 2)), C_PAD_EDGE)
    rect(center_x - max(1.0, _gs(s, 1)), center_y - travel, max(1.0, _gs(s, 2)), travel * 2.0, C_PAD_EDGE)
-   if(gamepad.axis_i100(sx) != 0 || gamepad.axis_i100(sy) != 0){
+   if gamepad.axis_i100(sx) != 0 || gamepad.axis_i100(sy) != 0 {
       def shaft_r = max(2.0, _gs(s, 4))
       draw_line_2d(center_x, center_y, knob_x, knob_y, C_PAD_EDGE, shaft_r * 2.0)
       _disc(center_x, center_y, shaft_r, C_PAD_EDGE)
@@ -371,7 +372,7 @@ fn draw_controller(any st, f64 x, f64 y, f64 w, f64 h) int {
 }
 
 fn line_h() f64 {
-   if(_line_h_cache > 0.0){ return _line_h_cache }
+   if _line_h_cache > 0.0 { return _line_h_cache }
    def sz = measure_text_fast(font, "Mg")
    def h = float(sz.get(1, 18.0))
    _line_h_cache = h > 0.0 ? h : 18.0
@@ -379,7 +380,7 @@ fn line_h() f64 {
 }
 
 fn controller_fit_scale(any w, any h) f64 {
-   if(w <= 0.0 || h <= 0.0){ return 0.0 }
+   if w <= 0.0 || h <= 0.0 { return 0.0 }
    min(w / 508.0, h / 232.0) * CONTROLLER_DRAW_SCALE
 }
 
@@ -411,13 +412,13 @@ fn default_override(any tag, any suffix) str {
    def key_tag = "NY_" + str.upper(to_str(tag)) + "_" + str.upper(to_str(suffix))
    def key_shared = "NY_UI_" + str.upper(to_str(suffix))
    def tag_value = common.env_trim(key_tag)
-   if(tag_value.len > 0){ return tag_value }
+   if tag_value.len > 0 { return tag_value }
    common.env_trim(key_shared)
 }
 
 fn default_font_size(any tag, f64 fallback, str suffix="FONT_SIZE") any {
    def raw = default_override(tag, suffix)
-   if(raw.len == 0){ return fallback }
+   if raw.len == 0 { return fallback }
    min(max(str.atof(raw), 8.0), 96.0)
 }
 
@@ -436,13 +437,13 @@ fn default_font_filter(any tag, int fallback=FONT_FILTER_DEFAULT, str suffix="FO
 
 fn font_from_candidates(int size, list candidates=FONT_CANDIDATES, int font_filter=-1) int {
    mut i = 0
-   while(i < candidates.len){
+   while i < candidates.len {
       def raw = candidates.get(i, "")
       def resolved = ospath.resolve_repo_asset(raw)
       def path = resolved.len > 0 ? resolved : raw
       def filter = str.find(str.lower(raw), "monocraft") >= 0 ? FONT_FILTER_NEAREST : font_filter
       def f = font_load(path, size, filter)
-      if(f){ return f }
+      if f { return f }
       i += 1
    }
    0
@@ -451,18 +452,18 @@ fn font_from_candidates(int size, list candidates=FONT_CANDIDATES, int font_filt
 fn terminal_font_map(any size, int font_filter=FONT_FILTER_NEAREST, int emoji_filter=FONT_FILTER_LINEAR, str reg_path="", str bold_path="", str ital_path="", str emoji_path="", bool emoji_on=true) dict {
    mut f = 0
    def font_size = int(size)
-   if(reg_path.len > 0){
+   if reg_path.len > 0 {
       f = font_load(reg_path, font_size, font_filter)
    } else {
       f = font_from_candidates(font_size, TERMINAL_FONT_CANDIDATES, font_filter)
    }
-   if(!f){ f = font_load(TERMINAL_FONT_DEFAULT, font_size, font_filter) }
+   if !f { f = font_load(TERMINAL_FONT_DEFAULT, font_size, font_filter) }
    mut bold = f
    mut italic = f
    mut emoji = f
-   if(bold_path.len > 0){ bold = common.value_or(font_load(bold_path, font_size, font_filter), f) }
-   if(ital_path.len > 0){ italic = common.value_or(font_load(ital_path, font_size, font_filter), f) }
-   if(emoji_on){
+   if bold_path.len > 0 { bold = common.value_or(font_load(bold_path, font_size, font_filter), f) }
+   if ital_path.len > 0 { italic = common.value_or(font_load(ital_path, font_size, font_filter), f) }
+   if emoji_on {
       def ep = (emoji_path.len > 0) ? emoji_path : "/usr/share/fonts/noto/NotoColorEmoji.ttf"
       emoji = common.value_or(font_load(ep, font_size, emoji_filter), f)
    }
@@ -471,13 +472,13 @@ fn terminal_font_map(any size, int font_filter=FONT_FILTER_NEAREST, int emoji_fi
 
 fn terminal_cell_size(any font_id, any font_size) list {
    def fs = float(font_size)
-   if(!font_id){ return [max(1.0, fs * 0.6), max(1.0, max(fs, 20.0))] }
+   if !font_id { return [max(1.0, fs * 0.6), max(1.0, max(fs, 20.0))] }
    def probe = measure_text_fast(font_id, "M")
    mut cw, ch = float(probe.get(0, 0.0)), float(probe.get(1, 0.0))
-   if(cw <= 1.0){ cw = max(cw, float(measure_text_fast(font_id, "A").get(0, 0.0))) }
-   if(cw <= 1.0){ cw = max(cw, float(measure_text_fast(font_id, "i").get(0, 0.0))) }
-   if(cw <= 1.0){ cw = fs * 0.6 }
-   if(ch <= 1.0){ ch = fs }
+   if cw <= 1.0 { cw = max(cw, float(measure_text_fast(font_id, "A").get(0, 0.0))) }
+   if cw <= 1.0 { cw = max(cw, float(measure_text_fast(font_id, "i").get(0, 0.0))) }
+   if cw <= 1.0 { cw = fs * 0.6 }
+   if ch <= 1.0 { ch = fs }
    [max(1.0, float(int(cw + 0.5))), max(1.0, float(int(ch + 0.5)))]
 }
 
@@ -514,4 +515,3 @@ fn text_char_count() int {
    assert(terminal_cell_size(0, 16.0).get(1) >= 16.0, "viewer terminal cell size")
    print("✓ std.os.ui.render.viewer self-test passed")
 }
-

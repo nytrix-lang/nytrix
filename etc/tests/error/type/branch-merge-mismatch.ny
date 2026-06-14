@@ -2,7 +2,7 @@
 use std.core
 
 fn choose(flag, a, b) {
-   if(flag){ return a }
+   if flag { return a }
    b
 }
 

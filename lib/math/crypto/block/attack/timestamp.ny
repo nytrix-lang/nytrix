@@ -15,14 +15,14 @@ fn aes_ecb_sha256_timestamp_bruteforce(list ciphertext, int center, int radius, 
    Returns [timestamp, plaintext] when optional prefix/suffix checks match, else nil."
    mut timestamp = center - radius
    def stop = center + radius
-   while(timestamp <= stop){
+   while timestamp <= stop {
       def key = slice(sha256(to_str(timestamp)), 0, 16)
       def padded = aes_decrypt_ecb(key, ciphertext)
-      if(padded != nil){
+      if padded != nil {
          def text = bin.pkcs7_unpad(padded).text
          def prefix_ok = prefix == "" || str.startswith(text, prefix)
          def suffix_ok = suffix == "" || str.endswith(text, suffix)
-         if(prefix_ok && suffix_ok){ return [timestamp, text] }
+         if prefix_ok && suffix_ok { return [timestamp, text] }
       }
       timestamp += 1
    }

@@ -37,28 +37,28 @@ fn start(dict st) int { int(st.get("start", 0)) }
 fn end(dict st) int { int(st.get("end", 0)) }
 
 fn _hex_digit_value(int c) int {
-   if(c >= 48 && c <= 57){ return c - 48 }
-   if(c >= 65 && c <= 70){ return c - 55 }
-   if(c >= 97 && c <= 102){ return c - 87 }
+   if c >= 48 && c <= 57 { return c - 48 }
+   if c >= 65 && c <= 70 { return c - 55 }
+   if c >= 97 && c <= 102 { return c - 87 }
    -1
 }
 
 fn _is_hex_digit(int c) bool { _hex_digit_value(c) >= 0 }
 
 fn normalize(str text) str {
-   if(text.len <= 0 || load8(text, 0) != 35){ return "" }
+   if text.len <= 0 || load8(text, 0) != 35 { return "" }
    def digits = text.len - 1
-   if(digits == 3){
-      if(!_is_hex_digit(load8(text, 1)) || !_is_hex_digit(load8(text, 2)) || !_is_hex_digit(load8(text, 3))){ return "" }
+   if digits == 3 {
+      if !_is_hex_digit(load8(text, 1)) || !_is_hex_digit(load8(text, 2)) || !_is_hex_digit(load8(text, 3)) { return "" }
       def r = str.str_slice(text, 1, 2)
       def g = str.str_slice(text, 2, 3)
       def b = str.str_slice(text, 3, 4)
       return "#" + r + r + g + g + b + b
    }
-   if(digits == 6 || digits == 8){
+   if digits == 6 || digits == 8 {
       mut i = 1
-      while(i < text.len){
-         if(!_is_hex_digit(load8(text, i))){ return "" }
+      while i < text.len {
+         if !_is_hex_digit(load8(text, i)) { return "" }
          i += 1
       }
       return str.str_slice(text, 0, 7)
@@ -73,12 +73,12 @@ fn _hit(str line_text, int i, int j, int row) dict {
 
 fn scan_hex_literal(str line_text, int pos, int row=0) dict {
    mut i = 0
-   while(i < line_text.len){
-      if(load8(line_text, i) != 35){ i += 1 continue }
+   while i < line_text.len {
+      if load8(line_text, i) != 35 { i += 1 continue }
       mut j = i + 1
-      while(j < line_text.len && _is_hex_digit(load8(line_text, j))){ j += 1 }
+      while j < line_text.len && _is_hex_digit(load8(line_text, j)) { j += 1 }
       def digits = j - i - 1
-      if((digits == 3 || digits == 6 || digits == 8) && pos >= i && pos <= j){
+      if (digits == 3 || digits == 6 || digits == 8) && pos >= i && pos <= j {
          return _hit(line_text, i, j, row)
       }
       i = max(i + 1, j)
@@ -87,27 +87,27 @@ fn scan_hex_literal(str line_text, int pos, int row=0) dict {
 }
 
 fn at_cursor(list lines, int row, int col) dict {
-   if(lines.len <= 0){ return dict(0) }
+   if lines.len <= 0 { return dict(0) }
    def r = min(max(row, 0), lines.len - 1)
    def line_text = to_str(lines.get(r, ""))
    scan_hex_literal(line_text, min(max(col, 0), line_text.len), r)
 }
 
 fn _clip_line(str line_text, int limit) str {
-   if(line_text.len <= limit){ return line_text }
+   if line_text.len <= limit { return line_text }
    str.str_slice(line_text, 0, max(0, limit - 3)) + "..."
 }
 
 fn _append_line_swatches(list out, str line_text, int row) list {
    mut i = 0
-   while(i < line_text.len){
-      if(load8(line_text, i) != 35){ i += 1 continue }
+   while i < line_text.len {
+      if load8(line_text, i) != 35 { i += 1 continue }
       mut j = i + 1
-      while(j < line_text.len && _is_hex_digit(load8(line_text, j))){ j += 1 }
+      while j < line_text.len && _is_hex_digit(load8(line_text, j)) { j += 1 }
       def digits = j - i - 1
-      if(digits == 3 || digits == 6 || digits == 8){
+      if digits == 3 || digits == 6 || digits == 8 {
          def hit = _hit(line_text, i, j, row)
-         if(hit.len > 0){ out = out.append(hit) }
+         if hit.len > 0 { out = out.append(hit) }
       }
       i = max(i + 1, j)
    }
@@ -118,7 +118,7 @@ fn swatches_visible(list lines, int scroll, int rows, int draw_limit) list {
    mut out = []
    mut row = max(0, scroll)
    def last = min(lines.len, max(0, scroll) + max(0, rows))
-   while(row < last){
+   while row < last {
       out = _append_line_swatches(out, _clip_line(to_str(lines.get(row, "")), draw_limit), row)
       row += 1
    }
@@ -155,23 +155,23 @@ fn _rgba_fallback(any fallback) list {
 fn _byte_unit(int v) f64 { float(max(0, min(255, v))) / 255.0 }
 
 fn _hex_pair_byte(str text, int off, int fallback) int {
-   if(off + 1 >= text.len){ return fallback }
+   if off + 1 >= text.len { return fallback }
    def hi = _hex_digit_value(load8(text, off))
    def lo = _hex_digit_value(load8(text, off + 1))
    (hi < 0 || lo < 0) ? fallback : hi * 16 + lo
 }
 
 fn _hex_nibble_byte(str text, int off, int fallback) int {
-   if(off >= text.len){ return fallback }
+   if off >= text.len { return fallback }
    def v = _hex_digit_value(load8(text, off))
    v < 0 ? fallback : v * 17
 }
 
 fn _rgba_from_hex(str text, any fallback) list {
    def fb = _rgba_fallback(fallback)
-   if(text.len <= 1 || load8(text, 0) != 35){ return fb }
+   if text.len <= 1 || load8(text, 0) != 35 { return fb }
    def digits = text.len - 1
-   if(digits == 3 || digits == 4){
+   if digits == 3 || digits == 4 {
       return [
          _byte_unit(_hex_nibble_byte(text, 1, int(float(fb.get(0, 1.0)) * 255.0 + 0.5))),
          _byte_unit(_hex_nibble_byte(text, 2, int(float(fb.get(1, 1.0)) * 255.0 + 0.5))),
@@ -179,7 +179,7 @@ fn _rgba_from_hex(str text, any fallback) list {
          digits == 4 ? _byte_unit(_hex_nibble_byte(text, 4, int(float(fb.get(3, 1.0)) * 255.0 + 0.5))) : float(fb.get(3, 1.0))
       ]
    }
-   if(digits == 6 || digits == 8){
+   if digits == 6 || digits == 8 {
       return [
          _byte_unit(_hex_pair_byte(text, 1, int(float(fb.get(0, 1.0)) * 255.0 + 0.5))),
          _byte_unit(_hex_pair_byte(text, 3, int(float(fb.get(1, 1.0)) * 255.0 + 0.5))),
@@ -193,8 +193,8 @@ fn _rgba_from_hex(str text, any fallback) list {
 fn rgba(any color, any fallback=[1.0, 1.0, 1.0, 1.0]) list {
    "Normalizes list/tuple or hex colors to clamped RGBA floats."
    def fb = _rgba_fallback(fallback)
-   if(is_str(color)){ return _rgba_from_hex(to_str(color), fb) }
-   if(is_list(color) || is_tuple(color)){
+   if is_str(color) { return _rgba_from_hex(to_str(color), fb) }
+   if is_list(color) || is_tuple(color) {
       return [
          clamp(float(color.get(0, fb.get(0, 1.0))), 0.0, 1.0),
          clamp(float(color.get(1, fb.get(1, 1.0))), 0.0, 1.0),

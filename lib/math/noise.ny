@@ -76,7 +76,7 @@ fn fbm3(any x, any y, any z, any lacunarity=2.0, any gain=0.5, int octaves=6) an
    mut freq = 1.0
    mut amp = 1.0
    mut i = 0
-   while(i < octaves){
+   while i < octaves {
       sum = sum + perlin3_seed(x * freq, y * freq, z * freq, i) * amp
       freq = freq * lacunarity
       amp = amp * gain
@@ -91,7 +91,7 @@ fn turbulence3(any x, any y, any z, any lacunarity=2.0, any gain=0.5, int octave
    mut freq = 1.0
    mut amp = 1.0
    mut i = 0
-   while(i < octaves){
+   while i < octaves {
       sum = sum + abs(perlin3_seed(x * freq, y * freq, z * freq, i)) * amp
       freq = freq * lacunarity
       amp = amp * gain

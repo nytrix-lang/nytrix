@@ -7,11 +7,11 @@ module std.core.tbuf(f32buf_new, f32buf_load, f32buf_store, f32buf_load_raw, f32
 use std.core
 
 fn _tbuf_new(int n, int elem_size) ptr {
-   if(n < 0){ n = 0 }
-   if(elem_size <= 0){ elem_size = 1 }
+   if n < 0 { n = 0 }
+   if elem_size <= 0 { elem_size = 1 }
    def total = 16 + n * elem_size
    def base = malloc(total)
-   if(!base){ panic("typed buffer allocation failed") }
+   if !base { panic("typed buffer allocation failed") }
    store64(base, n, 0)
    store64(base, elem_size, 8)
    memset(base + 16, 0, n * elem_size)
@@ -67,7 +67,7 @@ fn f32buf_store_raw(any buf, int i, int bits) any {
 @inline
 fn tbuf_len(any buf) int {
    "Returns the logical element count for typed buffer `buf`."
-   if(!buf){ return 0 }
+   if !buf { return 0 }
    load64(buf - 16, 0)
 }
 
@@ -80,7 +80,7 @@ fn tbuf_ptr(any buf) ptr {
 @inline
 fn tbuf_copy(any dst, int di, any src, int si, int n, int elem_size) any {
    "Copies `n` elements of `elem_size` bytes from `src[si]` into `dst[di]`."
-   if(!dst || !src || n <= 0 || elem_size <= 0){ return dst }
+   if !dst || !src || n <= 0 || elem_size <= 0 { return dst }
    memcpy(dst + di * elem_size, src + si * elem_size, n * elem_size)
    dst
 }

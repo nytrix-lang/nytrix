@@ -15,18 +15,18 @@ use std.math (clamp, max, min)
 use std.os.ui.render as gfx
 
 def C_BG = gfx.color_hex("#000000")
-def C_PANEL = gfx.color_hex("#080808")
-def C_PANEL_ALT = gfx.color_hex("#131318")
+def C_PANEL = gfx.color_hex("#050505")
+def C_PANEL_ALT = gfx.color_hex("#0a0a0a")
 def C_BOX = C_PANEL_ALT
-def C_LINE = gfx.color_hex("#2b2634")
-def C_TEXT = gfx.color_hex("#f5f5f6")
-def C_MUTED = gfx.color_hex("#c6c6ca")
-def C_DIM = gfx.color_hex("#15151b")
-def C_ACCENT = gfx.color_hex("#9f86d9")
-def C_ACCENT_HI = gfx.color_hex("#bda9ec")
-def C_KEY_IDLE = gfx.color_hex("#121218")
-def C_KEY_HOVER = gfx.color_hex("#1b1624")
-def C_KEY_DOWN = gfx.color_hex("#332347")
+def C_LINE = gfx.color_hex("#242424")
+def C_TEXT = gfx.color_hex("#eeeeee")
+def C_MUTED = gfx.color_hex("#b8b8b8")
+def C_DIM = gfx.color_hex("#141414")
+def C_ACCENT = gfx.color_hex("#d0d0d0")
+def C_ACCENT_HI = gfx.color_hex("#f2f2f2")
+def C_KEY_IDLE = gfx.color_hex("#101010")
+def C_KEY_HOVER = gfx.color_hex("#191919")
+def C_KEY_DOWN = gfx.color_hex("#303030")
 
 fn text_w(any font, any label, any font_lg=0, any font_md=0, f64 px=9.5) f64 {
    "Estimates text width for fixed-size UI layout."
@@ -63,14 +63,14 @@ fn fits(f64 y, f64 bottom, f64 h) bool {
 
 fn preview(str s, int limit) str {
    "Returns an ASCII preview clipped with an ellipsis."
-   if(s.len <= limit){ return s }
-   if(limit <= 3){ return str.str_slice(s, 0, limit) }
+   if s.len <= limit { return s }
+   if limit <= 3 { return str.str_slice(s, 0, limit) }
    str.str_slice(s, 0, limit - 3) + "..."
 }
 
 fn limit_text(str s, int limit) str {
    "Returns a UTF-8 safe prefix limited by codepoint count."
-   if(str.utf8_len(s) <= limit){ return s }
+   if str.utf8_len(s) <= limit { return s }
    str.utf8_slice(s, 0, limit)
 }
 
@@ -78,9 +78,9 @@ fn panel(any font_sm, f64 x, f64 y, f64 w, f64 h, str title, any accent=C_ACCENT
    "Draws a compact titled panel frame."
    gfx.draw_rect(x, y, w, h, C_PANEL)
    gfx.draw_rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, C_PANEL_ALT)
-   gfx.draw_rect(x, y, w, 3.0, accent)
-   gfx.draw_rectangle_lines(x, y, w, h, C_LINE, 1.5)
-   gfx.draw_text(font_sm, title, x + 14.0, y + 16.0, C_MUTED)
+   gfx.draw_rect(x, y, w, 2.0, accent)
+   gfx.draw_rectangle_lines(x, y, w, h, C_LINE, 1.0)
+   gfx.draw_text(font_sm, title, x + 10.0, y + 13.0, C_MUTED)
    0
 }
 
@@ -91,21 +91,21 @@ fn button(any font, str label, f64 x, f64 y, f64 w, f64 h, f64 mx, f64 my, bool 
    def fill = down ? C_KEY_DOWN : (hover ? C_KEY_HOVER : C_KEY_IDLE)
    def border = down ? C_ACCENT_HI : (hover ? color : C_LINE)
    gfx.draw_rect(x, y, w, h, fill)
-   gfx.draw_rectangle_lines(x, y, w, h, border, down ? 3.0 : (hover ? 2.5 : 1.25))
-   gfx.draw_text(font, label, x + w * 0.5 - text_w(font, label) * 0.5, y + 9.0, C_TEXT)
+   gfx.draw_rectangle_lines(x, y, w, h, border, down ? 2.0 : (hover ? 1.5 : 1.0))
+   gfx.draw_text(font, label, x + w * 0.5 - text_w(font, label) * 0.5, y + max(6.0, h * 0.26), C_TEXT)
    hover && click
 }
 
 fn text_box(any font_body, any font_small, str label, str value, f64 x, f64 y, f64 w, f64 h, bool active=false, bool caret=false, int max_chars=0) int {
    "Draws a single-line text box with optional active caret."
    def shown = preview(value, max_chars > 0 ? max_chars : int(max(8.0, (w - 28.0) / 9.8)))
-   gfx.draw_text(font_small, label, x, y - 20.0, C_MUTED)
+   gfx.draw_text(font_small, label, x, y - 17.0, C_MUTED)
    gfx.draw_rect(x, y, w, h, C_BOX)
-   gfx.draw_rectangle_lines(x, y, w, h, active ? C_ACCENT : C_LINE, active ? 2.5 : 1.25)
-   gfx.draw_text(font_body, shown, x + 12.0, y + 10.0, value.len > 0 ? C_TEXT : C_MUTED)
-   if(active && caret){
-      def cx = min(x + w - 16.0, x + 14.0 + text_w(font_body, shown))
-      gfx.draw_rect(cx, y + 10.0, 2.0, h - 20.0, C_ACCENT_HI)
+   gfx.draw_rectangle_lines(x, y, w, h, active ? C_ACCENT : C_LINE, active ? 1.5 : 1.0)
+   gfx.draw_text(font_body, shown, x + 10.0, y + max(6.0, h * 0.24), value.len > 0 ? C_TEXT : C_MUTED)
+   if active && caret {
+      def cx = min(x + w - 14.0, x + 12.0 + text_w(font_body, shown))
+      gfx.draw_rect(cx, y + 8.0, 2.0, max(8.0, h - 16.0), C_ACCENT_HI)
    }
    0
 }
@@ -115,7 +115,7 @@ fn keycap(any font_md, f64 x, f64 y, f64 size, str label, bool pressed, any colo
    def fill = pressed ? C_KEY_DOWN : C_KEY_IDLE
    def border = pressed ? C_ACCENT_HI : C_LINE
    gfx.draw_rect(x, y, size, size, fill)
-   gfx.draw_rectangle_lines(x, y, size, size, border, pressed ? 3.0 : 1.5)
+   gfx.draw_rectangle_lines(x, y, size, size, border, pressed ? 2.0 : 1.0)
    text_center(font_md, label, x + size * 0.5, y + size * 0.5 - text_h(font_md, 0, font_md) * 0.5, C_TEXT, 0, font_md)
    0
 }
@@ -147,8 +147,8 @@ fn sphere(f64 cx, f64 cy, f64 r, any color, bool active=false) int {
 fn axis(bool neg, bool pos) f64 {
    "Converts negative/positive button states to an axis value."
    mut out = 0.0
-   if(neg){ out -= 1.0 }
-   if(pos){ out += 1.0 }
+   if neg { out -= 1.0 }
+   if pos { out += 1.0 }
    out
 }
 

@@ -18,35 +18,35 @@ def SYNTH_TAU = 6.2831853071795864769
 
 fn _clamp_unit(any x) f64 {
    mut v = x + 0.0
-   if(v > 1.0){ v = 1.0 }
-   if(v < (0.0 - 1.0)){ v = 0.0 - 1.0 }
+   if v > 1.0 { v = 1.0 }
+   if v < (0.0 - 1.0) { v = 0.0 - 1.0 }
    return v
 }
 
 fn _clamp_duty(any d) f64 {
    mut v = d + 0.0
-   if(v < 0.01){ v = 0.01 }
-   if(v > 0.99){ v = 0.99 }
+   if v < 0.01 { v = 0.01 }
+   if v > 0.99 { v = 0.99 }
    return v
 }
 
 fn _phase_wrap01(any x) f64 {
    mut v = x + 0.0
-   while(v >= 1.0){ v = v - 1.0 }
-   while(v < 0.0){ v += 1.0 }
+   while v >= 1.0 { v = v - 1.0 }
+   while v < 0.0 { v += 1.0 }
    return v
 }
 
 fn _poly_blep(any t, any dt) f64 {
    mut x, d = t + 0.0, dt + 0.0
-   if(d <= 0.0){ return 0.0 }
-   if(d > 0.5){ d = 0.5 }
+   if d <= 0.0 { return 0.0 }
+   if d > 0.5 { d = 0.5 }
    x = _phase_wrap01(x)
-   if(x < d){
+   if x < d {
       x = x / d
       return x + x - (x * x) - 1.0
    }
-   if(x > 1.0 - d){
+   if x > 1.0 - d {
       x = (x - 1.0) / d
       return(x * x) + x + x + 1.0
    }
@@ -56,7 +56,7 @@ fn _poly_blep(any t, any dt) f64 {
 fn _wave_sample(int kind, f64 phase, f64 duty, f64 step) f64 {
    def p = phase / SYNTH_TAU
    mut dt = step / SYNTH_TAU
-   if(dt < 0.0){ dt = 0.0 - dt }
+   if dt < 0.0 { dt = 0.0 - dt }
    case kind {
       1 -> sin(phase)
       2 -> 1.0 - (4.0 * abs(p - 0.5))
@@ -77,7 +77,7 @@ fn _wave_sample(int kind, f64 phase, f64 duty, f64 step) f64 {
          v = v - dc
          def n1, n2 = abs(1.0 - dc), abs((0.0 - 1.0) - dc)
          def nmax = (n1 > n2) ? n1 : n2
-         if(nmax > 0.000001){ v = v / nmax }
+         if nmax > 0.000001 { v = v / nmax }
          v
       }
    }
@@ -88,17 +88,17 @@ fn _pack_wave_s16_mono(int kind, int total_frames, f64 step, int rate, f64 amp, 
    def bits = 16
    def buf_len = total_frames * 2
    def ptr = malloc(buf_len)
-   if(!ptr || total_frames <= 0){ return 0 }
+   if !ptr || total_frames <= 0 { return 0 }
    mut phase = 0.0
    mut fade = rate / 50
-   if(fade < 1){ fade = 1 }
-   if(fade > total_frames / 2){ fade = total_frames / 2 }
+   if fade < 1 { fade = 1 }
+   if fade > total_frames / 2 { fade = total_frames / 2 }
    mut i = 0
-   while(i < total_frames){
+   while i < total_frames {
       mut env = 1.0
-      if(!loop_safe){
-         if(i < fade){ env = i / (fade + 0.0) }
-         elif(i >= total_frames - fade){ env = (total_frames - i) / (fade + 0.0) }
+      if !loop_safe {
+         if i < fade { env = i / (fade + 0.0) }
+         elif i >= total_frames - fade { env = (total_frames - i) / (fade + 0.0) }
       }
       def raw = _wave_sample(kind, phase, duty, step)
       mut val = raw * (amp + 0.0)
@@ -108,7 +108,7 @@ fn _pack_wave_s16_mono(int kind, int total_frames, f64 step, int rate, f64 amp, 
       def s16 = __flt_to_int(scaled + ((scaled >= 0.0) ? 0.5 : (0.0 - 0.5)))
       store16(ptr, s16, i * 2)
       phase = phase + step
-      while(phase >= SYNTH_TAU){ phase = phase - SYNTH_TAU }
+      while phase >= SYNTH_TAU { phase = phase - SYNTH_TAU }
       i += 1
    }
    return memory.make(ptr, buf_len, channels, rate, bits, 1, 1)
@@ -116,21 +116,21 @@ fn _pack_wave_s16_mono(int kind, int total_frames, f64 step, int rate, f64 amp, 
 
 fn _safe_cycles(any freq, any dur_secs, int def_cycles) int {
    mut c = def_cycles
-   if(freq > 0.0 && dur_secs > 0.0){ c = __flt_to_int((dur_secs + 0.0) * (freq + 0.0) + 0.5) }
-   if(c < 1){ c = 1 }
+   if freq > 0.0 && dur_secs > 0.0 { c = __flt_to_int((dur_secs + 0.0) * (freq + 0.0) + 0.5) }
+   if c < 1 { c = 1 }
    return c
 }
 
 fn _safe_total_frames(any freq, int rate, int cycles, int def_frames) int {
    mut tf = def_frames
-   if(freq > 0.0 && rate > 0 && cycles > 0){ tf = __flt_to_int(((cycles + 0.0) * (rate + 0.0) / (freq + 0.0)) + 0.5) }
-   if(tf < 1){ tf = 1 }
+   if freq > 0.0 && rate > 0 && cycles > 0 { tf = __flt_to_int(((cycles + 0.0) * (rate + 0.0) / (freq + 0.0)) + 0.5) }
+   if tf < 1 { tf = 1 }
    return tf
 }
 
 fn _safe_rate(any rate) int {
    mut r = int(rate)
-   if(r <= 0){ r = 44100 }
+   if r <= 0 { r = 44100 }
    r
 }
 
@@ -138,9 +138,9 @@ fn _make_wave_source(int kind, any freq, any dur_secs, any rate=44100, any amp=0
    def r = _safe_rate(rate)
    mut a, d = _clamp_unit(amp), _clamp_duty(duty)
    mut total_frames = __flt_to_int((dur_secs + 0.0) * (r + 0.0))
-   if(total_frames < 1){ total_frames = 1 }
+   if total_frames < 1 { total_frames = 1 }
    mut step = (SYNTH_TAU * (freq + 0.0)) / (r + 0.0)
-   if(loop_safe){
+   if loop_safe {
       def cycles = _safe_cycles(freq, dur_secs, 1)
       total_frames = _safe_total_frames(freq, r, cycles, total_frames)
       step = SYNTH_TAU * (cycles + 0.0) / (total_frames + 0.0)
@@ -152,7 +152,7 @@ fn _make_wave_loop_source(int kind, any freq, any rate=44100, any amp=0.5, int c
    def r = _safe_rate(rate)
    mut a, d = _clamp_unit(amp), _clamp_duty(duty)
    mut c = cycles
-   if(c < 1){ c = 1 }
+   if c < 1 { c = 1 }
    def total_frames = _safe_total_frames(freq, r, c, r)
    def step = SYNTH_TAU * (c + 0.0) / (total_frames + 0.0)
    return _pack_wave_s16_mono(kind, total_frames, step, r, a, true, d)
@@ -194,10 +194,10 @@ fn write_synth_wav(any src, any file) bool {
 }
 
 fn _sound_synth_selftest_source(any src, int expected_rate, int expected_frames) bool {
-   if(!is_list(src) || src.get(0) != "SOUND_SOURCE"){ return false }
-   if(source.source_channels(src) != 1 || source.source_rate(src) != expected_rate){ return false }
-   if(source.source_bits(src) != 16 || source.sample_format(src) != source.SAMPLE_FMT_S16){ return false }
-   if(source.source_length(src) != expected_frames){ return false }
+   if !is_list(src) || src.get(0) != "SOUND_SOURCE" { return false }
+   if source.source_channels(src) != 1 || source.source_rate(src) != expected_rate { return false }
+   if source.source_bits(src) != 16 || source.sample_format(src) != source.SAMPLE_FMT_S16 { return false }
+   if source.source_length(src) != expected_frames { return false }
    def data = src.get(1)
    is_dict(data) && data.get("len") == expected_frames * 2 && data.get("ptr") != 0
 }

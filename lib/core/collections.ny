@@ -11,7 +11,7 @@ fn _collection_missing(any xs) bool { xs == nil || xs == 0 }
 @returns_owned
 fn Counter(any xs=[]) dict {
    "Python-style Counter constructor. Returns a dict of item -> count."
-   if(_collection_missing(xs)){ return dict(16) }
+   if _collection_missing(xs) { return dict(16) }
    ctr.counter(xs)
 }
 
@@ -39,9 +39,9 @@ fn counter_inc(dict d, any key) dict {
 @consumes(d)
 fn counter_update(dict d, any xs) dict {
    "Adds every item from `xs` into counter `d`."
-   if(_collection_missing(xs)){ return d }
+   if _collection_missing(xs) { return d }
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       d = counter_add(d, xs.get(i), 1)
       i += 1
    }
@@ -52,9 +52,9 @@ fn counter_update(dict d, any xs) dict {
 fn count_by(any xs, fnptr key_fn) dict {
    "Counts values by `key_fn(value)`, like `Counter(map(key_fn, xs))` without building an intermediate list."
    mut out = dict(16)
-   if(_collection_missing(xs)){ return out }
+   if _collection_missing(xs) { return out }
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       def k = key_fn(xs.get(i))
       out = counter_add(out, k, 1)
       i += 1
@@ -66,7 +66,7 @@ fn count_by(any xs, fnptr key_fn) dict {
 fn most_common(dict d, int n=0) list {
    "Returns `[key, count]` pairs sorted by descending count. Optional `n` limits output."
    def all = ctr.most_common(d)
-   if(n <= 0 || n >= all.len){ return all }
+   if n <= 0 || n >= all.len { return all }
    slice(all, 0, n)
 }
 
@@ -74,9 +74,9 @@ fn most_common(dict d, int n=0) list {
 fn group_by(any xs, fnptr key_fn) dict {
    "Groups values from `xs` by `key_fn(value)`."
    mut out = dict(16)
-   if(_collection_missing(xs)){ return out }
+   if _collection_missing(xs) { return out }
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       def v = xs.get(i)
       def k = key_fn(v)
       mut bucket = out.get(k, [])
@@ -89,7 +89,7 @@ fn group_by(any xs, fnptr key_fn) dict {
 
 fn default_get(dict d, any key, any default) any {
    "Returns `d[key]`, installing `default` into `d` first when missing."
-   if(!d.contains(key)){ d[key] = default }
+   if !d.contains(key) { d[key] = default }
    d.get(key, default)
 }
 
@@ -97,9 +97,9 @@ fn default_get(dict d, any key, any default) any {
 fn Queue(any xs=[]) dict {
    "Creates a FIFO queue. Queue operations mutate and return/use the queue dict."
    mut items = list()
-   if(!_collection_missing(xs)){
+   if !_collection_missing(xs) {
       mut i = 0
-      while(i < xs.len){
+      while i < xs.len {
          items = items.append(xs.get(i))
          i += 1
       }
@@ -127,7 +127,7 @@ fn queue_len(dict q) int {
    def items = _queue_items(q)
    def head = q.get("head", 0)
    def n = items.len - head
-   if(n < 0){ return 0 }
+   if n < 0 { return 0 }
    n
 }
 
@@ -141,10 +141,10 @@ fn queue_empty(dict q) bool {
 fn _queue_compact(dict q) dict {
    def items = _queue_items(q)
    def head = q.get("head", 0)
-   if(head <= 64 || head * 2 < items.len){ return q }
+   if head <= 64 || head * 2 < items.len { return q }
    mut out = list(items.len - head)
    mut i = head
-   while(i < items.len){
+   while i < items.len {
       out = out.append(items.get(i))
       i += 1
    }
@@ -160,19 +160,19 @@ fn queue_push(dict q, any value) dict {
    mut items = _queue_items(q)
    items = items.append(value)
    q = q.set("items", items)
-   if(!q.contains("head")){ q = q.set("head", 0) }
+   if !q.contains("head") { q = q.set("head", 0) }
    q
 }
 
 fn queue_peek(dict q, any default=0) any {
    "Returns the next queued value without removing it."
-   if(queue_empty(q)){ return default }
+   if queue_empty(q) { return default }
    _queue_items(q).get(q.get("head", 0), default)
 }
 
 fn queue_pop(dict q, any default=0) any {
    "Removes and returns the next queued value, or `default` when empty."
-   if(queue_empty(q)){ return default }
+   if queue_empty(q) { return default }
    def items = _queue_items(q)
    def head = q.get("head", 0)
    def value = items.get(head, default)
@@ -185,7 +185,7 @@ fn queue_pop(dict q, any default=0) any {
 @returns_owned
 fn queue_try_pop(dict q) dict {
    "Returns `{ok, value, queue}` for a nonblocking queue pop."
-   if(queue_empty(q)){ return {"ok": false, "value": 0, "queue": q} }
+   if queue_empty(q) { return {"ok": false, "value": 0, "queue": q} }
    def value = queue_pop(q)
    {"ok": true, "value": value, "queue": q}
 }
@@ -229,9 +229,9 @@ fn chan_len(dict ch) int {
 
 fn chan_send(dict ch, any value) bool {
    "Sends `value` if the channel is open and capacity permits; returns success."
-   if(chan_closed(ch)){ return false }
+   if chan_closed(ch) { return false }
    def cap = ch.get("capacity", 0)
-   if(cap > 0 && chan_len(ch) >= cap){ return false }
+   if cap > 0 && chan_len(ch) >= cap { return false }
    def updated = queue_push(ch, value)
    _queue_apply(ch, updated)
    true

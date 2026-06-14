@@ -54,9 +54,9 @@ fn partial_integer_from_bits_le(list bits) list {
    "Build a partial integer from little-endian bits, using nil for unknown bits."
    mut out = partial_integer_new()
    mut i = 0
-   while(i < bits.len){
+   while i < bits.len {
       def b = bits.get(i)
-      if(b == nil){ out = partial_integer_add_unknown(out, 1) }
+      if b == nil { out = partial_integer_add_unknown(out, 1) }
       else { out = partial_integer_add_known(out, int(b) & 1, 1) }
       i += 1
    }
@@ -69,10 +69,10 @@ fn partial_integer_known_lsb(any pi) list {
    mut bits = 0
    def cs = _pi_components(pi)
    mut i = 0
-   while(i < cs.len){
+   while i < cs.len {
       def c, v = cs[i], c[0]
       def n = c[1]
-      if(v == nil){ return _pi_pair(lsb, bits) }
+      if v == nil { return _pi_pair(lsb, bits) }
       lsb += v << bits
       bits += n
       i += 1
@@ -86,10 +86,10 @@ fn partial_integer_known_msb(any pi) list {
    mut bits = 0
    def cs = _pi_components(pi)
    mut i = cs.len - 1
-   while(i >= 0){
+   while i >= 0 {
       def c, v = cs[i], c[0]
       def n = c[1]
-      if(v == nil){ return _pi_pair(msb, bits) }
+      if v == nil { return _pi_pair(msb, bits) }
       msb = (msb << n) + v
       bits += n
       i -= 1
@@ -103,10 +103,10 @@ fn partial_integer_known_middle(any pi) list {
    mut bits = 0
    def cs = _pi_components(pi)
    mut i = 0
-   while(i < cs.len){
+   while i < cs.len {
       def c, v = cs[i], c[0]
       def n = c[1]
-      if(v == nil){ if(bits > 0){ return _pi_pair(middle, bits) } } else {
+      if v == nil { if bits > 0 { return _pi_pair(middle, bits) } } else {
          middle += v << bits
          bits += n
       }
@@ -120,9 +120,9 @@ fn partial_integer_unknown_lsb(any pi) int {
    mut bits = 0
    def cs = _pi_components(pi)
    mut i = 0
-   while(i < cs.len){
+   while i < cs.len {
       def c = cs[i]
-      if(c[0] != nil){ return bits }
+      if c[0] != nil { return bits }
       bits += c[1]
       i += 1
    }
@@ -134,9 +134,9 @@ fn partial_integer_unknown_msb(any pi) int {
    mut bits = 0
    def cs = _pi_components(pi)
    mut i = cs.len - 1
-   while(i >= 0){
+   while i >= 0 {
       def c = cs[i]
-      if(c[0] != nil){ return bits }
+      if c[0] != nil { return bits }
       bits += c[1]
       i -= 1
    }
@@ -148,9 +148,9 @@ fn partial_integer_unknown_middle(any pi) int {
    mut bits = 0
    def cs = _pi_components(pi)
    mut i = 0
-   while(i < cs.len){
+   while i < cs.len {
       def c = cs[i]
-      if(c[0] == nil){ if(bits > 0){ return bits } } else { bits += c.get(1, 0) }
+      if c[0] == nil { if bits > 0 { return bits } } else { bits += c.get(1, 0) }
       i += 1
    }
    bits
@@ -161,11 +161,11 @@ fn partial_integer_matches(any pi, number v) bool {
    mut shift = 0
    def cs = _pi_components(pi)
    mut i = 0
-   while(i < cs.len){
+   while i < cs.len {
       def c = cs[i]
       def cv = c[0]
       def n = c[1]
-      if(cv != nil && (((v >> shift) % (1 << n)) != cv)){ return false }
+      if cv != nil && (((v >> shift) % (1 << n)) != cv) { return false }
       shift += n
       i += 1
    }
@@ -174,17 +174,17 @@ fn partial_integer_matches(any pi, number v) bool {
 
 fn partial_integer_sub(any pi, list unknowns) any {
    "Substitute unknown segment values and return the completed integer."
-   if(unknowns.len != _pi_unknowns(pi)){ return nil }
+   if unknowns.len != _pi_unknowns(pi) { return nil }
    mut out = 0
    mut shift = 0
    mut ui = 0
    def cs = _pi_components(pi)
    mut i = 0
-   while(i < cs.len){
+   while i < cs.len {
       def c = cs[i]
       def cv = c[0]
       def n = c[1]
-      if(cv == nil){
+      if cv == nil {
          out += unknowns[ui] << shift
          ui += 1
       } else {
@@ -204,11 +204,11 @@ fn partial_integer_known_and_unknowns(any pi) list {
    mut off = 0
    def cs = _pi_components(pi)
    mut i = 0
-   while(i < cs.len){
+   while i < cs.len {
       def c = cs[i]
       def cv = c[0]
       def n = c[1]
-      if(cv == nil){
+      if cv == nil {
          offs = offs.append(off)
          lens = lens.append(n)
       } else {
@@ -225,9 +225,9 @@ fn partial_integer_unknown_bounds(any pi) list {
    mut out = []
    def cs = _pi_components(pi)
    mut i = 0
-   while(i < cs.len){
+   while i < cs.len {
       def c = cs[i]
-      if(c[0] == nil){ out = out.append(1 << c[1]) }
+      if c[0] == nil { out = out.append(1 << c[1]) }
       i += 1
    }
    out
@@ -240,7 +240,7 @@ fn partial_integer_to_int(any pi) any {
 
 fn _pi_log2_pow2(int base) int {
    mut n, v = 0, base
-   while(v > 1 && (v % 2) == 0){
+   while v > 1 && (v % 2) == 0 {
       v /= 2
       n += 1
    }
@@ -250,18 +250,18 @@ fn _pi_log2_pow2(int base) int {
 fn partial_integer_to_string_le(any pi, int base, str symbols="0123456789abcdefghijklmnopqrstuvwxyz") any {
    "Render partial-integer digits least-significant first."
    def bits_per_el = _pi_log2_pow2(base)
-   if(bits_per_el <= 0 || base > 36 || symbols.len < base){ return nil }
+   if bits_per_el <= 0 || base > 36 || symbols.len < base { return nil }
    mut chars = []
    def cs = _pi_components(pi)
    mut i = 0
-   while(i < cs.len){
+   while i < cs.len {
       def c = cs[i]
       mut v = c[0]
       def n = c[1]
-      if((n % bits_per_el) != 0){ return nil }
+      if (n % bits_per_el) != 0 { return nil }
       mut j = 0
-      while(j < (n / bits_per_el)){
-         if(v == nil){ chars = chars.append("?") } else {
+      while j < (n / bits_per_el) {
+         if v == nil { chars = chars.append("?") } else {
             def idx = v % base
             chars = chars.append(str.utf8_slice(symbols, idx, idx + 1, 1))
             v = v / base
@@ -276,7 +276,7 @@ fn partial_integer_to_string_le(any pi, int base, str symbols="0123456789abcdefg
 fn partial_integer_to_string_be(any pi, int base, str symbols="0123456789abcdefghijklmnopqrstuvwxyz") any {
    "Render partial-integer digits most-significant first."
    def chars = partial_integer_to_string_le(pi, base, symbols)
-   if(chars == nil){ return nil }
+   if chars == nil { return nil }
    reverse(chars)
 }
 

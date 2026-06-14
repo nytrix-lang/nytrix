@@ -16,18 +16,18 @@ fn _action(action="", input="", command="") dict {
 }
 
 fn _txt(any value, str fallback="") str {
-   if(value == nil){ return fallback }
+   if value == nil { return fallback }
    def out = to_str(value)
    out == "<nil>" ? fallback : out
 }
 
 fn _num(any value, f64 fallback=0.0) f64 {
-   if(value == nil){ return fallback }
+   if value == nil { return fallback }
    float(value)
 }
 
 fn _intv(any value, int fallback=0) int {
-   if(value == nil){ return fallback }
+   if value == nil { return fallback }
    int(value)
 }
 
@@ -35,22 +35,22 @@ fn console_body(input, history) dict {
    "Runs the console body operation."
    gui.text_colored("Integrated Console", [0.82, 0.82, 0.82, 1.0])
    mut next_input = gui.input_text("console_cmd", "Command", input, "help, load Lantern, autofit, lookat, snapshot...")
-   if(gui.button("console_run", "Run", 82.0)){
+   if gui.button("console_run", "Run", 82.0) {
       def cmd_line = str.strip(next_input)
-      if(cmd_line.len > 0){ return _action("command", "", cmd_line) }
+      if cmd_line.len > 0 { return _action("command", "", cmd_line) }
    }
    gui.same_line()
-   if(gui.button("console_help", "Help", 82.0)){ return _action("command", next_input, "help") }
+   if gui.button("console_help", "Help", 82.0) { return _action("command", next_input, "help") }
    gui.same_line()
-   if(gui.button("console_clear", "Clear", 82.0)){ return _action("clear", next_input) }
-   if(gui.button("console_fit", "Autofit", 88.0)){ return _action("fit", next_input) }
+   if gui.button("console_clear", "Clear", 82.0) { return _action("clear", next_input) }
+   if gui.button("console_fit", "Autofit", 88.0) { return _action("fit", next_input) }
    gui.same_line()
-   if(gui.button("console_lookat", "Look At", 88.0)){ return _action("lookat", next_input) }
+   if gui.button("console_lookat", "Look At", 88.0) { return _action("lookat", next_input) }
    gui.separator()
    def hist = is_list(history) ? history : []
    def hist_n = hist.len
    gui.text_colored("History: " + to_str(hist_n), [0.68, 0.68, 0.68, 1.0])
-   if(hist_n <= 0){
+   if hist_n <= 0 {
       gui.text_colored("> help", [0.72, 0.72, 0.72, 1.0])
       gui.text("CMD: load, unload, autofit, lookat, snapshot, stats")
       gui.text_colored("> load Box", [0.72, 0.72, 0.72, 1.0])
@@ -60,9 +60,9 @@ fn console_body(input, history) dict {
       return _action("", next_input)
    }
    mut start = hist_n - 14
-   if(start < 0){ start = 0 }
+   if start < 0 { start = 0 }
    mut i = start
-   while(i < hist_n){
+   while i < hist_n {
       def line = to_str(hist[i])
       gui.text((line.len > 0) ? line : " ")
       i += 1
@@ -105,16 +105,16 @@ fn probe_body(state) dict {
    gui.stat_card("probe_hover_card", "Hover", hovered, "active " + active, card_w, 64.0, [0.58, 0.86, 1.0, 1.0])
    gui.same_line()
    gui.stat_card("probe_focus_card", "Focus", focused, layout_name, card_w, 64.0, [0.34, 0.88, 0.52, 1.0])
-   if(probe_w >= 560.0){
+   if probe_w >= 560.0 {
       gui.same_line()
-      gui.stat_card("probe_frame_card", "Frame", f"{last_frame_ms:.2f}ms", to_str(int(fps)) + " fps", card_w, 64.0, [1.0, 0.78, 0.28, 1.0])
+      gui.stat_card("probe_frame_card", "Frame", f"{last_frame_ms:.2f}ms", to_str(int(fps)) + " fps", card_w, 64.0, [0.78, 0.78, 0.78, 1.0])
    }
    gui.progress_bar("probe_mouse_x", clamp(mx / max(1.0, win_w), 0.0, 1.0), "Mouse X")
    gui.progress_bar("probe_mouse_y", clamp(my / max(1.0, win_h), 0.0, 1.0), "Mouse Y")
    gui.separator()
-   if(gui.button("probe_refresh", "Refresh Probe", 132.0)){ return _action("refresh") }
+   if gui.button("probe_refresh", "Refresh Probe", 132.0) { return _action("refresh") }
    def last_probe_text = _txt(state.get("last_probe_text", ""), "")
-   if(last_probe_text.len > 0){ gui.text_colored(last_probe_text, [0.78, 0.90, 0.86, 1.0]) }
+   if last_probe_text.len > 0 { gui.text_colored(last_probe_text, [0.78, 0.78, 0.78, 1.0]) }
    _action()
 }
 
@@ -248,14 +248,14 @@ fn _gallery_basics(state, card_w, phase) dict {
    gui.same_line()
    gui.stat_card("gallery_state_card", "Mode", _gallery_mode_label(out.get("radio", 0)), bool(out.get("toggle_a", true)) ? "bloom on" : "bloom off", card_w, 60.0, [0.68, 0.82, 0.74, 1.0])
    out["combo"] = gui.combo_box("demo_context", "Editor Context", items, int(out.get("combo", 0)), 0.0, 6)
-   if(gui.button("primary_btn", "Primary Button", 150.0)){ out["action"] = "primary" }
+   if gui.button("primary_btn", "Primary Button", 150.0) { out["action"] = "primary" }
    gui.same_line()
-   if(gui.small_button("small_btn", "Small")){ out["action"] = "small" }
+   if gui.small_button("small_btn", "Small") { out["action"] = "small" }
    out["toggle_a"] = gui.toggle("toggle_a", "Enable bloom", bool(out.get("toggle_a", true)))
    out["toggle_b"] = gui.checkbox("toggle_b", "Enable gizmos", bool(out.get("toggle_b", false)))
-   if(gui.radio_button("radio_a", "Edit Mode", int(out.get("radio", 0)) == 0)){ out["radio"] = 0 }
-   if(gui.radio_button("radio_b", "Paint Mode", int(out.get("radio", 0)) == 1)){ out["radio"] = 1 }
-   if(gui.radio_button("radio_c", "Bake Mode", int(out.get("radio", 0)) == 2)){ out["radio"] = 2 }
+   if gui.radio_button("radio_a", "Edit Mode", int(out.get("radio", 0)) == 0) { out["radio"] = 0 }
+   if gui.radio_button("radio_b", "Paint Mode", int(out.get("radio", 0)) == 1) { out["radio"] = 1 }
+   if gui.radio_button("radio_c", "Bake Mode", int(out.get("radio", 0)) == 2) { out["radio"] = 2 }
    gui.progress_bar("gallery_basics_density", float(out.get("progress", 0.0)), "Interaction cadence")
    out
 }
@@ -268,9 +268,9 @@ fn _gallery_metrics(state, card_w, compact, phase) dict {
    gui.stat_card("gallery_metric_fps", "Frame", f"{last_frame_ms:.2f}ms", to_str(int(fps)) + " fps", card_w, 64.0, [0.58, 0.86, 1.0, 1.0])
    gui.same_line()
    gui.stat_card("gallery_metric_draw", "Draws", to_str(_intv(rs.get("draws", 0))), _txt(state.get("renderer_hotspot", ""), "steady"), card_w, 64.0, [0.34, 0.88, 0.52, 1.0])
-   if(!compact){
+   if !compact {
       gui.same_line()
-      gui.stat_card("gallery_metric_mem", "Budget", "streaming", "cache warm", card_w, 64.0, [1.0, 0.78, 0.28, 1.0])
+      gui.stat_card("gallery_metric_mem", "Budget", "streaming", "cache warm", card_w, 64.0, [0.78, 0.78, 0.78, 1.0])
    }
    out["float"] = gui.slider_float("demo_float", "Viewport Exposure", float(out.get("float", 1.0)), 0.1, 4.0)
    out["int"] = gui.slider_int("demo_int", "Model Index Preview", int(out.get("int", 0)), 0, max(int(state.get("model_count", 0)) - 1, 0))
@@ -300,8 +300,8 @@ fn gallery_body(state) dict {
    st["tab"] = gui.tab_strip("gallery_tabs", ["Basics", "Metrics", "Theme"], int(st.get("tab", 0)))
    gui.separator()
    def tab = int(st.get("tab", 0))
-   if(tab == 0){ return _gallery_basics(st, card_w, phase) }
-   if(tab == 1){ return _gallery_metrics(st, card_w, compact, phase) }
+   if tab == 0 { return _gallery_basics(st, card_w, phase) }
+   if tab == 1 { return _gallery_metrics(st, card_w, compact, phase) }
    _gallery_theme(st)
 }
 

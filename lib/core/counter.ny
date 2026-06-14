@@ -11,7 +11,7 @@ fn counter(seq xs) dict {
    "Creates a frequency counter dictionary from the elements of list or string `xs`."
    mut d, i = dict(16), 0
    def n = xs.len
-   while(i < n){
+   while i < n {
       def v = xs.get(i)
       d[v] = d.get(v, 0) + 1
       i += 1
@@ -32,10 +32,10 @@ fn _counter_merge_common(list left, list right) list {
    def ln, rn = left.len, right.len
    mut out = list(ln + rn)
    mut i, j = 0, 0
-   while(i < ln && j < rn){
+   while i < ln && j < rn {
       def li = left.get(i)
       def rj = right.get(j)
-      if(li.get(1, 0) >= rj.get(1, 0)){
+      if li.get(1, 0) >= rj.get(1, 0) {
          out = out.append(li)
          i += 1
       } else {
@@ -43,11 +43,11 @@ fn _counter_merge_common(list left, list right) list {
          j += 1
       }
    }
-   while(i < ln){
+   while i < ln {
       out = out.append(left.get(i))
       i += 1
    }
-   while(j < rn){
+   while j < rn {
       out = out.append(right.get(j))
       j += 1
    }
@@ -57,7 +57,7 @@ fn _counter_merge_common(list left, list right) list {
 @returns_owned
 fn _counter_sort_common(list xs) list {
    def n = xs.len
-   if(n <= 1){ return xs }
+   if n <= 1 { return xs }
    def mid = n / 2
    def left = slice(xs, 0, mid, 1)
    def right = slice(xs, mid, n, 1)

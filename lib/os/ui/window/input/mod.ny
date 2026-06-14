@@ -83,67 +83,67 @@ fn is_function_key(any key) bool {
 }
 
 fn _input_data_int(any data, any name, any fallback=0) int {
-   if(!is_dict(data)){ return int(fallback) }
+   if !is_dict(data) { return int(fallback) }
    def raw = data.get(name, fallback)
-   if(is_int(raw) || is_float(raw)){ return int(raw) }
+   if is_int(raw) || is_float(raw) { return int(raw) }
    int(fallback)
 }
 
 fn _function_key_range(int code, int first, int last, int out_first) int {
-   if(code >= first && code <= last){ return out_first + (code - first) }
+   if code >= first && code <= last { return out_first + (code - first) }
    0
 }
 
 fn _function_key_from_common_scancode(int code) int {
    mut key = _function_key_range(code, 67, 76, KEY_F1)
-   if(key > 0){ return key }
-   if(code == 95){ return KEY_F11 }
-   if(code == 96){ return KEY_F12 }
+   if key > 0 { return key }
+   if code == 95 { return KEY_F11 }
+   if code == 96 { return KEY_F12 }
    key = _function_key_range(code, 59, 68, KEY_F1)
-   if(key > 0){ return key }
-   if(code == 87){ return KEY_F11 }
-   if(code == 88){ return KEY_F12 }
+   if key > 0 { return key }
+   if code == 87 { return KEY_F11 }
+   if code == 88 { return KEY_F12 }
    key = _function_key_range(code, 183, 194, KEY_F13)
-   if(key > 0){ return key }
+   if key > 0 { return key }
    key = _function_key_range(code, 0x3B, 0x44, KEY_F1)
-   if(key > 0){ return key }
-   if(code == 0x57){ return KEY_F11 }
-   if(code == 0x58){ return KEY_F12 }
+   if key > 0 { return key }
+   if code == 0x57 { return KEY_F11 }
+   if code == 0x58 { return KEY_F12 }
    key = _function_key_range(code, 0x64, 0x6E, KEY_F13)
-   if(key > 0){ return key }
+   if key > 0 { return key }
    key = _function_key_range(code, 0x70, 0x87, KEY_F1)
-   if(key > 0){ return key }
+   if key > 0 { return key }
    comptime match _CocoaFunctionKey(code, KEY_NULL)
 }
 
 fn function_key_from_scancode(any scancode, any backend_name="") int {
    "Maps common backend scancodes to F-key constants, or KEY_NULL when unknown."
-   if(!is_int(scancode) && !is_float(scancode)){ return KEY_NULL }
+   if !is_int(scancode) && !is_float(scancode) { return KEY_NULL }
    def code = int(scancode)
    def b = str.lower(str.strip(to_str(backend_name)))
-   if(b == "x11"){
+   if b == "x11" {
       def key = _function_key_range(code, 67, 76, KEY_F1)
-      if(key > 0){ return key }
-      if(code == 95){ return KEY_F11 }
-      if(code == 96){ return KEY_F12 }
+      if key > 0 { return key }
+      if code == 95 { return KEY_F11 }
+      if code == 96 { return KEY_F12 }
    }
-   elif(b == "wayland"){
+   elif b == "wayland" {
       def key = _function_key_range(code, 59, 68, KEY_F1)
-      if(key > 0){ return key }
-      if(code == 87){ return KEY_F11 }
-      if(code == 88){ return KEY_F12 }
+      if key > 0 { return key }
+      if code == 87 { return KEY_F11 }
+      if code == 88 { return KEY_F12 }
       return _function_key_range(code, 183, 194, KEY_F13)
    }
-   elif(b == "win32"){
+   elif b == "win32" {
       def key = _function_key_range(code, 0x3B, 0x44, KEY_F1)
-      if(key > 0){ return key }
-      if(code == 0x57){ return KEY_F11 }
-      if(code == 0x58){ return KEY_F12 }
+      if key > 0 { return key }
+      if code == 0x57 { return KEY_F11 }
+      if code == 0x58 { return KEY_F12 }
       def ext = _function_key_range(code, 0x64, 0x6E, KEY_F13)
-      if(ext > 0){ return ext }
+      if ext > 0 { return ext }
       return _function_key_range(code, 0x70, 0x87, KEY_F1)
    }
-   elif(b == "cocoa"){
+   elif b == "cocoa" {
       return comptime match _CocoaFunctionKey(code, KEY_NULL)
    }
    _function_key_from_common_scancode(code)
@@ -151,21 +151,21 @@ fn function_key_from_scancode(any scancode, any backend_name="") int {
 
 fn event_function_key(any data, any backend_name="") int {
    "Returns the normalized F-key from an event-data dictionary, or KEY_NULL."
-   if(!is_dict(data)){ return KEY_NULL }
+   if !is_dict(data) { return KEY_NULL }
    def from_key = normalize_key(data.get("key", KEY_NULL))
-   if(is_function_key(from_key)){ return from_key }
+   if is_function_key(from_key) { return from_key }
    def from_raw = normalize_key(data.get("raw_key", data.get("scancode", KEY_NULL)))
-   if(is_function_key(from_raw)){ return from_raw }
+   if is_function_key(from_raw) { return from_raw }
    mut b = str.lower(str.strip(to_str(backend_name)))
-   if(b.len == 0){ b = window.backend() }
+   if b.len == 0 { b = window.backend() }
    function_key_from_scancode(_input_data_int(data, "scancode", _input_data_int(data, "raw_key", KEY_NULL)), b)
 }
 
 fn event_key(any data, any backend_name="") int {
    "Returns the normalized key from an event-data dictionary, including backend F-key scancodes."
-   if(!is_dict(data)){ return KEY_NULL }
+   if !is_dict(data) { return KEY_NULL }
    def fn_key = event_function_key(data, backend_name)
-   if(fn_key != KEY_NULL){ return fn_key }
+   if fn_key != KEY_NULL { return fn_key }
    def key = _input_data_int(data, "key", KEY_NULL)
    key != KEY_NULL ? normalize_key(key) : KEY_NULL
 }
@@ -176,14 +176,14 @@ fn event_is_key(any data, any key, any backend_name="") bool {
 }
 
 fn _event_axis_int(any data, any name, any alias, int idx, any fallback=0) int {
-   if(is_dict(data)){
+   if is_dict(data) {
       def raw = data.get(name, data.get(alias, fallback))
-      if(is_int(raw) || is_float(raw)){ return int(raw) }
+      if is_int(raw) || is_float(raw) { return int(raw) }
       return int(fallback)
    }
-   if(is_list(data)){
+   if is_list(data) {
       def raw = data.get(idx, fallback)
-      if(is_int(raw) || is_float(raw)){ return int(raw) }
+      if is_int(raw) || is_float(raw) { return int(raw) }
    }
    int(fallback)
 }
@@ -206,12 +206,12 @@ fn resize_event_extent(any win, any data, any current_w=1280, any current_h=720)
    def fsz = window.get_framebuffer_size(win)
    mut live_w = float(fsz.get(0, event_w))
    mut live_h = float(fsz.get(1, event_h))
-   if(live_w <= 0.0 || live_h <= 0.0){
+   if live_w <= 0.0 || live_h <= 0.0 {
       live_w = float(event_w)
       live_h = float(event_h)
    }
-   if(event_w > 0 && event_h > 0 && live_w == float(current_w) && live_h == float(current_h) &&
-      (event_w != int(current_w) || event_h != int(current_h))){
+   if event_w > 0 && event_h > 0 && live_w == float(current_w) && live_h == float(current_h) &&
+   (event_w != int(current_w) || event_h != int(current_h)){
       live_w = float(event_w)
       live_h = float(event_h)
    }
@@ -222,13 +222,13 @@ fn _active_window() any { window.last() }
 
 fn _resolve_window(any maybe_win=0) any {
    def w = maybe_win ? window.get_win(maybe_win) : 0
-   if(is_dict(w) && w.contains("handle")){ return w }
+   if is_dict(w) && w.contains("handle") { return w }
    _active_window()
 }
 
 fn key_down(any win_or_key, any key=KEY_NULL) bool {
    "Returns true if a key is currently held down. Accepts key_down(key) or key_down(win, key)."
-   if(key == KEY_NULL){
+   if key == KEY_NULL {
       def win = _active_window()
       return win ? window.key_down(win, win_or_key) : false
    }
@@ -238,7 +238,7 @@ fn key_down(any win_or_key, any key=KEY_NULL) bool {
 
 fn key_pressed(any win_or_key, any key=KEY_NULL) bool {
    "Returns true if a key was pressed this frame. Accepts key_pressed(key) or key_pressed(win, key)."
-   if(key == KEY_NULL){
+   if key == KEY_NULL {
       def win = _active_window()
       return win ? window.key_pressed(win, win_or_key) : false
    }
@@ -250,20 +250,20 @@ fn key_chord(any win_or_notation, str notation="") bool {
    "Returns true if a specific key combination(e.g., 'C-x') was triggered this frame."
    def active_form = notation.len == 0
    def win = active_form ? _active_window() : _resolve_window(win_or_notation)
-   if(active_form){ notation = to_str(win_or_notation) }
-   if(!win){ return false }
+   if active_form { notation = to_str(win_or_notation) }
+   if !win { return false }
    def seq = parse_notation(notation)
-   if(seq.len != 1){ return false }
+   if seq.len != 1 { return false }
    def pair = seq.get(0)
-   if(!window.key_pressed(win, pair.get(0))){ return false }
+   if !window.key_pressed(win, pair.get(0)) { return false }
    def mod = pair.get(1)
-   if(mod != 0 && (window.get_modifiers(win) & mod) != mod){ return false }
+   if mod != 0 && (window.get_modifiers(win) & mod) != mod { return false }
    true
 }
 
 fn mod_down(any win_or_mod, any mod=KEY_NULL) bool {
    "Returns true if a modifier bit is active. Accepts mod_down(mod) or mod_down(win, mod)."
-   if(mod == KEY_NULL){
+   if mod == KEY_NULL {
       def win = _active_window()
       return win ? window.mod_down(win, win_or_mod) : false
    }
@@ -314,7 +314,7 @@ fn is_mouse_event(int typ) bool {
 
 fn event_mouse_xy(any win, any data) list {
    "Returns `[x, y]` from mouse event data, falling back to the live cursor."
-   if(is_dict(data) && (data.contains("x") || data.contains("y"))){
+   if is_dict(data) && (data.contains("x") || data.contains("y")) {
       return [float(data.get("x", 0.0)), float(data.get("y", 0.0))]
    }
    def cur = window.cursor_pos(win)
@@ -336,13 +336,13 @@ fn _view_scale(any win, any view_w, any view_h) list {
 
 fn scale_event_xy(any win, any ev_data, any view_w, any view_h) any {
    "Returns event data with x/y/dx/dy scaled into a framebuffer or view size."
-   if(!is_dict(ev_data) || !ev_data.contains("x") || !ev_data.contains("y")){ return ev_data }
+   if !is_dict(ev_data) || !ev_data.contains("x") || !ev_data.contains("y") { return ev_data }
    mut out = dict(16)
    def items = dict_items(ev_data)
    mut i = 0
-   while(i < items.len){
+   while i < items.len {
       def kv = items.get(i, [])
-      if(is_list(kv) && kv.len >= 2){ out[kv.get(0)] = kv.get(1) }
+      if is_list(kv) && kv.len >= 2 { out[kv.get(0)] = kv.get(1) }
       i += 1
    }
    def sc = _view_scale(win, view_w, view_h)
@@ -354,16 +354,31 @@ fn scale_event_xy(any win, any ev_data, any view_w, any view_h) any {
    def raw_y = float(ev_data.get("y", 0.0))
    out["raw_x"] = raw_x
    out["raw_y"] = raw_y
-   out["x"] = min(max(raw_x * sx, 0.0), max(vw - 1.0, 0.0))
-   out["y"] = min(max(raw_y * sy, 0.0), max(vh - 1.0, 0.0))
-   if(ev_data.contains("dx")){ out["dx"] = float(ev_data.get("dx", 0.0)) * sx }
-   if(ev_data.contains("dy")){ out["dy"] = float(ev_data.get("dy", 0.0)) * sy }
+   mut px = raw_x * sx
+   mut py = raw_y * sy
+   ;; Backends usually deliver mouse events in logical/window pixels, but some
+   ;; X11/Wayland/raw-cursor transitions can briefly expose a bogus logical
+   ;; window size.  When that happens, scaling collapses valid in-window events
+   ;; to the top/left edge (most visibly y=0), which breaks editor hit-testing
+   ;; and 3D gizmo dragging.  Keep the scaled path for real HiDPI, but trust a
+   ;; sane raw event if scaling clearly collapsed or blew out of the viewport.
+   def raw_inside = raw_x >= 0.0 && raw_y >= 0.0 && raw_x <= vw && raw_y <= vh
+   def collapsed = raw_inside && ((raw_x > 2.0 && px <= 0.5) || (raw_y > 2.0 && py <= 0.5))
+   def blown = px < -1.0 || py < -1.0 || px > vw + 1.0 || py > vh + 1.0
+   if raw_inside && (collapsed || blown) {
+      px = raw_x
+      py = raw_y
+   }
+   out["x"] = min(max(px, 0.0), max(vw - 1.0, 0.0))
+   out["y"] = min(max(py, 0.0), max(vh - 1.0, 0.0))
+   if ev_data.contains("dx") { out["dx"] = float(ev_data.get("dx", 0.0)) * sx }
+   if ev_data.contains("dy") { out["dy"] = float(ev_data.get("dy", 0.0)) * sy }
    out
 }
 
 fn mouse_view_pos(any win, any view_w, any view_h) list {
    "Returns mouse position scaled into a framebuffer or view size."
-   if(!win){ return [0.0, 0.0] }
+   if !win { return [0.0, 0.0] }
    def p = window.mouse_pos(win)
    def sc = _view_scale(win, view_w, view_h)
    def vw = float(sc.get(0, view_w))

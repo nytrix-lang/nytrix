@@ -19,7 +19,7 @@ fn hide_tools(any ids=0) int {
    "Hides all requested editor tool windows."
    def rows = _tool_ids(ids)
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       ui_editor.show_tool(to_str(rows.get(i, "")), false)
       i += 1
    }
@@ -30,7 +30,7 @@ fn reset_tool_scrolls(any ids=0) int {
    "Resets scroll state for all requested editor tool windows."
    def rows = _tool_ids(ids)
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       ui_layout.reset_window_scroll(to_str(rows.get(i, "")))
       i += 1
    }
@@ -39,7 +39,7 @@ fn reset_tool_scrolls(any ids=0) int {
 
 fn _apply_tool_plan_row(any plan, any id) any {
    def row = plan.get(to_str(id), dict(0))
-   if(is_dict(row)){
+   if is_dict(row) {
       ui_editor.apply_tool_rect_if_visible(id, bool(row.get("show", false)), row.get("rect", [0.0, 0.0, 0.0, 0.0]))
    }
 }
@@ -48,7 +48,7 @@ fn apply_tool_plan(any plan, any ids=0) int {
    "Applies a tiled layout plan to visible editor tools."
    def rows = _tool_ids(ids)
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       _apply_tool_plan_row(plan, to_str(rows.get(i, "")))
       i += 1
    }
@@ -62,10 +62,10 @@ fn sanitize_workspace_state(any editor_tab, any workspace_mode, any center_tab, 
    mut wm = int(workspace_mode)
    mut ct = int(center_tab)
    mut st = int(side_tab)
-   if(et < 0 || et >= int(editor_tab_count)){ et = 0 }
-   if(wm < 0 || wm > 1){ wm = 1 }
-   if(ct < 0 || ct > 2){ ct = 0 }
-   if(st < 0 || st > 3){ st = 0 }
+   if et < 0 || et >= int(editor_tab_count) { et = 0 }
+   if wm < 0 || wm > 1 { wm = 1 }
+   if ct < 0 || ct > 2 { ct = 0 }
+   if st < 0 || st > 3 { st = 0 }
    out["editor_tab"] = et
    out["workspace_mode"] = wm
    out["center_tab"] = ct
@@ -83,7 +83,7 @@ fn workspace_visibility(any workspace_mode, any center_tab, any side_tab) dict {
    out["profiler"] = false
    out["probe"] = false
    out["gallery"] = false
-   if(int(workspace_mode) != 1){ return out }
+   if int(workspace_mode) != 1 { return out }
    def ct, st = int(center_tab), int(side_tab)
    out["workspace"] = ct == 1
    out["graph"] = ct == 2
@@ -100,13 +100,13 @@ fn focus_window_ids(
 ) list {
    "Returns visible tool ids that should participate in focus layout."
    mut ids = []
-   if(show_profiler){ ids = ids.append("profiler") }
-   if(show_workspace){ ids = ids.append("workspace_grid") }
-   if(show_graph){ ids = ids.append("node_graph") }
-   if(show_inspector){ ids = ids.append("inspector") }
-   if(show_browser && !show_editor){ ids = ids.append("asset_browser") }
-   if(show_probe){ ids = ids.append("widget_probe") }
-   if(show_gallery){ ids = ids.append("widget_gallery") }
+   if show_profiler { ids = ids.append("profiler") }
+   if show_workspace { ids = ids.append("workspace_grid") }
+   if show_graph { ids = ids.append("node_graph") }
+   if show_inspector { ids = ids.append("inspector") }
+   if show_browser && !show_editor { ids = ids.append("asset_browser") }
+   if show_probe { ids = ids.append("widget_probe") }
+   if show_gallery { ids = ids.append("widget_gallery") }
    ids
 }
 
@@ -165,8 +165,8 @@ fn _shell_plan(
 fn _shot_tab(any shot_name, list names, int fallback=0) int {
    def shot = to_str(shot_name)
    mut i = 0
-   while(i < names.len){
-      if(shot == to_str(names.get(i, ""))){ return i }
+   while i < names.len {
+      if shot == to_str(names.get(i, "")) { return i }
       i += 1
    }
    fallback
@@ -214,39 +214,39 @@ fn shot_plan(any shot_name) dict {
    shot == "inspector_viewport" || shot == "inspector_env" ||
    shot == "inspector_settings" || shot == "inspector_diag" ||
    shot == "inspector_renderer"
-   if(shot == "full_editor"){
+   if shot == "full_editor" {
       return _editor_plan(0, true)
-   } elif(shot == "full_editor_workspace"){
+   } elif shot == "full_editor_workspace" {
       return _editor_plan(0, true, false, 1)
-   } elif(shot == "editor_catalog" || shot == "editor_scene"){
+   } elif shot == "editor_catalog" || shot == "editor_scene" {
       return _editor_plan()
-   } elif(shot == "editor_hierarchy"){
+   } elif shot == "editor_hierarchy" {
       return _editor_plan(1)
-   } elif(shot == "editor_scene_compact"){
+   } elif shot == "editor_scene_compact" {
       return _editor_plan(0, true, true, 1, "box")
-   } elif(shot == "editor_view"){
+   } elif shot == "editor_view" {
       return _editor_plan(0, true)
-   } elif(shot == "editor_theme"){
+   } elif shot == "editor_theme" {
       return _editor_plan(2)
-   } elif(shot == "editor_console"){
+   } elif shot == "editor_console" {
       return _editor_plan(3)
-   } elif(shot == "editor_probe"){
+   } elif shot == "editor_probe" {
       return _editor_plan(3, false, false, 0, "", true)
-   } elif(shot == "probe_overlay"){
+   } elif shot == "probe_overlay" {
       return _tool_plan("probe", 0, "", true)
-   } elif(_shot_in(shot, gallery_shots)){
+   } elif _shot_in(shot, gallery_shots) {
       return _tool_plan("gallery", _shot_tab(shot, gallery_shots, 0))
-   } elif(_shot_in(shot, browser_shots)){
+   } elif _shot_in(shot, browser_shots) {
       def browser_tab = (shot == "browser_hierarchy") ? 1 : 0
       def model_filter = (shot == "browser_filtered") ? "box" : ""
       return _tool_plan("browser", browser_tab, model_filter)
-   } elif(inspector_shot){
+   } elif inspector_shot {
       return _tool_plan("inspector", _inspector_tab(shot))
-   } elif(shot == "graph"){
+   } elif shot == "graph" {
       return _tool_plan("graph")
-   } elif(shot == "workspace"){
+   } elif shot == "workspace" {
       return _tool_plan("workspace")
-   } elif(shot == "profiler"){
+   } elif shot == "profiler" {
       return _tool_plan("profiler")
    }
    _shell_plan()
@@ -284,30 +284,30 @@ fn tiled_layout_plan(
    mut out = dict(16)
    out["standalone_browser"] = standalone_browser
    out["focus_only"] = false
-   if(!editor){
+   if !editor {
       out["focus_only"] = true
       return out
    }
    def editor_only = editor && int(workspace_mode) != 1 &&
    !gallery && !probe && !browser && !inspector && !profiler && !workspace && !graph
-   if(editor_only){
+   if editor_only {
       out["focus_only"] = true
       return out
    }
    def tiny = w < 900.0 || h < 560.0
    def auto_compact = w < 1680.0 || h < 940.0
    mut tiles = dict(12)
-   if(p == "default" && tiny){
+   if p == "default" && tiny {
       tiles = ui_layout.tile_editor_shell_preset("compact", w, h, g)
-   } elif(p == "default" && auto_compact){
+   } elif p == "default" && auto_compact {
       tiles = ui_layout.tile_editor_shell(w, h, g, 0.24, 0.30, 0.20)
-   } elif(p == "default"){
+   } elif p == "default" {
       tiles = ui_layout.tile_editor_shell(w, h, g, 0.27, 0.30, 0.22)
    } else {
       tiles = ui_layout.tile_editor_shell_preset(p, w, h, g)
    }
    _shell_plan_rect(out, "editor_main", editor, _shell_rect(tiles, "editor_main", [20.0, 20.0, 390.0, 680.0]))
-   if(int(workspace_mode) == 1){
+   if int(workspace_mode) == 1 {
       def center_main = _shell_rect(tiles, "center_main", _shell_rect(tiles, "workspace_grid", [450.0, 460.0, 390.0, 260.0]))
       def side_main = _shell_rect(tiles, "side_main", _shell_rect(tiles, "inspector", [860.0, 20.0, 360.0, 360.0]))
       _shell_plan_rect(out, "asset_browser", standalone_browser, center_main)

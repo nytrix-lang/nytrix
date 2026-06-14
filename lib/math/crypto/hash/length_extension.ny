@@ -23,12 +23,12 @@ fn md5_padding(int msg_len_bits) list {
    Returns the padding bytes as a list."
    def msg_len_bytes = msg_len_bits / 8
    mut pad_len = 64 - (msg_len_bytes % 64)
-   if(pad_len <= 8){ pad_len = pad_len + 64 }
+   if pad_len <= 8 { pad_len = pad_len + 64 }
    mut padding = list(pad_len)
    store64(padding, pad_len, 0)
    __store_item_fast(padding, 0, 128)
    mut j = 0
-   while(j < 8){
+   while j < 8 {
       __store_item_fast(padding, pad_len - 8 + j, (msg_len_bits >> (j * 8)) & 255)
       j += 1
    }
@@ -60,12 +60,12 @@ fn md5_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) s
    mut M = list(padded_suffix_len)
    store64(M, padded_suffix_len, 0)
    mut si = 0
-   while(si < suffix_len){
+   while si < suffix_len {
       __store_item_fast(M, si, __load_item_fast(suffix_bytes, si))
       si += 1
    }
    mut pi = 0
-   while(pi < final_pad.len){
+   while pi < final_pad.len {
       __store_item_fast(M, suffix_len + pi, __load_item_fast(final_pad, pi))
       pi += 1
    }
@@ -74,19 +74,19 @@ fn md5_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) s
    mut off = 0
    def num_blocks = padded_suffix_len / 64
    mut bi = 0
-   while(bi < num_blocks){
+   while bi < num_blocks {
       mut aa = ha
       mut bb = hb
       mut cc = hc
       mut dd = hd
       mut ri = 0
-      while(ri < 64){
+      while ri < 64 {
          mut f, g = 0, 0
-         if(ri < 16){
+         if ri < 16 {
             f, g = ((bb & cc) | ((bb ^^ 4294967295) & dd)), ri
-         } else if(ri < 32){
+         } else if ri < 32 {
             f, g = ((dd & bb) | ((dd ^^ 4294967295) & cc)), (5 * ri + 1) % 16
-         } else if(ri < 48){
+         } else if ri < 48 {
             f, g = (bb ^^ cc ^^ dd), (3 * ri + 5) % 16
          } else {
             f, g = (cc ^^ (bb | (dd ^^ 4294967295))), (7 * ri) % 16
@@ -129,12 +129,12 @@ fn sha1_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) 
    mut M = list(padded_suffix_len)
    store64(M, padded_suffix_len, 0)
    mut si2 = 0
-   while(si2 < suffix_len){
+   while si2 < suffix_len {
       __store_item_fast(M, si2, __load_item_fast(suffix_bytes, si2))
       si2 += 1
    }
    mut pi2 = 0
-   while(pi2 < final_pad.len){
+   while pi2 < final_pad.len {
       __store_item_fast(M, suffix_len + pi2, __load_item_fast(final_pad, pi2))
       pi2 += 1
    }
@@ -145,15 +145,15 @@ fn sha1_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) 
    mut bi2 = 0
    mut W = list(80)
    store64(W, 80, 0)
-   while(bi2 < num_blocks2){
+   while bi2 < num_blocks2 {
       mut wi = 0
-      while(wi < 16){
+      while wi < 16 {
          def base = bi2 * 64 + wi * 4
          def word = (__load_item_fast(M, base) << 24) | (__load_item_fast(M, base + 1) << 16) | (__load_item_fast(M, base + 2) << 8) | __load_item_fast(M, base + 3)
          __store_item_fast(W, wi, _u32(word))
          wi += 1
       }
-      while(wi < 80){
+      while wi < 80 {
          def v = __load_item_fast(W, wi - 3) ^^ __load_item_fast(W, wi - 8) ^^ __load_item_fast(W, wi - 14) ^^ __load_item_fast(W, wi - 16)
          __store_item_fast(W, wi, _rotl32(v, 1))
          wi += 1
@@ -164,12 +164,12 @@ fn sha1_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) 
       mut dd2 = hd2
       mut ee2 = he2
       mut ri2 = 0
-      while(ri2 < 80){
+      while ri2 < 80 {
          def ki = ri2 < 20 ? 1518500249 : (ri2 < 40 ? 1859775393 : (ri2 < 60 ? 2400959708 : 3395469782))
          mut f2 = 0
-         if(ri2 < 20){ f2 = ((bb2 & cc2) | ((bb2 ^^ 4294967295) & dd2)) } else if(ri2 < 40){
+         if ri2 < 20 { f2 = ((bb2 & cc2) | ((bb2 ^^ 4294967295) & dd2)) } else if ri2 < 40 {
             f2 = (bb2 ^^ cc2 ^^ dd2)
-         } else if(ri2 < 60){
+         } else if ri2 < 60 {
             f2 = ((bb2 & cc2) | (bb2 & dd2) | (cc2 & dd2))
          } else {
             f2 = (bb2 ^^ cc2 ^^ dd2)
@@ -214,12 +214,12 @@ fn sha256_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes
    mut M2 = list(padded_suffix_len2)
    store64(M2, padded_suffix_len2, 0)
    mut si3 = 0
-   while(si3 < suffix_len2){
+   while si3 < suffix_len2 {
       __store_item_fast(M2, si3, __load_item_fast(suffix_bytes, si3))
       si3 += 1
    }
    mut pi3 = 0
-   while(pi3 < final_pad.len){
+   while pi3 < final_pad.len {
       __store_item_fast(M2, suffix_len2 + pi3, __load_item_fast(final_pad, pi3))
       pi3 += 1
    }
@@ -235,15 +235,15 @@ fn sha256_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes
    mut h = h7
    mut W2 = list(64)
    store64(W2, 64, 0)
-   while(bi3 < num_blocks3){
+   while bi3 < num_blocks3 {
       mut wi2 = 0
-      while(wi2 < 16){
+      while wi2 < 16 {
          def base2 = bi3 * 64 + wi2 * 4
          def word2 = (__load_item_fast(M2, base2) << 24) | (__load_item_fast(M2, base2 + 1) << 16) | (__load_item_fast(M2, base2 + 2) << 8) | __load_item_fast(M2, base2 + 3)
          __store_item_fast(W2, wi2, _u32(word2))
          wi2 += 1
       }
-      while(wi2 < 64){
+      while wi2 < 64 {
          def wm15 = __load_item_fast(W2, wi2 - 15)
          def wm2 = __load_item_fast(W2, wi2 - 2)
          def s0 = _rotr32(wm15, 7) ^^ _rotr32(wm15, 18) ^^ (wm15 >> 3)
@@ -261,7 +261,7 @@ fn sha256_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes
       mut gg3 = g
       mut hh3 = h
       mut ri3 = 0
-      while(ri3 < 64){
+      while ri3 < 64 {
          def S1 = _rotr32(ee3, 6) ^^ _rotr32(ee3, 11) ^^ _rotr32(ee3, 25)
          def ch = (ee3 & ff3) ^^ ((ee3 ^^ 4294967295) & gg3)
          def t1 = _u32(hh3 + S1 + ch + __load_item_fast(_SHA256_K, ri3) + __load_item_fast(W2, ri3))
@@ -319,7 +319,7 @@ fn _u64_list_le(int n) list {
    mut out = list(n)
    store64(out, n, 0)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(out, i, _U64_ZERO_LE)
       i += 1
    }
@@ -329,7 +329,7 @@ fn _u64_list_le(int n) list {
 fn _rotr64_le(any x, int n) any {
    def shift = n % 64
    def word = _u64_word_le(x)
-   if(shift == 0){ return word }
+   if shift == 0 { return word }
    _u64_word_le((word >> shift) | (word << (64 - shift)))
 }
 
@@ -362,7 +362,7 @@ fn _sha512_small1(any x) any {
 fn _u64_from_bytes_be(list bs, int offset) any {
    mut out = _U64_ZERO_LE
    mut i = 0
-   while(i < 8){
+   while i < 8 {
       out = (out * 256) + int(__load_item_fast(bs, offset + i))
       i += 1
    }
@@ -374,7 +374,7 @@ fn _u64_to_hex_be(any v) str {
    mut out = list(8)
    store64(out, 8, 0)
    mut i = 7
-   while(i >= 0){
+   while i >= 0 {
       __store_item_fast(out, 7 - i, bigint_to_int((word >> (i * 8)) & 255))
       i -= 1
    }
@@ -391,7 +391,7 @@ fn sha512_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes
    def hash_bytes = orig_hash_hex.unhex
    mut h = _u64_list_le(8)
    mut hi = 0
-   while(hi < 8){
+   while hi < 8 {
       h[hi] = _u64_from_bytes_be(hash_bytes, hi * 8)
       hi += 1
    }
@@ -399,24 +399,24 @@ fn sha512_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes
    mut M = list(padded_suffix_len)
    store64(M, padded_suffix_len, 0)
    mut si = 0
-   while(si < suffix_len){
+   while si < suffix_len {
       __store_item_fast(M, si, __load_item_fast(suffix_bytes, si))
       si += 1
    }
    mut pi = 0
-   while(pi < final_pad.len){
+   while pi < final_pad.len {
       __store_item_fast(M, suffix_len + pi, __load_item_fast(final_pad, pi))
       pi += 1
    }
    mut off = 0
-   while(off < padded_suffix_len){
+   while off < padded_suffix_len {
       mut w = _u64_list_le(80)
       mut wi = 0
-      while(wi < 16){
+      while wi < 16 {
          w[wi] = _u64_from_bytes_be(M, off + wi * 8)
          wi += 1
       }
-      while(wi < 80){
+      while wi < 80 {
          w[wi] = _u64_word_le(_sha512_small1(w[wi - 2]) + w[wi - 7] + _sha512_small0(w[wi - 15]) + w[wi - 16])
          wi += 1
       }
@@ -426,7 +426,7 @@ fn sha512_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes
       mut g = h[6]
       mut hh = h[7]
       mut ri = 0
-      while(ri < 80){
+      while ri < 80 {
          def t1 = _u64_word_le(hh + _sha512_big1(e) + _sha512_ch(e, f, g) + _K512_LE[ri] + w[ri])
          def t2 = _u64_word_le(_sha512_big0(a) + _sha512_maj(a, b, c))
          hh = g
@@ -458,20 +458,20 @@ fn _sha_padding(int msg_len_bytes, int block_size, int len_field_bytes) list {
    Appends 0x80, then zeros, then big-endian length in bits.
    Returns padding bytes as a list."
    mut pad_len = block_size - (msg_len_bytes % block_size)
-   if(pad_len <= len_field_bytes){ pad_len = pad_len + block_size }
+   if pad_len <= len_field_bytes { pad_len = pad_len + block_size }
    mut padding = list(pad_len)
    store64(padding, pad_len, 0)
    __store_item_fast(padding, 0, 128)
    def msg_len_bits = msg_len_bytes * 8
    mut j = 0
-   if(len_field_bytes == 16){
+   if len_field_bytes == 16 {
       j = 8
-      while(j < 16){
+      while j < 16 {
          __store_item_fast(padding, pad_len - 16 + j, (msg_len_bits >> ((15 - j) * 8)) & 255)
          j += 1
       }
    } else {
-      while(j < len_field_bytes){
+      while j < len_field_bytes {
          __store_item_fast(padding, pad_len - len_field_bytes + j, (msg_len_bits >> ((len_field_bytes - 1 - j) * 8)) & 255)
          j += 1
       }

@@ -41,14 +41,14 @@ fn _is_number_suffix(int c) bool {
 
 fn _scan_number(str source, int i, int src_len) int {
    mut j = i
-   if(j < src_len && (load8(source, j) == 45 || load8(source, j) == 43)){ j += 1 }
-   if(j + 1 < src_len && load8(source, j) == 48 && (load8(source, j + 1) == 120 || load8(source, j + 1) == 88)){
+   if j < src_len && (load8(source, j) == 45 || load8(source, j) == 43) { j += 1 }
+   if j + 1 < src_len && load8(source, j) == 48 && (load8(source, j + 1) == 120 || load8(source, j + 1) == 88) {
       j += 2
-      while(j < src_len && (_is_hex_digit(load8(source, j)) || load8(source, j) == 95)){ j += 1 }
+      while j < src_len && (_is_hex_digit(load8(source, j)) || load8(source, j) == 95) { j += 1 }
    } else {
-      while(j < src_len){
+      while j < src_len {
          def c = load8(source, j)
-         if(_is_hex_digit(c) || _is_number_suffix(c)){ j += 1 }
+         if _is_hex_digit(c) || _is_number_suffix(c) { j += 1 }
          else { break }
       }
    }
@@ -57,7 +57,7 @@ fn _scan_number(str source, int i, int src_len) int {
 
 fn _scan_ident(str source, int i, int src_len) int {
    mut j = i
-   while(j < src_len && _is_ident_part(load8(source, j))){ j += 1 }
+   while j < src_len && _is_ident_part(load8(source, j)) { j += 1 }
    j
 }
 
@@ -65,39 +65,39 @@ fn tokenize(str source, list out_tokens) list {
    "Runs the tokenize operation."
    def src_len = source.len
    mut i = 0
-   while(i < src_len){
+   while i < src_len {
       def idx = i + 0
       i = idx
       def ch = load8(source, i)
-      if(ch == 32 || ch == 9 || ch == 10 || ch == 13){
+      if ch == 32 || ch == 9 || ch == 10 || ch == 13 {
          mut j = i
-         while(j < src_len){ def c = load8(source, j) if(c != 32 && c != 9 && c != 10 && c != 13){ break } j += 1 }
+         while j < src_len { def c = load8(source, j) if c != 32 && c != 9 && c != 10 && c != 13 { break } j += 1 }
          out_tokens = _h.add_tok(out_tokens, 14, i, j - i)
          i = j
-      } elif(ch == 47 && i + 1 < src_len && load8(source, i + 1) == 47){
+      } elif ch == 47 && i + 1 < src_len && load8(source, i + 1) == 47 {
          def j = _h.scan_line(source, i, src_len)
          out_tokens = _h.add_tok(out_tokens, 4, i, j - i)
          i = j
-      } elif(ch == 47 && i + 1 < src_len && load8(source, i + 1) == 42){
+      } elif ch == 47 && i + 1 < src_len && load8(source, i + 1) == 42 {
          mut j = i + 2
-         while(j + 1 < src_len){ if(load8(source, j) == 42 && load8(source, j + 1) == 47){ j += 2 break } j += 1 }
+         while j + 1 < src_len { if load8(source, j) == 42 && load8(source, j + 1) == 47 { j += 2 break } j += 1 }
          out_tokens = _h.add_tok(out_tokens, 4, i, j - i)
          i = j
-      } elif(ch == 59 || ch == 33){
+      } elif ch == 59 || ch == 33 {
          def j = _h.scan_line(source, i, src_len)
          out_tokens = _h.add_tok(out_tokens, 4, i, j - i)
          i = j
-      } elif(ch == 35 && !(i + 1 < src_len && (_is_digit(load8(source, i + 1)) || load8(source, i + 1) == 43 || load8(source, i + 1) == 45))){
+      } elif ch == 35 && !(i + 1 < src_len && (_is_digit(load8(source, i + 1)) || load8(source, i + 1) == 43 || load8(source, i + 1) == 45)) {
          def j = _h.scan_line(source, i, src_len)
          out_tokens = _h.add_tok(out_tokens, 4, i, j - i)
          i = j
-      } elif(ch == 34 || ch == 39 || ch == 96){
+      } elif ch == 34 || ch == 39 || ch == 96 {
          def j = _h.scan_quoted(source, i, src_len)
          out_tokens = _h.add_tok(out_tokens, 2, i, j - i)
          i = j
-      } elif(_is_digit(ch)){
+      } elif _is_digit(ch) {
          def j = _scan_number(source, i, src_len)
-         if(j < src_len && load8(source, j) == 58){
+         if j < src_len && load8(source, j) == 58 {
             out_tokens = _h.add_tok(out_tokens, 0, i, j - i)
             out_tokens = _h.add_tok(out_tokens, 7, j, 1)
             i = j + 1
@@ -105,49 +105,49 @@ fn tokenize(str source, list out_tokens) list {
             out_tokens = _h.add_tok(out_tokens, 3, i, j - i)
             i = j
          }
-      } elif((ch == 45 || ch == 43) && i + 1 < src_len && _is_digit(load8(source, i + 1))){
+      } elif (ch == 45 || ch == 43) && i + 1 < src_len && _is_digit(load8(source, i + 1)) {
          def j = _scan_number(source, i, src_len)
          out_tokens = _h.add_tok(out_tokens, 3, i, j - i)
          i = j
-      } elif(_is_reg_prefix(ch) && i + 1 < src_len && _is_ident_start(load8(source, i + 1))){
+      } elif _is_reg_prefix(ch) && i + 1 < src_len && _is_ident_start(load8(source, i + 1)) {
          def j = _scan_ident(source, i + 1, src_len)
          def word = str.str_slice(source, i + 1, j)
-         if(_h.in_list_ci(word, REGISTERS)){ out_tokens = _h.add_tok(out_tokens, 1, i, j - i) }
+         if _h.in_list_ci(word, REGISTERS) { out_tokens = _h.add_tok(out_tokens, 1, i, j - i) }
          else { out_tokens = _h.add_tok(out_tokens, 6, i, 1) out_tokens = _h.add_tok(out_tokens, 8, i + 1, j - i - 1) }
          i = j
-      } elif(_is_ident_start(ch)){
+      } elif _is_ident_start(ch) {
          def j = _scan_ident(source, i, src_len)
          def word = str.str_slice(source, i, j)
-         if(j < src_len && load8(source, j) == 58){
+         if j < src_len && load8(source, j) == 58 {
             out_tokens = _h.add_tok(out_tokens, 0, i, j - i)
             out_tokens = _h.add_tok(out_tokens, 7, j, 1)
             i = j + 1
-         } elif(_h.in_list_ci(word, DIRECTIVES)){
+         } elif _h.in_list_ci(word, DIRECTIVES) {
             out_tokens = _h.add_tok(out_tokens, 10, i, j - i)
             i = j
-         } elif(_h.in_list_ci(word, REGISTERS)){
+         } elif _h.in_list_ci(word, REGISTERS) {
             out_tokens = _h.add_tok(out_tokens, 1, i, j - i)
             i = j
-         } elif(_h.in_list_ci(word, SIZE_WORDS)){
+         } elif _h.in_list_ci(word, SIZE_WORDS) {
             out_tokens = _h.add_tok(out_tokens, 1, i, j - i)
             i = j
-         } elif(_h.in_list_ci(word, OPCODES)){
+         } elif _h.in_list_ci(word, OPCODES) {
             out_tokens = _h.add_tok(out_tokens, 5, i, j - i)
             i = j
          } else {
             out_tokens = _h.add_tok(out_tokens, 8, i, j - i)
             i = j
          }
-      } elif(_is_operator_ch(ch)){
+      } elif _is_operator_ch(ch) {
          mut j = i
-         while(j < src_len){
+         while j < src_len {
             def c = load8(source, j)
-            if(_is_operator_ch(c)){ j += 1 }
+            if _is_operator_ch(c) { j += 1 }
             else { break }
          }
          out_tokens = _h.add_tok(out_tokens, 6, i, j - i)
          i = j
-      } elif(ch == 40 || ch == 41 || ch == 91 || ch == 93 || ch == 123 || ch == 125 || ch == 44 || ch == 58){
+      } elif ch == 40 || ch == 41 || ch == 91 || ch == 93 || ch == 123 || ch == 125 || ch == 44 || ch == 58 {
          out_tokens = _h.add_tok(out_tokens, 7, i, 1)
          i += 1
       } else {

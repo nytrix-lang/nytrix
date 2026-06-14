@@ -17,11 +17,11 @@ fn mat4_identity() list {
 fn mat4_mul(any a, any b) list {
    "Runs the mat4 mul operation."
    def raw = __gltf_mat4_mul_list(a, b)
-   if(is_list(raw)){ return raw }
+   if is_list(raw) { return raw }
    mut o, c = [0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0, "mat4", 400], 0
-   while(c < 4){
+   while c < 4 {
       mut r = 0
-      while(r < 4){
+      while r < 4 {
          def val = (0.0 + a.get(0 * 4 + r, 0.0)) * (0.0 + b.get(c * 4 + 0, 0.0)) +
          (0.0 + a.get(1 * 4 + r, 0.0)) * (0.0 + b.get(c * 4 + 1, 0.0)) +
          (0.0 + a.get(2 * 4 + r, 0.0)) * (0.0 + b.get(c * 4 + 2, 0.0)) +
@@ -36,12 +36,12 @@ fn mat4_mul(any a, any b) list {
 
 fn node_local_matrix(any node) list {
    "Runs the node local matrix operation."
-   if(is_dict(node)){
+   if is_dict(node) {
       def raw_m = node.get("matrix")
-      if(is_list(raw_m) && raw_m.len >= 16){
+      if is_list(raw_m) && raw_m.len >= 16 {
          mut out = [0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0, "mat4", 400]
          mut i = 0
-         while(i < 16){
+         while i < 16 {
             out[i] = 0.0 + raw_m.get(i, (i % 5) == 0 ? 1.0 : 0.0)
             i += 1
          }
@@ -91,7 +91,7 @@ fn mat4_from_trs(any t, any r, any s) list {
 
 fn mat4_inverse_affine(any m) list {
    "Inverts an affine tagged mat4. Returns identity when the matrix is singular."
-   if(!is_list(m) || m.len < 16){ return mat4_identity() }
+   if !is_list(m) || m.len < 16 { return mat4_identity() }
    def a00, a01 = 0.0 + m.get(0, 1.0), 0.0 + m.get(4, 0.0)
    def a02 = 0.0 + m.get(8, 0.0)
    def a10 = 0.0 + m.get(1, 0.0)
@@ -101,7 +101,7 @@ fn mat4_inverse_affine(any m) list {
    def a21 = 0.0 + m.get(6, 0.0)
    def a22 = 0.0 + m.get(10, 1.0)
    def det = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20)
-   if(abs(det) < 0.0000001){ return mat4_identity() }
+   if abs(det) < 0.0000001 { return mat4_identity() }
    def inv_det = 1.0 / det
    def b00 =  (a11 * a22 - a12 * a21) * inv_det
    def b01 = -(a01 * a22 - a02 * a21) * inv_det
@@ -126,20 +126,20 @@ fn mat4_inverse_affine(any m) list {
 
 fn mat4_transform_point(any m, any p) list {
    "Runs the mat4 transform point operation."
-   if(!is_list(m) || m.len < 16){ return [0.0 + p.get(0,0.0), 0.0 + p.get(1,0.0), 0.0 + p.get(2,0.0)] }
+   if !is_list(m) || m.len < 16 { return [0.0 + p.get(0,0.0), 0.0 + p.get(1,0.0), 0.0 + p.get(2,0.0)] }
    def x = 0.0 + p.get(0,0.0) def y = 0.0 + p.get(1,0.0) def z = 0.0 + p.get(2,0.0)
    mat4_apply_pos(m, x, y, z)
 }
 
 fn mat4_transform_dir(any m, any d) list {
    "Runs the mat4 transform dir operation."
-   if(!is_list(m) || m.len < 16){ return [0.0 + d.get(0,0.0), 0.0 + d.get(1,0.0), 0.0 + d.get(2,-1.0)] }
+   if !is_list(m) || m.len < 16 { return [0.0 + d.get(0,0.0), 0.0 + d.get(1,0.0), 0.0 + d.get(2,-1.0)] }
    def x = 0.0 + d.get(0,0.0) def y = 0.0 + d.get(1,0.0) def z = 0.0 + d.get(2,-1.0)
    mut out = mat4_apply_dir(m, x, y, z)
    def ox, oy = 0.0 + out.get(0,0.0), 0.0 + out.get(1,0.0)
    def oz = 0.0 + out.get(2,0.0)
    def len2 = ox*ox + oy*oy + oz*oz
-   if(len2 > 0.000001){
+   if len2 > 0.000001 {
       def inv = 1.0 / sqrt(len2)
       out = [ox*inv, oy*inv, oz*inv]
    }
@@ -148,7 +148,7 @@ fn mat4_transform_dir(any m, any d) list {
 
 fn safe_model_mat4(any m) list {
    "Normalizes possibly malformed model matrices to a strict 16-float array."
-   if(!is_list(m) || m.len < 16){ return mat4_identity() }
+   if !is_list(m) || m.len < 16 { return mat4_identity() }
    [
       float(m.get(0, 1.0)),  float(m.get(1, 0.0)),  float(m.get(2, 0.0)),  float(m.get(3, 0.0)),
       float(m.get(4, 0.0)),  float(m.get(5, 1.0)),  float(m.get(6, 0.0)),  float(m.get(7, 0.0)),

@@ -42,26 +42,26 @@ fn profile_alpha_from_delta(any delta) f64 {
 
 fn _flatter_log2_float_approx(f64 x) f64 {
    mut v = x
-   if(v <= 0.0){ return 0.0 }
+   if v <= 0.0 { return 0.0 }
    mut e = 0.0
-   while(v >= 2.0){ v *= 0.5 e += 1.0 }
-   while(v > 0.0 && v < 1.0){ v *= 2.0 e -= 1.0 }
+   while v >= 2.0 { v *= 0.5 e += 1.0 }
+   while v > 0.0 && v < 1.0 { v *= 2.0 e -= 1.0 }
    e + (v - 1.0) * 1.4426950408889634
 }
 
 fn _flatter_log2_abs(any x) f64 {
-   if(is_float(x)){
+   if is_float(x) {
       def xf = float(x)
       return _flatter_log2_float_approx(xf < 0.0 ? 0.0 - xf : xf)
    }
    def z = Z(x)
-   if(z == Z(0)){ return 0.0 }
+   if z == Z(0) { return 0.0 }
    def a = z < Z(0) ? -z : z
    def s = bigint_to_str(a)
    def take = min(16, s.len)
    mut lead = 0.0
    mut i = 0
-   while(i < take){
+   while i < take {
       lead = lead * 10.0 + float(load8(s, i) - 48)
       i += 1
    }
@@ -70,7 +70,7 @@ fn _flatter_log2_abs(any x) f64 {
 
 fn _flatter_z_to_float(any x) f64 {
    def z = Z(x)
-   if(z == Z(0)){ return 0.0 }
+   if z == Z(0) { return 0.0 }
    def neg = z < Z(0)
    def a = neg ? -z : z
    def s = bigint_to_str(a)
@@ -78,7 +78,7 @@ fn _flatter_z_to_float(any x) f64 {
    def take = min(16, n)
    mut lead = 0.0
    mut i = 0
-   while(i < take){
+   while i < take {
       lead = lead * 10.0 + float(load8(s, i) - 48)
       i += 1
    }
@@ -89,7 +89,7 @@ fn _flatter_z_to_float(any x) f64 {
 fn _flatter_profile_logs(list profile) list {
    mut out = []
    mut i = 0
-   while(i < profile.len){
+   while i < profile.len {
       out = out.append(_flatter_log2_abs(profile.get(i)))
       i += 1
    }
@@ -99,7 +99,7 @@ fn _flatter_profile_logs(list profile) list {
 fn _flatter_profile_norm_logs(list profile) list {
    mut out = []
    mut i = 0
-   while(i < profile.len){
+   while i < profile.len {
       out = out.append(0.5 * _flatter_log2_abs(profile.get(i)))
       i += 1
    }
@@ -107,45 +107,45 @@ fn _flatter_profile_norm_logs(list profile) list {
 }
 
 fn _flatter_profile_spread(list logs) f64 {
-   if(logs.len == 0){ return 0.0 }
+   if logs.len == 0 { return 0.0 }
    mut lo = float(logs.get(0))
    mut hi = lo
    mut i = 1
-   while(i < logs.len){
+   while i < logs.len {
       def v = float(logs.get(i))
-      if(v < lo){ lo = v }
-      if(v > hi){ hi = v }
+      if v < lo { lo = v }
+      if v > hi { hi = v }
       i += 1
    }
    hi - lo
 }
 
 fn _flatter_profile_drop(list logs) f64 {
-   if(logs.len <= 1){ return 0.0 }
+   if logs.len <= 1 { return 0.0 }
    mut max_left = []
    mut min_right = []
    mut cur_max = float(logs.get(0))
    mut i = 0
-   while(i < logs.len){
+   while i < logs.len {
       def v = float(logs.get(i))
-      if(v > cur_max){ cur_max = v }
+      if v > cur_max { cur_max = v }
       max_left = max_left.append(cur_max)
       min_right = min_right.append(0.0)
       i += 1
    }
    mut cur_min = float(logs.get(logs.len - 1))
    i = logs.len - 1
-   while(i >= 0){
+   while i >= 0 {
       def v = float(logs.get(i))
-      if(v < cur_min){ cur_min = v }
+      if v < cur_min { cur_min = v }
       min_right[i] = cur_min
       i -= 1
    }
    mut spread = max_left.get(logs.len - 1) - min_right.get(0)
    i = 0
-   while(i < logs.len - 1){
+   while i < logs.len - 1 {
       def gap = min_right.get(i + 1) - max_left.get(i)
-      if(gap > 0.0){ spread = spread - gap }
+      if gap > 0.0 { spread = spread - gap }
       i += 1
    }
    spread
@@ -155,7 +155,7 @@ fn _flatter_profile_slice(list logs, int start, int stop) list {
    mut out = []
    mut i = max(0, start)
    def end = min(logs.len, stop)
-   while(i < end){
+   while i < end {
       out = out.append(float(logs.get(i)))
       i += 1
    }
@@ -164,10 +164,10 @@ fn _flatter_profile_slice(list logs, int start, int stop) list {
 
 fn _flatter_profile_mean(list logs, int start, int stop) f64 {
    def end = min(logs.len, stop)
-   if(start >= end){ return 0.0 }
+   if start >= end { return 0.0 }
    mut sum = 0.0
    mut i = max(0, start)
-   while(i < end){
+   while i < end {
       sum = sum + float(logs.get(i))
       i += 1
    }
@@ -175,18 +175,18 @@ fn _flatter_profile_mean(list logs, int start, int stop) f64 {
 }
 
 fn _flatter_goal_s_guess(int n) f64 {
-   if(n <= 1){ return 0.0 }
+   if n <= 1 { return 0.0 }
    def lgn = _flatter_log2_abs(n)
    3.0 * (1.0 + pow(3.0, lgn + 1.0) - pow(2.0, lgn + 2.0)) / 2.0
 }
 
 fn _flatter_goal_bound(int n, f64 quality, f64 best_slope) f64 {
-   if(n <= 1){ return 0.0 }
+   if n <= 1 { return 0.0 }
    best_slope * float(n) + quality * _flatter_goal_s_guess(n)
 }
 
 fn _flatter_shape_from_any(any basis_or_shape) dict {
-   if(is_dict(basis_or_shape) && is_list(basis_or_shape.get("profile_norm_log2", nil))){ return basis_or_shape }
+   if is_dict(basis_or_shape) && is_list(basis_or_shape.get("profile_norm_log2", nil)) { return basis_or_shape }
    profile_shape_report(basis_or_shape)
 }
 
@@ -199,16 +199,16 @@ fn profile_goal_report(any basis_or_shape, str target="slope", any value=nil, bo
    def n = logs.len
    def best_slope = _flatter_bkz_best_slope()
    mut slope = value == nil ? profile_default_alpha() : float(value)
-   if(target == "rhf"){
+   if target == "rhf" {
       slope = profile_alpha_from_rhf(value == nil ? profile_rhf_from_alpha(profile_default_alpha()) : value)
-   } else if(target == "drop"){
+   } else if target == "drop" {
       def denom = bool(proved) ? max(1, n) : max(1, n - 1)
       slope = value == nil ? profile_default_alpha() : float(value) / float(denom)
    }
-   if(bool(proved) && slope <= best_slope){ slope = best_slope + 0.000001 }
+   if bool(proved) && slope <= best_slope { slope = best_slope + 0.000001 }
    def drop = shape.get("drop_norm", shape.get("drop", 0.0))
    def spread = shape.get("spread_norm", shape.get("spread", 0.0))
-   if(n <= 1){
+   if n <= 1 {
       return {
          "method": "profile-goal",
          "rows": n,
@@ -234,7 +234,7 @@ fn profile_goal_report(any basis_or_shape, str target="slope", any value=nil, bo
    mut mu_left = 0.0
    mut mu_right = 0.0
    mut satisfied = false
-   if(bool(proved)){
+   if bool(proved) {
       max_drop = slope * float(n)
       satisfied = drop < max_drop
    } else {
@@ -245,14 +245,14 @@ fn profile_goal_report(any basis_or_shape, str target="slope", any value=nil, bo
       gamma_i = quality * pow(3.0, _flatter_log2_abs(n))
       mu_sep = (max_drop - gamma_i) / 2.0 + gamma_i
       mut n_left = n / 2
-      if(n == 3){ n_left = 2 }
+      if n == 3 { n_left = 2 }
       def n_right = n - n_left
       l_drop = _flatter_goal_bound(n_left, quality, best_slope)
       r_drop = _flatter_goal_bound(n_right, quality, best_slope)
       mut n1 = n_left / 2
-      if(n_left == 3){ n1 = 2 }
+      if n_left == 3 { n1 = 2 }
       mut n3 = n_right / 2
-      if(n_right == 3){ n3 = 2 }
+      if n_right == 3 { n3 = 2 }
       mid_drop = _flatter_profile_drop(_flatter_profile_slice(logs, n1, n_left + n3))
       mu_left = _flatter_profile_mean(logs, 0, n_left)
       mu_right = _flatter_profile_mean(logs, n_left, n)
@@ -288,7 +288,7 @@ fn profile_goal_check(any basis_or_shape, str target="slope", any value=nil, boo
 }
 
 fn _flatter_profile_compression_precision(f64 spread, int n, str mode, bool aggressive) int {
-   if(mode == "heuristic3"){
+   if mode == "heuristic3" {
       return int(ceil(aggressive ? spread + 30.0 : 2.0 * spread + 30.0 + 2.0 * float(n)))
    }
    int(ceil(2.0 * spread + 40.0))
@@ -296,7 +296,7 @@ fn _flatter_profile_compression_precision(f64 spread, int n, str mode, bool aggr
 
 fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-generic", bool aggressive_precision=false) dict {
    def n = logs.len
-   if(n == 0){
+   if n == 0 {
       return {
          "method": "profile-compression-plan",
          "source": "flatter-recursive-compression",
@@ -318,18 +318,18 @@ fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-ge
    mut min_right = []
    mut i = 0
    mut cur_max = float(logs.get(0))
-   while(i < n){
+   while i < n {
       def v = float(logs.get(i))
-      if(v > cur_max){ cur_max = v }
+      if v > cur_max { cur_max = v }
       max_left = max_left.append(cur_max)
       min_right = min_right.append(0.0)
       i += 1
    }
    mut cur_min = float(logs.get(n - 1))
    i = n - 1
-   while(i >= 0){
+   while i >= 0 {
       def v = float(logs.get(i))
-      if(v < cur_min){ cur_min = v }
+      if v < cur_min { cur_min = v }
       min_right[i] = cur_min
       i -= 1
    }
@@ -337,14 +337,14 @@ fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-ge
    mut compressible = 0
    mut max_gap = 0.0
    i = 1
-   while(i < n){
+   while i < n {
       def gap = min_right.get(i) - max_left.get(i - 1)
       mut next_shift = int(shifts.get(i - 1))
-      if(gap > 1.0){
+      if gap > 1.0 {
          def add = int(floor(gap - 1.0))
          next_shift += add
          compressible += 1
-         if(gap > max_gap){ max_gap = gap }
+         if gap > max_gap { max_gap = gap }
       }
       shifts = shifts.append(next_shift)
       i += 1
@@ -356,7 +356,7 @@ fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-ge
    def base_shift = int(ceil(max_left.get(n - 1))) - relative_tail - precision
    mut column_shifts = []
    i = 0
-   while(i < n){
+   while i < n {
       column_shifts = column_shifts.append(int(shifts.get(i)) + base_shift)
       i += 1
    }
@@ -394,9 +394,9 @@ fn profile_shape_report(any basis) dict {
    def rows = _flatter_matrix_rows(a)
    def quality = rows <= 160 ? lll_backend.lll_quality_report(a) : dict(0)
    mut gso = quality.get("gso", nil)
-   if(gso == nil){ gso = lll_backend.gso_report(a) }
+   if gso == nil { gso = lll_backend.gso_report(a) }
    mut profile = quality.get("profile", nil)
-   if(profile == nil){ profile = gso.get("profile", []) }
+   if profile == nil { profile = gso.get("profile", []) }
    def logs = _flatter_profile_logs(profile)
    def norm_logs = _flatter_profile_norm_logs(profile)
    {
@@ -425,7 +425,7 @@ fn _flatter_row_norm_shape_report(any basis) dict {
    def data = _flatter_matrix_data(a)
    mut profile = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       profile = profile.append(_flatter_norm_z(data.get(i)))
       i += 1
    }
@@ -450,7 +450,7 @@ fn _flatter_row_norm_shape_report(any basis) dict {
 }
 
 fn _flatter_reduce_matrix(any basis) any {
-   if(is_list(basis) && basis.len >= 3 && is_int(basis.get(0, nil)) && is_int(basis.get(1, nil)) && is_list(basis.get(2, nil))){ return basis }
+   if is_list(basis) && basis.len >= 3 && is_int(basis.get(0, nil)) && is_int(basis.get(1, nil)) && is_list(basis.get(2, nil)) { return basis }
    matrix.Matrix(basis)
 }
 
@@ -466,7 +466,7 @@ fn _flatter_clone_rows(any m) list {
    mut out = list(rows)
    __list_set_len(out, rows)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       out[i] = vec_clone(data.get(i))
       i += 1
    }
@@ -480,11 +480,11 @@ fn _flatter_clone_rows_small(any m) list {
    mut out = list(rows)
    __list_set_len(out, rows)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = list(cols)
       __list_set_len(row, cols)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          def raw = data.get(i).get(j)
          def v = _flatter_small_i64(raw)
          row[j] = v != 2147483647 ? v : raw
@@ -504,23 +504,23 @@ fn _flatter_clone_rows_lower_report(any m) dict {
    __list_set_len(out, rows)
    mut lower = true
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def row_data = data[i]
       mut row = list(cols)
       __list_set_len(row, cols)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          def raw = row_data[j]
          mut v = raw
-         if(is_bigint(raw)){
+         if is_bigint(raw) {
             def z = Z(raw)
             def az = z < Z(0) ? -z : z
-            if(az <= Z(2000000000000000000)){ v = bigint_to_int(z) }
+            if az <= Z(2000000000000000000) { v = bigint_to_int(z) }
          }
-         if(j > i){
-            if(is_int(v)){
-               if(int(v) != 0){ lower = false }
-            } elif(Z(v) != Z(0)){
+         if j > i {
+            if is_int(v) {
+               if int(v) != 0 { lower = false }
+            } elif Z(v) != Z(0) {
                lower = false
             }
          }
@@ -536,37 +536,37 @@ fn _flatter_clone_rows_lower_report(any m) dict {
 fn _flatter_public_basis(any basis) list { _flatter_clone_rows(_flatter_reduce_matrix(basis)) }
 
 fn _flatter_small_i64(any x) int {
-   if(is_int(x)){
+   if is_int(x) {
       def v = int(x)
-      if(v >= -1000000000 && v <= 1000000000){ return v }
+      if v >= -1000000000 && v <= 1000000000 { return v }
       return 2147483647
    }
-   if(is_bigint(x)){
+   if is_bigint(x) {
       def z = Z(x)
       def a = z < Z(0) ? -z : z
-      if(bigint_bit_length(a) < 31){ return bigint_to_int(z) }
+      if bigint_bit_length(a) < 31 { return bigint_to_int(z) }
    }
    2147483647
 }
 
 fn _flatter_dot_z(list a, list b) any {
-   mut int: direct_sum = 0
-   mut bool: direct_ok = true
-   mut int: dk = 0
-   def int: direct_limit = 4000000000000000000
-   while(dk < a.len && direct_ok){
+   mut int direct_sum = 0
+   mut bool direct_ok = true
+   mut int dk = 0
+   def int direct_limit = 4000000000000000000
+   while dk < a.len && direct_ok {
       def av = a[dk]
       def bv = b[dk]
-      if(is_int(av) && is_int(bv)){
-         def int: ai = int(av)
-         def int: bi = int(bv)
-         if(ai == 0 || bi == 0){
+      if is_int(av) && is_int(bv) {
+         def int ai = int(av)
+         def int bi = int(bv)
+         if ai == 0 || bi == 0 {
             nil
-         } elif(ai >= -1000000000 && ai <= 1000000000 && bi >= -1000000000 && bi <= 1000000000){
-            def int: term = ai * bi
-            def int: sum_abs = direct_sum < 0 ? -direct_sum : direct_sum
-            def int: term_abs = term < 0 ? -term : term
-            if(sum_abs <= direct_limit - term_abs){
+         } elif ai >= -1000000000 && ai <= 1000000000 && bi >= -1000000000 && bi <= 1000000000 {
+            def int term = ai * bi
+            def int sum_abs = direct_sum < 0 ? -direct_sum : direct_sum
+            def int term_abs = term < 0 ? -term : term
+            if sum_abs <= direct_limit - term_abs {
                direct_sum += term
             } else {
                direct_ok = false
@@ -579,19 +579,19 @@ fn _flatter_dot_z(list a, list b) any {
       }
       dk += 1
    }
-   if(direct_ok){ return direct_sum }
-   mut int: small_sum = 0
-   mut bool: small_ok = true
-   mut int: k = 0
-   while(k < a.len && small_ok){
-      def int: ai = _flatter_small_i64(a[k])
-      def int: bi = _flatter_small_i64(b[k])
-      if(ai != 2147483647 && bi != 2147483647){
-         if(ai != 0 && bi != 0){
-            def int: term = ai * bi
-            def int: sum_abs = small_sum < 0 ? -small_sum : small_sum
-            def int: term_abs = term < 0 ? -term : term
-            if(sum_abs <= direct_limit - term_abs){
+   if direct_ok { return direct_sum }
+   mut int small_sum = 0
+   mut bool small_ok = true
+   mut int k = 0
+   while k < a.len && small_ok {
+      def int ai = _flatter_small_i64(a[k])
+      def int bi = _flatter_small_i64(b[k])
+      if ai != 2147483647 && bi != 2147483647 {
+         if ai != 0 && bi != 0 {
+            def int term = ai * bi
+            def int sum_abs = small_sum < 0 ? -small_sum : small_sum
+            def int term_abs = term < 0 ? -term : term
+            if sum_abs <= direct_limit - term_abs {
                small_sum += term
             } else {
                small_ok = false
@@ -602,10 +602,10 @@ fn _flatter_dot_z(list a, list b) any {
       }
       k += 1
    }
-   if(small_ok){ return small_sum }
+   if small_ok { return small_sum }
    mut s = Z(0)
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       s = s + Z(a[i]) * Z(b[i])
       i += 1
    }
@@ -613,20 +613,20 @@ fn _flatter_dot_z(list a, list b) any {
 }
 
 fn _flatter_norm_z(list a) any {
-   mut int: direct_sum = 0
-   mut bool: direct_ok = true
-   mut int: dk = 0
-   def int: direct_limit = 4000000000000000000
-   while(dk < a.len && direct_ok){
+   mut int direct_sum = 0
+   mut bool direct_ok = true
+   mut int dk = 0
+   def int direct_limit = 4000000000000000000
+   while dk < a.len && direct_ok {
       def av = a[dk]
-      if(is_int(av)){
-         def int: ai = int(av)
-         if(ai == 0){
+      if is_int(av) {
+         def int ai = int(av)
+         if ai == 0 {
             nil
-         } elif(ai >= -1000000000 && ai <= 1000000000){
-            def int: term = ai * ai
-            def int: sum_abs = direct_sum < 0 ? -direct_sum : direct_sum
-            if(sum_abs <= direct_limit - term){
+         } elif ai >= -1000000000 && ai <= 1000000000 {
+            def int term = ai * ai
+            def int sum_abs = direct_sum < 0 ? -direct_sum : direct_sum
+            if sum_abs <= direct_limit - term {
                direct_sum += term
             } else {
                direct_ok = false
@@ -639,17 +639,17 @@ fn _flatter_norm_z(list a) any {
       }
       dk += 1
    }
-   if(direct_ok){ return direct_sum }
-   mut int: small_sum = 0
-   mut bool: small_ok = true
-   mut int: k = 0
-   while(k < a.len && small_ok){
-      def int: ai = _flatter_small_i64(a[k])
-      if(ai != 2147483647){
-         if(ai != 0){
-            def int: term = ai * ai
-            def int: sum_abs = small_sum < 0 ? -small_sum : small_sum
-            if(sum_abs <= direct_limit - term){
+   if direct_ok { return direct_sum }
+   mut int small_sum = 0
+   mut bool small_ok = true
+   mut int k = 0
+   while k < a.len && small_ok {
+      def int ai = _flatter_small_i64(a[k])
+      if ai != 2147483647 {
+         if ai != 0 {
+            def int term = ai * ai
+            def int sum_abs = small_sum < 0 ? -small_sum : small_sum
+            if sum_abs <= direct_limit - term {
                small_sum += term
             } else {
                small_ok = false
@@ -660,10 +660,10 @@ fn _flatter_norm_z(list a) any {
       }
       k += 1
    }
-   if(small_ok){ return small_sum }
+   if small_ok { return small_sum }
    mut s = Z(0)
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       def z = Z(a[i])
       s = s + z * z
       i += 1
@@ -672,47 +672,47 @@ fn _flatter_norm_z(list a) any {
 }
 
 fn _flatter_round_div(any num, any den) any {
-   if(is_int(num) && is_int(den)){
+   if is_int(num) && is_int(den) {
       def ni = int(num)
       def di = int(den)
-      if(di > 0 && ni >= -1000000000000 && ni <= 1000000000000 && di <= 1000000000000){
-         if(ni >= 0){ return(2 * ni + di) / (2 * di) }
+      if di > 0 && ni >= -1000000000000 && ni <= 1000000000000 && di <= 1000000000000 {
+         if ni >= 0 { return(2 * ni + di) / (2 * di) }
          return -((2 * (-ni) + di) / (2 * di))
       }
    }
    def d = Z(den)
-   if(d <= Z(0)){ return Z(0) }
+   if d <= Z(0) { return Z(0) }
    def n = Z(num)
-   if(n >= Z(0)){ return(Z(2) * n + d) / (Z(2) * d) }
+   if n >= Z(0) { return(Z(2) * n + d) / (Z(2) * d) }
    -((Z(2) * (-n) + d) / (Z(2) * d))
 }
 
 fn _flatter_round_div_signed(any num, any den) any {
-   if(is_int(num) && is_int(den)){
+   if is_int(num) && is_int(den) {
       def ni = int(num)
       def di = int(den)
-      if(di != 0 && ni >= -1000000000000 && ni <= 1000000000000 && di >= -1000000000000 && di <= 1000000000000){
-         if(di < 0){ return -_flatter_round_div_signed(ni, -di) }
-         if(ni >= 0){ return(2 * ni + di) / (2 * di) }
+      if di != 0 && ni >= -1000000000000 && ni <= 1000000000000 && di >= -1000000000000 && di <= 1000000000000 {
+         if di < 0 { return -_flatter_round_div_signed(ni, -di) }
+         if ni >= 0 { return(2 * ni + di) / (2 * di) }
          return -((2 * (-ni) + di) / (2 * di))
       }
    }
    def d = Z(den)
-   if(d == Z(0)){ return Z(0) }
-   if(d < Z(0)){ return -_flatter_round_div_signed(num, -d) }
+   if d == Z(0) { return Z(0) }
+   if d < Z(0) { return -_flatter_round_div_signed(num, -d) }
    _flatter_round_div(num, d)
 }
 
 fn _flatter_round_div_signed_int(int num, int den) int {
-   if(den == 0){ return 2147483647 }
+   if den == 0 { return 2147483647 }
    mut n = num
    mut d = den
-   if(d < 0){
+   if d < 0 {
       n = -n
       d = -d
    }
-   if(n < -2000000000000000000 || n > 2000000000000000000 || d > 2000000000000000000){ return 2147483647 }
-   if(n >= 0){ return(2 * n + d) / (2 * d) }
+   if n < -2000000000000000000 || n > 2000000000000000000 || d > 2000000000000000000 { return 2147483647 }
+   if n >= 0 { return(2 * n + d) / (2 * d) }
    -((2 * (-n) + d) / (2 * d))
 }
 
@@ -722,11 +722,11 @@ fn _flatter_row_submul(list a, list b, any coeff) list {
    __list_set_len(out, len)
    mut i = 0
    def ci = _flatter_small_i64(coeff)
-   if(ci != 2147483647){
-      while(i < len){
+   if ci != 2147483647 {
+      while i < len {
          def ai = _flatter_small_i64(a.get(i))
          def bi = _flatter_small_i64(b.get(i))
-         if(ai != 2147483647 && bi != 2147483647){
+         if ai != 2147483647 && bi != 2147483647 {
             def v = ai - ci * bi
             out[i] = v >= -100000000 && v <= 100000000 ? v : Z(v)
          } else {
@@ -736,7 +736,7 @@ fn _flatter_row_submul(list a, list b, any coeff) list {
       }
    } else {
       def c = Z(coeff)
-      while(i < len){
+      while i < len {
          out[i] = Z(a.get(i)) - c * Z(b.get(i))
          i += 1
       }
@@ -751,11 +751,11 @@ fn _flatter_row_submul_prefix(list a, list b, any coeff, int upto) list {
    mut i = 0
    def end = min(min(a.len, b.len), upto + 1)
    def ci = _flatter_small_i64(coeff)
-   if(ci != 2147483647){
-      while(i < end){
+   if ci != 2147483647 {
+      while i < end {
          def ai = _flatter_small_i64(a.get(i))
          def bi = _flatter_small_i64(b.get(i))
-         if(ai != 2147483647 && bi != 2147483647){
+         if ai != 2147483647 && bi != 2147483647 {
             def v = ai - ci * bi
             out[i] = v >= -100000000 && v <= 100000000 ? v : Z(v)
          } else {
@@ -765,12 +765,12 @@ fn _flatter_row_submul_prefix(list a, list b, any coeff, int upto) list {
       }
    } else {
       def c = Z(coeff)
-      while(i < end){
+      while i < end {
          out[i] = Z(a.get(i)) - c * Z(b.get(i))
          i += 1
       }
    }
-   while(i < len){
+   while i < len {
       out[i] = a.get(i)
       i += 1
    }
@@ -780,19 +780,19 @@ fn _flatter_row_submul_prefix(list a, list b, any coeff, int upto) list {
 fn _flatter_row_submul_prefix_bigint_inplace(list a, list b, any coeff, int upto) list {
    def end = min(min(a.len, b.len), upto + 1)
    mut i = 0
-   if(is_int(coeff)){
+   if is_int(coeff) {
       def ci = int(coeff)
       def cz = Z(ci)
       def ac = ci < 0 ? -ci : ci
-      while(i < end){
+      while i < end {
          def av = a[i]
          def bv = b[i]
-         if(is_int(av) && is_int(bv)){
+         if is_int(av) && is_int(bv) {
             def ai = int(av)
             def bi = int(bv)
             def aa = ai < 0 ? -ai : ai
             def ab = bi < 0 ? -bi : bi
-            if(ab == 0 || ac <= (2000000000000000000 - aa) / ab){
+            if ab == 0 || ac <= (2000000000000000000 - aa) / ab {
                def v = ai - ci * bi
                a[i] = v
             } else {
@@ -805,7 +805,7 @@ fn _flatter_row_submul_prefix_bigint_inplace(list a, list b, any coeff, int upto
       }
    } else {
       def c = Z(coeff)
-      while(i < end){
+      while i < end {
          a[i] = Z(a.get(i)) - c * Z(b.get(i))
          i += 1
       }
@@ -816,13 +816,13 @@ fn _flatter_row_submul_prefix_bigint_inplace(list a, list b, any coeff, int upto
 fn _flatter_row_i64_abs_bound(list row, int cap) int {
    mut out = 0
    mut i = 0
-   while(i < row.len){
+   while i < row.len {
       def v = row.get(i)
-      if(!is_int(v)){ return -1 }
+      if !is_int(v) { return -1 }
       def vi = int(v)
       def av = vi < 0 ? -vi : vi
-      if(av > cap){ return -1 }
-      if(av > out){ out = av }
+      if av > cap { return -1 }
+      if av > out { out = av }
       i += 1
    }
    out
@@ -832,7 +832,7 @@ fn _flatter_row_i64_abs_bounds(list rows, int cap) list {
    mut out = list(rows.len)
    __list_set_len(out, rows.len)
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       out[i] = _flatter_row_i64_abs_bound(rows.get(i), cap)
       i += 1
    }
@@ -842,21 +842,21 @@ fn _flatter_row_i64_abs_bounds(list rows, int cap) list {
 fn _flatter_compress_row_i64_bound(list row, int cap) list {
    mut max_abs = 0
    mut i = 0
-   while(i < row.len){
+   while i < row.len {
       def raw = row.get(i)
       mut v = raw
-      if(is_bigint(raw)){
+      if is_bigint(raw) {
          def z = Z(raw)
          def az = z < Z(0) ? -z : z
-         if(az > Z(cap)){ return [row, -1] }
+         if az > Z(cap) { return [row, -1] }
          v = bigint_to_int(z)
-      } elif(!is_int(raw)){
+      } elif !is_int(raw) {
          return [row, -1]
       }
       def vi = int(v)
       def av = vi < 0 ? -vi : vi
-      if(av > cap){ return [row, -1] }
-      if(av > max_abs){ max_abs = av }
+      if av > cap { return [row, -1] }
+      if av > max_abs { max_abs = av }
       row[i] = vi
       i += 1
    }
@@ -867,11 +867,11 @@ fn _flatter_row_submul_prefix_i64_bound_cached(list a, list b, int coeff, int up
    mut max_abs = old_bound
    def end = min(min(a.len, b.len), upto + 1)
    mut i = 0
-   while(i < end){
+   while i < end {
       def v = int(a.get(i)) - coeff * int(b.get(i))
       a[i] = v
       def av = v < 0 ? -v : v
-      if(av > max_abs){ max_abs = av }
+      if av > max_abs { max_abs = av }
       i += 1
    }
    [a, max_abs]
@@ -882,23 +882,23 @@ fn _flatter_row_submul_prefix_i64_checked_cached(list a, list b, int coeff, int 
    def cabs = coeff < 0 ? -coeff : coeff
    mut max_abs = old_bound
    mut i = 0
-   while(i < end){
+   while i < end {
       def av = a.get(i)
       def bv = b.get(i)
-      if(!is_int(av) || !is_int(bv)){ return [a, -1] }
+      if !is_int(av) || !is_int(bv) { return [a, -1] }
       def ai = int(av)
       def bi = int(bv)
       def babs = bi < 0 ? -bi : bi
       def aabs = ai < 0 ? -ai : ai
-      if(babs != 0 && cabs > (cap - aabs) / babs){ return [a, -1] }
+      if babs != 0 && cabs > (cap - aabs) / babs { return [a, -1] }
       i += 1
    }
    i = 0
-   while(i < end){
+   while i < end {
       def v = int(a.get(i)) - coeff * int(b.get(i))
       a[i] = v
       def av = v < 0 ? -v : v
-      if(av > max_abs){ max_abs = av }
+      if av > max_abs { max_abs = av }
       i += 1
    }
    [a, max_abs]
@@ -912,7 +912,7 @@ fn _flatter_row_addmul(list a, list b, any coeff) list {
 fn _flatter_zero_row(int n) list {
    mut out = []
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(Z(0))
       i += 1
    }
@@ -921,15 +921,15 @@ fn _flatter_zero_row(int n) list {
 
 fn _flatter_mod_pos(any x, any q) bigint {
    def qq = Z(q)
-   if(qq == Z(0)){ return Z(0) }
+   if qq == Z(0) { return Z(0) }
    mut r = Z(x) % qq
-   if(r < Z(0)){ r = r + (qq < Z(0) ? -qq : qq) }
+   if r < Z(0) { r = r + (qq < Z(0) ? -qq : qq) }
    r
 }
 
 @inline
 fn _flatter_is_zero_scalar(any x) bool {
-   if(is_int(x)){ return int(x) == 0 }
+   if is_int(x) { return int(x) == 0 }
    Z(x) == Z(0)
 }
 
@@ -938,11 +938,11 @@ fn _flatter_all_zero(any m) bool {
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def row = data.get(i)
       mut j = 0
-      while(j < cols){
-         if(!_flatter_is_zero_scalar(row.get(j))){ return false }
+      while j < cols {
+         if !_flatter_is_zero_scalar(row.get(j)) { return false }
          j += 1
       }
       i += 1
@@ -955,11 +955,11 @@ fn _flatter_is_lower_triangular(any m) bool {
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def row = data.get(i)
       mut j = i + 1
-      while(j < cols){
-         if(!_flatter_is_zero_scalar(row.get(j))){ return false }
+      while j < cols {
+         if !_flatter_is_zero_scalar(row.get(j)) { return false }
          j += 1
       }
       i += 1
@@ -973,11 +973,11 @@ fn _flatter_is_local_banded(any m, int window) bool {
    def data = _flatter_matrix_data(m)
    def w = max(0, window)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def row = data.get(i)
       mut j = 0
-      while(j < cols){
-         if(!_flatter_is_zero_scalar(row.get(j)) && abs(j - i) > w){ return false }
+      while j < cols {
+         if !_flatter_is_zero_scalar(row.get(j)) && abs(j - i) > w { return false }
          j += 1
       }
       i += 1
@@ -988,21 +988,21 @@ fn _flatter_is_local_banded(any m, int window) bool {
 fn _flatter_lower_triangular_profile_spread(any m) f64 {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
-   if(rows == 0 || cols == 0){ return 0.0 }
+   if rows == 0 || cols == 0 { return 0.0 }
    def data = _flatter_matrix_data(m)
    mut lo = 0.0
    mut hi = 0.0
    mut seen = false
    mut i = 0
-   while(i < rows && i < cols){
+   while i < rows && i < cols {
       def v = 2.0 * _flatter_log2_abs(data.get(i).get(i))
-      if(!seen){
+      if !seen {
          lo = v
          hi = v
          seen = true
       } else {
-         if(v < lo){ lo = v }
-         if(v > hi){ hi = v }
+         if v < lo { lo = v }
+         if v > hi { hi = v }
       }
       i += 1
    }
@@ -1013,10 +1013,10 @@ fn _flatter_is_upper_triangular(any m) bool {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut j = 0
-      while(j < i && j < cols){
-         if(Z(matrix.mat_get(m, i, j)) != Z(0)){ return false }
+      while j < i && j < cols {
+         if Z(matrix.mat_get(m, i, j)) != Z(0) { return false }
          j += 1
       }
       i += 1
@@ -1027,26 +1027,26 @@ fn _flatter_is_upper_triangular(any m) bool {
 fn _flatter_qary_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
-   if(rows != cols || rows < 4){ return -1 }
+   if rows != cols || rows < 4 { return -1 }
    mut k = 0
-   while(k < rows){
+   while k < rows {
       def diag = _flatter_abs_z(matrix.mat_get(m, k, k))
-      if(diag == Z(1)){ break }
-      if(diag <= Z(1)){ return -1 }
+      if diag == Z(1) { break }
+      if diag <= Z(1) { return -1 }
       mut j = 0
-      while(j < cols){
-         if(j != k && Z(matrix.mat_get(m, k, j)) != Z(0)){ return -1 }
+      while j < cols {
+         if j != k && Z(matrix.mat_get(m, k, j)) != Z(0) { return -1 }
          j += 1
       }
       k += 1
    }
-   if(k <= 0 || k >= rows){ return -1 }
+   if k <= 0 || k >= rows { return -1 }
    mut i = k
-   while(i < rows){
-      if(_flatter_abs_z(matrix.mat_get(m, i, i)) != Z(1)){ return -1 }
+   while i < rows {
+      if _flatter_abs_z(matrix.mat_get(m, i, i)) != Z(1) { return -1 }
       mut j = k
-      while(j < cols){
-         if(j != i && !_flatter_is_zero_scalar(matrix.mat_get(m, i, j))){ return -1 }
+      while j < cols {
+         if j != i && !_flatter_is_zero_scalar(matrix.mat_get(m, i, j)) { return -1 }
          j += 1
       }
       i += 1
@@ -1057,21 +1057,21 @@ fn _flatter_qary_split(any m) int {
 fn _flatter_lower_triangular_qary_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
-   if(rows != cols || rows < 4 || !_flatter_is_lower_triangular(m)){ return -1 }
+   if rows != cols || rows < 4 || !_flatter_is_lower_triangular(m) { return -1 }
    mut k = 0
-   while(k < rows){
+   while k < rows {
       def diag = _flatter_abs_z(matrix.mat_get(m, k, k))
-      if(diag == Z(1)){ break }
-      if(diag <= Z(1)){ return -1 }
+      if diag == Z(1) { break }
+      if diag <= Z(1) { return -1 }
       k += 1
    }
-   if(k <= 0 || k >= rows){ return -1 }
+   if k <= 0 || k >= rows { return -1 }
    mut i = k
-   while(i < rows){
-      if(_flatter_abs_z(matrix.mat_get(m, i, i)) != Z(1)){ return -1 }
+   while i < rows {
+      if _flatter_abs_z(matrix.mat_get(m, i, i)) != Z(1) { return -1 }
       mut j = k
-      while(j < cols){
-         if(j != i && Z(matrix.mat_get(m, i, j)) != Z(0)){ return -1 }
+      while j < cols {
+         if j != i && Z(matrix.mat_get(m, i, j)) != Z(0) { return -1 }
          j += 1
       }
       i += 1
@@ -1080,12 +1080,12 @@ fn _flatter_lower_triangular_qary_split(any m) int {
 }
 
 fn _flatter_lower_qary_uniform_modulus(any m, int k) bool {
-   if(k <= 0){ return false }
+   if k <= 0 { return false }
    def q = _flatter_abs_z(matrix.mat_get(m, 0, 0))
-   if(q <= Z(1)){ return false }
+   if q <= Z(1) { return false }
    mut i = 1
-   while(i < k){
-      if(_flatter_abs_z(matrix.mat_get(m, i, i)) != q){ return false }
+   while i < k {
+      if _flatter_abs_z(matrix.mat_get(m, i, i)) != q { return false }
       i += 1
    }
    true
@@ -1094,32 +1094,32 @@ fn _flatter_lower_qary_uniform_modulus(any m, int k) bool {
 fn _flatter_upper_qary_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
-   if(rows != cols || rows < 4){ return -1 }
+   if rows != cols || rows < 4 { return -1 }
    mut k = 0
-   while(k < rows && Z(matrix.mat_get(m, k, k)) == Z(1)){ k += 1 }
-   if(k <= 0 || k >= rows){ return -1 }
+   while k < rows && Z(matrix.mat_get(m, k, k)) == Z(1) { k += 1 }
+   if k <= 0 || k >= rows { return -1 }
    mut i = 0
-   while(i < k){
+   while i < k {
       mut j = 0
-      while(j < k){
+      while j < k {
          def want = i == j ? Z(1) : Z(0)
-         if(Z(matrix.mat_get(m, i, j)) != want){ return -1 }
+         if Z(matrix.mat_get(m, i, j)) != want { return -1 }
          j += 1
       }
       i += 1
    }
    def q = _flatter_abs_z(matrix.mat_get(m, k, k))
-   if(q <= Z(1)){ return -1 }
+   if q <= Z(1) { return -1 }
    i = k
-   while(i < rows){
+   while i < rows {
       mut j = 0
-      while(j < k){
-         if(Z(matrix.mat_get(m, i, j)) != Z(0)){ return -1 }
+      while j < k {
+         if Z(matrix.mat_get(m, i, j)) != Z(0) { return -1 }
          j += 1
       }
-      while(j < cols){
+      while j < cols {
          def want = i == j ? q : Z(0)
-         if(_flatter_abs_z(matrix.mat_get(m, i, j)) != want){ return -1 }
+         if _flatter_abs_z(matrix.mat_get(m, i, j)) != want { return -1 }
          j += 1
       }
       i += 1
@@ -1134,15 +1134,15 @@ fn _flatter_qary_blockswap_orientation(any m, int k) any {
    def cols = _flatter_matrix_cols(mm)
    mut out = []
    mut i = k
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut c = k
-      while(c < cols){
+      while c < cols {
          row = row.append(data.get(i).get(c))
          c += 1
       }
       c = 0
-      while(c < k){
+      while c < k {
          row = row.append(data.get(i).get(c))
          c += 1
       }
@@ -1150,15 +1150,15 @@ fn _flatter_qary_blockswap_orientation(any m, int k) any {
       i += 1
    }
    i = 0
-   while(i < k){
+   while i < k {
       mut row = []
       mut c = k
-      while(c < cols){
+      while c < cols {
          row = row.append(data.get(i).get(c))
          c += 1
       }
       c = 0
-      while(c < k){
+      while c < k {
          row = row.append(data.get(i).get(c))
          c += 1
       }
@@ -1176,16 +1176,16 @@ fn _flatter_qary_unblockswap_columns(any m, int k) any {
    def tail = cols - k
    mut out = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def src = data.get(i)
       mut row = []
       mut c = tail
-      while(c < cols){
+      while c < cols {
          row = row.append(src.get(c))
          c += 1
       }
       c = 0
-      while(c < tail){
+      while c < tail {
          row = row.append(src.get(c))
          c += 1
       }
@@ -1201,8 +1201,8 @@ fn _flatter_pow2_z(int bits) any {
 
 fn _flatter_shift_scale_value(any v, int shift) any {
    def z = Z(v)
-   if(shift == 0){ return z }
-   if(shift < 0){ return z * _flatter_pow2_z(0 - shift) }
+   if shift == 0 { return z }
+   if shift < 0 { return z * _flatter_pow2_z(0 - shift) }
    _flatter_round_div_signed(z, _flatter_pow2_z(shift))
 }
 
@@ -1211,11 +1211,11 @@ fn _flatter_scale_columns_by_shifts(any m, list shifts) any {
    def data = _flatter_matrix_data(a)
    mut out = []
    mut r = 0
-   while(r < data.len){
+   while r < data.len {
       def src = data.get(r)
       mut row = []
       mut c = 0
-      while(c < src.len){
+      while c < src.len {
          row = row.append(_flatter_shift_scale_value(src.get(c), int(shifts.get(c, 0))))
          c += 1
       }
@@ -1228,11 +1228,11 @@ fn _flatter_scale_columns_by_shifts(any m, list shifts) any {
 fn _flatter_qary_uniform_column_shifts(any m, int split, int keep_bits) list {
    def q = _flatter_abs_z(matrix.mat_get(m, 0, 0))
    mut bits = int(ceil(_flatter_log2_abs(q)))
-   if(bits < 0){ bits = 0 }
+   if bits < 0 { bits = 0 }
    def shift = max(0, bits - keep_bits)
    mut out = []
    mut c = 0
-   while(c < _flatter_matrix_cols(m)){
+   while c < _flatter_matrix_cols(m) {
       out = out.append(c < split ? shift : 0)
       c += 1
    }
@@ -1242,11 +1242,11 @@ fn _flatter_qary_uniform_column_shifts(any m, int split, int keep_bits) list {
 fn _flatter_qary_residue_key(list data, int k, list terms) str {
    mut key = ""
    mut col = 0
-   while(col < k){
+   while col < k {
       def q = _flatter_abs_z(data.get(col).get(col))
       mut s = Z(0)
       mut t = 0
-      while(t < terms.len){
+      while t < terms.len {
          def term = terms.get(t)
          def row_idx = k + int(term.get(0))
          def sign = Z(term.get(1))
@@ -1254,7 +1254,7 @@ fn _flatter_qary_residue_key(list data, int k, list terms) str {
          t += 1
       }
       def r = _flatter_mod_pos(s, q)
-      if(col > 0){ key = key + "," }
+      if col > 0 { key = key + "," }
       key = key + bigint_to_str(r)
       col += 1
    }
@@ -1265,11 +1265,11 @@ fn _flatter_qary_complement_key(str key, list moduli) str {
    def parts = split(key, ",")
    mut out = ""
    mut i = 0
-   while(i < parts.len){
+   while i < parts.len {
       def q = Z(moduli.get(i))
       def r = Z(parts.get(i))
       def c = r == Z(0) ? Z(0) : q - r
-      if(i > 0){ out = out + "," }
+      if i > 0 { out = out + "," }
       out = out + bigint_to_str(c)
       i += 1
    }
@@ -1278,8 +1278,8 @@ fn _flatter_qary_complement_key(str key, list moduli) str {
 
 fn _flatter_seen_key_index(list keys, str key) int {
    mut i = 0
-   while(i < keys.len){
-      if(keys.get(i) == key){ return i }
+   while i < keys.len {
+      if keys.get(i) == key { return i }
       i += 1
    }
    -1
@@ -1288,10 +1288,10 @@ fn _flatter_seen_key_index(list keys, str key) int {
 fn _flatter_lower_triangular_residue_key(list data, int k, list terms) str {
    mut residue = []
    mut col = 0
-   while(col < k){
+   while col < k {
       mut s = Z(0)
       mut t = 0
-      while(t < terms.len){
+      while t < terms.len {
          def term = terms.get(t)
          def row_idx = k + int(term.get(0))
          def sign = Z(term.get(1))
@@ -1302,15 +1302,15 @@ fn _flatter_lower_triangular_residue_key(list data, int k, list terms) str {
       col += 1
    }
    col = k - 1
-   while(col >= 0){
+   while col >= 0 {
       def pivot_abs = _flatter_abs_z(data.get(col).get(col))
-      if(pivot_abs == Z(0)){ return "#singular" }
+      if pivot_abs == Z(0) { return "#singular" }
       def r = _flatter_mod_pos(Z(residue.get(col)), pivot_abs)
       def pivot = Z(data.get(col).get(col))
       def coeff = (Z(residue.get(col)) - r) / pivot
-      if(coeff != Z(0)){
+      if coeff != Z(0) {
          mut j = 0
-         while(j <= col){
+         while j <= col {
             residue[j] = Z(residue.get(j)) - coeff * Z(data.get(col).get(j))
             j += 1
          }
@@ -1320,8 +1320,8 @@ fn _flatter_lower_triangular_residue_key(list data, int k, list terms) str {
    }
    mut key = ""
    col = 0
-   while(col < k){
-      if(col > 0){ key = key + "," }
+   while col < k {
+      if col > 0 { key = key + "," }
       key = key + bigint_to_str(Z(residue.get(col)))
       col += 1
    }
@@ -1330,13 +1330,13 @@ fn _flatter_lower_triangular_residue_key(list data, int k, list terms) str {
 
 fn _flatter_lower_triangular_qary_find_relation(any m, int k) list {
    def local = _flatter_lower_triangular_qary_find_local_relation(m, k)
-   if(local.len > 0){ return local }
+   if local.len > 0 { return local }
    def data = _flatter_matrix_data(m)
    def rows = _flatter_matrix_rows(m)
    def tail = rows - k
    mut moduli = []
    mut c = 0
-   while(c < k){
+   while c < k {
       moduli = moduli.append(_flatter_abs_z(data.get(c).get(c)))
       c += 1
    }
@@ -1344,23 +1344,23 @@ fn _flatter_lower_triangular_qary_find_relation(any m, int k) list {
    mut seen_keys = []
    mut seen_terms = []
    mut a = 0
-   while(a < tail){
+   while a < tail {
       mut b = a + 1
-      while(b < tail){
+      while b < tail {
          mut sa_i = 0
-         while(sa_i < 2){
+         while sa_i < 2 {
             def sa = sa_i == 0 ? Z(-1) : Z(1)
             mut sb_i = 0
-            while(sb_i < 2){
+            while sb_i < 2 {
                def sb = sb_i == 0 ? Z(-1) : Z(1)
                def terms = [[a, sa], [b, sb]]
                def key = _flatter_lower_triangular_residue_key(data, k, terms)
-               if(key == zero_key){ return terms }
+               if key == zero_key { return terms }
                def want = _flatter_qary_complement_key(key, moduli)
                def want_idx = _flatter_seen_key_index(seen_keys, want)
                def other = want_idx >= 0 ? seen_terms.get(want_idx) : nil
-               if(other != nil && _flatter_terms_disjoint(terms, other)){ return terms + other }
-               if(_flatter_seen_key_index(seen_keys, key) < 0){
+               if other != nil && _flatter_terms_disjoint(terms, other) { return terms + other }
+               if _flatter_seen_key_index(seen_keys, key) < 0 {
                   seen_keys = seen_keys.append(key)
                   seen_terms = seen_terms.append(terms)
                }
@@ -1377,10 +1377,10 @@ fn _flatter_lower_triangular_qary_find_relation(any m, int k) list {
 
 fn _flatter_terms_disjoint(list a, list b) bool {
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       mut j = 0
-      while(j < b.len){
-         if(int(a.get(i).get(0)) == int(b.get(j).get(0))){ return false }
+      while j < b.len {
+         if int(a.get(i).get(0)) == int(b.get(j).get(0)) { return false }
          j += 1
       }
       i += 1
@@ -1402,7 +1402,7 @@ fn _flatter_qary_miss_report(str method, bool detected, int split, int rows, int
       "verification_skipped": !track_transform,
       "elapsed_ms": float(ticks() - t0) / 1000000.0
    }
-   if(detected){ out["split"] = split }
+   if detected { out["split"] = split }
    out
 }
 
@@ -1410,7 +1410,7 @@ fn _flatter_qary_success_report(str method, int split, int rows, int cols, list 
    def out_basis = matrix.Matrix(work)
    mut transform_matrix = nil
    mut transform_verified = false
-   if(track_transform){
+   if track_transform {
       transform_matrix = matrix.Matrix(transform)
       def verified_first = _flatter_same_row(_flatter_apply_transform_row(transform.get(0), basis), work.get(0))
       def verified_target = target == 0 ? true : _flatter_same_row(_flatter_apply_transform_row(transform.get(target), basis), work.get(target))
@@ -1441,7 +1441,7 @@ fn _flatter_qary_success_row_report(str method, int split, int rows, int cols, l
    def out_basis = matrix.Matrix(work)
    mut transform_matrix = nil
    mut transform_verified = false
-   if(track_transform){
+   if track_transform {
       transform_matrix = matrix.Matrix(transform)
       def verified_first = _flatter_same_row(_flatter_apply_transform_row(transform.get(0), basis), work.get(0))
       def verified_target = target == 0 ? true : _flatter_same_row(_flatter_apply_transform_row(transform.get(target), basis), work.get(target))
@@ -1474,20 +1474,20 @@ fn _flatter_qary_success_from_row_report(str method, int k, int rows, int cols, 
    mut transform = track_transform ? _flatter_identity_rows(rows) : nil
    def target = k + int(found.get("terms").get(0).get(0))
    work[target] = found.get("row")
-   if(track_transform){ transform[target] = found.get("transform_row") }
-   if(target != 0){
+   if track_transform { transform[target] = found.get("transform_row") }
+   if target != 0 {
       def tmp_row = work.get(0)
       work[0] = work.get(target)
       work[target] = tmp_row
-      if(track_transform){
+      if track_transform {
          def tmp_tr = transform.get(0)
          transform[0] = transform.get(target)
          transform[target] = tmp_tr
       }
    }
    mut out = _flatter_qary_success_row_report(method, k, rows, cols, found.get("terms"), basis, _flatter_matrix_data(basis), work, transform, target, t0, relation_kind, track_transform)
-   if(found.contains("trials")){ out["search_trials"] = found.get("trials", 0) }
-   if(found.contains("max_weight")){ out["search_max_weight"] = found.get("max_weight", 0) }
+   if found.contains("trials") { out["search_trials"] = found.get("trials", 0) }
+   if found.contains("max_weight") { out["search_max_weight"] = found.get("max_weight", 0) }
    out
 }
 
@@ -1495,7 +1495,7 @@ fn _flatter_lower_triangular_reduce_relation(list data, int k, int rows, int col
    mut rel_row = _flatter_zero_row(cols)
    mut rel_tr = _flatter_zero_row(rows)
    mut ti = 0
-   while(ti < terms.len){
+   while ti < terms.len {
       def term = terms.get(ti)
       def row_idx = k + int(term.get(0))
       def sign = Z(term.get(1))
@@ -1504,11 +1504,11 @@ fn _flatter_lower_triangular_reduce_relation(list data, int k, int rows, int col
       ti += 1
    }
    mut col = k - 1
-   while(col >= 0){
+   while col >= 0 {
       def pivot = Z(data.get(col).get(col))
-      if(pivot != Z(0)){
+      if pivot != Z(0) {
          def q = _flatter_round_div_signed(rel_row.get(col), pivot)
-         if(q != Z(0)){
+         if q != Z(0) {
             rel_row = _flatter_row_submul(rel_row, data.get(col), q)
             rel_tr[col] = Z(rel_tr.get(col)) - q
          }
@@ -1529,19 +1529,19 @@ fn _flatter_lower_triangular_qary_find_local_relation(any m, int k) list {
    def cols = _flatter_matrix_cols(m)
    def tail = rows - k
    mut a = 0
-   while(a + 3 < tail){
+   while a + 3 < tail {
       def four = [[a, 1], [a + 1, -1], [a + 2, -1], [a + 3, 1]]
-      if(_flatter_lower_triangular_qary_terms_short(data, k, rows, cols, four)){ return four }
+      if _flatter_lower_triangular_qary_terms_short(data, k, rows, cols, four) { return four }
       def four_neg = [[a, -1], [a + 1, 1], [a + 2, 1], [a + 3, -1]]
-      if(_flatter_lower_triangular_qary_terms_short(data, k, rows, cols, four_neg)){ return four_neg }
+      if _flatter_lower_triangular_qary_terms_short(data, k, rows, cols, four_neg) { return four_neg }
       a += 1
    }
    a = 0
-   while(a + 1 < tail){
+   while a + 1 < tail {
       def diff = [[a, 1], [a + 1, -1]]
-      if(_flatter_lower_triangular_qary_terms_short(data, k, rows, cols, diff)){ return diff }
+      if _flatter_lower_triangular_qary_terms_short(data, k, rows, cols, diff) { return diff }
       def sum = [[a, 1], [a + 1, 1]]
-      if(_flatter_lower_triangular_qary_terms_short(data, k, rows, cols, sum)){ return sum }
+      if _flatter_lower_triangular_qary_terms_short(data, k, rows, cols, sum) { return sum }
       a += 1
    }
    []
@@ -1557,14 +1557,14 @@ fn _flatter_lower_triangular_qary_find_near_relation(any m, int k) dict {
    mut best_tr = []
    mut best_norm = _flatter_dot_z(data.get(0), data.get(0))
    mut a = 0
-   while(a < tail){
+   while a < tail {
       mut sa_i = 0
-      while(sa_i < 2){
+      while sa_i < 2 {
          def sa = sa_i == 0 ? Z(-1) : Z(1)
          def single = [[a, sa]]
          def srep = _flatter_lower_triangular_reduce_relation(data, k, rows, cols, single)
          def sn = Z(srep.get("norm"))
-         if(sn < best_norm){
+         if sn < best_norm {
             best_norm = sn
             best_terms = single
             best_row = srep.get("row")
@@ -1573,17 +1573,17 @@ fn _flatter_lower_triangular_qary_find_near_relation(any m, int k) dict {
          sa_i += 1
       }
       mut b = a + 1
-      while(b < tail){
+      while b < tail {
          sa_i = 0
-         while(sa_i < 2){
+         while sa_i < 2 {
             def sa = sa_i == 0 ? Z(-1) : Z(1)
             mut sb_i = 0
-            while(sb_i < 2){
+            while sb_i < 2 {
                def sb = sb_i == 0 ? Z(-1) : Z(1)
                def terms = [[a, sa], [b, sb]]
                def rep = _flatter_lower_triangular_reduce_relation(data, k, rows, cols, terms)
                def n = Z(rep.get("norm"))
-               if(n < best_norm){
+               if n < best_norm {
                   best_norm = n
                   best_terms = terms
                   best_row = rep.get("row")
@@ -1610,12 +1610,12 @@ fn _flatter_lower_triangular_qary_search_relation(any m, int k, int trials=4096,
    mut best_tr = []
    mut best_norm = _flatter_dot_z(data.get(0), data.get(0))
    mut t = 0
-   while(t < max(1, trials)){
+   while t < max(1, trials) {
       mut terms = []
       mut seed = (t + 1) * 1103515245 + rows * 131071 + k * 8191
       def weight = 3 + (t % max(1, max_weight - 2))
       mut c = 0
-      while(c < weight){
+      while c < weight {
          seed = (seed * 1103515245 + 12345 + c * 97) % 2147483647
          def idx = seed % tail
          seed = (seed * 1103515245 + 12345 + idx * 31) % 2147483647
@@ -1625,7 +1625,7 @@ fn _flatter_lower_triangular_qary_search_relation(any m, int k, int trials=4096,
       }
       def rep = _flatter_lower_triangular_reduce_relation(data, k, rows, cols, terms)
       def n = Z(rep.get("norm"))
-      if(n < best_norm){
+      if n < best_norm {
          best_norm = n
          best_terms = terms
          best_row = rep.get("row")
@@ -1642,15 +1642,15 @@ fn _flatter_qary_pair_fingerprint(list data, int k, int a, int b, int sa, int sb
    mut h1, h2, want1, want2, col = 0, 0, 0, 0, 0
    def row_a = data.get(k + a)
    def row_b = data.get(k + b)
-   while(col < k){
+   while col < k {
       mut q = _flatter_small_i64(data.get(col).get(col))
-      if(q == 2147483647 || q == 0){ return [] }
-      if(q < 0){ q = -q }
+      if q == 2147483647 || q == 0 { return [] }
+      if q < 0 { q = -q }
       def av = _flatter_small_i64(row_a.get(col))
       def bv = _flatter_small_i64(row_b.get(col))
-      if(av == 2147483647 || bv == 2147483647){ return [] }
+      if av == 2147483647 || bv == 2147483647 { return [] }
       mut r = (sa * av + sb * bv) % q
-      if(r < 0){ r += q }
+      if r < 0 { r += q }
       def c = r == 0 ? 0 : q - r
       def w1 = ((col + 1) * 1000003 + 97) % mod1
       def w2 = ((col + 1) * 1000033 + 193) % mod2
@@ -1665,23 +1665,23 @@ fn _flatter_qary_pair_fingerprint(list data, int k, int a, int b, int sa, int sb
 
 fn _flatter_qary_terms_zero_int(list data, int k, list terms) bool {
    mut col = 0
-   while(col < k){
+   while col < k {
       mut q = _flatter_small_i64(data.get(col).get(col))
-      if(q == 2147483647 || q == 0){ return false }
-      if(q < 0){ q = -q }
+      if q == 2147483647 || q == 0 { return false }
+      if q < 0 { q = -q }
       mut s = 0
       mut t = 0
-      while(t < terms.len){
+      while t < terms.len {
          def term = terms.get(t)
          def row_idx = k + int(term.get(0))
          def v = _flatter_small_i64(data.get(row_idx).get(col))
-         if(v == 2147483647){ return false }
+         if v == 2147483647 { return false }
          s += int(term.get(1)) * v
          t += 1
       }
       mut r = s % q
-      if(r < 0){ r += q }
-      if(r != 0){ return false }
+      if r < 0 { r += q }
+      if r != 0 { return false }
       col += 1
    }
    true
@@ -1692,19 +1692,19 @@ fn _flatter_qary_find_local_relation(any m, int k) list {
    def rows = _flatter_matrix_rows(m)
    def tail = rows - k
    mut a = 0
-   while(a + 3 < tail){
+   while a + 3 < tail {
       def four = [[a, 1], [a + 1, -1], [a + 2, -1], [a + 3, 1]]
-      if(_flatter_qary_terms_zero_int(data, k, four)){ return four }
+      if _flatter_qary_terms_zero_int(data, k, four) { return four }
       def four_neg = [[a, -1], [a + 1, 1], [a + 2, 1], [a + 3, -1]]
-      if(_flatter_qary_terms_zero_int(data, k, four_neg)){ return four_neg }
+      if _flatter_qary_terms_zero_int(data, k, four_neg) { return four_neg }
       a += 1
    }
    a = 0
-   while(a + 1 < tail){
+   while a + 1 < tail {
       def diff = [[a, 1], [a + 1, -1]]
-      if(_flatter_qary_terms_zero_int(data, k, diff)){ return diff }
+      if _flatter_qary_terms_zero_int(data, k, diff) { return diff }
       def sum = [[a, 1], [a + 1, 1]]
-      if(_flatter_qary_terms_zero_int(data, k, sum)){ return sum }
+      if _flatter_qary_terms_zero_int(data, k, sum) { return sum }
       a += 1
    }
    []
@@ -1712,32 +1712,32 @@ fn _flatter_qary_find_local_relation(any m, int k) list {
 
 fn _flatter_qary_find_relation_fast(any m, int k) list {
    def local = _flatter_qary_find_local_relation(m, k)
-   if(local.len > 0){ return local }
+   if local.len > 0 { return local }
    def data = _flatter_matrix_data(m)
    def rows = _flatter_matrix_rows(m)
    def tail = rows - k
    mut seen = dict(0)
    mut a = 0
-   while(a < tail){
+   while a < tail {
       mut b = a + 1
-      while(b < tail){
+      while b < tail {
          mut sa_i = 0
-         while(sa_i < 2){
+         while sa_i < 2 {
             def sa = sa_i == 0 ? -1 : 1
             mut sb_i = 0
-            while(sb_i < 2){
+            while sb_i < 2 {
                def sb = sb_i == 0 ? -1 : 1
                def fp = _flatter_qary_pair_fingerprint(data, k, a, b, sa, sb)
-               if(fp.len == 0){ return [] }
+               if fp.len == 0 { return [] }
                def terms = [[a, sa], [b, sb]]
-               if(_flatter_qary_terms_zero_int(data, k, terms)){ return terms }
+               if _flatter_qary_terms_zero_int(data, k, terms) { return terms }
                def bucket = seen.get(fp.get(1), [])
                mut bi = 0
-               while(bi < bucket.len){
+               while bi < bucket.len {
                   def other = bucket.get(bi)
-                  if(_flatter_terms_disjoint(terms, other)){
+                  if _flatter_terms_disjoint(terms, other) {
                      def joined = terms + other
-                     if(_flatter_qary_terms_zero_int(data, k, joined)){ return joined }
+                     if _flatter_qary_terms_zero_int(data, k, joined) { return joined }
                   }
                   bi += 1
                }
@@ -1756,13 +1756,13 @@ fn _flatter_qary_find_relation_fast(any m, int k) list {
 
 fn _flatter_qary_find_relation(any m, int k) list {
    def fast = _flatter_qary_find_relation_fast(m, k)
-   if(fast.len > 0){ return fast }
+   if fast.len > 0 { return fast }
    def data = _flatter_matrix_data(m)
    def rows = _flatter_matrix_rows(m)
    def tail = rows - k
    mut moduli = []
    mut c = 0
-   while(c < k){
+   while c < k {
       moduli = moduli.append(_flatter_abs_z(data.get(c).get(c)))
       c += 1
    }
@@ -1770,23 +1770,23 @@ fn _flatter_qary_find_relation(any m, int k) list {
    mut seen_keys = []
    mut seen_terms = []
    mut a = 0
-   while(a < tail){
+   while a < tail {
       mut b = a + 1
-      while(b < tail){
+      while b < tail {
          mut sa_i = 0
-         while(sa_i < 2){
+         while sa_i < 2 {
             def sa = sa_i == 0 ? Z(-1) : Z(1)
             mut sb_i = 0
-            while(sb_i < 2){
+            while sb_i < 2 {
                def sb = sb_i == 0 ? Z(-1) : Z(1)
                def terms = [[a, sa], [b, sb]]
                def key = _flatter_qary_residue_key(data, k, terms)
-               if(key == zero_key){ return terms }
+               if key == zero_key { return terms }
                def want = _flatter_qary_complement_key(key, moduli)
                def want_idx = _flatter_seen_key_index(seen_keys, want)
                def other = want_idx >= 0 ? seen_terms.get(want_idx) : nil
-               if(other != nil && _flatter_terms_disjoint(terms, other)){ return terms + other }
-               if(_flatter_seen_key_index(seen_keys, key) < 0){
+               if other != nil && _flatter_terms_disjoint(terms, other) { return terms + other }
+               if _flatter_seen_key_index(seen_keys, key) < 0 {
                   seen_keys = seen_keys.append(key)
                   seen_terms = seen_terms.append(terms)
                }
@@ -1807,19 +1807,19 @@ fn _flatter_qary_relation_prepass_report(any basis, str method, bool lower, bool
    def rows = _flatter_matrix_rows(a)
    def cols = _flatter_matrix_cols(a)
    def k = lower ? _flatter_lower_triangular_qary_split(a) : _flatter_qary_split(a)
-   if(k < 0){
+   if k < 0 {
       return _flatter_qary_miss_report(method, false, k, rows, cols, a, t0, track_transform)
    }
    def terms = lower ? _flatter_lower_triangular_qary_find_relation(a, k) : _flatter_qary_find_relation(a, k)
-   if(terms.len == 0){
-      if(lower){
+   if terms.len == 0 {
+      if lower {
          def near = _flatter_lower_triangular_qary_find_near_relation(a, k)
-         if(near.get("found", false)){
+         if near.get("found", false) {
             return _flatter_qary_success_from_row_report(method, k, rows, cols, a, near, t0, "near", track_transform)
          }
-         if(rows >= 96){
+         if rows >= 96 {
             def searched = _flatter_lower_triangular_qary_search_relation(a, k, 4096, 14)
-            if(searched.get("found", false)){
+            if searched.get("found", false) {
                return _flatter_qary_success_from_row_report(method, k, rows, cols, a, searched, t0, "deterministic-search", track_transform)
             }
          }
@@ -1832,41 +1832,41 @@ fn _flatter_qary_relation_prepass_report(any basis, str method, bool lower, bool
    mut rel_row = _flatter_zero_row(cols)
    mut rel_tr = track_transform ? _flatter_zero_row(rows) : []
    mut ti = 0
-   while(ti < terms.len){
+   while ti < terms.len {
       def term = terms.get(ti)
       def row_idx = k + int(term.get(0))
       def sign = Z(term.get(1))
       rel_row = _flatter_row_addmul(rel_row, data.get(row_idx), sign)
-      if(track_transform){ rel_tr = _flatter_row_addmul(rel_tr, transform.get(row_idx), sign) }
+      if track_transform { rel_tr = _flatter_row_addmul(rel_tr, transform.get(row_idx), sign) }
       ti += 1
    }
    mut exact = true
    mut col = lower ? k - 1 : 0
-   while(lower ? col >= 0 : col < k){
+   while lower ? col >= 0 : col < k {
       def pivot = Z(data.get(col).get(col))
       def v = Z(rel_row.get(col))
-      if(pivot == Z(0) || v % pivot != Z(0)){
+      if pivot == Z(0) || v % pivot != Z(0) {
          exact = false
       } else {
          def coeff = v / pivot
-         if(coeff != Z(0)){
+         if coeff != Z(0) {
             rel_row = _flatter_row_submul(rel_row, data.get(col), coeff)
-            if(track_transform){ rel_tr = _flatter_row_submul(rel_tr, transform.get(col), coeff) }
+            if track_transform { rel_tr = _flatter_row_submul(rel_tr, transform.get(col), coeff) }
          }
       }
       col += lower ? -1 : 1
    }
-   if(!exact){
+   if !exact {
       return _flatter_qary_miss_report(method, true, k, rows, cols, a, t0, track_transform)
    }
    def target = k + int(terms.get(0).get(0))
    work[target] = rel_row
-   if(track_transform){ transform[target] = rel_tr }
-   if(target != 0){
+   if track_transform { transform[target] = rel_tr }
+   if target != 0 {
       def tmp_row = work.get(0)
       work[0] = work.get(target)
       work[target] = tmp_row
-      if(track_transform){
+      if track_transform {
          def tmp_tr = transform.get(0)
          transform[0] = transform.get(target)
          transform[target] = tmp_tr
@@ -1878,25 +1878,25 @@ fn _flatter_qary_relation_prepass_report(any basis, str method, bool lower, bool
 fn _flatter_ntru2_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
-   if(rows != cols || rows < 4 || rows % 2 != 0){ return -1 }
+   if rows != cols || rows < 4 || rows % 2 != 0 { return -1 }
    def k = rows / 2
    mut i = 0
-   while(i < k){
+   while i < k {
       def pivot = _flatter_abs_z(matrix.mat_get(m, i, i))
-      if(pivot <= Z(1)){ return -1 }
+      if pivot <= Z(1) { return -1 }
       mut j = 0
-      while(j < cols){
-         if(j != i && !_flatter_is_zero_scalar(matrix.mat_get(m, i, j))){ return -1 }
+      while j < cols {
+         if j != i && !_flatter_is_zero_scalar(matrix.mat_get(m, i, j)) { return -1 }
          j += 1
       }
       i += 1
    }
    i = 0
-   while(i < k){
+   while i < k {
       mut j = 0
-      while(j < k){
+      while j < k {
          def want = i == j ? Z(1) : Z(0)
-         if(Z(matrix.mat_get(m, k + i, k + j)) != want){ return -1 }
+         if Z(matrix.mat_get(m, k + i, k + j)) != want { return -1 }
          j += 1
       }
       i += 1
@@ -1910,7 +1910,7 @@ fn _flatter_ntru2_sum_relation_prepass_report(any basis, bool track_transform=tr
    def rows = _flatter_matrix_rows(a)
    def cols = _flatter_matrix_cols(a)
    def k = _flatter_ntru2_split(a)
-   if(k < 0){
+   if k < 0 {
       return _flatter_qary_miss_report("ntru2-sum-relation-prepass", false, k, rows, cols, a, t0, track_transform)
    }
    def data = _flatter_matrix_data(a)
@@ -1918,27 +1918,27 @@ fn _flatter_ntru2_sum_relation_prepass_report(any basis, bool track_transform=tr
    mut rel_tr = track_transform ? _flatter_zero_row(rows) : []
    mut terms = []
    mut col = 0
-   while(col < k){
+   while col < k {
       def pivot = Z(data.get(col).get(col))
-      if(pivot == Z(0)){
+      if pivot == Z(0) {
          return _flatter_qary_miss_report("ntru2-sum-relation-prepass", true, k, rows, cols, a, t0, track_transform)
       }
       mut s = Z(0)
       mut i = 0
-      while(i < k){
+      while i < k {
          s = s + Z(data.get(k + i).get(col))
          i += 1
       }
-      if(s % pivot != Z(0)){
+      if s % pivot != Z(0) {
          return _flatter_qary_miss_report("ntru2-sum-relation-prepass", true, k, rows, cols, a, t0, track_transform)
       }
-      if(track_transform){ rel_tr[col] = s / pivot }
+      if track_transform { rel_tr[col] = s / pivot }
       col += 1
    }
    mut i = 0
-   while(i < k){
+   while i < k {
       rel_row[k + i] = Z(-1)
-      if(track_transform){ rel_tr[k + i] = Z(-1) }
+      if track_transform { rel_tr[k + i] = Z(-1) }
       terms = terms.append([i, Z(-1)])
       i += 1
    }
@@ -1946,12 +1946,12 @@ fn _flatter_ntru2_sum_relation_prepass_report(any basis, bool track_transform=tr
    mut transform = track_transform ? _flatter_identity_rows(rows) : nil
    def target = k
    work[target] = rel_row
-   if(track_transform){ transform[target] = rel_tr }
-   if(target != 0){
+   if track_transform { transform[target] = rel_tr }
+   if target != 0 {
       def tmp_row = work.get(0)
       work[0] = work.get(target)
       work[target] = tmp_row
-      if(track_transform){
+      if track_transform {
          def tmp_tr = transform.get(0)
          transform[0] = transform.get(target)
          transform[target] = tmp_tr
@@ -1963,29 +1963,29 @@ fn _flatter_ntru2_sum_relation_prepass_report(any basis, bool track_transform=tr
 fn _flatter_ntru_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
-   if(rows != cols || rows < 4 || rows % 2 != 0){ return -1 }
+   if rows != cols || rows < 4 || rows % 2 != 0 { return -1 }
    def k = rows / 2
    mut i = 0
-   while(i < k){
+   while i < k {
       mut j = 0
-      while(j < k){
+      while j < k {
          def want = i == j ? Z(1) : Z(0)
-         if(Z(matrix.mat_get(m, i, j)) != want){ return -1 }
+         if Z(matrix.mat_get(m, i, j)) != want { return -1 }
          j += 1
       }
       i += 1
    }
    mut q = Z(0)
    i = 0
-   while(i < k){
+   while i < k {
       mut j = 0
-      while(j < k){
+      while j < k {
          def v = Z(matrix.mat_get(m, k + i, k + j))
-         if(i == j){
-            if(v <= Z(1)){ return -1 }
-            if(i == 0){ q = v } elif(v != q){ return -1 }
-         } elif(v != Z(0)){ return -1 }
-         if(Z(matrix.mat_get(m, k + i, j)) != Z(0)){ return -1 }
+         if i == j {
+            if v <= Z(1) { return -1 }
+            if i == 0 { q = v } elif v != q { return -1 }
+         } elif v != Z(0) { return -1 }
+         if Z(matrix.mat_get(m, k + i, j)) != Z(0) { return -1 }
          j += 1
       }
       i += 1
@@ -1999,7 +1999,7 @@ fn _flatter_ntru_sum_relation_prepass_report(any basis, bool track_transform=tru
    def rows = _flatter_matrix_rows(a)
    def cols = _flatter_matrix_cols(a)
    def k = _flatter_ntru_split(a)
-   if(k < 0){
+   if k < 0 {
       return _flatter_qary_miss_report("ntru-sum-relation-prepass", false, k, rows, cols, a, t0, track_transform)
    }
    def data = _flatter_matrix_data(a)
@@ -2008,25 +2008,25 @@ fn _flatter_ntru_sum_relation_prepass_report(any basis, bool track_transform=tru
    mut rel_tr = track_transform ? _flatter_zero_row(rows) : []
    mut terms = []
    mut i = 0
-   while(i < k){
+   while i < k {
       rel_row[i] = Z(1)
-      if(track_transform){ rel_tr[i] = Z(1) }
+      if track_transform { rel_tr[i] = Z(1) }
       i += 1
    }
    mut col = 0
-   while(col < k){
+   while col < k {
       mut s = Z(0)
       i = 0
-      while(i < k){
+      while i < k {
          s = s + Z(data.get(i).get(k + col))
          i += 1
       }
-      if(s % q != Z(0)){
+      if s % q != Z(0) {
          return _flatter_qary_miss_report("ntru-sum-relation-prepass", true, k, rows, cols, a, t0, track_transform)
       }
       def coeff = s / q
-      if(coeff != Z(0)){
-         if(track_transform){ rel_tr[k + col] = -coeff }
+      if coeff != Z(0) {
+         if track_transform { rel_tr[k + col] = -coeff }
          terms = terms.append([col, -coeff])
       }
       col += 1
@@ -2034,7 +2034,7 @@ fn _flatter_ntru_sum_relation_prepass_report(any basis, bool track_transform=tru
    mut work = _flatter_clone_rows(a)
    mut transform = track_transform ? _flatter_identity_rows(rows) : nil
    work[0] = rel_row
-   if(track_transform){ transform[0] = rel_tr }
+   if track_transform { transform[0] = rel_tr }
    _flatter_qary_success_row_report("ntru-sum-relation-prepass", k, rows, cols, terms, a, data, work, transform, 0, t0, "top-sum-minus-q-diagonal", track_transform)
 }
 
@@ -2071,18 +2071,18 @@ fn triangular_size_reduce_report(any basis, int passes=1) dict {
    def data_before = _flatter_matrix_data(a)
    def first_before = rows > 0 ? _flatter_dot_z(data_before.get(0), data_before.get(0)) : Z(0)
    def best_before = _flatter_best_norm_sq(a)
-   if(triangular){
+   if triangular {
       mut p = 0
-      while(p < max(1, passes)){
+      while p < max(1, passes) {
          mut changed = false
          mut i = 1
-         while(i < rows){
+         while i < rows {
             mut j = min(i, cols - 1) - 1
-            while(j >= 0){
+            while j >= 0 {
                def pivot = Z(work.get(j).get(j))
-               if(pivot != Z(0)){
+               if pivot != Z(0) {
                   def coeff = _flatter_round_div_signed(Z(work.get(i).get(j)), pivot)
-                  if(coeff != Z(0)){
+                  if coeff != Z(0) {
                      work[i] = _flatter_row_submul_prefix(work.get(i), work.get(j), coeff, j)
                      transform[i] = _flatter_row_submul(transform.get(i), transform.get(j), coeff)
                      ops = ops.append({"pass": p + 1, "row": i, "against": j, "coeff": coeff})
@@ -2093,7 +2093,7 @@ fn triangular_size_reduce_report(any basis, int passes=1) dict {
             }
             i += 1
          }
-         if(!changed){ p = passes } else { p += 1 }
+         if !changed { p = passes } else { p += 1 }
       }
    }
    def out_basis = matrix.Matrix(work)
@@ -2132,16 +2132,16 @@ fn _flatter_triangular_violation_report(any basis) dict {
    mut violations = 0
    mut max_scaled_excess = Z(0)
    mut i = 1
-   while(i < rows){
+   while i < rows {
       mut j = 0
-      while(j < i && j < cols){
+      while j < i && j < cols {
          def pivot = _flatter_abs_z(data.get(j).get(j))
-         if(pivot != Z(0)){
+         if pivot != Z(0) {
             def scaled = _flatter_abs_z(data.get(i).get(j)) * Z(2)
-            if(scaled > pivot){
+            if scaled > pivot {
                violations += 1
                def excess = scaled - pivot
-               if(excess > max_scaled_excess){ max_scaled_excess = excess }
+               if excess > max_scaled_excess { max_scaled_excess = excess }
             }
          }
          j += 1
@@ -2181,7 +2181,7 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
    def first_before = rows > 0 ? _flatter_dot_z(data_before.get(0), data_before.get(0)) : Z(0)
    def best_before = collect_quality ? _flatter_best_norm_sq(a) : Z(-1)
    def before = collect_quality ? _flatter_triangular_violation_report(a) : {"violations": -1, "max_scaled_excess": Z(-1)}
-   if(triangular && before.get("violations", 0) == 0){
+   if triangular && before.get("violations", 0) == 0 {
       return {
          "method": "blocked-triangular-size-reduction",
          "rows": rows,
@@ -2222,25 +2222,25 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
    mut work = cloned.get("rows")
    mut row_bounds = _flatter_row_i64_abs_bounds(work, row_i64_safe)
    mut transform = track ? _flatter_identity_rows(rows) : []
-   if(triangular){
+   if triangular {
       mut p = 0
-      while(p < max(1, passes)){
+      while p < max(1, passes) {
          mut changed = false
          mut rb = 0
-         while(rb < blocks){
+         while rb < blocks {
             def r0 = rb * bs
             def r1 = min(rows, r0 + bs)
             mut cb = rb
-            while(cb >= 0){
+            while cb >= 0 {
                def c0 = cb * bs
                def c1 = min(rows, c0 + bs)
                mut tile_ops = []
                mut i = r0
-               while(i < r1){
+               while i < r1 {
                   mut row_i = work.get(i)
-                  if(row_bounds.get(i) == -1){
+                  if row_bounds.get(i) == -1 {
                      def compressed_i = _flatter_compress_row_i64_bound(row_i, row_i64_safe)
-                     if(compressed_i.get(1) >= 0){
+                     if compressed_i.get(1) >= 0 {
                         row_i = compressed_i.get(0)
                         row_bounds[i] = compressed_i.get(1)
                      } else {
@@ -2249,11 +2249,11 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
                   }
                   mut transform_i = track ? transform.get(i) : []
                   mut j = min(min(i, cols - 1), c1) - 1
-                  while(j >= c0){
+                  while j >= c0 {
                      mut row_j = work.get(j)
-                     if(row_bounds.get(j) == -1){
+                     if row_bounds.get(j) == -1 {
                         def compressed_j = _flatter_compress_row_i64_bound(row_j, row_i64_safe)
-                        if(compressed_j.get(1) >= 0){
+                        if compressed_j.get(1) >= 0 {
                            row_j = compressed_j.get(0)
                            row_bounds[j] = compressed_j.get(1)
                            work[j] = row_j
@@ -2263,22 +2263,22 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
                      }
                      def pivot = row_j.get(j)
                      def pivot_nonzero = is_int(pivot) ? int(pivot) != 0 : Z(pivot) != Z(0)
-                     if(pivot_nonzero){
+                     if pivot_nonzero {
                         def raw_num = row_i.get(j)
-                        if(is_int(raw_num) && is_int(pivot)){
+                        if is_int(raw_num) && is_int(pivot) {
                            def coeff_i = _flatter_round_div_signed_int(int(raw_num), int(pivot))
-                           if(coeff_i != 2147483647 && coeff_i != 0){
+                           if coeff_i != 2147483647 && coeff_i != 0 {
                               def abs_coeff_i = coeff_i < 0 ? -coeff_i : coeff_i
                               def row_bound_i = int(row_bounds.get(i))
                               def row_bound_j = int(row_bounds.get(j))
-                              if(abs_coeff_i <= 1000000000 && row_bound_i >= 0 && row_bound_j >= 0 && row_bound_i < row_i64_safe && row_bound_j <= (row_i64_safe - row_bound_i) / abs_coeff_i){
+                              if abs_coeff_i <= 1000000000 && row_bound_i >= 0 && row_bound_j >= 0 && row_bound_i < row_i64_safe && row_bound_j <= (row_i64_safe - row_bound_i) / abs_coeff_i {
                                  def fast = _flatter_row_submul_prefix_i64_bound_cached(row_i, row_j, coeff_i, j, row_bound_i)
                                  row_i = fast.get(0)
                                  row_bounds[i] = fast.get(1)
                                  fast_row_ops += 1
-                              } elif(row_bound_i >= 0 && row_bound_j >= 0){
+                              } elif row_bound_i >= 0 && row_bound_j >= 0 {
                                  def checked = _flatter_row_submul_prefix_i64_checked_cached(row_i, row_j, coeff_i, j, row_i64_safe, row_bound_i)
-                                 if(checked.get(1) >= 0){
+                                 if checked.get(1) >= 0 {
                                     row_i = checked.get(0)
                                     row_bounds[i] = checked.get(1)
                                     fast_row_ops += 1
@@ -2294,24 +2294,24 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
                                  generic_row_ops += 1
                                  generic_unbounded_row_ops += 1
                               }
-                              if(track){ transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff_i) }
+                              if track { transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff_i) }
                               op_count += 1
-                              if(record_ops){
+                              if record_ops {
                                  def op = {"pass": p + 1, "row_block": rb, "col_block": cb, "row": i, "against": j, "coeff": coeff_i}
                                  tile_ops = tile_ops.append(op)
                                  ops = ops.append(op)
                               }
                               changed = true
-                           } elif(coeff_i == 2147483647){
+                           } elif coeff_i == 2147483647 {
                               def coeff = _flatter_round_div_signed(raw_num, pivot)
-                              if(coeff != Z(0)){
+                              if coeff != Z(0) {
                                  row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff, j)
                                  row_bounds[i] = -1
                                  generic_row_ops += 1
                                  generic_big_coeff_ops += 1
-                                 if(track){ transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff) }
+                                 if track { transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff) }
                                  op_count += 1
-                                 if(record_ops){
+                                 if record_ops {
                                     def op = {"pass": p + 1, "row_block": rb, "col_block": cb, "row": i, "against": j, "coeff": coeff}
                                     tile_ops = tile_ops.append(op)
                                     ops = ops.append(op)
@@ -2321,14 +2321,14 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
                            }
                         } else {
                            def coeff = _flatter_round_div_signed(raw_num, pivot)
-                           if(coeff != Z(0)){
+                           if coeff != Z(0) {
                               row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff, j)
                               row_bounds[i] = -1
                               generic_row_ops += 1
                               generic_dynamic_ops += 1
-                              if(track){ transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff) }
+                              if track { transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff) }
                               op_count += 1
-                              if(record_ops){
+                              if record_ops {
                                  def op = {"pass": p + 1, "row_block": rb, "col_block": cb, "row": i, "against": j, "coeff": coeff}
                                  tile_ops = tile_ops.append(op)
                                  ops = ops.append(op)
@@ -2340,11 +2340,11 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
                      j -= 1
                   }
                   work[i] = row_i
-                  if(track){ transform[i] = transform_i }
+                  if track { transform[i] = transform_i }
                   i += 1
                }
                tile_count += 1
-               if(record_ops){
+               if record_ops {
                   tile_reports = tile_reports.append({
                         "pass": p + 1,
                         "row_block": rb,
@@ -2361,7 +2361,7 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
             }
             rb += 1
          }
-         if(!changed){ p = passes } else { p += 1 }
+         if !changed { p = passes } else { p += 1 }
       }
    }
    def out_basis = matrix.Matrix(work)
@@ -2415,20 +2415,20 @@ fn _flatter_tail_unit_split(any basis) int {
    def m = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
-   if(rows == 0 || rows != cols || !_flatter_is_lower_triangular(m)){ return -1 }
+   if rows == 0 || rows != cols || !_flatter_is_lower_triangular(m) { return -1 }
    def data = _flatter_matrix_data(m)
    mut split = rows
    mut i = rows - 1
-   while(i >= 0){
+   while i >= 0 {
       def d = _flatter_abs_z(data.get(i).get(i))
-      if(d == Z(1)){
+      if d == Z(1) {
          split = i
       } else {
          i = -1
       }
       i -= 1
    }
-   if(split <= 0 || split >= rows){ return -1 }
+   if split <= 0 || split >= rows { return -1 }
    split
 }
 
@@ -2438,9 +2438,9 @@ fn _flatter_best_norm_sq(any basis) bigint {
    def data = _flatter_matrix_data(m)
    mut best = Z(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def n = _flatter_norm_z(data.get(i))
-      if(i == 0 || n < best){ best = n }
+      if i == 0 || n < best { best = n }
       i += 1
    }
    best
@@ -2460,28 +2460,28 @@ fn triangular_bounded_lll_prepass_report(any basis, int chunk_budget=2048, int m
    def before_best = _flatter_best_norm_sq(work)
    mut final_best = before_best
    mut i = 0
-   while(i < max(1, max_chunks)){
+   while i < max(1, max_chunks) {
       def before_chunk = final_best
       def rep_method = track_transform ? "bounded-int-transform" : "bounded-int-no-transform-compact"
       def rep = lll_backend.lll_reduce_bounded_report(work, max(1, chunk_budget), delta, rep_method, eta)
       work = rep.get("basis")
-      if(total_transform != nil && rep.get("transform_tracked", false)){
+      if total_transform != nil && rep.get("transform_tracked", false) {
          total_transform = _flatter_matmul(rep.get("transform"), total_transform)
-      } elif(total_transform_identity && rep.get("transform_tracked", false)){
+      } elif total_transform_identity && rep.get("transform_tracked", false) {
          total_transform = rep.get("transform")
          total_transform_identity = false
-      } elif(!rep.get("transform_tracked", false)){
+      } elif !rep.get("transform_tracked", false) {
          total_transform = nil
          total_transform_identity = false
       }
       total_steps += rep.get("steps", 0)
       def sort = short_row_prepass_report(work, track_transform)
       def sort_ops = sort.get("op_count", 0)
-      if(sort_ops > 0){
+      if sort_ops > 0 {
          work = sort.get("basis")
-         if(total_transform != nil){
+         if total_transform != nil {
             total_transform = _flatter_matmul(sort.get("transform"), total_transform)
-         } elif(total_transform_identity){
+         } elif total_transform_identity {
             total_transform = sort.get("transform")
             total_transform_identity = false
          }
@@ -2533,29 +2533,29 @@ fn triangular_bounded_lll_prepass_report(any basis, int chunk_budget=2048, int m
 fn _flatter_tail_normal_form_target_row(list data, int split, int tail, int cols, int rows, int target) dict {
    mut coeffs = []
    mut i = 0
-   while(i < tail){
+   while i < tail {
       coeffs = coeffs.append(Z(0))
       i += 1
    }
    mut exact = true
    mut backsolve_ops = 0
    mut idx = tail - 1
-   while(idx >= 0){
+   while idx >= 0 {
       def coord = split + idx
       mut s = idx == target ? Z(1) : Z(0)
       mut r = idx + 1
-      while(r < tail){
+      while r < tail {
          s = s - Z(coeffs.get(r)) * Z(data.get(split + r).get(coord))
          r += 1
       }
       def raw_pivot = data.get(coord).get(coord)
       def pivot_i = _flatter_small_i64(raw_pivot)
-      if(pivot_i == 0 || (pivot_i == 2147483647 && Z(raw_pivot) == Z(0))){
+      if pivot_i == 0 || (pivot_i == 2147483647 && Z(raw_pivot) == Z(0)) {
          exact = false
          coeffs[idx] = Z(0)
-      } elif(pivot_i == 1){
+      } elif pivot_i == 1 {
          coeffs[idx] = s
-      } elif(pivot_i == -1){
+      } elif pivot_i == -1 {
          coeffs[idx] = -s
       } else {
          coeffs[idx] = s / Z(raw_pivot)
@@ -2567,21 +2567,21 @@ fn _flatter_tail_normal_form_target_row(list data, int split, int tail, int cols
    mut tr = _flatter_zero_row(rows)
    mut reduction_ops = 0
    idx = 0
-   while(idx < tail){
+   while idx < tail {
       def c = Z(coeffs.get(idx))
-      if(c != Z(0)){
+      if c != Z(0) {
          row = _flatter_row_addmul(row, data.get(split + idx), c)
          tr[split + idx] = Z(tr.get(split + idx)) + c
       }
       idx += 1
    }
    idx = split - 1
-   while(idx >= 0){
+   while idx >= 0 {
       def raw_pivot = data.get(idx).get(idx)
       def pivot_i = _flatter_small_i64(raw_pivot)
-      if(pivot_i != 0 && (pivot_i != 2147483647 || Z(raw_pivot) != Z(0))){
+      if pivot_i != 0 && (pivot_i != 2147483647 || Z(raw_pivot) != Z(0)) {
          def q = pivot_i != 2147483647 ? _flatter_round_div_signed(row.get(idx), pivot_i) : _flatter_round_div_signed(row.get(idx), Z(raw_pivot))
-         if(q != Z(0)){
+         if q != Z(0) {
             row = _flatter_row_submul(row, data.get(idx), q)
             tr[idx] = Z(tr.get(idx)) - q
             reduction_ops += 1
@@ -2594,27 +2594,27 @@ fn _flatter_tail_normal_form_target_row(list data, int split, int tail, int cols
 
 fn _flatter_tail_reduce_heads(list work, list transform, int rows, int split) dict {
    mut tail_reduce_ops, sort_swaps = 0, 0
-   if(rows <= 160){
+   if rows <= 160 {
       mut head = 0
       def head_limit = rows > 96 ? min(split, 1) : min(split, 8)
-      while(head < head_limit){
+      while head < head_limit {
          mut cur = work.get(head)
          mut cur_tr = transform.get(head)
          mut cur_norm = _flatter_dot_z(cur, cur)
          mut pass = 0
          mut changed = true
-         while(changed && pass < 1){
+         while changed && pass < 1 {
             changed = false
             mut tail_idx = rows - 1
-            while(tail_idx >= split){
+            while tail_idx >= split {
                def reducer = work.get(tail_idx)
                def reducer_norm = _flatter_dot_z(reducer, reducer)
-               if(reducer_norm != Z(0)){
+               if reducer_norm != Z(0) {
                   def q = _flatter_round_div_signed(_flatter_dot_z(cur, reducer), reducer_norm)
-                  if(q != Z(0)){
+                  if q != Z(0) {
                      def cand = _flatter_row_submul(cur, reducer, q)
                      def cand_norm = _flatter_dot_z(cand, cand)
-                     if(cand_norm < cur_norm){
+                     if cand_norm < cur_norm {
                         cur = cand
                         cur_tr = _flatter_row_submul(cur_tr, transform.get(tail_idx), q)
                         cur_norm = cand_norm
@@ -2631,18 +2631,18 @@ fn _flatter_tail_reduce_heads(list work, list transform, int rows, int split) di
          transform[head] = cur_tr
          head += 1
       }
-      if(rows <= 96){
+      if rows <= 96 {
          mut head_work = []
          mut head_transform = []
          head = 0
-         while(head < split){
+         while head < split {
             head_work = head_work.append(work.get(head))
             head_transform = head_transform.append(transform.get(head))
             head += 1
          }
          def sorted = _flatter_norm_sort_rows(head_work, head_transform, split, true)
          head = 0
-         while(head < split){
+         while head < split {
             work[head] = sorted.get("work").get(head)
             transform[head] = sorted.get("transform").get(head)
             head += 1
@@ -2661,7 +2661,7 @@ fn triangular_tail_normal_form_report(any basis) dict {
    def cols = _flatter_matrix_cols(a)
    def data = _flatter_matrix_data(a)
    def split = _flatter_tail_unit_split(a)
-   if(split < 0){
+   if split < 0 {
       return {
          "method": "triangular-tail-normal-form",
          "found": false,
@@ -2677,7 +2677,7 @@ fn triangular_tail_normal_form_report(any basis) dict {
    mut work = []
    mut transform = []
    mut i = 0
-   while(i < split){
+   while i < split {
       work = work.append(vec_clone(data.get(i)))
       mut tr = _flatter_zero_row(rows)
       tr[i] = Z(1)
@@ -2687,9 +2687,9 @@ fn triangular_tail_normal_form_report(any basis) dict {
    def tail = rows - split
    mut exact = true
    mut backsolve_ops, reduction_ops, target = 0, 0, 0
-   while(target < tail){
+   while target < tail {
       def built = _flatter_tail_normal_form_target_row(data, split, tail, cols, rows, target)
-      if(!built.get("exact", true)){ exact = false }
+      if !built.get("exact", true) { exact = false }
       backsolve_ops += built.get("backsolve_ops", 0)
       reduction_ops += built.get("reduction_ops", 0)
       work = work.append(built.get("row"))
@@ -2739,10 +2739,10 @@ fn triangular_tail_normal_form(any basis) any {
 fn _flatter_identity_rows(int n) list {
    mut out = []
    mut i = 0
-   while(i < n){
+   while i < n {
       mut row = []
       mut j = 0
-      while(j < n){
+      while j < n {
          row = row.append(i == j ? Z(1) : Z(0))
          j += 1
       }
@@ -2755,16 +2755,16 @@ fn _flatter_identity_rows(int n) list {
 fn _flatter_same_matrix(any a, any b) bool {
    def ar = _flatter_matrix_rows(a)
    def ac = _flatter_matrix_cols(a)
-   if(ar != _flatter_matrix_rows(b) || ac != _flatter_matrix_cols(b)){ return false }
+   if ar != _flatter_matrix_rows(b) || ac != _flatter_matrix_cols(b) { return false }
    def ad = _flatter_matrix_data(a)
    def bd = _flatter_matrix_data(b)
    mut i = 0
-   while(i < ar){
+   while i < ar {
       def ra = ad.get(i)
       def rb = bd.get(i)
       mut j = 0
-      while(j < ac){
-         if(ra.get(j) != rb.get(j)){ return false }
+      while j < ac {
+         if ra.get(j) != rb.get(j) { return false }
          j += 1
       }
       i += 1
@@ -2773,10 +2773,10 @@ fn _flatter_same_matrix(any a, any b) bool {
 }
 
 fn _flatter_same_row(list a, list b) bool {
-   if(a.len != b.len){ return false }
+   if a.len != b.len { return false }
    mut i = 0
-   while(i < a.len){
-      if(Z(a.get(i)) != Z(b.get(i))){ return false }
+   while i < a.len {
+      if Z(a.get(i)) != Z(b.get(i)) { return false }
       i += 1
    }
    true
@@ -2786,15 +2786,15 @@ fn _flatter_is_identity_matrix(any m) bool {
    def a = _flatter_reduce_matrix(m)
    def rows = _flatter_matrix_rows(a)
    def cols = _flatter_matrix_cols(a)
-   if(rows != cols){ return false }
+   if rows != cols { return false }
    def data = _flatter_matrix_data(a)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def row = data.get(i)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          def want = i == j ? 1 : 0
-         if(row.get(j) != want){ return false }
+         if row.get(j) != want { return false }
          j += 1
       }
       i += 1
@@ -2808,9 +2808,9 @@ fn _flatter_apply_transform_row(list tr, any basis) list {
    def data = _flatter_matrix_data(basis)
    mut out = _flatter_zero_row(cols)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def coeff = Z(tr.get(i))
-      if(coeff != Z(0)){ out = _flatter_row_addmul(out, data.get(i), coeff) }
+      if coeff != Z(0) { out = _flatter_row_addmul(out, data.get(i), coeff) }
       i += 1
    }
    out
@@ -2829,9 +2829,9 @@ fn _flatter_bf_norm_sq(any m) bigint {
    def data = _flatter_matrix_data(m)
    mut out = bf_zero()
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut j = 0
-      while(j < cols){
+      while j < cols {
          def x = _flatter_bf_from_scalar(data.get(i).get(j))
          out = bf_add(out, bf_mul(x, x))
          j += 1
@@ -2846,11 +2846,11 @@ fn _flatter_has_float_entry(any m) bool {
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def row = data.get(i)
       mut j = 0
-      while(j < cols){
-         if(is_float(row.get(j))){ return true }
+      while j < cols {
+         if is_float(row.get(j)) { return true }
          j += 1
       }
       i += 1
@@ -2863,7 +2863,7 @@ fn _flatter_total_norm_sq_z(any m) bigint {
    def data = _flatter_matrix_data(m)
    mut out = Z(0)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       out += _flatter_dot_z(data.get(i), data.get(i))
       i += 1
    }
@@ -2880,14 +2880,14 @@ fn _flatter_row_norm_profile_from_rows(list rows) dict {
    mut min_norm = nil
    mut max_norm = Z(0)
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def norm = _flatter_dot_z(rows.get(i), rows.get(i))
       profile = profile.append(norm)
-      if(norm == Z(0)){
+      if norm == Z(0) {
          zero_rows += 1
       } else {
-         if(min_norm == nil || norm < min_norm){ min_norm = norm }
-         if(norm > max_norm){ max_norm = norm }
+         if min_norm == nil || norm < min_norm { min_norm = norm }
+         if norm > max_norm { max_norm = norm }
       }
       i += 1
    }
@@ -2921,30 +2921,30 @@ fn relative_size_reduce_report(any basis, int passes=1) dict {
    mut norms = []
    mut op_count = 0
    mut ni = 0
-   while(ni < rows){
+   while ni < rows {
       def row = work.get(ni)
       norms = norms.append(_flatter_norm_z(row))
       ni += 1
    }
    mut ops = []
    mut p = 0
-   while(p < passes){
+   while p < passes {
       mut i = 1
-      while(i < rows){
+      while i < rows {
          mut j = i - 1
-         while(j >= 0){
+         while j >= 0 {
             def ri = work.get(i)
             def rj = work.get(j)
             def denom = norms.get(j)
-            if(denom != Z(0)){
+            if denom != Z(0) {
                def coeff = _flatter_round_div(_flatter_dot_z(ri, rj), denom)
-               if(coeff != Z(0)){
+               if coeff != Z(0) {
                   def new_row = _flatter_row_submul(ri, rj, coeff)
                   work[i] = new_row
                   norms[i] = _flatter_norm_z(new_row)
                   transform[i] = _flatter_row_submul(transform.get(i), transform.get(j), coeff)
                   op_count += 1
-                  if(record_ops){ ops = ops.append({"pass": p + 1, "row": i, "against": j, "coeff": coeff}) }
+                  if record_ops { ops = ops.append({"pass": p + 1, "row": i, "against": j, "coeff": coeff}) }
                }
             }
             j -= 1
@@ -2984,32 +2984,32 @@ fn _flatter_norm_sort_rows(list work_in, list transform_in, int rows, bool track
    mut norms = list(rows)
    __list_set_len(norms, rows)
    mut ni = 0
-   while(ni < rows){
+   while ni < rows {
       norms[ni] = _flatter_norm_z(work.get(ni))
       ni += 1
    }
    mut swaps = 0
    mut si = 0
-   while(si < rows){
+   while si < rows {
       mut best = si
       mut best_norm = norms.get(si)
       mut sj = si + 1
-      while(sj < rows){
+      while sj < rows {
          def nrm = norms.get(sj)
-         if(nrm < best_norm){
+         if nrm < best_norm {
             best = sj
             best_norm = nrm
          }
          sj += 1
       }
-      if(best != si){
+      if best != si {
          def tmp_row = work.get(si)
          work[si] = work.get(best)
          work[best] = tmp_row
          def tmp_norm = norms.get(si)
          norms[si] = norms.get(best)
          norms[best] = tmp_norm
-         if(track){
+         if track {
             def tmp_tr = transform.get(si)
             transform[si] = transform.get(best)
             transform[best] = tmp_tr
@@ -3027,30 +3027,30 @@ fn _flatter_lagrange_pair_window(list work_in, list transform_in, int rows, int 
    mut norms = list(rows)
    __list_set_len(norms, rows)
    mut ni0 = 0
-   while(ni0 < rows){
+   while ni0 < rows {
       norms[ni0] = _flatter_norm_z(work.get(ni0))
       ni0 += 1
    }
    mut pair_count, ops, swaps = 0, 0, 0
    mut changed = false
    mut i = 0
-   while(i + gap < rows){
+   while i + gap < rows {
       def j = i + gap
       pair_count += 1
       mut local_changed = true
       mut steps = 0
-      while(local_changed && steps < step_limit){
+      while local_changed && steps < step_limit {
          local_changed = false
          def ni = norms.get(i)
          def nj = norms.get(j)
-         if(ni != Z(0) && nj != Z(0) && nj < ni){
+         if ni != Z(0) && nj != Z(0) && nj < ni {
             def tmp_row = work.get(i)
             work[i] = work.get(j)
             work[j] = tmp_row
             def tmp_norm = norms.get(i)
             norms[i] = norms.get(j)
             norms[j] = tmp_norm
-            if(track){
+            if track {
                def tmp_tr = transform.get(i)
                transform[i] = transform.get(j)
                transform[j] = tmp_tr
@@ -3060,23 +3060,23 @@ fn _flatter_lagrange_pair_window(list work_in, list transform_in, int rows, int 
             local_changed = true
          }
          def base_norm = norms.get(i)
-         if(base_norm != Z(0)){
+         if base_norm != Z(0) {
             def coeff = _flatter_round_div(_flatter_dot_z(work.get(j), work.get(i)), base_norm)
-            if(coeff != Z(0)){
+            if coeff != Z(0) {
                def cur_norm = norms.get(j)
                def candidate = _flatter_row_submul(work.get(j), work.get(i), coeff)
                def candidate_norm = _flatter_norm_z(candidate)
-               if(candidate_norm < cur_norm){
+               if candidate_norm < cur_norm {
                   work[j] = candidate
                   norms[j] = candidate_norm
-                  if(track){ transform[j] = _flatter_row_submul(transform.get(j), transform.get(i), coeff) }
+                  if track { transform[j] = _flatter_row_submul(transform.get(j), transform.get(i), coeff) }
                   ops += 1
                   changed = true
                   local_changed = true
                }
             }
          }
-         if(local_changed){ steps += 1 }
+         if local_changed { steps += 1 }
       }
       i += 1
    }
@@ -3102,21 +3102,21 @@ fn lagrange_pair_reduce_report(any basis, int window=4, int rounds=2, int max_pa
    mut total_swaps = 0
    mut p = 0
    mut changed = true
-   while(p < pass_limit && changed){
+   while p < pass_limit && changed {
       changed = false
       mut pass_pairs = 0
       mut pass_ops = 0
       mut pass_swaps = 0
-      if(bool(sort_each_pass)){
+      if bool(sort_each_pass) {
          def sorted = _flatter_norm_sort_rows(work, transform, rows, track)
          work = sorted.get("work")
          transform = sorted.get("transform")
          pass_swaps += sorted.get("swaps", 0)
          total_swaps += sorted.get("swaps", 0)
-         if(sorted.get("changed", false)){ changed = true }
+         if sorted.get("changed", false) { changed = true }
       }
       mut gap = 1
-      while(gap <= w){
+      while gap <= w {
          def window_rep = _flatter_lagrange_pair_window(work, transform, rows, gap, step_limit, track)
          work = window_rep.get("work")
          transform = window_rep.get("transform")
@@ -3126,7 +3126,7 @@ fn lagrange_pair_reduce_report(any basis, int window=4, int rounds=2, int max_pa
          total_ops += window_rep.get("op_count", 0)
          pass_swaps += window_rep.get("swap_count", 0)
          total_swaps += window_rep.get("swap_count", 0)
-         if(window_rep.get("changed", false)){ changed = true }
+         if window_rep.get("changed", false) { changed = true }
          gap += 1
       }
       pass_reports = pass_reports.append({
@@ -3136,7 +3136,7 @@ fn lagrange_pair_reduce_report(any basis, int window=4, int rounds=2, int max_pa
             "op_count": pass_ops,
             "swap_count": pass_swaps
       })
-      if(changed){ p += 1 } else { p = pass_limit }
+      if changed { p += 1 } else { p = pass_limit }
    }
    def final_sorted = _flatter_norm_sort_rows(work, transform, rows, track)
    work = final_sorted.get("work")
@@ -3183,21 +3183,21 @@ fn _flatter_sparse_entries_raw(list rows) dict {
    mut nonzero = 0
    mut all_int = true
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows.get(i)
       mut entries = []
       mut j = 0
-      while(j < row.len){
+      while j < row.len {
          def v = row.get(j)
-         if(is_int(v)){
-            if(v != 0){
+         if is_int(v) {
+            if v != 0 {
                entries = entries.append([j, v])
                nonzero += 1
             }
          } else {
             def vi = _flatter_small_i64(v)
-            if(vi == 2147483647){ all_int = false }
-            if(vi != 0){
+            if vi == 2147483647 { all_int = false }
+            if vi != 0 {
                entries = entries.append([j, vi != 2147483647 ? vi : v])
                nonzero += 1
             }
@@ -3215,7 +3215,7 @@ fn _flatter_matmul_shape(any left, any right, str caller) list {
    def B = _flatter_reduce_matrix(right)
    def ac = _flatter_matrix_cols(A)
    def br = _flatter_matrix_rows(B)
-   if(ac != br){ panic(caller + ": incompatible shapes") }
+   if ac != br { panic(caller + ": incompatible shapes") }
    [A, B, _flatter_matrix_rows(A), ac, br, _flatter_matrix_cols(B)]
 }
 
@@ -3230,10 +3230,10 @@ fn _flatter_sparse_product_work_report(any left, any right) dict {
    def brows = bsp.get("rows")
    mut row_scaled_adds = 0
    mut i = 0
-   while(i < ar){
+   while i < ar {
       def erow = arows.get(i)
       mut e = 0
-      while(e < erow.len){
+      while e < erow.len {
          def k = int(erow.get(e).get(0))
          row_scaled_adds += brows.get(k).len
          e += 1
@@ -3251,17 +3251,17 @@ fn _flatter_sparse_product_work_report(any left, any right) dict {
 
 fn _strassen_predicted_scalar_multiplications(int n, int leaf_size) int {
    def leaf = max(1, leaf_size)
-   if(n <= leaf || n <= 1){ return n * n * n }
+   if n <= leaf || n <= 1 { return n * n * n }
    7 * _strassen_predicted_scalar_multiplications(n / 2, leaf)
 }
 
 fn _flatter_triangular_structural_count(str uplo, str transpose, int n) int {
    mut count = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       mut j = 0
-      while(j < n){
-         if(_flatter_triangular_structural_nonzero(uplo, transpose, i, j)){ count += 1 }
+      while j < n {
+         if _flatter_triangular_structural_nonzero(uplo, transpose, i, j) { count += 1 }
          j += 1
       }
       i += 1
@@ -3272,7 +3272,7 @@ fn _flatter_triangular_structural_count(str uplo, str transpose, int n) int {
 fn _flatter_zero_matrix_rows(int rows, int cols) list {
    mut out = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       out = out.append(_flatter_zero_row(cols))
       i += 1
    }
@@ -3282,10 +3282,10 @@ fn _flatter_zero_matrix_rows(int rows, int cols) list {
 fn _flatter_zero_matrix_rows_int(int rows, int cols) list {
    mut out = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(0)
          j += 1
       }
@@ -3311,19 +3311,19 @@ fn _flatter_matmul_sparse_report(any left, any right, str method="sparse-row-exa
    mut out_rows = int_fast ? _flatter_zero_matrix_rows_int(ar, bc) : _flatter_zero_matrix_rows(ar, bc)
    mut nonzero_products = 0
    mut row_scaled_adds = 0
-   if(int_fast){
+   if int_fast {
       mut i = 0
-      while(i < ar){
+      while i < ar {
          mut out_row = out_rows.get(i)
          def erow = arows.get(i)
          mut e = 0
-         while(e < erow.len){
+         while e < erow.len {
             def entry = erow.get(e)
             def k = int(entry.get(0))
             def av = entry.get(1)
             def brow = brows.get(k)
             mut b = 0
-            while(b < brow.len){
+            while b < brow.len {
                def bent = brow.get(b)
                def j = int(bent.get(0))
                out_row[j] = out_row.get(j) + av * bent.get(1)
@@ -3338,17 +3338,17 @@ fn _flatter_matmul_sparse_report(any left, any right, str method="sparse-row-exa
       }
    } else {
       mut i = 0
-      while(i < ar){
+      while i < ar {
          mut out_row = out_rows.get(i)
          def erow = arows.get(i)
          mut e = 0
-         while(e < erow.len){
+         while e < erow.len {
             def entry = erow.get(e)
             def k = int(entry.get(0))
             def av = Z(entry.get(1))
             def brow = brows.get(k)
             mut b = 0
-            while(b < brow.len){
+            while b < brow.len {
                def bent = brow.get(b)
                def j = int(bent.get(0))
                def bv = Z(bent.get(1))
@@ -3413,18 +3413,18 @@ fn lattice_matmul_report(any left, any right) dict {
    def br, bc = int(s.get(4)), int(s.get(5))
    def dense_work = ar * ac * bc
    def sparse_work = _flatter_sparse_product_work_report(A, B)
-   if(br == bc && (_flatter_is_lower_triangular(B) || _flatter_is_upper_triangular(B))){
+   if br == bc && (_flatter_is_lower_triangular(B) || _flatter_is_upper_triangular(B)) {
       def tri_kind = _flatter_is_lower_triangular(B) ? "lower" : "upper"
       def tri_work = ar * _flatter_triangular_structural_count(tri_kind, "none", br)
-      if(tri_work <= sparse_work.get("row_scaled_adds", dense_work)){
+      if tri_work <= sparse_work.get("row_scaled_adds", dense_work) {
          def trep = lattice_triangular_matmul_report(B, A, "right", tri_kind, "none", "nonunit", Z(1))
          return _flatter_matmul_tag_report(trep, "triangular", trep.get("method", "triangular-exact-lattice-matmul"), dense_work, sparse_work, 0, tri_work)
       }
    }
-   if(ar == ac && (_flatter_is_lower_triangular(A) || _flatter_is_upper_triangular(A))){
+   if ar == ac && (_flatter_is_lower_triangular(A) || _flatter_is_upper_triangular(A)) {
       def tri_kind = _flatter_is_lower_triangular(A) ? "lower" : "upper"
       def tri_work = bc * _flatter_triangular_structural_count(tri_kind, "none", ar)
-      if(tri_work <= sparse_work.get("row_scaled_adds", dense_work)){
+      if tri_work <= sparse_work.get("row_scaled_adds", dense_work) {
          def trep = lattice_triangular_matmul_report(A, B, "left", tri_kind, "none", "nonunit", Z(1))
          return _flatter_matmul_tag_report(trep, "triangular", trep.get("method", "triangular-exact-lattice-matmul"), dense_work, sparse_work, 0, tri_work)
       }
@@ -3433,12 +3433,12 @@ fn lattice_matmul_report(any left, any right) dict {
    def strassen_leaf = 4
    def strassen_muls = _strassen_predicted_scalar_multiplications(padded, strassen_leaf)
    def use_strassen = padded >= 8 && padded <= 64 && sparse_work.get("row_scaled_adds", 0) * 4 >= dense_work * 3 && strassen_muls < dense_work
-   if(use_strassen){
+   if use_strassen {
       def rep = lattice_matmul_strassen_report(A, B, strassen_leaf)
       return _flatter_matmul_tag_report(rep, "strassen", rep.get("method", "strassen-exact-lattice-matmul"), dense_work, sparse_work, strassen_muls)
    }
    def dense_enough_for_threads = sparse_work.get("row_scaled_adds", 0) * 4 >= dense_work * 3
-   if(padded > 64 && dense_enough_for_threads && ospar.parallel_should_threads(dense_work)){
+   if padded > 64 && dense_enough_for_threads && ospar.parallel_should_threads(dense_work) {
       def rep = lattice_matmul_threaded_report(A, B)
       return _flatter_matmul_tag_report(rep, "threaded-row-sharded", rep.get("method", "threaded-row-sharded-exact-lattice-matmul"), dense_work, sparse_work, strassen_muls)
    }
@@ -3452,8 +3452,8 @@ fn lattice_matmul(any left, any right) any {
 }
 
 fn _flatter_matmul(any left, any right) any {
-   if(_flatter_is_identity_matrix(left)){ return _flatter_reduce_matrix(right) }
-   if(_flatter_is_identity_matrix(right)){ return _flatter_reduce_matrix(left) }
+   if _flatter_is_identity_matrix(left) { return _flatter_reduce_matrix(right) }
+   if _flatter_is_identity_matrix(right) { return _flatter_reduce_matrix(left) }
    _flatter_matmul_sparse_report(left, right).get("matrix")
 }
 
@@ -3478,11 +3478,11 @@ fn lattice_matmul_blocked_report(any left, any right, int block_size=16) dict {
    mut out_rows = list(ar)
    __list_set_len(out_rows, ar)
    mut i = 0
-   while(i < ar){
+   while i < ar {
       mut row = list(bc)
       __list_set_len(row, bc)
       mut j = 0
-      while(j < bc){
+      while j < bc {
          row[j] = z0
          j += 1
       }
@@ -3493,30 +3493,30 @@ fn lattice_matmul_blocked_report(any left, any right, int block_size=16) dict {
    mut skipped_zero_products = 0
    mut block_count = 0
    mut ii = 0
-   while(ii < ar){
+   while ii < ar {
       mut kk = 0
-      while(kk < ac){
+      while kk < ac {
          mut jj = 0
-         while(jj < bc){
+         while jj < bc {
             def iend = min(ar, ii + bs)
             def kend = min(ac, kk + bs)
             def jend = min(bc, jj + bs)
             i = ii
-            if(i64_fast){
-               while(i < iend){
+            if i64_fast {
+               while i < iend {
                   mut row = out_rows.get(i)
                   def arow = work_ad.get(i)
                   mut k = kk
-                  while(k < kend){
+                  while k < kend {
                      def av = int(arow.get(k))
-                     if(av == 0){
+                     if av == 0 {
                         skipped_zero_products += jend - jj
                      } else {
                         def brow = work_bd.get(k)
                         mut j = jj
-                        while(j < jend){
+                        while j < jend {
                            def bv = int(brow.get(j))
-                           if(bv == 0){
+                           if bv == 0 {
                               skipped_zero_products += 1
                            } else {
                               row[j] = int(row.get(j)) + av * bv
@@ -3531,20 +3531,20 @@ fn lattice_matmul_blocked_report(any left, any right, int block_size=16) dict {
                   i += 1
                }
             } else {
-               while(i < iend){
+               while i < iend {
                   mut row = out_rows.get(i)
                   def arow = work_ad.get(i)
                   mut k = kk
-                  while(k < kend){
+                  while k < kend {
                      def av = bigint_fast ? arow.get(k) : Z(arow.get(k))
-                     if(av == z0){
+                     if av == z0 {
                         skipped_zero_products += jend - jj
                      } else {
                         def brow = work_bd.get(k)
                         mut j = jj
-                        while(j < jend){
+                        while j < jend {
                            def bv = bigint_fast ? brow.get(j) : Z(brow.get(j))
-                           if(bv == z0){
+                           if bv == z0 {
                               skipped_zero_products += 1
                            } else {
                               row[j] = row.get(j) + av * bv
@@ -3589,11 +3589,11 @@ fn lattice_matmul_blocked(any left, any right, int block_size=16) any {
 
 fn _flatter_matrix_data_all_bigint(list data) bool {
    mut i = 0
-   while(i < data.len){
+   while i < data.len {
       def row = data.get(i)
       mut j = 0
-      while(j < row.len){
-         if(!is_bigint(row.get(j))){ return false }
+      while j < row.len {
+         if !is_bigint(row.get(j)) { return false }
          j += 1
       }
       i += 1
@@ -3606,16 +3606,16 @@ fn _flatter_matrix_data_small_i64_report(list data) dict {
    __list_set_len(rows, data.len)
    mut max_abs = 0
    mut i = 0
-   while(i < data.len){
+   while i < data.len {
       def src = data.get(i)
       mut row = list(src.len)
       __list_set_len(row, src.len)
       mut j = 0
-      while(j < src.len){
+      while j < src.len {
          def v = _flatter_small_i64(src.get(j))
-         if(v == 2147483647){ return {"ok": false, "rows": [], "max_abs": max_abs} }
+         if v == 2147483647 { return {"ok": false, "rows": [], "max_abs": max_abs} }
          def av = v < 0 ? -v : v
-         if(av > max_abs){ max_abs = av }
+         if av > max_abs { max_abs = av }
          row[j] = v
          j += 1
       }
@@ -3631,22 +3631,22 @@ fn _flatter_matmul_row_from_data(list ad, list bd, int i, int ac, int bc) dict {
    mut nonzero = 0
    mut skipped = 0
    mut j = 0
-   while(j < bc){
+   while j < bc {
       row[j] = Z(0)
       j += 1
    }
    def arow = ad.get(i)
    mut k = 0
-   while(k < ac){
+   while k < ac {
       def av = Z(arow.get(k))
-      if(av == Z(0)){
+      if av == Z(0) {
          skipped += bc
       } else {
          def brow = bd.get(k)
          j = 0
-         while(j < bc){
+         while j < bc {
             def bv = Z(brow.get(j))
-            if(bv == Z(0)){
+            if bv == Z(0) {
                skipped += 1
             } else {
                row[j] = Z(row.get(j)) + av * bv
@@ -3666,22 +3666,22 @@ fn _flatter_matmul_row_from_i64_data(list ad, list bd, int i, int ac, int bc) di
    mut nonzero = 0
    mut skipped = 0
    mut j = 0
-   while(j < bc){
+   while j < bc {
       row[j] = 0
       j += 1
    }
    def arow = ad.get(i)
    mut k = 0
-   while(k < ac){
+   while k < ac {
       def av = int(arow.get(k))
-      if(av == 0){
+      if av == 0 {
          skipped += bc
       } else {
          def brow = bd.get(k)
          j = 0
-         while(j < bc){
+         while j < bc {
             def bv = int(brow.get(j))
-            if(bv == 0){
+            if bv == 0 {
                skipped += 1
             } else {
                row[j] = int(row.get(j)) + av * bv
@@ -3702,22 +3702,22 @@ fn _flatter_matmul_row_from_bigint_data(list ad, list bd, int i, int ac, int bc)
    mut skipped = 0
    def z0 = Z(0)
    mut j = 0
-   while(j < bc){
+   while j < bc {
       row[j] = z0
       j += 1
    }
    def arow = ad.get(i)
    mut k = 0
-   while(k < ac){
+   while k < ac {
       def av = arow.get(k)
-      if(av == z0){
+      if av == z0 {
          skipped += bc
       } else {
          def brow = bd.get(k)
          j = 0
-         while(j < bc){
+         while j < bc {
             def bv = brow.get(j)
-            if(bv == z0){
+            if bv == z0 {
                skipped += 1
             } else {
                row[j] = row.get(j) + av * bv
@@ -3745,7 +3745,7 @@ fn _flatter_matmul_chunk_worker(list args) dict {
    mut nonzero = 0
    mut skipped = 0
    mut i = start
-   while(i < stop){
+   while i < stop {
       def rr = i64_fast ? _flatter_matmul_row_from_i64_data(ad, bd, i, ac, bc) : (bigint_fast ? _flatter_matmul_row_from_bigint_data(ad, bd, i, ac, bc) : _flatter_matmul_row_from_data(ad, bd, i, ac, bc))
       rows[i - start] = rr.get("row")
       nonzero += rr.get("nonzero_products", 0)
@@ -3776,7 +3776,7 @@ fn lattice_matmul_threaded_report(any left, any right, int max_threads=0) dict {
    def ranges = ospar.chunk_ranges(ar, workers)
    mut handles = []
    mut i = 0
-   while(i < ranges.len){
+   while i < ranges.len {
       def r = ranges.get(i)
       handles = handles.append(ospar.future(_flatter_matmul_chunk_worker, [work_ad, work_bd, r.get(0), r.get(1), ac, bc, bigint_fast, i64_fast]))
       i += 1
@@ -3787,7 +3787,7 @@ fn lattice_matmul_threaded_report(any left, any right, int max_threads=0) dict {
    mut skipped = 0
    mut chunk_reports = []
    i = 0
-   while(i < handles.len){
+   while i < handles.len {
       def rep = ospar.future_wait(handles.get(i))
       chunk_reports = chunk_reports.append({
             "start": rep.get("start", 0),
@@ -3797,7 +3797,7 @@ fn lattice_matmul_threaded_report(any left, any right, int max_threads=0) dict {
       })
       def rows = rep.get("rows")
       mut j = 0
-      while(j < rows.len){
+      while j < rows.len {
          out_rows[int(rep.get("start", 0)) + j] = rows.get(j)
          j += 1
       }
@@ -3833,16 +3833,16 @@ fn _flatter_triangular_structural_nonzero(str uplo, str transpose, int k, int j)
    def lower = uplo == "lower" || uplo == "L"
    def upper = uplo == "upper" || uplo == "U"
    def trans = transpose == "transpose" || transpose == "T"
-   if(lower && !trans){ return k >= j }
-   if(lower && trans){ return j >= k }
-   if(upper && !trans){ return k <= j }
-   if(upper && trans){ return j <= k }
+   if lower && !trans { return k >= j }
+   if lower && trans { return j >= k }
+   if upper && !trans { return k <= j }
+   if upper && trans { return j <= k }
    true
 }
 
 fn _flatter_triangular_entry(any tri, str uplo, str transpose, str diag, int k, int j) bigint {
-   if(!_flatter_triangular_structural_nonzero(uplo, transpose, k, j)){ return Z(0) }
-   if(k == j && (diag == "unit" || diag == "U")){ return Z(1) }
+   if !_flatter_triangular_structural_nonzero(uplo, transpose, k, j) { return Z(0) }
+   if k == j && (diag == "unit" || diag == "U") { return Z(1) }
    def trans = transpose == "transpose" || transpose == "T"
    trans ? Z(matrix.mat_get(tri, j, k)) : Z(matrix.mat_get(tri, k, j))
 }
@@ -3853,14 +3853,14 @@ fn lattice_triangular_matmul_report(any triangular, any dense, str side="right",
    def A = _flatter_reduce_matrix(triangular)
    def B = _flatter_reduce_matrix(dense)
    def n = _flatter_matrix_rows(A)
-   if(n != _flatter_matrix_cols(A)){ panic("lattice_triangular_matmul_report: triangular matrix must be square") }
+   if n != _flatter_matrix_cols(A) { panic("lattice_triangular_matmul_report: triangular matrix must be square") }
    def right_side = side == "right" || side == "R"
    def left_side = side == "left" || side == "L"
-   if(!(right_side || left_side)){ panic("lattice_triangular_matmul_report: side must be right/R or left/L") }
+   if !(right_side || left_side) { panic("lattice_triangular_matmul_report: side must be right/R or left/L") }
    def rows = _flatter_matrix_rows(B)
    def cols = _flatter_matrix_cols(B)
-   if(right_side && cols != n){ panic("lattice_triangular_matmul_report: dense column count must match triangular size for right-side multiply") }
-   if(left_side && rows != n){ panic("lattice_triangular_matmul_report: dense row count must match triangular size for left-side multiply") }
+   if right_side && cols != n { panic("lattice_triangular_matmul_report: dense column count must match triangular size for right-side multiply") }
+   if left_side && rows != n { panic("lattice_triangular_matmul_report: dense row count must match triangular size for left-side multiply") }
    def bd = _flatter_matrix_data(B)
    def scale = Z(alpha)
    mut out_rows = list(right_side ? rows : n)
@@ -3868,21 +3868,21 @@ fn lattice_triangular_matmul_report(any triangular, any dense, str side="right",
    mut structural_products = 0
    mut nonzero_products = 0
    mut zero_value_skips = 0
-   if(right_side){
+   if right_side {
       mut i = 0
-      while(i < rows){
+      while i < rows {
          mut row = list(n)
          __list_set_len(row, n)
          mut j = 0
-         while(j < n){
+         while j < n {
             mut s = Z(0)
             mut k = 0
-            while(k < n){
-               if(_flatter_triangular_structural_nonzero(uplo, transpose, k, j)){
+            while k < n {
+               if _flatter_triangular_structural_nonzero(uplo, transpose, k, j) {
                   structural_products += 1
                   def av = _flatter_triangular_entry(A, uplo, transpose, diag, k, j)
                   def bv = Z(bd.get(i).get(k))
-                  if(av == Z(0) || bv == Z(0)){
+                  if av == Z(0) || bv == Z(0) {
                      zero_value_skips += 1
                   } else {
                      s = s + bv * av * scale
@@ -3899,19 +3899,19 @@ fn lattice_triangular_matmul_report(any triangular, any dense, str side="right",
       }
    } else {
       mut i = 0
-      while(i < n){
+      while i < n {
          mut row = list(cols)
          __list_set_len(row, cols)
          mut j = 0
-         while(j < cols){
+         while j < cols {
             mut s = Z(0)
             mut k = 0
-            while(k < n){
-               if(_flatter_triangular_structural_nonzero(uplo, transpose, i, k)){
+            while k < n {
+               if _flatter_triangular_structural_nonzero(uplo, transpose, i, k) {
                   structural_products += 1
                   def av = _flatter_triangular_entry(A, uplo, transpose, diag, i, k)
                   def bv = Z(bd.get(k).get(j))
-                  if(av == Z(0) || bv == Z(0)){
+                  if av == Z(0) || bv == Z(0) {
                      zero_value_skips += 1
                   } else {
                      s = s + av * bv * scale
@@ -3954,7 +3954,7 @@ fn lattice_triangular_matmul(any triangular, any dense, str side="right", str up
 
 fn _flatter_next_pow2(int n) int {
    mut p = 1
-   while(p < n){ p = p * 2 }
+   while p < n { p = p * 2 }
    p
 }
 
@@ -3965,11 +3965,11 @@ fn _strassen_pad_rows(any m, int size) list {
    mut out = list(size)
    __list_set_len(out, size)
    mut i = 0
-   while(i < size){
+   while i < size {
       mut row = list(size)
       __list_set_len(row, size)
       mut j = 0
-      while(j < size){
+      while j < size {
          row[j] = (i < rows && j < cols) ? data.get(i).get(j) : 0
          j += 1
       }
@@ -3983,11 +3983,11 @@ fn _strassen_crop_rows(list rows, int out_rows, int out_cols) list {
    mut out = list(out_rows)
    __list_set_len(out, out_rows)
    mut i = 0
-   while(i < out_rows){
+   while i < out_rows {
       mut row = list(out_cols)
       __list_set_len(row, out_cols)
       mut j = 0
-      while(j < out_cols){
+      while j < out_cols {
          row[j] = rows.get(i).get(j)
          j += 1
       }
@@ -4002,11 +4002,11 @@ fn _strassen_add(list a, list b) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       mut row = list(n)
       __list_set_len(row, n)
       mut j = 0
-      while(j < n){
+      while j < n {
          row[j] = a.get(i).get(j) + b.get(i).get(j)
          j += 1
       }
@@ -4021,11 +4021,11 @@ fn _strassen_sub(list a, list b) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       mut row = list(n)
       __list_set_len(row, n)
       mut j = 0
-      while(j < n){
+      while j < n {
          row[j] = a.get(i).get(j) - b.get(i).get(j)
          j += 1
       }
@@ -4039,11 +4039,11 @@ fn _strassen_slice(list a, int r0, int c0, int n) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       mut row = list(n)
       __list_set_len(row, n)
       mut j = 0
-      while(j < n){
+      while j < n {
          row[j] = a.get(r0 + i).get(c0 + j)
          j += 1
       }
@@ -4058,16 +4058,16 @@ fn _strassen_join(list c11, list c12, list c21, list c22) list {
    mut out = list(h * 2)
    __list_set_len(out, h * 2)
    mut i = 0
-   while(i < h){
+   while i < h {
       mut row = list(h * 2)
       __list_set_len(row, h * 2)
       mut j = 0
-      while(j < h){
+      while j < h {
          row[j] = c11.get(i).get(j)
          j += 1
       }
       j = 0
-      while(j < h){
+      while j < h {
          row[h + j] = c12.get(i).get(j)
          j += 1
       }
@@ -4075,16 +4075,16 @@ fn _strassen_join(list c11, list c12, list c21, list c22) list {
       i += 1
    }
    i = 0
-   while(i < h){
+   while i < h {
       mut row = list(h * 2)
       __list_set_len(row, h * 2)
       mut j = 0
-      while(j < h){
+      while j < h {
          row[j] = c21.get(i).get(j)
          j += 1
       }
       j = 0
-      while(j < h){
+      while j < h {
          row[h + j] = c22.get(i).get(j)
          j += 1
       }
@@ -4100,17 +4100,17 @@ fn _strassen_naive_square_report(list a, list b) dict {
    __list_set_len(out, n)
    mut nonzero_products = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       mut row = list(n)
       __list_set_len(row, n)
       mut j = 0
-      while(j < n){
+      while j < n {
          mut s = 0
          mut k = 0
-         while(k < n){
+         while k < n {
             def av = a.get(i).get(k)
             def bv = b.get(k).get(j)
-            if(av != 0 && bv != 0){ nonzero_products += 1 }
+            if av != 0 && bv != 0 { nonzero_products += 1 }
             s = s + av * bv
             k += 1
          }
@@ -4139,14 +4139,14 @@ fn _strassen_merge_counts(list reps, int extra_adds, int depth) dict {
    mut calls = 1
    mut max_depth = depth
    mut i = 0
-   while(i < reps.len){
+   while i < reps.len {
       def r = reps.get(i)
       scalar_muls += r.get("scalar_multiplications", 0)
       scalar_adds += r.get("scalar_additions", 0)
       matrix_ops += r.get("matrix_add_sub_ops", 0)
       nonzero += r.get("nonzero_products", 0)
       calls += r.get("recursive_calls", 0)
-      if(r.get("max_depth", depth) > max_depth){ max_depth = r.get("max_depth", depth) }
+      if r.get("max_depth", depth) > max_depth { max_depth = r.get("max_depth", depth) }
       i += 1
    }
    {
@@ -4161,7 +4161,7 @@ fn _strassen_merge_counts(list reps, int extra_adds, int depth) dict {
 
 fn _strassen_square_report(list a, list b, int leaf_size, int depth) dict {
    def n = a.len
-   if(n <= max(1, leaf_size) || n <= 1){
+   if n <= max(1, leaf_size) || n <= 1 {
       def base = _strassen_naive_square_report(a, b)
       return base.set("max_depth", depth)
    }
@@ -4233,7 +4233,7 @@ fn lattice_matmul_strassen(any left, any right, int leaf_size=16) any {
 fn _flatter_slice_rows(list rows, int start, int stop) list {
    mut out = []
    mut i = start
-   while(i < stop){
+   while i < stop {
       out = out.append(vec_clone(rows.get(i)))
       i += 1
    }
@@ -4244,7 +4244,7 @@ fn _flatter_replace_rows(list rows, int start, any block) list {
    def bdata = (is_list(block) && block.len >= 3 && is_int(block.get(0, nil)) && is_int(block.get(1, nil)) && is_list(block.get(2, nil))) ? _flatter_matrix_data(block) : block
    mut out = []
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def j = i - start
       out = out.append((j >= 0 && j < bdata.len) ? bdata.get(j) : rows.get(i))
       i += 1
@@ -4257,13 +4257,13 @@ fn _flatter_apply_block_transform_rows(list global_rows, int start, any block_tr
    def size = tdata.len
    mut out = []
    mut i = 0
-   while(i < global_rows.len){
-      if(i >= start && i < start + size){
+   while i < global_rows.len {
+      if i >= start && i < start + size {
          mut row = _flatter_zero_row(global_rows.len)
          mut j = 0
-         while(j < size){
+         while j < size {
             def coeff = Z(tdata.get(i - start).get(j))
-            if(coeff != Z(0)){
+            if coeff != Z(0) {
                row = _flatter_row_addmul(row, global_rows.get(start + j), coeff)
             }
             j += 1
@@ -4290,40 +4290,40 @@ fn _flatter_strategy_window(str name, int start, int stop, str child_split="") d
 }
 
 fn _flatter_split_phase2_k(int n) int {
-   if(n == 3){ return 2 }
+   if n == 3 { return 2 }
    max(1, n / 2)
 }
 
 fn _flatter_split_phase3_k(int n) int {
-   if(n == 3){ return 2 }
+   if n == 3 { return 2 }
    max(1, n / 2)
 }
 
 fn _flatter_phase2_windows(int n, int iter) list {
-   if(n <= 1){ return [_flatter_strategy_window("all", 0, n, "phase3")] }
+   if n <= 1 { return [_flatter_strategy_window("all", 0, n, "phase3")] }
    def k = _flatter_split_phase2_k(n)
-   if(n == 3){
-      if(iter == 0){ return [_flatter_strategy_window("left", 0, k, "phase2")] }
+   if n == 3 {
+      if iter == 0 { return [_flatter_strategy_window("left", 0, k, "phase2")] }
       return [_flatter_strategy_window("all", 0, n, "phase3")]
    }
-   if(iter == 0){ return [_flatter_strategy_window("left", 0, k, "phase2")] }
-   if(iter == 1){ return [_flatter_strategy_window("right", k, n, "phase2")] }
+   if iter == 0 { return [_flatter_strategy_window("left", 0, k, "phase2")] }
+   if iter == 1 { return [_flatter_strategy_window("right", k, n, "phase2")] }
    [_flatter_strategy_window("all", 0, n, "phase3")]
 }
 
 fn _flatter_phase2_stopping_point(int n, int iter) bool {
-   if(n == 3){ return iter > 1 }
+   if n == 3 { return iter > 1 }
    iter > 2
 }
 
 fn _flatter_phase3_windows(int n, int iter) list {
-   if(n <= 1){ return [_flatter_strategy_window("all", 0, n, "phase3")] }
+   if n <= 1 { return [_flatter_strategy_window("all", 0, n, "phase3")] }
    def k = _flatter_split_phase3_k(n)
-   if(n == 3){
-      if(iter % 2 == 0){ return [_flatter_strategy_window("left-pair", 0, 2, "phase3")] }
+   if n == 3 {
+      if iter % 2 == 0 { return [_flatter_strategy_window("left-pair", 0, 2, "phase3")] }
       return [_flatter_strategy_window("right-pair", 1, 3, "phase3")]
    }
-   if(iter % 2 == 0){
+   if iter % 2 == 0 {
       def left_k = _flatter_split_phase3_k(k)
       def right_k = _flatter_split_phase3_k(n - k)
       return [_flatter_strategy_window("middle", left_k, k + right_k, "phase3")]
@@ -4337,8 +4337,8 @@ fn _flatter_phase3_windows(int n, int iter) list {
 fn _flatter_phase3_stopping_point(int iter) bool { iter % 2 == 0 }
 
 fn _flatter_strategy_precision_rule(str strategy, int n) str {
-   if(strategy == "proved3"){ return "2 * (2 * spread + 40)" }
-   if(strategy == "heuristic3" || strategy == "heuristic2" || strategy == "heuristic1"){
+   if strategy == "proved3" { return "2 * (2 * spread + 40)" }
+   if strategy == "heuristic3" || strategy == "heuristic2" || strategy == "heuristic1" {
       return "aggressive ? spread + 30 : 2 * spread + 30 + 2 * n"
    }
    "2 * spread + 40"
@@ -4348,30 +4348,30 @@ fn _flatter_strategy_iterations(int n, str strategy, int max_iterations) list {
    mut out = []
    def limit = max(1, max_iterations)
    mut i = 0
-   while(i < limit){
+   while i < limit {
       mut windows = []
       mut split = "none"
       mut stopping = false
-      if(strategy == "proved2"){
+      if strategy == "proved2" {
          windows = _flatter_phase2_windows(n, i)
          split = "phase2"
          stopping = _flatter_phase2_stopping_point(n, i)
-      } else if(strategy == "proved3"){
+      } else if strategy == "proved3" {
          def phase = i % 3
-         if(phase == 0){
+         if phase == 0 {
             windows = [_flatter_strategy_window("middle", n / 4, (3 * n) / 4, "phase3")]
-         } else if(phase == 1){
+         } else if phase == 1 {
             windows = [_flatter_strategy_window("left", 0, n / 2, "phase3")]
          } else {
             windows = [_flatter_strategy_window("right", n / 2, n, "phase3")]
          }
          split = "phase3"
          stopping = i > 0 && i % 3 == 0
-      } else if(strategy == "heuristic2" || strategy == "heuristic1"){
+      } else if strategy == "heuristic2" || strategy == "heuristic1" {
          windows = _flatter_phase2_windows(n, i)
          split = "phase2"
          stopping = _flatter_phase2_stopping_point(n, i)
-      } else if(strategy == "heuristic3"){
+      } else if strategy == "heuristic3" {
          windows = _flatter_phase3_windows(n, i)
          split = "phase3"
          stopping = _flatter_phase3_stopping_point(i)
@@ -4398,18 +4398,18 @@ fn recursive_strategy_plan_report(int rows, str strategy="proved3", int max_iter
    def n = max(0, rows)
    mut family = _flatter_schoenhage_strategy_family(strategy)
    mut split = "custom"
-   if(strategy == "proved2" || strategy == "heuristic2" || strategy == "heuristic1"){ split = "phase2" }
-   if(strategy == "proved3" || strategy == "heuristic3"){ split = "phase3" }
+   if strategy == "proved2" || strategy == "heuristic2" || strategy == "heuristic1" { split = "phase2" }
+   if strategy == "proved3" || strategy == "heuristic3" { split = "phase3" }
    mut padded_rows = n
-   if(strategy == "proved1"){
+   if strategy == "proved1" {
       padded_rows = 1
-      while(padded_rows < max(1, n)){ padded_rows = padded_rows * 2 }
+      while padded_rows < max(1, n) { padded_rows = padded_rows * 2 }
       split = "padded-recursive"
       family = "proved"
    }
    def plan_rows = strategy == "proved1" ? padded_rows : n
    mut iterations = []
-   if(strategy == "proved1"){
+   if strategy == "proved1" {
       iterations = [{
             "iteration": 0,
             "split": "padded-recursive",
@@ -4438,8 +4438,8 @@ fn recursive_strategy_plan_report(int rows, str strategy="proved3", int max_iter
 
 fn _flatter_schoenhage_phase(int rows, int phase, str strategy) dict {
    def n = max(0, rows)
-   if(n <= 1){ return _flatter_phase("none", 0, n) }
-   if(strategy == "proved1"){
+   if n <= 1 { return _flatter_phase("none", 0, n) }
+   if strategy == "proved1" {
       return case phase {
          0 -> _flatter_phase("upper-triangular-size", 0, n)
          1 -> _flatter_phase("left", 0, max(2, n / 2))
@@ -4447,14 +4447,14 @@ fn _flatter_schoenhage_phase(int rows, int phase, str strategy) dict {
          _ -> _flatter_phase("all", 0, n)
       }
    }
-   if(strategy == "proved2" || strategy == "heuristic2" || strategy == "phase2"){
+   if strategy == "proved2" || strategy == "heuristic2" || strategy == "phase2" {
       return case phase {
          0 -> _flatter_phase("left", 0, max(2, n / 2))
          1 -> _flatter_phase("right", n / 2, n)
          _ -> _flatter_phase("all", 0, n)
       }
    }
-   if(strategy == "heuristic1"){
+   if strategy == "heuristic1" {
       def start1 = n / 4
       return case phase {
          0 -> _flatter_phase("left-rectangular", 0, max(2, n / 2))
@@ -4472,14 +4472,14 @@ fn _flatter_schoenhage_phase(int rows, int phase, str strategy) dict {
 }
 
 fn _flatter_schoenhage_phase_count(str strategy) int {
-   if(strategy == "proved1" || strategy == "heuristic1"){ return 4 }
+   if strategy == "proved1" || strategy == "heuristic1" { return 4 }
    3
 }
 
 fn _flatter_schoenhage_strategy_family(str strategy) str {
-   if(strategy == "proved1" || strategy == "proved2" || strategy == "proved3"){ return "proved" }
-   if(strategy == "heuristic1" || strategy == "heuristic2" || strategy == "heuristic3"){ return "heuristic" }
-   if(strategy == "phase2" || strategy == "phase3"){ return "split" }
+   if strategy == "proved1" || strategy == "proved2" || strategy == "proved3" { return "proved" }
+   if strategy == "heuristic1" || strategy == "heuristic2" || strategy == "heuristic3" { return "heuristic" }
+   if strategy == "phase2" || strategy == "phase3" { return "split" }
    "custom"
 }
 
@@ -4503,7 +4503,7 @@ fn schoenhage_reduce_report(any basis, str strategy="proved3", int max_rounds=3,
    mut r = 0
    mut goal_before = profile_goal_report(before_shape, goal_target, goal_value, goal_proved)
    mut goal_after = goal_before
-   if(rows >= 32 && before_shape.get("spread", 0.0) <= 0.5){
+   if rows >= 32 && before_shape.get("spread", 0.0) <= 0.5 {
       return {
          "method": "schoenhage-recursive-sublattice-reduction",
          "strategy": strategy,
@@ -4544,18 +4544,18 @@ fn schoenhage_reduce_report(any basis, str strategy="proved3", int max_rounds=3,
    mut total_transform = matrix.matrix_identity(rows)
    mut stopped_reason = "max-rounds"
    mut keep_going = !(bool(stop_on_goal) && goal_before.get("satisfied", false))
-   if(!keep_going){ stopped_reason = "profile-goal-before" }
-   while(r < round_limit && keep_going){
+   if !keep_going { stopped_reason = "profile-goal-before" }
+   while r < round_limit && keep_going {
       mut round_changed = false
       mut round_ops = 0
       mut round_phases = []
       mut p = 0
-      while(p < phase_count){
+      while p < phase_count {
          def phase = _flatter_schoenhage_phase(rows, p, strategy)
          def start = max(0, phase.get("start", 0))
          def stop = min(rows, phase.get("stop", rows))
          def block_rows = stop - start
-         if(block_rows >= 2){
+         if block_rows >= 2 {
             def block = matrix.Matrix(_flatter_slice_rows(work_rows, start, stop))
             def first_before = _flatter_dot_z(_flatter_matrix_data(block).get(0), _flatter_matrix_data(block).get(0))
             def local_window = max(1, block_rows - 1)
@@ -4565,7 +4565,7 @@ fn schoenhage_reduce_report(any basis, str strategy="proved3", int max_rounds=3,
             def row_ops = red.get("row_op_count", 0)
             def first_after = red.get("first_norm_after", first_before)
             def changed = row_ops > 0 || first_after < first_before
-            if(changed){ round_changed = true }
+            if changed { round_changed = true }
             round_ops += row_ops
             total_ops += row_ops
             total_pairs += red.get("pair_count", 0)
@@ -4606,10 +4606,10 @@ fn schoenhage_reduce_report(any basis, str strategy="proved3", int max_rounds=3,
             "profile_goal_satisfied": round_goal.get("satisfied", false)
       })
       goal_after = round_goal
-      if(bool(stop_on_goal) && round_goal.get("satisfied", false)){
+      if bool(stop_on_goal) && round_goal.get("satisfied", false) {
          stopped_reason = "profile-goal-after-round"
          keep_going = false
-      } else if(!round_changed){
+      } else if !round_changed {
          stopped_reason = "fixed-point"
          keep_going = false
       }
@@ -4677,9 +4677,9 @@ fn sublattice_reduce_report(any basis, int window_size=16, int stride=8, any del
    mut total_reduction_ops = 0
    mut total_reduction_steps = 0
    mut start = 0
-   while(start < rows){
+   while start < rows {
       def stop = min(rows, start + win)
-      if(stop - start >= 2){
+      if stop - start >= 2 {
          def block = matrix.Matrix(_flatter_slice_rows(work, start, stop))
          def before = lll_backend.gso_report(block)
          def rsz = relative_size_reduce_report(block, 1)
@@ -4691,7 +4691,7 @@ fn sublattice_reduce_report(any basis, int window_size=16, int stride=8, any del
          def rsz_transform = rsz.get("transform")
          def local_transform = (red_transform != nil && rsz_transform != nil) ? _flatter_matmul(red_transform, rsz_transform) : nil
          work = _flatter_replace_rows(work, start, red.get("basis"))
-         if(transform_tracked && local_transform != nil){
+         if transform_tracked && local_transform != nil {
             total_transform_rows = _flatter_apply_block_transform_rows(total_transform_rows, start, local_transform)
          } else {
             transform_tracked = false
@@ -4711,7 +4711,7 @@ fn sublattice_reduce_report(any basis, int window_size=16, int stride=8, any del
                "elapsed_ms": rsz.get("elapsed_ms", 0.0) + red.get("elapsed_ms", 0.0)
          })
       }
-      if(stop >= rows){ start = rows } else { start += step }
+      if stop >= rows { start = rows } else { start += step }
    }
    def out_basis = matrix.Matrix(work)
    def total_transform = transform_tracked ? matrix.Matrix(total_transform_rows) : nil
@@ -4775,10 +4775,10 @@ fn _flatter_multiscale_report(int t0, any basis, int rows, int cols, int min_win
       "basis": basis,
       "elapsed_ms": float(ticks() - t0) / 1000000.0
    }
-   if(extra != nil){
+   if extra != nil {
       def keys = dict_keys(extra)
       mut i = 0
-      while(i < keys.len){
+      while i < keys.len {
          def k = keys.get(i)
          out = out.set(k, extra.get(k))
          i += 1
@@ -4794,33 +4794,33 @@ fn recursive_reduce_report(any basis, int min_window=8, any delta=0.99, int roun
    mut work = original
    def rows = _flatter_matrix_rows(work)
    def cols = _flatter_matrix_cols(work)
-   if(rows > 64 && !bool(stop_on_goal)){
+   if rows > 64 && !bool(stop_on_goal) {
       def first_before = rows > 0 ? _flatter_dot_z(_flatter_matrix_data(original).get(0), _flatter_matrix_data(original).get(0)) : Z(0)
       def short = short_row_prepass_report(original, false)
       mut first_after = short.get("first_norm_after", first_before)
-      if(first_before > Z(0) && first_after * Z(4) < first_before){
+      if first_before > Z(0) && first_after * Z(4) < first_before {
          work = short.get("basis")
          mut cleanup_applied = false
          mut cleanup_method = ""
          mut cleanup_elapsed_ms = 0.0
          mut cleanup_first_norm_after = first_after
-         if(rows >= 384 && first_after * Z(8) >= first_before){
+         if rows >= 384 && first_after * Z(8) >= first_before {
             def cleanup = banded_triplet_prepass_report(work, 4, 2)
             mut cleanup_basis = cleanup.get("basis")
             mut cleanup_first = cleanup.get("first_norm_after", first_after)
             mut cleanup_name = cleanup.get("method", "banded-triplet-prepass")
             mut cleanup_ms = cleanup.get("elapsed_ms", 0.0)
-            if(cleanup_first >= first_after){
+            if cleanup_first >= first_after {
                def pair_cleanup = lagrange_pair_reduce_report(work, 24, 2, 16, false, true, false)
                def pair_first = pair_cleanup.get("first_norm_after", first_after)
-               if(pair_first < cleanup_first){
+               if pair_first < cleanup_first {
                   cleanup_basis = pair_cleanup.get("basis")
                   cleanup_first = pair_first
                   cleanup_name = pair_cleanup.get("method", "lagrange-row-pair-reduction")
                   cleanup_ms = cleanup_ms + pair_cleanup.get("elapsed_ms", 0.0)
                }
             }
-            if(cleanup_first < first_after){
+            if cleanup_first < first_after {
                work = cleanup_basis
                first_after = cleanup_first
                cleanup_applied = true
@@ -4858,11 +4858,11 @@ fn recursive_reduce_report(any basis, int min_window=8, any delta=0.99, int roun
    mut total_transform = matrix.matrix_identity(rows)
    mut levels = []
    def fast_pair_schedule = rows == 64 && min_window <= 16 && !bool(stop_on_goal)
-   if(fast_pair_schedule){
+   if fast_pair_schedule {
       def first_before = rows > 0 ? _flatter_dot_z(_flatter_matrix_data(work).get(0), _flatter_matrix_data(work).get(0)) : Z(0)
       def short = short_row_prepass_report(work, false)
       def first_after = short.get("first_norm_after", first_before)
-      if(short.get("op_count", 0) > 0 && first_before > Z(0) && first_after * Z(4) < first_before){
+      if short.get("op_count", 0) > 0 && first_before > Z(0) && first_after * Z(4) < first_before {
          work = short.get("basis")
          def before_shape_short = _flatter_skip("profile-speed fastpath omits GSO profile")
          def after_shape_short = _flatter_skip("profile-speed fastpath omits GSO profile")
@@ -4908,7 +4908,7 @@ fn recursive_reduce_report(any basis, int min_window=8, any delta=0.99, int roun
    }
    def before_shape = profile_shape_report(original)
    def medium_direct_schedule = rows == 48 && min_window <= 12 && before_shape.get("spread", 0.0) <= 16.0
-   if(medium_direct_schedule){
+   if medium_direct_schedule {
       def budget = 2048
       def direct = lll_backend.lll_reduce_bounded_report(work, budget, delta, "bounded-int-no-transform", 0.51)
       work = direct.get("basis")
@@ -4936,13 +4936,13 @@ fn recursive_reduce_report(any basis, int min_window=8, any delta=0.99, int roun
    mut goal_after = goal_before
    mut stopped_reason = "max-levels"
    mut keep_going = !(bool(stop_on_goal) && goal_before.get("satisfied", false))
-   if(!keep_going){ stopped_reason = "profile-goal-before" }
-   while(keep_going && window >= max(2, min_window)){
+   if !keep_going { stopped_reason = "profile-goal-before" }
+   while keep_going && window >= max(2, min_window) {
       def stride = max(1, window / 2)
       def rep = sublattice_reduce_report(work, window, stride, delta, rounds)
       work = rep.get("basis")
       def rep_transform = rep.get("transform")
-      if(total_transform != nil && rep_transform != nil){
+      if total_transform != nil && rep_transform != nil {
          total_transform = _flatter_matmul(rep_transform, total_transform)
       } else {
          total_transform = nil
@@ -4962,13 +4962,13 @@ fn recursive_reduce_report(any basis, int min_window=8, any delta=0.99, int roun
             "elapsed_ms": rep.get("elapsed_ms", 0.0)
       })
       goal_after = level_goal
-      if(bool(stop_on_goal) && level_goal.get("satisfied", false)){
+      if bool(stop_on_goal) && level_goal.get("satisfied", false) {
          stopped_reason = "profile-goal-after-level"
          keep_going = false
-      } else if(medium_local_schedule){
+      } else if medium_local_schedule {
          stopped_reason = "medium-local-window"
          keep_going = false
-      } else if(window <= min_window){
+      } else if window <= min_window {
          window = 0
       } else {
          window = max(min_window, window / 2)
@@ -4986,14 +4986,14 @@ fn recursive_reduce(any basis, int min_window=8, any delta=0.99, int rounds=2) a
 }
 
 fn _qr_zero_rows(int rows, int cols) list<list<f64>> {
-   mut list<list<f64>>: out = list(rows)
+   mut list<list<f64>> out = list(rows)
    __list_set_len(out, rows)
    mut i = 0
-   while(i < rows){
-      mut list<f64>: row = list(cols)
+   while i < rows {
+      mut list<f64> row = list(cols)
       __list_set_len(row, cols)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row[j] = 0.0
          j += 1
       }
@@ -5006,10 +5006,10 @@ fn _qr_zero_rows(int rows, int cols) list<list<f64>> {
 fn _qr_col(any m, int col) list<f64> {
    def rows = _flatter_matrix_rows(m)
    def data = _flatter_matrix_data(m)
-   mut list<f64>: out = list(rows)
+   mut list<f64> out = list(rows)
    __list_set_len(out, rows)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       out[i] = float(data[i][col])
       i += 1
    }
@@ -5017,9 +5017,9 @@ fn _qr_col(any m, int col) list<f64> {
 }
 
 fn _qr_dot(list<f64> a, list<f64> b) f64 {
-   mut f64: s = 0.0
-   mut int: i = 0
-   while(i < a.len){
+   mut f64 s = 0.0
+   mut int i = 0
+   while i < a.len {
       s += a[i] * b[i]
       i += 1
    }
@@ -5027,8 +5027,8 @@ fn _qr_dot(list<f64> a, list<f64> b) f64 {
 }
 
 fn _qr_sub_scaled_inplace(list<f64> a, list<f64> b, f64 scale) any {
-   mut int: i = 0
-   while(i < a.len){
+   mut int i = 0
+   while i < a.len {
       a[i] = a[i] - scale * b[i]
       i += 1
    }
@@ -5036,11 +5036,11 @@ fn _qr_sub_scaled_inplace(list<f64> a, list<f64> b, f64 scale) any {
 }
 
 fn _qr_scale(list<f64> a, any scale) list<f64> {
-   mut list<f64>: out = list(a.len)
+   mut list<f64> out = list(a.len)
    __list_set_len(out, a.len)
-   mut int: i = 0
-   def f64: s = float(scale)
-   while(i < a.len){
+   mut int i = 0
+   def f64 s = float(scale)
+   while i < a.len {
       out[i] = a[i] * s
       i += 1
    }
@@ -5048,15 +5048,15 @@ fn _qr_scale(list<f64> a, any scale) list<f64> {
 }
 
 fn _qr_q_matrix(list<list<f64>> q_cols, int rows, int cols) any {
-   mut list<list<f64>>: q_rows = list(rows)
+   mut list<list<f64>> q_rows = list(rows)
    __list_set_len(q_rows, rows)
    mut i = 0
-   while(i < rows){
-      mut list<f64>: row = list(cols)
+   while i < rows {
+      mut list<f64> row = list(cols)
       __list_set_len(row, cols)
       mut j = 0
-      while(j < cols){
-         def list<f64>: q_col = q_cols.get(j)
+      while j < cols {
+         def list<f64> q_col = q_cols.get(j)
          row[j] = q_col[i]
          j += 1
       }
@@ -5067,27 +5067,27 @@ fn _qr_q_matrix(list<list<f64>> q_cols, int rows, int cols) any {
 }
 
 fn _qr_reconstruction_error(any a, any q, any r) f64 {
-   def int: rows = _flatter_matrix_rows(a)
-   def int: cols = _flatter_matrix_cols(a)
+   def int rows = _flatter_matrix_rows(a)
+   def int cols = _flatter_matrix_cols(a)
    def a_data = _flatter_matrix_data(a)
    def q_data = _flatter_matrix_data(q)
    def r_data = _flatter_matrix_data(r)
-   mut f64: worst = 0.0
-   mut int: i = 0
-   while(i < rows){
+   mut f64 worst = 0.0
+   mut int i = 0
+   while i < rows {
       def a_row = a_data.get(i)
-      def list<f64>: q_row = q_data[i]
-      mut int: j = 0
-      while(j < cols){
-         mut f64: s = 0.0
-         mut int: k = 0
-         while(k < cols){
-            def list<f64>: rr = r_data[k]
+      def list<f64> q_row = q_data[i]
+      mut int j = 0
+      while j < cols {
+         mut f64 s = 0.0
+         mut int k = 0
+         while k < cols {
+            def list<f64> rr = r_data[k]
             s += q_row[k] * rr[j]
             k += 1
          }
-         def f64: e = abs(s - float(a_row[j]))
-         if(e > worst){ worst = e }
+         def f64 e = abs(s - float(a_row[j]))
+         if e > worst { worst = e }
          j += 1
       }
       i += 1
@@ -5096,16 +5096,16 @@ fn _qr_reconstruction_error(any a, any q, any r) f64 {
 }
 
 fn _qr_orthogonality_error(list<list<f64>> q_cols) f64 {
-   mut f64: worst = 0.0
-   mut int: i = 0
-   while(i < q_cols.len){
-      def list<f64>: qi = q_cols.get(i)
-      mut int: j = i
-      while(j < q_cols.len){
-         def f64: target = i == j ? 1.0 : 0.0
-         def list<f64>: qj = q_cols.get(j)
-         def f64: e = abs(_qr_dot(qi, qj) - target)
-         if(e > worst){ worst = e }
+   mut f64 worst = 0.0
+   mut int i = 0
+   while i < q_cols.len {
+      def list<f64> qi = q_cols.get(i)
+      mut int j = i
+      while j < q_cols.len {
+         def f64 target = i == j ? 1.0 : 0.0
+         def list<f64> qj = q_cols.get(j)
+         def f64 e = abs(_qr_dot(qi, qj) - target)
+         if e > worst { worst = e }
          j += 1
       }
       i += 1
@@ -5114,14 +5114,14 @@ fn _qr_orthogonality_error(list<list<f64>> q_cols) f64 {
 }
 
 fn _qr_identity(int n) list<list<f64>> {
-   mut list<list<f64>>: out = list(n)
+   mut list<list<f64>> out = list(n)
    __list_set_len(out, n)
    mut i = 0
-   while(i < n){
-      mut list<f64>: row = list(n)
+   while i < n {
+      mut list<f64> row = list(n)
       __list_set_len(row, n)
       mut j = 0
-      while(j < n){
+      while j < n {
          row[j] = i == j ? 1.0 : 0.0
          j += 1
       }
@@ -5135,14 +5135,14 @@ fn _qr_copy_float_rows(any m) list<list<f64>> {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
-   mut list<list<f64>>: out = list(rows)
+   mut list<list<f64>> out = list(rows)
    __list_set_len(out, rows)
    mut i = 0
-   while(i < rows){
-      mut list<f64>: row = list(cols)
+   while i < rows {
+      mut list<f64> row = list(cols)
       __list_set_len(row, cols)
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row[j] = float(data[i][j])
          j += 1
       }
@@ -5156,21 +5156,21 @@ fn _householder_vec_norm(list<f64> v) f64 { sqrt(_qr_dot(v, v)) }
 
 fn _qr_full_reconstruction_error_rows(any a, list<list<f64>> q_data, list<list<f64>> r_data, int rows, int cols) f64 {
    def a_data = _flatter_matrix_data(a)
-   mut f64: worst = 0.0
-   mut int: i = 0
-   while(i < rows){
-      def list<f64>: q_row = q_data[i]
+   mut f64 worst = 0.0
+   mut int i = 0
+   while i < rows {
+      def list<f64> q_row = q_data[i]
       def a_row = a_data[i]
-      mut int: j = 0
-      while(j < cols){
-         mut f64: s = 0.0
-         mut int: k = 0
-         while(k < rows){
+      mut int j = 0
+      while j < cols {
+         mut f64 s = 0.0
+         mut int k = 0
+         while k < rows {
             s += q_row[k] * r_data[k][j]
             k += 1
          }
-         def f64: e = abs(s - float(a_row[j]))
-         if(e > worst){ worst = e }
+         def f64 e = abs(s - float(a_row[j]))
+         if e > worst { worst = e }
          j += 1
       }
       i += 1
@@ -5186,19 +5186,19 @@ fn _qr_full_reconstruction_error(any a, any q, any r) f64 {
    def r_data = _flatter_matrix_data(r)
    mut worst = 0.0
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def a_row = a_data[i]
       def q_row = q_data[i]
       mut j = 0
-      while(j < cols){
+      while j < cols {
          mut s = 0.0
          mut k = 0
-         while(k < rows){
+         while k < rows {
             s += float(q_row[k]) * float(r_data[k][j])
             k += 1
          }
          def e = abs(s - float(a_row[j]))
-         if(e > worst){ worst = e }
+         if e > worst { worst = e }
          j += 1
       }
       i += 1
@@ -5211,19 +5211,19 @@ fn _qr_full_orthogonality_error(any q) f64 {
    def data = _flatter_matrix_data(q)
    mut worst = 0.0
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut j = i
-      while(j < rows){
+      while j < rows {
          mut s = 0.0
          mut k = 0
-         while(k < rows){
+         while k < rows {
             def row = data[k]
             s += float(row[i]) * float(row[j])
             k += 1
          }
          def target = i == j ? 1.0 : 0.0
          def e = abs(s - target)
-         if(e > worst){ worst = e }
+         if e > worst { worst = e }
          j += 1
       }
       i += 1
@@ -5232,21 +5232,21 @@ fn _qr_full_orthogonality_error(any q) f64 {
 }
 
 fn _qr_full_orthogonality_error_rows(list<list<f64>> data, int rows) f64 {
-   mut f64: worst = 0.0
-   mut int: i = 0
-   while(i < rows){
-      mut int: j = i
-      while(j < rows){
-         mut f64: s = 0.0
-         mut int: k = 0
-         while(k < rows){
-            def list<f64>: row = data[k]
+   mut f64 worst = 0.0
+   mut int i = 0
+   while i < rows {
+      mut int j = i
+      while j < rows {
+         mut f64 s = 0.0
+         mut int k = 0
+         while k < rows {
+            def list<f64> row = data[k]
             s += row[i] * row[j]
             k += 1
          }
-         def f64: target = i == j ? 1.0 : 0.0
-         def f64: e = abs(s - target)
-         if(e > worst){ worst = e }
+         def f64 target = i == j ? 1.0 : 0.0
+         def f64 e = abs(s - target)
+         if e > worst { worst = e }
          j += 1
       }
       i += 1
@@ -5258,26 +5258,26 @@ fn qr_factor_report(any basis) dict {
    "Compute a QR factorization report for an integer/float lattice basis."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
-   def int: rows = _flatter_matrix_rows(a)
-   def int: cols = _flatter_matrix_cols(a)
-   if(rows < cols){ panic("qr_factor_report: require rows >= cols") }
-   mut list<list<f64>>: q_cols = list(0)
-   mut list<list<f64>>: r_rows = _qr_zero_rows(cols, cols)
-   mut int: k = 0
-   while(k < cols){
+   def int rows = _flatter_matrix_rows(a)
+   def int cols = _flatter_matrix_cols(a)
+   if rows < cols { panic("qr_factor_report: require rows >= cols") }
+   mut list<list<f64>> q_cols = list(0)
+   mut list<list<f64>> r_rows = _qr_zero_rows(cols, cols)
+   mut int k = 0
+   while k < cols {
       mut v = _qr_col(a, k)
-      mut int: j = 0
-      while(j < k){
-         def list<f64>: qj = q_cols.get(j)
-         def f64: rjk = _qr_dot(qj, v)
-         def list<f64>: rr = r_rows[j]
+      mut int j = 0
+      while j < k {
+         def list<f64> qj = q_cols.get(j)
+         def f64 rjk = _qr_dot(qj, v)
+         def list<f64> rr = r_rows[j]
          rr[k] = rjk
          r_rows[j] = rr
          _qr_sub_scaled_inplace(v, qj, rjk)
          j += 1
       }
-      def f64: norm = sqrt(_qr_dot(v, v))
-      def list<f64>: rrk = r_rows[k]
+      def f64 norm = sqrt(_qr_dot(v, v))
+      def list<f64> rrk = r_rows[k]
       rrk[k] = norm
       r_rows[k] = rrk
       q_cols = q_cols.append(norm > 0.0 ? _qr_scale(v, 1.0 / norm) : _qr_scale(v, 0.0))
@@ -5308,24 +5308,24 @@ fn qr_reorthogonalized_factor_report(any basis, int passes=2) dict {
    "Compute a reorthogonalized modified Gram-Schmidt QR factorization report."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
-   def int: rows = _flatter_matrix_rows(a)
-   def int: cols = _flatter_matrix_cols(a)
-   if(rows < cols){ panic("qr_reorthogonalized_factor_report: require rows >= cols") }
-   def int: active_passes = max(1, passes)
-   mut list<list<f64>>: q_cols = list(0)
-   mut list<list<f64>>: r_rows = _qr_zero_rows(cols, cols)
+   def int rows = _flatter_matrix_rows(a)
+   def int cols = _flatter_matrix_cols(a)
+   if rows < cols { panic("qr_reorthogonalized_factor_report: require rows >= cols") }
+   def int active_passes = max(1, passes)
+   mut list<list<f64>> q_cols = list(0)
+   mut list<list<f64>> r_rows = _qr_zero_rows(cols, cols)
    mut zero_norm_columns = []
-   mut int: projection_count = 0
-   mut int: k = 0
-   while(k < cols){
+   mut int projection_count = 0
+   mut int k = 0
+   while k < cols {
       mut v = _qr_col(a, k)
-      mut int: pass = 0
-      while(pass < active_passes){
-         mut int: j = 0
-         while(j < k){
-            def list<f64>: qj = q_cols.get(j)
-            def f64: rjk = _qr_dot(qj, v)
-            def list<f64>: rr = r_rows[j]
+      mut int pass = 0
+      while pass < active_passes {
+         mut int j = 0
+         while j < k {
+            def list<f64> qj = q_cols.get(j)
+            def f64 rjk = _qr_dot(qj, v)
+            def list<f64> rr = r_rows[j]
             rr[k] = rr[k] + rjk
             r_rows[j] = rr
             _qr_sub_scaled_inplace(v, qj, rjk)
@@ -5334,11 +5334,11 @@ fn qr_reorthogonalized_factor_report(any basis, int passes=2) dict {
          }
          pass += 1
       }
-      def f64: norm = sqrt(_qr_dot(v, v))
-      def list<f64>: rrk = r_rows[k]
+      def f64 norm = sqrt(_qr_dot(v, v))
+      def list<f64> rrk = r_rows[k]
       rrk[k] = norm
       r_rows[k] = rrk
-      if(norm > 0.0){
+      if norm > 0.0 {
          q_cols = q_cols.append(_qr_scale(v, 1.0 / norm))
       } else {
          q_cols = q_cols.append(_qr_scale(v, 0.0))
@@ -5375,40 +5375,40 @@ fn householder_qr_factor_report(any basis) dict {
    "Compute a Householder QR factorization report."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
-   def int: rows = _flatter_matrix_rows(a)
-   def int: cols = _flatter_matrix_cols(a)
-   if(rows < cols){ panic("householder_qr_factor_report: require rows >= cols") }
-   mut list<list<f64>>: R = _qr_copy_float_rows(a)
-   mut list<list<f64>>: Q = _qr_identity(rows)
+   def int rows = _flatter_matrix_rows(a)
+   def int cols = _flatter_matrix_cols(a)
+   if rows < cols { panic("householder_qr_factor_report: require rows >= cols") }
+   mut list<list<f64>> R = _qr_copy_float_rows(a)
+   mut list<list<f64>> Q = _qr_identity(rows)
    mut reflections = []
-   mut int: k = 0
-   while(k < cols && k < rows - 1){
-      mut list<f64>: x = list(rows - k)
+   mut int k = 0
+   while k < cols && k < rows - 1 {
+      mut list<f64> x = list(rows - k)
       __list_set_len(x, rows - k)
-      mut int: i = k
-      while(i < rows){
+      mut int i = k
+      while i < rows {
          x[i - k] = R[i][k]
          i += 1
       }
-      def f64: normx = _householder_vec_norm(x)
-      if(normx > 0.0){
-         mut list<f64>: v = clone(x)
-         def f64: alpha = x[0] >= 0.0 ? (0.0 - normx) : normx
+      def f64 normx = _householder_vec_norm(x)
+      if normx > 0.0 {
+         mut list<f64> v = clone(x)
+         def f64 alpha = x[0] >= 0.0 ? (0.0 - normx) : normx
          v[0] = v[0] - alpha
-         def f64: vnorm = _householder_vec_norm(v)
-         if(vnorm > 0.0){
+         def f64 vnorm = _householder_vec_norm(v)
+         if vnorm > 0.0 {
             v = _qr_scale(v, 1.0 / vnorm)
-            mut int: j = k
-            while(j < cols){
-               mut f64: dot = 0.0
+            mut int j = k
+            while j < cols {
+               mut f64 dot = 0.0
                i = k
-               while(i < rows){
+               while i < rows {
                   dot += v[i - k] * R[i][j]
                   i += 1
                }
                i = k
-               while(i < rows){
-                  def list<f64>: rr = R[i]
+               while i < rows {
+                  def list<f64> rr = R[i]
                   rr[j] = rr[j] - 2.0 * v[i - k] * dot
                   R[i] = rr
                   i += 1
@@ -5416,16 +5416,16 @@ fn householder_qr_factor_report(any basis) dict {
                j += 1
             }
             i = 0
-            while(i < rows){
-               mut f64: dotq = 0.0
+            while i < rows {
+               mut f64 dotq = 0.0
                j = k
-               while(j < rows){
+               while j < rows {
                   dotq += Q[i][j] * v[j - k]
                   j += 1
                }
                j = k
-               while(j < rows){
-                  def list<f64>: qr = Q[i]
+               while j < rows {
+                  def list<f64> qr = Q[i]
                   qr[j] = qr[j] - 2.0 * dotq * v[j - k]
                   Q[i] = qr
                   j += 1
@@ -5460,42 +5460,42 @@ fn householder_qr_factor(any basis) list {
 }
 
 fn _flatter_qr_factor_report(any basis, str method) dict {
-   if(method == "modified" || method == "modified-gram-schmidt"){
+   if method == "modified" || method == "modified-gram-schmidt" {
       return qr_factor_report(basis)
    }
-   if(method == "reorthogonalized" || method == "reorthogonalized-mgs" || method == "mgs2"){
+   if method == "reorthogonalized" || method == "reorthogonalized-mgs" || method == "mgs2" {
       return qr_reorthogonalized_factor_report(basis, 2)
    }
-   if(method == "tall-skinny" || method == "tsqr"){
+   if method == "tall-skinny" || method == "tsqr" {
       return tall_skinny_qr_factor_report(basis, 32, "reorthogonalized")
    }
-   if(method == "blocked" || method == "blocked-householder"){
+   if method == "blocked" || method == "blocked-householder" {
       return blocked_qr_factor_report(basis, 16)
    }
    householder_qr_factor_report(basis)
 }
 
 fn _flatter_qr_method_name(str method) str {
-   if(method == "modified" || method == "modified-gram-schmidt"){ return "modified-gram-schmidt" }
-   if(method == "reorthogonalized" || method == "reorthogonalized-mgs" || method == "mgs2"){ return "reorthogonalized-modified-gram-schmidt" }
-   if(method == "tall-skinny" || method == "tsqr"){ return "tall-skinny-qr" }
-   if(method == "blocked" || method == "blocked-householder"){ return "blocked-householder-qr" }
+   if method == "modified" || method == "modified-gram-schmidt" { return "modified-gram-schmidt" }
+   if method == "reorthogonalized" || method == "reorthogonalized-mgs" || method == "mgs2" { return "reorthogonalized-modified-gram-schmidt" }
+   if method == "tall-skinny" || method == "tsqr" { return "tall-skinny-qr" }
+   if method == "blocked" || method == "blocked-householder" { return "blocked-householder-qr" }
    "householder"
 }
 
 fn _qr_block_from_rows(list rows_data, int row_start, int row_end, int col_start, int col_end) any {
-   def int: out_rows = max(0, row_end - row_start)
-   def int: out_cols = max(0, col_end - col_start)
-   mut list<list<f64>>: out = list(out_rows)
+   def int out_rows = max(0, row_end - row_start)
+   def int out_cols = max(0, col_end - col_start)
+   mut list<list<f64>> out = list(out_rows)
    __list_set_len(out, out_rows)
-   mut int: oi = 0
-   mut int: i = row_start
-   while(i < row_end){
-      mut list<f64>: row = list(out_cols)
+   mut int oi = 0
+   mut int i = row_start
+   while i < row_end {
+      mut list<f64> row = list(out_cols)
       __list_set_len(row, out_cols)
-      mut int: oj = 0
-      mut int: j = col_start
-      while(j < col_end){
+      mut int oj = 0
+      mut int j = col_start
+      while j < col_end {
          row[oj] = float(rows_data[i][j])
          j += 1
          oj += 1
@@ -5513,10 +5513,10 @@ fn _qr_set_block(list rows_data, int row_start, int col_start, any block) list {
    def bc = _flatter_matrix_cols(block)
    def bd = _flatter_matrix_data(block)
    mut i = 0
-   while(i < br){
+   while i < br {
       mut row = out.get(row_start + i)
       mut j = 0
-      while(j < bc){
+      while j < bc {
          row[col_start + j] = float(bd.get(i).get(j))
          j += 1
       }
@@ -5531,10 +5531,10 @@ fn _qr_embed_panel_q(int rows, int start, any q_panel) any {
    def pd = _flatter_matrix_data(q_panel)
    def pr = _flatter_matrix_rows(q_panel)
    mut i = 0
-   while(i < pr){
+   while i < pr {
       mut row = out.get(start + i)
       mut j = 0
-      while(j < pr){
+      while j < pr {
          row[start + j] = float(pd.get(i).get(j))
          j += 1
       }
@@ -5548,17 +5548,17 @@ fn blocked_qr_factor_report(any basis, int block_size=16) dict {
    "Compute a blocked Householder QR factorization report."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
-   def int: rows = _flatter_matrix_rows(a)
-   def int: cols = _flatter_matrix_cols(a)
-   if(rows < cols){ panic("blocked_qr_factor_report: require rows >= cols") }
-   def int: bs = max(1, block_size)
+   def int rows = _flatter_matrix_rows(a)
+   def int cols = _flatter_matrix_cols(a)
+   if rows < cols { panic("blocked_qr_factor_report: require rows >= cols") }
+   def int bs = max(1, block_size)
    mut work = _qr_copy_float_rows(a)
    mut q_total = matrix.Matrix(_qr_identity(rows))
    mut panel_reports = []
-   mut int: panel_count = 0
-   mut int: k = 0
-   while(k < cols){
-      def int: width = min(bs, cols - k)
+   mut int panel_count = 0
+   mut int k = 0
+   while k < cols {
+      def int width = min(bs, cols - k)
       def panel = _qr_block_from_rows(work, k, rows, k, k + width)
       def qr = householder_qr_factor_report(panel)
       def q_panel = qr.get("q")
@@ -5607,10 +5607,10 @@ fn _qr_thin_matrix(any q, int rows, int cols) any {
    def data = _flatter_matrix_data(q)
    mut out = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(float(data.get(i).get(j)))
          j += 1
       }
@@ -5624,10 +5624,10 @@ fn _qr_top_square(any r, int cols) any {
    def data = _flatter_matrix_data(r)
    mut out = []
    mut i = 0
-   while(i < cols){
+   while i < cols {
       mut row = []
       mut j = 0
-      while(j < cols){
+      while j < cols {
          row = row.append(float(data.get(i).get(j)))
          j += 1
       }
@@ -5639,17 +5639,17 @@ fn _qr_top_square(any r, int cols) any {
 
 fn _qr_row_window(any m, int start, int end) any {
    def data = _flatter_matrix_data(m)
-   def int: rows = max(0, end - start)
-   def int: cols = _flatter_matrix_cols(m)
-   mut list<list<f64>>: out = list(rows)
+   def int rows = max(0, end - start)
+   def int cols = _flatter_matrix_cols(m)
+   mut list<list<f64>> out = list(rows)
    __list_set_len(out, rows)
-   mut int: oi = 0
-   mut int: i = start
-   while(i < end){
-      mut list<f64>: row = list(cols)
+   mut int oi = 0
+   mut int i = start
+   while i < end {
+      mut list<f64> row = list(cols)
       __list_set_len(row, cols)
-      mut int: j = 0
-      while(j < cols){
+      mut int j = 0
+      while j < cols {
          row[j] = float(data[i][j])
          j += 1
       }
@@ -5661,24 +5661,24 @@ fn _qr_row_window(any m, int start, int end) any {
 }
 
 fn _qr_matmul_float(any left, any right) any {
-   def int: lrows = _flatter_matrix_rows(left)
-   def int: lcols = _flatter_matrix_cols(left)
-   def int: rcols = _flatter_matrix_cols(right)
+   def int lrows = _flatter_matrix_rows(left)
+   def int lcols = _flatter_matrix_cols(left)
+   def int rcols = _flatter_matrix_cols(right)
    def ldata = _flatter_matrix_data(left)
    def rdata = _flatter_matrix_data(right)
-   mut list<list<f64>>: out = list(lrows)
+   mut list<list<f64>> out = list(lrows)
    __list_set_len(out, lrows)
-   mut int: i = 0
-   while(i < lrows){
-      mut list<f64>: row = list(rcols)
+   mut int i = 0
+   while i < lrows {
+      mut list<f64> row = list(rcols)
       __list_set_len(row, rcols)
-      def list<f64>: lrow = ldata[i]
-      mut int: j = 0
-      while(j < rcols){
-         mut f64: s = 0.0
-         mut int: k = 0
-         while(k < lcols){
-            def list<f64>: rrow = rdata[k]
+      def list<f64> lrow = ldata[i]
+      mut int j = 0
+      while j < rcols {
+         mut f64 s = 0.0
+         mut int k = 0
+         while k < lcols {
+            def list<f64> rrow = rdata[k]
             s += lrow[k] * rrow[j]
             k += 1
          }
@@ -5692,24 +5692,24 @@ fn _qr_matmul_float(any left, any right) any {
 }
 
 fn _qr_thin_orthogonality_error(any q) f64 {
-   def int: rows = _flatter_matrix_rows(q)
-   def int: cols = _flatter_matrix_cols(q)
+   def int rows = _flatter_matrix_rows(q)
+   def int cols = _flatter_matrix_cols(q)
    def data = _flatter_matrix_data(q)
-   mut f64: worst = 0.0
-   mut int: i = 0
-   while(i < cols){
-      mut int: j = i
-      while(j < cols){
-         mut f64: s = 0.0
-         mut int: k = 0
-         while(k < rows){
-            def list<f64>: row = data[k]
+   mut f64 worst = 0.0
+   mut int i = 0
+   while i < cols {
+      mut int j = i
+      while j < cols {
+         mut f64 s = 0.0
+         mut int k = 0
+         while k < rows {
+            def list<f64> row = data[k]
             s += row[i] * row[j]
             k += 1
          }
-         def f64: target = i == j ? 1.0 : 0.0
-         def f64: e = abs(s - target)
-         if(e > worst){ worst = e }
+         def f64 target = i == j ? 1.0 : 0.0
+         def f64 e = abs(s - target)
+         if e > worst { worst = e }
          j += 1
       }
       i += 1
@@ -5723,16 +5723,16 @@ fn tall_skinny_qr_factor_report(any basis, int block_size=32, str qr_method="reo
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
    def cols = _flatter_matrix_cols(a)
-   if(rows < cols){ panic("tall_skinny_qr_factor_report: require rows >= cols") }
+   if rows < cols { panic("tall_skinny_qr_factor_report: require rows >= cols") }
    def panel_rows = max(cols, block_size)
    mut q_blocks = []
    mut r_stack_rows = []
    mut block_reports = []
    mut start = 0
-   while(start < rows){
+   while start < rows {
       def remaining = rows - start
       mut end = start + panel_rows
-      if(remaining <= panel_rows || remaining < panel_rows + cols){
+      if remaining <= panel_rows || remaining < panel_rows + cols {
          end = rows
       }
       def panel = _qr_row_window(a, start, end)
@@ -5743,7 +5743,7 @@ fn tall_skinny_qr_factor_report(any basis, int block_size=32, str qr_method="reo
       q_blocks = q_blocks.append(qi)
       def ridata = _flatter_matrix_data(ri)
       mut rr = 0
-      while(rr < cols){
+      while rr < cols {
          r_stack_rows = r_stack_rows.append(ridata.get(rr))
          rr += 1
       }
@@ -5764,12 +5764,12 @@ fn tall_skinny_qr_factor_report(any basis, int block_size=32, str qr_method="reo
    def final_r = _qr_top_square(top.get("r"), cols)
    mut q_rows = []
    mut b = 0
-   while(b < q_blocks.len){
+   while b < q_blocks.len {
       def g = _qr_row_window(top_q, b * cols, (b + 1) * cols)
       def qpart = _qr_matmul_float(q_blocks.get(b), g)
       def pdata = _flatter_matrix_data(qpart)
       mut i = 0
-      while(i < _flatter_matrix_rows(qpart)){
+      while i < _flatter_matrix_rows(qpart) {
          q_rows = q_rows.append(pdata.get(i))
          i += 1
       }
@@ -5814,7 +5814,7 @@ fn fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, str qr_met
    mut gso_recomputes = 0
    def run_passes = max(0, passes)
    mut p = 0
-   while(p < run_passes){
+   while p < run_passes {
       def snap = matrix.Matrix(work)
       def gso = lll_backend.gso_report(snap)
       gso_recomputes += 1
@@ -5822,17 +5822,17 @@ fn fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, str qr_met
       def snap_rows = _flatter_matrix_data(snap)
       mut pass_ops = []
       mut i = 1
-      while(i < rows){
+      while i < rows {
          mut j = i - 1
-         while(j >= 0){
+         while j >= 0 {
             def den = _flatter_dot_z(snap_rows.get(j), snap_rows.get(j))
-            if(den != Z(0)){
+            if den != Z(0) {
                def num = _flatter_dot_z(snap_rows.get(i), snap_rows.get(j))
                def mu_gso = matrix.mat_get(mu, i, j)
                def eta_scaled = Z(to_int(float(eta) * 1000000.0))
-               if(_flatter_abs_z(num) * Z(1000000) > den * eta_scaled){
+               if _flatter_abs_z(num) * Z(1000000) > den * eta_scaled {
                   def coeff = _flatter_round_div(num, den)
-                  if(coeff != Z(0)){
+                  if coeff != Z(0) {
                      work[i] = _flatter_row_submul(work.get(i), work.get(j), coeff)
                      transform[i] = _flatter_row_submul(transform.get(i), transform.get(j), coeff)
                      def op = {
@@ -5865,7 +5865,7 @@ fn fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, str qr_met
             "profile": gso.get("profile", []),
             "profile_slope": gso.get("profile_slope", 0.0)
       })
-      if(pass_ops.len == 0){ p = run_passes } else { p += 1 }
+      if pass_ops.len == 0 { p = run_passes } else { p += 1 }
    }
    def out_basis = matrix.Matrix(work)
    def after = _flatter_row_norm_profile_report(out_basis)
@@ -5912,21 +5912,21 @@ fn _flatter_gso_size_reduce_report(any basis, int passes=2, any eta=0.51) dict {
    def run_passes = max(0, passes)
    def eta_scaled = Z(to_int(float(eta) * 1000000.0))
    mut p = 0
-   while(p < run_passes){
+   while p < run_passes {
       def snap = matrix.Matrix(work)
       def snap_rows = _flatter_matrix_data(snap)
       def profile = _flatter_row_norm_profile_from_rows(snap_rows)
       mut pass_ops = []
       mut i = 1
-      while(i < rows){
+      while i < rows {
          mut j = i - 1
-         while(j >= 0){
+         while j >= 0 {
             def den = _flatter_dot_z(snap_rows.get(j), snap_rows.get(j))
-            if(den != Z(0)){
+            if den != Z(0) {
                def num = _flatter_dot_z(snap_rows.get(i), snap_rows.get(j))
-               if(_flatter_abs_z(num) * Z(1000000) > den * eta_scaled){
+               if _flatter_abs_z(num) * Z(1000000) > den * eta_scaled {
                   def coeff = _flatter_round_div(num, den)
-                  if(coeff != Z(0)){
+                  if coeff != Z(0) {
                      work[i] = _flatter_row_submul(work.get(i), work.get(j), coeff)
                      transform[i] = _flatter_row_submul(transform.get(i), transform.get(j), coeff)
                      def op = {
@@ -5960,7 +5960,7 @@ fn _flatter_gso_size_reduce_report(any basis, int passes=2, any eta=0.51) dict {
             "profile_slope": profile.get("profile_slope", 0.0),
             "profile_source": profile.get("method", "row-norm-profile")
       })
-      if(pass_ops.len == 0){ p = run_passes } else { p += 1 }
+      if pass_ops.len == 0 { p = run_passes } else { p += 1 }
    }
    def out_basis = matrix.Matrix(work)
    def after = _flatter_row_norm_profile_report(out_basis)
@@ -6000,19 +6000,19 @@ fn _flatter_gso_size_reduce_compact_report(any basis, int passes=2, any eta=0.51
    def run_passes = max(0, passes)
    def eta_scaled = Z(to_int(float(eta) * 1000000.0))
    mut p = 0
-   while(p < run_passes){
+   while p < run_passes {
       def snap_rows = work
       mut pass_ops = 0
       mut i = 1
-      while(i < rows){
+      while i < rows {
          mut j = i - 1
-         while(j >= 0){
+         while j >= 0 {
             def den = _flatter_dot_z(snap_rows.get(j), snap_rows.get(j))
-            if(den != Z(0)){
+            if den != Z(0) {
                def num = _flatter_dot_z(snap_rows.get(i), snap_rows.get(j))
-               if(_flatter_abs_z(num) * Z(1000000) > den * eta_scaled){
+               if _flatter_abs_z(num) * Z(1000000) > den * eta_scaled {
                   def coeff = _flatter_round_div(num, den)
-                  if(coeff != Z(0)){
+                  if coeff != Z(0) {
                      work[i] = _flatter_row_submul(work.get(i), work.get(j), coeff)
                      transform[i] = _flatter_row_submul(transform.get(i), transform.get(j), coeff)
                      op_count += 1
@@ -6024,7 +6024,7 @@ fn _flatter_gso_size_reduce_compact_report(any basis, int passes=2, any eta=0.51
          }
          i += 1
       }
-      if(pass_ops == 0){ p = run_passes } else { p += 1 }
+      if pass_ops == 0 { p = run_passes } else { p += 1 }
    }
    {
       "method": "gso-size-reduction",
@@ -6063,7 +6063,7 @@ fn _flatter_iterated_gso_size_reduce_compact_report(any basis, int max_iteration
    def limit = max(1, max_iterations)
    mut i = 0
    mut keep_going = true
-   while(i < limit && keep_going){
+   while i < limit && keep_going {
       def rep = _flatter_gso_size_reduce_compact_report(work, 1, eta)
       work = rep.get("basis")
       total_transform = _flatter_matmul(rep.get("transform"), total_transform)
@@ -6077,7 +6077,7 @@ fn _flatter_iterated_gso_size_reduce_compact_report(any basis, int max_iteration
             "gso_recomputes": 0,
             "elapsed_ms": rep.get("elapsed_ms", 0.0)
       })
-      if(rep.get("op_count", 0) == 0){
+      if rep.get("op_count", 0) == 0 {
          stopped_reason = "identity-transform"
          keep_going = false
       } else {
@@ -6126,27 +6126,27 @@ fn refined_fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, st
    def run_passes = max(0, passes)
    def eta_scaled = Z(to_int(float(eta) * 1000000.0))
    mut p = 0
-   while(p < run_passes){
+   while p < run_passes {
       mut pass_ops = []
       mut row_reports = []
       mut changed = false
       mut i = 1
-      while(i < rows){
+      while i < rows {
          mut repeats = 0
          mut row_ops = []
          mut row_changed = true
-         while(row_changed && repeats < max(1, max_row_repeats)){
+         while row_changed && repeats < max(1, max_row_repeats) {
             row_changed = false
             def local_rows = work
             local_row_rechecks += 1
             mut j = i - 1
-            while(j >= 0){
+            while j >= 0 {
                def den = _flatter_dot_z(local_rows.get(j), local_rows.get(j))
-               if(den != Z(0)){
+               if den != Z(0) {
                   def num = _flatter_dot_z(local_rows.get(i), local_rows.get(j))
-                  if(_flatter_abs_z(num) * Z(1000000) > den * eta_scaled){
+                  if _flatter_abs_z(num) * Z(1000000) > den * eta_scaled {
                      def coeff = _flatter_round_div(num, den)
-                     if(coeff != Z(0)){
+                     if coeff != Z(0) {
                         work[i] = _flatter_row_submul(work.get(i), work.get(j), coeff)
                         transform[i] = _flatter_row_submul(transform.get(i), transform.get(j), coeff)
                         def op = {
@@ -6191,7 +6191,7 @@ fn refined_fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, st
             "orthogonality_error": 0.0,
             "reconstruction_error": 0.0
       })
-      if(!changed){ p = run_passes } else { p += 1 }
+      if !changed { p = run_passes } else { p += 1 }
    }
    def out_basis = matrix.Matrix(work)
    def after = _flatter_row_norm_profile_report(out_basis)
@@ -6242,7 +6242,7 @@ fn iterated_fused_qr_size_reduce_report(any basis, int max_iterations=4, any eta
    def limit = max(1, max_iterations)
    mut i = 0
    mut keep_going = true
-   while(i < limit && keep_going){
+   while i < limit && keep_going {
       def norm_before = _flatter_total_norm_key(work)
       def rep = (qr_method == "gso" || qr_method == "gso-only") ? _flatter_gso_size_reduce_report(work, 1, eta) : fused_qr_size_reduce_report(work, 1, eta, qr_method)
       def next_basis = rep.get("basis")
@@ -6265,7 +6265,7 @@ fn iterated_fused_qr_size_reduce_report(any basis, int max_iterations=4, any eta
             "profile_after": rep.get("profile_after", []),
             "elapsed_ms": rep.get("elapsed_ms", 0.0)
       })
-      if(rep.get("op_count", 0) == 0){
+      if rep.get("op_count", 0) == 0 {
          stopped_reason = "identity-transform"
          keep_going = false
       } else {
@@ -6315,20 +6315,20 @@ fn short_row_prepass_report(any basis, bool track_transform=true) dict {
    mut best = 0
    mut best_norm = n > 0 ? _flatter_dot_z(rows.get(0), rows.get(0)) : Z(0)
    mut i = 1
-   while(i < n){
+   while i < n {
       def nr = _flatter_dot_z(rows.get(i), rows.get(i))
-      if(nr < best_norm){
+      if nr < best_norm {
          best = i
          best_norm = nr
       }
       i += 1
    }
    mut swaps = 0
-   if(best != 0 && n > 0){
+   if best != 0 && n > 0 {
       def tmp = rows.get(0)
       rows[0] = rows.get(best)
       rows[best] = tmp
-      if(track){
+      if track {
          def tr_tmp = transform.get(0)
          transform[0] = transform.get(best)
          transform[best] = tr_tmp
@@ -6369,9 +6369,9 @@ fn banded_triplet_prepass_report(any basis, int max_gap=8, int coeff_bound=4) di
    def first_before = rows > 0 ? _flatter_dot_z(work.get(0), work.get(0)) : Z(0)
    mut best_norm = first_before
    mut i0 = 1
-   while(i0 < rows){
+   while i0 < rows {
       def nr = _flatter_dot_z(work.get(i0), work.get(i0))
-      if(nr < best_norm){
+      if nr < best_norm {
          best_norm = nr
          best_idx = i0
       }
@@ -6386,9 +6386,9 @@ fn banded_triplet_prepass_report(any basis, int max_gap=8, int coeff_bound=4) di
    def gap_limit = max(1, max_gap)
    def bound = max(1, coeff_bound)
    mut gap = 1
-   while(gap <= gap_limit){
+   while gap <= gap_limit {
       mut i = 0
-      while(i + 2 * gap < rows){
+      while i + 2 * gap < rows {
          def j = i + gap
          def k = i + 2 * gap
          def ri = work.get(i)
@@ -6401,15 +6401,15 @@ fn banded_triplet_prepass_report(any basis, int max_gap=8, int coeff_bound=4) di
          def dik = _flatter_dot_z(ri, rk)
          def djk = _flatter_dot_z(rj, rk)
          mut c1i = 0 - bound
-         while(c1i <= bound){
+         while c1i <= bound {
             mut c2i = 0 - bound
-            while(c2i <= bound){
-               if(c1i != 0 || c2i != 0){
+            while c2i <= bound {
+               if c1i != 0 || c2i != 0 {
                   def zc1 = Z(c1i)
                   def zc2 = Z(c2i)
                   def cn = ni + zc1 * zc1 * nj + zc2 * zc2 * nk - Z(2) * zc1 * dij - Z(2) * zc2 * dik + Z(2) * zc1 * zc2 * djk
                   candidate_count += 1
-                  if(cn < best_norm){
+                  if cn < best_norm {
                      best_norm = cn
                      best_i = i
                      best_j = j
@@ -6427,7 +6427,7 @@ fn banded_triplet_prepass_report(any basis, int max_gap=8, int coeff_bound=4) di
       gap += 1
    }
    mut op_count = 0
-   if(best_j >= 0){
+   if best_j >= 0 {
       mut best_row = _flatter_row_submul(work.get(best_i), work.get(best_j), best_c1)
       best_row = _flatter_row_submul(best_row, work.get(best_k), best_c2)
       work[best_i] = best_row
@@ -6437,7 +6437,7 @@ fn banded_triplet_prepass_report(any basis, int max_gap=8, int coeff_bound=4) di
       best_idx = best_i
    }
    mut swaps = 0
-   if(best_idx != 0 && rows > 0){
+   if best_idx != 0 && rows > 0 {
       def tmp_row = work.get(0)
       work[0] = work.get(best_idx)
       work[best_idx] = tmp_row
@@ -6486,32 +6486,32 @@ fn _flatter_norm_sort_report(any basis, bool track_transform=true) dict {
    mut norms = list(n)
    __list_set_len(norms, n)
    mut ni = 0
-   while(ni < n){
+   while ni < n {
       norms[ni] = _flatter_dot_z(rows.get(ni), rows.get(ni))
       ni += 1
    }
    mut swaps = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       mut best = i
       mut best_norm = norms.get(i)
       mut j = i + 1
-      while(j < n){
+      while j < n {
          def nr = norms.get(j)
-         if(nr < best_norm){
+         if nr < best_norm {
             best = j
             best_norm = nr
          }
          j += 1
       }
-      if(best != i){
+      if best != i {
          def tmp = rows.get(i)
          rows[i] = rows.get(best)
          rows[best] = tmp
          def norm_tmp = norms.get(i)
          norms[i] = norms.get(best)
          norms[best] = norm_tmp
-         if(track){
+         if track {
             def tr_tmp = transform.get(i)
             transform[i] = transform.get(best)
             transform[best] = tr_tmp
@@ -6539,7 +6539,7 @@ fn _flatter_norm_sort_report(any basis, bool track_transform=true) dict {
 fn _flatter_fixed_dot(list a, list b) bigint {
    mut s = bf_zero()
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       s = bf_add(s, bf_mul(_flatter_bf_from_scalar(a.get(i)), _flatter_bf_from_scalar(b.get(i))))
       i += 1
    }
@@ -6555,14 +6555,14 @@ fn _flatter_fixed_gram_report(any basis, any exact_gram) dict {
    mut max_scaled_error = Z(0)
    mut multiply_adds = 0
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < rows){
+      while j < rows {
          def got = _flatter_fixed_dot(data.get(i), data.get(j))
          def expect = Z(matrix.mat_get(exact_gram, i, j)) * BF_SCALE
          def err = _flatter_abs_z(got - expect)
-         if(err > max_scaled_error){ max_scaled_error = err }
+         if err > max_scaled_error { max_scaled_error = err }
          row = row.append(got)
          multiply_adds += data.get(i).len
          j += 1
@@ -6585,7 +6585,7 @@ fn _flatter_fixed_gram_report(any basis, any exact_gram) dict {
 fn _flatter_float_dot(list a, list b) f64 {
    mut s = 0.0
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       s = s + float(a.get(i)) * float(b.get(i))
       i += 1
    }
@@ -6596,10 +6596,10 @@ fn _flatter_compensated_float_dot(list a, list b) list {
    mut sum = 0.0
    mut comp = 0.0
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       def prod = float(a.get(i)) * float(b.get(i))
       def t = sum + prod
-      if(abs(sum) >= abs(prod)){
+      if abs(sum) >= abs(prod) {
          comp = comp + ((sum - t) + prod)
       } else {
          comp = comp + ((prod - t) + sum)
@@ -6620,12 +6620,12 @@ fn _flatter_float_gram_report(any basis, any exact_gram, bool compensated=false)
    mut correction_abs_sum = 0.0
    mut multiply_adds = 0
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < rows){
+      while j < rows {
          mut got = 0.0
-         if(compensated){
+         if compensated {
             def pair = _flatter_compensated_float_dot(data.get(i), data.get(j))
             got = float(pair.get(0))
             correction_abs_sum = correction_abs_sum + abs(float(pair.get(1)))
@@ -6634,7 +6634,7 @@ fn _flatter_float_gram_report(any basis, any exact_gram, bool compensated=false)
          }
          def expect = _flatter_z_to_float(matrix.mat_get(exact_gram, i, j))
          def err = abs(got - expect)
-         if(err > max_abs_error){ max_abs_error = err }
+         if err > max_abs_error { max_abs_error = err }
          row = row.append(got)
          multiply_adds += data.get(i).len
          j += 1
@@ -6696,7 +6696,7 @@ fn _flatter_dd_add(list a, list b) list {
 fn _flatter_double_double_dot(list a, list b) list {
    mut acc = [0.0, 0.0]
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       acc = _flatter_dd_add(acc, _flatter_dd_two_prod(float(a.get(i)), float(b.get(i))))
       i += 1
    }
@@ -6714,18 +6714,18 @@ fn _flatter_double_double_gram_report(any basis, any exact_gram) dict {
    mut correction_abs_sum = 0.0
    mut multiply_adds = 0
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut hi_row = []
       mut lo_row = []
       mut j = 0
-      while(j < rows){
+      while j < rows {
          def dd = _flatter_double_double_dot(data.get(i), data.get(j))
          def hi = float(dd.get(0))
          def lo = float(dd.get(1))
          def got = hi + lo
          def expect = _flatter_z_to_float(matrix.mat_get(exact_gram, i, j))
          def err = abs(got - expect)
-         if(err > max_abs_error){ max_abs_error = err }
+         if err > max_abs_error { max_abs_error = err }
          correction_abs_sum = correction_abs_sum + abs(lo)
          hi_row = hi_row.append(hi)
          lo_row = lo_row.append(lo)
@@ -6752,14 +6752,14 @@ fn _flatter_expansion_sum(list e, f64 x) list {
    mut q = x
    mut out = []
    mut i = 0
-   while(i < e.len){
+   while i < e.len {
       def s = _flatter_dd_two_sum(q, float(e.get(i)))
       def err = float(s.get(1))
-      if(err != 0.0){ out = out.append(err) }
+      if err != 0.0 { out = out.append(err) }
       q = float(s.get(0))
       i += 1
    }
-   if(q != 0.0){ out = out.append(q) }
+   if q != 0.0 { out = out.append(q) }
    out
 }
 
@@ -6767,7 +6767,7 @@ fn _flatter_quad_double_from_expansion(list e) list {
    mut out = [0.0, 0.0, 0.0, 0.0]
    mut oi = 0
    mut i = e.len - 1
-   while(i >= 0 && oi < 4){
+   while i >= 0 && oi < 4 {
       out[oi] = float(e.get(i))
       oi += 1
       i -= 1
@@ -6778,7 +6778,7 @@ fn _flatter_quad_double_from_expansion(list e) list {
 fn _flatter_quad_double_dot(list a, list b) list {
    mut exp = []
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       def prod = _flatter_dd_two_prod(float(a.get(i)), float(b.get(i)))
       exp = _flatter_expansion_sum(exp, float(prod.get(1)))
       exp = _flatter_expansion_sum(exp, float(prod.get(0)))
@@ -6790,7 +6790,7 @@ fn _flatter_quad_double_dot(list a, list b) list {
 fn _flatter_quad_double_value(list q) f64 {
    mut s = 0.0
    mut i = 0
-   while(i < q.len){
+   while i < q.len {
       s = s + float(q.get(i))
       i += 1
    }
@@ -6807,17 +6807,17 @@ fn _flatter_quad_double_gram_report(any basis, any exact_gram) dict {
    mut component_abs_sum = 0.0
    mut multiply_adds = 0
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < rows){
+      while j < rows {
          def qd = _flatter_quad_double_dot(data.get(i), data.get(j))
          def got = _flatter_quad_double_value(qd)
          def expect = _flatter_z_to_float(matrix.mat_get(exact_gram, i, j))
          def err = abs(got - expect)
-         if(err > max_abs_error){ max_abs_error = err }
+         if err > max_abs_error { max_abs_error = err }
          mut qi = 0
-         while(qi < qd.len){
+         while qi < qd.len {
             component_abs_sum = component_abs_sum + abs(float(qd.get(qi)))
             qi += 1
          }
@@ -6848,7 +6848,7 @@ fn lattice_quad_double_gram_report(any basis) dict {
 
 fn _flatter_dpe_from_z(any x) dict {
    def z = Z(x)
-   if(z == Z(0)){
+   if z == Z(0) {
       return {"sign": 0, "mantissa": 0.0, "exponent2": 0, "log2_abs": 0.0}
    }
    def logv = _flatter_log2_abs(z)
@@ -6873,20 +6873,20 @@ fn _flatter_dpe_gram_report(any exact_gram) dict {
    mut max_log2_error = 0.0
    mut overflow_safe_entries = 0
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut row = []
       mut j = 0
-      while(j < cols){
+      while j < cols {
          def d = _flatter_dpe_from_z(data.get(i).get(j))
          def exp2 = int(d.get("exponent2", 0))
          def eabs = exp2 < 0 ? 0 - exp2 : exp2
-         if(eabs > max_exp_abs){ max_exp_abs = eabs }
-         if(eabs > 1023){ overflow_safe_entries += 1 }
-         if(int(d.get("sign", 0)) != 0){
+         if eabs > max_exp_abs { max_exp_abs = eabs }
+         if eabs > 1023 { overflow_safe_entries += 1 }
+         if int(d.get("sign", 0)) != 0 {
             def mant = float(d.get("mantissa", 1.0))
             def recon = float(d.get("exponent2", 0)) + _flatter_log2_float_approx(mant)
             def err = abs(recon - float(d.get("log2_abs", 0.0)))
-            if(err > max_log2_error){ max_log2_error = err }
+            if err > max_log2_error { max_log2_error = err }
          }
          row = row.append(d)
          j += 1
@@ -7075,7 +7075,7 @@ fn hlll_reduce_report(any basis, any delta=0.99, int max_rounds=2, any eta=0.51)
    def limit = max(1, max_rounds)
    mut r = 0
    mut changed = true
-   while(r < limit && changed){
+   while r < limit && changed {
       def qin = rows >= cols ? work : matrix.matrix_transpose(work)
       def qr = householder_qr_factor_report(qin)
       def fused = iterated_fused_qr_size_reduce_report(work, 2, eta, "householder")
@@ -7178,7 +7178,7 @@ fn _flatter_prepass_exit_report(str compression, str reason, any delta, int max_
       "elapsed_ms": float(ticks() - started_at) / 1000000.0,
       "basis": _flatter_public_basis(basis)
    }
-   if(verification_skipped){ out["verification_skipped"] = true }
+   if verification_skipped { out["verification_skipped"] = true }
    out
 }
 
@@ -7211,7 +7211,7 @@ fn _flatter_pair_prepass_summary(dict pair, int pair_ops, any first_before, any 
       "first_norm_after": first_after,
       "elapsed_ms": pair.get("elapsed_ms", 0.0)
    }
-   if(include_tracking){ out["transform_tracked"] = pair.get("transform_tracked", false) }
+   if include_tracking { out["transform_tracked"] = pair.get("transform_tracked", false) }
    out
 }
 
@@ -7262,29 +7262,29 @@ fn _flatter_triangular_unit_column_prepass_report(any a, any before_best, any be
    mut unit_row = -1
    mut unit_val = Z(0)
    mut c = cols - 1
-   while(c >= 0 && unit_col < 0){
+   while c >= 0 && unit_col < 0 {
       mut seen = 0
       mut seen_row = -1
       mut seen_val = Z(0)
       mut r = 0
-      while(r < rows){
+      while r < rows {
          def v = Z(data.get(r).get(c))
-         if(v != Z(0)){
+         if v != Z(0) {
             seen += 1
             seen_row = r
             seen_val = v
-            if(seen > 1){ r = rows }
+            if seen > 1 { r = rows }
          }
          r += 1
       }
-      if(seen == 1 && (seen_val == Z(1) || seen_val == Z(-1))){
+      if seen == 1 && (seen_val == Z(1) || seen_val == Z(-1)) {
          unit_col = c
          unit_row = seen_row
          unit_val = seen_val
       }
       c -= 1
    }
-   if(unit_col < 0){
+   if unit_col < 0 {
       return {
          "method": "triangular-column-unit-prepass", "found": false,
          "rows": rows, "cols": cols, "op_count": 0, "lll_step_count": 0,
@@ -7298,14 +7298,14 @@ fn _flatter_triangular_unit_column_prepass_report(any a, any before_best, any be
    mut work = _flatter_clone_rows(a)
    mut row = work.get(unit_row)
    mut j = 0
-   while(j < cols){
-      if(j != unit_col){ row[j] = 0 }
+   while j < cols {
+      if j != unit_col { row[j] = 0 }
       j += 1
    }
    work[unit_row] = row
-   if(unit_col != 0){
+   if unit_col != 0 {
       mut i = 0
-      while(i < rows){
+      while i < rows {
          mut ri = work.get(i)
          def tmp = ri.get(0)
          ri[0] = ri.get(unit_col)
@@ -7315,7 +7315,7 @@ fn _flatter_triangular_unit_column_prepass_report(any a, any before_best, any be
       }
    }
    mut sort_ops = 0
-   if(unit_row != 0){
+   if unit_row != 0 {
       def tmp = work.get(0)
       work[0] = work.get(unit_row)
       work[unit_row] = tmp
@@ -7343,7 +7343,7 @@ fn _flatter_triangular_column_bounded_prepass_report(any basis, int step_budget=
    def cols = _flatter_matrix_cols(a)
    def before_best = _flatter_best_norm_sq(a)
    def before_first = rows > 0 ? _flatter_dot_z(_flatter_matrix_data(a).get(0), _flatter_matrix_data(a).get(0)) : Z(0)
-   if(rows != cols || !_flatter_is_lower_triangular(a)){
+   if rows != cols || !_flatter_is_lower_triangular(a) {
       return {
          "method": "triangular-column-bounded-prepass",
          "found": false,
@@ -7364,12 +7364,12 @@ fn _flatter_triangular_column_bounded_prepass_report(any basis, int step_budget=
       }
    }
    def unit = _flatter_triangular_unit_column_prepass_report(a, before_best, before_first, t0)
-   if(unit.get("found", false) && unit.get("best_norm_after", before_best) < before_best){ return unit }
+   if unit.get("found", false) && unit.get("best_norm_after", before_best) < before_best { return unit }
    def red = lll_backend.lll_reduce_bounded_report(matrix.matrix_transpose(a), max(64, step_budget), delta, "bounded-int-no-transform", eta)
    mut out_basis = matrix.matrix_transpose(red.get("basis"))
    def sorted = short_row_prepass_report(out_basis, false)
    def sort_ops = sorted.get("op_count", 0)
-   if(sort_ops > 0){ out_basis = sorted.get("basis") }
+   if sort_ops > 0 { out_basis = sorted.get("basis") }
    def out_data = _flatter_matrix_data(out_basis)
    {
       "method": "triangular-column-bounded-prepass",
@@ -7485,7 +7485,7 @@ fn _flatter_round_summary(int round_index, dict fused, dict rep, any round_delta
 }
 
 fn _flatter_round_fused(any work, any eta, bool triangular_round_path, bool track_transform) dict {
-   if(triangular_round_path && !track_transform){
+   if triangular_round_path && !track_transform {
       return {
          "method": "triangular-direct-no-fused",
          "basis": work,
@@ -7500,9 +7500,9 @@ fn _flatter_round_fused(any work, any eta, bool triangular_round_path, bool trac
 }
 
 fn _flatter_round_delta(any delta, int rows, bool triangular_round_path, bool triangular_warmup_prepass, bool track_transform) any {
-   if(triangular_round_path && !track_transform && rows >= 64){ return 0.97 }
-   if(!triangular_round_path || float(delta) <= 0.75){ return delta }
-   if(!track_transform && rows >= 24 && rows < 64){ return triangular_warmup_prepass ? 0.75 : 0.86076 }
+   if triangular_round_path && !track_transform && rows >= 64 { return 0.97 }
+   if !triangular_round_path || float(delta) <= 0.75 { return delta }
+   if !track_transform && rows >= 24 && rows < 64 { return triangular_warmup_prepass ? 0.75 : 0.86076 }
    rows >= 24 ? 0.90 : 0.75
 }
 
@@ -7523,7 +7523,7 @@ fn _flatter_round_lll(dict fused, int rows, int cols, any delta, any eta, bool t
 }
 
 fn _flatter_round_transform(any total_transform, dict fused, dict rep) any {
-   if(total_transform != nil && rep.get("transform_tracked", false)){
+   if total_transform != nil && rep.get("transform_tracked", false) {
       def round_transform = _flatter_matmul(rep.get("transform"), fused.get("transform"))
       return _flatter_matmul(round_transform, total_transform)
    }
@@ -7533,10 +7533,10 @@ fn _flatter_round_transform(any total_transform, dict fused, dict rep) any {
 fn _flatter_round_sort(any work, bool triangular_round_path, bool track_transform, int rows) dict {
    mut sorted = dict(0)
    mut ops = 0
-   if(triangular_round_path && !track_transform && rows >= 64){
+   if triangular_round_path && !track_transform && rows >= 64 {
       sorted = short_row_prepass_report(work, false)
       ops = sorted.get("op_count", 0)
-      if(ops > 0){ work = sorted.get("basis") }
+      if ops > 0 { work = sorted.get("basis") }
    }
    {"basis": work, "report": sorted, "op_count": ops}
 }
@@ -7544,7 +7544,7 @@ fn _flatter_round_sort(any work, bool triangular_round_path, bool track_transfor
 fn _flatter_round_profile_goal(any work, str goal_target, any goal_value, bool goal_proved, bool skip_profile) list {
    mut round_shape = _flatter_skip("triangular no-transform fast summary")
    mut round_goal = _flatter_skipped_profile_goal()
-   if(!skip_profile){
+   if !skip_profile {
       round_shape = profile_shape_report(work)
       round_goal = profile_goal_report(round_shape, goal_target, goal_value, goal_proved)
    }
@@ -7552,9 +7552,9 @@ fn _flatter_round_profile_goal(any work, str goal_target, any goal_value, bool g
 }
 
 fn _flatter_round_next_state(str stopped_reason, dict round_goal, dict rep, dict fused, any first, any prev_first, bool stop_on_goal, bool triangular_round_path, bool track_transform, int rows) list {
-   if(bool(stop_on_goal) && round_goal.get("satisfied", false)){ return [false, "profile-goal-after-round"] }
-   if(!rep.get("reduction_complete", true) && !(triangular_round_path && !track_transform && rows >= 64)){ return [false, "lll-" + rep.get("incomplete_reason", "incomplete")] }
-   if(triangular_round_path && !track_transform && rows < 64){ return [false, "triangular-no-transform-one-round"] }
+   if bool(stop_on_goal) && round_goal.get("satisfied", false) { return [false, "profile-goal-after-round"] }
+   if !rep.get("reduction_complete", true) && !(triangular_round_path && !track_transform && rows >= 64) { return [false, "lll-" + rep.get("incomplete_reason", "incomplete")] }
+   if triangular_round_path && !track_transform && rows < 64 { return [false, "triangular-no-transform-one-round"] }
    def changed = first < prev_first || fused.get("op_count", 0) > 0 || rep.get("steps", 0) > 0
    [changed, changed ? stopped_reason : "fixed-point"]
 }
@@ -7644,14 +7644,14 @@ fn _flatter_small_direct_path(any delta, int max_rounds, any eta, list prepass_r
    mut total_transform = total_transform_in
    mut prepass_ops = total_prepass_ops
    mut small_delta = float(delta) > 0.75 ? 0.75 : delta
-   if(_flatter_is_lower_triangular(work) && float(small_delta) > 0.55){ small_delta = 0.55 }
-   if(rows == 16 && !_flatter_is_lower_triangular(work)){
+   if _flatter_is_lower_triangular(work) && float(small_delta) > 0.55 { small_delta = 0.55 }
+   if rows == 16 && !_flatter_is_lower_triangular(work) {
       def pair = lagrange_pair_reduce_report(work, 15, 1, 32, false, true, track_transform)
       def pair_ops = pair.get("row_op_count", pair.get("op_count", 0) + pair.get("swap_count", 0))
       def pair_after = pair.get("first_norm_after", first_before_sort)
-      if(pair_ops > 0 && first_before_sort > Z(0) && pair_after < first_before_sort){
+      if pair_ops > 0 && first_before_sort > Z(0) && pair_after < first_before_sort {
          work = pair.get("basis")
-         if(pair.get("transform_tracked", false)){
+         if pair.get("transform_tracked", false) {
             total_transform = _flatter_chain_prepass_transform(total_transform, pair.get("transform"), prepass_reports.len != 0)
          } else {
             total_transform = nil
@@ -7665,16 +7665,16 @@ fn _flatter_small_direct_path(any delta, int max_rounds, any eta, list prepass_r
    def small_budget = max(64, rows * rows * _flatter_matrix_cols(work) * 16)
    def small = track_transform ? lll_backend.lll_reduce_report(work, small_delta, small_method, eta) : lll_backend.lll_reduce_bounded_report(work, small_budget, small_delta, small_method, eta)
    work = small.get("basis")
-   if(total_transform != nil && small.get("transform_tracked", false)){
+   if total_transform != nil && small.get("transform_tracked", false) {
       total_transform = _flatter_matmul(small.get("transform"), total_transform)
-   } elif(!small.get("transform_tracked", false)){
+   } elif !small.get("transform_tracked", false) {
       total_transform = nil
    }
    def small_sort = short_row_prepass_report(work, track_transform)
    def small_sort_ops = small_sort.get("op_count", 0)
-   if(small_sort_ops > 0){
+   if small_sort_ops > 0 {
       work = small_sort.get("basis")
-      if(total_transform != nil){ total_transform = _flatter_matmul(small_sort.get("transform"), total_transform) }
+      if total_transform != nil { total_transform = _flatter_matmul(small_sort.get("transform"), total_transform) }
    }
    _flatter_small_direct_report(delta, max_rounds, eta, prepass_reports, triangular_prepass, prepass_ops, small_method, small_delta, small, small_sort, small_sort_ops, total_transform, work, rows, first_before_sort, started_at, track_transform)
 }
@@ -7684,7 +7684,7 @@ fn _flatter_bounded_direct_path(any delta, int max_rounds, any eta, list prepass
    mut work = direct.get("basis")
    def sorted = short_row_prepass_report(work, false)
    def sort_ops = sorted.get("op_count", 0)
-   if(sort_ops > 0){ work = sorted.get("basis") }
+   if sort_ops > 0 { work = sorted.get("basis") }
    mut out = _flatter_small_direct_report(delta, max_rounds, eta, prepass_reports, triangular_prepass, total_prepass_ops, direct.get("method", "bounded-int-no-transform"), delta, direct, sorted, sort_ops, nil, work, rows, first_before_sort, started_at, false)
    out["compression"] = "bounded-direct-lll"
    out["direct_budget"] = max(64, budget)
@@ -7713,15 +7713,15 @@ fn _flatter_triangular_prepass_path(any work_in, any total_transform_in, int row
    mut prepass_reports = prepass_reports_in
    mut total_prepass_ops = total_prepass_ops_in
    mut triangular_prepass, triangular_warmup_prepass = false, false
-   if(rows < 32 || !_flatter_is_lower_triangular(work)){
+   if rows < 32 || !_flatter_is_lower_triangular(work) {
       return {"work": work, "transform": total_transform, "reports": prepass_reports, "op_count": total_prepass_ops, "triangular": false, "warmup": false, "bounded": false}
    }
    mut bounded_triangular_prepass = false
-   if(!track_transform && rows >= 96 && _flatter_is_lower_triangular(work)){
+   if !track_transform && rows >= 96 && _flatter_is_lower_triangular(work) {
       def current_best_col = _flatter_best_norm_sq(work)
       def col = _flatter_triangular_column_bounded_prepass_report(work, rows >= 128 ? 80000 : 24000, 0.97, 0.60)
       def col_best = col.get("best_norm_after", current_best_col)
-      if(col.get("found", false) && col_best < current_best_col){
+      if col.get("found", false) && col_best < current_best_col {
          work = col.get("basis")
          total_transform = nil
          triangular_prepass = true
@@ -7737,11 +7737,11 @@ fn _flatter_triangular_prepass_path(any work_in, any total_transform_in, int row
          })
       }
    }
-   if(rows < 64 && !track_transform){
+   if rows < 64 && !track_transform {
       def direct = triangular_bounded_lll_prepass_report(work, 2048, 2, 0.75, 0.60, false)
       def direct_best = direct.get("best_norm_after")
       def current_best = direct.get("best_norm_before")
-      if(direct_best < current_best){
+      if direct_best < current_best {
          work = direct.get("basis")
          triangular_prepass = true
          triangular_warmup_prepass = true
@@ -7749,27 +7749,27 @@ fn _flatter_triangular_prepass_path(any work_in, any total_transform_in, int row
          prepass_reports = prepass_reports.append(_flatter_triangular_bounded_prepass_summary(direct, "triangular-bounded-warmup-prepass", current_best, direct_best, false, false, true))
       }
    }
-   if(rows >= 64 && !bounded_triangular_prepass){
+   if rows >= 64 && !bounded_triangular_prepass {
       def direct_step_cap = track_transform ? 2048 : (rows == 64 ? 8192 : (rows >= 96 ? 6144 : 4096))
       def direct_rounds = track_transform ? 3 : (rows == 64 ? 8 : 8)
       def direct_eta = track_transform ? eta : 0.60
       def direct = triangular_bounded_lll_prepass_report(work, direct_step_cap, direct_rounds, 0.75, direct_eta, track_transform)
       def direct_best = _flatter_best_norm_sq(direct.get("basis"))
       def current_best = _flatter_best_norm_sq(work)
-      if(direct_best < current_best){
+      if direct_best < current_best {
          work = direct.get("basis")
-         if(total_transform != nil && direct.get("transform_tracked", false)){ total_transform = _flatter_matmul(direct.get("transform"), total_transform) }
+         if total_transform != nil && direct.get("transform_tracked", false) { total_transform = _flatter_matmul(direct.get("transform"), total_transform) }
          triangular_prepass = true
          bounded_triangular_prepass = true
          total_prepass_ops += direct.get("op_count", direct.get("steps", 0))
          prepass_reports = prepass_reports.append(_flatter_triangular_bounded_prepass_summary(direct, "triangular-bounded-lll-prepass", current_best, direct_best, direct.get("transform_tracked", false), direct.get("transform_verified", false), direct.get("verification_skipped", false)))
       }
    }
-   if(!bounded_triangular_prepass && rows >= 64){
+   if !bounded_triangular_prepass && rows >= 64 {
       def normal = triangular_tail_normal_form_report(work)
-      if(normal.get("found", false) && (normal.get("transform_verified", false) || !track_transform)){
+      if normal.get("found", false) && (normal.get("transform_verified", false) || !track_transform) {
          work = normal.get("basis")
-         if(total_transform != nil){ total_transform = _flatter_matmul(normal.get("transform"), total_transform) }
+         if total_transform != nil { total_transform = _flatter_matmul(normal.get("transform"), total_transform) }
          triangular_prepass = true
          total_prepass_ops += normal.get("op_count", 0)
          prepass_reports = prepass_reports.append({
@@ -7781,10 +7781,10 @@ fn _flatter_triangular_prepass_path(any work_in, any total_transform_in, int row
          })
       }
    }
-   if(_flatter_is_lower_triangular(work) && (track_transform || rows >= 64) && !(bounded_triangular_prepass && !track_transform)){
+   if _flatter_is_lower_triangular(work) && (track_transform || rows >= 64) && !(bounded_triangular_prepass && !track_transform) {
       def tri = blocked_triangular_size_reduce_report(work, 32, max(1, max_rounds), track_transform)
       work = tri.get("basis")
-      if(total_transform != nil){ total_transform = _flatter_matmul(tri.get("transform"), total_transform) }
+      if total_transform != nil { total_transform = _flatter_matmul(tri.get("transform"), total_transform) }
       triangular_prepass = true
       total_prepass_ops += tri.get("op_count", 0)
       prepass_reports = prepass_reports.append({
@@ -7811,7 +7811,7 @@ fn _flatter_reduction_rounds(
    def bounded_triangular_stop = track_transform && prepass_reports.len > 0 && prepass_reports.get(prepass_reports.len - 1).get("method", "") == "triangular-bounded-lll-prepass"
    mut changed = !(bool(stop_on_goal) && goal_before.get("satisfied", false)) && !bounded_triangular_stop
    mut stopped_reason = bounded_triangular_stop ? "triangular-bounded-lll-prepass" : (changed ? "max-rounds" : "profile-goal-before")
-   while(changed && i < max_rounds){
+   while changed && i < max_rounds {
       def round = _flatter_reduce_round(work, total_transform, rows, cols, delta, eta, goal_target, goal_value, goal_proved, stop_on_goal, track_transform, triangular_round_path, triangular_fast_summary, triangular_warmup_prepass, prev_first, i + 1, stopped_reason)
       work = round.get("work")
       total_transform = round.get("transform")
@@ -7848,10 +7848,10 @@ fn _flatter_round_path_report(
    total_prepass_ops = tri_path.get("op_count")
    def triangular_prepass = triangular_prepass_in || tri_path.get("triangular")
    def triangular_warmup_prepass = tri_path.get("warmup")
-   if(!track_transform && prepass_reports.len > 0){
+   if !track_transform && prepass_reports.len > 0 {
       def last_prepass = prepass_reports.get(prepass_reports.len - 1)
       def last_method = last_prepass.get("method", "")
-      if((last_method == "triangular-column-bounded-prepass" || last_method == "triangular-column-unit-prepass") && Z(last_prepass.get("best_norm_after", Z(2))) <= Z(1)){
+      if (last_method == "triangular-column-bounded-prepass" || last_method == "triangular-column-unit-prepass") && Z(last_prepass.get("best_norm_after", Z(2))) <= Z(1) {
          mut solved = _flatter_prepass_exit_report(last_method, "triangular column prepass solved unit vector", delta, 0, eta, prepass_reports, triangular_prepass, total_prepass_ops, nil, false, work, t0, true)
          solved["requested_max_rounds"] = max_rounds
          solved["strategy_round_floor"] = "triangular-column-solved"
@@ -7864,25 +7864,25 @@ fn _flatter_round_path_report(
    def skip_profile_summary = triangular_fast_summary || bounded_triangular_stop || (triangular_round_path && !stop_on_goal && rows >= 32) || (!track_transform && !stop_on_goal && rows >= 48)
    mut before_shape, before = _flatter_skip("no-transform fast summary"), _flatter_profile_stub(work, rows)
    mut goal_before = _flatter_skipped_profile_goal()
-   if(!skip_profile_summary){
+   if !skip_profile_summary {
       before_shape = profile_shape_report(work)
       before = before_shape.get("gso")
       goal_before = profile_goal_report(before_shape, goal_target, goal_value, goal_proved)
    }
    mut effective_max_rounds = max_rounds
    mut strategy_round_floor = ""
-   if(triangular_fast_summary && rows == 64 && max_rounds < 3){
+   if triangular_fast_summary && rows == 64 && max_rounds < 3 {
       effective_max_rounds = 3
       strategy_round_floor = "triangular-dim64"
    }
-   if(triangular_fast_summary && rows == 96 && max_rounds < 24){
+   if triangular_fast_summary && rows == 96 && max_rounds < 24 {
       effective_max_rounds = 24
       strategy_round_floor = "triangular-dim96"
    }
-   if(prepass_reports.len > 0){
+   if prepass_reports.len > 0 {
       def last_prepass = prepass_reports.get(prepass_reports.len - 1)
       def last_method = last_prepass.get("method", "")
-      if((last_method == "triangular-column-bounded-prepass" || last_method == "triangular-column-unit-prepass") && Z(last_prepass.get("best_norm_after", Z(2))) <= Z(1)){
+      if (last_method == "triangular-column-bounded-prepass" || last_method == "triangular-column-unit-prepass") && Z(last_prepass.get("best_norm_after", Z(2))) <= Z(1) {
          effective_max_rounds = 0
          strategy_round_floor = "triangular-column-solved"
       }
@@ -7898,19 +7898,19 @@ fn _flatter_round_path_report(
    def final_short_only = total_transform == nil && !stop_on_goal && (triangular_fast_summary || (!track_transform && rows >= 48))
    def final_sort = final_short_only ? short_row_prepass_report(work, false) : _flatter_norm_sort_report(work, total_transform != nil)
    def final_sort_ops = final_sort.get("op_count", 0)
-   if(final_sort_ops > 0){
+   if final_sort_ops > 0 {
       work = final_sort.get("basis")
-      if(total_transform != nil){ total_transform = _flatter_matmul(final_sort.get("transform"), total_transform) }
+      if total_transform != nil { total_transform = _flatter_matmul(final_sort.get("transform"), total_transform) }
    }
    mut after_shape, after = _flatter_skip("no-transform fast summary"), _flatter_profile_stub(work, rows)
-   if(!skip_profile_summary){
+   if !skip_profile_summary {
       after_shape = profile_shape_report(work)
       after = after_shape.get("gso")
       goal_after = profile_goal_report(after_shape, goal_target, goal_value, goal_proved)
    }
    def applied = total_transform == nil ? work : _flatter_matmul(total_transform, original)
    mut out = _flatter_final_report(delta, effective_max_rounds, eta, goal_target, goal_value, goal_proved, stop_on_goal, stopped_reason, rounds, prepass_reports, triangular_prepass, triangular_warmup_prepass, total_fused_ops, total_prepass_ops, final_sort, final_sort_ops, total_lll_steps, before, after, before_shape, after_shape, goal_before, goal_after, total_transform, applied, work, t0)
-   if(effective_max_rounds != max_rounds){
+   if effective_max_rounds != max_rounds {
       out["requested_max_rounds"] = max_rounds
       out["strategy_round_floor"] = strategy_round_floor
    }
@@ -8027,10 +8027,10 @@ fn _flatter_upper_qary_orientation_report(any original, int split, any delta, in
    def oriented = _flatter_qary_blockswap_orientation(original, split)
    def inner_t0 = ticks()
    def first_before = _flatter_dot_z(_flatter_matrix_data(oriented).get(0), _flatter_matrix_data(oriented).get(0))
-   if(_flatter_matrix_rows(oriented) >= 96 && float(delta) >= 0.95 && max_rounds >= 3){
+   if _flatter_matrix_rows(oriented) >= 96 && float(delta) >= 0.95 && max_rounds >= 3 {
       return _flatter_upper_qary_scaled_transform_report(original, split, delta, max_rounds, eta, goal_target, goal_value, goal_proved, stop_on_goal, started_at)
    }
-   if(_flatter_matrix_rows(oriented) <= 64 && float(delta) >= 0.95 && max_rounds >= 3){
+   if _flatter_matrix_rows(oriented) <= 64 && float(delta) >= 0.95 && max_rounds >= 3 {
       def strong_t = ticks()
       def sized = blocked_triangular_size_reduce_report(oriented, 32, 1, false)
       def primary_delta = _flatter_matrix_rows(oriented) == 64 ? 0.70 : 0.931
@@ -8107,13 +8107,13 @@ fn _flatter_upper_qary_orientation_report(any original, int split, any delta, in
    mut postpass_norm_before = _flatter_best_norm_sq(restored)
    mut postpass_norm_after = postpass_norm_before
    mut postpass_elapsed = 0.0
-   if(_flatter_matrix_rows(oriented) >= 48){
+   if _flatter_matrix_rows(oriented) >= 48 {
       def post_t = ticks()
       def post = triangular_bounded_lll_prepass_report(restored, 4096, 1, 0.75, 0.75, false)
       def post_basis = post.get("basis")
       def post_best = _flatter_best_norm_sq(post_basis)
       postpass_elapsed = float(ticks() - post_t) / 1000000.0
-      if(post_best < postpass_norm_before){
+      if post_best < postpass_norm_before {
          restored = post_basis
          postpass_applied = true
          postpass_norm_after = post_best
@@ -8155,7 +8155,7 @@ fn _flatter_upper_qary_orientation_report(any original, int split, any delta, in
 
 fn _flatter_ntru2_prepass(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool triangular_prepass, bool track_transform, any delta, int max_rounds, any eta, any t0) dict {
    def classic = _flatter_ntru_sum_relation_prepass_report(work, track_transform)
-   if(classic.get("found", false)){
+   if classic.get("found", false) {
       work = classic.get("basis")
       total_transform = track_transform ? classic.get("transform") : nil
       total_prepass_ops += classic.get("weight", 0)
@@ -8164,7 +8164,7 @@ fn _flatter_ntru2_prepass(any work, any total_transform, list prepass_reports, i
       return _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops, true, rep)
    }
    def ntru = _flatter_ntru2_sum_relation_prepass_report(work, track_transform)
-   if(ntru.get("found", false)){
+   if ntru.get("found", false) {
       work = ntru.get("basis")
       total_transform = track_transform ? ntru.get("transform") : nil
       total_prepass_ops += ntru.get("weight", 0)
@@ -8177,24 +8177,24 @@ fn _flatter_ntru2_prepass(any work, any total_transform, list prepass_reports, i
 
 fn _flatter_qary_prepasses(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool triangular_prepass, int rows, bool lower_before_initial, bool skip_general_prepasses, bool track_transform, any delta, int max_rounds, any eta, any t0) dict {
    mut qary = {"found": false}
-   if(!skip_general_prepasses){ qary = _flatter_qary_relation_prepass_report(work, "qary-relation-prepass", false, track_transform) }
-   if(qary.get("found", false)){
+   if !skip_general_prepasses { qary = _flatter_qary_relation_prepass_report(work, "qary-relation-prepass", false, track_transform) }
+   if qary.get("found", false) {
       work = qary.get("basis")
       total_transform = track_transform ? qary.get("transform") : nil
       total_prepass_ops += qary.get("weight", 0)
       prepass_reports = prepass_reports.append(_flatter_basic_prepass_summary(qary, "qary-relation-prepass", qary.get("weight", 0), qary.get("first_norm_after", 0)))
-      if(rows >= 8){
+      if rows >= 8 {
          def rep = _flatter_prepass_exit_report("qary-relation-prepass", "qary relation prepass", delta, max_rounds, eta, prepass_reports, triangular_prepass, total_prepass_ops, total_transform, track_transform && qary.get("transform_verified", false), work, t0, !track_transform)
          return _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops, true, rep, true)
       }
    }
-   if(lower_before_initial && rows >= 8){
+   if lower_before_initial && rows >= 8 {
       def lower_split = _flatter_lower_triangular_qary_split(work)
-      if(lower_split >= 0 && !_flatter_lower_qary_uniform_modulus(work, lower_split)){
+      if lower_split >= 0 && !_flatter_lower_qary_uniform_modulus(work, lower_split) {
          return _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops, false, nil, qary.get("found", false))
       }
       def lower_qary = _flatter_qary_relation_prepass_report(work, "lower-triangular-qary-relation-prepass", true, track_transform)
-      if(lower_qary.get("found", false)){
+      if lower_qary.get("found", false) {
          work = lower_qary.get("basis")
          total_transform = track_transform ? lower_qary.get("transform") : nil
          total_prepass_ops += lower_qary.get("weight", 0)
@@ -8211,16 +8211,16 @@ fn _flatter_short_prepass(any work, any total_transform, list prepass_reports, i
    mut first_after_short = first_before_sort
    mut short_swapped = false
    def rectangular_tail_fast = !track_transform && rows >= 48 && _flatter_matrix_cols(work) > rows
-   if(!skip_general_prepasses && !rectangular_tail_fast){
+   if !skip_general_prepasses && !rectangular_tail_fast {
       short = short_row_prepass_report(work, track_transform)
       first_after_short = short.get("first_norm_after", first_before_sort)
       short_swapped = short.get("swaps", 0) > 0 && first_before_sort > Z(0)
    }
    def strong_short = (rows < 96 || track_transform || lower_before) && short_swapped && first_after_short * Z(1000) < first_before_sort
    def large_short = rows >= 64 && rows < 96 && !track_transform && !lower_before && short_swapped && first_after_short * Z(4) < first_before_sort
-   if(strong_short || large_short){
+   if strong_short || large_short {
       work = short.get("basis")
-      if(total_transform != nil){ total_transform = _flatter_chain_prepass_transform(total_transform, short.get("transform"), prepass_reports.len != 0) }
+      if total_transform != nil { total_transform = _flatter_chain_prepass_transform(total_transform, short.get("transform"), prepass_reports.len != 0) }
       total_prepass_ops += short.get("op_count", 0)
       prepass_reports = prepass_reports.append(_flatter_basic_prepass_summary(short, "short-row-prepass", short.get("op_count", 0), first_after_short))
       prepass_reports[prepass_reports.len - 1]["best_row"] = short.get("best_row", 0)
@@ -8235,14 +8235,14 @@ fn _flatter_short_prepass(any work, any total_transform, list prepass_reports, i
 }
 
 fn _flatter_triplet_pair_prepass(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool triangular_prepass, int rows, bool lower_before, any first_before_sort, any first_after_short, bool track_transform, any delta, int max_rounds, any eta, any t0) dict {
-   if(rows < 24 || lower_before){ return _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops) }
-   if(rows == 32 || rows == 64 || (rows <= 128 && _flatter_is_local_banded(work, 4))){
+   if rows < 24 || lower_before { return _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops) }
+   if rows == 32 || rows == 64 || (rows <= 128 && _flatter_is_local_banded(work, 4)) {
       def triplet = banded_triplet_prepass_report(work, rows >= 64 ? 4 : 3, 2)
       def triplet_ops = triplet.get("op_count", 0)
       def triplet_after = triplet.get("first_norm_after", first_before_sort)
-      if(triplet.get("found", false) && triplet_ops > 0 && triplet_after < first_after_short){
+      if triplet.get("found", false) && triplet_ops > 0 && triplet_after < first_after_short {
          work = triplet.get("basis")
-         if(total_transform != nil){ total_transform = _flatter_chain_prepass_transform(total_transform, triplet.get("transform"), prepass_reports.len != 0) }
+         if total_transform != nil { total_transform = _flatter_chain_prepass_transform(total_transform, triplet.get("transform"), prepass_reports.len != 0) }
          total_prepass_ops += triplet_ops
          prepass_reports = prepass_reports.append(_flatter_triplet_prepass_summary(triplet, triplet_ops, first_before_sort, triplet_after))
          def rep = _flatter_prepass_exit_report("banded-triplet-prepass", "banded triplet prepass", delta, max_rounds, eta, prepass_reports, triangular_prepass, total_prepass_ops, total_transform, track_transform && triplet.get("transform_verified", false), work, t0, !track_transform)
@@ -8254,9 +8254,9 @@ fn _flatter_triplet_pair_prepass(any work, any total_transform, list prepass_rep
    def pair = lagrange_pair_reduce_report(work, min(pair_window, rows - 1), pair_rounds, 32, false, true, track_transform)
    def pair_ops = pair.get("row_op_count", pair.get("op_count", 0) + pair.get("swap_count", 0))
    def pair_after = pair.get("first_norm_after", first_before_sort)
-   if(pair_ops > 0 && pair_after <= first_after_short){
+   if pair_ops > 0 && pair_after <= first_after_short {
       work = pair.get("basis")
-      if(total_transform != nil && pair.get("transform_tracked", true)){ total_transform = _flatter_chain_prepass_transform(total_transform, pair.get("transform"), prepass_reports.len != 0) }
+      if total_transform != nil && pair.get("transform_tracked", true) { total_transform = _flatter_chain_prepass_transform(total_transform, pair.get("transform"), prepass_reports.len != 0) }
       total_prepass_ops += pair_ops
       prepass_reports = prepass_reports.append(_flatter_pair_prepass_summary(pair, pair_ops, first_before_sort, pair_after))
       def rep = _flatter_prepass_exit_report("lagrange-row-pair-reduction", "lagrange row-pair prepass", delta, max_rounds, eta, prepass_reports, triangular_prepass, total_prepass_ops, total_transform, track_transform && pair.get("transform_verified", false), work, t0, pair.get("verification_skipped", false) || !track_transform)
@@ -8266,12 +8266,12 @@ fn _flatter_triplet_pair_prepass(any work, any total_transform, list prepass_rep
 }
 
 fn _flatter_norm_sort_prepass(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool triangular_prepass, bool skip_general_prepasses, bool track_transform, any first_before_sort, any delta, int max_rounds, any eta, any t0) dict {
-   if(skip_general_prepasses){ return _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops) }
+   if skip_general_prepasses { return _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops) }
    def sorted = _flatter_norm_sort_report(work, track_transform)
    def first_after_sort = sorted.get("first_norm_after", first_before_sort)
-   if(sorted.get("swaps", 0) > 0 && first_before_sort > Z(0) && first_after_sort * Z(1000) < first_before_sort){
+   if sorted.get("swaps", 0) > 0 && first_before_sort > Z(0) && first_after_sort * Z(1000) < first_before_sort {
       work = sorted.get("basis")
-      if(total_transform != nil){ total_transform = _flatter_chain_prepass_transform(total_transform, sorted.get("transform"), prepass_reports.len != 0) }
+      if total_transform != nil { total_transform = _flatter_chain_prepass_transform(total_transform, sorted.get("transform"), prepass_reports.len != 0) }
       total_prepass_ops += sorted.get("op_count", 0)
       prepass_reports = prepass_reports.append(_flatter_basic_prepass_summary(sorted, "norm-sort-prepass", sorted.get("op_count", 0), first_after_sort))
       def rep = _flatter_prepass_exit_report("norm-sort-prepass", "norm sort prepass", delta, max_rounds, eta, prepass_reports, triangular_prepass, total_prepass_ops, total_transform, track_transform && sorted.get("transform_verified", false), work, t0, !track_transform)
@@ -8286,54 +8286,54 @@ fn flatter_reduce_report(any basis, any delta=0.99, int max_rounds=3, any eta=0.
    def original = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(original)
    def cols = _flatter_matrix_cols(original)
-   if(rows == 0 || cols == 0 || _flatter_all_zero(original)){ return _flatter_zero_rank_report(delta, max_rounds, eta, rows, cols, t0) }
+   if rows == 0 || cols == 0 || _flatter_all_zero(original) { return _flatter_zero_rank_report(delta, max_rounds, eta, rows, cols, t0) }
    mut work = original
    mut total_transform = track_transform ? matrix.matrix_identity(rows) : nil
    mut prepass_reports, total_prepass_ops, triangular_prepass = [], 0, false
    def lower_before_initial = _flatter_is_lower_triangular(work)
-   if(!track_transform && !lower_before_initial){
+   if !track_transform && !lower_before_initial {
       def upper_qary_split = _flatter_upper_qary_split(work)
-      if(upper_qary_split >= 0){
+      if upper_qary_split >= 0 {
          return _flatter_upper_qary_orientation_report(original, upper_qary_split, delta, max_rounds, eta, goal_target, goal_value, goal_proved, stop_on_goal, t0)
       }
    }
    def skip_general_prepasses = lower_before_initial && rows >= 32 && !track_transform
    def ntru = _flatter_ntru2_prepass(work, total_transform, prepass_reports, total_prepass_ops, triangular_prepass, track_transform, delta, max_rounds, eta, t0)
-   if(ntru.get("exit", false)){ return ntru.get("report") }
+   if ntru.get("exit", false) { return ntru.get("report") }
    work = ntru.get("work")
    total_transform = ntru.get("transform")
    prepass_reports = ntru.get("reports")
    total_prepass_ops = ntru.get("op_count")
    def qary = _flatter_qary_prepasses(work, total_transform, prepass_reports, total_prepass_ops, triangular_prepass, rows, lower_before_initial, skip_general_prepasses, track_transform, delta, max_rounds, eta, t0)
-   if(qary.get("exit", false)){ return qary.get("report") }
+   if qary.get("exit", false) { return qary.get("report") }
    work = qary.get("work")
    total_transform = qary.get("transform")
    prepass_reports = qary.get("reports")
    total_prepass_ops = qary.get("op_count")
    def first_before_sort = _flatter_dot_z(_flatter_matrix_data(work).get(0), _flatter_matrix_data(work).get(0))
    def local_banded_initial = _flatter_is_local_banded(work, 4)
-   if(!track_transform && (lower_before_initial || !local_banded_initial) && (rows == 48 || rows == 64)){
+   if !track_transform && (lower_before_initial || !local_banded_initial) && (rows == 48 || rows == 64) {
       def steep_spread = lower_before_initial ? _flatter_lower_triangular_profile_spread(work) : profile_shape_report(work).get("spread", 0.0)
-      if(rows == 48 && steep_spread > 24.0){
+      if rows == 48 && steep_spread > 24.0 {
          return _flatter_bounded_direct_path(delta, max_rounds, eta, prepass_reports, triangular_prepass, total_prepass_ops, work, rows, 2048, first_before_sort, t0, "steep-profile-dim48")
       }
-      if(rows == 64 && steep_spread > 24.0){
+      if rows == 64 && steep_spread > 24.0 {
          return _flatter_triangular_bounded_direct_path(delta, max_rounds, eta, prepass_reports, triangular_prepass, total_prepass_ops, work, rows, 2048, 4, first_before_sort, t0, "steep-profile-dim64")
       }
    }
    def lower_before = qary.get("qary_found", false) ? _flatter_is_lower_triangular(work) : lower_before_initial
-   if(!lower_before && rows >= 32 && rows <= 128 && local_banded_initial){
+   if !lower_before && rows >= 32 && rows <= 128 && local_banded_initial {
       def local = _flatter_triplet_pair_prepass(work, total_transform, prepass_reports, total_prepass_ops, triangular_prepass, rows, lower_before, first_before_sort, first_before_sort, track_transform, delta, max_rounds, eta, t0)
-      if(local.get("exit", false)){ return local.get("report") }
+      if local.get("exit", false) { return local.get("report") }
    }
    def short = _flatter_short_prepass(work, total_transform, prepass_reports, total_prepass_ops, triangular_prepass, rows, lower_before, skip_general_prepasses, track_transform, first_before_sort, delta, max_rounds, eta, t0)
-   if(short.get("exit", false)){ return short.get("report") }
+   if short.get("exit", false) { return short.get("report") }
    def first_after_short = short.get("first_after_short", first_before_sort)
    def pair = _flatter_triplet_pair_prepass(work, total_transform, prepass_reports, total_prepass_ops, triangular_prepass, rows, lower_before, first_before_sort, first_after_short, track_transform, delta, max_rounds, eta, t0)
-   if(pair.get("exit", false)){ return pair.get("report") }
+   if pair.get("exit", false) { return pair.get("report") }
    def sorted = _flatter_norm_sort_prepass(work, total_transform, prepass_reports, total_prepass_ops, triangular_prepass, skip_general_prepasses, track_transform, first_before_sort, delta, max_rounds, eta, t0)
-   if(sorted.get("exit", false)){ return sorted.get("report") }
-   if(rows >= 8 && rows <= 16){
+   if sorted.get("exit", false) { return sorted.get("report") }
+   if rows >= 8 && rows <= 16 {
       return _flatter_small_direct_path(delta, max_rounds, eta, prepass_reports, triangular_prepass, total_prepass_ops, track_transform, work, total_transform, rows, first_before_sort, t0)
    }
    _flatter_round_path_report(original, work, total_transform, rows, cols, delta, max_rounds, eta, goal_target, goal_value, goal_proved, stop_on_goal, track_transform, prepass_reports, triangular_prepass, total_prepass_ops, t0)
@@ -8349,7 +8349,7 @@ fn vec_clone(list v) list {
    mut n = v.len
    mut result = list(0)
    mut i = 0
-   while(i < n){
+   while i < n {
       result = result.append(v.get(i))
       i += 1
    }
@@ -8361,7 +8361,7 @@ fn vec_dot(list a, list b) any {
    mut n = a.len
    mut result = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       result = result + a.get(i) * b.get(i)
       i += 1
    }
@@ -8378,7 +8378,7 @@ fn vec_scale(list v, any s) list {
    mut n = v.len
    mut result = list(0)
    mut i = 0
-   while(i < n){
+   while i < n {
       result = result.append(v.get(i) * s)
       i += 1
    }
@@ -8390,7 +8390,7 @@ fn vec_scale_add(list a, list b, any coeff) list {
    mut n = a.len
    mut result = list(0)
    mut i = 0
-   while(i < n){
+   while i < n {
       result = result.append(a.get(i) + coeff * b.get(i))
       i += 1
    }
@@ -8402,7 +8402,7 @@ fn vec_sub_scaled(list a, list b, any coeff) list {
    mut n = a.len
    mut result = list(0)
    mut i = 0
-   while(i < n){
+   while i < n {
       result = result.append(a.get(i) - coeff * b.get(i))
       i += 1
    }
@@ -8414,11 +8414,11 @@ fn _gram_schmidt_nonempty(list basis, int n) list {
    def first = vec_clone(basis.get(0))
    gs = gs.append(first)
    mut i = 1
-   while(i < n){
+   while i < n {
       def bi = vec_clone(basis.get(i))
       mut proj = vec_clone(bi)
       mut j = 0
-      while(j < i){
+      while j < i {
          def gsj = gs.get(j)
          def gs_norm = vec_norm_sq(gsj)
          def mu_num = vec_dot(bi, gsj)
@@ -8441,7 +8441,7 @@ fn gram_schmidt_rows(list basis) list {
 fn _basis_clone(list basis, int n) list {
    mut out = list(0)
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(vec_clone(basis.get(i)))
       i += 1
    }
@@ -8457,17 +8457,17 @@ fn lll_reduce(list basis, any delta) list {
 fn lll_reduce_delta(list basis, any delta) list {
    "Core LLL reduction with delta parameter: performs size reduction and Lovasz condition swaps in-place on basis; delta is typically 0.75 or 0.99; returns the reduced basis."
    mut n = basis.len
-   if(n == 0){ return basis }
+   if n == 0 { return basis }
    mut k = 1
-   while(k < n){
+   while k < n {
       mut j = k - 1
-      while(j >= 0){
+      while j >= 0 {
          def gs = gram_schmidt_rows(basis)
          def gsj = gs.get(j)
          def gs_norm = vec_norm_sq(gsj)
          def bk = basis.get(k)
          def mu_num = vec_dot(bk, gsj)
-         if(mu_num != 0 && gs_norm != 0){
+         if mu_num != 0 && gs_norm != 0 {
             mut c = (mu_num + gs_norm / 2) / gs_norm
             def bk_cur, bj_cur = basis.get(k), basis.get(j)
             def new_bk = vec_sub_scaled(bk_cur, bj_cur, c)
@@ -8481,7 +8481,7 @@ fn lll_reduce_delta(list basis, any delta) list {
       def gs_prev_norm = vec_norm_sq(gsk_prev)
       def lhs = (delta * 100) * gs_prev_norm
       def rhs_num = vec_norm_sq(gsk) * 100
-      if(lhs > rhs_num){
+      if lhs > rhs_num {
          def bk = basis.get(k)
          def bk_prev = basis.get(k - 1)
          basis[k - 1] = bk
@@ -8498,14 +8498,14 @@ fn shortest_vector(list basis) list {
    "Find the shortest non-zero vector in a lattice using LLL reduction: reduces the basis with delta=0.75 and returns the vector with the smallest norm."
    def reduced = lll_reduce(basis, 75)
    mut n = reduced.len
-   if(n == 0){ return list(0) }
+   if n == 0 { return list(0) }
    mut best = vec_clone(reduced.get(0))
    mut best_norm = vec_norm_sq(best)
    mut i = 1
-   while(i < n){
+   while i < n {
       def v = reduced.get(i)
       def vn = vec_norm_sq(v)
-      if(vn < best_norm){
+      if vn < best_norm {
          best = vec_clone(v)
          best_norm = vn
       }
@@ -8517,12 +8517,12 @@ fn shortest_vector(list basis) list {
 fn babai_cvp(list basis, list target) list {
    "Babai closest vector algorithm: given a lattice basis and a target vector, find the closest lattice point using Gram-Schmidt rounding; returns the reconstructed closest lattice vector."
    mut n = basis.len
-   if(n == 0){ return target }
+   if n == 0 { return target }
    def gs = gram_schmidt_rows(basis)
    mut t = vec_clone(target)
    mut coeffs = list(0)
    mut i = n - 1
-   while(i >= 0){
+   while i >= 0 {
       def gsi = gs.get(i)
       def gs_norm = vec_norm_sq(gsi)
       def mu_num = vec_dot(t, gsi)
@@ -8533,7 +8533,7 @@ fn babai_cvp(list basis, list target) list {
    }
    mut result = vec_clone(target)
    i = 0
-   while(i < n){
+   while i < n {
       mut c = coeffs.get(n - 1 - i)
       def bi = basis.get(i)
       result = vec_sub_scaled(result, bi, c)

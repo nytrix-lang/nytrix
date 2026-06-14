@@ -37,14 +37,14 @@ fn flatten_inline(l) {
 }
 
 fn flatten_try(x) {
-   if(is_str(x)) return [x]
+   if is_str(x) return [x]
    try{
       mapcat(flatten_try, x)
    } catch(_){[x]}
 }
 
 fn flatten_recursive(x) {
-   if(is_str(x) || !is_list(x)){ return [x] }
+   if is_str(x) || !is_list(x) { return [x] }
    it.mapcat(flatten_recursive, x)
 }
 

@@ -12,37 +12,37 @@ fn _clean_tool_id(any id) str { str.strip(to_str(id)) }
 
 fn _append_tool_id(list out, any id) list {
    def key = _clean_tool_id(id)
-   if(key.len == 0 || key == "0"){ return out }
+   if key.len == 0 || key == "0" { return out }
    mut i = 0
    def out_n = out.len
-   while(i < out_n){
-      if(to_str(out.get(i, "")) == key){ return out }
+   while i < out_n {
+      if to_str(out.get(i, "")) == key { return out }
       i += 1
    }
    out.append(key)
 }
 
 fn _merge_tool_ids_into(list out, any ids) list {
-   if(!ids){ return out }
-   if(is_list(ids) || is_tuple(ids) || is_set(ids)){
+   if !ids { return out }
+   if is_list(ids) || is_tuple(ids) || is_set(ids) {
       mut next = out
       mut i = 0
       def ids_n = ids.len
-      while(i < ids_n){
+      while i < ids_n {
          next = _merge_tool_ids_into(next, ids.get(i, ""))
          i += 1
       }
       return next
    }
-   if(is_dict(ids)){
-      if(ids.contains("id")){ return _append_tool_id(out, ids.get("id", "")) }
+   if is_dict(ids) {
+      if ids.contains("id") { return _append_tool_id(out, ids.get("id", "")) }
       mut next = out
       def keys = dict_keys(ids)
       mut i = 0
       def keys_n = keys.len
-      while(i < keys_n){
+      while i < keys_n {
          def key = to_str(keys.get(i, ""))
-         if(bool(ids.get(key, false))){ next = _append_tool_id(next, key) }
+         if bool(ids.get(key, false)) { next = _append_tool_id(next, key) }
          i += 1
       }
       return next
@@ -71,9 +71,9 @@ fn visible_tool_ids(any ids) list {
    mut out = []
    mut i = 0
    def all_n = all.len
-   while(i < all_n){
+   while i < all_n {
       def key = to_str(all.get(i, ""))
-      if(gui.window_visible(key)){ out = out.append(key) }
+      if gui.window_visible(key) { out = out.append(key) }
       i += 1
    }
    out
@@ -99,7 +99,7 @@ fn tool_snapshot(any ids) list {
    mut rows = []
    mut i = 0
    def all_n = all.len
-   while(i < all_n){
+   while i < all_n {
       rows = rows.append(_tool_snapshot_row(all.get(i, "")))
       i += 1
    }
@@ -109,7 +109,7 @@ fn tool_snapshot(any ids) list {
 fn show_tool(any id, bool visible=true) bool {
    "Shows or hides an editor tool window."
    def key = to_str(id)
-   if(key.len == 0){ return false }
+   if key.len == 0 { return false }
    gui.show_window(key, !!visible)
    !!visible
 }
@@ -117,21 +117,21 @@ fn show_tool(any id, bool visible=true) bool {
 fn tool_closed(any id) bool {
    "Returns true when a tool was closed and hides it in GUI state."
    def key = to_str(id)
-   if(key.len == 0){ return false }
+   if key.len == 0 { return false }
    def closed = gui.window_closed(key)
-   if(closed){ gui.show_window(key, false) }
+   if closed { gui.show_window(key, false) }
    closed
 }
 
 fn begin_tool(any id, bool visible, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) list {
    "Begins a docked tool window and reports [body_visible, closed]."
    def key = to_str(id)
-   if(key.len == 0){ return [false, false] }
+   if key.len == 0 { return [false, false] }
    def shown = bool(visible)
    gui.show_window(key, shown)
-   if(!shown){ return [false, false] }
+   if !shown { return [false, false] }
    def body = gui.begin_window(key, title, x, y, w, h, opts)
-   if(tool_closed(key)){ return [false, true] }
+   if tool_closed(key) { return [false, true] }
    [body, false]
 }
 
@@ -148,31 +148,31 @@ fn focus_pref_rect(any id, list root) list {
    def rh = float(root.get(3, 0.0))
    mut ww = clamp(rw * 0.72, 520.0, 1040.0)
    mut hh = clamp(rh * 0.78, 340.0, 920.0)
-   if(rid == "editor_main"){
+   if rid == "editor_main" {
       ww = clamp(rw * 0.82, 900.0, 1520.0)
       hh = clamp(rh * 0.92, 680.0, 1020.0)
-   } elif(rid == "profiler"){
+   } elif rid == "profiler" {
       ww = clamp(rw * 0.82, 820.0, 1320.0)
       hh = clamp(rh * 0.76, 560.0, 860.0)
-   } elif(rid == "asset_browser"){
+   } elif rid == "asset_browser" {
       ww = rw
       hh = clamp(rh * 0.62, 520.0, 760.0)
       return [rx, ry + max(0.0, rh - hh), ww, hh]
-   } elif(rid == "widget_gallery"){
+   } elif rid == "widget_gallery" {
       ww = clamp(rw * 0.62, 720.0, 1080.0)
       hh = clamp(rh * 0.68, 520.0, 780.0)
       return [rx + max(0.0, (rw - ww) * 0.5), ry + max(0.0, (rh - hh) * 0.34), ww, hh]
-   } elif(rid == "node_graph"){
+   } elif rid == "node_graph" {
       ww = clamp(rw * 0.70, 640.0, 1040.0)
       hh = clamp(rh * 0.68, 460.0, 760.0)
-   } elif(rid == "inspector"){
+   } elif rid == "inspector" {
       ww = clamp(rw * 0.46, 620.0, 920.0)
       hh = rh
       return [rx + max(0.0, (rw - ww) * 0.5), ry, ww, hh]
-   } elif(rid == "workspace_grid"){
+   } elif rid == "workspace_grid" {
       ww = clamp(rw * 0.78, 760.0, 1180.0)
       hh = clamp(rh * 0.70, 500.0, 800.0)
-   } elif(rid == "widget_probe"){
+   } elif rid == "widget_probe" {
       ww = clamp(rw * 0.42, 560.0, 760.0)
       hh = clamp(rh * 0.46, 380.0, 560.0)
       return [rx + max(0.0, (rw - ww) * 0.5), ry + max(0.0, (rh - hh) * 0.32), ww, hh]
@@ -181,20 +181,20 @@ fn focus_pref_rect(any id, list root) list {
 }
 
 fn _focus_pair_weights(str a, str b) list {
-   if((a == "workspace_grid" && b == "node_graph") || (a == "node_graph" && b == "workspace_grid")){
-      if(a == "workspace_grid"){ return [0.44, 0.56] }
+   if (a == "workspace_grid" && b == "node_graph") || (a == "node_graph" && b == "workspace_grid") {
+      if a == "workspace_grid" { return [0.44, 0.56] }
       return [0.56, 0.44]
    }
-   if((a == "asset_browser" && b == "widget_probe") || (a == "widget_probe" && b == "asset_browser")){
-      if(a == "asset_browser"){ return [0.62, 0.38] }
+   if (a == "asset_browser" && b == "widget_probe") || (a == "widget_probe" && b == "asset_browser") {
+      if a == "asset_browser" { return [0.62, 0.38] }
       return [0.38, 0.62]
    }
-   if((a == "inspector" && b == "asset_browser") || (a == "asset_browser" && b == "inspector")){
-      if(a == "asset_browser"){ return [0.58, 0.42] }
+   if (a == "inspector" && b == "asset_browser") || (a == "asset_browser" && b == "inspector") {
+      if a == "asset_browser" { return [0.58, 0.42] }
       return [0.42, 0.58]
    }
-   if((a == "profiler" && b == "widget_gallery") || (a == "widget_gallery" && b == "profiler")){
-      if(a == "profiler"){ return [0.56, 0.44] }
+   if (a == "profiler" && b == "widget_gallery") || (a == "widget_gallery" && b == "profiler") {
+      if a == "profiler" { return [0.56, 0.44] }
       return [0.44, 0.56]
    }
    [1.0, 1.0]
@@ -203,7 +203,7 @@ fn _focus_pair_weights(str a, str b) list {
 fn _ones(int count) list {
    mut out = []
    mut i = 0
-   while(i < count){
+   while i < count {
       out = out.append(1.0)
       i += 1
    }
@@ -215,21 +215,21 @@ fn apply_focus_layout(list ids, f64 ww, f64 wh, f64 gap=14.0) int {
    def g = max(0.0, float(gap))
    def root = gui.rect(0.0, 0.0, max(0.0, float(ww)), max(0.0, float(wh)))
    def n = ids.len
-   if(n <= 0){ return 0 }
-   if(n == 1){
+   if n <= 0 { return 0 }
+   if n == 1 {
       def id0 = to_str(ids.get(0, ""))
       gui.apply_window_rect(id0, focus_pref_rect(id0, root))
       return 1
    }
-   if(n == 2){
+   if n == 2 {
       def a, b = to_str(ids.get(0, "")), to_str(ids.get(1, ""))
       def cols = gui.split_cols(root, _focus_pair_weights(a, b), g)
       gui.apply_window_rect(a, cols.get(0, root))
       gui.apply_window_rect(b, cols.get(1, root))
       return 2
    }
-   if(n == 3){
-      if(to_str(ids.get(0, "")) == "profiler" && to_str(ids.get(1, "")) == "inspector" && to_str(ids.get(2, "")) == "widget_probe"){
+   if n == 3 {
+      if to_str(ids.get(0, "")) == "profiler" && to_str(ids.get(1, "")) == "inspector" && to_str(ids.get(2, "")) == "widget_probe" {
          def cols3 = gui.split_cols(root, [0.54, 0.46], g)
          def right_rows3 = gui.split_rows(cols3.get(1, root), [0.74, 0.26], g)
          gui.apply_window_rect("profiler", cols3.get(0, root))
@@ -244,7 +244,7 @@ fn apply_focus_layout(list ids, f64 ww, f64 wh, f64 gap=14.0) int {
       gui.apply_window_rect(to_str(ids.get(2, "")), rows.get(1, root))
       return 3
    }
-   if(n == 4){
+   if n == 4 {
       def rows = gui.split_rows(root, [1.0, 1.0], g)
       def top = gui.split_cols(rows.get(0, root), [1.0, 1.0], g)
       def bot = gui.split_cols(rows.get(1, root), [1.0, 1.0], g)
@@ -260,12 +260,12 @@ fn apply_focus_layout(list ids, f64 ww, f64 wh, f64 gap=14.0) int {
    def left_rows = gui.split_rows(cols.get(0, root), _ones(left_n), g)
    def right_rows = gui.split_rows(cols.get(1, root), _ones(right_n), g)
    mut i = 0
-   while(i < left_n && i < ids.len){
+   while i < left_n && i < ids.len {
       gui.apply_window_rect(to_str(ids.get(i, "")), left_rows.get(i, root))
       i += 1
    }
    mut rj = 0
-   while(rj < right_n && left_n + rj < ids.len){
+   while rj < right_n && left_n + rj < ids.len {
       gui.apply_window_rect(to_str(ids.get(left_n + rj, "")), right_rows.get(rj, root))
       rj += 1
    }

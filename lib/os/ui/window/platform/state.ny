@@ -11,8 +11,8 @@ mut _platform_state = dict(8)
 
 fn _ensure_platform_state() dict {
    mut needs_init = true
-   if(is_dict(_platform_state)){ needs_init = _platform_state.len == 0 }
-   if(needs_init){
+   if is_dict(_platform_state) { needs_init = _platform_state.len == 0 }
+   if needs_init {
       _platform_state = {
          "initialized": false,
          "backend_name": "",

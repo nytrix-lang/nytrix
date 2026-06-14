@@ -21,9 +21,9 @@ fn apply_identity_hints(str title_class="NytrixViewer", str title_instance="nytr
    mut x11_class = common.env_trim("NY_UI_X11_CLASS_NAME")
    mut x11_inst = common.env_trim("NY_UI_X11_INSTANCE_NAME")
    mut wl_app_id = common.env_trim("NY_UI_WAYLAND_APP_ID")
-   if(x11_class.len == 0){ x11_class = title_class }
-   if(x11_inst.len == 0){ x11_inst = title_instance }
-   if(wl_app_id.len == 0){ wl_app_id = x11_inst }
+   if x11_class.len == 0 { x11_class = title_class }
+   if x11_inst.len == 0 { x11_inst = title_instance }
+   if wl_app_id.len == 0 { wl_app_id = x11_inst }
    window.window_hint_string(win_native.X11_CLASS_NAME, x11_class)
    window.window_hint_string(win_native.X11_INSTANCE_NAME, x11_inst)
    window.window_hint_string(win_native.WAYLAND_APP_ID, wl_app_id)
@@ -52,13 +52,13 @@ fn failure_summary(str backend_name, bool headless_enabled) str {
 }
 
 fn _windowed_open_flags(bool headless_enabled) int {
-   if(headless_enabled){ return window.WINDOW_HIDE }
+   if headless_enabled { return window.WINDOW_HIDE }
    window.WINDOW_FOCUS_ON_SHOW | (raw_mouse_enabled() ? window.WINDOW_RAW_MOUSE : 0)
 }
 
 fn open_viewer_window(str title, int msaa, bool vsync, bool filter_linear, bool fullscreen, bool headless_enabled) dict {
    "Opens a fullscreen or windowed viewer and returns its handle and size."
-   if(fullscreen){
+   if fullscreen {
       return {"win": ui_runtime.open_fullscreen(title, msaa, vsync, filter_linear), "w": 0, "h": 0}
    }
    def ext = ui_app.app_window_extent_from_env(headless_enabled)
@@ -85,7 +85,7 @@ fn live_framebuffer_size(any win, int fallback_w=1280, int fallback_h=720) list 
    def fb = win_native.get_framebuffer_size(window.id(win))
    mut w = float(fb.get(0, 0.0))
    mut h = float(fb.get(1, 0.0))
-   if(w <= 0.0 || h <= 0.0){
+   if w <= 0.0 || h <= 0.0 {
       def ws = window.size(win)
       w = float(ws.get(0, fallback_w))
       h = float(ws.get(1, fallback_h))
@@ -96,10 +96,10 @@ fn live_framebuffer_size(any win, int fallback_w=1280, int fallback_h=720) list 
 fn finish_window(any win, bool fullscreen, bool headless_enabled) list {
    "Finalizes window visibility, focus, exit key, and framebuffer size."
    window.set_exit_key(win, window.KEY_NULL)
-   if(headless_enabled){ window.hide(win) }
-   if(fit_to_workarea_enabled(fullscreen, headless_enabled)){ window.fit_to_workarea(win) }
+   if headless_enabled { window.hide(win) }
+   if fit_to_workarea_enabled(fullscreen, headless_enabled) { window.fit_to_workarea(win) }
    window.set_should_close(win, false)
-   if(!headless_enabled){
+   if !headless_enabled {
       window.show(win)
       window.focus(win)
    }

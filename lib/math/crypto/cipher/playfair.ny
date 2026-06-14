@@ -20,7 +20,7 @@ fn _playfair_builder_take(list b) str {
 fn _playfair_pos_map(list square) dict {
    mut pos = dict(32)
    mut idx = 0
-   while(idx < 25){
+   while idx < 25 {
       pos = pos.set(to_str(load8(square[idx], 0)), idx)
       idx += 1
    }
@@ -39,14 +39,14 @@ fn playfair_make_square(str key) list {
    mut square = list(0)
    mut used = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
    mut i = 0
-   while(i < key.len){
+   while i < key.len {
       def c = load8(key, i)
       mut letter = case c {
          65..90 -> c - 65
          97..122 -> c - 97
          _ -> -1
       }
-      if(letter >= 0){
+      if letter >= 0 {
          letter = letter == 9 ? 8 : letter
          case used[letter] {
             0 -> {
@@ -59,7 +59,7 @@ fn playfair_make_square(str key) list {
       i += 1
    }
    mut j = 0
-   while(j < 26){
+   while j < 26 {
       case j {
          9 -> {}
          _ -> {
@@ -80,7 +80,7 @@ fn playfair_find_pos(list square, any letter) list {
    letter: uppercase character code to find
    Returns [row, col] as a list."
    def idx = _playfair_pos_map(square).get(to_str(letter), -1)
-   if(idx >= 0){
+   if idx >= 0 {
       return [idx / 5, idx % 5]
    }
    [-1, -1]
@@ -93,7 +93,7 @@ fn playfair_prepare_digraphs(str plaintext) list {
    Returns a list of [char1, char2] digraph pairs."
    mut cleaned_b = Builder(plaintext.len + 8)
    mut i = 0
-   while(i < plaintext.len){
+   while i < plaintext.len {
       def c = load8(plaintext, i)
       case c {
          65..90 -> { cleaned_b = builder_append(cleaned_b, chr(c)) }
@@ -110,13 +110,13 @@ fn playfair_prepare_digraphs(str plaintext) list {
    }
    mut digraphs = list(0)
    mut pos = 0
-   while(pos < n){
+   while pos < n {
       def c1 = load8(cleaned, pos)
       mut c2 = 88
       def next_pos = pos + 1
-      if(next_pos < n){
+      if next_pos < n {
          def next_c = load8(cleaned, next_pos)
-         if(c1 == next_c){ c2 = 88 } else {
+         if c1 == next_c { c2 = 88 } else {
             c2 = next_c
             pos += 1
          }
@@ -137,10 +137,10 @@ fn _playfair_shift_digraph(list square, dict pos, int c1, int c2, int shift) lis
    def col1 = idxp1 % 5
    def r2 = idxp2 / 5
    def col2 = idxp2 % 5
-   if(r1 == r2){
+   if r1 == r2 {
       return _playfair_pair(square, r1 * 5 + ((col1 + shift) % 5), r2 * 5 + ((col2 + shift) % 5))
    }
-   if(col1 == col2){
+   if col1 == col2 {
       return _playfair_pair(square, ((r1 + shift) % 5) * 5 + col1, ((r2 + shift) % 5) * 5 + col2)
    }
    _playfair_pair(square, r1 * 5 + col2, r2 * 5 + col1)
@@ -175,7 +175,7 @@ fn playfair_encrypt(str plaintext, list square) str {
    def pos = _playfair_pos_map(square)
    mut result = Builder(digraphs.len * 2 + 8)
    mut i = 0
-   while(i < digraphs.len){
+   while i < digraphs.len {
       def pair = digraphs[i]
       def c1 = pair[0]
       def c2 = pair[1]
@@ -197,7 +197,7 @@ fn playfair_decrypt(str ciphertext, list square) str {
    def pos = _playfair_pos_map(square)
    mut result = Builder(ciphertext.len + 8)
    mut i = 0
-   while(i < ciphertext.len){
+   while i < ciphertext.len {
       def c1, c2 = load8(ciphertext, i), load8(ciphertext, i + 1)
       def dec = _playfair_decrypt_digraph(square, pos, c1, c2)
       def ch1 = dec[0]
@@ -213,13 +213,13 @@ fn playfair_decrypt_offset(str ciphertext, list square, int offset=0, bool strip
    "Decrypt ciphertext after skipping an initial offset.
    Useful for captured Playfair streams that start mid-digraph. If the
    remaining ciphertext length is odd, the trailing byte is dropped."
-   if(offset < 0){ offset = 0 }
-   if(offset >= ciphertext.len){ return "" }
+   if offset < 0 { offset = 0 }
+   if offset >= ciphertext.len { return "" }
    mut text = ciphertext
-   if(offset > 0){ text = slice(ciphertext, offset, ciphertext.len) }
-   if((text.len % 2) == 1){ text = slice(text, 0, text.len - 1) }
+   if offset > 0 { text = slice(ciphertext, offset, ciphertext.len) }
+   if (text.len % 2) == 1 { text = slice(text, 0, text.len - 1) }
    mut out = playfair_decrypt(text, square)
-   if(strip_x){ out = str_replace(out, "X", "") }
+   if strip_x { out = str_replace(out, "X", "") }
    out
 }
 

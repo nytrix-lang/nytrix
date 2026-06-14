@@ -4,8 +4,8 @@ use std.core.test as test
 
 fn __list_has(xs, want) {
    mut i = 0
-   while(i < xs.len){
-      if(xs.get(i, 0) == want){ return true }
+   while i < xs.len {
+      if xs.get(i, 0) == want { return true }
       i += 1
    }
    false
@@ -13,26 +13,26 @@ fn __list_has(xs, want) {
 
 fn __macro_double(node) {
    def args = node.get("args", list(0))
-   if(args.len != 1){ return 0 }
+   if args.len != 1 { return 0 }
    def x = args.get(0, 0)
-   if(!is_int(x)){ return 0 }
+   if !is_int(x) { return 0 }
    x + x
 }
 
 fn __macro_double_plus1(node) {
    def args = node.get("args", list(0))
-   if(args.len != 1){ return 0 }
+   if args.len != 1 { return 0 }
    def x = args.get(0, 0)
-   if(!is_int(x)){ return 0 }
+   if !is_int(x) { return 0 }
    (x + x) + 1
 }
 
 fn __macro_add2(node) {
    def args = node.get("args", list(0))
-   if(args.len != 2){ return 0 }
+   if args.len != 2 { return 0 }
    def a = args.get(0, 0)
    def b = args.get(1, 0)
-   if(!is_int(a) || !is_int(b)){ return 0 }
+   if !is_int(a) || !is_int(b) { return 0 }
    a + b
 }
 
@@ -52,7 +52,7 @@ fn __macro_pong(node) {
 }
 
 fn __attr_mark(node, args) {
-   if(!is_dict(node)){ return node }
+   if !is_dict(node) { return node }
    mut out = node
    out = out.set("marked", true)
    out = out.set("arg_count", args.len)
@@ -60,28 +60,28 @@ fn __attr_mark(node, args) {
 }
 
 fn __rw_add1(value) {
-   if(!is_int(value)){ return value }
+   if !is_int(value) { return value }
    value + 1
 }
 
 fn __rw_mul2(value) {
-   if(!is_int(value)){ return value }
+   if !is_int(value) { return value }
    value * 2
 }
 
 fn __rw_shift(value) {
-   if(!syntax.is_form(value, "shift")){ return value }
+   if !syntax.is_form(value, "shift") { return value }
    def tail = syntax.form_tail(value)
-   if(tail.len != 1){ return value }
+   if tail.len != 1 { return value }
    syntax.form("inc1", tail)
 }
 
 fn __rw_eval_inc1(value) {
-   if(!syntax.is_form(value, "inc1")){ return value }
+   if !syntax.is_form(value, "inc1") { return value }
    def tail = syntax.form_tail(value)
-   if(tail.len != 1){ return value }
+   if tail.len != 1 { return value }
    def x = tail.get(0, 0)
-   if(!is_int(x)){ return value }
+   if !is_int(x) { return value }
    x + 1
 }
 
@@ -327,7 +327,7 @@ fn test_error_paths() {
       syntax.register_macro("", __macro_double)
    } catch e {
       caught = true
-      if(e){ caught = true }
+      if e { caught = true }
    }
    assert(caught, "empty macro name should fail")
    caught = false
@@ -335,7 +335,7 @@ fn test_error_paths() {
       syntax.register_attribute("", __attr_mark)
    } catch e {
       caught = true
-      if(e){ caught = true }
+      if e { caught = true }
    }
    assert(caught, "empty attribute name should fail")
    syntax.reset_registry()
@@ -344,7 +344,7 @@ fn test_error_paths() {
       syntax.apply_attribute("effects", dict(2), list(0))
    } catch e {
       caught = true
-      if(e){ caught = true }
+      if e { caught = true }
    }
    assert(caught, "@effects without args should fail")
    caught = false
@@ -352,7 +352,7 @@ fn test_error_paths() {
       syntax.apply_attribute("extern", dict(2), [123])
    } catch e {
       caught = true
-      if(e){ caught = true }
+      if e { caught = true }
    }
    assert(caught, "@extern with non-string argument should fail")
 }

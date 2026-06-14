@@ -10,19 +10,19 @@ use std.core.reflect as core_ref
 use std.core.syntax.syntax as syntax_impl
 
 fn _ensure_argc(str name, list args, int want) int {
-   if(args.len != want){ panic("@" + name + " expects " + to_str(want) + " argument(s)") }
+   if args.len != want { panic("@" + name + " expects " + to_str(want) + " argument(s)") }
    0
 }
 
 fn _set_flag(any node, str key, any value=true) any {
-   if(!is_dict(node)){ return node }
+   if !is_dict(node) { return node }
    node.set(key, value)
 }
 
 fn attr_extern(any node, list args) any {
    "Builtin @extern metadata transform."
    _ensure_argc("extern", args, 1)
-   if(!is_str(args[0])){ panic("@extern argument must be string") }
+   if !is_str(args[0]) { panic("@extern argument must be string") }
    node = _set_flag(node, "is_extern", true)
    node = _set_flag(node, "link_name", args[0])
    node
@@ -60,7 +60,7 @@ fn attr_cache(any node, list args) any {
 
 fn attr_effects(any node, list args) any {
    "Builtin @effects metadata transform."
-   if(args.len == 0){ panic("@effects expects at least one argument") }
+   if args.len == 0 { panic("@effects expects at least one argument") }
    node = _set_flag(node, "effect_contract_known", true)
    node = _set_flag(node, "effect_contract", args)
    node
@@ -68,9 +68,9 @@ fn attr_effects(any node, list args) any {
 
 fn attr_llvm(any node, list args) any {
    "Builtin @llvm metadata transform."
-   if(args.len < 1 || args.len > 2){ panic("@llvm expects 1 or 2 argument(s)") }
+   if args.len < 1 || args.len > 2 { panic("@llvm expects 1 or 2 argument(s)") }
    node = _set_flag(node, "llvm_attr", args[0])
-   if(args.len == 2){ node = _set_flag(node, "llvm_value", args[1]) }
+   if args.len == 2 { node = _set_flag(node, "llvm_value", args[1]) }
    node
 }
 

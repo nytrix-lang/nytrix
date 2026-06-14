@@ -57,32 +57,32 @@ fn _blob(any row) str {
 }
 
 fn _fuzzy(str q, str s) bool {
-   if(q.len <= 0){ return true }
+   if q.len <= 0 { return true }
    mut qi = 0
    mut si = 0
-   while(qi < q.len && si < s.len){
-      if(load8(q, qi) == load8(s, si)){ qi += 1 }
+   while qi < q.len && si < s.len {
+      if load8(q, qi) == load8(s, si) { qi += 1 }
       si += 1
    }
    qi == q.len
 }
 
 fn _match_level(str q, any row) int {
-   if(q.len <= 0){ return 0 }
+   if q.len <= 0 { return 0 }
    def title = str.lower(to_str(row.get(0, "")))
    def id = str.lower(to_str(row.get(1, "")))
    def key = str.lower(to_str(row.get(2, "")))
    def tag = str.lower(to_str(row.get(4, "")))
-   if(str.startswith(title, q) || str.startswith(id, q) || str.startswith(key, q)){ return 0 }
-   if(str.str_contains(title, q) || str.str_contains(id, q) || str.str_contains(key, q) || str.str_contains(tag, q)){ return 1 }
+   if str.startswith(title, q) || str.startswith(id, q) || str.startswith(key, q) { return 0 }
+   if str.str_contains(title, q) || str.str_contains(id, q) || str.str_contains(key, q) || str.str_contains(tag, q) { return 1 }
    _fuzzy(q, _blob(row)) ? 2 : -1
 }
 
 fn _append_level(list out, list rows, str q, int level, int limit) list {
    mut i = 0
-   while(i < rows.len && out.len < limit){
+   while i < rows.len && out.len < limit {
       def row = rows.get(i)
-      if(_match_level(q, row) == level){ out = out.append(row) }
+      if _match_level(q, row) == level { out = out.append(row) }
       i += 1
    }
    out
@@ -116,8 +116,8 @@ fn _clamp_state(dict st, int total) dict {
    def view = visible(st)
    def idx = min(max(0, index(st)), max(0, total - 1))
    mut scr = _clamp_scroll(scroll(st), total, view)
-   if(idx < scr){ scr = idx }
-   if(idx >= scr + view){ scr = idx - view + 1 }
+   if idx < scr { scr = idx }
+   if idx >= scr + view { scr = idx - view + 1 }
    st["index"] = idx
    st["scroll"] = _clamp_scroll(scr, total, view)
    st
@@ -139,8 +139,8 @@ fn scroll_by(dict st, int delta) dict {
    def view = visible(st)
    st["scroll"] = _clamp_scroll(scroll(st) + delta, opts.len, view)
    def idx = index(st)
-   if(idx < scroll(st)){ st["index"] = scroll(st) }
-   elif(idx >= scroll(st) + view){ st["index"] = min(max(0, opts.len - 1), scroll(st) + view - 1) }
+   if idx < scroll(st) { st["index"] = scroll(st) }
+   elif idx >= scroll(st) + view { st["index"] = min(max(0, opts.len - 1), scroll(st) + view - 1) }
    _clamp_state(st, opts.len)
 }
 
@@ -150,7 +150,7 @@ fn visible_matches(dict st) list {
    def stop = min(opts.len, start + visible(st))
    mut out = []
    mut i = start
-   while(i < stop){
+   while i < stop {
       out = out.append(opts.get(i))
       i += 1
    }
@@ -167,29 +167,29 @@ fn handle_key(dict st, any data) dict {
    def opts = state_matches(st)
    def mods = int(data.get("mods", data.get("mod", 0)))
    def ctrl = (mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0
-   if(window.event_key_is(data, key.KEY_ESCAPE)){ st = close(st) }
-   elif(window.event_key_is(data, key.KEY_ENTER)){ choose = true }
-   elif(window.event_key_is(data, key.KEY_BACKSPACE)){
+   if window.event_key_is(data, key.KEY_ESCAPE) { st = close(st) }
+   elif window.event_key_is(data, key.KEY_ENTER) { choose = true }
+   elif window.event_key_is(data, key.KEY_BACKSPACE) {
       def q = query(st)
-      if(q.len > 0){ st["query"] = str.str_slice(q, 0, q.len - 1) }
+      if q.len > 0 { st["query"] = str.str_slice(q, 0, q.len - 1) }
       st["index"] = 0
       st["scroll"] = 0
    } else {
-      if(window.event_key_is(data, key.KEY_UP) || (ctrl && window.event_key_is(data, key.KEY_P))){ st = set_index(st, index(st) - 1) }
-      elif(window.event_key_is(data, key.KEY_DOWN) || window.event_key_is(data, key.KEY_TAB) || (ctrl && window.event_key_is(data, key.KEY_N))){ st = set_index(st, index(st) + 1) }
-      elif(window.event_key_is(data, key.KEY_PAGE_UP)){ st = set_index(st, index(st) - visible(st)) }
-      elif(window.event_key_is(data, key.KEY_PAGE_DOWN)){ st = set_index(st, index(st) + visible(st)) }
-      elif(window.event_key_is(data, key.KEY_HOME)){ st = set_index(st, 0) }
-      elif(window.event_key_is(data, key.KEY_END)){ st = set_index(st, opts.len - 1) }
+      if window.event_key_is(data, key.KEY_UP) || (ctrl && window.event_key_is(data, key.KEY_P)) { st = set_index(st, index(st) - 1) }
+      elif window.event_key_is(data, key.KEY_DOWN) || window.event_key_is(data, key.KEY_TAB) || (ctrl && window.event_key_is(data, key.KEY_N)) { st = set_index(st, index(st) + 1) }
+      elif window.event_key_is(data, key.KEY_PAGE_UP) { st = set_index(st, index(st) - visible(st)) }
+      elif window.event_key_is(data, key.KEY_PAGE_DOWN) { st = set_index(st, index(st) + visible(st)) }
+      elif window.event_key_is(data, key.KEY_HOME) { st = set_index(st, 0) }
+      elif window.event_key_is(data, key.KEY_END) { st = set_index(st, opts.len - 1) }
    }
    {"st": st, "choose": choose}
 }
 
 fn handle_char(dict st, any data) dict {
    def mods = int(data.get("mods", data.get("mod", 0)))
-   if((mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0){ return st }
+   if (mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 { return st }
    def cp = int(data.get("char", 0))
-   if(cp >= 32 && cp != 127){
+   if cp >= 32 && cp != 127 {
       st["query"] = query(st) + chr(cp)
       st["index"] = 0
       st["scroll"] = 0

@@ -25,14 +25,14 @@ fn make_event(i32 kind, any win, i32 win_id=0, any data=0) list {
 }
 
 fn _event_get(any ev, i32 slot, any fallback=0) any {
-   if(!is_event(ev)){ return fallback }
+   if !is_event(ev) { return fallback }
    ev.get(slot, fallback)
 }
 
 @inline
 fn event_type(any ev) int {
    "Returns event type enum value."
-   if(!is_event(ev)){ return _EVENT_NONE }
+   if !is_event(ev) { return _EVENT_NONE }
    int(ev.get(_E_TYPE, _EVENT_NONE))
 }
 
@@ -44,7 +44,7 @@ fn event_window(any ev) any {
 @inline
 fn event_window_id(any ev) int {
    "Returns the event's associated window id."
-   if(!is_event(ev)){ return 0 }
+   if !is_event(ev) { return 0 }
    int(ev.get(_E_WINDOW_ID, 0))
 }
 
@@ -54,20 +54,20 @@ fn event_data(any ev) any {
 }
 
 fn _queue_can_coalesce_tail_motion(any q, any ev) bool {
-   if(!is_list(q) || q.len <= 0 || !is_event(ev)){ return false }
-   if(event_type(ev) != _EVENT_MOUSE_POS_CHANGED){ return false }
+   if !is_list(q) || q.len <= 0 || !is_event(ev) { return false }
+   if event_type(ev) != _EVENT_MOUSE_POS_CHANGED { return false }
    def last = q.get(q.len - 1, [])
-   if(!is_event(last) || event_type(last) != _EVENT_MOUSE_POS_CHANGED){ return false }
+   if !is_event(last) || event_type(last) != _EVENT_MOUSE_POS_CHANGED { return false }
    def last_id = event_window_id(last)
    def next_id = event_window_id(ev)
-   if(last_id != 0 && next_id != 0){ return last_id == next_id }
+   if last_id != 0 && next_id != 0 { return last_id == next_id }
    true
 }
 
 fn queue_push(any q, any ev) list {
    "Appends an event to the queue and coalesces consecutive mouse-motion events."
-   if(!is_list(q)){ q = [] }
-   if(_queue_can_coalesce_tail_motion(q, ev)){
+   if !is_list(q) { q = [] }
+   if _queue_can_coalesce_tail_motion(q, ev) {
       q[q.len - 1] = ev
       return q
    }
@@ -76,12 +76,12 @@ fn queue_push(any q, any ev) list {
 
 fn queue_pop(any q) any {
    "Pops the oldest event from queue `q` (FIFO). Returns oldest event or 0 if empty."
-   if(!is_list(q) || q.len == 0){ return 0 }
+   if !is_list(q) || q.len == 0 { return 0 }
    q.get(0)
 }
 
 fn queue_len(any q) i32 {
    "Returns queue length."
-   if(!is_list(q)){ return 0 }
+   if !is_list(q) { return 0 }
    q.len
 }

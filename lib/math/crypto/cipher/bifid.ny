@@ -14,7 +14,7 @@ fn _bifid_ch(str s, int i) str {
 
 fn _bifid_index(str alphabet, str ch, str scope) int {
    def idx = find(alphabet, ch)
-   if(idx < 0){ crypto_fail(scope, "character not in alphabet: " + ch) }
+   if idx < 0 { crypto_fail(scope, "character not in alphabet: " + ch) }
    idx
 }
 
@@ -25,7 +25,7 @@ fn bifid_cbc_unmask(str message, str mask, str alphabet="ABCDEFGHIKLMNOPQRSTUVWX
    def n = message.len
    mut out = ""
    mut i = 0
-   while(i < n){
+   while i < n {
       def a = _bifid_index(alphabet, _bifid_ch(message, i), "cipher.bifid_cbc_unmask")
       def b = _bifid_index(alphabet, _bifid_ch(mask, i % mask.len), "cipher.bifid_cbc_unmask")
       out += _bifid_ch(alphabet, (alphabet.len + a - b) % alphabet.len)
@@ -40,7 +40,7 @@ fn bifid_cbc_decrypt_block(str key, str ciphertext_block, int period=8) str {
    crypto_require_len(ciphertext_block, period, "cipher.bifid_cbc_decrypt_block", "ciphertext_block")
    mut out = ""
    mut i = 0
-   while(i < period){
+   while i < period {
       def a = _bifid_ch(ciphertext_block, i / 2)
       def b = _bifid_ch(ciphertext_block, (period + i) / 2)
       def ai = _bifid_index(key, a, "cipher.bifid_cbc_decrypt_block")
@@ -60,7 +60,7 @@ fn bifid_cbc_decrypt(str key, str iv, str ciphertext, int period=8) str {
    mut out = ""
    mut mask = iv
    mut i = 0
-   while(i < ciphertext.len){
+   while i < ciphertext.len {
       def block = str_slice(ciphertext, i, i + period, 1)
       out += bifid_cbc_unmask(bifid_cbc_decrypt_block(key, block, period), mask)
       mask = block

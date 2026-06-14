@@ -2,7 +2,7 @@
 use std.core
 
 fn bad(bool flag) int {
-   if(flag){ return 1 }
+   if flag { return 1 }
    return "x"
 }
 

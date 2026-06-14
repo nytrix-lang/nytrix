@@ -21,14 +21,14 @@ fn find_mod_inverse_26(int n) int {
 }
 
 fn _hill_key_matrix(any key_mat) any {
-   if(is_matrix(key_mat)){ return key_mat }
+   if is_matrix(key_mat) { return key_mat }
    Matrix(key_mat)
 }
 
 fn _hill_apply_matrix(str msg, any key) str {
    mut result = Builder(msg.len + 8)
    mut i = 0
-   while(i < msg.len){
+   while i < msg.len {
       def c1, c2 = ord(msg[i]) - 65, ord(msg[i + 1]) - 65
       def r1 = (c1 * mat_get(key, 0, 0) + c2 * mat_get(key, 0, 1)) % 26
       def r2 = (c1 * mat_get(key, 1, 0) + c2 * mat_get(key, 1, 1)) % 26
@@ -43,7 +43,7 @@ fn hill_encrypt(str msg, any key_mat) str {
    "Encrypt a message using the Hill cipher with a 2x2 key matrix, padding with 'X' if needed."
    def key = _hill_key_matrix(key_mat)
    mut m = msg
-   if(m.len % 2 != 0){ m = m + "X" }
+   if m.len % 2 != 0 { m = m + "X" }
    _hill_apply_matrix(m, key)
 }
 
@@ -52,7 +52,7 @@ fn hill_decrypt(str msg, any key_mat) any {
    def key = _hill_key_matrix(key_mat)
    def det = (mat_get(key, 0, 0) * mat_get(key, 1, 1) - mat_get(key, 0, 1) * mat_get(key, 1, 0)) % 26
    def inv_det = find_mod_inverse_26((det + 26) % 26)
-   if(inv_det == -1){ return nil }
+   if inv_det == -1 { return nil }
    def inv_mat = Matrix([
          [
             (mat_get(key, 1, 1) * inv_det) % 26,
