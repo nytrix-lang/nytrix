@@ -63,10 +63,18 @@ fn _enabled(any opts) bool {
 }
 
 fn _warmup(any opts) int {
+   mut n = 1
    if is_dict(opts) && opts.contains("warmup") {
-      return _opt_int(opts, "warmup", 1)
+      n = _opt_int(opts, "warmup", 1)
+   } else {
+      n = ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_WARMUP", 1, 0, 128)
    }
-   ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_WARMUP", 1, 0, 128)
+   ;; Swapchain images are independent. Present-only reuse may load an
+   ;; image that has not received a full draw yet, causing black/empty
+   ;; flashes on startup, resize, or async loads. Warm through every image.
+   def imgs = gfx.get_swapchain_image_count()
+   if imgs > 1 { n = max(n, imgs + 1) }
+   n
 }
 
 fn _redraw_interval(any opts) int {

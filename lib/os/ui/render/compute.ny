@@ -119,7 +119,7 @@ fn speculative_gi_probe_shader() str {
    layout(push_constant) uniform PC { uint probeCount ; float intensity; float time; uint flags; } pc;
    void main(){
    uint i = gl_GlobalInvocationID.x ;
-   if i >= pc.probeCount return ;
+   if(i >= pc.probeCount) return ;
    vec3 n = normalize(vec3(fract(float(i)*0.37)-0.5, fract(float(i)*0.73)-0.5, 0.5)) ;
    vec3 e = texture(envMap, n).rgb ;
    probes[i].irradiance = vec4(mix(probes[i].irradiance.rgb, e * pc.intensity, 0.05), 1.0) ;
@@ -137,7 +137,7 @@ fn ibl_prefilter_shader() str {
    layout(push_constant) uniform PC { float roughness ; uint face; uint size; uint sampleCount; } pc;
    void main(){
    ivec2 p = ivec2(gl_GlobalInvocationID.xy) ;
-   if p.x >= int(pc.size) || p.y >= int(pc.size) return ;
+   if(p.x >= int(pc.size) || p.y >= int(pc.size)) return ;
    vec2 uv = (vec2(p)+0.5)/float(pc.size)*2.0-1.0 ;
    vec3 dir = normalize(vec3(uv, 1.0)) ;
    vec3 c = texture(envMap, dir).rgb ;
@@ -155,7 +155,7 @@ fn brdf_lut_shader() str {
    layout(push_constant) uniform PC { uint size ; uint sampleCount; } pc;
    void main(){
    ivec2 p = ivec2(gl_GlobalInvocationID.xy) ;
-   if p.x >= int(pc.size) || p.y >= int(pc.size) return ;
+   if(p.x >= int(pc.size) || p.y >= int(pc.size)) return ;
    vec2 uv = (vec2(p)+0.5)/float(pc.size) ;
    imageStore(outLut, p, vec4(uv.x, uv.y, 0.0, 1.0)) ;
    }
@@ -177,7 +177,7 @@ fn transmission_blur_shader() str {
    vec4 ex = texture(materialExt, uv) ;
    float r = clamp(ex.y * pc.maxRadius, 0.0, pc.maxRadius) ;
    vec3 c = vec3(0.0) ; float w = 0.0;
-   for int y=-2 ;y<=2;y++ for int x=-2;x<=2;x++{ vec2 o=vec2(x,y)*pc.invExtent*r; c += texture(sceneColor, uv+o).rgb; w += 1.0; }
+   for(int y=-2 ;y<=2;y++) for(int x=-2;x<=2;x++){ vec2 o=vec2(x,y)*pc.invExtent*r; c += texture(sceneColor, uv+o).rgb; w += 1.0; }
    imageStore(outColor, ip, vec4(c/max(w,1.0), 1.0)) ;
    }
    "
@@ -192,6 +192,6 @@ fn material_ext_resolve_shader() str {
    layout(std430,binding=0) readonly buffer Materials { MaterialExt mats[] ; };
    layout(std430,binding=1) buffer Out { vec4 ext[] ; };
    layout(push_constant) uniform PC { uint materialCount ; } pc;
-   void main(){ uint i=gl_GlobalInvocationID.x ; if i>=pc.materialCount return; MaterialExt m=mats[i]; ext[i]=vec4(float(m.bsdf4&255u)/255.0,float((m.bsdf5>>8)&255u)/255.0,0.0,1.0); }
+   void main(){ uint i=gl_GlobalInvocationID.x ; if(i>=pc.materialCount) return; MaterialExt m=mats[i]; ext[i]=vec4(float(m.bsdf4&255u)/255.0,float((m.bsdf5>>8)&255u)/255.0,0.0,1.0); }
    "
 }

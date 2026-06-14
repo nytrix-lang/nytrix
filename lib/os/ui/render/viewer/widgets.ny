@@ -15,18 +15,18 @@ use std.math (clamp, max, min)
 use std.os.ui.render as gfx
 
 def C_BG = gfx.color_hex("#000000")
-def C_PANEL = gfx.color_hex("#050505")
-def C_PANEL_ALT = gfx.color_hex("#0a0a0a")
+def C_PANEL = gfx.color_hex("#080808")
+def C_PANEL_ALT = gfx.color_hex("#131318")
 def C_BOX = C_PANEL_ALT
-def C_LINE = gfx.color_hex("#242424")
-def C_TEXT = gfx.color_hex("#eeeeee")
-def C_MUTED = gfx.color_hex("#b8b8b8")
-def C_DIM = gfx.color_hex("#141414")
-def C_ACCENT = gfx.color_hex("#d0d0d0")
-def C_ACCENT_HI = gfx.color_hex("#f2f2f2")
-def C_KEY_IDLE = gfx.color_hex("#101010")
-def C_KEY_HOVER = gfx.color_hex("#191919")
-def C_KEY_DOWN = gfx.color_hex("#303030")
+def C_LINE = gfx.color_hex("#2b2634")
+def C_TEXT = gfx.color_hex("#f5f5f6")
+def C_MUTED = gfx.color_hex("#c6c6ca")
+def C_DIM = gfx.color_hex("#15151b")
+def C_ACCENT = gfx.color_hex("#9f86d9")
+def C_ACCENT_HI = gfx.color_hex("#bda9ec")
+def C_KEY_IDLE = gfx.color_hex("#121218")
+def C_KEY_HOVER = gfx.color_hex("#1b1624")
+def C_KEY_DOWN = gfx.color_hex("#332347")
 
 fn text_w(any font, any label, any font_lg=0, any font_md=0, f64 px=9.5) f64 {
    "Estimates text width for fixed-size UI layout."
