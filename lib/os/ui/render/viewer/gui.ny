@@ -177,7 +177,10 @@ comptime emit _scaled_metric_triplet(_resize_h, _M_RESIZE_H, _min_win_w, _M_MIN_
 
 @inline
 @jit
-fn _snap(f64 v) f64 { float(int(v)) }
+fn _snap(f64 v) f64 {
+   "Rounds UI geometry to the nearest pixel without truncation drift."
+   v >= 0.0 ? float(int(v + 0.5)) : float(int(v - 0.5))
+}
 
 fn _clear_pending_input_events() any {
    _event_mouse_has_pos, _event_mouse_down0_known, _event_mouse_down0 = false, false, false
@@ -329,7 +332,7 @@ fn split_cols(list r, list weights, f64 gap=0.0) list { "Splits `r` into weighte
 fn split_rows(list r, list weights, f64 gap=0.0) list { "Splits `r` into weighted rows." _split_rect_axis(r, weights, gap, true) }
 
 fn apply_window_rect(any id, list r) any {
-   "Applies a stored window rectangle by widget/window id."
+   "Applies a stored window rectangle by widget/window id without fighting active drag/resize."
    def key = to_str(id)
    if key.len == 0 { return 0 }
    mut st = _window_lookup(key)
@@ -338,12 +341,15 @@ fn apply_window_rect(any id, list r) any {
       st["id"] = key
       st["open"] = true
    }
-   def nx, ny = float(r.get(0, 0.0)), float(r.get(1, 0.0))
-   def nw, nh = max(float(r.get(2, 0.0)), _min_win_w()), max(float(r.get(3, 0.0)), _min_win_h())
+   def nx, ny = _snap(float(r.get(0, 0.0))), _snap(float(r.get(1, 0.0)))
+   def nw, nh = max(_snap(float(r.get(2, 0.0))), _min_win_w()), max(_snap(float(r.get(3, 0.0))), _min_win_h())
    def moved = abs(float(st.get("x", nx)) - nx) > 0.5 ||
    abs(float(st.get("y", ny)) - ny) > 0.5 ||
    abs(float(st.get("w", nw)) - nw) > 0.5 ||
    abs(float(st.get("h", nh)) - nh) > 0.5
+   if _active_window_move == key || _active_window_resize == key {
+      return 0
+   }
    st["x"] = nx
    st["y"] = ny
    st["w"] = nw
@@ -3921,7 +3927,7 @@ fn begin_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) bool 
       _move_off_x = _mouse_x - sx
       _move_off_y = _mouse_y - sy
    }
-   if _active_window_move == to_str(id)&& _mouse_down0 && _mouse_drag_ready() { sx, sy = _snap(_mouse_x - _move_off_x), _snap(_mouse_y - _move_off_y) }
+   if _active_window_move == to_str(id) && _mouse_down0 && _mouse_drag_ready() { sx, sy = _snap(_mouse_x - _move_off_x), _snap(_mouse_y - _move_off_y) }
    def resize_x, resize_y = sx + sw - _resize_h(), sy + sh - _resize_h()
    def resize_hover = resizable && !collapsed && _window_pointer_hit(id, resize_x, resize_y, _resize_h(), _resize_h())
    if resize_hover || (_active_window_resize == to_str(id) && _mouse_down0) {
@@ -3934,7 +3940,7 @@ fn begin_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) bool 
       _resize_pad_y = sy + sh - _mouse_y
    }
    if _active_window_resize == to_str(id) && !_mouse_down0 { _active_window_resize = "" }
-   if _active_window_resize == to_str(id)&& _mouse_down0 && _mouse_drag_ready() { sw, sh = max(_min_win_w(), _snap(_mouse_x - sx + _resize_pad_x)), max(_min_win_h(), _snap(_mouse_y - sy + _resize_pad_y)) }
+   if _active_window_resize == to_str(id) && _mouse_down0 && _mouse_drag_ready() { sw, sh = max(_min_win_w(), _snap(_mouse_x - sx + _resize_pad_x)), max(_min_win_h(), _snap(_mouse_y - sy + _resize_pad_y)) }
    st["x"] = sx st["y"] = sy
    st["w"] = sw st["h"] = sh
    st, sx = _clamp_window_pos(st), float(st.get("x", sx))
@@ -4068,6 +4074,7 @@ fn end_window() any {
    assert(inset([0.0, 0.0, 10.0, 10.0], 2.0) == [2.0, 2.0, 6.0, 6.0], "gui inset")
    assert(split_cols([0.0, 0.0, 100.0, 20.0], [1.0, 1.0], 4.0).len == 2, "gui split cols")
    assert(split_rows([0.0, 0.0, 20.0, 100.0], [1.0, 1.0], 4.0).len == 2, "gui split rows")
+   assert(_snap(10.6) == 11.0 && _snap(10.2) == 10.0, "gui snap nearest")
    apply_window_rect("probe", [10.0, 12.0, 260.0, 120.0])
    assert(window_visible("probe"), "gui window visible")
    set_window_pos("probe", 14.0, 18.0)
