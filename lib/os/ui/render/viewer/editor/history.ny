@@ -17,7 +17,7 @@ fn new() dict {
 
 fn _clone_buffer(any b) dict {
    mut out = clone(b)
-   if(is_dict(out)){
+   if is_dict(out) {
       def lines = out.get("lines", [""])
       out["lines"] = is_list(lines) ? clone(lines) : [to_str(lines)]
       return out
@@ -28,7 +28,7 @@ fn _clone_buffer(any b) dict {
 fn _clone_buffers(list buffers) list {
    mut out = []
    mut i = 0
-   while(i < buffers.len){
+   while i < buffers.len {
       out = out.append(_clone_buffer(buffers.get(i, {})))
       i += 1
    }
@@ -73,9 +73,9 @@ fn _restore(dict st, dict snap) dict {
 fn push(dict hist, dict st) dict {
    def snap = snapshot(st)
    mut undo = hist.get("undo", [])
-   if(undo.len > 0 && _same(undo.get(undo.len - 1), snap)){ return hist }
+   if undo.len > 0 && _same(undo.get(undo.len - 1), snap) { return hist }
    undo = undo.append(snap)
-   if(undo.len > 128){ undo = slice(undo, undo.len - 128, undo.len, 1) }
+   if undo.len > 128 { undo = slice(undo, undo.len - 128, undo.len, 1) }
    hist["undo"] = undo
    hist["redo"] = []
    hist
@@ -87,7 +87,7 @@ fn _pack(dict hist, dict st, str status="") dict {
 
 fn undo(dict hist, dict st) dict {
    mut undo = hist.get("undo", [])
-   if(undo.len <= 0){ return _pack(hist, st, "nothing to undo") }
+   if undo.len <= 0 { return _pack(hist, st, "nothing to undo") }
    mut redo = hist.get("redo", [])
    redo = redo.append(snapshot(st))
    def snap = undo.get(undo.len - 1)
@@ -99,7 +99,7 @@ fn undo(dict hist, dict st) dict {
 
 fn redo(dict hist, dict st) dict {
    mut redo = hist.get("redo", [])
-   if(redo.len <= 0){ return _pack(hist, st, "nothing to redo") }
+   if redo.len <= 0 { return _pack(hist, st, "nothing to redo") }
    mut undo = hist.get("undo", [])
    undo = undo.append(snapshot(st))
    def snap = redo.get(redo.len - 1)
@@ -111,12 +111,12 @@ fn redo(dict hist, dict st) dict {
 
 fn _before_edit(dict hist, dict st) dict {
    hist = push(hist, st)
-   if(ed.selection_valid(st)){ st = ed.delete_selection(st) }
+   if ed.selection_valid(st) { st = ed.delete_selection(st) }
    {"hist": hist, "st": st}
 }
 
 fn insert_text(dict hist, dict st, str text) dict {
-   if(text.len <= 0){ return _pack(hist, st) }
+   if text.len <= 0 { return _pack(hist, st) }
    def p = _before_edit(hist, st)
    hist = p.get("hist", hist)
    st = ed.insert_text(p.get("st", st), text)
@@ -130,20 +130,20 @@ fn newline(dict hist, dict st) dict {
 
 fn backspace(dict hist, dict st) dict {
    hist = push(hist, st)
-   if(ed.selection_valid(st)){ st = ed.delete_selection(st) }
+   if ed.selection_valid(st) { st = ed.delete_selection(st) }
    else { st = ed.backspace(st) }
    _pack(hist, st)
 }
 
 fn delete_char(dict hist, dict st) dict {
    hist = push(hist, st)
-   if(ed.selection_valid(st)){ st = ed.delete_selection(st) }
+   if ed.selection_valid(st) { st = ed.delete_selection(st) }
    else { st = ed.delete_char(st) }
    _pack(hist, st)
 }
 
 fn cut_selection(dict hist, dict st) dict {
-   if(!ed.selection_valid(st)){ return _pack(hist, st, "no selection") }
+   if !ed.selection_valid(st) { return _pack(hist, st, "no selection") }
    hist = push(hist, st)
    _pack(hist, ed.delete_selection(st), "cut")
 }
@@ -151,7 +151,7 @@ fn cut_selection(dict hist, dict st) dict {
 fn insert_pair(dict hist, dict st, str open, str close) dict {
    hist = push(hist, st)
    def selected = ed.selection_text(st)
-   if(selected.len > 0){
+   if selected.len > 0 {
       st = ed.delete_selection(st)
       st = ed.insert_text(st, open + selected + close)
       return _pack(hist, st)

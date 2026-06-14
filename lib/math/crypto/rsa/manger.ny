@@ -15,23 +15,23 @@ fn _ceil_div(any a, any b) any { a / b + ((a % b) != 0 ? 1 : 0) }
 
 fn _manger_step1(any padding_oracle, any n, any e, any c) any {
    mut f1 = 2
-   while(padding_oracle(mod(power_mod(f1, e, n) * c, n))){ f1 *= 2 }
+   while padding_oracle(mod(power_mod(f1, e, n) * c, n)) { f1 *= 2 }
    f1
 }
 
 fn _manger_step2(any padding_oracle, any n, any e, any c, any B, any f1) any {
    mut f2 = _floor_div(n + B, B) * f1 / 2
-   while(!padding_oracle(mod(power_mod(f2, e, n) * c, n))){ f2 += f1 / 2 }
+   while !padding_oracle(mod(power_mod(f2, e, n) * c, n)) { f2 += f1 / 2 }
    f2
 }
 
 fn _manger_step3(any padding_oracle, any n, any e, any c, any B, any f2) any {
    mut mmin = _ceil_div(n, f2)
    mut mmax = _floor_div(n + B, f2)
-   while(mmin < mmax){
+   while mmin < mmax {
       def f, i = _floor_div(2 * B, mmax - mmin), _floor_div(f * mmin, n)
       def f3 = _ceil_div(i * n, mmin)
-      if(padding_oracle(mod(power_mod(f3, e, n) * c, n))){ mmax = _floor_div(i * n + B, f3) } else { mmin = _ceil_div(i * n + B, f3) }
+      if padding_oracle(mod(power_mod(f3, e, n) * c, n)) { mmax = _floor_div(i * n + B, f3) } else { mmin = _ceil_div(i * n + B, f3) }
    }
    mmin
 }

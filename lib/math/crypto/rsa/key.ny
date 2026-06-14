@@ -16,22 +16,22 @@ fn _asn1_int_at(list seq, int idx) any {
 }
 
 fn _der_len(any n) list {
-   if(n < 128){ return [n] }
+   if n < 128 { return [n] }
    def b = Z(n).bytes
    [128 | b.len].concat(b)
 }
 
 fn _der_int(any x) list {
    mut b = Z(x).bytes
-   if(b.len == 0){ b = [0] }
-   if((b[0] & 128) != 0){ b = [0].concat(b) }
+   if b.len == 0 { b = [0] }
+   if (b[0] & 128) != 0 { b = [0].concat(b) }
    [2].concat(_der_len(b.len)).concat(b)
 }
 
 fn _der_seq(list parts) list {
    mut body = []
    mut i = 0
-   while(i < parts.len){
+   while i < parts.len {
       body = body.concat(parts[i])
       i += 1
    }
@@ -43,7 +43,7 @@ fn _pem_wrap(str label, list der) str {
    mut out = Builder(b64.len + 80)
    out = builder_append(out, "-----BEGIN " + label + "-----\n")
    mut i = 0
-   while(i < b64.len){
+   while i < b64.len {
       out = builder_append(out, slice(b64, i, min(i + 64, b64.len)))
       out = builder_append(out, "\n")
       i += 64
@@ -68,7 +68,7 @@ fn rsa_public_pem_values(str pem) list {
    "Parse a SubjectPublicKeyInfo or PKCS#1 RSA PUBLIC KEY PEM and return [n, e]."
    def top = asn1_get_sequence(asn1_parse(pem_decode(pem))[0])
    assert(top != nil && top.len >= 2, "RSA public key ASN.1 sequence")
-   if(top[0]["tag"] == 0x02){
+   if top[0]["tag"] == 0x02 {
       return [_asn1_int_at(top, 0), _asn1_int_at(top, 1)]
    }
    def bit_value = top[1]["val"]
@@ -103,9 +103,9 @@ fn _ssh_mpint(list blob, int pos) list {
    def n = _ssh_u32(blob, pos)
    def start = pos + 4
    mut i = start
-   while(i < start + n && blob[i] == 0){ i += 1 }
+   while i < start + n && blob[i] == 0 { i += 1 }
    mut out = Z(0)
-   while(i < start + n){
+   while i < start + n {
       out = out * Z(256) + Z(blob[i])
       i += 1
    }

@@ -20,18 +20,18 @@ mut _default_color = -1
 
 fn _env_int_or(str key, int fallback) int {
    def v = env(key)
-   if(is_int(v)){ return v }
-   if(is_str(v)){
+   if is_int(v) { return v }
+   if is_str(v) {
       def s = strip(v)
-      if(s.len > 0){ return atoi(s) }
+      if s.len > 0 { return atoi(s) }
    }
    fallback
 }
 
 fn _truthy(any v, bool fallback=false) bool {
-   if(v == nil || v == 0){ return fallback }
-   if(is_int(v)){ return v != 0 }
-   if(is_str(v)){
+   if v == nil || v == 0 { return fallback }
+   if is_int(v) { return v != 0 }
+   if is_str(v) {
       def s = lower(strip(v))
       return !(s == "" || s == "0" || s == "false" || s == "off" || s == "no" || s == "never")
    }
@@ -40,17 +40,17 @@ fn _truthy(any v, bool fallback=false) bool {
 
 fn _verbose_default() bool {
    def v = env("NY_NET_VERBOSE")
-   if(v == nil || v == 0){ return false }
-   if(is_int(v)){ return v != 0 }
-   if(!is_str(v)){ return true }
+   if v == nil || v == 0 { return false }
+   if is_int(v) { return v != 0 }
+   if !is_str(v) { return true }
    _truthy(v, false)
 }
 
 fn level_value(any level) int {
    "Returns numeric log severity: quiet=0, error=1, info=2, debug=3, trace=4."
-   if(level == nil || level == 0){ return 0 }
-   if(is_int(level)){ return level }
-   if(!is_str(level)){ return level ? 2 : 0 }
+   if level == nil || level == 0 { return 0 }
+   if is_int(level) { return level }
+   if !is_str(level) { return level ? 2 : 0 }
    def s = lower(strip(level))
    return case s {
       "", "quiet", "none", "off", "false", "0" -> 0
@@ -65,18 +65,18 @@ fn level_value(any level) int {
 fn level_name(any level) str {
    "Normalizes a log level to quiet/error/info/debug/trace."
    def n = level_value(level)
-   if(n <= 0){ return "quiet" }
-   if(n == 1){ return "error" }
-   if(n == 2){ return "info" }
-   if(n == 3){ return "debug" }
+   if n <= 0 { return "quiet" }
+   if n == 1 { return "error" }
+   if n == 2 { return "info" }
+   if n == 3 { return "debug" }
    "trace"
 }
 
 fn default_level() str {
    "Returns the process-wide network log level."
-   if(is_str(_default_level_override) && _default_level_override.len > 0){ return _default_level_override }
+   if is_str(_default_level_override) && _default_level_override.len > 0 { return _default_level_override }
    def lv = env("NY_NET_LOG_LEVEL")
-   if(is_str(lv) && strip(lv).len > 0){ return level_name(lv) }
+   if is_str(lv) && strip(lv).len > 0 { return level_name(lv) }
    _verbose_default() ? "debug" : "quiet"
 }
 
@@ -88,7 +88,7 @@ fn set_default_level(any level="debug") str {
 
 fn timeout_ms(int fallback=5000) int {
    "Returns the process-wide network timeout in milliseconds."
-   if(_default_timeout_ms >= 0){ return _default_timeout_ms }
+   if _default_timeout_ms >= 0 { return _default_timeout_ms }
    _env_int_or("NY_NET_TIMEOUT_MS", fallback)
 }
 
@@ -99,12 +99,12 @@ fn chunk_size() int {
 
 fn color_enabled(any options=0) bool {
    "Returns whether network logs should use ANSI color."
-   if(is_dict(options) && options.get("color", nil) != nil){ return _truthy(options.get("color"), true) }
-   if(_default_color >= 0){ return _default_color != 0 }
+   if is_dict(options) && options.get("color", nil) != nil { return _truthy(options.get("color"), true) }
+   if _default_color >= 0 { return _default_color != 0 }
    def no = env("NO_COLOR")
-   if(no != nil && no != 0 && to_str(no).len > 0){ return false }
+   if no != nil && no != 0 && to_str(no).len > 0 { return false }
    def c = env("NY_NET_COLOR")
-   if(is_str(c) && strip(c).len > 0){ return _truthy(c, true) }
+   if is_str(c) && strip(c).len > 0 { return _truthy(c, true) }
    true
 }
 
@@ -120,21 +120,21 @@ fn _ansi_code(str color, int bold=0) str {
       "white" -> "37"
       _ -> "0"
    }
-   if(bold != 0){ return "1;" + c }
+   if bold != 0 { return "1;" + c }
    c
 }
 
 fn paint(str s, str color="", int bold=0, any options=0) str {
    "Applies ANSI color when network color is enabled."
-   if(!color_enabled(options) || color.len == 0){ return s }
+   if !color_enabled(options) || color.len == 0 { return s }
    "\033[" + _ansi_code(color, bold) + "m" + s + "\033[0m"
 }
 
 fn _option_level(any options) str {
-   if(is_dict(options)){
+   if is_dict(options) {
       def lv = options.get("log_level", options.get("level", ""))
-      if(is_str(lv) && strip(lv).len > 0){ return level_name(lv) }
-      if(is_int(lv)){ return level_name(lv) }
+      if is_str(lv) && strip(lv).len > 0 { return level_name(lv) }
+      if is_int(lv) { return level_name(lv) }
    }
    default_level()
 }
@@ -145,15 +145,15 @@ fn log_enabled(any options, str want) bool {
 }
 
 fn _level_color(str lvl) str {
-   if(lvl == "error"){ return "red" }
-   if(lvl == "info"){ return "green" }
-   if(lvl == "debug"){ return "cyan" }
+   if lvl == "error" { return "red" }
+   if lvl == "info" { return "green" }
+   if lvl == "debug" { return "cyan" }
    "gray"
 }
 
 fn log_line(str tag, str want, str msg, any options=0) int {
    "Prints a consistently formatted network log line when enabled."
-   if(!log_enabled(options, want)){ return 0 }
+   if !log_enabled(options, want) { return 0 }
    def lvl = level_name(want)
    print(paint("[" + tag + " " + lvl + "]", _level_color(lvl), lvl == "info" ? 1 : 0, options) + " " + msg)
    0
@@ -161,22 +161,22 @@ fn log_line(str tag, str want, str msg, any options=0) int {
 
 fn set_context(any options=0) dict {
    "Updates process-wide network defaults."
-   if(is_str(options) && strip(options).len > 0){
+   if is_str(options) && strip(options).len > 0 {
       set_default_level(options)
-   } elif(is_dict(options)){
-      if(options.get("log_level", nil) != nil){ set_default_level(options.get("log_level")) }
-      if(options.get("level", nil) != nil){ set_default_level(options.get("level")) }
-      if(options.get("timeout_ms", nil) != nil){ _default_timeout_ms = max(0, atoi(to_str(options.get("timeout_ms")))) }
-      if(options.get("timeout", nil) != nil){ _default_timeout_ms = max(0, atoi(to_str(options.get("timeout"))) * 1000) }
-      if(options.get("chunk_size", nil) != nil){ _default_chunk_size = max(0, min(1048576, atoi(to_str(options.get("chunk_size"))))) }
-      if(options.get("color", nil) != nil){ _default_color = _truthy(options.get("color"), true) ? 1 : 0 }
+   } elif is_dict(options) {
+      if options.get("log_level", nil) != nil { set_default_level(options.get("log_level")) }
+      if options.get("level", nil) != nil { set_default_level(options.get("level")) }
+      if options.get("timeout_ms", nil) != nil { _default_timeout_ms = max(0, atoi(to_str(options.get("timeout_ms")))) }
+      if options.get("timeout", nil) != nil { _default_timeout_ms = max(0, atoi(to_str(options.get("timeout"))) * 1000) }
+      if options.get("chunk_size", nil) != nil { _default_chunk_size = max(0, min(1048576, atoi(to_str(options.get("chunk_size"))))) }
+      if options.get("color", nil) != nil { _default_color = _truthy(options.get("color"), true) ? 1 : 0 }
    }
    context()
 }
 
 fn context(any options=0) dict {
    "Returns or updates process-wide network context."
-   if((is_str(options) && strip(options).len > 0) || is_dict(options)){ return set_context(options) }
+   if (is_str(options) && strip(options).len > 0) || is_dict(options) { return set_context(options) }
    {
       "log_level": default_level(),
       "timeout_ms": _default_timeout_ms,

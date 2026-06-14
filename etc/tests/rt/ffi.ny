@@ -34,10 +34,10 @@ free(ffi_color)
    def pid = getpid()
    assert(pid > 0, "posix standard header import exposes getpid")
    def login_name = getlogin()
-   if(login_name){
+   if login_name {
       assert(type(login_name) == "str" && login_name.len > 0, "posix getlogin returns a Ny string")
    }
-   mut timeval: tv = timeval(0, 0)
-   assert(gettimeofday(&tv, NULL) == 0, "posix header import accepts NULL and timeval out pointer")
+   mut local_tv = timeval(0, 0)
+   assert(gettimeofday(&local_tv, NULL) == 0, "posix header import accepts NULL and timeval out pointer")
 } #endif
 print("✓ FFI include resolution passed")

@@ -14,35 +14,35 @@ fn tokenize(str source, list out_tokens) list {
    "Runs the tokenize operation."
    def src_len = source.len
    mut i = 0
-   while(i < src_len){
+   while i < src_len {
       def idx = i + 0
       i = idx
       def ch = load8(source, i)
-      if(_h.is_space_ch(ch)){
+      if _h.is_space_ch(ch) {
          def j = _h.scan_space(source, i, src_len)
          out_tokens = _h.add_tok(out_tokens, 14, i, j - i)
          i = j
-      } elif(ch == 35){
+      } elif ch == 35 {
          def j = _h.scan_line(source, i, src_len)
          out_tokens = _h.add_tok(out_tokens, 4, i, j - i)
          i = j
-      } elif(ch == 34){
+      } elif ch == 34 {
          def j = _h.scan_quoted(source, i, src_len)
          out_tokens = _h.add_tok(out_tokens, 2, i, j - i)
          i = j
-      } elif(_h.is_alpha_ch(ch)){
+      } elif _h.is_alpha_ch(ch) {
          def j = _h.scan_ident(source, i, src_len)
          def word = str.str_slice(source, i, j)
-         if(_h.in_list(word, KW)){ out_tokens = _h.add_tok(out_tokens, 0, i, j - i) }
+         if _h.in_list(word, KW) { out_tokens = _h.add_tok(out_tokens, 0, i, j - i) }
          else { out_tokens = _h.add_tok(out_tokens, 8, i, j - i) }
          i = j
-      } elif(ch == 36 && i + 1 < src_len && load8(source, i + 1) == 123){
+      } elif ch == 36 && i + 1 < src_len && load8(source, i + 1) == 123 {
          mut j = i + 2
-         while(j < src_len && load8(source, j) != 125){ j += 1 }
-         if(j < src_len){ j += 1 }
+         while j < src_len && load8(source, j) != 125 { j += 1 }
+         if j < src_len { j += 1 }
          out_tokens = _h.add_tok(out_tokens, 8, i, j - i)
          i = j
-      } elif(ch == 40 || ch == 41){
+      } elif ch == 40 || ch == 41 {
          out_tokens = _h.add_tok(out_tokens, 7, i, 1)
          i += 1
       } else {

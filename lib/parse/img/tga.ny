@@ -12,7 +12,7 @@ use std.math.bin as pbin
 
 fn decode(str data) any {
    "Decodes an uncompressed 24-bit or 32-bit TGA image."
-   if(data.len < 18){ return 0 }
+   if data.len < 18 { return 0 }
    def id_len = load8(data, 0)
    def color_map_type = load8(data, 1)
    load8(data, 2)
@@ -22,19 +22,19 @@ fn decode(str data) any {
    def flip_x = (desc >> 4) & 1
    def flip_y = (desc >> 5) & 1
    mut p = 18 + id_len
-   if(color_map_type == 1){
+   if color_map_type == 1 {
       def map_len = pbin.u16le(data, 5)
       def map_entry_size = load8(data, 7)
       p += map_len * (map_entry_size / 8)
    }
    def tpx = w * h
    def pix = init_str(malloc(tpx * 4 + 1), tpx * 4)
-   if(!pix){ return 0 }
-   if(bpp == 24 && !flip_x && !flip_y){
+   if !pix { return 0 }
+   if bpp == 24 && !flip_x && !flip_y {
       mut y = 0
-      while(y < h){
+      while y < h {
          mut x = 0
-         while(x + 4 <= w){
+         while x + 4 <= w {
             def src = p + (y * w + x) * 3
             def dst = (y * w + x) * 4
             def b0 = load8(data, src)
@@ -55,7 +55,7 @@ fn decode(str data) any {
             store32(pix, r3|(g3<<8)|(b3<<16)|(255<<24), dst+12)
             x += 4
          }
-         while(x < w){
+         while x < w {
             def src = p + (y * w + x) * 3
             def dst = (y * w + x) * 4
             store32(pix, load8(data, src+2)|(load8(data, src+1)<<8)|(load8(data, src)<<16)|(255<<24), dst)
@@ -63,11 +63,11 @@ fn decode(str data) any {
          }
          y += 1
       }
-   } elif(bpp == 32 && !flip_x && !flip_y){
+   } elif bpp == 32 && !flip_x && !flip_y {
       mut y = 0
-      while(y < h){
+      while y < h {
          mut x = 0
-         while(x < w){
+         while x < w {
             def src = p + (y * w + x) * 4
             def dst = (y * w + x) * 4
             store32(pix, load8(data, src+2)|(load8(data, src+1)<<8)|(load8(data, src)<<16)|(load8(data, src+3)<<24), dst)
@@ -77,22 +77,22 @@ fn decode(str data) any {
       }
    } else {
       mut y = 0
-      while(y < h){
+      while y < h {
          mut x = 0
-         while(x < w){
+         while x < w {
             mut ry = h - 1 - y
-            if(flip_y){ ry = y }
+            if flip_y { ry = y }
             mut rx = x
-            if(flip_x){ rx = w - 1 - x }
+            if flip_x { rx = w - 1 - x }
             def src_off = p + (y * w + x) * (bpp / 8)
             def dst_off = (ry * w + rx) * 4
-            if(bpp == 24){
+            if bpp == 24 {
                store8(pix, load8(data, src_off + 2), dst_off)
                store8(pix, load8(data, src_off + 1), dst_off + 1)
                store8(pix, load8(data, src_off), dst_off + 2)
                store8(pix, 255, dst_off + 3)
             }
-            elif(bpp == 32){
+            elif bpp == 32 {
                store8(pix, load8(data, src_off + 2), dst_off)
                store8(pix, load8(data, src_off + 1), dst_off + 1)
                store8(pix, load8(data, src_off), dst_off + 2)
@@ -128,15 +128,15 @@ fn encode(dict img) str {
    def out = init_str(malloc(w * h * 4 + 19), w * h * 4 + 18)
    __copy_mem(out, hdr, 18)
    mut y = 0
-   while(y < h){
+   while y < h {
       mut x = 0
-      while(x < w){
+      while x < w {
          def src_off = (y * w + x) * ch
          def dst_off = 18 + (y * w + x) * 4
          mut r, g = load8(d, src_off), r
          mut b, a = r, 255
-         if(ch >= 3){ g, b = load8(d, src_off + 1), load8(d, src_off + 2) }
-         if(ch == 4){ a = load8(d, src_off + 3) }
+         if ch >= 3 { g, b = load8(d, src_off + 1), load8(d, src_off + 2) }
+         if ch == 4 { a = load8(d, src_off + 3) }
          store8(out, b, dst_off)
          store8(out, g, dst_off + 1)
          store8(out, r, dst_off + 2)
@@ -154,9 +154,9 @@ fn save(dict img, str path) Result {
    def h = int(img.get("height", 0))
    def d = img.get("data", 0)
    def ch = int(img.get("channels", img.get("bpp", 4)))
-   if(!d || w <= 0 || h <= 0 || ch <= 0){ return err(-22) }
+   if !d || w <= 0 || h <= 0 || ch <= 0 { return err(-22) }
    def n = __save_tga_rgba(path, d, w, h, ch)
-   if(n >= 0){ return ok(n) }
+   if n >= 0 { return ok(n) }
    err(n)
 }
 
@@ -173,7 +173,7 @@ fn save(dict img, str path) Result {
    assert(is_str(encoded) && encoded.len == 34, "tga encoded size")
    def decoded = decode(encoded)
    assert(is_dict(decoded) && decoded.get("width") == 2 && decoded.get("height") == 2 && decoded.get("channels") == 4, "tga decoded shape")
-   match save(img, "build/tga-native-smoke.tga"){
+   match save(img, "build/tga-native-smoke.tga") {
       ok(n) -> { assert(n > 0, "tga native save bytes") }
       err(e) -> { panic("tga save failed: " + to_str(e)) }
    }

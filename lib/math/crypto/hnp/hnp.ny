@@ -16,7 +16,7 @@ fn hnp_centered_mod(any value, any modulus) bigint {
    "Return value modulo modulus in the centered interval(-modulus/2, modulus/2]."
    def q = Z(modulus)
    mut v = Z(value) % q
-   if(v > q / Z(2)){ v = v - q }
+   if v > q / Z(2) { v = v - q }
    v
 }
 
@@ -43,11 +43,11 @@ fn hnp_partition_samples(list samples, list counts) list {
    mut groups = [[], [], [], []]
    mut pos = 0
    mut g = 0
-   while(g < 4){
+   while g < 4 {
       mut bucket = []
       mut i = 0
       def want = int(counts.get(g, 0))
-      while(i < want && pos < samples.len){
+      while i < want && pos < samples.len {
          bucket = bucket.append(samples[pos])
          pos += 1
          i += 1
@@ -61,7 +61,7 @@ fn hnp_partition_samples(list samples, list counts) list {
 fn _hnp_zero_row(int n) list {
    mut row = []
    mut i = 0
-   while(i < n){
+   while i < n {
       row = row.append(Z(0))
       i += 1
    }
@@ -80,7 +80,7 @@ fn hnp_replace_samples(list samples, any modulus, any leaked_bits, str mode="shi
    "Replace HNP samples against the first sample.
    `shifted` mode uses(a_i+B)-t_i'(a_0+B), matching lattice/prescreen rows.
    `raw` mode uses a_i-a_0*t_i', matching interval narrowing rows."
-   if(samples.len < 2){ return [] }
+   if samples.len < 2 { return [] }
    def q = Z(modulus)
    def bound = hnp_leak_bound(q, leaked_bits)
    def first = samples[0]
@@ -88,7 +88,7 @@ fn hnp_replace_samples(list samples, any modulus, any leaked_bits, str mode="shi
    def a0 = Z(first[1])
    mut out = []
    mut i = 1
-   while(i < samples.len){
+   while i < samples.len {
       def sample = samples[i]
       def t_rep = (t0_inv * Z(sample[0])) % q
       def a_rep = mode == "raw" ? (Z(sample[1]) - t_rep * a0) % q : ((Z(sample[1]) + bound) - t_rep * (a0 + bound)) % q
@@ -103,12 +103,12 @@ fn hnp_prescreen_target(list replaced_samples, any target, any modulus, any boun
    def q, b = Z(modulus), Z(bound)
    mut errors = 0
    mut i = 0
-   while(i < replaced_samples.len){
+   while i < replaced_samples.len {
       def sample = replaced_samples[i]
       def residue = ((Z(sample[0]) * Z(target) - Z(sample[1]) + b) % q) - b
-      if(_hnp_abs(residue) > b){
+      if _hnp_abs(residue) > b {
          errors += 1
-         if(errors > max_errors){ return false }
+         if errors > max_errors { return false }
       }
       i += 1
    }
@@ -117,7 +117,7 @@ fn hnp_prescreen_target(list replaced_samples, any target, any modulus, any boun
 
 fn _hnp_lsb_lattice_rows(list samples, any modulus, any leaked_bits, any volume_bits=0, any embedding=nil) any {
    def n = samples.len
-   if(n < 2){ return nil }
+   if n < 2 { return nil }
    def q = Z(modulus)
    def emb = embedding == nil ? hnp_embedding(q, leaked_bits) : Z(embedding)
    def scale = Z(1) << int(volume_bits)
@@ -125,19 +125,19 @@ fn _hnp_lsb_lattice_rows(list samples, any modulus, any leaked_bits, any volume_
    def replaced = hnp_replace_samples(samples, q, leaked_bits)
    mut rows = []
    mut i = 0
-   while(i < dim){
+   while i < dim {
       rows = rows.append(_hnp_zero_row(dim))
       i += 1
    }
    i = 0
-   while(i < n - 1){
+   while i < n - 1 {
       mut row = rows[i]
       row[i] = q
       rows[i] = row
       i += 1
    }
    i = 0
-   while(i < replaced.len){
+   while i < replaced.len {
       def sample = replaced[i]
       mut trow = rows[n - 1]
       trow[i] = sample[0] * scale
@@ -188,11 +188,11 @@ fn hnp_check_alpha(any alpha, list samples, any modulus, any leaked_bits, int ma
    def bound = hnp_leak_bound(q, leaked_bits)
    mut errors = 0
    mut i = 0
-   while(i < samples.len){
+   while i < samples.len {
       def sample = samples[i]
-      if(((Z(alpha) * Z(sample[0]) - Z(sample[1])) % q) > Z(2) * bound){
+      if ((Z(alpha) * Z(sample[0]) - Z(sample[1])) % q) > Z(2) * bound {
          errors += 1
-         if(errors > max_errors){ return false }
+         if errors > max_errors { return false }
       }
       i += 1
    }
@@ -208,7 +208,7 @@ fn hnp_linear_predicate_eliminate_alpha(list first, any target, any tau, list ch
 fn _hnp_slice(list xs, int start, int count) list {
    mut out = []
    mut i = 0
-   while(i < count && start + i < xs.len){
+   while i < count && start + i < xs.len {
       out = out.append(xs[start + i])
       i += 1
    }
@@ -220,9 +220,9 @@ fn _hnp_count_errors(any alpha, list samples, any modulus, any leaked_bits) int 
    def bound = hnp_leak_bound(q, leaked_bits)
    mut errors = 0
    mut i = 0
-   while(i < samples.len){
+   while i < samples.len {
       def sample = samples[i]
-      if(((Z(alpha) * Z(sample[0]) - Z(sample[1])) % q) > Z(2) * bound){ errors += 1 }
+      if ((Z(alpha) * Z(sample[0]) - Z(sample[1])) % q) > Z(2) * bound { errors += 1 }
       i += 1
    }
    errors
@@ -231,7 +231,7 @@ fn _hnp_count_errors(any alpha, list samples, any modulus, any leaked_bits) int 
 fn _hnp_dict(list pairs) dict {
    mut out = dict(pairs.len)
    mut i = 0
-   while(i < pairs.len){
+   while i < pairs.len {
       def pair = pairs[i]
       out = out.set(pair[0], pair[1])
       i += 1
@@ -289,12 +289,12 @@ fn _hnp_try_candidate(list first, list checks, any q, any bits, any target, any 
 }
 
 fn _hnp_try_row(any row, list first, list checks, any q, any bits, int max_errors, any embedding, int volume_bits) any {
-   if(!is_list(row) || row.len < 2){ return nil }
+   if !is_list(row) || row.len < 2 { return nil }
    def target_idx = row.len - 2
    def tau_idx = row.len - 1
    mut target = Z(row[target_idx])
    mut tau = Z(row[tau_idx])
-   if(volume_bits <= 0){
+   if volume_bits <= 0 {
       def alpha = _hnp_try_candidate(first, checks, q, bits, target, tau, max_errors, embedding)
       return alpha == nil ? nil : [alpha, target, tau]
    }
@@ -307,7 +307,7 @@ fn _hnp_try_row(any row, list first, list checks, any q, any bits, int max_error
    mut cand = invalid ? target + radius : target - radius
    def stop = target + radius
    mut hit = nil
-   while(hit == nil && cand < stop){
+   while hit == nil && cand < stop {
       def alpha = _hnp_try_candidate(first, checks, q, bits, cand, tau, max_errors, embedding)
       hit = alpha == nil ? nil : [alpha, cand, tau]
       cand += Z(1)
@@ -319,7 +319,7 @@ fn hnp_recover(any samples, any modulus, any leaked_bits, any opts=nil) dict {
    "Recover an HNP hidden number from [t,a] samples.
    Options dict: method(pure/auto/lll), volume_bits or x, lattice_samples,
    counts, embedding, max_errors, delta. Returns a result dict with `ok` and `key`."
-   if(!is_list(samples) || samples.len < 2){ return _hnp_result(false, nil, "need at least two samples", is_list(samples) ? samples.len : 0, 0, 0, "auto", 0) }
+   if !is_list(samples) || samples.len < 2 { return _hnp_result(false, nil, "need at least two samples", is_list(samples) ? samples.len : 0, 0, 0, "auto", 0) }
    def q = Z(modulus)
    def cfg = _hnp_recover_opts(opts, samples.len)
    def method = cfg[0]
@@ -330,7 +330,7 @@ fn hnp_recover(any samples, any modulus, any leaked_bits, any opts=nil) dict {
    def counts = cfg[5]
    def use_counts = is_list(counts)
    def lattice_samples = use_counts ? hnp_partition_samples(samples, counts)[0] : _hnp_slice(samples, 0, cfg[6])
-   if(lattice_samples.len < 2){
+   if lattice_samples.len < 2 {
       return _hnp_result(false, nil, "need at least two lattice samples",
       samples.len, lattice_samples.len, samples.len, method, volume_bits)
    }
@@ -339,15 +339,15 @@ fn hnp_recover(any samples, any modulus, any leaked_bits, any opts=nil) dict {
    def reduction_report = basis == nil ? nil : lllmod.lll_reduce_report(basis, delta, method)
    def reduced = reduction_report == nil ? nil : reduction_report.get("basis")
    def failure = basis == nil ? "lattice construction failed" : (reduced == nil ? "lattice reduction failed" : nil)
-   if(failure != nil){
+   if failure != nil {
       return _hnp_result(false, nil, failure,
       samples.len, lattice_samples.len, samples.len, method, volume_bits).set("lattice_report", reduction_report)
    }
    def rows = reduced[2]
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def hit = _hnp_try_row(rows[i], lattice_samples[0], samples, q, leaked_bits, max_errors, embedding, volume_bits)
-      if(hit != nil){
+      if hit != nil {
          def alpha = hit[0]
          def errors = _hnp_count_errors(alpha, samples, q, leaked_bits)
          return _hnp_result(true, alpha, "ok", samples.len, lattice_samples.len, samples.len, method, volume_bits,
@@ -361,25 +361,25 @@ fn hnp_recover(any samples, any modulus, any leaked_bits, any opts=nil) dict {
 fn hnp_lattice(list samples, any modulus, any known_bits) any {
    "Construct and reduce an HNP lattice, then extract a hidden number candidate."
    def basis = hnp_lsb_lattice_eliminate_alpha(samples, modulus, known_bits)
-   if(basis == nil){ return nil }
+   if basis == nil { return nil }
    def reduced = lllmod.lll(basis)
    hnp_extract_x(reduced, modulus)
 }
 
 fn hnp_extract_x(any reduced, any modulus) any {
    "Extract a small non-zero coordinate from an LLL-reduced HNP lattice."
-   if(reduced == nil){ return nil }
+   if reduced == nil { return nil }
    def nrows = int(reduced[0])
    def ncols = int(reduced[1])
    def data = reduced[2]
    mut i = 0
-   while(i < nrows){
+   while i < nrows {
       def row = data[i]
       mut j = 0
-      while(j < ncols){
+      while j < ncols {
          def val = row[j]
          def abs_val = _hnp_abs(val)
-         if(abs_val > 0 && abs_val < modulus){ return abs_val }
+         if abs_val > 0 && abs_val < modulus { return abs_val }
          j += 1
       }
       i += 1

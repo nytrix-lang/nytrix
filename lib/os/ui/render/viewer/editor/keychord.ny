@@ -18,9 +18,9 @@ fn empty_state() dict {
 }
 
 fn tick(dict st, f64 dt) dict {
-   if(to_str(st.get("prefix", "")).len > 0){
+   if to_str(st.get("prefix", "")).len > 0 {
       st["timer"] = float(st.get("timer", 0.0)) - dt
-      if(float(st.get("timer", 0.0)) <= 0.0){ st = clear(st) }
+      if float(st.get("timer", 0.0)) <= 0.0 { st = clear(st) }
    }
    st
 }
@@ -119,10 +119,10 @@ fn event_chord(any data) str {
    def shifted = (mods & key.MOD_SHIFT) != 0
    def shifted_name = shifted ? _shifted_printable_name(k) : ""
    mut out = ""
-   if((mods & key.MOD_CONTROL) != 0){ out += "C-" }
-   if((mods & (key.MOD_ALT)) != 0){ out += "M-" }
-   if((mods & (key.MOD_SUPER | key.MOD_META)) != 0){ out += "S-" }
-   if(shifted && shifted_name.len <= 0){ out += "Shift-" }
+   if (mods & key.MOD_CONTROL) != 0 { out += "C-" }
+   if (mods & (key.MOD_ALT)) != 0 { out += "M-" }
+   if (mods & (key.MOD_SUPER | key.MOD_META)) != 0 { out += "S-" }
+   if shifted && shifted_name.len <= 0 { out += "Shift-" }
    out + (shifted_name.len > 0 ? shifted_name : _key_name(k))
 }
 
@@ -130,8 +130,8 @@ fn _is_prefix(str chord) bool {
    def p = chord + " "
    def rows = commands.all_commands()
    mut i = 0
-   while(i < rows.len){
-      if(str.startswith(commands.row_key(rows.get(i)), p)){ return true }
+   while i < rows.len {
+      if str.startswith(commands.row_key(rows.get(i)), p) { return true }
       i += 1
    }
    false
@@ -141,11 +141,11 @@ fn command_chord(dict st, any data) list {
    "Returns [next_state, command] where command can be a complete chord or empty while waiting for a suffix."
    def ch = event_chord(data)
    def prefix = to_str(st.get("prefix", ""))
-   if(ch == "C-g"){
+   if ch == "C-g" {
       return [clear(st), "cancel"]
    }
    def full = prefix.len > 0 ? prefix + " " + ch : ch
-   if(_is_prefix(full)){
+   if _is_prefix(full) {
       st["prefix"] = full
       st["timer"] = PREFIX_TIMEOUT
       return [st, ""]

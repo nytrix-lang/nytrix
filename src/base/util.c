@@ -4,6 +4,7 @@
 #define _XOPEN_SOURCE 500
 #include "base/util.h"
 #include "base/common.h"
+#include "base/curl.h"
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -174,6 +175,64 @@ char *ny_read_file(const char *path) {
   return content;
 }
 
+typedef struct {
+  char *data;
+  size_t len;
+  size_t cap;
+} ny_curl_buf_t;
+
+static size_t ny_curl_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
+  size_t total = size * nmemb;
+  ny_curl_buf_t *buf = (ny_curl_buf_t *)userdata;
+  if (buf->len + total + 1 > buf->cap) {
+    size_t new_cap = buf->cap ? buf->cap * 2 : 8192;
+    while (buf->len + total + 1 > new_cap)
+      new_cap *= 2;
+    char *new_data = realloc(buf->data, new_cap);
+    if (!new_data)
+      return 0;
+    buf->data = new_data;
+    buf->cap = new_cap;
+  }
+  memcpy(buf->data + buf->len, ptr, total);
+  buf->len += total;
+  buf->data[buf->len] = '\0';
+  return total;
+}
+
+char *ny_read_url(const char *url) {
+  if (!url)
+    return NULL;
+
+  ny_curl_state_t curl_state = {0};
+  if (ny_curl_init(&curl_state)) {
+    void *curl = ny_curl_easy_init(&curl_state);
+    if (curl) {
+      ny_curl_buf_t buf = {0};
+      curl_state.setopt(curl, NY_CURLOPT_URL, url);
+      curl_state.setopt(curl, NY_CURLOPT_WRITEFUNCTION, ny_curl_write_cb);
+      curl_state.setopt(curl, NY_CURLOPT_WRITEDATA, &buf);
+      curl_state.setopt(curl, NY_CURLOPT_FOLLOWLOCATION, 1L);
+      curl_state.setopt(curl, NY_CURLOPT_USERAGENT, "nytrix-compiler/0.5");
+      curl_state.setopt(curl, NY_CURLOPT_FAILONERROR, 1L);
+      curl_state.setopt(curl, NY_CURLOPT_TIMEOUT, 30L);
+
+      int res = ny_curl_easy_perform(&curl_state, curl);
+      curl_state.cleanup(curl);
+      ny_curl_cleanup(&curl_state);
+
+      if (res == 0 && buf.data) {
+        return buf.data;
+      }
+      free(buf.data);
+    } else {
+      ny_curl_cleanup(&curl_state);
+    }
+  }
+
+  return NULL;
+}
+
 int ny_write_file(const char *path, const char *content, size_t len) {
   if (!path || !content)
     return -1;
@@ -223,11 +282,11 @@ void ny_ensure_dir_recursive(const char *path) {
   if (tmp[len - 1] == '/')
     tmp[len - 1] = 0;
   for (char *p = tmp + 1; *p; p++) {
-    if (*p == '/') {
-      *p = 0;
-      ny_ensure_dir(tmp);
-      *p = '/';
-    }
+    if (*p != '/')
+      continue;
+    *p = 0;
+    ny_ensure_dir(tmp);
+    *p = '/';
   }
   ny_ensure_dir(tmp);
 }
@@ -246,11 +305,11 @@ int ny_copy_file(const char *src, const char *dst) {
   char buf[8192];
   size_t n;
   while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-    if (fwrite(buf, 1, n, out) != n) {
-      fclose(in);
-      fclose(out);
-      return -1;
-    }
+    if (fwrite(buf, 1, n, out) == n)
+      continue;
+    fclose(in);
+    fclose(out);
+    return -1;
   }
   fclose(in);
   fclose(out);
@@ -385,9 +444,9 @@ const char *ny_src_root(void) {
                                  "/opt/nytrix/share/nytrix", "/opt/nytrix/share",
                                  "/opt/homebrew/share/nytrix"};
   for (size_t i = 0; i < sizeof(install_paths) / sizeof(install_paths[0]); i++) {
-    if (nytrix_has_sources(install_paths[i])) {
-      return ny_cache_path(buf, sizeof(buf), install_paths[i]);
-    }
+    if (!nytrix_has_sources(install_paths[i]))
+      continue;
+    return ny_cache_path(buf, sizeof(buf), install_paths[i]);
   }
 #else
   const char *pd = getenv("PROGRAMDATA");
@@ -726,12 +785,12 @@ bool ny_log_should_emit(const char *fmt) {
     g_log_seen = calloc(g_log_seen_cap, sizeof(log_entry_t));
     mask = g_log_seen_cap - 1;
     for (size_t i = 0; i < old_cap; i++) {
-      if (old_tbl[i].hash != 0) {
-        size_t nidx = (size_t)old_tbl[i].hash & mask;
-        while (g_log_seen[nidx].hash != 0)
-          nidx = (nidx + 1) & mask;
-        g_log_seen[nidx] = old_tbl[i];
-      }
+      if (old_tbl[i].hash == 0)
+        continue;
+      size_t nidx = (size_t)old_tbl[i].hash & mask;
+      while (g_log_seen[nidx].hash != 0)
+        nidx = (nidx + 1) & mask;
+      g_log_seen[nidx] = old_tbl[i];
     }
     free(old_tbl);
     idx = (size_t)h & mask;

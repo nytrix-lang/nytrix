@@ -23,7 +23,7 @@ use std.os.ui.assets.catalog as asset_catalog
 use std.os.ui.render.viewer.runtime as ui_runtime
 use std.os.ui.render.scene as scene_engine
 
-def list: MONO_FONT_CANDIDATES = [
+def list MONO_FONT_CANDIDATES = [
    "etc/assets/fonts/monocraft.ttf",
    "etc/assets/fonts/jetbrains.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
@@ -32,7 +32,7 @@ def list: MONO_FONT_CANDIDATES = [
    "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
 ]
 
-def list: EDITOR_FONT_CANDIDATES = [
+def list EDITOR_FONT_CANDIDATES = [
    "etc/assets/fonts/maplemono.ttf",
    "etc/assets/fonts/JetBrainsMono-Regular.ttf",
    "etc/assets/fonts/jetbrains.ttf",
@@ -44,8 +44,8 @@ def list: EDITOR_FONT_CANDIDATES = [
    "etc/assets/fonts/monocraft.ttf"
 ]
 
-def str: TERM_FONT_DEFAULT = "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
-def list: TERM_FONT_CANDIDATES = [
+def str TERM_FONT_DEFAULT = "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+def list TERM_FONT_CANDIDATES = [
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/MesloLGSNerdFontMono-Regular.ttf",
@@ -55,7 +55,7 @@ def list: TERM_FONT_CANDIDATES = [
    "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
 ]
 
-def list: UI_FONT_CANDIDATES = [
+def list UI_FONT_CANDIDATES = [
    "etc/assets/fonts/jetbrains.ttf",
    "etc/assets/fonts/maplemono.ttf",
    "etc/assets/fonts/monocraft.ttf",
@@ -96,7 +96,7 @@ fn gltf_asset_roots(any defaults=["tmp/assets/models"]) list {
 
 fn gltf_asset_catalog() dict {
    "Runs the asset catalog operation."
-   if(is_dict(_gltf_asset_catalog_cache)){ return _gltf_asset_catalog_cache }
+   if is_dict(_gltf_asset_catalog_cache) { return _gltf_asset_catalog_cache }
    _gltf_asset_catalog_cache = asset_catalog.gltf_catalog_make(gltf_asset_roots())
    _gltf_asset_catalog_cache
 }
@@ -104,7 +104,7 @@ fn gltf_asset_catalog() dict {
 fn resolve_gltf_asset_path(any spec) str {
    "Resolves a glTF asset spec(name, relative path, or absolute path) to a file path."
    def raw = str.strip(to_str(spec))
-   if(raw.len == 0){ return "" }
+   if raw.len == 0 { return "" }
    asset_catalog.gltf_catalog_resolve(gltf_asset_catalog(), raw)
 }
 
@@ -116,7 +116,7 @@ fn list_gltf_asset_names(int limit=24) list {
 fn prefetch_gltf_asset(any spec) bool {
    "Preloads and parses a glTF/GLB asset in the background."
    def gltf_path = resolve_gltf_asset_path(spec)
-   if(gltf_path.len == 0){ return false }
+   if gltf_path.len == 0 { return false }
    scene_engine.prefetch_gltf_asset_path(gltf_path)
    true
 }
@@ -124,7 +124,7 @@ fn prefetch_gltf_asset(any spec) bool {
 fn load_named_scene(any spec, any cam3d=0, any M_SP=0, any M_PT=0, any M_PS=0) any {
    "Resolves and loads a glTF asset spec."
    def gltf_path = resolve_gltf_asset_path(spec)
-   if(gltf_path.len == 0){ return 0 }
+   if gltf_path.len == 0 { return 0 }
    scene_engine.load_scene_mesh(gltf_path, scene_engine.scene_asset_name_from_gltf_path(gltf_path), cam3d, M_SP, M_PT, M_PS, 0)
 }
 
@@ -136,21 +136,21 @@ fn icon_dirs(any defaults=["etc/assets/images/icons"], any env_names=["NY_UI_ICO
 fn icon_path(any name, any dirs=0, str ext=".svg", str fallback_name="tree") str {
    "Resolves an icon name against configured icon directories."
    def key = str.lower(str.strip(to_str(name)))
-   if(key.len == 0){ return "" }
+   if key.len == 0 { return "" }
    def compact = str.str_replace(key, "_", "")
    def roots = is_list(dirs) ? dirs : icon_dirs()
    mut i = 0
-   while(i < roots.len){
+   while i < roots.len {
       def root = to_str(roots[i])
       def direct = ospath.join(root, key + ext)
-      if(osfs.is_file(direct)){ return direct }
-      if(compact != key){
+      if osfs.is_file(direct) { return direct }
+      if compact != key {
          def compact_path = ospath.join(root, compact + ext)
-         if(osfs.is_file(compact_path)){ return compact_path }
+         if osfs.is_file(compact_path) { return compact_path }
       }
-      if(key == "node" && fallback_name.len > 0){
+      if key == "node" && fallback_name.len > 0 {
          def fallback = ospath.join(root, fallback_name + ext)
-         if(osfs.is_file(fallback)){ return fallback }
+         if osfs.is_file(fallback) { return fallback }
       }
       i += 1
    }
@@ -159,10 +159,10 @@ fn icon_path(any name, any dirs=0, str ext=".svg", str fallback_name="tree") str
 
 fn _skybox_env_source(str env_name, str default_rel_path) str {
    mut raw = common.env_trim(env_name)
-   if(raw.len == 0 && env_name != "NY_DEMO_SKYBOX"){
+   if raw.len == 0 && env_name != "NY_DEMO_SKYBOX" {
       raw = common.env_trim("NY_DEMO_SKYBOX")
    }
-   if(raw.len == 0){ return "" }
+   if raw.len == 0 { return "" }
    def low = str.lower(raw)
    case low {
       "0", "false", "off", "no" -> { return "" }
@@ -181,8 +181,8 @@ fn skybox_env_size(any fast_batch_env=false) list {
 fn skybox_source_arg(any source="", str source_env="NY_UI_SKYBOX_SOURCE", str path_env="NY_UI_SKYBOX_PATH") str {
    "Runs the skybox source arg operation."
    mut raw = str.strip(to_str(source))
-   if(raw.len == 0){ raw = common.env_trim(source_env) }
-   if(raw.len == 0){ raw = common.env_trim(path_env) }
+   if raw.len == 0 { raw = common.env_trim(source_env) }
+   if raw.len == 0 { raw = common.env_trim(path_env) }
    raw
 }
 
@@ -207,30 +207,30 @@ fn skybox_source_is_default_asset(any source) bool {
 fn skybox_resolve_source_path(any source="", str default_rel_path="etc/assets/images/DaySkyHDRI041B_4K_HDR.exr", str default_path="") str {
    "Runs the skybox resolve source path operation."
    def raw = skybox_source_arg(source)
-   if(skybox_source_is_default_asset(raw)){
+   if skybox_source_is_default_asset(raw) {
       def resolved_default = str.strip(to_str(default_path))
-      if(resolved_default.len > 0){ return resolved_default }
+      if resolved_default.len > 0 { return resolved_default }
       def path = ospath.resolve_repo_asset(default_rel_path)
-      if(osfs.is_file(path)){ return path }
+      if osfs.is_file(path) { return path }
       return path
    }
-   if(osfs.is_file(raw)){ return raw }
+   if osfs.is_file(raw) { return raw }
    def repo_path = ospath.resolve_repo_asset(raw)
-   if(repo_path.len > 0 && osfs.is_file(repo_path)){ return repo_path }
+   if repo_path.len > 0 && osfs.is_file(repo_path) { return repo_path }
    raw
 }
 
 fn load_env_skybox(default_rel_path="etc/assets/images/DaySkyHDRI041B_4K_HDR.exr", env_name="NY_UI_SKYBOX") int {
    "Loads an optional equirectangular skybox from `env_name`; truthy values use `default_rel_path`, path values load that path."
    def source = _skybox_env_source(to_str(env_name), to_str(default_rel_path))
-   if(source.len == 0){ return -1 }
+   if source.len == 0 { return -1 }
    def path = ospath.resolve_repo_asset(source)
-   if(!osfs.is_file(path)){
+   if !osfs.is_file(path) {
       ui_runtime.dbg("skybox", "missing equirect skybox: " + path)
       return -1
    }
    def tex = ui_runtime.load_equirect_skybox(path)
-   if(tex >= 0){ ui_runtime.dbg("skybox", "loaded equirect skybox tex=" + to_str(tex)) }
+   if tex >= 0 { ui_runtime.dbg("skybox", "loaded equirect skybox tex=" + to_str(tex)) }
    else { ui_runtime.dbg("skybox", "failed to load equirect skybox: " + path) }
    tex
 }

@@ -633,6 +633,14 @@ file(GLOB_RECURSE STD_SOURCES_LIB CONFIGURE_DEPENDS "${NYTRIX_ROOT}/lib/*.ny")
 set(STD_SOURCES ${STD_SOURCES_LIB})
 
 option(NYTRIX_STD_VERBOSE "Verbose std.ny generation output" OFF)
+set(_NYTRIX_VENDOR_LIB_DIR "${NYTRIX_ROOT}/build/vendor/lib/host")
+if(UNIX AND NOT APPLE AND EXISTS "${_NYTRIX_VENDOR_LIB_DIR}")
+  set(_NYTRIX_STD_ENV ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=${_NYTRIX_VENDOR_LIB_DIR}:$ENV{LD_LIBRARY_PATH}")
+elseif(APPLE AND EXISTS "${_NYTRIX_VENDOR_LIB_DIR}")
+  set(_NYTRIX_STD_ENV ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${_NYTRIX_VENDOR_LIB_DIR}:$ENV{DYLD_LIBRARY_PATH}")
+else()
+  set(_NYTRIX_STD_ENV ${CMAKE_COMMAND} -E env)
+endif()
 if(NYTRIX_STD_VERBOSE)
   set(_NYTRIX_STD_VERBOSE_LEVEL 1)
 else()
@@ -641,7 +649,7 @@ endif()
 
 add_custom_command(
   OUTPUT "${STD_NY}" "${STD_SYMBOLS}"
-  COMMAND $<TARGET_FILE:ny> --bundle-std="${STD_NY}" --bundle-symbols="${STD_SYMBOLS}" --verbose=${_NYTRIX_STD_VERBOSE_LEVEL}
+  COMMAND ${_NYTRIX_STD_ENV} $<TARGET_FILE:ny> --bundle-std="${STD_NY}" --bundle-symbols="${STD_SYMBOLS}" --verbose=${_NYTRIX_STD_VERBOSE_LEVEL}
   WORKING_DIRECTORY "${NYTRIX_ROOT}"
   DEPENDS ny ${STD_SOURCES}
   COMMENT "Generating std.ny"
@@ -650,7 +658,7 @@ add_custom_command(
 set(STD_BC "${CMAKE_BINARY_DIR}/std.bc")
 add_custom_command(
   OUTPUT "${STD_BC}"
-  COMMAND $<TARGET_FILE:ny> --emit-bc="${STD_BC}" --emit-module=std "${STD_NY}"
+  COMMAND ${_NYTRIX_STD_ENV} $<TARGET_FILE:ny> --emit-bc="${STD_BC}" --emit-module=std "${STD_NY}"
   WORKING_DIRECTORY "${NYTRIX_ROOT}"
   DEPENDS ny "${STD_NY}"
   COMMENT "Pre-compiling stdlib bitcode"

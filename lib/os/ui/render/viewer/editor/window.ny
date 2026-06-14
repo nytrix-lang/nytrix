@@ -30,7 +30,7 @@ fn _child(dict node, str key) dict {
 }
 
 fn _clear_active(dict node) dict {
-   if(to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE){
+   if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE {
       node["active"] = false
       return node
    }
@@ -40,8 +40,8 @@ fn _clear_active(dict node) dict {
 }
 
 fn _split_selected(dict node, str kind, any new_buffer) list {
-   if(to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE){
-      if(bool(node.get("active", false))){
+   if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE {
+      if bool(node.get("active", false)) {
          def old = node
          old["active"] = false
          return [{
@@ -55,7 +55,7 @@ fn _split_selected(dict node, str kind, any new_buffer) list {
    }
    def left_res = _split_selected(_child(node, "left"), kind, new_buffer)
    node["left"] = left_res.get(0)
-   if(bool(left_res.get(1, false))){ return [node, true] }
+   if bool(left_res.get(1, false)) { return [node, true] }
    def right_res = _split_selected(_child(node, "right"), kind, new_buffer)
    node["right"] = right_res.get(0)
    [node, bool(right_res.get(1, false))]
@@ -75,9 +75,9 @@ fn pane_layout(dict node, f64 x, f64 y, f64 w, f64 h) dict {
    node["w"] = w
    node["h"] = h
    def split = to_str(node.get("split", SPLIT_NONE))
-   if(split == SPLIT_NONE){ return node }
+   if split == SPLIT_NONE { return node }
    def ratio = min(max(float(node.get("ratio", 0.5)), 0.15), 0.85)
-   if(split == SPLIT_VERTICAL){
+   if split == SPLIT_VERTICAL {
       def lw = max(MIN_PANE, w * ratio)
       node["left"] = pane_layout(_child(node, "left"), x, y, lw, h)
       node["right"] = pane_layout(_child(node, "right"), x + lw, y, max(MIN_PANE, w - lw), h)
@@ -90,7 +90,7 @@ fn pane_layout(dict node, f64 x, f64 y, f64 w, f64 h) dict {
 }
 
 fn _leaves_into(dict node, list out) list {
-   if(to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE){ return out.append(node) }
+   if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE { return out.append(node) }
    out = _leaves_into(_child(node, "left"), out)
    _leaves_into(_child(node, "right"), out)
 }
@@ -102,16 +102,16 @@ fn leaves(dict node) list {
 fn selected(dict node) dict {
    def rows = leaves(node)
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows.get(i)
-      if(bool(row.get("active", false))){ return row }
+      if bool(row.get("active", false)) { return row }
       i += 1
    }
    rows.len > 0 ? rows.get(0) : leaf()
 }
 
 fn _select_buffer(dict node, any buffer) dict {
-   if(to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE){
+   if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE {
       node["active"] = node.get("buffer", 0) == buffer
       return node
    }
@@ -122,12 +122,12 @@ fn _select_buffer(dict node, any buffer) dict {
 
 fn select_next(dict node, int dir=1) dict {
    def rows = leaves(node)
-   if(rows.len <= 0){ return node }
+   if rows.len <= 0 { return node }
    mut active = 0
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows.get(i, dict(0))
-      if(is_dict(row) && bool(row.get("active", false))){ active = i }
+      if is_dict(row) && bool(row.get("active", false)) { active = i }
       i += 1
    }
    def next = (active + dir + rows.len) % rows.len
@@ -139,26 +139,26 @@ fn select_at(dict node, f64 x, f64 y) dict {
    def rows = leaves(node)
    mut picked = -1
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def r = rows.get(i)
-      if(x >= float(r.get("x", 0.0)) && x <= float(r.get("x", 0.0)) + float(r.get("w", 0.0)) &&
-      y >= float(r.get("y", 0.0)) && y <= float(r.get("y", 0.0)) + float(r.get("h", 0.0))){ picked = i }
+      if x >= float(r.get("x", 0.0)) && x <= float(r.get("x", 0.0)) + float(r.get("w", 0.0)) &&
+      y >= float(r.get("y", 0.0)) && y <= float(r.get("y", 0.0)) + float(r.get("h", 0.0)){ picked = i }
       i += 1
    }
-   if(picked < 0){ return node }
+   if picked < 0 { return node }
    def picked_row = rows.get(picked, dict(0))
    _select_buffer(_clear_active(node), is_dict(picked_row) ? picked_row.get("buffer", picked) : picked)
 }
 
 fn delete_selected(dict node) dict {
-   if(to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE){ return node }
+   if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE { return node }
    def left = _child(node, "left")
    def right = _child(node, "right")
-   if(to_str(left.get("split", SPLIT_NONE)) == SPLIT_NONE && bool(left.get("active", false))){
+   if to_str(left.get("split", SPLIT_NONE)) == SPLIT_NONE && bool(left.get("active", false)) {
       right["active"] = true
       return right
    }
-   if(to_str(right.get("split", SPLIT_NONE)) == SPLIT_NONE && bool(right.get("active", false))){
+   if to_str(right.get("split", SPLIT_NONE)) == SPLIT_NONE && bool(right.get("active", false)) {
       left["active"] = true
       return left
    }
@@ -168,7 +168,7 @@ fn delete_selected(dict node) dict {
 }
 
 fn balance(dict node) dict {
-   if(to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE){ return node }
+   if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE { return node }
    node["ratio"] = 0.5
    node["left"] = balance(_child(node, "left"))
    node["right"] = balance(_child(node, "right"))
@@ -176,13 +176,13 @@ fn balance(dict node) dict {
 }
 
 fn _resize(dict node, f64 delta) dict {
-   if(to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE){ return node }
+   if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE { return node }
    def left = _child(node, "left")
    def right = _child(node, "right")
-   if(bool(selected(left).get("active", false))){
+   if bool(selected(left).get("active", false)) {
       node["ratio"] = min(max(float(node.get("ratio", 0.5)) + delta, 0.15), 0.85)
       node["left"] = _resize(left, delta)
-   } elif(bool(selected(right).get("active", false))){
+   } elif bool(selected(right).get("active", false)) {
       node["ratio"] = min(max(float(node.get("ratio", 0.5)) - delta, 0.15), 0.85)
       node["right"] = _resize(right, delta)
    }

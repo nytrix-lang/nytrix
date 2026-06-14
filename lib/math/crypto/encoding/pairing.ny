@@ -30,10 +30,10 @@ fn cantor_unpair_leaves(any z, int leaf_limit=256) list {
    This mirrors recursive encoders that stop at byte-sized leaves."
    mut stack = [Z(z)]
    mut out = []
-   while(stack.len > 0){
+   while stack.len > 0 {
       def cur = stack[stack.len - 1]
       stack = slice(stack, 0, stack.len - 1)
-      if(cur < Z(leaf_limit)){
+      if cur < Z(leaf_limit) {
          out = out.append(int(cur))
       } else {
          def xy = cantor_unpair(cur)

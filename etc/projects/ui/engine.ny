@@ -53,16 +53,22 @@ use std.os.ui.render.viewer.engine.gizmo
 use std.os.ui.render.viewer.engine.state
 
 fn _render_set_next_frame_load_color(any enabled) bool { gfx.set_next_frame_load_color(enabled) }
-fn _render_set_frame_time_sec(any seconds) bool { gfx.set_frame_time_sec(seconds) }
-fn _render_set_skybox_view(any yaw, any pitch, any fov) bool { gfx.set_skybox_view(yaw, pitch, fov) }
-fn _render_begin_frame() bool { gfx.begin_frame() }
-fn _render_end_frame() bool { gfx.end_frame() }
-fn _render_draw_skybox(any tex_id) bool { gfx.draw_skybox(int(tex_id)) }
-fn _render_vertex_offset() int { gfx.renderer_vertex_offset() }
-fn _render_reset_overlay_state() bool { gfx.reset_overlay_state() }
 
+fn _render_set_frame_time_sec(any seconds) bool { gfx.set_frame_time_sec(seconds) }
+
+fn _render_set_skybox_view(any yaw, any pitch, any fov) bool { gfx.set_skybox_view(yaw, pitch, fov) }
+
+fn _render_begin_frame() bool { gfx.begin_frame() }
+
+fn _render_end_frame() bool { gfx.end_frame() }
+
+fn _render_draw_skybox(any tex_id) bool { gfx.draw_skybox(int(tex_id)) }
+
+fn _render_vertex_offset() int { gfx.renderer_vertex_offset() }
+
+fn _render_reset_overlay_state() bool { gfx.reset_overlay_state() }
 def STARTUP_ONE_ARG_CMDS = ["load", "timeout", "skybox", "anim", "gizmo"]
-def HUD_BG_U32 = 0xE6080A12
+def HUD_BG_U32 = 0xE6000000
 def WHITE_U32 = 0xFFFFFFFF
 mut str: _gui_pending_model_load_name = ""
 mut bool: _gui_pending_unload_scene = false
@@ -97,7 +103,7 @@ fn _ui_auto_dpi_scale() f64 {
 }
 
 fn _dbg_ui(any msg) bool {
-   if(_ui_debug_enabled == 1){
+   if _ui_debug_enabled == 1 {
       ui_runtime.dbg("ui", to_str(msg))
    }
    true
@@ -105,20 +111,20 @@ fn _dbg_ui(any msg) bool {
 
 fn _gui_layout_preset_env() str {
    def cli = str.strip(to_str(_cli_gui_layout))
-   if(cli.len > 0){ return cli }
+   if cli.len > 0 { return cli }
    mut raw = ui_profile.env_trim_cached("NY_UI_GUI_LAYOUT")
-   if(raw.len == 0){ raw = ui_profile.env_trim_cached("NY_UI_GUI_LAYOUT_PRESET") }
-   if(raw.len == 0){ raw = ui_profile.env_trim_cached("NY_GUI_LAYOUT") }
-   if(raw.len > 0){ return raw }
+   if raw.len == 0 { raw = ui_profile.env_trim_cached("NY_UI_GUI_LAYOUT_PRESET") }
+   if raw.len == 0 { raw = ui_profile.env_trim_cached("NY_GUI_LAYOUT") }
+   if raw.len > 0 { return raw }
    (_gui_layout_preset_name.len > 0) ? _gui_layout_preset_name : "default"
 }
 
 fn _gui_shot_env() str {
    def cli = str.strip(to_str(_cli_gui_shot))
-   if(cli.len > 0){ return cli }
+   if cli.len > 0 { return cli }
    mut raw = ui_profile.env_trim_cached("NY_UI_GUI_SHOT")
-   if(raw.len == 0){ raw = ui_profile.env_trim_cached("NY_GUI_SHOT") }
-   if(raw.len > 0){ return raw }
+   if raw.len == 0 { raw = ui_profile.env_trim_cached("NY_GUI_SHOT") }
+   if raw.len > 0 { return raw }
    str.strip(to_str(_gui_shot_name))
 }
 
@@ -146,7 +152,7 @@ fn _ui_scene_visible() bool {
 }
 
 fn _gui_probe_mode_enabled() bool {
-   if(_gui_probe_mode == 1){ return true }
+   if _gui_probe_mode == 1 { return true }
    def on =
    _gui_dump_suite_active ||
    _cli_gui_shot.len > 0 ||
@@ -154,11 +160,11 @@ fn _gui_probe_mode_enabled() bool {
    ui_profile.env_truthy_cached("NY_UI_GUI_PROBE") ||
    ui_profile.env_truthy_cached("NY_GUI_PROBE") ||
    ui_profile.env_truthy_cached("NY_UI_GUI_DUMP_PROBE")
-   if(on){
+   if on {
       _gui_probe_mode = 1
       return true
    }
-   if(_gui_probe_mode < 0){ _gui_probe_mode = 0 }
+   if _gui_probe_mode < 0 { _gui_probe_mode = 0 }
    false
 }
 
@@ -226,7 +232,7 @@ fn _gui_capture_layout_state() dict {
 }
 
 fn _gui_apply_layout_state(any st) bool {
-   if(!is_dict(st)){ return false }
+   if !is_dict(st) { return false }
    _gui_layout_preset_name = to_str(st.get("preset", _gui_layout_preset_name))
    _gui_workspace_mode = int(st.get("mode", _gui_workspace_mode))
    _gui_center_tab = int(st.get("center_tab", _gui_center_tab))
@@ -325,7 +331,7 @@ fn _gui_asset_derived_state() dict {
    def names = _refresh_model_catalog()
    _gui_model_selected_name = viewer_catalog.sync_selected(_gui_model_selected_name, _loaded_scene_name, names)
    def sig = _gui_asset_state_sig(names)
-   if(sig == _gui_asset_state_cache_sig && is_dict(_gui_asset_state_cache) && _gui_asset_state_cache.contains("names")){
+   if sig == _gui_asset_state_cache_sig && is_dict(_gui_asset_state_cache) && _gui_asset_state_cache.contains("names") {
       return _gui_asset_state_cache
    }
    def filtered_names = _gui_filtered_model_catalog(names)
@@ -344,10 +350,10 @@ fn _gui_asset_derived_state() dict {
 }
 
 fn _gui_init_editor_graph() bool {
-   if(_gui_graph_nodes.len == 0){
+   if _gui_graph_nodes.len == 0 {
       _gui_graph_nodes = demo_editor.graph_nodes()
    }
-   if(_gui_graph_links.len == 0){
+   if _gui_graph_links.len == 0 {
       _gui_graph_links = demo_editor.graph_links()
    }
    true
@@ -360,7 +366,7 @@ fn _scene_selection_bounds_cache_clear() bool {
 }
 
 fn _scene_selection_bounds_cache_key() str {
-   if(!is_dict(active_scene)){ return _loaded_scene_name + "|none" }
+   if !is_dict(active_scene) { return _loaded_scene_name + "|none" }
    _loaded_scene_name + "|" +
    to_str(active_scene.get("fit_scale", 1.0)) + "|" +
    to_str(active_scene.get("fit_tx", 0.0)) + "|" +
@@ -380,10 +386,10 @@ fn _scene_selection_bounds_cache_key() str {
 
 fn _scene_selection_bounds() list {
    def cache_key = _scene_selection_bounds_cache_key()
-   if(_scene_selection_cached_name == cache_key && is_list(_scene_selection_cached_bounds)){
+   if _scene_selection_cached_name == cache_key && is_list(_scene_selection_cached_bounds) {
       return _scene_selection_cached_bounds
    }
-   if(!is_dict(active_scene)){
+   if !is_dict(active_scene) {
       _scene_selection_cached_bounds = []
       _scene_selection_cached_name = cache_key
       return []
@@ -410,7 +416,7 @@ fn _selection_overlay_clear_rects() bool {
 }
 
 fn _selection_overlay_hit_test(any x, any y) bool {
-   if(!_scene_editor_tools_enabled()){ return false }
+   if !_scene_editor_tools_enabled() { return false }
    _selection_overlay_hover_mode = ui_selection.selection_overlay_hit_test(
       x, y,
       _selection_overlay_panel_rect,
@@ -422,7 +428,7 @@ fn _selection_overlay_hit_test(any x, any y) bool {
 }
 
 fn _selection_overlay_handle_click(any x, any y) bool {
-   if(!_scene_editor_tools_enabled()){ return false }
+   if !_scene_editor_tools_enabled() { return false }
    def hit = ui_selection.selection_overlay_hit_test(
       x, y,
       _selection_overlay_panel_rect,
@@ -431,25 +437,25 @@ fn _selection_overlay_handle_click(any x, any y) bool {
       _selection_overlay_rotate_rect,
    _selection_overlay_scale_rect)
    _selection_overlay_hover_mode = hit
-   if(hit <= 0){ return hit == 0 }
+   if hit <= 0 { return hit == 0 }
    _gizmo_mode = hit - 1
    true
 }
 
 fn _apply_selection_overlay_probe_env() bool {
    mut mode_name = ui_profile.env_trim_cached("NY_UI_GIZMO")
-   if(mode_name.len == 0){ mode_name = ui_profile.env_trim_cached("NY_UI_SELECTION_GIZMO") }
-   if(mode_name.len == 0){ mode_name = ui_profile.env_trim_cached("NY_UI_GIZMO_MODE") }
+   if mode_name.len == 0 { mode_name = ui_profile.env_trim_cached("NY_UI_SELECTION_GIZMO") }
+   if mode_name.len == 0 { mode_name = ui_profile.env_trim_cached("NY_UI_GIZMO_MODE") }
    def requested =
    mode_name.len > 0 ||
    ui_profile.env_truthy_cached("NY_UI_SELECTION_OVERLAY_PROBE") ||
    ui_profile.env_truthy_cached("NY_UI_SELECTION_OVERLAY_DUMP") ||
    ui_profile.env_truthy_cached("NY_UI_GIZMO_PROBE")
-   if(!requested){ return false }
-   if(mode_name.len > 0){
+   if !requested { return false }
+   if mode_name.len > 0 {
       _gizmo_mode = ui_selection.selection_gizmo_mode(mode_name, _gizmo_mode)
    }
-   if(is_dict(active_scene)){ show_scene = true }
+   if is_dict(active_scene) { show_scene = true }
    _scene_selected = is_dict(active_scene) && show_scene
    _scene_selection_rect = true
    _selection_overlay_dump_mode = 1
@@ -465,7 +471,7 @@ fn _apply_selection_overlay_probe_env() bool {
 }
 
 fn _gizmo_trace(any msg) bool {
-   if(ui_profile.env_truthy_cached("NY_UI_GIZMO_TRACE") || ui_profile.trace_enabled()){
+   if ui_profile.env_truthy_cached("NY_UI_GIZMO_TRACE") || ui_profile.trace_enabled() {
       ui_profile.print_text("[ui:gizmo] " + to_str(msg))
    }
    true
@@ -473,7 +479,7 @@ fn _gizmo_trace(any msg) bool {
 
 fn _gui_apply_shell_shot(any shot_name) bool {
    mut shot = str.strip(to_str(shot_name))
-   if(shot.len == 0){ shot = "full_editor" }
+   if shot.len == 0 { shot = "full_editor" }
    def plan = ui_shell.shot_plan(shot)
    _gui_shell_show(
       bool(plan.get("show_editor", false)),
@@ -493,7 +499,7 @@ fn _gui_apply_shell_shot(any shot_name) bool {
    _gui_gallery_tab = int(plan.get("gallery_tab", _gui_gallery_tab))
    _gui_inspector_tab = int(plan.get("inspector_tab", _gui_inspector_tab))
    def filter = to_str(plan.get("model_filter", _gui_model_filter))
-   if(filter != _gui_model_filter){
+   if filter != _gui_model_filter {
       _gui_model_filter = filter
       _gui_invalidate_model_filter_cache()
    }
@@ -509,11 +515,11 @@ fn _gui_apply_shell_shot(any shot_name) bool {
 
 fn _gui_apply_probe_preset() bool {
    def shot = _gui_shot_env()
-   if(shot.len > 0){
+   if shot.len > 0 {
       _gui_visible = true
       return _gui_apply_shell_shot(shot)
    }
-   if(!_gui_probe_mode_enabled()){
+   if !_gui_probe_mode_enabled() {
       return false
    }
    _gui_visible = true
@@ -542,8 +548,8 @@ fn _gui_editor_shell_open() bool {
 }
 
 fn _gui_close_tool_window(any id, bool break_dock=true) bool {
-   if(!ui_editor.tool_closed(id)){ return false }
-   if(break_dock && _gui_workspace_mode == 1){ _gui_workspace_mode = 0 }
+   if !ui_editor.tool_closed(id) { return false }
+   if break_dock && _gui_workspace_mode == 1 { _gui_workspace_mode = 0 }
    _gui_layout_dirty = true
    _gui_layout_warm_frames = 4
    true
@@ -570,26 +576,26 @@ fn _gui_pinned_tool_opts(bool scrollable=true) dict {
 }
 
 fn _gui_fit_standalone_editor() bool {
-   if(!_gui_show_editor || _gui_workspace_mode == 1){ return false }
+   if !_gui_show_editor || _gui_workspace_mode == 1 { return false }
    ui_editor.apply_tool_rect_if_visible("editor_main", true, [0.0, 0.0, max(1.0, _win_w), max(1.0, _win_h)])
    true
 }
 
 fn _gui_fit_standalone_asset_browser() bool {
-   if(!_gui_show_browser || _gui_show_editor){ return false }
+   if !_gui_show_browser || _gui_show_editor { return false }
    ui_editor.apply_focus_layout(["asset_browser"], _win_w, _win_h, _gui_layout_gap)
    true
 }
 
 fn _gui_apply_tiled_layout(bool force=false) bool {
-   if(!force && !_gui_layout_dirty && _gui_layout_warm_frames <= 0){ return false }
+   if !force && !_gui_layout_dirty && _gui_layout_warm_frames <= 0 { return false }
    _gui_sanitize_workspace_state()
    def plan = ui_shell.tiled_layout_plan(
       _gui_layout_preset_env(), _win_w, _win_h, _gui_layout_gap, _gui_workspace_mode,
       _gui_show_editor, _gui_show_gallery, _gui_show_probe, _gui_show_browser,
       _gui_show_inspector, _gui_show_profiler, _gui_show_workspace, _gui_show_graph
    )
-   if(bool(plan.get("focus_only", false))){
+   if bool(plan.get("focus_only", false)) {
       def ids = ui_shell.focus_window_ids(
          _gui_show_profiler, _gui_show_workspace, _gui_show_graph, _gui_show_inspector,
       _gui_show_browser, _gui_show_editor, _gui_show_probe, _gui_show_gallery)
@@ -597,33 +603,32 @@ fn _gui_apply_tiled_layout(bool force=false) bool {
    } else {
       ui_shell.apply_tool_plan(plan)
    }
-   if(_gui_layout_warm_frames > 0){ _gui_layout_warm_frames -= 1 }
+   if _gui_layout_warm_frames > 0 { _gui_layout_warm_frames -= 1 }
    else { _gui_layout_dirty = false }
    true
 }
 
 fn _gui_refresh_auto_scale() bool {
-   if(_gui_scale_manual || ui_profile.gui_scale_env_present()){ return false }
+   if _gui_scale_manual || ui_profile.gui_scale_env_present() { return false }
    def next = ui_app.app_gui_scale_for_window(_win_w, _win_h, _gui_dpi_scale)
-   if(ui_app.app_absf(next - _gui_scale) <= 0.001){ return false }
+   if ui_app.app_absf(next - _gui_scale) <= 0.001 { return false }
    _gui_scale = next
    _gui_layout_dirty = true
    _gui_layout_warm_frames = 3
    true
 }
 
-
 fn _ui_cli_color(str code, str text) str {
-   if(common.env_truthy("NO_COLOR")){ return text }
+   if common.env_truthy("NO_COLOR") { return text }
    def esc = chr(27)
    esc + "[" + code + "m" + text + esc + "[0m"
 }
 
 fn _ui_has_help_arg() bool {
    mut i = 1
-   while(i < argc()){
+   while i < argc() {
       def a = str.lower(str.strip(to_str(argv(i))))
-      if(a == "-h" || a == "--help" || a == "help"){ return true }
+      if a == "-h" || a == "--help" || a == "help" { return true }
       i += 1
    }
    false
@@ -675,29 +680,29 @@ fn _ui_print_help() any {
 fn _ui_apply_cli_options() bool {
    ui_profile.apply_verbose_argv()
    def opts = viewer_cli.parse_options(viewer_cli.argv_list())
-   if(bool(opts.get("verbose", false))){ ui_profile.apply_verbose_argv() }
-   if(bool(opts.get("surfaced_headless", false))){
+   if bool(opts.get("verbose", false)) { ui_profile.apply_verbose_argv() }
+   if bool(opts.get("surfaced_headless", false)) {
       ui_profile.force_surfaced_headless()
-   } elif(bool(opts.get("headless", false))){
+   } elif bool(opts.get("headless", false)) {
       ui_profile.force_headless(bool(opts.get("nosurface", true)), bool(opts.get("bench", false)), bool(opts.get("sim", false)))
    }
-   if(bool(opts.get("frame_hash_requested", false))){
+   if bool(opts.get("frame_hash_requested", false)) {
       ui_profile.force_frame_hash_lock()
    }
-   if(bool(opts.get("profile", false))){
+   if bool(opts.get("profile", false)) {
       ui_profile.profile_dump_force(true)
    }
-   if(bool(opts.get("profile_frame_trace", false)) || bool(opts.get("frame_trace", false))){
+   if bool(opts.get("profile_frame_trace", false)) || bool(opts.get("frame_trace", false)) {
       ui_profile.set_bool("NY_UI_PROFILE_TRACE", true)
    }
-   if(bool(opts.get("render_trace", false))){
+   if bool(opts.get("render_trace", false)) {
       ui_profile.set_bool("NY_GFX_FRAME_TRACE", true)
    }
-   if(bool(opts.get("frame_print_every", false))){
+   if bool(opts.get("frame_print_every", false)) {
       ui_profile.force_frame_print_every(1)
    }
    def profile_dir = to_str(opts.get("profile_dir", ""))
-   if(profile_dir.len > 0){
+   if profile_dir.len > 0 {
       ui_profile.profile_dump_set_path(ospath.join(profile_dir, "nytrix_ui_profile.oasset.jsonl"))
    }
    _cli_dump_requested = bool(opts.get("dump_requested", false))
@@ -711,14 +716,14 @@ fn _ui_apply_cli_options() bool {
    _cli_gui_layout = to_str(opts.get("gui_layout", ""))
    _cli_gui_shot = to_str(opts.get("gui_shot", ""))
    _cli_render_backend = to_str(opts.get("render_backend", ""))
-   if(_cli_gui_layout.len > 0){ _gui_layout_preset_name = _cli_gui_layout }
-   if(_cli_gui_shot.len > 0){
+   if _cli_gui_layout.len > 0 { _gui_layout_preset_name = _cli_gui_layout }
+   if _cli_gui_shot.len > 0 {
       _gui_probe_mode = 1
       _gui_shot_name = _cli_gui_shot
       _gui_visible = true
    }
    def dump_path = to_str(opts.get("dump_path", ""))
-   if(dump_path.len > 0){ _auto_dump_path = dump_path }
+   if dump_path.len > 0 { _auto_dump_path = dump_path }
    true
 }
 
@@ -738,17 +743,17 @@ fn from_env() dict {
 
 fn _gui_refresh_frame_metrics() {
    mut int: interval = ui_profile.env_int_cached("NY_UI_GUI_STATS_INTERVAL", 18, 1, 240)
-   if(_gui_probe_mode_enabled() || _gui_dump_suite_active_now()){
+   if _gui_probe_mode_enabled() || _gui_dump_suite_active_now() {
       interval = 1
    }
-   elif(_gui_show_profiler){
+   elif _gui_show_profiler {
       interval = 4
    }
-   elif(_gui_show_inspector){ interval = min(interval, 12) }
-   if(ui_profile.trace_enabled()){
+   elif _gui_show_inspector { interval = min(interval, 12) }
+   if ui_profile.trace_enabled() {
       interval = int(min(interval, 4))
    }
-   if(ui_profile.parity_lock_stats_enabled()){
+   if ui_profile.parity_lock_stats_enabled() {
       fps = 0
       _gui_frame_stats_refresh_frame = total_frames
       _gui_frame_stats_cache = {
@@ -759,32 +764,32 @@ fn _gui_refresh_frame_metrics() {
       _gui_renderer_hotspot_cache = "steady"
       return
    }
-   if(_gui_frame_stats_refresh_frame >= 0 && (total_frames - _gui_frame_stats_refresh_frame) < interval){
+   if _gui_frame_stats_refresh_frame >= 0 && (total_frames - _gui_frame_stats_refresh_frame) < interval {
       return
    }
    _gui_frame_stats_refresh_frame = total_frames
    _gui_frame_stats_cache = renderer_frame_stats()
    _gui_scene_parts_cache = asset_catalog.scene_part_count(active_scene)
    _gui_renderer_hotspot_cache = str.strip(to_str(ui_app.app_renderer_hotspot_label(_gui_frame_stats_cache)))
-   if(_gui_renderer_hotspot_cache.len == 0 || _gui_renderer_hotspot_cache == "<nil>"){ _gui_renderer_hotspot_cache = "steady" }
+   if _gui_renderer_hotspot_cache.len == 0 || _gui_renderer_hotspot_cache == "<nil>" { _gui_renderer_hotspot_cache = "steady" }
 }
 
 fn _batch_dump_terminal_log(msg) {
-   if(asset_batch.terminal_log_enabled(_batch_dump_enabled(), ui_profile.batch_fast_env_enabled())){
+   if asset_batch.terminal_log_enabled(_batch_dump_enabled(), ui_profile.batch_fast_env_enabled()) {
       terminal.log(msg)
    }
 }
 
 fn _prime_dump_anim_pose() {
-   if(!ui_profile.dump_pose_enabled(_auto_dump_enabled, _cli_dump_requested, _batch_dump_enabled(), _gui_dump_suite_active, _gui_probe_mode_enabled()) || !is_dict(active_scene) || !_anim_enabled || _anim_duration <= 0.0001){
+   if !ui_profile.dump_pose_enabled(_auto_dump_enabled, _cli_dump_requested, _batch_dump_enabled(), _gui_dump_suite_active, _gui_probe_mode_enabled()) || !is_dict(active_scene) || !_anim_enabled || _anim_duration <= 0.0001 {
       return false
    }
    def pose_frac = asset_batch.dump_anim_pose_fraction(0.35)
    mut pose_time = 0.0
-   if(pose_frac > 0.0){
+   if pose_frac > 0.0 {
       pose_time = _anim_duration * pose_frac
    }
-   if(is_nan(pose_time) || is_inf(pose_time) || pose_time < 0.0 || pose_time > _anim_duration){
+   if is_nan(pose_time) || is_inf(pose_time) || pose_time < 0.0 || pose_time > _anim_duration {
       pose_time = _anim_duration * pose_frac
    }
    _anim_time = float(pose_time)
@@ -798,12 +803,12 @@ fn _prime_dump_anim_pose() {
 }
 
 fn _freeze_dump_deform_pose() {
-   if(!ui_profile.dump_pose_enabled(_auto_dump_enabled, _cli_dump_requested, _batch_dump_enabled(), _gui_dump_suite_active, _gui_probe_mode_enabled()) || !is_dict(active_scene)){
+   if !ui_profile.dump_pose_enabled(_auto_dump_enabled, _cli_dump_requested, _batch_dump_enabled(), _gui_dump_suite_active, _gui_probe_mode_enabled()) || !is_dict(active_scene) {
       return false
    }
    def skin_count = int(active_scene.get("skin_count", 0))
    def morph_count = int(active_scene.get("morph_target_count", 0))
-   if(skin_count <= 0 && morph_count <= 0){
+   if skin_count <= 0 && morph_count <= 0 {
       return false
    }
    _anim_enabled = false
@@ -830,7 +835,7 @@ fn _freeze_dump_deform_pose() {
 }
 
 fn _stop_model_prefetch() {
-   if(_model_prefetch_thread){
+   if _model_prefetch_thread {
       thread_join(_model_prefetch_thread)
       _model_prefetch_thread = 0
    }
@@ -839,14 +844,14 @@ fn _stop_model_prefetch() {
 
 fn _schedule_model_prefetch(idx) {
    def names = _refresh_model_catalog()
-   if(!is_list(names) || idx < 0 || idx >= names.len){
+   if !is_list(names) || idx < 0 || idx >= names.len {
       return false
    }
    def name = to_str(names.get(idx, ""))
-   if(name.len == 0){
+   if name.len == 0 {
       return false
    }
-   if(_model_prefetch_thread && _model_prefetch_name == name){
+   if _model_prefetch_thread && _model_prefetch_name == name {
       return true
    }
    _stop_model_prefetch()
@@ -858,7 +863,7 @@ fn _schedule_model_prefetch(idx) {
 }
 
 fn _scene_load_async_mutex() {
-   if(!_scene_load_async_mu){
+   if !_scene_load_async_mu {
       _scene_load_async_mu = mutex_new()
    }
    _scene_load_async_mu
@@ -869,16 +874,16 @@ fn _scene_load_async_active() {
 }
 
 fn _scene_load_async_status() {
-   if(!_scene_load_async_active()){
+   if !_scene_load_async_active() {
       return [false, false]
    }
    def mu = _scene_load_async_mutex()
-   if(mu){
+   if mu {
       mutex_lock(mu)
    }
    def done = bool(_scene_load_async_job.get("done", false))
    def ok = bool(_scene_load_async_job.get("ok", false))
-   if(mu){
+   if mu {
       mutex_unlock(mu)
    }
    [done, ok]
@@ -896,13 +901,13 @@ fn _scene_load_async_clear() {
 fn _scene_select_active_loaded(str reason="scene loaded") bool {
    _scene_selection_bounds_cache_clear()
    _selection_overlay_clear_rects()
-   if(!is_dict(active_scene) || !show_scene){
+   if !is_dict(active_scene) || !show_scene {
       _scene_selected = false
       _scene_selection_rect = false
       _sync_cursor_state(reason)
       return false
    }
-   if(!_scene_editor_tools_enabled()){
+   if !_scene_editor_tools_enabled() {
       _scene_selected = false
       _scene_selection_rect = false
       _sync_cursor_state(reason)
@@ -917,18 +922,18 @@ fn _scene_select_active_loaded(str reason="scene loaded") bool {
 }
 
 fn _scene_runtime_finish_loaded(new_scene, old_scene, old_name, auto_frame=true) {
-   if(!is_dict(new_scene)){
+   if !is_dict(new_scene) {
       return false
    }
    _scene_selection_bounds_cache_clear()
-   if(is_dict(old_scene)){
+   if is_dict(old_scene) {
       scene_engine.unload_scene(old_scene, old_name)
    }
    active_scene = new_scene
    _loaded_scene_name = to_str(active_scene.get("scene_name", _loaded_scene_name))
    _gui_material_selected_idx = -1
    _gui_material_selected_part_idx = -1
-   if(_loaded_scene_name.len == 0){
+   if _loaded_scene_name.len == 0 {
       _loaded_scene_name = "Scene"
    }
    show_scene = true
@@ -940,13 +945,13 @@ fn _scene_runtime_finish_loaded(new_scene, old_scene, old_name, auto_frame=true)
    _sync_model_index_from_loaded()
    _release_scene_loading_input("scene loaded")
    gui.suppress_mouse_clicks(10, true)
-   if(auto_frame){
+   if auto_frame {
       _cmd_autofit(false)
       _cmd_lookat(false)
    }
    _scene_select_active_loaded("scene loaded")
    terminal.log(_loaded_scene_name + " loaded")
-   if(ui_profile.env_truthy_cached("NY_UI_ADJACENT_PREFETCH")){
+   if ui_profile.env_truthy_cached("NY_UI_ADJACENT_PREFETCH") {
       _schedule_adjacent_prefetch_from_current(1)
    }
    true
@@ -954,7 +959,7 @@ fn _scene_runtime_finish_loaded(new_scene, old_scene, old_name, auto_frame=true)
 
 fn _resolve_gltf_path_or_log(want) {
    def gltf_path = ui_assets.resolve_gltf_asset_path(want)
-   if(gltf_path.len == 0){
+   if gltf_path.len == 0 {
       terminal.log("ERROR: glTF asset not found: " + want)
    }
    gltf_path
@@ -963,7 +968,7 @@ fn _resolve_gltf_path_or_log(want) {
 fn _finish_scene_load_path(gltf_path, want, auto_frame=true) {
    mut any: old_scene = active_scene
    mut old_name = _loaded_scene_name
-   if(is_dict(old_scene) && old_name == want){
+   if is_dict(old_scene) && old_name == want {
       scene_engine.unload_scene(old_scene, old_name)
       active_scene = 0
       show_scene = false
@@ -975,7 +980,7 @@ fn _finish_scene_load_path(gltf_path, want, auto_frame=true) {
       old_name = ""
    }
    def new_scene = scene_engine.load_scene_path(gltf_path, "", camthreed, M_SP, M_PT, M_PS)
-   if(!is_dict(new_scene)){
+   if !is_dict(new_scene) {
       terminal.log("Load failed: " + want)
       return false
    }
@@ -984,22 +989,22 @@ fn _finish_scene_load_path(gltf_path, want, auto_frame=true) {
 
 fn _load_scene_runtime_sync(spec, auto_frame=true, show_loading=true) {
    def want = str.strip(to_str(spec))
-   if(want.len == 0){
+   if want.len == 0 {
       return false
    }
-   if(to_str(str.lower(want)) == "list"){
+   if to_str(str.lower(want)) == "list" {
       def names = ui_assets.list_gltf_asset_names()
-      if(names.len == 0){
+      if names.len == 0 {
          terminal.log("No glTF folders found in " + asset_catalog.format_name_list(ui_assets.gltf_asset_roots()))
       }
       else { terminal.log("glTF folders: " + scene_engine.format_name_list(names)) }
       return true
    }
    def gltf_path = _resolve_gltf_path_or_log(want)
-   if(gltf_path.len == 0){
+   if gltf_path.len == 0 {
       return false
    }
-   if(show_loading && !is_dict(active_scene)){
+   if show_loading && !is_dict(active_scene) {
       _release_scene_loading_input("scene load sync")
       _present_loading_frame("Loading " + want)
    }
@@ -1008,18 +1013,18 @@ fn _load_scene_runtime_sync(spec, auto_frame=true, show_loading=true) {
 
 fn _load_scene_runtime_async(spec, auto_frame=true) {
    def want = str.strip(to_str(spec))
-   if(want.len == 0){
+   if want.len == 0 {
       return false
    }
-   if(to_str(str.lower(want)) == "list"){
+   if to_str(str.lower(want)) == "list" {
       return _load_scene_runtime_sync(want, auto_frame, false)
    }
-   if(_scene_load_async_active()){
+   if _scene_load_async_active() {
       terminal.log("Load already in progress: " + _scene_load_async_spec)
       return false
    }
    def gltf_path = _resolve_gltf_path_or_log(want)
-   if(gltf_path.len == 0){
+   if gltf_path.len == 0 {
       return false
    }
    _app_release_pointer_ownership("scene load start")
@@ -1034,20 +1039,20 @@ fn _load_scene_runtime_async(spec, auto_frame=true) {
    _scene_load_async_thread = int(thread_spawn(fn() {
             def ok = ui_assets.prefetch_gltf_asset(gltf_path)
             def mu = _scene_load_async_mutex()
-            if(mu){
+            if mu {
                mutex_lock(mu)
             }
             job["ok"] = ok ? true : false
             job["done"] = true
-            if(mu){
+            if mu {
                mutex_unlock(mu)
             }
    }))
-   if(!_scene_load_async_thread){
+   if !_scene_load_async_thread {
       _scene_load_async_clear()
       return _load_scene_runtime_sync(want, auto_frame, false)
    }
-   if(!is_dict(active_scene)){
+   if !is_dict(active_scene) {
       show_scene = false
    }
    _sync_cursor_state("scene load async")
@@ -1056,12 +1061,12 @@ fn _load_scene_runtime_async(spec, auto_frame=true) {
 }
 
 fn _poll_scene_load_async() {
-   if(!_scene_load_async_active()){
+   if !_scene_load_async_active() {
       return false
    }
    _release_scene_loading_input("scene load pending")
    def st = _scene_load_async_status()
-   if(!bool(st.get(0, false))){
+   if !bool(st.get(0, false)) {
       return false
    }
    thread_join(_scene_load_async_thread)
@@ -1072,9 +1077,9 @@ fn _poll_scene_load_async() {
    def auto_frame = _scene_load_async_auto_frame
    _scene_load_finalizing = true
    _scene_load_async_clear()
-   if(!ok){
+   if !ok {
       terminal.log("Background load failed: " + want)
-      if(_startup_post_load_pending){
+      if _startup_post_load_pending {
          _startup_post_load_pending = false
       }
       _scene_load_finalizing = false
@@ -1084,13 +1089,13 @@ fn _poll_scene_load_async() {
    terminal.log("Finalizing: " + want)
    _present_loading_frame("Finalizing " + want)
    def loaded_ok = _finish_scene_load_path(gltf_path, want, auto_frame)
-   if(_startup_post_load_pending){
+   if _startup_post_load_pending {
       _startup_post_load_pending = false
-      if(loaded_ok){
+      if loaded_ok {
          _startup_exec_post_load_cmds()
       }
    }
-   if(loaded_ok){
+   if loaded_ok {
       _present_loading_frame("Loaded " + want)
    }
    _scene_load_finalizing = false
@@ -1100,40 +1105,40 @@ fn _poll_scene_load_async() {
 
 fn _schedule_adjacent_prefetch_from_current(dir=1) {
    def names = _refresh_model_catalog()
-   if(!is_list(names) || names.len == 0){
+   if !is_list(names) || names.len == 0 {
       return false
    }
    mut idx = _sync_model_index_from_loaded()
-   if(idx < 0){
+   if idx < 0 {
       return false
    }
    mut next_idx = idx + dir
-   while(next_idx < 0){
+   while next_idx < 0 {
       next_idx += names.len
    }
-   while(next_idx >= names.len){
+   while next_idx >= names.len {
       next_idx -= names.len
    }
    _schedule_model_prefetch(next_idx)
 }
 
 fn _schedule_batch_prefetch_next() {
-   if(!ui_profile.batch_prefetch_enabled()){
+   if !ui_profile.batch_prefetch_enabled() {
       return false
    }
-   if(!_batch_dump_enabled()){
+   if !_batch_dump_enabled() {
       return false
    }
    def next_idx = _batch_dump_index + 1
-   if(next_idx < 0 || next_idx >= _batch_dump_models.len){
+   if next_idx < 0 || next_idx >= _batch_dump_models.len {
       return false
    }
    def name = to_str(_batch_dump_models.get(next_idx, ""))
    def spec = to_str(_batch_dump_model_specs.get(next_idx, name))
-   if(spec.len == 0){
+   if spec.len == 0 {
       return false
    }
-   if(_model_prefetch_thread && _model_prefetch_name == spec){
+   if _model_prefetch_thread && _model_prefetch_name == spec {
       return true
    }
    _stop_model_prefetch()
@@ -1151,10 +1156,10 @@ fn _sync_model_index_from_loaded() {
 
 fn _load_scene_runtime(spec, auto_frame=true) {
    def want = str.strip(to_str(spec))
-   if(want.len == 0){
+   if want.len == 0 {
       return false
    }
-   if(!_batch_dump_enabled() && !ui_profile.headless_enabled()){
+   if !_batch_dump_enabled() && !ui_profile.headless_enabled() {
       return _load_scene_runtime_async(want, auto_frame)
    }
    return _load_scene_runtime_sync(want, auto_frame, true)
@@ -1162,27 +1167,27 @@ fn _load_scene_runtime(spec, auto_frame=true) {
 
 fn _cycle_loaded_model(dir) {
    def names = _refresh_model_catalog()
-   if(!is_list(names) || names.len == 0){
+   if !is_list(names) || names.len == 0 {
       terminal.log("No glTF models found")
       return false
    }
    def count = names.len
    mut idx = _sync_model_index_from_loaded()
-   if(idx < 0){
+   if idx < 0 {
       idx = 0
    }
    mut next_idx = idx + dir
-   while(next_idx < 0){
+   while next_idx < 0 {
       next_idx += count
    }
-   while(next_idx >= count){
+   while next_idx >= count {
       next_idx -= count
    }
    def name = to_str(names.get(next_idx, ""))
-   if(name.len == 0){
+   if name.len == 0 {
       return false
    }
-   if(_load_scene_runtime(name, true)){
+   if _load_scene_runtime(name, true) {
       _model_index = next_idx
       terminal.log("Model: " + _loaded_scene_name + " (" + to_str(next_idx + 1) + "/" + to_str(count) + ")")
       return true
@@ -1198,7 +1203,7 @@ fn _gui_open_default_editor() {
    _gui_center_tab = 0
    _gui_side_tab = 0
    _gui_sanitize_workspace_state()
-   if(is_dict(active_scene) && show_scene){
+   if is_dict(active_scene) && show_scene {
       _set_active_scene_model_matrix()
       _scene_select_active_loaded("editor open")
    }
@@ -1213,7 +1218,7 @@ fn _gui_open_default_editor() {
 
 fn _gui_dump_path() {
    def shot = _gui_shot_env()
-   if(shot.len > 0){
+   if shot.len > 0 {
       return ui_dump.path_named("ui_gui_" + shot + ".png", _cli_dump_dir)
    }
    ui_dump.path_named("ui_gui_" + ui_dump.safe_name(_gui_layout_preset_env()) + "_" + to_str(int(ticks())) + ".png", _cli_dump_dir)
@@ -1222,18 +1227,18 @@ fn _gui_dump_path() {
 fn _snapshot_ok(path) {
    def out_path = to_str(path)
    def dir = ospath.dirname(out_path)
-   if(dir.len > 0 && dir != "." && !osfs.is_dir(dir)){
+   if dir.len > 0 && dir != "." && !osfs.is_dir(dir) {
       def res = run_capture(["mkdir", "-p", dir], [], nil, false)
-      if(!bool(res.get("ok", false)) && !osfs.is_dir(dir)){ return false }
+      if !bool(res.get("ok", false)) && !osfs.is_dir(dir) { return false }
    }
-   if(gfx.snapshot(out_path)){ return true }
+   if gfx.snapshot(out_path) { return true }
    osfs.is_file(out_path)
 }
 
 fn _gui_take_snapshot() {
    def path = _gui_dump_path()
    _gui_last_dump_path = path
-   if(_snapshot_ok(path)){
+   if _snapshot_ok(path) {
       terminal.log("GUI dump: " + path)
       return true
    }
@@ -1244,7 +1249,7 @@ fn _gui_take_snapshot() {
 fn _hotkey_frame_dump() {
    def path = ui_dump.path_named("frame_dump_" + to_str(int(ticks())) + ".png", _cli_dump_dir)
    _gui_last_dump_path = path
-   if(_snapshot_ok(path)){
+   if _snapshot_ok(path) {
       ui_profile.print_text("[ui:hotkey] F5 frame_dump path=" + path)
       terminal.log("Frame dump: " + path)
       return true
@@ -1269,7 +1274,7 @@ fn _static_world_color_reuse_reset() bool {
 fn _scene_edit_redraw(any frames=3) bool {
    _render_set_next_frame_load_color(false)
    _static_world_color_reuse_reset()
-   if(is_dict(active_scene)){
+   if is_dict(active_scene) {
       scene_engine.scene_fast_reset(active_scene)
    }
    _static_world_redraw(frames)
@@ -1295,14 +1300,14 @@ fn _ui_view_input_active() bool {
 }
 
 fn _ui_static_world_fast_enabled() bool {
-   if(ui_profile.env_present_cached("NY_UI_STATIC_WORLD_FAST")){
+   if ui_profile.env_present_cached("NY_UI_STATIC_WORLD_FAST") {
       return ui_profile.env_toggle_cached("NY_UI_STATIC_WORLD_FAST", false)
    }
    true
 }
 
 fn _scene_static_pose_gpu_ready() bool {
-   if(!is_dict(active_scene)){ return false }
+   if !is_dict(active_scene) { return false }
    bool(active_scene.get("static_pose_gpu_ready", false)) &&
    !bool(active_scene.get("anim_playing", _anim_enabled)) &&
    to_int(active_scene.get("gpu_parts_slab", 0)) != 0 &&
@@ -1310,7 +1315,7 @@ fn _scene_static_pose_gpu_ready() bool {
 }
 
 fn _scene_deform_idle_ready() bool {
-   if(!is_dict(active_scene)){ return false }
+   if !is_dict(active_scene) { return false }
    def has_deform =
    int(active_scene.get("anim_count", 0)) > 0 ||
    int(active_scene.get("skin_count", 0)) > 0 ||
@@ -1319,25 +1324,25 @@ fn _scene_deform_idle_ready() bool {
 }
 
 fn _scene_deform_blocks_static() bool {
-   if(!is_dict(active_scene)){ return false }
+   if !is_dict(active_scene) { return false }
    def has_deform =
    int(active_scene.get("anim_count", 0)) > 0 ||
    int(active_scene.get("skin_count", 0)) > 0 ||
    int(active_scene.get("morph_target_count", 0)) > 0
-   if(!has_deform){ return false }
-   if(_anim_enabled || bool(active_scene.get("anim_playing", false)) || bool(active_scene.get("anim_time_override", false))){
+   if !has_deform { return false }
+   if _anim_enabled || bool(active_scene.get("anim_playing", false)) || bool(active_scene.get("anim_time_override", false)) {
       return true
    }
    !_scene_static_pose_gpu_ready() && !_scene_deform_idle_ready()
 }
 
 fn _ui_static_update_clean() bool {
-   if(_proj_dirty || _ui_view_input_active()){ return false }
-   if(_term_open || _gui_enabled_now() || _scene_load_async_active()){ return false }
-   if(_batch_dump_enabled() || _gui_dump_suite_active || _pending_auto_dump){ return false }
-   if(_anim_enabled){ return false }
-   if(_anim_count > 0 && !_scene_static_pose_gpu_ready() && !_scene_deform_idle_ready()){ return false }
-   if(_scene_deform_blocks_static()){ return false }
+   if _proj_dirty || _ui_view_input_active() { return false }
+   if _term_open || _gui_enabled_now() || _scene_load_async_active() { return false }
+   if _batch_dump_enabled() || _gui_dump_suite_active || _pending_auto_dump { return false }
+   if _anim_enabled { return false }
+   if _anim_count > 0 && !_scene_static_pose_gpu_ready() && !_scene_deform_idle_ready() { return false }
+   if _scene_deform_blocks_static() { return false }
    true
 }
 
@@ -1354,7 +1359,7 @@ fn _static_world_present_reuse_allowed(any load_color=false) bool {
 }
 
 fn _static_world_color_reuse_enabled() bool {
-   if(ui_profile.env_present_cached("NY_UI_STATIC_COLOR_REUSE")){
+   if ui_profile.env_present_cached("NY_UI_STATIC_COLOR_REUSE") {
       return ui_profile.env_toggle_cached("NY_UI_STATIC_COLOR_REUSE", false)
    }
    _batch_dump_enabled() || _gui_dump_suite_active || _proof_dump_active() ||
@@ -1362,18 +1367,18 @@ fn _static_world_color_reuse_enabled() bool {
 }
 
 fn _static_world_color_reuse_allowed() bool {
-   if(_static_world_redraw_frames > 0){ return false }
-   if(!_static_world_color_reuse_enabled()){ return false }
-   if(!gfx.backend_capabilities().get("load_color_resume", false)){ return false }
-   if(!_ui_static_world_fast_enabled()){ return false }
-   if(!_ui_static_update_clean()){ return false }
-   if(_static_world_color_reuse_frames <= 0){ return false }
+   if _static_world_redraw_frames > 0 { return false }
+   if !_static_world_color_reuse_enabled() { return false }
+   if !gfx.backend_capabilities().get("load_color_resume", false) { return false }
+   if !_ui_static_world_fast_enabled() { return false }
+   if !_ui_static_update_clean() { return false }
+   if _static_world_color_reuse_frames <= 0 { return false }
    _static_world_color_reuse_w == int(_win_w) && _static_world_color_reuse_h == int(_win_h)
 }
 
 fn _static_world_color_reuse_note(any load_color=false) bool {
-   if(_static_world_redraw_frames > 0){ _static_world_redraw_frames -= 1 }
-   if(bool(load_color)){
+   if _static_world_redraw_frames > 0 { _static_world_redraw_frames -= 1 }
+   if bool(load_color) {
       _static_world_color_reuse_frames += 1
    } else {
       _static_world_color_reuse_frames = 1
@@ -1425,7 +1430,7 @@ fn _scene_loading_input_guard_active() bool {
 }
 
 fn _release_scene_loading_input(str reason="scene loading") bool {
-   if(!_scene_loading_input_guard_active()){
+   if !_scene_loading_input_guard_active() {
       return false
    }
    def _discard_drag = _scene_drag_end()
@@ -1435,7 +1440,7 @@ fn _release_scene_loading_input(str reason="scene loading") bool {
    _middle_mouse_suppress_scroll_until_ns = ticks() + _MIDDLE_SCROLL_SUPPRESS_NS
    skip_mouse_frames = max(skip_mouse_frames, 3)
    _suppress_mouse_deltas(_CURSOR_TRANSITION_SUPPRESS_NS)
-   if(win && !_term_open && !ui_profile.headless_enabled()){
+   if win && !_term_open && !ui_profile.headless_enabled() {
       _intended_cursor_mode = CURSOR_NORMAL
       set_cursor_mode(win, CURSOR_NORMAL)
    }
@@ -1451,7 +1456,7 @@ fn _invalidate_chrome_frame(frames=4) {
 
 fn _hotkey_toggle_editor() {
    def now = ticks()
-   if(_hotkey_f1_last_ns > 0 && now - _hotkey_f1_last_ns < 160000000){
+   if _hotkey_f1_last_ns > 0 && now - _hotkey_f1_last_ns < 160000000 {
       return false
    }
    _hotkey_f1_last_ns = now
@@ -1463,12 +1468,12 @@ fn _hotkey_toggle_editor() {
    _rmb_look_active = false
    def _discard_drag = _scene_drag_end()
    _clear_camera_input_state()
-   if(opening){
+   if opening {
       _gui_open_default_editor()
       _gui_visible = true
       focus(win)
       gui.suppress_mouse_clicks(5, true)
-      if(!ui_profile.headless_enabled()){
+      if !ui_profile.headless_enabled() {
          show_centered_cursor(win)
       }
    } else {
@@ -1476,7 +1481,7 @@ fn _hotkey_toggle_editor() {
       gui.clear_focus()
       _scene_clear_selection("editor close")
    }
-   if(ui_profile.trace_enabled() || ui_profile.env_truthy_cached("NY_UI_HOTKEY_TRACE")){
+   if ui_profile.trace_enabled() || ui_profile.env_truthy_cached("NY_UI_HOTKEY_TRACE") {
       ui_profile.print_text("[ui:hotkey] F1 editor=" + (opening ? "open" : "closed"))
    }
    _sync_cursor_state("F1 editor toggle")
@@ -1490,7 +1495,7 @@ fn _gui_focus_asset_search() {
    _invalidate_chrome_frame(4)
    _rmb_look_active = false
    _clear_camera_input_state()
-   if(_gui_show_browser && !_gui_show_editor){
+   if _gui_show_browser && !_gui_show_editor {
       gui.focus_window("asset_browser")
       gui.request_focus("asset_browser::asset_title_filter")
       _sync_cursor_state("gui focus asset search")
@@ -1507,7 +1512,7 @@ fn _gui_focus_asset_search() {
 }
 
 fn _gui_unload_scene() {
-   if(is_dict(active_scene)){
+   if is_dict(active_scene) {
       scene_engine.unload_scene(active_scene, _loaded_scene_name)
       active_scene = 0
    }
@@ -1530,11 +1535,11 @@ fn _gui_mark_model_loaded() {
 
 fn _gui_activate_model_name(name) {
    def n = str.strip(to_str(name))
-   if(n.len == 0){
+   if n.len == 0 {
       return false
    }
    _gui_model_selected_name = n
-   if(_load_scene_runtime(n, true)){
+   if _load_scene_runtime(n, true) {
       return _gui_mark_model_loaded()
    }
    false
@@ -1542,7 +1547,7 @@ fn _gui_activate_model_name(name) {
 
 fn _queue_gui_model_load(name) bool {
    def n = str.strip(to_str(name))
-   if(n.len == 0){ return false }
+   if n.len == 0 { return false }
    _gui_pending_model_load_name = n
    _gui_pending_unload_scene = false
    true
@@ -1555,21 +1560,21 @@ fn _queue_gui_unload_scene() bool {
 }
 
 fn _process_gui_scene_requests() bool {
-   if(_scene_load_async_active()){
-      if(_gui_pending_model_load_name.len > 0){
+   if _scene_load_async_active() {
+      if _gui_pending_model_load_name.len > 0 {
          _release_scene_loading_input("scene load request queued")
       }
       return false
    }
-   if(_gui_pending_unload_scene){
+   if _gui_pending_unload_scene {
       _gui_pending_unload_scene = false
       _gui_unload_scene()
       return true
    }
    def n = str.strip(_gui_pending_model_load_name)
-   if(n.len <= 0){ return false }
+   if n.len <= 0 { return false }
    _gui_pending_model_load_name = ""
-   if(_gui_activate_model_name(n)){
+   if _gui_activate_model_name(n) {
       _gui_asset_load_wait_mouse_up = true
       return true
    }
@@ -1585,7 +1590,7 @@ fn _batch_dump_parse_env() {
    ui_profile.env_truthy_cached("NY_UI_BATCH_DUMP_ALL") ||
    ui_profile.env_trim_cached("NY_UI_BATCH_DUMP_FILE").len > 0 ||
    ui_profile.env_trim_cached("NY_UI_BATCH_DUMP_LIST").len > 0
-   if(!requested){ return }
+   if !requested { return }
    def all_names = (_cli_dump_all_requested || ui_profile.env_truthy_cached("NY_UI_BATCH_DUMP_ALL")) ? _refresh_model_catalog() : []
    def cfg = asset_batch.parse_env(_cli_batch_models_raw,
       _cli_dump_all_requested,
@@ -1600,12 +1605,12 @@ fn _batch_dump_parse_env() {
    _batch_dump_dir = to_str(cfg.get("dir", ""))
    _batch_dump_settle_frames = int(cfg.get("settle_frames", 4))
    _batch_dump_model_timeout_sec = float(cfg.get("timeout_sec", 45.0))
-   if(bool(cfg.get("no_missing", false))){
+   if bool(cfg.get("no_missing", false)) {
       ui_profile.print_text("[ui:batch:complete] count=0 reason=no_missing dir=" + _batch_dump_dir)
       __exit(0)
    }
    _batch_dump_active_mode = bool(cfg.get("active", false))
-   if(_batch_dump_active_mode){
+   if _batch_dump_active_mode {
       _batch_dump_run_started_ns = ticks()
       print(
          "[ui:batch:init] count=" + to_str(_batch_dump_models.len)
@@ -1630,7 +1635,7 @@ fn _gui_dump_suite_parse_env() {
    _gui_dump_suite_dir = to_str(cfg.get("dir", ""))
    _gui_dump_suite_settle_frames = int(cfg.get("settle_frames", 4))
    _gui_dump_suite_active = _gui_dump_suite_specs.len > 0
-   if(_gui_dump_suite_active){
+   if _gui_dump_suite_active {
       _gui_probe_mode = 1
       print(
          "[ui:gui-suite:init] count=" + to_str(_gui_dump_suite_specs.len)
@@ -1642,7 +1647,7 @@ fn _gui_dump_suite_parse_env() {
 }
 
 fn _gui_dump_suite_apply_current() {
-   if(!_gui_dump_suite_active_now()){
+   if !_gui_dump_suite_active_now() {
       return false
    }
    def spec = _gui_dump_suite_specs.get(_gui_dump_suite_index, [])
@@ -1653,12 +1658,12 @@ fn _gui_dump_suite_apply_current() {
    def kind = ui_dump.suite_field(spec, 4, "gui")
    def gizmo = ui_dump.suite_field(spec, 5, "")
    def model = ui_dump.suite_field(spec, 6, "")
-   if(layout_name.len > 0){ _gui_layout_preset_name = layout_name }
+   if layout_name.len > 0 { _gui_layout_preset_name = layout_name }
    gui.debug_force_combo_open("")
    _selection_overlay_dump_mode, _scene_selection_rect, _scene_selected = 0, false, false
-   if(kind == "gizmo"){
-      if(model.len > 0 && (!is_dict(active_scene) || _loaded_scene_name != model)){
-         if(_load_scene_runtime_sync(model, true, false)){
+   if kind == "gizmo" {
+      if model.len > 0 && (!is_dict(active_scene) || _loaded_scene_name != model) {
+         if _load_scene_runtime_sync(model, true, false) {
             _cmd_autofit(false)
             _cmd_lookat(false)
          }
@@ -1682,7 +1687,7 @@ fn _gui_dump_suite_apply_current() {
    } else {
       _gui_visible = true
       _gui_apply_shell_shot(shot)
-      if(combo.len > 0){ gui.debug_force_combo_open(combo) }
+      if combo.len > 0 { gui.debug_force_combo_open(combo) }
    }
    _gui_layout_dirty = true
    _gui_layout_warm_frames = max(_gui_layout_warm_frames, _gui_dump_suite_settle_frames)
@@ -1698,7 +1703,7 @@ fn _gui_dump_suite_apply_current() {
 }
 
 fn _gui_dump_suite_begin() {
-   if(!_gui_dump_suite_active){ return false }
+   if !_gui_dump_suite_active { return false }
    _gui_probe_bootstrapped = true
    _gui_dump_suite_apply_current()
 }
@@ -1708,12 +1713,12 @@ fn _gui_dump_suite_finish() {
    _gui_dump_suite_active = false
    gui.debug_force_combo_open("")
    _selection_overlay_dump_mode = 0
-   if(ui_dump.suite_exit_enabled()){ set_should_close(win, true) }
+   if ui_dump.suite_exit_enabled() { set_should_close(win, true) }
 }
 
 fn _gui_dump_suite_advance() {
    _gui_dump_suite_index += 1
-   if(!_gui_dump_suite_active_now()){
+   if !_gui_dump_suite_active_now() {
       _gui_dump_suite_finish()
       return false
    }
@@ -1721,15 +1726,15 @@ fn _gui_dump_suite_advance() {
 }
 
 fn _gui_dump_suite_after_frame() {
-   if(!_gui_dump_suite_active_now()){ return false }
-   if(_gui_dump_suite_wait_frames > 0){
+   if !_gui_dump_suite_active_now() { return false }
+   if _gui_dump_suite_wait_frames > 0 {
       _gui_dump_suite_wait_frames -= 1
       return false
    }
    def path = ui_dump.suite_snapshot_path(_gui_dump_suite_specs, _gui_dump_suite_index, _gui_dump_suite_dir, _cli_dump_dir)
-   if(path.len == 0){ _gui_dump_suite_advance() return false }
+   if path.len == 0 { _gui_dump_suite_advance() return false }
    _gui_dump_suite_attempts += 1
-   if(_gui_dump_suite_attempts <= 2){
+   if _gui_dump_suite_attempts <= 2 {
       def _discard_7 = print(
          "[ui:gui-suite] snapshot idx=" + to_str(_gui_dump_suite_index + 1)
          + "/" + to_str(_gui_dump_suite_specs.len)
@@ -1737,13 +1742,13 @@ fn _gui_dump_suite_after_frame() {
          + " path=" + path
       )
    }
-   if(_snapshot_ok(path)){
+   if _snapshot_ok(path) {
       _gui_last_dump_path = path
       ui_profile.print_line("ui:gui-suite", "path=" + path)
       _gui_dump_suite_advance()
       return true
    }
-   if(_gui_dump_suite_attempts >= 6){
+   if _gui_dump_suite_attempts >= 6 {
       ui_profile.print_line("ui:gui-suite:fail", "path=" + path + " attempts=" + to_str(_gui_dump_suite_attempts))
       _gui_dump_suite_advance()
    }
@@ -1753,8 +1758,8 @@ fn _gui_dump_suite_after_frame() {
 fn _batch_dump_advance_or_exit() {
    _batch_dump_index += 1
    def models_n = _batch_dump_models.len
-   while(_batch_dump_index < models_n){
-      if(_batch_dump_begin_current()){
+   while _batch_dump_index < models_n {
+      if _batch_dump_begin_current() {
          return
       }
       _batch_dump_index += 1
@@ -1768,13 +1773,13 @@ fn _batch_dump_advance_or_exit() {
 }
 
 fn _batch_dump_begin_current() {
-   if(!_batch_dump_enabled()){ return false }
-   if(_batch_dump_index < 0 || _batch_dump_index >= _batch_dump_models.len){ return false }
+   if !_batch_dump_enabled() { return false }
+   if _batch_dump_index < 0 || _batch_dump_index >= _batch_dump_models.len { return false }
    def spec = to_str(_batch_dump_model_specs.get(_batch_dump_index, ""))
    def display_name = to_str(_batch_dump_models.get(_batch_dump_index, ""))
-   if(spec.len == 0){ return false }
+   if spec.len == 0 { return false }
    _stop_model_prefetch()
-   if(is_dict(active_scene)){
+   if is_dict(active_scene) {
       scene_engine.unload_scene(active_scene, _loaded_scene_name)
       active_scene = 0
    }
@@ -1789,7 +1794,7 @@ fn _batch_dump_begin_current() {
       + " model=" + display_name
       + " elapsed_s=" + str.to_fixed(asset_batch.elapsed_s(_batch_dump_run_started_ns), 2)
    )
-   if(ui_dump.model_skipped(display_name, _batch_dump_skip_models) || ui_dump.model_skipped(spec, _batch_dump_skip_models)){
+   if ui_dump.model_skipped(display_name, _batch_dump_skip_models) || ui_dump.model_skipped(spec, _batch_dump_skip_models) {
       _batch_dump_completed_count += 1
       print(
          "[ui:batch] skip idx=" + to_str(_batch_dump_index + 1)
@@ -1802,19 +1807,19 @@ fn _batch_dump_begin_current() {
       return false
    }
    def load_scene_t0 = ticks()
-   if(ospath.has_sep(spec)){
+   if ospath.has_sep(spec) {
       active_scene = scene_engine.load_scene_path(spec, display_name, camthreed, M_SP, M_PT, M_PS)
    } else {
       active_scene = ui_assets.load_named_scene(spec, camthreed, M_SP, M_PT, M_PS)
    }
    ui_profile.stage_log("ui:batch:prof", display_name, "scene_load", load_scene_t0)
-   if(!is_dict(active_scene)){
+   if !is_dict(active_scene) {
       _batch_dump_terminal_log("batch load failed: " + spec)
       ui_profile.print_line("ui:batch:fail", "load failed model=" + spec)
       return false
    }
    _loaded_scene_name = display_name
-   if(_loaded_scene_name.len == 0){
+   if _loaded_scene_name.len == 0 {
       _loaded_scene_name = spec
    }
    _invalidate_chrome_frame(max(4, _batch_dump_settle_frames + 2))
@@ -1858,8 +1863,8 @@ fn _batch_dump_begin_current() {
 
 fn maybe_run(any app=0) bool {
    "Return true when batch dump orchestration should own the UI run."
-   if(_batch_dump_enabled()){
-      if(_batch_dump_models.len == 0){ _batch_dump_parse_env() }
+   if _batch_dump_enabled() {
+      if _batch_dump_models.len == 0 { _batch_dump_parse_env() }
       return _batch_dump_enabled()
    }
    false
@@ -1870,7 +1875,7 @@ fn _startup_trace_enabled() bool {
 }
 
 fn _startup_trace(stage, t0) {
-   if(!_startup_trace_enabled()){
+   if !_startup_trace_enabled() {
       return 0
    }
    def ms = ui_profile.elapsed_ms(t0)
@@ -1889,106 +1894,106 @@ fn _set_projection_mode(next_ortho) {
 }
 
 fn _focused_scene_look_active() bool {
-   if(ui_profile.headless_enabled()){
+   if ui_profile.headless_enabled() {
       return false
    }
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       return false
    }
-   if(_auto_dump_enabled == 1 || _batch_dump_active_mode || _gui_dump_suite_active || _proof_dump_active()){
+   if _auto_dump_enabled == 1 || _batch_dump_active_mode || _gui_dump_suite_active || _proof_dump_active() {
       return false
    }
-   if(_term_open || _gui_visible || _gui_enabled_now()){
+   if _term_open || _gui_visible || _gui_enabled_now() {
       return false
    }
-   if(APP_WIRE || !_ui_scene_visible()){
+   if APP_WIRE || !_ui_scene_visible() {
       return false
    }
-   if(_scene_drag_active){
+   if _scene_drag_active {
       return false
    }
-   if(ui_profile.env_truthy_cached("NY_UI_DISABLE_FOCUS_LOOK")){
+   if ui_profile.env_truthy_cached("NY_UI_DISABLE_FOCUS_LOOK") {
       return false
    }
    def live_win = get_win(win)
-   if(is_dict(live_win) && live_win.contains("focused") && !bool(live_win.get("focused", true))){
+   if is_dict(live_win) && live_win.contains("focused") && !bool(live_win.get("focused", true)) {
       return false
    }
    true
 }
 
 fn _camera_keyboard_nav_allowed(bool gui_active=false, bool gui_keys_blocking=false) bool {
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       return false
    }
-   if(_term_open || gui_keys_blocking){
+   if _term_open || gui_keys_blocking {
       return false
    }
-   if(_rmb_look_active && _ui_scene_visible()){
+   if _rmb_look_active && _ui_scene_visible() {
       return true
    }
-   if(_cursor_lock_enabled && !gui_active && !_gui_enabled_now() && _ui_scene_visible()){
+   if _cursor_lock_enabled && !gui_active && !_gui_enabled_now() && _ui_scene_visible() {
       return true
    }
-   if(_focused_scene_look_active()){
+   if _focused_scene_look_active() {
       return true
    }
    !gui_active && !_gui_enabled_now()
 }
 
 fn _desired_cursor_mode() {
-   if(ui_profile.headless_enabled()){
+   if ui_profile.headless_enabled() {
       return CURSOR_NORMAL
    }
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       return CURSOR_NORMAL
    }
-   if(_auto_dump_enabled == 1 || _batch_dump_active_mode || _gui_dump_suite_active){
+   if _auto_dump_enabled == 1 || _batch_dump_active_mode || _gui_dump_suite_active {
       return CURSOR_NORMAL
    }
-   if(_term_open){
+   if _term_open {
       return CURSOR_NORMAL
    }
    ;; RMB/look ownership must win over visible GUI panels.  The previous order
    ;; returned CURSOR_NORMAL whenever the editor UI was visible, so camera look
    ;; used unstable window-position deltas instead of captured/raw deltas.
-   if(_scene_drag_active){
+   if _scene_drag_active {
       return CURSOR_NORMAL
    }
-   if(_rmb_look_active){
+   if _rmb_look_active {
       return CURSOR_DISABLED
    }
-   if(_gui_enabled_now() || _gui_visible){
+   if _gui_enabled_now() || _gui_visible {
       return CURSOR_NORMAL
    }
-   if(_cursor_lock_enabled){
+   if _cursor_lock_enabled {
       return CURSOR_DISABLED
    }
-   if(_scene_selected){
+   if _scene_selected {
       return CURSOR_NORMAL
    }
-   if(_focused_scene_look_active()){
+   if _focused_scene_look_active() {
       return CURSOR_DISABLED
    }
    CURSOR_NORMAL
 }
 
 fn _sync_cursor_state(reason) {
-   if(!win){
+   if !win {
       return
    }
    def mode = _desired_cursor_mode()
    def prev_mode = _intended_cursor_mode
    _intended_cursor_mode = mode
-   if(ui_profile.headless_enabled()){
+   if ui_profile.headless_enabled() {
       return
    }
-   elif(mode == CURSOR_NORMAL && prev_mode == CURSOR_DISABLED){
+   elif mode == CURSOR_NORMAL && prev_mode == CURSOR_DISABLED {
       set_cursor_mode(win, CURSOR_NORMAL)
    } else {
       set_cursor_mode(win, mode)
    }
-   if(_startup_trace_enabled()){
+   if _startup_trace_enabled() {
       def pos = cursor_pos(win)
       ui_runtime.dbg("ui",
          reason + " - _term_open=" + to_str(_term_open) +
@@ -2001,16 +2006,16 @@ fn _sync_cursor_state(reason) {
 
 fn _set_timeout() {
    mut env_t = ui_profile.env_trim_cached("NY_UI_TIMEOUT")
-   if(env_t.len == 0){
+   if env_t.len == 0 {
       env_t = ui_profile.env_trim_cached("NY_TIMEOUT")
    }
-   if(_cli_timeout_sec > 0.0){
+   if _cli_timeout_sec > 0.0 {
       _timeout_ns = int(_cli_timeout_sec * 1e9)
    }
-   elif(env_t.len > 0){
+   elif env_t.len > 0 {
       _timeout_ns = int(str.atof(env_t) * 1e9)
    }
-   elif(ui_profile.env_truthy_cached("CI") || ui_profile.env_truthy_cached("NYTRIX_TEST_MODE")){
+   elif ui_profile.env_truthy_cached("CI") || ui_profile.env_truthy_cached("NYTRIX_TEST_MODE") {
       _timeout_ns = int(5.0 * 1e9)
    }
    else { _timeout_ns = 0 }
@@ -2020,7 +2025,7 @@ fn _init_fonts() {
    def t0 = (_ui_debug_enabled == 1) ? ticks() : 0
    def editor_paths = ui_assets.EDITOR_FONT_CANDIDATES
    _gui_dpi_scale = _ui_auto_dpi_scale()
-   if(!ui_profile.gui_scale_env_present()){
+   if !ui_profile.gui_scale_env_present() {
       _gui_scale = ui_app.app_gui_scale_for_window(_win_w, _win_h, _gui_dpi_scale)
    }
    def base_font_sz = ui_runtime.default_font_size("ui", 13.0 * _gui_dpi_scale)
@@ -2030,7 +2035,7 @@ fn _init_fonts() {
    def font_filter = ui_runtime.default_font_filter("ui", FONT_FILTER_LINEAR)
    def ui_font_filter = ui_runtime.default_font_filter("ui", FONT_FILTER_LINEAR, "UI_FONT_FILTER")
    def title_font_filter = ui_runtime.default_font_filter("ui", FONT_FILTER_LINEAR, "TITLE_FONT_FILTER")
-   if(_ui_debug_enabled == 1){
+   if _ui_debug_enabled == 1 {
       _dbg_ui("[ui] fonts: begin base_sz=" + to_str(base_font_sz) + " ui_sz=" + to_str(ui_font_sz) +
          " title_sz=" + to_str(title_font_sz) + " small_sz=" + to_str(small_font_sz) +
          " base_filter=" + to_str(font_filter) +
@@ -2041,19 +2046,19 @@ fn _init_fonts() {
    res_font_ui = ui_assets.editor_font(ui_font_sz, editor_paths, ui_font_filter)
    res_font_title = ui_assets.editor_font(title_font_sz, editor_paths, title_font_filter)
    res_font_small = ui_assets.editor_font(small_font_sz, editor_paths, ui_font_filter)
-   if(!res_font){
+   if !res_font {
       ui_runtime.dbg("ui", "font fallback active")
    }
-   if(!res_font_ui){
+   if !res_font_ui {
       res_font_ui = ui_assets.editor_font(ui_font_sz, editor_paths, ui_font_filter)
    }
-   if(!res_font_title){
+   if !res_font_title {
       res_font_title = _ui_font()
    }
-   if(!res_font_small){
+   if !res_font_small {
       res_font_small = _ui_font()
    }
-   if(_ui_debug_enabled == 1){
+   if _ui_debug_enabled == 1 {
       def ms = ui_profile.elapsed_ms(t0)
       _dbg_ui("[ui] fonts: done base_id=" + to_str(res_font) + " ui_id=" + to_str(res_font_ui) +
       " title_id=" + to_str(res_font_title) + " small_id=" + to_str(res_font_small) + " ms=" + to_str(ms))
@@ -2062,7 +2067,7 @@ fn _init_fonts() {
 
 fn _warm_mesh_helpers() {
    def buf = malloc(VERTEX_STRIDE)
-   if(!buf){
+   if !buf {
       return 0
    }
    push_vertex(buf, 0.0, 0.0, 0.0, 0.0, 0.0, WHITE)
@@ -2073,24 +2078,24 @@ fn _warm_mesh_helpers() {
 
 fn _startup_exec_line(any line, str source="cmd") {
    def cmd_line = str.strip(to_str(line))
-   if(cmd_line.len == 0){
+   if cmd_line.len == 0 {
       return 0
    }
    _dbg_ui("[ui] startup " + source + ": " + cmd_line)
-   if(source == "post"){
+   if source == "post" {
       def post_cmd = to_str(str.lower(cmd_line))
-      if(post_cmd == "autofit" || post_cmd == "fit"){
+      if post_cmd == "autofit" || post_cmd == "fit" {
          _cmd_autofit(false) return 1
       }
-      if(post_cmd == "lookat" || post_cmd == "focus" || post_cmd == "frame"){
+      if post_cmd == "lookat" || post_cmd == "focus" || post_cmd == "frame" {
          _cmd_lookat(false) return 1
       }
    }
    def cmd_parts = str.split_words(cmd_line)
-   if(cmd_parts.len > 1 && eq(str.lower(to_str(cmd_parts.get(0, ""))), "load")){
+   if cmd_parts.len > 1 && eq(str.lower(to_str(cmd_parts.get(0, ""))), "load") {
       _loaded_scene_name = str.strip(str.join_words(cmd_parts, " ", 1))
       show_scene = _loaded_scene_name.len > 0
-      if(source == "cmd"){
+      if source == "cmd" {
          _cli_scene_requested = true
          _cli_scripted_scene_load = true
       }
@@ -2104,16 +2109,16 @@ fn _startup_exec_line(any line, str source="cmd") {
 
 fn _startup_exec_semicolon_list(line, source="cmd") {
    def line0 = str.strip(to_str(line))
-   if(line0.len == 0){
+   if line0.len == 0 {
       return 0
    }
-   if(str.find(line0, ";") < 0){
+   if str.find(line0, ";") < 0 {
       return _startup_exec_line(line0, source)
    }
    def parts = str.split(line0, ";")
    def parts_len = parts.len
    mut j = 0
-   while(j < parts_len){
+   while j < parts_len {
       _startup_exec_line(parts.get(j, ""), source)
       j += 1
    }
@@ -2122,9 +2127,9 @@ fn _startup_exec_semicolon_list(line, source="cmd") {
 
 fn _ui_print_frame_hash(dump_path="") {
    def line = ui_dump.framebuffer_hash_line()
-   if(line.len > 0){
+   if line.len > 0 {
       print(line)
-      if(dump_path.len > 0){
+      if dump_path.len > 0 {
          ui_profile.print_line("ui:hash", "path=" + dump_path + " " + line)
       }
       return true
@@ -2137,18 +2142,18 @@ fn _startup_exec_cli_cmds() {
    def plan = viewer_cli.startup_plan(viewer_cli.argv_list(), STARTUP_ONE_ARG_CMDS)
    def actions = plan.get("actions", [])
    mut i = 0
-   while(is_list(actions) && i < actions.len){
+   while is_list(actions) && i < actions.len {
       def a = actions.get(i, {})
       def kind = to_str(a.get("kind", ""))
       def value = to_str(a.get("value", ""))
-      if(kind == "scene"){
+      if kind == "scene" {
          _loaded_scene_name = str.strip(value)
          show_scene = _loaded_scene_name.len > 0
-         if(show_scene){ _cli_scripted_scene_load = true }
+         if show_scene { _cli_scripted_scene_load = true }
          _dbg_ui("[ui] startup state: scene=" + to_str(is_dict(active_scene)) + " show_scene=" + to_str(show_scene))
-      } elif(kind == "cmds"){
+      } elif kind == "cmds" {
          _startup_exec_semicolon_list(value, "cmd")
-      } elif(kind == "cmd"){
+      } elif kind == "cmd" {
          _startup_exec_line(value, "cmd")
       }
       i += 1
@@ -2158,7 +2163,7 @@ fn _startup_exec_cli_cmds() {
 
 fn _startup_exec_env_var(name, origin) {
    def line0 = ui_profile.env_trim_cached(to_str(name))
-   if(line0.len == 0){
+   if line0.len == 0 {
       return 0
    }
    _startup_exec_semicolon_list(line0, origin)
@@ -2171,7 +2176,7 @@ fn _startup_exec_env_cmds() {
 
 fn _apply_startup_render_env() bool {
    gfx.apply_backend_env()
-   if(_cli_render_backend.len > 0){ gfx.apply_backend_name(_cli_render_backend) }
+   if _cli_render_backend.len > 0 { gfx.apply_backend_name(_cli_render_backend) }
    def cfg = ui_app.app_startup_render_config(APP_MSAA, APP_VSYNC, APP_FILTER_LINEAR)
    APP_MSAA = int(cfg.get("msaa", APP_MSAA))
    APP_VSYNC = bool(cfg.get("vsync", APP_VSYNC))
@@ -2193,7 +2198,7 @@ fn _load_fast_generated_skybox(any visible=true) bool {
 }
 
 fn _ensure_visible_skybox_ready() bool {
-   if(skybox_tex_id >= 0){ return true }
+   if skybox_tex_id >= 0 { return true }
    _load_fast_generated_skybox(true)
 }
 
@@ -2201,7 +2206,7 @@ fn _setup_window() {
    _dbg_ui("[ui] startup: opening window")
    _apply_startup_render_env()
    ui_bootstrap.apply_identity_hints()
-   if(ui_profile.headless_sim_enabled() && ui_bootstrap.headless_sim_refused()){
+   if ui_profile.headless_sim_enabled() && ui_bootstrap.headless_sim_refused() {
       ui_profile.print_line("ui:headless-sim:fail", "refused surfaced backend; expected no-surface backend")
       exit(2)
    }
@@ -2209,7 +2214,7 @@ fn _setup_window() {
    def opened = ui_bootstrap.open_viewer_window("Nytrix", APP_MSAA, APP_VSYNC, APP_FILTER_LINEAR, want_fullscreen, ui_profile.headless_enabled())
    win = opened.get("win", 0)
    _win_w, _win_h = float(opened.get("w", _win_w)), float(opened.get("h", _win_h))
-   if(!win){
+   if !win {
       def fail_msg = ui_bootstrap.failure_summary(get_active_backend_name(), ui_profile.headless_enabled())
       ui_profile.print_line("ui:window:fail", fail_msg)
       eprint("[ui] failed to create GPU window: " + fail_msg)
@@ -2218,7 +2223,7 @@ fn _setup_window() {
    _dbg_ui("[ui] startup: window opened")
    active_backend_name = get_active_backend_name()
    set_clear_color(APP_BG)
-   if(!gfx.backend_capabilities().get("double_buffered", false)){
+   if !gfx.backend_capabilities().get("double_buffered", false) {
       def fail_msg = ui_bootstrap.failure_summary(active_backend_name, ui_profile.headless_enabled())
       eprint("[ui] GPU renderer is required: " + fail_msg)
       exit(1)
@@ -2242,9 +2247,9 @@ fn _setup_camera() {
    camthreed = camera.init(start_pos, start_yaw, start_pitch)
    mut start_fov = 120.0
    def dump_fov_env = ui_profile.env_trim_cached("NY_UI_DUMP_FOV")
-   if(dump_fov_env.len > 0){
+   if dump_fov_env.len > 0 {
       def raw = str.atof(dump_fov_env)
-      if(raw >= 15.0 && raw <= 120.0){
+      if raw >= 15.0 && raw <= 120.0 {
          start_fov = raw
       }
    }
@@ -2283,15 +2288,41 @@ fn _scene_editor_tools_enabled() bool {
 
 fn _event_mouse_xy_view(any data) list {
    "Returns mouse event coordinates in the active renderer framebuffer/view space."
+   if !is_dict(data) { return _cursor_xy_view() }
+   def raw_x = float(data.get("x", 0.0))
+   def raw_y = float(data.get("y", 0.0))
+   def ww = max(1.0, float(_win_w))
+   def wh = max(1.0, float(_win_h))
+   def raw_inside = raw_x >= 0.0 && raw_y >= 0.0 && raw_x <= ww && raw_y <= wh
    def scaled = uin.scale_event_xy(win, data, _win_w, _win_h)
-   def out = uin.event_mouse_xy(win, scaled)
-   def _discard_evxy_trace = _app_input_trace(
-      "event_mouse_xy_view raw=(" + to_str(is_dict(data) ? data.get("x", 0.0) : 0.0) + "," + to_str(is_dict(data) ? data.get("y", 0.0) : 0.0) + ")" +
-      " scaled=(" + to_str(scaled.get("x", 0.0)) + "," + to_str(scaled.get("y", 0.0)) + ")" +
-      " out=(" + to_str(out.get(0, 0.0)) + "," + to_str(out.get(1, 0.0)) + ")" +
-      " win=(" + to_str(_win_w) + "," + to_str(_win_h) + ")"
-   )
-   out
+   mut sx = float(scaled.get("x", raw_x))
+   mut sy = float(scaled.get("y", raw_y))
+   ;; X11/Wayland events are already in window/view pixels for the editor.
+   ;; Some compositors briefly report a bogus logical window size while raw
+   ;; cursor mode toggles, which collapses scaled Y to 0 and makes gizmo pick
+   ;; and drag math think every mouse event is on the top edge.  Prefer the
+   ;; raw event when it is sane and the scaled value clearly collapsed.
+   def scaled_collapsed_y = raw_inside && raw_y > 2.0 && sy <= 0.5
+   def scaled_collapsed_x = raw_inside && raw_x > 2.0 && sx <= 0.5
+   def scaled_oob = sx < -1.0 || sy < -1.0 || sx > ww + 1.0 || sy > wh + 1.0
+   mut source = "scaled"
+   if raw_inside && (scaled_collapsed_y || scaled_collapsed_x || scaled_oob) {
+      sx = raw_x
+      sy = raw_y
+      source = "raw"
+   }
+   sx = clamp(sx, 0.0, max(0.0, ww - 1.0))
+   sy = clamp(sy, 0.0, max(0.0, wh - 1.0))
+   if source == "raw" || ui_profile.env_truthy_cached("NY_UI_INPUT_XY_TRACE") {
+      def _discard_evxy_trace = _app_input_trace(
+         "event_mouse_xy_view source=" + source +
+         " raw=(" + to_str(raw_x) + "," + to_str(raw_y) + ")" +
+         " scaled=(" + to_str(scaled.get("x", 0.0)) + "," + to_str(scaled.get("y", 0.0)) + ")" +
+         " out=(" + to_str(sx) + "," + to_str(sy) + ")" +
+         " win=(" + to_str(_win_w) + "," + to_str(_win_h) + ")"
+      )
+   }
+   [sx, sy]
 }
 
 fn _cursor_xy_view() list {
@@ -2300,7 +2331,7 @@ fn _cursor_xy_view() list {
 }
 
 fn _scene_clear_selection(str reason="scene selection clear") bool {
-   if(_scene_drag_active){
+   if _scene_drag_active {
       _scene_drag_state["active"] = false
       _scene_drag_active = false
       _scene_drag_mode = _gizmo_mode
@@ -2318,7 +2349,7 @@ fn _cam_slot_num(int idx, f64 fallback=0.0) f64 {
 }
 
 fn _active_scene_model_matrix() {
-   if(!is_dict(active_scene) || !is_dict(active_scene)){
+   if !is_dict(active_scene) {
       return M_SP
    }
    scene_engine.scene_active_model_matrix_into(active_scene, M_SP, M_ID, M_W, M_PT, M_PR, M_PS, M_PW, M_Ptmp)
@@ -2329,16 +2360,18 @@ fn _set_active_scene_model_matrix() {
 }
 
 fn _scene_drag_begin(x, y, any pick=0) bool {
-   if(!_scene_editor_tools_enabled() || !is_dict(active_scene) || !show_scene || !is_dict(active_scene)){
+   if !_scene_editor_tools_enabled() || !is_dict(active_scene) || !show_scene {
       return false
    }
-   if(is_dict(pick)){
+   if is_dict(pick) {
       _gizmo_mode = int(clamp(float(pick.get("mode", _gizmo_mode)), 0.0, 2.0))
       _gizmo_axis = int(clamp(float(pick.get("axis", _gizmo_axis)), 0.0, 3.0))
    }
    _scene_selected = true
    _scene_selection_rect = true
    def drag_bounds = _scene_selection_bounds()
+   def drag_basis = scene_engine.scene_drag_camera_basis(_h_yaw, _h_pch)
+   def drag_wpp = scene_engine.scene_drag_pixel_scale(drag_bounds, _cam_px, _cam_py, _cam_pz, _cam_fov)
    _scene_drag_state = scene_engine.scene_drag_begin_state(active_scene, x, y, _gizmo_mode, {
          "axis": _gizmo_axis,
          "precise": _gizmo_precise || _move_shift || key_down(win, uin.KEY_LEFT_SHIFT) || key_down(win, uin.KEY_RIGHT_SHIFT) || key_down(win, uin.KEY_SHIFT),
@@ -2346,12 +2379,40 @@ fn _scene_drag_begin(x, y, any pick=0) bool {
          "screen_axis_x": is_dict(pick) ? float(pick.get("screen_axis_x", 0.0)) : 0.0,
          "screen_axis_y": is_dict(pick) ? float(pick.get("screen_axis_y", 0.0)) : 0.0,
          "axis_world_per_pixel": is_dict(pick) ? float(pick.get("screen_world_per_pixel", 0.0)) : 0.0,
+         "drag_world_per_pixel": drag_wpp,
+         "drag_right_x": float(drag_basis.get("right_x", 1.0)),
+         "drag_right_y": float(drag_basis.get("right_y", 0.0)),
+         "drag_right_z": float(drag_basis.get("right_z", 0.0)),
+         "drag_up_x": float(drag_basis.get("up_x", 0.0)),
+         "drag_up_y": float(drag_basis.get("up_y", 1.0)),
+         "drag_up_z": float(drag_basis.get("up_z", 0.0)),
          "axis_ray_ok": false,
          "axis_coord_start": 0.0,
          "axis_world_delta_ok": false,
-         "axis_world_delta": 0.0
+         "axis_world_delta": 0.0,
+         "ray_world_delta_ok": false,
+         "ray_start_x": 0.0,
+         "ray_start_y": 0.0,
+         "ray_start_z": 0.0,
+         "ray_plane_nx": 0.0,
+         "ray_plane_ny": 0.0,
+         "ray_plane_nz": 0.0,
+         "ray_world_dx": 0.0,
+         "ray_world_dy": 0.0,
+         "ray_world_dz": 0.0
    })
    _scene_drag_state["bounds"] = drag_bounds
+   def ray_start = _scene_world_gizmo_axis_drag_coord(_gizmo_axis, x, y, drag_bounds)
+   if bool(ray_start.get("ok", false)) {
+      _scene_drag_state["axis_ray_ok"] = true
+      _scene_drag_state["axis_coord_start"] = float(ray_start.get("coord", 0.0))
+      _scene_drag_state["ray_start_x"] = float(ray_start.get("wx", 0.0))
+      _scene_drag_state["ray_start_y"] = float(ray_start.get("wy", 0.0))
+      _scene_drag_state["ray_start_z"] = float(ray_start.get("wz", 0.0))
+      _scene_drag_state["ray_plane_nx"] = float(ray_start.get("nx", 0.0))
+      _scene_drag_state["ray_plane_ny"] = float(ray_start.get("ny", 0.0))
+      _scene_drag_state["ray_plane_nz"] = float(ray_start.get("nz", 0.0))
+   }
    _scene_drag_active = bool(_scene_drag_state.get("active", false))
    _scene_drag_mode = int(_scene_drag_state.get("mode", _gizmo_mode))
    def _discard_drag_begin_trace = _app_input_trace(
@@ -2372,35 +2433,68 @@ fn _scene_drag_begin(x, y, any pick=0) bool {
 }
 
 fn _scene_drag_update(x, y) bool {
-   if(!_scene_drag_active || !_scene_editor_tools_enabled() || !is_dict(active_scene) || !show_scene){
-      if(_scene_drag_active){ _scene_drag_end() }
+   if !_scene_drag_active || !_scene_editor_tools_enabled() || !is_dict(active_scene) || !show_scene {
+      if _scene_drag_active { _scene_drag_end() }
       return false
    }
-   ;; Preserve the axis that was picked at mouse-down.  Re-reading the global
-   ;; gizmo axis every motion event can turn a locked Y-axis drag back into a
-   ;; free drag if hover/UI state changes mid-frame.
-   if(int(_scene_drag_state.get("axis", 0)) <= 0 && _gizmo_axis > 0){ _scene_drag_state["axis"] = _gizmo_axis }
+   ;; Use the axis captured at mouse-down. Do not reread _gizmo_axis here:
+   ;; center/free drags must remain free, and axis drags must remain locked.
    def drag_axis = int(_scene_drag_state.get("axis", 0))
-   ;; Keep translate drags continuous in screen space. The ray/axis closest-point
-   ;; solve can become ill-conditioned for shallow projected axes and then jumps
-   ;; between coarse world sections even though mouse coordinates are floats.
-   _scene_drag_state["axis_world_delta_ok"] = false
+   ;; Movement is computed from the frozen mouse-down camera basis and
+   ;; projected axis tangent stored in _scene_drag_state.  Do not raycast on
+   ;; every mouse move: shallow ray/axis intersections jump between solutions
+   ;; and were the source of flickery, camera-dependent gizmo motion.
    _scene_drag_state["precise"] = _gizmo_precise || _move_shift || key_down(win, uin.KEY_LEFT_SHIFT) || key_down(win, uin.KEY_RIGHT_SHIFT) || key_down(win, uin.KEY_SHIFT)
    _scene_drag_state["snap"] = _gizmo_snap || key_down(win, uin.KEY_LEFT_CONTROL) || key_down(win, uin.KEY_RIGHT_CONTROL) || key_down(win, uin.KEY_CTRL)
-   _scene_drag_state = scene_engine.scene_drag_apply(active_scene, _scene_drag_state, x, y, _h_yaw, _scene_drag_state.get("bounds", _scene_selection_bounds()), _cam_px, _cam_py, _cam_pz, _cam_fov, _h_pch)
+   def drag_bounds = _scene_drag_state.get("bounds", _scene_selection_bounds())
+   if int(_scene_drag_state.get("mode", 0)) == 0 {
+      def pn = [
+         float(_scene_drag_state.get("ray_plane_nx", 0.0)),
+         float(_scene_drag_state.get("ray_plane_ny", 0.0)),
+         float(_scene_drag_state.get("ray_plane_nz", 0.0))
+      ]
+      def ray_now = _scene_world_gizmo_axis_drag_coord(drag_axis, x, y, drag_bounds, pn)
+      def ray_ok = bool(ray_now.get("ok", false))
+      _scene_drag_state["ray_update_ok"] = ray_ok
+      ;; Do not leave stale ray-derived deltas live after a failed intersection.
+      ;; A single bad mouse event used to reuse the previous world delta while
+      ;; last_x/last_y advanced, which looked like flicker/backtracking.
+      _scene_drag_state["axis_world_delta_ok"] = false
+      _scene_drag_state["ray_world_delta_ok"] = false
+      if ray_ok {
+         if drag_axis > 0 {
+            _scene_drag_state["axis_world_delta_ok"] = true
+            _scene_drag_state["axis_world_delta"] = float(ray_now.get("coord", 0.0)) - float(_scene_drag_state.get("axis_coord_start", 0.0))
+            _scene_drag_state["axis_coord_now"] = float(ray_now.get("coord", 0.0))
+         } else {
+            _scene_drag_state["ray_world_delta_ok"] = true
+            _scene_drag_state["ray_world_dx"] = float(ray_now.get("wx", 0.0)) - float(_scene_drag_state.get("ray_start_x", 0.0))
+            _scene_drag_state["ray_world_dy"] = float(ray_now.get("wy", 0.0)) - float(_scene_drag_state.get("ray_start_y", 0.0))
+            _scene_drag_state["ray_world_dz"] = float(ray_now.get("wz", 0.0)) - float(_scene_drag_state.get("ray_start_z", 0.0))
+         }
+      }
+   }
+   _scene_drag_state = scene_engine.scene_drag_apply(active_scene, _scene_drag_state, x, y, _h_yaw, drag_bounds, _cam_px, _cam_py, _cam_pz, _cam_fov, _h_pch)
    def _discard_drag_update_trace = _app_input_trace(
       "drag update x=" + to_str(x) + " y=" + to_str(y) +
       " axis=" + to_str(drag_axis) +
       " mode=" + to_str(_scene_drag_state.get("mode", 0)) +
-      " ray_ok=" + to_str(_scene_drag_state.get("axis_ray_ok", false)) +
-      " world_ok=" + to_str(_scene_drag_state.get("axis_world_delta_ok", false)) +
-      " world_delta=" + to_str(_scene_drag_state.get("axis_world_delta", 0.0)) +
+      " ray_start_ok=" + to_str(_scene_drag_state.get("axis_ray_ok", false)) +
+      " ray_update_ok=" + to_str(_scene_drag_state.get("ray_update_ok", false)) +
+      " axis_src=" + to_str(_scene_drag_state.get("drag_axis_source", "")) +
+      " axis_delta=" + to_str(_scene_drag_state.get("drag_axis_delta", 0.0)) +
+      " axis_coord_start=" + to_str(_scene_drag_state.get("axis_coord_start", 0.0)) +
+      " axis_coord_now=" + to_str(_scene_drag_state.get("axis_coord_now", 0.0)) +
+      " plane=(" + to_str(_scene_drag_state.get("ray_plane_nx", 0.0)) + "," + to_str(_scene_drag_state.get("ray_plane_ny", 0.0)) + "," + to_str(_scene_drag_state.get("ray_plane_nz", 0.0)) + ")" +
+      " screen_axis=(" + to_str(_scene_drag_state.get("screen_axis_x", 0.0)) + "," + to_str(_scene_drag_state.get("screen_axis_y", 0.0)) + ")" +
+      " vec_src=" + to_str(_scene_drag_state.get("drag_vec_source", "")) +
+      " vec=(" + to_str(_scene_drag_state.get("drag_vec_dx", 0.0)) + "," + to_str(_scene_drag_state.get("drag_vec_dy", 0.0)) + "," + to_str(_scene_drag_state.get("drag_vec_dz", 0.0)) + ")" +
       " ok=" + to_str(_scene_drag_state.get("ok", false)) +
       " changed=" + to_str(_scene_drag_state.get("changed", false)) +
       " edit_t=(" + to_str(active_scene.get("edit_tx", 0.0)) + "," + to_str(active_scene.get("edit_ty", 0.0)) + "," + to_str(active_scene.get("edit_tz", 0.0)) + ")"
    )
-   if(!bool(_scene_drag_state.get("ok", false))){ return false }
-   if(bool(_scene_drag_state.get("changed", false))){
+   if !bool(_scene_drag_state.get("ok", false)) { return false }
+   if bool(_scene_drag_state.get("changed", false)) {
       _scene_selection_bounds_cache_clear()
       _scene_transform_redraw(2)
    }
@@ -2408,7 +2502,7 @@ fn _scene_drag_update(x, y) bool {
 }
 
 fn _scene_drag_end() bool {
-   if(!_scene_drag_active){
+   if !_scene_drag_active {
       return false
    }
    _scene_drag_state["active"] = false
@@ -2425,7 +2519,7 @@ fn _apply_scene_fit_transform(mesh) {
 fn _trace_fit_camera_apply(any mesh, f64 fit_cam_x, f64 fit_cam_y, f64 fit_cam_z, f64 sane_cam_x, f64 sane_cam_y, f64 sane_cam_z,
    f64 sane_target_x, f64 sane_target_y, f64 sane_target_z, f64 min_x, f64 min_y, f64 min_z, f64 max_x, f64 max_y, f64 max_z,
    bool force_dump_pose, str fit_branch, f64 fit_cam_yaw, f64 fit_cam_pitch, f64 applied_fov) bool {
-   if(ui_profile.env_truthy_cached("NY_GLTF_MODEL_DEBUG") || ui_profile.env_truthy_cached("NY_UI_FITCAM_TRACE")){
+   if ui_profile.env_truthy_cached("NY_GLTF_MODEL_DEBUG") || ui_profile.env_truthy_cached("NY_UI_FITCAM_TRACE") {
       def _discard_trace_log = terminal.log("[ui] fitcam apply: name=" + _loaded_scene_name +
          " " + ui_app.app_vec3_text("source_cam", fit_cam_x, fit_cam_y, fit_cam_z) +
          " " + ui_app.app_vec3_text("applied_cam", sane_cam_x, sane_cam_y, sane_cam_z) +
@@ -2456,7 +2550,7 @@ fn _commit_fit_camera_state(sane_cam_x, sane_cam_y, sane_cam_z, fit_cam_yaw, fit
    camthreed[7] = fit_cam_pitch
    camthreed[8] = fit_cam_yaw
    camthreed[9] = fit_cam_pitch
-   if(applied_fov >= 15.0 && applied_fov <= 120.0){
+   if applied_fov >= 15.0 && applied_fov <= 120.0 {
       camthreed[16] = applied_fov
       camera.set_fov(camthreed, applied_fov)
    }
@@ -2467,7 +2561,7 @@ fn _commit_fit_camera_state(sane_cam_x, sane_cam_y, sane_cam_z, fit_cam_yaw, fit
 }
 
 fn _apply_scene_fit_camera(mesh) {
-   if(!is_dict(mesh) || !camthreed){
+   if !is_dict(mesh) || !camthreed {
       return false
    }
    def dump_pose = ui_profile.dump_pose_enabled(_auto_dump_enabled, _cli_dump_requested, _batch_dump_enabled(), _gui_dump_suite_active, _gui_probe_mode_enabled())
@@ -2479,7 +2573,7 @@ fn _apply_scene_fit_camera(mesh) {
       "cam_yaw": _cam_slot_num(6, 0.0), "cam_pitch": _cam_slot_num(7, 0.0), "cam_fov": _cam_slot_num(16, _cam_fov)
    }
    def st = camera.fit_scene_state(mesh, fit_opts)
-   if(!is_dict(st) || !st.contains("cam_x")){ return false }
+   if !is_dict(st) || !st.contains("cam_x") { return false }
    _trace_fit_camera_apply(mesh, float(st.get("fit_cam_x", 0.0)), float(st.get("fit_cam_y", 0.0)), float(st.get("fit_cam_z", 0.0)),
       float(st.get("cam_x", 0.0)), float(st.get("cam_y", 0.0)), float(st.get("cam_z", 0.0)),
       float(st.get("target_x", 0.0)), float(st.get("target_y", 0.0)), float(st.get("target_z", 0.0)),
@@ -2493,19 +2587,19 @@ fn _apply_scene_fit_camera(mesh) {
 }
 
 fn _cmd_autofit(log_result=true) {
-   if(!_active_scene_valid()){
-      if(log_result && (_loaded_scene_name.len > 0 || show_scene || _cli_scene_requested)){
+   if !_active_scene_valid() {
+      if log_result && (_loaded_scene_name.len > 0 || show_scene || _cli_scene_requested) {
          terminal.log("ERROR: no active scene")
       }
       return false
    }
    def fitted_scene = scene_engine.scene_apply_fit(active_scene)
-   if(camera.fit_camera_sane(fitted_scene)){
+   if camera.fit_camera_sane(fitted_scene) {
       active_scene = fitted_scene
-   } elif(ui_profile.env_truthy_cached("NY_GLTF_MODEL_DEBUG")){
+   } elif ui_profile.env_truthy_cached("NY_GLTF_MODEL_DEBUG") {
       terminal.log("[ui] autofit rejected invalid scene fit; preserving loader camera")
    }
-   if(ui_profile.env_truthy_cached("NY_GLTF_MODEL_DEBUG")){
+   if ui_profile.env_truthy_cached("NY_GLTF_MODEL_DEBUG") {
       terminal.log("[ui] autofit mesh: baked=" + to_str(bool(active_scene.get("gpu_model_baked", false))) +
          " fit_applied=" + to_str(bool(active_scene.get("fit_applied", false))) +
          " fit_scale=" + to_str(float(active_scene.get("fit_scale", 1.0))) +
@@ -2516,22 +2610,22 @@ fn _cmd_autofit(log_result=true) {
    _apply_scene_fit_transform(active_scene)
    _apply_scene_fit_camera(active_scene)
    _scene_selection_bounds_cache_update()
-   if(log_result){
+   if log_result {
       terminal.log("autofit: " + _loaded_scene_name)
    }
    true
 }
 
 fn _cmd_lookat(log_result=true) {
-   if(!_active_scene_valid()){
-      if(log_result && (_loaded_scene_name.len > 0 || show_scene || _cli_scene_requested)){
+   if !_active_scene_valid() {
+      if log_result && (_loaded_scene_name.len > 0 || show_scene || _cli_scene_requested) {
          terminal.log("ERROR: no active scene")
       }
       return false
    }
    _apply_scene_fit_camera(active_scene)
    _scene_selection_bounds_cache_update()
-   if(log_result){
+   if log_result {
       terminal.log("lookat: " + _loaded_scene_name)
    }
    true
@@ -2540,26 +2634,26 @@ fn _cmd_lookat(log_result=true) {
 fn _startup_exec_post_load_cmds() {
    _startup_exec_env_var("NY_UI_POST_LOAD_CMD", "post")
    mut i = 0
-   while(i < _cli_post_load_cmds.len){
+   while i < _cli_post_load_cmds.len {
       _startup_exec_line(_cli_post_load_cmds.get(i, ""), "post")
       i += 1
    }
 }
 
 fn _sync_window_size_from_live() {
-   if(!win){
+   if !win {
       return false
    }
    def fsz = win_native.get_framebuffer_size(id(win))
    mut live_w, live_h = float(fsz.get(0, _win_w)), float(fsz.get(1, _win_h))
-   if(live_w <= 0.0 || live_h <= 0.0){
+   if live_w <= 0.0 || live_h <= 0.0 {
       def wsz = size(win)
       live_w, live_h = float(wsz.get(0, _win_w)), float(wsz.get(1, _win_h))
    }
-   if(live_w <= 0.0 || live_h <= 0.0){
+   if live_w <= 0.0 || live_h <= 0.0 {
       return false
    }
-   if(live_w == _win_w && live_h == _win_h){
+   if live_w == _win_w && live_h == _win_h {
       return false
    }
    _win_w, _win_h = live_w, live_h
@@ -2569,14 +2663,14 @@ fn _sync_window_size_from_live() {
    _cross_cx_last = -9e9
    _cross_cy_last = -9e9
    set_win_size(int(_win_w), int(_win_h))
-   if(!ui_profile.headless_enabled() && !_term_open && !_scene_loading_input_guard_active() && _intended_cursor_mode == CURSOR_DISABLED){
+   if !ui_profile.headless_enabled() && !_term_open && !_scene_loading_input_guard_active() && _intended_cursor_mode == CURSOR_DISABLED {
       center_cursor(win)
    }
    true
 }
 
 fn _sync_anim_state_from_scene(mesh) {
-   if(!is_dict(mesh)){
+   if !is_dict(mesh) {
       _anim_gltf_data = 0
       _anim_count = 0
       _anim_duration = 0.0
@@ -2589,7 +2683,7 @@ fn _sync_anim_state_from_scene(mesh) {
       _skin_count = scene_engine.scene_mesh_int(mesh, "skin_count", 0)
       _morph_target_count = scene_engine.scene_mesh_int(mesh, "morph_target_count", 0)
    }
-   if(_anim_count > 1){
+   if _anim_count > 1 {
       _anim_idx = -1
    } else {
       _anim_idx = 0
@@ -2597,23 +2691,23 @@ fn _sync_anim_state_from_scene(mesh) {
    _anim_time = 0.0
    _anim_speed = 1.0
    mut autoplay = false
-   if(ui_profile.env_present_cached("NY_GLTF_AUTOPLAY")){
+   if ui_profile.env_present_cached("NY_GLTF_AUTOPLAY") {
       autoplay = ui_profile.env_toggle_cached("NY_GLTF_AUTOPLAY", false)
    } else {
       autoplay = !_batch_dump_enabled() && !_gui_dump_suite_active
    }
    _anim_enabled = (_anim_count > 0 && is_dict(_anim_gltf_data) && autoplay)
-   if(_anim_enabled && _anim_duration > 0.0001){
+   if _anim_enabled && _anim_duration > 0.0001 {
       def raw_pose_frac = ui_profile.env_trim_cached("NY_GLTF_AUTOPLAY_POSE_FRACTION")
       ;; Interactive autoplay starts from the clip start.  A mid-clip default is
       ;; useful for deterministic screenshots but misleading for live playback.
       ;; Use NY_GLTF_AUTOPLAY_POSE_FRACTION only for an explicit custom offset.
       mut pose_frac = raw_pose_frac.len > 0 ? float(str.atof(raw_pose_frac)) : 0.0
-      if(is_nan(pose_frac) || is_inf(pose_frac)){ pose_frac = 0.0 }
+      if is_nan(pose_frac) || is_inf(pose_frac) { pose_frac = 0.0 }
       pose_frac = clamp(pose_frac, 0.0, 1.0)
       _anim_time = _anim_duration * pose_frac
    }
-   if(is_dict(mesh)){
+   if is_dict(mesh) {
       mesh["anim_playing"] = _anim_enabled
       mesh["anim_idx"] = _anim_idx
       mesh["anim_time"] = _anim_time
@@ -2622,7 +2716,7 @@ fn _sync_anim_state_from_scene(mesh) {
       ;; update driver writes an explicit sampled time. Setting this true at load
       ;; freezes draw-side sampling at t=0 when the simple update path is used.
       mesh["anim_time_override"] = false
-      if(_anim_enabled){
+      if _anim_enabled {
          mesh["static_pose_gpu_ready"] = false
          mesh["parts_model_baked"] = false
          mesh["gpu_model_baked"] = false
@@ -2630,7 +2724,7 @@ fn _sync_anim_state_from_scene(mesh) {
          ;; the frame loop will use. Otherwise the load command can show a
          ;; partially posed/cached scene until the next update tick.
          def posed_mesh = scene_engine.apply_gltf_animation(mesh, _anim_idx, _anim_time)
-         if(to_int(mesh) == to_int(active_scene)){ active_scene = posed_mesh }
+         if to_int(mesh) == to_int(active_scene) { active_scene = posed_mesh }
       }
    }
 }
@@ -2644,13 +2738,13 @@ fn _clear_anim_state() {
    _anim_idx = 0
    _skin_count = 0
    _morph_target_count = 0
-   if(is_dict(active_scene)){ active_scene["anim_playing"] = false }
+   if is_dict(active_scene) { active_scene["anim_playing"] = false }
 }
 
 fn _sync_scene_anim_playing_flag() bool {
-   if(is_dict(active_scene)){
+   if is_dict(active_scene) {
       active_scene["anim_playing"] = _anim_enabled
-      if(_anim_enabled){
+      if _anim_enabled {
          active_scene["static_pose_gpu_ready"] = false
          scene_engine.scene_fast_reset(active_scene)
       }
@@ -2659,14 +2753,14 @@ fn _sync_scene_anim_playing_flag() bool {
 }
 
 fn _anim_select(idx, play=false, label="switched to") {
-   if(_anim_count <= 0 || idx < 0 || idx >= _anim_count){
+   if _anim_count <= 0 || idx < 0 || idx >= _anim_count {
       return false
    }
    _anim_idx = idx
    _anim_time = 0.0
    def ainfo = gltf.gltf_animation_info(_anim_gltf_data, _anim_idx)
    _anim_duration = float(ainfo.get("duration", 0.0))
-   if(play){
+   if play {
       _anim_enabled = true
    }
    terminal.log("[anim] " + label + " #" + to_str(_anim_idx) + " dur=" + to_str(_anim_duration) + "s")
@@ -2700,7 +2794,7 @@ fn _draw_infinite_world_grid(cam_px, cam_pz, include_axes=false) {
    gfx.set_model_matrix(M_PR)
    def coarse_x = floor(cam_px / coarse_spacing) * coarse_spacing
    def coarse_z = floor(cam_pz / coarse_spacing) * coarse_spacing
-   if(include_axes && draw_grid_pair_axes(coarse_x - fine_x, coarse_z - fine_z, 0.0 - fine_x, 0.0 - fine_z)){
+   if include_axes && draw_grid_pair_axes(coarse_x - fine_x, coarse_z - fine_z, 0.0 - fine_x, 0.0 - fine_z) {
       return true
    }
    draw_grid_pair(
@@ -2722,7 +2816,7 @@ fn _draw_infinite_world_grid(cam_px, cam_pz, include_axes=false) {
 
 fn _scene_pref_cache_update(name) {
    def key = str.strip(to_str(name))
-   if(_scene_pref_cache_name == key){
+   if _scene_pref_cache_name == key {
       return
    }
    _scene_pref_cache_name = key
@@ -2735,38 +2829,38 @@ fn _scene_pref_cache_update(name) {
 }
 
 fn _apply_batch_scene_clear_color(name) {
-   if(!ui_profile.dump_pose_enabled(_auto_dump_enabled, _cli_dump_requested, _batch_dump_enabled(), _gui_dump_suite_active, _gui_probe_mode_enabled())){
+   if !ui_profile.dump_pose_enabled(_auto_dump_enabled, _cli_dump_requested, _batch_dump_enabled(), _gui_dump_suite_active, _gui_probe_mode_enabled()) {
       return
    }
-   APP_BG = [0.045, 0.052, 0.055, 1.0]
+   APP_BG = [0.000, 0.000, 0.000, 1.0]
    set_clear_color(APP_BG)
    return
 }
 
 fn _auto_dump_ready_now() {
-   if(_scene_load_async_active() || _startup_post_load_pending){
+   if _scene_load_async_active() || _startup_post_load_pending {
       return false
    }
-   if(_loaded_scene_name.len > 0 && (!is_dict(active_scene) || !show_scene)){
+   if _loaded_scene_name.len > 0 && (!is_dict(active_scene) || !show_scene) {
       return false
    }
    true
 }
 
 fn _exec_cursor_cmd(line_l) bool {
-   if(eq(line_l, "cursor lock")){
+   if eq(line_l, "cursor lock") {
       _cursor_lock_enabled = true
       _sync_cursor_state("cmd cursor lock")
       terminal.log("Cursor lock: ON")
       return true
    }
-   if(eq(line_l, "cursor unlock")){
+   if eq(line_l, "cursor unlock") {
       _cursor_lock_enabled = false
       _sync_cursor_state("cmd cursor unlock")
       terminal.log("Cursor lock: OFF")
       return true
    }
-   if(eq(line_l, "cursor toggle") || eq(line_l, "cursor")){
+   if eq(line_l, "cursor toggle") || eq(line_l, "cursor") {
       _cursor_lock_enabled = !_cursor_lock_enabled
       _sync_cursor_state("cmd cursor toggle")
       terminal.log("Cursor lock: " + (_cursor_lock_enabled ? "ON" : "OFF"))
@@ -2776,7 +2870,7 @@ fn _exec_cursor_cmd(line_l) bool {
 }
 
 fn _exec_hash_cmd(cmd) bool {
-   if(!eq(cmd, "hash")){
+   if !eq(cmd, "hash") {
       return false
    }
    def cp, cr = camera.get_pos(camthreed), camera.get_rot(camthreed)
@@ -2787,15 +2881,15 @@ fn _exec_hash_cmd(cmd) bool {
    terminal.log(c_pos)
    terminal.log(c_rot)
    terminal.log(c_fov)
-   if(print_to_stdout){
+   if print_to_stdout {
       def _discard_hash_pos = print(c_pos)
       def _discard_hash_rot = print(c_rot)
       def _discard_hash_fov = print(c_fov)
    }
    def fb_hash_line = ui_dump.framebuffer_hash_line()
-   if(fb_hash_line.len > 0){
+   if fb_hash_line.len > 0 {
       terminal.log(fb_hash_line)
-      if(print_to_stdout){
+      if print_to_stdout {
          def _discard_fb_hash = print(fb_hash_line)
       }
    } else {
@@ -2805,15 +2899,15 @@ fn _exec_hash_cmd(cmd) bool {
 }
 
 fn _exec_snapshot_cmd(cmd, line) bool {
-   if(!eq(cmd, "snapshot")){
+   if !eq(cmd, "snapshot") {
       return false
    }
    mut path = ui_dump.path_named("snapshot_" + to_str(int(ticks())) + ".png", _cli_dump_dir)
    def space_idx = str.find(line, " ")
-   if(space_idx >= 0){
+   if space_idx >= 0 {
       path = str.strip(str.str_slice(line, space_idx + 1, line.len))
    }
-   if(path.len == 0){
+   if path.len == 0 {
       path = ui_dump.path_named("snapshot_" + to_str(int(ticks())) + ".png", _cli_dump_dir)
    }
    terminal.log(_snapshot_ok(path) ? "Snapshot saved to " + path : "ERROR: Failed to save snapshot to " + path)
@@ -2821,30 +2915,30 @@ fn _exec_snapshot_cmd(cmd, line) bool {
 }
 
 fn _exec_projection_camera_cmd(cmd, parts) bool {
-   if(eq(cmd, "ortho")){
+   if eq(cmd, "ortho") {
       _set_projection_mode(common.parse_toggle_arg(parts, is_ortho, !is_ortho))
       return true
    }
-   if(eq(cmd, "persp") || eq(cmd, "perspective")){
+   if eq(cmd, "persp") || eq(cmd, "perspective") {
       _set_projection_mode(!common.parse_toggle_arg(parts, !is_ortho, true))
       return true
    }
-   if(eq(cmd, "fov")){
-      if(parts.len > 1){
+   if eq(cmd, "fov") {
+      if parts.len > 1 {
          _cam_fov = clamp(str.atof(parts.get(1)), 15.0, 120.0)
          camera.set_fov(camthreed, _cam_fov)
          _proj_dirty = true
       }
       return true
    }
-   if(eq(cmd, "speed")){ if(parts.len > 1){ _spd = str.atof(parts.get(1)) camera.set_speed(camthreed, _spd) } return true }
-   if(eq(cmd, "sens")){ if(parts.len > 1){ _sens = str.atof(parts.get(1)) camera.set_sens(camthreed, _sens) } return true }
-   if(eq(cmd, "pos")){
+   if eq(cmd, "speed") { if parts.len > 1 { _spd = str.atof(parts.get(1)) camera.set_speed(camthreed, _spd) } return true }
+   if eq(cmd, "sens") { if parts.len > 1 { _sens = str.atof(parts.get(1)) camera.set_sens(camthreed, _sens) } return true }
+   if eq(cmd, "pos") {
       def p = camera.get_pos(camthreed)
       terminal.log(f"POS: {p.get(0):.2f}, {p.get(1):.2f}, {p.get(2):.2f}")
       return true
    }
-   if(eq(cmd, "rot")){
+   if eq(cmd, "rot") {
       def r = camera.get_rot(camthreed)
       terminal.log(f"ROT: Yaw={r.get(0):.1f} Pitch={r.get(1):.1f}")
       return true
@@ -2853,10 +2947,10 @@ fn _exec_projection_camera_cmd(cmd, parts) bool {
 }
 
 fn _exec_selection_cmd(cmd, parts) bool {
-   if(eq(cmd, "autofit") || eq(cmd, "fit")){ def _discard_16 = _cmd_autofit(true) return true }
-   if(eq(cmd, "lookat") || eq(cmd, "focus") || eq(cmd, "frame")){ def _discard_17 = _cmd_lookat(true) return true }
-   if(eq(cmd, "select")){
-      if(!_scene_editor_tools_enabled()){
+   if eq(cmd, "autofit") || eq(cmd, "fit") { def _discard_16 = _cmd_autofit(true) return true }
+   if eq(cmd, "lookat") || eq(cmd, "focus") || eq(cmd, "frame") { def _discard_17 = _cmd_lookat(true) return true }
+   if eq(cmd, "select") {
+      if !_scene_editor_tools_enabled() {
          _scene_clear_selection("cmd select ignored")
          terminal.log("Selection: editor closed")
          return true
@@ -2866,15 +2960,15 @@ fn _exec_selection_cmd(cmd, parts) bool {
       terminal.log(_scene_selected ? "Selection: scene" : "Selection: none")
       return true
    }
-   if(eq(cmd, "gizmo")){
-      if(!_scene_editor_tools_enabled()){
+   if eq(cmd, "gizmo") {
+      if !_scene_editor_tools_enabled() {
          terminal.log("Gizmo: editor closed")
          return true
       }
       def mode = str.lower(parts.get(1, ""))
-      if(eq(mode, "rotate") || eq(mode, "rot") || eq(mode, "r") || eq(mode, "1")){
+      if eq(mode, "rotate") || eq(mode, "rot") || eq(mode, "r") || eq(mode, "1") {
          _gizmo_mode = 1
-      } elif(eq(mode, "scale") || eq(mode, "s") || eq(mode, "2")){
+      } elif eq(mode, "scale") || eq(mode, "s") || eq(mode, "2") {
          _gizmo_mode = 2
       } else {
          _gizmo_mode = 0
@@ -2882,7 +2976,7 @@ fn _exec_selection_cmd(cmd, parts) bool {
       terminal.log("Gizmo: " + ui_selection.selection_gizmo_label(_gizmo_mode))
       return true
    }
-   if(eq(cmd, "deselect") || eq(cmd, "unselect")){
+   if eq(cmd, "deselect") || eq(cmd, "unselect") {
       _scene_selected = false
       _selection_overlay_clear_rects()
       _sync_cursor_state("cmd deselect")
@@ -2893,26 +2987,26 @@ fn _exec_selection_cmd(cmd, parts) bool {
 }
 
 fn _exec_render_cmd(cmd, parts) bool {
-   if(eq(cmd, "bg")){ if(parts.len >= 4){ APP_BG = [str.atof(parts.get(1)), str.atof(parts.get(2)), str.atof(parts.get(3)), 1.0] } return true }
-   if(eq(cmd, "wireframe")){
+   if eq(cmd, "bg") { if parts.len >= 4 { APP_BG = [str.atof(parts.get(1)), str.atof(parts.get(2)), str.atof(parts.get(3)), 1.0] } return true }
+   if eq(cmd, "wireframe") {
       APP_WIRE = common.parse_toggle_arg(parts, APP_WIRE, !APP_WIRE)
       set_wireframe(APP_WIRE)
       return true
    }
-   if(eq(cmd, "stats")){ APP_STATS = common.parse_toggle_arg(parts, APP_STATS, !APP_STATS) return true }
-   if(eq(cmd, "skybox")){
+   if eq(cmd, "stats") { APP_STATS = common.parse_toggle_arg(parts, APP_STATS, !APP_STATS) return true }
+   if eq(cmd, "skybox") {
       def source = parts.len > 1 ? str.strip(str.join_words(parts, " ", 1)) : ""
-      if(ui_assets.skybox_source_is_off(source)){
+      if ui_assets.skybox_source_is_off(source) {
          _reset_skybox_resources()
          skybox_enabled = false
          ui_profile.set_bool("NY_UI_PROOF_SKYBOX", false)
          terminal.log("Skybox: off")
          return true
       }
-      if(ui_assets.skybox_source_is_generated(source)){
+      if ui_assets.skybox_source_is_generated(source) {
          _reset_skybox_resources()
          ui_profile.set_bool("NY_UI_PROOF_SKYBOX", true)
-         if(_load_fast_generated_skybox(true)){
+         if _load_fast_generated_skybox(true) {
             terminal.log("Skybox: generated tex=" + to_str(skybox_tex_id))
          } else {
             terminal.log("Skybox: generated failed")
@@ -2922,7 +3016,7 @@ fn _exec_render_cmd(cmd, parts) bool {
       skybox_enabled = true
       ui_profile.set_bool("NY_UI_PROOF_SKYBOX", true)
       def ok = _load_skybox(true, source)
-      if(ok){
+      if ok {
          terminal.log("Skybox: tex=" + to_str(skybox_tex_id))
       } else {
          terminal.log("Skybox: failed")
@@ -2933,10 +3027,10 @@ fn _exec_render_cmd(cmd, parts) bool {
 }
 
 fn _exec_runtime_cmd(cmd, parts) bool {
-   if(eq(cmd, "clear")){ terminal.clear() return true }
-   if(eq(cmd, "exit")){ set_should_close(win, true) return true }
-   if(eq(cmd, "timeout")){
-      if(parts.len > 1){
+   if eq(cmd, "clear") { terminal.clear() return true }
+   if eq(cmd, "exit") { set_should_close(win, true) return true }
+   if eq(cmd, "timeout") {
+      if parts.len > 1 {
          def f64: secs = float(max(0.0, str.atof(parts.get(1))))
          _timeout_ns = int(secs * 1e9)
          terminal.log("Timeout: " + to_str(secs) + "s")
@@ -2946,7 +3040,7 @@ fn _exec_runtime_cmd(cmd, parts) bool {
       }
       return true
    }
-   if(eq(cmd, "help")){
+   if eq(cmd, "help") {
       terminal.log("CMD: skybox [path|generated|off], load, unload, autofit, lookat, anim, timeout, ortho, persp, clear, hash")
       terminal.log("CMD: snapshot, exit, fov, speed, sens, bg, pos, rot, wireframe, stats")
       return true
@@ -2955,12 +3049,12 @@ fn _exec_runtime_cmd(cmd, parts) bool {
 }
 
 fn _exec_scene_cmd(cmd, parts) bool {
-   if(eq(cmd, "load")){
+   if eq(cmd, "load") {
       def _discard_18 = _load_scene_runtime(str.join_words(parts, " ", 1), false)
       return true
    }
-   if(eq(cmd, "unload")){
-      if(is_dict(active_scene)){
+   if eq(cmd, "unload") {
+      if is_dict(active_scene) {
          scene_engine.unload_scene(active_scene, _loaded_scene_name)
       }
       active_scene = 0
@@ -2975,45 +3069,45 @@ fn _exec_scene_cmd(cmd, parts) bool {
 }
 
 fn _exec_anim_cmd(cmd, parts) bool {
-   if(!eq(cmd, "anim")){
+   if !eq(cmd, "anim") {
       return false
    }
    def sub = str.lower(parts.get(1, ""))
-   if(eq(sub, "play") || eq(sub, "on")){
+   if eq(sub, "play") || eq(sub, "on") {
       _anim_enabled = true
       def _discard_anim_sync = _sync_scene_anim_playing_flag()
       terminal.log("[anim] playing")
    }
-   elif(eq(sub, "pause") || eq(sub, "off")){
+   elif eq(sub, "pause") || eq(sub, "off") {
       _anim_enabled = false
       def _discard_anim_sync = _sync_scene_anim_playing_flag()
       terminal.log("[anim] paused")
    }
-   elif(eq(sub, "stop")){
+   elif eq(sub, "stop") {
       _anim_enabled = false
       _anim_time = 0.0
       def _discard_anim_sync = _sync_scene_anim_playing_flag()
       terminal.log("[anim] stopped")
    }
-   elif(eq(sub, "next")){
-      if(_anim_count > 0){
+   elif eq(sub, "next") {
+      if _anim_count > 0 {
          def _discard_19 = _anim_select((_anim_idx + 1) % _anim_count)
       }
    }
-   elif(eq(sub, "prev")){
-      if(_anim_count > 0){
+   elif eq(sub, "prev") {
+      if _anim_count > 0 {
          def _discard_20 = _anim_select((_anim_idx + _anim_count - 1) % _anim_count)
       }
    }
-   elif(eq(sub, "speed")){
-      if(parts.len > 2){
+   elif eq(sub, "speed") {
+      if parts.len > 2 {
          _anim_speed = str.atof(parts.get(2))
          terminal.log("[anim] speed=" + to_str(_anim_speed))
       }
    }
-   elif(sub.len > 0){
+   elif sub.len > 0 {
       def n = int(str.atof(sub))
-      if(!_anim_select(n, true, "playing")){
+      if !_anim_select(n, true, "playing") {
          terminal.log("[anim] index out of range(0.." + to_str(_anim_count - 1) + ")")
       }
    } else {
@@ -3031,27 +3125,27 @@ fn _exec_anim_cmd(cmd, parts) bool {
 fn exec_cmd(line) {
    "Execute one command line from the UI terminal."
    def line_l = str.lower(str.strip(line))
-   if(_exec_cursor_cmd(line_l)){ return }
+   if _exec_cursor_cmd(line_l) { return }
    def parts = str.split_words(line)
-   if(parts.len == 0){
+   if parts.len == 0 {
       return
    }
    def cmd = str.lower(parts.get(0, ""))
-   if(_exec_runtime_cmd(cmd, parts)){ return }
-   if(_exec_hash_cmd(cmd)){ return }
-   if(_exec_snapshot_cmd(cmd, line)){ return }
-   if(_exec_projection_camera_cmd(cmd, parts)){ return }
-   if(_exec_selection_cmd(cmd, parts)){ return }
-   if(_exec_render_cmd(cmd, parts)){ return }
-   if(_exec_scene_cmd(cmd, parts)){ return }
-   if(_exec_anim_cmd(cmd, parts)){ return }
+   if _exec_runtime_cmd(cmd, parts) { return }
+   if _exec_hash_cmd(cmd) { return }
+   if _exec_snapshot_cmd(cmd, line) { return }
+   if _exec_projection_camera_cmd(cmd, parts) { return }
+   if _exec_selection_cmd(cmd, parts) { return }
+   if _exec_render_cmd(cmd, parts) { return }
+   if _exec_scene_cmd(cmd, parts) { return }
+   if _exec_anim_cmd(cmd, parts) { return }
 }
 
 ;; ---- panel ----
 fn _browser_apply_result(res) int {
-   if(!is_dict(res)){ return 0 }
+   if !is_dict(res) { return 0 }
    def next_filter = to_str(res.get("filter", _gui_model_filter))
-   if(next_filter != _gui_model_filter || bool(res.get("filter_changed", false))){
+   if next_filter != _gui_model_filter || bool(res.get("filter_changed", false)) {
       _gui_model_filter = next_filter
       _gui_invalidate_model_filter_cache()
    }
@@ -3059,33 +3153,33 @@ fn _browser_apply_result(res) int {
    _gui_model_show_paths = bool(res.get("show_paths", _gui_model_show_paths))
    def action = to_str(res.get("action", ""))
    def model = str.strip(to_str(res.get("model", "")))
-   if(_cli_scripted_scene_load && _timeout_ns > 0 && (action == "load" || action == "unload" || action == "fit")){
-      if(action == "load" && model.len > 0){ _gui_model_selected_name = model }
+   if _cli_scripted_scene_load && _timeout_ns > 0 && (action == "load" || action == "unload" || action == "fit") {
+      if action == "load" && model.len > 0 { _gui_model_selected_name = model }
       return 0
    }
-   if(_gui_asset_load_wait_mouse_up && !gui.mouse_down()){
+   if _gui_asset_load_wait_mouse_up && !gui.mouse_down() {
       _gui_asset_load_wait_mouse_up = false
    }
-   if(action == "select" && model.len > 0){
+   if action == "select" && model.len > 0 {
       _gui_model_selected_name = model
-   } elif(action == "load" && model.len > 0){
+   } elif action == "load" && model.len > 0 {
       def press_seq = int(res.get("press_seq", 0))
-      if(!_gui_asset_load_wait_mouse_up && press_seq > _gui_last_asset_load_press_seq){
+      if !_gui_asset_load_wait_mouse_up && press_seq > _gui_last_asset_load_press_seq {
          _gui_last_asset_load_press_seq = press_seq
          def _discard_load = _queue_gui_model_load(model)
       } else {
          _gui_model_selected_name = model
       }
-   } elif(action == "unload"){
+   } elif action == "unload" {
       def _discard_unload = _queue_gui_unload_scene()
-   } elif(action == "fit"){
-      if(show_scene && is_dict(active_scene)){
+   } elif action == "fit" {
+      if show_scene && is_dict(active_scene) {
          def _discard_fit, _discard_look = _cmd_autofit(false), _cmd_lookat(false)
       }
-   } elif(action == "prefetch" && model.len > 0){
+   } elif action == "prefetch" && model.len > 0 {
       ui_assets.prefetch_gltf_asset(model)
       terminal.log("Prefetched: " + model)
-   } elif(action == "refresh"){
+   } elif action == "refresh" {
       _model_names = []
       _gui_invalidate_model_catalog_caches()
       _refresh_model_catalog()
@@ -3100,9 +3194,9 @@ fn _icon_mode_button(str id, str icon_name, bool selected, f64 w=36.0, f64 h=30.
 fn _draw_asset_mode_bar(str idp, bool compact=false) int {
    mut tab = (int(_gui_browser_tab) == 1) ? 1 : 0
    gui.text_colored("Assets", [0.82, 0.82, 0.82, 1.0])
-   if(_icon_mode_button(idp + "_mode_catalog", "asset_grid", tab == 0)){ tab = 0 }
+   if _icon_mode_button(idp + "_mode_catalog", "asset_grid", tab == 0) { tab = 0 }
    gui.same_line()
-   if(_icon_mode_button(idp + "_mode_hierarchy", "hierarchy", tab == 1)){ tab = 1 }
+   if _icon_mode_button(idp + "_mode_hierarchy", "hierarchy", tab == 1) { tab = 1 }
    gui.same_line()
    gui.text_colored(tab == 1 ? "Hierarchy" : "Catalog", compact ? [0.70, 0.70, 0.70, 0.92] : [0.76, 0.76, 0.76, 0.94])
    _gui_browser_tab = tab
@@ -3110,10 +3204,10 @@ fn _draw_asset_mode_bar(str idp, bool compact=false) int {
 }
 
 fn _browser_take_tab_shortcut(str idp, f64 win_w, f64 win_h, bool compact, bool standalone) bool {
-   if(standalone){
+   if standalone {
       _draw_asset_mode_bar(idp, compact)
       gui.separator()
-      if(_gui_browser_tab == 1){
+      if _gui_browser_tab == 1 {
          viewer_hierarchy.draw_body(idp, active_scene, win_w, win_h, false, ui_profile.parity_lock_stats_enabled())
          return true
       }
@@ -3131,7 +3225,7 @@ fn _draw_gui_asset_browser_body(str host_id, bool standalone=false) {
    def win_h = ui_app.app_window_h(host, standalone ? 450.0 : 700.0)
    def compact = win_w < 470.0
    t_prof = ui_profile.mark_next(prof, "asset_body_prep", t_prof)
-   if(_browser_take_tab_shortcut(idp, win_w, win_h, compact, standalone)){
+   if _browser_take_tab_shortcut(idp, win_w, win_h, compact, standalone) {
       ui_profile.mark_done(prof, "asset_body_shortcut", t_prof)
       return
    }
@@ -3164,7 +3258,7 @@ fn _draw_gui_asset_browser_body(str host_id, bool standalone=false) {
 }
 
 fn _draw_gui_asset_browser() {
-   if(!_gui_show_browser || _gui_show_editor){
+   if !_gui_show_browser || _gui_show_editor {
       ui_editor.show_tool("asset_browser", false)
       return
    }
@@ -3180,21 +3274,21 @@ fn _draw_gui_asset_browser() {
       450.0,
    browser_opts)
    def body = bool(tool.get(0, false))
-   if(body){
+   if body {
       def title_filter_prev = _gui_model_filter
       _gui_model_filter = gui.title_input_text("asset_title_filter", _gui_model_filter, "Search assets...", 0.0)
-      if(_gui_model_filter != title_filter_prev){
+      if _gui_model_filter != title_filter_prev {
          _gui_invalidate_model_filter_cache()
          _gui_layout_dirty = true
          _gui_layout_warm_frames = 2
       }
    }
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-browser] rect=" + ui_app.app_rect_text("asset_browser") + " body=" + to_str(body)) }
-   if(_gui_close_tool_window("asset_browser") || bool(tool.get(1, false))){
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-browser] rect=" + ui_app.app_rect_text("asset_browser") + " body=" + to_str(body)) }
+   if _gui_close_tool_window("asset_browser") || bool(tool.get(1, false)) {
       _gui_show_browser = false
       return
    }
-   if(body){
+   if body {
       _draw_gui_asset_browser_body("asset_browser", true)
    }
    ui_editor.end_tool()
@@ -3204,16 +3298,16 @@ fn _draw_gui_console_panel() {
    def res = viewer_panels.console_body(_gui_console_input, terminal.get_history())
    _gui_console_input = to_str(res.get("input", _gui_console_input))
    def action = to_str(res.get("action", ""))
-   if(action == "command"){
+   if action == "command" {
       def cmd_line = str.strip(to_str(res.get("command", "")))
-      if(cmd_line.len > 0){
+      if cmd_line.len > 0 {
          terminal.log("> " + cmd_line)
          exec_cmd(cmd_line)
          _gui_console_input = ""
       }
-   } elif(action == "clear"){ terminal.clear() }
-   elif(action == "fit"){ def _discard_fit_console = _cmd_autofit(true) }
-   elif(action == "lookat"){ def _discard_look_console = _cmd_lookat(true) }
+   } elif action == "clear" { terminal.clear() }
+   elif action == "fit" { def _discard_fit_console = _cmd_autofit(true) }
+   elif action == "lookat" { def _discard_look_console = _cmd_lookat(true) }
 }
 
 fn _editor_draw_header(rs, layout_now, active_shot, editor_w, editor_h, card_w) {
@@ -3228,20 +3322,20 @@ fn _editor_draw_header(rs, layout_now, active_shot, editor_w, editor_h, card_w) 
 }
 
 fn _editor_catalog_tab(bool dense) {
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-editor] tab_catalog") }
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] tab_catalog") }
    def prof = ui_profile.enabled()
    mut t_prof = prof ? ui_profile.now() : 0
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-editor] catalog_sanitize") }
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] catalog_sanitize") }
    _gui_sanitize_workspace_state()
    t_prof = ui_profile.mark_next(prof, "catalog_sanitize", t_prof)
    _gui_show_browser = false
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-editor] catalog_assets") }
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] catalog_assets") }
    _draw_gui_asset_browser_body("editor_main", false)
-   if(prof){ ui_profile.mark("catalog_asset_browser", t_prof) }
+   if prof { ui_profile.mark("catalog_asset_browser", t_prof) }
 }
 
 fn _editor_hierarchy_tab(bool dense) {
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-editor] tab_hierarchy") }
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] tab_hierarchy") }
    viewer_hierarchy.draw_body("editor_hierarchy", active_scene,
       ui_app.app_window_w("editor_main", 520.0),
       max(220.0, gui.remaining_h(0.0)),
@@ -3251,10 +3345,10 @@ fn _editor_hierarchy_tab(bool dense) {
 
 fn _editor_legacy_scene_tab(bool dense) {
    _editor_catalog_tab(dense)
-   if(!dense && gui.collapsing_header("scene_runtime", "Runtime", false)){
+   if !dense && gui.collapsing_header("scene_runtime", "Runtime", false) {
       APP_STATS = gui.checkbox("stats", "Stats Overlay", APP_STATS)
       def next_wire = gui.checkbox("wire", "Wireframe", APP_WIRE)
-      if(next_wire != APP_WIRE){
+      if next_wire != APP_WIRE {
          APP_WIRE = next_wire
          set_wireframe(APP_WIRE)
       }
@@ -3270,13 +3364,13 @@ fn _editor_style_tab() {
    def st = demo_editor.draw_style_tab(style_state)
    def scale0 = _gui_scale
    _gui_scale = float(st.get("scale", _gui_scale))
-   if(ui_app.app_absf(scale0 - _gui_scale) > 0.001){ _gui_scale_manual = true }
+   if ui_app.app_absf(scale0 - _gui_scale) > 0.001 { _gui_scale_manual = true }
    gui.set_scale(_gui_scale)
    _gui_layout_gap = float(st.get("gap", _gui_layout_gap))
    APP_BG = st.get("bg", APP_BG)
-   if(bool(st.get("bg_changed", false))){ set_clear_color(APP_BG) }
+   if bool(st.get("bg_changed", false)) { set_clear_color(APP_BG) }
    _gui_accent = st.get("accent", _gui_accent)
-   if(bool(st.get("accent_changed", false))){ gui.set_accent(_gui_accent) }
+   if bool(st.get("accent_changed", false)) { gui.set_accent(_gui_accent) }
 }
 
 fn _editor_layout_tab(bool dense, bool compact_header, bool compact, str layout_now, str active_shot) {
@@ -3299,7 +3393,7 @@ fn _editor_layout_tab(bool dense, bool compact_header, bool compact, str layout_
    _gui_layout_preset_name = to_str(res.get(1, _gui_layout_preset_name))
    _gui_shot_name = to_str(res.get(2, _gui_shot_name))
    _gui_layout_slot_idx = int(res.get(3, _gui_layout_slot_idx))
-   if(bool(res.get(4, false))){ _gui_layout_dirty = true }
+   if bool(res.get(4, false)) { _gui_layout_dirty = true }
    case to_str(res.get(5, "")){
       "apply_shot" -> { _gui_apply_shell_shot(_gui_shot_name) }
       "retile" -> { _gui_layout_dirty = true }
@@ -3308,7 +3402,7 @@ fn _editor_layout_tab(bool dense, bool compact_header, bool compact, str layout_
          terminal.log("Saved layout " + to_str(_gui_layout_slot_idx + 1))
       }
       "load_slot" -> {
-         if(_gui_apply_layout_state(_gui_layout_slots.get(_gui_layout_slot_idx, 0))){
+         if _gui_apply_layout_state(_gui_layout_slots.get(_gui_layout_slot_idx, 0)) {
             terminal.log("Loaded layout " + to_str(_gui_layout_slot_idx + 1))
          }
       }
@@ -3332,7 +3426,7 @@ fn _editor_layout_tab(bool dense, bool compact_header, bool compact, str layout_
 
 fn _editor_console_info_tab(bool dense, bool compact_header, bool compact, str layout_now, str active_shot) {
    _draw_gui_console_panel()
-   if(gui.remaining_h(0.0) >= 190.0){
+   if gui.remaining_h(0.0) >= 190.0 {
       gui.separator()
       _editor_layout_tab(dense, compact_header, compact, layout_now, active_shot)
    }
@@ -3349,7 +3443,7 @@ fn _editor_tab_body(bool dense, bool compact_header, bool compact, str layout_no
 }
 
 fn _draw_gui_editor() {
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-editor] begin_window") }
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] begin_window") }
    def prof = ui_profile.enabled()
    mut t_prof = prof ? ui_profile.now() : 0
    mut editor_opts = _gui_has_tiled_peer() ? _gui_pinned_tool_opts(false) : dict(2)
@@ -3358,15 +3452,15 @@ fn _draw_gui_editor() {
    def tool = ui_editor.begin_tool("editor_main", _gui_show_editor, "Editor", 20.0, 20.0, 520.0, 700.0, editor_opts)
    t_prof = ui_profile.mark_next(prof, "editor_begin_tool", t_prof)
    def body = bool(tool.get(0, false))
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-editor] body=" + to_str(body)) }
-   if(_gui_close_tool_window("editor_main", false) || bool(tool.get(1, false))){
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] body=" + to_str(body)) }
+   if _gui_close_tool_window("editor_main", false) || bool(tool.get(1, false)) {
       _gui_close_editor_shell()
       return
    }
-   if(!_gui_show_editor){
+   if !_gui_show_editor {
       return
    }
-   if(body){
+   if body {
       def rs = _gui_frame_stats_cache
       def editor_w, editor_h = ui_app.app_window_w("editor_main", 520.0), ui_app.app_window_h("editor_main", 700.0)
       def editor_metrics = demo_editor.chrome_metrics(editor_w, editor_h)
@@ -3375,32 +3469,32 @@ fn _draw_gui_editor() {
       def card_w = ui_app.app_card_w("editor_main", summary_cols, 10.0, compact ? 0.0 : 82.0)
       def last_dump_path, last_probe_text = to_str(_gui_last_dump_path), to_str(_gui_last_probe_text)
       def layout_now, active_shot = _gui_layout_preset_env(), (_gui_shot_name.len > 0) ? _gui_shot_name : "full_editor"
-      if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-editor] intro") }
+      if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] intro") }
       _gui_sanitize_workspace_state()
       def prev_visible = demo_editor.visibility_snapshot(_gui_show_gallery, _gui_show_probe, _gui_show_browser, _gui_show_profiler, _gui_show_workspace, _gui_show_graph, _gui_show_inspector)
       t_prof = ui_profile.mark_next(prof, "editor_prep", t_prof)
       _gui_editor_tab = _editor_draw_header(rs, layout_now, active_shot, editor_w, editor_h, card_w)
       t_prof = ui_profile.mark_next(prof, "editor_header", t_prof)
       gui.separator()
-      if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-editor] body") }
+      if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] body") }
       t_prof = ui_profile.mark_next(prof, "editor_tabs", t_prof)
       _editor_tab_body(dense, compact_header, compact, layout_now, active_shot)
       t_prof = ui_profile.mark_next(prof, "editor_tab_body", t_prof)
       _gui_sync_workspace_visibility()
-      if(demo_editor.visibility_changed(prev_visible, _gui_show_gallery, _gui_show_probe, _gui_show_browser, _gui_show_profiler, _gui_show_workspace, _gui_show_graph, _gui_show_inspector)){
+      if demo_editor.visibility_changed(prev_visible, _gui_show_gallery, _gui_show_probe, _gui_show_browser, _gui_show_profiler, _gui_show_workspace, _gui_show_graph, _gui_show_inspector) {
          _gui_layout_dirty = true
          _gui_layout_warm_frames = 4
       }
       demo_editor.draw_footer(last_dump_path, last_probe_text, ui_profile.gui_trace_enabled(), editor_w)
-      if(prof){ ui_profile.mark("editor_footer", t_prof) }
+      if prof { ui_profile.mark("editor_footer", t_prof) }
    }
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-editor] end_window") }
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] end_window") }
    ui_editor.end_tool()
 }
 
 fn _apply_tool_close_state(st, break_dock=true) bool {
-   if(!bool(st.get("closed", false))){ return false }
-   if(break_dock && _gui_workspace_mode == 1){ _gui_workspace_mode = 0 }
+   if !bool(st.get("closed", false)) { return false }
+   if break_dock && _gui_workspace_mode == 1 { _gui_workspace_mode = 0 }
    _gui_layout_dirty = true
    _gui_layout_warm_frames = 4
    true
@@ -3423,8 +3517,8 @@ fn _draw_gui_gallery(phase) {
    _gui_demo_progress, _gui_demo_float, _gui_accent =
    float(st.get("progress", _gui_demo_progress)), float(st.get("float", _gui_demo_float)), st.get("accent", _gui_accent)
    def action = to_str(st.get("action", ""))
-   if(action == "primary"){ terminal.log("Primary button clicked") }
-   elif(action == "small"){ terminal.log("Small button clicked") }
+   if action == "primary" { terminal.log("Primary button clicked") }
+   elif action == "small" { terminal.log("Small button clicked") }
    _apply_tool_close_state(st)
 }
 
@@ -3434,7 +3528,7 @@ fn _draw_gui_graph() {
    def st = viewer_tools.draw_graph(graph_state)
    _gui_show_graph, _gui_graph_nodes, _gui_graph_links =
    bool(st.get("show", _gui_show_graph)), st.get("nodes", _gui_graph_nodes), st.get("links", _gui_graph_links)
-   if(to_str(st.get("action", "")) == "reset_graph"){ _gui_init_editor_graph() }
+   if to_str(st.get("action", "")) == "reset_graph" { _gui_init_editor_graph() }
    _apply_tool_close_state(st)
 }
 
@@ -3442,7 +3536,7 @@ fn _inspector_state(any rs, int part_count, int mat_mask) any {
    _scene_pref_cache_update(_loaded_scene_name)
    mut display_rs = rs
    mut display_part_count = part_count
-   if(ui_profile.parity_lock_stats_enabled()){
+   if ui_profile.parity_lock_stats_enabled() {
       display_rs = {
          "draws": 0, "dynamic_draws": 0, "static_draws": 0, "indexed_draws": 0,
          "flushes": 0, "pipeline_binds": 0, "descriptor_binds": 0, "submitted_vertices": 0
@@ -3453,7 +3547,7 @@ fn _inspector_state(any rs, int part_count, int mat_mask) any {
    def selected_part_idx = viewer_hierarchy.selected_part()
    def selected_part_mat_idx = viewer_hierarchy.selected_material()
    mut selected_material_idx = _gui_material_selected_idx
-   if(selected_part_idx >= 0 && selected_part_idx != _gui_material_selected_part_idx && selected_part_mat_idx >= 0){
+   if selected_part_idx >= 0 && selected_part_idx != _gui_material_selected_part_idx && selected_part_mat_idx >= 0 {
       selected_material_idx = selected_part_mat_idx
       _gui_material_selected_idx = selected_material_idx
       _gui_material_selected_part_idx = selected_part_idx
@@ -3505,12 +3599,12 @@ fn _inspector_state(any rs, int part_count, int mat_mask) any {
 }
 
 fn _apply_inspector_result(st) any {
-   if(!is_dict(st)){ return 0 }
+   if !is_dict(st) { return 0 }
    def old_msaa, old_vsync, old_filter = APP_MSAA, APP_VSYNC, APP_FILTER_LINEAR
    _gui_inspector_tab = int(st.get("tab", _gui_inspector_tab))
    def old_anim_enabled = _anim_enabled
    _anim_enabled = bool(st.get("anim_enabled", _anim_enabled))
-   if(old_anim_enabled != _anim_enabled){
+   if old_anim_enabled != _anim_enabled {
       def _discard_anim_sync = _sync_scene_anim_playing_flag()
    }
    _anim_speed = float(st.get("anim_speed", _anim_speed))
@@ -3521,10 +3615,10 @@ fn _apply_inspector_result(st) any {
    _gizmo_snap = bool(st.get("gizmo_snap", _gizmo_snap))
    _gizmo_precise = bool(st.get("gizmo_precise", _gizmo_precise))
    _gizmo_ruler = bool(st.get("gizmo_ruler", _gizmo_ruler))
-   if(old_gizmo_mode != _gizmo_mode || old_gizmo_axis != _gizmo_axis ||
+   if (old_gizmo_mode != _gizmo_mode || old_gizmo_axis != _gizmo_axis ||
       old_gizmo_snap != _gizmo_snap || old_gizmo_precise != _gizmo_precise ||
    old_gizmo_ruler != _gizmo_ruler){ _scene_edit_redraw(2) }
-   if(bool(st.get("transform_changed", false)) && is_dict(active_scene)){
+   if bool(st.get("transform_changed", false)) && is_dict(active_scene) {
       active_scene["edit_tx"] = float(st.get("edit_tx", active_scene.get("edit_tx", 0.0)))
       active_scene["edit_ty"] = float(st.get("edit_ty", active_scene.get("edit_ty", 0.0)))
       active_scene["edit_tz"] = float(st.get("edit_tz", active_scene.get("edit_tz", 0.0)))
@@ -3538,10 +3632,10 @@ fn _apply_inspector_result(st) any {
       _scene_selection_bounds_cache_clear()
       _scene_edit_redraw(3)
    }
-   if(bool(st.get("selection_changed", false))){
+   if bool(st.get("selection_changed", false)) {
       _scene_selected = bool(st.get("scene_selected", _scene_selected)) && is_dict(active_scene) && show_scene && _scene_editor_tools_enabled()
       _scene_selection_rect = bool(st.get("selection_rect", _scene_selection_rect))
-      if(_scene_selected){
+      if _scene_selected {
          _scene_selection_bounds_cache_update()
          _scene_edit_redraw(2)
       } else {
@@ -3556,17 +3650,17 @@ fn _apply_inspector_result(st) any {
    _rmb_look_sens_mul = float(st.get("rmb_sens", _rmb_look_sens_mul))
    _drag, _damp = float(st.get("drag", _drag)), float(st.get("damp", _damp))
    _ortho_zoom = float(st.get("ortho_zoom", _ortho_zoom))
-   if(bool(st.get("projection_changed", false))){ _set_projection_mode(bool(st.get("is_ortho", is_ortho))) }
-   if(bool(st.get("camera_changed", false))){ _gui_apply_camera_state() }
+   if bool(st.get("projection_changed", false)) { _set_projection_mode(bool(st.get("is_ortho", is_ortho))) }
+   if bool(st.get("camera_changed", false)) { _gui_apply_camera_state() }
    APP_STATS = bool(st.get("stats", APP_STATS))
-   if(bool(st.get("wire_changed", false))){ APP_WIRE = bool(st.get("wire", APP_WIRE)) set_wireframe(APP_WIRE) }
+   if bool(st.get("wire_changed", false)) { APP_WIRE = bool(st.get("wire", APP_WIRE)) set_wireframe(APP_WIRE) }
    show_scene = bool(st.get("show_scene", show_scene))
-   if(bool(st.get("cursor_changed", false))){ _cursor_lock_enabled = bool(st.get("cursor_lock", _cursor_lock_enabled)) _sync_cursor_state("inspect cursor lock") }
+   if bool(st.get("cursor_changed", false)) { _cursor_lock_enabled = bool(st.get("cursor_lock", _cursor_lock_enabled)) _sync_cursor_state("inspect cursor lock") }
    _gui_material_selected_idx = int(st.get("selected_material", _gui_material_selected_idx))
    _gui_material_selected_part_idx = int(st.get("selected_part", _gui_material_selected_part_idx))
-   if(bool(st.get("material_changed", false)) && is_dict(active_scene)){
+   if bool(st.get("material_changed", false)) && is_dict(active_scene) {
       def tweak = st.get("material_tweak", dict(0))
-      if(is_dict(tweak)){
+      if is_dict(tweak) {
          active_scene = scene_engine.scene_apply_material_tweak(active_scene,
             int(tweak.get("mat_idx", -1)),
             tweak,
@@ -3575,30 +3669,30 @@ fn _apply_inspector_result(st) any {
       }
    }
    APP_BG = st.get("bg", APP_BG)
-   if(bool(st.get("bg_changed", false))){ set_clear_color(APP_BG) }
+   if bool(st.get("bg_changed", false)) { set_clear_color(APP_BG) }
    def scale0 = _gui_scale
    _gui_scale = float(st.get("gui_scale", _gui_scale))
-   if(bool(st.get("scale_changed", false)) || ui_app.app_absf(scale0 - _gui_scale) > 0.001){ _gui_scale_manual = true }
+   if bool(st.get("scale_changed", false)) || ui_app.app_absf(scale0 - _gui_scale) > 0.001 { _gui_scale_manual = true }
    gui.set_scale(_gui_scale)
    def gap0 = _gui_layout_gap
    _gui_layout_gap = float(st.get("layout_gap", _gui_layout_gap))
    _gui_workspace_grid = float(st.get("workspace_grid", _gui_workspace_grid))
    _gui_workspace_major = int(st.get("workspace_major", _gui_workspace_major))
-   if(bool(st.get("layout_changed", false)) || ui_app.app_absf(gap0 - _gui_layout_gap) > 0.001){ _gui_layout_dirty = true _gui_layout_warm_frames = 4 }
+   if bool(st.get("layout_changed", false)) || ui_app.app_absf(gap0 - _gui_layout_gap) > 0.001 { _gui_layout_dirty = true _gui_layout_warm_frames = 4 }
    _gui_env_mode = int(st.get("env_mode", _gui_env_mode))
    skybox_enabled = bool(st.get("skybox_enabled", skybox_enabled))
    APP_MSAA = int(st.get("msaa", APP_MSAA))
    APP_VSYNC = bool(st.get("vsync", APP_VSYNC))
    APP_FILTER_LINEAR = bool(st.get("filter_linear", APP_FILTER_LINEAR))
-   if(APP_MSAA != old_msaa){ terminal.log("MSAA queued for next renderer init: " + to_str(APP_MSAA)) }
-   if(APP_VSYNC != old_vsync){ terminal.log("VSync queued for next renderer init: " + (APP_VSYNC ? "on" : "off")) }
-   if(APP_FILTER_LINEAR != old_filter){ terminal.log("Texture filter queued for next renderer init: " + (APP_FILTER_LINEAR ? "on" : "off")) }
+   if APP_MSAA != old_msaa { terminal.log("MSAA queued for next renderer init: " + to_str(APP_MSAA)) }
+   if APP_VSYNC != old_vsync { terminal.log("VSync queued for next renderer init: " + (APP_VSYNC ? "on" : "off")) }
+   if APP_FILTER_LINEAR != old_filter { terminal.log("Texture filter queued for next renderer init: " + (APP_FILTER_LINEAR ? "on" : "off")) }
    case to_str(st.get("action", "")){
       "autofit" -> { def _discard_48 = _cmd_autofit(true) }
       "lookat" -> { def _discard_49 = _cmd_lookat(true) }
       "unload" -> { def _discard_unload = _queue_gui_unload_scene() }
       "reset_transform" -> {
-         if(is_dict(active_scene)){
+         if is_dict(active_scene) {
             active_scene["edit_tx"] = 0.0
             active_scene["edit_ty"] = 0.0
             active_scene["edit_tz"] = 0.0
@@ -3626,19 +3720,19 @@ fn _draw_gui_inspector() {
    def inspector_opts = _gui_show_editor ? _gui_pinned_tool_opts(true) : dict(0)
    def tool = ui_editor.begin_tool("inspector", _gui_show_inspector, "Inspector", 860.0, 20.0, 390.0, 430.0, inspector_opts)
    def body = bool(tool.get(0, false))
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-inspector] rect=" + ui_app.app_rect_text("inspector") + " body=" + to_str(body)) }
-   if(_gui_close_tool_window("inspector") || bool(tool.get(1, false))){
-      if(_gui_show_editor && _gui_workspace_mode == 1){
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-inspector] rect=" + ui_app.app_rect_text("inspector") + " body=" + to_str(body)) }
+   if _gui_close_tool_window("inspector") || bool(tool.get(1, false)) {
+      if _gui_show_editor && _gui_workspace_mode == 1 {
          _gui_close_editor_shell()
       } else {
          _gui_show_inspector = false
       }
       return
    }
-   if(!_gui_show_inspector){
+   if !_gui_show_inspector {
       return
    }
-   if(body){
+   if body {
       def rs = _gui_frame_stats_cache
       def part_count = _gui_scene_parts_cache
       def mat_mask = (is_dict(active_scene)) ? int(active_scene.get("material_feature_mask", 0)) : 0
@@ -3656,7 +3750,7 @@ fn _draw_gui_probe() {
    def st = viewer_tools.draw_probe(probe_state)
    _gui_show_probe = bool(st.get("show", _gui_show_probe))
    def action = to_str(st.get("action", ""))
-   if(action == "refresh"){
+   if action == "refresh" {
       _gui_last_probe_text = ui_diag.probe_text()
       terminal.log(_gui_last_probe_text)
    }
@@ -3692,13 +3786,13 @@ fn _prepare_gui_overlay_pass() {
 }
 
 fn _draw_editor_backdrop(phase, ww, wh) {
-   if(!_gui_enabled_now()){
+   if !_gui_enabled_now() {
       return
    }
-   if(is_dict(active_scene) && show_scene){
+   if is_dict(active_scene) && show_scene {
       return
    }
-   if(!_gui_probe_mode_enabled()){
+   if !_gui_probe_mode_enabled() {
       return
    }
    viewer_overlay.draw_backdrop(float(ww), float(wh), 0.86)
@@ -3706,7 +3800,7 @@ fn _draw_editor_backdrop(phase, ww, wh) {
 }
 
 fn _draw_loading_overlay(phase, ww, wh) {
-   if(!_scene_load_async_active() || _proof_dump_active()){
+   if !_scene_load_async_active() || _proof_dump_active() {
       return
    }
    _prepare_gui_overlay_pass()
@@ -3715,7 +3809,7 @@ fn _draw_loading_overlay(phase, ww, wh) {
 }
 
 fn _draw_runtime_stats_overlay_fast(reuse_color=false) {
-   if(!APP_STATS || _proof_dump_active() || _gui_enabled_now() || _batch_dump_enabled() || _auto_dump_enabled == 1 || _pending_auto_dump){
+   if !APP_STATS || _proof_dump_active() || _gui_enabled_now() || _batch_dump_enabled() || _auto_dump_enabled == 1 || _pending_auto_dump {
       return
    }
    viewer_overlay.draw_fps(_ui_font(), int(fps), bool(reuse_color))
@@ -3723,10 +3817,10 @@ fn _draw_runtime_stats_overlay_fast(reuse_color=false) {
 }
 
 fn _draw_runtime_overlay_after_world(reuse_color=false) {
-   if(!APP_STATS){
+   if !APP_STATS {
       return
    }
-   if(viewer_overlay.fps_skip_reuse(bool(reuse_color), int(fps))){
+   if viewer_overlay.fps_skip_reuse(bool(reuse_color), int(fps)) {
       return
    }
    _prepare_gui_overlay_pass()
@@ -3737,8 +3831,8 @@ fn _draw_ui(phase, term_open) {
    def ww = _win_w
    def wh = _win_h
    def chrome_on = _chrome_visible()
-   if(!chrome_on){
-      if(term_open){
+   if !chrome_on {
+      if term_open {
          terminal.draw(ww, wh, phase)
       }
       return
@@ -3746,23 +3840,23 @@ fn _draw_ui(phase, term_open) {
    def gui_now = _gui_enabled_now()
    def loading_now = _scene_load_async_active() && !_proof_dump_active()
    def crosshair_now = ui_profile.crosshair_enabled() && !term_open && !_proof_dump_active() && !gui_now
-   if(!gui_now && !term_open && !loading_now && !APP_STATS && !crosshair_now){
+   if !gui_now && !term_open && !loading_now && !APP_STATS && !crosshair_now {
       gui.set_enabled(false)
       return
    }
    _prepare_gui_overlay_pass()
-   if(gui_now || term_open || loading_now){
+   if gui_now || term_open || loading_now {
       _draw_editor_backdrop(phase, ww, wh)
       _draw_editor_gui(phase)
-      if(term_open){
+      if term_open {
          terminal.draw(ww, wh, phase)
       }
-      if(loading_now){
+      if loading_now {
          _draw_loading_overlay(phase, ww, wh)
       }
    }
    _draw_runtime_stats_overlay_fast()
-   if(crosshair_now){
+   if crosshair_now {
       def center = viewer_overlay.draw_crosshair(float(ww), float(wh), _crosshair_mesh, M_cross_t, _cross_cx_last, _cross_cy_last)
       _cross_cx_last = float(center.get(0, _cross_cx_last))
       _cross_cy_last = float(center.get(1, _cross_cy_last))
@@ -3771,24 +3865,24 @@ fn _draw_ui(phase, term_open) {
 }
 
 fn _prepare_static_world_visual_fast() bool {
-   if(_scene_deform_blocks_static()){ return false }
+   if _scene_deform_blocks_static() { return false }
    _scene_pref_cache_update(_loaded_scene_name)
-   if(_scene_pref_studio || _scene_pref_neutral || _scene_pref_reflect ||
+   if (_scene_pref_studio || _scene_pref_neutral || _scene_pref_reflect ||
       _scene_pref_visible || _scene_pref_optical || _scene_pref_black_visible){
       return false
    }
    def proof_sky = _proof_dump_active() && ui_profile.env_truthy_cached("NY_UI_PROOF_SKYBOX")
-   if((skybox_enabled || proof_sky) && skybox_tex_id < 0 && !_ensure_visible_skybox_ready()){
+   if (skybox_enabled || proof_sky) && skybox_tex_id < 0 && !_ensure_visible_skybox_ready() {
       return false
    }
    _static_world_draw_sky = (skybox_enabled || proof_sky) && skybox_tex_id >= 0
    _ui_update_projection_fast()
    gfx.set_view_proj(M_VP)
    gfx.set_cam_pos(_cam_px_cache, _cam_py_cache, _cam_pz_cache)
-   if(ui_profile.env_truthy_cached("NY_UI_DISABLE_ENV")){
+   if ui_profile.env_truthy_cached("NY_UI_DISABLE_ENV") {
       gfx.set_env_tex(-1)
       gfx.set_env_spec_tex(-1)
-   } elif(ui_profile.env_truthy_cached("NY_UI_DISABLE_ENV_SPEC")){
+   } elif ui_profile.env_truthy_cached("NY_UI_DISABLE_ENV_SPEC") {
       gfx.set_env_tex(skybox_tex_id)
       gfx.set_env_spec_tex(-1)
    } else {
@@ -3799,7 +3893,7 @@ fn _prepare_static_world_visual_fast() bool {
 }
 
 fn _draw_static_world_visual_fast(load_color=false) {
-   if(_static_world_draw_sky && !load_color){
+   if _static_world_draw_sky && !load_color {
       gfx.set_view_proj(M_VP_SKY)
       gfx.set_model_matrix(M_ID)
       _render_draw_skybox(skybox_tex_id)
@@ -3809,24 +3903,24 @@ fn _draw_static_world_visual_fast(load_color=false) {
 }
 
 fn _static_world_skip_draw_now(load_color=false) bool {
-   if(!load_color){ return false }
-   if(!_static_world_present_reuse_allowed(load_color) && _ui_view_input_active()){ return false }
+   if !load_color { return false }
+   if !_static_world_present_reuse_allowed(load_color) && _ui_view_input_active() { return false }
    _last_world_ms = 0.0
    _last_ui_ms = 0.0
    true
 }
 
 fn _draw_active_scene_fast_or_fallback() bool {
-   if(!is_dict(active_scene) || !show_scene){
+   if !is_dict(active_scene) || !show_scene {
       return false
    }
    def draw_trace = ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE")
-   if(draw_trace){
+   if draw_trace {
       def scene_gpu_slab_ready = to_int(active_scene.get("gpu_parts_slab", 0)) != 0
       mut scene_state_count = 0
       mut scene_state_slab = false
       def scene_gpu_state = active_scene.get("gpu_draw_state", 0)
-      if(is_list(scene_gpu_state) && scene_gpu_state.len >= 2){
+      if is_list(scene_gpu_state) && scene_gpu_state.len >= 2 {
          scene_state_slab = to_int(scene_gpu_state.get(0, 0)) != 0
          scene_state_count = int(scene_gpu_state.get(1, 0))
       }
@@ -3836,10 +3930,10 @@ fn _draw_active_scene_fast_or_fallback() bool {
          " state_slab=" + to_str(scene_state_slab) +
       " state_count=" + to_str(scene_state_count))
    }
-   if(!_scene_deform_blocks_static() && scene_engine.scene_fast_draw(active_scene, _active_scene_model_matrix(), draw_trace)){
+   if !_scene_deform_blocks_static() && scene_engine.scene_fast_draw(active_scene, _active_scene_model_matrix(), draw_trace) {
       return true
    }
-   if(draw_trace){ ui_profile.print_text("[ui:scene-draw] fast path missed; falling back") }
+   if draw_trace { ui_profile.print_text("[ui:scene-draw] fast path missed; falling back") }
    _set_active_scene_model_matrix()
    gfx.reset_overlay_state()
    gfx.set_unlit(false)
@@ -3853,14 +3947,14 @@ fn draw(phase, term_open) {
 }
 
 fn _gui_frame_trace(bool on, msg) bool {
-   if(!on){ return false }
+   if !on { return false }
    ui_profile.print_text("[ui:gui-frame] " + to_str(msg))
 }
 
 fn _draw_editor_gui(phase) {
    def gui_enabled = _gui_enabled_now()
    gui.set_enabled(gui_enabled)
-   if(!gui_enabled){
+   if !gui_enabled {
       return
    }
    def gui_trace = ui_profile.gui_trace_enabled()
@@ -3879,46 +3973,46 @@ fn _draw_editor_gui(phase) {
    gui.set_fonts(_ui_font(), _ui_title_font(), _ui_small_font())
    gui.begin_frame(0, _ui_font(), _win_w, _win_h)
    _gui_apply_tiled_layout(false)
-   if(_gui_show_editor){
+   if _gui_show_editor {
       _gui_frame_trace(gui_trace, "editor")
       _draw_gui_editor()
    }
-   if(_gui_show_profiler){
+   if _gui_show_profiler {
       _gui_frame_trace(gui_trace, "profiler")
       _draw_gui_profiler()
    }
-   if(_gui_show_workspace){
+   if _gui_show_workspace {
       _gui_frame_trace(gui_trace, "workspace")
       _draw_gui_workspace()
    }
-   if(_gui_show_graph){
+   if _gui_show_graph {
       _gui_frame_trace(gui_trace, "graph")
       _draw_gui_graph()
    }
-   if(_gui_show_inspector){
+   if _gui_show_inspector {
       _gui_frame_trace(gui_trace, "inspector")
       _draw_gui_inspector()
    }
-   if(_gui_show_gallery){
+   if _gui_show_gallery {
       _gui_frame_trace(gui_trace, "gallery")
       _draw_gui_gallery(phase)
    }
-   if(_gui_show_probe){
+   if _gui_show_probe {
       _gui_frame_trace(gui_trace, "probe")
       _draw_gui_probe()
    }
-   if(_gui_show_browser && !_gui_show_editor){
+   if _gui_show_browser && !_gui_show_editor {
       _gui_frame_trace(gui_trace, "browser")
       _draw_gui_asset_browser()
    }
    _gui_frame_trace(gui_trace, "end_frame")
    gui.end_frame()
-   if(parity_editor_compact){
+   if parity_editor_compact {
       def rs_after = renderer_frame_stats()
       def sig =
       ui_app.app_renderer_stats_line(rs_before, true, true) + "|" +
       ui_app.app_renderer_stats_line(rs_after, true, true)
-      if(sig != _last_editor_parity_sig){
+      if sig != _last_editor_parity_sig {
          _last_editor_parity_sig = sig
          def _discard_66 = ui_profile.print_text("[parity:editor] shot=editor_scene_compact begin " +
          ui_app.app_renderer_stats_line(rs_before, true, true))
@@ -3926,7 +4020,7 @@ fn _draw_editor_gui(phase) {
          ui_app.app_renderer_stats_line(rs_after, true, true))
       }
    }
-   if(gui_trace){
+   if gui_trace {
       def gui_vo1 = _render_vertex_offset()
       _gui_frame_trace(gui_trace, "verts_added=" + to_str(gui_vo1 - gui_vo0))
    }
@@ -3938,8 +4032,8 @@ fn _idle_opts(gui_now_frame, want_auto_capture=false) dict {
    def static_pose_ready = _scene_static_pose_gpu_ready() || _scene_deform_idle_ready()
    def any: opts = {
       "enabled": true,
-      "warmup": ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_WARMUP", 2, 2, 128),
-      "redraw_interval": ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_REDRAW_INTERVAL", 120, 0, 1000000),
+      "warmup": ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_WARMUP", 1, 0, 128),
+      "redraw_interval": ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_REDRAW_INTERVAL", 300, 0, 1000000),
       "trace": ui_profile.env_truthy_cached("NY_UI_GUI_IDLE_REUSE_TRACE"),
       "gui_frame": bool(gui_now_frame),
       "gui_visible": _gui_visible,
@@ -3958,7 +4052,7 @@ fn _idle_opts(gui_now_frame, want_auto_capture=false) dict {
       "projection_dirty": _proj_dirty,
       "async_load": _scene_load_async_active(),
       "startup_load": _startup_post_load_pending,
-      "dynamic_active": _gui_show_gallery || _gui_show_probe || _gui_show_profiler,
+      "dynamic_active": _gui_show_gallery || _gui_show_probe || _gui_show_profiler || _gui_asset_load_wait_mouse_up,
       "animated": _anim_enabled,
       "static_pose_ready": static_pose_ready,
       "animation_count": static_pose_ready ? 0 : _anim_count,
@@ -3981,7 +4075,7 @@ fn note_full_draw(gui_now_frame, want_auto_capture=false) {
 }
 
 fn try_present(gui_now_frame, want_auto_capture=false) bool {
-   if(!ui_idle.try_present(_idle_opts(gui_now_frame, want_auto_capture))){ return false }
+   if !ui_idle.try_present(_idle_opts(gui_now_frame, want_auto_capture)) { return false }
    _last_world_ms = 0.0
    _last_ui_ms = 0.0
    true
@@ -4002,6 +4096,8 @@ mut bool: _middle_mouse_active = false
 mut int: _middle_mouse_suppress_scroll_until_ns = 0
 mut int: _mouse_delta_suppress_until_ns = 0
 mut int: _mouse_look_trace_count = 0
+mut int: _app_drag_trace_count = 0
+mut int: _app_pick_trace_count = 0
 mut int: _mouse_look_raw_until_ns = 0
 mut int: _mouse_look_last_event_ns = 0
 mut int: _mouse_look_last_frame = -1
@@ -4015,20 +4111,20 @@ def int: _CURSOR_TRANSITION_SUPPRESS_NS = 16000000
 
 fn _camera_sim_dt(any dt) f64 {
    mut raw = float(dt)
-   if(raw <= 0.0){ raw = 0.0001 }
+   if raw <= 0.0 { raw = 0.0001 }
    def max_ms = ui_profile.env_int_cached("NY_UI_CAMERA_DT_MAX_MS", 33, 8, 100)
    def min_ms = ui_profile.env_int_cached("NY_UI_CAMERA_DT_MIN_MS", 1, 0, 16)
    mut lo = float(min_ms) / 1000.0
    mut hi = float(max_ms) / 1000.0
-   if(lo < 0.0001){ lo = 0.0001 }
-   if(hi < lo){ hi = lo }
+   if lo < 0.0001 { lo = 0.0001 }
+   if hi < lo { hi = lo }
    raw = clamp(raw, lo, hi)
    def smooth_pct = ui_profile.env_int_cached("NY_UI_CAMERA_DT_SMOOTH_PCT", 35, 0, 100)
-   if(smooth_pct <= 0){
+   if smooth_pct <= 0 {
       _camera_sim_dt_smooth = raw
       return raw
    }
-   if(_camera_sim_dt_smooth <= 0.0){
+   if _camera_sim_dt_smooth <= 0.0 {
       _camera_sim_dt_smooth = raw
       return raw
    }
@@ -4038,11 +4134,20 @@ fn _camera_sim_dt(any dt) f64 {
 }
 
 fn _app_input_trace(str msg) bool {
-   if(!ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){ return false }
+   if !ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") { return false }
+   def is_drag = str.startswith(msg, "drag ") || str.startswith(msg, "pick ") || str.startswith(msg, "scene ")
+   if is_drag {
+      def drag_limit = ui_profile.env_int_cached("NY_UI_DRAG_TRACE_LIMIT", 240, 0, 1000000)
+      if _app_drag_trace_count >= drag_limit { return false }
+      _app_drag_trace_count += 1
+      ui_profile.eprint_text("[ui:input] " + msg)
+      return true
+   }
    def limit = ui_profile.env_int_cached("NY_UI_APP_INPUT_TRACE_LIMIT", 80, 0, 1000000)
-   if(_mouse_look_trace_count >= limit){ return false }
+   if _mouse_look_trace_count >= limit { return false }
    _mouse_look_trace_count += 1
    ui_profile.eprint_text("[ui:input] " + msg)
+   true
 }
 
 fn _ui_begin_hotkey_text_suppress() {
@@ -4050,10 +4155,10 @@ fn _ui_begin_hotkey_text_suppress() {
 }
 
 fn _ui_consume_hotkey_text_spill(typ) {
-   if(typ != EVENT_KEY_CHAR){ return false }
-   if(_hotkey_text_suppress_until_ns <= 0){ return false }
+   if typ != EVENT_KEY_CHAR { return false }
+   if _hotkey_text_suppress_until_ns <= 0 { return false }
    def now = ticks()
-   if(now <= _hotkey_text_suppress_until_ns){
+   if now <= _hotkey_text_suppress_until_ns {
       _hotkey_text_suppress_until_ns = 0
       _dbg_ui("[ui:key] consumed hotkey text spill")
       return true
@@ -4064,11 +4169,11 @@ fn _ui_consume_hotkey_text_spill(typ) {
 
 fn _app_poll_f1_hotkey() bool {
    def f1_down = key_down(win, uin.KEY_F1)
-   if(_hotkey_f1_down){
-      if(!f1_down){ _hotkey_f1_down = false }
+   if _hotkey_f1_down {
+      if !f1_down { _hotkey_f1_down = false }
       return f1_down
    }
-   if(f1_down && !_hotkey_f1_down){
+   if f1_down && !_hotkey_f1_down {
       _hotkey_f1_down = true
       def _discard_f1 = _hotkey_toggle_editor()
       _suppress_mouse_deltas(_CURSOR_TRANSITION_SUPPRESS_NS)
@@ -4079,27 +4184,27 @@ fn _app_poll_f1_hotkey() bool {
 
 fn _ui_handle_menu_hotkey(typ, data, fast=false) bool {
    _ui_set_update_stage("hotkey.menu.start")
-   if(typ != EVENT_KEY_PRESSED && typ != EVENT_KEY_RELEASED){ return false }
+   if typ != EVENT_KEY_PRESSED && typ != EVENT_KEY_RELEASED { return false }
    _ui_set_update_stage("hotkey.menu.data")
-   if(!is_dict(data)){ return false }
+   if !is_dict(data) { return false }
    _ui_set_update_stage("hotkey.menu.key")
    def fn_key = uin.event_function_key(data)
    def k = fn_key > 0 ? fn_key : uin.event_key(data)
-   if(k == 0){ return false }
+   if k == 0 { return false }
    def is_f1 = k == uin.KEY_F1
    _ui_set_update_stage("hotkey.menu.range")
-   if(!uin.is_function_key(k)){ return false }
+   if !uin.is_function_key(k) { return false }
    _ui_set_update_stage("hotkey.menu.release")
-   if(typ == EVENT_KEY_RELEASED){
-      if(is_f1){ _hotkey_f1_down = false }
+   if typ == EVENT_KEY_RELEASED {
+      if is_f1 { _hotkey_f1_down = false }
       return viewer_keyboard.is_viewer_menu_hotkey(k)
    }
    _ui_set_update_stage("hotkey.menu.suppress")
    _ui_begin_hotkey_text_suppress()
    _ui_set_update_stage("hotkey.menu.action")
    def action = int(data.get("action", 1))
-   if(is_f1){
-      if(action != 2 && !_hotkey_f1_down){
+   if is_f1 {
+      if action != 2 && !_hotkey_f1_down {
          _hotkey_f1_down = true
          _ui_set_update_stage("hotkey.menu.f1")
          _hotkey_toggle_editor()
@@ -4107,12 +4212,12 @@ fn _ui_handle_menu_hotkey(typ, data, fast=false) bool {
       }
       return true
    }
-   if(action == 2){ return false }
+   if action == 2 { return false }
    case k {
       uin.KEY_F3 -> {
          _gui_visible = !_gui_visible
          _invalidate_chrome_frame(4)
-         if(_gui_visible){
+         if _gui_visible {
             _clear_camera_input_state()
             gui.suppress_mouse_clicks(4, true)
          }
@@ -4121,7 +4226,7 @@ fn _ui_handle_menu_hotkey(typ, data, fast=false) bool {
          true
       }
       uin.KEY_F4 -> {
-         if(fast){ return false }
+         if fast { return false }
          _gui_probe_overlay = !_gui_probe_overlay
          terminal.log("GUI debug overlay: " + (_gui_probe_overlay ? "ON" : "OFF"))
          true
@@ -4131,16 +4236,16 @@ fn _ui_handle_menu_hotkey(typ, data, fast=false) bool {
          true
       }
       uin.KEY_F6 -> {
-         if(fast){ return false }
+         if fast { return false }
          _gui_last_probe_text = ui_diag.probe_text()
          ui_diag.print_probe()
          terminal.log(_gui_last_probe_text)
          true
       }
       uin.KEY_F7 -> {
-         if(fast){ return false }
+         if fast { return false }
          _gui_layout_dirty = true
-         if(ui_profile.env_truthy_cached("NY_UI_HOTKEY_TRACE")){
+         if ui_profile.env_truthy_cached("NY_UI_HOTKEY_TRACE") {
             terminal.log("GUI layout retile requested")
          }
          true
@@ -4158,14 +4263,14 @@ fn _first_frame_trace_allowed() bool {
 }
 
 fn _note_first_frame_render_result(bool rendered) {
-   if(rendered || total_frames > 0){
+   if rendered || total_frames > 0 {
       _first_frame_begin_fail_count = 0
       return
    }
    _first_frame_begin_fail_count += 1
    def limit = ui_profile.env_int_cached("NY_UI_BEGIN_FRAME_FAIL_LIMIT", 24, 1, 1000000)
-   if(_first_frame_begin_fail_count >= limit){
-      if(!_first_frame_begin_fail_reported){
+   if _first_frame_begin_fail_count >= limit {
+      if !_first_frame_begin_fail_reported {
          _first_frame_begin_fail_reported = true
          ui_profile.print_text("[ui:render] begin_frame failed before first frame count=" +
             to_str(_first_frame_begin_fail_count) +
@@ -4180,12 +4285,12 @@ fn _startup_config_env() {
    _ui_apply_cli_options()
    _ui_debug_enabled = (ui_profile.env_truthy_cached("NY_UI_DEBUG") || _startup_trace_enabled()) ? 1 : 0
    APP_STATS = ui_profile.env_toggle_cached("NY_UI_STATS", APP_STATS)
-   if(!ui_profile.env_present_cached("NY_UI_STATS") && ui_profile.env_truthy_cached("NY_UI_STATS_AUTO") &&
+   if (!ui_profile.env_present_cached("NY_UI_STATS") && ui_profile.env_truthy_cached("NY_UI_STATS_AUTO") &&
       !ui_profile.frame_hash_lock_enabled() && !ui_profile.env_truthy_cached("NYTRIX_AUTO_DUMP") &&
       !ui_profile.headless_enabled() && !ui_profile.ui_bench_enabled()){
       APP_STATS = true
    }
-   if(ui_profile.ui_bench_enabled()){
+   if ui_profile.ui_bench_enabled() {
       APP_STATS = false
       _gui_visible = false
       _gui_show_editor = false
@@ -4201,15 +4306,15 @@ fn _startup_config_env() {
    _batch_dump_parse_env()
    _gui_dump_suite_parse_env()
    _fps_log_enabled = ui_profile.env_truthy_cached("NY_UI_FPS_LOG") ? 1 : 0
-   if(ui_profile.headless_sim_enabled() && ui_profile.ui_bench_enabled()){
+   if ui_profile.headless_sim_enabled() && ui_profile.ui_bench_enabled() {
       _fps_log_enabled = 0
    }
    _auto_dump_enabled = ui_profile.env_truthy_cached("NYTRIX_AUTO_DUMP") ? 1 : 0
    _auto_dump_exit_mode = ui_profile.env_truthy_cached("NYTRIX_AUTO_DUMP_EXIT") ? 1 : 0
    _auto_dump_immediate_mode = ui_profile.env_truthy_cached("NYTRIX_AUTO_DUMP_IMMEDIATE") ? 1 : 0
-   if(_cli_dump_requested){
+   if _cli_dump_requested {
       _auto_dump_enabled = 1
-      if(!ui_profile.frame_hash_lock_enabled()){
+      if !ui_profile.frame_hash_lock_enabled() {
          _auto_dump_immediate_mode = 1
       }
       _auto_dump_exit_mode = 1
@@ -4220,31 +4325,31 @@ fn _startup_config_auto_dump() {
    def _dump_delay_env = ui_profile.env_trim_cached("NYTRIX_AUTO_DUMP_DELAY_FRAMES")
    def _dump_elapsed_env = ui_profile.env_trim_cached("NYTRIX_AUTO_DUMP_MIN_ELAPSED_SEC")
    def _dump_path_env = ui_profile.env_trim_cached("NYTRIX_AUTO_DUMP_PATH")
-   if(_dump_path_env.len > 0){
+   if _dump_path_env.len > 0 {
       _auto_dump_path = _dump_path_env
    }
-   if(_auto_dump_immediate_mode == 1){
+   if _auto_dump_immediate_mode == 1 {
       _auto_dump_delay_frames = 4
    }
    else { _auto_dump_delay_frames = 0 }
-   if(_dump_delay_env.len > 0){
+   if _dump_delay_env.len > 0 {
       def _dump_delay_n = int(str.atof(_dump_delay_env))
-      if(_dump_delay_n >= 0){
+      if _dump_delay_n >= 0 {
          _auto_dump_delay_frames = _dump_delay_n
       }
    }
-   if(_cli_dump_delay_frames >= 0){
+   if _cli_dump_delay_frames >= 0 {
       _auto_dump_delay_frames = _cli_dump_delay_frames
    }
    _auto_dump_min_elapsed_sec = 0.0
-   if(_dump_elapsed_env.len > 0){
+   if _dump_elapsed_env.len > 0 {
       def _dump_elapsed_v = float(str.atof(_dump_elapsed_env))
-      if(_dump_elapsed_v > 0.0){
+      if _dump_elapsed_v > 0.0 {
          _auto_dump_min_elapsed_sec = _dump_elapsed_v
       }
    }
    _auto_dump_frame_counter = 0
-   if(_auto_dump_enabled == 1){
+   if _auto_dump_enabled == 1 {
       ui_profile.print_line(
          "ui:dump:init",
          "delay_frames=" + to_str(_auto_dump_delay_frames) +
@@ -4256,26 +4361,26 @@ fn _startup_config_auto_dump() {
 }
 
 fn _startup_editor_default_enabled() bool {
-   if(ui_profile.env_present_cached("NY_UI_START_EDITOR")){
+   if ui_profile.env_present_cached("NY_UI_START_EDITOR") {
       return ui_profile.env_toggle_cached("NY_UI_START_EDITOR", false)
    }
-   if(!_chrome_visible() || _batch_dump_enabled() || ui_profile.ui_bench_enabled()){
+   if !_chrome_visible() || _batch_dump_enabled() || ui_profile.ui_bench_enabled() {
       return false
    }
    true
 }
 
 fn _startup_open_editor_default() bool {
-   if(!_startup_editor_default_enabled() || (_gui_visible && _gui_show_editor)){
+   if !_startup_editor_default_enabled() || (_gui_visible && _gui_show_editor) {
       return false
    }
-   if(show_scene || is_dict(active_scene) || _loaded_scene_name.len > 0){
+   if show_scene || is_dict(active_scene) || _loaded_scene_name.len > 0 {
       return false
    }
    _gui_editor_tab = 3
    _gui_open_default_editor()
    _invalidate_chrome_frame(2)
-   if(!ui_profile.headless_enabled()){
+   if !ui_profile.headless_enabled() {
       show_centered_cursor(win)
    }
    true
@@ -4286,7 +4391,7 @@ fn _startup_init_window_runtime() {
    mut stage_t0 = ticks()
    _setup_window()
    _startup_trace("window", stage_t0)
-   if(_chrome_visible()){
+   if _chrome_visible() {
       _dbg_ui("[ui] startup: init fonts")
       stage_t0 = ticks()
       _init_fonts()
@@ -4318,10 +4423,10 @@ fn _startup_init_window_runtime() {
 }
 
 fn _warm_gui_text_renderer() bool {
-   if(!_chrome_visible() || !win || !ui_profile.env_toggle_cached("NY_UI_WARM_TEXT_RENDERER", true)){
+   if !_chrome_visible() || !win || !ui_profile.env_toggle_cached("NY_UI_WARM_TEXT_RENDERER", true) {
       return false
    }
-   if(!gfx.begin_frame()){
+   if !gfx.begin_frame() {
       return false
    }
    gfx.set_ortho_2d(0, _win_w, _win_h, 0)
@@ -4335,7 +4440,7 @@ fn _warm_gui_text_renderer() bool {
 }
 
 fn _warm_gui_editor_resources() bool {
-   if(!_chrome_visible()){
+   if !_chrome_visible() {
       return false
    }
    def icon_names = [
@@ -4350,29 +4455,29 @@ fn _startup_init_timers_and_skybox() {
    last_upd_t = start_t
    last_fps_t = start_t
    _set_timeout()
-   if(_startup_trace_enabled()){
+   if _startup_trace_enabled() {
       terminal.log("[startup] terminal ready")
    }
    skybox_enabled = ui_profile.visible_skybox_default()
    skybox_tex_id = -1
-   if(skybox_enabled && ui_profile.startup_skybox_enabled() && !_batch_dump_enabled()){
+   if skybox_enabled && ui_profile.startup_skybox_enabled() && !_batch_dump_enabled() {
       def sky_t0 = ticks()
-      if(ui_assets.skybox_source_arg("").len > 0){
+      if ui_assets.skybox_source_arg("").len > 0 {
          _load_skybox(true)
       } else {
          _load_fast_generated_skybox(true)
       }
       _startup_skybox_pending = false
-      if(_startup_trace_enabled()){
+      if _startup_trace_enabled() {
          terminal.log("[startup] skybox=" + to_str(ui_profile.elapsed_ms(sky_t0)) + "ms")
       }
    } else {
       _startup_skybox_pending = false
    }
-   if(ui_profile.trace_enabled()){
+   if ui_profile.trace_enabled() {
       print_to_stdout = true
       def _discard_10 = ui_profile.print_text("[profile] NY_UI_PROFILE_TRACE=1 every=" + to_str(ui_profile.frame_print_every()) + " frames")
-      if(ui_profile.profile_dump_enabled(ui_profile.trace_enabled())){
+      if ui_profile.profile_dump_enabled(ui_profile.trace_enabled()) {
          def _discard_11 = ui_profile.print_text("[profile] ui_jsonl=" + ui_profile.profile_dump_file())
       }
    }
@@ -4386,23 +4491,23 @@ fn _startup_exec_commands_and_scene() {
    stage_t0 = ticks()
    _startup_exec_cli_cmds()
    _startup_trace("cli_cmds", stage_t0)
-   if(_cli_scene_requested && _cli_post_load_cmds.len == 0 && !ui_profile.env_present_cached("NY_UI_POST_LOAD_CMD")){
+   if _cli_scene_requested && _cli_post_load_cmds.len == 0 && !ui_profile.env_present_cached("NY_UI_POST_LOAD_CMD") {
       _cli_post_load_cmds = _cli_post_load_cmds.append("autofit")
       _cli_post_load_cmds = _cli_post_load_cmds.append("lookat")
    }
    mut boot_scene_env = ui_profile.env_trim_cached("NY_UI_BOOT_SCENE")
-   if(boot_scene_env.len == 0){
+   if boot_scene_env.len == 0 {
       boot_scene_env = ui_profile.env_trim_cached("NYTRIX_DEFAULT_SCENE")
    }
-   if(!show_scene && boot_scene_env.len > 0){
+   if !show_scene && boot_scene_env.len > 0 {
       _loaded_scene_name = boot_scene_env
       show_scene = _loaded_scene_name.len > 0
       _clear_anim_state()
-      if(show_scene){
+      if show_scene {
          def _discard_12 = _dbg_ui("[ui] startup env load: " + _loaded_scene_name)
       }
    }
-   if(!show_scene && argc() > 2 && eq(str.lower(to_str(argv(1))), "load")){
+   if !show_scene && argc() > 2 && eq(str.lower(to_str(argv(1))), "load") {
       _loaded_scene_name = str.strip(to_str(argv(2)))
       show_scene = _loaded_scene_name.len > 0
       _clear_anim_state()
@@ -4410,33 +4515,33 @@ fn _startup_exec_commands_and_scene() {
       _cli_scripted_scene_load = true
       def _discard_13 = _dbg_ui("[ui] startup argv load: " + _loaded_scene_name)
    }
-   if(!ui_profile.headless_enabled() && ui_profile.env_truthy_cached("NY_UI_STARTUP_SLEEP")){
+   if !ui_profile.headless_enabled() && ui_profile.env_truthy_cached("NY_UI_STARTUP_SLEEP") {
       msleep(20)
    }
-   if(_batch_dump_enabled()){
+   if _batch_dump_enabled() {
       stage_t0 = ticks()
-      if(!_batch_dump_begin_current()){
+      if !_batch_dump_begin_current() {
          def _discard_14 = _batch_dump_advance_or_exit()
       }
       _startup_trace("batch_scene_load", stage_t0)
    }
-   elif(show_scene && !is_dict(active_scene)){
+   elif show_scene && !is_dict(active_scene) {
       stage_t0 = ticks()
       def startup_scene_name = _loaded_scene_name
       _startup_post_load_pending = true
       def show_startup_loading = !ui_profile.fast_nosurface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled()) && !ui_profile.sim_nosurface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled())
-      if(_load_scene_runtime_sync(startup_scene_name, true, show_startup_loading)){
+      if _load_scene_runtime_sync(startup_scene_name, true, show_startup_loading) {
          _startup_post_load_pending = false
          _startup_exec_post_load_cmds()
          def scene_stage = show_startup_loading ? "scene_load_sync_startup" : "scene_load_sync_bench"
          def scene_ms = _startup_trace(scene_stage, stage_t0)
-         if(_startup_trace_enabled()){
+         if _startup_trace_enabled() {
             terminal.log(_loaded_scene_name + " loaded in " + to_str(scene_ms) + "ms")
          }
       }
       else {
          _startup_post_load_pending = false
-         if(_startup_trace_enabled()){
+         if _startup_trace_enabled() {
             terminal.log("Scene load failed(non-fatal)")
          }
       }
@@ -4444,13 +4549,13 @@ fn _startup_exec_commands_and_scene() {
 }
 
 fn _startup_finalize_gui_assets(startup_t0) {
-   if(!_gui_dump_suite_begin()){
+   if !_gui_dump_suite_begin() {
       _gui_apply_probe_preset()
       _apply_selection_overlay_probe_env()
       _startup_open_editor_default()
    }
    mut stage_t0 = 0
-   if(_chrome_visible()){
+   if _chrome_visible() {
       _dbg_ui("[ui] startup: build axes")
       stage_t0 = ticks()
       def axes_res = mesh_build_axes(18.0, 0.08)
@@ -4461,7 +4566,7 @@ fn _startup_finalize_gui_assets(startup_t0) {
       axes_opts["unlit"] = true
       axes_opts["vc_mode"] = 1
       axes_opts["storage"] = "cpu"
-      if(axes_ptr && axes_cnt > 0){
+      if axes_ptr && axes_cnt > 0 {
          _axes_mesh = mesh_create_cpu(axes_ptr, axes_cnt, false, axes_opts)
       }
       _startup_trace("axes", stage_t0)
@@ -4469,7 +4574,7 @@ fn _startup_finalize_gui_assets(startup_t0) {
    _dbg_ui("[ui] startup: finalize")
    stage_t0 = ticks()
    viewer_overlay.init()
-   if(_chrome_visible() && ui_profile.crosshair_enabled()){
+   if _chrome_visible() && ui_profile.crosshair_enabled() {
       def _cross_pair = ui_runtime.build_crosshair_mesh()
       _crosshair_buf, _crosshair_mesh = _cross_pair.get(0, 0), _cross_pair.get(1, 0)
    }
@@ -4493,17 +4598,17 @@ fn startup(any app=0) {
 }
 
 fn _batch_dump_update_anim_fast(dt) {
-   if(_anim_enabled && is_dict(active_scene) && _anim_count > 0 && is_dict(_anim_gltf_data)){
+   if _anim_enabled && is_dict(active_scene) && _anim_count > 0 && is_dict(_anim_gltf_data) {
       mut frame_dt = float(dt)
-      if(is_nan(frame_dt) || is_inf(frame_dt) || frame_dt <= 0.0){ frame_dt = 0.0166667 }
-      if(frame_dt > 0.1){ frame_dt = 0.0166667 }
-      if(_anim_duration <= 0.0001){
+      if is_nan(frame_dt) || is_inf(frame_dt) || frame_dt <= 0.0 { frame_dt = 0.0166667 }
+      if frame_dt > 0.1 { frame_dt = 0.0166667 }
+      if _anim_duration <= 0.0001 {
          _anim_duration = float(active_scene.get("anim_duration", 0.0))
       }
       _anim_time += frame_dt * _anim_speed
-      if(_anim_duration > 0.0001){
-         while(_anim_time >= _anim_duration){ _anim_time -= _anim_duration }
-         while(_anim_time < 0.0){ _anim_time += _anim_duration }
+      if _anim_duration > 0.0001 {
+         while _anim_time >= _anim_duration { _anim_time -= _anim_duration }
+         while _anim_time < 0.0 { _anim_time += _anim_duration }
       }
       active_scene["anim_time"] = _anim_time
       active_scene["anim_idx"] = _anim_idx
@@ -4517,10 +4622,10 @@ fn _batch_dump_update_anim_fast(dt) {
       scene_engine.scene_fast_reset(active_scene)
       _static_world_color_reuse_reset()
       _static_world_redraw(1)
-   } elif(!is_dict(active_scene) || _anim_count <= 0 || !is_dict(_anim_gltf_data)){
+   } elif !is_dict(active_scene) || _anim_count <= 0 || !is_dict(_anim_gltf_data) {
       _anim_enabled = false
-      if(is_dict(active_scene)){ active_scene["anim_playing"] = false }
-   } elif(is_dict(active_scene)){
+      if is_dict(active_scene) { active_scene["anim_playing"] = false }
+   } elif is_dict(active_scene) {
       active_scene["anim_playing"] = false
    }
 }
@@ -4531,15 +4636,15 @@ fn _handle_window_resize_event(data, layout_dirty=false, reset_cross=false, rece
    _win_h = float(extent.get(1, _win_h))
    _proj_dirty = true
    _static_world_redraw(3)
-   if(layout_dirty){
+   if layout_dirty {
       _gui_layout_dirty = true
       _gui_layout_warm_frames = 3
    }
-   if(reset_cross){
+   if reset_cross {
       _cross_cx_last, _cross_cy_last = -9e9, -9e9
    }
    set_win_size(int(_win_w), int(_win_h))
-   if(recenter_locked && !ui_profile.headless_enabled() && !_term_open && !_scene_loading_input_guard_active() && _intended_cursor_mode == CURSOR_DISABLED){
+   if recenter_locked && !ui_profile.headless_enabled() && !_term_open && !_scene_loading_input_guard_active() && _intended_cursor_mode == CURSOR_DISABLED {
       center_cursor(win)
    }
 }
@@ -4551,13 +4656,13 @@ fn _app_next_event() {
 
 fn _batch_dump_update_fast(dt) {
    mut e = _app_next_event()
-   while(e != 0){
+   while e != 0 {
       def typ = event_type(e)
       def data = event_data(e)
-      if(typ == EVENT_WINDOW_RESIZED){
+      if typ == EVENT_WINDOW_RESIZED {
          _handle_window_resize_event(data)
       }
-      if(quit(e)){
+      if quit(e) {
          set_should_close(win, true)
       }
       e = _app_next_event()
@@ -4573,36 +4678,36 @@ fn _batch_dump_update_fast(dt) {
 
 fn _app_simulate_camera_frame(dt, bool prep_gui, bool gui_nav_blocking) {
    def _discard_f1_poll = _app_poll_f1_hotkey()
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       _release_scene_loading_input("scene load camera block")
       return
    }
    def live_win = get_win(win)
    mut live_keys = dict(8)
    mut live_mods = 0
-   if(is_dict(live_win)){
+   if is_dict(live_win) {
       def raw_keys = live_win.get("key_states", 0)
-      if(is_dict(raw_keys)){ live_keys = raw_keys }
+      if is_dict(raw_keys) { live_keys = raw_keys }
       live_mods = int(live_win.get("modifiers", 0))
    }
    def skip_look = skip_mouse_frames > 0
-   if(skip_look){ skip_mouse_frames -= 1 }
+   if skip_look { skip_mouse_frames -= 1 }
    mut dx, dy = _mouse_dx_acc, _mouse_dy_acc
    _mouse_dx_acc, _mouse_dy_acc = 0.0, 0.0
    def dragging_scene = _scene_drag_active
-   if(dragging_scene){
+   if dragging_scene {
       dx = 0.0
       dy = 0.0
    }
    mut overlay_mouse = false
-   if(prep_gui && _scene_selected && _scene_selection_rect){
+   if prep_gui && _scene_selected && _scene_selection_rect {
       def cur = _cursor_xy_view()
       overlay_mouse = _selection_overlay_hit_test(float(cur.get(0, 0.0)), float(cur.get(1, 0.0)))
    }
    def editor_nav = _rmb_look_active && !_term_open
    def focus_mouse_look = _focused_scene_look_active()
    def nav_keys = !dragging_scene && _camera_keyboard_nav_allowed(prep_gui, gui_nav_blocking)
-   if(prep_gui && !nav_keys && _ui_move_input_active()){
+   if prep_gui && !nav_keys && _ui_move_input_active() {
       _clear_camera_input_state()
    }
    def gui_mouse = dragging_scene || (!editor_nav && (prep_gui || overlay_mouse))
@@ -4636,7 +4741,7 @@ fn _app_simulate_camera_frame(dt, bool prep_gui, bool gui_nav_blocking) {
    _spdx, _spdy, _spd_z = float(sim.get("spdx", _spdx)), float(sim.get("spdy", _spdy)), float(sim.get("spdz", _spd_z))
    _vx, _vy, _vz = float(sim.get("vx", _vx)), float(sim.get("vy", _vy)), float(sim.get("vz", _vz))
    _cam_px, _cam_py, _cam_pz = float(sim.get("cam_x", _cam_px)), float(sim.get("cam_y", _cam_py)), float(sim.get("cam_z", _cam_pz))
-   if(bool(sim.get("look_applied", false))){
+   if bool(sim.get("look_applied", false)) {
       def _discard_input_trace = _app_input_trace(
          "look apply dx=" + to_str(sim.get("look_dx", 0.0)) +
          " dy=" + to_str(sim.get("look_dy", 0.0)) +
@@ -4650,7 +4755,7 @@ fn _app_simulate_camera_frame(dt, bool prep_gui, bool gui_nav_blocking) {
 }
 
 fn _app_update_fast_path(dt) bool {
-   if(_batch_dump_enabled() && ui_profile.batch_fast_env_enabled()){
+   if _batch_dump_enabled() && ui_profile.batch_fast_env_enabled() {
       _cam_fov = camthreed.get(16)
       _batch_dump_update_fast(dt)
       return true
@@ -4671,13 +4776,13 @@ fn _app_run_bench_sim(dt, trace, deep_trace) {
 fn _app_pump_bench_events() {
    mut e = _app_next_event()
    _cam_fov = camthreed.get(16)
-   while(e != 0){
+   while e != 0 {
       def typ = event_type(e)
       def data = event_data(e)
-      if(typ == EVENT_WINDOW_RESIZED){
+      if typ == EVENT_WINDOW_RESIZED {
          _handle_window_resize_event(data, false, true)
       }
-      if(quit(e)){
+      if quit(e) {
          set_should_close(win, true)
       }
       e = _app_next_event()
@@ -4685,10 +4790,10 @@ fn _app_pump_bench_events() {
 }
 
 fn _app_update_bench_frame(dt, trace, deep_trace, t_evt0) bool {
-   if(!ui_profile.ui_bench_enabled()){
+   if !ui_profile.ui_bench_enabled() {
       return false
    }
-   if(ui_profile.sim_nosurface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled())){
+   if ui_profile.sim_nosurface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled()) {
       _app_run_bench_sim(dt, trace, deep_trace)
       return true
    }
@@ -4704,25 +4809,25 @@ fn _app_update_bench_frame(dt, trace, deep_trace, t_evt0) bool {
 }
 
 fn _app_set_move_key(k, sc, pressed) bool {
-   if(k == uin.KEY_W){ _move_w = pressed return true }
-   if(k == uin.KEY_A){ _move_a = pressed return true }
-   if(k == uin.KEY_S){ _move_s = pressed return true }
-   if(k == uin.KEY_D){ _move_d = pressed return true }
-   if(k == uin.KEY_SPACE){ _move_space = pressed return true }
-   if(ui_app.app_key_is_shift(k, sc)){ _move_shift = pressed return true }
-   if(ui_app.app_key_is_ctrl(k, sc)){ _move_ctrl = pressed return true }
+   if k == uin.KEY_W { _move_w = pressed return true }
+   if k == uin.KEY_A { _move_a = pressed return true }
+   if k == uin.KEY_S { _move_s = pressed return true }
+   if k == uin.KEY_D { _move_d = pressed return true }
+   if k == uin.KEY_SPACE { _move_space = pressed return true }
+   if ui_app.app_key_is_shift(k, sc) { _move_shift = pressed return true }
+   if ui_app.app_key_is_ctrl(k, sc) { _move_ctrl = pressed return true }
    false
 }
 
 fn _app_submit_console_key(k, gui_block_keys) bool {
-   if(_term_open || !gui_block_keys || gui.focused_id() != "editor_main::console_cmd"){
+   if _term_open || !gui_block_keys || gui.focused_id() != "editor_main::console_cmd" {
       return false
    }
-   if(k != uin.KEY_ENTER && k != 257){
+   if k != uin.KEY_ENTER && k != 257 {
       return false
    }
    def cmd_line = str.strip(_gui_console_input)
-   if(cmd_line.len > 0){
+   if cmd_line.len > 0 {
       terminal.log("> " + cmd_line)
       exec_cmd(cmd_line)
       _gui_console_input = ""
@@ -4731,12 +4836,12 @@ fn _app_submit_console_key(k, gui_block_keys) bool {
 }
 
 fn _app_handle_escape_key(k) bool {
-   if(k != uin.KEY_ESCAPE && k != 256){
+   if k != uin.KEY_ESCAPE && k != 256 {
       return false
    }
    def _discard_drag = _scene_drag_end()
-   if(_gui_editor_shell_open() || _scene_selected){
-      if(_gui_editor_shell_open()){
+   if _gui_editor_shell_open() || _scene_selected {
+      if _gui_editor_shell_open() {
          _gui_close_editor_shell()
          gui.clear_focus()
       }
@@ -4750,31 +4855,31 @@ fn _app_handle_escape_key(k) bool {
 }
 
 fn _app_handle_selected_gizmo_key(k, mods, gui_blocks_world) bool {
-   if(_term_open || gui_blocks_world || !_scene_editor_tools_enabled() || !_scene_selected || (mods & MOD_CONTROL) != 0){
+   if _term_open || gui_blocks_world || !_scene_editor_tools_enabled() || !_scene_selected || (mods & MOD_CONTROL) != 0 {
       return false
    }
-   if(k == uin.KEY_1){
+   if k == uin.KEY_1 {
       _gizmo_mode = 0
       _gizmo_axis = 0
       terminal.log("Gizmo: Move")
       _scene_edit_redraw(2)
       return true
    }
-   if(k == uin.KEY_2){
+   if k == uin.KEY_2 {
       _gizmo_mode = 1
       _gizmo_axis = 0
       terminal.log("Gizmo: Rotate")
       _scene_edit_redraw(2)
       return true
    }
-   if(k == uin.KEY_3){
+   if k == uin.KEY_3 {
       _gizmo_mode = 2
       _gizmo_axis = 0
       terminal.log("Gizmo: Scale")
       _scene_edit_redraw(2)
       return true
    }
-   if(k == uin.KEY_X || k == uin.KEY_Y || k == uin.KEY_Z){
+   if k == uin.KEY_X || k == uin.KEY_Y || k == uin.KEY_Z {
       def next_axis = (k == uin.KEY_X) ? 1 : ((k == uin.KEY_Y) ? 2 : 3)
       _gizmo_axis = (_gizmo_axis == next_axis) ? 0 : next_axis
       terminal.log("Axis: " + ((_gizmo_axis == 1) ? "X" : ((_gizmo_axis == 2) ? "Y" : ((_gizmo_axis == 3) ? "Z" : "Free"))))
@@ -4785,10 +4890,10 @@ fn _app_handle_selected_gizmo_key(k, mods, gui_blocks_world) bool {
 }
 
 fn _app_handle_focus_model_key(k, mods, gui_blocks_world) bool {
-   if(_term_open || gui_blocks_world || (mods & MOD_CONTROL) != 0){
+   if _term_open || gui_blocks_world || (mods & MOD_CONTROL) != 0 {
       return false
    }
-   if(k != uin.KEY_F){
+   if k != uin.KEY_F {
       return false
    }
    _cmd_lookat(true)
@@ -4800,19 +4905,19 @@ fn _app_focus_editor_tab(idx) {
 }
 
 fn _app_handle_editor_shortcut(k, mods, gui_enabled_frame) bool {
-   if(_term_open || !gui_enabled_frame){
+   if _term_open || !gui_enabled_frame {
       return false
    }
    def ctrl = (mods & MOD_CONTROL) != 0
-   if(ctrl && (k == uin.KEY_P || k == uin.KEY_K || k == uin.KEY_F)){
+   if ctrl && (k == uin.KEY_P || k == uin.KEY_K || k == uin.KEY_F) {
       _gui_focus_asset_search()
       return true
    }
-   if(ctrl && k >= uin.KEY_1 && k <= uin.KEY_4){
+   if ctrl && k >= uin.KEY_1 && k <= uin.KEY_4 {
       _app_focus_editor_tab(k - uin.KEY_1)
       return true
    }
-   if(!ctrl && k == uin.KEY_SLASH){
+   if !ctrl && k == uin.KEY_SLASH {
       _gui_focus_asset_search()
       return true
    }
@@ -4824,17 +4929,17 @@ fn _app_block_scripted_model_cycle(k) bool {
 }
 
 fn _app_handle_model_cycle_key(k, gui_blocks_world) bool {
-   if(_term_open || gui_blocks_world){
+   if _term_open || gui_blocks_world {
       return false
    }
-   if(_app_block_scripted_model_cycle(k)){
+   if _app_block_scripted_model_cycle(k) {
       return true
    }
-   if(k == uin.KEY_PAGE_UP){
+   if k == uin.KEY_PAGE_UP {
       _cycle_loaded_model(-1)
       return true
    }
-   if(k == uin.KEY_PAGE_DOWN){
+   if k == uin.KEY_PAGE_DOWN {
       _cycle_loaded_model(1)
       return true
    }
@@ -4845,33 +4950,33 @@ fn _app_handle_key_pressed(data, gui_blocks_world, gui_block_keys, gui_enabled_f
    def k = uin.event_key(data)
    def sc = data.get("scancode", data.get("raw_key", 0))
    def mods = ui_app.app_effective_mods(data.get("mod", 0), k, sc, _move_shift, _move_ctrl)
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       _release_scene_loading_input("scene load key block")
-      if(gui_event_consumed){ return true }
-      if(_app_handle_escape_key(k)){ return true }
+      if gui_event_consumed { return true }
+      if _app_handle_escape_key(k) { return true }
       return false
    }
-   if(_camera_keyboard_nav_allowed(gui_enabled_frame, gui_blocks_world)){
+   if _camera_keyboard_nav_allowed(gui_enabled_frame, gui_blocks_world) {
       def _discard_move = _app_set_move_key(k, sc, true)
-   } elif(gui_enabled_frame){
+   } elif gui_enabled_frame {
       def _discard_blocked_move = _app_set_move_key(k, sc, false)
    }
-   if(_app_submit_console_key(k, gui_block_keys)){ return true }
-   if(gui_event_consumed){ return true }
-   if(_app_handle_escape_key(k)){ return true }
-   if(_app_handle_focus_model_key(k, mods, gui_blocks_world)){ return true }
-   if(_app_handle_selected_gizmo_key(k, mods, gui_blocks_world)){ return true }
-   if(_app_handle_editor_shortcut(k, mods, gui_enabled_frame)){ return true }
+   if _app_submit_console_key(k, gui_block_keys) { return true }
+   if gui_event_consumed { return true }
+   if _app_handle_escape_key(k) { return true }
+   if _app_handle_focus_model_key(k, mods, gui_blocks_world) { return true }
+   if _app_handle_selected_gizmo_key(k, mods, gui_blocks_world) { return true }
+   if _app_handle_editor_shortcut(k, mods, gui_enabled_frame) { return true }
    _app_handle_model_cycle_key(k, gui_blocks_world)
 }
 
 fn _app_handle_key_released(data) {
    def k = uin.event_key(data)
    def sc = data.get("scancode", data.get("raw_key", 0))
-   if(uin.event_is_key(data, uin.KEY_F1)){
+   if uin.event_is_key(data, uin.KEY_F1) {
       _hotkey_f1_down = false
    }
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       _release_scene_loading_input("scene load key release")
       return
    }
@@ -4879,16 +4984,16 @@ fn _app_handle_key_released(data) {
 }
 
 fn _app_handle_mouse_pos(data, gui_on_event) {
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       _release_scene_loading_input("scene load mouse move")
       return
    }
-   if(_scene_drag_active){
+   if _scene_drag_active {
       ;; Gizmo dragging is screen-space/absolute.  Do not feed raw/relative
       ;; mouse events into it: on X11/Wayland those events can carry virtual
       ;; cursor coordinates from captured look, which makes the gizmo jump or
       ;; jitter when the editor (F1) is open.
-      if(is_dict(data) && bool(data.get("relative", false))){
+      if is_dict(data) && bool(data.get("relative", false)) {
          def _discard_drag_rel_trace = _app_input_trace(
             "drag dropped relative-event x=" + to_str(data.get("x", 0.0)) +
             " y=" + to_str(data.get("y", 0.0)) +
@@ -4904,7 +5009,7 @@ fn _app_handle_mouse_pos(data, gui_on_event) {
       _clear_mouse_look_state()
       return
    }
-   if(skip_mouse_frames > 0 || ticks() < _mouse_delta_suppress_until_ns){
+   if skip_mouse_frames > 0 || ticks() < _mouse_delta_suppress_until_ns {
       _clear_mouse_look_state()
       return
    }
@@ -4914,22 +5019,22 @@ fn _app_handle_mouse_pos(data, gui_on_event) {
    ;; mixing those with raw relative events makes the camera alternate between
    ;; real deltas and warp/GUI-position deltas, which feels like Vulkan jitter.
    mut gui_blocks_look = false
-   if(!_rmb_look_active){
+   if !_rmb_look_active {
       def mp_for_hit = _event_mouse_xy_view(data)
       gui_blocks_look = gui_on_event && gui.hit_test(float(mp_for_hit.get(0, 0.0)), float(mp_for_hit.get(1, 0.0)))
    }
    def viewport_free_look = (_cursor_lock_enabled || focus_mouse_look) && !gui_blocks_look
    def captured_look = _rmb_look_active || viewport_free_look
-   if(!_term_open && captured_look){
-      if(!is_dict(data) || !_mouse_look_accept_event(data, captured_look)){ return }
+   if !_term_open && captured_look {
+      if !is_dict(data) || !_mouse_look_accept_event(data, captured_look) { return }
       def relative_ev = bool(data.get("relative", true))
       mut mdx, mdy = float(data.get("dx", 0.0)), float(data.get("dy", 0.0))
       def dead = float(ui_profile.env_int_cached("NY_UI_MOUSE_LOOK_DEADZONE_MILLI", 0, 0, 1000)) / 1000.0
-      if(abs(mdx) <= dead){ mdx = 0.0 }
-      if(abs(mdy) <= dead){ mdy = 0.0 }
+      if abs(mdx) <= dead { mdx = 0.0 }
+      if abs(mdy) <= dead { mdy = 0.0 }
       def max_delta = float(ui_profile.env_int_cached("NY_UI_MOUSE_LOOK_MAX_DELTA", 32, 4, 512))
       mdx, mdy = clamp(mdx, 0.0 - max_delta, max_delta), clamp(mdy, 0.0 - max_delta, max_delta)
-      if(mdx == 0.0 && mdy == 0.0){ return }
+      if mdx == 0.0 && mdy == 0.0 { return }
       _mouse_dx_acc += mdx
       _mouse_dy_acc += mdy
       def _discard_input_trace = _app_input_trace(
@@ -4943,7 +5048,7 @@ fn _app_handle_mouse_pos(data, gui_on_event) {
          " focus=" + to_str(focus_mouse_look) +
          " free=" + to_str(viewport_free_look) +
       " gui_event=" + to_str(gui_on_event))
-   } elif(gui_on_event){
+   } elif gui_on_event {
       def _discard_clear_mouse = _clear_mouse_look_state()
    }
    return
@@ -4954,37 +5059,35 @@ fn _middle_mouse_scroll_suppressed() bool {
 }
 
 fn _mouse_look_accept_event(dict data, bool captured_look) bool {
-   if(!captured_look){ return false }
+   if !captured_look { return false }
    def has_dx = data.contains("dx") || data.contains("dy")
-   if(!has_dx){ return false }
+   if !has_dx { return false }
    def now = ticks()
    def is_raw = bool(data.get("raw", false))
    def is_relative = bool(data.get("relative", is_raw))
-   if(!is_relative){ return false }
-
+   if !is_relative { return false }
    ;; Pick one mouse source per capture session.  X11/Wayland can emit both raw
    ;; relative events and cursor-warp fallback events around the same frame.  Even
    ;; if each event is valid alone, alternating sources makes yaw/pitch jitter.
    ;; Once raw motion is observed, ignore fallback motion briefly.  If raw never
    ;; arrives, fallback remains usable.
-   if(is_raw){
-      if(_mouse_look_last_source == "fallback" && total_frames == _mouse_look_last_frame){
+   if is_raw {
+      if _mouse_look_last_source == "fallback" && total_frames == _mouse_look_last_frame {
          _mouse_dx_acc = 0.0
          _mouse_dy_acc = 0.0
       }
       _mouse_look_raw_until_ns = now + 250000000
       _mouse_look_last_source = "raw"
-   } elif(now < _mouse_look_raw_until_ns){
+   } elif now < _mouse_look_raw_until_ns {
       return false
    } else {
       _mouse_look_last_source = "fallback"
    }
-
    ;; Drop duplicate zero/near-zero transition noise from cursor mode changes.
-   if(total_frames == _mouse_look_last_frame && now - _mouse_look_last_event_ns < 1000000){
+   if total_frames == _mouse_look_last_frame && now - _mouse_look_last_event_ns < 1000000 {
       def dx = abs(float(data.get("dx", 0.0)))
       def dy = abs(float(data.get("dy", 0.0)))
-      if(dx < 0.001 && dy < 0.001){ return false }
+      if dx < 0.001 && dy < 0.001 { return false }
    }
    _mouse_look_last_frame = total_frames
    _mouse_look_last_event_ns = now
@@ -5000,7 +5103,7 @@ fn _middle_mouse_start() bool {
    _middle_mouse_active = true
    _middle_mouse_suppress_scroll_until_ns = ticks() + _MIDDLE_SCROLL_SUPPRESS_NS
    _suppress_mouse_deltas(_CURSOR_TRANSITION_SUPPRESS_NS)
-   if(_scene_drag_active){
+   if _scene_drag_active {
       def _discard_drag = _scene_drag_end()
    }
    _rmb_look_active = false
@@ -5011,7 +5114,7 @@ fn _middle_mouse_start() bool {
 }
 
 fn _middle_mouse_stop() bool {
-   if(!_middle_mouse_active){ return false }
+   if !_middle_mouse_active { return false }
    _middle_mouse_active = false
    _middle_mouse_suppress_scroll_until_ns = ticks() + _MIDDLE_SCROLL_SUPPRESS_NS
    _suppress_mouse_deltas(_CURSOR_TRANSITION_SUPPRESS_NS)
@@ -5022,9 +5125,9 @@ fn _middle_mouse_stop() bool {
 }
 
 fn _app_handle_mouse_button_pressed(data, gui_enabled_frame, gui_event_consumed) bool {
-   if(!ui_profile.headless_enabled()){ focus(win) }
+   if !ui_profile.headless_enabled() { focus(win) }
    def b = int(data.get("button", -1))
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       _release_scene_loading_input("scene load mouse press")
       return true
    }
@@ -5032,7 +5135,7 @@ fn _app_handle_mouse_button_pressed(data, gui_enabled_frame, gui_event_consumed)
    def mx = float(pos.get(0, 0.0))
    def my = float(pos.get(1, 0.0))
    mut gui_under_mouse = false
-   if(gui_enabled_frame){
+   if gui_enabled_frame {
       gui_under_mouse = gui.hit_test(mx, my)
    }
    def gui_mouse_now = gui_enabled_frame &&
@@ -5042,10 +5145,19 @@ fn _app_handle_mouse_button_pressed(data, gui_enabled_frame, gui_event_consumed)
    ;; click.  The Y handle often projects over the overlay region; checking the
    ;; overlay first makes the click change mode or free-drag instead of starting
    ;; a locked Y-axis drag.
-   if(!_term_open && editor_scene_tools && b == _MOUSE_LEFT && _scene_selected && _scene_selection_rect){
+   if !_term_open && editor_scene_tools && b == _MOUSE_LEFT && _scene_selected && _scene_selection_rect {
       _ui_update_projection_fast()
       def pick = _scene_world_gizmo_pick(mx, my)
-      if(bool(pick.get("hit", false))){
+      def _discard_pick_trace = _app_input_trace(
+         "pick press x=" + to_str(mx) + " y=" + to_str(my) +
+         " hit=" + to_str(pick.get("hit", false)) +
+         " axis=" + to_str(pick.get("axis", 0)) +
+         " mode=" + to_str(pick.get("mode", _gizmo_mode)) +
+         " dist2=" + to_str(pick.get("dist2", -1.0)) +
+         " gui_under=" + to_str(gui_under_mouse) +
+         " gui_wants=" + to_str(gui_mouse_now)
+      )
+      if bool(pick.get("hit", false)) {
          def _discard_begin = _scene_drag_begin(mx, my, pick)
          skip_mouse_frames = _scene_drag_active ? 0 : 2
          _sync_cursor_state("scene gizmo drag")
@@ -5053,21 +5165,21 @@ fn _app_handle_mouse_button_pressed(data, gui_enabled_frame, gui_event_consumed)
       }
    }
    mut overlay_mouse = false
-   if(!_term_open && b == _MOUSE_LEFT && _scene_selected && _scene_selection_rect){
+   if !_term_open && b == _MOUSE_LEFT && _scene_selected && _scene_selection_rect {
       overlay_mouse = _selection_overlay_handle_click(mx, my)
    }
-   if(overlay_mouse){
+   if overlay_mouse {
       _sync_cursor_state("selection overlay")
       return true
    }
    def gui_mouse = overlay_mouse || gui_mouse_now
    def gui_blocks_viewport_rmb = overlay_mouse || gui_under_mouse
-   if(!_term_open && b == _MOUSE_MIDDLE){
+   if !_term_open && b == _MOUSE_MIDDLE {
       _middle_mouse_suppress_scroll_until_ns = ticks() + _MIDDLE_SCROLL_SUPPRESS_NS
-      if(!gui_mouse && is_dict(active_scene) && show_scene){ return _middle_mouse_start() }
+      if !gui_mouse && is_dict(active_scene) && show_scene { return _middle_mouse_start() }
       return gui_mouse
    }
-   if(!_term_open && !gui_blocks_viewport_rmb && b == _MOUSE_RIGHT && is_dict(active_scene) && show_scene){
+   if !_term_open && !gui_blocks_viewport_rmb && b == _MOUSE_RIGHT && is_dict(active_scene) && show_scene {
       _rmb_look_active = true
       gui.clear_focus()
       skip_mouse_frames = 0
@@ -5077,7 +5189,7 @@ fn _app_handle_mouse_button_pressed(data, gui_enabled_frame, gui_event_consumed)
       _sync_cursor_state("rmb look start")
       return true
    }
-   if(!_term_open && !gui_mouse && editor_scene_tools && b == _MOUSE_LEFT && is_dict(active_scene) && show_scene){
+   if !_term_open && !gui_mouse && editor_scene_tools && b == _MOUSE_LEFT && is_dict(active_scene) && show_scene {
       _scene_selected = true
       _scene_selection_rect = true
       _scene_selection_bounds_cache_update()
@@ -5091,21 +5203,21 @@ fn _app_handle_mouse_button_pressed(data, gui_enabled_frame, gui_event_consumed)
 
 fn _app_handle_mouse_button_released(data) {
    def b = int(data.get("button", -1))
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       _release_scene_loading_input("scene load mouse release")
       return
    }
-   if(b == _MOUSE_MIDDLE){
+   if b == _MOUSE_MIDDLE {
       def _discard_middle = _middle_mouse_stop()
       return
    }
-   if(b == _MOUSE_LEFT && _scene_drag_active){
+   if b == _MOUSE_LEFT && _scene_drag_active {
       def _discard_drag = _scene_drag_end()
       skip_mouse_frames = 2
       _sync_cursor_state("scene drag stop")
       return
    }
-   if(b == _MOUSE_RIGHT && _rmb_look_active){
+   if b == _MOUSE_RIGHT && _rmb_look_active {
       _rmb_look_active = false
       skip_mouse_frames = 0
       _clear_camera_input_state()
@@ -5123,7 +5235,7 @@ fn _app_release_pointer_ownership(reason="pointer release") {
    _middle_mouse_suppress_scroll_until_ns = 0
    _mouse_delta_suppress_until_ns = ticks() + _CURSOR_TRANSITION_SUPPRESS_NS
    _hotkey_f1_down = false
-   if(!_term_open && !ui_profile.headless_enabled()){
+   if !_term_open && !ui_profile.headless_enabled() {
       _intended_cursor_mode = CURSOR_NORMAL
       set_cursor_mode(win, CURSOR_NORMAL)
    }
@@ -5147,19 +5259,19 @@ fn _app_handle_mouse_leave() {
 fn _app_handle_mouse_enter() {
    skip_mouse_frames = 3
    _suppress_mouse_deltas(_CURSOR_TRANSITION_SUPPRESS_NS)
-   if(!ui_profile.headless_enabled()){ focus(win) }
+   if !ui_profile.headless_enabled() { focus(win) }
    _sync_cursor_state("mouse enter")
 }
 
 fn _app_handle_scroll(data, gui_enabled_frame, gui_event_consumed=false) {
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       _release_scene_loading_input("scene load scroll")
       return
    }
-   if(_middle_mouse_scroll_suppressed()){
+   if _middle_mouse_scroll_suppressed() {
       return
    }
-   if(_scene_drag_active){
+   if _scene_drag_active {
       ;; A gizmo axis/translate drag is in progress.  Touchpads emit scroll
       ;; events alongside two-finger drags, and letting those change camera
       ;; FOV/zoom mid-drag shifts the view/projection used by the axis ray
@@ -5168,28 +5280,28 @@ fn _app_handle_scroll(data, gui_enabled_frame, gui_event_consumed=false) {
    }
    def dy = float(data.get("dy", 0.0))
    mut scroll_over_gui = gui_event_consumed
-   if(gui_enabled_frame){
+   if gui_enabled_frame {
       def pos = _event_mouse_xy_view(data)
       scroll_over_gui = scroll_over_gui || gui.hit_test(float(pos.get(0, 0.0)), float(pos.get(1, 0.0)))
    }
    def camera_scroll = !_term_open && (_rmb_look_active || !gui_enabled_frame || !scroll_over_gui)
-   if(camera_scroll && is_ortho){
+   if camera_scroll && is_ortho {
       _ortho_zoom = clamp(_ortho_zoom - dy * 2.0, 5.0, 200.0)
       _proj_dirty = true
    }
-   elif(camera_scroll){
+   elif camera_scroll {
       _cam_fov = clamp(_cam_fov - dy * 5.0, 15.0, 120.0)
       _proj_dirty = true
    }
 }
 
 fn _app_handle_terminal_event(typ, data) {
-   if(!_term_open){
+   if !_term_open {
       return
    }
    _ui_set_update_stage("terminal.event")
    def int: res = int(terminal.handle_event(typ, data))
-   if(res == 2){
+   if res == 2 {
       terminal.exec(exec_cmd)
    }
 }
@@ -5213,11 +5325,11 @@ fn _app_process_events() {
    _ui_set_update_stage("gui.enable")
    mut gui_enabled_frame = _gui_enabled_now()
    gui.set_enabled(gui_enabled_frame)
-   if(gui_enabled_frame){
+   if gui_enabled_frame {
       _ui_set_update_stage("gui.prepare.pre")
       gui.prepare_input(win, _win_w, _win_h)
    }
-   while(e != 0){
+   while e != 0 {
       ui_idle.mark_event_seen()
       _ui_set_update_stage("event.type")
       def typ = event_type(e)
@@ -5225,12 +5337,12 @@ fn _app_process_events() {
       def data = event_data(e)
       _ui_trace_event(typ, data)
       _ui_set_update_stage("hotkey.text")
-      if(_ui_consume_hotkey_text_spill(typ)){
+      if _ui_consume_hotkey_text_spill(typ) {
          e = _app_next_event()
          continue
       }
       _ui_set_update_stage("hotkey.menu")
-      if(_ui_handle_menu_hotkey(typ, data, false)){
+      if _ui_handle_menu_hotkey(typ, data, false) {
          gui_enabled_frame = _gui_enabled_now()
          gui.set_enabled(gui_enabled_frame)
          e = _app_next_event()
@@ -5241,7 +5353,7 @@ fn _app_process_events() {
       ;; mouse motion/release events. The gizmo is absolute screen-space; letting
       ;; the editor panels process the same stream causes hover/focus/layout churn
       ;; and visible jitter.
-      if(_scene_drag_active && (typ == EVENT_MOUSE_POS_CHANGED || typ == EVENT_MOUSE_BUTTON_RELEASED || typ == EVENT_MOUSE_SCROLL)){
+      if _scene_drag_active && (typ == EVENT_MOUSE_POS_CHANGED || typ == EVENT_MOUSE_BUTTON_RELEASED || typ == EVENT_MOUSE_SCROLL) {
          gui_on_event = false
       }
       _ui_set_update_stage("gui.feed")
@@ -5262,14 +5374,14 @@ fn _app_process_events() {
          EVENT_MOUSE_SCROLL -> { _app_handle_scroll(data, gui_enabled_frame, gui_event_consumed) true }
          _ -> false
       }
-      if(consumed){
+      if consumed {
          gui_enabled_frame = _gui_enabled_now()
          gui.set_enabled(gui_enabled_frame)
          e = _app_next_event()
          continue
       }
       _app_handle_terminal_event(typ, data)
-      if(quit(e)){
+      if quit(e) {
          _ui_trace_event(typ, data, "event.quit")
          set_should_close(win, true)
       }
@@ -5284,16 +5396,16 @@ fn _app_prepare_gui_after_events(bench, gui_enabled_frame, trace, deep_trace) {
    def prep_gui = !bench && gui_enabled_frame
    gui.set_enabled(prep_gui)
    mut gui_nav_blocking = false
-   if(prep_gui){
+   if prep_gui {
       _ui_set_update_stage("gui.prepare.post")
       gui.prepare_input(win, _win_w, _win_h)
       gui_nav_blocking = !_rmb_look_active && (gui.wants_keyboard() || gui.focused_id() != "")
-      if(gui_nav_blocking && !_app_gui_nav_blocking){
+      if gui_nav_blocking && !_app_gui_nav_blocking {
          _clear_camera_input_state()
       }
    }
    _last_gui_prep_ms = (trace && deep_trace) ? ui_profile.elapsed_ms(t_prep0) : 0.0
-   if(_term_open){
+   if _term_open {
       _mouse_dx_acc, _mouse_dy_acc = 0.0, 0.0
    }
    _app_prep_gui = prep_gui
@@ -5301,7 +5413,7 @@ fn _app_prepare_gui_after_events(bench, gui_enabled_frame, trace, deep_trace) {
 }
 
 fn _app_idle_after_events(bench, prep_gui) bool {
-   if(!bench && !_term_open && !prep_gui && !_rmb_look_active && !_scene_drag_active && !_focused_scene_look_active() &&
+   if (!bench && !_term_open && !prep_gui && !_rmb_look_active && !_scene_drag_active && !_focused_scene_look_active() &&
       _intended_cursor_mode != CURSOR_DISABLED && skip_mouse_frames <= 0 &&
       _mouse_dx_acc == 0.0 && _mouse_dy_acc == 0.0 &&
       !_move_w && !_move_a && !_move_s && !_move_d && !_move_space && !_move_shift && !_move_ctrl &&
@@ -5360,11 +5472,11 @@ fn _sync_camera_state_to_arrays() {
 }
 
 fn _gui_apply_camera_state() bool {
-   if(!camthreed){ return false }
-   if(_cam_fov < 15.0){ _cam_fov = 15.0 }
-   if(_cam_fov > 120.0){ _cam_fov = 120.0 }
-   if(_h_pch < _p_min){ _h_pch = _p_min }
-   if(_h_pch > _p_max){ _h_pch = _p_max }
+   if !camthreed { return false }
+   if _cam_fov < 15.0 { _cam_fov = 15.0 }
+   if _cam_fov > 120.0 { _cam_fov = 120.0 }
+   if _h_pch < _p_min { _h_pch = _p_min }
+   if _h_pch > _p_max { _h_pch = _p_max }
    _target_yaw = _h_yaw
    _target_pch = _h_pch
    _vx, _vy, _vz = 0.0, 0.0, 0.0
@@ -5383,7 +5495,7 @@ fn _gui_apply_camera_state() bool {
 }
 
 fn _ui_projection_aspect() f64 {
-   if(_win_h > 0.0 && _win_w > 0.0){ return _win_w / _win_h }
+   if _win_h > 0.0 && _win_w > 0.0 { return _win_w / _win_h }
    16.0 / 9.0
 }
 
@@ -5394,14 +5506,14 @@ fn _ui_update_projection(f64 px, f64 py, f64 pz, f64 tx, f64 ty, f64 tz) bool {
    M_V_SKY[14] = 0.0
    M_V_SKY[15] = 0.0
    M_V_SKY[16] = 0.0
-   if(is_ortho){
+   if is_ortho {
       mut z = _ortho_zoom
-      if(z < 0.01){ z = 0.01 }
+      if z < 0.01 { z = 0.01 }
       rmat.mat4_ortho_into(-z * aspect, z * aspect, -z, z, -1000.0, 1000.0, M_P)
    } else {
       mut fov = _cam_fov
-      if(fov < 15.0){ fov = 15.0 }
-      if(fov > 120.0){ fov = 120.0 }
+      if fov < 15.0 { fov = 15.0 }
+      if fov > 120.0 { fov = 120.0 }
       rmat.mat4_perspective_into(fov * PI / 180.0, aspect, 0.1, 1000.0, M_P)
    }
    rmat.mat4_mul_into(M_P, M_V, M_VP)
@@ -5413,7 +5525,7 @@ fn _ui_update_projection(f64 px, f64 py, f64 pz, f64 tx, f64 ty, f64 tz) bool {
 }
 
 fn _ui_update_projection_fast() bool {
-   if(!_proj_dirty){ return true }
+   if !_proj_dirty { return true }
    def tgt = camera.target_from_angles(_cam_px, _cam_py, _cam_pz, _h_yaw, _h_pch)
    _ui_update_projection(
       _cam_px, _cam_py, _cam_pz,
@@ -5443,15 +5555,15 @@ fn _sync_projection_from_camera() {
 fn _app_update_simulation(dt, bench, prep_gui, gui_nav_blocking, trace, deep_trace) {
    def prev_cam = _camera_state_snapshot()
    def t_sim0 = (trace && deep_trace) ? ticks() : 0
-   if(!_term_open && !bench){
+   if !_term_open && !bench {
       _ui_set_update_stage("camera.sim")
       _app_simulate_camera_frame(dt, prep_gui, gui_nav_blocking)
    }
    def cam_dirty = _camera_state_changed(prev_cam)
-   if(cam_dirty){
+   if cam_dirty {
       _sync_camera_state_to_arrays()
    }
-   if(cam_dirty || _proj_dirty){
+   if cam_dirty || _proj_dirty {
       _sync_projection_from_camera()
       _static_world_redraw(2)
    }
@@ -5468,27 +5580,27 @@ fn app_update(dt) {
    def deep_trace = ui_profile.deep_enabled()
    def bench = ui_profile.ui_bench_enabled()
    def t_evt0 = (trace && deep_trace) ? ticks() : 0
-   if(_app_update_fast_path(dt)){ return }
-   if(_app_update_bench_frame(dt, trace, deep_trace, t_evt0)){ return }
+   if _app_update_fast_path(dt) { return }
+   if _app_update_bench_frame(dt, trace, deep_trace, t_evt0) { return }
    def gui_enabled_frame = _app_process_events()
    _ui_set_update_stage("post-events")
    _last_evt_ms = (trace && deep_trace) ? ui_profile.elapsed_ms(t_evt0) : 0.0
    _app_prepare_gui_after_events(bench, gui_enabled_frame, trace, deep_trace)
    def _discard_f1_poll = _app_poll_f1_hotkey()
-   if(_app_idle_after_events(bench, _app_prep_gui)){ return }
+   if _app_idle_after_events(bench, _app_prep_gui) { return }
    _app_update_simulation(dt, bench, _app_prep_gui, _app_gui_nav_blocking, trace, deep_trace)
    _ui_set_update_stage("done")
 }
 
 fn _draw_world_bench_fast(cam_px, cam_py, cam_pz) {
-   if(!_bench_env_bound){
+   if !_bench_env_bound {
       gfx.set_env_tex(-1)
       gfx.set_env_spec_tex(-1)
       _bench_env_bound = true
    }
    _cam_px_cache, _cam_py_cache = cam_px, cam_py
    _cam_pz_cache = cam_pz
-   if(!_bench_cam_bound || cam_px != _bench_cam_x || cam_py != _bench_cam_y || cam_pz != _bench_cam_z){
+   if !_bench_cam_bound || cam_px != _bench_cam_x || cam_py != _bench_cam_y || cam_pz != _bench_cam_z {
       gfx.set_cam_pos(cam_px, cam_py, cam_pz)
       _bench_cam_x, _bench_cam_y = cam_px, cam_py
       _bench_cam_z = cam_pz
@@ -5506,14 +5618,14 @@ fn _world_ensure_generated_envs(
       bool(studio_env), bool(neutral_env), bool(compare_reflect_env),
       bool(compare_visible_env), bool(optical_spec_env), bool(feature_fallback_env)
    )
-   if(bool(plan.get(0, false))){
+   if bool(plan.get(0, false)) {
       build_generated_textures(
          plan.get(1, false),
          plan.get(2, false),
          plan.get(3, false),
          plan.get(4, false)
       )
-      if(bool(plan.get(5, false))){
+      if bool(plan.get(5, false)) {
          def _discard_21 = _load_fast_generated_skybox(ui_profile.visible_skybox_default())
       }
    }
@@ -5533,27 +5645,27 @@ fn _world_env_textures() dict {
 }
 
 fn _world_scene_env_allowed() bool {
-   if(ui_profile.env_truthy_cached("NY_UI_DISABLE_ENV")){ return false }
-   if(ui_profile.env_present_cached("NY_UI_VISIBLE_SKYBOX") && !ui_profile.env_enabled_cached("NY_UI_VISIBLE_SKYBOX")){ return false }
-   if(ui_profile.env_present_cached("NY_UI_SHOW_SKYBOX") && !ui_profile.env_enabled_cached("NY_UI_SHOW_SKYBOX")){ return false }
+   if ui_profile.env_truthy_cached("NY_UI_DISABLE_ENV") { return false }
+   if ui_profile.env_present_cached("NY_UI_VISIBLE_SKYBOX") && !ui_profile.env_enabled_cached("NY_UI_VISIBLE_SKYBOX") { return false }
+   if ui_profile.env_present_cached("NY_UI_SHOW_SKYBOX") && !ui_profile.env_enabled_cached("NY_UI_SHOW_SKYBOX") { return false }
    true
 }
 
 fn _world_ensure_scene_env_ready() bool {
-   if(!show_scene || !is_dict(active_scene) || !_world_scene_env_allowed()){ return false }
-   if(skybox_tex_id >= 0 || compare_env_tex_id >= 0 || neutral_env_tex_id >= 0 || compare_visible_env_tex_id >= 0){
+   if !show_scene || !is_dict(active_scene) || !_world_scene_env_allowed() { return false }
+   if skybox_tex_id >= 0 || compare_env_tex_id >= 0 || neutral_env_tex_id >= 0 || compare_visible_env_tex_id >= 0 {
       return true
    }
-   if(_load_skybox(true, "")){ return true }
+   if _load_skybox(true, "") { return true }
    _load_fast_generated_skybox(true)
 }
 
 fn _world_scene_has_lights() bool {
-   if(!is_dict(active_scene)){
+   if !is_dict(active_scene) {
       return false
    }
    mut has_scene_lights = int(active_scene.get("scene_lights_count", 0)) > 0
-   if(!has_scene_lights){
+   if !has_scene_lights {
       def scene_lights_fallback = active_scene.get("scene_lights", [])
       has_scene_lights = is_list(scene_lights_fallback) && scene_lights_fallback.len > 0
    }
@@ -5568,7 +5680,7 @@ fn _world_proof_batch_env_fallbacks(
    !_scene_pref_black_visible && _gui_env_mode != 4
    def has_lights = _world_scene_has_lights()
    def tex0 = _world_env_textures()
-   if(scene_engine.proof_needs_generated(tex0, int(env_tex), int(env_spec_tex), can_fallback, has_lights, bool(scene_env_sensitive_materials), bool(scene_needs_reflect_spec))){
+   if scene_engine.proof_needs_generated(tex0, int(env_tex), int(env_spec_tex), can_fallback, has_lights, bool(scene_env_sensitive_materials), bool(scene_needs_reflect_spec)) {
       def _discard_22 = build_generated_textures(true, true, true, scene_needs_reflect_spec)
    }
    def pair = scene_engine.proof_fallbacks(
@@ -5577,10 +5689,10 @@ fn _world_proof_batch_env_fallbacks(
    )
    mut out_env_tex = int(pair.get(0, env_tex))
    mut out_env_spec_tex = int(pair.get(1, env_spec_tex))
-   if(can_fallback && out_env_tex < 0 && skybox_tex_id < 0){
+   if can_fallback && out_env_tex < 0 && skybox_tex_id < 0 {
       def _discard_23 = _load_fast_generated_skybox(false)
    }
-   if(can_fallback && out_env_tex < 0){
+   if can_fallback && out_env_tex < 0 {
       def sky_pair = scene_engine.skybox_fallback(_world_env_textures(), out_env_tex, out_env_spec_tex, true)
       out_env_tex = int(sky_pair.get(0, out_env_tex))
       out_env_spec_tex = int(sky_pair.get(1, out_env_spec_tex))
@@ -5598,15 +5710,15 @@ fn _world_env_background_state(env_tex, env_spec_tex, batch_on, proof_on, gui_pr
       ui_profile.env_truthy_cached("NY_UI_GUI_DRAW_ENV_BG"), bool(proof_on),
       ui_profile.env_truthy_cached("NY_UI_PROOF_SKYBOX")
    )
-   if(draw_env_background && skybox_enabled && _ensure_visible_skybox_ready() && skybox_tex_id >= 0){
+   if draw_env_background && skybox_enabled && _ensure_visible_skybox_ready() && skybox_tex_id >= 0 {
       out_env_tex = skybox_tex_id
-      if(out_env_spec_tex < 0){
+      if out_env_spec_tex < 0 {
          out_env_spec_tex = (skybox_spec_tex_id >= 0) ? skybox_spec_tex_id : skybox_tex_id
       }
    }
-   elif(draw_env_background && out_env_tex < 0 && _ensure_visible_skybox_ready()){
+   elif draw_env_background && out_env_tex < 0 && _ensure_visible_skybox_ready() {
       out_env_tex = skybox_tex_id
-      if(out_env_spec_tex < 0){
+      if out_env_spec_tex < 0 {
          out_env_spec_tex = (skybox_spec_tex_id >= 0) ? skybox_spec_tex_id : skybox_tex_id
       }
    }
@@ -5614,15 +5726,15 @@ fn _world_env_background_state(env_tex, env_spec_tex, batch_on, proof_on, gui_pr
 }
 
 fn _world_trace_parity(env_tex, env_spec_tex, draw_env_background, scene_mat_mask, batch_on, proof_on, gui_probe_on) {
-   if(!ui_profile.parity_trace_enabled()){ return }
+   if !ui_profile.parity_trace_enabled() { return }
    mut lights_count = 0
-   if(is_dict(active_scene)){ lights_count = int(active_scene.get("scene_lights_count", 0)) }
+   if is_dict(active_scene) { lights_count = int(active_scene.get("scene_lights_count", 0)) }
    def sig = to_str(env_tex) + "|" + to_str(env_spec_tex) + "|" +
    to_str(draw_env_background ? 1 : 0) + "|" + to_str(scene_mat_mask) + "|" +
    to_str(lights_count) + "|" + to_str(_gui_env_mode) + "|" +
    to_str(batch_on ? 1 : 0) + "|" + to_str(proof_on ? 1 : 0) + "|" +
    to_str(gui_probe_on ? 1 : 0) + "|" + to_str(show_scene ? 1 : 0) + "|" + _loaded_scene_name
-   if(sig != _last_world_parity_sig){
+   if sig != _last_world_parity_sig {
       _last_world_parity_sig = sig
       def _discard_world_parity_trace = ui_profile.print_text("[parity:world] scene=" + _loaded_scene_name +
          " env=" + to_str(env_tex) +
@@ -5638,7 +5750,7 @@ fn _world_trace_parity(env_tex, env_spec_tex, draw_env_background, scene_mat_mas
 }
 
 fn _draw_world_skybox(draw_env_background, env_tex) {
-   if(draw_env_background && env_tex >= 0){
+   if draw_env_background && env_tex >= 0 {
       _render_set_skybox_view(_h_yaw, _h_pch, _cam_fov)
       gfx.set_view_proj(M_VP_SKY)
       gfx.set_model_matrix(M_ID)
@@ -5651,16 +5763,16 @@ fn _draw_world_grid_and_scene(phase, cam_px, cam_pz, chrome_on, gui_probe_on, gu
    def clean_proof = _proof_dump_active()
    def have_scene = gui_probe_has_scene
    def have_axes = is_dict(_axes_mesh) && !clean_proof
-   if(ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE")){
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") {
       mut scene_gpu_count = 0
       mut scene_cpu_count = 0
       mut scene_state_count = 0
       mut scene_state_slab = false
-      if(is_dict(active_scene)){
+      if is_dict(active_scene) {
          scene_gpu_count = int(active_scene.get("gpu_parts_count", 0))
          scene_cpu_count = int(active_scene.get("parts_count", 0))
          def scene_gpu_state = active_scene.get("gpu_draw_state", 0)
-         if(is_list(scene_gpu_state) && scene_gpu_state.len >= 2){
+         if is_list(scene_gpu_state) && scene_gpu_state.len >= 2 {
             scene_state_slab = to_int(scene_gpu_state.get(0, 0)) != 0
             scene_state_count = int(scene_gpu_state.get(1, 0))
          }
@@ -5674,17 +5786,17 @@ fn _draw_world_grid_and_scene(phase, cam_px, cam_pz, chrome_on, gui_probe_on, gu
          " state_slab=" + to_str(scene_state_slab) +
       " state_count=" + to_str(scene_state_count))
    }
-   if(chrome_on && (ui_profile.world_grid_enabled(_gui_visible, _scene_selected, _gui_probe_mode_enabled()) || (_gizmo_ruler && _gui_editor_shell_open())) && !clean_proof && !(gui_probe_on && !have_scene)){
+   if chrome_on && (ui_profile.world_grid_enabled(_gui_visible, _scene_selected, _gui_probe_mode_enabled()) || (_gizmo_ruler && _gui_editor_shell_open())) && !clean_proof && !(gui_probe_on && !have_scene) {
       gfx.set_unlit(true)
       gfx.reset_overlay_state()
       def axes_in_grid = _draw_infinite_world_grid(cam_px, cam_pz, have_axes)
-      if(have_axes && !axes_in_grid){
+      if have_axes && !axes_in_grid {
          gfx.set_model_matrix(M_ID)
          draw_mesh(_axes_mesh)
       }
       gfx.set_unlit(false)
    }
-   if(have_scene){
+   if have_scene {
       gfx.clear_depth()
       _set_active_scene_model_matrix()
       gfx.reset_overlay_state()
@@ -5694,7 +5806,7 @@ fn _draw_world_grid_and_scene(phase, cam_px, cam_pz, chrome_on, gui_probe_on, gu
 }
 
 fn _draw_world(phase, cam_px, cam_py, cam_pz) {
-   if(ui_profile.ui_bench_enabled()){
+   if ui_profile.ui_bench_enabled() {
       _draw_world_bench_fast(cam_px, cam_py, cam_pz)
       return
    }
@@ -5762,11 +5874,11 @@ fn _draw_world(phase, cam_px, cam_py, cam_pz) {
 }
 
 fn _present_loading_frame(label) {
-   if(ui_profile.headless_enabled() || !win){ return false }
+   if ui_profile.headless_enabled() || !win { return false }
    poll_events()
-   if(should_close(win)){ return false }
+   if should_close(win) { return false }
    _sync_window_size_from_live()
-   if(!gfx.begin_frame()){ return false }
+   if !gfx.begin_frame() { return false }
    _prepare_gui_overlay_pass()
    viewer_loading.draw_startup_card(_win_w, _win_h, _ui_title_font(), _ui_font(), label)
    def ok = gfx.end_frame()
@@ -5777,24 +5889,24 @@ fn _present_loading_frame(label) {
 fn render_thread_obj() {
    "Draw one full renderer frame for the current UI state."
    def phase = _render_phase
-   if(phase < 0.0){ return false }
+   if phase < 0.0 { return false }
    def render_trace = ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE")
-   if(_ui_static_world_fast_enabled() && total_frames >= 2 && _ui_static_update_clean() && _prepare_static_world_visual_fast()){
+   if _ui_static_world_fast_enabled() && total_frames >= 2 && _ui_static_update_clean() && _prepare_static_world_visual_fast() {
       def load_color = _main_loop_force_full_render ? false : _static_world_color_reuse_allowed()
-      if(render_trace){
+      if render_trace {
          ui_profile.print_text("[ui:render] static force=" + to_str(_main_loop_force_full_render) +
             " load_color=" + to_str(load_color) +
             " color_frames=" + to_str(_static_world_color_reuse_frames) +
          " redraw=" + to_str(_static_world_redraw_frames))
       }
-      if(load_color){ _render_set_next_frame_load_color(true) }
+      if load_color { _render_set_next_frame_load_color(true) }
       _ui_set_update_stage("render.static.begin_frame")
-      if(!gfx.begin_frame()){
-         if(load_color){ _render_set_next_frame_load_color(false) }
+      if !gfx.begin_frame() {
+         if load_color { _render_set_next_frame_load_color(false) }
          return false
       }
       _ui_set_update_stage("render.static.draw")
-      if(!_static_world_skip_draw_now(load_color)){
+      if !_static_world_skip_draw_now(load_color) {
          _draw_static_world_visual_fast(load_color)
       }
       _draw_runtime_overlay_after_world(load_color)
@@ -5803,15 +5915,15 @@ fn render_thread_obj() {
       _static_world_color_reuse_note(load_color)
       return true
    }
-   if(render_trace){
+   if render_trace {
       ui_profile.print_text("[ui:render] full force=" + to_str(_main_loop_force_full_render) +
          " static=" + to_str(_ui_static_world_fast_enabled()) +
       " tf=" + to_str(total_frames))
    }
    _main_loop_trace_once("[ui:render] begin_frame.before")
    _ui_set_update_stage("render.begin_frame")
-   if(!gfx.begin_frame()){
-      if(ui_profile.gui_trace_enabled()){
+   if !gfx.begin_frame() {
+      if ui_profile.gui_trace_enabled() {
          def _discard_72 = ui_profile.print_text("[ui:frame] skip reason=begin_frame_false")
       }
       _main_loop_trace_once("[ui:render] begin_frame.false")
@@ -5835,9 +5947,9 @@ fn _draw_frame(phase, term_open) {
    def cam_pz = _cam_pz_cache
    def trace = ui_profile.trace_enabled()
    def t0 = trace ? ticks() : 0
-   if(_ui_debug_enabled == 1){
+   if _ui_debug_enabled == 1 {
       def cur_to = term_open ? 1 : 0
-      if(_last_draw_world_state != 1 || cur_to != _last_term_open_state){
+      if _last_draw_world_state != 1 || cur_to != _last_term_open_state {
          _last_draw_world_state = 1
          _last_term_open_state = cur_to
          _dbg_ui("[ui] draw mode: term_open=" + to_str(term_open) + " world_pass=true")
@@ -5850,10 +5962,10 @@ fn _draw_frame(phase, term_open) {
       ui_profile.eprint_text("[ui:panic] stage=draw.world frame=" + to_str(total_frames))
       panic(err)
    }
-   if(ui_profile.ui_bench_enabled()){
+   if ui_profile.ui_bench_enabled() {
       return
    }
-   if(trace){
+   if trace {
       def t1 = ticks()
       _last_world_ms = ui_profile.ms_between(t1, t0)
       try {
@@ -5878,22 +5990,22 @@ fn _draw_frame(phase, term_open) {
 
 fn _render_thread_world_only_fast(draw_overlay=false) {
    def phase = _render_phase
-   if(phase < 0.0){ return false }
-   if(!gfx.begin_frame()){ return false }
+   if phase < 0.0 { return false }
+   if !gfx.begin_frame() { return false }
    gfx.set_view_proj(M_VP)
    _draw_world(phase, _cam_px_cache, _cam_py_cache, _cam_pz_cache)
-   if(draw_overlay){ def _discard_80 = _draw_runtime_overlay_after_world(false) }
+   if draw_overlay { def _discard_80 = _draw_runtime_overlay_after_world(false) }
    def _discard_81 = gfx.end_frame()
    true
 }
 
 fn _render_thread_static_world_visual_direct(load_color=false) {
-   if(load_color){ _render_set_next_frame_load_color(true) }
-   if(!gfx.begin_frame()){
-      if(load_color){ _render_set_next_frame_load_color(false) }
+   if load_color { _render_set_next_frame_load_color(true) }
+   if !gfx.begin_frame() {
+      if load_color { _render_set_next_frame_load_color(false) }
       return false
    }
-   if(!_static_world_skip_draw_now(load_color)){
+   if !_static_world_skip_draw_now(load_color) {
       _draw_static_world_visual_fast(load_color)
    }
    def _discard_86 = gfx.end_frame()
@@ -5905,9 +6017,9 @@ fn _bench_draw_world_only_fast() {
 }
 
 fn _render_bench_frame() bool {
-   if(ui_profile.bench_enabled(ui_profile.profile_dump_enabled(ui_profile.trace_enabled()))){
+   if ui_profile.bench_enabled(ui_profile.profile_dump_enabled(ui_profile.trace_enabled())) {
       def t0 = ticks()
-      if(!_render_begin_frame()){ return false }
+      if !_render_begin_frame() { return false }
       def t1 = ticks()
       _bench_draw_world_only_fast()
       def t2 = ticks()
@@ -5916,7 +6028,7 @@ fn _render_bench_frame() bool {
       ui_profile.bench_record(t1 - t0, t2 - t1, t3 - t2)
       return true
    }
-   if(!_render_begin_frame()){ return false }
+   if !_render_begin_frame() { return false }
    _bench_draw_world_only_fast()
    def _discard_88 = _render_end_frame()
    true
@@ -5924,7 +6036,7 @@ fn _render_bench_frame() bool {
 
 fn _render_thread_obj_fast_bench() {
    def now = ticks()
-   if(_last_frame_time == 0){ _last_frame_time = now }
+   if _last_frame_time == 0 { _last_frame_time = now }
    _current_frame_time = (now - _last_frame_time) / 1000000000.0
    _last_frame_time = now
    _frame_time_accum += _current_frame_time
@@ -5935,11 +6047,11 @@ fn _render_thread_obj_fast_bench() {
 fn _render_thread_obj_sim_bench_fast() { _render_bench_frame() }
 
 fn _fast_view_sync_live_keys() bool {
-   if(key_down(win, uin.KEY_ESCAPE) || key_down(win, 0xFF1B)){
+   if key_down(win, uin.KEY_ESCAPE) || key_down(win, 0xFF1B) {
       set_should_close(win, true)
       return false
    }
-   if(_app_poll_f1_hotkey()){
+   if _app_poll_f1_hotkey() {
       return false
    }
    _move_w = key_down(win, uin.KEY_W)
@@ -5956,22 +6068,22 @@ fn _fast_view_handle_key_pressed(any data) bool {
    def k = uin.event_key(data)
    def sc = data.get("scancode", data.get("raw_key", 0))
    def mods = ui_app.app_effective_mods(data.get("mod", 0), k, sc, _move_shift, _move_ctrl)
-   if(k == uin.KEY_F1){
+   if k == uin.KEY_F1 {
       def _discard_f1 = _hotkey_toggle_editor()
       return false
    }
    def _discard_move_key = _app_set_move_key(k, sc, true)
-   if(k == uin.KEY_ESCAPE || k == 256){
+   if k == uin.KEY_ESCAPE || k == 256 {
       set_should_close(win, true)
-   } elif(k == uin.KEY_PAGE_UP){
-      if(_app_block_scripted_model_cycle(k)){ return true }
+   } elif k == uin.KEY_PAGE_UP {
+      if _app_block_scripted_model_cycle(k) { return true }
       _cycle_loaded_model(-1)
-   } elif(k == uin.KEY_PAGE_DOWN){
-      if(_app_block_scripted_model_cycle(k)){ return true }
+   } elif k == uin.KEY_PAGE_DOWN {
+      if _app_block_scripted_model_cycle(k) { return true }
       _cycle_loaded_model(1)
-   } elif((mods & MOD_CONTROL) == 0 && k == uin.KEY_F){
+   } elif (mods & MOD_CONTROL) == 0 && k == uin.KEY_F {
       _cmd_lookat(true)
-   } elif((mods & MOD_CONTROL) != 0 && (k == uin.KEY_P || k == uin.KEY_K || k == uin.KEY_F)){
+   } elif (mods & MOD_CONTROL) != 0 && (k == uin.KEY_P || k == uin.KEY_K || k == uin.KEY_F) {
       _gui_visible = true
       _gui_focus_asset_search()
    }
@@ -5985,14 +6097,14 @@ fn _fast_view_handle_key_released(any data) {
 }
 
 fn _fast_view_handle_mouse_pressed(any data) {
-   if(_scene_loading_input_guard_active()){
+   if _scene_loading_input_guard_active() {
       _release_scene_loading_input("scene load fast mouse press")
       return
    }
    def b = int(data.get("button", -1))
-   if(!_term_open && b == _MOUSE_MIDDLE){
+   if !_term_open && b == _MOUSE_MIDDLE {
       def _discard_middle = _middle_mouse_start()
-   } elif(!_term_open && b == _MOUSE_RIGHT && is_dict(active_scene) && show_scene){
+   } elif !_term_open && b == _MOUSE_RIGHT && is_dict(active_scene) && show_scene {
       _rmb_look_active = true
       gui.clear_focus()
       skip_mouse_frames = 0
@@ -6004,9 +6116,9 @@ fn _fast_view_handle_mouse_pressed(any data) {
 
 fn _fast_view_handle_mouse_released(any data) {
    def b = int(data.get("button", -1))
-   if(b == _MOUSE_MIDDLE){
+   if b == _MOUSE_MIDDLE {
       def _discard_middle = _middle_mouse_stop()
-   } elif(b == _MOUSE_RIGHT && _rmb_look_active){
+   } elif b == _MOUSE_RIGHT && _rmb_look_active {
       _rmb_look_active = false
       skip_mouse_frames = 0
       _clear_camera_input_state()
@@ -6020,83 +6132,83 @@ fn _fast_view_pump_events() bool {
    poll_events()
    mut interactive = false
    mut e = _app_next_event()
-   while(e != 0){
+   while e != 0 {
       def typ = event_type(e)
       def data = event_data(e)
-      if(quit(e)){
+      if quit(e) {
          set_should_close(win, true)
       }
-      if(_ui_consume_hotkey_text_spill(typ)){
+      if _ui_consume_hotkey_text_spill(typ) {
          e = _app_next_event()
          continue
       }
-      if(_ui_handle_menu_hotkey(typ, data, true)){
+      if _ui_handle_menu_hotkey(typ, data, true) {
          e = _app_next_event()
          continue
       }
-      if(typ == EVENT_WINDOW_RESIZED){
+      if typ == EVENT_WINDOW_RESIZED {
          _handle_window_resize_event(data, true, true, true)
       }
-      elif(typ == EVENT_KEY_PRESSED){
+      elif typ == EVENT_KEY_PRESSED {
          interactive = true
-         if(!_fast_view_handle_key_pressed(data)){ return false }
+         if !_fast_view_handle_key_pressed(data) { return false }
       }
-      elif(typ == EVENT_KEY_RELEASED){
+      elif typ == EVENT_KEY_RELEASED {
          interactive = true
          def _discard_key_release = _fast_view_handle_key_released(data)
       }
-      elif(typ == EVENT_MOUSE_BUTTON_PRESSED){
+      elif typ == EVENT_MOUSE_BUTTON_PRESSED {
          interactive = true
          def _discard_mouse_press = _fast_view_handle_mouse_pressed(data)
       }
-      elif(typ == EVENT_MOUSE_BUTTON_RELEASED){
+      elif typ == EVENT_MOUSE_BUTTON_RELEASED {
          interactive = true
          def _discard_mouse_release = _fast_view_handle_mouse_released(data)
       }
-      elif(typ == EVENT_MOUSE_POS_CHANGED){
+      elif typ == EVENT_MOUSE_POS_CHANGED {
          interactive = true
          _app_handle_mouse_pos(data, false)
       }
-      elif(typ == EVENT_MOUSE_SCROLL){
+      elif typ == EVENT_MOUSE_SCROLL {
          interactive = true
-         if(_middle_mouse_scroll_suppressed()){
+         if _middle_mouse_scroll_suppressed() {
             e = _app_next_event()
             continue
          }
          _app_handle_scroll(data, false, false)
       }
-      elif(typ == EVENT_FOCUS_OUT){
+      elif typ == EVENT_FOCUS_OUT {
          interactive = true
          _app_handle_focus_out()
       }
-      elif(typ == EVENT_MOUSE_LEAVE){
+      elif typ == EVENT_MOUSE_LEAVE {
          interactive = true
          _app_handle_mouse_leave()
       }
-      elif(typ == EVENT_MOUSE_ENTER){
+      elif typ == EVENT_MOUSE_ENTER {
          interactive = true
          _app_handle_mouse_enter()
       }
       e = _app_next_event()
    }
-   if(interactive){
+   if interactive {
       return false
    }
-   if(!_fast_view_sync_live_keys()){
+   if !_fast_view_sync_live_keys() {
       return false
    }
    !(_ui_move_input_active() || _middle_mouse_active)
 }
 
 fn _ui_fast_view_enabled() bool {
-   if(!win || ui_profile.headless_enabled() || ui_profile.nosurface_enabled()){ return false }
-   if(!ui_profile.ui_bench_enabled() || _timeout_ns <= 0){ return false }
-   if(_auto_dump_enabled == 1 || _batch_dump_enabled() || _gui_dump_suite_active){ return false }
-   if(_term_open || _gui_enabled_now() || _gui_probe_mode_enabled()){ return false }
-   if(!is_dict(active_scene) || !show_scene || _scene_load_async_active()){ return false }
-   if(_anim_enabled){ return false }
-   if((_anim_count > 0 || is_dict(_anim_gltf_data)) && !_scene_static_pose_gpu_ready() && !_scene_deform_idle_ready()){ return false }
-   if(!_ui_static_world_fast_enabled()){ return false }
+   if !win || ui_profile.headless_enabled() || ui_profile.nosurface_enabled() { return false }
+   if !ui_profile.ui_bench_enabled() || _timeout_ns <= 0 { return false }
+   if _auto_dump_enabled == 1 || _batch_dump_enabled() || _gui_dump_suite_active { return false }
+   if _term_open || _gui_enabled_now() || _gui_probe_mode_enabled() { return false }
+   if !is_dict(active_scene) || !show_scene || _scene_load_async_active() { return false }
+   if _anim_enabled { return false }
+   if (_anim_count > 0 || is_dict(_anim_gltf_data)) && !_scene_static_pose_gpu_ready() && !_scene_deform_idle_ready() { return false }
+   if !_ui_static_world_fast_enabled() { return false }
    !_ui_view_input_active()
 }
 
@@ -6138,7 +6250,7 @@ fn _bench_print_summary(
 }
 
 fn _bench_log_start(mode_name) {
-   if(_fps_log_enabled != 1){ return }
+   if _fps_log_enabled != 1 { return }
    def _printed = ui_profile.print_text("[bench] mode=" + mode_name +
       " headless=" + to_str(ui_profile.headless_enabled()) +
       " backend=" + to_str(get_active_backend_name()) +
@@ -6150,12 +6262,12 @@ fn _bench_log_start(mode_name) {
 }
 
 fn _bench_bind_env_and_camera(bool bind_env=true) {
-   if(bind_env && !_bench_env_bound){
+   if bind_env && !_bench_env_bound {
       gfx.set_env_tex(-1)
       gfx.set_env_spec_tex(-1)
       _bench_env_bound = true
    }
-   if(!_bench_cam_bound){
+   if !_bench_cam_bound {
       gfx.set_cam_pos(_cam_px_cache, _cam_py_cache, _cam_pz_cache)
       _bench_cam_x, _bench_cam_y, _bench_cam_z = _cam_px_cache, _cam_py_cache, _cam_pz_cache
       _bench_cam_bound = true
@@ -6164,13 +6276,13 @@ fn _bench_bind_env_and_camera(bool bind_env=true) {
 
 fn _sample_fps_tick(int now, bool update_public_fps=false) bool {
    def sampled = ui_loop.sample_fps(_fps_samples, frame_num, last_fps_t, now)
-   if(!bool(sampled.get("sampled", false))){ return false }
+   if !bool(sampled.get("sampled", false)) { return false }
    _fps_samples = sampled.get("samples", _fps_samples)
    frame_num = int(sampled.get("frames", 0))
    last_fps_t = int(sampled.get("last", now))
-   if(update_public_fps){
+   if update_public_fps {
       fps = int(sampled.get("fps", fps))
-      if(win && !ui_profile.headless_enabled()){
+      if win && !ui_profile.headless_enabled() {
          set_title(win, "Nytrix UI - " + to_str(fps) + " FPS")
       }
    }
@@ -6187,40 +6299,40 @@ fn _run_fast_nosurface_bench_loop() {
    mut phase = 0.0
    def dt = 0.0001
    mut static_visual_fast = visual_bench && _prepare_static_world_visual_fast()
-   if(_fps_log_enabled == 1 && visual_bench){
+   if _fps_log_enabled == 1 && visual_bench {
       ui_profile.print_text("[bench] visual_static=" + to_str(static_visual_fast) +
       " skybox=" + to_str(_static_world_draw_sky))
    }
-   if(!static_visual_fast){
+   if !static_visual_fast {
       gfx.set_view_proj(M_VP)
    }
    _bench_bind_env_and_camera(!static_visual_fast)
    mut visual_reuse_latched = false
    mut visual_profile = ui_profile.bench_enabled(ui_profile.profile_dump_enabled(ui_profile.trace_enabled()))
-   while(true){
-      if((frame_iter & 63) == 0){
+   while true {
+      if (frame_iter & 63) == 0 {
          now = ticks()
-         if(_timeout_ns > 0 && (now - start_t) >= _timeout_ns){
+         if _timeout_ns > 0 && (now - start_t) >= _timeout_ns {
             break
          }
       }
       mut rendered = false
-      if(static_visual_fast){
+      if static_visual_fast {
          mut load_color = visual_reuse_latched
-         if(!visual_reuse_latched){
+         if !visual_reuse_latched {
             load_color = _static_world_color_reuse_allowed()
-            if(load_color){
+            if load_color {
                visual_reuse_latched = true
             }
          }
-         if(visual_profile){
+         if visual_profile {
             def t0 = ticks()
-            if(load_color){
+            if load_color {
                _render_set_next_frame_load_color(true)
             }
-            if(gfx.begin_frame()){
+            if gfx.begin_frame() {
                def t1 = ticks()
-               if(!_static_world_skip_draw_now(load_color)){
+               if !_static_world_skip_draw_now(load_color) {
                   _draw_static_world_visual_fast(load_color)
                }
                def t2 = ticks()
@@ -6228,13 +6340,13 @@ fn _run_fast_nosurface_bench_loop() {
                def t3 = ticks()
                ui_profile.bench_record(t1 - t0, t2 - t1, t3 - t2)
                rendered = true
-            } elif(load_color){
+            } elif load_color {
                _render_set_next_frame_load_color(false)
             }
          } else {
             rendered = _render_thread_static_world_visual_direct(load_color)
          }
-         if(rendered){
+         if rendered {
             _static_world_color_reuse_note(load_color)
          }
       } else {
@@ -6243,7 +6355,7 @@ fn _run_fast_nosurface_bench_loop() {
          _render_phase = phase
          rendered = _render_thread_obj_fast_bench()
       }
-      if(rendered){
+      if rendered {
          _did_first_frame = true
          total_frames += 1
       }
@@ -6267,21 +6379,21 @@ fn _run_simulated_nosurface_bench_loop() {
    gfx.set_view_proj(M_VP)
    mut static_update_clean = _ui_static_update_clean()
    def dt = 0.0001
-   if(static_update_clean){
+   if static_update_clean {
       _current_frame_time = dt
       _render_dt = dt
       _render_phase = phase
       _render_set_frame_time_sec(_frame_time_accum)
    }
    _bench_bind_env_and_camera(true)
-   while(true){
-      if((frame_iter & 63) == 0){
+   while true {
+      if (frame_iter & 63) == 0 {
          now = ticks()
-         if(_timeout_ns > 0 && (now - start_t) >= _timeout_ns){
+         if _timeout_ns > 0 && (now - start_t) >= _timeout_ns {
             break
          }
       }
-      if(!(static_update_clean && !_proj_dirty)){
+      if !(static_update_clean && !_proj_dirty) {
          phase += dt
          _current_frame_time = dt
          _frame_time_accum += dt
@@ -6293,10 +6405,10 @@ fn _run_simulated_nosurface_bench_loop() {
       mut update_t1 = frame_t0
       def anim_trace = _anim_frame_trace_enabled() && _anim_frame_trace_hits < 16
       def anim_loop_t0 = anim_trace ? ticks() : 0
-      if(anim_trace){
+      if anim_trace {
          ui_profile.print_text("[anim:loop] iter=" + to_str(frame_iter) + " update.before")
       }
-      if(static_update_clean && !_proj_dirty){
+      if static_update_clean && !_proj_dirty {
          _last_update_ms = 0.0
       } else {
          app_update(dt)
@@ -6304,33 +6416,33 @@ fn _run_simulated_nosurface_bench_loop() {
          _last_update_ms = trace ? ui_profile.ms_between(update_t1, frame_t0) : 0.0
          static_update_clean = _ui_static_update_clean()
       }
-      if(anim_trace){
+      if anim_trace {
          ui_profile.print_text("[anim:loop] update_ms=" + to_str(ui_profile.elapsed_ms(anim_loop_t0)) + " render.before")
       }
       def anim_render_t0 = anim_trace ? ticks() : 0
       def rendered = _render_thread_obj_sim_bench_fast()
-      if(anim_trace){
+      if anim_trace {
          ui_profile.print_text("[anim:loop] render_ms=" +
             to_str(ui_profile.elapsed_ms(anim_render_t0)) +
          " rendered=" + to_str(rendered))
          _anim_frame_trace_hits += 1
       }
       def draw_t1 = trace ? ticks() : update_t1
-      if(rendered){
+      if rendered {
          _did_first_frame = true
          total_frames += 1
          frame_num += 1
-         if(trace){
+         if trace {
             _last_draw_ms = ui_profile.ms_between(draw_t1, update_t1)
             _last_frame_ms = ui_profile.ms_between(draw_t1, frame_t0)
          }
       }
-      if((frame_iter & 1023) == 0){
+      if (frame_iter & 1023) == 0 {
          def _discard_sample = _sample_fps_tick(ticks())
       }
       frame_iter += 1
    }
-   if(ui_profile.bench_enabled(ui_profile.profile_dump_enabled(ui_profile.trace_enabled()))){
+   if ui_profile.bench_enabled(ui_profile.profile_dump_enabled(ui_profile.trace_enabled())) {
       def rs = renderer_frame_stats()
       ui_profile.bench_flush(ticks() - start_t, rs, ui_profile.profile_dump_enabled(ui_profile.trace_enabled()) ? ui_profile.profile_dump_file() : "")
    }
@@ -6340,7 +6452,7 @@ fn _run_simulated_nosurface_bench_loop() {
 
 fn _run_fast_view_loop() bool {
    "Runs static no-chrome model viewing through a tight visible renderer loop."
-   if(_fps_log_enabled == 1){
+   if _fps_log_enabled == 1 {
       def _discard_94 = ui_profile.print_text("[fast-view] mode=static_view backend=" + to_str(get_active_backend_name()) +
          " _timeout_ns=" + to_str(_timeout_ns) +
       " loaded_scene=" + to_str(_loaded_scene_name))
@@ -6348,10 +6460,10 @@ fn _run_fast_view_loop() bool {
    _bench_reset_runtime(ticks())
    def view_start_t = start_t
    mut static_visual_fast = _prepare_static_world_visual_fast()
-   if(_fps_log_enabled == 1){
+   if _fps_log_enabled == 1 {
       def _discard_95 = ui_profile.print_text("[fast-view] static_visual=" + to_str(static_visual_fast))
    }
-   if(!static_visual_fast){
+   if !static_visual_fast {
       def _discard_96 = _ui_update_projection_fast()
       gfx.set_view_proj(M_VP)
       set_clear_color(APP_BG)
@@ -6365,67 +6477,67 @@ fn _run_fast_view_loop() bool {
    _render_phase = phase
    _render_set_frame_time_sec(_frame_time_accum)
    mut static_reuse_latched = false
-   while(true){
-      if((frame_iter & 255) == 0){
+   while true {
+      if (frame_iter & 255) == 0 {
          def now = ticks()
          def deadline = (_timeout_ns > 500000000) ? (_timeout_ns - 300000000) : _timeout_ns
-         if(_timeout_ns > 0 && (now - start_t) >= deadline){
+         if _timeout_ns > 0 && (now - start_t) >= deadline {
             break
          }
       }
       def fast_ok = _fast_view_pump_events()
-      if(should_close(win)){
+      if should_close(win) {
          break
       }
-      if(!fast_ok || !_ui_fast_view_enabled()){
+      if !fast_ok || !_ui_fast_view_enabled() {
          return false
       }
       def proj_was_dirty = _proj_dirty
-      if(proj_was_dirty){
+      if proj_was_dirty {
          def _discard_97 = _ui_update_projection_fast()
       }
-      if(proj_was_dirty || frame_iter == 0){
+      if proj_was_dirty || frame_iter == 0 {
          gfx.set_view_proj(M_VP)
       }
-      if(proj_was_dirty && static_visual_fast){
+      if proj_was_dirty && static_visual_fast {
          static_reuse_latched = false
          _static_world_color_reuse_reset()
          static_visual_fast = _prepare_static_world_visual_fast()
       }
       mut rendered = false
-      if(static_visual_fast){
+      if static_visual_fast {
          mut load_color = static_reuse_latched
-         if(!static_reuse_latched){
+         if !static_reuse_latched {
             load_color = _static_world_color_reuse_allowed()
-            if(load_color){
+            if load_color {
                static_reuse_latched = true
             }
          }
-         if(load_color){
+         if load_color {
             _render_set_next_frame_load_color(true)
          }
-         if(gfx.begin_frame()){
-            if(!_static_world_skip_draw_now(load_color)){
+         if gfx.begin_frame() {
+            if !_static_world_skip_draw_now(load_color) {
                _draw_static_world_visual_fast(load_color)
             }
-            if(APP_STATS){
+            if APP_STATS {
                def _discard_98 = _draw_runtime_overlay_after_world(load_color)
             }
             def _discard_99 = gfx.end_frame()
             _static_world_color_reuse_note(load_color)
             rendered = true
-         } elif(load_color){
+         } elif load_color {
             _render_set_next_frame_load_color(false)
          }
       } else {
          rendered = _render_thread_world_only_fast(APP_STATS)
       }
-      if(rendered){
+      if rendered {
          _did_first_frame = true
          total_frames += 1
          frame_num += 1
       }
-      if((APP_STATS || _fps_log_enabled == 1) && (frame_iter & 1023) == 0){
+      if (APP_STATS || _fps_log_enabled == 1) && (frame_iter & 1023) == 0 {
          def _discard_sample = _sample_fps_tick(ticks(), true)
       }
       frame_iter += 1
@@ -6433,27 +6545,27 @@ fn _run_fast_view_loop() bool {
    def rs = renderer_frame_stats()
    ui_profile.bench_flush(ticks() - view_start_t, rs, ui_profile.profile_dump_enabled(ui_profile.trace_enabled()) ? ui_profile.profile_dump_file() : "")
    _bench_print_summary("[fast-view] ", view_start_t, total_frames, rs, true, false, false)
-   if(win && !should_close(win)){
+   if win && !should_close(win) {
       set_cursor_mode(win, CURSOR_NORMAL)
    }
    gfx.shutdown()
-   if(win){ window.close(win) }
+   if win { window.close(win) }
    true
 }
 
 fn _run_main_loop_fast_path() bool {
-   if(_ui_fast_view_enabled() && _run_fast_view_loop()){
+   if _ui_fast_view_enabled() && _run_fast_view_loop() {
       return true
    }
-   if(ui_profile.fast_surface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled(), _gui_dump_suite_active)){
+   if ui_profile.fast_surface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled(), _gui_dump_suite_active) {
       _run_simulated_nosurface_bench_loop()
       return true
    }
-   if(ui_profile.sim_nosurface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled())){
+   if ui_profile.sim_nosurface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled()) {
       _run_simulated_nosurface_bench_loop()
       return true
    }
-   if(ui_profile.fast_nosurface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled())){
+   if ui_profile.fast_nosurface_bench_enabled(_timeout_ns, _auto_dump_enabled, _batch_dump_enabled()) {
       _run_fast_nosurface_bench_loop()
       return true
    }
@@ -6461,17 +6573,17 @@ fn _run_main_loop_fast_path() bool {
 }
 
 fn _main_loop_startup_pump() {
-   if(!_startup_pumped){
+   if !_startup_pumped {
       poll_events()
       _startup_pumped = true
-      if((!ui_profile.ui_bench_enabled()
+      if ((!ui_profile.ui_bench_enabled()
          || !ui_profile.headless_enabled())
          && !(_batch_dump_enabled()
          && ui_profile.batch_fast_env_enabled())){
          def _discard_100 = _sync_window_size_from_live()
       }
-      if(should_close(win)){
-         if(_startup_trace_enabled()){
+      if should_close(win) {
+         if _startup_trace_enabled() {
             ui_profile.print_text("[ui] startup post-pump: window requested close")
          }
       }
@@ -6489,19 +6601,19 @@ fn _main_loop_reset_timers() {
 }
 
 fn _main_loop_trace_pre_enter() {
-   if(should_close(win)){
-      if(_startup_trace_enabled()){
+   if should_close(win) {
+      if _startup_trace_enabled() {
          ui_profile.print_text("[ui:loop] pre-enter close flag is set")
       }
    }
-   if(_startup_trace_enabled()){
+   if _startup_trace_enabled() {
       def _pre_win = get_win(win)
       mut local_should_close = "not-window"
       mut real_should_close = "not-window"
-      if(is_dict(win)){
+      if is_dict(win) {
          local_should_close = win.get("should_close", "missing")
       }
-      if(is_dict(_pre_win)){
+      if is_dict(_pre_win) {
          real_should_close = _pre_win.get("should_close", "missing")
       }
       ui_profile.print_text("[ui:loop] pre-enter closing=" + to_str(should_close(win)) +
@@ -6513,18 +6625,18 @@ fn _main_loop_trace_pre_enter() {
 }
 
 fn _main_loop_trace_once(msg) {
-   if(_first_frame_trace_allowed() && _startup_trace_enabled()){
+   if _first_frame_trace_allowed() && _startup_trace_enabled() {
       ui_profile.print_text(msg)
    }
 }
 
 fn _main_loop_timeout_close(elapsed) bool {
-   if(_timeout_ns <= 0 || _batch_dump_enabled() || elapsed < _timeout_ns ||
+   if (_timeout_ns <= 0 || _batch_dump_enabled() || elapsed < _timeout_ns ||
       (_auto_dump_enabled && !_did_first_frame)){
       return false
    }
-   if(_auto_dump_enabled == 1){
-      if(_auto_dump_ready_now()){
+   if _auto_dump_enabled == 1 {
+      if _auto_dump_ready_now() {
          _pending_auto_dump = true
          request_frame_capture()
          return true
@@ -6535,13 +6647,13 @@ fn _main_loop_timeout_close(elapsed) bool {
 }
 
 fn _batch_dump_check_model_timeout(now) {
-   if(!_batch_dump_enabled() || _batch_dump_model_started_ns <= 0 ||
+   if (!_batch_dump_enabled() || _batch_dump_model_started_ns <= 0 ||
       _batch_dump_model_timeout_sec <= 0.0 ||
       _batch_dump_index < 0 || _batch_dump_index >= _batch_dump_models.len){
       return
    }
    def elapsed_batch_s = float(now - _batch_dump_model_started_ns) / 1e9
-   if(elapsed_batch_s < _batch_dump_model_timeout_sec){
+   if elapsed_batch_s < _batch_dump_model_timeout_sec {
       return
    }
    def model_name = to_str(_batch_dump_models.get(_batch_dump_index, ""))
@@ -6574,11 +6686,11 @@ fn _main_loop_gui_capture_requests(gui_now_frame) {
    _main_loop_want_auto_capture = false
    _main_loop_force_full_render = false
    mut want_gui_capture = false
-   if(gui_now_frame && !_gui_auto_dump_done){
+   if gui_now_frame && !_gui_auto_dump_done {
       _main_loop_gui_dump_path = ui_dump.gui_auto_dump_path(_cli_gui_auto_dump)
       want_gui_capture = _main_loop_gui_dump_path.len > 0 && total_frames >= ui_dump.gui_auto_dump_delay()
    }
-   if(ui_profile.dump_trace_enabled() && total_frames < 18){
+   if ui_profile.dump_trace_enabled() && total_frames < 18 {
       def _discard_gui_dump_trace = ui_profile.print_text("[ui:gui-dump-state] frame=" + to_str(total_frames)
          + " gui_now=" + to_str(gui_now_frame)
          + " done=" + to_str(_gui_auto_dump_done)
@@ -6590,24 +6702,24 @@ fn _main_loop_gui_capture_requests(gui_now_frame) {
       + " pending_auto=" + to_str(_pending_auto_dump))
    }
    mut want_gui_suite_capture = false
-   if(_gui_dump_suite_active_now()){
+   if _gui_dump_suite_active_now() {
       want_gui_suite_capture = _gui_dump_suite_wait_frames <= 0
    }
    mut want_batch_capture = false
-   if(_batch_dump_enabled() && _batch_dump_wait_frames <= 0){
+   if _batch_dump_enabled() && _batch_dump_wait_frames <= 0 {
       want_batch_capture = _batch_dump_index >= 0 && _batch_dump_index < _batch_dump_models.len
    }
-   if(_pending_auto_dump && !_auto_dump_done){
+   if _pending_auto_dump && !_auto_dump_done {
       _main_loop_want_auto_capture = _auto_dump_ready_now()
    }
-   if(want_gui_capture || want_gui_suite_capture || want_batch_capture || _main_loop_want_auto_capture){
+   if want_gui_capture || want_gui_suite_capture || want_batch_capture || _main_loop_want_auto_capture {
       request_frame_capture()
       _main_loop_force_full_render = true
    }
 }
 
 fn _main_loop_try_idle_present(update_t1, trace, gui_now_frame) bool {
-   if(_main_loop_force_full_render){ return false }
+   if _main_loop_force_full_render { return false }
    _main_loop_draw_t0 = update_t1
    _main_loop_trace_once("[ui:loop] idle-reuse.before")
    _main_loop_rendered = false
@@ -6617,7 +6729,7 @@ fn _main_loop_try_idle_present(update_t1, trace, gui_now_frame) bool {
       ui_profile.eprint_text("[ui:panic] stage=idle-reuse frame=" + to_str(total_frames))
       panic(err)
    }
-   if(!_main_loop_rendered){
+   if !_main_loop_rendered {
       return false
    }
    _note_first_frame_render_result(_main_loop_rendered)
@@ -6642,19 +6754,19 @@ fn _main_loop_render_frame(frame_t0, update_t1, trace) {
 }
 
 fn _main_loop_handle_deferred_skybox() {
-   if(!_startup_skybox_pending){
+   if !_startup_skybox_pending {
       return
    }
    _startup_skybox_pending = false
    def sky_t0 = ticks()
    _load_fast_generated_skybox(ui_profile.visible_skybox_default())
-   if(_startup_trace_enabled()){
+   if _startup_trace_enabled() {
       terminal.log("[startup] deferred_fast_skybox=" + to_str(ui_profile.elapsed_ms(sky_t0)) + "ms")
    }
 }
 
 fn _main_loop_maybe_queue_immediate_dump() {
-   if(_auto_dump_enabled == 1 && !_auto_dump_done && !_pending_auto_dump &&
+   if (_auto_dump_enabled == 1 && !_auto_dump_done && !_pending_auto_dump &&
       _auto_dump_frame_counter >= _auto_dump_delay_frames &&
       _render_phase >= _auto_dump_min_elapsed_sec && _auto_dump_ready_now()){
       _pending_auto_dump = true
@@ -6663,14 +6775,14 @@ fn _main_loop_maybe_queue_immediate_dump() {
 }
 
 fn _main_loop_record_timing(rendered, trace, frame_t0, draw_t0, draw_t1) {
-   if(!rendered){
+   if !rendered {
       _last_draw_ms = 0.0
       _last_frame_ms = 0.0
       return
    }
    _last_draw_ms = trace ? ui_profile.ms_between(draw_t1, draw_t0) : 0.0
    _last_frame_ms = trace ? ui_profile.ms_between(draw_t1, frame_t0) : 0.0
-   if(trace){
+   if trace {
       _frame_ms_samples = ui_app.app_push_hist_sample(_frame_ms_samples, _last_frame_ms)
       _draw_ms_samples = ui_app.app_push_hist_sample(_draw_ms_samples, _last_draw_ms)
       _world_ms_samples = ui_app.app_push_hist_sample(_world_ms_samples, _last_world_ms)
@@ -6680,44 +6792,44 @@ fn _main_loop_record_timing(rendered, trace, frame_t0, draw_t0, draw_t1) {
 }
 
 fn _main_loop_process_gui_dump(gui_now_frame, gui_dump_path) {
-   if(_gui_dump_suite_active_now()){
+   if _gui_dump_suite_active_now() {
       def _discard_102 = _gui_dump_suite_after_frame()
       return
    }
-   if(!gui_now_frame || _gui_auto_dump_done || gui_dump_path.len <= 0 || total_frames < ui_dump.gui_auto_dump_delay()){
+   if !gui_now_frame || _gui_auto_dump_done || gui_dump_path.len <= 0 || total_frames < ui_dump.gui_auto_dump_delay() {
       return
    }
-   if(_gui_auto_dump_attempts == 0){
+   if _gui_auto_dump_attempts == 0 {
       ui_profile.print_line("ui:gui-dump", "request path=" + gui_dump_path + " delay=" + to_str(ui_dump.gui_auto_dump_delay()))
    }
    _gui_auto_dump_attempts += 1
-   if(_gui_auto_dump_attempts <= 2){
+   if _gui_auto_dump_attempts <= 2 {
       ui_profile.print_line("ui:gui-dump", "attempt=" + to_str(_gui_auto_dump_attempts) + " path=" + gui_dump_path)
    }
    def ok = _snapshot_ok(gui_dump_path)
-   if(ok){
+   if ok {
       _gui_last_dump_path = gui_dump_path
       _gui_auto_dump_done = true
       ui_profile.print_line("ui:gui-dump", "path=" + gui_dump_path)
-   } elif(_gui_auto_dump_attempts >= 8){
+   } elif _gui_auto_dump_attempts >= 8 {
       _gui_auto_dump_done = true
       ui_profile.print_line("ui:gui-dump:fail", "path=" + gui_dump_path + " attempts=" + to_str(_gui_auto_dump_attempts))
    }
-   if(_gui_auto_dump_done && ui_dump.gui_auto_dump_exit_enabled()){
+   if _gui_auto_dump_done && ui_dump.gui_auto_dump_exit_enabled() {
       set_should_close(win, true)
    }
    return
 }
 
 fn _main_loop_process_batch_dump() {
-   if(!_batch_dump_enabled()){
+   if !_batch_dump_enabled() {
       return
    }
-   if(_batch_dump_wait_frames > 0){
+   if _batch_dump_wait_frames > 0 {
       _batch_dump_wait_frames -= 1
       return
    }
-   if(_batch_dump_index < 0 || _batch_dump_index >= _batch_dump_models.len){
+   if _batch_dump_index < 0 || _batch_dump_index >= _batch_dump_models.len {
       return
    }
    def model_name = to_str(_batch_dump_models.get(_batch_dump_index, ""))
@@ -6730,7 +6842,7 @@ fn _main_loop_process_batch_dump() {
       + " path=" + batch_path
    )
    def snapshot_ok = _snapshot_ok(batch_path)
-   if(snapshot_ok){
+   if snapshot_ok {
       _batch_dump_completed_count += 1
       print(
          "[ui:batch] done idx=" + to_str(_batch_dump_index + 1)
@@ -6757,7 +6869,7 @@ fn _main_loop_process_batch_dump() {
 fn _main_loop_after_render_success(gui_now_frame, gui_dump_path) {
    _did_first_frame = true
    _auto_dump_frame_counter += 1
-   if(_scene_load_async_thread != 0){
+   if _scene_load_async_thread != 0 {
       def _discard_101 = _poll_scene_load_async()
    }
    _main_loop_handle_deferred_skybox()
@@ -6781,7 +6893,7 @@ fn _main_loop_profile_flush(trace) {
 }
 
 fn _main_loop_finish_auto_dump(rendered, want_auto_capture) {
-   if(!rendered || !want_auto_capture || !_pending_auto_dump || _auto_dump_done){
+   if !rendered || !want_auto_capture || !_pending_auto_dump || _auto_dump_done {
       return
    }
    ui_profile.print_line(
@@ -6790,8 +6902,8 @@ fn _main_loop_finish_auto_dump(rendered, want_auto_capture) {
       " total_frames=" + to_str(total_frames) +
       " path=" + _auto_dump_path
    )
-   if(_snapshot_ok(_auto_dump_path)){
-      if(ui_profile.env_truthy_cached("NY_UI_PRINT_FRAME_HASH") ||
+   if _snapshot_ok(_auto_dump_path) {
+      if (ui_profile.env_truthy_cached("NY_UI_PRINT_FRAME_HASH") ||
          ui_profile.env_truthy_cached("NY_UI_EXPECT_FRAME_HASH") ||
          ui_profile.frame_hash_lock_enabled() ||
          str.find(_auto_dump_path, "fb_hash") >= 0){
@@ -6799,29 +6911,29 @@ fn _main_loop_finish_auto_dump(rendered, want_auto_capture) {
       }
       _auto_dump_done = true
       _pending_auto_dump = false
-      if(_auto_dump_exit_mode == 1 || ui_profile.frame_hash_lock_enabled() || str.find(_auto_dump_path, "fb_hash") >= 0){
+      if _auto_dump_exit_mode == 1 || ui_profile.frame_hash_lock_enabled() || str.find(_auto_dump_path, "fb_hash") >= 0 {
          __exit(0)
       }
       set_should_close(win, true)
    }
-   if(ui_profile.frame_hash_lock_enabled() || str.find(_auto_dump_path, "fb_hash") >= 0){
+   if ui_profile.frame_hash_lock_enabled() || str.find(_auto_dump_path, "fb_hash") >= 0 {
       __exit(0)
    }
    return
 }
 
 fn _main_loop_finish_timeout(timeout_close) {
-   if(!timeout_close){
+   if !timeout_close {
       return
    }
    set_should_close(win, true)
-   if(_auto_dump_enabled != 1 && _fps_log_enabled != 1){
+   if _auto_dump_enabled != 1 && _fps_log_enabled != 1 {
       __exit(0)
    }
 }
 
 fn _main_loop_count_frame(rendered, now) {
-   if(!rendered){
+   if !rendered {
       return
    }
    frame_num += 1
@@ -6830,20 +6942,20 @@ fn _main_loop_count_frame(rendered, now) {
 }
 
 fn _main_loop_restore_cursor() {
-   if(win && !should_close(win)){
+   if win && !should_close(win) {
       set_cursor_mode(win, CURSOR_NORMAL)
    }
 }
 
 fn _run_main_loop() {
-   if(_run_main_loop_fast_path()){
+   if _run_main_loop_fast_path() {
       return
    }
    _main_loop_startup_pump()
    _main_loop_reset_timers()
    _main_loop_trace_pre_enter()
-   while(!should_close(win)){
-      if(_first_frame_trace_allowed() && _startup_trace_enabled()){
+   while !should_close(win) {
+      if _first_frame_trace_allowed() && _startup_trace_enabled() {
          ui_profile.print_text("[ui:loop] first-iter")
       }
       _main_loop_trace_once("[ui:loop] pump.before")
@@ -6852,8 +6964,8 @@ fn _run_main_loop() {
       def frame_t0 = ticks()
       def now = frame_t0
       mut dt = float(now - last_upd_t) / 1e9
-      if(dt > 0.1){ dt = 0.016 }
-      if(dt < 0.0001){ dt = 0.0001 }
+      if dt > 0.1 { dt = 0.016 }
+      if dt < 0.0001 { dt = 0.0001 }
       last_upd_t = now
       def elapsed = now - start_t
       def trace = ui_profile.trace_enabled()
@@ -6863,7 +6975,7 @@ fn _run_main_loop() {
       _render_phase = float(elapsed) / 1e9
       mut gui_now_frame = _gui_enabled_now()
       _main_loop_call_update(dt)
-      if(should_close(win)){
+      if should_close(win) {
          _main_loop_trace_once("[ui:loop] close-after-update")
          break
       }
@@ -6872,13 +6984,13 @@ fn _run_main_loop() {
       gui_now_frame = _gui_enabled_now()
       _main_loop_maybe_queue_immediate_dump()
       _main_loop_gui_capture_requests(gui_now_frame)
-      if(!_main_loop_try_idle_present(update_t1, trace, gui_now_frame)){
+      if !_main_loop_try_idle_present(update_t1, trace, gui_now_frame) {
          _main_loop_render_frame(frame_t0, update_t1, trace)
-         if(_main_loop_rendered){
+         if _main_loop_rendered {
             note_full_draw(gui_now_frame, _main_loop_want_auto_capture)
          }
       }
-      if(_main_loop_rendered){
+      if _main_loop_rendered {
          _main_loop_after_render_success(gui_now_frame, _main_loop_gui_dump_path)
       }
       _main_loop_record_timing(_main_loop_rendered, trace, frame_t0, _main_loop_draw_t0, _main_loop_draw_t1)
@@ -6890,7 +7002,7 @@ fn _run_main_loop() {
    _print_fps_summary(start_t, total_frames, true)
    _main_loop_restore_cursor()
    gfx.shutdown()
-   if(win){ def _discard_close_window = window.close(win) }
+   if win { def _discard_close_window = window.close(win) }
 }
 
 fn run(any app=0) {
@@ -6904,7 +7016,7 @@ fn draw_frame(any app=0) {
 }
 
 #main {
-   if(_ui_has_help_arg()){ _ui_print_help() exit(0) }
+   if _ui_has_help_arg() { _ui_print_help() exit(0) }
    def app = create(from_env())
    startup(app)
    maybe_run(app)

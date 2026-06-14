@@ -41,7 +41,7 @@ fn editor_layout(f64 sw, f64 sh, f64 rail_w=250.0, f64 top_h=32.0) dict {
 fn with_bottom_dock(dict lay, f64 sh, bool open, f64 want_h=0.0) dict {
    "Reserves a bottom dock above the status bar and shrinks the editor pane."
    lay["dock_open"] = open
-   if(!open){ return lay }
+   if !open { return lay }
    def gap = 0.0
    def ey = float(lay.get("edit_y", 0.0))
    def status_y = float(lay.get("status_y", sh - STATUS_H))
@@ -57,23 +57,23 @@ fn with_bottom_dock(dict lay, f64 sh, bool open, f64 want_h=0.0) dict {
 }
 
 fn pane_at(dict lay, f64 x, f64 y) str {
-   if(divider_hit(lay, x, y)){ return "divider" }
-   if(bool(lay.get("dock_open", false)) &&
-      x >= float(lay.get("dock_x", 0.0)) && x <= float(lay.get("dock_x", 0.0)) + float(lay.get("dock_w", 0.0)) &&
-   y >= float(lay.get("dock_y", 0.0)) && y <= float(lay.get("dock_y", 0.0)) + float(lay.get("dock_h", 0.0))){ return "terminal" }
-   if(x >= float(lay.get("edit_x", 0.0)) && x <= float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0)) &&
-   y >= float(lay.get("edit_y", 0.0)) && y <= float(lay.get("edit_y", 0.0)) + float(lay.get("edit_h", 0.0))){ return "editor" }
-   if(float(lay.get("rail_w", 0.0)) > 1.0 &&
-      x >= float(lay.get("rail_x", 0.0)) && x <= float(lay.get("rail_x", 0.0)) + float(lay.get("rail_w", 0.0)) &&
-   y >= float(lay.get("rail_y", 0.0)) && y <= float(lay.get("rail_y", 0.0)) + float(lay.get("rail_h", 0.0))){ return "project" }
-   if(y >= float(lay.get("status_y", 0.0)) && y <= float(lay.get("status_y", 0.0)) + float(lay.get("status_h", STATUS_H))){ return "status" }
+   if divider_hit(lay, x, y) { return "divider" }
+   if bool(lay.get("dock_open", false)) &&
+   x >= float(lay.get("dock_x", 0.0)) && x <= float(lay.get("dock_x", 0.0)) + float(lay.get("dock_w", 0.0)) &&
+   y >= float(lay.get("dock_y", 0.0)) && y <= float(lay.get("dock_y", 0.0)) + float(lay.get("dock_h", 0.0)){ return "terminal" }
+   if x >= float(lay.get("edit_x", 0.0)) && x <= float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0)) &&
+   y >= float(lay.get("edit_y", 0.0)) && y <= float(lay.get("edit_y", 0.0)) + float(lay.get("edit_h", 0.0)){ return "editor" }
+   if float(lay.get("rail_w", 0.0)) > 1.0 &&
+   x >= float(lay.get("rail_x", 0.0)) && x <= float(lay.get("rail_x", 0.0)) + float(lay.get("rail_w", 0.0)) &&
+   y >= float(lay.get("rail_y", 0.0)) && y <= float(lay.get("rail_y", 0.0)) + float(lay.get("rail_h", 0.0)){ return "project" }
+   if y >= float(lay.get("status_y", 0.0)) && y <= float(lay.get("status_y", 0.0)) + float(lay.get("status_h", STATUS_H)) { return "status" }
    "top"
 }
 
 fn focus_next(str current, bool project_on=true, bool dock_on=false) str {
-   if(current == "project"){ return "editor" }
-   if(current == "editor"){ return dock_on ? "terminal" : (project_on ? "project" : "editor") }
-   if(current == "terminal"){ return project_on ? "project" : "editor" }
+   if current == "project" { return "editor" }
+   if current == "editor" { return dock_on ? "terminal" : (project_on ? "project" : "editor") }
+   if current == "terminal" { return project_on ? "project" : "editor" }
    project_on ? "project" : "editor"
 }
 
@@ -89,27 +89,27 @@ fn col_at(any font, str line, f64 x, f64 text_x) int {
    def target = max(0.0, x - text_x)
    mut lo = 0
    mut hi = line.len
-   while(lo < hi){
+   while lo < hi {
       def mid = (lo + hi) / 2
       def w = float(gfx.measure_text_fast(font, str.str_slice(line, 0, mid + 1)).get(0, 0.0))
-      if(w >= target){ hi = mid }
+      if w >= target { hi = mid }
       else { lo = mid + 1 }
    }
    lo
 }
 
 fn buffer_at(dict lay, f64 x, f64 y, int count) int {
-   if(x < float(lay.get("rail_x", 0.0)) + 10.0 || x > float(lay.get("rail_x", 0.0)) + float(lay.get("rail_w", 0.0)) - 10.0){ return -1 }
+   if x < float(lay.get("rail_x", 0.0)) + 10.0 || x > float(lay.get("rail_x", 0.0)) + float(lay.get("rail_w", 0.0)) - 10.0 { return -1 }
    def rel = y - float(lay.get("rail_y", 0.0)) - 44.0
-   if(rel < 0.0){ return -1 }
+   if rel < 0.0 { return -1 }
    def idx = int(rel / 42.0)
-   if(idx < 0 || idx >= count){ return -1 }
+   if idx < 0 || idx >= count { return -1 }
    def in_row = rel - float(idx) * 42.0
    in_row <= 34.0 ? idx : -1
 }
 
 fn divider_hit(dict lay, f64 x, f64 y) bool {
-   if(float(lay.get("rail_w", 0.0)) <= 1.0){ return false }
+   if float(lay.get("rail_w", 0.0)) <= 1.0 { return false }
    def dx = float(lay.get("divider_x", 0.0))
    x >= dx - 7.0 && x <= dx + 7.0 &&
    y >= float(lay.get("rail_y", 0.0)) && y <= float(lay.get("rail_y", 0.0)) + float(lay.get("rail_h", 0.0))

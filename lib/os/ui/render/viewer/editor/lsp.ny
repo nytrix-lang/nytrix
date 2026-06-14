@@ -22,11 +22,11 @@ fn _ext_key(str path) str {
 
 fn _argv_from_env(str key, str path) list {
    def raw = str.strip(env(key))
-   if(raw.len <= 0){ return [] }
+   if raw.len <= 0 { return [] }
    mut out = []
    def parts = str.split_words(raw)
    mut i = 0
-   while(i < parts.len){
+   while i < parts.len {
       def w = to_str(parts.get(i, ""))
       out = out.append(w == "{file}" ? path : w)
       i += 1
@@ -40,11 +40,11 @@ fn enabled_by_default() bool {
 }
 
 fn command_for(str path) list {
-   if(!enabled_by_default()){ return [] }
+   if !enabled_by_default() { return [] }
    def per_ext = _argv_from_env("NY_EDITOR_LSP_" + _ext_key(path), path)
-   if(per_ext.len > 0){ return per_ext }
+   if per_ext.len > 0 { return per_ext }
    def generic = _argv_from_env("NY_EDITOR_LSP_COMMAND", path)
-   if(generic.len > 0){ return generic }
+   if generic.len > 0 { return generic }
    [tools.lsp_command()]
 }
 
@@ -57,18 +57,18 @@ fn new() dict {
 }
 
 fn _uri(str path) str {
-   if(str.startswith(path, "file://")){ return path }
+   if str.startswith(path, "file://") { return path }
    "file://" + ospath.normalize(path)
 }
 
 fn _lang(str path) str {
    def ext = str.lower(ospath.extname(path))
-   if(ext == ".ny"){ return "nytrix" }
-   if(ext == ".c" || ext == ".h"){ return "c" }
-   if(ext == ".cpp" || ext == ".hpp" || ext == ".cc" || ext == ".cxx"){ return "cpp" }
-   if(ext == ".py"){ return "python" }
-   if(ext == ".js"){ return "javascript" }
-   if(ext == ".ts"){ return "typescript" }
+   if ext == ".ny" { return "nytrix" }
+   if ext == ".c" || ext == ".h" { return "c" }
+   if ext == ".cpp" || ext == ".hpp" || ext == ".cc" || ext == ".cxx" { return "cpp" }
+   if ext == ".py" { return "python" }
+   if ext == ".js" { return "javascript" }
+   if ext == ".ts" { return "typescript" }
    "plaintext"
 }
 
@@ -87,7 +87,7 @@ fn _doc(str uri) dict { {"uri": uri} }
 
 fn start(dict st, str path, str text="") dict {
    def argv = command_for(path)
-   if(argv.len <= 0){
+   if argv.len <= 0 {
       st["active"] = false
       st["last"] = "no language server configured"
       return st
@@ -98,7 +98,7 @@ fn start(dict st, str path, str text="") dict {
    st["lang"] = _lang(path)
    st["argv"] = argv
    st["last"] = "lsp ready: " + str.join(argv, " ")
-   if(text.len > 0){ st["last_request"] = did_open(st, path, text) }
+   if text.len > 0 { st["last_request"] = did_open(st, path, text) }
    st
 }
 
@@ -174,9 +174,9 @@ fn diagnostics_from_check(dict check_res) list {
    def lines = str.split(text, "\n")
    mut out = []
    mut i = 0
-   while(i < lines.len){
+   while i < lines.len {
       def line = to_str(lines.get(i, ""))
-      if(str.str_contains(line, "[E") || str.str_contains(line, "[W")){
+      if str.str_contains(line, "[E") || str.str_contains(line, "[W") {
          out = out.append({"line": line, "severity": str.str_contains(line, "[E") ? 1 : 2, "message": line})
       }
       i += 1
@@ -186,10 +186,10 @@ fn diagnostics_from_check(dict check_res) list {
 
 fn diagnostics_text(dict st) str {
    def ds = st.get("diagnostics", [])
-   if(ds.len <= 0){ return "No diagnostics\n" + status(st) }
+   if ds.len <= 0 { return "No diagnostics\n" + status(st) }
    mut out = []
    mut i = 0
-   while(i < ds.len){
+   while i < ds.len {
       def d = ds.get(i, {})
       out = out.append(to_str(i + 1) + ". " + to_str(d.get("message", d.get("line", ""))))
       i += 1

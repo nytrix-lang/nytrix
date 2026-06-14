@@ -24,18 +24,18 @@ def SHADER_BACKEND_GLES300 = "glsl300es"
 fn normalize_backend_name(any name) str {
    "Normalizes backend aliases to render shader targets."
    def n = lower(strip(to_str(name)))
-   if(n == "vk" || n == "vulkan" || n == "glsl450" ||
-      n == "vk450" || n == SHADER_BACKEND_VK450){
+   if n == "vk" || n == "vulkan" || n == "glsl450" ||
+   n == "vk450" || n == SHADER_BACKEND_VK450{
       return SHADER_BACKEND_VK450
    }
-   if(n == "gl" || n == "opengl" || n == "gl120" || n == SHADER_BACKEND_GL120){
+   if n == "gl" || n == "opengl" || n == "gl120" || n == SHADER_BACKEND_GL120 {
       return SHADER_BACKEND_GL120
    }
-   if(n == "gl330" || n == "opengl330" || n == "glsl330" || n == SHADER_BACKEND_GL330){
+   if n == "gl330" || n == "opengl330" || n == "glsl330" || n == SHADER_BACKEND_GL330 {
       return SHADER_BACKEND_GL330
    }
-   if(n == "webgl" || n == "webgl2" || n == "gles" || n == "gles300" ||
-      n == "glsl300es" || n == SHADER_BACKEND_GLES300){
+   if n == "webgl" || n == "webgl2" || n == "gles" || n == "gles300" ||
+   n == "glsl300es" || n == SHADER_BACKEND_GLES300{
       return SHADER_BACKEND_GLES300
    }
    SHADER_BACKEND_VK450
@@ -58,24 +58,25 @@ fn _vertex_to_vk450(str src) str { "#version 450\n" + _strip_known_versions(src)
 
 fn _fragment_to_vk450(str src) str {
    mut out = _strip_known_versions(src)
-   if(str_contains(out, "gl_FragColor")){
+   if str_contains(out, "gl_FragColor") {
       out = str_replace(out, "gl_FragColor", "fragColor")
       out = "layout(location = 0) out vec4 fragColor;\n" + out
    }
-   if(!str_contains(out, "layout(location = 0) out")){
-      if(str_contains(out, "out vec4")){ out = str_replace(out, "out vec4", "layout(location = 0) out vec4") }
+   if !str_contains(out, "layout(location = 0) out") {
+      if str_contains(out, "out vec4") { out = str_replace(out, "out vec4", "layout(location = 0) out vec4") }
    }
    "#version 450\n" + out
 }
 
 fn _vertex_to_gl120(str src) str { "#version 120\n" + _strip_known_versions(src) }
+
 fn _fragment_to_gl120(str src) str { "#version 120\n" + _strip_known_versions(src) }
 
 fn _vertex_to_gl330(str src) str { "#version 330 core\n" + _strip_known_versions(src) }
 
 fn _fragment_to_gl330(str src) str {
    mut out = _strip_known_versions(src)
-   if(str_contains(out, "gl_FragColor")){
+   if str_contains(out, "gl_FragColor") {
       out = str_replace(out, "gl_FragColor", "fragColor")
       out = "out vec4 fragColor;\n" + out
    }
@@ -86,8 +87,8 @@ fn _vertex_to_gles300(str src) str { "#version 300 es\n" + _strip_known_versions
 
 fn _fragment_to_gles300(str src) str {
    mut out = _strip_known_versions(src)
-   if(!str_contains(out, "precision ")){ out = "precision mediump float;\n" + out }
-   if(str_contains(out, "gl_FragColor")){
+   if !str_contains(out, "precision ") { out = "precision mediump float;\n" + out }
+   if str_contains(out, "gl_FragColor") {
       out = str_replace(out, "gl_FragColor", "fragColor")
       out = "out vec4 fragColor;\n" + out
    }
@@ -96,9 +97,9 @@ fn _fragment_to_gles300(str src) str {
 
 fn _parse_marker(str line, str prefix) any {
    def trimmed = strip(line)
-   if(!startswith(trimmed, prefix)){ return 0 }
+   if !startswith(trimmed, prefix) { return 0 }
    mut tail = strip(str_replace(trimmed, prefix, ""))
-   if(tail.len == 0){ tail = "vkglsl450" }
+   if tail.len == 0 { tail = "vkglsl450" }
    tail
 }
 
@@ -110,30 +111,30 @@ fn parse_combined_shader(str combined_src) dict {
    mut src = ""
    mut i = 0
    def lines_n = lines.len
-   while(i < lines_n){
+   while i < lines_n {
       def line = lines.get(i)
       def vs_tag = _parse_marker(line, "#vertex")
       def fs_tag = _parse_marker(line, "#fragment")
-      if(vs_tag){
-         if(target.len > 0){ defs = defs.set(target, src) }
+      if vs_tag {
+         if target.len > 0 { defs = defs.set(target, src) }
          target = "vs_" + vs_tag
          src = ""
-      } elif(fs_tag){
-         if(target.len > 0){ defs = defs.set(target, src) }
+      } elif fs_tag {
+         if target.len > 0 { defs = defs.set(target, src) }
          target = "fs_" + fs_tag
          src = ""
       } else {
-         if(target.len > 0){ src = src + line + "\n" }
+         if target.len > 0 { src = src + line + "\n" }
       }
       i += 1
    }
-   if(target.len > 0){ defs = defs.set(target, src) }
+   if target.len > 0 { defs = defs.set(target, src) }
    defs
 }
 
 fn transpile_shader_defs(any defs) dict {
    "Ensures defs include Vulkan, OpenGL, and WebGL shader variants."
-   if(!is_dict(defs)){ return dict(4) }
+   if !is_dict(defs) { return dict(4) }
    mut out = dict_clone(defs)
    mut vs450 = out.get("vs_vkglsl450", 0)
    mut fs450 = out.get("fs_vkglsl450", 0)
@@ -143,41 +144,41 @@ fn transpile_shader_defs(any defs) dict {
    mut fs330 = out.get("fs_glsl330", 0)
    mut vs300es = out.get("vs_glsl300es", 0)
    mut fs300es = out.get("fs_glsl300es", 0)
-   if(vs450){
+   if vs450 {
       out = out.set("vs_vkglsl450", _vertex_to_vk450(vs450))
-   } elif(!vs450){
+   } elif !vs450 {
       def vs_any = out.get("vs_glsl330", out.get("vs_glsl120", 0))
-      if(vs_any){ out = out.set("vs_vkglsl450", _vertex_to_vk450(vs_any)) }
+      if vs_any { out = out.set("vs_vkglsl450", _vertex_to_vk450(vs_any)) }
    }
-   if(fs450){
+   if fs450 {
       out = out.set("fs_vkglsl450", _fragment_to_vk450(fs450))
-   } elif(!fs450){
+   } elif !fs450 {
       def fs_any = out.get("fs_glsl330", out.get("fs_glsl120", 0))
-      if(fs_any){ out = out.set("fs_vkglsl450", _fragment_to_vk450(fs_any)) }
+      if fs_any { out = out.set("fs_vkglsl450", _fragment_to_vk450(fs_any)) }
    }
-   if(vs120){ out = out.set("vs_glsl120", _vertex_to_gl120(vs120)) } else {
+   if vs120 { out = out.set("vs_glsl120", _vertex_to_gl120(vs120)) } else {
       def vs_any120 = out.get("vs_glsl330", out.get("vs_vkglsl450", 0))
-      if(vs_any120){ out = out.set("vs_glsl120", _vertex_to_gl120(vs_any120)) }
+      if vs_any120 { out = out.set("vs_glsl120", _vertex_to_gl120(vs_any120)) }
    }
-   if(fs120){ out = out.set("fs_glsl120", _fragment_to_gl120(fs120)) } else {
+   if fs120 { out = out.set("fs_glsl120", _fragment_to_gl120(fs120)) } else {
       def fs_any120 = out.get("fs_glsl330", out.get("fs_vkglsl450", 0))
-      if(fs_any120){ out = out.set("fs_glsl120", _fragment_to_gl120(fs_any120)) }
+      if fs_any120 { out = out.set("fs_glsl120", _fragment_to_gl120(fs_any120)) }
    }
-   if(vs330){ out = out.set("vs_glsl330", _vertex_to_gl330(vs330)) } else {
+   if vs330 { out = out.set("vs_glsl330", _vertex_to_gl330(vs330)) } else {
       def vs_any330 = out.get("vs_glsl120", out.get("vs_vkglsl450", 0))
-      if(vs_any330){ out = out.set("vs_glsl330", _vertex_to_gl330(vs_any330)) }
+      if vs_any330 { out = out.set("vs_glsl330", _vertex_to_gl330(vs_any330)) }
    }
-   if(fs330){ out = out.set("fs_glsl330", _fragment_to_gl330(fs330)) } else {
+   if fs330 { out = out.set("fs_glsl330", _fragment_to_gl330(fs330)) } else {
       def fs_any330 = out.get("fs_glsl120", out.get("fs_vkglsl450", 0))
-      if(fs_any330){ out = out.set("fs_glsl330", _fragment_to_gl330(fs_any330)) }
+      if fs_any330 { out = out.set("fs_glsl330", _fragment_to_gl330(fs_any330)) }
    }
-   if(vs300es){ out = out.set("vs_glsl300es", _vertex_to_gles300(vs300es)) } else {
+   if vs300es { out = out.set("vs_glsl300es", _vertex_to_gles300(vs300es)) } else {
       def vs_any300es = out.get("vs_glsl330", out.get("vs_glsl120", out.get("vs_vkglsl450", 0)))
-      if(vs_any300es){ out = out.set("vs_glsl300es", _vertex_to_gles300(vs_any300es)) }
+      if vs_any300es { out = out.set("vs_glsl300es", _vertex_to_gles300(vs_any300es)) }
    }
-   if(fs300es){ out = out.set("fs_glsl300es", _fragment_to_gles300(fs300es)) } else {
+   if fs300es { out = out.set("fs_glsl300es", _fragment_to_gles300(fs300es)) } else {
       def fs_any300es = out.get("fs_glsl330", out.get("fs_glsl120", out.get("fs_vkglsl450", 0)))
-      if(fs_any300es){ out = out.set("fs_glsl300es", _fragment_to_gles300(fs_any300es)) }
+      if fs_any300es { out = out.set("fs_glsl300es", _fragment_to_gles300(fs_any300es)) }
    }
    out
 }
@@ -188,7 +189,7 @@ fn transpile_shader_source(str combined_src) dict {
 }
 
 fn _read_text(any path) str {
-   match file_read(path){
+   match file_read(path) {
       ok(s) -> { return s }
       err(_) -> { return "" }
    }
@@ -201,11 +202,11 @@ fn _resolve_repo_asset(any rel) str {
 
 fn shader_hash32(any s) int {
    "Returns a small stable hash for shader source change detection."
-   if(!is_str(s)){ return 0 }
+   if !is_str(s) { return 0 }
    mut h = 2166136261
    mut i = 0
    def n = s.len
-   while(i < n){
+   while i < n {
       h = band(bxor(h, load8(s, i)) * 16777619, 2147483647)
       i += 1
    }
@@ -225,7 +226,7 @@ fn shader_watch(any state, any vert_rel, any frag_rel, any force=false, any poll
    mut out = is_dict(state) ? state : dict(12)
    def now = ticks()
    def last = int(out.get("last_check", 0))
-   if(!bool(force) && int(poll_ns) > 0 && last > 0 && (now - last) < int(poll_ns)){
+   if !bool(force) && int(poll_ns) > 0 && last > 0 && (now - last) < int(poll_ns) {
       out["changed"] = false
       return out
    }

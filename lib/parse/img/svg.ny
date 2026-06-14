@@ -13,7 +13,6 @@ use std.os as os
 def SVG_REF_PATH_DATA = "https://www.w3.org/TR/SVG/paths.html"
 def SVG_REF_SHAPES = "https://www.w3.org/TR/SVG/shapes.html"
 def SVG_REF_ARCS = "https://www.w3.org/TR/SVG/implnote.html#ArcImplementationNotes"
-
 mut _svg_last_error = ""
 
 fn _svg_set_error(any msg) bool {
@@ -37,15 +36,15 @@ fn available() bool {
 }
 
 fn _looks_like_svg(any data) bool {
-   if(!is_str(data) || data.len < 4){ return false }
+   if !is_str(data) || data.len < 4 { return false }
    mut i = 0
    def limit = min(data.len - 3, 768)
-   while(i < limit){
-      if(load8(data, i) == 60){
+   while i < limit {
+      if load8(data, i) == 60 {
          def c1 = load8(data, i + 1) | 32
          def c2 = load8(data, i + 2) | 32
          def c3 = load8(data, i + 3) | 32
-         if(c1 == 115 && c2 == 118 && c3 == 103){ return true }
+         if c1 == 115 && c2 == 118 && c3 == 103 { return true }
       }
       i += 1
    }
@@ -77,16 +76,16 @@ fn _is_path_cmd(int c) bool {
 }
 
 fn _skip_sep(str s, int p) int {
-   while(p < s.len){
+   while p < s.len {
       def c = load8(s, p)
-      if(c <= 32 || c == 44){ p += 1 }
+      if c <= 32 || c == 44 { p += 1 }
       else { break }
    }
    p
 }
 
 fn _skip_ws(str s, int p) int {
-   while(p < s.len && _is_space(load8(s, p))){ p += 1 }
+   while p < s.len && _is_space(load8(s, p)) { p += 1 }
    p
 }
 
@@ -96,44 +95,44 @@ fn _attr_key_stop(int c) bool {
 
 fn _parse_tag_attrs(str s, int p) list {
    mut attrs = dict(64)
-   while(p < s.len){
+   while p < s.len {
       p = _skip_ws(s, p)
-      if(p >= s.len || load8(s, p) == 47 || load8(s, p) == 62){ break }
+      if p >= s.len || load8(s, p) == 47 || load8(s, p) == 62 { break }
       mut kb = Builder(32)
-      while(p < s.len){
+      while p < s.len {
          def c = load8(s, p)
-         if(_attr_key_stop(c)){ break }
+         if _attr_key_stop(c) { break }
          kb = builder_append(kb, chr(c))
          p += 1
       }
       def key = builder_to_str(kb)
       builder_free(kb)
       p = _skip_ws(s, p)
-      if(p < s.len && load8(s, p) == 61){
+      if p < s.len && load8(s, p) == 61 {
          p += 1
          p = _skip_ws(s, p)
          def quote = load8(s, p)
          mut vb = Builder(64)
-         if(quote == 34 || quote == 39){
+         if quote == 34 || quote == 39 {
             p += 1
-            while(p < s.len && load8(s, p) != quote){
+            while p < s.len && load8(s, p) != quote {
                vb = builder_append(vb, chr(load8(s, p)))
                p += 1
             }
-            if(p < s.len){ p += 1 }
+            if p < s.len { p += 1 }
          } else {
-            while(p < s.len){
+            while p < s.len {
                def c = load8(s, p)
-               if(c <= 32 || c == 47 || c == 62){ break }
+               if c <= 32 || c == 47 || c == 62 { break }
                vb = builder_append(vb, chr(c))
                p += 1
             }
          }
          def val = builder_to_str(vb)
          builder_free(vb)
-         if(key.len > 0){ attrs[key] = val }
+         if key.len > 0 { attrs[key] = val }
       } else {
-         if(key.len > 0){ attrs[key] = true }
+         if key.len > 0 { attrs[key] = true }
       }
    }
    [attrs, p]
@@ -143,29 +142,29 @@ fn _parse_svg_tree(str data) any {
    mut p = 0
    mut root = 0
    mut stack = []
-   while(p < data.len){
-      if(load8(data, p) != 60){
+   while p < data.len {
+      if load8(data, p) != 60 {
          p += 1
          continue
       }
       p += 1
-      if(p >= data.len){ break }
+      if p >= data.len { break }
       def c0 = load8(data, p)
-      if(c0 == 33 || c0 == 63){
-         while(p < data.len && load8(data, p) != 62){ p += 1 }
-         if(p < data.len){ p += 1 }
+      if c0 == 33 || c0 == 63 {
+         while p < data.len && load8(data, p) != 62 { p += 1 }
+         if p < data.len { p += 1 }
          continue
       }
-      if(c0 == 47){
-         while(p < data.len && load8(data, p) != 62){ p += 1 }
-         if(p < data.len){ p += 1 }
-         if(stack.len > 0){ stack.pop() }
+      if c0 == 47 {
+         while p < data.len && load8(data, p) != 62 { p += 1 }
+         if p < data.len { p += 1 }
+         if stack.len > 0 { stack.pop() }
          continue
       }
       mut nb = Builder(24)
-      while(p < data.len){
+      while p < data.len {
          def c = load8(data, p)
-         if(c <= 32 || c == 47 || c == 62){ break }
+         if c <= 32 || c == 47 || c == 62 { break }
          nb = builder_append(nb, chr(c))
          p += 1
       }
@@ -176,21 +175,21 @@ fn _parse_svg_tree(str data) any {
       p = int(ar[1])
       mut self_closing = false
       p = _skip_ws(data, p)
-      if(p < data.len && load8(data, p) == 47){
+      if p < data.len && load8(data, p) == 47 {
          self_closing = true
          p += 1
       }
-      if(p < data.len && load8(data, p) == 62){ p += 1 }
-      if(name.len == 0){ continue }
+      if p < data.len && load8(data, p) == 62 { p += 1 }
+      if name.len == 0 { continue }
       def node = _svg_node(name, attrs)
-      if(!root){ root = node }
-      if(stack.len > 0){
+      if !root { root = node }
+      if stack.len > 0 {
          def parent = stack[stack.len - 1]
          mut children = parent.get("children", [])
          children = children.append(node)
          parent["children"] = children
       }
-      if(!self_closing){ stack = stack.append(node) }
+      if !self_closing { stack = stack.append(node) }
    }
    root
 }
@@ -198,22 +197,22 @@ fn _parse_svg_tree(str data) any {
 fn _read_num(str s, int p) list {
    p = _skip_sep(s, p)
    def start = p
-   if(p < s.len && (load8(s, p) == 45 || load8(s, p) == 43)){ p += 1 }
+   if p < s.len && (load8(s, p) == 45 || load8(s, p) == 43) { p += 1 }
    mut any_digit = false
-   while(p < s.len && _is_digit(load8(s, p))){ any_digit = true p += 1 }
-   if(p < s.len && load8(s, p) == 46){
+   while p < s.len && _is_digit(load8(s, p)) { any_digit = true p += 1 }
+   if p < s.len && load8(s, p) == 46 {
       p += 1
-      while(p < s.len && _is_digit(load8(s, p))){ any_digit = true p += 1 }
+      while p < s.len && _is_digit(load8(s, p)) { any_digit = true p += 1 }
    }
-   if(any_digit && p < s.len && ((load8(s, p) | 32) == 101)){
+   if any_digit && p < s.len && ((load8(s, p) | 32) == 101) {
       def ep = p
       p += 1
-      if(p < s.len && (load8(s, p) == 45 || load8(s, p) == 43)){ p += 1 }
+      if p < s.len && (load8(s, p) == 45 || load8(s, p) == 43) { p += 1 }
       mut ed = false
-      while(p < s.len && _is_digit(load8(s, p))){ ed = true p += 1 }
-      if(!ed){ p = ep }
+      while p < s.len && _is_digit(load8(s, p)) { ed = true p += 1 }
+      if !ed { p = ep }
    }
-   if(!any_digit){ return [false, 0.0, start] }
+   if !any_digit { return [false, 0.0, start] }
    [true, str.atof(str.str_slice(s, start, p)), p]
 }
 
@@ -221,9 +220,9 @@ fn _number_list(any raw) list {
    def s = to_str(raw)
    mut xs = []
    mut p = 0
-   while(p < s.len){
+   while p < s.len {
       def r = _read_num(s, p)
-      if(r.get(0, false)){
+      if r.get(0, false) {
          xs = xs.append(float(r.get(1, 0.0)))
          p = int(r.get(2, p + 1))
       } else {
@@ -239,15 +238,15 @@ fn _num(any raw, f64 fallback=0.0) f64 {
 }
 
 fn _clamp01(f64 v) f64 {
-   if(v < 0.0){ return 0.0 }
-   if(v > 1.0){ return 1.0 }
+   if v < 0.0 { return 0.0 }
+   if v > 1.0 { return 1.0 }
    v
 }
 
 fn _opacity(any raw, f64 fallback=1.0) f64 {
-   if(!raw){ return fallback }
+   if !raw { return fallback }
    def s = str.strip(to_str(raw))
-   if(s.len == 0){ return fallback }
+   if s.len == 0 { return fallback }
    def v = _num(s, fallback)
    _clamp01(str.endswith(s, "%") ? (v / 100.0) : v)
 }
@@ -267,30 +266,30 @@ fn _rgba_none() dict { _rgba(0, 0, 0, 0.0, true) }
 fn _hex_byte(str s, int off) int {
    def hi = str.hex_val(load8(s, off))
    def lo = str.hex_val(load8(s, off + 1))
-   if(hi < 0 || lo < 0){ return 0 }
+   if hi < 0 || lo < 0 { return 0 }
    (hi << 4) | lo
 }
 
 fn _parse_color(any raw, any inherited=0) dict {
-   if(!raw){ return is_dict(inherited) ? inherited : _rgba(0, 0, 0, 1.0) }
+   if !raw { return is_dict(inherited) ? inherited : _rgba(0, 0, 0, 1.0) }
    mut s = str.lower(str.strip(to_str(raw)))
-   if(s.len == 0){ return is_dict(inherited) ? inherited : _rgba(0, 0, 0, 1.0) }
-   if(s == "none"){ return _rgba_none() }
-   if(s == "transparent"){ return _rgba(0, 0, 0, 0.0) }
-   if(str.startswith(s, "url(")){ return is_dict(inherited) ? inherited : _rgba(242, 242, 242, 1.0) }
-   if(str.startswith(s, "#")){
+   if s.len == 0 { return is_dict(inherited) ? inherited : _rgba(0, 0, 0, 1.0) }
+   if s == "none" { return _rgba_none() }
+   if s == "transparent" { return _rgba(0, 0, 0, 0.0) }
+   if str.startswith(s, "url(") { return is_dict(inherited) ? inherited : _rgba(242, 242, 242, 1.0) }
+   if str.startswith(s, "#") {
       s = str.str_slice(s, 1, s.len)
-      if(s.len == 3){
+      if s.len == 3 {
          def r = str.hex_val(load8(s, 0))
          def g = str.hex_val(load8(s, 1))
          def b = str.hex_val(load8(s, 2))
          return _rgba((r << 4) | r, (g << 4) | g, (b << 4) | b, 1.0)
       }
-      if(s.len >= 6){ return _rgba(_hex_byte(s, 0), _hex_byte(s, 2), _hex_byte(s, 4), 1.0) }
+      if s.len >= 6 { return _rgba(_hex_byte(s, 0), _hex_byte(s, 2), _hex_byte(s, 4), 1.0) }
    }
-   if(str.startswith(s, "rgb")){
+   if str.startswith(s, "rgb") {
       def xs = _number_list(s)
-      if(xs.len >= 3){ return _rgba(int(xs[0]), int(xs[1]), int(xs[2]), 1.0) }
+      if xs.len >= 3 { return _rgba(int(xs[0]), int(xs[1]), int(xs[2]), 1.0) }
    }
    case s {
       "white" -> _rgba(255, 255, 255, 1.0)
@@ -303,20 +302,20 @@ fn _parse_color(any raw, any inherited=0) dict {
 }
 
 fn _color_alpha(dict c, f64 opacity=1.0) f64 {
-   if(bool(c.get("none", false))){ return 0.0 }
+   if bool(c.get("none", false)) { return 0.0 }
    _clamp01(float(c.get("a", 1.0)) * opacity)
 }
 
 fn _style_lookup(str style, str key) any {
-   if(style.len == 0){ return 0 }
+   if style.len == 0 { return 0 }
    def parts = str.split(style, ";")
    mut i = 0
-   while(i < parts.len){
+   while i < parts.len {
       def part = to_str(parts[i])
       def colon = str.find(part, ":")
-      if(colon >= 0){
+      if colon >= 0 {
          def k = str.lower(str.strip(str.str_slice(part, 0, colon)))
-         if(k == key){ return str.strip(str.str_slice(part, colon + 1, part.len)) }
+         if k == key { return str.strip(str.str_slice(part, colon + 1, part.len)) }
       }
       i += 1
    }
@@ -324,14 +323,14 @@ fn _style_lookup(str style, str key) any {
 }
 
 fn _attr(any attrs, str key, any fallback=0) any {
-   if(!is_dict(attrs)){ return fallback }
+   if !is_dict(attrs) { return fallback }
    attrs.get(key, fallback)
 }
 
 fn _style_attr(any attrs, str key, any fallback=0) any {
-   if(!is_dict(attrs)){ return fallback }
+   if !is_dict(attrs) { return fallback }
    def style_val = _style_lookup(to_str(attrs.get("style", "")), key)
-   if(style_val){ return style_val }
+   if style_val { return style_val }
    attrs.get(key, fallback)
 }
 
@@ -367,35 +366,35 @@ fn _transform_matrix(any raw) list {
    def s = to_str(raw)
    mut p = 0
    mut out = _mat_identity()
-   while(p < s.len){
-      while(p < s.len && !_is_alpha(load8(s, p))){ p += 1 }
+   while p < s.len {
+      while p < s.len && !_is_alpha(load8(s, p)) { p += 1 }
       def start = p
-      while(p < s.len && (_is_alpha(load8(s, p)) || load8(s, p) == 45)){ p += 1 }
-      if(start >= p){ break }
+      while p < s.len && (_is_alpha(load8(s, p)) || load8(s, p) == 45) { p += 1 }
+      if start >= p { break }
       def name = str.lower(str.str_slice(s, start, p))
-      while(p < s.len && load8(s, p) != 40){ p += 1 }
-      if(p >= s.len){ break }
+      while p < s.len && load8(s, p) != 40 { p += 1 }
+      if p >= s.len { break }
       p += 1
       def arg_start = p
       mut depth = 1
-      while(p < s.len && depth > 0){
+      while p < s.len && depth > 0 {
          def c = load8(s, p)
-         if(c == 40){ depth += 1 }
-         elif(c == 41){ depth -= 1 }
-         if(depth > 0){ p += 1 }
+         if c == 40 { depth += 1 }
+         elif c == 41 { depth -= 1 }
+         if depth > 0 { p += 1 }
       }
       def args = _number_list(str.str_slice(s, arg_start, p))
-      if(p < s.len && load8(s, p) == 41){ p += 1 }
+      if p < s.len && load8(s, p) == 41 { p += 1 }
       mut local = _mat_identity()
-      if(name == "translate" && args.len >= 1){
+      if name == "translate" && args.len >= 1 {
          local = _mat_translate(float(args[0]), args.len > 1 ? float(args[1]) : 0.0)
-      } elif(name == "scale" && args.len >= 1){
+      } elif name == "scale" && args.len >= 1 {
          local = _mat_scale(float(args[0]), args.len > 1 ? float(args[1]) : float(args[0]))
-      } elif(name == "matrix" && args.len >= 6){
+      } elif name == "matrix" && args.len >= 6 {
          local = [float(args[0]), float(args[1]), float(args[2]), float(args[3]), float(args[4]), float(args[5])]
-      } elif(name == "rotate" && args.len >= 1){
+      } elif name == "rotate" && args.len >= 1 {
          local = _mat_rotate(float(args[0]))
-         if(args.len >= 3){
+         if args.len >= 3 {
             local = _mat_mul(_mat_translate(float(args[1]), float(args[2])), _mat_mul(local, _mat_translate(0.0 - float(args[1]), 0.0 - float(args[2]))))
          }
       }
@@ -420,27 +419,27 @@ fn _state_child(dict parent, any attrs) dict {
    def opacity = float(parent.get("opacity", 1.0)) * _opacity(_style_attr(attrs, "opacity", 1.0), 1.0)
    s["opacity"] = opacity
    def fill_raw = _style_attr(attrs, "fill", 0)
-   if(fill_raw){ s["fill"] = _parse_color(fill_raw, parent.get("fill", 0)) }
+   if fill_raw { s["fill"] = _parse_color(fill_raw, parent.get("fill", 0)) }
    def stroke_raw = _style_attr(attrs, "stroke", 0)
-   if(stroke_raw){ s["stroke"] = _parse_color(stroke_raw, parent.get("stroke", 0)) }
+   if stroke_raw { s["stroke"] = _parse_color(stroke_raw, parent.get("stroke", 0)) }
    def fill_op = _style_attr(attrs, "fill-opacity", 0)
-   if(fill_op && is_dict(s["fill"])){
+   if fill_op && is_dict(s["fill"]) {
       def fc = dict_mod.dict_clone(s["fill"])
       fc["a"] = _clamp01(float(fc.get("a", 1.0)) * _opacity(fill_op, 1.0))
       s["fill"] = fc
    }
    def stroke_op = _style_attr(attrs, "stroke-opacity", 0)
-   if(stroke_op && is_dict(s["stroke"])){
+   if stroke_op && is_dict(s["stroke"]) {
       def sc = dict_mod.dict_clone(s["stroke"])
       sc["a"] = _clamp01(float(sc.get("a", 1.0)) * _opacity(stroke_op, 1.0))
       s["stroke"] = sc
    }
    def sw = _style_attr(attrs, "stroke-width", 0)
-   if(sw){ s["stroke_width"] = max(0.0, _num(sw, float(s.get("stroke_width", 1.0)))) }
+   if sw { s["stroke_width"] = max(0.0, _num(sw, float(s.get("stroke_width", 1.0)))) }
    def fr = _style_attr(attrs, "fill-rule", 0)
-   if(fr){ s["fill_rule"] = str.lower(str.strip(to_str(fr))) }
+   if fr { s["fill_rule"] = str.lower(str.strip(to_str(fr))) }
    def tf = _style_attr(attrs, "transform", 0)
-   if(tf){ s["transform"] = _mat_mul(s.get("transform", _mat_identity()), _transform_matrix(tf)) }
+   if tf { s["transform"] = _mat_mul(s.get("transform", _mat_identity()), _transform_matrix(tf)) }
    s
 }
 
@@ -449,16 +448,16 @@ fn _pt(f64 x, f64 y) list { [x, y] }
 fn _apply_path(list paths, list m) list {
    mut out = []
    mut i = 0
-   while(i < paths.len){
+   while i < paths.len {
       def path = paths[i]
       mut p2 = []
       mut j = 0
-      while(j < path.len){
+      while j < path.len {
          def p = path[j]
          p2 = p2.append(_mat_apply(m, float(p[0]), float(p[1])))
          j += 1
       }
-      if(p2.len > 0){ out = out.append(p2) }
+      if p2.len > 0 { out = out.append(p2) }
       i += 1
    }
    out
@@ -468,7 +467,7 @@ fn _append_cubic(list cur, f64 x0, f64 y0, f64 x1, f64 y1, f64 x2, f64 y2, f64 x
    def rough = max(max(math.abs(x1 - x0) + math.abs(y1 - y0), math.abs(x2 - x1) + math.abs(y2 - y1)), math.abs(x3 - x2) + math.abs(y3 - y2))
    mut seg = int(max(8.0, min(32.0, rough * 2.0)))
    mut i = 1
-   while(i <= seg){
+   while i <= seg {
       def t = float(i) / float(seg)
       def mt = 1.0 - t
       def x = mt * mt * mt * x0 + 3.0 * mt * mt * t * x1 + 3.0 * mt * t * t * x2 + t * t * t * x3
@@ -492,7 +491,7 @@ fn _angle_between(f64 ux, f64 uy, f64 vx, f64 vy) f64 {
 fn _append_arc(list cur, f64 x0, f64 y0, f64 rx0, f64 ry0, f64 rot_deg, int large_arc, int sweep, f64 x, f64 y) list {
    mut rx = math.abs(rx0)
    mut ry = math.abs(ry0)
-   if(rx <= 0.000001 || ry <= 0.000001 || (math.abs(x - x0) < 0.000001 && math.abs(y - y0) < 0.000001)){
+   if rx <= 0.000001 || ry <= 0.000001 || (math.abs(x - x0) < 0.000001 && math.abs(y - y0) < 0.000001) {
       return cur.append(_pt(x, y))
    }
    def phi = rot_deg * math.PI / 180.0
@@ -503,7 +502,7 @@ fn _append_arc(list cur, f64 x0, f64 y0, f64 rx0, f64 ry0, f64 rot_deg, int larg
    def x1p = cos_phi * dx + sin_phi * dy
    def y1p = 0.0 - sin_phi * dx + cos_phi * dy
    def lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry)
-   if(lam > 1.0){
+   if lam > 1.0 {
       def s = math.sqrt(lam)
       rx *= s
       ry *= s
@@ -513,7 +512,7 @@ fn _append_arc(list cur, f64 x0, f64 y0, f64 rx0, f64 ry0, f64 rot_deg, int larg
    def x1p2 = x1p * x1p
    def y1p2 = y1p * y1p
    mut rad = (rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2) / max(0.000001, rx2 * y1p2 + ry2 * x1p2)
-   if(rad < 0.0){ rad = 0.0 }
+   if rad < 0.0 { rad = 0.0 }
    def sign = (large_arc == sweep) ? -1.0 : 1.0
    def coef = sign * math.sqrt(rad)
    def cxp = coef * (rx * y1p / ry)
@@ -526,11 +525,11 @@ fn _append_arc(list cur, f64 x0, f64 y0, f64 rx0, f64 ry0, f64 rot_deg, int larg
    def vy = (0.0 - y1p - cyp) / ry
    mut theta = _angle_between(1.0, 0.0, ux, uy)
    mut delta = _angle_between(ux, uy, vx, vy)
-   if(sweep == 0 && delta > 0.0){ delta -= 2.0 * math.PI }
-   if(sweep != 0 && delta < 0.0){ delta += 2.0 * math.PI }
+   if sweep == 0 && delta > 0.0 { delta -= 2.0 * math.PI }
+   if sweep != 0 && delta < 0.0 { delta += 2.0 * math.PI }
    def seg = int(max(4.0, min(48.0, math.ceil(math.abs(delta) / (math.PI / 8.0)))))
    mut i = 1
-   while(i <= seg){
+   while i <= seg {
       def a = theta + delta * float(i) / float(seg)
       def ca = math.cos(a)
       def sa = math.sin(a)
@@ -559,35 +558,35 @@ fn _path_flatten(any raw) list {
    mut last_qx = 0.0
    mut last_qy = 0.0
    mut last_cmd = 0
-   while(p < d.len){
+   while p < d.len {
       p = _skip_sep(d, p)
-      if(p >= d.len){ break }
-      if(_is_path_cmd(load8(d, p))){
+      if p >= d.len { break }
+      if _is_path_cmd(load8(d, p)) {
          cmd = load8(d, p)
          p += 1
-      } elif(cmd == 0){
+      } elif cmd == 0 {
          p += 1
          continue
       }
       def rel = cmd >= 97 && cmd <= 122
       def uc = rel ? (cmd - 32) : cmd
-      if(uc == 90){
-         if(cur.len > 0){ cur = cur.append(_pt(sx, sy)) paths = paths.append(cur) cur = [] x = sx y = sy }
+      if uc == 90 {
+         if cur.len > 0 { cur = cur.append(_pt(sx, sy)) paths = paths.append(cur) cur = [] x = sx y = sy }
          last_cmd = uc
          continue
       }
-      if(uc == 77){
+      if uc == 77 {
          mut first = true
-         while(true){
+         while true {
             def r1 = _read_num(d, p)
-            if(!r1[0]){ break }
+            if !r1[0] { break }
             def r2 = _read_num(d, int(r1[2]))
-            if(!r2[0]){ break }
+            if !r2[0] { break }
             p = int(r2[2])
             mut nx = float(r1[1])
             mut ny = float(r2[1])
-            if(rel){ nx += x ny += y }
-            if(first){
+            if rel { nx += x ny += y }
+            if first {
                paths = _path_finish(paths, cur)
                cur = [_pt(nx, ny)]
                sx = nx
@@ -600,44 +599,44 @@ fn _path_flatten(any raw) list {
             y = ny
          }
          last_cmd = 77
-      } elif(uc == 76){
-         while(true){
+      } elif uc == 76 {
+         while true {
             def r1 = _read_num(d, p)
-            if(!r1[0]){ break }
+            if !r1[0] { break }
             def r2 = _read_num(d, int(r1[2]))
-            if(!r2[0]){ break }
+            if !r2[0] { break }
             p = int(r2[2])
             x = (rel ? x : 0.0) + float(r1[1])
             y = (rel ? y : 0.0) + float(r2[1])
             cur = cur.append(_pt(x, y))
          }
          last_cmd = 76
-      } elif(uc == 72){
-         while(true){
+      } elif uc == 72 {
+         while true {
             def r = _read_num(d, p)
-            if(!r[0]){ break }
+            if !r[0] { break }
             p = int(r[2])
             x = rel ? x + float(r[1]) : float(r[1])
             cur = cur.append(_pt(x, y))
          }
          last_cmd = 72
-      } elif(uc == 86){
-         while(true){
+      } elif uc == 86 {
+         while true {
             def r = _read_num(d, p)
-            if(!r[0]){ break }
+            if !r[0] { break }
             p = int(r[2])
             y = rel ? y + float(r[1]) : float(r[1])
             cur = cur.append(_pt(x, y))
          }
          last_cmd = 86
-      } elif(uc == 67){
-         while(true){
-            def r1 = _read_num(d, p) if(!r1[0]){ break }
-            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
-            def r3 = _read_num(d, int(r2[2])) if(!r3[0]){ break }
-            def r4 = _read_num(d, int(r3[2])) if(!r4[0]){ break }
-            def r5 = _read_num(d, int(r4[2])) if(!r5[0]){ break }
-            def r6 = _read_num(d, int(r5[2])) if(!r6[0]){ break }
+      } elif uc == 67 {
+         while true {
+            def r1 = _read_num(d, p) if !r1[0] { break }
+            def r2 = _read_num(d, int(r1[2])) if !r2[0] { break }
+            def r3 = _read_num(d, int(r2[2])) if !r3[0] { break }
+            def r4 = _read_num(d, int(r3[2])) if !r4[0] { break }
+            def r5 = _read_num(d, int(r4[2])) if !r5[0] { break }
+            def r6 = _read_num(d, int(r5[2])) if !r6[0] { break }
             p = int(r6[2])
             def x1 = (rel ? x : 0.0) + float(r1[1])
             def y1 = (rel ? y : 0.0) + float(r2[1])
@@ -652,12 +651,12 @@ fn _path_flatten(any raw) list {
             last_cy = y2
          }
          last_cmd = 67
-      } elif(uc == 83){
-         while(true){
-            def r1 = _read_num(d, p) if(!r1[0]){ break }
-            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
-            def r3 = _read_num(d, int(r2[2])) if(!r3[0]){ break }
-            def r4 = _read_num(d, int(r3[2])) if(!r4[0]){ break }
+      } elif uc == 83 {
+         while true {
+            def r1 = _read_num(d, p) if !r1[0] { break }
+            def r2 = _read_num(d, int(r1[2])) if !r2[0] { break }
+            def r3 = _read_num(d, int(r2[2])) if !r3[0] { break }
+            def r4 = _read_num(d, int(r3[2])) if !r4[0] { break }
             p = int(r4[2])
             def x1 = (last_cmd == 67 || last_cmd == 83) ? (2.0 * x - last_cx) : x
             def y1 = (last_cmd == 67 || last_cmd == 83) ? (2.0 * y - last_cy) : y
@@ -672,12 +671,12 @@ fn _path_flatten(any raw) list {
             last_cy = y2
          }
          last_cmd = 83
-      } elif(uc == 81){
-         while(true){
-            def r1 = _read_num(d, p) if(!r1[0]){ break }
-            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
-            def r3 = _read_num(d, int(r2[2])) if(!r3[0]){ break }
-            def r4 = _read_num(d, int(r3[2])) if(!r4[0]){ break }
+      } elif uc == 81 {
+         while true {
+            def r1 = _read_num(d, p) if !r1[0] { break }
+            def r2 = _read_num(d, int(r1[2])) if !r2[0] { break }
+            def r3 = _read_num(d, int(r2[2])) if !r3[0] { break }
+            def r4 = _read_num(d, int(r3[2])) if !r4[0] { break }
             p = int(r4[2])
             def x1 = (rel ? x : 0.0) + float(r1[1])
             def y1 = (rel ? y : 0.0) + float(r2[1])
@@ -690,10 +689,10 @@ fn _path_flatten(any raw) list {
             last_qy = y1
          }
          last_cmd = 81
-      } elif(uc == 84){
-         while(true){
-            def r1 = _read_num(d, p) if(!r1[0]){ break }
-            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
+      } elif uc == 84 {
+         while true {
+            def r1 = _read_num(d, p) if !r1[0] { break }
+            def r2 = _read_num(d, int(r1[2])) if !r2[0] { break }
             p = int(r2[2])
             def x1 = (last_cmd == 81 || last_cmd == 84) ? (2.0 * x - last_qx) : x
             def y1 = (last_cmd == 81 || last_cmd == 84) ? (2.0 * y - last_qy) : y
@@ -706,15 +705,15 @@ fn _path_flatten(any raw) list {
             last_qy = y1
          }
          last_cmd = 84
-      } elif(uc == 65){
-         while(true){
-            def r1 = _read_num(d, p) if(!r1[0]){ break }
-            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
-            def r3 = _read_num(d, int(r2[2])) if(!r3[0]){ break }
-            def r4 = _read_num(d, int(r3[2])) if(!r4[0]){ break }
-            def r5 = _read_num(d, int(r4[2])) if(!r5[0]){ break }
-            def r6 = _read_num(d, int(r5[2])) if(!r6[0]){ break }
-            def r7 = _read_num(d, int(r6[2])) if(!r7[0]){ break }
+      } elif uc == 65 {
+         while true {
+            def r1 = _read_num(d, p) if !r1[0] { break }
+            def r2 = _read_num(d, int(r1[2])) if !r2[0] { break }
+            def r3 = _read_num(d, int(r2[2])) if !r3[0] { break }
+            def r4 = _read_num(d, int(r3[2])) if !r4[0] { break }
+            def r5 = _read_num(d, int(r4[2])) if !r5[0] { break }
+            def r6 = _read_num(d, int(r5[2])) if !r6[0] { break }
+            def r7 = _read_num(d, int(r6[2])) if !r7[0] { break }
             p = int(r7[2])
             def nx = (rel ? x : 0.0) + float(r6[1])
             def ny = (rel ? y : 0.0) + float(r7[1])
@@ -731,31 +730,31 @@ fn _path_flatten(any raw) list {
 }
 
 fn _rect_path(f64 x, f64 y, f64 w, f64 h, f64 rx=0.0, f64 ry=0.0) list {
-   if(w <= 0.0 || h <= 0.0){ return [] }
+   if w <= 0.0 || h <= 0.0 { return [] }
    rx = min(math.abs(rx), w * 0.5)
    ry = min(math.abs(ry), h * 0.5)
-   if(rx <= 0.0 || ry <= 0.0){ return [[_pt(x, y), _pt(x + w, y), _pt(x + w, y + h), _pt(x, y + h), _pt(x, y)]] }
+   if rx <= 0.0 || ry <= 0.0 { return [[_pt(x, y), _pt(x + w, y), _pt(x + w, y + h), _pt(x, y + h), _pt(x, y)]] }
    mut p = []
    mut i = 0
-   while(i <= 6){
+   while i <= 6 {
       def a = -math.PI * 0.5 + float(i) * (math.PI * 0.5 / 6.0)
       p = p.append(_pt(x + w - rx + math.cos(a) * rx, y + ry + math.sin(a) * ry))
       i += 1
    }
    i = 0
-   while(i <= 6){
+   while i <= 6 {
       def a = float(i) * (math.PI * 0.5 / 6.0)
       p = p.append(_pt(x + w - rx + math.cos(a) * rx, y + h - ry + math.sin(a) * ry))
       i += 1
    }
    i = 0
-   while(i <= 6){
+   while i <= 6 {
       def a = math.PI * 0.5 + float(i) * (math.PI * 0.5 / 6.0)
       p = p.append(_pt(x + rx + math.cos(a) * rx, y + h - ry + math.sin(a) * ry))
       i += 1
    }
    i = 0
-   while(i <= 6){
+   while i <= 6 {
       def a = math.PI + float(i) * (math.PI * 0.5 / 6.0)
       p = p.append(_pt(x + rx + math.cos(a) * rx, y + ry + math.sin(a) * ry))
       i += 1
@@ -764,11 +763,11 @@ fn _rect_path(f64 x, f64 y, f64 w, f64 h, f64 rx=0.0, f64 ry=0.0) list {
 }
 
 fn _ellipse_path(f64 cx, f64 cy, f64 rx, f64 ry) list {
-   if(rx <= 0.0 || ry <= 0.0){ return [] }
+   if rx <= 0.0 || ry <= 0.0 { return [] }
    mut p = []
    mut i = 0
    def n = 40
-   while(i <= n){
+   while i <= n {
       def a = float(i) * (2.0 * math.PI / float(n))
       p = p.append(_pt(cx + math.cos(a) * rx, cy + math.sin(a) * ry))
       i += 1
@@ -780,11 +779,11 @@ fn _points_path(any raw, bool close=false) list {
    def xs = _number_list(raw)
    mut p = []
    mut i = 0
-   while(i + 1 < xs.len){
+   while i + 1 < xs.len {
       p = p.append(_pt(float(xs[i]), float(xs[i + 1])))
       i += 2
    }
-   if(close && p.len > 0){ p = p.append(p[0]) }
+   if close && p.len > 0 { p = p.append(p[0]) }
    p.len > 0 ? [p] : []
 }
 
@@ -793,19 +792,19 @@ fn _line_path(f64 x1, f64 y1, f64 x2, f64 y2) list { [[_pt(x1, y1), _pt(x2, y2)]
 fn _winding_at(list paths, f64 x, f64 y, bool evenodd=false) int {
    mut winding = 0
    mut i = 0
-   while(i < paths.len){
+   while i < paths.len {
       def path = paths[i]
       mut j = 0
-      while(j + 1 < path.len){
+      while j + 1 < path.len {
          def p0 = path[j]
          def p1 = path[j + 1]
          def x0 = float(p0[0])
          def y0 = float(p0[1])
          def x1 = float(p1[0])
          def y1 = float(p1[1])
-         if(y0 <= y){
-            if(y1 > y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) > 0.0){ winding += 1 }
-         } elif(y1 <= y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) < 0.0){
+         if y0 <= y {
+            if y1 > y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) > 0.0 { winding += 1 }
+         } elif y1 <= y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) < 0.0 {
             winding -= 1
          }
          j += 1
@@ -831,13 +830,13 @@ fn _seg_dist2(f64 px, f64 py, f64 x0, f64 y0, f64 x1, f64 y1) f64 {
 fn _stroke_hit(list paths, f64 x, f64 y, f64 width) bool {
    def r2 = (width * 0.5) * (width * 0.5)
    mut i = 0
-   while(i < paths.len){
+   while i < paths.len {
       def path = paths[i]
       mut j = 0
-      while(j + 1 < path.len){
+      while j + 1 < path.len {
          def p0 = path[j]
          def p1 = path[j + 1]
-         if(_seg_dist2(x, y, float(p0[0]), float(p0[1]), float(p1[0]), float(p1[1])) <= r2){ return true }
+         if _seg_dist2(x, y, float(p0[0]), float(p0[1]), float(p1[0]), float(p1[1])) <= r2 { return true }
          j += 1
       }
       i += 1
@@ -852,23 +851,23 @@ fn _path_bounds(list paths, f64 pad, int w, int h) list {
    mut maxy = -1000000000.0
    mut any_pt = false
    mut i = 0
-   while(i < paths.len){
+   while i < paths.len {
       def path = paths[i]
       mut j = 0
-      while(j < path.len){
+      while j < path.len {
          def p = path[j]
          def x = float(p[0])
          def y = float(p[1])
-         if(x < minx){ minx = x }
-         if(y < miny){ miny = y }
-         if(x > maxx){ maxx = x }
-         if(y > maxy){ maxy = y }
+         if x < minx { minx = x }
+         if y < miny { miny = y }
+         if x > maxx { maxx = x }
+         if y > maxy { maxy = y }
          any_pt = true
          j += 1
       }
       i += 1
    }
-   if(!any_pt){ return [0, 0, -1, -1] }
+   if !any_pt { return [0, 0, -1, -1] }
    def x0 = max(0, int(math.floor(minx - pad)))
    def y0 = max(0, int(math.floor(miny - pad)))
    def x1 = min(w - 1, int(math.ceil(maxx + pad)))
@@ -878,7 +877,7 @@ fn _path_bounds(list paths, f64 pad, int w, int h) list {
 
 fn _blend(any out, int off, dict color, f64 alpha) any {
    alpha = _clamp01(alpha)
-   if(alpha <= 0.0){ return 0 }
+   if alpha <= 0.0 { return 0 }
    def sr = float(color.get("r", 0))
    def sg = float(color.get("g", 0))
    def sb = float(color.get("b", 0))
@@ -887,7 +886,7 @@ fn _blend(any out, int off, dict color, f64 alpha) any {
    def db = float(load8(out, off + 2) & 255)
    def da = float(load8(out, off + 3) & 255) / 255.0
    def oa = alpha + da * (1.0 - alpha)
-   if(oa <= 0.0){ return 0 }
+   if oa <= 0.0 { return 0 }
    def r = (sr * alpha + dr * da * (1.0 - alpha)) / oa
    def g = (sg * alpha + dg * da * (1.0 - alpha)) / oa
    def b = (sb * alpha + db * da * (1.0 - alpha)) / oa
@@ -900,32 +899,32 @@ fn _blend(any out, int off, dict color, f64 alpha) any {
 
 fn _draw_paths(any out, int w, int h, list paths, dict color, f64 opacity, str mode, f64 stroke_width=1.0, str fill_rule="nonzero") any {
    def ca = _color_alpha(color, opacity)
-   if(ca <= 0.0 || paths.len == 0){ return 0 }
+   if ca <= 0.0 || paths.len == 0 { return 0 }
    def evenodd = fill_rule == "evenodd"
    def pad = mode == "stroke" ? stroke_width * 0.5 + 1.0 : 1.0
    def b = _path_bounds(paths, pad, w, h)
-   if(int(b[2]) < int(b[0]) || int(b[3]) < int(b[1])){ return 0 }
+   if int(b[2]) < int(b[0]) || int(b[3]) < int(b[1]) { return 0 }
    mut y = int(b[1])
-   while(y <= int(b[3])){
+   while y <= int(b[3]) {
       mut x = int(b[0])
-      while(x <= int(b[2])){
+      while x <= int(b[2]) {
          mut cov = 0
          mut sy = 0
-         while(sy < 2){
+         while sy < 2 {
             mut sx = 0
-            while(sx < 2){
+            while sx < 2 {
                def px = float(x) + (float(sx) + 0.5) * 0.5
                def py = float(y) + (float(sy) + 0.5) * 0.5
-               if(mode == "fill"){
-                  if(_winding_at(paths, px, py, evenodd) != 0){ cov += 1 }
-               } elif(_stroke_hit(paths, px, py, stroke_width)){
+               if mode == "fill" {
+                  if _winding_at(paths, px, py, evenodd) != 0 { cov += 1 }
+               } elif _stroke_hit(paths, px, py, stroke_width) {
                   cov += 1
                }
                sx += 1
             }
             sy += 1
          }
-         if(cov > 0){ _blend(out, (y * w + x) * 4, color, ca * float(cov) * 0.25) }
+         if cov > 0 { _blend(out, (y * w + x) * 4, color, ca * float(cov) * 0.25) }
          x += 1
       }
       y += 1
@@ -934,13 +933,13 @@ fn _draw_paths(any out, int w, int h, list paths, dict color, f64 opacity, str m
 }
 
 fn _collect_defs(any node, dict defs) any {
-   if(!is_dict(node)){ return 0 }
+   if !is_dict(node) { return 0 }
    def attrs = node.get("attr", dict())
    def id = to_str(attrs.get("id", ""))
-   if(id.len > 0){ defs[id] = node }
+   if id.len > 0 { defs[id] = node }
    def children = node.get("children", [])
    mut i = 0
-   while(i < children.len){
+   while i < children.len {
       _collect_defs(children[i], defs)
       i += 1
    }
@@ -948,53 +947,53 @@ fn _collect_defs(any node, dict defs) any {
 }
 
 fn _node_paths(str name, any attrs) list {
-   if(name == "path"){ return _path_flatten(_attr(attrs, "d", "")) }
-   if(name == "rect"){
+   if name == "path" { return _path_flatten(_attr(attrs, "d", "")) }
+   if name == "rect" {
       def x = _num(_attr(attrs, "x", 0.0), 0.0)
       def y = _num(_attr(attrs, "y", 0.0), 0.0)
       def w = _num(_attr(attrs, "width", 0.0), 0.0)
       def h = _num(_attr(attrs, "height", 0.0), 0.0)
       mut rx = _num(_attr(attrs, "rx", 0.0), 0.0)
       mut ry = _num(_attr(attrs, "ry", rx), rx)
-      if(rx == 0.0 && ry > 0.0){ rx = ry }
+      if rx == 0.0 && ry > 0.0 { rx = ry }
       return _rect_path(x, y, w, h, rx, ry)
    }
-   if(name == "circle"){ return _ellipse_path(_num(_attr(attrs, "cx", 0.0), 0.0), _num(_attr(attrs, "cy", 0.0), 0.0), _num(_attr(attrs, "r", 0.0), 0.0), _num(_attr(attrs, "r", 0.0), 0.0)) }
-   if(name == "ellipse"){ return _ellipse_path(_num(_attr(attrs, "cx", 0.0), 0.0), _num(_attr(attrs, "cy", 0.0), 0.0), _num(_attr(attrs, "rx", 0.0), 0.0), _num(_attr(attrs, "ry", 0.0), 0.0)) }
-   if(name == "polygon"){ return _points_path(_attr(attrs, "points", ""), true) }
-   if(name == "polyline"){ return _points_path(_attr(attrs, "points", ""), false) }
-   if(name == "line"){ return _line_path(_num(_attr(attrs, "x1", 0.0), 0.0), _num(_attr(attrs, "y1", 0.0), 0.0), _num(_attr(attrs, "x2", 0.0), 0.0), _num(_attr(attrs, "y2", 0.0), 0.0)) }
+   if name == "circle" { return _ellipse_path(_num(_attr(attrs, "cx", 0.0), 0.0), _num(_attr(attrs, "cy", 0.0), 0.0), _num(_attr(attrs, "r", 0.0), 0.0), _num(_attr(attrs, "r", 0.0), 0.0)) }
+   if name == "ellipse" { return _ellipse_path(_num(_attr(attrs, "cx", 0.0), 0.0), _num(_attr(attrs, "cy", 0.0), 0.0), _num(_attr(attrs, "rx", 0.0), 0.0), _num(_attr(attrs, "ry", 0.0), 0.0)) }
+   if name == "polygon" { return _points_path(_attr(attrs, "points", ""), true) }
+   if name == "polyline" { return _points_path(_attr(attrs, "points", ""), false) }
+   if name == "line" { return _line_path(_num(_attr(attrs, "x1", 0.0), 0.0), _num(_attr(attrs, "y1", 0.0), 0.0), _num(_attr(attrs, "x2", 0.0), 0.0), _num(_attr(attrs, "y2", 0.0), 0.0)) }
    []
 }
 
 fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=0) any {
-   if(!is_dict(node) || depth > 16){ return 0 }
+   if !is_dict(node) || depth > 16 { return 0 }
    def name = str.lower(to_str(node.get("name", "")))
-   if(name == "defs" || name == "lineargradient" || name == "radialgradient" || name == "clippath" || name == "mask" || name == "style"){ return 0 }
+   if name == "defs" || name == "lineargradient" || name == "radialgradient" || name == "clippath" || name == "mask" || name == "style" { return 0 }
    def attrs = node.get("attr", dict())
-   if(to_str(_style_attr(attrs, "display", "")) == "none"){ return 0 }
+   if to_str(_style_attr(attrs, "display", "")) == "none" { return 0 }
    def st = _state_child(state, attrs)
-   if(name == "use"){
+   if name == "use" {
       mut href = to_str(attrs.get("xlink:href", attrs.get("href", "")))
-      if(str.startswith(href, "#")){ href = str.str_slice(href, 1, href.len) }
-      if(defs.contains(href)){
+      if str.startswith(href, "#") { href = str.str_slice(href, 1, href.len) }
+      if defs.contains(href) {
          mut use_state = dict_mod.dict_clone(st)
          def tx = _num(attrs.get("x", 0.0), 0.0)
          def ty = _num(attrs.get("y", 0.0), 0.0)
-         if(tx != 0.0 || ty != 0.0){ use_state["transform"] = _mat_mul(use_state.get("transform", _mat_identity()), _mat_translate(tx, ty)) }
+         if tx != 0.0 || ty != 0.0 { use_state["transform"] = _mat_mul(use_state.get("transform", _mat_identity()), _mat_translate(tx, ty)) }
          _draw_node(out, w, h, defs[href], use_state, defs, depth + 1)
       }
       return 0
    }
    def raw_paths = _node_paths(name, attrs)
-   if(raw_paths.len > 0){
+   if raw_paths.len > 0 {
       def paths = _apply_path(raw_paths, st.get("transform", _mat_identity()))
       def fill = st.get("fill", _rgba_none())
-      if(_color_alpha(fill, float(st.get("opacity", 1.0))) > 0.0 && name != "line" && name != "polyline"){
+      if _color_alpha(fill, float(st.get("opacity", 1.0))) > 0.0 && name != "line" && name != "polyline" {
          _draw_paths(out, w, h, paths, fill, float(st.get("opacity", 1.0)), "fill", 1.0, to_str(st.get("fill_rule", "nonzero")))
       }
       def stroke = st.get("stroke", _rgba_none())
-      if(_color_alpha(stroke, float(st.get("opacity", 1.0))) > 0.0){
+      if _color_alpha(stroke, float(st.get("opacity", 1.0))) > 0.0 {
          def m = st.get("transform", _mat_identity())
          def scale = max(math.sqrt(float(m[0]) * float(m[0]) + float(m[1]) * float(m[1])), math.sqrt(float(m[2]) * float(m[2]) + float(m[3]) * float(m[3])))
          _draw_paths(out, w, h, paths, stroke, float(st.get("opacity", 1.0)), "stroke", max(0.5, float(st.get("stroke_width", 1.0)) * scale), "nonzero")
@@ -1002,7 +1001,7 @@ fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=
    }
    def children = node.get("children", [])
    mut i = 0
-   while(i < children.len){
+   while i < children.len {
       _draw_node(out, w, h, children[i], st, defs, depth + 1)
       i += 1
    }
@@ -1012,9 +1011,9 @@ fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=
 fn _svg_min_raster() int {
    mut target = 32.0
    def raw = os.env("NY_SVG_MIN_RASTER")
-   if(raw){
+   if raw {
       target = _num(raw, target)
-      if(target < 16.0){ target = 16.0 } elif(target > 512.0){ target = 512.0 }
+      if target < 16.0 { target = 16.0 } elif target > 512.0 { target = 512.0 }
    }
    int(target + 0.5)
 }
@@ -1025,12 +1024,12 @@ fn _viewport(any root) list {
    def height = max(1.0, _num(attrs.get("height", width), width))
    def vb_raw = attrs.get("viewBox", attrs.get("viewbox", ""))
    def vb = _number_list(vb_raw)
-   if(vb.len >= 4){ return [float(vb[0]), float(vb[1]), max(1.0, float(vb[2])), max(1.0, float(vb[3])), width, height] }
+   if vb.len >= 4 { return [float(vb[0]), float(vb[1]), max(1.0, float(vb[2])), max(1.0, float(vb[3])), width, height] }
    [0.0, 0.0, width, height, width, height]
 }
 
 fn _decode_root(any root) any {
-   if(!is_dict(root) || str.lower(to_str(root.get("name", ""))) != "svg"){
+   if !is_dict(root) || str.lower(to_str(root.get("name", ""))) != "svg" {
       _svg_set_error("missing <svg> root")
       return 0
    }
@@ -1042,7 +1041,7 @@ fn _decode_root(any root) any {
    def out_w = max(1, int(src_w * scale + 0.5))
    def out_h = max(1, int(src_h * scale + 0.5))
    def ptr = malloc(out_w * out_h * 4 + 32)
-   if(!ptr){
+   if !ptr {
       _svg_set_error("out of memory allocating SVG raster")
       return 0
    }
@@ -1063,12 +1062,12 @@ fn _decode_root(any root) any {
 
 fn decode(any data, any _source_path="") any {
    "Decodes SVG bytes through the native Ny rasterizer."
-   if(!_looks_like_svg(data)){
+   if !_looks_like_svg(data) {
       _svg_set_error("input does not look like SVG")
       return 0
    }
    def root = _parse_svg_tree(data)
-   if(!root){
+   if !root {
       _svg_set_error("SVG XML parse failed")
       return 0
    }
@@ -1077,12 +1076,12 @@ fn decode(any data, any _source_path="") any {
 
 fn load_path(any path) any {
    "Loads and decodes an SVG file through the native Ny rasterizer."
-   if(!is_str(path) || path.len == 0 || !os.file_exists(path)){
+   if !is_str(path) || path.len == 0 || !os.file_exists(path) {
       _svg_set_error("SVG path not found: " + to_str(path))
       return 0
    }
    def r = os.file_read(path)
-   if(!is_ok(r)){
+   if !is_ok(r) {
       _svg_set_error("failed to read SVG path: " + to_str(path))
       return 0
    }

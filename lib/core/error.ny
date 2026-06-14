@@ -40,7 +40,7 @@ def WARN_RESOURCE = "warn.resource"
 fn exception(str kind=ERR, str message="", any data=0) dict {
    "Creates a structured exception payload without changing panic/catch semantics."
    mut e = {"kind": kind, "message": message}
-   if(data != 0){ e["data"] = data }
+   if data != 0 { e["data"] = data }
    return e
 }
 
@@ -48,19 +48,19 @@ fn exception(str kind=ERR, str message="", any data=0) dict {
 fn warning(str kind=WARN, str message="", any data=0) dict {
    "Creates a structured warning payload."
    mut w = {"kind": kind, "message": message}
-   if(data != 0){ w["data"] = data }
+   if data != 0 { w["data"] = data }
    return w
 }
 
 fn error_kind(any e) str {
    "Returns the symbolic error kind for structured errors, or ERR for raw panic payloads."
-   if(is_dict(e)){ return e.get("kind", ERR) }
+   if is_dict(e) { return e.get("kind", ERR) }
    return ERR
 }
 
 fn error_message(any e) str {
    "Returns the message string for structured errors, or the string form of a raw payload."
-   if(is_dict(e)){ return __to_str(e.get("message", "")) }
+   if is_dict(e) { return __to_str(e.get("message", "")) }
    return __to_str(e)
 }
 
@@ -115,13 +115,13 @@ fn is_err(any v) bool {
 
 fn unwrap(any v) any {
    "Unwraps a Result or returns the value. Panics if **Err**."
-   if(is_err(v)){ panic("unwrapped an Err: " + __to_str(__unwrap(v))) }
+   if is_err(v) { panic("unwrapped an Err: " + __to_str(__unwrap(v))) }
    return __unwrap(v)
 }
 
 fn unwrap_or(any v, any default) any {
    "Unwraps a Result or returns the default value."
-   if(is_ok(v)){ return __unwrap(v) }
+   if is_ok(v) { return __unwrap(v) }
    return default
 }
 

@@ -11,15 +11,15 @@ use std.math.crypto.symmetric.aes (aes_sbox)
 fn trace_column_sums(list traces) list {
    "Return per-column sums for a rectangular list of numeric traces."
    def rows = traces.len
-   if(rows == 0){ return [] }
+   if rows == 0 { return [] }
    def width = traces[0].len
    mut sums = bin.zero_list(width)
    mut i = 0
-   while(i < rows){
+   while i < rows {
       def row = traces[i]
       assert(row.len == width, "trace rows must have equal width")
       mut j = 0
-      while(j < width){
+      while j < width {
          sums[j] = sums[j] + row[j]
          j += 1
       }
@@ -31,12 +31,12 @@ fn trace_column_sums(list traces) list {
 fn threshold_trace_bits(list traces, int threshold=120) list {
    "Classify each trace column as 1 when its average is at least threshold."
    def rows = traces.len
-   if(rows == 0){ return [] }
+   if rows == 0 { return [] }
    def sums = trace_column_sums(traces)
    def n = sums.len
    mut bits = bin.zero_list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       bits[i] = sums[i] >= threshold * rows ? 1 : 0
       i += 1
    }
@@ -49,8 +49,8 @@ fn bits_lsb_to_bigint(list bits) bigint {
    def n = bits.len
    mut out = Z(0)
    mut i = 0
-   while(i < n){
-      if(bits[i] != 0){ out += Z(1) << i }
+   while i < n {
+      if bits[i] != 0 { out += Z(1) << i }
       i += 1
    }
    out
@@ -68,7 +68,7 @@ fn aes_sbox_lsb_leak_count(list plaintext, list key) int {
    def n = plaintext.len < key.len ? plaintext.len : key.len
    mut count = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       count += S[(plaintext[i] ^^ key[i]) & 255] & 1
       i += 1
    }
@@ -78,23 +78,23 @@ fn aes_sbox_lsb_leak_count(list plaintext, list key) int {
 fn aes_sbox_lsb_recover_byte(list leaks) int {
    "Recover one AES key byte from 256 leakage counts where plaintext byte p ranges 0..255.
    Other byte positions must be fixed, so the minimum leakage is treated as the constant baseline."
-   if(leaks == nil || leaks.len != 256){ return -1 }
+   if leaks == nil || leaks.len != 256 { return -1 }
    def S = aes_sbox()
    mut base = leaks[0]
    mut i = 1
-   while(i < 256){
-      if(leaks[i] < base){ base = leaks[i] }
+   while i < 256 {
+      if leaks[i] < base { base = leaks[i] }
       i += 1
    }
    mut k = 0
-   while(k < 256){
+   while k < 256 {
       mut ok = true
       mut p = 0
-      while(p < 256){
-         if((leaks[p] - base) != (S[(p ^^ k) & 255] & 1)){ ok = false }
+      while p < 256 {
+         if (leaks[p] - base) != (S[(p ^^ k) & 255] & 1) { ok = false }
          p += 1
       }
-      if(ok){ return k }
+      if ok { return k }
       k += 1
    }
    -1
@@ -104,7 +104,7 @@ fn aes_sbox_lsb_recover_key(list leak_rows) list {
    "Recover an AES-style key from one 256-count leakage row per key byte."
    mut key = bin.zero_list(leak_rows.len)
    mut i = 0
-   while(i < leak_rows.len){
+   while i < leak_rows.len {
       key[i] = aes_sbox_lsb_recover_byte(leak_rows[i])
       i += 1
    }

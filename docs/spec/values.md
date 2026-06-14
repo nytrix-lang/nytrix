@@ -41,7 +41,8 @@ f"{count + 1=}"
 ## Lists
 
 Lists are ordered mutable sequences. `list(n)` creates an empty list with
-reserved capacity `n` and zero initialized elements.
+reserved capacity `n`. It does not create `n` initialized elements; the list
+starts with zero elements. Use `append` or a literal to fill it.
 
 ```ny
 def xs = [1, 2, 3]

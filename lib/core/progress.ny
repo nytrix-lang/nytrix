@@ -7,12 +7,12 @@ use std.core
 use std.core.term as term
 
 fn _progress_total(any target) int {
-   if(is_int(target)){ return target }
+   if is_int(target) { return target }
    target.len
 }
 
 fn _progress_value(any target, int i) any {
-   if(is_int(target)){ return i }
+   if is_int(target) { return i }
    target.get(i)
 }
 
@@ -23,7 +23,7 @@ fn _progress_run(any target, str desc, int width, str color, any body) any {
    mut out = list(n)
    term.bar_update(p, 0)
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(body(_progress_value(target, i)))
       term.bar_update(p, i + 1)
       i += 1
@@ -37,17 +37,17 @@ fn _progress_from_args(any target, any label, list args) any {
    mut width = 40
    mut color = "green"
    mut body = nil
-   if(is_str(label)){ desc = label }
-   elif(label != nil){ body = label }
+   if is_str(label) { desc = label }
+   elif label != nil { body = label }
    mut i = 0
-   while(i < args.len){
+   while i < args.len {
       def arg = args.get(i)
-      if(is_int(arg)){ width = arg }
-      elif(is_str(arg)){ color = arg }
+      if is_int(arg) { width = arg }
+      elif is_str(arg) { color = arg }
       else { body = arg }
       i += 1
    }
-   if(body != nil){ return _progress_run(target, desc, width, color, body) }
+   if body != nil { return _progress_run(target, desc, width, color, body) }
    _progress_bar(target, desc, width, color)
 }
 
@@ -101,16 +101,16 @@ fn total(list p) int {
 fn percent(list p) int {
    "Returns integer completion percent."
    def t = total(p)
-   if(t <= 0){ return 100 }
+   if t <= 0 { return 100 }
    def c = current(p)
-   if(c <= 0){ return 0 }
-   if(c >= t){ return 100 }
+   if c <= 0 { return 0 }
+   if c >= t { return 100 }
    (c * 100) / t
 }
 
 fn reset(list p, int n=-1) int {
    "Resets progress state and optionally changes the total."
-   if(n >= 0){ p.set(0, n) }
+   if n >= 0 { p.set(0, n) }
    p.set(1, 0)
    p.set(8, p.get(7, 0))
    p.set(9, 0)

@@ -22,10 +22,10 @@ fn message(dict st, str text, f64 ttl=1.5) dict {
 }
 
 fn history_add(dict st, str id) dict {
-   if(id.len <= 0){ return st }
+   if id.len <= 0 { return st }
    mut h = st.get("history", [])
-   if(h.len == 0 || to_str(h.get(h.len - 1, "")) != id){ h = h.append(id) }
-   if(h.len > 64){ h = slice(h, h.len - 64, h.len, 1) }
+   if h.len == 0 || to_str(h.get(h.len - 1, "")) != id { h = h.append(id) }
+   if h.len > 64 { h = slice(h, h.len - 64, h.len, 1) }
    st["history"] = h
    st["last"] = id
    st
@@ -37,7 +37,7 @@ fn command(dict st, str id, str text="") dict {
 }
 
 fn key_seen(dict st, str chord) dict {
-   if(chord.len <= 0){ return st }
+   if chord.len <= 0 { return st }
    st["show_key"] = chord
    st["key_timer"] = 1.2
    st
@@ -50,10 +50,10 @@ fn clear_key(dict st) dict {
 }
 
 fn tick(dict st, f64 dt) dict {
-   if(float(st.get("timer", 0.0)) > 0.0){ st["timer"] = max(0.0, float(st.get("timer", 0.0)) - dt) }
-   if(float(st.get("key_timer", 0.0)) > 0.0){
+   if float(st.get("timer", 0.0)) > 0.0 { st["timer"] = max(0.0, float(st.get("timer", 0.0)) - dt) }
+   if float(st.get("key_timer", 0.0)) > 0.0 {
       st["key_timer"] = max(0.0, float(st.get("key_timer", 0.0)) - dt)
-      if(float(st.get("key_timer", 0.0)) <= 0.0){ st["show_key"] = "" }
+      if float(st.get("key_timer", 0.0)) <= 0.0 { st["show_key"] = "" }
    }
    st
 }

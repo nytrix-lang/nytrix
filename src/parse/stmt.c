@@ -1848,7 +1848,7 @@ static stmt_t *parse_layout_guard_stmt(parser_t *p) {
   parser_expect(p, NY_T_STRUCT, "'layout'", NULL);
   if (!tok_is_ident_text(p->cur, "guard")) {
     parser_error(p, p->cur, "expected 'guard' after 'layout'",
-                 "write: layout guard Shape: value = source else { ... }");
+                 "write: layout guard Shape value = source else { ... }");
     return NULL;
   }
   parser_advance(p);
@@ -1859,13 +1859,18 @@ static stmt_t *parse_layout_guard_stmt(parser_t *p) {
     return NULL;
   const char *type_name = parser_intern(p, owned_type, strlen(owned_type));
   free(owned_type);
-  parser_expect(p, NY_T_COLON, "':' after layout guard type", NULL);
+
+  if (parser_match(p, NY_T_COLON)) {
+    /* Support legacy or explicit colon */
+  }
+
   if (p->cur.kind != NY_T_IDENT) {
-    parser_error(p, p->cur, "expected binding name after ':'", NULL);
+    parser_error(p, p->cur, "expected binding name in layout guard", NULL);
     return NULL;
   }
   const char *name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
   parser_advance(p);
+
   parser_expect(p, NY_T_ASSIGN, "'=' in layout guard", NULL);
   expr_t *value = p_parse_expr(p, 0);
   if (!parser_match(p, NY_T_ELSE)) {
@@ -1987,51 +1992,38 @@ static stmt_t *parse_struct(parser_t *p) {
     }
     const char *id1 = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
     parser_advance(p);
-    parser_expect(p, NY_T_COLON, "':'", NULL);
     const char *fname = id1;
     const char *tname = NULL;
-    size_t ptr_depth = 0;
-    while (parser_match(p, NY_T_STAR))
-      ptr_depth++;
-    if (p->cur.kind == NY_T_IDENT) {
-      const char *id2 = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+    if (parser_match(p, NY_T_COLON)) {
+       /* Old Name: Type syntax or Type: Name */
+    }
+    if (p->cur.kind == NY_T_IDENT || p->cur.kind == NY_T_STAR || p->cur.kind == NY_T_QUESTION) {
+      /* Type Name syntax */
+      tname = id1;
+      size_t ptr_depth = 0;
+      while (parser_match(p, NY_T_STAR)) ptr_depth++;
+      if (p->cur.kind != NY_T_IDENT) {
+        parser_error(p, p->cur, "expected field name after type", NULL);
+        break;
+      }
+      fname = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
       parser_advance(p);
-      bool id1_is_type =
-          (strcmp(id1, "int") == 0 || strcmp(id1, "i8") == 0 ||
-           strcmp(id1, "i16") == 0 || strcmp(id1, "i32") == 0 ||
-           strcmp(id1, "i64") == 0 || strcmp(id1, "i128") == 0 ||
-           strcmp(id1, "u8") == 0 || strcmp(id1, "u16") == 0 ||
-           strcmp(id1, "u32") == 0 || strcmp(id1, "u64") == 0 ||
-           strcmp(id1, "u128") == 0 || strcmp(id1, "str") == 0 ||
-           strcmp(id1, "ptr") == 0 || strcmp(id1, "handle") == 0 ||
-           strcmp(id1, "fnptr") == 0 || strcmp(id1, "char") == 0 ||
-           strcmp(id1, "seq") == 0 || strcmp(id1, "sequence") == 0 ||
-           strcmp(id1, "number") == 0 || strcmp(id1, "numeric") == 0 ||
-           strcmp(id1, "integer") == 0 || strcmp(id1, "float") == 0 ||
-           strcmp(id1, "scalar") == 0 || strcmp(id1, "collection") == 0 ||
-           strcmp(id1, "container") == 0 || strcmp(id1, "iterable") == 0 ||
-           strcmp(id1, "indexable") == 0 || strcmp(id1, "allocator") == 0 ||
-           strcmp(id1, "bool") == 0 || strcmp(id1, "f32") == 0 ||
-           strcmp(id1, "f64") == 0 || strcmp(id1, "f128") == 0);
-      if (id1_is_type) {
-        fname = id2;
-        tname = id1;
-      } else {
-        fname = id1;
-        tname = id2;
+      if (ptr_depth > 0) {
+        size_t base_len = strlen(tname);
+        char *ptr_tname = arena_alloc(p->arena, base_len + ptr_depth + 1);
+        memset(ptr_tname, '*', ptr_depth);
+        memcpy(ptr_tname + ptr_depth, tname, base_len);
+        ptr_tname[base_len + ptr_depth] = '\0';
+        tname = ptr_tname;
       }
     } else {
-      parser_error(p, p->cur, "expected field name or type", NULL);
-      break;
-    }
-    if (ptr_depth > 0) {
-      size_t tname_len = strlen(tname);
-      size_t total_len = ptr_depth + tname_len;
-      char *new_tname = arena_alloc(p->arena, total_len + 1);
-      memset(new_tname, '*', ptr_depth);
-      memcpy(new_tname + ptr_depth, tname, tname_len);
-      new_tname[total_len] = '\0';
-      tname = new_tname;
+      /* Fallback to simple field name if no type is provided or if Type: Name was used but we already consumed the type */
+      if (!tname) {
+         /* If we didn't match a second identifier, id1 is either name or type.
+            But layouts REQUIRE types for ABI. */
+         parser_error(p, p->prev, "layout fields require a type", "write 'int x' or 'int: x'");
+         break;
+      }
     }
     int field_align = 0;
     if (p->cur.kind == NY_T_IDENT && p->cur.len == 5 &&
@@ -4560,46 +4552,37 @@ stmt_t *p_parse_stmt(parser_t *p) {
       while (true) {
         const char *var_type = NULL;
         token_t ident = {0};
-        if (((p->cur.kind == NY_T_IDENT || p->cur.kind == NY_T_NUMBER) &&
-             (parser_peek(p).kind == NY_T_COLON ||
-              parser_peek(p).kind == NY_T_LT)) ||
-            p->cur.kind == NY_T_QUESTION || p->cur.kind == NY_T_STAR) {
-          var_type = parse_type_ref(p, "expected type name before ':'");
-          parser_expect(p, NY_T_COLON, "':' after type", NULL);
+        if (stmt_token_looks_type_name(p->cur) && (parser_peek(p).kind == NY_T_IDENT || parser_peek(p).kind == NY_T_STAR || parser_peek(p).kind == NY_T_QUESTION)) {
+          var_type = parse_type_ref(p, "expected type name");
           if (p->cur.kind != NY_T_IDENT) {
-            parser_error(p, p->cur, "expected variable name after ':'", NULL);
-            if (p->cur.kind != NY_T_EOF)
-              parser_advance(p);
+            parser_error(p, p->cur, "expected variable name after type", NULL);
+            if (p->cur.kind != NY_T_EOF) parser_advance(p);
             stmt_free_members(s);
             return NULL;
           }
-          if (parser_token_is_builtin_type(p->cur)) {
-            parser_error(
-                p, p->cur, "typed declarations are type-first",
-                "write 'def int: value = ...', not 'def value: int = ...'");
+          ident = p->cur;
+          parser_advance(p);
+        } else if (((p->cur.kind == NY_T_IDENT || p->cur.kind == NY_T_NUMBER) &&
+                    (parser_peek(p).kind == NY_T_COLON ||
+                     parser_peek(p).kind == NY_T_LT)) ||
+                   p->cur.kind == NY_T_QUESTION || p->cur.kind == NY_T_STAR) {
+          var_type = parse_type_ref(p, "expected type name before ':'");
+          if (parser_match(p, NY_T_COLON)) {
+            /* Support legacy or explicit colon if needed, but the user prefers no colon */
+          }
+          if (p->cur.kind != NY_T_IDENT) {
+            parser_error(p, p->cur, "expected variable name", NULL);
+            if (p->cur.kind != NY_T_EOF) parser_advance(p);
             stmt_free_members(s);
             return NULL;
           }
           ident = p->cur;
           parser_advance(p);
         } else {
-          if (stmt_token_looks_type_name(p->cur) &&
-              parser_peek(p).kind == NY_T_IDENT) {
-            parser_error(
-                p, p->cur, "typed declarations use 'type: name'",
-                start_tok.kind == NY_T_MUT
-                    ? "write 'mut u64: hash = ...', not 'mut u64 hash = ...'"
-                    : "write 'def int: value = ...', not 'def int value = "
-                      "...'");
-            parser_sync_stmt_boundary(p);
-            stmt_free_members(s);
-            return NULL;
-          }
           if (p->cur.kind != NY_T_IDENT) {
             parser_error(p, p->cur, "expected identifier after 'def'",
                          parse_missing_ident_hint(p->cur, "variable"));
-            if (p->cur.kind != NY_T_EOF)
-              parser_advance(p);
+            if (p->cur.kind != NY_T_EOF) parser_advance(p);
             stmt_free_members(s);
             return NULL;
           }
@@ -4620,18 +4603,10 @@ stmt_t *p_parse_stmt(parser_t *p) {
           mangled = true;
         }
         const char *name_s = arena_strndup(p->arena, final_name, nlen);
-        if (mangled)
-          free(final_name);
+        if (mangled) free(final_name);
         vec_push_arena(p->arena, &s->as.var.names, name_s);
-        if (parser_match(p, NY_T_COLON)) {
-          parser_error(
-              p, p->prev, "typed declarations are type-first",
-              "write 'def int: value = ...', not 'def value: int = ...'");
-          (void)parse_type_ref(p, "expected type name after ':'");
-        }
         vec_push_arena(p->arena, &s->as.var.types, var_type);
-        if (!parser_match(p, NY_T_COMMA))
-          break;
+        if (!parser_match(p, NY_T_COMMA)) break;
       }
     }
     if (parser_match(p, NY_T_ASSIGN)) {

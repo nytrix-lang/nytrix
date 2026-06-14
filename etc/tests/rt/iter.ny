@@ -61,7 +61,7 @@ assert(it.flatten([(1, 2), it.range(2), "ab"]) == [1, 2, 0, 1, "a", "b"], "flatt
 assert(it.mapcat(fn(v) { [v, v] }, [1, 2]) == [1, 1, 2, 2], "mapcat")
 assert(it.mapcat(fn(v) { v }, [(1, 2), "ab", it.range(2)]) == [1, 2, "a", "b", 0, 1], "mapcat sequences")
 assert(it.filter_map([1, 2, 3, 4], fn(v) {
-         if((v % 2) == 0){ return v * 10 }
+         if (v % 2) == 0 { return v * 10 }
          0
 }) == [20, 40], "filter map")
 assert(it.compact([0, 1, "", "x", nil, 4]) == [1, "x", 4], "compact")

@@ -7,7 +7,7 @@ def start = ticks()
 mut lst = []
 mut idx = 0
 def n = _bench_scale(1000, 200)
-while(idx < n){
+while idx < n {
    lst = lst.append(idx)
    idx = idx + 1
 }
@@ -15,7 +15,7 @@ while(idx < n){
 assert(len(lst) == n, "list size")
 mut sum = 0
 idx = 0
-while(idx < len(lst)){
+while idx < len(lst) {
    sum = sum + lst.get(idx)
    idx = idx + 1
 }

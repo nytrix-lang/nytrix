@@ -23,14 +23,14 @@ fn cm11_prime_candidates_from_order_mod(any gift, any modulus) list {
    mut out = []
    def left = mod_quadratic_roots_prime(Z(1), Z(-1), Z(3) - Z(gift), m)
    mut i = 0
-   while(i < left.len){
+   while i < left.len {
       def u = left[i]
       out = _cm_append_unique(out, u * u + u + Z(3))
       i += 1
    }
    def right = mod_quadratic_roots_prime(Z(1), Z(3), Z(5) - Z(gift), m)
    i = 0
-   while(i < right.len){
+   while i < right.len {
       def u = right[i]
       out = _cm_append_unique(out, u * u + u + Z(3))
       i += 1
@@ -40,7 +40,7 @@ fn cm11_prime_candidates_from_order_mod(any gift, any modulus) list {
 
 fn is_cm_discriminant(number d) int {
    "Check if d is a valid CM discriminant(negative fundamental discriminant). Returns 1 if valid, 0 otherwise."
-   if(d >= 0){ return 0 }
+   if d >= 0 { return 0 }
    case int(d % 4){
       1 -> {
          def abs_d = _cm_abs(d)
@@ -62,10 +62,10 @@ fn is_cm_discriminant(number d) int {
 }
 
 fn _is_squarefree(number n) bool {
-   if(n <= 1){ return true }
+   if n <= 1 { return true }
    mut test = 2
-   while(test * test <= n){
-      if(n % (test * test) == 0){ return false }
+   while test * test <= n {
+      if n % (test * test) == 0 { return false }
       test += 1
    }
    true
@@ -74,14 +74,14 @@ fn _is_squarefree(number n) bool {
 fn cm_discriminant(number n) number {
    "Find CM discriminant for field size n. Returns a negative discriminant d such that the imaginary quadratic field Q(sqrt(d)) has class number related to n."
    mut d = 0 - n
-   if(is_cm_discriminant(d) == 1){ return d }
+   if is_cm_discriminant(d) == 1 { return d }
    def d_alt = 0 - 4 * n
    (is_cm_discriminant(d_alt) == 1) ? d_alt : d
 }
 
 fn class_number(number d) int {
    "Compute class number of imaginary quadratic field Q(sqrt(d)) where d is a negative discriminant. Returns the class number h."
-   if(d >= 0){ return 0 }
+   if d >= 0 { return 0 }
    def abs_d = _cm_abs(d)
    def sqrt_d = isqrt(abs_d)
    def bound = sqrt_d
@@ -89,17 +89,17 @@ fn class_number(number d) int {
    mut h = 0
    def a_limit = bound / 2 + 1
    mut a = 1
-   while(a <= a_limit){
+   while a <= a_limit {
       def b_max = (a < bound) ? a : bound
       def b_start = 0 - a + 1
       mut b = b_start
-      while(b <= b_max){
+      while b <= b_max {
          def c_num = b * b - disc
-         if(c_num > 0 && c_num % (4 * a) == 0){
+         if c_num > 0 && c_num % (4 * a) == 0 {
             def c = c_num / (4 * a)
-            if(a <= c && (a != c || b >= 0)){
+            if a <= c && (a != c || b >= 0) {
                def g = gcd(a, gcd(b, c))
-               if(g == 1){ h += 1 }
+               if g == 1 { h += 1 }
             }
          }
          b += 1
@@ -112,7 +112,7 @@ fn class_number(number d) int {
 fn cm_hilbert_class_poly(number d) list {
    "Compute Hilbert class polynomial for discriminant d. Returns coefficients as list [c0, c1, ..., cn]."
    def h = class_number(d)
-   if(h == 0){ return [1] }
+   if h == 0 { return [1] }
    def abs_d = _cm_abs(d)
    def j_approx = compute_j_approx(abs_d)
    [j_approx, 1]
@@ -128,11 +128,11 @@ fn compute_j_approx(number d) number {
 
 fn exp_approx(number x) number {
    "Internal: Approximate e^x using Taylor series expansion(20 terms). Returns floating-point approximation."
-   if(x < 0){ return 1 / exp_approx(0 - x) }
+   if x < 0 { return 1 / exp_approx(0 - x) }
    mut result = 1
    mut term = 1
    mut i = 1
-   while(i < 20){
+   while i < 20 {
       term = term * x / i
       result = result + term
       i += 1
@@ -143,8 +143,8 @@ fn exp_approx(number x) number {
 fn cm_j_invariant(number d) number {
    "Compute j-invariant for CM discriminant d. Returns the approximate j-invariant value."
    def abs_d = _cm_abs(d)
-   if(abs_d == 3){ return 0 }
-   if(abs_d == 4){ return 1728 }
+   if abs_d == 3 { return 0 }
+   if abs_d == 4 { return 1728 }
    compute_j_approx(abs_d)
 }
 
@@ -158,8 +158,8 @@ fn find_cm_curve(number p, number d) list {
 
 fn find_curve_a(number j, number p) number {
    "Internal: Find curve parameter a from j-invariant over F_p. Returns the coefficient a for the elliptic curve."
-   if(j == 0){ return 0 }
-   if(j == 1728){ return 1 }
+   if j == 0 { return 0 }
+   if j == 1728 { return 1 }
    def num = 3 * j * j % p
    def den = j % p
    def inv_den = inverse_mod(den, p)
@@ -168,8 +168,8 @@ fn find_curve_a(number j, number p) number {
 
 fn find_curve_b(number j, number a, number p) number {
    "Internal: Find curve parameter b from j-invariant and a over F_p. Returns the coefficient b for the elliptic curve."
-   if(j == 0){ return 1 }
-   if(j == 1728){ return 0 }
+   if j == 0 { return 1 }
+   if j == 1728 { return 0 }
    def num = 2 * j * j * j % p
    def den = j * j % p
    def inv_den = inverse_mod(den, p)
@@ -199,13 +199,13 @@ fn find_t_from_equation(number p, number d) number {
    def four_p = 4 * p
    def t_bound = 2 * isqrt(p) + 1
    mut t = 0
-   while(t <= t_bound){
+   while t <= t_bound {
       def rhs = t * t - four_p
       def diff = (rhs < 0) ? 0 - rhs : rhs
-      if(diff % d == 0){
+      if diff % d == 0 {
          def quotient = diff / d
          def sqrt_q = isqrt(quotient)
-         if(sqrt_q * sqrt_q == quotient){ return t }
+         if sqrt_q * sqrt_q == quotient { return t }
       }
       t += 1
    }
@@ -222,13 +222,13 @@ fn cm_curve_params(number p, number d) list {
 fn cm_factor(number n) number {
    "Attempt to factor n using CM method. Works when n is a prime or has small prime factors. Returns a factor or 0 if none found."
    mut d = 3
-   while(d < 100){
-      if(is_cm_discriminant(0 - d) == 1){
+   while d < 100 {
+      if is_cm_discriminant(0 - d) == 1 {
          mut j = cm_j_invariant(0 - d)
          def candidate = j % n
-         if(candidate > 1 && candidate < n){
+         if candidate > 1 && candidate < n {
             def g = gcd(candidate, n)
-            if(g > 1 && g < n){ return g }
+            if g > 1 && g < n { return g }
          }
       }
       d += 1

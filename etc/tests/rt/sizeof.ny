@@ -2,13 +2,13 @@ use std.core
 use std.os
 
 layout TestPoint {
-   x: i32,
-   y: i32
+   i32 x,
+   i32 y
 }
 
 struct TestPair {
-   a: i64,
-   b: u8
+   i64 a,
+   u8 b
 }
 
 def int_sz = sizeof(int)

@@ -28,7 +28,7 @@ fn _normalized_char(str ch) str {
 fn _matrix_index(str matrix, str target) int {
    mut found = -1
    mut i = 0
-   while(i < matrix.len){
+   while i < matrix.len {
       found = (found < 0 && _char_at(matrix, i) == target) ? i : found
       i += 1
    }
@@ -38,7 +38,7 @@ fn _matrix_index(str matrix, str target) int {
 fn _coord_index(str pair) int {
    mut found = -1
    mut i = 0
-   while(i < ADFGVX_COORDS.len){
+   while i < ADFGVX_COORDS.len {
       found = (found < 0 && ADFGVX_COORDS.get(i) == pair) ? i : found
       i += 1
    }
@@ -52,20 +52,20 @@ fn adfgvx_build_matrix(str keyword, bool include_digits) str {
    mut seen = dict(40)
    mut matrix = ""
    mut ki = 0
-   while(ki < keyword.len){
+   while ki < keyword.len {
       def ck = _normalized_char(_char_at(keyword, ki))
-      if(!seen.get(ck, false)){
+      if !seen.get(ck, false) {
          seen.set(ck, true)
          matrix = str_add(matrix, ck)
       }
       ki += 1
    }
    mut alphabet = "ABCDEFGHIKLMNOPQRSTUVWXYZ"
-   if(include_digits){ alphabet = str_add(alphabet, "0123456789") }
+   if include_digits { alphabet = str_add(alphabet, "0123456789") }
    mut ai = 0
-   while(ai < alphabet.len){
+   while ai < alphabet.len {
       def ch = _char_at(alphabet, ai)
-      if(!seen.get(ch, false)){
+      if !seen.get(ch, false) {
          seen.set(ch, true)
          matrix = str_add(matrix, ch)
       }
@@ -79,9 +79,9 @@ fn adfgvx_substitute(str text, str matrix) str {
    Returns the substituted string(pairs of ADFGVX chars)."
    mut out = ""
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def found = _matrix_index(matrix, _normalized_char(_char_at(text, i)))
-      if(found >= 0){ out = str_add(out, ADFGVX_COORDS.get(found)) }
+      if found >= 0 { out = str_add(out, ADFGVX_COORDS.get(found)) }
       i += 1
    }
    out
@@ -92,10 +92,10 @@ fn adfgvx_desubstitute(str coded, str matrix) str {
    Returns the original characters."
    mut out = ""
    mut i = 0
-   while(i + 1 < coded.len){
+   while i + 1 < coded.len {
       def pair = utf8_slice(coded, i, i + 2, 1)
       def found = _coord_index(pair)
-      if(found >= 0 && found < matrix.len){ out = str_add(out, _char_at(matrix, found)) }
+      if found >= 0 && found < matrix.len { out = str_add(out, _char_at(matrix, found)) }
       i = i + 2
    }
    out
@@ -106,17 +106,17 @@ fn _col_order(str key) list {
    mut used = list(n)
    mut order = list(n)
    mut out_i = 0
-   while(out_i < n){
+   while out_i < n {
       mut best = -1
       mut i = 0
-      while(i < n){
-         if(!used.get(i, false)){
+      while i < n {
+         if !used.get(i, false) {
             def ch = _char_at(key, i)
-            if(best < 0 || ch < _char_at(key, best)){ best = i }
+            if best < 0 || ch < _char_at(key, best) { best = i }
          }
          i += 1
       }
-      if(best >= 0){
+      if best >= 0 {
          order[out_i] = best
          used[best] = true
       }
@@ -133,14 +133,14 @@ fn adfgvx_encrypt(str plaintext, str matrix, str transposition_key) str {
    def subst = adfgvx_substitute(plaintext, matrix)
    def n_rows = subst.len
    def n_cols = transposition_key.len
-   if(n_cols == 0){ return subst }
+   if n_cols == 0 { return subst }
    def order = _col_order(transposition_key)
    mut out = ""
    mut oi = 0
-   while(oi < order.len){
+   while oi < order.len {
       def col = order.get(oi)
       mut ri = col
-      while(ri < n_rows){
+      while ri < n_rows {
          out = str_add(out, _char_at(subst, ri))
          ri = ri + n_cols
       }
@@ -154,7 +154,7 @@ fn _column_lengths(list order, int n_chars, int n_cols) list {
    def extra = n_chars % n_cols
    mut lens = list(n_cols)
    mut oi = 0
-   while(oi < n_cols){
+   while oi < n_cols {
       def c = order.get(oi)
       lens[oi] = n_full_rows + (c < extra ? 1 : 0)
       oi += 1
@@ -166,7 +166,7 @@ fn _cipher_columns(str ciphertext, list col_lens) list {
    mut cols = list(col_lens.len)
    mut pos = 0
    mut ci = 0
-   while(ci < col_lens.len){
+   while ci < col_lens.len {
       def clen = col_lens.get(ci)
       cols[ci] = utf8_slice(ciphertext, pos, pos + clen, 1)
       pos = pos + clen
@@ -178,7 +178,7 @@ fn _cipher_columns(str ciphertext, list col_lens) list {
 fn _blank_grid(int n_chars) list {
    mut grid = list(n_chars)
    mut i = 0
-   while(i < n_chars){
+   while i < n_chars {
       grid[i] = ""
       i += 1
    }
@@ -189,14 +189,14 @@ fn _read_rows(list cols, list order, int n_chars, int n_cols) list {
    mut grid = _blank_grid(n_chars)
    mut off = list(n_cols)
    mut r = 0
-   while(r < n_chars / n_cols + 1){
+   while r < n_chars / n_cols + 1 {
       mut c2 = 0
-      while(c2 < n_cols){
+      while c2 < n_cols {
          def col_data = cols.get(c2)
          def o = off.get(c2)
-         if(o < col_data.len){
+         if o < col_data.len {
             def row = r * n_cols + order.get(c2)
-            if(row < grid.len){
+            if row < grid.len {
                grid[row] = _char_at(col_data, o)
                off[c2] = o + 1
             }
@@ -215,7 +215,7 @@ fn adfgvx_decrypt(str ciphertext, str matrix, str transposition_key) str {
    Returns the plaintext."
    def n_cols = transposition_key.len
    def n_chars = ciphertext.len
-   if(n_cols == 0){ return adfgvx_desubstitute(ciphertext, matrix) }
+   if n_cols == 0 { return adfgvx_desubstitute(ciphertext, matrix) }
    def order = _col_order(transposition_key)
    def cols = _cipher_columns(ciphertext, _column_lengths(order, n_chars, n_cols))
    def grid = _read_rows(cols, order, n_chars, n_cols)

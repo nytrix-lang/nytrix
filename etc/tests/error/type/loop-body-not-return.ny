@@ -3,7 +3,7 @@ use std.core
 
 fn loop_body_is_not_return() int {
    mut i = 0
-   while(i < 1){
+   while i < 1 {
       "not the return"
       i += 1
    }

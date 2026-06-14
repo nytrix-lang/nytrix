@@ -37,12 +37,12 @@ mut platform_guard = "other"
    print("✓ std.core.asm[x86] tests passed")
 }
 
-#elif(arm || aarch64){
+#elif arm || aarch64 {
    print("Testing inline assembly for ARM...")
    mut x = asm("mov $0, $1", "=r,r", 42)
    print("asm(42) =", x)
    mut x_check = x
-   #if(arm && !aarch64){
+   #if arm && !aarch64 {
       ;; ARM32 JIT may leave upper 32 bits of i64 register-pair moves undefined.
       ;; Validate the semantically relevant low 32-bit payload.
       x_check = x & 4294967295

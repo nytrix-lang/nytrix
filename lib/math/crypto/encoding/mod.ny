@@ -15,8 +15,8 @@ use std.math.crypto.encoding.radix
 fn _alphabet_index(str alphabet, str ch, int limit=0) int {
    def n = limit > 0 ? min(alphabet.len, limit) : alphabet.len
    mut i = 0
-   while(i < n){
-      if(utf8_slice(alphabet, i, i + 1, 1) == ch){ return i }
+   while i < n {
+      if utf8_slice(alphabet, i, i + 1, 1) == ch { return i }
       i += 1
    }
    -1
@@ -43,9 +43,9 @@ fn _base64_translate_custom(str s, str alphabet) str {
    def pad_ch = alpha_n >= 65 ? utf8_slice(alphabet, 64, 65, 1) : "="
    mut translated = ""
    mut i = 0
-   while(i < s.len){
+   while i < s.len {
       def ch = utf8_slice(s, i, i + 1, 1)
-      if(ch == pad_ch){ translated = str_add(translated, "=") } else {
+      if ch == pad_ch { translated = str_add(translated, "=") } else {
          def j = _alphabet_index(alphabet, ch, 64)
          translated = str_add(translated, j >= 0 ? utf8_slice(std, j, j + 1, 1) : ch)
       }
@@ -66,7 +66,7 @@ fn base64_decode_nested(str s, int layers) str {
    Returns the final plaintext string."
    mut cur = s
    mut i = 0
-   while(i < layers){
+   while i < layers {
       cur = base64_decode_str(cur)
       i += 1
    }
@@ -74,16 +74,16 @@ fn base64_decode_nested(str s, int layers) str {
 }
 
 fn _base64_char_ok(str ch) bool {
-   if(ch.len == 0){ return false }
+   if ch.len == 0 { return false }
    def c = ord(ch)
    ch == "=" || ch == "+" || ch == "/" || ch == "-" || ch == "_" || (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
 }
 
 fn _base64_decode_candidate(str s) bool {
-   if(s.len == 0 || s.len % 4 != 0){ return false }
+   if s.len == 0 || s.len % 4 != 0 { return false }
    mut i = 0
-   while(i < s.len){
-      if(!_base64_char_ok(utf8_slice(s, i, i + 1, 1))){ return false }
+   while i < s.len {
+      if !_base64_char_ok(utf8_slice(s, i, i + 1, 1)) { return false }
       i += 1
    }
    true
@@ -93,9 +93,9 @@ fn base64_decode_until_marker(str s, str marker="", int max_layers=64) str {
    "Decode Base64 while the input still looks Base64-shaped, or until `marker` appears."
    mut cur = s
    mut i = 0
-   while(i < max_layers && _base64_decode_candidate(cur)){
+   while i < max_layers && _base64_decode_candidate(cur) {
       cur = base64_decode_str(cur)
-      if(marker.len > 0 && str.find(cur, marker) >= 0){ return cur }
+      if marker.len > 0 && str.find(cur, marker) >= 0 { return cur }
       i += 1
    }
    cur
@@ -115,19 +115,19 @@ fn base32_decode_custom(str s, str alphabet) str {
    "Decode Base32 using a custom 32-character alphabet."
    mut clean = ""
    mut i = 0
-   while(i < s.len){
+   while i < s.len {
       def ch = utf8_slice(s, i, i + 1, 1)
-      if(ch != "="){ clean = str_add(clean, ch) }
+      if ch != "=" { clean = str_add(clean, ch) }
       i += 1
    }
    mut bits = ""
    mut j = 0
-   while(j < clean.len){
+   while j < clean.len {
       def ch = utf8_slice(clean, j, j + 1, 1)
       def idx = _alphabet_index(alphabet, ch)
-      if(idx >= 0){
+      if idx >= 0 {
          mut k = 4
-         while(k >= 0){
+         while k >= 0 {
             bits = str_add(bits, to_str((idx >> k) & 1))
             k = k - 1
          }
@@ -136,10 +136,10 @@ fn base32_decode_custom(str s, str alphabet) str {
    }
    mut out = ""
    mut bi = 0
-   while(bi + 7 < bits.len){
+   while bi + 7 < bits.len {
       mut val = 0
       mut k = 0
-      while(k < 8){
+      while k < 8 {
          val = val * 2 + atoi(utf8_slice(bits, bi + k, bi + k + 1, 1))
          k += 1
       }
@@ -155,14 +155,14 @@ fn base32_decode_custom_lsb(str s, str alphabet) str {
    mut bitlen = 0
    mut out = ""
    mut i = 0
-   while(i < s.len){
+   while i < s.len {
       def ch = utf8_slice(s, i, i + 1, 1)
-      if(ch != "="){
+      if ch != "=" {
          def val = _alphabet_index(alphabet, ch)
-         if(val >= 0){
+         if val >= 0 {
             bitstream = bitstream | (val << bitlen)
             bitlen += 5
-            while(bitlen >= 8){
+            while bitlen >= 8 {
                out = str_add(out, chr(bitstream & 255))
                bitstream = bitstream >> 8
                bitlen -= 8
@@ -179,15 +179,15 @@ fn a1z26_pairs_decode(str s, bool mirror=false, int shift=0) str {
    With mirror=true, values are first Atbash-mirrored as 1<->26 ; shift then rotates the 1..26 result."
    mut out = ""
    mut i = 0
-   while(i < s.len){
+   while i < s.len {
       def c = load8(s, i)
-      if(c >= 48 && c <= 57){
+      if c >= 48 && c <= 57 {
          mut j = i
-         while(j < s.len && load8(s, j) >= 48 && load8(s, j) <= 57){ j += 1 }
+         while j < s.len && load8(s, j) >= 48 && load8(s, j) <= 57 { j += 1 }
          mut k = i
-         while(k + 1 < j){
+         while k + 1 < j {
             def n = atoi(utf8_slice(s, k, k + 2, 1))
-            if(n >= 1 && n <= 26){
+            if n >= 1 && n <= 26 {
                mut v = mirror ? (27 - n) : n
                v = ((v + shift - 1) % 26 + 26) % 26 + 1
                out = str_add(out, chr(v + 64))
@@ -211,10 +211,10 @@ fn binary_to_text(str binary_str) str {
    def clean = str_replace(binary_str, " ", "")
    mut out = ""
    mut i = 0
-   while(i + 7 < clean.len){
+   while i + 7 < clean.len {
       mut val = 0
       mut k = 0
-      while(k < 8){
+      while k < 8 {
          def bit = utf8_slice(clean, i + k, i + k + 1, 1)
          val = val * 2 + (bit == "1" ? 1 : 0)
          k += 1
@@ -228,29 +228,29 @@ fn binary_to_text(str binary_str) str {
 fn bits_to_text_width(any bits, int width=8) str {
    "Decode fixed-width MSB-first bit chunks to text.
    Use width 7 for seven-bit ASCII and width 8 for byte ASCII."
-   if(width <= 0 || width > 8){ panic("bits_to_text_width: width must be between 1 and 8") }
+   if width <= 0 || width > 8 { panic("bits_to_text_width: width must be between 1 and 8") }
    mut clean = ""
-   if(is_str(bits)){
+   if is_str(bits) {
       clean = str_replace(str_replace(str_replace(str_replace(bits, " ", ""), "\t", ""), "\n", ""), "\r", "")
    } else {
       mut i = 0
-      while(i < bits.len){
+      while i < bits.len {
          def bit = to_str(bits[i])
-         if(bit != "0" && bit != "1"){ panic("bits_to_text_width: bits must contain only 0 or 1") }
+         if bit != "0" && bit != "1" { panic("bits_to_text_width: bits must contain only 0 or 1") }
          clean = str_add(clean, bit)
          i += 1
       }
    }
-   if(clean.len == 0){ return "" }
-   if(clean.len % width != 0){ panic("bits_to_text_width: number of bits must be a multiple of width") }
+   if clean.len == 0 { return "" }
+   if clean.len % width != 0 { panic("bits_to_text_width: number of bits must be a multiple of width") }
    mut out = ""
    mut i = 0
-   while(i < clean.len){
+   while i < clean.len {
       mut val = 0
       mut k = 0
-      while(k < width){
+      while k < width {
          def bit = utf8_slice(clean, i + k, i + k + 1, 1)
-         if(bit != "0" && bit != "1"){ panic("bits_to_text_width: bits must contain only 0 or 1") }
+         if bit != "0" && bit != "1" { panic("bits_to_text_width: bits must contain only 0 or 1") }
          val = val * 2 + (bit == "1" ? 1 : 0)
          k += 1
       }
@@ -262,13 +262,13 @@ fn bits_to_text_width(any bits, int width=8) str {
 
 fn ascii_integer(any bits) int {
    "Convert exactly 8 MSB-first bits to an ASCII integer."
-   if(bits.len != 8){ panic("ascii_integer: B must consist of 8 bits") }
+   if bits.len != 8 { panic("ascii_integer: B must consist of 8 bits") }
    mut v, i = 0, 0
-   while(i < 8){
+   while i < 8 {
       def raw = is_str(bits) ? utf8_slice(bits, i, i + 1, 1) : bits[i]
-      if(is_str(raw) && raw != "0" && raw != "1"){ panic("ascii_integer: bits must contain only 0 or 1") }
+      if is_str(raw) && raw != "0" && raw != "1" { panic("ascii_integer: bits must contain only 0 or 1") }
       def b = is_str(raw) ? atoi(raw) : int(raw)
-      if(b != 0 && b != 1){ panic("ascii_integer: bits must contain only 0 or 1") }
+      if b != 0 && b != 1 { panic("ascii_integer: bits must contain only 0 or 1") }
       v = (v << 1) | (b & 1)
       i += 1
    }
@@ -278,10 +278,10 @@ fn ascii_integer(any bits) int {
 fn ascii_to_bin(any value) str {
    "Encode ASCII text or a list of string chunks as a compact binary string."
    mut text = ""
-   if(is_list(value)){
+   if is_list(value) {
       mut i = 0
-      while(i < value.len){
-         if(!is_str(value[i])){ panic("ascii_to_bin: list elements must be strings") }
+      while i < value.len {
+         if !is_str(value[i]) { panic("ascii_to_bin: list elements must be strings") }
          text = str_add(text, value[i])
          i += 1
       }
@@ -294,14 +294,14 @@ fn ascii_to_bin(any value) str {
 
 fn bin_to_ascii(any bits) str {
    "Decode a non-empty binary string/list whose length is a multiple of 8."
-   if(bits.len == 0){ panic("bin_to_ascii: B must be a non-empty binary string") }
-   if(bits.len % 8 != 0){ panic("bin_to_ascii: number of bits must be a multiple of 8") }
+   if bits.len == 0 { panic("bin_to_ascii: B must be a non-empty binary string") }
+   if bits.len % 8 != 0 { panic("bin_to_ascii: number of bits must be a multiple of 8") }
    mut out = ""
    mut i = 0
-   while(i < bits.len){
+   while i < bits.len {
       mut block = []
       mut j = 0
-      while(j < 8){
+      while j < 8 {
          block = block.append(is_str(bits) ? atoi(utf8_slice(bits, i + j, i + j + 1, 1)) : bits[i + j])
          j += 1
       }
@@ -315,12 +315,12 @@ fn text_to_binary(str text) str {
    "Convert ASCII text to binary string(8-bit groups space-separated)."
    mut out = ""
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def code = ord(utf8_slice(text, i, i + 1, 1))
-      if(i > 0){ out = str_add(out, " ") }
+      if i > 0 { out = str_add(out, " ") }
       mut bits = ""
       mut k = 7
-      while(k >= 0){
+      while k >= 0 {
          bits = str_add(bits, to_str((code >> k) & 1))
          k = k - 1
       }
@@ -335,16 +335,16 @@ fn octal_to_text(str octal_str) str {
    def parts = split(octal_str, " ")
    mut out = ""
    mut i = 0
-   while(i < parts.len){
+   while i < parts.len {
       def raw = parts.get(i)
-      if(raw.len > 0){
+      if raw.len > 0 {
          mut val = 0
          mut j = 0
-         while(j < raw.len){
+         while j < raw.len {
             val = val * 8 + atoi(utf8_slice(raw, j, j + 1, 1))
             j += 1
          }
-         if(val > 0 && val < 256){ out = str_add(out, chr(val)) }
+         if val > 0 && val < 256 { out = str_add(out, chr(val)) }
       }
       i += 1
    }
@@ -355,14 +355,14 @@ fn text_to_octal(str text) str {
    "Convert ASCII text to space-separated octal values."
    mut out = ""
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def code = ord(utf8_slice(text, i, i + 1, 1))
-      if(i > 0){ out = str_add(out, " ") }
+      if i > 0 { out = str_add(out, " ") }
       mut digits = ""
       mut v = code
-      if(v == 0){ digits = "0"
+      if v == 0 { digits = "0"
       } else {
-         while(v > 0){
+         while v > 0 {
             digits = str_add(to_str(v % 8), digits)
             v = v / 8
          }
@@ -394,9 +394,9 @@ fn rot_n(str text, int n) str {
    "Apply ROT-N shift to alphabetic characters only."
    mut out = ""
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def code = ord(utf8_slice(text, i, i + 1, 1))
-      if(code >= 65 && code <= 90){ out = str_add(out, chr((code - 65 + n) % 26 + 65)) } elif(code >= 97 && code <= 122){
+      if code >= 65 && code <= 90 { out = str_add(out, chr((code - 65 + n) % 26 + 65)) } elif code >= 97 && code <= 122 {
          out = str_add(out, chr((code - 97 + n) % 26 + 97))
       } else {
          out = str_add(out, utf8_slice(text, i, i + 1, 1))
@@ -415,12 +415,12 @@ fn rot_alphabet(str text, str alphabet, int shift) str {
    "Rotate characters found in a custom alphabet by `shift`, preserving other chars."
    mut out = ""
    def m = alphabet.len
-   if(m == 0){ return text }
+   if m == 0 { return text }
    mut i = 0
-   while(i < text.len){
+   while i < text.len {
       def ch = utf8_slice(text, i, i + 1, 1)
       def pos = _alphabet_index(alphabet, ch)
-      if(pos >= 0){
+      if pos >= 0 {
          def np = ((pos + shift) % m + m) % m
          out = str_add(out, utf8_slice(alphabet, np, np + 1, 1))
       } else {
@@ -435,14 +435,14 @@ fn bits_to_bytes(list bit_list) list {
    "Convert a list of 0/1 bits to a byte list(MSB first, padded to 8)."
    mut result = []
    mut i = 0
-   while(i + 7 < bit_list.len + 1){
+   while i + 7 < bit_list.len + 1 {
       mut val = 0
       mut k = 0
-      while(k < 8 && i + k < bit_list.len){
+      while k < 8 && i + k < bit_list.len {
          val = val * 2 + bit_list[i + k]
          k += 1
       }
-      while(k < 8){
+      while k < 8 {
          val = val * 2
          k += 1
       }
@@ -456,10 +456,10 @@ fn bytes_to_bits(list byte_list) list {
    "Convert a byte list to a list of 0/1 bits(MSB first)."
    mut result = []
    mut i = 0
-   while(i < byte_list.len){
+   while i < byte_list.len {
       def b = byte_list[i]
       mut k = 7
-      while(k >= 0){
+      while k >= 0 {
          result = result.append((b >> k) & 1)
          k = k - 1
       }
@@ -480,10 +480,10 @@ fn bytes_concat3(list a, list b, list c) list {
 
 fn bytes_repeat_value(int value, int n) list {
    "Return a byte list containing value repeated n times."
-   if(n <= 0){ return list(0) }
+   if n <= 0 { return list(0) }
    mut out = []
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(value & 255)
       i += 1
    }
@@ -494,7 +494,7 @@ fn byte_list_to_ascii(list byte_list) str {
    "Convert a list of byte values to text by mapping each byte through `chr`."
    mut out = ""
    mut i = 0
-   while(i < byte_list.len){
+   while i < byte_list.len {
       out = out + chr(byte_list.get(i) & 255)
       i += 1
    }
@@ -503,8 +503,8 @@ fn byte_list_to_ascii(list byte_list) str {
 
 fn _ascii_match_at(list byte_list, str pattern, int at) bool {
    mut j = 0
-   while(j < pattern.len){
-      if(byte_list[at + j] != ord(utf8_slice(pattern, j, j + 1, 1))){ return false }
+   while j < pattern.len {
+      if byte_list[at + j] != ord(utf8_slice(pattern, j, j + 1, 1)) { return false }
       j += 1
    }
    true
@@ -513,10 +513,10 @@ fn _ascii_match_at(list byte_list, str pattern, int at) bool {
 fn ascii_contains(list byte_list, str needle) bool {
    "Return true if a byte list contains the ASCII substring `needle`."
    def bn, nn = byte_list.len, needle.len
-   if(bn < nn){ return false }
+   if bn < nn { return false }
    mut i = 0
-   while(i + nn <= bn){
-      if(_ascii_match_at(byte_list, needle, i)){ return true }
+   while i + nn <= bn {
+      if _ascii_match_at(byte_list, needle, i) { return true }
       i += 1
    }
    false
@@ -526,16 +526,16 @@ fn extract_ascii_span(list byte_list, str prefix, str suffix) any {
    "Extract the first ASCII span that begins with `prefix` and ends with `suffix`."
    def bn, pn = byte_list.len, prefix.len
    def sn = suffix.len
-   if(pn == 0 || sn == 0){ return nil }
+   if pn == 0 || sn == 0 { return nil }
    mut i = 0
-   while(i + pn <= bn){
-      if(_ascii_match_at(byte_list, prefix, i)){
+   while i + pn <= bn {
+      if _ascii_match_at(byte_list, prefix, i) {
          mut k = i + pn
-         while(k + sn <= bn){
-            if(_ascii_match_at(byte_list, suffix, k)){
+         while k + sn <= bn {
+            if _ascii_match_at(byte_list, suffix, k) {
                mut out = []
                mut t = i
-               while(t < k + sn){
+               while t < k + sn {
                   out = out.append(byte_list[t])
                   t += 1
                }
@@ -564,7 +564,7 @@ fn affine_bytes_decrypt(list byte_list, int a, int b) list {
    mut out = []
    mut i = 0
    def n = byte_list.len
-   while(i < n){
+   while i < n {
       def c, p = mod(Z(byte_list[i]), Z(256)), mod(inva * (c - bb), Z(256))
       out = out.append(bigint_to_int(p))
       i += 1

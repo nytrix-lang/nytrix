@@ -16,21 +16,21 @@ fn make(ptr data_ptr, int byte_len, int channels, int rate, int bits, int sample
    data = data.set("channels", channels)
    data = data.set("rate", rate)
    data = data.set("bits", bits)
-   if(sample_fmt == 0){
-      if(bits == 16){ sample_fmt = 1 }
-      elif(bits == 8){ sample_fmt = 2 }
-      elif(bits == 24){ sample_fmt = 3 }
-      elif(bits == 32){ sample_fmt = (format_tag == 3) ? 5 : 4 }
+   if sample_fmt == 0 {
+      if bits == 16 { sample_fmt = 1 }
+      elif bits == 8 { sample_fmt = 2 }
+      elif bits == 24 { sample_fmt = 3 }
+      elif bits == 32 { sample_fmt = (format_tag == 3) ? 5 : 4 }
    }
    data = data.set("sample_fmt", sample_fmt)
    data = data.set("format_tag", format_tag)
    data = data.set("cursor", 0.0)
    mut sample_bytes = bits / 8
-   if(sample_bytes <= 0){ sample_bytes = 1 }
+   if sample_bytes <= 0 { sample_bytes = 1 }
    mut frame_size = sample_bytes * channels
-   if(frame_size <= 0){ frame_size = channels }
+   if frame_size <= 0 { frame_size = channels }
    def total_frames = byte_len / frame_size
-   if(sound_debug.enabled()){ print("SourceMemory: byte_len:", byte_len, "frame_size:", frame_size, "total_frames:", total_frames, "sample_fmt:", sample_fmt) }
+   if sound_debug.enabled() { print("SourceMemory: byte_len:", byte_len, "frame_size:", frame_size, "total_frames:", total_frames, "sample_fmt:", sample_fmt) }
    data = data.set("sample_bytes", sample_bytes)
    data = data.set("frame_size", frame_size)
    data = data.set("total_frames", total_frames)

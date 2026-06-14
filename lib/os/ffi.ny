@@ -61,7 +61,7 @@ fn dlopen(str path, int flags) any {
 
 fn dlsym(any h, any s) any {
    "Returns the memory address of the symbol `s` within library handle `h`."
-   if(is_str(s)){ return __dlsym(h, s) }
+   if is_str(s) { return __dlsym(h, s) }
    0
 }
 
@@ -77,17 +77,17 @@ fn dlerror() str {
 
 fn _try(str path, int flags) any {
    def h = __dlopen(path, flags)
-   if(h != 0){ return h }
+   if h != 0 { return h }
    0
 }
 
 fn dlopen_checked(any name, any required_symbol, int flags=0) any {
    "Opens library `name` and verifies that `required_symbol` exists before returning the handle."
    mut eff_flags = flags
-   if(eff_flags == 0){ eff_flags = RTLD_NOW() | RTLD_GLOBAL() }
+   if eff_flags == 0 { eff_flags = RTLD_NOW() | RTLD_GLOBAL() }
    def h = dlopen_any(name, eff_flags)
-   if(h == 0){ return 0 }
-   if(required_symbol && required_symbol.len > 0 && dlsym(h, required_symbol) == 0){
+   if h == 0 { return 0 }
+   if required_symbol && required_symbol.len > 0 && dlsym(h, required_symbol) == 0 {
       dlclose(h)
       return 0
    }
@@ -96,50 +96,50 @@ fn dlopen_checked(any name, any required_symbol, int flags=0) any {
 
 fn dlopen_any(any name, int flags=0) any {
    "Attempts to open a dynamic library by searching for several platform-specific name variations and versions."
-   if(!is_str(name) || name.len == 0){ return 0 }
-   if(flags == 0){ flags = RTLD_NOW() | RTLD_GLOBAL() }
+   if !is_str(name) || name.len == 0 { return 0 }
+   if flags == 0 { flags = RTLD_NOW() | RTLD_GLOBAL() }
    def n = name.len
-   if(n >= 4){ if(endswith(name, ".so") || endswith(name, ".dylib") || endswith(name, ".dll")){ return _try(name, flags) } }
+   if n >= 4 { if endswith(name, ".so") || endswith(name, ".dylib") || endswith(name, ".dll") { return _try(name, flags) } }
    def has_sep = ospath.has_sep(name)
    #windows {
       def h0 = _try(name, flags)
-      if(h0){ return h0 }
+      if h0 { return h0 }
       def h1 = _try(name + ".dll", flags)
-      if(h1){ return h1 }
-      if(!has_sep){
+      if h1 { return h1 }
+      if !has_sep {
          def h2 = _try("lib" + name + ".dll", flags)
-         if(h2){ return h2 }
+         if h2 { return h2 }
       }
       return 0
    }
    #elif macos {
       def h0 = _try(name, flags)
-      if(h0){ return h0 }
+      if h0 { return h0 }
       def h1 = _try(name + ".dylib", flags)
-      if(h1){ return h1 }
-      if(!has_sep){
+      if h1 { return h1 }
+      if !has_sep {
          def h2 = _try("lib" + name + ".dylib", flags)
-         if(h2){ return h2 }
+         if h2 { return h2 }
          def h3 = _try("lib" + name + ".0.dylib", flags)
-         if(h3){ return h3 }
+         if h3 { return h3 }
       }
       return 0
    }
    #endif
    def h0 = _try(name, flags)
-   if(h0){ return h0 }
+   if h0 { return h0 }
    def h1 = _try(name + ".so", flags)
-   if(h1){ return h1 }
+   if h1 { return h1 }
    def h2 = _try(name + ".so.1", flags)
-   if(h2){ return h2 }
-   if(!has_sep){
+   if h2 { return h2 }
+   if !has_sep {
       def h3 = _try("lib" + name + ".so", flags)
-      if(h3){ return h3 }
+      if h3 { return h3 }
       def versions = ["0", "1", "2", "3", "8", "12", "14", "18"]
       mut i = 0
-      while(i < versions.len){
+      while i < versions.len {
          def h4 = _try("lib" + name + ".so." + versions.get(i), flags)
-         if(h4){ return h4 }
+         if h4 { return h4 }
          i += 1
       }
    }
@@ -311,22 +311,22 @@ fn call1_i64(any f, any a) any {
 fn ffi_call(any fptr, list args) any {
    "Dynamic FFI fallback: calls external function at `fptr` with `args` list. Supports 0-15 arguments; use extern/#include for native ABI calls and wider signatures."
    def n = args.len
-   if(n==0){ return call0(fptr)  }
-   if(n==1){ def a = args.get(0) return call1(fptr, a)  }
-   if(n==2){ def a = args.get(0) def b = args.get(1) return call2(fptr, a, b)  }
-   if(n==3){ def a = args.get(0) def b = args.get(1) def c = args.get(2) return call3(fptr, a, b, c)  }
-   if(n==4){ def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) return call4(fptr, a, b, c, d)  }
-   if(n==5){ def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) return call5(fptr, a, b, c, d, e)  }
-   if(n==6){ def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) def f = args.get(5) return call6(fptr, a, b, c, d, e, f)  }
-   if(n==7){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) return call7(fptr,a,b,c,d,e,f,g) }
-   if(n==8){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) return call8(fptr,a,b,c,d,e,f,g,h) }
-   if(n==9){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) return call9(fptr,a,b,c,d,e,f,g,h,i) }
-   if(n==10){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) return call10(fptr,a,b,c,d,e,f,g,h,i,j) }
-   if(n==11){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) return call11(fptr,a,b,c,d,e,f,g,h,i,j,k) }
-   if(n==12){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) return call12(fptr,a,b,c,d,e,f,g,h,i,j,k,l) }
-   if(n==13){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) return call13(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m) }
-   if(n==14){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) return call14(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o) }
-   if(n==15){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) def p=args.get(14) return call15(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o,p) }
+   if n==0 { return call0(fptr)  }
+   if n==1 { def a = args.get(0) return call1(fptr, a)  }
+   if n==2 { def a = args.get(0) def b = args.get(1) return call2(fptr, a, b)  }
+   if n==3 { def a = args.get(0) def b = args.get(1) def c = args.get(2) return call3(fptr, a, b, c)  }
+   if n==4 { def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) return call4(fptr, a, b, c, d)  }
+   if n==5 { def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) return call5(fptr, a, b, c, d, e)  }
+   if n==6 { def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) def f = args.get(5) return call6(fptr, a, b, c, d, e, f)  }
+   if n==7 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) return call7(fptr,a,b,c,d,e,f,g) }
+   if n==8 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) return call8(fptr,a,b,c,d,e,f,g,h) }
+   if n==9 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) return call9(fptr,a,b,c,d,e,f,g,h,i) }
+   if n==10 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) return call10(fptr,a,b,c,d,e,f,g,h,i,j) }
+   if n==11 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) return call11(fptr,a,b,c,d,e,f,g,h,i,j,k) }
+   if n==12 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) return call12(fptr,a,b,c,d,e,f,g,h,i,j,k,l) }
+   if n==13 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) return call13(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m) }
+   if n==14 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) return call14(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o) }
+   if n==15 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) def p=args.get(14) return call15(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o,p) }
    panic("ffi_call supports 0-15 args")
    0
 }
@@ -334,26 +334,26 @@ fn ffi_call(any fptr, list args) any {
 fn bind(any h, str name) any {
    "Returns a Nytrix function binding to external symbol `name` in library `h`."
    def fptr = dlsym(h, name)
-   if(fptr != 0){ return fn(...args) { ffi_call(fptr, args) } }
+   if fptr != 0 { return fn(...args) { ffi_call(fptr, args) } }
    0
 }
 
 fn call_ext(any h, str name, ...args) any {
    "Calls external symbol `name` in library `h` with provided arguments."
    def fptr = dlsym(h, name)
-   if(fptr != 0){ return ffi_call(fptr, args) }
+   if fptr != 0 { return ffi_call(fptr, args) }
    0
 }
 
 fn _bind_map(any h, list names, any target=0) dict {
    mut res = _d.dict(8)
    mut i, n = 0, names.len
-   while(i < n){
+   while i < n {
       def name = names.get(i)
       def b = bind(h, name)
-      if(b != 0){
+      if b != 0 {
          res = res.set(name, b)
-         if(target != 0){ target.set(name, b) }
+         if target != 0 { target.set(name, b) }
       }
       i += 1
    }
@@ -388,13 +388,13 @@ fn extern_all() int {
 
 fn malloc(int n) ptr {
    "Allocates `n` bytes and returns a raw pointer, or `0` for non-positive sizes."
-   if(n<=0){return 0}
+   if n<=0 {return 0}
    __malloc(n)
 }
 
 fn free(any p) int {
    "Frees raw pointer `p` when it is non-zero."
-   if(p){ __free(p) }
+   if p { __free(p) }
    0
 }
 
@@ -419,7 +419,7 @@ comptime emit _ffi_ctype(ptr, "ptr", 8, 8)
 
 fn CType(any tag, int size, int align=0) list {
    "Returns an FFI scalar type descriptor `[tag, size, align]`."
-   if(align <= 0){ align = size }
+   if align <= 0 { align = size }
    [tag, size, align]
 }
 
@@ -430,7 +430,7 @@ fn handle() list {
 
 fn _align(int offset, int alignment) int {
    def rem = offset % alignment
-   if(rem == 0){ return offset }
+   if rem == 0 { return offset }
    offset + (alignment - rem)
 }
 
@@ -440,7 +440,7 @@ fn CStruct(list fields) dict {
    mut curr_off = 0
    mut m_align = 1
    mut i = 0
-   while(i < fields.len){
+   while i < fields.len {
       def fld = fields.get(i)
       def typ = fld.get(0)
       def nm = fld.get(1)
@@ -452,7 +452,7 @@ fn CStruct(list fields) dict {
       info = info.set("type", typ.get(0))
       info = info.set("size", sz)
       d_lyt = d_lyt.set(nm, info)
-      if(al > m_align){ m_align = al }
+      if al > m_align { m_align = al }
       curr_off += sz
       i += 1
    }
@@ -466,7 +466,7 @@ fn CStruct(list fields) dict {
 
 fn sizeof_struct(any d) int {
    "Returns the size in bytes for struct descriptor `d`."
-   if(is_list(d)){ return d.get(1) }
+   if is_list(d) { return d.get(1) }
    d.get("size", 0)
 }
 
@@ -478,7 +478,7 @@ fn offsetof_struct(any d, any name) int {
 }
 
 fn _cstruct_storage_kind(any typ) int {
-   if(!is_str(typ)){ return 0 }
+   if !is_str(typ) { return 0 }
    case typ {
       "u32", "i32" -> 32
       "u64", "i64", "ptr" -> 64
@@ -493,14 +493,14 @@ fn cstruct_set(any p, any d, any name, any val) bool {
    "Sets field `name` through a dynamic CStruct descriptor."
    def fs = d.get("fields", 0)
    def info = fs.get(name, 0)
-   if(!info){ return false }
+   if !info { return false }
    def off = info.get("offset")
    def kind = _cstruct_storage_kind(info.get("type"))
-   if(kind == 32){ store32(p, val, off) }
-   elif(kind == 64){ store64_h(p, val, off) }
-   elif(kind == 33){ store32_f32(p, val, off) }
-   elif(kind == 8){ store8(p, val, off) }
-   elif(kind == 16){ store16(p, val, off) }
+   if kind == 32 { store32(p, val, off) }
+   elif kind == 64 { store64_h(p, val, off) }
+   elif kind == 33 { store32_f32(p, val, off) }
+   elif kind == 8 { store8(p, val, off) }
+   elif kind == 16 { store16(p, val, off) }
    true
 }
 
@@ -508,7 +508,7 @@ fn cstruct_get(any p, any d, any name) any {
    "Gets field `name` through a dynamic CStruct descriptor."
    def fs = d.get("fields", 0)
    def info = fs.get(name, 0)
-   if(!info){ return 0 }
+   if !info { return 0 }
    def off = info.get("offset")
    def kind = _cstruct_storage_kind(info.get("type"))
    case kind {
@@ -524,25 +524,25 @@ fn cstruct_get(any p, any d, any name) any {
 fn bind_lib(any name_or_h, list syms) any {
    "Binds a list of symbols from a library(by name or handle) into a dictionary."
    mut lib = 0
-   if(is_str(name_or_h)){ lib = dlopen_any(name_or_h, RTLD_NOW()) }
+   if is_str(name_or_h) { lib = dlopen_any(name_or_h, RTLD_NOW()) }
    else { lib = name_or_h }
-   if(!lib){ return 0 }
+   if !lib { return 0 }
    mut res = _d.dict(8)
    mut i = 0
-   while(i < syms.len){
+   while i < syms.len {
       def s = syms.get(i)
       mut nm, arity = "", -1
-      if(is_list(s)){ nm = s.get(0) arity = s.get(1) }
+      if is_list(s) { nm = s.get(0) arity = s.get(1) }
       else { nm = s }
       def fptr = dlsym(lib, nm)
-      if(fptr){
-         if(arity == 0){ res = res.set(nm, fn() { call0(fptr) }) }
-         elif(arity == 1){ res = res.set(nm, fn(a) { call1(fptr, a) }) }
-         elif(arity == 2){ res = res.set(nm, fn(a, b) { call2(fptr, a, b) }) }
-         elif(arity == 3){ res = res.set(nm, fn(a, b, c) { call3(fptr, a, b, c) }) }
-         elif(arity == 4){ res = res.set(nm, fn(a, b, c, d) { call4(fptr, a, b, c, d) }) }
-         elif(arity == 5){ res = res.set(nm, fn(a, b, c, d, e) { call5(fptr, a, b, c, d, e) }) }
-         elif(arity == 6){ res = res.set(nm, fn(a, b, c, d, e, f) { call6(fptr, a, b, c, d, e, f) }) }
+      if fptr {
+         if arity == 0 { res = res.set(nm, fn() { call0(fptr) }) }
+         elif arity == 1 { res = res.set(nm, fn(a) { call1(fptr, a) }) }
+         elif arity == 2 { res = res.set(nm, fn(a, b) { call2(fptr, a, b) }) }
+         elif arity == 3 { res = res.set(nm, fn(a, b, c) { call3(fptr, a, b, c) }) }
+         elif arity == 4 { res = res.set(nm, fn(a, b, c, d) { call4(fptr, a, b, c, d) }) }
+         elif arity == 5 { res = res.set(nm, fn(a, b, c, d, e) { call5(fptr, a, b, c, d, e) }) }
+         elif arity == 6 { res = res.set(nm, fn(a, b, c, d, e, f) { call6(fptr, a, b, c, d, e, f) }) }
          else {
             res = res.set(nm, fn(...args) { ffi_call(fptr, args) })
          }

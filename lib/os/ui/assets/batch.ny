@@ -29,7 +29,7 @@ fn elapsed_s(int run_started_ns) f64 {
 
 fn eta_s(int run_started_ns, int completed_count, int total_count) f64 {
    "Runs the eta s operation."
-   if(completed_count <= 0 || run_started_ns <= 0){ return 0.0 }
+   if completed_count <= 0 || run_started_ns <= 0 { return 0.0 }
    def remaining = max(0, total_count - completed_count)
    def avg_s = elapsed_s(run_started_ns) / max(1.0, float(completed_count))
    avg_s * float(remaining)
@@ -54,15 +54,15 @@ fn terminal_log_enabled(bool active, bool fast_env) bool {
 fn dump_anim_pose_fraction(f64 fallback=0.35) f64 {
    "Runs the dump anim pose fraction operation."
    def raw = ui_profile.env_trim_cached("NY_UI_DUMP_ANIM_POSE_FRACTION")
-   if(raw.len <= 0){ return fallback }
+   if raw.len <= 0 { return fallback }
    mut v = float(str.atof(raw))
-   if(is_nan(v) || is_inf(v)){ v = fallback }
+   if is_nan(v) || is_inf(v) { v = fallback }
    clamp(v, 0.0, 1.0)
 }
 
 fn _read_file_parts(path) list {
-   if(path.len <= 0){ return [] }
-   match file_read(path){
+   if path.len <= 0 { return [] }
+   match file_read(path) {
       ok(file_txt) -> {
          def txt = str.strip(to_str(file_txt))
          return txt.len > 0 ? str.split(txt, "\n") : []
@@ -74,11 +74,11 @@ fn _read_file_parts(path) list {
 fn _input_parts(cli_raw, cli_all, all_names) list {
    def batch_path = ui_profile.env_trim_cached("NY_UI_BATCH_DUMP_FILE")
    mut parts = _read_file_parts(batch_path)
-   if(is_list(parts) && parts.len > 0){ return parts }
+   if is_list(parts) && parts.len > 0 { return parts }
    def txt = ui_profile.env_trim_cached("NY_UI_BATCH_DUMP_LIST")
-   if(txt.len > 0){ return ui_dump.split_model_list(txt) }
-   if(to_str(cli_raw).len > 0){ return ui_dump.split_model_list(cli_raw) }
-   if(bool(cli_all) || ui_profile.env_truthy_cached("NY_UI_BATCH_DUMP_ALL")){
+   if txt.len > 0 { return ui_dump.split_model_list(txt) }
+   if to_str(cli_raw).len > 0 { return ui_dump.split_model_list(cli_raw) }
+   if bool(cli_all) || ui_profile.env_truthy_cached("NY_UI_BATCH_DUMP_ALL") {
       return is_list(all_names) ? all_names : []
    }
    []
@@ -94,30 +94,30 @@ fn format_model(item, catalog=0) dict {
    mut display = raw
    mut spec_path = raw
    def resolved = _resolved_path(catalog, raw)
-   if(resolved.len > 0){
+   if resolved.len > 0 {
       spec_path = resolved
-      if(ospath.has_sep(raw)){ display = ospath.basename(raw) }
-   } elif(ospath.has_sep(raw)){
+      if ospath.has_sep(raw) { display = ospath.basename(raw) }
+   } elif ospath.has_sep(raw) {
       display = ospath.basename(raw)
    }
    def low = str.lower(display)
-   if(str.endswith(low, ".gltf")){ display = str.str_slice(display, 0, display.len - 5) }
-   elif(str.endswith(low, ".glb")){ display = str.str_slice(display, 0, display.len - 4) }
-   if(str.strip(to_str(display)).len == 0){ display = raw }
+   if str.endswith(low, ".gltf") { display = str.str_slice(display, 0, display.len - 5) }
+   elif str.endswith(low, ".glb") { display = str.str_slice(display, 0, display.len - 4) }
+   if str.strip(to_str(display)).len == 0 { display = raw }
    {"display": display, "spec": spec_path}
 }
 
 fn _apply_missing_filter(models, specs, dump_dir, cli_dump_dir) dict {
-   if(dump_dir.len <= 0 || !is_list(models) || models.len == 0){
+   if dump_dir.len <= 0 || !is_list(models) || models.len == 0 {
       return {"models": models, "specs": specs, "no_missing": false, "before": is_list(models) ? models.len : 0}
    }
    def before = models.len
    mut keep_names = []
    mut keep_specs = []
    mut mi = 0
-   while(mi < models.len){
+   while mi < models.len {
       def model_name = to_str(models.get(mi, ""))
-      if(!osfs.is_file(ui_dump.snapshot_path(model_name, dump_dir, cli_dump_dir))){
+      if !osfs.is_file(ui_dump.snapshot_path(model_name, dump_dir, cli_dump_dir)) {
          keep_names = keep_names.append(model_name)
          keep_specs = keep_specs.append(specs.get(mi, model_name))
       }
@@ -132,9 +132,9 @@ fn parse_env(cli_raw="", cli_all=false, all_names=[], cli_dump_dir="", cli_delay
    mut specs = []
    def parts = _input_parts(cli_raw, cli_all, all_names)
    mut i = 0
-   while(is_list(parts) && i < parts.len){
+   while is_list(parts) && i < parts.len {
       def item = str.strip(to_str(parts.get(i, "")))
-      if(item.len > 0){
+      if item.len > 0 {
          def row = format_model(item, catalog)
          models = models.append(row.get("display", item))
          specs = specs.append(row.get("spec", item))
@@ -142,24 +142,24 @@ fn parse_env(cli_raw="", cli_all=false, all_names=[], cli_dump_dir="", cli_delay
       i += 1
    }
    mut dump_dir = ui_profile.env_trim_cached("NY_UI_BATCH_DUMP_DIR")
-   if(dump_dir.len == 0 && to_str(cli_dump_dir).len > 0){ dump_dir = to_str(cli_dump_dir) }
+   if dump_dir.len == 0 && to_str(cli_dump_dir).len > 0 { dump_dir = to_str(cli_dump_dir) }
    mut settle_frames = 4
-   if(ui_profile.env_present_cached("NY_UI_BATCH_DUMP_SETTLE_FRAMES")){
+   if ui_profile.env_present_cached("NY_UI_BATCH_DUMP_SETTLE_FRAMES") {
       settle_frames = ui_profile.env_int_cached("NY_UI_BATCH_DUMP_SETTLE_FRAMES", settle_frames, 0, 1000000)
    }
-   if(int(cli_delay_frames) >= 0){ settle_frames = int(cli_delay_frames) }
+   if int(cli_delay_frames) >= 0 { settle_frames = int(cli_delay_frames) }
    mut timeout_sec = 45.0
    def timeout_s = ui_profile.env_trim_cached("NY_UI_BATCH_MODEL_TIMEOUT_SEC")
-   if(timeout_s.len > 0){
+   if timeout_s.len > 0 {
       def parsed_timeout = float(str.atof(timeout_s))
-      if(parsed_timeout > 0.0){ timeout_sec = parsed_timeout }
+      if parsed_timeout > 0.0 { timeout_sec = parsed_timeout }
    }
    mut skip_models = []
    def skip_txt = ui_profile.env_trim_cached("NY_UI_BATCH_DUMP_SKIP_LIST")
-   if(skip_enabled(skip_txt)){ skip_models = ui_dump.parse_skip_list(skip_txt) }
+   if skip_enabled(skip_txt) { skip_models = ui_dump.parse_skip_list(skip_txt) }
    def missing_only = bool(cli_missing) || ui_profile.env_truthy_cached("NY_UI_BATCH_DUMP_MISSING")
    mut no_missing = false
-   if(missing_only){
+   if missing_only {
       def filtered = _apply_missing_filter(models, specs, dump_dir, to_str(cli_dump_dir))
       models = filtered.get("models", models)
       specs = filtered.get("specs", specs)

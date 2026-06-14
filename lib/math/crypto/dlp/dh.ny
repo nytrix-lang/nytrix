@@ -26,13 +26,13 @@ fn dh_default_group() list {
 
 fn dh_keygen(any p=nil, any g=nil, any q=nil, any x=nil) list {
    "Generate a Diffie-Hellman [public, private] pair. x may be supplied for deterministic tests."
-   if(p == nil || g == nil){
+   if p == nil || g == nil {
       def group = dh_default_group()
       p, g = p == nil ? group[0] : p, g == nil ? group[1] : g
       q = q == nil ? group[2] : q
    }
-   if(q == nil){ q = Z(p) - Z(1) }
-   if(x == nil){ x = randint(Z(2), Z(p) - Z(2)) }
+   if q == nil { q = Z(p) - Z(1) }
+   if x == nil { x = randint(Z(2), Z(p) - Z(2)) }
    def h = power_mod(g, x, p)
    [dh_public_key(h, p, g, q), dh_private_key(x, p, g, q)]
 }

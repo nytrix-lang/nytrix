@@ -17,19 +17,19 @@ use std.core.str as str
 use std.math.crypto.hash.ntlm
 use std.core.common as common
 
-if(comptime{ __os_name() == "linux" }){
+if comptime { __os_name() == "linux" }{
    #link "libcrypto.so"
    #include <openssl/evp.h> as "EVP_"
    #include <openssl/hmac.h> as "HMAC_"
 }
 
-if(comptime{ __os_name() == "windows" }){
+if comptime { __os_name() == "windows" }{
    #link "libcrypto.lib"
    #include <openssl/evp.h> as "EVP_"
    #include <openssl/hmac.h> as "HMAC_"
 }
 
-if(comptime{ __os_name() == "macos" }){
+if comptime { __os_name() == "macos" }{
    #link "libcrypto.dylib"
    #include <openssl/evp.h> as "EVP_"
    #include <openssl/hmac.h> as "HMAC_"
@@ -51,12 +51,12 @@ mut _hash_native_backend_name = ""
 mut _hash_native_last_error = ""
 
 fn _hash_norm_span(any s, int start, int span_len) list {
-   if(!is_int(start)){ start = 0 }
-   if(start < 0){ start = 0 }
+   if !is_int(start) { start = 0 }
+   if start < 0 { start = 0 }
    def n = (is_str(s) || is_bytes(s) || is_list(s)) ? s.len : 0
-   if(start > n){ start = n }
-   if(!is_int(span_len) || span_len <= 0){ span_len = n - start }
-   if(start + span_len > n){ span_len = n - start }
+   if start > n { start = n }
+   if !is_int(span_len) || span_len <= 0 { span_len = n - start }
+   if start + span_len > n { span_len = n - start }
    [start, span_len]
 }
 
@@ -86,17 +86,17 @@ fn _hash_input_bytes(any data, int start=0, int span_len=0) list {
    def span = _hash_norm_span(data, start, span_len)
    start, span_len = span.get(0), span.get(1)
    mut out = []
-   if(is_str(data) || is_bytes(data)){
+   if is_str(data) || is_bytes(data) {
       mut i = 0
-      while(i < span_len){
+      while i < span_len {
          out = out.append(load8(data, start + i))
          i += 1
       }
       return out
    }
-   if(is_list(data)){
+   if is_list(data) {
       mut i = 0
-      while(i < span_len){
+      while i < span_len {
          out = out.append(int(data[start + i]) & 255)
          i += 1
       }
@@ -106,22 +106,22 @@ fn _hash_input_bytes(any data, int start=0, int span_len=0) list {
 }
 
 fn _hash_data_bytes(any data) list {
-   if(is_str(data) || is_bytes(data)){
+   if is_str(data) || is_bytes(data) {
       def n = data.len
       mut out = list(n)
       __list_set_len(out, n)
       mut i = 0
-      while(i < n){
+      while i < n {
          out[i] = load8(data, i)
          i += 1
       }
       return out
    }
-   if(is_list(data)){
+   if is_list(data) {
       mut out = list(data.len)
       __list_set_len(out, data.len)
       mut i = 0
-      while(i < data.len){
+      while i < data.len {
          out[i] = int(data[i]) & 255
          i += 1
       }
@@ -150,23 +150,23 @@ fn _hash_mul32(int a, int b) int {
 }
 
 fn _hash_native_load() bool {
-   if(_hash_native_checked){ return _hash_native_ok }
+   if _hash_native_checked { return _hash_native_ok }
    _hash_native_checked = true
    _hash_native_ok = false
    _hash_native_backend_name = ""
    _hash_native_last_error = ""
-   if(!_hash_native_enabled()){ return _hash_native_set_error("disabled by NY_HASH_NATIVE") }
-   if(!(
-         comptime{ __os_name() == "linux" } ||
-         comptime{ __os_name() == "macos" } ||
-         comptime{ __os_name() == "windows" }
-      )){
+   if !_hash_native_enabled() { return _hash_native_set_error("disabled by NY_HASH_NATIVE") }
+   if !(
+      comptime{ __os_name() == "linux" } ||
+      comptime{ __os_name() == "macos" } ||
+      comptime{ __os_name() == "windows" }
+   ){
       return _hash_native_set_error("native hash backend unsupported on this OS")
    }
-   def handle: probe_ctx = _EVP_MD_CTX_new()
-   def handle: probe_md = _EVP_get_digestbyname("SHA256")
-   if(probe_ctx == 0 || probe_md == 0){
-      if(probe_ctx != 0){ _EVP_MD_CTX_free(probe_ctx) }
+   def handle probe_ctx = _EVP_MD_CTX_new()
+   def handle probe_md = _EVP_get_digestbyname("SHA256")
+   if probe_ctx == 0 || probe_md == 0 {
+      if probe_ctx != 0 { _EVP_MD_CTX_free(probe_ctx) }
       return _hash_native_set_error("OpenSSL EVP backend missing required symbols")
    }
    _EVP_MD_CTX_free(probe_ctx)
@@ -177,11 +177,11 @@ fn _hash_native_load() bool {
 }
 
 fn _hash_native_digest_obj(list names) handle {
-   if(!_hash_native_load()){ return 0 }
+   if !_hash_native_load() { return 0 }
    mut i = 0
-   while(i < names.len){
-      def handle: md = _EVP_get_digestbyname(names[i])
-      if(md){ return md }
+   while i < names.len {
+      def handle md = _EVP_get_digestbyname(names[i])
+      if md { return md }
       i += 1
    }
    0
@@ -191,12 +191,12 @@ fn _hash_span_buf(any s, int start, int span_len) list {
    def span = _hash_norm_span(s, start, span_len)
    start = span[0]
    def slen = span[1]
-   if(slen == 0){ return [0, 0, false] }
-   if(is_str(s) || is_bytes(s)){ return [ptr_add(s, start), slen, false] }
+   if slen == 0 { return [0, 0, false] }
+   if is_str(s) || is_bytes(s) { return [ptr_add(s, start), slen, false] }
    def buf = malloc(slen)
-   if(!buf){ return [0, 0, false] }
+   if !buf { return [0, 0, false] }
    mut i = 0
-   while(i < slen){
+   while i < slen {
       store8(buf, (is_str(s) || is_bytes(s)) ? load8(s, start + i) : (int(s.get(start + i)) & 255), i)
       i += 1
    }
@@ -207,7 +207,7 @@ fn _hash_bytes_from_ptr(any p, int n) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
-   while(i < n){
+   while i < n {
       __store_item_fast(out, i, load8(p, i))
       i += 1
    }
@@ -216,49 +216,49 @@ fn _hash_bytes_from_ptr(any p, int n) list {
 
 fn _hash_native_digest_hex(list names, any s, int start=0, int count=0) any {
    def out = _hash_native_digest_bytes(names, s, start, count)
-   if(out == nil){ return nil }
+   if out == nil { return nil }
    out.hex
 }
 
 fn _hash_native_digest_bytes(list names, any s, int start=0, int count=0) any {
    def md = _hash_native_digest_obj(names)
-   if(!md){ return nil }
+   if !md { return nil }
    def src = _hash_span_buf(s, start, count)
    def buf = src[0]
    def slen = src[1]
    def owned = src[2]
-   if(!buf && slen > 0){ return nil }
-   def handle: ctx = _EVP_MD_CTX_new()
+   if !buf && slen > 0 { return nil }
+   def handle ctx = _EVP_MD_CTX_new()
    def out = malloc(128)
    def out_len_p = malloc(8)
-   if(!ctx || !out || !out_len_p){
-      if(owned){ free(buf) }
-      if(ctx){ _EVP_MD_CTX_free(ctx) }
+   if !ctx || !out || !out_len_p {
+      if owned { free(buf) }
+      if ctx { _EVP_MD_CTX_free(ctx) }
       free(out, out_len_p)
       return nil
    }
    store32(out_len_p, 0, 0)
-   if(_EVP_DigestInit_ex(ctx, md, 0) != 1){
-      if(owned){ free(buf) }
+   if _EVP_DigestInit_ex(ctx, md, 0) != 1 {
+      if owned { free(buf) }
       _EVP_MD_CTX_free(ctx)
       free(out, out_len_p)
       return nil
    }
-   if(slen > 0 && _EVP_DigestUpdate(ctx, buf, slen) != 1){
-      if(owned){ free(buf) }
+   if slen > 0 && _EVP_DigestUpdate(ctx, buf, slen) != 1 {
+      if owned { free(buf) }
       _EVP_MD_CTX_free(ctx)
       free(out, out_len_p)
       return nil
    }
-   if(_EVP_DigestFinal_ex(ctx, out, out_len_p) != 1){
-      if(owned){ free(buf) }
+   if _EVP_DigestFinal_ex(ctx, out, out_len_p) != 1 {
+      if owned { free(buf) }
       _EVP_MD_CTX_free(ctx)
       free(out, out_len_p)
       return nil
    }
    def out_len = load32(out_len_p, 0)
    def res = _hash_bytes_from_ptr(out, out_len)
-   if(owned){ free(buf) }
+   if owned { free(buf) }
    _EVP_MD_CTX_free(ctx)
    free(out, out_len_p)
    res
@@ -266,13 +266,13 @@ fn _hash_native_digest_bytes(list names, any s, int start=0, int count=0) any {
 
 fn _hash_native_hmac_hex(list names, any key, any data) any {
    def out = _hash_native_hmac_bytes(names, key, data)
-   if(out == nil){ return nil }
+   if out == nil { return nil }
    out.hex
 }
 
 fn _hash_native_hmac_bytes(list names, any key, any data) any {
    def md = _hash_native_digest_obj(names)
-   if(!md || !_hash_native_load()){ return nil }
+   if !md || !_hash_native_load() { return nil }
    def key_src = _hash_span_buf(key, 0, 0)
    def data_src = _hash_span_buf(data, 0, 0)
    def key_buf = key_src[0]
@@ -283,23 +283,23 @@ fn _hash_native_hmac_bytes(list names, any key, any data) any {
    def data_owned = data_src[2]
    def out = malloc(128)
    def out_len_p = malloc(8)
-   if(!out || !out_len_p){
-      if(key_owned){ free(key_buf) }
-      if(data_owned){ free(data_buf) }
+   if !out || !out_len_p {
+      if key_owned { free(key_buf) }
+      if data_owned { free(data_buf) }
       free(out, out_len_p)
       return nil
    }
    store32(out_len_p, 0, 0)
-   if(!_HMAC(md, key_buf, key_len, data_buf, data_len, out, out_len_p)){
-      if(key_owned){ free(key_buf) }
-      if(data_owned){ free(data_buf) }
+   if !_HMAC(md, key_buf, key_len, data_buf, data_len, out, out_len_p) {
+      if key_owned { free(key_buf) }
+      if data_owned { free(data_buf) }
       free(out, out_len_p)
       return nil
    }
    def out_len = load32(out_len_p, 0)
    def res = _hash_bytes_from_ptr(out, out_len)
-   if(key_owned){ free(key_buf) }
-   if(data_owned){ free(data_buf) }
+   if key_owned { free(key_buf) }
+   if data_owned { free(data_buf) }
    free(out, out_len_p)
    res
 }
@@ -310,7 +310,7 @@ def _U64_ZERO = bigint_from_str("0")
 fn _u64_list(int n) list {
    mut out = list(n)
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(_U64_ZERO)
       i += 1
    }
@@ -322,7 +322,7 @@ fn _u64_word(any x) any { (x & _U64_MASK) + _U64_ZERO }
 fn _rotr64(any x, int n) any {
    def shift = n % 64
    def word = _u64_word(x)
-   if(shift == 0){ return word }
+   if shift == 0 { return word }
    _u64_word((word >> shift) | (word << (64 - shift)))
 }
 
@@ -363,7 +363,7 @@ def _K512 = [0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5d
 fn _dl64(any s, int i) any {
    mut out = _U64_ZERO
    mut j = 0
-   while(j < 8){
+   while j < 8 {
       out = (out * 256) + load8(s, i + j)
       j += 1
    }
@@ -373,7 +373,7 @@ fn _dl64(any s, int i) any {
 fn _ts64(any s, int i, any v) any {
    mut j = 7
    mut val = v
-   while(j >= 0){
+   while j >= 0 {
       store8(s, val & 255, i + j)
       val = val >> 8
       j -= 1
@@ -384,7 +384,7 @@ fn _u64_hex(any v) str {
    def word = _u64_word(v)
    mut out = str.Builder(16)
    mut i = 7
-   while(i >= 0){
+   while i >= 0 {
       out = str.builder_append(out, str.to_hex(bigint_to_int((word >> (i * 8)) & 255), 2))
       i -= 1
    }
@@ -395,9 +395,9 @@ fn _u64_hex(any v) str {
 
 fn sha512(any msg, int start=0, int count=0) str {
    "Computes the SHA-512 hash of a message."
-   if(_hash_native_load()){
+   if _hash_native_load() {
       def native = _hash_native_digest_hex(["SHA512", "sha512", "SHA-512"], msg, start, count)
-      if(native != nil){ return native }
+      if native != nil { return native }
    }
    mut data = _hash_input_bytes(msg, start, count)
    def n = data.len
@@ -409,23 +409,23 @@ fn sha512(any msg, int start=0, int count=0) str {
    def total_len = n + padding_len
    mut m = malloc(total_len)
    mut bi = 0
-   while(bi < n){
+   while bi < n {
       store8(m, data.get(bi), bi)
       bi += 1
    }
    store8(m, 128, n)
    mut i = n + 1
-   while(i < total_len - 16){ store8(m, 0, i) i += 1 }
-   while(i < total_len - 8){ store8(m, 0, i) i += 1 }
+   while i < total_len - 16 { store8(m, 0, i) i += 1 }
+   while i < total_len - 8 { store8(m, 0, i) i += 1 }
    _ts64(m, total_len - 8, n * 8)
    mut p = 0
-   while(p < total_len){
+   while p < total_len {
       mut w, j = _u64_list(80), 0
-      while(j < 16){
+      while j < 16 {
          w[j] = _dl64(m, p + j * 8)
          j += 1
       }
-      while(j < 80){
+      while j < 80 {
          def s0, s1 = _sigma0_512(w.get(j - 15)), _sigma1_512(w.get(j - 2))
          w[j] = _u64_word(s1 + w.get(j - 7) + s0 + w.get(j - 16))
          j += 1
@@ -436,7 +436,7 @@ fn sha512(any msg, int start=0, int count=0) str {
       mut g = h.get(6)
       mut ha = h.get(7)
       mut k = 0
-      while(k < 80){
+      while k < 80 {
          def t1 = _u64_word(ha + _Sigma1_512(e) + _Ch(e, f, g) + _K512.get(k) + w.get(k))
          def t2 = _u64_word(_Sigma0_512(a) + _Maj(a, b, c))
          ha = g
@@ -462,7 +462,7 @@ fn sha512(any msg, int start=0, int count=0) str {
    free(m)
    mut res = str.Builder(136)
    mut l = 0
-   while(l < 8){
+   while l < 8 {
       res = str.builder_append(res, _u64_hex(h.get(l)))
       l += 1
    }
@@ -478,11 +478,11 @@ fn crc32(any s, int start=0, int count=0) int {
    def data = _hash_input_bytes(s, start, count)
    def slen = data.len
    mut c, i = 4294967295, 0
-   while(i < slen){
+   while i < slen {
       c = (c ^^ data.get(i))
       mut j = 0
-      while(j < 8){
-         if((c & 1) != 0){ c = (_lshr32(c, 1) ^^ 3988292384) } else { c = _lshr32(c, 1) }
+      while j < 8 {
+         if (c & 1) != 0 { c = (_lshr32(c, 1) ^^ 3988292384) } else { c = _lshr32(c, 1) }
          j += 1
       }
       i += 1
@@ -496,7 +496,7 @@ fn adler32(any s, int start=0, int count=0) int {
    def slen = data.len
    mut a, b = 1, 0
    mut i = 0
-   while(i < slen){
+   while i < slen {
       a = (a + _bit(data.get(i))) % 65521
       b = (b + a) % 65521
       i += 1
@@ -509,7 +509,7 @@ fn fnv1a(any s, int start=0, int count=0) int {
    def data = _hash_input_bytes(s, start, count)
    def slen = data.len
    mut h, i = 2166136261, 0
-   while(i < slen){
+   while i < slen {
       h = _u32(((h ^^ _bit(data.get(i))) * 16777619))
       i += 1
    }
@@ -527,10 +527,10 @@ fn xxh32(any s, int seed=0, int start=0, int count=0) int {
    def P5 = 374761393
    mut h32 = 0
    mut p = 0
-   if(slen >= 16){
+   if slen >= 16 {
       mut v1, v2 = _u32(seed + P1 + P2), _u32(seed + P2)
       mut v3, v4 = _u32(seed), _u32(seed - P1)
-      while(p + 16 <= slen){
+      while p + 16 <= slen {
          v1 = _hash_mul32(_rotl32(_u32(v1 + _hash_mul32(_bit(_hash_le32(data, p)), P2)), 13), P1)
          v2 = _hash_mul32(_rotl32(_u32(v2 + _hash_mul32(_bit(_hash_le32(data, p + 4)), P2)), 13), P1)
          v3 = _hash_mul32(_rotl32(_u32(v3 + _hash_mul32(_bit(_hash_le32(data, p + 8)), P2)), 13), P1)
@@ -542,11 +542,11 @@ fn xxh32(any s, int seed=0, int start=0, int count=0) int {
       h32 = _u32(seed + P5)
    }
    h32 = _u32(h32 + slen)
-   while(p + 4 <= slen){
+   while p + 4 <= slen {
       h32 = _hash_mul32(_rotl32(_u32(h32 + _hash_mul32(_bit(_hash_le32(data, p)), P3)), 17), P4)
       p = p + 4
    }
-   while(p < slen){
+   while p < slen {
       h32 = _hash_mul32(_rotl32(_u32(h32 + _hash_mul32(_hash_byte(data.get(p)), P5)), 11), P1)
       p += 1
    }
@@ -560,9 +560,9 @@ fn xxh32(any s, int seed=0, int start=0, int count=0) int {
 
 fn sha1(any s, int start=0, int count=0) str {
    "Calculates the SHA-1 hash of a string or buffer. Returns the result as a 40-character hexadecimal string."
-   if(_hash_native_load()){
+   if _hash_native_load() {
       def native = _hash_native_digest_hex(["SHA1", "sha1", "SHA-1"], s, start, count)
-      if(native != nil){ return native }
+      if native != nil { return native }
    }
    def data = _hash_input_bytes(s, start, count)
    def slen = data.len
@@ -572,7 +572,7 @@ fn sha1(any s, int start=0, int count=0) str {
    def p_len = ((slen + 8) / 64 + 1) * 64
    mut m = zalloc(p_len)
    mut cpi = 0
-   while(cpi < slen){
+   while cpi < slen {
       store8(m, data.get(cpi), cpi)
       cpi += 1
    }
@@ -588,9 +588,9 @@ fn sha1(any s, int start=0, int count=0) str {
    store8(m, (bitlen & 255), p_len - 1)
    mut w = zero_list(80)
    mut off = 0
-   while(off < p_len){
+   while off < p_len {
       mut t = 0
-      while(t < 16){
+      while t < 16 {
          def base_idx = off + t * 4
          def val =
          (((_bit(load8(m, base_idx)) << 24) | (_bit(load8(m, base_idx + 1)) << 16)) |
@@ -598,7 +598,7 @@ fn sha1(any s, int start=0, int count=0) str {
          w[t] = _u32(val)
          t += 1
       }
-      while(t < 80){
+      while t < 80 {
          def v = _xor32(_xor32(w.get(t - 3), w.get(t - 8)), _xor32(w.get(t - 14), w.get(t - 16)))
          w[t] = _rotl32(v, 1)
          t += 1
@@ -607,14 +607,14 @@ fn sha1(any s, int start=0, int count=0) str {
       mut hc, hd = h2, h3
       mut he = h4
       mut i = 0
-      while(i < 80){
-         mut int: f = 0
-         mut int: k = 0
-         if(i < 20){
+      while i < 80 {
+         mut int f = 0
+         mut int k = 0
+         if i < 20 {
             f, k = _or32(_and32(hb, hc), _and32(_not32(hb), hd)), 1518500249
-         } else if(i < 40){
+         } else if i < 40 {
             f, k = _xor32(_xor32(hb, hc), hd), 1859775393
-         } else if(i < 60){
+         } else if i < 60 {
             f, k = _or32(_or32(_and32(hb, hc), _and32(hb, hd)), _and32(hc, hd)), 2400959708
          } else {
             f, k = _xor32(_xor32(hb, hc), hd), 3395469782
@@ -637,9 +637,9 @@ fn sha1(any s, int start=0, int count=0) str {
 fn md5(any s, int start=0, int count=0) str {
    "Calculates the MD5(Message-Digest Algorithm 5) hash of a string or buffer. " +
    "Returns a 32-character hexadecimal string."
-   if(_hash_native_load()){
+   if _hash_native_load() {
       def native = _hash_native_digest_hex(["MD5", "md5"], s, start, count)
-      if(native != nil){ return native }
+      if native != nil { return native }
    }
    def data = _hash_input_bytes(s, start, count)
    def slen = data.len
@@ -648,7 +648,7 @@ fn md5(any s, int start=0, int count=0) str {
    def p_len = ((slen + 8) / 64 + 1) * 64
    mut m = zalloc(p_len)
    mut cpi = 0
-   while(cpi < slen){
+   while cpi < slen {
       store8(m, data.get(cpi), cpi)
       cpi += 1
    }
@@ -679,18 +679,18 @@ fn md5(any s, int start=0, int count=0) str {
       6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
    ]
    mut off = 0
-   while(off < p_len){
+   while off < p_len {
       mut a, b = h0, h1
       mut c, d = h2, h3
       mut i = 0
-      while(i < 64){
-         mut int: f = 0
-         mut int: g = 0
-         if(i < 16){
+      while i < 64 {
+         mut int f = 0
+         mut int g = 0
+         if i < 16 {
             f, g = _or32(_and32(b, c), _and32(_not32(b), d)), i
-         } else if(i < 32){
+         } else if i < 32 {
             f, g = _or32(_and32(d, b), _and32(_not32(d), c)), (5 * i + 1) % 16
-         } else if(i < 48){
+         } else if i < 48 {
             f, g = _xor32(_xor32(b, c), d), (3 * i + 5) % 16
          } else {
             f, g = _xor32(c, _or32(b, _not32(d))), (7 * i) % 16
@@ -743,29 +743,29 @@ fn _sha256_maj(int x, int y, int z) int { (x & y) ^^ (x & z) ^^ (y & z) }
 
 fn sha256(any data) list {
    "Compute SHA-256 hash of message(string or bytes). Returns bytes list."
-   if(_hash_native_load()){
+   if _hash_native_load() {
       def native = _hash_native_digest_bytes(["SHA256", "sha256", "SHA-256"], data, 0, 0)
-      if(native != nil){ return native }
+      if native != nil { return native }
    }
    mut msg_len = 0
-   if(is_str(data) || is_bytes(data) || is_list(data)){ msg_len = data.len }
+   if is_str(data) || is_bytes(data) || is_list(data) { msg_len = data.len }
    mut padded_len = msg_len + 1
-   while((padded_len % 64) != 56){ padded_len += 1 }
+   while (padded_len % 64) != 56 { padded_len += 1 }
    def total_len = padded_len + 8
    def msg = zalloc(total_len)
    def w = malloc(512)
-   if(!msg || !w){
+   if !msg || !w {
       free(msg, w)
       return []
    }
    mut copy_i = 0
-   if(is_str(data) || is_bytes(data)){
-      while(copy_i < msg_len){
+   if is_str(data) || is_bytes(data) {
+      while copy_i < msg_len {
          store8(msg, load8(data, copy_i), copy_i)
          copy_i += 1
       }
-   } else if(is_list(data)){
-      while(copy_i < msg_len){
+   } else if is_list(data) {
+      while copy_i < msg_len {
          store8(msg, int(data[copy_i]) & 255, copy_i)
          copy_i += 1
       }
@@ -773,7 +773,7 @@ fn sha256(any data) list {
    store8(msg, 128, msg_len)
    def bit_len = msg_len * 8
    mut i = 7
-   while(i >= 0){
+   while i >= 0 {
       store8(msg, (bit_len >> (i * 8)) & 255, total_len - 8 + (7 - i))
       i -= 1
    }
@@ -786,16 +786,16 @@ fn sha256(any data) list {
    mut h6 = 0x1f83d9ab
    mut h7 = 0x5be0cd19
    mut chunk_start = 0
-   while(chunk_start < total_len){
+   while chunk_start < total_len {
       i = 0
-      while(i < 16){
+      while i < 16 {
          def idx = chunk_start + i * 4
          def word = (load8(msg, idx) << 24) | (load8(msg, idx + 1) << 16) |
          (load8(msg, idx + 2) << 8) | load8(msg, idx + 3)
          store64(w, word & 0xffffffff, i * 8)
          i += 1
       }
-      while(i < 64){
+      while i < 64 {
          def wm15 = load64(w, (i - 15) * 8)
          def wm2 = load64(w, (i - 2) * 8)
          def s0 = _sha256_rotr(wm15, 7) ^^ _sha256_rotr(wm15, 18) ^^ (wm15 >> 3)
@@ -810,7 +810,7 @@ fn sha256(any data) list {
       mut g = h6
       mut hh = h7
       i = 0
-      while(i < 64){
+      while i < 64 {
          def t1 = (hh + (_sha256_rotr(e, 6) ^^ _sha256_rotr(e, 11) ^^ _sha256_rotr(e, 25)) +
          _sha256_ch(e, f, g) + SHA256_K[i] + load64(w, i * 8)) & 0xffffffff
          def t2 = ((_sha256_rotr(a, 2) ^^ _sha256_rotr(a, 13) ^^ _sha256_rotr(a, 22)) + _sha256_maj(a, b, c)) & 0xffffffff
@@ -838,7 +838,7 @@ fn sha256(any data) list {
    mut result = list(32)
    __list_set_len(result, 32)
    mut k = 0
-   while(k < 8){
+   while k < 8 {
       def hi = case k {
          0 -> h0
          1 -> h1
@@ -903,26 +903,26 @@ def _RIPEMD160_SP = [
 ]
 
 fn _ripemd160_f(int j, int x, int y, int z) int {
-   if(j < 16){ return _xor32(_xor32(x, y), z) }
-   if(j < 32){ return _or32(_and32(x, y), _and32(_not32(x), z)) }
-   if(j < 48){ return _xor32(_or32(x, _not32(y)), z) }
-   if(j < 64){ return _or32(_and32(x, z), _and32(y, _not32(z))) }
+   if j < 16 { return _xor32(_xor32(x, y), z) }
+   if j < 32 { return _or32(_and32(x, y), _and32(_not32(x), z)) }
+   if j < 48 { return _xor32(_or32(x, _not32(y)), z) }
+   if j < 64 { return _or32(_and32(x, z), _and32(y, _not32(z))) }
    _xor32(x, _or32(y, _not32(z)))
 }
 
 fn _ripemd160_k(int j) int {
-   if(j < 16){ return 0x00000000 }
-   if(j < 32){ return 0x5a827999 }
-   if(j < 48){ return 0x6ed9eba1 }
-   if(j < 64){ return 0x8f1bbcdc }
+   if j < 16 { return 0x00000000 }
+   if j < 32 { return 0x5a827999 }
+   if j < 48 { return 0x6ed9eba1 }
+   if j < 64 { return 0x8f1bbcdc }
    0xa953fd4e
 }
 
 fn _ripemd160_kp(int j) int {
-   if(j < 16){ return 0x50a28be6 }
-   if(j < 32){ return 0x5c4dd124 }
-   if(j < 48){ return 0x6d703ef3 }
-   if(j < 64){ return 0x7a6d76e9 }
+   if j < 16 { return 0x50a28be6 }
+   if j < 32 { return 0x5c4dd124 }
+   if j < 48 { return 0x6d703ef3 }
+   if j < 64 { return 0x7a6d76e9 }
    0x00000000
 }
 
@@ -942,9 +942,9 @@ fn _ripemd160_pure(any data) list {
    mut msg = _hash_data_bytes(data)
    def bit_len = msg.len * 8
    msg = msg.append(128)
-   while((msg.len % 64) != 56){ msg = msg.append(0) }
+   while (msg.len % 64) != 56 { msg = msg.append(0) }
    mut i = 0
-   while(i < 8){
+   while i < 8 {
       msg = msg.append((bit_len >> (8 * i)) & 255)
       i += 1
    }
@@ -952,7 +952,7 @@ fn _ripemd160_pure(any data) list {
    mut h2, h3 = 0x98badcfe, 0x10325476
    mut h4 = 0xc3d2e1f0
    mut off = 0
-   while(off < msg.len){
+   while off < msg.len {
       mut al, bl = h0, h1
       mut cl, dl = h2, h3
       mut el = h4
@@ -962,7 +962,7 @@ fn _ripemd160_pure(any data) list {
       mut dr = h3
       mut er = h4
       i = 0
-      while(i < 80){
+      while i < 80 {
          def tl0 = _add32(_add32(_add32(al, _ripemd160_f(i, bl, cl, dl)), _ripemd160_word(msg, off, _RIPEMD160_R[i])), _ripemd160_k(i))
          def tl = _add32(_rotl32(tl0, _RIPEMD160_S[i]), el)
          al, el = el, dl
@@ -993,9 +993,9 @@ fn _ripemd160_pure(any data) list {
 fn ripemd160_bytes(any data) list {
    "Compute RIPEMD-160 hash of message(string or bytes). Returns bytes list.
    Uses native OpenSSL when available, then a pure-Ny fallback."
-   if(_hash_native_load()){
+   if _hash_native_load() {
       def out = _hash_native_digest_bytes(["RIPEMD160", "ripemd160", "RIPEMD-160"], data, 0, 0)
-      if(out != nil){ return out }
+      if out != nil { return out }
    }
    _ripemd160_pure(data)
 }
@@ -1024,29 +1024,29 @@ def _KECCAK_PI = [
 
 fn _keccak_f1600(list st) any {
    mut i = 0
-   while(i < 24){
-      mut c, x = _u64_list(0), 0 while(x < 5){
+   while i < 24 {
+      mut c, x = _u64_list(0), 0 while x < 5 {
          c = c.append(st.get(x) ^^ st.get(x+5) ^^ st.get(x+10) ^^ st.get(x+15) ^^ st.get(x+20))
          x += 1
       }
       mut d = _u64_list(0)
-      x = 0 while(x < 5){
+      x = 0 while x < 5 {
          def v = _u64_word(c.get((x+4)%5) ^^ _rotr64(c.get((x+1)%5), 63))
          d = d.append(v)
          x += 1
       }
-      x = 0 while(x < 25){
+      x = 0 while x < 25 {
          st[x] = _u64_word(st.get(x) ^^ d.get(x%5))
          x += 1
       }
       mut st_new = _u64_list(25)
-      x = 0 while(x < 25){
+      x = 0 while x < 25 {
          def idx = _KECCAK_PI.get(x)
          st_new[idx] = _rotr64(st.get(x), 64 - _KECCAK_RHO.get(x))
          x += 1
       }
-      x = 0 while(x < 5){
-         mut y = 0 while(y < 5){
+      x = 0 while x < 5 {
+         mut y = 0 while y < 5 {
             def base = y*5 + x
             def v = st_new.get(base) ^^ ((_U64_MASK ^^ st_new.get(y*5 + (x+1)%5)) & st_new.get(y*5 + (x+2)%5))
             st[base] = _u64_word(v)
@@ -1064,13 +1064,13 @@ fn _sha3_common(any data, int capacity, int out_len) str {
    def rate = 1600 - capacity
    def rate_bytes = rate / 8
    msg = msg.append(0x06)
-   while((msg.len % rate_bytes) != (rate_bytes - 1)){ msg = msg.append(0) }
+   while (msg.len % rate_bytes) != (rate_bytes - 1) { msg = msg.append(0) }
    msg = msg.append(0x80)
    mut st = _u64_list(25)
    mut off = 0
-   while(off < msg.len){
+   while off < msg.len {
       mut j = 0
-      while(j < rate_bytes && (off + j) < msg.len){
+      while j < rate_bytes && (off + j) < msg.len {
          def lane_idx = j / 8
          def cur = st.get(lane_idx)
          def b = msg.get(off + j)
@@ -1083,7 +1083,7 @@ fn _sha3_common(any data, int capacity, int out_len) str {
    mut bytes_needed = out_len / 8
    mut out = str.Builder(bytes_needed * 2 + 8)
    mut k = 0
-   while(k < bytes_needed){
+   while k < bytes_needed {
       def lane = st.get(k / 8)
       def b = (lane >> (8 * (k % 8))) & 255
       out = str.builder_append(out, str.to_hex(b, 2))
@@ -1096,18 +1096,18 @@ fn _sha3_common(any data, int capacity, int out_len) str {
 
 fn sha3_256(any data) str {
    "Return SHA3-256 digest as a hexadecimal string."
-   if(_hash_native_load()){
+   if _hash_native_load() {
       def native = _hash_native_digest_hex(["SHA3-256", "sha3-256", "SHA3_256"], data, 0, 0)
-      if(native != nil){ return native }
+      if native != nil { return native }
    }
    _sha3_common(data, 512, 256)
 }
 
 fn sha3_512(any data) str {
    "Return SHA3-512 digest as a hexadecimal string."
-   if(_hash_native_load()){
+   if _hash_native_load() {
       def native = _hash_native_digest_hex(["SHA3-512", "sha3-512", "SHA3_512"], data, 0, 0)
-      if(native != nil){ return native }
+      if native != nil { return native }
    }
    _sha3_common(data, 1024, 512)
 }
@@ -1139,34 +1139,34 @@ fn _blake2s_le32(any msg, int off) int { msg.get(off, 0) | (msg.get(off + 1, 0) 
 
 fn blake2s(any data, any key=nil, int out_len=32) str {
    "Return BLAKE2s digest as a hexadecimal string."
-   if(key == nil && out_len == 32 && _hash_native_load()){
+   if key == nil && out_len == 32 && _hash_native_load() {
       def native = _hash_native_digest_hex(["BLAKE2S-256", "blake2s256", "BLAKE2s256"], data, 0, 0)
-      if(native != nil){ return native }
+      if native != nil { return native }
    }
    mut msg = _hash_data_bytes(data)
    def key_len = key == nil ? 0 : key.len
    mut h = clone(_BLAKE2S_IV)
    h[0] = h.get(0) ^^ 0x01010000 ^^ (key_len << 8) ^^ out_len
-   if(key != nil && key_len > 0){
+   if key != nil && key_len > 0 {
       mut k_pad = clone(key)
-      while(k_pad.len < 64){ k_pad = k_pad.append(0) }
+      while k_pad.len < 64 { k_pad = k_pad.append(0) }
       msg = k_pad.extend(msg)
    }
    def n = msg.len
    mut p, t = 0, 0
-   while(p < n || n == 0){
+   while p < n || n == 0 {
       def block_len = (n - p < 64) ? (n - p) : 64
       t += block_len
       def is_last = (p + block_len == n)
-      mut m, i = list(16), 0 while(i < 16){
+      mut m, i = list(16), 0 while i < 16 {
          m[i] = _blake2s_le32(msg, p + i*4)
          i += 1
       }
       mut v = clone(h)
       v = v.extend(_BLAKE2S_IV)
       v[12] = v.get(12) ^^ t
-      if(is_last){ v[14] = v.get(14) ^^ 0xffffffff }
-      mut r = 0 while(r < 10){
+      if is_last { v[14] = v.get(14) ^^ 0xffffffff }
+      mut r = 0 while r < 10 {
          def sig = _BLAKE2S_SIGMA.get(r)
          _blake2s_g(v, 0, 4, 8, 12, m.get(sig.get(0)), m.get(sig.get(1)))
          _blake2s_g(v, 1, 5, 9, 13, m.get(sig.get(2)), m.get(sig.get(3)))
@@ -1178,15 +1178,15 @@ fn blake2s(any data, any key=nil, int out_len=32) str {
          _blake2s_g(v, 3, 4, 9, 14, m.get(sig.get(14)), m.get(sig.get(15)))
          r += 1
       }
-      i = 0 while(i < 8){
+      i = 0 while i < 8 {
          h[i] = h.get(i) ^^ v.get(i) ^^ v.get(i+8)
          i += 1
       }
       p += 64
-      if(n == 0){ break }
+      if n == 0 { break }
    }
    mut out = str.Builder(out_len * 2 + 8)
-   mut i = 0 while(i < out_len){
+   mut i = 0 while i < out_len {
       def word = h.get(i / 4)
       out = str.builder_append(out, str.to_hex((word >> (8 * (i % 4))) & 255, 2))
       i += 1
@@ -1198,41 +1198,41 @@ fn blake2s(any data, any key=nil, int out_len=32) str {
 
 fn md5_hmac(any key, any message) str {
    "HMAC-MD5 implementation."
-   if(_hash_native_load()){
+   if _hash_native_load() {
       def native = _hash_native_hmac_hex(["MD5", "md5"], key, message)
-      if(native != nil){ return native }
+      if native != nil { return native }
    }
    _hash_hmac_bytes(key, message, "md5").hex
 }
 
 fn _hash_hmac_digest_bytes(str digest_name, any data) list {
-   if(digest_name == "md5"){ return md5(data).unhex }
-   if(digest_name == "sha256"){ return sha256(data) }
+   if digest_name == "md5" { return md5(data).unhex }
+   if digest_name == "sha256" { return sha256(data) }
    []
 }
 
 fn _hash_hmac_bytes(any key, any data, str digest_name) list {
    def block_size = 64
    mut key_bytes = _hash_data_bytes(key)
-   if(key_bytes.len > block_size){ key_bytes = _hash_hmac_digest_bytes(digest_name, key_bytes) }
-   while(key_bytes.len < block_size){ key_bytes = key_bytes.append(0) }
+   if key_bytes.len > block_size { key_bytes = _hash_hmac_digest_bytes(digest_name, key_bytes) }
+   while key_bytes.len < block_size { key_bytes = key_bytes.append(0) }
    mut o_key_pad, i_key_pad = [], []
    mut i = 0
-   while(i < block_size){
+   while i < block_size {
       o_key_pad, i_key_pad = o_key_pad.append(key_bytes.get(i) ^^ 0x5c), i_key_pad.append(key_bytes.get(i) ^^ 0x36)
       i += 1
    }
    mut inner = clone(i_key_pad)
    def data_bytes = _hash_data_bytes(data)
    i = 0
-   while(i < data_bytes.len){
+   while i < data_bytes.len {
       inner = inner.append(data_bytes.get(i))
       i += 1
    }
    mut outer = clone(o_key_pad)
    def inner_hash = _hash_hmac_digest_bytes(digest_name, inner)
    i = 0
-   while(i < inner_hash.len){
+   while i < inner_hash.len {
       outer = outer.append(inner_hash.get(i))
       i += 1
    }
@@ -1241,9 +1241,9 @@ fn _hash_hmac_bytes(any key, any data, str digest_name) list {
 
 fn sha256_hmac(any key, any data) list {
    "HMAC-SHA256."
-   if(_hash_native_load()){
+   if _hash_native_load() {
       def native = _hash_native_hmac_bytes(["SHA256", "sha256", "SHA-256"], key, data)
-      if(native != nil){ return native }
+      if native != nil { return native }
    }
    _hash_hmac_bytes(key, data, "sha256")
 }
@@ -1254,12 +1254,12 @@ fn md5_padding(int msg_len) list {
    def pad_len = ((55 - msg_len) % 64 + 64) % 64 + 1
    mut pad = [0x80]
    mut i = 1
-   while(i < pad_len){
+   while i < pad_len {
       pad = pad.append(0)
       i += 1
    }
    mut j = 0
-   while(j < 8){
+   while j < 8 {
       pad = pad.append((bit_len >> (j * 8)) & 255)
       j += 1
    }
@@ -1272,12 +1272,12 @@ fn sha1_padding(int msg_len) list {
    def pad_len = ((55 - msg_len) % 64 + 64) % 64 + 1
    mut pad = [0x80]
    mut i = 1
-   while(i < pad_len){
+   while i < pad_len {
       pad = pad.append(0)
       i += 1
    }
    mut j = 7
-   while(j >= 0){
+   while j >= 0 {
       pad = pad.append((bit_len >> (j * 8)) & 255)
       j = j - 1
    }
@@ -1451,9 +1451,9 @@ impl bytes {
 fn hash_dict_crack(any target_hash, list wordlist, fnptr hash_fn) any {
    "Dictionary attack on hashes."
    mut i = 0
-   while(i < wordlist.len){
+   while i < wordlist.len {
       def word = wordlist.get(i)
-      if(hash_fn(word) == target_hash){ return word }
+      if hash_fn(word) == target_hash { return word }
       i += 1
    }
    nil
@@ -1463,28 +1463,28 @@ fn hash_brute_crack(any target_hash, str charset, int max_len, fnptr hash_fn) an
    "Brute-force attack on hashes."
    def cs_len = charset.len
    mut length = 1
-   while(length <= max_len){
+   while length <= max_len {
       mut indices = []
       mut i = 0
-      while(i < length){
+      while i < length {
          indices = indices.append(0)
          i += 1
       }
       mut done = false
-      while(!done){
+      while !done {
          mut candidate = ""
          mut j = 0
-         while(j < length){
+         while j < length {
             def idx = indices.get(j)
             candidate = str.str_add(candidate, str.utf8_slice(charset, idx, idx + 1, 1))
             j += 1
          }
-         if(hash_fn(candidate) == target_hash){ return candidate }
+         if hash_fn(candidate) == target_hash { return candidate }
          mut carry = 1
          mut k = length - 1
-         while(k >= 0 && carry > 0){
+         while k >= 0 && carry > 0 {
             def new_idx = indices.get(k) + carry
-            if(new_idx >= cs_len){
+            if new_idx >= cs_len {
                indices[k] = 0
                carry = 1
             } else {
@@ -1493,7 +1493,7 @@ fn hash_brute_crack(any target_hash, str charset, int max_len, fnptr hash_fn) an
             }
             k = k - 1
          }
-         if(carry > 0){ done = true }
+         if carry > 0 { done = true }
       }
       length += 1
    }

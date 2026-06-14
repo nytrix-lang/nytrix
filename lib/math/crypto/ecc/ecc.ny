@@ -28,29 +28,29 @@ fn ecc_point_double(any P, any a, any p) any {
 
 fn ecc_scalar_mult(any k, any P, any a, any p, any n=nil) any {
    "Scalar multiplication k*P using Jacobian binary double-and-add."
-   if(k == 0 || P == nil){ return nil }
+   if k == 0 || P == nil { return nil }
    ecc_from_jacobian(_ecc_scalar_mult_jacobian(k, ecc_to_jacobian(P, p), a, p), p)
 }
 
 fn ecc_scalar_mult_jacobian(any k, any P, any a, any p) list {
    "Scalar multiplication k*P in Jacobian space. Returns [X,Y,Z] (Jacobian)."
-   if(k == 0 || P == nil){ return [Z(0), Z(1), Z(0)] }
+   if k == 0 || P == nil { return [Z(0), Z(1), Z(0)] }
    _ecc_scalar_mult_jacobian(k, P, a, p)
 }
 
 fn _ecc_scalar_mult_jacobian(any k, list Pj, any a, any p) list {
    mut kk = Z(k)
    mut Pt = Pj
-   if(bigint_lt(kk, Z(0))){
+   if bigint_lt(kk, Z(0)) {
       kk = bigint_neg(kk)
       Pt = [Pt[0], mod_sub(0, Pt[1], p), Pt[2]]
    }
    mut R = [Z(0), Z(1), Z(0)]
    def bits = bigint_bit_length(kk)
    mut b = bits - 1
-   while(b >= 0){
+   while b >= 0 {
       R = ecc_jacobian_double(R, a, p)
-      if(bigint_mod(bigint_div(kk, bigint_lshift(Z(1), b)), Z(2)) != Z(0)){ R = ecc_jacobian_add(R, Pt, a, p) }
+      if bigint_mod(bigint_div(kk, bigint_lshift(Z(1), b)), Z(2)) != Z(0) { R = ecc_jacobian_add(R, Pt, a, p) }
       b -= 1
    }
    R
@@ -58,15 +58,15 @@ fn _ecc_scalar_mult_jacobian(any k, list Pj, any a, any p) list {
 
 fn ecc_to_jacobian(any P, any p) any {
    "Convert affine point P=[x,y] into Jacobian [X,Y,Z] over Fp."
-   if(P == nil){ return nil }
+   if P == nil { return nil }
    [mod(P[0], p), mod(P[1], p), Z(1)]
 }
 
 fn ecc_from_jacobian(any P, any p) any {
    "Convert Jacobian point [X,Y,Z] back to affine coordinates over Fp."
-   if(P == nil){ return nil }
+   if P == nil { return nil }
    def X = P[0] def Y = P[1] def Z = P[2]
-   if(mod(Z, p) == 0){ return nil }
+   if mod(Z, p) == 0 { return nil }
    def Zi = inverse_mod(Z, p)
    def Zi2 = mod_mul(Zi, Zi, p)
    def Zi3 = mod_mul(Zi2, Zi, p)
@@ -75,12 +75,12 @@ fn ecc_from_jacobian(any P, any p) any {
 
 fn ecc_jacobian_double(any P, any a, any p) list {
    "Double a Jacobian point on y^2 = x^3 + ax + b over Fp."
-   if(P == nil || P[2] == 0 || P[1] == 0){ return [Z(0), Z(1), Z(0)] }
+   if P == nil || P[2] == 0 || P[1] == 0 { return [Z(0), Z(1), Z(0)] }
    def X1 = P[0] def Y1 = P[1] def Z1 = P[2]
    def Y1sq = mod_mul(Y1, Y1, p)
    def S = mod_mul(4, mod_mul(X1, Y1sq, p), p)
    mut M = mod_mul(3, mod_mul(X1, X1, p), p)
-   if(a != 0){
+   if a != 0 {
       def Z1sq = mod_mul(Z1, Z1, p)
       M = mod_add(M, mod_mul(a, mod_mul(Z1sq, Z1sq, p), p), p)
    }
@@ -92,17 +92,17 @@ fn ecc_jacobian_double(any P, any a, any p) list {
 
 fn ecc_jacobian_add(any P, any Q, any a, any p) any {
    "Add two Jacobian points on y^2 = x^3 + ax + b over Fp."
-   if(P == nil){ return Q }
-   if(Q == nil){ return P }
+   if P == nil { return Q }
+   if Q == nil { return P }
    def X1 = P[0] def Y1 = P[1] def Z1 = P[2]
    def X2 = Q[0] def Y2 = Q[1] def Z2 = Q[2]
-   if(Z1 == 0){ return Q }
-   if(Z2 == 0){ return P }
+   if Z1 == 0 { return Q }
+   if Z2 == 0 { return P }
    def Z1sq, Z2sq = mod_mul(Z1, Z1, p), mod_mul(Z2, Z2, p)
    def U1, U2 = mod_mul(X1, Z2sq, p), mod_mul(X2, Z1sq, p)
    def S1, S2 = mod_mul(mod_mul(Y1, Z2, p), Z2sq, p), mod_mul(mod_mul(Y2, Z1, p), Z1sq, p)
-   if(U1 == U2){
-      if(S1 != S2){ return nil }
+   if U1 == U2 {
+      if S1 != S2 { return nil }
       return ecc_jacobian_double(P, a, p)
    }
    def H, r = mod_sub(U2, U1, p), mod_sub(S2, S1, p)
@@ -117,7 +117,7 @@ fn ecc_jacobian_add(any P, any Q, any a, any p) any {
 
 fn ecc_negate(any P, any p) any {
    "Return the additive inverse of affine point P over Fp."
-   if(P == nil){ return nil }
+   if P == nil { return nil }
    [P[0], mod_sub(0, P[1], p)]
 }
 
@@ -128,7 +128,7 @@ fn ecc_sub(any P, any Q, any a, any p) any {
 
 fn ecc_is_on_curve(any P, any a, any b, any p) bool {
    "Return true when affine point P lies on y^2 = x^3 + ax + b over Fp."
-   if(P == nil){ return true }
+   if P == nil { return true }
    def x = P[0] def y = P[1]
    def lhs, rhs = mod_mul(y, y, p), mod_add(mod_add(bigint_pow(Z(x), Z(3)), mod_mul(a, x, p), p), b, p)
    lhs == rhs
@@ -136,7 +136,7 @@ fn ecc_is_on_curve(any P, any a, any b, any p) bool {
 
 fn ecc_parameter_recovery(list pts, any p) any {
    "Recover(a, b) from points on curve. Needs 2 points."
-   if(pts.len < 2){ return nil }
+   if pts.len < 2 { return nil }
    def P1 = pts[0] def P2 = pts[1]
    def x1 = P1[0] def y1 = P1[1]
    def x2 = P2[0] def y2 = P2[1]
@@ -203,7 +203,7 @@ fn ecc_precompute_table(any P, any a, any p, int w=4) list {
    "Build a small affine precomputation table for windowed scalar multiplication."
    mut table = [P]
    mut i = 1
-   while(i < (1 << (w - 1))){
+   while i < (1 << (w - 1)) {
       table = table.append(ecc_point_add(table[i - 1], P, a, p))
       i += 1
    }

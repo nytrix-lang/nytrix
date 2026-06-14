@@ -97,12 +97,12 @@ fn context_actions() list { _FILE_ACTIONS }
 
 fn context_actions_for(dict st) list {
    def scope = to_str(context_entry(st).get("scope", "file"))
-   if(scope == "editor"){ return _EDITOR_ACTIONS }
-   if(scope == "git"){ return _GIT_ACTIONS }
-   if(scope == "timeline"){ return _TIMELINE_ACTIONS }
-   if(scope == "outline"){ return _OUTLINE_ACTIONS }
-   if(scope == "terminal"){ return _TERMINAL_ACTIONS }
-   if(bool(context_entry(st).get("dir", false))){ return _DIR_ACTIONS }
+   if scope == "editor" { return _EDITOR_ACTIONS }
+   if scope == "git" { return _GIT_ACTIONS }
+   if scope == "timeline" { return _TIMELINE_ACTIONS }
+   if scope == "outline" { return _OUTLINE_ACTIONS }
+   if scope == "terminal" { return _TERMINAL_ACTIONS }
+   if bool(context_entry(st).get("dir", false)) { return _DIR_ACTIONS }
    _FILE_ACTIONS
 }
 
@@ -139,25 +139,25 @@ fn context_clamp(dict st, f64 sw, f64 sh, f64 w=156.0, f64 row_h=24.0) dict {
 }
 
 fn context_hit(dict st, f64 mx, f64 my, f64 w=156.0, f64 row_h=24.0) str {
-   if(!context_is_open(st)){ return "" }
+   if !context_is_open(st) { return "" }
    def x = context_x(st)
    def y = context_y(st)
    def actions = context_actions_for(st)
-   if(mx < x || mx > x + w || my < y || my > y + float(actions.len) * row_h){ return "" }
+   if mx < x || mx > x + w || my < y || my > y + float(actions.len) * row_h { return "" }
    def idx = int((my - y) / row_h)
-   if(idx < 0 || idx >= actions.len){ return "" }
+   if idx < 0 || idx >= actions.len { return "" }
    def row = actions.get(idx, [])
    is_list(row) ? to_str(row.get(1, "")) : ""
 }
 
 fn context_hover(dict st, f64 mx, f64 my, f64 w=156.0, f64 row_h=24.0) dict {
-   if(!context_is_open(st)){ return dict(0) }
+   if !context_is_open(st) { return dict(0) }
    def x = context_x(st)
    def y = context_y(st)
    def actions = context_actions_for(st)
-   if(mx < x || mx > x + w || my < y || my > y + float(actions.len) * row_h){ return dict(0) }
+   if mx < x || mx > x + w || my < y || my > y + float(actions.len) * row_h { return dict(0) }
    def idx = int((my - y) / row_h)
-   if(idx < 0 || idx >= actions.len){ return dict(0) }
+   if idx < 0 || idx >= actions.len { return dict(0) }
    def row = actions.get(idx)
    {"idx": idx, "id": to_str(row.get(1, "")), "title": to_str(row.get(0, "")), "key": to_str(row.get(2, "")), "tag": to_str(row.get(3, "")), "detail": to_str(row.get(4, ""))}
 }
@@ -189,20 +189,20 @@ fn rename_rel(dict st) str { to_str(rename_entry(st).get("rel", "")) }
 
 fn rename_handle_key(dict st, any data) dict {
    mut submit = false
-   if(window.event_key_is(data, key.KEY_ESCAPE)){ st = rename_close(st) }
-   elif(window.event_key_is(data, key.KEY_ENTER)){ submit = true }
-   elif(window.event_key_is(data, key.KEY_BACKSPACE)){
+   if window.event_key_is(data, key.KEY_ESCAPE) { st = rename_close(st) }
+   elif window.event_key_is(data, key.KEY_ENTER) { submit = true }
+   elif window.event_key_is(data, key.KEY_BACKSPACE) {
       def text = rename_text(st)
-      if(text.len > 0){ st["text"] = str.str_slice(text, 0, text.len - 1) }
+      if text.len > 0 { st["text"] = str.str_slice(text, 0, text.len - 1) }
    }
    {"st": st, "submit": submit}
 }
 
 fn rename_handle_char(dict st, any data) dict {
    def mods = int(data.get("mods", data.get("mod", 0)))
-   if((mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0){ return st }
+   if (mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 { return st }
    def cp = int(data.get("char", 0))
-   if(cp >= 32 && cp != 127){ st["text"] = rename_text(st) + chr(cp) }
+   if cp >= 32 && cp != 127 { st["text"] = rename_text(st) + chr(cp) }
    st
 }
 

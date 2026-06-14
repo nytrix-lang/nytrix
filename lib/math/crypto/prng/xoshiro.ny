@@ -55,10 +55,10 @@ fn xoroshiro128plus_jump(list state) list {
    mut s0, s1 = Z(0), Z(0)
    mut st = state
    mut i = 0
-   while(i < jumps.len){
+   while i < jumps.len {
       mut b = 0
-      while(b < 64){
-         if((jumps.get(i) & (Z(1) << Z(b))) != Z(0)){ s0, s1 = _u64(s0 ^^ st.get(0)), _u64(s1 ^^ st.get(1)) }
+      while b < 64 {
+         if (jumps.get(i) & (Z(1) << Z(b))) != Z(0) { s0, s1 = _u64(s0 ^^ st.get(0)), _u64(s1 ^^ st.get(1)) }
          st = xoroshiro128plus_next(st).get(0)
          b += 1
       }
@@ -86,10 +86,10 @@ fn xoshiro256plusplus_jump(list state) list {
    mut s2, s3 = Z(0), Z(0)
    mut st = state
    mut i = 0
-   while(i < jumps.len){
+   while i < jumps.len {
       mut b = 0
-      while(b < 64){
-         if((jumps.get(i) & (Z(1) << Z(b))) != Z(0)){
+      while b < 64 {
+         if (jumps.get(i) & (Z(1) << Z(b))) != Z(0) {
             s0, s1 = _u64(s0 ^^ st.get(0)), _u64(s1 ^^ st.get(1))
             s2, s3 = _u64(s2 ^^ st.get(2)), _u64(s3 ^^ st.get(3))
          }

@@ -38,8 +38,8 @@ fn _kind_is_preview(str kind) bool {
 }
 
 fn read_text(str path) str {
-   if(path.len <= 0 || !file_exists(path)){ return "" }
-   match file_read(path){ ok(v) -> to_str(v) err(_) -> "" }
+   if path.len <= 0 || !file_exists(path) { return "" }
+   match file_read(path) { ok(v) -> to_str(v) err(_) -> "" }
 }
 
 fn _max_edit_bytes() int {
@@ -53,10 +53,10 @@ fn _max_edit_lines() int {
 fn _line_count_exceeds(str data, int max_lines) bool {
    mut lines = 1
    mut i = 0
-   while(i < data.len){
-      if(load8(data, i) == 10){
+   while i < data.len {
+      if load8(data, i) == 10 {
          lines += 1
-         if(lines > max_lines){ return true }
+         if lines > max_lines { return true }
       }
       i += 1
    }
@@ -66,10 +66,10 @@ fn _line_count_exceeds(str data, int max_lines) bool {
 fn _line_prefix(str data, int max_lines) str {
    mut lines = 1
    mut i = 0
-   while(i < data.len){
-      if(load8(data, i) == 10){
+   while i < data.len {
+      if load8(data, i) == 10 {
          lines += 1
-         if(lines > max_lines){ return str.str_slice(data, 0, i) }
+         if lines > max_lines { return str.str_slice(data, 0, i) }
       }
       i += 1
    }
@@ -77,21 +77,21 @@ fn _line_prefix(str data, int max_lines) str {
 }
 
 fn _read_head(str path, int max_bytes) dict {
-   if(path.len <= 0 || max_bytes <= 0 || !file_exists(path)){ return {"ok": false, "text": "", "truncated": false} }
+   if path.len <= 0 || max_bytes <= 0 || !file_exists(path) { return {"ok": false, "text": "", "truncated": false} }
    def want = max_bytes + 1
-   match sys.sys_open(ospath.normalize(path), 0, 0){
+   match sys.sys_open(ospath.normalize(path), 0, 0) {
       ok(fd) -> {
          def buf = malloc(want + 32)
-         if(buf == 0){
+         if buf == 0 {
             sys.sys_close_quiet(fd)
             return {"ok": false, "text": "", "truncated": false}
          }
          mut total = 0
          mut failed = false
-         while(total < want){
-            match sys.sys_read(fd, ptr_add(buf, total), want - total){
+         while total < want {
+            match sys.sys_read(fd, ptr_add(buf, total), want - total) {
                ok(n) -> {
-                  if(n <= 0){ break }
+                  if n <= 0 { break }
                   total += n
                }
                err(_) -> {
@@ -101,11 +101,11 @@ fn _read_head(str path, int max_bytes) dict {
             }
          }
          sys.sys_close_quiet(fd)
-         if(failed){
+         if failed {
             free(buf)
             return {"ok": false, "text": "", "truncated": false}
          }
-         if(total <= 0){
+         if total <= 0 {
             free(buf)
             return {"ok": true, "text": "", "truncated": false}
          }
@@ -117,15 +117,15 @@ fn _read_head(str path, int max_bytes) dict {
 }
 
 fn _binary_like(str data) bool {
-   if(data.len == 0){ return false }
-   if(!str.utf8_valid(data)){ return true }
+   if data.len == 0 { return false }
+   if !str.utf8_valid(data) { return true }
    def n = min(data.len, 4096)
    mut bad = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       def c = load8(data, i) & 255
-      if(c == 0){ return true }
-      if(c < 32 && c != 9 && c != 10 && c != 13){ bad += 1 }
+      if c == 0 { return true }
+      if c < 32 && c != 9 && c != 10 && c != 13 { bad += 1 }
       i += 1
    }
    bad > max(8, n / 80)
@@ -135,12 +135,12 @@ fn _hex_preview(str data, int limit=96) str {
    def n = min(data.len, limit)
    mut out = ""
    mut i = 0
-   while(i < n){
-      if(i > 0){ out += (i % 16 == 0 ? "\n" : " ") }
+   while i < n {
+      if i > 0 { out += (i % 16 == 0 ? "\n" : " ") }
       out += str.to_hex(load8(data, i) & 255, 2)
       i += 1
    }
-   if(data.len > n){ out += "\n..." }
+   if data.len > n { out += "\n..." }
    out
 }
 
@@ -150,8 +150,8 @@ fn _preview_text(str path, str kind, str data="", str reason="") str {
    mut out = "Preview: " + name + "\n"
    out += "path: " + path + "\n"
    out += "kind: " + (kind.len > 0 ? kind : "file") + (ext.len > 0 ? " (" + ext + ")" : "") + "\n"
-   if(reason.len > 0){ out += "note: " + reason + "\n" }
-   if(data.len > 0){
+   if reason.len > 0 { out += "note: " + reason + "\n" }
+   if data.len > 0 {
       out += "bytes loaded: " + to_str(data.len) + "\n\n"
       out += "hex:\n" + _hex_preview(data)
    } else {
@@ -182,18 +182,18 @@ fn _large_text_buffer(str path, str data, str note) dict {
 }
 
 fn read_buffer(str path) dict {
-   if(path.len <= 0 || !file_exists(path)){ return ed.buffer("missing", "", "") }
-   if(is_dir(path)){ return _preview_buffer(path, "dir", "", "directory") }
+   if path.len <= 0 || !file_exists(path) { return ed.buffer("missing", "", "") }
+   if is_dir(path) { return _preview_buffer(path, "dir", "", "directory") }
    def kind = file_kind(path)
-   if(_kind_is_preview(kind)){ return _preview_buffer(path, kind, "", "non-text file") }
+   if _kind_is_preview(kind) { return _preview_buffer(path, kind, "", "non-text file") }
    def max_bytes = _max_edit_bytes()
    def rd = _read_head(path, max_bytes)
-   if(!rd.get("ok", false)){ return _preview_buffer(path, "file", "", "read failed") }
+   if !rd.get("ok", false) { return _preview_buffer(path, "file", "", "read failed") }
    def data = to_str(rd.get("text", ""))
-   if(_binary_like(data)){ return _preview_buffer(path, "binary", data, "binary bytes detected") }
-   if(rd.get("truncated", false)){ return _large_text_buffer(path, data, "showing first " + to_str(max_bytes) + " bytes; set NY_EDITOR_MAX_EDIT_BYTES to edit more") }
+   if _binary_like(data) { return _preview_buffer(path, "binary", data, "binary bytes detected") }
+   if rd.get("truncated", false) { return _large_text_buffer(path, data, "showing first " + to_str(max_bytes) + " bytes; set NY_EDITOR_MAX_EDIT_BYTES to edit more") }
    def max_lines = _max_edit_lines()
-   if(_line_count_exceeds(data, max_lines)){
+   if _line_count_exceeds(data, max_lines) {
       return _large_text_buffer(path, _line_prefix(data, max_lines), "showing first " + to_str(max_lines) + " lines; set NY_EDITOR_MAX_EDIT_LINES to edit more")
    }
    mut b = ed.buffer(ospath.basename(path), path, data)
@@ -202,20 +202,20 @@ fn read_buffer(str path) dict {
 }
 
 fn write_text(str path, str text) bool {
-   if(path.len <= 0){ return false }
-   match file_write(path, text){ ok(_) -> true err(_) -> false }
+   if path.len <= 0 { return false }
+   match file_write(path, text) { ok(_) -> true err(_) -> false }
 }
 
 fn seed_buffers(list args, str fallback="README.md") list {
    mut out = []
-   if(args.len > 1){
+   if args.len > 1 {
       def path = to_str(args.get(1, ""))
-      if(file_exists(path)){ out = out.append(read_buffer(path)) }
+      if file_exists(path) { out = out.append(read_buffer(path)) }
    }
-   if(out.len == 0 && fallback.len > 0 && file_exists(fallback)){
+   if out.len == 0 && fallback.len > 0 && file_exists(fallback) {
       out = out.append(read_buffer(fallback))
    }
-   if(out.len == 0){ out = out.append(ed.buffer("untitled.ny", "", "")) }
+   if out.len == 0 { out = out.append(ed.buffer("untitled.ny", "", "")) }
    out
 }
 
@@ -232,17 +232,17 @@ fn _buffer_index_for_path(dict st, str path) int {
    def want = ospath.normalize(path)
    def bs = st.get("buffers", [])
    mut i = 0
-   while(i < bs.len){
+   while i < bs.len {
       def b = bs.get(i, {})
-      if(ospath.normalize(to_str(b.get("path", ""))) == want){ return i }
-      if(ospath.normalize(to_str(b.get("source_path", ""))) == want){ return i }
+      if ospath.normalize(to_str(b.get("path", ""))) == want { return i }
+      if ospath.normalize(to_str(b.get("source_path", ""))) == want { return i }
       i += 1
    }
    -1
 }
 
 fn append_file(dict st, str path) dict {
-   if(path.len <= 0 || !file_exists(path)){ return set_status(st, "open failed") }
+   if path.len <= 0 || !file_exists(path) { return set_status(st, "open failed") }
    mut bs = st.get("buffers", [])
    def b = read_buffer(path)
    bs = bs.append(b)
@@ -252,9 +252,9 @@ fn append_file(dict st, str path) dict {
 }
 
 fn open_file(dict st, str path) dict {
-   if(path.len <= 0){ return st }
+   if path.len <= 0 { return st }
    def idx = _buffer_index_for_path(st, path)
-   if(idx >= 0){
+   if idx >= 0 {
       st = ed.select_buffer(st, idx)
       return set_status(st, "buffer " + ospath.basename(path))
    }
@@ -265,16 +265,16 @@ fn project_entry_for_path(dict model, str path) dict {
    def want = ospath.normalize(path)
    def rows = project.tree(model)
    mut i = 0
-   while(i < rows.len){
+   while i < rows.len {
       def e = rows.get(i, {})
-      if(ospath.normalize(to_str(e.get("path", ""))) == want){ return e }
+      if ospath.normalize(to_str(e.get("path", ""))) == want { return e }
       i += 1
    }
    dict(0)
 }
 
 fn open_or_toggle_project_row(dict st, dict model, dict entry) dict {
-   if(entry.get("dir", false)){
+   if entry.get("dir", false) {
       model = project.toggle(model, to_str(entry.get("rel", "")))
    } else {
       st = open_file(st, to_str(entry.get("path", "")))
@@ -286,12 +286,12 @@ fn set_output_buffer(dict st, str name, str text) dict {
    mut bs = st.get("buffers", [])
    mut hit = -1
    mut i = 0
-   while(i < bs.len){
+   while i < bs.len {
       def row = bs.get(i, dict(0))
-      if(is_dict(row) && to_str(row.get("name", "")) == name){ hit = i break }
+      if is_dict(row) && to_str(row.get("name", "")) == name { hit = i break }
       i += 1
    }
-   if(hit >= 0){
+   if hit >= 0 {
       mut b = bs.get(hit)
       b["lines"] = ed.split_lines(text)
       b["dirty"] = false
@@ -308,10 +308,10 @@ fn set_output_buffer(dict st, str name, str text) dict {
 
 fn save(dict st) dict {
    def b = ed.current_buffer(st)
-   if(b.get("readonly", false)){ return set_status(st, "read-only preview") }
+   if b.get("readonly", false) { return set_status(st, "read-only preview") }
    def path = to_str(b.get("path", ""))
-   if(path.len <= 0){ return set_status(st, "memory buffer") }
-   if(write_text(path, ed.join_lines(ed.current_lines(st)))){
+   if path.len <= 0 { return set_status(st, "memory buffer") }
+   if write_text(path, ed.join_lines(ed.current_lines(st))) {
       return set_status(mark_clean(st), "saved " + ospath.basename(path))
    }
    set_status(st, "save failed")
@@ -327,7 +327,7 @@ fn _tool_output(dict st, str label, dict res) dict {
 fn run_current_file(dict st) dict {
    st = save(st)
    def path = to_str(ed.current_buffer(st).get("path", ""))
-   if(path.len <= 0){ return set_status(st, "save before run") }
+   if path.len <= 0 { return set_status(st, "save before run") }
    st = set_status(st, "running " + ospath.basename(path))
    def res = runner.run_file(path)
    st = set_output_buffer(st, runner.output_name(path), runner.output_text(res))
@@ -335,8 +335,8 @@ fn run_current_file(dict st) dict {
 }
 
 fn run_text(dict st, str path, str text, str label="selection") dict {
-   if(path.len <= 0){ return set_status(st, "save before run") }
-   if(str.strip(text).len <= 0){ return set_status(st, "nothing to run") }
+   if path.len <= 0 { return set_status(st, "save before run") }
+   if str.strip(text).len <= 0 { return set_status(st, "nothing to run") }
    st = set_status(st, "running " + label + " " + ospath.basename(path))
    def res = runner.run_text(path, text, label)
    st = set_output_buffer(st, runner.output_name(path), runner.output_text(res))
@@ -346,7 +346,7 @@ fn run_text(dict st, str path, str text, str label="selection") dict {
 fn check_current_file(dict st) dict {
    st = save(st)
    def path = to_str(ed.current_buffer(st).get("path", ""))
-   if(path.len <= 0){ return set_status(st, "save before check") }
+   if path.len <= 0 { return set_status(st, "save before check") }
    _tool_output(st, "diagnostics: " + ospath.basename(path), tools.check_file(path))
 }
 
@@ -354,9 +354,9 @@ fn format_current_file(dict st) dict {
    st = save(st)
    def b = ed.current_buffer(st)
    def path = to_str(b.get("path", ""))
-   if(path.len <= 0){ return set_status(st, "save before format") }
+   if path.len <= 0 { return set_status(st, "save before format") }
    def res = tools.format_file(path)
-   if(res.get("ok", false)){
+   if res.get("ok", false) {
       mut bs = st.get("buffers", [])
       mut cur = ed.current_buffer(st)
       cur["lines"] = ed.split_lines(read_text(path))
@@ -370,7 +370,7 @@ fn format_current_file(dict st) dict {
 fn debug_current_file(dict st) dict {
    st = save(st)
    def path = to_str(ed.current_buffer(st).get("path", ""))
-   if(path.len <= 0){ return set_status(st, "save before debug") }
+   if path.len <= 0 { return set_status(st, "save before debug") }
    _tool_output(st, "debug: " + ospath.basename(path), tools.debug_file(path))
 }
 

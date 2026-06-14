@@ -19,7 +19,7 @@ fn multiprime_phi(list primes) any {
    mut result = 1
    mut i = 0
    mut n_primes = primes.len
-   while(i < n_primes){
+   while i < n_primes {
       def p_i = primes.get(i)
       result = result * (p_i - 1)
       i += 1
@@ -41,16 +41,16 @@ fn repeated_prime_factor(any n, int min_power=2, int max_power=64) any {
    Returns nil if no exact prime power is found in the requested exponent range."
    def nn = Z(n)
    mut r = min_power
-   while(r <= max_power){
+   while r <= max_power {
       def p = nth_root(nn, r)
-      if(p > Z(1) && is_prime(p)){
+      if p > Z(1) && is_prime(p) {
          mut acc = Z(1)
          mut i = 0
-         while(i < r){
+         while i < r {
             acc = acc * p
             i += 1
          }
-         if(acc == nn){ return [p, r] }
+         if acc == nn { return [p, r] }
       }
       r += 1
    }
@@ -62,7 +62,7 @@ fn repeated_prime_phi(any p, int r) any {
    def pp = Z(p)
    mut acc = Z(1)
    mut i = 1
-   while(i < r){
+   while i < r {
       acc = acc * pp
       i += 1
    }

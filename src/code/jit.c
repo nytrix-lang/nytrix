@@ -850,6 +850,7 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_
   register_jit_sigs(ee, mod, cg);
 
 apply_runtime_attrs:
+  ;
   // Apply critical attributes to runtime symbols
   LLVMValueRef panic_fn = LLVMGetNamedFunction(mod, "__panic");
   if (panic_fn) {

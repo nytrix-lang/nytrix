@@ -297,11 +297,11 @@ fn ascii_class_mask(str chars) list {
    mut lo = 0
    mut hi = 0
    mut i = 0
-   while(i < chars.len){
+   while i < chars.len {
       def c = load8(chars, i)
-      if(c >= 0 && c < 64){
+      if c >= 0 && c < 64 {
          lo = lo | (1 << c)
-      } elif(c < 128){
+      } elif c < 128 {
          hi = hi | (1 << (c - 64))
       }
       i += 1
@@ -311,11 +311,11 @@ fn ascii_class_mask(str chars) list {
 
 fn _span_len(any data, int start=0, int count=0) list {
    mut n, s = len(data), start
-   if(s < 0){ s = n + s }
-   if(s < 0){ s = 0 }
-   if(s > n){ s = n }
+   if s < 0 { s = n + s }
+   if s < 0 { s = 0 }
+   if s > n { s = n }
    mut c = count
-   if(c <= 0 || s + c > n){ c = n - s }
+   if c <= 0 || s + c > n { c = n - s }
    [s, c]
 }
 
@@ -331,11 +331,11 @@ fn ascii_class_reduce(any data, int rounds, str chars, int hit=1, int miss=0, in
 fn ascii_class_reduce_ptr(ptr data, int n, int rounds, str chars, int hit=1, int miss=0, int start=0, int count=0) int {
    "Reduces bytes by an ASCII class from a raw pointer without constructing a string."
    mut s = start
-   if(s < 0){ s = n + s }
-   if(s < 0){ s = 0 }
-   if(s > n){ s = n }
+   if s < 0 { s = n + s }
+   if s < 0 { s = 0 }
+   if s > n { s = n }
    mut c = count
-   if(c <= 0 || s + c > n){ c = n - s }
+   if c <= 0 || s + c > n { c = n - s }
    def mask = ascii_class_mask(chars)
    __simmd_byte_class_reduce(ptr_add(data, s), c, rounds, mask.get(0), mask.get(1), hit, miss)
 }
@@ -343,22 +343,22 @@ fn ascii_class_reduce_ptr(ptr data, int n, int rounds, str chars, int hit=1, int
 fn ascii_vowel_reduce(any data, int rounds, int hit=3, int miss=1, int start=0, int count=0) int {
    "Specialized fast ASCII vowel reducer for byte-scan hot paths."
    mut n, s = len(data), start
-   if(s < 0){ s = n + s }
-   if(s < 0){ s = 0 }
-   if(s > n){ s = n }
+   if s < 0 { s = n + s }
+   if s < 0 { s = 0 }
+   if s > n { s = n }
    mut c = count
-   if(c <= 0 || s + c > n){ c = n - s }
+   if c <= 0 || s + c > n { c = n - s }
    __simmd_byte_class_reduce(ptr_add(data, s), c, rounds, 0, _ASCII_VOWEL_MASK, hit, miss)
 }
 
 fn ascii_vowel_reduce_ptr(ptr data, int n, int rounds, int hit=3, int miss=1, int start=0, int count=0) int {
    "Specialized fast ASCII vowel reducer from a raw pointer without constructing a string."
    mut s = start
-   if(s < 0){ s = n + s }
-   if(s < 0){ s = 0 }
-   if(s > n){ s = n }
+   if s < 0 { s = n + s }
+   if s < 0 { s = 0 }
+   if s > n { s = n }
    mut c = count
-   if(c <= 0 || s + c > n){ c = n - s }
+   if c <= 0 || s + c > n { c = n - s }
    __simmd_byte_class_reduce(ptr_add(data, s), c, rounds, 0, _ASCII_VOWEL_MASK, hit, miss)
 }
 
@@ -388,10 +388,10 @@ fn i32_sqlscan_sum_ptr(ptr region, ptr tier, ptr amount, ptr flags, int n, int r
 
 fn mat4_mul(list a, list b, any out=0) list {
    "SIMD-backed 4x4 matrix multiply for Ny list matrices. Returns `out`; when omitted, allocates a 16-slot output list."
-   if(!is_list(out)){
+   if !is_list(out) {
       out = list(16)
       mut i = 0
-      while(i < 16){
+      while i < 16 {
          out = out.append(0.0)
          i += 1
       }
@@ -409,7 +409,7 @@ fn mat4_mul_ptr(ptr a, ptr b, ptr out) ptr {
    def b = malloc(64)
    def out = malloc(64)
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       def diag = (i == 0 || i == 5 || i == 10 || i == 15) ? 1.0 : 0.0
       store32_f32(a, diag, i * 4)
       store32_f32(b, float(i + 1), i * 4)

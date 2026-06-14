@@ -7,7 +7,7 @@ fn fib(n) {
    mut a = 0
    mut b = 1
    mut i = 2
-   while(i <= n){
+   while i <= n {
       def c = a + b
       a = b
       b = c
@@ -20,7 +20,7 @@ def iters = _bench_scale(50000, 500)
 mut i = 0
 mut r = 0
 def t0 = ticks()
-while(i < iters){
+while i < iters {
    r = fib(40)
    i += 1
 }

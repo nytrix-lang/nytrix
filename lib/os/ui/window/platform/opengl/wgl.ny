@@ -45,9 +45,9 @@ fn wglGetProcAddress(any _name) any {
 
 fn choose_pixel_format(any dc) int {
    "Runs the choose pixel format operation."
-   if(!dc){ return 0 }
+   if !dc { return 0 }
    def pfd = zalloc(40)
-   if(!pfd){ return 0 }
+   if !pfd { return 0 }
    store16(pfd, 40, 0)
    store16(pfd, 1, 2)
    store32(pfd, 0x00000004 | 0x00000020 | 0x00000001, 4)
@@ -57,20 +57,20 @@ fn choose_pixel_format(any dc) int {
    store8(pfd, 8, 24)
    store8(pfd, 0, 25)
    def pf = ChoosePixelFormat(dc, pfd)
-   if(pf != 0){ SetPixelFormat(dc, pf, pfd) }
+   if pf != 0 { SetPixelFormat(dc, pf, pfd) }
    free(pfd)
    pf
 }
 
 fn create_context(any dc) any {
    "Creates create context."
-   if(!dc){ return 0 }
+   if !dc { return 0 }
    wglCreateContext(dc)
 }
 
 fn destroy_context(any ctx) bool {
    "Destroys destroy context."
-   if(!ctx){ return false }
+   if !ctx { return false }
    wglDeleteContext(ctx)
    true
 }
@@ -82,7 +82,7 @@ fn make_current(any dc, any ctx) bool {
 
 fn swap_buffers(any dc) bool {
    "Runs the swap buffers operation."
-   if(!dc){ return false }
+   if !dc { return false }
    SwapBuffers(dc) != 0
 }
 
@@ -94,9 +94,9 @@ fn swap_interval(any interval) bool {
 fn get_proc_address(any name) any {
    "Returns get proc address."
    def proc_name = to_str(name)
-   if(!startswith(proc_name, "gl") && !startswith(proc_name, "wgl")){ return 0 }
+   if !startswith(proc_name, "gl") && !startswith(proc_name, "wgl") { return 0 }
    def s, p = cstr(proc_name), wglGetProcAddress(s)
-   if(p){ return p }
+   if p { return p }
    0
 }
 

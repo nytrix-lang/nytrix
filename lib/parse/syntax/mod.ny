@@ -93,9 +93,9 @@ fn json_tokenize(str source, list out_tokens) list { _json_mod.tokenize(source, 
 fn _basename_start(str filename) int {
    mut slash = -1
    mut i = 0
-   while(i < filename.len){
+   while i < filename.len {
       def c = load8(filename, i)
-      if(c == 47 || c == 92){ slash = i }
+      if c == 47 || c == 92 { slash = i }
       i += 1
    }
    slash + 1
@@ -104,8 +104,8 @@ fn _basename_start(str filename) int {
 fn _last_dot(str filename, int start) int {
    mut dot = -1
    mut i = start
-   while(i < filename.len){
-      if(load8(filename, i) == 46){ dot = i }
+   while i < filename.len {
+      if load8(filename, i) == 46 { dot = i }
       i += 1
    }
    dot
@@ -113,12 +113,12 @@ fn _last_dot(str filename, int start) int {
 
 fn detect_language(?str filename) str {
    "Runs the detect language operation."
-   if(!filename || !is_str(filename)){ return "text" }
+   if !filename || !is_str(filename) { return "text" }
    def name_start = _basename_start(filename)
    def name = str.str_slice(filename, name_start, filename.len)
-   if(name == "CMakeLists.txt"){ return "cmake" }
+   if name == "CMakeLists.txt" { return "cmake" }
    def dot = _last_dot(filename, name_start)
-   if(dot < 0){ return "text" }
+   if dot < 0 { return "text" }
    def ext = str.str_slice(filename, dot, filename.len)
    comptime match SyntaxLangByExt(ext, "text")
 }
@@ -147,11 +147,11 @@ fn tokenize_auto(str source, ?str filename, list out_tokens) list {
 
 fn _has_token_kind(str source, list toks, str needle, int kind) bool {
    def pos = str.find(source, needle)
-   if(pos < 0){ return false }
+   if pos < 0 { return false }
    mut i = 0
-   while(i < toks.len){
+   while i < toks.len {
       def tok = toks.get(i)
-      if(int(tok.get(0, -1)) == kind && int(tok.get(1, -1)) == pos){ return true }
+      if int(tok.get(0, -1)) == kind && int(tok.get(1, -1)) == pos { return true }
       i += 1
    }
    false

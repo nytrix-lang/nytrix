@@ -20,8 +20,8 @@ use std.math.matrix
 
 fn poly_set_at(list poly, int idx, any val) list {
    "Internal: Set polynomial coefficient at index idx to val. Returns modified polynomial."
-   if(!is_list(poly)){ return poly }
-   if(idx < 0 || idx >= poly.len){ return poly }
+   if !is_list(poly) { return poly }
+   if idx < 0 || idx >= poly.len { return poly }
    poly[idx] = val
    poly
 }
@@ -32,7 +32,7 @@ fn poly_add(list a, list b) list {
    mut n = (na > nb) ? na : nb
    mut result = []
    mut i = 0
-   while(i < n){
+   while i < n {
       def va, vb = (i < na) ? a[i] : 0, (i < nb) ? b[i] : 0
       result = result.append(va + vb)
       i += 1
@@ -46,7 +46,7 @@ fn poly_mod_add(list a, list b, any p) list {
    mut n = (na > nb) ? na : nb
    mut result = []
    mut i = 0
-   while(i < n){
+   while i < n {
       def va, vb = (i < na) ? a[i] : 0, (i < nb) ? b[i] : 0
       result = result.append(mod(va + vb, p))
       i += 1
@@ -57,15 +57,15 @@ fn poly_mod_add(list a, list b, any p) list {
 fn poly_mul(list a, list b) list {
    "Multiply two polynomials using convolution, returning new polynomial result."
    def na, nb = a.len, b.len
-   if(na == 0 || nb == 0){ return [] }
+   if na == 0 || nb == 0 { return [] }
    def nr = na + nb - 1
    mut result = []
    mut i = 0
-   while(i < nr){ result = result.append(0) i += 1 }
+   while i < nr { result = result.append(0) i += 1 }
    i = 0
-   while(i < na){
+   while i < na {
       mut j = 0
-      while(j < nb){
+      while j < nb {
          mut idx = i + j
          def cur = result[idx]
          def prod = a[i] * b[j]
@@ -80,10 +80,10 @@ fn poly_mul(list a, list b) list {
 fn poly_eval(list poly, any x) any {
    "Evaluate polynomial at point x using Horner's method. Returns the computed value."
    mut n = poly.len
-   if(n == 0){ return 0 }
+   if n == 0 { return 0 }
    mut result = 0
    mut i = n - 1
-   while(i >= 0){
+   while i >= 0 {
       result = result * x + poly[i]
       i = i - 1
    }
@@ -93,10 +93,10 @@ fn poly_eval(list poly, any x) any {
 fn poly_mod_eval(list poly, any x, any modulus) any {
    "Evaluate polynomial at x modulo modulus using Horner's method with modular reduction at each step."
    mut n = poly.len
-   if(n == 0){ return 0 }
+   if n == 0 { return 0 }
    mut result = 0
    mut i = n - 1
-   while(i >= 0){
+   while i >= 0 {
       result = (result * x + poly[i]) % modulus
       i = i - 1
    }
@@ -107,9 +107,9 @@ fn poly_small_roots(list poly, int bound) list {
    "Find all integer roots of poly with absolute value <= bound by brute force search."
    mut roots = list(0)
    mut x = 0 - bound
-   while(x <= bound){
+   while x <= bound {
       mut val = poly_eval(poly, x)
-      if(val == 0){ roots = roots.append(x) }
+      if val == 0 { roots = roots.append(x) }
       x += 1
    }
    roots
@@ -118,10 +118,10 @@ fn poly_small_roots(list poly, int bound) list {
 fn poly_derivative(list poly) list {
    "Compute formal derivative of polynomial. Returns derivative as coefficient list."
    mut n = poly.len
-   if(n <= 1){ return [0] }
+   if n <= 1 { return [0] }
    mut result = list(n - 1)
    mut i = 1
-   while(i < n){
+   while i < n {
       result = result.append(poly[i] * i)
       i += 1
    }
@@ -131,10 +131,10 @@ fn poly_derivative(list poly) list {
 fn poly_derivative_mod(list poly, any modulus) list {
    "Compute formal derivative of polynomial with coefficients reduced modulo modulus."
    mut n = poly.len
-   if(n <= 1){ return [0] }
+   if n <= 1 { return [0] }
    mut result = list(n - 1)
    mut i = 1
-   while(i < n){
+   while i < n {
       result = result.append((poly[i] * i) % modulus)
       i += 1
    }
@@ -143,28 +143,28 @@ fn poly_derivative_mod(list poly, any modulus) list {
 
 fn poly_modulus(list a, list b) list {
    "Polynomial remainder a mod b over the ambient coefficient ring."
-   if(b.len == 0){ return clone(a) }
+   if b.len == 0 { return clone(a) }
    mut r = clone(a)
    def db = b.len - 1
    def lead = b[db]
-   if(lead == 0){ return r }
-   while(r.len >= b.len && r.len > 0){
+   if lead == 0 { return r }
+   while r.len >= b.len && r.len > 0 {
       def dr = r.len - 1
       def factor = r[dr] / lead
       mut i = 0
-      while(i < b.len){
+      while i < b.len {
          def idx = dr - db + i
          r[idx] = r[idx] - factor * b[i]
          i += 1
       }
-      while(r.len > 0 && r[r.len - 1] == 0){ r.pop() }
+      while r.len > 0 && r[r.len - 1] == 0 { r.pop() }
    }
    r
 }
 
 fn poly_gcd(list a, list b) list {
    "Compute GCD of two polynomials using Euclidean algorithm. Returns the GCD polynomial."
-   while(b.len > 0){
+   while b.len > 0 {
       mut r = poly_modulus(a, b)
       a, b = b, r
    }
@@ -174,16 +174,16 @@ fn poly_gcd(list a, list b) list {
 fn poly_mod_gcd(list a, list b, any p) list {
    "GCD of polynomials a, b modulo p."
    mut u, v = clone(a), clone(b)
-   while(v.len > 1 || (v.len == 1 && v[0] != 0)){
+   while v.len > 1 || (v.len == 1 && v[0] != 0) {
       def r = poly_mod_div(u, v, p).get(1)
       u, v = v, r
    }
    def lc = u[u.len - 1]
-   if(lc == 1 || lc == 0){ return u }
+   if lc == 1 || lc == 0 { return u }
    def lci = inverse_mod(lc, p)
    mut res = []
    mut i = 0
-   while(i < u.len){
+   while i < u.len {
       res = res.append((u[i] * lci) % p)
       i += 1
    }
@@ -193,21 +193,21 @@ fn poly_mod_gcd(list a, list b, any p) list {
 fn poly_mod_div(list a, list b, any p) list {
    "Polynomial division with remainder modulo p. Returns [q, r]."
    def na, nb = a.len, b.len
-   if(nb == 0){ panic("poly_mod_div: division by zero") }
-   if(na < nb){ return [[0], a] }
+   if nb == 0 { panic("poly_mod_div: division by zero") }
+   if na < nb { return [[0], a] }
    def lcb = b[nb - 1]
    def lcbi = inverse_mod(lcb, p)
    mut r, q = clone(a), list(na - nb + 1)
-   mut i = 0 while(i <= (na - nb)){ q = q.append(0) i += 1 }
+   mut i = 0 while i <= (na - nb) { q = q.append(0) i += 1 }
    mut deg_r = na - 1
-   while(deg_r >= nb - 1){
+   while deg_r >= nb - 1 {
       def lead_r = r[deg_r]
-      if(lead_r == 0){ deg_r -= 1 continue }
+      if lead_r == 0 { deg_r -= 1 continue }
       def factor = (lead_r * lcbi) % p
       def shift = deg_r - nb + 1
       q[shift] = factor
       mut j = 0
-      while(j < nb){
+      while j < nb {
          def idx = shift + j
          def val = (r[idx] - factor * b[j]) % p
          r[idx] = (val + p) % p
@@ -215,7 +215,7 @@ fn poly_mod_div(list a, list b, any p) list {
       }
       deg_r -= 1
    }
-   while(r.len > 1 && r[r.len - 1] == 0){ r = r.slice(0, r.len - 1) }
+   while r.len > 1 && r[r.len - 1] == 0 { r = r.slice(0, r.len - 1) }
    [q, r]
 }
 
@@ -225,7 +225,7 @@ fn poly_neg(list a, any p) list {
    "Runs the poly neg operation."
    mut out = []
    mut i = 0
-   while(i < a.len){
+   while i < a.len {
       out = out.append(mod(0 - a.get(i), p))
       i += 1
    }
@@ -236,7 +236,7 @@ fn poly_mod_mul(list a, list b, any p) list {
    "Polynomial multiplication modulo p."
    def res = poly_mul(a, b)
    mut i = 0
-   while(i < res.len){
+   while i < res.len {
       res[i] = (res[i] % p + p) % p
       i += 1
    }
@@ -248,8 +248,8 @@ fn poly_mod_pow(list a, int e, list f, any p) list {
    mut res = [1]
    mut base = a
    mut exp = e
-   while(exp > 0){
-      if(exp & 1 != 0){ res = poly_mod_div(poly_mod_mul(res, base, p), f, p).get(1) }
+   while exp > 0 {
+      if exp & 1 != 0 { res = poly_mod_div(poly_mod_mul(res, base, p), f, p).get(1) }
       base = poly_mod_div(poly_mod_mul(base, base, p), f, p).get(1)
       exp = exp >> 1
    }
@@ -260,39 +260,39 @@ fn poly_factor_cz(list f, any p) list {
    "Cantor-Zassenhaus factorization of monic square-free polynomial f over GF(p).
    p must be an odd prime. Returns a list of irreducible factors."
    def n = f.len - 1
-   if(n <= 1){ return [f] }
+   if n <= 1 { return [f] }
    mut factors = [f]
    mut attempts = 0
-   while(attempts < 100){
+   while attempts < 100 {
       mut all_irreducible = true
-      mut list: new_factors = []
+      mut list new_factors = []
       mut i = 0
-      while(i < factors.len){
-         def list: g = factors.get(i, [])
+      while i < factors.len {
+         def list g = factors.get(i, [])
          def deg_g = g.len - 1
-         if(deg_g <= 1){
+         if deg_g <= 1 {
             new_factors = new_factors.append(g)
             i += 1
             continue
          }
-         mut list: a = []
+         mut list a = []
          mut j = 0
-         while(j < deg_g){
+         while j < deg_g {
             a = a.append(bigint_random(p))
             j += 1
          }
-         def list: g_luck = poly_mod_gcd(g, a, p)
-         if(g_luck.len > 1 && g_luck.len < g.len){
+         def list g_luck = poly_mod_gcd(g, a, p)
+         if g_luck.len > 1 && g_luck.len < g.len {
             new_factors = new_factors.append(g_luck)
             new_factors = new_factors.append(poly_mod_div(g, g_luck, p).get(0))
             all_irreducible = false
             i += 1
             continue
          }
-         def list: h_poly = poly_mod_pow(a, (p - 1) / 2, g, p)
-         def list: h_minus_1 = poly_add(h_poly, [bigint_from_int(-1)])
-         def list: split = poly_mod_gcd(g, h_minus_1, p)
-         if(split.len > 1 && split.len < g.len){
+         def list h_poly = poly_mod_pow(a, (p - 1) / 2, g, p)
+         def list h_minus_1 = poly_add(h_poly, [bigint_from_int(-1)])
+         def list split = poly_mod_gcd(g, h_minus_1, p)
+         if split.len > 1 && split.len < g.len {
             new_factors = new_factors.append(split)
             new_factors = new_factors.append(poly_mod_div(g, split, p).get(0))
             all_irreducible = false
@@ -302,14 +302,14 @@ fn poly_factor_cz(list f, any p) list {
          i += 1
       }
       factors = new_factors
-      if(all_irreducible){
+      if all_irreducible {
          mut deg_sum = 0
          i = 0
-         while(i < factors.len){
+         while i < factors.len {
             deg_sum += (factors.get(i).len - 1)
             i += 1
          }
-         if(deg_sum == n){ return factors }
+         if deg_sum == n { return factors }
       }
       attempts += 1
    }
@@ -321,9 +321,9 @@ fn poly_mod_roots(list f, any p) list {
    def factors = poly_factor_cz(f, p)
    mut roots = []
    mut i = 0
-   while(i < factors.len){
+   while i < factors.len {
       def g = factors.get(i)
-      if(g.len == 2){
+      if g.len == 2 {
          def a, b = g.get(1), g.get(0)
          roots = roots.append(mod_sub(0, mod_mul(b, inverse_mod(a, p), p), p))
       }
@@ -336,22 +336,22 @@ fn poly_subproduct_tree(list points, any p) list {
    "Build a subproduct tree for the given points modulo p.
    Returns a list of lists representing the tree levels."
    def n = points.len
-   if(n == 0){ return [] }
+   if n == 0 { return [] }
    mut level = []
    mut i = 0
-   while(i < n){
+   while i < n {
       level = level.append([mod(0 - points.get(i), p), 1])
       i += 1
    }
    mut tree = [level]
-   while(level.len > 1){
+   while level.len > 1 {
       mut next_level = []
       mut j = 0
-      while(j < level.len - 1){
+      while j < level.len - 1 {
          next_level = next_level.append(poly_mod_mul(level.get(j), level.get(j + 1), p))
          j += 2
       }
-      if(level.len % 2 == 1){ next_level = next_level.append(level.get(level.len - 1)) }
+      if level.len % 2 == 1 { next_level = next_level.append(level.get(level.len - 1)) }
       level = next_level
       tree = tree.append(level)
    }
@@ -365,14 +365,14 @@ fn poly_multipoint_eval(list poly, list points, any p) list {
    def n = points.len
    mut remainders = [poly_mod_div(poly, tree.get(tree.len - 1).get(0), p).get(1)]
    mut l = tree.len - 2
-   while(l >= 0){
+   while l >= 0 {
       mut next_remainders = []
       mut i = 0
-      while(i < remainders.len){
+      while i < remainders.len {
          def r = remainders.get(i)
          def level = tree.get(l)
          next_remainders = next_remainders.append(poly_mod_div(r, level.get(2 * i), p).get(1))
-         if(2 * i + 1 < level.len){ next_remainders = next_remainders.append(poly_mod_div(r, level.get(2 * i + 1), p).get(1)) }
+         if 2 * i + 1 < level.len { next_remainders = next_remainders.append(poly_mod_div(r, level.get(2 * i + 1), p).get(1)) }
          i += 1
       }
       remainders = next_remainders
@@ -380,7 +380,7 @@ fn poly_multipoint_eval(list poly, list points, any p) list {
    }
    mut results = []
    mut j = 0
-   while(j < n){
+   while j < n {
       def r = remainders.get(j)
       results = results.append((r.len > 0) ? r.get(0) : 0)
       j += 1
@@ -393,14 +393,14 @@ fn poly_interpolate(list points, list values, any p) list {
    Finds the unique polynomial of degree < points.len passing through(points, values).
    Runs in O(M(n) log n) using subproduct tree."
    def n = points.len
-   if(n == 0){ return [] }
-   if(n == 1){ return [mod(values.get(0), p)] }
+   if n == 0 { return [] }
+   if n == 1 { return [mod(values.get(0), p)] }
    def tree = poly_subproduct_tree(points, p)
    def root_poly = tree.get(tree.len - 1).get(0)
    def dM = poly_derivative_mod(root_poly, p)
    def denoms = poly_multipoint_eval(dM, points, p)
    mut b, i = [], 0
-   while(i < n){
+   while i < n {
       b = b.append(mod(values.get(i) * inverse_mod(denoms.get(i), p), p))
       i += 1
    }
@@ -410,7 +410,7 @@ fn poly_interpolate(list points, list values, any p) list {
 fn _poly_interpolate_upward(list tree, int level_idx, int start, int length, list b, any p) list {
    "Internal recursive upward pass for fast interpolation.
    Combines L and R segments: Res = L * M_right + R * M_left."
-   if(length == 1){ return [b.get(start)] }
+   if length == 1 { return [b.get(start)] }
    def m, L = length / 2, _poly_interpolate_upward(tree, level_idx + 1, start, m, b, p)
    def R = _poly_interpolate_upward(tree, level_idx + 1, start + m, length - m, b, p)
    def level = tree.get(level_idx)
@@ -422,13 +422,13 @@ fn _poly_interpolate_upward(list tree, int level_idx, int start, int length, lis
 fn poly_hgcd(list a, list b, any p) list {
    "Half-GCD algorithm: compute a transformation matrix M such that M * [a, b]^T = [a', b'] with deg(b') < n/2."
    def n, m = a.len, n / 2
-   if(b.len <= m || n < 32){ return [[1], [0], [0], [1]] }
+   if b.len <= m || n < 32 { return [[1], [0], [0], [1]] }
    def k = m
    def a_hi, b_hi = poly_div_x(a, k), poly_div_x(b, k)
    def R1 = poly_hgcd(a_hi, b_hi, p)
    def ab = _poly_mat_mul_vec(R1, a, b, p)
    mut a_new, b_new = ab.get(0), ab.get(1)
-   if(b_new.len <= m){ return R1 }
+   if b_new.len <= m { return R1 }
    def res = poly_mod_divmod(a_new, b_new, p)
    def q = res.get(0)
    def r = res.get(1)
@@ -442,11 +442,11 @@ fn poly_hgcd(list a, list b, any p) list {
 fn poly_mod_gcd_fast(list a, list b, any p) list {
    "Subquadratic GCD using Half-GCD recursive reduction."
    mut u, v = a, b
-   while(v.len > 32){
+   while v.len > 32 {
       def M = poly_hgcd(u, v, p)
       def uv = _poly_mat_mul_vec(M, u, v, p)
       u, v = uv.get(0), uv.get(1)
-      if(v.len > 0){
+      if v.len > 0 {
          def res = poly_mod_divmod(u, v, p)
          u, v = v, res.get(1)
       }
@@ -479,7 +479,7 @@ fn _poly_mat_mat_mul(list A, list B, list C, any p) list {
 
 fn poly_div_x(list a, int k) list {
    "Returns a / x^k(removes first k coefficients)."
-   if(a.len <= k){ return [] }
+   if a.len <= k { return [] }
    a.slice(k, a.len)
 }
 
@@ -489,20 +489,20 @@ fn poly_sylvester_matrix(list a, list b) list {
    def n = na + nb
    mut matrix = list(n)
    mut i = 0
-   while(i < nb){
+   while i < nb {
       mut row = list(n)
-      mut k = 0 while(k < i){ row = row.append(Z(0)) k += 1 }
-      mut j = 0 while(j <= na){ row = row.append(a.get(na - j)) j += 1 }
-      while(row.len < n){ row = row.append(Z(0)) }
+      mut k = 0 while k < i { row = row.append(Z(0)) k += 1 }
+      mut j = 0 while j <= na { row = row.append(a.get(na - j)) j += 1 }
+      while row.len < n { row = row.append(Z(0)) }
       matrix = matrix.append(row)
       i += 1
    }
    i = 0
-   while(i < na){
+   while i < na {
       mut row = list(n)
-      mut k = 0 while(k < i){ row = row.append(Z(0)) k += 1 }
-      mut j = 0 while(j <= nb){ row = row.append(b.get(nb - j)) j += 1 }
-      while(row.len < n){ row = row.append(Z(0)) }
+      mut k = 0 while k < i { row = row.append(Z(0)) k += 1 }
+      mut j = 0 while j <= nb { row = row.append(b.get(nb - j)) j += 1 }
+      while row.len < n { row = row.append(Z(0)) }
       matrix = matrix.append(row)
       i += 1
    }
@@ -523,18 +523,18 @@ fn poly_resultant_mod(list a, list b, any modn) any {
    we fall back to the integer determinant and reduce modulo `modn`."
    def S = poly_sylvester_matrix(a, b)
    def detm = matrix_det_mod(S, modn)
-   if(detm != nil && detm != Z(0)){ return detm }
+   if detm != nil && detm != Z(0) { return detm }
    mod(matrix_det(S), modn)
 }
 
 fn _poly_trim_mod_local(list p, any modn) list {
    mut out = []
    mut i = 0
-   while(i < len(p)){
+   while i < len(p) {
       out = out.append(mod(p.get(i), modn))
       i += 1
    }
-   while(out.len > 1 && out.get(out.len - 1) == Z(0)){ out = out.slice(0, out.len - 1) }
+   while out.len > 1 && out.get(out.len - 1) == Z(0) { out = out.slice(0, out.len - 1) }
    out
 }
 
@@ -543,7 +543,7 @@ fn _poly_mod_add_local(list a, list b, any modn) list {
    def n = (na > nb) ? na : nb
    mut out = []
    mut i = 0
-   while(i < n){
+   while i < n {
       def av, bv = (i < na) ? a.get(i) : Z(0), (i < nb) ? b.get(i) : Z(0)
       out = out.append(mod(av + bv, modn))
       i += 1
@@ -554,7 +554,7 @@ fn _poly_mod_add_local(list a, list b, any modn) list {
 fn _poly_mod_scale_local(list a, any s, any modn) list {
    mut out = []
    mut i = 0
-   while(i < len(a)){
+   while i < len(a) {
       out = out.append(mod(a.get(i) * s, modn))
       i += 1
    }
@@ -562,17 +562,17 @@ fn _poly_mod_scale_local(list a, any s, any modn) list {
 }
 
 fn _poly_mod_mul_local(list a, list b, any modn) list {
-   if(len(a) == 0 || len(b) == 0){ return [Z(0)] }
+   if len(a) == 0 || len(b) == 0 { return [Z(0)] }
    mut out = []
    mut i = 0
-   while(i < len(a) + len(b) - 1){
+   while i < len(a) + len(b) - 1 {
       out = out.append(Z(0))
       i += 1
    }
    i = 0
-   while(i < len(a)){
+   while i < len(a) {
       mut j = 0
-      while(j < len(b)){
+      while j < len(b) {
          def idx = i + j
          out[idx] = mod(out.get(idx) + a.get(i) * b.get(j), modn)
          j += 1
@@ -583,12 +583,12 @@ fn _poly_mod_mul_local(list a, list b, any modn) list {
 }
 
 fn _poly_small_nonnegative_int(any x, str name) int {
-   if(is_int(x)){
-      if(x < 0){ panic("PolynomialExponentError: " + name + " must be non-negative") }
+   if is_int(x) {
+      if x < 0 { panic("PolynomialExponentError: " + name + " must be non-negative") }
       return x
    }
-   if(is_bigint(x)){
-      if(x < Z(0)){ panic("PolynomialExponentError: " + name + " must be non-negative") }
+   if is_bigint(x) {
+      if x < Z(0) { panic("PolynomialExponentError: " + name + " must be non-negative") }
       return bigint_to_int(x)
    }
    panic("PolynomialTypeError: " + name + " must be an int or bigint")
@@ -598,10 +598,10 @@ fn _poly_mod_pow_local(list a, any e, any modn) list {
    mut res = [Z(1)]
    mut base = _poly_trim_mod_local(a, modn)
    mut exp = _poly_small_nonnegative_int(e, "exponent")
-   while(exp > 0){
-      if(exp % 2 == 1){ res = _poly_mod_mul_local(res, base, modn) }
+   while exp > 0 {
+      if exp % 2 == 1 { res = _poly_mod_mul_local(res, base, modn) }
       exp = exp / 2
-      if(exp > 0){ base = _poly_mod_mul_local(base, base, modn) }
+      if exp > 0 { base = _poly_mod_mul_local(base, base, modn) }
    }
    res
 }
@@ -615,7 +615,7 @@ fn poly_resultant_quadratic_xn_minus_const_mod(list a2, list a1, list a0, any ex
    def aa2 = _poly_trim_mod_local(a2, modn)
    def aa1 = _poly_trim_mod_local(a1, modn)
    def aa0 = _poly_trim_mod_local(a0, modn)
-   if(e == 0){
+   if e == 0 {
       def v = mod(Z(1) - cval, modn)
       return [mod(v * v, modn)]
    }
@@ -623,7 +623,7 @@ fn poly_resultant_quadratic_xn_minus_const_mod(list a2, list a1, list a0, any ex
    mut te = (e == 1) ? t1 : t0
    def a0a2 = _poly_mod_mul_local(aa0, aa2, modn)
    mut k = 2
-   while(k <= e){
+   while k <= e {
       def left = _poly_mod_mul_local(_poly_mod_scale_local(aa1, Z(-1), modn), t1, modn)
       def right = _poly_mod_mul_local(_poly_mod_scale_local(a0a2, Z(-1), modn), t0, modn)
       te, t0 = _poly_mod_add_local(left, right, modn), t1
@@ -637,10 +637,10 @@ fn poly_resultant_quadratic_xn_minus_const_mod(list a2, list a1, list a0, any ex
 }
 
 fn _poly2_coeff(list p, int i, int j) any {
-   if(i < 0 || j < 0){ return 0 }
+   if i < 0 || j < 0 { return 0 }
    def rows = _matrix_rows(p)
    def cols = _matrix_cols(p)
-   if(i >= rows || j >= cols){ return 0 }
+   if i >= rows || j >= cols { return 0 }
    mat_get(p, i, j)
 }
 
@@ -658,9 +658,9 @@ fn poly2_add(list a, list b) list {
    def rr, cr = (ra > rb) ? ra : rb, (ca > cb) ? ca : cb
    mut res = mat_new(rr, cr, 0)
    mut i = 0
-   while(i < rr){
+   while i < rr {
       mut j = 0
-      while(j < cr){
+      while j < cr {
          mat_set(res, i, j, _poly2_coeff(a, i, j) + _poly2_coeff(b, i, j))
          j += 1
       }
@@ -673,21 +673,21 @@ fn poly2_mul(list a, list b) list {
    "Multiply bivariate polynomials via 2D convolution."
    def ra, ca = _matrix_rows(a), _matrix_cols(a)
    def rb, cb = _matrix_rows(b), _matrix_cols(b)
-   if(ra == 0 || ca == 0 || rb == 0 || cb == 0){ return mat_new(1, 1, 0) }
+   if ra == 0 || ca == 0 || rb == 0 || cb == 0 { return mat_new(1, 1, 0) }
    def rr, cr = ra + rb - 1, ca + cb - 1
    mut res = mat_new(rr, cr, 0)
    mut i1 = 0
-   while(i1 < ra){
+   while i1 < ra {
       mut j1 = 0
-      while(j1 < ca){
+      while j1 < ca {
          def va = mat_get(a, i1, j1)
-         if(va != 0){
+         if va != 0 {
             mut i2 = 0
-            while(i2 < rb){
+            while i2 < rb {
                mut j2 = 0
-               while(j2 < cb){
+               while j2 < cb {
                   def vb = mat_get(b, i2, j2)
-                  if(vb != 0){
+                  if vb != 0 {
                      def ir, jr = i1 + i2, j1 + j2
                      mat_set(res, ir, jr, mat_get(res, ir, jr) + va * vb)
                   }
@@ -709,10 +709,10 @@ fn poly2_to_univariate_x(list p, any y_val) list {
    def cols = _matrix_cols(p)
    mut res = []
    mut i = 0
-   while(i < rows){
+   while i < rows {
       mut coeff = 0
       mut j = cols - 1
-      while(j >= 0){
+      while j >= 0 {
          coeff = coeff * y_val + mat_get(p, i, j)
          j -= 1
       }
@@ -728,10 +728,10 @@ fn poly2_to_univariate_y(list p, any x_val) list {
    def cols = _matrix_cols(p)
    mut res = []
    mut j = 0
-   while(j < cols){
+   while j < cols {
       mut coeff = 0
       mut i = rows - 1
-      while(i >= 0){
+      while i >= 0 {
          coeff = coeff * x_val + mat_get(p, i, j)
          i -= 1
       }
@@ -754,7 +754,7 @@ fn poly2_resultant_x(list p1, list p2) list {
    mut points = []
    mut res_vals = []
    mut y_val = 0
-   while(points.len <= d_res){
+   while points.len <= d_res {
       def u1, u2 = poly2_to_univariate_x(p1, y_val), poly2_to_univariate_x(p2, y_val)
       points = points.append(y_val)
       res_vals = res_vals.append(poly_resultant(u1, u2))

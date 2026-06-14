@@ -17,12 +17,12 @@ use std.os.ui.render.viewer.engine.panels as viewer_panels
 fn _state(any state) dict { is_dict(state) ? state : dict(0) }
 
 fn _num(any value, f64 fallback=0.0) f64 {
-   if(value == nil){ return fallback }
+   if value == nil { return fallback }
    float(value)
 }
 
 fn _txt(any value, str fallback="") str {
-   if(value == nil){ return fallback }
+   if value == nil { return fallback }
    def out = to_str(value)
    out == "<nil>" ? fallback : out
 }
@@ -38,7 +38,7 @@ fn _tool(st_in, str id, str title, f64 x, f64 y, f64 w, f64 h) list {
    mut st = st_in
    def show = bool(st.get("show", false))
    def tool = ui_editor.begin_tool(id, show, title, x, y, w, h)
-   if(!show || bool(tool.get(1, false))){
+   if !show || bool(tool.get(1, false)) {
       return [false, _finish(st, false, bool(tool.get(1, false)))]
    }
    [bool(tool.get(0, false)), st]
@@ -48,21 +48,21 @@ fn profiler_hot_label(any last_update_ms, any last_world_ms, any last_draw_ms, a
    "Returns the dominant frame stage label."
    mut label = "draw"
    mut best = _num(last_draw_ms)
-   if(_num(last_world_ms) > best){
+   if _num(last_world_ms) > best {
       best = _num(last_world_ms)
       label = "world"
    }
-   if(_num(last_update_ms) > best){
+   if _num(last_update_ms) > best {
       best = _num(last_update_ms)
       label = "update"
    }
-   if(_num(last_ui_ms) > best){ label = "ui" }
+   if _num(last_ui_ms) > best { label = "ui" }
    label
 }
 
 fn profiler_snapshot(any fps_value, any last_frame_ms, any last_update_ms, any last_world_ms, any last_draw_ms, any last_ui_ms, any fps_samples, any frame_ms_samples, any draw_ms_samples, any ui_ms_samples, bool parity=false) dict {
    "Builds the profiler timing snapshot consumed by the profiler panel."
-   if(parity){
+   if parity {
       return {
          "fps": 0, "last_frame": 0.0, "last_update": 0.0, "last_world": 0.0,
          "last_draw": 0.0, "last_ui": 0.0, "avg_fps": 0.0, "avg_frame": 0.0,
@@ -84,9 +84,9 @@ fn draw_gallery(any state) dict {
    mut st = _state(state)
    st["action"] = ""
    def opened = _tool(st, "widget_gallery", "Widget Gallery", 450.0, 20.0, 390.0, 690.0)
-   if(!bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false))){ return opened.get(1, st) }
+   if !bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false)) { return opened.get(1, st) }
    st = opened.get(1, st)
-   if(bool(opened.get(0, false))){
+   if bool(opened.get(0, false)) {
       def gallery_w = ui_app.app_window_w("widget_gallery", 420.0)
       def compact = gallery_w < 500.0
       st = viewer_panels.gallery_body({
@@ -109,10 +109,10 @@ fn draw_graph(any state) dict {
    mut st = _state(state)
    st["action"] = ""
    def opened = _tool(st, "node_graph", "Node Graph", 860.0, 20.0, 360.0, 360.0)
-   if(!bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false))){ return opened.get(1, st) }
+   if !bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false)) { return opened.get(1, st) }
    st = opened.get(1, st)
-   if(bool(opened.get(0, false))){
-      if(gui.small_button("graph_reset", "Reset Layout")){
+   if bool(opened.get(0, false)) {
+      if gui.small_button("graph_reset", "Reset Layout") {
          st["nodes"] = []
          st["links"] = []
          st["action"] = "reset_graph"
@@ -133,9 +133,9 @@ fn draw_probe(any state) dict {
    mut st = _state(state)
    st["action"] = ""
    def opened = _tool(st, "widget_probe", "Probe", 860.0, 20.0, 360.0, 360.0)
-   if(!bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false))){ return opened.get(1, st) }
+   if !bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false)) { return opened.get(1, st) }
    st = opened.get(1, st)
-   if(bool(opened.get(0, false))){
+   if bool(opened.get(0, false)) {
       def cur = ui_window.cursor_pos(st.get("win", 0))
       def scr = ui_window.scroll_pos(st.get("win", 0))
       def probe_w = ui_app.app_window_w("widget_probe", 480.0)
@@ -158,9 +158,9 @@ fn draw_profiler(any state) dict {
    "Draws the profiler tool and returns updated state."
    mut st = _state(state)
    def opened = _tool(st, "profiler", "Profiler", 450.0, 20.0, 390.0, 420.0)
-   if(!bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false))){ return opened.get(1, st) }
+   if !bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false)) { return opened.get(1, st) }
    st = opened.get(1, st)
-   if(bool(opened.get(0, false))){
+   if bool(opened.get(0, false)) {
       viewer_panels.profiler_body(st.get("renderer", dict(0)), st.get("profile", dict(0)), _txt(st.get("renderer_hotspot", ""), ""),
       ui_app.app_card_w("profiler", 3, 10.0, 110.0), ui_app.app_card_w("profiler", 4, 10.0, 84.0))
    }
@@ -172,10 +172,10 @@ fn draw_workspace(any state) dict {
    "Draws the workspace grid tool and returns updated state."
    mut st = _state(state)
    def opened = _tool(st, "workspace_grid", "Workspace", 450.0, 460.0, 390.0, 260.0)
-   if(ui_profile.gui_trace_enabled()){ ui_profile.print_text("[ui:gui-workspace] rect=" + ui_app.app_rect_text("workspace_grid") + " body=" + to_str(bool(opened.get(0, false)))) }
-   if(!bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false))){ return opened.get(1, st) }
+   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-workspace] rect=" + ui_app.app_rect_text("workspace_grid") + " body=" + to_str(bool(opened.get(0, false)))) }
+   if !bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false)) { return opened.get(1, st) }
    st = opened.get(1, st)
-   if(bool(opened.get(0, false))){
+   if bool(opened.get(0, false)) {
       def out = viewer_panels.workspace_body(clamp(ui_app.app_window_body_h("workspace_grid", 210.0, 170.0), 190.0, 520.0),
       st.get("grid", 32.0), st.get("major", 4), st.get("cam_x", 0.0), st.get("cam_y", 0.0), st.get("cam_z", 0.0), st.get("font", 0))
       st["grid"] = float(out.get(0, st.get("grid", 32.0)))

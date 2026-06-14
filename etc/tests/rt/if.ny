@@ -7,8 +7,8 @@ use std.core.str
 
 ;; If strict syntax (Test)
 fn early_return(x) {
-   if(x < 0){ return 0 }
-   if(x == 10){
+   if x < 0 { return 0 }
+   if x == 10 {
       return 20
    } else {
       return x * 2
@@ -17,12 +17,12 @@ fn early_return(x) {
 
 fn non_tail_if_expr_return(bool flag) dict {
    mut xs = [0]
-   if(flag){ xs[0] = 7 }
+   if flag { xs[0] = 7 }
    {"status": "done", "xs": xs}
 }
 
 fn require_text_after_panic(?str candidate) str {
-   if(candidate == nil){ panic("missing text") }
+   if candidate == nil { panic("missing text") }
    def str: out = candidate
    out
 }
@@ -31,8 +31,8 @@ assert(early_return(-1) == 0, "if return")
 assert(early_return(10) == 20, "if else return")
 assert(early_return(5) == 10, "fallthrough")
 
-if(1){ print("if true ok") }
-if(0){
+if 1 { print("if true ok") }
+if 0 {
    panic("if false taken")
 } else {
    print("if false else ok")
@@ -40,22 +40,22 @@ if(0){
 
 mut val = 0
 
-if(1){
+if 1 {
    val = 1
    val = 2
 }
 
 assert(val == 2, "block exec")
 
-if(0){
+if 0 {
    val = 10
 }
 
 val = 20
 assert(val == 20, "skip block")
-def binding_if_expr = if(true){ 41 } else { 0 }
+def binding_if_expr = if true { 41 } else { 0 }
 assert(binding_if_expr == 41, "binding-level if expression returns branch value")
-def nested_if_expr = if(false){ 0 } else { if(true){ 9 } else { 3 } }
+def nested_if_expr = if false { 0 } else { if true { 9 } else { 3 } }
 assert(nested_if_expr == 9, "nested if expression returns branch value")
 
 ;; Compile-time #if syntax/selection checks

@@ -23,35 +23,35 @@ fn hastad_solve(list ns, list cs, any e) any {
    def ee = _hastad_exp(e)
    def k = ns.len
    def kc = cs.len
-   if(k == 0 || kc != k || ee <= 0){ return nil }
+   if k == 0 || kc != k || ee <= 0 { return nil }
    mut rems = []
    mut mods = []
    mut i = 0
-   while(i < k){
+   while i < k {
       rems = rems.append(cs.get(i))
       mods = mods.append(ns.get(i))
       i += 1
    }
    def me = crt(rems, mods)
-   if(me == nil){ return nil }
+   if me == nil { return nil }
    def m = nth_root(me, ee)
    mut check = Z(1)
    mut j = 0
-   while(j < ee){
+   while j < ee {
       check = check * m
       j += 1
    }
-   if(check == me){ return m }
+   if check == me { return m }
    nil
 }
 
 fn _hastad_next_combo(list combo, int n, int k) bool {
    mut i = k - 1
-   while(i >= 0){
-      if(combo.get(i) < n - k + i){
+   while i >= 0 {
+      if combo.get(i) < n - k + i {
          combo[i] = combo.get(i) + 1
          mut j = i + 1
-         while(j < k){
+         while j < k {
             combo[j] = combo.get(j - 1) + 1
             j += 1
          }
@@ -65,7 +65,7 @@ fn _hastad_next_combo(list combo, int n, int k) bool {
 fn _hastad_subset(list ns, list cs, list combo) list {
    mut sub_ns, sub_cs = [], []
    mut i = 0
-   while(i < combo.len){
+   while i < combo.len {
       def idx = combo.get(i)
       sub_ns, sub_cs = sub_ns.append(ns.get(idx)), sub_cs.append(cs.get(idx))
       i += 1
@@ -77,18 +77,18 @@ fn hastad_find(list ns, list cs, any e) any {
    "Scan e-sized recipient subsets for a valid Hastad broadcast recovery.
    Returns [m, indices] or nil."
    def ee = _hastad_exp(e)
-   if(ns.len != cs.len || ns.len < ee){ return nil }
+   if ns.len != cs.len || ns.len < ee { return nil }
    mut combo = []
    mut i = 0
-   while(i < ee){
+   while i < ee {
       combo = combo.append(i)
       i += 1
    }
-   while(true){
+   while true {
       def sub = _hastad_subset(ns, cs, combo)
       def m = hastad_solve(sub.get(0), sub.get(1), ee)
-      if(m != nil){ return [m, clone(combo)] }
-      if(!_hastad_next_combo(combo, ns.len, ee)){ break }
+      if m != nil { return [m, clone(combo)] }
+      if !_hastad_next_combo(combo, ns.len, ee) { break }
    }
    nil
 }
@@ -106,15 +106,15 @@ fn hastad_attack_report(list ns, any e, list cs) dict {
    mut reason = ""
    mut m = nil
    mut indices = []
-   if(ee <= 1){
+   if ee <= 1 {
       reason = "exponent must be greater than one"
-   } else if(ns.len != cs.len){
+   } else if ns.len != cs.len {
       reason = "modulus and ciphertext lists must have the same length"
-   } else if(ns.len < ee){
+   } else if ns.len < ee {
       reason = "not enough samples for exponent"
    } else {
       def hit = hastad_find(ns, cs, ee)
-      if(hit == nil){
+      if hit == nil {
          reason = "no exact broadcast root found"
       } else {
          m = hit.get(0)

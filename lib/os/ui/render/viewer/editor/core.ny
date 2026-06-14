@@ -52,9 +52,9 @@ fn state(list buffers) dict {
 fn current_buffer(dict st) dict {
    def bs = st.get("buffers", [])
    def idx = int(st.get("active", 0))
-   if(idx >= 0 && idx < bs.len){
+   if idx >= 0 && idx < bs.len {
       def b = bs.get(idx, dict(0))
-      if(is_dict(b)){ return b }
+      if is_dict(b) { return b }
    }
    {"name": "empty", "path": "", "lines": [""], "dirty": false}
 }
@@ -78,11 +78,11 @@ fn clamp_cursor(dict st) dict {
    def lines = current_lines(st)
    mut row = int(st.get("cursor_line", 0))
    mut col = int(st.get("cursor_col", 0))
-   if(row < 0){ row = 0 }
-   if(row >= lines.len){ row = max(0, lines.len - 1) }
+   if row < 0 { row = 0 }
+   if row >= lines.len { row = max(0, lines.len - 1) }
    def line = to_str(lines.get(row, ""))
-   if(col < 0){ col = 0 }
-   if(col > line.len){ col = line.len }
+   if col < 0 { col = 0 }
+   if col > line.len { col = line.len }
    st["cursor_line"] = row
    st["cursor_col"] = col
    st

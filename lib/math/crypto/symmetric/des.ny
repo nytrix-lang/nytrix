@@ -57,7 +57,7 @@ fn _byte_bit(list bytes, int off, int bit_pos) int {
 fn _permute_bytes_int(list bytes, int off, list table) int {
    mut out = 0
    mut i = 0
-   while(i < table.len){
+   while i < table.len {
       out = (out << 1) | _byte_bit(bytes, off, __load_item_fast(table, i))
       i += 1
    }
@@ -67,12 +67,12 @@ fn _permute_bytes_int(list bytes, int off, list table) int {
 fn _initial_halves(list block, int off) list {
    mut l = 0
    mut i = 0
-   while(i < 32){
+   while i < 32 {
       l = (l << 1) | _byte_bit(block, off, __load_item_fast(_DES_IP, i))
       i += 1
    }
    mut r = 0
-   while(i < 64){
+   while i < 64 {
       r = (r << 1) | _byte_bit(block, off, __load_item_fast(_DES_IP, i))
       i += 1
    }
@@ -85,10 +85,10 @@ fn _pair_bit(int hi, int lo, int bit_pos) int {
 
 fn _final_bytes_into(int hi, int lo, list out, int out_off) any {
    mut i = 0
-   while(i < 8){
+   while i < 8 {
       mut b = 0
       mut j = 0
-      while(j < 8){
+      while j < 8 {
          b = (b << 1) | _pair_bit(hi, lo, __load_item_fast(_DES_FP, i * 8 + j))
          j += 1
       }
@@ -100,10 +100,10 @@ fn _final_bytes_into(int hi, int lo, list out, int out_off) any {
 fn _final_bytes_list(int hi, int lo) list {
    mut out = []
    mut i = 0
-   while(i < 8){
+   while i < 8 {
       mut b = 0
       mut j = 0
-      while(j < 8){
+      while j < 8 {
          b = (b << 1) | _pair_bit(hi, lo, __load_item_fast(_DES_FP, i * 8 + j))
          j += 1
       }
@@ -116,7 +116,7 @@ fn _final_bytes_list(int hi, int lo) list {
 fn _permute_int(int value, int width, list table) int {
    mut out = 0
    mut i = 0
-   while(i < table.len){
+   while i < table.len {
       out = (out << 1) | ((value >> (width - __load_item_fast(table, i))) & 1)
       i += 1
    }
@@ -133,7 +133,7 @@ fn _subkeys(list key) list {
    mut d = kb & 0x0fffffff
    mut keys = []
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       def sh = __load_item_fast(_DES_SHIFTS, i)
       c = _rotl28(c, sh)
       d = _rotl28(d, sh)
@@ -147,7 +147,7 @@ fn _f(int r, int k) int {
    def x = _permute_int(r, 32, _DES_E) ^^ k
    mut s = 0
    mut box = 0
-   while(box < 8){
+   while box < 8 {
       def chunk = (x >> (42 - box * 6)) & 63
       def row = ((chunk & 32) >> 4) | (chunk & 1)
       def col = (chunk >> 1) & 15
@@ -162,7 +162,7 @@ fn _crypt_halves(list keys, list block, int off, bool decrypt) list {
    mut l = __load_item_fast(halves, 0)
    mut r = __load_item_fast(halves, 1)
    mut round = 0
-   while(round < 16){
+   while round < 16 {
       def ki = __load_item_fast(keys, decrypt ? 15 - round : round)
       def next_r = (l ^^ _f(r, ki)) & 0xffffffff
       l = r
@@ -177,7 +177,7 @@ fn _crypt_block_into(list keys, list block, int off, bool decrypt, list out, int
    mut l = __load_item_fast(halves, 0)
    mut r = __load_item_fast(halves, 1)
    mut round = 0
-   while(round < 16){
+   while round < 16 {
       def ki = __load_item_fast(keys, decrypt ? 15 - round : round)
       def next_r = (l ^^ _f(r, ki)) & 0xffffffff
       l = r
@@ -217,7 +217,7 @@ fn des_encrypt_ecb(list key, list plaintext) list {
    mut out = []
    store64(out, plaintext.len, 0)
    mut i = 0
-   while(i < plaintext.len){
+   while i < plaintext.len {
       _crypt_block_into(keys, plaintext, i, false, out, i)
       i += 8
    }
@@ -232,7 +232,7 @@ fn des_decrypt_ecb(list key, list ciphertext) list {
    mut out = []
    store64(out, ciphertext.len, 0)
    mut i = 0
-   while(i < ciphertext.len){
+   while i < ciphertext.len {
       _crypt_block_into(keys, ciphertext, i, true, out, i)
       i += 8
    }

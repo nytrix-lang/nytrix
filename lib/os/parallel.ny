@@ -11,7 +11,7 @@ use std.core.common as common
 use std.os.thread
 
 fn _normalize_parallel_mode(any v) str {
-   if(!is_str(v)){ return "auto" }
+   if !is_str(v) { return "auto" }
    def s = lower(strip(v))
    case s {
       "off", "auto", "threads" -> s
@@ -20,7 +20,7 @@ fn _normalize_parallel_mode(any v) str {
 }
 
 fn _normalize_scheduler_policy(any v) str {
-   if(!is_str(v)){ return "auto" }
+   if !is_str(v) { return "auto" }
    def s = lower(strip(v))
    case s {
       "off", "direct", "auto", "work-stealing" -> s
@@ -31,13 +31,13 @@ fn _normalize_scheduler_policy(any v) str {
 
 fn _logical_cpu_guess() int {
    def n1 = common.parse_nonneg_int(env("NYTRIX_LOGICAL_CPUS"))
-   if(n1 > 0){ return n1 }
+   if n1 > 0 { return n1 }
    def n2 = common.parse_nonneg_int(env("NUMBER_OF_PROCESSORS"))
-   if(n2 > 0){ return n2 }
+   if n2 > 0 { return n2 }
    def n3 = common.parse_nonneg_int(env("NPROC"))
-   if(n3 > 0){ return n3 }
+   if n3 > 0 { return n3 }
    def n4 = osinfo.cpu_logical_count()
-   if(n4 > 0){ return n4 }
+   if n4 > 0 { return n4 }
    2
 }
 
@@ -47,12 +47,12 @@ mut _parallel_min_work_eff_loaded = false
 mut _parallel_min_work_eff_cache = 0
 
 fn _effective_parallel_threads() int {
-   if(_parallel_threads_eff_loaded){ return _parallel_threads_eff_cache }
+   if _parallel_threads_eff_loaded { return _parallel_threads_eff_cache }
    mut out = 2
-   if(PARALLEL_THREADS > 0){ out = PARALLEL_THREADS }
+   if PARALLEL_THREADS > 0 { out = PARALLEL_THREADS }
    else {
       def n = _logical_cpu_guess()
-      if(n > 1){ out = n }
+      if n > 1 { out = n }
    }
    _parallel_threads_eff_cache = out
    _parallel_threads_eff_loaded = true
@@ -60,13 +60,13 @@ fn _effective_parallel_threads() int {
 }
 
 fn _effective_parallel_min_work() int {
-   if(_parallel_min_work_eff_loaded){ return _parallel_min_work_eff_cache }
+   if _parallel_min_work_eff_loaded { return _parallel_min_work_eff_cache }
    mut out = 65536
-   if(PARALLEL_MIN_WORK > 0){ out = PARALLEL_MIN_WORK }
+   if PARALLEL_MIN_WORK > 0 { out = PARALLEL_MIN_WORK }
    else {
       def t = _effective_parallel_threads()
-      if(t >= 8){ out = 262144 }
-      elif(t >= 4){ out = 131072 }
+      if t >= 8 { out = 262144 }
+      elif t >= 4 { out = 131072 }
    }
    _parallel_min_work_eff_cache = out
    _parallel_min_work_eff_loaded = true
@@ -152,7 +152,7 @@ fn scheduler_status(int work_items=0) dict {
 fn hardware_threads() int {
    "Returns the effective logical CPU thread budget selected by std.os.parallel."
    def n = parallel_status(0).get("effective_threads", 1)
-   if(n > 0){ return n }
+   if n > 0 { return n }
    1
 }
 
@@ -187,14 +187,14 @@ fn future_wait(any thread_handle) any {
 fn chunk_ranges(int count, int workers) list {
    "Returns `[start, stop]` ranges splitting `count` items over `workers` chunks."
    mut out = list()
-   if(count <= 0){ return out }
-   if(workers < 1){ workers = 1 }
-   if(workers > count){ workers = count }
+   if count <= 0 { return out }
+   if workers < 1 { workers = 1 }
+   if workers > count { workers = count }
    def chunk = (count + workers - 1) / workers
    mut start = 0
-   while(start < count){
+   while start < count {
       mut stop = start + chunk
-      if(stop > count){ stop = count }
+      if stop > count { stop = count }
       out = out.append([start, stop])
       start = stop
    }
@@ -220,12 +220,12 @@ fn work_queue_pop(dict q) dict {
 
 fn work_queue_steal(list queues, int victim=0) dict {
    "Attempts to steal a task from another queue and returns `{ok, value, from}`."
-   if(queues.len == 0){ return {"ok": false, "value": 0, "from": -1} }
+   if queues.len == 0 { return {"ok": false, "value": 0, "from": -1} }
    mut i = 0
-   while(i < queues.len){
+   while i < queues.len {
       def idx = (victim + i) % queues.len
       def q = queues.get(idx)
-      if(queue_len(q) > 0){
+      if queue_len(q) > 0 {
          def r = queue_try_pop(q)
          return {"ok": r.get("ok", false), "value": r.get("value", 0), "from": q.get("id", idx)}
       }
@@ -240,7 +240,7 @@ fn work_stealing_plan(int work_items=0, int max_threads=0) dict {
    def ranges = chunk_ranges(work_items, workers)
    mut queues = list(workers)
    mut i = 0
-   while(i < workers){
+   while i < workers {
       queues = queues.append(work_queue(i))
       i += 1
    }
@@ -252,7 +252,7 @@ fn work_stealing_plan(int work_items=0, int max_threads=0) dict {
 fn _serial_map(list xs, fnptr f) list {
    mut out = list(xs.len)
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       out = out.append(f(xs.get(i, 0)))
       i += 1
    }
@@ -262,7 +262,7 @@ fn _serial_map(list xs, fnptr f) list {
 fn _serial_map_indexed(list xs, fnptr f) list {
    mut out = list(xs.len)
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       out = out.append(f(xs.get(i, 0), i))
       i += 1
    }
@@ -276,7 +276,7 @@ fn _map_chunk(list args) list {
    def stop = args.get(3)
    mut out = list(stop - start)
    mut i = start
-   while(i < stop){
+   while i < stop {
       out = out.append(f(xs.get(i, 0)))
       i += 1
    }
@@ -290,7 +290,7 @@ fn _map_indexed_chunk(list args) list {
    def stop = args.get(3)
    mut out = list(stop - start)
    mut i = start
-   while(i < stop){
+   while i < stop {
       out = out.append(f(xs.get(i, 0), i))
       i += 1
    }
@@ -303,7 +303,7 @@ fn _each_chunk(list args) int {
    def start = args.get(2)
    def stop = args.get(3)
    mut i = start
-   while(i < stop){
+   while i < stop {
       f(xs.get(i, 0))
       i += 1
    }
@@ -313,10 +313,10 @@ fn _each_chunk(list args) int {
 fn _join_chunks(list handles) list {
    mut out = list()
    mut i = 0
-   while(i < handles.len){
+   while i < handles.len {
       def part = thread_join(handles.get(i))
       mut j = 0
-      while(j < part.len){
+      while j < part.len {
          out = out.append(part.get(j, 0))
          j += 1
       }
@@ -328,7 +328,7 @@ fn _join_chunks(list handles) list {
 fn _spawn_chunks(list xs, fnptr f, list ranges, fnptr worker) list {
    mut handles = list(ranges.len)
    mut i = 0
-   while(i < ranges.len){
+   while i < ranges.len {
       def r = ranges.get(i)
       handles = handles.append(thread_spawn(worker, [f, xs, r.get(0), r.get(1)]))
       i += 1
@@ -339,9 +339,9 @@ fn _spawn_chunks(list xs, fnptr f, list ranges, fnptr worker) list {
 fn parallel_map(list xs, fnptr f, int max_threads=0) list {
    "Maps `f(item)` over `xs`, using worker threads when std.os.parallel policy selects them."
    def n = xs.len
-   if(n == 0){ return list() }
+   if n == 0 { return list() }
    def workers = thread_budget(n, max_threads)
-   if(workers <= 1 || !parallel_should_threads(n)){ return _serial_map(xs, f) }
+   if workers <= 1 || !parallel_should_threads(n) { return _serial_map(xs, f) }
    def ranges = chunk_ranges(n, workers)
    _join_chunks(_spawn_chunks(xs, f, ranges, _map_chunk))
 }
@@ -349,9 +349,9 @@ fn parallel_map(list xs, fnptr f, int max_threads=0) list {
 fn parallel_map_indexed(list xs, fnptr f, int max_threads=0) list {
    "Maps `f(item, index)` over `xs`, preserving input order."
    def n = xs.len
-   if(n == 0){ return list() }
+   if n == 0 { return list() }
    def workers = thread_budget(n, max_threads)
-   if(workers <= 1 || !parallel_should_threads(n)){ return _serial_map_indexed(xs, f) }
+   if workers <= 1 || !parallel_should_threads(n) { return _serial_map_indexed(xs, f) }
    def ranges = chunk_ranges(n, workers)
    _join_chunks(_spawn_chunks(xs, f, ranges, _map_indexed_chunk))
 }
@@ -359,11 +359,11 @@ fn parallel_map_indexed(list xs, fnptr f, int max_threads=0) list {
 fn parallel_each(list xs, fnptr f, int max_threads=0) int {
    "Runs `f(item)` for each item and returns the number of processed items."
    def n = xs.len
-   if(n == 0){ return 0 }
+   if n == 0 { return 0 }
    def workers = thread_budget(n, max_threads)
-   if(workers <= 1 || !parallel_should_threads(n)){
+   if workers <= 1 || !parallel_should_threads(n) {
       mut i = 0
-      while(i < n){
+      while i < n {
          f(xs.get(i, 0))
          i += 1
       }
@@ -373,7 +373,7 @@ fn parallel_each(list xs, fnptr f, int max_threads=0) int {
    def handles = _spawn_chunks(xs, f, ranges, _each_chunk)
    mut done = 0
    mut i = 0
-   while(i < handles.len){
+   while i < handles.len {
       done += thread_join(handles.get(i))
       i += 1
    }

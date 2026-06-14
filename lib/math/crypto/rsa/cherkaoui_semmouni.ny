@@ -15,22 +15,22 @@ use std.math.crypto.rsa.op (compute_phi, compute_d)
 
 fn _cs_private_from_factors(number e, number p, number q) any {
    def d = compute_d(e, compute_phi(p, q))
-   if(d == nil || d <= 0){ return nil }
+   if d == nil || d <= 0 { return nil }
    d
 }
 
 fn _cs_bound_ok(number e, number n, any beta, any delta) bool {
-   if(beta == nil || delta == nil){ return true }
+   if beta == nil || delta == nil { return true }
    def n_f = float(n)
-   if(n_f <= 1.0){ return false }
+   if n_f <= 1.0 { return false }
    def alpha = log(float(e)) / log(n_f)
    delta < (2.0 - sqrt(2.0 * alpha * beta))
 }
 
 fn _cs_max_iter(number n, any beta) int {
-   if(beta == nil){ return 1000000 }
+   if beta == nil { return 1000000 }
    mut budget = int(2.0 * pow(float(n), beta))
-   if(budget < 64){ budget = 64 }
+   if budget < 64 { budget = 64 }
    budget
 }
 
@@ -38,16 +38,16 @@ fn cherkaoui_semmouni_attack(number n, number e, any beta=nil, any delta=nil, an
    "Recover [p, q, d] when the RSA primes are unusually close.
    Uses the trusted Fermat factorization path and derives d after factoring.
    Returns nil on failure."
-   if(check_bounds && !_cs_bound_ok(e, n, beta, delta)){ return nil }
-   if(max_iter == nil){ max_iter = _cs_max_iter(n, beta) }
+   if check_bounds && !_cs_bound_ok(e, n, beta, delta) { return nil }
+   if max_iter == nil { max_iter = _cs_max_iter(n, beta) }
    def pq = fermat_attack(n, max_iter)
-   if(pq == nil){
+   if pq == nil {
       def wd = wiener_attack(n, e)
-      if(wd == nil){ return nil }
+      if wd == nil { return nil }
       return [wd[1], wd[2], wd[0]]
    }
    def p, q = pq[0], pq[1]
    def d = _cs_private_from_factors(e, p, q)
-   if(d == nil){ return nil }
+   if d == nil { return nil }
    [p, q, d]
 }

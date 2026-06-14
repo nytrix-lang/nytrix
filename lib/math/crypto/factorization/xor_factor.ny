@@ -35,21 +35,21 @@ fn xor_factor_pairs_report(any n, int max_divisor_scan=0) dict {
    out = out.set("method", "xor-factor-divisor-scan")
    out = out.set("n", nz)
    out = out.set("max_divisor_scan", max_divisor_scan)
-   if(nz < Z(1)){
+   if nz < Z(1) {
       return out.set("pairs", []).set("pair_count", 0).set("success", false).set("elapsed_ms", float(ticks() - t0) / 1000000.0)
    }
    mut end = isqrt(nz)
    mut hit_limit = false
-   if(max_divisor_scan > 0 && Z(max_divisor_scan) < end){
+   if max_divisor_scan > 0 && Z(max_divisor_scan) < end {
       end = Z(max_divisor_scan)
       hit_limit = true
    }
    mut pairs = list(0)
    mut tested = 0
    mut a = Z(1)
-   while(a <= end){
+   while a <= end {
       tested += 1
-      if(nz % a == Z(0)){
+      if nz % a == Z(0) {
          pairs = pairs.append(_xorfac_pair(a, nz / a))
       }
       a = a + Z(1)
@@ -80,7 +80,7 @@ fn xor_factor_with_target_report(any n, any target, int max_shared_masks=0) dict
    out = out.set("n", nz)
    out = out.set("target_xor", xz)
    out = out.set("max_shared_masks", max_shared_masks)
-   if(nz < Z(1) || xz < Z(0)){
+   if nz < Z(1) || xz < Z(0) {
       return out.set("pairs", []).set("pair_count", 0).set("success", false).set("elapsed_ms", float(ticks() - t0) / 1000000.0)
    }
    def max_shared = isqrt(nz)
@@ -90,26 +90,26 @@ fn xor_factor_with_target_report(any n, any target, int max_shared_masks=0) dict
    mut discriminants_tested = 0
    mut shared = Z(0)
    mut hit_limit = false
-   while(shared <= max_shared && !hit_limit){
-      if((shared & xz) == Z(0)){
+   while shared <= max_shared && !hit_limit {
+      if (shared & xz) == Z(0) {
          tried += 1
          def sum_pq = xz + Z(2) * shared
-         if(sum_pq > Z(0)){
+         if sum_pq > Z(0) {
             discriminants_tested += 1
             def roots = solve_quadratic_roots(sum_pq, nz)
-            if(roots != nil){
+            if roots != nil {
                def p, q = roots.get(0), roots.get(1)
-               if(p > Z(0) && q > Z(0) && p * q == nz && (p ^^ q) == xz && !pairs.contains(_xorfac_pair(p, q))){
+               if p > Z(0) && q > Z(0) && p * q == nz && (p ^^ q) == xz && !pairs.contains(_xorfac_pair(p, q)) {
                   pairs = pairs.append(_xorfac_pair(p, q))
                }
             }
          }
-         if(max_shared_masks > 0 && tried >= max_shared_masks && shared < max_shared){ hit_limit = true }
+         if max_shared_masks > 0 && tried >= max_shared_masks && shared < max_shared { hit_limit = true }
       } else {
          skipped_overlap += 1
       }
       shared = shared + Z(1)
-      while(shared <= max_shared && (shared & xz) != Z(0)){
+      while shared <= max_shared && (shared & xz) != Z(0) {
          skipped_overlap += 1
          shared = shared + Z(1)
       }
@@ -134,7 +134,7 @@ fn xor_factor_pairs_with_target(any n, any target) list {
 fn xor_factor_from_target(any n, any target) any {
    "Return one [p, q] pair where p*q == n and p^q == target, or nil."
    def pairs = xor_factor_pairs_with_target(n, target)
-   if(pairs.len == 0){ return nil }
+   if pairs.len == 0 { return nil }
    def first = pairs.get(0)
    [first.get(0), first.get(1)]
 }

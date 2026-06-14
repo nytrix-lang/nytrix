@@ -19,10 +19,10 @@ fn lsb_oracle_recover_from_bits(any n, list bits) any {
    mut high = Z(1)
    mut denom = Z(1)
    mut i = 0
-   while(i < bits.len){
+   while i < bits.len {
       def mid = low + high
       denom = denom * Z(2)
-      if(bits[i] == 0){
+      if bits[i] == 0 {
          low = low * Z(2)
          high = mid
       } else {
@@ -43,11 +43,11 @@ fn lsb_oracle_attack(any n, any e, any c, fnptr oracle_fn) any {
    mut denom = Z(1)
    mut cc = Z(c)
    def twoe = power_mod(Z(2), Z(e), Z(n))
-   while(denom < Z(n) * Z(2)){
+   while denom < Z(n) * Z(2) {
       cc = mod(cc * twoe, Z(n))
       def mid = low + high
       denom = denom * Z(2)
-      if(oracle_fn(cc) == 0){
+      if oracle_fn(cc) == 0 {
          low = low * Z(2)
          high = mid
       } else {
@@ -62,12 +62,12 @@ fn lsb_oracle_variant_attack(any n, any e, any c, int bit_len, fnptr oracle_fn) 
    "Recover plaintext from a parity oracle using inverse powers of two.
    oracle_fn(ciphertext) must return the least-significant bit of the decrypted plaintext.
    Returns the recovered plaintext integer modulo 2^bit_len."
-   if(bit_len <= 0){ return Z(0) }
+   if bit_len <= 0 { return Z(0) }
    mut known = Z(oracle_fn(Z(c)))
    mut i = 1
-   while(i < bit_len){
+   while i < bit_len {
       def scale = power_mod(Z(2), Z(i), Z(n))
-      if(gcd(scale, Z(n)) != Z(1)){ return nil }
+      if gcd(scale, Z(n)) != Z(1) { return nil }
       def inv = inverse_mod(scale, Z(n))
       def chosen = mod(Z(c) * power_mod(inv, Z(e), Z(n)), Z(n))
       def out_bit = Z(oracle_fn(chosen))

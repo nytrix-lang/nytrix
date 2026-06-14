@@ -2,7 +2,7 @@ use std.core
 use std.os
 use std.core.str
 
-if(comptime{ arch() == "x86_64" && os() == "windows" }){
+if comptime { arch() == "x86_64" && os() == "windows" }{
    @naked
    fn naked_add_x86(a, b) {
       asm("
@@ -10,7 +10,7 @@ if(comptime{ arch() == "x86_64" && os() == "windows" }){
          ret
       ", "")
    }
-} elif(comptime{ arch() == "x86_64" }){
+} elif comptime { arch() == "x86_64" }{
    @naked
    fn naked_add_x86(a, b) {
       asm("
@@ -18,7 +18,7 @@ if(comptime{ arch() == "x86_64" && os() == "windows" }){
          ret
       ", "")
    }
-} elif(comptime{ arch() == "aarch64" || arch() == "arm64" }){
+} elif comptime { arch() == "aarch64" || arch() == "arm64" }{
    @naked
    fn naked_add_arm64(a, b) {
       asm("
@@ -33,14 +33,14 @@ if(comptime{ arch() == "x86_64" && os() == "windows" }){
 def run_naked = env("NYTRIX_TEST_NAKED")
 print("Testing @naked...")
 
-if(run_naked == "1"){
-   if(comptime{ arch() == "x86_64" }){
+if run_naked == "1" {
+   if comptime { arch() == "x86_64" }{
       print("Testing @naked for x86_64...")
       def res = naked_add_x86(10, 20)
       print("naked_add(10, 20) =", res)
       assert(res == 30, "naked_add failed")
       print("✓ @naked x86 passed")
-   } elif(comptime{ arch() == "aarch64" || arch() == "arm64" }){
+   } elif comptime { arch() == "aarch64" || arch() == "arm64" }{
       print("Testing @naked for ARM64...")
       def res = naked_add_arm64(10, 20)
       print("naked_add(10, 20) =", res)
@@ -54,13 +54,13 @@ if(run_naked == "1"){
 ;; Test Multi-Input ASM
 print("Testing Multi-Input ASM...")
 
-if(comptime{ arch() == "x86_64" }){
+if comptime { arch() == "x86_64" }{
    def a = 100
    def b = 50
    def c = asm("lea -1($1, $2), $0", "=r,r,r", a, b)
    print("asm_add(100, 50) =", c)
    assert(c == 150, "multi-input asm failed")
-} elif(comptime{ arch() == "aarch64" || arch() == "arm64" }){
+} elif comptime { arch() == "aarch64" || arch() == "arm64" }{
    def a = 100
    def b = 50
    def c = asm("add $0, $1, $2\nsub $0, $0, #1", "=r,r,r", a, b)
@@ -215,7 +215,7 @@ assert(s1[0] == 2 && s2[0] == 1, "@argmemonly function failed")
 fn hot_loop(n) {
    mut sum = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       sum = sum + i
       i += 1
    }

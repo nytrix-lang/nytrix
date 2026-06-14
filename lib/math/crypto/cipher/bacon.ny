@@ -17,7 +17,7 @@ fn bacon_decode_ab(str bits) str {
    U and V share 'BAABB'."
    mut out = Builder((bits.len / 5) + 8)
    mut i = 0
-   while(i + 4 < bits.len){
+   while i + 4 < bits.len {
       def chunk = str_slice(bits, i, i + 5, 1)
       def ch = case chunk {
          "AAAAA" -> "A"  "AAAAB" -> "B"  "AAABA" -> "C"  "AAABB" -> "D"
@@ -28,7 +28,7 @@ fn bacon_decode_ab(str bits) str {
          "BABAA" -> "W"  "BABAB" -> "X"  "BABBA" -> "Y"  "BABBB" -> "Z"
          _ -> ""
       }
-      if(ch.len > 0){ out = builder_append(out, ch) }
+      if ch.len > 0 { out = builder_append(out, ch) }
       i += 5
    }
    def text = builder_to_str(out)

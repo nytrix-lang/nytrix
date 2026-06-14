@@ -142,7 +142,7 @@ while(mut i = 0 i < n ++i){ body }
 for value in expr { body }
 for value, index in expr { body }
 for(index in expr){ body }
-for(mut i = 0; i < n; ++i){ body }
+for(mut i = 0 i < n ++i){ body }
 for value in lo..hi { body }
 match expr { arms }
 case expr { arms }

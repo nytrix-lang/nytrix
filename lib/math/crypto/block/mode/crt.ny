@@ -19,12 +19,12 @@ fn crt_block_combine(list remainders, list moduli, int block_size) list {
    block_size: target block size for output
    Returns the combined plaintext as a byte list."
    mut n = remainders.len
-   if(n == 0){ return list(0) }
-   if(n == 1){ return clone(remainders[0]) }
+   if n == 0 { return list(0) }
+   if n == 1 { return clone(remainders[0]) }
    def num_coeffs = moduli.len
    mut int_rems = list(0)
    mut i = 0
-   while(i < n){
+   while i < n {
       def rem_bytes = remainders[i]
       mut val = _bytes_to_int_le(rem_bytes)
       int_rems = int_rems.append(val)
@@ -32,7 +32,7 @@ fn crt_block_combine(list remainders, list moduli, int block_size) list {
    }
    mut int_mods = list(0)
    i = 0
-   while(i < num_coeffs){
+   while i < num_coeffs {
       int_mods = int_mods.append(moduli[i])
       i += 1
    }
@@ -48,7 +48,7 @@ fn _bytes_to_int_le(list bytes) any {
    mut result = 0
    mut shift = 0
    mut i = 0
-   while(i < n){
+   while i < n {
       result = result + (bytes[i] << shift)
       shift = shift + 8
       i += 1
@@ -64,7 +64,7 @@ fn _int_to_bytes_le(any value, int block_size) list {
    mut result = list(0)
    mut v = value
    mut i = 0
-   while(i < block_size){
+   while i < block_size {
       result = result.append(v & 255)
       v = v >> 8
       i += 1

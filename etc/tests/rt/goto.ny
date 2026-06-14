@@ -9,7 +9,7 @@ fn jump_forward() int {
 
 fn jump_out() int {
    mut x = 0
-   if(true){
+   if true {
       x = 3
       goto done
       x = 9

@@ -47,10 +47,10 @@ mut TYPE_GROUPS = nil
 mut TYPE_GROUP_ORDER = nil
 
 fn _name_in_list(any xs, str name) bool {
-   if(!(is_list(xs) || is_tuple(xs))){ return false }
+   if !(is_list(xs) || is_tuple(xs)) { return false }
    mut i = 0
-   while(i < xs.len){
-      if(xs.get(i) == name){ return true }
+   while i < xs.len {
+      if xs.get(i) == name { return true }
       i += 1
    }
    false
@@ -58,10 +58,10 @@ fn _name_in_list(any xs, str name) bool {
 
 fn _clone_spec_list(any members) list {
    mut out = list(0)
-   if(members == nil){ return out }
-   if(is_list(members) || is_tuple(members)){
+   if members == nil { return out }
+   if is_list(members) || is_tuple(members) {
       mut i = 0
-      while(i < members.len){
+      while i < members.len {
          out = out.append(members.get(i, nil))
          i += 1
       }
@@ -83,12 +83,12 @@ fn _type_alias_set(str name, str target) str {
 fn _type_group_set(str name, any members) list {
    def xs = _clone_spec_list(members)
    TYPE_GROUPS = TYPE_GROUPS.set(name, xs)
-   if(!_name_in_list(TYPE_GROUP_ORDER, name)){ TYPE_GROUP_ORDER = TYPE_GROUP_ORDER.append(name) }
+   if !_name_in_list(TYPE_GROUP_ORDER, name) { TYPE_GROUP_ORDER = TYPE_GROUP_ORDER.append(name) }
    xs
 }
 
 fn _types_init() int {
-   if(TYPE_ALIASES != nil){ return 0 }
+   if TYPE_ALIASES != nil { return 0 }
    TYPE_NAMES = dict(32)
    TYPE_ALIASES = dict(64)
    TYPE_GROUPS = dict(32)
@@ -150,9 +150,9 @@ fn normalize_type_name(str name) str {
    _types_init()
    mut cur = name
    mut i = 0
-   while(i < 16){
+   while i < 16 {
       def next = TYPE_ALIASES.get(cur, nil)
-      if(next == nil || next == cur){ return cur }
+      if next == nil || next == cur { return cur }
       cur = next
       i += 1
    }
@@ -175,9 +175,9 @@ fn _canonical_spec_list(any members) list {
    def xs = _clone_spec_list(members)
    mut out = list(xs.len)
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       def item = xs.get(i, nil)
-      if(is_str(item)){
+      if is_str(item) {
          out = out.append(normalize_type_name(to_str(item)))
       } else {
          out = out.append(item)
@@ -200,15 +200,15 @@ fn extend_type_group(str name, any members) list {
    mut out = TYPE_GROUPS.get(key, list(0))
    def add = _canonical_spec_list(members)
    mut i = 0
-   while(i < add.len){
+   while i < add.len {
       def item = add.get(i, nil)
       mut exists = false
       mut j = 0
-      while(j < out.len){
-         if(out.get(j, nil) == item){ exists = true }
+      while j < out.len {
+         if out.get(j, nil) == item { exists = true }
          j += 1
       }
-      if(!exists){ out = out.append(item) }
+      if !exists { out = out.append(item) }
       i += 1
    }
    _type_group_set(key, out)
@@ -261,7 +261,7 @@ fn is_bool(any x) bool {
 
 fn is_nil(any x) bool {
    "Check if x is nil. Integer 0 is NOT nil."
-   if(__is_int(x)){ return false }
+   if __is_int(x) { return false }
    x == nil
 }
 
@@ -294,21 +294,21 @@ fn is_set(any x) bool {
 fn is_bigint(any x) bool {
    "Check if x is a BigInt."
    def f = globals().get("std.math.nt.is_bigint")
-   if(f){ return f(x) == true }
+   if f { return f(x) == true }
    __tagof(x) == TAG_BIGINT
 }
 
 fn is_poly(any x) bool {
    "Check if x is a Polynomial(tag 302)."
    def f = globals().get("std.math.crypto.poly.is_poly")
-   if(f){ return f(x) == true }
+   if f { return f(x) == true }
    __tagof(x) == TAG_POLY
 }
 
 fn is_matrix(any x) bool {
    "Check if x is a Matrix(tag 303)."
    def f = globals().get("std.math.matrix.is_matrix")
-   if(f){ return f(x) == true }
+   if f { return f(x) == true }
    __tagof(x) == TAG_MATRIX
 }
 
@@ -325,14 +325,14 @@ fn type_tag(any x) int {
 fn type_name(any x) str {
    "Get the canonical runtime type name for x."
    _types_init()
-   if(is_nil(x)){ return "nil" }
-   if(is_int(x)){ return "int" }
-   if(is_bool(x)){ return "bool" }
-   if(is_float(x)){ return "float" }
+   if is_nil(x) { return "nil" }
+   if is_int(x) { return "int" }
+   if is_bool(x) { return "bool" }
+   if is_float(x) { return "float" }
    def tag = __tagof(x)
    def name = TYPE_NAMES.get(tag, nil)
-   if(name != nil){ return name }
-   if(!x){ return "nil" }
+   if name != nil { return name }
+   if !x { return "nil" }
    f"unknown({tag})"
 }
 
@@ -361,28 +361,28 @@ fn _is_leaf_type(any x, str name) bool {
 }
 
 fn _is_type_spec_at(any x, any spec, int depth) bool {
-   if(depth <= 0){ return false }
-   if(is_str(spec)){ return _type_name_accepts_at(x, to_str(spec), depth) }
-   if(is_int(spec)){ return type_tag(x) == spec }
-   if(is_list(spec) || is_tuple(spec)){ return _any_type_spec_at(x, spec, depth - 1) }
+   if depth <= 0 { return false }
+   if is_str(spec) { return _type_name_accepts_at(x, to_str(spec), depth) }
+   if is_int(spec) { return type_tag(x) == spec }
+   if is_list(spec) || is_tuple(spec) { return _any_type_spec_at(x, spec, depth - 1) }
    false
 }
 
 fn _any_type_spec_at(any x, any specs, int depth) bool {
    mut i = 0
-   while(i < specs.len){
-      if(_is_type_spec_at(x, specs.get(i, nil), depth)){ return true }
+   while i < specs.len {
+      if _is_type_spec_at(x, specs.get(i, nil), depth) { return true }
       i += 1
    }
    false
 }
 
 fn _type_name_accepts_at(any x, str name, int depth) bool {
-   if(depth <= 0){ return false }
+   if depth <= 0 { return false }
    _types_init()
    def n = normalize_type_name(name)
    def group = TYPE_GROUPS.get(n, nil)
-   if(group != nil){ return _any_type_spec_at(x, group, depth - 1) }
+   if group != nil { return _any_type_spec_at(x, group, depth - 1) }
    _is_leaf_type(x, n)
 }
 
@@ -400,10 +400,10 @@ fn is_one_of(any x, any spec) bool {
 }
 
 fn _type_spec_to_str(any spec) str {
-   if(is_list(spec) || is_tuple(spec)){
+   if is_list(spec) || is_tuple(spec) {
       mut parts = list(0)
       mut i = 0
-      while(i < spec.len){
+      while i < spec.len {
          parts = parts.append(_type_spec_to_str(spec.get(i, nil)))
          i += 1
       }
@@ -414,13 +414,13 @@ fn _type_spec_to_str(any spec) str {
 
 fn require_type(any x, any spec, str msg="type check failed") any {
    "Return x if it matches spec, otherwise panic with msg."
-   if(!is_type(x, spec)){ panic(msg) }
+   if !is_type(x, spec) { panic(msg) }
    x
 }
 
 fn assert_type(any x, any spec, str msg="type check failed") any {
    "Assert that x matches a type spec, panic with expected and actual type names."
-   if(!is_type(x, spec)){ panic(f"{msg}: expected {_type_spec_to_str(spec)}, got {type_name(x)}") }
+   if !is_type(x, spec) { panic(f"{msg}: expected {_type_spec_to_str(spec)}, got {type_name(x)}") }
    x
 }
 
@@ -440,18 +440,18 @@ mut NEXT_CUSTOM_TAG = 200
 fn register_type(str name) int {
    "Register a new custom type name, returns assigned tag."
    def existing = CUSTOM_TYPES.get(name, nil)
-   if(existing != nil){ return existing }
+   if existing != nil { return existing }
    def tag = NEXT_CUSTOM_TAG
    CUSTOM_TYPES = CUSTOM_TYPES.set(name, tag)
    NEXT_CUSTOM_TAG += 1
-   if(NEXT_CUSTOM_TAG > 299){ panic("Too many custom types(max 100)") }
+   if NEXT_CUSTOM_TAG > 299 { panic("Too many custom types(max 100)") }
    tag
 }
 
 fn is_registered_type(any x, str name) bool {
    "Check if x is of registered custom type name."
    def tag = CUSTOM_TYPES.get(name, nil)
-   if(tag == nil){ return false }
+   if tag == nil { return false }
    __tagof(x) == tag
 }
 

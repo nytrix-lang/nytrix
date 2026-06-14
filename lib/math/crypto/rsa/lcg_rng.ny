@@ -20,21 +20,21 @@ fn rsa_lcg_factor_power2(any n, any mult, any inc, int modulus_bits=512, int max
    mut a_pow = A
    mut geom = Z(1)
    mut gap = 1
-   while(gap <= max_gap){
+   while gap <= max_gap {
       def b = mod(B * geom, M)
-      if(two_adic_valuation(b, modulus_bits) > 0){
+      if two_adic_valuation(b, modulus_bits) > 0 {
          def half_b = b / Z(2)
          def inv_a = inverse_mod(a_pow, M)
-         if(inv_a != 0 && inv_a != nil){
+         if inv_a != 0 && inv_a != nil {
             def s = mod(inv_a * inv_a * half_b * half_b + inv_a * mod(nn, M), M)
             def roots = mod_sqrt_power2(s, modulus_bits, 8192)
             def center = mod(inv_a * half_b, M)
             mut i = 0
-            while(i < roots.len){
+            while i < roots.len {
                def p = mod(roots.get(i) - center, M)
-               if(p > Z(1) && nn % p == Z(0)){
+               if p > Z(1) && nn % p == Z(0) {
                   def q = nn / p
-                  if(is_prime(p) && is_prime(q)){ return [p, q, gap] }
+                  if is_prime(p) && is_prime(q) { return [p, q, gap] }
                }
                i += 1
             }

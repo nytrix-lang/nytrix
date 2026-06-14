@@ -6,10 +6,10 @@ module std.math.scalar(PI, E, LN2, LN10, float, int, floor, ceil, round, abs, mi
 use std.core
 use std.math.float (float, int, floor, ceil, round, abs)
 
-def f64: PI   = 3.14159265358979323846
-def f64: E    = 2.71828182845904523536
-def f64: LN2  = 0.69314718055994530941
-def f64: LN10 = 2.30258509299404568402
+def f64 PI   = 3.14159265358979323846
+def f64 E    = 2.71828182845904523536
+def f64 LN2  = 0.69314718055994530941
+def f64 LN10 = 2.30258509299404568402
 
 fn min(number a, number b) number {
    "Returns the smaller value."
@@ -23,16 +23,16 @@ fn max(number a, number b) number {
 
 fn clamp(number x, number lo, number hi) number {
    "Clamps a value to an inclusive range."
-   if(x < lo){ return lo }
-   if(x > hi){ return hi }
+   if x < lo { return lo }
+   if x > hi { return hi }
    x
 }
 
 fn clamp01(number x) f64 {
    "Clamps a value to the unit interval."
    def v = float(x)
-   if(v < 0.0){ return 0.0 }
-   if(v > 1.0){ return 1.0 }
+   if v < 0.0 { return 0.0 }
+   if v > 1.0 { return 1.0 }
    v
 }
 

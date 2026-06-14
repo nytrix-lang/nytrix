@@ -17,7 +17,7 @@ gfx.apply_backend_env()
 gfx.apply_backend_argv()
 def win = gfx.init_window(960, 540, "Nytrix Monitor Detector", key.WINDOW_SCALE_TO_MONITOR | key.WINDOW_CENTER)
 
-if(!win){ panic("window init failed") }
+if !win { panic("window init failed") }
 def UI_FONTS = ["etc/assets/fonts/monocraft.ttf", "etc/assets/fonts/jetbrains.ttf"]
 def font_title = gfx.font_load_first(UI_FONTS, 28)
 def font_body = gfx.font_load_first(UI_FONTS, 18)
@@ -65,7 +65,7 @@ fn refresh_hud_text(list ws, f64 sw, f64 sh, list dpi, list mouse, f64 mx, f64 m
    def imy = int(my)
    def dx = float(dpi.get(0, 1.0))
    def dy = float(dpi.get(1, 1.0))
-   if(iww == hud_win_w && iwh == hud_win_h && isw == hud_sw && ish == hud_sh &&
+   if (iww == hud_win_w && iwh == hud_win_h && isw == hud_sw && ish == hud_sh &&
       rmx == hud_raw_mx && rmy == hud_raw_my && imx == hud_mx && imy == hud_my &&
    fps == hud_fps && monitor_count == hud_monitors && dx == hud_dpi_x && dy == hud_dpi_y){ return 0 }
    hud_win_w = iww
@@ -92,19 +92,19 @@ fn refresh_hud_text(list ws, f64 sw, f64 sh, list dpi, list mouse, f64 mx, f64 m
 
 fn refresh_monitor_cache(bool force) int {
    def now = ticks()
-   if(!force && last_monitor_refresh != 0 && now - last_monitor_refresh < MONITOR_REFRESH_NS && monitor_rows.len > 0){ return 0 }
+   if !force && last_monitor_refresh != 0 && now - last_monitor_refresh < MONITOR_REFRESH_NS && monitor_rows.len > 0 { return 0 }
    def monitors = window.get_monitors()
    mut rows = []
    mut i = 0
-   while(i < monitors.len){
+   while i < monitors.len {
       rows = rows.append(view_window.monitor_row(monitors.get(i), i))
       i += 1
    }
    monitor_rows = rows
-   if(rows.len > 0){
+   if rows.len > 0 {
       current_monitor = window.get_current_monitor_index(win, monitors)
-      if(current_monitor < 0){ current_monitor = 0 }
-      elif(current_monitor >= rows.len){ current_monitor = rows.len - 1 }
+      if current_monitor < 0 { current_monitor = 0 }
+      elif current_monitor >= rows.len { current_monitor = rows.len - 1 }
    } else {
       current_monitor = 0
    }
@@ -114,29 +114,29 @@ fn refresh_monitor_cache(bool force) int {
 
 fn refresh_window_state(bool force) dict {
    def now = ticks()
-   if(!force && last_state_refresh != 0 && now - last_state_refresh < STATE_REFRESH_NS && is_dict(state_cache)){ return state_cache }
+   if !force && last_state_refresh != 0 && now - last_state_refresh < STATE_REFRESH_NS && is_dict(state_cache) { return state_cache }
    state_cache = window.window_state(win)
    last_state_refresh = now
    state_cache
 }
 
-fn toggle_flag_key(any code, any flag) bool { if(!window.key_pressed(win, code)){ return false } window.toggle_window_flag(win, flag) true }
+fn toggle_flag_key(any code, any flag) bool { if !window.key_pressed(win, code) { return false } window.toggle_window_flag(win, flag) true }
 
 fn handle_window_flag_keys() bool {
    mut changed = false
-   if(toggle_flag_key(key.KEY_F, key.WINDOW_FULLSCREEN)){ changed = true }
-   if(window.key_pressed(win, key.KEY_B) || window.key_pressed(win, key.KEY_SPACE)){ window.toggle_window_borderless(win) changed = true }
-   if(toggle_flag_key(key.KEY_R, key.WINDOW_NO_RESIZE)){ changed = true }
-   if(toggle_flag_key(key.KEY_C, key.WINDOW_NO_BORDER)){ changed = true }
-   if(toggle_flag_key(key.KEY_M, key.WINDOW_MAXIMIZE)){ changed = true }
-   if(toggle_flag_key(key.KEY_T, key.WINDOW_FLOATING)){ changed = true }
-   if(window.key_pressed(win, key.KEY_V)){ window.toggle_window_vsync() changed = true }
-   if(window.key_pressed(win, key.KEY_H)){
+   if toggle_flag_key(key.KEY_F, key.WINDOW_FULLSCREEN) { changed = true }
+   if window.key_pressed(win, key.KEY_B) || window.key_pressed(win, key.KEY_SPACE) { window.toggle_window_borderless(win) changed = true }
+   if toggle_flag_key(key.KEY_R, key.WINDOW_NO_RESIZE) { changed = true }
+   if toggle_flag_key(key.KEY_C, key.WINDOW_NO_BORDER) { changed = true }
+   if toggle_flag_key(key.KEY_M, key.WINDOW_MAXIMIZE) { changed = true }
+   if toggle_flag_key(key.KEY_T, key.WINDOW_FLOATING) { changed = true }
+   if window.key_pressed(win, key.KEY_V) { window.toggle_window_vsync() changed = true }
+   if window.key_pressed(win, key.KEY_H) {
       window.toggle_window_flag(win, key.WINDOW_HIDE)
       hidden_timer = window.has_window_flag(win, key.WINDOW_HIDE) ? 3.0 : 0.0
       changed = true
    }
-   if(window.key_pressed(win, key.KEY_N)){
+   if window.key_pressed(win, key.KEY_N) {
       window.set_window_flag(win, key.WINDOW_MINIMIZE, true)
       minimized_timer = 3.0
       changed = true
@@ -146,22 +146,22 @@ fn handle_window_flag_keys() bool {
 
 fn update_window_flag_timers(f64 dt) bool {
    mut changed = false
-   if(hidden_timer > 0.0){
+   if hidden_timer > 0.0 {
       hidden_timer -= dt
-      if(hidden_timer <= 0.0){ window.set_window_flag(win, key.WINDOW_HIDE, false) changed = true }
+      if hidden_timer <= 0.0 { window.set_window_flag(win, key.WINDOW_HIDE, false) changed = true }
    }
-   if(minimized_timer > 0.0){
+   if minimized_timer > 0.0 {
       minimized_timer -= dt
-      if(minimized_timer <= 0.0){ window.set_window_flag(win, key.WINDOW_MINIMIZE, false) changed = true }
+      if minimized_timer <= 0.0 { window.set_window_flag(win, key.WINDOW_MINIMIZE, false) changed = true }
    }
    changed
 }
 
-while(!gfx.window_should_close(win)){
+while !gfx.window_should_close(win) {
    def dt = gfx.get_delta_time()
    def state_changed = handle_window_flag_keys()
    def timer_changed = update_window_flag_timers(dt)
-   if(!gfx.begin_frame_clear(bg)){ continue }
+   if !gfx.begin_frame_clear(bg) { continue }
    fps_state = ui_runtime.fps_tick(fps_state, dt)
    def fps = ui_runtime.fps_current(fps_state, dt)
    def fb = window.get_framebuffer_size(win)
@@ -179,7 +179,7 @@ while(!gfx.window_should_close(win)){
    refresh_monitor_cache(false)
    def monitor_count = monitor_rows.len
    mut current = current_monitor
-   if(window.key_pressed(win, key.KEY_ENTER) && monitor_count > 1){
+   if window.key_pressed(win, key.KEY_ENTER) && monitor_count > 1 {
       current = (current + 1) % max(1, monitor_count)
       window.move_to_monitor(win, monitor_rows.get(current, {}).get("mon", 0))
       refresh_monitor_cache(true)
@@ -198,7 +198,7 @@ while(!gfx.window_should_close(win)){
    widgets.text_right(font_small, hud_right, sw - pad, pad + 44.0, widgets.C_MUTED)
    gfx.draw_rect(area_x, area_y, area_w, area_h, gfx.color_alpha(widgets.C_PANEL_ALT, 0.85))
    gfx.draw_rectangle_lines(area_x, area_y, area_w, area_h, widgets.C_LINE, 1.5)
-   if(monitor_count == 0){
+   if monitor_count == 0 {
       gfx.draw_text(font_body, "No monitors reported by the active backend.", area_x + 28.0, area_y + 34.0, widgets.C_MUTED)
    } else {
       def wp = window.pos(win)
@@ -206,7 +206,7 @@ while(!gfx.window_should_close(win)){
       def map = view_window.desktop_map(bounds, area_x, area_y, area_w, area_h)
       def scale = float(map.get("scale", 1.0))
       mut i = 0
-      while(i < monitor_count){
+      while i < monitor_count {
          def row = monitor_rows.get(i, {})
          def mon = view_window.map_desktop_rect(map, row.get("rect", [0, 0, 1, 1]))
          view_window.draw_monitor_info(font_body, font_small, row,
@@ -225,9 +225,9 @@ while(!gfx.window_should_close(win)){
    def info_h = 80.0
    view_window.draw_dpi_info_text(font_small, area_x + 12.0, area_y + area_h - info_h - 12.0, info_w, info_h, hud_dpi_line1, hud_dpi_line2, state)
    def flags_w = min(360.0, max(250.0, area_w - 24.0))
-   if(area_w >= 680.0){
+   if area_w >= 680.0 {
       view_window.draw_window_flags(font_small, area_x + area_w - flags_w - 22.0, area_y + area_h - 166.0, flags_w, state)
-   } elif(area_h >= 340.0){
+   } elif area_h >= 340.0 {
       view_window.draw_window_flags(font_small, area_x + 22.0, area_y + area_h - 258.0, flags_w, state)
    }
    gfx.draw_circle(mx, my, 8.0, widgets.C_ACCENT_HI)

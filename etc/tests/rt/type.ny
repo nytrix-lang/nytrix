@@ -26,7 +26,7 @@ fn process(str data) str {
 }
 
 fn maybe_int(bool flag) ?int {
-   if(flag){ return 7 }
+   if flag { return 7 }
    return nil
 }
 
@@ -35,31 +35,31 @@ fn read_opt(?int v) ?int {
 }
 
 fn maybe_list(bool flag) ?list {
-   if(flag){ return [4, 5] }
+   if flag { return [4, 5] }
    return nil
 }
 
 fn nullable_list_after_guard() int {
-   def ?list: raw = maybe_list(true)
-   if(raw == nil){ return 0 }
-   def list: xs = raw
+   def ?list raw = maybe_list(true)
+   if raw == nil { return 0 }
+   def list xs = raw
    xs.len
 }
 
 fn nullable_list_after_reversed_guard() int {
-   def ?list: raw = [7, 8, 9]
-   if(nil == raw){ return 0 }
-   def list: xs = raw
+   def ?list raw = [7, 8, 9]
+   if nil == raw { return 0 }
+   def list xs = raw
    xs.len
 }
 
 fn nullable_list_after_else_guard() int {
-   def ?list: raw = [1]
-   if(raw != nil){
-   }else{
+   def ?list raw = [1]
+   if raw != nil {
+   }else {
       return 0
    }
-   def list: xs = raw
+   def list xs = raw
    xs.len
 }
 
@@ -81,12 +81,12 @@ fn echo_int_ptr(*int p) *int {
 }
 
 fn read_int_ptr(*int p) int {
-   if(p == nil){ return 0 }
+   if p == nil { return 0 }
    return load64(p)
 }
 
 fn write_int_ptr(*int p, int v) *int {
-   if(p != nil){ store64(p, v) }
+   if p != nil { store64(p, v) }
    return p
 }
 
@@ -133,7 +133,7 @@ fn typed_bytes_size(bytes b) int {
 fn typed_list_index_sum(list xs) int {
    mut i = 0
    mut acc = 0
-   while(i < xs.len){
+   while i < xs.len {
       acc += xs[i]
       i += 1
    }
@@ -143,7 +143,7 @@ fn typed_list_index_sum(list xs) int {
 fn typed_nested_index_sum(list rows) int {
    mut i = 0
    mut acc = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows[i]
       acc += row[0] + row[-1]
       i += 1
@@ -154,7 +154,7 @@ fn typed_nested_index_sum(list rows) int {
 fn strict_bare_list_sum(list xs) int {
    mut i = 0
    mut acc = 0
-   while(i < xs.len){
+   while i < xs.len {
       acc += xs[i]
       i += 1
    }
@@ -164,7 +164,7 @@ fn strict_bare_list_sum(list xs) int {
 fn strict_bare_nested_list_sum(list rows) int {
    mut i = 0
    mut acc = 0
-   while(i < rows.len){
+   while i < rows.len {
       def row = rows[i]
       acc += row[0] + row[-1]
       i += 1
@@ -177,9 +177,9 @@ fn strict_bare_dict_sum(dict d) int {
 }
 
 fn strict_bare_float_list_sum(list xs) f64 {
-   mut f64: acc = 0.0
+   mut f64 acc = 0.0
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       acc += xs[i]
       i += 1
    }
@@ -195,12 +195,12 @@ fn any_type_name(any x) str {
 }
 
 fn nullable_list_index_sum() int {
-   def ?list: raw = [2, 4, 6]
-   if(raw == nil){ return 0 }
-   def list: xs = raw
+   def ?list raw = [2, 4, 6]
+   if raw == nil { return 0 }
+   def list xs = raw
    mut i = 0
    mut acc = 0
-   while(i < xs.len){
+   while i < xs.len {
       acc += xs[i]
       i += 1
    }
@@ -208,16 +208,16 @@ fn nullable_list_index_sum() int {
 }
 
 fn test_primitives() {
-   def i8: a = 10
-   def i16: b = 20
-   def i32: c = 30
-   def i64: d = 40
-   def u8: e = 50
-   def u16: f = 60
-   def u32: g = 70
-   def u64: h = 80
-   def char: i = 'A'
-   def bool: j = true
+   def i8 a = 10
+   def i16 b = 20
+   def i32 c = 30
+   def i64 d = 40
+   def u8 e = 50
+   def u16 f = 60
+   def u32 g = 70
+   def u64 h = 80
+   def char i = 'A'
+   def bool j = true
    assert(a == 10, "i8 failed")
    assert(b == 20, "i16 failed")
    assert(c == 30, "i32 failed")
@@ -231,16 +231,16 @@ fn test_primitives() {
 }
 
 fn test_typed_bindings_smoke() {
-   def i32: a = 10
-   def u16: b = 20
-   def bool: c = true
-   def ?int: some = 7
-   def ?int: absent = nil
+   def i32 a = 10
+   def u16 b = 20
+   def bool c = true
+   def ?int some = 7
+   def ?int absent = nil
    assert(a == 10, "typed i32 binding")
    assert(b == 20, "typed u16 binding")
    assert(c, "typed bool binding")
-   if(some != nil){
-      def int: narrowed = some
+   if some != nil {
+      def int narrowed = some
       assert(narrowed == 7, "optional narrowing in branch")
    } else {
       assert(false, "optional with value should narrow")
@@ -249,16 +249,16 @@ fn test_typed_bindings_smoke() {
 }
 
 fn test_null_contracts() {
-   def *int: p = nil
+   def *int p = nil
    assert(p == nil, "typed pointer nil assignment failed")
-   def ?int: o = nil
+   def ?int o = nil
    assert(o == nil, "typed nullable int nil assignment failed")
-   def ?int: q = 9
+   def ?int q = 9
    assert(q == 9, "typed nullable int value assignment failed")
 }
 
 fn test_pointer_arg_types() {
-   def *int: p = malloc(8)
+   def *int p = malloc(8)
    assert(p != nil, "typed pointer malloc failed")
    assert(echo_int_ptr(p) == p, "typed pointer arg roundtrip failed")
    write_int_ptr(p, 33)
@@ -270,10 +270,10 @@ fn test_pointer_arg_types() {
 }
 
 fn test_handle_arg_types() {
-   def ptr: p = malloc(8)
+   def ptr p = malloc(8)
    assert(p != nil, "handle test malloc failed")
    store64_h(p, 0x12345678)
-   def handle: h = load64_h(p)
+   def handle h = load64_h(p)
    assert(h == 0x12345678, "typed handle load failed")
    assert(echo_handle(h) == h, "typed handle arg/result failed")
    assert(echo_handle(0) == 0, "typed handle accepts zero")
@@ -283,12 +283,12 @@ fn test_handle_arg_types() {
 }
 
 fn test_raw_i64_buffer_types() {
-   def ptr: p = malloc(16)
+   def ptr p = malloc(16)
    assert(p != nil, "raw i64 test malloc failed")
    store64_i(p, 7, 0)
    store64_i(p, -3, 8)
-   def int: a = load64_i(p, 0)
-   def int: b = load64_i(p, 8)
+   def int a = load64_i(p, 0)
+   def int b = load64_i(p, 8)
    assert(a == 7 && b == -3, "raw i64 load/store preserves signed values")
    store64_i(p, a + 1, 0)
    assert(load64_i(p, 0) == 8, "raw i64 load participates in normal int arithmetic")
@@ -296,11 +296,11 @@ fn test_raw_i64_buffer_types() {
 }
 
 fn test_typed_float_abi() {
-   def f64: a = typed_f64_add(1.25, 2.75)
-   def f64: b = typed_f32_f64_mix(1.5f32, 2.25)
-   def f64: c = typed_f64_tail(2.0, 4.0)
-   def f64: d = a > b ? a : b
-   def f64: e = a < b ? a : b
+   def f64 a = typed_f64_add(1.25, 2.75)
+   def f64 b = typed_f32_f64_mix(1.5f32, 2.25)
+   def f64 c = typed_f64_tail(2.0, 4.0)
+   def f64 d = a > b ? a : b
+   def f64 e = a < b ? a : b
    assert(int(a * 100.0) == 400, "typed f64 params/result failed")
    assert(int(b * 100.0) == 375, "typed f32/f64 params failed")
    assert(int(c * 100.0) == 900, "typed f64 implicit tail failed")
@@ -315,9 +315,9 @@ fn test_typed_f64_buffer() {
    f64buf_store(b, 1, 2.25)
    f64buf_store(b, 2, 3.0)
    f64buf_store(b, 3, -0.75)
-   mut f64: sum = 0.0
+   mut f64 sum = 0.0
    mut i = 0
-   while(i < 4){
+   while i < 4 {
       sum += f64buf_load(b, i)
       i += 1
    }
@@ -364,23 +364,23 @@ fn test_runtime_type_shape() {
 }
 
 fn test_typeinfer_boolean_results() {
-   def int: a = 3
-   def int: b = 5
+   def int a = 3
+   def int b = 5
    def lt = a < b
    def ge = a >= b
    def is_eq = a == b
    assert(eq(type(lt), "bool") && lt, "inferred comparison result stays bool")
    assert(eq(type(ge), "bool") && !ge, "inferred >= result stays bool")
    assert(eq(type(is_eq), "bool") && !is_eq, "inferred == result stays bool")
-   def int: mask = (a << 2) | (b & 3)
+   def int mask = (a << 2) | (b & 3)
    assert(mask == 13, "integer shift/bitwise inference stays int")
 }
 
 fn test_any_dynamic_surface() {
-   def any: a = 42
-   def any: b = "ny"
-   def any: c = [1, 2, 3]
-   def any: d = {"x": 7}
+   def any a = 42
+   def any b = "ny"
+   def any c = [1, 2, 3]
+   def any d = {"x": 7}
    assert(echo_any(a) == 42, "any accepts int")
    assert(echo_any(b) == "ny", "any accepts str")
    assert(echo_any(c).len == 3, "any accepts list")
@@ -421,7 +421,7 @@ impl SelfBox {
       a.value == b.value
    }
    fn maybe(self box, bool keep) ?self {
-      if(keep){ return box }
+      if keep { return box }
       nil
    }
    operator + self: self = add
@@ -429,13 +429,13 @@ impl SelfBox {
 }
 
 layout SelfPair {
-   i32: x,
-   i32: y
+   i32 x,
+   i32 y
 }
 
 impl SelfPair {
    fn new(i32 x, i32 y) *self {
-      def ptr: out = malloc(__layout_size("SelfPair"))
+      def ptr out = malloc(__layout_size("SelfPair"))
       store_layout(out, "SelfPair", x, y)
       out
    }
@@ -479,77 +479,77 @@ impl int, f32 {
 }
 
 layout TypePoint {
-   x: i32,
-   y: i32
+   i32 x,
+   i32 y
 }
 
 layout TypePacked pack(1){
-   u8: a,
-   u32: b
+   u8 a,
+   u32 b
 }
 
 layout TypeAligned align(16){
-   u8: a
+   u8 a
 }
 
 layout TypeStorePacked pack(1){
-   u8: a,
-   u16: b,
-   f32: c,
-   bool: d
+   u8 a,
+   u16 b,
+   f32 c,
+   bool d
 }
 
 layout TypeMaterial pack(4){
-   i32: base_tex,
-   i32: normal_tex,
-   i32: flags,
-   f64: metallic,
-   f64: roughness
+   i32 base_tex,
+   i32 normal_tex,
+   i32 flags,
+   f64 metallic,
+   f64 roughness
 }
 
 layout record TypeDerivedMaterial derive(default, eq, hash, debug_str) pack(4){
-   i32: base_tex = -1,
-   i32: normal_tex = -1,
-   i32: flags = 0,
-   f64: metallic = 1.0,
-   f64: roughness = 0.5
+   i32 base_tex = -1,
+   i32 normal_tex = -1,
+   i32 flags = 0,
+   f64 metallic = 1.0,
+   f64 roughness = 0.5
 }
 
 layout shape TypeTextureInfo derive(load, store, zero) pack(4){
-   i32: index = -1,
-   i32: texCoord = 0,
-   f64: scale = 1.0,
-   bool: enabled = true
+   i32 index = -1,
+   i32 texCoord = 0,
+   f64 scale = 1.0,
+   bool enabled = true
 }
 
 layout shape TypeHeaderInfo derive(load, debug_str) pack(8){
-   str: sender = "",
-   int: priority = 0
+   str sender = "",
+   int priority = 0
 }
 
 layout shape StrictHeader derive(load) pack(8){
-   str: sender = "",
-   int: priority = 0
+   str sender = "",
+   int priority = 0
 }
 
 layout shape StrictInferHeader derive(load) pack(8){
-   str: sender = "",
-   int: priority = 0
+   str sender = "",
+   int priority = 0
 }
 
 layout TypePushConstants pack(4){
-   f64: time,
-   f64: exposure,
-   i32: base_color,
-   i32: tex_id,
-   i32: flags
+   f64 time,
+   f64 exposure,
+   i32 base_color,
+   i32 tex_id,
+   i32 flags
 }
 
 layout TypeMethodPair pack(4){
-   i32: x,
-   i32: y,
+   i32 x,
+   i32 y,
    fn new(i32 x, i32 y) *self {
-      def ptr: out = malloc(__layout_size("TypeMethodPair"))
+      def ptr out = malloc(__layout_size("TypeMethodPair"))
       store_layout(out, "TypeMethodPair", x, y)
       out
    }
@@ -560,46 +560,46 @@ layout TypeMethodPair pack(4){
 }
 
 layout TypeWindowState {
-   i32: backend,
-   i32: width,
-   i32: height,
-   i32: events
+   i32 backend,
+   i32 width,
+   i32 height,
+   i32 events
 }
 
 impl TypeMaterial {
    fn has_texture(*self mat) bool {
-      def i32: flags = load32(mat, __layout_offset("TypeMaterial", "flags"))
+      def i32 flags = load32(mat, __layout_offset("TypeMaterial", "flags"))
       (flags & 1) != 0
    }
    fn score(*self mat) f64 {
-      def f64: metallic = load64_f64(mat, __layout_offset("TypeMaterial", "metallic"))
-      def f64: roughness = load64_f64(mat, __layout_offset("TypeMaterial", "roughness"))
+      def f64 metallic = load64_f64(mat, __layout_offset("TypeMaterial", "metallic"))
+      def f64 roughness = load64_f64(mat, __layout_offset("TypeMaterial", "roughness"))
       metallic * (1.0 - roughness)
    }
 }
 
 fn test_impl_self_type_alias() {
-   def SelfBox: a = SelfBox({"value": 5})
-   def SelfBox: b = SelfBox({"value": 8})
-   def SelfBox: c = a + b
+   def SelfBox a = SelfBox({"value": 5})
+   def SelfBox b = SelfBox({"value": 8})
+   def SelfBox c = a + b
    assert(c.value == 13, "impl self return type")
    assert(a.add(b).value == 13, "impl self method parameter type")
    assert(a == SelfBox({"value": 5}), "impl self operator type")
-   def ?SelfBox: kept = a.maybe(true)
-   if(kept != nil){
+   def ?SelfBox kept = a.maybe(true)
+   if kept != nil {
       assert(kept.value == 5, "impl nullable self return")
    } else {
       assert(false, "impl nullable self should be present")
    }
    assert(a.maybe(false) == 0, "impl nullable self nil return")
-   def *SelfPair: p = SelfPair.new(7, 11)
+   def *SelfPair p = SelfPair.new(7, 11)
    assert(p.sum() == 18, "impl pointer self receiver")
    assert(SelfPair.sum(p) == 18, "impl pointer self associated call")
    free(p)
 }
 
 fn type_material_new(i32 base_tex, i32 normal_tex, f64 metallic, f64 roughness) ptr {
-   def ptr: mat = malloc(__layout_size("TypeMaterial"))
+   def ptr mat = malloc(__layout_size("TypeMaterial"))
    store_layout(mat, "TypeMaterial", base_tex, normal_tex, (base_tex >= 0) ? 1 : 0, metallic, roughness)
    mat
 }
@@ -615,63 +615,63 @@ fn type_packed_write(ptr dst) ptr {
 }
 
 fn type_read_texture_info(any value) ptr {
-   layout guard TypeTextureInfo: info = value else {
+   layout guard TypeTextureInfo info = value else {
       return TypeTextureInfo()
    }
    info
 }
 
 fn type_read_header_info(any value) *TypeHeaderInfo {
-   layout guard TypeHeaderInfo: info = value else {
+   layout guard TypeHeaderInfo info = value else {
       return TypeHeaderInfo()
    }
-   if(TypeHeaderInfo_load_priority(info) < 0){
+   if TypeHeaderInfo_load_priority(info) < 0 {
       return TypeHeaderInfo()
    }
    info
 }
 
 fn type_header_result(any value) {
-   layout guard TypeHeaderInfo: info = value else {
+   layout guard TypeHeaderInfo info = value else {
       return err("bad header")
    }
-   if(TypeHeaderInfo_load_priority(info) < 0){
+   if TypeHeaderInfo_load_priority(info) < 0 {
       return err("negative priority")
    }
    ok(info)
 }
 
 fn type_header_result_annotated(any value) Result<*TypeHeaderInfo, str> {
-   layout guard TypeHeaderInfo: info = value else {
+   layout guard TypeHeaderInfo info = value else {
       return err("bad header")
    }
    ok(info)
 }
 
 fn strict_result(bool ok_flag) Result<int, str> {
-   if(ok_flag){ return ok(7) }
+   if ok_flag { return ok(7) }
    err("bad")
 }
 
 fn strict_inferred_header_result(any raw) {
-   layout guard StrictInferHeader: h = raw else {
+   layout guard StrictInferHeader h = raw else {
       return err("bad header")
    }
    ok(h)
 }
 
 fn type_win_new(i32 backend, i32 width, i32 height) ptr {
-   def ptr: state = malloc(__layout_size("TypeWindowState"))
+   def ptr state = malloc(__layout_size("TypeWindowState"))
    store_layout(state, "TypeWindowState", backend, width, height, 0)
    state
 }
 
 fn type_backend_poll(ptr state) i32 {
-   def i32: backend = load32(state, __layout_offset("TypeWindowState", "backend"))
-   def i32: events = load32(state, __layout_offset("TypeWindowState", "events")) + 1
+   def i32 backend = load32(state, __layout_offset("TypeWindowState", "backend"))
+   def i32 events = load32(state, __layout_offset("TypeWindowState", "events")) + 1
    store32(state, events, __layout_offset("TypeWindowState", "events"))
-   if(backend == 1){ return 10 }
-   if(backend == 2){ return 11 }
+   if backend == 1 { return 10 }
+   if backend == 2 { return 11 }
    0
 }
 
@@ -684,7 +684,7 @@ fn test_operator_examples() {
    def a = vec.Vector3(1.0, 2.0, 3.0)
    def b = vec.Vector3(4.0, 5.0, 6.0)
    def sum = a + b
-   def f64: dots = a * b
+   def f64 dots = a * b
    def half = b / 2.0
    def ratio = b / a
    assert(sum.x == 5.0 && sum.y == 7.0 && sum.z == 9.0, "scoped vec3 add")
@@ -696,21 +696,21 @@ fn test_operator_examples() {
    assert(vec.runtime_type(sum) == "vec3" && vec.is_vec3(sum), "scoped add preserves vec3")
    assert((2.0 * a).z == 6.0, "imported scalar-left vec3 operator")
    assert(vec.op("/", b, a).x == 4.0, "dynamic vec3 component div")
-   def Meter: meters_a = Meter(dict(2).set("value", 7))
-   def Meter: meters_b = Meter(dict(2).set("value", 7))
+   def Meter meters_a = Meter(dict(2).set("value", 7))
+   def Meter meters_b = Meter(dict(2).set("value", 7))
    assert(meters_a.val == 7, "custom language type property call")
    assert(meters_a == meters_b, "custom language type operator")
-   def ShapeBox: box_a = ShapeBox({"value": [1, 2]})
-   def ShapeBox: box_b = ShapeBox({"value": [3, 4]})
-   def ShapeBox: box_nested = ShapeBox({"value": [[1], [2]]})
-   def ShapeBox: box_sum = box_a + box_b
+   def ShapeBox box_a = ShapeBox({"value": [1, 2]})
+   def ShapeBox box_b = ShapeBox({"value": [3, 4]})
+   def ShapeBox box_nested = ShapeBox({"value": [[1], [2]]})
+   def ShapeBox box_sum = box_a + box_b
    assert(eq(box_a.shape, "list<int>"), "impl method can expose type_shape")
    assert(box_a.same_shape(box_b), "impl method can compare runtime shapes")
    assert(!box_a.same_shape(box_nested), "impl method rejects different runtime shape")
    assert(box_sum.value == [1, 2, 3, 4], "shape-checked custom add operator")
    assert(eq(box_sum.value.type_shape, "list<int>"), "operator result keeps checked shape")
    assert(21.twice() == 42, "multi-owner int impl method")
-   def f32: scalar = 1.5f32
+   def f32 scalar = 1.5f32
    assert(scalar.twice() == 3.0, "multi-owner f32 impl method")
 }
 
@@ -725,24 +725,24 @@ fn test_layout_examples() {
    assert(__layout_align("TypeAligned") == 16, "TypeAligned align")
    assert(__layout_offset("TypeDerivedMaterial", "roughness") == 20, "record roughness offset")
    assert(__layout_offset("TypeTextureInfo", "scale") == 8, "shape scale offset")
-   def ptr: pair = malloc(__layout_size("TypeMethodPair"))
+   def ptr pair = malloc(__layout_size("TypeMethodPair"))
    store_layout(pair, "TypeMethodPair", 7, 11)
    assert(load32(pair, __layout_offset("TypeMethodPair", "x")) +
    load32(pair, __layout_offset("TypeMethodPair", "y")) == 18, "layout-local pointer fields")
    free(pair)
-   def *TypeMaterial: mat = type_material_new(4, 7, 0.8, 0.25)
+   def *TypeMaterial mat = type_material_new(4, 7, 0.8, 0.25)
    assert(load32(mat, __layout_offset("TypeMaterial", "base_tex")) == 4, "material base tex")
    assert(load32(mat, __layout_offset("TypeMaterial", "flags")) != 0, "attached material texture flag")
    assert(load64_f64(mat, __layout_offset("TypeMaterial", "metallic")) *
       (1.0 - load64_f64(mat, __layout_offset("TypeMaterial", "roughness"))) == 0.6000000000000001,
    "material score from layout fields")
    free(mat)
-   def ptr: derived_default = malloc(__layout_size("TypeDerivedMaterial"))
+   def ptr derived_default = malloc(__layout_size("TypeDerivedMaterial"))
    store_layout(derived_default, "TypeDerivedMaterial", -1, -1, 0, 1.0, 0.5)
    assert(load32(derived_default, __layout_offset("TypeDerivedMaterial", "base_tex")) != 0, "record default int storage")
    assert(load64_f64(derived_default, __layout_offset("TypeDerivedMaterial", "metallic")) == 1.0, "record default f64")
-   def ptr: derived_a = malloc(__layout_size("TypeDerivedMaterial"))
-   def ptr: derived_b = malloc(__layout_size("TypeDerivedMaterial"))
+   def ptr derived_a = malloc(__layout_size("TypeDerivedMaterial"))
+   def ptr derived_b = malloc(__layout_size("TypeDerivedMaterial"))
    store_layout(derived_a, "TypeDerivedMaterial", 4, 7, 1, 0.8, 0.25)
    store_layout(derived_b, "TypeDerivedMaterial", 4, 7, 1, 0.8, 0.25)
    assert(load32(derived_a, __layout_offset("TypeDerivedMaterial", "base_tex")) ==
@@ -753,7 +753,7 @@ fn test_layout_examples() {
    free(derived_a)
    free(derived_b)
    def tex_src = dict(4).set("index", 3).set("texCoord", 1).set("scale", 0.5).set("enabled", false)
-   def ptr: tex_info = type_read_texture_info(tex_src)
+   def ptr tex_info = type_read_texture_info(tex_src)
    assert(TypeTextureInfo_load_index(tex_info) == 3, "shape load index")
    assert(TypeTextureInfo_load_texCoord(tex_info) == 1, "shape load tex coord")
    assert(TypeTextureInfo_load_scale(tex_info) == 0.5, "shape load f64")
@@ -761,21 +761,21 @@ fn test_layout_examples() {
    TypeTextureInfo_store(tex_info, 9, 2, 0.25, true)
    assert(TypeTextureInfo_load_index(tex_info) == 9, "shape derive store")
    free(tex_info)
-   def ptr: tex_default = type_read_texture_info(123)
+   def ptr tex_default = type_read_texture_info(123)
    assert(TypeTextureInfo_load_index(tex_default) == -1, "layout guard fallback")
    assert(TypeTextureInfo_load_enabled(tex_default), "layout guard fallback defaults")
    free(tex_default)
-   def ptr: tex_zero = TypeTextureInfo_zero()
+   def ptr tex_zero = TypeTextureInfo_zero()
    assert(TypeTextureInfo_load_enabled(tex_zero) == false, "shape derive zero")
    free(tex_zero)
    def header_src = dict(2).set("sender", "Gemini").set("priority", 10)
-   def *TypeHeaderInfo: header = type_read_header_info(header_src)
+   def *TypeHeaderInfo header = type_read_header_info(header_src)
    assert(TypeHeaderInfo_load_sender(header) == "Gemini", "layout guard string field load")
    assert(TypeHeaderInfo_load_priority(header) == 10, "layout guard int field load")
    assert(TypeHeaderInfo_load_sender(header) == "Gemini", "shape load str")
    assert(TypeHeaderInfo_debug_str(header) != "", "shape debug str str")
    free(header)
-   match type_header_result(header_src){
+   match type_header_result(header_src) {
       ok(info) -> {
          assert(TypeHeaderInfo_load_sender(info) == "Gemini", "Result match preserves layout payload str")
          assert(TypeHeaderInfo_load_priority(info) == 10, "Result match preserves layout payload int")
@@ -783,14 +783,14 @@ fn test_layout_examples() {
       }
       err(e) -> assert(false, e)
    }
-   match type_header_result_annotated(header_src){
+   match type_header_result_annotated(header_src) {
       ok(info) -> {
          assert(TypeHeaderInfo_load_sender(info) == "Gemini", "annotated Result return preserves payload str")
          free(info)
       }
       err(e) -> assert(false, e)
    }
-   def *TypeHeaderInfo: header_wrapped_ptr = TypeHeaderInfo_from(header_src)
+   def *TypeHeaderInfo header_wrapped_ptr = TypeHeaderInfo_from(header_src)
    def header_wrapped = ok(header_wrapped_ptr)
    match header_wrapped {
       ok(info) -> {
@@ -803,24 +803,24 @@ fn test_layout_examples() {
    assert(TypeHeaderInfo_load_sender(header_unwrapped) == "Gemini", "unwrap(Result<*layout, E>) returns typed layout ptr")
    assert(TypeHeaderInfo_load_priority(header_unwrapped) == 10, "unwrap keeps typed layout ptr metadata")
    free(header_wrapped_ptr)
-   def ptr: packed = malloc(__layout_size("TypeStorePacked"))
+   def ptr packed = malloc(__layout_size("TypeStorePacked"))
    type_packed_write(packed)
    assert(load8(packed, __layout_offset("TypeStorePacked", "a")) == 7, "load u8")
    assert(load16(packed, __layout_offset("TypeStorePacked", "b")) == 0x1234, "load u16")
    assert(load32_f32(packed, __layout_offset("TypeStorePacked", "c")) == 1.5, "load f32")
    assert(load8(packed, __layout_offset("TypeStorePacked", "d")) != 0, "load bool")
    free(packed)
-   def ptr: pc = malloc(__layout_size("TypePushConstants"))
+   def ptr pc = malloc(__layout_size("TypePushConstants"))
    type_pc_write(pc, 1.25, 0.75, 0xff00ff, 7, 1)
    assert(load32(pc, __layout_offset("TypePushConstants", "tex_id")) == 7, "push tex id")
    assert(load64_f64(pc, __layout_offset("TypePushConstants", "exposure")) == 0.75, "push exposure")
    free(pc)
-   def ptr: win = type_win_new(1, 1280, 720)
+   def ptr win = type_win_new(1, 1280, 720)
    assert(load32(win, __layout_offset("TypeWindowState", "width")) == 1280, "backend width")
    assert(type_backend_poll(win) == 10, "backend dispatch")
    assert(load32(win, __layout_offset("TypeWindowState", "events")) == 1, "shared state updated")
    free(win)
-   def ptr: backend = contract.make(1, contract.REQUIRED_RENDER_WINDOW | contract.CAP_CURSOR | contract.CAP_CLIPBOARD,
+   def ptr backend = contract.make(1, contract.REQUIRED_RENDER_WINDOW | contract.CAP_CURSOR | contract.CAP_CLIPBOARD,
    contract.REQUIRED_RENDER_WINDOW)
    assert(contract.valid(backend), "complete backend contract")
    assert(contract.has(backend, contract.CAP_SURFACE), "contract surface capability")
@@ -828,17 +828,17 @@ fn test_layout_examples() {
 }
 
 fn test_strict_types() {
-   def any: explicit_any = {"sender": "ny", "priority": 1}
+   def any explicit_any = {"sender": "ny", "priority": 1}
    assert(eq(type(explicit_any), "dict"), "explicit any keeps dict runtime type")
    def dict<str, any>: explicit_dict = {"sender": "ny", "priority": 1}
    assert(eq(type(explicit_dict), "dict"), "explicit dict<str, any> keeps dict runtime type")
-   layout guard StrictHeader: h = {"sender": "ny", "priority": 2} else {
+   layout guard StrictHeader h = {"sender": "ny", "priority": 2} else {
       assert(false, "layout guard should accept mixed boundary data")
    }
    assert(StrictHeader_load_sender(h) == "ny", "layout guard narrows sender")
    assert(StrictHeader_load_priority(h) == 2, "layout guard narrows priority")
    free(h)
-   def *StrictHeader: h2 = StrictHeader_from({"sender": "nx", "priority": 3})
+   def *StrictHeader h2 = StrictHeader_from({"sender": "nx", "priority": 3})
    assert(StrictHeader_load_sender(h2) == "nx", "Layout_from narrows sender")
    assert(StrictHeader_load_priority(h2) == 3, "Layout_from narrows priority")
    free(h2)
@@ -851,77 +851,77 @@ fn test_strict_types() {
 }
 
 fn test_flow_null_narrowing() {
-   def ?int: a = 5
-   if(a != nil){
-      def int: v = a
+   def ?int a = 5
+   if a != nil {
+      def int v = a
       assert(v == 5, "if x != nil narrowing failed")
       assert(need_int(a) == 5, "call-site narrowing failed")
    }
-   def ?int: b = 6
-   if(b == nil){
+   def ?int b = 6
+   if b == nil {
       assert(false, "unexpected nil in else-narrowing test")
-   }else{
-      def int: w = b
+   }else {
+      def int w = b
       assert(w == 6, "else branch narrowing failed")
       assert(need_int(b) == 6, "else branch call-site narrowing failed")
    }
-   def ?int: c = 7
-   if(nil != c){
-      def int: x = c
+   def ?int c = 7
+   if nil != c {
+      def int x = c
       assert(x == 7, "reversed nil != x narrowing failed")
    }
-   def ?int: d = 8
-   if(nil == d){
+   def ?int d = 8
+   if nil == d {
       assert(false, "unexpected nil in reversed equality narrowing test")
-   }else{
-      def int: y = d
+   }else {
+      def int y = d
       assert(y == 8, "reversed nil == x else narrowing failed")
    }
-   def ?int: e = 10
-   if(e != nil && need_int(e) == 10){
+   def ?int e = 10
+   if e != nil && need_int(e) == 10 {
       assert(true, "logical && rhs narrowing failed")
-   }else{
+   }else {
       assert(false, "logical && rhs narrowing branch failed")
    }
-   def ?int: f = 11
-   if(f == nil || need_int(f) == 11){
+   def ?int f = 11
+   if f == nil || need_int(f) == 11 {
       assert(true, "logical || rhs narrowing failed")
-   }else{
+   }else {
       assert(false, "logical || rhs narrowing branch failed")
    }
-   def ?int: g = 12
-   if(g == nil || false){
+   def ?int g = 12
+   if g == nil || false {
       assert(false, "logical || else branch narrowing setup failed")
-   }else{
-      def int: z = g
+   }else {
+      def int z = g
       assert(z == 12, "logical || else branch narrowing failed")
    }
-   mut ?int: h = 13
-   if(h != nil){
+   mut ?int h = 13
+   if h != nil {
       h = nil
       assert(h == nil, "mutable nullable assignment after narrowing failed")
    }
-   def ?int: i = 14
-   if((i != nil) && is_nonzero(i)){
+   def ?int i = 14
+   if (i != nil) && is_nonzero(i) {
       assert(true, "nested logical narrowing failed")
-   }else{
+   }else {
       assert(false, "nested logical narrowing branch failed")
    }
-   def ?int: j = 2
-   def ?int: k = 3
-   if(j != nil && k != nil){
-      def int: sum = need_int(j) + need_int(k)
+   def ?int j = 2
+   def ?int k = 3
+   if j != nil && k != nil {
+      def int sum = need_int(j) + need_int(k)
       assert(sum == 5, "multi-var && branch narrowing failed")
-   }else{
+   }else {
       assert(false, "multi-var && branch should be true")
    }
-   def ?int: m = 4
-   def ?int: n = 5
-   if(m == nil || n == nil){
+   def ?int m = 4
+   def ?int n = 5
+   if m == nil || n == nil {
       assert(false, "multi-var || else narrowing setup failed")
-   }else{
-      def int: mv = m
-      def int: nv = n
+   }else {
+      def int mv = m
+      def int nv = n
       assert(mv + nv == 9, "multi-var || else branch narrowing failed")
    }
 }
@@ -960,7 +960,7 @@ fn hm_getx(d) {
 fn hm_sum_typed_f64(list<f64> xs) f64 {
    mut s = 0.0
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       s += xs[i]
       i += 1
    }
@@ -970,7 +970,7 @@ fn hm_sum_typed_f64(list<f64> xs) f64 {
 fn hm_mut_float_accumulator(list<f64> xs) f64 {
    mut s = 0.0
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       s += xs[i] * 2.0
       i += 1
    }
@@ -978,14 +978,14 @@ fn hm_mut_float_accumulator(list<f64> xs) f64 {
 }
 
 fn hm_update_typed_nested_f64(list<list<f64>> rows) list<list<f64>> {
-   def list<f64>: row = rows[0]
+   def list<f64> row = rows[0]
    row[1] = row[1] + 0.5
    rows[0] = row
    rows
 }
 
 fn hm_append_typed_f64() f64 {
-   mut list<f64>: xs = list(2)
+   mut list<f64> xs = list(2)
    xs = xs.append(1.5)
    xs = xs.append(-2.5)
    xs[0] + xs[1]
@@ -998,7 +998,7 @@ fn hm_negative_literal_fold() int {
 fn hm_sum_typed_ints(list<int> xs) int {
    mut s = 0
    mut i = 0
-   while(i < xs.len){
+   while i < xs.len {
       s += xs[i]
       i += 1
    }
@@ -1028,13 +1028,13 @@ fn hm_small(x) {
 }
 
 fn hm_choose_int(bool flag) int {
-   if(flag){ return 21 }
+   if flag { return 21 }
    34
 }
 
 fn hm_loop_tail_value() int {
    mut i = 0
-   while(i < 1){
+   while i < 1 {
       "loop body expression is not a function return"
       i += 1
    }
@@ -1042,7 +1042,7 @@ fn hm_loop_tail_value() int {
 }
 
 fn hm_nontail_if_value() int {
-   if(true){
+   if true {
       "non-tail branch expression is not a function return"
    }
    8
@@ -1091,8 +1091,8 @@ fn test_hm_principal_examples() {
       eq(config_shape, "dict<str, bool|str|int>") ||
       eq(config_shape, "dict<str, bool|int|str>"),
    "HM heterogeneous dict runtime shape")
-   mut ?int: maybe = nil
-   if(true){ maybe = 9 }
+   mut ?int maybe = nil
+   if true { maybe = 9 }
    assert(maybe == 9, "HM nullable merge shape")
    assert(hm_choose_int(true) == 21, "HM declared return inference")
    assert(hm_add1(41) == 42, "HM infers numeric operand from + literal")
@@ -1100,7 +1100,7 @@ fn test_hm_principal_examples() {
    assert(hm_first([9, 8, 7]) == 9, "HM infers list index element int")
    assert(hm_first(["a", "b"]) == "a", "HM infers list index element str")
    assert(hm_first("az") == "a", "HM/runtime string index returns str")
-   mut bytes: bs = bytes(1)
+   mut bytes bs = bytes(1)
    bs = bytes_set(bs, 0, 66)
    assert(hm_first(bs) == 66, "HM/runtime bytes index returns int")
    assert(hm_pick_nested([[1], [2]]) == 2, "HM infers nested index element int")
@@ -1148,8 +1148,8 @@ fn test_strict_type_inference_regressions() {
    assert(strict_bare_nested_list_sum([[1, 2, 3], [4, 5, 6]]) == 14, "strict bare nested list infers indexed rows")
    assert(strict_bare_dict_sum({"x": 11, "y": 31}) == 42, "strict bare dict infers indexed values")
    assert(strict_bare_float_list_sum([1.0, 2.5, 3.5]) == 7.0, "strict bare list infers f64 elements")
-   def any: strict_raw_header = {"sender": "ny", "priority": 7}
-   match strict_inferred_header_result(strict_raw_header){
+   def any strict_raw_header = {"sender": "ny", "priority": 7}
+   match strict_inferred_header_result(strict_raw_header) {
       ok(h) -> {
          assert(StrictInferHeader_load_sender(h) == "ny", "strict Result ok payload preserves layout str")
          assert(StrictInferHeader_load_priority(h) == 7, "strict Result ok payload preserves layout int")
@@ -1157,7 +1157,7 @@ fn test_strict_type_inference_regressions() {
       }
       err(e) -> assert(false, e)
    }
-   def *StrictInferHeader: strict_direct_header = StrictInferHeader_from({"sender": "nx", "priority": 9})
+   def *StrictInferHeader strict_direct_header = StrictInferHeader_from({"sender": "nx", "priority": 9})
    def strict_direct_result = ok(strict_direct_header)
    match strict_direct_result {
       ok(h) -> assert(StrictInferHeader_load_priority(h) == 9, "strict ok(value) keeps known payload with wildcard err arm")
@@ -1171,25 +1171,25 @@ fn test_strict_long_regressions() {
    static_assert([1, 2, 3].long == 0x010203, "strict static list .long")
    static_assert("010203".unhex.long == 0x010203, "strict static unhex .long")
    static_assert("AAAAAAAAAA".long == Z("308157561862552534729025"), "strict static big .long")
-   def int: ct = comptime{ return "ABC".long }
+   def int ct = comptime{ return "ABC".long }
    assert(ct == 0x414243, "strict comptime .long")
    def inferred_ct = comptime{ return [1, 2, 3].long }
    assert(inferred_ct == 0x010203, "strict inferred comptime .long keeps integer type")
    def inferred_big_ct = comptime{ return "AAAAAAAAAA".long }
    assert(inferred_big_ct == Z("308157561862552534729025"), "strict inferred comptime big .long")
    assert(type(inferred_big_ct) == "bigint", "strict inferred comptime big .long keeps bigint runtime")
-   def any: dynamic_bytes = [1, 2, 3]
+   def any dynamic_bytes = [1, 2, 3]
    assert(to_str(dynamic_bytes.long) == "66051", "strict any receiver allows .long")
    assert(strict_long_any_source().long == Z(0x010203), "strict returned any allows .long")
    def long_chain_bytes = [1, 2, 3].long.bytes
    assert(long_chain_bytes == [1, 2, 3], "strict .long.bytes roundtrip")
    assert("010203".unhex.long.bytes.long == Z(0x010203), "strict .unhex.long.bytes.long roundtrip")
-   match strict_long_result_source(){
+   match strict_long_result_source() {
       ok(v) -> assert(v.long == Z(0x040506), "strict Result payload allows .long")
       err(e) -> assert(false, e)
    }
    def strict_long_maybe = strict_long_option_source()
-   if(strict_long_maybe != nil){
+   if strict_long_maybe != nil {
       assert(strict_long_maybe.long == Z(0x070809), "strict Option payload allows .long")
    }
    assert_compile_range(1, 0, 2, "strict range proof builtin")
@@ -1220,7 +1220,7 @@ fn test_dynamic_byte_list_long_property() {
    built = built.append(2)
    built = built.append(3)
    assert(built.long == Z(0x010203), "dynamic appended list .long property")
-   mut list: annotated = []
+   mut list annotated = []
    annotated = annotated.append(4)
    annotated = annotated.append(5)
    assert(annotated.long == Z(0x0405), "annotated list .long property")
@@ -1238,24 +1238,24 @@ fn test_dynamic_byte_list_long_property() {
    assert("010203".unhex.long == Z(0x010203), "unhex list .long property")
    assert(long_runtime_hex_source().unhex.long == Z(0x4142), "runtime hex string result .unhex.long property")
    assert(long_runtime_str_source().to_bytes.long == Z(0x4142), "runtime string result .to_bytes.long property")
-   def any: as_any = [10, 11]
+   def any as_any = [10, 11]
    assert(as_any.long == Z(0x0a0b), "any receiver .long property")
-   def any: any_hex = "4142"
+   def any any_hex = "4142"
    assert(any_hex.unhex.long == Z(0x4142), "any string receiver .unhex.long property")
-   match long_runtime_result_source(){
+   match long_runtime_result_source() {
       ok(v) -> assert(v.long == Z(0x040506), "result payload .long property")
       err(e) -> assert(false, e)
    }
    def maybe_long_bytes = long_runtime_option_source()
-   if(maybe_long_bytes != nil){
+   if maybe_long_bytes != nil {
       assert(maybe_long_bytes.long == Z(0x070809), "option payload .long property")
    }
-   mut bytes: raw_bytes = bytes(3)
+   mut bytes raw_bytes = bytes(3)
    raw_bytes = bytes_set(raw_bytes, 0, 12)
    raw_bytes = bytes_set(raw_bytes, 1, 13)
    raw_bytes = bytes_set(raw_bytes, 2, 14)
    assert(raw_bytes.long == Z(0x0c0d0e), "native bytes .long property")
-   def any: raw_as_any = raw_bytes
+   def any raw_as_any = raw_bytes
    assert(raw_as_any.long == Z(0x0c0d0e), "any native bytes .long property")
    def mixed = {"list": [1, 2], "str": "AB", "int": 123}
    assert(mixed["list"].long == Z(0x0102), "heterogeneous dict list .long property")
@@ -1284,7 +1284,7 @@ fn test_dynamic_byte_list_long_property() {
    assert(1.0.long == Z(1), "float .long property")
    assert(1.9.long == Z(1), "float .long truncates toward zero")
    assert((-1.9).long == Z(-1), "negative float .long truncates toward zero")
-   def any: float_as_any = 12.75
+   def any float_as_any = 12.75
    assert(float_as_any.long == Z(12), "any float .long property")
    assert("ABC".to_bytes.long == Z(0x414243), "chained to_bytes .long property")
    def z_bytes = Z(0x010203).bytes
@@ -1313,15 +1313,15 @@ fn test_dynamic_byte_list_long_property() {
 }
 
 def type_flow_values = [10, 20, 30]
-def int: type_flow_idx = 1
+def int type_flow_idx = 1
 assert_compile_range(type_flow_idx, 1, 1, "type flow range proof")
 assert_compile_index(type_flow_values, type_flow_idx, "type flow index proof")
 
 fn test_type_flow_range_examples() int {
    def xs = [10, 20, 30]
-   mut int: i = 0
-   mut int: acc = 0
-   while(i < xs.len){
+   mut int i = 0
+   mut int acc = 0
+   while i < xs.len {
       assert_compile_range(i, 0, 2, "type flow loop range proof")
       assert_compile_index(xs, i, "type flow loop index proof")
       acc += xs[i]
@@ -1336,9 +1336,9 @@ fn mono_mask_mix(a, b) {
 }
 
 fn test_mono_masked_wrap_examples() int {
-   mut int: acc = 1
-   mut int: i = 0
-   while(i < 64){
+   mut int acc = 1
+   mut int i = 0
+   while i < 64 {
       acc = mono_mask_mix(acc, i)
       i += 1
    }

@@ -18,20 +18,20 @@ use std.math.crypto.poly
 fn boneh_durfee_attack(any e, any n, f64 delta=0.292, int m=3, any t=nil) any {
    "Boneh-Durfee attack on RSA with small private exponent d < n^0.292.
    Uses LLL on a bivariate lattice to find small roots of f(x, y) = x(A + y) + 1 mod e."
-   if(e <= 1 || n <= 1 || m < 1){ return nil }
-   if(!t){ t = int(float(m) * (1.0 - 2.0*delta) / float(delta)) }
+   if e <= 1 || n <= 1 || m < 1 { return nil }
+   if !t { t = int(float(m) * (1.0 - 2.0*delta) / float(delta)) }
    def A, X = bigint_div(bigint_add(n, bigint(1)), bigint(2)), bigint_from_int(int(pow(float(n), delta)))
    def Y = bigint_from_int(int(pow(float(n), 0.5)))
    mut shifts = []
-   mut j = 0 while(j <= m){
-      mut i = 0 while(i <= m - j){
+   mut j = 0 while j <= m {
+      mut i = 0 while i <= m - j {
          shifts = shifts.append(_bd_gen_shift(i, j, m - j, A, e, X, Y))
          i += 1
       }
       j += 1
    }
-   j = 0 while(j <= m){
-      mut i = 0 while(i <= t){
+   j = 0 while j <= m {
+      mut i = 0 while i <= t {
          shifts = shifts.append(_bd_gen_shift(i, j, 0, A, bigint(1), X, Y))
          i += 1
       }
@@ -40,7 +40,7 @@ fn boneh_durfee_attack(any e, any n, f64 delta=0.292, int m=3, any t=nil) any {
    def B = Matrix(shifts)
    def reduced = lll(B)
    def res = _bd_extract_roots(reduced, X, Y, m)
-   if(res == nil || res.len == 0){ return nil }
+   if res == nil || res.len == 0 { return nil }
    def y0 = res.get(0)
    def phi = n + 1 + y0
    def d = inverse_mod(e, phi)
@@ -62,8 +62,8 @@ fn _bd_extract_roots(any basis, any X, any Y, int m) any {
 fn _poly2_to_flat_vector(any p, any X, any Y) list {
    def r, c = _matrix_rows(p), _matrix_cols(p)
    mut vec = []
-   mut i = 0 while(i < r){
-      mut j = 0 while(j < c){
+   mut i = 0 while i < r {
+      mut j = 0 while j < c {
          def v = _matrix_get(p, i, j)
          vec = vec.append(bigint_mul(v, bigint_mul(bigint_pow(X, Z(i)), bigint_pow(Y, Z(j)))))
          j += 1
@@ -76,8 +76,8 @@ fn _poly2_to_flat_vector(any p, any X, any Y) list {
 fn _flat_vector_to_poly2(list vec, any X, any Y, int r, int c) any {
    mut p = poly2_new(r, c)
    mut idx = 0
-   mut i = 0 while(i < r){
-      mut j = 0 while(j < c){
+   mut i = 0 while i < r {
+      mut j = 0 while j < c {
          def val = vec.get(idx)
          def coeff = bigint_div(val, bigint_mul(bigint_pow(X, Z(i)), bigint_pow(Y, Z(j))))
          _matrix_set(p, i, j, coeff)

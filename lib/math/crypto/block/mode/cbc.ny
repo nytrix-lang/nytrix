@@ -46,12 +46,12 @@ fn cbc_bit_flipping(list iv, list ct, int pos, int old_byte, int new_byte) list 
    def new_ct = r[1]
    mut out = []
    mut i = 0
-   while(i < new_iv.len){
+   while i < new_iv.len {
       out = out.append(new_iv[i])
       i += 1
    }
    i = 0
-   while(i < new_ct.len){
+   while i < new_ct.len {
       out = out.append(new_ct[i])
       i += 1
    }
@@ -70,20 +70,20 @@ fn cbc_padding_oracle_step(list prev_block, list ct_block, int block_size, list 
    def target_idx = block_size - pad_val
    mut mod_prev = clone(prev_block)
    mut ri = 0
-   while(ri < known_bytes.len){
+   while ri < known_bytes.len {
       def byte_pos = block_size - 1 - ri
       def pt_byte = known_bytes[ri]
       mod_prev[byte_pos] = prev_block[byte_pos] ^^ pt_byte ^^ pad_val
       ri += 1
    }
    mut guess = 0
-   while(guess < 256){
+   while guess < 256 {
       mod_prev[target_idx] = guess
-      if(oracle_fn(mod_prev, ct_block)){
+      if oracle_fn(mod_prev, ct_block) {
          def pt = guess ^^ pad_val ^^ prev_block[target_idx]
-         if(pad_val == 1){
+         if pad_val == 1 {
             mod_prev[target_idx] = guess ^^ 1
-            if(!oracle_fn(mod_prev, ct_block)){ return pt }
+            if !oracle_fn(mod_prev, ct_block) { return pt }
          } else {
             return pt
          }
@@ -98,15 +98,15 @@ fn cbc_padding_oracle_decrypt_block(list prev_block, list ct_block, int block_si
    Returns the decrypted plaintext block as a byte list."
    mut known = []
    mut i = 0
-   while(i < block_size){
+   while i < block_size {
       def b = cbc_padding_oracle_step(prev_block, ct_block, block_size, known, oracle_fn)
-      if(b < 0){ known = known.append(0)
+      if b < 0 { known = known.append(0)
       } else { known = known.append(b) }
       i += 1
    }
    mut result = []
    mut j = known.len - 1
-   while(j >= 0){
+   while j >= 0 {
       result = result.append(known[j])
       j = j - 1
    }
@@ -121,11 +121,11 @@ fn cbc_padding_oracle_decrypt(list iv, list ct, int block_size, fnptr oracle_fn)
    def n_blocks = ct.len / block_size
    mut plaintext = []
    mut block_idx = 0
-   while(block_idx < n_blocks){
+   while block_idx < n_blocks {
       mut prev = []
-      if(block_idx == 0){ prev = clone(iv) } else {
+      if block_idx == 0 { prev = clone(iv) } else {
          mut pi, pj = (block_idx - 1) * block_size, 0
-         while(pj < block_size){
+         while pj < block_size {
             prev = prev.append(ct[pi + pj])
             pj += 1
          }
@@ -133,24 +133,24 @@ fn cbc_padding_oracle_decrypt(list iv, list ct, int block_size, fnptr oracle_fn)
       mut cur_ct = []
       def start = block_idx * block_size
       mut ci = 0
-      while(ci < block_size){
+      while ci < block_size {
          cur_ct = cur_ct.append(ct[start + ci])
          ci += 1
       }
       def pt_block = cbc_padding_oracle_decrypt_block(prev, cur_ct, block_size, oracle_fn)
       mut pbi = 0
-      while(pbi < pt_block.len){
+      while pbi < pt_block.len {
          plaintext = plaintext.append(pt_block[pbi])
          pbi += 1
       }
       block_idx += 1
    }
    def last_byte = plaintext[plaintext.len - 1]
-   if(last_byte > 0 && last_byte <= block_size){
+   if last_byte > 0 && last_byte <= block_size {
       def new_len = plaintext.len - last_byte
       mut stripped = []
       mut i = 0
-      while(i < new_len){
+      while i < new_len {
          stripped = stripped.append(plaintext[i])
          i += 1
       }
@@ -167,14 +167,14 @@ fn cbc_mac_forge(list msg1, list tag1, list msg2, list tag2) list {
    def tlen = tag1.len
    mut msg2_xor = []
    mut i = 0
-   while(i < msg2.len){
+   while i < msg2.len {
       def tb = (i < tlen) ? tag1[i] : 0
       msg2_xor = msg2_xor.append(msg2[i] ^^ tb)
       i += 1
    }
    mut forged = clone(msg1)
    i = 0
-   while(i < msg2_xor.len){
+   while i < msg2_xor.len {
       forged = forged.append(msg2_xor[i])
       i += 1
    }
@@ -188,13 +188,13 @@ fn cbc_mac_length_extension(list msg1, list tag1, list msg2, int block_size) lis
    mut mod_msg2 = clone(msg2)
    def tlen = tag1.len
    mut i = 0
-   while(i < tlen && i < mod_msg2.len){
+   while i < tlen && i < mod_msg2.len {
       mod_msg2[i] = mod_msg2[i] ^^ tag1[i]
       i += 1
    }
    mut extended = clone(msg1)
    i = 0
-   while(i < mod_msg2.len){
+   while i < mod_msg2.len {
       extended = extended.append(mod_msg2[i])
       i += 1
    }
@@ -209,10 +209,10 @@ fn cbc_and_cbc_mac_forge(list iv, list ct, list tag, list target_msg) list {
    def n_blocks = (target_len + block_size - 1) / block_size
    mut forged_ct = []
    mut bi = 0
-   while(bi < n_blocks){
+   while bi < n_blocks {
       def block_start = bi * block_size
       mut bj = 0
-      while(bj < block_size){
+      while bj < block_size {
          def byte_idx = block_start + bj
          def b = (byte_idx < target_len) ? target_msg[byte_idx] : block_size
          forged_ct = forged_ct.append(b)

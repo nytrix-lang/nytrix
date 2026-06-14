@@ -12,7 +12,7 @@ fn backend() str {
 
 fn _task_from_call(fnptr work, any arg=0) any {
    def argv = malloc(8)
-   if(!argv){ return 0 }
+   if !argv { return 0 }
    store64(argv, arg, 0)
    def h = __async_task_new(work, 1, argv)
    free(argv)
@@ -58,7 +58,7 @@ fn await_all(list handles) list {
    "Awaits each task handle in order and returns their results."
    mut out = list(handles.len)
    mut i = 0
-   while(i < handles.len){
+   while i < handles.len {
       out = out.append(await(handles.get(i)))
       i += 1
    }

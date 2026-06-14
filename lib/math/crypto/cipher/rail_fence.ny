@@ -15,22 +15,22 @@ fn _rail_builder_take(list b) str { def out = builder_to_str(b) builder_free(b) 
 
 fn _rail_zero_list(int n) list {
    mut out, i = list(0), 0
-   while(i < n){ out = out.append(0) i += 1 }
+   while i < n { out = out.append(0) i += 1 }
    out
 }
 
 fn _rail_phase_row(int phase, int rails) int {
    def period = 2 * (rails - 1)
    mut p = phase % period
-   if(p < 0){ p += period }
-   if(p < rails){ return p }
+   if p < 0 { p += period }
+   if p < rails { return p }
    period - p
 }
 
 fn _rail_lengths_offset(int n, int rails, int offset) list {
    mut lens = _rail_zero_list(rails)
    mut i = 0
-   while(i < n){
+   while i < n {
       def row = _rail_phase_row(offset + i, rails)
       lens[row] = lens[row] + 1
       i += 1
@@ -48,12 +48,12 @@ fn rail_fence_encrypt_offset(str text, int rails, int offset=0) str {
    crypto_require(text != nil, "cipher.rail_fence_encrypt_offset", "text is nil")
    crypto_require(rails != nil, "cipher.rail_fence_encrypt_offset", "rails is nil")
    mut n = text.len
-   if(rails < 2 || n == 0){ return text }
-   if(rails > n){ rails = n }
+   if rails < 2 || n == 0 { return text }
+   if rails > n { rails = n }
    mut fence, r = list(0), 0
-   while(r < rails){ fence = fence.append(Builder((n / rails) + 8)) r += 1 }
+   while r < rails { fence = fence.append(Builder((n / rails) + 8)) r += 1 }
    mut i = 0
-   while(i < n){
+   while i < n {
       def row = _rail_phase_row(offset + i, rails)
       mut current = fence[row]
       current = builder_append(current, chr(load8(text, i)))
@@ -62,7 +62,7 @@ fn rail_fence_encrypt_offset(str text, int rails, int offset=0) str {
    }
    mut result = Builder(n + 8)
    r = 0
-   while(r < rails){
+   while r < rails {
       def rail_b = fence[r]
       result = builder_append(result, builder_to_str(rail_b))
       builder_free(rail_b)
@@ -81,22 +81,22 @@ fn rail_fence_decrypt_offset(str ciphertext, int rails, int offset=0) str {
    crypto_require(ciphertext != nil, "cipher.rail_fence_decrypt_offset", "ciphertext is nil")
    crypto_require(rails != nil, "cipher.rail_fence_decrypt_offset", "rails is nil")
    mut n = ciphertext.len
-   if(rails < 2 || n == 0){ return ciphertext }
-   if(rails > n){ rails = n }
+   if rails < 2 || n == 0 { return ciphertext }
+   if rails > n { rails = n }
    def rail_lens = _rail_lengths_offset(n, rails, offset)
    mut fence, pos, r = list(0), 0, 0
-   while(r < rails){
+   while r < rails {
       def rl = rail_lens[r]
       mut segment = Builder(rl + 8)
       mut j = 0
-      while(j < rl){ segment = builder_append(segment, chr(load8(ciphertext, pos))) pos += 1 j += 1 }
+      while j < rl { segment = builder_append(segment, chr(load8(ciphertext, pos))) pos += 1 j += 1 }
       fence = fence.append(_rail_builder_take(segment))
       r += 1
    }
    mut rail_indices = _rail_zero_list(rails)
    mut result = Builder(n + 8)
    mut i = 0
-   while(i < n){
+   while i < n {
       def row = _rail_phase_row(offset + i, rails)
       def ri = rail_indices[row]
       def rail_str = fence[row]
@@ -113,7 +113,7 @@ fn rail_fence_crack(str ciphertext) list {
    mut n = ciphertext.len
    mut results = list(0)
    mut rails = 2
-   while(rails < n){
+   while rails < n {
       def plaintext = rail_fence_decrypt(ciphertext, rails)
       results = results.append([rails, plaintext])
       rails += 1

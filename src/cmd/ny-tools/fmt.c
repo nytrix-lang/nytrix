@@ -708,6 +708,9 @@ static int split_comment_index(const char *line) {
   return -1;
 }
 
+static size_t fmt_find_matching_paren(const char *s, size_t open);
+static int fmt_keyword_at(const char *s, size_t i, const char *kw);
+
 static void collapse_kw_paren(char *s, const char *kw) {
   size_t k = strlen(kw);
   size_t n = strlen(s);
@@ -720,20 +723,79 @@ static void collapse_kw_paren(char *s, const char *kw) {
   }
 }
 
+static void fmt_set_one_space_after(char *s, size_t cap, size_t pos) {
+  size_t n = strlen(s);
+  if (pos >= n || cap <= n + 1)
+    return;
+  size_t p = pos;
+  while (s[p] == ' ' || s[p] == '\t')
+    p++;
+  if (p == pos) {
+    memmove(s + pos + 1, s + pos, n - pos + 1);
+    s[pos] = ' ';
+    return;
+  }
+  if (p > pos + 1)
+    memmove(s + pos + 1, s + p, strlen(s + p) + 1);
+  s[pos] = ' ';
+}
+
+static void drop_kw_condition_parens(char *s, size_t cap, const char *kw) {
+  size_t k = strlen(kw);
+  for (size_t i = 0; s && s[i]; i++) {
+    if (!fmt_keyword_at(s, i, kw))
+      continue;
+    size_t open = i + k;
+    while (s[open] == ' ' || s[open] == '\t')
+      open++;
+    if (s[open] != '(')
+      continue;
+    size_t close = fmt_find_matching_paren(s, open);
+    if (close == (size_t)-1)
+      continue;
+    size_t body = close + 1;
+    while (s[body] == ' ' || s[body] == '\t')
+      body++;
+    if (s[body] != '{') {
+      fmt_set_one_space_after(s, cap, i + k);
+      i = i + k;
+      continue;
+    }
+    memmove(s + close, s + close + 1, strlen(s + close + 1) + 1);
+    memmove(s + open, s + open + 1, strlen(s + open + 1) + 1);
+    fmt_set_one_space_after(s, cap, i + k);
+    i = i + k;
+  }
+}
+
+static void drop_control_condition_parens(char *s, size_t cap) {
+  drop_kw_condition_parens(s, cap, "if");
+  drop_kw_condition_parens(s, cap, "elif");
+  drop_kw_condition_parens(s, cap, "while");
+  drop_kw_condition_parens(s, cap, "for");
+  drop_kw_condition_parens(s, cap, "match");
+}
+
 static int starts_with_use_line(const char *s);
 
+static int fmt_word_ending_at_is_control(const char *s, size_t end) {
+  if (!s || end == (size_t)-1 || (!isalnum((unsigned char)s[end]) && s[end] != '_'))
+    return 0;
+  size_t start = end;
+  while (start > 0 && (isalnum((unsigned char)s[start - 1]) || s[start - 1] == '_'))
+    start--;
+  size_t n = end - start + 1;
+  if ((n == 2 && strncmp(s + start, "if", 2) == 0) ||
+      (n == 4 && strncmp(s + start, "elif", 4) == 0) ||
+      (n == 5 && strncmp(s + start, "while", 5) == 0) ||
+      (n == 3 && strncmp(s + start, "for", 3) == 0) ||
+      (n == 5 && strncmp(s + start, "match", 5) == 0))
+    return 1;
+  return 0;
+}
+
 static void short_forms(char *s) {
-  collapse_kw_paren(s, "if");
-  collapse_kw_paren(s, "elif");
-  collapse_kw_paren(s, "while");
-  collapse_kw_paren(s, "for");
-  collapse_kw_paren(s, "match");
-  for (size_t i = 0; s[i]; i++) {
-    if (s[i] == ')' && s[i + 1] == ' ' && s[i + 2] == '{') {
-      memmove(s + i + 1, s + i + 2, strlen(s + i + 2) + 1);
-      i++;
-    }
-  }
+  drop_control_condition_parens(s, 8192);
   char *p = strstr(s, "comptime {");
   while (p) {
     memmove(p + 8, p + 9, strlen(p + 9) + 1);
@@ -743,10 +805,13 @@ static void short_forms(char *s) {
     return;
   for (size_t i = 0; s[i]; i++) {
     if ((isalnum((unsigned char)s[i]) || s[i] == '_') && s[i + 1] == ' ' && s[i + 2] == '(') {
+      if (fmt_word_ending_at_is_control(s, i))
+        continue;
       memmove(s + i + 1, s + i + 2, strlen(s + i + 2) + 1);
       i++;
     }
   }
+  drop_control_condition_parens(s, 8192);
 }
 
 static int fmt_ident_char(char ch) {
@@ -976,6 +1041,95 @@ static void normalize_fn_scope_space(char *s, size_t cap) {
     if (fmt_ensure_one_space_before(s, cap, brace))
       brace++;
     i = brace;
+  }
+}
+
+
+static int fmt_keyword_at(const char *s, size_t i, const char *kw) {
+  size_t n = strlen(kw);
+  if (strncmp(s + i, kw, n) != 0)
+    return 0;
+  char before = i == 0 ? '\0' : s[i - 1];
+  char after = s[i + n];
+  return !fmt_ident_char(before) && !fmt_ident_char(after);
+}
+
+static size_t fmt_control_body_brace(const char *s, size_t start) {
+  int quote = 0, esc = 0, paren = 0, bracket = 0;
+  for (size_t i = start; s && s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '$' && s[i + 1] == '{') {
+      size_t next = fmt_skip_template_hole(s, i);
+      if (next == i || s[next] == '\0')
+        break;
+      i = next - 1;
+      continue;
+    }
+    if (ch == '(')
+      paren++;
+    else if (ch == ')' && paren > 0)
+      paren--;
+    else if (ch == '[')
+      bracket++;
+    else if (ch == ']' && bracket > 0)
+      bracket--;
+    else if (ch == '{' && paren == 0 && bracket == 0)
+      return i;
+  }
+  return (size_t)-1;
+}
+
+static void normalize_control_scope_space(char *s, size_t cap) {
+  static const char *keys[] = {"if", "elif", "while", "for", "match", "else"};
+  int quote = 0, esc = 0;
+  for (size_t i = 0; s && s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '$' && s[i + 1] == '{') {
+      size_t next = fmt_skip_template_hole(s, i);
+      if (next == i || s[next] == '\0')
+        break;
+      i = next - 1;
+      continue;
+    }
+    for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
+      const char *kw = keys[k];
+      size_t n = strlen(kw);
+      if (!fmt_keyword_at(s, i, kw))
+        continue;
+      size_t brace = fmt_control_body_brace(s, i + n);
+      if (brace == (size_t)-1)
+        continue;
+      if (fmt_ensure_one_space_before(s, cap, brace))
+        brace++;
+      i = brace;
+      break;
+    }
   }
 }
 
@@ -1346,6 +1500,37 @@ static int repeated_mut_decl_col(const char *s) {
     }
   }
   return -1;
+}
+
+
+static int reversed_layout_field_col(const char *s) {
+  char buf[4096];
+  if (!s)
+    return -1;
+  snprintf(buf, sizeof(buf), "%s", s);
+  int comment = split_comment_index(buf);
+  if (comment >= 0)
+    buf[comment] = '\0';
+  trim_trailing_ws(buf);
+  const char *p = lstrip_ws(buf);
+  if (!*p || *p == '}' || starts_with_word(p, "layout") || starts_with_word(p, "derive") ||
+      starts_with_word(p, "pack") || starts_with_word(p, "align"))
+    return -1;
+  if (!isalpha((unsigned char)*p) && *p != '_')
+    return -1;
+  const char *name = p;
+  while (isalnum((unsigned char)*p) || *p == '_')
+    p++;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  if (*p != ':')
+    return -1;
+  p++;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  if (!isalpha((unsigned char)*p) && *p != '_')
+    return -1;
+  return (int)(name - buf) + 1;
 }
 
 typedef struct {
@@ -1838,6 +2023,7 @@ static char *format_ny_text(const char *in) {
     snprintf(code_stripped, sizeof(code_stripped), "%s", lstrip_ws(code));
     short_forms(code_stripped);
     normalize_fn_scope_space(code_stripped, sizeof(code_stripped));
+    normalize_control_scope_space(code_stripped, sizeof(code_stripped));
     normalize_use_import_star(code_stripped);
     normalize_use_import_list_space(code_stripped, sizeof(code_stripped));
 
@@ -2761,6 +2947,7 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
   int ny_impl_depth = 0;
   int ny_template_depth = 0;
   int ny_main_guard_depth = 0;
+  int ny_layout_depth = 0;
   for (size_t i = 0; i < lines.len; i++) {
     const char *line = lines.items[i];
     int ln = (int)i + 1;
@@ -2768,6 +2955,8 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
     int starts_impl = is_ny_file && starts_with_word(stripped, "impl");
     int starts_template = is_ny_file && starts_with_ny_template_line(stripped);
     int starts_main_guard = is_ny_file && starts_with_main_guard(stripped);
+    int starts_layout = is_ny_file && starts_with_word(stripped, "layout");
+    int in_layout = starts_layout || ny_layout_depth > 0;
     int in_impl = starts_impl || ny_impl_depth > 0;
     int in_template = starts_template || ny_template_depth > 0;
     int in_main_guard = starts_main_guard || ny_main_guard_depth > 0;
@@ -2811,6 +3000,12 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
         issue_push(issues, path, ln, repeated_mut_col, "NYFMT1302", "warning",
                    "same-line mutable declarations repeat 'mut'",
                    "write one declaration group, e.g. 'mut n, b, s = a, b, c'");
+      }
+      int layout_col = in_layout ? reversed_layout_field_col(line) : -1;
+      if (layout_col >= 0) {
+        issue_push(issues, path, ln, layout_col, "NYFMT1305", "warning",
+                   "layout field uses name-first syntax",
+                   "layout fields are type-first: write 'f32 center_x,' not 'center_x: f32'");
       }
       char group_note[512];
       int group_col = adjacent_simple_decl_group_col(&lines, i, group_note, sizeof(group_note));
@@ -2916,6 +3111,12 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
       if (ny_main_guard_depth < 0)
         ny_main_guard_depth = 0;
     }
+    if (is_ny_file && (starts_layout || ny_layout_depth > 0)) {
+      int starts_close = 0;
+      ny_layout_depth += count_brace_delta(line, &starts_close);
+      if (ny_layout_depth < 0)
+        ny_layout_depth = 0;
+    }
   }
 
   sv_free(&lines);
@@ -2965,7 +3166,7 @@ static int token_list_contains(const char *tokens, const char *token) {
 
 static const AuditModeMap k_audit_mode_maps[] = {
     {"smart|overhaul",
-     "bugs|bloat|batteries|profiles|trim|legacy|methods|contracts|specialize|meta|types|dead|constants|calls"},
+     "bugs|bloat|batteries|profiles|trim|loops|legacy|methods|contracts|specialize|meta|types|dead|constants|calls"},
     {"modules", "bloat|batteries|profiles"},
     {"trim", "bloat|profiles|legacy|methods|contracts|specialize|meta"},
     {"bugs|bug|correctness|lint", "bugs"},
@@ -2977,6 +3178,7 @@ static const AuditModeMap k_audit_mode_maps[] = {
     {"legacy", "methods"},
     {"methods|syntax", "methods|legacy|types"},
     {"constants|consts", "constants"},
+    {"loops|continue|guards", "trim|loops"},
 };
 
 static int audit_wants_one(const char *mode, const char *section) {
@@ -6591,6 +6793,93 @@ static int audit_find_or_add_slot(char *items, size_t width, int *count, int cap
   return slot;
 }
 
+static int audit_indent_cols(const char *line) {
+  int n = 0;
+  for (const char *p = line; p && *p; p++) {
+    if (*p == ' ')
+      n++;
+    else if (*p == '\t')
+      n += 3;
+    else
+      break;
+  }
+  return n;
+}
+
+static size_t audit_next_nonblank_line(StrVec *lines, size_t from) {
+  for (size_t i = from; i < lines->len; i++) {
+    const char *s = lstrip_ws(lines->items[i]);
+    if (*s)
+      return i;
+  }
+  return lines->len;
+}
+
+static void audit_add_continue_findings(const char *path, StrVec *lines, IssueVec *issues, AuditStats *stats) {
+  if (!nyt_ends_with(path, ".ny") && !nyt_ends_with(path, ".c") && !nyt_ends_with(path, ".h"))
+    return;
+  for (size_t i = 0; i < lines->len; i++) {
+    const char *line = lines->items[i];
+    const char *s = lstrip_ws(line);
+    if (!starts_with_word(s, "for") && !starts_with_word(s, "while"))
+      continue;
+    int loop_indent = audit_indent_cols(line);
+    size_t j = audit_next_nonblank_line(lines, i + 1);
+    if (j >= lines->len)
+      continue;
+    const char *jline = lines->items[j];
+    const char *js = lstrip_ws(jline);
+    if (!starts_with_word(js, "if"))
+      continue;
+    int if_indent = audit_indent_cols(jline);
+    if (if_indent <= loop_indent)
+      continue;
+    int scope = 0;
+    int if_lines = 0;
+    size_t close = j;
+    for (size_t k = j; k < lines->len; k++) {
+      const char *ks = lstrip_ws(lines->items[k]);
+      if (!*ks)
+        continue;
+      scope += audit_count_char(ks, '{') - audit_count_char(ks, '}');
+      if_lines++;
+      close = k;
+      if (k > j && scope <= 0)
+        break;
+    }
+    if (if_lines < 4)
+      continue;
+    size_t after = audit_next_nonblank_line(lines, close + 1);
+    int has_else = 0;
+    int if_body_is_loop_body = 0;
+    int followed_by_same_level_work = 0;
+    if (after < lines->len) {
+      const char *as = lstrip_ws(lines->items[after]);
+      int after_indent = audit_indent_cols(lines->items[after]);
+      has_else = starts_with_word(as, "else") || starts_with_word(as, "elif");
+      if_body_is_loop_body = !has_else && after_indent <= loop_indent;
+      followed_by_same_level_work = !has_else && after_indent == if_indent;
+    } else {
+      if_body_is_loop_body = 1;
+    }
+    if (has_else)
+      continue;
+    if (if_body_is_loop_body) {
+      issue_push(issues, path, (int)j + 1, 1, "NYAUD3007", "note",
+                 "nested if block takes up the loop body",
+                 "invert the condition and use early 'continue' so the loop body stays flat and easier to scan");
+      stats->findings++;
+      stats->trim_targets++;
+    } else if (followed_by_same_level_work && if_lines >= 6) {
+      issue_push(issues, path, (int)j + 1, 1, "NYAUD3008", "note",
+                 "large leading if inside loop",
+                 "consider a guard 'if !condition { continue }' before the heavy body to reduce indentation and branch work");
+      stats->findings++;
+      stats->trim_targets++;
+    }
+  }
+}
+
 static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files,
                             FunctionPressureVec *functions, IssueVec *issues, AuditStats *stats,
                             const char *mode) {
@@ -6833,6 +7122,9 @@ static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files
                "use case with comma/range arms, then promote stable keymaps/token/enum maps to comptime table plus comptime match to avoid runtime setup");
     stats->findings++;
     stats->trim_targets++;
+  }
+  if (audit_wants(mode, "trim") || audit_wants(mode, "loops")) {
+    audit_add_continue_findings(path, &lines, issues, stats);
   }
   if (audit_wants(mode, "trim") && indexed_set_helpers > 0) {
     char msg[256];
@@ -8534,7 +8826,7 @@ static void usage(void) {
   printf("%smodes:%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
   printf("  %s--check --fix --analyze --audit --trim --syntax --types --dead%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-  printf("  %s--smart --overhaul --bugs --checks --bloat --modules --profiles --layouts%s\n",
+  printf("  %s--smart --overhaul --bugs --checks --bloat --modules --profiles --layouts --loops%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("  %s--contracts --ffi --constants --specialize --metaprog --constfold%s\n\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
@@ -8544,7 +8836,9 @@ static void usage(void) {
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("  %s--min-sev CRIT|HIGH|MED|LOW --types-strict -v%s\n", nyt_clr(NYT_GREEN),
          nyt_clr(NYT_RESET));
-  printf("  audit modes compose; accept justified smells with %sny-fmt: accept NYAUDxxxx reason%s\n",
+  printf("  audit modes compose; use %s--audit=loops,trim%s to find continue/guard-loop flattening wins\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  accept justified smells with %sny-fmt: accept NYAUDxxxx reason%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
 }
 

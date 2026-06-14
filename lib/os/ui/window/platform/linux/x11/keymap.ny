@@ -114,7 +114,7 @@ def INVALID_CODEPOINT = -1
 
 fn translate_keysym(int primary, int secondary=0, int width=1) int {
    "Translate common X11 keysyms into backend key codes."
-   if(width > 1){
+   if width > 1 {
       match secondary {
          XK_KP_0 -> { return KEY_KP_0 }
          XK_KP_1 -> { return KEY_KP_1 }
@@ -220,8 +220,8 @@ fn translate_keysym(int primary, int secondary=0, int width=1) int {
       XK_slash -> { return KEY_SLASH }
       XK_less -> { return KEY_WORLD_1 }
       _ -> {
-         if(primary >= XK_a && primary <= XK_z){ return KEY_A + (primary - XK_a) }
-         if(primary >= XK_0 && primary <= XK_9){ return KEY_0 + (primary - XK_0) }
+         if primary >= XK_a && primary <= XK_z { return KEY_A + (primary - XK_a) }
+         if primary >= XK_0 && primary <= XK_9 { return KEY_0 + (primary - XK_0) }
       }
    }
    -1
@@ -341,7 +341,7 @@ fn translate_scancode(int scancode) int {
 
 fn keysym_from_key(int key) int {
    "Returns the primary KeySym for a Nytrix key constant."
-   if(key >= 32 && key <= 126){ return key }
+   if key >= 32 && key <= 126 { return key }
    match key {
       KEY_ESCAPE -> { return XK_Escape }
       KEY_TAB -> { return XK_Tab }
@@ -458,11 +458,11 @@ fn _keysym_table_lookup(int keysym) int {
    "Binary search through the sorted keysym-to-unicode table."
    mut lo = 0
    mut hi = _KEYSYM_TABLE_LEN - 1
-   while(lo <= hi){
+   while lo <= hi {
       def mid = (lo + hi) / 2
       def ks = _KEYSYM_TO_UCS.get(mid * 2)
-      if(ks == keysym){ return _KEYSYM_TO_UCS.get(mid * 2 + 1) }
-      if(ks < keysym){ lo = mid + 1 }
+      if ks == keysym { return _KEYSYM_TO_UCS.get(mid * 2 + 1) }
+      if ks < keysym { lo = mid + 1 }
       else { hi = mid - 1 }
    }
    INVALID_CODEPOINT
@@ -470,11 +470,11 @@ fn _keysym_table_lookup(int keysym) int {
 
 fn keysym_to_unicode(int keysym) int {
    "Map an X11 keysym to its Unicode codepoint using the full keysym table."
-   if((keysym >= 0x0020 && keysym <= 0x007e) ||
-      (keysym >= 0x00a0 && keysym <= 0x00ff)){
+   if (keysym >= 0x0020 && keysym <= 0x007e) ||
+   (keysym >= 0x00a0 && keysym <= 0x00ff){
       return keysym
    }
-   if(band(keysym, 0xff000000) == 0x01000000){ return band(keysym, 0x00ffffff) }
+   if band(keysym, 0xff000000) == 0x01000000 { return band(keysym, 0x00ffffff) }
    _keysym_table_lookup(keysym)
 }
 

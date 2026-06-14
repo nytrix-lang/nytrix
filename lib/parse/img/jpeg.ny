@@ -46,41 +46,41 @@ mut _jpeg_disable_turbo_cache = -1
 mut _jpeg_max_scan_cache = -1
 
 fn _raw_ptr(any p) any {
-   if(!p){ return 0 }
-   if(is_int(p)){ return to_int(p) }
+   if !p { return 0 }
+   if is_int(p) { return to_int(p) }
    p
 }
 
 fn _jpeg_decode_turbo(any data) any {
    def handle = _tj_init_decompress()
-   if(!handle){ return 0 }
+   if !handle { return 0 }
    def w_p = zalloc(4) def h_p = zalloc(4) def ss_p = zalloc(4) def cs_p = zalloc(4)
-   if(!w_p || !h_p || !ss_p || !cs_p){
+   if !w_p || !h_p || !ss_p || !cs_p {
       free(w_p, h_p, ss_p, cs_p)
       _tj_destroy(handle)
       return 0
    }
    def hdr_res = _tj_decompress_header3(handle, _raw_ptr(data), data.len, w_p, h_p, ss_p, cs_p)
-   if(int(hdr_res) != 0){
+   if int(hdr_res) != 0 {
       free(w_p, h_p, ss_p, cs_p)
       _tj_destroy(handle)
       return 0
    }
    def wVal, hVal = load32(w_p, 0), load32(h_p, 0)
    free(w_p, h_p, ss_p, cs_p)
-   if(wVal <= 0 || hVal <= 0 || wVal > 16384 || hVal > 16384){
+   if wVal <= 0 || hVal <= 0 || wVal > 16384 || hVal > 16384 {
       _tj_destroy(handle)
       return 0
    }
    def pix_len = wVal * hVal * 4
    def pix_raw = malloc(pix_len + 32)
-   if(!pix_raw){
+   if !pix_raw {
       _tj_destroy(handle)
       return 0
    }
    def dec_res = _tj_decompress2(handle, _raw_ptr(data), data.len, pix_raw, wVal, 0, hVal, 7, 0)
    _tj_destroy(handle)
-   if(int(dec_res) != 0){
+   if int(dec_res) != 0 {
       free(pix_raw)
       return 0
    }
@@ -106,14 +106,14 @@ fn _jpeg_disable_turbo() bool {
 }
 
 fn _jpeg_prog_max_scan() int {
-   if(_jpeg_max_scan_cache != -1){ return _jpeg_max_scan_cache }
+   if _jpeg_max_scan_cache != -1 { return _jpeg_max_scan_cache }
    _jpeg_max_scan_cache = common.parse_nonneg_int(common.env_trim("NY_JPEG_MAX_SCAN"))
    _jpeg_max_scan_cache
 }
 
 fn _c_u8(any v) int {
-   if(v < 0){ return 0 }
-   if(v > 255){ return 255 }
+   if v < 0 { return 0 }
+   if v > 255 { return 255 }
    v
 }
 
@@ -121,10 +121,10 @@ fn _m_hm(list b, list val_list) list {
    mut cm, sm = pbin.zero_list(256), pbin.zero_list(256)
    mut cCount, kCount = 0, 0
    mut lIdx = 1
-   while(lIdx <= 16){
+   while lIdx <= 16 {
       def ctVal = b.get((lIdx - 1))
       mut j = 0
-      while(j < ctVal){
+      while j < ctVal {
          def sSym = val_list.get(kCount)
          cm[sSym] = cCount
          sm[sSym] = lIdx
@@ -154,13 +154,13 @@ fn _h_new(list ctx) int {
 fn _h_add(list ctx, int root, int code, int len_bits, int sym) any {
    mut cur = root
    mut iBit = len_bits
-   while(iBit > 0){
+   while iBit > 0 {
       def nodeList = ctx.get(0)
       def nObj = nodeList.get(cur)
       def bitVal = (code >> (iBit - 1)) & 1
-      if(bitVal){
+      if bitVal {
          mut rVal = nObj.get(3)
-         if(rVal == -1){
+         if rVal == -1 {
             rVal = _h_new(ctx)
             def nUpd = ctx.get(0).get(cur)
             nUpd[3] = rVal
@@ -168,7 +168,7 @@ fn _h_add(list ctx, int root, int code, int len_bits, int sym) any {
          cur = rVal
       } else {
          mut lVal = nObj.get(2)
-         if(lVal == -1){
+         if lVal == -1 {
             lVal = _h_new(ctx)
             def nUpd = ctx.get(0).get(cur)
             nUpd[2] = lVal
@@ -190,17 +190,17 @@ fn _h_parse(any data, int off) list {
    _h_new(ctx)
    mut counts = list(16)
    mut iC = 0
-   while(iC < 16){
+   while iC < 16 {
       counts = counts.append(load8(data, (off + iC)))
       iC += 1
    }
    mut pPtr = off + 16
    mut cvVal = 0
    mut clIdx = 1
-   while(clIdx <= 16){
+   while clIdx <= 16 {
       def cntVal = counts.get((clIdx - 1))
       mut j = 0
-      while(j < cntVal){
+      while j < cntVal {
          _h_add(ctx, 0, cvVal, clIdx, load8(data, pPtr))
          pPtr += 1
          cvVal += 1
@@ -214,16 +214,16 @@ fn _h_parse(any data, int off) list {
 
 fn _h_dec(list nodes, list bs) int {
    mut cur = 0
-   while(1){
+   while 1 {
       mut bl = bs.get(3)
-      if(bl == 0){
+      if bl == 0 {
          def db = bs.get(0)
          mut bp = bs.get(1)
-         if(bp >= db.len){ return -1 }
+         if bp >= db.len { return -1 }
          mut cV = load8(db, bp)
          bp += 1
-         if(cV == 255){
-            if(bp < db.len){ if(load8(db, bp) == 0){ bp += 1 } }
+         if cV == 255 {
+            if bp < db.len { if load8(db, bp) == 0 { bp += 1 } }
          }
          bs[2] = cV
          bs[3] = 8
@@ -234,10 +234,10 @@ fn _h_dec(list nodes, list bs) int {
       def bit = (bs.get(2) >> bl) & 1
       bs[3] = bl
       def n = nodes.get(cur)
-      if(bit){ cur = n.get(3) } else { cur = n.get(2) }
-      if(cur == -1){ return -1 }
+      if bit { cur = n.get(3) } else { cur = n.get(2) }
+      if cur == -1 { return -1 }
       def cn = nodes.get(cur)
-      if(cn.get(1)){ return cn.get(0) }
+      if cn.get(1) { return cn.get(0) }
    }
 }
 
@@ -252,17 +252,17 @@ fn _bs_m(any data, int start) list {
 }
 
 fn _bs_skip_restart(any bs, int expected_rst=-1) bool {
-   if(!is_list(bs)){ return false }
+   if !is_list(bs) { return false }
    bs[3] = 0
    bs[2] = 0
    def db = bs.get(0)
    mut bp = bs.get(1)
-   if(!is_str(db) || bp < 0 || bp + 1 >= db.len){ return false }
-   while(bp + 1 < db.len && load8(db, bp) == 255 && load8(db, bp + 1) == 255){ bp += 1 }
-   if(bp + 1 >= db.len || load8(db, bp) != 255){ return false }
+   if !is_str(db) || bp < 0 || bp + 1 >= db.len { return false }
+   while bp + 1 < db.len && load8(db, bp) == 255 && load8(db, bp + 1) == 255 { bp += 1 }
+   if bp + 1 >= db.len || load8(db, bp) != 255 { return false }
    def mk = load8(db, bp + 1)
-   if(mk < 208 || mk > 215){ return false }
-   if(expected_rst >= 0 && mk != (208 + (expected_rst & 7))){ return false }
+   if mk < 208 || mk > 215 { return false }
+   if expected_rst >= 0 && mk != (208 + (expected_rst & 7)) { return false }
    bp += 2
    bs[1] = bp
    true
@@ -271,16 +271,16 @@ fn _bs_skip_restart(any bs, int expected_rst=-1) bool {
 fn _bs_gbs(list bs, int n) int {
    mut v = 0
    mut iCount = 0
-   while(iCount < n){
+   while iCount < n {
       mut bl = bs.get(3)
-      if(bl == 0){
+      if bl == 0 {
          def db = bs.get(0)
          mut bp = bs.get(1)
-         if(bp < db.len){
+         if bp < db.len {
             mut cV = load8(db, bp)
             bp += 1
-            if(cV == 255){
-               if(bp < db.len){ if(load8(db, bp) == 0){ bp += 1 } }
+            if cV == 255 {
+               if bp < db.len { if load8(db, bp) == 0 { bp += 1 } }
             }
             bs[2] = cV
             bs[3] = 8
@@ -299,30 +299,30 @@ fn _bs_gbs(list bs, int n) int {
 }
 
 fn _d_cf(int sz, int bits) int {
-   if(sz == 0){ return 0 }
-   if((bits >> (sz - 1)) & 1){ return bits }
+   if sz == 0 { return 0 }
+   if (bits >> (sz - 1)) & 1 { return bits }
    return bits - (1 << sz) + 1
 }
 
 fn _jpeg_find_next_marker(any data, int start) int {
-   if(!is_str(data)){ return data.len }
+   if !is_str(data) { return data.len }
    mut i = start
    def n = data.len
-   while(i + 1 < n){
+   while i + 1 < n {
       def b = load8(data, i)
-      if(b != 255){
+      if b != 255 {
          i += 1
          continue
       }
       mut j = i + 1
-      while(j < n && load8(data, j) == 255){ j += 1 }
-      if(j >= n){ return n }
+      while j < n && load8(data, j) == 255 { j += 1 }
+      if j >= n { return n }
       def c = load8(data, j)
-      if(c == 0){
+      if c == 0 {
          i = j + 1
          continue
       }
-      if(c >= 208 && c <= 215){
+      if c >= 208 && c <= 215 {
          i = j + 1
          continue
       }
@@ -345,11 +345,11 @@ fn _jpeg_prog_alloc_component(int wVal, int hVal, int mh, int mv, any dobj) list
    def full_blocks = max(1, ((wVal + 7) / 8) * ((hVal + 7) / 8))
    def blocks = max(int(dims.get(2, 0)), full_blocks)
    def coeff_bytes = blocks * 64 * 4
-   if(coeff_bytes <= 0 || coeff_bytes > (256 * 1024 * 1024)){ return [bw, bh, blocks, 0] }
+   if coeff_bytes <= 0 || coeff_bytes > (256 * 1024 * 1024) { return [bw, bh, blocks, 0] }
    def coeff = malloc(coeff_bytes)
-   if(!coeff){ return [bw, bh, blocks, 0] }
+   if !coeff { return [bw, bh, blocks, 0] }
    mut zi = 0
-   while(zi < coeff_bytes){
+   while zi < coeff_bytes {
       store8(coeff, 0, zi)
       zi += 1
    }
@@ -358,7 +358,7 @@ fn _jpeg_prog_alloc_component(int wVal, int hVal, int mh, int mv, any dobj) list
 
 fn _jpeg_prog_coeff_at(any coeff, int block_idx, int pos) int {
    mut v = load32(coeff, (block_idx * 64 + pos) * 4)
-   if(v >= 2147483648){ v -= 4294967296 }
+   if v >= 2147483648 { v -= 4294967296 }
    v
 }
 
@@ -369,31 +369,31 @@ fn _jpeg_prog_set_coeff(any coeff, int block_idx, int pos, any value) any {
 
 fn _jpeg_prog_refine_nonzero(any coeff, int block_idx, int pos, int al, list bs) any {
    def cur = _jpeg_prog_coeff_at(coeff, block_idx, pos)
-   if(cur == 0){ return 0 }
+   if cur == 0 { return 0 }
    def bit = _bs_gbs(bs, 1)
-   if(bit == 0){ return 0 }
+   if bit == 0 { return 0 }
    def step = 1 << al
-   if(cur > 0){
-      if((cur & step) == 0){ _jpeg_prog_set_coeff(coeff, block_idx, pos, cur + step) }
+   if cur > 0 {
+      if (cur & step) == 0 { _jpeg_prog_set_coeff(coeff, block_idx, pos, cur + step) }
    } else {
       def mag = -cur
-      if((mag & step) == 0){ _jpeg_prog_set_coeff(coeff, block_idx, pos, cur - step) }
+      if (mag & step) == 0 { _jpeg_prog_set_coeff(coeff, block_idx, pos, cur - step) }
    }
    0
 }
 
 fn _jpeg_prog_render_component(any plane, int plane_len, int plane_w, any coeff, any qtbl, int bw, int bh, int step_x, int step_y) any {
-   if(!plane || !coeff || bw <= 0 || bh <= 0 || !is_list(qtbl)){ return 0 }
+   if !plane || !coeff || bw <= 0 || bh <= 0 || !is_list(qtbl) { return 0 }
    mut cf = pbin.zero_list(64)
    mut blk = pbin.zero_list(64)
    mut nat = pbin.zero_list(64)
    mut by = 0
-   while(by < bh){
+   while by < bh {
       mut bx = 0
-      while(bx < bw){
+      while bx < bw {
          def bi = by * bw + bx
          mut k = 0
-         while(k < 64){
+         while k < 64 {
             cf[k] = _jpeg_prog_coeff_at(coeff, bi, k)
             k += 1
          }
@@ -411,14 +411,14 @@ fn _jpeg_alloc_planes(int plane_sz) any {
    def cyB = init_str(malloc(alloc_sz), plane_sz)
    def ccbB = init_str(malloc(alloc_sz), plane_sz)
    def ccrB = init_str(malloc(alloc_sz), plane_sz)
-   if(!cyB || !ccbB || !ccrB){
-      if(cyB){ free(cyB) }
-      if(ccbB){ free(ccbB) }
-      if(ccrB){ free(ccrB) }
+   if !cyB || !ccbB || !ccrB {
+      if cyB { free(cyB) }
+      if ccbB { free(ccbB) }
+      if ccrB { free(ccrB) }
       return 0
    }
    mut i = 0
-   while(i < plane_sz){
+   while i < plane_sz {
       store8(cyB, 128, i)
       store8(ccbB, 128, i)
       store8(ccrB, 128, i)
@@ -431,7 +431,7 @@ fn _jpeg_planes_to_rgba(any cyB, any ccbB, any ccrB, int wVal, int hVal) any {
    def tpx = wVal * hVal
    def pix = init_str(malloc(tpx * 4 + 32), (tpx * 4))
    mut kL = 0
-   while(kL + 4 <= tpx){
+   while kL + 4 <= tpx {
       def y0, y1 = load8(cyB, kL), load8(cyB, kL + 1)
       def y2, y3 = load8(cyB, kL + 2), load8(cyB, kL + 3)
       def cb0, cb1 = load8(ccbB, kL) - 128, load8(ccbB, kL + 1) - 128
@@ -456,7 +456,7 @@ fn _jpeg_planes_to_rgba(any cyB, any ccbB, any ccrB, int wVal, int hVal) any {
       store32(pix, _c_u8(r3)|(_c_u8(g3)<<8)|(_c_u8(b3)<<16)|(255<<24), d0+12)
       kL = kL + 4
    }
-   while(kL < tpx){
+   while kL < tpx {
       def y = load8(cyB, kL)
       def cb = load8(ccbB, kL) - 128
       def cr = load8(ccrB, kL) - 128
@@ -483,15 +483,15 @@ fn _jpeg_prog_component_info(int wVal, int hVal, int mh, int mv, list cidMap, li
    mut comp_info = dict(16)
    def cord_n = cord.len
    mut ci = 0
-   while(ci < cord_n){
+   while ci < cord_n {
       def cid = cord.get(ci, -1)
       def dobj = cidMap.get(cid)
-      if(is_list(dobj)){
+      if is_list(dobj) {
          def alloc = _jpeg_prog_alloc_component(wVal, hVal, mh, mv, dobj)
          def bw = int(alloc.get(0, 0))
          def bh = int(alloc.get(1, 0))
          def coeff = alloc.get(3, 0)
-         if(coeff){
+         if coeff {
             mut nd = list(6)
             nd = nd.append(dobj.get(0, 0))
             nd = nd.append(dobj.get(1, 1))
@@ -511,15 +511,15 @@ fn _jpeg_progressive_result(list planes, int plane_sz, int wVal, int hVal, int m
    def cyB, ccbB = planes.get(0), planes.get(1)
    def ccrB = planes.get(2)
    mut Yid = 1
-   if(cord.len > 0){ Yid = cord.get(0) }
+   if cord.len > 0 { Yid = cord.get(0) }
    mut Cbid = Yid
-   if(cord.len > 1){ Cbid = cord.get(1) }
+   if cord.len > 1 { Cbid = cord.get(1) }
    mut Crid = Cbid
-   if(cord.len > 2){ Crid = cord.get(2) }
+   if cord.len > 2 { Crid = cord.get(2) }
    mut yInfo = comp_info.get(Yid, 0)
    mut cbInfo = comp_info.get(Cbid, 0)
    mut crInfo = comp_info.get(Crid, 0)
-   if(!is_list(yInfo) || !is_list(cbInfo) || !is_list(crInfo)){
+   if !is_list(yInfo) || !is_list(cbInfo) || !is_list(crInfo) {
       free(cyB) free(ccbB) free(ccrB)
       return 0
    }
@@ -547,43 +547,43 @@ fn _jpeg_progressive_result(list planes, int plane_sz, int wVal, int hVal, int m
 fn _jpeg_prog_decode_interleaved_dc(int wVal, int hVal, int mh, int mv, any comp_info, list hdc, any comps, any comp_meta, int comps_n, int comp_meta_n, int ah, int al, list bs) any {
    mut pdc_map = dict(8)
    mut mcy = 0
-   while((mcy * 8 * mv) < hVal){
+   while (mcy * 8 * mv) < hVal {
       mut mcx = 0
-      while((mcx * 8 * mh) < wVal){
+      while (mcx * 8 * mh) < wVal {
          mut cii = 0
-         while(cii < comps_n){
+         while cii < comps_n {
             def cid = comps.get(cii, -1)
             def info = comp_info.get(cid, 0)
-            if(is_list(info)){
+            if is_list(info) {
                mut meta = 0
-               if(cii < comp_meta_n){ meta = comp_meta.get(cii, 0) }
+               if cii < comp_meta_n { meta = comp_meta.get(cii, 0) }
                def hs, vs = int(info.get(1, 1)), int(info.get(2, 1))
                mut dcid = 0
                mut dh = 0
-               if(is_list(meta)){
+               if is_list(meta) {
                   dcid = int(meta.get(1, 0))
                   dh = meta.get(3, 0)
                }
                def bw = int(info.get(3, 0))
                def coeff = info.get(5, 0)
-               if(!dh){ dh = hdc.get(dcid, 0) }
+               if !dh { dh = hdc.get(dcid, 0) }
                mut pdc = int(pdc_map.get(cid, 0))
                mut vb = 0
-               while(vb < vs){
+               while vb < vs {
                   mut hb = 0
-                  while(hb < hs){
+                  while hb < hs {
                      def bi = (mcy * vs + vb) * bw + (mcx * hs + hb)
-                     if(bi >= 0 && bi < (bw * int(info.get(4, 0)))){
-                        if(ah == 0){
+                     if bi >= 0 && bi < (bw * int(info.get(4, 0))) {
+                        if ah == 0 {
                            def sz = _h_dec(dh, bs)
-                           if(sz < 0){ break }
+                           if sz < 0 { break }
                            def bits = _bs_gbs(bs, sz)
                            def d_val = _d_cf(sz, bits)
                            pdc = pdc + d_val
                            _jpeg_prog_set_coeff(coeff, bi, 0, pdc << al)
                         } else {
                            def bit = _bs_gbs(bs, 1)
-                           if(bit != 0){
+                           if bit != 0 {
                               def cur = _jpeg_prog_coeff_at(coeff, bi, 0)
                               _jpeg_prog_set_coeff(coeff, bi, 0, cur | (1 << al))
                            }
@@ -607,27 +607,27 @@ fn _jpeg_prog_decode_interleaved_dc(int wVal, int hVal, int mh, int mv, any comp
 fn _jpeg_prog_decode_ac_raster(any coeff, int bw, int bh, int ss, int se, int ah, int al, any ah_tbl, list bs) any {
    mut eobrun = 0
    mut by = 0
-   while(by < bh){
+   while by < bh {
       mut bx = 0
-      while(bx < bw){
+      while bx < bw {
          def bi = by * bw + bx
-         if(ah == 0){
-            if(eobrun > 0){ eobrun -= 1 } else {
+         if ah == 0 {
+            if eobrun > 0 { eobrun -= 1 } else {
                mut k = ss
-               while(k <= se){
+               while k <= se {
                   def sym = _h_dec(ah_tbl, bs)
-                  if(sym < 0){ break }
+                  if sym < 0 { break }
                   def run = sym >> 4
                   def size = sym & 15
-                  if(size == 0){
-                     if(run == 15){ k += 16 } else {
+                  if size == 0 {
+                     if run == 15 { k += 16 } else {
                         eobrun = (1 << run) - 1
-                        if(run > 0){ eobrun += _bs_gbs(bs, run) }
+                        if run > 0 { eobrun += _bs_gbs(bs, run) }
                         break
                      }
                   } else {
                      k += run
-                     if(k > se){ break }
+                     if k > se { break }
                      def bits = _bs_gbs(bs, size)
                      def v = _d_cf(size, bits) << al
                      _jpeg_prog_set_coeff(coeff, bi, k, v)
@@ -637,47 +637,47 @@ fn _jpeg_prog_decode_ac_raster(any coeff, int bw, int bh, int ss, int se, int ah
             }
          } else {
             mut k = ss
-            while(k <= se){
-               if(eobrun > 0){
-                  while(k <= se){
-                     if(_jpeg_prog_coeff_at(coeff, bi, k) != 0){ _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) }
+            while k <= se {
+               if eobrun > 0 {
+                  while k <= se {
+                     if _jpeg_prog_coeff_at(coeff, bi, k) != 0 { _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) }
                      k += 1
                   }
                   eobrun -= 1
                   break
                }
                def sym = _h_dec(ah_tbl, bs)
-               if(sym < 0){ break }
+               if sym < 0 { break }
                mut run = sym >> 4
                def size = sym & 15
-               if(size == 0){
-                  if(run == 15){
+               if size == 0 {
+                  if run == 15 {
                      mut z = 16
-                     while(k <= se && z > 0){
-                        if(_jpeg_prog_coeff_at(coeff, bi, k) != 0){ _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) } else { z -= 1 }
+                     while k <= se && z > 0 {
+                        if _jpeg_prog_coeff_at(coeff, bi, k) != 0 { _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) } else { z -= 1 }
                         k += 1
                      }
                   } else {
                      eobrun = (1 << run)
-                     if(run > 0){ eobrun += _bs_gbs(bs, run) }
+                     if run > 0 { eobrun += _bs_gbs(bs, run) }
                      eobrun -= 1
-                     while(k <= se){
-                        if(_jpeg_prog_coeff_at(coeff, bi, k) != 0){ _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) }
+                     while k <= se {
+                        if _jpeg_prog_coeff_at(coeff, bi, k) != 0 { _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) }
                         k += 1
                      }
                      break
                   }
                } else {
-                  while(k <= se){
-                     if(_jpeg_prog_coeff_at(coeff, bi, k) != 0){ _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) } else {
-                        if(run == 0){ break }
+                  while k <= se {
+                     if _jpeg_prog_coeff_at(coeff, bi, k) != 0 { _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) } else {
+                        if run == 0 { break }
                         run -= 1
                      }
                      k += 1
                   }
-                  if(k <= se){
+                  if k <= se {
                      mut v = 1 << al
-                     if(size != 1){ v = _d_cf(size, _bs_gbs(bs, size)) << al } else { if(_bs_gbs(bs, 1) == 0){ v = -(1 << al) } }
+                     if size != 1 { v = _d_cf(size, _bs_gbs(bs, size)) << al } else { if _bs_gbs(bs, 1) == 0 { v = -(1 << al) } }
                      _jpeg_prog_set_coeff(coeff, bi, k, v)
                      k += 1
                   }
@@ -697,15 +697,15 @@ fn _jpeg_decode_progressive(any data, int wVal, int hVal, int mh, int mv, list q
    def mcu_h = mv * 8
    def plane_sz = ((wVal + mcu_w - 1) / mcu_w) * mcu_w * ((hVal + mcu_h - 1) / mcu_h) * mcu_h
    def planes = _jpeg_alloc_planes(plane_sz)
-   if(!planes){ return 0 }
+   if !planes { return 0 }
    def comp_info = _jpeg_prog_component_info(wVal, hVal, mh, mv, cidMap, cord)
    def max_scan = _jpeg_prog_max_scan()
    def scan_list_n = scan_list.len
    mut si = 0
-   while(si < scan_list_n){
-      if(max_scan > 0 && si >= max_scan){ break }
+   while si < scan_list_n {
+      if max_scan > 0 && si >= max_scan { break }
       def scan = scan_list.get(si, 0)
-      if(is_list(scan) && scan.len >= 8){
+      if is_list(scan) && scan.len >= 8 {
          def scan_start = int(scan.get(0, 0))
          def comps = scan.get(2, 0)
          def comp_meta = scan.get(3, 0)
@@ -717,46 +717,46 @@ fn _jpeg_decode_progressive(any data, int wVal, int hVal, int mh, int mv, list q
          def comps_n = is_list(comps) ? comps.len : 0
          def comp_meta_n = is_list(comp_meta) ? comp_meta.len : 0
          def interleaved = comps_n > 1
-         if(interleaved && ss == 0){
+         if interleaved && ss == 0 {
             _jpeg_prog_decode_interleaved_dc(wVal, hVal, mh, mv, comp_info, hdc, comps, comp_meta, comps_n, comp_meta_n, ah, al, bs)
             si += 1
             continue
          }
          mut cii = 0
-         while(cii < comps_n){
+         while cii < comps_n {
             def cid = comps.get(cii, -1)
             def info = comp_info.get(cid, 0)
-            if(is_list(info)){
+            if is_list(info) {
                mut meta = 0
-               if(cii < comp_meta_n){ meta = comp_meta.get(cii, 0) }
+               if cii < comp_meta_n { meta = comp_meta.get(cii, 0) }
                def hs, vs = int(info.get(1, 1)), int(info.get(2, 1))
                mut dcid, acid = 0, 0
                mut dh = 0
                mut ah_tbl = 0
-               if(is_list(meta)){
+               if is_list(meta) {
                   dcid, acid = int(meta.get(1, 0)), int(meta.get(2, 0))
                   dh, ah_tbl = meta.get(3, 0), meta.get(4, 0)
                }
                def bw, bh = int(info.get(3, 0)), int(info.get(4, 0))
                def coeff = info.get(5, 0)
-               if(!dh){ dh = hdc.get(dcid, 0) }
-               if(!ah_tbl){ ah_tbl = hac.get(acid, 0) }
+               if !dh { dh = hdc.get(dcid, 0) }
+               if !ah_tbl { ah_tbl = hac.get(acid, 0) }
                mut pdc = 0
-               if(ss > 0 && !interleaved){
+               if ss > 0 && !interleaved {
                   _jpeg_prog_decode_ac_raster(coeff, bw, bh, ss, se, ah, al, ah_tbl, bs)
                } else {
                   mut mcy = 0
-                  while((mcy * 8 * mv) < hVal){
+                  while (mcy * 8 * mv) < hVal {
                      mut mcx = 0
-                     while((mcx * 8 * mh) < wVal){
+                     while (mcx * 8 * mh) < wVal {
                         mut vb = 0
-                        while(vb < vs){
+                        while vb < vs {
                            mut hb = 0
-                           while(hb < hs){
+                           while hb < hs {
                               def bi = (mcy * vs + vb) * bw + (mcx * hs + hb)
-                              if(bi >= 0 && bi < (bw * bh)){
-                                 if(ss == 0){
-                                    if(ah == 0){
+                              if bi >= 0 && bi < (bw * bh) {
+                                 if ss == 0 {
+                                    if ah == 0 {
                                        def sz = _h_dec(dh, bs)
                                        def bits = _bs_gbs(bs, sz)
                                        def d_val = _d_cf(sz, bits)
@@ -764,7 +764,7 @@ fn _jpeg_decode_progressive(any data, int wVal, int hVal, int mh, int mv, list q
                                        _jpeg_prog_set_coeff(coeff, bi, 0, pdc << al)
                                     } else {
                                        def bit = _bs_gbs(bs, 1)
-                                       if(bit != 0){
+                                       if bit != 0 {
                                           def cur = _jpeg_prog_coeff_at(coeff, bi, 0)
                                           _jpeg_prog_set_coeff(coeff, bi, 0, cur | (1 << al))
                                        }
@@ -805,16 +805,16 @@ def _JIDCT_FIX_2_562915447 = 20995
 def _JIDCT_FIX_3_072711026 = 25172
 
 fn _jpeg_descale(int v, int n) int {
-   if(n <= 0){ return v }
+   if n <= 0 { return v }
    def add = 1 << (n - 1)
-   if(v >= 0){ return(v + add) >> n }
+   if v >= 0 { return(v + add) >> n }
    -(((-v) + add) >> n)
 }
 
 fn _idct_has_ac(list cf) bool {
    mut ci = 1
-   while(ci < 64){
-      if(cf.get(ci) != 0){ return true }
+   while ci < 64 {
+      if cf.get(ci) != 0 { return true }
       ci += 1
    }
    false
@@ -823,11 +823,11 @@ fn _idct_has_ac(list cf) bool {
 fn _idct_store_sample(any out, int out_len, int plane_w, int off, int step_x, int step_y, int x, int y, int fv) any {
    def py, px = (off / plane_w) + y * step_y, (off % plane_w) + x * step_x
    mut dy = 0
-   while(dy < step_y){
+   while dy < step_y {
       mut dx = 0
-      while(dx < step_x){
+      while dx < step_x {
          def pidx = (py + dy) * plane_w + (px + dx)
-         if(pidx < out_len){ store8(out, fv, pidx) }
+         if pidx < out_len { store8(out, fv, pidx) }
          dx += 1
       }
       dy += 1
@@ -839,9 +839,9 @@ fn _idct_store_dc(list cf, list qt, any out, int out_len, int off, int step_x, i
    def dcv = cf.get(0) * qt.get(0)
    def fv = _c_u8(_jpeg_descale(dcv, 3) + 128)
    mut y = 0
-   while(y < 8){
+   while y < 8 {
       mut x = 0
-      while(x < 8){
+      while x < 8 {
          _idct_store_sample(out, out_len, plane_w, off, step_x, step_y, x, y, fv)
          x += 1
       }
@@ -852,12 +852,12 @@ fn _idct_store_dc(list cf, list qt, any out, int out_len, int off, int step_x, i
 
 fn _idct_prepare_block(list cf, list qt, list blk, list natural) any {
    mut kIdx = 0
-   while(kIdx < 64){
+   while kIdx < 64 {
       blk.set(kIdx, cf.get(kIdx) * qt.get(kIdx))
       kIdx += 1
    }
    kIdx = 0
-   while(kIdx < 64){
+   while kIdx < 64 {
       natural.set(_ZZ.get(kIdx), blk.get(kIdx))
       kIdx += 1
    }
@@ -866,15 +866,15 @@ fn _idct_prepare_block(list cf, list qt, list blk, list natural) any {
 
 fn _idct_pass_columns(list blk, list natural) any {
    mut col = 0
-   while(col < 8){
+   while col < 8 {
       def c1, c2 = natural.get(8 + col), natural.get(16 + col)
       def c3, c4 = natural.get(24 + col), natural.get(32 + col)
       def c5, c6 = natural.get(40 + col), natural.get(48 + col)
       def c7 = natural.get(56 + col)
-      if(c1 == 0 && c2 == 0 && c3 == 0 && c4 == 0 && c5 == 0 && c6 == 0 && c7 == 0){
+      if c1 == 0 && c2 == 0 && c3 == 0 && c4 == 0 && c5 == 0 && c6 == 0 && c7 == 0 {
          def dcval = natural.get(col) << _JIDCT_PASS1_BITS
          mut ry = 0
-         while(ry < 8){
+         while ry < 8 {
             blk.set(ry * 8 + col, dcval)
             ry += 1
          }
@@ -919,16 +919,16 @@ fn _idct_pass_columns(list blk, list natural) any {
 
 fn _idct_emit_rows(list blk, any out, int out_len, int off, int step_x, int step_y, int plane_w) any {
    mut y = 0
-   while(y < 8){
+   while y < 8 {
       def row_off = y * 8
       mut r1, r2 = blk.get(row_off + 1), blk.get(row_off + 2)
       mut r3, r4 = blk.get(row_off + 3), blk.get(row_off + 4)
       mut r5, r6 = blk.get(row_off + 5), blk.get(row_off + 6)
       mut r7 = blk.get(row_off + 7)
-      if(r1 == 0 && r2 == 0 && r3 == 0 && r4 == 0 && r5 == 0 && r6 == 0 && r7 == 0){
+      if r1 == 0 && r2 == 0 && r3 == 0 && r4 == 0 && r5 == 0 && r6 == 0 && r7 == 0 {
          def fv = _c_u8(_jpeg_descale(blk.get(row_off), _JIDCT_PASS1_BITS + 3) + 128)
          mut x = 0
-         while(x < 8){
+         while x < 8 {
             _idct_store_sample(out, out_len, plane_w, off, step_x, step_y, x, y, fv)
             x += 1
          }
@@ -969,7 +969,7 @@ fn _idct_emit_rows(list blk, any out, int out_len, int off, int step_x, int step
       def fv6 = _c_u8(_jpeg_descale(tmp11 - tmp2, _JIDCT_CONST_BITS + _JIDCT_PASS1_BITS + 3) + 128)
       def fv7 = _c_u8(_jpeg_descale(tmp10 - tmp3, _JIDCT_CONST_BITS + _JIDCT_PASS1_BITS + 3) + 128)
       mut x = 0
-      while(x < 8){
+      while x < 8 {
          def fv = case x {
             1 -> fv1
             2 -> fv2
@@ -989,7 +989,7 @@ fn _idct_emit_rows(list blk, any out, int out_len, int off, int step_x, int step
 }
 
 fn _idct(list cf, list qt, any out, int out_len, int off, int step_x, int step_y, int plane_w, list blk, list natural) any {
-   if(!_idct_has_ac(cf)){
+   if !_idct_has_ac(cf) {
       _idct_store_dc(cf, qt, out, out_len, off, step_x, step_y, plane_w)
       return 0
    }
@@ -1000,10 +1000,10 @@ fn _idct(list cf, list qt, any out, int out_len, int off, int step_x, int step_y
 }
 
 fn _d_du(list bs, any dh, any ah, any qt, int pdc, any plane, int plane_len, int off, int step_x, int step_y, int pw, list cf, list blk, list natural) any {
-   if(_jpeg_diag_on()){ _jpeg_diag_total_blocks += 1 }
+   if _jpeg_diag_on() { _jpeg_diag_total_blocks += 1 }
    def sz = _h_dec(dh, bs)
-   if(sz < 0){
-      if(_jpeg_diag_on()){ _jpeg_diag_dc_fail += 1 }
+   if sz < 0 {
+      if _jpeg_diag_on() { _jpeg_diag_dc_fail += 1 }
       bs[4] = pdc
       return 0
    }
@@ -1013,24 +1013,24 @@ fn _d_du(list bs, any dh, any ah, any qt, int pdc, any plane, int plane_len, int
    bs[4] = ndc
    cf[0] = ndc
    mut iC = 1
-   while(iC < 64){
+   while iC < 64 {
       cf[iC] = 0
       iC += 1
    }
    mut jI = 1
-   while(jI < 64){
+   while jI < 64 {
       def sym = _h_dec(ah, bs)
-      if(sym < 0){
-         if(_jpeg_diag_on()){ _jpeg_diag_ac_fail += 1 }
+      if sym < 0 {
+         if _jpeg_diag_on() { _jpeg_diag_ac_fail += 1 }
          break
       }
       def run = sym >> 4
       def asz = sym & 15
-      if(asz == 0){
-         if(run == 15){ jI += 16 } else { break }
+      if asz == 0 {
+         if run == 15 { jI += 16 } else { break }
       } else {
          jI += run
-         if(jI < 64){
+         if jI < 64 {
             def bV = _bs_gbs(bs, asz)
             cf[jI] = _d_cf(asz, bV)
             jI += 1
@@ -1057,31 +1057,31 @@ fn _jpeg_parse_headers(any data) any {
    mut mh = 1
    mut mv = 1
    mut restart_interval = 0
-   while(ptr < (data.len - 1)){
-      if(load8(data, ptr) != 255){
+   while ptr < (data.len - 1) {
+      if load8(data, ptr) != 255 {
          ptr += 1
          continue
       }
       def mark = (load8(data, ptr) << 8) | load8(data, (ptr + 1))
       ptr += 2
-      if(mark == 0xFFD9){ break }
+      if mark == 0xFFD9 { break }
       def sl = (load8(data, ptr) << 8) | load8(data, (ptr + 1))
-      if(sl < 2 || (ptr + sl) > data.len){ return 0 }
+      if sl < 2 || (ptr + sl) > data.len { return 0 }
       def soff = ptr + 2
-      if(mark == 0xFFC0 || mark == 0xFFC2){
-         if(mark == 0xFFC2){ is_prog = true }
+      if mark == 0xFFC0 || mark == 0xFFC2 {
+         if mark == 0xFFC2 { is_prog = true }
          hVal, wVal = (load8(data, (soff + 1)) << 8) | load8(data, (soff + 2)), (load8(data, (soff + 3)) << 8) | load8(data, (soff + 4))
-         if(wVal > 16384 || hVal > 16384 || wVal == 0 || hVal == 0){ return 0 }
+         if wVal > 16384 || hVal > 16384 || wVal == 0 || hVal == 0 { return 0 }
          ncVal = load8(data, (soff + 5))
          mut kC = 0
-         while(kC < ncVal){
+         while kC < ncVal {
             def idV = load8(data, (soff + 6 + kC * 3))
             def sV = load8(data, (soff + 7 + kC * 3))
             def qV = load8(data, (soff + 8 + kC * 3))
             def hsV = sV >> 4
             def vsV = sV & 15
-            if(hsV > mh){ mh = hsV }
-            if(vsV > mv){ mv = vsV }
+            if hsV > mh { mh = hsV }
+            if vsV > mv { mv = vsV }
             mut dobj = list(5)
             dobj = dobj.append(qV)
             dobj = dobj.append(hsV)
@@ -1092,41 +1092,41 @@ fn _jpeg_parse_headers(any data) any {
             cord = cord.append(idV)
             kC += 1
          }
-      } elif(mark == 0xFFDB){
+      } elif mark == 0xFFDB {
          mut qoff = soff
-         while(qoff < (soff + sl - 2)){
+         while qoff < (soff + sl - 2) {
             def qid = load8(data, qoff) & 15
             qoff += 1
             mut qtl = list(64)
             mut kq = 0
-            while(kq < 64){
+            while kq < 64 {
                qtl = qtl.append(load8(data, (qoff + kq)))
                kq += 1
             }
             qoff += 64
             qts[qid] = qtl
          }
-      } elif(mark == 0xFFC4){
+      } elif mark == 0xFFC4 {
          mut hoff = soff
-         while(hoff < (soff + sl - 2)){
+         while hoff < (soff + sl - 2) {
             def tiV, tcV = load8(data, hoff), tiV >> 4
             def tidV = tiV & 15
             def h_res = _h_parse(data, (hoff + 1))
             hoff += (1 + h_res.get(1))
-            if(tcV == 0){ hdc[tidV] = h_res.get(0) } else { hac[tidV] = h_res.get(0) }
+            if tcV == 0 { hdc[tidV] = h_res.get(0) } else { hac[tidV] = h_res.get(0) }
          }
-      } elif(mark == 0xFFDD){
-         if(sl >= 4){ restart_interval = (load8(data, soff) << 8) | load8(data, (soff + 1)) }
-      } elif(mark == 0xFFDA){
+      } elif mark == 0xFFDD {
+         if sl >= 4 { restart_interval = (load8(data, soff) << 8) | load8(data, (soff + 1)) }
+      } elif mark == 0xFFDA {
          scan = list(4)
          mut scan_meta = list(0)
          def countC = load8(data, soff)
          mut sidx = 0
-         while(sidx < countC){
+         while sidx < countC {
             def sid = load8(data, (soff + 1 + sidx * 2))
             def tiv = load8(data, (soff + 2 + sidx * 2))
             def dobj = cidMap.get(sid)
-            if(is_list(dobj)){
+            if is_list(dobj) {
                dobj[3] = (tiv >> 4)
                dobj[4] = (tiv & 15)
             }
@@ -1141,7 +1141,7 @@ fn _jpeg_parse_headers(any data) any {
             sidx += 1
          }
          ssVal = (soff + sl - 2)
-         if(is_prog){
+         if is_prog {
             def scan_ss, scan_se = load8(data, (soff + 1 + countC * 2)), load8(data, (soff + 2 + countC * 2))
             def scan_ahal = load8(data, (soff + 3 + countC * 2))
             mut rec = list(0)
@@ -1166,20 +1166,20 @@ fn _jpeg_parse_headers(any data) any {
 
 fn decode(any data) any {
    "Decodes a baseline JPEG byte string into an image dictionary."
-   if(!is_str(data) || data.len < 4){ return 0 }
-   if(load8(data, 0) != 255 || load8(data, 1) != 216){ return 0 }
-   if(!_jpeg_disable_turbo()){
+   if !is_str(data) || data.len < 4 { return 0 }
+   if load8(data, 0) != 255 || load8(data, 1) != 216 { return 0 }
+   if !_jpeg_disable_turbo() {
       def turbo = _jpeg_decode_turbo(data)
-      if(turbo){ return turbo }
+      if turbo { return turbo }
    }
    def diag_on = _jpeg_diag_on()
-   if(diag_on){
+   if diag_on {
       _jpeg_diag_total_blocks = 0
       _jpeg_diag_dc_fail = 0
       _jpeg_diag_ac_fail = 0
    }
    def parsed = _jpeg_parse_headers(data)
-   if(!parsed){ return 0 }
+   if !parsed { return 0 }
    def wVal, hVal = int(parsed.get(0, 0)), int(parsed.get(1, 0))
    def ssVal = int(parsed.get(3, 0))
    def qts, hdc = parsed.get(4), parsed.get(5)
@@ -1189,16 +1189,16 @@ fn decode(any data) any {
    def is_prog = parsed.get(11)
    def mh, mv = int(parsed.get(12, 1)), int(parsed.get(13, 1))
    def restart_interval = int(parsed.get(14, 0))
-   if(is_prog){ return _jpeg_decode_progressive(data, wVal, hVal, mh, mv, qts, hdc, hac, cidMap, cord, scan_list) }
-   if(wVal == 0 || hVal == 0 || ssVal == 0){ return 0 }
+   if is_prog { return _jpeg_decode_progressive(data, wVal, hVal, mh, mv, qts, hdc, hac, cidMap, cord, scan_list) }
+   if wVal == 0 || hVal == 0 || ssVal == 0 { return 0 }
    def tpx = wVal * hVal
    def mcu_w, mcu_h = mh * 8, mv * 8
    def padded_w, padded_h = ((wVal + mcu_w - 1) / mcu_w) * mcu_w, ((hVal + mcu_h - 1) / mcu_h) * mcu_h
    def tpx_pad = padded_w * padded_h
    mut plane_sz = tpx
-   if(tpx_pad > tpx){ plane_sz = tpx_pad }
+   if tpx_pad > tpx { plane_sz = tpx_pad }
    def planes = _jpeg_alloc_planes(plane_sz)
-   if(!planes){ return 0 }
+   if !planes { return 0 }
    def cyB, ccbB = planes.get(0), planes.get(1)
    def ccrB = planes.get(2)
    def bs = _bs_m(data, ssVal)
@@ -1207,25 +1207,25 @@ fn decode(any data) any {
    mut mcu_count = 0
    mut restart_seq = 0
    mut Yid = 1
-   if(cord.len > 0){ Yid = cord.get(0) }
+   if cord.len > 0 { Yid = cord.get(0) }
    mut Cbid = 2
-   if(cord.len > 1){ Cbid = cord.get(1) }
+   if cord.len > 1 { Cbid = cord.get(1) }
    mut decode_cf = list(64)
    mut decode_blk = list(64)
    mut decode_natural = list(64)
    mut i64 = 0
-   while(i64 < 64){
+   while i64 < 64 {
       decode_cf = decode_cf.append(0)
       decode_blk = decode_blk.append(0)
       decode_natural = decode_natural.append(0)
       i64 += 1
    }
    mut mcy = 0
-   while((mcy * 8 * mv) < hVal){
+   while (mcy * 8 * mv) < hVal {
       mut mcx = 0
-      while((mcx * 8 * mh) < wVal){
-         if(restart_interval > 0 && mcu_count > 0 && (mcu_count % restart_interval) == 0){
-            if(!_bs_skip_restart(bs, restart_seq)){ return 0 }
+      while (mcx * 8 * mh) < wVal {
+         if restart_interval > 0 && mcu_count > 0 && (mcu_count % restart_interval) == 0 {
+            if !_bs_skip_restart(bs, restart_seq) { return 0 }
             restart_seq = (restart_seq + 1) & 7
             pdc1 = 0
             pdc2 = 0
@@ -1233,10 +1233,10 @@ fn decode(any data) any {
          }
          def scan_n = scan.len
          mut sidx_l = 0
-         while(sidx_l < scan_n){
+         while sidx_l < scan_n {
             def cid = scan.get(sidx_l)
             def dobj = cidMap.get(cid)
-            if(!is_list(dobj)){
+            if !is_list(dobj) {
                sidx_l += 1
                continue
             }
@@ -1245,22 +1245,22 @@ fn decode(any data) any {
             def dhV = hdc.get(dobj.get(3))
             def ahV = hac.get(dobj.get(4))
             mut vb = 0
-            while(vb < vsV){
+            while vb < vsV {
                mut hb = 0
-               while(hb < hsV){
+               while hb < hsV {
                   mut pdcV = pdc3
                   mut planeL = ccrB
-                  if(cid == Yid){
+                  if cid == Yid {
                      pdcV = pdc1
                      planeL = cyB
-                  } elif(cid == Cbid){
+                  } elif cid == Cbid {
                      pdcV = pdc2
                      planeL = ccbB
                   }
                   def step_x, step_y = max(1, mh / max(1, hsV)), max(1, mv / max(1, vsV))
                   _d_du(bs, dhV, ahV, qtV, pdcV, planeL, plane_sz, ((mcy * 8 * mv + vb * 8) * wVal + (mcx * 8 * mh + hb * 8)), step_x, step_y, wVal, decode_cf, decode_blk, decode_natural)
                   def ndcV = bs.get(4)
-                  if(cid == Yid){ pdc1 = ndcV } elif(cid == Cbid){
+                  if cid == Yid { pdc1 = ndcV } elif cid == Cbid {
                      pdc2 = ndcV
                   } else {
                      pdc3 = ndcV
@@ -1279,7 +1279,7 @@ fn decode(any data) any {
    def pix = _jpeg_planes_to_rgba(cyB, ccbB, ccrB, wVal, hVal)
    def rd = _jpeg_image_result(pix, wVal, hVal)
    free(cyB, ccbB, ccrB)
-   if(diag_on){
+   if diag_on {
       print("[jpeg] blocks=" + to_str(_jpeg_diag_total_blocks) +
          " dc_fail=" + to_str(_jpeg_diag_dc_fail) +
          " ac_fail=" + to_str(_jpeg_diag_ac_fail) +
@@ -1291,7 +1291,7 @@ fn decode(any data) any {
 fn _mgb(any v) int {
    mut xV = (v < 0) ? -v : v
    mut nC = 0
-   while(xV > 0){
+   while xV > 0 {
       xV = xV >> 1
       nC += 1
    }
@@ -1299,8 +1299,8 @@ fn _mgb(any v) int {
 }
 
 fn _apb(int v, int n) int {
-   if(n == 0){ return 0 }
-   if(v < 0){ return v + (1 << n) - 1 }
+   if n == 0 { return 0 }
+   if v < 0 { return v + (1 << n) - 1 }
    return v
 }
 
@@ -1316,21 +1316,21 @@ fn _eeb(list eb, int b) any {
    def bV = b & 255
    mut bL = eb.get(2)
    bL = bL.append(bV)
-   if(bV == 255){ bL = bL.append(0) }
+   if bV == 255 { bL = bL.append(0) }
    eb[2] = bL
    0
 }
 
 fn _epb(list eb, int b, int n) any {
-   if(n == 0){ return 0 }
+   if n == 0 { return 0 }
    mut acc = eb.get(0)
    mut num = eb.get(1)
    mut iC = n
-   while(iC > 0){
+   while iC > 0 {
       iC -= 1
       acc = (acc << 1) | ((b >> iC) & 1)
       num += 1
-      if(num == 8){
+      if num == 8 {
          _eeb(eb, acc)
          acc = 0
          num = 0
@@ -1342,7 +1342,7 @@ fn _epb(list eb, int b, int n) any {
 }
 
 fn _ebf(list eb) any {
-   if(eb.get(1) > 0){
+   if eb.get(1) > 0 {
       def acc = eb.get(0)
       def num = eb.get(1)
       def pushV = (acc << (8 - num)) | ((1 << (8 - num)) - 1)
@@ -1356,14 +1356,14 @@ fn _ebf(list eb) any {
 fn _fdct(list blk, list qn) list {
    mut nat = pbin.zero_list(64)
    mut vL = 0
-   while(vL < 8){
+   while vL < 8 {
       mut uL = 0
-      while(uL < 8){
+      while uL < 8 {
          mut sA = 0.0
          mut yC = 0
-         while(yC < 8){
+         while yC < 8 {
             mut xC = 0
-            while(xC < 8){
+            while xC < 8 {
                def pV = blk.get((yC * 8 + xC)) * 1.0
                def a1 = ((2.0 * xC + 1.0) * uL * 3.141592653589793) / 16.0
                def a2 = ((2.0 * yC + 1.0) * vL * 3.141592653589793) / 16.0
@@ -1385,7 +1385,7 @@ fn _fdct(list blk, list qn) list {
    }
    mut zz = pbin.zero_list(64)
    mut kI = 0
-   while(kI < 64){
+   while kI < 64 {
       zz[kI] = nat.get(_ZZ.get(kI))
       kI += 1
    }
@@ -1397,13 +1397,13 @@ fn _ebk(list eb, list zz, int pdc, list dm, list am) int {
    def dff = dc - pdc
    def nb = _mgb(dff)
    _epb(eb, dm.get(0).get(nb), dm.get(1).get(nb))
-   if(nb > 0){ _epb(eb, _apb(dff, nb), nb) }
+   if nb > 0 { _epb(eb, _apb(dff, nb), nb) }
    mut run = 0
    mut iI = 1
-   while(iI < 64){
+   while iI < 64 {
       def cV = zz.get(iI)
-      if(cV == 0){ run += 1 } else {
-         while(run >= 16){
+      if cV == 0 { run += 1 } else {
+         while run >= 16 {
             _epb(eb, am.get(0).get(0xF0), am.get(1).get(0xF0))
             run -= 16
          }
@@ -1415,14 +1415,14 @@ fn _ebk(list eb, list zz, int pdc, list dm, list am) int {
       }
       iI += 1
    }
-   if(run > 0){ _epb(eb, am.get(0).get(0), am.get(1).get(0)) }
+   if run > 0 { _epb(eb, am.get(0).get(0), am.get(1).get(0)) }
    return dc
 }
 
 fn _jpeg_append_bytes(list out, list bytes) list {
    def n = bytes.len
    mut i = 0
-   while(i < n){
+   while i < n {
       out = out.append(bytes.get(i))
       i += 1
    }
@@ -1431,23 +1431,23 @@ fn _jpeg_append_bytes(list out, list bytes) list {
 
 fn _jpeg_scaled_quant_tables(int qual) list {
    mut q1Val = qual
-   if(q1Val < 1){ q1Val = 1 }
-   if(q1Val > 100){ q1Val = 100 }
+   if q1Val < 1 { q1Val = 1 }
+   if q1Val > 100 { q1Val = 100 }
    def sc = (q1Val < 50) ? (5000 / q1Val) : (200 - q1Val * 2)
    mut qyn, qcn = list(64), list(64)
    mut iI = 0
-   while(iI < 64){
+   while iI < 64 {
       mut v1, v2 = (_QY.get(iI) * sc + 50) / 100, (_QC.get(iI) * sc + 50) / 100
-      if(v1 < 1){ v1 = 1 }
-      if(v1 > 255){ v1 = 255 }
-      if(v2 < 1){ v2 = 1 }
-      if(v2 > 255){ v2 = 255 }
+      if v1 < 1 { v1 = 1 }
+      if v1 > 255 { v1 = 255 }
+      if v2 < 1 { v2 = 1 }
+      if v2 > 255 { v2 = 255 }
       qyn, qcn = qyn.append(v1), qcn.append(v2)
       iI += 1
    }
    mut qyz, qcz = list(64), list(64)
    mut jI = 0
-   while(jI < 64){
+   while jI < 64 {
       qyz, qcz = qyz.append(qyn.get(_ZZ.get(jI))), qcz.append(qcn.get(_ZZ.get(jI)))
       jI += 1
    }
@@ -1457,7 +1457,7 @@ fn _jpeg_scaled_quant_tables(int qual) list {
 fn _jpeg_append_quant_table(list out, int table_id, list qz) list {
    out = _jpeg_append_bytes(out, [255, 219, 0, 67, table_id])
    mut kQ = 0
-   while(kQ < 64){
+   while kQ < 64 {
       out = out.append(qz.get(kQ))
       kQ += 1
    }
@@ -1468,12 +1468,12 @@ fn _jpeg_append_huffman_table(list out, int table_class_id, list counts, list va
    def seg_len = 3 + 16 + val_count
    out = _jpeg_append_bytes(out, [255, 196, (seg_len >> 8) & 255, seg_len & 255, table_class_id])
    mut kD = 0
-   while(kD < 16){
+   while kD < 16 {
       out = out.append(counts.get(kD))
       kD += 1
    }
    kD = 0
-   while(kD < val_count){
+   while kD < val_count {
       out = out.append(vals.get(kD))
       kD += 1
    }
@@ -1515,16 +1515,16 @@ fn _jpeg_sample_ycc_blocks(any dataV, int wVal, int hVal, int chV, int bx, int b
    mut bCbData = list(64)
    mut bCrData = list(64)
    mut yI = 0
-   while(yI < 8){
+   while yI < 8 {
       mut xI = 0
-      while(xI < 8){
+      while xI < 8 {
          def px, py = ((bx + xI) < wVal) ? (bx + xI) : (wVal - 1), ((by + yI) < hVal) ? (by + yI) : (hVal - 1)
          def po = (py * wVal + px) * chV
          def rR = load8(dataV, po)
          mut rV, gV = rR, rR
          mut bV = rR
-         if(chV >= 3){ gV, bV = load8(dataV, (po + 1)), load8(dataV, (po + 2)) }
-         if(chV == 4){
+         if chV >= 3 { gV, bV = load8(dataV, (po + 1)), load8(dataV, (po + 2)) }
+         if chV == 4 {
             def aV_raw = load8(dataV, (po + 3))
             def ai, bi = aV_raw, 255 - ai
             rV, gV = (rV * ai + 255 * bi) / 255, (gV * ai + 255 * bi) / 255
@@ -1548,7 +1548,7 @@ fn _jpeg_append_entropy_payload(list out, list eb) list {
    def fb = eb.get(2)
    def fb_n = fb.len
    mut kI = 0
-   while(kI < fb_n){
+   while kI < fb_n {
       out = out.append(fb.get(kI))
       kI += 1
    }
@@ -1560,7 +1560,7 @@ fn _jpeg_bytes_from_list(list out) any {
    def resL = out.len
    def resP = init_str(malloc(resL + 32), resL)
    mut rI = 0
-   while(rI < resL){
+   while rI < resL {
       store8(resP, out.get(rI), rI)
       rI += 1
    }
@@ -1583,9 +1583,9 @@ fn encode(any img, int qual=90) any {
    mut d1, d2 = 0, 0
    mut d3 = 0
    mut by = 0
-   while(by < hVal){
+   while by < hVal {
       mut bx = 0
-      while(bx < wVal){
+      while bx < wVal {
          def blocks = _jpeg_sample_ycc_blocks(dataV, wVal, hVal, chV, bx, by)
          d1, d2 = _ebk(eb, _fdct(blocks.get(0), qyn), d1, dmY, amY), _ebk(eb, _fdct(blocks.get(1), qcn), d2, dmC, amC)
          d3 = _ebk(eb, _fdct(blocks.get(2), qcn), d3, dmC, amC)
