@@ -8,9 +8,9 @@ module std.os.ui.window.platform.contract(WindowBackendContract, CAP_CREATE, CAP
 use std.core
 
 layout WindowBackendContract pack(4){
-   i32: backend,
-   i32: mask,
-   i32: required
+   i32 backend,
+   i32 mask,
+   i32 required
 }
 
 def CAP_CREATE = 1

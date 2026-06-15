@@ -150,7 +150,7 @@ static inline bool parser_parse_param_type_first(parser_t *p, param_t *pr,
   parser_match(p, NY_T_COLON);
   if (p->cur.kind != NY_T_IDENT) {
     parser_error(p, p->cur, "expected parameter name after type",
-                 "write 'Type name' or 'Type: name'");
+                 "write 'Type name'");
     return false;
   }
   if (parser_token_is_builtin_type(p->cur) && !parser_type_ref_is_builtin_type(pr->type)) {

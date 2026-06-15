@@ -393,17 +393,7 @@ static inline uint64_t ny_module_used_index_version(const codegen_t *cg,
 }
 
 static inline uint32_t ny_fun_name_len(fun_sig *fs) {
-  if (!fs || !fs->name)
-    return 0;
-  if (fs->name[0] == '\0') {
-    fs->name_len = 0;
-    return 0;
-  }
-  if (fs->name_len && fs->name_hash)
-    return fs->name_len;
-  size_t n = strlen(fs->name);
-  fs->name_len = (uint32_t)n;
-  return (uint32_t)n;
+  return ny_cached_fun_name_len(fs);
 }
 
 static inline uint64_t ny_fun_name_hash(fun_sig *fs) {

@@ -5,5 +5,5 @@ fn first(xs) {
    xs[0]
 }
 
-def int: c = first("AZ")
+def int c = first("AZ")
 print(c)

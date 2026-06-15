@@ -19,7 +19,7 @@ Nytrix uses dated release milestones. Exact build snapshots are identified by th
 ### Changed
 
 * Simplified editor layouts, asset browsing, hierarchy and inspector panels, and F1 editor toggling.
-* Simplified function syntax from `fn foo(type: arg): ret` to `fn foo(type arg) ret`.
+* Simplified typed function syntax to `fn foo(type arg) ret`.
 * Improved window resizing, input handling, MSYS2 support, and runtime deployment.
 * Reworked renderer and viewer architecture around the `render/viewer` split.
 * Optimized animated glTF mesh updates by retaining GPU index buffers.

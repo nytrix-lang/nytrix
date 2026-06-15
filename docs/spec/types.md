@@ -31,21 +31,21 @@ Generic type expressions are part of the compiler surface. Common forms are
 ## Typed bindings
 
 ```ny
-def int: port = 8080
-mut str: name = "ny"
+def int port = 8080
+mut str name = "ny"
 fn add(int a, int b) int { a + b }
 ```
 
-Typed binding order stays `Type: name`.
+Typed binding order is `Type name`.
 
 ## Numeric casts
 
 Fixed-width scalar casts use callable type names:
 
 ```ny
-def u64: n = u64(42)
-def i32: small = i32(n)
-def f64: ratio = f64(small) / 2.0
+def u64 n = u64(42)
+def i32 small = i32(n)
+def f64 ratio = f64(small) / 2.0
 ```
 
 Available cast names are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`,
@@ -57,9 +57,9 @@ Available cast names are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`,
 or handle `nil` before using the payload as non-null.
 
 ```ny
-def ?str: maybe_name = nil
+def ?str maybe_name = nil
 if(maybe_name != nil){
-   def str: name = maybe_name
+   def str name = maybe_name
 }
 ```
 
@@ -89,27 +89,27 @@ assert(Color.Red == 0, "enum value")
 ```
 
 `enum` declares an algebraic data type. Variants can be payload-less or carry
-named payload fields.
+ordered payload fields.
 
 ```ny
 enum Shape {
-   Circle(int: radius),
-   Rect(int: width, int: height),
+   Circle(int radius),
+   Rect(int width, int height),
    Empty
 }
 
-def c = Shape.Circle(radius: 4)
-def also_c = Circle(radius: 2)
+def c = Shape.Circle(4)
+def also_c = Circle(2)
 ```
 
-Payload constructors require named fields. Pattern matching refines payload
-fields in each arm:
+Payload constructors use positional values. Pattern matching binds payload
+values positionally in each arm:
 
 ```ny
 fn area(Shape s) int {
    match s {
-      Shape.Circle(radius: r) -> r * r
-      Shape.Rect(width: w, height: h) -> w * h
+      Shape.Circle(r) -> r * r
+      Shape.Rect(w, h) -> w * h
       Shape.Empty -> 0
    }
 }
@@ -119,15 +119,15 @@ Generic ADTs declare type parameters and work in typed bindings:
 
 ```ny
 enum Option<T> {
-   Some(T: value),
+   Some(T value),
    None
 }
 
-def Option<int>: value = Option.Some(value: 41)
+def Option<int> value = Option.Some(41)
 ```
 
 The compiler checks generic ADT payloads in typed contexts; for example,
-`Option<int>` rejects `Option.Some(value: "text")`.
+`Option<int>` rejects `Option.Some("text")`.
 
 ## Native types
 
@@ -148,7 +148,7 @@ code.
 
 ```ny
 struct Box {
-   value: int
+   int value
 }
 
 fn read(Box box) int {
@@ -164,19 +164,19 @@ Layout forms include packing, alignment, derived helpers, and guards:
 
 ```ny
 layout Packed pack(1){
-   tag: u8,
-   value: i32
+   u8 tag,
+   i32 value
 }
 
 layout record Row derive(default, eq, hash, debug_str) pack(4){
-   id: i32
+   i32 id
 }
 
 layout shape Header derive(load, store, zero) pack(8){
-   sender: str
+   str sender
 }
 
-layout guard Header: h = value else {
+layout guard Header h = value else {
    return err("bad header")
 }
 ```
@@ -185,9 +185,7 @@ layout guard Header: h = value else {
 layout pointer type. Derived layout shapes emit `LayoutName_from(value)` and
 `*_load_*` helpers when requested.
 
-Struct and layout fields use `name: Type`. The parser accepts the older
-primitive-only `Type: name` spelling for compatibility, but custom field types
-should use `name: Type`.
+Struct and layout fields use the short `Type name` spelling.
 
 ## Impl self and operators
 
@@ -240,7 +238,7 @@ ty.extend_type_group("math_input", ["seq"])
 ```
 
 `is_type`, `require_type`, `assert_type`, and typed function annotations such
-as `number: x` accept groups.
+as `number x` accept groups.
 
 ## Compile-time checks
 
@@ -267,7 +265,7 @@ ny --strict-types file.ny
 ```
 
 Use `--no-strict-types` only when an outer tool or environment enabled strict
-dynamic checks and a legacy probe intentionally relies on them:
+dynamic checks and a compatibility probe intentionally relies on them:
 
 ```bash
 ny --no-strict-types old_probe.ny

@@ -8,15 +8,15 @@ block values.
 ```ny
 def name = expr
 mut name = expr
-def Type: name = expr
-mut Type: name = expr
+def Type name = expr
+mut Type name = expr
 def a, b = expr
 mut a, b
 del name
 ```
 
 `def` creates an immutable binding. `mut` creates a mutable binding. Typed
-binding order is `Type: name`.
+binding order is `Type name`.
 
 `del name` sets an existing mutable binding to `nil` and clears the compiler's
 static facts for that binding. The binding remains readable. `del` rejects
@@ -37,7 +37,7 @@ fn(a, b){ body }
 Named functions bind a public or local function name. `fn(...) { ... }` creates
 an inline callable value.
 
-The parser accepts `lambda(...) { ... }` as a legacy spelling with the same
+The parser accepts `lambda(...) { ... }` as a compatibility spelling with the same
 parameter-list and return-type syntax as `fn(...) { ... }`. New code should use
 `fn`.
 

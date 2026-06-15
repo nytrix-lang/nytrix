@@ -122,14 +122,7 @@ static binding *stmt_lookup_binding_no_mark(scope *scopes, size_t depth,
 
 static bool stmt_call_builtin_name_shadowed(codegen_t *cg, scope *scopes,
                                             size_t depth, expr_t *callee) {
-  size_t name_len = 0;
-  uint64_t hash = 0;
-  const char *name =
-      ny_builtin_surface_name_for_callee(callee, &name_len, &hash);
-  if (!name)
-    return true;
-  return ny_builtin_name_shadowed_by_user_symbol(cg, scopes, depth, name,
-                                                 name_len, hash);
+  return ny_call_builtin_name_shadowed(cg, scopes, depth, callee);
 }
 
 static bool stmt_expr_is_list_ctor(expr_t *e) {

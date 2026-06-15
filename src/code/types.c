@@ -109,14 +109,7 @@ static binding *type_lookup_binding(codegen_t *cg, scope *scopes, size_t depth,
 
 static bool type_call_builtin_name_shadowed(codegen_t *cg, scope *scopes,
                                             size_t depth, expr_t *callee) {
-  size_t name_len = 0;
-  uint64_t hash = 0;
-  const char *name =
-      ny_builtin_surface_name_for_callee(callee, &name_len, &hash);
-  if (!name)
-    return true;
-  return ny_builtin_name_shadowed_by_user_symbol(cg, scopes, depth, name,
-                                                 name_len, hash);
+  return ny_call_builtin_name_shadowed(cg, scopes, depth, callee);
 }
 
 static fun_sig *type_lookup_attached_method(codegen_t *cg,
@@ -912,26 +905,6 @@ bool ny_is_native_abi_type_name(const char *name) {
     return true;
   default:
     return false;
-  }
-}
-
-static LLVMTypeRef layout_abi_carrier_type(codegen_t *cg,
-                                           layout_def_t *layout) {
-  if (!cg || !layout)
-    return NULL;
-  if (layout->size > 16)
-    return cg->type_i8ptr;
-  switch (layout->size) {
-  case 1:
-    return cg->type_i8;
-  case 2:
-    return cg->type_i16;
-  case 4:
-    return cg->type_i32;
-  case 8:
-    return cg->type_i64;
-  default:
-    return layout->llvm_type;
   }
 }
 
@@ -2289,7 +2262,7 @@ LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *type_name,
   }
   layout_def_t *layout = lookup_layout(cg, resolved_name);
   if (layout)
-    return layout->llvm_type ? layout_abi_carrier_type(cg, layout)
+    return layout->llvm_type ? ny_layout_abi_carrier_type(cg, layout)
                              : cg->type_i64;
   if (is_opaque_system_abi_type(resolved_name))
     return cg->type_i8ptr;

@@ -7,8 +7,8 @@ ownership, and ABI behavior.
 
 ```ny
 layout Name {
-   field: Type,
-   field2: Type
+   Type field,
+   Type field2
 }
 ```
 
@@ -58,7 +58,7 @@ when a C function expects an out pointer:
 ```ny
 #include <sys/time.h> as ""
 
-mut timeval: tv = timeval(0, 0)
+mut timeval tv = timeval(0, 0)
 gettimeofday(&tv, NULL)
 ```
 

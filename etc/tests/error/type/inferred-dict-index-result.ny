@@ -5,5 +5,5 @@ fn getx(d) {
    d["x"]
 }
 
-def str: s = getx({"x": 1})
+def str s = getx({"x": 1})
 print(s)

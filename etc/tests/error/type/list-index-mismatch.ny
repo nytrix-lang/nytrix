@@ -2,5 +2,5 @@
 use std.core
 
 def xs = [1, 2, 3]
-def str: s = xs[0]
+def str s = xs[0]
 print(s)
