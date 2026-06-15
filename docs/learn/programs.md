@@ -134,18 +134,18 @@ Use `enum` when the API returns one of several tagged shapes.
 
 ```ny
 enum Parse<T> {
-   Ok(T: value),
-   Err(str: message)
+   Ok(T value),
+   Err(str message)
 }
 
 fn parse_flag(str raw) Parse<bool> {
-   if(raw == "yes"){ Parse.Ok(value: true) }
-   else { Parse.Err(message: "expected yes") }
+   if(raw == "yes"){ Parse.Ok(true) }
+   else { Parse.Err("expected yes") }
 }
 
 match parse_flag("yes") {
-   Parse.Ok(value: v) -> assert(v, "flag")
-   Parse.Err(message: msg) -> panic(msg)
+   Parse.Ok(v) -> assert(v, "flag")
+   Parse.Err(msg) -> panic(msg)
 }
 ```
 

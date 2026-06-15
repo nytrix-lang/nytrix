@@ -6,5 +6,5 @@ enum Option<T> {
    None
 }
 
-def Option<int>: x = Option.Some("hi")
+def Option<int> x = Option.Some("hi")
 print(x)

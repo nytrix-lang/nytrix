@@ -38,7 +38,7 @@ The unqualified profile import brings the module core export group plus the
 named profile into scope. Item imports still use the module's exported public
 surface.
 
-`use module.path *` is accepted as a broad legacy import form. Public examples
+`use module.path *` is accepted as a broad compatibility import form. Public examples
 use explicit module imports, aliases, or item lists.
 
 There is no implicit global `std` object before import. This is not valid unless

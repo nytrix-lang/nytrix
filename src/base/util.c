@@ -154,24 +154,28 @@ const char *ny_get_temp_dir(void) {
 #endif
 #endif
 }
+static void ny_strip_shebang_inplace(char *content, size_t read) {
+  if (!content || read < 2 || content[0] != '#' || content[1] != '!')
+    return;
+  char *newline = strchr(content, '\n');
+  if (!newline)
+    return;
+  size_t skip_len = (size_t)(newline - content) + 1;
+  if (skip_len < read) {
+    size_t new_len = read - skip_len;
+    memmove(content, newline + 1, new_len);
+    content[new_len] = '\0';
+  } else {
+    content[0] = '\0';
+  }
+}
+
 char *ny_read_file(const char *path) {
   size_t read = 0;
   char *content = ny_read_file_raw(path, &read);
   if (!content)
     return NULL;
-  if (read >= 2 && content[0] == '#' && content[1] == '!') {
-    char *newline = strchr(content, '\n');
-    if (newline) {
-      size_t skip_len = (size_t)(newline - content) + 1;
-      if (skip_len < read) {
-        size_t new_len = read - skip_len;
-        memmove(content, newline + 1, new_len);
-        content[new_len] = '\0';
-      } else {
-        content[0] = '\0';
-      }
-    }
-  }
+  ny_strip_shebang_inplace(content, read);
   return content;
 }
 
@@ -222,6 +226,7 @@ char *ny_read_url(const char *url) {
       ny_curl_cleanup(&curl_state);
 
       if (res == 0 && buf.data) {
+        ny_strip_shebang_inplace(buf.data, buf.len);
         return buf.data;
       }
       free(buf.data);

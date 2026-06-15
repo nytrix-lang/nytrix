@@ -33,7 +33,7 @@ assert(tp[-1] == 6, "tuple negative index read")
 def s = "abcd"
 assert(s[2] == "c", "string index read")
 assert(s[-2] == "c", "string negative index read")
-mut bytes: bs = bytes(3)
+mut bytes bs = bytes(3)
 bs = bytes_set(bs, 0, 65)
 bs = bytes_set(bs, 1, 66)
 bs = bytes_set(bs, 2, 67)
@@ -51,10 +51,10 @@ while i < xs.len {
 
 assert(mix == 87, "mixed indexed loop read")
 def raw_probe = [2, 3, 4, 5, 6, 7, 8, 9]
-mut int: raw_acc = 0
-mut int: raw_i = 0
+mut int raw_acc = 0
+mut int raw_i = 0
 while raw_i < 64 {
-   def int: raw_idx = (((raw_i * 3) + 1) % 8)
+   def int raw_idx = (((raw_i * 3) + 1) % 8)
    raw_acc += get(raw_probe, raw_idx, 0) + (raw_i % 5)
    raw_i += 1
 }
@@ -64,13 +64,13 @@ def raw_repr_probe = [0, 0, 1]
 assert(raw_repr_probe == [0, 0, 1], "list representation valid")
 assert(repr(raw_repr_probe) == "[0, 0, 1]", "list repr")
 assert(to_str(raw_repr_probe) == "[0, 0, 1]", "list to_str")
-mut int: redecl_i = 0
+mut int redecl_i = 0
 while redecl_i < 3 {
    redecl_i += 1
 }
 
-mut int: redecl_i = 0
-mut int: redecl_sum = 0
+mut int redecl_i = 0
+mut int redecl_sum = 0
 while redecl_i < 4 {
    redecl_sum += redecl_i
    redecl_i += 1

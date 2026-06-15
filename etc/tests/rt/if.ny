@@ -23,7 +23,7 @@ fn non_tail_if_expr_return(bool flag) dict {
 
 fn require_text_after_panic(?str candidate) str {
    if candidate == nil { panic("missing text") }
-   def str: out = candidate
+   def str out = candidate
    out
 }
 

@@ -307,6 +307,7 @@ static int sb_addn(sb_t *sb, const char *s, size_t n) {
 }
 
 static int sb_add(sb_t *sb, const char *s) { return sb_addn(sb, s, strlen(s)); }
+static void sb_add_xml_escaped(sb_t *sb, const char *s);
 
 #define NYT_OG_W 1200
 #define NYT_OG_H 630
@@ -386,28 +387,6 @@ static int dirname_into(char *out, size_t out_n, const char *path) {
   return 1;
 }
 
-static void sb_add_og_xml_escaped(sb_t *sb, const char *s) {
-  for (const char *p = s ? s : ""; *p; p++) {
-    switch (*p) {
-    case '&':
-      sb_add(sb, "&amp;");
-      break;
-    case '<':
-      sb_add(sb, "&lt;");
-      break;
-    case '>':
-      sb_add(sb, "&gt;");
-      break;
-    case '"':
-      sb_add(sb, "&quot;");
-      break;
-    default:
-      sb_addn(sb, p, 1);
-      break;
-    }
-  }
-}
-
 static int write_og_fontconfig(const char *path, const char *font_path) {
   if (!font_path || !ny_path_readable(font_path))
     return 0;
@@ -420,7 +399,7 @@ static int write_og_fontconfig(const char *path, const char *font_path) {
                "<fontconfig>\n"
                "  <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n"
                "  <dir>");
-  sb_add_og_xml_escaped(&xml, font_dir);
+  sb_add_xml_escaped(&xml, font_dir);
   sb_add(&xml, "</dir>\n</fontconfig>\n");
   int ok = xml.data && write_file(path, xml.data);
   free(xml.data);

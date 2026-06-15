@@ -12,7 +12,7 @@ use std.core
 module stats(mean, median)
 
 fn mean(list<number> xs) number {
-   mut number: total = 0
+   mut number total = 0
    for x in xs { total += x }
    total / xs.len
 }

@@ -22,10 +22,10 @@ Identify the native contract before writing Nytrix declarations:
 
 ```ny
 layout Pixel {
-   u8: r,
-   u8: g,
-   u8: b,
-   u8: a
+   u8 r,
+   u8 g,
+   u8 b,
+   u8 a
 }
 ```
 
@@ -75,7 +75,7 @@ Imported C typedef structs become layouts:
 ```ny
 #include <sys/time.h> as ""
 
-mut timeval: tv = timeval(0, 0)
+mut timeval tv = timeval(0, 0)
 gettimeofday(&tv, NULL)
 ```
 
@@ -124,7 +124,7 @@ their byte range. Scoped buffers make the lifetime explicit:
 
 ```ny
 with ptr: buf = malloc(16){
-   def int: off = 4
+   def int off = 4
    assert_compile_range(off, 0, 15, "buffer byte offset")
    store8(buf, 1, off)
 }
@@ -138,10 +138,10 @@ Native checks verify one boundary at a time:
 use std.core
 
 layout Pixel {
-   u8: r,
-   u8: g,
-   u8: b,
-   u8: a
+   u8 r,
+   u8 g,
+   u8 b,
+   u8 a
 }
 
 assert_eq(sizeof(Pixel), 4, "pixel abi size")

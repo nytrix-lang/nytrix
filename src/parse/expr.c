@@ -1113,7 +1113,7 @@ static expr_t *parse_primary(parser_t *p) {
     }
     parser_expect(p, NY_T_RPAREN, NULL, NULL);
     if (parser_match(p, NY_T_COLON)) {
-      parser_error(p, p->prev, "legacy function return syntax",
+      parser_error(p, p->prev, "old function return separator",
                    "write 'fn(params) RetType { ... }', without ':'");
       if (p->cur.kind != NY_T_LBRACE && p->cur.kind != NY_T_ASSIGN &&
           p->cur.kind != NY_T_EOF)

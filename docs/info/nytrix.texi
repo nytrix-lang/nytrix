@@ -87,8 +87,8 @@ Open the REPL.
 @example
 def name = expr
 mut name = expr
-def Type: name = expr
-mut Type: name = expr
+def Type name = expr
+mut Type name = expr
 def a, b = expr
 
 fn name(params) @{ body @}
@@ -96,8 +96,7 @@ fn name(params) Type @{ body @}
 fn(v)@{ expr @}
 @end example
 
-Function parameters use @code{Type name}. Typed bindings and fields use
-@code{Type: name}. @code{fn(...)} is the canonical inline callable spelling.
+Function parameters, typed bindings, and fields use @code{Type name}. @code{fn(...)} is the canonical inline callable spelling.
 
 @section Types
 
@@ -126,7 +125,7 @@ if(cond)@{ body @} elif(other)@{ body @} else @{ body @}
 while(cond)@{ body @}
 for value, index in expr @{ body @}
 case value @{ literal -> expr _ -> fallback @}
-match value @{ Pattern(field: name) -> expr _ -> fallback @}
+match value @{ Pattern(value) -> expr _ -> fallback @}
 try @{ body @} catch err @{ handler @}
 defer @{ cleanup @}
 with Type: name = value @{ body @}
@@ -163,10 +162,10 @@ extern "library" @{ fn symbol(Type arg) Type @}
 extern @{ fn process_symbol(Type arg) Type @}
 
 layout Pixel @{
-   u8: r,
-   u8: g,
-   u8: b,
-   u8: a
+   u8 r,
+   u8 g,
+   u8 b,
+   u8 a
 @}
 @end example
 

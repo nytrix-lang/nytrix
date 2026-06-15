@@ -3686,7 +3686,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
                    "Declare variable (not 'let')");
             printf("  %-30s %s\n", "fn name(params) Ret { }",
                    "Function with return type");
-            printf("  %-30s %s\n", "Type name / Type: field",
+            printf("  %-30s %s\n", "Type name field syntax",
                    "Function param / typed field");
             printf("  %-30s %s\n", ";", "Line comment (not '//')");
             printf("  %-30s %s\n", "dict() / []", "Empty dict / list literal");

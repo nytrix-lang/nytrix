@@ -638,27 +638,6 @@ static bool ny_ct_fast_eval_unary(const char *op, const ny_ct_fast_val_t *r,
     return true;                                                               \
   }
 
-static bool ny_ct_fast_pow_i64(int64_t base, int64_t exp, int64_t *out) {
-  if (!out || exp < 0)
-    return false;
-  int64_t result = 1;
-  int64_t b = base;
-  uint64_t e = (uint64_t)exp;
-  while (e) {
-    if (e & 1) {
-      if (__builtin_mul_overflow(result, b, &result) ||
-          !ny_small_int_fits_i64(result))
-        return false;
-    }
-    e >>= 1;
-    if (e) {
-      if (__builtin_mul_overflow(b, b, &b) || !ny_small_int_fits_i64(b))
-        return false;
-    }
-  }
-  *out = result;
-  return true;
-}
 
 static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
                               ny_ct_fast_val_t *out) {
@@ -752,7 +731,7 @@ static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
       out->i = l ^ r;
       return true;
     }
-    if (!op[1] && ny_ct_fast_pow_i64(l, r, &out->i)) {
+    if (!op[1] && ny_checked_small_pow_i64(l, r, &out->i)) {
       out->kind = NY_CT_FAST_INT;
       return true;
     }

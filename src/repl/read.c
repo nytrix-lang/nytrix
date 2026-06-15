@@ -35,20 +35,6 @@ static int ny_hist_cap = 0;
 static int ny_hist_max = 1000;
 static const char *NY_HIST_MAGIC = "NYHIST1";
 
-static int starts_with_ci(const char *s, const char *prefix) {
-  if (!s || !prefix)
-    return 0;
-  while (*prefix) {
-    if (!*s)
-      return 0;
-    if (tolower((unsigned char)*s) != tolower((unsigned char)*prefix))
-      return 0;
-    s++;
-    prefix++;
-  }
-  return 1;
-}
-
 static int repl_next_cap(int current, int needed_len, int extra) {
   if (needed_len < 0)
     return 0;
@@ -2079,13 +2065,13 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {"case", "case value { pattern -> expr }", "Match a value against patterns.", 6},
     {"match", "match value { pattern -> expr }", "Match a value against patterns.", 6},
     {"enum", "enum Name { A, B }", "Declare an enum type.", 6},
-    {"struct", "struct Name { type: field }", "Declare a structured value type.", 6},
-    {"layout", "layout Name { type: field }", "Declare an ABI/layout-shaped type.", 6},
+    {"struct", "struct Name { Type field }", "Declare a structured value type.", 6},
+    {"layout", "layout Name { Type field }", "Declare an ABI/layout-shaped type.", 6},
     {"extern", "extern \"lib\" { fn name(...) }", "Declare foreign functions.", 6},
     {"embed", "embed \"path\"", "Embed file contents at compile time.", 6},
     {"comptime", "comptime { ... }", "Run code during compilation.", 6},
     {"impl", "impl type { fn method(...) { ... } }", "Attach methods/operators to a type.", 6},
-    {"operator", "operator + Type: Type = fn_name", "Bind an operator implementation.", 6},
+    {"operator", "operator Type + Type: Type = fn_name", "Bind an operator implementation.", 6},
     {"self", "self", "Receiver type marker inside impl methods.", 6},
     {"true", "true", "Boolean true literal.", 6},
     {"false", "false", "Boolean false literal.", 6},
@@ -2114,6 +2100,10 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
 };
 
 static char **g_repl_comp_sort_matches = NULL;
+
+#define REPL_COMPLETION_EMPTY_LIMIT 96
+#define REPL_COMPLETION_FILTER_LIMIT 900
+#define REPL_COMPLETION_PREVIEW_ROWS 9
 
 static int repl_env_bool(const char *name, int *out) {
   const char *v = getenv(name);
@@ -2155,11 +2145,11 @@ static repl_comp_theme_t repl_completion_theme(void) {
     return t;
   }
   t.dim = "\x1b[90m";
-  t.accent = "\x1b[36m";
-  t.match = "\x1b[1;33m";
+  t.accent = "\x1b[95m";
+  t.match = "\x1b[1;36m";
   t.item = "\x1b[37m";
-  t.selected = "\x1b[100m\x1b[97m";
-  t.selected_match = "\x1b[100m\x1b[1;33m";
+  t.selected = "\x1b[48;5;236m\x1b[97m";
+  t.selected_match = "\x1b[48;5;236m\x1b[1;96m";
   return t;
 }
 
@@ -2606,6 +2596,64 @@ static void repl_print_fuzzy_candidate(const char *candidate, const char *query,
   printf("%s", theme->reset);
 }
 
+static int repl_completion_is_private_name(const char *s) {
+  if (!s || !*s)
+    return 0;
+  const char *base = repl_completion_last_segment(s);
+  return base && base[0] == '_';
+}
+
+static int repl_completion_is_command(const char *s) {
+  return s && s[0] == ':';
+}
+
+static int repl_completion_static_kind_is(const char *s, int kind) {
+  const repl_static_doc_t *doc = repl_completion_static_doc(s);
+  return doc && doc->kind == kind;
+}
+
+static int repl_completion_is_type_word(const char *s) {
+  return repl_completion_static_kind_is(s, 7);
+}
+
+static int repl_completion_is_syntax_word(const char *s) {
+  return repl_completion_static_kind_is(s, 6);
+}
+
+static int repl_completion_empty_score(const char *candidate, int member_context,
+                                       const char *owner_hint) {
+  if (!candidate || !*candidate)
+    return 0;
+  if (repl_completion_is_private_name(candidate))
+    return 0;
+  const char *base = repl_completion_last_segment(candidate);
+  size_t len = strlen(candidate);
+  int score = 1000;
+  if (repl_completion_is_command(candidate))
+    score += 9000;
+  if (repl_completion_is_syntax_word(candidate))
+    score += 8200;
+  if (repl_completion_is_type_word(candidate))
+    score += 7600;
+  if (!strchr(candidate, '.'))
+    score += 2200;
+  else if (strncmp(candidate, "std.", 4) == 0)
+    score += 700;
+  if (base && *base && strcmp(base, candidate) == 0)
+    score += 1000;
+  if (member_context)
+    score += 1500;
+  if (owner_hint && *owner_hint && base && *base)
+    score += 200;
+  if (len <= 18)
+    score += 450;
+  else if (len <= 32)
+    score += 250;
+  else if (len > 96)
+    score -= 700;
+  return score > 0 ? score : 1;
+}
+
 static int repl_completion_item_cmp(const void *a, const void *b) {
   const repl_comp_item_t *ia = (const repl_comp_item_t *)a;
   const repl_comp_item_t *ib = (const repl_comp_item_t *)b;
@@ -2616,71 +2664,12 @@ static int repl_completion_item_cmp(const void *a, const void *b) {
   return strcasecmp(sa, sb);
 }
 
-static int repl_completion_boundary_bonus(char prev) {
-  if (prev == '\0')
-    return 35;
-  if (prev == '.' || prev == '_' || prev == '-' || prev == '/' || prev == '\\')
-    return 28;
-  if (isspace((unsigned char)prev) || prev == ':' || prev == '(' || prev == '[')
-    return 18;
-  return 0;
-}
-
-static int repl_completion_fuzzy_score(const char *candidate, const char *query) {
-  if (!candidate)
-    return 0;
-  if (!query || !*query)
-    return 1;
-  if (strcmp(candidate, query) == 0)
-    return 2000;
-  if (strcasecmp(candidate, query) == 0)
-    return 1900;
-  size_t qlen = strlen(query);
-  if (strncasecmp(candidate, query, qlen) == 0)
-    return 1600 - (int)(strlen(candidate) > 120 ? 120 : strlen(candidate));
-  int score = 0;
-  int last = -1;
-  int first = -1;
-  int ci = 0;
-  for (int qi = 0; query[qi]; ++qi) {
-    unsigned char q = (unsigned char)tolower((unsigned char)query[qi]);
-    int found = -1;
-    while (candidate[ci]) {
-      unsigned char c = (unsigned char)tolower((unsigned char)candidate[ci]);
-      if (c == q) {
-        found = ci++;
-        break;
-      }
-      ci++;
-    }
-    if (found < 0)
-      return 0;
-    if (first < 0)
-      first = found;
-    score += 35;
-    if (last >= 0 && found == last + 1)
-      score += 55;
-    if (found == qi)
-      score += 25;
-    score += repl_completion_boundary_bonus(found > 0 ? candidate[found - 1] : '\0');
-    score -= found > 120 ? 120 : found;
-    last = found;
-  }
-  if (starts_with_ci(candidate, query))
-    score += 500;
-  if (first == 0)
-    score += 120;
-  size_t clen = strlen(candidate);
-  score -= clen > 160 ? 160 : (int)(clen / 2);
-  return score > 0 ? score : 1;
-}
-
 static int repl_completion_visible_rows(int term_rows) {
   int max_rows = term_rows - 7;
   if (max_rows < 4)
     max_rows = 4;
-  if (max_rows > 10)
-    max_rows = 10;
+  if (max_rows > REPL_COMPLETION_PREVIEW_ROWS)
+    max_rows = REPL_COMPLETION_PREVIEW_ROWS;
   return max_rows;
 }
 
@@ -2691,24 +2680,73 @@ static int repl_completion_page_rows(void) {
   return repl_completion_visible_rows(term_rows);
 }
 
+static int repl_completion_limit_for(int empty_query) {
+  const char *env = getenv(empty_query ? "NYTRIX_REPL_COMPLETE_EMPTY_LIMIT"
+                                      : "NYTRIX_REPL_COMPLETE_LIMIT");
+  if (env && *env) {
+    char *end = NULL;
+    long v = strtol(env, &end, 10);
+    if (end && *end == '\0' && v > 0 && v < INT_MAX)
+      return (int)v;
+  }
+  return empty_query ? REPL_COMPLETION_EMPTY_LIMIT : REPL_COMPLETION_FILTER_LIMIT;
+}
+
+static int repl_completion_better(char **matches, const repl_comp_item_t *a,
+                                  const repl_comp_item_t *b) {
+  if (!a || !b)
+    return 0;
+  if (a->score != b->score)
+    return a->score > b->score;
+  const char *sa = matches ? matches[a->idx] : "";
+  const char *sb = matches ? matches[b->idx] : "";
+  return strcasecmp(sa ? sa : "", sb ? sb : "") < 0;
+}
+
+static int repl_completion_worst_index(char **matches, repl_comp_item_t *items, int n) {
+  int worst = 0;
+  for (int i = 1; i < n; ++i) {
+    if (repl_completion_better(matches, &items[worst], &items[i]))
+      worst = i;
+  }
+  return worst;
+}
+
 static repl_comp_item_t *repl_completion_filter(char **matches, size_t count,
-                                                const char *query, int *out_len) {
+                                                const char *query, int member_context,
+                                                const char *owner_hint, int *out_len) {
   if (out_len)
     *out_len = 0;
   if (!matches || count == 0)
     return NULL;
+  int empty_query = (!query || !*query);
+  int limit = repl_completion_limit_for(empty_query);
   if (count > (size_t)INT_MAX)
     count = (size_t)INT_MAX;
-  repl_comp_item_t *items = malloc(sizeof(*items) * count);
+  if (limit <= 0 || limit > (int)count)
+    limit = (int)count;
+  repl_comp_item_t *items = malloc(sizeof(*items) * (size_t)limit);
   if (!items)
     return NULL;
   int n = 0;
+  int worst = -1;
   for (size_t i = 0; i < count; ++i) {
-    int score = repl_completion_fuzzy_score(matches[i], query);
-    if (score > 0) {
-      items[n].idx = (int)i;
-      items[n].score = score;
-      n++;
+    int score = empty_query
+                    ? repl_completion_empty_score(matches[i], member_context, owner_hint)
+                    : repl_fuzzy_score(matches[i], query, 0);
+    if (score <= 0)
+      continue;
+    repl_comp_item_t item = {.idx = (int)i, .score = score};
+    if (n < limit) {
+      items[n++] = item;
+      worst = -1;
+    } else {
+      if (worst < 0)
+        worst = repl_completion_worst_index(matches, items, n);
+      if (repl_completion_better(matches, &item, &items[worst])) {
+        items[worst] = item;
+        worst = -1;
+      }
     }
   }
   g_repl_comp_sort_matches = matches;
@@ -2729,6 +2767,46 @@ static int repl_completion_find_item(char **matches, repl_comp_item_t *items, in
       return i;
   }
   return 0;
+}
+
+
+static const char *repl_completion_selected(char **matches, repl_comp_item_t *items,
+                                            int item_count, int selected) {
+  if (!matches || !items || selected < 0 || selected >= item_count)
+    return NULL;
+  return matches[items[selected].idx];
+}
+
+static void repl_completion_refilter(char **matches, size_t count, const char *query,
+                                     int member_context, const char *owner_hint,
+                                     repl_comp_item_t **items, int *item_count,
+                                     int *selected, const char *old_choice) {
+  free(*items);
+  *items = repl_completion_filter(matches, count, query, member_context, owner_hint, item_count);
+  *selected = repl_completion_find_item(matches, *items, *item_count, old_choice);
+  if (*selected >= *item_count)
+    *selected = *item_count > 0 ? *item_count - 1 : 0;
+}
+
+static int repl_completion_query_pop_char(char *query) {
+  size_t qlen = query ? strlen(query) : 0;
+  if (qlen == 0)
+    return 0;
+  query[--qlen] = '\0';
+  while (qlen > 0 && ((unsigned char)query[qlen] & 0xc0) == 0x80)
+    query[--qlen] = '\0';
+  return 1;
+}
+
+static int repl_completion_query_pop_word(char *query) {
+  size_t qlen = query ? strlen(query) : 0;
+  if (qlen == 0)
+    return 0;
+  while (qlen > 0 && (query[qlen - 1] == '_' || query[qlen - 1] == '-' ||
+                      query[qlen - 1] == '.' || isalnum((unsigned char)query[qlen - 1])))
+    qlen--;
+  query[qlen] = '\0';
+  return 1;
 }
 
 static void repl_replace_range(char **pbuf, int *cap, int *len, int *pos,
@@ -2772,7 +2850,7 @@ static void repl_reserve_completion_popup(const char *prompt, const char *buf, i
   int down = tot_r - cur_r;
   if (down > 0)
     printf("\x1b[%dB", down);
-  int reserve = repl_completion_visible_rows(term_rows) + 5;
+  int reserve = repl_completion_visible_rows(term_rows) + 6;
   for (int i = 0; i < reserve; ++i)
     printf("\n");
   repl_return_to_editor_cursor(down + reserve, cur_c);
@@ -2802,20 +2880,18 @@ static void repl_print_completion_row(const char *candidate, const char *query,
                                       const char *owner_hint) {
   if (!candidate)
     candidate = "";
-  repl_comp_meta_t meta = repl_completion_meta_for(candidate, member_context, owner_hint);
-  char detail[512];
-  repl_completion_detail(&meta, candidate, detail, sizeof(detail));
+  char detail[512] = {0};
+  if (selected) {
+    repl_comp_meta_t meta = repl_completion_meta_for(candidate, member_context, owner_hint);
+    repl_completion_detail(&meta, candidate, detail, sizeof(detail));
+  }
   int name_width = visible_len(candidate);
-  int cand_width = item_width;
-  if (detail[0] && name_width + 3 < item_width)
-    cand_width = name_width;
+  int cand_width = (detail[0] && name_width + 3 < item_width) ? name_width : item_width;
   if (cand_width < 0)
     cand_width = 0;
   if (theme && theme->color) {
-    if (selected)
-      printf("%s%s ", theme->selected, theme->selected_icon);
-    else
-      printf("%s  ", theme->dim);
+    printf("%s%s ", selected ? theme->selected : theme->dim,
+           selected ? theme->selected_icon : " ");
     repl_print_fuzzy_candidate(candidate, query, theme, cand_width, selected);
     int used = name_width < cand_width ? name_width : cand_width;
     const char *fill = selected ? theme->selected : theme->dim;
@@ -2823,13 +2899,10 @@ static void repl_print_completion_row(const char *candidate, const char *query,
       printf("%s", fill);
       if (detail[0] && item_width - used > 3) {
         printf("  ");
-        used += 2;
-        used += repl_print_flat_trimmed(detail, item_width - used);
+        used += 2 + repl_print_flat_trimmed(detail, item_width - used - 2);
       }
-      while (used < item_width) {
+      while (used++ < item_width)
         putchar(' ');
-        used++;
-      }
     }
     printf("%s\n", theme->reset);
   } else {
@@ -2838,8 +2911,7 @@ static void repl_print_completion_row(const char *candidate, const char *query,
     int used = name_width < cand_width ? name_width : cand_width;
     if (detail[0] && item_width - used > 3) {
       printf("  ");
-      used += 2;
-      repl_print_flat_trimmed(detail, item_width - used);
+      repl_print_flat_trimmed(detail, item_width - used - 2);
     }
     printf("\n");
   }
@@ -2882,8 +2954,8 @@ static int repl_print_completion_preview(const char *candidate, const repl_comp_
 static void repl_render_completion_popup(const char *prompt, const char *buf, int len,
                                          int pos, int prompt_cols, const char *query,
                                          char **matches, repl_comp_item_t *items,
-                                         int item_count, int selected, int member_context,
-                                         const char *owner_hint) {
+                                         int item_count, size_t total_count, int selected,
+                                         int member_context, const char *owner_hint) {
   repl_comp_theme_t theme = repl_completion_theme();
   if (!g_vt_output_ok) {
     if (items && item_count > 0) {
@@ -2912,16 +2984,24 @@ static void repl_render_completion_popup(const char *prompt, const char *buf, in
   if (down > 0)
     printf("\x1b[%dB", down);
   printf("\n\x1b[J");
-  const char *q = (query && *query) ? query : "all";
+  int has_query = query && *query;
+  const char *q = has_query ? query : "type to filter";
   int popup_lines = 0;
-  if (theme.color)
-    printf("%s%s %scomplete%s %s%s%s %s(%d match%s)%s\n",
-           theme.accent, theme.search_icon, theme.dim, theme.reset,
-           (query && *query) ? theme.match : theme.dim, q, theme.reset,
-           theme.dim, item_count, item_count == 1 ? "" : "es", theme.reset);
-  else
-    printf("%s complete %s (%d match%s)\n", theme.search_icon, q, item_count,
-           item_count == 1 ? "" : "es");
+  if (theme.color) {
+    printf("%s%s %scomplete%s %s%s%s ", theme.accent, theme.search_icon,
+           theme.dim, theme.reset, has_query ? theme.match : theme.dim, q, theme.reset);
+    if (total_count > (size_t)item_count)
+      printf("%s(top %d/%zu)%s\n", theme.dim, item_count, total_count, theme.reset);
+    else
+      printf("%s(%d match%s)%s\n", theme.dim, item_count,
+             item_count == 1 ? "" : "es", theme.reset);
+  } else {
+    if (total_count > (size_t)item_count)
+      printf("%s complete %s (top %d/%zu)\n", theme.search_icon, q, item_count, total_count);
+    else
+      printf("%s complete %s (%d match%s)\n", theme.search_icon, q, item_count,
+             item_count == 1 ? "" : "es");
+  }
   popup_lines++;
   if (!items || item_count == 0) {
     if (theme.color)
@@ -2945,6 +3025,14 @@ static void repl_render_completion_popup(const char *prompt, const char *buf, in
                theme.reset);
       else
         printf("  %s %d more\n", theme.more_icon, item_count - end);
+      popup_lines++;
+    }
+    if (!has_query) {
+      if (theme.color)
+        printf("%s  type filters · arrows move · tab/enter accept · esc cancel%s\n",
+               theme.dim, theme.reset);
+      else
+        printf("  type filters · arrows move · tab/enter accept · esc cancel\n");
       popup_lines++;
     }
     if (selected >= 0 && selected < item_count)
@@ -2979,13 +3067,13 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
     return 0;
   }
   int item_count = 0;
-  repl_comp_item_t *items = repl_completion_filter(matches, count, query, &item_count);
+  repl_comp_item_t *items = repl_completion_filter(matches, count, query, member_context, owner_hint, &item_count);
   int selected = 0;
   int accepted = 0;
   int canceled = 0;
   repl_reserve_completion_popup(prompt, *pbuf, *len, *pos, prompt_cols);
   repl_render_completion_popup(prompt, *pbuf, *len, *pos, prompt_cols, query,
-                               matches, items, item_count, selected, member_context, owner_hint);
+                               matches, items, item_count, count, selected, member_context, owner_hint);
   while (!accepted && !canceled) {
     char ch_val = 0;
     int k;
@@ -2999,7 +3087,7 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
       break;
     }
     if (k == K_ENTER || k == K_TAB) {
-      if (items && item_count > 0) {
+      if (items && item_count > 0 && selected >= 0 && selected < item_count) {
         const char *choice = matches[items[selected].idx];
         repl_replace_range(pbuf, cap, len, pos, start, end, choice);
         accepted = 1;
@@ -3028,38 +3116,45 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
         if (selected >= item_count)
           selected = item_count - 1;
       }
+    } else if (k == K_CTRL_U) {
+      if (query[0]) {
+        const char *old_choice = repl_completion_selected(matches, items, item_count, selected);
+        query[0] = '\0';
+        repl_completion_refilter(matches, count, query, member_context, owner_hint,
+                                 &items, &item_count, &selected, old_choice);
+      } else {
+        canceled = 1;
+      }
+    } else if (k == K_CTRL_W) {
+      if (repl_completion_query_pop_word(query)) {
+        const char *old_choice = repl_completion_selected(matches, items, item_count, selected);
+        repl_completion_refilter(matches, count, query, member_context, owner_hint,
+                                 &items, &item_count, &selected, old_choice);
+      } else {
+        canceled = 1;
+      }
     } else if (k == K_BACKSPACE || k == K_CTRL_BACKSPACE) {
-      size_t qlen = strlen(query);
-      if (qlen > 0) {
-        const char *old_choice = (items && selected >= 0 && selected < item_count)
-                                     ? matches[items[selected].idx]
-                                     : NULL;
-        query[--qlen] = '\0';
-        while (qlen > 0 && ((unsigned char)query[qlen] & 0xc0) == 0x80)
-          query[--qlen] = '\0';
-        free(items);
-        items = repl_completion_filter(matches, count, query, &item_count);
-        selected = repl_completion_find_item(matches, items, item_count, old_choice);
+      if (repl_completion_query_pop_char(query)) {
+        const char *old_choice = repl_completion_selected(matches, items, item_count, selected);
+        repl_completion_refilter(matches, count, query, member_context, owner_hint,
+                                 &items, &item_count, &selected, old_choice);
       } else {
         canceled = 1;
       }
     } else if (k < 1000 && k > 0 && isprint((unsigned char)k)) {
       size_t qlen = strlen(query);
       if (qlen + 2 < sizeof(query)) {
-        const char *old_choice = (items && selected >= 0 && selected < item_count)
-                                     ? matches[items[selected].idx]
-                                     : NULL;
+        const char *old_choice = repl_completion_selected(matches, items, item_count, selected);
         query[qlen++] = (char)k;
         query[qlen] = '\0';
-        free(items);
-        items = repl_completion_filter(matches, count, query, &item_count);
-        selected = repl_completion_find_item(matches, items, item_count, old_choice);
+        repl_completion_refilter(matches, count, query, member_context, owner_hint,
+                                 &items, &item_count, &selected, old_choice);
       }
     }
     if (selected >= item_count)
       selected = item_count > 0 ? item_count - 1 : 0;
     repl_render_completion_popup(prompt, *pbuf, *len, *pos, prompt_cols, query,
-                                 matches, items, item_count, selected, member_context, owner_hint);
+                                 matches, items, item_count, count, selected, member_context, owner_hint);
   }
   repl_clear_completion_popup(prompt, *pbuf, *len, *pos, prompt_cols);
   free(items);

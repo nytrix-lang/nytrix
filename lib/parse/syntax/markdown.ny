@@ -13,8 +13,6 @@ fn tokenize(str source, list out_tokens) list {
    def src_len = source.len
    mut i = 0
    while i < src_len {
-      def idx = i + 0
-      i = idx
       def ch = load8(source, i)
       if ch == 10 || ch == 13 {
          mut j = i

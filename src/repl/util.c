@@ -297,6 +297,163 @@ static int repl_stmt_is_boundary(const char *src, size_t i, int paren, int brack
   return src[i] == '\n' && paren == 0 && brack == 0 && brace == 0 && !in_str;
 }
 
+static int repl_ident_char_at(char ch) {
+  return isalnum((unsigned char)ch) || ch == '_';
+}
+
+static int repl_word_at(const char *s, const char *word) {
+  size_t len = strlen(word);
+  return strncmp(s, word, len) == 0 && !repl_ident_char_at(s[len]);
+}
+
+static const char *repl_skip_inline_ws(const char *s) {
+  while (*s == ' ' || *s == '\t' || *s == '\r')
+    s++;
+  return s;
+}
+
+static const char *repl_find_top_level_assign(const char *s) {
+  int paren = 0, brack = 0, brace = 0, in_str = 0;
+  char quote = '\0';
+  for (const char *p = s; *p; ++p) {
+    char ch = *p;
+    if (in_str) {
+      if (ch == '\\' && p[1]) {
+        ++p;
+        continue;
+      }
+      if (ch == quote) {
+        in_str = 0;
+        quote = '\0';
+      }
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      in_str = 1;
+      quote = ch;
+      continue;
+    }
+    if (ch == ';' || ch == '#')
+      break;
+    if (ch == '(')
+      paren++;
+    else if (ch == ')' && paren > 0)
+      paren--;
+    else if (ch == '[')
+      brack++;
+    else if (ch == ']' && brack > 0)
+      brack--;
+    else if (ch == '{')
+      brace++;
+    else if (ch == '}' && brace > 0)
+      brace--;
+    else if (ch == '=' && paren == 0 && brack == 0 && brace == 0) {
+      char prev = (p > s) ? p[-1] : '\0';
+      char next = p[1];
+      if (prev == '=' || prev == '!' || prev == '<' || prev == '>' || next == '=')
+        continue;
+      return p;
+    }
+  }
+  return NULL;
+}
+
+static int repl_expr_can_end_with(char ch) {
+  return isalnum((unsigned char)ch) || ch == '_' || ch == ')' || ch == ']' ||
+         ch == '}' || ch == '"' || ch == '\'';
+}
+
+static int repl_expr_can_start_with(char ch) {
+  return isalpha((unsigned char)ch) || isdigit((unsigned char)ch) || ch == '_' ||
+         ch == '(' || ch == '[' || ch == '{' || ch == '.' || ch == '"' || ch == '\'';
+}
+
+static int repl_keep_rhs_keyword(const char *s) {
+  return repl_word_at(s, "else") || repl_word_at(s, "elif") || repl_word_at(s, "catch");
+}
+
+static char *repl_trim_persistent_assignment(const char *stmt) {
+  char *copy = ny_strdup(stmt);
+  if (!copy)
+    return NULL;
+  char *code = repl_skip_leading_noncode(copy);
+  if (!*code)
+    return copy;
+  char *target = repl_assignment_target(code);
+  int starts_mutating = !strncmp(code, "def ", 4) || !strncmp(code, "mut ", 4) || target != NULL;
+  free(target);
+  if (!starts_mutating)
+    return copy;
+  const char *eq = repl_find_top_level_assign(code);
+  if (!eq)
+    return copy;
+  const char *p = eq + 1;
+  int paren = 0, brack = 0, brace = 0, in_str = 0;
+  char quote = '\0';
+  const char *last = p;
+  while (*p) {
+    char ch = *p;
+    if (in_str) {
+      if (ch == '\\' && p[1]) {
+        p += 2;
+        last = p;
+        continue;
+      }
+      if (ch == quote) {
+        in_str = 0;
+        quote = '\0';
+      }
+      p++;
+      last = p;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      in_str = 1;
+      quote = ch;
+      p++;
+      last = p;
+      continue;
+    }
+    if ((ch == ';' || ch == '#') && paren == 0 && brack == 0 && brace == 0)
+      break;
+    if (ch == '\n' && paren == 0 && brack == 0 && brace == 0)
+      break;
+    if (ch == '(')
+      paren++;
+    else if (ch == ')' && paren > 0)
+      paren--;
+    else if (ch == '[')
+      brack++;
+    else if (ch == ']' && brack > 0)
+      brack--;
+    else if (ch == '{')
+      brace++;
+    else if (ch == '}' && brace > 0)
+      brace--;
+    if (paren == 0 && brack == 0 && brace == 0 && isspace((unsigned char)ch)) {
+      const char *next = repl_skip_inline_ws(p + 1);
+      char prev = '\0';
+      for (const char *q = p; q > eq + 1; --q) {
+        if (!isspace((unsigned char)q[-1])) {
+          prev = q[-1];
+          break;
+        }
+      }
+      if (*next && *next != '\n' && repl_expr_can_end_with(prev) &&
+          repl_expr_can_start_with(*next) && !repl_keep_rhs_keyword(next))
+        break;
+    }
+    p++;
+    last = p;
+  }
+  while (last > code && isspace((unsigned char)last[-1]))
+    last--;
+  code[last - code] = '\0';
+  char *out = ny_strdup(code);
+  free(copy);
+  return out;
+}
+
 char *repl_extract_persistent_source(const char *src) {
   if (!src || !*src)
     return NULL;
@@ -354,22 +511,29 @@ char *repl_extract_persistent_source(const char *src) {
         if (stmt) {
           char *trimmed = repl_skip_leading_noncode(stmt);
           if (*trimmed && is_persistent_def(trimmed)) {
-            size_t stmt_len = strlen(stmt);
-            int needs_nl = (stmt_len > 0 && stmt[stmt_len - 1] != '\n');
+            char *persist = repl_trim_persistent_assignment(stmt);
+            if (!persist)
+              persist = ny_strdup(stmt);
+            size_t stmt_len = persist ? strlen(persist) : 0;
+            int needs_nl = (stmt_len > 0 && persist[stmt_len - 1] != '\n');
             size_t need = out_len + stmt_len + (needs_nl ? 1 : 0) + 1;
             if (need > out_cap) {
               out_cap = need + 256;
               out = realloc(out, out_cap);
               if (!out) {
+                free(persist);
                 free(stmt);
                 return NULL;
               }
             }
-            memcpy(out + out_len, stmt, stmt_len);
-            out_len += stmt_len;
-            if (needs_nl)
-              out[out_len++] = '\n';
-            out[out_len] = '\0';
+            if (stmt_len > 0) {
+              memcpy(out + out_len, persist, stmt_len);
+              out_len += stmt_len;
+              if (needs_nl)
+                out[out_len++] = '\n';
+              out[out_len] = '\0';
+            }
+            free(persist);
           }
           free(stmt);
         }

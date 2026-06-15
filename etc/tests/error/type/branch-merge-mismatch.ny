@@ -6,5 +6,5 @@ fn choose(flag, a, b) {
    b
 }
 
-def int: x = choose(true, 1, "x")
+def int x = choose(true, 1, "x")
 print(x)

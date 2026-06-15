@@ -3064,26 +3064,6 @@ static bool abi_sig_param_needs_native_coerce(fun_sig *sig,
   return !abi_type_is_tagged(type_name);
 }
 
-static LLVMTypeRef abi_layout_carrier_type(codegen_t *cg,
-                                           layout_def_t *layout) {
-  if (!cg || !layout)
-    return NULL;
-  if (layout->size > 16)
-    return cg->type_i8ptr;
-  switch (layout->size) {
-  case 1:
-    return cg->type_i8;
-  case 2:
-    return cg->type_i16;
-  case 4:
-    return cg->type_i32;
-  case 8:
-    return cg->type_i64;
-  default:
-    return layout->llvm_type;
-  }
-}
-
 static LLVMValueRef abi_layout_ptr_from_value(codegen_t *cg, LLVMValueRef v,
                                               LLVMTypeRef pointee_type,
                                               const char *name) {
@@ -5002,7 +4982,7 @@ static LLVMTypeRef abi_type_from_name(codegen_t *cg, const char *type_name) {
   type_name = abi_skip_nullable(type_name);
   layout_def_t *layout = abi_layout_from_name(cg, type_name);
   if (layout)
-    return abi_layout_carrier_type(cg, layout);
+    return ny_layout_abi_carrier_type(cg, layout);
   if (abi_type_is_ptr(type_name))
     return cg->type_i8ptr;
   if (abi_type_is_tagged(type_name))
@@ -5202,7 +5182,7 @@ LLVMValueRef ny_coerce_to_abi_proven_int(codegen_t *cg, LLVMValueRef v,
                                NY_LLVM_NAME(cg, "abi_layout_byval_i8"));
       return ptr;
     }
-    LLVMTypeRef carrier = abi_layout_carrier_type(cg, layout);
+    LLVMTypeRef carrier = ny_layout_abi_carrier_type(cg, layout);
     if (LLVMTypeOf(v) == carrier)
       return v;
     LLVMValueRef ptr =
@@ -5307,7 +5287,7 @@ LLVMValueRef ny_box_abi_result(codegen_t *cg, LLVMValueRef v,
     LLVMValueRef ptr_i64 =
         LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
                        &size_arg, 1, NY_LLVM_NAME(cg, "abi_layout_alloc"));
-    LLVMTypeRef carrier = abi_layout_carrier_type(cg, layout);
+    LLVMTypeRef carrier = ny_layout_abi_carrier_type(cg, layout);
     LLVMValueRef dst =
         abi_layout_ptr_from_value(cg, ptr_i64, carrier, "abi_layout_ret_ptr");
     ny_store(cg, dst, v);

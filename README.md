@@ -33,6 +33,7 @@ assert(greet("Nytrix") == "Hello, Nytrix!", "greet")
 ./make ny -run hello.ny
 ./make ny -o hello hello.ny
 ./hello
+./make ny https://raw.githubusercontent.com/user/project/main/tool.ny
 ```
 
 ## Install
@@ -81,9 +82,15 @@ assert(to_str(shifted) == "[32, 33, 34, 35]", "comptime list")
 
 ```ny
 use std.core
+layout Vec2 pack(4) {
+    f32 x,
+    f32 y
+}
 #include <math.h> as "cos"
 assert(cos(0.0) == 1.0, "cos")
 ```
+
+Layouts use `Type name` fields. A colon may still parse as an implicit separator only where the grammar would otherwise be unambiguous.
 
 ## Project
 
@@ -109,7 +116,7 @@ compiler, runtime, or stdlib.
 
 ## Status
 
-Expect breaking changes. Pin a commit and check
+Pin a commit for reproducible builds and check
 [docs/CHANGELOG.md](docs/CHANGELOG.md) before upgrading.
 
 ## License

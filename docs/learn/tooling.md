@@ -242,7 +242,7 @@ ny --clean-cache
 Compile-time type checks are on by default for typed code, generics, layouts,
 and native boundaries. Suspicious dynamic fallbacks are warnings by default;
 `--strict-types` rejects them for files that should stay fully statically
-explainable. `--no-strict-types` is the legacy escape hatch when that stricter
+explainable. `--no-strict-types` is the compatibility escape hatch when that stricter
 layer was enabled by a wrapper or environment. `--safe-mode` adds
 ownership/borrow checks, RC/RAII cleanup, strict effect/alias policy, and
 raw-memory diagnostics. `--strict` adds

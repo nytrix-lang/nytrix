@@ -2,8 +2,8 @@
 use std.core
 
 layout BadLayout {
-   i32: x
+   i32 x
 }
 
-def ptr: p = malloc(__layout_size("BadLayout"))
+def ptr p = malloc(__layout_size("BadLayout"))
 load_layout(p, "BadLayout", "missing")

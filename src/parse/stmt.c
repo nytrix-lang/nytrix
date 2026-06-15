@@ -801,7 +801,7 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
       (void)parse_type_ref(p, "expected return type after '->'");
   }
   if (parser_match(p, NY_T_COLON)) {
-    parser_error(p, p->prev, "legacy function return syntax",
+    parser_error(p, p->prev, "old function return separator",
                  "write 'fn name(params) RetType { ... }', without ':'");
     if (p->cur.kind != NY_T_LBRACE && p->cur.kind != NY_T_ASSIGN &&
         p->cur.kind != NY_T_SEMI && p->cur.kind != NY_T_EOF)
@@ -1103,7 +1103,7 @@ static stmt_t *parse_extern_fn_decl(parser_t *p, token_t tok,
   parser_expect(p, NY_T_RPAREN, NULL, NULL);
   const char *return_type = NULL;
   if (parser_match(p, NY_T_COLON)) {
-    parser_error(p, p->prev, "legacy extern return syntax",
+    parser_error(p, p->prev, "old extern return separator",
                  "write 'fn name(params) RetType', without ':'");
     if (p->cur.kind != NY_T_AS && p->cur.kind != NY_T_SEMI && p->cur.kind != NY_T_EOF)
       (void)parse_type_ref(p, "expected return type");
@@ -1625,11 +1625,11 @@ static void layout_emit_default_constructor(layout_gen_buf_t *b,
   if (!params) {
     for (size_t i = 0; i < fields->len; ++i) {
       layout_field_t *f = &fields->data[i];
-      layout_gen_append(b, "   def %s: %s = %s\n", f->type_name, f->name,
+      layout_gen_append(b, "   def %s %s = %s\n", f->type_name, f->name,
                         layout_default_src(f));
     }
   }
-  layout_gen_append(b, "   def ptr: out = malloc(__layout_size(");
+  layout_gen_append(b, "   def ptr out = malloc(__layout_size(");
   layout_gen_append_str_lit(b, owner);
   layout_gen_append(b, "))\n");
   layout_emit_store_call(b, owner, fields);
@@ -1641,7 +1641,7 @@ static void layout_emit_shape_from(layout_gen_buf_t *b, const char *owner,
   layout_gen_append(b, "fn %s_from(value) ptr {\n", owner);
   layout_gen_append(b,
                     "   if(!is_dict(value) && !is_list(value)){ return 0 }\n");
-  layout_gen_append(b, "   def ptr: out = malloc(__layout_size(");
+  layout_gen_append(b, "   def ptr out = malloc(__layout_size(");
   layout_gen_append_str_lit(b, owner);
   layout_gen_append(b, "))\n");
   for (size_t i = 0; i < fields->len; ++i) {
@@ -1650,7 +1650,7 @@ static void layout_emit_shape_from(layout_gen_buf_t *b, const char *owner,
     snprintf(raw, sizeof(raw),
              "(is_dict(value) ? value.get(\"%s\", %s) : value.get(%zu, %s))",
              f->name, layout_default_src(f), i, layout_default_src(f));
-    layout_gen_append(b, "   def %s: %s = ", f->type_name, f->name);
+    layout_gen_append(b, "   def %s %s = ", f->type_name, f->name);
     layout_emit_field_cast(b, f->type_name, raw);
     layout_gen_append(b, "\n");
   }
@@ -1686,7 +1686,7 @@ static void layout_emit_store_derive(layout_gen_buf_t *b, const char *owner,
 
 static void layout_emit_zero_derive(layout_gen_buf_t *b, const char *owner) {
   layout_gen_append(b, "fn %s_zero() ptr {\n", owner);
-  layout_gen_append(b, "   def ptr: out = malloc(__layout_size(");
+  layout_gen_append(b, "   def ptr out = malloc(__layout_size(");
   layout_gen_append_str_lit(b, owner);
   layout_gen_append(b, "))\n");
   layout_gen_append(b, "   memset(out, 0, __layout_size(");
@@ -1861,7 +1861,7 @@ static stmt_t *parse_layout_guard_stmt(parser_t *p) {
   free(owned_type);
 
   if (parser_match(p, NY_T_COLON)) {
-    /* Support legacy or explicit colon */
+    /* Treat colon as an optional separator. */
   }
 
   if (p->cur.kind != NY_T_IDENT) {
@@ -1995,7 +1995,7 @@ static stmt_t *parse_struct(parser_t *p) {
     const char *fname = id1;
     const char *tname = NULL;
     if (parser_match(p, NY_T_COLON)) {
-       /* Old Name: Type syntax or Type: Name */
+       /* Treat colon as an optional separator. */
     }
     if (p->cur.kind == NY_T_IDENT || p->cur.kind == NY_T_STAR || p->cur.kind == NY_T_QUESTION) {
       /* Type Name syntax */
@@ -2017,11 +2017,11 @@ static stmt_t *parse_struct(parser_t *p) {
         tname = ptr_tname;
       }
     } else {
-      /* Fallback to simple field name if no type is provided or if Type: Name was used but we already consumed the type */
+      /* A lone name is not enough for ABI fields; fields stay type-first. */
       if (!tname) {
          /* If we didn't match a second identifier, id1 is either name or type.
             But layouts REQUIRE types for ABI. */
-         parser_error(p, p->prev, "layout fields require a type", "write 'int x' or 'int: x'");
+         parser_error(p, p->prev, "layout fields require a type", "write 'int x'");
          break;
       }
     }
@@ -2095,9 +2095,7 @@ static stmt_t *parse_enum(parser_t *p) {
       while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
         enum_field_t field = {0};
         field.type_name = parse_type_ref(p, "expected enum payload field type");
-        /* Keep the old type-first form `Type: name`, but prefer the same
-         * spelling used by function parameters: `Type name`.
-         */
+        
         parser_match(p, NY_T_COLON);
         if (p->cur.kind != NY_T_IDENT) {
           parser_error(p, p->cur, "expected enum payload field name",
@@ -4568,7 +4566,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
                    p->cur.kind == NY_T_QUESTION || p->cur.kind == NY_T_STAR) {
           var_type = parse_type_ref(p, "expected type name before ':'");
           if (parser_match(p, NY_T_COLON)) {
-            /* Support legacy or explicit colon if needed, but the user prefers no colon */
+            /* Treat colon as an optional separator when the parse is otherwise clear. */
           }
           if (p->cur.kind != NY_T_IDENT) {
             parser_error(p, p->cur, "expected variable name", NULL);

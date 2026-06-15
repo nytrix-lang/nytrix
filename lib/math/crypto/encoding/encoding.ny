@@ -12,8 +12,8 @@ use std.math.nt
 use std.core.str
 
 layout shape Asn1Node derive(load) pack(8){
-   int: tag = 0,
-   int: len = 0
+   int tag = 0,
+   int len = 0
 }
 
 fn base64_encode(list b) str {
