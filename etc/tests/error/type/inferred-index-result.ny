@@ -5,5 +5,5 @@ fn first(xs) {
    xs[0]
 }
 
-def str: s = first([1, 2])
+def str s = first([1, 2])
 print(s)

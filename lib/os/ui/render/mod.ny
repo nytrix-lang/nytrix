@@ -141,14 +141,14 @@ def FONT_FILTER_LINEAR = 1
 def FONT_FILTER_BILINEAR = 1
 
 layout MeshGpuDrawSlab pack(8){
-   ptr: sbuf_handle,
-   ptr: sbuf_offset,
-   ptr: ibuf,
-   ptr: ibuf_offset,
-   i32: draw_count,
-   i32: idx_count,
-   i32: flags,
-   i32: idx_u32
+   ptr sbuf_handle,
+   ptr sbuf_offset,
+   ptr ibuf,
+   ptr ibuf_offset,
+   i32 draw_count,
+   i32 idx_count,
+   i32 flags,
+   i32 idx_u32
 }
 
 fn _font_path_wants_nearest(str path) bool {

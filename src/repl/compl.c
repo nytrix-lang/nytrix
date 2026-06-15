@@ -130,7 +130,6 @@ static const char *const k_number_member_words[] = {
     "type_shape", "is_shape", "require_shape", NULL};
 
 static void add_match(const char *s);
-static int starts_with_ci(const char *s, const char *prefix);
 
 /* Fast dedup hash set for add_match — open addressing, power-of-2 size */
 #define MATCH_HT_INIT 256
@@ -223,25 +222,6 @@ static compl_ctx_t get_context(const char *line, int pos) {
   return CTX_NORMAL;
 }
 
-static const char *strcasestr_impl(const char *haystack, const char *needle) {
-  if (!needle || !*needle)
-    return haystack;
-  for (; *haystack; ++haystack) {
-    if (tolower((unsigned char)*haystack) == tolower((unsigned char)*needle)) {
-      const char *h, *n;
-      for (h = haystack, n = needle; *h && *n; ++h, ++n) {
-        if (tolower((unsigned char)*h) != tolower((unsigned char)*n)) {
-          break;
-        }
-      }
-      if (!*n) {
-        return haystack;
-      }
-    }
-  }
-  return NULL;
-}
-
 static int is_break_char(char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '"' || c == '\\' || c == '\'' || c == '`' ||
          c == '@' || c == '$' || c == '>' || c == '<' || c == '=' || c == ';' || c == '|' ||
@@ -297,73 +277,11 @@ static void extract_command_arg(const char *line, int cursor, char *out, size_t 
   out[len] = '\0';
 }
 
-static int fuzzy_boundary_bonus(char prev) {
-  if (prev == '\0')
-    return 35;
-  if (prev == '.' || prev == '_' || prev == '-' || prev == '/' || prev == '\\')
-    return 28;
-  if (isspace((unsigned char)prev) || prev == ':' || prev == '(' || prev == '[')
-    return 18;
-  return 0;
-}
-
-static int fuzzy_score(const char *cand, const char *text) {
-  if (!cand)
-    return 0;
-  if (!text || !*text)
-    return 1;
-  if (strcmp(cand, text) == 0)
-    return 2000;
-  if (strcasecmp(cand, text) == 0)
-    return 1900;
-  size_t text_len = strlen(text);
-  if (strncasecmp(cand, text, text_len) == 0)
-    return 1600 - (int)(strlen(cand) > 120 ? 120 : strlen(cand));
-  const char *sub = strcasestr_impl(cand, text);
-  int score = 0;
-  if (sub) {
-    int offset = (int)(sub - cand);
-    score = 900 - (offset > 120 ? 120 : offset);
-    score += fuzzy_boundary_bonus(offset > 0 ? cand[offset - 1] : '\0');
-  }
-  int ci = 0;
-  int last = -1;
-  int first = -1;
-  int fuzzy = 0;
-  for (int qi = 0; text[qi]; ++qi) {
-    unsigned char q = (unsigned char)tolower((unsigned char)text[qi]);
-    int found = -1;
-    while (cand[ci]) {
-      unsigned char c = (unsigned char)tolower((unsigned char)cand[ci]);
-      if (c == q) {
-        found = ci++;
-        break;
-      }
-      ci++;
-    }
-    if (found < 0)
-      return score;
-    if (first < 0)
-      first = found;
-    fuzzy += 35;
-    if (last >= 0 && found == last + 1)
-      fuzzy += 55;
-    fuzzy += fuzzy_boundary_bonus(found > 0 ? cand[found - 1] : '\0');
-    fuzzy -= found > 120 ? 120 : found;
-    last = found;
-  }
-  if (first == 0)
-    fuzzy += 120;
-  size_t clen = strlen(cand);
-  fuzzy -= clen > 160 ? 160 : (int)(clen / 2);
-  return fuzzy > score ? fuzzy : score;
-}
-
 static void add_list_completions(const char *const *items, const char *text) {
   if (!items)
     return;
   for (int i = 0; items[i]; i++) {
-    if (fuzzy_score(items[i], text) > 0)
+    if (repl_fuzzy_score(items[i], text, 1) > 0)
       add_match(items[i]);
   }
 }
@@ -372,7 +290,7 @@ static void add_member_word_completions(const char *const *items, const char *te
   if (!items)
     return;
   for (int i = 0; items[i]; i++) {
-    if (!text || !*text || starts_with_ci(items[i], text))
+    if (!text || !*text || repl_starts_with_ci(items[i], text))
       add_match(items[i]);
   }
 }
@@ -394,29 +312,18 @@ static int completion_symbol_matches(const char *cand, const char *text) {
     return 0;
   if (!text || !*text)
     return 1;
+  size_t len = strlen(text);
   if (strchr(text, '.'))
-    return fuzzy_score(cand, text) > 0;
-  if (starts_with_ci(cand, text))
+    return len < 2 ? repl_starts_with_ci(cand, text) : repl_fuzzy_score(cand, text, 1) > 0;
+  if (repl_starts_with_ci(cand, text))
     return 1;
-  return fuzzy_score(last_segment(cand), text) > 0;
+  if (len < 2)
+    return 0;
+  return repl_fuzzy_score(last_segment(cand), text, 1) > 0;
 }
 
 static int completion_allows_private(const char *text) {
   return text && text[0] == '_';
-}
-
-static int starts_with_ci(const char *s, const char *prefix) {
-  if (!prefix || !*prefix)
-    return 1;
-  while (*prefix) {
-    if (!*s)
-      return 0;
-    if (tolower((unsigned char)*s) != tolower((unsigned char)*prefix))
-      return 0;
-    s++;
-    prefix++;
-  }
-  return 1;
 }
 
 static int command_matches(const char *line, const char *name) {
@@ -439,7 +346,7 @@ static int completion_score(const char *cand, const char *text, compl_ctx_t ctx)
       return 450;
     return 100;
   }
-  int score = fuzzy_score(cand, text);
+  int score = repl_fuzzy_score(cand, text, 1);
   const char *base = last_segment(cand);
   if (strcmp(cand, text) == 0)
     score += 1000;
@@ -447,9 +354,9 @@ static int completion_score(const char *cand, const char *text, compl_ctx_t ctx)
     score += 900;
   if (strncmp(cand, text, strlen(text)) == 0)
     score += 700;
-  if (starts_with_ci(base, text))
+  if (repl_starts_with_ci(base, text))
     score += 650;
-  const char *inside = strcasestr_impl(base, text);
+  const char *inside = repl_strcasestr(base, text);
   if (inside)
     score += 200 - (int)(inside - base > 64 ? 64 : (inside - base));
   if (ctx == CTX_COMMAND && cand[0] == ':')
@@ -558,32 +465,38 @@ static void add_files(const char *text) {
   closedir(d);
 }
 
+static int module_is_top_level_std(const char *m) {
+  if (!m || strncmp(m, "std.", 4) != 0)
+    return 0;
+  return strchr(m + 4, '.') == NULL;
+}
+
 static void add_normal_completions(const char *text) {
+  int empty = (!text || !*text);
   for (size_t i = 0; i < ny_std_package_count(); ++i) {
     const char *pkg = ny_std_package_name(i);
     if (completion_symbol_matches(pkg, text))
       add_match(pkg);
   }
-  size_t mod_count = ny_std_module_count();
-  for (size_t i = 0; i < mod_count; i++) {
+  for (size_t i = 0; i < ny_std_module_count(); i++) {
     const char *m = ny_std_module_name(i);
-    if (completion_symbol_matches(m, text))
+    if ((empty && module_is_top_level_std(m)) || (!empty && completion_symbol_matches(m, text)))
       add_match(m);
   }
   add_list_completions(k_syntax_words, text);
   add_list_completions(k_type_words, text);
-  if (g_repl_docs) {
-    repl_ensure_docs_for_query((doc_list_t *)g_repl_docs, text ? text : "");
-    const doc_list_t *d = (const doc_list_t *)g_repl_docs;
-    for (size_t i = 0; i < d->len; i++) {
-      const char *base = last_segment(d->data[i].name);
-      if (!completion_allows_private(text) && base[0] == '_')
-        continue;
-      if (completion_symbol_matches(d->data[i].name, text))
-        add_match(d->data[i].name);
-      if (fuzzy_score(base, text) > 0)
-        add_match(base);
-    }
+  if (!g_repl_docs || empty)
+    return;
+  repl_ensure_docs_for_query((doc_list_t *)g_repl_docs, text);
+  const doc_list_t *d = (const doc_list_t *)g_repl_docs;
+  for (size_t i = 0; i < d->len; i++) {
+    const char *base = last_segment(d->data[i].name);
+    if (!completion_allows_private(text) && base[0] == '_')
+      continue;
+    if (completion_symbol_matches(d->data[i].name, text))
+      add_match(d->data[i].name);
+    if (strlen(text) >= 2 && repl_fuzzy_score(base, text, 1) > 0)
+      add_match(base);
   }
 }
 
@@ -650,9 +563,9 @@ static void add_use_completions(const char *text) {
         j++;
       }
       seg[j] = '\0';
-      if (fuzzy_score(seg, tail) > 0)
+      if (repl_fuzzy_score(seg, tail, 1) > 0)
         add_match(seg);
-    } else if (fuzzy_score(m, tail) > 0) {
+    } else if (repl_fuzzy_score(m, tail, 1) > 0) {
       add_match(m);
     }
   }
@@ -994,7 +907,7 @@ static int curated_member_word_matches_receiver(receiver_kind_t recv, const char
   const char *const *items = receiver_member_words(recv);
   if (!items)
     return 1;
-  return member_word_in(items, word) || (recv == RECV_NUMBER && starts_with_ci(word, "ascii_"));
+  return member_word_in(items, word) || (recv == RECV_NUMBER && repl_starts_with_ci(word, "ascii_"));
 }
 
 static int method_matches_receiver(const char *name, receiver_kind_t recv) {
@@ -1030,7 +943,7 @@ static void add_member_completions(const char *line, int cursor) {
     recv = infer_member_receiver_from_variable(line, cursor, head);
   if (!namespace_like)
     add_receiver_member_words(recv, tail);
-  if (g_repl_docs) {
+  if (g_repl_docs && (namespace_like || tail[0])) {
     repl_ensure_docs_for_query((doc_list_t *)g_repl_docs, namespace_like && head[0] ? head : tail);
     const doc_list_t *d = (const doc_list_t *)g_repl_docs;
     for (size_t i = 0; i < d->len; i++) {
@@ -1047,7 +960,7 @@ static void add_member_completions(const char *line, int cursor) {
       const char *base = last_segment(name);
       if (!completion_allows_private(tail) && base[0] == '_')
         continue;
-      if (!tail[0] || fuzzy_score(base, tail) > 0)
+      if (!tail[0] || repl_fuzzy_score(base, tail, 1) > 0)
         add_match(base);
     }
   }
@@ -1069,7 +982,7 @@ static void add_member_completions(const char *line, int cursor) {
       j++;
     }
     seg[j] = '\0';
-    if (fuzzy_score(seg, tail) > 0)
+    if (repl_fuzzy_score(seg, tail, 1) > 0)
       add_match(seg);
   }
 }

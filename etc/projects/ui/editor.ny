@@ -138,10 +138,10 @@ fn _scaled_int(f64 value, f64 density, int lo, int hi) int {
 }
 
 def UI_DENSITY = _env_float_between("NY_EDITOR_DENSITY", 0.78, 0.54, 1.25)
-def int: FONT_TITLE_SIZE = int(common.env_int_clamped("NY_EDITOR_TITLE_FONT_SIZE", _scaled_int(22.0, UI_DENSITY, 12, 48), 8, 96))
-def int: FONT_BODY_SIZE = int(common.env_int_clamped("NY_EDITOR_FONT_SIZE", _scaled_int(16.0, UI_DENSITY, 9, 32), 8, 96))
-def int: FONT_SMALL_SIZE = int(common.env_int_clamped("NY_EDITOR_SMALL_FONT_SIZE", _scaled_int(13.0, UI_DENSITY, 8, 28), 8, 96))
-def int: FONT_MODELINE_SIZE = int(common.env_int_clamped("NY_EDITOR_MODELINE_FONT_SIZE", max(13, _scaled_int(14.0, UI_DENSITY, 10, 28)), 8, 96))
+def int FONT_TITLE_SIZE = int(common.env_int_clamped("NY_EDITOR_TITLE_FONT_SIZE", _scaled_int(22.0, UI_DENSITY, 12, 48), 8, 96))
+def int FONT_BODY_SIZE = int(common.env_int_clamped("NY_EDITOR_FONT_SIZE", _scaled_int(16.0, UI_DENSITY, 9, 32), 8, 96))
+def int FONT_SMALL_SIZE = int(common.env_int_clamped("NY_EDITOR_SMALL_FONT_SIZE", _scaled_int(13.0, UI_DENSITY, 8, 28), 8, 96))
+def int FONT_MODELINE_SIZE = int(common.env_int_clamped("NY_EDITOR_MODELINE_FONT_SIZE", max(13, _scaled_int(14.0, UI_DENSITY, 10, 28)), 8, 96))
 def TOP_H = max(16.0, 26.0 * UI_DENSITY)
 def RAIL_MIN_W = 38.0
 def EDIT_MIN_W = 56.0
@@ -158,7 +158,7 @@ else {
    gfx.apply_backend_argv()
 }
 
-def int: RENDER_BACKEND_MOCK = int(gfx.BACKEND_MOCK)
+def int RENDER_BACKEND_MOCK = int(gfx.BACKEND_MOCK)
 def win = gfx.init_window(START_W, START_H, "Nytrix Editor", START_FLAGS, EDITOR_PRESENT_MODE, false, 1)
 
 if !win { panic("window init failed") }
@@ -172,10 +172,10 @@ fn _load_editor_font(list candidates, int size) any {
    f
 }
 
-mut int: font_title_size = FONT_TITLE_SIZE
-mut int: font_body_size = FONT_BODY_SIZE
-mut int: font_small_size = FONT_SMALL_SIZE
-mut int: font_modeline_size = FONT_MODELINE_SIZE
+mut int font_title_size = FONT_TITLE_SIZE
+mut int font_body_size = FONT_BODY_SIZE
+mut int font_small_size = FONT_SMALL_SIZE
+mut int font_modeline_size = FONT_MODELINE_SIZE
 mut font_title = _load_editor_font(TITLE_FONT_CANDIDATES, font_title_size)
 mut font_body = _load_editor_font(UI_FONT_CANDIDATES, font_body_size)
 mut font_small = _load_editor_font(UI_FONT_CANDIDATES, font_small_size)
@@ -183,30 +183,30 @@ mut font_modeline = _load_editor_font(MODELINE_FONT_CANDIDATES, font_modeline_si
 def cursor_text = window.create_standard_cursor(window.IBEAM_CURSOR)
 def cursor_resize = window.create_standard_cursor(window.RESIZE_EW_CURSOR)
 def cursor_resize_ns = window.create_standard_cursor(window.RESIZE_NS_CURSOR)
-mut f64: FONT_BODY_ADV = max(1.0, float(gfx.measure_text_fast(font_body, "M").get(0, 8.0)))
-mut f64: FONT_SMALL_ADV = max(1.0, float(gfx.measure_text_fast(font_small, "M").get(0, 7.0)))
-mut f64: FONT_MODELINE_ADV = max(1.0, float(gfx.measure_text_fast(font_modeline, "M").get(0, 7.0)))
-mut f64: FONT_MODELINE_CLIP_ADV = max(9.6, FONT_MODELINE_ADV * 1.35)
+mut f64 FONT_BODY_ADV = max(1.0, float(gfx.measure_text_fast(font_body, "M").get(0, 8.0)))
+mut f64 FONT_SMALL_ADV = max(1.0, float(gfx.measure_text_fast(font_small, "M").get(0, 7.0)))
+mut f64 FONT_MODELINE_ADV = max(1.0, float(gfx.measure_text_fast(font_modeline, "M").get(0, 7.0)))
+mut f64 FONT_MODELINE_CLIP_ADV = max(9.6, FONT_MODELINE_ADV * 1.35)
 def SECTION_H = project.TREE_HEADER_H
 def SECTION_ICON_Y = 4.0
 def SECTION_TEXT_Y = 6.0
 def ROW_TEXT_Y = 4.0
 def EDITOR_TEXT_TOP = 12.0
 def INPUT_TRACE = common.env_truthy("NY_EDITOR_INPUT_TRACE")
-def int: BIG_FILE_LINES = 5000
-def int: HIGHLIGHT_MAX_LINE_BYTES = 900
+def int BIG_FILE_LINES = 5000
+def int HIGHLIGHT_MAX_LINE_BYTES = 900
 def OUTLINE_MAX_LINES = 5000
-def int: LINE_DRAW_EXTRA_COLS = 96
+def int LINE_DRAW_EXTRA_COLS = 96
 def RAIL_TABS_H = 26.0
 def CONTEXT_W = 284.0
 def CONTEXT_ROW_H = 26.0
 def FIND_BAR_H = 58.0
-def f64: PALETTE_HEADER_H = 50.0
-def f64: PALETTE_ROW_H = 24.0
-def f64: PALETTE_DETAIL_H = 30.0
-def int: PALETTE_MAX_ROWS = 14
-def f64: WHICH_KEY_ROW_H = 26.0
-def int: WHICH_KEY_MAX_ROWS = 36
+def f64 PALETTE_HEADER_H = 50.0
+def f64 PALETTE_ROW_H = 24.0
+def f64 PALETTE_DETAIL_H = 30.0
+def int PALETTE_MAX_ROWS = 14
+def f64 WHICH_KEY_ROW_H = 26.0
+def int WHICH_KEY_MAX_ROWS = 36
 def TOP_TAB_MIN_W = 64.0
 def TOP_TAB_MAX_W = 144.0
 def MOUSE_BACK = 3
@@ -294,22 +294,22 @@ fn _font_visual_h(int font, f64 fallback) f64 {
 }
 
 fn _clamp_f64(f64 value, f64 lo, f64 hi) f64 {
-   mut f64: out = value
+   mut f64 out = value
    if out < lo { out = lo }
    if out > hi { out = hi }
    out
 }
 
 fn _clamp_int(int value, int lo, int hi) int {
-   mut int: out = value
+   mut int out = value
    if out < lo { out = lo }
    if out > hi { out = hi }
    out
 }
 
 fn _center_y(f64 y, f64 h, f64 item_h) f64 {
-   def f64: spare = h - item_h
-   def f64: pad = spare > 0.0 ? spare : 0.0
+   def f64 spare = h - item_h
+   def f64 pad = spare > 0.0 ? spare : 0.0
    float(int(y + pad * 0.5 + 0.5))
 }
 
@@ -394,16 +394,16 @@ mut context_state = prompt.context_state()
 mut rename_state = prompt.rename_state()
 mut fps_state = ui_runtime.fps_begin()
 mut reuse_state = ui_reuse.make()
-mut int: frame_count = 0
-mut int: reuse_present_count = 0
-mut int: begin_fail_count = 0
-mut bool: frame_events_seen = false
+mut int frame_count = 0
+mut int reuse_present_count = 0
+mut int begin_fail_count = 0
+mut bool frame_events_seen = false
 mut next_cache_save_time = 0.0
-mut int: force_full_redraw = 0
-mut int: last_escape_ns = 0
-mut bool: auto_dump_done = false
-mut str: cursor_kind = ""
-mut int: perf_advisor_reports = 0
+mut int force_full_redraw = 0
+mut int last_escape_ns = 0
+mut bool auto_dump_done = false
+mut str cursor_kind = ""
+mut int perf_advisor_reports = 0
 mut edit_scroll_accum = 0.0
 mut palette_scroll_accum = 0.0
 mut which_key_scroll_accum = 0.0
@@ -424,47 +424,47 @@ fn _editor_probe(str name) bool {
    common.env_truthy("NY_EDITOR_" + name + "_SELFTEST")
 }
 
-def bool: INPUT_PROBE = _editor_probe("INPUT")
-def bool: CONTEXT_PROBE = _editor_probe("CONTEXT")
-def bool: TERMINAL_PROBE = _editor_probe("TERMINAL")
-def bool: TERMINAL_DUMP_PROBE = _editor_probe("TERMINAL_DUMP")
-def bool: SYNTAX_PROBE = _editor_probe("SYNTAX")
-def bool: NAV_PROBE = _editor_probe("NAV")
-def bool: UNDO_PROBE = _editor_probe("UNDO")
-def bool: ESCAPE_PROBE = _editor_probe("ESCAPE")
-def bool: MODELINE_PROBE = _editor_probe("MODELINE")
-def bool: CHORD_PROBE = _editor_probe("CHORD")
-def bool: FIND_PROBE = _editor_probe("FIND")
-def bool: PALETTE_PROBE = _editor_probe("PALETTE")
-def bool: WHICH_KEY_PROBE = _editor_probe("WHICH_KEY")
-def bool: MULTICURSOR_PROBE = _editor_probe("MULTICURSOR")
-def bool: ZOOM_PROBE = _editor_probe("ZOOM")
-def bool: SCROLLBAR_PROBE = _editor_probe("SCROLLBAR")
-def bool: GOTO_PROBE = _editor_probe("GOTO")
-def bool: GIT_PROBE = _editor_probe("GIT")
-def bool: TAB_PROBE = _editor_probe("TAB")
-def bool: SELECT_PROBE = _editor_probe("SELECT")
-def bool: BENCH_PROBE = _editor_probe("BENCH")
-def bool: MOCK_BENCH_FAST = BENCH_PROBE && common.env_truthy("NY_UI_HEADLESS") && !common.env_truthy("NYTRIX_AUTO_DUMP")
-def int: BENCH_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_BENCH_FRAMES", 240, 1, 100000))
-def int: BENCH_WARMUP_FRAMES = int(common.env_int_clamped("NY_EDITOR_BENCH_WARMUP_FRAMES", 1, 0, 10000))
-def bool: FRAME_TRACE = common.env_truthy("NY_EDITOR_FRAME_TRACE")
-def int: FRAME_TRACE_LIMIT = int(common.env_int_clamped("NY_EDITOR_FRAME_TRACE_FRAMES", 5, 1, 100000))
-def bool: PERF_ADVISOR = FRAME_TRACE || common.env_truthy("NY_EDITOR_PERF_ADVISOR")
-def int: PERF_ADVISOR_MIN_MS = int(common.env_int_clamped("NY_EDITOR_PERF_ADVISOR_MIN_MS", 18, 1, 1000))
-def int: PERF_ADVISOR_LIMIT = int(common.env_int_clamped("NY_EDITOR_PERF_ADVISOR_FRAMES", 12, 1, 10000))
-def int: CACHE_SAVE_SECONDS = int(common.env_int_clamped("NY_EDITOR_CACHE_SAVE_SECONDS", 5, 1, 300))
-def int: PROJECT_OPEN_CACHE_LIMIT = int(common.env_int_clamped("NY_EDITOR_PROJECT_OPEN_CACHE_LIMIT", 1024, 0, 10000))
-def int: BEGIN_FAIL_LIMIT = int(common.env_int_clamped("NY_EDITOR_BEGIN_FAIL_LIMIT", 180, 1, 10000))
-def int: EVENT_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_MAX_EVENTS_PER_FRAME", 384, 32, 8192))
-def int: IDLE_REUSE_WARMUP = int(common.env_int_clamped("NY_EDITOR_IDLE_REUSE_WARMUP", 1, 0, 128))
-def int: IDLE_REUSE_INTERVAL = int(common.env_int_clamped("NY_EDITOR_IDLE_REUSE_INTERVAL", 1200, 1, 100000))
-def int: ESC_QUIT_WINDOW_NS = 900000000
+def bool INPUT_PROBE = _editor_probe("INPUT")
+def bool CONTEXT_PROBE = _editor_probe("CONTEXT")
+def bool TERMINAL_PROBE = _editor_probe("TERMINAL")
+def bool TERMINAL_DUMP_PROBE = _editor_probe("TERMINAL_DUMP")
+def bool SYNTAX_PROBE = _editor_probe("SYNTAX")
+def bool NAV_PROBE = _editor_probe("NAV")
+def bool UNDO_PROBE = _editor_probe("UNDO")
+def bool ESCAPE_PROBE = _editor_probe("ESCAPE")
+def bool MODELINE_PROBE = _editor_probe("MODELINE")
+def bool CHORD_PROBE = _editor_probe("CHORD")
+def bool FIND_PROBE = _editor_probe("FIND")
+def bool PALETTE_PROBE = _editor_probe("PALETTE")
+def bool WHICH_KEY_PROBE = _editor_probe("WHICH_KEY")
+def bool MULTICURSOR_PROBE = _editor_probe("MULTICURSOR")
+def bool ZOOM_PROBE = _editor_probe("ZOOM")
+def bool SCROLLBAR_PROBE = _editor_probe("SCROLLBAR")
+def bool GOTO_PROBE = _editor_probe("GOTO")
+def bool GIT_PROBE = _editor_probe("GIT")
+def bool TAB_PROBE = _editor_probe("TAB")
+def bool SELECT_PROBE = _editor_probe("SELECT")
+def bool BENCH_PROBE = _editor_probe("BENCH")
+def bool MOCK_BENCH_FAST = BENCH_PROBE && common.env_truthy("NY_UI_HEADLESS") && !common.env_truthy("NYTRIX_AUTO_DUMP")
+def int BENCH_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_BENCH_FRAMES", 240, 1, 100000))
+def int BENCH_WARMUP_FRAMES = int(common.env_int_clamped("NY_EDITOR_BENCH_WARMUP_FRAMES", 1, 0, 10000))
+def bool FRAME_TRACE = common.env_truthy("NY_EDITOR_FRAME_TRACE")
+def int FRAME_TRACE_LIMIT = int(common.env_int_clamped("NY_EDITOR_FRAME_TRACE_FRAMES", 5, 1, 100000))
+def bool PERF_ADVISOR = FRAME_TRACE || common.env_truthy("NY_EDITOR_PERF_ADVISOR")
+def int PERF_ADVISOR_MIN_MS = int(common.env_int_clamped("NY_EDITOR_PERF_ADVISOR_MIN_MS", 18, 1, 1000))
+def int PERF_ADVISOR_LIMIT = int(common.env_int_clamped("NY_EDITOR_PERF_ADVISOR_FRAMES", 12, 1, 10000))
+def int CACHE_SAVE_SECONDS = int(common.env_int_clamped("NY_EDITOR_CACHE_SAVE_SECONDS", 5, 1, 300))
+def int PROJECT_OPEN_CACHE_LIMIT = int(common.env_int_clamped("NY_EDITOR_PROJECT_OPEN_CACHE_LIMIT", 1024, 0, 10000))
+def int BEGIN_FAIL_LIMIT = int(common.env_int_clamped("NY_EDITOR_BEGIN_FAIL_LIMIT", 180, 1, 10000))
+def int EVENT_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_MAX_EVENTS_PER_FRAME", 384, 32, 8192))
+def int IDLE_REUSE_WARMUP = int(common.env_int_clamped("NY_EDITOR_IDLE_REUSE_WARMUP", 1, 0, 128))
+def int IDLE_REUSE_INTERVAL = int(common.env_int_clamped("NY_EDITOR_IDLE_REUSE_INTERVAL", 1200, 1, 100000))
+def int ESC_QUIT_WINDOW_NS = 900000000
 palette_state["cfg"] = command_cfg
 
 fn _trace_ms(int a, int b) str {
-   def int: delta = b - a
-   def int: us = delta > 0 ? delta / 1000 : 0
+   def int delta = b - a
+   def int us = delta > 0 ? delta / 1000 : 0
    to_str(us / 1000) + "." + to_str((us / 100) % 10) + to_str((us / 10) % 10) + "ms"
 }
 
@@ -565,7 +565,7 @@ fn _editor_dynamic_ui_active() bool {
 }
 
 fn _editor_reuse_opts(f64 sw, f64 sh) dict {
-   def any: opts = {
+   def any opts = {
       "enabled": common.env_truthy("NY_UI_EDITOR_IDLE_REUSE"),
       "gui_frame": true,
       "win_w": int(sw),
@@ -584,11 +584,11 @@ fn _editor_reuse_opts(f64 sw, f64 sh) dict {
 
 fn _bench_finish() int {
    if !BENCH_PROBE { return 0 }
-   def int: start_ns = int(fps_state.get("start", ticks()))
-   def int: elapsed_ns = ticks() - start_ns
-   def f64: elapsed = elapsed_ns > 0 ? float(elapsed_ns) / 1000000000.0 : 0.000001
-   def int: total = int(fps_state.get("total", 0))
-   def int: avg = int(float(total) / elapsed)
+   def int start_ns = int(fps_state.get("start", ticks()))
+   def int elapsed_ns = ticks() - start_ns
+   def f64 elapsed = elapsed_ns > 0 ? float(elapsed_ns) / 1000000000.0 : 0.000001
+   def int total = int(fps_state.get("total", 0))
+   def int avg = int(float(total) / elapsed)
    print("[editor:bench] avg_fps=" + to_str(avg) +
       " frames=" + to_str(total) +
       " reused=" + to_str(reuse_present_count) +
@@ -632,20 +632,20 @@ fn _layout_sh(dict lay) f64 {
 }
 
 fn _palette_rect(f64 sw, f64 sh, int matches_len) list {
-   mut f64: w = sw - 44.0
+   mut f64 w = sw - 44.0
    if w < 220.0 { w = 220.0 }
    if w > 880.0 { w = 880.0 }
-   mut f64: x = sw * 0.5 - w * 0.5
+   mut f64 x = sw * 0.5 - w * 0.5
    if x < 8.0 { x = 8.0 }
-   mut f64: y = sh * 0.09
+   mut f64 y = sh * 0.09
    if y < 18.0 { y = 18.0 }
-   mut int: max_rows = int((sh - y - PALETTE_HEADER_H - PALETTE_DETAIL_H - 24.0) / PALETTE_ROW_H)
+   mut int max_rows = int((sh - y - PALETTE_HEADER_H - PALETTE_DETAIL_H - 24.0) / PALETTE_ROW_H)
    if max_rows < 1 { max_rows = 1 }
-   mut int: rows = matches_len
+   mut int rows = matches_len
    if rows < 1 { rows = 1 }
    if rows > max_rows { rows = max_rows }
    if rows > PALETTE_MAX_ROWS { rows = PALETTE_MAX_ROWS }
-   def f64: h = PALETTE_HEADER_H + float(rows) * PALETTE_ROW_H + PALETTE_DETAIL_H + 10.0
+   def f64 h = PALETTE_HEADER_H + float(rows) * PALETTE_ROW_H + PALETTE_DETAIL_H + 10.0
    [x, y, w, h, rows]
 }
 
@@ -671,20 +671,20 @@ fn _palette_row_hit(dict lay, f64 mx, f64 my) int {
 }
 
 fn _which_key_rect(f64 sw, f64 sh, int total) list {
-   mut f64: w = sw - 28.0
+   mut f64 w = sw - 28.0
    if w < 320.0 { w = 320.0 }
    if w > 1180.0 { w = 1180.0 }
-   def int: cols = w > 960.0 ? 3 : (w > 640.0 ? 2 : 1)
-   mut int: max_lines = int((sh - 130.0) / WHICH_KEY_ROW_H)
+   def int cols = w > 960.0 ? 3 : (w > 640.0 ? 2 : 1)
+   mut int max_lines = int((sh - 130.0) / WHICH_KEY_ROW_H)
    if max_lines < 1 { max_lines = 1 }
-   mut int: max_visible = max_lines * cols
+   mut int max_visible = max_lines * cols
    if max_visible > WHICH_KEY_MAX_ROWS { max_visible = WHICH_KEY_MAX_ROWS }
    if max_visible < 1 { max_visible = 1 }
-   mut int: visible = total
+   mut int visible = total
    if visible > max_visible { visible = max_visible }
    if visible < 1 { visible = 1 }
-   def int: line_count = int((visible + cols - 1) / cols)
-   def f64: h = 74.0 + float(line_count) * WHICH_KEY_ROW_H + 12.0
+   def int line_count = int((visible + cols - 1) / cols)
+   def f64 h = 74.0 + float(line_count) * WHICH_KEY_ROW_H + 12.0
    [14.0, sh - h - 14.0, w, h, cols, visible]
 }
 
@@ -697,8 +697,8 @@ fn _which_key_contains(f64 sw, f64 sh, f64 mx, f64 my) bool {
 }
 
 fn _clamp_which_key_scroll(int total, int visible) int {
-   def int: visible_rows = visible > 0 ? visible : 1
-   def int: max_scroll = total > visible_rows ? total - visible_rows : 0
+   def int visible_rows = visible > 0 ? visible : 1
+   def int max_scroll = total > visible_rows ? total - visible_rows : 0
    _clamp_int(which_key_scroll, 0, max_scroll)
 }
 
@@ -736,8 +736,8 @@ fn _invalidate_text_metrics() int {
    0
 }
 
-def int: FONT_ZOOM_MIN = 8
-def int: FONT_ZOOM_MAX = 42
+def int FONT_ZOOM_MIN = 8
+def int FONT_ZOOM_MAX = 42
 
 fn _apply_editor_fonts() int {
    font_title = _load_editor_font(TITLE_FONT_CANDIDATES, font_title_size)
@@ -754,12 +754,12 @@ fn _apply_editor_fonts() int {
 }
 
 fn _set_editor_font_size(int body_size, bool persist=true) int {
-   def int: next = _clamp_int(body_size, FONT_ZOOM_MIN, FONT_ZOOM_MAX)
+   def int next = _clamp_int(body_size, FONT_ZOOM_MIN, FONT_ZOOM_MAX)
    if next == font_body_size {
       if persist { _status("font " + to_str(font_body_size) + "px") }
       return 0
    }
-   def int: delta = next - FONT_BODY_SIZE
+   def int delta = next - FONT_BODY_SIZE
    font_body_size = next
    font_title_size = _clamp_int(FONT_TITLE_SIZE + delta, 8, 96)
    font_small_size = _clamp_int(FONT_SMALL_SIZE + delta, 8, 96)
@@ -779,7 +779,7 @@ fn _reset_editor_font() int {
 }
 
 fn _line_limit(dict lay) int {
-   def f64: limit = float(lay.get("edit_w", 0.0)) / 7.5 + float(LINE_DRAW_EXTRA_COLS)
+   def f64 limit = float(lay.get("edit_w", 0.0)) / 7.5 + float(LINE_DRAW_EXTRA_COLS)
    int(_clamp_f64(limit, 120.0, 1000000.0))
 }
 
@@ -809,7 +809,7 @@ fn _buffer_source_path(dict b) str {
 fn _editor_context_entry() dict {
    def b = ed.current_buffer(st)
    def path = _buffer_source_path(b)
-   def any: entry = {
+   def any entry = {
       "scope": "editor", "name": to_str(b.get("name", "buffer")), "path": path,
       "rel": path.len > 0 ? path : to_str(b.get("name", "buffer")),
       "dir": false, "kind": to_str(b.get("kind", "file"))
@@ -833,16 +833,16 @@ fn _open_context(f64 x, f64 y, dict entry, str scope) int {
 fn _timeline_context_entry(any row) dict {
    def typ = to_str(row.get(0, ""))
    if typ == "command" {
-      def any: command_entry = {"type": "command", "name": to_str(row.get(1, "command")), "id": to_str(row.get(2, "")), "path": "", "rel": to_str(row.get(2, "")), "dir": false}
+      def any command_entry = {"type": "command", "name": to_str(row.get(1, "command")), "id": to_str(row.get(2, "")), "path": "", "rel": to_str(row.get(2, "")), "dir": false}
       return command_entry
    }
    def path = to_str(row.get(2, ""))
-   def any: file_entry = {"type": "file", "name": to_str(row.get(1, ospath.basename(path))), "path": path, "rel": path, "dir": false, "kind": session.file_kind(path)}
+   def any file_entry = {"type": "file", "name": to_str(row.get(1, ospath.basename(path))), "path": path, "rel": path, "dir": false, "kind": session.file_kind(path)}
    file_entry
 }
 
 fn _is_svg_path(str path) bool {
-   def str: ext = str.lower(ospath.extname(path))
+   def str ext = str.lower(ospath.extname(path))
    ext == ".svg"
 }
 
@@ -935,10 +935,10 @@ fn _draw_svg_metadata(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
    _fill_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, gfx.color_hex("#010102"))
    _stroke_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, C_LINE_2, 1.0)
    if tex > 0 && iw > 0.0 && ih > 0.0 {
-      def f64: max_w = _clamp_f64(w * 0.46, 64.0, 1000000.0)
-      def f64: max_h = _clamp_f64(h - 92.0, 64.0, 1000000.0)
-      mut f64: scale = max_w / iw
-      def f64: scale_h = max_h / ih
+      def f64 max_w = _clamp_f64(w * 0.46, 64.0, 1000000.0)
+      def f64 max_h = _clamp_f64(h - 92.0, 64.0, 1000000.0)
+      mut f64 scale = max_w / iw
+      def f64 scale_h = max_h / ih
       if scale_h < scale { scale = scale_h }
       _draw_tex_rect(tex, x + pad + 12.0, y + pad + 14.0, iw * scale, ih * scale, gfx.WHITE)
    } else {
@@ -947,10 +947,10 @@ fn _draw_svg_metadata(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
    }
    mut lines = _svg_meta_lines(path, 0)
    if tex > 0 { lines = lines.append("texture: " + to_str(int(iw)) + "x" + to_str(int(ih))) }
-   def f64: mx = x + (tex > 0 ? _clamp_f64(w * 0.53, 220.0, 1000000.0) : pad + 82.0)
+   def f64 mx = x + (tex > 0 ? _clamp_f64(w * 0.53, 220.0, 1000000.0) : pad + 82.0)
    mut i = 0
    while i < lines.len && y + pad + 50.0 + float(i) * 20.0 < y + h - pad {
-      def int: text_cols = int(_clamp_f64((x + w - pad - mx) / 7.2, 12.0, 1000000.0))
+      def int text_cols = int(_clamp_f64((x + w - pad - mx) / 7.2, 12.0, 1000000.0))
       _text(i == 0 ? font_body : font_small, widgets.preview(to_str(lines.get(i, "")), text_cols), mx, y + pad + 24.0 + float(i) * 20.0, i == 0 ? C_ACCENT_2 : C_MUTED)
       i += 1
    }
@@ -974,17 +974,17 @@ fn _draw_image_preview(dict lay, dict b) bool {
    def y = float(lay.get("edit_y", 0.0))
    def w = float(lay.get("edit_w", 0.0))
    def h = float(lay.get("edit_h", 0.0))
-   def f64: pad = 12.0
-   def f64: label_h = 42.0
-   def f64: avail_w = _clamp_f64(w - pad * 2.0, 16.0, 1000000.0)
-   def f64: avail_h = _clamp_f64(h - pad * 2.0 - label_h, 16.0, 1000000.0)
-   mut f64: scale = avail_w / iw
-   def f64: scale_h = avail_h / ih
+   def f64 pad = 12.0
+   def f64 label_h = 42.0
+   def f64 avail_w = _clamp_f64(w - pad * 2.0, 16.0, 1000000.0)
+   def f64 avail_h = _clamp_f64(h - pad * 2.0 - label_h, 16.0, 1000000.0)
+   mut f64 scale = avail_w / iw
+   def f64 scale_h = avail_h / ih
    if scale_h < scale { scale = scale_h }
-   def f64: draw_w = iw * scale
-   def f64: draw_h = ih * scale
-   def f64: ix = x + (w - draw_w) * 0.5
-   def f64: iy = y + pad + (avail_h - draw_h) * 0.5
+   def f64 draw_w = iw * scale
+   def f64 draw_h = ih * scale
+   def f64 ix = x + (w - draw_w) * 0.5
+   def f64 iy = y + pad + (avail_h - draw_h) * 0.5
    _fill_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, gfx.color_hex("#010102"))
    _stroke_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, C_LINE_2, 1.0)
    _draw_tex_rect(tex, ix, iy, draw_w, draw_h, gfx.WHITE)
@@ -1012,7 +1012,7 @@ fn _status(str msg) int {
 
 fn _cache_parse(str raw) dict {
    def rows = str.split(raw, "\n")
-   def int: cap = _clamp_int(rows.len * 2, 64, 1000000)
+   def int cap = _clamp_int(rows.len * 2, 64, 1000000)
    mut out = dict(cap)
    mut i = 0
    while i < rows.len {
@@ -1040,7 +1040,7 @@ fn _cache_value(any raw, str key_name, str fallback) str {
 }
 
 fn _cache_bool(any raw, str key_name, bool fallback) bool {
-   def str: v = str.lower(str.strip(_cache_value(raw, key_name, fallback ? "1" : "0")))
+   def str v = str.lower(str.strip(_cache_value(raw, key_name, fallback ? "1" : "0")))
    v == "1" || v == "true" || v == "on" || v == "yes"
 }
 

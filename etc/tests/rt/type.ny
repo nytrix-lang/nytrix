@@ -830,7 +830,7 @@ fn test_layout_examples() {
 fn test_strict_types() {
    def any explicit_any = {"sender": "ny", "priority": 1}
    assert(eq(type(explicit_any), "dict"), "explicit any keeps dict runtime type")
-   def dict<str, any>: explicit_dict = {"sender": "ny", "priority": 1}
+   def dict<str, any> explicit_dict = {"sender": "ny", "priority": 1}
    assert(eq(type(explicit_dict), "dict"), "explicit dict<str, any> keeps dict runtime type")
    layout guard StrictHeader h = {"sender": "ny", "priority": 2} else {
       assert(false, "layout guard should accept mixed boundary data")

@@ -15,8 +15,6 @@ fn tokenize(str source, list out_tokens) list {
    def src_len = source.len
    mut i = 0
    while i < src_len {
-      def idx = i + 0
-      i = idx
       def ch = load8(source, i)
       if _h.is_space_ch(ch) {
          def j = _h.scan_space(source, i, src_len)

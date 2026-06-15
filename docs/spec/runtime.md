@@ -33,7 +33,7 @@ compiler-tracked allocation require a proven byte range:
 
 ```ny
 with ptr: p = malloc(8){
-   def int: i = 3
+   def int i = 3
    assert_compile_range(i, 0, 7, "byte index")
    store8(p, 65, i)
    assert(load8(p, i) == 65, "checked load")

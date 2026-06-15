@@ -13,5 +13,5 @@ impl Meter {
    }
 }
 
-def Meter: m = Meter({"value": 1})
+def Meter m = Meter({"value": 1})
 print(m.val)

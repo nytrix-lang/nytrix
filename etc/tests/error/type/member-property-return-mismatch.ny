@@ -7,6 +7,6 @@ impl PropBox {
    }
 }
 
-def PropBox: box = PropBox({})
-def str: s = box.value
+def PropBox box = PropBox({})
+def str s = box.value
 print(s)

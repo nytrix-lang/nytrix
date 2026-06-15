@@ -52,8 +52,8 @@ functions.
 
 ```ny
 match value {
-   Shape.Circle(radius: r) -> r * r
-   Shape.Rect(width: w, height: h) -> w * h
+   Shape.Circle(r) -> r * r
+   Shape.Rect(w, h) -> w * h
    _ -> fallback
 }
 ```
@@ -61,19 +61,19 @@ match value {
 `match` is for branches selected by value structure rather than only literal
 equality. Fallback arms are explicit.
 
-ADT patterns use the constructor name and named payload fields. Payload fields
-must bind to an identifier or `_`.
+ADT patterns use the constructor name and positional payload bindings. Payload
+slots bind to an identifier or `_`.
 
 ```ny
 match shape {
-   Shape.Circle(radius: r) if r > 0 -> r
-   Shape.Circle(radius: _) -> 0
+   Shape.Circle(r) if r > 0 -> r
+   Shape.Circle(_) -> 0
    Shape.Empty -> 0
 }
 ```
 
-The compiler checks duplicate variants, missing constructor fields, unknown
-payload fields, and non-exhaustive ADT matches.
+The compiler checks duplicate variants, payload arity, unknown constructors,
+and non-exhaustive ADT matches.
 
 When arms use only literals or ranges, `case` is the direct form.
 

@@ -96,7 +96,7 @@ use std.core
 def data = [1, 2, 3, 4]
 
 fn work(list<int> xs) int {
-   mut int: total = 0
+   mut int total = 0
    for x in xs { total += int(x) }
    total
 }

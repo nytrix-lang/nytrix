@@ -52,7 +52,7 @@ comptime table Name {
 Compile-time tables make static dispatch visible. Use them for lookup
 surfaces, generated classifier logic, and branch-free native output.
 
-The compiler also emits a legacy helper named from the table. For
+The compiler also emits a compatibility helper named from the table. For
 `comptime table KeyMap`, call `_key_map(key)` or `_key_map(key, fallback)`.
 Prefer `comptime match KeyMap(key, fallback)` in new code.
 
