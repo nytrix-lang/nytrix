@@ -1404,8 +1404,11 @@ static const ny_std_root_alias_t k_std_root_aliases[] = {
     {"bin", "std.math.bin"},
 };
 
-static const char *const k_std_bare_surface_modules[] = {"std.core",
-                                                         "std.os.prim"};
+static const char *const k_std_bare_surface_modules[] = {
+    "std.core",     "std.os",      "std.os.prim",
+    "std.math",     "std.math.nt", "std.math.bin",
+    "std.core.str",
+};
 
 static const char *const k_std_root_use_modules[] = {
     "std.core",     "std.os.prim", "std.math",     "std.math.nt",

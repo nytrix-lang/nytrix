@@ -1314,26 +1314,6 @@ static const op_map_t op_map[] = {
     {"in", NULL, NULL, NY_BINOP_IN, false, NULL},
     {NULL, NULL, NULL, NY_BINOP_UNKNOWN, false, NULL}};
 
-static bool ny_const_int_pow_exact(int64_t base, int64_t exp, int64_t *out) {
-  if (!out || exp < 0)
-    return false;
-  int64_t result = 1;
-  int64_t b = base;
-  uint64_t e = (uint64_t)exp;
-  while (e) {
-    if (e & 1) {
-      if (__builtin_mul_overflow(result, b, &result) || !ny_small_int_fits_i64(result))
-        return false;
-    }
-    e >>= 1;
-    if (e) {
-      if (__builtin_mul_overflow(b, b, &b) || !ny_small_int_fits_i64(b))
-        return false;
-    }
-  }
-  *out = result;
-  return true;
-}
 
 static __attribute__((unused)) LLVMValueRef ny_emit_raw_int_binary(codegen_t *cg,
                                                                    const op_map_t *entry,
@@ -2625,7 +2605,7 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth, const char *
   if (kind == NY_BINOP_POW) {
     int64_t li = 0, ri = 0, out = 0;
     if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri) &&
-        ny_const_int_pow_exact(li, ri, &out))
+        ny_checked_small_pow_i64(li, ri, &out))
       return ny_const_tagged_int_value(cg, out);
   }
 

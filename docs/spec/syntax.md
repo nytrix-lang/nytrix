@@ -58,8 +58,8 @@ module name generated from Spec { key = value emit make_backend(Contract) }
 ```ny
 def name = expr
 mut name = expr
-def Type: name = expr
-mut Type: name = expr
+def Type name = expr
+mut Type name = expr
 def a, b = expr
 mut a, b
 del name
@@ -104,7 +104,7 @@ Common generic forms include `list<int>`, `dict<str, int>`, `set<str>`,
 ## Data Declarations
 
 ```ny
-struct Vec2 { x: f64, y: f64 }
+struct Vec2 { f64 x, f64 y }
 
 enum Color {
    Red,
@@ -113,13 +113,13 @@ enum Color {
 }
 
 enum Shape {
-   Circle(int: radius),
-   Rect(int: width, int: height),
+   Circle(int radius),
+   Rect(int width, int height),
    Empty
 }
 
 enum Option<T> {
-   Some(T: value),
+   Some(T value),
    None
 }
 
@@ -179,7 +179,7 @@ case value {
 }
 
 match value {
-   Pattern(field: name) -> expr
+   Pattern(value) -> expr
    _ -> expr
 }
 ```
@@ -193,15 +193,14 @@ match value {
 extern "library" { fn symbol(Type arg) Type }
 extern { fn process_symbol(Type arg) Type }
 
-layout Name { field: Type, field2: Type }
-layout Packed pack(1){ tag: u8, value: i32 }
-layout record Row derive(default, eq, hash, debug_str) pack(4){ id: i32 }
-layout shape Header derive(load, store, zero) pack(8){ sender: str }
-layout guard Header: h = value else { fallback }
+layout Name { Type field, Type field2 }
+layout Packed pack(1){ u8 tag, i32 value }
+layout record Row derive(default, eq, hash, debug_str) pack(4){ i32 id }
+layout shape Header derive(load, store, zero) pack(8){ str sender }
+layout guard Header h = value else { fallback }
 ```
 
-Fields use `name: Type`. The parser still accepts the older primitive-only
-`Type: name` spelling, but docs and tests use `name: Type`.
+Fields use the short `Type name` spelling.
 
 ## Attributes
 

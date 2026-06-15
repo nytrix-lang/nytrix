@@ -114,13 +114,13 @@ See [patterns.md](patterns.md) for full arm syntax and guards.
 ```ny
 match value {
    pattern -> expr
-   Pattern(field: name) -> expr
+   Pattern(value) -> expr
    _ -> fallback
 }
 ```
 
 `match` handles dispatch by value shape. Match ADT variants by qualified
-constructor name and named payload fields.
+constructor name and positional payload bindings.
 
 ## Try and catch
 
@@ -163,7 +163,7 @@ loops make the control path harder to see. Prefer `while`, `for`, `break`, and
 ## With
 
 ```ny
-with Type name = value { body }
+with Type: name = value { body }
 ```
 
 `with` binds a scoped value and runs the body with API-defined setup and

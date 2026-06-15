@@ -10,7 +10,7 @@ def s1 = "hello"
 def s2 = "world"
 assert(s1.len == 5, "len s1")
 assert(s2.len == 5, "len s2")
-def str: typed_len_source = "hello"
+def str typed_len_source = "hello"
 assert(typed_len_source.len == 5, "typed str property len")
 assert("abc".len == 3, "literal str property len")
 assert(["x", "y"].len == 2, "literal list property len")

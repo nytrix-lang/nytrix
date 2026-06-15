@@ -71,7 +71,7 @@ use module.path *
 ```
 
 `use module.path` imports normal exported names and keeps the leaf name
-available as a module alias. `use module.path *` is accepted as legacy broad
+available as a module alias. `use module.path *` is accepted as compatibility broad
 import spelling.
 
 `use path:profile` imports the module's core export group plus the named export

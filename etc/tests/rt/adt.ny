@@ -64,7 +64,7 @@ fn unwrap_or_zero(o) {
 
 assert_eq(unwrap_or_zero(Option.Some(12)), 12, "generic ADT payload")
 assert_eq(unwrap_or_zero(Option.None), 0, "generic ADT empty variant")
-def Option<int>: typed_option = Option.Some(41)
+def Option<int> typed_option = Option.Some(41)
 match typed_option {
    Option.Some(v) -> assert_eq(v + 1, 42, "generic ADT match refines payload type")
    Option.None -> assert_eq(0, 1, "unexpected generic ADT empty variant")

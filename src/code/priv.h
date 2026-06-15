@@ -96,6 +96,51 @@ static inline bool ny_stmt_is_bare_std_use(const stmt_t *s) {
     return false;
   return s->as.use.module && strcmp(s->as.use.module, "std") == 0;
 }
+static inline uint32_t ny_cached_fun_name_len(fun_sig *fs) {
+  if (!fs || !fs->name)
+    return 0;
+  if (fs->name[0] == '\0') {
+    fs->name_len = 0;
+    return 0;
+  }
+  if (fs->name_len && fs->name_hash)
+    return fs->name_len;
+  fs->name_len = (uint32_t)strlen(fs->name);
+  return fs->name_len;
+}
+
+static inline LLVMTypeRef ny_layout_abi_carrier_type(codegen_t *cg,
+                                                     layout_def_t *layout) {
+  if (!cg || !layout)
+    return NULL;
+  if (layout->size > 16)
+    return cg->type_i8ptr;
+  switch (layout->size) {
+  case 1: return cg->type_i8;
+  case 2: return cg->type_i16;
+  case 4: return cg->type_i32;
+  case 8: return cg->type_i64;
+  default: return layout->llvm_type;
+  }
+}
+
+static inline bool ny_checked_small_pow_i64(int64_t base, int64_t exp, int64_t *out) {
+  if (!out || exp < 0)
+    return false;
+  int64_t result = 1, b = base;
+  uint64_t e = (uint64_t)exp;
+  while (e) {
+    if ((e & 1) && (__builtin_mul_overflow(result, b, &result) ||
+                    !ny_small_int_fits_i64(result)))
+      return false;
+    e >>= 1;
+    if (e && (__builtin_mul_overflow(b, b, &b) || !ny_small_int_fits_i64(b)))
+      return false;
+  }
+  *out = result;
+  return true;
+}
+
 static inline const char *ny_sig_param_type(fun_sig *sig, size_t idx) {
   if (!sig || !sig->stmt_t)
     return NULL;
@@ -346,6 +391,14 @@ bool ny_builtin_name_shadowed_by_user_symbol(codegen_t *cg, scope *scopes, size_
                                              uint64_t hash);
 const char *ny_builtin_surface_name_for_callee(expr_t *callee, size_t *out_len,
                                                uint64_t *out_hash);
+static inline bool ny_call_builtin_name_shadowed(codegen_t *cg, scope *scopes,
+                                                size_t depth, expr_t *callee) {
+  size_t name_len = 0;
+  uint64_t hash = 0;
+  const char *name = ny_builtin_surface_name_for_callee(callee, &name_len, &hash);
+  return !name || ny_builtin_name_shadowed_by_user_symbol(cg, scopes, depth,
+                                                          name, name_len, hash);
+}
 binding *lookup_binding_hash_no_mark(scope *scopes, size_t depth, const char *name,
                                      size_t name_len, uint64_t hash);
 void scope_bind(codegen_t *cg, scope *scopes, size_t depth, const char *name, LLVMValueRef v,

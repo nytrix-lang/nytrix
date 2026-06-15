@@ -1,0 +1,387 @@
+source ::= { stmt } EOF
+
+ignored ::= whitespace | newline | comment | shebang | line_directive
+comment ::= ';' { any_char - newline } newline
+shebang ::= '#!' { any_char - newline } newline
+line_directive ::= '#' ['line'] number [string] newline
+
+identifier ::= ident_start { ident_char } { template_tail }
+             | template_tail { ident_char } { template_tail }
+
+ident_start ::= letter | '_'
+ident_char ::= letter | digit | '_'
+template_tail ::= '${' identifier '}' { ident_char }
+
+path ::= path_part { '.' path_part }
+path_part ::= identifier | number [identifier]
+
+literal ::= number | string | fstring | 'true' | 'false' | nil
+nil ::= 'nil' | 'none' | 'NULL'
+
+number ::= decimal [number_suffix]
+         | hexadecimal [int_suffix]
+         | binary [int_suffix]
+         | octal [int_suffix]
+
+decimal ::= digits ['.' digits] [exponent]
+          | digits exponent
+
+digits ::= digit { ['_'] digit }
+hexadecimal ::= ('0x' | '0X') hex_digit { ['_'] hex_digit }
+binary ::= ('0b' | '0B') bin_digit { ['_'] bin_digit }
+octal ::= ('0o' | '0O') oct_digit { ['_'] oct_digit }
+
+exponent ::= ('e' | 'E') ['+' | '-'] digits
+
+number_suffix ::= int_suffix | float_suffix
+int_suffix ::= ['_'] ('i8' | 'i16' | 'i32' | 'i64' | 'i128'
+                   | 'u8' | 'u16' | 'u32' | 'u64' | 'u128')
+float_suffix ::= ['_'] ('f32' | 'f64' | 'f128')
+
+string ::= '"' { string_char | escape } '"'
+         | "'" { string_char | escape } "'"
+         | '"""' { any_char } '"""'
+         | "'''" { any_char } "'''"
+
+fstring ::= 'f' string
+escape ::= '\' any_char
+
+stmt ::= block
+       | use_stmt
+       | module_stmt
+       | hash_stmt
+       | attr_fn
+       | fn_decl
+       | extern_stmt
+       | struct_decl
+       | layout_decl
+       | layout_guard
+       | enum_decl
+       | comptime_stmt
+       | if_stmt
+       | while_stmt
+       | for_stmt
+       | try_stmt
+       | match_stmt
+       | defer_stmt
+       | return_stmt
+       | break_stmt
+       | continue_stmt
+       | goto_stmt
+       | binding_stmt
+       | del_stmt
+       | impl_stmt
+       | operator_decl
+       | with_stmt
+       | label_stmt
+       | macro_stmt
+       | assignment_stmt
+       | update_stmt
+       | expr_stmt
+
+stmt_or_block ::= stmt | block
+block ::= '{' { stmt } '}'
+
+use_stmt ::= 'use' use_target [':' identifier] [use_import] [use_alias]
+use_target ::= string | path | 'std' path
+use_import ::= '*' | '(' use_item { [','] use_item } [','] ')'
+use_item ::= identifier ['as' identifier]
+use_alias ::= 'as' identifier
+
+module_stmt ::= 'module' path ['*'] [module_body]
+module_body ::= generated_module
+              | '(' module_item { [','] module_item } [','] ')' [block]
+              | block
+
+module_item ::= identifier | export_profile | internal_profile
+export_profile ::= 'export' identifier '(' identifier { [','] identifier } [','] ')'
+internal_profile ::= 'internal' '(' identifier { [','] identifier } [','] ')'
+
+generated_module ::= 'generated' 'from' path '{' { generated_item } '}'
+generated_item ::= export_profile
+                 | internal_profile
+                 | 'emit' expr
+                 | identifier '=' expr
+                 | stmt
+
+hash_stmt ::= '#' hash_form
+
+hash_form ::= 'main' stmt_or_block
+            | platform_name stmt_or_block hash_alt?
+            | ('if' | 'elif') hash_condition stmt_or_block hash_alt?
+            | 'include' include_target ['as' include_alias] ['link' string]
+            | 'link' string
+            | 'define' identifier [number | identifier]
+            | 'line' [number] [string]
+
+hash_alt ::= ('else' | '#' 'else') stmt_or_block ['#' 'endif']
+           | ('elif' | '#' 'elif') hash_condition stmt_or_block hash_alt?
+           | '#' 'endif'
+
+hash_condition ::= ['('] expr [')']
+
+platform_name ::= 'linux' | 'unix' | 'posix' | 'macos' | 'mac'
+                | 'windows' | 'x86' | 'x86_64' | 'x64'
+                | 'aarch64' | 'arm64' | 'arm' | 'riscv'
+                | 'LINUX' | 'UNIX' | 'MACOS'
+                | 'IS_LINUX' | 'IS_UNIX' | 'IS_MACOS'
+                | 'IS_WINDOWS' | 'IS_X86' | 'IS_X86_64'
+                | 'IS_AARCH64' | 'IS_ARM' | 'IS_RISCV'
+
+include_target ::= string | '<' { any_char - '>' } '>'
+include_alias ::= string | identifier
+
+attribute ::= '@' attr_name ['(' [expr { ',' expr } [',']] ')']
+attr_name ::= identifier | number | string | fstring | lexer_keyword
+attr_fn ::= attribute { attribute } fn_decl
+
+fn_decl ::= 'fn' path '(' [params] ')' [type_ref] fn_body
+fn_body ::= block | '=' expr | same_line_expr | empty_extern_body
+same_line_expr ::= expr
+empty_extern_body ::= ε
+
+fn_expr ::= 'fn' '(' [params] ')' [type_ref] fn_expr_body
+lambda_expr ::= 'lambda' '(' [params] ')' [type_ref] fn_expr_body
+fn_expr_body ::= block | expr
+
+params ::= param { ',' param } [',']
+param ::= ['...'] (identifier | type_ref identifier) ['=' expr]
+
+extern_stmt ::= 'extern' extern_body
+extern_body ::= string extern_block
+              | extern_block
+              | extern_fn
+              | '#' 'link' string
+              | '#' 'include' include_target ['as' include_alias] ['link' string]
+
+extern_block ::= '{' { extern_fn } '}'
+extern_fn ::= 'fn' path '(' [extern_params] ')' [type_ref] ['as' extern_alias]
+extern_params ::= '...' | extern_param { ',' extern_param } [',']
+extern_param ::= type_ref identifier
+extern_alias ::= string | identifier
+
+binding_stmt ::= ('def' | 'mut') binding_targets ['=' expr_list]
+binding_targets ::= '[' identifier { ',' identifier } [','] ']'
+                  | binding_target { ',' binding_target } [',']
+binding_target ::= identifier | type_ref identifier
+
+del_stmt ::= 'del' identifier
+
+struct_decl ::= 'struct' path struct_attrs '{' { struct_member [','] } '}'
+layout_decl ::= 'layout' ['record' | 'shape'] path layout_attrs '{' { layout_member [','] } '}'
+
+struct_attrs ::= { align_attr | pack_attr }
+layout_attrs ::= { align_attr | pack_attr | derive_attr }
+
+align_attr ::= 'align' '(' number ')'
+pack_attr ::= 'pack' '(' number ')'
+derive_attr ::= 'derive' '(' identifier { ',' identifier } [','] ')'
+
+struct_member ::= field | attr_fn | fn_decl | operator_decl
+layout_member ::= layout_field | attr_fn | fn_decl | operator_decl
+
+field ::= type_ref identifier [align_attr]
+layout_field ::= field ['=' expr]
+
+layout_guard ::= 'layout' 'guard' path identifier '=' expr 'else' stmt_or_block
+
+enum_decl ::= 'enum' path [generic_params] '{' [enum_item { ',' enum_item } [',']] '}'
+generic_params ::= '<' identifier { ',' identifier } [','] '>'
+enum_item ::= identifier ['(' [enum_fields] ')'] ['=' expr]
+enum_fields ::= enum_field { ',' enum_field } [',']
+enum_field ::= type_ref identifier
+
+impl_stmt ::= 'impl' type_ref { ',' type_ref } '{' { impl_member [','] } '}'
+impl_member ::= attr_fn | fn_decl | operator_decl
+
+operator_decl ::= 'operator' operator_form
+operator_form ::= type_ref operator type_ref ':' type_ref '=' path
+                | operator type_ref ':' type_ref '=' path
+
+operator ::= '+' | '-' | '*' | '/' | '%' | '^'
+           | '==' | '!=' | '<' | '<=' | '>' | '>='
+           | '&' | '|' | '^^' | '<<' | '>>'
+
+comptime_stmt ::= comptime_table
+                | comptime_template
+                | comptime_emit
+                | comptime_reflect
+                | comptime_diagnostic
+                | comptime_expr_stmt
+
+comptime_expr_stmt ::= 'comptime' expr
+
+comptime_table ::= 'comptime' 'table' path '{' { table_arm } '}'
+table_arm ::= expr { ',' expr } [','] ['if' expr] '->' expr [',']
+
+comptime_template ::= 'comptime' 'template' path '(' [template_params] ')' block
+template_params ::= identifier { ',' identifier } [',']
+
+comptime_emit ::= 'comptime' 'emit' expr
+
+comptime_reflect ::= 'comptime' ('fields' | 'exports') '(' path ')' 'as' identifier
+                     '{' { 'emit' (block | stmt) } '}'
+
+comptime_diagnostic ::= 'comptime' 'diagnostic' 'rule' identifier
+                        '{' { diagnostic_clause } '}'
+
+diagnostic_clause ::= 'when' diagnostic_predicate
+                    | 'error' string
+                    | 'fix' string
+
+diagnostic_predicate ::= 'call' '.' 'name' '==' string
+                         ['&&' '!' 'is_literal' '(' 'call' '.' 'arg' '(' number ')' ')']
+
+if_stmt ::= 'if' if_header stmt_or_block
+            { 'elif' if_header stmt_or_block }
+            ['else' stmt_or_block]
+
+if_header ::= expr
+            | '(' expr ')'
+            | ('def' | 'mut') binding_targets '=' expr expr
+            | '(' ('def' | 'mut') binding_targets '=' expr expr ')'
+
+while_stmt ::= loop_attrs? 'while' while_header stmt_or_block
+
+while_header ::= expr
+               | '(' expr [update_stmt | assignment_stmt | expr_stmt] ')'
+               | ('def' | 'mut') binding_targets '=' expr expr
+               | '(' ('def' | 'mut') binding_targets '=' expr expr
+                    [update_stmt | assignment_stmt | expr_stmt] ')'
+
+for_stmt ::= comptime_for
+           | loop_attrs? 'for' for_header stmt_or_block
+
+comptime_for ::= 'for' identifier 'in' 'comptime' comptime_iterable
+                 '{' { 'emit' expr } '}'
+
+comptime_iterable ::= list_lit | tuple_lit | set_lit
+
+for_header ::= identifier 'in' expr
+             | identifier ',' identifier 'in' expr
+             | '(' identifier 'in' expr ')'
+             | '(' identifier ',' identifier 'in' expr ')'
+             | ('def' | 'mut') binding_targets ['=' expr_list] expr [stmt]
+             | '(' ('def' | 'mut') binding_targets ['=' expr_list] expr [stmt] ')'
+
+loop_attrs ::= '@' loop_attr { ',' loop_attr }
+loop_attr ::= 'unroll' | 'nounroll' | 'vectorize' | 'simd'
+
+try_stmt ::= 'try' block 'catch' [identifier | '(' [identifier] ')'] block
+
+match_stmt ::= match_kw expr '{' { match_arm | match_default } '}'
+match_kw ::= 'match' | 'case'
+
+match_arm ::= match_patterns ['if' expr] (('->' arm_body) | block)
+match_patterns ::= expr { [','] expr }
+match_default ::= 'else' block
+arm_body ::= expr | block
+
+defer_stmt ::= 'defer' block
+return_stmt ::= 'return' [expr]
+break_stmt ::= 'break'
+continue_stmt ::= 'continue'
+goto_stmt ::= 'goto' identifier
+label_stmt ::= identifier ':'
+
+with_stmt ::= 'with' type_ref ':' identifier '=' expr block
+
+macro_stmt ::= identifier ['(' [expr { ',' expr } [',']] ')'] block
+
+assignment_stmt ::= assign_target assignment_op expr
+                  | identifier { ',' identifier } '=' expr_list
+
+assign_target ::= identifier | index_expr
+assignment_op ::= '=' | '+=' | '-=' | '*=' | '/=' | '%='
+
+update_stmt ::= ('++' | '--') identifier
+expr_stmt ::= expr
+expr_list ::= expr { ',' expr } [',']
+
+expr ::= ternary
+
+ternary ::= pipe_or ['?' expr ':' expr]
+
+pipe_or ::= and_null { '||' and_null | '|>' pipe_target }
+pipe_target ::= and_null
+              | '.' identifier ['(' [call_args] ')']
+              | '[' expr ']'
+
+and_null ::= equality { ('&&' | '??') equality }
+equality ::= relation { ('==' | '!=') relation }
+relation ::= additive { ('<' | '<=' | '>' | '>=' | '..') additive }
+additive ::= multiplicative { ('+' | '-') multiplicative }
+multiplicative ::= bitwise { ('*' | '/' | '%') bitwise }
+bitwise ::= power { ('|' | '&' | '^^' | '<<' | '>>') power }
+power ::= pow_prefix ['^' power]
+
+pow_prefix ::= ('-' | '!' | '~') power
+             | unary
+
+unary ::= ('async' | 'await' | '&') unary
+        | postfix
+
+postfix ::= primary { postfix_op }
+postfix_op ::= '?'
+             | '(' [call_args] ')'
+             | '.' identifier ['(' [call_args] ')']
+             | '?.' identifier ['(' [call_args] ')']
+             | '[' slice ']'
+
+slice ::= [expr] [':' [expr] [':' [expr]]]
+
+call_args ::= call_arg { ',' call_arg } [',']
+call_arg ::= expr | identifier '=' expr
+
+primary ::= identifier
+          | literal
+          | list_lit
+          | tuple_lit
+          | dict_lit
+          | set_lit
+          | fn_expr
+          | lambda_expr
+          | asm_expr
+          | embed_expr
+          | sizeof_expr
+          | comptime_primary
+          | match_stmt
+          | if_stmt
+          | inferred_member
+          | '(' expr ')'
+
+list_lit ::= '[' [expr { ',' expr } [',']] ']'
+
+tuple_lit ::= '(' ')'
+            | '(' expr ',' [expr { ',' expr } [',']] ')'
+
+dict_lit ::= '{' '}'
+           | '{' expr ':' expr { ',' expr ':' expr } [','] '}'
+
+set_lit ::= '{' expr { ',' expr } [','] '}'
+
+asm_expr ::= 'asm' '(' string [',' string { ',' expr }] ')'
+embed_expr ::= 'embed' '(' string ')'
+sizeof_expr ::= 'sizeof' '(' (type_ref | expr) ')'
+
+comptime_primary ::= 'comptime' 'match' path '(' expr ',' expr ')'
+                   | 'comptime' block
+                   | 'comptime' expr
+
+inferred_member ::= '.' identifier
+index_expr ::= expr '[' slice ']'
+
+type_ref ::= { '?' } { '*' } path [generic_args]
+generic_args ::= '<' type_ref { ',' type_ref } [','] '>'
+
+lexer_keyword ::= 'fn' | 'return' | 'if' | 'else' | 'elif'
+                | 'while' | 'for' | 'in'
+                | 'true' | 'false'
+                | 'try' | 'catch'
+                | 'use' | 'goto' | 'lambda' | 'defer'
+                | 'break' | 'continue'
+                | 'asm' | 'as' | 'comptime'
+                | 'struct' | 'layout' | 'match' | 'case'
+                | 'embed' | 'sizeof' | 'extern'
+                | 'def' | 'mut' | 'nil' | 'none' | 'NULL'
+                | 'del' | 'module' | 'enum'

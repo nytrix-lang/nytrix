@@ -88,8 +88,6 @@ fn tokenize(str source, list out_tokens) list {
    mut import_path = false
    while i < src_len && guard < src_len + 8 {
       guard += 1
-      def idx = i + 0
-      i = idx
       def ch = load8(source, i)
       if _h.is_space_ch(ch) {
          def j = _h.scan_space(source, i, src_len)
