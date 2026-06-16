@@ -15,7 +15,7 @@ use std.os.ui.render.dump as ui_profile
 use std.os.ui.render.viewer.term as ui_term
 use std.os.ui.window as window
 use std.os.prim
-use std.parse.img.exr as exr
+use std.math.parse.img.exr as exr
 use std.core.common as common
 
 mut _headless_cache = -1

@@ -47,7 +47,7 @@ use std.os.ui.render.viewer.engine.tools as viewer_tools
 use std.os.ui.window
 use std.os.ui.window.input as uin
 use std.os.ui.window.native as win_native
-use std.parse.3d.gltf as gltf
+use std.math.parse.3d.gltf as gltf
 use std.os.ui.render.viewer.engine.env
 use std.os.ui.render.viewer.engine.gizmo
 use std.os.ui.render.viewer.engine.state

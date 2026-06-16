@@ -1,0 +1,23 @@
+shape adt-match-field-must-bind {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "ADT match field 'radius' must bind to an identifier or '_'"
+  source ny <<'NY'
+use std.core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def s = Shape.Circle(1)
+match s {
+   Shape.Circle(1) -> 1
+   Shape.Empty -> 0
+}
+NY
+}

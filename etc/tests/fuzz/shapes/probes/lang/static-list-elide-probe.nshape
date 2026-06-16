@@ -1,0 +1,41 @@
+shape static_list_elide_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn readonly_probe(): int {
+   def xs = [3, 5, 8, 13]
+   mut i = 0
+   mut acc = len(xs)
+   while(i < len(xs)){
+      acc += get(xs, i, 0)
+      i += 1
+   }
+   acc
+}
+fn mutable_probe(): int {
+   mut xs = [1, 2, 3]
+   xs = set_idx(xs, 1, 7)
+   get(xs, 1, 0)
+}
+fn escaped_probe(): int {
+   def xs = [4, 6]
+   print(xs)
+   len(xs)
+}
+fn mixed_probe(): int {
+   def xs = [1, "x"]
+   len(xs)
+}
+fn main(): int {
+   print(readonly_probe())
+   print(mutable_probe())
+   print(escaped_probe())
+   print(mixed_probe())
+   0
+}
+NY
+}

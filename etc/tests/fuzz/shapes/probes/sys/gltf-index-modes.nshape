@@ -1,0 +1,119 @@
+shape gltf-index-modes {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.crypto.encoding.base as base64
+use std.math.parse.3d.gltf as gltf
+fn _positions_blob(int vertex_count) str {
+   def byte_len = vertex_count * 12
+   def raw = init_str(malloc(byte_len + 1), byte_len)
+   mut i = 0
+   while i < vertex_count {
+      def off = i * 12
+      store32_f32(raw, float(i), off)
+      store32_f32(raw, float(i & 1), off + 4)
+      store32_f32(raw, 0.0, off + 8)
+      i += 1
+   }
+   raw
+}
+fn _strip_doc(str name) dict {
+   def bin = _positions_blob(4)
+   def b64 = base64.encode64(bin)
+   def json =
+   "{\"asset\":{\"version\":\"2.0\"}," +
+   "\"buffers\":[{\"uri\":\"data:application/octet-stream;base64," + b64 + "\",\"byteLength\":48}]," +
+   "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":48}]," +
+   "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\"}]," +
+   "\"meshes\":[{\"name\":\"" + name + "\",\"primitives\":[{\"attributes\":{\"POSITION\":0},\"mode\":5}]}]," +
+   "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}"
+   gltf.parse_gltf_str(json, "tmp/test/platform/ui")
+}
+fn _indexed_mode_doc(str name, int mode) dict {
+   def pos_len = 48
+   def idx_len = 8
+   def raw = init_str(malloc(pos_len + idx_len + 1), pos_len + idx_len)
+   def indices = [2, 0, 3, 1]
+   mut i = 0
+   while i < 4 {
+      def off = i * 12
+      store32_f32(raw, float(i), off)
+      store32_f32(raw, float(i & 1), off + 4)
+      store32_f32(raw, 0.0, off + 8)
+      store16(raw, int(indices.get(i, i)), pos_len + i * 2)
+      i += 1
+   }
+   def b64 = base64.encode64(raw)
+   def json =
+   "{\"asset\":{\"version\":\"2.0\"}," +
+   "\"buffers\":[{\"uri\":\"data:application/octet-stream;base64," + b64 + "\",\"byteLength\":56}]," +
+   "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":48},{\"buffer\":0,\"byteOffset\":48,\"byteLength\":8}]," +
+   "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\"},{\"bufferView\":1,\"componentType\":5123,\"count\":4,\"type\":\"SCALAR\"}]," +
+   "\"meshes\":[{\"name\":\"" + name + "\",\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1,\"mode\":" + to_str(mode) + "}]}]," +
+   "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}"
+   gltf.parse_gltf_str(json, "tmp/test/platform/ui")
+}
+fn _assert_indices16(dict part, list expected, str label) bool {
+   def iptr = part.get("iptr", 0)
+   assert(iptr != 0, label + " index ptr")
+   assert(int(part.get("icnt", 0)) == expected.len, label + " index count")
+   mut i = 0
+   while i < expected.len {
+      assert(load16(iptr, i * 2) == int(expected.get(i, -1)), label + " index " + to_str(i))
+      i += 1
+   }
+   true
+}
+fn _extension_doc() dict {
+   def json =
+   "{\"asset\":{\"version\":\"2.0\"}," +
+   "\"extensionsUsed\":[\"KHR_texture_transform\",\"KHR_draco_mesh_compression\",\"VENDOR_unknown\"]," +
+   "\"extensionsRequired\":[\"KHR_texture_transform\",\"KHR_draco_mesh_compression\",\"VENDOR_unknown\"]," +
+   "\"scenes\":[{\"nodes\":[]}],\"nodes\":[],\"meshes\":[],\"materials\":[]}"
+   gltf.parse_gltf_str(json, "tmp/test/platform/ui")
+}
+def strip_doc = _strip_doc("strip")
+assert(is_dict(strip_doc) && !strip_doc.contains("error"), "triangle strip doc parses")
+def strip_group = gltf.gltf_to_mesh_group_indexed(strip_doc)
+def strip_parts = strip_group.get("parts", [])
+assert(strip_parts.len == 1, "triangle strip part count")
+assert(int(strip_parts[0].get("icnt", 0)) == 6, "triangle strip generated index count")
+assert(!strip_parts[0].get("index_type_u32", false), "triangle strip generated u16 index size")
+def fan_doc = _indexed_mode_doc("fan", 6)
+assert(is_dict(fan_doc) && !fan_doc.contains("error"), "indexed triangle fan doc parses")
+def fan_group = gltf.gltf_to_mesh_group_indexed(fan_doc)
+def fan_parts = fan_group.get("parts", [])
+assert(fan_parts.len == 1, "triangle fan part count")
+assert(int(fan_parts[0].get("icnt", 0)) == 6, "triangle fan expanded index count")
+assert(!fan_parts[0].get("index_type_u32", false), "triangle fan keeps u16 index size")
+assert(_assert_indices16(fan_parts[0], [2, 0, 3, 2, 3, 1], "triangle fan"), "triangle fan index order")
+def indexed_strip_doc = _indexed_mode_doc("indexed_strip", 5)
+assert(is_dict(indexed_strip_doc) && !indexed_strip_doc.contains("error"), "indexed triangle strip doc parses")
+def indexed_strip_group = gltf.gltf_to_mesh_group_indexed(indexed_strip_doc)
+def indexed_strip_parts = indexed_strip_group.get("parts", [])
+assert(indexed_strip_parts.len == 1, "indexed triangle strip part count")
+assert(_assert_indices16(indexed_strip_parts[0], [2, 0, 3, 3, 0, 1], "indexed triangle strip"), "indexed triangle strip order")
+def ext_doc = _extension_doc()
+assert(is_dict(ext_doc) && is_dict(ext_doc.get("gltf", 0)), "extension doc keeps parsed graph")
+def caps = gltf.gltf_supported_extension_caps()
+assert(caps.get("KHR_texture_transform", "") == "parse+shader", "extension caps known shader status")
+assert(caps.get("KHR_draco_mesh_compression", "") == "todo", "extension caps todo status")
+def report = gltf.gltf_extensions_report(ext_doc)
+def required_exts = report.get("required", [])
+assert(required_exts.len == 3, "extension report required count")
+assert(required_exts[0].get("known", false) && required_exts[0].get("status", "") == "parse+shader", "extension report known required")
+assert(required_exts[1].get("known", false) && required_exts[1].get("status", "") == "todo", "extension report todo required")
+assert(!required_exts[2].get("known", true) && required_exts[2].get("status", "") == "unknown", "extension report unknown required")
+def failures = gltf.gltf_required_extension_failures(ext_doc)
+assert(failures.len == 2, "required extension failures filters supported")
+assert(gltf.gltf_free_data(strip_doc), "free strip doc")
+assert(gltf.gltf_free_data(fan_doc), "free fan doc")
+assert(gltf.gltf_free_data(indexed_strip_doc), "free indexed strip doc")
+assert(gltf.gltf_free_data(ext_doc), "free extension doc")
+print("gltf_index_modes_probe ok")
+NY
+}

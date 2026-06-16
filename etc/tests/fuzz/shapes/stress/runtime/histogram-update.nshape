@@ -1,0 +1,6 @@
+shape histogram-update {
+  family "stress-histogram"
+  generator "stress"
+  features ["stress-style", "optimizer-pattern", "arrays", "histogram", "set_idx", "mutation", "mod"]
+  template stress-histogram-update
+}

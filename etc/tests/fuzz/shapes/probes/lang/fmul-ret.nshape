@@ -1,0 +1,15 @@
+shape fmul_ret {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn f(x){
+   return x * 2
+}
+print(f(5))
+print(f(10))
+NY
+}

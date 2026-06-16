@@ -1,0 +1,34 @@
+shape info {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.util.parse.image as image
+fn main(){
+   if(argc() < 2){
+      print("usage: image/info.ny <path>")
+      return 2
+   }
+   def path = argv(1)
+   def img = image.load(path)
+   if(!img){
+      print("[img-info] decode failed: " + path)
+      return 1
+   }
+   print(
+      "[img-info] path=" + path +
+      " w=" + to_str(dict_get(img, "width", 0)) +
+      " h=" + to_str(dict_get(img, "height", 0)) +
+      " channels=" + to_str(dict_get(img, "channels", -1)) +
+      " bpp=" + to_str(dict_get(img, "bpp", -1)) +
+      " data=" + to_str(bool(dict_get(img, "data", 0)))
+   )
+   0
+}
+main()
+NY
+}

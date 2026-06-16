@@ -3,6 +3,9 @@
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
 #ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE 1
 #endif
@@ -17,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -210,8 +214,14 @@ static inline ny_tick_t ny_ticks_now(void) {
 #elif defined(__APPLE__)
   return (ny_tick_t)mach_absolute_time();
 #else
-  struct timespec ts;
+  struct timespec ts = {0};
+#if defined(CLOCK_MONOTONIC)
   clock_gettime(CLOCK_MONOTONIC, &ts);
+#elif defined(CLOCK_REALTIME)
+  clock_gettime(CLOCK_REALTIME, &ts);
+#else
+  { struct timeval tv; gettimeofday(&tv, NULL); ts.tv_sec = tv.tv_sec; ts.tv_nsec = tv.tv_usec * 1000; }
+#endif
   return (ny_tick_t)ts.tv_sec * 1000000000ull + (ny_tick_t)ts.tv_nsec;
 #endif
 }

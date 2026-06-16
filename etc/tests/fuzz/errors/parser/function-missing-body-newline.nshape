@@ -1,0 +1,15 @@
+shape parser-function-missing-body-newline {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected function body"
+  source ny <<'NY'
+use core
+
+fn main()
+main()
+NY
+}

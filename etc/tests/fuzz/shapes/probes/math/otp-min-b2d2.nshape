@@ -1,0 +1,29 @@
+shape otp_min_b2d2 {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module otp_min_b2d2(f)
+use std.core
+fn f(key_size=nil){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut i = 0
+      while(i < ks){
+         key = append(key, 0)
+         i = i + 1
+      }
+      si = si + 1
+   }
+   0
+}
+if(comptime{__main()}){
+   print("ok d2")
+}
+NY
+}

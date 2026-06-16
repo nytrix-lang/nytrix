@@ -1,0 +1,23 @@
+shape adt-match-unknown-field {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unknown field 'diameter' in ADT match pattern 'Shape.Circle'"
+  source ny <<'NY'
+use std.core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def s = Shape.Circle(1)
+match s {
+   Shape.Circle(diameter: d) -> d
+   Shape.Empty -> 0
+}
+NY
+}

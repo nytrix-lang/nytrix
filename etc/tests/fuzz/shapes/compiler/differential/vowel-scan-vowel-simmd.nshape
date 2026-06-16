@@ -1,0 +1,26 @@
+shape vowel-scan-vowel_simmd {
+  family "compiler-suite"
+  generator "stress"
+  features ["ny", "differential"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.simmd as simmd
+fn main(): int {
+   def n = 65536
+   def rounds = 2000
+   def p = malloc_raw(n + 1)
+   mut i = 0
+   while(i < n){
+      store8(p, ((i * 131 + (i / 8) + 17) % 96) + 32, i)
+      i += 1
+   }
+   store8(p, 0, n)
+   def total = simmd.ascii_vowel_reduce_ptr(p, n, rounds, 3, 1)
+   print(total)
+   free_raw(p)
+   return 0
+}
+NY
+}

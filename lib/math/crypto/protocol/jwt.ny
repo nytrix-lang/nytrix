@@ -9,7 +9,7 @@ module std.math.crypto.protocol.jwt(jwt_base64url_encode_bytes, jwt_base64url_en
 use std.core
 use std.math.bin as bin
 use std.math.crypto.hash (sha256_hmac)
-use std.parse.data.json
+use std.math.parse.data.json
 use std.core.str as str
 
 fn _strip_b64_padding(str s) str {

@@ -1,0 +1,61 @@
+shape sqlscan-sqlscan_scalar {
+  family "compiler-suite"
+  generator "stress"
+  features ["ny", "differential"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn sqlscan_scalar(ptr: region, ptr: tier, ptr: amount, ptr: flags, int: n, int: rounds): int {
+   mut checksum = 0
+   mut bucket3 = 0
+   mut bucket5 = 0
+   mut r = 0
+   while(r < rounds){
+      mut j = 0
+      while(j < n){
+         def off = j * 4
+         def rg = load32(region, off)
+         def tr = load32(tier, off)
+         def am = load32(amount, off)
+         def fl = load32(flags, off)
+         if((rg == 3 || rg == 5 || rg == 11) && tr >= 4 && (fl & 3) == 1 && am >= 1000){
+            def score = am + tr * 17 - rg * 5 + (fl & 7)
+            if((rg & 7) == 5){
+               bucket5 += score
+            } else {
+               bucket3 += score
+            }
+            checksum += score
+         }
+         j += 1
+      }
+      r += 1
+   }
+   checksum + bucket3 * 4 + bucket5 * 6
+}
+fn main(): int {
+   def n = 4096
+   def rounds = 200
+   def bytes = n * 4
+   def region = malloc_raw(bytes)
+   def tier = malloc_raw(bytes)
+   def amount = malloc_raw(bytes)
+   def flags = malloc_raw(bytes)
+   mut i = 0
+   while(i < n){
+      store32(region, (i * 17 + 3) % 16, i * 4)
+      store32(tier, (i * 13 + 5) % 8, i * 4)
+      store32(amount, 500 + ((i * 97) % 2000), i * 4)
+      store32(flags, (i * 19 + 1) % 16, i * 4)
+      i += 1
+   }
+   print(sqlscan_scalar(region, tier, amount, flags, n, rounds))
+   free_raw(region)
+   free_raw(tier)
+   free_raw(amount)
+   free_raw(flags)
+   return 0
+}
+NY
+}

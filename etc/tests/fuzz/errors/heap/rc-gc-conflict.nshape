@@ -1,0 +1,13 @@
+shape heap-rc-gc-conflict {
+  family "compiler-errors/heap"
+  generator "error"
+  features ["error", "heap", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "--heap=rc cannot be combined with -gc"
+  flags "--heap=rc -gc"
+  source ny <<'NY'
+print(1)
+NY
+}

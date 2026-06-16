@@ -1,0 +1,66 @@
+shape fibonacci {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def iters = 5000
+;; Fibonacci (Benchmark)
+fn fib(n) {
+   mut a = 0
+   mut b = 1
+   mut i = 2
+   while i <= n {
+      def c = a + b
+      a = b
+      b = c
+      i += 1
+   }
+   return b
+}
+mut i = 0
+mut r = 0
+def t0 = ticks()
+while i < iters {
+   r = fib(40)
+   i += 1
+}
+def t1 = ticks()
+def elapsed_ms = (t1 - t0) / 1000000
+print("Fib(40) = ", r)
+print("Avg Time: ", to_str(elapsed_ms / iters), " ms")
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
+}
+
+static int64_t fib(int n) {
+    int64_t a = 0, b = 1;
+    for (int i = 2; i <= n; i++) {
+        int64_t c = a + b;
+        a = b;
+        b = c;
+    }
+    return b;
+}
+int main(void) {
+    int64_t start = now_ns();
+    int64_t r = 0;
+    const int iters = 50000;
+    for (int i = 0; i < iters; i++) r = fib(40);
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)r);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

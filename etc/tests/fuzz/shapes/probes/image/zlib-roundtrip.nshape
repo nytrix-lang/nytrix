@@ -1,0 +1,46 @@
+shape zlib_roundtrip {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.enc.zlib as zlib
+fn make_bytes(n){
+   def p = malloc(n + 17)
+   def s = init_str(p, n)
+   mut i = 0
+   while(i < n){
+      store8(s, ((i * 37 + (i >> 1)) % 251) + 1, i)
+      i += 1
+   }
+   store8(s, 0, n)
+   s
+}
+fn main(){
+   def src = make_bytes(4096)
+   def comp = zlib.compress_zlib(src, 6)
+   print("src_len=" + to_str(len(src)))
+   print("comp_len=" + to_str(len(comp)))
+   def dec = zlib.decompress_zlib(comp, len(src) * 2)
+   print("dec_len=" + to_str(len(dec)))
+   if(len(dec) != len(src)){
+      print("zerr=" + zlib.error())
+      print("len_mismatch")
+      return 1
+   }
+   mut i = 0
+   while(i < len(src)){
+      if(load8(src, i) != load8(dec, i)){
+         print("byte_mismatch@" + to_str(i) + " src=" + to_str(load8(src, i)) + " dec=" + to_str(load8(dec, i)))
+         return 2
+      }
+      i += 1
+   }
+   print("zlib_roundtrip_ok")
+   0
+}
+main()
+NY
+}

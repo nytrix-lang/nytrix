@@ -7,7 +7,7 @@
 #include "pkg.h"
 #include "base/args.h"
 #include "base/util.h"
-#include "cmd/ny-tools/tool.h"
+#include "cmd/tools/tool.h"
 
 #include <ctype.h>
 #ifndef _WIN32

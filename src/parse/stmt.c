@@ -29,8 +29,6 @@ static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
   len += p->cur.len;
   parser_advance(p);
 
-  /* Consume immediately following ident chars for prefix-number idents (e.g.
-   * '3d') */
   while (p->cur.kind == NY_T_IDENT &&
          p->cur.col == (int)(p->prev.col + p->prev.len)) {
     if (len + p->cur.len + 1 > cap) {
@@ -49,8 +47,7 @@ static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
   }
 
   while (parser_match(p, NY_T_DOT)) {
-    /* Accept identifiers or numeric segments like '3' (for paths e.g. parse.3d)
-     */
+
     if (p->cur.kind != NY_T_IDENT && p->cur.kind != NY_T_NUMBER) {
       parser_error(p, p->cur,
                    after_dot_err ? after_dot_err
@@ -73,8 +70,7 @@ static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
     memcpy(buf + len, p->cur.lexeme, p->cur.len);
     len += p->cur.len;
     parser_advance(p);
-    /* If we just consumed a numeric token, absorb immediately following ident
-       chars (e.g. 'd' after '3') to reconstruct '3d' as a single segment. */
+
     while (p->cur.kind == NY_T_IDENT &&
            p->cur.col == (int)(p->prev.col + p->prev.len)) {
       if (len + p->cur.len + 1 > cap) {
@@ -464,7 +460,7 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
         break;
     }
     if (parser_match(p, NY_T_GT)) {
-      /* consumed below */
+
     } else if (p->cur.kind == NY_T_RSHIFT) {
       token_t tok = p->cur;
       p->cur.kind = NY_T_GT;
@@ -866,7 +862,7 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   if (p->cur.kind == NY_T_LBRACE) {
     body = p_parse_block(p);
   } else {
-    /* Braceless single-expression body: fn f(x) expr */
+
     if (p->cur.kind == NY_T_EOF || p->cur.line > p->prev.line) {
       parser_error(p, p->cur, "expected function body",
                    "use '{ ... }', '= expr', or ';' for declarations");
@@ -1168,7 +1164,7 @@ static stmt_t *parse_extern(parser_t *p) {
     parser_advance(p);
     if (p->cur.kind == NY_T_IDENT &&
         strncmp(p->cur.lexeme, "link", p->cur.len) == 0) {
-      /* extern #link "libname"  ── same as top-level #link "libname" */
+
       parser_advance(p);
       if (p->cur.kind != NY_T_STRING) {
         parser_error(p, p->cur, "expected library name string after '#link'",
@@ -1205,7 +1201,7 @@ static stmt_t *parse_extern(parser_t *p) {
                      "expected string or '<header>' after '#include'", NULL);
         return NULL;
       }
-      /* optional:  as prefix */
+
       const char *prefix = NULL;
       if (parser_match(p, NY_T_AS)) {
         if (p->cur.kind == NY_T_STRING) {
@@ -1217,7 +1213,7 @@ static stmt_t *parse_extern(parser_t *p) {
           parser_advance(p);
         }
       }
-      /* optional:  link "libname" — tells JIT/AOT which .so to load */
+
       const char *lib = NULL;
       if (p->cur.kind == NY_T_IDENT &&
           strncmp(p->cur.lexeme, "link", p->cur.len) == 0) {
@@ -1235,7 +1231,7 @@ static stmt_t *parse_extern(parser_t *p) {
       s->as.inc.lib = lib;
       return s;
     }
-    /* Fallback */
+
     parser_error(p, p->cur, "expected 'include' or 'link' after 'extern #'",
                  NULL);
     return NULL;
@@ -1861,7 +1857,7 @@ static stmt_t *parse_layout_guard_stmt(parser_t *p) {
   free(owned_type);
 
   if (parser_match(p, NY_T_COLON)) {
-    /* Treat colon as an optional separator. */
+
   }
 
   if (p->cur.kind != NY_T_IDENT) {
@@ -1995,10 +1991,10 @@ static stmt_t *parse_struct(parser_t *p) {
     const char *fname = id1;
     const char *tname = NULL;
     if (parser_match(p, NY_T_COLON)) {
-       /* Treat colon as an optional separator. */
+
     }
     if (p->cur.kind == NY_T_IDENT || p->cur.kind == NY_T_STAR || p->cur.kind == NY_T_QUESTION) {
-      /* Type Name syntax */
+
       tname = id1;
       size_t ptr_depth = 0;
       while (parser_match(p, NY_T_STAR)) ptr_depth++;
@@ -2017,10 +2013,9 @@ static stmt_t *parse_struct(parser_t *p) {
         tname = ptr_tname;
       }
     } else {
-      /* A lone name is not enough for ABI fields; fields stay type-first. */
+
       if (!tname) {
-         /* If we didn't match a second identifier, id1 is either name or type.
-            But layouts REQUIRE types for ABI. */
+
          parser_error(p, p->prev, "layout fields require a type", "write 'int x'");
          break;
       }
@@ -2095,7 +2090,7 @@ static stmt_t *parse_enum(parser_t *p) {
       while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
         enum_field_t field = {0};
         field.type_name = parse_type_ref(p, "expected enum payload field type");
-        
+
         parser_match(p, NY_T_COLON);
         if (p->cur.kind != NY_T_IDENT) {
           parser_error(p, p->cur, "expected enum payload field name",
@@ -2476,7 +2471,7 @@ static void parse_optional_hash_endif(parser_t *p) {
   if (p->cur.kind != NY_T_HASH)
     return;
   parser_t saved = *p;
-  parser_advance(p); /* '#' */
+  parser_advance(p);
   if (tok_is_hash_kw(p->cur, "endif", NY_T_IDENT)) {
     parser_advance(p);
     return;
@@ -2491,7 +2486,7 @@ static stmt_t *parse_hash_if_stmt(parser_t *p, token_t hash_tok) {
     parser_error(p, kw_tok, "expected 'if' or 'elif' after '#'", NULL);
     return NULL;
   }
-  parser_advance(p); /* if|elif */
+  parser_advance(p);
 
   expr_t *cond = parse_hash_if_cond_as_comptime(p, kw_tok);
   if (!cond)
@@ -2510,7 +2505,7 @@ static stmt_t *parse_hash_if_stmt(parser_t *p, token_t hash_tok) {
     alt = ny_parse_if_stmt(p);
   } else if (p->cur.kind == NY_T_HASH) {
     parser_t saved = *p;
-    parser_advance(p); /* '#' */
+    parser_advance(p);
     if (tok_is_hash_kw(p->cur, "else", NY_T_ELSE)) {
       parser_advance(p);
       alt = ny_parse_stmt_or_block(p);
@@ -4431,9 +4426,9 @@ stmt_t *p_parse_stmt(parser_t *p) {
   case NY_T_HASH:
     return parse_hash_stmt(p);
   case NY_T_AT: {
-    /* Save state so we can backtrack if this is not a loop attribute */
+
     parser_t saved = *p;
-    parser_advance(p); /* consume '@' */
+    parser_advance(p);
     if (p->cur.kind >= NY_T_IDENT && p->cur.kind <= NY_T_ENUM) {
       const char *name = p->cur.lexeme;
       size_t namelen = p->cur.len;
@@ -4442,29 +4437,29 @@ stmt_t *p_parse_stmt(parser_t *p) {
                           (namelen == 9 && memcmp(name, "vectorize", 9) == 0) ||
                           (namelen == 4 && memcmp(name, "simd", 4) == 0);
       if (is_loop_attr) {
-        // peek ahead for while/for
-        parser_advance(p); /* consume attr name */
+
+        parser_advance(p);
         if (p->cur.kind == NY_T_WHILE) {
           *p = saved;
-          parser_advance(p); /* consume '@' */
-          parser_advance(p); /* consume attr name */
+          parser_advance(p);
+          parser_advance(p);
           return ny_parse_while_stmt_with_attr(p, name, namelen);
         }
         if (p->cur.kind == NY_T_FOR) {
           *p = saved;
           return ny_parse_for_stmt(p);
         }
-        /* Not a loop, restore and fall through */
+
         *p = saved;
       } else {
-        /* Not a loop attribute, restore to re-parse as function attribute */
+
         *p = saved;
       }
     } else {
-      /* Not an identifier after '@', restore and fall through */
+
       *p = saved;
     }
-    /* Function attribute handling */
+
     ny_attribute_list attrs = {0};
     while (p->cur.kind == NY_T_AT) {
       parser_advance(p);
@@ -4566,7 +4561,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
                    p->cur.kind == NY_T_QUESTION || p->cur.kind == NY_T_STAR) {
           var_type = parse_type_ref(p, "expected type name before ':'");
           if (parser_match(p, NY_T_COLON)) {
-            /* Treat colon as an optional separator when the parse is otherwise clear. */
+
           }
           if (p->cur.kind != NY_T_IDENT) {
             parser_error(p, p->cur, "expected variable name", NULL);
@@ -4941,7 +4936,7 @@ program_t parse_program(parser_t *p) {
     if (guess > 4096)
       guess = 4096;
     vec_reserve_arena(p->arena, &prog.body, guess);
-    /* Store raw source for debug info (needed for -c inline code) */
+
     prog.raw_src = p->src;
     prog.raw_src_len = src_len;
   }

@@ -170,15 +170,27 @@ fn choose_config(any display, list attrs) any {
    res
 }
 
-fn create_context(any display, any config, any share=0, int gles_ver=2) any {
+fn _create_context_with_attrs(any display, any config, any share, any attrs) any {
+   eglCreateContext(display, config, share, attrs)
+}
+
+fn create_context(any display, any config, any share=0, int gles_ver=0) any {
    "Creates create context."
    if !display || !config { return 0 }
+   ;; The renderer in std.os.ui.render.gl uses desktop OpenGL fixed-function
+   ;; entry points. Request an EGL desktop-GL context first; GLES lacks glBegin,
+   ;; matrix stack, and the client-array calls this backend intentionally uses.
+   if eglBindAPI(0x30A2) != 0 {
+      def ctx = _create_context_with_attrs(display, config, share, 0)
+      if ctx { return ctx }
+   }
+   if gles_ver <= 0 { return 0 }
    eglBindAPI(0x30A0)
    def attrs = zalloc(12)
    store32(attrs, 0x3098, 0)
    store32(attrs, int(gles_ver), 4)
    store32(attrs, 0x3038, 8)
-   def ctx = eglCreateContext(display, config, share, attrs)
+   def ctx = _create_context_with_attrs(display, config, share, attrs)
    free(attrs)
    ctx
 }

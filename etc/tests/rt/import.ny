@@ -17,9 +17,9 @@ use "./use/declared.ny" as declared_provider
 use "./use/declared.ny" (make_report as declared_make_report)
 use "./use/collision/provider.ny" as collision_a
 use "./use/guard.ny" (main_guard_runtime_seen, main_guard_comptime_seen, hash_main_guard_seen)
-use "./use/implicitpkg.ny" as implicitpkg
-use "./use/implicitpkg.ny" (child_value as implicit_child_value)
-use "./use/implicitpkg.ny"
+use "./use/implicit-pkg.ny" as implicitpkg
+use "./use/implicit-pkg.ny" (child_value as implicit_child_value)
+use "./use/implicit-pkg.ny"
 module ReExportMath(
    ceil, floor
 ){
@@ -106,3 +106,18 @@ mut a = [10, 20]
 a[1] = 99
 assert(a.get(1) == 99, "index assignment lowers through set_idx")
 print("✓ import tests passed")
+
+;; REPL migration: import consistency
+use std.math.bin as bin
+use std.math.crypto.hash
+use std.math.nt
+
+fn main() {
+   def digest = sha1("abc")
+   def digest_bytes = bin.hex_to_bytes(digest)
+   def shared = nt.power_mod(Z(2), Z(5), Z(13))
+   assert(digest == "a9993e364706816aba3e25717850c26c9cd0d89d", "hash import survives")
+   assert(digest_bytes.len == 20, "bin alias survives")
+   assert(shared == Z(6), "nt import survives")
+}
+main()

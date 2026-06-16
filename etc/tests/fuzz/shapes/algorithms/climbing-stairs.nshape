@@ -1,0 +1,35 @@
+shape climbing-stairs {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "dynamic-programming", "scalar", "recurrence"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.error
+use std.core.reflect
+use std.os.time
+fn ways(n){
+   if(n <= 2){ return n }
+   mut a = 1
+   mut b = 2
+   mut i = 3
+   while(i <= n){
+      def c = a + b
+      a = b
+      b = c
+      i += 1
+   }
+   return b
+}
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 2500000){
+   checksum += ways(36)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT climbing_stairs ", checksum, " ", t1 - t0)
+NY
+}

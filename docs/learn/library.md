@@ -17,15 +17,15 @@ ny doc get std.os.net.remote
 | Files, paths, time, processes, threads | `std.os` |
 | HTTP, sockets, process tubes, transcripts | `std.os.net` |
 | Windows, drawing, input, gamepads, textures, scenes | `std.os.ui.render`, `std.os.ui.window` |
-| JSON, YAML, TOML, CSV, XML, SQL, zlib | `std.parse.data` |
-| Images, fonts, glTF, meshes | `std.parse.img`, `std.parse.font.truetype`, `std.parse.3d.gltf` |
+| JSON, YAML, TOML, CSV, XML, SQL, zlib | `std.math.parse.data` |
+| Images, fonts, glTF, meshes | `std.math.parse.img`, `std.math.parse.font.truetype`, `std.math.parse.3d.gltf` |
 | Scalars, big ints, matrices, number theory, SIMD | `std.math` |
 | Encodings, hashes, ciphers, public-key helpers, analysis | `std.math.crypto` |
 
 Use aliases when call sites would otherwise hide ownership:
 
 ```ny
-use std.parse.data.json as json
+use std.math.parse.data.json as json
 def obj = json.json_decode("{\"ok\":true}")
 ```
 
@@ -38,9 +38,9 @@ def obj = json.json_decode("{\"ok\":true}")
 | OS | `std.os`, `std.os.args`, `std.os.path`, `std.os.fs`, `std.os.io`, `std.os.process`, `std.os.subprocess`, `std.os.time`, `std.os.clock`, `std.os.thread`, `std.os.atomic`, `std.os.parallel`, `std.os.async`, `std.os.ffi`, `std.os.disasm`, `std.os.gpu`, `std.os.accel`, `std.os.sound`, `std.os.clipboard`, `std.os.info`, `std.os.platform`, `std.os.sys` |
 | Networking | `std.os.net`, `std.os.net.requests`, `std.os.net.server`, `std.os.net.remote`, `std.os.net.socket`, `std.os.net.http`, `std.os.net.curl` |
 | UI | `std.os.ui`, `std.os.ui.window`, `std.os.ui.window.consts`, `std.os.ui.window.input`, `std.os.ui.render` (backend facade), `std.os.ui.render.gl`, `std.os.ui.render.vk`, `std.os.ui.render.viewer`, `std.os.ui.render.viewer.widgets`, `std.os.ui.render.viewer.input`, `std.os.ui.render.viewer.window`, `std.os.ui.render.viewer.clipboard`, `std.os.ui.render.viewer.app`, `std.os.ui.render.camera`, `std.os.ui.assets` |
-| Data | `std.parse.data.json`, `yaml`, `toml`, `csv`, `xml`, `sql`, `zlib` |
-| Syntax parsers | `std.parse.syntax.nytrix`, `c`, `javascript`, `typescript`, `python`, `bash`, `lua`, `html`, `markdown`, `json`, `xml`, `yaml`, `cmake`, `assembly` |
-| Assets | `std.parse.img`, `std.parse.img.png`, `jpeg`, `gif`, `bmp`, `svg`, `tga`, `webp`, `exr`, `std.parse.font.truetype`, `std.parse.3d.gltf`, `meshopt`, `obj` |
+| Data | `std.math.parse.data.json`, `yaml`, `toml`, `csv`, `xml`, `sql`, `zlib` |
+| Syntax parsers | `std.math.parse.syntax.nytrix`, `c`, `javascript`, `typescript`, `python`, `bash`, `lua`, `html`, `markdown`, `json`, `xml`, `yaml`, `cmake`, `assembly` |
+| Assets | `std.math.parse.img`, `std.math.parse.img.png`, `jpeg`, `gif`, `bmp`, `svg`, `tga`, `webp`, `exr`, `std.math.parse.font.truetype`, `std.math.parse.3d.gltf`, `meshopt`, `obj` |
 | Math | `std.math`, `integer`, `float`, `scalar`, `big`, `bigrat`, `bin`, `complex`, `ct`, `gf`, `hensel`, `logic`, `matrix`, `noise`, `nt`, `ntt`, `poly`, `quat`, `random`, `ring`, `simmd`, `smt`, `stat`, `vector` |
 | Crypto | `std.math.crypto.encoding`, `hash`, `symmetric`, `block.mode`, `block.stream`, `cipher`, `rsa`, `ecc`, `lattice`, `factorization`, `prng`, `analysis` |
 
@@ -100,7 +100,7 @@ Generated docs own signatures and docstrings:
 
 ```bash
 ny doc search --symbols json_decode
-ny doc get std.parse.data.json
+ny doc get std.math.parse.data.json
 ```
 
 Related guides:

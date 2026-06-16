@@ -1,0 +1,32 @@
+shape sum-of-two-integers {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "bitwise", "carry", "scalar"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn add_no_plus(a, b){
+   mut x = a
+   mut y = b
+   while(y != 0){
+      def carry = (x & y) << 1
+      x = x ^^ y
+      y = carry
+   }
+   return x
+}
+mut checksum = 0
+def t0 = ticks()
+mut i = 1
+while(i < 900000){
+   def a = i & 1048575
+   def b = (i * 3) & 1048575
+   checksum += add_no_plus(a, b)
+   i += 1
+}
+def t1 = ticks()
+print("RESULT sum_of_two_integers ", checksum, " ", t1 - t0)
+NY
+}

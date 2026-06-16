@@ -72,10 +72,10 @@ static void ny_pkgconfig_append_cflags(const char *pkg, char ***args,
                                        size_t *len, size_t *cap) {
   if (!pkg || !*pkg || !args || !len || !cap)
     return;
-  /* pkg-config is expensive to spawn; cache results per package name. */
+
   typedef struct {
     const char *pkg;
-    char *out; /* raw cflags string */
+    char *out;
   } ny_pkgcfg_cflags_entry_t;
   static ny_pkgcfg_cflags_entry_t *g_cflags_cache = NULL;
   static size_t g_cflags_cache_len = 0, g_cflags_cache_cap = 0;
@@ -84,7 +84,7 @@ static void ny_pkgconfig_append_cflags(const char *pkg, char ***args,
       const char *buf = g_cflags_cache[i].out;
       if (!buf || !*buf)
         return;
-      /* tokenise cached output */
+
       const char *p = buf;
       while (*p) {
         while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
@@ -119,7 +119,7 @@ static void ny_pkgconfig_append_cflags(const char *pkg, char ***args,
   pclose(f);
   if (!buf || !*buf) {
     free(buf);
-    /* cache negative/empty result to avoid repeated spawns */
+
     if (g_cflags_cache_len == g_cflags_cache_cap) {
       size_t nc = g_cflags_cache_cap ? g_cflags_cache_cap * 2 : 32;
       ny_pkgcfg_cflags_entry_t *nn =
@@ -135,7 +135,7 @@ static void ny_pkgconfig_append_cflags(const char *pkg, char ***args,
     }
     return;
   }
-  /* store raw output in cache */
+
   if (g_cflags_cache_len == g_cflags_cache_cap) {
     size_t nc = g_cflags_cache_cap ? g_cflags_cache_cap * 2 : 32;
     ny_pkgcfg_cflags_entry_t *nn =
@@ -165,30 +165,27 @@ static void ny_pkgconfig_append_cflags(const char *pkg, char ***args,
       break;
     *p++ = save;
   }
-  /* buf is now owned by cache (if cached); otherwise free. */
+
   if (!g_cflags_cache)
     free(buf);
 }
 
-/* FFI header metadata table.
-   Every implicit package or library comes from this table; callers can still
-   pass an explicit library in source when a header is project-specific. */
 typedef struct {
-  const char *header_prefix; /* matched against the start of the header path */
-  const char *pkg_config;    /* pkg-config package to query first (or NULL)  */
-  const char *fallback_lib;  /* dlopen name if pkg-config is unavailable     */
-  const char *prefix;        /* default C symbol prefix filter (or NULL)     */
+  const char *header_prefix;
+  const char *pkg_config;
+  const char *fallback_lib;
+  const char *prefix;
 } ny_autolink_entry_t;
 
 static const ny_autolink_entry_t ny_autolink_table[] = {
-    /* Sound */
+
     {"alsa/", "alsa", "libasound.so.2", "snd_"},
     {"sound/", "alsa", "libasound.so.2", "snd_"},
     {"jack/", "jack", "libjack.so.0", "jack_"},
     {"pulse/simple", "libpulse-simple", "libpulse-simple.so.0", "pa_"},
     {"pulse/", "libpulse", "libpulse.so.0", "pa_"},
     {"sndfile", "sndfile", "libsndfile.so.1", "sf_"},
-    /* Graphics / Windowing */
+
     {"vulkan/", "vulkan", "libvulkan.so.1", "vk"},
     {"vk_", "vulkan", "libvulkan.so.1", "vk"},
     {"X11/Xlib-xcb", "x11-xcb", "libX11-xcb.so.1", "X"},
@@ -211,36 +208,36 @@ static const ny_autolink_entry_t ny_autolink_table[] = {
     {"wayland-client", "wayland-client", "libwayland-client.so.0", "wl_"},
     {"wayland-cursor", "wayland-cursor", "libwayland-cursor.so.0", "wl_"},
     {"wayland-server", "wayland-server", "libwayland-server.so.0", "wl_"},
-    /* SDL / Raylib */
+
     {"SDL2/", "sdl2", "libSDL2-2.0.so.0", "SDL_"},
     {"SDL3/", "sdl3", "libSDL3.so.0", "SDL_"},
     {"raylib", "raylib", "libraylib.so", NULL},
     {"rlgl", "raylib", "libraylib.so", "rl"},
-    /* Curl / Network */
+
     {"curl/", "libcurl", "libcurl.so.4", "curl_"},
-    /* Compression */
+
     {"zlib", "zlib", "libz.so.1", NULL},
     {"lz4", "liblz4", "liblz4.so.1", NULL},
     {"zstd", "libzstd", "libzstd.so.1", NULL},
-    /* Math */
+
     {"fftw3", "fftw3", "libfftw3.so.3", NULL},
     {"z3", "z3", "libz3.so", "Z3_"},
-    /* Fonts */
+
     {"freetype2/", "freetype2", "libfreetype.so.6", "FT_"},
     {"fontconfig/", "fontconfig", "libfontconfig.so.1", "Fc"},
     {"librsvg-2.0/", "librsvg-2.0", "librsvg-2.so.2", "rsvg_"},
     {"cairo/", "cairo", "libcairo.so.2", "cairo_"},
-    /* Images */
+
     {"png.h", "libpng", "libpng16.so.16", "png_"},
     {"turbojpeg.h", "libturbojpeg", "libturbojpeg.so.0", "tj"},
     {"webp/", "libwebp", "libwebp.so.7", "WebP"},
-    /* Input */
+
     {"libinput", "libinput", "libinput.so.10", "libinput_"},
     {"evdev/", NULL, "libevdev.so.2", "libevdev_"},
-    /* Crypto / system */
+
     {"openssl/", "openssl", "libcrypto.so", NULL},
     {"crypt.h", NULL, "libcrypt.so.1", "crypt"},
-    /* End */
+
     {NULL, NULL, NULL, NULL},
 };
 
@@ -259,24 +256,23 @@ static const ny_autolink_entry_t *ny_ffi_header_entry(const char *header_path) {
   return NULL;
 }
 
-/* Try pkg-config to get the .so name, returns a malloc'd string or NULL */
 static char *ny_pkgconfig_lib(const char *pkg) {
   if (!pkg || !*pkg)
     return NULL;
-  /* Cache per pkg, since headers often map to the same package repeatedly. */
+
   typedef struct {
     const char *pkg;
-    char *lib; /* malloc'd "libX.so" or NULL for negative cache */
+    char *lib;
   } ny_pkgcfg_lib_entry_t;
   static ny_pkgcfg_lib_entry_t *g_lib_cache = NULL;
   static size_t g_lib_cache_len = 0, g_lib_cache_cap = 0;
   for (size_t i = 0; i < g_lib_cache_len; i++) {
     if (g_lib_cache[i].pkg && strcmp(g_lib_cache[i].pkg, pkg) == 0) {
-      /* return a fresh copy to preserve existing ownership contract */
+
       return g_lib_cache[i].lib ? strdup(g_lib_cache[i].lib) : NULL;
     }
   }
-  /* "pkg-config --libs-only-l <pkg>" returns e.g. "-lasound\n" */
+
   char cmd[256];
   snprintf(cmd, sizeof(cmd), "pkg-config --libs-only-l %s 2>%s", pkg,
            NY_FFI_NULL_DEVICE);
@@ -290,32 +286,32 @@ static char *ny_pkgconfig_lib(const char *pkg) {
     return NULL;
   }
   pclose(f);
-  /* strip trailing whitespace */
+
   size_t n = strlen(buf);
   while (n > 0 &&
          (buf[n - 1] == '\n' || buf[n - 1] == ' ' || buf[n - 1] == '\r'))
     buf[--n] = '\0';
   if (!buf[0])
     return NULL;
-  /* convert "-lfoo -lbar" → first entry "libfoo.so" */
+
   const char *p = buf;
   while (*p == ' ')
     p++;
   if (p[0] == '-' && p[1] == 'l') {
     p += 2;
-    /* find end of token */
+
     const char *end = p;
     while (*end && *end != ' ')
       end++;
     size_t len = (size_t)(end - p);
-    /* build "libNAME.so" */
+
     char *result = malloc(len + 8);
     if (!result)
       return NULL;
     memcpy(result, "lib", 3);
     memcpy(result + 3, p, len);
-    memcpy(result + 3 + len, ".so", 4); /* includes NUL */
-    /* cache the computed library string (store owned copy) */
+    memcpy(result + 3 + len, ".so", 4);
+
     if (g_lib_cache_len == g_lib_cache_cap) {
       size_t nc = g_lib_cache_cap ? g_lib_cache_cap * 2 : 32;
       ny_pkgcfg_lib_entry_t *nn =
@@ -331,7 +327,7 @@ static char *ny_pkgconfig_lib(const char *pkg) {
     }
     return result;
   }
-  /* negative cache */
+
   if (g_lib_cache_len == g_lib_cache_cap) {
     size_t nc = g_lib_cache_cap ? g_lib_cache_cap * 2 : 32;
     ny_pkgcfg_lib_entry_t *nn =
@@ -348,8 +344,6 @@ static char *ny_pkgconfig_lib(const char *pkg) {
   return NULL;
 }
 
-/* Resolve the shared library to dlopen for a given header path.
-   Returns a malloc'd string (caller frees) or NULL if unknown. */
 static char *ny_autolink_resolve(const char *header_path) {
   const ny_autolink_entry_t *e = ny_ffi_header_entry(header_path);
   if (!e)
@@ -608,7 +602,6 @@ static bool ny_ffi_record_type_name(CXType type, char *buf, size_t cap) {
   return ok;
 }
 
-/* Type mapping. */
 static const char *map_clang_type(CXType type);
 
 static bool ny_ffi_type_is_char_pointer(CXType type) {
@@ -663,7 +656,7 @@ static const char *map_clang_type(CXType type) {
   case CXType_UInt:
     return "u32";
   case CXType_Long:
-    return "i64"; /* Heuristic: Nytrix targets 64-bit Linux/Windows standard */
+    return "i64";
   case CXType_ULong:
     return "u64";
   case CXType_LongLong:
@@ -680,9 +673,6 @@ static const char *map_clang_type(CXType type) {
         pointee.kind == CXType_FunctionNoProto)
       return "fnptr";
 
-    /* Pointer to a Vulkan/platform handle type (e.g. VkSurfaceKHR*) is an
-       out-parameter — must stay as 'ptr' so the runtime untags it before
-       the write.  Only bare handle typedefs (the value itself) are u64. */
     if (pointee.kind == CXType_Typedef) {
       CXString pointee_name = clang_getTypeSpelling(pointee);
       const char *pn = clang_getCString(pointee_name);
@@ -692,9 +682,7 @@ static const char *map_clang_type(CXType type) {
       if (handle_pointee)
         return "ptr";
     }
-    /* Treat dispatchable handles (pointers to opaque structs) as u64
-       to ensure consistent tagging/untagging behavior with non-dispatchable
-       handles. */
+
     CXString name_cx = clang_getTypeSpelling(type);
     const char *name = clang_getCString(name_cx);
     bool is_handle = name && (strstr(name, "Vk") || strstr(name, "wl_") ||
@@ -709,13 +697,13 @@ static const char *map_clang_type(CXType type) {
   case CXType_FunctionNoProto:
     return "fnptr";
   case CXType_Enum:
-    /* C enums always have underlying type 'int' (i32) on all platforms */
+
     return "i32";
   case CXType_Typedef: {
     char name_buf[128];
     if (ny_ffi_record_type_name(type, name_buf, sizeof(name_buf)))
       return "ptr";
-    /* Resolve typedef to its canonical type */
+
     CXType canon = clang_getCanonicalType(type);
     if (canon.kind != CXType_Typedef)
       return map_clang_type(canon);
@@ -724,14 +712,13 @@ static const char *map_clang_type(CXType type) {
   case CXType_Record:
   case CXType_ConstantArray:
   case CXType_IncompleteArray:
-    /* Struct/array by value — pass as opaque pointer; caller must handle */
+
     return "ptr";
   default:
     return "u64";
   }
 }
 
-/* libclang AST visitor. Registers each function decl as an extern fun_sig. */
 typedef struct {
   codegen_t *cg;
   const char *prefix;
@@ -1374,8 +1361,6 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
   ffi_context *ctx = (ffi_context *)client_data;
   enum CXCursorKind kind = clang_getCursorKind(cursor);
 
-  /* Accept declarations from the header and any file it transitively includes.
-     We reject clang built-in virtual files (no real path).              */
   CXSourceLocation loc = clang_getCursorLocation(cursor);
   CXFile cx_file;
   clang_getSpellingLocation(loc, &cx_file, NULL, NULL, NULL);
@@ -1417,7 +1402,6 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
     if (verbose_enabled >= 3 && c_name)
       fprintf(stderr, "[ffi:import] symbol=%s\n", c_name);
 
-    /* Skip C stdlib symbols that conflict with Nytrix runtime builtins */
     static const char *const ffi_blacklist[] = {
         "malloc",   "calloc",    "realloc",  "free",    "aligned_alloc",
         "memcpy",   "memmove",   "memset",   "memcmp",  "memchr",
@@ -1436,10 +1420,6 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
       }
     }
 
-    /* Only import functions that match filter prefixes (if specified).
-       This prevents importing hundreds of unrelated system functions.
-       Namespace aliases like `as "c"` import requested-header functions as
-       `c.name` while keeping the underlying C link name unchanged.       */
     if (c_name && *c_name && *c_name != '_') {
       if (ctx->prefix && ctx->prefix_len > 0 && !ctx->namespace_alias) {
         if (strncmp(c_name, ctx->prefix, ctx->prefix_len) != 0) {
@@ -1540,10 +1520,6 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
         ny_ffi_add_align_attr(ctx, f, idx, arg_layout->align);
       }
 
-      /* Dedup: if already registered from a prior FFI source (extern or
-         another #include), skip to avoid conflicts. But if a Ny function
-         was registered first, allow the FFI override — the Ny stub acts
-         as a fallback when the header/library is not available. */
       bool already_known = false;
       bool existing_is_ny_fn = false;
       for (int si = 0; si < (int)ctx->cg->fun_sigs.len; si++) {
@@ -1593,7 +1569,6 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
                                    : CXChildVisit_Continue;
 }
 
-/* Public entry point. */
 void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
                          const char *prefix, bool is_std, const char *lib) {
   if (!cg || !header_path || !*header_path) {
@@ -1604,14 +1579,12 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
     return;
   }
 
-  /* Use the explicit metadata table for default import prefixes. */
   if (!prefix || !*prefix) {
     const ny_autolink_entry_t *entry = ny_ffi_header_entry(header_path);
     if (entry && entry->prefix)
       prefix = entry->prefix;
   }
 
-  /* Auto-resolve the library to link if the caller didn't specify one */
   char *auto_lib = NULL;
   const char *resolved_lib = lib;
   if (!resolved_lib || !*resolved_lib) {
@@ -1625,7 +1598,6 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
             resolved_lib ? resolved_lib : "(none)", auto_lib ? " [auto]" : "");
   }
 
-  /* dlopen the library so JIT can resolve the symbols (mirrors 'link') */
   if (resolved_lib && *resolved_lib) {
 #ifndef _WIN32
     void *handle = dlopen(resolved_lib, RTLD_LAZY | RTLD_GLOBAL);
@@ -1635,8 +1607,7 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
       ny_diag_hint("the library may still be unavailable at runtime");
     }
 #endif
-    /* Also register in cg->links so the native JIT cache .so gets the
-       library pre-loaded via the .libs sidecar file on cache replay. */
+
     bool found = false;
     for (size_t i = 0; i < cg->links.len; i++) {
       if (strcmp(cg->links.data[i], resolved_lib) == 0) {
@@ -1650,9 +1621,6 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
 
   free(auto_lib);
 
-  /* Resolve header to an absolute path
-     libclang's parseTranslationUnit needs a real file path, not just
-     the include-style short form (e.g. "alsa/asoundlib.h").          */
   static const char *const sys_include_dirs[] = {
       ".",
       "src",
@@ -1713,11 +1681,8 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
     }
   }
 
-  /* Parse the header with libclang */
   CXIndex index = clang_createIndex(0, 0);
 
-  /* Build clang args: include paths + any #define macros from the FFI
-   * preprocessor */
   char **clang_owned_args = NULL;
   size_t clang_args_len = 0, clang_args_cap = 0;
   ny_ffi_append_default_clang_args(&clang_owned_args, &clang_args_len,
@@ -1801,14 +1766,13 @@ void ny_ffi_clang_process(codegen_t *cg) {
   if (!cg || cg->ffi.includes_len == 0)
     return;
 
-  /* Build virtual source buffer */
   char *buf = NULL;
   size_t len = 0;
   size_t cap = 0;
 
   for (size_t i = 0; i < cg->ffi.defines.len; i++) {
     const char *d = cg->ffi.defines.data[i];
-    /* Direct macro definition */
+
     char line[1024];
     snprintf(line, sizeof(line), "#define %s\n", d);
     ffi_buf_append(&buf, &len, &cap, line);
@@ -1824,7 +1788,6 @@ void ny_ffi_clang_process(codegen_t *cg) {
       snprintf(line, sizeof(line), "#include \"%s\"\n", p);
     ffi_buf_append(&buf, &len, &cap, line);
 
-    /* Handle dlopen/link registry for each include */
     const char *lib = cg->ffi.includes[i].lib;
     char *auto_lib = NULL;
     if (!lib || !*lib) {
@@ -1848,7 +1811,6 @@ void ny_ffi_clang_process(codegen_t *cg) {
     free(auto_lib);
   }
 
-  /* Parse virtual buffer with libclang */
   CXIndex index = clang_createIndex(0, 0);
   char **clang_args = NULL;
   size_t clang_args_len = 0, clang_args_cap = 0;
@@ -1909,7 +1871,6 @@ void ny_ffi_clang_process(codegen_t *cg) {
   clang_disposeIndex(index);
   free(buf);
 
-  /* Clear session */
   for (size_t i = 0; i < cg->ffi.defines.len; i++)
     free(cg->ffi.defines.data[i]);
   cg->ffi.defines.len = 0;

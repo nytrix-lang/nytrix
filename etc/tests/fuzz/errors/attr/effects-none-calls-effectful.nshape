@@ -1,0 +1,20 @@
+shape attr-effects-none-calls-effectful {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "declared @effects(none) but inferred effects="
+  source ny <<'NY'
+use std.core
+
+@effects(none)
+fn bad() {
+   print("effect")
+   1
+}
+
+bad()
+NY
+}

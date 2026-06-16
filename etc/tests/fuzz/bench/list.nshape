@@ -1,0 +1,61 @@
+shape list {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def n = 20000
+;; List (Benchmark)
+def start = ticks()
+mut lst = []
+mut idx = 0
+while idx < n {
+   lst = lst.append(idx)
+   idx = idx + 1
+}
+assert(len(lst) == n, "list size")
+mut sum = 0
+idx = 0
+while idx < len(lst) {
+   sum = sum + lst.get(idx)
+   idx = idx + 1
+}
+def end = ticks()
+def expected = (n - 1) * n / 2 ; Sum of 0..n-1
+assert(sum == expected, "list sum")
+print("List benchmark passed, sum =", sum)
+print("Time(ns): ", end - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
+}
+
+int main(void) {
+    const int n = 20000;
+    int *lst = (int *)malloc((size_t)n * sizeof(int));
+    if (!lst) return 2;
+    int64_t start = now_ns();
+    for (int i = 0; i < n; i++) lst[i] = i;
+    int64_t sum = 0;
+    for (int i = 0; i < n; i++) sum += lst[i];
+    int64_t expected = (int64_t)(n - 1) * n / 2;
+    int64_t end = now_ns();
+    free(lst);
+    if (sum != expected) return 3;
+    printf("checksum=%lld\n", (long long)sum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

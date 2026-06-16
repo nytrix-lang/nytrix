@@ -1,0 +1,53 @@
+shape valid-palindrome {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "string", "two-pointer", "ascii"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.reflect
+use std.util.parse.str
+use std.os.time
+fn mk_text(reps){
+   mut s = ""
+   mut i = 0
+   while(i < reps){
+      s = s + "A man, a plan, a canal: Panama"
+      i += 1
+   }
+   return s
+}
+fn is_alnum_ch(c){
+   def o = ord(c)
+   return((o >= 48 && o <= 57) || (o >= 65 && o <= 90) || (o >= 97 && o <= 122))
+}
+fn lower_ch(c){
+   def o = ord(c)
+   if(o >= 65 && o <= 90){ return chr(o + 32) }
+   return c
+}
+fn valid_pal(s){
+   mut l = 0
+   mut r = len(s) - 1
+   while(l < r){
+      while(l < r && !is_alnum_ch(get(s, l))){ l += 1 }
+      while(l < r && !is_alnum_ch(get(s, r))){ r -= 1 }
+      if(lower_ch(get(s, l)) != lower_ch(get(s, r))){ return false }
+      l += 1
+      r -= 1
+   }
+   return true
+}
+def s = mk_text(1200)
+mut checksum = 0
+def t0 = ticks()
+mut i = 0
+while(i < 120){
+   checksum += valid_pal(s) ? 1 : 0
+   i += 1
+}
+def t1 = ticks()
+print("RESULT valid_palindrome ", checksum, " ", t1 - t0)
+NY
+}

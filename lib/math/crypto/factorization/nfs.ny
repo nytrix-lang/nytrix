@@ -9,6 +9,7 @@ module std.math.crypto.factorization.nfs(nfs_polynomial_report, snfs_shape_repor
 use std.core
 use std.math.nt
 use std.math.crypto.factorization.classical as classical
+use std.math.crypto.factorization.classical.gf2 as gf2
 use std.os.clock (ticks)
 
 fn _nfs_elapsed_ms(any t0) number { float(ticks() - t0) / 1000000.0 }
@@ -939,7 +940,7 @@ fn nfs_dependency_report(any n, int rational_bound=64, int algebraic_bound=64, i
    }
    def frels = filter.get("filtered_relations", [])
    def matrix = _nfs_dependency_matrix(frels, width)
-   def la = classical.block_lanczos_gf2_report(matrix, frels.len, 8, 0, true)
+   def la = gf2.block_lanczos_gf2_report(matrix, frels.len, 8, 0, true)
    {
       "method": "nfs-dependency-report", "n": _nfs_z(n),
       "relation_report": rels, "relation_filter": filter,

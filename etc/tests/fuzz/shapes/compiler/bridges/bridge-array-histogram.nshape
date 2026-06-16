@@ -1,0 +1,23 @@
+shape bridge-array-histogram {
+  family "c-bridge-seed"
+  generator "torture"
+  features ["c-bridge", "differential", "arrays", "histogram", "reduction"]
+  template raw-c-seed
+  source c <<'C'
+#include <stdio.h>
+int main(void) {
+    int xs[] = {3, 1, 4, 1, 5, 9, 2, 6, 5, 3};
+    int hist[] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int score = 0;
+    for (int i = 0; i < 10; ++i) {
+        int bucket = xs[i] % 8;
+        hist[bucket] = hist[bucket] + xs[i];
+    }
+    for (int i = 0; i < 8; ++i) {
+        score += hist[i] * (i + 1);
+    }
+    printf("%d\n", score);
+    return 0;
+}
+C
+}

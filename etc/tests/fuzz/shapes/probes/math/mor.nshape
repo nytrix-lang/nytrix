@@ -1,0 +1,22 @@
+shape mor {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.util.parse.image as image
+fn main(){
+   def img = image.load("/tmp/mor.jpg")
+   if(!img){
+      print("[mor] fail")
+      return 1
+   }
+   print("[mor] ok " + to_str(dict_get(img, "width", 0)) + "x" + to_str(dict_get(img, "height", 0)))
+   0
+}
+main()
+NY
+}

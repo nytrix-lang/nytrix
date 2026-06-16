@@ -12,6 +12,7 @@ use std.math.crypto.factorization.pollard as pollard
 use std.math.crypto.factorization.fermat as fermat
 use std.math.crypto.factorization.ecm as ecm
 use std.math.crypto.factorization.classical as classical
+use std.math.crypto.factorization.classical.qs as qs
 use std.math.crypto.factorization.nfs as nfs
 use std.os.clock (ticks)
 
@@ -515,8 +516,8 @@ fn _hf_named_report(any n, str method) any {
       "p-1-stage2" -> pollard.pollard_pm1_stage2_report(n, 2000, 50000)
       "p+1" -> pollard.williams_pp1_report(n, 20000)
       "ecm-stage1-stage2" -> ecm.ecm_scheduled_factor_report(n, false, 24, 2000, 5000, 8)
-      "self-initializing-quadratic-sieve" -> classical.siqs_factor_report(n, 64, 8, 384, 40)
-      "multi-window-quadratic-sieve" -> classical.mpqs_factor_report(n)
+      "self-initializing-quadratic-sieve" -> qs.siqs_factor_report(n, 64, 8, 384, 40)
+      "multi-window-quadratic-sieve" -> qs.mpqs_factor_report(n)
       "nfs-square-root-gcd" -> nfs.nfs_factor_report(n, 64, 64, 12, 3, 6)
       _ -> nil
    }

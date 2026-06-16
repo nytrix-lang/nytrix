@@ -1,0 +1,14 @@
+shape std_math_type_errors {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.math
+fn bad_math_return(int: x): int {
+   sqrt(x)
+}
+bad_math_return(9)
+NY
+}

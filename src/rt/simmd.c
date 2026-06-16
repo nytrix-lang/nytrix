@@ -1627,14 +1627,10 @@ int64_t rt_simmd_jsonscan_ascii(int64_t ptr_v, int64_t len_v, int64_t rounds_v) 
   return rt_tag_v(one * (int64_t)rounds);
 }
 
-/* rt_simd_mat4_mul(a, b, out) - column-major 4x4 float matrix multiply.
- * a, b, out are Nytrix list objects; elements [2..17] are the 16 floats.
- * Uses SSE2 when available; falls back to portable scalar.
- * Returns out. */
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 #if defined(__SSE2__)
 static void _mat4_mul_simd(const float *A, const float *B, float *O) {
-  /* Each column of B is transformed by the full A */
+
   for (int col = 0; col < 4; col++) {
     __m128 bcol = _mm_loadu_ps(B + col * 4);
     __m128 r = _mm_mul_ps(_mm_loadu_ps(A + 0), _mm_shuffle_ps(bcol, bcol, 0x00));
@@ -1644,7 +1640,7 @@ static void _mat4_mul_simd(const float *A, const float *B, float *O) {
     _mm_storeu_ps(O + col * 4, r);
   }
 }
-#else /* NEON fallback */
+#else
 static void _mat4_mul_simd(const float *A, const float *B, float *O) {
   for (int col = 0; col < 4; col++) {
     float32x4_t bcol = vld1q_f32(B + col * 4);
@@ -1682,8 +1678,7 @@ int64_t rt_simd_mat4_mul_ptr(int64_t a_ptr, int64_t b_ptr, int64_t o_ptr) {
 int64_t rt_simd_mat4_mul(int64_t a_lst, int64_t b_lst, int64_t o_lst) {
   if (!is_ptr(a_lst) || !is_ptr(b_lst) || !is_ptr(o_lst))
     return o_lst;
-  /* Nytrix list layout: header(16b) + len(8b) + cap(8b) + items[2..17] at
-   * +16+(i*8) */
+
   float A[16], B[16], Out[16];
   for (int i = 0; i < 16; i++) {
     int64_t av = *(int64_t *)((char *)(uintptr_t)a_lst + 16 + (i + 2) * 8);

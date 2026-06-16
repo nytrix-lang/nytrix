@@ -1,0 +1,12 @@
+shape local_import_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use "etc/tests/fuzz/fixtures/local-import-probe-mod.ny" as probe
+assert(probe.run() == 7, "local import")
+NY
+}

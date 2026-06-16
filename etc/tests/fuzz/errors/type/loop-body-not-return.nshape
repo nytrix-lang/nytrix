@@ -1,0 +1,23 @@
+shape type-loop-body-not-return {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use std.core
+
+fn loop_body_is_not_return() int {
+   mut i = 0
+   while i < 1 {
+      "not the return"
+      i += 1
+   }
+   return "real mismatch"
+}
+
+print(loop_body_is_not_return())
+NY
+}

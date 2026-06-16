@@ -1,0 +1,28 @@
+shape z3_bv {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.math.smt
+assert(z3_available(), "z3 available")
+print(z3_version())
+def ctx = z3_ctx_new()
+assert(ctx != 0, "ctx")
+def s = z3_solver_new(ctx)
+assert(s != 0, "solver")
+;; x + 1 == 3 over BV32 => x == 2
+def x = z3_bv_const(ctx, "x", 32)
+def one = z3_bv_u64(ctx, 1, 32)
+def three = z3_bv_u64(ctx, 3, 32)
+def eq = z3_eq(ctx, z3_bvadd(ctx, x, one), three)
+z3_solver_assert(ctx, s, eq)
+assert(z3_solver_check(ctx, s), "sat")
+def xv = z3_model_eval_u64(ctx, s, x)
+assert(xv != nil && int(xv) == 2, "model x")
+z3_solver_del(ctx, s)
+z3_ctx_del(ctx)
+print("z3_bv ok")
+NY
+}

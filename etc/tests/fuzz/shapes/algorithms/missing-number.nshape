@@ -1,0 +1,41 @@
+shape missing-number {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "xor", "array", "reduction"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.reflect
+use std.os.time
+fn gen_missing(n, miss){
+   mut a = list(0)
+   mut i = 0
+   while(i <= n){
+      if(i != miss){ a = append(a, i) }
+      i += 1
+   }
+   return a
+}
+fn missing(a, n){
+   mut x = n
+   mut i = 0
+   while(i < n){
+      x = x ^^ i ^^ get(a, i)
+      i += 1
+   }
+   return x
+}
+def n = 200000
+def arr = gen_missing(n, 77777)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 80){
+   checksum += missing(arr, n)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT missing_number ", checksum, " ", t1 - t0)
+NY
+}

@@ -1,0 +1,19 @@
+shape type-strict-dynamic-arithmetic {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-dynamic-arithmetic"
+  flags "--strict-types"
+  source ny <<'NY'
+use std.core
+
+fn add_one(any x) {
+   x + 1
+}
+
+add_one(1)
+NY
+}

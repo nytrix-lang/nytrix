@@ -1,0 +1,22 @@
+shape adt-match-non-exhaustive {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "non-exhaustive match for enum 'Shape' (missing: Empty)"
+  source ny <<'NY'
+use std.core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def s = Shape.Circle(1)
+match s {
+   Shape.Circle(r) -> r
+}
+NY
+}

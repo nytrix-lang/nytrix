@@ -1,0 +1,15 @@
+shape parser-attribute-needs-function {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "function attributes must be followed by 'fn'"
+  source ny <<'NY'
+use std.core
+
+@inline
+print(1)
+NY
+}

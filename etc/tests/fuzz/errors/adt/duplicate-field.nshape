@@ -1,0 +1,19 @@
+shape adt-duplicate-field {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "duplicate enum payload field"
+  source ny <<'NY'
+use std.core
+
+enum Bad {
+   A(int x, int x),
+   B
+}
+
+print(1)
+NY
+}

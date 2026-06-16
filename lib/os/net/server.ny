@@ -17,7 +17,7 @@ use std.os.args as cli
 use std.os.net.context as netctx
 use std.os.net.socket as sock
 use std.os.net.http as http
-use std.parse.data.json as jsonlib
+use std.math.parse.data.json as jsonlib
 
 fn status_text(int status) str {
    "Returns a standard HTTP reason phrase for common status codes."

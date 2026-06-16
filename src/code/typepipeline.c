@@ -40,7 +40,7 @@ typedef struct ny_tp_use_alias_cache_entry_t {
   size_t extra_len;
   uint64_t hash;
   uint16_t len;
-  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  uint8_t state;
   char key[NY_TP_USE_ALIAS_KEY_MAX];
   const char *value;
 } ny_tp_use_alias_cache_entry_t;

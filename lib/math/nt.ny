@@ -36,7 +36,7 @@ use std.math.big
 use std.core.str
 use std.core.str as str_mod
 use std.os.net (requests_get_parsed)
-use std.parse.data.json (json_decode)
+use std.math.parse.data.json (json_decode)
 
 def _TAG_BIGINT = __runtime_tag("bigint")
 def _TAG_LIST = __runtime_tag("list")

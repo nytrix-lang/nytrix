@@ -1,0 +1,95 @@
+shape x11-gif-vk {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.str as str
+use std.os.ui.window.event as ev
+use std.os.ui.render.vk.buffers as bufs
+use std.os.ui.render.vk.compute as comp
+use std.os.ui.render.vk.state as st
+use std.os.ui.window.platform.api as api
+use std.os.ui.window.platform.linux.x11.common as xc
+use std.os.ui.window.platform.linux.x11.keymap as km
+use std.math.parse.img.gif as gif
+fn byte_str(list bytes) any {
+   def n = bytes.len
+   def out = malloc(n + 1)
+   assert(out != 0, "byte string allocation")
+   init_str(out, n)
+   mut i = 0
+   while i < n {
+      store8(out, bytes.get(i), i)
+      i += 1
+   }
+   store8(out, 0, n)
+   out
+}
+def e = ev.make_event(7, "window", 42, {"x": 3})
+assert(ev.is_event(e), "event shape")
+assert(ev.event_type(e) == 7, "event type")
+assert(ev.event_window(e) == "window", "event window")
+assert(ev.event_window_id(e) == 42, "event window id")
+assert(ev.event_data(e).get("x", 0) == 3, "event data")
+def q = ev.queue_push([], e)
+assert(ev.queue_len(q) == 1, "event queue len")
+assert(ev.queue_pop(q) == e, "event queue pop")
+assert(ev.queue_len(0) == 0, "event queue non-list len")
+def euro = xc.encodeUTF8String(0x20ac)
+assert(euro == str.chr(0x20ac), "x11 encode utf8")
+def decoded = xc.decodeUTF8(euro, 0)
+assert(decoded.get(0) == 0x20ac, "x11 decode utf8 codepoint")
+assert(decoded.get(1) == euro.len, "x11 decode utf8 index")
+assert(xc.convertLatin1toUTF8(byte_str([65, 233])) == ("A" + str.chr(233)), "x11 latin1")
+def uris = xc.parseUriList("file:///tmp/a%20b\r\n#skip\nfile://host/opt/x")
+assert(uris.len == 2, "x11 uri count")
+assert(uris.get(0) == "/tmp/a b", "x11 uri first")
+assert(uris.get(1) == "/opt/x", "x11 uri host path")
+assert(xc.dup_string("copy") == "copy", "x11 dup string")
+assert(km.translate_keysym(0xff1b) == api.KEY_ESCAPE, "x11 keysym escape")
+assert(km.translate_keysym(0x61) == api.KEY_A, "x11 keysym alpha")
+assert(km.translate_scancode(38) == api.KEY_A, "x11 scancode alpha")
+assert(km.keysym_from_key(api.KEY_ESCAPE) == 0xff1b, "x11 key to keysym")
+assert(km.keysym_to_unicode(0x010020ac) == 0x20ac, "x11 direct unicode keysym")
+assert(km.keysym_to_unicode(0) == km.INVALID_CODEPOINT, "x11 invalid keysym")
+def caps = comp.compute_caps()
+assert(caps.get("refraction_resolve", false), "compute caps refraction")
+assert(comp.compute_workgroups(129, 64) == 3, "compute workgroups ceil")
+def mask = comp.compute_feature_mask({
+      "refraction_factor": 1.0,
+      "transmission_factor": 0.25,
+      "thickness_factor": 0.0,
+      "diffuse_transmission_factor": 0.5
+})
+assert((mask & comp.COMPUTE_FEATURE_REFRACTION) != 0, "compute mask refraction")
+assert((mask & comp.COMPUTE_FEATURE_TRANSMISSION) != 0, "compute mask transmission")
+assert((mask & comp.COMPUTE_FEATURE_VOLUME) == 0, "compute mask volume off")
+assert((mask & comp.COMPUTE_FEATURE_DIFFUSE_TRANSMISSION) != 0, "compute mask diffuse transmission")
+def pass_desc = comp.compute_pass_desc("material", comp.gltf_material_compute_shader(), 16, 4, 1)
+assert(pass_desc.get("name") == "material", "compute pass name")
+assert(pass_desc.get("stage") == "comp", "compute pass stage")
+assert(pass_desc.get("shader").contains("#version 450"), "compute shader body")
+assert(comp.refraction_resolve_shader().contains("imageStore"), "compute refraction shader")
+assert(st._set_vertex_offset(4) == 0, "vk state set vertex offset")
+assert(st._advance_vertex_offset(6) == 0, "vk state advance vertex offset")
+assert(st._vertex_offset == 10, "vk state vertex offset value")
+assert(bufs.static_buffer_address({"address": 123}) == 123, "vk cached buffer address")
+assert(bufs.static_buffer_address({"handle": 0, "offset": 8}) == 0, "vk missing buffer address")
+assert(bufs.buffer_device_address(0) == 0, "vk null buffer address")
+def rgba = byte_str([255, 0, 0, 255])
+def encoded = gif.encode({"width": 1, "height": 1, "channels": 4, "data": rgba})
+assert(is_str(encoded), "gif encoded string")
+assert(load8(encoded, 0) == 71 && load8(encoded, 1) == 73 && load8(encoded, 2) == 70, "gif magic")
+def decoded_gif = gif.decode(encoded)
+assert(is_dict(decoded_gif), "gif decoded dict")
+assert(decoded_gif.get("width") == 1, "gif width")
+assert(decoded_gif.get("height") == 1, "gif height")
+assert(decoded_gif.get("channels") == 4, "gif channels")
+assert(load8(decoded_gif.get("data"), 0) == 255, "gif red channel")
+assert(load8(decoded_gif.get("data"), 3) == 255, "gif alpha channel")
+print("ui_x11_gif_vk_probe ok")
+NY
+}

@@ -683,7 +683,6 @@ static void append_json_str(char **buf, size_t *len, size_t *cap, const char *s)
   append(buf, len, cap, "\"");
 }
 
-
 typedef struct json_writer_t {
   char *buf;
   size_t len;

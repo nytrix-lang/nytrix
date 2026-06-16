@@ -1,0 +1,26 @@
+shape ownership-use-after-consume {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "use after move of owned slot 'a'"
+  flags "--borrow-check"
+  source ny <<'NY'
+use std.core
+
+@consumes(x)
+fn take(x) int {
+   0
+}
+
+fn bad() int {
+   def a = [1]
+   take(a)
+   len(a)
+}
+
+bad()
+NY
+}

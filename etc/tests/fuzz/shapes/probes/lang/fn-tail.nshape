@@ -1,0 +1,21 @@
+shape fn_tail {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn pct(){
+   100
+}
+fn pct_ret(){
+   return 100
+}
+fn main(){
+   print("pct=", pct())
+   print("pct_ret=", pct_ret())
+}
+main()
+NY
+}

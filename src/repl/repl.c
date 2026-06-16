@@ -1944,20 +1944,19 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
   if (g_repl_ctx)
     return;
 
-  /* Fast REPL initialization - minimal LLVM setup */
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
 
   g_repl_ctx = LLVMContextCreate();
   LLVMModuleRef mod =
       LLVMModuleCreateWithNameInContext("repl_base", g_repl_ctx);
-  /* Use O1 for REPL - good balance of speed and optimization */
+
   ny_llvm_prepare_module(mod, 1);
   g_repl_builder = LLVMCreateBuilderInContext(g_repl_ctx);
 
   const char *std_init_fn_name = NULL;
   if (mode != STD_MODE_NONE) {
-    /* Check for cached prebuilt stdlib first */
+
     const char *prebuilt = getenv("NYTRIX_STD_PREBUILT");
     if ((!prebuilt || ny_access(prebuilt, R_OK) != 0)) {
       const char *build_std = getenv("NYTRIX_BUILD_STD_PATH");
@@ -1986,7 +1985,6 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
 #endif
     }
 
-    /* Use prebuilt std.ny when available. */
     if (mode == STD_MODE_FULL && prebuilt && ny_access(prebuilt, R_OK) == 0) {
       g_std_src_cached_persistent = repl_read_file(prebuilt);
     }
@@ -2285,10 +2283,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         repl_rewrite_lazy_std_qualified_calls(eval_input, docs);
     if (compile_input_owned)
       compile_input = compile_input_owned;
-    /*
-     * In the REPL, bare `use std` means "enable lazy root std". Keep it out
-     * of the eval body so the compiler does not expand the whole root package.
-     */
+
     char *stripped = repl_strip_bare_std_use_statements(compile_input);
     if (stripped) {
       free(compile_input_owned);
@@ -2507,7 +2502,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
           LLVMAddGlobalMapping(g_repl_ee, cg.interns.data[i].val,
                                &cg.interns.data[i].data);
       }
-      (void)cg.global_vars; /* skip GlobalValueAddress - MCJIT crash */
+      (void)cg.global_vars;
       repl_debug_stage("jit-get-address");
       uint64_t addr = LLVMGetFunctionAddress(g_repl_ee, fn_name);
       if (addr) {
@@ -2792,8 +2787,7 @@ static void repl_ensure_module(const char *name, std_mode_t std_mode,
       return;
     }
   }
-  // If it's the core 'std' root module, we skip because it's guaranteed bundled
-  // in std_mode
+
   if (std_mode != STD_MODE_NONE && strcmp(norm_name, "std") == 0) {
     vec_push(&g_repl_cg.use_modules, ny_strdup(norm_name));
     free(norm_name);

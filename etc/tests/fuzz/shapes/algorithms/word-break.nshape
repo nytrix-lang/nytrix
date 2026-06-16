@@ -1,0 +1,87 @@
+shape word-break {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "string", "dict", "dynamic-programming"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.dict
+use std.os.time
+fn zero_list(n){
+   mut out = list(0)
+   mut i = 0
+   while(i < n){
+      out = append(out, 0)
+      i += 1
+   }
+   out
+}
+fn word_at(words, idx){
+   get(words, idx % len(words))
+}
+fn mk_text(words, n){
+   mut s = ""
+   mut x = 24681012
+   mut i = 0
+   while(i < n){
+      x = (x * 1664525 + 1013904223) & 2147483647
+      s = s + word_at(words, x % len(words))
+      i += 1
+   }
+   s
+}
+fn matches_at(text, pos, word){
+   if(pos + len(word) > len(text)){ return false }
+   mut i = 0
+   while(i < len(word)){
+      if(get(text, pos + i) != get(word, i)){ return false }
+      i += 1
+   }
+   true
+}
+fn word_break_score(text, words){
+   def n = len(text)
+   mut dp = zero_list(n + 1)
+   set_idx(dp, 0, 1)
+   mut memo = dict()
+   mut i = 0
+   while(i < n){
+      if(get(dp, i) != 0){
+         mut j = 0
+         while(j < len(words)){
+            def w = get(words, j)
+            def key = i * 131 + j
+            def hit = memo.get(key, -1)
+            mut ok = hit == 1
+            if(hit == -1){
+               ok = matches_at(text, i, w)
+               memo = memo.set(key, ok ? 1 : 0)
+            }
+            if(ok){ set_idx(dp, i + len(w), 1) }
+            j += 1
+         }
+      }
+      i += 1
+   }
+   mut score = get(dp, n) != 0 ? 1 : 0
+   i = 0
+   while(i <= n){
+      score += get(dp, i)
+      i += 1
+   }
+   score
+}
+def words = ["ny", "lang", "gc", "dict", "arena", "parser", "emit", "shape", "fuzz", "heap", "byte", "token"]
+def text = mk_text(words, 700)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 130){
+   checksum += word_break_score(text, words)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT word_break ", checksum, " ", t1 - t0)
+NY
+}

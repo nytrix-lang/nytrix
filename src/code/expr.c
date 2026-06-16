@@ -638,7 +638,6 @@ static bool ny_ct_fast_eval_unary(const char *op, const ny_ct_fast_val_t *r,
     return true;                                                               \
   }
 
-
 static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
                               ny_ct_fast_val_t *out) {
   switch (op[0]) {
@@ -754,7 +753,7 @@ static bool ny_ct_fast_eval_binary(const char *op, const ny_ct_fast_val_t *l,
   if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
     bool eq = false;
     if (ny_ct_numeric_eq(l, r, &eq)) {
-      /* handled */
+
     } else if (l->kind == NY_CT_FAST_INT && r->kind == NY_CT_FAST_INT) {
       eq = (l->i == r->i);
     } else if (l->kind == NY_CT_FAST_BOOL && r->kind == NY_CT_FAST_BOOL) {
@@ -1552,7 +1551,7 @@ static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
           s->kind == NY_S_ENUM || s->kind == NY_S_MACRO ||
           s->kind == NY_S_USE || s->kind == NY_S_EXPORT ||
           s->kind == NY_S_OPERATOR) {
-        // Harmless declarations during fast eval
+
         continue;
       }
       ny_ct_fast_val_t next = ny_ct_fast_none();
@@ -2673,11 +2672,11 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
   sfn->as.fn.body = body;
   sfn->as.fn.is_variadic = is_variadic;
   sfn->as.fn.return_type = callable_return_type;
-  // Copy location from body if possible
+
   if (body)
     sfn->tok = body->tok;
   scope sc[64] = {0};
-  // heuristic.
+
   bool uses_env = captures.len > 0 || ny_lambda_values_need_closure(cg);
   if (name_hint && strcmp(name_hint, "__defer") == 0)
     uses_env = true;
@@ -2688,16 +2687,15 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
     LLVMSetLinkage(lf, LLVMInternalLinkage);
   fun_sig *lambda_sig = lookup_fun(cg, name, 0);
   cg->last_lambda_sig = (!uses_env && lambda_sig) ? lambda_sig : NULL;
-  // Keep callable pointers raw. Ad-hoc low-bit tagging collides with
-  // 32-bit runtime native tags (and ARM Thumb pointer semantics).
+
   LLVMValueRef fn_ptr_raw = ny_ptr2i64(cg, lf, "");
 
   if (!uses_env) {
-    /* No captures: return plain callable pointer */
+
     vec_free(&captures);
     return fn_ptr_raw;
   }
-  /* Create Env */
+
   bool is_defer = (name_hint && strcmp(name_hint, "__defer") == 0);
   LLVMValueRef env_ptr = NULL;
 
@@ -2734,7 +2732,7 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
       ny_store(cg, dst, slot_val);
     }
   }
-  /* Create Closure Object [Tag=TAG_CLOSURE | Code | Env] */
+
   LLVMValueRef cls_size =
       LLVMConstInt(cg->type_i64, ((uint64_t)16 << 1) | 1, false);
   LLVMValueRef cls_ptr =
@@ -2742,7 +2740,7 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
                      (LLVMValueRef[]){cls_size}, 1, "closure");
   LLVMValueRef cls_raw =
       LLVMBuildIntToPtr(cg->builder, cls_ptr, ny_ptr_i64_ty(cg), "");
-  /* Set Tag -8 */
+
   LLVMValueRef tag_addr = LLVMBuildGEP2(
       cg->builder, ny_i8_ty(cg),
       ny_bitcast(cg, cls_raw, LLVMPointerType(ny_i8_ty(cg), 0), ""),
@@ -2751,11 +2749,11 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
     ny_store(cg, ny_bitcast(cg, tag_addr, ny_ptr_i64_ty(cg), ""),
              LLVMConstInt(cg->type_i64, TAG_CLOSURE, false));
   }
-  /* Store Code at 0 */
+
   if (cls_raw && fn_ptr_raw) {
     ny_store(cg, cls_raw, fn_ptr_raw);
   }
-  /* Store Env at 8 */
+
   LLVMValueRef env_store_addr = LLVMBuildGEP2(
       cg->builder, cg->type_i64, cls_raw, (LLVMValueRef[]){ny_c1(cg)}, 1, "");
   if (env_store_addr && env_ptr) {
@@ -2895,7 +2893,6 @@ LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v) {
       return LLVMConstInt(ny_i1_ty(cg), 0, false);
   }
 
-  // Fold `select i1 %cond, i64 true_imm, i64 false_imm` (tag_bool) back to %cond
   if (v && LLVMIsASelectInst(v)) {
     LLVMValueRef tv = LLVMGetOperand(v, 1);
     LLVMValueRef fv = LLVMGetOperand(v, 2);
@@ -2906,7 +2903,6 @@ LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v) {
     }
   }
 
-  // Branchless: truthy = (v != nil && v != tagged_int_zero && v != false)
   LLVMValueRef not_none = ny_ne(cg, v, ny_cnil(cg), "");
   LLVMValueRef not_zero = ny_ne(cg, v, ny_c1(cg), "");
   LLVMValueRef not_false = ny_ne(cg, v, ny_cfalse(cg), "");
@@ -2925,7 +2921,6 @@ static void intern_map_resize(codegen_t *cg, size_t new_cap) {
     if (e->intern_idx == 0)
       continue;
 
-    // Re-insert into new map
     string_intern *in = &cg->interns.data[e->intern_idx - 1];
     uint64_t hash = in->hash;
     size_t pos = hash & (new_cap - 1);
@@ -2961,13 +2956,12 @@ static void intern_map_put(codegen_t *cg, uint64_t hash, uint32_t intern_idx) {
 LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   uint64_t key_hash = ny_const_str_hash(s, len);
 
-  // Try hash map lookup first
   if (cg->intern_map_cap > 0) {
     size_t pos = key_hash & (cg->intern_map_cap - 1);
     while (1) {
       uint32_t idx = cg->intern_map[pos].intern_idx;
       if (idx == 0)
-        break; // Not found
+        break;
 
       string_intern *in = &cg->interns.data[idx - 1];
       if (in->hash == key_hash && in->len == len && in->module == cg->module) {
@@ -2985,22 +2979,17 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   size_t tail_size = 16;
   size_t total_len = header_size + final_len + 1 + tail_size;
   char *obj_data = calloc(1, total_len);
-  // Write Header
-  // We do NOT write heap magic numbers (NY_MAGIC1/2) here.
-  // If we did, the runtime would treat this as a heap pointer and strict bounds
-  // checking (__check_oob) would forbid accessing header fields (like length
-  // at -16). By leaving magics as 0, is_heap_ptr returns false, allowing
-  // access.
-  *(uint64_t *)(obj_data) = 0;                       // NY_MAGIC1;
-  *(uint64_t *)(obj_data + 8) = (uint64_t)final_len; // Capacity
-  *(uint64_t *)(obj_data + 16) = 0;                  // NY_MAGIC2;
+
+  *(uint64_t *)(obj_data) = 0;
+  *(uint64_t *)(obj_data + 8) = (uint64_t)final_len;
+  *(uint64_t *)(obj_data + 16) = 0;
   *(uint64_t *)(obj_data + 48) =
-      ((uint64_t)final_len << 1) | 1; // Length at p-16 (tagged)
-  *(uint64_t *)(obj_data + 56) = 120; // Tag at p-8 (TAG_STR)
-  // Write Data
+      ((uint64_t)final_len << 1) | 1;
+  *(uint64_t *)(obj_data + 56) = 120;
+
   memcpy(obj_data + header_size, final_s, final_len);
   obj_data[header_size + final_len] = '\0';
-  // Write Tail
+
   uint64_t magic3 = NY_MAGIC3;
   memcpy(obj_data + header_size + final_len + 1, &magic3, sizeof(magic3));
   char data_name[128];
@@ -3028,7 +3017,6 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
     LLVMSetLinkage(runtime_ptr_global, LLVMPrivateLinkage);
   }
 
-  // Store the global and metadata
   string_intern in = {.data = obj_data + header_size,
                       .len = final_len,
                       .hash = key_hash,
@@ -3039,7 +3027,6 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   vec_push(&cg->interns, in);
   intern_map_put(cg, key_hash, (uint32_t)cg->interns.len);
 
-  // Return the runtime pointer global (callers will load from it)
   return runtime_ptr_global;
 }
 
@@ -4200,14 +4187,12 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   char *err = NULL;
   LLVMBasicBlockRef prev_bb = cg->builder ? ny_cur_block(cg) : NULL;
 
-  // 1. Snapshot current module state for isolated comptime evaluation.
   size_t sealed_count = 0;
   LLVMValueRef *sealed_terms =
       ny_seal_unterminated_blocks(cg->module, cg->ctx, &sealed_count);
   LLVMMemoryBufferRef bitcode = LLVMWriteBitcodeToMemoryBuffer(cg->module);
   ny_unseal_blocks(sealed_terms, sealed_count);
 
-  // 2. Parse into an isolated context.
   bool ctm_ctx_owned = true;
   LLVMContextRef ctm_ctx = LLVMContextCreate();
   LLVMModuleRef mod = NULL;
@@ -4238,10 +4223,6 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   static int ctm_count = 0;
   snprintf(entry_name, sizeof(entry_name), "__ctm_entry_%d", ctm_count++);
 
-  // Any function that is currently incomplete (not terminated) is likely the
-  // one containing the comptime block or one of its parents in a recursive
-  // build. We must convert these to declarations (remove bodies) to avoid
-  // LLVM verification errors.
   for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
        f = LLVMGetNextFunction(f)) {
     if (LLVMIsDeclaration(f)) {
@@ -4272,12 +4253,8 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
     }
   }
 
-  // 4. Normalize debug metadata in the snapshot before JIT.
 #ifdef _WIN32
-  /*
-   * COFF + MCJIT can fail with IMAGE_REL_AMD64_ADDR32NB relocations when
-   * transient comptime snapshot modules carry debug metadata.
-   */
+
   LLVMStripModuleDebugInfo(mod);
 #else
   if (LLVMGetModuleContext(mod)) {
@@ -4287,7 +4264,6 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   }
 #endif
 
-  // 5. Verification Check (now should pass)
   char *verify_err = NULL;
   if (LLVMVerifyModule(mod, LLVMReturnStatusAction, &verify_err) != 0) {
     NY_LOG_WARN("Comptime snapshot module verification failed: %s\n",
@@ -4295,7 +4271,6 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
     LLVMDisposeMessage(verify_err);
   }
 
-  // 6. Setup temporary codegen context.
   LLVMBuilderRef bld = LLVMCreateBuilderInContext(ctm_ctx);
   codegen_t tcg;
   codegen_init_with_context(&tcg, cg->prog, cg->arena, mod, ctm_ctx, bld);
@@ -4380,7 +4355,6 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
     }
   }
 
-  // 7. JIT Execute.
   LLVMExecutionEngineRef ee = NULL;
   struct LLVMMCJITCompilerOptions jit_opts;
   ny_jit_init_native_once();
@@ -4617,14 +4591,14 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
       return expr_fail(cg, e->tok, "slice operation requires 'slice'");
     LLVMValueRef start = e->as.index.start
                              ? gen_expr(cg, scopes, depth, e->as.index.start)
-                             : ny_c1(cg); // 0 tagged
+                             : ny_c1(cg);
     LLVMValueRef stop =
         e->as.index.stop
             ? gen_expr(cg, scopes, depth, e->as.index.stop)
             : LLVMConstInt(cg->type_i64, ((0x3fffffffULL) << 1) | 1, false);
     LLVMValueRef step = e->as.index.step
                             ? gen_expr(cg, scopes, depth, e->as.index.step)
-                            : LLVMConstInt(cg->type_i64, 3, false); // 1 tagged
+                            : LLVMConstInt(cg->type_i64, 3, false);
     ny_dbg_loc(cg, e->tok);
     return LLVMBuildCall2(
         cg->builder, s->type, s->value,
@@ -4648,40 +4622,24 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
 LLVMValueRef gen_expr_list_stack_alloc(codegen_t *cg, scope *scopes,
                                        size_t depth, expr_t *e) {
   size_t item_count = e->as.list_like.len;
-  /* Header (16 bytes) + items * 8 bytes. We also need space for the tag at p-8.
-     Actually, standard Nytrix pointers point to (data + 8), and tag is at p-8.
-     Wait, rt_list_new allocates (16 + n*8). The pointer returned is the start of the 16 bytes?
-     No, rt_list_new:
-     int64_t p = rt_malloc(16 + n * 8);
-     *(int64_t *)(p-8) = TAG_LIST;
-     return p;
-     So p points to the length/capacity header.
-  */
 
-  /* We need 8 (tag) + 16 (header) + n*8 (data). */
-  /* LLVMBuildAlloca takes an LLVM type; allocate enough i64 slots directly. */
   LLVMValueRef mem_ptr = LLVMBuildAlloca(cg->builder, LLVMArrayType(cg->type_i64, 3 + item_count), "list_stack");
   LLVMSetAlignment(mem_ptr, 16);
 
-  /* Get pointer to the data part (offset by 1 i64 for the tag) */
   LLVMValueRef p_idx[2] = { ny_c0(cg), ny_c1(cg) };
   LLVMValueRef p_addr = LLVMBuildGEP2(cg->builder, LLVMArrayType(cg->type_i64, 3 + item_count), mem_ptr, p_idx, 2, "p_header");
   LLVMValueRef p = LLVMBuildPtrToInt(cg->builder, p_addr, cg->type_i64, "p_val");
 
-  /* Set tag at p-8 */
   LLVMValueRef tag_addr = LLVMBuildIntToPtr(cg->builder, ny_sub(cg, p, ny_ci(cg, 8), ""), ny_ptr_i64_ty(cg), "");
   uint64_t tag = (e->kind == NY_E_LIST) ? TAG_LIST : TAG_TUPLE;
   ny_store(cg, tag_addr, ny_ci(cg, tag));
 
-  /* Set length at p+0 */
   LLVMValueRef len_addr = LLVMBuildIntToPtr(cg->builder, p, ny_ptr_i64_ty(cg), "");
   ny_store(cg, len_addr, ny_ci(cg, (item_count << 1) | 1));
 
-  /* Set capacity at p+8 */
   LLVMValueRef cap_addr = LLVMBuildIntToPtr(cg->builder, ny_add(cg, p, ny_ci(cg, 8), ""), ny_ptr_i64_ty(cg), "");
   ny_store(cg, cap_addr, ny_ci(cg, (item_count << 1) | 1));
 
-  /* Store items */
   for (size_t i = 0; i < item_count; i++) {
     LLVMValueRef item_val = gen_expr(cg, scopes, depth, e->as.list_like.data[i]);
     LLVMValueRef item_addr = LLVMBuildIntToPtr(cg->builder, ny_add(cg, p, ny_ci(cg, 16 + i * 8), ""), ny_ptr_i64_ty(cg), "");
@@ -5653,8 +5611,7 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
     if (!ny_is_numeric_expr_like(cg, scopes, depth, e->as.binary.left) ||
         !ny_is_numeric_expr_like(cg, scopes, depth, e->as.binary.right))
       break;
-    // Fast path: Recursively generate operands as f64.
-    // Falls back to gen_expr + unbox if operands are not float-like.
+
     LLVMValueRef lf = gen_expr_as_f64(cg, scopes, depth, e->as.binary.left);
     LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, e->as.binary.right);
     bool divisor_nonzero =
@@ -5783,10 +5740,9 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
   default:
     break;
   }
-  // Fallback: generate as i64, then convert to f64
+
   LLVMValueRef v = gen_expr(cg, scopes, depth, e);
-  // Shallow check for float type to avoid expensive infer_expr_type in hot
-  // path. identifiers with is_f64_slot are definitely floats.
+
   if (e->kind == NY_E_IDENT) {
     size_t name_len = (size_t)e->tok.len;
     if (name_len == 0)
@@ -5799,7 +5755,7 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
       return LLVMBuildLoad2(cg->builder, f64_ty, ptr, "f64_load");
     }
   }
-  // Unknown type: safe unbox (handles both int and float, adds branches)
+
   return ny_unbox_float(cg, v);
 }
 
@@ -5988,7 +5944,6 @@ static char *ny_int_literal_decimal_from_token(token_t tok, int64_t fallback) {
 
 static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
 
-  // Check for dead code - don't generate instructions if block is terminated
   if (cg->builder) {
     LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
     if (cur_bb && LLVMGetBasicBlockTerminator(cur_bb)) {
@@ -6023,10 +5978,10 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
     if (e->as.literal.kind == NY_LIT_BOOL)
       return e->as.literal.as.b ? ny_ctrue(cg) : ny_cfalse(cg);
     if (e->as.literal.kind == NY_LIT_STR) {
-      // Get the runtime pointer global for this string
+
       LLVMValueRef str_runtime_global =
           const_string_ptr(cg, e->as.literal.as.s.data, e->as.literal.as.s.len);
-      // Load the pointer value (will be initialized by string init function)
+
       return ny_load(cg, str_runtime_global, "str_ptr");
     }
     if (e->as.literal.kind == NY_LIT_FLOAT) {
@@ -6083,14 +6038,10 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
         LLVMValueRef raw = ny_ptr2i64(cg, sv, "");
         return ny_box_callable_closure(cg, raw, e->tok);
       }
-      // Return raw callable pointer as int. Do not apply ad-hoc low-bit tags:
-      // on 32-bit targets, tag `2` collides with NY_NATIVE_TAG and causes
-      // __callN/__thread dispatch to treat Nytrix functions as native
-      // pointers.
+
       return ny_ptr2i64(cg, sv, "");
     }
 
-    // NEW: Try resolving as an unqualified enum member
     enum_member_def_t *emd = lookup_enum_member(cg, e->as.ident.name);
     if (emd) {
       return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1, true);
@@ -6153,8 +6104,6 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
     if (mono_raw_int)
       return mono_raw_int;
 
-    // Fast path for arithmetic and comparison of known floats.
-    // Avoids boxing of intermediate results in expressions like (x*x + y*y).
     bool is_arith = ny_is_f64_arith_op(op);
     bool is_cmp = (strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
                    strcmp(op, ">") == 0 || strcmp(op, ">=") == 0 ||
@@ -6267,14 +6216,14 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
     return ny_c0(cg);
   case NY_E_DEREF: {
     LLVMValueRef ptr = gen_expr(cg, scopes, depth, e->as.deref.target);
-    // Low level: treat ptr as raw address
+
     ny_dbg_loc(cg, e->tok);
     LLVMValueRef raw_ptr = LLVMBuildIntToPtr(cg->builder, ptr, cg->type_i8ptr,
                                              NY_LLVM_NAME(cg, "raw_ptr"));
     return ny_load(cg, raw_ptr, NY_LLVM_NAME(cg, "deref"));
   }
   case NY_E_MEMBER: {
-    // First, attempt to resolve as a static enum member or qualified global.
+
     char *full_name = codegen_full_name(cg, e, cg->arena);
     if (full_name) {
       enum_member_def_t *emd = lookup_enum_member(cg, full_name);
@@ -6357,7 +6306,6 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
           "Member access on a dynamic object requires the 'get' function.");
     }
 
-    // Assume `get` can take a default value as a third argument.
     LLVMValueRef args[16];
     args[0] = target;
     args[1] = key_str;
@@ -6367,7 +6315,7 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
     if (arg_count > 16)
       arg_count = 16;
     for (unsigned i = 2; i < arg_count; i++) {
-      args[i] = ny_c1(cg); // Tagged 0 default
+      args[i] = ny_c1(cg);
     }
     ny_dbg_loc(cg, e->tok);
     return LLVMBuildCall2(cg->builder, get_sig->type, get_sig->value, args,
@@ -6446,7 +6394,7 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
                           "");
   }
   case NY_E_FSTRING: {
-    // Empty string init
+
     LLVMValueRef empty_runtime_global = const_string_ptr(cg, "", 0);
     LLVMValueRef res = ny_load(cg, empty_runtime_global, "");
     fun_sig *cs = ny_helper_str_concat(cg), *ts = ny_helper_to_str(cg);
@@ -6474,7 +6422,7 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
   }
   case NY_E_LAMBDA:
   case NY_E_FN: {
-    /* Capture All Visible Variables (scopes[1..depth]) */
+
     return gen_closure(cg, scopes, depth, e->as.lambda.params,
                        e->as.lambda.body, e->as.lambda.is_variadic,
                        e->as.lambda.return_type, "__lambda");
@@ -6525,7 +6473,6 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
 
     ny_pos(cg, err_bb);
 
-    // return res (which is the error result)
     if (cg->result_store_val) {
       ny_store(cg, cg->result_store_val, res);
     } else {
@@ -6534,11 +6481,9 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
       ny_cg_emit_trace_exit(cg);
       LLVMBuildRet(cg->builder, res);
     }
-    // We need a dummy terminator if there are instructions after this try
 
     ny_pos(cg, ok_bb);
 
-    // Unwrap value
     fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap", 0);
     if (!unwrap_sig) {
       return expr_fail(cg, e->tok, "__unwrap not found for '?' operator");

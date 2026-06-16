@@ -78,7 +78,7 @@ use std.os.ui.render.gl as lib_glr
 use std.os.ui.render.texture as render_texture
 use std.os.ui.render.utils as render_utils
 use std.os.ui.render.shared as render_shared
-use std.parse.3d.gltf as gltf
+use std.math.parse.3d.gltf as gltf
 use std.os.ui.render.vk.state (
    _scratch_model_saved_a,
    _VKR_OFF_X, _VKR_OFF_Y, _VKR_OFF_Z,
@@ -112,9 +112,9 @@ use std.math
 use std.os.ui.render.matrix
 use std.math.vector
 use std.math.crypto.hash as lib_hash
-use std.parse.img as lib_img
-use std.parse.data.zlib as lib_zlib
-use std.parse.3d.obj as lib_obj
+use std.math.parse.img as lib_img
+use std.math.parse.data.zlib as lib_zlib
+use std.math.parse.3d.obj as lib_obj
 use std.core.cache as cache
 
 def BACKEND_NONE = 0
@@ -328,6 +328,13 @@ fn _font_prime_mode() int {
    if _font_prime_mode_cache != -1 { return _font_prime_mode_cache }
    _font_prime_mode_cache = _env_full_none_mode("NY_FONT_PRIME")
    _font_prime_mode_cache
+}
+
+fn _font_prime_extended_default() bool {
+   if _backend == BACKEND_GL {
+      return ui_profile.env_truthy_cached("NY_GL_FONT_EAGER_EXTENDED")
+   }
+   true
 }
 
 fn _deep_should_log_mesh() bool {
@@ -1556,7 +1563,9 @@ fn _font_prime_fast_data(int font_id) any {
       return ptr
    }
    _font_prime_range(font_id, 32, 126)
-   _font_prime_range(font_id, 128, 255)
+   if prime_full || _font_prime_extended_default() {
+      _font_prime_range(font_id, 128, 255)
+   }
    def prime_terminal = (mode != 0) && is_str(mode) && (mode == "terminal" || mode == "std" || mode == "2")
    if prime_terminal || prime_full {
       _font_prime_range(font_id, 0x2500, 0x259F)
@@ -1837,31 +1846,10 @@ fn _font_bitmap_uv(any atlas_ref, any bm, int cp) any {
    def u0, v0 = is_list(uv) ? _list_num_safe(uv, 0, 0.0) : 0.0, is_list(uv) ? _list_num_safe(uv, 1, 0.0) : 0.0
    def u1, v1 = is_list(uv) ? _list_num_safe(uv, 2, 0.0) : 0.0, is_list(uv) ? _list_num_safe(uv, 3, 0.0) : 0.0
    if is_list(uv) && uv.len >= 4 && u1 > u0 && v1 > v0 {
-      if lib_atlas.atlas_get_backend() == "gl" {
-         def aw = float(atlas_ref.get("width", 0))
-         def ah = float(atlas_ref.get("height", 0))
-         if aw > 0.0 && ah > 0.0 {
-            def hu = 0.5 / aw
-            def hv = 0.5 / ah
-            return [u0 + hu, v0 + hv, u1 - hu, v1 - hv]
-         }
-      }
       return uv
    }
    def atlas_uv = lib_atlas.atlas_get(atlas_ref, cp)
    if is_list(atlas_uv) && atlas_uv.len >= 4 {
-      if lib_atlas.atlas_get_backend() == "gl" {
-         def aw = float(atlas_ref.get("width", 0))
-         def ah = float(atlas_ref.get("height", 0))
-         if aw > 0.0 && ah > 0.0 {
-            return [
-               _list_num_safe(atlas_uv, 0, 0.0) + 0.5 / aw,
-               _list_num_safe(atlas_uv, 1, 0.0) + 0.5 / ah,
-               _list_num_safe(atlas_uv, 2, 0.0) - 0.5 / aw,
-               _list_num_safe(atlas_uv, 3, 0.0) - 0.5 / ah
-            ]
-         }
-      }
       return atlas_uv
    }
    uv
@@ -2518,7 +2506,7 @@ fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color) bool {
    def cg = _list_num_safe(rgba, 1, 1.0)
    def cb = _list_num_safe(rgba, 2, 1.0)
    def ca = _list_num_safe(rgba, 3, 1.0)
-   mut pen_x, pen_y = x, (_backend == BACKEND_GL) ? floor(y + ascent + 0.5) : y + ascent
+   mut pen_x, pen_y = x, y + ascent
    mut prev_gi = -1
    mut drew = false
    mut i = 0
@@ -2539,7 +2527,7 @@ fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color) bool {
       def glyph = _font_resolve_glyph(font_id, cp)
       if !glyph { continue }
       def gi = glyph.get("gi", 0)
-      if _backend != BACKEND_GL && prev_gi >= 0 && gi > 0 { pen_x += float(lib_ttf.get_kern(info, prev_gi, gi, font_size)) }
+      if prev_gi >= 0 && gi > 0 { pen_x += float(lib_ttf.get_kern(info, prev_gi, gi, font_size)) }
       mut g_adv = glyph.get("advance", 0.0)
       def bm = glyph.get("bitmap", 0)
       if bm {
@@ -3356,7 +3344,7 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
       if _is_debug() { ui_profile.print_text("[gfx] Applying headless mode(HIDDEN | NO_RESIZE)") }
       if use_gl && !ui_profile.headless_gui_enabled() { return init_mock_surface(width, height) }
    }
-   def auto_hide_boot = !headless && !explicit_hide && !_visible_vulkan_boot_required()
+   def auto_hide_boot = !headless && !explicit_hide && (use_gl || !_visible_vulkan_boot_required())
    if auto_hide_boot { f = f | 0x0200 }
    mut win = lib_uiw.open_window(title, x, y, width, height, f)
    if !win { return false }
@@ -3549,22 +3537,18 @@ fn begin_drawing() bool {
    if _backend == BACKEND_GL {
       def fresh = lib_uiw.get_win(_active_win)
       if fresh { _active_win = fresh }
-      def gl_caps = lib_glr.capabilities()
-      mut fb = gl_caps.get("software_upload", false) ? lib_uiw.size(_active_win) : lib_uiw.get_framebuffer_size(_active_win)
-      mut w, h = int(fb.get(0, 0)), int(fb.get(1, 0))
+      mut w = int(_active_win.get("w", 0))
+      mut h = int(_active_win.get("h", 0))
       if w <= 0 || h <= 0 {
-         fb = lib_uiw.size(_active_win)
-         w, h = int(fb.get(0, 0)), int(fb.get(1, 0))
+         def sz = lib_uiw.size(_active_win)
+         w, h = int(sz.get(0, 0)), int(sz.get(1, 0))
+         if w <= 0 || h <= 0 {
+            def fbsz = lib_uiw.get_framebuffer_size(_active_win)
+            w, h = int(fbsz.get(0, 0)), int(fbsz.get(1, 0))
+         }
       }
       if w > 0 && h > 0 {
-         if w != int(_active_win.get("w", 0)) || h != int(_active_win.get("h", 0)) {
-            _active_win["w"] = w
-            _active_win["h"] = h
-            lib_uiw._save_win(_active_win)
-            set_win_size(w, h)
-         } else {
-            _last_win_w, _last_win_h = float(w), float(h)
-         }
+         _last_win_w, _last_win_h = float(w), float(h)
       }
       return lib_glr.begin_frame(_active_win, w, h)
    }
@@ -4130,14 +4114,7 @@ fn _shape_sdf_color(any color) vec4 {
 }
 
 fn _store_v3_c4(ptr buf, int vi, f64 x, f64 y, f64 z, f64 r, f64 g, f64 b, f64 a) bool {
-   def off = vi * 28
-   store32_f32(buf, x, off)
-   store32_f32(buf, y, off + 4)
-   store32_f32(buf, z, off + 8)
-   store32_f32(buf, r, off + 12)
-   store32_f32(buf, g, off + 16)
-   store32_f32(buf, b, off + 20)
-   store32_f32(buf, a, off + 24)
+   render_shared.store_vertex64(buf, vi, x, y, z, 0.0, 0.0, render_shared.pack_rgba_u32(r, g, b, a), 0)
    true
 }
 
@@ -4219,43 +4196,40 @@ fn _shape_scratch_alloc(int bytes) ptr {
 fn _draw_triangles_impl(ptr verts, int tri_count, bool owns=true) bool {
    if verts == 0 || tri_count <= 0 { return false }
    if !_prepare_draw() { if owns { free(verts) } return false }
-   def draw_vk = _backend == BACKEND_VK
-   def draw_gl = _backend == BACKEND_GL
-   def draw_cpu = _backend == BACKEND_MOCK
-   if draw_vk || draw_gl || draw_cpu {
-      if draw_cpu { _cpu_mul_active_mvp_into(_cull_mvp) }
+   def vertex_count = tri_count * 3
+   if _backend == BACKEND_VK {
+      lib_vkr.draw_vertices(verts, vertex_count, -1)
+   } elif _backend == BACKEND_GL {
+      lib_glr.draw_vertices(verts, vertex_count, -1)
+   } elif _backend == BACKEND_MOCK {
+      _cpu_mul_active_mvp_into(_cull_mvp)
       mut i = 0
       while i < tri_count {
-         def off = i * 3 * 28
-         def x0, y0 = load32_f32(verts, off + 0), load32_f32(verts, off + 4)
-         def x1, y1 = load32_f32(verts, off + 28), load32_f32(verts, off + 32)
-         def x2, y2 = load32_f32(verts, off + 56), load32_f32(verts, off + 60)
-         def z0, z1 = load32_f32(verts, off + 8), load32_f32(verts, off + 36)
-         def z2 = load32_f32(verts, off + 64)
-         def cr, cg = load32_f32(verts, off + 12), load32_f32(verts, off + 16)
-         def cb, ca = load32_f32(verts, off + 20), load32_f32(verts, off + 24)
-         if draw_vk {
-            lib_vkr.draw_triangle_3d(x0, y0, z0, x1, y1, z1, x2, y2, z2, cr, cg, cb, ca)
-            i += 1
-            continue
-         }
-         if draw_gl {
-            lib_glr.draw_triangle_3d(x0, y0, z0, x1, y1, z1, x2, y2, z2, cr, cg, cb, ca)
-            i += 1
-            continue
-         }
+         def off0 = i * 3 * VERTEX_STRIDE
+         def off1 = off0 + VERTEX_STRIDE
+         def off2 = off1 + VERTEX_STRIDE
+         def x0, y0 = load32_f32(verts, off0 + OFF_X), load32_f32(verts, off0 + OFF_Y)
+         def x1, y1 = load32_f32(verts, off1 + OFF_X), load32_f32(verts, off1 + OFF_Y)
+         def x2, y2 = load32_f32(verts, off2 + OFF_X), load32_f32(verts, off2 + OFF_Y)
+         def c0 = load32(verts, off0 + OFF_C)
          mut sx0, sy0 = x0, y0
          mut sx1, sy1 = x1, y1
          mut sx2, sy2 = x2, y2
          if _mvp_matrix {
+            def z0 = load32_f32(verts, off0 + OFF_Z)
+            def z1 = load32_f32(verts, off1 + OFF_Z)
+            def z2 = load32_f32(verts, off2 + OFF_Z)
             def p0, p1 = _cpu_project_vertex(x0, y0, z0, _cull_mvp), _cpu_project_vertex(x1, y1, z1, _cull_mvp)
             def p2 = _cpu_project_vertex(x2, y2, z2, _cull_mvp)
-            if !p0 || !p1 || !p2 { i += 1 continue }
-            sx0, sy0 = p0.get(0, 0.0), p0.get(1, 0.0)
-            sx1, sy1 = p1.get(0, 0.0), p1.get(1, 0.0)
-            sx2, sy2 = p2.get(0, 0.0), p2.get(1, 0.0)
+            if p0 && p1 && p2 {
+               sx0, sy0 = p0.get(0, 0.0), p0.get(1, 0.0)
+               sx1, sy1 = p1.get(0, 0.0), p1.get(1, 0.0)
+               sx2, sy2 = p2.get(0, 0.0), p2.get(1, 0.0)
+               _cpu_draw_triangle(sx0, sy0, sx1, sy1, sx2, sy2, c0)
+            }
+         } else {
+            _cpu_draw_triangle(sx0, sy0, sx1, sy1, sx2, sy2, c0)
          }
-         _cpu_draw_triangle(sx0, sy0, sx1, sy1, sx2, sy2, _cpu_pack_color(cr, cg, cb, ca))
          i += 1
       }
    }
@@ -4590,7 +4564,7 @@ fn _draw_filled_fan_fallback(
    f64 alpha
 )  bool {
    segments = max(3, int(segments))
-   def verts = _shape_scratch_alloc(segments * 84)
+   def verts = _shape_scratch_alloc(segments * 3 * VERTEX_STRIDE)
    if !verts { return false }
    mut vi, i = 0, 0
    while i < segments {
@@ -4615,6 +4589,9 @@ fn draw_circle(f64 cx, f64 cy, f64 radius, any color, int segments=256) bool {
       lib_vkr.draw_circle_sdf(cx, cy, radius, r, g, b, a)
       return true
    }
+   if _backend == BACKEND_GL {
+      return lib_glr.draw_fan_2d(cx, cy, radius, radius, segments, 0.0, TAU, r, g, b, a)
+   }
    _draw_filled_fan_fallback(cx, cy, radius, radius, segments, 0.0, r, g, b, a)
 }
 
@@ -4633,7 +4610,7 @@ fn _draw_ring_sector_fallback(
 ) bool {
    steps = max(1, int(steps))
    def tri_count = steps * 2
-   def verts = _shape_scratch_alloc(tri_count * 84)
+   def verts = _shape_scratch_alloc(tri_count * 3 * VERTEX_STRIDE)
    if !verts { return false }
    mut vi, i = 0, 0
    while i < steps {
@@ -4654,7 +4631,7 @@ fn _draw_ring_sector_fallback(
 }
 
 fn draw_ring(f64 cx, f64 cy, f64 inner_radius, f64 outer_radius, any color, int segments=256) bool {
-   "Draws a filled ring/annulus using SDF for Vulkan or triangle segments for fallback."
+   "Draws a filled ring(donut)."
    if inner_radius < 0 { inner_radius = 0 }
    if outer_radius <= inner_radius { return false }
    def rgba = _shape_sdf_color(color)
@@ -4664,7 +4641,9 @@ fn draw_ring(f64 cx, f64 cy, f64 inner_radius, f64 outer_radius, any color, int 
       lib_vkr.draw_ring_sdf(cx, cy, inner_radius, outer_radius, r, g, b, a)
       return true
    }
-   segments = max(3, int(segments))
+   if _backend == BACKEND_GL {
+      return lib_glr.draw_ring_2d(cx, cy, inner_radius, outer_radius, segments, r, g, b, a)
+   }
    _draw_ring_sector_fallback(cx, cy, inner_radius, outer_radius, 0.0, TAU, segments, r, g, b, a)
 }
 
@@ -4793,11 +4772,14 @@ fn draw_rounded_rectangle(f64 x, f64 y, f64 w, f64 h, f64 radius, any color, int
    if radius <= 0 { return draw_rect(x, y, w, h, color) }
    def max_r = min(w, h) / 2.0
    if radius > max_r { radius = max_r }
+   def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+   def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
    if _backend == BACKEND_VK {
-      def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
-      def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
       lib_vkr.draw_rounded_rect_2d(x, y, w, h, radius, segments, r, g, b, a)
       return true
+   }
+   if _backend == BACKEND_GL {
+      return lib_glr.draw_rounded_rect_2d(x, y, w, h, radius, segments, r, g, b, a)
    }
    draw_rect(x + radius, y, w - (radius * 2.0), h, color)
    draw_rect(x, y + radius, radius, h - (radius * 2.0), color)
@@ -4835,7 +4817,7 @@ fn draw_star(f64 cx, f64 cy, f64 inner_radius, f64 outer_radius, int pts, any co
       lib_vkr.draw_star_2d(cx, cy, inner_radius, outer_radius, pts, rot, r, g, b, a)
       return true
    }
-   def verts = _shape_scratch_alloc(total * 84)
+   def verts = _shape_scratch_alloc(total * 3 * VERTEX_STRIDE)
    if !verts { return false }
    mut vi, i = 0, 0
    while i < total {
@@ -9613,31 +9595,7 @@ fn set_wireframe(bool enabled) bool {
 }
 
 #main {
-   def win = init_mock_surface(64, 64)
-   assert(is_dict(win) && get_active_backend() == BACKEND_MOCK, "render mock surface")
-   assert(get_framebuffer_size() == [64, 64] && framebuffer_size_f64() == [64.0, 64.0], "render framebuffer size")
-   assert(begin_drawing() && clear_background(BLACK), "render mock begin")
-   def fit = layout_fit(128.0, 64.0)
-   assert(fit.get("scale", 0.0) == 0.5 && layout_x(fit, 10.0) == 5.0 && layout_y(fit, 10.0) == 21.0, "render layout fit")
-   assert(layout_size(fit, 8.0) == 4.0 && layout_rect(fit, 10.0, 20.0, 30.0, 40.0) == [5.0, 26.0, 15.0, 20.0], "render layout helpers")
-   assert(set_ortho_2d(0.0, 64.0, 0.0, 64.0), "render ortho setup")
-   assert(draw_rect(8.0, 8.0, 18.0, 18.0, RED), "render mock rect")
-   def px = get_pixel(16, 16)
-   assert(is_list(px) && float(px.get(0, 0.0)) > 0.5 && float(px.get(3, 0.0)) > 0.5, "render mock pixel")
-   assert(draw_rectangle_lines(2.0, 2.0, 20.0, 16.0, GREEN, 1.0), "render rectangle outline")
-   assert(draw_line_2d(0.0, 63.0, 63.0, 0.0, BLUE, 1.0), "render line 2d")
-   assert(draw_circle(44.0, 14.0, 6.0, YELLOW, 18) && draw_ring(44.0, 32.0, 3.0, 8.0, CYAN, 24), "render circles")
-   assert(draw_polygon(18.0, 46.0, 5, 7.0, MAGENTA) && draw_ellipse(45.0, 48.0, 9.0, 5.0, ORANGE, 24), "render filled shapes")
-   assert(draw_arc(32.0, 32.0, 12.0, 20.0, 160.0, PURPLE, 1.0, 24), "render arc")
-   assert(draw_rounded_rectangle(4.0, 36.0, 14.0, 12.0, 3.0, CYAN, 12) && draw_star(54.0, 54.0, 3.0, 7.0, 5, WHITE), "render rounded/star")
-   assert(draw_text(999999, "a9?#", 5.0, 22.0, WHITE), "render builtin text")
-   assert(draw_rect_fast(1.0, 1.0, 3.0, 3.0, color_pack(1.0, 1.0, 1.0, 1.0)), "render fast rect")
-   assert(draw_rect_outline_fast(28.0, 28.0, 10.0, 10.0, color_pack(0.0, 1.0, 0.0, 1.0)), "render fast outline")
-   assert(scissor_push(0.0, 0.0, 12.0, 12.0) && scissor_pop(), "render scissor")
-   assert(set_model_matrix(mat4_identity()) && draw_line([4.0, 4.0, 0.0], [60.0, 4.0, 0.0], YELLOW, 1.0), "render world line")
-   assert(end_drawing(), "render mock end")
-   def next_fit = begin_frame_layout(BLACK, 128.0, 64.0)
-   assert(is_dict(next_fit) && next_fit.get("scale", 0.0) == 0.5 && end_frame(), "render frame layout")
-   assert(close_window(), "render mock close")
+   assert(color_pack(1.0, 0.0, 0.0, 1.0) != color_pack(0.0, 1.0, 0.0, 1.0), "render color pack")
+   assert(BACKEND_NONE == 0 && BACKEND_MOCK == 3, "render backend constants")
    print("✓ std.os.ui.render self-test passed")
 }

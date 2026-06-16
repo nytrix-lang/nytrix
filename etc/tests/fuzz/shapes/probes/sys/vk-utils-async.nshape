@@ -1,0 +1,125 @@
+shape vk-utils-async {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math (abs)
+use std.os.async as aio
+use std.os.ui.render.vk.state as st
+use std.os.ui.render.vk.utils as vu
+fn near(any a, any b) bool {
+   abs(float(a) - float(b)) < 0.0001
+}
+fn byte_buf(list bytes) any {
+   def n = bytes.len
+   def out = malloc(n)
+   assert(out != 0, "byte buffer allocation")
+   mut i = 0
+   while i < n {
+      store8(out, bytes.get(i), i)
+      i += 1
+   }
+   out
+}
+fn inc(any x) any { x + 1 }
+fn square(any x) any { x * x }
+assert(aio.backend() == "stackless", "async backend")
+assert(aio.await(aio.future(inc, 41)) == 42, "async future await")
+def vals = aio.await_all([aio.async(square, 2), aio.Future(square, 3)])
+assert(vals == [4, 9], "async await_all")
+assert(aio.await(aio.yield_now()) == 0, "async yield")
+def color = vu.__vkr_pack_color(1.0, 0.5, 0.0, 1.0)
+assert(((color >> 16) & 255) == 255, "pack color red")
+assert(((color >> 8) & 255) == 127, "pack color green")
+assert((color & 255) == 0, "pack color blue")
+assert(vu._vkr_color_u32([1.0, 0.0, 0.0, 1.0]) != 0, "list color pack")
+def rgba = vu.pack_rgba_u32([1.0, 0.0, 0.5, 1.0])
+assert((rgba & 255) == 255, "rgba red byte")
+assert(((rgba >> 16) & 255) == 128, "rgba blue byte")
+assert(((rgba >> 24) & 255) == 255, "rgba alpha byte")
+def normal_word = vu.pack_normal_tex_word(5, 1, 2.0, false, false, true)
+assert((normal_word & 0xffff) == 5, "normal tex id")
+assert((normal_word & 0x10000) != 0, "normal uv set")
+assert((normal_word & 0x40000) != 0, "normal double-sided bit")
+assert(((normal_word >> 24) & 127) == 127, "normal scale bits")
+def bsdf = {
+   "specular_factor": 1.0,
+   "transmission_factor": 0.5,
+   "sheen_color_factor": [0.25, 0.5, 0.75],
+   "thickness_factor": 2.0,
+   "attenuation_color": [1.0, 0.5, 0.0],
+   "attenuation_distance": 5.0,
+   "clearcoat_factor": 1.0,
+   "anisotropy_strength": 0.5,
+   "diffuse_transmission_factor": 1.0,
+   "refraction_factor": 0.5,
+   "alpha_coverage": 0.25
+}
+assert((vu.pack_bsdf0_u32(bsdf) & 255) == 255, "bsdf0 specular")
+assert((vu.pack_bsdf2_u32(bsdf) & 255) == 63, "bsdf2 sheen red")
+assert((vu.pack_bsdf4_u32(bsdf) & 255) == 255, "bsdf4 clearcoat")
+assert((vu.pack_bsdf5_u32(bsdf) & 255) == 255, "bsdf5 diffuse transmission")
+assert(vu.pack_emissive_u32([2.0, 1.0, 0.0], 2.0) != 0, "emissive packed")
+def mat0 = vu.pack_material_scalar_u32(0x0000ff00, "metallicFactor", 1.0)
+assert((mat0 & 255) == 255, "material metallic scalar")
+assert(((mat0 >> 8) & 255) == 255, "material roughness preserved")
+def alpha0 = vu.pack_alpha_cutoff_u32(0, 0.5)
+assert(((alpha0 >> 8) & 255) == 128, "alpha cutoff")
+def m = malloc(64)
+assert(vu.store_mat4_cm_raw(m, [1.0, 0.0, 0.0, 0.0,
+         0.0, 1.0, 0.0, 0.0,
+         0.0, 0.0, 1.0, 0.0,
+7.0, 8.0, 9.0, 1.0], true), "store plain mat4")
+assert(near(load32_f32(m, 0), 1.0), "mat4 first")
+assert(near(load32_f32(m, 48), 7.0), "mat4 translation x")
+free(m)
+def src = malloc(st.VERTEX_STRIDE * 3)
+def idx = malloc(6)
+assert(src != 0 && idx != 0, "vertex/index allocation")
+vu._vkr_store_vertex(src, 0, 1.0, 0.0, 0.0, 0.0, 0.0, 0xffffffff)
+vu._vkr_store_vertex(src, 1, 2.0, 0.0, 0.0, 0.0, 0.0, 0xffffffff)
+vu._vkr_store_vertex(src, 2, 3.0, 0.0, 0.0, 0.0, 0.0, 0xffffffff)
+store16(idx, 2, 0)
+store16(idx, 0, 2)
+store16(idx, 1, 4)
+def expanded = vu.gltf_expand_indexed_vertices(src, 3, idx, 3, false)
+assert(expanded != 0, "expand indexed vertices")
+assert(near(load32_f32(expanded, 0), 3.0), "expanded first vertex")
+assert(near(load32_f32(expanded, st.VERTEX_STRIDE), 1.0), "expanded second vertex")
+def rewound = vu.gltf_rewind_triangle_vertices(src, 3)
+assert(rewound != 0, "rewind triangle vertices")
+assert(near(load32_f32(rewound, st.VERTEX_STRIDE), 3.0), "rewound second vertex")
+free(src)
+free(idx)
+free(expanded)
+free(rewound)
+def bgra = byte_buf([1, 2, 3, 4])
+vu._vkr_bgra_to_rgba_if_needed(bgra, 4, 44)
+assert(load8(bgra, 0) == 3 && load8(bgra, 2) == 1, "bgra swap")
+free(bgra)
+def mesh = {"tex_id": -1, "count": 0}
+def part = {"mesh": mesh, "mat_idx": 2}
+def raw = {"vptr": 111, "vcnt": 3, "iptr": 222, "icnt": 6, "tex_id": 7, "material_slab": 333}
+def synced = vu.gltf_sync_drawable_part_from_raw(part, raw)
+assert(synced.get("vptr") == 111, "sync part vptr")
+assert(synced.get("mesh").get("count") == 3, "sync mesh count")
+assert(synced.get("mesh").get("tex_id") == 7, "sync mesh texture")
+def anim_part = {"mat_idx": 2, "mesh": {"mat_idx": 2}}
+def overridden = vu.gltf_anim_apply_material_pointer_overrides(anim_part, [
+      {"material": 2, "kind": "baseColorFactor", "value": [0.25, 0.5, 0.75, 1.0]},
+      {"material": 2, "kind": "uvOffset", "slot": "baseColorTexture", "value": [1.0, -1.0]}
+])
+assert(overridden.get("animated_color_override", false), "animated color flag")
+assert(overridden.get("base_uv_xf0", 0) != 0, "animated uv override")
+assert(overridden.get("mesh").get("base_uv_xf0", 0) == overridden.get("base_uv_xf0", 0), "mesh uv sync")
+def slab = vu.pack_material_slab({"base_color_u32": rgba, "material_u32": mat0, "tex_id": 7, "visible": true})
+assert(slab != 0, "material slab allocation")
+assert(load32(slab, 0) == rgba, "material slab base color")
+assert(load32(slab, 4) == mat0, "material slab material word")
+free(slab)
+print("vk_utils_async_probe ok")
+NY
+}

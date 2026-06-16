@@ -1,0 +1,6 @@
+shape add-compare-grid {
+  family "gcc-torture-addif"
+  generator "torture"
+  features ["gcc-torture", "addcmp", "branches", "compare-grid", "typed-int"]
+  template torture-add-compare-grid
+}

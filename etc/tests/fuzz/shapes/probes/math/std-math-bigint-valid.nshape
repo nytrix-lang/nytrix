@@ -1,0 +1,17 @@
+shape std_math_bigint_valid {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.nt
+def a = Z(8)
+def b = Z(13)
+def c = a + b
+assert(c.str == "21", "bigint operator sum")
+assert(bigint_mul(Z(3), Z(7)).str == "21", "bigint helper product")
+print("std math bigint valid")
+NY
+}

@@ -1,0 +1,6 @@
+shape array-copy-update {
+  family "array-copy-mutation"
+  generator "typed"
+  features ["arrays", "copy", "set_idx", "mutation", "inbounds"]
+  template array-copy-update
+}

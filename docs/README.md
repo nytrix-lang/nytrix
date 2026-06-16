@@ -11,7 +11,7 @@ keyword search:
 ```bash
 ny doc search json
 ny doc search --symbols recvuntil
-ny doc get std.parse.data.json
+ny doc get std.math.parse.data.json
 ```
 
 ## Start here

@@ -42,7 +42,7 @@ Fix shape:
 
 ```ny
 use std.core
-use std.parse.data.json as json
+use std.math.parse.data.json as json
 ```
 
 A semicolon after a `use` line starts a comment in Nytrix; it is not a
@@ -174,7 +174,7 @@ Search by module path when the symbol name is broad:
 
 ```bash
 ny doc get std.os.ui.render
-ny doc get std.parse.data.json
+ny doc get std.math.parse.data.json
 ```
 
 ## Network timeout

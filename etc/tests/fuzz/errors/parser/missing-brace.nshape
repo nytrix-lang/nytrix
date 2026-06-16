@@ -1,0 +1,15 @@
+shape parser-missing-brace {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "check for missing ';' or unmatched brace"
+  source ny <<'NY'
+use std.core
+
+if true {
+   print(1)
+NY
+}

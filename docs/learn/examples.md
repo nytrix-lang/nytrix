@@ -55,11 +55,11 @@ ny test --pattern ownership
 
 ## Benchmarks
 
-Bench examples live under `etc/tests/bench/`. Use them for rough comparisons:
+Bench examples live under `etc/tests/fuzz/bench/`. Use them for rough comparisons:
 
 ```bash
 ny perf
-ny -o build/cache/bench/sieve etc/tests/bench/sieve.ny
+ny -o build/cache/bench/sieve etc/tests/fuzz/bench/sieve.nshape
 ```
 
 ## Related

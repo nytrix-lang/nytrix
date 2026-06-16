@@ -1,0 +1,14 @@
+shape type-undefined-call {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "undefined symbol"
+  source ny <<'NY'
+use std.core
+
+does_not_exist(1, 2)
+NY
+}

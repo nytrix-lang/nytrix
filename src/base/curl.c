@@ -18,7 +18,7 @@ bool ny_curl_init(ny_curl_state_t *state) {
     return false;
 
   if (state->handle)
-    return true; /* Already initialized */
+    return true;
 
 #ifdef _WIN32
   state->handle = LoadLibraryA("libcurl.dll");

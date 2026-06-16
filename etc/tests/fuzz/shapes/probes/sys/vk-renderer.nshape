@@ -1,0 +1,61 @@
+shape vk-renderer {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.matrix
+use std.os.ui.render.vk.renderer as r
+r.renderer_config(false, 0, "", "", 1)
+assert(is_str(r.debug_stage()), "renderer debug stage")
+assert(is_list(r.get_swapchain_size()), "renderer swapchain size type")
+assert(is_int(r.get_swapchain_width()), "renderer swapchain width type")
+assert(is_int(r.get_swapchain_height()), "renderer swapchain height type")
+assert(r.notify_window_resize(0, 1) == false, "renderer reject invalid resize")
+assert(r.notify_window_resize(320, 240) == true, "renderer accept resize")
+assert(r.begin_frame() == false, "renderer begin without device")
+assert(r.end_frame() == false, "renderer end without frame")
+assert(r.clear(0.0, 0.0, 0.0, 1.0) == 0, "renderer clear without frame")
+assert(r.clear_depth() == 0, "renderer clear depth without frame")
+r.set_clear_color(0.1, 0.2, 0.3, 1.0)
+r.set_frame_time_sec(0.016)
+r.set_unlit(true)
+r.set_double_sided(true)
+r.set_vertex_color_mode(1)
+r.set_material([1.0, 0.5, 0.25, 1.0], 0.1, 0.8)
+r.set_material_packed(0xffffffff, 0)
+r.set_cam_pos(1.0, 2.0, 3.0)
+r.set_env_tex(-1)
+r.set_env_spec_tex(-1)
+r.set_mask(0)
+def m = mat4_identity()
+r.set_model_matrix(m)
+r.set_mvp(m)
+r.set_ortho(0.0, 100.0, 0.0, 100.0, -1.0, 1.0)
+r.set_perspective(1.0, 1.0, 0.1, 100.0)
+assert(is_list(r._mvp_matrix()), "renderer mvp matrix")
+def part_slab = malloc(256)
+memset(part_slab, 0, 256)
+assert(r.draw_parts_flat(part_slab, 1, 0) == 0, "renderer flat draw closed frame")
+assert(r.draw_parts_flat_range(part_slab, 0, 1, 0) == 0, "renderer flat range closed frame")
+assert(r.draw_part_flat_no_restore(part_slab, 0, 0) == 0, "renderer flat part closed frame")
+assert(r.draw_part0_flat_no_restore(part_slab) == 0, "renderer part0 inactive slab")
+assert(r.draw_part0_flat_state_no_restore(part_slab) == 0, "renderer part0 state closed frame")
+def mat_slab = malloc(160)
+memset(mat_slab, 0, 160)
+r.set_material_from_slab(mat_slab)
+r.set_scene_lights([])
+def light_slab = malloc(56)
+memset(light_slab, 0, 56)
+r.set_scene_lights_slab(light_slab, 0)
+assert(r._choose_composite_alpha(1, false) == 1, "renderer composite opaque")
+assert(r._choose_present_mode() >= 0, "renderer present mode fallback")
+r.shutdown()
+free(part_slab)
+free(mat_slab)
+free(light_slab)
+print("vk_renderer_probe ok")
+NY
+}

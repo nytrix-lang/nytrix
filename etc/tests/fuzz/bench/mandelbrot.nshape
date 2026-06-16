@@ -1,0 +1,101 @@
+shape mandelbrot {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def size = 96
+def ITERS = 64
+;; Mandelbrot Set (Benchmark)
+fn mandelbrot(w, h, max_iter) {
+   mut count = 0
+   def sx = 4.0 / w
+   def sy = 4.0 / h
+   def hw_sx = - (w * 0.6666667) * sx
+   def hh_sy = - (h * 0.5) * sy
+   def four = 4.0
+   mut c_im = hh_sy
+   mut y = 0
+   while y < h {
+      mut c_re = hw_sx
+      mut x = 0
+      while x < w {
+         mut zr = 0.0
+         mut zi = 0.0
+         mut zr2 = 0.0
+         mut zi2 = 0.0
+         mut i = 0
+         while i < max_iter {
+            zr2 = zr * zr
+            zi2 = zi * zi
+            if zr2 + zi2 > four { break }
+            zi = (zr + zr) * zi + c_im
+            zr = zr2 - zi2 + c_re
+            i += 1
+         }
+         if i == max_iter { count += 1 }
+         c_re += sx
+         x += 1
+      }
+      c_im += sy
+      y += 1
+   }
+   count
+}
+def WIDTH = size
+def HEIGHT = size
+print("Mandelbrot:", WIDTH, "x", HEIGHT, "iters:", ITERS)
+def t0 = ticks()
+def res = mandelbrot(WIDTH, HEIGHT, ITERS)
+def t1 = ticks()
+print("Points:", res)
+print("Time:", (t1 - t0) / 1000000, "ms")
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
+}
+
+static int mandelbrot(int w, int h, int max_iter) {
+    int count = 0;
+    double sx = 4.0 / (double)w;
+    double sy = 4.0 / (double)h;
+    double hw_sx = -((double)w * 0.6666667) * sx;
+    double c_im = -((double)h * 0.5) * sy;
+    for (int y = 0; y < h; y++, c_im += sy) {
+        double c_re = hw_sx;
+        for (int x = 0; x < w; x++, c_re += sx) {
+            double zr = 0.0, zi = 0.0, zr2 = 0.0, zi2 = 0.0;
+            int i = 0;
+            for (; i < max_iter; i++) {
+                zr2 = zr * zr;
+                zi2 = zi * zi;
+                if (zr2 + zi2 > 4.0) break;
+                zi = (zr + zr) * zi + c_im;
+                zr = zr2 - zi2 + c_re;
+            }
+            if (i == max_iter) count++;
+        }
+    }
+    return count;
+}
+int main(void) {
+    int64_t start = now_ns();
+    int r = mandelbrot(96, 96, 64);
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)r);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

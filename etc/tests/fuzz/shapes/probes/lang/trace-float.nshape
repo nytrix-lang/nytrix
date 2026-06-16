@@ -1,0 +1,14 @@
+shape trace_float {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.math.float as flt
+def x = 72.0
+print(to_str(flt.float(x)))
+NY
+}

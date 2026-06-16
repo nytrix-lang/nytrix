@@ -1,0 +1,24 @@
+shape static_list_elide_runtime_helper {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn sum_readonly(xs): int {
+   mut i = 0
+   mut acc = 0
+   while(i < len(xs)){
+      acc += get(xs, i, 0)
+      i += 1
+   }
+   acc
+}
+fn main(): int {
+   def xs = [2, 4, 6, 8]
+   print(sum_readonly(xs))
+   0
+}
+NY
+}
