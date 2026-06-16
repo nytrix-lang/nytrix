@@ -1,0 +1,6 @@
+shape bounded-mod-reduction {
+  family "reduction-mod"
+  generator "typed"
+  features ["loops", "mod", "reduction", "typed-int", "positive-divisor"]
+  template bounded-mod-reduction
+}

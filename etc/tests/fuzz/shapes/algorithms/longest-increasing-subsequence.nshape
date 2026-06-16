@@ -1,0 +1,66 @@
+shape longest-increasing-subsequence {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "binary-search", "array", "optimizer"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn gen_vals(n){
+   mut a = list(0)
+   mut i = 0
+   while(i < n){
+      a = append(a, 0)
+      i += 1
+   }
+   mut x = 1357911
+   i = 0
+   while(i < n){
+      x = (x * 1103515245 + 12345) & 2147483647
+      def wave = (i % 257) * 4096
+      set_idx(a, i, (x % 100000) + wave)
+      i += 1
+   }
+   a
+}
+fn lower_bound(tails, n, v){
+   mut lo = 0
+   mut hi = n
+   while(lo < hi){
+      def mid = (lo + hi) / 2
+      if(get(tails, mid) < v){ lo = mid + 1 }
+      else { hi = mid }
+   }
+   lo
+}
+fn lis_len(a){
+   mut tails = list(0)
+   mut i = 0
+   while(i < len(a)){
+      tails = append(tails, 0)
+      i += 1
+   }
+   mut size = 0
+   i = 0
+   while(i < len(a)){
+      def v = get(a, i)
+      def pos = lower_bound(tails, size, v)
+      set_idx(tails, pos, v)
+      if(pos == size){ size += 1 }
+      i += 1
+   }
+   size
+}
+def a = gen_vals(42000)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 80){
+   checksum += lis_len(a)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT longest_increasing_subsequence ", checksum, " ", t1 - t0)
+NY
+}

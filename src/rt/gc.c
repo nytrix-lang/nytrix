@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Global GC state */
 nyGcState_t gNyGc = {0};
 
 typedef struct nyGcForward {
@@ -25,7 +24,6 @@ typedef struct nyGcForwardMap {
 
 static atomic_flag gNyGcLock = ATOMIC_FLAG_INIT;
 
-/* Forward declarations */
 static void nyGcMinorCollectUnlocked(void);
 static void nyGcMajorCollectUnlocked(void);
 static void nyGcMark_from_roots(void);
@@ -392,7 +390,6 @@ static size_t nyGcByteSizeFromEnv(const char *name, size_t fallback, size_t mini
   return out < minimum ? minimum : out;
 }
 
-/* Initialize GC */
 void nyGcInit(void) {
   nyGcLock();
   if (gNyGc.initialized) {
@@ -457,7 +454,6 @@ void nyGcInit(void) {
   nyGcUnlock();
 }
 
-/* Shutdown GC */
 void nyGcDispose(void) {
   nyGcLock();
   if (!gNyGc.initialized) {
@@ -481,7 +477,6 @@ void nyGcDispose(void) {
   nyGcUnlock();
 }
 
-/* Add root */
 void nyGcAddRoot(int64_t *slot) {
   if (!slot)
     return;
@@ -503,7 +498,6 @@ void nyGcAddRoot(int64_t *slot) {
   nyGcUnlock();
 }
 
-/* Remove root */
 void nyGcRemoveRoot(int64_t *slot) {
   if (!gNyGc.initialized || !gNyGc.enable_nursery)
     return;
@@ -517,7 +511,6 @@ void nyGcRemoveRoot(int64_t *slot) {
   nyGcUnlock();
 }
 
-/* Write barrier for tenured -> nursery references */
 void nyGcWriteBarrier(int64_t *slot, int64_t value) {
   if (!slot)
     return;
@@ -549,7 +542,6 @@ void nyGcWriteBarrier(int64_t *slot, int64_t value) {
   nyGcUnlock();
 }
 
-/* Add to remembered set */
 static void nyGcAddRememberedUnlocked(int64_t *slot) {
   for (size_t i = 0; i < gNyGc.remembered_count; i++) {
     if (gNyGc.remembered_set[i] == slot)
@@ -568,7 +560,6 @@ static void nyGcAddRememberedUnlocked(int64_t *slot) {
   gNyGc.remembered_set[gNyGc.remembered_count++] = slot;
 }
 
-/* Allocate from nursery (fast path) */
 int64_t nyGcAllocFast(size_t size) {
   if (!gNyGc.initialized)
     nyGcInit();
@@ -583,7 +574,6 @@ int64_t nyGcAllocFast(size_t size) {
   return obj;
 }
 
-/* Allocate (with fallback) */
 int64_t nyGcAlloc(size_t size) {
   if (!gNyGc.initialized)
     nyGcInit();
@@ -616,7 +606,6 @@ int64_t nyGcAlloc(size_t size) {
   return obj;
 }
 
-/* Slow path allocation */
 int64_t nyGcAllocSlow(size_t size) {
   if (!gNyGc.initialized)
     nyGcInit();
@@ -645,7 +634,6 @@ int64_t nyGcAllocSlow(size_t size) {
   return obj;
 }
 
-/* Trigger minor GC */
 void nyGcTriggerMinor(void) {
   if (!gNyGc.initialized)
     nyGcInit();
@@ -656,7 +644,6 @@ void nyGcTriggerMinor(void) {
   nyGcUnlock();
 }
 
-/* Trigger major GC */
 void nyGcTriggerMajor(void) {
   if (!gNyGc.initialized)
     nyGcInit();
@@ -667,7 +654,6 @@ void nyGcTriggerMajor(void) {
   nyGcUnlock();
 }
 
-/* Full collection */
 void nyGcCollect(void) {
   if (!gNyGc.initialized)
     nyGcInit();
@@ -679,7 +665,6 @@ void nyGcCollect(void) {
   nyGcUnlock();
 }
 
-/* Minor collection (nursery only) */
 static void nyGcMinorCollectUnlocked(void) {
   nyGcValidateUnlocked("minor-before");
   gNyGc.stats.nursery_collections++;
@@ -691,7 +676,6 @@ static void nyGcMinorCollectUnlocked(void) {
   nyGcValidateUnlocked("minor-after");
 }
 
-/* Major collection (full) */
 static void nyGcMajorCollectUnlocked(void) {
   nyGcValidateUnlocked("major-before");
   gNyGc.stats.tenured_collections++;
@@ -702,7 +686,6 @@ static void nyGcMajorCollectUnlocked(void) {
   nyGcValidateUnlocked("major-after");
 }
 
-/* Mark from all roots */
 static void nyGcMark_from_roots(void) {
   for (size_t i = 0; i < gNyGc.root_count; i++) {
     int64_t root = *gNyGc.roots[i];
@@ -717,7 +700,6 @@ static void nyGcMark_from_roots(void) {
   }
 }
 
-/* Mark object and its children */
 static void nyGcMarkUnlocked(int64_t obj) {
   nyGcHeader_t *header = NULL;
   if (!nyGcHeaderForObject(obj, &header))
@@ -776,7 +758,6 @@ void nyGcMark(int64_t obj) {
   nyGcUnlock();
 }
 
-/* Check if object is marked */
 bool nyGcIsMarked(int64_t obj) {
   bool marked = false;
   if (!gNyGc.initialized || !gNyGc.enable_nursery)
@@ -789,7 +770,6 @@ bool nyGcIsMarked(int64_t obj) {
   return marked;
 }
 
-/* Promote nursery survivors to tenured */
 static void nyGcPromoteSurvivors(void) {
   nyGcForwardMap_t forwards = {0};
   uint8_t *ptr = gNyGc.nursery_start;
@@ -828,7 +808,6 @@ static void nyGcPromoteSurvivors(void) {
   free(forwards.data);
 }
 
-/* Sweep tenured */
 static void nyGcSweepTenured(void) {
   nyGcForwardMap_t forwards = {0};
   uint8_t *ptr = gNyGc.tenured_start;
@@ -901,7 +880,6 @@ static void nyGcSweepLargeUnlocked(void) {
   }
 }
 
-/* Set finalizer */
 void nyGcSetFinalizer(int64_t obj, void (*finalizer)(int64_t)) {
   if (!gNyGc.initialized)
     nyGcInit();
@@ -918,7 +896,6 @@ void nyGcSetFinalizer(int64_t obj, void (*finalizer)(int64_t)) {
   nyGcUnlock();
 }
 
-/* Get heap usage */
 size_t nyGcGetHeapUsage(void) {
   size_t usage = 0;
   nyGcLock();
@@ -931,7 +908,6 @@ size_t nyGcGetHeapUsage(void) {
   return usage;
 }
 
-/* Dump statistics */
 void nyGcDumpStats(FILE *out) {
   if (!out)
     out = stderr;

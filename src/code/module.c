@@ -22,7 +22,7 @@ typedef struct ny_module_stmt_lookup_entry_t {
   size_t extra_len;
   uint64_t hash;
   uint16_t len;
-  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  uint8_t state;
   char key[NY_MODULE_STMT_LOOKUP_KEY_MAX];
   stmt_t *value;
 } ny_module_stmt_lookup_entry_t;
@@ -40,7 +40,7 @@ typedef struct ny_module_public_target_entry_t {
   uint16_t target_len;
   uint8_t profile_len;
   uint8_t include_child_uses;
-  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  uint8_t state;
   uint16_t value_len;
   char target[NY_MODULE_PUBLIC_TARGET_KEY_MAX];
   char profile[NY_MODULE_PUBLIC_TARGET_PROFILE_MAX];
@@ -1351,8 +1351,7 @@ static void ny_collect_exported_child_module_surface(codegen_t *cg, stmt_t *mod,
       if (!child_mod)
         continue;
       ny_str_list_push_unique_owned(exports, ny_strdup(path));
-      // Eager package imports expose the next public layer. Deeper exported
-      // symbols are resolved lazily by name so root package imports stay cheap.
+
       ny_collect_module_public_surface_inner(cg, child_mod, exports, profile,
                                              false, depth + 1);
     }

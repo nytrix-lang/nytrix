@@ -1,0 +1,28 @@
+shape int-monomorphization-int_mono {
+  family "compiler-suite"
+  generator "stress"
+  features ["ny", "differential"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn hot_mix(a, b){
+   return ((a * 3 + b) * 5 - a) + (b * 7)
+}
+fn main(): int {
+   mut acc = 0
+   mut i = 0
+   while(i < 10000000){
+      def a = (i & 1023) + 1
+      def b = ((i * 3) & 2047) + 3
+      acc = acc + hot_mix(a, b)
+      if(acc > 1000000000){
+         acc = acc - 1000000000
+      }
+      i += 1
+   }
+   print(acc)
+   return 0
+}
+NY
+}

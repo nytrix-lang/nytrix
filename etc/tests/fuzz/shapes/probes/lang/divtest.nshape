@@ -1,0 +1,13 @@
+shape divtest {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+print(3+1)
+print(3/1)
+print(3/0)
+NY
+}

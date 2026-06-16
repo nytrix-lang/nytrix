@@ -10,7 +10,7 @@ use std.os.ui.render.dump as ui_profile
 use std.os.ui.render as render
 use std.os.ui.render.atlas as atlas
 use std.os.ui.assets.viewer as assets
-use std.parse.img.svg as svg
+use std.math.parse.img.svg as svg
 
 mut _cache = dict(32)
 mut _sprite_cache = dict(64)

@@ -1,0 +1,22 @@
+shape type-polymorphic-call-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "function argument: expected str, got int"
+  source ny <<'NY'
+use std.core
+
+fn id(x) {
+   x
+}
+
+fn need_str(str s) str {
+   s
+}
+
+print(need_str(id(1)))
+NY
+}

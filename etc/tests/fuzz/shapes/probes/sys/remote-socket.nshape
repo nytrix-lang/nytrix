@@ -1,0 +1,63 @@
+shape remote-socket {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.str
+use std.os.net as net
+use std.os.net.socket as sock
+use std.os.thread
+use std.os.time
+fn remote_socket_server(list args) int {
+   def port = args.get(0)
+   def state = args.get(1)
+   def s = sock.socket_bind("127.0.0.1", port)
+   if s < 0 {
+      store64(state, -1)
+      return -1
+   }
+   store64(state, 1)
+   def c = sock.socket_accept(s)
+   if c < 0 {
+      sock.close_socket(s)
+      store64(state, -2)
+      return -1
+   }
+   sock.write_socket_all(c, "name: ")
+   def name = sock.read_socket_until(c, "\n", 4096)
+   sock.write_socket_all(c, "hello " + strip(name) + "\nmenu> abcXYZ\n")
+   sock.close_socket(c)
+   sock.close_socket(s)
+   store64(state, 2)
+   0
+}
+def port = 55100 + ((ticks() / 1000000) % 1000)
+def state = malloc(8)
+store64(state, 0)
+def t = thread_spawn(remote_socket_server, [port, state])
+mut waited = 0
+while load64(state) == 0 && waited < 2000 {
+   msleep(10)
+   waited += 10
+}
+def r = net.remote_retry("127.0.0.1", port, 50, 10)
+assert(is_dict(r), "remote returns tube")
+net.set_timeout(r, 2000)
+net.set_chunk_size(r, 8)
+assert(net.sendlineafter(r, "name: ", "ny") == "name: ", "sendlineafter prompt")
+assert(net.recvline(r) == "hello ny\n", "recvline")
+def exp = net.expect(r, ["missing", "abc"])
+assert(exp.get(0) == 1 && exp.get(1) == "menu> abc", "expect hit")
+assert(net.buffered(r) == 4, "buffered suffix")
+assert(net.recvn(r, 4) == "XYZ\n", "recvn buffered")
+assert(net.sendafter(r, "never", "x", 16) == "", "sendafter timeout")
+assert(net.recv_all(r, 1024) == "", "recvall eof")
+net.close(r)
+thread_join(t)
+free(state)
+print("remote socket probe passed")
+NY
+}

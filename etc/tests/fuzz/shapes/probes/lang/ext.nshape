@@ -1,0 +1,16 @@
+shape ext {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.demo.scene as scene
+use std.os.path as ospath
+use std.util.parse.str as str
+def p = scene.resolve_gltf_asset_path("RiggedSimple")
+print("p=" + to_str(p))
+print("ext=" + to_str(ospath.extname(p)) + " lower=" + to_str(str.lower(ospath.extname(p))))
+NY
+}

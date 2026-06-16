@@ -1,0 +1,37 @@
+shape matrix {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.math
+use std.os.ui.render.matrix
+fn dump_mat(name, m){
+   print(name)
+   mut r = 0
+   while(r < 4){
+      mut line = ""
+      mut c = 0
+      while(c < 4){
+         if(c > 0){ line = line + " " }
+         line = line + to_str(mat4_get(m, r, c, 0.0))
+         c += 1
+      }
+      print(line)
+      r += 1
+   }
+}
+def ortho = mat4_ortho(0.0, 1920.0, 1080.0, 0.0, -1.0, 1.0)
+def persp = mat4_perspective(45.0 * PI / 180.0, 1920.0 / 1080.0, 0.1, 1000.0)
+def view = mat4_look_at([0.0, 8.0, 45.0], [0.0, 8.0, 44.0], [0.0, 1.0, 0.0])
+mut vp = mat4_identity()
+mat4_mul_into(persp, view, vp)
+dump_mat("ortho", ortho)
+dump_mat("persp", persp)
+dump_mat("view", view)
+dump_mat("vp", vp)
+NY
+}

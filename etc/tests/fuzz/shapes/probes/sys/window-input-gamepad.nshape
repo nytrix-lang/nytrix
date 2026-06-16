@@ -1,0 +1,41 @@
+shape window-input-gamepad {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.ui.window.input.gamepad as gamepad
+use std.os.ui.window.platform.win32.joystick as winjoy
+assert(gamepad.get_gamepad_axis_count(-1) == 0, "invalid joystick axis count")
+assert(gamepad.get_gamepad_button_count(-1) == 0, "invalid joystick button count")
+assert(!gamepad.get_gamepad_button(-1, "A"), "invalid joystick button is up")
+assert(gamepad.get_gamepad_axis(-1, "LEFTX") == 0.0, "invalid joystick axis is centered")
+def win_mapping = "fedcba9876543210fedcba9876543210,Windows Probe Pad,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,platform:Windows,"
+assert(winjoy.update_gamepad_mappings(win_mapping) == 1, "win32 mapping parser delegates")
+def count = malloc(4)
+def state = malloc(64)
+assert(count && state, "win32 probe buffers allocate")
+#windows {
+   winjoy.init()
+   winjoy.poll_joysticks()
+} #else {
+   assert(!winjoy.init(), "non-windows win32 init is false")
+   assert(!winjoy.poll_joysticks(), "non-windows win32 poll is false")
+   assert(!winjoy.joystick_present(0), "non-windows win32 joystick absent")
+   assert(winjoy.get_joystick_name(0) == "Unknown", "non-windows win32 name fallback")
+   assert(winjoy.get_joystick_guid(0) == "00000000000000000000000000000000", "non-windows win32 guid fallback")
+   assert(!winjoy.get_joystick_axes(0, count), "non-windows win32 axes absent")
+   assert(load32(count, 0) == 0, "non-windows win32 axis count clears")
+   assert(!winjoy.get_joystick_buttons(0, count), "non-windows win32 buttons absent")
+   assert(load32(count, 0) == 0, "non-windows win32 button count clears")
+   store8(state, 123, 0)
+   assert(!winjoy.get_gamepad_state(0, state), "non-windows win32 state absent")
+   assert(load8(state, 0) == 0, "non-windows win32 state clears")
+   assert(winjoy.get_gamepad_name(0) == "Unknown", "non-windows win32 gamepad name fallback")
+}
+free(count)
+free(state)
+NY
+}

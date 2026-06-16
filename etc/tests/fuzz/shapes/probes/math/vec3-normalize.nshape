@@ -1,0 +1,59 @@
+shape vec3_normalize {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math
+use std.math.vector
+fn normalize(vec3: src): vec3 {
+   def len = sqrt(src * src)
+   if(len == 0.0) Vector3(0.0, 0.0, 0.0)
+   Vector3(src / len)
+}
+;; Raw layout surface: this is the current low-level typed-memory form.
+layout Vec3 {
+   f64: x,
+   f64: y,
+   f64: z
+}
+fn set_vec3(ptr: dst, f64: x, f64: y, f64: z): ptr {
+   store64_f64(dst, x, __layout_offset("Vec3", "x"))
+   store64_f64(dst, y, __layout_offset("Vec3", "y"))
+   store64_f64(dst, z, __layout_offset("Vec3", "z"))
+   return dst
+}
+fn normalize_ptr(ptr: src, ptr: dst): ptr {
+   def sx = load64_f64(src, __layout_offset("Vec3", "x"))
+   def sy = load64_f64(src, __layout_offset("Vec3", "y"))
+   def sz = load64_f64(src, __layout_offset("Vec3", "z"))
+   def len = sqrt(sx * sx + sy * sy + sz * sz)
+   if(len == 0.0){ return set_vec3(dst, 0.0, 0.0, 0.0) }
+   return set_vec3(dst, sx / len, sy / len, sz / len)
+}
+def vec3: a = Vector3(1.0, 2.0, 2.0)
+def vec3: n = normalize(a)
+assert(runtime_type(n) == "vec3", "normalize returns runtime vec3")
+assert(n.x > 0.333 && n.x < 0.334, "normalize x")
+assert(n.y > 0.666 && n.y < 0.667, "normalize y")
+assert(n.z > 0.666 && n.z < 0.667, "normalize z")
+def vec3: zed = normalize(Vector3(0.0, 0.0, 0.0))
+assert(zed.x == 0.0 && zed.y == 0.0 && zed.z == 0.0, "guard if expression returns early")
+def raw = malloc(__layout_size("Vec3"))
+def out = malloc(__layout_size("Vec3"))
+set_vec3(raw, 0.0, 3.0, 4.0)
+normalize_ptr(raw, out)
+assert(load64_f64(out, __layout_offset("Vec3", "x")) == 0.0, "raw normalize x")
+assert(load64_f64(out, __layout_offset("Vec3", "y")) == 0.6, "raw normalize y")
+assert(load64_f64(out, __layout_offset("Vec3", "z")) == 0.8, "raw normalize z")
+free(raw)
+free(out)
+def fast = normalize3(vec3(0.0, 3.0, 4.0))
+assert(get(fast, 1, 0.0) == 0.6, "fast vec3 normalize y")
+assert(op("dot3", vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)) == 32.0, "vector op dot3")
+assert(dim(n) == 3, "vector reflection dim")
+print("ok vec3 normalize runtime + raw layout")
+NY
+}

@@ -1,0 +1,67 @@
+shape valid-parentheses {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "string", "stack", "parser"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn zero_list(n){
+   mut out = list(n)
+   mut i = 0
+   while(i < n){
+      out = append(out, 0)
+      i += 1
+   }
+   out
+}
+fn gen_balanced_codes(n){
+   def total = n * 6
+   mut out = zero_list(total)
+   mut i = 0
+   mut k = 0
+   while(i < n){
+      set_idx(out, k + 0, 40)
+      set_idx(out, k + 1, 123)
+      set_idx(out, k + 2, 91)
+      set_idx(out, k + 3, 93)
+      set_idx(out, k + 4, 125)
+      set_idx(out, k + 5, 41)
+      k += 6
+      i += 1
+   }
+   out
+}
+fn valid_codes(s, n, st){
+   mut top = 0
+   mut i = 0
+   while(i < n){
+      def c = get(s, i)
+      if(c == 40 || c == 91 || c == 123){
+         set_idx(st, top, c)
+         top += 1
+      } elif(c == 41 || c == 93 || c == 125){
+         if(top == 0){ return false }
+         top -= 1
+         def t = get(st, top)
+         if((c == 41 && t != 40) || (c == 93 && t != 91) || (c == 125 && t != 123)){ return false }
+      }
+      i += 1
+   }
+   return top == 0
+}
+def s = gen_balanced_codes(25000)
+def n = len(s)
+def st = zero_list(n)
+mut checksum = 0
+def t0 = ticks()
+mut i = 0
+while(i < 120){
+   checksum += valid_codes(s, n, st) ? 1 : 0
+   i += 1
+}
+def t1 = ticks()
+print("RESULT valid_parentheses ", checksum, " ", t1 - t0)
+NY
+}

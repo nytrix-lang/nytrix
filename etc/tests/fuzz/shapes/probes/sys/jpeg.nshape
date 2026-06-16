@@ -1,0 +1,62 @@
+shape jpeg {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.common as common
+use std.os (file_exists, file_read)
+use std.os.path as ospath
+use std.math.parse.img.jpeg as jpeg
+fn make_rgba(int w, int h) any {
+   def data = malloc(w * h * 4)
+   assert(data != 0, "jpeg rgba allocation")
+   mut y = 0
+   while y < h {
+      mut x = 0
+      while x < w {
+         def off = (y * w + x) * 4
+         store8(data, (x * 37 + 40) & 255, off)
+         store8(data, (y * 53 + 70) & 255, off + 1)
+         store8(data, (x * 19 + y * 23 + 90) & 255, off + 2)
+         store8(data, 255, off + 3)
+         x += 1
+      }
+      y += 1
+   }
+   data
+}
+def rgba = make_rgba(8, 8)
+def encoded = jpeg.encode({"width": 8, "height": 8, "channels": 4, "data": rgba}, 88)
+assert(is_str(encoded), "jpeg encoded bytes")
+assert(encoded.len > 100, "jpeg encoded length")
+assert(load8(encoded, 0) == 255 && load8(encoded, 1) == 216, "jpeg soi")
+assert(load8(encoded, encoded.len - 2) == 255 && load8(encoded, encoded.len - 1) == 217, "jpeg eoi")
+def decoded = jpeg.decode(encoded)
+assert(is_dict(decoded), "jpeg decoded dict")
+assert(decoded.get("width") == 8, "jpeg decoded width")
+assert(decoded.get("height") == 8, "jpeg decoded height")
+assert(decoded.get("channels") == 4, "jpeg decoded channels")
+def pixels = decoded.get("data", 0)
+assert(is_str(pixels), "jpeg decoded pixel buffer")
+assert(pixels.len == 8 * 8 * 4, "jpeg decoded pixel length")
+assert(load8(pixels, 3) == 255, "jpeg decoded alpha")
+if !common.env_truthy("NY_JPEG_DISABLE_TURBO") {
+   def asset_path = ospath.resolve_repo_asset("tmp/assets/models/gltf/tests/DamagedHelmet/Default_albedo.jpg")
+   if file_exists(asset_path) {
+      def asset_res = file_read(asset_path)
+      assert(!is_err(asset_res), "jpeg asset read")
+      def asset_img = jpeg.decode(unwrap(asset_res))
+      assert(is_dict(asset_img), "jpeg asset decoded")
+      assert(asset_img.get("width") == 2048, "jpeg asset width")
+      assert(asset_img.get("height") == 2048, "jpeg asset height")
+      assert(asset_img.get("channels") == 4, "jpeg asset channels")
+      assert(is_str(asset_img.get("data", 0)), "jpeg asset pixels")
+   }
+}
+free(rgba)
+print("jpeg_probe ok")
+NY
+}

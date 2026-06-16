@@ -1,0 +1,15 @@
+shape parser-use-dot-stops {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "use expects module identifier or string path"
+  source ny <<'NY'
+use .
+
+fn main() { 0 }
+main()
+NY
+}

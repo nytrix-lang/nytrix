@@ -560,9 +560,7 @@ int64_t rt_add(int64_t a, int64_t b) {
     MATH_STAT_INC(add_bigint);
     return rt_bigint_add(a, b);
   }
-  // Handle ptr+int BEFORE is_v_flt to avoid reading guard pages at ptr-8
-  // for non-heap pointers (e.g., Vulkan-mapped memory). Use is_v_flt_mapped
-  // (uncached mincore) so stale page-cache entries can't cause SIGSEGV.
+
   if (is_any_ptr(a) && (b & 1)) {
     MATH_STAT_INC(add_ptr_int);
     if (is_v_flt_mapped(a))
@@ -675,7 +673,7 @@ int64_t rt_mul(int64_t a, int64_t b) {
     MATH_STAT_INC(mul_list_repeat);
     int64_t count = b >> 1;
     if (count <= 0)
-      return rt_list_new(1); // tagged 0 length
+      return rt_list_new(1);
     int64_t len_v = *(int64_t *)((char *)(uintptr_t)a + 0);
     int64_t l_len = is_int(len_v) ? (len_v >> 1) : len_v;
     if (l_len <= 0)
@@ -1067,7 +1065,7 @@ int64_t rt_big_add_abs(int64_t a, int64_t b) {
   int64_t nb = list_len(b);
   int64_t nmax = na > nb ? na : nb;
   int64_t out = rt_list_new((nmax + 1) << 1 | 1);
-  // rt_list_new sets length=cap. Reset length to 0 to use rt_append
+
   *(int64_t *)((char *)(uintptr_t)out + 0) = 1;
 
   int64_t carry = 0;
@@ -1119,7 +1117,7 @@ int64_t rt_big_mul_abs(int64_t a, int64_t b) {
   int64_t nout = na + nb;
   int64_t out = rt_list_new(nout << 1 | 1);
   int64_t *raw_out = (int64_t *)((char *)(uintptr_t)out + 16);
-  // Initialize with tagged 0
+
   for (int64_t k = 0; k < nout; k++)
     raw_out[k] = 1;
 

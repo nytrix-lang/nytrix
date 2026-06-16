@@ -1,0 +1,16 @@
+shape parser-match-recovery-extra-paren {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected '->' or block after case patterns"
+  source ny <<'NY'
+use std.core
+
+fn main() { 0 match}
+mavvvvvvvv)
+vvvvvvvvvvvvvvvvvvinvv
+NY
+}

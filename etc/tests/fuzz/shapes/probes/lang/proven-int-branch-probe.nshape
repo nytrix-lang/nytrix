@@ -1,0 +1,24 @@
+shape proven_int_branch_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn main(): int {
+   mut int: i = -8
+   mut int: acc = 0
+   while(i < 16){
+      if(i >= -2 && i < 9){
+         acc += i * 3
+      } else {
+         acc -= i
+      }
+      i += 1
+   }
+   print(acc)
+   0
+}
+NY
+}

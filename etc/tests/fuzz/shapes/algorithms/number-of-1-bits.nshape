@@ -1,0 +1,29 @@
+shape number-of-1-bits {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "bitwise", "popcount", "scalar"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn popc(x){
+   mut v = x & 4294967295
+   mut c = 0
+   while(v != 0){
+      v = v & (v - 1)
+      c += 1
+   }
+   return c
+}
+mut checksum = 0
+def t0 = ticks()
+mut x = 1
+while(x < 5000000){
+   checksum += popc((x * 2654435761) & 4294967295)
+   x += 1
+}
+def t1 = ticks()
+print("RESULT number_of_1_bits ", checksum, " ", t1 - t0)
+NY
+}

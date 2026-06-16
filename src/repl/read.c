@@ -350,7 +350,7 @@ static int get_char_timeout(int ms) {
         if (g_repl_sigint)
           return 3;
         if (g_got_winch)
-          return -2; // Special value for winch
+          return -2;
         continue;
       }
     }
@@ -443,7 +443,7 @@ static int read_key_posix(char *out_chr) {
     c = get_char_timeout(-1);
   }
   if (c == -2)
-    return -2; // WINCH
+    return -2;
   if (c == -1 || c == 4)
     return K_EOF;
   if (c == '\r') {
@@ -1675,11 +1675,11 @@ static void draw_line(const char *prompt, const char *buf, int len, int pos, int
     term_rows = 24;
   if (term_cols != prev_cols || term_rows < prev_lines) {
     if (prev_cols != 0) {
-      // Clear previous lines if we know how many there were
+
       if (prev_lines > 0) {
         printf("\r\x1b[%dA", prev_lines);
       }
-      printf("\x1b[J"); // Clear from cursor to end of screen
+      printf("\x1b[J");
       prev_lines = 0;
       prev_total_rows = 0;
     }
@@ -2769,7 +2769,6 @@ static int repl_completion_find_item(char **matches, repl_comp_item_t *items, in
   return 0;
 }
 
-
 static const char *repl_completion_selected(char **matches, repl_comp_item_t *items,
                                             int item_count, int selected) {
   if (!matches || !items || selected < 0 || selected >= item_count)
@@ -3237,7 +3236,7 @@ char *ny_readline(const char *prompt) {
     memset(&sa_winch, 0, sizeof(sa_winch));
     sa_winch.sa_handler = handle_winch;
     sigemptyset(&sa_winch.sa_mask);
-    sa_winch.sa_flags = 0; // Ensure SA_RESTART is NOT set
+    sa_winch.sa_flags = 0;
     sigaction(SIGWINCH, &sa_winch, NULL);
   }
 #endif

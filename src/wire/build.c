@@ -643,7 +643,7 @@ static int spawn_with_host_flags(const char *const base[], const char *env, char
   if (base[0] && idx + 1 < max) {
     argv[idx++] = base[0];
     base_idx = 1;
-    /* Keep launcher + compiler adjacent (e.g. ccache clang ...), then append host flags. */
+
     if ((strcmp(base[0], "ccache") == 0 || strcmp(base[0], "sccache") == 0) && base[1] &&
         idx + 1 < max) {
       argv[idx++] = base[1];
@@ -902,9 +902,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   bool msvc = is_msvc_cc(cc);
   const char *clang_target_arg = ny_win_clang_target_arg(cc);
   if (msvc) {
-    // ccache not typically used with MSVC/cl.exe via direct invocation in this
-    // context or requires specific configuration (sccache). Skipping for MSVC
-    // path.
+
     snprintf(include_arg, sizeof(include_arg), "/I%s/src", root);
     const char *llvm_inc = find_llvm_include_dir();
     if (llvm_inc && *llvm_inc)
@@ -1295,7 +1293,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   if (runtime_ast_obj)
     argv[idx++] = runtime_ast_obj;
   const char *shared_rt_path = NULL;
-  /* Check runtime_obj for .so path */
+
   if (runtime_obj) {
     const char *dot = strrchr(runtime_obj, '.');
     if (dot && strcmp(dot, ".so") == 0) {
@@ -1355,7 +1353,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   argv[idx++] = "-o";
   argv[idx++] = output_path;
 #ifndef _WIN32
-  /* Libraries can also be added via #link directive or NYTRIX_SHARED_LIBS env. */
+
 #endif
 #ifdef _WIN32
   static char win_gmp_lib_arg[PATH_MAX + 4];
@@ -1364,8 +1362,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
     snprintf(win_gmp_lib_arg, sizeof(win_gmp_lib_arg), "-L%s", win_gmp_lib_dir);
     argv[idx++] = win_gmp_lib_arg;
   }
-  /* Libraries can also be added via #link directive or NYTRIX_SHARED_LIBS env
-   */
+
 #endif
   char *shared_buf = NULL;
   char *shared_lib_copies[16] = {NULL};
@@ -1387,7 +1384,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   }
   for (size_t i = 0; i < shared_count; ++i) {
     const char *lib = shared_libs[i];
-    /* Convert bare names like "m" to "-lm", pass through "-lXXX" as-is */
+
     if (lib[0] == '-' && lib[1] == 'l') {
       argv[idx++] = lib;
     } else if (strchr(lib, '/')) {
@@ -1400,9 +1397,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
       shared_lib_copies[shared_lib_copy_count++] = copy;
     }
   }
-  /* Note: shared_buf is NOT freed here - pointers in shared_libs reference it
-   */
-  /* Convert libXXX.so / libXXX.dylib -> -lXXX for native linkers. */
+
   char link_buf_storage[16][64];
   size_t link_buf_idx = 0;
   for (size_t i = 0; i < link_lib_count; ++i) {
@@ -1479,10 +1474,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
 #endif
   }
 #endif
-  /*
-   * The AOT runtime object uses GMP-backed bigint helpers and may also retain
-   * platform support code. Add the small default runtime libs here explicitly.
-   */
+
   if (!has_gmp && idx + 1 < NY_MAX_LINK_ARGS)
     argv[idx++] = "-lgmp";
 #if defined(_WIN32)

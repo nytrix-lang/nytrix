@@ -1,0 +1,20 @@
+shape mod_inline {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+module probe.mod.inline {
+   fn f(){
+      return 100
+   }
+}
+use probe.mod.inline
+fn main(){
+   print("f=", f())
+}
+main()
+NY
+}

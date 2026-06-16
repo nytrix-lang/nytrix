@@ -1,0 +1,28 @@
+shape loop {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.util.parse.image as img
+fn main(){
+   def path = "etc/assets/models/gltf/tests/MorphPrimitivesTest/uv_texture.jpg"
+   mut i = 0
+   while(i < 400){
+      def im = img.load(path)
+      if(!im){
+         print("load failed at " + to_str(i))
+         return 1
+      }
+      if((i % 25) == 0){
+         print("ok " + to_str(i))
+      }
+      i += 1
+   }
+   print("done")
+   0
+}
+NY
+}

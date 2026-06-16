@@ -1,0 +1,29 @@
+shape proven_int_mod_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn fold0(int: a, int: b): int {
+   (a * 3 + b * 5 + 17) % 65521
+}
+fn fold1(int: a, int: b): int {
+   (fold0(a, b) ^ (a + b)) % 65521
+}
+fn negmod(int: x): int {
+   x % 9
+}
+fn main(): int {
+   mut x = -37
+   mut y = 0
+   y += x % 9
+   y += negmod(-37)
+   y += fold1(12, 34) % 31
+   y += 100 % 7
+   print(y)
+   0
+}
+NY
+}

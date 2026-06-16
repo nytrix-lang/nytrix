@@ -1,0 +1,19 @@
+shape layout-duplicate-field {
+  family "compiler-errors/layout"
+  generator "error"
+  features ["error", "layout", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "duplicate field 'x' in layout 'Bad'"
+  source ny <<'NY'
+use std.core
+
+layout Bad {
+   int x
+   int x
+}
+
+print(1)
+NY
+}

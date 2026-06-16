@@ -1,4 +1,4 @@
-/* Manual memset to avoid IFUNC issues */
+
 #define memset_manual(p, v, n)                                                                     \
   do {                                                                                             \
     unsigned char *_p = (unsigned char *)(p);                                                      \
@@ -46,7 +46,6 @@ int debug_enabled __attribute__((weak)) = 0;
 
 int64_t rt_globals_ptr = 1;
 
-/* Robust trace control: only print trace frames when -trace was used */
 int g_trace_requested = 0;
 int g_trace_suspended = 0;
 static int g_trace_env_ready = 0;
@@ -64,7 +63,7 @@ static const char *g_trace_env_filter = NULL;
 #define NY_LONGJMP(env, val) _longjmp(env, val)
 #else
 #define NY_JMP_BUF jmp_buf
-// On Windows, _setjmp takes two arguments.
+
 #define NY_SETJMP(env) _setjmp(env, NULL)
 #define NY_LONGJMP(env, val) longjmp(env, val)
 #endif
@@ -152,7 +151,6 @@ void rt_cleanup_small_strings(void) {
   }
 }
 
-/* Live call stack - push on enter, pop on exit */
 #define CALL_STACK_MAX 512
 static NY_TLS int64_t g_cs_files[CALL_STACK_MAX];
 static NY_TLS int64_t g_cs_lines[CALL_STACK_MAX];
@@ -752,7 +750,6 @@ int64_t rt_trace_dump(int64_t count) {
   if (want == 0 || want > g_trace_len)
     want = g_trace_len;
 
-  // Print newest first
   for (size_t i = 0; i < want; i++) {
     size_t idx = (g_trace_idx + TRACE_RING - 1 - i) % TRACE_RING;
     print_trace_entry(g_trace_files[idx], g_trace_lines[idx], g_trace_cols[idx], g_trace_funcs[idx],
@@ -785,7 +782,7 @@ int64_t rt_trace_enter(int64_t func, int64_t file, int64_t line) {
   if (g_trace_suspended)
     return 0;
   trace_record(file, line, 1, func);
-  /* push onto live call stack */
+
   if (g_cs_depth < CALL_STACK_MAX) {
     g_cs_files[g_cs_depth] = file;
     g_cs_lines[g_cs_depth] = line;
@@ -1320,14 +1317,14 @@ int64_t rt_list_new(int64_t n_v) {
   int64_t n = is_int(n_v) ? (n_v >> 1) : n_v;
   if (n < 0)
     n = 0;
-  // Standard layout: 16 bytes header (length, capacity) + n * 8 bytes data
+
   int64_t p = rt_malloc_uninit(16 + n * 8);
   if (!p)
     return 0;
-  // Standard Nytrix tags are at p-8
+
   *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_LIST;
-  *(int64_t *)((char *)(uintptr_t)p + 0) = 1;            // Length = 0 (tagged: (0<<1)|1 = 1)
-  *(int64_t *)((char *)(uintptr_t)p + 8) = (n << 1) | 1; // Capacity = n (tagged)
+  *(int64_t *)((char *)(uintptr_t)p + 0) = 1;
+  *(int64_t *)((char *)(uintptr_t)p + 8) = (n << 1) | 1;
 
   return p;
 }
@@ -1783,17 +1780,13 @@ int64_t rt_sorted_any(int64_t xs) {
   return rt_sort_any(xs);
 }
 
-/* Fast list-length read: reads the tagged length word at lst+0 and returns the
- * raw (untagged) element count.  Avoids the full rt_load64_idx bounds-check +
- * rt_addr_readable machinery when all we need is the length. */
 int64_t rt_list_len(int64_t lst) {
   if (!is_ptr(lst))
-    return 1; /* tagged 0 */
+    return 1;
   int64_t tagged = *(int64_t *)((char *)(uintptr_t)lst + 0);
-  return tagged; /* caller uses tagged value directly in Nytrix arithmetic */
+  return tagged;
 }
 
-/* Fast list-length write: stores `n` (tagged integer) at lst+0. */
 int64_t rt_list_set_len(int64_t lst, int64_t n) {
   if (!is_ptr(lst))
     return 0;
@@ -1873,7 +1866,7 @@ int64_t rt_get_backtrace(int64_t count_v) {
     want = g_cs_depth;
   int64_t lst = rt_list_new(is_int(want) ? (int64_t)want : rt_tag((int64_t)want));
   for (size_t i = 0; i < want; i++) {
-    size_t idx = g_cs_depth - 1 - i; /* innermost first */
+    size_t idx = g_cs_depth - 1 - i;
     int64_t frame = rt_list_new(rt_tag(3));
     rt_append(frame, g_cs_files[idx]);
     rt_append(frame, g_cs_lines[idx]);

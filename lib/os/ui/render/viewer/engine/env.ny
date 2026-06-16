@@ -13,8 +13,8 @@ use std.os.ui.render
 use std.os.ui.render.scene as render_scene
 use std.os.ui.render.viewer.term as terminal
 use std.os.ui.render.viewer.engine.state
-use std.parse.img as img
-use std.parse.img.exr as exr
+use std.math.parse.img as img
+use std.math.parse.img.exr as exr
 
 fn _reset_skybox_texture_resources() {
    if skybox_tex_id >= 0 {

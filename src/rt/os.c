@@ -91,7 +91,7 @@ static char **ny_native_argv(intptr_t rargv, bool *needs_free) {
       dst[i] = (char *)(uintptr_t)rt_untag_v(src[i]);
     }
   } else {
-    // Fallback for raw NULL-terminated array
+
     int64_t *src = (int64_t *)(uintptr_t)rargv;
     while (src[count] != 0 && src[count] != 1)
       count++;
@@ -317,13 +317,13 @@ int64_t rt_save_tga_rgba(int64_t path, int64_t data, int64_t width, int64_t heig
     return rt_tag_v((int64_t)-errno);
 
   uint8_t header[18] = {0};
-  header[2] = 2; /* uncompressed true-color */
+  header[2] = 2;
   header[12] = (uint8_t)(w & 255u);
   header[13] = (uint8_t)((w >> 8) & 255u);
   header[14] = (uint8_t)(h & 255u);
   header[15] = (uint8_t)((h >> 8) & 255u);
   header[16] = 32;
-  header[17] = 40; /* top-left origin + 8 alpha bits */
+  header[17] = 40;
   if (fwrite(header, 1, sizeof(header), fp) != sizeof(header)) {
     int e = errno ? errno : EIO;
     fclose(fp);
@@ -919,11 +919,6 @@ int64_t rt_tty_sane_fd(int64_t fd) {
 #endif
 }
 
-/*
- * Terminal-safe signal handler for SIGINT / SIGTERM
- * Restores the saved termios, exits alt-screen, resets attrs, shows cursor.
- * Called automatically when set_raw_mode() activates raw mode.
-  */
 #ifndef _WIN32
 #include <signal.h>
 static volatile sig_atomic_t rt_tty_sig_installed = 0;
@@ -949,28 +944,28 @@ static struct sigaction *rt_tty_old_sigaction(int sig) {
 }
 
 static void rt_tty_sig_restore(int sig) {
-  /* Restore termios */
+
   if (rt_tty_mode_saved) {
     tcsetattr(STDIN_FILENO, TCSANOW, &rt_tty_mode_prev);
     rt_tty_mode_saved = 0;
   }
-  /* Exit alt-screen, reset all SGR attrs, show cursor, enable wrap */
-  static const char cleanup[] = "\033[0m"     /* reset SGR */
-                                "\033[?25h"   /* show cursor */
-                                "\033[?7h"    /* enable wrap */
-                                "\033[?1049l" /* leave alt screen */
-                                "\033[?2004l" /* disable bracketed paste */
-                                "\033[?1000l" /* disable mouse tracking */
-                                "\033[?1002l" /* disable mouse drag tracking */
-                                "\033[?1003l" /* disable any-event mouse tracking */
-                                "\033[?1006l" /* disable sgr mouse mode */
-                                "\033[0m"     /* reset SGR again on main screen */
-                                "\033[?25h"   /* show cursor on main screen */
-                                "\033[?7h"    /* enable wrap on main screen */
-                                "\033[2K\r";  /* clear current line and return */
+
+  static const char cleanup[] = "\033[0m"
+                                "\033[?25h"
+                                "\033[?7h"
+                                "\033[?1049l"
+                                "\033[?2004l"
+                                "\033[?1000l"
+                                "\033[?1002l"
+                                "\033[?1003l"
+                                "\033[?1006l"
+                                "\033[0m"
+                                "\033[?25h"
+                                "\033[?7h"
+                                "\033[2K\r";
   write(STDOUT_FILENO, cleanup, sizeof(cleanup) - 1);
   fsync(STDOUT_FILENO);
-  /* Re-raise with original handler */
+
   struct sigaction *old = rt_tty_old_sigaction(sig);
   if (old)
     sigaction(sig, old, NULL);

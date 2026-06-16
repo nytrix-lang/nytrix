@@ -1,0 +1,6 @@
+shape crc-mix-loop {
+  family "gcc-torture-crc"
+  generator "torture"
+  features ["gcc-torture", "crc", "bitwise", "loops", "reduction", "typed-int"]
+  template torture-crc-mix-loop
+}

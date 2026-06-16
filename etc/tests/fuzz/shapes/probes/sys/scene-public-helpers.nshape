@@ -1,0 +1,39 @@
+shape scene-public-helpers {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.parse.3d.gltf as gltf
+use std.os.ui.render.scene as scene
+def fox = "tmp/assets/models/gltf/tests/Fox/Fox.gltf"
+def nested_fox = "tmp/assets/models/gltf/tests/Fox/glTF/Fox.gltf"
+def cube_dir = "tmp/assets/models/gltf/tests/Cube"
+def round_dir = "tmp/assets/models/gltf/tests/XmpMetadataRoundedCube"
+assert(scene.scene_asset_name_from_gltf_path(fox) == "Fox", "scene name from direct path")
+assert(scene.scene_asset_name_from_gltf_path(nested_fox) == "Fox", "scene name from sample layout path")
+assert(scene.first_gltf_in_dir(cube_dir, "Cube") == cube_dir + "/Cube.gltf", "first gltf prefers named file")
+assert(scene.first_gltf_in_dir(round_dir, "XmpMetadataRoundedCube") == round_dir + "/XmpMetadataRoundedCube.glb", "first gltf prefers named glb")
+assert(scene.first_gltf_in_dir("tmp/test/platform/ui/does-not-exist") == "", "missing gltf directory fallback")
+assert(scene.format_name_list(["Fox", "", "Cube"]) == "Fox, Cube", "scene name list formatting")
+assert(scene.apply_gltf_animation(0) == 0, "animation no-op keeps non-dict")
+def cube_doc = gltf.load_gltf_file(cube_dir + "/Cube.gltf")
+assert(is_dict(cube_doc), "cube gltf loads for scene material probe")
+assert(!cube_doc.contains("error"), "cube gltf has no load error for scene material probe")
+def cube_mats = gltf.gltf_material_infos(cube_doc)
+def cube_records = scene.build_material_records(cube_mats, cube_dir)
+assert(is_list(cube_records), "scene material records returns list")
+assert(cube_records.len == cube_mats.len, "scene material record count matches gltf material info count")
+if cube_records.len > 0 {
+   def rec0 = cube_records.get(0, 0)
+   assert(is_dict(rec0), "scene material record is dict")
+   assert(is_int(rec0.get("base_color_u32", 0)), "scene material record packs base color")
+   assert(is_int(rec0.get("material_u32", 0)), "scene material record packs roughness/metallic")
+}
+assert(gltf.gltf_free_data(cube_doc), "cube gltf frees after scene material probe")
+def fitted = {"fit_applied": true, "gpu_model_baked": false}
+assert(scene.scene_apply_fit(fitted).get("fit_applied", false), "fit no-op keeps applied scene")
+NY
+}

@@ -1,0 +1,27 @@
+shape load_only {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.util.parse.image as image
+fn main(){
+   if(argc() < 2){
+      print("usage: image/load_only.ny <in>")
+      return 2
+   }
+   def in_path = to_str(argv(1))
+   def img = image.load(in_path)
+   if(!img){
+      print("[img-load] decode failed: " + in_path)
+      return 1
+   }
+   print("[img-load] ok " + to_str(dict_get(img, "width", 0)) + "x" + to_str(dict_get(img, "height", 0)))
+   0
+}
+main()
+NY
+}

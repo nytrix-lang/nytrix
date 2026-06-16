@@ -1,0 +1,51 @@
+shape max-subarray {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "dynamic-programming", "array", "kadane"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.error
+use std.core.reflect
+use std.os.time
+fn gen_seq(n){
+   mut a = list(0)
+   mut x = 123456789
+   mut i = 0
+   while(i < n){
+      a = append(a, 0)
+      i += 1
+   }
+   i = 0
+   while(i < n){
+      x = (x * 1103515245 + 12345) & 2147483647
+      set_idx(a, i, (x % 2001) - 1000)
+      i += 1
+   }
+   return a
+}
+fn kadane(a){
+   mut best = get(a, 0)
+   mut cur = get(a, 0)
+   mut i = 1
+   while(i < len(a)){
+      def x = get(a, i)
+      cur = (cur + x > x) ? (cur + x) : x
+      best = (best > cur) ? best : cur
+      i += 1
+   }
+   return best
+}
+def arr = gen_seq(120000)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 24){
+   checksum += kadane(arr)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT max_subarray ", checksum, " ", t1 - t0)
+NY
+}

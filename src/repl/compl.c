@@ -131,7 +131,6 @@ static const char *const k_number_member_words[] = {
 
 static void add_match(const char *s);
 
-/* Fast dedup hash set for add_match — open addressing, power-of-2 size */
 #define MATCH_HT_INIT 256
 static const char **match_ht = NULL;
 static size_t match_ht_cap = 0;

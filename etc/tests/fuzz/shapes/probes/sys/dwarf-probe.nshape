@@ -1,0 +1,19 @@
+shape dwarf_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+def int: global_probe = 41
+fn bump(int: x): int {
+   mut int: local_probe = x + 1
+   local_probe
+}
+fn main(): int {
+   print(bump(global_probe))
+   0
+}
+NY
+}

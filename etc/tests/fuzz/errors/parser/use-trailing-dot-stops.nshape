@@ -1,0 +1,15 @@
+shape parser-use-trailing-dot-stops {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected identifier after '.'"
+  source ny <<'NY'
+use std.
+
+fn main() { 0 }
+main()
+NY
+}

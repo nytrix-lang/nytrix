@@ -1,0 +1,6 @@
+shape two-level-reduction {
+  family "stress-loop-nest"
+  generator "stress"
+  features ["stress-style", "optimizer-pattern", "nested-loops", "reduction", "scalar-evolution", "typed-int"]
+  template stress-two-level-reduction
+}

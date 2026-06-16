@@ -1,0 +1,77 @@
+shape edit-distance {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "string", "dynamic-programming", "nested-loop"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn zero_list(n){
+   mut out = list(0)
+   mut i = 0
+   while(i < n){
+      out = append(out, 0)
+      i += 1
+   }
+   out
+}
+fn mk_word(n, seed){
+   mut x = seed
+   mut s = ""
+   mut i = 0
+   while(i < n){
+      x = (x * 1664525 + 1013904223) & 2147483647
+      s = s + chr(97 + (x % 26))
+      i += 1
+   }
+   s
+}
+fn min3(a, b, c){
+   mut m = a
+   if(b < m){ m = b }
+   if(c < m){ m = c }
+   m
+}
+fn edit_distance(a, b){
+   def n = len(a)
+   def m = len(b)
+   mut prev = zero_list(m + 1)
+   mut cur = zero_list(m + 1)
+   mut j = 0
+   while(j <= m){
+      set_idx(prev, j, j)
+      j += 1
+   }
+   mut i = 1
+   while(i <= n){
+      set_idx(cur, 0, i)
+      j = 1
+      while(j <= m){
+         def cost = get(a, i - 1) == get(b, j - 1) ? 0 : 1
+         def delete_cost = get(prev, j) + 1
+         def ins = get(cur, j - 1) + 1
+         def sub = get(prev, j - 1) + cost
+         set_idx(cur, j, min3(delete_cost, ins, sub))
+         j += 1
+      }
+      def tmp = prev
+      prev = cur
+      cur = tmp
+      i += 1
+   }
+   get(prev, m)
+}
+def a = mk_word(220, 12345)
+def b = mk_word(240, 77777)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 90){
+   checksum += edit_distance(a, b)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT edit_distance ", checksum, " ", t1 - t0)
+NY
+}

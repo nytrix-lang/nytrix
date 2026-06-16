@@ -1,0 +1,116 @@
+shape binary {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+mut max_depth = 10
+;; Binary Trees (Benchmark)
+fn make_tree(int depth) any {
+   if depth == 0 { return 0 }
+   mut d = depth - 1
+   return [make_tree(d), make_tree(d)]
+}
+fn check(any t) int {
+   if t == 0 { return 1 }
+   return 1 + check(t.get(0)) + check(t.get(1))
+}
+def min_depth = 4
+if max_depth < min_depth { max_depth = min_depth }
+print("Benchmarking Binary Trees(fast mode, max depth ", max_depth, ")")
+def start = ticks()
+mut trees = dict()
+mut d = min_depth
+while d <= max_depth {
+   trees = trees.set(d, make_tree(d))
+   d += 2
+}
+def stretch = make_tree(max_depth + 1)
+print(
+   "Stretch tree of depth ",
+   max_depth + 1,
+   " check: ",
+   check(stretch)
+)
+d = min_depth
+while d <= max_depth {
+   def iterations = 1 << (max_depth - d)
+   def t = trees.get(d, 0)
+   def chk = check(t) * iterations
+   print(iterations, " trees of depth ", d, " check: ", chk)
+   d += 2
+}
+def long_lived = trees.get(max_depth, 0)
+print(
+   "Long-lived tree of depth ",
+   max_depth,
+   " check: ",
+   check(long_lived)
+)
+def end = ticks()
+print("Time: ", (end - start) / 1000000, " ms")
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
+}
+
+typedef struct Node {
+    struct Node *left;
+    struct Node *right;
+} Node;
+
+static Node *make_tree(int depth) {
+    if (depth <= 0) return NULL;
+    Node *n = (Node *)malloc(sizeof(Node));
+    if (!n) exit(2);
+    n->left = make_tree(depth - 1);
+    n->right = make_tree(depth - 1);
+    return n;
+}
+
+static int check_tree(const Node *n) {
+    if (!n) return 1;
+    return 1 + check_tree(n->left) + check_tree(n->right);
+}
+
+static void free_tree(Node *n) {
+    if (!n) return;
+    free_tree(n->left);
+    free_tree(n->right);
+    free(n);
+}
+
+int main(void) {
+    const int min_depth = 4;
+    const int max_depth = 10;
+    int64_t start = now_ns();
+    int64_t checksum = 0;
+    Node *trees[16] = {0};
+    for (int d = min_depth; d <= max_depth; d += 2) trees[d] = make_tree(d);
+    Node *stretch = make_tree(max_depth + 1);
+    checksum += check_tree(stretch);
+    free_tree(stretch);
+    for (int d = min_depth; d <= max_depth; d += 2) {
+        int iterations = 1 << (max_depth - d);
+        checksum += (int64_t)check_tree(trees[d]) * iterations;
+    }
+    checksum += check_tree(trees[max_depth]);
+    for (int d = min_depth; d <= max_depth; d += 2) free_tree(trees[d]);
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)checksum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

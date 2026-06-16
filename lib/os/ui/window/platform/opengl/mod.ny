@@ -146,32 +146,46 @@ fn destroy_offscreen_context(any ctx) bool {
 fn make_context_current(any ctx) bool {
    "Makes the given context current on the calling thread."
    if !ctx || !is_dict(ctx) { return false }
-   _current_context = ctx
    def typ = ctx.get("type", "")
    if typ == "egl_offscreen" {
       def dpy = ctx.get("display", 0)
       def gl_ctx = ctx.get("context", 0)
-      if dpy && gl_ctx { return egl.make_current(dpy, 0, 0, gl_ctx) }
+      if dpy && gl_ctx && egl.make_current(dpy, 0, 0, gl_ctx) {
+         _current_context = ctx
+         return true
+      }
    }
    if typ == "egl" {
       def dpy = ctx.get("display", 0)
       def surf = ctx.get("surface", 0)
       def gl_ctx = ctx.get("context", 0)
-      if dpy && surf && gl_ctx { return egl.make_current(dpy, surf, surf, gl_ctx) }
+      if dpy && surf && gl_ctx && egl.make_current(dpy, surf, surf, gl_ctx) {
+         _current_context = ctx
+         return true
+      }
    }
    if typ == "glx_offscreen" {
       def gl_ctx = ctx.get("context", 0)
-      if gl_ctx { return glx.make_current(0, 0, gl_ctx) }
+      if gl_ctx && glx.make_current(0, 0, gl_ctx) {
+         _current_context = ctx
+         return true
+      }
    }
    if typ == "glx" {
       def dpy = ctx.get("display", 0)
       def win = ctx.get("window", 0)
       def gl_ctx = ctx.get("context", 0)
-      if dpy && win && gl_ctx { return glx.make_current(dpy, win, gl_ctx) }
+      if dpy && win && gl_ctx && glx.make_current(dpy, win, gl_ctx) {
+         _current_context = ctx
+         return true
+      }
    }
    if typ == "nsgl_offscreen" {
       def gl_ctx = ctx.get("context", 0)
-      if gl_ctx { return nsgl.make_current(gl_ctx) }
+      if gl_ctx && nsgl.make_current(gl_ctx) {
+         _current_context = ctx
+         return true
+      }
    }
    #macos {
       if typ == "osmesa" {
@@ -191,16 +205,21 @@ fn make_context_current(any ctx) bool {
 
 fn release_context_current() bool {
    "Releases the current OpenGL context on the calling thread."
+   def ctx = _current_context
    _current_context = 0
-   def b = _get_backend_name()
-   #linux {
-      if b == "wayland" { return egl.make_current(0, 0, 0, 0) }
-      if b == "x11" { return glx.make_current(0, 0, 0) }
-   } #elif windows {
+   if !ctx || !is_dict(ctx) { return true }
+   def typ = ctx.get("type", "")
+   if typ == "egl" || typ == "egl_offscreen" {
+      def dpy = ctx.get("display", 0)
+      if dpy { return egl.make_current(dpy, 0, 0, 0) }
       return true
-   } #elif macos {
-      if b == "cocoa" { return nsgl.make_current(0) }
-   } #endif
+   }
+   if typ == "glx" || typ == "glx_offscreen" {
+      def dpy = ctx.get("display", 0)
+      if dpy { return glx.make_current(dpy, 0, 0) }
+      return true
+   }
+   if typ == "nsgl_offscreen" { return nsgl.make_current(0) }
    true
 }
 
@@ -329,7 +348,10 @@ fn create_context(any native, any hints) any {
          def surface = egl.create_surface(dpy, config, w)
          if !surface { return 0 }
          def ctx = egl.create_context(dpy, config, 0)
-         if !ctx { return 0 }
+         if !ctx {
+            egl.destroy_surface(dpy, surface)
+            return 0
+         }
          return {"type": "egl", "display": dpy, "surface": surface, "context": ctx}
       }
       if b == "x11" {

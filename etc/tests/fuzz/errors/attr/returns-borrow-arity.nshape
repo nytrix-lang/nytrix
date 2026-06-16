@@ -1,0 +1,16 @@
+shape attr-returns-borrow-arity {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "@returns_borrow(...) requires exactly one parameter name"
+  source ny <<'NY'
+use std.core
+
+@returns_borrow(x, y)
+fn f(x, y) { x }
+print(f(1, 2))
+NY
+}

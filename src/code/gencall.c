@@ -2410,12 +2410,7 @@ static bool ny_gencall_expr_is_ptr_add_of_managed(codegen_t *cg, scope *scopes,
   if (ny_gencall_expr_is_managed_memory(cg, scopes, depth,
                                         e->as.call.args.data[0].val))
     return true;
-  /*
-   * std.math.simmd byte kernels intentionally normalize their public input
-   * through ptr_add(...) before calling the private raw intrinsic.  The wrapper
-   * accepts `any`, so local type inference often cannot see the managed source
-   * type here even though the intrinsic boundary is already raw-pointer shaped.
-   */
+
   return true;
 }
 
@@ -5020,9 +5015,7 @@ static LLVMValueRef abi_untag_int(codegen_t *cg, LLVMValueRef v,
     v = ny_cast_to_i64(cg, v, "abi_int_arg");
 
   LLVMValueRef shift = ny_c1(cg);
-  /* Only untag if the low bit is set (Nytrix tagged small int).
-     If low bit is clear, the value is a raw handle/pointer — pass through
-     unchanged. */
+
   LLVMValueRef lsb = ny_and(cg, v, shift, NY_LLVM_NAME(cg, "untag_lsb"));
   LLVMValueRef is_tagged =
       ny_eq(cg, lsb, shift, NY_LLVM_NAME(cg, "untag_tagged"));
@@ -5956,7 +5949,6 @@ static bool check_call_arity_diag(codegen_t *cg, token_t tok,
                     sig_arity);
       }
 
-      /* Auto-Chosen Visual Signature Hint */
       if (sig_found && sig_found->stmt_t &&
           sig_found->stmt_t->kind == NY_S_FUNC) {
         ny_param_list *params = &sig_found->stmt_t->as.fn.params;
@@ -5979,7 +5971,7 @@ static bool check_call_arity_diag(codegen_t *cg, token_t tok,
                      sig_buf);
       }
     }
-    /* Specific Library Hints */
+
     if (sig_found && sig_found->name) {
       if (strcmp(sig_found->name, "std.os.ui.render.draw_text") == 0 ||
           strcmp(sig_found->name, "draw_text") == 0) {
@@ -7983,12 +7975,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     bool want_is_ny_obj = (strcmp(n, "__is_ny_obj") == 0);
     bool want_is_str_obj = (strcmp(n, "__is_str_obj") == 0);
     bool want_tagof = (strcmp(n, "__tagof") == 0);
-    /*
-     * Keep these predicates on the runtime path.  AOT values can carry raw
-     * f64 bits or foreign pointers that look pointer-shaped; blindly loading
-     * value-8 here can fault before the guarded runtime helpers get a chance
-     * to reject them.
-     */
+
     bool use_fast_obj_intrinsics = false;
     if (use_fast_obj_intrinsics && (want_is_ny_obj || want_is_str_obj) &&
         c->args.len == 1) {
@@ -8266,7 +8253,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     bool looked_like_module_target = false;
     const char *resolved_module_name = NULL;
     const char *mc_target_type = NULL;
-    // sig_found declared above
+
     char module_expr_path[1024];
     if (mc->target && ny_resolve_module_expr_path(cg, scopes, depth, mc->target,
                                                   module_expr_path,
@@ -8292,7 +8279,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         }
       }
     }
-    // Priority 1: Check if target is a module alias
+
     if (mc->target && mc->target->kind == NY_E_IDENT) {
       const char *target_name = mc->target->as.ident.name;
       const char *module_name = target_name;
@@ -8313,10 +8300,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           is_alias = true;
         }
       }
-      // If it's an alias, it MUST be a module call.
-      // If it's NOT an alias, check if it doesn't exist as a local
-      // variable/function, in which case it might be a direct module usage
-      // (e.g. math.add)
+
       if (is_alias ||
           (lookup_fun(cg, target_name, 0) == NULL && !target_value_defined)) {
         looked_like_module_target = true;
@@ -8351,8 +8335,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           callee = fv;
           goto static_call_handling;
         }
-        // If it was an ALIAS, but method not found, we shouldn't fall back to
-        // standard methods
+
         if (is_alias) {
           char dotted[1280];
           snprintf(dotted, sizeof(dotted), "%s.%s", module_name,
@@ -8398,8 +8381,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         return ny_member_unknown_static_expr(cg, e->tok, "method", mc->name,
                                              mc_target_type);
       }
-      /* Fallback: try dynamic property lookup (e.g. obj.method -> get(obj,
-       * "method")) */
+
       fun_sig *getter = ny_gencall_getter(cg);
       if (getter && mc->name && strcmp(mc->name, "get") != 0) {
         LLVMValueRef target_val = gen_expr(cg, scopes, depth, mc->target);
@@ -8420,7 +8402,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         if (mc->args.len == 0) {
           return callee;
         }
-        ft = NULL; /* Trigger generic call handling */
+        ft = NULL;
         has_sig = false;
         skip_target = true;
         goto skip_static_handling;
@@ -8629,16 +8611,12 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     }
   }
 
-  /* For native-ABI variadics (from #include), we pass ALL user args directly
-     to the C function — no Nytrix list packing.  For Nytrix variadics we keep
-     the old sig_arity cap so remaining args get packed into the variadic list.
-   */
   bool native_variadic = has_sig && is_variadic && sig_meta &&
                          sig_meta->is_extern && sig_meta->is_native_abi;
   size_t sig_argc = (has_sig && is_variadic && !native_variadic)
                         ? (size_t)sig_arity
                         : (has_sig ? (size_t)sig_arity : call_argc);
-  /* For native variadics, ensure we have room for all user-supplied args */
+
   if (native_variadic && call_argc > sig_argc)
     sig_argc = call_argc;
   size_t final_argc = (sig_argc > call_argc) ? sig_argc : call_argc;
@@ -8696,7 +8674,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       }
     } else if (has_sig && is_variadic && !native_variadic &&
                i == (size_t)sig_arity - 1) {
-      /* Nytrix variadic packaging: build list in-place. */
+
       fun_sig *ls_s = lookup_fun(cg, "__list_new", 0);
       fun_sig *st_s = lookup_fun(cg, "__store64_idx", 0);
       if (!ls_s || !st_s) {
@@ -8748,7 +8726,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
             3, "");
         out_i++;
       }
-      // Set variadic list length at offset 0
+
       (void)LLVMBuildCall2(
           cg->builder, st_s->type, st_s->value,
           (LLVMValueRef[]){
@@ -8776,7 +8754,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         goto call_fail;
       }
     } else if (has_sig && sig_arity > (int)i && i < user_args_len) {
-      args[i] = ny_c0(cg); // none
+      args[i] = ny_c0(cg);
     } else {
       default_expr = NULL;
       if (has_sig && sig_meta && sig_meta->stmt_t &&
@@ -8805,7 +8783,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           goto call_fail;
         }
       } else {
-        args[i] = ny_c0(cg); // none
+        args[i] = ny_c0(cg);
       }
     }
   }
@@ -8873,13 +8851,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         }
       }
     }
-    /* Fallback: #include FFI functions have stmt_t=NULL so call_params is null.
-       Use the LLVM function type's param types to coerce Nytrix tagged values.
-       For native-ABI variadics, also coerce the extra args beyond the fixed
-       param count: treat them as ptr (if the value looks like a pointer) or
-       i64 (untag integers).  This matches what libc ABI expects for variadics
-       like XCreateIC / printf etc.
-     */
+
     if (!call_params && sig_meta->param_types.len == 0 && ft &&
         sig_meta->is_extern && sig_meta->is_native_abi) {
       unsigned np = LLVMCountParamTypes(ft);
@@ -8891,7 +8863,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       for (size_t i = 0; i < final_argc; i++) {
         const char *tname = NULL;
         if (i < (size_t)np) {
-          /* Fixed named parameter — use LLVM type */
+
           LLVMTypeKind k = LLVMGetTypeKind(pts[i]);
           if (k == LLVMPointerTypeKind) {
             tname = "ptr";
@@ -8907,7 +8879,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
               tname = "i32";
               break;
             case 64:
-              /* 64-bit params: treat as u64 to preserve raw Vulkan handles */
+
               tname = "u64";
               break;
             default:
@@ -8919,15 +8891,13 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
             tname = "f64";
           }
         } else if (native_variadic) {
-          /* Extra variadic arg — best-effort: strip Nytrix tags.
-             If the value has pointer alignment (low 3 bits clear, val>4096)
-             pass as ptr; otherwise untag as i64. */
+
           LLVMValueRef v = args[i];
           LLVMTypeRef vty = v ? LLVMTypeOf(v) : NULL;
           if (vty && LLVMGetTypeKind(vty) == LLVMPointerTypeKind) {
-            /* already a native pointer, nothing to do */
+
           } else {
-            /* Strip Nytrix int tag: if (v & 1) -> v >> 1, else pass raw */
+
             LLVMValueRef one = ny_c1(cg);
             LLVMValueRef lsb = ny_and(cg, v, one, "vi_lsb");
             LLVMValueRef is_tagged = ny_eq(cg, lsb, one, "vi_tagged");
@@ -8936,7 +8906,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
             v = ny_select(cg, is_tagged, untagged, v, "vi_val");
             args[i] = v;
           }
-          continue; /* skip ny_coerce_to_abi */
+          continue;
         }
         if (tname)
           args[i] = ny_coerce_to_abi(cg, args[i], tname);
@@ -9046,9 +9016,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
             : (sig_meta ? sig_meta->name : (mc ? mc->name : NULL)))) {
     ny_emit_trace_loc_force(cg, e->tok);
   }
-  /* Native-ABI variadics: pass all user-supplied args directly to the C
-     function so XCreateIC / printf-style calls work correctly.  Nytrix-
-     variadic calls keep the old sig_arity cap (the rest is in the list). */
+
   unsigned call_nargs =
       (unsigned)(native_variadic ? final_argc
                                  : (has_sig && is_variadic ? (size_t)sig_arity
@@ -9110,8 +9078,6 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     return ret_ptr_i64;
   }
 
-  /* Tail Call Optimization (TCO): mark a call only when statement lowering
-     proved the call expression is the direct returned value. */
   bool is_tail_call = false;
   LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
   if (cg->tail_call_depth > 0 && cur_bb && ft && !is_variadic &&
@@ -9230,7 +9196,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     ny_dbg_loc(cg, e->tok);
     res = LLVMBuildCall2(cg->builder, ft, callee, args, call_nargs, "");
     abi_apply_native_layout_call_attrs(cg, res, sig_meta);
-    /* Apply tail call attribute if eligible */
+
     if (is_tail_call && !sig_meta->is_extern && !sig_meta->is_variadic) {
       LLVMSetTailCallKind(res, LLVMTailCallKindTail);
     }

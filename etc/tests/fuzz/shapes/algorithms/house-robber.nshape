@@ -1,0 +1,53 @@
+shape house-robber {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "dynamic-programming", "array", "rolling-state"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.error
+use std.core.reflect
+use std.os.time
+fn gen_money(n){
+   mut a = list(0)
+   mut x = 24681357
+   mut i = 0
+   while(i < n){
+      a = append(a, 0)
+      i += 1
+   }
+   i = 0
+   while(i < n){
+      x = (x * 1664525 + 1013904223) & 2147483647
+      set_idx(a, i, (x % 1000) + 1)
+      i += 1
+   }
+   return a
+}
+fn rob(nums){
+   mut prev2 = 0
+   mut prev1 = 0
+   mut i = 0
+   while(i < len(nums)){
+      def take = prev2 + get(nums, i)
+      def skip = prev1
+      def cur = (take > skip) ? take : skip
+      prev2 = prev1
+      prev1 = cur
+      i += 1
+   }
+   return prev1
+}
+def arr = gen_money(180000)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 25){
+   checksum += rob(arr)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT house_robber ", checksum, " ", t1 - t0)
+NY
+}

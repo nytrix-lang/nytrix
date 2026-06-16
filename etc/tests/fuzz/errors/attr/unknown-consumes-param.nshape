@@ -1,0 +1,16 @@
+shape attr-unknown-consumes-param {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "@consumes(...) references unknown parameter 'y'"
+  source ny <<'NY'
+use std.core
+
+@consumes(y)
+fn f(x) { x }
+print(f(1))
+NY
+}

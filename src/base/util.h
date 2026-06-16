@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 static inline char *ny_read_file_raw(const char *path, size_t *out_len) {
   if (!path)
@@ -47,14 +48,66 @@ int ny_write_file(const char *path, const char *content, size_t len);
 bool ny_write_if_changed(const char *path, const char *content, size_t len);
 void ny_write_text_file(const char *path, const char *contents);
 int ny_copy_file(const char *src, const char *dst);
-int ny_ensure_dir(const char *path);
-void ny_ensure_dir_recursive(const char *path);
+static inline int ny_ensure_dir(const char *path) {
+  struct stat st = {0};
+  if (stat(path, &st) == -1) {
+#ifdef _WIN32
+    return _mkdir(path);
+#else
+    return mkdir(path, 0755);
+#endif
+  }
+  return 0;
+}
+
+static inline void ny_ensure_dir_recursive(const char *path) {
+  if (!path || !*path)
+    return;
+  char tmp[1024];
+  snprintf(tmp, sizeof(tmp), "%s", path);
+  size_t len = strlen(tmp);
+  if (len == 0)
+    return;
+  if (tmp[len - 1] == '/')
+    tmp[len - 1] = 0;
+  for (char *p = tmp + 1; *p; p++) {
+    if (*p != '/')
+      continue;
+    *p = 0;
+    ny_ensure_dir(tmp);
+    *p = '/';
+  }
+  ny_ensure_dir(tmp);
+}
+
 const char *ny_get_temp_dir(void);
-void ny_join_path(char *out, size_t out_len, const char *dir, const char *name);
+static inline void ny_join_path(char *out, size_t out_len, const char *dir, const char *name) {
+  if (!out || out_len == 0)
+    return;
+  if (!dir || !*dir) {
+    snprintf(out, out_len, "%s", name ? name : "");
+    return;
+  }
+  size_t dlen = strlen(dir);
+  int needs_sep = (dlen > 0 && dir[dlen - 1] != '/' && dir[dlen - 1] != '\\') ? 1 : 0;
+  if (needs_sep)
+    snprintf(out, out_len, "%s/%s", dir, name ? name : "");
+  else
+    snprintf(out, out_len, "%s%s", dir, name ? name : "");
+}
 bool ny_extract_line(const char *src, int line, const char **out_start, size_t *out_len);
 
 char *ny_strdup(const char *s);
-bool ny_env_is_truthy(const char *value);
+static inline bool ny_env_is_truthy(const char *value) {
+  if (!value || !*value)
+    return false;
+  if (strcmp(value, "0") == 0 || strcmp(value, "false") == 0 || strcmp(value, "False") == 0 ||
+      strcmp(value, "FALSE") == 0 || strcmp(value, "off") == 0 || strcmp(value, "OFF") == 0 ||
+      strcmp(value, "no") == 0 || strcmp(value, "NO") == 0) {
+    return false;
+  }
+  return true;
+}
 bool ny_env_enabled(const char *name);
 bool ny_env_enabled_default_on(const char *name);
 const char *ny_env_str(const char *name);
@@ -106,6 +159,20 @@ static inline bool ny_sub_range_ok(int64_t a, int64_t b, int64_t *out) {
 }
 static inline bool ny_mul_range_ok(int64_t a, int64_t b, int64_t *out) {
   return !__builtin_mul_overflow(a, b, out);
+}
+
+static inline bool ny_has_suffix(const char *str, const char *suffix) {
+  size_t a = strlen(str), b = strlen(suffix);
+  return a >= b && memcmp(str + a - b, suffix, b) == 0;
+}
+
+static inline const char *ny_base_name(const char *path) {
+  const char *s = strrchr(path, '/');
+  return s ? s + 1 : path;
+}
+
+static inline bool ny_is_ident_char(int c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
 
 static inline bool ny_name_tail_is(const char *name, const char *tail) {

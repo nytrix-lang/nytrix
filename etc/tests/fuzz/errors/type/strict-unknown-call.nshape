@@ -1,0 +1,15 @@
+shape type-strict-unknown-call {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-dynamic-call"
+  flags "--strict-types"
+  source ny <<'NY'
+use std.core
+
+does_not_exist_strict(1)
+NY
+}

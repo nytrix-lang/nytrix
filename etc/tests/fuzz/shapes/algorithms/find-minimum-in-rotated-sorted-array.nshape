@@ -1,0 +1,43 @@
+shape find-minimum-in-rotated-sorted-array {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "binary-search", "array", "branching"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.reflect
+use std.os.time
+fn mk_rot(n, rot){
+   mut a = list(0)
+   mut i = 0
+   while(i < n){ a = append(a, 0) i += 1 }
+   i = 0
+   while(i < n){
+      def v = ((i + rot) % n) + 1
+      set_idx(a, i, v)
+      i += 1
+   }
+   return a
+}
+fn find_min(a){
+   mut l = 0
+   mut r = len(a) - 1
+   while(l < r){
+      def m = l + ((r - l) >> 1)
+      if(get(a, m) > get(a, r)){ l = m + 1 } else { r = m }
+   }
+   return get(a, l)
+}
+def a = mk_rot(200000, 12345)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 150000){
+   checksum += find_min(a)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT find_minimum_in_rotated_sorted_array ", checksum, " ", t1 - t0)
+NY
+}

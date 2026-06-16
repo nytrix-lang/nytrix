@@ -262,15 +262,15 @@ const API_NAMESPACE_SUMMARIES = new Map(
       "Audio devices, formats, playback helpers, and sound-facing native integration.",
     "std.os.ui":
       "Windows, input, rendering, terminal UI, scenes, and platform backends.",
-    "std.parse":
+    "std.math.parse":
       "Structured data, source syntax, images, fonts, compressed data, and 3D asset parsing.",
-    "std.parse.data":
+    "std.math.parse.data":
       "JSON, YAML, TOML, CSV, XML, SQL, zlib, and related data-format helpers.",
-    "std.parse.img":
+    "std.math.parse.img":
       "Image codecs, metadata, loading, saving, and pixel format utilities.",
-    "std.parse.syntax":
+    "std.math.parse.syntax":
       "Tokenizers and highlighters for Nytrix and common source formats.",
-    "std.parse.3d":
+    "std.math.parse.3d":
       "3D asset loading, glTF scene inspection, meshes, materials, and asset workflow helpers.",
   }),
 );
@@ -1982,7 +1982,7 @@ print(f"{scale=} {lens=} {sum=} tag={tag(sum)}")`;
   const apiCards = [
     ["std.core", "std.core", "Core language helpers and runtime primitives.", "module"],
     ["std.os", "std.os", "Operating-system APIs, process utilities, and platform support.", "namespace"],
-    ["std.parse", "std.parse", "Data, syntax, images, and asset parsers.", "namespace"],
+    ["std.math.parse", "std.math.parse", "Data, syntax, images, and asset parsers.", "namespace"],
   ]
     .map(([route, title, summary, meta]) =>
       renderApiCard(route, title, summary, meta),

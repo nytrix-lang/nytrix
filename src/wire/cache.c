@@ -2,6 +2,7 @@
 #include "base/common.h"
 #include "base/hash.h"
 #include "base/loader.h"
+#include "base/time.h"
 #include "base/util.h"
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitReader.h>
@@ -40,18 +41,6 @@ static unsigned long ny_hash_string(const char *str) {
   while ((c = *str++))
     hash = ((hash << 5) + hash) + c;
   return hash;
-}
-
-static uint64_t ny_stat_mtime_nsec(const struct stat *st) {
-  if (!st)
-    return 0;
-#if defined(__APPLE__)
-  return (uint64_t)st->st_mtimespec.tv_nsec;
-#elif !defined(_WIN32)
-  return (uint64_t)st->st_mtim.tv_nsec;
-#else
-  return 0;
-#endif
 }
 
 static bool ny_write_text_file_atomic(const char *path, const char *content, size_t len);
@@ -378,9 +367,6 @@ int ny_cache_clean(void) {
 
 bool ny_jit_cache_enabled(void) { return ny_env_enabled_default_on("NYTRIX_JIT_CACHE"); }
 
-/* Bump these whenever cached bitcode assumptions change.  The test tree
- * layout is part of the source/cache identity because embedded paths can flow
- * into generated modules and stale bitcode should not survive a layout move. */
 enum { NY_JIT_CACHE_VERSION = 25 };
 enum { NY_STD_BC_CACHE_VERSION = 14 };
 
@@ -430,9 +416,7 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path, unsigned lo
     }
     std_hash ^= ny_hash_string(stdlib_path);
   }
-  /* The JIT source hash already covers the generated std.ny text.  Hashing
-     mtimes here churns large native-cache keys when generated std artifacts are
-     refreshed without content changes, so keep strict mtime invalidation opt-in. */
+
   if (std_latest_mtime && ny_env_enabled("NYTRIX_JIT_CACHE_STRICT_MTIME")) {
     std_hash ^= std_latest_mtime;
   }
@@ -748,7 +732,6 @@ bool ny_jit_cache_save(const char *cache_path, LLVMModuleRef module) {
     return ok;
   }
 
-  /* Use PID-unique temp file to avoid race with parallel processes */
   char tmp_path[1024];
   pid_t pid = getpid();
   snprintf(tmp_path, sizeof(tmp_path), "%s.%d.tmp", cache_path, (int)pid);
@@ -805,10 +788,7 @@ bool ny_jit_cache_save_ir(const char *cache_path, LLVMModuleRef module) {
 
 #ifndef _WIN32
 static bool ny_jit_cache_use_native(void) {
-  /* Native .so JIT cache is fast, but it bypasses parts of the normal MCJIT
-     setup path and has proven unsafe for large UI/native-library scripts.
-     Keep the stable bitcode cache on by default and require an explicit opt-in
-     for the native shared-object cache while that path is hardened. */
+
   return ny_env_enabled("NYTRIX_JIT_NATIVE_CACHE");
 }
 

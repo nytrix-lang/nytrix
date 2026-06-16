@@ -1,0 +1,18 @@
+shape fn_dict {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut a = []
+a = append(a, false)
+a = append(a, false)
+print("before=" + to_str(a))
+set_idx(a, 0, dict(1))
+set_idx(a, 1, dict(1))
+print("after=" + to_str(a))
+print("g0_dict=" + to_str(is_dict(get(a,0))) + " g1_dict=" + to_str(is_dict(get(a,1))) )
+NY
+}

@@ -1,0 +1,19 @@
+shape type_contract_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn add_one(int: x): int {
+   x + 1
+}
+fn echo_str(str: s): str {
+   s
+}
+assert(add_one(41) == 42, "typed argument and return")
+assert(echo_str("contract") == "contract", "string contract")
+print("type contract probe ok")
+NY
+}

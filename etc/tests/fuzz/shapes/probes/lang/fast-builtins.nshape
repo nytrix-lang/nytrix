@@ -1,0 +1,21 @@
+shape fast_builtins {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+assert(len("abc") == 3, "len on string literal")
+assert("abcd".len() == 4, "member len on string literal")
+def s = "hello"
+assert(len(s) == 5, "len on string value")
+assert(is_int(1), "is_int true for int")
+assert(!is_int(s), "is_int false for string")
+assert(is_ptr(s), "is_ptr true for string object")
+assert(!is_ptr(1), "is_ptr false for tagged int")
+def t = tagof(s)
+assert(is_int(t) && t > 0, "tagof returns tagged runtime tag for ptr")
+assert(tagof(1) == 0, "tagof returns 0 for non ptr")
+print("ok fast builtins probe")
+NY
+}

@@ -1,0 +1,41 @@
+shape parser-torture-errors {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "missing '}' before end of file"
+  source ny <<'NY'
+use std.core
+
+fn bad_inference(x) {
+   ;; This should challenge the HM-inference if types are contradictory
+   if x > 0 {
+      return x + 1
+   } else {
+      return "not a number"
+   }
+}
+
+fn deeply_nested() {
+   ;; Torture the parser with deep nesting
+   ((((((((((((((((((((((((((((((((((((((((((((((((((42))))))))))))))))))))))))))))))))))))))))))))))))))
+}
+
+fn mismatched_braces() {
+   if true {
+      {
+         {
+            print("missing braces")
+         }
+         ;; Missing one here
+      }
+   }
+   fn main() {
+      bad_inference(10)
+      deeply_nested()
+      mismatched_braces()
+   }
+NY
+}

@@ -1,0 +1,6 @@
+shape fixed-array-mutation {
+  family "array-mutation"
+  generator "typed"
+  features ["arrays", "set_idx", "mutation", "inbounds", "reduction"]
+  template fixed-array-mutation
+}

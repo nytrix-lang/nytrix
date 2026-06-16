@@ -1,0 +1,60 @@
+shape maximum-product-subarray {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "dynamic-programming", "array", "minmax"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.reflect
+use std.os.time
+fn gen_vals(n){
+   mut a = list(0)
+   mut i = 0
+   while(i < n){ a = append(a, 0) i += 1 }
+   mut x = 7777333
+   i = 0
+   while(i < n){
+      x = (x * 1103515245 + 12345) & 2147483647
+      set_idx(a, i, (x % 31) - 15)
+      i += 1
+   }
+   return a
+}
+fn wrap32(v){
+   def u = v & 4294967295
+   return(u >= 2147483648) ? (u - 4294967296) : u
+}
+fn max_prod(a){
+   mut mx = wrap32(get(a, 0))
+   mut mn = wrap32(get(a, 0))
+   mut best = wrap32(get(a, 0))
+   mut i = 1
+   while(i < len(a)){
+      def v = wrap32(get(a, i))
+      if(v < 0){
+         def t = mx
+         mx = mn
+         mn = t
+      }
+      def p1 = wrap32(mx * v)
+      def p2 = wrap32(mn * v)
+      mx = (v > p1) ? v : p1
+      mn = (v < p2) ? v : p2
+      best = (best > mx) ? best : mx
+      i += 1
+   }
+   return best
+}
+def a = gen_vals(160000)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 26){
+   checksum += max_prod(a) & 2147483647
+   r += 1
+}
+def t1 = ticks()
+print("RESULT maximum_product_subarray ", checksum, " ", t1 - t0)
+NY
+}

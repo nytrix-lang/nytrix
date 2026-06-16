@@ -1,0 +1,15 @@
+shape dict_int_key {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut d = dict(0)
+d = dict_set(d, 0, "hello")
+print("is_dict=" + to_str(is_dict(d)))
+print("k0=" + to_str(dict_get(d, 0, "none")))
+print("kstr=" + to_str(dict_get(d, "0", "none")))
+NY
+}

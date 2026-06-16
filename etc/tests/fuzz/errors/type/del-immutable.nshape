@@ -1,0 +1,15 @@
+shape type-del-immutable {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot reassign immutable"
+  source ny <<'NY'
+use std.core
+
+def x = 1
+del x
+NY
+}

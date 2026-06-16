@@ -1,0 +1,51 @@
+shape png-sweep {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.os.fs as fs
+use std.util.parse.image as image
+use std.util.parse.img.png as png
+use std.util.parse.str as str
+mut _png_sweep_total = 0
+mut _png_sweep_ok = 0
+mut _png_sweep_fail = 0
+fn _png_sweep_cb(path){
+   if(!is_str(path)){ return 0 }
+   def lp = str.lower(path)
+   if(!str.endswith(lp, ".png")){ return 0 }
+   _png_sweep_total += 1
+   def res = file_read(path)
+   if(!is_ok(res)){
+      print("PNG\tERR\tREAD\t" + path)
+      _png_sweep_fail += 1
+      return 0
+   }
+   def img = png.decode(unwrap(res))
+   if(!is_dict(img)){
+      print("PNG\tERR\tDECODE\t" + path)
+      _png_sweep_fail += 1
+      return 0
+   }
+   _png_sweep_ok += 1
+   image.free(img)
+   0
+}
+fn main(){
+   fs.walk("etc/assets", _png_sweep_cb)
+   print(
+      "PNG_SWEEP\ttotal=" + to_str(_png_sweep_total) +
+      "\tok=" + to_str(_png_sweep_ok) +
+      "\tfail=" + to_str(_png_sweep_fail)
+   )
+   _png_sweep_fail == 0 ? 0 : 1
+}
+if(comptime{__main()}){
+   __exit(main())
+}
+NY
+}

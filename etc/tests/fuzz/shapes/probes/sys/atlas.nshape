@@ -1,0 +1,44 @@
+shape atlas {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.error
+use std.os.ui.font.truetype as ttf
+use std.os.ui.render.atlas as atlas
+def path = "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+def info = ttf.load_path(path, 0)
+assert(info != 0, "font load")
+def gi = ttf.get_glyph_index(info, 65)
+def scale = ttf.scale_for_pixel_height(info, 32.0)
+def bm = ttf.get_glyph_bitmap(info, scale, scale, gi)
+assert(bm != 0, "glyph bitmap")
+def w = int(bm.get("width", 0))
+def h = int(bm.get("height", 0))
+def pixels = bm.get("data", 0)
+def a = atlas.atlas_create(64, 64, 0)
+assert(a, "atlas create")
+def uv = atlas.atlas_add(a, "A", w, h, pixels)
+assert(uv, "atlas add")
+def cpu = a.get("cpu_buf", 0)
+mut y = 0
+while y < h {
+   mut line = ""
+   mut x = 0
+   while x < w {
+      def src_a = load8(pixels, (y * w + x) * 4 + 3) & 255
+      def dst_a = load8(cpu, ((2 + y) * 64 + (2 + x)) * 4 + 3) & 255
+      assert(src_a == dst_a, "atlas alpha mismatch")
+      line += dst_a > 180 ? "#" : (dst_a > 40 ? "+" : ".")
+      x += 1
+   }
+   print(line)
+   y += 1
+}
+atlas.atlas_destroy(a)
+ttf.unload(info)
+NY
+}

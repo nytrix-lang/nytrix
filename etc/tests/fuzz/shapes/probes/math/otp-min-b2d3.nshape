@@ -1,0 +1,27 @@
+shape otp_min_b2d3 {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module otp_min_b2d3(f)
+use std.core
+fn f(key_size=nil){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut best_score = nil
+   mut si = 0
+   while(si < len(sizes)){
+      mut total_score = 0
+      if(best_score == nil || total_score > best_score){
+         best_score = total_score
+      }
+      si = si + 1
+   }
+   best_score
+}
+if(comptime{__main()}){
+   print("ok d3")
+}
+NY
+}

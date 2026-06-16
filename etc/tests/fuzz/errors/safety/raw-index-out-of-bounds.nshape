@@ -1,0 +1,17 @@
+shape safety-raw-index-out-of-bounds {
+  family "compiler-errors/safety"
+  generator "error"
+  features ["error", "safety", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "safe-mode raw memory access out of bounds"
+  flags "--safe-mode"
+  source ny <<'NY'
+use std.core
+
+with ptr: p = malloc(4){
+   load32(p, 2)
+}
+NY
+}

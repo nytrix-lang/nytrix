@@ -1,0 +1,29 @@
+shape mt19937_smt {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.math.crypto.prng.mt19937
+use std.math.crypto.prng.mt19937_smt
+;; Probe 1: exact output constraint recovers a state word.
+;; We don't model twist here; just check the temper relation.
+def known_state = 0x12345678
+def out = mt_temper(known_state)
+def c = dict()
+def c1 = dict_set(dict_set(dict_set(dict_set(c, "index", 0), "kind", "eq"), "value", out), "bits", 0)
+def res = mt19937_smt_recover_state_prefix([c1])
+assert(dict_get(res, "sat", false), "sat")
+def ws = dict_get(res, "model_words", [])
+assert(len(ws) == 1, "one word")
+assert(mt_temper(get(ws, 0)) == out, "temper matches")
+;; Probe 2: high bits constraint (top 10 bits) is consistent.
+def out2 = mt_temper(0x0badc0de)
+def hi = out2 >> 22
+def c2 = dict_set(dict_set(dict_set(dict_set(dict(), "index", 0), "kind", "hi"), "value", hi), "bits", 10)
+def res2 = mt19937_smt_recover_state_prefix([c2])
+assert(dict_get(res2, "sat", false), "sat hi")
+print("mt19937_smt ok")
+NY
+}

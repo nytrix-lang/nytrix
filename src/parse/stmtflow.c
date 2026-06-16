@@ -14,7 +14,7 @@ stmt_t *ny_parse_stmt_or_block(parser_t *p) {
 static stmt_t *parse_if_internal(parser_t *p, token_t tok) {
   stmt_t *s = stmt_new(p->arena, NY_S_IF, tok);
   s->as.iff.init = NULL;
-  
+
   bool header_paren = false;
   if (p->cur.kind == NY_T_LPAREN) {
     token_t next = parser_peek(p);
@@ -28,15 +28,15 @@ static stmt_t *parse_if_internal(parser_t *p, token_t tok) {
     s->as.iff.init = p_parse_stmt(p);
     parser_match(p, NY_T_SEMI);
   }
-  
+
   s->as.iff.test = p_parse_expr(p, 0);
-  
+
   if (header_paren) {
     parser_expect(p, NY_T_RPAREN, "')' after condition", NULL);
   }
-  
+
   s->as.iff.conseq = ny_parse_stmt_or_block(p);
-  
+
   if (parser_match(p, NY_T_ELSE)) {
     if (p->cur.kind == NY_T_IF) {
       s->as.iff.alt = ny_parse_if_stmt(p);
@@ -100,9 +100,8 @@ stmt_t *ny_parse_while_stmt(parser_t *p) {
   bool attr_vectorize = false;
   bool attr_nounroll = false;
 
-  /* Parse optional loop attributes: @unroll, @nounroll, @vectorize/@simd */
   if (p->cur.kind == NY_T_AT) {
-    parser_advance(p); /* consume '@' */
+    parser_advance(p);
     while (p->cur.kind >= NY_T_IDENT && p->cur.kind <= NY_T_ENUM) {
       const char *name = p->cur.lexeme;
       size_t namelen = p->cur.len;
@@ -135,7 +134,7 @@ stmt_t *ny_parse_while_stmt(parser_t *p) {
   }
 
   s->as.whl.test = p_parse_expr(p, 0);
-  
+
   if (p->cur.kind == NY_T_PLUS_PLUS || p->cur.kind == NY_T_MINUS_MINUS) {
     s->as.whl.update = parse_incrdecr_stmt(p);
   } else if (header_paren && p->cur.kind != NY_T_RPAREN) {
@@ -149,7 +148,7 @@ stmt_t *ny_parse_while_stmt(parser_t *p) {
   p->loop_depth++;
   s->as.whl.body = ny_parse_stmt_or_block(p);
   p->loop_depth--;
-  
+
   s->as.whl.attr_unroll = attr_unroll;
   s->as.whl.attr_vectorize = attr_vectorize;
   s->as.whl.attr_nounroll = attr_nounroll;
@@ -157,7 +156,7 @@ stmt_t *ny_parse_while_stmt(parser_t *p) {
 }
 
 stmt_t *ny_parse_while_stmt_with_attr(parser_t *p, const char *attr_name, size_t attr_len) {
-  /* This is called when @attr was already consumed before 'while' */
+
   stmt_t *s = ny_parse_while_stmt(p);
   if (s) {
     if (attr_len == 6 && memcmp(attr_name, "unroll", 6) == 0) s->as.whl.attr_unroll = true;
@@ -198,9 +197,9 @@ stmt_t *ny_parse_for_stmt(parser_t *p) {
        parser_advance(p);
     }
   }
-  
+
   if (has_paren || p->cur.kind == NY_T_DEF || p->cur.kind == NY_T_MUT) {
-    /* C-style for loop: for(mut i=0; cond; update) or for mut i=0 cond update */
+
     stmt_t *init = p_parse_stmt(p);
     if (!init) return NULL;
     if (p->cur.kind == NY_T_SEMI) parser_advance(p);
@@ -228,8 +227,7 @@ stmt_t *ny_parse_for_stmt(parser_t *p) {
     s->as.fr.attr_nounroll = attr_nounroll;
     return s;
   }
-  
-  /* Iterator-style: for x in ... or for x, i in ... */
+
   bool iter_paren = false;
   if (p->cur.kind == NY_T_LPAREN) {
     token_t next = parser_peek(p);
@@ -267,7 +265,7 @@ stmt_t *ny_parse_for_stmt(parser_t *p) {
       return s;
     }
   }
-  
+
   parser_error(p, p->cur, "for expects loop variable or C-style init",
                "use 'for x in iterable' or 'for(mut i=0; cond; update)'");
   return NULL;

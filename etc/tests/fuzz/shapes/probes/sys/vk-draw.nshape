@@ -1,0 +1,46 @@
+shape vk-draw {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.ui.render.vk.draw as draw
+assert(draw.draw_rect_fast(0.0, 0.0, 10.0, 10.0, 0xffffffff) == 0, "draw rect no frame")
+assert(draw.draw_rect_outline_fast(0.0, 0.0, 10.0, 10.0, 0xffffffff) == 0, "draw outline no frame")
+assert(draw.draw_line_fast(0.0, 0.0, 10.0, 10.0, 1.0, 0xffffffff) == 0, "draw line no frame")
+assert(draw.draw_rect(0.0, 0.0, 10.0, 10.0, 1.0, 0.0, 0.0, 1.0) == 0, "draw rect wrapper no frame")
+assert(draw.draw_rect_tex(0.0, 0.0, 10.0, 10.0, -1, 1.0, 1.0, 1.0, 1.0) == 0, "draw textured rect no frame")
+assert(draw.draw_rect_tex_uv(0.0, 0.0, 10.0, 10.0, -1, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw uv rect no frame")
+assert(draw.draw_glyph(0.0, 0.0, 8.0, 8.0, 0.0, 0.0, 1.0, 1.0, -1, 1.0, 1.0, 1.0, 1.0) == 0, "draw glyph no frame")
+assert(draw.draw_vertices(0, 1, -1) == false, "draw vertices no frame")
+assert(draw.draw_vertices_indexed_raw(0, 1, 0, 0, 1) == false, "draw indexed vertices no frame")
+assert(draw.draw_lines_raw(0, 1, 1.0) == false, "draw lines raw no frame")
+assert(draw.draw_points_raw(0, 1) == false, "draw points raw no frame")
+assert(draw.draw_triangle_3d(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0) == 0, "draw triangle 3d no frame")
+assert(draw.draw_quad_3d(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw quad 3d no frame")
+assert(draw.draw_rect_lines_2d(0.0, 0.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw rect lines no frame")
+assert(draw.draw_chamfer_rect_2d(0.0, 0.0, 10.0, 10.0, 2.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw chamfer no frame")
+assert(draw.draw_rounded_rect_2d(0.0, 0.0, 10.0, 10.0, 2.0, 8, 1.0, 1.0, 1.0, 1.0) == 0, "draw rounded no frame")
+assert(draw.draw_fan_2d(0.0, 0.0, 5.0, 5.0, 8, 0.0, 6.28, 1.0, 1.0, 1.0, 1.0) == 0, "draw fan no frame")
+assert(draw.draw_ellipse_lines_2d(0.0, 0.0, 5.0, 5.0, 1.0, 16, 1.0, 1.0, 1.0, 1.0) == 0, "draw ellipse no frame")
+assert(draw.draw_arc_2d(0.0, 0.0, 5.0, 0.0, 3.14, 1.0, 8, 1.0, 1.0, 1.0, 1.0) == 0, "draw arc no frame")
+assert(draw.draw_sector_2d(0.0, 0.0, 1.0, 5.0, 0.0, 3.14, 8, 1.0, 1.0, 1.0, 1.0) == 0, "draw sector no frame")
+assert(draw.draw_star_2d(0.0, 0.0, 2.0, 5.0, 5, 0.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw star no frame")
+assert(draw.draw_line_3d(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.1, 1.0, 1.0, 1.0, 1.0) == 0, "draw line 3d no frame")
+assert(draw.draw_grid_3d(1.0, 0.5) == 0, "draw grid no frame")
+assert(draw.draw_axes_3d(1.0) == 0, "draw axes no frame")
+assert(draw.draw_line_strip_2d(0.0, 0.0, 10.0, 10.0, [0.0, 1.0], 1.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw line strip no frame")
+assert(draw.draw_static_buffer({"handle": 123, "offset": 0, "count": 3}) == false, "draw static buffer no frame")
+assert(draw.draw_static_buffer_raw(123, 0, 3) == false, "draw static raw no frame")
+assert(draw.draw_static_buffer_indexed({"handle": 123, "offset": 0, "ioffset": 0}, 456, 3) == false, "draw static indexed no frame")
+assert(draw.draw_static_buffer_indexed_raw(123, 0, 456, 0, 3) == false, "draw static indexed raw no frame")
+def axes = draw.mesh_build_axes_3d(1.0, 0.2)
+assert(is_dict(axes), "axis mesh dict")
+assert(axes.get("cnt") == 108, "axis mesh vertex count")
+assert(axes.get("ptr") != 0, "axis mesh allocation")
+free(axes.get("ptr"))
+print("vk_draw_probe ok")
+NY
+}

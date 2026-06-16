@@ -1,5 +1,5 @@
 #include "ast.c"
-/* keep init.c as the single runtime compilation unit */
+
 #include "bigint.c"
 #include "core.c"
 #include "simmd.c"

@@ -1,0 +1,46 @@
+shape otp_min_b2c2 {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module otp_min_b2c2(f)
+use std.core
+fn f(ciphertexts, key_size=nil, char_frequencies=nil, char_floor=-5){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut best_key = nil
+   mut best_score = nil
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut ok = true
+      mut i = 0
+      while(i < ks && ok){
+         def kb = 0
+         if(kb == nil){ ok = false } else { key = append(key, kb) }
+         i = i + 1
+      }
+      if(ok){
+         mut total_score = 0
+         mut ci = 0
+         while(ci < len(ciphertexts) && ok){
+            def score = 1
+            if(score == nil){ ok = false } else { total_score = total_score + score }
+            ci = ci + 1
+         }
+         if(ok && (best_score == nil || total_score > best_score)){
+            best_score = total_score
+            best_key = key
+         }
+      }
+      si = si + 1
+   }
+   best_key
+}
+if(comptime{__main()}){
+   print("ok c2")
+}
+NY
+}

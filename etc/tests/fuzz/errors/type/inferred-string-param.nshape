@@ -1,0 +1,18 @@
+shape type-inferred-string-param {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "function argument: expected str, got int"
+  source ny <<'NY'
+use std.core
+
+fn suffix(x) {
+   x + "!"
+}
+
+print(suffix(1))
+NY
+}

@@ -1,0 +1,22 @@
+shape ownership-borrow-syntax-release-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot release owned slot 'a' while borrow 'b' is live"
+  flags "--borrow-check"
+  source ny <<'NY'
+use std.core
+
+fn bad() int {
+   def a = [1]
+   def b = &a
+   release(a)
+   len(b)
+}
+
+bad()
+NY
+}

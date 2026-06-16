@@ -1,0 +1,24 @@
+shape png-decode2 {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.os
+use std.util.parse.img.png as png
+use std.os.path as ospath
+def res = file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
+if(is_err(res)){
+   print("READ_ERR")
+} else {
+   def data = unwrap(res)
+   def img = png.decode(data)
+   if(img){
+      print("PNG_OK", dict_get(img, "width", 0), dict_get(img, "height", 0), len(dict_get(img, "data", "")))
+   } else {
+      print("PNG_BAD")
+   }
+}
+NY
+}

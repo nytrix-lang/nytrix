@@ -1,0 +1,119 @@
+shape otp_min_b2a {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module otp_min_b2a(
+   _otp_transpose,
+   _otp_frequency_key_byte,
+   _otp_minimal_period,
+   otp_apply_key
+)
+use std.core
+use std.math.bin
+use std.math
+fn _otp_lower(b){ (b >= 65 && b <= 90) ? (b + 32) : b }
+fn _otp_default_weight(b){
+   def c = _otp_lower(b)
+   if(c == 32){ return 130 }
+   if(c >= 33 && c <= 126){ return 1 }
+   0
+}
+fn _otp_freq_weight(char_frequencies, b, char_floor){
+   if(char_frequencies == nil){ return _otp_default_weight(b) }
+   def c = _otp_lower(b)
+   mut weight = dict_get(char_frequencies, c, nil)
+   if(weight == nil){ weight = dict_get(char_frequencies, bytes_to_str([c]), nil) }
+   if(weight == nil){ return char_floor }
+   if(weight <= 0){ return char_floor }
+   log10(weight)
+}
+fn otp_score_english(bytes, char_frequencies=nil, char_floor=-5){
+   mut score = 0
+   mut i = 0
+   while(i < len(bytes)){
+      def b = get(bytes, i)
+      if(!((b >= 32 && b <= 126) || b == 9 || b == 10 || b == 13)){ return nil }
+      score = score + _otp_freq_weight(char_frequencies, b, char_floor)
+      i = i + 1
+   }
+   score
+}
+fn _otp_transpose(ciphertexts, offset, key_size){
+   mut out = list(0)
+   mut ci = 0
+   while(ci < len(ciphertexts)){
+      def ct = get(ciphertexts, ci)
+      mut j = offset
+      while(j < len(ct)){
+         out = append(out, get(ct, j))
+         j = j + key_size
+      }
+      ci = ci + 1
+   }
+   out
+}
+fn _otp_frequency_key_byte(bytes, char_frequencies, char_floor){
+   mut best_key = nil
+   mut best_score = nil
+   mut k = 0
+   while(k < 256){
+      mut plain = list(0)
+      mut i = 0
+      while(i < len(bytes)){
+         plain = append(plain, get(bytes, i) ^ k)
+         i = i + 1
+      }
+      def score = otp_score_english(plain, char_frequencies, char_floor)
+      if(score != nil && (best_score == nil || score > best_score)){
+         best_score = score
+         best_key = k
+      }
+      k = k + 1
+   }
+   best_key
+}
+fn _otp_minimal_period(key){
+   def n = len(key)
+   mut period = 1
+   while(period <= n){
+      if(n % period == 0){
+         mut ok = true
+         mut i = 0
+         while(i < n && ok){
+            if(get(key, i) != get(key, i % period)){ ok = false }
+            i = i + 1
+         }
+         if(ok){
+            mut out = list(0)
+            mut j = 0
+            while(j < period){
+               out = append(out, get(key, j))
+               j = j + 1
+            }
+            return out
+         }
+      }
+      period = period + 1
+   }
+   key
+}
+fn otp_apply_key(data, key){
+   def n = len(data)
+   def kn = len(key)
+   if(kn == 0){ return _clone_list(data) }
+   mut out = list(0)
+   mut i = 0
+   while(i < n){
+      out = append(out, get(data, i) ^ get(key, i % kn))
+      i = i + 1
+   }
+   out
+}
+if(comptime{__main()}){
+   print("ok b2a")
+}
+NY
+}

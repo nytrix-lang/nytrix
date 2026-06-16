@@ -1,0 +1,19 @@
+shape type-bad-return {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use std.core
+
+fn bad(bool flag) int {
+   if flag { return 1 }
+   return "x"
+}
+
+print(bad(false))
+NY
+}

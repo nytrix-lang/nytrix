@@ -1,0 +1,6 @@
+shape byte-scan-load8 {
+  family "stress-byte-scan"
+  generator "stress"
+  features ["stress-style", "optimizer-pattern", "strings", "load8", "byte-scan", "reduction", "inbounds"]
+  template stress-byte-scan-load8
+}

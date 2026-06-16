@@ -1,0 +1,27 @@
+shape ownership-mutate-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot mutate owned slot 'a' while borrow 'b' is live"
+  flags "--borrow-check"
+  source ny <<'NY'
+use std.core
+
+@mutates(x)
+fn touch(x) int {
+   0
+}
+
+fn bad() int {
+   def a = [1, 2]
+   def b = borrow(a)
+   touch(a)
+   len(b)
+}
+
+bad()
+NY
+}

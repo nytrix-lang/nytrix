@@ -1,0 +1,19 @@
+shape type-polymorphic-return-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "variable declaration: expected str, got int"
+  source ny <<'NY'
+use std.core
+
+fn id(x) {
+   x
+}
+
+def str s = id(1)
+print(s)
+NY
+}

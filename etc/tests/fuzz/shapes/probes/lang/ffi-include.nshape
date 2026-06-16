@@ -1,0 +1,13 @@
+shape ffi_include {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#include <string.h> link "c"
+extern fn strlen(ptr: s): u64 as "strlen"
+use std.core
+print(to_str(strlen("abc")))
+NY
+}

@@ -1,0 +1,38 @@
+shape font {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.error
+use std.os
+use std.os.ui.font.truetype as ttf
+def path = "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+def info = ttf.load_path(path, 0)
+assert(info != 0, "font probe load path")
+def gi = ttf.get_glyph_index(info, 65)
+print("gi A=" + to_str(gi))
+def scale = ttf.scale_for_pixel_height(info, 32.0)
+def bm = ttf.get_glyph_bitmap(info, scale, scale, gi)
+assert(bm != 0, "font probe bitmap")
+def w = bm.get("width", 0)
+def h = bm.get("height", 0)
+def data = bm.get("data", 0)
+print("bitmap=" + to_str(w) + "x" + to_str(h) + " xoff=" + to_str(bm.get("xoff", 0)) + " yoff=" + to_str(bm.get("yoff", 0)))
+mut y = 0
+while y < h {
+   mut line = ""
+   mut x = 0
+   while x < w {
+      def a = load8(data, (y * w + x) * 4 + 3)
+      line += a > 180 ? "#" : (a > 40 ? "+" : ".")
+      x += 1
+   }
+   print(line)
+   y += 1
+}
+ttf.unload(info)
+NY
+}
