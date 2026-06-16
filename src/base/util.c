@@ -32,7 +32,6 @@
 #include <linux/limits.h>
 #endif
 
-static int ny_is_sep(char c) { return c == '/' || c == '\\'; }
 static const char *ny_first_nonempty_env(const char *const *names, size_t name_count) {
   if (!names)
     return NULL;
@@ -85,23 +84,6 @@ void ny_compiler_assert_fail(const char *file, int line, const char *func, const
   fprintf(stderr, "  hint: rerun with --dump-on-error or keep NYTRIX_COMPILER_ASSERTS=1 under stress\n");
   fflush(stderr);
   abort();
-}
-
-void ny_join_path(char *out, size_t out_len, const char *dir, const char *name) {
-  if (!out || out_len == 0)
-    return;
-  if (!dir || !*dir) {
-    snprintf(out, out_len, "%s", name ? name : "");
-    return;
-  }
-  size_t dlen = strlen(dir);
-  int needs_sep = 1;
-  if (dlen > 0 && ny_is_sep(dir[dlen - 1]))
-    needs_sep = 0;
-  if (needs_sep)
-    snprintf(out, out_len, "%s/%s", dir, name ? name : "");
-  else
-    snprintf(out, out_len, "%s%s", dir, name ? name : "");
 }
 
 bool ny_extract_line(const char *src, int line, const char **out_start, size_t *out_len) {
@@ -262,38 +244,6 @@ bool ny_write_if_changed(const char *path, const char *content, size_t len) {
     free(old);
   }
   return ny_write_file(path, content, len) == 0;
-}
-
-int ny_ensure_dir(const char *path) {
-  struct stat st = {0};
-  if (stat(path, &st) == -1) {
-#ifdef _WIN32
-    return _mkdir(path);
-#else
-    return mkdir(path, 0755);
-#endif
-  }
-  return 0;
-}
-
-void ny_ensure_dir_recursive(const char *path) {
-  if (!path || !*path)
-    return;
-  char tmp[1024];
-  snprintf(tmp, sizeof(tmp), "%s", path);
-  size_t len = strlen(tmp);
-  if (len == 0)
-    return;
-  if (tmp[len - 1] == '/')
-    tmp[len - 1] = 0;
-  for (char *p = tmp + 1; *p; p++) {
-    if (*p != '/')
-      continue;
-    *p = 0;
-    ny_ensure_dir(tmp);
-    *p = '/';
-  }
-  ny_ensure_dir(tmp);
 }
 
 int ny_copy_file(const char *src, const char *dst) {
@@ -505,17 +455,6 @@ char *ny_strdup(const char *s) {
     return NULL;
   memcpy(copy, s, len + 1);
   return copy;
-}
-
-bool ny_env_is_truthy(const char *v) {
-  if (!v || !*v)
-    return false;
-  if (strcmp(v, "0") == 0 || strcmp(v, "false") == 0 || strcmp(v, "False") == 0 ||
-      strcmp(v, "FALSE") == 0 || strcmp(v, "off") == 0 || strcmp(v, "OFF") == 0 ||
-      strcmp(v, "no") == 0 || strcmp(v, "NO") == 0) {
-    return false;
-  }
-  return true;
 }
 
 bool ny_env_enabled(const char *name) {

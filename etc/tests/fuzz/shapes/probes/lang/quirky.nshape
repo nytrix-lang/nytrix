@@ -1,0 +1,58 @@
+shape quirky {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.core.error
+fn inc(x){ x + 1 }
+fn main(_args){
+   ;; Pipeline + ternary + optional chaining + nil-coalescing.
+   def x = 10 |> inc() |> inc()
+   def v = (x > 0) ? x : 0
+   def obj = {"a": v}
+   def maybe = nil
+   def got = maybe?.a ?? obj?.a ?? -1
+   if(got != 12){
+      print("FAIL sugar got=" + to_str(got))
+      return 1
+   }
+   ;; Match with guard.
+   def r = match ok(42){
+      ok(n) if n > 40 -> n
+      ok(n) -> n + 1
+      err(_) -> -1
+      _ -> -2
+   }
+   if(r != 42){
+      print("FAIL match got=" + to_str(r))
+      return 2
+   }
+   ;; while-header sugar + list/dict mutation semantics.
+   mut sum = 0
+   while(mut i = 0 i < 5 ++i){
+      sum += i
+   }
+   if(sum != 10){
+      print("FAIL loop sum=" + to_str(sum))
+      return 3
+   }
+   mut xs = []
+   xs = append(xs, 7)
+   xs = append(xs, 9)
+   mut d = dict(4)
+   d = dict_set(d, "x", get(xs, 0, -1))
+   d = dict_set(d, "y", get(xs, 1, -1))
+   if(int(dict_get(d, "x", -1)) != 7 || int(dict_get(d, "y", -1)) != 9){
+      print("FAIL data")
+      return 4
+   }
+   print("OK lang/quirky")
+   0
+}
+main([])
+NY
+}

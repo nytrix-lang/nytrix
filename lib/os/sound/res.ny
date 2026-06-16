@@ -14,7 +14,7 @@ use std.os.clock (ticks)
 use std.os.path as path
 use std.os.fs as fs
 use std.core.str as str
-use std.parse.img as image
+use std.math.parse.img as image
 use std.os.sound.diag as sound_debug
 use std.os.sound.source
 

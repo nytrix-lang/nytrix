@@ -151,7 +151,7 @@ static inline int64_t rt_prepare_raw_callable(int64_t f) {
 int64_t rt_call0(int64_t f) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -170,13 +170,6 @@ int64_t rt_call0(int64_t f) {
   return ((int64_t (*)(void))f)();
 }
 
-/* Pointer-returning native calls.
- *
- * The generic rt_callN paths tag return values as Ny integers (rt_tag_v),
- * which is correct for numeric returns but destroys raw pointers (Z3, etc).
- * These helpers return NY-native-tagged handles so Ny code can safely pass
- * them back into further native calls (arguments are untagged via rt_untag_v).
- */
 int64_t rt_call0_ptr(int64_t f) {
   if (!f)
     return 0;
@@ -192,7 +185,7 @@ int64_t rt_call0_ptr(int64_t f) {
 int64_t rt_call0_i32(int64_t f) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -205,14 +198,12 @@ int64_t rt_call0_i32(int64_t f) {
 int64_t rt_call1(int64_t f, int64_t a0) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     int64_t v0 = rt_untag_v(a0);
-    /* `rt_untag_v()` already decodes native handles. Re-checking the untagged
-     * value with NY_NATIVE_IS would misclassify ordinary integers such as 110
-     * ('n') because their low bits also end in 0b110. */
+
     if (is_heap_ptr(v0))
       v0 = (int64_t)(uintptr_t)rt_untag_v(v0);
     int64_t res_raw = NY_NATIVE_RET1(NY_NATIVE_DECODE(f), v0);
@@ -246,7 +237,7 @@ int64_t rt_call1_ptr(int64_t f, int64_t a0) {
 int64_t rt_call1_i64(int64_t f, int64_t a0) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -265,7 +256,7 @@ int64_t rt_call1_i64(int64_t f, int64_t a0) {
 int64_t rt_call1_u32(int64_t f, int64_t a0) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -279,15 +270,13 @@ int64_t rt_call1_u32(int64_t f, int64_t a0) {
 int64_t rt_call2(int64_t f, int64_t a0, int64_t a1) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     int64_t v0 = rt_untag_v(a0);
     int64_t v1 = rt_untag_v(a1);
-    /* Do not run NY_NATIVE_IS on already-untagged integers here. Native
-     * handles are decoded by rt_untag_v(), while plain ints must stay plain
-     * ints for foreign APIs such as FreeType glyph lookup. */
+
     if (is_heap_ptr(v0))
       v0 = (int64_t)(uintptr_t)rt_untag_v(v0);
     if (is_heap_ptr(v1))
@@ -336,16 +325,14 @@ int64_t rt_call2_ptr_u32(int64_t f, int64_t a0, int64_t a1) {
 int64_t rt_call3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     int64_t v0 = rt_untag_v(a0);
     int64_t v1 = rt_untag_v(a1);
     int64_t v2 = rt_untag_v(a2);
-    /* If any argument is a heap pointer, treat it as a raw pointer when
-     * calling foreign functions. Native handles have already been untagged by
-     * rt_untag_v(); only actual heap values need extra unwrapping here. */
+
     if (is_heap_ptr(v0))
       v0 = (int64_t)(uintptr_t)rt_untag_v(v0);
     if (is_heap_ptr(v1))
@@ -426,7 +413,7 @@ int64_t rt_call3_ptr_ptr_u32(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
 int64_t rt_call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -434,8 +421,7 @@ int64_t rt_call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
     int64_t v1 = rt_untag_v(a1);
     int64_t v2 = rt_untag_v(a2);
     int64_t v3 = rt_untag_v(a3);
-    /* If any argument is a heap pointer, treat them as raw pointers (do not
-     * pass Ny header-tagged values as integers to foreign functions). */
+
     if (is_heap_ptr(v0))
       v0 = (int64_t)(uintptr_t)rt_untag_v(v0);
     if (is_heap_ptr(v1))
@@ -580,7 +566,7 @@ int64_t rt_call5_ptr_ptr_ptr_u64_i32_i32(int64_t f, int64_t a0, int64_t a1, int6
 int64_t rt_call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -620,7 +606,7 @@ int64_t rt_call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int6
                  int64_t a5) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -646,7 +632,7 @@ int64_t rt_call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int6
                  int64_t a6) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -674,7 +660,7 @@ int64_t rt_call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int6
                  int64_t a6, int64_t a7) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -702,7 +688,7 @@ int64_t rt_call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int6
                  int64_t a6, int64_t a7, int64_t a8) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -730,7 +716,7 @@ int64_t rt_call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
                   int64_t a6, int64_t a7, int64_t a8, int64_t a9) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -759,7 +745,7 @@ int64_t rt_call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
                   int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -789,7 +775,7 @@ int64_t rt_call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
                   int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -821,7 +807,7 @@ int64_t rt_call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
                   int64_t a12) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -844,7 +830,7 @@ int64_t rt_call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
           env, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
     }
   }
-  /* For raw function pointers, untag arguments to get raw values */
+
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                        int64_t, int64_t, int64_t, int64_t, int64_t))f)(a0, a1, a2, a3, a4, a5, a6,
                                                                        a7, a8, a9, a10, a11, a12);
@@ -855,7 +841,7 @@ int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
                   int64_t a12, int64_t a13) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -878,7 +864,7 @@ int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
           env, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13);
     }
   }
-  /* For raw function pointers, untag arguments to get raw values */
+
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                        int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f)(
       a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13);
@@ -889,7 +875,7 @@ int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
                   int64_t a12, int64_t a13, int64_t a14) {
   if (!f)
     return 1;
-  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
@@ -913,7 +899,7 @@ int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
                                           a12, a13, a14);
     }
   }
-  /* For raw function pointers, untag arguments to get raw values */
+
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                        int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f)(
       a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
@@ -1138,8 +1124,6 @@ int64_t rt_call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d)
                                              rt_ffi_f32_arg(c), rt_ffi_f32_arg(d));
   return 1;
 }
-
-// Zlib conventions
 
 #include <zlib.h>
 

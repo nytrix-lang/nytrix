@@ -1,0 +1,27 @@
+shape type-impl-method-duplicate {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "duplicate impl method 'Meter.val/1'"
+  source ny <<'NY'
+use std.core
+
+impl Meter {
+   fn val(self m) int {
+      m.get("value", 0)
+   }
+}
+
+impl Meter {
+   fn val(self m) int {
+      m.get("other", 0)
+   }
+}
+
+def Meter m = Meter({"value": 1})
+print(m.val)
+NY
+}

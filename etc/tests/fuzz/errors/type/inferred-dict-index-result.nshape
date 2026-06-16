@@ -1,0 +1,19 @@
+shape type-inferred-dict-index-result {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "variable declaration: expected str, got int"
+  source ny <<'NY'
+use std.core
+
+fn getx(d) {
+   d["x"]
+}
+
+def str s = getx({"x": 1})
+print(s)
+NY
+}

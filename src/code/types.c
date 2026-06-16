@@ -1398,7 +1398,7 @@ static bool literal_int_fits(int64_t val, const char *want) {
   case NY_BT_U64:
   case NY_BT_U128:
     return val >=
-           0; /* already checked by parser strtoull range, but check sign */
+           0;
   default:
     return true;
   }
@@ -1563,7 +1563,7 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
         if (b->type_name && !is_int_type_name(b->type_name) &&
             !is_float_type_name(b->type_name))
           return b->type_name;
-        /* Check type inference flags first */
+
         if (b->is_int_slot || b->is_int_direct)
           return "int";
         if (b->is_f64_slot || b->is_f64_direct)
@@ -2027,7 +2027,7 @@ bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
         return true;
       if (is_number_type_name(want))
         return true;
-      /* Allow integer literals as ptr (null pointer idiom for extern calls) */
+
       if (strcmp(want, "ptr") == 0)
         return true;
       if (is_bool_type_name(want) || is_str_type_name(want) ||
@@ -2060,7 +2060,7 @@ bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
         cg->had_error = 1;
         return false;
       }
-      /* Allow string literals as ptr (C const char*) for extern fn calls */
+
       if (strcmp(want, "ptr") == 0 || strcmp(want, "i64") == 0)
         return true;
       ny_diag_error(tok, "cannot assign string literal to %s", want);
@@ -2514,7 +2514,7 @@ static bool type_get_default_is_proven_int(codegen_t *cg, scope *scopes,
                                            size_t depth, expr_t *default_expr,
                                            int recursion) {
   if (!default_expr)
-    return true; /* get(...): implicit default is 0 */
+    return true;
   return type_expr_proven_int_with_params(cg, scopes, depth, default_expr, NULL,
                                           0, recursion + 1);
 }

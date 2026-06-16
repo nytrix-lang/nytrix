@@ -1,0 +1,19 @@
+shape type-operator-unresolved {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unresolved operator '+' for Meter and Meter"
+  source ny <<'NY'
+use std.core
+
+impl Meter {}
+
+def Meter a = Meter({"value": 1})
+def Meter b = Meter({"value": 2})
+def c = a + b
+print(c)
+NY
+}

@@ -1,0 +1,45 @@
+shape png-decode_one {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.math.bin as bin
+use std.util.parse.image as image
+use std.util.parse.img.png as png
+use std.util.parse.str as str
+fn main(){
+   def path = str.strip(to_str(env("PNG_PATH")))
+   if(len(path) == 0){
+      print("ERR\tmissing_path")
+      return 1
+   }
+   def read_res = file_read(path)
+   if(!is_ok(read_res)){
+      print("ERR\tread_failed\t" + path)
+      return 3
+   }
+   def img = png.decode(unwrap(read_res))
+   if(!is_dict(img)){
+      print("ERR\tdecode_failed\t" + path)
+      return 2
+   }
+   def hex = bin.bytes_to_hex(bin.str_to_bytes(dict_get(img, "data", "")))
+   print(
+      path
+      + "\t" + to_str(dict_get(img, "width", 0))
+      + "\t" + to_str(dict_get(img, "height", 0))
+      + "\t" + hex
+      + "\t" + to_str(dict_get(img, "channels", 0))
+   )
+   image.free(img)
+   0
+}
+if(comptime{__main()}){
+   main()
+}
+NY
+}

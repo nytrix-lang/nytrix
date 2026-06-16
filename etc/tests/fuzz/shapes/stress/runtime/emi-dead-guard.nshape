@@ -1,0 +1,6 @@
+shape emi-dead-guard {
+  family "stress-emi-cfg"
+  generator "stress"
+  features ["stress-style", "optimizer-pattern", "emi", "dead-guard", "branches", "cfg", "typed-int"]
+  template stress-emi-dead-guard
+}

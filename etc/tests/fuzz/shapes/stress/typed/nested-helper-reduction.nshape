@@ -1,0 +1,6 @@
+shape nested-helper-reduction {
+  family "nested-helper-int"
+  generator "typed"
+  features ["functions", "nested-loops", "helper-chain", "reduction", "typed-int"]
+  template nested-helper-reduction
+}

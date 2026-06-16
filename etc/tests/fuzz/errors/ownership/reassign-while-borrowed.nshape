@@ -1,0 +1,22 @@
+shape ownership-reassign-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot reassign owned slot 'a' while borrow 'b' is live"
+  flags "--borrow-check"
+  source ny <<'NY'
+use std.core
+
+fn bad() int {
+   mut a = [1]
+   def b = borrow(a)
+   a = [2]
+   len(b)
+}
+
+bad()
+NY
+}

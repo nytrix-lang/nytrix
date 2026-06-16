@@ -1,0 +1,26 @@
+shape png-info2 {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.os
+use std.os.path as ospath
+def res = file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
+if(is_err(res)){
+   print("READ_ERR")
+} else {
+   def data = unwrap(res)
+   print("LEN", len(data))
+   def p = 8
+   def length = (load8(data,p) << 24) | (load8(data,p+1) << 16) | (load8(data,p+2) << 8) | load8(data,p+3)
+   def typ = (load8(data,p+4) << 24) | (load8(data,p+5) << 16) | (load8(data,p+6) << 8) | load8(data,p+7)
+   print("IHDR_LEN", length, "TYPE", typ)
+   def c = p + 8
+   print("W", (load8(data,c) << 24) | (load8(data,c+1) << 16) | (load8(data,c+2) << 8) | load8(data,c+3))
+   print("H", (load8(data,c+4) << 24) | (load8(data,c+5) << 16) | (load8(data,c+6) << 8) | load8(data,c+7))
+   print("BD", load8(data,c+8), "CT", load8(data,c+9), "CM", load8(data,c+10), "FM", load8(data,c+11), "IM", load8(data,c+12))
+}
+NY
+}

@@ -1,0 +1,24 @@
+shape control-switch {
+  family "program-synth"
+  generator "program"
+  features ["program", "branching", "switch", "nested-control", "expression-trees"]
+  template ast-program
+  synth {
+    globals 2..5
+    arrays 1..3
+    structs 0..2
+    functions 4..8
+    statements 38..82
+    expression_depth 3..5
+    loop_depth 2..4
+    locals 4..8
+    params 1..4
+    scalar_widths "u16,u32,u64"
+    array_dims 1..2
+    statement_mix "branchy"
+    helper_mix "rich"
+    call_chance 28
+    switch_chance 42
+    pointer_chance 6
+  }
+}

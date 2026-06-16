@@ -1,0 +1,16 @@
+shape type-assert-compile-range {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "compile-time range assertion failed"
+  source ny <<'NY'
+use std.core
+
+def int x = 9
+assert_compile_range(x, 0, 3)
+print(x)
+NY
+}

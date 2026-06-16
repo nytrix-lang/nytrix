@@ -1,0 +1,15 @@
+shape type-call-non-function {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "local call: expected callable, got int"
+  source ny <<'NY'
+use std.core
+
+def int x = 1
+print(x())
+NY
+}

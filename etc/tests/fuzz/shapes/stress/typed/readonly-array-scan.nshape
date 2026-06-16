@@ -1,0 +1,6 @@
+shape readonly-array-scan {
+  family "array-readonly"
+  generator "typed"
+  features ["arrays", "get", "len", "readonly-array", "inbounds"]
+  template readonly-array-scan
+}

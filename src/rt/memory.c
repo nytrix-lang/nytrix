@@ -7,7 +7,6 @@
 
 extern int64_t rt_copy_mem(int64_t dst, int64_t src, int64_t n);
 
-/* Manual memset to avoid IFUNC issues with Vulkan driver */
 #define memset_manual(p, v, n)                                                                     \
   do {                                                                                             \
     unsigned char *_p = (unsigned char *)(p);                                                      \
@@ -408,7 +407,7 @@ int64_t rt_realloc(int64_t p_val, int64_t newsz) {
     return 0;
 
   memcpy((void *)(uintptr_t)res, (void *)(uintptr_t)p_val, old_cap);
-  // Transfer Nytrix header (length and tag)
+
   *(int64_t *)((char *)(uintptr_t)res - 16) = *(int64_t *)((char *)(uintptr_t)p_val - 16);
   *(int64_t *)((char *)(uintptr_t)res - 8) = *(int64_t *)((char *)(uintptr_t)p_val - 8);
 

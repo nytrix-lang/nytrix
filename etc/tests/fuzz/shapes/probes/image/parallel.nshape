@@ -1,0 +1,61 @@
+shape parallel {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.util.parse.image as image
+use std.os.thread
+def FILES = [
+   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img0.jpg",
+   "etc/assets/models/gltf/tests/MorphStressTest/Base_AO.png",
+   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img2.jpg",
+   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img3.png"
+]
+fn worker(args){
+   def id = int(get(args, 0, 0))
+   def rounds = int(get(args, 1, 1))
+   mut round = 0
+   while(round < rounds){
+      mut i = 0
+      while(i < len(FILES)){
+         def path = to_str(get(FILES, i, ""))
+         def img = image.load(path)
+         if(!img){
+            return "worker=" + to_str(id) + " round=" + to_str(round) + " file=" + path
+         }
+         i += 1
+      }
+      round += 1
+   }
+   ""
+}
+fn main(){
+   mut workers = 4
+   mut rounds = 100
+   if(argc() > 1){ workers = to_int(argv(1)) }
+   if(argc() > 2){ rounds = to_int(argv(2)) }
+   mut handles = []
+   mut wi = 0
+   while(wi < workers){
+      handles = append(handles, thread_spawn(worker, [wi, rounds]))
+      wi += 1
+   }
+   mut hi = 0
+   while(hi < len(handles)){
+      def res = to_str(thread_join(get(handles, hi, 0)))
+      if(len(res) > 0){
+         print("[img-parallel] fail " + res)
+         return 1
+      }
+      hi += 1
+   }
+   print("[img-parallel] ok workers=" + to_str(workers) + " rounds=" + to_str(rounds))
+   0
+}
+main()
+NY
+}

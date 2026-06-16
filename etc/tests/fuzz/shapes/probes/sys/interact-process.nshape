@@ -1,0 +1,46 @@
+shape interact-process {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os as os
+use std.os.interact as interact
+fn assert_proc(any p, str label) any {
+   assert(p != 0, label + " process started")
+   nil
+}
+def script1 = "printf 'ready\\n'; IFS= read line; printf 'got:%s\\n' \"$line\""
+def p1 = interact.proc("/bin/sh", ["/bin/sh", "-c", script1])
+assert_proc(p1, "expect")
+os.msleep(50)
+assert(interact.recv_until(p1, "ready\n", 128) == "ready\n", "recv_until prompt")
+assert(interact.sendline(p1, "hello") >= 0, "sendline")
+os.msleep(50)
+def hit = interact.expect(p1, ["missing", "got:hello\n"], 128)
+assert(hit.get(0) == 1, "expect selected second needle")
+assert(hit.get(1).contains("got:hello"), "expect captured output")
+assert(interact.close(p1) >= 0, "close expect process")
+def script2 = "printf 'name? '; IFS= read name; printf 'welcome:%s\\n' \"$name\""
+def p2 = interact.proc("/bin/sh", ["/bin/sh", "-c", script2])
+assert_proc(p2, "sendline_after")
+os.msleep(50)
+def prompt = interact.sendline_after(p2, "name? ", "nytrix", 128)
+assert(prompt == "name? ", "sendline_after returns prompt")
+os.msleep(50)
+def reply = interact.recv_until(p2, "\n", 128)
+assert(reply == "welcome:nytrix\n", "sendline_after reply")
+assert(interact.close(p2) >= 0, "close sendline_after process")
+def script3 = "printf 'alpha\\nbeta\\n'"
+def p3 = interact.proc("/bin/sh", ["/bin/sh", "-c", script3])
+assert_proc(p3, "expect_map")
+os.msleep(50)
+def mapped = interact.expect_map(p3, {"beta": "BETA", "gamma": "GAMMA"}, 128)
+assert(mapped.get(0) == "BETA", "expect_map tag")
+assert(mapped.get(1).contains("beta"), "expect_map buffer")
+assert(interact.close(p3) >= 0, "close expect_map process")
+print("interact process probe passed")
+NY
+}

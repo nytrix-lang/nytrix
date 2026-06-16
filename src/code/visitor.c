@@ -102,9 +102,7 @@ void ny_visit_expr(ny_visitor_t *v, expr_t *e) {
       break;
     case NY_E_LAMBDA:
     case NY_E_FN:
-      // Note: We don't automatically traverse into lambda bodies
-      // because they are distinct scopes/functions.
-      // Callers can handle this in pre/post if needed.
+
       break;
     case NY_E_IDENT:
     case NY_E_LITERAL:

@@ -1,0 +1,16 @@
+shape type-strict-heterogeneous-dict {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-heterogeneous-dict"
+  flags "--strict-types"
+  source ny <<'NY'
+use std.core
+
+def cfg = {"name": "ny", "version": 1}
+print(cfg)
+NY
+}

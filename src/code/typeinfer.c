@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Forward declarations */
 void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s);
 static void typeinfer_walk_expr(typeinfer_ctx_t *ctx, expr_t *e);
 
@@ -245,7 +244,6 @@ static size_t typeinfer_align_up(size_t value, size_t align) {
   return rem ? value + (align - rem) : value;
 }
 
-/* Initialize type inference context */
 void typeinfer_ctx_init(typeinfer_ctx_t *ctx, size_t max_vars, scope *scopes, codegen_t *cg) {
   if (!ctx)
     return;
@@ -255,7 +253,6 @@ void typeinfer_ctx_init(typeinfer_ctx_t *ctx, size_t max_vars, scope *scopes, co
   ny_type_arena_init(&ctx->type_arena);
   ctx->formal_hm_enabled = true;
 
-  /* Initialize hash table for O(1) lookups */
   ctx->hash_cap = max_vars * 2;
   if (ctx->hash_cap < 16)
     ctx->hash_cap = 16;
@@ -291,7 +288,6 @@ void typeinfer_ctx_init(typeinfer_ctx_t *ctx, size_t max_vars, scope *scopes, co
   ctx->cg = cg;
 }
 
-/* Dispose type inference context */
 void typeinfer_ctx_dispose(typeinfer_ctx_t *ctx) {
   if (!ctx)
     return;
@@ -300,7 +296,6 @@ void typeinfer_ctx_dispose(typeinfer_ctx_t *ctx) {
   memset(ctx, 0, sizeof(*ctx));
 }
 
-/* Find variable index by name using hash table */
 static int typeinfer_find_var(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name || !*name || !ctx->hash_table || ctx->hash_cap == 0)
     return -1;
@@ -308,7 +303,6 @@ static int typeinfer_find_var(typeinfer_ctx_t *ctx, const char *name) {
   uint64_t h = ny_hash64_cstr(name);
   size_t idx = h % ctx->hash_cap;
 
-  /* Linear probing */
   for (size_t i = 0; i < ctx->hash_cap; i++) {
     int var_idx = ctx->hash_table[(idx + i) % ctx->hash_cap];
     if (var_idx == -1)
@@ -319,7 +313,6 @@ static int typeinfer_find_var(typeinfer_ctx_t *ctx, const char *name) {
   return -1;
 }
 
-/* Add a variable to the inference context */
 void typeinfer_add_var(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name || !*name || !ctx->vars || !ctx->hash_table ||
       ctx->hash_cap == 0)
@@ -335,7 +328,6 @@ void typeinfer_add_var(typeinfer_ctx_t *ctx, const char *name) {
   ctx->vars[ctx->var_names_len++].name = name;
   ctx->vars[new_idx].type = ny_type_var(&ctx->type_arena);
 
-  /* Insert into hash table */
   uint64_t h = ny_hash64_cstr(name);
   size_t h_idx = h % ctx->hash_cap;
   while (ctx->hash_table[h_idx] != -1) {
@@ -357,7 +349,6 @@ static bool typeinfer_unify_named(typeinfer_ctx_t *ctx, int idx, const char *typ
   return ok;
 }
 
-/* Mark a variable as proven i64 */
 void typeinfer_mark_i64(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name)
     return;
@@ -369,7 +360,6 @@ void typeinfer_mark_i64(typeinfer_ctx_t *ctx, const char *name) {
   }
 }
 
-/* Mark a variable as proven f64 */
 void typeinfer_mark_f64(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name)
     return;
@@ -381,7 +371,6 @@ void typeinfer_mark_f64(typeinfer_ctx_t *ctx, const char *name) {
   }
 }
 
-/* Mark a variable as used in dynamic context (needs tags) */
 void typeinfer_mark_dynamic(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name)
     return;
@@ -392,17 +381,15 @@ void typeinfer_mark_dynamic(typeinfer_ctx_t *ctx, const char *name) {
   }
 }
 
-/* Check if a variable escapes */
 bool typeinfer_escapes(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name)
-    return true; /* Conservative: assume escape if unknown */
+    return true;
   int idx = typeinfer_find_var(ctx, name);
   if (idx < 0)
     return true;
   return ctx->vars[idx].escapes;
 }
 
-/* Mark a variable as escaping */
 void typeinfer_mark_escape(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name)
     return;
@@ -413,7 +400,6 @@ void typeinfer_mark_escape(typeinfer_ctx_t *ctx, const char *name) {
   }
 }
 
-/* Check if a variable is proven i64 */
 bool typeinfer_is_i64(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name)
     return false;
@@ -423,7 +409,6 @@ bool typeinfer_is_i64(typeinfer_ctx_t *ctx, const char *name) {
   return ctx->vars[idx].is_i64_proven && !ctx->vars[idx].is_used_in_dynamic;
 }
 
-/* Check if a variable is proven f64 */
 bool typeinfer_is_f64(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name)
     return false;
@@ -433,7 +418,6 @@ bool typeinfer_is_f64(typeinfer_ctx_t *ctx, const char *name) {
   return ctx->vars[idx].is_f64_proven && !ctx->vars[idx].is_used_in_dynamic;
 }
 
-/* Check if a variable needs dynamic tagging */
 bool typeinfer_needs_dynamic(typeinfer_ctx_t *ctx, const char *name) {
   if (!ctx || !name)
     return false;
@@ -443,14 +427,12 @@ bool typeinfer_needs_dynamic(typeinfer_ctx_t *ctx, const char *name) {
   return ctx->vars[idx].is_used_in_dynamic;
 }
 
-/* Check if expression is an integer literal */
 static bool expr_is_int_lit(expr_t *e) {
   if (!e)
     return false;
   return e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT;
 }
 
-/* Check if expression is a float literal */
 static bool expr_is_float_lit(expr_t *e) {
   if (!e)
     return false;
@@ -473,7 +455,6 @@ static bool typeinfer_binary_op_returns_f64(const char *op) {
          strcmp(op, "/") == 0 || strcmp(op, "^") == 0;
 }
 
-/* Quick check: is this expression provably i64? */
 bool typeinfer_expr_is_i64(typeinfer_ctx_t *ctx, expr_t *e) {
   if (!ctx || !e)
     return false;
@@ -500,7 +481,6 @@ bool typeinfer_expr_is_i64(typeinfer_ctx_t *ctx, expr_t *e) {
   return false;
 }
 
-/* Quick check: is this expression provably f64? */
 bool typeinfer_expr_is_f64(typeinfer_ctx_t *ctx, expr_t *e) {
   if (!ctx || !e)
     return false;
@@ -527,7 +507,6 @@ bool typeinfer_expr_is_f64(typeinfer_ctx_t *ctx, expr_t *e) {
   return false;
 }
 
-/* Walk an expression for type inference */
 static void typeinfer_walk_expr(typeinfer_ctx_t *ctx, expr_t *e) {
   if (!ctx || !e)
     return;
@@ -566,7 +545,7 @@ static void typeinfer_walk_expr(typeinfer_ctx_t *ctx, expr_t *e) {
     for (size_t i = 0; i < e->as.call.args.len; i++) {
       if (e->as.call.args.data[i].val) {
         typeinfer_walk_expr(ctx, e->as.call.args.data[i].val);
-        /* Arguments to a call escape the current function */
+
         if (e->as.call.args.data[i].val->kind == NY_E_IDENT) {
           typeinfer_mark_escape(ctx, e->as.call.args.data[i].val->as.ident.name);
         }
@@ -660,19 +639,18 @@ static void typeinfer_walk_expr(typeinfer_ctx_t *ctx, expr_t *e) {
   case NY_E_INFERRED_MEMBER:
   case NY_E_LOGICAL:
   case NY_E_TERNARY:
-    /* Complex or dynamic expressions - skip for basic i64 inference */
+
     break;
   }
 }
 
-/* Walk a statement for type inference */
 void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
   if (!ctx || !s)
     return;
 
   switch (s->kind) {
   case NY_S_VAR: {
-    /* Variable declaration - add to context and infer from initializer */
+
     for (size_t i = 0; i < s->as.var.names.len; i++) {
       const char *name = s->as.var.names.data[i];
       expr_t *init = (i < s->as.var.exprs.len) ? s->as.var.exprs.data[i] : NULL;
@@ -692,7 +670,6 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
         }
       }
 
-      /* Check if explicitly typed as int */
       const char *vartype = (i < s->as.var.types.len) ? s->as.var.types.data[i] : NULL;
       if (vartype && strcmp(vartype, "int") == 0) {
         typeinfer_mark_i64(ctx, name);
@@ -703,13 +680,12 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
       if (init) {
         typeinfer_walk_expr(ctx, init);
 
-        /* Infer from initializer */
         if (expr_is_int_lit(init)) {
           typeinfer_mark_i64(ctx, name);
         } else if (expr_is_float_lit(init)) {
           typeinfer_mark_f64(ctx, name);
         } else if (init->kind == NY_E_IDENT) {
-          /* Copy type and escape status from source variable */
+
           if (typeinfer_is_i64(ctx, init->as.ident.name))
             typeinfer_mark_i64(ctx, name);
           else if (typeinfer_is_f64(ctx, init->as.ident.name))
@@ -718,10 +694,10 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
           if (typeinfer_escapes(ctx, init->as.ident.name))
             typeinfer_mark_escape(ctx, name);
         } else if (init->kind == NY_E_BINARY) {
-          /* Binary op: if both operands are same type, result is same type */
+
           const char *op = init->as.binary.op;
           if (typeinfer_binary_op_returns_f64(op)) {
-            /* Check for f64 */
+
             bool left_f64 = init->as.binary.left->kind == NY_E_IDENT &&
                             typeinfer_is_f64(ctx, init->as.binary.left->as.ident.name);
             bool right_f64 = init->as.binary.right->kind == NY_E_IDENT &&
@@ -730,7 +706,7 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
               typeinfer_mark_f64(ctx, name);
           }
           if (typeinfer_binary_op_returns_i64(op)) {
-            /* Check for i64 */
+
             bool left_i64 = init->as.binary.left->kind == NY_E_IDENT &&
                             typeinfer_is_i64(ctx, init->as.binary.left->as.ident.name);
             bool right_i64 = init->as.binary.right->kind == NY_E_IDENT &&
@@ -749,7 +725,6 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
         typeinfer_mark_dynamic(ctx, name);
       }
 
-      /* Propagate escape back to initializer if this variable escapes */
       if (typeinfer_escapes(ctx, name) && init && init->kind == NY_E_IDENT) {
         typeinfer_mark_escape(ctx, init->as.ident.name);
       }
@@ -815,7 +790,7 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
   }
 
   case NY_S_FUNC: {
-    /* Nested function - recurse with fresh context or skip for now */
+
     if (s->as.fn.body)
       typeinfer_walk_stmt(ctx, s->as.fn.body);
     break;
@@ -841,7 +816,7 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
   case NY_S_MATCH:
   case NY_S_OPERATOR:
   case NY_S_IMPL:
-    /* These don't affect local variable type inference */
+
     break;
 
   default:
@@ -849,30 +824,25 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
   }
 }
 
-/* Run type inference on a function body */
 void typeinfer_func_body(typeinfer_ctx_t *ctx, stmt_t *body) {
   if (!ctx || !body)
     return;
 
-  /* Fixed-point iteration: loop until no more types can be proven */
-  int max_passes = 20; /* Safety cap to prevent infinite loops in edge cases */
+  int max_passes = 20;
   for (int pass = 0; pass < max_passes; pass++) {
     ctx->changed = false;
     typeinfer_walk_stmt(ctx, body);
 
-    /* If nothing changed in this pass, we have reached a fixed point */
     if (!ctx->changed) {
       break;
     }
   }
 }
 
-/* Apply inferred types to scope bindings - applies to ALL scopes up to depth */
 void typeinfer_apply_to_scopes(typeinfer_ctx_t *ctx, scope *scopes, size_t depth) {
   if (!ctx || !scopes || depth == 0)
     return;
 
-  /* Apply to all scopes from 0 to depth-1 */
   for (size_t d = 0; d < depth; d++) {
     scope *s = &scopes[d];
     for (size_t i = 0; i < s->vars.len; i++) {

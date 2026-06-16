@@ -368,7 +368,6 @@ void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef
   LLVMInitializeMCJITCompilerOptions(options, sizeof(*options));
   bool apple_arm64 = ny_module_target_is_apple_arm64(mod);
 
-  /* Fast JIT mode for development - can be overridden */
   int opt_level = 3;
   const char *opt_env = getenv("NYTRIX_JIT_OPT_LEVEL");
   if (opt_env && *opt_env) {
@@ -379,25 +378,19 @@ void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef
       opt_level = 3;
   }
   if (apple_arm64 && (!opt_env || !*opt_env)) {
-    /* MCJIT's arm64 Mach-O backend is most reliable at the baseline codegen
-       level; callers can still override this for local experiments. */
+
     opt_level = 0;
   }
 
-  /* Enable FastISel for faster compilation (less optimized but much faster) */
   int fast_isel = (opt_level <= 1) ? 1 : 0;
   const char *fast_isel_env = getenv("NYTRIX_JIT_FAST_ISEL");
   if (fast_isel_env && *fast_isel_env) {
     fast_isel = (atoi(fast_isel_env) != 0);
   } else if (apple_arm64) {
-    /* Keep MCJIT enabled on Apple arm64, but avoid FastISel's Mach-O
-       materialization crashes on larger mixed layout/operator modules. */
+
     fast_isel = 0;
   }
 
-  /* Apple arm64 MCJIT can place code, constants, and runtime stubs outside
-     short branch reach for larger modules. Use a conservative code model unless
-     the caller explicitly overrides it. */
   options->CodeModel = apple_arm64 ? LLVMCodeModelLarge : LLVMCodeModelJITDefault;
   options->OptLevel = (unsigned)opt_level;
   options->EnableFastISel = fast_isel;
@@ -736,7 +729,7 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
 static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_t *cg) {
   if (!cg || !mod)
     return;
-  /* Fallback: if cache hit skipped sig collection, map all declarations. */
+
   if (cg->fun_sigs.len == 0) {
     for (LLVMValueRef f = LLVMGetFirstFunction(mod); f; f = LLVMGetNextFunction(f)) {
       if (!LLVMIsDeclaration(f))
@@ -765,8 +758,6 @@ static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod
 
     const char *symbol = sig->link_name ? sig->link_name : sig->name;
 
-    /* Look up the function in the current module.
-       The function might be named by its qualified name or its link name. */
     LLVMValueRef val = LLVMGetNamedFunction(mod, symbol);
     if (!val) {
       val = LLVMGetNamedFunction(mod, sig->name);
@@ -788,7 +779,7 @@ void register_jit_sigs(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_t *
   (void)ee;
   (void)mod;
   (void)cg;
-  // For non-extern functions, they are defined within the JIT.
+
 }
 
 void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_t *cg) {
@@ -851,7 +842,7 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_
 
 apply_runtime_attrs:
   ;
-  // Apply critical attributes to runtime symbols
+
   LLVMValueRef panic_fn = LLVMGetNamedFunction(mod, "__panic");
   if (panic_fn) {
     unsigned nr_kind = LLVMGetEnumAttributeKindForName("noreturn", 8);
@@ -880,8 +871,6 @@ static int compare_func_info(const void *a, const void *b) {
   return 0;
 }
 
-/* Write a perf-<pid>.map file so that perf and GDB can resolve JIT addresses.
-   Format per line: <start_hex> <size_hex> <name>  */
 void ny_jit_write_perf_map(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
 #ifndef _WIN32
   const char *env = getenv("NYTRIX_JIT_PERF_MAP");
@@ -916,7 +905,7 @@ void ny_jit_write_perf_map(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
       capacity = capacity == 0 ? 16 : capacity * 2;
       func_info_t *new_funcs = (func_info_t *)realloc(funcs, capacity * sizeof(func_info_t));
       if (!new_funcs) {
-        free(funcs); // Free any allocated memory before returning
+        free(funcs);
         fclose(f);
         return;
       }
@@ -927,13 +916,10 @@ void ny_jit_write_perf_map(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
     num_funcs++;
   }
 
-  // Sort functions by address
   if (num_funcs > 1) {
     qsort(funcs, num_funcs, sizeof(func_info_t), compare_func_info);
   }
 
-  /* Write to perf map, calculating sizes. Open in "w" to avoid
-     accumulating duplicate symbols in long sessions. */
   fclose(f);
   f = fopen(path, "w");
   if (!f) {
@@ -944,7 +930,7 @@ void ny_jit_write_perf_map(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
   for (size_t i = 0; i < num_funcs; i++) {
     uint64_t addr = funcs[i].addr;
     const char *name = funcs[i].name;
-    uintptr_t size = 100; /* default estimation */
+    uintptr_t size = 100;
     if (i + 1 < num_funcs) {
       size = (uintptr_t)(funcs[i + 1].addr - addr);
     }

@@ -25,12 +25,12 @@ use std.os.info
 use std.os.path as ospath
 use std.os.thread
 use std.os.time
-use std.parse.data.json
+use std.math.parse.data.json
 use std.core.str as str
 use std.os.ui.render.dump as ui_profile
 use std.os.ui.assets.catalog as asset_catalog
-use std.parse.img as lib_img
-use std.parse.3d.gltf as gltf
+use std.math.parse.img as lib_img
+use std.math.parse.3d.gltf as gltf
 use std.core.common as common
 use std.os.ui.render.viewer.term as terminal
 use std.math

@@ -1,0 +1,16 @@
+shape type-list-index-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "variable declaration: expected str, got int"
+  source ny <<'NY'
+use std.core
+
+def xs = [1, 2, 3]
+def str s = xs[0]
+print(s)
+NY
+}

@@ -1,0 +1,19 @@
+shape type-inferred-string-index-result {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use std.core
+
+fn first(xs) {
+   xs[0]
+}
+
+def int c = first("AZ")
+print(c)
+NY
+}

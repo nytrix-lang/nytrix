@@ -6,11 +6,11 @@
 #include "base/util.h"
 #include "code/jit.h"
 #include "cmd/ny/pkg.h"
-#include "cmd/ny-tools/fmt.h"
-#include "cmd/ny-tools/make.h"
-#include "cmd/ny-tools/perf.h"
-#include "cmd/ny-tools/test.h"
-#include "cmd/ny-tools/web.h"
+#include "cmd/fmt/fmt.h"
+#include "cmd/make/make.h"
+#include "cmd/perf/perf.h"
+#include "cmd/test/test.h"
+#include "cmd/web/web.h"
 #include "parse/parser.h"
 #include "rt/shared.h"
 #include "wire/pipe.h"
@@ -62,13 +62,11 @@ const char *__lsan_default_suppressions() {
 }
 #endif
 
-/* Async-signal-safe string writer */
 static void write_str(const char *s) {
   if (s)
     (void)write(STDERR_FILENO, s, strlen(s));
 }
 
-/* Async-signal-safe decimal writer */
 static void write_dec(int64_t v) {
   if (v == 0) {
     write_str("0");
@@ -134,11 +132,6 @@ static void handle_segv(int sig) {
                      : (sig == SIGILL)  ? "IllegalInstructionError"
                                         : "SignalError";
 
-  /* System backtrace entirely removed. backtrace() internally calls into
-   * libgcc which attempts to allocate memory, causing a double-fault
-   * crash when the heap is corrupted, preventing the Nytrix trace
-   * from ever printing. */
-
   int64_t files[32], lines[32], cols[32], funcs[32];
   extern int64_t rt_trace_get_frames(int64_t *f, int64_t *l, int64_t *c, int64_t *fn, int count);
   int count = rt_trace_get_frames(files, lines, cols, funcs, 16);
@@ -176,8 +169,7 @@ static void handle_segv(int sig) {
 
 static void ny_install_signal_handlers(void) {
 #ifndef _WIN32
-  /* Use a dedicated alternate signal stack so the handler can run even when
-   * the main stack or heap is corrupted. */
+
   (void)signal(SIGPIPE, SIG_IGN);
   static char g_sigstack[65536];
   stack_t ss = {.ss_sp = g_sigstack, .ss_size = sizeof(g_sigstack), .ss_flags = 0};
@@ -1233,7 +1225,7 @@ static bool ny_argv_has_flag(int argc, char **argv, const char *flag) {
     const char *a = argv[i];
     if (!a)
       continue;
-    /* Don't stop at -- for trace flags, we want global visibility */
+
     if (ny_arg_match(a, flag, NULL))
       return true;
   }
@@ -1359,8 +1351,7 @@ int main(int argc, char **argv, char **envp) {
     if (share_root && *share_root)
       ny_setenv_force("NYTRIX_SHARE_ROOT", share_root);
   }
-  /* Activate tracing as early as possible for JIT visibility */
-  /* Set the robust trace flag BEFORE installing signal handlers */
+
   if (trace_requested) {
     ny_setenv_force("NYTRIX_TRACE", "1");
     g_trace_requested = 1;
@@ -1372,7 +1363,7 @@ int main(int argc, char **argv, char **envp) {
     ny_jit_init_native_once();
   }
   ny_install_signal_handlers();
-  /* Strictly tie tracing to the -trace flag presence */
+
   if (trace_requested) {
     ny_setenv_force("NYTRIX_TRACE", "1");
   } else {
@@ -1411,8 +1402,6 @@ int main(int argc, char **argv, char **envp) {
   if (ui_arg_bridge_rc != 0)
     return ui_arg_bridge_rc;
 
-  /* Match the common interpreter shape: `ny` starts an interactive REPL when
-   * stdin is a terminal, and runs stdin as REPL batch input when piped. */
   if (!opt.command_string && !opt.input_file && opt.mode != NY_MODE_REPL &&
       opt.mode != NY_MODE_HELP && opt.mode != NY_MODE_VERSION &&
       opt.mode != NY_MODE_BUNDLE && opt.mode != NY_MODE_CLEAN_CACHE) {

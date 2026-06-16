@@ -1,0 +1,15 @@
+shape type-list-index-non-int {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use std.core
+
+def xs = [1, 2, 3]
+print(xs["x"])
+NY
+}

@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_EXTENSIONS ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 project(nytrix C CXX)
 if (APPLE)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -8,9 +13,8 @@ include(CheckLinkerFlag)
 include(CheckCSourceCompiles)
 
 set(NYTRIX_ROOT "${CMAKE_CURRENT_LIST_DIR}")
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+
+add_compile_definitions(_GNU_SOURCE)
 
 option(NYTRIX_BUILD_SHARED "Build shared runtime library" ON)
 option(NYTRIX_BUILD_LSP "Build ny-lsp" ON)
@@ -709,14 +713,12 @@ nytrix_apply_size_flags(nytrix_runtime)
 
 target_include_directories(nytrix_compiler PRIVATE
   "${NYTRIX_ROOT}/src"
-  "${NYTRIX_ROOT}/src/base"
   "${NYTRIX_ROOT}/src/rt"
   "${CMAKE_BINARY_DIR}"
 )
 
 target_include_directories(nytrix_runtime PRIVATE
   "${NYTRIX_ROOT}/src"
-  "${NYTRIX_ROOT}/src/base"
   "${NYTRIX_ROOT}/src/rt"
   "${CMAKE_BINARY_DIR}"
 )
@@ -928,11 +930,11 @@ endif()
 add_executable(ny
   "${NYTRIX_ROOT}/src/cmd/ny/main.c"
   "${NYTRIX_ROOT}/src/cmd/ny/pkg.c"
-  "${NYTRIX_ROOT}/src/cmd/ny-tools/fmt.c"
-  "${NYTRIX_ROOT}/src/cmd/ny-tools/perf.c"
-  "${NYTRIX_ROOT}/src/cmd/ny-tools/test.c"
-  "${NYTRIX_ROOT}/src/cmd/ny-tools/web.c"
-  "${NYTRIX_ROOT}/src/cmd/ny-tools/make.c"
+  "${NYTRIX_ROOT}/src/cmd/fmt/fmt.c"
+  "${NYTRIX_ROOT}/src/cmd/perf/perf.c"
+  "${NYTRIX_ROOT}/src/cmd/test/test.c"
+  "${NYTRIX_ROOT}/src/cmd/web/web.c"
+  "${NYTRIX_ROOT}/src/cmd/make/make.c"
   $<TARGET_OBJECTS:nytrix_compiler>
   $<TARGET_OBJECTS:nytrix_runtime>
 )
@@ -940,8 +942,7 @@ add_dependencies(ny nytrix_version_header)
 # ny generates std.ny, so the compiler binary itself does not depend on it.
   target_include_directories(ny PRIVATE
     "${NYTRIX_ROOT}/src"
-    "${NYTRIX_ROOT}/src/base"
-    "${NYTRIX_ROOT}/src/cmd/ny-tools"
+    "${NYTRIX_ROOT}/src/cmd/tools"
     "${NYTRIX_ROOT}/src/rt"
     "${CMAKE_BINARY_DIR}"
   )
@@ -996,19 +997,19 @@ endif()
 
 function(nytrix_add_tool tool_target tool_name)
   set(_tool_sources
-    "${NYTRIX_ROOT}/src/cmd/ny-tools/main.c"
+    "${NYTRIX_ROOT}/src/cmd/tools/main.c"
     "${NYTRIX_ROOT}/src/base/args.c"
   )
   if ("${tool_name}" STREQUAL "fmt")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/ny-tools/fmt.c")
+    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/fmt/fmt.c")
   elseif ("${tool_name}" STREQUAL "perf")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/ny-tools/perf.c")
+    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/perf/perf.c")
   elseif ("${tool_name}" STREQUAL "test")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/ny-tools/test.c")
+    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/test/test.c")
   elseif ("${tool_name}" STREQUAL "doc")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/ny-tools/web.c")
+    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/web/web.c")
   elseif ("${tool_name}" STREQUAL "make")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/ny-tools/make.c")
+    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/make/make.c")
   endif()
   add_executable(${tool_target}
     ${_tool_sources}
@@ -1028,7 +1029,6 @@ function(nytrix_add_tool tool_target tool_name)
   endif()
   target_include_directories(${tool_target} PRIVATE
     "${NYTRIX_ROOT}/src"
-    "${NYTRIX_ROOT}/src/base"
     "${NYTRIX_ROOT}/src/rt"
     "${CMAKE_BINARY_DIR}"
   )
@@ -1051,16 +1051,38 @@ nytrix_add_tool(ny-test "test")
 nytrix_add_tool(ny-doc "doc")
 nytrix_add_tool(ny-make "make")
 
+add_executable(ny-fuzz
+  "${NYTRIX_ROOT}/src/cmd/fuzz/analyze.c"
+  "${NYTRIX_ROOT}/src/cmd/fuzz/compare.c"
+  "${NYTRIX_ROOT}/src/cmd/fuzz/generate.c"
+  "${NYTRIX_ROOT}/src/cmd/fuzz/proc.c"
+  "${NYTRIX_ROOT}/src/cmd/fuzz/shape.c"
+  "${NYTRIX_ROOT}/src/cmd/fuzz/synth.c"
+  "${NYTRIX_ROOT}/src/cmd/fuzz/usage.c"
+  "${NYTRIX_ROOT}/src/cmd/fuzz/util.c"
+  "${NYTRIX_ROOT}/src/cmd/fuzz/worker.c"
+  "${NYTRIX_ROOT}/src/cmd/tools/cbridge.c"
+)
+add_dependencies(ny-fuzz nytrix_version_header)
+target_include_directories(ny-fuzz PRIVATE
+  "${NYTRIX_ROOT}/src"
+  "${NYTRIX_ROOT}/src/cmd/tools"
+  "${NYTRIX_ROOT}/src/rt"
+  "${CMAKE_BINARY_DIR}"
+)
+set_target_properties(ny-fuzz PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 if (NYTRIX_BUILD_LSP)
   add_executable(ny-lsp
-    "${NYTRIX_ROOT}/src/cmd/ny-lsp/main.c"
+    "${NYTRIX_ROOT}/src/cmd/lsp/main.c"
     $<TARGET_OBJECTS:nytrix_compiler>
     $<TARGET_OBJECTS:nytrix_runtime>
   )
   add_dependencies(ny-lsp nytrix_version_header)
   target_include_directories(ny-lsp PRIVATE
     "${NYTRIX_ROOT}/src"
-    "${NYTRIX_ROOT}/src/base"
     "${NYTRIX_ROOT}/src/rt"
     "${CMAKE_BINARY_DIR}"
   )
@@ -1099,6 +1121,13 @@ if (NYTRIX_BUILD_LSP)
     target_compile_definitions(ny-lsp PRIVATE _GNU_SOURCE)
   endif()
 endif()
+
+add_executable(ny-dap
+  "${NYTRIX_ROOT}/src/cmd/dap/main.c"
+)
+set_target_properties(ny-dap PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
 
 if (WIN32)
   set(NYTRIX_WINDOWS_RUNTIME_DEPS_SCRIPT "${CMAKE_BINARY_DIR}/nytrix_copy_runtime_deps.cmake")
@@ -1353,7 +1382,6 @@ if (NYTRIX_BUILD_SHARED AND NOT WIN32)
 
   target_include_directories(nytrixrt PRIVATE
     "${NYTRIX_ROOT}/src"
-    "${NYTRIX_ROOT}/src/base"
     "${NYTRIX_ROOT}/src/rt"
     "${CMAKE_BINARY_DIR}"
   )
@@ -1459,7 +1487,7 @@ if (NYTRIX_ENABLE_BOLT AND UNIX AND NOT APPLE)
     message(STATUS "BOLT enabled: ${LLVM_BOLT}, perf: ${PERF}")
     set(NY_BOLT_PROFILE "${CMAKE_BINARY_DIR}/bolt-profile.data" CACHE STRING "Path to perf.data for BOLT optimization")
     set(NY_BOLT_OPT_LEVEL "2" CACHE STRING "BOLT optimization level: 0|1|2|3")
-    set(NY_BOLT_WORKLOAD "etc/tests/bench" CACHE STRING "Path to benchmark workload for profiling")
+    set(NY_BOLT_WORKLOAD "etc/tests/fuzz/bench" CACHE STRING "Path to benchmark workload for profiling")
 
     # Step 1: Instrument binary for profiling
     add_custom_target(bolt_instrument

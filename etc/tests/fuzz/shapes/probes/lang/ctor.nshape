@@ -1,0 +1,16 @@
+shape ctor {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+def d0 = dict(16)
+def l0 = list(0)
+print("d0_is_dict=" + to_str(is_dict(d0)))
+print("d0_raw=" + to_str(d0))
+print("l0_is_list=" + to_str(is_list(l0)))
+print("l0_len=" + to_str(len(l0)))
+NY
+}

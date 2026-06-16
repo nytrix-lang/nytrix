@@ -1,0 +1,21 @@
+shape xml_attr_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os as os
+use std.math.parse.data.xml as xml
+#main {
+   def r = os.file_read("etc/assets/images/icons/arrowdown.svg")
+   assert(is_ok(r), "read arrow svg")
+   def root = xml.parse(unwrap(r))
+   def child = root.get("children", [])[0]
+   def attrs = child.get("attr", dict())
+   print(to_str(dict_keys(attrs)))
+   print("stroke-width=" + to_str(attrs.get("stroke-width", "")) + " d=" + to_str(attrs.get("d", "")))
+}
+NY
+}

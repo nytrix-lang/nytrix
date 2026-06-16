@@ -1,0 +1,6 @@
+shape defaulted-oob-get {
+  family "safe-indexing"
+  generator "typed"
+  features ["arrays", "get", "default", "oob-safe", "branches"]
+  template defaulted-oob-get
+}

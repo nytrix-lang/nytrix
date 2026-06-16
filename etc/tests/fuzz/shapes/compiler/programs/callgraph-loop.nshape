@@ -1,0 +1,24 @@
+shape callgraph-loop {
+  family "program-synth"
+  generator "program"
+  features ["program", "callgraph", "bounded-loops", "unsigned-int", "globals", "arrays"]
+  template ast-program
+  synth {
+    globals 3..6
+    arrays 1..3
+    structs 0..2
+    functions 4..7
+    statements 34..74
+    expression_depth 2..4
+    loop_depth 1..3
+    locals 4..9
+    params 2..4
+    scalar_widths "u8,u16,u32"
+    array_dims 1..2
+    statement_mix "callheavy"
+    helper_mix "rich"
+    call_chance 38
+    switch_chance 12
+    pointer_chance 8
+  }
+}

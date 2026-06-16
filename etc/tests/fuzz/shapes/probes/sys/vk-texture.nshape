@@ -1,0 +1,59 @@
+shape vk-texture {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.ui.render.vk.texture as tex
+def job = tex.tex_job_make(3, "textures/albedo.png", "image/png", {"filter": 1}, 7, "baseColorTexture")
+assert(job.get("index") == 3, "texture job index")
+assert(job.get("uri") == "textures/albedo.png", "texture job uri")
+assert(job.get("mime") == "image/png", "texture job mime")
+assert(job.get("sampler").get("filter") == 1, "texture job sampler")
+assert(job.get("material") == 7, "texture job material")
+assert(job.get("slot") == "baseColorTexture", "texture job slot")
+def fallback_q = tex.tex_job_queue_push(0, job)
+assert(fallback_q.get("head") == 0, "texture queue fallback head")
+assert(fallback_q.get("items").len == 1, "texture queue fallback push")
+def q = tex.tex_job_queue_make()
+tex.tex_job_queue_push(q, job)
+tex.tex_job_queue_push(q, tex.tex_job_make(4, "textures/normal.png"))
+def first = tex.tex_job_queue_pop(q)
+def second = tex.tex_job_queue_pop(q)
+assert(first.get("index") == 3, "texture queue first")
+assert(second.get("index") == 4, "texture queue second")
+assert(tex.tex_job_queue_pop(q) == 0, "texture queue empty")
+assert(tex.tex_job_queue_pop(0) == 0, "texture queue invalid")
+def result_ok = tex.tex_job_result_make(job, 2, 2, "rgba", true)
+def result_bad = tex.tex_job_result_make(job, 0, 0, 0, false, "decode failed")
+assert(result_ok.get("ok") && result_ok.get("width") == 2 && result_ok.get("height") == 2, "texture result ok")
+assert(!result_bad.get("ok") && result_bad.get("error") == "decode failed", "texture result error")
+def plan = tex.tex_job_upload_plan([result_bad, result_ok, 0])
+assert(plan.len == 1, "texture upload plan filters failed results")
+assert(plan.get(0).get("pixels") == "rgba", "texture upload plan payload")
+assert(tex.tex_job_upload_plan(0).len == 0, "texture upload plan invalid")
+def key_a = tex.tex_job_cache_key("textures/a.png", "image/png", 1)
+def key_a2 = tex.tex_job_cache_key("textures/a.png", "image/png", 1)
+def key_b = tex.tex_job_cache_key("textures/a.png", "image/png", 2)
+assert(key_a == key_a2, "texture cache key stable")
+assert(key_a != key_b, "texture cache key flags")
+assert(key_a.len > 5, "texture cache key shape")
+def worker = tex.tex_job_worker_plan(3)
+assert(worker.get("workers") == 3, "texture worker count")
+assert(worker.get("worker_touches_renderer") == false, "texture worker renderer isolation")
+assert(worker.get("main_thread_upload") == true, "texture worker upload thread")
+assert(worker.get("preserve_material_ids") == true, "texture worker material ids")
+assert(tex.texture_count() >= 0, "texture count available")
+assert(is_int(tex.last_created_texture_id()), "texture last id type")
+assert(tex.material_descriptor(1, 2, 3, 4, 5) == 0, "texture material descriptor no device")
+assert(tex.texture_format(-1) == 37, "texture default format")
+assert(tex.texture_descriptor(123) == 0, "texture descriptor no device")
+assert(tex.set_texture_debug_meta(-1, "x", "y") == false, "texture debug meta invalid id")
+assert(tex.destroy_texture(-1) == 0, "texture destroy invalid id")
+assert(tex.read_framebuffer() == 0, "texture framebuffer no device")
+assert(tex.blit_buffer(0, 1, 1) == 0, "texture blit closed frame")
+print("vk_texture_probe ok")
+NY
+}

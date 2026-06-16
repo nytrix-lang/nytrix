@@ -1,7 +1,7 @@
 #!/usr/bin/env ny
 
 ;; Keywords: platform probe ui app example term renderer png font
-;; Terminal Emulator
+;; Unix Terminal Emulator
 use std.core
 use std.os (exit)
 use std.os.args

@@ -1,0 +1,48 @@
+shape coin-change {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "dynamic-programming", "array", "nested-loop"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.error
+use std.core.reflect
+use std.os.time
+fn coin_change(coins, amount){
+   def inf = amount + 1
+   mut dp = list(0)
+   mut i = 0
+   while(i <= amount){
+      dp = append(dp, inf)
+      i += 1
+   }
+   set_idx(dp, 0, 0)
+   i = 1
+   while(i <= amount){
+      mut j = 0
+      while(j < len(coins)){
+         def c = get(coins, j)
+         if(c <= i){
+            def cand = get(dp, i - c) + 1
+            if(cand < get(dp, i)){ set_idx(dp, i, cand) }
+         }
+         j += 1
+      }
+      i += 1
+   }
+   def ans = get(dp, amount)
+   return(ans > amount) ? -1 : ans
+}
+def coins = [1, 2, 5, 7, 11, 13, 29]
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 3000){
+   checksum += coin_change(coins, 999)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT coin_change ", checksum, " ", t1 - t0)
+NY
+}

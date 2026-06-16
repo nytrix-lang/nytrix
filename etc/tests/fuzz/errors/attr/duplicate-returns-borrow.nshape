@@ -1,0 +1,17 @@
+shape attr-duplicate-returns-borrow {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "duplicate attribute '@returns_borrow(...)'"
+  source ny <<'NY'
+use std.core
+
+@returns_borrow(x)
+@returns_borrow(x)
+fn f(x) { x }
+print(f(1))
+NY
+}

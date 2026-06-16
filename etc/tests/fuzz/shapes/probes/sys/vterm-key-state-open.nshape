@@ -1,0 +1,27 @@
+shape vterm-key-state-open {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.ui.window.consts
+use std.os.ui.window.input as ui
+use std.os.ui.render.viewer.vterm as vterm
+mut vt = vterm.new(80, 24, {"regular": 0, "bold": 0, "italic": 0, "emoji": 0}, 0, 0)
+case vterm.open(vt, "/bin/sh", ["sh", "-c", "sleep 1"]){
+   ok(next_vt) -> { vt = next_vt }
+   err(e) -> { panic("vterm open failed: " + to_str(e)) }
+}
+def st0 = vt.get("state")
+assert(load32(st0, 0) == 0, "open initial cx")
+assert(load32(st0, 4) == 0, "open initial cy")
+vt = vterm.handle_event(vt, EVENT_KEY_PRESSED, {"key": ui.KEY_A, "action": 1, "mod": 0, "ww": 800.0, "wh": 480.0})
+def st1 = vt.get("state")
+assert(load32(st1, 0) == 0, "open key press preserves cx")
+assert(load32(st1, 4) == 0, "open key press preserves cy")
+vterm.close(vt)
+print("vterm-key-state-open ok")
+NY
+}

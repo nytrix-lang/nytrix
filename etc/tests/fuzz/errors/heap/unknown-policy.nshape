@@ -1,0 +1,13 @@
+shape heap-unknown-policy {
+  family "compiler-errors/heap"
+  generator "error"
+  features ["error", "heap", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "invalid heap policy: wat"
+  flags "--heap=wat"
+  source ny <<'NY'
+print(1)
+NY
+}

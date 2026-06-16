@@ -1,0 +1,20 @@
+shape safety-safe-mode-owned-return {
+  family "compiler-errors/safety"
+  generator "error"
+  features ["error", "safety", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "returning owned slot 'a' requires @returns_owned"
+  flags "--safe-mode"
+  source ny <<'NY'
+use std.core
+
+fn bad() {
+   def a = [1]
+   return a
+}
+
+bad()
+NY
+}

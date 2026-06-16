@@ -606,7 +606,6 @@ void codegen_debug_init(codegen_t *cg, const char *main_file) {
       is_optimized, flags, strlen(flags), 0, split_name, strlen(split_name), LLVMDWARFEmissionFull,
       0, split_inlining, profile_info, sysroot, strlen(sysroot), sdk, strlen(sdk));
 
-  /* Set initial debug scope to compile unit */
   cg->di_scope = cg->di_cu;
 
   LLVMMetadataRef dbg_ver = LLVMValueAsMetadata(
@@ -630,9 +629,7 @@ LLVMMetadataRef codegen_debug_subprogram(codegen_t *cg, LLVMValueRef func, const
                                          token_t tok) {
   if (!cg || !cg->di_builder || !func)
     return NULL;
-  /* Don't attach !dbg to declarations — only definitions may have subprograms.
-     Also skip if the function already has a subprogram (prevents duplicates
-     when the std bundle is loaded and functions are re-encountered). */
+
   if (LLVMIsDeclaration(func))
     return LLVMGetSubprogram(func);
   if (LLVMGetSubprogram(func))
@@ -647,14 +644,14 @@ LLVMMetadataRef codegen_debug_subprogram(codegen_t *cg, LLVMValueRef func, const
   char display_buf[96];
   const char *display_name = ny_debug_display_name(name, tok, display_buf, sizeof(display_buf));
   unsigned line = tok.line > 0 ? (unsigned)tok.line : 1;
-  /* Create subprogram with full debug info */
+
   LLVMMetadataRef sp = LLVMDIBuilderCreateFunction(
       cg->di_builder, file ? file : cg->di_file, display_name, strlen(display_name), name,
       strlen(name), file ? file : cg->di_file, line, cg->di_subroutine_type, 0, 1, line,
       LLVMDIFlagZero, 0);
   if (sp) {
     LLVMSetSubprogram(func, sp);
-    /* Attach debug location to function entry */
+
     LLVMMetadataRef loc = LLVMDIBuilderCreateDebugLocation(cg->ctx, line, 0, sp, NULL);
     LLVMSetCurrentDebugLocation2(cg->builder, loc);
   }

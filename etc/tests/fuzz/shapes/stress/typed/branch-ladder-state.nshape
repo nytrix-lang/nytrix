@@ -1,0 +1,6 @@
+shape branch-ladder-state {
+  family "branch-ladder"
+  generator "typed"
+  features ["branches", "state-machine", "typed-int", "mod"]
+  template branch-ladder-state
+}

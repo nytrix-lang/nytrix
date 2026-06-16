@@ -1,0 +1,26 @@
+shape ownership-move-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot move owned slot 'a' while borrow 'b' is live"
+  flags "--borrow-check"
+  source ny <<'NY'
+use std.core
+
+@returns_owned
+@consumes(x)
+fn adopt(x) { x }
+
+fn bad() int {
+   def a = [1, 2]
+   def b = borrow(a)
+   def c = adopt(a)
+   len(b) + len(c)
+}
+
+bad()
+NY
+}

@@ -8,7 +8,7 @@
 #include <string.h>
 
 static bool ny_builtin_name_is_pure(const char *name) {
-  /* Fast O(1) dispatch: all pure builtins start with '__' — check len+char[2] */
+
   if (!name || name[0] != '_' || name[1] != '_')
     return false;
   switch (name[2]) {
@@ -374,7 +374,7 @@ static bool effects_visit_expr(ny_visitor_t *v, expr_t *e) {
     ctx->result |= ny_sig_effects(sig);
     if (!sig)
       ctx->result |= NY_FX_FFI;
-    return false; // Manually traversed children
+    return false;
   }
   case NY_E_MEMCALL: {
     ny_visit_expr(v, e->as.memcall.target);
@@ -387,7 +387,7 @@ static bool effects_visit_expr(ny_visitor_t *v, expr_t *e) {
     ctx->result |= ny_sig_effects(sig);
     if (!sig)
       ctx->result |= NY_FX_FFI;
-    return false; // Manually traversed children
+    return false;
   }
   case NY_E_LIST:
   case NY_E_TUPLE:
@@ -397,10 +397,10 @@ static bool effects_visit_expr(ny_visitor_t *v, expr_t *e) {
   case NY_E_LAMBDA:
   case NY_E_FN:
     ctx->result |= NY_FX_ALLOC;
-    return true; // Continue traversal
+    return true;
   case NY_E_ASM:
     ctx->result |= NY_FX_FFI;
-    return true; // Continue traversal
+    return true;
   default:
     return true;
   }
@@ -421,7 +421,7 @@ static bool effects_visit_stmt(ny_visitor_t *v, stmt_t *s) {
     }
     ny_purity_scope_restore(ctx->local_names, ctx->local_hashes,
                             ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0}, &cp);
-    return false; // Manually traversed children
+    return false;
   }
   case NY_S_VAR: {
     for (size_t i = 0; i < s->as.var.exprs.len; i++) {
@@ -434,7 +434,7 @@ static bool effects_visit_stmt(ny_visitor_t *v, stmt_t *s) {
                           s->as.var.names.data[i]);
       }
     }
-    return false; // Manually traversed children
+    return false;
   }
   case NY_S_FOR: {
     if (s->as.fr.init)
@@ -458,7 +458,7 @@ static bool effects_visit_stmt(ny_visitor_t *v, stmt_t *s) {
       ny_visit_stmt(v, s->as.fr.update);
     ny_purity_scope_restore(ctx->local_names, ctx->local_hashes,
                             ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0}, &cp);
-    return false; // Manually traversed children
+    return false;
   }
   case NY_S_OPERATOR:
   case NY_S_IMPL:
@@ -466,7 +466,7 @@ static bool effects_visit_stmt(ny_visitor_t *v, stmt_t *s) {
   case NY_S_MACRO:
   case NY_S_INCLUDE: {
     ctx->result |= NY_FX_ALL;
-    return true; // Continue traversal
+    return true;
   }
   default:
     return true;

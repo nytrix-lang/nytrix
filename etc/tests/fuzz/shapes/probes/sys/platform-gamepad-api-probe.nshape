@@ -1,0 +1,54 @@
+shape platform-gamepad-api-probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.common as common
+use std.os.ui.window.native as native
+use std.os.ui.window.input.gamepad as gamepad
+print("native.init", native.init())
+print("gamepad.load_joysticks", gamepad.load_joysticks())
+def ids = gamepad.get_joysticks()
+print("gamepad.get_joysticks", ids)
+mut jid = 0
+while jid < 16 {
+   if native.joystick_present(jid) {
+      def count_ptr = malloc(4)
+      def axes_ptr = native.get_joystick_axes(jid, count_ptr)
+      def axes = load32(count_ptr, 0)
+      def buttons_ptr = native.get_joystick_buttons(jid, count_ptr)
+      def buttons = load32(count_ptr, 0)
+      def hats_ptr = native.get_joystick_hats(jid, count_ptr)
+      def hats = load32(count_ptr, 0)
+      print("jid", jid)
+      print(" name", native.get_joystick_name(jid))
+      print(" guid", native.get_joystick_guid(jid))
+      print(" mapped", native.joystick_is_gamepad(jid))
+      print(" gamepad_name", native.get_gamepad_name(jid))
+      print(" counts", axes, buttons, hats)
+      common.touch(axes_ptr)
+      common.touch(buttons_ptr)
+      mut ai = 0
+      while ai < axes && ai < 8 {
+         print(" axis", ai, gamepad.get_gamepad_axis(jid, ai))
+         ai += 1
+      }
+      mut bi = 0
+      while bi < buttons && bi < 20 {
+         if gamepad.get_gamepad_button(jid, bi) { print(" button", bi, "down") }
+         bi += 1
+      }
+      mut hi = 0
+      while hi < hats && hi < 8 {
+         print(" hat", hi, hats_ptr ? load8(hats_ptr, hi) : 0)
+         hi += 1
+      }
+      free(count_ptr)
+   }
+   jid += 1
+}
+NY
+}

@@ -1,0 +1,35 @@
+shape decode {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.util.parse.image as image
+fn main(){
+   mut in_path = "etc/assets/models/gltf/tests/CompareVolume/Compare_Volume_img2.png"
+   mut out_path = ""
+   mut save_fmt = "auto"
+   if(argc() > 1){ in_path = argv(1) }
+   if(argc() > 2){ out_path = argv(2) }
+   if(argc() > 3){ save_fmt = argv(3) }
+   def img = image.load(in_path)
+   if(!img){
+      print("[img-probe] decode failed: " + in_path)
+      return 1
+   }
+   print("[img-probe] ok " + to_str(dict_get(img, "width", 0)) + "x" + to_str(dict_get(img, "height", 0)))
+   if(!is_str(out_path) || len(out_path) == 0){ return 0 }
+   def saved = image.save(img, out_path, save_fmt)
+   if(!saved){
+      print("[img-probe] save failed: " + out_path)
+      return 2
+   }
+   print("[img-probe] wrote " + out_path)
+   0
+}
+main()
+NY
+}

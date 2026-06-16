@@ -1,0 +1,70 @@
+shape remote-tube-pingpong {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.test
+use std.os.net.remote as tube
+use std.os.net.socket
+use std.os.thread
+use std.os.time
+def PORT = 57000 + ((ticks() / 1000000) % 1000)
+fn server_task(list args) int {
+   def port = args.get(0)
+   def state = args.get(1)
+   def server = socket_bind("127.0.0.1", port)
+   if server < 0 {
+      store64(state, -1)
+      return -1
+   }
+   defer { close_socket(server) }
+   store64(state, 1)
+   def client = socket_accept(server)
+   if client < 0 {
+      store64(state, -2)
+      return -1
+   }
+   defer { close_socket(client) }
+   write_socket_all(client, "name: ")
+   def got = read_socket_until(client, "\n", 1024)
+   if got == "nytrix\n" {
+      write_socket_all(client, "ok\n")
+      store64(state, 2)
+      return 0
+   }
+   store64(state, -3)
+   return -1
+}
+def state = malloc(8)
+assert(state != 0, "state allocation")
+defer { free(state) }
+store64(state, 0)
+mut args = []
+args = append(args, PORT)
+args = append(args, state)
+def thread = thread_spawn(server_task, args)
+assert(thread != 0 && thread != -1, "thread_spawn starts remote tube server")
+mut waited = 0
+while load64(state) == 0 && waited < 5000 {
+   msleep(10)
+   waited += 10
+}
+if load64(state) != 1 {
+   thread_join(thread)
+   print("skip remote_tube_pingpong: localhost socket unavailable")
+   return 0
+}
+def io = tube.remote_retry("127.0.0.1", PORT, 200, 25)
+assert(io != 0, "remote_retry connects")
+tube.set_timeout(io, 5000)
+tube.sendlineafter(io, "name: ", "nytrix")
+assert_eq(tube.recvuntil(io, "\n"), "ok\n", "recvuntil reads server response")
+tube.close(io)
+assert(thread_join(thread) == 0, "server thread exits cleanly")
+assert(load64(state) == 2, "server received tube payload")
+print("ok remote_tube_pingpong")
+NY
+}

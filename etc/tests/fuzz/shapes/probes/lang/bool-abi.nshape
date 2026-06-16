@@ -1,0 +1,24 @@
+shape bool_abi {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn main(){
+   def a = 200000
+   def b = 100
+   def c = (a * b) / 100
+   print("a=", a)
+   print("b=", b)
+   print("c=", c)
+   print("lt=", c < 50000)
+   print("ge=", c >= 50000)
+   mut out = c
+   if(out < 50000){ out = 50000 }
+   print("out=", out)
+}
+main()
+NY
+}

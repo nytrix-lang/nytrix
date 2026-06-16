@@ -1087,11 +1087,13 @@ fn make_context_current(any win) bool {
       _set_platform_val("current_win_context", 0)
       return true
    }
+   def handle = _native_handle(win)
+   if !handle { return false }
    def window_contexts = _get_platform_val("window_contexts", dict(8))
-   def ctx = window_contexts.get(win, 0)
+   def ctx = window_contexts.get(handle, 0)
    if !ctx { return false }
    if (b == "x11" || b == "wayland") && opengl_backend.make_context_current(ctx) {
-      _set_platform_val("current_win_context", win)
+      _set_platform_val("current_win_context", handle)
       return true
    }
    false
@@ -2144,7 +2146,7 @@ fn _window_ctx_typed_field(any win, str typ, str field) any {
 
 fn get_glx_context(any win) any {
    "Returns the GLX context for a window when available."
-   _window_ctx_typed_field(win, "glx_offscreen", "context")
+   _window_ctx_typed_field(win, "glx", "context")
 }
 
 fn get_glx_window(any win) any { "Returns the GLX drawable handle for a window." _native_handle(win) }
@@ -2159,7 +2161,7 @@ fn get_egl_display() any {
 
 fn get_egl_context(any win) any {
    "Returns the EGL context for a window when available."
-   _window_ctx_typed_field(win, "egl_offscreen", "context")
+   _window_ctx_typed_field(win, "egl", "context")
 }
 
 fn get_egl_surface(any win) any {

@@ -53,7 +53,7 @@ source location. Keep labels short; you will search for them later.
 
 ```ny
 use std.core
-use std.parse.data.json as json
+use std.math.parse.data.json as json
 
 def cfg = json.json_decode("{\"name\":\"ny\",\"ports\":[8080,8081]}")
 assert_eq(cfg.get("name", ""), "ny", "name")
@@ -67,7 +67,7 @@ After the build, `ny doc` gives you the local API index:
 ```bash
 ny doc search json
 ny doc search --symbols recvuntil
-ny doc get std.parse.data.json
+ny doc get std.math.parse.data.json
 ```
 
 Use `search` for names and topics. Use `get` after you know the module or

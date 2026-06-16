@@ -4529,8 +4529,7 @@ static bool stmt_bindable_inferred_type(const char *type_name) {
   if (!type_name || !*type_name || strcmp(type_name, "any") == 0 ||
       strcmp(type_name, "void") == 0)
     return false;
-  /* Do not retroactively force large numeric literals into narrow fixed-width
-   * declarations. */
+
   if (stmt_type_name_is_narrow_fixed_int_value(type_name))
     return false;
   return true;
@@ -4542,14 +4541,7 @@ static bool stmt_bindable_mut_inferred_type(const char *type_name) {
     return false;
   if (stmt_type_name_is_float_value(type_name))
     return true;
-  /*
-   * Mutable bindings still need the inferred owner for attached methods:
-   *   mut out = "x".to_bytes
-   *   out.text
-   * should resolve through list.text, not dynamic/any lookup.  Keep narrow
-   * numeric literals out, but preserve tagged object owners such as list,
-   * bytes, str, dict, set, tuple, range, and bigint.
-   */
+
   return ny_gencall_type_is_known_obj(type_name);
 }
 
@@ -7149,7 +7141,6 @@ static bool stmt_auto_simd_loop_shape(codegen_t *cg, scope *scopes,
   return false;
 }
 
-/* Create LLVM loop metadata for explicit and inferred vectorization hints. */
 static void apply_loop_metadata(codegen_t *cg, LLVMValueRef branch,
                                 bool attr_unroll, bool attr_nounroll,
                                 bool attr_vectorize, bool inferred_vectorize) {
@@ -7439,8 +7430,6 @@ static bool stmt_try_emit_fast_range_for(codegen_t *cg, scope *scopes,
                       NY_LLVM_NAME(cg, "for_range_stop_excl"));
   }
 
-  /* String-append loop optimization: detect `out = out + piece` in the body and
-     lower to __str_builder_append instead of naive O(n^2) concat. */
   stmt_str_append_loop_t str_append_range_loop = {0};
   bool use_str_append_range = false;
   if (ny_env_enabled_default_on("NYTRIX_STRING_APPEND_LOOP_BUILDER") &&
@@ -7553,21 +7542,19 @@ static bool stmt_try_emit_fast_range_for(codegen_t *cg, scope *scopes,
 
 static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                          size_t func_root) {
-  /* C-style for loop: for(init; cond; update) */
+
   if (s->as.fr.init || s->as.fr.cond) {
     LLVMBasicBlockRef pre = ny_cur_block(cg);
     LLVMValueRef f = LLVMGetBasicBlockParent(pre);
     LLVMBasicBlockRef cb = ny_bb_fn(f, "fc"), bb = ny_bb_fn(f, "fb"),
                       lb = ny_bb_fn(f, "fl"), eb = ny_bb_fn(f, "fe");
 
-    /* Init */
     if (s->as.fr.init)
       gen_stmt(cg, scopes, depth, s->as.fr.init, func_root, false);
 
     ny_dbg_loc(cg, s->tok);
     ny_br(cg, cb);
 
-    /* Cond */
     ny_pos(cg, cb);
     bool inferred_vectorize =
         stmt_auto_simd_loop_shape(cg, scopes, *depth, s);
@@ -7579,7 +7566,6 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       ny_br(cg, bb);
     }
 
-    /* Body */
     ny_pos(cg, bb);
     LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
     scope_enter(scopes, depth, eb, lb);
@@ -7594,7 +7580,6 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     scope_pop(scopes, depth);
     codegen_debug_pop_block(cg, dbg_scope);
 
-    /* Update + loop back */
     ny_pos(cg, lb);
     if (s->as.fr.update)
       gen_stmt(cg, scopes, depth, s->as.fr.update, func_root, false);
@@ -7604,12 +7589,10 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                         s->as.fr.attr_nounroll, s->as.fr.attr_vectorize,
                         inferred_vectorize);
 
-    /* Exit */
     ny_pos(cg, eb);
     return;
   }
 
-  /* Iterator-style for loop: for x in iterable */
   if (stmt_try_emit_fast_range_for(cg, scopes, depth, s, func_root))
     return;
 
@@ -7641,7 +7624,7 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
 
   unsigned get_param_count = LLVMCountParamTypes(gs->type);
   LLVMValueRef get_args[3] = {
-      itv, i_val, ny_c1(cg)}; // 1 parses as 'none' internally for Nytrix
+      itv, i_val, ny_c1(cg)};
   LLVMValueRef item = LLVMBuildCall2(cg->builder, gs->type, gs->value, get_args,
                                      get_param_count, "");
   if (stmt_type_is_native_abi_value(cg, gs->return_type)) {
@@ -7651,7 +7634,7 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   bool iter_binding_is_int =
       s->as.fr.iter_by_index ||
       stmt_iterable_yields_int(cg, scopes, *depth, s->as.fr.iterable);
-  /* String-append loop optimization for generic iterators */
+
   stmt_str_append_loop_t str_append_iter_loop = {0};
   bool use_str_append_iter = false;
   if (ny_env_enabled_default_on("NYTRIX_STRING_APPEND_LOOP_BUILDER") &&
@@ -7749,8 +7732,6 @@ static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     return;
   }
 
-  // Allocate a static size for jump buffer (1024 bytes is enough on any OS).
-  // Use build_alloca to ensure it's in the entry block.
   LLVMTypeRef arr_type = LLVMArrayType(ny_i8_ty(cg), 1024);
   LLVMValueRef jmpbuf = build_alloca(cg, "jmpbuf", arr_type);
   LLVMSetAlignment(jmpbuf, 16);
@@ -7774,7 +7755,7 @@ static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         LLVMFunctionType(ret_t, (LLVMTypeRef[]){arg_t, arg_t}, 2, 0));
   }
 #else
-  // Prefer _setjmp (no signal mask save/restore) to match NY_LONGJMP=_longjmp.
+
   setjmp_func = ny_get_named_fn(cg, "_setjmp");
   if (!setjmp_func)
     setjmp_func = ny_get_named_fn(cg, "setjmp");
@@ -8408,7 +8389,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
             ny_store(cg, slot, fv);
           continue;
         }
-        // Unknown numeric expression: generate a regular Ny value, then unbox.
+
         {
           LLVMValueRef v = gen_expr(cg, scopes, *depth, expr_for_check);
           LLVMValueRef fv = ny_unbox_float(cg, v);

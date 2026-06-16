@@ -1,0 +1,53 @@
+shape subarray-sum-k {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "dict", "prefix-sum", "array"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.dict
+use std.os.time
+fn gen_vals(n){
+   mut a = list(0)
+   mut i = 0
+   while(i < n){
+      a = append(a, 0)
+      i += 1
+   }
+   i = 0
+   while(i < n){
+      mut v = (i % 9) - 4
+      if((i % 97) == 0){ v = 6 }
+      if((i % 193) == 0){ v = -6 }
+      set_idx(a, i, v)
+      i += 1
+   }
+   a
+}
+fn subarray_sum_k(a, k){
+   mut counts = dict()
+   counts = counts.set(0, 1)
+   mut prefix = 0
+   mut ans = 0
+   mut i = 0
+   while(i < len(a)){
+      prefix += get(a, i)
+      ans += counts.get(prefix - k, 0)
+      counts = counts.set(prefix, counts.get(prefix, 0) + 1)
+      i += 1
+   }
+   ans
+}
+def a = gen_vals(85000)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 45){
+   checksum += subarray_sum_k(a, (r % 17) - 8)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT subarray_sum_k ", checksum, " ", t1 - t0)
+NY
+}

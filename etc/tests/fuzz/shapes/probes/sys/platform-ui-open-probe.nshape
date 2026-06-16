@@ -1,0 +1,14 @@
+shape platform-ui-open-probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.ui.render
+use std.os.ui.window
+def w = init_window(1280, 720, "probe", WINDOW_FOCUS_ON_SHOW, false, false, 4)
+print("opened=" + to_str(is_dict(w)))
+NY
+}

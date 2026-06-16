@@ -1,0 +1,20 @@
+shape adt-generic-type-mismatch {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "type mismatch: expected 'Option<int>', got 'Option<str>'"
+  source ny <<'NY'
+use std.core
+
+enum Option<T> {
+   Some(T value),
+   None
+}
+
+def Option<int> x = Option.Some("hi")
+print(x)
+NY
+}

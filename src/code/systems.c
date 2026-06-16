@@ -2,26 +2,22 @@
 #include "priv.h"
 #include <string.h>
 
-/* Check if function has @sys attribute */
 bool ny_is_sys_function(stmt_t *fn) {
   if (!fn || fn->kind != NY_S_FUNC)
     return false;
   return fn->as.fn.attr_sys;
 }
 
-/* Check if function has @nogc attribute */
 bool ny_is_nogc_function(stmt_t *fn) {
   if (!fn || fn->kind != NY_S_FUNC)
     return false;
   return fn->as.fn.attr_nogc;
 }
 
-/* Generate raw i64 value (no tag) */
 LLVMValueRef gen_raw_int(codegen_t *cg, int64_t value) {
   return LLVMConstInt(cg->type_i64, (uint64_t)value, false);
 }
 
-/* Generate raw binary operation - NO tag checks, NO tagging */
 LLVMValueRef gen_raw_binary(codegen_t *cg, const char *op, LLVMValueRef l, LLVMValueRef r) {
   LLVMValueRef result = NULL;
 
@@ -84,47 +80,38 @@ LLVMValueRef gen_raw_binary(codegen_t *cg, const char *op, LLVMValueRef l, LLVMV
   return result;
 }
 
-/* Stack allocate variable */
 LLVMValueRef alloc_stack_var(codegen_t *cg, const char *name, LLVMTypeRef type) {
   LLVMValueRef ptr = LLVMBuildAlloca(cg->builder, type, name);
   LLVMSetAlignment(ptr, 16);
   return ptr;
 }
 
-/* Apply aggressive optimizations to function */
 void apply_sys_optimizations(codegen_t *cg, LLVMValueRef fn) {
   if (!cg || !fn)
     return;
 
-  /* Always inline */
   LLVMAddAttributeAtIndex(
       fn, LLVMAttributeFunctionIndex,
       LLVMCreateEnumAttribute(cg->ctx, LLVMGetEnumAttributeKindForName("alwaysinline", 12), 0));
 
-  /* Hot function */
   LLVMAddAttributeAtIndex(
       fn, LLVMAttributeFunctionIndex,
       LLVMCreateEnumAttribute(cg->ctx, LLVMGetEnumAttributeKindForName("hot", 3), 0));
 
-  /* No inline recursion barrier */
   LLVMAddAttributeAtIndex(
       fn, LLVMAttributeFunctionIndex,
       LLVMCreateEnumAttribute(cg->ctx, LLVMGetEnumAttributeKindForName("noinline", 8), 0));
 }
 
-/* Add SIMD vectorization hints to loop */
 void add_simd_hints(codegen_t *cg, LLVMValueRef loop) {
   (void)cg;
   (void)loop;
-  /* LLVM loop vectorize metadata would go here */
-  /* For now, rely on LLVM's auto-vectorization with -O3 */
+
 }
 
-/* Unroll loop by factor */
 void unroll_loop(codegen_t *cg, LLVMValueRef loop, int factor) {
   (void)cg;
   (void)loop;
   (void)factor;
-  /* LLVM unroll metadata would go here */
-  /* For now, rely on LLVM's auto-unrolling with -O3 */
+
 }

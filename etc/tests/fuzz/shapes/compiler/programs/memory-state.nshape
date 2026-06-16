@@ -1,0 +1,24 @@
+shape memory-state {
+  family "program-synth"
+  generator "program"
+  features ["program", "stateful-globals", "arrays", "structs", "safe-pointers", "checksum"]
+  template ast-program
+  synth {
+    globals 4..8
+    arrays 2..5
+    structs 1..4
+    functions 3..6
+    statements 30..68
+    expression_depth 2..4
+    loop_depth 1..3
+    locals 5..10
+    params 2..4
+    scalar_widths "u8,u16,u32,u64"
+    array_dims 1..2
+    statement_mix "memory"
+    helper_mix "rich"
+    call_chance 22
+    switch_chance 16
+    pointer_chance 34
+  }
+}

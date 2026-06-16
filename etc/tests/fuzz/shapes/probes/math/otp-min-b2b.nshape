@@ -1,0 +1,79 @@
+shape otp_min_b2b {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module otp_min_b2b(
+   otp_recover_reused_key
+)
+use std.core
+use std.math.bin
+use std.math
+fn _otp_lower(b){ (b >= 65 && b <= 90) ? (b + 32) : b }
+fn _otp_default_weight(b){
+   def c = _otp_lower(b)
+   if(c == 32){ return 130 }
+   if(c >= 33 && c <= 126){ return 1 }
+   0
+}
+fn _otp_freq_weight(char_frequencies, b, char_floor){
+   if(char_frequencies == nil){ return _otp_default_weight(b) }
+   char_floor
+}
+fn otp_score_english(bytes, char_frequencies=nil, char_floor=-5){
+   mut score = 0
+   mut i = 0
+   while(i < len(bytes)){
+      def b = get(bytes, i)
+      if(!((b >= 32 && b <= 126) || b == 9 || b == 10 || b == 13)){ return nil }
+      score = score + _otp_freq_weight(char_frequencies, b, char_floor)
+      i = i + 1
+   }
+   score
+}
+fn _otp_transpose(ciphertexts, offset, key_size){ [] }
+fn _otp_frequency_key_byte(bytes, char_frequencies, char_floor){ 0 }
+fn _otp_minimal_period(key){ key }
+fn otp_apply_key(data, key){ data }
+fn otp_recover_reused_key(ciphertexts, key_size=nil, max_key_size=nil, char_frequencies=nil, char_floor=-5){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut best_key = nil
+   mut best_score = nil
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut ok = true
+      mut i = 0
+      while(i < ks && ok){
+         def column = _otp_transpose(ciphertexts, i, ks)
+         def kb = _otp_frequency_key_byte(column, char_frequencies, char_floor)
+         if(kb == nil){ ok = false } else { key = append(key, kb) }
+         i = i + 1
+      }
+      if(ok){
+         key = _otp_minimal_period(key)
+         mut total_score = 0
+         mut ci = 0
+         while(ci < len(ciphertexts) && ok){
+            def plain = otp_apply_key(get(ciphertexts, ci), key)
+            def score = otp_score_english(plain, char_frequencies, char_floor)
+            if(score == nil){ ok = false } else { total_score = total_score + score }
+            ci = ci + 1
+         }
+         if(ok && (best_score == nil || total_score > best_score)){
+            best_score = total_score
+            best_key = key
+         }
+      }
+      si = si + 1
+   }
+   best_key
+}
+if(comptime{__main()}){
+   print("ok b2b")
+}
+NY
+}

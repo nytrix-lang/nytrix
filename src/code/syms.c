@@ -16,12 +16,6 @@
 
 static int ny_trace_resolve_enabled(void);
 
-/*
- * Lookup hot-path cache:
- * Symbol resolution in codegen repeatedly scans fun/global vectors. Keep a
- * tiny direct-mapped cache per query kind and invalidate entries when codegen
- * context mutates (stamp changes).
- */
 #define NY_LOOKUP_CACHE_SLOTS 8192u
 #define NY_LOOKUP_KEY_MAX 96u
 #define NY_LOOKUP_EXACT_INDEX_SLOTS 65536u
@@ -33,7 +27,7 @@ typedef struct ny_fun_lookup_cache_entry_t {
   uint64_t stamp;
   uint64_t hash;
   uint16_t len;
-  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  uint8_t state;
   char key[NY_LOOKUP_KEY_MAX];
   fun_sig *value;
 } ny_fun_lookup_cache_entry_t;
@@ -43,7 +37,7 @@ typedef struct ny_global_lookup_cache_entry_t {
   uint64_t stamp;
   uint64_t hash;
   uint16_t len;
-  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  uint8_t state;
   char key[NY_LOOKUP_KEY_MAX];
   binding *value;
 } ny_global_lookup_cache_entry_t;
@@ -53,7 +47,7 @@ typedef struct ny_alias_lookup_cache_entry_t {
   uint64_t stamp;
   uint64_t hash;
   uint16_t len;
-  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  uint8_t state;
   char key[NY_LOOKUP_KEY_MAX];
   const char *value;
 } ny_alias_lookup_cache_entry_t;
@@ -64,7 +58,7 @@ typedef struct ny_overload_lookup_cache_entry_t {
   uint64_t hash;
   uint16_t len;
   uint32_t argc;
-  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  uint8_t state;
   char key[NY_LOOKUP_KEY_MAX];
   fun_sig *value;
 } ny_overload_lookup_cache_entry_t;
@@ -925,7 +919,7 @@ binding *lookup_global_exact(codegen_t *cg, const char *name) {
       if (!ny_binding_is_valid(cg, e->value)) {
         ny_global_exact_index_rebuild(cg, stamp);
         s = ny_get_sym_state(cg);
-        e = &s->global_exact[pos]; // Simple retry
+        e = &s->global_exact[pos];
         if (!e->state || e->hash != hash || e->len != (uint32_t)len ||
             memcmp(e->name, name, len) != 0)
           return NULL;
@@ -1431,7 +1425,7 @@ static binding *ny_global_tail_find(codegen_t *cg, const char *tail) {
       if (!ny_binding_is_valid(cg, e->value)) {
         ny_global_tail_index_rebuild(cg, stamp);
         s = ny_get_sym_state(cg);
-        e = &s->global_tail[pos]; // Simple retry
+        e = &s->global_tail[pos];
         if (!e->state || e->hash != hash || e->len != (uint32_t)len ||
             memcmp(e->tail_name, tail, len) != 0)
           return NULL;
@@ -1444,7 +1438,7 @@ static binding *ny_global_tail_find(codegen_t *cg, const char *tail) {
 }
 
 bool builtin_allowed_comptime(const char *name) {
-  // Disallow non-deterministic or system-interacting builtins at comptime.
+
   static const char *deny[] = {
       "__syscall",
       "__execve",
@@ -1586,7 +1580,7 @@ enum_member_def_t *lookup_enum_member(codegen_t *cg, const char *name) {
   const char *dot = strrchr(name, '.');
 
   if (dot) {
-    // Fully qualified name: "EnumName.MemberName"
+
     size_t enum_name_len = dot - name;
     const char *member_name = dot + 1;
 
@@ -1594,7 +1588,7 @@ enum_member_def_t *lookup_enum_member(codegen_t *cg, const char *name) {
       enum_def_t *enum_def = cg->enums.data[i];
       if (enum_def->name && strncmp(enum_def->name, name, enum_name_len) == 0 &&
           enum_def->name[enum_name_len] == '\0') {
-        // Found the enum definition, now look for the member
+
         for (size_t j = 0; j < enum_def->members.len; ++j) {
           enum_member_def_t *member_def = &enum_def->members.data[j];
           if (member_def->name && strcmp(member_def->name, member_name) == 0) {
@@ -1604,8 +1598,7 @@ enum_member_def_t *lookup_enum_member(codegen_t *cg, const char *name) {
       }
     }
   } else {
-    // Unqualified name: "MemberName"
-    // Search all enums for a member with this name
+
     for (size_t i = 0; i < cg->enums.len; ++i) {
       enum_def_t *enum_def = cg->enums.data[i];
       for (size_t j = 0; j < enum_def->members.len; ++j) {
@@ -1756,7 +1749,6 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
       goto end;
   }
 
-  // 1. Precise name match (local or unqualified global)
   res = lookup_fun_exact(cg, name);
   if (ny_trace_resolve_enabled()) {
     fprintf(stderr, "[resolve] 1 exact '%s' -> %s\n", name,
@@ -1780,7 +1772,6 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
   if (builtin_runtime_name)
     goto end;
 
-  // 2. Current module scope + import alias fallback (unqualified names only)
   if (!tried_scoped_or_alias) {
     if (ny_trace_resolve_enabled()) {
       fprintf(stderr, "[resolve] 2 scoped/alias '%s' qualified=%d\n", name,
@@ -1975,7 +1966,6 @@ binding *lookup_global_hash(codegen_t *cg, const char *name, uint64_t hash) {
   if (!cg->global_vars.data)
     goto end;
 
-  // 1. Precise name match (local or unqualified global)
   res = lookup_global_exact(cg, name);
   if (res && ny_current_ctx_is_std(cg) && !qualified &&
       ny_global_is_root_user_var(res))
@@ -1991,7 +1981,6 @@ binding *lookup_global_hash(codegen_t *cg, const char *name, uint64_t hash) {
       goto end;
   }
 
-  // 2. Current module scope + import alias fallback (unqualified names only)
   res = ny_lookup_try_scoped_or_alias(cg, name, qualified,
                                       ny_lookup_global_recurse, NULL);
   if (res)
@@ -2223,8 +2212,7 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
     best = ny_fun_tail_find(cg, name);
     if (best && ny_tail_result_blocked_by_export_profile(cg, best->name, name))
       best = NULL;
-    /* If tail_find found something with arity mismatch, try a full search for a
-     * better one! */
+
     if (best) {
       int best_min_arity = ny_required_arity_for_sig(best);
       if (!best->is_variadic &&
@@ -2417,7 +2405,7 @@ static void diag_dump_import_graph_stmt_list(token_t tok, const char *root_file,
     bool is_local_use = (s->kind == NY_S_USE && s->as.use.is_local);
     bool allow = is_user_file || is_local_use;
     if (!allow && ny_is_stdlib_tok(s->tok)) {
-      /* Avoid spamming stdlib-internal imports; they drown out user context. */
+
       continue;
     }
     if (s->kind == NY_S_USE) {
@@ -2428,8 +2416,7 @@ static void diag_dump_import_graph_stmt_list(token_t tok, const char *root_file,
       continue;
     }
     if (s->kind == NY_S_MODULE) {
-      /* Only recurse into user/local modules; skip stdlib modules unless
-       * explicitly requested. */
+
       if (!ny_is_stdlib_tok(s->tok) ||
           (root_file && s->tok.filename &&
            strcmp(s->tok.filename, root_file) == 0))
@@ -2473,8 +2460,6 @@ static void diag_dump_undef_context(codegen_t *cg, const char *name,
     ny_diag_note_tok(tok, "imports: unavailable (no AST attached)");
   }
 
-  /* If there are functions with the same tail name, list a few; this often
-     indicates “missing module prefix” rather than truly undefined. */
   if (full) {
     int shown = 0;
     for (size_t i = 0; i < cg->fun_sigs.len && shown < 12; ++i) {
@@ -2557,7 +2542,6 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
   if (dotted_query)
     showed_module_exports = diag_hint_module_exports(cg, name);
 
-  /* Common typo / missing import hints */
   if (strcmp(name, "array.new") == 0 ||
       strcmp(name, "std.core.array.new") == 0) {
     ny_diag_hint("use [] for an empty list literal");
@@ -2612,9 +2596,8 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
   const char *alt1 = NULL, *alt2 = NULL;
   int alt1_d = 100, alt2_d = 100;
 
-  /* 1. Check for capitalization errors and fuzzy matches */
   const char *best_f = NULL;
-  int best_fd = 3; /* threshold */
+  int best_fd = 3;
   for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
     const char *fn = cg->fun_sigs.data[i].name;
     const char *dot = strrchr(fn, '.');
@@ -2634,7 +2617,6 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
     ny_diag_hint("did you mean '%s'?", best_f);
   }
 
-  /* 2. Check for missing imports/prefixes for common builtins */
   struct {
     const char *sym;
     const char *hint;
@@ -2695,7 +2677,6 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
     return;
   }
 
-  /* 3. Check if symbol exists in a module that is not imported */
   if (strchr(name, '.') == NULL) {
     for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
       const char *cand = cg->fun_sigs.data[i].name;
@@ -2727,7 +2708,6 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
     }
   }
 
-  /* 4. Levenshtein for typos */
   for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
     const char *cand = cg->fun_sigs.data[i].name;
     const char *dot = strrchr(cand, '.');

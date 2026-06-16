@@ -1,0 +1,11 @@
+shape repl_jit_smoke {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+1 + 1
+NY
+}

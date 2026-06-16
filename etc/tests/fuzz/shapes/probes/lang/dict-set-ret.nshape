@@ -1,0 +1,16 @@
+shape dict_set_ret {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut d = dict(0)
+def r = dict_set(d, "a", 1)
+print("r_is_dict=" + to_str(is_dict(r)))
+print("r_is_list=" + to_str(is_list(r)))
+print("d_is_dict=" + to_str(is_dict(d)))
+print("d_a=" + to_str(dict_get(d, "a", -1)))
+NY
+}

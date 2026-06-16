@@ -1327,32 +1327,32 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
   }
   ny_usage_section("EXAMPLES");
   fprintf(stderr,
-          "  \033[1;36m%s etc/tests/bench/sieve.ny          # compile and run "
+          "  \033[1;36m%s etc/tests/rt/control.ny                       # compile and run "
           "via JIT\033[0m\n",
           prog);
   fprintf(stderr,
-          "  \033[1;36m%s -O2 -run etc/tests/bench/sieve.ny  # build native "
+          "  \033[1;36m%s -O2 -run etc/tests/rt/control.ny               # build native "
           "ELF and run\033[0m\n",
           prog);
   fprintf(stderr,
-          "  \033[1;36m%s -O2 -o app etc/tests/bench/sieve.ny # emit native "
+          "  \033[1;36m%s -O2 -o app etc/tests/rt/control.ny              # emit native "
           "executable\033[0m\n",
           prog);
   fprintf(stderr,
-          "  \033[1;36m%s -v -time -verify etc/tests/rt/control.ny # debug "
+          "  \033[1;36m%s -v -time -verify etc/tests/rt/control.ny        # debug "
           "compilation\033[0m\n",
           prog);
   fprintf(stderr,
-          "  \033[1;36m%s                                  # interactive "
+          "  \033[1;36m%s                                      # interactive "
           "REPL\033[0m\n",
           prog);
   fprintf(stderr,
-          "  \033[1;36m%s -c 'print(\"hello\")'                # run "
+          "  \033[1;36m%s -c 'print(\"hello\")'                    # run "
           "inline\033[0m\n",
           prog);
   fprintf(stderr,
-          "  \033[1;36m%s -ic 'a=1337'                        # run inline, "
-          "then REPL\033[0m\n",
+          "  \033[1;36m%s -ic 'a=1337'                            # run inline, then "
+          "REPL\033[0m\n",
           prog);
 }
 

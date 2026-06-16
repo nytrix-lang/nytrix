@@ -976,7 +976,7 @@ char *ny_read_declared_module_name(const char *path) {
   FILE *f = fopen(path, "rb");
   if (!f)
     return NULL;
-  // Only read the first 4KB - module declaration must be near the top
+
   char buf[4096];
   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
   fclose(f);
@@ -1829,13 +1829,7 @@ static bool ny_std_module_has_descendant(const char *module_name) {
 static int module_export_child_depth(const char *module_name) {
   if (!module_name)
     return -1;
-  /*
-   * Exported names that are also module children should load as namespace
-   * children.  If the parent has a known subtree, expose one further child
-   * layer so package roots can publish category modules without hand-written
-   * `use` fanout in the package file.  Non-stdlib/local declared modules keep
-   * the legacy recursive behavior because their sibling graph is not indexed.
-   */
+
   if (strncmp(module_name, "std.", 4) == 0 && ny_std_module_has_descendant(module_name))
     return 1;
   return -1;
@@ -2039,7 +2033,6 @@ static void scan_dependencies(mod_list *list, size_t idx) {
   char *base_dir = dir_from_path(list->entries[idx].path);
   bool prefer_local = !list->entries[idx].is_std;
 
-  // Optimized scanner for 'use' and 'module'
   lexer_t lx;
   lexer_init(&lx, txt, list->entries[idx].path);
   int depth = 0;
@@ -2150,7 +2143,7 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
       if (core_idx >= 0) {
         mod_list_add(&mods, ny_std_mods[core_idx].path, ny_std_mods[core_idx].name, true);
       } else {
-        // Fallback to all if core not found
+
         for (size_t j = 0; j < ny_std_mods_len; ++j) {
           mod_list_add(&mods, ny_std_mods[j].path, ny_std_mods[j].name, true);
         }

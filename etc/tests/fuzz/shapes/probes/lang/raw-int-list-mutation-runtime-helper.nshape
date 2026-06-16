@@ -1,0 +1,25 @@
+shape raw_int_list_mutation_runtime_helper {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn main(): int {
+   mut a = [1, 2, 3, 4, 5, 6, 7, 8]
+   mut b = [8, 7, 6, 5, 4, 3, 2, 1]
+   mut c = [0, 0, 0, 0, 0, 0, 0, 0]
+   mut int: i = 0
+   mut int: acc = 0
+   while(i < len(a)){
+      def j = i % len(a)
+      c = set_idx(c, j, get(a, j, 0) + get(b, j, 0))
+      acc += get(c, j, 0)
+      i += 1
+   }
+   print(acc + get(c, 99, 11))
+   0
+}
+NY
+}

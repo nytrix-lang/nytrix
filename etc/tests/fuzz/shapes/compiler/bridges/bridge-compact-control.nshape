@@ -1,0 +1,21 @@
+shape bridge-compact-control {
+  family "c-bridge-seed"
+  generator "torture"
+  features ["c-bridge", "differential", "array-mutation", "reverse-loop", "branching"]
+  template raw-c-seed
+  source c <<'C'
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {
+    int xs[8] = {5, 7, 11, 13, 17, 19, 23, 29};
+    int32_t checksum = 200;
+    for(int i = 7; i >= 0; i--) {
+        int slot = i % 8;
+        xs[slot] += i;
+        if(i > 3) { checksum += xs[slot]; } else { checksum -= i; }
+    }
+    printf("%d\n", checksum);
+    return 0;
+}
+C
+}

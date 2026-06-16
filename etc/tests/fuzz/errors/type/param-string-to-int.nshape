@@ -1,0 +1,18 @@
+shape type-param-string-to-int {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use std.core
+
+fn need_int(int x) int {
+   x
+}
+
+need_int("hi")
+NY
+}

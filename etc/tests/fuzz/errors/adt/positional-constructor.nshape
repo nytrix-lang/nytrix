@@ -1,0 +1,20 @@
+shape adt-positional-constructor {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "too many positional fields for ADT variant 'Shape.Circle'"
+  source ny <<'NY'
+use std.core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def x = Shape.Circle(1, 2)
+print(x)
+NY
+}

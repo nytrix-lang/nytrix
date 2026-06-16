@@ -1,0 +1,19 @@
+shape type-strict-dynamic-member {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-dynamic-member"
+  flags "--strict-types"
+  source ny <<'NY'
+use std.core
+
+fn read_member(any x) {
+   x.missing
+}
+
+read_member(1)
+NY
+}

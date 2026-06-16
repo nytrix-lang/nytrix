@@ -3,6 +3,7 @@
 #include "base/common.h"
 #include "base/hash.h"
 #include "base/loader.h"
+#include "base/time.h"
 #include "base/util.h"
 #include "code/code.h"
 #include "code/jit.h"
@@ -375,29 +376,29 @@ static bool ny_write_linux_x64_tiny_exe(const ny_options *opt,
   size_t c = 0;
   size_t disp_pos = 0;
   if (do_write) {
-    code[c++] = 0xb8; /* mov eax, SYS_write */
+    code[c++] = 0xb8;
     ny_emit_u32le(code + c, 1u);
     c += 4;
-    code[c++] = 0xbf; /* mov edi, fd */
+    code[c++] = 0xbf;
     ny_emit_u32le(code + c, cmd->kind == NY_TINY_CMD_EPRINT ? 2u : 1u);
     c += 4;
-    code[c++] = 0x48; /* lea rsi, [rip + msg] */
+    code[c++] = 0x48;
     code[c++] = 0x8d;
     code[c++] = 0x35;
     disp_pos = c;
     c += 4;
-    code[c++] = 0xba; /* mov edx, len */
+    code[c++] = 0xba;
     ny_emit_u32le(code + c, (uint32_t)msg_len);
     c += 4;
-    code[c++] = 0x0f; /* syscall */
+    code[c++] = 0x0f;
     code[c++] = 0x05;
   }
-  code[c++] = 0x31; /* xor edi, edi */
+  code[c++] = 0x31;
   code[c++] = 0xff;
-  code[c++] = 0xb8; /* mov eax, SYS_exit */
+  code[c++] = 0xb8;
   ny_emit_u32le(code + c, 60u);
   c += 4;
-  code[c++] = 0x0f; /* syscall */
+  code[c++] = 0x0f;
   code[c++] = 0x05;
 
   const uint64_t base = UINT64_C(0x400000);
@@ -2206,9 +2207,7 @@ ny_jit_effective_codegen_opt_level(const ny_options *opt,
       !ny_env_has_value("NYTRIX_JIT_CODEGEN_OPT") &&
       !ny_env_has_value("NYTRIX_JIT_OPT_LEVEL") &&
       !ny_env_has_value("NYTRIX_OPT_PROFILE")) {
-    /* MCJIT's arm64 Mach-O backend is less stable at optimized codegen levels
-       for large modules. Keep module optimization intact, but compile the final
-       machine code conservatively unless the user explicitly opts in. */
+
     return LLVMCodeGenLevelNone;
   }
   return ny_jit_codegen_opt_level(opt);
@@ -2224,9 +2223,7 @@ static int ny_jit_effective_ir_opt_level(const ny_options *opt,
     return ny_clamp_llvm_opt_level(level);
   if (ny_jit_module_is_apple_arm64(module) &&
       !ny_env_has_value("NYTRIX_OPT_PROFILE") && !(opt && opt->opt_pipeline)) {
-    /* MCJIT on arm64 Mach-O is sensitive to optimized IR in a few larger
-       mixed-shape modules. Keep the default JIT path portable; users can opt
-       back in with NYTRIX_JIT_IR_OPT_LEVEL or NYTRIX_JIT_OPT_LEVEL. */
+
     return 0;
   }
   return ny_clamp_llvm_opt_level(fallback);
@@ -2298,18 +2295,6 @@ static time_t ny_file_mtime_or_zero(const char *path) {
   if (stat(path, &st) != 0)
     return 0;
   return st.st_mtime;
-}
-
-static uint64_t ny_stat_mtime_nsec(const struct stat *st) {
-  if (!st)
-    return 0;
-#if defined(__APPLE__)
-  return (uint64_t)st->st_mtimespec.tv_nsec;
-#elif !defined(_WIN32)
-  return (uint64_t)st->st_mtim.tv_nsec;
-#else
-  return 0;
-#endif
 }
 
 static uint64_t ny_file_cache_stamp(const char *path) {
@@ -2610,17 +2595,13 @@ static uint64_t ny_build_std_cache_path(const ny_options *opt,
   }
   h = ny_hash_cstrv(h, uses, use_count);
   h = ny_fnv1a64_cstr(prebuilt_path, h);
-  /* Important: std caches must invalidate when the prebuilt std.ny changes.
-     mtimes can be coarse or unchanged under some workflows (e.g. unpacked
-     archives, copied artifacts). Include prebuilt file identity (mtime+size)
-     when present. */
+
   if (prebuilt_path && *prebuilt_path &&
       !ny_std_path_is_generated_build_artifact(prebuilt_path)) {
     struct stat pst;
     if (stat(prebuilt_path, &pst) == 0) {
       h = ny_hash64_u64(h, (uint64_t)pst.st_mtime);
-      /* ctime + inode id makes cache invalidation robust even when mtimes are
-         preserved (e.g. some copy/extract workflows). */
+
       h = ny_hash64_u64(h, (uint64_t)pst.st_ctime);
       h = ny_hash64_u64(h, (uint64_t)pst.st_ino);
       h = ny_hash64_u64(h, (uint64_t)pst.st_dev);
@@ -2646,9 +2627,7 @@ static uint64_t ny_build_std_cache_path(const ny_options *opt,
   h = ny_fnv1a64_cstr(opt ? opt->argv0 : NULL, h);
   h = ny_hash64_u64(h,
                     (uint64_t)ny_file_mtime_or_zero(opt ? opt->argv0 : NULL));
-  /* Bundle generation uses entry_path for local module resolution and
-     filtering. Include input file identity to avoid cross-file cache poisoning
-     under parallel tests. */
+
   h = ny_fnv1a64_cstr(opt ? opt->input_file : NULL, h);
   h = ny_hash64_u64(
       h, (uint64_t)ny_file_mtime_or_zero(opt ? opt->input_file : NULL));
@@ -3152,10 +3131,7 @@ static NY_UNUSED_FUNC int ny_parallel_module_jobs(const ny_options *opt,
 static NY_UNUSED_FUNC bool ny_parallel_modules_enabled(const ny_options *opt) {
   if (!opt || !opt->parallel_mode)
     return false;
-  /* Standalone emit-only builds are used heavily for probing and tooling and
-   * have shown instability in the worker fan-out path; keep them single-process
-   * unless the caller explicitly opts back in via run_jit/output orchestration.
-   */
+
   if (opt->emit_only && !opt->output_file && !opt->run_jit)
     return false;
   bool explicit_modules = strcmp(opt->parallel_mode, "modules") == 0;
@@ -3269,7 +3245,6 @@ static bool ny_spawn_module_job(const ny_options *opt, const char *module_name,
 
 #endif
 
-/* ny_cache_path_is_ir() moved to cache.c - use from there */
 static bool ny_link_module_cache(LLVMContextRef ctx, LLVMModuleRef main_mod,
                                  const char *cache_path) {
   if (!ctx || !main_mod || !cache_path)
@@ -3302,11 +3277,7 @@ static bool ny_link_module_cache(LLVMContextRef ctx, LLVMModuleRef main_mod,
     return false;
   }
   LLVMStripModuleDebugInfo(mod);
-  /* Keep llvm.used/llvm.compiler.used on the incoming module until after
-   * LLVMLinkModules2. Cached modules use it to anchor private string data
-   * globals that are initialized by the script entry after the link. Dropping
-   * it before the link can leave linked runtime string globals with no matching
-   * data global, which turns into a zero string pointer at runtime. */
+
   char *verify_msg = NULL;
   if (LLVMVerifyModule(mod, LLVMReturnStatusAction, &verify_msg) != 0) {
     if (verify_msg)
@@ -3547,12 +3518,7 @@ static void ensure_aot_entry(codegen_t *cg, LLVMValueRef script_fn) {
   LLVMValueRef argc = LLVMGetParam(main_fn, 0);
   LLVMValueRef argv = LLVMGetParam(main_fn, 1);
   LLVMValueRef envp = LLVMGetParam(main_fn, 2);
-  /* Call _ny_aot_set_args(i32, ptr, ptr) — exact same types as main's own
-     params. No conversions at all, so the optimizer cannot drop argv/envp. The
-     linker alias _ny_aot_set_args → rt_set_args is in rt/core.c; the C ABI
-     passes i32 in rdi (sext by callee), ptr in rsi, ptr in rdx — identical to
-     the (i64,i64,i64) ABI that rt_set_args uses via the SysV calling
-     convention. */
+
   LLVMTypeRef set_args_ty =
       LLVMFunctionType(i64, (LLVMTypeRef[]){i32, ptrptr, ptrptr}, 3, 0);
   LLVMValueRef set_args_fn =
@@ -3616,9 +3582,7 @@ static void ensure_aot_entry(codegen_t *cg, LLVMValueRef script_fn) {
       }
     }
   }
-  /* Flush the print buffer — JIT mode does this explicitly in pipe.c after
-     calling the script entry; AOT must do it here before returning or output is
-     lost. */
+
   LLVMTypeRef flush_ty = LLVMFunctionType(i64, NULL, 0, 0);
   LLVMValueRef flush_fn = LLVMGetNamedFunction(cg->module, "rt_print_flush");
   if (!flush_fn)
@@ -4138,7 +4102,7 @@ static bool ny_ir_is_std_value(LLVMValueRef v) {
     return false;
   const char *sec = LLVMGetSection(v);
   if (sec && *sec) {
-    /* Prefer explicit origin tags attached during codegen. */
+
     if (strcmp(sec, "ny.std") == 0 || strcmp(sec, "__TEXT,ny_std") == 0 ||
         strcmp(sec, "__DATA,ny_std") == 0)
       return true;
@@ -5097,7 +5061,7 @@ int ny_pipeline_run(ny_options *opt) {
     cg.ownership_strict = true;
   }
   codegen_collect_links(&cg, &prog);
-  /* Debug symbols only for emitted artifacts, not for pure JIT execution. */
+
   cg.debug_symbols =
       opt->debug_symbols &&
       (opt->output_file || opt->emit_ir_path || opt->emit_bc_path ||
@@ -5105,7 +5069,7 @@ int ny_pipeline_run(ny_options *opt) {
   cg.debug_opt_level = opt->opt_level;
   if (cg.debug_symbols && parse_name && *parse_name)
     cg.debug_main_file = parse_name;
-  /* Store user source for debug info (needed for -c inline code) */
+
   cg.user_source = user_src;
   cg.user_source_len = ulen;
   if ((opt->run_jit || opt->output_file) && opt->mode != NY_MODE_REPL &&
@@ -5471,7 +5435,7 @@ int ny_pipeline_run(ny_options *opt) {
     if (opt->run_jit) {
       eff_opt = ny_jit_effective_ir_opt_level(opt, cg.module, eff_opt);
     }
-    /* Finalize debug info BEFORE optimization */
+
     if (cg.di_builder) {
       codegen_debug_finalize(&cg);
     }
@@ -5733,10 +5697,7 @@ skip_compilation:
       LLVMModuleRef jmod = cg.module;
       LLVMValueRef jit_script_fn = LLVMGetNamedFunction(jmod, "_ny_top_entry");
       LLVMValueRef jit_main_fn = LLVMGetNamedFunction(jmod, "main");
-      /* Strip DWARF debug info before handing the module to MCJIT.
-         DwarfDebug::finishEntityDefinitions can crash during MCJIT code
-         emission with certain metadata patterns. MCJIT doesn't use DWARF for
-         execution. */
+
       if (opt->debug_symbols)
         LLVMStripModuleDebugInfo(jmod);
       if (ny_jit_module_is_apple_arm64(jmod))
@@ -5749,8 +5710,7 @@ skip_compilation:
         if (fast_isel_env && *fast_isel_env) {
           jopt.EnableFastISel = ny_env_is_truthy(fast_isel_env) ? 1 : 0;
         } else if (!ny_jit_module_is_apple_arm64(jmod)) {
-          /* Apple arm64 inherits the shared SelectionDAG default from
-             ny_jit_init_options; other targets keep the faster JIT path. */
+
           jopt.EnableFastISel = 1;
         }
       }

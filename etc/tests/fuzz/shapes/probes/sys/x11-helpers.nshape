@@ -1,0 +1,136 @@
+shape x11-helpers {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.common
+use std.core.mem
+use std.os.ui.window.consts as wc
+use std.os.ui.window.platform.linux.x11 as x11
+def expected_available = common.env_trim("DISPLAY").len > 0
+assert(x11.available() == expected_available, "x11 availability follows DISPLAY")
+assert(x11.get_backend_name() == "x11", "x11 backend name")
+def scaled = {"scale_x": 1.25, "scale_y": 1.5}
+assert(x11.get_window_content_scale(scaled) == [1.25, 1.5], "content scale reads cached values")
+assert(x11.get_window_content_scale(0) == [1.0, 1.0], "content scale fallback")
+def key_states = dict(4).set(65, true)
+def mouse_buttons = dict(4).set(0, true).set(1, false)
+def scancodes = dict(4).set(65, 38)
+def win = {
+   "key_states": key_states,
+   "mouse_buttons": mouse_buttons,
+   "x11_scancodes": scancodes,
+   "raw_mouse_motion": true,
+   "cursor_mode": x11.CURSOR_MODE_DISABLED,
+   "sticky_keys": true,
+   "sticky_mouse_buttons": false,
+   "lock_key_mods": true,
+   "virtual_cursor_x": 12,
+   "virtual_cursor_y": 34,
+}
+fn translated_type(list events, int i) int {
+   def e = events.get(i)
+   int(e.get(1, 0))
+}
+fn translated_data(list events, int i) any {
+   def e = events.get(i)
+   e.get(4, 0)
+}
+assert(x11.get_key_state(win, 65) == 1, "cached key state true")
+assert(x11.get_key_state(win, 66) == 0, "cached key state false")
+assert(x11.get_mouse_button_state(win, 0) == 1, "cached mouse button true")
+assert(x11.get_mouse_button_state(win, 1) == 0, "cached mouse button false")
+assert(x11.get_key_scancode(win, 65) == 38, "cached key scancode")
+assert(x11.get_key_scancode(win, 66) == -1, "missing key scancode")
+assert(x11.get_cursor_pos(win) == [12.0, 34.0], "disabled cursor cached position")
+assert(x11.get_input_mode(win, x11.INPUT_MODE_RAW_MOUSE) == 1, "raw mouse input mode")
+assert(x11.get_input_mode(win, x11.INPUT_MODE_CURSOR) == x11.CURSOR_MODE_DISABLED, "cursor input mode")
+assert(x11.get_input_mode(win, x11.INPUT_MODE_STICKY_KEYS) == 1, "sticky key mode")
+assert(x11.get_input_mode(win, x11.INPUT_MODE_STICKY_MOUSE_BUTTONS) == 0, "sticky mouse mode")
+assert(x11.get_input_mode(win, x11.INPUT_MODE_LOCK_KEY_MODS) == 1, "lock key mods mode")
+assert(!x11.show_window(dict(2)), "show fallback without handle")
+assert(!x11.hide_window(dict(2)), "hide fallback without handle")
+assert(!x11.iconify_window(dict(2)), "iconify fallback without handle")
+assert(!x11.maximize_window(dict(2)), "maximize fallback without handle")
+assert(!x11.restore_window(dict(2)), "restore fallback without handle")
+assert(!x11.focus_window(dict(2)), "focus fallback without handle")
+assert(!x11.set_window_resizable(dict(2), true), "resizable fallback without handle")
+assert(!x11.set_window_decorated(dict(2), true), "decorated fallback without handle")
+assert(!x11.set_window_floating(dict(2), true), "floating fallback without handle")
+assert(!x11.set_window_mouse_passthrough(dict(2), true), "passthrough fallback without handle")
+assert(!x11.set_window_size_limits(dict(2), 1, 1, 10, 10), "size limits fallback without handle")
+assert(!x11.set_window_aspect_ratio(dict(2), 16, 9), "aspect fallback without handle")
+assert(!x11.set_window_opacity(dict(2), 0.5), "opacity setter fallback without handle")
+assert(x11.get_window_opacity(dict(2)) == 1.0, "opacity getter fallback")
+def event_buf = zalloc(192)
+assert(event_buf, "event buffer allocates")
+mut event_win = {
+   "handle": 101,
+   "root": 1,
+   "w": 640,
+   "h": 480,
+   "x": 0,
+   "y": 0,
+   "mouse_x": 3,
+   "mouse_y": 4,
+   "cursor_mode": x11.CURSOR_MODE_NORMAL,
+}
+store32(event_buf, x11.Expose, 0)
+store32(event_buf, 101, 32)
+mut translated = x11.translate_event(event_win, event_buf)
+event_win = translated.get(0, event_win)
+mut events = translated.get(1, [])
+assert(events.len == 1, "Expose emits one event")
+assert(translated_type(events, 0) == wc.EVENT_WINDOW_REFRESH, "Expose translates to refresh")
+assert(event_win.get("mapped", false), "Expose marks window mapped")
+store32(event_buf, x11.EnterNotify, 0)
+store32(event_buf, 101, 32)
+store32(event_buf, 22, 64)
+store32(event_buf, 33, 68)
+translated = x11.translate_event(event_win, event_buf)
+event_win = translated.get(0, event_win)
+events = translated.get(1, [])
+assert(events.len == 2, "EnterNotify emits enter and position")
+assert(translated_type(events, 0) == wc.EVENT_MOUSE_ENTER, "EnterNotify emits enter")
+assert(translated_type(events, 1) == wc.EVENT_MOUSE_POS_CHANGED, "EnterNotify emits position")
+assert(translated_data(events, 1).get("x", 0) == 22, "EnterNotify carries x")
+assert(translated_data(events, 1).get("y", 0) == 33, "EnterNotify carries y")
+store32(event_buf, x11.MotionNotify, 0)
+store32(event_buf, 101, 32)
+store32(event_buf, 28, 64)
+store32(event_buf, 31, 68)
+translated = x11.translate_event(event_win, event_buf)
+event_win = translated.get(0, event_win)
+events = translated.get(1, [])
+assert(events.len == 1, "MotionNotify emits position")
+assert(translated_type(events, 0) == wc.EVENT_MOUSE_POS_CHANGED, "MotionNotify translates to position")
+assert(translated_data(events, 0).get("dx", 0) == 6.0, "MotionNotify carries dx")
+assert(translated_data(events, 0).get("dy", 0) == -2.0, "MotionNotify carries dy")
+store32(event_buf, x11.ConfigureNotify, 0)
+store32(event_buf, 101, 32)
+store32(event_buf, 5, 48)
+store32(event_buf, 7, 52)
+store32(event_buf, 800, 56)
+store32(event_buf, 600, 60)
+translated = x11.translate_event(event_win, event_buf)
+event_win = translated.get(0, event_win)
+events = translated.get(1, [])
+assert(events.len == 2, "ConfigureNotify emits resize and move")
+assert(translated_type(events, 0) == wc.EVENT_WINDOW_RESIZED, "ConfigureNotify emits resize")
+assert(translated_type(events, 1) == wc.EVENT_WINDOW_MOVED, "ConfigureNotify emits move")
+assert(event_win.get("w", 0) == 800 && event_win.get("h", 0) == 600, "ConfigureNotify updates size")
+assert(event_win.get("x", 0) == 5 && event_win.get("y", 0) == 7, "ConfigureNotify updates position")
+store32(event_buf, x11.DestroyNotify, 0)
+store32(event_buf, 101, 32)
+translated = x11.translate_event(event_win, event_buf)
+event_win = translated.get(0, event_win)
+events = translated.get(1, [])
+assert(events.len == 1, "DestroyNotify emits quit")
+assert(translated_type(events, 0) == wc.EVENT_QUIT, "DestroyNotify translates to quit")
+assert(event_win.get("should_close", false), "DestroyNotify marks close")
+free(event_buf)
+NY
+}

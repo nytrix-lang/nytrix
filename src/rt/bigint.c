@@ -6,19 +6,6 @@
 #include "rt/runtime.h"
 #include "rt/shared.h"
 
-/*
- * Nytrix BigInt Implementation
- * Layout (heap object):
- *   -8: TAG_BIGINT
- *    0: Sign (+1, -1, or 0) (tagged)
- *    8: Limb count (tagged)
- *   16+ : Little-endian uint64_t magnitude words
- *
- * Keep the heap representation independent from GMP's mp_limb_t ABI.  MSYS,
- * Homebrew, and Linux packages can expose different native limb choices, but
- * 64-bit import/export words are stable across all CI platforms.
- */
-
 extern int64_t rt_tagof(int64_t v);
 extern int64_t rt_list_new(int64_t n_v);
 extern int64_t rt_append(int64_t lst, int64_t val);
@@ -589,8 +576,6 @@ int64_t _bi_from_mpz(const mpz_t val) {
   return p;
 }
 
-/* Internal API used by rt_add, rt_sub, etc. */
-
 int64_t rt_bigint_add(int64_t a, int64_t b) {
   int64_t fast = 0;
   if (_bi_try_add_limb2(a, b, 0, &fast))
@@ -931,7 +916,6 @@ int64_t rt_bigint_popcount(int64_t a) {
   return rt_tag_v((int64_t)r);
 }
 
-/* Stubs for remaining functions to maintain compatibility */
 int64_t rt_bigint_to_int(int64_t a) {
   mpz_t ma;
   _bi_val_to_mpz(a, ma);
@@ -1305,13 +1289,10 @@ int64_t rt_bigint_gf2_inv(int64_t a, int64_t m) {
   return out;
 }
 
-/* Constant-time comparison: compare two byte buffers in constant time.
-   Returns 0 if equal, non-zero otherwise. Uses XOR-accumulate to avoid
-   data-dependent branches. */
 int64_t rt_ct_compare(int64_t a_ptr, int64_t b_ptr, int64_t len_val) {
   const uint8_t *a = (const uint8_t *)(uintptr_t)a_ptr;
   const uint8_t *b = (const uint8_t *)(uintptr_t)b_ptr;
-  size_t len = (size_t)(len_val >> 1); /* untag */
+  size_t len = (size_t)(len_val >> 1);
   if (!a || !b || len == 0)
     return rt_tag_v(0);
   uint8_t result = 0;
@@ -1323,12 +1304,9 @@ int64_t rt_ct_compare(int64_t a_ptr, int64_t b_ptr, int64_t len_val) {
   return rt_tag_v((int64_t)result);
 }
 
-/* Constant-time conditional select: returns a if condition is truthy, else b.
-   Falsy values: raw == NY_IMM_NIL, tagged int 0, NY_IMM_FALSE.
-   Uses branchless bitwise ops for constant-time execution. */
 int64_t rt_ct_select(int64_t a, int64_t b, int64_t condition) {
   uint64_t c = (uint64_t)condition;
-  /* Branchless equality: is_zero(x) = ((x | -x) >> 63) ^ 1 */
+
   uint64_t is_0 = ((c | (0ULL - c)) >> 63) ^ 1ULL;
   uint64_t d1 = c ^ 1ULL;
   uint64_t is_1 = ((d1 | (0ULL - d1)) >> 63) ^ 1ULL;

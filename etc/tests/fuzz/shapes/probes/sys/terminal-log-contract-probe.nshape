@@ -1,0 +1,13 @@
+shape terminal_log_contract_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+def label = "terminal-log-contract"
+assert(len(label) > 0, "terminal label")
+print("terminal log contract probe ok")
+NY
+}
