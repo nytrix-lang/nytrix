@@ -180,18 +180,16 @@ void ny_apply_rt_fn_attrs(codegen_t *cg, LLVMValueRef fn) {
   bool is_apple_arm64 = ny_module_target_is_apple_arm64(cg->module);
 
   if (cg->debug_symbols || is_apple) {
-    // For Apple targets, we must provide frame pointers for the fortified
-    // setjmp/longjmp stack checks to work correctly.
+
     add_fn_string_attr(cg, fn, "frame-pointer", "all");
 
     if (is_apple_arm64) {
       add_fn_string_attr(cg, fn, "no-frame-pointer-elim", "true");
       add_fn_string_attr(cg, fn, "no-frame-pointer-elim-non-leaf", "true");
-      // Disable red-zone for JIT stability.
+
       add_fn_string_attr(cg, fn, "no-red-zone", "true");
     }
 
-    // Use Sync UWTable (1) for longjmp compatibility on many platforms.
     add_fn_enum_attr(cg, fn, "uwtable", 1);
   }
 }
@@ -340,15 +338,13 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   add_builtins(cg);
   LLVMAddGlobal(cg->module, cg->type_i64, "__NYTRIX__");
 
-  /* Initialize optimization flags */
-  /* Type inference is safe and enabled by default - provides 94-99x speedup */
   cg->opt_enabled = cg->debug_opt_level > 0 ||
                     ny_env_enabled("NYTRIX_ENABLE_OPTIMIZE") ||
                     ny_env_enabled("NYTRIX_OPT_ENABLE");
   cg->opt_type_infer =
-      ny_env_enabled("NYTRIX_ENABLE_TYPEINFER") || /* Explicit enable */
-      ny_env_enabled("NYTRIX_ENABLE_OPTIMIZE") ||  /* Optimize mode */
-      !ny_env_enabled("NYTRIX_DISABLE_TYPEINFER"); /* Enabled by default */
+      ny_env_enabled("NYTRIX_ENABLE_TYPEINFER") ||
+      ny_env_enabled("NYTRIX_ENABLE_OPTIMIZE") ||
+      !ny_env_enabled("NYTRIX_DISABLE_TYPEINFER");
   cg->opt_const_fold =
       cg->opt_enabled || ny_env_enabled("NYTRIX_ENABLE_CONST_FOLD");
   cg->opt_tail_call =
@@ -357,7 +353,7 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
       cg->opt_enabled || ny_env_enabled("NYTRIX_ENABLE_INLINE");
   cg->opt_lazy_load =
       cg->opt_enabled || ny_env_enabled("NYTRIX_ENABLE_LAZY_LOAD");
-  /* Systems mode - C-level performance with @sys functions */
+
   cg->opt_sys_mode =
       ny_env_enabled("NYTRIX_SYS_MODE") || ny_env_enabled("NYTRIX_SYS");
   cg->opt_unsafe_arith = ny_env_enabled("NYTRIX_UNSAFE_ARITH") ||
@@ -598,9 +594,7 @@ static bool ny_lazy_emit_is_conservative_keep(const char *final_name) {
   const char *tail = ny_name_leaf(final_name);
   if (!tail || !*tail)
     return true;
-  /* Operator fallback helpers are still synthesized from several codegen
-   * paths. Other std.core functions are collected by the post-declaration
-   * demand pass when LLVM uses their declarations. */
+
   if (strncmp(final_name, "std.math.nt.__", 14) == 0 ||
       strncmp(final_name, "std.math.matrix.__", 18) == 0)
     return true;
@@ -1778,7 +1772,7 @@ void codegen_collect_links(codegen_t *cg, program_t *prog) {
       continue;
     process_links(cg, s, NULL);
   }
-  /* Also process extra_progs which contains loaded module bodies */
+
   for (size_t p = 0; p < cg->extra_progs.len; p++) {
     program_t *eprog = cg->extra_progs.data[p];
     if (!eprog)
@@ -1819,7 +1813,6 @@ void codegen_prepare(codegen_t *cg) {
   NY_COMPILER_ASSERT(cg->extra_progs.data != NULL || cg->extra_progs.len == 0,
                      "codegen_prepare extra_progs vector has len but no data");
 
-  /* Initialize debug info if enabled */
   if (cg->debug_symbols) {
     stmt_t *first_stmt =
         (cg->prog->body.len > 0) ? cg->prog->body.data[0] : NULL;
@@ -1829,7 +1822,7 @@ void codegen_prepare(codegen_t *cg) {
         (cg->debug_main_file && *cg->debug_main_file)
             ? cg->debug_main_file
             : (first_stmt ? first_stmt->tok.filename : "<inline>");
-    /* For inline code (-c), save to temp file so GDB can find source */
+
     bool inline_source = !main_file || !*main_file || main_file[0] == '<' ||
                          strcmp(main_file, "-") == 0;
     if (inline_source && cg->user_source && cg->user_source_len > 0) {
@@ -1843,14 +1836,14 @@ void codegen_prepare(codegen_t *cg) {
       if (f) {
         fwrite(cg->user_source, 1, cg->user_source_len, f);
         fclose(f);
-        /* Resolve to absolute path for debug info */
+
         static char abs_inline[4096];
         if (ny_realpath(inline_file, abs_inline)) {
           main_file = abs_inline;
         } else {
           main_file = inline_file;
         }
-        /* Update user code statements at the END of the program body */
+
         size_t start = cg->prog->body.len > 20 ? cg->prog->body.len - 20 : 0;
         for (size_t i = start; i < cg->prog->body.len; i++) {
           stmt_t *s = cg->prog->body.data[i];
@@ -1919,8 +1912,6 @@ void codegen_prepare(codegen_t *cg) {
     process_exports(cg, s);
   }
 
-  /* Re-scan for #link after imports are resolved (module bodies may be loaded
-   * now). */
   ny_build_link_allowed_modules(cg);
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
@@ -1956,10 +1947,6 @@ void codegen_repopulate_interns(codegen_t *cg) {
   if (!cg || !cg->module)
     return;
 
-  /* Linked std bitcode can rename private runtime globals to
-   * .str.runtime.<hash>.<n> while the matching data global keeps the base
-   * .str.data.<hash> name. Rebuild interns from the actual runtime globals so
-   * every linked runtime pointer is initialized before user code runs. */
   for (LLVMValueRef g = LLVMGetFirstGlobal(cg->module); g;
        g = LLVMGetNextGlobal(g)) {
     const char *name = LLVMGetValueName(g);
@@ -2296,11 +2283,10 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
   assigned_hash_list top_entry_blocked_hashes = {0};
   uint64_t top_entry_blocked_bloom[4] = {0, 0, 0, 0};
 
-  /* Run type inference for top-level code */
   if (cg->opt_type_infer && cg->prog && cg->prog->body.len > 0) {
     typeinfer_ctx_t infer_ctx = {0};
     typeinfer_ctx_init(&infer_ctx, 256, sc, cg);
-    /* Walk all top-level statements */
+
     for (size_t i = 0; i < cg->prog->body.len; i++) {
       stmt_t *s = cg->prog->body.data[i];
       NY_COMPILER_ASSERTF(s != NULL,
@@ -2333,7 +2319,7 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
         assigned_name_add(&top_entry_blocked_names, &top_entry_blocked_hashes,
                           top_entry_blocked_bloom, name);
     }
-    /* Apply to scope 0 (top-level) */
+
     typeinfer_apply_to_scopes(&infer_ctx, sc, 1);
     typeinfer_ctx_dispose(&infer_ctx);
   }
@@ -2497,10 +2483,6 @@ void codegen_emit_string_init(codegen_t *cg) {
       ny_codegen_speed_profile_enabled(cg) ||
       ny_fast_path_enabled(cg, "NYTRIX_CONST_STRING_GLOBAL_INIT");
 
-  /* Collect all string data globals for this module and build an llvm.used
-   * array to prevent DCE from removing the string data globals. This replaces
-   * the per-string inline asm identity calls, saving ~2.5s JIT compile time
-   * for large modules (6000+ strings). */
   size_t str_count = 0;
   bool init_all = (cg->current_module_name == NULL);
   for (size_t i = 0; i < cg->interns.len; i++) {
@@ -2520,10 +2502,10 @@ void codegen_emit_string_init(codegen_t *cg) {
         continue;
       elements[idx++] = LLVMConstPointerCast(si->gv, i8_ptr_ty);
     }
-    /* Use llvm.used to prevent DCE of string data globals. */
+
     LLVMValueRef used_global = LLVMGetNamedGlobal(cg->module, "llvm.used");
     if (used_global) {
-      /* Append to existing llvm.used array. */
+
       LLVMValueRef old_init = LLVMGetInitializer(used_global);
       size_t old_count = LLVMGetArrayLength(LLVMTypeOf(old_init));
       size_t new_count = old_count + str_count;
@@ -2541,16 +2523,12 @@ void codegen_emit_string_init(codegen_t *cg) {
     free(elements);
   }
 
-  /* When emit_module_decls_only is true (parallel modules mode), string data
-   * globals from stdlib modules may not be in cg->interns but are still
-   * referenced by the linked bitcode. Scan the module for any .str.data globals
-   * and add them to llvm.used so the linker doesn't strip them. */
   if (cg->emit_module_decls_only) {
     LLVMValueRef g = LLVMGetFirstGlobal(cg->module);
     while (g) {
       const char *gname = LLVMGetValueName(g);
       if (gname && strncmp(gname, ".str.data.", 10) == 0) {
-        /* Check if already in llvm.used. */
+
         bool found = false;
         LLVMValueRef ug = LLVMGetNamedGlobal(cg->module, "llvm.used");
         if (ug) {
@@ -2588,10 +2566,6 @@ void codegen_emit_string_init(codegen_t *cg) {
     }
   }
 
-  /* Init runtime string pointers: direct GEP + store, no inline asm needed
-   * because the data globals are preserved via __NYTRIX_STR_USED above.
-   * When init_all is true (script entry point), also scan the module for
-   * any additional string globals from linked-in stdlib modules. */
   for (size_t i = 0; i < cg->interns.len; i++) {
     if (!init_all && cg->interns.data[i].module != cg->module)
       continue;
@@ -2605,7 +2579,6 @@ void codegen_emit_string_init(codegen_t *cg) {
       continue;
     LLVMTypeRef rt_ty = LLVMTypeOf(runtime_ptr_global);
 
-    /* Direct GEP into the string data global, skip 64-byte header. */
     LLVMValueRef indices[] = {LLVMConstInt(cg->type_i64, 64, 0)};
     LLVMValueRef str_data_ptr = LLVMBuildInBoundsGEP2(
         cg->builder, i8_ty, str_array_global, indices, 1, "");
@@ -2617,8 +2590,6 @@ void codegen_emit_string_init(codegen_t *cg) {
     }
   }
 
-  /* For AOT builds, scan the module for any runtime string pointer globals
-   * that came from linked stdlib bitcode and weren't in cg->interns. */
   if (init_all) {
     size_t old_intern_len = cg->interns.len;
     codegen_repopulate_interns(cg);
@@ -2685,7 +2656,7 @@ static void codegen_free_layout_def(layout_def_t *def) {
 void codegen_dispose(codegen_t *cg) {
   if (!cg)
     return;
-  /* Only finalize debug info if not already done during optimization */
+
   if (cg->di_builder) {
     codegen_debug_finalize(cg);
   }

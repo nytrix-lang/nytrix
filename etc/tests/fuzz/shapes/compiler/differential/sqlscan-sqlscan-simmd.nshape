@@ -1,0 +1,34 @@
+shape sqlscan-sqlscan_simmd {
+  family "compiler-suite"
+  generator "stress"
+  features ["ny", "differential"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.simmd as simmd
+fn main(): int {
+   def n = 32768
+   def rounds = 2000
+   def bytes = n * 4
+   def region = malloc_raw(bytes)
+   def tier = malloc_raw(bytes)
+   def amount = malloc_raw(bytes)
+   def flags = malloc_raw(bytes)
+   mut i = 0
+   while(i < n){
+      store32(region, (i * 17 + 3) % 16, i * 4)
+      store32(tier, (i * 13 + 5) % 8, i * 4)
+      store32(amount, 500 + ((i * 97) % 2000), i * 4)
+      store32(flags, (i * 19 + 1) % 16, i * 4)
+      i += 1
+   }
+   print(simmd.i32_sqlscan_sum_ptr(region, tier, amount, flags, n, rounds))
+   free_raw(region)
+   free_raw(tier)
+   free_raw(amount)
+   free_raw(flags)
+   return 0
+}
+NY
+}

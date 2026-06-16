@@ -1,0 +1,50 @@
+shape contains-duplicate {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "dict", "array", "membership"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.set
+use std.os.time
+fn gen_vals(n){
+   mut a = list(0)
+   mut x = 31415926
+   mut i = 0
+   while(i < n){
+      a = append(a, 0)
+      i += 1
+   }
+   i = 0
+   while(i < n){
+      x = (x * 1103515245 + 12345) & 2147483647
+      set_idx(a, i, x % 100000)
+      i += 1
+   }
+   set_idx(a, n / 2, get(a, 0))
+   return a
+}
+fn has_dup(a){
+   mut s = set(8)
+   mut i = 0
+   while(i < len(a)){
+      def v = get(a, i)
+      if(contains(s, v)){ return true }
+      s = add(s, v)
+      i += 1
+   }
+   return false
+}
+def arr = gen_vals(200000)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 35){
+   checksum += has_dup(arr) ? 1 : 0
+   r += 1
+}
+def t1 = ticks()
+print("RESULT contains_duplicate ", checksum, " ", t1 - t0)
+NY
+}

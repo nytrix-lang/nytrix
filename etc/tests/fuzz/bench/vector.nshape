@@ -1,0 +1,78 @@
+shape vector {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+;; Vector Benchmark (Benchmark)
+; Fixed scale values (helpers may return 0 if env not set)
+fn hadamard_kernel(a, b) {
+   def n = a.len
+   mut out = list(n)
+   mut i = 0
+   while i < n {
+      __store_item_fast(out, i, __load_item_fast(a, i) * __load_item_fast(b, i))
+      i += 1
+   }
+   __list_set_len(out, n)
+   out
+}
+def n = 1024
+def rounds = 2
+mut a = list(n)
+mut b = list(n)
+mut i = 0
+while i < n {
+   a = a.append(i + 1)
+   b = b.append(i + 3)
+   i += 1
+}
+print("Running", rounds, "rounds of size", n)
+def t0 = ticks()
+mut acc = 0
+mut r = 0
+while r < rounds {
+   def c = hadamard_kernel(a, b)
+   acc = acc + c.get(0, 0) + c.get(n - 1, 0)
+   r += 1
+}
+def t1 = ticks()
+print("Vector benchmark acc =", acc)
+print("Time(ns): ", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
+}
+
+int main(void) {
+    const int n = 1024, rounds = 2;
+    int64_t *a = (int64_t *)malloc((size_t)n * sizeof(int64_t));
+    int64_t *b = (int64_t *)malloc((size_t)n * sizeof(int64_t));
+    int64_t *c = (int64_t *)malloc((size_t)n * sizeof(int64_t));
+    if (!a || !b || !c) return 2;
+    for (int i = 0; i < n; i++) { a[i] = i + 1; b[i] = i + 3; }
+    int64_t start = now_ns();
+    int64_t acc = 0;
+    for (int r = 0; r < rounds; r++) {
+        for (int i = 0; i < n; i++) c[i] = a[i] * b[i];
+        acc += c[0] + c[n - 1];
+    }
+    int64_t end = now_ns();
+    free(a); free(b); free(c);
+    printf("checksum=%lld\n", (long long)acc);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

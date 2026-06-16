@@ -13,7 +13,7 @@ use std.os.clipboard as clipboard
 use std.core.str as str
 use std.math.crypto.encoding.base as str_base
 use std.math
-use std.parse.img.png as png_img
+use std.math.parse.img.png as png_img
 use std.os.ui.window.consts
 use std.os.ui.render (
    BACKEND_MOCK, _font_get, color_pack, draw_rect, draw_rect_fast,

@@ -1,0 +1,61 @@
+shape otp_min_a {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module otp_min_a(
+   otp_reuse_attack,
+   otp_decrypt_known_plaintext
+)
+use std.core
+fn otp_reuse_attack(ct1, ct2){
+   def n1 = len(ct1)
+   def n2 = len(ct2)
+   mut n = (n1 < n2) ? n1 : n2
+   mut result = list(0)
+   mut i = 0
+   while(i < n){
+      def x = bxor(get(ct1, i), get(ct2, i))
+      result = append(result, x)
+      i = i + 1
+   }
+   result
+}
+fn otp_decrypt_known_plaintext(ct, known_pt){
+   def ks_len = len(known_pt)
+   mut keystream = list(0)
+   mut i = 0
+   while(i < ks_len){
+      def b = bxor(get(ct, i), get(known_pt, i))
+      keystream = append(keystream, b)
+      i = i + 1
+   }
+   def ct_len = len(ct)
+   mut result = list(0)
+   i = 0
+   while(i < ct_len){
+      def ks_byte = (i < ks_len) ? get(keystream, i) : 0
+      mut p = bxor(get(ct, i), ks_byte)
+      result = append(result, p)
+      i = i + 1
+   }
+   result
+}
+if(comptime{__main()}){
+   def key = [0xAB, 0xCD, 0xEF]
+   def pt1 = [72, 101, 108]
+   def pt2 = [87, 111, 114]
+   def ct1 = [pt1[0] ^ key[0], pt1[1] ^ key[1], pt1[2] ^ key[2]]
+   def ct2 = [pt2[0] ^ key[0], pt2[1] ^ key[1], pt2[2] ^ key[2]]
+   def xored = otp_reuse_attack(ct1, ct2)
+   assert(get(xored, 0) == (get(pt1, 0) ^ get(pt2, 0)), "otp_reuse xor[0]")
+   assert(get(xored, 1) == (get(pt1, 1) ^ get(pt2, 1)), "otp_reuse xor[1]")
+   def recovered = otp_decrypt_known_plaintext(ct1, pt1)
+   assert(get(recovered, 0) == get(pt1, 0), "otp kpa[0]")
+   assert(get(recovered, 2) == get(pt1, 2), "otp kpa[2]")
+   print("ok a")
+}
+NY
+}

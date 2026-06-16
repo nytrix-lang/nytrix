@@ -187,8 +187,7 @@ static int ny_should_disable_trace_emission(codegen_t *cg) {
 static void emit_trace_enter(codegen_t *cg, const char *name, token_t tok) {
   if (!cg || !cg->builder || !name)
     return;
-  /* Preserve trace-based backtraces for debug-style runs, but avoid
-     instrumenting optimized pipelines unless explicitly requested. */
+
   if (ny_should_disable_trace_emission(cg))
     return;
   fun_sig *ts = lookup_fun(cg, "__trace_enter", 0);
@@ -390,8 +389,7 @@ static bool attr_arg_text_view(expr_t *arg, const char **text, size_t *len) {
     *len = arg->as.literal.as.s.len;
     return true;
   }
-  // 'none' / 'nil' are tokenized as NY_T_NIL (literal int 0), but in
-  // attribute context we want the original keyword text.
+
   if (arg->kind == NY_E_LITERAL && arg->as.literal.kind == NY_LIT_INT &&
       arg->as.literal.as.i == 0 && arg->tok.lexeme && arg->tok.len > 0) {
     *text = arg->tok.lexeme;
@@ -862,7 +860,7 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
     decl->attr_cold = true;
   }
   if (decl->attr_consteval) {
-    /* @consteval implies @inline and @pure: must be evaluable at compile time */
+
     decl->attr_inline = true;
     decl->attr_readnone = true;
     decl->attr_nounwind = true;
@@ -872,8 +870,8 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
     decl->effect_contract_mask = NY_FX_NONE;
   }
   if (decl->attr_constant_time) {
-    /* @constant_time: prevent speculation-based timing leaks */
-    decl->attr_noinline = false; /* allow inlining for better ct codegen */
+
+    decl->attr_noinline = false;
     decl->attr_hot = true;
   }
   if (decl->attr_accel) {
@@ -899,7 +897,6 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
   decl->attrs_resolved = true;
 }
 
-/* Count statements in function body for inlining heuristic */
 static size_t count_stmts_in_body(const stmt_t *body) {
   if (!body)
     return 0;
@@ -913,13 +910,13 @@ static size_t count_stmts_in_body(const stmt_t *body) {
           s->kind == NY_S_RETURN) {
         count++;
       } else if (s->kind == NY_S_IF) {
-        count += 2; /* if + branches */
+        count += 2;
         if (s->as.iff.conseq)
           count += count_stmts_in_body(s->as.iff.conseq);
         if (s->as.iff.alt)
           count += count_stmts_in_body(s->as.iff.alt);
       } else if (s->kind == NY_S_WHILE || s->kind == NY_S_FOR) {
-        count += 3; /* loops are expensive */
+        count += 3;
       }
     }
   } else {
@@ -1041,14 +1038,12 @@ void ny_apply_decl_fn_attrs(codegen_t *cg, LLVMValueRef fn, stmt_t *fn_stmt) {
 
   ny_apply_rt_fn_attrs(cg, fn);
 
-  /* ── Auto-force inline on tiny functions ─────────────────────── */
   if (cg->opt_inline_small && !has_try && !decl->attr_noinline) {
     size_t stmt_count = count_stmts_in_body(decl->body);
     if (stmt_count < 8 || decl->attr_inline || decl->attr_flatten)
       add_fn_enum_attr(cg, fn, "alwaysinline", 0);
   }
 
-  /* ── Special attribute combinations ──────────────────────────── */
   if (decl->attr_naked)
     add_fn_enum_attr(cg, fn, "naked", 0);
   if (decl->attr_jit) {
@@ -1069,12 +1064,6 @@ void ny_apply_decl_fn_attrs(codegen_t *cg, LLVMValueRef fn, stmt_t *fn_stmt) {
     add_fn_enum_attr(cg, fn, "noinline", 0);
   }
 
-  /* ── Table-driven LLVM enum attributes ───────────────────────── */
-  /*
-   * LLVM 20+ rejects the legacy readnone/readonly/writeonly/argmemonly
-   * function attributes in opaque-pointer IR. Keep Nytrix's semantic flags
-   * for diagnostics/effects, but do not emit invalid IR optimization hints.
-   */
   if (decl->attr_nounwind && !has_try)
     add_fn_enum_attr(cg, fn, "nounwind", 0);
   if (decl->attr_mustprogress && !has_try)
@@ -1642,7 +1631,7 @@ static void mark_expr_params(expr_t *e, type_env_t *env, const char **param_name
               break;
             }
           }
-          // Propagate to env (local vars) — both f64 and int are safe
+
           bool found = false;
           for (int k = 0; k < env->count; k++) {
             if (strcmp(env->names[k], oname) == 0) {
@@ -1696,7 +1685,6 @@ static void scan_body_for_param_types(stmt_t *body, type_env_t *env, const char 
         mark_expr_params(init, env, param_names, param_types, nparam);
         const char *t = ast_infer_type(init, env);
 
-        // If this is an assignment to a parameter, update its type
         for (int j = 0; j < nparam; j++) {
           if (param_names[j] && strcmp(body->as.var.names.data[i], param_names[j]) == 0) {
             if (t) {
@@ -1724,8 +1712,6 @@ static void scan_body_for_param_types(stmt_t *body, type_env_t *env, const char 
           }
         }
 
-        // Reverse propagation: If LHS has a type in env, and RHS is a param,
-        // give param that type.
         if (init->kind == NY_E_IDENT) {
           const char *lhs_type = NULL;
           for (int k = 0; k < env->count; k++) {
@@ -1803,13 +1789,11 @@ static void scan_body_for_param_types(stmt_t *body, type_env_t *env, const char 
   }
 }
 
-// Check if a param name appears as argument to float(), store32_f32(),
-// or other float-consuming calls.
 static void scan_float_usage_expr(expr_t *e, const char **pnames, bool *used_float, int np) {
   if (!e)
     return;
   if (e->kind == NY_E_CALL) {
-    // Check if this is float(param) or store32_f32(..., param, ...)
+
     expr_t *callee = e->as.call.callee;
     bool is_float_fn = false;
     if (callee && callee->kind == NY_E_IDENT) {
@@ -1910,7 +1894,7 @@ static void scan_float_usage(stmt_t *s, const char **pnames, bool *used_float, i
 static bool is_numeric_fn(const char *fn_name) {
   if (!fn_name)
     return false;
-  // Functions that only make sense with numeric args
+
   static const char *numeric_fns[] = {"abs",
                                       "sqrt",
                                       "sin",
@@ -1951,8 +1935,7 @@ static void scan_poly_usage_expr(expr_t *e, const char **pnames, bool *poly, int
     bool is_numeric = false;
     if (callee && callee->kind == NY_E_IDENT)
       is_numeric = is_numeric_fn(callee->as.ident.name);
-    // If calling a non-numeric function with a param directly as arg,
-    // mark param as potentially polymorphic
+
     if (!is_numeric && callee) {
       for (size_t a = 0; a < e->as.call.args.len; a++) {
         expr_t *arg = e->as.call.args.data[a].val;
@@ -1988,7 +1971,7 @@ static void scan_poly_usage_expr(expr_t *e, const char **pnames, bool *poly, int
     scan_poly_usage_expr(e->as.ternary.false_expr, pnames, poly, np);
     return;
   }
-  // Index access: param[x] or x[param] indicates non-int usage
+
   if (e->kind == NY_E_INDEX) {
     expr_t *obj = e->as.index.target;
     if (obj && obj->kind == NY_E_IDENT) {
@@ -2068,7 +2051,7 @@ static void infer_param_types(stmt_t *fn, const char **param_types) {
   int nparam = (int)fn->as.fn.params.len;
   if (nparam == 0 || nparam > 16)
     return;
-  // Skip int inference for stdlib functions (they're typically polymorphic)
+
   bool is_stdlib = ny_is_stdlib_tok(fn->tok);
   if (!is_stdlib && fn->tok.filename) {
     is_stdlib = strstr(fn->tok.filename, "nytrix/lib/") != NULL ||
@@ -2094,11 +2077,10 @@ static void infer_param_types(stmt_t *fn, const char **param_types) {
       env.count++;
     }
   }
-  // Multiple passes: each pass propagates types further (local vars → params)
+
   for (int pass = 0; pass < 3; pass++)
     scan_body_for_param_types(fn->as.fn.body, &env, param_names, param_types, nparam);
-  // Safety: clear int inference for params used in float or polymorphic
-  // contexts
+
   bool param_used_as_float[16] = {0};
   bool param_used_poly[16] = {0};
   scan_float_usage(fn->as.fn.body, param_names, param_used_as_float, nparam);
@@ -2278,9 +2260,7 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
   bool split_worker_attached_method =
       cg && cg->emit_module_decls_only && fn->as.fn.name &&
       strchr(fn->as.fn.name, '.') != NULL;
-  /* Tag functions by origin so later passes (like std-bc cache stripping) can
-     distinguish std/lib symbols from user code even when the language-level
-     name is unqualified (e.g. `print`). */
+
   const char *origin_section = "ny.user";
   if (ny_is_stdlib_tok(fn->tok))
     origin_section = "ny.std";
@@ -2341,13 +2321,11 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
       ny_apply_longjmp_fn_attrs(cg, f);
   } else {
     ny_llvm_clear_function(f);
-    /* Keep the original section tag if present; otherwise tag based on origin. */
+
     const char *sec = LLVMGetSection(f);
 #ifdef __APPLE__
     if (cg->is_repl) {
-      /* REPL MCJIT snippets on Mach-O can fault when calling between custom
-         sections. Let LLVM place interactive functions in the default text
-         section; normal builds still keep std/user origin tags. */
+
     } else if (sec && strcmp(sec, "ny.std") == 0)
       LLVMSetSection(f, "__TEXT,ny_std");
     else if (sec && strcmp(sec, "ny.user") == 0)
@@ -2373,9 +2351,6 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
   LLVMBasicBlockRef cur = ny_cur_block(cg);
   LLVMBasicBlockRef entry_bb = ny_bb_fn(f, "entry");
   ny_pos(cg, entry_bb);
-
-  // Entry block has no predecessors — seal it immediately so Braun SSA never
-  // creates incomplete PHIs at the function entry.
 
   LLVMMetadataRef prev_scope = cg->di_scope;
   LLVMMetadataRef prev_loc = cg->di_loc;
@@ -2714,13 +2689,12 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
   cg->current_fn_attr_naked = fn->as.fn.attr_naked;
   cg->current_fn_attr_tailcall = fn->as.fn.attr_tailcall;
 
-  /* Phase 2: Static type inference pass for proven i64 types */
   if (cg->opt_type_infer) {
     typeinfer_ctx_t infer_ctx = {0};
     size_t max_infer_vars = 256;
     typeinfer_ctx_init(&infer_ctx, max_infer_vars, scopes, cg);
     typeinfer_func_body(&infer_ctx, fn->as.fn.body);
-    /* Apply to fd+1 to include the current function scope */
+
     typeinfer_apply_to_scopes(&infer_ctx, scopes, fd + 1);
     typeinfer_ctx_dispose(&infer_ctx);
   }
@@ -3127,7 +3101,7 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
         !ny_env_enabled("NYTRIX_STDBC_IMPORT_FFI")) {
       return;
     }
-    /* Build "NAME" or "NAME=value" string for the FFI preprocessor */
+
     if (s->as.def.value && s->as.def.value[0]) {
       size_t nlen = strlen(s->as.def.name);
       size_t vlen = strlen(s->as.def.value);

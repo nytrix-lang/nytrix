@@ -1,0 +1,17 @@
+shape type-assert-compile-index {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "static index proof failed"
+  source ny <<'NY'
+use std.core
+
+def xs = [1, 2, 3]
+def int i = 4
+assert_compile_index(xs, i, "static index proof failed")
+print(xs)
+NY
+}

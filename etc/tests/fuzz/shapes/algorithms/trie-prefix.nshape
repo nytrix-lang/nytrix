@@ -1,0 +1,100 @@
+shape trie-prefix {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "dict", "trie", "string"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.dict
+use std.os.time
+fn new_node(){
+   dict().set(-1, 0)
+}
+fn gen_word(seed, n){
+   mut x = seed
+   mut s = ""
+   mut i = 0
+   while(i < n){
+      x = (x * 1664525 + 1013904223) & 2147483647
+      s = s + chr(97 + (x % 26))
+      i += 1
+   }
+   s
+}
+fn build_words(n){
+   mut out = list(0)
+   mut i = 0
+   while(i < n){
+      out = append(out, gen_word(1009 + i * 7919, 4 + (i % 9)))
+      i += 1
+   }
+   out
+}
+fn trie_insert(nodes, word){
+   mut idx = 0
+   mut i = 0
+   while(i < len(word)){
+      def c = ord(get(word, i))
+      mut node = get(nodes, idx)
+      mut next = node.get(c, -1)
+      if(next == -1){
+         nodes = append(nodes, new_node())
+         next = len(nodes) - 1
+         node = node.set(c, next)
+         set_idx(nodes, idx, node)
+      }
+      idx = next
+      i += 1
+   }
+   def terminal = get(nodes, idx).set(-1, 1)
+   set_idx(nodes, idx, terminal)
+   nodes
+}
+fn build_trie(words){
+   mut nodes = list(0)
+   nodes = append(nodes, new_node())
+   mut i = 0
+   while(i < len(words)){
+      nodes = trie_insert(nodes, get(words, i))
+      i += 1
+   }
+   nodes
+}
+fn has_prefix(nodes, word){
+   mut idx = 0
+   mut i = 0
+   while(i < len(word)){
+      def c = ord(get(word, i))
+      def node = get(nodes, idx)
+      def next = node.get(c, -1)
+      if(next == -1){ return false }
+      idx = next
+      i += 1
+   }
+   true
+}
+fn query_score(nodes, words){
+   mut score = 0
+   mut i = 0
+   while(i < len(words)){
+      def w = get(words, i)
+      score += has_prefix(nodes, w) ? 3 : 0
+      score += has_prefix(nodes, w + "z") ? 7 : 1
+      i += 1
+   }
+   score
+}
+def words = build_words(900)
+def nodes = build_trie(words)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 420){
+   checksum += query_score(nodes, words)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT trie_prefix ", checksum, " ", t1 - t0)
+NY
+}

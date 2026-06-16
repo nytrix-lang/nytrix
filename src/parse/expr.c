@@ -39,7 +39,7 @@ static bool check_int_range(parser_t *p, token_t tok, uint64_t val,
   case NY_LIT_HINT_I64:
     return val <= (uint64_t)INT64_MAX;
   case NY_LIT_HINT_I128:
-    return true; /* Fits in uint64_t means fits in i128 */
+    return true;
   case NY_LIT_HINT_U8:
     return val <= UINT8_MAX;
   case NY_LIT_HINT_U16:
@@ -389,7 +389,7 @@ static const char *expr_parse_type_ref(parser_t *p, const char *err_msg) {
         break;
     }
     if (parser_match(p, NY_T_GT)) {
-      /* consumed */
+
     } else if (p->cur.kind == NY_T_RSHIFT) {
       token_t tok = p->cur;
       p->cur.kind = NY_T_GT;
@@ -460,9 +460,9 @@ static int precedence(token_kind kind) {
   case NY_T_RSHIFT:
     return 7;
   case NY_T_PIPE:
-    return 1; /* Low precedence, same as OR */
+    return 1;
   case NY_T_QUESTION_QUESTION:
-    return 2; /* Between OR and AND */
+    return 2;
   default:
     return 0;
   }
@@ -1216,7 +1216,7 @@ static expr_t *parse_postfix(parser_t *p) {
         expr = m;
       }
     } else if (p->cur.kind == NY_T_QUESTION_DOT) {
-      /* Optional Chaining Sugar: expr?.name -> if(expr) expr.name else nil */
+
       token_t qdot_tok = p->cur;
       parser_advance(p);
       if (p->cur.kind != NY_T_IDENT) {
@@ -1231,7 +1231,7 @@ static expr_t *parse_postfix(parser_t *p) {
       expr_t *access;
 
       if (p->cur.kind == NY_T_LPAREN) {
-        /* expr?.foo() */
+
         parser_advance(p);
         expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
         mc->as.memcall.target = target;
@@ -1239,19 +1239,17 @@ static expr_t *parse_postfix(parser_t *p) {
         parse_call_arg_list(p, &mc->as.memcall.args, NULL);
         access = mc;
       } else {
-        /* expr?.foo */
+
         expr_t *m = expr_new(p->arena, NY_E_MEMBER, id_tok);
         m->as.member.target = target;
         m->as.member.name = name;
         access = m;
       }
 
-      /* Wrap in ternary: if(expr) access else nil */
       expr_t *tern = expr_new(p->arena, NY_E_TERNARY, qdot_tok);
       tern->as.ternary.cond = target;
       tern->as.ternary.true_expr = access;
 
-      /* nil literal */
       token_t nil_tok = {.kind = NY_T_NIL, .lexeme = "nil", .len = 3};
       expr_t *nil_lit = expr_new(p->arena, NY_E_LITERAL, nil_tok);
       nil_lit->as.literal.kind = NY_LIT_INT;

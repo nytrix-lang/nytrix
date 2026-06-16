@@ -1,0 +1,51 @@
+shape float {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def iters = 200000
+;; Float (Benchmark)
+def start = ticks()
+mut x = 1.0
+def y = 1.000001
+mut i = 0
+while i < iters {
+   x = x * y
+   i += 1
+}
+def end = ticks()
+def dur = end - start
+print("Float ", iters, " muls took(ns): ", dur)
+print("Result: ", x)
+print("Time(ns): ", dur)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
+}
+
+int main(void) {
+    const int iters = 200000;
+    volatile double x = 1.0;
+    const double y = 1.000001;
+    int64_t start = now_ns();
+    for (int i = 0; i < iters; i++) x = x * y;
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)(x * 1000000000.0));
+    printf("result=%.12f\n", x);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

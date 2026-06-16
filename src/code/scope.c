@@ -215,7 +215,7 @@ typedef struct ny_builtin_shadow_cache_entry {
   size_t fun_len;
   uint64_t hash;
   uint16_t name_len;
-  uint8_t state; /* 0=empty, 1=no shadow, 2=shadow */
+  uint8_t state;
   char key[NY_BUILTIN_SHADOW_KEY_MAX];
 } ny_builtin_shadow_cache_entry;
 

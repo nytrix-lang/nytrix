@@ -1,0 +1,20 @@
+shape append_dict {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut a = list(0)
+mut d = dict(0)
+dict_set(d, "x", 7)
+mut b = append(a, d)
+print("b_is_list=" + to_str(is_list(b)))
+print("b_len=" + to_str(len(b)))
+def e = get(b, 0, 0)
+print("e_is_dict=" + to_str(is_dict(e)))
+print("e_raw=" + to_str(e))
+print("d_x=" + to_str(dict_get(d, "x", -1)))
+NY
+}

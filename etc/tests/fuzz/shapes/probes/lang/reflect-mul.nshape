@@ -1,0 +1,16 @@
+shape reflect_mul {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+def a = 48
+def b = 6
+print("mul=" + to_str(std.core.reflect.mul(a, b)))
+print("expr=" + to_str(a * b))
+print("eq=" + to_str(std.core.reflect.mul(a, b) == (a * b)))
+NY
+}

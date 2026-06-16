@@ -1,0 +1,54 @@
+shape two-sum {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "dict", "array", "lookup"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.reflect
+use std.core.dict
+use std.os.time
+fn gen_vals(n){
+   mut a = list(0)
+   mut i = 0
+   while(i < n){
+      a = append(a, 0)
+      i += 1
+   }
+   mut x = 1234567
+   i = 0
+   while(i < n){
+      x = (x * 1664525 + 1013904223) & 2147483647
+      set_idx(a, i, x % 1000000)
+      i += 1
+   }
+   set_idx(a, n - 2, 111)
+   set_idx(a, n - 1, 777)
+   return a
+}
+fn two_sum_score(a, target){
+   mut d = dict()
+   mut i = 0
+   while(i < len(a)){
+      def v = get(a, i)
+      def need = target - v
+      def j = d.get(need, -1)
+      if(j != -1){ return i + j }
+      d = d.set(v, i)
+      i += 1
+   }
+   return -1
+}
+def a = gen_vals(150000)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 30){
+   checksum += two_sum_score(a, 888)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT two_sum ", checksum, " ", t1 - t0)
+NY
+}

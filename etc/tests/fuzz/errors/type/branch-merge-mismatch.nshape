@@ -1,0 +1,20 @@
+shape type-branch-merge-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use std.core
+
+fn choose(flag, a, b) {
+   if flag { return a }
+   b
+}
+
+def int x = choose(true, 1, "x")
+print(x)
+NY
+}

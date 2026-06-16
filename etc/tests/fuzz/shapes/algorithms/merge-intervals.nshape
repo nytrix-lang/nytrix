@@ -1,0 +1,85 @@
+shape merge-intervals {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "nested-list", "sort", "mutation"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn gen_intervals(n){
+   mut out = list(0)
+   mut x = 314159265
+   mut i = 0
+   while(i < n){
+      x = (x * 1664525 + 1013904223) & 2147483647
+      def start = x % (n * 3)
+      x = (x * 1664525 + 1013904223) & 2147483647
+      def stop = start + 1 + (x % 31)
+      out = append(out, [start, stop])
+      i += 1
+   }
+   out
+}
+fn copy_intervals(src){
+   mut out = list(0)
+   mut i = 0
+   while(i < len(src)){
+      def row = get(src, i)
+      out = append(out, [get(row, 0), get(row, 1)])
+      i += 1
+   }
+   out
+}
+fn sort_intervals(xs){
+   mut i = 1
+   while(i < len(xs)){
+      def row = get(xs, i)
+      def key = get(row, 0)
+      mut j = i - 1
+      while(j >= 0 && get(get(xs, j), 0) > key){
+         set_idx(xs, j + 1, get(xs, j))
+         j -= 1
+      }
+      set_idx(xs, j + 1, row)
+      i += 1
+   }
+}
+fn merge_score(src){
+   def xs = copy_intervals(src)
+   sort_intervals(xs)
+   mut merged = 0
+   mut checksum = 0
+   def first = get(xs, 0)
+   mut cur_s = get(first, 0)
+   mut cur_e = get(first, 1)
+   mut i = 1
+   while(i < len(xs)){
+      def row = get(xs, i)
+      def s = get(row, 0)
+      def e = get(row, 1)
+      if(s <= cur_e){
+         if(e > cur_e){ cur_e = e }
+      } else {
+         checksum += (cur_s * 31) + cur_e
+         merged += 1
+         cur_s = s
+         cur_e = e
+      }
+      i += 1
+   }
+   checksum += (cur_s * 31) + cur_e
+   merged * 1000003 + checksum
+}
+def intervals = gen_intervals(220)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 35){
+   checksum += merge_score(intervals)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT merge_intervals ", checksum, " ", t1 - t0)
+NY
+}

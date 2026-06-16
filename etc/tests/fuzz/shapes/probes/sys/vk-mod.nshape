@@ -1,0 +1,71 @@
+shape vk-mod {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.ui.render.vk as vk
+assert(is_str(vk.debug_stage()), "vk debug stage")
+assert(vk.create_texture(1, 1, 0) == -1, "vk create texture no device")
+assert(vk.create_texture_ex(1, 1, 0) == -1, "vk create texture ex no device")
+assert(vk.create_cubemap(1, []) == -1, "vk cubemap no device")
+assert(vk.draw_skybox(-1) == false, "vk skybox no device")
+assert(vk.update_texture_rect(-1, 0, 0, 1, 1, 0) == false, "vk update texture no device")
+assert(vk.texture_size(-1) == 0, "vk texture size no device")
+assert(vk.texture_format(-1) == 0, "vk texture format no device")
+assert(vk.texture_descriptor(-1) == 0, "vk texture descriptor no device")
+assert(vk.destroy_texture(-1) == 0, "vk destroy texture no device")
+assert(vk.read_framebuffer() == 0, "vk read framebuffer no device")
+assert(vk.blit_buffer(0, 1, 1) == 0, "vk blit no device")
+assert(vk.draw_rect_fast(0.0, 0.0, 1.0, 1.0, 0xffffffff) == 0, "vk draw rect no frame")
+assert(vk.draw_line_fast(0.0, 0.0, 1.0, 1.0, 1.0, 0xffffffff) == 0, "vk draw line no frame")
+assert(vk.draw_vertices(0, 1, -1) == false, "vk draw vertices no frame")
+assert(vk.draw_static_buffer({"handle": 1, "offset": 0, "count": 3}) == false, "vk static buffer no frame")
+assert(vk.draw_static_buffer_raw(1, 0, 3) == false, "vk static raw no frame")
+assert(vk.draw_static_buffer_indexed({"handle": 1, "offset": 0, "ioffset": 0}, 2, 3) == false, "vk static indexed no frame")
+assert(vk.draw_static_buffer_indexed_raw(1, 0, 2, 0, 3) == false, "vk static indexed raw no frame")
+def job = vk.tex_job_make(2, "textures/base.png", "image/png", {"filter": 1}, 5, "baseColorTexture")
+assert(job.get("index") == 2 && job.get("material") == 5, "vk texture job wrapper")
+def q = vk.tex_job_queue_make()
+vk.tex_job_queue_push(q, job)
+assert(vk.tex_job_queue_pop(q).get("uri") == "textures/base.png", "vk texture queue wrapper")
+assert(vk.tex_job_queue_pop(q) == 0, "vk texture queue empty")
+def ok = vk.tex_job_result_make(job, 4, 4, "rgba", true)
+assert(vk.tex_job_upload_plan([ok]).len == 1, "vk upload plan wrapper")
+assert(vk.tex_job_cache_key("a.png", "image/png", 1) == vk.tex_job_cache_key("a.png", "image/png", 1), "vk texture cache key stable")
+assert(vk.tex_job_worker_plan(2).get("workers") == 2, "vk worker plan wrapper")
+assert(vk.gltf_pass_plan(0, "OPAQUE").get(0) == vk.GLTF_PASS_OPAQUE, "vk gltf opaque pass")
+assert(vk.gltf_pass_plan(128, "BLEND").len >= 2, "vk gltf blend pass")
+assert(vk.gltf_material_layout().get("base_material_bytes") == 152, "vk material layout")
+assert(vk.gltf_gbuffer_layout().len == 4, "vk gbuffer layout")
+assert(vk.gltf_descriptor_plan().get("texture_array_binding") == 1, "vk descriptor layout")
+assert(vk.gltf_shader_defines(vk.COMPUTE_FEATURE_TRANSMISSION).contains("NY_GLTF_TRANSMISSION"), "vk shader defines")
+assert(vk.gltf_pipeline_key("OPAQUE", true, false, 7).contains("ds=1"), "vk pipeline key")
+assert(vk.gltf_variant_key(1, 2, 3) == "1:2:3", "vk variant key")
+assert(vk.gltf_alpha_sort_key(0.5, 4, 9).get("part") == 9, "vk alpha sort key")
+assert(vk.gltf_unwired_checklist().len >= 5, "vk checklist")
+def parts = [
+   {"idx_buf": 11, "idx_off": 0, "vbuf": 22, "voff": 0, "material": 1, "pipeline": 7, "index_count": 36},
+   {"idx_buf": 11, "idx_off": 0, "vbuf": 22, "voff": 0, "material": 1, "pipeline": 7, "index_count": 36},
+   {"idx_buf": 12, "idx_off": 0, "vbuf": 22, "voff": 0, "material": 2, "pipeline": 7, "index_count": 12}
+]
+assert(vk.indirect_count_groups(parts) == 2, "vk indirect group count")
+def groups = vk.indirect_build_groups(parts)
+assert(groups.len == 2, "vk indirect groups")
+assert(groups.get(0).get("instance_count") == 2, "vk indirect first group instances")
+def cmds = malloc(vk.INDIRECT_CMD_BYTES * groups.len)
+assert(cmds != 0, "vk indirect command allocation")
+assert(vk.indirect_write_group_cmds(cmds, groups, true) == 2, "vk indirect command write")
+assert(load32(cmds, 0) == 36, "vk indirect command index count")
+assert(load32(cmds, 4) == 2, "vk indirect command instance count")
+free(cmds)
+assert(vk.indirect_shader_prepare().contains("DrawIndexedIndirect"), "vk indirect shader")
+assert(vk.cull_aabb_visible([[1.0, 0.0, 0.0, 1.0]], -0.5, -0.5, -0.5, 0.5, 0.5, 0.5), "vk cull visible")
+assert(!vk.cull_aabb_visible([[1.0, 0.0, 0.0, -2.0]], -0.5, -0.5, -0.5, 0.5, 0.5, 0.5), "vk cull hidden")
+assert(vk.cull_stats(10, 4).get("culled") == 6, "vk cull stats")
+assert(vk.cull_shader().contains("visibleAabb"), "vk cull shader")
+print("vk_mod_probe ok")
+NY
+}

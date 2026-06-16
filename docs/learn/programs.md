@@ -96,7 +96,7 @@ Put imports at the top. Aliases keep repeated module calls namespaced.
 ```ny
 use std.core
 use std.os.net as net
-use std.parse.data.json as json
+use std.math.parse.data.json as json
 ```
 
 Import the owning module instead of relying on a broad namespace. A visible

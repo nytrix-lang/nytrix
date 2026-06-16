@@ -1,0 +1,19 @@
+shape type-layout-unknown-field {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unknown field 'missing' in layout 'BadLayout'"
+  source ny <<'NY'
+use std.core
+
+layout BadLayout {
+   i32 x
+}
+
+def ptr p = malloc(__layout_size("BadLayout"))
+load_layout(p, "BadLayout", "missing")
+NY
+}

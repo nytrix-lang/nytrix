@@ -1,0 +1,12 @@
+shape type-lambda-typo {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "did you mean keyword 'lambda'"
+  source ny <<'NY'
+def f = lamda(x){ x }
+NY
+}

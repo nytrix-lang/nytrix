@@ -45,7 +45,7 @@ use std.os.path as ospath
 use std.os.sys as ossys
 use std.os.ui.render (request_frame_capture, read_framebuffer, snapshot)
 use std.os.ui.window
-use std.parse.img as img_mod
+use std.math.parse.img as img_mod
 
 mut _env_bool_cache, _env_int_cache, _env_str_cache = dict(64), dict(32), dict(32)
 mut _dump_path_cache, _counter_values = dict(16), dict(64)

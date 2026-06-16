@@ -1,0 +1,207 @@
+shape corpus-nynth-core {
+  family "corpus-replay"
+  generator "typed"
+  features ["corpus", "ny-source", "nynth-ir", "baked-source", "correctness"]
+  template baked-ny-corpus
+  expect ny_sources_compile
+  source ny_18ec888042ef8474fd8d <<'NY'
+use std.core
+mut work = [15, 27, 8, 22, 4]
+mut int: acc = 0
+mut int: i = 0
+while(i < 32){
+   def int: idx = (((i * 5) + 8) % 5)
+   def int: next = (((get(work, idx, 0) + i) + acc) % 127)
+   work = set_idx(work, idx, next)
+   acc += (get(work, idx, 0) - (i % 3))
+   i += 1
+}
+print(acc)
+NY
+  source ny_21435681b7527fd66f58 <<'NY'
+use std.core
+def src = [26, 6, 23, 24, 20]
+mut dst = [0, 0, 0, 0, 0]
+mut int: acc = 0
+mut int: i = 0
+while(i < 5){
+   def int: v = (get(src, i, 0) + 15)
+   dst = set_idx(dst, i, ((v + (i * 4)) % 149))
+   i += 1
+}
+mut int: j = 0
+while(j < 31){
+   def int: idx = ((j + 18) % 5)
+   acc += get(dst, idx, 0)
+   if((j % 4) == 3){
+      dst = set_idx(dst, idx, ((get(dst, idx, 0) + acc) % 149))
+   }
+   j += 1
+}
+print(acc)
+NY
+  source ny_3712b142c8e5e2ab8eec <<'NY'
+use std.core
+fn fold0(int: x): int {
+   mut int: y = (((x * 3) + 15) % 97)
+   if((y % 2) == 0){
+      y += (x % 11)
+   } else {
+      y -= (x % 7)
+   }
+   return y
+}
+fn fold1(int: x): int {
+   def int: y = fold0((x + 18))
+   if(y > 40){
+      return (y - 13)
+   } else {
+      return (y + 17)
+   }
+}
+mut int: acc = 0
+mut int: i = 0
+while(i < 32){
+   acc += fold1((i + (acc % 5)))
+   if((acc % 4) == 1){
+      acc += fold0(i)
+   }
+   i += 1
+}
+print(acc)
+NY
+  source ny_586b45252b2a3fc08e33 <<'NY'
+use std.core
+mut int: state = 9
+mut int: acc = 0
+mut int: i = 0
+while(i < 32){
+   if(((state + i) % 5) == 0){
+      state = ((state + 18) % 211)
+      acc += state
+   } else {
+      if((i % 2) == 0){
+         state = (((state * 3) + i) % 211)
+      } else {
+         state = ((state + (i * 2)) % 211)
+      }
+      acc -= (state % 23)
+   }
+   i += 1
+}
+print((acc + state))
+NY
+  source ny_76f32de8e750a948feed <<'NY'
+use std.core
+mut int: acc = 0
+mut int: i = 0
+while(i < 32){
+   def int: v = ((((i + 39) * 7) + 15) % 113)
+   acc += ((v % 9) * (i % 5))
+   if((i % 3) == 2){
+      acc -= (v % 7)
+   }
+   i += 1
+}
+print(acc)
+NY
+  source ny_9a19ee901b487336a5d3 <<'NY'
+use std.core
+mut int: acc = 0
+mut int: i = 0
+while(i < 32){
+   def int: v = ((((i + 6) * 7) + 10) % 113)
+   acc += ((v % 9) * (i % 5))
+   if((i % 3) == 2){
+      acc -= (v % 7)
+   }
+   i += 1
+}
+print(acc)
+NY
+  source ny_9d6ed387b1ee90ab0c73 <<'NY'
+use std.core
+def data = [29, 4, 26, 3, 17, 18, 20]
+mut int: acc = 0
+mut int: i = 0
+while(i < 32){
+   def int: idx = (i % 10)
+   def int: got = get(data, idx, 13)
+   if((idx < 0) || (idx >= len(data))){
+      acc += (got - i)
+   } else {
+      acc += (got + (i % 5))
+   }
+   i += 1
+}
+print(acc)
+NY
+  source ny_b72b1903d4c2ff38f6b5 <<'NY'
+use std.core
+def data = [20, 7, 29, 4, 2, 31, 22]
+mut int: acc = 0
+mut int: i = 0
+while(i < 26){
+   def int: idx = (((i * 2) + 15) % 7)
+   acc += (get(data, idx, 0) * ((i % 4) + 1))
+   i += 1
+}
+print(acc)
+NY
+  source ny_df74f0b349f9ebad2b3c <<'NY'
+use std.core
+fn mix(int: x, int: y): int {
+   mut int: z = (((x * 10) + (y * 3)) % 173)
+   if(z > 80){
+      z -= (x % 17)
+   } else {
+      z += (y % 19)
+   }
+   return z
+}
+mut int: acc = 0
+mut int: i = 0
+while(i < 8){
+   mut int: j = 0
+   while(j < 4){
+      acc += mix((i + j), (acc + 3))
+      if(((i + j) % 3) == 1){
+         acc -= (mix(j, i) % 11)
+      }
+      j += 1
+   }
+   i += 1
+}
+print(acc)
+NY
+  source ny_eb4c6f89b5a343f44d8d <<'NY'
+use std.core
+fn fold0(int: x): int {
+   mut int: y = (((x * 3) + 19) % 97)
+   if((y % 2) == 0){
+      y += (x % 11)
+   } else {
+      y -= (x % 7)
+   }
+   return y
+}
+fn fold1(int: x): int {
+   def int: y = fold0((x + 5))
+   if(y > 40){
+      return (y - 13)
+   } else {
+      return (y + 17)
+   }
+}
+mut int: acc = 0
+mut int: i = 0
+while(i < 32){
+   acc += fold1((i + (acc % 5)))
+   if((acc % 4) == 1){
+      acc += fold0(i)
+   }
+   i += 1
+}
+print(acc)
+NY
+}

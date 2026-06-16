@@ -1947,7 +1947,7 @@ NY_RUN_CACHE_BLOCKERS = {
     "--dump-on-error", "--dump-diagnose", "-trace",
 }
 
-NY_SUBCOMMANDS = {"fmt", "test", "doc", "web", "perf", "make", "pkg", "get", "install", "new", "ny-lsp"}
+NY_SUBCOMMANDS = {"fmt", "test", "doc", "web", "perf", "make", "pkg", "get", "install", "new", "c2ny", "ny-lsp"}
 
 def _ny_arg_takes_value(arg: str) -> bool:
     return arg in NY_VALUE_OPTS
@@ -3804,8 +3804,10 @@ def run_make_profile(build_root: Path, kind: str, jobs: int, args: list[str]) ->
         cmake_build(build_root, san_kind, ["ny", "ny-test"], jobs)
         return run_test(build_root, san_kind, jobs, rest)
     if mode == "fuzz":
-        cmake_build(build_root, kind, ["ny", "ny-test"], jobs)
-        return run_tool(build_root, kind, "ny-test", ["--smoke", *rest])
+        cmake_build(build_root, kind, ["ny", "ny-test", "ny-fuzz"], jobs)
+        if rest:
+            return run_tool(build_root, kind, "ny-fuzz", rest)
+        return run_tool(build_root, kind, "ny-fuzz", ["validate-shapes", "etc/tests/fuzz"])
     if mode == "afl":
         afl = shutil.which("afl-fuzz")
         if not afl:
@@ -3905,7 +3907,7 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     return rc
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
-    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "docs", "web-demos", "wasm", "install", "uninstall", "clean", "debug", "tidy", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "docs", "web-demos", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -5395,6 +5397,11 @@ def main() -> int:
             rc = run_tool(build_root, active_kind, "ny-doc", [std_file, "-o", out_dir, *extra])
         elif cmd == "web-demos":
             rc = run_web_demos(build_root, active_kind, extra)
+        elif cmd == "c2ny":
+            if not extra:
+                nyt_err("c2ny", "usage: ./make c2ny <file.c> [-o <out.ny>]")
+                raise SystemExit(1)
+            rc = run_tool(build_root, active_kind, "ny-fmt", ["--c2ny", *extra])
         elif cmd == "wasm":
             rc = run_wasm(build_root, active_kind, extra)
         elif cmd == "install":
@@ -5448,7 +5455,19 @@ def main() -> int:
         elif cmd == "ubsan":
             rc = run_test(build_root, active_kind, requested_jobs, extra)
         elif cmd == "fuzz":
-            rc = run_tool(build_root, active_kind, "ny-test", ["--smoke"])
+            cmake_build(build_root, active_kind, ["ny", "ny-test", "ny-fuzz"], requested_jobs)
+            if extra and extra[0] == "afl":
+                afl = shutil.which("afl-fuzz")
+                if not afl:
+                    raise SystemExit("make fuzz afl: afl-fuzz not found")
+                afl_args = _strip_dashdash(extra[1:])
+                if not afl_args:
+                    raise SystemExit("make fuzz afl: pass afl-fuzz args after --")
+                rc = subprocess.run([afl, *afl_args], cwd=str(ROOT)).returncode
+            elif extra:
+                rc = run_tool(build_root, active_kind, "ny-fuzz", extra)
+            else:
+                rc = run_tool(build_root, active_kind, "ny-fuzz", ["validate-shapes", "etc/tests/fuzz"])
         elif cmd in ("optcheck", "fb"):
             raise SystemExit(f"make: command '{cmd}' is not yet ported to native C path")
         else:

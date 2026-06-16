@@ -1,0 +1,81 @@
+shape kth-largest-heap {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "heap", "array", "mutation"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn gen_vals(n){
+   mut a = list(0)
+   mut i = 0
+   while(i < n){
+      a = append(a, 0)
+      i += 1
+   }
+   mut x = 246813579
+   i = 0
+   while(i < n){
+      x = (x * 1664525 + 1013904223) & 2147483647
+      set_idx(a, i, x % 1000003)
+      i += 1
+   }
+   a
+}
+fn heap_sift_up(h, idx){
+   mut i = idx
+   while(i > 0){
+      def p = (i - 1) / 2
+      if(get(h, p) <= get(h, i)){ return }
+      def t = get(h, p)
+      set_idx(h, p, get(h, i))
+      set_idx(h, i, t)
+      i = p
+   }
+}
+fn heap_sift_down(h, n, idx){
+   mut i = idx
+   while(true){
+      def l = i * 2 + 1
+      def r = l + 1
+      mut best = i
+      if(l < n && get(h, l) < get(h, best)){ best = l }
+      if(r < n && get(h, r) < get(h, best)){ best = r }
+      if(best == i){ return }
+      def t = get(h, i)
+      set_idx(h, i, get(h, best))
+      set_idx(h, best, t)
+      i = best
+   }
+}
+fn kth_largest(a, k){
+   mut h = list(0)
+   mut hn = 0
+   mut i = 0
+   while(i < len(a)){
+      def v = get(a, i)
+      if(hn < k){
+         h = append(h, v)
+         hn += 1
+         heap_sift_up(h, hn - 1)
+      } elif(v > get(h, 0)){
+         set_idx(h, 0, v)
+         heap_sift_down(h, hn, 0)
+      }
+      i += 1
+   }
+   get(h, 0)
+}
+def a = gen_vals(90000)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 55){
+   checksum += kth_largest(a, 97 + (r % 13))
+   r += 1
+}
+def t1 = ticks()
+print("RESULT kth_largest_heap ", checksum, " ", t1 - t0)
+NY
+}

@@ -404,7 +404,7 @@ void parser_expect_slow(parser_t *p, token_kind kind, const char *msg,
     char def_msg[128];
     snprintf(def_msg, sizeof(def_msg), "expected %s", parser_token_name(kind));
     if (!hint) {
-      // Just a simple hint for now
+
       hint = "check syntax";
     }
     char buf[64];
@@ -490,7 +490,7 @@ char *parser_unescape_string(arena_t *arena, const char *cur, size_t len,
         }
         int oct = (int)strtol(oct_s, NULL, 8);
         if (oct > 255) {
-          // NY_LOG_WARN("octal escape sequence out of range: %s", oct_s);
+
         }
         out[oi++] = (char)oct;
         cur--;

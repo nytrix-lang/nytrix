@@ -1,0 +1,24 @@
+shape matrix_assign {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math
+use std.os.ui.render.matrix
+fn touch(m){
+   m[1] = 99
+   m
+}
+mut a = [0, 1, 2]
+touch(a)
+assert(a.get(1, 0) == 99, "param index assignment mutates")
+mut p = mat4_identity()
+mat4_perspective_into(120.0 * PI / 180.0, 16.0 / 9.0, 0.1, 1000.0, p)
+assert(p.get(2, 0.0) != 1.0, "perspective updates m00")
+assert(p.get(17, 1.0) == 0.0, "perspective updates m33")
+print("matrix assign ok")
+NY
+}

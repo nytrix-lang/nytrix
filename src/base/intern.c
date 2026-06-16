@@ -86,7 +86,7 @@ void ny_intern_init(void) {
     return;
   g_intern_cap = 4096;
   g_intern_table = malloc(g_intern_cap * sizeof(ny_intern_entry));
-  // ID 0 is invalid/empty.
+
   g_intern_table[0].str = "";
   g_intern_table[0].len = 0;
   g_intern_table[0].hash = 0;
@@ -120,7 +120,6 @@ ny_sym_id ny_intern_str(const char *str, size_t len) {
     idx = (idx + 1) & mask;
   }
 
-  // Need to add.
   if (g_intern_count >= g_intern_cap) {
     g_intern_cap *= 2;
     g_intern_table = realloc(g_intern_table, g_intern_cap * sizeof(ny_intern_entry));
@@ -139,7 +138,6 @@ ny_sym_id ny_intern_str(const char *str, size_t len) {
 
   g_intern_map[idx] = new_id;
 
-  // Rehash if > 70% full
   if (g_intern_count * 10 > g_intern_map_cap * 7) {
     size_t new_map_cap = g_intern_map_cap * 2;
     uint32_t *new_map = calloc(new_map_cap, sizeof(uint32_t));

@@ -1,0 +1,6 @@
+shape copyprop-dse-array {
+  family "gcc-torture-copyprop-dse"
+  generator "torture"
+  features ["gcc-torture", "arrays", "copy-prop", "dse", "mutation", "zero-init", "inbounds"]
+  template torture-copyprop-dse-array
+}

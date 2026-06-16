@@ -1,0 +1,21 @@
+shape type-module-alias-unknown-member {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "module 'OnlyPi' has no exported member 'TAU'"
+  source ny <<'NY'
+use std.core
+module OnlyPi(
+   PI
+){
+   use std.math.scalar (PI)
+}
+
+use OnlyPi as math_alias
+
+print(math_alias.TAU)
+NY
+}

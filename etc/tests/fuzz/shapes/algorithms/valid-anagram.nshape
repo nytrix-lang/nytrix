@@ -1,0 +1,80 @@
+shape valid-anagram {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "string", "histogram", "array"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn zero_list(n){
+   mut out = list(n)
+   mut i = 0
+   while(i < n){
+      out = append(out, 0)
+      i += 1
+   }
+   out
+}
+fn mkarr(out, n, seed){
+   mut x = seed
+   mut i = 0
+   while(i < n){
+      x = (x * 1103515245 + 12345) & 2147483647
+      set_idx(out, i, x % 26)
+      i += 1
+   }
+}
+fn copy_arr(dst, src, n){
+   mut i = 0
+   while(i < n){
+      set_idx(dst, i, get(src, i))
+      i += 1
+   }
+}
+fn shuffle(dst, src, n){
+   copy_arr(dst, src, n)
+   mut x = 99991
+   mut i = n - 1
+   while(i > 0){
+      x = (x * 1664525 + 1013904223) & 2147483647
+      def j = x % (i + 1)
+      def t = get(dst, i)
+      set_idx(dst, i, get(dst, j))
+      set_idx(dst, j, t)
+      i -= 1
+   }
+}
+fn is_ana(a, b, n){
+   def cnt = zero_list(26)
+   mut i = 0
+   while(i < n){
+      def ai = get(a, i)
+      def bi = get(b, i)
+      set_idx(cnt, ai, get(cnt, ai) + 1)
+      set_idx(cnt, bi, get(cnt, bi) - 1)
+      i += 1
+   }
+   i = 0
+   while(i < 26){
+      if(get(cnt, i) != 0){ return false }
+      i += 1
+   }
+   return true
+}
+def N = 8000
+def s1 = zero_list(N)
+def s2 = zero_list(N)
+mkarr(s1, N, 424242)
+shuffle(s2, s1, N)
+mut checksum = 0
+def t0 = ticks()
+mut i = 0
+while(i < 400){
+   checksum += is_ana(s1, s2, N) ? 1 : 0
+   i += 1
+}
+def t1 = ticks()
+print("RESULT valid_anagram ", checksum, " ", t1 - t0)
+NY
+}

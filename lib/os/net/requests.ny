@@ -17,7 +17,7 @@ use std.os.net.context as netctx
 use std.core
 use std.core.dict_mod as _d
 use std.core.str
-use std.parse.data.json as jsonlib
+use std.math.parse.data.json as jsonlib
 
 fn _requests_empty_response(any url, any method, str transport="requests", str error="") dict {
    mut out = _d.dict(12)

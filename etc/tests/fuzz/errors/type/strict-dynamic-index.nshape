@@ -1,0 +1,19 @@
+shape type-strict-dynamic-index {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-dynamic-index"
+  flags "--strict-types"
+  source ny <<'NY'
+use std.core
+
+fn read_index(any x) {
+   x[0]
+}
+
+read_index(1)
+NY
+}

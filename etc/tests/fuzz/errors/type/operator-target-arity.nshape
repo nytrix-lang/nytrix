@@ -1,0 +1,21 @@
+shape type-operator-target-arity {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "operator target 'Bad.add' must take exactly two arguments"
+  source ny <<'NY'
+use std.core
+
+impl Bad {
+   fn add(self x) self {
+      x
+   }
+   operator + self: self = add
+}
+
+print(1)
+NY
+}
