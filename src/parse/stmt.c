@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 static attribute_t parse_attr(parser_t *p);
+static const char *parse_type_ref(parser_t *p, const char *err_msg);
 static bool tok_is_ident_text(token_t tok, const char *text);
 static stmt_t *parse_generated_module(parser_t *p, token_t tok,
                                       const char *mod_name, bool export_all);
@@ -222,6 +223,31 @@ static bool stmt_token_looks_type_name(token_t tok) {
     return false;
   unsigned char ch = (unsigned char)tok.lexeme[0];
   return parser_token_is_builtin_type(tok) || isupper(ch) || ch == '_';
+}
+
+static bool stmt_token_can_follow_decl_name(token_kind kind) {
+  return kind == NY_T_ASSIGN || kind == NY_T_COMMA || kind == NY_T_SEMI ||
+         kind == NY_T_RBRACE || kind == NY_T_EOF;
+}
+
+static bool stmt_looks_type_first_binding(parser_t *p) {
+  if (!p || !parser_token_can_start_type_ref(p->cur))
+    return false;
+
+  if (p->cur.kind == NY_T_IDENT) {
+    token_kind next = parser_peek(p).kind;
+    if (next != NY_T_IDENT && next != NY_T_LT && next != NY_T_DOT)
+      return false;
+  }
+
+  parser_t probe = *p;
+  probe.quiet = true;
+  const char *type = parse_type_ref(&probe, NULL);
+  if (!type || probe.cur.kind != NY_T_IDENT)
+    return false;
+
+  parser_advance(&probe);
+  return stmt_token_can_follow_decl_name(probe.cur.kind);
 }
 
 static bool stmt_ident_lbrace_starts_named_fields(parser_t *p) {
@@ -4545,11 +4571,12 @@ stmt_t *p_parse_stmt(parser_t *p) {
       while (true) {
         const char *var_type = NULL;
         token_t ident = {0};
-        if (stmt_token_looks_type_name(p->cur) && (parser_peek(p).kind == NY_T_IDENT || parser_peek(p).kind == NY_T_STAR || parser_peek(p).kind == NY_T_QUESTION)) {
+        if (stmt_looks_type_first_binding(p)) {
           var_type = parse_type_ref(p, "expected type name");
           if (p->cur.kind != NY_T_IDENT) {
             parser_error(p, p->cur, "expected variable name after type", NULL);
-            if (p->cur.kind != NY_T_EOF) parser_advance(p);
+            if (p->cur.kind != NY_T_EOF)
+              parser_advance(p);
             stmt_free_members(s);
             return NULL;
           }
