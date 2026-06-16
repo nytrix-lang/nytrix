@@ -7,6 +7,7 @@ use std.core.syntax.type as ty
 use std.math.vector as vec
 use std.math.bin
 use std.math.nt
+use std.math.ring
 use std.os.ui.window.platform.contract as contract
 use std.core.str
 use std.math.crypto.encoding.bytes
@@ -15,6 +16,18 @@ use std.core.tbuf
 
 fn test_add(int a, int b) int {
    return a + b
+}
+
+fn test_lowercase_type_first_local_bindings() {
+   def poly_ring left_ring = PolynomialRing("ZZ", "x")
+   def poly_ring right_ring = PolynomialRing("ZZ", "x")
+   def poly_elem left_poly = Poly(left_ring, [1, 2], "x")
+   def poly_elem right_poly = Poly(right_ring, [3, 4], "x")
+
+   assert(is_poly_ring(left_ring), "lowercase type-first poly_ring lhs")
+   assert(is_poly_ring(right_ring), "lowercase type-first poly_ring rhs")
+   assert(is_poly_elem(left_poly), "lowercase type-first poly_elem lhs")
+   assert(is_poly_elem(right_poly), "lowercase type-first poly_elem rhs")
 }
 
 fn get_name() str {
@@ -1358,6 +1371,7 @@ assert(nullable_list_after_reversed_guard() == 3, "post reversed nil-guard ?list
 assert(nullable_list_after_else_guard() == 1, "post else-return ?list narrowing failed")
 test_primitives()
 test_typed_bindings_smoke()
+test_lowercase_type_first_local_bindings()
 test_null_contracts()
 test_pointer_arg_types()
 test_handle_arg_types()
