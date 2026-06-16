@@ -8,8 +8,7 @@
 #include <string.h>
 
 static LLVMValueRef ny_small_int_range_ok(codegen_t *cg, LLVMValueRef raw) {
-  /* Nytrix small-ints are 62-bit signed (leaving 2 bits for tagging/safety).
-   * A value fits if sign-extending from bit 61 to 63 yields the same value. */
+
   LLVMValueRef shift = LLVMConstInt(cg->type_i64, 2, false);
   LLVMValueRef shl = LLVMBuildShl(cg->builder, raw, shift, "small_shl");
   LLVMValueRef ashr = LLVMBuildAShr(cg->builder, shl, shift, "small_ashr");
@@ -1314,11 +1313,10 @@ static const op_map_t op_map[] = {
     {"in", NULL, NULL, NY_BINOP_IN, false, NULL},
     {NULL, NULL, NULL, NY_BINOP_UNKNOWN, false, NULL}};
 
-
 static __attribute__((unused)) LLVMValueRef ny_emit_raw_int_binary(codegen_t *cg,
                                                                    const op_map_t *entry,
                                                                    LLVMValueRef l, LLVMValueRef r) {
-  /* Complete tag elimination - pure i64 operations, no tagging */
+
   if (!entry)
     return NULL;
 
@@ -1406,7 +1404,7 @@ static LLVMValueRef ny_emit_tagged_int_fast_no_slow(codegen_t *cg, const op_map_
   if (kind == NY_BINOP_DIV || kind == NY_BINOP_MOD) {
     int64_t rv = 0;
     if (ny_const_tagged_int(r, &rv) && rv != 0) {
-      // Power-of-2 constant: use shift/mask
+
       LLVMValueRef li = ny_untag_int(cg, l);
       if (rv > 0 && (rv & (rv - 1)) == 0 && kind == NY_BINOP_DIV) {
         int shift = __builtin_ctzll((uint64_t)rv);
@@ -1585,9 +1583,7 @@ static LLVMValueRef ny_try_emit_raw_int_expr_fast_binary(codegen_t *cg, scope *s
     ok = range_r.known && range_r.min_raw > 0;
   } else if (kind == NY_BINOP_MOD) {
     ok = range_r.known && range_r.min_raw > 0;
-    /* Constant divisors already have a tighter tagged-int path below, including
-     * power-of-two masks.  The raw-expression path is only useful for proven
-     * positive variable divisors. */
+
     int64_t const_rhs = 0;
     if (ok && ny_const_tagged_int(r, &const_rhs))
       return NULL;
@@ -1603,8 +1599,6 @@ static LLVMValueRef ny_try_emit_raw_int_expr_fast_binary(codegen_t *cg, scope *s
     }
   }
 
-  /* Use the already-emitted operands for this binary node.  Re-walking the AST here can
-   * regenerate mutable direct locals outside their loop-carried SSA value. */
   LLVMValueRef lhs = ny_untag_int(cg, l);
   LLVMValueRef rhs = ny_untag_int(cg, r);
 
@@ -1631,7 +1625,7 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg, scope *sco
 
   if (!fallback || !entry)
     return NULL;
-  /* Fast int binops now enabled by default - provides major speedup */
+
   if (!ny_env_enabled_default_on("NYTRIX_FAST_INT_BINOPS") &&
       !ny_env_enabled("NYTRIX_ENABLE_TYPEINFER") && !ny_env_enabled("NYTRIX_ENABLE_OPTIMIZE"))
     return NULL;
@@ -1748,10 +1742,6 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg, scope *sco
       return fast;
   }
 
-  /* For dynamic values, keep the normal generic helper as the slow path and
-   * take the inline path only when runtime tags prove both operands are small
-   * ints. Pointer-like expressions are excluded because raw handles can have
-   * arbitrary low bits after address arithmetic. */
   if (!proven_both && !dynamic_tagged_int_ok)
     return NULL;
 
@@ -1903,16 +1893,14 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg, scope *sco
       pred = LLVMIntSGT;
     else if (kind == NY_BINOP_GE)
       pred = LLVMIntSGE;
-    // For tagged integers, relative order is preserved:
-    // (a << 1 | 1) < (b << 1 | 1) <=> a < b
+
     LLVMValueRef cmp = LLVMBuildICmp(cg->builder, pred, l, r, NY_LLVM_NAME(cg, "icmp_fast"));
     fast_value = ny_tag_bool(cg, cmp);
     fast_done_bb = ny_cur_block(cg);
 
     ny_br(cg, merge_bb);
   } else {
-    // Fallback if kind is not handled in fast path (should not happen given
-    // op_map)
+
     fast_value = ny_c0(cg);
     fast_done_bb = ny_cur_block(cg);
     ny_br(cg, merge_bb);
@@ -2366,13 +2354,11 @@ static LLVMValueRef ny_try_emit_float_fast_binary(codegen_t *cg, const op_map_t 
       kind == NY_BINOP_SHR || kind == NY_BINOP_MOD)
     return NULL;
 
-  // Check if both operands are proven floats — skip all branching
   const char *lt = le ? infer_expr_type(cg, scopes, depth, le) : NULL;
   const char *rt = re ? infer_expr_type(cg, scopes, depth, re) : NULL;
   bool proven_l = lt && (strcmp(lt, "f64") == 0 || strcmp(lt, "f32") == 0);
   bool proven_r = rt && (strcmp(rt, "f64") == 0 || strcmp(rt, "f32") == 0);
 
-  /* Also check binding flags directly for cases where infer_expr_type fails */
   if (!proven_l && le && le->kind == NY_E_IDENT) {
     size_t name_len = (size_t)le->tok.len;
     if (name_len == 0)
@@ -2420,7 +2406,6 @@ static LLVMValueRef ny_try_emit_float_fast_binary(codegen_t *cg, const op_map_t 
     return ny_direct_box_float(cg, res_f);
   }
 
-  // If neither operand is proven float, bail out to let int fast path try
   if (!proven_l && !proven_r)
     return NULL;
 
@@ -2522,28 +2507,28 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth, const char *
   switch (op[0]) {
   case '+':
     entry = &op_map[0];
-    break; // "+"
+    break;
   case '-':
     entry = &op_map[1];
-    break; // "-"
+    break;
   case '*':
     entry = &op_map[2];
-    break; // "*"
+    break;
   case '/':
     entry = &op_map[3];
-    break; // "/"
+    break;
   case '%':
     entry = &op_map[4];
-    break; // "%"
+    break;
   case '^':
     entry = (op[1] == '^') ? &op_map[8] : &op_map[5];
-    break; // "^" or "^^"
+    break;
   case '|':
     entry = &op_map[6];
-    break; // "|"
+    break;
   case '&':
     entry = &op_map[7];
-    break; // "&"
+    break;
   case '<':
     entry = (op[1] == '=') ? &op_map[10] : (op[1] == '<') ? &op_map[13] : &op_map[9];
     break;
@@ -2553,15 +2538,15 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth, const char *
   case '=':
     if (op[1] == '=')
       entry = &op_map[15];
-    break; // "=="
+    break;
   case '!':
     if (op[1] == '=')
       entry = &op_map[16];
-    break; // "!="
+    break;
   case 'i':
     if (op[1] == 'n' && !op[2])
       entry = &op_map[17];
-    break; // "in"
+    break;
   }
 
   if (!entry) {
@@ -2638,9 +2623,7 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth, const char *
       LLVMValueRef cmp = ny_eq(cg, l, r, "eq_fast");
       return ny_tag_bool(cg, cmp);
     }
-    /* Direct equality check against boolean immediates.
-       These are not tagged ints, so the tagged-int fast path would waste
-       cycles checking LSB and then constant-fold to false. Just compare. */
+
     int64_t l_const = 0, r_const = 0;
     bool l_is_const = LLVMIsConstant(l) && ny_const_tagged_int(l, &l_const);
     bool r_is_const = LLVMIsConstant(r) && ny_const_tagged_int(r, &r_const);
@@ -2671,11 +2654,6 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth, const char *
   if (builtin_name) {
     if (!allow_fast_int_numeric)
       goto skip_fast_builtin_numeric;
-    /* Note: Complete tag elimination disabled */
-    /* LLVMValueRef raw =
-        ny_try_emit_raw_int_binary(cg, scopes, depth, entry, l, r, le, re);
-    if (raw)
-      return raw; */
 
     int64_t li = 0, ri = 0;
     if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri)) {
@@ -2775,11 +2753,6 @@ skip_fast_builtin_numeric:
     }
   }
 
-  /* When prefer_builtin_ops is true, still try std.core.reflect generic as
-   * fallback for non-numeric types (lists, strings, dicts). The builtin
-   * __add/__mul only handle integers. If the generic exists, we bypass fast int
-   * paths for non-int operands by letting the generic function handle type
-   * dispatch. */
   if (generic_name && prefer_builtin_ops) {
     char full_generic[128];
     snprintf(full_generic, sizeof(full_generic), "std.core.reflect.%s", generic_name);
@@ -2792,8 +2765,7 @@ skip_fast_builtin_numeric:
     if (!gs)
       gs = lookup_fun(cg, generic_name, 0);
     if (gs && gs->stmt_t && ny_is_stdlib_tok(gs->stmt_t->tok)) {
-      /* Generic exists in stdlib - try fast paths first, then fall through to
-       * generic */
+
       if (builtin_name) {
         fun_sig *s = lookup_fun(cg, builtin_name, 0);
         LLVMValueRef fast = (s && allow_fast_int_numeric)
@@ -2809,7 +2781,7 @@ skip_fast_builtin_numeric:
             return fast;
         }
       }
-      /* Not proven integers - let std.core.reflect dispatch by type */
+
       return LLVMBuildCall2(cg->builder, gs->type, gs->value, (LLVMValueRef[]){l, r}, 2, "");
     }
   }

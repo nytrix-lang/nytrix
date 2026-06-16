@@ -4,7 +4,7 @@
 ;; - std.core
 module std.core.ast(parse_ast)
 use std.core
-use std.parse.data.json
+use std.math.parse.data.json
 
 fn parse_ast(str source) any {
    "Parses Nytrix source code and returns the AST as a nested structure(list of dicts)."

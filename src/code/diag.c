@@ -1,10 +1,3 @@
-/*  ──────────────────────────────────────────────────────────────────────
- *  Nytrix Diagnostic System — Overhauled
- *  • Coded errors  [E####]  and warnings  [W####]
- *  • Smart contextual suggestions
- *  • Unified hint / fix / note pipeline
- *  • Deduplication with frequency counter
- *  ────────────────────────────────────────────────────────────────────── */
 
 #include "base/common.h"
 #include "base/intern.h"
@@ -16,9 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ── error / warning codes ─────────────────────────────────────────── */
 typedef enum {
-  /* General (E1xxx) */
+
   E_SYNTAX = 1001,
   E_UNDEFINED = 1002,
   E_TYPE_MISMATCH = 1003,
@@ -36,7 +28,6 @@ typedef enum {
   E_LAYOUT_SIZE = 1015,
   E_INVALID_FFI = 1016,
 
-  /* Warnings (W2xxx) */
   W_UNUSED = 2001,
   W_SHADOWING = 2002,
   W_DEPRECATED = 2003,
@@ -44,7 +35,6 @@ typedef enum {
   W_DIV_ZERO = 2005,
 } diag_code_t;
 
-/* ── dedup tables ──────────────────────────────────────────────────── */
 typedef struct {
   char *key;
   int count;
@@ -54,12 +44,10 @@ static diag_entry_t *g_diag_seen_tbl = NULL;
 static size_t g_diag_seen_cap = 0;
 static size_t g_diag_seen_len = 0;
 
-/* ── last-primary tracking ─────────────────────────────────────────── */
 static bool g_last_primary_emitted = false;
-static int g_warn_level = 1; /* 0=none, 1=useful, 2=all */
+static int g_warn_level = 1;
 static bool g_diag_compact_mode = false;
 
-/* ── source cache ──────────────────────────────────────────────────── */
 static char *g_diag_cached_file = NULL;
 static char *g_diag_cached_src = NULL;
 
@@ -86,7 +74,6 @@ void ny_diag_configure(int warn_level, bool compact_mode) {
 
 int ny_diag_warn_level(void) { return g_warn_level; }
 
-/* ── source loading ────────────────────────────────────────────────── */
 static const char *diag_load_source(const char *filename) {
   if (!filename || filename[0] == '<')
     return NULL;
@@ -109,7 +96,6 @@ static void diag_print_snippet(token_t tok, const char *color) {
   ny_print_snippet(src, tok.line, tok.col, tok.len, color);
 }
 
-/* ── hash table ────────────────────────────────────────────────────── */
 static uint64_t diag_hash(const char *s) { return ny_hash64_cstr(s); }
 
 static bool diag_tbl_grow(void) {
@@ -156,7 +142,6 @@ static bool diag_mark_seen(const char *key) {
   return true;
 }
 
-/* ── public dedup gate ─────────────────────────────────────────────── */
 bool ny_diag_should_emit(const char *kind, token_t tok, const char *name) {
   char key[512];
   const char *file = diag_token_filename_or_unknown(tok);
@@ -165,7 +150,6 @@ bool ny_diag_should_emit(const char *kind, token_t tok, const char *name) {
   return diag_mark_seen(key);
 }
 
-/* ── stdlib token check ────────────────────────────────────────────── */
 #define NY_STDLIB_TOK_CACHE_SLOTS 4096u
 
 typedef struct {
@@ -243,7 +227,7 @@ static bool ny_is_stdlib_filename_uncached(const char *filename) {
          strstr(norm, "/lib/core/") != NULL ||
          strstr(norm, "/lib/math/") != NULL ||
          strstr(norm, "/lib/os/") != NULL ||
-         strstr(norm, "/lib/parse/") != NULL ||
+         strstr(norm, "/lib/math/parse/") != NULL ||
          strstr(norm, "/nytrix/lib/") != NULL ||
          strstr(norm, "/nytrix/nytrix/lib/") != NULL ||
          strstr(norm, "std.ny") != NULL ||
@@ -274,7 +258,6 @@ static bool ny_warning_code_is_noisy(int code) {
   return code == (int)W_SHADOWING;
 }
 
-/* ── unique primary gate ───────────────────────────────────────────── */
 static bool ny_diag_emit_unique(const char *level, token_t tok, const char *rendered) {
   char key[1536];
   const char *file = diag_token_filename_or_unknown(tok);
@@ -285,7 +268,6 @@ static bool ny_diag_emit_unique(const char *level, token_t tok, const char *rend
   return diag_mark_seen(key);
 }
 
-/* ── primary message emitter ───────────────────────────────────────── */
 static void ny_diag_primary(const char *label, const char *code, const char *label_color,
                             const char *code_color, token_t tok, const char *fmt, va_list ap) {
   va_list cp;
@@ -306,7 +288,7 @@ static void ny_diag_primary(const char *label, const char *code, const char *lab
   if (g_diag_compact_mode) {
     fprintf(stderr, "%s:%d:%d: [%s] %s: %s\n", file, line, col, code, label, rendered);
   } else {
-    /* file:line:col:  [EXXXX]  label:  message */
+
     fprintf(stderr, "%s:%d:%d:  %s[%s]%s %s%s:%s %s\n", file, line, col, clr(code_color), code,
             clr(NY_CLR_RESET), clr(label_color), label, clr(NY_CLR_RESET), rendered);
     diag_print_snippet(tok, label_color);
@@ -315,7 +297,6 @@ static void ny_diag_primary(const char *label, const char *code, const char *lab
   g_last_primary_emitted = true;
 }
 
-/* ── attachable secondary messages ─────────────────────────────────── */
 static void ny_secondary(const char *label, const char *label_color, const char *rendered) {
   if (!g_last_primary_emitted)
     return;
@@ -324,8 +305,6 @@ static void ny_secondary(const char *label, const char *label_color, const char 
   else
     fprintf(stderr, "       %s%s%s  %s\n", clr(label_color), label, clr(NY_CLR_RESET), rendered);
 }
-
-/* ── public API ────────────────────────────────────────────────────── */
 
 void ny_diag_error(token_t tok, const char *fmt, ...) {
   va_list ap;
@@ -426,8 +405,6 @@ void ny_diag_note_tok(token_t tok, const char *fmt, ...) {
           clr(NY_CLR_RESET), rendered);
 }
 
-/* ── convenience helpers ───────────────────────────────────────────── */
-
 void ny_diag_error_context(token_t tok, const char *primary_msg, const char *context,
                            const char *suggestion) {
   ny_diag_error(tok, "%s", primary_msg);
@@ -444,7 +421,6 @@ void ny_diag_type_mismatch(token_t tok, const char *expected, const char *got,
   if (context && *context)
     ny_diag_hint("in %s", context);
 
-  /* Smart type-conversion suggestions */
   if (strcmp(expected, "int") == 0 && strcmp(got, "f64") == 0) {
     ny_diag_fix("Use %strunc(x)%s or %sfloor(x)%s to convert f64 → int", clr(NY_CLR_BOLD),
                 clr(NY_CLR_RESET), clr(NY_CLR_BOLD), clr(NY_CLR_RESET));

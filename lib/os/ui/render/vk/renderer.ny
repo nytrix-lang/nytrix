@@ -25,7 +25,7 @@ use std.os.ui.render.vk.vulkan
 use std.os (msleep, ticks)
 use std.os.path as ospath
 use std.os.process as proc
-use std.parse.data.json
+use std.math.parse.data.json
 use std.core.str as text
 use std.core.common as common
 

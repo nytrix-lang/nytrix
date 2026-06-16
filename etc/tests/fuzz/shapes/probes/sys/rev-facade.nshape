@@ -1,0 +1,57 @@
+shape rev-facade {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use "../../../lib/os/rev/mod.ny" as rev
+use std.core.str as str
+def st = rev.status()
+assert(st.get("solver", dict()).get("module", "") == "lib.os.revsolve", "rev facade solver module")
+assert(st.get("solver", dict()).contains("z3"), "rev facade z3 status")
+assert(st.get("symbolic", dict()).contains("z3"), "rev facade symbolic status")
+def solved_text = rev.solve_decompiled_input("fn main(input) input == \"facade-ok\"")
+assert(solved_text.get("status", "") == "sat", "rev facade text solve status")
+assert(solved_text.get("input", "") == "facade-ok", "rev facade text solve input")
+def path = "tmp/test/rev/crackmes/angr-examples/examples/ais3_crackme/ais3_crackme"
+def loaded = rev.load(path)
+assert(loaded.get("ok", false), "rev facade load path")
+assert(rev.load(loaded).get("ok", false), "rev facade load accepts loaded binary")
+assert(rev.arch(loaded) == "x86_64", "rev facade arch")
+assert(rev.arch_profile(loaded).get("bits", 0) == 64, "rev facade arch profile")
+assert(rev.entry(loaded) > 0, "rev facade entry")
+assert(rev.default_target(loaded, 0) == "main", "rev facade default target")
+def quick = rev.inspect(loaded, {"string_limit": 16})
+assert(quick.get("ok", false), "rev facade inspect ok")
+assert(quick.get("target", "") == "main", "rev facade inspect target")
+assert(quick.get("function_count", 0) > 0, "rev facade inspect functions")
+assert(quick.get("recovered_function_count", 0) >= quick.get("function_count", 0), "rev facade inspect recovered functions")
+assert(rev.analyze(path).get("ok", false), "rev facade analyze")
+assert(rev.triage(path, {"max_bytes": 256}).get("ok", false), "rev facade triage")
+assert(str.find(rev.report(path, 2), "ais3_crackme") >= 0, "rev facade report")
+assert(rev.functions(loaded).len > 0, "rev facade functions")
+assert(rev.recover_functions(loaded, 4096).len > 0, "rev facade recovered functions")
+assert(rev.imports(loaded).len > 0, "rev facade imports")
+assert(rev.strings(loaded, 4, 64).len > 0, "rev facade strings")
+def graph = rev.cfg(loaded, "main", 896)
+assert(graph.get("nodes", []).len > 0, "rev facade cfg")
+assert(rev.ssa(loaded, "main", {"max_bytes": 896}).get("value_count", 0) > 0, "rev facade ssa")
+assert(rev.vsa(loaded, "main", {"max_bytes": 896}).get("interval_count", 0) >= 0, "rev facade vsa")
+def dec = rev.decompile(path, "main", {"max_bytes": 896})
+assert(dec.get("ok", false), "rev facade decompile ok")
+assert(str.find(dec.get("text", ""), "verify") >= 0, "rev facade decompile text")
+def both = rev.solve_binary_input(path, 0, {"max_bytes": 896})
+assert(both.get("ok", false), "rev facade solve decompile ok")
+assert(both.get("target", "") == "main", "rev facade solve defaults to main")
+assert(both.get("solve", dict()).get("status", "") == "unknown", "rev facade solve binary does not hallucinate")
+assert(str.find(both.get("solve", dict()).get("reason", ""), "no direct") >= 0, "rev facade solve binary reason")
+def raw = rev.solve_binary_input(path, 0, {"max_bytes": 896, "raw_entry": true})
+assert(raw.get("target", "") == 0, "rev facade can keep raw entry target")
+def missing = rev.solve_binary_input("/tmp/nytrix-rev-missing-binary", 0, {"max_bytes": 32})
+assert(!missing.get("ok", true), "rev facade missing binary fails")
+assert(missing.get("solve", dict()).get("reason", "") == "binary load failed", "rev facade missing binary reason")
+assert(!rev.inspect("/tmp/nytrix-rev-missing-binary").get("ok", true), "rev facade inspect missing binary")
+print("REV_FACADE_PROBE_OK")
+NY
+}

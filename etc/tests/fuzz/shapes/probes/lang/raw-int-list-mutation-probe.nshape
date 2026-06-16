@@ -1,0 +1,24 @@
+shape raw_int_list_mutation_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn main(): int {
+   mut xs = [1, 2, 3, 4, 5, 6, 7, 8]
+   mut i = 0
+   mut acc = 0
+   while(i < len(xs)){
+      def idx = (i * 3 + 1) % len(xs)
+      def next = (get(xs, idx, 0) + i + acc) % 127
+      xs = set_idx(xs, idx, next)
+      acc += get(xs, idx, 0)
+      i += 1
+   }
+   print(acc)
+   0
+}
+NY
+}

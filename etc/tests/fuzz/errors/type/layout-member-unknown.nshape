@@ -1,0 +1,19 @@
+shape type-layout-member-unknown {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unknown member 'y' for layout 'HMPair'"
+  source ny <<'NY'
+use std.core
+
+layout HMPair {
+   i32 x
+}
+
+def *HMPair p = nil
+print(p.y)
+NY
+}

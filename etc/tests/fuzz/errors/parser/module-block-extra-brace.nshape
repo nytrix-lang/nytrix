@@ -1,0 +1,16 @@
+shape parser-module-block-extra-brace {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unexpected token '}'"
+  source ny <<'NY'
+use std.core
+
+{module 0 }
+main() }
+main()
+NY
+}

@@ -13,7 +13,7 @@ use std.core.str as str
 use std.os (env)
 use std.os.path as ospath
 use std.os.ui.render.viewer.editor.tools as tools
-use std.parse.data.json (json_encode)
+use std.math.parse.data.json (json_encode)
 
 fn _ext_key(str path) str {
    def ext = str.upper(str.str_replace(ospath.extname(path), ".", ""))

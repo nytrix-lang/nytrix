@@ -1,0 +1,19 @@
+shape type-strict-result-payload {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-result-payload"
+  flags "--strict-types"
+  source ny <<'NY'
+use std.core
+
+fn bad_unwrap(any x) {
+   unwrap(x)
+}
+
+bad_unwrap(1)
+NY
+}

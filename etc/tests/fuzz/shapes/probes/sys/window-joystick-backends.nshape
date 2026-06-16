@@ -1,0 +1,50 @@
+shape window-joystick-backends {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.ui.window.platform.cocoa.joystick as cocoajoy
+use std.os.ui.window.platform.linux.joystick as linuxjoy
+def linux_mapping = "00112233445566778899aabbccddeeff,Linux Probe Pad,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,platform:Linux,"
+def macos_mapping = "ffeeddccbbaa99887766554433221100,Mac Probe Pad,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,platform:Mac OS X,"
+assert(linuxjoy.update_gamepad_mappings(linux_mapping) == 1, "linux mapping parser delegates")
+assert(cocoajoy.update_gamepad_mappings(macos_mapping) == 1, "cocoa mapping parser delegates")
+def count = malloc(4)
+def state = malloc(64)
+assert(count && state, "backend probe buffers allocate")
+assert(!linuxjoy.joystick_present(-1), "linux invalid joystick absent")
+assert(linuxjoy.get_joystick_name(-1) == "Unknown", "linux invalid name fallback")
+assert(linuxjoy.get_joystick_guid(-1) == "00000000000000000000000000000000", "linux invalid guid fallback")
+assert(!linuxjoy.get_joystick_axes(-1, count), "linux invalid axes absent")
+assert(load32(count, 0) == 0, "linux invalid axis count clears")
+assert(!linuxjoy.get_joystick_buttons(-1, count), "linux invalid buttons absent")
+assert(load32(count, 0) == 0, "linux invalid button count clears")
+assert(!linuxjoy.get_joystick_hats(-1, count), "linux invalid hats absent")
+assert(load32(count, 0) == 0, "linux invalid hat count clears")
+store8(state, 77, 0)
+assert(!linuxjoy.get_gamepad_state(-1, state), "linux invalid gamepad state absent")
+assert(load8(state, 0) == 0, "linux invalid gamepad state clears")
+assert(!cocoajoy.joystick_present(-1), "cocoa invalid joystick absent")
+assert(cocoajoy.get_joystick_name(-1) == "Unknown", "cocoa invalid name fallback")
+assert(cocoajoy.get_joystick_guid(-1) == "00000000000000000000000000000000", "cocoa invalid guid fallback")
+assert(!cocoajoy.get_joystick_axes(-1, count), "cocoa invalid axes absent")
+assert(load32(count, 0) == 0, "cocoa invalid axis count clears")
+assert(!cocoajoy.get_joystick_buttons(-1, count), "cocoa invalid buttons absent")
+assert(load32(count, 0) == 0, "cocoa invalid button count clears")
+store8(state, 88, 0)
+assert(!cocoajoy.get_gamepad_state(-1, state), "cocoa invalid gamepad state absent")
+assert(load8(state, 0) == 0, "cocoa invalid gamepad state clears")
+#macos {
+   cocoajoy.terminate()
+} #else {
+   assert(!cocoajoy.init(), "non-macos cocoa init is false")
+   assert(!cocoajoy.poll_joysticks(), "non-macos cocoa poll is false")
+}
+linuxjoy.terminate()
+free(count)
+free(state)
+NY
+}

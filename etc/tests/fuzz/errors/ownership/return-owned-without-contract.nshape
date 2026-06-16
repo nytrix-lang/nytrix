@@ -1,0 +1,20 @@
+shape ownership-return-owned-without-contract {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "returning owned slot 'a' requires @returns_owned"
+  flags "--borrow-check"
+  source ny <<'NY'
+use std.core
+
+fn bad() {
+   def a = [1]
+   return a
+}
+
+bad()
+NY
+}

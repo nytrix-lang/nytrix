@@ -1,0 +1,41 @@
+shape png-decode {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.os
+use std.enc.zlib as zlib
+use std.os.path as ospath
+def res = file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
+if(is_err(res)){
+   print("READ_ERR")
+} else {
+   def data = unwrap(res)
+   mut idat = ""
+   mut off = 8
+   while(off + 8 <= len(data)){
+      def ln = (load8(data, off) << 24) | (load8(data, off + 1) << 16) | (load8(data, off + 2) << 8) | load8(data, off + 3)
+      def typ = (load8(data, off + 4) << 24) | (load8(data, off + 5) << 16) | (load8(data, off + 6) << 8) | load8(data, off + 7)
+      def ch_off = off + 8
+      if(typ == 1229209940){
+         mut i = 0
+         while(i < ln){
+            idat = idat + chr(load8(data, ch_off + i))
+            i += 1
+         }
+      }
+      off = ch_off + ln + 4
+      if(typ == 1229278788){ break }
+   }
+   def raw = zlib.decompress_zlib_limit(idat, 1040)
+   print("RAW_LEN", len(raw))
+   mut y = 0
+   while(y < 16){
+      print("ROW", y, "FILTER", load8(raw, y * 65))
+      y += 1
+   }
+}
+NY
+}

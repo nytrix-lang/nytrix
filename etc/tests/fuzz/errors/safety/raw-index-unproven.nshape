@@ -1,0 +1,20 @@
+shape safety-raw-index-unproven {
+  family "compiler-errors/safety"
+  generator "error"
+  features ["error", "safety", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "safe-mode raw memory access requires a proven byte range for index"
+  flags "--safe-mode"
+  source ny <<'NY'
+use std.core
+
+mut int i = 0
+
+if argc() > 0 { i = argc() }
+with ptr: p = malloc(8){
+   load8(p, i)
+}
+NY
+}

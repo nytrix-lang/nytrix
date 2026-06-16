@@ -1,0 +1,17 @@
+shape fast_len {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.util.parse.str.bytes
+assert(len("abcd") == 4, "len str")
+assert(len([1, 2, 3]) == 3, "len list")
+assert(len((1, 2)) == 2, "len tuple")
+assert(len({"a": 1, "b": 2}) == 2, "len dict")
+def b = bytes(5)
+assert(len(b) == 5, "len bytes")
+print("ok fast len probe")
+NY
+}

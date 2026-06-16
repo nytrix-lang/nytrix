@@ -1,0 +1,21 @@
+shape ownership-return-owner-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot return owned slot 'a' while borrow 'b' is live"
+  flags "--borrow-check"
+  source ny <<'NY'
+use std.core
+
+fn bad() {
+   def a = [1]
+   def b = borrow(a)
+   return a
+}
+
+bad()
+NY
+}

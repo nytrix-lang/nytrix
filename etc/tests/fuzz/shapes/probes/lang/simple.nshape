@@ -1,0 +1,19 @@
+shape simple {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.util.parse.3d.gltf as gltf
+use std.os.path as ospath
+def p = ospath.resolve_repo_asset("etc/assets/models/gltf/tests/SimpleSkin/SimpleSkin.gltf")
+def res = gltf.load_gltf_file(p)
+print("load_dict=" + to_str(is_dict(res)) + " err=" + to_str(is_dict(res) ? dict_get(res, "error", "") : ""))
+if(is_dict(res) && !dict_has(res, "error")){
+   print("mesh_cnt=" + to_str(gltf.gltf_mesh_count(res)) + " skin_cnt=" + to_str(gltf.gltf_skin_count(res)) + " anim_cnt=" + to_str(gltf.gltf_animation_count(res)))
+   def mesh = gltf.gltf_to_mesh_group_indexed(res, 0, [])
+   print("mesh_dict=" + to_str(is_dict(mesh)) + " parts=" + to_str(is_dict(mesh) ? len(dict_get(mesh, "parts", [])) : -1))
+}
+NY
+}

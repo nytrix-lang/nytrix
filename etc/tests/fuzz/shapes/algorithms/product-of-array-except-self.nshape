@@ -1,0 +1,62 @@
+shape product-of-array-except-self {
+  family "training-kernels"
+  generator "torture"
+  features ["training-kernel", "reusable", "ny", "prefix-suffix", "array", "mutation"]
+  template reusable-ny-kernel
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.reflect
+use std.os.time
+fn gen_vals(n){
+   mut a = list(0)
+   mut i = 0
+   while(i < n){ a = append(a, 0) i += 1 }
+   mut x = 20240527
+   i = 0
+   while(i < n){
+      x = (x * 1664525 + 1013904223) & 2147483647
+      set_idx(a, i, (x % 97) + 1)
+      i += 1
+   }
+   return a
+}
+fn score_prod_except(a){
+   def n = len(a)
+   mut out = list(0)
+   mut i = 0
+   while(i < n){ out = append(out, 1) i += 1 }
+   mut pref = 1
+   i = 0
+   while(i < n){
+      set_idx(out, i, pref)
+      pref = (pref * get(a, i)) % 65521
+      i += 1
+   }
+   mut suff = 1
+   i = n - 1
+   while(i >= 0){
+      set_idx(out, i, (get(out, i) * suff) % 65521)
+      suff = (suff * get(a, i)) % 65521
+      i -= 1
+   }
+   mut s = 0
+   i = 0
+   while(i < n){
+      s += get(out, i)
+      i += 1
+   }
+   return s
+}
+def a = gen_vals(70000)
+mut checksum = 0
+def t0 = ticks()
+mut r = 0
+while(r < 20){
+   checksum += score_prod_except(a)
+   r += 1
+}
+def t1 = ticks()
+print("RESULT product_of_array_except_self ", checksum, " ", t1 - t0)
+NY
+}

@@ -10,8 +10,8 @@ use std
 use std.core
 use std math as math
 use std.math as math
-use std.parse.data.json (json_decode, json_encode)
-use std.parse.data.json (json_decode as decode_json)
+use std.math.parse.data.json (json_decode, json_encode)
+use std.math.parse.data.json (json_decode as decode_json)
 use "./local_helpers.ny" as helpers
 use "./local_helpers.ny" (helper)
 use "./local_helpers.ny":debug
@@ -56,7 +56,7 @@ Use a direct import or an alias.
 | --- | --- |
 | `use std.core` | The module exports common names used directly. |
 | `use std.math as math` | Calls stay visibly namespaced. |
-| `use std.parse.data.json (json_decode)` | Only one or two names are needed. |
+| `use std.math.parse.data.json (json_decode)` | Only one or two names are needed. |
 | `use "./helper.ny" (helper)` | A local file provides a private helper. |
 | `use module.path *` | Legacy or local code that intentionally imports the full surface. |
 
@@ -127,7 +127,7 @@ part of the standard library.
 Aliases keep call sites short while preserving the real module boundary:
 
 ```ny
-use std.parse.data.json as json
+use std.math.parse.data.json as json
 
 def obj = json.json_decode("{\"ok\": true}")
 ```

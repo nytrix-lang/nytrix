@@ -1,0 +1,6 @@
+shape induction-affine {
+  family "stress-loop-affine"
+  generator "stress"
+  features ["stress-style", "optimizer-pattern", "induction", "affine-index", "vectorizable", "arrays", "inbounds"]
+  template stress-induction-affine
+}

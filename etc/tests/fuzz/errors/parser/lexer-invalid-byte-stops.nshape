@@ -1,0 +1,16 @@
+shape parser-lexer-invalid-byte-stops {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  source ny <<'NY'
+use std.core
+
+mut i = 0
+while (i < 8)é
+
+fn main() { 0 }
+main()
+NY
+}

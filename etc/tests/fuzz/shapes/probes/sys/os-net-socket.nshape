@@ -1,0 +1,114 @@
+shape os-net-socket {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.net.socket
+use std.os.thread
+use std.os.time
+use std.os.sys
+fn _socket_probe_join_if_valid_thread(any handle) int {
+   if handle != 0 && handle != -1 { return thread_join(handle) }
+   return -1
+}
+fn _socket_probe_server_task(list arg) int {
+   def port = arg.get(0)
+   def state = arg.get(1)
+   def s = socket_bind("127.0.0.1", port)
+   if s < 0 {
+      store64(state, -1)
+      print("Server: socket_bind failed, error:", s)
+      return -1
+   }
+   defer { close_socket(s) }
+   store64(state, 1)
+   def c = socket_accept(s)
+   if c < 0 {
+      store64(state, -2)
+      print("Server: socket_accept failed, error:", c, ", errno:", errno())
+      return -1
+   }
+   defer { close_socket(c) }
+   store64(state, 2)
+   def req = read_socket(c, 1024)
+   if req == "ping" {
+      def write_res = write_socket_all(c, "pong")
+      if write_res < 0 { print("Server: write_socket failed, errno:", errno()) }
+   }
+   store64(state, 3)
+   return 0
+}
+fn main(){
+   def PORT = 54000 + ((ticks() / 1000000) % 2000)
+   def CONNECT_RETRIES = 200
+   def CONNECT_RETRY_MS = 25
+   def SERVER_READY_WAIT_MS = 5000
+   def SERVER_READY_POLL_MS = 10
+   def state_ptr = malloc(8)
+   if state_ptr == 0 {
+      print("Skipping socket test: could not allocate shared state.")
+      return 0
+   }
+   defer { free(state_ptr) }
+   store64(state_ptr, 0)
+   mut args = list()
+   args = args.append(PORT)
+   args = args.append(state_ptr)
+   mut t = -1
+   mut has_thread = false
+   defer {
+      if has_thread { _socket_probe_join_if_valid_thread(t) }
+   }
+   t = thread_spawn(_socket_probe_server_task, args)
+   if t == 0 || t == -1 {
+      print("Skipping socket test: thread_spawn failed, handle:", t)
+      return 0
+   }
+   has_thread = true
+   mut waited = 0
+   while load64(state_ptr) == 0 && waited < SERVER_READY_WAIT_MS {
+      msleep(SERVER_READY_POLL_MS)
+      waited += SERVER_READY_POLL_MS
+   }
+   def server_state = load64(state_ptr)
+   if server_state < 0 {
+      print("Skipping socket test: server init failed. state:", server_state)
+      return 0
+   }
+   mut c = -1
+   defer {
+      if c >= 0 { close_socket(c) }
+   }
+   mut tries = 0
+   while c < 0 && tries < CONNECT_RETRIES {
+      c = socket_connect("127.0.0.1", PORT)
+      if c < 0 { msleep(CONNECT_RETRY_MS) }
+      tries += 1
+   }
+   if c < 0 {
+      print("Skipping socket test: client connect failed after", tries, "tries. Error:", c)
+      mut kick = -1
+      mut kick_tries = 0
+      while kick < 0 && kick_tries < CONNECT_RETRIES {
+         kick = socket_connect("127.0.0.1", PORT)
+         if kick < 0 { msleep(CONNECT_RETRY_MS) }
+         kick_tries += 1
+      }
+      if kick >= 0 { close_socket(kick) }
+      return 0
+   }
+   def write_res = write_socket_all(c, "ping")
+   if write_res < 0 {
+      print("Client: write_socket failed, errno:", errno())
+      panic("Client: write_socket failed")
+   }
+   def res_val = read_socket(c, 1024)
+   assert((res_val == "pong"), "socket ping/pong")
+   print("OS_NET_SOCKET_INLINE_MAIN_PROBE_OK")
+   return 0
+}
+NY
+}

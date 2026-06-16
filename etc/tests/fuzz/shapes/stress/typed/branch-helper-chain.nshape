@@ -1,0 +1,6 @@
+shape branch-helper-chain {
+  family "branch-call-int"
+  generator "typed"
+  features ["functions", "branches", "typed-int", "helper-chain"]
+  template branch-helper-chain
+}

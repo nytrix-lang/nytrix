@@ -6,14 +6,14 @@
 #include <string.h>
 
 static const uint8_t ny_lex_table[256] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, // 0-15
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 16-31
-    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 32-47 (space is 1)
-    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, // 48-63 (digits are 4)
-    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, // 64-79 (A-O are 2)
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 2, // 80-95 (P-Z are 2, _ is 2)
-    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, // 96-111 (a-o are 2)
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0  // 112-127 (p-z are 2)
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0,
+    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 2,
+    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0
 };
 
 #define IS_SPACE(c) (ny_lex_table[(uint8_t)(c)] & 1)
@@ -260,14 +260,11 @@ static void skip_whitespace(lexer_t *lx) {
       while (peek(lx) != '\n' && peek(lx) != '\0')
         advance(lx);
       size_t comment_end = lx->pos;
-      /* Only warn when ';' is used as a statement separator in single-line
-         input (like from -c 'code; more code'). Multi-line files commonly
-         use ';' for inline comments, so we skip the warning for those. */
+
       if (comment_end > comment_start) {
-        /* Single-line source only (e.g., -c 'code; more code') */
+
         if (!lx->source_has_newline) {
-          /* Single-line source — warn if there's code before and content after
-           */
+
           const char *p = lx->src + comment_start;
           const char *end = lx->src + comment_end;
           while (p < end && (*p == ' ' || *p == '\t'))
@@ -295,7 +292,7 @@ static void skip_whitespace(lexer_t *lx) {
       size_t start_pos = lx->pos;
       bool bol = (start_pos == 0 || lx->src[start_pos - 1] == '\n');
       if (bol) {
-        // Peek ahead to see if it's a line directive or shebang
+
         const char *p = lx->src + lx->pos + 1;
         while (*p == ' ' || *p == '\t')
           p++;
@@ -305,7 +302,7 @@ static void skip_whitespace(lexer_t *lx) {
         bool is_shebang = (start_pos == 0 && *p == '!');
 
         if (is_line_dir) {
-          advance(lx); // consume '#'
+          advance(lx);
           p = lx->src + lx->pos;
           while (*p == ' ' || *p == '\t')
             p++;
@@ -350,7 +347,7 @@ static void skip_whitespace(lexer_t *lx) {
           continue;
         }
       }
-      // If it's not a processed directive, let it be a token (like #link)
+
       break;
     } else {
       break;
@@ -449,7 +446,7 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
       return NY_T_IDENT;
     }
     if (len == 7 && memcmp(start, "include", 7) == 0) {
-      return NY_T_IDENT; /* valid: used after # for #include <header> */
+      return NY_T_IDENT;
     }
     break;
   case 'n':
@@ -776,8 +773,8 @@ token_t lexer_next(lexer_t *lx) {
       while (peek(lx) != '\0' && !(peek(lx) == '*' && peek_next(lx) == '/'))
         advance(lx);
       if (peek(lx) == '*') {
-        advance(lx); // *
-        advance(lx); // /
+        advance(lx);
+        advance(lx);
       }
       return lexer_next(lx);
     }
@@ -915,7 +912,6 @@ char *parse_use_name(lexer_t *lx, token_t *entry_tok, token_t *out_last_tok) {
   memcpy(buf, t.lexeme, t.len);
   len += t.len;
 
-  /* Absorb following chars if it was a digit-starting ident (e.g. '3d') */
   token_t next;
   while ((next = lexer_next(lx)).kind == NY_T_IDENT &&
          next.col == (int)(t.col + t.len)) {
@@ -960,7 +956,6 @@ char *parse_use_name(lexer_t *lx, token_t *entry_tok, token_t *out_last_tok) {
       memcpy(buf + len, id.lexeme, id.len);
       len += id.len;
 
-      /* Re-absorb for segments like '3d' after dot */
       t = id;
       while ((next = lexer_next(lx)).kind == NY_T_IDENT &&
              next.col == (int)(t.col + t.len)) {

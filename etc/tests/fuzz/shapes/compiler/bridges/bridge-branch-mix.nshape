@@ -1,0 +1,25 @@
+shape bridge-branch-mix {
+  family "c-bridge-seed"
+  generator "torture"
+  features ["c-bridge", "differential", "helper-call", "branching", "integer-mix"]
+  template raw-c-seed
+  source c <<'C'
+#include <stdio.h>
+static int step(int x) {
+    return (x * 17 + 3) % 97;
+}
+int main(void) {
+    int sum = 0;
+    for (int i = 0; i < 80; ++i) {
+        int v = step(i);
+        if ((v % 2) == 0) {
+            sum += v * 3;
+        } else {
+            sum += v + 11;
+        }
+    }
+    printf("%d\n", sum);
+    return 0;
+}
+C
+}

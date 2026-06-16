@@ -1,0 +1,48 @@
+shape float_call {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.math
+@jit
+fn pack8(a, b, c, d, e, f, g, h){
+   [a, b, c, d, e, f, g, h]
+}
+@jit
+fn sum8(a, b, c, d, e, f, g, h){
+   a + b + c + d + e + f + g + h
+}
+@jit
+fn mixed10(a, b, c, d, e, f, g, h, tex_id, alpha){
+   [
+      a + e,
+      b + f,
+      c + g,
+      d + h,
+      tex_id,
+      alpha
+   ]
+}
+fn show(label, v){
+   print(label + ": " + to_str(v))
+}
+def vals = [40.0, 40.0, 300.0, 140.0, 0.2, 0.8, 0.2, 1.0]
+show("pack8", pack8(
+      get(vals, 0, 0.0), get(vals, 1, 0.0), get(vals, 2, 0.0), get(vals, 3, 0.0),
+      get(vals, 4, 0.0), get(vals, 5, 0.0), get(vals, 6, 0.0), get(vals, 7, 0.0)
+))
+show("sum8", sum8(
+      get(vals, 0, 0.0), get(vals, 1, 0.0), get(vals, 2, 0.0), get(vals, 3, 0.0),
+      get(vals, 4, 0.0), get(vals, 5, 0.0), get(vals, 6, 0.0), get(vals, 7, 0.0)
+))
+show("mixed10", mixed10(
+      40.0, 40.0, 300.0, 140.0,
+      0.2, 0.8, 0.2, 1.0,
+      17, 1.0
+))
+NY
+}

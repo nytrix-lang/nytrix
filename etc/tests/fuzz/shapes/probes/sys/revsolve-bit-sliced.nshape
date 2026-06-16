@@ -1,0 +1,60 @@
+shape revsolve-bit-sliced {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use "../../../lib/os/rev/solve.ny" as rev
+def concrete = rev.solve_bit_sliced_ascii_transform("jw6wLPdwMYxqPyQJqs0hqRXCUaSKYT\n", 18, 30, {
+      "binary": "tmp/test/rev/crackmes/angr-examples/examples/9447_nobranch/nobranch",
+      "entry": 0x400400,
+      "output_addr": 0x616050,
+      "timeout_ms": 5000,
+      "concrete_input": "AAAAAAAAAAAAAAAAAA",
+      "trace_mapper_inputs": true,
+      "flag_shape": false,
+})
+assert(concrete.get("kind", "") == "bit_sliced_ascii_transform", "concrete kind")
+assert(concrete.get("status", "") == "sat", "concrete status")
+assert(concrete.get("input", "") == "AAAAAAAAAAAAAAAAAA", "concrete input")
+assert(concrete.get("materialized_output", "") == "jw6wLPdwMYxqPyQJqs0hqRXCUaSKYT", "concrete materialized output")
+assert(concrete.get("materialized_output", "") != "Xw6wLPdwMYxqPyQJqs0hqRXCUaSKYT", "concrete wrong target mismatch")
+assert(concrete.get("unsupported", []).len == 0, "concrete unsupported")
+assert(concrete.get("executed", 0) > 27000, "concrete executed rows")
+assert(concrete.get("cuts", -1) == 0, "concrete no symbolic cuts")
+assert(concrete.get("asserted_cuts", -1) == 0, "concrete no asserted cuts")
+assert(concrete.get("output_writes", dict()).get("complete", false), "concrete output write summary complete")
+assert(concrete.get("output_writes", dict()).get("final_count", 0) == 30, "concrete final output writers")
+assert(concrete.get("output_writes", dict()).get("base64_mapper_complete", false), "concrete base64 mapper detected")
+def concrete_mapper = concrete.get("mapper_input_validation", dict())
+assert(concrete_mapper.get("selected_count", 0) >= 10, "concrete mapper selected semantic candidates")
+assert(int(concrete_mapper.get("counts", dict()).get("low6", 0)) > 0, "concrete mapper low6 relations")
+assert(int(concrete_mapper.get("counts", dict()).get("double_low6", 0)) > 0, "concrete mapper doubled-index relations")
+assert(int(concrete_mapper.get("counts", dict()).get("ascii_case_toggle", 0)) > 0, "concrete mapper case-toggle relations")
+assert(!concrete_mapper.contains("events"), "mapper validation is compact by default")
+assert(!concrete_mapper.contains("mismatches"), "mapper mismatches are compact by default")
+def first_final = concrete.get("output_writes", dict()).get("final", [])[0]
+assert(first_final.get("mapper", dict()).get("candidate_count", 0) > 0, "compact mapper keeps candidate count")
+assert(!first_final.get("mapper", dict()).contains("candidates"), "compact mapper drops raw candidates")
+def plan = rev.solve_bit_sliced_ascii_transform("HMQhQLi6VqgeOj78AbiaqquK3noeJt\n", 18, 30, {
+      "entry": 0x400400,
+      "output_addr": 0x616050,
+})
+assert(plan.get("kind", "") == "bit_sliced_ascii_transform", "plan kind")
+assert(plan.get("status", "") == "plan", "fallback plan status")
+assert(plan.get("input_len", 0) == 18, "input len")
+assert(plan.get("output_len", 0) == 30, "output len")
+assert(plan.get("output_addr", 0) == 0x616050, "output addr")
+assert(plan.get("constraints", []).len >= 2, "constraints")
+def exported = "use lib.os.revsolve as rev\n\nfn main(){\n  return rev.solve_bit_sliced_ascii_transform(\"HMQhQLi6VqgeOj78AbiaqquK3noeJt\\n\", 18, 30, {\"strategy\": \"lifted-symbolic-output-constrain\", \"alphabet\": \"base64\", \"input_len\": 18, \"output_len\": 30, \"output_addr\": 0x616050, \"argv_index\": 1, \"entry\": 0x400400})\n}"
+def bridged = rev.solve_decompiled_input(exported)
+assert(bridged.get("kind", "") == "bit_sliced_ascii_transform", "bridged plan kind")
+assert(bridged.get("status", "") == "plan", "bridged plan status")
+assert(bridged.get("target_core", "") == "HMQhQLi6VqgeOj78AbiaqquK3noeJt", "bridged target")
+assert(bridged.get("input_len", 0) == 18, "bridged input len")
+assert(bridged.get("output_addr", 0) == 0x616050, "bridged output addr")
+assert(bridged.get("binary", "") == "", "bridged no binary fallback")
+print("REVSOLVE_BIT_SLICED_PROBE_OK")
+NY
+}

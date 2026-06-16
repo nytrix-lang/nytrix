@@ -1,0 +1,48 @@
+shape vk-pipeline {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.os.ui.render.vk.pipeline as pipe
+assert(pipe.shader_pc_bytes() == 256, "push constant byte size")
+assert(pipe.bind_pipeline(0) == 0, "bind default outside frame")
+assert(pipe.push_constants(0, 4) == 0, "push constants outside frame")
+assert(!pipe._ensure_nocull_pipeline(), "nocull pipeline waits for device")
+assert(!pipe._ensure_line_pipeline(), "line pipeline waits for device")
+assert(!pipe._ensure_point_pipeline(), "point pipeline waits for device")
+assert(!pipe._ensure_wire_pipeline(), "wire pipeline waits for device")
+assert(!pipe._ensure_circle_pipeline(), "circle pipeline waits for device")
+assert(!pipe._ensure_ring_pipeline(), "ring pipeline waits for device")
+assert(!pipe._ensure_skybox_pipeline(), "skybox pipeline waits for device")
+assert(pipe._get_default_pipeline() == 0, "default pipeline fallback")
+assert(pipe._get_nocull_pipeline() == 0, "nocull pipeline fallback")
+assert(pipe._get_unlit_nocull_pipeline() == 0, "unlit nocull fallback")
+assert(pipe._get_flip_pipeline() == 0, "flip pipeline fallback")
+assert(pipe._get_flip_unlit_pipeline() == 0, "flip unlit fallback")
+assert(pipe._get_mesh_opaque_pipeline() == 0, "mesh opaque fallback")
+assert(pipe._get_mesh_opaque_nocull_pipeline() == 0, "mesh opaque nocull fallback")
+assert(pipe._get_mesh_opaque_nocull_flip_pipeline() == 0, "mesh opaque nocull flip fallback")
+assert(pipe._get_mesh_opaque_unlit_pipeline() == 0, "mesh opaque unlit fallback")
+assert(pipe._get_mesh_opaque_unlit_nocull_pipeline() == 0, "mesh opaque unlit nocull fallback")
+assert(pipe._get_mesh_opaque_unlit_nocull_flip_pipeline() == 0, "mesh opaque unlit nocull flip fallback")
+assert(pipe._get_mesh_fast_opaque_pipeline() == 0, "fast opaque fallback")
+assert(pipe._get_mesh_fast_opaque_nocull_pipeline() == 0, "fast opaque nocull fallback")
+assert(pipe._get_mesh_fast_opaque_flip_pipeline() == 0, "fast opaque flip fallback")
+assert(pipe._get_mesh_fast_opaque_nocull_flip_pipeline() == 0, "fast opaque nocull flip fallback")
+assert(pipe._get_mesh_fast_env_opaque_pipeline() == 0, "fast env opaque fallback")
+assert(pipe._get_mesh_fast_env_opaque_nocull_pipeline() == 0, "fast env opaque nocull fallback")
+assert(pipe._get_mesh_fast_env_opaque_flip_pipeline() == 0, "fast env opaque flip fallback")
+assert(pipe._get_mesh_fast_env_opaque_nocull_flip_pipeline() == 0, "fast env opaque nocull flip fallback")
+assert(pipe._get_mesh_alpha_pipeline() == 0, "mesh alpha fallback")
+assert(pipe._get_mesh_alpha_nocull_pipeline() == 0, "mesh alpha nocull fallback")
+assert(pipe._get_mesh_alpha_nocull_flip_pipeline() == 0, "mesh alpha nocull flip fallback")
+assert(pipe._get_mesh_alpha_unlit_pipeline() == 0, "mesh alpha unlit fallback")
+assert(pipe._get_mesh_alpha_unlit_nocull_pipeline() == 0, "mesh alpha unlit nocull fallback")
+assert(pipe._get_mesh_alpha_unlit_nocull_flip_pipeline() == 0, "mesh alpha unlit nocull flip fallback")
+assert(pipe._get_mesh_alpha_flip_pipeline() == 0, "mesh alpha flip fallback")
+assert(pipe._get_mesh_alpha_unlit_flip_pipeline() == 0, "mesh alpha unlit flip fallback")
+print("vk_pipeline_probe passed")
+NY
+}

@@ -232,8 +232,7 @@ int64_t rt_to_str(int64_t v) {
     return v;
   if (rt_is_nil_imm(v))
     return (int64_t)(uintptr_t)_str_none.s;
-  /* Immediate booleans must be checked before is_int() because the current
-     ABI uses even immediates for bool while small ints use odd tags. */
+
   if (rt_is_true_imm(v))
     return (int64_t)(uintptr_t)_str_true.s;
   if (rt_is_false_imm(v))

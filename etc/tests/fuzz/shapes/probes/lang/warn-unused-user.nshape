@@ -1,0 +1,14 @@
+shape warn_unused_user {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+fn f(){
+   def x = 1
+   0
+}
+f()
+NY
+}

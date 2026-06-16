@@ -1,0 +1,38 @@
+shape png-idat_extract {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.os
+use std.enc.zlib as zlib
+use std.os.path as ospath
+def res = file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
+if(is_err(res)){
+   print("READ_ERR")
+} else {
+   def data = unwrap(res)
+   def off = 8
+   mut idat = ""
+   while(off + 8 <= len(data)){
+      def ln = (load8(data, off) << 24) | (load8(data, off + 1) << 16) | (load8(data, off + 2) << 8) | load8(data, off + 3)
+      def typ = (load8(data, off + 4) << 24) | (load8(data, off + 5) << 16) | (load8(data, off + 6) << 8) | load8(data, off + 7)
+      def ch_off = off + 8
+      if(typ == 1229209940){
+         idat = idat + file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
+      }
+      off = ch_off + ln + 4
+      if(typ == 1229278788){ break }
+   }
+   print("PNG_LEN", len(data))
+   def raw = zlib.decompress_zlib_limit(str_add("", idat), 1040)
+   print("RAW_LEN", len(raw))
+   mut row = 0
+   while(row < 16){
+      print("ROW", row, "FILTER", load8(raw, row * 65))
+      row += 1
+   }
+}
+NY
+}

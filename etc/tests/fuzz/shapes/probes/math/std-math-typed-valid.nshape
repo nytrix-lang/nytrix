@@ -1,0 +1,19 @@
+shape std_math_typed_valid {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math
+fn hyp2(int: a, int: b): int {
+   a * a + b * b
+}
+assert(hyp2(3, 4) == 25, "typed int math")
+assert(gcd(84, 30) == 6, "gcd")
+assert(lcm(6, 14) == 42, "lcm")
+assert(sqrt(81) == 9.0, "sqrt")
+print("std math typed valid")
+NY
+}

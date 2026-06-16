@@ -37,8 +37,8 @@ use std.os.ui.render.viewer.icons as icons
 use std.os.ui.render.viewer.runtime as ui_runtime
 use std.os.ui.render.viewer.widgets
 use std.os.ui.window
-use std.parse.img.svg as svg_img
-use std.parse.syntax
+use std.math.parse.img.svg as svg_img
+use std.math.parse.syntax
 
 fn _editor_color(str code, str text) str {
    if common.env_truthy("NO_COLOR") { return text }
@@ -163,6 +163,15 @@ def win = gfx.init_window(START_W, START_H, "Nytrix Editor", START_FLAGS, EDITOR
 
 if !win { panic("window init failed") }
 window.set_exit_key(win, key.KEY_NULL)
+
+if gfx.get_active_backend_name() == "opengl" {
+   if gfx.begin_frame_clear([0.015, 0.015, 0.018, 1.0]) {
+      gfx.set_ortho_2d(0.0, float(START_W), 0.0, float(START_H))
+      gfx.draw_rect_fast(0.0, 0.0, float(START_W), 2.0, 0xffd6c8ff)
+      gfx.end_frame()
+   }
+}
+
 def FONT_PRIME = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_/#[]{}().,:;+-=<>!?$%@&|\\\"'`~*" + chr(0x2022) + chr(0x2026) + chr(0x2190) + chr(0x2191) + chr(0x2192) + chr(0x2193) + chr(0x2713) + chr(0x2717) + chr(0x03BB)
 
 fn _load_editor_font(list candidates, int size) any {
