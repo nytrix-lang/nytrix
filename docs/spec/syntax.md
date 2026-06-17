@@ -33,6 +33,7 @@ nil  true  false
 ```ny
 use std
 use module.path
+use module.path, other.module
 use module.path as alias
 use std module.path as alias
 use module.path (name, other)

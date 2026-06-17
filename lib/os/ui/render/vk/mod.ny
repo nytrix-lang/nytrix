@@ -513,12 +513,6 @@ fn create_texture(int width, int height, any pixels) int {
    if !_device { return -1 }
    def raw = vk_texture.create_texture(width, height, pixels)
    if raw >= 0 && raw < vk_state.MAX_TEXTURES { return raw }
-   def stable = vk_texture.last_created_texture_id()
-   if stable >= 0 && stable < vk_state.MAX_TEXTURES { return stable }
-   if raw >= 0 {
-      def latest = vk_texture.texture_count() - 1
-      if latest >= 0 && latest < vk_state.MAX_TEXTURES { return latest }
-   }
    -1
 }
 
@@ -527,12 +521,6 @@ fn create_texture_ex(int width, int height, any pixels, int format = 37, any fil
    if !_device { return -1 }
    def raw = vk_texture.create_texture_ex(width, height, pixels, format, filter, wrap_s, wrap_t, use_mipmaps, prebaked_mip_bytes)
    if raw >= 0 && raw < vk_state.MAX_TEXTURES { return raw }
-   def stable = vk_texture.last_created_texture_id()
-   if stable >= 0 && stable < vk_state.MAX_TEXTURES { return stable }
-   if raw >= 0 {
-      def latest = vk_texture.texture_count() - 1
-      if latest >= 0 && latest < vk_state.MAX_TEXTURES { return latest }
-   }
    -1
 }
 

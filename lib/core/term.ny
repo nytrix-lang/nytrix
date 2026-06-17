@@ -2,7 +2,7 @@
 ;; Terminal styling, tables, progress bars, canvas drawing, keyboard input, and TUI control.
 ;; References:
 ;; - std.core
-module std.core.term(bold, italic, dim, underline, color, style, panel, table, tree, bar, bar_update, bar_finish, bar_range, bar_write, get_terminal_size, clear_screen, cursor_hide, cursor_show, cursor_move, cursor_up, cursor_down, cursor_left, cursor_right, enable_wrap, disable_wrap, screen_reset, enter_alt_screen, leave_alt_screen, tui_begin, tui_end, is_quit_key, color_names, get_color_name, get_color, shapes, log_color_enabled, log_tag_color, log_tag, log_text, log_line, elog_line, canvas, canvas_clear, canvas_set, canvas_print, canvas_box, canvas_refresh, get_key, poll_key, set_raw_mode, set_cooked_mode, write_str)
+module std.core.term(bold, italic, dim, underline, color, style, panel, table, tree, bar, bar_update, bar_finish, bar_range, bar_write, get_terminal_size, clear_screen, cursor_hide, cursor_show, cursor_move, cursor_up, cursor_down, cursor_left, cursor_right, enable_wrap, disable_wrap, screen_reset, enter_alt_screen, leave_alt_screen, tui_begin, tui_end, tui_canvas_loop, is_quit_key, color_names, get_color_name, get_color, shapes, log_color_enabled, log_tag_color, log_tag, log_text, log_line, elog_line, canvas, canvas_clear, canvas_zclear, shade, canvas_set, canvas_print, canvas_box, canvas_refresh, get_key, poll_key, set_raw_mode, set_cooked_mode, write_str)
 use std.core.str
 use std.core.reflect
 use std.core
@@ -170,6 +170,28 @@ fn tui_end() int {
    unwrap(sys_write(1, cleanup_seq, cleanup_seq.len))
    leave_alt_screen()
    unwrap(sys_write(1, cleanup_seq, cleanup_seq.len))
+   0
+}
+
+
+fn tui_canvas_loop(any draw, int delay=16) int {
+   "Runs a resize-aware TUI canvas loop. Calls draw(canvas, zbuf, width, height) once per frame."
+   tui_begin()
+   mut s = get_terminal_size()
+   mut w, h = s[0], s[1] - 1
+   mut c, z, k = canvas(w, h), [0.0] * w * h, 0
+   while !is_quit_key(k) {
+      s = get_terminal_size()
+      if w != s[0] || h != s[1] - 1 {
+         w, h = s[0], s[1] - 1
+         c, z = canvas(w, h), [0.0] * w * h
+         clear_screen()
+      }
+      draw(c, z, w, h)
+      if delay > 0 { msleep(delay) }
+      k = poll_key()
+   }
+   tui_end()
    0
 }
 
@@ -769,6 +791,22 @@ fn canvas_clear(list canv) int {
       i += 1
    }
    0
+}
+
+
+fn canvas_zclear(list canv, list z) int {
+   "Clears a canvas and zeroes a matching depth/z buffer."
+   mut i = 0
+   while i < z.len { z[i] = 0.0 i += 1 }
+   canvas_clear(canv)
+}
+
+fn shade(str pal, any v, any mul=1.0) str {
+   "Picks a clamped shade character from a palette."
+   def n = pal.len
+   if n <= 0 { return "" }
+   def i = int(v * mul)
+   pal[i < 0 ? 0 : i >= n ? n - 1 : i]
 }
 
 fn _byte_len(any s) int {

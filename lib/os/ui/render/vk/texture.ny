@@ -1247,8 +1247,29 @@ fn _upload_cubemap_face_dedicated(any image, int face_size, any pixels, int laye
    mut fence_ptr = _tex_alloc(8)
    create_fence(_device, fence_ci, 0, fence_ptr)
    def fence = load64_h(fence_ptr, 0)
-   queue_submit(_graphics_queue, 1, submit_info, fence)
-   wait_for_fences(_device, 1, fence_ptr, 1, 0xFFFFFFFFFFFFFFFF)
+   ;; Check the submit return value and use a finite fence timeout. The
+   ;; previous code called wait_for_fences with UINT64_MAX, so a lost device
+   ;; or OOM on submit would hang the application forever with no diagnostic.
+   def submit_res = queue_submit(_graphics_queue, 1, submit_info, fence)
+   if submit_res != 0 {
+      _tex_debug("cubemap face submit failed code=" + to_str(submit_res))
+      destroy_fence(_device, fence, 0)
+      free_command_buffers(_device, _command_pool, 1, cb_ptr)
+      free_memory(_device, staging_mem, 0)
+      destroy_buffer(_device, staging_buf, 0)
+      free(fence_ci, fence_ptr, submit_info, begin_info, cb_alloc, cb_ptr, mem_req, alloc_info, mem_ptr, buf_ci, staging_buf_ptr, bar, copy_region)
+      return false
+   }
+   def wait_res = wait_for_fences(_device, 1, fence_ptr, 1, 5_000_000_000)
+   if wait_res != 0 {
+      _tex_debug("cubemap face fence wait failed code=" + to_str(wait_res))
+      destroy_fence(_device, fence, 0)
+      free_command_buffers(_device, _command_pool, 1, cb_ptr)
+      free_memory(_device, staging_mem, 0)
+      destroy_buffer(_device, staging_buf, 0)
+      free(fence_ci, fence_ptr, submit_info, begin_info, cb_alloc, cb_ptr, mem_req, alloc_info, mem_ptr, buf_ci, staging_buf_ptr, bar, copy_region)
+      return false
+   }
    destroy_fence(_device, fence, 0)
    free_command_buffers(_device, _command_pool, 1, cb_ptr)
    free_memory(_device, staging_mem, 0)

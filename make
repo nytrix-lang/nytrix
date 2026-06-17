@@ -1724,10 +1724,71 @@ def cmake_configure_complete(bdir: Path) -> bool:
         or any(bdir.glob("*.sln"))
     )
 
+def _vendor_has_nytrix_libedit_stub(lib_dir: Path) -> bool:
+    """Detect the compatibility libedit stub from older tarballs.
+
+    That stub is only meant to satisfy LLVM's unused editline dependency; if it
+    sits in LD_LIBRARY_PATH it can also be picked up by host tools such as
+    /bin/sh.  Some shells are linked against libedit and then fail during
+    process startup with missing symbols like `el_source`.
+    """
+    if host_os() != "linux" or not lib_dir.is_dir():
+        return False
+    for p in sorted(lib_dir.glob("libedit.so*")):
+        try:
+            if "nytrix-stub" in p.name:
+                return True
+            target = p.resolve(strict=True)
+            if "nytrix-stub" in target.name:
+                return True
+        except Exception:
+            try:
+                link = os.readlink(p)
+                if "nytrix-stub" in link:
+                    return True
+            except Exception:
+                pass
+    return False
+
+def _vendor_libedit_shim_ready(lib_dir: Path) -> bool:
+    """Return true when the bundled libedit shim has the shell-safe exports."""
+    if host_os() != "linux" or not lib_dir.is_dir():
+        return False
+    readelf = which("readelf")
+    if not readelf:
+        return False
+    candidates = sorted(lib_dir.glob("libedit.so*"))
+    for p in candidates:
+        try:
+            target = p.resolve(strict=True)
+        except Exception:
+            target = p
+        if "nytrix-stub" not in p.name and "nytrix-stub" not in target.name:
+            continue
+        try:
+            res = subprocess.run([readelf, "-Ws", str(target)], capture_output=True, text=True, timeout=5)
+        except Exception:
+            return False
+        text = (res.stdout or "") + (res.stderr or "")
+        return (" el_source" in text) and (" el_resize" in text) and (" history_length" in text)
+    return False
+
+def _sanitize_vendor_terminal_libs(lib_dir: Path) -> None:
+    """Refresh stale terminal-library shims before exporting vendor LD paths."""
+    has_stub = _vendor_has_nytrix_libedit_stub(lib_dir)
+    needs_edit = _vendor_any_needed(lib_dir, "libedit.so.0")
+    has_edit = any(lib_dir.glob("libedit.so*"))
+    if has_stub and _vendor_libedit_shim_ready(lib_dir):
+        return
+    if has_stub or (needs_edit and not has_edit):
+        _write_vendor_libedit_stub(lib_dir)
+
 def _detect_vendor_lib_dir(build_root: Path) -> Path | None:
     lib_dir = build_root / "vendor" / "lib" / "host"
     if lib_dir.is_dir() and any(lib_dir.glob("*.so*")):
-        return lib_dir
+        _sanitize_vendor_terminal_libs(lib_dir)
+        if any(lib_dir.glob("*.so*")):
+            return lib_dir
     return None
 
 def cmake_configure(build_root: Path, kind: str) -> Path:
@@ -4659,6 +4720,200 @@ def _glibc_needed_versions(path: Path) -> list[tuple[int, int]]:
             out.append((int(maj), int(min_)))
     return out
 
+def _glibc_required_max(path: Path) -> tuple[int, int] | None:
+    versions = _glibc_needed_versions(path)
+    return max(versions) if versions else None
+
+def _elf_needed_names(path: Path) -> list[str]:
+    if host_os() != "linux":
+        return []
+    readelf = which("readelf")
+    if not readelf:
+        return []
+    try:
+        res = subprocess.run([readelf, "-d", str(path)], capture_output=True, text=True, timeout=10)
+    except Exception:
+        return []
+    text = (res.stdout or "") + (res.stderr or "")
+    return re.findall(r"Shared library: \[([^\]]+)\]", text)
+
+def _vendor_glibc_floor_violations(lib_dir: Path, floor: tuple[int, int]) -> list[tuple[Path, tuple[int, int]]]:
+    bad: list[tuple[Path, tuple[int, int]]] = []
+    if host_os() != "linux" or not lib_dir.is_dir():
+        return bad
+    for p in sorted(lib_dir.glob("*.so*")):
+        if p.is_symlink() or not p.is_file():
+            continue
+        req = _glibc_required_max(p)
+        if req and req > floor:
+            bad.append((p, req))
+    return bad
+
+def _remove_vendor_lib_family(lib_dir: Path, pattern: str) -> None:
+    for p in sorted(lib_dir.glob(pattern)):
+        try:
+            p.unlink()
+        except Exception:
+            pass
+
+def _write_vendor_libedit_stub(lib_dir: Path) -> bool:
+    # LLVM links against editline, but Nytrix never uses LLVM's interactive
+    # line-editor path. On rolling distros libedit/ncurses can require a newer
+    # glibc than the rest of the vendored LLVM bundle. This tiny no-libc ELF
+    # stub satisfies the loader for source builds without shipping host terminal
+    # libraries in the tarball.
+    if host_os() != "linux":
+        return False
+    cc_raw = (os.environ.get("CC") or _select_default_cc() or "").strip()
+    if not cc_raw:
+        return False
+    src = (
+        "typedef struct EditLine EditLine;\n"
+        "typedef struct History History;\n"
+        "typedef struct LineInfo LineInfo;\n"
+        "typedef struct LineInfoW LineInfoW;\n"
+        "typedef int wchar_t;\n"
+        "typedef unsigned long size_t;\n"
+        "int history_base = 1;\n"
+        "int history_length = 0;\n"
+        "int history_max_entries = 0;\n"
+        "int history_offset = 0;\n"
+        "int history_expansion_char = 33;\n"
+        "int history_subst_char = 94;\n"
+        "const char *history_no_expand_chars = \"\\0\";\n"
+        "void *history_inhibit_expansion_function = (void *)0;\n"
+        "EditLine *el_init(const char *prog, void *fin, void *fout, void *ferr) "
+        "{ (void)prog; (void)fin; (void)fout; (void)ferr; return (EditLine *)0; }\n"
+        "EditLine *el_init_fd(const char *prog, void *fin, void *fout, void *ferr, int fdin, int fdout, int fderr) "
+        "{ (void)fdin; (void)fdout; (void)fderr; return el_init(prog, fin, fout, ferr); }\n"
+        "void el_end(EditLine *e) { (void)e; }\n"
+        "void el_reset(EditLine *e) { (void)e; }\n"
+        "int el_set(EditLine *e, int op, ...) { (void)e; (void)op; return -1; }\n"
+        "int el_get(EditLine *e, int op, ...) { (void)e; (void)op; return -1; }\n"
+        "int el_wset(EditLine *e, int op, ...) { (void)e; (void)op; return -1; }\n"
+        "int el_wget(EditLine *e, int op, ...) { (void)e; (void)op; return -1; }\n"
+        "const char *el_gets(EditLine *e, int *count) "
+        "{ (void)e; if (count) *count = 0; return (const char *)0; }\n"
+        "const wchar_t *el_wgets(EditLine *e, int *count) "
+        "{ (void)e; if (count) *count = 0; return (const wchar_t *)0; }\n"
+        "int el_getc(EditLine *e, char *c) { (void)e; if (c) *c = 0; return 0; }\n"
+        "int el_wgetc(EditLine *e, wchar_t *c) { (void)e; if (c) *c = 0; return 0; }\n"
+        "const LineInfo *el_line(EditLine *e) { (void)e; return (const LineInfo *)0; }\n"
+        "const LineInfoW *el_wline(EditLine *e) { (void)e; return (const LineInfoW *)0; }\n"
+        "int el_insertstr(EditLine *e, const char *s) { (void)e; (void)s; return -1; }\n"
+        "int el_winsertstr(EditLine *e, const wchar_t *s) { (void)e; (void)s; return -1; }\n"
+        "int el_push(EditLine *e, const char *s) { (void)e; (void)s; return -1; }\n"
+        "int el_wpush(EditLine *e, const wchar_t *s) { (void)e; (void)s; return -1; }\n"
+        "int el_replacestr(EditLine *e, const char *s) { (void)e; (void)s; return -1; }\n"
+        "int el_wreplacestr(EditLine *e, const wchar_t *s) { (void)e; (void)s; return -1; }\n"
+        "int el_deletestr(EditLine *e, int n) { (void)e; (void)n; return -1; }\n"
+        "int el_deletestr1(EditLine *e, int n) { (void)e; (void)n; return -1; }\n"
+        "int el_cursor(EditLine *e, int n) { (void)e; (void)n; return -1; }\n"
+        "void el_beep(EditLine *e) { (void)e; }\n"
+        "int el_resize(EditLine *e) { (void)e; return 0; }\n"
+        "int el_parse(EditLine *e, int argc, const char **argv) { (void)e; (void)argc; (void)argv; return -1; }\n"
+        "int el_wparse(EditLine *e, int argc, const wchar_t **argv) { (void)e; (void)argc; (void)argv; return -1; }\n"
+        "int el_source(EditLine *e, const char *file) { (void)e; (void)file; return -1; }\n"
+        "History *history_init(void) { return (History *)0; }\n"
+        "void history_end(History *h) { (void)h; }\n"
+        "History *history_winit(void) { return (History *)0; }\n"
+        "void history_wend(History *h) { (void)h; }\n"
+        "int history(History *h, void *ev, int op, ...) "
+        "{ (void)h; (void)ev; (void)op; return -1; }\n"
+        "int history_w(History *h, void *ev, int op, ...) "
+        "{ (void)h; (void)ev; (void)op; return -1; }\n"
+        "char *history_arg_extract(int a, int b, const char *s) { (void)a; (void)b; (void)s; return (char *)0; }\n"
+        "int history_expand(char *s, char **o) { (void)s; if (o) *o = (char *)0; return 0; }\n"
+        "void *history_get(int i) { (void)i; return (void *)0; }\n"
+        "void *history_get_history_state(void) { return (void *)0; }\n"
+        "int history_is_stifled(void) { return 0; }\n"
+        "void **history_list(void) { return (void **)0; }\n"
+        "int history_search(const char *s, int d) { (void)s; (void)d; return -1; }\n"
+        "int history_search_pos(const char *s, int d, int p) { (void)s; (void)d; (void)p; return -1; }\n"
+        "int history_search_prefix(const char *s, int d) { (void)s; (void)d; return -1; }\n"
+        "int history_set_pos(int p) { (void)p; return -1; }\n"
+        "char **history_tokenize(const char *s) { (void)s; return (char **)0; }\n"
+        "int history_total_bytes(void) { return 0; }\n"
+        "int history_truncate_file(const char *f, int n) { (void)f; (void)n; return 0; }\n"
+    )
+    real = lib_dir / "libedit.so.0.0.nytrix-stub"
+    tmp = lib_dir / ".libedit.so.0.0.nytrix-stub.tmp"
+    cmd = shlex.split(cc_raw) + [
+        "-shared", "-fPIC", "-nostdlib", "-x", "c", "-",
+        "-Wl,-soname,libedit.so.0", "-o", str(tmp),
+    ]
+    try:
+        res = subprocess.run(cmd, input=src, text=True, capture_output=True, timeout=30)
+    except Exception:
+        return False
+    if res.returncode != 0 or not tmp.exists():
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+    _remove_vendor_lib_family(lib_dir, "libedit.so*")
+    tmp.replace(real)
+    try:
+        real.chmod(0o755)
+    except Exception:
+        pass
+    for link_name, target in (("libedit.so.0", real.name), ("libedit.so", "libedit.so.0")):
+        link = lib_dir / link_name
+        try:
+            link.unlink(missing_ok=True)
+            link.symlink_to(target)
+        except Exception:
+            _copy2_if_different(real, link)
+    log("VENDOR", "replaced host libedit with Nytrix LLVM line-editor shim")
+    return True
+
+def _vendor_any_needed(lib_dir: Path, soname: str) -> bool:
+    for p in sorted(lib_dir.glob("*.so*")):
+        if p.is_symlink() or not p.is_file():
+            continue
+        if p.name.startswith(soname):
+            continue
+        if soname in _elf_needed_names(p):
+            return True
+    return False
+
+def _repair_tar_vendor_glibc_floor(lib_dir: Path) -> None:
+    if host_os() != "linux" or _env_flag("NYTRIX_ALLOW_NEW_GLIBC_BUNDLE", False):
+        return
+    if not lib_dir.is_dir():
+        return
+    floor = _parse_glibc_floor()
+    bad = _vendor_glibc_floor_violations(lib_dir, floor)
+    if any(p.name.startswith("libedit.so") for p, _ in bad):
+        if not _write_vendor_libedit_stub(lib_dir):
+            raise SystemExit(
+                "make tar: vendored libedit needs newer glibc than "
+                f"{floor[0]}.{floor[1]} and the compatibility shim could not be built; "
+                "install cc or set NYTRIX_ALLOW_NEW_GLIBC_BUNDLE=1 to keep host libs"
+            )
+
+    # After replacing libedit, ncurses is normally no longer referenced by the
+    # vendored LLVM closure. Drop an over-new ncurses copy instead of shipping a
+    # same-distro terminal library in a portable source archive.
+    bad = _vendor_glibc_floor_violations(lib_dir, floor)
+    if any(p.name.startswith("libncursesw.so") for p, _ in bad) and not _vendor_any_needed(lib_dir, "libncursesw.so.6"):
+        _remove_vendor_lib_family(lib_dir, "libncursesw.so*")
+        log("TAR", "removed unused host-newer libncursesw from vendor bundle")
+
+    bad = _vendor_glibc_floor_violations(lib_dir, floor)
+    if bad:
+        detail = ", ".join(f"{p.name} needs GLIBC_{req[0]}.{req[1]}" for p, req in bad[:8])
+        if len(bad) > 8:
+            detail += f", ... {len(bad) - 8} more"
+        raise SystemExit(
+            "make tar: refusing to package host-newer vendored libs "
+            f"(floor GLIBC_{floor[0]}.{floor[1]}): {detail}. "
+            "Build the tar on an older distro/container or set "
+            "NYTRIX_ALLOW_NEW_GLIBC_BUNDLE=1 for a same-host bundle."
+        )
+
 def _check_static_bundle_glibc_floor(lib_dir: Path, context: str = "static") -> None:
     if host_os() != "linux" or _env_flag("NYTRIX_ALLOW_NEW_GLIBC_BUNDLE", False):
         return
@@ -5204,9 +5459,10 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
         print("usage: make tar [--source|--with-binaries]")
         print()
         print("  Default: creates build/dist/nytrix-source.tar.gz")
-        print("    source code + vendored build shared libs; user compiles with ./make bin")
+        print("    source code + vendored LLVM build libs, checked against NYTRIX_GLIBC_FLOOR")
         print("  --with-binaries: creates build/dist/nytrix-static.tar.gz")
         print("    includes build/static/ with ./run-ny and bundled runtime libs")
+        print("  NYTRIX_GLIBC_FLOOR=2.38 controls the portability floor for packaged libs.")
         print("  NYTRIX_TAR_WITH_BINARIES=1 makes --with-binaries the default.")
         return 0
 
@@ -5222,8 +5478,11 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
         boot_step("tar: bundling vendored libs first")
         run_make_vendor(build_root, kind, jobs, [])
 
-    # Copy vendored libs into build/vendor/ inside the package.
+    # Copy vendored libs into build/vendor/ inside the package, then repair the
+    # copy so source tarballs do not ship same-distro terminal libraries that
+    # require a newer glibc than the rest of the vendored LLVM closure.
     _copytree_replace(build_root / "vendor", package_dir / "build" / "vendor")
+    _repair_tar_vendor_glibc_floor(package_dir / "build" / "vendor" / "lib" / "host")
 
     if with_binaries:
         # Build and bundle static portable folder.
