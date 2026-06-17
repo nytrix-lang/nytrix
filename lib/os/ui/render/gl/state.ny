@@ -177,6 +177,13 @@ mut _tex_pixels = dict(128)
 mut _wireframe = false
 mut _lighting_enabled = false
 mut _depth_mask_enabled = true
+;; Cached GL_TEXTURE_2D / GL_DEPTH_TEST enable state. The previous code issued
+;; glEnable/glDisable unconditionally on every draw_vertices call, which on a
+;; 2000-cell terminal frame meant ~4000 redundant GL calls just to restate the
+;; same enable bits. These mirror the existing _bound_tex / _depth_mask_enabled
+;; caching pattern.
+mut _texture_2d_enabled = false
+mut _depth_test_enabled = false
 mut _clear_r = 0.0
 mut _clear_g = 0.0
 mut _clear_b = 0.0
@@ -914,9 +921,17 @@ fn _default_ortho(int w, int h) list {
 fn _ensure_scratch(int bytes) ptr {
    if bytes <= 0 { return 0 }
    if _scratch && _scratch_cap >= bytes { return _scratch }
-   if _scratch { free(_scratch) _scratch = 0 _scratch_cap = 0 }
-   _scratch = zalloc(bytes)
-   if _scratch { _scratch_cap = bytes }
+   ;; Grow geometrically with realloc instead of free+zalloc. The previous code
+   ;; zero-filled the entire scratch buffer on every growth, even though the
+   ;; callers (_store_vertex / _store_rect) overwrite every byte before upload.
+   ;; realloc can also extend in-place without copying.
+   def new_cap = max(bytes, _scratch_cap * 2)
+   if _scratch {
+      _scratch = realloc(_scratch, new_cap)
+   } else {
+      _scratch = malloc(new_cap)
+   }
+   if _scratch { _scratch_cap = new_cap } else { _scratch_cap = 0 }
    _scratch
 }
 
@@ -942,8 +957,24 @@ fn _format_internal(int fmt) int {
 
 fn _format_external(int fmt) int { fmt == 9 ? GL_LUMINANCE : GL_RGBA }
 
+;; Cached GL buffer bindings. draw_vertices / draw_vertices_indexed_raw end
+;; every call by binding buffer 0 (defensive unbind), which forces the next
+;; draw to re-bind the dynamic VBO. Without this cache that is 2 glBindBuffer
+;; calls per draw that the GL driver has to round-trip. We short-circuit when
+;; the requested handle already matches the cached binding for the target.
+mut _bound_array_buffer = 0
+mut _bound_elem_buffer = 0
+
 fn _bind_buffer(int target, any handle) bool {
-   _ny_glBindBuffer(target, int(handle))
+   def h = int(handle)
+   if target == GL_ARRAY_BUFFER {
+      if h == _bound_array_buffer { return true }
+      _bound_array_buffer = h
+   } elif target == GL_ELEMENT_ARRAY_BUFFER {
+      if h == _bound_elem_buffer { return true }
+      _bound_elem_buffer = h
+   }
+   _ny_glBindBuffer(target, h)
    true
 }
 
@@ -1008,7 +1039,10 @@ fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
    mut active_tex = tex_id
    if active_tex == -2 && _current_base_tex_id > 0 { active_tex = _current_base_tex_id }
    if active_tex > 0 {
-      _ny_glEnable(GL_TEXTURE_2D)
+      if !_texture_2d_enabled {
+         _ny_glEnable(GL_TEXTURE_2D)
+         _texture_2d_enabled = true
+      }
       ;; Default textured path is now a cheap albedo preview: no fixed-function
       ;; lighting or vertex-color multiplication.  Use NY_GL_LIT_TEXTURES=1 to
       ;; compare the legacy modulated path.
@@ -1017,7 +1051,10 @@ fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
       bind_texture(active_tex)
       _load_base_uv_texture_matrix(_current_base_uv_xf0, _current_base_uv_xf1)
    } else {
-      _call1("glDisable", GL_TEXTURE_2D)
+      if _texture_2d_enabled {
+         _call1("glDisable", GL_TEXTURE_2D)
+         _texture_2d_enabled = false
+      }
       _bound_tex = -999999
       _load_base_uv_texture_matrix(0, 0)
    }
@@ -1025,8 +1062,11 @@ fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
    ;; scene depth buffer completely.  Mesh draw paths pass depth_write=true;
    ;; otherwise GL draws indexed triangles in index order without updating depth,
    ;; so backfaces and darker shell triangles bleed over the albedo texture.
-   if depth_write { _call1u("glEnable", GL_DEPTH_TEST) }
-   else { _call1u("glDisable", GL_DEPTH_TEST) }
+   if depth_write != _depth_test_enabled {
+      if depth_write { _call1u("glEnable", GL_DEPTH_TEST) }
+      else { _call1u("glDisable", GL_DEPTH_TEST) }
+      _depth_test_enabled = depth_write
+   }
    _set_depth_mask(depth_write)
    true
 }

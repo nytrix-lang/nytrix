@@ -5248,6 +5248,11 @@ fn _app_handle_focus_out() {
 fn _app_handle_focus_in() {
    skip_mouse_frames = 3
    _suppress_mouse_deltas(_CURSOR_TRANSITION_SUPPRESS_NS)
+   ;; Re-sync F1 hotkey state: focus-out clears _hotkey_f1_down, so if the user
+   ;; is still holding F1 when focus returns we must mark it as down to prevent
+   ;; the next _app_poll_f1_hotkey from treating it as a fresh press and
+   ;; toggling the editor closed.
+   if key_down(win, uin.KEY_F1) { _hotkey_f1_down = true }
    camera.reset_motion(camthreed)
    _sync_cursor_state("focus in")
 }

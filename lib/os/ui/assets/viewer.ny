@@ -48,6 +48,8 @@ def str TERM_FONT_DEFAULT = "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
 def list TERM_FONT_CANDIDATES = [
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Regular.ttf",
+   "/usr/share/fonts/TTF/SymbolsNerdFontMono-Regular.ttf",
+   "/usr/share/fonts/OTF/SymbolsNerdFontMono-Regular.otf",
    "/usr/share/fonts/TTF/MesloLGSNerdFontMono-Regular.ttf",
    "/usr/share/fonts/OTF/FiraMonoNerdFontMono-Regular.otf",
    "etc/assets/fonts/jetbrains.ttf",

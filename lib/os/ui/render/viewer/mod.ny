@@ -473,12 +473,28 @@ fn terminal_font_map(any size, int font_filter=FONT_FILTER_NEAREST, int emoji_fi
 fn terminal_cell_size(any font_id, any font_size) list {
    def fs = float(font_size)
    if !font_id { return [max(1.0, fs * 0.6), max(1.0, max(fs, 20.0))] }
-   def probe = measure_text_fast(font_id, "M")
-   mut cw, ch = float(probe.get(0, 0.0)), float(probe.get(1, 0.0))
-   if cw <= 1.0 { cw = max(cw, float(measure_text_fast(font_id, "A").get(0, 0.0))) }
-   if cw <= 1.0 { cw = max(cw, float(measure_text_fast(font_id, "i").get(0, 0.0))) }
+   def f = _font_get(font_id)
+   def ascent = f ? float(f.get("ascent", fs * 0.80)) : (fs * 0.80)
+   def descent = f ? float(f.get("descent", 0.0 - fs * 0.20)) : (0.0 - fs * 0.20)
+   ;; Terminal grids use mono advance, but keep enough row height for real
+   ;; terminal glyph overhang.  Box drawing fonts rely on this to connect rows.
+   def zero = measure_text_fast(font_id, "0")
+   mut cw = float(zero.get(0, 0.0))
+   if cw <= 1.0 { cw = float(measure_text_fast(font_id, "M").get(0, 0.0)) }
    if cw <= 1.0 { cw = fs * 0.6 }
+   mut ch = (ascent - descent) * 1.18
+   if ch <= 1.0 { ch = float(measure_text_fast(font_id, "Mg").get(1, 0.0)) }
    if ch <= 1.0 { ch = fs }
+   def ch_min = fs * 1.05
+   def ch_max = fs * 1.45
+   if ch < ch_min { ch = ch_min }
+   if ch > ch_max { ch = ch_max }
+   def env_lh = common.env_trim("NY_TERM_LINE_HEIGHT")
+   if env_lh.len > 0 {
+      def scale = str.atof(env_lh)
+      if scale > 0.50 && scale < 3.00 { ch = fs * scale }
+      elif scale >= 4.0 && scale <= 256.0 { ch = scale }
+   }
    [max(1.0, float(int(cw + 0.5))), max(1.0, float(int(ch + 0.5)))]
 }
 

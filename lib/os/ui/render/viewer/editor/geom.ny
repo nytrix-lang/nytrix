@@ -13,8 +13,8 @@ use std.core.str as str
 use std.math (max, min)
 use std.os.ui.render as gfx
 
-def LINE_H = 22.0
-def STATUS_H = 30.0
+def LINE_H = 24.0
+def STATUS_H = 31.0
 def MIN_RAIL_W = 48.0
 def MIN_EDIT_W = 56.0
 def MIN_BODY_H = 36.0
@@ -78,11 +78,11 @@ fn focus_next(str current, bool project_on=true, bool dock_on=false) str {
 }
 
 fn visible_rows(f64 edit_h) int {
-   max(1, int((edit_h - 18.0) / LINE_H))
+   max(1, int((edit_h - 12.0) / LINE_H))
 }
 
 fn row_at(dict lay, f64 y, int scroll) int {
-   int((y - float(lay.get("edit_y", 0.0)) - 14.0) / LINE_H) + scroll
+   int((y - float(lay.get("edit_y", 0.0)) - 6.0) / LINE_H) + scroll
 }
 
 fn col_at(any font, str line, f64 x, f64 text_x) int {

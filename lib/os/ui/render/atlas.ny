@@ -38,14 +38,7 @@ fn _atlas_use_gl(any a=0) bool { _atlas_backend_name(a) == "gl" }
 
 fn _atlas_stable_tex_id(any candidate, any a=0) int {
    mut tex_id = int(candidate)
-   def stable = int(_atlas_use_gl(a) ? glr.last_created_texture_id() : vkr.last_created_texture_id())
-   if stable >= 0 && stable < 1024 { return stable }
-   def count = int(_atlas_use_gl(a) ? glr.texture_count() : vkr.texture_count())
-   if (tex_id < 0 || tex_id >= 1024) && count > 0 {
-      def latest = count - 1
-      if latest >= 0 && latest < 1024 { return latest }
-   }
-   tex_id
+   (tex_id >= 0 && tex_id < 1024) ? tex_id : -1
 }
 
 fn _atlas_create_texture(int w, int h, any pixels, int filter, any a=0) int {
@@ -150,6 +143,19 @@ fn atlas_ensure_texture(any a) int {
    tex_id
 }
 
+fn _atlas_uv_rect(int aw, int ah, int cx, int cy, int w, int h, int filter) list {
+   "Returns the exact atlas rect. atlas_add writes a 1px gutter, so do not
+   shrink UVs: pixel-center insets make glyphs look squeezed/stretched when
+   the quad is already pixel-aligned."
+   def fw, fh = float(aw), float(ah)
+   [
+      float(cx) / fw,
+      float(cy) / fh,
+      float(cx + w) / fw,
+      float(cy + h) / fh
+   ]
+}
+
 fn atlas_add(any a, any key, any w, any h, any pixels) any {
    "Packs an image and returns [u1,v1,u2,v2]. Correctly updates packing state."
    if !is_dict(a) || w <= 0 || h <= 0 { return 0 }
@@ -218,13 +224,7 @@ fn atlas_add(any a, any key, any w, any h, any pixels) any {
    store32(state_ptr, cx + w + 2, 0)
    store32(state_ptr, cy, 4)
    store32(state_ptr, mrh, 8)
-   def fw, fh = float(aw), float(ah)
-   def uv = [
-      float(cx) / fw,
-      float(cy) / fh,
-      float(cx + w) / fw,
-      float(cy + h) / fh
-   ]
+   def uv = _atlas_uv_rect(int(aw), int(ah), int(cx), int(cy), int(w), int(h), int(a.get("filter", -1)))
    items[key] = uv
    uv
 }
