@@ -6,7 +6,6 @@
 ;;
 ;; Current local bad signal on 2026-06-01:
 ;;   timeout after 5s while evaluating tokenize_auto.
-
 use std.core
 use std.math.parse.syntax as syn
 

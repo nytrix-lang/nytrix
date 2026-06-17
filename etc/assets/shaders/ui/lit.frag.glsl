@@ -395,9 +395,7 @@ void main(){
     float rawAlpha = tex.a * baseTint.a ;
     bool vertexCoverageMask = alphaMode == 2u && vertexColorMultiply && baseIndex < 1024u ;
     if(vertexCoverageMask){
-      float rgbCoverage = max(max(tex.r, tex.g), tex.b) ;
-      float coverage = max(tex.a, rgbCoverage) ;
-      rawAlpha = coverage * baseTint.a ;
+      rawAlpha = tex.a * baseTint.a ;
     }
     float baseAlpha = rawAlpha ;
     // No real alpha-to-coverage pipeline is wired yet, so emulate coverage with
@@ -428,9 +426,7 @@ void main(){
   float rawAlpha = tex.a * baseTint.a ;
   bool vertexCoverageMask = alphaMode == 2u && vertexColorMultiply && baseIndex < 1024u ;
   if(vertexCoverageMask){
-    float rgbCoverage = max(max(tex.r, tex.g), tex.b) ;
-    float coverage = max(tex.a, rgbCoverage) ;
-    rawAlpha = coverage * baseTint.a ;
+    rawAlpha = tex.a * baseTint.a ;
     texBaseLinear = baseTint.rgb ;
     baseTint = vec4(1.0) ;
   }

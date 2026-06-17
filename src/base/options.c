@@ -1051,6 +1051,11 @@ static void ny_usage_items(const ny_usage_entry_t *items) {
   fputc('\n', stderr);
 }
 
+static void ny_usage_example(int width, const char *cmd, const char *desc) {
+  fprintf(stderr, "  %s%-*s%s # %s\n", clr(NY_CLR_CYAN), width, cmd,
+          clr(NY_CLR_RESET), desc);
+}
+
 static void ny_options_usage_impl(const char *prog, bool show_env) {
   fprintf(
       stderr,
@@ -1326,34 +1331,22 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
         {NULL, NULL, NULL}});
   }
   ny_usage_section("EXAMPLES");
-  fprintf(stderr,
-          "  \033[1;36m%s etc/tests/rt/control.ny                       # compile and run "
-          "via JIT\033[0m\n",
-          prog);
-  fprintf(stderr,
-          "  \033[1;36m%s -O2 -run etc/tests/rt/control.ny               # build native "
-          "ELF and run\033[0m\n",
-          prog);
-  fprintf(stderr,
-          "  \033[1;36m%s -O2 -o app etc/tests/rt/control.ny              # emit native "
-          "executable\033[0m\n",
-          prog);
-  fprintf(stderr,
-          "  \033[1;36m%s -v -time -verify etc/tests/rt/control.ny        # debug "
-          "compilation\033[0m\n",
-          prog);
-  fprintf(stderr,
-          "  \033[1;36m%s                                      # interactive "
-          "REPL\033[0m\n",
-          prog);
-  fprintf(stderr,
-          "  \033[1;36m%s -c 'print(\"hello\")'                    # run "
-          "inline\033[0m\n",
-          prog);
-  fprintf(stderr,
-          "  \033[1;36m%s -ic 'a=1337'                            # run inline, then "
-          "REPL\033[0m\n",
-          prog);
+  char cmd[512];
+  const int example_width = 67;
+  snprintf(cmd, sizeof(cmd), "%s etc/tests/rt/control.ny", prog);
+  ny_usage_example(example_width, cmd, "compile and run via JIT");
+  snprintf(cmd, sizeof(cmd), "%s -O2 -run etc/tests/rt/control.ny", prog);
+  ny_usage_example(example_width, cmd, "build native ELF and run");
+  snprintf(cmd, sizeof(cmd), "%s -O2 -o app etc/tests/rt/control.ny", prog);
+  ny_usage_example(example_width, cmd, "emit native executable");
+  snprintf(cmd, sizeof(cmd), "%s -v -time -verify etc/tests/rt/control.ny", prog);
+  ny_usage_example(example_width, cmd, "debug compilation");
+  snprintf(cmd, sizeof(cmd), "%s", prog);
+  ny_usage_example(example_width, cmd, "interactive REPL");
+  snprintf(cmd, sizeof(cmd), "%s -c 'print(\"hello\")'", prog);
+  ny_usage_example(example_width, cmd, "run inline");
+  snprintf(cmd, sizeof(cmd), "%s -ic 'a=1337'", prog);
+  ny_usage_example(example_width, cmd, "run inline, then REPL");
 }
 
 void ny_options_usage(const char *prog) { ny_options_usage_impl(prog, false); }

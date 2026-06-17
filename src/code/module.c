@@ -551,11 +551,19 @@ static void ny_module_stmt_index_add_program(module_stmt_slot *slots,
 }
 
 static void ny_module_stmt_index_build(codegen_t *cg) {
-  if (!cg || cg->module_stmt_index)
+  if (!cg)
     return;
   size_t n = ny_count_top_modules(cg->prog);
   for (size_t p = 0; p < cg->extra_progs.len; ++p)
     n += ny_count_top_modules(cg->extra_progs.data[p]);
+  if (cg->module_stmt_index && cg->module_stmt_index_len == n)
+    return;
+  free(cg->module_stmt_index);
+  cg->module_stmt_index = NULL;
+  cg->module_stmt_index_cap = 0;
+  cg->module_stmt_index_len = 0;
+  free(cg->module_stmt_lookup_cache);
+  cg->module_stmt_lookup_cache = NULL;
   size_t cap = ny_module_stmt_index_cap_for(n + 1u);
   module_stmt_slot *slots = calloc(cap, sizeof(module_stmt_slot));
   if (!slots)
@@ -1417,8 +1425,7 @@ static const char *const k_std_root_use_modules[] = {
 static bool ny_bare_use_keeps_shallow_surface(const char *mod) {
   if (!mod)
     return false;
-  return strcmp(mod, "std") == 0 || strcmp(mod, "std.math") == 0 ||
-         strcmp(mod, "std.math.crypto") == 0;
+  return strcmp(mod, "std") == 0 || strcmp(mod, "std.math.crypto") == 0;
 }
 
 static void ny_process_bare_std_use_imports(codegen_t *cg, bool user_use) {

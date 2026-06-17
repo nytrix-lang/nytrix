@@ -34,7 +34,7 @@ fn dispatch(int mode) int {
 
 fn float_typed(number px) float { 2048.0 / px }
 
-fn float_inferred(number px){ 2048.0 / px }
+fn float_inferred(number px) { 2048.0 / px }
 
 fn alphabet() str { UPPER + LOWER + DIGITS + "+/" }
 

@@ -314,11 +314,12 @@ fn _load_glyph(dict info, int gi, int flags) bool {
    _ft_load_glyph(_raw_ptr(face), gi, flags) == 0
 }
 
-fn get_hmetrics(dict info, int gi) list {
-   "Returns horizontal glyph metrics for glyph index `gi`."
+fn get_hmetrics(dict info, int gi, int px_hint=0) list {
+   "Returns horizontal glyph metrics for glyph index `gi` at `px_hint` when provided."
    def face = info.get("face", 0)
    if !face { return [0, 0] }
-   def px = _px_val(info)
+   mut px = int(px_hint)
+   if px <= 0 { px = _px_val(info) }
    if px <= 0 { return [0, 0] }
    _set_size(info, px)
    if !_load_glyph(info, gi, 0) { return [0, 0] }
@@ -385,11 +386,11 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
    if px < 1 { px = 1 }
    if px > 1024 { px = 1024 }
    if !_set_size(info, px) { return 0 }
+   ;; Render at the requested pixel size with the face's native hinting.  Do
+   ;; not force auto-hinting here: at editor sizes it visibly distorts some
+   ;; mono glyph stems and makes text look stretched/jagged.
    mut load_flags = 4
-   if is_color_font { load_flags = load_flags | 0x100000 } elif !info.get("is_scalable", true) {
-   } else {
-      load_flags = load_flags | 32
-   }
+   if is_color_font { load_flags = load_flags | 0x100000 }
    def rc = _ft_load_glyph(_raw_ptr(face), gi, load_flags)
    if rc != 0 { return 0 }
    def face_p = _raw_ptr(face)

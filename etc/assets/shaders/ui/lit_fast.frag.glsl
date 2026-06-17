@@ -142,9 +142,7 @@ void main(){
   bool vertexTextureCoverage = (pc.baseTexIndex & 0x80000000u) != 0u && (vertexColorMultiply || vertexTextureIndex) && baseIndex < 1024u ;
   bool vertexCoverageMask = (alphaMode == 2u || vertexTextureCoverage) && vertexColorMultiply && baseIndex < 1024u ;
   if(vertexCoverageMask){
-    float rgbCoverage = max(max(tex.r, tex.g), tex.b) ;
-    float coverage = max(tex.a, rgbCoverage) ;
-    rawAlpha = coverage * baseTint.a ;
+    rawAlpha = tex.a * baseTint.a ;
   }
   float outAlpha = (alphaMode == 2u || vertexTextureCoverage) ? rawAlpha : 1.0 ;
   if(alphaMode == 1u){

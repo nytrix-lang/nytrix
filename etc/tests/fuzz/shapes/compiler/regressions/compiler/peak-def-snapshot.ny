@@ -11,7 +11,6 @@
 ;;
 ;; Current local bad output from peak on 2026-06-01:
 ;; 0
-
 mut int: acc = 1
 def int: row = acc
 acc -= row

@@ -21,7 +21,10 @@ fn draw_vertices(any p, int count, int tex_id=-1, bool use_material=false) bool 
    if _upload_dynamic_vertices(p, count) {
       _setup_arrays_vbo(0, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit)
       _ny_glDrawArrays(GL_TRIANGLES, 0, count)
-      _bind_buffer(GL_ARRAY_BUFFER, 0)
+      ;; Skip defensive unbind: _bind_buffer in state.ny caches the binding,
+      ;; so the next draw's _upload_dynamic_vertices will see the same buffer
+      ;; already bound and short-circuit. This eliminates 1 glBindBuffer per
+      ;; draw call on the hot terminal text path.
    } else {
       if !_draw_immediate_vertices(p, count, GL_TRIANGLES, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit) { return false }
    }
@@ -89,8 +92,9 @@ fn draw_vertices_indexed_raw(
    def idx_ty = index_type == 1 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT
    if idx_buf { _ny_glDrawElementsOffset(_draw_mode(is_lines, is_points), idx_count, idx_ty, int(idx_offset)) }
    else { _ny_glDrawElements(_draw_mode(is_lines, is_points), idx_count, idx_ty, idx_offset) }
-   _bind_buffer(GL_ARRAY_BUFFER, 0)
-   if idx_buf { _bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0) }
+   ;; Skip defensive unbinds of GL_ARRAY_BUFFER / GL_ELEMENT_ARRAY_BUFFER:
+   ;; _bind_buffer in state.ny now caches bindings, so leaving the dynamic VBO
+   ;; bound lets the next draw's _upload_dynamic_vertices short-circuit.
    _record_draw(idx_count, false, true)
 }
 

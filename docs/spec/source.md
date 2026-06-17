@@ -60,6 +60,7 @@ strict ownership checks through `--borrow-check` and `--ownership-strict`.
 ```ny
 use std
 use module.path
+use module.path, other.module
 use module.path as alias
 use std module.path as alias
 use module.path (name, other)
@@ -71,8 +72,9 @@ use module.path *
 ```
 
 `use module.path` imports normal exported names and keeps the leaf name
-available as a module alias. `use module.path *` is accepted as compatibility broad
-import spelling.
+available as a module alias. Comma-separated module entries are shorthand for
+multiple `use` statements. `use module.path *` is accepted as compatibility
+broad import spelling.
 
 `use path:profile` imports the module's core export group plus the named export
 profile. `use std module.path as alias` normalizes to `use std.module.path as

@@ -3419,13 +3419,42 @@ static char **ny_collect_import_names(const char *src, const char *entry_path,
       t = lexer_next(&lx);
     } else if (t.kind == NY_T_USE && (depth == 0 || module_depth_count > 0)) {
       t = lexer_next(&lx);
-      token_t next_tok;
-      char *name = parse_use_name(&lx, &t, &next_tok);
-      if (name) {
-        append_use(&uses, &len, &cap, name);
-        free(name);
+      int use_line = t.line;
+      for (;;) {
+        token_t next_tok;
+        char *name = parse_use_name(&lx, &t, &next_tok);
+        if (name) {
+          append_use(&uses, &len, &cap, name);
+          free(name);
+        }
+        t = next_tok;
+        int paren_depth = 0;
+        while (t.kind != NY_T_EOF) {
+          if (paren_depth == 0 && t.line != use_line)
+            break;
+          if (paren_depth == 0 && t.kind == NY_T_COMMA) {
+            t = lexer_next(&lx);
+            break;
+          }
+          if (paren_depth == 0 &&
+              (t.kind == NY_T_USE || t.kind == NY_T_MODULE ||
+               t.kind == NY_T_FN || t.kind == NY_T_STRUCT ||
+               t.kind == NY_T_ENUM || t.kind == NY_T_EXTERN ||
+               t.kind == NY_T_COMPTIME || t.kind == NY_T_DEF ||
+               t.kind == NY_T_MUT || t.kind == NY_T_DEL ||
+               t.kind == NY_T_RBRACE)) {
+            break;
+          }
+          if (t.kind == NY_T_LPAREN)
+            paren_depth++;
+          else if (t.kind == NY_T_RPAREN && paren_depth > 0)
+            paren_depth--;
+          t = lexer_next(&lx);
+        }
+        if (t.kind == NY_T_EOF ||
+            (t.kind != NY_T_IDENT && t.kind != NY_T_STRING))
+          break;
       }
-      t = next_tok;
     } else {
       t = lexer_next(&lx);
     }

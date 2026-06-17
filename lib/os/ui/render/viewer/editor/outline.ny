@@ -7,7 +7,7 @@ use std.core
 use std.core.str as str
 use std.math (min)
 
-def ROW_H = 21.0
+def ROW_H = 28.0
 
 fn _ident_after(str s, int start) str {
    mut i = start
@@ -57,13 +57,13 @@ fn symbols(list lines, str filename="", int max_lines=0) list {
 }
 
 fn row_y(f64 panel_y, int idx) f64 {
-   panel_y + 28.0 + float(idx) * ROW_H
+   panel_y + 36.0 + float(idx) * ROW_H
 }
 
 fn row_at(f64 panel_x, f64 panel_y, f64 panel_w, f64 panel_h, f64 x, f64 y, int count) int {
    if x < panel_x || x > panel_x + panel_w { return -1 }
-   if y < panel_y + 28.0 || y > panel_y + panel_h { return -1 }
-   def rel = y - panel_y - 28.0
+   if y < panel_y + 36.0 || y > panel_y + panel_h { return -1 }
+   def rel = y - panel_y - 36.0
    def idx = int(rel / ROW_H)
    if idx < 0 || idx >= count { return -1 }
    def in_row = rel - float(idx) * ROW_H
@@ -73,6 +73,6 @@ fn row_at(f64 panel_x, f64 panel_y, f64 panel_w, f64 panel_h, f64 x, f64 y, int 
 #main {
    def syms = symbols(["module a", "fn main() int {", "struct Thing {", "#main {"])
    assert(syms.len == 4 && syms.get(1).get("name") == "main", "outline symbols")
-   assert(row_at(0.0, 0.0, 100.0, 100.0, 5.0, 29.0, 2) == 0, "outline row hit")
+   assert(row_at(0.0, 0.0, 100.0, 100.0, 5.0, 37.0, 2) == 0, "outline row hit")
    print("✓ viewer editor outline test passed")
 }

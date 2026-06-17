@@ -53,4 +53,5 @@ fn main() {
    }
    assert(str_seen == ["t iter is 0", "e iter is 1", "s iter is 2", "t iter is 3"], "REPL indexed string for")
 }
+
 main()
