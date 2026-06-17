@@ -1278,9 +1278,7 @@ static stmt_t *parse_extern(parser_t *p) {
   return parse_extern_fn_decl(p, tok, false);
 }
 
-static stmt_t *parse_use(parser_t *p) {
-  token_t tok = p->cur;
-  parser_expect(p, NY_T_USE, "'use'", NULL);
+static stmt_t *parse_use_one(parser_t *p, token_t tok) {
   stmt_t *s = stmt_new(p->arena, NY_S_USE, tok);
   s->as.use.is_local = false;
   s->as.use.import_all = false;
@@ -1379,8 +1377,29 @@ static stmt_t *parse_use(parser_t *p) {
                    "module alias cannot be combined with an import list", NULL);
     }
   }
-  parser_match(p, NY_T_SEMI);
   return s;
+}
+
+static stmt_t *parse_use(parser_t *p) {
+  token_t tok = p->cur;
+  parser_expect(p, NY_T_USE, "'use'", NULL);
+  stmt_t *first = parse_use_one(p, tok);
+  if (!first)
+    return NULL;
+  if (!parser_match(p, NY_T_COMMA)) {
+    parser_match(p, NY_T_SEMI);
+    return first;
+  }
+  stmt_t *block = stmt_new_transparent_block(p, tok);
+  vec_push_arena(p->arena, &block->as.block.body, first);
+  do {
+    stmt_t *next = parse_use_one(p, p->cur);
+    if (!next)
+      break;
+    vec_push_arena(p->arena, &block->as.block.body, next);
+  } while (parser_match(p, NY_T_COMMA));
+  parser_match(p, NY_T_SEMI);
+  return block;
 }
 
 static void parser_export_meta_push_unique(parser_t *p,

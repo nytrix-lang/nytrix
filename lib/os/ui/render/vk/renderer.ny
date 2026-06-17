@@ -167,6 +167,11 @@ mut _last_persp_valid = false
 mut _last_persp_fovy, _last_persp_aspect, _last_persp_near, _last_persp_far = 0.0, 0.0, 0.0, 0.0
 mut _vk_markers_enabled, _ident_mat = false, 0
 mut _logged_suboptimal_acquire, _logged_suboptimal_present = false, false
+;; One-shot per frame: when _vertex_limit_hit trips we used to silently drop
+;; the rest of the frame's text with no diagnostic. Track whether we have
+;; already logged the truncation for this frame so we surface the issue once
+;; instead of spamming on every subsequent _check_flush call.
+mut _logged_vertex_limit_hit = false
 mut _logged_waiting_acquire, _suboptimal_recreate_attempted = false, false
 mut _verbose_last_report_frame, _deep_last_report_frame = -1, -1
 mut _old_swapchain_hint, _backend_is_wayland_cached, _backend_is_win32_cached = 0, -1, -1
@@ -1952,6 +1957,7 @@ fn begin_frame() bool {
    _vertex_offset = 0
    _last_flush_offset = 0
    _vertex_limit_hit = false
+   _logged_vertex_limit_hit = false
    _current_frame_vertex_offset = _current_frame * _vertex_capacity
    if _vertex_map { _local_vertex_map = _vertex_map + _current_frame_vertex_offset }
    else { _local_vertex_map = 0 }
@@ -3115,7 +3121,18 @@ fn _flush() any {
 }
 
 fn _check_flush(int bytes) bool {
-   if _vertex_limit_hit { return false }
+   if _vertex_limit_hit {
+      ;; Surface the truncation once per frame so a single oversized text run
+      ;; (e.g. paste of 174K+ chars, which exceeds the 64MB vertex buffer)
+      ;; does not blank out the rest of the frame's text with no diagnostic.
+      if !_logged_vertex_limit_hit {
+         _logged_vertex_limit_hit = true
+         if vk_state._debug_gfx_enabled {
+            ui_profile.print_text("[gfx:vulkan] vertex buffer full — text runs truncated for the rest of this frame (bytes=" + to_str(bytes) + ")")
+         }
+      }
+      return false
+   }
    if _vertex_offset + bytes > _vertex_capacity {
       _flush_reason = 5
       _flush()
@@ -3226,7 +3243,8 @@ fn _end_frame_internal(bool present) bool {
    if _capture_request {
       _capture_request = false
       _capture_ready = false
-      if wait_for_fences(_device, 1, _ptr_fence, 1, 0xFFFFFFFFFFFFFFFF) == 0 {
+      def capture_wait_res = wait_for_fences(_device, 1, _ptr_fence, 1, 5000000000)
+      if capture_wait_res == 0 {
          def w, h = _swapchain_extent_w, _swapchain_extent_h
          def size = w * h * 4
          if _staging_map && w > 0 && h > 0 && _staging_capacity >= size {
@@ -3270,6 +3288,9 @@ fn _end_frame_internal(bool present) bool {
             }
          }
       }
+      elif _debug_gfx_enabled || common.env_truthy("NY_VK_CAPTURE_TRACE") {
+         ui_profile.print_text("[gfx:vulkan] capture fence wait failed code=" + to_str(capture_wait_res))
+      }
    }
    if present && has_surface && _swapchain != 0 {
       def sc = _swapchain
@@ -3312,6 +3333,19 @@ fn _end_frame_internal(bool present) bool {
             ui_profile.print_text("[gfx:vulkan] present suboptimal continuing=true")
             _logged_suboptimal_present = true
          }
+      } elif pr != 0 {
+         ;; Surface lost / device lost / full-screen exclusive lost: previously
+         ;; these error codes were silently ignored and the frame was treated
+         ;; as successful, leaving a dead swapchain that the next begin_frame
+         ;; would fail on without any link back to the present error. Surface
+         ;; the failure and schedule a recreate so the next frame has a chance
+         ;; to recover.
+         if vk_state._debug_gfx_enabled {
+            ui_profile.print_text("[gfx:vulkan] present failed code=" + to_str(pr) + " — scheduling recreate")
+         }
+         _frame_open = false
+         _schedule_swapchain_recreate(true)
+         return false
       }
       if backend_is_win32 {
          _pump_host_messages_if_needed()
@@ -3469,6 +3503,7 @@ fn _end_frame_internal(bool present) bool {
 fn clear(any r, any g, any b, any a) any {
    "Commands the GPU to clear the current color attachment."
    if !_frame_open { return 0 }
+   _flush()
    if _clear_ca == 0 { _clear_ca = _renderer_alloc(24) _clear_rect = _renderer_alloc(24) }
    def cb = load64(_cmd_bufs_slab, _current_frame * 8)
    store32(_clear_ca, VK_IMAGE_ASPECT_COLOR_BIT, 0)

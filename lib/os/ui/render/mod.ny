@@ -1179,13 +1179,25 @@ fn _render_release_scratch_buffers() bool {
 
 fn _font_line_height(any info, f64 scale, f64 size) f64 {
    def vm = lib_ttf.get_vmetrics(info)
-   def line_h = vm.get(2, 0) * scale
+   def raw_ascent = float(vm.get(0, 0))
+   def raw_descent = float(vm.get(1, 0))
+   def raw_height = float(vm.get(2, 0))
+   def ascent = raw_ascent * scale
+   def descent = raw_descent * scale
+   def raw_gap = raw_height - (raw_ascent - raw_descent)
+   def gap = max(0.0, raw_gap * scale)
    def size_f = float(size)
-   mut lh = line_h
+   ;; get_vmetrics returns ascent/descent/height.  Do not add height directly as
+   ;; a line gap; that double-counts the line box and inflates editor/terminal
+   ;; rows.  Derive the real gap from height - (ascent - descent).
+   mut lh = (ascent - descent) + gap
    if lh < size_f * 0.95 { lh = size_f }
    def sane_max = size_f * 1.60
-   if lh > sane_max { lh = size_f * 1.25 }
-   lh
+   if lh > sane_max { lh = sane_max }
+   ;; Keep row math and glyph placement on an integer pixel line box.  Fractional
+   ;; line heights make the editor drift a little every row and eventually break
+   ;; line-number, highlight, and scrollbar alignment.
+   floor(lh + 0.999)
 }
 
 fn _fallback_path_priority(any path) int {
@@ -1198,6 +1210,11 @@ fn _fallback_path_priority(any path) int {
    || lib_str.find(lp, "twemoji") >= 0{
       return 0
    }
+   ;; Terminal UI symbols should not fall back through proportional/CJK faces
+   ;; before patched mono symbol fonts.  Prefer Nerd/Powerline/Symbola first so
+   ;; U+2500 boxes, U+2580 blocks and U+2800 braille keep mono metrics.
+   if lib_str.find(lp, "nerd") >= 0 || lib_str.find(lp, "powerline") >= 0 || lib_str.find(lp, "symbol") >= 0 || lib_str.find(lp, "seguisym") >= 0 { return 1 }
+   if lib_str.find(lp, "dejavu") >= 0 || lib_str.find(lp, "liberation") >= 0 || lib_str.find(lp, "arial unicode") >= 0 { return 2 }
    if lib_str.find(lp, "cjk") >= 0
    || lib_str.find(lp, "hiragino") >= 0
    || lib_str.find(lp, "meiryo") >= 0
@@ -1208,13 +1225,8 @@ fn _fallback_path_priority(any path) int {
    || lib_str.find(lp, "notosanssc") >= 0
    || lib_str.find(lp, "notosanstc") >= 0
    || lib_str.find(lp, "wenquanyi") >= 0{
-      return 1
+      return 3
    }
-   if lib_str.find(lp, "dejavu") >= 0 || lib_str.find(lp, "liberation") >= 0 || lib_str.find(lp, "arial unicode") >= 0 ||
-   lib_str.find(lp, "seguisym") >= 0 || lib_str.find(lp, "symbola") >= 0{
-      return 2
-   }
-   if lib_str.find(lp, "nerd") >= 0 || lib_str.find(lp, "powerline") >= 0 { return 3 }
    4
 }
 
@@ -1296,6 +1308,10 @@ fn _get_fallback_paths() list {
       "/usr/share/fonts/liberation2/LiberationMono-Regular.ttf",
       "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
       "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Regular.ttf",
+      "/usr/share/fonts/TTF/SymbolsNerdFontMono-Regular.ttf",
+      "/usr/share/fonts/TTF/SymbolsNerdFont-Regular.ttf",
+      "/usr/share/fonts/OTF/SymbolsNerdFontMono-Regular.otf",
+      "/usr/share/fonts/OTF/SymbolsNerdFont-Regular.otf",
       "/usr/share/fonts/TTF/MesloLGSNerdFontMono-Regular.ttf",
       "/usr/share/fonts/OTF/FiraMonoNerdFontMono-Regular.otf",
       "C:/Windows/Fonts/seguiemj.ttf",
@@ -1776,14 +1792,7 @@ fn _glyph_center_yoff(dict font_obj, f64 bh) f64 {
 
 fn _glyph_center_align_needed(int cp, int is_color) bool {
    if is_color { return true }
-   (cp == 0x2022)
-   || (cp == 0x2026)
-   || (cp >= 0x2190 && cp <= 0x27BF)
-   || (cp >= 0x2B00 && cp <= 0x2BFF)
-   || (cp >= 0x1F000 && cp <= 0x1FAFF)
-   || (cp >= 0xE000 && cp <= 0xF8FF)
-   || (cp >= 0xF0000 && cp <= 0xFFFFD)
-   || (cp >= 0x100000 && cp <= 0x10FFFD)
+   cp == 0x2022 || cp == 0x2026
 }
 
 fn _font_bitmap_is_color_like(any font_obj, any bm) bool {
@@ -1800,13 +1809,12 @@ fn _font_bitmap_is_color_like(any font_obj, any bm) bool {
 }
 
 fn _font_raster_oversample(dict font_obj) f64 {
-   def info = font_obj.get("info", 0)
-   if info && (!info.get("is_scalable", true) || info.get("is_color", false)) { return 1.0 }
-   if !font_obj.get("is_scalable", true) || font_obj.get("is_color", false) { return 1.0 }
-   if int(font_obj.get("filter", FONT_FILTER_LINEAR)) != FONT_FILTER_LINEAR { return 1.0 }
-   def sz = float(font_obj.get("size", 16.0))
-   if sz <= 0.0 || sz > 36.0 { return 1.0 }
-   2.0
+   ;; Editor text must be enlarged by loading/rasterizing the face at the
+   ;; desired pixel size, not by drawing a downscaled oversized bitmap.  The old
+   ;; 2x atlas path made glyph edges soft and could make stems look stretched on
+   ;; non-integer DPI/framebuffer paths.  Keep one source pixel equal to one
+   ;; screen pixel; DPI/font size changes create a new cached font+atlas.
+   1.0
 }
 
 fn _font_bitmap_atlas_ref(any owner_font, any bm) any {
@@ -1856,10 +1864,10 @@ fn _font_bitmap_uv(any atlas_ref, any bm, int cp) any {
 }
 
 fn _font_store_fast_bitmap_metrics(any off, any font_obj, any owner_font, any glyph, any bm, any uv, int tex_id, int is_color, int cp) bool {
-   mut xoff, yoff = float(bm.get("xoff", 0)), float(bm.get("yoff", 0))
-   mut bw, bh = float(bm.get("width", 0)), float(bm.get("height", 0))
+   mut xoff, yoff = float(bm.get("draw_xoff", bm.get("xoff", 0))), float(bm.get("draw_yoff", bm.get("yoff", 0)))
+   mut bw, bh = float(bm.get("draw_width", bm.get("width", 0))), float(bm.get("draw_height", bm.get("height", 0)))
    def raster_os = (is_color == 0) ? _font_raster_oversample(owner_font) : 1.0
-   if raster_os > 1.0 {
+   if raster_os > 1.0 && !bm.contains("draw_width") {
       xoff, yoff = xoff / raster_os, yoff / raster_os
       bw, bh = bw / raster_os, bh / raster_os
    }
@@ -1905,7 +1913,7 @@ fn _font_sync_fast_glyph(int font_id, int cp) bool {
       store64_h(root_ptr, page_ptr, page_idx * 8)
    }
    mut glyph = _font_resolve_glyph(font_id, cp)
-   if !glyph { return false }
+   if !glyph || _dict_bool(glyph, "_provisional", false) { return false }
    def off = ptr_add(page_ptr, (cp & 255) * 48)
    def owner_id = int(glyph.get("_font_id", font_id))
    mut owner_font = _font_get(owner_id)
@@ -2063,7 +2071,7 @@ fn _font_prepare_bitmap_for_atlas(
    if !is_dict(a) { return [out_bm, font_obj] }
    mut atlas_pixels = bdata
    mut atlas_pixels_tmp = 0
-   if !is_color && lib_atlas.atlas_get_backend() == "gl" {
+   if !is_color {
       def total_px = bw * bh
       atlas_pixels_tmp = malloc(total_px * 4)
       if atlas_pixels_tmp {
@@ -2071,6 +2079,10 @@ fn _font_prepare_bitmap_for_atlas(
          while pi < total_px {
             def off = pi * 4
             def a8 = load8(bdata, off + 3) & 255
+            ;; Store monochrome glyphs as straight-alpha white masks.  The text
+            ;; shaders multiply the sampled mask by the vertex color; putting
+            ;; coverage into RGB makes normal UI text disappear/darken and breaks
+            ;; color limits.  Bitmap width/height still come from the real glyph.
             store8(atlas_pixels_tmp, 255, off)
             store8(atlas_pixels_tmp, 255, off + 1)
             store8(atlas_pixels_tmp, 255, off + 2)
@@ -2131,7 +2143,7 @@ fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true) any {
       def fallback_hit = fallback.get(0, 0)
       font_obj, glyphs = fallback.get(1, font_obj), fallback.get(2, glyphs)
       if fallback_hit { return fallback_hit }
-      if allow_default { gi = lib_ttf.get_glyph_index(info, 63) _used_q_fallback = _skipped_fallback_build && (cp != 63) }
+      if allow_default { gi = lib_ttf.get_glyph_index(info, 63) _used_q_fallback = (cp != 63) }
    }
    if gi == 0 {
       def empty = {"gi": 0, "bitmap": 0, "advance": float(font_size) * 0.5}
@@ -2141,8 +2153,12 @@ fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true) any {
       return empty
    }
    def raster_os = _font_raster_oversample(font_obj)
-   mut bm, hm = lib_ttf.get_glyph_bitmap(info, scale * raster_os, scale * raster_os, gi), lib_ttf.get_hmetrics(info, gi)
-   if raster_os > 1.0 { hm = [float(hm.get(0, 0.0)) / raster_os, float(hm.get(1, 0.0)) / raster_os] }
+   mut bm = lib_ttf.get_glyph_bitmap(info, scale * raster_os, scale * raster_os, gi)
+   ;; Measure advances at the logical font size.  Do not inherit the face size
+   ;; left by bitmap rasterization or divide a raster-sized advance afterward;
+   ;; that mixes bitmap pixels with monospace cell metrics and causes stretched
+   ;; columns after font-size changes.
+   mut hm = lib_ttf.get_hmetrics(info, gi, font_size)
    mut glyph = {"gi": gi}
    if bm {
       def bm_state = _font_prepare_bitmap_for_atlas(font_id, font_obj, bm, cp, raster_os, atlas_size, atlas_filter)
@@ -2182,7 +2198,11 @@ fn _draw_glyph_bitmap_runs(
 )  bool {
    "Internal helper to draw a glyph bitmap on the active backend."
    if !data || bw <= 0 || bh <= 0 || a <= 0.0 { return false }
-   if _backend == BACKEND_GL {
+   if _backend == BACKEND_GL || _backend == BACKEND_VK {
+      ;; Vulkan safe text also comes through this path when the atlas renderer is
+      ;; disabled.  It must still submit real glyph coverage to the GPU instead
+      ;; of falling through to the software framebuffer helper, which is not the
+      ;; active editor target and made text disappear.
       mut drew_gl = false
       mut yy_gl = 0
       while yy_gl < bh {
@@ -2196,6 +2216,18 @@ fn _draw_glyph_bitmap_runs(
                if is_color && bpp >= 4 {
                   sr_gl, sg_gl = float(load8(data, px_off_gl + 0) & 255) / 255.0, float(load8(data, px_off_gl + 1) & 255) / 255.0
                   sb_gl = float(load8(data, px_off_gl + 2) & 255) / 255.0
+               } elif alpha8_gl >= 250 {
+                  def run_x0_gl = xx_gl
+                  xx_gl += 1
+                  while xx_gl < bw {
+                     def run_alpha_gl = load8(data, row_off_gl + xx_gl * bpp + (bpp >= 4 ? 3 : 0)) & 255
+                     if run_alpha_gl < 250 { break }
+                     xx_gl += 1
+                  }
+                  draw_rect_fast(float(int(ox + run_x0_gl)), float(int(oy + yy_gl)), float(xx_gl - run_x0_gl), 1.0,
+                  render_shared.pack_rgba_u32(sr_gl, sg_gl, sb_gl, a))
+                  drew_gl = true
+                  continue
                }
                draw_rect_fast(float(int(ox + xx_gl)), float(int(oy + yy_gl)), 1.0, 1.0,
                render_shared.pack_rgba_u32(sr_gl, sg_gl, sb_gl, a * (float(alpha8_gl) / 255.0)))
@@ -2248,6 +2280,9 @@ fn _draw_glyph_bitmap_scaled_runs(
    bool is_color=false
 ) bool {
    if !data || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0 || a <= 0.0 { return false }
+   if dst_w == src_w && dst_h == src_h {
+      return _draw_glyph_bitmap_runs(data, src_w, src_h, ox, oy, r, g, b, a, bpp, is_color)
+   }
    if _backend == BACKEND_GL && lib_glr.capabilities().get("software_upload", false) {
       return lib_glr.draw_glyph_bitmap_scaled(data, src_w, src_h, dst_w, dst_h, ox, oy, r, g, b, a, bpp, is_color)
    }
@@ -2341,7 +2376,9 @@ fn _ttf_apply_control_cp(
          def space_g = _font_resolve_glyph(font_id, 32)
          space_adv = space_g.get("advance", 8.0)
       }
-      return [true, pen_x + space_adv * 4.0, pen_y, -1, space_adv]
+      def tab_w = max(1.0, space_adv * 4.0)
+      def rel_x = max(0.0, pen_x - base_x)
+      return [true, base_x + float(int(rel_x / tab_w) + 1) * tab_w, pen_y, -1, space_adv]
    }
    [false, pen_x, pen_y, prev_gi, space_adv]
 }
@@ -2399,7 +2436,10 @@ fn _ttf_draw_bitmap_glyph(
    def yoff = float(bm.get("draw_yoff", bm.get("yoff", 0)))
    def bpp = int(bm.get("bpp", 4))
    def bdata = bm.get("data", 0)
-   def gl_soft_text = _backend == BACKEND_GL && bdata && lib_glr.capabilities().get("software_upload", false)
+   def gl_soft_text = _backend == BACKEND_GL && bdata && (
+      lib_glr.capabilities().get("software_upload", false) ||
+      !ui_profile.env_truthy_cached("NY_GL_TEXTURE_TEXT")
+   )
    mut drew = false
    if bw <= 0.0 || bh <= 0.0 { return [g_adv, drew] }
    def vk_cpu_text = _font_vk_safe_cpu_text()
@@ -3751,6 +3791,7 @@ fn end_mode_3d() bool {
       _reset_material_state()
       lib_vkr.set_unlit(true)
    } elif _backend == BACKEND_GL {
+      _reset_material_state()
       lib_glr.set_ortho(0.0, _last_win_w, _last_win_h, 0.0, -1.0, 1.0)
       lib_glr.set_model_matrix(_scratch_ident)
       lib_glr.set_unlit(true)
@@ -6700,7 +6741,9 @@ fn measure_text(int font, any text) list {
       if cp == 13 { prev_gi = -1 continue }
       if cp == 9 {
          def sp_tab = lib_vkr._vkr_glyph_get_off(glyphs_ptr, 32)
-         pen_x += (sp_tab && load32(sp_tab, 40) != 0) ? load32_f32(sp_tab, 0) * 4.0 : line_h * 2.0
+         def tab_cell = (sp_tab && load32(sp_tab, 40) != 0) ? load32_f32(sp_tab, 0) : line_h * 0.5
+         def tab_w = max(1.0, tab_cell * 4.0)
+         pen_x = float(int(pen_x / tab_w) + 1) * tab_w
          prev_gi = -1
          continue
       }
@@ -6747,7 +6790,7 @@ fn measure_text_fast(int font, any text) list {
 
 fn terminal_fast_text_supported() bool {
    "Returns true when the active backend exposes the packed terminal glyph path."
-   if _backend == BACKEND_GL { return true }
+   if _backend == BACKEND_GL { return _font_can_use_fast_gl_text() }
    if _backend == BACKEND_VK { return _font_can_use_fast_vk_text() }
    false
 }
@@ -6759,7 +6802,7 @@ fn font_fast_glyph_present(any glyphs_ptr, int cp) bool {
       if !_font_can_use_fast_vk_text() { return false }
       return bool(lib_vkr._vkr_glyph_present(glyphs_ptr, cp))
    }
-   if _backend == BACKEND_GL {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
       def off = _gl_fast_glyph_off(glyphs_ptr, cp)
       if !off || load32(off, render_shared.GLYPH_PRESENT) == 0 { return false }
       def bw = load32_f32(off, render_shared.GLYPH_BW)
@@ -6778,7 +6821,7 @@ fn font_fast_glyph_texture(any glyphs_ptr, int cp) int {
       def off = lib_vkr._vkr_glyph_get_off(glyphs_ptr, cp)
       return off ? int(load32(off, render_shared.GLYPH_TEX)) : -1
    }
-   if _backend == BACKEND_GL {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
       def off = _gl_fast_glyph_off(glyphs_ptr, cp)
       return off ? int(load32(off, render_shared.GLYPH_TEX)) : -1
    }
@@ -6818,6 +6861,36 @@ fn _gl_draw_text_glyph_fast(any glyphs_ptr, f64 x, f64 baseline_y, int cp, int c
    true
 }
 
+fn _gl_draw_terminal_glyph_fast(any glyphs_ptr, f64 cell_x, f64 baseline_y, int cp, int color_u32) bool {
+   if _backend != BACKEND_GL || !glyphs_ptr { return false }
+   mut g_off = _gl_fast_glyph_off(glyphs_ptr, cp)
+   if !g_off || load32(g_off, render_shared.GLYPH_PRESENT) == 0 { return false }
+   mut bw = load32_f32(g_off, render_shared.GLYPH_BW)
+   mut bh = load32_f32(g_off, render_shared.GLYPH_BH)
+   if bw <= 0.0 || bh <= 0.0 { return false }
+   def tex_id = int(load32(g_off, render_shared.GLYPH_TEX))
+   if tex_id <= 0 { return false }
+   mut gx = floor(cell_x + load32_f32(g_off, render_shared.GLYPH_XOFF) + 0.5)
+   mut gy = floor(baseline_y - load32_f32(g_off, render_shared.GLYPH_YOFF) + 0.5)
+   def verts = _shape_scratch_alloc(VERTEX_STRIDE * 6)
+   if !verts { return false }
+   def col = (load32(g_off, render_shared.GLYPH_IS_COLOR) != 0) ? 0xffffffff : color_u32
+   _gl_store_text_quad(
+      verts,
+      gx,
+      gy,
+      bw,
+      bh,
+      load32_f32(g_off, render_shared.GLYPH_U1),
+      load32_f32(g_off, render_shared.GLYPH_V1),
+      load32_f32(g_off, render_shared.GLYPH_U2),
+      load32_f32(g_off, render_shared.GLYPH_V2),
+      col
+   )
+   _gl_fast_text_flush(verts, 1, tex_id)
+   true
+}
+
 fn draw_text_glyph_fast(any glyphs_ptr, f64 x, f64 y, int cp, any color, int tex_id=-1) bool {
    "Draws one glyph through the active backend fast path when available."
    def packed = _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true)
@@ -6830,7 +6903,7 @@ fn draw_text_glyph_fast(any glyphs_ptr, f64 x, f64 y, int cp, any color, int tex
       lib_vkr.__vkr_draw_text_glyph(glyphs_ptr, 0, x, y, cp, packed, tex_id)
       return true
    }
-   if _backend == BACKEND_GL && glyphs_ptr {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() && glyphs_ptr {
       return _gl_draw_text_glyph_fast(glyphs_ptr, x, y, cp, packed)
    }
    false
@@ -6838,30 +6911,67 @@ fn draw_text_glyph_fast(any glyphs_ptr, f64 x, f64 y, int cp, any color, int tex
 
 fn _gl_draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 cw, any glyphs_ptr, int skip_mask, int reverse_mask) bool {
    if _backend != BACKEND_GL || !line_ptr || !glyphs_ptr || co <= 0 { return false }
-   mut c = 0
+   ;; Batched fast path: allocate one scratch buffer for the whole line and
+   ;; accumulate quads, flushing only when the glyph texture changes (rare —
+   ;; most lines share one atlas page) or at end-of-line. The previous code
+   ;; called _gl_draw_terminal_glyph_fast per cell, which issued one GL
+   ;; draw_vertices call per visible cell — up to ~1920 draw calls for an
+   ;; 80x24 terminal. This rewrite collapses that to 1-N draw calls.
+   def cap = co * VERTEX_STRIDE * 6
+   def verts = _shape_scratch_alloc(cap)
+   if !verts { return false }
+   mut glyphs = 0
+   mut cur_tex = -1
+   mut flush_off = 0
    mut drew = false
+   mut c = 0
    while c < co {
       def off = c * 16
       def cp = load32(line_ptr, off)
       if cp > 32 {
          def md = load32(line_ptr, off + 12)
          if (md & skip_mask) == 0 {
-            mut fg = load32(line_ptr, off + 4) | 0xff000000
-            if (md & reverse_mask) != 0 {
-               fg = load32(line_ptr, off + 8) | 0xff000000
-            }
-            if _gl_draw_text_glyph_fast(
-               glyphs_ptr,
-               floor(px + float(c) * cw + 0.5),
-               baseline_y,
-               cp,
-               fg
-            ){
-               drew = true
+            def g_off = _gl_fast_glyph_off(glyphs_ptr, cp)
+            if g_off && load32(g_off, render_shared.GLYPH_PRESENT) != 0 {
+               def bw = load32_f32(g_off, render_shared.GLYPH_BW)
+               def bh = load32_f32(g_off, render_shared.GLYPH_BH)
+               if bw > 0.0 && bh > 0.0 {
+                  def tex_id = int(load32(g_off, render_shared.GLYPH_TEX))
+                  if tex_id > 0 {
+                     ;; Flush pending batch when texture changes so each draw
+                     ;; call uses a single atlas texture.
+                     if cur_tex != -1 && cur_tex != tex_id && glyphs > 0 {
+                        if _gl_fast_text_flush(verts + flush_off, glyphs, cur_tex) { drew = true }
+                        flush_off += glyphs * VERTEX_STRIDE * 6
+                        glyphs = 0
+                     }
+                     mut fg = load32(line_ptr, off + 4) | 0xff000000
+                     if (md & reverse_mask) != 0 {
+                        fg = load32(line_ptr, off + 8) | 0xff000000
+                     }
+                     def col = (load32(g_off, render_shared.GLYPH_IS_COLOR) != 0) ? 0xffffffff : fg
+                     def gx = floor(px + float(c) * cw + load32_f32(g_off, render_shared.GLYPH_XOFF) + 0.5)
+                     def gy = floor(baseline_y - load32_f32(g_off, render_shared.GLYPH_YOFF) + 0.5)
+                     _gl_store_text_quad(
+                        verts + flush_off + glyphs * VERTEX_STRIDE * 6,
+                        gx, gy, bw, bh,
+                        load32_f32(g_off, render_shared.GLYPH_U1),
+                        load32_f32(g_off, render_shared.GLYPH_V1),
+                        load32_f32(g_off, render_shared.GLYPH_U2),
+                        load32_f32(g_off, render_shared.GLYPH_V2),
+                        col
+                     )
+                     glyphs += 1
+                     cur_tex = tex_id
+                  }
+               }
             }
          }
       }
       c += 1
+   }
+   if glyphs > 0 && cur_tex > 0 {
+      if _gl_fast_text_flush(verts + flush_off, glyphs, cur_tex) { drew = true }
    }
    drew
 }
@@ -6874,7 +6984,7 @@ fn draw_terminal_line_fast_ptr(any line_ptr, int cols, f64 x, f64 baseline_y, f6
       lib_vk_font.draw_terminal_line_ptr(line_ptr, cols, x, baseline_y, cell_w, glyphs_ptr, skip_mask, reverse_mask)
       return true
    }
-   if _backend == BACKEND_GL {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
       return _gl_draw_terminal_line_ptr(line_ptr, cols, x, baseline_y, cell_w, glyphs_ptr, skip_mask, reverse_mask)
    }
    false
@@ -6984,14 +7094,15 @@ fn draw_lines_2d_fast_ptr(any lines, int count, int stride=24) int {
 
 @jit
 fn _font_can_use_fast_vk_text() bool {
-   ;; Vulkan terminal/editor text must use the atlas path by default.  The
-   ;; temporary CPU/rect fallback was correct-but-far-too-slow for TUIs like
-   ;; btop because every glyph became many dynamic rectangles.
+   ;; Vulkan editor/terminal text must use the atlas path by default.  The
+   ;; CPU/rect fallback is useful for diagnostics, but full editor frames can
+   ;; generate too many per-pixel quads and make text disappear or drop frames.
    ;;
-   ;; Keep an escape hatch for driver/debug cases:
-   ;;   NY_VK_SAFE_TEXT=1      force slow CPU/rect fallback
+   ;; Debug toggles:
+   ;;   NY_VK_SAFE_TEXT=1      force slow CPU/rect glyph fallback
    ;;   NY_VK_FAST_TEXT=0      disable atlas fast text
    ;;   NY_VK_FAST_TEXT=1      force atlas fast text
+   ;;   NY_VK_TEXTURE_TEXT=1   force texture-glyph debug path
    if _backend != BACKEND_VK { return false }
    if ui_profile.env_truthy_cached("NY_VK_SAFE_TEXT") { return false }
    if ui_profile.env_present_cached("NY_VK_FAST_TEXT") { return ui_profile.env_enabled_cached("NY_VK_FAST_TEXT") }
@@ -6999,10 +7110,18 @@ fn _font_can_use_fast_vk_text() bool {
 }
 
 @jit
+fn _font_can_use_fast_gl_text() bool {
+   ;; The GL atlas text path is kept as an opt-in debug path.  On the current
+   ;; fixed-function/VBO backend it samples a single atlas strip for some drivers,
+   ;; producing vertical barcode glyphs.  Prefer the real TTF path by default.
+   _backend == BACKEND_GL && ui_profile.env_truthy_cached("NY_GL_FAST_TEXT")
+}
+
+@jit
 fn _font_vk_safe_cpu_text() bool {
    ;; Slow safety path for debugging only.  It rasterizes real TTF glyph pixels
-   ;; into rects, so it is readable but too expensive for btop/htop/fullscreen
-   ;; TUIs.  Do not make this the default.
+   ;; into rects, so it remains useful when diagnosing atlas/driver issues,
+   ;; but it is too expensive to be the default editor renderer.
    _backend == BACKEND_VK &&
    !_font_can_use_fast_vk_text() &&
    !ui_profile.env_truthy_cached("NY_VK_TEXTURE_TEXT")
@@ -7040,6 +7159,11 @@ fn _gl_fast_text_flush(any verts, int glyphs, int tex_id) bool {
          " uv1=(" + to_str(load32_f32(verts + VERTEX_STRIDE * 2, 12)) + "," + to_str(load32_f32(verts + VERTEX_STRIDE * 2, 16)) + ")" +
       " color=0x" + lib_str.to_hex(load32(verts, 20)))
    }
+   ;; Fast text bypasses draw_rect_tex_uv(), so it must reset the GL UI material
+   ;; itself.  Otherwise a previous textured/rotated draw can leave the texture
+   ;; matrix or alternate UV offset active, which samples a thin atlas strip and
+   ;; stretches it through the glyph quad.
+   lib_glr.set_ui_material(-1, 0, 12)
    lib_glr.draw_vertices(verts, glyphs * 6, tex_id)
 }
 
@@ -7246,7 +7370,7 @@ fn draw_text_batch(int font, list lines, f64 x, f64 y, f64 spacing, int color_u3
    "Draws multiple lines of text with minimal interpreter overhead."
    def font_id = _resolve_text_font(font)
    def n_lines = is_list(lines) ? lines.len : 0
-   if _backend == BACKEND_GL {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
       _font_sync_and_ensure_gpu(font_id)
       def f = _font_get(font_id)
       def glyphs_ptr = f ? f.get("fast_glyphs", 0) : 0
@@ -7298,7 +7422,7 @@ fn draw_text_runs(int font, list runs, any color=WHITE) bool {
    def font_id = _resolve_text_font(font)
    def n_runs = is_list(runs) ? runs.len : 0
    if n_runs <= 0 { return false }
-   if _backend == BACKEND_GL {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
       _prime_text_runs_list(font_id, runs)
       _font_sync_and_ensure_gpu(font_id)
       def f = _font_get(font_id)
@@ -7340,7 +7464,7 @@ fn draw_text_runs_flat(int font, list runs, any color=WHITE) bool {
    def font_id = _resolve_text_font(font)
    def n = is_list(runs) ? runs.len : 0
    if n < 3 { return false }
-   if _backend == BACKEND_GL {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
       _prime_text_runs_flat_list(font_id, runs)
       _font_sync_and_ensure_gpu(font_id)
       def f = _font_get(font_id)
@@ -7374,7 +7498,7 @@ fn draw_text_runs_flat_colors(int font, list runs) bool {
    def font_id = _resolve_text_font(font)
    def n = is_list(runs) ? runs.len : 0
    if n < 4 { return false }
-   if _backend == BACKEND_GL {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
       _prime_text_runs_flat_color_list(font_id, runs)
       _font_sync_and_ensure_gpu(font_id)
       def f = _font_get(font_id)
@@ -7475,7 +7599,7 @@ fn _draw_text_impl(int font, any text, f64 x, f64 y, any color=WHITE) bool {
       _draw_text_builtin(text, x, y, packed)
       return true
    }
-   if _backend == BACKEND_GL && font_id > 0 {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() && font_id > 0 {
       def f = _font_get(font_id)
       def glyphs_ptr = f ? f.get("fast_glyphs", 0) : 0
       if glyphs_ptr {

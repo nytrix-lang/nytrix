@@ -1129,7 +1129,9 @@ fn Builder(int initial_cap=64) list {
    "Creates a new StringBuilder with initial capacity."
    mut cap = initial_cap
    if !is_int(cap) || cap < 8 { cap = 64 }
-   [malloc(cap + 1), 0, cap]
+   def buf = malloc(cap + 1)
+   if buf { store8(buf, 0, 0) }
+   [buf, 0, cap]
 }
 
 @returns_owned
@@ -1138,10 +1140,22 @@ fn builder_append(any b, any s) any {
    "Appends string `s` to the builder `b`."
    if !is_list(b) || b.len < 3 { return b }
    mut buf = b[0]
-   mut l = b[1]
-   mut cap = b[2]
-   if !is_str(s) { s = to_str(s) }
+   mut l = int(b[1])
+   mut cap = int(b[2])
+   if l < 0 { l = 0 }
+   if cap < 8 { cap = 64 }
+   if !buf {
+      buf = malloc(cap + 1)
+      if !buf { return b }
+      store8(buf, 0, 0)
+      b[0] = buf
+      b[2] = cap
+   }
+   if is_ptr(s) { s = cstr_to_str(s) }
+   elif !is_str(s) { s = to_str(s) }
+   if !is_str(s) { return b }
    def slen = s.len
+   if slen <= 0 { return b }
    if l + slen >= cap {
       mut ncap = cap * 2
       if ncap < l + slen { ncap = l + slen + 128 }
@@ -1153,7 +1167,9 @@ fn builder_append(any b, any s) any {
       b[2] = cap
    }
    memcpy(buf + l, s, slen)
-   b[1] = l + slen
+   l += slen
+   store8(buf, 0, l)
+   b[1] = l
    b
 }
 
@@ -1163,8 +1179,17 @@ fn builder_append_byte(any b, int c) any {
    "Appends one raw byte to the builder `b`."
    if !is_list(b) || b.len < 3 { return b }
    mut buf = b[0]
-   mut l = b[1]
-   mut cap = b[2]
+   mut l = int(b[1])
+   mut cap = int(b[2])
+   if l < 0 { l = 0 }
+   if cap < 8 { cap = 64 }
+   if !buf {
+      buf = malloc(cap + 1)
+      if !buf { return b }
+      store8(buf, 0, 0)
+      b[0] = buf
+      b[2] = cap
+   }
    if l + 1 >= cap {
       mut ncap = cap * 2
       if ncap < l + 129 { ncap = l + 129 }
@@ -1176,7 +1201,9 @@ fn builder_append_byte(any b, int c) any {
       b[2] = cap
    }
    store8(buf, c & 255, l)
-   b[1] = l + 1
+   l += 1
+   store8(buf, 0, l)
+   b[1] = l
    b
 }
 
@@ -1184,12 +1211,13 @@ fn builder_append_byte(any b, int c) any {
 fn builder_to_str(any b) str {
    "Returns the content of builder `b` as a Nytrix string."
    if !is_list(b) || b.len < 3 { return "" }
-   def l = b[1]
-   if l == 0 { return "" }
+   def buf = b[0]
+   mut l = int(b[1])
+   if !buf || l <= 0 { return "" }
    mut out = malloc(l + 1)
    if !out { return "" }
    init_str(out, l)
-   memcpy(out, b[0], l)
+   memcpy(out, buf, l)
    store8(out, 0, l)
    out
 }

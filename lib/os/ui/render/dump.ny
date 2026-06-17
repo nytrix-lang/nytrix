@@ -95,7 +95,7 @@ fn _ny_trace_mode() str {
 
 fn _ny_trace_deep() bool {
    def m = _ny_trace_mode()
-   common.env_truthy("NY_TRACE_DEEP") || m == "2" || m == "deep" || m == "full" || m == "verbose" || m == "spam"
+   common.env_truthy("NY_TRACE_DEEP") || m == "2" || m == "deep" || m == "full" || m == "spam"
 }
 
 fn _ny_trace_spam() bool {
@@ -240,11 +240,16 @@ fn apply_verbose_argv(int start_index=1) bool {
    if level <= 0 { return false }
    if _verbose_argv_mode >= level { return true }
    _verbose_argv_mode = level
-   ;; Keep -v and -vv bounded.  Only --trace-spam/-vvv maps to NY_TRACE=spam;
-   ;; NY_TRACE=deep enables frame/stage breadcrumbs through _ny_trace_value(),
-   ;; which is too noisy for normal diagnostics.
-   set_str("NY_TRACE", level >= 3 ? "spam" : "verbose")
-   set_bool("NY_TRACE", true)
+   ;; Keep -v bounded: do not turn on generic NY_TRACE, because it can fan out
+   ;; into Vulkan/profile frame spam through shared trace defaults.  -vv keeps
+   ;; the cheap NY_TRACE=1 compatibility mode; --trace-spam/-vvv is explicit.
+   if level >= 2 {
+      set_str("NY_TRACE", level >= 3 ? "spam" : "1")
+      set_bool("NY_TRACE", true)
+   } else {
+      set_str("NY_TRACE", "0")
+      set_bool("NY_TRACE", false)
+   }
    ;; Useful-by-default diagnostics: startup/backend choice, input events,
    ;; renderer failures, font loading, and Vulkan initialization timing.
    ;; Keep hot per-frame/per-stage/per-glyph logs out of -v and -vv; those
@@ -260,7 +265,9 @@ fn apply_verbose_argv(int start_index=1) bool {
       set_bools([
             "NY_GFX_FRAME_TRACE", "NY_VK_BEGIN_TRACE", "NY_VK_STAGE_TRACE",
             "NY_GL_TEXT_TRACE", "NY_VK_DESCRIPTOR_TRACE", "NY_UI_TEX_TRACE",
-            "NY_TEX_TRACE", "NY_UI_GUI_DUMP_TRACE", "NY_TRACE_SPAM"
+            "NY_TEX_TRACE", "NY_UI_GUI_DUMP_TRACE", "NY_TRACE_SPAM",
+            "NY_UI_PROFILE", "NY_UI_PROFILE_TRACE", "NY_VK_PROFILE_TRACE",
+            "NY_VK_PROFILE_DUMP"
       ], false)
    }
    if level >= 2 {

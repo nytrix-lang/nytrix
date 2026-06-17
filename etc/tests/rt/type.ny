@@ -23,7 +23,6 @@ fn test_lowercase_type_first_local_bindings() {
    def poly_ring right_ring = PolynomialRing("ZZ", "x")
    def poly_elem left_poly = Poly(left_ring, [1, 2], "x")
    def poly_elem right_poly = Poly(right_ring, [3, 4], "x")
-
    assert(is_poly_ring(left_ring), "lowercase type-first poly_ring lhs")
    assert(is_poly_ring(right_ring), "lowercase type-first poly_ring rhs")
    assert(is_poly_elem(left_poly), "lowercase type-first poly_elem lhs")

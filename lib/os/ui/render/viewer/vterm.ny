@@ -42,22 +42,61 @@ fn set_viewport(any x, any y) any {
 
 def IMAGE_PLACEHOLDER_CHAR = 0x10EEEE
 def IMAGE_PLACEHOLDER_CHAR_OLD = 0xEEEE
+def TERMINAL_PRINTABLE_ASCII = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+mut _terminal_prime_text_cache = ""
+
+fn _terminal_prime_range(str text, int first, int last) str {
+   mut cp = first
+   mut out = text
+   while cp <= last {
+      out = out + chr(cp)
+      cp += 1
+   }
+   out
+}
+
+fn _terminal_prime_text() str {
+   "Builds the terminal atlas warmup string once."
+   if _terminal_prime_text_cache.len > 0 { return _terminal_prime_text_cache }
+   mut text = TERMINAL_PRINTABLE_ASCII + "°±×÷·•…‹›←↑→↓↔↕▲△▴▵▶▷▸▹▼▽▾▿◀◁◂◃◆◇●○◦✓✔✗✘"
+   text = _terminal_prime_range(text, 0x2500, 0x257f) ;; box drawing
+   text = _terminal_prime_range(text, 0x2580, 0x259f) ;; block elements
+   text = _terminal_prime_range(text, 0x2800, 0x28ff) ;; braille graphs
+   _terminal_prime_text_cache = text
+   _terminal_prime_text_cache
+}
 
 fn _vterm_cell_metrics(int font_id) list {
    def f_obj = _font_get(font_id)
    def f_size = (f_obj != 0) ? float(f_obj.get("size", 16.0)) : 16.0
    def ascent  = (f_obj != 0) ? float(f_obj.get("ascent", f_size * 0.80)) : (f_size * 0.80)
    def descent = (f_obj != 0) ? float(f_obj.get("descent", 0.0 - f_size * 0.20)) : (0.0 - f_size * 0.20)
-   def span = ascent - descent
-   def cs = measure_text(font_id, "M")
-   mut cw = float(cs.get(0, 0.0))
+   ;; Terminal cells use mono advance, but keep a terminal-style row box.
+   ;; Box/block glyphs in patched mono fonts intentionally overhang the nominal
+   ;; ascent/descent ink box so adjacent cells connect.  Do not shrink the row to
+   ;; raw ascent/descent and do not fit these glyphs per cell.
+   def zero = measure_text(font_id, "0")
+   mut cw = float(zero.get(0, 0.0))
+   if cw <= 0.1 {
+      def m = measure_text(font_id, "M")
+      cw = float(m.get(0, 0.0))
+   }
    if cw <= 0.1 { cw = max(7.0, floor(f_size * 0.55)) }
-   mut ch = span * 1.18
+   mut ch = (ascent - descent) * 1.18
    def ch_min = f_size * 1.05
-   def ch_max = f_size * 1.45
+   ;; Match _font_line_height's ceiling so patched mono fonts whose line box
+   ;; (ascent-descent) exceeds ~1.45x size are not clipped and made to overflow
+   ;; their rows.  Box/block/braille glyphs must connect across adjacent cells.
+   def ch_max = f_size * 1.90
    if ch < ch_min { ch = ch_min }
    if ch > ch_max { ch = ch_max }
-   [float(cw), float(ch)]
+   def env_lh = common.env_trim("NY_TERM_LINE_HEIGHT")
+   if env_lh.len > 0 {
+      def scale = str.atof(env_lh)
+      if scale > 0.50 && scale < 3.00 { ch = f_size * scale }
+      elif scale >= 4.0 && scale <= 256.0 { ch = scale }
+   }
+   [float(floor(cw + 0.5)), float(floor(ch + 0.5))]
 }
 
 fn _vt_clip_set(dict vt, str text) dict {
@@ -93,35 +132,31 @@ fn _vt_selection_text(dict vt, list history, int cs_row, int cs_col, int ce_row,
    if e_row < s_row { return "" }
    if s_col < 0 { s_col = 0 } elif s_col >= co { s_col = co - 1 }
    if e_col < 0 { e_col = 0 } elif e_col >= co { e_col = co - 1 }
-   mut full_b = Builder(max(128, (e_row - s_row + 1) * max(8, co / 2)))
+   mut full_text = ""
    mut cur_y = s_row
    while cur_y <= e_row {
       def row_x1, row_x2 = (cur_y == s_row) ? s_col : 0, (cur_y == e_row) ? e_col : (co - 1)
       if row_x2 >= row_x1 {
          def line_ptr = (cur_y < hist_len) ? history.get(cur_y) : ptr_add(g, (cur_y - hist_len) * co * 16)
-         mut row_b = Builder(max(32, row_x2 - row_x1 + 8))
+         mut row_txt = ""
          mut cur_x = row_x1
          while cur_x <= row_x2 {
             def cp = load32(line_ptr, cur_x * 16)
             def m  = load32(line_ptr, cur_x * 16 + 12)
             if (m & ATTR_WDUMMY) == 0 {
-               if (m & ATTR_IMAGE) != 0 { row_b = builder_append(row_b, _cp_to_str(IMAGE_PLACEHOLDER_CHAR, ascii_cache)) } elif cp > 32 { row_b = builder_append(row_b, _cp_to_str(cp, ascii_cache)) } elif cp == 32 { row_b = builder_append(row_b, " ") }
+               if (m & ATTR_IMAGE) != 0 { row_txt = row_txt + _cp_to_str(IMAGE_PLACEHOLDER_CHAR, ascii_cache) } elif cp > 32 { row_txt = row_txt + _cp_to_str(cp, ascii_cache) } elif cp == 32 { row_txt = row_txt + " " }
             }
             cur_x += 1
          }
-         mut row_txt = builder_to_str(row_b)
-         builder_free(row_b)
          mut ti = row_txt.len - 1
          while ti >= 0 && load8(row_txt, ti) == 32 { ti -= 1 }
          if ti < row_txt.len - 1 { row_txt = str.str_slice(row_txt, 0, ti + 1) }
-         full_b = builder_append(full_b, row_txt)
+         full_text = full_text + row_txt
       }
-      if cur_y < e_row { full_b = builder_append(full_b, "\n") }
+      if cur_y < e_row { full_text = full_text + "\n" }
       cur_y += 1
    }
-   def out = builder_to_str(full_b)
-   builder_free(full_b)
-   out
+   full_text
 }
 
 def ATTR_BOLD      = 1
@@ -424,6 +459,9 @@ def OFF_PENDING_CHAR   = 224
 def OFF_PENDING_MOD    = 228
 def OFF_PENDING_ACTION = 232
 def OFF_PENDING_T      = 236
+def OFF_LAST_REL_T     = 240
+def OFF_LAST_REL_CODE  = 248
+def OFF_LAST_REL_MOD   = 252
 def OFF_LAST_KEY_MOD   = 188
 def OFF_KBD_FLAGS      = 192
 def OFF_BACKGROUND_ERASE = 196
@@ -540,7 +578,7 @@ fn new(int cols, int rows, dict fonts, int bg_color=0, int text_color=0) any {
    if text_color != 0 { dfg = text_color }
    mut cache = malloc(1024)
    if !cache { return 0 }
-   mut ci = 0 while ci < 128 { store64(cache, str.chr(ci), ci * 8) ci += 1 }
+   mut ci = 0 while ci < 128 { store64(cache, chr(ci), ci * 8) ci += 1 }
    vt = vt.set("ascii_cache", cache)
    def palette = malloc(256 * 4)
    if !palette { return _vterm_new_fail(cache=cache) }
@@ -560,7 +598,8 @@ fn new(int cols, int rows, dict fonts, int bg_color=0, int text_color=0) any {
          }
       }
    }
-   dbg = _opaque_abgr(dbg)
+   ;; Keep the background alpha from NY_TERM_BG/theme colors so cells can blend
+   ;; over the editor instead of forcing accidental black/opaque rectangles.
    dfg = _opaque_abgr(dfg)
    vt = vt.set("def_bg", dbg).set("def_fg", dfg)
    def bg_l = _abgr_luma(dbg)
@@ -601,7 +640,7 @@ fn new(int cols, int rows, dict fonts, int bg_color=0, int text_color=0) any {
    store8(st, 1, OFF_CURSOR_VISIBLE) store8(st, 0, OFF_APPKEYS)
    store8(st, 0, OFF_KBD_PROTO)
    store32(st, 0, OFF_KBD_FLAGS)
-   store8(st, _env_bool_cached("NY_TERM_BCE", false) ? 1 : 0, OFF_BACKGROUND_ERASE)
+   store8(st, _env_bool_cached("NY_TERM_BCE", true) ? 1 : 0, OFF_BACKGROUND_ERASE)
    store8(st, 0, OFF_INSERT)
    store8(st, int(vt.get("cursor_style_default", 2)), OFF_CURSOR_STYLE_S)
    vt = vt
@@ -1016,12 +1055,20 @@ fn idle_sleep_ms(dict vt, int now_ticks=-1) int {
 }
 
 fn update(dict vt) dict {
-   "Reads new data from the PTY and updates the terminal grid and state."
+   "Reads new PTY data and updates the terminal grid/state."
    mut nvt = vt
-   if int(nvt.get("last_update_bytes", 0)) != 0 { nvt = nvt.set("last_update_bytes", 0) }
-   def pending_st = nvt.get("state")
-   if pending_st { nvt = _vterm_flush_pending_printable(nvt, pending_st) }
-   def sh = nvt.get("shared") def lk = load64(sh, 0)
+   if int(nvt.get("last_update_bytes", 0)) != 0 {
+      nvt = nvt.set("last_update_bytes", 0)
+   }
+   def st = nvt.get("state", 0)
+   if !st { return nvt }
+   if load8(st, OFF_PENDING_PRINT) != 0 {
+      nvt = _vterm_flush_pending_printable(nvt, st)
+   }
+   def sh = nvt.get("shared", 0)
+   if !sh { return nvt }
+   def lk = load64(sh, 0)
+   if !lk { return nvt }
    mutex_lock(lk)
    def end = load64(sh, 16)
    def read_off = load64(sh, 48)
@@ -1035,17 +1082,29 @@ fn update(dict vt) dict {
       return nvt
    }
    def bp = load64(sh, 8)
-   def st = nvt.get("state")
-   def max_drain = int(nvt.get("parse_bytes", 262144))
+   if !bp {
+      store64(sh, 0, 16)
+      store64(sh, 0, 48)
+      mutex_unlock(lk)
+      return nvt
+   }
+   def max_drain = max(4096, int(nvt.get("parse_bytes", 262144)))
    def sz = (avail > max_drain) ? max_drain : avail
-   nvt = nvt.set("last_update_bytes", sz)
+   if sz <= 0 {
+      mutex_unlock(lk)
+      return nvt
+   }
    mut t_buf = nvt.get("drain_buf", 0)
-   mut t_cap = nvt.get("drain_cap", 0)
+   mut t_cap = int(nvt.get("drain_cap", 0))
    if t_cap < sz {
-      def new_buf = t_buf ? realloc(t_buf, sz) : malloc(sz)
-      if !new_buf { mutex_unlock(lk) return nvt }
+      def new_cap = max(sz, t_cap * 2)
+      def new_buf = t_buf ? realloc(t_buf, new_cap) : malloc(new_cap)
+      if !new_buf {
+         mutex_unlock(lk)
+         return nvt
+      }
       t_buf = new_buf
-      t_cap = sz
+      t_cap = new_cap
       nvt = nvt.set("drain_buf", t_buf)
       nvt = nvt.set("drain_cap", t_cap)
    }
@@ -1058,12 +1117,22 @@ fn update(dict vt) dict {
       store64(sh, next_off, 48)
    }
    mutex_unlock(lk)
-   if sz > 0 { _vterm_clear_selection_for_output(st) }
+   nvt = nvt.set("last_update_bytes", sz)
+   if sz > 0 {
+      _vterm_clear_selection_for_output(st)
+   }
    mut u_len = load32(st, OFF_UTF8_LEN)
    mut p = 0
-   mut co, ro = nvt.get("cols"), nvt.get("rows")
-   mut g, pal = nvt.get("grid"), nvt.get("palette")
-   mut dfg, dbg = nvt.get("def_fg"), nvt.get("def_bg")
+   mut co = int(nvt.get("cols", 0))
+   mut ro = int(nvt.get("rows", 0))
+   mut g = nvt.get("grid", 0)
+   mut pal = nvt.get("palette", 0)
+   mut dfg = int(nvt.get("def_fg", SYS_TEXT))
+   mut dbg = int(nvt.get("def_bg", SYS_BASE))
+   if co <= 0 || ro <= 0 || !g {
+      store32(st, 0, OFF_UTF8_LEN)
+      return nvt
+   }
    _vterm_clamp_cursor(nvt, st, co, ro)
    while p < sz {
       def b = load8(t_buf, p) & 255
@@ -1077,33 +1146,34 @@ fn update(dict vt) dict {
             elif (b0 & 0xF0) == 0xE0 { exp = 3 }
             elif (b0 & 0xF8) == 0xF0 { exp = 4 }
             if exp == u_len {
-               def old_vt = nvt
                nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, str._utf8_decode_at(st + OFF_UTF8_BUF, 0, u_len))
                u_len = 0
-               if (nvt != old_vt) && nvt.get("grid") != g {
-                  co, ro = nvt.get("cols"), nvt.get("rows")
-                  g, pal = nvt.get("grid"), nvt.get("palette")
-                  dfg, dbg = nvt.get("def_fg"), nvt.get("def_bg")
-               }
+               co = int(nvt.get("cols", co))
+               ro = int(nvt.get("rows", ro))
+               g = nvt.get("grid", g)
+               pal = nvt.get("palette", pal)
+               dfg = int(nvt.get("def_fg", dfg))
+               dbg = int(nvt.get("def_bg", dbg))
             } elif u_len >= 4 || exp == 0 {
-               def old_vt = nvt
                nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, 63)
                u_len = 0
-               if (nvt != old_vt) && nvt.get("grid") != g {
-                  co, ro = nvt.get("cols"), nvt.get("rows")
-                  g, pal = nvt.get("grid"), nvt.get("palette")
-                  dfg, dbg = nvt.get("def_fg"), nvt.get("def_bg")
-               }
+               co = int(nvt.get("cols", co))
+               ro = int(nvt.get("rows", ro))
+               g = nvt.get("grid", g)
+               pal = nvt.get("palette", pal)
+               dfg = int(nvt.get("def_fg", dfg))
+               dbg = int(nvt.get("def_bg", dbg))
             }
          } else {
-            def old_vt = nvt
             nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, 63)
-            u_len = 0 p -= 1
-            if (nvt != old_vt) && nvt.get("grid") != g {
-               co, ro = nvt.get("cols"), nvt.get("rows")
-               g, pal = nvt.get("grid"), nvt.get("palette")
-               dfg, dbg = nvt.get("def_fg"), nvt.get("def_bg")
-            }
+            u_len = 0
+            p -= 1
+            co = int(nvt.get("cols", co))
+            ro = int(nvt.get("rows", ro))
+            g = nvt.get("grid", g)
+            pal = nvt.get("palette", pal)
+            dfg = int(nvt.get("def_fg", dfg))
+            dbg = int(nvt.get("def_bg", dbg))
          }
       } else {
          if load32(st, OFF_ESC_STATE) == 0 && load8(st, OFF_INSERT) == 0 && b >= 32 && b < 127 {
@@ -1114,33 +1184,40 @@ fn update(dict vt) dict {
                q += 1
             }
             nvt = _tput_ascii_run_fast(nvt, st, co, ro, g, dfg, dbg, t_buf, p, q - p)
+            co = int(nvt.get("cols", co))
+            ro = int(nvt.get("rows", ro))
+            g = nvt.get("grid", g)
+            pal = nvt.get("palette", pal)
+            dfg = int(nvt.get("def_fg", dfg))
+            dbg = int(nvt.get("def_bg", dbg))
             p = q
             continue
          }
          if (b & 0x80) == 0 {
-            def old_vt = nvt
             nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, b)
-            if (nvt != old_vt) && nvt.get("grid") != g {
-               co, ro = nvt.get("cols"), nvt.get("rows")
-               g, pal = nvt.get("grid"), nvt.get("palette")
-               dfg, dbg = nvt.get("def_fg"), nvt.get("def_bg")
-            }
+            co = int(nvt.get("cols", co))
+            ro = int(nvt.get("rows", ro))
+            g = nvt.get("grid", g)
+            pal = nvt.get("palette", pal)
+            dfg = int(nvt.get("def_fg", dfg))
+            dbg = int(nvt.get("def_bg", dbg))
          } elif (b & 0xE0) == 0xC0 || (b & 0xF0) == 0xE0 || (b & 0xF8) == 0xF0 {
             store8(st + OFF_UTF8_BUF, b, 0)
             u_len = 1
          } else {
-            def old_vt = nvt
             nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, 63)
-            if (nvt != old_vt) && nvt.get("grid") != g {
-               co, ro = nvt.get("cols"), nvt.get("rows")
-               g, pal = nvt.get("grid"), nvt.get("palette")
-               dfg, dbg = nvt.get("def_fg"), nvt.get("def_bg")
-            }
+            co = int(nvt.get("cols", co))
+            ro = int(nvt.get("rows", ro))
+            g = nvt.get("grid", g)
+            pal = nvt.get("palette", pal)
+            dfg = int(nvt.get("def_fg", dfg))
+            dbg = int(nvt.get("def_bg", dbg))
          }
       }
       p += 1
    }
    store32(st, u_len, OFF_UTF8_LEN)
+   _vterm_clamp_cursor(nvt, st, co, ro)
    nvt
 }
 
@@ -1482,9 +1559,23 @@ fn _scroll_process_scaled(f64 dy_raw, f64 default_scale, str scale_env_key, f64 
 fn _scroll_process(f64 dy_raw) f64 { _scroll_process_scaled(dy_raw, 3.0, "NY_TERM_SCROLL_SCALE", 30.0, "NY_TERM_SCROLL_MAX") }
 
 fn _scroll_process_app(f64 dy_raw) f64 {
-   "App/TUI scrolling: keep wheel semantics near 1 input step per detent.
-   This avoids oversending mouse-wheel or arrow events under Wayland/Xwayland."
-   _scroll_process_scaled(dy_raw, 1.0, "NY_TERM_APP_SCROLL_SCALE", 8.0, "NY_TERM_APP_SCROLL_MAX")
+   "App/TUI scrolling: map one wheel notch to several app wheel ticks."
+   _scroll_process_scaled(dy_raw, 4.0, "NY_TERM_APP_SCROLL_SCALE", 24.0, "NY_TERM_APP_SCROLL_MAX")
+}
+
+fn _scroll_app_cells(any st, f64 dy_raw) int {
+   def dy = _scroll_process_app(dy_raw)
+   mut acc = load32_f32(st, OFF_SCROLL_ACC) + dy
+   ;; A real terminal sends multiple wheel button events per detent. Keeping
+   ;; this at 1 makes btop/htop/nvim feel like they ignore the wheel. Keep it
+   ;; bounded, but default to a useful burst.
+   def max_step = common.env_int_clamped("NY_TERM_APP_SCROLL_REPEAT_MAX", 8, 1, 48)
+   if acc > float(max_step) { acc = float(max_step) }
+   elif acc < (0.0 - float(max_step)) { acc = 0.0 - float(max_step) }
+   mut cells = int(acc)
+   acc -= float(cells)
+   store32_f32(st, acc, OFF_SCROLL_ACC)
+   cells
 }
 
 fn _vterm_handle_mouse_scroll(dict vt, any st, int ro, int hist_len, f64 cw, f64 ch, any da) dict {
@@ -1497,35 +1588,35 @@ fn _vterm_handle_mouse_scroll(dict vt, any st, int ro, int hist_len, f64 cw, f64
       _vterm_reset_click_sequence(st)
    }
    def dy_raw = float(da.get("dy", 0.0))
+   if abs(dy_raw) < 0.0001 { return vt }
    def mode = load32(st, OFF_MODE)
+   ;; Mouse-reporting apps: send bounded SGR wheel events.
+   ;; Do not let one wheel/touchpad burst become dozens of TUI redraws.
    if (mode & MODE_MOUSE) != 0 && (da.get("mod", 0) & MOD_SHIFT) == 0 {
-      def dy = _scroll_process_app(dy_raw)
+      def dcells = _scroll_app_cells(st, dy_raw)
+      if dcells == 0 { return vt }
       def lmx, lmy = load32_f32(st, OFF_LAST_MX), load32_f32(st, OFF_LAST_MY)
       def mcell = _mouse_cell_clamped({"x": lmx, "y": lmy}, cw, ch, int(vt.get("cols")), ro)
       def mcol = mcell.get(0)
       def mrow = mcell.get(1)
-      def acc = load32_f32(st, OFF_SCROLL_ACC)
-      mut nacc = acc + dy
-      mut dcells = int(nacc)
-      nacc -= float(dcells)
-      store32_f32(st, nacc, OFF_SCROLL_ACC)
       def btn = (dcells > 0) ? 64 : 65
       _send_input_repeat(vt, "\x1b[<" + to_str(btn) + ";" + to_str(mcol) + ";" + to_str(mrow) + "M", abs(dcells))
       return vt
    }
-   if (mode & MODE_ALTSCREEN) != 0 {
-      def dy = _scroll_process_app(dy_raw)
-      def acc = load32_f32(st, OFF_SCROLL_ACC)
-      mut nacc = acc + dy
-      mut dcells = int(nacc)
-      nacc -= float(dcells)
-      store32_f32(st, nacc, OFF_SCROLL_ACC)
+   ;; Alternate-screen apps without mouse reporting: bounded arrow fallback.
+   ;; Honor Shift the same way the mouse-reporting branch above does — Shift
+   ;; is the user's escape hatch to scroll the local scrollback instead of
+   ;; forwarding arrows to the TUI.
+   if (mode & MODE_ALTSCREEN) != 0 && (da.get("mod", 0) & MOD_SHIFT) == 0 {
+      def dcells = _scroll_app_cells(st, dy_raw)
+      if dcells == 0 { return vt }
       def appk = load8(st, OFF_APPKEYS) != 0
       def up_seq = appk ? "\033OA" : "\033[A"
       def down_seq = appk ? "\033OB" : "\033[B"
       _send_input_repeat(vt, (dcells > 0) ? up_seq : down_seq, abs(dcells))
       return vt
    }
+   ;; Normal scrollback: keep it local and fast.
    def dy = _scroll_process(dy_raw)
    mut off_f = load32_f32(st, OFF_SCROLL_F)
    off_f += dy
@@ -1593,9 +1684,9 @@ fn _tputc_fast(dict vt, any st, int co, int ro, any g, any pal, int dfg, int dbg
       else {
          if u >= 60 && u <= 63 {
             store8(st, u, OFF_CSI_PRIV)
-            return vt.set("esc_buf", str.chr(u))
+            return vt.set("esc_buf", chr(u))
          }
-         if (u >= 48 && u <= 57) || u == 59 || u == 58 { return vt.set("esc_buf", vt.get("esc_buf") + str.chr(u)) }
+         if (u >= 48 && u <= 57) || u == 59 || u == 58 { return vt.set("esc_buf", vt.get("esc_buf") + chr(u)) }
          return vt
       }
    } elif s_state == ESC_STR {
@@ -1613,7 +1704,7 @@ fn _tputc_fast(dict vt, any st, int co, int ro, any g, any pal, int dfg, int dbg
          store8(st, 0, OFF_ESC_STR_KIND)
          return vt
       } else {
-         return vt.set("esc_buf", vt.get("esc_buf") + str.chr(u))
+         return vt.set("esc_buf", vt.get("esc_buf") + chr(u))
       }
    } elif s_state == ESC_STR_ESC {
       def kind = load8(st, OFF_ESC_STR_KIND)
@@ -1949,19 +2040,37 @@ fn _tscrolldown_fast(dict vt, any st, int co, int ro, any g, int dfg, int dbg, i
 }
 
 fn _tclearline_fast(any st, int co, any g, int dfg, int dbg, int y, int x1, int x2) any {
-   def bg = (load8(st, OFF_BACKGROUND_ERASE) != 0) ? load32(st, OFF_CUR_BG) : dbg
-   mut x = x1 while x <= x2 { def off = (y * co + x) * 16 store32(g, 32, off)
-      store32(g, dfg, off+4)
-      store32(g, bg, off+8)
-      store32(g, 0, off+12)
-   x += 1 }
+   if !st || !g || co <= 0 { return 0 }
+   mut ax1 = x1
+   mut ax2 = x2
+   if ax1 < 0 { ax1 = 0 }
+   if ax2 >= co { ax2 = co - 1 }
+   if ax2 < ax1 { return 0 }
+   def bce = load8(st, OFF_BACKGROUND_ERASE) != 0
+   def fg = bce ? load32(st, OFF_CUR_FG) : dfg
+   def bg = bce ? load32(st, OFF_CUR_BG) : dbg
+   mut x = ax1
+   while x <= ax2 {
+      def off = (y * co + x) * 16
+      store32(g, 32, off)
+      store32(g, fg, off + 4)
+      store32(g, bg, off + 8)
+      store32(g, 0, off + 12)
+      x += 1
+   }
    0
 }
 
 fn _tclearregion_fast(any st, int co, int ro, any g, int dfg, int dbg, int x1, int y1, int x2, int y2) any {
-   mut y = y1
-   while y <= y2 {
-      def mx1, mx2 = (y == y1) ? x1 : 0, (y == y2) ? x2 : co - 1
+   if !st || !g || co <= 0 || ro <= 0 { return 0 }
+   mut ay1 = y1
+   mut ay2 = y2
+   if ay1 < 0 { ay1 = 0 }
+   if ay2 >= ro { ay2 = ro - 1 }
+   if ay2 < ay1 { return 0 }
+   mut y = ay1
+   while y <= ay2 {
+      def mx1, mx2 = (y == ay1) ? x1 : 0, (y == ay2) ? x2 : co - 1
       _tclearline_fast(st, co, g, dfg, dbg, y, mx1, mx2)
       y += 1
    }
@@ -2158,6 +2267,14 @@ fn _tcsihandle_fast(dict vt, any st, int co, int ro, any g, any pal, int dfg, in
       send_input(vt, "\033P>|kitty(0.0.0)\033\\")
       return vt
    }
+   if u == 110 {
+      if a0 == 6 {
+         send_input(vt, "\033[" + to_str(load32(st, OFF_CY) + 1) + ";" + to_str(load32(st, OFF_CX) + 1) + "R")
+      } elif a0 == 5 {
+         send_input(vt, "\033[0n")
+      }
+      return vt
+   }
    def cleared = _tcsi_clear_ops(vt, st, co, ro, g, dfg, dbg, u, a0)
    if cleared != nil { return cleared }
    if u == 109 {
@@ -2291,22 +2408,35 @@ fn _tswapscreen_fast(dict vt, any st, int co, int ro, any g, int dfg, int dbg, b
    mut nvt = vt
    mut alt = nvt.get("alt_grid", 0)
    mut m = load32(st, OFF_MODE)
+   if set && (m & MODE_ALTSCREEN) != 0 {
+      return nvt
+   }
    if set && !alt {
       alt = malloc(co * ro * 16)
       if !alt { return nvt }
-      _clear_grid(alt, co, ro, dfg, dbg)
       nvt = nvt.set("alt_grid", alt)
    }
    if set {
+      _clear_grid(alt, co, ro, dfg, dbg)
       store32(st, load32(st, OFF_CX), OFF_SAVED_CX)
       store32(st, load32(st, OFF_CY), OFF_SAVED_CY)
       store32(st, load32(st, OFF_CUR_FG), OFF_SAVED_FG)
       store32(st, load32(st, OFF_CUR_BG), OFF_SAVED_BG)
       store32(st, load32(st, OFF_CUR_MODE), OFF_SAVED_MODE)
       store32(st, m | MODE_ALTSCREEN, OFF_MODE)
+      store32(st, 0, OFF_CX)
+      store32(st, 0, OFF_CY)
+      store32(st, 0, OFF_TOP)
+      store32(st, ro - 1, OFF_BOT)
+      store32(st, 0, OFF_SCROLL)
+      store32_f32(st, 0.0, OFF_SCROLL_F)
+      store32_f32(st, 0.0, OFF_SCROLL_ACC)
       store32(st, dfg, OFF_CUR_FG)
       store32(st, dbg, OFF_CUR_BG)
       store32(st, 0, OFF_CUR_MODE)
+      store8(st, 0, OFF_MOUSE_BTNDOWN)
+      store8(st, 0, OFF_MOUSE_BTN)
+      _vterm_clear_selection(st)
       nvt = nvt.set("grid", alt)
       nvt = nvt.set("primary_grid", g)
    } else {
@@ -2316,6 +2446,10 @@ fn _tswapscreen_fast(dict vt, any st, int co, int ro, any g, int dfg, int dbg, b
       store32(st, load32(st, OFF_SAVED_FG), OFF_CUR_FG)
       store32(st, load32(st, OFF_SAVED_BG), OFF_CUR_BG)
       store32(st, load32(st, OFF_SAVED_MODE), OFF_CUR_MODE)
+      store32(st, 0, OFF_SCROLL)
+      store32_f32(st, 0.0, OFF_SCROLL_F)
+      store32_f32(st, 0.0, OFF_SCROLL_ACC)
+      _vterm_clear_selection(st)
       def prim = nvt.get("primary_grid", 0)
       if prim { nvt = nvt.set("grid", prim) }
    }
@@ -2897,7 +3031,7 @@ fn _tstrhandle(dict vt, int kind, str buf) dict {
          if semi >= 0 {
             def val = str.str_slice(buf, semi + 1, buf.len)
             def c = _parse_abgr(val, 0)
-            if c != 0 { vt = vt.set("def_bg", _opaque_abgr(c)) }
+            if c != 0 { vt = vt.set("def_bg", c) }
          }
       } elif str.startswith(buf, "12;") {
          def semi = str.find(buf, ";")
@@ -2949,14 +3083,12 @@ fn send_input(dict vt, str s) any {
 fn _send_input_repeat(dict vt, str seq, int count) any {
    if count <= 0 || seq.len <= 0 { return 0 }
    if count == 1 { return send_input(vt, seq) }
-   mut b = Builder(seq.len * count)
+   mut out = ""
    mut i = 0
    while i < count {
-      b = builder_append(b, seq)
+      out = out + seq
       i += 1
    }
-   def out = builder_to_str(b)
-   builder_free(b)
    send_input(vt, out)
 }
 
@@ -2977,11 +3109,8 @@ fn _get_scratch(int len) any {
 }
 
 fn _cp_to_str(int cp, any acache) any {
-   if cp < 128 { return str.chr(cp) }
-   def scratch = _get_scratch(8)
-   if !scratch { return "" }
-   def n = str._utf8_encode_at(scratch, 0, cp)
-   init_str(scratch, n)
+   if cp < 0 || cp > 0x10ffff { return "" }
+   chr(cp)
 }
 
 fn _scroll_set(any st, int off, int hist_len) any {
@@ -3116,14 +3245,14 @@ fn _vterm_draw_cpu(dict vt, any st, int co, int ro, any g, list history, int his
          elif abs_r == e_row { sel_in_row = true sel_s = 0 sel_e = e_col }
       }
       mut c = 0
-      mut run_b = []
+      mut run_text = ""
       mut run_x = 0.0
       mut run_fg = 0
       while c < co {
          def off = c * 16
          def cp = load32(line_ptr, off)
          def md = load32(line_ptr, off + 12)
-         def bg_val = _opaque_abgr(load32(line_ptr, off + 8))
+         def bg_val = load32(line_ptr, off + 8)
          def text_visible = (md & (ATTR_WDUMMY | ATTR_INVIS | ATTR_IMAGE)) == 0 && cp > 32
          mut rfg = 0
          mut rbg = bg_val
@@ -3137,45 +3266,32 @@ fn _vterm_draw_cpu(dict vt, any st, int co, int ro, any g, list history, int his
          def rx = floor(px + float(c) * cw + 0.5)
          if rbg != db && rbg != 0 && (rbg & 0xFF000000) != 0 { draw_rect(rx, ry, cw, ch, rbg) }
          if text_visible {
-            if run_b.len <= 0 || run_fg != rfg {
-               if run_b.len > 0 {
-                  def txt = builder_to_str(run_b)
-                  builder_free(run_b)
-                  if txt.len > 0 {
-                     text_runs = text_runs.append(txt)
-                     text_runs = text_runs.append(run_x)
-                     text_runs = text_runs.append(ry + gy_reg)
-                     text_runs = text_runs.append(run_fg)
-                  }
+            if run_text.len <= 0 || run_fg != rfg {
+               if run_text.len > 0 {
+                  text_runs = text_runs.append(run_text)
+                  text_runs = text_runs.append(run_x)
+                  text_runs = text_runs.append(ry + gy_reg)
+                  text_runs = text_runs.append(run_fg)
                }
-               run_b = Builder(32)
+               run_text = ""
                run_x = rx
                run_fg = rfg
             }
-            if cp < 128 { run_b = builder_append_byte(run_b, cp) }
-            else { run_b = builder_append(run_b, _cp_to_str(cp, acache)) }
-         } elif run_b.len > 0 {
-            def txt = builder_to_str(run_b)
-            builder_free(run_b)
-            if txt.len > 0 {
-               text_runs = text_runs.append(txt)
-               text_runs = text_runs.append(run_x)
-               text_runs = text_runs.append(ry + gy_reg)
-               text_runs = text_runs.append(run_fg)
-            }
-            run_b = []
-         }
-         c += 1
-      }
-      if run_b.len > 0 {
-         def txt = builder_to_str(run_b)
-         builder_free(run_b)
-         if txt.len > 0 {
-            text_runs = text_runs.append(txt)
+            run_text = run_text + _cp_to_str(cp, acache)
+         } elif run_text.len > 0 {
+            text_runs = text_runs.append(run_text)
             text_runs = text_runs.append(run_x)
             text_runs = text_runs.append(ry + gy_reg)
             text_runs = text_runs.append(run_fg)
+            run_text = ""
          }
+         c += 1
+      }
+      if run_text.len > 0 {
+         text_runs = text_runs.append(run_text)
+         text_runs = text_runs.append(run_x)
+         text_runs = text_runs.append(ry + gy_reg)
+         text_runs = text_runs.append(run_fg)
       }
       r += 1
    }
@@ -3265,13 +3381,13 @@ fn _vterm_draw_background_line_ptr(any line_ptr, int co, f64 px, f64 ry, f64 cw,
    while c < co {
       def off = c * 16
       def md = load32(line_ptr, off + 12)
-      mut rbg = (md & reverse_mask) ? (load32(line_ptr, off + 4) | 0xFF000000) : ((load32(line_ptr, off + 8) & 0x00ffffff) | 0xff000000)
+      mut rbg = (md & reverse_mask) ? (load32(line_ptr, off + 4) | 0xFF000000) : load32(line_ptr, off + 8)
       if rbg != db && rbg != 0 && (rbg & 0xFF000000) != 0 {
          mut run_len = 1
          while c + run_len < co {
             def off2 = (c + run_len) * 16
             def md2 = load32(line_ptr, off2 + 12)
-            def rbg2 = (md2 & reverse_mask) ? (load32(line_ptr, off2 + 4) | 0xFF000000) : ((load32(line_ptr, off2 + 8) & 0x00ffffff) | 0xff000000)
+            def rbg2 = (md2 & reverse_mask) ? (load32(line_ptr, off2 + 4) | 0xFF000000) : load32(line_ptr, off2 + 8)
             if rbg2 == db || rbg2 != rbg { break }
             run_len += 1
          }
@@ -3324,7 +3440,7 @@ fn _vterm_draw_selection_overlay(dict vt, any st, int co, int ro, any g, list hi
          while c <= x2 {
             def off = c * 16
             def md = load32(line_ptr, off + 12)
-            def bg_val = _opaque_abgr(load32(line_ptr, off + 8))
+            def bg_val = load32(line_ptr, off + 8)
             def fg_val = load32(line_ptr, off + 4)
             def base = (md & ATTR_REVERSE) ? (fg_val | 0xff000000) : bg_val
             def mixed = _blend_abgr_over(sel_bg, (base == 0) ? db : base)
@@ -3332,7 +3448,7 @@ fn _vterm_draw_selection_overlay(dict vt, any st, int co, int ro, any g, list hi
             while c + run_len <= x2 {
                def off2 = (c + run_len) * 16
                def md2 = load32(line_ptr, off2 + 12)
-               def bg2 = _opaque_abgr(load32(line_ptr, off2 + 8))
+               def bg2 = load32(line_ptr, off2 + 8)
                def fg2 = load32(line_ptr, off2 + 4)
                def base2 = (md2 & ATTR_REVERSE) ? (fg2 | 0xff000000) : bg2
                def mixed2 = _blend_abgr_over(sel_bg, (base2 == 0) ? db : base2)
@@ -3359,19 +3475,24 @@ fn _vterm_draw_foregrounds(dict vt, int co, int ro, any g, list history, int his
       def ry = floor((float(r) + scroll_frac_r) * ch + py + 0.5)
       if ry + ch < py || ry > py + wh { r += 1 continue }
       def by = floor(ry + gy_reg + ascent + 0.5)
+      ;; Draw glyphs through the packed atlas path using the font's own metrics.
       draw_terminal_line_fast_ptr(line_ptr, co, px, by, cw, gptr, skip_mask, ATTR_REVERSE)
-      mut c = 0
-      while c < co {
-         def off = c * 16
+      ;; Fallback only for codepoints that are not in the fast atlas.  Common
+      ;; terminal UTF-8 ranges are primed by _terminal_prime_text(), so this is
+      ;; rare and does not affect btop/htop scroll speed.
+      mut fc = 0
+      while fc < co {
+         def off = fc * 16
          def cp = load32(line_ptr, off)
          if cp > 32 {
             def md = load32(line_ptr, off + 12)
             if (md & skip_mask) == 0 && !font_fast_glyph_present(gptr, cp) {
                def fg = ((md & ATTR_REVERSE) != 0) ? (load32(line_ptr, off + 8) | 0xFF000000) : (load32(line_ptr, off + 4) | 0xFF000000)
-               draw_text(f_reg, _cp_to_str(cp, acache), floor(px + float(c) * cw + 0.5), ry + gy_reg, fg)
+               def rx = floor(px + float(fc) * cw + 0.5)
+               draw_text(f_reg, _cp_to_str(cp, acache), rx, ry + gy_reg, fg)
             }
          }
-         c += 1
+         fc += 1
       }
       r += 1
    }
@@ -3390,7 +3511,7 @@ fn draw(dict vt, any ww, any wh) any {
    def co = vt.get("cols") def ro = vt.get("rows") def g = vt.get("grid")
    def fonts = vt.get("fonts")
    mut f_reg = fonts.get("regular") if !f_reg { f_reg = 0 }
-   f_reg = font_prepare(f_reg, " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789$#/>-_=+[]{}().,:;")
+   f_reg = font_prepare(f_reg, _terminal_prime_text())
    def f_obj = _font_get(f_reg)
    def f_size = (f_obj != 0) ? float(f_obj.get("size", 16.0)) : 16.0
    def ascent  = (f_obj != 0) ? float(f_obj.get("ascent", 12.0)) : (f_size * 0.80)
@@ -3411,7 +3532,12 @@ fn draw(dict vt, any ww, any wh) any {
       _scroll_set(st, int(scroll_f_val), hist_len)
    }
    def vis_prev = vt.get("scroll_vis", scroll_f_val)
-   def vis = vis_prev + (scroll_f_val - vis_prev) * 0.25
+   def smooth = _env_float_between("NY_TERM_SCROLL_SMOOTH", 1.0, 0.05, 1.0)
+   mut vis = scroll_f_val
+   if smooth < 0.999 {
+      vis = vis_prev + (scroll_f_val - vis_prev) * smooth
+      if abs(scroll_f_val - vis) < 0.01 { vis = scroll_f_val }
+   }
    if vis != vis_prev { vt = vt.set("scroll_vis", vis) }
    def scroll_i = int(floor(vis))
    def scroll_frac = vis - float(scroll_i)
@@ -3480,7 +3606,11 @@ fn _vterm_handle_mouse_press(dict vt, any st, int co, int ro, list history, int 
    def sx, sy = xy.get(0), xy.get(1)
    def ww, wh = float(da.get("ww", float(co) * cw + _px * 2.0)), float(da.get("wh", float(ro) * ch + _py * 2.0))
    def sb_w, sb_x = 6.0, ww - sb_w - _px
-   if hist_len > 0 && mx_raw >= sb_x {
+   ;; Scrollbar is not drawn in alt-screen mode (see draw code at line ~3198),
+   ;; so its hit-test must be disabled here as well. Without this guard, the
+   ;; rightmost 6 pixels of an alt-screen TUI would set OFF_SCROLL and the
+   ;; next render would pull rows from main-screen history over the alt grid.
+   if hist_len > 0 && mx_raw >= sb_x && (load32(st, OFF_MODE) & MODE_ALTSCREEN) == 0 {
       _vterm_clear_selection(st)
       _vterm_reset_click_sequence(st)
       store8(st, 1, OFF_SB_DRAGGING)
@@ -3544,12 +3674,25 @@ fn _vterm_handle_mouse_motion(dict vt, any st, int co, int ro, int hist_len, f64
       if (mf & MOUSE_1003_MOTION) != 0 || ((mf & MOUSE_1002_DRAG) != 0 && load8(st, OFF_MOUSE_BTNDOWN) != 0) {
          def cell = _mouse_cell_clamped(da, cw, ch, co, ro)
          def col = cell.get(0) def row = cell.get(1)
-         def btn = load8(st, OFF_MOUSE_BTN)
+         ;; xterm 1003 (any-motion) reports button 3 ("no button") when no
+         ;; button is held, so apps can distinguish hover from drag. The
+         ;; stored OFF_MOUSE_BTN retains the last pressed button indefinitely
+         ;; and would otherwise leak a stale button code into the motion
+         ;; event.
+         mut btn = load8(st, OFF_MOUSE_BTN)
+         if (mf & MOUSE_1003_MOTION) != 0 && load8(st, OFF_MOUSE_BTNDOWN) == 0 { btn = 3 }
          _mouse_send(vt, btn + 32, col, row, false)
          return vt
       }
    }
    if load8(st, OFF_SB_DRAGGING) != 0 {
+      ;; If we somehow entered SB_DRAGGING while in alt-screen mode (e.g. the
+      ;; user pressed on the scrollbar before the app toggled alt-screen on),
+      ;; bail out instead of corrupting the alt grid with main-screen history.
+      if (load32(st, OFF_MODE) & MODE_ALTSCREEN) != 0 {
+         store8(st, 0, OFF_SB_DRAGGING)
+         return vt
+      }
       def wh = float(da.get("wh", float(ro) * ch + _py * 2.0))
       def track_h = wh - _py * 2.0
       def fy = (my - _py) / track_h
@@ -3584,6 +3727,22 @@ fn _vterm_handle_mouse_motion(dict vt, any st, int co, int ro, int hist_len, f64
 fn _vterm_handle_mouse_release(dict vt, any st, int co, list history, int hist_len, f64 cw, f64 ch, any da) dict {
    store8(st, 0, OFF_SEL_DRAGGING)
    store8(st, 0, OFF_SB_DRAGGING)
+   ;; If a press was reported to the app (OFF_MOUSE_BTNDOWN=1), we MUST send
+   ;; a matching release even if the user happens to be holding Shift at
+   ;; release time. Previously the Shift guard skipped the entire branch and
+   ;; left BTNDOWN set, causing phantom drag events until the next clean
+   ;; non-Shift press/release pair. Use the stored press button so the app
+   ;; sees a consistent button-down/button-up pair.
+   if (load32(st, OFF_MODE) & MODE_MOUSE) != 0 && load8(st, OFF_MOUSE_BTNDOWN) != 0 {
+      def mf = load8(st, OFF_MOUSE_FLAGS)
+      if mf != 0 {
+         def btn = load8(st, OFF_MOUSE_BTN)
+         def cell = _mouse_cell_clamped(da, cw, ch, int(vt.get("cols")), int(vt.get("rows")))
+         _mouse_send(vt, btn, cell.get(0), cell.get(1), true)
+         store8(st, 0, OFF_MOUSE_BTNDOWN)
+         return vt
+      }
+   }
    if (load32(st, OFF_MODE) & MODE_MOUSE) != 0 && (da.get("mod", 0) & MOD_SHIFT) == 0 {
       def mf = load8(st, OFF_MOUSE_FLAGS)
       if mf != 0 {
@@ -3710,9 +3869,37 @@ fn _vterm_flush_pending_printable(dict vt, any st) dict {
    _vterm_send_code(vt, st, vt.get("history").len, load32(st, OFF_SCROLL), code, md)
 }
 
+fn _vterm_key_action(any da) int {
+   if !is_dict(da) { return 1 }
+   if !!da.get("repeat", false) ||
+   !!da.get("repeated", false) ||
+   !!da.get("is_repeat", false) ||
+   !!da.get("autorepeat", false) {
+      return 2
+   }
+   def a = int(da.get("action", da.get("state", 1)))
+   if a == 2 { return 2 }
+   if a == 3 { return 3 }
+   if a == 0 { return 0 }
+   1
+}
+
 fn _vterm_handle_key_release(dict vt, any st, any da) dict {
-   def k = da.get("key")
-   def md = da.get("mod", 0) & 0xFF
+   def k = int(da.get("key", 0))
+   def md = int(da.get("mod", 0)) & 0xFF
+   store64(st, ticks(), OFF_LAST_REL_T)
+   store32(st, k, OFF_LAST_REL_CODE)
+   store32(st, md, OFF_LAST_REL_MOD)
+   if load32(st, OFF_LAST_KEY_CODE) == k && load32(st, OFF_LAST_KEY_MOD) == md {
+      store64(st, 0, OFF_LAST_KEY_T)
+      store32(st, 0, OFF_LAST_KEY_CODE)
+      store32(st, 0, OFF_LAST_KEY_MOD)
+   }
+   ;; OFF_CHAR_CB_ACTIVE is set when an EVENT_KEY_CHAR fires (synthesize mode)
+   ;; but was previously never cleared, which caused every subsequent printable
+   ;; key press to be short-circuited at the top of _vterm_handle_printable_key.
+   ;; Clearing it on every release keeps the gate honest.
+   store8(st, 0, OFF_CHAR_CB_ACTIVE)
    def flags = load32(st, OFF_KBD_FLAGS)
    if (flags & KBD_REPORT_EVENTS) == 0 { return vt }
    if k >= 32 && k <= 126 {
@@ -3808,8 +3995,8 @@ fn _vterm_handle_modified_printable(dict vt, int k, int md, int flags, int actio
 fn _vterm_handle_control_key(dict vt, any st, int hist_len, int scroll_off, int k) list {
    mut seq = ""
    if k == 32 { seq = "\000" }
-   elif k >= 65 && k <= 90 { seq = str.chr(k - 64) }
-   elif k >= 97 && k <= 122 { seq = str.chr(k - 96) }
+   elif k >= 65 && k <= 90 { seq = chr(k - 64) }
+   elif k >= 97 && k <= 122 { seq = chr(k - 96) }
    elif k == 91 { seq = "\033" }
    elif k == 92 { seq = "\034" }
    elif k == 93 { seq = "\035" }
@@ -3865,17 +4052,14 @@ fn _vterm_arrow_suffix(int k) str {
 
 fn _vterm_handle_special_key(dict vt, any st, int hist_len, int scroll_off, int k, int md, int action, bool appk) list {
    if k == 13 || k == KEY_ENTER || k == KEY_KP_ENTER {
-      ;; Enter is a command submit, not text. Native backends deliver held Enter
-      ;; as KEY_PRESSED action=2 repeat events; forwarding those floods the PTY
-      ;; with blank commands and lets frames expose half-drained prompt/newline
-      ;; output. Keep the first press, drop autorepeat.
-      if action == 2 { return _vterm_key_hit(vt) }
+      ;; Forward native key repeat too.  EVENT_KEY_CHAR CR/LF is filtered in
+      ;; term.ny, so each physical/native repeat tick sends exactly one CR.
       _vterm_follow_cursor(vt, st, scroll_off, hist_len)
       send_input(vt, "\r")
       return _vterm_key_hit(vt)
    } elif k == 8 || k == KEY_BACKSPACE {
       _vterm_follow_cursor(vt, st, scroll_off, hist_len)
-      send_input(vt, str.chr(127))
+      send_input(vt, chr(127))
       return _vterm_key_hit(vt)
    } elif k == 9 || k == KEY_TAB {
       if (md & MOD_SHIFT) != 0 { send_input(vt, "\033[Z") }
@@ -3943,7 +4127,7 @@ fn _vterm_handle_printable_key(dict vt, any st, int hist_len, int scroll_off, in
       _vterm_follow_cursor(vt, st, scroll_off, hist_len)
       store64(st, now_t, OFF_LAST_CHAR_T)
       store32(st, int(kout), OFF_LAST_CHAR_C)
-      send_input(vt, str.chr(kout))
+      send_input(vt, chr(kout))
       return _vterm_key_hit(vt)
    }
    if k > 126 && k < 256 {
@@ -3955,24 +4139,40 @@ fn _vterm_handle_printable_key(dict vt, any st, int hist_len, int scroll_off, in
       _vterm_follow_cursor(vt, st, scroll_off, hist_len)
       store64(st, now_t, OFF_LAST_CHAR_T)
       store32(st, int(k), OFF_LAST_CHAR_C)
-      send_input(vt, str.chr(k))
+      send_input(vt, chr(k))
       return _vterm_key_hit(vt)
    }
    _vterm_key_miss(vt)
 }
 
 fn _vterm_handle_key_press(dict vt, any st, int co, list history, int hist_len, int scroll_off, any da) dict {
-   def k = da.get("key") def raw_md = da.get("mod", 0) def appk = load8(st, OFF_APPKEYS) != 0
+   def k = int(da.get("key", 0))
+   def raw_md = int(da.get("mod", 0))
+   def appk = load8(st, OFF_APPKEYS) != 0
    def md = raw_md & 0xFF
    def flags = load32(st, OFF_KBD_FLAGS)
    def kbd = flags != 0
-   def action = da.get("action", 1)
+   mut action = _vterm_key_action(da)
+   def now = ticks()
+   def last_t = load64(st, OFF_LAST_KEY_T)
+   def last_k = load32(st, OFF_LAST_KEY_CODE)
+   def last_m = load32(st, OFF_LAST_KEY_MOD)
+   def rel_t = load64(st, OFF_LAST_REL_T)
+   def rel_k = load32(st, OFF_LAST_REL_CODE)
+   def rel_m = load32(st, OFF_LAST_REL_MOD)
+   ;; X11 autorepeat can arrive either as repeated KeyPress events or as a
+   ;; synthetic KeyRelease+KeyPress pair where repeat=false.  Preserve native
+   ;; repeat for arrows/TUIs, but still classify it as action=2 so primary
+   ;; Enter repeat can be suppressed without killing held Down/PageDown.
+   if action == 1 && last_t != 0 && last_k == k && last_m == md {
+      action = 2
+   } elif action == 1 && rel_t != 0 && rel_k == k && rel_m == md && (now - rel_t) < 90000000 {
+      action = 2
+   }
    if action != 2 {
-      def now = ticks()
-      def last_t = load64(st, OFF_LAST_KEY_T)
-      def last_k = load32(st, OFF_LAST_KEY_CODE)
-      def last_m = load32(st, OFF_LAST_KEY_MOD)
-      if last_k == k && last_m == md && (now - last_t) < 5000000 { return vt }
+      if last_k == k && last_m == md && (now - last_t) < 5000000 {
+         return vt
+      }
       store64(st, now, OFF_LAST_KEY_T)
       store32(st, k, OFF_LAST_KEY_CODE)
       store32(st, md, OFF_LAST_KEY_MOD)
@@ -4022,6 +4222,23 @@ fn handle_event(dict vt, int ty, any da) dict {
    def cw = vt.get("char_w", 9.0)
    def ch = vt.get("char_h", 18.0)
    if ty == EVENT_MOUSE_LEAVE || ty == EVENT_FOCUS_OUT {
+      ;; Reset every kind of "pressed / armed" state so the app does not keep
+      ;; receiving phantom drag, motion, or autorepeat events after we lose
+      ;; focus. Without this, OFF_MOUSE_BTNDOWN stays set and 1002-drag mode
+      ;; reports motion with a button the user is no longer holding; key
+      ;; autorepeat state survives and the first key press on refocus is
+      ;; misclassified as a repeat and dropped; pending-printable state leaks
+      ;; a stray char into the PTY after refocus.
+      _vterm_clear_pending_printable(st)
+      store8(st, 0, OFF_MOUSE_BTNDOWN)
+      store8(st, 0, OFF_MOUSE_BTN)
+      store8(st, 0, OFF_CHAR_CB_ACTIVE)
+      store64(st, 0, OFF_LAST_KEY_T)
+      store32(st, 0, OFF_LAST_KEY_CODE)
+      store32(st, 0, OFF_LAST_KEY_MOD)
+      store64(st, 0, OFF_LAST_REL_T)
+      store32(st, 0, OFF_LAST_REL_CODE)
+      store32(st, 0, OFF_LAST_REL_MOD)
       if ty == EVENT_MOUSE_LEAVE {
          _vterm_clear_selection(st)
          _vterm_reset_click_sequence(st)
@@ -4149,6 +4366,15 @@ fn resize(dict vt, int cols, int rows) dict {
    def oc = vt.get("cols") def or = vt.get("rows")
    if cols == oc && rows == or { return vt }
    def dfg = vt.get("def_fg") def dbg = vt.get("def_bg")
+   ;; Detect alt-screen mode up front: in this mode grid and alt_grid point
+   ;; at the same buffer (the visible alt screen), and primary_grid holds the
+   ;; hidden main-screen buffer. The previous code unconditionally freed og
+   ;; (== alt_grid) and then freed alt_grid again — a double free — while
+   ;; leaving primary_grid with stale cols/rows, causing out-of-bounds writes
+   ;; after the next alt-screen exit. We now resize whichever buffer is the
+   ;; visible one and also reallocate the hidden one to match the new size.
+   def st0 = vt.get("state")
+   def in_alt = st0 != 0 && (load32(st0, OFF_MODE) & MODE_ALTSCREEN) != 0
    def og, ng = vt.get("grid"), malloc(cols * rows * 16)
    if !ng { return vt }
    _clear_grid(ng, cols, rows, dfg, dbg)
@@ -4163,7 +4389,30 @@ fn resize(dict vt, int cols, int rows) dict {
    nvt = nvt.set("rows", rows)
    free(og)
    def al = nvt.get("alt_grid")
-   if al { free(al) nvt = nvt.set("alt_grid", 0) }
+   if in_alt {
+      ;; grid was == alt_grid (both pointed at og, now freed). Keep them in
+      ;; sync by pointing alt_grid at the new buffer too — do NOT free(al)
+      ;; because al == og here.
+      nvt = nvt.set("alt_grid", ng)
+      ;; Resize the hidden primary_grid so a later alt-screen exit restores a
+      ;; correctly-sized main screen instead of corrupting memory.
+      def prim = nvt.get("primary_grid", 0)
+      if prim && prim != og {
+         def pnew = malloc(cols * rows * 16)
+         if pnew {
+            _clear_grid(pnew, cols, rows, dfg, dbg)
+            mut pr = 0 while pr < copy_rows {
+               memcpy(ptr_add(pnew, pr * cols * 16), ptr_add(prim, pr * oc * 16), copy_cols * 16)
+               pr += 1
+            }
+            free(prim)
+            nvt = nvt.set("primary_grid", pnew)
+         }
+      }
+   } elif al {
+      ;; Not in alt-screen: alt_grid is a stale separate buffer, safe to free.
+      free(al) nvt = nvt.set("alt_grid", 0)
+   }
    def cw, ch = nvt.get("char_w", 9.0), nvt.get("char_h", 18.0)
    def px_w, px_h = int(float(cols) * cw), int(float(rows) * ch)
    nvt = nvt.set("px_w", px_w)

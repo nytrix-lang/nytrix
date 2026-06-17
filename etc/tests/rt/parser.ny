@@ -93,4 +93,5 @@ fn main() {
          54, 55, 56, 57, 58, 59
    ) == 1, "long REPL doc signature survives")
 }
+
 main()

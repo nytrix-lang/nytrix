@@ -7,7 +7,6 @@
 ;;
 ;; Current local retest on 2026-06-01 exits 0 and prints an empty line, so this
 ;; is tracked as a fixed-candidate regression guard.
-
 use std.core
 use std.os.args
 
