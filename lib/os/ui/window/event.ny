@@ -77,7 +77,14 @@ fn queue_push(any q, any ev) list {
 fn queue_pop(any q) any {
    "Pops the oldest event from queue `q` (FIFO). Returns oldest event or 0 if empty."
    if !is_list(q) || q.len == 0 { return 0 }
-   q.get(0)
+   def head = q.get(0)
+   mut i = 1
+   while i < q.len {
+      q[i - 1] = q.get(i)
+      i += 1
+   }
+   q.pop()
+   head
 }
 
 fn queue_len(any q) i32 {

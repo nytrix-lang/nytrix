@@ -5,6 +5,6 @@
 ;;
 ;; Baseline that should pass:
 ;;   etc/tests/fuzz/errors/stdlib/bare-dict-import-baseline.ny
-
 use std.core.dict
+
 0

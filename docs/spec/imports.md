@@ -8,6 +8,7 @@ source unit. Import resolution happens before normal execution.
 ```ny
 use std
 use std.core
+use std.core, std.core.reflect
 use std math as math
 use std.math as math
 use std.math.parse.data.json (json_decode, json_encode)
@@ -19,8 +20,9 @@ use package_name
 use module.path *
 ```
 
-`use module.path` imports exported names. `as` binds an explicit module alias.
-Item lists import only selected public names.
+`use module.path` imports exported names. Multiple module imports can be grouped
+on one line with commas; each entry behaves like its own `use` statement. `as`
+binds an explicit module alias. Item lists import only selected public names.
 
 `use std` imports the root standard-library surface. It exposes common root
 names and standard namespace aliases such as `std.math`, `math`, `os`, `OS`,

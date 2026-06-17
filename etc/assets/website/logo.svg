@@ -1,44 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
   <defs>
-
-    <path id="n-path" d="
-      M 20,28
-      L 28,20
-      H 36
-      V 52
-      L 64,20
-      L 80,28
-      V 72
-      L 64,80
-      V 48
-      L 36,80
-      H 28
-      L 20,72
-      Z
-    "/>
-
-    <clipPath id="inside-n-clip">
-      <use href="#n-path" />
+    <path id="n" d="M80 28 72 20h-8v32L36 20 20 28v44l16 8V48l28 32h8l8-8z"/>
+    <clipPath id="mid" clipPathUnits="userSpaceOnUse">
+      <path d="M64 20H36v60h28z"/>
     </clipPath>
-
-    <clipPath id="center-intersection-clip">
-      <rect x="36" y="20" width="28" height="60" />
-    </clipPath>
-
   </defs>
-
-  <g transform="translate(100 0) scale(-1 1)">
-
-    <g clip-path="url(#inside-n-clip)">
-
-    </g>
-
-    <use href="#n-path" fill="#F0F0FF" />
-
-    <g clip-path="url(#center-intersection-clip)">
-      <line x1="20" y1="20" x2="80" y2="80"
-            stroke="#C9C4FF" stroke-width="9" stroke-linecap="square"/>
-    </g>
-
-  </g>
+  <use href="#n" fill="#f0f0ff"/>
+  <path clip-path="url(#mid)" d="M80 20 23 80" fill="none" stroke="#c9c4ff" stroke-width="9" stroke-linecap="square"/>
 </svg>

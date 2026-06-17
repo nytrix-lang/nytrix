@@ -711,7 +711,9 @@ fn __vkr_draw_text_glyph(any g_ptr, any v, any x, any y, int cp, any color, any 
 
 @jit
 fn draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 cw, any glyphs_ptr, int skip_mask, int reverse_mask) any {
-   "Draws draw terminal line ptr."
+   "Draws a terminal cell line via the packed glyph atlas fast path. Glyphs are
+   placed using their own baseline/x-offset metrics; the cell box is not clipped,
+   so overhanging box/block/braille glyphs connect across adjacent cells."
    if !line_ptr || !glyphs_ptr || !_frame_open || co <= 0 { return 0 }
    if !_check_flush(co * _VKR_VERT_STRIDE * 6) { return 0 }
    def page0 = load64(glyphs_ptr, 0)

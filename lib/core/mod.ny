@@ -698,6 +698,10 @@ fn malloc(int n) ptr {
 
 fn free(...ptrs) any {
    "Frees one or more heap memory blocks. Nil/zero pointers are ignored."
+   if is_ptr(ptrs) {
+      if ptrs { __free(ptrs) }
+      return nil
+   }
    mut i = 0
    while i < ptrs.len {
       def p = ptrs.get(i)

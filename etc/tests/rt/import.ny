@@ -120,4 +120,5 @@ fn main() {
    assert(digest_bytes.len == 20, "bin alias survives")
    assert(shared == Z(6), "nt import survives")
 }
+
 main()

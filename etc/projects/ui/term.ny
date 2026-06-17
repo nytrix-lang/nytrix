@@ -85,6 +85,12 @@ mut _mouse_update_budget_ns = 3000000
 mut _scroll_update_max = 96
 mut _scroll_update_budget_ns = 6000000
 mut _pending_mouse_motion = 0
+mut _repeat_key = 0
+mut _repeat_mod = 0
+mut _repeat_down = false
+mut _repeat_next_ticks = 0
+mut _input_debug_count = 0
+mut _input_debug_max = 0
 
 fn _arm_plus_char_suppress() any {
    if _suppress_plus_char_count < 32 {
@@ -118,11 +124,11 @@ fn _consume_zoom_plus_char(any data) bool {
 
 fn _consume_terminal_control_char(any data) bool {
    if !is_dict(data) { return false }
-   def ch = int(data.get("char", data.get("codepoint", 0)))
-   ;; Enter/Return belongs to EVENT_KEY_PRESSED in the terminal path.
-   ;; Some backends also emit EVENT_KEY_CHAR with LF/CR for the same physical
-   ;; key. Forwarding that char gives the PTY a second newline while holding
-   ;; Enter and produces the visual blank-row bursts.
+
+   def ch = int(data.get("char", data.get("codepoint", data.get("unicode", 0))))
+
+   ;; Enter/Return is handled by EVENT_KEY_PRESSED. Drop backend-generated
+   ;; KEY_CHAR LF/CR so held Enter cannot submit twice per repeat tick.
    ch == 10 || ch == 13
 }
 
@@ -213,6 +219,11 @@ fn _font_zoom_active() bool {
 fn _apply_font_zoom_tick(any now_ticks) bool {
    if _font_reset_pending {
       _font_reset_pending = false
+      ;; Discard a stale zoom delta that was queued after the reset request
+      ;; (e.g. user hit Ctrl-0 then Ctrl-= before the next tick). Without
+      ;; this, the reset branch returns immediately and the queued delta is
+      ;; silently lost — the user's Ctrl-= appears to do nothing for a frame.
+      _font_zoom_pending_delta = 0
       _font_zoom_next_ticks = now_ticks + _font_zoom_repeat_ns()
       return _set_font_size_live(START_FONT_SIZE)
    }
@@ -237,6 +248,69 @@ fn _term_color(str code, str text) str {
 
 fn _term_diag(str label, any value) any {
    eprint("  " + _term_color("90", label + ": ") + to_str(value))
+   0
+}
+
+fn _term_verbose_arg() bool {
+   mut i = 1
+   while i < argc() {
+      def a = str.lower(str.strip(to_str(argv(i))))
+      if a == "-v" || a == "--verbose" || a == "-vv" || a == "-vvv" || a == "--debug" || a == "--debug-deep" { return true }
+      i += 1
+   }
+   false
+}
+
+fn _input_debug_enabled() bool {
+   common.env_truthy("NY_TERM_INPUT_DEBUG") ||
+   common.env_truthy("NY_TERM_RAW_INPUT_DEBUG") ||
+   _term_verbose_arg()
+}
+
+fn _input_debug_limit() int {
+   common.env_int_clamped("NY_TERM_INPUT_DEBUG_LIMIT", 512, 0, 1000000)
+}
+
+fn _input_event_name(int typ) str {
+   if typ == EVENT_KEY_PRESSED { return "key-press" }
+   if typ == EVENT_KEY_RELEASED { return "key-release" }
+   if typ == EVENT_KEY_CHAR { return "key-char" }
+   if typ == EVENT_MOUSE_SCROLL { return "mouse-scroll" }
+   if typ == EVENT_MOUSE_POS_CHANGED { return "mouse-motion" }
+   if typ == EVENT_MOUSE_BUTTON_PRESSED { return "mouse-press" }
+   if typ == EVENT_MOUSE_BUTTON_RELEASED { return "mouse-release" }
+   if typ == EVENT_FOCUS_IN { return "focus-in" }
+   if typ == EVENT_FOCUS_OUT { return "focus-out" }
+   if typ == EVENT_MOUSE_LEAVE { return "mouse-leave" }
+   if typ == EVENT_WINDOW_RESIZED { return "resize" }
+   "event"
+}
+
+fn _input_debug_event(str stage, int typ, any data) any {
+   if !_input_debug_enabled() { return 0 }
+   if _input_debug_max == 0 { _input_debug_max = _input_debug_limit() }
+   if _input_debug_max > 0 && _input_debug_count >= _input_debug_max { return 0 }
+   _input_debug_count += 1
+
+   if !is_dict(data) {
+      eprint("[term:input:" + stage + "] type=" + _input_event_name(typ) + " raw=" + to_str(data))
+      return 0
+   }
+
+   eprint(
+      "[term:input:" + stage + "] type=" + _input_event_name(typ) +
+      " key=" + to_str(data.get("key", "")) +
+      " code=" + to_str(data.get("code", "")) +
+      " scancode=" + to_str(data.get("scancode", "")) +
+      " char=" + to_str(data.get("char", data.get("codepoint", data.get("unicode", "")))) +
+      " action=" + to_str(data.get("action", data.get("state", ""))) +
+      " repeat=" + to_str(data.get("repeat", data.get("repeated", data.get("is_repeat", data.get("autorepeat", ""))))) +
+      " mod=" + to_str(data.get("mod", data.get("mods", ""))) +
+      " x=" + to_str(data.get("x", "")) +
+      " y=" + to_str(data.get("y", "")) +
+      " dx=" + to_str(data.get("dx", "")) +
+      " dy=" + to_str(data.get("dy", ""))
+   )
    0
 }
 
@@ -484,8 +558,8 @@ fn _refresh_update_budget(any now_ticks) any {
    _key_update_budget_ns = common.env_int_clamped("NY_TERM_KEY_UPDATE_BUDGET_MS", 4, 1, 24) * 1000000
    _mouse_update_max = common.env_int_clamped("NY_TERM_MOUSE_UPDATE_MAX", 48, 16, 512)
    _mouse_update_budget_ns = common.env_int_clamped("NY_TERM_MOUSE_UPDATE_BUDGET_MS", 3, 1, 24) * 1000000
-   _scroll_update_max = common.env_int_clamped("NY_TERM_SCROLL_UPDATE_MAX", 96, 16, 512)
-   _scroll_update_budget_ns = common.env_int_clamped("NY_TERM_SCROLL_UPDATE_BUDGET_MS", 6, 1, 24) * 1000000
+   _scroll_update_max = common.env_int_clamped("NY_TERM_SCROLL_UPDATE_MAX", 64, 8, 256)
+   _scroll_update_budget_ns = common.env_int_clamped("NY_TERM_SCROLL_UPDATE_BUDGET_MS", 5, 1, 16) * 1000000
    _update_budget_reload_ticks = now_ticks + 1000000000
    0
 }
@@ -662,7 +736,14 @@ fn _vterm_event_data(int typ, any data) any {
    if is_dict(ev_data) {
       ev_data = _scale_event_xy(ev_data)
       if typ == EVENT_KEY_PRESSED || typ == EVENT_KEY_RELEASED {
-         ev_data = ev_data.set("key", ui.normalize_key(ev_data.get("key", 0))).set("mod", view.normalize_mod(ev_data.get("mod", ev_data.get("mods", 0))))
+         def k = ui.normalize_key(ev_data.get("key", 0))
+         def md = view.normalize_mod(ev_data.get("mod", ev_data.get("mods", 0)))
+         def action = (typ == EVENT_KEY_RELEASED) ? 3 : _term_key_action(ev_data, k, md)
+
+         ev_data = ev_data
+            .set("key", k)
+            .set("mod", md)
+            .set("action", action)
       }
       if ui.is_mouse_event(typ) {
          def event_button = int(ev_data.get("button", -1))
@@ -785,7 +866,7 @@ fn _scroll_event_data(any data) any {
 fn _dispatch_mouse_scroll(any data) bool {
    _prepare_scroll_mouse_state()
    vt = vterm.handle_event(vt, EVENT_MOUSE_SCROLL, _scroll_event_data(data))
-   _request_redraw(1)
+   _request_redraw(_term_redraw_frames())
    true
 }
 
@@ -804,6 +885,133 @@ fn _flush_pending_mouse_events() bool {
 
 fn _event_budget_done(any event_start_ticks, int event_count) bool {
    event_count > 0 && (event_count % 16) == 0 && (ticks() - event_start_ticks) >= _input_event_budget_ns
+}
+
+fn _term_synth_repeat_enabled() bool {
+   ;; Keep a local xrate fallback enabled by default.  X11 often reports native
+   ;; autorepeat as ordinary repeat=false KeyPress events; those are still
+   ;; forwarded, and this clock only fills gaps when the backend does not emit
+   ;; repeat events for a held key such as Enter.
+   !common.env_present("NY_TERM_SYNTH_REPEAT") || common.env_truthy("NY_TERM_SYNTH_REPEAT")
+}
+
+fn _xrepeat_delay_ns() int {
+   common.env_int_clamped("NY_TERM_XREPEAT_DELAY_MS", 250, 80, 1000) * 1000000
+}
+
+fn _xrepeat_interval_ns() int {
+   def hz = common.env_int_clamped("NY_TERM_XREPEAT_RATE_HZ", 30, 1, 120)
+   1000000000 / hz
+}
+
+fn _term_repeatable_key(int k, int md) bool {
+   if (md & (MOD_SUPER | MOD_META)) != 0 { return false }
+
+   k == 13 || k == KEY_ENTER || k == KEY_KP_ENTER ||
+   k == 8 || k == KEY_BACKSPACE ||
+   k == 9 || k == KEY_TAB ||
+   k == 127 || k == KEY_DELETE ||
+   k == KEY_UP || k == KEY_DOWN || k == KEY_LEFT || k == KEY_RIGHT ||
+   k == KEY_PAGE_UP || k == KEY_PAGE_DOWN ||
+   k == KEY_HOME || k == KEY_END ||
+   k >= KEY_F1 && k <= KEY_F12 ||
+   (md & MOD_CONTROL) != 0
+}
+
+fn _term_key_action(any data, int k, int md) int {
+   if !is_dict(data) { return 1 }
+
+   def a = int(data.get("action", data.get("state", 1)))
+   if a == 3 || a == 0 { return 3 }
+
+   ;; Trust the native backend stream by default.  X11 auto-repeat commonly
+   ;; arrives as repeated key-press events with repeat=false, so same-key
+   ;; presses must not be rewritten and dropped in the term layer.
+   if a == 2 ||
+      !!data.get("repeat", false) ||
+      !!data.get("repeated", false) ||
+      !!data.get("is_repeat", false) ||
+      !!data.get("autorepeat", false) {
+      return 2
+   }
+
+   1
+}
+fn _term_repeat_clear() any {
+   _repeat_key = 0
+   _repeat_mod = 0
+   _repeat_down = false
+   _repeat_next_ticks = 0
+   0
+}
+
+fn _term_repeat_clear_key(int k) any {
+   if _repeat_down && _repeat_key == k {
+      _term_repeat_clear()
+   }
+   0
+}
+
+fn _term_repeat_arm(int k, int md) any {
+   if !_term_repeatable_key(k, md) {
+      _term_repeat_clear()
+      return 0
+   }
+
+   if _repeat_down && _repeat_key == k && _repeat_mod == md {
+      ;; A native repeat tick arrived.  Keep forwarding it normally, but move
+      ;; the synthetic fallback clock forward so we do not double-send.
+      _repeat_next_ticks = ticks() + _xrepeat_interval_ns()
+      return 0
+   }
+
+   _repeat_key = k
+   _repeat_mod = md
+   _repeat_down = true
+   _repeat_next_ticks = ticks() + _xrepeat_delay_ns()
+   0
+}
+
+fn _term_pump_key_repeat(any now_ticks) bool {
+   if !_term_synth_repeat_enabled() { return false }
+   if !_repeat_down || _repeat_key == 0 { return false }
+   if now_ticks < _repeat_next_ticks { return false }
+
+   def interval = _xrepeat_interval_ns()
+   def max_burst = common.env_int_clamped("NY_TERM_XREPEAT_BURST_MAX", 4, 1, 16)
+
+   mut sent = 0
+   while _repeat_down && now_ticks >= _repeat_next_ticks && sent < max_burst {
+      vt = vterm.handle_event(vt, EVENT_KEY_PRESSED, {
+         "key": _repeat_key,
+         "mod": _repeat_mod,
+         "action": 2,
+         "repeat": true,
+         "ww": win_w,
+         "wh": win_h,
+      })
+      _repeat_next_ticks += interval
+      sent += 1
+   }
+
+   if sent > 0 {
+      _request_redraw(1)
+      return true
+   }
+
+   false
+}
+
+fn _term_idle_sleep_ms(any now_ticks) int {
+   mut sleep_ms = vterm.idle_sleep_ms(vt, now_ticks)
+
+   if _term_synth_repeat_enabled() && _repeat_down {
+      def left_ns = _repeat_next_ticks - ticks()
+      def rep_ms = (left_ns <= 0) ? 0 : max(1, int(left_ns / 1000000))
+      if sleep_ms > rep_ms { sleep_ms = rep_ms }
+   }
+
+   sleep_ms
 }
 
 fn _handle_app_key(int k, int md) bool {
@@ -862,6 +1070,7 @@ fn update(now_ticks) {
    while e != 0 && event_count < max_events {
       def typ = window.event_type(e)
       def data = window.event_data(e)
+      _input_debug_event("raw", typ, data)
       if typ == EVENT_MOUSE_LEAVE || typ == EVENT_FOCUS_OUT {
          _clear_pending_mouse_events()
       } elif typ != EVENT_MOUSE_POS_CHANGED && typ != EVENT_MOUSE_SCROLL {
@@ -875,9 +1084,23 @@ fn update(now_ticks) {
       } elif typ == EVENT_KEY_PRESSED {
          def k = ui.normalize_key(data.get("key", 0))
          def md = view.normalize_mod(data.get("mod", data.get("mods", 0)))
+         def action = _term_key_action(data, k, md)
+
          input_hot = true
          key_input_hot = true
-         if _handle_app_key(k, md) {
+
+         ;; Forward native key presses exactly as delivered.  The local repeat
+         ;; clock is only a fallback / rate stabilizer, and native repeats push
+         ;; its next tick forward to avoid double sends.
+         if _term_synth_repeat_enabled() { _term_repeat_arm(k, md) }
+         else { _term_repeat_clear() }
+
+         if action == 1 && _handle_app_key(k, md) {
+            ;; App layer consumed this key (e.g. Ctrl-= for font zoom). Cancel
+            ;; the synth-repeat we just armed for it so subsequent repeats of
+            ;; the held key are not double-dispatched to vterm alongside the
+            ;; app's own zoom tick.
+            _term_repeat_clear_key(k)
             _request_redraw(1)
             e = window.check_event(win)
             event_count += 1
@@ -887,7 +1110,10 @@ fn update(now_ticks) {
       } elif typ == EVENT_KEY_RELEASED {
          def k = ui.normalize_key(data.get("key", 0))
          def md = view.normalize_mod(data.get("mod", data.get("mods", 0)))
+
+         _term_repeat_clear_key(k)
          _stop_font_zoom_key(k)
+
          if (md & MOD_CONTROL) == 0 {
             _stop_font_zoom_hold()
             _clear_plus_char_suppress()
@@ -927,9 +1153,11 @@ fn update(now_ticks) {
       if ui.is_input_event(typ) { input_hot = true }
       if ui.is_mouse_event(typ) { mouse_input_hot = true }
       def ev_data = _vterm_event_data(typ, data)
+      _input_debug_event("norm", typ, ev_data)
       if typ == EVENT_MOUSE_LEAVE || typ == EVENT_FOCUS_OUT {
          _left_button_was_down = false
          _last_left_down_ticks = 0
+         _term_repeat_clear()
          _clear_font_zoom_keys()
          _clear_plus_char_suppress()
       }
@@ -961,10 +1189,10 @@ fn update(now_ticks) {
       event_count += 1
       input_hot = true
    }
-   if _sync_lost_left_release() {
+   if _term_pump_key_repeat(ticks()) {
       event_count += 1
       input_hot = true
-      mouse_input_hot = true
+      key_input_hot = true
    }
    mut updates = 0
    mut last_update_bytes = 0
@@ -977,7 +1205,7 @@ fn update(now_ticks) {
       if budget_ns > 4000000 { budget_ns = 4000000 }
    } elif scroll_input_hot {
       max_updates = _scroll_update_max
-      if budget_ns < _scroll_update_budget_ns { budget_ns = _scroll_update_budget_ns }
+      budget_ns = _scroll_update_budget_ns
    } elif key_input_hot || mouse_input_hot {
       if key_input_hot {
          max_updates = _key_update_max
@@ -1025,7 +1253,7 @@ fn update(now_ticks) {
    if _font_zoom_active() { _needs_draw = true }
    if pty_backlog_hot { _request_redraw(1) }
    if activity { _last_activity_ticks = now_ticks }
-   if !_needs_draw { msleep(vterm.idle_sleep_ms(vt, now_ticks)) }
+   if !_needs_draw { msleep(_term_idle_sleep_ms(now_ticks)) }
 }
 
 fn _resize_term() {
@@ -1034,8 +1262,13 @@ fn _resize_term() {
    def ch = float(cell.get(1, max(float(font_size), 20.0)))
    def cols = int(win_w / cw)
    def rows = int(win_h / ch)
-   set_win_size(int(win_w), int(win_h))
+   ;; Bail BEFORE updating the internal window size so the renderer keeps using
+   ;; the old (consistent) win_w/win_h + vt dimensions. Calling set_win_size
+   ;; first and then returning leaves vt with stale cols/rows while the ortho
+   ;; projection has already moved to the new (sub-cell) win size, causing
+   ;; text to overflow or clip for one or more frames.
    if cols <= 0 || rows <= 0 { return }
+   set_win_size(int(win_w), int(win_h))
    vt = vterm.resize(vt, cols, rows)
    vt = vt.set("char_w", cw).set("char_h", ch).set("px_w", int(float(cols) * cw)).set("px_h", int(float(rows) * ch))
 }

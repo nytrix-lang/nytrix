@@ -101,21 +101,21 @@ def START_H = 760
 def START_FLAGS = key.WINDOW_CENTER | key.WINDOW_FOCUS_ON_SHOW | key.WINDOW_ALLOW_DND
 def EDITOR_PRESENT_MODE = common.env_truthy("NY_EDITOR_FAST_PRESENT") ? "immediate" : "fifo"
 def UI_FONT_CANDIDATES = [
+   "etc/assets/fonts/jetbrains.ttf",
+   "etc/assets/fonts/maplemono.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Regular.ttf",
    "/usr/share/fonts/OTF/FiraMonoNerdFontMono-Regular.otf",
    "/usr/share/fonts/TTF/MesloLGSNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-   "etc/assets/fonts/jetbrains.ttf",
-   "etc/assets/fonts/maplemono.ttf",
    "etc/assets/fonts/monocraft.ttf",
 ]
 
 def TITLE_FONT_CANDIDATES = [
-   "etc/assets/fonts/monocraft.ttf",
+   "etc/assets/fonts/jetbrains.ttf",
    "etc/assets/fonts/maplemono.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
-   "etc/assets/fonts/jetbrains.ttf",
+   "etc/assets/fonts/monocraft.ttf",
 ]
 
 def MODELINE_FONT_CANDIDATES = [
@@ -137,12 +137,12 @@ fn _scaled_int(f64 value, f64 density, int lo, int hi) int {
    int(min(max(value * density, float(lo)), float(hi)))
 }
 
-def UI_DENSITY = _env_float_between("NY_EDITOR_DENSITY", 0.78, 0.54, 1.25)
-def int FONT_TITLE_SIZE = int(common.env_int_clamped("NY_EDITOR_TITLE_FONT_SIZE", _scaled_int(22.0, UI_DENSITY, 12, 48), 8, 96))
-def int FONT_BODY_SIZE = int(common.env_int_clamped("NY_EDITOR_FONT_SIZE", _scaled_int(16.0, UI_DENSITY, 9, 32), 8, 96))
-def int FONT_SMALL_SIZE = int(common.env_int_clamped("NY_EDITOR_SMALL_FONT_SIZE", _scaled_int(13.0, UI_DENSITY, 8, 28), 8, 96))
-def int FONT_MODELINE_SIZE = int(common.env_int_clamped("NY_EDITOR_MODELINE_FONT_SIZE", max(13, _scaled_int(14.0, UI_DENSITY, 10, 28)), 8, 96))
-def TOP_H = max(16.0, 26.0 * UI_DENSITY)
+def UI_DENSITY = _env_float_between("NY_EDITOR_DENSITY", 1.0, 0.54, 1.25)
+def int FONT_TITLE_SIZE = int(common.env_int_clamped("NY_EDITOR_TITLE_FONT_SIZE", _scaled_int(24.0, UI_DENSITY, 12, 48), 8, 96))
+def int FONT_BODY_SIZE = int(common.env_int_clamped("NY_EDITOR_FONT_SIZE", _scaled_int(18.0, UI_DENSITY, 9, 36), 8, 96))
+def int FONT_SMALL_SIZE = int(common.env_int_clamped("NY_EDITOR_SMALL_FONT_SIZE", _scaled_int(15.0, UI_DENSITY, 8, 32), 8, 96))
+def int FONT_MODELINE_SIZE = int(common.env_int_clamped("NY_EDITOR_MODELINE_FONT_SIZE", max(15, _scaled_int(16.0, UI_DENSITY, 10, 32)), 8, 96))
+def TOP_H = max(21.0, 30.0 * UI_DENSITY)
 def RAIL_MIN_W = 38.0
 def EDIT_MIN_W = 56.0
 def DOCK_MIN_H = 34.0
@@ -175,7 +175,7 @@ if gfx.get_active_backend_name() == "opengl" {
 def FONT_PRIME = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_/#[]{}().,:;+-=<>!?$%@&|\\\"'`~*" + chr(0x2022) + chr(0x2026) + chr(0x2190) + chr(0x2191) + chr(0x2192) + chr(0x2193) + chr(0x2713) + chr(0x2717) + chr(0x03BB)
 
 fn _load_editor_font(list candidates, int size) any {
-   def f = gfx.font_load_first(candidates, size)
+   def f = gfx.font_load_first(candidates, size, gfx.FONT_FILTER_LINEAR)
    gfx.font_allow_color_fallback(f, true)
    gfx.font_prepare(f, FONT_PRIME)
    f
@@ -192,29 +192,29 @@ mut font_modeline = _load_editor_font(MODELINE_FONT_CANDIDATES, font_modeline_si
 def cursor_text = window.create_standard_cursor(window.IBEAM_CURSOR)
 def cursor_resize = window.create_standard_cursor(window.RESIZE_EW_CURSOR)
 def cursor_resize_ns = window.create_standard_cursor(window.RESIZE_NS_CURSOR)
-mut f64 FONT_BODY_ADV = max(1.0, float(gfx.measure_text_fast(font_body, "M").get(0, 8.0)))
-mut f64 FONT_SMALL_ADV = max(1.0, float(gfx.measure_text_fast(font_small, "M").get(0, 7.0)))
-mut f64 FONT_MODELINE_ADV = max(1.0, float(gfx.measure_text_fast(font_modeline, "M").get(0, 7.0)))
+mut f64 FONT_BODY_ADV = max(1.0, float(gfx.measure_text_fast(font_body, "0").get(0, 8.0)))
+mut f64 FONT_SMALL_ADV = max(1.0, float(gfx.measure_text_fast(font_small, "0").get(0, 7.0)))
+mut f64 FONT_MODELINE_ADV = max(1.0, float(gfx.measure_text_fast(font_modeline, "0").get(0, 7.0)))
 mut f64 FONT_MODELINE_CLIP_ADV = max(9.6, FONT_MODELINE_ADV * 1.35)
 def SECTION_H = project.TREE_HEADER_H
-def SECTION_ICON_Y = 4.0
-def SECTION_TEXT_Y = 6.0
-def ROW_TEXT_Y = 4.0
-def EDITOR_TEXT_TOP = 12.0
+def SECTION_ICON_Y = 0.0
+def SECTION_TEXT_Y = 0.0
+def ROW_TEXT_Y = 0.0
+def EDITOR_TEXT_TOP = 6.0
 def INPUT_TRACE = common.env_truthy("NY_EDITOR_INPUT_TRACE")
 def int BIG_FILE_LINES = 5000
 def int HIGHLIGHT_MAX_LINE_BYTES = 900
 def OUTLINE_MAX_LINES = 5000
 def int LINE_DRAW_EXTRA_COLS = 96
-def RAIL_TABS_H = 26.0
+def RAIL_TABS_H = 32.0
 def CONTEXT_W = 284.0
-def CONTEXT_ROW_H = 26.0
+def CONTEXT_ROW_H = 29.0
 def FIND_BAR_H = 58.0
 def f64 PALETTE_HEADER_H = 50.0
-def f64 PALETTE_ROW_H = 24.0
+def f64 PALETTE_ROW_H = 28.0
 def f64 PALETTE_DETAIL_H = 30.0
 def int PALETTE_MAX_ROWS = 14
-def f64 WHICH_KEY_ROW_H = 26.0
+def f64 WHICH_KEY_ROW_H = 29.0
 def int WHICH_KEY_MAX_ROWS = 36
 def TOP_TAB_MIN_W = 64.0
 def TOP_TAB_MAX_W = 144.0
@@ -223,7 +223,7 @@ def MOUSE_FORWARD = 4
 def NAV_LIMIT = 96
 def NAV_SEP = "\t"
 def EDITOR_CACHE_PATH = "build/cache/editor_state.cfg"
-def TERM_TAB_H = 20.0
+def TERM_TAB_H = 26.0
 def TERM_TAB_MIN_W = 64.0
 def TERM_TAB_MAX_W = 118.0
 def PANEL_SPLIT_HIT = 4.0
@@ -299,7 +299,11 @@ fn _text_center(int font, any text, f64 x, f64 y, any color) int {
 fn _font_visual_h(int font, f64 fallback) f64 {
    mut h = float(gfx.font_line_height(font))
    if h < 8.0 { h = fallback }
-   min(max(8.0, h), max(8.0, fallback))
+   ;; Use the actual rasterized font line box.  The old helper clamped the
+   ;; measured height back down to the row fallback, which made baselines and
+   ;; icon/text limits pretend oversized glyphs were shorter than they really
+   ;; were.
+   min(max(8.0, h), 96.0)
 }
 
 fn _clamp_f64(f64 value, f64 lo, f64 hi) f64 {
@@ -322,8 +326,39 @@ fn _center_y(f64 y, f64 h, f64 item_h) f64 {
    float(int(y + pad * 0.5 + 0.5))
 }
 
+fn _snap_px(f64 v) f64 {
+   float(int(v + 0.5))
+}
+
 fn _text_center_y_for(int font, f64 y, f64 h) f64 {
    _center_y(y, h, _font_visual_h(font, h))
+}
+
+fn _row_text_y(int font, f64 row_y, f64 row_h) f64 {
+   _text_center_y_for(font, row_y, row_h)
+}
+
+fn _font_ascent_px(int font, f64 fallback) f64 {
+   mut a = float(gfx.font_ascent(font))
+   if a <= 0.0 { a = fallback * 0.78 }
+   a
+}
+
+fn _row_baseline_y(int ref_font, f64 row_y, f64 row_h) f64 {
+   def text_h = _font_visual_h(ref_font, row_h)
+   _snap_px(row_y + max(0.0, row_h - text_h) * 0.5 + _font_ascent_px(ref_font, text_h))
+}
+
+fn _row_text_y_from_baseline(int font, f64 baseline_y, f64 row_h) f64 {
+   _snap_px(baseline_y - _font_ascent_px(font, _font_visual_h(font, row_h)))
+}
+
+fn _editor_row_baseline_y(f64 row_y) f64 {
+   _row_baseline_y(font_body, row_y, ed.LINE_H)
+}
+
+fn _editor_row_y(f64 panel_y, int row) f64 {
+   _snap_px(panel_y + EDITOR_TEXT_TOP + float(row) * ed.LINE_H)
 }
 
 fn _draw_tex_rect(int tex, f64 x, f64 y, f64 w, f64 h, any tint=gfx.WHITE) int {
@@ -453,6 +488,7 @@ def bool GOTO_PROBE = _editor_probe("GOTO")
 def bool GIT_PROBE = _editor_probe("GIT")
 def bool TAB_PROBE = _editor_probe("TAB")
 def bool SELECT_PROBE = _editor_probe("SELECT")
+def bool TEXTGRID_PROBE = _editor_probe("TEXTGRID")
 def bool BENCH_PROBE = _editor_probe("BENCH")
 def bool MOCK_BENCH_FAST = BENCH_PROBE && common.env_truthy("NY_UI_HEADLESS") && !common.env_truthy("NYTRIX_AUTO_DUMP")
 def int BENCH_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_BENCH_FRAMES", 240, 1, 100000))
@@ -555,6 +591,16 @@ fn _trace_draw(
 
 fn _request_full_redraw(int frames=2) int {
    if frames > force_full_redraw { force_full_redraw = frames }
+   0
+}
+
+fn _clear_pending_destructive_prompts() int {
+   st["quit_prompt"] = false
+   st["kill_confirm"] = false
+   st["kill_confirm_buf"] = -1
+   st["reload_confirm"] = false
+   st["reload_confirm_buf"] = -1
+   last_escape_ns = 0
    0
 }
 
@@ -753,10 +799,10 @@ fn _apply_editor_fonts() int {
    font_body = _load_editor_font(UI_FONT_CANDIDATES, font_body_size)
    font_small = _load_editor_font(UI_FONT_CANDIDATES, font_small_size)
    font_modeline = _load_editor_font(MODELINE_FONT_CANDIDATES, font_modeline_size)
-   FONT_BODY_ADV = _clamp_f64(float(gfx.measure_text_fast(font_body, "M").get(0, 8.0)), 1.0, 10000.0)
-   FONT_SMALL_ADV = _clamp_f64(float(gfx.measure_text_fast(font_small, "M").get(0, 7.0)), 1.0, 10000.0)
-   FONT_MODELINE_ADV = _clamp_f64(float(gfx.measure_text_fast(font_modeline, "M").get(0, 7.0)), 1.0, 10000.0)
-   FONT_MODELINE_CLIP_ADV = _clamp_f64(FONT_MODELINE_ADV * 1.35, 9.6, 10000.0)
+   FONT_BODY_ADV = _clamp_f64(float(gfx.measure_text_fast(font_body, "0").get(0, 8.0)), 1.0, 10000.0)
+   FONT_SMALL_ADV = _clamp_f64(float(gfx.measure_text_fast(font_small, "0").get(0, 7.0)), 1.0, 10000.0)
+   FONT_MODELINE_ADV = _clamp_f64(float(gfx.measure_text_fast(font_modeline, "0").get(0, 7.0)), 1.0, 10000.0)
+   FONT_MODELINE_CLIP_ADV = _clamp_f64(FONT_MODELINE_ADV * 1.35, 11.0, 10000.0)
    term_state = termpane.set_font(term_state, font_body)
    _invalidate_text_metrics()
    0
@@ -1130,7 +1176,7 @@ fn _cache_append_project_ops(list rows, str prefix, list ops) list {
 }
 
 fn _restore_session_allowed() bool {
-   cli.args().len <= 1 && !INPUT_PROBE && !CONTEXT_PROBE && !TERMINAL_PROBE && !TERMINAL_DUMP_PROBE && !SYNTAX_PROBE && !NAV_PROBE && !UNDO_PROBE && !ESCAPE_PROBE && !MODELINE_PROBE && !CHORD_PROBE && !FIND_PROBE && !PALETTE_PROBE && !WHICH_KEY_PROBE && !MULTICURSOR_PROBE && !ZOOM_PROBE && !SCROLLBAR_PROBE && !GOTO_PROBE && !GIT_PROBE && !TAB_PROBE && !SELECT_PROBE && !BENCH_PROBE
+   cli.args().len <= 1 && !INPUT_PROBE && !CONTEXT_PROBE && !TERMINAL_PROBE && !TERMINAL_DUMP_PROBE && !SYNTAX_PROBE && !NAV_PROBE && !UNDO_PROBE && !ESCAPE_PROBE && !MODELINE_PROBE && !CHORD_PROBE && !FIND_PROBE && !PALETTE_PROBE && !WHICH_KEY_PROBE && !MULTICURSOR_PROBE && !ZOOM_PROBE && !SCROLLBAR_PROBE && !GOTO_PROBE && !GIT_PROBE && !TAB_PROBE && !SELECT_PROBE && !TEXTGRID_PROBE && !BENCH_PROBE
 }
 
 fn _restore_cached_buffers(any raw) list {
@@ -2778,9 +2824,14 @@ fn _debug_current_file() int {
 }
 
 fn _save() int {
+   def path = _current_path()
+   def was_dirty = bool(ed.current_buffer(st).get("dirty", false))
    st = session.save(st)
-   if lsp_state.get("active", false) && _current_path().len > 0 {
-      lsp_state["last_request"] = lsp.did_save(lsp_state, _current_path())
+   def now_dirty = bool(ed.current_buffer(st).get("dirty", false))
+   def save_status = to_str(st.get("status", ""))
+   def save_ok = path.len > 0 && !str.startswith(save_status, "save failed") && save_status != "read-only preview" && save_status != "memory buffer"
+   if lsp_state.get("active", false) && save_ok && (!now_dirty || !was_dirty) {
+      lsp_state["last_request"] = lsp.did_save(lsp_state, path)
    }
    0
 }
@@ -2855,6 +2906,20 @@ fn _kill_buffer() int {
       return 0
    }
    def active = int(st.get("active", 0))
+   ;; Guard against accidentally discarding unsaved edits: require a second
+   ;; kill-buffer invocation within a short window when the active buffer is
+   ;; dirty. The first call only emits a status hint.
+   def cur = bs.get(active, {})
+   if bool(cur.get("dirty", false)) && !bool(cur.get("readonly", false)) {
+      if !bool(st.get("kill_confirm", false)) || int(st.get("kill_confirm_buf", -1)) != active {
+         st["kill_confirm"] = true
+         st["kill_confirm_buf"] = active
+         _status("unsaved changes — run kill-buffer again to discard")
+         return 0
+      }
+      st["kill_confirm"] = false
+      st["kill_confirm_buf"] = -1
+   }
    mut out = []
    mut i = 0
    while i < bs.len {
@@ -2905,6 +2970,7 @@ fn _mutate_lines(list lines, str msg) int {
 fn _save_all() int {
    mut bs = st.get("buffers", [])
    mut saved = 0
+   mut failed = 0
    mut i = 0
    while i < bs.len {
       mut b = bs.get(i, {})
@@ -2914,18 +2980,41 @@ fn _save_all() int {
             b["dirty"] = false
             bs[i] = b
             saved += 1
+         } else {
+            ;; write failed (disk full, permissions, etc.) — keep dirty=true
+            ;; and surface the failure in the status line so the user knows
+            ;; the modeline "MOD" did not actually clear.
+            failed += 1
          }
       }
       i += 1
    }
    st["buffers"] = bs
-   _status("saved " + to_str(saved) + " buffer" + (saved == 1 ? "" : "s"))
+   if failed > 0 {
+      _status("saved " + to_str(saved) + ", " + to_str(failed) + " failed")
+   } else {
+      _status("saved " + to_str(saved) + " buffer" + (saved == 1 ? "" : "s"))
+   }
    0
 }
 
 fn _reload_from_disk() int {
    def path = to_str(ed.current_buffer(st).get("path", ""))
    if path.len <= 0 || !file_exists(path) { _status("no file to reload") return 0 }
+   ;; Guard against clobbering unsaved in-memory edits: same double-tap pattern
+   ;; as _kill_buffer. The first invocation only warns; the second one within
+   ;; the same editor session actually reloads.
+   if bool(ed.current_buffer(st).get("dirty", false)) {
+      def active = int(st.get("active", 0))
+      if !bool(st.get("reload_confirm", false)) || int(st.get("reload_confirm_buf", -1)) != active {
+         st["reload_confirm"] = true
+         st["reload_confirm_buf"] = active
+         _status("buffer dirty — run reload again to discard edits")
+         return 0
+      }
+      st["reload_confirm"] = false
+      st["reload_confirm_buf"] = -1
+   }
    mut bs = st.get("buffers", [])
    bs[int(st.get("active", 0))] = session.read_buffer(path)
    st["buffers"] = bs
@@ -3541,7 +3630,7 @@ fn _layout_with_terminal(dict lay, f64 sh) dict {
          term_state,
          float(lay.get("dock_x", 0.0)) + 8.0,
          float(lay.get("dock_y", 0.0)) + TERM_TAB_H,
-         float(lay.get("dock_w", 1.0)) - 16.0,
+         max(1.0, float(lay.get("dock_w", 1.0)) - 16.0),
          max(48.0, float(lay.get("dock_h", 1.0)) - TERM_TAB_H - 1.0)
       )
    }
@@ -3580,7 +3669,7 @@ fn _term_tab_hit(dict lay, f64 mx, f64 my) dict {
    mut i = 0
    while i < n {
       def tx = start_x + float(i) * tw
-      if mx >= tx && mx <= tx + tw - 2.0 {
+      if mx >= tx && mx < tx + tw {
          return {"action": mx >= tx + tw - 23.0 ? "close" : "select", "idx": i}
       }
       i += 1
@@ -3699,7 +3788,10 @@ fn _apply_scrollbar_target(dict target, f64 my) int {
 
 fn _rail_width_from_mouse(dict lay, f64 mx) f64 {
    def sw = float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0))
-   min(max(mx, RAIL_MIN_W), max(RAIL_MIN_W, sw - EDIT_MIN_W))
+   ;; Upper bound is the editor-edge position; let it fall to 0 when the window
+   ;; is narrower than EDIT_MIN_W so the layout can collapse the rail instead
+   ;; of starving the editor pane below EDIT_MIN_W.
+   min(max(mx, RAIL_MIN_W), max(0.0, sw - EDIT_MIN_W))
 }
 
 fn _place_cursor(dict lay, f64 x, f64 y) int {
@@ -4267,7 +4359,8 @@ fn _handle_key(any data) int {
       return 0
    }
    if INPUT_TRACE { print("[editor:key] fallback") }
-   _direct_key_fallback(data)
+   def fallback_handled = _direct_key_fallback(data)
+   if fallback_handled && st.get("quit_prompt", false) { _clear_pending_destructive_prompts() }
    0
 }
 
@@ -4327,8 +4420,7 @@ fn _handle_escape_key(any data) bool {
    st["drag_divider"] = false
    st["drag_terminal"] = false
    if cleared {
-      st["quit_prompt"] = false
-      last_escape_ns = 0
+      _clear_pending_destructive_prompts()
       _request_full_redraw(2)
       _status("cleared")
       return true
@@ -4361,6 +4453,10 @@ fn _handle_mouse_press(dict lay, any data) int {
          palette_state = pal.close(palette_state)
          return 0
       }
+      ;; pi == -1: click landed inside the palette rect but not on a row
+      ;; (e.g. on the palette header padding). Swallow it so the click does
+      ;; not fall through to tab/terminal handlers behind the modal.
+      if pi == -1 { return 0 }
    }
    def tab_hit_top = _top_tab_hit(lay, mx, my)
    def top_action = to_str(tab_hit_top.get("action", ""))
@@ -4920,16 +5016,27 @@ fn _handle_drop(dict lay, any data) int {
    if is_dict(target) && target.len > 0 {
       mut opened = false
       mut moved = 0
+      mut failed = 0
       mut i = 0
       while i < files.len {
          def dst = _drop_move_into(target, to_str(files.get(i, "")))
          if dst.len > 0 {
             moved += 1
             if !opened && !osfs.is_dir(dst) { _open_file(dst) opened = true }
+         } else {
+            failed += 1
          }
          i += 1
       }
-      if moved > 0 { _status("moved " + to_str(moved) + " dropped item" + (moved == 1 ? "" : "s")) }
+      ;; Preserve per-file failure messages instead of overwriting them with a
+      ;; blanket success count.
+      if moved > 0 && failed > 0 {
+         _status("moved " + to_str(moved) + ", " + to_str(failed) + " failed")
+      } elif moved > 0 {
+         _status("moved " + to_str(moved) + " dropped item" + (moved == 1 ? "" : "s"))
+      } elif failed > 0 {
+         _status("drop failed: " + to_str(failed) + " item" + (failed == 1 ? "" : "s"))
+      }
       return 0
    }
    st = session.append_file(st, to_str(files.get(0, "")))
@@ -4956,6 +5063,13 @@ fn _process_events(dict lay) int {
       def is_mouse_move = typ == window.EVENT_MOUSE_POS_CHANGED
       def is_scroll = typ == window.EVENT_MOUSE_SCROLL
       def is_drop = typ == window.EVENT_DATA_DROP
+      ;; Focus loss / mouse leave: drop any armed chord prefix and the quit
+      ;; prompt so the user does not return to a half-armed editor that
+      ;; silently runs C-x k on the next keystroke.
+      if typ == window.EVENT_FOCUS_OUT || typ == window.EVENT_MOUSE_LEAVE {
+         if chord.pending(chord_state) { chord_state = chord.empty_state() }
+         _clear_pending_destructive_prompts()
+      }
       mut scroll_ev = 0
       if is_scroll {
          if is_dict(data) {
@@ -5441,15 +5555,18 @@ fn _prepare_visible_runs(
    mut i = 0
    while i < rows && scroll + i < lines.len {
       def li = scroll + i
-      def yy = y + EDITOR_TEXT_TOP + float(i) * ed.LINE_H
+      def yy = _editor_row_y(y, i)
+      def baseline_y = _editor_row_baseline_y(yy)
+      def text_y = _row_text_y_from_baseline(font_body, baseline_y, ed.LINE_H)
+      def num_y = _row_text_y_from_baseline(font_small, baseline_y, ed.LINE_H)
       def line = to_str(lines.get(li, ""))
       def draw_line = _draw_line_text(line, draw_limit)
       if show_numbers {
          line_runs = line_runs.append(to_str(li + 1))
          line_runs = line_runs.append(num_x)
-         line_runs = line_runs.append(yy + 2.0)
+         line_runs = line_runs.append(num_y)
       }
-      text_runs = _append_highlight_runs(text_runs, filename, draw_line, li, text_x, yy, _highlight_on(draw_line))
+      text_runs = _append_highlight_runs(text_runs, filename, draw_line, li, text_x, text_y, _highlight_on(draw_line))
       i += 1
    }
    visible_runs_cache_key = key
@@ -5534,7 +5651,7 @@ fn _draw_color_swatches_visible(list lines, int scroll, int rows, f64 text_x, f6
          def stop = min(max(int(hit.get("end", start)), start), line.len)
          def hex = to_str(hit.get("hex", ""))
          if hex.len >= 7 && stop > start {
-            def yy = y + EDITOR_TEXT_TOP + float(li - scroll) * ed.LINE_H
+            def yy = _editor_row_y(y, li - scroll)
             def sx = text_x + _measure_prefix(line, start)
             def ex = text_x + _measure_prefix(line, stop)
             def col = _hex_color(hex)
@@ -5562,7 +5679,7 @@ fn _draw_color_picker(dict lay, f64 sw, f64 sh) int {
    if row >= scroll && row < scroll + rows {
       def line = to_str(ed.current_lines(st).get(row, ""))
       x = min(max(_line_text_x(lay) + _measure_prefix(line, colorpicker.start(color_state)) + 18.0, 16.0), max(16.0, sw - 236.0))
-      y = min(max(y0 + EDITOR_TEXT_TOP + float(row - scroll) * ed.LINE_H + 20.0, 16.0), max(16.0, sh - 112.0))
+      y = min(max(_editor_row_y(y0, row - scroll) + ed.LINE_H + 2.0, 16.0), max(16.0, sh - 112.0))
    }
    def w = 220.0
    def h = 88.0
@@ -5630,7 +5747,7 @@ fn _draw_find_visible(list lines, int scroll, int rows, f64 text_x, f64 y) int {
          def a = min(max(int(r.get("start", 0)), 0), line.len)
          def b = min(max(int(r.get("end", a)), a), line.len)
          if b > a {
-            def yy = y + EDITOR_TEXT_TOP + float(row - scroll) * ed.LINE_H
+            def yy = _editor_row_y(y, row - scroll)
             def sx = text_x + _measure_prefix(line, a)
             def ex = text_x + _measure_prefix(line, b)
             _fill_rect(sx, yy - 2.0, max(4.0, ex - sx), ed.LINE_H, i == active_idx ? gfx.color_alpha(C_ACCENT, 0.52) : gfx.color_alpha(C_CYAN, 0.24))
@@ -5700,6 +5817,7 @@ fn _top_tab_hit(dict lay, f64 mx, f64 my) dict {
 fn _select_top_tab(int idx) int {
    def bs = st.get("buffers", [])
    if idx < 0 || idx >= bs.len { return 0 }
+   _clear_pending_destructive_prompts()
    if idx != int(st.get("active", 0)) { _nav_push_current() }
    st = ed.select_buffer(st, idx)
    _buffer_changed(true)
@@ -5771,10 +5889,12 @@ fn _queue_git_badge(list runs, str code, f64 right_x, f64 y) list {
 
 fn _draw_section_title(str icon, str title, f64 x, f64 y, f64 w, str right="") int {
    _fill_rect(x, y, w, SECTION_H, C_PANE_2)
-   _draw_icon(icon, x + 8.0, y + SECTION_ICON_Y, 15.0, C_MUTED)
+   def icon_y = _center_y(y, SECTION_H, 15.0)
+   def text_y = _row_text_y(font_small, y, SECTION_H)
+   _draw_icon(icon, x + 8.0, icon_y, 15.0, C_MUTED)
    mut runs = []
-   runs = _append_text_run(runs, title, x + 30.0, y + SECTION_TEXT_Y, U_MUTED)
-   if right.len > 0 { runs = _append_right_run(runs, font_small, right, x + w - 8.0, y + SECTION_TEXT_Y, U_MUTED) }
+   runs = _append_text_run(runs, title, x + 30.0, text_y, U_MUTED)
+   if right.len > 0 { runs = _append_right_run(runs, font_small, right, x + w - 8.0, text_y, U_MUTED) }
    _flush_rects()
    if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
    0
@@ -5840,12 +5960,13 @@ fn _draw_rail_tabs(f64 x, f64 y, f64 w) int {
    while i < tabs.len {
       def t = tabs.get(i)
       def id = to_str(t.get(0, ""))
-      def tx = x + float(i) * tab_w
-      def on = id == active
-      _fill_rect(tx, y, tab_w, RAIL_TABS_H, on ? gfx.color_alpha(C_ACCENT, 0.13) : C_PANE_2)
-      _stroke_rect(tx, y, tab_w, RAIL_TABS_H, on ? C_ACCENT : C_LINE, 1.0)
-      _draw_icon(to_str(t.get(1, "")), tx + 8.0, y + 7.0, 15.0, on ? C_ACCENT : C_MUTED)
-      runs = _append_text_run(runs, widgets.preview(to_str(t.get(2, "")), int(max(4.0, (tab_w - 30.0) / 7.0))), tx + 27.0, y + 9.0, on ? U_TEXT : U_MUTED)
+	 def tx = _snap_px(x + float(i) * tab_w)
+	 def on = id == active
+	 def text_y = _row_text_y(font_small, y, RAIL_TABS_H)
+	 _fill_rect(tx, y, tab_w, RAIL_TABS_H, on ? gfx.color_alpha(C_ACCENT, 0.13) : C_PANE_2)
+	 _stroke_rect(tx, y, tab_w, RAIL_TABS_H, on ? C_ACCENT : C_LINE, 1.0)
+	 _draw_icon(to_str(t.get(1, "")), tx + 8.0, _center_y(y, RAIL_TABS_H, 15.0), 15.0, on ? C_ACCENT : C_MUTED)
+	 runs = _append_text_run(runs, widgets.preview(to_str(t.get(2, "")), int(max(4.0, (tab_w - 30.0) / 7.0))), tx + 29.0, text_y, on ? U_TEXT : U_MUTED)
       i += 1
    }
    _flush_rects()
@@ -5869,8 +5990,10 @@ fn _draw_git_panel(f64 x, f64 y, f64 w, f64 h) int {
       def e = rows.get(scroll + i, {})
       def code = to_str(e.get("git", ""))
       def col = _git_color(code)
-      _draw_icon(project.file_icon(e), x + 10.0, yy + 3.0, 16.0, col)
-      runs = _append_text_run(runs, widgets.preview(to_str(e.get("rel", "")), int(max(8.0, (w - 74.0) / 7.2))), x + 32.0, yy + ROW_TEXT_Y, U_MUTED)
+      def baseline_y = _row_baseline_y(font_small, yy, project.TREE_ROW_H)
+      def text_y = _row_text_y_from_baseline(font_small, baseline_y, project.TREE_ROW_H)
+      _draw_icon(project.file_icon(e), x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, col)
+      runs = _append_text_run(runs, widgets.preview(to_str(e.get("rel", "")), int(max(8.0, (w - 74.0) / 7.2))), x + 34.0, text_y, U_MUTED)
       runs = _queue_git_badge(runs, code, x + w - 8.0, yy)
       i += 1
    }
@@ -5914,9 +6037,11 @@ fn _draw_timeline_panel(f64 x, f64 y, f64 w, f64 h) int {
       def kind = to_str(row.get(0, ""))
       def label = to_str(row.get(1, ""))
       def detail = to_str(row.get(2, ""))
-      _draw_icon(kind == "buffer" ? "textfile" : "statusindicator", x + 10.0, yy + 3.0, 16.0, kind == "buffer" ? C_ACCENT_2 : C_MUTED)
-      runs = _append_text_run(runs, widgets.preview(label, int(max(8.0, (w - 50.0) / 7.2))), x + 32.0, yy + ROW_TEXT_Y, kind == "buffer" ? U_TEXT : U_MUTED)
-      if detail.len > 0 { runs = _append_right_run(runs, font_small, widgets.preview(detail, 12), x + w - 8.0, yy + ROW_TEXT_Y, U_DIM) }
+      def baseline_y = _row_baseline_y(font_small, yy, project.TREE_ROW_H)
+      def text_y = _row_text_y_from_baseline(font_small, baseline_y, project.TREE_ROW_H)
+      _draw_icon(kind == "buffer" ? "textfile" : "statusindicator", x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, kind == "buffer" ? C_ACCENT_2 : C_MUTED)
+      runs = _append_text_run(runs, widgets.preview(label, int(max(8.0, (w - 50.0) / 7.2))), x + 34.0, text_y, kind == "buffer" ? U_TEXT : U_MUTED)
+      if detail.len > 0 { runs = _append_right_run(runs, font_small, widgets.preview(detail, 12), x + w - 8.0, text_y, U_DIM) }
       i += 1
    }
    if rows.len == 0 { runs = _append_text_run(runs, "no timeline yet", x + 12.0, y + 36.0, U_MUTED) }
@@ -5951,12 +6076,17 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
       if selected { _fill_rect(x + 4.0, yy, w - 8.0, project.TREE_ROW_H, gfx.color_alpha(C_ACCENT, active ? 0.25 : 0.14)) }
       elif active { _fill_rect(x + 4.0, yy, w - 8.0, project.TREE_ROW_H, gfx.color_alpha(C_ACCENT, 0.18)) }
       mut ix = x + 8.0 + float(depth) * 12.0
+      def arrow_slot = 16.0
       if e.get("dir", false) {
-         _draw_icon(e.get("open", false) ? "guitreearrowdown" : "guitreearrowright", ix, yy + 4.0, 12.0, selected ? C_ACCENT : C_MUTED)
-         ix += 14.0
+         _draw_icon(e.get("open", false) ? "guitreearrowdown" : "guitreearrowright", ix + 1.0, _center_y(yy, project.TREE_ROW_H, 12.0), 12.0, selected ? C_ACCENT : C_MUTED)
       }
-      _draw_icon(project.file_icon(e), ix, yy + 3.0, 16.0, (active || selected) ? C_ACCENT : C_MUTED)
-      runs = _append_text_run(runs, widgets.preview(to_str(e.get("name", "")), int(max(8.0, (w - (ix - x) - 46.0) / 7.2))), ix + 20.0, yy + ROW_TEXT_Y, (active || selected) ? U_TEXT : U_MUTED)
+      ix += arrow_slot
+      def file_x = ix
+      def text_x = file_x + 24.0
+      def baseline_y = _row_baseline_y(font_small, yy, project.TREE_ROW_H)
+      def text_y = _row_text_y_from_baseline(font_small, baseline_y, project.TREE_ROW_H)
+      _draw_icon(project.file_icon(e), file_x, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, (active || selected) ? C_ACCENT : C_MUTED)
+      runs = _append_text_run(runs, widgets.preview(to_str(e.get("name", "")), int(max(8.0, (w - (text_x - x) - 26.0) / 7.2))), text_x, text_y, (active || selected) ? U_TEXT : U_MUTED)
       runs = _queue_git_badge(runs, to_str(e.get("git", "")), x + w - 8.0, yy)
       i += 1
    }
@@ -5988,9 +6118,10 @@ fn _draw_outline(f64 x, f64 y, f64 w, f64 h) int {
       def line = int(s.get("line", 0))
       def active = line == int(st.get("cursor_line", 0))
       if active { _fill_rect(x + 4.0, yy, w - 8.0, outline.ROW_H, gfx.color_alpha(C_ACCENT, 0.16)) }
-      _draw_icon(to_str(s.get("icon", "graphnode")), x + 10.0, yy + 3.0, 15.0, active ? C_ACCENT : C_MUTED)
-      runs = _append_text_run(runs, widgets.preview(to_str(s.get("name", "")), int(max(8.0, (w - 72.0) / 7.2))), x + 30.0, yy + 4.0, active ? U_TEXT : U_MUTED)
-      runs = _append_right_run(runs, font_small, to_str(line + 1), x + w - 8.0, yy + 4.0, U_MUTED)
+      def text_y = _row_text_y(font_small, yy, outline.ROW_H)
+      _draw_icon(to_str(s.get("icon", "graphnode")), x + 10.0, _center_y(yy, outline.ROW_H, 15.0), 15.0, active ? C_ACCENT : C_MUTED)
+      runs = _append_text_run(runs, widgets.preview(to_str(s.get("name", "")), int(max(8.0, (w - 72.0) / 7.2))), x + 32.0, text_y, active ? U_TEXT : U_MUTED)
+      runs = _append_right_run(runs, font_small, to_str(line + 1), x + w - 8.0, text_y, U_MUTED)
       i += 1
    }
    if syms.len > visible && visible > 0 {
@@ -6084,20 +6215,23 @@ fn _draw_editor(dict lay, bool caret) int {
    def selection_ranges = _selection_ranges_active()
    def cursor_row = int(st.get("cursor_line", 0))
    if cursor_row >= scroll && cursor_row < scroll + rows {
-      def cy0 = y + EDITOR_TEXT_TOP + float(cursor_row - scroll) * ed.LINE_H
-      _fill_rect(x + 1.0, cy0 - 2.0, w - 2.0, ed.LINE_H, gfx.color_alpha(C_ACCENT, 0.10))
+      def cy0 = _editor_row_y(y, cursor_row - scroll)
+      _fill_rect(x + 1.0, cy0, w - 2.0, ed.LINE_H, gfx.color_alpha(C_ACCENT, 0.10))
    }
    if show_guides || selection_ranges.len > 0 {
       mut i = 0
       while i < rows && scroll + i < lines.len {
          def li = scroll + i
-         def yy = y + EDITOR_TEXT_TOP + float(i) * ed.LINE_H
+         def yy = _editor_row_y(y, i)
+         def baseline_y = _editor_row_baseline_y(yy)
+         def text_y = _row_text_y_from_baseline(font_body, baseline_y, ed.LINE_H)
+         def num_y = _row_text_y_from_baseline(font_small, baseline_y, ed.LINE_H)
          def line = to_str(lines.get(li, ""))
          def draw_line = _draw_line_text(line, draw_limit)
          if show_guides {
             mut g = 0
             while g < draw_line.len && load8(draw_line, g) == 32 {
-               if g > 0 && g % 3 == 0 { _fill_rect(text_x + float(g) * FONT_BODY_ADV, yy - 1.0, 1.0, ed.LINE_H - 2.0, gfx.color_alpha(C_LINE_2, 0.58)) }
+               if g > 0 && g % 3 == 0 { _fill_rect(text_x + float(g) * FONT_BODY_ADV, yy + 1.0, 1.0, ed.LINE_H - 2.0, gfx.color_alpha(C_LINE_2, 0.58)) }
                g += 1
             }
          }
@@ -6109,9 +6243,9 @@ fn _draw_editor(dict lay, bool caret) int {
          if show_numbers {
             line_runs = line_runs.append(to_str(li + 1))
             line_runs = line_runs.append(x + 16.0)
-            line_runs = line_runs.append(yy + 2.0)
+            line_runs = line_runs.append(num_y)
          }
-         text_runs = _append_highlight_runs(text_runs, filename, draw_line, li, text_x, yy, _highlight_on(draw_line))
+         text_runs = _append_highlight_runs(text_runs, filename, draw_line, li, text_x, text_y, _highlight_on(draw_line))
          i += 1
       }
    } else {
@@ -6128,8 +6262,8 @@ fn _draw_editor(dict lay, bool caret) int {
    if caret && int(st.get("cursor_line", 0)) >= scroll && int(st.get("cursor_line", 0)) < scroll + rows {
       def line = to_str(lines.get(int(st.get("cursor_line", 0)), ""))
       def cx = text_x + _measure_prefix(line, int(st.get("cursor_col", 0)))
-      def cy = y + EDITOR_TEXT_TOP + float(int(st.get("cursor_line", 0)) - scroll) * ed.LINE_H
-      _fill_rect(cx, cy - 1.0, 2.0, ed.LINE_H - 2.0, C_ACCENT)
+      def cy = _editor_row_y(y, int(st.get("cursor_line", 0)) - scroll)
+      _fill_rect(cx, cy + 1.0, 2.0, ed.LINE_H - 2.0, C_ACCENT)
    }
    if caret && _extra_cursor_count() > 0 {
       def extras = _extra_cursors()
@@ -6140,8 +6274,8 @@ fn _draw_editor(dict lay, bool caret) int {
             def eline = to_str(lines.get(erow, ""))
             def ecol = min(max(_cursor_col(extras.get(ei)), 0), eline.len)
             def ecx = text_x + _measure_prefix(eline, ecol)
-            def ecy = y + EDITOR_TEXT_TOP + float(erow - scroll) * ed.LINE_H
-            _fill_rect(ecx, ecy - 1.0, 2.0, ed.LINE_H - 2.0, C_ACCENT_2)
+            def ecy = _editor_row_y(y, erow - scroll)
+            _fill_rect(ecx, ecy + 1.0, 2.0, ed.LINE_H - 2.0, C_ACCENT_2)
          }
          ei += 1
       }
@@ -6165,24 +6299,25 @@ fn _draw_terminal(dict lay) int {
    def tw = _term_tab_w(w, n)
    mut i = 0
    while i < n {
-      def tx = x + 6.0 + float(i) * tw
+      def tx = _snap_px(x + 6.0 + float(i) * tw)
       def tab_w = min(tw - 2.0, x + w - tx - 40.0)
       if tab_w <= 16.0 { break }
       def on = i == active
+      def text_y = _row_text_y(font_small, y + 3.0, TERM_TAB_H - 5.0)
       _fill_rect(tx, y + 3.0, tab_w, TERM_TAB_H - 5.0, on ? C_PANE : C_CHIP)
       _stroke_rect(tx, y + 3.0, tab_w, TERM_TAB_H - 5.0, on ? C_ACCENT : C_LINE, 1.0)
       if on { _fill_rect(tx, y + TERM_TAB_H - 2.0, tab_w, 2.0, C_ACCENT) }
-      runs = _append_text_run(runs, widgets.preview(termpane.tab_title(term_state, i), int(max(4.0, (tab_w - 30.0) / FONT_SMALL_ADV))), tx + 9.0, y + 8.0, on ? U_TEXT : U_MUTED)
-      runs = _append_text_run(runs, "x", tx + tab_w - 15.0, y + 8.0, on ? U_MUTED : U_DIM)
+      runs = _append_text_run(runs, widgets.preview(termpane.tab_title(term_state, i), int(max(4.0, (tab_w - 30.0) / FONT_SMALL_ADV))), tx + 9.0, text_y, on ? U_TEXT : U_MUTED)
+      runs = _append_text_run(runs, "x", tx + tab_w - 15.0, text_y, on ? U_MUTED : U_DIM)
       i += 1
    }
-   def plus_x = x + 6.0 + float(n) * tw + 3.0
+   def plus_x = _snap_px(x + 6.0 + float(n) * tw + 3.0)
    if plus_x + 24.0 < x + w - 8.0 {
       _fill_rect(plus_x, y + 3.0, 24.0, TERM_TAB_H - 5.0, C_CHIP)
       _stroke_rect(plus_x, y + 3.0, 24.0, TERM_TAB_H - 5.0, C_LINE, 1.0)
-      runs = _append_center_run(runs, font_small, "+", plus_x + 12.0, y + 8.0, U_ACCENT)
+      runs = _append_center_run(runs, font_small, "+", plus_x + 12.0, _row_text_y(font_small, y + 3.0, TERM_TAB_H - 5.0), U_ACCENT)
    }
-   runs = _append_right_run(runs, font_small, "F6 shell  F7 repl", x + w - 10.0, y + 8.0, U_DIM)
+   runs = _append_right_run(runs, font_small, "F6 shell  F7 repl", x + w - 10.0, _row_text_y(font_small, y + 3.0, TERM_TAB_H - 5.0), U_DIM)
    _flush_rects()
    if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
    _stroke_rect(x, y, w, h, to_str(st.get("focus", "editor")) == "terminal" ? C_ACCENT : C_LINE, to_str(st.get("focus", "editor")) == "terminal" ? 2.0 : 1.0)
@@ -6320,15 +6455,17 @@ fn _draw_palette(f64 sw, f64 sh) int {
    while i < rows && i < visible_matches.len {
       def row = visible_matches.get(i)
       def actual = start + i
-      def yy = y + PALETTE_HEADER_H + float(i) * PALETTE_ROW_H
-      def tag = cmd.row_tag(row)
-      def active = actual == pal.index(palette_state)
-      def col = _command_color(tag)
-      if active { _fill_rect(x + 10.0, yy - 4.0, w - 20.0, PALETTE_ROW_H - 4.0, gfx.color_alpha(C_ACCENT, 0.20)) }
-      _draw_icon(_command_icon(tag, cmd.row_id(row)), x + 18.0, yy + 4.0, 17.0, active ? C_ACCENT : col)
-      body_runs = _append_text_run(body_runs, _preview_body(to_str(row.get(0, "")), w * 0.36), x + 42.0, yy + 4.0, active ? U_TEXT : U_MUTED)
-      small_runs = _append_text_run(small_runs, _preview_small(to_str(row.get(3, "")), w * 0.30), x + w * 0.44, yy + 8.0, active ? U_ACCENT_2 : U_DIM)
-      small_runs = _queue_key_badge(small_runs, _preview_small(to_str(row.get(2, "")), 120.0), x + w - 146.0, yy + 3.0, active ? C_ACCENT : C_MUTED)
+	 def yy = y + PALETTE_HEADER_H + float(i) * PALETTE_ROW_H
+	 def tag = cmd.row_tag(row)
+	 def active = actual == pal.index(palette_state)
+	 def col = _command_color(tag)
+	 def body_y = _row_text_y(font_body, yy, PALETTE_ROW_H)
+	 def small_y = _row_text_y(font_small, yy, PALETTE_ROW_H)
+	 if active { _fill_rect(x + 10.0, yy - 4.0, w - 20.0, PALETTE_ROW_H - 4.0, gfx.color_alpha(C_ACCENT, 0.20)) }
+	 _draw_icon(_command_icon(tag, cmd.row_id(row)), x + 18.0, _center_y(yy, PALETTE_ROW_H, 17.0), 17.0, active ? C_ACCENT : col)
+	 body_runs = _append_text_run(body_runs, _preview_body(to_str(row.get(0, "")), w * 0.36), x + 44.0, body_y, active ? U_TEXT : U_MUTED)
+	 small_runs = _append_text_run(small_runs, _preview_small(to_str(row.get(3, "")), w * 0.30), x + w * 0.44, small_y, active ? U_ACCENT_2 : U_DIM)
+	 small_runs = _queue_key_badge(small_runs, _preview_small(to_str(row.get(2, "")), 120.0), x + w - 146.0, yy + 3.0, active ? C_ACCENT : C_MUTED)
       i += 1
    }
    if matches.len == 0 { body_runs = _append_text_run(body_runs, "No commands", x + 18.0, y + PALETTE_HEADER_H, U_WARN) }
@@ -6346,8 +6483,9 @@ fn _draw_palette(f64 sw, f64 sh) int {
       def detail_y = y + h - PALETTE_DETAIL_H - 4.0
       _fill_rect(x + 10.0, detail_y, w - 20.0, PALETTE_DETAIL_H - 8.0, C_CHIP)
       _stroke_rect(x + 10.0, detail_y, w - 20.0, PALETTE_DETAIL_H - 8.0, C_LINE, 1.0)
-      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(1, "")) + "  " + to_str(sel.get(4, "")), w * 0.28), x + 22.0, detail_y + 9.0, U_ACCENT)
-      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(3, "")), w * 0.56), x + w * 0.34, detail_y + 9.0, U_MUTED)
+      def detail_text_y = _row_text_y(font_small, detail_y, PALETTE_DETAIL_H - 8.0)
+      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(1, "")) + "  " + to_str(sel.get(4, "")), w * 0.28), x + 22.0, detail_text_y, U_ACCENT)
+      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(3, "")), w * 0.56), x + w * 0.34, detail_text_y, U_MUTED)
    }
    _flush_rects()
    if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_body, body_runs) }
@@ -6371,7 +6509,7 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
    def line = to_str(lines.get(min(max(row, 0), max(0, lines.len - 1)), ""))
    def visible_row = row - scroll
    def base_x = _line_text_x(lay) + _measure_prefix(line, int(st.get("cursor_col", 0)))
-   def base_y = float(lay.get("edit_y", 0.0)) + EDITOR_TEXT_TOP + float(max(0, visible_row)) * ed.LINE_H + ed.LINE_H + 4.0
+   def base_y = _editor_row_y(float(lay.get("edit_y", 0.0)), max(0, visible_row)) + ed.LINE_H + 4.0
    def rows = min(items.len, 9)
    def w = min(420.0, max(260.0, sw * 0.42))
    def h = 34.0 + float(rows) * 26.0
@@ -6380,23 +6518,27 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
    def prefix = to_str(completion_state.get("prefix", ""))
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
    _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
-   _draw_icon("search", x + 10.0, y + 9.0, 16.0, C_ACCENT)
+   _draw_icon("search", x + 10.0, _center_y(y, 30.0, 16.0), 16.0, C_ACCENT)
    mut body_runs = []
    mut small_runs = []
-   body_runs = _append_text_run(body_runs, prefix.len > 0 ? prefix : "completion", x + 34.0, y + 8.0, U_TEXT)
-   small_runs = _append_right_run(small_runs, font_small, "Enter accept  Esc close", x + w - 12.0, y + 11.0, U_MUTED)
+   def header_body_y = _row_text_y(font_body, y, 30.0)
+   def header_small_y = _row_text_y(font_small, y, 30.0)
+   body_runs = _append_text_run(body_runs, prefix.len > 0 ? prefix : "completion", x + 36.0, header_body_y, U_TEXT)
+   small_runs = _append_right_run(small_runs, font_small, "Enter accept  Esc close", x + w - 12.0, header_small_y, U_MUTED)
    _fill_rect(x + 10.0, y + 30.0, w - 20.0, 1.0, C_LINE)
    mut i = 0
    while i < rows {
       def item = items.get(i, {})
       def active = i == int(completion_state.get("index", 0))
-      def yy = y + 40.0 + float(i) * 26.0
-      def kind = to_str(item.get("kind", "symbol"))
-      def col = _completion_color(kind)
-      if active { _fill_rect(x + 8.0, yy - 5.0, w - 16.0, 24.0, gfx.color_alpha(C_ACCENT, 0.18)) }
-      _draw_icon(kind == "lsp" ? "net" : (kind == "keyword" ? "codeedit" : "doc"), x + 14.0, yy - 1.0, 15.0, active ? C_ACCENT : col)
-      body_runs = _append_text_run(body_runs, widgets.preview(to_str(item.get("label", "")), int(max(10.0, (w - 178.0) / 8.2))), x + 36.0, yy, active ? U_TEXT : U_MUTED)
-      small_runs = _append_right_run(small_runs, font_small, widgets.preview(to_str(item.get("detail", "")), 24), x + w - 14.0, yy + 3.0, active ? U_ACCENT_2 : U_DIM)
+	 def yy = y + 40.0 + float(i) * 26.0
+	 def kind = to_str(item.get("kind", "symbol"))
+	 def col = _completion_color(kind)
+	 def body_y = _row_text_y(font_body, yy - 5.0, 24.0)
+	 def small_y = _row_text_y(font_small, yy - 5.0, 24.0)
+	 if active { _fill_rect(x + 8.0, yy - 5.0, w - 16.0, 24.0, gfx.color_alpha(C_ACCENT, 0.18)) }
+	 _draw_icon(kind == "lsp" ? "net" : (kind == "keyword" ? "codeedit" : "doc"), x + 14.0, _center_y(yy - 5.0, 24.0, 15.0), 15.0, active ? C_ACCENT : col)
+	 body_runs = _append_text_run(body_runs, widgets.preview(to_str(item.get("label", "")), int(max(10.0, (w - 178.0) / 8.2))), x + 38.0, body_y, active ? U_TEXT : U_MUTED)
+	 small_runs = _append_right_run(small_runs, font_small, widgets.preview(to_str(item.get("detail", "")), 24), x + w - 14.0, small_y, active ? U_ACCENT_2 : U_DIM)
       i += 1
    }
    _flush_rects()
@@ -6521,13 +6663,14 @@ fn _draw_context_menu(f64 sw, f64 sh) int {
       def id = to_str(row.get(1, ""))
       def key_label = to_str(row.get(2, ""))
       def tag = to_str(row.get(3, ""))
-      def detail = to_str(row.get(4, ""))
-      def col = _command_color(tag)
-      if i == hover_idx { _fill_rect(x + 6.0, yy + 3.0, w - 12.0, row_h - 6.0, gfx.color_alpha(C_ACCENT, 0.18)) }
-      elif i > 0 { _fill_rect(x + 8.0, yy, w - 16.0, 1.0, gfx.color_alpha(C_LINE, 0.50)) }
-      _draw_icon(_command_icon(tag, id), x + 10.0, yy + 9.0, 15.0, i == hover_idx ? C_ACCENT : col)
-      runs = _append_text_run(runs, widgets.preview(to_str(row.get(0, "")), 26), x + 33.0, yy + 7.0, i == hover_idx ? U_TEXT : U_MUTED)
-      if key_label.len > 0 { runs = _append_right_run(runs, font_small, key_label, x + w - 10.0, yy + 7.0, i == hover_idx ? U_ACCENT : U_DIM) }
+	 def detail = to_str(row.get(4, ""))
+	 def col = _command_color(tag)
+	 def text_y = _row_text_y(font_small, yy, row_h)
+	 if i == hover_idx { _fill_rect(x + 6.0, yy + 3.0, w - 12.0, row_h - 6.0, gfx.color_alpha(C_ACCENT, 0.18)) }
+	 elif i > 0 { _fill_rect(x + 8.0, yy, w - 16.0, 1.0, gfx.color_alpha(C_LINE, 0.50)) }
+	 _draw_icon(_command_icon(tag, id), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, i == hover_idx ? C_ACCENT : col)
+	 runs = _append_text_run(runs, widgets.preview(to_str(row.get(0, "")), 26), x + 35.0, text_y, i == hover_idx ? U_TEXT : U_MUTED)
+	 if key_label.len > 0 { runs = _append_right_run(runs, font_small, key_label, x + w - 10.0, text_y, i == hover_idx ? U_ACCENT : U_DIM) }
       if detail.len > 0 { runs = _append_text_run(runs, widgets.preview(detail, 42), x + 33.0, yy + 22.0, U_DIM) }
       i += 1
    }
@@ -6743,6 +6886,7 @@ fn _bench_text() str {
 
 fn _initial_buffers() list {
    if TERMINAL_DUMP_PROBE { return [ed.buffer("terminal-visual.ny", "", "use std.core\nprint(\"terminal visual probe\")\n")] }
+   if TEXTGRID_PROBE { return [ed.buffer("textgrid.ny", "", "fn main() int {\n\tprint(\"grid\")\n   return 0\n}\n")] }
    if BENCH_PROBE || SCROLLBAR_PROBE { return [ed.buffer(BENCH_PROBE ? "bench.ny" : "scrollbar.ny", "", _bench_text())] }
    if ZOOM_PROBE { return [ed.buffer("zoom-test.ny", "", "use std.core\n")] }
    if GOTO_PROBE { return [ed.buffer("goto-test.ny", "", "use std.core\nfn local_target() int { return 1 }\nfn main() int {\n   local_target()\n   project_target()\n}\n")] }
@@ -6878,6 +7022,20 @@ if SELECT_PROBE {
    assert(_selection_any_valid() && _selected_text_all() == "one\ntwo\nthree", "ctrl-a selects whole buffer")
    _handle_escape_key({"key": key.KEY_ESCAPE, "mods": 0})
    assert(!_selection_any_valid() && !bool(st.get("quit_prompt", false)), "escape clears select all")
+   st["quit_prompt"] = true
+   last_escape_ns = 1
+   _handle_key({"key": key.KEY_DOWN, "mods": 0})
+   assert(!bool(st.get("quit_prompt", false)) && last_escape_ns == 0, "movement clears quit prompt")
+   mut dirty_a = ed.buffer("dirty-a.ny", "", "a")
+   mut dirty_b = ed.buffer("dirty-b.ny", "", "b")
+   dirty_a["dirty"] = true
+   dirty_b["dirty"] = true
+   st = ed.state([dirty_a, dirty_b])
+   _kill_buffer()
+   assert(bool(st.get("kill_confirm", false)) && int(st.get("kill_confirm_buf", -1)) == 0, "dirty kill arms active buffer")
+   st = ed.select_buffer(st, 1)
+   _kill_buffer()
+   assert(st.get("buffers", []).len == 2 && bool(st.get("kill_confirm", false)) && int(st.get("kill_confirm_buf", -1)) == 1, "dirty kill confirm does not transfer")
    window.set_should_close(win, true)
 }
 
@@ -6988,6 +7146,23 @@ if MODELINE_PROBE {
    def safe = _modeline_safe("ok \tbox " + chr(0x03BB) + chr(0x2192) + chr(0x2713))
    assert(_modeline_utf8_clean(safe) && str.utf8_valid(safe), "modeline preserves valid utf8 and strips controls")
    assert(str.utf8_valid(_preview_modeline(safe, 36.0)), "modeline clips on utf8 boundaries")
+   window.set_should_close(win, true)
+}
+
+if TEXTGRID_PROBE {
+   def row0 = _editor_row_y(32.0, 0)
+   def row1 = _editor_row_y(32.0, 1)
+   def baseline = _editor_row_baseline_y(row0)
+   def body_y = _row_text_y_from_baseline(font_body, baseline, ed.LINE_H)
+   def num_y = _row_text_y_from_baseline(font_small, baseline, ed.LINE_H)
+   assert(row1 - row0 == ed.LINE_H, "textgrid row origin stable")
+   assert(_snap_px(row0) == row0 && _snap_px(body_y) == body_y && _snap_px(num_y) == num_y, "textgrid rows snap to pixels")
+   assert(_snap_px(body_y + _font_ascent_px(font_body, ed.LINE_H)) == baseline, "textgrid code baseline")
+   assert(_snap_px(num_y + _font_ascent_px(font_small, ed.LINE_H)) == baseline, "textgrid line-number baseline")
+   assert(FONT_BODY_ADV == _clamp_f64(float(gfx.measure_text_fast(font_body, "0").get(0, 8.0)), 1.0, 10000.0), "textgrid body mono cell")
+   def tab_w = float(gfx.measure_text_fast(font_body, "\t").get(0, 0.0))
+   def four_zero = float(gfx.measure_text_fast(font_body, "0000").get(0, 0.0))
+   assert(tab_w == four_zero, "textgrid tab stop cell width")
    window.set_should_close(win, true)
 }
 

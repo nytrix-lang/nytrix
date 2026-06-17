@@ -454,9 +454,9 @@ static int perf_real_case_count(void) {
 }
 
 typedef struct {
-	  char scan_dir[4096];
-	  char first_report[4096];
-	  char latest_report[4096];
+     char scan_dir[4096];
+     char first_report[4096];
+     char latest_report[4096];
   char latest_full_pressure_report[4096];
   char worst_report[4096];
   char worst_perf_case[128];
@@ -528,9 +528,9 @@ typedef struct {
   char worklist_report[4096];
   char historical_worklist_report[4096];
   char historical_worklist_markdown[4096];
-	  char coverage_report[4096];
-	  char plan_report[4096];
-	  char latest_report[4096];
+     char coverage_report[4096];
+     char plan_report[4096];
+     char latest_report[4096];
   char campaign_first_report[4096];
   char latest_full_pressure_report[4096];
     char next_script[4096];
@@ -12225,12 +12225,12 @@ static bool write_fuzz_all_history_markdown(const char *root,
                      summary->ignored_no_evidence_reports,
                      summary->ignored_no_evidence_reports == 1 ? "" : "s");
   }
-	  (void)sb_appendf(&md,
-	                   "- Compute: %.6f thread-years (%.2f thread-hours); %.2f credited wall-hours; max %.0f threads.\n",
-	                   summary->total_thread_s / (3600.0 * 24.0 * 365.0),
-	                   summary->total_thread_s / 3600.0,
-	                   summary->total_effective_budget_s / 3600.0,
-	                   summary->max_threads);
+     (void)sb_appendf(&md,
+                      "- Compute: %.6f thread-years (%.2f thread-hours); %.2f credited wall-hours; max %.0f threads.\n",
+                      summary->total_thread_s / (3600.0 * 24.0 * 365.0),
+                      summary->total_thread_s / 3600.0,
+                      summary->total_effective_budget_s / 3600.0,
+                      summary->max_threads);
   if (summary->first_report[0]) {
     (void)sb_appendf(&md,
                      "- Calendar: %.2f days first-to-latest evidence; %.2f days since first evidence",
@@ -12240,8 +12240,8 @@ static bool write_fuzz_all_history_markdown(const char *root,
     md_append_code(&md, summary->first_report);
     (void)sb_append(&md, ".\n");
   }
-	  (void)sb_appendf(&md,
-	                   "- Full-pressure: %d reports, %d ok, %d attention, %.2f thread-hours.\n",
+     (void)sb_appendf(&md,
+                      "- Full-pressure: %d reports, %d ok, %d attention, %.2f thread-hours.\n",
                    summary->full_pressure_reports,
                    summary->full_pressure_ok_reports,
                    summary->full_pressure_attention_reports,
@@ -12741,12 +12741,12 @@ static int cmd_public_fuzz_all_history(int argc, char **argv) {
     string_list_free(&report_rows);
     free(f.data);
   }
-	  if (summary.reports <= 0 && failures.count == 0) {
-	    (void)string_list_push_take(&failures,
-	                                make_fuzz_failure(root, "fuzz-all-history",
-	                                                  "no fuzz-all reports found",
-	                                                  scan_dir ? scan_dir : ""));
-	  }
+     if (summary.reports <= 0 && failures.count == 0) {
+       (void)string_list_push_take(&failures,
+                                   make_fuzz_failure(root, "fuzz-all-history",
+                                                     "no fuzz-all reports found",
+                                                     scan_dir ? scan_dir : ""));
+     }
   if (first_report_mtime > 0) {
     time_t now = time(NULL);
     time_t latest_for_span =
@@ -12760,9 +12760,9 @@ static int cmd_public_fuzz_all_history(int argc, char **argv) {
     summary.campaign_calendar_span_days = span_s / 86400.0;
     summary.campaign_calendar_age_days = age_s / 86400.0;
   }
-	  if (markdown_path && *markdown_path &&
-	      !write_fuzz_all_history_markdown(root, markdown_path, json_path,
-	                                       &summary, &rows, target_arg,
+     if (markdown_path && *markdown_path &&
+         !write_fuzz_all_history_markdown(root, markdown_path, json_path,
+                                          &summary, &rows, target_arg,
                                        hours_arg, threads_arg, profile_arg)) {
     (void)string_list_push_take(&failures,
                                 make_fuzz_failure(root, "fuzz-all-history",
@@ -12796,20 +12796,20 @@ static int cmd_public_fuzz_all_history(int argc, char **argv) {
                    "\"ignored_no_evidence_reports\":%d,"
                    "\"row_limit\":%d,\"ok_reports\":%d,"
                    "\"failed_reports\":%d,\"attention_reports\":%d,"
-	                   "\"full_pressure_reports\":%d,"
-	                   "\"full_pressure_ok_reports\":%d,"
-		                   "\"full_pressure_attention_reports\":%d,"
-		                       "\"campaign_hours\":%.4f,"
+                      "\"full_pressure_reports\":%d,"
+                      "\"full_pressure_ok_reports\":%d,"
+                         "\"full_pressure_attention_reports\":%d,"
+                             "\"campaign_hours\":%.4f,"
                        "\"requested_campaign_hours\":%.4f,"
                        "\"total_duration_s\":%.3f,\"total_budget_s\":%.3f,"
                        "\"total_effective_budget_s\":%.3f,"
-	                   "\"thread_hours\":%.4f,\"thread_years\":%.8f,"
-	                   "\"campaign_first_report_epoch\":%.0f,"
-	                   "\"campaign_latest_report_epoch\":%.0f,"
-	                   "\"campaign_calendar_span_days\":%.4f,"
-	                   "\"campaign_calendar_age_days\":%.4f,"
-	                   "\"campaign_calendar_percent_10y\":%.4f,"
-	                   "\"full_pressure_thread_hours\":%.4f,"
+                      "\"thread_hours\":%.4f,\"thread_years\":%.8f,"
+                      "\"campaign_first_report_epoch\":%.0f,"
+                      "\"campaign_latest_report_epoch\":%.0f,"
+                      "\"campaign_calendar_span_days\":%.4f,"
+                      "\"campaign_calendar_age_days\":%.4f,"
+                      "\"campaign_calendar_percent_10y\":%.4f,"
+                      "\"full_pressure_thread_hours\":%.4f,"
                    "\"full_pressure_thread_years\":%.8f,"
                    "\"max_threads\":%.0f,"
                    "\"checked_subcases\":%.0f,\"sub_failures_total\":%.0f,"
@@ -12828,23 +12828,23 @@ static int cmd_public_fuzz_all_history(int argc, char **argv) {
                    summary.ignored_no_evidence_reports, limit,
                    summary.ok_reports, summary.failed_reports,
                    summary.attention_reports,
-		                   summary.full_pressure_reports,
-		                   summary.full_pressure_ok_reports,
-		                   summary.full_pressure_attention_reports,
-	                       summary.total_effective_budget_s / 3600.0,
+                         summary.full_pressure_reports,
+                         summary.full_pressure_ok_reports,
+                         summary.full_pressure_attention_reports,
+                          summary.total_effective_budget_s / 3600.0,
                        summary.total_budget_s / 3600.0,
                        summary.total_duration_s, summary.total_budget_s,
-	                       summary.total_effective_budget_s,
-	                       summary.total_thread_s / 3600.0,
-	                   summary.total_thread_s / (3600.0 * 24.0 * 365.0),
-	                   summary.first_report_epoch,
-	                   summary.latest_report_epoch,
-	                   summary.campaign_calendar_span_days,
-	                   summary.campaign_calendar_age_days,
-	                   fuzz_all_campaign_calendar_percent_10y(
-	                       summary.campaign_calendar_age_days),
-	                   summary.full_pressure_thread_s / 3600.0,
-	                   summary.full_pressure_thread_s / (3600.0 * 24.0 * 365.0),
+                          summary.total_effective_budget_s,
+                          summary.total_thread_s / 3600.0,
+                      summary.total_thread_s / (3600.0 * 24.0 * 365.0),
+                      summary.first_report_epoch,
+                      summary.latest_report_epoch,
+                      summary.campaign_calendar_span_days,
+                      summary.campaign_calendar_age_days,
+                      fuzz_all_campaign_calendar_percent_10y(
+                          summary.campaign_calendar_age_days),
+                      summary.full_pressure_thread_s / 3600.0,
+                      summary.full_pressure_thread_s / (3600.0 * 24.0 * 365.0),
                    summary.max_threads,
                    summary.total_sub_rows, summary.total_sub_failures,
                    summary.total_lanes, summary.total_ok_lanes,
@@ -12853,11 +12853,11 @@ static int cmd_public_fuzz_all_history(int argc, char **argv) {
                    summary.known_reproduced_total,
                    summary.known_lost_total, summary.known_baseline_total,
                    summary.perf_hotspots_total, summary.perf_max_ratio);
-	  (void)sb_append(&extra, ",\"perf_max_case\":");
-	  (void)sb_append_json_str(&extra, summary.worst_perf_case);
+     (void)sb_append(&extra, ",\"perf_max_case\":");
+     (void)sb_append_json_str(&extra, summary.worst_perf_case);
   (void)sb_append(&extra, ",\"campaign_first_report\":");
   (void)sb_append_json_str(&extra, summary.first_report);
-	  (void)sb_append(&extra, ",\"latest_report\":");
+     (void)sb_append(&extra, ",\"latest_report\":");
   (void)sb_append_json_str(&extra, summary.latest_report);
   (void)sb_append(&extra, ",\"latest_full_pressure_report\":");
   (void)sb_append_json_str(&extra, summary.latest_full_pressure_report);
@@ -16736,23 +16736,23 @@ static int cmd_public_fuzz_all_plan(int argc, char **argv) {
       append_rel_json_str(&row, root, coverage_path);
     }
     (void)sb_appendf(&row,
-	                     ",\"target_thread_years\":%.8f,"
-	                     "\"current_thread_years\":%.8f,"
-	                     "\"thread_years\":%.8f,"
-	                     "\"remaining_thread_years\":%.8f,"
-	                     "\"target_percent\":%.4f,"
-	                     "\"campaign_percent\":%.4f,"
-	                     "\"campaign_confidence_percent\":%.4f,"
-	                     "\"campaign_remaining_percent\":%.4f,"
-	                     "\"remaining_percent\":%.4f,"
-	                     "\"campaign_calendar_span_days\":%.4f,"
-	                     "\"campaign_calendar_age_days\":%.4f,"
-	                     "\"campaign_calendar_percent_10y\":%.4f,"
-	                     "\"score_percent\":%.2f,"
-	                     "\"stability_percent\":%.2f,"
-	                     "\"stability_score_percent\":%.2f,"
-	                     "\"language_score_percent\":%.2f,"
-	                     "\"language_score\":%.2f,"
+                        ",\"target_thread_years\":%.8f,"
+                        "\"current_thread_years\":%.8f,"
+                        "\"thread_years\":%.8f,"
+                        "\"remaining_thread_years\":%.8f,"
+                        "\"target_percent\":%.4f,"
+                        "\"campaign_percent\":%.4f,"
+                        "\"campaign_confidence_percent\":%.4f,"
+                        "\"campaign_remaining_percent\":%.4f,"
+                        "\"remaining_percent\":%.4f,"
+                        "\"campaign_calendar_span_days\":%.4f,"
+                        "\"campaign_calendar_age_days\":%.4f,"
+                        "\"campaign_calendar_percent_10y\":%.4f,"
+                        "\"score_percent\":%.2f,"
+                        "\"stability_percent\":%.2f,"
+                        "\"stability_score_percent\":%.2f,"
+                        "\"language_score_percent\":%.2f,"
+                        "\"language_score\":%.2f,"
                      "\"language_score_good_threshold_percent\":%.2f,"
                      "\"language_score_gap_percent\":%.2f,"
                      "\"language_score_signal_percent\":%.2f,"
@@ -16801,20 +16801,20 @@ static int cmd_public_fuzz_all_plan(int argc, char **argv) {
                      "\"full_pressure_ready\":%s,"
                      "\"target_reached\":%s,"
                      "\"long_run_ready\":%s",
-	                     target_years, current_years, current_years,
-	                     remaining_years,
-	                     target_percent, target_percent, target_percent,
-	                     campaign_remaining_percent,
-	                     campaign_remaining_percent,
-	                     campaign_calendar_span_days,
-	                     campaign_calendar_age_days,
-	                     fuzz_all_campaign_calendar_percent_10y(
-	                         campaign_calendar_age_days),
-	                     language_score_percent,
-	                     language_score_percent,
-	                     language_score_percent,
-	                     language_score_percent,
-	                     language_score_percent,
+                        target_years, current_years, current_years,
+                        remaining_years,
+                        target_percent, target_percent, target_percent,
+                        campaign_remaining_percent,
+                        campaign_remaining_percent,
+                        campaign_calendar_span_days,
+                        campaign_calendar_age_days,
+                        fuzz_all_campaign_calendar_percent_10y(
+                            campaign_calendar_age_days),
+                        language_score_percent,
+                        language_score_percent,
+                        language_score_percent,
+                        language_score_percent,
+                        language_score_percent,
                      language_good_threshold_percent,
                      language_score_gap_percent,
                      language_signal_percent,
@@ -16865,12 +16865,12 @@ static int cmd_public_fuzz_all_plan(int argc, char **argv) {
     (void)sb_append_json_str(&row, coverage_queue_lanes ?
                                       coverage_queue_lanes : "");
     append_fuzz_all_coverage_queue_json(&row, coverage_queue_json);
-	    append_fuzz_all_campaign_alias_fields(
-	        &row, current_years, target_years, remaining_years, target_percent,
-	        runs_needed, wall_hours, wall_hours / 24.0, thread_years_per_run,
-	        target_percent_per_run, runs_per_day, thread_years_per_day,
-	        hours_per_run, threads_arg,
-	        completion_eta_local);
+       append_fuzz_all_campaign_alias_fields(
+           &row, current_years, target_years, remaining_years, target_percent,
+           runs_needed, wall_hours, wall_hours / 24.0, thread_years_per_run,
+           target_percent_per_run, runs_per_day, thread_years_per_day,
+           hours_per_run, threads_arg,
+           completion_eta_local);
     (void)sb_append(&row, ",\"completion_eta_local\":");
     (void)sb_append_json_str(&row, completion_eta_local);
     (void)sb_append(&row, ",\"campaign_state\":");
@@ -17007,23 +17007,23 @@ static int cmd_public_fuzz_all_plan(int argc, char **argv) {
     append_rel_json_str(&extra, root, markdown_path);
   }
   (void)sb_appendf(&extra,
-	                   ",\"target_thread_years\":%.8f,"
-	                   "\"current_thread_years\":%.8f,"
-	                   "\"thread_years\":%.8f,"
-	                   "\"remaining_thread_years\":%.8f,"
-	                   "\"target_percent\":%.4f,"
-	                   "\"campaign_percent\":%.4f,"
-	                   "\"campaign_confidence_percent\":%.4f,"
-	                   "\"campaign_remaining_percent\":%.4f,"
-	                   "\"remaining_percent\":%.4f,"
-	                   "\"campaign_calendar_span_days\":%.4f,"
-	                   "\"campaign_calendar_age_days\":%.4f,"
-	                   "\"campaign_calendar_percent_10y\":%.4f,"
-	                   "\"score_percent\":%.2f,"
-	                   "\"stability_percent\":%.2f,"
-	                   "\"stability_score_percent\":%.2f,"
-	                   "\"language_score_percent\":%.2f,"
-	                   "\"language_score\":%.2f,"
+                      ",\"target_thread_years\":%.8f,"
+                      "\"current_thread_years\":%.8f,"
+                      "\"thread_years\":%.8f,"
+                      "\"remaining_thread_years\":%.8f,"
+                      "\"target_percent\":%.4f,"
+                      "\"campaign_percent\":%.4f,"
+                      "\"campaign_confidence_percent\":%.4f,"
+                      "\"campaign_remaining_percent\":%.4f,"
+                      "\"remaining_percent\":%.4f,"
+                      "\"campaign_calendar_span_days\":%.4f,"
+                      "\"campaign_calendar_age_days\":%.4f,"
+                      "\"campaign_calendar_percent_10y\":%.4f,"
+                      "\"score_percent\":%.2f,"
+                      "\"stability_percent\":%.2f,"
+                      "\"stability_score_percent\":%.2f,"
+                      "\"language_score_percent\":%.2f,"
+                      "\"language_score\":%.2f,"
                    "\"language_score_good_threshold_percent\":%.2f,"
                    "\"language_score_gap_percent\":%.2f,"
                    "\"language_score_signal_percent\":%.2f,"
@@ -17071,20 +17071,20 @@ static int cmd_public_fuzz_all_plan(int argc, char **argv) {
                    "\"full_pressure_ready\":%s,"
                    "\"target_reached\":%s,"
                    "\"long_run_ready\":%s",
-	                   target_years, current_years, current_years,
-	                   remaining_years,
-	                   target_percent, target_percent, target_percent,
-	                   campaign_remaining_percent,
-	                   campaign_remaining_percent,
-	                   campaign_calendar_span_days,
-	                   campaign_calendar_age_days,
-	                   fuzz_all_campaign_calendar_percent_10y(
-	                       campaign_calendar_age_days),
-	                   language_score_percent,
-	                   language_score_percent,
-	                   language_score_percent,
-	                   language_score_percent,
-	                   language_score_percent,
+                      target_years, current_years, current_years,
+                      remaining_years,
+                      target_percent, target_percent, target_percent,
+                      campaign_remaining_percent,
+                      campaign_remaining_percent,
+                      campaign_calendar_span_days,
+                      campaign_calendar_age_days,
+                      fuzz_all_campaign_calendar_percent_10y(
+                          campaign_calendar_age_days),
+                      language_score_percent,
+                      language_score_percent,
+                      language_score_percent,
+                      language_score_percent,
+                      language_score_percent,
                    language_good_threshold_percent,
                    language_score_gap_percent,
                    language_signal_percent,
@@ -17134,12 +17134,12 @@ static int cmd_public_fuzz_all_plan(int argc, char **argv) {
   (void)sb_append_json_str(&extra, coverage_queue_lanes ?
                                       coverage_queue_lanes : "");
   append_fuzz_all_coverage_queue_json(&extra, coverage_queue_json);
-	  append_fuzz_all_campaign_alias_fields(
-	      &extra, current_years, target_years, remaining_years, target_percent,
-	      runs_needed, wall_hours, wall_hours / 24.0, thread_years_per_run,
-	      target_percent_per_run, runs_per_day, thread_years_per_day,
-	      hours_per_run, threads_arg,
-	      completion_eta_local);
+     append_fuzz_all_campaign_alias_fields(
+         &extra, current_years, target_years, remaining_years, target_percent,
+         runs_needed, wall_hours, wall_hours / 24.0, thread_years_per_run,
+         target_percent_per_run, runs_per_day, thread_years_per_day,
+         hours_per_run, threads_arg,
+         completion_eta_local);
   (void)sb_append(&extra, ",\"completion_eta_local\":");
   (void)sb_append_json_str(&extra, completion_eta_local);
   (void)sb_append(&extra, ",\"campaign_state\":");
@@ -17212,8 +17212,8 @@ static int cmd_public_fuzz_all_plan(int argc, char **argv) {
   (void)sb_append(&extra, ",\"coverage_next_state_refresh_command\":");
   (void)sb_append_json_str(&extra, has_coverage_next ?
                                     coverage_next_state_refresh_command : "");
-	  char *report = build_native_report_json_with_top_aliases(
-	      &rows, &failures, "fuzz-all-plan", extra.data, true);
+     char *report = build_native_report_json_with_top_aliases(
+         &rows, &failures, "fuzz-all-plan", extra.data, true);
   int rc = emit_native_report(report, json_path, "all fuzz plan",
                               rows.count, failures.count);
   free(extra.data);
@@ -20492,17 +20492,17 @@ static void append_fuzz_all_campaign_alias_fields(
                    "\"campaign_wall_days_needed\":%.4f,"
                    "\"campaign_thread_years_per_run\":%.8f,"
                    "\"campaign_percent_per_run\":%.4f,"
-	                   "\"campaign_runs_per_wall_day\":%.4f,"
-	                   "\"campaign_thread_years_per_wall_day\":%.8f,"
-	                   "\"campaign_percent_per_wall_day\":%.4f,"
-	                   "\"campaign_equivalent_wall_days\":%.4f,"
-	                   "\"campaign_plan_wall_hours\":%.4f",
-	                   thread_years, target_thread_years,
-	                   remaining_thread_years, campaign_percent, runs_needed,
-	                   wall_hours_needed, wall_days_needed, thread_years_per_run,
-	                   percent_per_run, runs_per_day, thread_years_per_day,
-	                   percent_per_day, equivalent_wall_days,
-	                   campaign_plan_wall_hours);
+                      "\"campaign_runs_per_wall_day\":%.4f,"
+                      "\"campaign_thread_years_per_wall_day\":%.8f,"
+                      "\"campaign_percent_per_wall_day\":%.4f,"
+                      "\"campaign_equivalent_wall_days\":%.4f,"
+                      "\"campaign_plan_wall_hours\":%.4f",
+                      thread_years, target_thread_years,
+                      remaining_thread_years, campaign_percent, runs_needed,
+                      wall_hours_needed, wall_days_needed, thread_years_per_run,
+                      percent_per_run, runs_per_day, thread_years_per_day,
+                      percent_per_day, equivalent_wall_days,
+                      campaign_plan_wall_hours);
   (void)sb_append(b, ",\"campaign_plan_threads\":");
   (void)sb_append_json_str(b, campaign_plan_threads ?
                                   campaign_plan_threads : "");
@@ -21065,13 +21065,13 @@ static char *make_fuzz_all_status_summary_row(
                    "\"full_pressure_reports\":%.0f,"
                    "\"full_pressure_ok_reports\":%.0f,"
                    "\"full_pressure_attention_reports\":%.0f,"
-	                   "\"thread_hours\":%.4f,\"thread_years\":%.8f,"
-	                   "\"campaign_first_report_epoch\":%.0f,"
-	                   "\"campaign_latest_report_epoch\":%.0f,"
-	                   "\"campaign_calendar_span_days\":%.4f,"
-	                   "\"campaign_calendar_age_days\":%.4f,"
-	                   "\"campaign_calendar_percent_10y\":%.4f,"
-	                   "\"full_pressure_thread_hours\":%.4f,"
+                      "\"thread_hours\":%.4f,\"thread_years\":%.8f,"
+                      "\"campaign_first_report_epoch\":%.0f,"
+                      "\"campaign_latest_report_epoch\":%.0f,"
+                      "\"campaign_calendar_span_days\":%.4f,"
+                      "\"campaign_calendar_age_days\":%.4f,"
+                      "\"campaign_calendar_percent_10y\":%.4f,"
+                      "\"full_pressure_thread_hours\":%.4f,"
                    "\"full_pressure_thread_years\":%.8f,"
                    "\"checked_subcases\":%.0f,\"sub_failures_total\":%.0f,"
                    "\"active_items\":%.0f,"
@@ -21190,14 +21190,14 @@ static char *make_fuzz_all_status_summary_row(
                    s ? s->full_pressure_reports : 0.0,
                    s ? s->full_pressure_ok_reports : 0.0,
                    s ? s->full_pressure_attention_reports : 0.0,
-	                   s ? s->thread_hours : 0.0, s ? s->thread_years : 0.0,
-	                   s ? s->campaign_first_report_epoch : 0.0,
-	                   s ? s->campaign_latest_report_epoch : 0.0,
-	                   s ? s->campaign_calendar_span_days : 0.0,
-	                   s ? s->campaign_calendar_age_days : 0.0,
-	                   fuzz_all_campaign_calendar_percent_10y(
-	                       s ? s->campaign_calendar_age_days : 0.0),
-	                   s ? s->full_pressure_thread_hours : 0.0,
+                      s ? s->thread_hours : 0.0, s ? s->thread_years : 0.0,
+                      s ? s->campaign_first_report_epoch : 0.0,
+                      s ? s->campaign_latest_report_epoch : 0.0,
+                      s ? s->campaign_calendar_span_days : 0.0,
+                      s ? s->campaign_calendar_age_days : 0.0,
+                      fuzz_all_campaign_calendar_percent_10y(
+                          s ? s->campaign_calendar_age_days : 0.0),
+                      s ? s->full_pressure_thread_hours : 0.0,
                    s ? s->full_pressure_thread_years : 0.0,
                    s ? s->checked_subcases : 0.0,
                    s ? s->sub_failures_total : 0.0,
@@ -21321,20 +21321,20 @@ static char *make_fuzz_all_status_summary_row(
                        s ? s->blocker_count : 0,
                        s && s->blocker_count == 0 && s->long_run_ready ?
                            "true" : "false");
-	  append_fuzz_all_campaign_alias_fields(
-	      &row, s ? s->thread_years : 0.0,
-	      s ? s->target_thread_years : 0.0,
-	      s ? s->remaining_thread_years : 0.0,
-	      s ? s->target_percent : 0.0,
-	      s ? s->runs_needed : 0.0,
-	      s ? s->wall_hours_needed : 0.0,
-	      s ? s->wall_days_needed : 0.0,
-	      projection.thread_years_per_run, projection.target_percent_per_run,
-	      s ? s->runs_per_day : 0.0,
-	      s ? s->thread_years_per_day : 0.0,
-	      s ? s->campaign_plan_wall_hours : 0.0,
-	      s ? s->campaign_plan_threads : "",
-	      s ? s->completion_eta_local : "");
+     append_fuzz_all_campaign_alias_fields(
+         &row, s ? s->thread_years : 0.0,
+         s ? s->target_thread_years : 0.0,
+         s ? s->remaining_thread_years : 0.0,
+         s ? s->target_percent : 0.0,
+         s ? s->runs_needed : 0.0,
+         s ? s->wall_hours_needed : 0.0,
+         s ? s->wall_days_needed : 0.0,
+         projection.thread_years_per_run, projection.target_percent_per_run,
+         s ? s->runs_per_day : 0.0,
+         s ? s->thread_years_per_day : 0.0,
+         s ? s->campaign_plan_wall_hours : 0.0,
+         s ? s->campaign_plan_threads : "",
+         s ? s->completion_eta_local : "");
   (void)sb_append(&row, ",\"campaign_first_report\":");
   (void)sb_append_json_str(&row, s ? s->campaign_first_report : "");
   (void)sb_appendf(&row,
@@ -21412,11 +21412,11 @@ static char *make_fuzz_all_status_summary_row(
                      s ? s->historical_non_reproducing_afl_timeouts : 0.0,
                      s && s->latest_only_non_reproducing_afl_timeout > 0.0 ?
                          "true" : "false");
-	  (void)sb_append(&row, ",\"advisory_state\":");
-	  (void)sb_append_json_str(&row,
-	      s ? fuzz_all_advisory_state(s->non_reproducing_afl_timeouts,
-	                                  s->historical_non_reproducing_afl_timeouts)
-	        : "clear");
+     (void)sb_append(&row, ",\"advisory_state\":");
+     (void)sb_append_json_str(&row,
+         s ? fuzz_all_advisory_state(s->non_reproducing_afl_timeouts,
+                                     s->historical_non_reproducing_afl_timeouts)
+           : "clear");
   double effective_advisory_timeouts = s ?
       fuzz_all_effective_advisory_timeouts(
           s->non_reproducing_afl_timeouts,
@@ -21433,7 +21433,7 @@ static char *make_fuzz_all_status_summary_row(
   (void)sb_append(&row, ",\"advisory_penalty_state\":");
   (void)sb_append_json_str(
       &row, fuzz_all_advisory_penalty_state(effective_advisory_timeouts));
-	  (void)sb_append(&row, ",\"latest_full_pressure_clean_reason\":");
+     (void)sb_append(&row, ",\"latest_full_pressure_clean_reason\":");
   (void)sb_append_json_str(&row,
                            s ? s->latest_full_pressure_clean_reason : "");
   (void)sb_appendf(&row,
@@ -24909,8 +24909,8 @@ static int cmd_public_fuzz_all_status(int argc, char **argv) {
     (void)summary_number_from_report(history.data,
                                      "full_pressure_attention_reports",
                                      &status.full_pressure_attention_reports);
-	    (void)summary_number_from_report(history.data, "thread_hours", &status.thread_hours);
-	    (void)summary_number_from_report(history.data, "thread_years", &status.thread_years);
+       (void)summary_number_from_report(history.data, "thread_hours", &status.thread_hours);
+       (void)summary_number_from_report(history.data, "thread_years", &status.thread_years);
     (void)summary_number_from_report(history.data, "campaign_first_report_epoch",
                                      &status.campaign_first_report_epoch);
     (void)summary_number_from_report(history.data, "campaign_latest_report_epoch",
@@ -24924,8 +24924,8 @@ static int cmd_public_fuzz_all_status(int argc, char **argv) {
     snprintf(status.campaign_first_report,
              sizeof(status.campaign_first_report), "%s", first ? first : "");
     free(first);
-	    (void)summary_number_from_report(history.data, "full_pressure_thread_hours",
-	                                     &status.full_pressure_thread_hours);
+       (void)summary_number_from_report(history.data, "full_pressure_thread_hours",
+                                        &status.full_pressure_thread_hours);
     (void)summary_number_from_report(history.data, "full_pressure_thread_years",
                                      &status.full_pressure_thread_years);
     (void)summary_number_from_report(history.data, "checked_subcases", &status.checked_subcases);
@@ -26104,17 +26104,17 @@ static int cmd_public_fuzz_all_status(int argc, char **argv) {
                    "\"evidence_ignored_no_evidence_reports\":%.0f,"
                    "\"ok_reports\":%.0f,"
                    "\"failed_reports\":%.0f,\"attention_reports\":%.0f,"
-	                   "\"full_pressure_reports\":%.0f,"
-	                   "\"full_pressure_ok_reports\":%.0f,"
-	                   "\"full_pressure_attention_reports\":%.0f,"
-	                   "\"thread_hours\":%.4f,\"thread_years\":%.8f,"
-	                   "\"campaign_first_report_epoch\":%.0f,"
-	                   "\"campaign_latest_report_epoch\":%.0f,"
-	                   "\"campaign_calendar_span_days\":%.4f,"
-	                   "\"campaign_calendar_age_days\":%.4f,"
-	                   "\"campaign_calendar_percent_10y\":%.4f,"
-	                   "\"full_pressure_thread_hours\":%.4f,"
-	                   "\"full_pressure_thread_years\":%.8f,"
+                      "\"full_pressure_reports\":%.0f,"
+                      "\"full_pressure_ok_reports\":%.0f,"
+                      "\"full_pressure_attention_reports\":%.0f,"
+                      "\"thread_hours\":%.4f,\"thread_years\":%.8f,"
+                      "\"campaign_first_report_epoch\":%.0f,"
+                      "\"campaign_latest_report_epoch\":%.0f,"
+                      "\"campaign_calendar_span_days\":%.4f,"
+                      "\"campaign_calendar_age_days\":%.4f,"
+                      "\"campaign_calendar_percent_10y\":%.4f,"
+                      "\"full_pressure_thread_hours\":%.4f,"
+                      "\"full_pressure_thread_years\":%.8f,"
                    "\"checked_subcases\":%.0f,\"sub_failures_total\":%.0f,"
                    "\"active_items\":%.0f,"
                    "\"active_count\":%.0f,"
@@ -26232,14 +26232,14 @@ static int cmd_public_fuzz_all_status(int argc, char **argv) {
                    status.full_pressure_reports,
                    status.full_pressure_ok_reports,
                    status.full_pressure_attention_reports,
-	                   status.thread_hours, status.thread_years,
-	                   status.campaign_first_report_epoch,
-	                   status.campaign_latest_report_epoch,
-	                   status.campaign_calendar_span_days,
-	                   status.campaign_calendar_age_days,
-	                   fuzz_all_campaign_calendar_percent_10y(
-	                       status.campaign_calendar_age_days),
-	                   status.full_pressure_thread_hours,
+                      status.thread_hours, status.thread_years,
+                      status.campaign_first_report_epoch,
+                      status.campaign_latest_report_epoch,
+                      status.campaign_calendar_span_days,
+                      status.campaign_calendar_age_days,
+                      fuzz_all_campaign_calendar_percent_10y(
+                          status.campaign_calendar_age_days),
+                      status.full_pressure_thread_hours,
                    status.full_pressure_thread_years,
                    status.checked_subcases, status.sub_failures_total,
                    status.active_items,
@@ -26352,24 +26352,24 @@ static int cmd_public_fuzz_all_status(int argc, char **argv) {
                            "true" : "false",
                        strict ? "true" : "false",
                    allow_incomplete_coverage ? "true" : "false",
-	                       allow_full_pressure_remediation ? "true" : "false",
-	                       refresh ? "true" : "false",
-	                       status.blocker_count,
-	                       status.blocker_count == 0 && status.long_run_ready ? "true" : "false");
-			  append_fuzz_all_campaign_alias_fields(
-			      &extra, status.thread_years, status.target_thread_years,
-		      status.remaining_thread_years, status.target_percent,
-		      status.runs_needed, status.wall_hours_needed,
-		      status.wall_days_needed, status_projection.thread_years_per_run,
-		      status_projection.target_percent_per_run,
-			      status.runs_per_day, status.thread_years_per_day,
-			      status.campaign_plan_wall_hours,
-			      status.campaign_plan_threads,
-			      status.completion_eta_local);
+                          allow_full_pressure_remediation ? "true" : "false",
+                          refresh ? "true" : "false",
+                          status.blocker_count,
+                          status.blocker_count == 0 && status.long_run_ready ? "true" : "false");
+           append_fuzz_all_campaign_alias_fields(
+               &extra, status.thread_years, status.target_thread_years,
+            status.remaining_thread_years, status.target_percent,
+            status.runs_needed, status.wall_hours_needed,
+            status.wall_days_needed, status_projection.thread_years_per_run,
+            status_projection.target_percent_per_run,
+               status.runs_per_day, status.thread_years_per_day,
+               status.campaign_plan_wall_hours,
+               status.campaign_plan_threads,
+               status.completion_eta_local);
   (void)sb_append(&extra, ",\"campaign_first_report\":");
   (void)sb_append_json_str(&extra, status.campaign_first_report);
-		  (void)sb_appendf(&extra,
-	                   ",\"coverage_queue_count\":%d,"
+        (void)sb_appendf(&extra,
+                      ",\"coverage_queue_count\":%d,"
                    "\"coverage_queue_non_advisory_count\":%d,"
                    "\"coverage_queue_advisory_count\":%d",
                    status.coverage_queue_count,
@@ -28433,8 +28433,8 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
                                                     "status missing remaining_thread_years",
                                                     status_path));
     (void)summary_number_from_report(status.data, "runs_needed", &runs_needed);
-	    (void)summary_number_from_report(status.data, "runs_per_day",
-	                                     &runs_per_day);
+       (void)summary_number_from_report(status.data, "runs_per_day",
+                                        &runs_per_day);
     (void)summary_number_from_report(status.data, "thread_years_per_day",
                                      &thread_years_per_day);
     (void)summary_number_from_report(status.data,
@@ -28460,7 +28460,7 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
     campaign_first_report =
         summary_string_from_report(status.data, "campaign_first_report");
     if (!campaign_first_report) campaign_first_report = strdup("");
-	    (void)summary_number_from_report(status.data, "wall_hours_needed",
+       (void)summary_number_from_report(status.data, "wall_hours_needed",
                                      &wall_hours_needed);
     (void)summary_number_from_report(status.data, "thread_hours_needed",
                                      &thread_hours_needed);
@@ -29600,13 +29600,13 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
                      "\"campaign_confidence_percent\":%.4f,"
                      "\"campaign_remaining_percent\":%.4f,"
                      "\"remaining_percent\":%.4f,"
-	                   "\"thread_years\":%.8f,"
-	                   "\"campaign_first_report_epoch\":%.0f,"
-	                   "\"campaign_latest_report_epoch\":%.0f,"
-	                   "\"campaign_calendar_span_days\":%.4f,"
-	                   "\"campaign_calendar_age_days\":%.4f,"
-	                   "\"campaign_calendar_percent_10y\":%.4f,"
-	                   "\"target_thread_years\":%.8f,"
+                      "\"thread_years\":%.8f,"
+                      "\"campaign_first_report_epoch\":%.0f,"
+                      "\"campaign_latest_report_epoch\":%.0f,"
+                      "\"campaign_calendar_span_days\":%.4f,"
+                      "\"campaign_calendar_age_days\":%.4f,"
+                      "\"campaign_calendar_percent_10y\":%.4f,"
+                      "\"target_thread_years\":%.8f,"
                    "\"remaining_thread_years\":%.8f,"
                    "\"runs_needed\":%.0f,"
                    "\"runs_per_day\":%.4f,"
@@ -29702,13 +29702,13 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
                      target_percent, target_percent, target_percent,
                      fuzz_all_campaign_remaining_percent(target_percent),
                      fuzz_all_campaign_remaining_percent(target_percent),
-	                   thread_years, campaign_first_report_epoch,
-	                   campaign_latest_report_epoch,
-	                   campaign_calendar_span_days,
-	                   campaign_calendar_age_days,
-	                   fuzz_all_campaign_calendar_percent_10y(
-	                       campaign_calendar_age_days),
-	                   target_thread_years,
+                      thread_years, campaign_first_report_epoch,
+                      campaign_latest_report_epoch,
+                      campaign_calendar_span_days,
+                      campaign_calendar_age_days,
+                      fuzz_all_campaign_calendar_percent_10y(
+                          campaign_calendar_age_days),
+                      target_thread_years,
                    remaining_thread_years, runs_needed, runs_per_day,
                    wall_hours_needed, thread_hours_needed,
                    wall_days_needed, status_age_seconds,
@@ -29789,9 +29789,9 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
                        historical_non_reproducing_timeouts,
                        non_reproducing_timeouts,
                        historical_non_reproducing_timeouts,
-	                       gate_penalty, correctness_penalty,
-	                   perf_penalty, advisory_penalty, env_penalty,
-	                   freshness_penalty);
+                          gate_penalty, correctness_penalty,
+                      perf_penalty, advisory_penalty, env_penalty,
+                      freshness_penalty);
   append_fuzz_all_compact_score_alias_fields(
       &row, stability_score, stability_label, next_run_stability_score,
       latest_report_age_seconds, latest_report_stale_after_hours,
@@ -29805,7 +29805,7 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
       completion_eta ? completion_eta : "");
   (void)sb_append(&row, ",\"campaign_first_report\":");
   (void)sb_append_json_str(&row, campaign_first_report ? campaign_first_report : "");
-		  (void)sb_append(&row, ",\"campaign_state\":");
+        (void)sb_append(&row, ",\"campaign_state\":");
   (void)sb_append_json_str(&row, fuzz_all_campaign_state(
                                      ready, target_reached,
                                      campaign_complete));
@@ -30307,13 +30307,13 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
                      "\"campaign_confidence_percent\":%.4f,"
                      "\"campaign_remaining_percent\":%.4f,"
                      "\"remaining_percent\":%.4f,"
-	                   "\"thread_years\":%.8f,"
-	                   "\"campaign_first_report_epoch\":%.0f,"
-	                   "\"campaign_latest_report_epoch\":%.0f,"
-	                   "\"campaign_calendar_span_days\":%.4f,"
-	                   "\"campaign_calendar_age_days\":%.4f,"
-	                   "\"campaign_calendar_percent_10y\":%.4f,"
-	                   "\"target_thread_years\":%.8f,"
+                      "\"thread_years\":%.8f,"
+                      "\"campaign_first_report_epoch\":%.0f,"
+                      "\"campaign_latest_report_epoch\":%.0f,"
+                      "\"campaign_calendar_span_days\":%.4f,"
+                      "\"campaign_calendar_age_days\":%.4f,"
+                      "\"campaign_calendar_percent_10y\":%.4f,"
+                      "\"target_thread_years\":%.8f,"
                    "\"remaining_thread_years\":%.8f,"
                    "\"runs_needed\":%.0f,"
                    "\"runs_per_day\":%.4f,"
@@ -30414,13 +30414,13 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
                      target_percent, target_percent, target_percent,
                      fuzz_all_campaign_remaining_percent(target_percent),
                      fuzz_all_campaign_remaining_percent(target_percent),
-	                   thread_years, campaign_first_report_epoch,
-	                   campaign_latest_report_epoch,
-	                   campaign_calendar_span_days,
-	                   campaign_calendar_age_days,
-	                   fuzz_all_campaign_calendar_percent_10y(
-	                       campaign_calendar_age_days),
-	                   target_thread_years,
+                      thread_years, campaign_first_report_epoch,
+                      campaign_latest_report_epoch,
+                      campaign_calendar_span_days,
+                      campaign_calendar_age_days,
+                      fuzz_all_campaign_calendar_percent_10y(
+                          campaign_calendar_age_days),
+                      target_thread_years,
                    remaining_thread_years, runs_needed, runs_per_day,
                    wall_hours_needed, thread_hours_needed,
                    wall_days_needed, status_age_seconds,
@@ -30520,7 +30520,7 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
       completion_eta ? completion_eta : "");
   (void)sb_append(&extra, ",\"campaign_first_report\":");
   (void)sb_append_json_str(&extra, campaign_first_report ? campaign_first_report : "");
-	  (void)sb_append(&extra, ",\"campaign_state\":");
+     (void)sb_append(&extra, ",\"campaign_state\":");
   (void)sb_append_json_str(&extra, fuzz_all_campaign_state(
                                       ready, target_reached,
                                       campaign_complete));
@@ -34186,21 +34186,21 @@ static void append_fuzz_all_top_aliases(str_buf_t *b,
      "latest_full_pressure_clean_reason"},
     {"latest_full_pressure_failure_count",
      "latest_full_pressure_failure_count"},
-	    {"latest_full_pressure_demoted_non_reproducing_afl_timeout",
-	     "latest_full_pressure_demoted_non_reproducing_afl_timeout"},
-	    {"latest_report_stale_after_hours", "latest_report_stale_after_hours"},
-	    {"latest_report_freshness_remaining_hours",
-	     "latest_report_freshness_remaining_hours"},
-	    {"latest_report_freshness_overdue_hours",
-	     "latest_report_freshness_overdue_hours"},
-	    {"latest_full_pressure_report_freshness_remaining_hours",
-	     "latest_full_pressure_report_freshness_remaining_hours"},
-	    {"latest_full_pressure_report_freshness_overdue_hours",
-	     "latest_full_pressure_report_freshness_overdue_hours"},
-	    {"evidence_fresh", "evidence_fresh"},
-	    {"evidence_freshness_overdue_hours",
-	     "evidence_freshness_overdue_hours"},
-	    {"freshness_penalty", "freshness_penalty"},
+       {"latest_full_pressure_demoted_non_reproducing_afl_timeout",
+        "latest_full_pressure_demoted_non_reproducing_afl_timeout"},
+       {"latest_report_stale_after_hours", "latest_report_stale_after_hours"},
+       {"latest_report_freshness_remaining_hours",
+        "latest_report_freshness_remaining_hours"},
+       {"latest_report_freshness_overdue_hours",
+        "latest_report_freshness_overdue_hours"},
+       {"latest_full_pressure_report_freshness_remaining_hours",
+        "latest_full_pressure_report_freshness_remaining_hours"},
+       {"latest_full_pressure_report_freshness_overdue_hours",
+        "latest_full_pressure_report_freshness_overdue_hours"},
+       {"evidence_fresh", "evidence_fresh"},
+       {"evidence_freshness_overdue_hours",
+        "evidence_freshness_overdue_hours"},
+       {"freshness_penalty", "freshness_penalty"},
     {"latest_h", "latest_report_age_hours"},
     {"latest_over_h", "latest_report_freshness_overdue_hours"},
     {"full_h", "latest_full_pressure_report_age_hours"},
@@ -34240,9 +34240,9 @@ static void append_fuzz_all_top_aliases(str_buf_t *b,
     {"campaign_first_report_epoch", "campaign_first_report_epoch"},
     {"campaign_latest_report_epoch", "campaign_latest_report_epoch"},
     {"campaign_calendar_span_days", "campaign_calendar_span_days"},
-	    {"campaign_calendar_age_days", "campaign_calendar_age_days"},
-	    {"campaign_calendar_percent_10y", "campaign_calendar_percent_10y"},
-	    {"campaign_eta_local", "campaign_eta_local"},
+       {"campaign_calendar_age_days", "campaign_calendar_age_days"},
+       {"campaign_calendar_percent_10y", "campaign_calendar_percent_10y"},
+       {"campaign_eta_local", "campaign_eta_local"},
     {"score", "score_percent"},
     {"score_percent", "score_percent"},
     {"score_label", "language_score_label"},
@@ -41593,13 +41593,13 @@ static char *selftest_catalog_row_json(const selftest_spec_t *spec) {
     char *display_arg = selftest_catalog_display_arg(spec, spec->args[i]);
     (void)sb_append_json_str(&row, display_arg ? display_arg : "");
     free(display_arg);
-	  }
-	  (void)sb_append(&row, "],\"only_command\":");
-	  str_buf_t command = {0};
-	  (void)sb_append(&command,
-	                  "env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 "
-	                  "nice -n 10 ./build/nynth selftest run --only ");
-	  (void)sb_append(&command, spec->name);
+     }
+     (void)sb_append(&row, "],\"only_command\":");
+     str_buf_t command = {0};
+     (void)sb_append(&command,
+                     "env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 "
+                     "nice -n 10 ./build/nynth selftest run --only ");
+     (void)sb_append(&command, spec->name);
   (void)sb_append(&command, " --json build/fuzz/all/selftest-");
   (void)sb_append(&command, spec->name);
   (void)sb_append(&command, ".json");
@@ -41657,10 +41657,10 @@ static bool write_selftest_catalog_markdown(const char *markdown_path,
   md_append_code(&md, selftest_catalog_focused_command());
   (void)sb_append(&md, "\n- Focus template: ");
   md_append_code(&md, selftest_catalog_focused_template_command());
-	  (void)sb_append(&md, "\n- Full: ");
-		  md_append_code(&md, selftest_catalog_full_command());
-		  (void)sb_append(&md, "\n- Catalog: ");
-	  md_append_code(&md, selftest_catalog_catalog_command());
+     (void)sb_append(&md, "\n- Full: ");
+        md_append_code(&md, selftest_catalog_full_command());
+        (void)sb_append(&md, "\n- Catalog: ");
+     md_append_code(&md, selftest_catalog_catalog_command());
   (void)sb_append(&md, "\n- Probe: ");
   md_append_code(&md, selftest_catalog_result_probe_command());
   (void)sb_append(&md, "\n- Cockpit: ");
@@ -41805,19 +41805,19 @@ static int cmd_public_selftest_catalog(int argc, char **argv) {
   str_buf_t extra = {0};
   (void)sb_appendf(&extra,
                    ",\"total_cases\":%d,\"fast_cases\":%d,\"slow_cases\":%d,"
-	                   "\"focused_command\":",
-	                   spec_count, spec_count - slow_count, slow_count);
-	  (void)sb_append_json_str(&extra, selftest_catalog_focused_command());
+                      "\"focused_command\":",
+                      spec_count, spec_count - slow_count, slow_count);
+     (void)sb_append_json_str(&extra, selftest_catalog_focused_command());
   (void)sb_append(&extra, ",\"focused_template_command\":");
   (void)sb_append_json_str(&extra,
                            selftest_catalog_focused_template_command());
   (void)sb_append(&extra, ",\"focused_example_command\":");
   (void)sb_append_json_str(&extra,
                            selftest_catalog_focused_example_command());
-	  (void)sb_append(&extra, ",\"full_command\":");
+     (void)sb_append(&extra, ",\"full_command\":");
   (void)sb_append_json_str(&extra, selftest_catalog_full_command());
-	  (void)sb_append(&extra, ",\"catalog_command\":");
-	  (void)sb_append_json_str(&extra, selftest_catalog_catalog_command());
+     (void)sb_append(&extra, ",\"catalog_command\":");
+     (void)sb_append_json_str(&extra, selftest_catalog_catalog_command());
   (void)sb_append(&extra, ",\"result_probe_command\":");
   (void)sb_append_json_str(&extra, selftest_catalog_result_probe_command());
   (void)sb_append(&extra, ",\"cockpit_command\":");
@@ -42457,19 +42457,19 @@ static void selftest_validate_selftest_catalog(const char *json,
       !strstr(json, "\"validator\":\"fuzz_all_plan_coverage_next\"") ||
       !strstr(json, "\"validator\":\"fuzz_all_old_writer_classifier\""))
     (void)string_list_push_copy(errors, "selftest catalog validator names missing");
-		  if (!strstr(json, "\"only_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only fuzz_gc_campaign_compact") ||
-		      !strstr(json, "--markdown build/fuzz/all/selftest-fuzz_gc_campaign_compact.md") ||
-		      !strstr(json, "\"focused_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only fuzz_all_help") ||
-		      !strstr(json, "\"focused_template_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only NAME") ||
-		      !strstr(json, "--markdown build/fuzz/all/selftest-NAME.md") ||
-		      !strstr(json, "\"focused_example_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only fuzz_all_help") ||
-		      !strstr(json, "--markdown build/fuzz/all/selftest-fuzz_all_help.md") ||
-		      !strstr(json, "\"full_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --full") ||
-	      !strstr(json, "--markdown build/fuzz/all/selftest-full.md") ||
-	      !strstr(json, "\"catalog_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --list") ||
-	      !strstr(json, "\"result_probe_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --list --probe --json build/fuzz/all/selftest-catalog.json --markdown build/fuzz/all/selftest-catalog.md\"") ||
-	      !strstr(json, "\"cockpit_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only fuzz_all_help") ||
-	      !strstr(json, "\"cockpit_result_probe_command\":\"jq {ok,cases,ok_count,failure_count,requested_cases,executed_cases,skipped_slow_count,all_requested_executed} build/fuzz/all/selftest-cockpit.json\"") ||
+        if (!strstr(json, "\"only_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only fuzz_gc_campaign_compact") ||
+            !strstr(json, "--markdown build/fuzz/all/selftest-fuzz_gc_campaign_compact.md") ||
+            !strstr(json, "\"focused_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only fuzz_all_help") ||
+            !strstr(json, "\"focused_template_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only NAME") ||
+            !strstr(json, "--markdown build/fuzz/all/selftest-NAME.md") ||
+            !strstr(json, "\"focused_example_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only fuzz_all_help") ||
+            !strstr(json, "--markdown build/fuzz/all/selftest-fuzz_all_help.md") ||
+            !strstr(json, "\"full_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --full") ||
+         !strstr(json, "--markdown build/fuzz/all/selftest-full.md") ||
+         !strstr(json, "\"catalog_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --list") ||
+         !strstr(json, "\"result_probe_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --list --probe --json build/fuzz/all/selftest-catalog.json --markdown build/fuzz/all/selftest-catalog.md\"") ||
+         !strstr(json, "\"cockpit_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only fuzz_all_help") ||
+         !strstr(json, "\"cockpit_result_probe_command\":\"jq {ok,cases,ok_count,failure_count,requested_cases,executed_cases,skipped_slow_count,all_requested_executed} build/fuzz/all/selftest-cockpit.json\"") ||
       !strstr(json, "--only fuzz_all_audit") ||
       !strstr(json, "--only fuzz_all_default_pressure") ||
       !strstr(json, "--only fuzz_all_coverage_commands") ||
@@ -42571,9 +42571,9 @@ static void selftest_validate_selftest_catalog(const char *json,
           !strstr(md.data, "--only perf_triage_args") ||
           !strstr(md.data, "--json build/fuzz/all/selftest-cockpit.json") ||
           !strstr(md.data, "--markdown build/fuzz/all/selftest-cockpit.md") ||
-	          !strstr(md.data, "Focus template:") ||
-	          !strstr(md.data, "--only fuzz_all_help --json build/fuzz/all/selftest-fuzz_all_help.json") ||
-	          !strstr(md.data, "Probe:") ||
+             !strstr(md.data, "Focus template:") ||
+             !strstr(md.data, "--only fuzz_all_help --json build/fuzz/all/selftest-fuzz_all_help.json") ||
+             !strstr(md.data, "Probe:") ||
           !strstr(md.data, "selftest run --list --probe --json build/fuzz/all/selftest-catalog.json --markdown build/fuzz/all/selftest-catalog.md") ||
           !strstr(md.data, "Cockpit probe:") ||
           !strstr(md.data, "jq {ok,cases,ok_count,failure_count,requested_cases,executed_cases,skipped_slow_count,all_requested_executed} build/fuzz/all/selftest-cockpit.json") ||
@@ -42817,15 +42817,15 @@ static void selftest_validate_fuzz_all_top_aliases(const char *json,
   selftest_expect_top_alias_string(json, "campaign_first_report", errors);
   selftest_expect_top_alias_number(json, "campaign_first_report_epoch",
                                    "campaign_first_report_epoch", errors);
-	  selftest_expect_top_alias_number(json, "campaign_latest_report_epoch",
-	                                   "campaign_latest_report_epoch", errors);
-	  selftest_expect_top_alias_number(json, "campaign_calendar_span_days",
-	                                   "campaign_calendar_span_days", errors);
-	  selftest_expect_top_alias_number(json, "campaign_calendar_age_days",
-	                                   "campaign_calendar_age_days", errors);
-	  selftest_expect_top_alias_number(json, "campaign_calendar_percent_10y",
-	                                   "campaign_calendar_percent_10y", errors);
-	  selftest_expect_top_alias_string(json, "campaign_eta_local", errors);
+     selftest_expect_top_alias_number(json, "campaign_latest_report_epoch",
+                                      "campaign_latest_report_epoch", errors);
+     selftest_expect_top_alias_number(json, "campaign_calendar_span_days",
+                                      "campaign_calendar_span_days", errors);
+     selftest_expect_top_alias_number(json, "campaign_calendar_age_days",
+                                      "campaign_calendar_age_days", errors);
+     selftest_expect_top_alias_number(json, "campaign_calendar_percent_10y",
+                                      "campaign_calendar_percent_10y", errors);
+     selftest_expect_top_alias_string(json, "campaign_eta_local", errors);
   selftest_expect_top_alias_number(json, "score_percent", "score_percent",
                                    errors);
   selftest_expect_top_alias_number(json, "score", "score_percent",
@@ -42961,34 +42961,34 @@ static void selftest_validate_fuzz_all_top_aliases(const char *json,
                                    errors);
   selftest_expect_top_alias_number(json, "latest_report_age_hours",
                                    "latest_report_age_hours", errors);
-	  selftest_expect_top_alias_number(json, "latest_report_stale_after_hours",
-	                                   "latest_report_stale_after_hours", errors);
-	  selftest_expect_top_alias_number(
-	      json, "latest_report_freshness_remaining_hours",
-	      "latest_report_freshness_remaining_hours", errors);
-	  selftest_expect_top_alias_number(
-	      json, "latest_report_freshness_overdue_hours",
-	      "latest_report_freshness_overdue_hours", errors);
-	  selftest_expect_top_alias_number(json, "latest_full_pressure_report_age_hours",
-	                                   "latest_full_pressure_report_age_hours",
-	                                   errors);
+     selftest_expect_top_alias_number(json, "latest_report_stale_after_hours",
+                                      "latest_report_stale_after_hours", errors);
+     selftest_expect_top_alias_number(
+         json, "latest_report_freshness_remaining_hours",
+         "latest_report_freshness_remaining_hours", errors);
+     selftest_expect_top_alias_number(
+         json, "latest_report_freshness_overdue_hours",
+         "latest_report_freshness_overdue_hours", errors);
+     selftest_expect_top_alias_number(json, "latest_full_pressure_report_age_hours",
+                                      "latest_full_pressure_report_age_hours",
+                                      errors);
   selftest_expect_top_alias_number(json, "latest_full_pressure_failure_count",
                                    "latest_full_pressure_failure_count",
                                    errors);
-	  selftest_expect_top_alias_number(
-	      json, "latest_full_pressure_report_stale_after_hours",
-	      "latest_full_pressure_report_stale_after_hours", errors);
-	  selftest_expect_top_alias_number(
-	      json, "latest_full_pressure_report_freshness_remaining_hours",
-	      "latest_full_pressure_report_freshness_remaining_hours", errors);
-	  selftest_expect_top_alias_number(
-	      json, "latest_full_pressure_report_freshness_overdue_hours",
-	      "latest_full_pressure_report_freshness_overdue_hours", errors);
-	  selftest_expect_top_alias_number(json, "evidence_freshness_overdue_hours",
-	                                   "evidence_freshness_overdue_hours",
-	                                   errors);
-	  selftest_expect_top_alias_number(json, "freshness_penalty",
-	                                   "freshness_penalty", errors);
+     selftest_expect_top_alias_number(
+         json, "latest_full_pressure_report_stale_after_hours",
+         "latest_full_pressure_report_stale_after_hours", errors);
+     selftest_expect_top_alias_number(
+         json, "latest_full_pressure_report_freshness_remaining_hours",
+         "latest_full_pressure_report_freshness_remaining_hours", errors);
+     selftest_expect_top_alias_number(
+         json, "latest_full_pressure_report_freshness_overdue_hours",
+         "latest_full_pressure_report_freshness_overdue_hours", errors);
+     selftest_expect_top_alias_number(json, "evidence_freshness_overdue_hours",
+                                      "evidence_freshness_overdue_hours",
+                                      errors);
+     selftest_expect_top_alias_number(json, "freshness_penalty",
+                                      "freshness_penalty", errors);
   selftest_expect_top_alias_number(json, "current_advisory_timeouts",
                                    "current_advisory_timeouts", errors);
   selftest_expect_top_alias_number(json, "effective_advisory_timeouts",
@@ -43181,7 +43181,7 @@ static void selftest_validate_fuzz_all_top_aliases(const char *json,
   selftest_expect_top_alias_string(json,
                                    "recommended_state_canonical_progress_report",
                                    errors);
-	  selftest_expect_top_alias_string(json, "freshness_action_command", errors);
+     selftest_expect_top_alias_string(json, "freshness_action_command", errors);
   selftest_expect_top_alias_string(json, "latest_report_freshness_command",
                                    errors);
   selftest_expect_top_alias_string(
@@ -43192,7 +43192,7 @@ static void selftest_validate_fuzz_all_top_aliases(const char *json,
                                    errors);
   selftest_expect_top_alias_string(json, "full_pressure_action_command",
                                    errors);
-	  selftest_expect_top_alias_string(json, "state_file", errors);
+     selftest_expect_top_alias_string(json, "state_file", errors);
   selftest_expect_top_alias_string(json, "state_command", errors);
   selftest_expect_top_alias_string(json, "state_refresh_command", errors);
   selftest_expect_top_alias_string(json, "state", errors);
@@ -43827,18 +43827,18 @@ static void selftest_validate_fuzz_reporting(const char *json,
                  "run-missing-evidence.sh")))
       (void)string_list_push_copy(errors,
                                   "coverage next guarded command was missing");
-	    if (coverage_next_command &&
-	        strstr(coverage_next_command, "fuzz all run") &&
-	        (!coverage_next_low_cpu_command ||
-	         !strstr(coverage_next_low_cpu_command,
-	                 "env NYNTH_LOW_PRIORITY=1") ||
-	         !strstr(coverage_next_low_cpu_command, "nice -n 10") ||
-	         strncmp(coverage_next_low_cpu_command,
-	                 "NYNTH_LOW_PRIORITY=", 19) == 0 ||
-	         !strstr(coverage_next_low_cpu_command,
-	                 "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
-	         !strstr(coverage_next_low_cpu_command,
-	                 "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
+       if (coverage_next_command &&
+           strstr(coverage_next_command, "fuzz all run") &&
+           (!coverage_next_low_cpu_command ||
+            !strstr(coverage_next_low_cpu_command,
+                    "env NYNTH_LOW_PRIORITY=1") ||
+            !strstr(coverage_next_low_cpu_command, "nice -n 10") ||
+            strncmp(coverage_next_low_cpu_command,
+                    "NYNTH_LOW_PRIORITY=", 19) == 0 ||
+            !strstr(coverage_next_low_cpu_command,
+                    "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
+            !strstr(coverage_next_low_cpu_command,
+                    "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
          !strstr(coverage_next_low_cpu_command,
                  "run-missing-evidence.sh")))
       (void)string_list_push_copy(errors,
@@ -43846,23 +43846,23 @@ static void selftest_validate_fuzz_reporting(const char *json,
     if (coverage_next_command &&
         strstr(coverage_next_command, "fuzz all run") &&
         (!coverage_next_state_file ||
-	 !strstr(coverage_next_state_file,
-	         "run-missing-evidence-state.json") ||
-	 !coverage_next_state_command ||
-	 !strstr(coverage_next_state_command,
-	         "jq {state,event,live,fresh,child_status,") ||
-	         !strstr(coverage_next_state_command,
-		         "run-missing-evidence-state.json") ||
-	         !coverage_next_state_refresh_command ||
-	         !strstr(coverage_next_state_refresh_command,
-	                 "env NYNTH_LOW_PRIORITY=1") ||
-	         !strstr(coverage_next_state_refresh_command, "nice -n 10") ||
-	         strncmp(coverage_next_state_refresh_command,
-	                 "NYNTH_LOW_PRIORITY=", 19) == 0 ||
-	         !strstr(coverage_next_state_refresh_command,
-	                 "NYNTH_RUN_DRY_RUN=1") ||
-	         !strstr(coverage_next_state_refresh_command,
-	                 "run-missing-evidence.sh") ||
+    !strstr(coverage_next_state_file,
+            "run-missing-evidence-state.json") ||
+    !coverage_next_state_command ||
+    !strstr(coverage_next_state_command,
+            "jq {state,event,live,fresh,child_status,") ||
+            !strstr(coverage_next_state_command,
+               "run-missing-evidence-state.json") ||
+            !coverage_next_state_refresh_command ||
+            !strstr(coverage_next_state_refresh_command,
+                    "env NYNTH_LOW_PRIORITY=1") ||
+            !strstr(coverage_next_state_refresh_command, "nice -n 10") ||
+            strncmp(coverage_next_state_refresh_command,
+                    "NYNTH_LOW_PRIORITY=", 19) == 0 ||
+            !strstr(coverage_next_state_refresh_command,
+                    "NYNTH_RUN_DRY_RUN=1") ||
+            !strstr(coverage_next_state_refresh_command,
+                    "run-missing-evidence.sh") ||
          !coverage_next_stop_file ||
          !strstr(coverage_next_stop_file, "missing-evidence-stop") ||
          !coverage_next_stop_command ||
@@ -43991,18 +43991,18 @@ static void selftest_validate_fuzz_reporting(const char *json,
     }
     if (coverage_next_command &&
         strstr(coverage_next_command, "fuzz all run") &&
-	        (!coverage_next_preview_command ||
-	         !strstr(coverage_next_preview_command, "fuzz all preflight") ||
-	         (coverage_next_lane && strcmp(coverage_next_lane, "afl") == 0 &&
-	          !strstr(coverage_next_preview_command, "--only-lane afl")) ||
-	         !strstr(coverage_next_preview_command,
-	                 "env NYNTH_LOW_PRIORITY=1") ||
-	         !strstr(coverage_next_preview_command, "nice -n 10") ||
-	         strncmp(coverage_next_preview_command,
-	                 "NYNTH_LOW_PRIORITY=", 19) == 0 ||
-	         !strstr(coverage_next_preview_command,
-	                 "--allow-dirty-nytrix-baseline") ||
-	         !strstr(coverage_next_preview_command, "build/cache/scratch")))
+           (!coverage_next_preview_command ||
+            !strstr(coverage_next_preview_command, "fuzz all preflight") ||
+            (coverage_next_lane && strcmp(coverage_next_lane, "afl") == 0 &&
+             !strstr(coverage_next_preview_command, "--only-lane afl")) ||
+            !strstr(coverage_next_preview_command,
+                    "env NYNTH_LOW_PRIORITY=1") ||
+            !strstr(coverage_next_preview_command, "nice -n 10") ||
+            strncmp(coverage_next_preview_command,
+                    "NYNTH_LOW_PRIORITY=", 19) == 0 ||
+            !strstr(coverage_next_preview_command,
+                    "--allow-dirty-nytrix-baseline") ||
+            !strstr(coverage_next_preview_command, "build/cache/scratch")))
       (void)string_list_push_copy(errors,
                                   "coverage next preflight preview was missing");
     } else if (coverage_next_action &&
@@ -45706,13 +45706,13 @@ static void selftest_validate_fuzz_reporting(const char *json,
         (void)string_list_push_copy(
             errors, "status Controls omit quick jq readout");
       const char *status_jq_line = controls_section ?
-	          strstr(controls_section,
-	                 "jq {ok,cases,ok_count,failure_count,ready,blockers,active_count,"
-	                 "coverage_percent,coverage_queue_count,"
-	                 "coverage_queue_non_advisory_count,"
-	                 "coverage_queue_advisory_count,"
-	                 "coverage_queue_lanes,campaign_percent,"
-	                 "campaign_remaining_percent,thread_years,"
+             strstr(controls_section,
+                    "jq {ok,cases,ok_count,failure_count,ready,blockers,active_count,"
+                    "coverage_percent,coverage_queue_count,"
+                    "coverage_queue_non_advisory_count,"
+                    "coverage_queue_advisory_count,"
+                    "coverage_queue_lanes,campaign_percent,"
+                    "campaign_remaining_percent,thread_years,"
                  "target_thread_years,score_percent,stability_percent,"
                  "stability_score_percent,language_score_percent,"
                  "language_score_label,completion_state,"
@@ -45793,25 +45793,25 @@ static void selftest_validate_fuzz_reporting(const char *json,
                   "advisory_recheck_raw_repro_checked,"
                   "advisory_recheck_raw_repro_passed,"
                   "advisory_recheck_raw_repro_timeouts,"
-	                  "advisory_recheck_raw_repro_unexpected,advisory_penalty,"
-	                  "old_nytrix_test_scratch_absent,old_nytrix_fuzz_absent,"
-	                  "old_nytrix_build_cache_absent,"
-	                  "active_old_nytrix_output_writer_present,old_path_report,"
-	                  "old_path_markdown,old_path_cache_policy_ok,"
-	                  "old_path_present_count,old_path_moved_count,"
-	                  "old_path_remaining_count,"
-	                  "old_path_wait_remaining_seconds,"
-	                  "old_path_artifact_leak_count,old_path_artifact_moved_count,"
-	                  "old_path_artifact_remaining_count,compiler_findings,"
+                     "advisory_recheck_raw_repro_unexpected,advisory_penalty,"
+                     "old_nytrix_test_scratch_absent,old_nytrix_fuzz_absent,"
+                     "old_nytrix_build_cache_absent,"
+                     "active_old_nytrix_output_writer_present,old_path_report,"
+                     "old_path_markdown,old_path_cache_policy_ok,"
+                     "old_path_present_count,old_path_moved_count,"
+                     "old_path_remaining_count,"
+                     "old_path_wait_remaining_seconds,"
+                     "old_path_artifact_leak_count,old_path_artifact_moved_count,"
+                     "old_path_artifact_remaining_count,compiler_findings,"
                   "known_bug_replay_findings,runtime_surface_state,"
                   "runtime_exports,direct_runtime_refs,"
-	                  "runtime_surface_scope,runtime_coverage_done,runtime_coverage_total,"
+                     "runtime_surface_scope,runtime_coverage_done,runtime_coverage_total,"
                   "runtime_export_coverage_percent,"
                   "runtime_unreferenced_count,runtime_wrapper_gap_count,"
-	                  "crt_surface_state,crt_surface_scope,crt_behavior_state,"
-	                  "crt_behavior_scope,crt_behavior_next_action,"
-	                  "crt_behavior_next_reason,crt_behavior_next_command,"
-	                  "crt_runtime_exports,crt_direct_refs,"
+                     "crt_surface_state,crt_surface_scope,crt_behavior_state,"
+                     "crt_behavior_scope,crt_behavior_next_action,"
+                     "crt_behavior_next_reason,crt_behavior_next_command,"
+                     "crt_runtime_exports,crt_direct_refs,"
                   "crt_coverage_done,crt_coverage_total,"
                   "crt_export_coverage_percent,"
                   "crt_unreferenced_percent,crt_unreferenced_count,"
@@ -45821,7 +45821,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
                   "crt_next_unreferenced_family,"
                   "crt_next_unreferenced_count,perf_hotspots_open,"
                   "perf_worst_ratio,perf_worst_slowdown_percent,"
-	                  "perf_worst_case,latest_full_pressure_perf_hotspots,latest_full_pressure_perf_max_ratio,latest_full_pressure_perf_max_slowdown_percent,latest_full_pressure_perf_max_case,latest_full_pressure_perf_rows,latest_full_pressure_perf_suite_current,perf_watchlist_state}") :
+                     "perf_worst_case,latest_full_pressure_perf_hotspots,latest_full_pressure_perf_max_ratio,latest_full_pressure_perf_max_slowdown_percent,latest_full_pressure_perf_max_case,latest_full_pressure_perf_rows,latest_full_pressure_perf_suite_current,perf_watchlist_state}") :
           NULL;
       const char *status_jq_end =
           status_jq_line ? strchr(status_jq_line, '\n') : NULL;
@@ -45834,23 +45834,23 @@ static void selftest_validate_fuzz_reporting(const char *json,
       if (quick_jq_line && status_jq_line && quick_jq_line > status_jq_line)
         (void)string_list_push_copy(
             errors, "status Controls put deep jq before quick jq");
-	      const char *state_jq_line = controls_section ?
-	          strstr(controls_section,
-	                 "jq {state,event,live,child_status,stale_after_seconds,"
-	                 "repeat_mode,repeat_count,"
-	                 "handoff_low_priority,handoff_nice,handoff_load_wait,"
-	                 "handoff_max_load_pct,handoff_space_guard,"
-	                 "handoff_min_free_gb,handoff_run_lock,handoff_threads,"
-	                 "heartbeat_s,heartbeat_count,child_pid,"
-	                 "cycle,cycles,max_cycles,cooldown_s,timestamp_utc,"
-	                 "updated_at,started_at,finished_at,pid,campaign_dir,"
-	                 "stop_file,status_report,status_json,progress_report,"
-	                 "progress_json,dry_run_exceeds_max,dry_run_wall_hours,"
-	                 "dry_run_wall_days,dry_run_thread_years,"
-	                 "dry_run_campaign_gain_percent,"
-	                 "dry_run_target_percent_per_run,"
-	                 "dry_run_thread_years_per_run,canonical_status_report,"
-		                 "canonical_progress_report,last_report}") :
+         const char *state_jq_line = controls_section ?
+             strstr(controls_section,
+                    "jq {state,event,live,child_status,stale_after_seconds,"
+                    "repeat_mode,repeat_count,"
+                    "handoff_low_priority,handoff_nice,handoff_load_wait,"
+                    "handoff_max_load_pct,handoff_space_guard,"
+                    "handoff_min_free_gb,handoff_run_lock,handoff_threads,"
+                    "heartbeat_s,heartbeat_count,child_pid,"
+                    "cycle,cycles,max_cycles,cooldown_s,timestamp_utc,"
+                    "updated_at,started_at,finished_at,pid,campaign_dir,"
+                    "stop_file,status_report,status_json,progress_report,"
+                    "progress_json,dry_run_exceeds_max,dry_run_wall_hours,"
+                    "dry_run_wall_days,dry_run_thread_years,"
+                    "dry_run_campaign_gain_percent,"
+                    "dry_run_target_percent_per_run,"
+                    "dry_run_thread_years_per_run,canonical_status_report,"
+                       "canonical_progress_report,last_report}") :
           NULL;
       const char *state_jq_end =
           state_jq_line ? strchr(state_jq_line, '\n') : NULL;
@@ -46093,12 +46093,12 @@ static void selftest_validate_fuzz_reporting(const char *json,
                                                "NYNTH_RUN_REPEAT=target")) ||
             !strstr(recommended_command, expected_run_next))))
     (void)string_list_push_copy(errors, "status recommended command wrong");
-	  if (stale_evidence &&
-	      (!recommended_command ||
-	       !selftest_command_uses_env_nice(recommended_command) ||
-	       strstr(recommended_command, "NYNTH_RUN_REPEAT=")))
-	    (void)string_list_push_copy(
-	        errors, "status stale-evidence command is not low-impact");
+     if (stale_evidence &&
+         (!recommended_command ||
+          !selftest_command_uses_env_nice(recommended_command) ||
+          strstr(recommended_command, "NYNTH_RUN_REPEAT=")))
+       (void)string_list_push_copy(
+           errors, "status stale-evidence command is not low-impact");
   if (expect_missing_evidence && coverage_next_command &&
       strstr(coverage_next_command, "fuzz all run") &&
       (!recommended_command ||
@@ -46111,13 +46111,13 @@ static void selftest_validate_fuzz_reporting(const char *json,
                coverage_next_low_cpu_command) != 0)
       (void)string_list_push_copy(
           errors, "status recommended low-cpu command alias wrong");
-	  } else if (recommended_command &&
-	             strstr(recommended_command, "NYNTH_LOW_PRIORITY=1")) {
-	    if (!recommended_low_cpu_command ||
-	        strcmp(recommended_low_cpu_command, recommended_command) != 0 ||
-	        !selftest_command_uses_env_nice(recommended_low_cpu_command))
-	      (void)string_list_push_copy(
-	          errors, "status recommended low-cpu command lost selected handoff");
+     } else if (recommended_command &&
+                strstr(recommended_command, "NYNTH_LOW_PRIORITY=1")) {
+       if (!recommended_low_cpu_command ||
+           strcmp(recommended_low_cpu_command, recommended_command) != 0 ||
+           !selftest_command_uses_env_nice(recommended_low_cpu_command))
+         (void)string_list_push_copy(
+             errors, "status recommended low-cpu command lost selected handoff");
   } else if (recommended_low_cpu_command && *recommended_low_cpu_command) {
     (void)string_list_push_copy(
         errors, "status unexpected recommended low-cpu command");
@@ -46161,12 +46161,12 @@ static void selftest_validate_fuzz_reporting(const char *json,
             errors,
             "status recommended state refresh targets instead of good");
     }
-	  } else if (stale_evidence) {
-	    if (!recommended_preview_command ||
-	        !selftest_command_uses_env_nice(recommended_preview_command) ||
-	        !strstr(recommended_preview_command, "NYNTH_RUN_DRY_RUN=1") ||
-	        !strstr(recommended_preview_command, expected_run_next) ||
-	        strstr(recommended_preview_command, "NYNTH_RUN_REPEAT="))
+     } else if (stale_evidence) {
+       if (!recommended_preview_command ||
+           !selftest_command_uses_env_nice(recommended_preview_command) ||
+           !strstr(recommended_preview_command, "NYNTH_RUN_DRY_RUN=1") ||
+           !strstr(recommended_preview_command, expected_run_next) ||
+           strstr(recommended_preview_command, "NYNTH_RUN_REPEAT="))
       (void)string_list_push_copy(
           errors, "status stale-evidence preview command wrong");
     if (have_recommended_state_refresh_required &&
@@ -47569,21 +47569,21 @@ static void selftest_validate_fuzz_default_pressure(const char *json,
   selftest_expect_top_alias_number(
       json, "next_run_language_score_delta_percent",
       "next_run_language_score_delta_percent", errors);
-	  selftest_expect_top_alias_number(json, "coverage_percent",
-	                                   "coverage_percent", errors);
-	  selftest_expect_top_alias_number(json, "coverage_backlog_lanes",
-	                                   "coverage_backlog_lanes", errors);
-	  selftest_expect_top_alias_number(json, "coverage_queue_count",
-	                                   "coverage_queue_count", errors);
-	  selftest_expect_top_alias_number(
-	      json, "coverage_queue_non_advisory_count",
-	      "coverage_queue_non_advisory_count", errors);
-	  selftest_expect_top_alias_number(json, "coverage_queue_advisory_count",
-	                                   "coverage_queue_advisory_count",
-	                                   errors);
-	  selftest_expect_top_alias_string(json, "coverage_queue_lanes", errors);
-	  selftest_expect_top_alias_number(json, "coverage_blocker_gaps",
-	                                   "coverage_blocker_gaps", errors);
+     selftest_expect_top_alias_number(json, "coverage_percent",
+                                      "coverage_percent", errors);
+     selftest_expect_top_alias_number(json, "coverage_backlog_lanes",
+                                      "coverage_backlog_lanes", errors);
+     selftest_expect_top_alias_number(json, "coverage_queue_count",
+                                      "coverage_queue_count", errors);
+     selftest_expect_top_alias_number(
+         json, "coverage_queue_non_advisory_count",
+         "coverage_queue_non_advisory_count", errors);
+     selftest_expect_top_alias_number(json, "coverage_queue_advisory_count",
+                                      "coverage_queue_advisory_count",
+                                      errors);
+     selftest_expect_top_alias_string(json, "coverage_queue_lanes", errors);
+     selftest_expect_top_alias_number(json, "coverage_blocker_gaps",
+                                      "coverage_blocker_gaps", errors);
   selftest_expect_top_alias_number(json, "active_worklist_items",
                                    "active_worklist_items", errors);
   selftest_expect_top_alias_number(json, "runs_needed",
@@ -47869,27 +47869,27 @@ static void selftest_validate_fuzz_default_pressure(const char *json,
       strcmp(plan_next_action, expected_plan_action) != 0)
     (void)string_list_push_copy(errors,
                                 "default plan recommendation action wrong");
-	  if (!plan_next_command ||
-	      !strstr(plan_next_command, "fuzz_default_pressure/run-next.sh") ||
-	      strstr(plan_next_command, "fuzz all run") ||
-	      !selftest_command_uses_env_nice(plan_next_command) ||
-	      (expected_repeat[0] && !strstr(plan_next_command, expected_repeat)) ||
-	      (!expected_repeat[0] && strstr(plan_next_command, "NYNTH_RUN_REPEAT=")))
-	    (void)string_list_push_copy(errors,
-	                                "default plan recommendation command wrong");
-	  if (!plan_next_preview ||
-	      !selftest_command_uses_env_nice(plan_next_preview) ||
-	      !strstr(plan_next_preview, "NYNTH_RUN_DRY_RUN=1") ||
-	      (expected_repeat[0] && !strstr(plan_next_preview, expected_repeat)) ||
-	      (!expected_repeat[0] && strstr(plan_next_preview, "NYNTH_RUN_REPEAT=")) ||
-	      !strstr(plan_next_preview, "fuzz_default_pressure/run-next.sh"))
-	    (void)string_list_push_copy(errors,
-	                                "default plan recommendation preview wrong");
-	  if (!plan_next_low_cpu ||
-	      strcmp(plan_next_low_cpu, plan_next_command) != 0 ||
-	      !selftest_command_uses_env_nice(plan_next_low_cpu))
-	    (void)string_list_push_copy(errors,
-	                                "default plan low-cpu command lost selected handoff");
+     if (!plan_next_command ||
+         !strstr(plan_next_command, "fuzz_default_pressure/run-next.sh") ||
+         strstr(plan_next_command, "fuzz all run") ||
+         !selftest_command_uses_env_nice(plan_next_command) ||
+         (expected_repeat[0] && !strstr(plan_next_command, expected_repeat)) ||
+         (!expected_repeat[0] && strstr(plan_next_command, "NYNTH_RUN_REPEAT=")))
+       (void)string_list_push_copy(errors,
+                                   "default plan recommendation command wrong");
+     if (!plan_next_preview ||
+         !selftest_command_uses_env_nice(plan_next_preview) ||
+         !strstr(plan_next_preview, "NYNTH_RUN_DRY_RUN=1") ||
+         (expected_repeat[0] && !strstr(plan_next_preview, expected_repeat)) ||
+         (!expected_repeat[0] && strstr(plan_next_preview, "NYNTH_RUN_REPEAT=")) ||
+         !strstr(plan_next_preview, "fuzz_default_pressure/run-next.sh"))
+       (void)string_list_push_copy(errors,
+                                   "default plan recommendation preview wrong");
+     if (!plan_next_low_cpu ||
+         strcmp(plan_next_low_cpu, plan_next_command) != 0 ||
+         !selftest_command_uses_env_nice(plan_next_low_cpu))
+       (void)string_list_push_copy(errors,
+                                   "default plan low-cpu command lost selected handoff");
   if (!recommended_action || !plan_next_action ||
       strcmp(recommended_action, plan_next_action) != 0 ||
       !recommended_command || !plan_next_command ||
@@ -47946,55 +47946,55 @@ static void selftest_validate_fuzz_default_pressure(const char *json,
              !strstr(md.data, "old writer")) {
     (void)string_list_push_copy(errors,
                                 "default plan markdown omits score guards");
-	  } else if (!strstr(md.data, "wall-hours; x") ||
-	             !strstr(md.data, "thread-hours")) {
-	    (void)string_list_push_copy(errors, "default plan markdown mixes budget units");
-	  }
-	  if (md.data) {
-	    const char *controls_section = strstr(md.data, "\n## Controls\n");
-	    const char *plan_jq_line =
-	        controls_section ?
-	            strstr(controls_section,
-	                   "jq '{ok,cases,ok_count,failure_count,campaign_percent,"
-	                   "campaign_remaining_percent,thread_years,"
-	                   "target_thread_years,score_percent,stability_percent,"
-	                   "stability_score_percent,language_score_percent,") :
-	            NULL;
-	    const char *plan_jq_end =
-	        plan_jq_line ? strchr(plan_jq_line, '\n') : NULL;
-	    if (!plan_jq_line || !plan_jq_end ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "fuzz_default_pressure/plan.json") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "recommended_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "recommended_preview_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "recommended_low_cpu_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "language_score_good_threshold_percent") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "language_score_evidence_cap_percent") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "language_score_note") ||
-		        !find_n(plan_jq_line, plan_jq_end,
-		                "next_run_language_score_delta_percent") ||
-		        !find_n(plan_jq_line, plan_jq_end,
-		                "coverage_queue_count") ||
-		        !find_n(plan_jq_line, plan_jq_end,
-		                "coverage_queue_lanes") ||
-		        !find_n(plan_jq_line, plan_jq_end,
-		                "plan_next_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "plan_next_preview_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "plan_next_low_cpu_command") ||
-	        find_n(plan_jq_line, plan_jq_end, ".md.json") ||
-	        find_n(plan_jq_line, plan_jq_end, "/home/e/nynth"))
-	      (void)string_list_push_copy(
-	          errors, "default plan Controls omit compact plan jq readout");
-	  }
-	  free(md.data);
+     } else if (!strstr(md.data, "wall-hours; x") ||
+                !strstr(md.data, "thread-hours")) {
+       (void)string_list_push_copy(errors, "default plan markdown mixes budget units");
+     }
+     if (md.data) {
+       const char *controls_section = strstr(md.data, "\n## Controls\n");
+       const char *plan_jq_line =
+           controls_section ?
+               strstr(controls_section,
+                      "jq '{ok,cases,ok_count,failure_count,campaign_percent,"
+                      "campaign_remaining_percent,thread_years,"
+                      "target_thread_years,score_percent,stability_percent,"
+                      "stability_score_percent,language_score_percent,") :
+               NULL;
+       const char *plan_jq_end =
+           plan_jq_line ? strchr(plan_jq_line, '\n') : NULL;
+       if (!plan_jq_line || !plan_jq_end ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "fuzz_default_pressure/plan.json") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "recommended_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "recommended_preview_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "recommended_low_cpu_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "language_score_good_threshold_percent") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "language_score_evidence_cap_percent") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "language_score_note") ||
+              !find_n(plan_jq_line, plan_jq_end,
+                      "next_run_language_score_delta_percent") ||
+              !find_n(plan_jq_line, plan_jq_end,
+                      "coverage_queue_count") ||
+              !find_n(plan_jq_line, plan_jq_end,
+                      "coverage_queue_lanes") ||
+              !find_n(plan_jq_line, plan_jq_end,
+                      "plan_next_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "plan_next_preview_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "plan_next_low_cpu_command") ||
+           find_n(plan_jq_line, plan_jq_end, ".md.json") ||
+           find_n(plan_jq_line, plan_jq_end, "/home/e/nynth"))
+         (void)string_list_push_copy(
+             errors, "default plan Controls omit compact plan jq readout");
+     }
+     free(md.data);
   free(markdown);
   free(plan_next_action);
   free(plan_next_command);
@@ -48039,18 +48039,18 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
   selftest_expect_top_alias_string(json, "plan_next_command", errors);
   selftest_expect_top_alias_string(json, "plan_next_low_cpu_command",
                                    errors);
-	  selftest_expect_top_alias_string(json, "plan_next_preview_command",
-	                                   errors);
-	  selftest_expect_top_alias_number(json, "coverage_queue_count",
-	                                   "coverage_queue_count", errors);
-	  selftest_expect_top_alias_number(
-	      json, "coverage_queue_non_advisory_count",
-	      "coverage_queue_non_advisory_count", errors);
-	  selftest_expect_top_alias_number(json, "coverage_queue_advisory_count",
-	                                   "coverage_queue_advisory_count",
-	                                   errors);
-	  selftest_expect_top_alias_string(json, "coverage_queue_lanes", errors);
-	  double backlog_lanes = -1.0;
+     selftest_expect_top_alias_string(json, "plan_next_preview_command",
+                                      errors);
+     selftest_expect_top_alias_number(json, "coverage_queue_count",
+                                      "coverage_queue_count", errors);
+     selftest_expect_top_alias_number(
+         json, "coverage_queue_non_advisory_count",
+         "coverage_queue_non_advisory_count", errors);
+     selftest_expect_top_alias_number(json, "coverage_queue_advisory_count",
+                                      "coverage_queue_advisory_count",
+                                      errors);
+     selftest_expect_top_alias_string(json, "coverage_queue_lanes", errors);
+     double backlog_lanes = -1.0;
   if (!summary_number_from_report(json, "coverage_backlog_lanes",
                                   &backlog_lanes) ||
       backlog_lanes <= 0.0)
@@ -48135,19 +48135,19 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
       strstr(plan_next_command, "fuzz all run"))
     (void)string_list_push_copy(errors,
                                 "coverage-next plan command did not prefer guarded handoff");
-	  if (!plan_next_low_cpu ||
-	      !selftest_command_uses_env_nice(plan_next_low_cpu) ||
-	      !strstr(plan_next_low_cpu, "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
-	      !strstr(plan_next_low_cpu, "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
-	      !strstr(plan_next_low_cpu, "run-missing-evidence.sh"))
-	    (void)string_list_push_copy(errors,
-	                                "coverage-next plan low-cpu command was missing");
-	  if (!plan_next_preview ||
-	      !selftest_command_uses_env_nice(plan_next_preview) ||
-	      !strstr(plan_next_preview, "fuzz all preflight") ||
-	      !strstr(plan_next_preview, "build/cache/scratch"))
-	    (void)string_list_push_copy(errors,
-	                                "coverage-next plan preview was missing");
+     if (!plan_next_low_cpu ||
+         !selftest_command_uses_env_nice(plan_next_low_cpu) ||
+         !strstr(plan_next_low_cpu, "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
+         !strstr(plan_next_low_cpu, "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
+         !strstr(plan_next_low_cpu, "run-missing-evidence.sh"))
+       (void)string_list_push_copy(errors,
+                                   "coverage-next plan low-cpu command was missing");
+     if (!plan_next_preview ||
+         !selftest_command_uses_env_nice(plan_next_preview) ||
+         !strstr(plan_next_preview, "fuzz all preflight") ||
+         !strstr(plan_next_preview, "build/cache/scratch"))
+       (void)string_list_push_copy(errors,
+                                   "coverage-next plan preview was missing");
   if (!recommended_action || !plan_next_action ||
       strcmp(recommended_action, plan_next_action) != 0)
     (void)string_list_push_copy(errors,
@@ -48168,12 +48168,12 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
       strcmp(recommended_preview, plan_next_preview) != 0)
     (void)string_list_push_copy(errors,
                                 "coverage-next plan recommended preview alias wrong");
-	  if (!plan_state_refresh ||
-	      !selftest_command_uses_env_nice(plan_state_refresh) ||
-	      !strstr(plan_state_refresh, "NYNTH_RUN_DRY_RUN=1") ||
-	      !strstr(plan_state_refresh, "run-missing-evidence.sh"))
-	    (void)string_list_push_copy(errors,
-	                                "coverage-next plan state refresh missing");
+     if (!plan_state_refresh ||
+         !selftest_command_uses_env_nice(plan_state_refresh) ||
+         !strstr(plan_state_refresh, "NYNTH_RUN_DRY_RUN=1") ||
+         !strstr(plan_state_refresh, "run-missing-evidence.sh"))
+       (void)string_list_push_copy(errors,
+                                   "coverage-next plan state refresh missing");
   if (!handoff_command ||
       !strstr(handoff_command, "fuzz_plan_coverage_next/run-next.sh"))
     (void)string_list_push_copy(errors,
@@ -48307,7 +48307,7 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
                                 "coverage-next plan markdown was not readable");
   } else {
     const char *next_section = strstr(md.data, "\n## Next\n");
-	    const char *controls_section = strstr(md.data, "\n## Controls\n");
+       const char *controls_section = strstr(md.data, "\n## Controls\n");
     const char *campaign_section = strstr(md.data, "\n## Campaign Run\n");
     const char *missing_handoff = strstr(md.data,
                                          "run-missing-evidence.sh");
@@ -48329,52 +48329,52 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
     const char *stop_in_next =
         next_section ? strstr(next_section, "missing-evidence-stop") : NULL;
     const char *run_next = strstr(md.data, "run-next.sh");
-	    const char *campaign_preview =
-	        campaign_section ? strstr(campaign_section,
-	                                  "NYNTH_RUN_DRY_RUN=1 NYNTH_RUN_REPEAT=target") : NULL;
-	    const char *plan_jq_line =
-	        controls_section ?
-	            strstr(controls_section,
-	                   "jq '{ok,cases,ok_count,failure_count,campaign_percent,"
-	                   "campaign_remaining_percent,thread_years,"
-	                   "target_thread_years,score_percent,stability_percent,"
-	                   "stability_score_percent,language_score_percent,") :
-	            NULL;
-	    const char *plan_jq_end =
-	        plan_jq_line ? strchr(plan_jq_line, '\n') : NULL;
-	    if (!plan_jq_line || !plan_jq_end ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "fuzz_plan_coverage_next/plan.json") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "recommended_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "recommended_preview_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "recommended_low_cpu_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "language_score_good_threshold_percent") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "language_score_evidence_cap_percent") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "language_score_note") ||
-		        !find_n(plan_jq_line, plan_jq_end,
-		                "next_run_language_score_delta_percent") ||
-		        !find_n(plan_jq_line, plan_jq_end,
-		                "coverage_queue_count") ||
-		        !find_n(plan_jq_line, plan_jq_end,
-		                "coverage_queue_lanes") ||
-		        !find_n(plan_jq_line, plan_jq_end,
-		                "plan_next_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "plan_next_preview_command") ||
-	        !find_n(plan_jq_line, plan_jq_end,
-	                "plan_next_low_cpu_command") ||
-	        find_n(plan_jq_line, plan_jq_end, ".md.json") ||
-	        find_n(plan_jq_line, plan_jq_end, "/home/e/nynth"))
-	      (void)string_list_push_copy(
-	          errors, "coverage-next plan Controls omit compact plan jq readout");
-	    if (!strstr(md.data,
-	                "collect missing coverage evidence before unattended campaign runs"))
+       const char *campaign_preview =
+           campaign_section ? strstr(campaign_section,
+                                     "NYNTH_RUN_DRY_RUN=1 NYNTH_RUN_REPEAT=target") : NULL;
+       const char *plan_jq_line =
+           controls_section ?
+               strstr(controls_section,
+                      "jq '{ok,cases,ok_count,failure_count,campaign_percent,"
+                      "campaign_remaining_percent,thread_years,"
+                      "target_thread_years,score_percent,stability_percent,"
+                      "stability_score_percent,language_score_percent,") :
+               NULL;
+       const char *plan_jq_end =
+           plan_jq_line ? strchr(plan_jq_line, '\n') : NULL;
+       if (!plan_jq_line || !plan_jq_end ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "fuzz_plan_coverage_next/plan.json") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "recommended_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "recommended_preview_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "recommended_low_cpu_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "language_score_good_threshold_percent") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "language_score_evidence_cap_percent") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "language_score_note") ||
+              !find_n(plan_jq_line, plan_jq_end,
+                      "next_run_language_score_delta_percent") ||
+              !find_n(plan_jq_line, plan_jq_end,
+                      "coverage_queue_count") ||
+              !find_n(plan_jq_line, plan_jq_end,
+                      "coverage_queue_lanes") ||
+              !find_n(plan_jq_line, plan_jq_end,
+                      "plan_next_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "plan_next_preview_command") ||
+           !find_n(plan_jq_line, plan_jq_end,
+                   "plan_next_low_cpu_command") ||
+           find_n(plan_jq_line, plan_jq_end, ".md.json") ||
+           find_n(plan_jq_line, plan_jq_end, "/home/e/nynth"))
+         (void)string_list_push_copy(
+             errors, "coverage-next plan Controls omit compact plan jq readout");
+       if (!strstr(md.data,
+                   "collect missing coverage evidence before unattended campaign runs"))
       (void)string_list_push_copy(errors,
                                   "coverage-next plan TLDR was not action-first");
     if (!strstr(md.data, "- Coverage queue:") ||
@@ -48611,17 +48611,17 @@ static void selftest_validate_fuzz_all_coverage_commands(const char *json,
       (void)string_list_push_copy(errors,
                                   "coverage report next command was missing");
     if (coverage_next_command && strstr(coverage_next_command, "fuzz all run") &&
-	        (!coverage_next_guarded ||
-	         !strstr(coverage_next_guarded, "run-missing-evidence.sh") ||
-	         !coverage_next_low_cpu ||
-	         !selftest_command_uses_env_nice(coverage_next_low_cpu) ||
-	         !strstr(coverage_next_low_cpu, "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
-	         !strstr(coverage_next_low_cpu, "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
-	         !strstr(coverage_next_low_cpu, "run-missing-evidence.sh") ||
-	         !coverage_next_preview ||
-	         !strstr(coverage_next_preview, "fuzz all preflight") ||
-	         !selftest_command_uses_env_nice(coverage_next_preview) ||
-	         !strstr(coverage_next_preview, "build/cache/scratch") ||
+           (!coverage_next_guarded ||
+            !strstr(coverage_next_guarded, "run-missing-evidence.sh") ||
+            !coverage_next_low_cpu ||
+            !selftest_command_uses_env_nice(coverage_next_low_cpu) ||
+            !strstr(coverage_next_low_cpu, "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
+            !strstr(coverage_next_low_cpu, "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
+            !strstr(coverage_next_low_cpu, "run-missing-evidence.sh") ||
+            !coverage_next_preview ||
+            !strstr(coverage_next_preview, "fuzz all preflight") ||
+            !selftest_command_uses_env_nice(coverage_next_preview) ||
+            !strstr(coverage_next_preview, "build/cache/scratch") ||
          !coverage_next_state_command ||
          !strstr(coverage_next_state_command,
                  "jq {state,event,live,fresh,") ||
@@ -48629,11 +48629,11 @@ static void selftest_validate_fuzz_all_coverage_commands(const char *json,
                  "run-missing-evidence-state.json") ||
          strstr(coverage_next_state_command,
                 "cat build/fuzz/all/run-missing-evidence-state.json") ||
-	         !coverage_next_state_refresh ||
-	         !selftest_command_uses_env_nice(coverage_next_state_refresh) ||
-	         !strstr(coverage_next_state_refresh, "NYNTH_RUN_DRY_RUN=1") ||
-	         !strstr(coverage_next_state_refresh,
-	                 "run-missing-evidence.sh") ||
+            !coverage_next_state_refresh ||
+            !selftest_command_uses_env_nice(coverage_next_state_refresh) ||
+            !strstr(coverage_next_state_refresh, "NYNTH_RUN_DRY_RUN=1") ||
+            !strstr(coverage_next_state_refresh,
+                    "run-missing-evidence.sh") ||
          !coverage_next_stop_command ||
          !strstr(coverage_next_stop_command, "missing-evidence-stop") ||
          !coverage_next_resume_command ||
@@ -50171,7 +50171,7 @@ static void selftest_validate_compiler_known_bugs(const char *json,
 static void selftest_validate_compiler_std_audit(const char *json,
                                                  string_list_t *errors,
                                                  int *row_count) {
-	  selftest_validate_standard_report(json, errors, row_count);
+     selftest_validate_standard_report(json, errors, row_count);
   char *mode = summary_string_from_report(json, "mode");
   if (!mode || strcmp(mode, "compiler-std-audit") != 0)
     (void)string_list_push_copy(errors, "compiler std audit mode mismatch");
@@ -50428,14 +50428,14 @@ static void selftest_validate_compiler_std_audit(const char *json,
     if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
       (void)string_list_push_copy(errors, "compiler std audit markdown was not readable");
     } else if (!strstr(md.data, "# Nynth Compiler Std Audit") ||
-	               !strstr(md.data, "TLDR") ||
-	               !strstr(md.data, "Runtime surface") ||
-		               !strstr(md.data, "CRT aliases") ||
-		               !strstr(md.data, "Claim scope") ||
-		               !strstr(md.data, "not a bugless CRT behavior proof") ||
-	               !strstr(md.data, "CRT behavior next") ||
-	               !strstr(md.data, "./build/fuzz/all/run-next.sh") ||
-	               (unreferenced_count > 0.0 &&
+                  !strstr(md.data, "TLDR") ||
+                  !strstr(md.data, "Runtime surface") ||
+                     !strstr(md.data, "CRT aliases") ||
+                     !strstr(md.data, "Claim scope") ||
+                     !strstr(md.data, "not a bugless CRT behavior proof") ||
+                  !strstr(md.data, "CRT behavior next") ||
+                  !strstr(md.data, "./build/fuzz/all/run-next.sh") ||
+                  (unreferenced_count > 0.0 &&
                 (!strstr(md.data, "CRT families") ||
                  !strstr(md.data, "## CRT Families") ||
                  !strstr(md.data, "## Next CRT") ||
@@ -52254,13 +52254,13 @@ static void selftest_validate_fuzz_all_progress(const char *json,
                  "run-missing-evidence.sh")))
       (void)string_list_push_copy(errors,
                                   "progress coverage next guarded command missing");
-	    if (progress_coverage_next_command &&
-	        strstr(progress_coverage_next_command, "fuzz all run") &&
-	        (!progress_coverage_next_low_cpu ||
-	         !selftest_command_uses_env_nice(progress_coverage_next_low_cpu) ||
-	         !strstr(progress_coverage_next_low_cpu,
-	                 "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
-	         !strstr(progress_coverage_next_low_cpu,
+       if (progress_coverage_next_command &&
+           strstr(progress_coverage_next_command, "fuzz all run") &&
+           (!progress_coverage_next_low_cpu ||
+            !selftest_command_uses_env_nice(progress_coverage_next_low_cpu) ||
+            !strstr(progress_coverage_next_low_cpu,
+                    "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
+            !strstr(progress_coverage_next_low_cpu,
                  "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
          !strstr(progress_coverage_next_low_cpu,
                  "run-missing-evidence.sh")))
@@ -52269,19 +52269,19 @@ static void selftest_validate_fuzz_all_progress(const char *json,
     if (progress_coverage_next_command &&
         strstr(progress_coverage_next_command, "fuzz all run") &&
         (!progress_coverage_next_state_file ||
-	 !strstr(progress_coverage_next_state_file,
-	         "run-missing-evidence-state.json") ||
-	 !progress_coverage_next_state_command ||
-	 !strstr(progress_coverage_next_state_command,
-	         "jq {state,event,live,fresh,child_status,") ||
-	         !strstr(progress_coverage_next_state_command,
-		         "run-missing-evidence-state.json") ||
-	         !progress_coverage_next_state_refresh ||
-	         !selftest_command_uses_env_nice(
-	             progress_coverage_next_state_refresh) ||
-	         !strstr(progress_coverage_next_state_refresh,
-	                 "NYNTH_RUN_DRY_RUN=1") ||
-	         !strstr(progress_coverage_next_state_refresh,
+    !strstr(progress_coverage_next_state_file,
+            "run-missing-evidence-state.json") ||
+    !progress_coverage_next_state_command ||
+    !strstr(progress_coverage_next_state_command,
+            "jq {state,event,live,fresh,child_status,") ||
+            !strstr(progress_coverage_next_state_command,
+               "run-missing-evidence-state.json") ||
+            !progress_coverage_next_state_refresh ||
+            !selftest_command_uses_env_nice(
+                progress_coverage_next_state_refresh) ||
+            !strstr(progress_coverage_next_state_refresh,
+                    "NYNTH_RUN_DRY_RUN=1") ||
+            !strstr(progress_coverage_next_state_refresh,
                  "run-missing-evidence.sh") ||
          !progress_coverage_next_stop_file ||
          !strstr(progress_coverage_next_stop_file,
@@ -52334,15 +52334,15 @@ static void selftest_validate_fuzz_all_progress(const char *json,
           errors, "progress coverage next state refresh requirement missing");
     if (progress_coverage_next_command &&
         strstr(progress_coverage_next_command, "fuzz all run") &&
-	        (!progress_coverage_next_preview ||
-	         !strstr(progress_coverage_next_preview, "fuzz all preflight") ||
-	         (progress_coverage_next_lane &&
-	          strcmp(progress_coverage_next_lane, "afl") == 0 &&
-	          !strstr(progress_coverage_next_preview, "--only-lane afl")) ||
-	         !selftest_command_uses_env_nice(progress_coverage_next_preview) ||
-	         !strstr(progress_coverage_next_preview,
-	                 "--allow-dirty-nytrix-baseline") ||
-	         !strstr(progress_coverage_next_preview, "build/cache/scratch")))
+           (!progress_coverage_next_preview ||
+            !strstr(progress_coverage_next_preview, "fuzz all preflight") ||
+            (progress_coverage_next_lane &&
+             strcmp(progress_coverage_next_lane, "afl") == 0 &&
+             !strstr(progress_coverage_next_preview, "--only-lane afl")) ||
+            !selftest_command_uses_env_nice(progress_coverage_next_preview) ||
+            !strstr(progress_coverage_next_preview,
+                    "--allow-dirty-nytrix-baseline") ||
+            !strstr(progress_coverage_next_preview, "build/cache/scratch")))
         (void)string_list_push_copy(errors,
                                     "progress coverage next preview missing");
     }
@@ -53799,13 +53799,13 @@ static void selftest_validate_fuzz_all_progress(const char *json,
         (void)string_list_push_copy(
             errors, "progress Controls omit quick jq readout");
       const char *progress_jq_line = controls_section ?
-	          strstr(controls_section,
-	                 "jq {ok,cases,ok_count,failure_count,ready,blockers,active_count,"
-	                 "coverage_percent,coverage_queue_count,"
-	                 "coverage_queue_non_advisory_count,"
-	                 "coverage_queue_advisory_count,"
-	                 "coverage_queue_lanes,campaign_percent,"
-	                 "campaign_remaining_percent,thread_years,"
+             strstr(controls_section,
+                    "jq {ok,cases,ok_count,failure_count,ready,blockers,active_count,"
+                    "coverage_percent,coverage_queue_count,"
+                    "coverage_queue_non_advisory_count,"
+                    "coverage_queue_advisory_count,"
+                    "coverage_queue_lanes,campaign_percent,"
+                    "campaign_remaining_percent,thread_years,"
                  "target_thread_years,score_percent,stability_percent,"
                  "stability_score_percent,language_score_percent,"
                  "language_score_label,completion_state,"
@@ -53886,25 +53886,25 @@ static void selftest_validate_fuzz_all_progress(const char *json,
                  "advisory_recheck_raw_repro_checked,"
                  "advisory_recheck_raw_repro_passed,"
                  "advisory_recheck_raw_repro_timeouts,"
-	                 "advisory_recheck_raw_repro_unexpected,advisory_penalty,"
-	                 "old_nytrix_test_scratch_absent,old_nytrix_fuzz_absent,"
-	                 "old_nytrix_build_cache_absent,"
-	                 "active_old_nytrix_output_writer_present,old_path_report,"
-	                 "old_path_markdown,old_path_cache_policy_ok,"
-	                 "old_path_present_count,old_path_moved_count,"
-	                 "old_path_remaining_count,"
-	                 "old_path_wait_remaining_seconds,"
-	                 "old_path_artifact_leak_count,old_path_artifact_moved_count,"
-	                 "old_path_artifact_remaining_count,compiler_findings,"
+                    "advisory_recheck_raw_repro_unexpected,advisory_penalty,"
+                    "old_nytrix_test_scratch_absent,old_nytrix_fuzz_absent,"
+                    "old_nytrix_build_cache_absent,"
+                    "active_old_nytrix_output_writer_present,old_path_report,"
+                    "old_path_markdown,old_path_cache_policy_ok,"
+                    "old_path_present_count,old_path_moved_count,"
+                    "old_path_remaining_count,"
+                    "old_path_wait_remaining_seconds,"
+                    "old_path_artifact_leak_count,old_path_artifact_moved_count,"
+                    "old_path_artifact_remaining_count,compiler_findings,"
                  "known_bug_replay_findings,runtime_surface_state,"
                  "runtime_exports,direct_runtime_refs,"
-	                 "runtime_surface_scope,runtime_coverage_done,runtime_coverage_total,"
+                    "runtime_surface_scope,runtime_coverage_done,runtime_coverage_total,"
                  "runtime_export_coverage_percent,"
                  "runtime_unreferenced_count,runtime_wrapper_gap_count,"
-	                 "crt_surface_state,crt_surface_scope,crt_behavior_state,"
-	                 "crt_behavior_scope,crt_behavior_next_action,"
-	                 "crt_behavior_next_reason,crt_behavior_next_command,"
-	                 "crt_runtime_exports,crt_direct_refs,"
+                    "crt_surface_state,crt_surface_scope,crt_behavior_state,"
+                    "crt_behavior_scope,crt_behavior_next_action,"
+                    "crt_behavior_next_reason,crt_behavior_next_command,"
+                    "crt_runtime_exports,crt_direct_refs,"
                  "crt_coverage_done,crt_coverage_total,"
                  "crt_export_coverage_percent,"
                  "crt_unreferenced_percent,crt_unreferenced_count,"
@@ -53914,7 +53914,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
                  "crt_next_unreferenced_family,"
                  "crt_next_unreferenced_count,perf_hotspots_open,"
                  "perf_worst_ratio,perf_worst_slowdown_percent,"
-	                 "perf_worst_case,latest_full_pressure_perf_hotspots,latest_full_pressure_perf_max_ratio,latest_full_pressure_perf_max_slowdown_percent,latest_full_pressure_perf_max_case,latest_full_pressure_perf_rows,latest_full_pressure_perf_suite_current,perf_watchlist_state}") :
+                    "perf_worst_case,latest_full_pressure_perf_hotspots,latest_full_pressure_perf_max_ratio,latest_full_pressure_perf_max_slowdown_percent,latest_full_pressure_perf_max_case,latest_full_pressure_perf_rows,latest_full_pressure_perf_suite_current,perf_watchlist_state}") :
           NULL;
       const char *progress_jq_end =
           progress_jq_line ? strchr(progress_jq_line, '\n') : NULL;
@@ -53932,19 +53932,19 @@ static void selftest_validate_fuzz_all_progress(const char *json,
           strstr(controls_section,
                  "jq {state,event,live,child_status,stale_after_seconds,"
                  "repeat_mode,repeat_count,"
-	                 "handoff_low_priority,handoff_nice,handoff_load_wait,"
-	                 "handoff_max_load_pct,handoff_space_guard,"
-	                 "handoff_min_free_gb,handoff_run_lock,handoff_threads,"
-	                 "heartbeat_s,heartbeat_count,child_pid,"
-	                 "cycle,cycles,max_cycles,cooldown_s,timestamp_utc,"
-	                 "updated_at,started_at,finished_at,pid,campaign_dir,"
-	                 "stop_file,status_report,status_json,progress_report,"
-	                 "progress_json,dry_run_exceeds_max,dry_run_wall_hours,"
-	                 "dry_run_wall_days,dry_run_thread_years,"
-	                 "dry_run_campaign_gain_percent,"
-	                 "dry_run_target_percent_per_run,"
-	                 "dry_run_thread_years_per_run,canonical_status_report,"
-		                 "canonical_progress_report,last_report}") :
+                    "handoff_low_priority,handoff_nice,handoff_load_wait,"
+                    "handoff_max_load_pct,handoff_space_guard,"
+                    "handoff_min_free_gb,handoff_run_lock,handoff_threads,"
+                    "heartbeat_s,heartbeat_count,child_pid,"
+                    "cycle,cycles,max_cycles,cooldown_s,timestamp_utc,"
+                    "updated_at,started_at,finished_at,pid,campaign_dir,"
+                    "stop_file,status_report,status_json,progress_report,"
+                    "progress_json,dry_run_exceeds_max,dry_run_wall_hours,"
+                    "dry_run_wall_days,dry_run_thread_years,"
+                    "dry_run_campaign_gain_percent,"
+                    "dry_run_target_percent_per_run,"
+                    "dry_run_thread_years_per_run,canonical_status_report,"
+                       "canonical_progress_report,last_report}") :
           NULL;
       const char *state_jq_end =
           state_jq_line ? strchr(state_jq_line, '\n') : NULL;
@@ -54576,15 +54576,15 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
               write_file_text(cache_marker, "old build cache\n") &&
               write_file_text(artifact_file,
                               "{\"wrapper\":\"/home/e/nytrix/tmp/projects/test/scratch/old.ny\"}\n") &&
-	              write_file_text(
-	                  stale_command_artifact,
-	                  "- Cockpit: `env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 "
-	                  "nice -n 10 ./build/nynth selftest run --only fuzz_all_help "
-	                  "--only fuzz_all_default_pressure "
-	                  "--only fuzz_all_full_pressure_remediation "
-	                  "--only fuzz_all_plan_coverage_next "
-	                  "--json build/fuzz/all/selftest-cockpit.json "
-	                  "--markdown build/fuzz/all/selftest-cockpit.md`\n") &&
+                 write_file_text(
+                     stale_command_artifact,
+                     "- Cockpit: `env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 "
+                     "nice -n 10 ./build/nynth selftest run --only fuzz_all_help "
+                     "--only fuzz_all_default_pressure "
+                     "--only fuzz_all_full_pressure_remediation "
+                     "--only fuzz_all_plan_coverage_next "
+                     "--json build/fuzz/all/selftest-cockpit.json "
+                     "--markdown build/fuzz/all/selftest-cockpit.md`\n") &&
               write_file_text(
                   stale_run_good_artifact,
                   "NYNTH_RUN_REPEAT=good ./build/fuzz/all/run-next.sh\n");
@@ -54676,7 +54676,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
         "\"low_priority\":true,\"nice\":10,"
         "\"load_wait\":true,\"max_load_pct\":75,"
         "\"space_guard\":true,\"min_free_gb\":20,"
-		      "\"run_lock\":true,\"threads\":\"25%\","
+            "\"run_lock\":true,\"threads\":\"25%\","
         "\"last_report\":\"\"}\n";
     const char *no_evidence =
         "{\"rows\":["
@@ -55527,7 +55527,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "\"low_priority\":true,\"nice\":10,"
       "\"load_wait\":true,\"max_load_pct\":75,"
       "\"space_guard\":true,\"min_free_gb\":20,"
-	      "\"run_lock\":true,\"threads\":\"25%%\","
+         "\"run_lock\":true,\"threads\":\"25%%\","
       "\"last_report\":\"latest-smoke.json\"}\n",
       (long)getpid());
     str_buf_t status = {0};
