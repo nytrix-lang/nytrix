@@ -2035,6 +2035,7 @@ static void scan_dependencies(mod_list *list, size_t idx) {
 
   lexer_t lx;
   lexer_init(&lx, txt, list->entries[idx].path);
+  lx.intern_identifiers = false;
   int depth = 0;
   for (;;) {
     token_t t = lexer_next(&lx);

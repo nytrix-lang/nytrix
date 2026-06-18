@@ -7,20 +7,20 @@ checks under `etc/tests/`.
 
 | Area | Files |
 | --- | --- |
-| CLI | [conway.ny](../../etc/projects/cli/conway.ny), [matrix.ny](../../etc/projects/cli/matrix.ny), [ant.ny](../../etc/projects/cli/ant.ny) |
+| Terminal | [conway.ny](../../etc/projects/os/conway.ny), [matrix.ny](../../etc/projects/os/matrix.ny), [ant.ny](../../etc/projects/os/ant.ny) |
 | OS | [args.ny](../../etc/projects/os/args.ny), [server.ny](../../etc/projects/os/server.ny), [ffi.ny](../../etc/projects/os/ffi.ny), [sound.ny](../../etc/projects/os/sound.ny) |
 | UI | [term.ny](../../etc/projects/ui/term.ny), [input.ny](../../etc/projects/ui/input.ny), [monitor.ny](../../etc/projects/ui/monitor.ny), [engine.ny](../../etc/projects/ui/engine.ny), [editor.ny](../../etc/projects/ui/editor.ny) |
 
 Run one directly:
 
 ```bash
-ny etc/projects/cli/conway.ny
+ny etc/projects/os/conway.ny
 ```
 
 Build a native executable:
 
 ```bash
-ny -o build/conway etc/projects/cli/conway.ny
+ny -o build/conway etc/projects/os/conway.ny
 ```
 
 Build the browser wasm runner:
@@ -41,7 +41,7 @@ language surface in isolation:
 | Topic | Files |
 | --- | --- |
 | ADTs and matching | [adt.ny](../../etc/tests/rt/adt.ny), [match.ny](../../etc/tests/rt/match.ny) |
-| Async and threads | [async.ny](../../etc/tests/rt/async.ny), [thread.ny](../../etc/tests/rt/thread.ny) |
+| Concurrency and threads | [concurrency.ny](../../etc/tests/rt/concurrency.ny), [thread.ny](../../etc/tests/rt/thread.ny) |
 | Comptime | [comptime.ny](../../etc/tests/rt/comptime.ny), [table.ny](../../etc/tests/rt/table.ny) |
 | Native boundary | [ffi.ny](../../etc/tests/rt/ffi.ny), [extern.ny](../../etc/tests/rt/extern.ny), [asm.ny](../../etc/tests/rt/asm.ny) |
 | Ownership and safety | [ownership.ny](../../etc/tests/rt/ownership.ny), [safe.ny](../../etc/tests/rt/safe.ny), [memory.ny](../../etc/tests/rt/memory.ny) |

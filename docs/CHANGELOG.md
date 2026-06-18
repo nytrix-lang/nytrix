@@ -10,8 +10,9 @@ Nytrix uses dated release milestones. Exact build snapshots are identified by th
 
 * SVG/UI: 4×4 supersampling, stroke linecap/linejoin, faster sub-path bboxes, gradient/`<use>`/visibility fixes, terminal 256-color support, SVG preview retry/background fixes, and terminal tab throttling.
 * Compiler: decoupled `--borrow-check` from `--ownership-strict`, added crash/panic debug help, tightened `--strict-types` globals, enabled Z3 by default, and elides proven nonzero f64 division checks.
+* Compiler/tooling: clarified type-first docs, fixed stale docs links, sped up type-pipeline JSON emission, and reduced engine/editor cache churn plus compile-time profiling overhead.
 * Fuzz: moved real benchmarks into `etc/tests/fuzz/bench/*.nshape`, added calls/matrix/string, refreshed existing bench shapes with checksum validation, and made `ny-fuzz bench real` consume those shapes directly.
-* Assets/tests: removed unavailable-asset probes, kept synthetic image coverage, and restored `tmp/assets/models` as the default local glTF root with env-root overrides.
+* Assets/glTF: removed unavailable-asset probes, kept synthetic image coverage, restored `tmp/assets/models` as the default local glTF root, and moved glTF hot paths from `src/rt/gltf.c` into Ny.
 * Build/CI: Windows installs Z3 through MSYS2/UCRT64, CMake probes LLVM/libclang paths more reliably, and build metadata now reports 0.6.0.
 * Examples/fixes: improved `matrix.ny` color/glyph timing and fixed canvas UTF-8 buffer access type mismatches.
 

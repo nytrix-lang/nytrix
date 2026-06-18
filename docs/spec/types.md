@@ -185,7 +185,7 @@ layout guard Header h = value else {
 layout pointer type. Derived layout shapes emit `LayoutName_from(value)` and
 `*_load_*` helpers when requested.
 
-Struct and layout fields use the short `Type name` spelling.
+Structs, layouts, functions, and local declarations use `Type name`.
 
 ## Impl self and operators
 

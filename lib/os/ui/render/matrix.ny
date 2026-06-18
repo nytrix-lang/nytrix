@@ -55,13 +55,13 @@ fn mat4_mul_into(list a, list b, list o) list {
 
 fn mat4_to_buffer(list m, ptr buf) list {
    "Writes 16 float components from matrix `m` into raw buffer `buf`."
-   __copy_mem(buf, m + 16, 128)
+   __mat4_to_buffer(m, buf)
    m
 }
 
 fn mat4_from_buffer(list m, ptr buf) list {
    "Loads 16 float components from raw buffer `buf` into matrix `m`."
-   __copy_mem(m + 16, buf, 128)
+   __mat4_from_buffer(m, buf)
    m
 }
 
@@ -341,6 +341,12 @@ fn mat4_inverse_into(list src, list dst) list {
    assert(mat4_get(prod, 0, 3) == 2.0 && mat4_get(prod, 1, 3) == 3.0, "mat4 multiply")
    def vec = mat4_mul_vec4(translated, [1.0, 1.0, 1.0, 1.0])
    assert(vec[0] == 3.0 && vec[1] == 4.0 && vec[2] == 5.0, "mat4 vec4 multiply")
+   def buf = malloc(128)
+   assert(mat4_to_buffer(translated, buf) == translated, "mat4 buffer store returns matrix")
+   def roundtrip = mat4_zero()
+   assert(mat4_from_buffer(roundtrip, buf) == roundtrip, "mat4 buffer load returns matrix")
+   assert(mat4_get(roundtrip, 0, 3) == 2.0 && mat4_get(roundtrip, 2, 3) == 4.0, "mat4 buffer roundtrip")
+   free(buf)
    def inv = mat4_inverse(translated)
    assert(abs(mat4_get(inv, 0, 3) + 2.0) < 0.0001, "mat4 inverse")
    print("✓ std.os.ui.render.matrix self-test passed")

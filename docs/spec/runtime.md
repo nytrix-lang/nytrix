@@ -27,9 +27,9 @@ ny --safe-mode file.ny
 ny --mode=safe file.ny
 ```
 
-In this profile, code scopes owned raw allocations with `with ptr` or returns
-them through an ownership contract. Raw memory loads and stores against a
-compiler-tracked allocation require a proven byte range:
+In this profile, code scopes owned raw allocations with `with ptr: name` or
+returns them through an ownership contract. Raw memory loads and stores against
+a compiler-tracked allocation require a proven byte range:
 
 ```ny
 with ptr: p = malloc(8){
@@ -124,8 +124,8 @@ Ownership function contracts are:
 
 ## Scoped cleanup
 
-`defer` and `with` provide language-level cleanup. Library APIs can build
-resource-safe wrappers on top.
+`defer` and `with` provide cleanup. `with` uses the resource spelling
+`with Type: name = value { ... }`.
 
 ```ny
 defer { cleanup() }
