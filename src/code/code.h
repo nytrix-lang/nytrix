@@ -367,6 +367,7 @@ typedef struct codegen_debug_t {
   bool debug_symbols;
   bool ownership_enabled;
   bool ownership_strict;
+  bool ownership_runtime_cleanup;
   bool rc_heap_enabled;
   const char *heap_policy;
   int debug_opt_level;
@@ -620,6 +621,7 @@ struct codegen_t {
       bool debug_symbols;
       bool ownership_enabled;
       bool ownership_strict;
+      bool ownership_runtime_cleanup;
       bool rc_heap_enabled;
       const char *heap_policy;
       int debug_opt_level;

@@ -97,11 +97,14 @@ Enable compiler checks:
 ```bash
 ny --borrow-check file.ny
 ny --borrow-check --ownership-strict file.ny
+ny --ownership file.ny
 ```
 
-In strict ownership mode the compiler reports moves, releases, mutations, and
-reassignments while a borrow is live; use after move; double release; local
-borrow escapes; and owned returns without `@returns_owned`.
+`--borrow-check` enables borrow/ownership diagnostics (moves, releases, borrow
+escapes, use after move, double release) without forcing RAII runtime cleanup.
+Add `--ownership-strict` for stricter tracking (e.g. no implicit borrows from
+mutable slots). Use `--ownership` (alias for `--heap=raii`) to enable both
+diagnostics and automatic runtime cleanup of owned values.
 
 With borrow checking disabled, the compiler still parses ownership attributes
 and keeps them as declaration metadata. Run `ny --borrow-check` or

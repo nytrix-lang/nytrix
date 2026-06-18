@@ -128,7 +128,7 @@ fn draw_keycap(any win, any font_key, any item, f64 x, f64 y, f64 w, f64 h, f64 
    def fill = down ? widgets.C_KEY_DOWN : (hover ? widgets.C_KEY_HOVER : widgets.C_KEY_IDLE)
    def border = down ? widgets.C_KEY_DOWN : (hover ? widgets.C_KEY_DOWN : widgets.C_LINE)
    gfx.draw_rect(x, y, w, h, fill)
-   gfx.draw_rectangle_lines(x, y, w, h, border, hover ? 3.0 : 2.0)
+   gfx.draw_rect_lines(x, y, w, h, border, hover ? 3.0 : 2.0)
    gfx.draw_text(font_key, label, x + 6.0, y + 6.0, down ? gfx.WHITE : (enabled ? widgets.C_TEXT : widgets.C_MUTED))
    0
 }

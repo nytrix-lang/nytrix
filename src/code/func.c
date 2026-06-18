@@ -888,7 +888,11 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
       decl->attr_borrows.len != 0 || decl->attr_consumes.len != 0 ||
       decl->attr_mutates.len != 0 || decl->attr_releases.len != 0 ||
       decl->attr_forgets.len != 0;
+  const char *warn_ownership_contracts =
+      getenv("NYTRIX_WARN_OWNERSHIP_CONTRACTS");
   if (has_ownership_contract && !cg->ownership_enabled &&
+      warn_ownership_contracts && *warn_ownership_contracts &&
+      strcmp(warn_ownership_contracts, "0") != 0 &&
       !ny_is_stdlib_tok(fn_stmt->tok)) {
     ny_diag_warning(fn_stmt->tok,
                     "ownership contract attributes are parsed but not enforced "

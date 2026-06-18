@@ -8,6 +8,7 @@ use std.core.common as common
 use std.math
 use std.os.ffi as ffi
 use std.os.ui.window as lib_uiw
+use std.os.ui.window.platform as ui_backend
 use std.os.ui.render.dump as ui_profile
 use std.os.ui.render.matrix as matrix
 use std.os.ui.render.shared as render_shared
@@ -1407,8 +1408,15 @@ fn init(any win) bool {
       return true
    }
    if !lib_uiw.make_current(win) { return false }
-   if _cfg_gl_perf { lib_uiw.set_window_vsync(false) }
-   if common.env_present("NY_GL_SWAP_INTERVAL") { lib_uiw.set_window_vsync(common.env_int_clamped("NY_GL_SWAP_INTERVAL", 0, 0, 1) > 0) }
+   if _cfg_gl_perf {
+      lib_uiw.set_window_vsync(false)
+      ui_backend.swap_interval(0)
+   }
+   if common.env_present("NY_GL_SWAP_INTERVAL") {
+      def interval = common.env_int_clamped("NY_GL_SWAP_INTERVAL", 0, 0, 4)
+      lib_uiw.set_window_vsync(interval > 0)
+      ui_backend.swap_interval(interval)
+   }
    if !_has("glClear") || !_has("glDrawArrays") || !_has("glVertexPointer") || !_has("glTexImage2D") {
       shutdown()
       return false

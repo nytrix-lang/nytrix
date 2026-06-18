@@ -139,7 +139,7 @@ fn meter(any font_sm, str label, any value, f64 x, f64 y, f64 w, any color) int 
    def bar_w = max(24.0, w - 70.0)
    render.draw_rect(bar_x, y + 5.0, bar_w, 11.0, render.color_alpha(widgets.C_DIM, 0.45))
    render.draw_rect(bar_x, y + 5.0, bar_w * v, 11.0, color)
-   render.draw_rectangle_lines(bar_x, y + 5.0, bar_w, 11.0, widgets.C_LINE, 1.0)
+   render.draw_rect_lines(bar_x, y + 5.0, bar_w, 11.0, widgets.C_LINE, 1.0)
    0
 }
 
@@ -163,7 +163,7 @@ fn _draw_flag_cell(any font_sm, f64 x, f64 y, f64 w, str label, bool active) int
    def fill = active ? render.color_alpha(widgets.C_ACCENT, 0.55) : render.color_alpha(widgets.C_PANEL_ALT, 0.70)
    def border = active ? widgets.C_ACCENT_HI : widgets.C_LINE
    render.draw_rect(x, y, w, 24.0, fill)
-   render.draw_rectangle_lines(x, y, w, 24.0, border, active ? 2.0 : 1.0)
+   render.draw_rect_lines(x, y, w, 24.0, border, active ? 2.0 : 1.0)
    render.draw_text(font_sm, label, x + 8.0, y + 4.0, active ? widgets.C_TEXT : widgets.C_MUTED)
    widgets.text_right(font_sm, active ? "on" : "off", x + w - 8.0, y + 4.0, active ? widgets.C_ACCENT_HI : widgets.C_MUTED)
    0
@@ -172,7 +172,7 @@ fn _draw_flag_cell(any font_sm, f64 x, f64 y, f64 w, str label, bool active) int
 fn draw_window_flags(any font_sm, f64 x, f64 y, f64 w, dict state) int {
    "Draws the compact window flag grid."
    render.draw_rect(x - 10.0, y - 10.0, w + 20.0, 176.0, render.color_alpha(widgets.C_PANEL, 0.88))
-   render.draw_rectangle_lines(x - 10.0, y - 10.0, w + 20.0, 176.0, widgets.C_LINE, 1.0)
+   render.draw_rect_lines(x - 10.0, y - 10.0, w + 20.0, 176.0, widgets.C_LINE, 1.0)
    render.draw_text(font_sm, "FLAGS  F/B/R/C/H/N/M/T/V", x, y, widgets.C_MUTED)
    def gap = 6.0
    def cw = (w - gap) * 0.5
@@ -191,7 +191,7 @@ fn draw_window_flags(any font_sm, f64 x, f64 y, f64 w, dict state) int {
 fn draw_dpi_info_text(any font_sm, f64 x, f64 y, f64 w, f64 h, str line1, str line2, dict state) int {
    "Draws a DPI/framebuffer information panel."
    render.draw_rect(x, y, w, h, render.color_alpha(widgets.C_PANEL, 0.88))
-   render.draw_rectangle_lines(x, y, w, h, widgets.C_LINE, 1.0)
+   render.draw_rect_lines(x, y, w, h, widgets.C_LINE, 1.0)
    render.draw_text(font_sm, "DPI / framebuffer", x + 12.0, y + 10.0, widgets.C_MUTED)
    render.draw_text(font_sm, line1, x + 12.0, y + 31.0, widgets.C_TEXT)
    render.draw_text(font_sm, line2, x + 12.0, y + 52.0, widgets.C_MUTED)
@@ -214,7 +214,7 @@ fn draw_monitor_info(any font_body, any font_sm, any row, f64 x, f64 y, f64 w, f
    def fill = active ? render.color_alpha(widgets.C_ACCENT, 0.24) : widgets.C_PANEL
    def border = active ? widgets.C_ACCENT : widgets.C_LINE
    render.draw_rect(x, y, w, h, fill)
-   render.draw_rectangle_lines(x, y, w, h, border, active ? 4.0 : 2.0)
+   render.draw_rect_lines(x, y, w, h, border, active ? 4.0 : 2.0)
    def label_size = clamp(scale * 92.0, 14.0, 26.0)
    def info_size = clamp(scale * 62.0, 10.0, 16.0)
    render.draw_text(font_body, row.get("name", ""), x + 12.0, y + max(12.0, h * 0.18), active ? widgets.C_TEXT : render.color_alpha(widgets.C_TEXT, 0.82))
@@ -233,7 +233,7 @@ fn draw_window_marker(any font_sm, list rect, str label="window") int {
    def w = float(rect.get(2, 3.0))
    def h = float(rect.get(3, 3.0))
    render.draw_rect(x, y, w, h, render.color_alpha(widgets.C_ACCENT_HI, 0.42))
-   render.draw_rectangle_lines(x, y, w, h, widgets.C_ACCENT_HI, 2.0)
+   render.draw_rect_lines(x, y, w, h, widgets.C_ACCENT_HI, 2.0)
    if w > 54.0 && h > 24.0 { render.draw_text(font_sm, label, x + 8.0, y + 8.0, widgets.C_TEXT) }
    0
 }

@@ -3,7 +3,7 @@
 
   # Nytrix
 
-  <strong>A systems programming language.</strong>
+  <strong>Programming language.</strong>
 
   [![Version](https://img.shields.io/badge/version-0.5.0-2f6fed)](docs/CHANGELOG.md)
   [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)

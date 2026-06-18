@@ -1044,7 +1044,7 @@ static bool ny_try_bad_std_call_type_diag(codegen_t *cg, scope *scopes,
         ny_gencall_type_supports_get(got))
       return false;
     ny_diag_error(e->tok,
-                  "get expects a string, list, tuple, dict, or range, got '%s'",
+                  "get expects a string, bytes, list, tuple, dict, range, or vector, got '%s'",
                   ny_type_leaf(got));
     ny_diag_hint("raw pointers and scalar values are not indexable through "
                  "std.core.get");

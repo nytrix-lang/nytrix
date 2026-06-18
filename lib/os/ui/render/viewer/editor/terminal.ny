@@ -12,6 +12,7 @@ module std.os.ui.render.viewer.editor.terminal(
 use std.core
 use std.core.common as common
 use std.math (max, min)
+use std.os (ticks)
 use std.os.ui.render.viewer.editor.tools as tools
 use std.os.ui.render.viewer.vterm as vterm
 use std.os.ui.window.consts
@@ -43,7 +44,18 @@ fn is_focused(dict st) bool { bool(st.get("focus", false)) }
 
 fn mode(dict st) str { to_str(st.get("mode", "shell")) }
 
-fn tab_count(dict st) int { st.get("tabs", []).len }
+fn _tabs(dict st) list {
+   def tabs = st.get("tabs", [])
+   is_list(tabs) ? tabs : []
+}
+
+fn _tab_at(list tabs, int idx) dict {
+   if idx < 0 || idx >= tabs.len { return dict(0) }
+   def tab = tabs.get(idx, dict(0))
+   is_dict(tab) ? tab : dict(0)
+}
+
+fn tab_count(dict st) int { _tabs(st).len }
 
 fn active_tab(dict st) int {
    def n = tab_count(st)
@@ -64,10 +76,10 @@ fn _blank_vt(dict st) any {
 fn _ensure_vt(dict st) dict {
    if is_dict(st.get("vt")) { return st }
    st["vt"] = _blank_vt(st)
-   mut tabs = st.get("tabs", [])
+   mut tabs = _tabs(st)
    if tabs.len > 0 {
       def idx = active_tab(st)
-      mut tab = tabs.get(idx, {})
+      mut tab = _tab_at(tabs, idx)
       if !is_dict(tab.get("vt", 0)) {
          tab["vt"] = st.get("vt")
          tabs[idx] = tab
@@ -85,7 +97,7 @@ fn _tune_vt(any vt) any {
 }
 
 fn _sync_active(dict st) dict {
-   def tabs = st.get("tabs", [])
+   def tabs = _tabs(st)
    if tabs.len <= 0 {
       st["open"] = false
       st["active"] = 0
@@ -93,7 +105,7 @@ fn _sync_active(dict st) dict {
       return st
    }
    def idx = active_tab(st)
-   mut tab = tabs.get(idx, {})
+   mut tab = _tab_at(tabs, idx)
    st["active"] = idx
    st["vt"] = tab.get("vt", st.get("vt", 0))
    if !is_dict(st.get("vt")) {
@@ -108,27 +120,38 @@ fn _sync_active(dict st) dict {
 }
 
 fn _replace_active(dict st, any vt) dict {
-   mut tabs = st.get("tabs", [])
+   mut tabs = _tabs(st)
    if tabs.len <= 0 {
       st["vt"] = vt
       return st
    }
    def idx = active_tab(st)
-   mut tab = tabs.get(idx, {})
+   mut tab = _tab_at(tabs, idx)
    tab["vt"] = vt
    tabs[idx] = tab
    st["tabs"] = tabs
    _sync_active(st)
 }
 
-fn _update_tab_vt(list tabs, int idx) list {
+fn _update_tab_vt_budget(list tabs, int idx, int max_updates, int deadline_ns) list {
    if idx < 0 || idx >= tabs.len { return tabs }
-   mut tab = tabs.get(idx, {})
-   def vt = tab.get("vt", 0)
-   if is_dict(vt) && int(vt.get("master_fd", -1)) >= 0 {
-      tab["vt"] = vterm.update(vt)
-      tabs[idx] = tab
+   mut tab = _tab_at(tabs, idx)
+   mut vt = tab.get("vt", 0)
+   if !(is_dict(vt) && int(vt.get("master_fd", -1)) >= 0) { return tabs }
+   mut updates = 0
+   mut drained = 0
+   while updates < max(1, max_updates) {
+      vt = vterm.update(vt)
+      def bytes = int(vt.get("last_update_bytes", 0))
+      drained += max(0, bytes)
+      updates += 1
+      if bytes <= 0 { break }
+      if deadline_ns > 0 && ticks() >= deadline_ns { break }
    }
+   tab["vt"] = vt
+   tab["last_update_bytes"] = drained
+   tab["hot"] = drained > 0 || vterm.needs_visual_refresh(vt)
+   tabs[idx] = tab
    tabs
 }
 
@@ -141,11 +164,11 @@ fn _tab_label(str m, any vt) str {
 }
 
 fn tab_title(dict st, int idx=-1) str {
-   def tabs = st.get("tabs", [])
+   def tabs = _tabs(st)
    if tabs.len <= 0 { return "" }
    if idx < 0 { idx = active_tab(st) }
    if idx < 0 || idx >= tabs.len { return "" }
-   def tab = tabs.get(idx, {})
+   def tab = _tab_at(tabs, idx)
    _tab_label(to_str(tab.get("mode", "terminal")), tab.get("vt"))
 }
 
@@ -161,7 +184,7 @@ fn _spawn(dict st, str m, str path, list args, str banner, list child_env=[]) di
       ok(v) -> { vt = v }
       err(e) -> { vt = vterm.write(vt, "terminal start failed: " + to_str(e) + "\n") }
    }
-   mut tabs = st.get("tabs", [])
+   mut tabs = _tabs(st)
    tabs = tabs.append({"mode": m, "vt": vt})
    st["tabs"] = tabs
    st["active"] = tabs.len - 1
@@ -184,10 +207,10 @@ fn open_repl(dict st) dict {
 }
 
 fn _find_tab_mode(dict st, str m) int {
-   def tabs = st.get("tabs", [])
+   def tabs = _tabs(st)
    mut i = 0
    while i < tabs.len {
-      def tab = tabs.get(i, dict(0))
+      def tab = _tab_at(tabs, i)
       if is_dict(tab) && to_str(tab.get("mode", "terminal")) == m { return i }
       i += 1
    }
@@ -228,18 +251,18 @@ fn prev_tab(dict st) dict {
 }
 
 fn close_tab(dict st, int idx=-1) dict {
-   mut tabs = st.get("tabs", [])
+   mut tabs = _tabs(st)
    if tabs.len <= 0 { return close(st) }
    if idx < 0 { idx = active_tab(st) }
    if idx < 0 || idx >= tabs.len { return st }
    def old_active = active_tab(st)
-   def tab = tabs.get(idx, {})
+   def tab = _tab_at(tabs, idx)
    def vt = tab.get("vt", 0)
    if is_dict(vt) { vterm.close(vt) }
    mut out = []
    mut i = 0
    while i < tabs.len {
-      if i != idx { out = out.append(tabs.get(i)) }
+      if i != idx { out = out.append(_tab_at(tabs, i)) }
       i += 1
    }
    st["tabs"] = out
@@ -298,10 +321,10 @@ fn _set_vt_font(any vt, any font) any {
 fn set_font(dict st, any font) dict {
    "Updates the shared terminal font and all existing tabs without clearing terminal contents."
    st["font"] = font
-   mut tabs = st.get("tabs", [])
+   mut tabs = _tabs(st)
    mut i = 0
    while i < tabs.len {
-      mut tab = tabs.get(i, {})
+      mut tab = _tab_at(tabs, i)
       def vt = tab.get("vt", 0)
       if is_dict(vt) {
          tab["vt"] = _set_vt_font(vt, font)
@@ -369,10 +392,10 @@ fn debug_text(dict st, int max_rows=4, int max_cols=120) str {
 }
 
 fn close(dict st) dict {
-   def tabs = st.get("tabs", [])
+   def tabs = _tabs(st)
    mut i = 0
    while i < tabs.len {
-      def tab = tabs.get(i, dict(0))
+      def tab = _tab_at(tabs, i)
       def vt = is_dict(tab) ? tab.get("vt", 0) : 0
       if is_dict(vt) { vterm.close(vt) }
       i += 1
@@ -399,16 +422,33 @@ fn toggle_repl(dict st) dict {
 
 fn update(dict st) dict {
    if !is_open(st) { return st }
-   mut tabs = st.get("tabs", [])
+   mut tabs = _tabs(st)
    def n = tabs.len
    if n <= 0 { return _sync_active(st) }
    def active = active_tab(st)
    def tick = int(st.get("update_tick", 0))
+   def active_max = common.env_int_clamped("NY_EDITOR_TERM_ACTIVE_UPDATE_MAX", 8, 1, 64)
+   def inactive_every = common.env_int_clamped("NY_EDITOR_TERM_INACTIVE_EVERY", 8, 1, 120)
+   def budget_ms = common.env_int_clamped("NY_EDITOR_TERM_UPDATE_BUDGET_MS", 3, 1, 16)
+   def deadline = ticks() + budget_ms * 1000000
+   tabs = _update_tab_vt_budget(tabs, active, active_max, deadline)
    def inactive = tick % n
-   tabs = _update_tab_vt(tabs, active)
-   if inactive != active { tabs = _update_tab_vt(tabs, inactive) }
+   if n > 1 && inactive != active && (tick % inactive_every) == 0 && ticks() < deadline {
+      tabs = _update_tab_vt_budget(tabs, inactive, 1, deadline)
+   }
+   mut hot = false
+   mut bytes = 0
+   mut i = 0
+   while i < tabs.len {
+      def tab = _tab_at(tabs, i)
+      bytes += int(tab.get("last_update_bytes", 0))
+      hot = hot || bool(tab.get("hot", false))
+      i += 1
+   }
    st["tabs"] = tabs
    st["update_tick"] = tick + 1
+   st["last_update_bytes"] = bytes
+   st["hot"] = hot
    _sync_active(st)
 }
 
@@ -417,7 +457,7 @@ fn resize(dict st, f64 x, f64 y, f64 w, f64 h) dict {
    st["y"] = y
    st["w"] = max(1.0, w)
    st["h"] = max(1.0, h)
-   if !is_open(st) && st.get("tabs", []).len <= 0 { return st }
+   if !is_open(st) && _tabs(st).len <= 0 { return st }
    st = _ensure_vt(st)
    def vt = st.get("vt")
    def cw = max(1.0, float(vt.get("char_w", 9.0)))
@@ -429,10 +469,10 @@ fn resize(dict st, f64 x, f64 y, f64 w, f64 h) dict {
    st["cols"] = cols
    st["rows"] = rows
    if old_cols == cols && old_rows == rows && is_dict(st.get("vt", 0)) { return st }
-   mut tabs = st.get("tabs", [])
+   mut tabs = _tabs(st)
    mut i = 0
    while i < tabs.len {
-      mut tab = tabs.get(i, {})
+      mut tab = _tab_at(tabs, i)
       def tvt = tab.get("vt", 0)
       if is_dict(tvt) {
          mut rvt = vterm.resize(tvt, cols, rows)

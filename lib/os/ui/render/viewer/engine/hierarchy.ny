@@ -10,6 +10,7 @@ module std.os.ui.render.viewer.engine.hierarchy(
 use std.core
 use std.math (clamp, max, min)
 use std.os.ui.assets.catalog as asset_catalog
+use std.os.ui.render.dump as ui_profile
 use std.os.ui.render.viewer.gui as gui
 use std.os.ui.render.viewer.icons as icons
 
@@ -77,6 +78,7 @@ fn _icon_missing(any icon) bool {
 
 fn _node_icon(node, parity_lock, camera_icon, model_icon, node_icon) any {
    if parity_lock { return -1 }
+   if !ui_profile.env_toggle_cached("NY_UI_SVG_HIERARCHY_ICONS", false) { return -1 }
    mut mesh_icon = model_icon
    mut fallback_icon = node_icon
    if _icon_missing(mesh_icon) { mesh_icon = icons.icon_sprite("asset_model") }
@@ -136,7 +138,7 @@ fn _draw_parts(idp, parts, win_w, list_h, max_rows, parity_lock, model_icon) int
    if first_row > 0 { gui.spacer_px(float(first_row) * row_step) }
    mut pi = first_row
    def row_w = max(120.0, float(win_w) - 44.0)
-   def icon = parity_lock ? -1 : (_icon_missing(model_icon) ? icons.icon_sprite("asset_model") : model_icon)
+   def icon = (parity_lock || !ui_profile.env_toggle_cached("NY_UI_SVG_HIERARCHY_ICONS", false)) ? -1 : (_icon_missing(model_icon) ? icons.icon_sprite("asset_model") : model_icon)
    while pi < last_row {
       def part = parts[pi]
       def node_idx = is_dict(part) ? int(part.get("node_idx", -1)) : -1
@@ -179,9 +181,10 @@ fn _roots(g, nodes) {
    roots
 }
 
-fn _tree_h(win_h, compact, part_count) f64 {
+fn _tree_h(win_h, compact, part_count, node_count=0) f64 {
    if part_count > 0 {
-      return clamp(float(win_h) * (compact ? 0.36 : 0.40), 150.0, compact ? 340.0 : 420.0)
+      def content_h = 62.0 + float(min(max(int(node_count), 1), compact ? 8 : 10)) * 38.0
+      return clamp(min(float(win_h) * (compact ? 0.36 : 0.40), content_h), 112.0, compact ? 340.0 : 420.0)
    }
    clamp(float(win_h) - (compact ? 110.0 : 168.0), 210.0, compact ? 900.0 : 650.0)
 }
@@ -222,10 +225,11 @@ fn draw_body(idp, scene, win_w, win_h, compact=false, parity_lock=false, camera_
       return _draw_parts(idp, parts, win_w, _parts_h(win_h, compact), compact ? 260 : 360, parity_lock, model_icon)
    }
    def roots = _roots(g, nodes)
-   def tree_h = _tree_h(win_h, compact, part_count)
+   def tree_h = _tree_h(win_h, compact, part_count, nodes.len)
    def rows = _draw_tree(idp, nodes, roots, win_w, tree_h, parity_lock, camera_icon, model_icon, node_icon)
    if part_count > 0 {
-      def parts_h = clamp(float(win_h) - tree_h - (compact ? 148.0 : 190.0), 150.0, compact ? 520.0 : 620.0)
+      def part_content_h = 54.0 + float(min(max(parts.len, 1), compact ? 8 : 10)) * 36.0
+      def parts_h = clamp(min(float(win_h) - tree_h - (compact ? 148.0 : 190.0), part_content_h), 104.0, compact ? 520.0 : 620.0)
       def _parts_rows = _draw_parts(idp, parts, win_w, parts_h, compact ? 220 : 320, parity_lock, model_icon)
    }
    rows

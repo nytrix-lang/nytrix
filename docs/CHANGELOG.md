@@ -6,6 +6,15 @@ Nytrix uses dated release milestones. Exact build snapshots are identified by th
 
 * [ ] Native x86/x64 backend for faster comptime and reduced LLVM dependency.
 
+## [0.5.1] - 2026-06-18
+
+* SVG: 4×4 supersampling, stroke linecap/linejoin, sub-path bbox 13× speedup, gradient fixes, `<use>` inheritance, visibility.
+* Terminal: 256-color `\033[38;5;Nm` support in `canvas_refresh` for color indices 9–255.
+* Editor: SVG preview bg fix, retry on failure, terminal tab budget throttling.
+* Compiler: `--borrow-check` decoupled from `--ownership-strict` (diagnostics without RAII cleanup); debug help on crash/panic; `--strict-types` global decl types.
+* Examples: matrix.ny — per-column palette colors, sequential glyphs, CJK chars, 256-color, smoother drop timing.
+* Fixed: canvas `bytes_set`/`bytes_get` `ptr` vs `bytes` type mismatch breaking multi-byte UTF-8 in BLEN/COL/ATTR buffers.
+
 ## [0.5.0] - 2026-06-05
 
 ### Added

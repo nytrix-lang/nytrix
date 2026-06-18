@@ -79,7 +79,7 @@ fn panel(any font_sm, f64 x, f64 y, f64 w, f64 h, str title, any accent=C_ACCENT
    gfx.draw_rect(x, y, w, h, C_PANEL)
    gfx.draw_rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, C_PANEL_ALT)
    gfx.draw_rect(x, y, w, 2.0, accent)
-   gfx.draw_rectangle_lines(x, y, w, h, C_LINE, 1.0)
+   gfx.draw_rect_lines(x, y, w, h, C_LINE, 1.0)
    gfx.draw_text(font_sm, title, x + 10.0, y + 13.0, C_MUTED)
    0
 }
@@ -91,7 +91,7 @@ fn button(any font, str label, f64 x, f64 y, f64 w, f64 h, f64 mx, f64 my, bool 
    def fill = down ? C_KEY_DOWN : (hover ? C_KEY_HOVER : C_KEY_IDLE)
    def border = down ? C_ACCENT_HI : (hover ? color : C_LINE)
    gfx.draw_rect(x, y, w, h, fill)
-   gfx.draw_rectangle_lines(x, y, w, h, border, down ? 2.0 : (hover ? 1.5 : 1.0))
+   gfx.draw_rect_lines(x, y, w, h, border, down ? 2.0 : (hover ? 1.5 : 1.0))
    gfx.draw_text(font, label, x + w * 0.5 - text_w(font, label) * 0.5, y + max(6.0, h * 0.26), C_TEXT)
    hover && click
 }
@@ -101,7 +101,7 @@ fn text_box(any font_body, any font_small, str label, str value, f64 x, f64 y, f
    def shown = preview(value, max_chars > 0 ? max_chars : int(max(8.0, (w - 28.0) / 9.8)))
    gfx.draw_text(font_small, label, x, y - 17.0, C_MUTED)
    gfx.draw_rect(x, y, w, h, C_BOX)
-   gfx.draw_rectangle_lines(x, y, w, h, active ? C_ACCENT : C_LINE, active ? 1.5 : 1.0)
+   gfx.draw_rect_lines(x, y, w, h, active ? C_ACCENT : C_LINE, active ? 1.5 : 1.0)
    gfx.draw_text(font_body, shown, x + 10.0, y + max(6.0, h * 0.24), value.len > 0 ? C_TEXT : C_MUTED)
    if active && caret {
       def cx = min(x + w - 14.0, x + 12.0 + text_w(font_body, shown))
@@ -115,7 +115,7 @@ fn keycap(any font_md, f64 x, f64 y, f64 size, str label, bool pressed, any colo
    def fill = pressed ? C_KEY_DOWN : C_KEY_IDLE
    def border = pressed ? C_ACCENT_HI : C_LINE
    gfx.draw_rect(x, y, size, size, fill)
-   gfx.draw_rectangle_lines(x, y, size, size, border, pressed ? 2.0 : 1.0)
+   gfx.draw_rect_lines(x, y, size, size, border, pressed ? 2.0 : 1.0)
    text_center(font_md, label, x + size * 0.5, y + size * 0.5 - text_h(font_md, 0, font_md) * 0.5, C_TEXT, 0, font_md)
    0
 }
@@ -129,7 +129,7 @@ fn signal_chip(any font_sm, f64 x, f64 y, str label, bool active, any color=C_AC
    "Draws a status chip and returns its width."
    def w = chip_w(font_sm, label)
    gfx.draw_rect(x, y, w, 24.0, active ? C_KEY_DOWN : gfx.color_alpha(C_DIM, 0.35))
-   gfx.draw_rectangle_lines(x, y, w, 24.0, active ? C_ACCENT_HI : C_LINE, 1.0)
+   gfx.draw_rect_lines(x, y, w, 24.0, active ? C_ACCENT_HI : C_LINE, 1.0)
    text_center(font_sm, label, x + w * 0.5, y + 6.0, active ? C_TEXT : C_MUTED)
    w
 }

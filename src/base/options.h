@@ -174,6 +174,7 @@ typedef struct {
   bool enable_gc;
   bool ownership;
   bool ownership_strict;
+  bool borrow_check;
   bool heap_policy_explicit;
   bool gc_flag_seen;
   ny_heap_policy_t heap_policy;
