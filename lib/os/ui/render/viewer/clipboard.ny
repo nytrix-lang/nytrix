@@ -195,7 +195,7 @@ fn draw_panel(any win, dict st, any font_body, any font_small, f64 x, f64 y, f64
    def clip_y = by + float(rows) * (bh + gap) + 12.0
    def clip_h = max(36.0, y + h - clip_y - inner)
    gfx.draw_rect(x + inner, clip_y, content_w, clip_h, gfx.color_alpha(widgets.C_DIM, 0.34))
-   gfx.draw_rectangle_lines(x + inner, clip_y, content_w, clip_h, widgets.C_LINE, 1.0)
+   gfx.draw_rect_lines(x + inner, clip_y, content_w, clip_h, widgets.C_LINE, 1.0)
    gfx.draw_text(font_small, "Clipboard", x + inner + 10.0, clip_y + 12.0, widgets.C_MUTED)
    gfx.draw_text(font_body, widgets.preview(clipboard_text(st), int(max(10.0, (content_w - 20.0) / 9.8))), x + inner + 10.0, clip_y + 38.0, clipboard_text(st).len > 0 ? widgets.C_TEXT : widgets.C_MUTED)
    st

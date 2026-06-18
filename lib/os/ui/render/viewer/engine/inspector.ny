@@ -124,7 +124,8 @@ fn _slider3(str idp, str title, f64 x0, f64 y0, f64 z0, f64 lo, f64 hi, f64 cell
 }
 
 fn _mode_button(str id, str icon_name, str label, bool selected) bool {
-   gui.icon_button(id, icons.icon_sprite(icon_name), label, 96.0, 30.0, selected)
+   def icon = ui_profile.env_toggle_cached("NY_UI_SVG_INSPECTOR_ICONS", false) ? icons.icon_sprite(icon_name) : -1
+   gui.icon_button(id, icon, label, 96.0, 30.0, selected)
 }
 
 fn _axis_button(str id, str label, bool selected) bool {
@@ -610,10 +611,11 @@ fn _transform_tab(any state) dict {
          gui.same_line()
          st["gizmo_snap"] = gui.icon_button("inspect_snap", -1, "Snap", 72.0, 30.0, bool(st.get("gizmo_snap", false))) ? !bool(st.get("gizmo_snap", false)) : bool(st.get("gizmo_snap", false))
          gui.same_line()
-         st["gizmo_precise"] = gui.icon_button("inspect_precise", -1, "Precise", 84.0, 30.0, bool(st.get("gizmo_precise", false))) ? !bool(st.get("gizmo_precise", false)) : bool(st.get("gizmo_precise", false))
+         st["gizmo_precise"] = gui.icon_button("inspect_precise", -1, "Precise", 108.0, 30.0, bool(st.get("gizmo_precise", false))) ? !bool(st.get("gizmo_precise", false)) : bool(st.get("gizmo_precise", false))
       } else {
          gui.text_colored("Axis constraint", [0.70, 0.70, 0.70, 0.94])
-         if gui.icon_button("inspect_axis_free", icons.icon_sprite("tooltransform"), "Free", 70.0, 30.0, axis == 0) { axis = 0 }
+         def free_icon = ui_profile.env_toggle_cached("NY_UI_SVG_INSPECTOR_ICONS", false) ? icons.icon_sprite("tooltransform") : -1
+         if gui.icon_button("inspect_axis_free", free_icon, "Free", 70.0, 30.0, axis == 0) { axis = 0 }
          gui.same_line()
          if _axis_button("inspect_axis_x", "X", axis == 1) { axis = (axis == 1) ? 0 : 1 }
          gui.same_line()
