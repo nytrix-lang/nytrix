@@ -768,8 +768,9 @@ fn _renderer_tab(any state) dict {
       _prop("Draw", f"{_num(st.get('last_draw_ms', 0.0)):.3f} ms")
       _prop("UI", f"{_num(st.get('last_ui_ms', 0.0)):.3f} ms")
       gui.progress_bar("inspect_frame_budget", clamp(_num(st.get("last_frame_ms", 0.0)) / 16.667, 0.0, 1.0), "Frame budget")
-      def avg = ui_app.app_hist_mean(st.get("frame_ms_samples", []))
-      def peak = ui_app.app_hist_max(st.get("frame_ms_samples", []))
+      def frame_stats = ui_app.app_hist_mean_max(st.get("frame_ms_samples", []))
+      def avg = float(frame_stats.get(0, 0.0))
+      def peak = float(frame_stats.get(1, 0.0))
       gui.progress_bar("inspect_frame_average", clamp(avg / 16.667, 0.0, 1.0), "Avg " + f"{avg:.2f} ms")
       gui.text_colored("Peak " + f"{peak:.2f} ms", [0.86, 0.78, 0.58, 1.0])
    }

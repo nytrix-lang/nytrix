@@ -150,8 +150,9 @@ impl Meter {
 }
 ```
 
-The operator body is a named function. The declaration connects the operator
-token to that function for the owner type.
+The operator body is a named function. The colon separates the right operand
+type from the return type; parameters elsewhere use the normal `Type name`
+spelling.
 
 ## Precedence
 

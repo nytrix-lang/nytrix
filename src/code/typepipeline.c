@@ -109,17 +109,62 @@ typedef struct ny_tp_ctx_t {
   size_t mono_candidates;
 } ny_tp_ctx_t;
 
-static void tp_append(ny_tp_json_t *j, const char *fmt, ...) {
-  if (!j || !fmt)
-    return;
+static bool tp_reserve(ny_tp_json_t *j, size_t add) {
+  if (!j)
+    return false;
   if (!j->data) {
     j->cap = 1024;
+    while (j->cap <= add)
+      j->cap *= 2;
     j->data = malloc(j->cap);
-    if (!j->data)
-      return;
+    if (!j->data) {
+      j->cap = 0;
+      return false;
+    }
     j->data[0] = '\0';
     j->len = 0;
   }
+  if (add >= SIZE_MAX - j->len)
+    return false;
+  size_t need = j->len + add + 1;
+  if (need <= j->cap)
+    return true;
+  size_t new_cap = j->cap;
+  while (new_cap < need) {
+    if (new_cap > SIZE_MAX / 2) {
+      new_cap = need;
+      break;
+    }
+    new_cap *= 2;
+  }
+  char *tmp = realloc(j->data, new_cap);
+  if (!tmp)
+    return false;
+  j->data = tmp;
+  j->cap = new_cap;
+  return true;
+}
+
+static void tp_append_raw(ny_tp_json_t *j, const char *s, size_t n) {
+  if (!s || n == 0 || !tp_reserve(j, n))
+    return;
+  memcpy(j->data + j->len, s, n);
+  j->len += n;
+  j->data[j->len] = '\0';
+}
+
+static void tp_append_char(ny_tp_json_t *j, char c) {
+  if (!tp_reserve(j, 1))
+    return;
+  j->data[j->len++] = c;
+  j->data[j->len] = '\0';
+}
+
+static void tp_append(ny_tp_json_t *j, const char *fmt, ...) {
+  if (!j || !fmt)
+    return;
+  if (!tp_reserve(j, 0))
+    return;
   for (;;) {
     va_list ap;
     va_start(ap, fmt);
@@ -131,78 +176,71 @@ static void tp_append(ny_tp_json_t *j, const char *fmt, ...) {
       j->len += (size_t)n;
       return;
     }
-    size_t new_cap = j->cap * 2 + (size_t)n + 1;
-    char *tmp = realloc(j->data, new_cap);
-    if (!tmp)
+    if (!tp_reserve(j, (size_t)n))
       return;
-    j->data = tmp;
-    j->cap = new_cap;
+  }
+}
+
+static bool tp_json_needs_escape(unsigned char c) {
+  return c < 32 || c == '"' || c == '\\';
+}
+
+static void tp_json_escape_char(ny_tp_json_t *j, unsigned char c) {
+  switch (c) {
+  case '"':
+    tp_append_raw(j, "\\\"", 2);
+    break;
+  case '\\':
+    tp_append_raw(j, "\\\\", 2);
+    break;
+  case '\n':
+    tp_append_raw(j, "\\n", 2);
+    break;
+  case '\r':
+    tp_append_raw(j, "\\r", 2);
+    break;
+  case '\t':
+    tp_append_raw(j, "\\t", 2);
+    break;
+  default:
+    tp_append(j, "\\u%04x", (unsigned)c);
+    break;
   }
 }
 
 static void tp_json_str(ny_tp_json_t *j, const char *s) {
-  tp_append(j, "\"");
+  tp_append_char(j, '"');
   if (s) {
-    for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
-      switch (*p) {
-      case '"':
-        tp_append(j, "\\\"");
-        break;
-      case '\\':
-        tp_append(j, "\\\\");
-        break;
-      case '\n':
-        tp_append(j, "\\n");
-        break;
-      case '\r':
-        tp_append(j, "\\r");
-        break;
-      case '\t':
-        tp_append(j, "\\t");
-        break;
-      default:
-        if (*p < 32)
-          tp_append(j, "\\u%04x", (unsigned)*p);
-        else
-          tp_append(j, "%c", *p);
-        break;
+    const unsigned char *p = (const unsigned char *)s;
+    const unsigned char *run = p;
+    for (; *p; ++p) {
+      if (tp_json_needs_escape(*p)) {
+        tp_append_raw(j, (const char *)run, (size_t)(p - run));
+        tp_json_escape_char(j, *p);
+        run = p + 1;
       }
     }
+    tp_append_raw(j, (const char *)run, (size_t)(p - run));
   }
-  tp_append(j, "\"");
+  tp_append_char(j, '"');
 }
 
 static void tp_json_strn(ny_tp_json_t *j, const char *s, size_t n) {
-  tp_append(j, "\"");
+  tp_append_char(j, '"');
   if (s) {
-    for (size_t i = 0; i < n && s[i]; ++i) {
+    size_t run = 0;
+    size_t i = 0;
+    for (; i < n && s[i]; ++i) {
       unsigned char c = (unsigned char)s[i];
-      switch (c) {
-      case '"':
-        tp_append(j, "\\\"");
-        break;
-      case '\\':
-        tp_append(j, "\\\\");
-        break;
-      case '\n':
-        tp_append(j, "\\n");
-        break;
-      case '\r':
-        tp_append(j, "\\r");
-        break;
-      case '\t':
-        tp_append(j, "\\t");
-        break;
-      default:
-        if (c < 32)
-          tp_append(j, "\\u%04x", (unsigned)c);
-        else
-          tp_append(j, "%c", c);
-        break;
+      if (tp_json_needs_escape(c)) {
+        tp_append_raw(j, s + run, i - run);
+        tp_json_escape_char(j, c);
+        run = i + 1;
       }
     }
+    tp_append_raw(j, s + run, i - run);
   }
-  tp_append(j, "\"");
+  tp_append_char(j, '"');
 }
 
 static char *tp_take(ny_tp_json_t *j, const char *fallback) {

@@ -69,12 +69,13 @@ fn profiler_snapshot(any fps_value, any last_frame_ms, any last_update_ms, any l
          "avg_draw": 0.0, "avg_ui": 0.0, "peak_frame": 0.0, "hot_label": "steady"
       }
    }
+   def frame_stats = ui_app.app_hist_mean_max(frame_ms_samples)
    {
       "fps": int(_num(fps_value)), "last_frame": _num(last_frame_ms), "last_update": _num(last_update_ms),
       "last_world": _num(last_world_ms), "last_draw": _num(last_draw_ms), "last_ui": _num(last_ui_ms),
-      "avg_fps": float(ui_app.app_hist_mean(fps_samples)), "avg_frame": float(ui_app.app_hist_mean(frame_ms_samples)),
+      "avg_fps": float(ui_app.app_hist_mean(fps_samples)), "avg_frame": float(frame_stats.get(0, 0.0)),
       "avg_draw": float(ui_app.app_hist_mean(draw_ms_samples)), "avg_ui": float(ui_app.app_hist_mean(ui_ms_samples)),
-      "peak_frame": float(ui_app.app_hist_max(frame_ms_samples)),
+      "peak_frame": float(frame_stats.get(1, 0.0)),
       "hot_label": profiler_hot_label(last_update_ms, last_world_ms, last_draw_ms, last_ui_ms)
    }
 }

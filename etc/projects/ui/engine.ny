@@ -78,7 +78,14 @@ mut bool _cli_scripted_scene_load = false
 mut bool _scene_load_finalizing = false
 mut int _gui_material_selected_idx = -1
 mut int _gui_material_selected_part_idx = -1
-mut str _gui_asset_state_cache_sig = "\x00"
+mut bool _gui_asset_state_cache_valid = false
+mut str _gui_asset_state_cache_filter_key = "\x00"
+mut int _gui_asset_state_cache_names_len = -1
+mut str _gui_asset_state_cache_loaded = "\x00"
+mut str _gui_asset_state_cache_selected = "\x00"
+mut bool _gui_asset_state_cache_show_paths = false
+mut int _gui_asset_state_cache_browser_tab = -1
+mut bool _gui_asset_state_cache_has_scene = false
 mut dict _gui_asset_state_cache = dict(0)
 
 fn create(any config) dict {
@@ -264,7 +271,14 @@ fn _gui_invalidate_model_filter_cache() bool {
    _gui_selected_pick_cache_filter = "\x00"
    _gui_selected_pick_cache_len = -1
    _gui_selected_pick_cache_idx = -1
-   _gui_asset_state_cache_sig = "\x00"
+   _gui_asset_state_cache_valid = false
+   _gui_asset_state_cache_filter_key = "\x00"
+   _gui_asset_state_cache_names_len = -1
+   _gui_asset_state_cache_loaded = "\x00"
+   _gui_asset_state_cache_selected = "\x00"
+   _gui_asset_state_cache_show_paths = false
+   _gui_asset_state_cache_browser_tab = -1
+   _gui_asset_state_cache_has_scene = false
    _gui_asset_state_cache = dict(0)
    true
 }
@@ -320,22 +334,23 @@ fn _gui_selected_pick_index(any items, any name) int {
    _gui_selected_pick_cache_idx
 }
 
-fn _gui_asset_state_sig(list names) str {
-   asset_catalog.catalog_filter_key(_gui_model_filter) + "|" +
-   to_str(names.len) + "|" + _loaded_scene_name + "|" + _gui_model_selected_name + "|" +
-   to_str(_gui_model_show_paths ? 1 : 0) + "|" + to_str(_gui_browser_tab) + "|" +
-   to_str(is_dict(active_scene) ? 1 : 0)
-}
-
 fn _gui_asset_derived_state() dict {
    def names = _refresh_model_catalog()
    _gui_model_selected_name = viewer_catalog.sync_selected(_gui_model_selected_name, _loaded_scene_name, names)
-   def sig = _gui_asset_state_sig(names)
-   if sig == _gui_asset_state_cache_sig && is_dict(_gui_asset_state_cache) && _gui_asset_state_cache.contains("names") {
+   def filter_key = asset_catalog.catalog_filter_key(_gui_model_filter)
+   def has_scene = is_dict(active_scene)
+   if _gui_asset_state_cache_valid &&
+      _gui_asset_state_cache_filter_key == filter_key &&
+      _gui_asset_state_cache_names_len == names.len &&
+      _gui_asset_state_cache_loaded == _loaded_scene_name &&
+      _gui_asset_state_cache_selected == _gui_model_selected_name &&
+      _gui_asset_state_cache_show_paths == _gui_model_show_paths &&
+      _gui_asset_state_cache_browser_tab == _gui_browser_tab &&
+      _gui_asset_state_cache_has_scene == has_scene &&
+      is_dict(_gui_asset_state_cache) && _gui_asset_state_cache.contains("names") {
       return _gui_asset_state_cache
    }
    def filtered_names = _gui_filtered_model_catalog(names)
-   def filter_key = asset_catalog.catalog_filter_key(_gui_model_filter)
    def pick_names = (filter_key.len > 0) ? filtered_names : names
    def selected_idx = max(0, _gui_selected_pick_index(pick_names, _gui_model_selected_name))
    mut dict state_cache = dict(6)
@@ -344,7 +359,14 @@ fn _gui_asset_derived_state() dict {
    state_cache["filter_key"] = filter_key
    state_cache["selected_idx"] = selected_idx
    state_cache["catalog"] = ui_assets.gltf_asset_catalog()
-   _gui_asset_state_cache_sig = sig
+   _gui_asset_state_cache_valid = true
+   _gui_asset_state_cache_filter_key = filter_key
+   _gui_asset_state_cache_names_len = names.len
+   _gui_asset_state_cache_loaded = _loaded_scene_name
+   _gui_asset_state_cache_selected = _gui_model_selected_name
+   _gui_asset_state_cache_show_paths = _gui_model_show_paths
+   _gui_asset_state_cache_browser_tab = _gui_browser_tab
+   _gui_asset_state_cache_has_scene = has_scene
    _gui_asset_state_cache = state_cache
    _gui_asset_state_cache
 }
@@ -362,40 +384,23 @@ fn _gui_init_editor_graph() bool {
 fn _scene_selection_bounds_cache_clear() bool {
    _scene_selection_cached_bounds = []
    _scene_selection_cached_name = ""
+   _scene_selection_cache_clear_state()
    true
 }
 
-fn _scene_selection_bounds_cache_key() str {
-   if !is_dict(active_scene) { return _loaded_scene_name + "|none" }
-   _loaded_scene_name + "|" +
-   to_str(active_scene.get("fit_scale", 1.0)) + "|" +
-   to_str(active_scene.get("fit_tx", 0.0)) + "|" +
-   to_str(active_scene.get("fit_ty", 0.0)) + "|" +
-   to_str(active_scene.get("fit_tz", 0.0)) + "|" +
-   to_str(active_scene.get("edit_tx", 0.0)) + "|" +
-   to_str(active_scene.get("edit_ty", 0.0)) + "|" +
-   to_str(active_scene.get("edit_tz", 0.0)) + "|" +
-   to_str(active_scene.get("edit_rx", 0.0)) + "|" +
-   to_str(active_scene.get("edit_ry", 0.0)) + "|" +
-   to_str(active_scene.get("edit_rz", 0.0)) + "|" +
-   to_str(active_scene.get("edit_scale", 1.0)) + "|" +
-   to_str(active_scene.get("edit_sx", active_scene.get("edit_scale", 1.0))) + "|" +
-   to_str(active_scene.get("edit_sy", active_scene.get("edit_scale", 1.0))) + "|" +
-   to_str(active_scene.get("edit_sz", active_scene.get("edit_scale", 1.0)))
-}
-
 fn _scene_selection_bounds() list {
-   def cache_key = _scene_selection_bounds_cache_key()
-   if _scene_selection_cached_name == cache_key && is_list(_scene_selection_cached_bounds) {
+   if _scene_selection_cache_matches_current() && is_list(_scene_selection_cached_bounds) {
       return _scene_selection_cached_bounds
    }
    if !is_dict(active_scene) {
       _scene_selection_cached_bounds = []
-      _scene_selection_cached_name = cache_key
+      _scene_selection_cached_name = _loaded_scene_name
+      _scene_selection_cache_remember_current()
       return []
    }
    _scene_selection_cached_bounds = ui_selection.selection_bounds_from_scene(active_scene)
-   _scene_selection_cached_name = cache_key
+   _scene_selection_cached_name = _loaded_scene_name
+   _scene_selection_cache_remember_current()
    _scene_selection_cached_bounds
 }
 

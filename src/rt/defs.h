@@ -604,30 +604,6 @@ RT_DEF("__rand64", rt_rand64, 0, "fn __rand64()", "Returns a random 64-bit integ
 RT_DEF("__srand", rt_srand, 1, "fn __srand(s)", "Seeds the random number generator.")
 RT_DEF("__copy_mem", rt_copy_mem, 3, "fn __copy_mem(d, s, n)",
        "Copies n bytes from s to d (llvm intrinsic).")
-RT_DEF("__gltf_anim_fast_value_raw", rt_gltf_anim_fast_value_raw, 2,
-       "fn __gltf_anim_fast_value_raw(record, time_sec)",
-       "Hot glTF linear TRS animation sampler for cached raw accessor records.")
-RT_DEF("__gltf_pack_vertices_pnc_raw", rt_gltf_pack_vertices_pnc_raw, 14,
-       "fn __gltf_pack_vertices_pnc_raw(dst, count, pos, pos_stride, normal, normal_count, normal_stride, color, color_count, color_stride, color_comp, color_type_count, color_norm, tex_id)",
-       "Hot glTF vertex packer for float position/normal/color static vertices.")
-RT_DEF("__gltf_mat4_mul_list", rt_gltf_mat4_mul_list, 2,
-       "fn __gltf_mat4_mul_list(a, b)",
-       "Hot SIMD mat4 multiply for glTF [f0..f15, \"mat4\", 400] lists.")
-RT_DEF("__gltf_skin_mat_store_raw", rt_gltf_skin_mat_store_raw, 5,
-       "fn __gltf_skin_mat_store_raw(slab, idx, joint_world, inv_bind, mesh_inv)",
-       "Hot glTF skin matrix multiply into a raw 64-byte mat4 slab.")
-RT_DEF("__gltf_skin_mats_store_raw", rt_gltf_skin_mats_store_raw, 6,
-       "fn __gltf_skin_mats_store_raw(slab, joints, world_list, inv_bind_list, mesh_inv, count)",
-       "Hot glTF skin matrix slab fill from cached world and inverse-bind mat4 lists.")
-RT_DEF("__gltf_skin_apply_raw", rt_gltf_skin_apply_raw, 7,
-       "fn __gltf_skin_apply_raw(vptr, bind_vptr, joints_ptr, weights_ptr, vcnt, skin_slab, mat_count)",
-       "Hot CPU skinning for packed glTF/Vulkan vertices.")
-RT_DEF("__gltf_skin_apply_one_raw", rt_gltf_skin_apply_one_raw, 6,
-       "fn __gltf_skin_apply_one_raw(vptr, bind_vptr, joints_ptr, vcnt, skin_slab, mat_count)",
-       "Hot CPU skinning for packed glTF/Vulkan vertices with one joint influence per vertex.")
-RT_DEF("__gltf_skin_apply_one_fast_raw", rt_gltf_skin_apply_one_fast_raw, 6,
-       "fn __gltf_skin_apply_one_fast_raw(vptr, bind_vptr, joints_ptr, vcnt, skin_slab, mat_count)",
-       "Fast unchecked CPU skinning for valid packed glTF/Vulkan vertices with one joint influence.")
 RT_DEF("__simd_mat4_mul", rt_simd_mat4_mul, 3, "fn __simd_mat4_mul(a, b, out)",
        "SIMD-accelerated 4x4 column-major float matrix multiply "
        "(SSE2/NEON/scalar).")

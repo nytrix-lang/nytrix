@@ -6,7 +6,7 @@
 module std.os.ui.render.viewer.app(
    app_absf, app_resolve_repo_asset, app_key_is_shift, app_key_is_ctrl, app_effective_mods,
    app_pick_font, app_list_find_text, app_push_hist_sample, app_hist_mean,
-   app_hist_max, app_flag_names, app_scene_feature_names, app_msaa_index, app_msaa_samples,
+   app_hist_max, app_hist_mean_max, app_flag_names, app_scene_feature_names, app_msaa_index, app_msaa_samples,
    app_vec3_text,
    app_window_extent_from_env, app_startup_render_config, app_dpi_scale_from_env_or_metrics,
    app_gui_scale_from_env, app_gui_scale_for_window, app_renderer_hotspot_label, app_renderer_stats_line, app_window_w,
@@ -75,10 +75,11 @@ fn app_list_find_text(any items, any value) int {
 }
 
 fn app_push_hist_sample(any hist, any value, any limit=256) list {
-   "Appends one numeric sample and clamps history length."
+   "Appends one numeric sample and bounds history length with batched trimming."
    mut out = is_list(hist) ? hist : []
+   def cap = max(1, int(limit))
    out = out.append(float(value))
-   if out.len > int(limit) { out = slice(out, out.len - int(limit), out.len) }
+   if out.len > cap + 64 { out = slice(out, out.len - cap, out.len) }
    out
 }
 
@@ -107,6 +108,22 @@ fn app_hist_max(any hist) f64 {
       i += 1
    }
    out
+}
+
+fn app_hist_mean_max(any hist) list {
+   "Returns [mean, max] for a numeric history list with one scan."
+   if !is_list(hist) || hist.len <= 0 { return [0.0, 0.0] }
+   mut total = 0.0
+   mut peak = float(hist.get(0, 0.0))
+   mut i = 0
+   def n = hist.len
+   while i < n {
+      def v = float(hist[i])
+      total += v
+      if v > peak { peak = v }
+      i += 1
+   }
+   [total / float(n), peak]
 }
 
 fn app_flag_names(any mask, any flags, any fallback="") str {
@@ -307,6 +324,8 @@ fn app_graph_node(any title, any x, any y, any inputs, any outputs, any selected
    assert(app_effective_mods(0, 0, 50, false, false) != 0 && app_pick_font("Primary", "Fallback") == "Primary" && app_list_find_text(["Alpha", "Beta"], " beta ") == 1, "app UI helpers")
    def hist = app_push_hist_sample(app_push_hist_sample([], 2.0, 4), 4.0, 4)
    assert(app_hist_mean(hist) == 3.0 && app_hist_max(hist) == 4.0, "app history stats")
+   def both = app_hist_mean_max(hist)
+   assert(both.get(0, 0.0) == 3.0 && both.get(1, 0.0) == 4.0, "app combined history stats")
    assert(app_flag_names(3, [[1, "one"], [2, "two"]], "none") == "one, two", "app flag names")
    assert(app_scene_feature_names(0) == "base PBR" && app_msaa_index(4) == 2 && app_msaa_samples(3) == 8, "app scene/msaa")
    assert(app_gui_scale_for_window(640, 360, 1.0) < app_gui_scale_for_window(1280, 720, 1.0), "app gui compact scale")

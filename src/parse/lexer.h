@@ -117,6 +117,7 @@ typedef struct lexer_t {
   size_t split_pos;
   const char *split_filename;
   bool skipped_newline;
+  bool intern_identifiers;
   bool quiet;
   bool had_error;
   int error_count;

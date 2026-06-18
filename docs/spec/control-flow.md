@@ -166,9 +166,10 @@ loops make the control path harder to see. Prefer `while`, `for`, `break`, and
 with Type: name = value { body }
 ```
 
-`with` binds a scoped value and runs the body with API-defined setup and
-cleanup. The runtime runs cleanup when the body falls through, returns, or
-unwinds through a panic. `with ptr` scopes raw allocations from `malloc`.
+`with` is a type-first resource binding. The colon separates the resource type
+from the binding name; do not write `with name: Type`. Cleanup runs when the
+body falls through, returns, or unwinds through a panic. `with ptr` scopes raw
+allocations from `malloc`.
 
 ## Related
 

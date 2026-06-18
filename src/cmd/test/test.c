@@ -2463,8 +2463,7 @@ static int path_duration_hint(CacheDb *cache, const char *p) {
     return 0;
   if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
     return 5000;
-  if (strstr(p, "rt/bigint.ny") || strstr(p, "rt/remote.ny") ||
-      strstr(p, "rt/attr.ny") || strstr(p, "rt/sizeof.ny") ||
+  if (strstr(p, "rt/bigint.ny") || strstr(p, "rt/attr.ny") || strstr(p, "rt/sizeof.ny") ||
       strstr(p, "rt/asm.ny"))
     return 5000;
   if (strstr(p, "rt/comptime.ny"))

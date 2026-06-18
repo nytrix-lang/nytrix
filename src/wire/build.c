@@ -343,7 +343,7 @@ static time_t ny_runtime_latest_dep_mtime(const char *root) {
   static const char *const deps[] = {
       "src/rt/init.c",     "src/rt/ast.c",       "src/rt/bigint.c", "src/rt/core.c",
       "src/rt/ffi.c",      "src/rt/ffigates.c",  "src/rt/gc.c",     "src/rt/math.c",
-      "src/rt/memory.c",   "src/rt/os.c",        "src/rt/simmd.c",  "src/rt/gltf.c",
+      "src/rt/memory.c",   "src/rt/os.c",        "src/rt/simmd.c",
       "src/rt/string.c",
       "src/rt/shared.h",   "src/rt/runtime.h",   "src/rt/defs.h",   "src/parse/ast.h",
       "src/parse/json.h",  "src/parse/parser.h", "src/parse/lexer.h", "src/code/types.h",
