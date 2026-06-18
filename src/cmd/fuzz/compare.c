@@ -36615,8 +36615,7 @@ static const char *audit_runtime_family_for_name(const char *name) {
   if (audit_name_has_prefix(name, "__str_builder_") ||
       audit_name_has_prefix(name, "__cstr_"))
     return "string";
-  if (audit_name_has_prefix(name, "__gltf_") ||
-      audit_name_has_prefix(name, "__mat4_"))
+  if (audit_name_has_prefix(name, "__mat4_"))
     return "graphics";
   if (audit_name_is_one_of(name, panic_names,
                            (int)(sizeof(panic_names) / sizeof(panic_names[0]))))

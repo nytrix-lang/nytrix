@@ -248,27 +248,7 @@ fn _gltf_try_pack_vertices_pnc_raw(
    bool c_valid, any c_ptr, int c_cnt, int c_stride, int c_comp, int c_type_count, bool c_norm,
    int tex_id, int morph_targets_n
 ) bool {
-   if !pos_ptr || pos_comp != GLTF_COMP_FLOAT || pos_norm { return false }
-   if uv0_valid && (uv0_comp != GLTF_COMP_FLOAT || uv0_norm) { return false }
-   if n_valid && (n_comp != GLTF_COMP_FLOAT || n_norm) { return false }
-   if t_valid && (t_comp != GLTF_COMP_FLOAT || t_norm) { return false }
-   if common.env_truthy("NY_GLTF_PACK_NATIVE_OFF") { return false }
-   if morph_targets_n != 0 || pos_stride < 12 || uv0_valid || uv1_valid || t_valid { return false }
-   if n_valid && n_stride < 12 { return false }
-   __gltf_pack_vertices_pnc_raw(buf,
-      count,
-      pos_ptr,
-      pos_stride,
-      n_valid ? n_ptr : 0,
-      n_valid ? n_cnt : 0,
-      n_valid ? n_stride : 0,
-      c_valid ? c_ptr : 0,
-      c_valid ? c_cnt : 0,
-      c_valid ? c_stride : 0,
-      c_valid ? c_comp : 0,
-      c_valid ? c_type_count : 4,
-      c_valid ? c_norm : false,
-   tex_id)
+   false
 }
 
 fn _gltf_apply_morph_vec3(list morph_targets, int morph_targets_n, int vi, f64 x, f64 y, f64 z, str res_key) list {
