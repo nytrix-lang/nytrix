@@ -7,7 +7,6 @@
 #include "ffigates.c"
 #include "gc.c"
 #include "math.c"
-#include "gltf.c"
 #include "memory.c"
 #include "os.c"
 #include "string.c"
