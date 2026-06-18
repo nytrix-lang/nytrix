@@ -23,27 +23,30 @@
 ;            ..,--~~~~~~~~--,.
 use std.core.term,std.math
 
-def P=6.28 C=".,-~:;=!*#$@"
-fn L(s){mut r=[] mut i=0.0 while i<P{r=r.append([sin(i),cos(i)]) i+=s}r}
-fn D(c,z,A,B,w,h,x,y){
- mut i=0 while i<z.len{z[i]=0.0 i+=1} canvas_clear(c)
- def sx,cx,sy,cy=sin(x),cos(x),sin(y),cos(y)
- def ox,oy,kx,ky=w/2,h/2,w*0.38,h*0.72
- for t in A{
-  def st,ct,r=t[0],t[1],t[1]+2.0
-  for u in B{
-   def sp,cp,d=u[0],u[1],1.0/(5.0+cx*r*u[0]+st*sx)
-   def X=int(ox+kx*d*(r*(cy*cp+sx*sy*sp)-st*cx*sy))
-   def Y=int(oy-ky*d*(r*(sy*cp-sx*cy*sp)+st*cx*cy)) o=X+Y*w
-   if X>0&&X<w&&Y>0&&Y<h&&d>z[o]{
-    def l=cp*ct*sy-cx*ct*sp-sx*st+cy*(cx*st-ct*sx*sp) I=int(l*8.0)
-    if l>0.0{z[o]=d canvas_set(c,X,Y,C[I<0?0:I>11?11:I],6,0)}
-   }
-  }
- }
- canvas_refresh(c)
+fn draw(C,z,T,R,w,h,a,b){
+ mut i=0 while i<z.len{z[i]=0.0 i+=1} canvas_clear(C)
+ def A,B,Cs,D=sin(a),cos(a),sin(b),cos(b)
+ def O,P,K,L=w/2,h/2,w*0.38,h*0.72
+ def E,F=D*B-A,B+D*A
+ for t in T{def s,c=t[0],t[1] for p in R {
+  def u,v=p[0],p[1]
+  def n,m=c*v,c*u
+  def X,Y=n+2.0*v,m+2.0*u
+  def U,V=A*Y-B*s,B*Y+A*s
+  def q=1.0/(5.0+V)
+  def x,y=int(O+K*q*(D*X+Cs*U)),int(P-L*q*(Cs*X-D*U))
+  if x>0&&x<w&&y>0&&y<h {def o=x+y*w if q>z[o] {
+   def l=Cs*n+s*E-m*F
+   if l>0.0{z[o]=q def _=canvas_set(C,x,y,".,-~:;=!*#$@"[max(0,min(11,int(l*8.0)))],6,0)}
+  }}
+ }}
+ canvas_refresh(C)
 }
 
-def A,B=L(0.07),L(0.02)
-mut x,y=0.0,0.0
-tui_canvas_loop(fn(c,z,w,h){D(c,z,A,B,w,h,x,y) x+=0.04 y+=0.02})
+mut rx,ry = 0.0,0.0
+fn sweep(s)(0..int(TAU/s+1)).filter(fn(i){i*s<TAU}).map(fn(i){[sin(i*s),cos(i*s)]})
+tui_canvas_loop(fn(c, depth, w, h) {
+  draw(c, depth, sweep(0.07), sweep(0.02), w, h, rx, ry)
+  rx += 0.04
+  ry += 0.02
+})

@@ -99,11 +99,11 @@ fn rect(any x, any y, any w, any h, any color) bool {
 }
 
 fn _round_rect(any x, any y, any w, any h, any radius, any color) bool {
-   draw_rounded_rectangle_sdf(x, y, w, h, radius, color)
+   draw_rect_rounded_sdf(x, y, w, h, radius, color)
 }
 
 fn _disc(any cx, any cy, any radius, any color) bool {
-   draw_rounded_rectangle_sdf(cx - radius, cy - radius, radius * 2.0, radius * 2.0, radius, color)
+   draw_rect_rounded_sdf(cx - radius, cy - radius, radius * 2.0, radius * 2.0, radius, color)
 }
 
 fn text_w(any label) f64 {

@@ -1832,6 +1832,24 @@ static void print_panic_msg(int64_t msg_ptr) {
   }
 }
 
+static void print_runtime_debug_help(void) {
+  const char *gray = color_mode ? clr(NY_CLR_GRAY) : "";
+  const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
+  fprintf(stderr,
+          "%s\nDebug help:%s rerun with -trace, or set NYTRIX_TRACE=1 "
+          "NYTRIX_TRACE_CALLS=1 NYTRIX_TRACE_VALUES=1 NYTRIX_TRACE_VERBOSE=1.\n",
+          gray, rs);
+  fprintf(stderr,
+          "%sDebug filter:%s set NYTRIX_TRACE_FILTER=module_or_function_tail to "
+          "limit very noisy traces.\n",
+          gray, rs);
+  fprintf(stderr,
+          "%sImport/debug help:%s set NYTRIX_DIAG_UNDEF=1 for unresolved symbols, "
+          "NYTRIX_TRACE_IMPORTS=1 for import loading, NYTRIX_STD_CACHE=0 to bypass "
+          "std cache.\n",
+          gray, rs);
+}
+
 static void print_ny_trace_frame(int64_t file, int64_t line, int64_t col, int64_t func) {
   if (!is_v_str(file))
     return;
@@ -1947,6 +1965,7 @@ int64_t rt_panic(int64_t msg_ptr) {
     print_rt_snippet(g_trace_file, g_trace_line, g_trace_col);
   }
   print_panic_msg(msg_ptr);
+  print_runtime_debug_help();
   fprintf(stderr, "\n");
   exit(1);
 }

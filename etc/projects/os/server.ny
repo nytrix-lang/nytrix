@@ -45,7 +45,7 @@ nav{display:flex ;gap:8px;flex-wrap:wrap;margin-top:12px}
 a{
 padding:6px 10px ;
 border:1px solid var(--e) ;
-border-radius:6px ;
+border-radius:1px ;
 color:inherit ;
 text-decoration:none ;
 }
@@ -55,7 +55,6 @@ background:var(--a) ;
 border-color:var(--a) ;
 color:#000 ;
 }
-
 "
 
 fn asset(str body, str ctype) dict {
