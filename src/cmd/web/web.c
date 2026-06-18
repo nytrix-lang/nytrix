@@ -32,6 +32,7 @@
 #include <sys/wait.h>
 #else
 #include <windows.h>
+#include <process.h>
 #endif
 
 #ifndef PATH_MAX
@@ -342,9 +343,10 @@ static char *svg_data_uri_from_file(const char *path) {
 static int run_doc_tool_with_fontconfig(char *const argv[],
                                         const char *fontconfig_file) {
 #ifdef _WIN32
-  (void)argv;
-  (void)fontconfig_file;
-  return 0;
+  if (fontconfig_file && *fontconfig_file)
+    ny_setenv("FONTCONFIG_FILE", fontconfig_file, 1);
+  intptr_t rc = _spawnvp(_P_WAIT, argv[0], (const char *const *)argv);
+  return rc == 0;
 #else
   pid_t pid = fork();
   if (pid < 0)
@@ -373,6 +375,9 @@ static int dirname_into(char *out, size_t out_n, const char *path) {
     return 0;
   snprintf(out, out_n, "%s", path);
   char *slash = strrchr(out, '/');
+  char *backslash = strrchr(out, '\\');
+  if (!slash || (backslash && backslash > slash))
+    slash = backslash;
   if (!slash) {
     snprintf(out, out_n, ".");
     return 1;
@@ -406,7 +411,6 @@ static int write_og_fontconfig(const char *path, const char *font_path) {
 static int generate_website_og_png(const char *svg_path, const char *png_path,
                                    const char *font_path) {
   unlink(png_path);
-#ifndef _WIN32
   char fontconfig_path[PATH_MAX];
   int has_fontconfig = 0;
   if (font_path && *font_path &&
@@ -434,7 +438,6 @@ static int generate_website_og_png(const char *svg_path, const char *png_path,
           convert, has_fontconfig ? fontconfig_path : NULL) &&
       ny_path_readable(png_path))
     return 1;
-#endif
   return 0;
 }
 
