@@ -1016,6 +1016,7 @@ void ny_options_init(ny_options *opt) {
   opt->enable_gc = false;
   opt->ownership = false;
   opt->ownership_strict = false;
+  opt->borrow_check = false;
   opt->heap_policy = NY_HEAP_MANUAL;
   opt->heap_policy_explicit = false;
   opt->gc_flag_seen = false;
@@ -1100,7 +1101,7 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_MAGENTA, "--rc-gc", "Alias for --heap=rc"},
       {NY_CLR_MAGENTA, "--ownership", "Alias for --heap=raii"},
       {NY_CLR_MAGENTA, "--ownership-strict", "Strict ownership diagnostics"},
-      {NY_CLR_MAGENTA, "--borrow-check", "Alias for --ownership-strict"},
+      {NY_CLR_MAGENTA, "--borrow-check", "Borrow/ownership diagnostics without RAII cleanup"},
       {NY_CLR_MAGENTA, "--raii", "Alias for --ownership"},
       {NY_CLR_MAGENTA, "--owbership", "Typo-compatible alias for --ownership"},
       {NY_CLR_MAGENTA, "Note",
@@ -1696,18 +1697,22 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         opt->heap_policy = NY_HEAP_RAII;
         opt->heap_policy_explicit = true;
       } else if (strcmp(a, "--ownership-strict") == 0 ||
-                 strcmp(a, "--borrow-check") == 0 ||
                  strcmp(a, "--move-semantics") == 0) {
         opt->ownership = true;
         opt->ownership_strict = true;
         if (!opt->heap_policy_explicit)
           opt->heap_policy = NY_HEAP_RAII;
+      } else if (strcmp(a, "--borrow-check") == 0) {
+        opt->borrow_check = true;
+        opt->ownership_strict = true;
       } else if (strcmp(a, "--no-ownership-strict") == 0 ||
-                 strcmp(a, "--no-borrow-check") == 0)
+                 strcmp(a, "--no-borrow-check") == 0) {
         opt->ownership_strict = false;
-      else if (strcmp(a, "--no-ownership") == 0) {
+        opt->borrow_check = false;
+      } else if (strcmp(a, "--no-ownership") == 0) {
         opt->ownership = false;
         opt->ownership_strict = false;
+        opt->borrow_check = false;
         if (opt->heap_policy == NY_HEAP_RAII || opt->heap_policy == NY_HEAP_RC)
           opt->heap_policy = NY_HEAP_MANUAL;
       } else if (strcmp(a, "-timeout") == 0 || strcmp(a, "--timeout") == 0) {
@@ -1850,7 +1855,7 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
     opt->ownership = true;
   } else {
     opt->enable_gc = false;
-    if (!opt->ownership)
+    if (!opt->ownership && !opt->borrow_check)
       opt->ownership_strict = false;
   }
   if (opt->ownership && opt->enable_gc) {

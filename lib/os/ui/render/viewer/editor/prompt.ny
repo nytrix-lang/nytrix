@@ -133,8 +133,10 @@ fn context_y(dict st) f64 { float(st.get("y", 0.0)) }
 
 fn context_clamp(dict st, f64 sw, f64 sh, f64 w=156.0, f64 row_h=24.0) dict {
    def actions = context_actions_for(st)
-   st["x"] = max(8.0, min(context_x(st), sw - w - 8.0))
-   st["y"] = max(8.0, min(context_y(st), sh - float(actions.len) * row_h - 8.0))
+   def ww = min(max(1.0, w), max(1.0, sw - 16.0))
+   def hh = min(max(1.0, float(actions.len) * row_h), max(1.0, sh - 16.0))
+   st["x"] = max(8.0, min(context_x(st), max(8.0, sw - ww - 8.0)))
+   st["y"] = max(8.0, min(context_y(st), max(8.0, sh - hh - 8.0)))
    st
 }
 

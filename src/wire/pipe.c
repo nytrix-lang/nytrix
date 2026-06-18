@@ -2380,7 +2380,7 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
         (unsigned)opt->no_std,          (unsigned)opt->opt_dce,
         (unsigned)opt->opt_internalize, (unsigned)opt->opt_loops,
         (unsigned)opt->opt_autotune,    (unsigned)opt->ownership,
-        (unsigned)opt->ownership_strict};
+        (unsigned)opt->ownership_strict, (unsigned)opt->borrow_check};
     h = ny_hash_u32v(h, opt_fields, sizeof(opt_fields) / sizeof(opt_fields[0]));
   }
   h = ny_fnv1a64_cstr(opt->opt_pipeline, h);
@@ -2590,7 +2590,8 @@ static uint64_t ny_build_std_cache_path(const ny_options *opt,
         (unsigned)opt->opt_level,       (unsigned)opt->opt_dce,
         (unsigned)opt->opt_internalize, (unsigned)opt->no_std,
         (unsigned)opt->debug_symbols,   (unsigned)opt->trace_exec,
-        (unsigned)opt->ownership,       (unsigned)opt->ownership_strict};
+        (unsigned)opt->ownership,       (unsigned)opt->ownership_strict,
+        (unsigned)opt->borrow_check};
     h = ny_hash_u32v(h, opt_fields, sizeof(opt_fields) / sizeof(opt_fields[0]));
   }
   h = ny_hash_cstrv(h, uses, use_count);
@@ -5084,10 +5085,14 @@ int ny_pipeline_run(ny_options *opt) {
   cg.source_main_file = parse_name;
   cg.type_solver = opt->type_solver_raw ? opt->type_solver_raw : "auto";
   cg.strict_types = opt->strict_types;
+  cg.ownership_enabled = opt->ownership || opt->ownership_strict || opt->borrow_check;
+  cg.ownership_strict = opt->ownership_strict || opt->borrow_check;
+  cg.ownership_runtime_cleanup = opt->ownership;
   if (opt->safe_mode) {
     cg.strict_diagnostics = true;
     cg.ownership_enabled = true;
     cg.ownership_strict = true;
+    cg.ownership_runtime_cleanup = true;
   }
   codegen_collect_links(&cg, &prog);
 

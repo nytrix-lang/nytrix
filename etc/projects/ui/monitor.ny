@@ -197,7 +197,7 @@ while !gfx.window_should_close(win) {
    gfx.draw_text(font_small, hud_info, pad, pad + 62.0, widgets.C_MUTED)
    widgets.text_right(font_small, hud_right, sw - pad, pad + 44.0, widgets.C_MUTED)
    gfx.draw_rect(area_x, area_y, area_w, area_h, gfx.color_alpha(widgets.C_PANEL_ALT, 0.85))
-   gfx.draw_rectangle_lines(area_x, area_y, area_w, area_h, widgets.C_LINE, 1.5)
+   gfx.draw_rect_lines(area_x, area_y, area_w, area_h, widgets.C_LINE, 1.5)
    if monitor_count == 0 {
       gfx.draw_text(font_body, "No monitors reported by the active backend.", area_x + 28.0, area_y + 34.0, widgets.C_MUTED)
    } else {

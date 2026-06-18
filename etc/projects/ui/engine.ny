@@ -547,6 +547,12 @@ fn _gui_editor_shell_open() bool {
    )
 }
 
+fn _gui_any_panel_visible() bool {
+   _gui_show_editor || _gui_show_inspector || _gui_show_browser ||
+   _gui_show_gallery || _gui_show_probe || _gui_show_profiler ||
+   _gui_show_workspace || _gui_show_graph
+}
+
 fn _gui_close_tool_window(any id, bool break_dock=true) bool {
    if !ui_editor.tool_closed(id) { return false }
    if break_dock && _gui_workspace_mode == 1 { _gui_workspace_mode = 0 }
@@ -1198,10 +1204,19 @@ fn _cycle_loaded_model(dir) {
 fn _gui_open_default_editor() {
    _gui_visible = true
    def _discard_warm = _warm_gui_editor_resources()
+   if ui_profile.env_toggle_cached("NY_UI_SAFE_EDITOR_OVERLAY", false) {
+      _gui_shell_show(false, false, false, false, false, false, false, false)
+      _gui_workspace_mode = 0
+      _gui_sanitize_workspace_state()
+      return
+   }
    _gui_shell_show(true, false, false, false, true, false, false, false)
    _gui_workspace_mode = 1
+   _gui_editor_tab = 0
+   _gui_inspector_tab = 0
    _gui_center_tab = 0
    _gui_side_tab = 0
+   _gui_browser_tab = 1
    _gui_sanitize_workspace_state()
    if is_dict(active_scene) && show_scene {
       _set_active_scene_model_matrix()
@@ -1460,7 +1475,7 @@ fn _hotkey_toggle_editor() {
       return false
    }
    _hotkey_f1_last_ns = now
-   def opening = !_gui_editor_shell_open()
+   def opening = !_gui_visible
    _gui_layout_dirty = true
    _gui_layout_warm_frames = 2
    _invalidate_chrome_frame(4)
@@ -3191,6 +3206,10 @@ fn _icon_mode_button(str id, str icon_name, bool selected, f64 w=36.0, f64 h=30.
    gui.icon_button(id, viewer_icons.icon_sprite(icon_name), "", w, h, selected)
 }
 
+fn _menu_svg_icon(str name) any {
+   ui_profile.env_toggle_cached("NY_UI_SVG_MENU_ICONS", false) ? viewer_icons.icon_sprite(name) : -1
+}
+
 fn _draw_asset_mode_bar(str idp, bool compact=false) int {
    mut tab = (int(_gui_browser_tab) == 1) ? 1 : 0
    gui.text_colored("Assets", [0.82, 0.82, 0.82, 1.0])
@@ -3314,24 +3333,48 @@ fn _editor_draw_header(rs, layout_now, active_shot, editor_w, editor_h, card_w) 
    mut header_stats = rs
    header_stats["frame_ms"] = _last_frame_ms
    def display_fps = ui_profile.parity_lock_stats_enabled() ? 0 : fps
-   demo_editor.draw_header(
-      _loaded_scene_name, display_fps, layout_now, active_shot, _gui_editor_tab, editor_w, editor_h, card_w,
-      viewer_icons.icon_sprite("asset_grid"), viewer_icons.icon_sprite("hierarchy"),
-      viewer_icons.icon_sprite("preferences"), viewer_icons.icon_sprite("console"), header_stats, _gui_renderer_hotspot_cache
-   )
+   def scene_label = _loaded_scene_name.len > 0 ? _loaded_scene_name : "No scene"
+   gui.text_colored("Nytrix Editor", [0.94, 0.94, 0.94, 0.98])
+   gui.text_colored(scene_label + "  " + to_str(int(display_fps)) + " fps  " + to_str(layout_now), [0.66, 0.66, 0.66, 0.90])
+   def selected = gui.tab_strip("engine_editor_tabs", _gui_editor_tab_items, _gui_editor_tab, max(320.0, float(editor_w) - 28.0), 30.0)
+   selected
 }
 
 fn _editor_catalog_tab(bool dense) {
    if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] tab_catalog") }
    def prof = ui_profile.enabled()
    mut t_prof = prof ? ui_profile.now() : 0
-   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] catalog_sanitize") }
-   _gui_sanitize_workspace_state()
-   t_prof = ui_profile.mark_next(prof, "catalog_sanitize", t_prof)
    _gui_show_browser = false
-   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] catalog_assets") }
-   _draw_gui_asset_browser_body("editor_main", false)
-   if prof { ui_profile.mark("catalog_asset_browser", t_prof) }
+   def names = _refresh_model_catalog()
+   def prev_filter = _gui_model_filter
+   _gui_model_filter = gui.input_text("editor_asset_model_filter", "Filter", _gui_model_filter, "Type model name...", 0.0)
+   if _gui_model_filter != prev_filter { _gui_invalidate_model_filter_cache() }
+   t_prof = ui_profile.mark_next(prof, "catalog_filter", t_prof)
+   def filtered = _gui_filtered_model_catalog(names)
+   def filter_key = asset_catalog.catalog_filter_key(_gui_model_filter)
+   def pick_names = filter_key.len > 0 ? filtered : names
+   _gui_model_selected_name = viewer_catalog.sync_selected(_gui_model_selected_name, _loaded_scene_name, names)
+   def selected_idx = max(0, _gui_selected_pick_index(pick_names, _gui_model_selected_name))
+   gui.text_colored("Assets " + to_str(pick_names.len) + " / " + to_str(names.len) + "   selected " + (_gui_model_selected_name.len > 0 ? _gui_model_selected_name : "<none>"), [0.70, 0.70, 0.70, 0.94])
+   def grid_h = max(96.0, gui.remaining_h(4.0))
+   def res = viewer_catalog.draw_grid("editor_asset", "fast", pick_names, ui_app.app_window_w("editor_main", 520.0), grid_h, true, {
+      "show_paths": false,
+      "scene_loaded": is_dict(active_scene),
+      "loaded_name": _loaded_scene_name,
+      "selected_name": _gui_model_selected_name,
+      "selected_idx": selected_idx,
+      "ensure_selected": false,
+      "parity_lock": ui_profile.parity_lock_stats_enabled(),
+      "hide_detail": true,
+      "file_list": true,
+      "show_icons": false
+   })
+   def clicked = to_str(res.get("clicked", ""))
+   if clicked.len > 0 {
+      _gui_model_selected_name = clicked
+      def _discard_load = _queue_gui_model_load(clicked)
+   }
+   if prof { ui_profile.mark("catalog_fast_list", t_prof) }
 }
 
 fn _editor_hierarchy_tab(bool dense) {
@@ -3448,37 +3491,57 @@ fn _draw_gui_editor() {
    mut t_prof = prof ? ui_profile.now() : 0
    mut editor_opts = _gui_has_tiled_peer() ? _gui_pinned_tool_opts(false) : dict(2)
    editor_opts["scrollable"] = false
+   _main_loop_trace_once("[ui:gui-editor] fit.before")
    _gui_fit_standalone_editor()
+   _main_loop_trace_once("[ui:gui-editor] begin_tool.before")
    def tool = ui_editor.begin_tool("editor_main", _gui_show_editor, "Editor", 20.0, 20.0, 520.0, 700.0, editor_opts)
+   _main_loop_trace_once("[ui:gui-editor] begin_tool.after")
+   _main_loop_trace_once("[ui:gui-editor] mark.before")
    t_prof = ui_profile.mark_next(prof, "editor_begin_tool", t_prof)
+   _main_loop_trace_once("[ui:gui-editor] mark.after")
+   _main_loop_trace_once("[ui:gui-editor] body-read.before")
    def body = bool(tool.get(0, false))
+   _main_loop_trace_once("[ui:gui-editor] body-read.after")
    if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] body=" + to_str(body)) }
-   if _gui_close_tool_window("editor_main", false) || bool(tool.get(1, false)) {
+   _main_loop_trace_once("[ui:gui-editor] close-check.before")
+   if bool(tool.get(1, false)) {
       _gui_close_editor_shell()
       return
    }
+   _main_loop_trace_once("[ui:gui-editor] close-check.after")
+   _main_loop_trace_once("[ui:gui-editor] visible-check.before")
    if !_gui_show_editor {
       return
    }
+   _main_loop_trace_once("[ui:gui-editor] visible-check.after")
    if body {
+      _main_loop_trace_once("[ui:gui-editor] body.enter")
       def rs = _gui_frame_stats_cache
+      _main_loop_trace_once("[ui:gui-editor] metrics2.before")
       def editor_w, editor_h = ui_app.app_window_w("editor_main", 520.0), ui_app.app_window_h("editor_main", 700.0)
       def editor_metrics = demo_editor.chrome_metrics(editor_w, editor_h)
+      _main_loop_trace_once("[ui:gui-editor] metrics2.after")
       def compact, dense = bool(editor_metrics.get("compact", false)), bool(editor_metrics.get("dense", false))
       def compact_header, summary_cols = bool(editor_metrics.get("compact_header", false)), int(editor_metrics.get("summary_cols", 1))
       def card_w = ui_app.app_card_w("editor_main", summary_cols, 10.0, compact ? 0.0 : 82.0)
       def last_dump_path, last_probe_text = to_str(_gui_last_dump_path), to_str(_gui_last_probe_text)
       def layout_now, active_shot = _gui_layout_preset_env(), (_gui_shot_name.len > 0) ? _gui_shot_name : "full_editor"
       if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] intro") }
+      _main_loop_trace_once("[ui:gui-editor] sanitize.before")
       _gui_sanitize_workspace_state()
+      _main_loop_trace_once("[ui:gui-editor] sanitize.after")
       def prev_visible = demo_editor.visibility_snapshot(_gui_show_gallery, _gui_show_probe, _gui_show_browser, _gui_show_profiler, _gui_show_workspace, _gui_show_graph, _gui_show_inspector)
       t_prof = ui_profile.mark_next(prof, "editor_prep", t_prof)
+      _main_loop_trace_once("[ui:gui-editor] header.before")
       _gui_editor_tab = _editor_draw_header(rs, layout_now, active_shot, editor_w, editor_h, card_w)
+      _main_loop_trace_once("[ui:gui-editor] header.after")
       t_prof = ui_profile.mark_next(prof, "editor_header", t_prof)
       gui.separator()
       if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] body") }
       t_prof = ui_profile.mark_next(prof, "editor_tabs", t_prof)
+      _main_loop_trace_once("[ui:gui-editor] tab-body.before")
       _editor_tab_body(dense, compact_header, compact, layout_now, active_shot)
+      _main_loop_trace_once("[ui:gui-editor] tab-body.after")
       t_prof = ui_profile.mark_next(prof, "editor_tab_body", t_prof)
       _gui_sync_workspace_visibility()
       if demo_editor.visibility_changed(prev_visible, _gui_show_gallery, _gui_show_probe, _gui_show_browser, _gui_show_profiler, _gui_show_workspace, _gui_show_graph, _gui_show_inspector) {
@@ -3716,6 +3779,101 @@ fn _apply_inspector_result(st) any {
    }
 }
 
+fn _draw_gui_menu_panel() {
+   _main_loop_trace_once("[ui:menu] title.before")
+   gui.text_colored("Inspector", [0.86, 0.86, 0.86, 0.98])
+   def scene_label = _loaded_scene_name.len > 0 ? _loaded_scene_name : "No scene"
+   gui.text_colored(scene_label, [0.66, 0.66, 0.66, 0.92])
+   gui.separator()
+   _main_loop_trace_once("[ui:menu] actions.before")
+   if gui.icon_button("menu_fit_scene", _menu_svg_icon("asset_fit"), "Frame", 88.0, 30.0, false) { def _discard_fit = _cmd_autofit(true) }
+   gui.same_line()
+   if gui.icon_button("menu_look_scene", _menu_svg_icon("asset_camera"), "Look At", 96.0, 30.0, false) { def _discard_look = _cmd_lookat(true) }
+   gui.same_line()
+   if gui.icon_button("menu_unload_scene", _menu_svg_icon("asset_unload"), "Unload", 98.0, 30.0, false) { def _discard_unload = _queue_gui_unload_scene() }
+   _main_loop_trace_once("[ui:menu] toggles.before")
+   gui.separator()
+   APP_STATS = gui.checkbox("menu_stats", "Stats Overlay", APP_STATS)
+   def next_wire = gui.checkbox("menu_wire", "Wireframe", APP_WIRE)
+   if next_wire != APP_WIRE { APP_WIRE = next_wire set_wireframe(APP_WIRE) }
+   def old_anim = _anim_enabled
+   _anim_enabled = gui.checkbox("menu_anim", "Animation Enabled", _anim_enabled)
+   if old_anim != _anim_enabled { def _discard_anim_sync = _sync_scene_anim_playing_flag() }
+   def next_ortho = gui.checkbox("menu_ortho", "Orthographic Projection", is_ortho)
+   if next_ortho != is_ortho { _set_projection_mode(next_ortho) }
+   _scene_selected = gui.checkbox("menu_select", "Scene Selection", _scene_selected && is_dict(active_scene) && show_scene)
+   show_scene = gui.checkbox("menu_show_scene", "Draw Loaded Scene", show_scene)
+   gui.separator()
+   _main_loop_trace_once("[ui:menu] props.before")
+   def rs = _gui_frame_stats_cache
+   def part_count = _gui_scene_parts_cache
+   def mat_mask = is_dict(active_scene) ? int(active_scene.get("material_feature_mask", 0)) : 0
+   _scene_pref_cache_update(_loaded_scene_name)
+   if gui.collapsing_header("menu_scene_info", "Scene", true) {
+      gui.property_row("menu_scene_state", "State", show_scene && is_dict(active_scene) ? "visible" : "empty/hidden", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_loaded", "Loaded", _loaded_scene_name.len > 0 ? _loaded_scene_name : "<none>", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_selected", "Selected", _gui_model_selected_name.len > 0 ? _gui_model_selected_name : "<none>", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_parts", "Draw Parts", to_str(part_count), [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_lights", "Lights", is_dict(active_scene) ? to_str(int(active_scene.get("scene_lights_count", 0))) : "0", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_features", "Features", ui_app.app_scene_feature_names(mat_mask), [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_optical", "Optical", is_dict(active_scene) && bool(active_scene.get("has_optical", false)) ? "yes" : "no", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_blend", "Blend", (!is_dict(active_scene) || bool(active_scene.get("has_blend", true))) ? "yes" : "no", [0.72, 0.72, 0.72, 1.0])
+   }
+   if gui.collapsing_header("menu_transform_info", "Transform", true) {
+      gui.property_row("menu_pos", "Position", is_dict(active_scene) ? (f"{float(active_scene.get('edit_tx', 0.0)):.2f}, " + f"{float(active_scene.get('edit_ty', 0.0)):.2f}, " + f"{float(active_scene.get('edit_tz', 0.0)):.2f}") : "0, 0, 0", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_rot", "Rotation", is_dict(active_scene) ? (f"{float(active_scene.get('edit_rx', 0.0)):.2f}, " + f"{float(active_scene.get('edit_ry', 0.0)):.2f}, " + f"{float(active_scene.get('edit_rz', 0.0)):.2f}") : "0, 0, 0", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_scale", "Scale", is_dict(active_scene) ? (f"{float(active_scene.get('edit_sx', 1.0)):.2f}, " + f"{float(active_scene.get('edit_sy', 1.0)):.2f}, " + f"{float(active_scene.get('edit_sz', 1.0)):.2f}") : "1, 1, 1", [0.72, 0.72, 0.72, 1.0])
+      if gui.button("menu_reset_transform", "Reset Transform", 138.0) && is_dict(active_scene) {
+         active_scene["edit_tx"] = 0.0 active_scene["edit_ty"] = 0.0 active_scene["edit_tz"] = 0.0
+         active_scene["edit_rx"] = 0.0 active_scene["edit_ry"] = 0.0 active_scene["edit_rz"] = 0.0
+         active_scene["edit_sx"] = 1.0 active_scene["edit_sy"] = 1.0 active_scene["edit_sz"] = 1.0 active_scene["edit_scale"] = 1.0
+         _scene_selection_bounds_cache_clear()
+         _scene_edit_redraw(3)
+      }
+   }
+   if gui.collapsing_header("menu_camera_info", "Camera", true) {
+      gui.property_row("menu_camera", "Position", f"{_cam_px:.1f}, " + f"{_cam_py:.1f}, " + f"{_cam_pz:.1f}", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_view", "View", f"{_h_yaw:.2f}, " + f"{_h_pch:.2f}  fov " + f"{_cam_fov:.1f}", [0.72, 0.72, 0.72, 1.0])
+      _spd = gui.slider_float("menu_cam_speed", "Move Speed", _spd, 20.0, 5000.0)
+      _sens = gui.slider_float("menu_cam_sens", "Look Sens", _sens, 0.01, 0.60)
+      if is_ortho { _ortho_zoom = gui.slider_float("menu_ortho_zoom", "Ortho Zoom", _ortho_zoom, 5.0, 220.0) }
+      gui.property_row("menu_cursor", "Cursor Lock", _cursor_lock_enabled ? "on" : "off", [0.72, 0.72, 0.72, 1.0])
+   }
+   if gui.collapsing_header("menu_animation_info", "Animation", _anim_count > 0) {
+      gui.property_row("menu_anim_count", "Clips", to_str(_anim_count), [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_anim_time", "Time", f"{_anim_time:.3f} / " + f"{_anim_duration:.3f}", [0.72, 0.72, 0.72, 1.0])
+      _anim_speed = gui.slider_float("menu_anim_speed", "Speed", _anim_speed, 0.0, 4.0)
+   }
+   if gui.collapsing_header("menu_renderer_info", "Renderer", true) {
+      gui.property_row("menu_backend", "Backend", active_backend_name, [0.72, 0.78, 0.86, 1.0])
+      gui.property_row("menu_frame", "Frame", f"{_last_frame_ms:.3f} ms", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_draw", "Draw", f"{_last_draw_ms:.3f} ms", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_ui", "UI", f"{_last_ui_ms:.3f} ms", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_draws", "Draws", to_str(int(rs.get("draws", 0))), [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_flushes", "Flushes", to_str(int(rs.get("flushes", 0))), [0.72, 0.72, 0.72, 1.0])
+      gui.progress_bar("menu_frame_budget", clamp(_last_frame_ms / 16.667, 0.0, 1.0), "Frame budget")
+   }
+   if gui.collapsing_header("menu_environment_info", "Environment", false) {
+      gui.property_row("menu_env_mode", "Mode", _gui_env_mode_items.get(_gui_env_mode, "custom"), [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_skybox", "Skybox", skybox_enabled ? "on" : "off", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_skybox_tex", "Skybox Tex", to_str(skybox_tex_id), [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_pref", "Scene Pref", (_scene_pref_studio ? "studio " : "") + (_scene_pref_neutral ? "neutral " : "") + (_scene_pref_reflect ? "reflect " : "") + (_scene_pref_visible ? "visible " : "") + (_scene_pref_optical ? "optical" : ""), [0.72, 0.72, 0.72, 1.0])
+      if gui.button("menu_load_env", "Build Env", 104.0) { _load_skybox() }
+      gui.same_line()
+      if gui.button("menu_light_off", "Lighting Off", 112.0) { _gui_env_mode = 4 }
+   }
+   if gui.collapsing_header("menu_diag_info", "Diagnostics", false) {
+      gui.property_row("menu_window", "Window", to_str(_win_w) + "x" + to_str(_win_h), [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_dpi", "DPI Scale", f"{_gui_dpi_scale:.2f}", [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_hovered", "Hovered", to_str(gui.hovered_id()), [0.72, 0.72, 0.72, 1.0])
+      gui.property_row("menu_active", "Active", to_str(gui.active_id()), [0.72, 0.72, 0.72, 1.0])
+      if gui.button("menu_probe", "Probe", 92.0) { _gui_last_probe_text = ui_diag.probe_text() terminal.log(_gui_last_probe_text) }
+      gui.same_line()
+      if gui.button("menu_retile", "Retile", 92.0) { _gui_layout_dirty = true _gui_layout_warm_frames = 4 }
+   }
+   _main_loop_trace_once("[ui:menu] done")
+}
+
 fn _draw_gui_inspector() {
    def inspector_opts = _gui_show_editor ? _gui_pinned_tool_opts(true) : dict(0)
    def tool = ui_editor.begin_tool("inspector", _gui_show_inspector, "Inspector", 860.0, 20.0, 390.0, 430.0, inspector_opts)
@@ -3846,22 +4004,50 @@ fn _draw_ui(phase, term_open) {
    }
    _prepare_gui_overlay_pass()
    if gui_now || term_open || loading_now {
+      _main_loop_trace_once("[ui:draw-ui] backdrop.before")
       _draw_editor_backdrop(phase, ww, wh)
-      _draw_editor_gui(phase)
+      if _gui_any_panel_visible() {
+         _main_loop_trace_once("[ui:draw-ui] editor.before")
+         _draw_editor_gui(phase)
+         _main_loop_trace_once("[ui:draw-ui] editor.after")
+      } elif gui_now {
+         _main_loop_trace_once("[ui:draw-ui] safe-overlay.before")
+         _draw_gui_safe_overlay(phase, ww, wh)
+         _main_loop_trace_once("[ui:draw-ui] safe-overlay.after")
+      }
       if term_open {
+         _main_loop_trace_once("[ui:draw-ui] terminal.before")
          terminal.draw(ww, wh, phase)
+         _main_loop_trace_once("[ui:draw-ui] terminal.after")
       }
       if loading_now {
+         _main_loop_trace_once("[ui:draw-ui] loading.before")
          _draw_loading_overlay(phase, ww, wh)
+         _main_loop_trace_once("[ui:draw-ui] loading.after")
       }
    }
+   _main_loop_trace_once("[ui:draw-ui] stats.before")
    _draw_runtime_stats_overlay_fast()
+   _main_loop_trace_once("[ui:draw-ui] stats.after")
    if crosshair_now {
       def center = viewer_overlay.draw_crosshair(float(ww), float(wh), _crosshair_mesh, M_cross_t, _cross_cx_last, _cross_cy_last)
       _cross_cx_last = float(center.get(0, _cross_cx_last))
       _cross_cy_last = float(center.get(1, _cross_cy_last))
    }
    return
+}
+
+fn _draw_gui_safe_overlay(phase, ww, wh) bool {
+   def w = min(520.0, max(300.0, float(ww) * 0.34))
+   def h = 118.0
+   def x = float(ww) * 0.5 - w * 0.5
+   def y = max(24.0, float(wh) * 0.12)
+   gfx.draw_rect_fast(x, y, w, h, gfx.color_pack(0.0, 0.0, 0.0, 0.82))
+   gfx.draw_rect_fast(x, y, w, 2.0, gfx.color_pack(0.86, 0.86, 0.86, 0.86))
+   gfx.draw_rect_fast(x, y + h - 1.0, w, 1.0, gfx.color_pack(0.22, 0.22, 0.22, 0.84))
+   gfx.draw_text(_ui_title_font(), "NYTRIX", x + 20.0, y + 20.0, [0.94, 0.94, 0.94, 1.0])
+   gfx.draw_text(_ui_font(), "F1 closes this overlay. Unset NY_UI_SAFE_EDITOR_OVERLAY for the full editor shell.", x + 20.0, y + 66.0, [0.72, 0.72, 0.72, 1.0])
+   true
 }
 
 fn _prepare_static_world_visual_fast() bool {
@@ -3965,25 +4151,34 @@ fn _draw_editor_gui(phase) {
    def rs_before = parity_editor_compact ? renderer_frame_stats() : dict(0)
    _gui_frame_trace(gui_trace, "begin_frame")
    def gui_vo0 = gui_trace ? _render_vertex_offset() : 0
+   _main_loop_trace_once("[ui:editor-gui] metrics.before")
    _gui_refresh_frame_metrics()
    def _discard_auto_scale = _gui_refresh_auto_scale()
    gui.set_scale(_gui_scale)
    gui.set_accent(_gui_accent)
    gui.set_debug_overlay(_gui_probe_overlay)
    gui.set_fonts(_ui_font(), _ui_title_font(), _ui_small_font())
+   _main_loop_trace_once("[ui:editor-gui] begin_frame.before")
    gui.begin_frame(0, _ui_font(), _win_w, _win_h)
+   _main_loop_trace_once("[ui:editor-gui] layout.before")
    _gui_apply_tiled_layout(false)
    if _gui_show_editor {
       _gui_frame_trace(gui_trace, "editor")
+      _main_loop_trace_once("[ui:editor-gui] editor-panel.before")
       _draw_gui_editor()
+      _main_loop_trace_once("[ui:editor-gui] editor-panel.after")
    }
    if _gui_show_profiler {
       _gui_frame_trace(gui_trace, "profiler")
+      _main_loop_trace_once("[ui:editor-gui] profiler.before")
       _draw_gui_profiler()
+      _main_loop_trace_once("[ui:editor-gui] profiler.after")
    }
    if _gui_show_workspace {
       _gui_frame_trace(gui_trace, "workspace")
+      _main_loop_trace_once("[ui:editor-gui] workspace.before")
       _draw_gui_workspace()
+      _main_loop_trace_once("[ui:editor-gui] workspace.after")
    }
    if _gui_show_graph {
       _gui_frame_trace(gui_trace, "graph")
@@ -4006,7 +4201,9 @@ fn _draw_editor_gui(phase) {
       _draw_gui_asset_browser()
    }
    _gui_frame_trace(gui_trace, "end_frame")
+   _main_loop_trace_once("[ui:editor-gui] end_frame.before")
    gui.end_frame()
+   _main_loop_trace_once("[ui:editor-gui] end_frame.after")
    if parity_editor_compact {
       def rs_after = renderer_frame_stats()
       def sig =
@@ -4423,7 +4620,7 @@ fn _startup_init_window_runtime() {
 }
 
 fn _warm_gui_text_renderer() bool {
-   if !_chrome_visible() || !win || !ui_profile.env_toggle_cached("NY_UI_WARM_TEXT_RENDERER", true) {
+   if !_chrome_visible() || !win || !ui_profile.env_toggle_cached("NY_UI_WARM_TEXT_RENDERER", false) {
       return false
    }
    if !gfx.begin_frame() {
@@ -4440,12 +4637,12 @@ fn _warm_gui_text_renderer() bool {
 }
 
 fn _warm_gui_editor_resources() bool {
-   if !_chrome_visible() {
+   if !_chrome_visible() || !ui_profile.env_toggle_cached("NY_UI_WARM_EDITOR_RESOURCES", false) {
       return false
    }
    def icon_names = [
-      "scene_data", "preferences", "console", "info",
-      "asset_loaded", "asset_model", "asset_texture"
+      "scene_data", "preferences", "console", "info", "hierarchy", "asset_camera",
+      "asset_grid", "asset_fit", "asset_unload", "asset_loaded", "asset_model", "asset_texture"
    ]
    viewer_icons.warm_sprites(icon_names) >= 0
 }
@@ -5791,7 +5988,7 @@ fn _draw_world_grid_and_scene(phase, cam_px, cam_pz, chrome_on, gui_probe_on, gu
          " state_slab=" + to_str(scene_state_slab) +
       " state_count=" + to_str(scene_state_count))
    }
-   if chrome_on && (ui_profile.world_grid_enabled(_gui_visible, _scene_selected, _gui_probe_mode_enabled()) || (_gizmo_ruler && _gui_editor_shell_open())) && !clean_proof && !(gui_probe_on && !have_scene) {
+   if chrome_on && (!have_scene || ui_profile.world_grid_enabled(_gui_visible, _scene_selected, _gui_probe_mode_enabled()) || (_gizmo_ruler && _gui_editor_shell_open())) && !clean_proof && !(gui_probe_on && !have_scene) {
       gfx.set_unlit(true)
       gfx.reset_overlay_state()
       def axes_in_grid = _draw_infinite_world_grid(cam_px, cam_pz, have_axes)
@@ -5818,9 +6015,13 @@ fn _draw_world(phase, cam_px, cam_py, cam_pz) {
    def chrome_on = _chrome_visible()
    def batch_on = _batch_dump_enabled()
    def proof_on = _proof_dump_active()
+   _main_loop_trace_once("[ui:world] prefs.before")
    _scene_pref_cache_update(_loaded_scene_name)
+   _main_loop_trace_once("[ui:world] scene_env.before")
    def _discard_scene_env_ready = _world_ensure_scene_env_ready()
+   _main_loop_trace_once("[ui:world] env_textures.before")
    mut env_tex_map = _world_env_textures()
+   _main_loop_trace_once("[ui:world] mode_flags.before")
    def modes = scene_engine.mode_flags(
       _scene_pref_studio, _scene_pref_neutral, _scene_pref_reflect,
       _scene_pref_visible, _scene_pref_optical, batch_on, _gui_env_mode
@@ -5838,12 +6039,15 @@ fn _draw_world(phase, cam_px, cam_py, cam_pz) {
    def feature_fallback_env = scene_info.get(4, false)
    def gui_probe_on = _gui_probe_mode_enabled()
    def gui_probe_has_scene = _ui_scene_visible()
+   _main_loop_trace_once("[ui:world] generated_envs.before")
    _world_ensure_generated_envs(
       batch_on, proof_on, gui_probe_on, studio_env, neutral_env, compare_reflect_env,
       compare_visible_env, optical_spec_env, feature_fallback_env
    )
+   _main_loop_trace_once("[ui:world] generated_envs.after")
    env_tex_map = _world_env_textures()
    gfx.set_cam_pos(cam_px, cam_py, cam_pz)
+   _main_loop_trace_once("[ui:world] override.before")
    def override_pair = scene_engine.scene_override_pair(
       env_tex_map, studio_env, neutral_env, compare_reflect_env, compare_visible_env,
       optical_spec_env, feature_fallback_env, scene_env_sensitive_materials,
@@ -5856,6 +6060,7 @@ fn _draw_world(phase, cam_px, cam_py, cam_pz) {
       int(override_pair.get(0, -1)), int(override_pair.get(1, -1)), proof_on, batch_on,
       scene_env_sensitive_materials, scene_needs_reflect_spec, scene_needs_optical_spec, compare_visible_env
    )
+   _main_loop_trace_once("[ui:world] background.before")
    def bg_state = _world_env_background_state(
       int(fallback_pair.get(0, -1)), int(fallback_pair.get(1, -1)),
       batch_on, proof_on, gui_probe_on, gui_probe_has_scene, compare_visible_env
@@ -5873,8 +6078,11 @@ fn _draw_world(phase, cam_px, cam_py, cam_pz) {
    _cam_px_cache, _cam_py_cache = cam_px, cam_py
    _cam_pz_cache = cam_pz
    _draw_world_skybox(draw_env_background, env_tex)
+   _main_loop_trace_once("[ui:world] grid_scene.before")
    _draw_world_grid_and_scene(phase, cam_px, cam_pz, chrome_on, gui_probe_on, gui_probe_has_scene)
+   _main_loop_trace_once("[ui:world] gizmo.before")
    _draw_scene_world_gizmo()
+   _main_loop_trace_once("[ui:world] done")
    return
 }
 
@@ -5973,6 +6181,7 @@ fn _draw_frame(phase, term_open) {
    if trace {
       def t1 = ticks()
       _last_world_ms = ui_profile.ms_between(t1, t0)
+      _main_loop_trace_once("[ui:draw] ui.before")
       try {
          _draw_ui(phase, term_open)
       } catch err {
@@ -5980,9 +6189,11 @@ fn _draw_frame(phase, term_open) {
          " update_stage=" + _ui_update_stage)
          panic(err)
       }
+      _main_loop_trace_once("[ui:draw] ui.after")
       def t2 = ticks()
       _last_ui_ms = ui_profile.ms_between(t2, t1)
    } else {
+      _main_loop_trace_once("[ui:draw] ui.before")
       try {
          _draw_ui(phase, term_open)
       } catch err {
@@ -5990,6 +6201,7 @@ fn _draw_frame(phase, term_open) {
          " update_stage=" + _ui_update_stage)
          panic(err)
       }
+      _main_loop_trace_once("[ui:draw] ui.after")
    }
 }
 

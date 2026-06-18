@@ -418,8 +418,8 @@ fn _tile_editor_shell_cfg(f64 ww, f64 wh, f64 gap, f64 left_ratio, f64 top_ratio
    mut right_w = max(1.0, root_w - left_w - g)
    def center_bias = _weight_or(bottom_weights, 0, 1.0)
    def side_bias = _weight_or(bottom_weights, 1, 0.86)
-   def side_share = clamp(0.36 * (side_bias / max(0.05, center_bias)), compact ? 0.26 : 0.24, compact ? 0.42 : 0.38)
-   mut sidebar_w = clamp(right_w * side_share, compact ? 290.0 : 340.0, compact ? 430.0 : 500.0)
+   def side_share = clamp(0.40 * (side_bias / max(0.05, center_bias)), compact ? 0.30 : 0.28, compact ? 0.46 : 0.42)
+   mut sidebar_w = clamp(right_w * side_share, compact ? 340.0 : 390.0, compact ? 520.0 : 580.0)
    if right_w < 760.0 { sidebar_w = clamp(right_w * 0.40, 230.0, 300.0) }
    mut center_w = right_w - sidebar_w - g
    if center_w < 360.0 {

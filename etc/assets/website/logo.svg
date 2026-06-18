@@ -1,10 +1,67 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 100 100"
+     width="100%"
+     height="100%"
+     preserveAspectRatio="xMidYMid meet"
+     shape-rendering="geometricPrecision">
   <defs>
-    <path id="n" d="M80 28 72 20h-8v32L36 20 20 28v44l16 8V48l28 32h8l8-8z"/>
-    <clipPath id="mid" clipPathUnits="userSpaceOnUse">
-      <path d="M64 20H36v60h28z"/>
+    <linearGradient id="nGrad" x1="20" y1="20" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="58%" stop-color="#F7F9FF"/>
+      <stop offset="100%" stop-color="#E0E7FF"/>
+    </linearGradient>
+
+    <linearGradient id="lineGrad" x1="64" y1="20" x2="36" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#A855F7"/>
+    </linearGradient>
+
+    <filter id="shadow"
+            x="-30%" y="-30%" width="160%" height="160%"
+            color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="4" stdDeviation="4"
+                    flood-color="#312E81"
+                    flood-opacity="0.13"/>
+      <feDropShadow dx="0" dy="1.2" stdDeviation="1.2"
+                    flood-color="#6366F1"
+                    flood-opacity="0.06"/>
+    </filter>
+
+    <filter id="lineShadow"
+            x="-40%" y="-40%" width="180%" height="180%"
+            color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="1.1" stdDeviation="1.1"
+                    flood-color="#4338CA"
+                    flood-opacity="0.15"/>
+    </filter>
+
+    <path id="nShape"
+          d="M20 28l16-8 28 32V20l16 8v44l-16 8-28-32v32l-16-8z"/>
+
+    <clipPath id="slashClip">
+      <use href="#nShape"/>
+      <rect x="36" y="0" width="28" height="100" />
+    </clipPath>
+
+    <clipPath id="stemsClip">
+      <rect x="0" y="0" width="36" height="100" />
+      <rect x="64" y="0" width="36" height="100" />
     </clipPath>
   </defs>
-  <use href="#n" fill="#f0f0ff"/>
-  <path clip-path="url(#mid)" d="M80 20 23 80" fill="none" stroke="#c9c4ff" stroke-width="9" stroke-linecap="square"/>
+
+  <use href="#nShape"
+       fill="url(#nGrad)"
+       filter="url(#shadow)"/>
+
+  <path clip-path="url(#slashClip)"
+        d="M76 20L20 85"
+        fill="none"
+        stroke="url(#lineGrad)"
+        stroke-width="17"
+        stroke-linecap="round"
+        filter="url(#lineShadow)"/>
+
+  <use href="#nShape"
+       fill="url(#nGrad)"
+       clip-path="url(#stemsClip)"/>
 </svg>

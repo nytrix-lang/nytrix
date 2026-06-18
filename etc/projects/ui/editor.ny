@@ -13,6 +13,7 @@ use std.os.fs as osfs
 use std.os.path as ospath
 use std.os.ui.window.consts as key
 use std.os.ui.render as gfx
+use std.os.ui.render.diag as ui_diag
 use std.os.ui.render.dump as ui_dump
 use std.os.ui.render.reuse as ui_reuse
 use std.os.ui.render.viewer.batch as ui_batch
@@ -83,6 +84,9 @@ fn _editor_print_help() any {
    _editor_help_line("NY_EDITOR_FONT_SIZE=n", "body font size")
    _editor_help_line("NY_EDITOR_DENSITY=x", "scale editor chrome density")
    _editor_help_line("NY_EDITOR_INPUT_TRACE=1", "editor input trace")
+   _editor_help_line("NY_EDITOR_OMNI=1", "print compact WM/renderer/editor state for early frames")
+   _editor_help_line("NY_EDITOR_FRAME_TRACE=1", "print per-frame update/draw/present timings")
+   _editor_help_line("NY_EDITOR_FRAME_HASH=1", "print framebuffer hash for render lock tests")
    _editor_help_line("NY_EDITOR_FAST_PRESENT=1", "use immediate present instead of the default stable vsync")
    _editor_help_line("NY_UI_EDITOR_IDLE_REUSE=1", "enable present-only idle reuse for bench/debug")
    _editor_help_line("NY_UI_HEADLESS=1", "headless/mock mode")
@@ -96,11 +100,11 @@ fn _editor_print_help() any {
    0
 }
 
-def START_W = 1220
-def START_H = 760
+def int START_W = int(common.env_int_clamped("NY_EDITOR_START_W", 1220, 240, 8192))
+def int START_H = int(common.env_int_clamped("NY_EDITOR_START_H", 760, 180, 8192))
 def START_FLAGS = key.WINDOW_CENTER | key.WINDOW_FOCUS_ON_SHOW | key.WINDOW_ALLOW_DND
 def EDITOR_PRESENT_MODE = common.env_truthy("NY_EDITOR_FAST_PRESENT") ? "immediate" : "fifo"
-def UI_FONT_CANDIDATES = [
+def UI_FONT_CANDIDATES = borrow([
    "etc/assets/fonts/jetbrains.ttf",
    "etc/assets/fonts/maplemono.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
@@ -109,23 +113,23 @@ def UI_FONT_CANDIDATES = [
    "/usr/share/fonts/TTF/MesloLGSNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
    "etc/assets/fonts/monocraft.ttf",
-]
+])
 
-def TITLE_FONT_CANDIDATES = [
+def TITLE_FONT_CANDIDATES = borrow([
    "etc/assets/fonts/jetbrains.ttf",
    "etc/assets/fonts/maplemono.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
    "etc/assets/fonts/monocraft.ttf",
-]
+])
 
-def MODELINE_FONT_CANDIDATES = [
+def MODELINE_FONT_CANDIDATES = borrow([
    "etc/assets/fonts/jetbrains.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/MesloLGSNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-]
+])
 
 fn _env_float_between(str name, f64 fallback, f64 lo, f64 hi) f64 {
    def raw = common.env_trim(name)
@@ -363,6 +367,8 @@ fn _editor_row_y(f64 panel_y, int row) f64 {
 
 fn _draw_tex_rect(int tex, f64 x, f64 y, f64 w, f64 h, any tint=gfx.WHITE) int {
    if tex <= 0 || w <= 0.0 || h <= 0.0 { return 0 }
+   def sz = gfx.texture_size(tex)
+   if !is_list(sz) || int(sz.get(0, 0)) <= 0 || int(sz.get(1, 0)) <= 0 { return 0 }
    _flush_rects()
    gfx.draw_rect_tex(x, y, w, h, tex, _color_at(tint, 0, 1.0), _color_at(tint, 1, 1.0), _color_at(tint, 2, 1.0), _color_at(tint, 3, 1.0))
    0
@@ -387,57 +393,59 @@ def U_PROPERTY = _pack(C_PROPERTY)
 def TERM_BG = 0xff020101
 def TERM_FG = 0xfff6f5f5
 mut st = 0
-mut hist = history.new()
-mut find_state = find.state()
+mut hist = borrow(history.new())
+mut find_state = borrow(find.state())
 mut find_content_rev = -1
-mut palette_state = pal.state()
-mut chord_state = chord.empty_state()
-mut command_cfg = cmd.config()
-mut lsp_state = lsp.new()
-mut ui_state = interact.new()
-mut term_state = termpane.new(font_body, TERM_BG, TERM_FG)
-mut completion_state = {"open": false, "items": [], "index": 0, "prefix": "", "x": 0.0, "y": 0.0}
-mut peek_state = {"open": false, "title": "", "body": "", "path": "", "line": 0, "col": 0}
-mut color_state = colorpicker.state()
-mut project_drag = {"active": false, "armed": false, "entry": dict(8), "x": 0.0, "y": 0.0}
-mut project_selection = []
+mut palette_state = borrow(pal.state())
+mut chord_state = borrow(chord.empty_state())
+mut command_cfg = borrow(cmd.config())
+mut lsp_state = borrow(lsp.new())
+mut ui_state = borrow(interact.new())
+mut term_state = borrow(termpane.new(font_body, TERM_BG, TERM_FG))
+mut completion_state = borrow({"open": false, "items": [], "index": 0, "prefix": "", "x": 0.0, "y": 0.0})
+mut peek_state = borrow({"open": false, "title": "", "body": "", "path": "", "line": 0, "col": 0})
+mut color_state = borrow(colorpicker.state())
+mut project_drag = borrow({"active": false, "armed": false, "entry": borrow(dict(8)), "x": 0.0, "y": 0.0})
+mut project_selection = borrow([])
 mut project_selection_anchor = ""
-mut section_drag = {"active": false, "section": "", "x": 0.0, "y": 0.0}
-mut image_preview_cache = dict(32)
-mut nav_back = []
-mut nav_forward = []
-mut nav_live_loc = []
+mut section_drag = borrow({"active": false, "section": "", "x": 0.0, "y": 0.0})
+;; Process-lifetime frame caches: these globals are reused across frames and
+;; reset as editor state changes. They are not function-scoped owned slots.
+mut image_preview_cache = borrow(dict(32))
+mut nav_back = borrow([])
+mut nav_forward = borrow([])
+mut nav_live_loc = borrow([])
 mut nav_live_idx = 0
 mut nav_prev_idx = -1
 mut nav_next_idx = -1
 mut nav_probe_phase = 0
 mut content_rev = 0
 mut syntax_cache_rev = -1
-mut syntax_run_cache = dict(256)
-mut syntax_flat_cache = dict(256)
-mut syntax_lang_cache = dict(32)
+mut syntax_run_cache = borrow(dict(256))
+mut syntax_flat_cache = borrow(dict(256))
+mut syntax_lang_cache = borrow(dict(32))
 mut visible_runs_cache_key = ""
-mut visible_line_runs_cache = []
-mut visible_text_runs_cache = []
+mut visible_line_runs_cache = borrow([])
+mut visible_text_runs_cache = borrow([])
 mut width_cache_rev = -1
-mut width_cache = dict(512)
-mut ui_measure_cache = dict(512)
+mut width_cache = borrow(dict(512))
+mut ui_measure_cache = borrow(dict(512))
 mut modeline_cache_key = ""
-mut modeline_cache = dict(8)
+mut modeline_cache = borrow(dict(8))
 mut outline_cache_rev = -1
 mut outline_cache_name = ""
-mut outline_cache = []
+mut outline_cache = borrow([])
 mut definition_cache_rev = -1
 mut definition_cache_name = ""
-mut definition_cache = dict(64)
+mut definition_cache = borrow(dict(64))
 mut project_definition_cache_key = ""
-mut project_definition_cache = dict(512)
-mut project_definition_scanned = dict(256)
+mut project_definition_cache = borrow(dict(512))
+mut project_definition_scanned = borrow(dict(256))
 mut project_definition_cache_complete = false
-mut context_state = prompt.context_state()
-mut rename_state = prompt.rename_state()
-mut fps_state = ui_runtime.fps_begin()
-mut reuse_state = ui_reuse.make()
+mut context_state = borrow(prompt.context_state())
+mut rename_state = borrow(prompt.rename_state())
+mut fps_state = borrow(ui_runtime.fps_begin())
+mut reuse_state = borrow(ui_reuse.make())
 mut int frame_count = 0
 mut int reuse_present_count = 0
 mut int begin_fail_count = 0
@@ -448,6 +456,7 @@ mut int last_escape_ns = 0
 mut bool auto_dump_done = false
 mut str cursor_kind = ""
 mut int perf_advisor_reports = 0
+mut bool frame_hash_done = false
 mut edit_scroll_accum = 0.0
 mut palette_scroll_accum = 0.0
 mut which_key_scroll_accum = 0.0
@@ -489,12 +498,19 @@ def bool GIT_PROBE = _editor_probe("GIT")
 def bool TAB_PROBE = _editor_probe("TAB")
 def bool SELECT_PROBE = _editor_probe("SELECT")
 def bool TEXTGRID_PROBE = _editor_probe("TEXTGRID")
+def bool IMAGE_PROBE = _editor_probe("IMAGE")
 def bool BENCH_PROBE = _editor_probe("BENCH")
 def bool MOCK_BENCH_FAST = BENCH_PROBE && common.env_truthy("NY_UI_HEADLESS") && !common.env_truthy("NYTRIX_AUTO_DUMP")
 def int BENCH_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_BENCH_FRAMES", 240, 1, 100000))
 def int BENCH_WARMUP_FRAMES = int(common.env_int_clamped("NY_EDITOR_BENCH_WARMUP_FRAMES", 1, 0, 10000))
 def bool FRAME_TRACE = common.env_truthy("NY_EDITOR_FRAME_TRACE")
 def int FRAME_TRACE_LIMIT = int(common.env_int_clamped("NY_EDITOR_FRAME_TRACE_FRAMES", 5, 1, 100000))
+def bool FRAME_HASH = common.env_truthy("NY_EDITOR_FRAME_HASH") || common.env_truthy("NY_UI_FRAME_HASH_LOCK")
+def int FRAME_HASH_FRAME = int(common.env_int_clamped("NY_EDITOR_FRAME_HASH_FRAME", 2, 0, 1000000))
+def str FRAME_HASH_EXPECT = common.env_trim("NY_EDITOR_FRAME_HASH_EXPECT")
+def bool OMNI_TRACE = common.env_truthy("NY_EDITOR_OMNI") || common.env_truthy("NY_EDITOR_STATE_DUMP")
+def int OMNI_TRACE_FRAMES = int(common.env_int_clamped("NY_EDITOR_OMNI_FRAMES", 8, 1, 100000))
+def int OMNI_TRACE_EVERY = int(common.env_int_clamped("NY_EDITOR_OMNI_EVERY", 1, 1, 100000))
 def bool PERF_ADVISOR = FRAME_TRACE || common.env_truthy("NY_EDITOR_PERF_ADVISOR")
 def int PERF_ADVISOR_MIN_MS = int(common.env_int_clamped("NY_EDITOR_PERF_ADVISOR_MIN_MS", 18, 1, 1000))
 def int PERF_ADVISOR_LIMIT = int(common.env_int_clamped("NY_EDITOR_PERF_ADVISOR_FRAMES", 12, 1, 10000))
@@ -516,7 +532,7 @@ fn _trace_ms(int a, int b) str {
 fn _measure_ui(int font, str text, f64 fallback=0.0) f64 {
    "Returns cached UI text width for stable chrome labels.  Editor line-prefix widths keep their own content-revision cache."
    if text.len <= 0 { return 0.0 }
-   if !is_dict(ui_measure_cache) { ui_measure_cache = dict(512) }
+   if !is_dict(ui_measure_cache) { ui_measure_cache = borrow(dict(512)) }
    def key = to_str(font) + "\t" + text
    if ui_measure_cache.contains(key) { return float(ui_measure_cache.get(key, fallback)) }
    def w = float(gfx.measure_text_fast(font, text).get(0, fallback))
@@ -589,6 +605,52 @@ fn _trace_draw(
    0
 }
 
+fn _editor_popup_summary() str {
+   "palette=" + common.yn(pal.is_open(palette_state)) +
+   " find=" + common.yn(find.is_open(find_state)) +
+   " context=" + common.yn(prompt.context_is_open(context_state)) +
+   " rename=" + common.yn(prompt.rename_is_open(rename_state)) +
+   " color=" + common.yn(colorpicker.is_open(color_state)) +
+   " completion=" + common.yn(bool(completion_state.get("open", false))) +
+   " chord=" + common.yn(chord.pending(chord_state)) +
+   " quit=" + common.yn(bool(st.get("quit_prompt", false)))
+}
+
+fn _editor_omni_dump(dict lay, f64 sw, f64 sh) int {
+   if !OMNI_TRACE { return 0 }
+   if frame_count >= OMNI_TRACE_FRAMES { return 0 }
+   if frame_count % OMNI_TRACE_EVERY != 0 { return 0 }
+   def b = ed.current_buffer(st)
+   def lines = ed.current_lines(st)
+   def rs = gfx.renderer_frame_stats()
+   print("[editor:omni] frame=" + to_str(frame_count) +
+      " fps=" + to_str(int(st.get("fps", 0))) +
+      " frame_ms=" + to_str(float(st.get("frame_ms", 0.0))) +
+      " focus=" + to_str(st.get("focus", "")) +
+      " active=" + to_str(int(st.get("active", 0))) +
+      " buffers=" + to_str(st.get("buffers", []).len) +
+      " cursor=" + to_str(int(st.get("cursor_line", 0))) + ":" + to_str(int(st.get("cursor_col", 0))) +
+      " scroll=" + to_str(int(st.get("scroll", 0))) +
+      " file=" + to_str(b.get("name", "")) +
+      " kind=" + to_str(b.get("kind", "text")) +
+      " path=" + to_str(b.get("path", "")) +
+      " lines=" + to_str(lines.len) +
+      " layout=" + to_str(int(sw)) + "x" + to_str(int(sh)) +
+      " edit=" + to_str(int(float(lay.get("edit_x", 0.0)))) + "," + to_str(int(float(lay.get("edit_y", 0.0)))) + "," + to_str(int(float(lay.get("edit_w", 0.0)))) + "," + to_str(int(float(lay.get("edit_h", 0.0)))) +
+      " rail=" + common.yn(bool(st.get("show_hierarchy", true))) + ":" + _rail_tab() +
+      " project_loaded=" + common.yn(bool(st.get("project_loaded", false))) +
+      " git_loaded=" + common.yn(bool(st.get("git_loaded", false))) +
+      " terminal=" + common.yn(termpane.is_open(term_state)) +
+      " term_tabs=" + to_str(termpane.tab_count(term_state)) +
+      " term_hot=" + common.yn(bool(term_state.get("hot", false))) +
+      " term_bytes=" + to_str(int(term_state.get("last_update_bytes", 0))) +
+      " popups={" + _editor_popup_summary() + "}" +
+      " draws=" + to_str(int(rs.get("draws", 0))) +
+      " text=" + to_str(int(rs.get("prim_text_calls", 0))) + "/" + to_str(int(rs.get("prim_text_glyphs", 0))) +
+      " " + ui_diag.snapshot_text(win))
+   0
+}
+
 fn _request_full_redraw(int frames=2) int {
    if frames > force_full_redraw { force_full_redraw = frames }
    0
@@ -606,6 +668,8 @@ fn _clear_pending_destructive_prompts() int {
 
 fn _editor_dynamic_ui_active() bool {
    if force_full_redraw > 0 { return true }
+   if termpane.is_open(term_state) && bool(term_state.get("hot", false)) { return true }
+   if termpane.is_open(term_state) && int(term_state.get("last_update_bytes", 0)) > 0 { return true }
    if st.get("quit_prompt", false) { return true }
    if chord.pending(chord_state) { return true }
    if pal.is_open(palette_state) { return true }
@@ -619,6 +683,7 @@ fn _editor_dynamic_ui_active() bool {
    section_drag.get("active", false)
 }
 
+@returns_owned
 fn _editor_reuse_opts(f64 sw, f64 sh) dict {
    def any opts = {
       "enabled": common.env_truthy("NY_UI_EDITOR_IDLE_REUSE"),
@@ -686,22 +751,34 @@ fn _layout_sh(dict lay) f64 {
    float(lay.get("status_y", 0.0)) + float(lay.get("status_h", ed.STATUS_H))
 }
 
+fn _fit_rect(f64 x, f64 y, f64 w, f64 h, f64 sw, f64 sh, f64 margin=8.0) list {
+   def max_w = max(1.0, sw - margin * 2.0)
+   def max_h = max(1.0, sh - margin * 2.0)
+   w = min(max(1.0, w), max_w)
+   h = min(max(1.0, h), max_h)
+   def max_x = max(margin, sw - w - margin)
+   def max_y = max(margin, sh - h - margin)
+   x = min(max(margin, x), max_x)
+   y = min(max(margin, y), max_y)
+   [x, y, w, h]
+}
+
 fn _palette_rect(f64 sw, f64 sh, int matches_len) list {
-   mut f64 w = sw - 44.0
-   if w < 220.0 { w = 220.0 }
-   if w > 880.0 { w = 880.0 }
-   mut f64 x = sw * 0.5 - w * 0.5
-   if x < 8.0 { x = 8.0 }
-   mut f64 y = sh * 0.09
-   if y < 18.0 { y = 18.0 }
-   mut int max_rows = int((sh - y - PALETTE_HEADER_H - PALETTE_DETAIL_H - 24.0) / PALETTE_ROW_H)
+   def margin = 8.0
+   mut f64 w = min(880.0, max(220.0, sw - 44.0))
+   w = min(w, max(1.0, sw - margin * 2.0))
+   mut f64 y = max(18.0, sh * 0.09)
+   y = min(y, max(margin, sh - margin - PALETTE_HEADER_H - PALETTE_DETAIL_H - PALETTE_ROW_H - 10.0))
+   mut int max_rows = int((sh - y - margin - PALETTE_HEADER_H - PALETTE_DETAIL_H - 10.0) / PALETTE_ROW_H)
    if max_rows < 1 { max_rows = 1 }
    mut int rows = matches_len
    if rows < 1 { rows = 1 }
    if rows > max_rows { rows = max_rows }
    if rows > PALETTE_MAX_ROWS { rows = PALETTE_MAX_ROWS }
    def f64 h = PALETTE_HEADER_H + float(rows) * PALETTE_ROW_H + PALETTE_DETAIL_H + 10.0
-   [x, y, w, h, rows]
+   def x0 = sw * 0.5 - w * 0.5
+   def fit = _fit_rect(x0, y, w, h, sw, sh, margin)
+   [float(fit.get(0, x0)), float(fit.get(1, y)), float(fit.get(2, w)), float(fit.get(3, h)), rows]
 }
 
 fn _palette_contains(dict lay, f64 mx, f64 my) bool {
@@ -726,9 +803,8 @@ fn _palette_row_hit(dict lay, f64 mx, f64 my) int {
 }
 
 fn _which_key_rect(f64 sw, f64 sh, int total) list {
-   mut f64 w = sw - 28.0
-   if w < 320.0 { w = 320.0 }
-   if w > 1180.0 { w = 1180.0 }
+   mut f64 w = min(1180.0, max(320.0, sw - 28.0))
+   w = min(w, max(1.0, sw - 16.0))
    def int cols = w > 960.0 ? 3 : (w > 640.0 ? 2 : 1)
    mut int max_lines = int((sh - 130.0) / WHICH_KEY_ROW_H)
    if max_lines < 1 { max_lines = 1 }
@@ -738,9 +814,18 @@ fn _which_key_rect(f64 sw, f64 sh, int total) list {
    mut int visible = total
    if visible > max_visible { visible = max_visible }
    if visible < 1 { visible = 1 }
-   def int line_count = int((visible + cols - 1) / cols)
-   def f64 h = 74.0 + float(line_count) * WHICH_KEY_ROW_H + 12.0
-   [14.0, sh - h - 14.0, w, h, cols, visible]
+   mut int line_count = int((visible + cols - 1) / cols)
+   def max_h = max(1.0, sh - 16.0)
+   mut f64 h = min(max_h, 74.0 + float(line_count) * WHICH_KEY_ROW_H + 12.0)
+   mut int fit_lines = int((h - 86.0) / WHICH_KEY_ROW_H)
+   if fit_lines < 1 { fit_lines = 1 }
+   if fit_lines < line_count {
+      line_count = fit_lines
+      visible = min(visible, line_count * cols)
+      h = 74.0 + float(line_count) * WHICH_KEY_ROW_H + 12.0
+   }
+   def fit = _fit_rect(14.0, sh - h - 14.0, w, h, sw, sh, 8.0)
+   [float(fit.get(0, 14.0)), float(fit.get(1, sh - h - 14.0)), float(fit.get(2, w)), float(fit.get(3, h)), cols, visible]
 }
 
 fn _which_key_contains(f64 sw, f64 sh, f64 mx, f64 my) bool {
@@ -764,9 +849,9 @@ fn _touch_content() int {
    width_cache_rev = -1
    outline_cache_rev = -1
    definition_cache_rev = -1
-   syntax_run_cache = dict(256)
-   syntax_flat_cache = dict(256)
-   width_cache = dict(512)
+   syntax_run_cache = borrow(dict(256))
+   syntax_flat_cache = borrow(dict(256))
+   width_cache = borrow(dict(512))
    find_content_rev = -1
    color_state = colorpicker.close(color_state)
    0
@@ -774,8 +859,8 @@ fn _touch_content() int {
 
 fn _invalidate_project_definitions() int {
    project_definition_cache_key = ""
-   project_definition_cache = dict(512)
-   project_definition_scanned = dict(256)
+   project_definition_cache = borrow(dict(512))
+   project_definition_scanned = borrow(dict(256))
    project_definition_cache_complete = false
    0
 }
@@ -785,9 +870,9 @@ fn _invalidate_text_metrics() int {
    width_cache_rev = -1
    modeline_cache_key = ""
    visible_runs_cache_key = ""
-   syntax_run_cache = dict(256)
-   syntax_flat_cache = dict(256)
-   width_cache = dict(512)
+   syntax_run_cache = borrow(dict(256))
+   syntax_flat_cache = borrow(dict(256))
+   width_cache = borrow(dict(512))
    0
 }
 
@@ -861,6 +946,7 @@ fn _buffer_source_path(dict b) str {
    path.len > 0 ? path : to_str(b.get("source_path", ""))
 }
 
+@returns_owned
 fn _editor_context_entry() dict {
    def b = ed.current_buffer(st)
    def path = _buffer_source_path(b)
@@ -872,19 +958,21 @@ fn _editor_context_entry() dict {
    entry
 }
 
+@returns_owned
 fn _context_file_entry(dict entry) dict {
-   if is_dict(entry) && to_str(entry.get("path", "")).len > 0 { return entry }
+   if is_dict(entry) && to_str(entry.get("path", "")).len > 0 { return clone(entry) }
    _editor_context_entry()
 }
 
 fn _open_context(f64 x, f64 y, dict entry, str scope) int {
-   mut e = is_dict(entry) ? entry : dict(8)
+   mut e = is_dict(entry) ? clone(entry) : dict(8)
    e["scope"] = scope
    context_state = prompt.context_open(context_state, x, y, e)
    palette_state = pal.close(palette_state)
    0
 }
 
+@returns_owned
 fn _timeline_context_entry(any row) dict {
    def typ = to_str(row.get(0, ""))
    if typ == "command" {
@@ -914,6 +1002,7 @@ fn _svg_attr(str src, str name) str {
    end > qpos + 1 ? str.str_slice(src, qpos + 1, end) : ""
 }
 
+@returns_owned
 fn _svg_meta_lines(str path, any im=0) list {
    def src = session.read_text(path)
    def width = _svg_attr(src, "width")
@@ -941,12 +1030,15 @@ fn _svg_preview_tex(str path) int {
    if path.len <= 0 { return -1 }
    if image_preview_cache.contains(path) {
       def cached = int(image_preview_cache.get(path, -1))
-      if cached > 0 { return cached }
+      if cached > 0 {
+         def sz = gfx.texture_size(cached)
+         if is_list(sz) && int(sz.get(0, 0)) > 0 && int(sz.get(1, 0)) > 0 { return cached }
+         image_preview_cache = image_preview_cache.delete(path)
+      }
       if cached == -2 { return -1 }
    }
    def im = svg_img.load_path(path)
    if !im || !is_dict(im) {
-      image_preview_cache[path] = -2
       return -1
    }
    def tex = icons.stable_texture_id(gfx.texture_upload_image_ex(im, path, 37, false, false, 1, 33071, 33071, "editor_svg:" + path, true))
@@ -958,7 +1050,11 @@ fn _image_preview_tex(str path) int {
    if path.len <= 0 { return -1 }
    if image_preview_cache.contains(path) {
       def cached = int(image_preview_cache.get(path, -1))
-      if cached > 0 { return cached }
+      if cached > 0 {
+         def sz = gfx.texture_size(cached)
+         if is_list(sz) && int(sz.get(0, 0)) > 0 && int(sz.get(1, 0)) > 0 { return cached }
+         image_preview_cache = image_preview_cache.delete(path)
+      }
       if cached == -2 { return -1 }
    }
    if _is_svg_path(path) { return _svg_preview_tex(path) }
@@ -975,7 +1071,7 @@ fn _release_image_preview_cache() int {
       if tex > 0 { gfx.texture_destroy(tex) }
       i += 1
    }
-   image_preview_cache = dict(32)
+   image_preview_cache = borrow(dict(32))
    0
 }
 
@@ -987,7 +1083,7 @@ fn _draw_svg_metadata(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
    def w = float(lay.get("edit_w", 0.0))
    def h = float(lay.get("edit_h", 0.0))
    def pad = 12.0
-   _fill_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, gfx.color_hex("#010102"))
+   _fill_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, C_PANE_2)
    _stroke_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, C_LINE_2, 1.0)
    if tex > 0 && iw > 0.0 && ih > 0.0 {
       def f64 max_w = _clamp_f64(w * 0.46, 64.0, 1000000.0)
@@ -997,8 +1093,8 @@ fn _draw_svg_metadata(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
       if scale_h < scale { scale = scale_h }
       _draw_tex_rect(tex, x + pad + 12.0, y + pad + 14.0, iw * scale, ih * scale, gfx.WHITE)
    } else {
-      _draw_icon("asset_image", x + pad + 24.0, y + pad + 24.0, 44.0, C_ACCENT)
-      _text(font_body, "SVG preview unavailable", x + pad + 82.0, y + pad + 24.0, C_TEXT)
+      _draw_icon("asset_image", x + pad + 24.0, y + pad + 24.0, 44.0, C_WARN)
+      _text(font_body, "SVG preview unavailable", x + pad + 82.0, y + pad + 24.0, C_WARN)
    }
    mut lines = _svg_meta_lines(path, 0)
    if tex > 0 { lines = lines.append("texture: " + to_str(int(iw)) + "x" + to_str(int(ih))) }
@@ -1012,13 +1108,56 @@ fn _draw_svg_metadata(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
    true
 }
 
+fn _draw_svg_preview(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
+   def path = _buffer_source_path(b)
+   if !_is_svg_path(path) { return false }
+   if tex <= 0 || iw <= 0.0 || ih <= 0.0 { return _draw_svg_metadata(lay, b, tex, iw, ih) }
+   def x = float(lay.get("edit_x", 0.0))
+   def y = float(lay.get("edit_y", 0.0))
+   def w = float(lay.get("edit_w", 0.0))
+   def h = float(lay.get("edit_h", 0.0))
+   def f64 pad = 12.0
+   def f64 label_h = 46.0
+   def f64 meta_h = 38.0
+   def f64 avail_w = _clamp_f64(w - pad * 2.0, 16.0, 1000000.0)
+   def f64 avail_h = _clamp_f64(h - pad * 2.0 - label_h - meta_h, 16.0, 1000000.0)
+   mut f64 scale = avail_w / iw
+   def f64 scale_h = avail_h / ih
+   if scale_h < scale { scale = scale_h }
+   def f64 draw_w = max(1.0, iw * scale)
+   def f64 draw_h = max(1.0, ih * scale)
+   def f64 ix = x + (w - draw_w) * 0.5
+   def f64 iy = y + pad + (avail_h - draw_h) * 0.5
+   _fill_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, C_PANE_2)
+   _stroke_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, C_LINE_2, 1.0)
+   _draw_tex_rect(tex, ix, iy, draw_w, draw_h, gfx.WHITE)
+   def name = to_str(b.get("name", ospath.basename(path)))
+   def lines = _svg_meta_lines(path, 0)
+   def declared = lines.len > 4 ? to_str(lines.get(4, "")) : "SVG vector"
+   def info = "rendered " + to_str(int(iw)) + "x" + to_str(int(ih)) + "  " + declared + "  " + path
+   _text(font_body, widgets.preview(name, int(_clamp_f64((w - pad * 2.0) / 9.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 42.0, C_ACCENT_2)
+   _text(font_small, widgets.preview(info, int(_clamp_f64((w - pad * 2.0) / 7.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 20.0, C_DIM)
+   true
+}
+
+fn _image_probe_path() str {
+   "build/cache/editor_image_probe.svg"
+}
+
+fn _write_image_probe_fixture() str {
+   def path = _image_probe_path()
+   def src = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"96\" height=\"64\" viewBox=\"0 0 96 64\"><rect width=\"96\" height=\"64\" fill=\"#101014\"/><circle cx=\"32\" cy=\"32\" r=\"20\" fill=\"#8bdc9a\"/><path d=\"M52 14 L82 50 H52 Z\" fill=\"#ffd166\"/></svg>"
+   file_write(path, src)
+   path
+}
+
 fn _draw_image_preview(dict lay, dict b) bool {
    if to_str(b.get("kind", "")) != "image" { return false }
    def path = _buffer_source_path(b)
    def tex = _image_preview_tex(path)
    if _is_svg_path(path) {
       def sz = tex > 0 ? gfx.texture_size(tex) : [0, 0]
-      return _draw_svg_metadata(lay, b, tex, float(sz.get(0, 0)), float(sz.get(1, 0)))
+      return _draw_svg_preview(lay, b, tex, float(sz.get(0, 0)), float(sz.get(1, 0)))
    }
    if tex <= 0 { return false }
    def sz = gfx.texture_size(tex)
@@ -1065,6 +1204,7 @@ fn _status(str msg) int {
    0
 }
 
+@returns_owned
 fn _cache_parse(str raw) dict {
    def rows = str.split(raw, "\n")
    def int cap = _clamp_int(rows.len * 2, 64, 1000000)
@@ -1176,9 +1316,10 @@ fn _cache_append_project_ops(list rows, str prefix, list ops) list {
 }
 
 fn _restore_session_allowed() bool {
-   cli.args().len <= 1 && !INPUT_PROBE && !CONTEXT_PROBE && !TERMINAL_PROBE && !TERMINAL_DUMP_PROBE && !SYNTAX_PROBE && !NAV_PROBE && !UNDO_PROBE && !ESCAPE_PROBE && !MODELINE_PROBE && !CHORD_PROBE && !FIND_PROBE && !PALETTE_PROBE && !WHICH_KEY_PROBE && !MULTICURSOR_PROBE && !ZOOM_PROBE && !SCROLLBAR_PROBE && !GOTO_PROBE && !GIT_PROBE && !TAB_PROBE && !SELECT_PROBE && !TEXTGRID_PROBE && !BENCH_PROBE
+   cli.args().len <= 1 && !INPUT_PROBE && !CONTEXT_PROBE && !TERMINAL_PROBE && !TERMINAL_DUMP_PROBE && !SYNTAX_PROBE && !NAV_PROBE && !UNDO_PROBE && !ESCAPE_PROBE && !MODELINE_PROBE && !CHORD_PROBE && !FIND_PROBE && !PALETTE_PROBE && !WHICH_KEY_PROBE && !MULTICURSOR_PROBE && !ZOOM_PROBE && !SCROLLBAR_PROBE && !GOTO_PROBE && !GIT_PROBE && !TAB_PROBE && !SELECT_PROBE && !TEXTGRID_PROBE && !IMAGE_PROBE && !BENCH_PROBE
 }
 
+@returns_owned
 fn _restore_cached_buffers(any raw) list {
    mut out = []
    def count = _cache_int(raw, "buffer_count", 0, 0, 128)
@@ -1210,6 +1351,7 @@ fn _valid_focus(str pane) bool {
    pane == "editor" || pane == "project" || pane == "terminal"
 }
 
+@returns_owned
 fn _session_paths() list {
    mut out = []
    def bs = st.get("buffers", [])
@@ -1537,8 +1679,9 @@ fn _nav_record_current() int {
    0
 }
 
+@returns_owned
 fn _nav_trim(list xs) list {
-   if xs.len <= NAV_LIMIT { return xs }
+   if xs.len <= NAV_LIMIT { return clone(xs) }
    mut out = []
    mut i = xs.len - NAV_LIMIT
    while i < xs.len {
@@ -1548,6 +1691,7 @@ fn _nav_trim(list xs) list {
    out
 }
 
+@returns_owned
 fn _nav_without_last(list xs) list {
    mut out = []
    mut i = 0
@@ -1641,6 +1785,7 @@ fn _cursor_before(any a, any b) bool {
    ar < br || (ar == br && _cursor_col(a) < _cursor_col(b))
 }
 
+@returns_owned
 fn _cursor_sorted_desc(list cursors) list {
    mut raw = cursors
    mut out = []
@@ -1663,6 +1808,7 @@ fn _cursor_sorted_desc(list cursors) list {
    out
 }
 
+@returns_owned
 fn _all_cursors_desc() list {
    def lines = ed.current_lines(st)
    def max_row = max(0, lines.len - 1)
@@ -1732,6 +1878,7 @@ fn _move_extra_cursors_by(int drow, int dcol) int {
    0
 }
 
+@returns_owned
 fn _adjust_processed_insert(list cursors, int row, int col, int delta, int last_len, int text_len) list {
    mut out = []
    mut i = 0
@@ -1756,6 +1903,7 @@ fn _adjust_processed_insert(list cursors, int row, int col, int delta, int last_
    out
 }
 
+@returns_owned
 fn _adjust_processed_backspace(list cursors, int row, int col, int delta, int prev_len) list {
    mut out = []
    mut i = 0
@@ -1780,6 +1928,7 @@ fn _adjust_processed_backspace(list cursors, int row, int col, int delta, int pr
    out
 }
 
+@returns_owned
 fn _adjust_processed_delete(list cursors, int row, int col, int delta, int base_len) list {
    mut out = []
    mut i = 0
@@ -1894,6 +2043,7 @@ fn _range_before(any a, any b) bool {
    ar < br || (ar == br && int(a.get(1, 0)) < int(b.get(1, 0)))
 }
 
+@returns_owned
 fn _ranges_sorted_desc(list ranges) list {
    mut raw = ranges
    mut out = []
@@ -1930,6 +2080,7 @@ fn _selection_any_valid() bool {
    _multi_selection_valid() || ed.selection_valid(st)
 }
 
+@returns_owned
 fn _selection_ranges_active() list {
    if _multi_selection_valid() {
       mut out = []
@@ -2325,10 +2476,18 @@ fn _project_selection_status() int {
    _status(n <= 0 ? "selection cleared" : (to_str(n) + " selected"))
 }
 
+@consumes(xs)
+@forgets(xs)
+fn _project_selection_replace(list xs) int {
+   project_selection = borrow(xs)
+   forget(xs)
+   0
+}
+
 fn _project_selection_set(dict entry) int {
    def rel = _project_rel(entry)
    if rel.len <= 0 { return 0 }
-   project_selection = [rel]
+   _project_selection_replace([rel])
    project_selection_anchor = rel
    0
 }
@@ -2346,7 +2505,7 @@ fn _project_selection_toggle(dict entry) int {
       i += 1
    }
    if !found { out = out.append(rel) project_selection_anchor = rel }
-   project_selection = out
+   _project_selection_replace(out)
    _project_selection_status()
 }
 
@@ -2381,10 +2540,11 @@ fn _project_selection_range(dict entry) int {
       if r.len > 0 { out = out.append(r) }
       i += 1
    }
-   project_selection = out
+   _project_selection_replace(out)
    _project_selection_status()
 }
 
+@returns_owned
 fn _project_selected_entries() list {
    def rows = project.tree(project_state)
    mut out = []
@@ -2397,6 +2557,7 @@ fn _project_selected_entries() list {
    out
 }
 
+@returns_owned
 fn _project_action_entries(dict entry) list {
    def e = _project_entry_or_current(entry)
    if !is_dict(e) || e.len <= 0 { return [] }
@@ -2418,6 +2579,7 @@ fn _project_rel_has_selected_parent(str rel, list rels) bool {
    false
 }
 
+@returns_owned
 fn _project_filter_top_entries(list entries) list {
    mut rels = []
    mut i = 0
@@ -2698,6 +2860,7 @@ fn _format_current_file() int {
    0
 }
 
+@returns_owned
 fn _argv_tail(list argv) list {
    mut out = []
    mut i = 1
@@ -2766,6 +2929,7 @@ fn _debug_skip_symbol(str name) bool {
    name.len <= 0 || str.str_contains(DEBUG_LINE_SKIP_WORDS, " " + name + " ")
 }
 
+@returns_owned
 fn _debug_line_symbols(str line, int limit=10) list {
    mut out = []
    mut seen = dict(16)
@@ -3273,8 +3437,8 @@ fn _prepare_project_definition_cache(str active_path, int max_files, int max_byt
    def key = _project_definition_key(active_path, max_files, max_bytes)
    if project_definition_cache_key == key { return 0 }
    project_definition_cache_key = key
-   project_definition_cache = dict(512)
-   project_definition_scanned = dict(256)
+   project_definition_cache = borrow(dict(512))
+   project_definition_scanned = borrow(dict(256))
    project_definition_cache_complete = false
    0
 }
@@ -3824,6 +3988,10 @@ fn _palette_matches() list {
 fn _palette_open() int {
    palette_state["cfg"] = command_cfg
    palette_state = pal.open(palette_state)
+   context_state = prompt.context_close(context_state)
+   find_state = find.close(find_state)
+   rename_state = prompt.rename_close(rename_state)
+   _request_full_redraw(3)
    _status("command palette")
    0
 }
@@ -4283,6 +4451,7 @@ fn _handle_command(str ch) bool {
 }
 
 fn _direct_key_fallback(any data) bool {
+   if _ctrl(data) && _shift(data) && window.event_key_is(data, key.KEY_P) { _run_command("palette") return true }
    if _alt(data) && _shift(data) && window.event_key_is(data, key.KEY_UP) { _run_command("cursor-add-above") return true }
    if _alt(data) && _shift(data) && window.event_key_is(data, key.KEY_DOWN) { _run_command("cursor-add-below") return true }
    if _ctrl(data) && window.event_key_is(data, key.KEY_Z) {
@@ -4338,6 +4507,11 @@ fn _handle_key(any data) int {
    if prompt.rename_is_open(rename_state) { _handle_rename_key(data) return 0 }
    if pal.is_open(palette_state) { _handle_palette_key(data) return 0 }
    if find.is_open(find_state) { _handle_find_key(data) return 0 }
+   if _ctrl(data) && _shift(data) && window.event_key_is(data, key.KEY_P) {
+      _run_command("palette")
+      _suppress_char_from_key(data)
+      return 0
+   }
    if _completion_handle_key(data) { return 0 }
    def key_chord = chord.event_chord(data)
    if INPUT_TRACE {
@@ -4415,7 +4589,7 @@ fn _handle_escape_key(any data) bool {
    if chord.pending(chord_state) { chord_state = chord.empty_state() cleared = true }
    if _extra_cursor_count() > 0 { _clear_extra_cursors(false) cleared = true }
    if _selection_any_valid() || bool(st.get("sel_active", false)) { _clear_selections() cleared = true }
-   if project_selection.len > 0 { project_selection = [] project_selection_anchor = "" cleared = true }
+   if project_selection.len > 0 { _project_selection_replace([]) project_selection_anchor = "" cleared = true }
    st["drag_select"] = false
    st["drag_divider"] = false
    st["drag_terminal"] = false
@@ -4513,7 +4687,10 @@ fn _handle_mouse_press(dict lay, any data) int {
    }
    def section_hit = _rail_section_at(lay, mx, my)
    if section_hit.len > 0 && button == 0 {
-      section_drag = {"active": true, "section": section_hit, "x": mx, "y": my}
+      section_drag["active"] = true
+      section_drag["section"] = section_hit
+      section_drag["x"] = mx
+      section_drag["y"] = my
       _set_focus("project", false)
       return 0
    }
@@ -4605,7 +4782,11 @@ fn _handle_mouse_press(dict lay, any data) int {
                return 0
             }
             _project_selection_set(entry)
-            project_drag = {"active": false, "armed": true, "entry": entry, "x": mx, "y": my}
+            project_drag["active"] = false
+            project_drag["armed"] = true
+            project_drag["entry"] = borrow(clone(entry))
+            project_drag["x"] = mx
+            project_drag["y"] = my
             _open_or_toggle_project_row(entry)
          }
          return 0
@@ -4758,7 +4939,7 @@ fn _delete_project_entry(dict entry) int {
       deleted += 1
       i += 1
    }
-   project_selection = []
+   _project_selection_replace([])
    project_selection_anchor = ""
    st["project_loaded"] = true
    st["git_loaded"] = true
@@ -4796,7 +4977,11 @@ fn _finish_project_drag(dict lay, f64 mx, f64 my) int {
    if !project_drag.get("armed", false) { return 0 }
    def src = project_drag.get("entry", dict(8))
    def active = bool(project_drag.get("active", false))
-   project_drag = {"active": false, "armed": false, "entry": dict(8), "x": 0.0, "y": 0.0}
+   project_drag["active"] = false
+   project_drag["armed"] = false
+   project_drag["entry"] = borrow(dict(8))
+   project_drag["x"] = 0.0
+   project_drag["y"] = 0.0
    if !active || !is_dict(src) || src.len <= 0 { return 0 }
    def dst = _project_entry_at(lay, mx, my)
    if !is_dict(dst) || dst.len <= 0 { _status("move cancelled") return 0 }
@@ -4818,7 +5003,7 @@ fn _finish_project_drag(dict lay, f64 mx, f64 my) int {
       moved += 1
       i += 1
    }
-   project_selection = []
+   _project_selection_replace([])
    project_selection_anchor = ""
    st["project_loaded"] = true
    st["git_loaded"] = true
@@ -4833,7 +5018,10 @@ fn _finish_section_drag(f64 mx, f64 my) int {
    def section = to_str(section_drag.get("section", ""))
    def dx = mx - float(section_drag.get("x", mx))
    def dy = my - float(section_drag.get("y", my))
-   section_drag = {"active": false, "section": "", "x": 0.0, "y": 0.0}
+   section_drag["active"] = false
+   section_drag["section"] = ""
+   section_drag["x"] = 0.0
+   section_drag["y"] = 0.0
    if section.len <= 0 { return 0 }
    if (dx * dx + dy * dy) > 49.0 { _hide_rail_section(section) }
    else { _toggle_rail_section(section) }
@@ -5391,8 +5579,8 @@ fn _prefix_x(str line, int col, bool mono_line) f64 {
 fn _syntax_runs(str filename, str line, int li) list {
    if syntax_cache_rev != content_rev {
       syntax_cache_rev = content_rev
-      syntax_run_cache = dict(256)
-      syntax_flat_cache = dict(256)
+      syntax_run_cache = borrow(dict(256))
+      syntax_flat_cache = borrow(dict(256))
    }
    def key = _syntax_key(filename, li, line)
    if syntax_run_cache.contains(key) { return syntax_run_cache.get(key, []) }
@@ -5400,39 +5588,39 @@ fn _syntax_runs(str filename, str line, int li) list {
    mut runs = []
    if toks.len == 0 {
       if line.len > 0 { runs = runs.append([line, syntax.TOK_TEXT, 0.0]) }
-      syntax_run_cache[key] = runs
-      return runs
-   }
-   def mono_line = _mono_fast_prefix(line, line.len)
-   mut cursor = 0
-   mut i = 0
-   while i < toks.len {
-      def tok = toks.get(i)
-      def kind = int(tok.get(0, syntax.TOK_TEXT))
-      def start = min(max(int(tok.get(1, 0)), 0), line.len)
-      def end = min(line.len, start + max(0, int(tok.get(2, 0))))
-      if start > cursor {
-         runs = runs.append([str.str_slice(line, cursor, start), syntax.TOK_TEXT, _prefix_x(line, cursor, mono_line)])
+   } else {
+      def mono_line = _mono_fast_prefix(line, line.len)
+      mut cursor = 0
+      mut i = 0
+      while i < toks.len {
+         def tok = toks.get(i)
+         def kind = int(tok.get(0, syntax.TOK_TEXT))
+         def start = min(max(int(tok.get(1, 0)), 0), line.len)
+         def end = min(line.len, start + max(0, int(tok.get(2, 0))))
+         if start > cursor {
+            runs = runs.append([str.str_slice(line, cursor, start), syntax.TOK_TEXT, _prefix_x(line, cursor, mono_line)])
+         }
+         def seg_start = max(start, cursor)
+         if end > seg_start {
+            runs = runs.append([str.str_slice(line, seg_start, end), kind, _prefix_x(line, seg_start, mono_line)])
+            cursor = end
+         }
+         i += 1
       }
-      def seg_start = max(start, cursor)
-      if end > seg_start {
-         runs = runs.append([str.str_slice(line, seg_start, end), kind, _prefix_x(line, seg_start, mono_line)])
-         cursor = end
+      if cursor < line.len {
+         runs = runs.append([str.str_slice(line, cursor, line.len), syntax.TOK_TEXT, _prefix_x(line, cursor, mono_line)])
       }
-      i += 1
    }
-   if cursor < line.len {
-      runs = runs.append([str.str_slice(line, cursor, line.len), syntax.TOK_TEXT, _prefix_x(line, cursor, mono_line)])
-   }
-   syntax_run_cache[key] = runs
-   runs
+   syntax_run_cache[key] = borrow(runs)
+   forget(runs)
+   syntax_run_cache.get(key, [])
 }
 
 fn _syntax_rel_runs(str filename, str line, int li) list {
    if syntax_cache_rev != content_rev {
       syntax_cache_rev = content_rev
-      syntax_run_cache = dict(256)
-      syntax_flat_cache = dict(256)
+      syntax_run_cache = borrow(dict(256))
+      syntax_flat_cache = borrow(dict(256))
    }
    def key = _syntax_key(filename, li, line)
    if syntax_flat_cache.contains(key) { return syntax_flat_cache.get(key, []) }
@@ -5449,8 +5637,9 @@ fn _syntax_rel_runs(str filename, str line, int li) list {
       }
       i += 1
    }
-   syntax_flat_cache[key] = flat
-   flat
+   syntax_flat_cache[key] = borrow(flat)
+   forget(flat)
+   syntax_flat_cache.get(key, [])
 }
 
 fn _append_plain_run(list out, str line, f64 x, f64 y) list {
@@ -5570,8 +5759,10 @@ fn _prepare_visible_runs(
       i += 1
    }
    visible_runs_cache_key = key
-   visible_line_runs_cache = line_runs
-   visible_text_runs_cache = text_runs
+   visible_line_runs_cache = borrow(line_runs)
+   visible_text_runs_cache = borrow(text_runs)
+   forget(line_runs)
+   forget(text_runs)
    0
 }
 
@@ -5601,7 +5792,7 @@ fn _draw_highlighted_line(str filename, str line, int li, f64 x, f64 y) int {
 fn _measure_prefix(str line, int col) f64 {
    if width_cache_rev != content_rev {
       width_cache_rev = content_rev
-      width_cache = dict(512)
+      width_cache = borrow(dict(512))
    }
    def n = min(max(col, 0), line.len)
    if n <= 0 { return 0.0 }
@@ -5674,15 +5865,17 @@ fn _draw_color_picker(dict lay, f64 sw, f64 sh) int {
    def x0 = float(lay.get("edit_x", 0.0))
    def y0 = float(lay.get("edit_y", 0.0))
    def rows = ed.visible_rows(float(lay.get("edit_h", 0.0)))
-   mut x = min(max(x0 + 42.0, 16.0), max(16.0, sw - 236.0))
-   mut y = min(max(y0 + 40.0, 16.0), max(16.0, sh - 112.0))
+   def w = min(220.0, max(1.0, sw - 16.0))
+   def h = min(88.0, max(1.0, sh - 16.0))
+   mut fit0 = _fit_rect(x0 + 42.0, y0 + 40.0, w, h, sw, sh, 8.0)
+   mut x = float(fit0.get(0, 8.0))
+   mut y = float(fit0.get(1, 8.0))
    if row >= scroll && row < scroll + rows {
       def line = to_str(ed.current_lines(st).get(row, ""))
-      x = min(max(_line_text_x(lay) + _measure_prefix(line, colorpicker.start(color_state)) + 18.0, 16.0), max(16.0, sw - 236.0))
-      y = min(max(_editor_row_y(y0, row - scroll) + ed.LINE_H + 2.0, 16.0), max(16.0, sh - 112.0))
+      fit0 = _fit_rect(_line_text_x(lay) + _measure_prefix(line, colorpicker.start(color_state)) + 18.0, _editor_row_y(y0, row - scroll) + ed.LINE_H + 2.0, w, h, sw, sh, 8.0)
+      x = float(fit0.get(0, x))
+      y = float(fit0.get(1, y))
    }
-   def w = 220.0
-   def h = 88.0
    def col = _hex_color(hex)
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.97))
    _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
@@ -6003,6 +6196,7 @@ fn _draw_git_panel(f64 x, f64 y, f64 w, f64 h) int {
    i
 }
 
+@returns_owned
 fn _timeline_rows() list {
    mut out = []
    def bs = st.get("buffers", [])
@@ -6366,17 +6560,21 @@ fn _queue_key_badge(list runs, str label, f64 x, f64 y, any col=C_MUTED) list {
 fn _draw_find_bar(f64 sw, f64 sh) int {
    if !find.is_open(find_state) { return 0 }
    _find_refresh_if_needed()
-   def w = min(760.0, max(280.0, sw - 34.0))
-   def x = sw * 0.5 - w * 0.5
-   def y = max(8.0, sh - FIND_BAR_H - ed.STATUS_H - 10.0)
-   _fill_rect(x, y, w, FIND_BAR_H, gfx.color_alpha(C_RAIL, 0.98))
-   _stroke_rect(x, y, w, FIND_BAR_H, find.error(find_state).len > 0 ? C_WARN : C_ACCENT, 1.0)
+   def replace_on = find.replace_on(find_state)
+   def bar_h = replace_on ? 86.0 : FIND_BAR_H
+   def w0 = min(760.0, max(280.0, sw - 34.0))
+   def fit = _fit_rect(sw * 0.5 - w0 * 0.5, sh - bar_h - ed.STATUS_H - 10.0, w0, bar_h, sw, sh, 8.0)
+   def x = float(fit.get(0, 8.0))
+   def y = float(fit.get(1, 8.0))
+   def w = float(fit.get(2, w0))
+   def h = float(fit.get(3, bar_h))
+   _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
+   _stroke_rect(x, y, w, h, find.error(find_state).len > 0 ? C_WARN : C_ACCENT, 1.0)
    _draw_icon("search", x + 13.0, y + 13.0, 18.0, find.error(find_state).len > 0 ? C_WARN : C_ACCENT)
    mut body_runs = []
    mut small_runs = []
    def q = find.query(find_state)
    def repl = find.replacement(find_state)
-   def replace_on = find.replace_on(find_state)
    def field = find.active_field(find_state)
    body_runs = _append_text_run(body_runs, _preview_body(q.len > 0 ? q : "find in buffer", w - 300.0), x + 40.0, y + 10.0, field == "find" ? U_ACCENT : (q.len > 0 ? U_TEXT : U_DIM))
    if replace_on {
@@ -6471,7 +6669,7 @@ fn _draw_palette(f64 sw, f64 sh) int {
    if matches.len == 0 { body_runs = _append_text_run(body_runs, "No commands", x + 18.0, y + PALETTE_HEADER_H, U_WARN) }
    if matches.len > rows {
       def track_x = x + w - 8.0
-      def track_y = y + PALETTE_HEADER_H
+      def track_y = y + PALETTE_HEADER_H + 4.0
       def track_h = float(rows) * PALETTE_ROW_H - 8.0
       def thumb_h = max(22.0, track_h * float(rows) / float(max(rows, matches.len)))
       def thumb_y = track_y + (track_h - thumb_h) * float(start) / float(max(1, matches.len - rows))
@@ -6511,34 +6709,37 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
    def base_x = _line_text_x(lay) + _measure_prefix(line, int(st.get("cursor_col", 0)))
    def base_y = _editor_row_y(float(lay.get("edit_y", 0.0)), max(0, visible_row)) + ed.LINE_H + 4.0
    def rows = min(items.len, 9)
-   def w = min(420.0, max(260.0, sw * 0.42))
-   def h = 34.0 + float(rows) * 26.0
-   def x = min(max(8.0, base_x), sw - w - 8.0)
-   def y = min(max(8.0, base_y), sh - h - 42.0)
+   def w0 = min(420.0, max(260.0, sw * 0.42))
+   def h0 = 34.0 + float(rows) * 26.0
+   def fit = _fit_rect(base_x, base_y, w0, h0, sw, sh - ed.STATUS_H, 8.0)
+   def x = float(fit.get(0, 8.0))
+   def y = float(fit.get(1, 8.0))
+   def w = float(fit.get(2, w0))
+   def h = float(fit.get(3, h0))
    def prefix = to_str(completion_state.get("prefix", ""))
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
    _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
-   _draw_icon("search", x + 10.0, _center_y(y, 30.0, 16.0), 16.0, C_ACCENT)
+   _draw_icon("search", x + 12.0, _center_y(y, 30.0, 16.0), 16.0, C_ACCENT)
    mut body_runs = []
    mut small_runs = []
    def header_body_y = _row_text_y(font_body, y, 30.0)
    def header_small_y = _row_text_y(font_small, y, 30.0)
    body_runs = _append_text_run(body_runs, prefix.len > 0 ? prefix : "completion", x + 36.0, header_body_y, U_TEXT)
    small_runs = _append_right_run(small_runs, font_small, "Enter accept  Esc close", x + w - 12.0, header_small_y, U_MUTED)
-   _fill_rect(x + 10.0, y + 30.0, w - 20.0, 1.0, C_LINE)
+   _fill_rect(x + 12.0, y + 30.0, w - 24.0, 1.0, C_LINE)
    mut i = 0
    while i < rows {
       def item = items.get(i, {})
       def active = i == int(completion_state.get("index", 0))
-	 def yy = y + 40.0 + float(i) * 26.0
-	 def kind = to_str(item.get("kind", "symbol"))
-	 def col = _completion_color(kind)
-	 def body_y = _row_text_y(font_body, yy - 5.0, 24.0)
-	 def small_y = _row_text_y(font_small, yy - 5.0, 24.0)
-	 if active { _fill_rect(x + 8.0, yy - 5.0, w - 16.0, 24.0, gfx.color_alpha(C_ACCENT, 0.18)) }
-	 _draw_icon(kind == "lsp" ? "net" : (kind == "keyword" ? "codeedit" : "doc"), x + 14.0, _center_y(yy - 5.0, 24.0, 15.0), 15.0, active ? C_ACCENT : col)
-	 body_runs = _append_text_run(body_runs, widgets.preview(to_str(item.get("label", "")), int(max(10.0, (w - 178.0) / 8.2))), x + 38.0, body_y, active ? U_TEXT : U_MUTED)
-	 small_runs = _append_right_run(small_runs, font_small, widgets.preview(to_str(item.get("detail", "")), 24), x + w - 14.0, small_y, active ? U_ACCENT_2 : U_DIM)
+      def yy = y + 40.0 + float(i) * 26.0
+      def kind = to_str(item.get("kind", "symbol"))
+      def col = _completion_color(kind)
+      def body_y = _row_text_y(font_body, yy - 4.0, 24.0)
+      def small_y = _row_text_y(font_small, yy - 4.0, 24.0)
+      if active { _fill_rect(x + 8.0, yy - 4.0, w - 16.0, 24.0, gfx.color_alpha(C_ACCENT, 0.18)) }
+      _draw_icon(kind == "lsp" ? "net" : (kind == "keyword" ? "codeedit" : "doc"), x + 14.0, _center_y(yy - 4.0, 24.0, 15.0), 15.0, active ? C_ACCENT : col)
+      body_runs = _append_text_run(body_runs, widgets.preview(to_str(item.get("label", "")), int(max(10.0, (w - 178.0) / 8.2))), x + 38.0, body_y, active ? U_TEXT : U_MUTED)
+      small_runs = _append_right_run(small_runs, font_small, widgets.preview(to_str(item.get("detail", "")), 24), x + w - 14.0, small_y, active ? U_ACCENT_2 : U_DIM)
       i += 1
    }
    _flush_rects()
@@ -6602,7 +6803,7 @@ fn _draw_which_key(f64 sw, f64 sh) int {
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.96))
    _stroke_rect(x, y, w, h, C_ACCENT, 2.0)
    _draw_icon("keyboard", x + 16.0, y + 16.0, 22.0, C_ACCENT)
-   _fill_rect(x + 14.0, y + 52.0, w - 28.0, 1.0, C_LINE)
+   _fill_rect(x + 16.0, y + 52.0, w - 32.0, 1.0, C_LINE)
    mut body_runs = []
    mut small_runs = []
    body_runs = _append_text_run(body_runs, "prefix " + prefix, x + 48.0, y + 15.0, U_TEXT)
@@ -6613,7 +6814,7 @@ fn _draw_which_key(f64 sw, f64 sh) int {
    mut i = 0
    while i < visible {
       def row = rows.get(start + i, ["", ""])
-      def cx = x + 14.0 + float(i % cols) * col_w
+      def cx = x + 16.0 + float(i % cols) * col_w
       def cy = y + 66.0 + float(i / cols) * WHICH_KEY_ROW_H
       def head = to_str(row.get(0, ""))
       def tag = _which_key_tag(prefix, head)
@@ -6643,35 +6844,40 @@ fn _draw_which_key(f64 sw, f64 sh) int {
 
 fn _draw_context_menu(f64 sw, f64 sh) int {
    if !prompt.context_is_open(context_state) { return 0 }
-   def w = CONTEXT_W
+   def w = min(CONTEXT_W, max(1.0, sw - 16.0))
    def row_h = CONTEXT_ROW_H
    def actions = prompt.context_actions_for(context_state)
-   def h = float(actions.len) * row_h
+   def h = min(float(actions.len) * row_h, max(1.0, sh - 16.0))
    context_state = prompt.context_clamp(context_state, sw, sh, w, row_h)
-   def x = prompt.context_x(context_state)
-   def y = prompt.context_y(context_state)
+   def fit = _fit_rect(prompt.context_x(context_state), prompt.context_y(context_state), w, h, sw, sh, 8.0)
+   def x = float(fit.get(0, 8.0))
+   def y = float(fit.get(1, 8.0))
+   context_state["x"] = x
+   context_state["y"] = y
    def mp = window.mouse_pos(win)
-   def hover = prompt.context_hover(context_state, float(mp.get(0, -1.0)), float(mp.get(1, -1.0)), w, row_h)
-   def hover_idx = int(hover.get("idx", -1))
+   def visible_actions = min(actions.len, max(1, int(h / row_h)))
+   def mx = float(mp.get(0, -1.0))
+   def my = float(mp.get(1, -1.0))
+   def hover_idx = (mx >= x && mx <= x + w && my >= y && my <= y + h) ? int((my - y) / row_h) : -1
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
    _stroke_rect(x, y, w, h, C_LINE, 1.0)
    mut runs = []
    mut i = 0
-   while i < actions.len {
+   while i < visible_actions {
       def row = actions.get(i)
       def yy = y + float(i) * row_h
       def id = to_str(row.get(1, ""))
       def key_label = to_str(row.get(2, ""))
       def tag = to_str(row.get(3, ""))
-	 def detail = to_str(row.get(4, ""))
-	 def col = _command_color(tag)
-	 def text_y = _row_text_y(font_small, yy, row_h)
-	 if i == hover_idx { _fill_rect(x + 6.0, yy + 3.0, w - 12.0, row_h - 6.0, gfx.color_alpha(C_ACCENT, 0.18)) }
-	 elif i > 0 { _fill_rect(x + 8.0, yy, w - 16.0, 1.0, gfx.color_alpha(C_LINE, 0.50)) }
-	 _draw_icon(_command_icon(tag, id), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, i == hover_idx ? C_ACCENT : col)
-	 runs = _append_text_run(runs, widgets.preview(to_str(row.get(0, "")), 26), x + 35.0, text_y, i == hover_idx ? U_TEXT : U_MUTED)
-	 if key_label.len > 0 { runs = _append_right_run(runs, font_small, key_label, x + w - 10.0, text_y, i == hover_idx ? U_ACCENT : U_DIM) }
-      if detail.len > 0 { runs = _append_text_run(runs, widgets.preview(detail, 42), x + 33.0, yy + 22.0, U_DIM) }
+      def detail = to_str(row.get(4, ""))
+      def col = _command_color(tag)
+      def text_y = _row_text_y(font_small, yy, row_h)
+      if i == hover_idx { _fill_rect(x + 4.0, yy + 2.0, w - 8.0, row_h - 4.0, gfx.color_alpha(C_ACCENT, 0.18)) }
+      elif i > 0 { _fill_rect(x + 4.0, yy, w - 8.0, 1.0, gfx.color_alpha(C_LINE, 0.50)) }
+      _draw_icon(_command_icon(tag, id), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, i == hover_idx ? C_ACCENT : col)
+      runs = _append_text_run(runs, widgets.preview(to_str(row.get(0, "")), 26), x + 34.0, text_y, i == hover_idx ? U_TEXT : U_MUTED)
+      if key_label.len > 0 { runs = _append_right_run(runs, font_small, key_label, x + w - 10.0, text_y, i == hover_idx ? U_ACCENT : U_DIM) }
+      if detail.len > 0 { runs = _append_text_run(runs, widgets.preview(detail, 42), x + 34.0, yy + 22.0, U_DIM) }
       i += 1
    }
    _flush_rects()
@@ -6681,10 +6887,13 @@ fn _draw_context_menu(f64 sw, f64 sh) int {
 
 fn _draw_rename_prompt(f64 sw, f64 sh) int {
    if !prompt.rename_is_open(rename_state) { return 0 }
-   def w = min(520.0, sw - 44.0)
-   def h = 86.0
-   def x = sw * 0.5 - w * 0.5
-   def y = max(24.0, sh * 0.18)
+   def w0 = min(520.0, max(1.0, sw - 44.0))
+   def h0 = 86.0
+   def fit = _fit_rect(sw * 0.5 - w0 * 0.5, max(24.0, sh * 0.18), w0, h0, sw, sh, 8.0)
+   def x = float(fit.get(0, 8.0))
+   def y = float(fit.get(1, 8.0))
+   def w = float(fit.get(2, w0))
+   def h = float(fit.get(3, h0))
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
    _stroke_rect(x, y, w, h, C_ACCENT, 2.0)
    _text(font_small, "rename " + prompt.rename_rel(rename_state), x + 16.0, y + 14.0, C_MUTED)
@@ -6764,14 +6973,14 @@ fn _modeline_meta(dict b) dict {
    if modeline_cache_key == key { return modeline_cache }
    def run_cmd = b.get("readonly", false) ? [] : runner.command_for(path)
    modeline_cache_key = key
-   modeline_cache = {
+   modeline_cache = borrow({
       "name": name,
       "kind": kind,
       "path": path,
       "display_path": _modeline_path(path, name),
       "run_hint": run_cmd.len > 0 ? to_str(run_cmd.get(0, "")) : "no-runner",
       "language": kind.len > 0 && kind != "code" && kind != "doc" && kind != "file" ? kind : syntax.detect_language(name)
-   }
+   })
    modeline_cache
 }
 
@@ -6895,6 +7104,7 @@ fn _initial_buffers() list {
    if ESCAPE_PROBE { return [ed.buffer("escape-test.ny", "", "use std.core\n")] }
    if NAV_PROBE || TAB_PROBE { return [ed.buffer("nav-a.ny", "", "alpha"), ed.buffer("nav-b.ny", "", "beta")] }
    if SELECT_PROBE { return [ed.buffer("select-all.ny", "", "one\ntwo\nthree")] }
+   if IMAGE_PROBE { return [session.read_buffer(_write_image_probe_fixture())] }
    if GIT_PROBE { return [ed.buffer("git-panel.ny", "", "use std.core\n")] }
    if CHORD_PROBE { return [ed.buffer("chord-test.ny", "", "")] }
    if UNDO_PROBE { return [ed.buffer("undo-test.ny", "", "a")] }
@@ -6925,6 +7135,12 @@ st["timeline_scroll"] = 0
 st["rail_split"] = 0.0
 st["term_h"] = 220.0
 _load_ui_cache()
+if BENCH_PROBE && common.env_truthy("NY_UI_HEADLESS") {
+   st["show_hierarchy"] = false
+   st["show_project"] = false
+   st["show_outline"] = false
+   st["rail_w"] = 0.0
+}
 next_cache_save_time = gfx.get_time() + float(CACHE_SAVE_SECONDS)
 _nav_record_current()
 fps_state = ui_runtime.fps_begin()
@@ -6998,8 +7214,18 @@ if FIND_PROBE {
    window.set_should_close(win, true)
 }
 
+if CONTEXT_PROBE {
+   _open_context(9999.0, 9999.0, _editor_context_entry(), "editor")
+   assert(prompt.context_is_open(context_state), "editor context opens")
+   assert(to_str(prompt.context_entry(context_state).get("scope", "")) == "editor", "editor context scope")
+   def fit_ctx = _fit_rect(prompt.context_x(context_state), prompt.context_y(context_state), CONTEXT_W, CONTEXT_ROW_H * 4.0, START_W, START_H, 8.0)
+   assert(float(fit_ctx.get(0, 0.0)) + CONTEXT_W <= START_W - 8.0 && float(fit_ctx.get(1, 0.0)) + CONTEXT_ROW_H * 4.0 <= START_H - 8.0, "context menu fits viewport")
+   window.set_should_close(win, true)
+}
+
 if PALETTE_PROBE {
-   _palette_open()
+   _handle_key({"key": key.KEY_P, "mods": key.MOD_CONTROL | key.MOD_SHIFT})
+   assert(pal.is_open(palette_state), "ctrl-shift-p opens palette")
    palette_state = pal.handle_char(palette_state, {"char": 102, "mods": 0})
    palette_state = pal.handle_char(palette_state, {"char": 105, "mods": 0})
    assert(pal.is_open(palette_state) && pal.state_matches(palette_state).len > 0, "palette filters commands")
@@ -7166,6 +7392,12 @@ if TEXTGRID_PROBE {
    window.set_should_close(win, true)
 }
 
+if IMAGE_PROBE {
+   def ib = ed.current_buffer(st)
+   assert(to_str(ib.get("kind", "")) == "image", "image probe opens a preview buffer")
+   assert(_is_svg_path(_buffer_source_path(ib)), "image probe uses svg source path")
+}
+
 if TERMINAL_PROBE && common.env_truthy("NY_UI_HEADLESS") {
    assert(termpane.is_open(term_state), "terminal pane open")
    window.set_should_close(win, true)
@@ -7200,7 +7432,7 @@ while !gfx.window_should_close(win) {
       window.push_event(win, window.EVENT_MOUSE_SCROLL, {"dy": -2.0, "x": float(lay.get("edit_x", 0.0)) + 40.0, "y": float(lay.get("edit_y", 0.0)) + 40.0})
    }
    if CONTEXT_PROBE && frame_count == 0 {
-      window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 1, "x": float(lay.get("edit_x", 0.0)) + 80.0, "y": float(lay.get("edit_y", 0.0)) + 42.0})
+      window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 1, "x": float(lay.get("edit_x", 0.0)) + max(8.0, float(lay.get("edit_w", 0.0)) * 0.5), "y": float(lay.get("edit_y", 0.0)) + max(8.0, min(42.0, float(lay.get("edit_h", 0.0)) * 0.5))})
    }
    if NAV_PROBE && frame_count == 0 && nav_probe_phase == 0 {
       window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": MOUSE_BACK, "x": float(lay.get("edit_x", 0.0)) + 30.0, "y": float(lay.get("edit_y", 0.0)) + 30.0})
@@ -7250,6 +7482,7 @@ while !gfx.window_should_close(win) {
    }
    _process_events(lay)
    def t_events = FRAME_TRACE ? ticks() : 0
+   _editor_omni_dump(lay, sw, sh)
    if INPUT_PROBE && !TERMINAL_PROBE && frame_count == 0 {
       if INPUT_TRACE {
          print("[editor:probe] line=" + to_str(int(st.get("cursor_line", -1))) + " col=" + to_str(int(st.get("cursor_col", -1))) + " scroll=" + to_str(int(st.get("scroll", -1))) + " follow=" + to_str(bool(st.get("scroll_follow", true))))
@@ -7380,8 +7613,25 @@ while !gfx.window_should_close(win) {
    _flush_rects()
    def t_flush = FRAME_TRACE ? ticks() : 0
    ui_dump.auto_dump_pre_frame(auto_dump_done, frame_count, auto_dump_delay)
+   if FRAME_HASH && frame_count + 1 >= FRAME_HASH_FRAME { gfx.request_frame_capture() }
    gfx.end_frame()
    def t_end = FRAME_TRACE ? ticks() : 0
+   if FRAME_HASH && !frame_hash_done && frame_count >= FRAME_HASH_FRAME {
+      def hash_line = ui_dump.framebuffer_hash_line()
+      if hash_line.len > 0 {
+         frame_hash_done = true
+         print("[editor:framehash] frame=" + to_str(frame_count) + " " + hash_line)
+         if FRAME_HASH_EXPECT.len > 0 && !str.str_contains(hash_line, FRAME_HASH_EXPECT) {
+            print("[editor:framehash:mismatch] expected=" + FRAME_HASH_EXPECT + " got=" + hash_line)
+            window.set_should_close(win, true)
+         }
+         if !common.env_truthy("NY_EDITOR_FRAME_HASH_EVERY") { window.set_should_close(win, true) }
+      } elif frame_count >= FRAME_HASH_FRAME + 4 {
+         frame_hash_done = true
+         print("[editor:framehash] frame=" + to_str(frame_count) + " unavailable backend=" + gfx.get_active_backend_name())
+         window.set_should_close(win, true)
+      }
+   }
    reuse_state = ui_reuse.note_full_draw(reuse_state, reuse_opts)
    if force_full_redraw > 0 { force_full_redraw -= 1 }
    _trace_frame(frame_count, t_frame0, t_update, t_events, t_begin, t_draw, t_flush, t_end)
@@ -7389,6 +7639,7 @@ while !gfx.window_should_close(win) {
    if BENCH_PROBE && BENCH_WARMUP_FRAMES > 0 && frame_count == BENCH_WARMUP_FRAMES {
       fps_state = ui_runtime.fps_begin()
    }
+   if IMAGE_PROBE && frame_count >= 2 { window.set_should_close(win, true) }
    if BENCH_PROBE && frame_count >= BENCH_FRAME_LIMIT { window.set_should_close(win, true) }
    if !BENCH_PROBE && gfx.get_time() >= next_cache_save_time {
       _save_ui_cache()

@@ -10,9 +10,6 @@ use std.core.str as str
 use std.math
 use std.os as os
 
-def SVG_REF_PATH_DATA = "https://www.w3.org/TR/SVG/paths.html"
-def SVG_REF_SHAPES = "https://www.w3.org/TR/SVG/shapes.html"
-def SVG_REF_ARCS = "https://www.w3.org/TR/SVG/implnote.html#ArcImplementationNotes"
 mut _svg_last_error = ""
 
 fn _svg_set_error(any msg) bool {
@@ -138,12 +135,21 @@ fn _parse_tag_attrs(str s, int p) list {
    [attrs, p]
 }
 
+fn _need_text(str name) bool { name == "style" || name == "title" || name == "desc" || name == "text" || name == "tspan" }
+
 fn _parse_svg_tree(str data) any {
    mut p = 0
    mut root = 0
    mut stack = []
+   mut need_text = false
    while p < data.len {
       if load8(data, p) != 60 {
+         if need_text && stack.len > 0 {
+            mut parent = stack[stack.len - 1]
+            mut txt = to_str(parent.get("text", ""))
+            txt += chr(load8(data, p))
+            parent["text"] = txt
+         }
          p += 1
          continue
       }
@@ -159,6 +165,7 @@ fn _parse_svg_tree(str data) any {
          while p < data.len && load8(data, p) != 62 { p += 1 }
          if p < data.len { p += 1 }
          if stack.len > 0 { stack.pop() }
+         need_text = stack.len > 0 && _need_text(str.lower(to_str(stack[stack.len - 1].get("name", ""))))
          continue
       }
       mut nb = Builder(24)
@@ -190,6 +197,7 @@ fn _parse_svg_tree(str data) any {
          parent["children"] = children
       }
       if !self_closing { stack = stack.append(node) }
+      need_text = _need_text(str.lower(name))
    }
    root
 }
@@ -274,9 +282,10 @@ fn _parse_color(any raw, any inherited=0) dict {
    if !raw { return is_dict(inherited) ? inherited : _rgba(0, 0, 0, 1.0) }
    mut s = str.lower(str.strip(to_str(raw)))
    if s.len == 0 { return is_dict(inherited) ? inherited : _rgba(0, 0, 0, 1.0) }
+   if s == "currentcolor" { return is_dict(inherited) ? inherited : _rgba(255, 255, 255, 1.0) }
    if s == "none" { return _rgba_none() }
    if s == "transparent" { return _rgba(0, 0, 0, 0.0) }
-   if str.startswith(s, "url(") { return is_dict(inherited) ? inherited : _rgba(242, 242, 242, 1.0) }
+   if str.startswith(s, "url(") { return _rgba(242, 242, 242, 1.0) }
    if str.startswith(s, "#") {
       s = str.str_slice(s, 1, s.len)
       if s.len == 3 {
@@ -301,6 +310,47 @@ fn _parse_color(any raw, any inherited=0) dict {
    }
 }
 
+fn _paint_url_id(any raw) str {
+   def s = str.strip(to_str(raw))
+   if !str.startswith(str.lower(s), "url(") { return "" }
+   def hash_pos = str.find(s, "#")
+   if hash_pos < 0 { return "" }
+   mut end = hash_pos + 1
+   while end < s.len {
+      def c = load8(s, end)
+      if c == 41 || c <= 32 || c == 34 || c == 39 { break }
+      end += 1
+   }
+   end > hash_pos + 1 ? str.str_slice(s, hash_pos + 1, end) : ""
+}
+
+fn _gradient_paint(dict defs, any raw) any {
+   def id = _paint_url_id(raw)
+   if id.len <= 0 || !defs.contains(id) { return 0 }
+   def node = defs[id]
+   if !is_dict(node) { return 0 }
+   def children = node.get("children", [])
+   mut last = 0
+   mut i = 0
+   while i < children.len {
+      def child = children[i]
+      if is_dict(child) && str.lower(to_str(child.get("name", ""))) == "stop" {
+         def attrs = child.get("attr", dict())
+         def stop = _style_attr(attrs, "stop-color", 0)
+         if stop {
+            def c = _parse_color(stop, 0)
+            def op = _style_attr(attrs, "stop-opacity", 0)
+            if op && is_dict(c) {
+               c["a"] = _clamp01(float(c.get("a", 1.0)) * _opacity(op, 1.0))
+            }
+            last = c
+         }
+      }
+      i += 1
+   }
+   last
+}
+
 fn _color_alpha(dict c, f64 opacity=1.0) f64 {
    if bool(c.get("none", false)) { return 0.0 }
    _clamp01(float(c.get("a", 1.0)) * opacity)
@@ -320,6 +370,85 @@ fn _style_lookup(str style, str key) any {
       i += 1
    }
    0
+}
+
+fn _parse_css(str text) dict {
+   mut rules = dict(64)
+   mut p = 0
+   while p < text.len {
+      while p < text.len && load8(text, p) <= 32 { p += 1 }
+      if p >= text.len { break }
+      if load8(text, p) == 47 && p + 1 < text.len && load8(text, p + 1) == 42 {
+         p += 2
+         while p + 1 < text.len && !(load8(text, p) == 42 && load8(text, p + 1) == 47) { p += 1 }
+         p += 2
+         continue
+      }
+      if load8(text, p) == 47 && p + 1 < text.len && load8(text, p + 1) == 47 {
+         while p < text.len && load8(text, p) != 10 { p += 1 }
+         continue
+      }
+      def sel_start = p
+      while p < text.len && load8(text, p) != 123 {
+         if load8(text, p) == 125 { break }
+         p += 1
+      }
+      def sel_raw = str.strip(str.str_slice(text, sel_start, p))
+      if p < text.len && load8(text, p) == 123 { p += 1 }
+      mut props = dict(16)
+      while p < text.len && load8(text, p) != 125 {
+         while p < text.len && load8(text, p) <= 32 { p += 1 }
+         if p >= text.len || load8(text, p) == 125 { break }
+         mut key_b = Builder(32)
+         while p < text.len && load8(text, p) != 58 {
+            key_b = builder_append(key_b, chr(load8(text, p)))
+            p += 1
+         }
+         def key = str.strip(str.lower(builder_to_str(key_b)))
+         builder_free(key_b)
+         if p < text.len { p += 1 }
+         while p < text.len && load8(text, p) <= 32 { p += 1 }
+         mut val_b = Builder(64)
+         while p < text.len && load8(text, p) != 59 && load8(text, p) != 125 {
+            val_b = builder_append(val_b, chr(load8(text, p)))
+            p += 1
+         }
+         def val = str.strip(builder_to_str(val_b))
+         builder_free(val_b)
+         if key.len > 0 && val.len > 0 { props[key] = val }
+         if p < text.len && load8(text, p) == 59 { p += 1 }
+      }
+      if p < text.len { p += 1 }
+      if sel_raw.len > 0 && props.len > 0 {
+         def sels = str.split(sel_raw, ",")
+         mut si = 0
+         while si < sels.len {
+            def s = str.strip(to_str(sels[si]))
+            if s.len > 0 {
+               if rules.contains(s) {
+                  mut existing = rules[s]
+                  def pkeys = dict_keys(props)
+                  mut pi = 0
+                  while pi < pkeys.len {
+                     existing[pkeys[pi]] = props[pkeys[pi]]
+                     pi += 1
+                  }
+               } else {
+                  rules[s] = props
+               }
+            }
+            si += 1
+         }
+      }
+   }
+   rules
+}
+
+fn _css_class_props(dict rules, str class_name) dict {
+   if class_name.len == 0 { return dict() }
+   def dot_sel = "." + class_name
+   def val = rules.get(dot_sel, 0)
+   is_dict(val) ? val : dict()
 }
 
 fn _attr(any attrs, str key, any fallback=0) any {
@@ -404,24 +533,38 @@ fn _transform_matrix(any raw) list {
 }
 
 fn _state_root(list transform) dict {
-   mut s = dict(8)
+   mut s = dict(10)
    s["fill"] = _rgba(0, 0, 0, 1.0)
    s["stroke"] = _rgba_none()
    s["stroke_width"] = 1.0
+   s["stroke_linecap"] = "butt"
+   s["stroke_linejoin"] = "miter"
    s["opacity"] = 1.0
    s["fill_rule"] = "nonzero"
+   s["color"] = _rgba(255, 255, 255, 1.0)
+   s["visibility"] = "visible"
    s["transform"] = transform
    s
 }
 
 fn _state_child(dict parent, any attrs) dict {
    mut s = dict_mod.dict_clone(parent)
-   def opacity = float(parent.get("opacity", 1.0)) * _opacity(_style_attr(attrs, "opacity", 1.0), 1.0)
-   s["opacity"] = opacity
+   def op = _opacity(_style_attr(attrs, "opacity", 1.0), 1.0)
+   s["opacity"] = float(parent.get("opacity", 1.0)) * op
+   def color_raw = _style_attr(attrs, "color", 0)
+   if color_raw { s["color"] = _parse_color(color_raw, parent.get("color", _rgba(255, 255, 255, 1.0))) }
    def fill_raw = _style_attr(attrs, "fill", 0)
-   if fill_raw { s["fill"] = _parse_color(fill_raw, parent.get("fill", 0)) }
+   if fill_raw {
+      def fill_str = str.strip(to_str(fill_raw))
+      if str.startswith(str.lower(fill_str), "url(") { s["_fill_url"] = fill_str }
+      s["fill"] = _parse_color(fill_raw, s.get("color", _rgba(255, 255, 255, 1.0)))
+   }
    def stroke_raw = _style_attr(attrs, "stroke", 0)
-   if stroke_raw { s["stroke"] = _parse_color(stroke_raw, parent.get("stroke", 0)) }
+   if stroke_raw {
+      def stroke_str = str.strip(to_str(stroke_raw))
+      if str.startswith(str.lower(stroke_str), "url(") { s["_stroke_url"] = stroke_str }
+      s["stroke"] = _parse_color(stroke_raw, s.get("color", _rgba(255, 255, 255, 1.0)))
+   }
    def fill_op = _style_attr(attrs, "fill-opacity", 0)
    if fill_op && is_dict(s["fill"]) {
       def fc = dict_mod.dict_clone(s["fill"])
@@ -440,6 +583,12 @@ fn _state_child(dict parent, any attrs) dict {
    if fr { s["fill_rule"] = str.lower(str.strip(to_str(fr))) }
    def tf = _style_attr(attrs, "transform", 0)
    if tf { s["transform"] = _mat_mul(s.get("transform", _mat_identity()), _transform_matrix(tf)) }
+   def lc = _style_attr(attrs, "stroke-linecap", 0)
+   if lc { s["stroke_linecap"] = str.lower(str.strip(to_str(lc))) }
+   def lj = _style_attr(attrs, "stroke-linejoin", 0)
+   if lj { s["stroke_linejoin"] = str.lower(str.strip(to_str(lj))) }
+   def vis = _style_attr(attrs, "visibility", 0)
+   if vis { s["visibility"] = str.lower(str.strip(to_str(vis))) }
    s
 }
 
@@ -789,25 +938,54 @@ fn _points_path(any raw, bool close=false) list {
 
 fn _line_path(f64 x1, f64 y1, f64 x2, f64 y2) list { [[_pt(x1, y1), _pt(x2, y2)]] }
 
-fn _winding_at(list paths, f64 x, f64 y, bool evenodd=false) int {
-   mut winding = 0
+fn _sub_path_bounds(list paths) list {
+   mut result = []
    mut i = 0
    while i < paths.len {
       def path = paths[i]
+      mut minx = 1000000000.0
+      mut miny = 1000000000.0
+      mut maxx = -1000000000.0
+      mut maxy = -1000000000.0
       mut j = 0
-      while j + 1 < path.len {
-         def p0 = path[j]
-         def p1 = path[j + 1]
-         def x0 = float(p0[0])
-         def y0 = float(p0[1])
-         def x1 = float(p1[0])
-         def y1 = float(p1[1])
-         if y0 <= y {
-            if y1 > y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) > 0.0 { winding += 1 }
-         } elif y1 <= y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) < 0.0 {
-            winding -= 1
-         }
+      while j < path.len {
+         def p = path[j]
+         def x = float(p[0])
+         def y = float(p[1])
+         if x < minx { minx = x }
+         if y < miny { miny = y }
+         if x > maxx { maxx = x }
+         if y > maxy { maxy = y }
          j += 1
+      }
+      result = result.append([minx, miny, maxx, maxy])
+      i += 1
+   }
+   result
+}
+
+fn _winding_at(list paths, list bounds, f64 x, f64 y, bool evenodd=false) int {
+   mut winding = 0
+   mut i = 0
+   while i < paths.len {
+      def b = bounds[i]
+      if x >= float(b[0]) && x <= float(b[2]) && y >= float(b[1]) && y <= float(b[3]) {
+         def path = paths[i]
+         mut j = 0
+         while j + 1 < path.len {
+            def p0 = path[j]
+            def p1 = path[j + 1]
+            def x0 = float(p0[0])
+            def y0 = float(p0[1])
+            def x1 = float(p1[0])
+            def y1 = float(p1[1])
+            if y0 <= y {
+               if y1 > y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) > 0.0 { winding += 1 }
+            } elif y1 <= y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) < 0.0 {
+               winding -= 1
+            }
+            j += 1
+         }
       }
       i += 1
    }
@@ -827,17 +1005,45 @@ fn _seg_dist2(f64 px, f64 py, f64 x0, f64 y0, f64 x1, f64 y1) f64 {
    ex * ex + ey * ey
 }
 
-fn _stroke_hit(list paths, f64 x, f64 y, f64 width) bool {
-   def r2 = (width * 0.5) * (width * 0.5)
+fn _stroke_hit(list paths, list bounds, f64 x, f64 y, f64 width, str linecap="butt", str linejoin="miter") bool {
+   def r = width * 0.5
+   def r2 = r * r
    mut i = 0
    while i < paths.len {
-      def path = paths[i]
-      mut j = 0
-      while j + 1 < path.len {
-         def p0 = path[j]
-         def p1 = path[j + 1]
-         if _seg_dist2(x, y, float(p0[0]), float(p0[1]), float(p1[0]), float(p1[1])) <= r2 { return true }
-         j += 1
+      def b = bounds[i]
+      if x >= float(b[0]) - r && x <= float(b[2]) + r && y >= float(b[1]) - r && y <= float(b[3]) + r {
+         def path = paths[i]
+         mut j = 0
+         while j + 1 < path.len {
+            def p0 = path[j]
+            def p1 = path[j + 1]
+            if _seg_dist2(x, y, float(p0[0]), float(p0[1]), float(p1[0]), float(p1[1])) <= r2 { return true }
+            j += 1
+         }
+         if path.len > 0 {
+            if linecap == "round" {
+               def first = path[0]
+               def last = path[path.len - 1]
+               def dx1 = x - float(first[0])
+               def dy1 = y - float(first[1])
+               if dx1 * dx1 + dy1 * dy1 <= r2 { return true }
+               if path.len > 1 {
+                  def dx2 = x - float(last[0])
+                  def dy2 = y - float(last[1])
+                  if dx2 * dx2 + dy2 * dy2 <= r2 { return true }
+               }
+            }
+            if linejoin == "round" && path.len > 2 {
+               mut k = 1
+               while k < path.len - 1 {
+                  def pt = path[k]
+                  def dx = x - float(pt[0])
+                  def dy = y - float(pt[1])
+                  if dx * dx + dy * dy <= r2 { return true }
+                  k += 1
+               }
+            }
+         }
       }
       i += 1
    }
@@ -897,34 +1103,35 @@ fn _blend(any out, int off, dict color, f64 alpha) any {
    0
 }
 
-fn _draw_paths(any out, int w, int h, list paths, dict color, f64 opacity, str mode, f64 stroke_width=1.0, str fill_rule="nonzero") any {
+fn _draw_paths(any out, int w, int h, list paths, dict color, f64 opacity, str mode, f64 stroke_width=1.0, str fill_rule="nonzero", str stroke_linecap="butt", str stroke_linejoin="miter") any {
    def ca = _color_alpha(color, opacity)
    if ca <= 0.0 || paths.len == 0 { return 0 }
    def evenodd = fill_rule == "evenodd"
    def pad = mode == "stroke" ? stroke_width * 0.5 + 1.0 : 1.0
    def b = _path_bounds(paths, pad, w, h)
    if int(b[2]) < int(b[0]) || int(b[3]) < int(b[1]) { return 0 }
+   def sub_bounds = _sub_path_bounds(paths)
    mut y = int(b[1])
    while y <= int(b[3]) {
       mut x = int(b[0])
       while x <= int(b[2]) {
          mut cov = 0
          mut sy = 0
-         while sy < 2 {
+         while sy < 4 {
             mut sx = 0
-            while sx < 2 {
-               def px = float(x) + (float(sx) + 0.5) * 0.5
-               def py = float(y) + (float(sy) + 0.5) * 0.5
+            while sx < 4 {
+               def px = float(x) + (float(sx) + 0.5) * 0.25
+               def py = float(y) + (float(sy) + 0.5) * 0.25
                if mode == "fill" {
-                  if _winding_at(paths, px, py, evenodd) != 0 { cov += 1 }
-               } elif _stroke_hit(paths, px, py, stroke_width) {
+                  if _winding_at(paths, sub_bounds, px, py, evenodd) != 0 { cov += 1 }
+               } elif _stroke_hit(paths, sub_bounds, px, py, stroke_width, stroke_linecap, stroke_linejoin) {
                   cov += 1
                }
                sx += 1
             }
             sy += 1
          }
-         if cov > 0 { _blend(out, (y * w + x) * 4, color, ca * float(cov) * 0.25) }
+         if cov > 0 { _blend(out, (y * w + x) * 4, color, ca * float(cov) * 0.0625) }
          x += 1
       }
       y += 1
@@ -937,6 +1144,25 @@ fn _collect_defs(any node, dict defs) any {
    def attrs = node.get("attr", dict())
    def id = to_str(attrs.get("id", ""))
    if id.len > 0 { defs[id] = node }
+   def name = str.lower(to_str(node.get("name", "")))
+   if name == "style" {
+      def text = to_str(node.get("text", ""))
+      if text.len > 0 {
+         def css = _parse_css(text)
+         if css.len > 0 {
+            if defs.contains("__css__") {
+               def existing = defs["__css__"]
+               def ckeys = dict_keys(css)
+               mut ci = 0
+               while ci < ckeys.len {
+                  existing[ckeys[ci]] = css[ckeys[ci]]
+                  ci += 1
+               }
+            } else { defs["__css__"] = css }
+         }
+      }
+      return 0
+   }
    def children = node.get("children", [])
    mut i = 0
    while i < children.len {
@@ -966,11 +1192,36 @@ fn _node_paths(str name, any attrs) list {
    []
 }
 
+def _CSS_INJECT_PROPS = ["fill", "stroke", "stroke-width", "fill-rule", "opacity", "fill-opacity", "stroke-opacity", "display", "color", "visibility", "stroke-linecap", "stroke-linejoin"]
+
 fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=0) any {
    if !is_dict(node) || depth > 16 { return 0 }
    def name = str.lower(to_str(node.get("name", "")))
    if name == "defs" || name == "lineargradient" || name == "radialgradient" || name == "clippath" || name == "mask" || name == "style" { return 0 }
-   def attrs = node.get("attr", dict())
+   def attrs_raw = node.get("attr", dict())
+   def class_str = to_str(attrs_raw.get("class", ""))
+   mut attrs = attrs_raw
+   if class_str.len > 0 && defs.contains("__css__") {
+      attrs = is_dict(attrs_raw) ? dict_mod.dict_clone(attrs_raw) : dict()
+      def css = defs["__css__"]
+      def classes = str.split(class_str, " ")
+      mut ci = 0
+      while ci < classes.len {
+         def cls = str.strip(to_str(classes[ci]))
+         if cls.len > 0 {
+            def props = _css_class_props(css, cls)
+            if props.len > 0 {
+               mut pi = 0
+               while pi < _CSS_INJECT_PROPS.len {
+                  def pk = _CSS_INJECT_PROPS[pi]
+                  if props.contains(pk) && !_style_attr(attrs, pk, 0) { attrs[pk] = to_str(props[pk]) }
+                  pi += 1
+               }
+            }
+         }
+         ci += 1
+      }
+   }
    if to_str(_style_attr(attrs, "display", "")) == "none" { return 0 }
    def st = _state_child(state, attrs)
    if name == "use" {
@@ -985,18 +1236,43 @@ fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=
       }
       return 0
    }
+   def vis = to_str(st.get("visibility", "visible"))
+   if vis == "hidden" || vis == "collapse" { return 0 }
    def raw_paths = _node_paths(name, attrs)
    if raw_paths.len > 0 {
       def paths = _apply_path(raw_paths, st.get("transform", _mat_identity()))
-      def fill = st.get("fill", _rgba_none())
-      if _color_alpha(fill, float(st.get("opacity", 1.0))) > 0.0 && name != "line" && name != "polyline" {
-         _draw_paths(out, w, h, paths, fill, float(st.get("opacity", 1.0)), "fill", 1.0, to_str(st.get("fill_rule", "nonzero")))
+      def opacity = float(st.get("opacity", 1.0))
+      mut fill = st.get("fill", _rgba_none())
+      def fill_url = st.get("_fill_url", 0)
+      if fill_url {
+         def gc = _gradient_paint(defs, fill_url)
+         if is_dict(gc) { fill = gc }
+      } else {
+         def fill_raw = _style_attr(attrs, "fill", 0)
+         if fill_raw && str.startswith(str.lower(str.strip(to_str(fill_raw))), "url(") {
+            def gc = _gradient_paint(defs, fill_raw)
+            if is_dict(gc) { fill = gc }
+         }
       }
-      def stroke = st.get("stroke", _rgba_none())
-      if _color_alpha(stroke, float(st.get("opacity", 1.0))) > 0.0 {
+      if _color_alpha(fill, opacity) > 0.0 && name != "line" && name != "polyline" {
+         _draw_paths(out, w, h, paths, fill, opacity, "fill", 1.0, to_str(st.get("fill_rule", "nonzero")))
+      }
+      mut stroke = st.get("stroke", _rgba_none())
+      def stroke_url = st.get("_stroke_url", 0)
+      if stroke_url {
+         def gc = _gradient_paint(defs, stroke_url)
+         if is_dict(gc) { stroke = gc }
+      } else {
+         def stroke_raw = _style_attr(attrs, "stroke", 0)
+         if stroke_raw && str.startswith(str.lower(str.strip(to_str(stroke_raw))), "url(") {
+            def gc = _gradient_paint(defs, stroke_raw)
+            if is_dict(gc) { stroke = gc }
+         }
+      }
+      if _color_alpha(stroke, opacity) > 0.0 {
          def m = st.get("transform", _mat_identity())
          def scale = max(math.sqrt(float(m[0]) * float(m[0]) + float(m[1]) * float(m[1])), math.sqrt(float(m[2]) * float(m[2]) + float(m[3]) * float(m[3])))
-         _draw_paths(out, w, h, paths, stroke, float(st.get("opacity", 1.0)), "stroke", max(0.5, float(st.get("stroke_width", 1.0)) * scale), "nonzero")
+          _draw_paths(out, w, h, paths, stroke, opacity, "stroke", max(0.5, float(st.get("stroke_width", 1.0)) * scale), "nonzero", to_str(st.get("stroke_linecap", "butt")), to_str(st.get("stroke_linejoin", "miter")))
       }
    }
    def children = node.get("children", [])
@@ -1009,22 +1285,30 @@ fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=
 }
 
 fn _svg_min_raster() int {
-   mut target = 32.0
+   mut target = 256.0
    def raw = os.env("NY_SVG_MIN_RASTER")
    if raw {
       target = _num(raw, target)
-      if target < 16.0 { target = 16.0 } elif target > 512.0 { target = 512.0 }
+      if target < 16.0 { target = 16.0 } elif target > 1024.0 { target = 1024.0 }
    }
    int(target + 0.5)
 }
 
 fn _viewport(any root) list {
    def attrs = root.get("attr", dict())
-   def width = max(1.0, _num(attrs.get("width", 64.0), 64.0))
-   def height = max(1.0, _num(attrs.get("height", width), width))
+   def parse_w = _num(attrs.get("width", 0.0), 0.0)
+   def parse_h = _num(attrs.get("height", 0.0), 0.0)
    def vb_raw = attrs.get("viewBox", attrs.get("viewbox", ""))
    def vb = _number_list(vb_raw)
-   if vb.len >= 4 { return [float(vb[0]), float(vb[1]), max(1.0, float(vb[2])), max(1.0, float(vb[3])), width, height] }
+   if vb.len >= 4 {
+      def vbw = max(1.0, float(vb[2]))
+      def vbh = max(1.0, float(vb[3]))
+      def width = parse_w > 0.0 ? max(1.0, parse_w) : vbw
+      def height = parse_h > 0.0 ? max(1.0, parse_h) : vbh
+      return [float(vb[0]), float(vb[1]), vbw, vbh, width, height]
+   }
+   def width = parse_w > 0.0 ? max(1.0, parse_w) : 64.0
+   def height = parse_h > 0.0 ? max(1.0, parse_h) : width
    [0.0, 0.0, width, height, width, height]
 }
 
@@ -1048,16 +1332,24 @@ fn _decode_root(any root) any {
    memset(ptr, 0, out_w * out_h * 4)
    mut defs = dict(32)
    _collect_defs(root, defs)
+   mut root_color = 0
+   if defs.contains("__css__") {
+      def css_rules = defs["__css__"]
+      def root_sel = css_rules.get(":root", 0)
+      if is_dict(root_sel) && root_sel.contains("color") {
+         root_color = _parse_color(root_sel["color"], 0)
+      }
+   }
    def base = _mat_mul(_mat_scale(float(out_w) / float(vp[2]), float(out_h) / float(vp[3])), _mat_translate(0.0 - float(vp[0]), 0.0 - float(vp[1])))
-   _draw_node(ptr, out_w, out_h, root, _state_root(base), defs)
+   def rs = _state_root(base)
+   if is_dict(root_color) {
+      rs["color"] = root_color
+      if !_style_attr(root.get("attr", dict()), "fill", 0) { rs["fill"] = root_color }
+   }
+   _draw_node(ptr, out_w, out_h, root, rs, defs)
    def rgba = init_str(ptr, out_w * out_h * 4)
-   mut out = dict(4)
-   out = dict_mod.dict_write(out, "data", rgba)
-   out = dict_mod.dict_write(out, "width", out_w)
-   out = dict_mod.dict_write(out, "height", out_h)
-   out = dict_mod.dict_write(out, "channels", 4)
    _svg_last_error = ""
-   out
+   {"data": rgba, "width": out_w, "height": out_h, "channels": 4}
 }
 
 fn decode(any data, any _source_path="") any {
