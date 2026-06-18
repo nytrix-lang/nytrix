@@ -257,6 +257,23 @@ mut bool _gizmo_precise = false
 mut bool _gizmo_ruler = true
 mut list _scene_selection_cached_bounds = []
 mut str _scene_selection_cached_name = ""
+mut bool _scene_selection_cache_valid = false
+mut bool _scene_selection_cache_has_scene = false
+mut str _scene_selection_cache_loaded = "\x00"
+mut f64 _scene_selection_cache_fit_scale = 0.0
+mut f64 _scene_selection_cache_fit_tx = 0.0
+mut f64 _scene_selection_cache_fit_ty = 0.0
+mut f64 _scene_selection_cache_fit_tz = 0.0
+mut f64 _scene_selection_cache_edit_tx = 0.0
+mut f64 _scene_selection_cache_edit_ty = 0.0
+mut f64 _scene_selection_cache_edit_tz = 0.0
+mut f64 _scene_selection_cache_edit_rx = 0.0
+mut f64 _scene_selection_cache_edit_ry = 0.0
+mut f64 _scene_selection_cache_edit_rz = 0.0
+mut f64 _scene_selection_cache_edit_scale = 0.0
+mut f64 _scene_selection_cache_edit_sx = 0.0
+mut f64 _scene_selection_cache_edit_sy = 0.0
+mut f64 _scene_selection_cache_edit_sz = 0.0
 mut list _selection_overlay_panel_rect = [0.0, 0.0, 0.0, 0.0]
 mut list _selection_overlay_toolbar_rect = [0.0, 0.0, 0.0, 0.0]
 mut list _selection_overlay_move_rect = [0.0, 0.0, 0.0, 0.0]
@@ -268,6 +285,61 @@ mut int _gui_editor_tab = 0
 mut int _gui_gallery_tab = 0
 mut int _gui_browser_tab = 0
 mut int _gui_inspector_tab = 1
+
+fn _scene_selection_cache_clear_state() bool {
+   _scene_selection_cache_valid = false
+   _scene_selection_cache_has_scene = false
+   _scene_selection_cache_loaded = "\x00"
+   true
+}
+
+fn _scene_selection_cache_matches_current() bool {
+   if !_scene_selection_cache_valid { return false }
+   def has_scene = is_dict(active_scene)
+   if _scene_selection_cache_has_scene != has_scene { return false }
+   if _scene_selection_cache_loaded != _loaded_scene_name { return false }
+   if !has_scene { return true }
+   def edit_scale = float(active_scene.get("edit_scale", 1.0))
+   _scene_selection_cache_fit_scale == float(active_scene.get("fit_scale", 1.0)) &&
+   _scene_selection_cache_fit_tx == float(active_scene.get("fit_tx", 0.0)) &&
+   _scene_selection_cache_fit_ty == float(active_scene.get("fit_ty", 0.0)) &&
+   _scene_selection_cache_fit_tz == float(active_scene.get("fit_tz", 0.0)) &&
+   _scene_selection_cache_edit_tx == float(active_scene.get("edit_tx", 0.0)) &&
+   _scene_selection_cache_edit_ty == float(active_scene.get("edit_ty", 0.0)) &&
+   _scene_selection_cache_edit_tz == float(active_scene.get("edit_tz", 0.0)) &&
+   _scene_selection_cache_edit_rx == float(active_scene.get("edit_rx", 0.0)) &&
+   _scene_selection_cache_edit_ry == float(active_scene.get("edit_ry", 0.0)) &&
+   _scene_selection_cache_edit_rz == float(active_scene.get("edit_rz", 0.0)) &&
+   _scene_selection_cache_edit_scale == edit_scale &&
+   _scene_selection_cache_edit_sx == float(active_scene.get("edit_sx", edit_scale)) &&
+   _scene_selection_cache_edit_sy == float(active_scene.get("edit_sy", edit_scale)) &&
+   _scene_selection_cache_edit_sz == float(active_scene.get("edit_sz", edit_scale))
+}
+
+fn _scene_selection_cache_remember_current() bool {
+   def has_scene = is_dict(active_scene)
+   _scene_selection_cache_valid = true
+   _scene_selection_cache_has_scene = has_scene
+   _scene_selection_cache_loaded = _loaded_scene_name
+   if has_scene {
+      def edit_scale = float(active_scene.get("edit_scale", 1.0))
+      _scene_selection_cache_fit_scale = float(active_scene.get("fit_scale", 1.0))
+      _scene_selection_cache_fit_tx = float(active_scene.get("fit_tx", 0.0))
+      _scene_selection_cache_fit_ty = float(active_scene.get("fit_ty", 0.0))
+      _scene_selection_cache_fit_tz = float(active_scene.get("fit_tz", 0.0))
+      _scene_selection_cache_edit_tx = float(active_scene.get("edit_tx", 0.0))
+      _scene_selection_cache_edit_ty = float(active_scene.get("edit_ty", 0.0))
+      _scene_selection_cache_edit_tz = float(active_scene.get("edit_tz", 0.0))
+      _scene_selection_cache_edit_rx = float(active_scene.get("edit_rx", 0.0))
+      _scene_selection_cache_edit_ry = float(active_scene.get("edit_ry", 0.0))
+      _scene_selection_cache_edit_rz = float(active_scene.get("edit_rz", 0.0))
+      _scene_selection_cache_edit_scale = edit_scale
+      _scene_selection_cache_edit_sx = float(active_scene.get("edit_sx", edit_scale))
+      _scene_selection_cache_edit_sy = float(active_scene.get("edit_sy", edit_scale))
+      _scene_selection_cache_edit_sz = float(active_scene.get("edit_sz", edit_scale))
+   }
+   true
+}
 mut int _gui_workspace_mode = 1
 mut int _gui_center_tab = 0
 mut int _gui_side_tab = 0

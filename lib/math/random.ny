@@ -132,3 +132,18 @@ fn int(list ctx, int a, int b) int {
    if range <= 0 { return a }
    a + (next(ctx) % range)
 }
+
+#main {
+   mut xs = [10, 20, 30]
+   def r = randrange(1, 5)
+   assert(r >= 1 && r < 5, "random randrange keeps scalar bounds")
+   def n = xs.len
+   assert(n == 3, "random self-test list length")
+   def ctx = new(123)
+   def a = next(ctx)
+   def b = next(ctx)
+   assert(a != b, "random state advances")
+   def bounded = int(ctx, 2, 6)
+   assert(bounded >= 2 && bounded <= 6, "random context int bounds")
+   print("✓ std.math.random self-test passed")
+}

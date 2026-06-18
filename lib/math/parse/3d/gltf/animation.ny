@@ -1,6 +1,6 @@
 ;; Keywords: 3d gltf glb parse
 ;; Submodule: animation
-module std.math.parse.3d.gltf.animation(_gltf_read_mat4_accessor_value, _gltf_mat4_transpose, _gltf_pack_skin_sidecars, gltf_skin_joint_mats, _gltf_skin_inv_bind_mats, _gltf_mesh_inv_key, _gltf_mesh_inv_cached, _gltf_pack_skin_mat_slab, _gltf_write_skin_mat_slab, _gltf_skin_mats_cache_record, gltf_free_skin_mats_cache, _gltf_apply_skinning_slab, _gltf_apply_skinning_one_slab, _gltf_apply_skinning_one_fast_slab, _gltf_apply_part_skin_slab, _gltf_part_runtime_skin_slab, _gltf_skin_weighted_mat4_vec3, _gltf_apply_skinning_fallback, gltf_apply_skinning, gltf_skin_count, gltf_skin_info, gltf_morph_target_count, _gltf_mesh_morph_weights, _gltf_collect_morph_targets, _gltf_release_morph_targets, _gltf_read_acc_f32, _gltf_read_acc_components, _gltf_read_acc_scalar_tuple, _gltf_read_anim_tuple, _gltf_lerp_vec, _gltf_nlerp_quat, _gltf_normalize_quat, _gltf_read_norm_i16_quat, _gltf_find_time_bracket, _gltf_sample_channel, gltf_animation_count, _gltf_animation_duration_from_anim, _gltf_animation_duration_from_samples, gltf_animation_info, _gltf_anim_fast_records, _gltf_anim_record_bracket, _gltf_anim_clean_tiny, _gltf_anim_fast_value, _gltf_sample_animation_fast, _gltf_anim_sample_component_count, _gltf_anim_store_override, gltf_sample_animation, gltf_sample_animation_merged, gltf_apply_morph_weights, _gltf_build_node_world_mats_animated, _gltf_build_node_world_mats_animated_fast, gltf_rebuild_animated_mats)
+module std.math.parse.3d.gltf.animation(_gltf_read_mat4_accessor_value, _gltf_mat4_transpose, _gltf_pack_skin_sidecars, gltf_skin_joint_mats, _gltf_skin_inv_bind_mats, _gltf_mesh_inv_key, _gltf_mesh_inv_cached, _gltf_pack_skin_mat_slab, _gltf_write_skin_mat_slab, _gltf_skin_mats_cache_record, gltf_free_skin_mats_cache, _gltf_apply_skinning_slab, _gltf_skin_weighted_mat4_vec3, _gltf_apply_skinning_fallback, gltf_apply_skinning, gltf_skin_count, gltf_skin_info, gltf_morph_target_count, _gltf_mesh_morph_weights, _gltf_collect_morph_targets, _gltf_release_morph_targets, _gltf_read_acc_f32, _gltf_read_acc_components, _gltf_read_acc_scalar_tuple, _gltf_read_anim_tuple, _gltf_lerp_vec, _gltf_nlerp_quat, _gltf_normalize_quat, _gltf_read_norm_i16_quat, _gltf_find_time_bracket, _gltf_sample_channel, gltf_animation_count, _gltf_animation_duration_from_anim, _gltf_animation_duration_from_samples, gltf_animation_info, _gltf_anim_fast_records, _gltf_anim_record_bracket, _gltf_anim_clean_tiny, _gltf_anim_fast_value, _gltf_sample_animation_fast, _gltf_anim_sample_component_count, _gltf_anim_store_override, gltf_sample_animation, gltf_sample_animation_merged, gltf_apply_morph_weights, _gltf_build_node_world_mats_animated, _gltf_build_node_world_mats_animated_fast, gltf_rebuild_animated_mats)
 use std.core
 use std.math.bin
 use std.math
@@ -225,55 +225,6 @@ fn _gltf_skin_mats_cache_record(any gltf_data, int skin_idx, dict node_world_mat
       def cached = skin_mats_cache.get(cache_key, 0)
       if is_list(cached) { return cached }
    }
-   def skin_raw_off = shr._gltf_skin_raw_off_enabled()
-   def skin_no_mesh_inv = shr._gltf_skin_no_mesh_inv_enabled()
-   def skin_transpose_inv_bind = shr._gltf_skin_transpose_inv_bind_enabled()
-   def skin_invbind_first = shr._gltf_skin_invbind_first_enabled()
-   if !skin_raw_off
-   && !skin_no_mesh_inv
-   && !skin_transpose_inv_bind
-   && !skin_invbind_first{
-      def runtime_skin = gltf_skin_info(gltf_data, skin_idx)
-      def runtime_joints = is_dict(runtime_skin) ? runtime_skin.get("joints", []) : []
-      def runtime_count = is_list(runtime_joints) ? runtime_joints.len : 0
-      if runtime_count > 0 {
-         def runtime_inv_bind = _gltf_skin_inv_bind_mats(gltf_data, skin_idx)
-         if is_list(runtime_inv_bind) && runtime_inv_bind.len >= runtime_count {
-            def runtime_mesh_inv = _gltf_mesh_inv_cached(mesh_bind_world)
-            def slab = malloc(runtime_count * 64)
-            if slab {
-               def runtime_world_list = node_world_mats.get("__world_list", 0)
-               if is_list(runtime_world_list) {
-                  __gltf_skin_mats_store_raw(
-                     slab,
-                     runtime_joints,
-                     runtime_world_list,
-                     runtime_inv_bind,
-                     runtime_mesh_inv,
-                     runtime_count
-                  )
-               } else {
-                  mut rji = 0
-                  while rji < runtime_count {
-                     def joint_idx = int(runtime_joints.get(rji, -1))
-                     def joint_world = node_world_mats.get(joint_idx, gltf_math.mat4_identity())
-                     def inv_bind = runtime_inv_bind.get(rji, gltf_math.mat4_identity())
-                     __gltf_skin_mat_store_raw(slab, rji, joint_world, inv_bind, runtime_mesh_inv)
-                     rji += 1
-                  }
-               }
-               def rec = [0, slab, runtime_count]
-               if is_dict(skin_mats_cache) {
-                  skin_mats_cache[cache_key] = rec
-                  mut keys = skin_mats_cache.get("__keys", [])
-                  keys = keys.append(cache_key)
-                  skin_mats_cache["__keys"] = keys
-               }
-               return rec
-            }
-         }
-      }
-   }
    def skin_mats = gltf_skin_joint_mats(gltf_data, skin_idx, node_world_mats, mesh_bind_world)
    if !is_list(skin_mats) || skin_mats.len == 0 { return 0 }
    def slab = _gltf_pack_skin_mat_slab(skin_mats)
@@ -309,66 +260,128 @@ fn gltf_free_skin_mats_cache(any skin_mats_cache) bool {
 
 fn _gltf_apply_skinning_slab(any vptr, any bind_vptr, any joints_ptr, any weights_ptr, int vcnt, any skin_slab, int mat_count) bool {
    if !vptr || !bind_vptr || !joints_ptr || !weights_ptr || !skin_slab || vcnt <= 0 || mat_count <= 0 { return false }
-   __gltf_skin_apply_raw(vptr, bind_vptr, joints_ptr, weights_ptr, vcnt, skin_slab, mat_count)
-}
-
-fn _gltf_apply_skinning_one_slab(any vptr, any bind_vptr, any joints_ptr, int vcnt, any skin_slab, int mat_count) bool {
-   if !vptr || !bind_vptr || !joints_ptr || !skin_slab || vcnt <= 0 || mat_count <= 0 { return false }
-   __gltf_skin_apply_one_raw(vptr, bind_vptr, joints_ptr, vcnt, skin_slab, mat_count)
-}
-
-fn _gltf_apply_skinning_one_fast_slab(any vptr, any bind_vptr, any joints_ptr, int vcnt, any skin_slab, int mat_count) bool {
-   if !vptr || !bind_vptr || !joints_ptr || !skin_slab || vcnt <= 0 || mat_count <= 0 { return false }
-   __gltf_skin_apply_one_fast_raw(vptr, bind_vptr, joints_ptr, vcnt, skin_slab, mat_count)
-}
-
-fn _gltf_apply_part_skin_slab(dict part, any vptr, any bind_vptr, any joints_ptr, any weights_ptr, int vcnt, any skin_slab, int mat_count) bool {
-   if part.get("skin_single_influence", false) {
-      if !shr._gltf_skin_validate_enabled() { return _gltf_apply_skinning_one_fast_slab(vptr, bind_vptr, joints_ptr, vcnt, skin_slab, mat_count) }
-      return _gltf_apply_skinning_one_slab(vptr, bind_vptr, joints_ptr, vcnt, skin_slab, mat_count)
-   }
-   _gltf_apply_skinning_slab(vptr, bind_vptr, joints_ptr, weights_ptr, vcnt, skin_slab, mat_count)
-}
-
-fn _gltf_part_runtime_skin_slab(dict part, any gltf_data, dict node_world_mats, int skin_idx, any mesh_bind_world) any {
-   def runtime_skin = gltf_skin_info(gltf_data, skin_idx)
-   def runtime_joints = is_dict(runtime_skin) ? runtime_skin.get("joints", []) : []
-   def runtime_count = is_list(runtime_joints) ? runtime_joints.len : 0
-   if runtime_count <= 0 { return 0 }
-   def runtime_inv_bind = _gltf_skin_inv_bind_mats(gltf_data, skin_idx)
-   if !is_list(runtime_inv_bind) || runtime_inv_bind.len < runtime_count { return 0 }
-   def runtime_mesh_inv = _gltf_mesh_inv_cached(mesh_bind_world)
-   mut runtime_slab = part.get("skin_runtime_slab", 0)
-   mut runtime_slab_count = int(part.get("skin_runtime_slab_count", 0))
-   if !runtime_slab || runtime_slab_count < runtime_count {
-      if runtime_slab { free(runtime_slab) }
-      runtime_slab = malloc(runtime_count * 64)
-      if !runtime_slab { return 0 }
-      runtime_slab_count = runtime_count
-      part["skin_runtime_slab"] = runtime_slab
-      part["skin_runtime_slab_count"] = runtime_slab_count
-   }
-   def runtime_world_list = node_world_mats.get("__world_list", 0)
-   if is_list(runtime_world_list) {
-      __gltf_skin_mats_store_raw(
-         runtime_slab,
-         runtime_joints,
-         runtime_world_list,
-         runtime_inv_bind,
-         runtime_mesh_inv,
-         runtime_count
-      )
-   } else {
-      mut rji = 0
-      while rji < runtime_count {
-         def joint_idx = int(runtime_joints.get(rji, -1))
-         def joint_world = node_world_mats.get(joint_idx, gltf_math.mat4_identity())
-         def inv_bind = runtime_inv_bind.get(rji, gltf_math.mat4_identity())
-         __gltf_skin_mat_store_raw(runtime_slab, rji, joint_world, inv_bind, runtime_mesh_inv)
-         rji += 1
+   memcpy(vptr, bind_vptr, vcnt * shr._GLTF_VTX_STRIDE)
+   mut vi = 0
+   while vi < vcnt {
+      def boff = vi * shr._GLTF_VTX_STRIDE
+      def px = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_X)
+      def py = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_Y)
+      def pz = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_Z)
+      def nx0 = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_NX)
+      def ny0 = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_NY)
+      def nz0 = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_NZ)
+      def has_norm = (nx0 * nx0 + ny0 * ny0 + nz0 * nz0) > 0.000001
+      def side_off = vi * 16
+      def j0 = int(load32(joints_ptr, side_off + 0))
+      def j1 = int(load32(joints_ptr, side_off + 4))
+      def j2 = int(load32(joints_ptr, side_off + 8))
+      def j3 = int(load32(joints_ptr, side_off + 12))
+      def w0 = load32_f32(weights_ptr, side_off + 0)
+      def w1 = load32_f32(weights_ptr, side_off + 4)
+      def w2 = load32_f32(weights_ptr, side_off + 8)
+      def w3 = load32_f32(weights_ptr, side_off + 12)
+      def use0 = w0 > 0.000001 && j0 >= 0 && j0 < mat_count
+      def use1 = w1 > 0.000001 && j1 >= 0 && j1 < mat_count
+      def use2 = w2 > 0.000001 && j2 >= 0 && j2 < mat_count
+      def use3 = w3 > 0.000001 && j3 >= 0 && j3 < mat_count
+      def ew0 = use0 ? w0 : 0.0
+      def ew1 = use1 ? w1 : 0.0
+      def ew2 = use2 ? w2 : 0.0
+      def ew3 = use3 ? w3 : 0.0
+      def wsum = ew0 + ew1 + ew2 + ew3
+      if wsum > 0.000001 {
+         def inv_w = 1.0 / wsum
+         mut sx = 0.0
+         mut sy = 0.0
+         mut sz = 0.0
+         mut snx = 0.0
+         mut sny = 0.0
+         mut snz = 0.0
+         if use0 {
+            def mb = j0 * 64
+            sx += ew0 * (load32_f32(skin_slab, mb + 0) * px + load32_f32(skin_slab, mb + 16) * py + load32_f32(skin_slab, mb + 32) * pz + load32_f32(skin_slab, mb + 48))
+            sy += ew0 * (load32_f32(skin_slab, mb + 4) * px + load32_f32(skin_slab, mb + 20) * py + load32_f32(skin_slab, mb + 36) * pz + load32_f32(skin_slab, mb + 52))
+            sz += ew0 * (load32_f32(skin_slab, mb + 8) * px + load32_f32(skin_slab, mb + 24) * py + load32_f32(skin_slab, mb + 40) * pz + load32_f32(skin_slab, mb + 56))
+            if has_norm {
+               snx += ew0 * (load32_f32(skin_slab, mb + 0) * nx0 + load32_f32(skin_slab, mb + 16) * ny0 + load32_f32(skin_slab, mb + 32) * nz0)
+               sny += ew0 * (load32_f32(skin_slab, mb + 4) * nx0 + load32_f32(skin_slab, mb + 20) * ny0 + load32_f32(skin_slab, mb + 36) * nz0)
+               snz += ew0 * (load32_f32(skin_slab, mb + 8) * nx0 + load32_f32(skin_slab, mb + 24) * ny0 + load32_f32(skin_slab, mb + 40) * nz0)
+            }
+         }
+         if use1 {
+            def mb = j1 * 64
+            sx += ew1 * (load32_f32(skin_slab, mb + 0) * px + load32_f32(skin_slab, mb + 16) * py + load32_f32(skin_slab, mb + 32) * pz + load32_f32(skin_slab, mb + 48))
+            sy += ew1 * (load32_f32(skin_slab, mb + 4) * px + load32_f32(skin_slab, mb + 20) * py + load32_f32(skin_slab, mb + 36) * pz + load32_f32(skin_slab, mb + 52))
+            sz += ew1 * (load32_f32(skin_slab, mb + 8) * px + load32_f32(skin_slab, mb + 24) * py + load32_f32(skin_slab, mb + 40) * pz + load32_f32(skin_slab, mb + 56))
+            if has_norm {
+               snx += ew1 * (load32_f32(skin_slab, mb + 0) * nx0 + load32_f32(skin_slab, mb + 16) * ny0 + load32_f32(skin_slab, mb + 32) * nz0)
+               sny += ew1 * (load32_f32(skin_slab, mb + 4) * nx0 + load32_f32(skin_slab, mb + 20) * ny0 + load32_f32(skin_slab, mb + 36) * nz0)
+               snz += ew1 * (load32_f32(skin_slab, mb + 8) * nx0 + load32_f32(skin_slab, mb + 24) * ny0 + load32_f32(skin_slab, mb + 40) * nz0)
+            }
+         }
+         if use2 {
+            def mb = j2 * 64
+            sx += ew2 * (load32_f32(skin_slab, mb + 0) * px + load32_f32(skin_slab, mb + 16) * py + load32_f32(skin_slab, mb + 32) * pz + load32_f32(skin_slab, mb + 48))
+            sy += ew2 * (load32_f32(skin_slab, mb + 4) * px + load32_f32(skin_slab, mb + 20) * py + load32_f32(skin_slab, mb + 36) * pz + load32_f32(skin_slab, mb + 52))
+            sz += ew2 * (load32_f32(skin_slab, mb + 8) * px + load32_f32(skin_slab, mb + 24) * py + load32_f32(skin_slab, mb + 40) * pz + load32_f32(skin_slab, mb + 56))
+            if has_norm {
+               snx += ew2 * (load32_f32(skin_slab, mb + 0) * nx0 + load32_f32(skin_slab, mb + 16) * ny0 + load32_f32(skin_slab, mb + 32) * nz0)
+               sny += ew2 * (load32_f32(skin_slab, mb + 4) * nx0 + load32_f32(skin_slab, mb + 20) * ny0 + load32_f32(skin_slab, mb + 36) * nz0)
+               snz += ew2 * (load32_f32(skin_slab, mb + 8) * nx0 + load32_f32(skin_slab, mb + 24) * ny0 + load32_f32(skin_slab, mb + 40) * nz0)
+            }
+         }
+         if use3 {
+            def mb = j3 * 64
+            sx += ew3 * (load32_f32(skin_slab, mb + 0) * px + load32_f32(skin_slab, mb + 16) * py + load32_f32(skin_slab, mb + 32) * pz + load32_f32(skin_slab, mb + 48))
+            sy += ew3 * (load32_f32(skin_slab, mb + 4) * px + load32_f32(skin_slab, mb + 20) * py + load32_f32(skin_slab, mb + 36) * pz + load32_f32(skin_slab, mb + 52))
+            sz += ew3 * (load32_f32(skin_slab, mb + 8) * px + load32_f32(skin_slab, mb + 24) * py + load32_f32(skin_slab, mb + 40) * pz + load32_f32(skin_slab, mb + 56))
+            if has_norm {
+               snx += ew3 * (load32_f32(skin_slab, mb + 0) * nx0 + load32_f32(skin_slab, mb + 16) * ny0 + load32_f32(skin_slab, mb + 32) * nz0)
+               sny += ew3 * (load32_f32(skin_slab, mb + 4) * nx0 + load32_f32(skin_slab, mb + 20) * ny0 + load32_f32(skin_slab, mb + 36) * nz0)
+               snz += ew3 * (load32_f32(skin_slab, mb + 8) * nx0 + load32_f32(skin_slab, mb + 24) * ny0 + load32_f32(skin_slab, mb + 40) * nz0)
+            }
+         }
+         sx *= inv_w
+         sy *= inv_w
+         sz *= inv_w
+         if shr._gltf_float_bad(sx) || shr._gltf_float_bad(sy) || shr._gltf_float_bad(sz) {
+            store32_f32(vptr, px, boff + shr._GLTF_VTX_OFF_X)
+            store32_f32(vptr, py, boff + shr._GLTF_VTX_OFF_Y)
+            store32_f32(vptr, pz, boff + shr._GLTF_VTX_OFF_Z)
+         } else {
+            store32_f32(vptr, sx, boff + shr._GLTF_VTX_OFF_X)
+            store32_f32(vptr, sy, boff + shr._GLTF_VTX_OFF_Y)
+            store32_f32(vptr, sz, boff + shr._GLTF_VTX_OFF_Z)
+         }
+         if has_norm {
+            snx *= inv_w
+            sny *= inv_w
+            snz *= inv_w
+            def nl = sqrt(snx * snx + sny * sny + snz * snz)
+            if nl > 0.000001 && !shr._gltf_float_bad(nl) {
+               def inv_n = 1.0 / nl
+               store32_f32(vptr, snx * inv_n, boff + shr._GLTF_VTX_OFF_NX)
+               store32_f32(vptr, sny * inv_n, boff + shr._GLTF_VTX_OFF_NY)
+               store32_f32(vptr, snz * inv_n, boff + shr._GLTF_VTX_OFF_NZ)
+            } else {
+               store32_f32(vptr, nx0, boff + shr._GLTF_VTX_OFF_NX)
+               store32_f32(vptr, ny0, boff + shr._GLTF_VTX_OFF_NY)
+               store32_f32(vptr, nz0, boff + shr._GLTF_VTX_OFF_NZ)
+            }
+         }
+      } else {
+         store32_f32(vptr, px, boff + shr._GLTF_VTX_OFF_X)
+         store32_f32(vptr, py, boff + shr._GLTF_VTX_OFF_Y)
+         store32_f32(vptr, pz, boff + shr._GLTF_VTX_OFF_Z)
+         if has_norm {
+            store32_f32(vptr, nx0, boff + shr._GLTF_VTX_OFF_NX)
+            store32_f32(vptr, ny0, boff + shr._GLTF_VTX_OFF_NY)
+            store32_f32(vptr, nz0, boff + shr._GLTF_VTX_OFF_NZ)
+         }
       }
+      vi += 1
    }
-   [runtime_slab, runtime_count]
+   true
 }
 
 fn _gltf_skin_weighted_mat4_vec3(
@@ -483,7 +496,6 @@ fn gltf_apply_skinning(any part, any gltf_data, any node_world_mats, any skin_ma
    def skin_idx = int(part.get("skin_idx", -1))
    if skin_idx < 0 { return part }
    if shr._gltf_disable_skinning_enabled() { return part }
-   def skin_raw_off = shr._gltf_skin_raw_off_enabled()
    def bind_vptr = part.get("skin_bind_vptr", 0)
    def joints_ptr = part.get("skin_joints_ptr", 0)
    def weights_ptr = part.get("skin_weights_ptr", 0)
@@ -494,18 +506,13 @@ fn gltf_apply_skinning(any part, any gltf_data, any node_world_mats, any skin_ma
    def node_idx = int(part.get("node_idx", -1))
    mut mesh_bind_world = node_idx >= 0 ? node_world_mats.get(node_idx, part.get("model", 0)) : part.get("model", 0)
    if !is_list(mesh_bind_world)|| mesh_bind_world.len < 16 { mesh_bind_world = part.get("skin_mesh_bind_world", part.get("model", 0)) }
-   if !is_dict(skin_mats_cache) {
-      def runtime_rec = _gltf_part_runtime_skin_slab(part, gltf_data, node_world_mats, skin_idx, mesh_bind_world)
-      if !is_list(runtime_rec) { return part }
-      _gltf_apply_part_skin_slab(part, vptr, bind_vptr, joints_ptr, weights_ptr, vcnt, runtime_rec.get(0, 0), int(runtime_rec.get(1, 0)))
-      return part
-   }
+   if !is_dict(skin_mats_cache) { skin_mats_cache = dict(4) }
    def skin_rec = _gltf_skin_mats_cache_record(gltf_data, skin_idx, node_world_mats, mesh_bind_world, skin_mats_cache)
    mut skin_mats = is_list(skin_rec) ? skin_rec.get(0, 0) : 0
    def skin_slab = is_list(skin_rec) ? skin_rec.get(1, 0) : 0
    def skin_mat_count = is_list(skin_rec) ? int(skin_rec.get(2, 0)) : 0
-   if skin_slab && skin_mat_count > 0 && !skin_raw_off {
-      _gltf_apply_part_skin_slab(part, vptr, bind_vptr, joints_ptr, weights_ptr, vcnt, skin_slab, skin_mat_count)
+   if skin_slab && skin_mat_count > 0 && !shr._gltf_skin_raw_off_enabled() {
+      _gltf_apply_skinning_slab(vptr, bind_vptr, joints_ptr, weights_ptr, vcnt, skin_slab, skin_mat_count)
       return part
    }
    if !is_list(skin_mats) || skin_mats.len == 0 { return part }
@@ -1518,4 +1525,58 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    }
    if fast_numeric && is_list(world_list) { node_world_mats["__world_list"] = world_list }
    node_world_mats
+}
+
+#main {
+   def in_ptr = malloc(8)
+   store32(in_ptr, 0x00000000, 0)
+   store32(in_ptr, 0x3f800000, 4)
+   def out_ptr = malloc(24)
+   store32(out_ptr, 0x00000000, 0)
+   store32(out_ptr, 0x00000000, 4)
+   store32(out_ptr, 0x00000000, 8)
+   store32(out_ptr, 0x40000000, 12)
+   store32(out_ptr, 0x40800000, 16)
+   store32(out_ptr, 0x40c00000, 20)
+   mut rec = [0, 1, in_ptr, out_ptr, 2, 4, 12, 3, 0]
+   def interp = _gltf_anim_fast_value(rec, 0.5)
+   assert(interp == [1.0, 2.0, 3.0], "gltf animation fast sampler interpolates vec3")
+   assert(rec[8] == 0, "gltf animation fast sampler updates bracket cache")
+   free(in_ptr)
+   free(out_ptr)
+
+   def bind = malloc(shr._GLTF_VTX_STRIDE)
+   def skinned = malloc(shr._GLTF_VTX_STRIDE)
+   def joints = malloc(16)
+   def weights = malloc(16)
+   def skin_slab = malloc(64)
+   memset(bind, 0, shr._GLTF_VTX_STRIDE)
+   memset(skinned, 0, shr._GLTF_VTX_STRIDE)
+   memset(joints, 0, 16)
+   memset(weights, 0, 16)
+   memset(skin_slab, 0, 64)
+   store32_f32(bind, 1.0, shr._GLTF_VTX_OFF_X)
+   store32_f32(bind, 2.0, shr._GLTF_VTX_OFF_Y)
+   store32_f32(bind, 3.0, shr._GLTF_VTX_OFF_Z)
+   store32_f32(bind, 0.0, shr._GLTF_VTX_OFF_NX)
+   store32_f32(bind, 1.0, shr._GLTF_VTX_OFF_NY)
+   store32_f32(bind, 0.0, shr._GLTF_VTX_OFF_NZ)
+   store32(joints, 0, 0)
+   store32_f32(weights, 1.0, 0)
+   store32_f32(skin_slab, 1.0, 0)
+   store32_f32(skin_slab, 1.0, 20)
+   store32_f32(skin_slab, 1.0, 40)
+   store32_f32(skin_slab, 10.0, 48)
+   store32_f32(skin_slab, 1.0, 60)
+   assert(_gltf_apply_skinning_slab(skinned, bind, joints, weights, 1, skin_slab, 1), "gltf skinning slab applies")
+   assert(load32_f32(skinned, shr._GLTF_VTX_OFF_X) == 11.0, "gltf skinning slab x")
+   assert(load32_f32(skinned, shr._GLTF_VTX_OFF_Y) == 2.0, "gltf skinning slab y")
+   assert(load32_f32(skinned, shr._GLTF_VTX_OFF_Z) == 3.0, "gltf skinning slab z")
+   assert(load32_f32(skinned, shr._GLTF_VTX_OFF_NY) == 1.0, "gltf skinning slab normal")
+   free(bind)
+   free(skinned)
+   free(joints)
+   free(weights)
+   free(skin_slab)
+   print("✓ std.math.parse.3d.gltf.animation self-test passed")
 }

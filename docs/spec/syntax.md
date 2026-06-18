@@ -153,6 +153,9 @@ defer { body }
 with Type: name = expr { body }
 ```
 
+Declarations use `Type name`. Resource scopes are also type-first, but keep the
+colon separator: `with Type: name = value { ... }`.
+
 ## Operators
 
 ```ny

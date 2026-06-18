@@ -18,32 +18,13 @@ fn _gizmo_selection_bounds() list {
       def drag_bounds = _scene_drag_state.get("bounds", [])
       if is_list(drag_bounds) && drag_bounds.len >= 6 { return drag_bounds }
    }
-   def cache_key = _gizmo_selection_cache_key()
-   if _scene_selection_cached_name == cache_key && is_list(_scene_selection_cached_bounds) && _scene_selection_cached_bounds.len >= 6 {
+   if _scene_selection_cache_matches_current() && is_list(_scene_selection_cached_bounds) && _scene_selection_cached_bounds.len >= 6 {
       return _scene_selection_cached_bounds
    }
    _scene_selection_cached_bounds = ui_selection.selection_bounds_from_scene(active_scene)
-   _scene_selection_cached_name = cache_key
+   _scene_selection_cached_name = _loaded_scene_name
+   _scene_selection_cache_remember_current()
    is_list(_scene_selection_cached_bounds) ? _scene_selection_cached_bounds : []
-}
-
-fn _gizmo_selection_cache_key() str {
-   if !is_dict(active_scene) { return _loaded_scene_name + "|none" }
-   _loaded_scene_name + "|" +
-   to_str(active_scene.get("fit_scale", 1.0)) + "|" +
-   to_str(active_scene.get("fit_tx", 0.0)) + "|" +
-   to_str(active_scene.get("fit_ty", 0.0)) + "|" +
-   to_str(active_scene.get("fit_tz", 0.0)) + "|" +
-   to_str(active_scene.get("edit_tx", 0.0)) + "|" +
-   to_str(active_scene.get("edit_ty", 0.0)) + "|" +
-   to_str(active_scene.get("edit_tz", 0.0)) + "|" +
-   to_str(active_scene.get("edit_rx", 0.0)) + "|" +
-   to_str(active_scene.get("edit_ry", 0.0)) + "|" +
-   to_str(active_scene.get("edit_rz", 0.0)) + "|" +
-   to_str(active_scene.get("edit_scale", 1.0)) + "|" +
-   to_str(active_scene.get("edit_sx", active_scene.get("edit_scale", 1.0))) + "|" +
-   to_str(active_scene.get("edit_sy", active_scene.get("edit_scale", 1.0))) + "|" +
-   to_str(active_scene.get("edit_sz", active_scene.get("edit_scale", 1.0)))
 }
 
 fn _gizmo_draw_transform(list b) bool {

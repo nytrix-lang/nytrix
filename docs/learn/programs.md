@@ -167,27 +167,27 @@ snippets belong in learn pages or self-tests instead.
 
 ### Rule 110
 
-[Open the source](../../etc/projects/cli/110.ny).
+[Open the source](../../etc/projects/os/110.ny).
 
-<!-- ny-doc-include-code: ny etc/projects/cli/110.ny -->
+<!-- ny-doc-include-code: ny etc/projects/os/110.ny -->
 
 ### Langton's Ant
 
-[Open the source](../../etc/projects/cli/ant.ny).
+[Open the source](../../etc/projects/os/ant.ny).
 
-<!-- ny-doc-include-code: ny etc/projects/cli/ant.ny -->
+<!-- ny-doc-include-code: ny etc/projects/os/ant.ny -->
 
 ### Conway's Game of Life
 
-[Open the source](../../etc/projects/cli/conway.ny).
+[Open the source](../../etc/projects/os/conway.ny).
 
-<!-- ny-doc-include-code: ny etc/projects/cli/conway.ny -->
+<!-- ny-doc-include-code: ny etc/projects/os/conway.ny -->
 
 ### Matrix Rain
 
-[Open the source](../../etc/projects/cli/matrix.ny).
+[Open the source](../../etc/projects/os/matrix.ny).
 
-<!-- ny-doc-include-code: ny etc/projects/cli/matrix.ny -->
+<!-- ny-doc-include-code: ny etc/projects/os/matrix.ny -->
 
 ### FFI
 

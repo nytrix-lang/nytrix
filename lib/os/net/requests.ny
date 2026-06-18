@@ -681,5 +681,12 @@ fn requests_parse_response(any raw) dict {
    assert_eq(parsed.get("status", 0), 404, "parse response status")
    assert_eq(parsed.get("reason", ""), "Not Found", "parse response reason")
    assert_eq(parsed.get("body", ""), "bad", "parse response body")
+   def raw_meta = "HTTP/1.1 201 Created\r\nContent-Length: 5\r\nX-Test: ok\r\n\r\nhelloignored"
+   def meta = requests_parse_response(raw_meta)
+   assert_eq(meta.get("ok", false), true, "parse response metadata ok")
+   assert_eq(meta.get("status", 0), 201, "parse response metadata status")
+   assert_eq(meta.get("reason", ""), "Created", "parse response metadata reason")
+   assert_eq(meta.get("body", ""), "hello", "parse response content length")
+   assert_eq(meta.get("headers", 0).get("x-test", ""), "ok", "parse response header lookup")
    print("✓ std.os.net.requests self-test passed")
 }

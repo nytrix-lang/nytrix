@@ -147,6 +147,7 @@ void lexer_init(lexer_t *lx, const char *src, const char *filename) {
   lx->split_pos = 0;
   lx->split_filename = NULL;
   lx->skipped_newline = false;
+  lx->intern_identifiers = true;
   lx->had_error = false;
   lx->error_count = 0;
   lx->quiet = false;
@@ -604,8 +605,9 @@ token_t lexer_next(lexer_t *lx) {
     lx->pos = (size_t)((const char *)p - src);
     lx->col += (int)len;
     token_t tok = make_token(lx, NY_T_IDENT, start);
-    tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
     tok.hash = ny_hash64(tok.lexeme, tok.len);
+    if (lx->intern_identifiers)
+      tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
     tok.kind = identifier_type(lx, tok.lexeme, tok.len);
     return tok;
   }
@@ -623,8 +625,9 @@ token_t lexer_next(lexer_t *lx) {
         lx->pos = start + token_len;
         lx->col += (int)token_len - 1;
         token_t tok = make_token(lx, NY_T_IDENT, start);
-        tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
         tok.hash = ny_hash64(tok.lexeme, tok.len);
+        if (lx->intern_identifiers)
+          tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
         tok.kind = identifier_type(lx, tok.lexeme, tok.len);
         return tok;
       }

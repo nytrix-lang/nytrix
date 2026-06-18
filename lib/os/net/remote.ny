@@ -785,5 +785,30 @@ fn interactive(any io, int max_read=4096, any options=0) int {
    set_verbose(dbg, false)
    assert_eq(log_level(dbg), "quiet", "remote verbose false")
    close(dbg)
+   #windows {
+      print("skip remote process tube self-test on Windows")
+   } #else {
+      def cmd = "printf 'ready\\n'; IFS= read line; printf 'echo:%s\\n' \"$line\""
+      def pio = shell(cmd, "quiet", 0, 2)
+      if pio == 0 {
+         print("skip remote process tube self-test(spawn unavailable)")
+      } else {
+         assert_eq(tube_kind(pio), "process", "remote process tube kind")
+         assert(pid(pio) > 0, "remote process tube pid")
+         assert_eq(recvline(pio, false), "ready", "remote process recvline")
+         assert_eq(sendline(pio, "hello"), 6, "remote process sendline")
+         assert_eq(recvuntil(pio, "\n", true), "echo:hello", "remote process recvuntil drop")
+         assert(close(pio) == 0, "remote process close status")
+      }
+      def sio = ssh("127.0.0.1", "", 1, "", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=1"], "quiet", 1000, 64)
+      if sio == 0 {
+         print("skip remote ssh tube self-test(spawn unavailable)")
+      } else {
+         assert_eq(tube_kind(sio), "process", "remote ssh tube kind")
+         assert(pid(sio) > 0, "remote ssh tube pid")
+         recvall(sio, 8192)
+         assert(close(sio) >= 0, "remote ssh tube process status")
+      }
+   } #endif
    print("✓ std.os.net.remote self-test passed")
 }

@@ -16,8 +16,6 @@ fn mat4_identity() list {
 @jit
 fn mat4_mul(any a, any b) list {
    "Runs the mat4 mul operation."
-   def raw = __gltf_mat4_mul_list(a, b)
-   if is_list(raw) { return raw }
    mut o, c = [0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0, "mat4", 400], 0
    while c < 4 {
       mut r = 0
