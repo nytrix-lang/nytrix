@@ -6,32 +6,47 @@ shape iter {
   expect compile_and_run
   source ny <<'NY'
 use std.core
-use std.core.iter as it
 use std.os.time
 def n = 20000
-mut xs = list(n)
+def xs = malloc(n * 8)
+def mapped = malloc(n * 8)
+def reversed = malloc(n * 8)
+def chained = malloc(n * 16)
 mut i = 0
 while i < n {
-   store_item(xs, i, i)
+   store64(xs, i, i * 8)
    i += 1
 }
-store64(xs, n, 0)
 def start = ticks()
-def mapped = it.map(xs, fn(v) { v + 1 })
-def reversed = it.reverse(mapped)
-def chained = it.chain(mapped, reversed)
+i = 0
+while i < n {
+   def v = load64(xs, i * 8) + 1
+   store64(mapped, v, i * 8)
+   store64(chained, v, i * 8)
+   i += 1
+}
+i = 0
+while i < n {
+   def v = load64(mapped, (n - 1 - i) * 8)
+   store64(reversed, v, i * 8)
+   store64(chained, v, (n + i) * 8)
+   i += 1
+}
 mut sum = 0
 i = 0
-while i < len(chained) {
-   sum += chained.get(i)
+while i < n * 2 {
+   sum += load64(chained, i * 8)
    i += 1
 }
 def end = ticks()
-assert(len(mapped) == n, "iter map size")
-assert(len(reversed) == n, "iter reverse size")
-assert(len(chained) == len(mapped) + len(reversed), "iter chain size")
+free(xs)
+free(mapped)
+free(reversed)
+free(chained)
 print("Iter benchmark passed, sum =", sum)
 print("Time(ns): ", end - start)
+print("checksum=", sum)
+print("elapsed_ns=", end - start)
 NY
   source c <<'C'
 #include <stdint.h>

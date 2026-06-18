@@ -9,7 +9,7 @@ shape decode {
 use std.core
 use std.util.parse.image as image
 fn main(){
-   mut in_path = "etc/assets/models/gltf/tests/CompareVolume/Compare_Volume_img2.png"
+   mut in_path = "etc/assets/images/prototype/prototype_grid_dark_small.png"
    mut out_path = ""
    mut save_fmt = "auto"
    if(argc() > 1){ in_path = argv(1) }

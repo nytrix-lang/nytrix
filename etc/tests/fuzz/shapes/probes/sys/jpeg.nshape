@@ -6,10 +6,8 @@ shape jpeg {
   expect compile_and_run
   source ny <<'NY'
 use std.core
-use std.core.common as common
-use std.os (file_exists, file_read)
-use std.os.path as ospath
 use std.math.parse.img.jpeg as jpeg
+
 fn make_rgba(int w, int h) any {
    def data = malloc(w * h * 4)
    assert(data != 0, "jpeg rgba allocation")
@@ -28,6 +26,7 @@ fn make_rgba(int w, int h) any {
    }
    data
 }
+
 def rgba = make_rgba(8, 8)
 def encoded = jpeg.encode({"width": 8, "height": 8, "channels": 4, "data": rgba}, 88)
 assert(is_str(encoded), "jpeg encoded bytes")
@@ -43,19 +42,6 @@ def pixels = decoded.get("data", 0)
 assert(is_str(pixels), "jpeg decoded pixel buffer")
 assert(pixels.len == 8 * 8 * 4, "jpeg decoded pixel length")
 assert(load8(pixels, 3) == 255, "jpeg decoded alpha")
-if !common.env_truthy("NY_JPEG_DISABLE_TURBO") {
-   def asset_path = ospath.resolve_repo_asset("tmp/assets/models/gltf/tests/DamagedHelmet/Default_albedo.jpg")
-   if file_exists(asset_path) {
-      def asset_res = file_read(asset_path)
-      assert(!is_err(asset_res), "jpeg asset read")
-      def asset_img = jpeg.decode(unwrap(asset_res))
-      assert(is_dict(asset_img), "jpeg asset decoded")
-      assert(asset_img.get("width") == 2048, "jpeg asset width")
-      assert(asset_img.get("height") == 2048, "jpeg asset height")
-      assert(asset_img.get("channels") == 4, "jpeg asset channels")
-      assert(is_str(asset_img.get("data", 0)), "jpeg asset pixels")
-   }
-}
 free(rgba)
 print("jpeg_probe ok")
 NY

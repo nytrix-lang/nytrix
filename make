@@ -3925,7 +3925,7 @@ def run_make_profile(build_root: Path, kind: str, jobs: int, args: list[str]) ->
         cmake_build(build_root, kind, ["ny", "ny-test", "ny-fuzz"], jobs)
         if rest:
             return run_tool(build_root, kind, "ny-fuzz", rest)
-        return run_tool(build_root, kind, "ny-fuzz", ["validate-shapes", "etc/tests/fuzz"])
+        return run_tool(build_root, kind, "ny-fuzz", ["validate-shapes", default_fuzz_shape_dir()])
     if mode == "afl":
         afl = shutil.which("afl-fuzz")
         if not afl:
@@ -3985,6 +3985,12 @@ def run_tool(build_root: Path, kind: str, name: str, args: list[str], timeout: f
         if interrupted or name == "ny" or rc == 130:
             restore_tty_visuals()
 
+def default_fuzz_shape_dir() -> str:
+    for rel in ("tmp/tests/fuzz/shapes", "etc/tests/fuzz/shapes", "etc/tests/fuzz"):
+        if (ROOT / rel).exists():
+            return rel
+    return "tmp/tests/fuzz/shapes"
+
 def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     started = time.perf_counter()
     test_jobs = resolve_test_jobs(jobs)
@@ -4025,7 +4031,7 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     return rc
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
-    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "docs", "web-demos", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web-demos", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -4160,6 +4166,7 @@ def print_help() -> None:
         ("Check", (
             ("fmt/check/tidy", "format, parse-check, or tidy source"),
             ("test/fuzz", "run tests and smoke fuzzing"),
+            ("bench", "run public C-vs-Ny benchmark shapes"),
             ("asan/ubsan", "run tests under sanitizer builds"),
             ("profile", "time, perf, gdb, sanitizer, and fuzz wrappers"),
             ("perf/gprof", "run performance tooling"),
@@ -5577,7 +5584,7 @@ def main() -> int:
     build_root, notice = resolve_build_dir()
     first_repl_bootstrap = bootstrap_needed_for_repl(build_root, kind, cmds)
     inspect_cmds = {"env", "targets", "doctor"}
-    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "test", "perf", "profile", "docs", "web-demos", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
+    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "test", "perf", "profile", "docs", "web-demos", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
     all_tool_style = all(c in tool_style_cmds for c in cmds)
     if all_tool_style and not first_repl_bootstrap:
         # Keep tool invocations clean by default (./make fmt/test/ny...) even if env
@@ -5654,8 +5661,10 @@ def main() -> int:
             targets = ["ny", "std", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"]
         elif cmd in ("fmt", "analyze", "check", "tidy"):
             targets = ["ny-fmt"]
-        elif cmd in ("test", "asan", "ubsan", "fuzz"):
+        elif cmd in ("test", "asan", "ubsan"):
             targets = ["ny", "ny-test"]
+        elif cmd in ("fuzz", "bench"):
+            targets = ["ny", "ny-test", "ny-fuzz"]
         elif cmd in ("cross", "cross-run"):
             targets = ["ny"]
         elif cmd == "profile":
@@ -5783,7 +5792,9 @@ def main() -> int:
             elif extra:
                 rc = run_tool(build_root, active_kind, "ny-fuzz", extra)
             else:
-                rc = run_tool(build_root, active_kind, "ny-fuzz", ["validate-shapes", "etc/tests/fuzz"])
+                rc = run_tool(build_root, active_kind, "ny-fuzz", ["validate-shapes", default_fuzz_shape_dir()])
+        elif cmd == "bench":
+            rc = run_tool(build_root, active_kind, "ny-fuzz", ["bench", "real", *extra])
         elif cmd in ("optcheck", "fb"):
             raise SystemExit(f"make: command '{cmd}' is not yet ported to native C path")
         else:

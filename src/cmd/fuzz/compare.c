@@ -446,7 +446,8 @@ typedef struct {
 } triage_item_t;
 
 static const char *const PERF_REAL_CASES[] = {
-  "branch", "intops", "string", "sqlscan", "jsonscan", "hashjoin", "poly"
+  "binary", "calls", "dict", "fibonacci", "float", "intops", "iter",
+  "list", "matrix", "mandelbrot", "sieve", "spectral", "string", "vector"
 };
 
 static int perf_real_case_count(void) {
@@ -39168,9 +39169,9 @@ static int cmd_public_bench_real(int argc, char **argv) {
   const char *ny_opt = value_after_equals(argc, argv, 3, "--ny-opt", "");
   if (runs < 1) runs = 1;
   if (warmup < 0) warmup = 0;
-  const char *ny_opt_arg = "-O3";
-  const char *ny_profile_arg = "--profile=peak";
-  const char *ny_flavor = "peak";
+  const char *ny_opt_arg = NULL;
+  const char *ny_profile_arg = NULL;
+  const char *ny_flavor = "native";
   if (has_flag_after(argc, argv, 3, "--ny-native") ||
       strcmp(ny_opt, "native") == 0 || strcmp(ny_opt, "none") == 0) {
     ny_opt_arg = NULL;
@@ -39206,21 +39207,23 @@ static int cmd_public_bench_real(int argc, char **argv) {
   if (!cc || !*cc) cc = "gcc";
   string_list_t rows = {0}, failures = {0};
   char *bench_dir = NULL;
-  (void)nynth_asprintf(&bench_dir, "build/native_perf/run_%ld_%d",
-                       (long)time(NULL), (int)getpid());
+  (void)asprintf(&bench_dir, "%s/build/native_perf/run_%ld_%d",
+                 root, (long)time(NULL), (int)getpid());
+  if (bench_dir) ny_ensure_dir_recursive(bench_dir);
   if (!bench_dir || !mkdir_p(bench_dir)) {
     (void)string_list_push_take(&failures, make_worker_failure_row("bench-real", "prepare",
                                                                   1, "", "build directory failed"));
   }
   for (int i = 0; i < case_count; ++i) {
     char *ny_path = NULL, *c_path = NULL, *shape_path = NULL, *case_dir = NULL, *c_elf = NULL, *ny_elf = NULL;
-    (void)nynth_asprintf(&ny_path, "shapes/perf/%s/perf_ny.ny", cases[i]);
-    (void)nynth_asprintf(&shape_path, "shapes/perf/perf-%s.nshape", cases[i]);
-    (void)nynth_asprintf(&c_path, "build/perf/baked-sources/%s/perf_c.c", cases[i]);
+    (void)asprintf(&ny_path, "%s/build/perf/baked-sources/%s/perf_ny.ny", root, cases[i]);
+    (void)asprintf(&shape_path, "%s/etc/tests/fuzz/bench/%s.nshape", root, cases[i]);
+    (void)asprintf(&c_path, "%s/build/perf/baked-sources/%s/perf_c.c", root, cases[i]);
     (void)asprintf(&case_dir, "%s/%s", bench_dir ? bench_dir : "build/native_perf", cases[i]);
     (void)asprintf(&c_elf, "%s/%s_c_o3.elf", case_dir ? case_dir : "", cases[i]);
     (void)asprintf(&ny_elf, "%s/%s_ny_%s.elf", case_dir ? case_dir : "", cases[i], ny_flavor);
-    bool ok = ny_path && c_path && shape_path && path_exists_file(ny_path) &&
+    bool ok = ny_path && c_path && shape_path &&
+              materialize_shape_source_block(shape_path, "ny", ny_path) &&
               materialize_shape_source_block(shape_path, "c", c_path);
     proc_result_t c_compile = {0}, ny_compile = {0};
     perf_run_result_t c_run = {0}, ny_run = {0};
