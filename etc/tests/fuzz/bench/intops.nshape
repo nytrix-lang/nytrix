@@ -24,6 +24,8 @@ while i < n {
 def end = ticks()
 print("Intops benchmark passed, acc =", acc)
 print("Time(ns): ", end - start)
+print("checksum=", acc)
+print("elapsed_ns=", end - start)
 NY
   source c <<'C'
 #include <stdint.h>

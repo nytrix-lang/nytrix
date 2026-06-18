@@ -8,7 +8,8 @@ shape svg {
 use std.core
 use std.core.error
 use std.math.parse.img.svg as svg
-def path = "tmp/assets/images/icons/tree.svg"
+
+def path = "etc/assets/images/icons/tree.svg"
 print("svg available=" + to_str(svg.available()) + " backend=" + svg.backend_name())
 def img = svg.load_path(path)
 assert(img, "svg load " + path + ": " + svg.last_error())
@@ -20,22 +21,13 @@ assert(h > 0, "svg height")
 assert(img.get("channels", 0) == 4, "svg channels")
 assert(is_str(data) && data.len == w * h * 4, "svg rgba bytes")
 mut alpha_nonzero = 0
-mut alpha_full = 0
-mut rgb_nonzero = 0
 mut i = 0
 while i < w * h {
-   def off = i * 4
-   def r = load8(data, off) & 255
-   def g = load8(data, off + 1) & 255
-   def b = load8(data, off + 2) & 255
-   def a = load8(data, off + 3) & 255
+   def a = load8(data, i * 4 + 3) & 255
    if a > 0 { alpha_nonzero += 1 }
-   if a == 255 { alpha_full += 1 }
-   if r > 0 || g > 0 || b > 0 { rgb_nonzero += 1 }
    i += 1
 }
 assert(alpha_nonzero > 0, "svg has visible pixels")
 assert(alpha_nonzero < w * h, "svg keeps transparent background")
-print("svg image=" + to_str(w) + "x" + to_str(h) + " channels=4 alpha_nonzero=" + to_str(alpha_nonzero) + " alpha_full=" + to_str(alpha_full) + " rgb_nonzero=" + to_str(rgb_nonzero))
 NY
 }

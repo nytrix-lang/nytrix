@@ -96,6 +96,7 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-gmp
             mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-z3
       - name: test
         shell: msys2 {0}
         run: python3 -B ./make test

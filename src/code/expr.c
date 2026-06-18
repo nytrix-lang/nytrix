@@ -20,6 +20,9 @@
 #include <llvm-c/Support.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
+#ifdef NYTRIX_HAS_Z3
+#include <z3.h>
+#endif
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5213,6 +5216,44 @@ static void ny_emit_f64_div_zero_guard(codegen_t *cg, LLVMValueRef rf) {
   ny_pos(cg, ok_bb);
 }
 
+static bool ny_z3_range_excludes_zero(int64_t min_raw, int64_t max_raw,
+                                      bool *decided) {
+  if (decided)
+    *decided = false;
+#ifdef NYTRIX_HAS_Z3
+  Z3_config cfg = Z3_mk_config();
+  if (!cfg)
+    return false;
+  Z3_context z3 = Z3_mk_context(cfg);
+  Z3_solver solver = Z3_mk_solver(z3);
+  Z3_solver_inc_ref(z3, solver);
+
+  Z3_sort i64 = Z3_mk_bv_sort(z3, 64);
+  Z3_symbol x_sym = Z3_mk_string_symbol(z3, "divisor");
+  Z3_ast x = Z3_mk_const(z3, x_sym, i64);
+  Z3_ast lo = Z3_mk_int64(z3, min_raw, i64);
+  Z3_ast hi = Z3_mk_int64(z3, max_raw, i64);
+  Z3_ast zero = Z3_mk_int64(z3, 0, i64);
+
+  Z3_solver_assert(z3, solver, Z3_mk_bvsge(z3, x, lo));
+  Z3_solver_assert(z3, solver, Z3_mk_bvsle(z3, x, hi));
+  Z3_solver_assert(z3, solver, Z3_mk_eq(z3, x, zero));
+  Z3_lbool status = Z3_solver_check(z3, solver);
+  bool excludes_zero = status == Z3_L_FALSE;
+  if (decided)
+    *decided = status != Z3_L_UNDEF;
+
+  Z3_solver_dec_ref(z3, solver);
+  Z3_del_context(z3);
+  Z3_del_config(cfg);
+  return excludes_zero;
+#else
+  (void)min_raw;
+  (void)max_raw;
+  return false;
+#endif
+}
+
 static bool ny_f64_expr_proven_nonzero(codegen_t *cg, scope *scopes,
                                        size_t depth, expr_t *e) {
   if (!e)
@@ -5223,9 +5264,28 @@ static bool ny_f64_expr_proven_nonzero(codegen_t *cg, scope *scopes,
     if (e->as.literal.kind == NY_LIT_FLOAT)
       return e->as.literal.as.f != 0.0;
   }
+  if (ny_call_expr_is_f64_cast(cg, scopes, depth, e) &&
+      e->as.call.args.len == 1) {
+    expr_t *arg = e->as.call.args.data[0].val;
+    int64_t cast_min_raw = 0, cast_max_raw = 0;
+    if (expr_int_range(cg, scopes, depth, arg, &cast_min_raw,
+                       &cast_max_raw)) {
+      bool z3_decided = false;
+      bool z3_nonzero =
+          ny_z3_range_excludes_zero(cast_min_raw, cast_max_raw, &z3_decided);
+      if (z3_decided)
+        return z3_nonzero;
+      return cast_min_raw > 0 || cast_max_raw < 0;
+    }
+  }
   int64_t min_raw = 0, max_raw = 0;
-  if (expr_int_range(cg, scopes, depth, e, &min_raw, &max_raw))
+  if (expr_int_range(cg, scopes, depth, e, &min_raw, &max_raw)) {
+    bool z3_decided = false;
+    bool z3_nonzero = ny_z3_range_excludes_zero(min_raw, max_raw, &z3_decided);
+    if (z3_decided)
+      return z3_nonzero;
     return min_raw > 0 || max_raw < 0;
+  }
   return false;
 }
 

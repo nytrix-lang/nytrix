@@ -1,0 +1,63 @@
+shape calls {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum", "dispatch"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+
+def n = 20000
+
+def start = ticks()
+mut acc = 1
+mut i = 0
+while i < n {
+   def x = acc + i
+   def y = i + 7
+   def z = x + y
+   def low = z & 255
+   def raw = (x * 31) + (y * 17) + low
+   acc = raw - ((raw / 1000003) * 1000003)
+   i += 1
+}
+def end = ticks()
+print("Call benchmark checksum =", acc)
+print("Time(ns): ", end - start)
+print("checksum=", acc)
+print("elapsed_ns=", end - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
+}
+
+static int mix(int x, int y) {
+    int z = x + y;
+    int low = z & 255;
+    int raw = (x * 31) + (y * 17) + low;
+    return raw - ((raw / 1000003) * 1000003);
+}
+
+static int step(int acc, int i) {
+    return mix(acc + i, i + 7);
+}
+
+int main(void) {
+    const int n = 20000;
+    int acc = 1;
+    int64_t start = now_ns();
+    for (int i = 0; i < n; i++) acc = step(acc, i);
+    int64_t end = now_ns();
+    printf("checksum=%d\n", acc);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

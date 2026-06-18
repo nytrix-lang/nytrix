@@ -8,7 +8,7 @@ shape loop {
 use std.core
 use std.util.parse.image as img
 fn main(){
-   def path = "etc/assets/models/gltf/tests/MorphPrimitivesTest/uv_texture.jpg"
+   def path = "etc/assets/images/prototype/prototype_grid_dark_small.png"
    mut i = 0
    while(i < 400){
       def im = img.load(path)
