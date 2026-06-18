@@ -8,12 +8,12 @@ shape aniso_png_mix {
 use std.core
 use std.util.parse.image as img
 def FILES = [
-   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img0.jpg",
-   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img1.png",
-   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img2.jpg",
-   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img3.png",
-   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img4.png",
-   "etc/assets/models/gltf/tests/AnisotropyRotationTest/AnisoDonutLabels.png"
+   "etc/assets/images/prototype/prototype_grid_dark_small.png",
+   "etc/assets/images/prototype/prototype_grid_dark_large.png",
+   "etc/assets/images/prototype/prototype_grid_light_small.png",
+   "etc/assets/images/prototype/prototype_grid_light_large.png",
+   "etc/assets/images/prototype/prototype_grid_dark_dotted.png",
+   "etc/assets/images/prototype/prototype_grid_light_dotted.png"
 ]
 fn main(){
    mut round = 0

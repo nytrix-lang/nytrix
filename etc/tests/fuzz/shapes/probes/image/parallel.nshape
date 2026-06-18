@@ -10,10 +10,10 @@ use std.core
 use std.util.parse.image as image
 use std.os.thread
 def FILES = [
-   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img0.jpg",
-   "etc/assets/models/gltf/tests/MorphStressTest/Base_AO.png",
-   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img2.jpg",
-   "etc/assets/models/gltf/tests/CompareAnisotropy/Compare_Anisotropy_img3.png"
+   "etc/assets/images/prototype/prototype_grid_dark_small.png",
+   "etc/assets/images/prototype/prototype_grid_light_small.png",
+   "etc/assets/images/prototype/prototype_grid_dark_dotted.png",
+   "etc/assets/images/prototype/prototype_grid_light_dotted.png"
 ]
 fn worker(args){
    def id = int(get(args, 0, 0))

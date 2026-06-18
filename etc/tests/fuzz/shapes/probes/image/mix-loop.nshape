@@ -8,13 +8,12 @@ shape mix_loop {
 use std.core
 use std.util.parse.image as img
 def FILES = [
-   "etc/assets/models/gltf/tests/PointLightIntensityTest/LampColorNames.png",
-   "etc/assets/models/gltf/tests/TextureCoordinateTest/TextureCoordinateTemplate.png",
-   "etc/assets/models/gltf/tests/TextureEncodingTest/0_136_0_gamma.png",
-   "etc/assets/models/gltf/tests/TextureEncodingTest/SlotLabels.png",
-   "etc/assets/models/gltf/tests/TextureTransformTest/Arrow.png",
-   "etc/assets/models/gltf/tests/VertexColorTest/VertexColorChecks.png",
-   "etc/assets/models/gltf/tests/MorphPrimitivesTest/uv_texture.jpg"
+   "etc/assets/images/prototype/prototype_grid_dark_small.png",
+   "etc/assets/images/prototype/prototype_grid_dark_small_text.png",
+   "etc/assets/images/prototype/prototype_grid_light_small.png",
+   "etc/assets/images/prototype/prototype_grid_light_small_text.png",
+   "etc/assets/images/prototype/prototype_grid_dark_large.png",
+   "etc/assets/images/prototype/prototype_grid_light_large.png"
 ]
 fn main(){
    mut round = 0

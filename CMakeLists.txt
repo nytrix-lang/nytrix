@@ -31,7 +31,7 @@ set(NYTRIX_DWARF_VERSION "5" CACHE STRING "DWARF version for Unix-like debug bui
 set_property(CACHE NYTRIX_DWARF_VERSION PROPERTY STRINGS 2 3 4 5)
 
 set(NYTRIX_VERSION_MAJOR "0")
-set(NYTRIX_VERSION_MINOR "5")
+set(NYTRIX_VERSION_MINOR "6")
 set(NYTRIX_VERSION_PATCH "0")
 set(NYTRIX_VERSION_REF "" CACHE STRING
     "Git ref used for version metadata; empty prefers the upstream remote ref")
@@ -103,7 +103,7 @@ if(NOT _version_major)
   set(_version_major "0")
 endif()
 if(NOT _version_minor)
-  set(_version_minor "5")
+  set(_version_minor "6")
 endif()
 if(NOT _version_patch)
   set(_version_patch "0")
@@ -307,6 +307,7 @@ if (NOT CMAKE_TOOLCHAIN_FILE)
     execute_process(COMMAND ${LLVM_CONFIG_EXE} --cflags OUTPUT_VARIABLE LLVM_CFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(COMMAND ${LLVM_CONFIG_EXE} --ldflags OUTPUT_VARIABLE LLVM_LDFLAGS_RAW OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(COMMAND ${LLVM_CONFIG_EXE} --libs all --system-libs OUTPUT_VARIABLE LLVM_LIBS_RAW OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND ${LLVM_CONFIG_EXE} --libdir OUTPUT_VARIABLE LLVM_LIBDIR_RAW OUTPUT_STRIP_TRAILING_WHITESPACE)
 
     if (NOT NYTRIX_LLVM_INCLUDE)
       execute_process(COMMAND ${LLVM_CONFIG_EXE} --includedir OUTPUT_VARIABLE NYTRIX_LLVM_INCLUDE OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -314,6 +315,7 @@ if (NOT CMAKE_TOOLCHAIN_FILE)
 
     set(NYTRIX_LLVM_CFLAGS "${LLVM_CFLAGS}")
     set(NYTRIX_LLVM_LDFLAGS "${LLVM_LDFLAGS_RAW}")
+    set(NYTRIX_LLVM_LIBDIR "${LLVM_LIBDIR_RAW}")
     if (LLVM_VERSION_RAW MATCHES "^([0-9]+)")
       set(NYTRIX_LLVM_VERSION_MAJOR "${CMAKE_MATCH_1}")
       if (NYTRIX_LLVM_VERSION_MAJOR VERSION_LESS 16 OR
@@ -405,6 +407,9 @@ set(CMAKE_REQUIRED_INCLUDES "${_nytrix_saved_required_includes}")
 
 set(NYTRIX_CLANG_LIBRARY "" CACHE FILEPATH "libclang library")
 set(_nytrix_llvm_lib_paths)
+if (NYTRIX_LLVM_LIBDIR)
+  list(APPEND _nytrix_llvm_lib_paths "${NYTRIX_LLVM_LIBDIR}")
+endif()
 if (NYTRIX_LLVM_INCLUDE)
   get_filename_component(_nytrix_llvm_prefix "${NYTRIX_LLVM_INCLUDE}" DIRECTORY)
   list(APPEND _nytrix_llvm_lib_paths "${_nytrix_llvm_prefix}/lib")
@@ -415,11 +420,17 @@ list(APPEND _nytrix_llvm_lib_paths
   "/opt/homebrew/opt/llvm/lib"
   "/usr/local/opt/llvm/lib"
   "/usr/lib/llvm-22/lib"
+  "/usr/lib/llvm22/lib"
   "/usr/lib/llvm-21/lib"
+  "/usr/lib/llvm21/lib"
   "/usr/lib/llvm-20/lib"
+  "/usr/lib/llvm20/lib"
   "/usr/lib/llvm-19/lib"
+  "/usr/lib/llvm19/lib"
   "/usr/lib/llvm-18/lib"
+  "/usr/lib/llvm18/lib"
   "/usr/lib/llvm-17/lib"
+  "/usr/lib/llvm17/lib"
   "C:/msys64/ucrt64/lib"
   "C:/msys64/clang64/lib"
   "C:/msys64/mingw64/lib"
@@ -539,7 +550,7 @@ set_property(CACHE NYTRIX_ENABLE_BOLT PROPERTY STRINGS off on)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(ZLIB REQUIRED)
 
-set(NYTRIX_ENABLE_Z3 "auto" CACHE STRING "Enable Z3-backed finite constraint solving: auto|on|off")
+set(NYTRIX_ENABLE_Z3 "on" CACHE STRING "Enable Z3-backed finite constraint solving: auto|on|off")
 set_property(CACHE NYTRIX_ENABLE_Z3 PROPERTY STRINGS auto on off)
 string(TOLOWER "${NYTRIX_ENABLE_Z3}" _nytrix_enable_z3_lc)
 if (NOT _nytrix_enable_z3_lc MATCHES "^(auto|on|off)$")
@@ -554,12 +565,23 @@ if (NOT _nytrix_enable_z3_lc STREQUAL "off")
   find_path(NYTRIX_Z3_INCLUDE_DIR
     NAMES z3.h
     HINTS ${NYTRIX_Z3_PC_INCLUDE_DIRS}
-    PATHS "/opt/homebrew/include" "/usr/local/include" "C:/vcpkg/installed/x64-windows/include"
+    PATHS
+      "$ENV{MSYSTEM_PREFIX}/include"
+      "$ENV{MINGW_PREFIX}/include"
+      "/opt/homebrew/include"
+      "/usr/local/include"
+      "C:/vcpkg/installed/x64-windows/include"
   )
   find_library(NYTRIX_Z3_LIBRARY
     NAMES z3 libz3
     HINTS ${NYTRIX_Z3_PC_LIBRARY_DIRS}
-    PATHS "/opt/homebrew/lib" "/usr/local/lib" "C:/vcpkg/installed/x64-windows/lib"
+    PATHS
+      "$ENV{MSYSTEM_PREFIX}/lib"
+      "$ENV{MINGW_PREFIX}/lib"
+      "${NYTRIX_ROOT}/build/vendor/lib/host"
+      "/opt/homebrew/lib"
+      "/usr/local/lib"
+      "C:/vcpkg/installed/x64-windows/lib"
   )
   if (NYTRIX_Z3_INCLUDE_DIR AND NYTRIX_Z3_LIBRARY)
     set(NYTRIX_Z3_FOUND TRUE)
