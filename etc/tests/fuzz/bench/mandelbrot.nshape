@@ -10,12 +10,12 @@ use std.os.time
 def size = 96
 def ITERS = 64
 ;; Mandelbrot Set (Benchmark)
-fn mandelbrot(w, h, max_iter) {
+fn mandelbrot(int w, int h, int max_iter) int {
    mut count = 0
-   def sx = 4.0 / w
-   def sy = 4.0 / h
-   def hw_sx = - (w * 0.6666667) * sx
-   def hh_sy = - (h * 0.5) * sy
+   def sx = 4.0 / float(w)
+   def sy = 4.0 / float(h)
+   def hw_sx = - (float(w) * 0.6666667) * sx
+   def hh_sy = - (float(h) * 0.5) * sy
    def four = 4.0
    mut c_im = hh_sy
    mut y = 0
@@ -53,6 +53,8 @@ def res = mandelbrot(WIDTH, HEIGHT, ITERS)
 def t1 = ticks()
 print("Points:", res)
 print("Time:", (t1 - t0) / 1000000, "ms")
+print("checksum=", res)
+print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
 #include <stdint.h>
