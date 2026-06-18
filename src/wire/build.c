@@ -1163,6 +1163,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   const char *arm_float_abi_flag = ny_builder_arm_float_abi_flag();
 #endif
 #ifdef _WIN32
+  (void)target_windows;
   (void)link_strip;
   bool msvc = is_msvc_cc(cc);
   if (msvc) {
