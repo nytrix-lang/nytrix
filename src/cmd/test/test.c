@@ -553,6 +553,26 @@ static int show_pass_output_enabled(void) {
   return test_env_truthy("NYTRIX_TEST_SHOW_PASS_OUTPUT");
 }
 
+static int test_ascii_symbols(void) {
+  const char *v = getenv("NYTRIX_UI_SYMBOLS");
+  if (!v || !*v)
+    v = getenv("NYTRIX_ASCII");
+  if (!v || !*v)
+    return 0;
+  return strcmp(v, "ascii") == 0 || strcmp(v, "plain") == 0 || strcmp(v, "text") == 0 ||
+         strcmp(v, "safe") == 0 || ny_env_is_truthy(v);
+}
+
+static const char *test_symbol(const char *sym) {
+  if (!test_ascii_symbols() || !sym)
+    return sym ? sym : "-";
+  if (strcmp(sym, "✓") == 0)
+    return "+";
+  if (strcmp(sym, "✗") == 0)
+    return "x";
+  return sym;
+}
+
 static int make_test_capture_tmp(char *tmp, size_t tmp_len, const char *prefix) {
   if (!tmp || tmp_len == 0)
     return -1;
@@ -609,11 +629,14 @@ static void print_test_progress_line(int pct, const char *a, const char *a_color
     format_test_time(fallback, sizeof(fallback), 0);
     time_label = fallback;
   }
+  const char *aa = test_symbol(a);
+  const char *bb = test_symbol(b);
+  const char *cc = test_symbol(c);
   printf("%s%3d%%%s [%s%s%s/%s%s%s/%s%s%s] %s%8s%s %s",
          nyt_clr(NYT_GRAY), pct, nyt_clr(NYT_RESET),
-         nyt_clr(a_color ? a_color : NYT_GRAY), a ? a : "-", nyt_clr(NYT_RESET),
-         nyt_clr(b_color ? b_color : NYT_GRAY), b ? b : "-", nyt_clr(NYT_RESET),
-         nyt_clr(c_color ? c_color : NYT_GRAY), c ? c : "-", nyt_clr(NYT_RESET),
+         nyt_clr(a_color ? a_color : NYT_GRAY), aa, nyt_clr(NYT_RESET),
+         nyt_clr(b_color ? b_color : NYT_GRAY), bb, nyt_clr(NYT_RESET),
+         nyt_clr(c_color ? c_color : NYT_GRAY), cc, nyt_clr(NYT_RESET),
          nyt_clr(NYT_GRAY), time_label, nyt_clr(NYT_RESET), disp_path(path));
   if (suffix && *suffix)
     printf(" %s", suffix);

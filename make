@@ -41,7 +41,13 @@ def apply_builtin_env_defaults() -> None:
     rt_init = ROOT / "src" / "rt" / "init.c"
     if rt_init.exists():
         os.environ.setdefault("NYTRIX_RT_SRC", str(rt_init))
-    if not os.environ.get("CC"):
+    sysname = platform.system()
+    is_win = sysname == "Windows" or sysname.startswith(("MSYS_NT", "MINGW", "CYGWIN_NT"))
+    # On Windows, do not snapshot the first clang on PATH here.  The real
+    # Windows dependency pass below chooses a coherent LLVM/GMP toolchain
+    # (usually one MSYS2/UCRT prefix).  Grabbing Program Files LLVM before
+    # that can mix native clang with MSYS2 headers and break system headers.
+    if not is_win and not os.environ.get("CC"):
         cc = _select_default_cc()
         if cc:
             os.environ["CC"] = cc
@@ -1060,22 +1066,43 @@ def _windows_configure_msys2_env(prefix: Path) -> None:
     bin_dir = prefix / "bin"
     if not bin_dir.exists():
         return
+    prefix_name = prefix.name.lower()
+    msystem = {
+        "ucrt64": "UCRT64",
+        "clang64": "CLANG64",
+        "mingw64": "MINGW64",
+        "clangarm64": "CLANGARM64",
+    }.get(prefix_name)
+    if msystem:
+        os.environ["MSYSTEM"] = msystem
     os.environ["MSYSTEM_PREFIX"] = _windows_cmake_path(prefix)
     os.environ["MINGW_PREFIX"] = _windows_cmake_path(prefix)
     _prepend_env_path("PATH", bin_dir)
     _prepend_env_path("CMAKE_PREFIX_PATH", prefix)
     _prepend_env_path("PKG_CONFIG_PATH", prefix / "lib" / "pkgconfig")
     _prepend_env_path("PKG_CONFIG_PATH", prefix / "share" / "pkgconfig")
-    os.environ.setdefault("ZLIB_ROOT", _windows_cmake_path(prefix))
-    cc = _windows_tool_path(bin_dir, "clang")
-    cxx = _windows_tool_path(bin_dir, "clang++")
-    if cc:
+    os.environ["ZLIB_ROOT"] = _windows_cmake_path(prefix)
+
+    # Keep the C/C++ compiler, llvm-config, pkg-config and import libraries
+    # from the same MSYS2 prefix.  This prevents the bad mix seen from cmd.exe:
+    # Program Files LLVM clang + C:/msys64/ucrt64 headers/libs.
+    keep = _env_flag("NYTRIX_WINDOWS_KEEP_TOOLCHAIN", False) or _windows_deps_provider() == "native"
+    cc = _windows_tool_path(bin_dir, "clang") or _windows_tool_path(bin_dir, "gcc")
+    cxx = _windows_tool_path(bin_dir, "clang++") or _windows_tool_path(bin_dir, "g++")
+    if cc and not keep:
+        os.environ["CC"] = str(cc)
+        os.environ["CMAKE_C_COMPILER"] = _windows_cmake_path(cc)
+    elif cc:
         os.environ.setdefault("CC", str(cc))
-    if cxx:
+    if cxx and not keep:
+        os.environ["CXX"] = str(cxx)
+        os.environ["CMAKE_CXX_COMPILER"] = _windows_cmake_path(cxx)
+    elif cxx:
         os.environ.setdefault("CXX", str(cxx))
+
     pkg_config = _windows_tool_path(bin_dir, "pkg-config") or _windows_tool_path(bin_dir, "pkgconf")
     if pkg_config:
-        os.environ.setdefault("PKG_CONFIG", str(pkg_config))
+        os.environ["PKG_CONFIG"] = str(pkg_config)
 
 def _windows_msys2_packages_for(missing: list[str]) -> list[str]:
     _subdir, pkg_prefix = _windows_msys2_layout()
@@ -1160,6 +1187,15 @@ def _windows_configure_llvm_env(llvm_root: Path) -> None:
     else:
         _prepend_env_path("PATH", bin_dir)
         _prepend_env_path("CMAKE_PREFIX_PATH", llvm_root)
+        if not _env_flag("NYTRIX_WINDOWS_KEEP_TOOLCHAIN", False):
+            cc = _windows_tool_path(bin_dir, "clang") or _windows_tool_path(bin_dir, "clang-cl")
+            cxx = _windows_tool_path(bin_dir, "clang++") or _windows_tool_path(bin_dir, "clang-cl")
+            if cc:
+                os.environ["CC"] = str(cc)
+                os.environ["CMAKE_C_COMPILER"] = _windows_cmake_path(cc)
+            if cxx:
+                os.environ["CXX"] = str(cxx)
+                os.environ["CMAKE_CXX_COMPILER"] = _windows_cmake_path(cxx)
     os.environ["LLVM_ROOT"] = str(llvm_root)
     os.environ["NYTRIX_LLVM_INCLUDE"] = str(include_dir)
     os.environ["NYTRIX_LLVM_HEADERS"] = str(include_dir)
@@ -1791,8 +1827,16 @@ def _detect_vendor_lib_dir(build_root: Path) -> Path | None:
             return lib_dir
     return None
 
+def _same_cmake_path(a: str, b: str) -> bool:
+    def norm(x: str) -> str:
+        return x.strip().strip('"').replace("\\", "/").lower()
+    return norm(a) == norm(b)
+
 def cmake_configure(build_root: Path, kind: str) -> Path:
     configure_macos_llvm_env()
+    if host_os() == "windows":
+        _windows_ensure_llvm()
+        _windows_ensure_gmp()
     bdir = cmake_build_dir(build_root, kind)
     bdir.mkdir(parents=True, exist_ok=True)
     cache = bdir / "CMakeCache.txt"
@@ -1823,15 +1867,28 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
         raw_ldflags = (raw_ldflags + " " + " ".join(extra_ldflags)).strip()
     host_ldflags = cmake_flag_list(raw_ldflags)
     cache_matches_flags = True
+    win_cc = ""
+    win_cxx = ""
+    if host_os() == "windows":
+        win_cc = _windows_cmake_tool(os.environ.get("CMAKE_C_COMPILER") or os.environ.get("CC") or "")
+        win_cxx = _windows_cmake_tool(os.environ.get("CMAKE_CXX_COMPILER") or os.environ.get("CXX") or "")
     if cache.exists():
         cache_matches_flags = (
             cmake_cache_value(bdir, "NYTRIX_HOST_CFLAGS", "") == host_cflags and
             cmake_cache_value(bdir, "NYTRIX_HOST_LDFLAGS", "") == host_ldflags
         )
+        if host_os() == "windows":
+            cached_cc = cmake_cache_value(bdir, "CMAKE_C_COMPILER", "")
+            cached_cxx = cmake_cache_value(bdir, "CMAKE_CXX_COMPILER", "")
+            cache_matches_flags = (
+                cache_matches_flags and
+                (not win_cc or _same_cmake_path(cached_cc, win_cc)) and
+                (not win_cxx or _same_cmake_path(cached_cxx, win_cxx))
+            )
     if cache.exists() and cmake_configure_complete(bdir) and cache_matches_flags:
         boot_ok(f"cmake ({kind}) up to date (unchanged)")
         return bdir
-    if cache.exists() and not cmake_configure_complete(bdir):
+    if cache.exists() and (not cmake_configure_complete(bdir) or not cache_matches_flags):
         cache.unlink(missing_ok=True)
         shutil.rmtree(bdir / "CMakeFiles", ignore_errors=True)
     boot_step(f"cmake configure ({kind})")
@@ -1843,8 +1900,8 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
         f"-DNYTRIX_HOST_LDFLAGS={host_ldflags}",
     ]
     if host_os() == "windows":
-        cc = _windows_cmake_tool(os.environ.get("CC") or "")
-        cxx = _windows_cmake_tool(os.environ.get("CXX") or "")
+        cc = win_cc or _windows_cmake_tool(os.environ.get("CC") or "")
+        cxx = win_cxx or _windows_cmake_tool(os.environ.get("CXX") or "")
         if cc:
             cmd.append(f"-DCMAKE_C_COMPILER={cc}")
         if cxx:
