@@ -92,7 +92,7 @@ fn gltf_asset_root_envs() list {
 }
 
 fn gltf_asset_roots(any defaults=["tmp/assets/models"]) list {
-   "Runs the asset roots operation."
+   "Returns configured glTF asset roots. Local runtime model folders default to tmp/assets/models; env vars add or override roots."
    asset_catalog.asset_dirs_from_env(defaults, gltf_asset_root_envs())
 }
 

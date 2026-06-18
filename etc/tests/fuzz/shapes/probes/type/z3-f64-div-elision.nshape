@@ -1,0 +1,16 @@
+shape z3-f64-div-elision {
+  family "type"
+  generator "typed"
+  features ["z3", "division", "f64", "guard-elision"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def divisor = 3
+def value = 10.0 / divisor
+def cast_divisor = float(divisor + 4)
+def cast_value = 21.0 / cast_divisor
+print("z3-f64-div-elision", value, cast_value)
+NY
+}

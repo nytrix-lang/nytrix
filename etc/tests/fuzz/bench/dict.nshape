@@ -12,19 +12,22 @@ mut d = dict()
 def t_start = ticks()
 mut i = 0
 while i < 1000 {
-   d = d.set(to_str(i), i)
-   i = i + 1
+   d = d.set(i, i)
+   i += 1
 }
 def t_mid = ticks()
-print("Insert(100k items) took(ns): ", t_mid - t_start)
+print("Insert(1k items) took(ns): ", t_mid - t_start)
 mut idx = 0
+mut checksum = 0
 while idx < 1000 {
-   d.get(to_str(idx), -1)
-   idx = idx + 1
+   checksum += d.get(idx, -1)
+   idx += 1
 }
 def t_end = ticks()
-print("Lookup(100k items) took(ns): ", t_end - t_mid)
+print("Lookup(1k items) took(ns): ", t_end - t_mid)
 print("Time(ns): ", t_end - t_start)
+print("checksum=", checksum)
+print("elapsed_ns=", t_end - t_start)
 NY
   source c <<'C'
 #include <stdint.h>
@@ -37,25 +40,29 @@ static int64_t now_ns(void) {
     return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
 }
 
-typedef struct { char key[16]; int value; int used; } Entry;
+typedef struct { int key; int value; int used; } Entry;
 #define CAP 2048
-static uint32_t hash_key(const char *s) {
-    uint32_t h = 2166136261u;
-    while (*s) { h ^= (unsigned char)*s++; h *= 16777619u; }
-    return h;
+static uint32_t hash_key(int key) {
+    uint32_t x = (uint32_t)key;
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
 }
-static void dict_set(Entry *tab, const char *key, int value) {
+static void dict_set(Entry *tab, int key, int value) {
     uint32_t i = hash_key(key) & (CAP - 1);
-    while (tab[i].used && strcmp(tab[i].key, key) != 0) i = (i + 1) & (CAP - 1);
+    while (tab[i].used && tab[i].key != key) i = (i + 1) & (CAP - 1);
     tab[i].used = 1;
-    snprintf(tab[i].key, sizeof(tab[i].key), "%s", key);
+    tab[i].key = key;
     tab[i].value = value;
 }
-static int dict_get(Entry *tab, const char *key, int fallback) {
+static int dict_get(Entry *tab, int key, int fallback) {
     uint32_t i = hash_key(key) & (CAP - 1);
     for (int probes = 0; probes < CAP; probes++) {
         if (!tab[i].used) return fallback;
-        if (strcmp(tab[i].key, key) == 0) return tab[i].value;
+        if (tab[i].key == key) return tab[i].value;
         i = (i + 1) & (CAP - 1);
     }
     return fallback;
@@ -63,11 +70,10 @@ static int dict_get(Entry *tab, const char *key, int fallback) {
 int main(void) {
     Entry *tab = (Entry *)calloc(CAP, sizeof(Entry));
     if (!tab) return 2;
-    char key[16];
     int64_t checksum = 0;
     int64_t start = now_ns();
-    for (int i = 0; i < 1000; i++) { snprintf(key, sizeof(key), "%d", i); dict_set(tab, key, i); }
-    for (int i = 0; i < 1000; i++) { snprintf(key, sizeof(key), "%d", i); checksum += dict_get(tab, key, -1); }
+    for (int i = 0; i < 1000; i++) { dict_set(tab, i, i); }
+    for (int i = 0; i < 1000; i++) { checksum += dict_get(tab, i, -1); }
     int64_t end = now_ns();
     free(tab);
     printf("checksum=%lld\n", (long long)checksum);
@@ -76,4 +82,18 @@ int main(void) {
     return 0;
 }
 C
+  source py <<'PY'
+import time
+
+start = time.process_time_ns()
+d = {}
+for i in range(1000):
+    d[i] = i
+checksum = 0
+for i in range(1000):
+    checksum += d.get(i, -1)
+end = time.process_time_ns()
+print(f"checksum={checksum}")
+print(f"elapsed_ns={max(1, end - start)}")
+PY
 }

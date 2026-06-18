@@ -103,6 +103,17 @@ static int make_mkdir(const char *path) {
 #endif
 }
 
+static const char *default_fuzz_shape_dir(void) {
+  struct stat st;
+  if (stat("tmp/tests/fuzz/shapes", &st) == 0)
+    return "tmp/tests/fuzz/shapes";
+  if (stat("etc/tests/fuzz/shapes", &st) == 0)
+    return "etc/tests/fuzz/shapes";
+  if (stat("etc/tests/fuzz", &st) == 0)
+    return "etc/tests/fuzz";
+  return "tmp/tests/fuzz/shapes";
+}
+
 static int build_line_progress(const char *line, const char **rest) {
   if (!line || line[0] != '[')
     return 0;
@@ -319,7 +330,7 @@ static int resolve_jobs(int requested, int *out_jobs, char *note, size_t note_sz
 
 static int is_known_command(const char *s) {
   static const char *cmds[] = {"all",   "bin",      "fmt",   "std",   "std_bc", "test", "repl",
-                               "fuzz",  "docs",     "install", "uninstall", "clean", "debug",
+                               "fuzz",  "bench",    "docs",  "install", "uninstall", "clean", "debug",
                                "tidy",  "perf",     "gprof", "asan",  "ubsan", "optcheck",
                                "analyze", "check",  "fb",    "ny",    "run", "release"};
   for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
@@ -413,12 +424,13 @@ static void print_help(void) {
   printf("  %sbin%s        build the ny executable\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sfmt/check%s  run ny fmt / parse checks\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %stest%s       run native test matrix\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
+  printf("  %sbench%s      run public C-vs-Ny benchmark shapes\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sdocs%s       build documentation portal\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sperf%s       run performance gates\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sinstall%s    install ny and ny-lsp; tools are available as ny <tool>\n",
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sclean%s      remove build outputs\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
-  printf("  more: std, std_bc, repl, run, fuzz, tidy, gprof, asan, ubsan, optcheck, analyze, fb, ny\n");
+  printf("  more: std, std_bc, repl, run, fuzz, bench, tidy, gprof, asan, ubsan, optcheck, analyze, fb, ny\n");
   printf("\n%soptions:%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
   printf("  %s-j, --jobs N%s                  parallel build jobs\n", nyt_clr(NYT_GREEN),
          nyt_clr(NYT_RESET));
@@ -844,6 +856,7 @@ static void build_targets_for_cmd(const char *cmd, const char ***targets, int *t
   static const char *all[] = {"ny",      "std",    "ny-fmt", "ny-perf",
                               "ny-test", "ny-doc", "ny-make"};
   static const char *test[] = {"ny", "ny-test"};
+  static const char *fuzz[] = {"ny", "ny-test", "ny-fuzz"};
   static const char *fmt[] = {"ny-fmt"};
   static const char *docs[] = {"ny", "std", "ny-doc"};
   static const char *std[] = {"std"};
@@ -863,6 +876,9 @@ static void build_targets_for_cmd(const char *cmd, const char ***targets, int *t
   } else if (strcmp(cmd, "test") == 0) {
     *targets = test;
     *target_count = (int)(sizeof(test) / sizeof(test[0]));
+  } else if (strcmp(cmd, "fuzz") == 0 || strcmp(cmd, "bench") == 0) {
+    *targets = fuzz;
+    *target_count = (int)(sizeof(fuzz) / sizeof(fuzz[0]));
   } else if (strcmp(cmd, "fmt") == 0 || strcmp(cmd, "analyze") == 0 ||
              strcmp(cmd, "check") == 0 || strcmp(cmd, "tidy") == 0) {
     *targets = fmt;
@@ -1031,10 +1047,20 @@ int ny_make_main(int argc, char **argv) {
       if (rc != 0)
         return rc;
     } else if (strcmp(cmd, "fuzz") == 0) {
-      const char *default_args[] = {"validate-shapes", "etc/tests/fuzz", NULL};
+      const char *default_args[] = {"validate-shapes", default_fuzz_shape_dir(), NULL};
       int rc = a.unknown_count == 0
                    ? run_ny_tool(root, kind, "ny-fuzz", NULL, default_args, 2)
                    : run_ny_tool(root, kind, "ny-fuzz", NULL, a.unknown, a.unknown_count);
+      if (rc != 0)
+        return rc;
+    } else if (strcmp(cmd, "bench") == 0) {
+      const char *bench_args[512];
+      int bench_argc = 0;
+      bench_args[bench_argc++] = "real";
+      for (int j = 0; j < a.unknown_count && bench_argc < 511; j++)
+        bench_args[bench_argc++] = a.unknown[j];
+      bench_args[bench_argc] = NULL;
+      int rc = run_ny_tool(root, kind, "ny-fuzz", "bench", bench_args, bench_argc);
       if (rc != 0)
         return rc;
     } else if (strcmp(cmd, "optcheck") == 0 || strcmp(cmd, "fb") == 0) {

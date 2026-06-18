@@ -12,9 +12,14 @@ def iters = 200000
 def start = ticks()
 mut x = 1.0
 def y = 1.000001
+mut checksum = 0
 mut i = 0
 while i < iters {
    x = x * y
+   if i < 1000 {
+      checksum += i + 1
+      if checksum > 90000 { checksum -= 90000 }
+   }
    i += 1
 }
 def end = ticks()
@@ -22,6 +27,8 @@ def dur = end - start
 print("Float ", iters, " muls took(ns): ", dur)
 print("Result: ", x)
 print("Time(ns): ", dur)
+print("checksum=", checksum)
+print("elapsed_ns=", dur)
 NY
   source c <<'C'
 #include <stdint.h>
@@ -38,10 +45,17 @@ int main(void) {
     const int iters = 200000;
     volatile double x = 1.0;
     const double y = 1.000001;
+    long long checksum = 0;
     int64_t start = now_ns();
-    for (int i = 0; i < iters; i++) x = x * y;
+    for (int i = 0; i < iters; i++) {
+        x = x * y;
+        if (i < 1000) {
+            checksum += i + 1;
+            if (checksum > 90000) checksum -= 90000;
+        }
+    }
     int64_t end = now_ns();
-    printf("checksum=%lld\n", (long long)(x * 1000000000.0));
+    printf("checksum=%lld\n", checksum);
     printf("result=%.12f\n", x);
     if (end <= start) end = start + 1;
     printf("elapsed_ns=%lld\n", (long long)(end - start));

@@ -1,0 +1,94 @@
+shape string {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum", "string"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+
+def rounds = 3000
+def needle = "ny"
+mut text = ""
+mut i = 0
+while i < 64 {
+   text = text + "nytrix-language-runtime-compiler;"
+   i += 1
+}
+
+def start = ticks()
+mut checksum = 0
+mut r = 0
+while r < rounds {
+   mut pos = 0
+   while pos + 1 < text.len {
+      if load8(text, pos) == 110 && load8(text, pos + 1) == 121 {
+         checksum += pos + r
+      }
+      pos += 1
+   }
+   r += 1
+}
+def end = ticks()
+print("String benchmark checksum =", checksum)
+print("Time(ns): ", end - start)
+print("checksum=", checksum)
+print("elapsed_ns=", end - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
+}
+
+int main(void) {
+    const int rounds = 3000;
+    const char *chunk = "nytrix-language-runtime-compiler;";
+    char text[4096];
+    text[0] = '\0';
+    for (int i = 0; i < 64; i++) strcat(text, chunk);
+    int64_t checksum = 0;
+    int64_t start = now_ns();
+    for (int r = 0; r < rounds; r++) {
+        const char *base = text;
+        const char *p = base;
+        while ((p = strstr(p, "ny")) != NULL) {
+            checksum += (int64_t)(p - base) + r;
+            p++;
+        }
+    }
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)checksum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+  source py <<'PY'
+import time
+
+ROUNDS = 3000
+needle = "ny"
+text = ""
+for _ in range(64):
+    text += "nytrix-language-runtime-compiler;"
+
+start = time.process_time_ns()
+checksum = 0
+for r in range(ROUNDS):
+    pos = 0
+    while pos >= 0:
+        pos = text.find(needle, pos)
+        if pos >= 0:
+            checksum += pos + r
+            pos += 1
+end = time.process_time_ns()
+print(f"checksum={checksum}")
+print(f"elapsed_ns={max(1, end - start)}")
+PY
+}

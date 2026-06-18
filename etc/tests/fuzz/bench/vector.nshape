@@ -9,25 +9,23 @@ use std.core
 use std.os.time
 ;; Vector Benchmark (Benchmark)
 ; Fixed scale values (helpers may return 0 if env not set)
-fn hadamard_kernel(a, b) {
-   def n = a.len
-   mut out = list(n)
+fn hadamard_kernel(ptr a, ptr b, ptr out, int n) ptr {
    mut i = 0
    while i < n {
-      __store_item_fast(out, i, __load_item_fast(a, i) * __load_item_fast(b, i))
+      store64(out, load64(a, i * 8) * load64(b, i * 8), i * 8)
       i += 1
    }
-   __list_set_len(out, n)
    out
 }
 def n = 1024
 def rounds = 2
-mut a = list(n)
-mut b = list(n)
+def a = malloc(n * 8)
+def b = malloc(n * 8)
+def c = malloc(n * 8)
 mut i = 0
 while i < n {
-   a = a.append(i + 1)
-   b = b.append(i + 3)
+   store64(a, i + 1, i * 8)
+   store64(b, i + 3, i * 8)
    i += 1
 }
 print("Running", rounds, "rounds of size", n)
@@ -35,13 +33,16 @@ def t0 = ticks()
 mut acc = 0
 mut r = 0
 while r < rounds {
-   def c = hadamard_kernel(a, b)
-   acc = acc + c.get(0, 0) + c.get(n - 1, 0)
+   hadamard_kernel(a, b, c, n)
+   acc += load64(c, 0) + load64(c, (n - 1) * 8)
    r += 1
 }
 def t1 = ticks()
+free(a, b, c)
 print("Vector benchmark acc =", acc)
 print("Time(ns): ", t1 - t0)
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
 #include <stdint.h>

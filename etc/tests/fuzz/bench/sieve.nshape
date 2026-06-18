@@ -31,7 +31,7 @@ fn sieve(n) {
       }
       p += 2
    }
-   i = p
+   i = 3
    while i <= n {
       if load8(flags, i >> 1) { count += 1 }
       i += 2
@@ -45,6 +45,8 @@ def r = sieve(N)
 def t1 = ticks()
 print(f"Primes: {to_str(r)}")
 print(f"Time: {to_str((t1 - t0) / 1000000)} ms")
+print("checksum=", r)
+print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
 #include <stdint.h>
@@ -83,4 +85,35 @@ int main(void) {
     return 0;
 }
 C
+  source py <<'PY'
+import time
+
+N = 60000
+
+def sieve(n):
+    if n < 2:
+        return 0
+    flags = bytearray(b"\x01") * ((n >> 1) + 1)
+    p = 3
+    while p * p <= n:
+        if flags[p >> 1]:
+            mul = p * p
+            while mul <= n:
+                flags[mul >> 1] = 0
+                mul += p * 2
+        p += 2
+    count = 1
+    i = 3
+    while i <= n:
+        if flags[i >> 1]:
+            count += 1
+        i += 2
+    return count
+
+start = time.process_time_ns()
+r = sieve(N)
+end = time.process_time_ns()
+print(f"checksum={r}")
+print(f"elapsed_ns={max(1, end - start)}")
+PY
 }

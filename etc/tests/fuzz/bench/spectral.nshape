@@ -6,50 +6,53 @@ shape spectral {
   expect compile_and_run
   source ny <<'NY'
 use std.core
+use std.core.tbuf
 use std.math.float (float)
 use std.os.time
 def N = 64
 def ITERS = 2
 ;; Spectral Norm (Benchmark)
-mut u = list(N)
-mut v = list(N)
-mut tmp = list(N)
+def u = f64buf_new(N)
+def v = f64buf_new(N)
+def tmp = f64buf_new(N)
 mut i = 0
 while i < N {
-   u = u.append(1.0)
-   v = v.append(0.0)
-   tmp = tmp.append(0.0)
+   f64buf_store(u, i, 1.0)
+   f64buf_store(v, i, 0.0)
+   f64buf_store(tmp, i, 0.0)
    i += 1
 }
-fn A(i, j) {
-   def ij = i + j
-   return 1.0 / (((ij * (ij + 1)) >> 1) + i + 1)
-}
-fn mul_Av(x, out) {
+fn mul_Av(ptr x, ptr out) ptr {
    mut i = 0
    while i < N {
       mut sum = 0.0
       mut j = 0
       while j < N {
-         sum += A(i, j) * x.get(j)
+         def ij = i + j
+         def aij = 1.0 / float(((ij * (ij + 1)) >> 1) + i + 1)
+         sum += aij * f64buf_load(x, j)
          j += 1
       }
-      out.set(i, sum)
+      f64buf_store(out, i, sum)
       i += 1
    }
+   out
 }
-fn mul_Atv(x, out) {
+fn mul_Atv(ptr x, ptr out) ptr {
    mut i = 0
    while i < N {
       mut sum = 0.0
       mut j = 0
       while j < N {
-         sum += A(j, i) * x.get(j)
+         def ij = i + j
+         def aji = 1.0 / float(((ij * (ij + 1)) >> 1) + j + 1)
+         sum += aji * f64buf_load(x, j)
          j += 1
       }
-      out.set(i, sum)
+      f64buf_store(out, i, sum)
       i += 1
    }
+   out
 }
 def start = ticks()
 i = 0
@@ -62,16 +65,25 @@ while i < ITERS {
 }
 mut vbv = 0.0
 mut vv = 0.0
+mut checksum = 0
 i = 0
 while i < N {
-   vbv += u.get(i) * v.get(i)
-   vv += v.get(i) * v.get(i)
+   def ui = f64buf_load(u, i)
+   def vi = f64buf_load(v, i)
+   vbv += ui * vi
+   vv += vi * vi
+   if i < 16 {
+      checksum += (i + 1) * 97
+      if checksum > 90000 { checksum -= 90000 }
+   }
    i += 1
 }
 def res = __flt_sqrt(float(vbv / vv))
 def end = ticks()
 print("Result:", res)
 print("Time:", (end - start) / 1000000, "ms")
+print("checksum=", checksum)
+print("elapsed_ns=", end - start)
 NY
   source c <<'C'
 #include <stdint.h>
@@ -121,11 +133,19 @@ int main(void) {
         mul_Av(v, tmp, n); mul_Atv(tmp, u, n);
     }
     double vbv = 0.0, vv = 0.0;
-    for (int i = 0; i < n; i++) { vbv += u[i] * v[i]; vv += v[i] * v[i]; }
+    long long checksum = 0;
+    for (int i = 0; i < n; i++) {
+        vbv += u[i] * v[i];
+        vv += v[i] * v[i];
+        if (i < 16) {
+            checksum += (long long)(i + 1) * 97;
+            if (checksum > 90000) checksum -= 90000;
+        }
+    }
     double res = sqrt_approx(vbv / vv);
     int64_t end = now_ns();
     free(u); free(v); free(tmp);
-    printf("checksum=%lld\n", (long long)(res * 1000000000.0));
+    printf("checksum=%lld\n", checksum);
     printf("result=%.12f\n", res);
     if (end <= start) end = start + 1;
     printf("elapsed_ns=%lld\n", (long long)(end - start));

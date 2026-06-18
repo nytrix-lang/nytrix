@@ -7771,8 +7771,8 @@ fn scene_fast_color_reuse_ready(any group) bool {
 }
 
 #main {
-   assert(scene_asset_name_from_gltf_path("assets/models/Fox/Fox.gltf") == "Fox", "scene direct gltf asset name")
-   assert(scene_asset_name_from_gltf_path("assets/models/Fox/glTF/Fox.gltf") == "Fox", "scene nested gltf asset name")
+   assert(scene_asset_name_from_gltf_path("fixtures/models/Fox/Fox.gltf") == "Fox", "scene direct gltf asset name")
+   assert(scene_asset_name_from_gltf_path("fixtures/models/Fox/glTF/Fox.gltf") == "Fox", "scene nested gltf asset name")
    assert(format_name_list(["Fox", "", "Cube"]) == "Fox, Cube", "scene name list formatting")
    assert(apply_gltf_animation(0) == 0, "scene animation no-op")
    def fitted = {"fit_applied": true, "gpu_model_baked": false}
