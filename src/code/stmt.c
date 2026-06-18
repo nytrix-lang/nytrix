@@ -572,6 +572,8 @@ static void stmt_ownership_emit_drop(codegen_t *cg, binding *b, token_t tok) {
   if (!cg || !cg->ownership_enabled || !b || !b->ownership_tracked ||
       b->owner_state != NY_OWNER_OWNED || b->ownership_forgotten)
     return;
+  if (!cg->ownership_runtime_cleanup)
+    return;
   if (!b->value)
     return;
   fun_sig *drop_sig = lookup_fun(cg, "__drop_owned", 0);
@@ -591,7 +593,8 @@ static void stmt_ownership_emit_drop(codegen_t *cg, binding *b, token_t tok) {
 
 static void stmt_ownership_register_slot_defer(codegen_t *cg, scope *scopes,
                                                size_t depth, binding *b) {
-  if (!cg || !cg->ownership_enabled || !scopes || !b || !b->is_slot ||
+  if (!cg || !cg->ownership_enabled || !cg->ownership_runtime_cleanup ||
+      !scopes || !b || !b->is_slot ||
       b->ownership_defer_registered)
     return;
   fun_sig *push_sig = lookup_fun(cg, "__push_defer", 0);
@@ -610,7 +613,7 @@ static void stmt_ownership_register_slot_defer(codegen_t *cg, scope *scopes,
 
 static void stmt_ownership_cleanup_scope(codegen_t *cg, scope *scopes,
                                          size_t depth) {
-  if (!cg || !cg->ownership_enabled || !scopes)
+  if (!cg || !cg->ownership_enabled || !cg->ownership_runtime_cleanup || !scopes)
     return;
   scope *sc = &scopes[depth];
   for (ssize_t i = (ssize_t)sc->vars.len - 1; i >= 0; --i) {
@@ -706,7 +709,7 @@ static void stmt_ownership_release_source(codegen_t *cg, scope *scopes,
   b->ownership_alloc_size_raw = 0;
   b->owner_state = forgotten ? NY_OWNER_MOVED : NY_OWNER_RELEASED;
   stmt_ownership_clear_borrow(b);
-  if (b->is_slot)
+  if (b->is_slot && cg->ownership_runtime_cleanup)
     ny_store(cg, b->value, ny_c0(cg));
 }
 
@@ -718,7 +721,8 @@ static void stmt_ownership_pre_store(codegen_t *cg, scope *scopes, size_t depth,
   if (stmt_ownership_same_source(dest, rhs, cg, scopes, depth))
     return;
   stmt_ownership_check_live_borrows(cg, scopes, depth, dest, tok, "reassign");
-  if (ny_diag_should_emit("ownership_reassign_drop", tok, dest->name))
+  if (cg->ownership_runtime_cleanup &&
+      ny_diag_should_emit("ownership_reassign_drop", tok, dest->name))
     ny_diag_warning(tok,
                     "reassigning owned slot '%s' drops its previous heap value",
                     dest->name);
@@ -832,7 +836,7 @@ static void stmt_ownership_post_store(codegen_t *cg, scope *scopes,
     src->ownership_alloc_size_known = false;
     src->ownership_alloc_size_raw = 0;
     stmt_ownership_clear_borrow(src);
-    if (src->is_slot)
+    if (src->is_slot && cg->ownership_runtime_cleanup)
       ny_store(cg, src->value, ny_c0(cg));
   }
 }
@@ -3106,7 +3110,7 @@ static void stmt_var_setup_local_binding(
     size_t nlen = strlen(name);
     binding *b = stmt_lookup_binding_no_mark(scopes, depth, name, nlen, 0);
     if (b) {
-      if (!decl_type_explicit)
+      if (!decl_type_explicit && !cg->strict_types)
         b->decl_type_name = NULL;
       b->is_f64_slot = use_f64_slot;
       b->is_f32_slot = use_f32_slot;
@@ -8130,7 +8134,10 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
       }
       if (!decl_type && expr_for_check) {
         const char *inf = infer_expr_type(cg, scopes, *depth, expr_for_check);
-        if ((!s->as.var.is_mut && stmt_bindable_inferred_type(inf)) ||
+        if ((cg->strict_types &&
+             (stmt_bindable_inferred_type(inf) ||
+              stmt_type_name_is_int_value(inf))) ||
+            (!s->as.var.is_mut && stmt_bindable_inferred_type(inf)) ||
             (s->as.var.is_mut && stmt_bindable_mut_inferred_type(inf)))
           decl_type = inf;
       }
@@ -8226,7 +8233,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
           b.is_mut = s->as.var.is_mut ? true : false;
           b.owned = true;
           b.type_name = type_name;
-          b.decl_type_name = decl_type_explicit ? type_name : NULL;
+          b.decl_type_name =
+              (decl_type_explicit || cg->strict_types) ? type_name : NULL;
           b.is_f64_slot = global_is_f64;
           b.is_f32_slot = global_is_f32;
           vec_push(&cg->global_vars, b);
@@ -8252,7 +8260,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
         binding *gb = resolved_global ? resolved_global : lookup_global(cg, n);
         if (gb && decl_type && !gb->type_name) {
           gb->type_name = decl_type;
-          if (decl_type_explicit)
+          if (decl_type_explicit || cg->strict_types)
             gb->decl_type_name = decl_type;
         }
       }
@@ -8272,7 +8280,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                           : infer_expr_type(cg, scopes, *depth, expr_for_check);
             if (!gb->type_name)
               gb->type_name = init_type;
-            if (decl_type_explicit && !gb->decl_type_name)
+            if ((decl_type_explicit || cg->strict_types) && !gb->decl_type_name)
               gb->decl_type_name = init_type;
           }
           continue;

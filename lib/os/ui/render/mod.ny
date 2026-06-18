@@ -6,7 +6,8 @@
 module std.os.ui.render(
    BACKEND_NONE, BACKEND_GL, BACKEND_VK, BACKEND_MOCK, BACKEND_TTY, BACKEND_AUTO,
    WHITE, BLACK, RED, GREEN, BLUE, YELLOW, CYAN, MAGENTA, ORANGE, PURPLE, GRAY, CLEAR,
-   color_rgba, color_rgb, color_gray, color_hex, color_lerp, color_alpha,
+   color_rgba, color_rgb, color_gray, color_hex, color_255, color_lerp, color_alpha,
+   rect, rect_x, rect_y, rect_w, rect_h,
    backend_capabilities, get_active_backend_name, renderer_frame_stats,
    renderer_vertex_offset, renderer_capture_requested, renderer_frame_index,
    renderer_gpu_ready, renderer_wait_idle, renderer_packed_scene_supported, renderer_mesh_pipeline,
@@ -26,10 +27,20 @@ module std.os.ui.render(
    window_should_close, get_active_window, begin_frame, begin_frame_clear, end_frame,
    begin_drawing, end_drawing, begin_mode_3d, end_mode_3d, clear_background,
    draw_triangles, draw_polyline, draw_triangle, draw_quad, draw_rect,
-   draw_rectangle_lines, draw_rect_rounded, draw_rect_sharp, draw_line, draw_line_2d,
+   draw_pixel, draw_pixel_v, draw_line_v, draw_line_ex, draw_line_strip,
+   draw_rect_v, draw_rect_rec, draw_rect_pro, draw_rect_lines, draw_rect_lines_ex,
+   draw_rect_gradient_v, draw_rect_gradient_h, draw_rect_gradient_ex,
+   draw_rect_rounded_lines, draw_rect_rounded_lines_ex,
+   draw_rect_rounded, draw_rect_sharp, draw_line, draw_line_2d,
    draw_line_fast, draw_circle, draw_circle_lines, draw_ring, draw_polygon,
-   draw_ellipse, draw_ellipse_lines, draw_arc, draw_sector, draw_rounded_rectangle,
-   draw_rounded_rectangle_sdf,
+   draw_circle_v, draw_circle_lines_v, draw_circle_sector, draw_circle_sector_lines,
+   draw_ellipse, draw_ellipse_v, draw_ellipse_lines, draw_ellipse_lines_v,
+   draw_ring_lines, draw_arc, draw_sector, draw_rect_rounded_sdf,
+   draw_triangle_lines, draw_triangle_fan, draw_triangle_strip,
+   draw_poly, draw_poly_lines, draw_poly_lines_ex,
+   check_collision_recs, check_collision_circles, check_collision_circle_rec,
+   check_collision_point_rec, check_collision_point_circle, check_collision_point_triangle,
+   check_collision_point_line, check_collision_lines, get_collision_rec,
    draw_star, draw_grid, draw_grid_pair, draw_grid_pair_axes, draw_axes, draw_cube,
    draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, get_frame_time, get_time, load_shader,
    load_shader_agnostic, shader_transpile, get_active_backend, compile_shader,
@@ -2892,6 +2903,29 @@ fn color_gray(f64 v, f64 a=1.0) vec4 {
    color_rgba(v, v, v, a)
 }
 
+fn color_255(any r, any g, any b, any a=255) vec4 {
+   "Creates a vec4 color from byte RGBA components(0 to 255)."
+   color_rgba(float(r) / 255.0, float(g) / 255.0, float(b) / 255.0, float(a) / 255.0)
+}
+
+fn rect(any x=0.0, any y=0.0, any w=0.0, any h=0.0) dict {
+   "Creates a rectangle dictionary with x/y/w/h fields."
+   if is_dict(x) { return x }
+   if is_list(x) || is_tuple(x) {
+      return {"x": float(x.get(0, 0.0)), "y": float(x.get(1, 0.0)), "w": float(x.get(2, 0.0)), "h": float(x.get(3, 0.0))}
+   }
+   {"x": float(x), "y": float(y), "w": float(w), "h": float(h)}
+}
+
+fn _rect_seq_at(any r, int index, f64 fallback=0.0) f64 {
+   (is_list(r) || is_tuple(r)) ? float(r.get(index, fallback)) : fallback
+}
+
+fn rect_x(any r) f64 { is_dict(r) ? float(r.get("x", 0.0)) : _rect_seq_at(r, 0, 0.0) }
+fn rect_y(any r) f64 { is_dict(r) ? float(r.get("y", 0.0)) : _rect_seq_at(r, 1, 0.0) }
+fn rect_w(any r) f64 { is_dict(r) ? float(r.get("w", r.get("width", 0.0))) : _rect_seq_at(r, 2, 0.0) }
+fn rect_h(any r) f64 { is_dict(r) ? float(r.get("h", r.get("height", 0.0))) : _rect_seq_at(r, 3, 0.0) }
+
 comptime table HexNibble {
    48..57 -> raw - 48
    65..70 -> raw - 55
@@ -3327,6 +3361,10 @@ fn _vsync_requested(any vsync) bool {
    bool(vsync)
 }
 
+fn _backend_fallback_enabled() bool {
+   ui_profile.env_toggle_cached("NY_UI_RENDER_FALLBACK", true)
+}
+
 fn _visible_vulkan_boot_required() bool {
    #windows { return false }
    #else { return false }
@@ -3403,10 +3441,34 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
             win = gl_win
          } else {
             if gl_win { lib_uiw.close(gl_win) }
+            if _backend_fallback_enabled() {
+               if _is_debug() { ui_profile.print_text("[gfx] Auto backend GPU fallback failed; using mock renderer") }
+               return init_mock_surface(width, height)
+            }
             return false
          }
       } else {
-         return false
+         if !_backend_fallback_enabled() { return false }
+         def try_gl = _backend_pref != BACKEND_GL
+         if _is_debug() {
+            ui_profile.print_text("[gfx] requested " + _requested_backend_name() + " backend failed; retrying " + (try_gl ? "OpenGL" : "Vulkan"))
+         }
+         if try_gl {
+            lib_uiw.window_hint(ui_backend.CLIENT_API, ui_backend.OPENGL_API)
+            ui_backend.window_hint(ui_backend.DOUBLEBUFFER, ui_backend.TRUE)
+            ui_backend.window_hint(ui_backend.SAMPLES, int(max(0, msaa)))
+         } else {
+            lib_uiw.window_hint(ui_backend.CLIENT_API, ui_backend.NO_API)
+         }
+         def alt_flags = try_gl ? (f & ~0x80000) : (f | 0x80000)
+         def alt_win = lib_uiw.open_window(title, x, y, width, height, alt_flags)
+         if alt_win && _init_with_window(alt_win, !try_gl) {
+            win = alt_win
+         } else {
+            if alt_win { lib_uiw.close(alt_win) }
+            if _is_debug() { ui_profile.print_text("[gfx] GPU fallback failed; using mock renderer") }
+            return init_mock_surface(width, height)
+         }
       }
    }
    if _backend == BACKEND_GL {
@@ -4485,6 +4547,39 @@ fn draw_line_2d(f64 x1, f64 y1, f64 x2, f64 y2, any color, f64 thickness=0.02) b
    _draw_line_impl([x1, y1, 0.0], [x2, y2, 0.0], color, thickness)
 }
 
+fn draw_pixel(int x, int y, any color) bool {
+   "Draws one screen pixel. Prefer batched rectangles for many pixels."
+   draw_rect(float(x), float(y), 1.0, 1.0, color)
+}
+
+fn draw_pixel_v(any pos, any color) bool {
+   "Draws one screen pixel at a vector-like position."
+   draw_pixel(int(vector.at(pos, 0, 0.0)), int(vector.at(pos, 1, 0.0)), color)
+}
+
+fn draw_line_v(any start, any finish, any color) bool {
+   "Draws a one-pixel 2D line from vector-like positions."
+   draw_line_2d(float(vector.at(start, 0, 0.0)), float(vector.at(start, 1, 0.0)),
+      float(vector.at(finish, 0, 0.0)), float(vector.at(finish, 1, 0.0)), color, 1.0)
+}
+
+fn draw_line_ex(any start, any finish, f64 thick, any color) bool {
+   "Draws a thick 2D line from vector-like positions."
+   draw_line_2d(float(vector.at(start, 0, 0.0)), float(vector.at(start, 1, 0.0)),
+      float(vector.at(finish, 0, 0.0)), float(vector.at(finish, 1, 0.0)), color, thick)
+}
+
+fn draw_line_strip(list points, any color, f64 thickness=1.0) bool {
+   "Draws a sequence of connected 2D line segments."
+   if !is_list(points) || points.len < 2 { return false }
+   mut i = 0
+   while i + 1 < points.len {
+      draw_line_ex(points[i], points[i + 1], thickness, color)
+      i += 1
+   }
+   true
+}
+
 fn draw_rect(f64 x, f64 y, f64 w, f64 h, any color) bool {
    "Draws a filled rectangle on screen. Automatically uses the fastest path available."
    if _backend == BACKEND_VK {
@@ -4496,6 +4591,60 @@ fn draw_rect(f64 x, f64 y, f64 w, f64 h, any color) bool {
       return true
    }
    draw_quad([x, y, 0.0], [x+w, y, 0.0], [x+w, y+h, 0.0], [x, y+h, 0.0], color)
+}
+
+fn draw_rect_v(any pos, any size, any color) bool {
+   "Draws a filled rectangle from position and size vectors."
+   draw_rect(float(vector.at(pos, 0, 0.0)), float(vector.at(pos, 1, 0.0)),
+      float(vector.at(size, 0, 0.0)), float(vector.at(size, 1, 0.0)), color)
+}
+
+fn draw_rect_rec(any rec, any color) bool {
+   "Draws a filled rectangle from a rectangle value."
+   draw_rect(rect_x(rec), rect_y(rec), rect_w(rec), rect_h(rec), color)
+}
+
+fn draw_rect_pro(any rec, any origin, f64 rotation_deg, any color) bool {
+   "Draws a rotated rectangle from rectangle/origin parameters."
+   def x, y, w, h = rect_x(rec), rect_y(rec), rect_w(rec), rect_h(rec)
+   def ox, oy = float(vector.at(origin, 0, 0.0)), float(vector.at(origin, 1, 0.0))
+   if abs(rotation_deg) <= 0.000001 { return draw_rect(x - ox, y - oy, w, h, color) }
+   def a = rotation_deg * PI / 180.0
+   def c, s = cos(a), sin(a)
+   def tx, ty = x, y
+   def p = fn(f64 px, f64 py) list {
+      def rx, ry = px - ox, py - oy
+      [tx + rx * c - ry * s, ty + rx * s + ry * c, 0.0]
+   }
+   draw_quad(p(0.0, 0.0), p(w, 0.0), p(w, h), p(0.0, h), color)
+}
+
+fn _draw_gradient_rect(f64 x, f64 y, f64 w, f64 h, any c0, any c1, any c2, any c3) bool {
+   if w <= 0.0 || h <= 0.0 { return false }
+   def verts = _shape_scratch_alloc(6 * VERTEX_STRIDE)
+   if !verts { return false }
+   _store_v3_c4(verts, 0, x, y, 0.0, _color_at(c0, 0, 1.0), _color_at(c0, 1, 1.0), _color_at(c0, 2, 1.0), _color_at(c0, 3, 1.0))
+   _store_v3_c4(verts, 1, x, y + h, 0.0, _color_at(c3, 0, 1.0), _color_at(c3, 1, 1.0), _color_at(c3, 2, 1.0), _color_at(c3, 3, 1.0))
+   _store_v3_c4(verts, 2, x + w, y + h, 0.0, _color_at(c2, 0, 1.0), _color_at(c2, 1, 1.0), _color_at(c2, 2, 1.0), _color_at(c2, 3, 1.0))
+   _store_v3_c4(verts, 3, x, y, 0.0, _color_at(c0, 0, 1.0), _color_at(c0, 1, 1.0), _color_at(c0, 2, 1.0), _color_at(c0, 3, 1.0))
+   _store_v3_c4(verts, 4, x + w, y + h, 0.0, _color_at(c2, 0, 1.0), _color_at(c2, 1, 1.0), _color_at(c2, 2, 1.0), _color_at(c2, 3, 1.0))
+   _store_v3_c4(verts, 5, x + w, y, 0.0, _color_at(c1, 0, 1.0), _color_at(c1, 1, 1.0), _color_at(c1, 2, 1.0), _color_at(c1, 3, 1.0))
+   _draw_triangles_impl(verts, 2, false)
+}
+
+fn draw_rect_gradient_v(int x, int y, int w, int h, any top, any bottom) bool {
+   "Draws a vertical gradient rectangle."
+   _draw_gradient_rect(float(x), float(y), float(w), float(h), top, top, bottom, bottom)
+}
+
+fn draw_rect_gradient_h(int x, int y, int w, int h, any left, any right) bool {
+   "Draws a horizontal gradient rectangle."
+   _draw_gradient_rect(float(x), float(y), float(w), float(h), left, right, right, left)
+}
+
+fn draw_rect_gradient_ex(any rec, any top_left, any bottom_left, any bottom_right, any top_right) bool {
+   "Draws a rectangle with independent corner colors."
+   _draw_gradient_rect(rect_x(rec), rect_y(rec), rect_w(rec), rect_h(rec), top_left, top_right, bottom_right, bottom_left)
 }
 
 fn draw_rect_sharp(f64 x, f64 y, f64 w, f64 h, any color, f64 r=4.0) bool {
@@ -4519,12 +4668,34 @@ fn draw_rect_sharp(f64 x, f64 y, f64 w, f64 h, any color, f64 r=4.0) bool {
 }
 
 fn draw_rect_rounded(f64 x, f64 y, f64 w, f64 h, f64 r, any color, int segments=24) bool {
-   "Draws a rounded rectangle using proper quarter-corner sectors."
-   draw_rounded_rectangle(x, y, w, h, r, color, segments)
+   "Draws a filled rectangle with rounded corners."
+   if w <= 0 || h <= 0 { return false }
+   if r <= 0 { return draw_rect(x, y, w, h, color) }
+   def max_r = min(w, h) / 2.0
+   if r > max_r { r = max_r }
+   def cr, cg = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+   def cb, ca = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
+   if _backend == BACKEND_VK {
+      lib_vkr.draw_rounded_rect_2d(x, y, w, h, r, segments, cr, cg, cb, ca)
+      return true
+   }
+   if _backend == BACKEND_GL {
+      return lib_glr.draw_rounded_rect_2d(x, y, w, h, r, segments, cr, cg, cb, ca)
+   }
+   draw_rect(x + r, y, w - (r * 2.0), h, color)
+   draw_rect(x, y + r, r, h - (r * 2.0), color)
+   draw_rect(x + w - r, y + r, r, h - (r * 2.0), color)
+   mut cs = max(2, int(segments / 4))
+   draw_sector(x + r, y + r, 0.0, r, 180.0, 270.0, color, cs)
+   draw_sector(x + w - r, y + r, 0.0, r, 270.0, 360.0, color, cs)
+   draw_sector(x + w - r, y + h - r, 0.0, r, 0.0, 90.0, color, cs)
+   draw_sector(x + r, y + h - r, 0.0, r, 90.0, 180.0, color, cs)
+   true
 }
 
 fn draw_rect_tex(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 r, f64 g, f64 b, f64 a) bool {
    "Draws a textured rectangle on screen."
+   if tex_id <= 0 || w <= 0.0 || h <= 0.0 { return false }
    if _backend == BACKEND_VK { lib_vkr.draw_rect_tex(x, y, w, h, tex_id, r, g, b, a) return true }
    if _backend == BACKEND_GL { lib_glr.draw_rect_tex(x, y, w, h, tex_id, r, g, b, a) return true }
    false
@@ -4546,6 +4717,7 @@ fn draw_rect_tex_uv(
    f64 a
 ) bool {
    "Draws a textured rectangle with custom UV coordinates."
+   if tex_id <= 0 || w <= 0.0 || h <= 0.0 { return false }
    if _backend == BACKEND_VK { lib_vkr.draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
    if _backend == BACKEND_GL { lib_glr.draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
    false
@@ -4568,12 +4740,13 @@ fn draw_rect_tex_uv_rot(
    f64 a
 ) bool {
    "Draws a rotated textured rectangle around center with custom UV coordinates."
+   if tex_id <= 0 || w <= 0.0 || h <= 0.0 { return false }
    if _backend == BACKEND_VK { lib_vkr.draw_rect_tex_uv_rot(cx, cy, w, h, rot_deg, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
    if _backend == BACKEND_GL { lib_glr.draw_rect_tex_uv_rot(cx, cy, w, h, rot_deg, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
    false
 }
 
-fn draw_rectangle_lines(f64 x, f64 y, f64 w, f64 h, any color, f64 thickness=0.02) bool {
+fn draw_rect_lines(f64 x, f64 y, f64 w, f64 h, any color, f64 thickness=0.02) bool {
    "Draws the outline of a rectangle."
    if _backend == BACKEND_VK {
       def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
@@ -4693,6 +4866,31 @@ fn draw_circle_lines(f64 cx, f64 cy, f64 radius, any color, f64 thickness=0.02, 
    draw_ring(cx, cy, max(0.0, radius - thickness / 2.0), radius + thickness / 2.0, color, segments)
 }
 
+fn draw_circle_v(any center, f64 radius, any color) bool {
+   "Draws a filled circle from a vector-like center."
+   draw_circle(float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0)), radius, color)
+}
+
+fn draw_circle_lines_v(any center, f64 radius, any color, f64 thickness=1.0) bool {
+   "Draws a circle outline from a vector-like center."
+   draw_circle_lines(float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0)), radius, color, thickness)
+}
+
+fn draw_circle_sector(any center, f64 radius, f64 start_deg, f64 end_deg, int segments, any color) bool {
+   "Draws a filled circle sector."
+   draw_sector(float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0)), 0.0, radius, start_deg, end_deg, color, segments)
+}
+
+fn draw_circle_sector_lines(any center, f64 radius, f64 start_deg, f64 end_deg, int segments, any color, f64 thickness=1.0) bool {
+   "Draws a circle sector outline."
+   def cx, cy = float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0))
+   draw_arc(cx, cy, radius, start_deg, end_deg, color, thickness, segments)
+   def a0, a1 = start_deg * PI / 180.0, end_deg * PI / 180.0
+   draw_line_2d(cx, cy, cx + cos(a0) * radius, cy + sin(a0) * radius, color, thickness)
+   draw_line_2d(cx, cy, cx + cos(a1) * radius, cy + sin(a1) * radius, color, thickness)
+   true
+}
+
 fn _draw_filled_fan_2d(f64 cx, f64 cy, f64 rx, f64 ry, int segments, any color, f64 rot=0.0) bool {
    if rx <= 0 || ry <= 0 { return false }
    segments = max(3, int(segments))
@@ -4713,6 +4911,11 @@ fn draw_polygon(f64 cx, f64 cy, int sides, f64 radius, any color, f64 rotation_d
 fn draw_ellipse(f64 cx, f64 cy, f64 rx, f64 ry, any color, int segments=256) bool {
    "Draws a filled ellipse."
    _draw_filled_fan_2d(cx, cy, rx, ry, segments, color, 0.0)
+}
+
+fn draw_ellipse_v(any center, f64 rx, f64 ry, any color, int segments=256) bool {
+   "Draws a filled ellipse from a vector-like center."
+   draw_ellipse(float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0)), rx, ry, color, segments)
 }
 
 fn _draw_radial_polyline_fallback(
@@ -4748,6 +4951,11 @@ fn _draw_radial_polyline_fallback(
    true
 }
 
+fn draw_rect_lines_ex(any rec, f64 thickness, any color) bool {
+   "Draws a rectangle outline from a rectangle value."
+   draw_rect_lines(rect_x(rec), rect_y(rec), rect_w(rec), rect_h(rec), color, thickness)
+}
+
 fn draw_ellipse_lines(f64 cx, f64 cy, f64 rx, f64 ry, any color, f64 thickness=0.02, int segments=72) bool {
    "Draws the outline of an ellipse."
    if rx <= 0 || ry <= 0 { return false }
@@ -4759,6 +4967,11 @@ fn draw_ellipse_lines(f64 cx, f64 cy, f64 rx, f64 ry, any color, f64 thickness=0
       return true
    }
    _draw_radial_polyline_fallback(cx, cy, rx, ry, 0.0, TAU, segments, color, thickness, true)
+}
+
+fn draw_ellipse_lines_v(any center, f64 rx, f64 ry, any color, f64 thickness=1.0, int segments=72) bool {
+   "Draws an ellipse outline from a vector-like center."
+   draw_ellipse_lines(float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0)), rx, ry, color, thickness, segments)
 }
 
 fn draw_arc(f64 cx, f64 cy, f64 radius, f64 start_deg, f64 end_deg, any color, f64 thickness=0.02, int segments=32) bool {
@@ -4807,33 +5020,178 @@ fn draw_sector(
    _draw_ring_sector_fallback(cx, cy, inner_radius, outer_radius, start, span_rad, steps, r, g, b, a)
 }
 
-fn draw_rounded_rectangle(f64 x, f64 y, f64 w, f64 h, f64 radius, any color, int segments=24) bool {
-   "Draws a filled rectangle with rounded corners."
-   if w <= 0 || h <= 0 { return false }
-   if radius <= 0 { return draw_rect(x, y, w, h, color) }
-   def max_r = min(w, h) / 2.0
-   if radius > max_r { radius = max_r }
-   def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
-   def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
-   if _backend == BACKEND_VK {
-      lib_vkr.draw_rounded_rect_2d(x, y, w, h, radius, segments, r, g, b, a)
-      return true
-   }
-   if _backend == BACKEND_GL {
-      return lib_glr.draw_rounded_rect_2d(x, y, w, h, radius, segments, r, g, b, a)
-   }
-   draw_rect(x + radius, y, w - (radius * 2.0), h, color)
-   draw_rect(x, y + radius, radius, h - (radius * 2.0), color)
-   draw_rect(x + w - radius, y + radius, radius, h - (radius * 2.0), color)
-   mut cs = max(2, int(segments / 4))
-   draw_sector(x+radius, y+radius, 0.0, radius, 180.0, 270.0, color, cs)
-   draw_sector(x + w - radius, y+radius, 0.0, radius, 270.0, 360.0, color, cs)
-   draw_sector(x + w - radius, y + h - radius, 0.0, radius, 0.0, 90.0, color, cs)
-   draw_sector(x+radius, y + h - radius, 0.0, radius, 90.0, 180.0, color, cs)
+fn draw_ring_lines(any center, f64 inner_radius, f64 outer_radius, f64 start_deg, f64 end_deg, int segments, any color, f64 thickness=1.0) bool {
+   "Draws the outline of a ring sector."
+   def cx, cy = float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0))
+   draw_arc(cx, cy, inner_radius, start_deg, end_deg, color, thickness, segments)
+   draw_arc(cx, cy, outer_radius, start_deg, end_deg, color, thickness, segments)
+   def a0, a1 = start_deg * PI / 180.0, end_deg * PI / 180.0
+   draw_line_2d(cx + cos(a0) * inner_radius, cy + sin(a0) * inner_radius, cx + cos(a0) * outer_radius, cy + sin(a0) * outer_radius, color, thickness)
+   draw_line_2d(cx + cos(a1) * inner_radius, cy + sin(a1) * inner_radius, cx + cos(a1) * outer_radius, cy + sin(a1) * outer_radius, color, thickness)
    true
 }
 
-fn draw_rounded_rectangle_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, any color) bool {
+fn draw_triangle_lines(any v1, any v2, any v3, any color, f64 thickness=1.0) bool {
+   "Draws a triangle outline."
+   draw_line_ex(v1, v2, thickness, color)
+   draw_line_ex(v2, v3, thickness, color)
+   draw_line_ex(v3, v1, thickness, color)
+   true
+}
+
+fn draw_triangle_fan(list points, any color) bool {
+   "Draws a triangle fan where points[0] is the center."
+   if !is_list(points) || points.len < 3 { return false }
+   mut tris = []
+   mut i = 1
+   while i + 1 < points.len {
+      tris = tris.append([vector.at(points[0], 0, 0.0), vector.at(points[0], 1, 0.0), 0.0])
+      tris = tris.append([vector.at(points[i], 0, 0.0), vector.at(points[i], 1, 0.0), 0.0])
+      tris = tris.append([vector.at(points[i + 1], 0, 0.0), vector.at(points[i + 1], 1, 0.0), 0.0])
+      i += 1
+   }
+   draw_triangles(tris, color)
+}
+
+fn draw_triangle_strip(list points, any color) bool {
+   "Draws a triangle strip."
+   if !is_list(points) || points.len < 3 { return false }
+   mut tris = []
+   mut i = 0
+   while i + 2 < points.len {
+      def a = (i % 2 == 0) ? points[i] : points[i + 1]
+      def b = (i % 2 == 0) ? points[i + 1] : points[i]
+      def c = points[i + 2]
+      tris = tris.append([vector.at(a, 0, 0.0), vector.at(a, 1, 0.0), 0.0])
+      tris = tris.append([vector.at(b, 0, 0.0), vector.at(b, 1, 0.0), 0.0])
+      tris = tris.append([vector.at(c, 0, 0.0), vector.at(c, 1, 0.0), 0.0])
+      i += 1
+   }
+   draw_triangles(tris, color)
+}
+
+fn draw_poly(any center, int sides, f64 radius, f64 rotation_deg, any color) bool {
+   "Draws a regular filled polygon."
+   draw_polygon(float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0)), sides, radius, color, rotation_deg)
+}
+
+fn draw_poly_lines(any center, int sides, f64 radius, f64 rotation_deg, any color, f64 thickness=1.0) bool {
+   "Draws a regular polygon outline."
+   draw_poly_lines_ex(center, sides, radius, rotation_deg, thickness, color)
+}
+
+fn draw_poly_lines_ex(any center, int sides, f64 radius, f64 rotation_deg, f64 thickness, any color) bool {
+   "Draws a regular polygon outline with explicit thickness."
+   sides = max(3, int(sides))
+   def cx, cy = float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0))
+   def rot = rotation_deg * PI / 180.0
+   mut pts = []
+   mut i = 0
+   while i < sides {
+      def a = rot + TAU * float(i) / float(sides)
+      pts = pts.append([cx + cos(a) * radius, cy + sin(a) * radius])
+      i += 1
+   }
+   i = 0
+   while i < sides {
+      draw_line_ex(pts[i], pts[(i + 1) % sides], thickness, color)
+      i += 1
+   }
+   true
+}
+
+fn check_collision_recs(any a, any b) bool {
+   "Returns true when two rectangles overlap."
+   rect_x(a) < rect_x(b) + rect_w(b) && rect_x(a) + rect_w(a) > rect_x(b) &&
+   rect_y(a) < rect_y(b) + rect_h(b) && rect_y(a) + rect_h(a) > rect_y(b)
+}
+
+fn check_collision_circles(any center1, f64 radius1, any center2, f64 radius2) bool {
+   "Returns true when two circles overlap."
+   def dx = float(vector.at(center2, 0, 0.0)) - float(vector.at(center1, 0, 0.0))
+   def dy = float(vector.at(center2, 1, 0.0)) - float(vector.at(center1, 1, 0.0))
+   def r = radius1 + radius2
+   dx * dx + dy * dy <= r * r
+}
+
+fn check_collision_point_rec(any point, any rec) bool {
+   "Returns true when a point lies inside a rectangle."
+   def px, py = float(vector.at(point, 0, 0.0)), float(vector.at(point, 1, 0.0))
+   px >= rect_x(rec) && px <= rect_x(rec) + rect_w(rec) && py >= rect_y(rec) && py <= rect_y(rec) + rect_h(rec)
+}
+
+fn check_collision_point_circle(any point, any center, f64 radius) bool {
+   "Returns true when a point lies inside a circle."
+   def dx = float(vector.at(point, 0, 0.0)) - float(vector.at(center, 0, 0.0))
+   def dy = float(vector.at(point, 1, 0.0)) - float(vector.at(center, 1, 0.0))
+   dx * dx + dy * dy <= radius * radius
+}
+
+fn check_collision_circle_rec(any center, f64 radius, any rec) bool {
+   "Returns true when a circle overlaps a rectangle."
+   def cx, cy = float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0))
+   def rx, ry, rw, rh = rect_x(rec), rect_y(rec), rect_w(rec), rect_h(rec)
+   def nx = max(rx, min(cx, rx + rw))
+   def ny = max(ry, min(cy, ry + rh))
+   def dx, dy = cx - nx, cy - ny
+   dx * dx + dy * dy <= radius * radius
+}
+
+fn check_collision_point_triangle(any p, any a, any b, any c) bool {
+   "Returns true when a point lies inside a triangle."
+   def px, py = float(vector.at(p, 0, 0.0)), float(vector.at(p, 1, 0.0))
+   def ax, ay = float(vector.at(a, 0, 0.0)), float(vector.at(a, 1, 0.0))
+   def bx, by = float(vector.at(b, 0, 0.0)), float(vector.at(b, 1, 0.0))
+   def cx, cy = float(vector.at(c, 0, 0.0)), float(vector.at(c, 1, 0.0))
+   def d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by)
+   def d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy)
+   def d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay)
+   def has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0
+   def has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0
+   !(has_neg && has_pos)
+}
+
+fn check_collision_point_line(any p, any a, any b, int threshold=1) bool {
+   "Returns true when a point is within threshold pixels of a line segment."
+   def px, py = float(vector.at(p, 0, 0.0)), float(vector.at(p, 1, 0.0))
+   def ax, ay = float(vector.at(a, 0, 0.0)), float(vector.at(a, 1, 0.0))
+   def bx, by = float(vector.at(b, 0, 0.0)), float(vector.at(b, 1, 0.0))
+   def dx, dy = bx - ax, by - ay
+   def len2 = dx * dx + dy * dy
+   if len2 <= 0.0000001 { return check_collision_point_circle(p, a, float(threshold)) }
+   mut t = ((px - ax) * dx + (py - ay) * dy) / len2
+   if t < 0.0 { t = 0.0 }
+   if t > 1.0 { t = 1.0 }
+   def qx, qy = ax + dx * t, ay + dy * t
+   def ex, ey = px - qx, py - qy
+   ex * ex + ey * ey <= float(threshold * threshold)
+}
+
+fn check_collision_lines(any a0, any a1, any b0, any b1) any {
+   "Returns the line intersection point as vec2, or nil when segments do not intersect."
+   def x1, y1 = float(vector.at(a0, 0, 0.0)), float(vector.at(a0, 1, 0.0))
+   def x2, y2 = float(vector.at(a1, 0, 0.0)), float(vector.at(a1, 1, 0.0))
+   def x3, y3 = float(vector.at(b0, 0, 0.0)), float(vector.at(b0, 1, 0.0))
+   def x4, y4 = float(vector.at(b1, 0, 0.0)), float(vector.at(b1, 1, 0.0))
+   def den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+   if abs(den) <= 0.0000001 { return nil }
+   def t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den
+   def u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / den
+   if t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0 { return nil }
+   vector.vec2(x1 + t * (x2 - x1), y1 + t * (y2 - y1))
+}
+
+fn get_collision_rec(any a, any b) dict {
+   "Returns the overlap rectangle for two rectangles, or an empty rectangle."
+   def x1 = max(rect_x(a), rect_x(b))
+   def y1 = max(rect_y(a), rect_y(b))
+   def x2 = min(rect_x(a) + rect_w(a), rect_x(b) + rect_w(b))
+   def y2 = min(rect_y(a) + rect_h(a), rect_y(b) + rect_h(b))
+   if x2 <= x1 || y2 <= y1 { return rect(0.0, 0.0, 0.0, 0.0) }
+   rect(x1, y1, x2 - x1, y2 - y1)
+}
+
+fn draw_rect_rounded_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, any color) bool {
    "Draws a smooth filled rectangle with rounded corners."
    if w <= 0 || h <= 0 { return false }
    if radius <= 0 { return draw_rect(x, y, w, h, color) }
@@ -4844,7 +5202,31 @@ fn draw_rounded_rectangle_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, any color)
       def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
       return lib_vkr.draw_rounded_rect_sdf(x, y, w, h, radius, r, g, b, a)
    }
-   draw_rounded_rectangle(x, y, w, h, radius, color, 48)
+   draw_rect_rounded(x, y, w, h, radius, color, 48)
+}
+
+fn draw_rect_rounded_lines_ex(any rec, f64 radius, int segments, f64 thickness, any color) bool {
+   "Draws a rounded rectangle outline from a rectangle value."
+   def x, y, w, h = rect_x(rec), rect_y(rec), rect_w(rec), rect_h(rec)
+   if w <= 0.0 || h <= 0.0 { return false }
+   if radius <= 0.0 { return draw_rect_lines(x, y, w, h, color, thickness) }
+   def max_r = min(w, h) * 0.5
+   if radius > max_r { radius = max_r }
+   draw_line_2d(x + radius, y, x + w - radius, y, color, thickness)
+   draw_line_2d(x + radius, y + h, x + w - radius, y + h, color, thickness)
+   draw_line_2d(x, y + radius, x, y + h - radius, color, thickness)
+   draw_line_2d(x + w, y + radius, x + w, y + h - radius, color, thickness)
+   def seg = max(4, int(segments))
+   draw_arc(x + radius, y + radius, radius, 180.0, 270.0, color, thickness, seg)
+   draw_arc(x + w - radius, y + radius, radius, 270.0, 360.0, color, thickness, seg)
+   draw_arc(x + w - radius, y + h - radius, radius, 0.0, 90.0, color, thickness, seg)
+   draw_arc(x + radius, y + h - radius, radius, 90.0, 180.0, color, thickness, seg)
+   true
+}
+
+fn draw_rect_rounded_lines(any rec, f64 radius, int segments, any color) bool {
+   "Draws a one-pixel rounded rectangle outline."
+   draw_rect_rounded_lines_ex(rec, radius, segments, 1.0, color)
 }
 
 fn draw_star(f64 cx, f64 cy, f64 inner_radius, f64 outer_radius, int pts, any color, f64 rotation_deg=0.0) bool {
@@ -6418,7 +6800,7 @@ fn _texture_upload_image_ex(
    }
    def w, h = _dict_int(img, "width", 0), _dict_int(img, "height", 0)
    def pixels = img.get("data", 0)
-   if w <= 0 || h <= 0 {
+   if w <= 0 || h <= 0 || !pixels {
       if trace_on || deep_on { ui_profile.print_text("[tex] skip upload invalid size path=" + path + " w=" + to_str(w) + " h=" + to_str(h)) }
       if free_img { lib_img.free(img) }
       return -1
@@ -6570,7 +6952,8 @@ fn texture_destroy(int tex) bool {
       i += 1
    }
    if _backend == BACKEND_GL { lib_glr.destroy_texture(tex) }
-   else { lib_vkr.destroy_texture(tex) }
+   elif _backend == BACKEND_VK { lib_vkr.destroy_texture(tex) }
+   else { return false }
    true
 }
 
@@ -6622,7 +7005,10 @@ fn texture_count() int {
 fn texture_size(int tex) list {
    "Returns [width, height] for a live texture id, or [0, 0] if unavailable."
    if !is_int(tex) || tex <= 0 { return [0, 0] }
-   if _backend == BACKEND_GL { return lib_glr.texture_size(tex) }
+   if _backend == BACKEND_GL {
+      def gl_sz = lib_glr.texture_size(tex)
+      return is_list(gl_sz) ? gl_sz : [0, 0]
+   }
    if _backend != BACKEND_VK { return [0, 0] }
    def sz = lib_vkr.texture_size(tex)
    is_list(sz) ? sz : [0, 0]
@@ -6631,9 +7017,10 @@ fn texture_size(int tex) list {
 fn draw_texture(int tex, f64 x, f64 y, f64 scale=1.0, any color=WHITE) bool {
    "Draws a texture at the given position with optional scale."
    if !is_int(tex) || tex <= 0 { return false }
+   if scale <= 0.0 { return false }
    if _backend != BACKEND_VK && _backend != BACKEND_GL { return false }
    def sz = (_backend == BACKEND_GL) ? lib_glr.texture_size(tex) : lib_vkr.texture_size(tex)
-   if !sz { return false }
+   if !is_list(sz) { return false }
    def w, h = sz.get(0, 0), sz.get(1, 0)
    if w <= 0 || h <= 0 { return false }
    def cr, cg = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)

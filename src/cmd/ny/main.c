@@ -120,6 +120,22 @@ static void write_ny_signal_repeat(int count) {
   write_str(clr(NY_CLR_RESET));
 }
 
+static void write_ny_signal_debug_help(void) {
+  write_str(clr(NY_CLR_GRAY));
+  write_str("\nDebug help:");
+  write_str(clr(NY_CLR_RESET));
+  write_str(" rerun with -trace, or set NYTRIX_TRACE=1 NYTRIX_TRACE_CALLS=1 "
+            "NYTRIX_TRACE_VALUES=1 NYTRIX_TRACE_VERBOSE=1.\n");
+  write_str(clr(NY_CLR_GRAY));
+  write_str("Debug filter:");
+  write_str(clr(NY_CLR_RESET));
+  write_str(" set NYTRIX_TRACE_FILTER=module_or_function_tail to reduce trace noise.\n");
+  write_str(clr(NY_CLR_GRAY));
+  write_str("Import/debug help:");
+  write_str(clr(NY_CLR_RESET));
+  write_str(" set NYTRIX_DIAG_UNDEF=1, NYTRIX_TRACE_IMPORTS=1, or NYTRIX_STD_CACHE=0.\n");
+}
+
 static void handle_segv(int sig) {
   signal(sig, SIG_DFL);
 
@@ -158,6 +174,7 @@ static void handle_segv(int sig) {
     have_last = 1;
   }
   write_ny_signal_repeat(repeats);
+  write_ny_signal_debug_help();
   write_str(clr(NY_CLR_RED));
   write_str(name);
   write_str(clr(NY_CLR_RESET));

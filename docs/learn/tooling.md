@@ -232,7 +232,9 @@ ny --safe-mode file.ny
 ny --strict file.ny
 ny --strict-types file.ny
 ny --no-strict-types legacy_probe.ny
+ny --borrow-check file.ny
 ny --borrow-check --ownership-strict file.ny
+ny --ownership file.ny
 ny --heap=gc file.ny
 ny --max-errors=20 file.ny
 ny --warn=useful file.ny
@@ -246,7 +248,10 @@ explainable. `--no-strict-types` is the compatibility escape hatch when that str
 layer was enabled by a wrapper or environment. `--safe-mode` adds
 ownership/borrow checks, RC/RAII cleanup, strict effect/alias policy, and
 raw-memory diagnostics. `--strict` adds
-ownership/borrow diagnostics without the full safe-mode profile.
+ownership/borrow diagnostics (moves, releases, borrow escapes) without forcing
+RAII runtime cleanup. `--borrow-check` enables the same diagnostics as `--strict`
+without the extra type restrictions. Use `--ownership` (`--heap=raii`) to add
+automatic runtime cleanup of owned values.
 
 ## Packages
 
