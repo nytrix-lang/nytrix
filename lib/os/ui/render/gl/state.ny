@@ -178,6 +178,7 @@ mut _tex_pixels = dict(128)
 mut _wireframe = false
 mut _lighting_enabled = false
 mut _depth_mask_enabled = true
+mut _blend_enabled = true
 ;; Cached GL_TEXTURE_2D / GL_DEPTH_TEST enable state. The previous code issued
 ;; glEnable/glDisable unconditionally on every draw_vertices call, which on a
 ;; 2000-cell terminal frame meant ~4000 redundant GL calls just to restate the
@@ -196,6 +197,8 @@ mut _current_base_color_u32 = 0xffffffff
 mut _current_material_u32 = 0x0000ff00
 mut _current_base_tex_id = -1
 mut _current_alpha_u32 = 0
+mut _current_bsdf0_u32 = 0
+mut _current_bsdf5_u32 = 0
 mut _current_base_uv_xf0 = 0
 mut _current_base_uv_xf1 = 0
 mut _last_texture_xf0 = 0x7fffffff
@@ -899,6 +902,7 @@ fn _load_base_uv_texture_matrix(int xf0, int xf1) bool {
    def p = _ensure_matrix_buf()
    if p {
       memset(p, 0, 64)
+      ;; Keep GL fallback consistent with the glTF KHR_texture_transform decode.
       store32_f32(p, cr * scl_x, 0)
       store32_f32(p, -sr * scl_x, 4)
       store32_f32(p, sr * scl_y, 16)
@@ -1006,7 +1010,9 @@ fn _gl_refresh_config() bool {
       _cfg_gl_preview_textures = true
       _cfg_gl_lit_textures = false
    }
-   _cfg_gl_vertex_colors = common.env_truthy("NY_GL_VERTEX_COLORS")
+   ;; Vertex colors are normal mesh material data, not a debug mode. Default
+   ;; them on for glTF parity; NY_GL_VERTEX_COLORS=0 disables them for probes.
+   _cfg_gl_vertex_colors = !common.env_falsey("NY_GL_VERTEX_COLORS")
    _cfg_gl_finish_each_draw = common.env_truthy("NY_GL_FINISH_EACH_DRAW")
    true
 }
@@ -1028,6 +1034,23 @@ fn _set_tex_env_mode(int mode) bool {
    _ny_glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, mode)
    _last_tex_env_mode = mode
    true
+}
+
+fn _set_blend_enabled(bool enabled) bool {
+   if enabled == _blend_enabled { return true }
+   if enabled { _call1u("glEnable", GL_BLEND) }
+   else { _call1u("glDisable", GL_BLEND) }
+   _blend_enabled = enabled
+   true
+}
+
+fn _current_material_needs_blend() bool {
+   def alpha_mode = band(int(_current_alpha_u32), 3)
+   if alpha_mode == 2 { return true }
+   def transmission = band(bshr(int(_current_bsdf0_u32), 16), 255)
+   def diffuse_transmission = band(int(_current_bsdf5_u32), 255)
+   def refraction = band(bshr(int(_current_bsdf5_u32), 8), 255)
+   transmission > 0 || diffuse_transmission > 0 || refraction > 0
 }
 
 fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
@@ -1068,7 +1091,12 @@ fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
       else { _call1u("glDisable", GL_DEPTH_TEST) }
       _depth_test_enabled = depth_write
    }
-   _set_depth_mask(depth_write)
+   ;; UI draws call with depth_write=false and still need normal alpha blending.
+   ;; Mesh draws call with depth_write=true; switch GL_BLEND from the active
+   ;; material instead of leaving it globally enabled for every opaque object.
+   def needs_blend = depth_write ? _current_material_needs_blend() : true
+   _set_blend_enabled(needs_blend)
+   _set_depth_mask(depth_write && !needs_blend)
    true
 }
 
@@ -1234,6 +1262,8 @@ fn set_material(any base_color, any metallic, any roughness) any {
    _current_material_u32 = bor(band(int(float(metallic) * 255.0), 255), bshl(band(int(float(roughness) * 255.0), 255), 8))
    _current_base_tex_id = -1
    _current_alpha_u32 = 0
+   _current_bsdf0_u32 = 0
+   _current_bsdf5_u32 = 0
    _current_vc_mode = 0
    _current_base_uv_xf0 = 0
    _current_base_uv_xf1 = 0
@@ -1247,6 +1277,8 @@ fn set_ui_material(int base_tex_id=-1, int alpha_u32=0, int vc_mode=12) any {
    _current_base_tex_id = _norm_i32(base_tex_id)
    if _current_base_tex_id <= 0 { _current_base_tex_id = -1 }
    _current_alpha_u32 = alpha_u32
+   _current_bsdf0_u32 = 0
+   _current_bsdf5_u32 = 0
    _current_vc_mode = int(vc_mode)
    _current_base_uv_xf0 = 0
    _current_base_uv_xf1 = 0
@@ -1296,6 +1328,8 @@ fn set_material_packed(
    _current_base_tex_id = _norm_i32(base_tex_id)
    if _current_base_tex_id <= 0 { _current_base_tex_id = -1 }
    _current_alpha_u32 = alpha_u32
+   _current_bsdf0_u32 = bsdf0_u32
+   _current_bsdf5_u32 = bsdf5_u32
    _current_vc_mode = int(vc_mode)
    _current_base_uv_xf0 = base_uv_xf0
    _current_base_uv_xf1 = base_uv_xf1
@@ -1426,6 +1460,7 @@ fn init(any win) bool {
    _apply_matrices()
    _call1("glDisable", GL_CULL_FACE)
    _call1("glEnable", GL_BLEND)
+   _blend_enabled = true
    if _has("glBlendFuncSeparate") {
       _call4("glBlendFuncSeparate", GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
    } else {

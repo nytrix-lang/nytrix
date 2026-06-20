@@ -231,7 +231,7 @@ fn _argv_verbose_token(any token) bool {
 fn apply_verbose_argv(int start_index=1) bool {
    "Enables bounded UI/render/input diagnostics from argv; -vv and --trace-spam increase verbosity."
    mut i = int(max(0, start_index))
-   mut level = 0
+   mut level = 1
    while i < argc() {
       def lv = _argv_verbose_level(argv(i))
       if lv > level { level = lv }
@@ -251,13 +251,15 @@ fn apply_verbose_argv(int start_index=1) bool {
       set_bool("NY_TRACE", false)
    }
    ;; Useful-by-default diagnostics: startup/backend choice, input events,
-   ;; renderer failures, font loading, and Vulkan initialization timing.
-   ;; Keep hot per-frame/per-stage/per-glyph logs out of -v and -vv; those
-   ;; are slow enough to change the behavior being debugged.
-   set_bools([
-         "NY_UI_TRACE", "NY_UI_STARTUP_TRACE", "NY_UI_INPUT_TRACE",
-         "NY_RENDER_DEBUG", "NY_VK_INIT_TRACE", "NY_FONT_LOAD_TRACE"
-   ], true)
+   ;; renderer failures, and Vulkan initialization timing.  Do not enable
+   ;; NY_UI_TRACE/NY_RENDER_DEBUG/NY_FONT_LOAD_TRACE for plain -v: those feed
+   ;; hot frame/profile/proc/font paths and change performance while debugging.
+   set_bools(["NY_UI_STARTUP_TRACE", "NY_UI_INPUT_TRACE", "NY_VK_INIT_TRACE"], true)
+   if level >= 2 {
+      set_bools(["NY_UI_TRACE", "NY_RENDER_DEBUG", "NY_FONT_LOAD_TRACE"], true)
+   } else {
+      set_bools(["NY_UI_TRACE", "NY_RENDER_DEBUG", "NY_FONT_LOAD_TRACE", "NY_TRACE_PROC"], false)
+   }
    if level < 3 {
       ;; Explicitly suppress hot traces in useful/deep modes, even if a cached
       ;; previous run asked for them.  Users can still request full spam with
@@ -266,8 +268,8 @@ fn apply_verbose_argv(int start_index=1) bool {
             "NY_GFX_FRAME_TRACE", "NY_VK_BEGIN_TRACE", "NY_VK_STAGE_TRACE",
             "NY_GL_TEXT_TRACE", "NY_VK_DESCRIPTOR_TRACE", "NY_UI_TEX_TRACE",
             "NY_TEX_TRACE", "NY_UI_GUI_DUMP_TRACE", "NY_TRACE_SPAM",
-            "NY_UI_PROFILE", "NY_UI_PROFILE_TRACE", "NY_VK_PROFILE_TRACE",
-            "NY_VK_PROFILE_DUMP"
+            "NY_TRACE_PROC", "NY_UI_PROFILE", "NY_UI_PROFILE_TRACE",
+            "NY_VK_PROFILE_TRACE", "NY_VK_PROFILE_DUMP"
       ], false)
    }
    if level >= 2 {
@@ -1094,7 +1096,8 @@ fn trace_process_enabled() bool {
    ;; silently re-enable the heavy /proc sampler in perf/debug runs.
    if env_present_cached("NY_TRACE_PROC") { return env_truthy_cached("NY_TRACE_PROC") }
    if _ny_trace_perf() { return false }
-   trace_enabled()
+   def mode = _ny_trace_mode()
+   mode == "deep" || mode == "full" || mode == "spam" || env_truthy_cached("NY_UI_PROFILE_TRACE")
 }
 
 fn _proc_parse_first_int(str line) int {

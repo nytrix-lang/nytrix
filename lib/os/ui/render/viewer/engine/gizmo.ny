@@ -32,7 +32,7 @@ fn _gizmo_draw_transform(list b) bool {
    def z0 = float(b.get(2, 0.0))
    def x1, y1 = float(b.get(3, 0.0)), float(b.get(4, 0.0))
    def z1 = float(b.get(5, 0.0))
-   def m = viewer_gizmo.metrics(b, _gizmo_mode)
+   def m = viewer_gizmo.metrics_screen(b, _gizmo_mode, M_VP, _win_w, _win_h)
    def pad = max(0.010, float(m.get(3, 1.0)) * 0.025)
    def span = float(m.get(3, 1.0))
    def box_col = [1.0, 0.68, 0.20, 0.86]
@@ -56,7 +56,7 @@ fn _scene_world_gizmo_pick(any x, any y) dict {
    }
    def b = _gizmo_selection_bounds()
    if !is_list(b) || b.len < 6 { return {"hit": false, "axis": 0, "mode": _gizmo_mode} }
-   viewer_gizmo.hit_test(M_VP, _win_w, _win_h, b, _gizmo_mode, x, y)
+   viewer_gizmo.hit_test_screen(M_VP, _win_w, _win_h, b, _gizmo_mode, x, y)
 }
 
 fn _scene_world_gizmo_axis_tangent(any axis) dict {
@@ -65,7 +65,7 @@ fn _scene_world_gizmo_axis_tangent(any axis) dict {
    }
    def b = _gizmo_selection_bounds()
    if !is_list(b) || b.len < 6 { return {"ok": false, "axis": int(axis), "screen_axis_x": 0.0, "screen_axis_y": 0.0} }
-   def m = viewer_gizmo.metrics(b, _gizmo_mode)
+   def m = viewer_gizmo.metrics_screen(b, _gizmo_mode, M_VP, _win_w, _win_h)
    def v = _gizmo_axis_vec(int(axis))
    def n = viewer_gizmo.axis_tangent(
       M_VP, _win_w, _win_h,

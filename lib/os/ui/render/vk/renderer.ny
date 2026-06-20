@@ -9,6 +9,7 @@ use std.core
 use std.core.mem
 use std.math
 use std.math.matrix
+use std.math.simmd as simmd
 use std.os.ui.render.matrix (mat4_identity)
 use std.os.ui.window.native as native
 use std.os.ui.window as lib_uiw
@@ -103,18 +104,14 @@ def _WAYLAND_ACQUIRE_TIMEOUT_NS = 16000000
 mut _active_scissor_x, _active_scissor_y, _active_scissor_w, _active_scissor_h = -1, -1, -1, -1
 mut _vk_pc_trace_logs = 0
 
+@inline
 fn _store_mat4(any dst, any mat) bool {
-   if dst == 0 { ui_profile.print_text("[vk] _store_mat4: null ptr") return false }
+   if !dst { ui_profile.print_text("[vk] _store_mat4: null ptr") return false }
    if !is_list(mat) || mat.len != 16 { return false }
-   mut r = 0
-   while r < 4 {
-      mut c = 0
-      while c < 4 {
-         if dst == 0 { ui_profile.print_text("[vk] _store_mat4: null ptr during write") return false }
-         store32_f32(dst, __load_item_fast(mat, r * 4 + c), c * 16 + r * 4)
-         c += 1
-      }
-      r += 1
+   mut i = 0
+   while i < 16 {
+      store32_f32(dst, __load_item_fast(mat, i), ((i & 3) * 16) + ((i >> 2) * 4))
+      i += 1
    }
    true
 }
@@ -140,14 +137,14 @@ fn renderer_config(any vsync, any filter, any vert_spv_path, any frag_spv_path, 
    filter: 0 for NEAREST, 1 for LINEAR(default 0)
    vert_spv_path: path to custom vertex shader .spv or empty for default
    frag_spv_path: path to custom fragment shader .spv or empty for default
-   msaa: number of MSAA samples(1, 2, 4, 8) (default 1)"
+   msaa: number of MSAA samples(1, 2, 4, 8) (default 4)"
    _cfg_present_policy = is_str(vsync) ? text.lower(vsync) : ""
    if _cfg_present_policy.len > 0 {
       _cfg_vsync = (_cfg_present_policy == "fifo" || _cfg_present_policy == "vsync")
    } elif ui_profile.env_present_cached("NY_UI_VSYNC") {
       _cfg_vsync = ui_profile.env_truthy_cached("NY_UI_VSYNC")
    } else {
-      _cfg_vsync = is_nil(vsync) ? true : !!vsync
+      _cfg_vsync = is_nil(vsync) ? false : !!vsync
    }
    _cfg_filter = filter ? 1 : 0
    _cfg_vert_spv = vert_spv_path
@@ -191,10 +188,17 @@ mut _image_available_semaphores_count, _render_finished_semaphores_count, _in_fl
 mut _scene_light_frame_mask = 0
 mut _trace_light_bind, _trace_light_detail, _trace_group, _trace_mat, _handles_valid = false, false, false, false, false
 mut _proc_trace_next_sample_frame_vk = 0
+mut _pending_resize_stamp_ns = 0
+mut _resize_debounce_ms_cache = -1
 mut _scene_light_tmp_slab = 0
 mut _current_emissive_tex_word, _current_base_tex_word = 0x80000000, 0x80000000
 mut _current_occlusion_tex_word, _current_normal_tex_word = 0x80000000, 0x80000000
 mut _current_material_key = 0
+mut _current_mat_slab_cache, _current_mat_slab_ptr = 0, 0
+mut _flat_fast_on = -1
+mut _material_state_no_sync = -1
+mut _flat_cache_last_tex, _flat_cache_last_unlit = -2147483647, 0
+mut _flat_cache_last_mat_ptr, _flat_cache_last_mat_key = 0, 0
 mut _main_deletion_queue, _frame_deletion_queues = [], [[], [], [], []]
 mut _draw_images, _draw_image_views, _draw_image_memories = [], [], []
 mut _draw_image_views_count, _draw_image_format, _draw_extent_w, _draw_extent_h = 0, 0, 0, 0
@@ -537,9 +541,24 @@ fn _vk_init_trace(str stage, any t0) any {
    ms
 }
 
+fn _resize_debounce_ms() int {
+   if _resize_debounce_ms_cache < 0 {
+      _resize_debounce_ms_cache = ui_profile.env_int_cached("NY_VK_RESIZE_DEBOUNCE_MS", 0, 0, 1000)
+   }
+   _resize_debounce_ms_cache
+}
+
+fn _resize_debounce_waiting(bool force) bool {
+   if force || _pending_resize_stamp_ns <= 0 { return false }
+   def ms = _resize_debounce_ms()
+   if ms <= 0 { return false }
+   (float(ticks() - _pending_resize_stamp_ns) / 1000000.0) < float(ms)
+}
+
 fn _schedule_swapchain_recreate(bool force=false) bool {
    if _pending_resize_w <= 0 { _pending_resize_w = _swapchain_extent_w }
    if _pending_resize_h <= 0 { _pending_resize_h = _swapchain_extent_h }
+   if _pending_resize_stamp_ns <= 0 { _pending_resize_stamp_ns = ticks() }
    _swapchain_recreate_pending = true
    if force { _swapchain_recreate_force = true }
    _suboptimal_recreate_attempted = false
@@ -1053,11 +1072,28 @@ fn init(any win) bool {
    if !_prepare_draw_image_format() { ui_profile.print_text("[gfx:vulkan] init failed stage=prepare_draw_image_format") return false }
    _vk_init_trace("prepare_draw_image_format", stage_t0)
    stage_t0 = ticks()
-   if !_create_depth_resources() { ui_profile.print_text("[gfx:vulkan] init failed stage=create_depth_resources") return false }
+   if !_create_depth_resources() {
+      if _cfg_msaa > 1 {
+         def requested_msaa = _cfg_msaa
+         _destroy_depth_msaa_resources()
+         _cfg_msaa = 1
+         if vk_state._debug_gfx_enabled { ui_profile.print_text("[gfx:vulkan] MSAA " + to_str(requested_msaa) + "x unsupported for depth/color target; falling back to 1x") }
+      }
+      if !_create_depth_resources() { ui_profile.print_text("[gfx:vulkan] init failed stage=create_depth_resources") return false }
+   }
    if _depth_image == 0 || _depth_view == 0 { ui_profile.print_text("[gfx:vulkan] depth resources creation failed: null handle") return false }
    _vk_init_trace("create_depth_resources", stage_t0)
    stage_t0 = ticks()
-   if !_create_render_pass() { ui_profile.print_text("[gfx:vulkan] init failed stage=create_render_pass") return false }
+   if !_create_render_pass() {
+      if _cfg_msaa > 1 {
+         def requested_msaa = _cfg_msaa
+         _destroy_depth_msaa_resources()
+         _cfg_msaa = 1
+         if vk_state._debug_gfx_enabled { ui_profile.print_text("[gfx:vulkan] MSAA " + to_str(requested_msaa) + "x render pass unsupported; falling back to 1x") }
+         if !_create_depth_resources() { ui_profile.print_text("[gfx:vulkan] init failed stage=create_depth_resources_msaa_fallback") return false }
+      }
+      if !_create_render_pass() { ui_profile.print_text("[gfx:vulkan] init failed stage=create_render_pass") return false }
+   }
    if _render_pass == 0 { ui_profile.print_text("[gfx:vulkan] render pass creation failed: null handle") return false }
    _vk_init_trace("create_render_pass", stage_t0)
    stage_t0 = ticks()
@@ -1341,34 +1377,20 @@ fn _sync_flat_part_model(?ptr base) any {
    0
 }
 
+@inline
 fn _mat4_ptr_is_identity(any p) bool {
    if !p { return false }
-   mut i = 0
-   while i < 16 {
-      def want = (i == 0 || i == 5 || i == 10 || i == 15) ? 1.0 : 0.0
-      if abs(load32_f32(p, i * 4) - want) > 0.000001 { return false }
-      i += 1
-   }
-   true
+   load32_f32(p, 0) == 1.0 && load32_f32(p, 20) == 1.0 && load32_f32(p, 40) == 1.0 && load32_f32(p, 60) == 1.0 &&
+   load32_f32(p, 4) == 0.0 && load32_f32(p, 8) == 0.0 && load32_f32(p, 12) == 0.0 &&
+   load32_f32(p, 16) == 0.0 && load32_f32(p, 24) == 0.0 && load32_f32(p, 28) == 0.0 &&
+   load32_f32(p, 32) == 0.0 && load32_f32(p, 36) == 0.0 && load32_f32(p, 44) == 0.0 &&
+   load32_f32(p, 48) == 0.0 && load32_f32(p, 52) == 0.0 && load32_f32(p, 56) == 0.0
 }
 
+@inline
 fn _mat4_ptr_mul_store(any a, any b, any dst) bool {
    if !a || !b || !dst { return false }
-   mut c = 0
-   while c < 4 {
-      mut r = 0
-      while r < 4 {
-         mut sum = 0.0
-         mut k = 0
-         while k < 4 {
-            sum += load32_f32(a, k * 16 + r * 4) * load32_f32(b, c * 16 + k * 4)
-            k += 1
-         }
-         store32_f32(dst, sum, c * 16 + r * 4)
-         r += 1
-      }
-      c += 1
-   }
+   simmd.mat4_mul_ptr(a, b, dst)
    true
 }
 
@@ -1412,6 +1434,38 @@ fn _sync_flat_part_shading(?ptr base, bool sync_tex=true, bool sync_mat=true, bo
    0
 }
 
+@inline
+fn _vk_flat_fast_on_cached() bool {
+   if _flat_fast_on < 0 { _flat_fast_on = common.env_truthy("NY_VK_FLAT_FAST_ON") ? 1 : 0 }
+   _flat_fast_on == 1
+}
+
+@inline
+fn _draw_flat_part_buffers_loaded(
+   ?ptr base,
+   any sbuf,
+   int soff,
+   any ibuf,
+   int ioff,
+   int idx_count,
+   int draw_count,
+   int index_type,
+   int topo,
+   any pipe,
+   bool flat_fast_on
+) int {
+   def is_lines = topo == 1
+   def is_points = topo == 2
+   def use_pipe = pipe ? pipe : 0
+   if topo == 0 && use_pipe && flat_fast_on && _draw_static_mesh_part_fast(sbuf, soff, ibuf, ioff, idx_count, draw_count, index_type, use_pipe) {
+   } elif ibuf && idx_count > 0 {
+      draw_static_buffer_indexed_raw(sbuf, soff, ibuf, ioff, idx_count, is_lines, 1.0, use_pipe, index_type, is_points)
+   } else {
+      draw_static_buffer_raw(sbuf, soff, draw_count, is_lines, 1.0, use_pipe, is_points)
+   }
+   1
+}
+
 fn _draw_flat_part_buffers(?ptr base) int {
    def sbuf = load64(base, 16)
    if !sbuf { return 0 }
@@ -1422,73 +1476,68 @@ fn _draw_flat_part_buffers(?ptr base) int {
    def draw_count = load32_h(base, 52)
    def index_type = load32_h(base, 56)
    def topo = load32_h(base, 60)
-   def is_lines = topo == 1
-   def is_points = topo == 2
-   def pipe = load64(base, 8)
-   mut use_pipe = 0
-   if pipe { use_pipe = pipe }
-   if topo == 0 && use_pipe && common.env_truthy("NY_VK_FLAT_FAST_ON") && _draw_static_mesh_part_fast(sbuf, soff, ibuf, ioff, idx_count, draw_count, index_type, use_pipe) {
-   } elif ibuf && idx_count > 0 {
-      draw_static_buffer_indexed_raw(sbuf, soff, ibuf, ioff, idx_count, is_lines, 1.0, use_pipe, index_type, is_points)
-   } else {
-      draw_static_buffer_raw(sbuf, soff, draw_count, is_lines, 1.0, use_pipe, is_points)
-   }
-   1
+   _draw_flat_part_buffers_loaded(base, sbuf, soff, ibuf, ioff, idx_count, draw_count, index_type, topo, load64(base, 8), _vk_flat_fast_on_cached())
 }
 
-fn _flat_range_sync_model_cache(?ptr base, int last_model_key, any base_model) int {
+@inline
+fn _flat_range_sync_model_cache_raw(?ptr base, int last_model_key) int {
    def model_key = load32_h(base, 252)
-   if model_key != 0 && model_key == last_model_key { return last_model_key }
-   _sync_flat_part_model_composed(base, base_model)
+   if model_key != 0 && model_key == last_model_key && !_model_dirty { return last_model_key }
+   _sync_flat_part_model(base)
    model_key
 }
 
-fn _flat_range_trace_part(int idx, ?ptr base, int traced_part) int {
-   if !(traced_part < 6 && _trace_light_detail) { return traced_part }
-   print(
-      "[vk:part] idx=" + to_str(idx) +
-      " model_t=(" +
-      to_str(load32_f32(base + 64, 48)) + "," +
-      to_str(load32_f32(base + 64, 52)) + "," +
-      to_str(load32_f32(base + 64, 56)) + ")"
-   )
-   traced_part + 1
+@inline
+fn _flat_range_sync_model_cache_composed(?ptr base, int last_model_key, any base_model) int {
+   def model_key = load32_h(base, 252)
+   if model_key != 0 && model_key == last_model_key && !_model_dirty { return last_model_key }
+   def model_ptr = base + 64
+   _mat4_ptr_mul_store(base_model, model_ptr, _current_model)
+   _model_dirty = true
+   _pc_dirty = true
+   model_key
 }
 
-fn _flat_range_sync_shading_cache(
-   ?ptr base,
-   bool sync_material_textures,
-   int last_tex,
-   int last_unlit,
-   any last_mat_ptr,
-   int last_mat_key
-) list {
+@inline
+fn _flat_range_reset_shading_cache() any {
+   _flat_cache_last_tex = -2147483647
+   _flat_cache_last_unlit = _current_is_unlit ? 1 : 0
+   _flat_cache_last_mat_ptr = 0
+   _flat_cache_last_mat_key = 0
+   0
+}
+
+@inline
+fn _flat_range_sync_shading_cache(?ptr base, bool sync_material_textures) any {
    if sync_material_textures {
       def tex_id = load32_h(base, 0)
-      if tex_id != last_tex {
+      if tex_id != _flat_cache_last_tex {
          if tex_id >= 0 { bind_texture(tex_id) }
          else { bind_default_texture() }
-         last_tex = tex_id
+         _flat_cache_last_tex = tex_id
       }
    }
    def is_unlit = load32_h(base, 132) != 0
    def want_unlit = is_unlit ? 1 : 0
-   if want_unlit != last_unlit {
+   if want_unlit != _flat_cache_last_unlit {
       set_unlit(is_unlit)
-      last_unlit = want_unlit
+      _flat_cache_last_unlit = want_unlit
    }
    def mat_ptr = base + 136
    def mat_key = load32_h(base, 128)
-   if !(mat_key != 0 && mat_key == last_mat_key) {
-      if !sync_material_textures { _set_material_from_part_slab_key_no_sync(mat_ptr, mat_key) } elif mat_key != 0 { _set_material_from_part_slab_key(mat_ptr, mat_key) } else {
-         if mat_ptr != last_mat_ptr {
-            if !last_mat_ptr || memcmp(mat_ptr, last_mat_ptr, 116) != 0 { _set_material_from_part_slab(mat_ptr) }
-            last_mat_ptr = mat_ptr
-         }
+   if mat_key != 0 {
+      if mat_key != _flat_cache_last_mat_key {
+         if sync_material_textures { _set_material_from_part_slab_key(mat_ptr, mat_key) }
+         else { _set_material_from_part_slab_key_no_sync(mat_ptr, mat_key) }
+         _flat_cache_last_mat_key = mat_key
+         _flat_cache_last_mat_ptr = mat_ptr
       }
-      last_mat_key = mat_key
+   } elif mat_ptr != _flat_cache_last_mat_ptr {
+      if !_flat_cache_last_mat_ptr || memcmp(mat_ptr, _flat_cache_last_mat_ptr, 116) != 0 { _set_material_from_part_slab(mat_ptr) }
+      _flat_cache_last_mat_key = 0
+      _flat_cache_last_mat_ptr = mat_ptr
    }
-   [last_tex, last_unlit, last_mat_ptr, last_mat_key]
+   0
 }
 
 fn draw_part0_flat_no_restore(?ptr slab_ptr) int {
@@ -1594,10 +1643,10 @@ fn _draw_parts_flat_range_impl(
    def saved_model = restore_model ? _snapshot_model_matrix(_scratch_model_saved_b) : 0
    def base_model = restore_model ? saved_model : _snapshot_model_matrix(_scratch_model_saved_a)
    mut drawn = 0
-   mut last_tex = -2147483647
-   mut last_unlit = _current_is_unlit ? 1 : 0
-   mut last_mat_ptr = 0
-   mut last_mat_key = 0
+   _flat_range_reset_shading_cache()
+   def flat_fast_on = _vk_flat_fast_on_cached()
+   def base_model_identity = !base_model || _mat4_ptr_is_identity(base_model)
+   def trace_part_models = _trace_light_detail
    mut last_model_key = 0
    mut traced_part = 0
    def trace_group_end = _trace_group ? (int(start_idx) + common.env_int_clamped("NY_UI_GROUP_TRACE_LIMIT", 6, 1, 4096)) : 0
@@ -1605,18 +1654,16 @@ fn _draw_parts_flat_range_impl(
    while i < int(end_idx) {
       def base = slab_ptr + i * 256
       if !_flat_part_active(base) { i += 1 continue }
-      last_model_key = _flat_range_sync_model_cache(base, last_model_key, base_model)
-      traced_part = _flat_range_trace_part(i, base, traced_part)
-      def shade_state = _flat_range_sync_shading_cache(
-         base,
-         sync_material_textures,
-         last_tex,
-         last_unlit,
-         last_mat_ptr,
-         last_mat_key
-      )
-      last_tex, last_unlit = shade_state.get(0, last_tex), shade_state.get(1, last_unlit)
-      last_mat_ptr, last_mat_key = shade_state.get(2, last_mat_ptr), shade_state.get(3, last_mat_key)
+      if base_model_identity { last_model_key = _flat_range_sync_model_cache_raw(base, last_model_key) }
+      else { last_model_key = _flat_range_sync_model_cache_composed(base, last_model_key, base_model) }
+      if trace_part_models && traced_part < 6 {
+         print("[vk:part] idx=" + to_str(i) + " model_t=(" +
+            to_str(load32_f32(base + 64, 48)) + "," +
+            to_str(load32_f32(base + 64, 52)) + "," +
+            to_str(load32_f32(base + 64, 56)) + ")")
+         traced_part += 1
+      }
+      _flat_range_sync_shading_cache(base, sync_material_textures)
       def sbuf = load64(base, 16)
       if !sbuf { i += 1 continue }
       def soff = load64_h(base, 24)
@@ -1626,6 +1673,7 @@ fn _draw_parts_flat_range_impl(
       def draw_count = load32_h(base, 52)
       def index_type = load32_h(base, 56)
       def topo = load32_h(base, 60)
+      def pipe = load64(base, 8)
       if _trace_group && i < trace_group_end {
          def mat_ptr = base + 136
          ui_profile.print_text("[group:draw] part=" + to_str(i) +
@@ -1642,7 +1690,7 @@ fn _draw_parts_flat_range_impl(
             " matTex=" + to_str(load32_h(mat_ptr, 20)) +
          " normal=0x" + text.to_hex(load32_h(mat_ptr, 100)))
       }
-      drawn += _draw_flat_part_buffers(base)
+      drawn += _draw_flat_part_buffers_loaded(base, sbuf, soff, ibuf, ioff, idx_count, draw_count, index_type, topo, pipe, flat_fast_on)
       i += 1
    }
    if saved_model && _current_model {
@@ -1741,17 +1789,23 @@ fn begin_frame() bool {
    if _swapchain_recreate_pending {
       _vk_stage("begin.recreate")
       def _t_recreate = _deep_on ? ticks() : 0
-      _swapchain_recreate_pending = false
       def force_recreate = _swapchain_recreate_force
-      _swapchain_recreate_force = false
-      if !force_recreate && _pending_resize_w > 0 && _pending_resize_h > 0 &&
-      _same_int_value(_pending_resize_w, _swapchain_extent_w) &&
-      _same_int_value(_pending_resize_h, _swapchain_extent_h){
-         _pending_resize_w, _pending_resize_h = 0, 0
+      if _resize_debounce_waiting(force_recreate) {
+         _vk_stage("begin.recreate.defer")
       } else {
-         _vk_stage("begin.recreate.call")
-         if !_recreate_swapchain() { return _vk_begin_false("recreate_failed") }
-         _pending_resize_w, _pending_resize_h = 0, 0
+         _swapchain_recreate_pending = false
+         _swapchain_recreate_force = false
+         if !force_recreate && _pending_resize_w > 0 && _pending_resize_h > 0 &&
+         _same_int_value(_pending_resize_w, _swapchain_extent_w) &&
+         _same_int_value(_pending_resize_h, _swapchain_extent_h){
+            _pending_resize_w, _pending_resize_h = 0, 0
+            _pending_resize_stamp_ns = 0
+         } else {
+            _vk_stage("begin.recreate.call")
+            if !_recreate_swapchain() { return _vk_begin_false("recreate_failed") }
+            _pending_resize_w, _pending_resize_h = 0, 0
+            _pending_resize_stamp_ns = 0
+         }
       }
       if has_surface && !_handle_ok(_swapchain) {
          ui_profile.print_text("[begin_frame] FAIL: swapchain unavailable after recreate")
@@ -2117,22 +2171,16 @@ fn _pack_emissive_tex_word(int tex_id, int uv_set) int {
    word
 }
 
+@inline
 fn _pack_base_tex_word(int tex_id, int vc_mode) int {
-   mut word = 0x80000000
-   if band(vc_mode, 1) != 0 { word = word | 0x40000000 }
-   if band(vc_mode, 4) != 0 { word = word | 0x10000000 }
-   if band(vc_mode, 2) != 0 { word = word | 0x20000000 }
-   if band(vc_mode, 8) != 0 { word = word | 0x04000000 }
-   if band(vc_mode, 16) != 0 { word = word | 0x08000000 }
-   if tex_id >= 0 {
-      word = band(tex_id, 0xffff)
-      if band(vc_mode, 1) != 0 { word = word | 0x40000000 }
-      if band(vc_mode, 4) != 0 { word = word | 0x10000000 }
-      if band(vc_mode, 2) != 0 { word = word | 0x20000000 }
-      if band(vc_mode, 8) != 0 { word = word | 0x04000000 }
-      if band(vc_mode, 16) != 0 { word = word | 0x08000000 }
-   }
-   word
+   mut flags = 0
+   if band(vc_mode, 1) != 0 { flags = flags | 0x40000000 }
+   if band(vc_mode, 4) != 0 { flags = flags | 0x10000000 }
+   if band(vc_mode, 2) != 0 { flags = flags | 0x20000000 }
+   if band(vc_mode, 8) != 0 { flags = flags | 0x04000000 }
+   if band(vc_mode, 16) != 0 { flags = flags | 0x08000000 }
+   if tex_id >= 0 && !_format_is_srgb(texture_format(tex_id)) { flags = flags | 0x02000000 }
+   (tex_id >= 0 ? band(tex_id, 0xffff) : 0x80000000) | flags
 }
 
 fn _pack_occlusion_tex_word(int tex_id, int uv_set) int {
@@ -2152,9 +2200,16 @@ fn _pack_normal_tex_word_current(int normal_tex_id, int normal_uv_xf1) int {
    bor(band(normal_tex_id, 0xfffe0000), 0xffff)
 }
 
-fn _sync_current_material_texture_slots() any {
+@inline
+fn _material_state_no_sync_cached() bool {
+   if _material_state_no_sync < 0 { _material_state_no_sync = common.env_truthy("NY_VK_MATERIAL_STATE_NO_SYNC") ? 1 : 0 }
+   _material_state_no_sync == 1
+}
+
+@inline
+fn _sync_current_material_texture_slots_impl(bool honor_no_sync_env) any {
    "Ensures every texture referenced by the current material has a valid bindless slot."
-   if common.env_truthy("NY_VK_MATERIAL_STATE_NO_SYNC") { return 0 }
+   if honor_no_sync_env && _material_state_no_sync_cached() { return 0 }
    if _current_base_tex_id >= 0 { bindless_sync_texture_slot(_current_base_tex_id) }
    def mr_word = band(bshr(_current_metallic_roughness_u32, 16), 0x7fff)
    def mr_tid = mr_word > 0 ? mr_word - 1 : -1
@@ -2169,6 +2224,8 @@ fn _sync_current_material_texture_slots() any {
    }
    0
 }
+
+fn _sync_current_material_texture_slots() any { _sync_current_material_texture_slots_impl(true) }
 
 fn set_ui_material(int base_tex_id = -1, int alpha_u32 = 0, int vc_mode = 12) any {
    "Sets the compact material state used by 2D UI, text, and terminal draws."
@@ -2436,9 +2493,24 @@ fn _set_material_from_part_slab(?ptr p) any {
    _set_material_from_slab_offsets(p, 96, 104, 108, load32_h(p, 112))
 }
 
-fn _set_material_from_part_slab_key(?ptr p, int key) any {
+@inline
+fn _cache_current_part_material(?ptr p) any {
    if !p { return 0 }
-   if key != 0 && key == _current_material_key &&
+   if !_current_mat_slab_cache { _current_mat_slab_cache = _renderer_alloc(116) }
+   memcpy(_current_mat_slab_cache, p, 116)
+   _current_mat_slab_ptr = p
+   0
+}
+
+@inline
+fn _current_part_material_cached(?ptr p, int key) bool {
+   key != 0 && key == _current_material_key && _current_mat_slab_cache &&
+   memcmp(p, _current_mat_slab_cache, 116) == 0
+}
+
+@inline
+fn _current_part_material_fields_match(?ptr p, int key) bool {
+   key != 0 && key == _current_material_key &&
    _current_base_color_u32 == load32_h(p, 0) &&
    _current_metallic_roughness_u32 == load32_h(p, 4) &&
    _current_emissive_u32 == load32_h(p, 8) &&
@@ -2466,13 +2538,11 @@ fn _set_material_from_part_slab_key(?ptr p, int key) any {
    _current_normal_tex_id == _norm_normal_tex_word(load32_h(p, 100)) &&
    _current_bsdf5_u32 == load32_h(p, 104) &&
    _current_ext2_tex_word == load32_h(p, 108) &&
-   _current_vc_mode == load32_h(p, 112){
-      return 0
-   }
-   if _vertex_offset != _last_flush_offset {
-      _flush_reason = 2
-      _flush()
-   }
+   _current_vc_mode == load32_h(p, 112)
+}
+
+@inline
+fn _load_current_part_material(?ptr p, int key) any {
    _current_material_key = key
    _current_base_color_u32 = load32_h(p, 0)
    _current_metallic_roughness_u32 = load32_h(p, 4)
@@ -2502,22 +2572,16 @@ fn _set_material_from_part_slab_key(?ptr p, int key) any {
    _current_bsdf5_u32 = load32_h(p, 104)
    _current_ext2_tex_word = load32_h(p, 108)
    _current_vc_mode = load32_h(p, 112)
+   _cache_current_part_material(p)
    _current_emissive_tex_word = _pack_emissive_tex_word(_current_emissive_tex_id, _current_emissive_uv_set)
    _current_base_tex_word = _pack_base_tex_word(_current_base_tex_id, _current_vc_mode)
    _current_occlusion_tex_word = _pack_occlusion_tex_word(_current_occlusion_tex_id, _current_occlusion_uv_set)
    _current_normal_tex_word = _pack_normal_tex_word_current(_current_normal_tex_id, _current_normal_uv_xf1)
-   if _current_base_tex_id >= 0 { bind_texture(_current_base_tex_id) }
-   def mr_word = band(bshr(_current_metallic_roughness_u32, 16), 0x7fff)
-   def mr_tid = mr_word > 0 ? mr_word - 1 : -1
-   def normal_tid = band(_current_normal_tex_id, 0xffff)
-   if mr_tid >= 0 { bindless_sync_texture_slot(mr_tid) }
-   if normal_tid < MAX_TEXTURES { bindless_sync_texture_slot(normal_tid) }
-   if _current_emissive_tex_id >= 0 { bindless_sync_texture_slot(_current_emissive_tex_id) }
-   if _current_occlusion_tex_id >= 0 { bindless_sync_texture_slot(_current_occlusion_tex_id) }
-   if (_current_ext2_tex_word & 0x80000000) == 0 {
-      def ext2_tid = band(_current_ext2_tex_word, 0xffff)
-      if ext2_tid < MAX_TEXTURES { bindless_sync_texture_slot(ext2_tid) }
-   }
+   0
+}
+
+@inline
+fn _trace_current_part_material(int key) any {
    if _trace_mat {
       def _base_tex_path = _texture_meta(_current_base_tex_id, "path", "")
       ui_profile.print_text("[vk:matpart] key=" + to_str(key) +
@@ -2529,83 +2593,31 @@ fn _set_material_from_part_slab_key(?ptr p, int key) any {
          " ext2=0x" + text.to_hex(_current_ext2_tex_word) +
       " vc=" + to_str(_current_vc_mode))
    }
-   _pc_dirty = true
    0
 }
 
-fn _set_material_from_part_slab_key_no_sync(?ptr p, int key) any {
+@inline
+fn _set_material_from_part_slab_key_impl(?ptr p, int key, bool bind_base_texture) any {
    if !p { return 0 }
-   if key != 0 && key == _current_material_key &&
-   _current_base_color_u32 == load32_h(p, 0) &&
-   _current_metallic_roughness_u32 == load32_h(p, 4) &&
-   _current_emissive_u32 == load32_h(p, 8) &&
-   _current_emissive_tex_id == _norm_i32(load32_h(p, 12)) &&
-   _current_emissive_uv_set == load32_h(p, 16) &&
-   _current_base_tex_id == _norm_i32(load32_h(p, 20)) &&
-   _current_alpha_u32 == load32_h(p, 24) &&
-   _current_occlusion_tex_id == _norm_i32(load32_h(p, 28)) &&
-   _current_occlusion_uv_set == load32_h(p, 32) &&
-   _current_bsdf0_u32 == load32_h(p, 36) &&
-   _current_bsdf1_u32 == load32_h(p, 40) &&
-   _current_bsdf2_u32 == load32_h(p, 44) &&
-   _current_bsdf3_u32 == load32_h(p, 48) &&
-   _current_base_uv_xf0 == load32_h(p, 52) &&
-   _current_base_uv_xf1 == load32_h(p, 56) &&
-   _current_normal_uv_xf0 == load32_h(p, 60) &&
-   _current_normal_uv_xf1 == load32_h(p, 64) &&
-   _current_mr_uv_xf0 == load32_h(p, 68) &&
-   _current_mr_uv_xf1 == load32_h(p, 72) &&
-   _current_occlusion_uv_xf0 == load32_h(p, 76) &&
-   _current_occlusion_uv_xf1 == load32_h(p, 80) &&
-   _current_emissive_uv_xf0 == load32_h(p, 84) &&
-   _current_emissive_uv_xf1 == load32_h(p, 88) &&
-   _current_bsdf4_u32 == load32_h(p, 96) &&
-   _current_normal_tex_id == _norm_normal_tex_word(load32_h(p, 100)) &&
-   _current_bsdf5_u32 == load32_h(p, 104) &&
-   _current_ext2_tex_word == load32_h(p, 108) &&
-   _current_vc_mode == load32_h(p, 112){
-      return 0
-   }
+   if _current_part_material_cached(p, key) || _current_part_material_fields_match(p, key) { return 0 }
    if _vertex_offset != _last_flush_offset {
       _flush_reason = 2
       _flush()
    }
-   _current_material_key = key
-   _current_base_color_u32 = load32_h(p, 0)
-   _current_metallic_roughness_u32 = load32_h(p, 4)
-   _current_emissive_u32 = load32_h(p, 8)
-   _current_emissive_tex_id = _norm_i32(load32_h(p, 12))
-   _current_emissive_uv_set = load32_h(p, 16)
-   _current_base_tex_id = _norm_i32(load32_h(p, 20))
-   _current_alpha_u32 = load32_h(p, 24)
-   _current_occlusion_tex_id = _norm_i32(load32_h(p, 28))
-   _current_occlusion_uv_set = load32_h(p, 32)
-   _current_bsdf0_u32 = load32_h(p, 36)
-   _current_bsdf1_u32 = load32_h(p, 40)
-   _current_bsdf2_u32 = load32_h(p, 44)
-   _current_bsdf3_u32 = load32_h(p, 48)
-   _current_base_uv_xf0 = load32_h(p, 52)
-   _current_base_uv_xf1 = load32_h(p, 56)
-   _current_normal_uv_xf0 = load32_h(p, 60)
-   _current_normal_uv_xf1 = load32_h(p, 64)
-   _current_mr_uv_xf0 = load32_h(p, 68)
-   _current_mr_uv_xf1 = load32_h(p, 72)
-   _current_occlusion_uv_xf0 = load32_h(p, 76)
-   _current_occlusion_uv_xf1 = load32_h(p, 80)
-   _current_emissive_uv_xf0 = load32_h(p, 84)
-   _current_emissive_uv_xf1 = load32_h(p, 88)
-   _current_bsdf4_u32 = load32_h(p, 96)
-   _current_normal_tex_id = _norm_normal_tex_word(load32_h(p, 100))
-   _current_bsdf5_u32 = load32_h(p, 104)
-   _current_ext2_tex_word = load32_h(p, 108)
-   _current_vc_mode = load32_h(p, 112)
-   _current_emissive_tex_word = _pack_emissive_tex_word(_current_emissive_tex_id, _current_emissive_uv_set)
-   _current_base_tex_word = _pack_base_tex_word(_current_base_tex_id, _current_vc_mode)
-   _current_occlusion_tex_word = _pack_occlusion_tex_word(_current_occlusion_tex_id, _current_occlusion_uv_set)
-   _current_normal_tex_word = _pack_normal_tex_word_current(_current_normal_tex_id, _current_normal_uv_xf1)
-   _sync_current_material_texture_slots()
+   _load_current_part_material(p, key)
+   if bind_base_texture && _current_base_tex_id >= 0 { bind_texture(_current_base_tex_id) }
+   _sync_current_material_texture_slots_impl(!bind_base_texture)
+   _trace_current_part_material(key)
    _pc_dirty = true
    0
+}
+
+fn _set_material_from_part_slab_key(?ptr p, int key) any {
+   _set_material_from_part_slab_key_impl(p, key, true)
+}
+
+fn _set_material_from_part_slab_key_no_sync(?ptr p, int key) any {
+   _set_material_from_part_slab_key_impl(p, key, false)
 }
 
 fn set_material_from_slab(?ptr p, int vc_mode = 0) any {
@@ -3024,8 +3036,12 @@ fn _sync_pc() any {
             " unlit=" + to_str(load32(pc_ptr, 132)) +
             " base=0x" + text.to_hex(load32(pc_ptr, 136)) +
             " mat=0x" + text.to_hex(load32(pc_ptr, 140)) +
+            " env=0x" + text.to_hex(load32(pc_ptr, 144)) +
+            " spec=" + to_str(load32(pc_ptr, 148)) +
             " btex=0x" + text.to_hex(load32(pc_ptr, 180)) +
-         " alpha=0x" + text.to_hex(load32(pc_ptr, 184)))
+            " alpha=0x" + text.to_hex(load32(pc_ptr, 184)) +
+            " baseUvXf=0x" + text.to_hex(load32(pc_ptr, 208)) + "/0x" + text.to_hex(load32(pc_ptr, 212)) +
+            " ntex=0x" + text.to_hex(load32(pc_ptr, 248)))
       }
       cmd_push_constants(cb, _pipeline_layout, 0x00000001 | 0x00000010, 0, shader_pc_bytes(), pc_ptr)
       _pc_dirty = false
@@ -3492,7 +3508,7 @@ fn _end_frame_internal(bool present) bool {
             "prim_text_glyphs": _prim_text_glyphs,
             "surface": _profile_surface, "present": present && _profile_surface
          }
-         _ = ui_profile.append_line(_vk_profile_dump_file(), json_encode(row))
+         ui_profile.append_line(_vk_profile_dump_file(), json_encode(row))
       }
    }
    _frame_open = false
@@ -3622,6 +3638,8 @@ fn _reset_texture_descriptor_state() any {
    _current_emissive_tex_id = -1
    _current_occlusion_tex_id = -1
    _current_ext2_tex_word = 0x80000000
+   _current_material_key = 0
+   _current_mat_slab_ptr = 0
    _last_bound_tex_id = -1
    _last_bound_ds = 0
    _last_bound_ubo_ds = 0
@@ -3650,6 +3668,9 @@ fn shutdown() any {
       _window_ref = 0
       if _scene_light_tmp_slab { free(_scene_light_tmp_slab) }
       _scene_light_tmp_slab = 0
+      if _current_mat_slab_cache { free(_current_mat_slab_cache) }
+      _current_mat_slab_cache = 0
+      _current_mat_slab_ptr = 0
       return 0
    }
    device_wait_idle(_device)
@@ -3691,6 +3712,9 @@ fn shutdown() any {
    _capture_h = 0
    if _scene_light_tmp_slab { free(_scene_light_tmp_slab) }
    _scene_light_tmp_slab = 0
+   if _current_mat_slab_cache { free(_current_mat_slab_cache) }
+   _current_mat_slab_cache = 0
+   _current_mat_slab_ptr = 0
    mut i = 0
    def textures_n = _textures.len
    while i < textures_n {
@@ -5391,6 +5415,7 @@ fn notify_window_resize(int w, int h) bool {
    if _same_int_value(_pending_resize_w, int(w)) && _same_int_value(_pending_resize_h, int(h)) { return true }
    if _same_int_value(_swapchain_extent_w, int(w)) && _same_int_value(_swapchain_extent_h, int(h)) { return true }
    _pending_resize_w, _pending_resize_h = int(w), int(h)
+   _pending_resize_stamp_ns = ticks()
    _swapchain_recreate_pending = true
    _swapchain_recreate_force = false
    _suboptimal_recreate_attempted = false

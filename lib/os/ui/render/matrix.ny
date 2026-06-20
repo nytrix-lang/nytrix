@@ -53,18 +53,21 @@ fn mat4_mul_into(list a, list b, list o) list {
    simmd.mat4_mul(a, b, o)
 }
 
+@inline
 fn mat4_to_buffer(list m, ptr buf) list {
    "Writes 16 float components from matrix `m` into raw buffer `buf`."
    __mat4_to_buffer(m, buf)
    m
 }
 
+@inline
 fn mat4_from_buffer(list m, ptr buf) list {
    "Loads 16 float components from raw buffer `buf` into matrix `m`."
    __mat4_from_buffer(m, buf)
    m
 }
 
+@inline
 fn mat4_mul_vec4(list m, list v) list {
    "Multiplies 4x4 matrix `m` by homogeneous vector `v`."
    def vx=v[0] def vy=v[1] def vz=v[2] def vw=v[3]

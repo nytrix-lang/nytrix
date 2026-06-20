@@ -53,7 +53,7 @@ fn text_center(any font, any label, f64 cx, f64 y, any color, any font_lg=0, any
 
 fn hit(f64 px, f64 py, f64 x, f64 y, f64 w, f64 h) bool {
    "Tests whether a point is inside a rectangle."
-   px >= x && px <= x + w && py >= y && py <= y + h
+   px >= x && px < x + w && py >= y && py < y + h
 }
 
 fn fits(f64 y, f64 bottom, f64 h) bool {

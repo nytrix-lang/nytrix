@@ -2,15 +2,15 @@
 ;; Sound facade for sources, mixers, backend selection, and one-shot playback.
 ;; References:
 ;; - std.os
-module std.os.sound(init, shutdown, load, play, stop, is_playing, set_volume, get_volume, set_pitch, get_pitch, set_pan, get_pan, set_master_volume, get_master_volume, play_oneshot, get_backend_name, diag, probe, probe_text, print_probe)
+module std.os.sound(init, shutdown, load, play, stop, stop_all, is_playing, set_volume, get_volume, set_pitch, get_pitch, set_pan, get_pan, set_master_volume, get_master_volume, set_fx_enabled, fx_enabled, set_fx_param, get_fx_param, reset_fx, fx_preset, play_oneshot, get_backend_name, diag, probe, probe_text, print_probe)
 use std.core
 use std.os.sound.backend as snd_backend
 use std.os.sound.res as res
 
-fn init() any {
-   "Initializes module state."
+fn init(any force_async=true) any {
+   "Initializes module state and starts the async mixer by default."
    res.init()
-   return snd_backend.init(false)
+   return snd_backend.init(force_async)
 }
 
 fn shutdown() any {
@@ -32,6 +32,11 @@ fn play(any sound, any pitch=1.0, any vol=1.0, any looping=false, any pan=0.0) a
 fn stop(any inst) any {
    "Stops a sound instance or all instances of a sound."
    snd_backend.stop(inst)
+}
+
+fn stop_all() any {
+   "Stops all active sounds."
+   snd_backend.stop_all()
 }
 
 fn is_playing(any inst) bool {
@@ -92,6 +97,13 @@ fn get_backend_name() str {
    "Returns the name of the active audio backend."
    return snd_backend.get_backend_name()
 }
+
+fn set_fx_enabled(bool enabled=true) any { snd_backend.set_fx_enabled(enabled) }
+fn fx_enabled() bool { snd_backend.fx_enabled() }
+fn set_fx_param(str name, any value) any { snd_backend.set_fx_param(name, value) }
+fn get_fx_param(str name) f64 { snd_backend.get_fx_param(name) }
+fn reset_fx() any { snd_backend.reset_fx() }
+fn fx_preset(str name) any { snd_backend.fx_preset(name) }
 
 use std.os.sound.diag as diag
 

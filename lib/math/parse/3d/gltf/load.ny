@@ -440,6 +440,9 @@ fn _gltf_resolve_accessor_data(any g, int acc_idx, any data) any {
    mut owned = false
    if bv_idx >= 0 && bv_idx < bv_list.len {
       def bv = bv_list.get(bv_idx)
+      def bv_ext = is_dict(bv) ? bv.get("extensions", 0) : 0
+      def meshopt_ext = is_dict(bv_ext) ? bv_ext.get("EXT_meshopt_compression", bv_ext.get("KHR_meshopt_compression", 0)) : 0
+      if is_dict(meshopt_ext) && !common.env_truthy("NY_GLTF_UNSAFE_UNDECODED_MESHOPT") { return 0 }
       def buf_idx = int(bv.get("buffer", 0))
       mut base_ptr = data
       if is_list(buffers_data) && buf_idx >= 0 && buf_idx < buffers_data.len {

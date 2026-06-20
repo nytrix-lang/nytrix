@@ -3,7 +3,7 @@
 ;; References:
 ;; - std.os.sound.source
 ;; - std.os
-module std.os.sound.source.synth(make_sine_source, make_sine_loop_source, make_triangle_source, make_square_source, make_saw_source, make_pulse_source, write_synth_wav)
+module std.os.sound.source.synth(make_sine_source, make_sine_loop_source, make_triangle_source, make_square_source, make_saw_source, make_pulse_source, make_supersaw_source, make_soft_pluck_source, write_synth_wav)
 use std.core
 use std.math
 use std.os.sound.source as source
@@ -17,17 +17,11 @@ def WAVE_PULSE = 5
 def SYNTH_TAU = 6.2831853071795864769
 
 fn _clamp_unit(any x) f64 {
-   mut v = x + 0.0
-   if v > 1.0 { v = 1.0 }
-   if v < (0.0 - 1.0) { v = 0.0 - 1.0 }
-   return v
+   clamp(x + 0.0, -1.0, 1.0)
 }
 
 fn _clamp_duty(any d) f64 {
-   mut v = d + 0.0
-   if v < 0.01 { v = 0.01 }
-   if v > 0.99 { v = 0.99 }
-   return v
+   clamp(d + 0.0, 0.01, 0.99)
 }
 
 fn _phase_wrap01(any x) f64 {
@@ -188,6 +182,140 @@ fn make_pulse_source(any freq, any dur_secs, any rate=44100, any amp=0.5, any du
    return _make_wave_source(WAVE_PULSE, freq, dur_secs, rate, amp, loop_safe, duty)
 }
 
+fn _round_s16(f64 x) int {
+   mut v = clamp(x, -1.0, 1.0)
+   def scaled = v * 32767.0
+   __flt_to_int(scaled + ((scaled >= 0.0) ? 0.5 : (0.0 - 0.5)))
+}
+
+fn _soft_clip(f64 x) f64 {
+   x / (1.0 + abs(x) * 0.55)
+}
+
+fn _safe_stereo_frames(any freq, any dur_secs, int rate) int {
+   mut frames = __flt_to_int((dur_secs + 0.0) * (rate + 0.0))
+   if frames < rate / 10 { frames = rate / 10 }
+   if frames < 64 { frames = 64 }
+   frames
+}
+
+fn _voice_rel(int v, int voices) f64 {
+   if voices <= 1 { return 0.0 }
+   def c = (voices - 1) / 2.0
+   ((v + 0.0) - c) / c
+}
+
+fn _voice_phase(int v) f64 {
+   _phase_wrap01(0.137 + (v + 0.0) * 0.173 + (v * v + 0.0) * 0.019)
+}
+
+fn make_supersaw_source(any freq, any dur_secs=2.0, any rate=44100, any amp=0.5, int voices=7, any detune=0.010, any width=0.74, bool loop_safe=true) any {
+   "Creates a stereo, loop-friendly supersaw pad source with baked unison and soft clipping."
+   def r = _safe_rate(rate)
+   mut vc = voices
+   if vc < 1 { vc = 1 }
+   if vc > 16 { vc = 16 }
+   def frames = _safe_stereo_frames(freq, dur_secs, r)
+   def bytes = frames * 4
+   def ptr = malloc(bytes)
+   if !ptr { return 0 }
+
+   def a = clamp(amp + 0.0, 0.0, 1.0)
+   def d = clamp(detune + 0.0, 0.0, 0.05)
+   def w = clamp01(width + 0.0)
+   mut fade = r / 160
+   if fade < 1 { fade = 1 }
+   if fade > frames / 2 { fade = frames / 2 }
+   def frames_f = frames + 0.0
+
+   mut phases = []
+   mut steps = []
+   mut i = 0
+   mut base_cycles = __flt_to_int((freq + 0.0) * (dur_secs + 0.0) + 0.5)
+   if base_cycles < 1 { base_cycles = 1 }
+   ;; Keep every baked voice on the same loop period.  Slow per-voice
+   ;; detune inside the buffer makes the loop sound like a repeating arp;
+   ;; width now comes from phase/tone spread and realtime chorus instead.
+   def loop_step = (SYNTH_TAU * (base_cycles + 0.0)) / frames_f
+   while i < vc {
+      phases = phases.append(_voice_phase(i) * SYNTH_TAU)
+      steps = steps.append(loop_step)
+      i += 1
+   }
+
+   i = 0
+   while i < frames {
+      mut l = 0.0
+      mut rr = 0.0
+      mut v = 0
+      while v < vc {
+         def rel = _voice_rel(v, vc)
+         def pan = rel * w
+         mut ph = phases[v]
+         def st = steps[v]
+         def saw = _wave_sample(WAVE_SAW, ph, 0.5, st)
+         def tri = _wave_sample(WAVE_TRIANGLE, ph, 0.5, st)
+         def sine = sin(ph)
+         def tone = saw * (0.42 + abs(rel) * d * 2.5) + tri * 0.42 + sine * 0.16
+         def gl = 0.5 * (1.0 - pan)
+         def gr = 0.5 * (1.0 + pan)
+         l += tone * gl
+         rr += tone * gr
+         ph += st
+         while ph >= SYNTH_TAU { ph -= SYNTH_TAU }
+         phases[v] = ph
+         v += 1
+      }
+
+      mut env = 1.0
+      if !loop_safe {
+         if i < fade { env = (i + 0.0) / (fade + 0.0) }
+         elif i >= frames - fade { env = ((frames - i) + 0.0) / (fade + 0.0) }
+      }
+
+      l = _soft_clip((l / (vc + 0.0)) * a * env * 1.32)
+      rr = _soft_clip((rr / (vc + 0.0)) * a * env * 1.32)
+      store16(ptr, _round_s16(l), i * 4)
+      store16(ptr, _round_s16(rr), i * 4 + 2)
+      i += 1
+   }
+
+   memory.make(ptr, bytes, 2, r, 16, 1, 1)
+}
+
+fn make_soft_pluck_source(any freq, any dur_secs=0.08, any rate=44100, any amp=0.35, any color=0.22) any {
+   "Creates a short stereo attack helper source with fast attack and smooth decay."
+   def r = _safe_rate(rate)
+   def frames = _safe_stereo_frames(freq, dur_secs, r)
+   def bytes = frames * 4
+   def ptr = malloc(bytes)
+   if !ptr { return 0 }
+   def a = clamp01(amp + 0.0)
+   def c = clamp01(color + 0.0)
+   mut phase = 0.0
+   def step = (SYNTH_TAU * (freq + 0.0)) / (r + 0.0)
+   mut attack = r / 360
+   if attack < 1 { attack = 1 }
+   mut i = 0
+   while i < frames {
+      def t = (i + 0.0) / (frames + 0.0)
+      mut e = 1.0 - t
+      e = e * e * e
+      if i < attack { e = e * ((i + 0.0) / (attack + 0.0)) }
+      def saw = _wave_sample(WAVE_SAW, phase, 0.5, step)
+      def tri = _wave_sample(WAVE_TRIANGLE, phase, 0.5, step)
+      def sine = sin(phase)
+      def tone = ((saw * c * 0.30) + (tri * (1.0 - c) * 0.80) + sine * 0.16) * a * e
+      def out = _soft_clip(tone)
+      store16(ptr, _round_s16(out), i * 4)
+      store16(ptr, _round_s16(out), i * 4 + 2)
+      phase += step
+      while phase >= SYNTH_TAU { phase -= SYNTH_TAU }
+      i += 1
+   }
+   memory.make(ptr, bytes, 2, r, 16, 1, 1)
+}
+
 fn write_synth_wav(any src, any file) bool {
    "Writes a synthesized source to `file` as WAV."
    source.write_wav(src, file)
@@ -202,6 +330,15 @@ fn _sound_synth_selftest_source(any src, int expected_rate, int expected_frames)
    is_dict(data) && data.get("len") == expected_frames * 2 && data.get("ptr") != 0
 }
 
+fn _sound_synth_selftest_stereo(any src, int expected_rate, int expected_min_frames) bool {
+   if !is_list(src) || src.get(0) != "SOUND_SOURCE" { return false }
+   if source.source_channels(src) != 2 || source.source_rate(src) != expected_rate { return false }
+   if source.source_bits(src) != 16 || source.sample_format(src) != source.SAMPLE_FMT_S16 { return false }
+   if source.source_length(src) < expected_min_frames { return false }
+   def data = src.get(1)
+   is_dict(data) && data.get("len") >= expected_min_frames * 4 && data.get("ptr") != 0
+}
+
 #main {
    def sine = make_sine_source(10.0, 0.1, 1000, 0.5, false)
    assert(_sound_synth_selftest_source(sine, 1000, 100), "sound synth sine")
@@ -211,5 +348,7 @@ fn _sound_synth_selftest_source(any src, int expected_rate, int expected_frames)
    assert(_sound_synth_selftest_source(make_square_source(20.0, 0.05, 1000, 0.25, true), 1000, 50), "sound synth square")
    assert(_sound_synth_selftest_source(make_saw_source(20.0, 0.05, 1000), 1000, 50), "sound synth saw")
    assert(_sound_synth_selftest_source(make_pulse_source(20.0, 0.05, 1000, 4.0, -0.5, true), 1000, 50), "sound synth pulse")
+   assert(_sound_synth_selftest_stereo(make_supersaw_source(20.0, 0.1, 1000, 0.35, 5, 0.01, 0.7, true), 1000, 100), "sound synth supersaw")
+   assert(_sound_synth_selftest_stereo(make_soft_pluck_source(20.0, 0.1, 1000, 0.35, 0.3), 1000, 100), "sound synth pluck")
    print("✓ std.os.sound.source.synth self-test passed")
 }

@@ -316,7 +316,8 @@ fn _gltf_resolve_part_skin(dict gltf_data, dict g, any data, list nodes, int par
       "skin_weights_ptr": skin_side.get("weights_ptr", 0),
       "skin_vcnt": int(skin_side.get("count", vcnt)),
       "skin_joints": skin_joints,
-      "skin_inv_bind_accessor": is_dict(skin_info) ? int(skin_info.get("inverse_bind_accessor", -1)) : -1
+      "skin_inv_bind_accessor": is_dict(skin_info) ? int(skin_info.get("inverse_bind_accessor", -1)) : -1,
+      "skin_single_influence": bool(skin_side.get("single_influence", false))
    }
 }
 

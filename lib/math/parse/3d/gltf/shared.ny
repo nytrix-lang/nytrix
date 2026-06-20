@@ -86,7 +86,8 @@ comptime table GltfExtensionStatus {
    "KHR_materials_transmission", "KHR_materials_volume", "KHR_materials_iridescence",
    "KHR_materials_anisotropy", "KHR_materials_dispersion", "KHR_materials_refraction",
    "KHR_materials_subsurface" -> "parse+packed"
-   "KHR_meshopt_compression", "EXT_meshopt_compression", "EXT_texture_webp" -> "parse+decode"
+   "EXT_texture_webp" -> "parse+decode"
+   "KHR_meshopt_compression", "EXT_meshopt_compression" -> "fallback-or-todo"
    "KHR_texture_basisu" -> "fallback-or-todo"
    "KHR_draco_mesh_compression" -> "todo"
    "KHR_materials_volume_scatter", "KHR_materials_diffuse_transmission", "KHR_materials_pbrSpecularGlossiness",
@@ -509,7 +510,7 @@ fn _gltf_node_local_mats(any g) list {
    def key = _gltf_cache_key_from_g(g) + ":nodes:" + to_str(nodes_n)
    def cached = _gltf_node_local_mats_cache.get(key, 0)
    if is_list(cached) && cached.len == nodes_n { return cached }
-   mut mats = list(nodes_n)
+   mut mats = []
    mut i = 0
    while i < nodes_n {
       mats = mats.append(gltf_math.node_local_matrix(nodes[i]))
@@ -533,7 +534,8 @@ fn _gltf_node_visit_key(int node_idx) str {
 fn _gltf_make_material_slot(int tex_id, int uv_set, int xf0, int xf1) dict { return {"tex_id": int(tex_id), "uv_set": int(uv_set), "xf0": int(xf0), "xf1": int(xf1)} }
 
 fn _gltf_alpha_mode_code(str alpha_mode) int {
-   case alpha_mode {
+   def m = str.upper(str.strip(to_str(alpha_mode)))
+   case m {
       "MASK" -> 1
       "BLEND" -> 2
       _ -> 0
@@ -807,8 +809,8 @@ fn _gltf_pointer_material_target(any pointer) any {
    if ktt_idx >= 5 && ktt_idx + 1 < parts_n {
       def slot = to_str(parts[ktt_idx - 2])
       def op = to_str(parts[ktt_idx + 1])
-      if slot != "" && (op == "offset" || op == "scale" || op == "rotation") {
-         def kind = (op == "offset") ? "uvOffset" : ((op == "scale") ? "uvScale" : "uvRotation")
+      if slot != "" && (op == "offset" || op == "scale" || op == "rotation" || op == "texCoord") {
+         def kind = (op == "offset") ? "uvOffset" : ((op == "scale") ? "uvScale" : ((op == "rotation") ? "uvRotation" : "uvTexCoord"))
          return {"material": mat_idx, "kind": kind, "slot": slot}
       }
    }

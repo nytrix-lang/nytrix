@@ -436,7 +436,9 @@ fn _gltf_material_apply_extensions(dict out, any ext, any ext_sg, bool use_spec_
    def ext_vol = _gltf_ext_dict(ext, "KHR_materials_volume")
    if is_dict(ext_vol) {
       out = _gltf_ext_float(out, ext_vol, "thickness_factor", "thicknessFactor", 0.0)
-      out = _gltf_ext_float(out, ext_vol, "attenuation_distance", "attenuationDistance", 0.0)
+      if ext_vol.contains("attenuationDistance") {
+         out["attenuation_distance"] = float(ext_vol.get("attenuationDistance", 0.0))
+      }
       out = _gltf_ext_vec3(out, ext_vol, "attenuation_color", "attenuationColor", 1.0, 1.0, 1.0)
       out = _gltf_ext_tex_uv(out, ext_vol, gltf_data, "thickness", "thicknessTexture")
    }
@@ -467,9 +469,21 @@ fn _gltf_material_apply_extensions(dict out, any ext, any ext_sg, bool use_spec_
    }
    def ext_sss = _gltf_ext_dict(ext, "KHR_materials_subsurface")
    if is_dict(ext_sss) {
-      out = _gltf_ext_float(out, ext_sss, "subsurface_factor", "subsurfaceFactor", 0.0)
-      out = _gltf_ext_vec3(out, ext_sss, "subsurface_color_factor", "subsurfaceColorFactor", 1.0, 1.0, 1.0)
+      if ext_sss.contains("subsurfaceFactor") { out["subsurface_factor"] = float(ext_sss.get("subsurfaceFactor", 0.0)) }
+      elif ext_sss.contains("subsurfaceWeight") { out["subsurface_factor"] = float(ext_sss.get("subsurfaceWeight", 0.0)) }
+      else { out["subsurface_factor"] = 0.0 }
+      if ext_sss.contains("subsurfaceColorFactor") { out = _gltf_ext_vec3(out, ext_sss, "subsurface_color_factor", "subsurfaceColorFactor", 1.0, 1.0, 1.0) }
+      elif ext_sss.contains("subsurfaceColor") { out = _gltf_ext_vec3(out, ext_sss, "subsurface_color_factor", "subsurfaceColor", 1.0, 1.0, 1.0) }
+      else { out["subsurface_color_factor"] = [1.0, 1.0, 1.0] }
       out = _gltf_ext_tex_info(out, ext_sss, gltf_data, "subsurface", "subsurfaceTexture")
+      if !out.contains("specular_factor") { out["specular_factor"] = 0.5 }
+   }
+   def ext_tluc = _gltf_ext_dict(ext, "KHR_materials_translucency")
+   if is_dict(ext_tluc) {
+      out = _gltf_ext_float(out, ext_tluc, "subsurface_factor", "translucencyFactor", 0.0)
+      out = _gltf_ext_vec3(out, ext_tluc, "subsurface_color_factor", "translucencyColorFactor", 1.0, 1.0, 1.0)
+      out = _gltf_ext_tex_info(out, ext_tluc, gltf_data, "subsurface", "translucencyTexture")
+      if !out.contains("specular_factor") { out["specular_factor"] = 0.5 }
    }
    out
 }
@@ -506,7 +520,7 @@ fn gltf_material_info(any gltf_data, int material_idx) any {
    out["roughness_factor"] = roughness_factor
    out["specular_glossiness"] = use_spec_gloss
    out["emissive_factor"] = shr._gltf_vec3(emissive, 0.0, 0.0, 0.0)
-   out["alpha_mode"] = to_str(mat.get("alphaMode", "OPAQUE"))
+   out["alpha_mode"] = str.upper(str.strip(to_str(mat.get("alphaMode", "OPAQUE"))))
    out["alpha_cutoff"] = float(mat.get("alphaCutoff", 0.5))
    out["double_sided"] = mat.get("doubleSided", false) ? true : false
    def normal_tex = mat.get("normalTexture", 0)
@@ -581,13 +595,14 @@ fn _gltf_pack_bsdf2(any info) int {
 
 fn _gltf_pack_bsdf3(any info) int {
    def c = is_dict(info) ? info.get("attenuation_color", [1.0, 1.0, 1.0]) : [1.0, 1.0, 1.0]
-   def att_dist = is_dict(info) ? float(info.get("attenuation_distance", 0.0)) : 0.0
+   def has_att_dist = is_dict(info) && info.contains("attenuation_distance")
+   def att_dist = has_att_dist ? float(info.get("attenuation_distance", 0.0)) : -1.0
    mut att_r, att_g = clamp01(float(c.get(0, 1.0))), clamp01(float(c.get(1, 1.0)))
    mut att_b = clamp01(float(c.get(2, 1.0)))
    def use_iri_pack =
    is_dict(info) &&
    float(info.get("iridescence_factor", 0.0)) > 0.0 &&
-   att_dist <= 0.0 &&
+   !has_att_dist &&
    abs(att_r - 1.0) <= 0.000001 &&
    abs(att_g - 1.0) <= 0.000001 &&
    abs(att_b - 1.0) <= 0.000001
@@ -604,8 +619,9 @@ fn _gltf_pack_bsdf3(any info) int {
       return _gltf_pack_u8x4(iri_ior_u8, iri_min_u8, iri_max_u8, 254)
    }
    mut att_u8 = 255
-   if att_dist > 0.0 {
-      att_u8 = band(int(sqrt(clamp01(att_dist / 10.0)) * 253.0 + 0.5), 255)
+   if has_att_dist {
+      def finite_dist = att_dist <= 0.0 ? 1.0 : att_dist
+      att_u8 = band(int(clamp01(finite_dist / 10.0) * 253.0 + 0.5), 255)
       if att_u8 < 1 { att_u8 = 1 }
       if att_u8 > 253 { att_u8 = 253 }
    }
@@ -744,13 +760,13 @@ fn _gltf_indexed_base_color_state(any info) dict {
    def r = int((clamp01(float(f.get(0, 1.0))) * 255.0))
    def g_val = int((clamp01(float(f.get(1, 1.0))) * 255.0))
    def b = int((clamp01(float(f.get(2, 1.0))) * 255.0))
-   def alpha_mode = is_dict(info) ? to_str(info.get("alpha_mode", "OPAQUE")) : "OPAQUE"
-   def is_blend = alpha_mode == "BLEND"
+   def alpha_mode = is_dict(info) ? str.upper(str.strip(to_str(info.get("alpha_mode", "OPAQUE")))) : "OPAQUE"
+   def uses_alpha_factor = alpha_mode == "BLEND" || alpha_mode == "MASK"
    def alpha_mode_code = shr._gltf_alpha_mode_code(alpha_mode)
    def alpha_cutoff_u8 = band(int((clamp01(is_dict(info) ? float(info.get("alpha_cutoff", 0.5)) : 0.5) * 255.0)), 255)
    def occ_strength_u8 = band(int((clamp01(is_dict(info) ? float(info.get("occlusion_strength", 1.0)) : 1.0) * 255.0)), 255)
    def double_sided = is_dict(info) ? info.get("double_sided", false) : false
-   def a = is_blend ? int((clamp01(float(f.get(3, 1.0))) * 255.0)) : 255
+   def a = uses_alpha_factor ? int((clamp01(float(f.get(3, 1.0))) * 255.0)) : 255
    {
       "packed_base": bor(bor(r, bshl(g_val, 8)), bor(bshl(b, 16), bshl(a, 24))),
       "alpha_mode": alpha_mode,
@@ -978,11 +994,11 @@ fn _gltf_indexed_prim_material_state(
    def has_uv1 = int(meta.get("uv1_cnt", 0)) > 0
    if !has_uv1 { material_state = _gltf_indexed_part_material_force_uv0(material_state) }
    if !has_uv1 && int(material_state.get("uv_set", 0)) != 0 { material_state["uv_set"] = 0 }
-   ;; Vertex colors are optional in glTF. Keep them opt-in for the viewer until
-   ;; the attribute mapper is proven for every sample model. A bad COLOR_0 decode
-   ;; multiplies the base-color texture and shows up exactly like gray/striped
-   ;; Avocado materials in the Vulkan path.
-   if common.env_truthy("NY_GLTF_VERTEX_COLORS") && int(meta.get("c_acc_idx", -1)) >= 0 && int(meta.get("c_cnt", 0)) > 0 {
+   ;; glTF COLOR_0 is part of the PBR base-color equation and must be
+   ;; multiplied by the material base color/texture by default.  Keep an escape
+   ;; hatch for diagnostics with NY_GLTF_VERTEX_COLORS=0, but do not require an
+   ;; opt-in env var for conformance samples such as VertexColorTest.
+   if !common.env_falsey("NY_GLTF_VERTEX_COLORS") && int(meta.get("c_acc_idx", -1)) >= 0 && int(meta.get("c_cnt", 0)) > 0 {
       material_state["prim_vc_mode"] = bor(int(material_state.get("prim_vc_mode", 0)), 4)
    }
    material_state

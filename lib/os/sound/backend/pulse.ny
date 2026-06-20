@@ -113,11 +113,12 @@ fn stream_open(any stream) any {
    def err_ptr = malloc(4)
    store32(err_ptr, 0, 0)
    mut out_dev = common.env_trim("NY_AUDIO_PULSE_DEVICE")
+   if !out_dev { out_dev = "" }
    def out_dev_c = out_dev.len > 0 ? cstr_dup(out_dev) : 0
    mut app_name = common.env_trim("NY_AUDIO_PULSE_APP")
-   if app_name.len == 0 { app_name = "Nytrix Audio" }
+   if !app_name || app_name.len == 0 { app_name = "Nytrix Audio" }
    mut stream_name = common.env_trim("NY_AUDIO_PULSE_STREAM")
-   if stream_name.len == 0 { stream_name = "Nytrix Output" }
+   if !stream_name || stream_name.len == 0 { stream_name = "Nytrix Output" }
    def app_name_c = cstr_dup(app_name)
    def stream_name_c = cstr_dup(stream_name)
    if sound_debug.enabled() { print("Sound: Pulse: Opening stream: rate=" + to_str(rate) + " chan=" + to_str(channels) + " fmt=" + to_str(format)) }

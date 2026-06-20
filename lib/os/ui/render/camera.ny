@@ -228,7 +228,7 @@ fn _auto_bounds_shape(f64 span_x, f64 span_y, f64 span_z) dict {
    if thin_y {
       sy = max(0.001, max_span * 0.015)
       yaw = 0.0
-      pitch = -88.0
+      pitch = 0.0
       margin = 1.55
       fov_mul = 1.12
       branch = "auto-flat-xz"
@@ -312,6 +312,23 @@ fn fit_scene_state(any mesh, any opts=0) dict {
    if safe_aspect < 0.1 { safe_aspect = 16.0 / 9.0 }
    mut safe_fov = fit_cam_fov
    if safe_fov < 15.0 || safe_fov > 120.0 { safe_fov = 60.0 }
+   def flat_sheet = min(span_x, min(span_y, span_z)) <= max(0.01, max(span_x, max(span_y, span_z)) * 0.04)
+   def dump_angle_override = dump_pose && (common.env_trim("NY_UI_DUMP_YAW").len > 0 || common.env_trim("NY_UI_DUMP_PITCH").len > 0)
+   if !flat_sheet && !dump_angle_override && fit_camera_sane(mesh) && mesh.contains("fit_target_x") {
+      def sane_target_x = _mesh_num(mesh, "fit_target_x", (min_x + max_x) * 0.5)
+      def sane_target_y = _mesh_num(mesh, "fit_target_y", (min_y + max_y) * 0.5)
+      def sane_target_z = _mesh_num(mesh, "fit_target_z", (min_z + max_z) * 0.5)
+      def angles = angle_state(fit_cam_x, fit_cam_y, fit_cam_z, sane_target_x, sane_target_y, sane_target_z, fit_cam_yaw, fit_cam_pitch)
+      return {
+         "fit_cam_x": fit_cam_x, "fit_cam_y": fit_cam_y, "fit_cam_z": fit_cam_z,
+         "cam_x": fit_cam_x, "cam_y": fit_cam_y, "cam_z": fit_cam_z,
+         "target_x": sane_target_x, "target_y": sane_target_y, "target_z": sane_target_z,
+         "min_x": min_x, "min_y": min_y, "min_z": min_z,
+         "max_x": max_x, "max_y": max_y, "max_z": max_z,
+         "force_dump_pose": false, "branch": "stored-fit",
+         "yaw": float(angles.get(0, fit_cam_yaw)), "pitch": float(angles.get(1, fit_cam_pitch)), "fov": safe_fov
+      }
+   }
    mut fit_branch = "auto-bounds"
    def fit_state = _auto_fit_state(min_x, min_y, min_z, max_x, max_y, max_z, span_x, span_y, span_z, safe_fov, safe_aspect, dump_pose, wide_mode)
    mut sane_cam_x, sane_cam_y = 0.0, 0.0

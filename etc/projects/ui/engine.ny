@@ -791,11 +791,49 @@ fn _batch_dump_terminal_log(msg) {
    }
 }
 
+mut int _anim_update_frame_guard = -1
+mut int _anim_last_tick_ns = 0
+
+fn _anim_update_guard_key() int {
+   ;; Guard animation sampling by the current update tick, not by total_frames.
+   ;; total_frames only advances after a successful present/full draw, so tying
+   ;; animation updates to it makes idle/headless/no-surface paths sample only
+   ;; when input forces a render. Visually that looks like STEP/keyframe jumps
+   ;; even when the glTF sampler is LINEAR.
+   def k = int(last_upd_t)
+   k != 0 ? k : int(ticks())
+}
+
+fn _anim_update_guard_reset() bool {
+   _anim_update_frame_guard = -1
+   _anim_last_tick_ns = 0
+   true
+}
+
+fn _anim_runtime_dt(any dt) f64 {
+   ;; Use the frame-loop dt as the animation clock.  Wall-clock fallback was
+   ;; useful for no-surface probes, but in the interactive viewer it could be
+   ;; updated only around input/present bursts and make smooth LINEAR clips
+   ;; look like integer/keyframe stepping.
+   def now_ns = ticks()
+   mut frame_dt = float(dt)
+   if is_nan(frame_dt) || is_inf(frame_dt) || frame_dt <= 0.0 {
+      if _anim_last_tick_ns > 0 {
+         frame_dt = float(now_ns - _anim_last_tick_ns) / 1000000000.0
+      }
+   }
+   _anim_last_tick_ns = now_ns
+   if is_nan(frame_dt) || is_inf(frame_dt) || frame_dt <= 0.0 { frame_dt = 0.0166667 }
+   if frame_dt > 0.05 { frame_dt = 0.0166667 }
+   if frame_dt < 0.000001 { frame_dt = 0.000001 }
+   frame_dt
+}
+
 fn _prime_dump_anim_pose() {
    if !ui_profile.dump_pose_enabled(_auto_dump_enabled, _cli_dump_requested, _batch_dump_enabled(), _gui_dump_suite_active, _gui_probe_mode_enabled()) || !is_dict(active_scene) || !_anim_enabled || _anim_duration <= 0.0001 {
       return false
    }
-   def pose_frac = asset_batch.dump_anim_pose_fraction(0.35)
+   def pose_frac = asset_batch.dump_anim_pose_fraction(0.5)
    mut pose_time = 0.0
    if pose_frac > 0.0 {
       pose_time = _anim_duration * pose_frac
@@ -805,10 +843,18 @@ fn _prime_dump_anim_pose() {
    }
    _anim_time = float(pose_time)
    _anim_speed = 0.0
+   def _discard_anim_guard_pose = _anim_update_guard_reset()
    active_scene["anim_idx"] = _anim_idx
    active_scene["anim_time"] = _anim_time
    active_scene["anim_duration"] = _anim_duration
    active_scene["anim_time_override"] = true
+   active_scene["anim_playing"] = true
+   active_scene["static_pose_gpu_ready"] = false
+   active_scene["parts_model_baked"] = false
+   active_scene["gpu_model_baked"] = false
+   active_scene = scene_engine.apply_gltf_animation(active_scene, _anim_idx, _anim_time)
+   scene_engine.scene_fast_reset(active_scene)
+   _static_world_color_reuse_reset()
    _dbg_ui("[ui] dump anim pose: t=" + f"{_anim_time:.3f}" + "/" + f"{_anim_duration:.3f}")
    true
 }
@@ -828,8 +874,10 @@ fn _freeze_dump_deform_pose() {
    active_scene["anim_count"] = 0
    active_scene["skin_count"] = 0
    active_scene["morph_target_count"] = 0
+   active_scene["anim_playing"] = false
    active_scene["anim_time"] = _anim_time
    active_scene["anim_time_override"] = true
+   active_scene["static_pose_gpu_ready"] = false
    active_scene["gpu_parts"] = []
    active_scene["gpu_parts_slab"] = 0
    active_scene["gpu_parts_count"] = 0
@@ -2540,7 +2588,7 @@ fn _trace_fit_camera_apply(any mesh, f64 fit_cam_x, f64 fit_cam_y, f64 fit_cam_z
    f64 sane_target_x, f64 sane_target_y, f64 sane_target_z, f64 min_x, f64 min_y, f64 min_z, f64 max_x, f64 max_y, f64 max_z,
    bool force_dump_pose, str fit_branch, f64 fit_cam_yaw, f64 fit_cam_pitch, f64 applied_fov) bool {
    if ui_profile.env_truthy_cached("NY_GLTF_MODEL_DEBUG") || ui_profile.env_truthy_cached("NY_UI_FITCAM_TRACE") {
-      def _discard_trace_log = terminal.log("[ui] fitcam apply: name=" + _loaded_scene_name +
+      def fit_trace_line = "[ui] fitcam apply: name=" + _loaded_scene_name +
          " " + ui_app.app_vec3_text("source_cam", fit_cam_x, fit_cam_y, fit_cam_z) +
          " " + ui_app.app_vec3_text("applied_cam", sane_cam_x, sane_cam_y, sane_cam_z) +
          " " + ui_app.app_vec3_text("target", sane_target_x, sane_target_y, sane_target_z) +
@@ -2554,7 +2602,9 @@ fn _trace_fit_camera_apply(any mesh, f64 fit_cam_x, f64 fit_cam_y, f64 fit_cam_z
          " gui_probe=" + to_str(_gui_probe_mode_enabled()) +
          " force_dump=" + to_str(force_dump_pose) +
          " branch=" + fit_branch +
-      " yaw=" + to_str(fit_cam_yaw) + " pitch=" + to_str(fit_cam_pitch) + " fov=" + to_str(applied_fov))
+      " yaw=" + to_str(fit_cam_yaw) + " pitch=" + to_str(fit_cam_pitch) + " fov=" + to_str(applied_fov)
+      def _discard_trace_log = terminal.log(fit_trace_line)
+      if ui_profile.env_truthy_cached("NY_UI_FITCAM_TRACE") { print(fit_trace_line) }
    }
    true
 }
@@ -2690,6 +2740,7 @@ fn _sync_window_size_from_live() {
 }
 
 fn _sync_anim_state_from_scene(mesh) {
+   def _discard_anim_guard_sync = _anim_update_guard_reset()
    if !is_dict(mesh) {
       _anim_gltf_data = 0
       _anim_count = 0
@@ -2750,6 +2801,7 @@ fn _sync_anim_state_from_scene(mesh) {
 }
 
 fn _clear_anim_state() {
+   def _discard_anim_guard_clear = _anim_update_guard_reset()
    _anim_enabled = false
    _anim_gltf_data = 0
    _anim_count = 0
@@ -2778,6 +2830,7 @@ fn _anim_select(idx, play=false, label="switched to") {
    }
    _anim_idx = idx
    _anim_time = 0.0
+   def _discard_anim_guard_select = _anim_update_guard_reset()
    def ainfo = gltf.gltf_animation_info(_anim_gltf_data, _anim_idx)
    _anim_duration = float(ainfo.get("duration", 0.0))
    if play {
@@ -2804,34 +2857,26 @@ fn load_model(any app=0, name="") {
 }
 
 fn _draw_infinite_world_grid(cam_px, cam_pz, include_axes=false) {
-   def fine_spacing = 1.0
-   def fine_slices = 72
-   def coarse_spacing = 10.0
-   def coarse_slices = 24
-   def fine_x = floor(cam_px / fine_spacing) * fine_spacing
-   def fine_z = floor(cam_pz / fine_spacing) * fine_spacing
-   rmat.mat4_translate_into(fine_x, 0.0, fine_z, M_PR)
+   def fine_cell, fine_span = 32.0, 42
+   def major_cell, major_span = 128.0, 18
+   def line_w, axis_w = 0.40, 0.60
+   def gx, gz = floor(cam_px / fine_cell) * fine_cell, floor(cam_pz / fine_cell) * fine_cell
+   def mx, mz = floor(cam_px / major_cell) * major_cell, floor(cam_pz / major_cell) * major_cell
+   rmat.mat4_translate_into(gx, 0.0, gz, M_PR)
    gfx.set_model_matrix(M_PR)
-   def coarse_x = floor(cam_px / coarse_spacing) * coarse_spacing
-   def coarse_z = floor(cam_pz / coarse_spacing) * coarse_spacing
-   if include_axes && draw_grid_pair_axes(coarse_x - fine_x, coarse_z - fine_z, 0.0 - fine_x, 0.0 - fine_z) {
-      return true
-   }
    draw_grid_pair(
-      fine_slices,
-      fine_spacing,
-      [0.11, 0.12, 0.14, 0.28],
-      [0.18, 0.20, 0.24, 0.58],
-      0.008,
-      coarse_slices,
-      coarse_spacing,
-      [0.20, 0.24, 0.30, 0.18],
-      [0.36, 0.42, 0.52, 0.72],
-      0.014,
-      coarse_x - fine_x,
-      coarse_z - fine_z
+      fine_span, fine_cell, [0.22,0.28,0.38,0.34], [0.44,0.56,0.74,0.62], line_w,
+      major_span, major_cell, [0.34,0.44,0.60,0.42], [0.70,0.84,1.00,0.88], line_w,
+      mx - gx, mz - gz
    )
-   false
+   if include_axes {
+      def ax, ay, az = 0.0 - gx, 0.035, 0.0 - gz
+      def len = major_cell * float(major_span)
+      draw_line([ax - len,ay,az], [ax + len,ay,az], [1.0,0.12,0.05,1.0], axis_w)
+      draw_line([ax,-len*0.20,az], [ax,len*0.20,az], [0.12,1.0,0.05,1.0], axis_w)
+      draw_line([ax,ay,az - len], [ax,ay,az + len], [0.05,0.18,1.0,1.0], axis_w)
+   }
+   true
 }
 
 fn _scene_pref_cache_update(name) {
@@ -3095,6 +3140,7 @@ fn _exec_anim_cmd(cmd, parts) bool {
    def sub = str.lower(parts.get(1, ""))
    if eq(sub, "play") || eq(sub, "on") {
       _anim_enabled = true
+      def _discard_anim_guard_play = _anim_update_guard_reset()
       def _discard_anim_sync = _sync_scene_anim_playing_flag()
       terminal.log("[anim] playing")
    }
@@ -3106,6 +3152,7 @@ fn _exec_anim_cmd(cmd, parts) bool {
    elif eq(sub, "stop") {
       _anim_enabled = false
       _anim_time = 0.0
+      def _discard_anim_guard_stop = _anim_update_guard_reset()
       def _discard_anim_sync = _sync_scene_anim_playing_flag()
       terminal.log("[anim] stopped")
    }
@@ -4231,7 +4278,8 @@ fn _draw_editor_gui(phase) {
 
 ;; ---- idle ----
 fn _idle_opts(gui_now_frame, want_auto_capture=false) dict {
-   def static_pose_ready = _scene_static_pose_gpu_ready() || _scene_deform_idle_ready()
+   def anim_live = _anim_enabled || (is_dict(active_scene) && (bool(active_scene.get("anim_playing", false)) || bool(active_scene.get("anim_time_override", false))))
+   def static_pose_ready = (!anim_live) && (_scene_static_pose_gpu_ready() || _scene_deform_idle_ready())
    def any opts = {
       "enabled": true,
       "warmup": ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_WARMUP", 1, 0, 128),
@@ -4255,9 +4303,9 @@ fn _idle_opts(gui_now_frame, want_auto_capture=false) dict {
       "async_load": _scene_load_async_active(),
       "startup_load": _startup_post_load_pending,
       "dynamic_active": _gui_show_gallery || _gui_show_probe || _gui_show_profiler || _gui_asset_load_wait_mouse_up,
-      "animated": _anim_enabled,
+      "animated": anim_live,
       "static_pose_ready": static_pose_ready,
-      "animation_count": static_pose_ready ? 0 : _anim_count,
+      "animation_count": (static_pose_ready || !anim_live) ? 0 : _anim_count,
       "skin_count": static_pose_ready ? 0 : _skin_count,
       "morph_target_count": static_pose_ready ? 0 : _morph_target_count,
       "input_active": _ui_move_input_active() || skip_mouse_frames > 0 || gui.active_id() != "",
@@ -4339,13 +4387,13 @@ fn _app_input_trace(str msg) bool {
    if !ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") { return false }
    def is_drag = str.startswith(msg, "drag ") || str.startswith(msg, "pick ") || str.startswith(msg, "scene ")
    if is_drag {
-      def drag_limit = ui_profile.env_int_cached("NY_UI_DRAG_TRACE_LIMIT", 240, 0, 1000000)
+      def drag_limit = ui_profile.env_int_cached("NY_UI_DRAG_TRACE_LIMIT", 64, 0, 1000000)
       if _app_drag_trace_count >= drag_limit { return false }
       _app_drag_trace_count += 1
       ui_profile.eprint_text("[ui:input] " + msg)
       return true
    }
-   def limit = ui_profile.env_int_cached("NY_UI_APP_INPUT_TRACE_LIMIT", 80, 0, 1000000)
+   def limit = ui_profile.env_int_cached("NY_UI_APP_INPUT_TRACE_LIMIT", 24, 0, 1000000)
    if _mouse_look_trace_count >= limit { return false }
    _mouse_look_trace_count += 1
    ui_profile.eprint_text("[ui:input] " + msg)
@@ -4801,9 +4849,15 @@ fn startup(any app=0) {
 
 fn _batch_dump_update_anim_fast(dt) {
    if _anim_enabled && is_dict(active_scene) && _anim_count > 0 && is_dict(_anim_gltf_data) {
-      mut frame_dt = float(dt)
-      if is_nan(frame_dt) || is_inf(frame_dt) || frame_dt <= 0.0 { frame_dt = 0.0166667 }
-      if frame_dt > 0.1 { frame_dt = 0.0166667 }
+      ;; Do not skip here.  Animation application already has an anim_last_time
+      ;; fast-exit, and some raw/headless loops keep the old guard key stable.
+      ;; Skipping at this layer was the real source of keyframe-only motion.
+      _anim_update_frame_guard += 1
+      if abs(_anim_speed) <= 0.000001 && bool(active_scene.get("anim_time_override", false)) {
+         active_scene["anim_playing"] = false
+         return
+      }
+      mut frame_dt = _anim_runtime_dt(dt)
       if _anim_duration <= 0.0001 {
          _anim_duration = float(active_scene.get("anim_duration", 0.0))
       }
@@ -4823,13 +4877,14 @@ fn _batch_dump_update_anim_fast(dt) {
       active_scene = scene_engine.apply_gltf_animation(active_scene, _anim_idx, _anim_time)
       scene_engine.scene_fast_reset(active_scene)
       _static_world_color_reuse_reset()
-      _static_world_redraw(1)
+      def _discard_anim_redraw = _static_world_redraw(1)
    } elif !is_dict(active_scene) || _anim_count <= 0 || !is_dict(_anim_gltf_data) {
       _anim_enabled = false
       if is_dict(active_scene) { active_scene["anim_playing"] = false }
    } elif is_dict(active_scene) {
       active_scene["anim_playing"] = false
    }
+   nil
 }
 
 fn _handle_window_resize_event(data, layout_dirty=false, reset_cross=false, recenter_locked=false) {
@@ -6519,7 +6574,8 @@ fn _run_fast_nosurface_bench_loop() {
    mut now = start_t
    mut frame_iter = 0
    mut phase = 0.0
-   def dt = 0.0001
+   mut dt = 0.0001
+   mut loop_last_t = ticks()
    mut static_visual_fast = visual_bench && _prepare_static_world_visual_fast()
    if _fps_log_enabled == 1 && visual_bench {
       ui_profile.print_text("[bench] visual_static=" + to_str(static_visual_fast) +
@@ -6537,6 +6593,15 @@ fn _run_fast_nosurface_bench_loop() {
          if _timeout_ns > 0 && (now - start_t) >= _timeout_ns {
             break
          }
+      }
+      if _anim_enabled {
+         def loop_now_t = ticks()
+         dt = float(loop_now_t - loop_last_t) / 1000000000.0
+         loop_last_t = loop_now_t
+         if is_nan(dt) || is_inf(dt) || dt <= 0.0 { dt = 0.0001 }
+         if dt > 0.1 { dt = 0.0166667 }
+         if dt < 0.000001 { dt = 0.000001 }
+         app_update(dt)
       }
       mut rendered = false
       if static_visual_fast {
@@ -6600,7 +6665,8 @@ fn _run_simulated_nosurface_bench_loop() {
    _ui_update_projection_fast()
    gfx.set_view_proj(M_VP)
    mut static_update_clean = _ui_static_update_clean()
-   def dt = 0.0001
+   mut dt = 0.0001
+   mut loop_last_t = ticks()
    if static_update_clean {
       _current_frame_time = dt
       _render_dt = dt
@@ -6615,7 +6681,15 @@ fn _run_simulated_nosurface_bench_loop() {
             break
          }
       }
-      if !(static_update_clean && !_proj_dirty) {
+      if _anim_enabled {
+         def loop_now_t = ticks()
+         dt = float(loop_now_t - loop_last_t) / 1000000000.0
+         loop_last_t = loop_now_t
+         if is_nan(dt) || is_inf(dt) || dt <= 0.0 { dt = 0.0001 }
+         if dt > 0.1 { dt = 0.0166667 }
+         if dt < 0.000001 { dt = 0.000001 }
+      }
+      if _anim_enabled || !(static_update_clean && !_proj_dirty) {
          phase += dt
          _current_frame_time = dt
          _frame_time_accum += dt
@@ -6630,7 +6704,7 @@ fn _run_simulated_nosurface_bench_loop() {
       if anim_trace {
          ui_profile.print_text("[anim:loop] iter=" + to_str(frame_iter) + " update.before")
       }
-      if static_update_clean && !_proj_dirty {
+      if static_update_clean && !_proj_dirty && !_anim_enabled {
          _last_update_ms = 0.0
       } else {
          app_update(dt)

@@ -74,6 +74,7 @@ fn color_u32(any c) int {
    pack_rgba_u32(c.get(0, 1.0), c.get(1, 1.0), c.get(2, 1.0), c.get(3, 1.0))
 }
 
+@inline
 fn store_mat4_cm_raw(any dst, any mat, bool allow_plain16=false) bool {
    "Stores tagged column-major mat4, optionally accepting a plain 16-float list."
    if !dst || !is_list(mat) { return false }

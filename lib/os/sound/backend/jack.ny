@@ -275,7 +275,7 @@ fn stream_open(any stream) any {
    if format != FORMAT_FLOAT32LE { format = FORMAT_S16LE }
    def rate = stream.get("sample_rate", 48000)
    mut name = common.env_trim("NY_AUDIO_JACK_CLIENT")
-   if name.len == 0 { name = "nytrix" }
+   if !name || name.len == 0 { name = "nytrix" }
    def status_ptr = malloc(8)
    if status_ptr == 0 { return false }
    store32(status_ptr, 0, 0)
