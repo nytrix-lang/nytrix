@@ -13,12 +13,12 @@ use std.core.str as str
 use std.math (max, min)
 use std.os.ui.render as gfx
 
-def LINE_H = 24.0
-def STATUS_H = 31.0
+def LINE_H = 22.0
+def STATUS_H = 27.0
 def MIN_RAIL_W = 48.0
 def MIN_EDIT_W = 56.0
-def MIN_BODY_H = 36.0
-def MIN_DOCK_H = 40.0
+def MIN_BODY_H = 32.0
+def MIN_DOCK_H = 34.0
 def MIN_EDIT_H = 28.0
 
 fn editor_layout(f64 sw, f64 sh, f64 rail_w=250.0, f64 top_h=32.0) dict {
@@ -85,8 +85,24 @@ fn row_at(dict lay, f64 y, int scroll) int {
    int((y - float(lay.get("edit_y", 0.0)) - 6.0) / LINE_H) + scroll
 }
 
+@inline
+fn _mono_ascii_line(str line) bool {
+   mut i = 0
+   while i < line.len {
+      def c = load8(line, i)
+      if c < 32 || c > 126 || c == 9 { return false }
+      i += 1
+   }
+   true
+}
+
 fn col_at(any font, str line, f64 x, f64 text_x) int {
    def target = max(0.0, x - text_x)
+   if line.len <= 0 || target <= 0.0 { return 0 }
+   def adv = float(gfx.measure_text_fast(font, "0").get(0, 0.0))
+   if adv > 0.0 && _mono_ascii_line(line) {
+      return min(line.len, max(0, int(target / adv + 0.5)))
+   }
    mut lo = 0
    mut hi = line.len
    while lo < hi {

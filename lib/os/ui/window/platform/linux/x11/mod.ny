@@ -62,7 +62,11 @@ fn _dbg_v(any msg) bool {
 fn _dbg_err(any msg) bool { _dbg_tagged("ui:x11:error", msg) }
 
 fn _input_debug_enabled() bool {
-   ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") || ui_profile.event_trace_enabled() || ui_profile.debug_verbose_enabled()
+   ;; Do not let generic -v/--verbose enable per-event mouse/key logs.
+   ;; During captured camera look and gizmo drags those logs can dominate the
+   ;; frame and make glTF animation look frozen.  Use NY_UI_INPUT_TRACE=1 when
+   ;; the actual input stream is needed.
+   ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") || ui_profile.event_trace_enabled()
 }
 
 fn _dbg_input(any msg) bool {
@@ -3791,8 +3795,10 @@ fn _translate_raw_motion_event(any win, any event_ptr, list events) list {
       }
    }
    XFreeEventData(display, cookie)
+   def raw_nonzero = dx != 0.0 || dy != 0.0
    def raw_dbg_count = int(win.get("raw_motion_debug_count", 0))
-   if raw_dbg_count < 32 {
+   def raw_zero_dbg_count = int(win.get("raw_motion_zero_debug_count", 0))
+   if raw_nonzero && raw_dbg_count < 16 {
       win["raw_motion_debug_count"] = raw_dbg_count + 1
       _dbg_input("raw motion dev=" + to_str(deviceid) +
          " src=" + to_str(sourceid) +
@@ -3800,8 +3806,14 @@ fn _translate_raw_motion_event(any win, any event_ptr, list events) list {
          " vals=[" + debug_vals + "]" +
          " dx=" + to_str(dx) +
       " dy=" + to_str(dy))
+   } elif !raw_nonzero && raw_zero_dbg_count < 4 {
+      win["raw_motion_zero_debug_count"] = raw_zero_dbg_count + 1
+      _dbg_input("raw motion zero dev=" + to_str(deviceid) +
+         " src=" + to_str(sourceid) +
+         " mask_len=" + to_str(mask_len) +
+      " vals=[" + debug_vals + "]")
    }
-   if dx != 0.0 || dy != 0.0 {
+   if raw_nonzero {
       win["raw_motion_nonzero_seen"] = true
       def last_x = float(win.get("virtual_cursor_x", win.get("mouse_x", 0)))
       def last_y = float(win.get("virtual_cursor_y", win.get("mouse_y", 0)))
@@ -4139,7 +4151,7 @@ fn _translate_motion_event(
       }
       if dx != 0 || dy != 0 {
          def fb_dbg_count = int(win.get("motion_fallback_debug_count", 0))
-         if fb_dbg_count < 24 {
+         if fb_dbg_count < 8 {
             win["motion_fallback_debug_count"] = fb_dbg_count + 1
             _dbg_input("motion fallback xi=" + to_str(xi_available) +
                " raw=" + to_str(raw_mouse_motion) +

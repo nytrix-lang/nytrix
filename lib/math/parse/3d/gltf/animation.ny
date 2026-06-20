@@ -75,9 +75,15 @@ fn _gltf_pack_skin_sidecars(dict g, any data, int joints_acc_idx, int weights_ac
    }
    memset(joints_sidecar, 0, use_count * 16)
    memset(weights_sidecar, 0, use_count * 16)
+   mut single_influence = true
    mut vi = 0
    while vi < use_count {
       def joff, woff = vi * joints_stride, vi * weights_stride
+      mut sj0 = 0
+      mut sw0 = 0.0
+      mut sw1 = 0.0
+      mut sw2 = 0.0
+      mut sw3 = 0.0
       mut k = 0
       while k < 4 {
          mut jv = 0
@@ -91,20 +97,26 @@ fn _gltf_pack_skin_sidecars(dict g, any data, int joints_acc_idx, int weights_ac
             jv = 0
          }
          store32(joints_sidecar, int(jv), vi * 16 + k * 4)
+         if k == 0 { sj0 = int(jv) }
          def wv = shr._gltf_read_f32_acc(
             weights_ptr,
             woff + k * max(1, shr._gltf_comp_size(weights_comp)),
             weights_comp,
             weights_norm
          )
+         if k == 0 { sw0 = wv }
+         elif k == 1 { sw1 = wv }
+         elif k == 2 { sw2 = wv }
+         else { sw3 = wv }
          store32_f32(weights_sidecar, wv, vi * 16 + k * 4)
          k += 1
       }
+      if single_influence && !(sj0 >= 0 && sw0 >= 0.999 && abs(sw1) <= 0.0001 && abs(sw2) <= 0.0001 && abs(sw3) <= 0.0001) { single_influence = false }
       vi += 1
    }
    ld._gltf_release_accessor_data(joints_res)
    ld._gltf_release_accessor_data(weights_res)
-   return {"joints_ptr": joints_sidecar, "weights_ptr": weights_sidecar, "count": use_count}
+   return {"joints_ptr": joints_sidecar, "weights_ptr": weights_sidecar, "count": use_count, "single_influence": single_influence}
 }
 
 fn gltf_skin_joint_mats(any gltf_data, int skin_idx, dict node_world_mats, any mesh_node_world=0) list {
@@ -119,11 +131,12 @@ fn gltf_skin_joint_mats(any gltf_data, int skin_idx, dict node_world_mats, any m
    def skin_transpose_inv_bind = shr._gltf_skin_transpose_inv_bind_enabled()
    def skin_invbind_first = shr._gltf_skin_invbind_first_enabled()
    def mesh_inv = skin_no_mesh_inv ? gltf_math.mat4_identity() : _gltf_mesh_inv_cached(mesh_node_world)
+   def world_list = is_dict(node_world_mats) ? node_world_mats.get("__world_list", 0) : 0
    mut out = list(0)
    mut ji = 0
    while ji < joints_n {
       def joint_idx = int(joints.get(ji, -1))
-      def joint_world = node_world_mats.get(joint_idx, gltf_math.mat4_identity())
+      def joint_world = (is_list(world_list) && joint_idx >= 0 && joint_idx < world_list.len && is_list(world_list.get(joint_idx, 0))) ? world_list.get(joint_idx, gltf_math.mat4_identity()) : node_world_mats.get(joint_idx, gltf_math.mat4_identity())
       mut inv_bind = inv_bind_mats.get(ji, gltf_math.mat4_identity())
       if skin_transpose_inv_bind { inv_bind = _gltf_mat4_transpose(inv_bind) }
       mut jm = skin_invbind_first ? gltf_math.mat4_mul(inv_bind, joint_world) : gltf_math.mat4_mul(joint_world, inv_bind)
@@ -258,9 +271,13 @@ fn gltf_free_skin_mats_cache(any skin_mats_cache) bool {
    true
 }
 
-fn _gltf_apply_skinning_slab(any vptr, any bind_vptr, any joints_ptr, any weights_ptr, int vcnt, any skin_slab, int mat_count) bool {
+fn _gltf_apply_skinning_slab(any vptr, any bind_vptr, any joints_ptr, any weights_ptr, int vcnt, any skin_slab, int mat_count, bool copy_static_attrs=true) bool {
    if !vptr || !bind_vptr || !joints_ptr || !weights_ptr || !skin_slab || vcnt <= 0 || mat_count <= 0 { return false }
-   memcpy(vptr, bind_vptr, vcnt * shr._GLTF_VTX_STRIDE)
+   ;; The whole vertex record only needs to be copied once: UVs, color,
+   ;; material ids, tangents, and other static attributes do not change during
+   ;; skinning.  Per-frame copies of large meshes such as BrainStem were
+   ;; burning bandwidth before the actual joint math even started.
+   if copy_static_attrs { memcpy(vptr, bind_vptr, vcnt * shr._GLTF_VTX_STRIDE) }
    mut vi = 0
    while vi < vcnt {
       def boff = vi * shr._GLTF_VTX_STRIDE
@@ -378,6 +395,69 @@ fn _gltf_apply_skinning_slab(any vptr, any bind_vptr, any joints_ptr, any weight
             store32_f32(vptr, ny0, boff + shr._GLTF_VTX_OFF_NY)
             store32_f32(vptr, nz0, boff + shr._GLTF_VTX_OFF_NZ)
          }
+      }
+      vi += 1
+   }
+   true
+}
+
+fn _gltf_apply_skinning_slab_single(any vptr, any bind_vptr, any joints_ptr, any weights_ptr, int vcnt, any skin_slab, int mat_count, bool copy_static_attrs=true) bool {
+   if !vptr || !bind_vptr || !joints_ptr || !weights_ptr || !skin_slab || vcnt <= 0 || mat_count <= 0 { return false }
+   if copy_static_attrs { memcpy(vptr, bind_vptr, vcnt * shr._GLTF_VTX_STRIDE) }
+   mut vi = 0
+   while vi < vcnt {
+      def boff = vi * shr._GLTF_VTX_STRIDE
+      def side_off = vi * 16
+      def j0 = int(load32(joints_ptr, side_off))
+      def w0 = load32_f32(weights_ptr, side_off)
+      def px = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_X)
+      def py = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_Y)
+      def pz = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_Z)
+      if j0 >= 0 && j0 < mat_count && w0 > 0.000001 {
+         def mb = j0 * 64
+         def m00 = load32_f32(skin_slab, mb + 0)
+         def m01 = load32_f32(skin_slab, mb + 4)
+         def m02 = load32_f32(skin_slab, mb + 8)
+         def m10 = load32_f32(skin_slab, mb + 16)
+         def m11 = load32_f32(skin_slab, mb + 20)
+         def m12 = load32_f32(skin_slab, mb + 24)
+         def m20 = load32_f32(skin_slab, mb + 32)
+         def m21 = load32_f32(skin_slab, mb + 36)
+         def m22 = load32_f32(skin_slab, mb + 40)
+         def m30 = load32_f32(skin_slab, mb + 48)
+         def m31 = load32_f32(skin_slab, mb + 52)
+         def m32 = load32_f32(skin_slab, mb + 56)
+         def sx = m00 * px + m10 * py + m20 * pz + m30
+         def sy = m01 * px + m11 * py + m21 * pz + m31
+         def sz = m02 * px + m12 * py + m22 * pz + m32
+         if shr._gltf_float_bad(sx) || shr._gltf_float_bad(sy) || shr._gltf_float_bad(sz) {
+            store32_f32(vptr, px, boff + shr._GLTF_VTX_OFF_X)
+            store32_f32(vptr, py, boff + shr._GLTF_VTX_OFF_Y)
+            store32_f32(vptr, pz, boff + shr._GLTF_VTX_OFF_Z)
+         } else {
+            store32_f32(vptr, sx, boff + shr._GLTF_VTX_OFF_X)
+            store32_f32(vptr, sy, boff + shr._GLTF_VTX_OFF_Y)
+            store32_f32(vptr, sz, boff + shr._GLTF_VTX_OFF_Z)
+         }
+         def nx0 = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_NX)
+         def ny0 = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_NY)
+         def nz0 = load32_f32(bind_vptr, boff + shr._GLTF_VTX_OFF_NZ)
+         if (nx0 * nx0 + ny0 * ny0 + nz0 * nz0) > 0.000001 {
+            def snx = m00 * nx0 + m10 * ny0 + m20 * nz0
+            def sny = m01 * nx0 + m11 * ny0 + m21 * nz0
+            def snz = m02 * nx0 + m12 * ny0 + m22 * nz0
+            def nl = sqrt(snx * snx + sny * sny + snz * snz)
+            if nl > 0.000001 && !shr._gltf_float_bad(nl) {
+               def inv_n = 1.0 / nl
+               store32_f32(vptr, snx * inv_n, boff + shr._GLTF_VTX_OFF_NX)
+               store32_f32(vptr, sny * inv_n, boff + shr._GLTF_VTX_OFF_NY)
+               store32_f32(vptr, snz * inv_n, boff + shr._GLTF_VTX_OFF_NZ)
+            }
+         }
+      } else {
+         store32_f32(vptr, px, boff + shr._GLTF_VTX_OFF_X)
+         store32_f32(vptr, py, boff + shr._GLTF_VTX_OFF_Y)
+         store32_f32(vptr, pz, boff + shr._GLTF_VTX_OFF_Z)
       }
       vi += 1
    }
@@ -512,7 +592,13 @@ fn gltf_apply_skinning(any part, any gltf_data, any node_world_mats, any skin_ma
    def skin_slab = is_list(skin_rec) ? skin_rec.get(1, 0) : 0
    def skin_mat_count = is_list(skin_rec) ? int(skin_rec.get(2, 0)) : 0
    if skin_slab && skin_mat_count > 0 && !shr._gltf_skin_raw_off_enabled() {
-      _gltf_apply_skinning_slab(vptr, bind_vptr, joints_ptr, weights_ptr, vcnt, skin_slab, skin_mat_count)
+      def copy_static_attrs = !bool(part.get("skin_static_attrs_ready", false)) || bool(part.get("skin_force_static_copy", false)) || int(part.get("morph_target_count", 0)) > 0
+      if bool(part.get("skin_single_influence", false)) {
+         _gltf_apply_skinning_slab_single(vptr, bind_vptr, joints_ptr, weights_ptr, vcnt, skin_slab, skin_mat_count, copy_static_attrs)
+      } else {
+         _gltf_apply_skinning_slab(vptr, bind_vptr, joints_ptr, weights_ptr, vcnt, skin_slab, skin_mat_count, copy_static_attrs)
+      }
+      if copy_static_attrs && int(part.get("morph_target_count", 0)) <= 0 { part["skin_static_attrs_ready"] = true }
       return part
    }
    if !is_list(skin_mats) || skin_mats.len == 0 { return part }
@@ -599,14 +685,20 @@ fn _gltf_collect_morph_targets(dict g, any data, any targets, any morph_weights)
    while ti < targets_n {
       def target = targets[ti]
       def weight = is_list(morph_weights) ? float(morph_weights.get(ti, 0.0)) : 0.0
-      if is_dict(target) && (weight > 0.000001 || weight < -0.000001) {
+      if is_dict(target) {
+         ;; Keep target accessors even when the current weight is zero.  Animated
+         ;; morphs often start at 0 then rise/fall later; dropping zero-weight
+         ;; targets made MorphStressTest stick at the pulled pose or rebuild
+         ;; through the non-morph texture path.
          def t_pos_res = ld._gltf_resolve_accessor_data(g, int(target.get("POSITION", -1)), data)
          def t_norm_res = ld._gltf_resolve_accessor_data(g, int(target.get("NORMAL", -1)), data)
-         if is_dict(t_pos_res) || is_dict(t_norm_res) {
-            morph_targets = morph_targets.append({"weight": weight, "pos_res": t_pos_res, "norm_res": t_norm_res})
+         def t_tan_res = ld._gltf_resolve_accessor_data(g, int(target.get("TANGENT", -1)), data)
+         if is_dict(t_pos_res) || is_dict(t_norm_res) || is_dict(t_tan_res) {
+            morph_targets = morph_targets.append({"weight": weight, "pos_res": t_pos_res, "norm_res": t_norm_res, "tan_res": t_tan_res})
          } else {
             ld._gltf_release_accessor_data(t_pos_res)
             ld._gltf_release_accessor_data(t_norm_res)
+            ld._gltf_release_accessor_data(t_tan_res)
          }
       }
       ti += 1
@@ -621,6 +713,7 @@ fn _gltf_release_morph_targets(list morph_targets) bool {
       def mt = morph_targets.get(mti, 0)
       ld._gltf_release_accessor_data(mt.get("pos_res", 0))
       ld._gltf_release_accessor_data(mt.get("norm_res", 0))
+      ld._gltf_release_accessor_data(mt.get("tan_res", 0))
       mti += 1
    }
    true
@@ -674,18 +767,43 @@ fn _gltf_read_anim_tuple(any data, any output_res, int idx, int n_comp, bool pac
    _gltf_read_acc_components(data, output_res, idx, n_comp)
 }
 
+fn _gltf_clamp01(f64 t) f64 {
+   if is_nan(t) || is_inf(t) { return 0.0 }
+   if t < 0.0 { return 0.0 }
+   if t > 1.0 { return 1.0 }
+   t
+}
+
+fn _gltf_anim_interp_mode(any raw) str {
+   def mode = str.upper(str.strip(to_str(raw)))
+   mode.len > 0 ? mode : "LINEAR"
+}
+
+fn _gltf_anim_alpha(f64 time_sec, f64 t_lo, f64 t_hi) f64 {
+   ;; Keep this math explicitly floating-point.  A regression made the
+   ;; bracket alpha collapse to 0/1 on some runtime paths, which made
+   ;; LINEAR AnimatedCube look exactly like STEP/keyframe snapping.
+   def lo_f = float(t_lo)
+   def hi_f = float(t_hi)
+   def dt = hi_f - lo_f
+   if is_nan(dt) || is_inf(dt) || dt <= 0.00000001 { return 0.0 }
+   _gltf_clamp01((float(time_sec) - lo_f) / dt)
+}
+
 fn _gltf_lerp_vec(list a, list b, f64 t, int n) list {
+   def tc = _gltf_clamp01(t)
    mut out = []
    mut i = 0
    while i < n {
       def av, bv = 0.0 + a.get(i, 0.0), 0.0 + b.get(i, 0.0)
-      out = out.append(av + (bv - av) * t)
+      out = out.append(av + (bv - av) * tc)
       i += 1
    }
    out
 }
 
 fn _gltf_nlerp_quat(list a, list b, f64 t) list {
+   def tc = _gltf_clamp01(t)
    ;; glTF LINEAR rotation interpolation for quaternions should take the
    ;; shortest arc and keep the result normalized.  This is used by both the
    ;; generic and fast animation samplers.
@@ -700,8 +818,8 @@ fn _gltf_nlerp_quat(list a, list b, f64 t) list {
       dot = 0.0 - dot
    }
    if dot > 0.9995 {
-      def rx, ry = ax + (bx - ax) * t, ay + (by - ay) * t
-      def rz, rw = az + (bz - az) * t, aw + (bw - aw) * t
+      def rx, ry = ax + (bx - ax) * tc, ay + (by - ay) * tc
+      def rz, rw = az + (bz - az) * tc, aw + (bw - aw) * tc
       def len2 = rx * rx + ry * ry + rz * rz + rw * rw
       def inv_len = len2 > 0.000001 ? 1.0 / sqrt(len2) : 1.0
       return [rx * inv_len, ry * inv_len, rz * inv_len, rw * inv_len]
@@ -710,16 +828,16 @@ fn _gltf_nlerp_quat(list a, list b, f64 t) list {
    def theta_0 = acos(dot)
    def sin_theta_0 = sin(theta_0)
    if abs(sin_theta_0) <= 0.000001 { return [ax, ay, az, aw] }
-   def theta = theta_0 * t
+   def theta = theta_0 * tc
    def sin_theta = sin(theta)
    def s0 = cos(theta) - dot * sin_theta / sin_theta_0
    def s1 = sin_theta / sin_theta_0
-   [
-      ax * s0 + bx * s1,
-      ay * s0 + by * s1,
-      az * s0 + bz * s1,
-      aw * s0 + bw * s1
-   ]
+   def rx, ry = ax * s0 + bx * s1, ay * s0 + by * s1
+   def rz, rw = az * s0 + bz * s1, aw * s0 + bw * s1
+   def len2 = rx * rx + ry * ry + rz * rz + rw * rw
+   if len2 <= 0.000001 { return [0.0, 0.0, 0.0, 1.0] }
+   def inv_len = 1.0 / sqrt(len2)
+   [rx * inv_len, ry * inv_len, rz * inv_len, rw * inv_len]
 }
 
 fn _gltf_normalize_quat(any q) list {
@@ -740,8 +858,8 @@ fn _gltf_read_norm_i16_quat(any data_ptr, int off) list {
    if y >= 32768 { y = y - 65536 }
    if z >= 32768 { z = z - 65536 }
    if w >= 32768 { w = w - 65536 }
-   mut qx, qy = x * shr._GLTF_INV_32767, y * _GLTF_INV_32767
-   mut qz, qw = z * shr._GLTF_INV_32767, w * _GLTF_INV_32767
+   mut qx, qy = x * shr._GLTF_INV_32767, y * shr._GLTF_INV_32767
+   mut qz, qw = z * shr._GLTF_INV_32767, w * shr._GLTF_INV_32767
    if qx < -1.0 { qx = -1.0 }
    if qy < -1.0 { qy = -1.0 }
    if qz < -1.0 { qz = -1.0 }
@@ -767,21 +885,16 @@ fn _gltf_find_time_bracket(any data, any input_res, f64 time_sec) list {
    }
    def t_lo = _gltf_read_acc_f32(data, input_res, lo, 0)
    def t_hi = _gltf_read_acc_f32(data, input_res, hi, 0)
-   def dt = t_hi - t_lo
-   def alpha = dt > 0.00001 ? (time_sec - t_lo) / dt : 0.0
+   def alpha = _gltf_anim_alpha(time_sec, t_lo, t_hi)
    [lo, hi, alpha]
 }
 
 fn _gltf_sample_channel(any data, dict sampler, dict input_res, dict output_res, f64 time_sec, int n_comp, bool is_rotation, bool packed_scalar_tuple=false) list {
-   def interp = to_str(sampler.get("interpolation", "LINEAR"))
+   def interp = _gltf_anim_interp_mode(sampler.get("interpolation", "LINEAR"))
    def bracket = _gltf_find_time_bracket(data, input_res, time_sec)
    def lo = int(bracket.get(0, 0))
    def hi = int(bracket.get(1, 0))
-   def t_lo = _gltf_read_acc_f32(data, input_res, lo, 0)
-   def t_hi = _gltf_read_acc_f32(data, input_res, hi, 0)
-   def dt = t_hi - t_lo
-   mut t = 0.0
-   if dt > 0.00001 { t = (time_sec - t_lo) / dt }
+   mut t = _gltf_clamp01(float(bracket.get(2, 0.0)))
    def rot_short_norm =
    is_rotation &&
    n_comp == 4 &&
@@ -931,6 +1044,11 @@ fn gltf_animation_info(any gltf_data, int anim_idx) any {
    out
 }
 
+fn _gltf_anim_fast_records_fail(str key) any {
+   _gltf_anim_sample_cache = cache.cache_put_reset(shr._gltf_anim_sample_cache, key, false, shr._GLTF_CACHE_LIMIT_MED, 64)
+   false
+}
+
 fn _gltf_anim_fast_records(any gltf_data, int anim_idx) any {
    shr._gltf_ensure_caches()
    def g = gltf_data.get("gltf", 0)
@@ -940,12 +1058,12 @@ fn _gltf_anim_fast_records(any gltf_data, int anim_idx) any {
    def key = shr._gltf_cache_key_from_data(gltf_data) + ":data:" + to_str(to_int(data)) + ":anim:" + to_str(int(anim_idx))
    if _gltf_anim_sample_cache.contains(key) { return _gltf_anim_sample_cache.get(key, 0) }
    def anims = g.get("animations", 0)
-   if !is_list(anims) || anim_idx < 0 || anim_idx >= anims.len { return 0 }
+   if !is_list(anims) || anim_idx < 0 || anim_idx >= anims.len { return _gltf_anim_fast_records_fail(key) }
    def anim = anims.get(anim_idx)
-   if !is_dict(anim) { return 0 }
+   if !is_dict(anim) { return _gltf_anim_fast_records_fail(key) }
    def channels = anim.get("channels", [])
    def samplers = anim.get("samplers", [])
-   if !is_list(channels) || !is_list(samplers) { return 0 }
+   if !is_list(channels) || !is_list(samplers) { return _gltf_anim_fast_records_fail(key) }
    def channels_n = channels.len
    def samplers_n = samplers.len
    mut records = list(0)
@@ -954,8 +1072,8 @@ fn _gltf_anim_fast_records(any gltf_data, int anim_idx) any {
       def ch = channels[ci]
       def tgt = is_dict(ch) ? ch.get("target", 0) : 0
       def samp_idx = is_dict(ch) ? int(ch.get("sampler", -1)) : -1
-      if !is_dict(tgt) || samp_idx < 0 || samp_idx >= samplers_n { return 0 }
-      if is_dict(tgt.get("extensions", 0)) { return 0 }
+      if !is_dict(tgt) || samp_idx < 0 || samp_idx >= samplers_n { return _gltf_anim_fast_records_fail(key) }
+      if is_dict(tgt.get("extensions", 0)) { return _gltf_anim_fast_records_fail(key) }
       def node_idx = int(tgt.get("node", -1))
       def path = to_str(tgt.get("path", ""))
       mut path_code = 0
@@ -963,25 +1081,50 @@ fn _gltf_anim_fast_records(any gltf_data, int anim_idx) any {
       if path == "translation" { path_code = 1 n_comp = 3 }
       elif path == "rotation" { path_code = 2 n_comp = 4 }
       elif path == "scale" { path_code = 3 n_comp = 3 }
-      else { return 0 }
-      if node_idx < 0 { return 0 }
+      else { return _gltf_anim_fast_records_fail(key) }
+      if node_idx < 0 { return _gltf_anim_fast_records_fail(key) }
       def samp = samplers[samp_idx]
-      if !is_dict(samp) { return 0 }
-      if to_str(samp.get("interpolation", "LINEAR")) != "LINEAR" { return 0 }
+      if !is_dict(samp) { return _gltf_anim_fast_records_fail(key) }
+      def interp = _gltf_anim_interp_mode(samp.get("interpolation", "LINEAR"))
+      mut interp_code = 0
+      if interp == "STEP" { interp_code = 1 }
+      elif interp != "LINEAR" { return _gltf_anim_fast_records_fail(key) }
       def input_res = ld._gltf_resolve_accessor_data(g, int(samp.get("input", -1)), data)
       def output_res = ld._gltf_resolve_accessor_data(g, int(samp.get("output", -1)), data)
-      if !is_dict(input_res) || !is_dict(output_res) { return 0 }
-      if input_res.get("owned", false) || output_res.get("owned", false) { return 0 }
-      if int(input_res.get("comp", 0)) != GLTF_COMP_FLOAT || int(output_res.get("comp", 0)) != GLTF_COMP_FLOAT { return 0 }
-      if int(input_res.get("type_count", 1)) != 1 || int(output_res.get("type_count", 0)) != n_comp { return 0 }
+      if !is_dict(input_res) || !is_dict(output_res) {
+         ld._gltf_release_accessor_data(input_res)
+         ld._gltf_release_accessor_data(output_res)
+         return _gltf_anim_fast_records_fail(key)
+      }
+      if input_res.get("owned", false) || output_res.get("owned", false) {
+         ld._gltf_release_accessor_data(input_res)
+         ld._gltf_release_accessor_data(output_res)
+         return _gltf_anim_fast_records_fail(key)
+      }
+      if int(input_res.get("comp", 0)) != GLTF_COMP_FLOAT || int(output_res.get("comp", 0)) != GLTF_COMP_FLOAT {
+         ld._gltf_release_accessor_data(input_res)
+         ld._gltf_release_accessor_data(output_res)
+         return _gltf_anim_fast_records_fail(key)
+      }
+      if int(input_res.get("type_count", 1)) != 1 || int(output_res.get("type_count", 0)) != n_comp {
+         ld._gltf_release_accessor_data(input_res)
+         ld._gltf_release_accessor_data(output_res)
+         return _gltf_anim_fast_records_fail(key)
+      }
       def in_ptr = input_res.get("ptr", 0)
       def out_ptr = output_res.get("ptr", 0)
       def count = int(input_res.get("count", 0))
-      if !in_ptr || !out_ptr || count <= 0 || int(output_res.get("count", 0)) < count { return 0 }
-      records = records.append([node_idx, path_code, in_ptr, out_ptr, count, int(input_res.get("stride", 4)), int(output_res.get("stride", n_comp * 4)), n_comp, 0])
+      if !in_ptr || !out_ptr || count <= 0 || int(output_res.get("count", 0)) < count {
+         ld._gltf_release_accessor_data(input_res)
+         ld._gltf_release_accessor_data(output_res)
+         return _gltf_anim_fast_records_fail(key)
+      }
+      records = records.append([node_idx, path_code, in_ptr, out_ptr, count, int(input_res.get("stride", 4)), int(output_res.get("stride", n_comp * 4)), n_comp, 0, interp_code])
+      ld._gltf_release_accessor_data(input_res)
+      ld._gltf_release_accessor_data(output_res)
       ci += 1
    }
-   if records.len != channels_n { return 0 }
+   if records.len != channels_n { return _gltf_anim_fast_records_fail(key) }
    _gltf_anim_sample_cache = cache.cache_put_reset(shr._gltf_anim_sample_cache, key, records, shr._GLTF_CACHE_LIMIT_MED, 64)
    records
 }
@@ -1016,8 +1159,7 @@ fn _gltf_anim_record_bracket(any rec, f64 time_sec) list {
       t_hi = f32le(in_ptr, (lo + 1) * stride)
    }
    rec[8] = lo
-   def dt = t_hi - t_lo
-   def alpha = dt > 0.00001 ? (time_sec - t_lo) / dt : 0.0
+   def alpha = _gltf_anim_alpha(time_sec, t_lo, t_hi)
    [lo, lo + 1, alpha]
 }
 
@@ -1025,17 +1167,38 @@ fn _gltf_anim_clean_tiny(f64 v) f64 {
    abs(v) < 0.000000000001 ? 0.0 : v
 }
 
+fn _gltf_anim_fast_tuple(any rec, int idx) list {
+   def out_ptr = rec.get(3, 0)
+   def stride = int(rec.get(6, 0))
+   def n_comp = int(rec.get(7, 0))
+   def off = idx * stride
+   if n_comp == 4 {
+      return [
+         _gltf_anim_clean_tiny(f32le(out_ptr, off + 0)),
+         _gltf_anim_clean_tiny(f32le(out_ptr, off + 4)),
+         _gltf_anim_clean_tiny(f32le(out_ptr, off + 8)),
+         _gltf_anim_clean_tiny(f32le(out_ptr, off + 12))
+      ]
+   }
+   [
+      _gltf_anim_clean_tiny(f32le(out_ptr, off + 0)),
+      _gltf_anim_clean_tiny(f32le(out_ptr, off + 4)),
+      _gltf_anim_clean_tiny(f32le(out_ptr, off + 8))
+   ]
+}
+
 fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
    def br = _gltf_anim_record_bracket(rec, time_sec)
    def lo = int(br.get(0, 0))
    def hi = int(br.get(1, 0))
-   def t = float(br.get(2, 0.0))
+   def t = _gltf_clamp01(float(br.get(2, 0.0)))
+   if lo == hi || int(rec.get(9, 0)) == 1 { return _gltf_anim_fast_tuple(rec, lo) }
    def out_ptr = rec.get(3, 0)
    def stride = int(rec.get(6, 0))
    def n_comp = int(rec.get(7, 0))
    def lo_off = lo * stride
    def hi_off = hi * stride
-   if n_comp == 4 {
+   if n_comp == 4 && int(rec.get(1, 0)) == 2 {
       def ax, ay = f32le(out_ptr, lo_off + 0), f32le(out_ptr, lo_off + 4)
       def az, aw = f32le(out_ptr, lo_off + 8), f32le(out_ptr, lo_off + 12)
       mut bx, by = f32le(out_ptr, hi_off + 0), f32le(out_ptr, hi_off + 4)
@@ -1063,11 +1226,28 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
       def sin_theta = sin(theta)
       def s0 = cos(theta) - dot * sin_theta / sin_theta_0
       def s1 = sin_theta / sin_theta_0
+      def rx, ry = ax * s0 + bx * s1, ay * s0 + by * s1
+      def rz, rw = az * s0 + bz * s1, aw * s0 + bw * s1
+      def len2 = rx * rx + ry * ry + rz * rz + rw * rw
+      if len2 <= 0.000001 { return [0.0, 0.0, 0.0, 1.0] }
+      def inv_len = 1.0 / sqrt(len2)
       return [
-         _gltf_anim_clean_tiny(ax * s0 + bx * s1),
-         _gltf_anim_clean_tiny(ay * s0 + by * s1),
-         _gltf_anim_clean_tiny(az * s0 + bz * s1),
-         _gltf_anim_clean_tiny(aw * s0 + bw * s1)
+         _gltf_anim_clean_tiny(rx * inv_len),
+         _gltf_anim_clean_tiny(ry * inv_len),
+         _gltf_anim_clean_tiny(rz * inv_len),
+         _gltf_anim_clean_tiny(rw * inv_len)
+      ]
+   }
+   if n_comp == 4 {
+      def ax, ay = f32le(out_ptr, lo_off + 0), f32le(out_ptr, lo_off + 4)
+      def az, aw = f32le(out_ptr, lo_off + 8), f32le(out_ptr, lo_off + 12)
+      def bx, by = f32le(out_ptr, hi_off + 0), f32le(out_ptr, hi_off + 4)
+      def bz, bw = f32le(out_ptr, hi_off + 8), f32le(out_ptr, hi_off + 12)
+      return [
+         _gltf_anim_clean_tiny(ax + (bx - ax) * t),
+         _gltf_anim_clean_tiny(ay + (by - ay) * t),
+         _gltf_anim_clean_tiny(az + (bz - az) * t),
+         _gltf_anim_clean_tiny(aw + (bw - aw) * t)
       ]
    }
    def ax, ay = f32le(out_ptr, lo_off + 0), f32le(out_ptr, lo_off + 4)
@@ -1083,7 +1263,11 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
 }
 
 fn _gltf_sample_animation_fast(any gltf_data, int anim_idx, f64 time_sec) any {
-   if !common.env_toggle("NY_GLTF_ANIM_FAST", true) { return 0 }
+   ;; Keep the direct accessor sampler as the default correctness path.  The
+   ;; record-cache sampler remains available with NY_GLTF_ANIM_FAST=1, but it is
+   ;; deliberately opt-in because broken cached timing made simple rigid clips
+   ;; such as AnimatedCube look like integer/keyframe stepping.
+   if !common.env_toggle("NY_GLTF_ANIM_FAST", false) { return 0 }
    def g = gltf_data.get("gltf", 0)
    def skins = is_dict(g) ? g.get("skins", 0) : 0
    if is_list(skins) && skins.len > 0 && !common.env_toggle("NY_GLTF_ANIM_FAST_SKIN", true) { return 0 }
@@ -1160,7 +1344,7 @@ fn _gltf_anim_sample_component_count(str path, bool is_visibility_pointer, any p
       if kind == "emissiveFactor" { return 3 }
       if kind == "metallicFactor" || kind == "roughnessFactor" || kind == "alphaCutoff" { return 1 }
       if kind == "uvOffset" || kind == "uvScale" { return 2 }
-      if kind == "uvRotation" { return 1 }
+      if kind == "uvRotation" || kind == "uvTexCoord" { return 1 }
    }
    if eq(path, "rotation") { return 4 }
    if eq(path, "weights") { return max(1, int(output_res.get("count", 0)) / max(1, int(input_res.get("count", 1)) * key_mult)) }
@@ -1173,7 +1357,7 @@ fn _gltf_anim_store_override(
 ) dict {
    if is_material_pointer {
       mut ptrs = overrides.get("__pointers", [])
-      ptrs = ptrs.append({"material": int(ptr_mat_target.get("material", -1)), "kind": to_str(ptr_mat_target.get("kind", "")), "value": val})
+      ptrs = ptrs.append({"material": int(ptr_mat_target.get("material", -1)), "kind": to_str(ptr_mat_target.get("kind", "")), "slot": to_str(ptr_mat_target.get("slot", "")), "value": val})
       overrides["__pointers"] = ptrs
       return overrides
    }
@@ -1208,9 +1392,28 @@ fn _gltf_anim_store_override(
    overrides
 }
 
+fn _gltf_anim_wrap_time_value(f64 t_raw, f64 dur) f64 {
+   mut t = float(t_raw)
+   if is_nan(t) || is_inf(t) { t = 0.0 }
+   if abs(t) > 1000000.0 { t = 0.0 }
+   if dur > 0.0001 {
+      while t >= dur { t -= dur }
+      while t < 0.0 { t += dur }
+   }
+   t
+}
+
+fn _gltf_anim_wrap_time(any gltf_data, int anim_idx, f64 time_sec) f64 {
+   if anim_idx < 0 { return _gltf_anim_wrap_time_value(time_sec, float(gltf_data.get("anim_duration_hint", 0.0))) }
+   def info = gltf_animation_info(gltf_data, anim_idx)
+   def dur = is_dict(info) ? float(info.get("duration", 0.0)) : 0.0
+   _gltf_anim_wrap_time_value(time_sec, dur)
+}
+
 fn gltf_sample_animation(any gltf_data, int anim_idx, f64 time_sec) any {
    "Sample animation at time_sec. Returns {node_idx: {T:[x,y,z], R:[x,y,z,w], S:[x,y,z]}} overrides."
-   def fast = _gltf_sample_animation_fast(gltf_data, anim_idx, time_sec)
+   def sample_t = _gltf_anim_wrap_time(gltf_data, anim_idx, time_sec)
+   def fast = _gltf_sample_animation_fast(gltf_data, anim_idx, sample_t)
    if is_dict(fast) { return fast }
    def g = gltf_data.get("gltf", 0)
    if !is_dict(g) { return 0 }
@@ -1254,14 +1457,14 @@ fn gltf_sample_animation(any gltf_data, int anim_idx, f64 time_sec) any {
             def input_res  = ld._gltf_resolve_accessor_data(g, input_idx,  data)
             def output_res = ld._gltf_resolve_accessor_data(g, output_idx, data)
             if is_dict(input_res) && is_dict(output_res) {
-               def key_mult = eq(to_str(samp.get("interpolation", "LINEAR")), "CUBICSPLINE") ? 3 : 1
+               def key_mult = eq(_gltf_anim_interp_mode(samp.get("interpolation", "LINEAR")), "CUBICSPLINE") ? 3 : 1
                def n_comp = _gltf_anim_sample_component_count(path, is_visibility_pointer, ptr_mat_target, input_res, output_res, key_mult)
                def is_rot = eq(path, "rotation")
                def packed_scalar_tuple =
                eq(path, "weights") &&
                int(output_res.get("type_count", 1)) == 1 &&
                n_comp > 1
-               def val = _gltf_sample_channel(data, samp, input_res, output_res, time_sec, n_comp, is_rot, packed_scalar_tuple)
+               def val = _gltf_sample_channel(data, samp, input_res, output_res, sample_t, n_comp, is_rot, packed_scalar_tuple)
                overrides = _gltf_anim_store_override(overrides, is_material_pointer, ptr_mat_target, is_visibility_pointer, ptr_vis_node_idx, node_idx, path, val)
             }
             ld._gltf_release_accessor_data(input_res)
@@ -1284,7 +1487,8 @@ fn gltf_sample_animation_merged(any gltf_data, f64 time_sec) any {
    mut merged = dict(is_list(node_defs) ? max(16, node_defs.len * 2) : 16)
    mut ai = 0
    while ai < anims_n {
-      def clip = gltf_sample_animation(gltf_data, ai, time_sec)
+      def clip_t = _gltf_anim_wrap_time(gltf_data, ai, time_sec)
+      def clip = gltf_sample_animation(gltf_data, ai, clip_t)
       if is_dict(clip) {
          def clip_nodes = clip.get("__nodes", [])
          if is_list(clip_nodes) {
@@ -1348,20 +1552,21 @@ fn gltf_sample_animation_merged(any gltf_data, f64 time_sec) any {
 }
 
 fn gltf_apply_morph_weights(any gltf_data, any overrides) list {
-   "Applies sampled node weights overrides onto referenced mesh.weights in gltf_data.
-   Returns [updated_gltf_data, changed]."
+   "Applies sampled node weights overrides onto node.weights.
+   glTF morph animation targets a node, not the shared mesh. Keeping weights on
+   the node lets several instances of the same mesh hold different poses."
    if !is_dict(gltf_data) || !is_dict(overrides) { return [gltf_data, false] }
    mut g = gltf_data.get("gltf", 0)
    if !is_dict(g) { return [gltf_data, false] }
-   def nodes = g.get("nodes", 0)
-   mut meshes = g.get("meshes", 0)
+   mut nodes = g.get("nodes", 0)
+   def meshes = g.get("meshes", 0)
    if !is_list(nodes) || !is_list(meshes) { return [gltf_data, false] }
    def nodes_n = nodes.len
    def meshes_n = meshes.len
    mut changed = false
    mut ni = 0
    while ni < nodes_n {
-      def node = nodes[ni]
+      mut node = nodes[ni]
       if is_dict(node) {
          def node_ov = overrides.get(ni, 0)
          if is_dict(node_ov) {
@@ -1369,18 +1574,22 @@ fn gltf_apply_morph_weights(any gltf_data, any overrides) list {
             if is_list(w) {
                def mesh_idx = int(node.get("mesh", -1))
                if mesh_idx >= 0 && mesh_idx < meshes_n {
-                  mut mesh = meshes[mesh_idx]
-                  if is_dict(mesh) {
-                     def w_n = w.len
-                     mut out_w = list(w_n)
-                     mut wi = 0
-                     while wi < w_n {
-                        __store_item_fast(out_w, wi, float(w[wi]))
-                        wi += 1
-                     }
-                     __list_set_len(out_w, w_n)
-                     mesh["weights"] = out_w
-                     meshes[mesh_idx] = mesh
+                  def w_n = w.len
+                  mut out_w = list(w_n)
+                  mut wi = 0
+                  mut same = false
+                  def old_w = node.get("weights", 0)
+                  if is_list(old_w) && old_w.len == w_n { same = true }
+                  while wi < w_n {
+                     def next_w = float(w[wi])
+                     __store_item_fast(out_w, wi, next_w)
+                     if same && abs(float(old_w.get(wi, 0.0)) - next_w) > 0.00001 { same = false }
+                     wi += 1
+                  }
+                  __list_set_len(out_w, w_n)
+                  if !same {
+                     node["weights"] = out_w
+                     nodes[ni] = node
                      changed = true
                   }
                }
@@ -1390,10 +1599,11 @@ fn gltf_apply_morph_weights(any gltf_data, any overrides) list {
       ni += 1
    }
    if !changed { return [gltf_data, false] }
-   g["meshes"] = meshes
+   g["nodes"] = nodes
    gltf_data["gltf"] = g
    [gltf_data, true]
 }
+
 
 fn _gltf_build_node_world_mats_animated(dict g, int node_idx, list parent_m, dict node_world_mats, dict overrides) dict {
    def nodes = g.get("nodes")
@@ -1483,18 +1693,38 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    def nodes = g.get("nodes", 0)
    def nodes_n = is_list(nodes) ? nodes.len : 0
    mut node_world_mats = dict(max(16, nodes_n * 2))
-   def fast_numeric = overrides.get("__fast_numeric", false) ? true : false
-   def base_local_mats = fast_numeric ? shr._gltf_node_local_mats(g) : 0
-   mut world_list = 0
-   mut fast_node_overrides = 0
-   if fast_numeric {
-      world_list = []
-      mut wi = 0
+   ;; Build a dense local/world cache for every animation path.  The old generic
+   ;; path recursively recomputed node local matrices and did dict lookups for
+   ;; every skeleton node every frame, which made recursive rigs very slow.
+   def fast_numeric = true
+   def base_local_mats = shr._gltf_node_local_mats(g)
+   mut world_list = []
+   mut wi = 0
+   while wi < nodes_n {
+      world_list = world_list.append(0)
+      wi += 1
+   }
+   mut fast_node_overrides = overrides.get("__fast_node_overrides", 0)
+   if !is_list(fast_node_overrides) {
+      fast_node_overrides = []
+      wi = 0
       while wi < nodes_n {
-         world_list = world_list.append(0)
+         fast_node_overrides = fast_node_overrides.append(0)
          wi += 1
       }
-      fast_node_overrides = overrides.get("__fast_node_overrides", 0)
+      def ov_nodes = overrides.get("__nodes", 0)
+      if is_list(ov_nodes) {
+         def ov_n = ov_nodes.len
+         mut oi = 0
+         while oi < ov_n {
+            def rec = ov_nodes[oi]
+            if is_dict(rec) {
+               def node_idx = int(rec.get("node", -1))
+               if node_idx >= 0 && node_idx < nodes_n { fast_node_overrides[node_idx] = rec }
+            }
+            oi += 1
+         }
+      }
    }
    def scenes = g.get("scenes")
    def scene_idx = shr._gltf_active_scene_idx(g, gltf_data)
@@ -1523,7 +1753,17 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
          }
       }
    }
-   if fast_numeric && is_list(world_list) { node_world_mats["__world_list"] = world_list }
+   if is_list(world_list) {
+      node_world_mats["__world_list"] = world_list
+   } else {
+      mut world_list2 = []
+      mut wi2 = 0
+      while wi2 < nodes_n {
+         world_list2 = world_list2.append(node_world_mats.get(wi2, 0))
+         wi2 += 1
+      }
+      node_world_mats["__world_list"] = world_list2
+   }
    node_world_mats
 }
 
@@ -1538,10 +1778,37 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    store32(out_ptr, 0x40000000, 12)
    store32(out_ptr, 0x40800000, 16)
    store32(out_ptr, 0x40c00000, 20)
-   mut rec = [0, 1, in_ptr, out_ptr, 2, 4, 12, 3, 0]
+   mut rec = [0, 1, in_ptr, out_ptr, 2, 4, 12, 3, 0, 0]
    def interp = _gltf_anim_fast_value(rec, 0.5)
    assert(interp == [1.0, 2.0, 3.0], "gltf animation fast sampler interpolates vec3")
+   def interp_quarter = _gltf_anim_fast_value(rec, 0.25)
+   assert(interp_quarter == [0.5, 1.0, 1.5], "gltf animation fast sampler keeps in-between vec3")
    assert(rec[8] == 0, "gltf animation fast sampler updates bracket cache")
+
+   def q_ptr = malloc(32)
+   ;; identity -> 180deg around Z should slerp to a smooth 90deg turn at t=0.5
+   store32_f32(q_ptr, 0.0, 0)
+   store32_f32(q_ptr, 0.0, 4)
+   store32_f32(q_ptr, 0.0, 8)
+   store32_f32(q_ptr, 1.0, 12)
+   store32_f32(q_ptr, 0.0, 16)
+   store32_f32(q_ptr, 0.0, 20)
+   store32_f32(q_ptr, 1.0, 24)
+   store32_f32(q_ptr, 0.0, 28)
+   mut qrec = [0, 2, in_ptr, q_ptr, 2, 4, 16, 4, 0, 0]
+   def qquarter = _gltf_anim_fast_value(qrec, 0.25)
+   assert(abs(float(qquarter.get(2, 0.0)) - 0.3826834) < 0.0003, "gltf animation fast sampler keeps in-between quat z")
+   assert(abs(float(qquarter.get(3, 0.0)) - 0.9238795) < 0.0003, "gltf animation fast sampler keeps in-between quat w")
+   def qhalf = _gltf_anim_fast_value(qrec, 0.5)
+   assert(abs(float(qhalf.get(2, 0.0)) - 0.70710678) < 0.0002, "gltf animation fast sampler slerps quat z")
+   assert(abs(float(qhalf.get(3, 0.0)) - 0.70710678) < 0.0002, "gltf animation fast sampler slerps quat w")
+
+   def br_q = _gltf_anim_record_bracket(qrec, 0.25)
+   assert(int(br_q.get(0, -1)) == 0 && int(br_q.get(1, -1)) == 1 && abs(float(br_q.get(2, -1.0)) - 0.25) < 0.000001, "gltf animation bracket keeps fractional alpha")
+   def qm = gltf_math.mat4_from_trs([0.0,0.0,0.0], qhalf, [1.0,1.0,1.0])
+   def qp = gltf_math.mat4_apply_pos(qm, 1.0, 0.0, 0.0)
+   assert(abs(float(qp.get(0, 0.0))) < 0.0002 && abs(float(qp.get(1, 0.0)) - 1.0) < 0.0002, "gltf animation fast sampler rotates box point")
+   free(q_ptr)
    free(in_ptr)
    free(out_ptr)
 

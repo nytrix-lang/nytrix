@@ -1094,7 +1094,7 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_MAGENTA, "--alias-require-no-escape",
        "Enforce no arg-escape / return-alias"},
       {NULL, NULL, NULL}});
-  ny_usage_section("EXPERT MEMORY");
+  ny_usage_section("MEMORY");
   ny_usage_items((const ny_usage_entry_t[]){
       {NY_CLR_MAGENTA, "--heap=MODE", "Heap policy: manual | raii | rc | gc"},
       {NY_CLR_MAGENTA, "-gc / -no-gc", "Enable/disable GC nursery"},

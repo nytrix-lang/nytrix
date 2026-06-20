@@ -49,6 +49,8 @@ vec2 applyUvXf(vec2 uv, uint xf0, uint xf1){
   vec2 suv = uv * scl ;
   float cr = cos(rot) ;
   float sr = sin(rot) ;
+  // glTF KHR_texture_transform is applied in UV space (V axis down):
+  // scale, then clockwise UV rotation, then offset.
   return vec2(cr * suv.x + sr * suv.y, -sr * suv.x + cr * suv.y) + off ;
 }
 vec2 baseUv(){ return applyUvXf(((pc.baseUvXf1 >> 30u) != 0u) ? vUV2 : vUV, pc.baseUvXf0, pc.baseUvXf1) ; }
@@ -99,17 +101,16 @@ vec3 applyNormalMap(vec3 N, vec4 authoredTangent, uint packedIndex, uint xf0, ui
 }
 
 float D_GGX(float NoH, float r){
-  float a = max(r * r, 0.045) ;
+  float a = max(r * r, 0.002) ;
   float a2 = a * a ;
   float d = NoH * NoH * (a2 - 1.0) + 1.0 ;
   return a2 / max(PI * d * d, 1e-4) ;
 }
 float V_SmithFast(float NoV, float NoL, float r){
-  float k = (r + 1.0) ;
-  k = (k * k) * 0.125 ;
+  float k = r * r * 0.5 ;
   float gv = NoV / max(NoV * (1.0 - k) + k, 1e-4) ;
   float gl = NoL / max(NoL * (1.0 - k) + k, 1e-4) ;
-  return gv * gl ;
+  return gv * gl * 0.25 ;
 }
 vec3 F_Schlick(vec3 f0, float VoH){
   return f0 + (vec3(1.0) - f0) * pow5(1.0 - VoH) ;
@@ -139,7 +140,7 @@ void main(){
   uint alphaMode = pc.alphaPacked & 3u ;
   float alphaCutoff = float((pc.alphaPacked >> 8u) & 255u) / 255.0 ;
   float rawAlpha = tex.a * baseTint.a ;
-  bool vertexTextureCoverage = (pc.baseTexIndex & 0x80000000u) != 0u && (vertexColorMultiply || vertexTextureIndex) && baseIndex < 1024u ;
+  bool vertexTextureCoverage = vertexTextureIndex && baseIndex < 1024u ;
   bool vertexCoverageMask = (alphaMode == 2u || vertexTextureCoverage) && vertexColorMultiply && baseIndex < 1024u ;
   if(vertexCoverageMask){
     rawAlpha = tex.a * baseTint.a ;
@@ -238,7 +239,8 @@ void main(){
 #endif
     vec3 skyCol = vec3(0.78, 0.86, 0.98) ;
     vec3 groundCol = vec3(0.10, 0.09, 0.08) ;
-    vec3 hemi = mix(groundCol, skyCol, clamp(N.y * 0.5 + 0.5, 0.0, 1.0)) ;
+    vec3 hemiRange = skyCol - groundCol ;
+    vec3 hemi = groundCol + hemiRange * clamp(N.y * 0.5 + 0.5, 0.0, 1.0) ;
     vec3 L = normalize(vec3(-0.55, 0.82, 0.18)) ;
     vec3 H = normalize(L + V) ;
     float NoLFront = max(dot(N, L), 0.0) ;
@@ -251,7 +253,7 @@ void main(){
     Lo += (diffuseColor * (1.0 - max3(F)) / PI) * vec3(0.92, 0.90, 0.86) * NoLDiff * 0.90 ;
     Lo += (F * spec) * vec3(0.92, 0.90, 0.86) * NoLFront * 0.90 ;
     vec3 R = reflect(-V, N) ;
-    vec3 env = mix(groundCol, skyCol, clamp(R.y * 0.5 + 0.5, 0.0, 1.0)) ;
+    vec3 env = groundCol + hemiRange * clamp(R.y * 0.5 + 0.5, 0.0, 1.0) ;
     Lo += env * F0 * mix(0.08, 0.42, metallic) * (1.0 - roughness * 0.60) ;
 #ifndef NY_FAST_ENV_ONLY
   }
@@ -267,9 +269,10 @@ void main(){
   if(iridescence > 0.001 && bsdf3A == 254u){ attenuationColor = vec3(1.0) ; }
   float dispersion = (float((pc.bsdf4Packed >> 24u) & 255u) / 255.0) * 10.0 ;
   bool diffuseTransmissionAlphaCard = alphaMode != 0u && diffuseTransmission > 0.001 ;
-  uint occIndex = pc.occlusionTexIndex & 0xFFFFu ;
-  if(occIndex != 0u && occIndex < 1024u){
-    vec2 occUV = mapUv(pc.occlusionTexIndex, pc.occlusionUvXf0, pc.occlusionUvXf1) ;
+  uint occWord = pc.occlusionTexIndex ;
+  uint occIndex = occWord & 0xFFFFu ;
+  if((occWord & 0x80000000u) == 0u && occIndex < 1024u){
+    vec2 occUV = mapUv(occWord, pc.occlusionUvXf0, pc.occlusionUvXf1) ;
     float occ = texture(texSamplers[nonuniformEXT(occIndex)], occUV).r ;
     float occStrength = float((pc.alphaPacked >> 16u) & 255u) / 255.0 ;
     if(transmission > 0.001 || diffuseTransmission > 0.001){
@@ -311,7 +314,8 @@ void main(){
     vec3 glassLo = mix(clearGlass, amberGlass, amberCue) ;
     float glassResolve = clamp(transmission * (0.46 + 0.32 * volumeGate + 0.16 * amberCue) * (1.0 - roughness * 0.20), 0.0, 0.90) ;
     Lo = mix(Lo, glassLo, glassResolve) ;
-    outAlpha = 1.0 ;
+    float glassAlpha = clamp(mix(0.16, 0.58, max(volumeGate, amberCue)) * (1.0 - roughness * 0.22), 0.12, 0.64) ;
+    outAlpha = min(outAlpha, glassAlpha) ;
   }
 
   if(iridescence > 0.001){

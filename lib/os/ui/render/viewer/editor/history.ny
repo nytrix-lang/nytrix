@@ -26,10 +26,11 @@ fn _clone_buffer(any b) dict {
 }
 
 fn _clone_buffers(list buffers) list {
-   mut out = []
+   mut out = list(buffers.len)
+   __list_set_len(out, buffers.len)
    mut i = 0
    while i < buffers.len {
-      out = out.append(_clone_buffer(buffers.get(i, {})))
+      __store_item_fast(out, i, _clone_buffer(buffers.get(i, {})))
       i += 1
    }
    out

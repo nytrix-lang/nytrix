@@ -141,11 +141,11 @@ fn _scaled_int(f64 value, f64 density, int lo, int hi) int {
    int(min(max(value * density, float(lo)), float(hi)))
 }
 
-def UI_DENSITY = _env_float_between("NY_EDITOR_DENSITY", 1.0, 0.54, 1.25)
+def UI_DENSITY = _env_float_between("NY_EDITOR_DENSITY", 0.82, 0.54, 1.25)
 def int FONT_TITLE_SIZE = int(common.env_int_clamped("NY_EDITOR_TITLE_FONT_SIZE", _scaled_int(24.0, UI_DENSITY, 12, 48), 8, 96))
 def int FONT_BODY_SIZE = int(common.env_int_clamped("NY_EDITOR_FONT_SIZE", _scaled_int(18.0, UI_DENSITY, 9, 36), 8, 96))
 def int FONT_SMALL_SIZE = int(common.env_int_clamped("NY_EDITOR_SMALL_FONT_SIZE", _scaled_int(15.0, UI_DENSITY, 8, 32), 8, 96))
-def int FONT_MODELINE_SIZE = int(common.env_int_clamped("NY_EDITOR_MODELINE_FONT_SIZE", max(15, _scaled_int(16.0, UI_DENSITY, 10, 32)), 8, 96))
+def int FONT_MODELINE_SIZE = int(common.env_int_clamped("NY_EDITOR_MODELINE_FONT_SIZE", max(13, _scaled_int(16.0, UI_DENSITY, 10, 32)), 8, 96))
 def TOP_H = max(21.0, 30.0 * UI_DENSITY)
 def RAIL_MIN_W = 38.0
 def EDIT_MIN_W = 56.0
@@ -163,7 +163,7 @@ else {
 }
 
 def int RENDER_BACKEND_MOCK = int(gfx.BACKEND_MOCK)
-def win = gfx.init_window(START_W, START_H, "Nytrix Editor", START_FLAGS, EDITOR_PRESENT_MODE, false, 1)
+def win = gfx.init_window(START_W, START_H, "Nytrix Editor", START_FLAGS, EDITOR_PRESENT_MODE, false, 4)
 
 if !win { panic("window init failed") }
 window.set_exit_key(win, key.KEY_NULL)
@@ -206,20 +206,21 @@ def SECTION_TEXT_Y = 0.0
 def ROW_TEXT_Y = 0.0
 def EDITOR_TEXT_TOP = 6.0
 def INPUT_TRACE = common.env_truthy("NY_EDITOR_INPUT_TRACE")
+def SHOW_LAST_KEY = common.env_truthy("NY_EDITOR_SHOW_LAST_KEY")
 def int BIG_FILE_LINES = 5000
 def int HIGHLIGHT_MAX_LINE_BYTES = 900
 def OUTLINE_MAX_LINES = 5000
 def int LINE_DRAW_EXTRA_COLS = 96
-def RAIL_TABS_H = 32.0
-def CONTEXT_W = 284.0
-def CONTEXT_ROW_H = 29.0
-def FIND_BAR_H = 58.0
-def f64 PALETTE_HEADER_H = 50.0
-def f64 PALETTE_ROW_H = 28.0
-def f64 PALETTE_DETAIL_H = 30.0
-def int PALETTE_MAX_ROWS = 14
-def f64 WHICH_KEY_ROW_H = 29.0
-def int WHICH_KEY_MAX_ROWS = 36
+def RAIL_TABS_H = 28.0
+def CONTEXT_W = 260.0
+def CONTEXT_ROW_H = 27.0
+def FIND_BAR_H = 48.0
+def f64 PALETTE_HEADER_H = 32.0
+def f64 PALETTE_ROW_H = 22.0
+def f64 PALETTE_DETAIL_H = 20.0
+def int PALETTE_MAX_ROWS = 12
+def f64 WHICH_KEY_ROW_H = 22.0
+def int WHICH_KEY_MAX_ROWS = 14
 def TOP_TAB_MIN_W = 64.0
 def TOP_TAB_MAX_W = 144.0
 def MOUSE_BACK = 3
@@ -227,7 +228,7 @@ def MOUSE_FORWARD = 4
 def NAV_LIMIT = 96
 def NAV_SEP = "\t"
 def EDITOR_CACHE_PATH = "build/cache/editor_state.cfg"
-def TERM_TAB_H = 26.0
+def TERM_TAB_H = 23.0
 def TERM_TAB_MIN_W = 64.0
 def TERM_TAB_MAX_W = 118.0
 def PANEL_SPLIT_HIT = 4.0
@@ -462,6 +463,7 @@ mut palette_scroll_accum = 0.0
 mut which_key_scroll_accum = 0.0
 mut which_key_scroll = 0
 mut which_key_prefix = ""
+mut which_key_rows_cache = borrow([])
 mut suppress_char_cp = 0
 mut tree_scroll_accum = 0.0
 mut outline_scroll_accum = 0.0
@@ -518,6 +520,8 @@ def int CACHE_SAVE_SECONDS = int(common.env_int_clamped("NY_EDITOR_CACHE_SAVE_SE
 def int PROJECT_OPEN_CACHE_LIMIT = int(common.env_int_clamped("NY_EDITOR_PROJECT_OPEN_CACHE_LIMIT", 1024, 0, 10000))
 def int BEGIN_FAIL_LIMIT = int(common.env_int_clamped("NY_EDITOR_BEGIN_FAIL_LIMIT", 180, 1, 10000))
 def int EVENT_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_MAX_EVENTS_PER_FRAME", 384, 32, 8192))
+def int COMPLETION_SCAN_RADIUS = int(common.env_int_clamped("NY_EDITOR_COMPLETION_SCAN_RADIUS", 900, 64, 20000))
+def int COMPLETION_SCAN_MAX_LINES = int(common.env_int_clamped("NY_EDITOR_COMPLETION_SCAN_MAX_LINES", 4000, 128, 1000000))
 def int IDLE_REUSE_WARMUP = int(common.env_int_clamped("NY_EDITOR_IDLE_REUSE_WARMUP", 1, 0, 128))
 def int IDLE_REUSE_INTERVAL = int(common.env_int_clamped("NY_EDITOR_IDLE_REUSE_INTERVAL", 1200, 1, 100000))
 def int ESC_QUIT_WINDOW_NS = 900000000
@@ -765,17 +769,17 @@ fn _fit_rect(f64 x, f64 y, f64 w, f64 h, f64 sw, f64 sh, f64 margin=8.0) list {
 
 fn _palette_rect(f64 sw, f64 sh, int matches_len) list {
    def margin = 8.0
-   mut f64 w = min(880.0, max(220.0, sw - 44.0))
+   mut f64 w = min(680.0, max(250.0, sw - 80.0))
    w = min(w, max(1.0, sw - margin * 2.0))
-   mut f64 y = max(18.0, sh * 0.09)
-   y = min(y, max(margin, sh - margin - PALETTE_HEADER_H - PALETTE_DETAIL_H - PALETTE_ROW_H - 10.0))
-   mut int max_rows = int((sh - y - margin - PALETTE_HEADER_H - PALETTE_DETAIL_H - 10.0) / PALETTE_ROW_H)
+   mut f64 y = max(12.0, sh * 0.070)
+   y = min(y, max(margin, sh - margin - PALETTE_HEADER_H - PALETTE_DETAIL_H - PALETTE_ROW_H - 6.0))
+   mut int max_rows = int((sh - y - margin - PALETTE_HEADER_H - PALETTE_DETAIL_H - 6.0) / PALETTE_ROW_H)
    if max_rows < 1 { max_rows = 1 }
    mut int rows = matches_len
    if rows < 1 { rows = 1 }
    if rows > max_rows { rows = max_rows }
    if rows > PALETTE_MAX_ROWS { rows = PALETTE_MAX_ROWS }
-   def f64 h = PALETTE_HEADER_H + float(rows) * PALETTE_ROW_H + PALETTE_DETAIL_H + 10.0
+   def f64 h = PALETTE_HEADER_H + float(rows) * PALETTE_ROW_H + PALETTE_DETAIL_H + 6.0
    def x0 = sw * 0.5 - w * 0.5
    def fit = _fit_rect(x0, y, w, h, sw, sh, margin)
    [float(fit.get(0, x0)), float(fit.get(1, y)), float(fit.get(2, w)), float(fit.get(3, h)), rows]
@@ -803,34 +807,41 @@ fn _palette_row_hit(dict lay, f64 mx, f64 my) int {
 }
 
 fn _which_key_rect(f64 sw, f64 sh, int total) list {
-   mut f64 w = min(1180.0, max(320.0, sw - 28.0))
+   mut f64 w = min(660.0, max(260.0, sw * 0.62))
    w = min(w, max(1.0, sw - 16.0))
-   def int cols = w > 960.0 ? 3 : (w > 640.0 ? 2 : 1)
-   mut int max_lines = int((sh - 130.0) / WHICH_KEY_ROW_H)
+   def int cols = w > 520.0 ? 2 : 1
+   mut int max_lines = int((sh - 84.0) / WHICH_KEY_ROW_H)
    if max_lines < 1 { max_lines = 1 }
    mut int max_visible = max_lines * cols
    if max_visible > WHICH_KEY_MAX_ROWS { max_visible = WHICH_KEY_MAX_ROWS }
    if max_visible < 1 { max_visible = 1 }
-   mut int visible = total
-   if visible > max_visible { visible = max_visible }
-   if visible < 1 { visible = 1 }
+   mut int visible = min(max(1, total), max_visible)
    mut int line_count = int((visible + cols - 1) / cols)
    def max_h = max(1.0, sh - 16.0)
-   mut f64 h = min(max_h, 74.0 + float(line_count) * WHICH_KEY_ROW_H + 12.0)
-   mut int fit_lines = int((h - 86.0) / WHICH_KEY_ROW_H)
+   mut f64 h = min(max_h, 42.0 + float(line_count) * WHICH_KEY_ROW_H + 8.0)
+   mut int fit_lines = int((h - 50.0) / WHICH_KEY_ROW_H)
    if fit_lines < 1 { fit_lines = 1 }
    if fit_lines < line_count {
       line_count = fit_lines
       visible = min(visible, line_count * cols)
-      h = 74.0 + float(line_count) * WHICH_KEY_ROW_H + 12.0
+      h = 42.0 + float(line_count) * WHICH_KEY_ROW_H + 8.0
    }
-   def fit = _fit_rect(14.0, sh - h - 14.0, w, h, sw, sh, 8.0)
-   [float(fit.get(0, 14.0)), float(fit.get(1, sh - h - 14.0)), float(fit.get(2, w)), float(fit.get(3, h)), cols, visible]
+   def fit = _fit_rect(10.0, sh - h - 10.0, w, h, sw, sh, 8.0)
+   [float(fit.get(0, 10.0)), float(fit.get(1, sh - h - 10.0)), float(fit.get(2, w)), float(fit.get(3, h)), cols, visible]
+}
+
+fn _which_key_rows(str prefix) list {
+   if prefix == which_key_prefix && is_list(which_key_rows_cache) { return which_key_rows_cache }
+   which_key_prefix = prefix
+   which_key_scroll = 0
+   which_key_scroll_accum = 0.0
+   which_key_rows_cache = pal.which_key(prefix)
+   which_key_rows_cache
 }
 
 fn _which_key_contains(f64 sw, f64 sh, f64 mx, f64 my) bool {
    if !chord.pending(chord_state) { return false }
-   def rows = pal.which_key(chord.describe(chord_state))
+   def rows = _which_key_rows(chord.describe(chord_state))
    if rows.len <= 0 { return false }
    def r = _which_key_rect(sw, sh, rows.len)
    widgets.hit(mx, my, float(r.get(0, 0.0)), float(r.get(1, 0.0)), float(r.get(2, 0.0)), float(r.get(3, 0.0)))
@@ -1787,23 +1798,20 @@ fn _cursor_before(any a, any b) bool {
 
 @returns_owned
 fn _cursor_sorted_desc(list cursors) list {
-   mut raw = cursors
+   if cursors.len <= 1 { return cursors }
+   mut keyed = []
+   mut i = 0
+   while i < cursors.len {
+      def c = cursors.get(i)
+      keyed = keyed.append([-_cursor_row(c), -_cursor_col(c), i, c])
+      i += 1
+   }
+   sort(keyed)
    mut out = []
-   while raw.len > 0 {
-      mut best = 0
-      mut i = 1
-      while i < raw.len {
-         if _cursor_before(raw.get(best), raw.get(i)) { best = i }
-         i += 1
-      }
-      out = out.append(raw.get(best))
-      mut rest = []
-      i = 0
-      while i < raw.len {
-         if i != best { rest = rest.append(raw.get(i)) }
-         i += 1
-      }
-      raw = rest
+   i = 0
+   while i < keyed.len {
+      out = out.append(keyed.get(i, [0, 0, 0, []]).get(3, []))
+      i += 1
    }
    out
 }
@@ -2045,23 +2053,20 @@ fn _range_before(any a, any b) bool {
 
 @returns_owned
 fn _ranges_sorted_desc(list ranges) list {
-   mut raw = ranges
+   if ranges.len <= 1 { return ranges }
+   mut keyed = []
+   mut i = 0
+   while i < ranges.len {
+      def r = _range_norm(ranges.get(i, []))
+      keyed = keyed.append([-int(r.get(0, 0)), -int(r.get(1, 0)), i, r])
+      i += 1
+   }
+   sort(keyed)
    mut out = []
-   while raw.len > 0 {
-      mut best = 0
-      mut i = 1
-      while i < raw.len {
-         if _range_before(raw.get(best), raw.get(i)) { best = i }
-         i += 1
-      }
-      out = out.append(raw.get(best))
-      mut rest = []
-      i = 0
-      while i < raw.len {
-         if i != best { rest = rest.append(raw.get(i)) }
-         i += 1
-      }
-      raw = rest
+   i = 0
+   while i < keyed.len {
+      out = out.append(keyed.get(i, [0, 0, 0, []]).get(3, []))
+      i += 1
    }
    out
 }
@@ -3270,23 +3275,40 @@ fn _completion_seed_items(str prefix) list {
    out
 }
 
+fn _completion_scan_line(list out, str prefix, list lines, int li) list {
+   if li < 0 || li >= lines.len || out.len >= 22 { return out }
+   def line = to_str(lines.get(li, ""))
+   mut i = 0
+   while i < line.len && out.len < 22 {
+      if !_word_byte(load8(line, i)) { i += 1 continue }
+      def start = i
+      while i < line.len && _word_byte(load8(line, i)) { i += 1 }
+      def word = str.str_slice(line, start, i)
+      if word.len > prefix.len && (prefix.len == 0 || str.startswith(word, prefix)) {
+         out = _completion_push(out, word, "buffer line " + to_str(li + 1), "symbol", word)
+      }
+   }
+   out
+}
+
 fn _completion_items(str prefix, bool lsp_hint=false) list {
    mut out = _completion_seed_items(prefix)
    def lines = ed.current_lines(st)
-   mut li = 0
-   while li < lines.len && out.len < 22 {
-      def line = to_str(lines.get(li, ""))
-      mut i = 0
-      while i < line.len && out.len < 22 {
-         if !_word_byte(load8(line, i)) { i += 1 continue }
-         def start = i
-         while i < line.len && _word_byte(load8(line, i)) { i += 1 }
-         def word = str.str_slice(line, start, i)
-         if word.len > prefix.len && (prefix.len == 0 || str.startswith(word, prefix)) {
-            out = _completion_push(out, word, "buffer line " + to_str(li + 1), "symbol", word)
-         }
-      }
+   def cursor = min(max(int(st.get("cursor_line", 0)), 0), max(0, lines.len - 1))
+   def radius = min(COMPLETION_SCAN_RADIUS, max(lines.len, 1))
+   def lo = max(0, cursor - radius)
+   def hi = min(lines.len, cursor + radius + 1)
+   mut li = lo
+   while li < hi && out.len < 22 {
+      out = _completion_scan_line(out, prefix, lines, li)
       li += 1
+   }
+   if out.len < 12 && lines.len <= COMPLETION_SCAN_MAX_LINES {
+      li = 0
+      while li < lines.len && out.len < 22 {
+         if li < lo || li >= hi { out = _completion_scan_line(out, prefix, lines, li) }
+         li += 1
+      }
    }
    if lsp_hint {
       out = _completion_push(out, "LSP completion requested", to_str(lsp_state.get("last", "waiting for language server")), "lsp", prefix)
@@ -3716,20 +3738,24 @@ fn _insert_pair(str open, str close) int {
    _apply_hist(history.insert_pair(hist, st, open, close))
 }
 
+fn _mods_live(any data) int {
+   int(data.get("mods", data.get("mod", window.get_modifiers(win))))
+}
+
 fn _ctrl(any data) bool {
-   (int(data.get("mods", data.get("mod", window.get_modifiers(win)))) & key.MOD_CONTROL) != 0
+   (_mods_live(data) & key.MOD_CONTROL) != 0 || window.key_down(win, key.KEY_LEFT_CONTROL) || window.key_down(win, key.KEY_RIGHT_CONTROL) || window.key_down(win, key.KEY_CTRL)
 }
 
 fn _cmd_mod(any data) bool {
-   (int(data.get("mods", data.get("mod", window.get_modifiers(win)))) & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0
+   (_mods_live(data) & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 || _ctrl(data) || window.key_down(win, key.KEY_LEFT_SUPER) || window.key_down(win, key.KEY_RIGHT_SUPER) || window.key_down(win, key.KEY_SUPER)
 }
 
 fn _shift(any data) bool {
-   (int(data.get("mods", data.get("mod", window.get_modifiers(win)))) & key.MOD_SHIFT) != 0
+   (_mods_live(data) & key.MOD_SHIFT) != 0 || window.key_down(win, key.KEY_LEFT_SHIFT) || window.key_down(win, key.KEY_RIGHT_SHIFT) || window.key_down(win, key.KEY_SHIFT)
 }
 
 fn _alt(any data) bool {
-   (int(data.get("mods", data.get("mod", window.get_modifiers(win)))) & key.MOD_ALT) != 0
+   (_mods_live(data) & key.MOD_ALT) != 0 || window.key_down(win, key.KEY_LEFT_ALT) || window.key_down(win, key.KEY_RIGHT_ALT) || window.key_down(win, key.KEY_ALT)
 }
 
 fn _key_event_char_cp(any data) int {
@@ -4450,6 +4476,42 @@ fn _handle_command(str ch) bool {
    true
 }
 
+fn _open_chord_prefix(str prefix) int {
+   chord_state["prefix"] = prefix
+   chord_state["timer"] = chord.PREFIX_TIMEOUT
+   which_key_prefix = ""
+   which_key_rows_cache = borrow([])
+   which_key_scroll = 0
+   which_key_scroll_accum = 0.0
+   ui_state = interact.key_seen(ui_state, prefix)
+   _request_full_redraw(2)
+   _status(prefix + "-")
+   0
+}
+
+fn _is_ctrl_space_event(any data) bool {
+   if !_ctrl(data) { return false }
+   if window.event_key_is(data, key.KEY_SPACE) { return true }
+   def k = int(data.get("key", key.KEY_NULL))
+   if k == key.KEY_SPACE { return true }
+   def sc = int(data.get("scancode", data.get("scan", -1)))
+   if sc == 65 { return true }
+   def cp = int(data.get("char", -1))
+   cp == 0 || cp == 32
+}
+
+fn _handle_ctrl_space(any data) bool {
+   if !_is_ctrl_space_event(data) { return false }
+   if chord.pending(chord_state) && chord.describe(chord_state) == "C-SPC" {
+      chord_state = chord.clear(chord_state)
+      _run_command("palette")
+   } else {
+      _open_chord_prefix("C-SPC")
+   }
+   _suppress_char_from_key(data)
+   true
+}
+
 fn _direct_key_fallback(any data) bool {
    if _ctrl(data) && _shift(data) && window.event_key_is(data, key.KEY_P) { _run_command("palette") return true }
    if _alt(data) && _shift(data) && window.event_key_is(data, key.KEY_UP) { _run_command("cursor-add-above") return true }
@@ -4512,13 +4574,14 @@ fn _handle_key(any data) int {
       _suppress_char_from_key(data)
       return 0
    }
+   if _handle_ctrl_space(data) { return 0 }
    if _completion_handle_key(data) { return 0 }
    def key_chord = chord.event_chord(data)
    if INPUT_TRACE {
       print("[editor:key] chord=" + key_chord + " key=" + to_str(int(data.get("key", -1))) + " mods=" + to_str(int(data.get("mods", data.get("mod", 0)))))
    }
-   ui_state = interact.key_seen(ui_state, key_chord)
    def had_prefix = chord.pending(chord_state)
+   if SHOW_LAST_KEY || had_prefix { ui_state = interact.key_seen(ui_state, key_chord) }
    if key_chord == "C-c" && !had_prefix { _copy_selection_or_buffer() }
    def res = chord.command_chord(chord_state, data)
    chord_state = res.get(0)
@@ -5931,6 +5994,7 @@ fn _draw_find_visible(list lines, int scroll, int rows, f64 text_x, f64 y) int {
    def active_idx = find.index(find_state)
    def last = scroll + rows
    mut i = 0
+   while i < rs.len && int(rs.get(i, {}).get("line", -1)) < scroll { i += 1 }
    while i < rs.len {
       def r = rs.get(i)
       def row = int(r.get("line", -1))
@@ -6551,10 +6615,10 @@ fn _command_color(str tag) any {
 
 fn _queue_key_badge(list runs, str label, f64 x, f64 y, any col=C_MUTED) list {
    if label.len <= 0 { return runs }
-   def bw = max(30.0, float(gfx.measure_text_fast(font_small, label).get(0, 0.0)) + 16.0)
-   _fill_rect(x, y, bw, 20.0, gfx.color_alpha(C_CHIP, 0.96))
-   _stroke_rect(x, y, bw, 20.0, gfx.color_alpha(col, 0.55), 1.0)
-   _append_center_run(runs, font_small, label, x + bw * 0.5, y + 5.0, _pack(col))
+   def bw = max(24.0, float(gfx.measure_text_fast(font_small, label).get(0, 0.0)) + 10.0)
+   _fill_rect(x, y, bw, 17.0, gfx.color_alpha(C_CHIP, 0.50))
+   _stroke_rect(x, y, bw, 17.0, gfx.color_alpha(col, 0.34), 1.0)
+   _append_center_run(runs, font_small, label, x + bw * 0.5, y + 3.0, _pack(col))
 }
 
 fn _draw_find_bar(f64 sw, f64 sh) int {
@@ -6582,7 +6646,7 @@ fn _draw_find_bar(f64 sw, f64 sh) int {
       body_runs = _append_text_run(body_runs, _preview_body(repl.len > 0 ? repl : "replace with", w - 300.0), x + 40.0, y + 34.0, field == "replace" ? U_ACCENT : (repl.len > 0 ? U_TEXT : U_DIM))
    }
    small_runs = _append_right_run(small_runs, font_small, find.summary(find_state), x + w - 14.0, y + 16.0, find.error(find_state).len > 0 ? U_WARN : U_ACCENT)
-   _fill_rect(x + 13.0, y + (replace_on ? 58.0 : 39.0), w - 26.0, 1.0, C_LINE)
+   _fill_rect(x + 13.0, y + (replace_on ? 58.0 : 28.0), w - 26.0, 1.0, C_LINE)
    def chips = [
       ["Enter", "next"],
       ["S-Enter", "prev"],
@@ -6600,13 +6664,13 @@ fn _draw_find_bar(f64 sw, f64 sh) int {
       def key_label = to_str(chip.get(0, ""))
       def text = to_str(chip.get(1, ""))
       def hot = str.str_contains(text, "on") || (key_label == "Tab" && replace_on)
-      small_runs = _queue_key_badge(small_runs, key_label, cx, y + (replace_on ? 62.0 : 43.0), hot ? C_ACCENT : C_MUTED)
+      small_runs = _queue_key_badge(small_runs, key_label, cx, y + (replace_on ? 62.0 : 30.0), hot ? C_ACCENT : C_MUTED)
       cx += max(30.0, float(gfx.measure_text_fast(font_small, key_label).get(0, 0.0)) + 16.0) + 5.0
-      small_runs = _append_text_run(small_runs, text, cx, y + (replace_on ? 67.0 : 48.0), hot ? U_ACCENT : U_DIM)
+      small_runs = _append_text_run(small_runs, text, cx, y + (replace_on ? 65.0 : 33.0), hot ? U_ACCENT : U_DIM)
       cx += float(gfx.measure_text_fast(font_small, text).get(0, 0.0)) + 14.0
       i += 1
    }
-   small_runs = _append_right_run(small_runs, font_small, "Esc close", x + w - 14.0, y + (replace_on ? 67.0 : 48.0), U_MUTED)
+   small_runs = _append_right_run(small_runs, font_small, "Esc close", x + w - 14.0, y + (replace_on ? 65.0 : 33.0), U_MUTED)
    _flush_rects()
    if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_body, body_runs) }
    if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, small_runs) }
@@ -6624,66 +6688,58 @@ fn _draw_palette(f64 sw, f64 sh) int {
    def rows = int(rect.get(4, 0))
    palette_state = pal.set_visible(palette_state, rows)
    def start = pal.scroll(palette_state)
-   def visible_matches = pal.visible_matches(palette_state)
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
-   _stroke_rect(x, y, w, h, C_ACCENT, 2.0)
-   _draw_icon("search", x + 16.0, y + 17.0, 20.0, C_ACCENT)
-   def q = pal.query(palette_state)
-   _fill_rect(x + 14.0, y + 48.0, w - 28.0, 1.0, C_LINE)
+   _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
+   _fill_rect(x + 10.0, y + PALETTE_HEADER_H - 1.0, w - 20.0, 1.0, C_LINE)
    mut body_runs = []
    mut small_runs = []
-   body_runs = _append_text_run(body_runs, _preview_body(q.len > 0 ? q : "command", w - 260.0), x + 44.0, y + 17.0, q.len > 0 ? U_TEXT : U_DIM)
+   def q = pal.query(palette_state)
+   def header_y = _row_text_y(font_body, y, PALETTE_HEADER_H)
+   def header_small_y = _row_text_y(font_small, y, PALETTE_HEADER_H)
+   body_runs = _append_text_run(body_runs, _preview_body(q.len > 0 ? q : "command", w - 230.0), x + 14.0, header_y, q.len > 0 ? U_TEXT : U_DIM)
    def pos_label = matches.len > 0 ? to_str(min(matches.len, pal.index(palette_state) + 1)) + "/" + to_str(matches.len) : "0/0"
-   small_runs = _append_right_run(small_runs, font_small, pos_label + "  Enter run  Tab/C-n next  wheel scroll", x + w - 16.0, y + 20.0, U_MUTED)
-   def chips = [["file", "f"], ["edit", "e"], ["search", "s"], ["run", "r"], ["pane", "w"], ["term", "t"], ["lsp", "l"]]
-   mut ci = 0
-   mut chip_x = x + 18.0
-   while ci < chips.len {
-      def chip = chips.get(ci)
-      def label = to_str(chip.get(0, ""))
-      def hot = to_str(chip.get(1, ""))
-      def bw = 18.0 + float(label.len + hot.len) * FONT_SMALL_ADV
-      _fill_rect(chip_x, y + 54.0, bw, 17.0, C_CHIP)
-      _stroke_rect(chip_x, y + 54.0, bw, 17.0, C_LINE, 1.0)
-      small_runs = _append_text_run(small_runs, hot + " " + label, chip_x + 7.0, y + 57.0, U_DIM)
-      chip_x += bw + 6.0
-      ci += 1
-   }
+   small_runs = _append_right_run(small_runs, font_small, pos_label + "  Enter run  Tab next", x + w - 14.0, header_small_y, U_MUTED)
+   def name_x = x + 14.0
+   def key_right = x + w - 16.0
+   def key_w = min(112.0, max(62.0, w * 0.16))
+   def detail_x = x + max(220.0, w * 0.43)
+   def name_w = max(80.0, detail_x - name_x - 12.0)
+   def detail_w = max(70.0, key_right - key_w - detail_x - 12.0)
    mut i = 0
-   while i < rows && i < visible_matches.len {
-      def row = visible_matches.get(i)
+   while i < rows && start + i < matches.len {
+      def row = matches.get(start + i)
       def actual = start + i
-	 def yy = y + PALETTE_HEADER_H + float(i) * PALETTE_ROW_H
-	 def tag = cmd.row_tag(row)
-	 def active = actual == pal.index(palette_state)
-	 def col = _command_color(tag)
-	 def body_y = _row_text_y(font_body, yy, PALETTE_ROW_H)
-	 def small_y = _row_text_y(font_small, yy, PALETTE_ROW_H)
-	 if active { _fill_rect(x + 10.0, yy - 4.0, w - 20.0, PALETTE_ROW_H - 4.0, gfx.color_alpha(C_ACCENT, 0.20)) }
-	 _draw_icon(_command_icon(tag, cmd.row_id(row)), x + 18.0, _center_y(yy, PALETTE_ROW_H, 17.0), 17.0, active ? C_ACCENT : col)
-	 body_runs = _append_text_run(body_runs, _preview_body(to_str(row.get(0, "")), w * 0.36), x + 44.0, body_y, active ? U_TEXT : U_MUTED)
-	 small_runs = _append_text_run(small_runs, _preview_small(to_str(row.get(3, "")), w * 0.30), x + w * 0.44, small_y, active ? U_ACCENT_2 : U_DIM)
-	 small_runs = _queue_key_badge(small_runs, _preview_small(to_str(row.get(2, "")), 120.0), x + w - 146.0, yy + 3.0, active ? C_ACCENT : C_MUTED)
+      def yy = y + PALETTE_HEADER_H + float(i) * PALETTE_ROW_H
+      def tag = cmd.row_tag(row)
+      def active = actual == pal.index(palette_state)
+      def col = _command_color(tag)
+      def body_y = _row_text_y(font_body, yy, PALETTE_ROW_H)
+      def small_y = _row_text_y(font_small, yy, PALETTE_ROW_H)
+      if active { _fill_rect(x + 7.0, yy + 2.0, w - 14.0, PALETTE_ROW_H - 4.0, gfx.color_alpha(C_ACCENT, 0.17)) }
+      elif i > 0 { _fill_rect(x + 12.0, yy, w - 24.0, 1.0, gfx.color_alpha(C_LINE, 0.36)) }
+      _fill_rect(x + 8.0, yy + 7.0, 3.0, 8.0, active ? C_ACCENT : col)
+      body_runs = _append_text_run(body_runs, _preview_body(to_str(row.get(0, "")), name_w), name_x, body_y, active ? U_TEXT : U_MUTED)
+      small_runs = _append_text_run(small_runs, _preview_small(to_str(row.get(3, "")), detail_w), detail_x, small_y, active ? U_ACCENT_2 : U_DIM)
+      small_runs = _append_right_run(small_runs, font_small, _preview_small(to_str(row.get(2, "")), key_w), key_right, small_y, active ? U_ACCENT : U_DIM)
       i += 1
    }
-   if matches.len == 0 { body_runs = _append_text_run(body_runs, "No commands", x + 18.0, y + PALETTE_HEADER_H, U_WARN) }
+   if matches.len == 0 { body_runs = _append_text_run(body_runs, "No commands", x + 14.0, y + PALETTE_HEADER_H + 5.0, U_WARN) }
    if matches.len > rows {
-      def track_x = x + w - 8.0
-      def track_y = y + PALETTE_HEADER_H + 4.0
-      def track_h = float(rows) * PALETTE_ROW_H - 8.0
-      def thumb_h = max(22.0, track_h * float(rows) / float(max(rows, matches.len)))
+      def track_x = x + w - 6.0
+      def track_y = y + PALETTE_HEADER_H + 3.0
+      def track_h = float(rows) * PALETTE_ROW_H - 6.0
+      def thumb_h = max(18.0, track_h * float(rows) / float(max(rows, matches.len)))
       def thumb_y = track_y + (track_h - thumb_h) * float(start) / float(max(1, matches.len - rows))
-      _fill_rect(track_x, track_y, 3.0, track_h, gfx.color_alpha(C_LINE_2, 0.72))
-      _fill_rect(track_x, thumb_y, 3.0, thumb_h, gfx.color_alpha(C_ACCENT, 0.82))
+      _fill_rect(track_x, track_y, 2.0, track_h, gfx.color_alpha(C_LINE_2, 0.62))
+      _fill_rect(track_x, thumb_y, 2.0, thumb_h, gfx.color_alpha(C_ACCENT, 0.76))
    }
    def sel = matches.len > 0 ? matches.get(min(max(pal.index(palette_state), 0), matches.len - 1), []) : []
    if sel.len > 0 {
-      def detail_y = y + h - PALETTE_DETAIL_H - 4.0
-      _fill_rect(x + 10.0, detail_y, w - 20.0, PALETTE_DETAIL_H - 8.0, C_CHIP)
-      _stroke_rect(x + 10.0, detail_y, w - 20.0, PALETTE_DETAIL_H - 8.0, C_LINE, 1.0)
-      def detail_text_y = _row_text_y(font_small, detail_y, PALETTE_DETAIL_H - 8.0)
-      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(1, "")) + "  " + to_str(sel.get(4, "")), w * 0.28), x + 22.0, detail_text_y, U_ACCENT)
-      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(3, "")), w * 0.56), x + w * 0.34, detail_text_y, U_MUTED)
+      def detail_y = y + h - PALETTE_DETAIL_H - 3.0
+      _fill_rect(x + 12.0, detail_y, w - 24.0, 1.0, C_LINE)
+      def detail_text_y = _row_text_y(font_small, detail_y + 2.0, PALETTE_DETAIL_H - 5.0)
+      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(1, "")) + "  " + to_str(sel.get(4, "")), w * 0.32), x + 14.0, detail_text_y, U_ACCENT)
+      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(3, "")), w * 0.58), x + w * 0.36, detail_text_y, U_MUTED)
    }
    _flush_rects()
    if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_body, body_runs) }
@@ -6768,29 +6824,24 @@ fn _which_key_detail(str prefix, str head) str {
 fn _draw_which_key(f64 sw, f64 sh) int {
    if pal.is_open(palette_state) || prompt.rename_is_open(rename_state) { return 0 }
    if !chord.pending(chord_state) {
+      if !SHOW_LAST_KEY { return 0 }
       def seen = interact.show_key(ui_state)
       if seen.len <= 0 { return 0 }
-      def w0 = min(460.0, max(190.0, float(seen.len) * FONT_BODY_ADV + 82.0))
-      def x0 = sw - w0 - 18.0
-      def y0 = sh - 92.0
-      _fill_rect(x0, y0, w0, 50.0, gfx.color_alpha(C_RAIL, 0.95))
-      _stroke_rect(x0, y0, w0, 50.0, C_LINE_2, 1.0)
-      _draw_icon("keyboard", x0 + 13.0, y0 + 13.0, 20.0, C_ACCENT)
+      def w0 = min(320.0, max(130.0, float(seen.len) * FONT_SMALL_ADV + 64.0))
+      def x0 = sw - w0 - 10.0
+      def y0 = sh - 42.0
+      _fill_rect(x0, y0, w0, 28.0, gfx.color_alpha(C_RAIL, 0.88))
+      _stroke_rect(x0, y0, w0, 28.0, C_LINE_2, 1.0)
       mut kruns = []
-      kruns = _append_text_run(kruns, _preview_body(seen, w0 - 92.0), x0 + 42.0, y0 + 11.0, U_TEXT)
-      kruns = _append_right_run(kruns, font_small, "last key", x0 + w0 - 14.0, y0 + 16.0, U_DIM)
+      kruns = _append_text_run(kruns, _preview_small(seen, w0 - 66.0), x0 + 10.0, _row_text_y(font_small, y0, 28.0), U_TEXT)
+      kruns = _append_right_run(kruns, font_small, "key", x0 + w0 - 10.0, _row_text_y(font_small, y0, 28.0), U_DIM)
       _flush_rects()
-      if kruns.len > 0 { gfx.draw_text_runs_flat_colors(font_body, kruns) }
+      if kruns.len > 0 { gfx.draw_text_runs_flat_colors(font_small, kruns) }
       return 0
    }
-   def rows = pal.which_key(chord.describe(chord_state))
-   if rows.len <= 0 { return 0 }
    def prefix = chord.describe(chord_state)
-   if prefix != which_key_prefix {
-      which_key_prefix = prefix
-      which_key_scroll = 0
-      which_key_scroll_accum = 0.0
-   }
+   def rows = _which_key_rows(prefix)
+   if rows.len <= 0 { return 0 }
    def rect = _which_key_rect(sw, sh, rows.len)
    def x = float(rect.get(0, 0.0))
    def y = float(rect.get(1, 0.0))
@@ -6800,41 +6851,35 @@ fn _draw_which_key(f64 sw, f64 sh) int {
    def visible = int(rect.get(5, 1))
    which_key_scroll = _clamp_which_key_scroll(rows.len, visible)
    def start = which_key_scroll
-   _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.96))
-   _stroke_rect(x, y, w, h, C_ACCENT, 2.0)
-   _draw_icon("keyboard", x + 16.0, y + 16.0, 22.0, C_ACCENT)
-   _fill_rect(x + 16.0, y + 52.0, w - 32.0, 1.0, C_LINE)
+   _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.94))
+   _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
+   _fill_rect(x + 10.0, y + 34.0, w - 20.0, 1.0, C_LINE)
    mut body_runs = []
    mut small_runs = []
-   body_runs = _append_text_run(body_runs, "prefix " + prefix, x + 48.0, y + 15.0, U_TEXT)
-   small_runs = _append_text_run(small_runs, "keys, groups, categories, and action detail", x + 48.0, y + 36.0, U_DIM)
+   body_runs = _append_text_run(body_runs, prefix, x + 12.0, y + 8.0, U_TEXT)
    def key_pos = rows.len > 0 ? to_str(start + 1) + "-" + to_str(min(rows.len, start + visible)) + "/" + to_str(rows.len) : "0/0"
-   small_runs = _append_right_run(small_runs, font_small, key_pos + "  wheel scroll  Esc/C-g close", x + w - 14.0, y + 20.0, U_MUTED)
-   def col_w = (w - 32.0) / float(cols)
+   small_runs = _append_right_run(small_runs, font_small, key_pos + "  Esc", x + w - 12.0, y + 10.0, U_MUTED)
+   def col_w = (w - 20.0) / float(cols)
    mut i = 0
    while i < visible {
       def row = rows.get(start + i, ["", ""])
-      def cx = x + 16.0 + float(i % cols) * col_w
-      def cy = y + 66.0 + float(i / cols) * WHICH_KEY_ROW_H
+      def cx = x + 10.0 + float(i % cols) * col_w
+      def cy = y + 42.0 + float(i / cols) * WHICH_KEY_ROW_H
       def head = to_str(row.get(0, ""))
-      def tag = _which_key_tag(prefix, head)
-      def col = _command_color(tag)
-      def key_label = _preview_small(head, min(116.0, col_w * 0.30))
-      _draw_icon(_command_icon(tag, ""), cx + 4.0, cy + 8.0, 14.0, col)
-      small_runs = _queue_key_badge(small_runs, key_label, cx + 22.0, cy + 2.0, col)
-      body_runs = _append_text_run(body_runs, _preview_small(to_str(row.get(1, "")), col_w - 172.0), cx + 108.0, cy + 2.0, U_TEXT)
-      small_runs = _append_text_run(small_runs, _preview_small(tag, 62.0), cx + 108.0, cy + 19.0, _pack(col))
-      small_runs = _append_text_run(small_runs, _preview_small(_which_key_detail(prefix, head), col_w - 188.0), cx + 160.0, cy + 19.0, U_DIM)
+      def key_label = _preview_small(head, min(62.0, col_w * 0.22))
+      small_runs = _append_text_run(small_runs, key_label, cx + 2.0, cy + 3.0, U_ACCENT)
+      body_runs = _append_text_run(body_runs, _preview_small(to_str(row.get(1, "")), col_w - 80.0), cx + 62.0, cy + 1.0, U_TEXT)
+      small_runs = _append_text_run(small_runs, _preview_small(to_str(row.get(3, "")), col_w - 80.0), cx + 62.0, cy + 14.0, U_DIM)
       i += 1
    }
    if rows.len > visible {
-      def track_x = x + w - 8.0
-      def track_y = y + 66.0
-      def track_h = h - 78.0
-      def thumb_h = max(20.0, track_h * float(visible) / float(max(visible, rows.len)))
+      def track_x = x + w - 6.0
+      def track_y = y + 42.0
+      def track_h = h - 50.0
+      def thumb_h = max(18.0, track_h * float(visible) / float(max(visible, rows.len)))
       def thumb_y = track_y + (track_h - thumb_h) * float(start) / float(max(1, rows.len - visible))
-      _fill_rect(track_x, track_y, 3.0, track_h, gfx.color_alpha(C_LINE_2, 0.72))
-      _fill_rect(track_x, thumb_y, 3.0, thumb_h, gfx.color_alpha(C_ACCENT, 0.78))
+      _fill_rect(track_x, track_y, 2.0, track_h, gfx.color_alpha(C_LINE_2, 0.62))
+      _fill_rect(track_x, thumb_y, 2.0, thumb_h, gfx.color_alpha(C_ACCENT, 0.74))
    }
    _flush_rects()
    if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_body, body_runs) }

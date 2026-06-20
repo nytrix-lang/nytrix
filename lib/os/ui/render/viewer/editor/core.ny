@@ -14,7 +14,8 @@ use std.os.path as ospath
 
 fn split_lines(str text) list {
    "Splits text into editor rows after normalizing CRLF."
-   str.split(str.replace(text, "\r\n", "\n"), "\n")
+   if str.find(text, "\r") < 0 { return str.split(text, "\n") }
+   str.split(str.replace(str.replace(text, "\r\n", "\n"), "\r", "\n"), "\n")
 }
 
 fn join_lines(list lines) str {
@@ -66,10 +67,12 @@ fn current_lines(dict st) list {
 
 fn set_lines(dict st, list lines) dict {
    mut bs = st.get("buffers", [])
-   mut b = current_buffer(st)
+   def idx = int(st.get("active", 0))
+   if idx < 0 || idx >= bs.len { return st }
+   mut b = bs.get(idx, current_buffer(st))
    b["lines"] = lines.len > 0 ? lines : [""]
    b["dirty"] = true
-   bs[int(st.get("active", 0))] = b
+   bs[idx] = b
    st["buffers"] = bs
    st
 }

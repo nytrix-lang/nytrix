@@ -76,7 +76,6 @@ typedef struct nyGcState {
   /* Tenured space */
   uint8_t *tenured_start;
   uint8_t *tenured_limit;
-  uint8_t *tenured_scan;
   uint8_t *tenured_free;
   size_t tenured_capacity;
 
