@@ -32,11 +32,12 @@ statements.
 | Item | Behavior |
 | --- | --- |
 | Line comment | `;` starts a comment until newline. |
+| Multiline comment | `;MARKER` starts a comment block until a matching `MARKER;` is encountered. |
 | Top-level statement | Executes when the file is run as a script. |
 | Declaration | Defines functions, modules, layouts, externs, and compile-time forms. |
 | Function docstring | A leading string literal in a function body is the function docstring. |
 
-There are no semicolon statement terminators. Semicolon means comment.
+There are no semicolon statement terminators. Semicolon means comment. Single-line comments start with `;`. Multiline comments start with `;MARKER` (where `MARKER` is a valid identifier immediately following the semicolon) and extend until a matching `MARKER;` is encountered.
 
 ## Core model
 

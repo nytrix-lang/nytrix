@@ -11,8 +11,8 @@ use std.os.ui.render.matrix as rmat
 
 def RECT_STRIDE = 20
 def TEX_STRIDE = 52
-def RECT_INITIAL_CAP = 8192
-def RECT_SOFT_FLUSH = 8192
+def RECT_INITIAL_CAP = 65536
+def RECT_SOFT_FLUSH = 32768
 def VERTEX_STRIDE = 64
 def DEG_TO_RAD = 0.017453292519943295
 mut _rects = 0
@@ -21,6 +21,9 @@ mut _count = 0
 mut _tex = 0
 mut _tex_cap = 0
 mut _tex_count = 0
+mut _last_rect_valid = false
+mut _last_rect_x, _last_rect_y, _last_rect_w, _last_rect_h = 0.0, 0.0, 0.0, 0.0
+mut _last_rect_color = 0
 mut _mesh_t = rmat.mat4_identity()
 mut _mesh_r = rmat.mat4_identity()
 mut _mesh_s = rmat.mat4_identity()
@@ -32,6 +35,9 @@ fn reset() any {
    "Drops queued rectangles without releasing the backing buffer."
    _count = 0
    _tex_count = 0
+   _last_rect_valid = false
+   _reserve(RECT_INITIAL_CAP)
+   _reserve_tex(RECT_INITIAL_CAP)
 }
 
 fn shutdown() any {
@@ -41,6 +47,7 @@ fn shutdown() any {
    if _tex { free(_tex) }
    _rects, _cap, _count = 0, 0, 0
    _tex, _tex_cap, _tex_count = 0, 0, 0
+   _last_rect_valid = false
 }
 
 fn queued_count() int {
@@ -136,18 +143,30 @@ fn flush() int {
       _count = 0
       gfx.draw_rects_fast_ptr(_rects, n, RECT_STRIDE)
    }
+   _last_rect_valid = false
    n + _flush_tex()
 }
 
 fn queue_rect(f64 x, f64 y, f64 w, f64 h, int color) bool {
    "Queues one packed solid rectangle."
    if w <= 0.0 || h <= 0.0 { return true }
+   if _last_rect_valid && color == _last_rect_color &&
+   abs(float(x) - _last_rect_x) <= 0.000001 &&
+   abs(float(y) - _last_rect_y) <= 0.000001 &&
+   abs(float(w) - _last_rect_w) <= 0.000001 &&
+   abs(float(h) - _last_rect_h) <= 0.000001{
+      return true
+   }
    if !_reserve(_count + 1) {
       gfx.draw_rect_fast(x, y, w, h, color)
       return true
    }
    _write(_count, x, y, w, h, color)
    _count += 1
+   _last_rect_valid = true
+   _last_rect_x, _last_rect_y = float(x), float(y)
+   _last_rect_w, _last_rect_h = float(w), float(h)
+   _last_rect_color = int(color)
    if _count >= RECT_SOFT_FLUSH { flush() }
    true
 }

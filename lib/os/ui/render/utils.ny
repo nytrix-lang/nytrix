@@ -25,7 +25,8 @@ comptime table GltfAnimUvSlotGroup {
    "baseColorTexture" -> "base"
    "normalTexture", "clearcoatNormalTexture" -> "normal"
    "metallicRoughnessTexture", "transmissionTexture", "sheenRoughnessTexture",
-   "iridescenceThicknessTexture", "anisotropyTexture", "clearcoatRoughnessTexture" -> "mr"
+   "iridescenceThicknessTexture", "anisotropyTexture", "clearcoatRoughnessTexture",
+   "diffuseTransmissionTexture" -> "mr"
    "occlusionTexture", "specularTexture", "clearcoatTexture", "thicknessTexture",
    "iridescenceTexture" -> "occlusion"
    "emissiveTexture", "specularColorTexture", "sheenColorTexture",
@@ -41,6 +42,7 @@ comptime table GltfAnimPointerKind {
    "uvOffset" -> 6
    "uvScale" -> 7
    "uvRotation" -> 8
+   "uvTexCoord" -> 9
 }
 
 layout VkrMaterialSlab pack(4){
@@ -139,10 +141,11 @@ fn pack_bsdf3_u32(dict minfo) int {
    mut att_b = clamp01(float(att.get(2, 1.0)))
    mut d_u8 = 255
    def spec_hdr_scale = float(minfo.get("specular_hdr_scale", 1.0))
-   def raw_d = float(minfo.get("attenuation_distance", 0.0))
+   def has_att_dist = minfo.contains("attenuation_distance")
+   def raw_d = has_att_dist ? float(minfo.get("attenuation_distance", 0.0)) : -1.0
    def use_iri_pack =
    spec_hdr_scale <= 1.001 &&
-   raw_d <= 0.0 &&
+   !has_att_dist &&
    float(minfo.get("iridescence_factor", 0.0)) > 0.0 &&
    abs(att_r - 1.0) <= 0.000001 &&
    abs(att_g - 1.0) <= 0.000001 &&
@@ -165,8 +168,9 @@ fn pack_bsdf3_u32(dict minfo) int {
       def clipped = min(spec_hdr_scale, 16.0)
       d_u8 = int((clamp01((clipped - 1.0) / 15.0) * 255.0 + 0.5)) & 255
    } else {
-      if raw_d <= 0.0 { d_u8 = 255 } else {
-         d_u8 = int((sqrt(clamp01(raw_d / 10.0)) * 253.0 + 0.5)) & 255
+      if !has_att_dist { d_u8 = 255 } else {
+         def finite_d = raw_d <= 0.0 ? 1.0 : raw_d
+         d_u8 = int((clamp01(finite_d / 10.0) * 253.0 + 0.5)) & 255
          if d_u8 < 1 { d_u8 = 1 }
          if d_u8 > 253 { d_u8 = 253 }
       }
@@ -288,11 +292,20 @@ fn _gltf_anim_pack_uv_rot8(f64 v) int {
 }
 
 fn _gltf_anim_unpack_uv_xf(int word0, int word1) dict {
+   def uv_set = (int(word1) >> 30) & 1
+   def xf_bits = int(word1) & 0x3fffffff
+   ;; Packed identity is [0, 0] (or [0, uvSetBit]).  Do not decode that as
+   ;; offset=(-8,-8), rotation=-PI; KHR_animation_pointer updates often start
+   ;; from identity and then override only offset/scale/rotation/texCoord.
+   if int(word0) == 0 && xf_bits == 0 {
+      return {"offset": [0.0, 0.0], "scale": [1.0, 1.0], "rotation": 0.0, "uv_set": uv_set}
+   }
+   def rot_bits = (int(word1) >> 22) & 255
    return {
       "offset": [_gltf_anim_decode_uv_offset16(word0), _gltf_anim_decode_uv_offset16(int(word0) >> 16)],
       "scale": [_gltf_anim_decode_uv_scale11(word1), _gltf_anim_decode_uv_scale11(int(word1) >> 11)],
-      "rotation": _gltf_anim_decode_uv_rot8(int(word1) >> 22),
-      "uv_set": (int(word1) >> 30) & 1
+      "rotation": rot_bits == 128 ? 0.0 : _gltf_anim_decode_uv_rot8(rot_bits),
+      "uv_set": uv_set
    }
 }
 
@@ -301,8 +314,19 @@ fn _gltf_anim_pack_uv_xf_state(dict st) list {
    def scl = st.get("scale", [1.0, 1.0])
    def rot = float(st.get("rotation", 0.0))
    def uv_set = int(st.get("uv_set", 0))
-   def word0 = _gltf_anim_pack_uv_offset16(off.get(0, 0.0)) | (_gltf_anim_pack_uv_offset16(off.get(1, 0.0)) << 16)
-   mut word1 = _gltf_anim_pack_uv_scale11(scl.get(0, 1.0)) | (_gltf_anim_pack_uv_scale11(scl.get(1, 1.0)) << 11)
+   def off_x = float(off.get(0, 0.0))
+   def off_y = float(off.get(1, 0.0))
+   def scl_x = float(scl.get(0, 1.0))
+   def scl_y = float(scl.get(1, 1.0))
+   def identity_xf =
+      abs(off_x) <= 0.000001 && abs(off_y) <= 0.000001 &&
+      abs(scl_x - 1.0) <= 0.000001 && abs(scl_y - 1.0) <= 0.000001 &&
+      abs(rot) <= 0.000001
+   if identity_xf {
+      return [0, uv_set == 1 ? 0x40000000 : 0]
+   }
+   def word0 = _gltf_anim_pack_uv_offset16(off_x) | (_gltf_anim_pack_uv_offset16(off_y) << 16)
+   mut word1 = _gltf_anim_pack_uv_scale11(scl_x) | (_gltf_anim_pack_uv_scale11(scl_y) << 11)
    word1 = word1 | (_gltf_anim_pack_uv_rot8(rot) << 22)
    if uv_set == 1 { word1 = word1 | 0x40000000 }
    [word0, word1]
@@ -310,10 +334,110 @@ fn _gltf_anim_pack_uv_xf_state(dict st) list {
 
 fn _gltf_anim_uv_slot_group(str slot) str { comptime match GltfAnimUvSlotGroup(slot, "") }
 
+fn _gltf_anim_ext2_kind_for_slot(str slot) int {
+   if slot == "transmissionTexture" { return 1 }
+   if slot == "sheenRoughnessTexture" { return 2 }
+   if slot == "iridescenceThicknessTexture" { return 3 }
+   if slot == "anisotropyTexture" { return 4 }
+   if slot == "clearcoatRoughnessTexture" { return 5 }
+   if slot == "diffuseTransmissionTexture" { return 6 }
+   0
+}
+
+fn _gltf_anim_uv_slot_group_for_material(str slot, any out, any mesh) str {
+   def grp = _gltf_anim_uv_slot_group(slot)
+   if slot == "transmissionTexture" || slot == "diffuseTransmissionTexture" {
+      mut euv = int(out.get("emissive_uv_set", 0))
+      if is_dict(mesh) { euv = int(mesh.get("emissive_uv_set", euv)) }
+      if slot == "transmissionTexture" && band(euv, 2) != 0 { return "emissive" }
+      if slot == "diffuseTransmissionTexture" && band(euv, 4) != 0 { return "emissive" }
+   }
+   grp
+}
+
+fn _gltf_anim_scalar0(any val, f64 fallback=0.0) f64 {
+   "Reads scalar animation values that may arrive as a scalar or a one-element list."
+   if is_list(val) {
+      if val.len <= 0 { return fallback }
+      return float(val.get(0, fallback))
+   }
+   if is_dict(val) { return fallback }
+   float(val)
+}
+
+fn _gltf_anim_sync_uv_set_lane(any out, any mesh, any slab, str slot, str grp, int xf1) bool {
+   "Mirrors animated texCoord into the packed texture-word lanes used by each map."
+   def uv_one = band(int(xf1), 0x40000000) != 0 ? 1 : 0
+   if grp == "base" {
+      out["base_uv_set"] = uv_one
+      if is_dict(mesh) { mesh["base_uv_set"] = uv_one }
+      return true
+   }
+   if grp == "normal" {
+      mut cur = int(out.get("normal_tex_word", 0x80000000))
+      if is_dict(mesh) { cur = int(mesh.get("normal_tex_word", cur)) }
+      def next = uv_one != 0 ? bor(cur, 0x10000) : band(cur, 0xfffeffff)
+      out["normal_tex_word"] = next
+      out["normal_uv_set"] = uv_one
+      if is_dict(mesh) {
+         mesh["normal_tex_word"] = next
+         mesh["normal_uv_set"] = uv_one
+      }
+      if slab { store32(slab, next, 100) }
+      return true
+   }
+   if grp == "mr" {
+      if slot == "metallicRoughnessTexture" || slot == "" {
+         mut cur = int(out.get("material_u32", 0))
+         if is_dict(mesh) { cur = int(mesh.get("material_u32", cur)) }
+         def next = uv_one != 0 ? bor(cur, 0x80000000) : band(cur, 0x7fffffff)
+         out["material_u32"] = next
+         out["mr_uv_set"] = uv_one
+         out["metallic_roughness_uv_set"] = uv_one
+         if is_dict(mesh) {
+            mesh["material_u32"] = next
+            mesh["mr_uv_set"] = uv_one
+            mesh["metallic_roughness_uv_set"] = uv_one
+         }
+         if slab { store32(slab, next, 4) }
+      }
+      def want_ext_kind = _gltf_anim_ext2_kind_for_slot(slot)
+      if want_ext_kind > 0 {
+         mut ext = int(out.get("ext2_tex_word", 0x80000000))
+         if is_dict(mesh) { ext = int(mesh.get("ext2_tex_word", ext)) }
+         def ext_live = band(ext, 0x80000000) == 0
+         def ext_kind = band(bshr(ext, 24), 0x0f)
+         if ext_live && ext_kind == want_ext_kind {
+            def next_ext = uv_one != 0 ? bor(ext, 0x10000) : band(ext, 0xfffeffff)
+            out["ext2_tex_word"] = next_ext
+            if is_dict(mesh) { mesh["ext2_tex_word"] = next_ext }
+            if slab { store32(slab, next_ext, 152) }
+         }
+      }
+      return true
+   }
+   if grp == "occlusion" {
+      out["occlusion_uv_set"] = uv_one
+      if is_dict(mesh) { mesh["occlusion_uv_set"] = uv_one }
+      if slab { store32(slab, uv_one, 32) }
+      return true
+   }
+   if grp == "emissive" {
+      mut cur = int(out.get("emissive_uv_set", 0))
+      if is_dict(mesh) { cur = int(mesh.get("emissive_uv_set", cur)) }
+      def next = bor(band(cur, 0xfffffffe), uv_one)
+      out["emissive_uv_set"] = next
+      if is_dict(mesh) { mesh["emissive_uv_set"] = next }
+      if slab { store32(slab, next, 16) }
+      return true
+   }
+   false
+}
+
 fn gltf_anim_apply_uv_pointer_override(any out, any mesh, any slab, str slot, str kind, any val) list {
    "Applies KHR_animation_pointer UV transform overrides to a CPU material slab."
-   def grp = _gltf_anim_uv_slot_group(slot)
-   if grp == "" { return [out, mesh] }
+   def grp = _gltf_anim_uv_slot_group_for_material(slot, out, mesh)
+   if grp == "" { return [out, mesh, false] }
    def kind_code = comptime match GltfAnimPointerKind(kind, 0)
    def k0 = grp + "_uv_xf0"
    def k1 = grp + "_uv_xf1"
@@ -323,12 +447,16 @@ fn gltf_anim_apply_uv_pointer_override(any out, any mesh, any slab, str slot, st
    if is_dict(mesh) { mesh_cur0, mesh_cur1 = int(mesh.get(k0, 0)), int(mesh.get(k1, 0)) }
    def cur0, cur1 = int(out.get(k0, mesh_cur0)), int(out.get(k1, mesh_cur1))
    mut st = _gltf_anim_unpack_uv_xf(cur0, cur1)
-   if kind_code == 6 && is_list(val) && val.len >= 2 { st["offset"] = [float(val.get(0, 0.0)), float(val.get(1, 0.0))] } elif kind_code == 7 && is_list(val) && val.len >= 2 {
+   if kind_code == 6 && is_list(val) && val.len >= 2 {
+      st["offset"] = [float(val.get(0, 0.0)), float(val.get(1, 0.0))]
+   } elif kind_code == 7 && is_list(val) && val.len >= 2 {
       st["scale"] = [float(val.get(0, 1.0)), float(val.get(1, 1.0))]
-   } elif kind_code == 8 && is_list(val) && val.len > 0 {
-      st["rotation"] = float(val.get(0, 0.0))
+   } elif kind_code == 8 {
+      st["rotation"] = _gltf_anim_scalar0(val, 0.0)
+   } elif kind_code == 9 {
+      st["uv_set"] = int(_gltf_anim_scalar0(val, 0.0)) > 0 ? 1 : 0
    } else {
-      return [out, mesh]
+      return [out, mesh, false]
    }
    def words = _gltf_anim_pack_uv_xf_state(st)
    def next0 = int(words.get(0, cur0))
@@ -343,7 +471,8 @@ fn gltf_anim_apply_uv_pointer_override(any out, any mesh, any slab, str slot, st
       store32(slab, next0, slab_off0)
       store32(slab, next1, slab_off1)
    }
-   [out, mesh]
+   _gltf_anim_sync_uv_set_lane(out, mesh, slab, slot, grp, next1)
+   [out, mesh, true]
 }
 
 fn gltf_anim_apply_material_pointer_overrides(any part, any ptr_overrides) any {
@@ -421,17 +550,13 @@ fn gltf_anim_apply_material_pointer_overrides(any part, any ptr_overrides) any {
                mesh["alpha_u32"] = next_alpha
                mesh_changed = true
             }
-         } elif kind_code >= 6 && kind_code <= 8 && is_list(val) {
+         } elif kind_code >= 6 && kind_code <= 9 {
             def uv_res = gltf_anim_apply_uv_pointer_override(out, mesh, slab, to_str(pr.get("slot", "")), kind, val)
-            def next_out = uv_res.get(0, out)
-            def next_mesh = uv_res.get(1, mesh)
-            if to_int(next_out) != to_int(out) {
-               out = next_out
+            if bool(uv_res.get(2, false)) {
+               out = uv_res.get(0, out)
+               mesh = uv_res.get(1, mesh)
                changed = true
-            }
-            if to_int(next_mesh) != to_int(mesh) {
-               mesh = next_mesh
-               mesh_changed = true
+               if is_dict(mesh) { mesh_changed = true }
             }
          }
       }
@@ -481,7 +606,31 @@ fn gltf_sync_drawable_part_from_raw(any part, any raw_part, bool update_part_tex
    }
    if raw_part.contains("node_idx") { part["node_idx"] = int(raw_part.get("node_idx", part.get("node_idx", -1))) }
    if raw_part.contains("visible") { part["visible"] = raw_part.get("visible", part.get("visible", true)) ? true : false }
-   if update_part_material && raw_part.contains("material_slab") { part["material_slab"] = raw_part.get("material_slab", 0) }
+   if update_part_material {
+      if raw_part.contains("material_slab") { part["material_slab"] = raw_part.get("material_slab", 0) }
+      ;; Morph/skinning rebuilds can allocate fresh material records and UV
+      ;; transform words.  Keep every packed material lane in sync with the raw
+      ;; part, otherwise morphed samples keep the old texture/BSDF state even
+      ;; when their vertices update correctly.
+      def mat_keys = [
+         "base_color_u32", "material_u32", "emissive_u32", "emissive_tex_id", "emissive_uv_set",
+         "alpha_u32", "occlusion", "occlusion_tex_id", "occlusion_uv_set", "normal_tex_id", "normal_tex_word", "normal_uv_set",
+         "bsdf0_u32", "bsdf1_u32", "bsdf2_u32", "bsdf3_u32", "bsdf4_u32", "bsdf5_u32", "ext2_tex_word",
+         "base_uv_xf0", "base_uv_xf1", "normal_uv_xf0", "normal_uv_xf1", "mr_uv_xf0", "mr_uv_xf1",
+         "occlusion_uv_xf0", "occlusion_uv_xf1", "emissive_uv_xf0", "emissive_uv_xf1", "vc_mode", "double_sided"
+      ]
+      mut k_i = 0
+      while k_i < mat_keys.len {
+         def k = to_str(mat_keys[k_i])
+         if raw_part.contains(k) {
+            def v = raw_part.get(k)
+            part[k] = v
+            mesh[k] = v
+         }
+         k_i += 1
+      }
+      part["mesh"] = mesh
+   }
    part
 }
 

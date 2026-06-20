@@ -195,8 +195,7 @@ int64_t rt_malloc(int64_t size) {
     return 0;
 
   size_t fill_size = (slot >= 0) ? g_pool_sizes[slot] : total;
-  for (size_t i = 0; i < fill_size; i++)
-    ((unsigned char *)p)[i] = 0;
+  memset(p, 0, fill_size);
 
   *(uint64_t *)p = NY_MAGIC1;
   *(uint64_t *)((char *)p + 8) = (uint64_t)((body << 1) | 1);
@@ -251,6 +250,7 @@ int64_t rt_malloc_raw(int64_t size) {
   void *p = malloc((size_t)n);
   if (!p)
     return 0;
+  rt_heap_ptr_neg_cache_store((uintptr_t)p);
   return (int64_t)(uintptr_t)p;
 }
 
@@ -305,6 +305,7 @@ int64_t rt_free(int64_t ptr) {
 int64_t rt_free_raw(int64_t ptr) {
   if (!ptr)
     return 1;
+  rt_heap_ptr_cache_forget((uintptr_t)ptr);
   free((void *)(uintptr_t)ptr);
   return 1;
 }

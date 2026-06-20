@@ -210,6 +210,7 @@ mut _active_scene_light_count = 0
 mut _active_scene_have_lights = false
 mut _active_scene_gpu_ready = false
 mut _active_scene_force_cpu_anim = false
+mut _active_scene_skip_part_cull = false
 mut _active_scene_cpu_optical_start = -1
 mut _vk_cam_pos_valid = false
 mut _vk_cam_pos_x = 0.0
@@ -345,7 +346,26 @@ fn _font_prime_extended_default() bool {
    if _backend == BACKEND_GL {
       return ui_profile.env_truthy_cached("NY_GL_FONT_EAGER_EXTENDED")
    }
-   true
+   ui_profile.env_truthy_cached("NY_VK_FONT_EAGER_EXTENDED")
+}
+
+fn _font_primary_atlas_size() int {
+   ui_profile.env_int_cached("NY_FONT_ATLAS_SIZE", 1024, 512, 4096)
+}
+
+fn _font_fallback_atlas_size() int {
+   ui_profile.env_int_cached("NY_FONT_FALLBACK_ATLAS_SIZE", 2048, 512, 4096)
+}
+
+fn _font_keep_bitmap_data() bool {
+   if ui_profile.env_truthy_cached("NY_FONT_KEEP_BITMAPS") { return true }
+   if ui_profile.env_truthy_cached("NY_FONT_DROP_BITMAPS") { return false }
+   _backend == BACKEND_GL
+}
+
+fn _texture_cache_write_max_bytes() int {
+   def mb = ui_profile.env_int_cached("NY_TEX_CACHE_WRITE_MAX_MB", 64, 0, 4096)
+   mb <= 0 ? 0 : mb * 1024 * 1024
 }
 
 fn _deep_should_log_mesh() bool {
@@ -468,7 +488,8 @@ fn _anim_apply_part_overrides(
          ;; string node keys, then always write the sampled matrix so nested
          ;; parent/child node transforms cannot be skipped by stale identity
          ;; or dictionary-key coercion checks.
-         def next_model = anim_mats.get(node_idx, anim_mats.get(to_str(node_idx), 0))
+         def world_list = anim_mats.get("__world_list", 0)
+         def next_model = (is_list(world_list) && node_idx >= 0 && node_idx < world_list.len) ? world_list.get(node_idx, 0) : anim_mats.get(node_idx, anim_mats.get(to_str(node_idx), 0))
          if is_list(next_model) {
             part["model"] = next_model
             part_changed = true
@@ -617,6 +638,195 @@ fn _anim_parts_keep_gltf_node_identity(any parts, any raw_parts) bool {
    matched == parts.len
 }
 
+fn _anim_time_same(any a, any b) bool {
+   abs(float(a) - float(b)) <= 0.0000005
+}
+
+fn _anim_gpu_rec_mat_idx(any rec) int {
+   if !is_list(rec) { return -1 }
+   if rec.len > 47 { return int(rec.get(47, -1)) }
+   def rec_mesh = rec.get(40, 0)
+   is_dict(rec_mesh) ? int(rec_mesh.get("mat_idx", rec_mesh.get("material_idx", -1))) : -1
+}
+
+fn _anim_part_matches_gpu_rec(any part, any rec) bool {
+   if !is_dict(part) || !is_list(rec) { return false }
+   if int(part.get("node_idx", -1)) != int(rec.get(11, -1)) { return false }
+   if int(part.get("mat_idx", part.get("material_idx", -1))) != _anim_gpu_rec_mat_idx(rec) { return false }
+   if int(part.get("tex_id", -1)) != int(rec.get(0, -1)) { return false }
+   def pv = int(part.get("vcnt", -1))
+   def pi = int(part.get("icnt", -1))
+   if pv >= 0 && int(rec.get(6, -1)) >= 0 && pv != int(rec.get(6, -1)) { return false }
+   if pi >= 0 && int(rec.get(7, -1)) >= 0 && pi != int(rec.get(7, -1)) { return false }
+   true
+}
+
+fn _anim_part_node_matches_gpu_rec(any part, any rec) bool {
+   is_dict(part) && is_list(rec) && int(part.get("node_idx", -1)) == int(rec.get(11, -2))
+}
+
+fn _anim_part_gpu_key(any part) str {
+   if !is_dict(part) { return "" }
+   to_str(int(part.get("node_idx", -1))) + ":" +
+   to_str(int(part.get("mat_idx", part.get("material_idx", -1)))) + ":" +
+   to_str(int(part.get("tex_id", -1))) + ":" +
+   to_str(int(part.get("vcnt", -1))) + ":" +
+   to_str(int(part.get("icnt", -1)))
+}
+
+fn _anim_rec_gpu_key(any rec) str {
+   if !is_list(rec) { return "" }
+   to_str(int(rec.get(11, -1))) + ":" +
+   to_str(_anim_gpu_rec_mat_idx(rec)) + ":" +
+   to_str(int(rec.get(0, -1))) + ":" +
+   to_str(int(rec.get(6, -1))) + ":" +
+   to_str(int(rec.get(7, -1)))
+}
+
+fn _anim_build_part_gpu_maps(any parts) list {
+   mut exact = dict(16)
+   mut node = dict(16)
+   if !is_list(parts) { return [exact, node] }
+   mut i = 0
+   def n = parts.len
+   while i < n {
+      def p = parts.get(i, 0)
+      if is_dict(p) {
+         def k = _anim_part_gpu_key(p)
+         if k.len > 0 && !exact.contains(k) { exact[k] = i }
+         def nk = to_str(int(p.get("node_idx", -1)))
+         if nk != "-1" && !node.contains(nk) { node[nk] = i }
+      }
+      i += 1
+   }
+   [exact, node]
+}
+
+fn _anim_find_part_index_for_gpu_rec_fast(any parts, dict used, dict exact, dict node, any rec, int fallback_i) int {
+   def k = _anim_rec_gpu_key(rec)
+   mut idx = int(exact.get(k, -1))
+   if idx >= 0 && idx < parts.len && !used.get(idx, false) { return idx }
+   def nk = is_list(rec) ? to_str(int(rec.get(11, -2))) : ""
+   idx = int(node.get(nk, -1))
+   if idx >= 0 && idx < parts.len && !used.get(idx, false) { return idx }
+   _anim_find_part_index_for_gpu_rec(parts, used, rec, fallback_i)
+}
+
+fn _anim_find_part_index_for_gpu_rec(any parts, dict used, any rec, int fallback_i) int {
+   if !is_list(parts) || !is_list(rec) { return -1 }
+   mut i = 0
+   while i < parts.len {
+      if !used.get(i, false) && _anim_part_matches_gpu_rec(parts.get(i, 0), rec) { return i }
+      i += 1
+   }
+   i = 0
+   while i < parts.len {
+      if !used.get(i, false) && _anim_part_node_matches_gpu_rec(parts.get(i, 0), rec) { return i }
+      i += 1
+   }
+   if fallback_i >= 0 && fallback_i < parts.len && !used.get(fallback_i, false) { return fallback_i }
+   -1
+}
+
+fn _anim_sync_gpu_rec_from_part(any rec, any part) any {
+   if !is_list(rec) || !is_dict(part) { return rec }
+   rec[10] = part.get("model", rec.get(10, 0))
+   rec[37] = part.get("visible", true) ? 1 : 0
+   rec
+}
+
+fn _anim_store_gpu_part_model(any base, any model_m) bool {
+   def n = is_list(model_m) ? model_m.len : 0
+   if !base || n <= 0 { return false }
+   ;; Runtime/static glTF matrices come in two layouts:
+   ;;   renderer mat4: [4,4,m00..m15]
+   ;;   glTF mat4:     [m00..m15,"mat4",400]
+   ;; Older animation packing only accepted the renderer layout and silently
+   ;; left the slab model stale/identity for glTF node animation.  That made
+   ;; simple assets like BoxAnimated freeze or split at high/sky positions.
+   store32(base, 0, 252)
+   mut off = -1
+   if n == 18 && int(model_m.get(0, 0)) == 4 && int(model_m.get(1, 0)) == 4 {
+      off = 2
+   } elif n >= 18 && is_str(model_m.get(16, 0)) {
+      off = 0
+   } elif n >= 16 {
+      off = 0
+   }
+   if off < 0 { return false }
+   mut j = 0
+   while j < 16 {
+      store32_f32(base + 64, float(model_m.get(off + j, (j == 0 || j == 5 || j == 10 || j == 15) ? 1.0 : 0.0)), j * 4)
+      j += 1
+   }
+   true
+}
+
+fn _anim_sync_rigid_gpu_state(dict group, any parts) dict {
+   mut gpu_parts = group.get("gpu_parts", 0)
+   def gpu_count = int(group.get("gpu_parts_count", 0))
+   if !is_list(parts) || !is_list(gpu_parts) || parts.len <= 0 || gpu_parts.len != parts.len || gpu_count != gpu_parts.len {
+      group["anim_gpu_rigid_ready"] = false
+      return group
+   }
+   mut gpu_slab = group.get("gpu_parts_slab", 0)
+   def scene_lights_count = int(group.get("scene_lights_count", 0))
+   mut used_parts = dict(max(4, parts.len * 2))
+   def part_maps = _anim_build_part_gpu_maps(parts)
+   def part_exact = part_maps.get(0, dict(0))
+   def part_node = part_maps.get(1, dict(0))
+   mut all_matched = true
+   mut i = 0
+   def parts_n = parts.len
+   while i < parts_n {
+      def rec0 = gpu_parts.get(i, 0)
+      def part_i = _anim_find_part_index_for_gpu_rec_fast(parts, used_parts, part_exact, part_node, rec0, i)
+      def part = part_i >= 0 ? parts.get(part_i, 0) : 0
+      if is_dict(part) && is_list(rec0) {
+         used_parts[part_i] = true
+         def rec = _anim_sync_gpu_rec_from_part(rec0, part)
+         gpu_parts[i] = rec
+         if gpu_slab {
+            def base = gpu_slab + i * 256
+            _anim_store_gpu_part_model(base, rec.get(10, 0))
+         }
+      } else {
+         all_matched = false
+      }
+      i += 1
+   }
+   if !all_matched || !gpu_slab {
+      group["anim_gpu_rigid_ready"] = false
+      return group
+   }
+   group["gpu_parts"] = gpu_parts
+   group["gpu_parts_slab"] = gpu_slab
+   group["gpu_parts_count"] = gpu_parts.len
+   group["gpu_draw_state"] = [
+      gpu_slab,
+      gpu_parts.len,
+      int(group.get("gpu_optical_start", 0)),
+      int(group.get("gpu_blend_start", gpu_parts.len)),
+      group.get("has_blend", false) ? 1 : 0,
+      0,
+      group.get("scene_lights_slab", 0),
+      scene_lights_count,
+      group.get("has_optical", false) ? 1 : 0
+   ]
+   group["anim_gpu_rigid_ready"] = bool(gpu_slab) && gpu_parts.len > 0
+   group
+}
+
+fn _group_rigid_gpu_anim_draw_ready(any group) bool {
+   if !is_dict(group) { return false }
+   ;; Keep live node animation on the conservative per-part model path by
+   ;; default.  The packed rigid GPU path is still available for profiling via
+   ;; NY_GLTF_RIGID_GPU_ANIM=1, but it was the path where stale slab model keys
+   ;; made AnimatedCube appear to jump between keyframes.
+   if !ui_profile.env_toggle_cached("NY_GLTF_RIGID_GPU_ANIM", false) { return false }
+   bool(group.get("anim_gpu_rigid_ready", false)) && bool(group.get("gpu_parts_slab", 0)) && int(group.get("gpu_parts_count", 0)) > 0
+}
+
 fn _apply_group_gltf_animation(dict group) dict {
    if !is_dict(group) { return group }
    mut gltf_data = group.get("gltf_data", 0)
@@ -627,8 +837,14 @@ fn _apply_group_gltf_animation(dict group) dict {
    if anim_count <= 0 && skin_count <= 0 && morph_count_total <= 0 { return group }
    def t = _anim_wrapped_time(group, float(_frame_time_accum))
    def anim_idx = int(group.get("anim_idx", 0))
+   if int(group.get("anim_last_idx", -2147483647)) == anim_idx && _anim_time_same(group.get("anim_last_time", -1.0), t) {
+      return group
+   }
    def overrides = _anim_sample_overrides(gltf_data, anim_count, anim_idx, t)
-   if !is_dict(overrides) { return group }
+   if !is_dict(overrides) {
+      group["anim_gpu_rigid_ready"] = false
+      return group
+   }
    mut anim_mats = gltf.gltf_rebuild_animated_mats(gltf_data, overrides)
    def fast_numeric_anim = overrides.get("__fast_numeric", false) ? true : false
    def use_vis_map = fast_numeric_anim ? false : gltf.gltf_has_node_visibility(gltf_data, overrides)
@@ -640,40 +856,54 @@ fn _apply_group_gltf_animation(dict group) dict {
    mut parts_changed = false
    def raw_anim_parts = group.get("anim_raw_parts", 0)
    def rigid_node_anim = anim_count > 0 && skin_count <= 0 && morph_count_total <= 0 && is_list(raw_anim_parts) && raw_anim_parts.len > 0
+   mut rigid_gpu_fast = false
    if rigid_node_anim {
       ;; Re-enter the original unmerged glTF primitive list before applying
       ;; sampled node matrices.  This preserves per-part node_idx for nested
       ;; parent/child animation and avoids rebuilding/converting the full glTF
       ;; asset every draw.
-      if !_anim_parts_keep_gltf_node_identity(parts, raw_anim_parts) {
+      def identity_known = bool(group.get("anim_parts_node_identity_ready", false)) && is_list(parts) && parts.len == raw_anim_parts.len
+      if !identity_known && !_anim_parts_keep_gltf_node_identity(parts, raw_anim_parts) {
          parts = _rebuild_drawable_parts_from_raw(raw_anim_parts)
+         group["anim_parts_node_identity_ready"] = false
+      } else {
+         group["anim_parts_node_identity_ready"] = true
       }
-      group["gpu_parts"] = []
-      group["gpu_parts_slab"] = 0
-      group["gpu_parts_count"] = 0
+      rigid_gpu_fast = ui_profile.env_toggle_cached("NY_GLTF_RIGID_GPU_ANIM", false) && !use_vis_map && !have_ptr_overrides && is_list(parts) && is_list(group.get("gpu_parts", 0)) && group.get("gpu_parts", []).len == parts.len && int(group.get("gpu_parts_count", 0)) == parts.len && bool(group.get("gpu_parts_slab", 0))
+      if !rigid_gpu_fast {
+         group["gpu_parts"] = []
+         group["gpu_parts_slab"] = 0
+         group["gpu_parts_count"] = 0
+      }
       mut gpu_state_anim_raw = group.get("gpu_draw_state", 0)
       if is_list(gpu_state_anim_raw) && gpu_state_anim_raw.len >= 2 {
-         gpu_state_anim_raw[0] = 0
-         gpu_state_anim_raw[1] = 0
+         if !rigid_gpu_fast {
+            gpu_state_anim_raw[0] = 0
+            gpu_state_anim_raw[1] = 0
+         }
          if gpu_state_anim_raw.len >= 6 { gpu_state_anim_raw[5] = 0 }
          elif gpu_state_anim_raw.len >= 5 { gpu_state_anim_raw[4] = 0 }
          group["gpu_draw_state"] = gpu_state_anim_raw
       }
       parts_changed = true
    }
-   def skin_mats_cache = (skin_count > 0 && !fast_numeric_anim) ? dict(max(4, skin_count * 2)) : 0
+   def skin_mats_cache = skin_count > 0 ? dict(max(4, skin_count * 2)) : 0
    if morph_count_total > 0 {
       def morph_state = _anim_apply_morph_rebuild(group, gltf_data, overrides, mat_records, parts)
       group, gltf_data, parts = morph_state.get(0, group), morph_state.get(1, gltf_data), morph_state.get(2, parts)
       parts_changed = morph_state.get(3, false) ? true : false
    }
-   if !is_list(parts) { return group }
+   if !is_list(parts) {
+      group["anim_gpu_rigid_ready"] = false
+      return group
+   }
    def part_state = _anim_apply_parts(parts, gltf_data, anim_mats, use_vis_map, vis_map, fast_numeric_anim, have_ptr_overrides, ptr_overrides, skin_mats_cache)
    parts = part_state.get(0, parts)
    parts_changed = parts_changed || (part_state.get(1, false) ? true : false)
    gltf.gltf_free_skin_mats_cache(skin_mats_cache)
    if parts_changed || anim_count > 0 || skin_count > 0 || morph_count_total > 0 {
       group["parts"] = parts
+      group["parts_count"] = parts.len
       group["static_pose_gpu_ready"] = false
       group["parts_model_baked"] = false
       group["gpu_model_baked"] = false
@@ -686,6 +916,13 @@ fn _apply_group_gltf_animation(dict group) dict {
          group["gpu_draw_state"] = gpu_state
       }
    }
+   if rigid_gpu_fast {
+      group = _anim_sync_rigid_gpu_state(group, parts)
+   } else {
+      group["anim_gpu_rigid_ready"] = false
+   }
+   group["anim_last_idx"] = anim_idx
+   group["anim_last_time"] = t
    group
 }
 
@@ -985,7 +1222,25 @@ fn get_pixel(int x, int y) any {
 
 fn get_framebuffer_size() list {
    "Returns [width, height] of the active framebuffer."
-   if _backend == BACKEND_VK { return lib_vkr.get_swapchain_size() }
+   if _backend == BACKEND_VK {
+      if _active_win {
+         def fresh = lib_uiw.get_win(_active_win)
+         if fresh { _active_win = fresh }
+         mut fb = lib_uiw.get_framebuffer_size(_active_win)
+         mut w, h = int(fb.get(0, 0)), int(fb.get(1, 0))
+         if w <= 0 || h <= 0 {
+            fb = lib_uiw.size(_active_win)
+            w, h = int(fb.get(0, 0)), int(fb.get(1, 0))
+         }
+         if w > 0 && h > 0 {
+            if w != int(lib_vkr.get_swapchain_width()) || h != int(lib_vkr.get_swapchain_height()) {
+               lib_vkr.notify_window_resize(w, h)
+            }
+            return [w, h]
+         }
+      }
+      return lib_vkr.get_swapchain_size()
+   }
    if _backend == BACKEND_GL { return [lib_glr.get_swapchain_width(), lib_glr.get_swapchain_height()] }
    [_cpu_w, _cpu_h]
 }
@@ -1430,9 +1685,9 @@ fn _fallback_meta(str path) dict {
    || (lib_str.find(lp, "arial unicode") >= 0)
    || (lib_str.find(lp, "seguisym") >= 0)
    || (lib_str.find(lp, "symbola") >= 0)
-   mut atlsz = 1024
-   if has_emoji || has_cjk { atlsz = 4096 }
-   elif has_nerd || has_dv { atlsz = 2048 }
+   mut atlsz = _font_primary_atlas_size()
+   if has_emoji || has_cjk { atlsz = _font_fallback_atlas_size() }
+   elif has_nerd || has_dv { atlsz = max(1024, _font_primary_atlas_size()) }
    mut m = {"emoji": has_emoji, "emoji2": has_emoji, "cjk": has_cjk, "nerd": has_nerd, "dv": has_dv, "atlas": atlsz}
    _fallback_meta_cache = cache.cache_put_reset(_ensure_fallback_meta_cache(), path, m, 2048, 32)
    m
@@ -1528,12 +1783,13 @@ fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT) int {
       descent = 0.0 - float(size) * 0.2
       line_h = float(size)
    }
-   def a = lib_atlas.atlas_create(2048, 2048, resolved_filter, true)
+   def atlas_sz = _font_primary_atlas_size()
+   def a = lib_atlas.atlas_create(atlas_sz, atlas_sz, resolved_filter, true)
    mut font_obj = {
       "_kind": "ttf", "path": path, "size": size, "data": f_data, "info": f_info,
       "scale": scale, "ascent": ascent, "descent": descent, "line_height": line_h,
       "glyphs": dict(256), "filter": resolved_filter,
-      "atlas": a, "atlas_chain": [a], "atlas_size": 2048
+      "atlas": a, "atlas_chain": [a], "atlas_size": atlas_sz
    }
    def id = _font_register(font_obj)
    if ui_profile.env_truthy_cached("NY_FONT_LOAD_TRACE") { ui_profile.print_text("[font:load] id=" + to_str(id) + " path=" + path + " size=" + to_str(size) + " scale=" + to_str(scale) + " filter=" + to_str(resolved_filter)) }
@@ -2115,6 +2371,10 @@ fn _font_prepare_bitmap_for_atlas(
    }
    if atlas_pixels_tmp { free(atlas_pixels_tmp) }
    if !is_list(uv) || uv.len < 4 { return [out_bm, font_obj] }
+   if bdata && !_font_keep_bitmap_data() {
+      free(bdata)
+      out_bm["data"] = 0
+   }
    out_bm["atlas"] = a
    out_bm["atlas_page"] = page_idx
    out_bm["tex_id"] = lib_atlas.atlas_texture_id(a)
@@ -3347,7 +3607,7 @@ fn init_mock_surface(int width=1280, int height=720) any {
    win
 }
 
-fn renderer_config(any vsync, bool filter, str vert="", str frag="", int msaa=1) bool {
+fn renderer_config(any vsync, bool filter, str vert="", str frag="", int msaa=4) bool {
    "Configures renderer settings that are known before window initialization."
    if _backend_auto_requested || _backend_pref == BACKEND_VK || _backend == BACKEND_VK { lib_vkr.renderer_config(vsync, filter, vert, frag, msaa) }
    true
@@ -3397,7 +3657,7 @@ fn _show_pending_after_first_frame() any {
    0
 }
 
-fn init_window(int width, int height, str title, int flags=0, any vsync=false, bool filter=false, int msaa=1) any {
+fn init_window(int width, int height, str title, int flags=0, any vsync=false, bool filter=false, int msaa=4) any {
    "Initializes a window with renderer config and graphics context. Returns window dict or false."
    if _backend_pref == BACKEND_MOCK { return init_mock_surface(width, height) }
    if _backend_auto_requested || _backend_pref == BACKEND_VK { renderer_config(vsync, filter, "", "", msaa) }
@@ -6274,6 +6534,8 @@ fn _texture_cache_enqueue_write(any path, int w, int h, int format, bool use_mip
    if _texture_disable_disk_cache_writes() { return false }
    def bytes = w * h * 4
    if bytes <= 0 { return false }
+   def max_bytes = _texture_cache_write_max_bytes()
+   if max_bytes > 0 && bytes > max_bytes { return false }
    def dup = malloc(bytes)
    if !dup { return false }
    memcpy(dup, pixels, bytes)
@@ -6881,11 +7143,19 @@ fn _texture_upload_image_ex(
 }
 
 fn texture_load_gltf(str uri, str base_path="", str usage="color", int filter=-1, any sampler_info=0) int {
-   "Loads a glTF texture URI, choosing sRGB(43) for 'color'/'emissive' and UNORM(37) for others."
+   "Loads a glTF texture URI, choosing sRGB(43) for authored color maps and UNORM(37) for data maps."
    _ensure_texture_caches()
    if ui_profile.env_present_cached("NY_RENDER_DEBUG") { ui_profile.print_text("[render] loading texture: " + to_str(uri)) }
    if !is_str(uri) || uri.len == 0 { return -1 }
-   def is_color = (usage == "color" || usage == "base_color" || usage == "albedo" || usage == "diffuse" || usage == "emissive")
+   def is_color =
+   usage == "color" ||
+   usage == "base_color" ||
+   usage == "albedo" ||
+   usage == "diffuse" ||
+   usage == "emissive" ||
+   usage == "specular_color" ||
+   usage == "sheen_color" ||
+   usage == "diffuse_transmission_color"
    def allow_disk_cache = usage != "emissive"
    def format = is_color ? 43 : 37
    def sampler_uses_mips = is_dict(sampler_info) && bool(sampler_info.get("min_uses_mips", false))
@@ -6901,13 +7171,14 @@ fn texture_load_gltf(str uri, str base_path="", str usage="color", int filter=-1
    mut wrap_s = is_dict(sampler_info) ? int(sampler_info.get("wrap_s", 10497)) : 10497
    mut wrap_t = is_dict(sampler_info) ? int(sampler_info.get("wrap_t", 10497)) : 10497
    ;; Viewer-safe default for glTF base-color atlases.  Many sample glTFs pack
-   ;; UV islands next to black/transparent padding.  Hardware/generated mips plus
-   ;; REPEAT wrapping bleed that padding back into the island and create the ugly
-   ;; black horizontal bands visible on Avocado.  Keep non-color data unchanged,
-   ;; but make base/albedo textures clamp and non-mipped unless explicitly asked.
+   ;; UV islands next to black/transparent padding.  Hardware/generated mips can
+   ;; bleed that padding back into the island and create the ugly black bands
+   ;; visible on Avocado.  Keep the authored/default wrap modes intact: glTF's
+   ;; default sampler is REPEAT, and tests such as Unicode/TextureSettings rely
+   ;; on it.
    if is_base_color && !ui_profile.env_truthy_cached("NY_GLTF_BASE_KEEP_SAMPLER") {
       if !ui_profile.env_truthy_cached("NY_GLTF_BASE_MIPS") { use_mips = false }
-      if !ui_profile.env_truthy_cached("NY_GLTF_BASE_REPEAT") {
+      if ui_profile.env_truthy_cached("NY_GLTF_BASE_CLAMP") {
          wrap_s = 33071
          wrap_t = 33071
       }
@@ -9273,6 +9544,9 @@ fn _draw_mesh_vk_fast(dict m, bool is_lines=false, f64 width=1.0, bool restore_u
    def mesh_unlit = !!_list_any_safe(mat_state, 3, false)
    def mesh_flip = !!_list_any_safe(mat_state, 4, false)
    def mesh_alpha_u32 = int(_list_any_safe(mat_state, 5, 0))
+   def mesh_bsdf0_u32 = material_slab ? load32(material_slab, 36) : int(m.get("bsdf0_u32", 0))
+   def mesh_bsdf5_u32 = material_slab ? load32(material_slab, 148) : int(m.get("bsdf5_u32", 0))
+   def mesh_optical = band(bshr(mesh_bsdf0_u32, 16), 255) > 0 || band(mesh_bsdf5_u32, 0xffff) > 0
    def dynamic_vertices = m.get("dynamic_vertices", false)
    def _lines_flag  = band(gpu_flags, _MESH_GPU_LINES) != 0
    def _points_flag = band(gpu_flags, _MESH_GPU_POINTS) != 0
@@ -9283,7 +9557,7 @@ fn _draw_mesh_vk_fast(dict m, bool is_lines=false, f64 width=1.0, bool restore_u
       if m.contains("draw_nocull") { mesh_nocull = m.get("draw_nocull", false) }
       else { mesh_nocull = m.get("no_cull", false) }
    }
-   def mesh_blend = (mesh_alpha_u32 & 3) == 2
+   def mesh_blend = ((mesh_alpha_u32 & 3) == 2) || mesh_optical
    def points     = _points_flag || mesh_points
    def lines      = !points && (is_lines || _lines_flag || mesh_lines)
    def use_unlit  = _unlit_flag  || mesh_unlit || points
@@ -9438,9 +9712,7 @@ fn _cpu_part_is_optical(any part) bool {
    if !is_dict(part) { return false }
    def slab = part.get("material_slab", 0)
    if slab {
-      def alpha = load32(slab, 24)
-      if (alpha & 3) == 2 { return false }
-      def bsdf0, bsdf5 = load32(slab, 36), load32(slab, 144)
+      def bsdf0, bsdf5 = load32(slab, 36), load32(slab, 148)
       return(((bshr(bsdf0, 16) & 255) > 0) || ((bsdf5 & 255) > 0) || ((bshr(bsdf5, 8) & 255) > 0))
    }
    def mesh = part.get("mesh", 0)
@@ -9448,14 +9720,9 @@ fn _cpu_part_is_optical(any part) bool {
    mut mslab = 0
    if mesh_is_dict { mslab = mesh.get("material_slab", 0) }
    if mslab {
-      def alpha = load32(mslab, 24)
-      if (alpha & 3) == 2 { return false }
-      def bsdf0, bsdf5 = load32(mslab, 36), load32(mslab, 144)
+      def bsdf0, bsdf5 = load32(mslab, 36), load32(mslab, 148)
       return(((bshr(bsdf0, 16) & 255) > 0) || ((bsdf5 & 255) > 0) || ((bshr(bsdf5, 8) & 255) > 0))
    }
-   def mesh_alpha = mesh_is_dict ? int(mesh.get("alpha_u32", 0)) : 0
-   def alpha = int(part.get("alpha_u32", mesh_alpha))
-   if (alpha & 3) == 2 { return false }
    def mesh_bsdf0 = mesh_is_dict ? int(mesh.get("bsdf0_u32", 0)) : 0
    def bsdf0 = int(part.get("bsdf0_u32", mesh_bsdf0))
    def mesh_bsdf5 = mesh_is_dict ? int(mesh.get("bsdf5_u32", 0)) : 0
@@ -9485,12 +9752,22 @@ fn _active_scene_clamp_ranges() bool {
 fn _active_scene_refresh_cpu_anim(dict group) bool {
    _active_scene_group = group
    _active_scene_render_parts = group.get("parts", _active_scene_render_parts)
-   _active_scene_gpu_slab = 0
-   _active_scene_gpu_ready = false
+   def rigid_gpu_ready = _group_rigid_gpu_anim_draw_ready(group)
+   _active_scene_gpu_slab = rigid_gpu_ready ? group.get("gpu_parts_slab", 0) : 0
+   _active_scene_gpu_parts = rigid_gpu_ready ? group.get("gpu_parts", _active_scene_gpu_parts) : group.get("gpu_parts", 0)
+   _active_scene_gpu_ready = rigid_gpu_ready
    _active_scene_model_baked = false
    _active_scene_parts_baked = false
-   _active_scene_force_cpu_anim = true
-   if is_list(_active_scene_render_parts) {
+   _active_scene_force_cpu_anim = !rigid_gpu_ready
+   if rigid_gpu_ready {
+      def next_count = int(group.get("gpu_parts_count", 0))
+      if next_count != _active_scene_count { _active_scene_cpu_optical_start = -1 }
+      _active_scene_count = next_count
+      _active_scene_optical_start = int(group.get("gpu_optical_start", 0))
+      _active_scene_blend_start = int(group.get("gpu_blend_start", next_count))
+      _active_scene_has_blend = group.get("has_blend", true) ? true : false
+      _active_scene_has_optical = group.get("has_optical", false) ? true : false
+   } elif is_list(_active_scene_render_parts) {
       def next_count = _active_scene_render_parts.len
       if next_count != _active_scene_count { _active_scene_cpu_optical_start = -1 }
       _active_scene_count = next_count
@@ -9677,13 +9954,11 @@ fn _scene_draw_group_gpu(
       lib_vkr.set_unlit(false)
       return true
    }
+   ;; Baked scene parts already carry the fitted part model in the GPU slab.
+   ;; Keep the current scene/edit model alive so rotations and sky transforms
+   ;; are composed by the flat renderer, and keep mask 0 so normals/tangents
+   ;; rotate with the final model.
    lib_vkr.set_mask(0)
-   if group_model_baked {
-      set_model_matrix(_scratch_ident)
-      lib_vkr.set_mask(2)
-   } else {
-      lib_vkr.set_mask(0)
-   }
    mut gpu_drawn = 0
    if gpu_part_count == 1
    && gpu_optical_start == 0
@@ -9693,12 +9968,18 @@ fn _scene_draw_group_gpu(
       gpu_drawn += lib_vkr.draw_part0_flat_no_restore(gpu_slab)
    } else {
       if gpu_optical_start > 0 { gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, 0, gpu_optical_start, 0) }
-      if group_has_optical && gpu_optical_start < gpu_part_count { lib_vkr.capture_scene_color_resume_pass() }
-      if gpu_optical_start < gpu_blend_start { gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, gpu_optical_start, gpu_blend_start, 0) }
-      if group_has_blend && gpu_blend_start < gpu_part_count {
-         gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, gpu_blend_start, gpu_part_count, 1)
-      } elif gpu_drawn <= 0 && gpu_part_count > 0 {
-         gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, 0, gpu_part_count, 0)
+      if group_has_optical && gpu_optical_start < gpu_part_count {
+         lib_vkr.capture_scene_color_resume_pass()
+         ;; After scene-color capture starts, keep optical and alpha-blend parts
+         ;; in one authored-order translucent range.
+         gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, gpu_optical_start, gpu_part_count, 0)
+      } else {
+         if gpu_optical_start < gpu_blend_start { gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, gpu_optical_start, gpu_blend_start, 0) }
+         if group_has_blend && gpu_blend_start < gpu_part_count {
+            gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, gpu_blend_start, gpu_part_count, 1)
+         } elif gpu_drawn <= 0 && gpu_part_count > 0 {
+            gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, 0, gpu_part_count, 0)
+         }
       }
    }
    lib_vkr.clear_scene_color_capture()
@@ -9836,17 +10117,26 @@ fn _scene_draw_group_cpu(
          i += 1
       }
    }
-   if _backend == BACKEND_VK && group_has_optical && cpu_optical_start < render_count { lib_vkr.capture_scene_color_resume_pass() }
-   mut pass = 1
-   while pass <= 2 {
-      mut i = (pass == 1) ? cpu_optical_start : cpu_blend_start
-      def pass_end = (pass == 1) ? cpu_blend_start : render_count
-      while i < pass_end {
+   if _backend == BACKEND_VK && group_has_optical && cpu_optical_start < render_count {
+      lib_vkr.capture_scene_color_resume_pass()
+      mut i = cpu_optical_start
+      while i < render_count {
          def part = render_parts[i]
          last_unlit = _scene_draw_cpu_part(part, saved_model2, have_saved_model, cpu_parts_baked, last_unlit)
          i += 1
       }
-      pass += 1
+   } else {
+      mut pass = 1
+      while pass <= 2 {
+         mut i = (pass == 1) ? cpu_optical_start : cpu_blend_start
+         def pass_end = (pass == 1) ? cpu_blend_start : render_count
+         while i < pass_end {
+            def part = render_parts[i]
+            last_unlit = _scene_draw_cpu_part(part, saved_model2, have_saved_model, cpu_parts_baked, last_unlit)
+            i += 1
+         }
+         pass += 1
+      }
    }
    if _backend == BACKEND_VK { lib_vkr.clear_scene_color_capture() }
    set_model_matrix(saved_model2)
@@ -9884,6 +10174,12 @@ fn draw_mesh_group(any group) bool {
    if force_cpu_anim {
       group = _apply_group_gltf_animation(group)
       _active_scene_refresh_cpu_anim(group)
+      if _group_rigid_gpu_anim_draw_ready(group) {
+         _scene_cache_group(group)
+         force_cpu_anim = false
+         _active_scene_force_cpu_anim = false
+         force_cpu_draw = _active_scene_has_blend && _gltf_force_cpu_blend_enabled()
+      }
    }
    def gpu_slab = _active_scene_gpu_slab
    def gpu_part_count = _active_scene_count
@@ -9903,6 +10199,7 @@ fn draw_mesh_group(any group) bool {
       group_model_baked = false
       group_parts_baked = false
    }
+   _active_scene_skip_part_cull = group_has_edit || bool(group.get("anim_playing", false)) || bool(group.get("anim_time_override", false)) || bool(group.get("anim_gpu_rigid_ready", false))
    def group_scene_lights = (have_scene_lights && !group_scene_light_slab) ? group.get("scene_lights", []) : []
    if _scene_draw_group_gpu(
       gpu_slab,
@@ -9984,22 +10281,47 @@ fn _clip_corner_reject_bits(f64 cx, f64 cy, f64 cz, f64 cw, f64 eps) int {
 fn _is_aabb_visible_xform(list min, list max, list mvp, any model=0) bool {
    if !_mat4_valid(mvp) { return true }
    if !_scene_bounds_cullable(min, max) { return true }
+   def mo = _mat4_data_off(mvp)
    def x1, y1, z1 = float(min.get(0, 0.0)), float(min.get(1, 0.0)), float(min.get(2, 0.0))
    def x2, y2, z2 = float(max.get(0, 0.0)), float(max.get(1, 0.0)), float(max.get(2, 0.0))
+   def p00, p10 = float(mvp.get(mo + 0, 0.0)), float(mvp.get(mo + 1, 0.0))
+   def p20, p30 = float(mvp.get(mo + 2, 0.0)), float(mvp.get(mo + 3, 1.0))
+   def p01, p11 = float(mvp.get(mo + 4, 0.0)), float(mvp.get(mo + 5, 0.0))
+   def p21, p31 = float(mvp.get(mo + 6, 0.0)), float(mvp.get(mo + 7, 0.0))
+   def p02, p12 = float(mvp.get(mo + 8, 0.0)), float(mvp.get(mo + 9, 0.0))
+   def p22, p32 = float(mvp.get(mo + 10, 0.0)), float(mvp.get(mo + 11, 0.0))
+   def p03, p13 = float(mvp.get(mo + 12, 0.0)), float(mvp.get(mo + 13, 0.0))
+   def p23, p33 = float(mvp.get(mo + 14, 0.0)), float(mvp.get(mo + 15, 1.0))
+   def use_model = _mat4_valid(model)
+   mut m00, m10, m20, m01, m11, m21 = 1.0, 0.0, 0.0, 0.0, 1.0, 0.0
+   mut m02, m12, m22, m03, m13, m23 = 0.0, 0.0, 1.0, 0.0, 0.0, 0.0
+   if use_model {
+      def oo = _mat4_data_off(model)
+      m00, m10 = float(model.get(oo + 0, 1.0)), float(model.get(oo + 1, 0.0))
+      m20 = float(model.get(oo + 2, 0.0))
+      m01, m11 = float(model.get(oo + 4, 0.0)), float(model.get(oo + 5, 1.0))
+      m21 = float(model.get(oo + 6, 0.0))
+      m02, m12 = float(model.get(oo + 8, 0.0)), float(model.get(oo + 9, 0.0))
+      m22 = float(model.get(oo + 10, 1.0))
+      m03, m13 = float(model.get(oo + 12, 0.0)), float(model.get(oo + 13, 0.0))
+      m23 = float(model.get(oo + 14, 0.0))
+   }
    mut out_bits = 63
    def eps = 0.0001
-   def use_model = _mat4_valid(model)
-   mut i = 0 while i < 8 {
+   mut i = 0
+   while i < 8 {
       def px, py = (i & 1) ? x2 : x1, (i & 2) ? y2 : y1
       def pz = (i & 4) ? z2 : z1
-      mut tx, ty, tz = px, py, pz
-      if use_model {
-         tx, ty = horizontal_mul_mvp(px, py, pz, 0, model), horizontal_mul_mvp(px, py, pz, 1, model)
-         tz = horizontal_mul_mvp(px, py, pz, 2, model)
-      }
-      def cx, cy = horizontal_mul_mvp(tx, ty, tz, 0, mvp), horizontal_mul_mvp(tx, ty, tz, 1, mvp)
-      def cz, cw = horizontal_mul_mvp(tx, ty, tz, 2, mvp), horizontal_mul_mvp(tx, ty, tz, 3, mvp)
-      out_bits = out_bits & _clip_corner_reject_bits(cx, cy, cz, cw, eps)
+      def tx = use_model ? (px*m00 + py*m01 + pz*m02 + m03) : px
+      def ty = use_model ? (px*m10 + py*m11 + pz*m12 + m13) : py
+      def tz = use_model ? (px*m20 + py*m21 + pz*m22 + m23) : pz
+      def cx, cy = tx*p00 + ty*p01 + tz*p02 + p03, tx*p10 + ty*p11 + tz*p12 + p13
+      def cz, cw = tx*p20 + ty*p21 + tz*p22 + p23, tx*p30 + ty*p31 + tz*p32 + p33
+      mut bits = 0
+      if cx < (0.0 - cw - eps) { bits = bits | 1 } if cx > (cw + eps) { bits = bits | 2 }
+      if cy < (0.0 - cw - eps) { bits = bits | 4 } if cy > (cw + eps) { bits = bits | 8 }
+      if cz < (0.0 - eps) { bits = bits | 16 } if cz > (cw + eps) { bits = bits | 32 }
+      out_bits = out_bits & bits
       if out_bits == 0 { return true }
       i += 1
    }
@@ -10009,7 +10331,7 @@ fn _is_aabb_visible_xform(list min, list max, list mvp, any model=0) bool {
 fn _is_aabb_visible_model(any min, any max, any model, any mvp) bool { _is_aabb_visible_xform(min, max, mvp, model) }
 
 fn _scene_part_frustum_visible(any part, any model) bool {
-   if !_gltf_frustum_cull_enabled() || !_mat4_valid(_mvp_matrix) { return true }
+   if !_gltf_frustum_cull_enabled() || !_mat4_valid(_mvp_matrix) || _active_scene_skip_part_cull { return true }
    if !is_dict(part) { return true }
    def bmin = part.get("min", 0)
    def bmax = part.get("max", 0)
@@ -10019,7 +10341,7 @@ fn _scene_part_frustum_visible(any part, any model) bool {
 
 fn _scene_effective_part_model(any render_model, any scene_model, bool group_model_baked) any {
    if !_mat4_valid(render_model) { return scene_model }
-   if !group_model_baked && _mat4_valid(scene_model) {
+   if _mat4_valid(scene_model) {
       mat4_mul_into(scene_model, render_model, _scratch_model_mul)
       return _scratch_model_mul
    }
@@ -10029,7 +10351,7 @@ fn _scene_effective_part_model(any render_model, any scene_model, bool group_mod
 fn _scene_gpu_part_frame_visible_from_part(any part, any scene_model, bool group_model_baked) bool {
    if is_dict(part) && !part.get("visible", true) { return false }
    if !is_dict(part) { return true }
-   if !_gltf_frustum_cull_enabled() || !_mat4_valid(_mvp_matrix) { return true }
+   if !_gltf_frustum_cull_enabled() || !_mat4_valid(_mvp_matrix) || _active_scene_skip_part_cull { return true }
    def bmin = part.get("min", 0)
    def bmax = part.get("max", 0)
    if !_scene_bounds_cullable(bmin, bmax) { return true }
@@ -10041,7 +10363,7 @@ fn _scene_gpu_part_frame_visible_from_part(any part, any scene_model, bool group
 fn _scene_gpu_part_frame_visible_from_rec(any rec, any scene_model, bool group_model_baked) bool {
    if is_list(rec) && _list_int_safe(rec, 37, 1) == 0 { return false }
    if !is_list(rec) { return true }
-   if !_gltf_frustum_cull_enabled() || !_mat4_valid(_mvp_matrix) { return true }
+   if !_gltf_frustum_cull_enabled() || !_mat4_valid(_mvp_matrix) || _active_scene_skip_part_cull { return true }
    def bmin = _list_any_safe(rec, 38, 0)
    def bmax = _list_any_safe(rec, 39, 0)
    if !_scene_bounds_cullable(bmin, bmax) { return true }
@@ -10064,7 +10386,7 @@ fn _scene_update_gpu_visibility_slab(any slab_ptr, int count, any render_parts, 
       }
       return count
    }
-   def frustum_on = _gltf_frustum_cull_enabled() && _mat4_valid(_mvp_matrix)
+   def frustum_on = _gltf_frustum_cull_enabled() && _mat4_valid(_mvp_matrix) && !_active_scene_skip_part_cull
    if count <= 2 || !frustum_on {
       mut visible_count_fast = 0
       mut fi = 0

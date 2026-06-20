@@ -22,6 +22,17 @@ typedef struct nyGcForwardMap {
   size_t cap;
 } nyGcForwardMap_t;
 
+static int gc_forward_cmp(const void *a, const void *b) {
+  int64_t fa = ((const nyGcForward_t *)a)->from;
+  int64_t fb = ((const nyGcForward_t *)b)->from;
+  return (fa > fb) - (fa < fb);
+}
+
+static void nyGcForwardSort(nyGcForwardMap_t *map) {
+  if (map && map->count > 1)
+    qsort(map->data, map->count, sizeof(*map->data), gc_forward_cmp);
+}
+
 static atomic_flag gNyGcLock = ATOMIC_FLAG_INIT;
 
 static void nyGcMinorCollectUnlocked(void);
@@ -33,6 +44,7 @@ static void nyGcSweepLargeUnlocked(void);
 static void nyGcClearLargeMarksUnlocked(void);
 static void nyGcAddRememberedUnlocked(int64_t *slot);
 static void nyGcMarkUnlocked(int64_t obj);
+static void nyGcRebuildRememberedUnlocked(void);
 static void nyGcValidateUnlocked(const char *phase);
 
 static void nyGcLock(void) {
@@ -172,17 +184,17 @@ static bool nyGcForwardPush(nyGcForwardMap_t *map, int64_t from, int64_t to) {
     map->cap = next;
   }
   map->data[map->count++] = (nyGcForward_t){from, to};
+  rt_heap_ptr_cache_forget((uintptr_t)from);
   return true;
 }
 
 static int64_t nyGcForwardFind(const nyGcForwardMap_t *map, int64_t value) {
-  if (!value)
+  if (!map || !map->count || !value)
     return 0;
-  for (size_t i = 0; i < map->count; i++) {
-    if (map->data[i].from == value)
-      return map->data[i].to;
-  }
-  return 0;
+  nyGcForward_t key = {value, 0};
+  nyGcForward_t *found = (nyGcForward_t *)bsearch(&key, map->data, map->count,
+                                                   sizeof(*map->data), gc_forward_cmp);
+  return found ? found->to : 0;
 }
 
 static void nyGcForwardSlot(const nyGcForwardMap_t *map, int64_t *slot) {
@@ -250,6 +262,13 @@ static void nyGcApplyForwards(const nyGcForwardMap_t *map) {
   for (size_t i = 0; i < gNyGc.remembered_count; i++)
     nyGcForwardSlot(map, gNyGc.remembered_set[i]);
 
+  uint8_t *nptr = gNyGc.nursery_start;
+  while (nptr < gNyGc.nursery_ptr) {
+    nyGcHeader_t *header = (nyGcHeader_t *)nptr;
+    nyGcUpdateObjectRefs(header, map);
+    nptr += nyGcAllocSize(header->size);
+  }
+
   uint8_t *ptr = gNyGc.tenured_start;
   while (ptr < gNyGc.tenured_free) {
     nyGcHeader_t *header = (nyGcHeader_t *)ptr;
@@ -259,6 +278,75 @@ static void nyGcApplyForwards(const nyGcForwardMap_t *map) {
   for (nyGcLargeObject_t *large = gNyGc.large_objects; large; large = large->next) {
     if (large->header)
       nyGcUpdateObjectRefs(large->header, map);
+  }
+}
+
+static bool nyGcSlotPointsToNursery(int64_t value) {
+  if (!value || !is_ptr(value) || !gNyGc.nursery_start)
+    return false;
+  uint8_t *p = (uint8_t *)(uintptr_t)value;
+  return p >= gNyGc.nursery_start + NYGC_OBJECT_DATA_OFFSET &&
+         p < gNyGc.nursery_ptr + NYGC_OBJECT_DATA_OFFSET;
+}
+
+static void nyGcRememberSlotIfNursery(int64_t *slot) {
+  if (slot && nyGcSlotPointsToNursery(*slot))
+    nyGcAddRememberedUnlocked(slot);
+}
+
+static void nyGcRememberObjectRefs(nyGcHeader_t *header) {
+  int64_t obj = (int64_t)(uintptr_t)nyGcObjPtr(header);
+  int64_t tag = *(int64_t *)((uint8_t *)(uintptr_t)obj - 8);
+
+  if (tag == TAG_LIST || tag == TAG_TUPLE) {
+    int64_t len = nyGcTaggedToInt(*(int64_t *)((uint8_t *)(uintptr_t)obj + 0));
+    size_t max_items = header->size > 16 ? (header->size - 16) / sizeof(int64_t) : 0;
+    if (len < 0)
+      len = 0;
+    if ((uint64_t)len > max_items)
+      len = (int64_t)max_items;
+    int64_t *items = (int64_t *)((uint8_t *)(uintptr_t)obj + 16);
+    for (int64_t i = 0; i < len; i++)
+      nyGcRememberSlotIfNursery(&items[i]);
+  } else if (tag == TAG_DICT) {
+    int64_t cap = nyGcTaggedToInt(*(int64_t *)((uint8_t *)(uintptr_t)obj + 8));
+    size_t max_slots = header->size > 16 ? (header->size - 16) / 24 : 0;
+    if (cap < 0)
+      cap = 0;
+    if ((uint64_t)cap > max_slots)
+      cap = (int64_t)max_slots;
+    for (int64_t i = 0; i < cap; i++) {
+      uint8_t *slot = (uint8_t *)(uintptr_t)obj + 16 + (size_t)i * 24;
+      int64_t state = *(int64_t *)(slot + 16);
+      if (state != 1 && state != rt_tag_v(1))
+        continue;
+      nyGcRememberSlotIfNursery((int64_t *)slot);
+      nyGcRememberSlotIfNursery((int64_t *)(slot + 8));
+    }
+  } else if (tag == TAG_OK || tag == TAG_ERR) {
+    if (header->size >= 8)
+      nyGcRememberSlotIfNursery((int64_t *)((uint8_t *)(uintptr_t)obj + 0));
+    if (header->size >= 16)
+      nyGcRememberSlotIfNursery((int64_t *)((uint8_t *)(uintptr_t)obj + 8));
+  } else if (tag == TAG_CLOSURE) {
+    if (header->size >= 16)
+      nyGcRememberSlotIfNursery((int64_t *)((uint8_t *)(uintptr_t)obj + 8));
+    if (header->size >= 24)
+      nyGcRememberSlotIfNursery((int64_t *)((uint8_t *)(uintptr_t)obj + 16));
+  }
+}
+
+static void nyGcRebuildRememberedUnlocked(void) {
+  gNyGc.remembered_count = 0;
+  uint8_t *ptr = gNyGc.tenured_start;
+  while (ptr < gNyGc.tenured_free) {
+    nyGcHeader_t *header = (nyGcHeader_t *)ptr;
+    nyGcRememberObjectRefs(header);
+    ptr += nyGcAllocSize(header->size);
+  }
+  for (nyGcLargeObject_t *large = gNyGc.large_objects; large; large = large->next) {
+    if (large->header)
+      nyGcRememberObjectRefs(large->header);
   }
 }
 
@@ -434,7 +522,6 @@ void nyGcInit(void) {
   }
   gNyGc.tenured_free = gNyGc.tenured_start;
   gNyGc.tenured_limit = gNyGc.tenured_start + gNyGc.tenured_capacity;
-  gNyGc.tenured_scan = gNyGc.tenured_start;
 
   gNyGc.remembered_capacity = 1024;
   gNyGc.remembered_set = (int64_t **)malloc(gNyGc.remembered_capacity * sizeof(int64_t *));
@@ -660,7 +747,6 @@ void nyGcCollect(void) {
   if (!gNyGc.enable_nursery)
     return;
   nyGcLock();
-  nyGcMinorCollectUnlocked();
   nyGcMajorCollectUnlocked();
   nyGcUnlock();
 }
@@ -671,8 +757,7 @@ static void nyGcMinorCollectUnlocked(void) {
   nyGcClearLargeMarksUnlocked();
   nyGcMark_from_roots();
   nyGcPromoteSurvivors();
-  gNyGc.nursery_ptr = gNyGc.nursery_start;
-  gNyGc.remembered_count = 0;
+  nyGcRebuildRememberedUnlocked();
   nyGcValidateUnlocked("minor-after");
 }
 
@@ -680,9 +765,9 @@ static void nyGcMajorCollectUnlocked(void) {
   nyGcValidateUnlocked("major-before");
   gNyGc.stats.tenured_collections++;
   nyGcMinorCollectUnlocked();
-  nyGcMark_from_roots();
   nyGcSweepTenured();
   nyGcSweepLargeUnlocked();
+  nyGcRebuildRememberedUnlocked();
   nyGcValidateUnlocked("major-after");
 }
 
@@ -773,28 +858,46 @@ bool nyGcIsMarked(int64_t obj) {
 static void nyGcPromoteSurvivors(void) {
   nyGcForwardMap_t forwards = {0};
   uint8_t *ptr = gNyGc.nursery_start;
+  uint8_t *old_nursery_ptr = gNyGc.nursery_ptr;
+  uint8_t *nursery_to = gNyGc.nursery_start;
 
-  while (ptr < gNyGc.nursery_ptr) {
+  while (ptr < old_nursery_ptr) {
     nyGcHeader_t *header = (nyGcHeader_t *)ptr;
     size_t total = nyGcAllocSize(header->size);
+    int64_t from_obj = (int64_t)(uintptr_t)nyGcObjPtr(header);
     if (header->flags & NYGC_MARKED) {
-      if (gNyGc.tenured_free + total <= gNyGc.tenured_limit) {
+      uint32_t next_age = header->age < UINT32_MAX ? header->age + 1 : header->age;
+      if (next_age < NYGC_PROMOTION_AGE) {
+        nyGcHeader_t *dst = (nyGcHeader_t *)nursery_to;
+        if ((uint8_t *)dst != ptr)
+          memmove(dst, header, total);
+        dst->flags &= ~(NYGC_MARKED | NYGC_TENURED | NYGC_SCANNED);
+        dst->age = next_age;
+        rt_heap_ptr_cache_store((uintptr_t)nyGcObjPtr(dst));
+        if (!nyGcForwardPush(&forwards, from_obj, (int64_t)(uintptr_t)nyGcObjPtr(dst))) {
+          free(forwards.data);
+          fprintf(stderr, "GC: nursery compaction map allocation failed\n");
+          exit(1);
+        }
+        nursery_to += total;
+      } else if (gNyGc.tenured_free + total <= gNyGc.tenured_limit) {
         nyGcHeader_t *dst = (nyGcHeader_t *)gNyGc.tenured_free;
         memcpy(dst, header, total);
-        dst->flags = (dst->flags | NYGC_TENURED) & ~NYGC_MARKED;
-        dst->age = header->age + 1;
+        dst->flags = (dst->flags | NYGC_TENURED) & ~(NYGC_MARKED | NYGC_SCANNED);
+        dst->age = NYGC_PROMOTION_AGE;
         gNyGc.tenured_free += total;
         gNyGc.stats.tenured_allocated += total;
         gNyGc.stats.objects_promoted++;
         rt_heap_ptr_cache_store((uintptr_t)nyGcObjPtr(dst));
-        if (!nyGcForwardPush(&forwards, (int64_t)(uintptr_t)nyGcObjPtr(header),
-                             (int64_t)(uintptr_t)nyGcObjPtr(dst))) {
+        if (!nyGcForwardPush(&forwards, from_obj, (int64_t)(uintptr_t)nyGcObjPtr(dst))) {
           free(forwards.data);
           fprintf(stderr, "GC: promotion map allocation failed\n");
           exit(1);
         }
       } else {
-        fprintf(stderr, "GC: Out of tenured space while promoting survivor\n");
+        free(forwards.data);
+        fprintf(stderr, "GC: FATAL: tenured full during promotion, heap would be corrupted\n");
+        abort();
       }
     } else {
       gNyGc.stats.objects_swept++;
@@ -803,6 +906,10 @@ static void nyGcPromoteSurvivors(void) {
     ptr += total;
   }
 
+  gNyGc.nursery_ptr = nursery_to;
+  if (old_nursery_ptr > nursery_to)
+    memset(nursery_to, 0, (size_t)(old_nursery_ptr - nursery_to));
+  nyGcForwardSort(&forwards);
   if (forwards.count)
     nyGcApplyForwards(&forwards);
   free(forwards.data);
@@ -833,6 +940,7 @@ static void nyGcSweepTenured(void) {
     ptr += total;
   }
 
+  nyGcForwardSort(&forwards);
   for (size_t i = 0; i < forwards.count; i++) {
     nyGcHeader_t *src = nyGcHeaderFromObject(forwards.data[i].from);
     nyGcHeader_t *dst = nyGcHeaderFromObject(forwards.data[i].to);
@@ -843,11 +951,11 @@ static void nyGcSweepTenured(void) {
   }
 
   gNyGc.tenured_free = new_free;
-  gNyGc.tenured_scan = gNyGc.tenured_start;
   if (old_free > new_free)
     memset(new_free, 0, (size_t)(old_free - new_free));
   if (forwards.count)
     nyGcApplyForwards(&forwards);
+  nyGcRebuildRememberedUnlocked();
   free(forwards.data);
 }
 

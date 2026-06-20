@@ -75,16 +75,12 @@ fn _atlas_update_texture_rect(int tex_id, int x, int y, int w, int h, any pixels
 mut _atlas_scratch = 0
 mut _atlas_scratch_cap = 0
 
+fn _atlas_scratch_keep_max() int { 4 * 1024 * 1024 }
+
 fn atlas_create(any w=2048, any h=2048, any filter=-1, bool defer_gpu=false) any {
    "Creates a new texture atlas. Uses a native state buffer for mutable metadata."
-   def buf_size = w * h * 4
-   def cpu_buf = zalloc(buf_size)
-   if !cpu_buf { return 0 }
    def state_ptr = zalloc(64)
-   if !state_ptr {
-      free(cpu_buf)
-      return 0
-   }
+   if !state_ptr { return 0 }
    store32(state_ptr, 2, 0)
    store32(state_ptr, 2, 4)
    store32(state_ptr, 0, 8)
@@ -93,6 +89,11 @@ fn atlas_create(any w=2048, any h=2048, any filter=-1, bool defer_gpu=false) any
    store32(state_ptr, h, 20)
    store32(state_ptr, 0, 24)
    store32(state_ptr, 0, 28)
+   mut cpu_buf = 0
+   if !defer_gpu {
+      cpu_buf = zalloc(w * h * 4)
+      if !cpu_buf { free(state_ptr) return 0 }
+   }
    mut out = {
       "tex_id": -1,
       "width": w,
@@ -103,7 +104,7 @@ fn atlas_create(any w=2048, any h=2048, any filter=-1, bool defer_gpu=false) any
       "filter": filter,
       "backend": _atlas_backend
    }
-   def tex_id = defer_gpu ? -1 : _atlas_create_texture(w, h, cpu_buf, int(filter), out)
+   def tex_id = cpu_buf ? _atlas_create_texture(w, h, cpu_buf, int(filter), out) : -1
    if tex_id >= 0 && !_atlas_use_gl(out) { vk_texture.set_texture_protected(tex_id, true) }
    out["tex_id"] = tex_id
    return out
@@ -171,7 +172,12 @@ fn atlas_add(any a, any key, any w, any h, any pixels) any {
       mrh = 0
    }
    if cy + h + 2 > ah { return 0 }
-   def cpu_buf = a.get("cpu_buf", 0)
+   mut cpu_buf = a.get("cpu_buf", 0)
+   if !cpu_buf && pixels {
+      cpu_buf = zalloc(aw * ah * 4)
+      if !cpu_buf { return 0 }
+      a["cpu_buf"] = cpu_buf
+   }
    if cpu_buf && pixels {
       mut row = 0
       while row < h {
@@ -265,6 +271,11 @@ fn atlas_flush(any a) int {
       row += 1
    }
    _atlas_update_texture_rect(tex_id, dx1, dy1, rw, rh, _atlas_scratch, a)
+   if _atlas_scratch_cap > _atlas_scratch_keep_max() {
+      free(_atlas_scratch)
+      _atlas_scratch = 0
+      _atlas_scratch_cap = 0
+   }
    store32(state_ptr, 0, 12)
    store32(state_ptr, aw, 16) store32(state_ptr, ah, 20)
    store32(state_ptr, 0, 24) store32(state_ptr, 0, 28)

@@ -293,15 +293,27 @@ fn _selection_bounds_apply_edit(any bounds, any scene_obj) list {
    [mnx, mny, mnz, mxx, mxy, mxz]
 }
 
-fn selection_bounds_from_scene(any scene_obj) list {
-   "Returns the best available selection bounds for a scene object."
-   if scene_obj == 0 || !is_dict(scene_obj) { return [] }
-   def gpu_bounds = selection_bounds_from_gpu_parts(scene_obj.get("gpu_parts", 0))
-   def part_bounds = selection_bounds_from_parts(scene_obj.get("parts", 0))
-   def render_bounds = _selection_choose_tighter_bounds(gpu_bounds, part_bounds)
-   if _selection_bounds_ready(render_bounds) {
-      return _selection_bounds_apply_scene_transform(render_bounds, scene_obj)
+fn _selection_child_bounds(any scene_obj, int depth) list {
+   if depth > 6 || !is_dict(scene_obj) { return [] }
+   mut out = []
+   def keys = ["children", "objects", "nodes", "items"]
+   mut ki = 0
+   while ki < keys.len {
+      def arr = scene_obj.get(keys.get(ki), 0)
+      if is_list(arr) {
+         mut i = 0
+         while i < arr.len {
+            def child = arr.get(i, 0)
+            if is_dict(child) { out = _accum_bounds(out, _selection_bounds_from_scene_inner(child, depth + 1)) }
+            i += 1
+         }
+      }
+      ki += 1
    }
+   out
+}
+
+fn _selection_direct_bounds(any scene_obj) list {
    mut bmin = scene_obj.get("fit_world_min", 0)
    mut bmax = scene_obj.get("fit_world_max", 0)
    def has_fit_world = selection_bounds_valid(bmin) && selection_bounds_valid(bmax)
@@ -314,6 +326,21 @@ fn selection_bounds_from_scene(any scene_obj) list {
       return _selection_bounds_apply_edit(fit_bounds, scene_obj)
    }
    []
+}
+
+fn _selection_bounds_from_scene_inner(any scene_obj, int depth) list {
+   if scene_obj == 0 || !is_dict(scene_obj) { return [] }
+   mut render_bounds = []
+   render_bounds = _accum_bounds(render_bounds, selection_bounds_from_gpu_parts(scene_obj.get("gpu_parts", 0)))
+   render_bounds = _accum_bounds(render_bounds, selection_bounds_from_parts(scene_obj.get("parts", 0)))
+   render_bounds = _accum_bounds(render_bounds, _selection_child_bounds(scene_obj, depth))
+   if _selection_bounds_ready(render_bounds) { return _selection_bounds_apply_scene_transform(render_bounds, scene_obj) }
+   _selection_direct_bounds(scene_obj)
+}
+
+fn selection_bounds_from_scene(any scene_obj) list {
+   "Returns full transformed selection bounds for a scene object or hierarchy."
+   _selection_bounds_from_scene_inner(scene_obj, 0)
 }
 
 #main {
@@ -355,5 +382,6 @@ fn selection_bounds_from_scene(any scene_obj) list {
    assert_bounds(selection_bounds_from_scene({"min": [0, 0, 0], "max": [1, 1, 1], "edit_tx": 2.0, "edit_ty": 3.0, "edit_tz": 4.0}), 2.0, 3.0, 4.0, 3.0, 4.0, 5.0, "selection scene edit")
    assert_bounds(selection_bounds_from_scene({"min": [0, 0, 0], "max": [1, 1, 1], "edit_scale": 2.0}), 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, "selection scene edit scale")
    assert_bounds(selection_bounds_from_scene({"min": [0, 0, 0], "max": [1, 1, 1], "fit_scale": 2.0, "fit_tx": 5.0, "fit_ty": 6.0, "fit_tz": 7.0}), 5.0, 6.0, 7.0, 7.0, 8.0, 9.0, "selection scene fit")
+   assert_bounds(selection_bounds_from_scene({"children": [{"min": [-500, 0, -400], "max": [500, 80, 400]}, {"min": [600, 0, -10], "max": [620, 20, 10]}]}), -500.0, 0.0, -400.0, 620.0, 80.0, 400.0, "selection hierarchy sponza bounds")
    print("✓ std.os.ui.render.viewer.engine.selection self-test passed")
 }

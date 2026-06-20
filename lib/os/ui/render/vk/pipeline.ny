@@ -139,9 +139,9 @@ comptime template _shader_cache_path_getter(name, file_name){
 }
 
 comptime emit _shader_cache_path_getter(_shader_points_spv, "nytrix_lit.vert.spv")
-comptime emit _shader_cache_path_getter(_shader_frag_spv, "nytrix_lit.frag.spv")
-comptime emit _shader_cache_path_getter(_shader_fast_frag_spv, "nytrix_lit_fast.frag.spv")
-comptime emit _shader_cache_path_getter(_shader_fast_env_frag_spv, "nytrix_lit_fast_env.frag.spv")
+comptime emit _shader_cache_path_getter(_shader_frag_spv, "nytrix_lit.v27.frag.spv")
+comptime emit _shader_cache_path_getter(_shader_fast_frag_spv, "nytrix_lit_fast.v27.frag.spv")
+comptime emit _shader_cache_path_getter(_shader_fast_env_frag_spv, "nytrix_lit_fast_env.v27.frag.spv")
 comptime emit _shader_cache_path_getter(_shader_sdf_spv, "nytrix_sdf.vert.spv")
 comptime emit _shader_cache_path_getter(_shader_sky_vert_spv, "nytrix_sky.vert.spv")
 comptime emit _shader_cache_path_getter(_shader_sky_frag_spv, "nytrix_sky.frag.spv")
