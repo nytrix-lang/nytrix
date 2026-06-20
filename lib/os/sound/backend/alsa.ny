@@ -108,6 +108,7 @@ fn stream_open(any stream) any {
    if !is_available() { return false }
    def device = stream.get("device")
    mut dev_id = common.env_trim("NY_AUDIO_ALSA_DEVICE")
+   if !dev_id { dev_id = "" }
    if dev_id.len == 0 {
       dev_id = is_dict(device) ? device.get("id", "") : ""
       if !is_str(dev_id) || dev_id.len == 0 || eq(dev_id, "default") { dev_id = "" }

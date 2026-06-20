@@ -12,6 +12,23 @@ use std.core.str as str
 use std.math (max, min)
 use std.os.ui.render.viewer.editor.core
 
+fn _copy_lines(list src, int a, int b, list dst, int at) int {
+   mut i = a
+   mut j = at
+   while i < b {
+      __store_item_fast(dst, j, src.get(i, ""))
+      i += 1
+      j += 1
+   }
+   j
+}
+
+fn _new_lines(int n) list {
+   mut out = list(max(1, n))
+   __list_set_len(out, max(1, n))
+   out
+}
+
 fn set_selection_anchor(dict st) dict {
    "Starts a selection at the current cursor."
    st["sel_active"] = false
@@ -57,14 +74,17 @@ fn selection_text(dict st) str {
    def el = int(ord.get(2, 0))
    def ec = int(ord.get(3, 0))
    def lines = current_lines(st)
-   mut out = []
+   def n = max(0, min(el, lines.len - 1) - sl + 1)
+   mut out = _new_lines(n)
    mut i = sl
+   mut j = 0
    while i <= el && i < lines.len {
       def line = to_str(lines.get(i, ""))
       def a = i == sl ? min(sc, line.len) : 0
       def b = i == el ? min(ec, line.len) : line.len
-      out = out.append(str.str_slice(line, a, max(a, b)))
+      __store_item_fast(out, j, str.str_slice(line, a, max(a, b)))
       i += 1
+      j += 1
    }
    join_lines(out)
 }
@@ -80,12 +100,10 @@ fn delete_selection(dict st) dict {
    def lines = current_lines(st)
    def first = to_str(lines.get(sl, ""))
    def last = to_str(lines.get(el, ""))
-   mut out = []
-   mut i = 0
-   while i < sl { out = out.append(lines.get(i, "")) i += 1 }
-   out = out.append(str.str_slice(first, 0, min(sc, first.len)) + str.str_slice(last, min(ec, last.len), last.len))
-   i = el + 1
-   while i < lines.len { out = out.append(lines.get(i, "")) i += 1 }
+   mut out = _new_lines(lines.len - (el - sl))
+   mut j = _copy_lines(lines, 0, sl, out, 0)
+   __store_item_fast(out, j, str.str_slice(first, 0, min(sc, first.len)) + str.str_slice(last, min(ec, last.len), last.len))
+   _copy_lines(lines, el + 1, lines.len, out, j + 1)
    st["cursor_line"] = sl
    st["cursor_col"] = sc
    st["sel_active"] = false

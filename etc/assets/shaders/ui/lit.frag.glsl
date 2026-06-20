@@ -74,7 +74,9 @@ vec2 applyUvXf(vec2 uv, uint xf0, uint xf1){
   vec2 suv = uv * scl ;
   float cr = cos(rot) ;
   float sr = sin(rot) ;
-  return vec2(cr * suv.x + sr * suv.y, -sr * suv.x + cr * suv.y) + off ;
+  // Keep the shader decode aligned with the CPU fallback matrix path.
+  // Apply scale, then the authored rotation, then offset.
+  return vec2(cr * suv.x - sr * suv.y, sr * suv.x + cr * suv.y) + off ;
 }
 vec2 baseUv(){ return applyUvXf(((pc.baseUvXf1 >> 30u) != 0u) ? vUV2 : vUV, pc.baseUvXf0, pc.baseUvXf1) ; }
 vec2 mapUv(uint packedIndex, uint xf0, uint xf1){ return applyUvXf(((packedIndex & 0x10000u) != 0u) ? vUV2 : vUV, xf0, xf1) ; }
@@ -334,9 +336,12 @@ void main(){
   bool vertexColorPrimary = (pc.baseTexIndex & 0x40000000u) != 0u ;
   bool vertexColorMultiply = (pc.baseTexIndex & 0x10000000u) != 0u ;
   bool specGlossWorkflow = (pc.baseTexIndex & 0x20000000u) != 0u ;
+  // Keep the original source workflow for IBL scale choices after the
+  // spec-gloss material is converted to metallic-roughness below.
   bool sourceSpecGlossWorkflow = specGlossWorkflow ;
   bool vertexTextureIndex = (pc.baseTexIndex & 0x04000000u) != 0u ;
   bool vertexPackedMaterial = (pc.baseTexIndex & 0x08000000u) != 0u ;
+  bool baseTextureLinear = (pc.baseTexIndex & 0x02000000u) != 0u ;
   vec4 baseTint = resolveTint((vertexColorPrimary || vertexColorMultiply) ? vColor : vec4(1.0), unpackColor(pc.baseColor)) ;
   uint baseIndex = pc.baseTexIndex ;
   if((baseIndex & 0x80000000u) != 0u){
@@ -366,7 +371,7 @@ void main(){
   bool extClearcoatMap = (pc.alphaPacked & 0x20000000u) != 0u ;
   bool extSheenColorMap = (pc.alphaPacked & 0x40000000u) != 0u ;
   bool extDiffuseTransmissionColor = (pc.alphaPacked & 0x80000000u) != 0u ;
-  // Debug views must not alias live extension transport bits.
+  // alphaPacked is live material state; never alias debug views onto it.
   bool dbgSceneLights = false ;
   bool dbgBaseColor = false ;
   bool dbgEmissive = false ;
@@ -405,22 +410,22 @@ void main(){
       baseAlpha = 1.0 ;
     }
 
-	  if(alphaMode == 1u){
-	    if(rawAlpha < alphaCutoff){ discard ; }
-	    baseAlpha = 1.0 ;
-	  } else if(alphaMode == 2u){
-	    if(baseAlpha <= 0.001){ discard ; }
-	  }
-	  bool gltfCullMaterial = (pc.normalTexIndex & 0x80000u) != 0u ;
-	  bool doubleSidedMaterial = (pc.normalTexIndex & 0x40000u) != 0u ;
-	  bool mirroredFacingUnlit = (pc.normalTexIndex & 0x20000u) != 0u ;
-	  bool logicalBackfaceUnlit = mirroredFacingUnlit ? false : !gl_FrontFacing ;
-	  if(gltfCullMaterial && !doubleSidedMaterial && !gl_FrontFacing){ discard ; }
+    if(alphaMode == 1u){
+      if(rawAlpha < alphaCutoff){ discard ; }
+      baseAlpha = 1.0 ;
+    } else if(alphaMode == 2u){
+      if(baseAlpha <= 0.001){ discard ; }
+    }
+    bool gltfCullMaterial = (pc.normalTexIndex & 0x80000u) != 0u ;
+    bool doubleSidedMaterial = (pc.normalTexIndex & 0x40000u) != 0u ;
+    bool mirroredFacingUnlit = (pc.normalTexIndex & 0x20000u) != 0u ;
+    bool logicalBackfaceUnlit = mirroredFacingUnlit ? false : !gl_FrontFacing ;
+    if(gltfCullMaterial && !doubleSidedMaterial && !gl_FrontFacing){ discard ; }
 
-	  vec3 unlitRgb = vertexCoverageMask ? baseTint.rgb : texBaseLinear * baseTint.rgb ;
-	  vec3 baseRgb = (vertexColorPrimary || vertexCoverageMask) ? unlitRgb : linearToSrgb(unlitRgb) ;
-	  outColor = vec4(baseRgb, baseAlpha) ;
-	  return ;
+    vec3 unlitRgb = vertexCoverageMask ? baseTint.rgb : texBaseLinear * baseTint.rgb ;
+    vec3 baseRgb = (vertexColorPrimary || vertexCoverageMask || baseTextureLinear) ? unlitRgb : linearToSrgb(unlitRgb) ;
+    outColor = vec4(baseRgb, baseAlpha) ;
+    return ;
   }
 
   float rawAlpha = tex.a * baseTint.a ;
@@ -432,9 +437,6 @@ void main(){
   }
   if(alphaCoverage < 0.999 && alphaMode == 2u){
     if(rawAlpha * alphaCoverage <= bayer4x4(gl_FragCoord.xy)){ discard ; }
-  }
-  if(alphaMode == 2u){
-    rawAlpha = rawAlpha ;
   }
   float baseAlpha = alphaMode == 2u ? clamp(rawAlpha, 0.0, 1.0) : 1.0 ;
 
@@ -669,7 +671,7 @@ void main(){
       finalEmissiveOnlySurface = emissiveOnlySurface ;
       bool specularOnlySurface = dot(baseColor, baseColor) <= 0.0006 && metallic <= 0.01 && (specularFactor > 0.01 || extSpecularMap || extSpecularColorMap) ;
       bool darkReflectiveSurface = dot(baseColor, baseColor) <= 0.0006 && !emissiveOnlySurface ;
-      bool extensionSurface = clearcoat > 0.0 || anisotropyStrength > 0.0 || iridescence > 0.0 || transmission > 0.0 || diffuseTransmission > 0.0 || dot(sheenColor, sheenColor) > 0.0005 ;
+      bool extensionSurface = clearcoat > 0.0 || anisotropyStrength > 0.0 || iridescence > 0.0 || transmission > 0.0 || diffuseTransmission > 0.0 || subsurfaceFactor > 0.0 || dot(sheenColor, sheenColor) > 0.0005 ;
       float safeIor = max(ior, 1.001) ;
       float dielectricF0Scalar = pow((safeIor - 1.0) / (safeIor + 1.0), 2.0) ;
       bool glossyMaterial = sourceSpecGlossWorkflow || specGlossWorkflow || extSpecularMap || extSpecularColorMap || metallic > 0.05 || clearcoat > 0.0 || transmission > 0.0 || iridescence > 0.0 ;
@@ -699,7 +701,7 @@ void main(){
       float roughDiffuse = glossyMaterial ? mix(0.16, 1.0, roughness) : 1.0 ;
       bool diffuseBoostExtension = transmission <= 0.001 && diffuseTransmission <= 0.001 && (clearcoat > 0.0 || iridescence > 0.0 || extSpecularMap || extSpecularColorMap) ;
       float extensionDiffuseBoost = diffuseBoostExtension ? 1.18 : 1.0 ;
-      vec3 diffuseEnergy = diffuseColor * (1.0 - fresnelMaxV) * extensionDiffuseBoost ;
+      vec3 diffuseEnergy = diffuseColor * (1.0 - transmission) * diffuseRemain * (1.0 - fresnelMaxV) * extensionDiffuseBoost ;
       vec3 Lo = vec3(0.0) ;
       float envAniso = 1.0 ;
       vec3 dPdx = dFdx(vWorldPos) ;
@@ -723,7 +725,7 @@ void main(){
       float darkSurfaceScale = 1.0 ;
       float emissiveOnlySpecScale = 1.0 ;
       float specularOnlyBoost = specularOnlySurface ? 1.15 : 1.0 ;
-      if(darkReflectiveSurface && metallic <= 0.05 && transmission <= 0.001 && diffuseTransmission <= 0.001 && clearcoat <= 0.001 && iridescence <= 0.001){
+      if(darkReflectiveSurface && metallic <= 0.05 && transmission <= 0.001 && diffuseTransmission <= 0.001 && clearcoat <= 0.001 && iridescence <= 0.001 && subsurfaceFactor <= 0.001){
          darkSurfaceScale = mix(0.18, 0.42, clamp(specularFactor, 0.0, 1.0)) ;
       }
       float darkReflectiveBoost = darkReflectiveSurface ? mix(0.35, 4.40, metallic) : 1.0 ;
@@ -878,7 +880,7 @@ void main(){
          iblSpecScale *= sourceSpecGlossWorkflow ? mix(1.24, 1.08, roughness) : 1.0 ;
          iblSpecScale *= mix(1.0, 2.35, iridescence * (1.0 - max(transmission, diffuseTransmission) * 0.55) * (1.0 - metalness * 0.72)) ;
          vec3 envTerm = envDiffuseTerm * iblDiffuseScale + envSpecTerm * iblSpecScale ;
-         float darkSheenCloth = smoothstep(0.02, 0.30, sheenMaxMaterial) * (1.0 - smoothstep(0.035, 0.18, max3(baseColor))) * (1.0 - metallic) * (1.0 - max(transmission, diffuseTransmission)) * texturedSheenDamp ;
+         float darkSheenCloth = smoothstep(0.04, 0.40, sheenMaxMaterial) * (1.0 - smoothstep(0.035, 0.18, max3(baseColor))) * (1.0 - metallic) * (1.0 - max(transmission, diffuseTransmission)) * texturedSheenDamp ;
          if(darkSheenCloth > 0.001){
             vec3 velvetTint = mix(vec3(max3(sheenColor) * 0.55), sqrt(max(sheenColor, vec3(0.0))), 0.80) ;
             vec3 velvetFill = envDiffuse * velvetTint * (0.10 + 0.30 * sheenRoughness) ;
@@ -932,7 +934,7 @@ void main(){
       float sheenTerm = pow(1.0 - NdotV, mix(8.0, 2.0, sheenRoughness)) ;
       Lo += sheenColor * sheenTerm * (1.0 - metallic) * mix(0.035, 0.10, 1.0 - sheenRoughness) ;
       Lo += envSpec * sheenColor * sheenTerm * (1.0 - metallic) * mix(0.02, 0.07, 1.0 - sheenRoughness) ;
-      float darkSheenClothLate = smoothstep(0.02, 0.30, sheenMaxMaterial) * (1.0 - smoothstep(0.035, 0.18, max3(baseColor))) * (1.0 - metallic) * (1.0 - max(transmission, diffuseTransmission)) * texturedSheenDamp ;
+      float darkSheenClothLate = smoothstep(0.04, 0.40, sheenMaxMaterial) * (1.0 - smoothstep(0.035, 0.18, max3(baseColor))) * (1.0 - metallic) * (1.0 - max(transmission, diffuseTransmission)) * texturedSheenDamp ;
       if(darkSheenClothLate > 0.001){
          vec3 darkSheenTint = mix(vec3(max3(sheenColor) * 0.55), sqrt(max(sheenColor, vec3(0.0))), 0.80) ;
          float velvetView = 0.48 + 0.52 * pow(1.0 - NdotV, mix(1.4, 0.45, sheenRoughness)) ;
@@ -999,7 +1001,7 @@ void main(){
 		      if(transmission <= 0.001 && diffuseTransmission <= 0.001 && metallic <= 0.05 && thickness > 0.001 && max3(baseColor) <= 0.020){
 		         Lo *= mix(0.035, 0.090, clamp(specularFactor, 0.0, 1.0)) ;
 		      }
-	      if(darkReflectiveSurface && transmission <= 0.001 && diffuseTransmission <= 0.001 && clearcoat <= 0.001 && iridescence <= 0.001 && metallic <= 0.05){
+	      if(darkReflectiveSurface && transmission <= 0.001 && diffuseTransmission <= 0.001 && clearcoat <= 0.001 && iridescence <= 0.001 && subsurfaceFactor <= 0.001 && metallic <= 0.05){
 	         float darkBaseClamp = mix(0.055, 0.125, clamp(specularFactor, 0.0, 1.0)) ;
 	         vec3 darkClamped = min(Lo, vec3(darkBaseClamp)) * mix(0.55, 0.90, roughness) ;
 	         float darkHighlightGate = smoothstep(0.08, 0.90, specularFactor) * (1.0 - smoothstep(0.62, 0.98, roughness)) ;
@@ -1023,15 +1025,16 @@ void main(){
          }
          Lo *= mix(1.0, occ, occMix) ;
       }
-      if(transmission > 0.0 || diffuseTransmission > 0.0){
+      if(transmission > 0.0 || diffuseTransmission > 0.0 || subsurfaceFactor > 0.0){
          vec3 surfaceLo = Lo ;
-         float transDist = (bsdf3A == 255u) ? 1e9 : max(attenuationDist * attenuationDist * 10.0, 0.001) ;
+         float transDist = (bsdf3A == 255u) ? 1e9 : max(float(bsdf3A) * (10.0 / 253.0), 0.01) ;
          vec3 safeAtt = max(attenuationColor, vec3(0.001)) ;
          vec3 sigmaA = -log(safeAtt) / transDist ;
          float iorNorm = clamp((ior - 1.0) / 1.42, 0.0, 1.0) ;
          float roughScatter = clamp(roughness * (0.55 + 0.45 * iorNorm) + roughness * roughness * 0.55, 0.0, 1.0) ;
-         float volumeScatter = clamp(thickness * (0.80 + 1.00 * iorNorm), 0.0, 1.0) ;
-         float opticalVolumeGate = smoothstep(0.0001, 0.012, thickness) ;
+         float opticalThickness = max(thickness, (transmission > 0.001 && ior > 1.01) ? 0.015 : thickness) ;
+         float volumeScatter = clamp(opticalThickness * (0.80 + 1.00 * iorNorm), 0.0, 1.0) ;
+         float opticalVolumeGate = smoothstep(0.0001, 0.012, opticalThickness) ;
          float viewWrap = 0.5 + 0.5 * max(dot(-N, V), 0.0) ;
          float dtMix = clamp(diffuseTransmission, 0.0, 1.0) ;
          vec3 boundaryTint = baseColor ;
@@ -1050,14 +1053,15 @@ void main(){
 		         float tintChromaWeight = clamp(attenuationChroma * 3.8, 0.0, 1.0) ;
 		         tintChromaWeight *= tintChromaWeight ;
 		         float neutralDispersionGlass = clamp(dispersion * 0.50, 0.0, 1.0) * (1.0 - tintChromaWeight) ;
-		         float amberVolumeCue = clamp(tintChromaWeight * attenuationPresence * smoothstep(0.52, 0.92, attenuationColor.r) * (1.0 - smoothstep(0.14, 0.36, attenuationColor.b)), 0.0, 1.0) ;
+		         float amberVolumeCue = clamp(tintChromaWeight * attenuationPresence * smoothstep(0.52, 0.92, attenuationColor.r) * (1.0 - smoothstep(0.20, 0.55, attenuationColor.b)), 0.0, 1.0) ;
 			         float texturedBoundaryGate = baseIndex < 1024u ? 1.0 : 0.0 ;
 		         float boundaryVolumeStrength = boundaryChroma * 5.20 + texturedBoundaryGate * max(boundaryLum - 0.08, 0.0) * 0.90 ;
 			         float boundaryTextureCarrier = 1.0 - attenuationPresence * (1.0 - texturedBoundaryGate * 0.34) ;
+			         boundaryTextureCarrier *= mix(1.0, 0.48, amberVolumeCue) ;
 			         float boundaryVolumeTint = clamp(transmission * opticalVolumeGate * boundaryTextureCarrier * boundaryVolumeStrength * smoothstep(0.06, 0.66, boundaryLum), 0.0, 1.0) ;
-			         boundaryVolumeTint = max(boundaryVolumeTint, transmission * opticalVolumeGate * boundaryTextureCarrier * texturedBoundaryGate * 0.52) ;
+			         boundaryVolumeTint = max(boundaryVolumeTint, transmission * opticalVolumeGate * boundaryTextureCarrier * texturedBoundaryGate * mix(0.18, 0.30, 1.0 - amberVolumeCue)) ;
 	         float pathLenScale = mix(1.0, 0.46, neutralDispersionGlass) ;
-         float rawPathLen = max((thickness * mix(1.0, 1.08, refractionFactor) + diffuseTransmission * 0.05) * pathLenScale, 0.0001) ;
+         float rawPathLen = max((opticalThickness * mix(1.0, 1.08, refractionFactor) + diffuseTransmission * 0.05) * pathLenScale, 0.0001) ;
          float shortNeutralVolume = smoothstep(0.70, 0.96, attenuationLum) * (1.0 - clamp(attenuationChroma * 8.0, 0.0, 1.0)) * (1.0 - smoothstep(0.06, 0.22, transDist)) ;
          float transmissionVolumeGate = clamp(transmission * opticalVolumeGate * (1.0 - metallic), 0.0, 1.0) ;
          float volumePathCap = max(transDist * mix(3.25, 4.95, max(tintChromaWeight, neutralDispersionGlass * 0.75)), 0.018) ;
@@ -1125,7 +1129,7 @@ void main(){
             float dispGate = clamp(dispersion * 0.12, 0.0, 1.0) ;
             float sceneContrast = 1.0 + dispGate * (0.20 + 0.12 * iorNorm) ;
             sceneThrough = clamp((sceneThrough - vec3(0.5)) * sceneContrast + vec3(0.5), vec3(0.0), vec3(1.0)) ;
-            float dispIor = dispersion * mix(0.024, 0.052, neutralDispersionGlass) ;
+            float dispIor = dispersion * mix(0.060, 0.110, neutralDispersionGlass) ;
             vec3 refrR = refract(-V, N, 1.0 / max(safeIor + dispIor, 1.001)) ;
             vec3 refrG = refrDir ;
             vec3 refrB = refract(-V, N, 1.0 / max(safeIor - dispIor, 1.001)) ;
@@ -1138,7 +1142,7 @@ void main(){
             vec3 refrSampleB = sampleEnvSpec(refrB, roughScatter) ;
             refrEnv = vec3(refrSampleR.r, refrSampleG.g, refrSampleB.b) ;
             vec2 chromaAxis = normalize(refrDir.xy + vec2(0.001, -0.001)) ;
-            float chromaPx = clamp(dispersion * (0.18 + 0.40 * neutralDispersionGlass) * (0.55 + 0.45 * iorNorm) * (1.0 - roughScatter * 0.42), 0.0, 4.5) ;
+            float chromaPx = clamp(dispersion * (0.42 + 0.86 * neutralDispersionGlass) * (0.55 + 0.45 * iorNorm) * (1.0 - roughScatter * 0.42), 0.0, 12.0) ;
             vec2 refrPxR = refrR.xy * refrScale + chromaAxis * chromaPx ;
             vec2 refrPxG = refrG.xy * refrScale ;
             vec2 refrPxB = refrB.xy * refrScale - chromaAxis * chromaPx ;
@@ -1157,6 +1161,10 @@ void main(){
          if(transmission > 0.001){
             float blurMix = clamp(roughScatter * 0.78 + volumeScatter * 0.44, 0.0, 1.0) ;
             vec3 throughEnv = mix(refrEnv, refrDiffuse, blurMix) ;
+            if(!hasSceneColorCapture()){
+               vec3 rigFallback = opticalLightRigEnv(refrDir, max(roughScatter, 0.035)) ;
+               throughEnv = max(throughEnv, rigFallback * (0.26 + 0.42 * (1.0 - roughScatter) + 0.18 * max(refractionFactor, iorNorm))) ;
+            }
             vec3 throughScene = mix(sceneThrough, sceneBehind, clamp(roughScatter * 0.025 + volumeScatter * 0.010, 0.0, 0.040)) ;
             vec3 through = hasSceneColorCapture() ? throughScene : throughEnv ;
             if(hasSceneColorCapture()){
@@ -1184,7 +1192,7 @@ void main(){
 		            through *= transTint * thinTransmissionTint ;
 			            if(amberVolumeCue > 0.001){
 			               vec3 amberFilteredThrough = pow(max(through, vec3(0.0)), vec3(1.34)) * vec3(0.50, 0.155, 0.030) ;
-			               through = mix(through, amberFilteredThrough, clamp(amberVolumeCue * (0.76 + 0.22 * volumeScatter) * (1.0 - roughScatter * 0.18), 0.0, 0.94)) ;
+			               through = mix(through, amberFilteredThrough, clamp(amberVolumeCue * (0.46 + 0.18 * volumeScatter) * (1.0 - roughScatter * 0.18), 0.0, 0.70)) ;
 			            }
 	            float thinColoredGlass = clamp(
 	               thinTintGate * (1.0 - opticalVolumeGate * 0.30) * (boundaryChroma * 3.40 + boundaryLum * 0.18),
@@ -1192,12 +1200,12 @@ void main(){
 	               1.0
 	            ) ;
 	            float coloredGlassBody = clamp(
-	               transmission * (1.0 - metallic) * (thinColoredGlass + boundaryChroma * 0.75 + boundaryVolumeTint * 0.55) * (0.68 + 0.50 * volumeScatter) * (1.0 - attenuationPresence * 0.28),
+	               transmission * (1.0 - metallic) * (thinColoredGlass + boundaryChroma * 0.55 + boundaryVolumeTint * 0.34) * (0.52 + 0.42 * volumeScatter) * (1.0 - attenuationPresence * 0.46),
 	               0.0,
 	               1.0
 	            ) ;
 	            if(coloredGlassBody > 0.001){
-	               vec3 coloredGlassFill = sqrt(max(boundaryTint, vec3(0.0))) * (0.220 + 0.320 * (1.0 - roughScatter)) * (0.55 + 0.45 * viewWrap) ;
+	               vec3 coloredGlassFill = sqrt(max(boundaryTint, vec3(0.0))) * (0.150 + 0.240 * (1.0 - roughScatter)) * (0.55 + 0.45 * viewWrap) ;
 	               through = max(through, coloredGlassFill * coloredGlassBody) ;
 	            }
 	            vec3 transmitWeight = clamp(transmission * (1.0 - metallic), 0.0, 1.0) * clamp(vec3(1.0) - fresnelV * 0.70, vec3(0.0), vec3(1.0)) ;
@@ -1211,7 +1219,7 @@ void main(){
             float denseVolumeCue = max(attenuationPresence * tintChromaWeight, neutralDispersionGlass * 0.78) ;
             denseVolumeCue = max(denseVolumeCue, attenuationPresence * neutralDispersionGlass * 0.40) ;
             float denseVolumeTint = clamp(transmission * opticalVolumeGate * denseVolumeCue, 0.0, 1.0) ;
-	            vec3 transmitted = through * volumeTint * transmitWeight * mix(1.00, 0.78, roughScatter) * mix(1.0, 1.08, sceneClearTransmission) * mix(1.0, 0.66, opticalIri * opticalVolumeGate) * mix(1.0, mix(0.48, 0.36, amberVolumeCue), denseVolumeTint) ;
+	            vec3 transmitted = through * volumeTint * transmitWeight * mix(1.00, 0.78, roughScatter) * mix(1.0, 1.08, sceneClearTransmission) * mix(1.0, 0.66, opticalIri * opticalVolumeGate) * mix(1.0, mix(0.72, 0.56, amberVolumeCue), denseVolumeTint) ;
             opticalLo += transmitted ;
 		            float bodyDensity = clamp(roughScatter * 0.40 + volumeScatter * 0.45 + max(tintChromaWeight, boundaryVolumeTint * 1.08) * 0.55, 0.0, 1.0) ;
             float opaqueLoss = mix(0.995, 0.92, bodyDensity) ;
@@ -1289,7 +1297,7 @@ void main(){
             vec3 bodyLight = mix(refrEnv, envSpec, 0.62) * bodyTint ;
             vec3 bodyCore = mix(bodyTint, bodyLight, 0.78) ;
 		            float coloredVolumeBody = max(attenuationPresence * max(tintChromaWeight, neutralDispersionGlass * 0.72), boundaryVolumeTint * 1.04) ;
-            float bodyStrength = max(neutralDispersionGlass * 0.060, mix(0.014, 0.145, tintChromaWeight)) ;
+            float bodyStrength = max(neutralDispersionGlass * 0.060, mix(0.010, 0.090, tintChromaWeight)) ;
             bodyStrength = max(bodyStrength, coloredVolumeBody * mix(0.045, 0.180, volumeScatter)) ;
             bodyStrength = max(bodyStrength, opticalIri * opticalVolumeGate * mix(0.045, 0.18, clamp(volumeScatter + silhouette * 0.75, 0.0, 1.0))) ;
             opticalLo += bodyCore * transmission * bodyStrength * (0.12 + 1.20 * silhouette) * (0.30 + 0.50 * volumeScatter) ;
@@ -1301,7 +1309,7 @@ void main(){
          }
          Lo = max(remainLo, vec3(0.0)) + opticalLo ;
          if(transmission > 0.001){
-		            float denseVolumeCue = max(max(attenuationPresence * max(tintChromaWeight, 0.42 * volumeScatter), boundaryVolumeTint * 1.15), neutralDispersionGlass * 0.86) ;
+		            float denseVolumeCue = max(max(attenuationPresence * max(tintChromaWeight, 0.32 * volumeScatter), boundaryVolumeTint * 0.70), neutralDispersionGlass * 0.86) ;
             denseVolumeCue = max(denseVolumeCue, attenuationPresence * neutralDispersionGlass * 0.46) ;
             float coloredVolumeGate = clamp(transmission * opticalVolumeGate * denseVolumeCue, 0.0, 1.0) ;
 	            if(coloredVolumeGate > 0.001){
@@ -1312,13 +1320,13 @@ void main(){
 		               vec3 denseBodyColor = denseBodyTint * mix(0.18, 0.68, 1.0 - roughScatter) * mix(0.46, 0.96, volumeScatter) ;
 	               denseBodyColor += edgeReflect * (0.05 + 0.17 * (1.0 - roughScatter)) ;
 	               vec3 tintedLo = max(Lo * mix(vec3(1.0), denseBodyTint, 0.93), denseBodyColor) ;
-		               Lo = mix(Lo, tintedLo, clamp(coloredVolumeGate * mix(0.34 + 0.42 * volumeScatter, 0.22 + 0.30 * volumeScatter, amberVolume), 0.0, mix(0.80, 0.58, amberVolume))) ;
-		               float denseShade = clamp(coloredVolumeGate * mix(0.18 + 0.40 * volumeScatter, 0.08 + 0.22 * volumeScatter, amberVolume) * (1.0 - roughScatter * 0.22), 0.0, mix(0.62, 0.32, amberVolume)) ;
+		               Lo = mix(Lo, tintedLo, clamp(coloredVolumeGate * mix(0.24 + 0.30 * volumeScatter, 0.12 + 0.20 * volumeScatter, amberVolume), 0.0, mix(0.58, 0.36, amberVolume))) ;
+		               float denseShade = clamp(coloredVolumeGate * mix(0.12 + 0.28 * volumeScatter, 0.04 + 0.14 * volumeScatter, amberVolume) * (1.0 - roughScatter * 0.22), 0.0, mix(0.44, 0.20, amberVolume)) ;
 		               Lo *= mix(vec3(1.0), max(denseBodyTint * mix(0.80, 1.0, neutralDispersionGlass), vec3(0.075, 0.026, 0.006)), denseShade) ;
 	               if(texturedBoundaryGate > 0.5 && attenuationColor.r < 0.92 && attenuationColor.g < 0.58 && attenuationColor.b < 0.22){
 		                  vec3 amberBody = mix(texturedVolumeTint, vec3(0.72, 0.33, 0.090), 0.74) ;
-		                  float amberDensity = clamp(boundaryVolumeTint * volumeScatter * (0.54 + 0.28 * (1.0 - roughScatter)), 0.0, 0.48) ;
-		                  Lo = mix(Lo, max(Lo * mix(amberBody, vec3(1.0), 0.28), amberBody * 0.090), amberDensity) ;
+		                  float amberDensity = clamp(boundaryVolumeTint * volumeScatter * (0.34 + 0.18 * (1.0 - roughScatter)), 0.0, 0.26) ;
+		                  Lo = mix(Lo, max(Lo * mix(amberBody, vec3(1.0), 0.48), amberBody * 0.050), amberDensity) ;
 	               }
 	            }
             float clearVolumeBody = clamp(transmission * opticalVolumeGate * (1.0 - attenuationPresence) * (1.0 - tintChromaWeight) * (1.0 - neutralDispersionGlass), 0.0, 1.0) ;
@@ -1327,20 +1335,20 @@ void main(){
                Lo *= mix(vec3(1.0), vec3(0.72, 0.77, 0.84), clearBodyShade) ;
             }
          }
-			         float amberAttenuationGlass = clamp(transmission * opticalVolumeGate * attenuationPresence * tintChromaWeight * smoothstep(0.52, 0.96, attenuationColor.r) * (1.0 - smoothstep(0.14, 0.38, attenuationColor.b)), 0.0, 1.0) ;
+			         float amberAttenuationGlass = clamp(transmission * opticalVolumeGate * attenuationPresence * tintChromaWeight * smoothstep(0.52, 0.96, attenuationColor.r) * (1.0 - smoothstep(0.20, 0.55, attenuationColor.b)), 0.0, 1.0) ;
 			         float amberColorGlass = amberAttenuationGlass ;
 		         float amberAttenuationCue = clamp(
-		            transmission * smoothstep(0.35, 1.35, thickness) *
-		            (1.0 - smoothstep(0.16, 0.42, attenuationColor.b)),
+		            transmission * opticalVolumeGate * attenuationPresence * tintChromaWeight * smoothstep(0.18, 1.35, opticalThickness) *
+		            (1.0 - smoothstep(0.20, 0.55, attenuationColor.b)),
 		            0.0,
-		            1.0
+		            0.68
 		         ) ;
 		         float amberBoundaryCue = clamp(
-		            transmission * smoothstep(0.20, 1.20, thickness) * texturedBoundaryGate *
+		            transmission * opticalVolumeGate * smoothstep(0.20, 1.20, opticalThickness) * texturedBoundaryGate *
 		            smoothstep(0.10, 0.55, boundaryLum) *
-		            clamp((boundaryTint.r - boundaryTint.b) * 2.8 + (boundaryTint.g - boundaryTint.b) * 1.4 + boundaryChroma * 0.65, 0.0, 1.0),
+		            clamp((boundaryTint.r - boundaryTint.b) * 1.8 + (boundaryTint.g - boundaryTint.b) * 0.9 + boundaryChroma * 0.42, 0.0, 1.0),
 		            0.0,
-		            1.0
+		            0.42
 		         ) ;
 		         amberColorGlass = max(amberColorGlass, max(amberAttenuationCue, amberBoundaryCue)) ;
 	         if(transmission > 0.001 && sceneClearTransmission > 0.001){
@@ -1371,7 +1379,7 @@ void main(){
 				            sceneResolve *= mix(1.0, 0.78, clamp(boundaryVolumeTint * volumeScatter, 0.0, 1.0)) ;
 				            sceneResolve *= mix(1.0, 0.92, clamp(tintChromaWeight + neutralDispersionGlass, 0.0, 1.0)) ;
 				            sceneResolve *= mix(1.0, 0.72, neutralDispersionGlass * (1.0 - roughScatter * 0.28)) ;
-					            sceneResolve = mix(sceneResolve, min(sceneResolve, mix(0.14, 0.22, volumeScatter)), amberColorGlass * (1.0 - roughScatter * 0.26)) ;
+					            sceneResolve = mix(sceneResolve, min(sceneResolve, mix(0.30, 0.42, volumeScatter)), amberColorGlass * 0.68 * (1.0 - roughScatter * 0.26)) ;
 				            Lo = mix(Lo, refractedSceneLo + rimLo, clamp(sceneResolve, 0.0, 0.96)) ;
 		         }
 			         if(amberColorGlass > 0.001){
@@ -1386,20 +1394,20 @@ void main(){
 			            if(boundaryVolumeTint > 0.001){
 			               float amberMottle = clamp(boundaryVolumeTint * (boundaryLum * 0.78 + boundaryChroma * 1.10), 0.0, 1.0) ;
 			               vec3 mottleColor = mix(vec3(0.30, 0.070, 0.010), vec3(0.92, 0.30, 0.050), amberMottle) ;
-			               amberFinalThrough = mix(amberFinalThrough, amberFinalThrough * mottleColor * 1.18, clamp(boundaryVolumeTint * 0.58, 0.0, 0.76)) ;
+			               amberFinalThrough = mix(amberFinalThrough, amberFinalThrough * mix(mottleColor, vec3(1.0), 0.42), clamp(boundaryVolumeTint * 0.24, 0.0, 0.32)) ;
 			            }
 				            vec3 amberFinalGloss = edgeReflect * vec3(1.20, 0.46, 0.12) * (0.020 + 0.62 * fresnelEdge) ;
 					            vec3 amberFinal = amberFinalThrough * (0.68 + 0.18 * viewWrap) + amberFinalGloss ;
-					            Lo = mix(Lo, amberFinal, clamp(amberColorGlass * (0.36 + 0.18 * volumeScatter) * (1.0 - roughScatter * 0.45), 0.0, 0.62)) ;
+					            Lo = mix(Lo, amberFinal, clamp(amberColorGlass * (0.18 + 0.12 * volumeScatter) * (1.0 - roughScatter * 0.45), 0.0, 0.34)) ;
 			         }
 		         if(boundaryVolumeTint > 0.001){
-			            float texturedVolumeResolve = clamp(boundaryVolumeTint * volumeScatter * (0.24 + 0.10 * roughScatter), 0.0, 0.28) ;
+			            float texturedVolumeResolve = clamp(boundaryVolumeTint * volumeScatter * (0.12 + 0.06 * roughScatter), 0.0, 0.16) ;
 			            vec3 amberBody = vec3(0.38, 0.16, 0.036) * (0.90 + 0.35 * (1.0 - roughScatter)) ;
 			            vec3 softenedTint = mix(texturedVolumeTint, vec3(1.0), 0.35) ;
-			            Lo = mix(Lo, max(Lo * softenedTint, amberBody * 0.42), texturedVolumeResolve) ;
+			            Lo = mix(Lo, max(Lo * mix(softenedTint, vec3(1.0), 0.35), amberBody * 0.22), texturedVolumeResolve) ;
 		            float mottle = clamp(boundaryLum * 0.95 + boundaryChroma * 0.80, 0.0, 1.0) ;
 		            vec3 mottleTint = mix(vec3(0.42, 0.18, 0.045), vec3(1.05, 0.62, 0.22), mottle) ;
-			            Lo *= mix(vec3(1.0), mottleTint, clamp(boundaryVolumeTint * 0.20, 0.0, 0.24)) ;
+			            Lo *= mix(vec3(1.0), mottleTint, clamp(boundaryVolumeTint * 0.10, 0.0, 0.12)) ;
 		         }
 		         if(amberColorGlass > 0.001){
 		            vec3 postScene = pow(max(sceneThrough, vec3(0.0)), vec3(1.35)) ;
@@ -1416,7 +1424,7 @@ void main(){
 		            }
 		            vec3 postGloss = edgeReflect * vec3(1.25, 0.46, 0.10) * (0.018 + 0.62 * amberRimPower) ;
 			            vec3 postFinal = postAmber * (0.72 + 0.16 * viewWrap) + postGloss ;
-			            Lo = mix(Lo, postFinal, clamp(amberColorGlass * (0.22 + 0.16 * volumeScatter) * (1.0 - roughScatter * 0.36), 0.0, 0.36)) ;
+			            Lo = mix(Lo, postFinal, clamp(amberColorGlass * (0.10 + 0.09 * volumeScatter) * (1.0 - roughScatter * 0.36), 0.0, 0.20)) ;
 		         }
 				         if(amberAttenuationGlass > 0.001 && hasSceneColorCapture()){
 				            float denseAmber = smoothstep(0.45, 0.95, amberAttenuationGlass) ;
@@ -1451,10 +1459,10 @@ void main(){
 					               vec3(0.54, 0.150, 0.026) * (0.34 + 0.36 * viewWrap) + edgeReflect * vec3(1.35, 0.48, 0.095) * (0.045 + 0.62 * fresnelEdge),
 					               0.72
 					            ) ;
-					            Lo = mix(Lo, amberLift, clamp(amberVolumeCue * (0.50 + 0.28 * volumeScatter) * (1.0 - roughScatter * 0.18), 0.0, 0.76)) ;
+					            Lo = mix(Lo, amberLift, clamp(amberVolumeCue * (0.22 + 0.18 * volumeScatter) * (1.0 - roughScatter * 0.18), 0.0, 0.42)) ;
 				         }
 					         if(amberColorGlass > 0.001){
-						            float amberBodyMask = clamp(max(amberColorGlass, amberVolumeCue) * (0.78 + 0.18 * volumeScatter) * (1.0 - roughScatter * 0.10), 0.0, 0.96) ;
+						            float amberBodyMask = clamp(max(amberColorGlass, amberVolumeCue) * (0.34 + 0.16 * volumeScatter) * (1.0 - roughScatter * 0.10), 0.0, 0.54) ;
 						            float amberSceneLum = dot(sceneThrough, vec3(0.2126, 0.7152, 0.0722)) ;
 						            float amberScene = smoothstep(0.18, 0.88, amberSceneLum) ;
 						            amberScene = mix(amberScene * 0.34, pow(amberScene, 1.80) * 0.68, 0.58) ;
@@ -1469,10 +1477,10 @@ void main(){
 						            float amberKeySpec = pow(max(dot(N, amberHalf), 0.0), mix(96.0, 38.0, roughScatter)) + pow(max(dot(R, amberKeyDir), 0.0), 18.0) * 0.42 ;
 						            amberBodySpec += vec3(1.55, 0.72, 0.22) * amberKeySpec * (0.20 + 0.80 * amberBodyMask) ;
 						            vec3 amberBodyTarget = amberBodyBase * (0.76 + 0.16 * viewWrap) + amberBodySpec + envSpec * vec3(0.42, 0.18, 0.040) * (0.020 + 0.10 * viewWrap) ;
-						            Lo = mix(Lo * vec3(0.34, 0.14, 0.045), amberBodyTarget, amberBodyMask) ;
+						            Lo = mix(Lo * vec3(0.70, 0.42, 0.20), amberBodyTarget, amberBodyMask) ;
 						         }
 						         if(neutralDispersionGlass > 0.001 && transmission > 0.001){
-						            float neutralBodyMask = clamp(neutralDispersionGlass * transmission * opticalVolumeGate * (0.50 + 0.34 * volumeScatter) * (1.0 - roughScatter * 0.18), 0.0, 0.86) ;
+						            float neutralBodyMask = clamp(neutralDispersionGlass * transmission * opticalVolumeGate * (0.36 + 0.22 * volumeScatter) * (1.0 - roughScatter * 0.18), 0.0, 0.62) ;
 						            float neutralSceneLum = dot(sceneThrough, vec3(0.2126, 0.7152, 0.0722)) ;
 						            float neutralScene = smoothstep(0.14, 0.92, neutralSceneLum) ;
 						            neutralScene = mix(neutralScene * 0.28, pow(neutralScene, 1.55) * 0.58, 0.55) ;
@@ -1508,22 +1516,24 @@ void main(){
 		            targetAlpha = mix(targetAlpha, max(targetAlpha, 0.78), thinGlassAlphaCue) ;
 		            targetAlpha = mix(targetAlpha, targetAlpha + 0.12, clarityLoss * roughScatter) ;
 			            targetAlpha = mix(targetAlpha, max(targetAlpha, 0.98), clamp(boundaryVolumeTint * volumeScatter * (1.0 - amberVolumeCue * 0.78), 0.0, 1.0)) ;
-			            targetAlpha = mix(targetAlpha, min(targetAlpha, mix(0.62, 0.78, roughScatter)), amberVolumeCue * (1.0 - roughScatter * 0.28)) ;
+			            targetAlpha = mix(targetAlpha, min(targetAlpha, mix(0.46, 0.64, roughScatter)), amberVolumeCue * (1.0 - roughScatter * 0.28)) ;
 			            targetAlpha = mix(targetAlpha, min(targetAlpha, clearAlpha), clearNeutralGlass * (1.0 - roughScatter * 0.35)) ;
 		            transAlpha = max(transAlpha, clamp(targetAlpha, 0.22, 0.96)) ;
 		         }
 		         transAlpha *= mix(1.0, clamp(dot(transTint, vec3(0.299, 0.587, 0.114)), 0.55, 1.0), 0.06) ;
 			         if(alphaMode == 2u || transmission > 0.0 || diffuseTransmission > 0.0){
-			            if(hasSceneColorCapture()){
-			               float captureAlpha = alphaMode == 2u ? min(baseAlpha, transAlpha) : 1.0 ;
-			               if(transmission > 0.0 && baseAlpha >= 0.995){
-			                  captureAlpha = 1.0 ;
-			               }
-			               baseAlpha = clamp(captureAlpha, 0.02, 1.0) ;
-			            } else {
-			               baseAlpha = min(baseAlpha, transAlpha) ;
-			            }
-			         }
+		            float authoredAlpha = alphaMode == 2u ? baseAlpha : 1.0 ;
+		            if(transmission > 0.0){
+		               float transStrength = clamp(transmission + diffuseTransmission * 0.35, 0.0, 1.0) ;
+               // Transmission/refraction is already resolved into Lo via scene/env
+               // sampling. Keeping framebuffer alpha too low washes out glass,
+               // iridescent covers, and other volume assets against the gallery.
+               float opticalAlpha = min(authoredAlpha, max(0.40, transAlpha * mix(1.02, 0.74, transStrength))) ;
+               baseAlpha = clamp(opticalAlpha, 0.38, 0.96) ;
+		            } else {
+		               baseAlpha = min(authoredAlpha, clamp(transAlpha, 0.02, 0.92)) ;
+		            }
+		         }
       }
       if(baseIndex < 1024u && !extensionSurface && metallic <= 0.12 && transmission <= 0.001 && diffuseTransmission <= 0.001){
          float albedoLum = dot(baseColor, vec3(0.299, 0.587, 0.114)) ;

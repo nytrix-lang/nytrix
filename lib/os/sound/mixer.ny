@@ -3,7 +3,7 @@
 ;; References:
 ;; - std.os.sound
 ;; - std.os
-module std.os.sound.mixer(mix_sounds, clamp_s16, load16_s)
+module std.os.sound.mixer(mix_sounds, clamp_s16, load16_s, set_fx_enabled, fx_enabled, set_fx_param, get_fx_param, reset_fx, fx_preset)
 use std.core
 use std.math
 use std.os (mutex_lock, mutex_unlock)
@@ -12,6 +12,43 @@ use std.os.sound.diag as sound_debug
 mut _debug = -1
 mut _acc_buf = 0
 mut _acc_frames = 0
+mut _fx_enabled = true
+mut _fx_drive = 0.08
+mut _fx_comp = 0.20
+mut _fx_hpf = 28.0
+mut _fx_lpf = 16000.0
+mut _fx_delay = 0.0
+mut _fx_delay_time = 0.22
+mut _fx_delay_fb = 0.18
+mut _fx_reverb = 0.0
+mut _fx_chorus = 0.12
+mut _fx_flanger = 0.0
+mut _fx_crush = 0.0
+mut _fx_trem = 0.0
+mut _fx_pan = 0.0
+mut _fx_tone = 0.58
+
+mut _fx_lp_l = 0.0
+mut _fx_lp_r = 0.0
+mut _fx_hp_l = 0.0
+mut _fx_hp_r = 0.0
+mut _fx_delay_buf = 0
+mut _fx_delay_frames = 0
+mut _fx_delay_pos = 0
+mut _fx_mod_buf = 0
+mut _fx_mod_frames = 0
+mut _fx_mod_pos = 0
+mut _fx_mod_phase = 0.0
+mut _fx_motion_phase = 0.0
+mut _fx_comp_env_l = 0.0
+mut _fx_comp_env_r = 0.0
+mut _fx_delay_lp_l = 0.0
+mut _fx_delay_lp_r = 0.0
+mut _fx_hold_l = 0.0
+mut _fx_hold_r = 0.0
+mut _fx_hold_i = 0
+mut _fx_delay_active = false
+mut _fx_mod_active = false
 def SAMPLE_FMT_S16 = 1
 def SAMPLE_FMT_U8 = 2
 def SAMPLE_FMT_S24 = 3
@@ -155,6 +192,434 @@ fn _mix_one_generic(any acc, any s_ptr, any s_channels, any s_fmt, any s_bits, a
    __flt_to_int(current)
 }
 
+fn set_fx_enabled(bool enabled=true) any { _fx_enabled = enabled }
+fn fx_enabled() bool { _fx_enabled }
+
+fn reset_fx() any {
+   _fx_enabled = true
+   _fx_drive = 0.08
+   _fx_comp = 0.20
+   _fx_hpf = 28.0
+   _fx_lpf = 16000.0
+   _fx_delay = 0.0
+   _fx_delay_time = 0.22
+   _fx_delay_fb = 0.18
+   _fx_reverb = 0.0
+   _fx_chorus = 0.12
+   _fx_flanger = 0.0
+   _fx_crush = 0.0
+   _fx_trem = 0.0
+   _fx_pan = 0.0
+   _fx_tone = 0.58
+   _fx_lp_l = 0.0
+   _fx_lp_r = 0.0
+   _fx_hp_l = 0.0
+   _fx_hp_r = 0.0
+   _fx_mod_phase = 0.0
+   _fx_motion_phase = 0.0
+   _fx_comp_env_l = 0.0
+   _fx_comp_env_r = 0.0
+   _fx_delay_lp_l = 0.0
+   _fx_delay_lp_r = 0.0
+   _fx_hold_i = 0
+   _fx_delay_active = false
+   _fx_mod_active = false
+}
+
+fn set_fx_param(str name, any value) any {
+   def v = value + 0.0
+   case name {
+      "drive", "saturation", "distortion" -> { _fx_drive = clamp01(v) }
+      "compress", "compression", "comp" -> { _fx_comp = clamp01(v) }
+      "hpf", "highpass", "high_pass" -> { _fx_hpf = clamp(v, 10.0, 12000.0) }
+      "lpf", "lowpass", "low_pass" -> { _fx_lpf = clamp(v, 200.0, 22000.0) }
+      "delay", "echo" -> { _fx_delay = clamp01(v) }
+      "delay_time", "echo_time" -> { _fx_delay_time = clamp(v, 0.025, 1.50) }
+      "delay_fb", "feedback" -> { _fx_delay_fb = clamp(v, 0.0, 0.92) }
+      "reverb", "space" -> { _fx_reverb = clamp01(v) }
+      "chorus" -> { _fx_chorus = clamp01(v) }
+      "flanger", "flange" -> { _fx_flanger = clamp01(v) }
+      "bitcrush", "crush", "bitcrusher" -> { _fx_crush = clamp01(v) }
+      "tremolo", "trem" -> { _fx_trem = clamp01(v) }
+      "autopan", "pan_lfo" -> { _fx_pan = clamp01(v) }
+      "tone", "air" -> { _fx_tone = clamp01(v) }
+      _ -> nil
+   }
+}
+
+fn get_fx_param(str name) f64 {
+   case name {
+      "drive", "saturation", "distortion" -> _fx_drive
+      "compress", "compression", "comp" -> _fx_comp
+      "hpf", "highpass", "high_pass" -> _fx_hpf
+      "lpf", "lowpass", "low_pass" -> _fx_lpf
+      "delay", "echo" -> _fx_delay
+      "delay_time", "echo_time" -> _fx_delay_time
+      "delay_fb", "feedback" -> _fx_delay_fb
+      "reverb", "space" -> _fx_reverb
+      "chorus" -> _fx_chorus
+      "flanger", "flange" -> _fx_flanger
+      "bitcrush", "crush", "bitcrusher" -> _fx_crush
+      "tremolo", "trem" -> _fx_trem
+      "autopan", "pan_lfo" -> _fx_pan
+      "tone", "air" -> _fx_tone
+      _ -> 0.0
+   }
+}
+
+fn fx_preset(str name) any {
+   case name {
+      "clean" -> {
+_fx_drive = 0.04
+         _fx_comp = 0.14
+         _fx_hpf = 24.0
+         _fx_lpf = 18000.0
+_fx_delay = 0.0
+         _fx_reverb = 0.0
+         _fx_chorus = 0.04
+         _fx_flanger = 0.0
+         _fx_crush = 0.0
+         _fx_trem = 0.0
+         _fx_pan = 0.0
+      }
+      "wide" -> {
+_fx_drive = 0.08
+         _fx_comp = 0.18
+         _fx_hpf = 34.0
+         _fx_lpf = 15500.0
+_fx_delay = 0.04
+         _fx_delay_time = 0.18
+         _fx_delay_fb = 0.16
+         _fx_reverb = 0.08
+         _fx_chorus = 0.28
+         _fx_flanger = 0.0
+         _fx_crush = 0.0
+         _fx_trem = 0.0
+         _fx_pan = 0.12
+      }
+      "echo" -> {
+_fx_drive = 0.07
+         _fx_comp = 0.22
+         _fx_hpf = 42.0
+         _fx_lpf = 13000.0
+_fx_delay = 0.32
+         _fx_delay_time = 0.26
+         _fx_delay_fb = 0.36
+         _fx_reverb = 0.05
+         _fx_chorus = 0.14
+         _fx_flanger = 0.0
+         _fx_crush = 0.0
+         _fx_trem = 0.0
+         _fx_pan = 0.06
+      }
+      "space" -> {
+_fx_drive = 0.05
+         _fx_comp = 0.18
+         _fx_hpf = 55.0
+         _fx_lpf = 11500.0
+_fx_delay = 0.18
+         _fx_delay_time = 0.34
+         _fx_delay_fb = 0.30
+         _fx_reverb = 0.34
+         _fx_chorus = 0.22
+         _fx_flanger = 0.0
+         _fx_crush = 0.0
+         _fx_trem = 0.0
+         _fx_pan = 0.12
+      }
+      "lofi" -> {
+_fx_drive = 0.20
+         _fx_comp = 0.36
+         _fx_hpf = 85.0
+         _fx_lpf = 5200.0
+_fx_delay = 0.08
+         _fx_delay_time = 0.18
+         _fx_delay_fb = 0.22
+         _fx_reverb = 0.08
+         _fx_chorus = 0.10
+         _fx_flanger = 0.0
+         _fx_crush = 0.36
+         _fx_trem = 0.08
+         _fx_pan = 0.0
+      }
+      "crush" -> {
+_fx_drive = 0.28
+         _fx_comp = 0.42
+         _fx_hpf = 120.0
+         _fx_lpf = 4200.0
+_fx_delay = 0.0
+         _fx_reverb = 0.0
+         _fx_chorus = 0.02
+         _fx_flanger = 0.0
+         _fx_crush = 0.62
+         _fx_trem = 0.0
+         _fx_pan = 0.0
+      }
+      "flange" -> {
+_fx_drive = 0.10
+         _fx_comp = 0.22
+         _fx_hpf = 40.0
+         _fx_lpf = 13500.0
+_fx_delay = 0.06
+         _fx_delay_time = 0.16
+         _fx_delay_fb = 0.18
+         _fx_reverb = 0.04
+         _fx_chorus = 0.06
+         _fx_flanger = 0.50
+         _fx_crush = 0.0
+         _fx_trem = 0.0
+         _fx_pan = 0.10
+      }
+      _ -> reset_fx()
+   }
+}
+
+fn _fx_ensure_delay(int rate) any {
+   mut frames = rate * 3
+   if frames < 4096 { frames = 4096 }
+   if _fx_delay_buf != 0 && _fx_delay_frames >= frames { return nil }
+   def bytes = frames * 2 * 4
+   if _fx_delay_buf == 0 { _fx_delay_buf = malloc(bytes) } else { _fx_delay_buf = realloc(_fx_delay_buf, bytes) }
+if _fx_delay_buf != 0 { _fx_delay_frames = frames
+   _fx_delay_pos = 0
+   memset(_fx_delay_buf, 0, bytes) }
+}
+
+fn _fx_ensure_mod(int rate) any {
+   mut frames = rate / 8
+   if frames < 2048 { frames = 2048 }
+   if _fx_mod_buf != 0 && _fx_mod_frames >= frames { return nil }
+   def bytes = frames * 2 * 4
+   if _fx_mod_buf == 0 { _fx_mod_buf = malloc(bytes) } else { _fx_mod_buf = realloc(_fx_mod_buf, bytes) }
+if _fx_mod_buf != 0 { _fx_mod_frames = frames
+   _fx_mod_pos = 0
+   memset(_fx_mod_buf, 0, bytes) }
+}
+
+fn _fx_alpha(f64 hz, f64 rate) f64 {
+   def h = clamp(hz, 1.0, rate * 0.45)
+   def rc = 1.0 / (6.283185307179586 * h)
+   def dt = 1.0 / rate
+   clamp01(dt / (rc + dt))
+}
+
+fn _fx_soft(f64 x) f64 { x / (1.0 + abs(x) * 0.72) }
+
+fn _fx_quant(f64 x, f64 crush) f64 {
+   if crush <= 0.0001 { return x }
+   mut bits = int(16.0 - crush * 12.0)
+   if bits < 4 { bits = 4 }
+   if bits > 16 { bits = 16 }
+   def levels = pow(2.0, bits + 0.0) * 0.5 - 1.0
+   if levels <= 1.0 { return x }
+   def q = x * levels
+   __flt_to_int(q + ((q >= 0.0) ? 0.5 : (0.0 - 0.5))) / levels
+}
+
+fn _fx_wrap_pos(int pos, int frames) int {
+   mut p = pos
+   while p < 0 { p += frames }
+   while p >= frames { p -= frames }
+   p
+}
+
+fn _fx_read_delay(any buf, int frames, f64 pos, int ch) f64 {
+   if !buf || frames <= 1 { return 0.0 }
+   mut p = pos
+   def ff = frames + 0.0
+   while p < 0.0 { p += ff }
+   while p >= ff { p -= ff }
+   mut i0 = int(p)
+   mut i1 = i0 + 1
+   if i1 >= frames { i1 = 0 }
+   def t = p - (i0 + 0.0)
+   def off = ch * 4
+   def a = load32_f32(buf, i0 * 8 + off)
+   def b = load32_f32(buf, i1 * 8 + off)
+   a + (b - a) * t
+}
+
+fn _fx_clear_delay() {
+   if _fx_delay_buf && _fx_delay_frames > 0 { memset(_fx_delay_buf, 0, _fx_delay_frames * 8) }
+   _fx_delay_lp_l = 0.0
+   _fx_delay_lp_r = 0.0
+   _fx_delay_active = false
+   return
+}
+
+fn _fx_clear_mod() {
+   if _fx_mod_buf && _fx_mod_frames > 0 { memset(_fx_mod_buf, 0, _fx_mod_frames * 8) }
+   _fx_mod_active = false
+   return
+}
+
+fn _fx_comp_gain(f64 env, f64 amt) f64 {
+   if amt <= 0.0001 { return 1.0 }
+   def thr = 0.78 - amt * 0.42
+   if env <= thr || env <= 0.000001 { return 1.0 }
+   def ratio = 1.0 + amt * 6.0
+   (thr + (env - thr) / ratio) / env
+}
+
+fn _fx_apply(any acc, int period_frames, int out_rate) any {
+   if !_fx_enabled { return nil }
+
+   def rate = max(1000.0, out_rate + 0.0)
+   def hp_a = _fx_alpha(_fx_hpf, rate)
+   def lp_hz = clamp(_fx_lpf * (0.70 + _fx_tone * 0.45), 200.0, rate * 0.46)
+   def lp_on = lp_hz < rate * 0.44
+   def lp_a = _fx_alpha(lp_hz, rate)
+   def use_delay = _fx_delay > 0.0001 || _fx_reverb > 0.0001
+   def use_mod = _fx_chorus > 0.0001 || _fx_flanger > 0.0001
+   def use_crush = _fx_crush > 0.0001
+
+   if use_delay {
+      _fx_ensure_delay(out_rate)
+      _fx_delay_active = true
+   } elif _fx_delay_active {
+      _fx_clear_delay()
+   }
+
+   if use_mod {
+      _fx_ensure_mod(out_rate)
+      _fx_mod_active = true
+   } elif _fx_mod_active {
+      _fx_clear_mod()
+   }
+
+   if !use_crush { _fx_hold_i = 0 }
+
+   def comp_att = 1.0 - exp((0.0 - 1.0) / (max(0.002, 0.004 + _fx_comp * 0.010) * rate))
+   def comp_rel = 1.0 - exp((0.0 - 1.0) / (max(0.020, 0.060 + _fx_comp * 0.160) * rate))
+
+   mut f = 0
+   while f < period_frames {
+      def loff = f * 8
+      def roff = loff + 4
+      mut l = _load32_s(acc, loff) / 32768.0
+      mut r = _load32_s(acc, roff) / 32768.0
+
+      ;; Cleanup EQ: DC/high-pass first, musical one-pole low-pass after.
+      _fx_hp_l += hp_a * (l - _fx_hp_l)
+      _fx_hp_r += hp_a * (r - _fx_hp_r)
+      l = l - _fx_hp_l
+      r = r - _fx_hp_r
+
+      if lp_on {
+         _fx_lp_l += lp_a * (l - _fx_lp_l)
+         _fx_lp_r += lp_a * (r - _fx_lp_r)
+         l = _fx_lp_l
+         r = _fx_lp_r
+      } else {
+         _fx_lp_l = l
+         _fx_lp_r = r
+      }
+
+      ;; Character stage: soft drive with makeup compensation, not harsh clipping.
+      if _fx_drive > 0.0001 {
+         def pre = 1.0 + _fx_drive * 3.2
+         def post = 1.0 / (1.0 + _fx_drive * 1.15)
+         l = _fx_soft(l * pre) * post
+         r = _fx_soft(r * pre) * post
+      }
+
+      ;; Bitcrush is intentionally conservative: fewer DC jumps, sane hold times.
+      if use_crush {
+         mut hold = int(1.0 + _fx_crush * _fx_crush * 20.0)
+         if hold < 1 { hold = 1 }
+         if _fx_hold_i <= 0 {
+            _fx_hold_l = _fx_quant(l, _fx_crush * 0.86)
+            _fx_hold_r = _fx_quant(r, _fx_crush * 0.86)
+            _fx_hold_i = hold
+         }
+         l = _fx_hold_l
+         r = _fx_hold_r
+         _fx_hold_i -= 1
+      }
+
+      _fx_mod_phase += (0.045 + _fx_chorus * 0.12 + _fx_flanger * 0.32) / rate
+      _fx_motion_phase += (0.42 + _fx_trem * 4.20 + _fx_pan * 0.56) / rate
+      while _fx_mod_phase >= 1.0 { _fx_mod_phase -= 1.0 }
+      while _fx_motion_phase >= 1.0 { _fx_motion_phase -= 1.0 }
+
+      ;; Chorus/flanger: fractional short delay, very damped feedback.
+      if use_mod && _fx_mod_buf != 0 && _fx_mod_frames > 1 {
+         def ph = _fx_mod_phase * 6.283185307179586
+         def m1 = (sin(ph) + 1.0) * 0.5
+         def m2 = (sin(ph + 3.141592653589793) + 1.0) * 0.5
+         def base = 0.0048 + _fx_chorus * 0.010 + _fx_flanger * 0.0010
+         def depth = _fx_chorus * 0.0075 + _fx_flanger * 0.0028
+         def dl = _fx_read_delay(_fx_mod_buf, _fx_mod_frames, (_fx_mod_pos + 0.0) - (base + m1 * depth) * rate, 0)
+         def dr = _fx_read_delay(_fx_mod_buf, _fx_mod_frames, (_fx_mod_pos + 0.0) - (base + m2 * depth) * rate, 1)
+         def wet = clamp01(_fx_chorus * 0.18 + _fx_flanger * 0.24)
+         def fb = clamp(_fx_flanger * 0.16, 0.0, 0.24)
+         store32_f32(_fx_mod_buf, l + dl * fb, _fx_mod_pos * 8)
+         store32_f32(_fx_mod_buf, r + dr * fb, _fx_mod_pos * 8 + 4)
+         l = l * (1.0 - wet) + dl * wet
+         r = r * (1.0 - wet) + dr * wet
+         _fx_mod_pos += 1
+         if _fx_mod_pos >= _fx_mod_frames { _fx_mod_pos = 0 }
+      }
+
+      ;; Echo/space: damped feedback path with crossfeed and lower wet ceiling.
+      if use_delay && _fx_delay_buf != 0 && _fx_delay_frames > 1 {
+         def dtime = clamp(_fx_delay_time, 0.025, 1.5)
+         def dpos = (_fx_delay_pos + 0.0) - dtime * rate
+         def hpos = (_fx_delay_pos + 0.0) - max(1.0, dtime * 0.43 * rate)
+         def qpos = (_fx_delay_pos + 0.0) - max(1.0, dtime * 0.67 * rate)
+         def el = _fx_read_delay(_fx_delay_buf, _fx_delay_frames, dpos, 0)
+         def er = _fx_read_delay(_fx_delay_buf, _fx_delay_frames, dpos, 1)
+         def hl = _fx_read_delay(_fx_delay_buf, _fx_delay_frames, hpos, 0)
+         def hr = _fx_read_delay(_fx_delay_buf, _fx_delay_frames, hpos, 1)
+         def ql = _fx_read_delay(_fx_delay_buf, _fx_delay_frames, qpos, 0)
+         def qr = _fx_read_delay(_fx_delay_buf, _fx_delay_frames, qpos, 1)
+         def wet = clamp01(_fx_delay) * 0.55
+         def rv = clamp01(_fx_reverb) * 0.62
+         def fb = clamp(_fx_delay_fb * 0.55 + rv * 0.16, 0.0, 0.62)
+         _fx_delay_lp_l += 0.11 * ((el * 0.68 + hl * 0.20 + qr * 0.12) - _fx_delay_lp_l)
+         _fx_delay_lp_r += 0.11 * ((er * 0.68 + hr * 0.20 + ql * 0.12) - _fx_delay_lp_r)
+         def feed_l = _fx_soft(_fx_delay_lp_l * fb)
+         def feed_r = _fx_soft(_fx_delay_lp_r * fb)
+         store32_f32(_fx_delay_buf, l + feed_l, _fx_delay_pos * 8)
+         store32_f32(_fx_delay_buf, r + feed_r, _fx_delay_pos * 8 + 4)
+         l = l + el * wet + (hl * 0.24 + qr * 0.14) * rv
+         r = r + er * wet + (hr * 0.24 + ql * 0.14) * rv
+         _fx_delay_pos += 1
+         if _fx_delay_pos >= _fx_delay_frames { _fx_delay_pos = 0 }
+      }
+
+      ;; Motion after spatial FX, equal-power-ish autopan and gentle tremolo.
+      if _fx_trem > 0.0001 || _fx_pan > 0.0001 {
+         def ph = _fx_motion_phase * 6.283185307179586
+         def trem = (sin(ph) + 1.0) * 0.5
+         def amp = 1.0 - _fx_trem * trem * 0.36
+         def pan = sin(ph * 0.73) * _fx_pan * 0.48
+         def lg = sqrt(clamp01(0.5 - pan * 0.5)) * 1.41421356
+         def rg = sqrt(clamp01(0.5 + pan * 0.5)) * 1.41421356
+         l = l * amp * lg
+         r = r * amp * rg
+      }
+
+      ;; Smooth compressor and safety limiter.
+      if _fx_comp > 0.0001 {
+         def al = abs(l)
+         def ar = abs(r)
+         _fx_comp_env_l += (al > _fx_comp_env_l ? comp_att : comp_rel) * (al - _fx_comp_env_l)
+         _fx_comp_env_r += (ar > _fx_comp_env_r ? comp_att : comp_rel) * (ar - _fx_comp_env_r)
+         l = l * _fx_comp_gain(_fx_comp_env_l, _fx_comp)
+         r = r * _fx_comp_gain(_fx_comp_env_r, _fx_comp)
+      }
+
+      l = _fx_soft(l * 1.025)
+      r = _fx_soft(r * 1.025)
+      l = clamp(l, -0.985, 0.985)
+      r = clamp(r, -0.985, 0.985)
+      store32(acc, __flt_to_int(l * 32767.0), loff)
+      store32(acc, __flt_to_int(r * 32767.0), roff)
+      f += 1
+   }
+}
+
 fn mix_sounds(any mix_buf, any buf_size, any active_sounds, any master_vol, any mtx, any out_rate=44100, any out_format=1) list {
    "Implements `mix_sounds`."
    if _debug == -1 { _debug = sound_debug.enabled() ? 1 : 0 }
@@ -227,6 +692,7 @@ fn mix_sounds(any mix_buf, any buf_size, any active_sounds, any master_vol, any 
       i += 1
    }
    _unlock(mtx)
+   _fx_apply(acc, period_frames, int(out_rate_f))
    mut s = 0
    def total_samples = period_frames * 2
    while s < total_samples {
