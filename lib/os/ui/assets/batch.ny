@@ -51,7 +51,7 @@ fn terminal_log_enabled(bool active, bool fast_env) bool {
    !active || !fast_env || ui_profile.env_truthy_cached("NY_UI_BATCH_TERMINAL_LOG")
 }
 
-fn dump_anim_pose_fraction(f64 fallback=0.35) f64 {
+fn dump_anim_pose_fraction(f64 fallback=0.5) f64 {
    "Runs the dump anim pose fraction operation."
    def raw = ui_profile.env_trim_cached("NY_UI_DUMP_ANIM_POSE_FRACTION")
    if raw.len <= 0 { return fallback }

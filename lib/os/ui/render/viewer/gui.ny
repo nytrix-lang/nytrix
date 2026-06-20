@@ -31,10 +31,12 @@ mut _event_mouse_down0, _event_mouse_pressed0, _event_mouse_released0 = false, f
 mut _suppress_mouse_frames, _suppress_mouse_until_up = 0, false
 mut _event_scroll_dx, _event_scroll_dy = 0.0, 0.0
 mut _key_events = []
+mut _key_mask_0, _key_mask_1, _key_mask_2, _key_mask_3 = 0, 0, 0, 0
+mut _key_mask_4, _key_mask_5, _key_mask_6, _key_mask_7 = 0, 0, 0, 0
 mut _text_events = ""
 mut _windows = dict(32)
 mut _widget_state = dict(64)
-mut _current_window, _current_window_id_cache = 0, ""
+mut _current_window, _current_window_id_cache, _widget_id_prefix = 0, "", ""
 mut _current_body_x_cache, _current_body_y_cache = 0.0, 0.0
 mut _current_body_w_cache, _current_body_h_cache = 0.0, 0.0
 mut _current_cursor_y_cache, _focus_collect_active = 0.0, false
@@ -64,6 +66,7 @@ mut _wants_mouse, _wants_keyboard, _debug_overlay = false, false, false
 mut _last_item = [0.0, 0.0, 0.0, 0.0]
 mut _hot_rect = [0.0, 0.0, 0.0, 0.0]
 mut _active_rect = [0.0, 0.0, 0.0, 0.0]
+mut _iw_visible, _iw_hovered, _iw_held, _iw_clicked, _iw_released = false, false, false, false, false
 mut _same_line_next, _same_line_gap = false, 0.0
 mut _scroll_area_active, _scroll_area_parent, _scroll_area_id = false, 0, ""
 mut _scroll_area_rect = [0.0, 0.0, 0.0, 0.0]
@@ -73,6 +76,10 @@ mut _scroll_area_capture_rect = [0.0, 0.0, 0.0, 0.0]
 mut _text_fit_cache = dict(512)
 mut _text_measure_cache = dict(1024)
 mut _font_h_cache = dict(16)
+mut _text_caches_ready = true
+mut _gui_frame_id = 0
+mut _font_metric_frame = -1
+mut _cached_body_h, _cached_title_h, _cached_small_h = 0.0, 0.0, 0.0
 mut _text_run_queue = []
 def int _TEXT_SELECT_ALL = -9001
 def int _TEXT_COPY = -9002
@@ -90,9 +97,11 @@ mut _panel_active_rgba = [0.125, 0.125, 0.132, 0.96]
 mut _popup_rgba = [0.000, 0.000, 0.000, 1.00]
 
 fn _ensure_text_caches() any {
+   if _text_caches_ready { return 0 }
    if !is_dict(_text_fit_cache) { _text_fit_cache = dict(512) }
    if !is_dict(_text_measure_cache) { _text_measure_cache = dict(1024) }
    if !is_dict(_font_h_cache) { _font_h_cache = dict(16) }
+   _text_caches_ready = true
 }
 
 fn _ui_text(any txt) str {
@@ -186,6 +195,43 @@ fn _clear_pending_input_events() any {
    _event_mouse_has_pos, _event_mouse_down0_known, _event_mouse_down0 = false, false, false
    _event_mouse_pressed0, _event_mouse_released0 = false, false
    _event_scroll_dx, _event_scroll_dy = 0.0, 0.0
+}
+
+fn _clear_key_masks() any {
+   _key_mask_0, _key_mask_1, _key_mask_2, _key_mask_3 = 0, 0, 0, 0
+   _key_mask_4, _key_mask_5, _key_mask_6, _key_mask_7 = 0, 0, 0, 0
+}
+
+fn _key_mask_set(int key) any {
+   if key < 0 || key >= 512 { return 0 }
+   def bit = 1 << (key & 63)
+   case key / 64 {
+      0 -> { _key_mask_0 = _key_mask_0 | bit }
+      1 -> { _key_mask_1 = _key_mask_1 | bit }
+      2 -> { _key_mask_2 = _key_mask_2 | bit }
+      3 -> { _key_mask_3 = _key_mask_3 | bit }
+      4 -> { _key_mask_4 = _key_mask_4 | bit }
+      5 -> { _key_mask_5 = _key_mask_5 | bit }
+      6 -> { _key_mask_6 = _key_mask_6 | bit }
+      7 -> { _key_mask_7 = _key_mask_7 | bit }
+      _ -> 0
+   }
+}
+
+fn _key_mask_has(int key) bool {
+   if key < 0 || key >= 512 { return false }
+   def bit = 1 << (key & 63)
+   case key / 64 {
+      0 -> (_key_mask_0 & bit) != 0
+      1 -> (_key_mask_1 & bit) != 0
+      2 -> (_key_mask_2 & bit) != 0
+      3 -> (_key_mask_3 & bit) != 0
+      4 -> (_key_mask_4 & bit) != 0
+      5 -> (_key_mask_5 & bit) != 0
+      6 -> (_key_mask_6 & bit) != 0
+      7 -> (_key_mask_7 & bit) != 0
+      _ -> false
+   }
 }
 
 fn suppress_mouse_clicks(int frames=3, bool until_up=true) any {
@@ -522,6 +568,9 @@ fn reset_state() any {
 
 fn _reset_font_metric_caches() any {
    _text_fit_cache, _text_measure_cache, _font_h_cache = dict(512), dict(1024), dict(16)
+   _text_caches_ready = true
+   _font_metric_frame = -1
+   _cached_body_h, _cached_title_h, _cached_small_h = 0.0, 0.0, 0.0
 }
 
 fn set_fonts(int body_font, int title_font=0, int small_font=0) any {
@@ -578,7 +627,7 @@ fn _font_title_id() int { (_font_title > 0) ? _font_title : _font_body() }
 fn _font_small_id() int { (_font_small > 0) ? _font_small : _font_body() }
 
 fn _measure_text_ui(int font_id, any txt) list {
-   _ensure_text_caches()
+   if !_text_caches_ready { _ensure_text_caches() }
    def fid = (font_id > 0) ? font_id : _font_body()
    def s = _ui_text(txt)
    def n = str.len(s)
@@ -591,10 +640,24 @@ fn _measure_text_ui(int font_id, any txt) list {
 }
 
 fn _font_h_for(int font_id) f64 {
-   _ensure_text_caches()
+   if !_text_caches_ready { _ensure_text_caches() }
    def fid = (font_id > 0) ? font_id : _font_body()
+   if _font_metric_frame == _gui_frame_id {
+      if fid == _font_body() && _cached_body_h > 0.0 { return _cached_body_h }
+      if fid == _font_title_id() && _cached_title_h > 0.0 { return _cached_title_h }
+      if fid == _font_small_id() && _cached_small_h > 0.0 { return _cached_small_h }
+   } else {
+      _font_metric_frame = _gui_frame_id
+      _cached_body_h, _cached_title_h, _cached_small_h = 0.0, 0.0, 0.0
+   }
    def key = to_str(fid)
-   if _font_h_cache.contains(key) { return float(_font_h_cache.get(key, _sx(15.0))) }
+   if _font_h_cache.contains(key) {
+      def cached = float(_font_h_cache.get(key, _sx(15.0)))
+      if fid == _font_body() { _cached_body_h = cached }
+      if fid == _font_title_id() { _cached_title_h = cached }
+      if fid == _font_small_id() { _cached_small_h = cached }
+      return cached
+   }
    mut h = float(font_line_height(fid))
    mut asc = float(font_ascent(fid))
    if asc > 0.0 {
@@ -606,6 +669,9 @@ fn _font_h_for(int font_id) f64 {
    }
    if h < _sx(10.0) { h = _sx(15.0) }
    _font_h_cache[key] = h
+   if fid == _font_body() { _cached_body_h = h }
+   if fid == _font_title_id() { _cached_title_h = h }
+   if fid == _font_small_id() { _cached_small_h = h }
    h
 }
 
@@ -617,7 +683,7 @@ fn _text_fit_cache_key(int font_id, any txt, f64 max_w) str {
 }
 
 fn _text_fit_cache_put(str key, str value) str {
-   _ensure_text_caches()
+   if !_text_caches_ready { _ensure_text_caches() }
    def k, v = to_str(key), to_str(value)
    if k.len > 0 { _text_fit_cache = cache.cache_put_reset(_text_fit_cache, k, v, 4096, 512) }
    v
@@ -638,7 +704,7 @@ fn _text_likely_fits_ascii(int font_id, str s, f64 max_w) bool {
 }
 
 fn _text_fit(int font_id, any txt, f64 max_w=0.0) str {
-   _ensure_text_caches()
+   if !_text_caches_ready { _ensure_text_caches() }
    def s = _ui_text(txt)
    if float(max_w) <= 0.0 { return s }
    def fid = (font_id > 0) ? font_id : _font_body()
@@ -1111,6 +1177,7 @@ fn _event_pointer_claimed() bool { _pointer_window_id() != "" || _active_widget_
 fn _queue_key_event(int key) any {
    if !is_list(_key_events) { _key_events = [] }
    _key_events = _key_events.append(key)
+   _key_mask_set(key)
 }
 
 fn prepare_input(any win, f64 ww=0.0, f64 wh=0.0) any {
@@ -1124,13 +1191,18 @@ fn prepare_input(any win, f64 ww=0.0, f64 wh=0.0) any {
       _wants_mouse, _wants_keyboard = false, false
       _mouse_down0, _mouse_down0_prev = false, false
       _mouse_pressed0, _mouse_released0 = false, false
+      _key_events = []
+      _clear_key_masks()
       _clear_pending_input_events()
       return 0
    }
-   def mp = uiw.cursor_pos(win)
-   def vp = _pointer_view_xy(mp.get(0, 0.0), mp.get(1, 0.0))
-   _mouse_x, _mouse_y = float(vp.get(0, 0.0)), float(vp.get(1, 0.0))
-   if _event_mouse_has_pos { _mouse_x, _mouse_y = _event_mouse_x, _event_mouse_y }
+   if _event_mouse_has_pos {
+      _mouse_x, _mouse_y = _event_mouse_x, _event_mouse_y
+   } else {
+      def mp = uiw.cursor_pos(win)
+      def vp = _pointer_view_xy(mp.get(0, 0.0), mp.get(1, 0.0))
+      _mouse_x, _mouse_y = float(vp.get(0, 0.0)), float(vp.get(1, 0.0))
+   }
    def sampled_down0 = _event_mouse_down0_known ? _event_mouse_down0 : uiw.mouse_down(win, 0)
    def sampled_pressed0 = (_event_mouse_pressed0 || (sampled_down0 && !_mouse_down0_prev)) && sampled_down0
    def sampled_released0 = _event_mouse_released0 || (_mouse_down0_prev && !sampled_down0)
@@ -1158,14 +1230,16 @@ fn prepare_input(any win, f64 ww=0.0, f64 wh=0.0) any {
       _mouse_press_x, _mouse_press_y = _mouse_x, _mouse_y
       _mouse_press_seq += 1
    }
-   def sp, sx = uiw.scroll_pos(win), float(sp.get(0, 0.0))
-   def sy = float(sp.get(1, 0.0))
    if abs(_event_scroll_dx) > 0.000001 || abs(_event_scroll_dy) > 0.000001 {
       _mouse_scroll_dx, _mouse_scroll_dy = _event_scroll_dx, _event_scroll_dy
+      _last_scroll_x += _event_scroll_dx
+      _last_scroll_y += _event_scroll_dy
    } else {
+      def sp, sx = uiw.scroll_pos(win), float(sp.get(0, 0.0))
+      def sy = float(sp.get(1, 0.0))
       _mouse_scroll_dx, _mouse_scroll_dy = sx - _last_scroll_x, sy - _last_scroll_y
+      _last_scroll_x, _last_scroll_y = sx, sy
    }
-   _last_scroll_x, _last_scroll_y = sx, sy
    _window_hovered = _top_window_id_at(_mouse_x, _mouse_y)
    if _mouse_pressed0 && _window_hovered.len == 0 && _active_window_move == "" && _active_window_resize == "" {
       _focused_window, _text_focus_id, _kbd_focus_id, _active_widget_id = "", "", "", ""
@@ -1345,6 +1419,8 @@ fn _text_state_set_cursor(any full_id, int cursor_idx) any {
 
 fn begin_frame(any win=0, int font=0, f64 ww=0.0, f64 wh=0.0) any {
    "Starts a GUI frame and resets per-frame hover/layout state."
+   _gui_frame_id += 1
+   if !_text_caches_ready { _ensure_text_caches() }
    if win { prepare_input(win, ww, wh) }
    else { _theme_refresh() }
    if font {
@@ -1423,6 +1499,7 @@ fn end_frame() any {
    _popup_hit_x, _popup_hit_y = _popup_next_hit_x, _popup_next_hit_y
    _popup_hit_w, _popup_hit_h = _popup_next_hit_w, _popup_next_hit_h
    _key_events = []
+   _clear_key_masks()
    _text_events = ""
 }
 
@@ -1665,6 +1742,7 @@ fn _register_focusable(any full_id) bool {
 }
 
 fn _key_event_present(int key) bool {
+   if _key_mask_has(key) { return true }
    if !is_list(_key_events) { return false }
    mut i = 0
    def events_n = _key_events.len
@@ -1681,37 +1759,38 @@ fn _text_selected_all(any full_id) bool { _state_get_num(full_id, "select_all", 
 
 fn _text_set_selected_all(any full_id, bool selected) any { _state_set_num(full_id, "select_all", selected ? 1.0 : 0.0) }
 
-fn _begin_interact_widget(any full_id, f64 x, f64 y, f64 w, f64 h, bool visible=true) list {
+fn _begin_interact_widget(any full_id, f64 x, f64 y, f64 w, f64 h, bool visible=true) any {
    def rect = [x, y, w, h]
    mut clip = rect
    def win = _current_window_state()
    if is_dict(win) { clip = _window_active_clip(win) }
-   def draw_ok = !!visible && _rect_intersects(rect, clip)
-   def hovered = draw_ok && _rect_hit(_mouse_x, _mouse_y,
+   _iw_visible = !!visible && _rect_intersects(rect, clip)
+   _iw_hovered = _iw_visible && _rect_hit(_mouse_x, _mouse_y,
       float(clip.get(0, 0.0)), float(clip.get(1, 0.0)),
    float(clip.get(2, 0.0)), float(clip.get(3, 0.0))) && _current_window_pointer_hit(x, y, w, h)
-   if hovered {
+   if _iw_hovered {
       _hot_id = full_id
       _hot_rect = rect
       _ensure_cursors()
       _want_cursor(_cursor_hand)
    }
-   if hovered && _mouse_pressed0 {
+   if _iw_hovered && _mouse_pressed0 {
       if _text_focus_id != "" && _text_focus_id != full_id { _text_focus_id = "" }
       _active_widget_id = full_id
       _kbd_focus_id = full_id
       _active_rect = rect
       if _current_window_id_cache.len > 0 { _focused_window = _current_window_id_cache }
    }
-   def held = (_active_widget_id == full_id) && _mouse_down0
-   def released = (_active_widget_id == full_id) && _mouse_released0
-   def clicked = released && hovered
-   [draw_ok, hovered, held, clicked, released]
+   _iw_held = (_active_widget_id == full_id) && _mouse_down0
+   _iw_released = (_active_widget_id == full_id) && _mouse_released0
+   _iw_clicked = _iw_released && _iw_hovered
+   0
 }
 
 fn _sync_current_layout_cache(any st) any {
    if !is_dict(st) {
       _current_window_id_cache = ""
+      _widget_id_prefix = ""
       _current_body_x_cache = 0.0
       _current_body_y_cache = 0.0
       _current_body_w_cache = 0.0
@@ -1720,11 +1799,18 @@ fn _sync_current_layout_cache(any st) any {
       return 0
    }
    _current_window_id_cache = to_str(st.get("id", ""))
+   _widget_id_prefix = _current_window_id_cache + "::"
    _current_body_x_cache = float(st.get("body_x", 0.0))
    _current_body_y_cache = float(st.get("body_y", 0.0))
    _current_body_w_cache = max(1.0, float(st.get("body_w", _sx(100.0))))
    _current_body_h_cache = max(1.0, float(st.get("body_h", 1.0)))
    _current_cursor_y_cache = float(st.get("cursor_y", _current_body_y_cache))
+}
+
+@inline
+@jit
+fn _wid(any id) str {
+   _widget_id_prefix + (is_str(id) ? id : to_str(id))
 }
 
 @inline
@@ -1983,16 +2069,16 @@ fn button(any id, any label, any w=0.0, any h=0.0) bool {
    mut bh = float(h)
    if bh <= 0.0 { bh = max(_item_h(), _sx(26.0)) }
    def rect = _layout_rect(bw, bh)
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    _register_focusable(full)
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
    def ww, hh = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
-   def inter = _begin_interact_widget(full, x, y, ww, hh, true)
-   def visible = inter.get(0, false)
-   def hovered = inter.get(1, false)
-   def held = inter.get(2, false)
+   _begin_interact_widget(full, x, y, ww, hh, true)
+   def visible = _iw_visible
+   def hovered = _iw_hovered
+   def held = _iw_held
    def focused = _kbd_focus_id == full
-   def clicked = inter.get(3, false) || _widget_key_activate(full)
+   def clicked = _iw_clicked || _widget_key_activate(full)
    if visible {
       _gui_rect_fast(x, y, ww, hh, held ? _press_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
       if focused || hovered || held { _gui_rect_fast(x, y, ww, held ? _sx(3.0) : _sx(2.0), _accent_u32) }
@@ -2010,16 +2096,16 @@ fn small_button(any id, any label, any w=0.0, any h=0.0) bool {
    mut bh = float(h)
    if bh <= 0.0 { bh = _small_item_h() }
    def rect = _layout_rect(bw, bh)
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    _register_focusable(full)
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
    def ww, hh = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
-   def inter = _begin_interact_widget(full, x, y, ww, hh, true)
-   def hovered = inter.get(1, false)
-   def held = inter.get(2, false)
+   _begin_interact_widget(full, x, y, ww, hh, true)
+   def hovered = _iw_hovered
+   def held = _iw_held
    def focused = _kbd_focus_id == full
-   def clicked = inter.get(3, false) || _widget_key_activate(full)
-   if inter.get(0, false) {
+   def clicked = _iw_clicked || _widget_key_activate(full)
+   if _iw_visible {
       _gui_rect_fast(x, y, ww, hh, held ? _press_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
       if focused || hovered || held { _gui_rect_fast(x, y, ww, held ? _sx(3.0) : _sx(2.0), _accent_u32) }
       _gui_rect_outline_fast(x, y, ww, hh, held ? _accent_u32 : ((hovered || focused) ? _accent_u32 : _border_u32))
@@ -2071,9 +2157,9 @@ fn icon_button(any id, any tex_id, any label="", f64 w=0.0, f64 h=0.0, bool sele
    if bh <= 0.0 { bh = max(_small_item_h() + _sx(4.0), _sx(28.0)) }
    def icon_sz = clamp(bh - _sx(12.0), _sx(18.0), _sx(24.0))
    def rect = _layout_rect(bw, bh)
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    _register_focusable(full)
-   def inter = _begin_interact_widget(full,
+   _begin_interact_widget(full,
       float(rect.get(0,
       0.0)),
       float(rect.get(1,
@@ -2083,11 +2169,11 @@ fn icon_button(any id, any tex_id, any label="", f64 w=0.0, f64 h=0.0, bool sele
       float(rect.get(3,
       0.0)),
    true)
-   def visible = inter.get(0, false)
-   def hovered = inter.get(1, false)
-   def held = inter.get(2, false)
+   def visible = _iw_visible
+   def hovered = _iw_hovered
+   def held = _iw_held
    def focused = _kbd_focus_id == full
-   def clicked = inter.get(3, false) || _widget_key_activate(full)
+   def clicked = _iw_clicked || _widget_key_activate(full)
    if visible {
       def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
       def rwf, rhf = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
@@ -2129,9 +2215,9 @@ fn selectable(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0, any 
       rh = max(_small_item_h(), float(m.get(1, _small_item_h())) + ((d.len > 0) ? _text_h() : 0.0) + _sx(8.0))
    }
    def rect = _layout_rect(rw, rh)
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    _register_focusable(full)
-   def inter = _begin_interact_widget(full,
+   _begin_interact_widget(full,
       float(rect.get(0,
       0.0)),
       float(rect.get(1,
@@ -2141,11 +2227,11 @@ fn selectable(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0, any 
       float(rect.get(3,
       0.0)),
    true)
-   def visible = inter.get(0, false)
-   def hovered = inter.get(1, false)
-   def held = inter.get(2, false)
+   def visible = _iw_visible
+   def hovered = _iw_hovered
+   def held = _iw_held
    def focused = _kbd_focus_id == full
-   def clicked = inter.get(3, false) || (keyboard && _widget_key_activate(full))
+   def clicked = _iw_clicked || (keyboard && _widget_key_activate(full))
    if visible {
       def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
       def rwf, rhf = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
@@ -2174,8 +2260,8 @@ fn selectable_file(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0,
    def rw = _pick_positive(w, _current_body_w())
    def rh = _pick_positive(h, _small_item_h())
    def rect = _layout_rect(rw, rh)
-   def full = _current_window_id_cache + "::" + to_str(id)
-   def inter = _begin_interact_widget(full,
+   def full = _wid(id)
+   _begin_interact_widget(full,
       float(rect.get(0,
       0.0)),
       float(rect.get(1,
@@ -2185,11 +2271,11 @@ fn selectable_file(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0,
       float(rect.get(3,
       0.0)),
    true)
-   if inter.get(0, false) {
+   if _iw_visible {
       def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
       def rwf, rhf = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
-      def hovered = bool(inter.get(1, false))
-      def held = bool(inter.get(2, false))
+      def hovered = bool(_iw_hovered)
+      def held = bool(_iw_held)
       def bg = selected ? _accent_soft_u32 : (held ? _panel_active_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
       def icon_sz = (_tex_ref_id(tex_id) >= 0) ? min(_sx(18.0), max(_sx(12.0), rhf - _sx(8.0))) : 0.0
       def text_x = x + _item_pad_x() + ((icon_sz > 0.0) ? (icon_sz + _sx(6.0)) : 0.0)
@@ -2202,7 +2288,7 @@ fn selectable_file(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0,
       }
       _draw_text_ui_ex(_font_body(), txt, text_x, _text_center_y_for(_font_body(), y, rhf), _text_u32, 0.0, text_w)
    }
-   bool(inter.get(3, false))
+   bool(_iw_clicked)
 }
 
 fn _text_edit_apply_input(any full_id, str value, int cursor) list {
@@ -2293,12 +2379,12 @@ fn _text_edit_apply_input(any full_id, str value, int cursor) list {
 fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
    "Draws an editable text field and returns the edited value."
    mut out = _ui_text(value)
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    def lbl = _ui_text(label)
    def ph = _ui_text(placeholder)
    def rw = _pick_positive(w, _current_body_w())
    def rect = _layout_rect(rw, _slider_h())
-   def inter = _begin_interact_widget(full,
+   _begin_interact_widget(full,
       float(rect.get(0,
       0.0)),
       float(rect.get(1,
@@ -2320,7 +2406,7 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
    }
    def nav_focus = _register_focusable(full)
    def mouse_focus = field_hover && _mouse_pressed0
-   if nav_focus || mouse_focus || inter.get(3, false) {
+   if nav_focus || mouse_focus || _iw_clicked {
       _kbd_focus_id = full
       _text_focus_id = full
       mut next_cursor = out.len
@@ -2336,15 +2422,14 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
       out, cursor = to_str(edit.get(0, out)), int(edit.get(1, cursor))
       _text_state_set_cursor(full, cursor)
    }
-   if inter.get(0, false) {
+   if _iw_visible {
       def label_clip = _clip_rect_inset(x, y, rwf, _text_h(), 0.0)
       def field_clip = _clip_rect_inset(x, field_y, rwf, field_h, 1.0)
       _gui_rect_fast(x,
          field_y,
          rwf,
          field_h,
-         active_text ? _panel_active_u32 : (inter.get(1,
-      false) ? _panel_hover_u32 : _panel_u32))
+         active_text ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
       _gui_rect_outline_fast(x, field_y, rwf, field_h, active_text ? _accent_u32 : _border_u32)
       def draw_s = (out.len > 0) ? out : ph
       mut draw_col = _text_dim_u32
@@ -2373,7 +2458,7 @@ fn title_input_text(any id, any value, any placeholder="", any w=0.0) str {
    def win = _current_window_state()
    if !is_dict(win) { return out }
    def win_id = _current_window_id_cache
-   def full = win_id + "::" + to_str(id)
+   def full = _wid(id)
    def sx = float(win.get("x", 0.0))
    def sy = float(win.get("y", 0.0))
    def sw = float(win.get("w", 0.0))
@@ -2449,9 +2534,9 @@ fn title_input_text(any id, any value, any placeholder="", any w=0.0) str {
 fn _choice_box_interact(any id, any txt, any box) list {
    def m = _measure_text_ui(_font_body(), txt)
    def rect = _layout_rect(_current_body_w(), max(box, float(m.get(1, box))))
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    _register_focusable(full)
-   def inter = _begin_interact_widget(full,
+   _begin_interact_widget(full,
       float(rect.get(0,
       0.0)),
       float(rect.get(1,
@@ -2461,7 +2546,7 @@ fn _choice_box_interact(any id, any txt, any box) list {
       float(rect.get(3,
       0.0)),
    true)
-   [rect, full, inter, _kbd_focus_id == full]
+   [rect, full, _kbd_focus_id == full]
 }
 
 fn _draw_choice_label(any txt, any rect, any box, any bx, any by) any {
@@ -2478,14 +2563,13 @@ fn _choice_control(any id, any label, any value, bool radio=false) bool {
    def hit = _choice_box_interact(id, txt, box)
    def rect = hit.get(0, [0.0, 0.0, 0.0, 0.0])
    def full = hit.get(1, "")
-   def inter = hit.get(2, [])
    mut out = !!value
-   def focused = hit.get(3, false)
-   if inter.get(3, false) || _widget_key_activate(full) { out = radio ? true : !out }
-   if inter.get(0, false) {
+   def focused = hit.get(2, false)
+   if _iw_clicked || _widget_key_activate(full) { out = radio ? true : !out }
+   if _iw_visible {
       def bx, by = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
       _gui_rect_fast(bx, by, box, box, out ? _accent_soft_u32 : _panel_u32)
-      _gui_rect_outline_fast(bx, by, box, box, (inter.get(1, false) || focused) ? _accent_u32 : _border_u32)
+      _gui_rect_outline_fast(bx, by, box, box, (_iw_hovered || focused) ? _accent_u32 : _border_u32)
       if out {
          if radio { _gui_rect_fast(bx + _sx(5.0), by + _sx(5.0), box - _sx(10.0), box - _sx(10.0), _accent_u32) } else {
             _gui_rect_fast(bx + _sx(5.0), by + _sx(9.0), _sx(5.0), _sx(2.0), _ok_u32)
@@ -2506,15 +2590,15 @@ fn toggle(any id, any label, any value) bool {
    def th = _toggle_h()
    def m = _measure_text_ui(_font_body(), txt)
    def rect = _layout_rect(min(_current_body_w(), _text_fit_width(_font_body(), txt) + _gap() + tw), max(float(m.get(1, th)), th))
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    _register_focusable(full)
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
    def ww, hh = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
-   def inter = _begin_interact_widget(full, x, y, ww, hh, true)
+   _begin_interact_widget(full, x, y, ww, hh, true)
    mut out = !!value
    def focused = _kbd_focus_id == full
-   if inter.get(3, false) || _widget_key_activate(full) { out = !out }
-   if inter.get(0, false) {
+   if _iw_clicked || _widget_key_activate(full) { out = !out }
+   if _iw_visible {
       def tx, ty = x + ww - tw, y + max(0.0, (hh - th) * 0.5)
       def clip = _clip_rect_inset(x, y, ww, hh, 1.0)
       _draw_text_ui_clipped(txt,
@@ -2524,7 +2608,7 @@ fn toggle(any id, any label, any value) bool {
          ww - tw - _gap(),
       clip)
       _gui_rect_fast(tx, ty, tw, th, out ? _accent_soft_u32 : _panel_u32)
-      _gui_rect_outline_fast(tx, ty, tw, th, (inter.get(1, false) || focused) ? _accent_u32 : _border_u32)
+      _gui_rect_outline_fast(tx, ty, tw, th, (_iw_hovered || focused) ? _accent_u32 : _border_u32)
       def knob = th - _sx(4.0)
       def kx = out ? (tx + tw - knob - _sx(2.0)) : (tx + _sx(2.0))
       _gui_rect_fast(kx, ty + _sx(2.0), knob, knob, out ? _accent_u32 : _text_dim_u32)
@@ -2556,13 +2640,13 @@ fn tab_strip(any id, list labels, int selected=0, f64 w=0.0, f64 h=0.0) int {
    while i < n {
       mut tx, tw = x + float(i) * tab_w, tab_w
       if i == n - 1 { tx, tw = x + ww - tab_w, max(_sx(52.0), x + ww - tx) }
-      def full = _current_window_id_cache + "::" + id_s + "#tab" + to_str(i)
+      def full = _widget_id_prefix + id_s + "#tab" + to_str(i)
       _register_focusable(full)
-      def inter = _begin_interact_widget(full, tx, y, tw, hh, true)
-      def hovered = inter.get(1, false)
-      def held = inter.get(2, false)
+      _begin_interact_widget(full, tx, y, tw, hh, true)
+      def hovered = _iw_hovered
+      def held = _iw_held
       def focused = _kbd_focus_id == full
-      if inter.get(3, false) || _widget_key_activate(full) { out = i }
+      if _iw_clicked || _widget_key_activate(full) { out = i }
       def active = out == i
       _gui_rect_fast(tx,
          y,
@@ -2830,10 +2914,10 @@ fn _combo_layout(f64 w) list {
    [rect, x, y, rwf, y + _text_h() + _tiny_gap(), field_h]
 }
 
-fn _combo_apply_trigger(str full, bool open, bool forced_open, bool nav_focus, list inter) bool {
+fn _combo_apply_trigger(str full, bool open, bool forced_open, bool nav_focus) bool {
    mut next_open = forced_open ? true : !!open
    if nav_focus { _kbd_focus_id = full }
-   if inter.get(3, false) || _widget_key_activate(full) {
+   if _iw_clicked || _widget_key_activate(full) {
       next_open = !next_open
       _focused_window = _current_window_id_cache
    }
@@ -2865,9 +2949,9 @@ fn _combo_popup_metrics(list values, f64 field_y, f64 field_h, int max_visible) 
    [row_h, popup_rows, popup_h, popup_y, max(0.0, float(values.len) * row_h - popup_h)]
 }
 
-fn _combo_scroll_state(bool open, list values, int out, str popup_key, list inter, bool popup_hover, f64 row_h, f64 popup_h, f64 max_scroll) f64 {
+fn _combo_scroll_state(bool open, list values, int out, str popup_key, bool popup_hover, f64 row_h, f64 popup_h, f64 max_scroll) f64 {
    mut scroll_y = clamp(_state_get_num(popup_key, "scroll_y", 0.0), 0.0, max_scroll)
-   if open && (inter.get(1, false)|| popup_hover) && abs(_mouse_scroll_dy) > 0.000001 { scroll_y = clamp(scroll_y - _mouse_scroll_dy * _scroll_step(), 0.0, max_scroll) }
+   if open && (_iw_hovered|| popup_hover) && abs(_mouse_scroll_dy) > 0.000001 { scroll_y = clamp(scroll_y - _mouse_scroll_dy * _scroll_step(), 0.0, max_scroll) }
    if open && values.len > 0 && out >= 0 {
       def sel_top = float(out) * row_h
       def sel_bot = sel_top + row_h
@@ -2877,16 +2961,15 @@ fn _combo_scroll_state(bool open, list values, int out, str popup_key, list inte
    scroll_y
 }
 
-fn _draw_combo_field(str full, str lbl, list values, int out, bool open, list inter, f64 x, f64 y, f64 rwf, f64 field_y, f64 field_h) any {
-   if !inter.get(0, false) { return 0 }
+fn _draw_combo_field(str full, str lbl, list values, int out, bool open, f64 x, f64 y, f64 rwf, f64 field_y, f64 field_h) any {
+   if !_iw_visible { return 0 }
    def label_clip = _clip_rect_inset(x, y, rwf, _text_h(), 0.0)
    def field_clip = _clip_rect_inset(x, field_y, rwf, field_h, 1.0)
    _gui_rect_fast(x,
       field_y,
       rwf,
       field_h,
-      open ? _panel_active_u32 : (inter.get(1,
-   false) ? _panel_hover_u32 : _panel_u32))
+      open ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
    _gui_rect_outline_fast(x, field_y, rwf, field_h, (_kbd_focus_id == full || open) ? _accent_u32 : _border_u32)
    def show_txt = ((values.len > 0) && out >= 0 && out < values.len) ? _ui_text(values.get(out, "")) : "<empty>"
    def text_y = _text_center_y_for(_font_body(), field_y, field_h)
@@ -2910,7 +2993,7 @@ fn combo_box(any id, any label, list items, int selected=0, f64 w=0.0, int max_v
    "Draws a combo box and returns the selected item index."
    def values = is_list(items) ? items : []
    mut out = _combo_selected_index(values, selected)
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    def open_key = full + "#open"
    def popup_key = full + "#popup"
    def lbl = _ui_text(label)
@@ -2919,18 +3002,18 @@ fn combo_box(any id, any label, list items, int selected=0, f64 w=0.0, int max_v
    def rwf, field_y = float(geom.get(3, 0.0)), float(geom.get(4, 0.0))
    def field_h = float(geom.get(5, _small_item_h()))
    def nav_focus = _register_focusable(full)
-   def inter = _begin_interact_widget(full, x, field_y, rwf, field_h, true)
+   _begin_interact_widget(full, x, field_y, rwf, field_h, true)
    def forced_open = _debug_combo_forced(full, id)
-   mut open = _combo_apply_trigger(full, _state_get_bool(open_key, false), forced_open, nav_focus, inter)
+   mut open = _combo_apply_trigger(full, _state_get_bool(open_key, false), forced_open, nav_focus)
    out = _combo_apply_keyboard(full, values, out, max_visible)
    def metrics = _combo_popup_metrics(values, field_y, field_h, max_visible)
    def row_h, popup_h = float(metrics.get(0, field_h)), float(metrics.get(2, field_h))
    def popup_rows, popup_y = int(metrics.get(1, 1)), float(metrics.get(3, field_y + field_h))
    def max_scroll = float(metrics.get(4, 0.0))
    def popup_hover = open && _current_window_pointer_hit(x, popup_y, rwf, popup_h)
-   if open && !forced_open && _mouse_pressed0 && !inter.get(1, false) && !popup_hover { open = false }
-   mut scroll_y = _combo_scroll_state(open, values, out, popup_key, inter, popup_hover, row_h, popup_h, max_scroll)
-   _draw_combo_field(full, lbl, values, out, open, inter, x, y, rwf, field_y, field_h)
+   if open && !forced_open && _mouse_pressed0 && !_iw_hovered && !popup_hover { open = false }
+   mut scroll_y = _combo_scroll_state(open, values, out, popup_key, popup_hover, row_h, popup_h, max_scroll)
+   _draw_combo_field(full, lbl, values, out, open, x, y, rwf, field_y, field_h)
    def popup_state = _combo_popup(full, popup_key, values, out, open, forced_open, x, field_y, rwf, popup_y, popup_h, row_h, popup_rows, max_scroll, scroll_y)
    out, open, scroll_y = int(popup_state.get(0, out)), !!popup_state.get(1, open), float(popup_state.get(2, scroll_y))
    _state_set_bool(open_key, open)
@@ -2951,9 +3034,9 @@ fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0) f
    mut out = clamp(float(value), lo, hi)
    def full_w = _pick_positive(w, _current_body_w())
    def rect = _layout_rect(full_w, _slider_h())
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    _register_focusable(full)
-   def inter = _begin_interact_widget(full,
+   _begin_interact_widget(full,
       float(rect.get(0,
       0.0)),
       float(rect.get(1,
@@ -2968,13 +3051,13 @@ fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0) f
       if _key_event_present(KEY_LEFT) || _key_event_present(KEY_DOWN) { out = clamp(out - step, lo, hi) }
       if _key_event_present(KEY_RIGHT) || _key_event_present(KEY_UP) { out = clamp(out + step, lo, hi) }
    }
-   if inter.get(2, false) || (inter.get(1, false) && _mouse_pressed0) {
+   if _iw_held || (_iw_hovered && _mouse_pressed0) {
       def track_x = float(rect.get(0, 0.0)) + _item_pad_x()
       def track_w = max(_sx(24.0), float(rect.get(2, 0.0)) - _item_pad_x() * 2.0)
       def t = clamp((_mouse_x - track_x) / track_w, 0.0, 1.0)
       out = lo + (hi - lo) * t
    }
-   if inter.get(0, false) {
+   if _iw_visible {
       def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
       def rw, ry = float(rect.get(2, 0.0)), y + _text_h() + _sx(10.0)
       def rh, rx = _sx(8.0), x + _item_pad_x()
@@ -2990,15 +3073,13 @@ fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0) f
          ry,
          tw,
          rh,
-         (inter.get(1,
-      false) || _kbd_focus_id == full) ? _accent_u32 : _border_u32)
+         (_iw_hovered || _kbd_focus_id == full) ? _accent_u32 : _border_u32)
       def knob_x = rx + tw * norm - _sx(5.0)
       _gui_rect_fast(knob_x,
          ry - _sx(4.0),
          _sx(10.0),
          _sx(16.0),
-         inter.get(2,
-      false) ? _panel_active_u32 : _panel_hover_u32)
+         _iw_held ? _panel_active_u32 : _panel_hover_u32)
    }
    out
 }
@@ -3324,7 +3405,7 @@ fn _node_canvas_draw_links(any links, any slot_pos) any {
 
 fn node_canvas(any id, list nodes, list links, f64 w=0.0, f64 h=280.0, f64 cell=32.0) list {
    "Draws an editable node graph and returns the updated node list."
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    def rect = grid_canvas(full + ".grid", "Node Graph", w, h, cell, 4)
    if !_rect_intersects(rect, _current_clip()) { return nodes }
    push_clip_rect(rect)
@@ -3340,11 +3421,11 @@ fn node_canvas(any id, list nodes, list links, f64 w=0.0, f64 h=280.0, f64 cell=
 
 fn collapsing_header(any id, any label, bool default_open=true) bool {
    "Draws a collapsing header and returns its open state."
-   def full = _current_window_id_cache + "::" + to_str(id) + "#header"
+   def full = _wid(id) + "#header"
    _register_focusable(full)
    mut open = _state_get_bool(full, default_open)
    def rect = _layout_rect(_current_body_w(), _item_h())
-   def inter = _begin_interact_widget(full,
+   _begin_interact_widget(full,
       float(rect.get(0,
       0.0)),
       float(rect.get(1,
@@ -3355,13 +3436,13 @@ fn collapsing_header(any id, any label, bool default_open=true) bool {
       0.0)),
    true)
    def focused = _kbd_focus_id == full
-   if inter.get(3, false) || _widget_key_activate(full) {
+   if _iw_clicked || _widget_key_activate(full) {
       open = !open
       _state_set_bool(full, open)
    }
-   if inter.get(0, false) {
+   if _iw_visible {
       _gui_rect_fast(float(rect.get(0, 0.0)), float(rect.get(1, 0.0)), float(rect.get(2, 0.0)), float(rect.get(3, 0.0)),
-      inter.get(2, false) ? _panel_active_u32 : (inter.get(1, false) ? _panel_hover_u32 : _panel_u32))
+      _iw_held ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
       _gui_rect_outline_fast(float(rect.get(0,
          0.0)),
          float(rect.get(1,
@@ -3491,13 +3572,13 @@ fn _color_sv_plane(str full, list rgba, f64 hue, f64 x, f64 y, f64 w, f64 h) lis
    def hsv = _color_rgb_to_hsv(out)
    mut sat = float(hsv.get(1, 0.0))
    mut val = float(hsv.get(2, 1.0))
-   def inter = _begin_interact_widget(full + ".sv", x, y, w, h, true)
-   if inter.get(2, false) || (inter.get(1, false) && _mouse_pressed0) {
+   _begin_interact_widget(full + ".sv", x, y, w, h, true)
+   if _iw_held || (_iw_hovered && _mouse_pressed0) {
       sat = clamp((_mouse_x - x) / max(1.0, w), 0.0, 1.0)
       val = clamp(1.0 - ((_mouse_y - y) / max(1.0, h)), 0.0, 1.0)
       out = _color_set_rgb(out, _color_hsv_to_rgb(hue, sat, val))
    }
-   if inter.get(0, false) {
+   if _iw_visible {
       def cols = 14
       def rows = 7
       def cw = max(1.0, w / float(cols))
@@ -3519,7 +3600,7 @@ fn _color_sv_plane(str full, list rgba, f64 hue, f64 x, f64 y, f64 w, f64 h) lis
       def cy = y + (1.0 - val) * h
       _gui_rect_outline_fast(cx - _sx(5.0), cy - _sx(5.0), _sx(10.0), _sx(10.0), _window_bg_u32)
       _gui_rect_outline_fast(cx - _sx(4.0), cy - _sx(4.0), _sx(8.0), _sx(8.0), _text_u32)
-      _gui_rect_outline_fast(x, y, w, h, inter.get(1, false) ? _accent_u32 : _border_u32)
+      _gui_rect_outline_fast(x, y, w, h, _iw_hovered ? _accent_u32 : _border_u32)
    }
    out
 }
@@ -3530,13 +3611,13 @@ fn _color_hue_strip(str full, list rgba, f64 hue, f64 x, f64 y, f64 w, f64 h) li
    def hsv = _color_rgb_to_hsv(out)
    def sat = float(hsv.get(1, 0.0))
    def val = float(hsv.get(2, 1.0))
-   def inter = _begin_interact_widget(full + ".hue", x, y, w, h, true)
-   if inter.get(2, false) || (inter.get(1, false) && _mouse_pressed0) {
+   _begin_interact_widget(full + ".hue", x, y, w, h, true)
+   if _iw_held || (_iw_hovered && _mouse_pressed0) {
       hval = clamp((_mouse_x - x) / max(1.0, w), 0.0, 1.0)
       out = _color_set_rgb(out, _color_hsv_to_rgb(hval, sat, val))
       _state_set_num(full, "hue", hval)
    }
-   if inter.get(0, false) {
+   if _iw_visible {
       def segs = 24
       def sw = max(1.0, w / float(segs))
       mut i = 0
@@ -3549,15 +3630,15 @@ fn _color_hue_strip(str full, list rgba, f64 hue, f64 x, f64 y, f64 w, f64 h) li
       def mx = x + hval * w
       _gui_rect_fast(mx - _sx(2.0), y - _sx(2.0), _sx(4.0), h + _sx(4.0), _window_bg_u32)
       _gui_rect_fast(mx - _sx(1.0), y - _sx(1.0), _sx(2.0), h + _sx(2.0), _text_u32)
-      _gui_rect_outline_fast(x, y, w, h, inter.get(1, false) ? _accent_u32 : _border_u32)
+      _gui_rect_outline_fast(x, y, w, h, _iw_hovered ? _accent_u32 : _border_u32)
    }
    out
 }
 
 fn _color_swatch(str full, int idx, list color, list rgba, f64 x, f64 y, f64 size) list {
    mut out = rgba
-   def inter = _begin_interact_widget(full + ".swatch" + to_str(idx), x, y, size, size, true)
-   if inter.get(1, false) && _mouse_pressed0 {
+   _begin_interact_widget(full + ".swatch" + to_str(idx), x, y, size, size, true)
+   if _iw_hovered && _mouse_pressed0 {
       out = [
          clamp(float(color.get(0, 1.0)), 0.0, 1.0),
          clamp(float(color.get(1, 1.0)), 0.0, 1.0),
@@ -3567,10 +3648,10 @@ fn _color_swatch(str full, int idx, list color, list rgba, f64 x, f64 y, f64 siz
       def hsv = _color_rgb_to_hsv(out)
       _state_set_num(full, "hue", float(hsv.get(0, 0.0)))
    }
-   if inter.get(0, false) {
+   if _iw_visible {
       _gui_rect_fast(x, y, size, size,
       color_pack(float(color.get(0, 1.0)), float(color.get(1, 1.0)), float(color.get(2, 1.0)), 1.0))
-      _gui_rect_outline_fast(x, y, size, size, inter.get(1, false) ? _accent_u32 : _border_u32)
+      _gui_rect_outline_fast(x, y, size, size, _iw_hovered ? _accent_u32 : _border_u32)
    }
    out
 }
@@ -3599,7 +3680,7 @@ fn _color_swatch_row(str full, list rgba) list {
 fn color_edit4(any id, any label, any rgba) list {
    "Draws RGBA sliders and returns the edited color."
    mut out = _color_rgba4(rgba)
-   def full = _current_window_id_cache + "::" + to_str(id) + "#color"
+   def full = _wid(id) + "#color"
    _color_preview_row(full, label, out)
    out[0] = slider_float(to_str(id) + ".r", "R", out.get(0, 1.0), 0.0, 1.0)
    out[1] = slider_float(to_str(id) + ".g", "G", out.get(1, 1.0), 0.0, 1.0)
@@ -3611,7 +3692,7 @@ fn color_edit4(any id, any label, any rgba) list {
 fn color_picker4(any id, any label, any rgba) list {
    "Draws an inline SV/hue color picker with swatches and RGBA sliders."
    mut out = _color_rgba4(rgba)
-   def full = _current_window_id_cache + "::" + to_str(id) + "#picker"
+   def full = _wid(id) + "#picker"
    def hsv = _color_rgb_to_hsv(out)
    mut hue = _state_get_num(full, "hue", float(hsv.get(0, 0.0)))
    if float(hsv.get(1, 0.0)) > 0.0005 { hue = float(hsv.get(0, 0.0)) }
@@ -3643,7 +3724,7 @@ fn begin_scroll_area(any id, any w=0.0, any h=0.0) bool {
    mut win = _current_window_state()
    if !is_dict(win) || _scroll_area_active { return false }
    def win_id = _current_window_id_cache
-   def full = win_id + "::" + to_str(id)
+   def full = _wid(id)
    def rw = _pick_positive(w, _current_body_w())
    def rh = _pick_positive(h, _sx(220.0))
    def rect = _layout_rect(rw, rh)
@@ -3699,7 +3780,7 @@ fn begin_scroll_area(any id, any w=0.0, any h=0.0) bool {
 fn set_scroll_area_content_hint(any id, any content_h) bool {
    "Sets the expected content height for the next scroll-area begin in the current window."
    if !is_dict(_current_window_state()) { return false }
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    _state_set_num(full, "content_h", max(0.0, float(content_h)))
    true
 }
@@ -3707,7 +3788,7 @@ fn set_scroll_area_content_hint(any id, any content_h) bool {
 fn scroll_area_ensure_visible(any id, any item_top, any item_bottom, any visible_h) bool {
    "Adjusts a scroll area so the requested content span is visible on next begin."
    if !is_dict(_current_window_state()) { return false }
-   def full = _current_window_id_cache + "::" + to_str(id)
+   def full = _wid(id)
    def content_h = max(0.0, _state_get_num(full, "content_h", 0.0))
    def vh = max(1.0, float(visible_h))
    def max_scroll = max(0.0, content_h - vh)

@@ -443,7 +443,9 @@ fn _scene_merge_i32_field_defaults() list {
    _scene_merge_i32_field_defaults_cache
 }
 
+mut _SCENE_MERGE_I32_FIELDS = _scene_merge_i32_field_defaults()
 mut _SCENE_MERGE_OPT_BOOL_FIELDS = ["is_lines", "is_points", "unlit", "no_cull", "double_sided", "flip_winding"]
+def _SCENE_ZERO3 = [0.0, 0.0, 0.0]
 def _SCENE_VC_VERTEX_TEX = 8
 def _SCENE_VC_VERTEX_MATERIAL = 16
 
@@ -825,7 +827,7 @@ fn _scene_apply_anim_morphs(dict scene, any gltf_data, dict overrides, any mat_r
       if is_dict(rebuilt) && is_list(rebuilt.get("parts", 0)) {
          def raw_parts = rebuilt.get("parts", parts)
          if is_list(parts) && parts.len == raw_parts.len && parts.len > 0 {
-            parts = render_utils.gltf_sync_drawable_parts_from_raw(parts, raw_parts, false, false)
+            parts = render_utils.gltf_sync_drawable_parts_from_raw(parts, raw_parts, true, true)
          } else {
             parts = _scene_rebuild_drawable_parts_from_raw(raw_parts)
          }
@@ -845,7 +847,8 @@ fn _scene_apply_anim_part(dict part, any gltf_data, dict anim_mats, any vis_map,
    def node_idx = int(part.get("node_idx", -1))
    def skin_idx = int(part.get("skin_idx", -1))
    if node_idx >= 0 {
-      def next_model = anim_mats.get(node_idx, anim_mats.get(to_str(node_idx), 0))
+      def world_list = anim_mats.get("__world_list", 0)
+      def next_model = (is_list(world_list) && node_idx >= 0 && node_idx < world_list.len) ? world_list.get(node_idx, 0) : anim_mats.get(node_idx, anim_mats.get(to_str(node_idx), 0))
       if is_list(next_model) { part["model"] = next_model }
       if use_vis_map { part["visible"] = vis_map.get(node_idx, true) ? true : false }
    }
@@ -866,7 +869,7 @@ fn _scene_apply_anim_part(dict part, any gltf_data, dict anim_mats, any vis_map,
 }
 
 fn _scene_apply_anim_parts(list parts, any gltf_data, dict anim_mats, any vis_map, bool use_vis_map, any ptr_overrides, int skin_count, bool fast_numeric_anim=false) list {
-   def skin_mats_cache = (skin_count > 0 && !fast_numeric_anim) ? dict(max(4, skin_count * 2)) : 0
+   def skin_mats_cache = skin_count > 0 ? dict(max(4, skin_count * 2)) : 0
    mut i = 0
    def parts_n = parts.len
    while i < parts_n {
@@ -936,6 +939,159 @@ fn _scene_parts_keep_gltf_node_identity(any parts, any raw_parts) bool {
    matched == parts.len
 }
 
+fn _scene_anim_time_same(any a, any b) bool {
+   abs(float(a) - float(b)) <= 0.0000005
+}
+
+fn _scene_anim_gpu_rec_mat_idx(any rec) int {
+   if !is_list(rec) { return -1 }
+   if rec.len > 47 { return int(rec.get(47, -1)) }
+   def rec_mesh = rec.get(40, 0)
+   is_dict(rec_mesh) ? int(rec_mesh.get("mat_idx", rec_mesh.get("material_idx", -1))) : -1
+}
+
+fn _scene_anim_part_matches_gpu_rec(any part, any rec) bool {
+   if !is_dict(part) || !is_list(rec) { return false }
+   if int(part.get("node_idx", -1)) != int(rec.get(11, -1)) { return false }
+   if int(part.get("mat_idx", part.get("material_idx", -1))) != _scene_anim_gpu_rec_mat_idx(rec) { return false }
+   if int(part.get("tex_id", -1)) != int(rec.get(0, -1)) { return false }
+   def pv = int(part.get("vcnt", -1))
+   def pi = int(part.get("icnt", -1))
+   if pv >= 0 && int(rec.get(6, -1)) >= 0 && pv != int(rec.get(6, -1)) { return false }
+   if pi >= 0 && int(rec.get(7, -1)) >= 0 && pi != int(rec.get(7, -1)) { return false }
+   true
+}
+
+fn _scene_anim_part_node_matches_gpu_rec(any part, any rec) bool {
+   is_dict(part) && is_list(rec) && int(part.get("node_idx", -1)) == int(rec.get(11, -2))
+}
+
+fn _scene_anim_part_gpu_key(any part) str {
+   if !is_dict(part) { return "" }
+   to_str(int(part.get("node_idx", -1))) + ":" +
+   to_str(int(part.get("mat_idx", part.get("material_idx", -1)))) + ":" +
+   to_str(int(part.get("tex_id", -1))) + ":" +
+   to_str(int(part.get("vcnt", -1))) + ":" +
+   to_str(int(part.get("icnt", -1)))
+}
+
+fn _scene_anim_rec_gpu_key(any rec) str {
+   if !is_list(rec) { return "" }
+   to_str(int(rec.get(11, -1))) + ":" +
+   to_str(_scene_anim_gpu_rec_mat_idx(rec)) + ":" +
+   to_str(int(rec.get(0, -1))) + ":" +
+   to_str(int(rec.get(6, -1))) + ":" +
+   to_str(int(rec.get(7, -1)))
+}
+
+fn _scene_anim_build_part_gpu_maps(any parts) list {
+   mut exact = dict(16)
+   mut node = dict(16)
+   if !is_list(parts) { return [exact, node] }
+   mut i = 0
+   def n = parts.len
+   while i < n {
+      def p = parts.get(i, 0)
+      if is_dict(p) {
+         def k = _scene_anim_part_gpu_key(p)
+         if k.len > 0 && !exact.contains(k) { exact[k] = i }
+         def nk = to_str(int(p.get("node_idx", -1)))
+         if nk != "-1" && !node.contains(nk) { node[nk] = i }
+      }
+      i += 1
+   }
+   [exact, node]
+}
+
+fn _scene_anim_find_part_index_for_gpu_rec_fast(any parts, dict used, dict exact, dict node, any rec, int fallback_i) int {
+   def k = _scene_anim_rec_gpu_key(rec)
+   mut idx = int(exact.get(k, -1))
+   if idx >= 0 && idx < parts.len && !used.get(idx, false) { return idx }
+   def nk = is_list(rec) ? to_str(int(rec.get(11, -2))) : ""
+   idx = int(node.get(nk, -1))
+   if idx >= 0 && idx < parts.len && !used.get(idx, false) { return idx }
+   _scene_anim_find_part_index_for_gpu_rec(parts, used, rec, fallback_i)
+}
+
+fn _scene_anim_find_part_index_for_gpu_rec(any parts, dict used, any rec, int fallback_i) int {
+   if !is_list(parts) || !is_list(rec) { return -1 }
+   mut i = 0
+   while i < parts.len {
+      if !used.get(i, false) && _scene_anim_part_matches_gpu_rec(parts.get(i, 0), rec) { return i }
+      i += 1
+   }
+   i = 0
+   while i < parts.len {
+      if !used.get(i, false) && _scene_anim_part_node_matches_gpu_rec(parts.get(i, 0), rec) { return i }
+      i += 1
+   }
+   if fallback_i >= 0 && fallback_i < parts.len && !used.get(fallback_i, false) { return fallback_i }
+   -1
+}
+
+fn _scene_sync_gpu_rec_from_part(any rec, any part) any {
+   if !is_list(rec) || !is_dict(part) { return rec }
+   rec[10] = part.get("model", rec.get(10, 0))
+   rec[37] = part.get("visible", true) ? 1 : 0
+   rec
+}
+
+fn _scene_sync_rigid_anim_gpu(dict scene, any parts) dict {
+   mut gpu_parts = scene.get("gpu_parts", 0)
+   def gpu_count = int(scene.get("gpu_parts_count", 0))
+   if !is_list(parts) || !is_list(gpu_parts) || parts.len <= 0 || gpu_parts.len != parts.len || gpu_count != gpu_parts.len {
+      scene["anim_gpu_rigid_ready"] = false
+      return scene
+   }
+   mut gpu_slab = scene.get("gpu_parts_slab", 0)
+   def scene_lights_count = _scene_mesh_int(scene, "scene_lights_count", 0)
+   mut used_parts = dict(max(4, parts.len * 2))
+   def part_maps = _scene_anim_build_part_gpu_maps(parts)
+   def part_exact = part_maps.get(0, dict(0))
+   def part_node = part_maps.get(1, dict(0))
+   mut all_matched = true
+   mut i = 0
+   def parts_n = parts.len
+   while i < parts_n {
+      def rec0 = gpu_parts.get(i, 0)
+      def part_i = _scene_anim_find_part_index_for_gpu_rec_fast(parts, used_parts, part_exact, part_node, rec0, i)
+      def part = part_i >= 0 ? parts.get(part_i, 0) : 0
+      if is_dict(part) && is_list(rec0) {
+         used_parts[part_i] = true
+         def rec = _scene_sync_gpu_rec_from_part(rec0, part)
+         gpu_parts[i] = rec
+         if gpu_slab {
+            def base = gpu_slab + i * 256
+            _scene_store_gpu_part_model(base, rec.get(10, 0))
+         }
+      } else {
+         all_matched = false
+      }
+      i += 1
+   }
+   if !all_matched {
+      scene["anim_gpu_rigid_ready"] = false
+      return scene
+   }
+   if !gpu_slab { gpu_slab = _pack_scene_gpu_parts_slab(gpu_parts, scene_lights_count <= 0) }
+   scene["gpu_parts"] = gpu_parts
+   scene["gpu_parts_slab"] = gpu_slab
+   scene["gpu_parts_count"] = gpu_parts.len
+   scene["gpu_draw_state"] = [
+      gpu_slab,
+      gpu_parts.len,
+      _scene_mesh_int(scene, "gpu_optical_start", 0),
+      _scene_mesh_int(scene, "gpu_blend_start", gpu_parts.len),
+      scene.get("has_blend", false) ? 1 : 0,
+      0,
+      scene.get("scene_lights_slab", 0),
+      scene_lights_count,
+      scene.get("has_optical", false) ? 1 : 0
+   ]
+   scene["anim_gpu_rigid_ready"] = bool(gpu_slab) && gpu_parts.len > 0
+   scene
+}
+
 fn _scene_apply_gltf_animation(any scene, int anim_idx=0, f64 now_sec=0.0) any {
    "Applies glTF animation overrides to part visibility and model matrices in-place."
    if !is_dict(scene) { return scene }
@@ -954,6 +1110,9 @@ fn _scene_apply_gltf_animation(any scene, int anim_idx=0, f64 now_sec=0.0) any {
    scene["anim_time"] = t
    scene["anim_time_override"] = explicit_time
    scene["anim_playing"] = was_playing || now_sec > 0.0
+   if int(scene.get("anim_last_idx", -2147483647)) == anim_idx && bool(scene.get("anim_last_time_override", false)) == explicit_time && _scene_anim_time_same(scene.get("anim_last_time", -1.0), t) {
+      return scene
+   }
    if explicit_time {
       scene["static_pose_gpu_ready"] = false
       scene["parts_model_baked"] = false
@@ -962,7 +1121,10 @@ fn _scene_apply_gltf_animation(any scene, int anim_idx=0, f64 now_sec=0.0) any {
       scene["gpu_draw_state"] = _scene_gpu_state_clear_model_flag(gpu_state_anim_pose)
    }
    def overrides = _scene_anim_overrides(gltf_data, anim_count, anim_idx, t)
-   if !is_dict(overrides) { return scene }
+   if !is_dict(overrides) {
+      scene["anim_gpu_rigid_ready"] = false
+      return scene
+   }
    scene = _scene_mark_fit_dirty_full(scene)
    mut anim_mats = gltf.gltf_rebuild_animated_mats(gltf_data, overrides)
    if common.env_truthy("NY_GLTF_SKIN_BIND_POSE") { anim_mats = gltf.gltf_rebuild_animated_mats(gltf_data, dict(0)) }
@@ -970,37 +1132,56 @@ fn _scene_apply_gltf_animation(any scene, int anim_idx=0, f64 now_sec=0.0) any {
    def use_vis_map = fast_numeric_anim ? false : gltf.gltf_has_node_visibility(gltf_data, overrides)
    def vis_map = use_vis_map ? gltf.gltf_resolve_node_visibility(gltf_data, overrides) : 0
    def ptr_overrides = overrides.get("__pointers", [])
+   def have_ptr_overrides = is_list(ptr_overrides) && ptr_overrides.len > 0
    def mat_records = scene.get("mat_records", [])
    mut parts = scene.get("parts", 0)
    def raw_anim_parts = scene.get("anim_raw_parts", 0)
    def rigid_node_anim = anim_count > 0 && skin_count <= 0 && morph_count_total <= 0 && is_list(raw_anim_parts) && raw_anim_parts.len > 0
+   mut rigid_gpu_fast = false
    if rigid_node_anim {
       ;; Rigid glTF animation is node-matrix animation.  Keep drawables aligned
       ;; with the original unmerged glTF primitive list so each part keeps the
-      ;; node_idx needed for parent->child world transforms.  Do not rebuild the
-      ;; whole glTF mesh every frame; that is slow and can double-apply sampled
-      ;; matrices before the normal part animation pass below.
-      if !_scene_parts_keep_gltf_node_identity(parts, raw_anim_parts) {
+      ;; node_idx needed for parent->child world transforms.
+      def identity_known = bool(scene.get("anim_parts_node_identity_ready", false)) && is_list(parts) && parts.len == raw_anim_parts.len
+      if !identity_known && !_scene_parts_keep_gltf_node_identity(parts, raw_anim_parts) {
          parts = _scene_rebuild_drawable_parts_from_raw(raw_anim_parts)
+         scene["anim_parts_node_identity_ready"] = false
+      } else {
+         scene["anim_parts_node_identity_ready"] = true
       }
+      rigid_gpu_fast = common.env_toggle("NY_GLTF_RIGID_GPU_ANIM", false) && !use_vis_map && !have_ptr_overrides && is_list(parts) && is_list(scene.get("gpu_parts", 0)) && scene.get("gpu_parts", []).len == parts.len && int(scene.get("gpu_parts_count", 0)) == parts.len && bool(scene.get("gpu_parts_slab", 0))
       scene["parts"] = parts
       scene["parts_count"] = is_list(parts) ? parts.len : 0
       scene["static_pose_gpu_ready"] = false
       scene["parts_model_baked"] = false
       scene["gpu_model_baked"] = false
-      scene["gpu_parts"] = []
-      scene["gpu_parts_slab"] = 0
-      scene["gpu_parts_count"] = 0
       scene["gpu_draw_state"] = _scene_gpu_state_clear_model_flag(scene.get("gpu_draw_state", 0))
+      if !rigid_gpu_fast {
+         scene["gpu_parts"] = []
+         scene["gpu_parts_slab"] = 0
+         scene["gpu_parts_count"] = 0
+      }
    }
    def morph_state = _scene_apply_anim_morphs(scene, gltf_data, overrides, mat_records, parts, morph_count_total)
    scene, gltf_data, parts = morph_state.get(0, scene), morph_state.get(1, gltf_data), morph_state.get(2, parts)
-   if !is_list(parts) { return scene }
+   if !is_list(parts) {
+      scene["anim_gpu_rigid_ready"] = false
+      return scene
+   }
    parts = _scene_apply_anim_parts(parts, gltf_data, anim_mats, vis_map, use_vis_map, ptr_overrides, skin_count, fast_numeric_anim)
    scene["parts"] = parts
    scene["parts_count"] = parts.len
    scene = _scene_mark_fit_dirty_parts(scene)
-   _scene_refresh_anim_lights(scene, gltf_data, overrides)
+   scene = _scene_refresh_anim_lights(scene, gltf_data, overrides)
+   if rigid_gpu_fast {
+      scene = _scene_sync_rigid_anim_gpu(scene, parts)
+   } else {
+      scene["anim_gpu_rigid_ready"] = false
+   }
+   scene["anim_last_idx"] = anim_idx
+   scene["anim_last_time"] = t
+   scene["anim_last_time_override"] = explicit_time
+   scene
 }
 
 fn apply_gltf_animation(any scene, int anim_idx=0, f64 now_sec=0.0) any { return _scene_apply_gltf_animation(scene, anim_idx, now_sec) }
@@ -1894,8 +2075,53 @@ fn scene_has_edit_transform(any mesh) bool {
    _scene_absf(_scene_edit_axis_scale(mesh, "edit_sz", sc) - 1.0) > 0.000001
 }
 
+fn _scene_vec3_ready(any v) bool {
+   is_list(v) && v.len >= 3 &&
+   !is_nan(float(v.get(0, 0.0))) && !is_inf(float(v.get(0, 0.0))) &&
+   !is_nan(float(v.get(1, 0.0))) && !is_inf(float(v.get(1, 0.0))) &&
+   !is_nan(float(v.get(2, 0.0))) && !is_inf(float(v.get(2, 0.0)))
+}
+
+fn _scene_bounds_center_vec(any mn, any mx) list {
+   if !_scene_vec3_ready(mn) || !_scene_vec3_ready(mx) { return [0.0, 0.0, 0.0] }
+   [
+      (float(mn.get(0, 0.0)) + float(mx.get(0, 0.0))) * 0.5,
+      (float(mn.get(1, 0.0)) + float(mx.get(1, 0.0))) * 0.5,
+      (float(mn.get(2, 0.0)) + float(mx.get(2, 0.0))) * 0.5
+   ]
+}
+
+fn _scene_edit_pivot(any mesh) list {
+   if !is_dict(mesh) { return [0.0, 0.0, 0.0] }
+   if mesh.contains("edit_pivot_x") || mesh.contains("edit_pivot_y") || mesh.contains("edit_pivot_z") {
+      return [
+         scene_mesh_num(mesh, "edit_pivot_x", 0.0),
+         scene_mesh_num(mesh, "edit_pivot_y", 0.0),
+         scene_mesh_num(mesh, "edit_pivot_z", 0.0)
+      ]
+   }
+   def fwmin = mesh.get("fit_world_min", 0)
+   def fwmax = mesh.get("fit_world_max", 0)
+   if _scene_vec3_ready(fwmin) && _scene_vec3_ready(fwmax) { return _scene_bounds_center_vec(fwmin, fwmax) }
+   def pmin = mesh.get("min", 0)
+   def pmax = mesh.get("max", 0)
+   if _scene_vec3_ready(pmin) && _scene_vec3_ready(pmax) {
+      def c = _scene_bounds_center_vec(pmin, pmax)
+      if scene_mesh_bool(mesh, "fit_applied", false) {
+         def fs = scene_mesh_num(mesh, "fit_scale", 1.0)
+         return [
+            float(c.get(0, 0.0)) * fs + scene_mesh_num(mesh, "fit_tx", 0.0),
+            float(c.get(1, 0.0)) * fs + scene_mesh_num(mesh, "fit_ty", 0.0),
+            float(c.get(2, 0.0)) * fs + scene_mesh_num(mesh, "fit_tz", 0.0)
+         ]
+      }
+      return c
+   }
+   [0.0, 0.0, 0.0]
+}
+
 fn scene_edit_transform_matrix_into(any mesh, list mt, list mr, list ms, list out, list tmp) list {
-   "Writes the edit transform matrix for a scene mesh."
+   "Writes the edit transform matrix for a scene mesh, rotating/scaling around the fitted object center."
    def tx = scene_mesh_num(mesh, "edit_tx", 0.0)
    def ty = scene_mesh_num(mesh, "edit_ty", 0.0)
    def tz = scene_mesh_num(mesh, "edit_tz", 0.0)
@@ -1914,6 +2140,15 @@ fn scene_edit_transform_matrix_into(any mesh, list mt, list mr, list ms, list ou
    mat4_mul_into(mr, tmp, out)
    mat4_rotate_z_into(rz, mr)
    mat4_mul_into(mr, out, tmp)
+   def pivot = _scene_edit_pivot(mesh)
+   def px, py = float(pivot.get(0, 0.0)), float(pivot.get(1, 0.0))
+   def pz = float(pivot.get(2, 0.0))
+   if abs(px) > 0.000001 || abs(py) > 0.000001 || abs(pz) > 0.000001 {
+      mat4_translate_into(0.0 - px, 0.0 - py, 0.0 - pz, ms)
+      mat4_mul_into(tmp, ms, out)
+      mat4_translate_into(px, py, pz, ms)
+      mat4_mul_into(ms, out, tmp)
+   }
    mat4_translate_into(tx, ty, tz, mt)
    mat4_mul_into(mt, tmp, out)
    out
@@ -3051,7 +3286,13 @@ fn _mat_sampler_uses_mips(any sampler) bool {
 
 fn _mat_tex_req_load(dict req_map, str key, any uri, str base_path, str usage, int filter=-1, any sampler=0) dict {
    if req_map.contains(key) { return req_map }
-   def is_color = (usage == "color" || usage == "emissive")
+   def is_color =
+   usage == "color" ||
+   usage == "base_color" ||
+   usage == "emissive" ||
+   usage == "specular_color" ||
+   usage == "sheen_color" ||
+   usage == "diffuse_transmission_color"
    def allow_disk_cache = usage != "emissive"
    def format = is_color ? 43 : 37
    def use_mips = _gltf_tex_use_mips() || _mat_sampler_uses_mips(sampler)
@@ -3347,6 +3588,7 @@ fn _apply_mat_record_to_part(any part, any mat_records) any {
    out["ext2_tex_word"] = ext2_tex_word
    out["bsdf_ext_slab"] = bsdf_ext_slab
    out["vc_mode"] = vc_mode
+   if rec.contains("double_sided") { out["double_sided"] = bool(rec.get("double_sided", out.get("double_sided", false))) }
    out
 }
 
@@ -3369,7 +3611,7 @@ fn _scene_pack_material_word(f64 metallic, f64 roughness, int current_word) int 
 }
 
 fn _scene_pack_alpha_word(str alpha_mode, f64 alpha_cutoff, f64 occlusion_strength, int current_word) int {
-   def mode_code = _mat_alpha_mode_code(str.upper(alpha_mode))
+   def mode_code = _mat_alpha_mode_code(alpha_mode)
    def cutoff_u8 = band(int((clamp01(alpha_cutoff) * 255.0 + 0.5)), 255)
    def occ_u8 = band(int((clamp01(occlusion_strength) * 255.0 + 0.5)), 255)
    bor(band(current_word, 0xff000000), bor(mode_code, bor(bshl(cutoff_u8, 8), bshl(occ_u8, 16))))
@@ -3577,7 +3819,7 @@ fn scene_apply_material_tweak(any scene, int mat_idx, any base_color, f64 metall
    def emissive_strength = max(0.0, float(tweak.get("emissive_strength", rec.get("emissive_strength", 1.0))))
    def normal_scale = max(0.0, float(tweak.get("normal_scale", rec.get("normal_scale", _scene_normal_scale_from_word(int(rec.get("normal_tex_word", 0x80000000)))))))
    def double_sided = bool(tweak.get("double_sided", rec.get("double_sided", false)))
-   def base_color_u32 = _mat_pack_base_color_u32(base_rgba)
+   def base_color_u32 = _mat_pack_base_color_u32(base_rgba, alpha_mode)
    def material_u32 = _scene_pack_material_word(metallic_v, roughness_v, int(rec.get("material_u32", 0x0000ff00)))
    def alpha_u32 = _scene_pack_alpha_word(alpha_mode, alpha_cutoff, occlusion_strength, alpha_word0)
    def emissive_u32 = render_utils.pack_emissive_u32(emissive_factor, emissive_strength)
@@ -4152,11 +4394,13 @@ fn _mat_info_load_base_tex(any tex_req_map, bool predecode_active, any minfo, st
    return _stable_loaded_texture_id(_try_load_tex(uri, base_path, "base_color", filter, sampler))
 }
 
-fn _mat_pack_base_color_u32(any base_color_factor) int {
+fn _mat_pack_base_color_u32(any base_color_factor, str alpha_mode="BLEND") int {
    def fr = band(int((clamp01(float(base_color_factor.get(0, 1.0))) * 255.0)), 255)
    def fg = band(int((clamp01(float(base_color_factor.get(1, 1.0))) * 255.0)), 255)
    def fb = band(int((clamp01(float(base_color_factor.get(2, 1.0))) * 255.0)), 255)
-   def fa = band(int((clamp01(float(base_color_factor.get(3, 1.0))) * 255.0)), 255)
+   def mode = str.upper(str.strip(alpha_mode))
+   def uses_alpha_factor = mode == "BLEND" || mode == "MASK"
+   def fa = uses_alpha_factor ? band(int((clamp01(float(base_color_factor.get(3, 1.0))) * 255.0)), 255) : 255
    bor(bor(fr, bshl(fg, 8)), bor(bshl(fb, 16), bshl(fa, 24)))
 }
 
@@ -4184,13 +4428,14 @@ fn _build_material_records_fast_core_pbr(list material_infos, str base_path, boo
       def minfo = material_infos.get(mi, 0)
       def base_id = _mat_info_load_base_tex(tex_req_map, predecode_active, minfo, base_path)
       if base_id >= 0 { loaded_tex_count += 1 }
-      def base_color_u32 = _mat_pack_base_color_u32(minfo.get("base_color_factor", [1.0, 1.0, 1.0, 1.0]))
+      def base_color_u32 = _mat_pack_base_color_u32(minfo.get("base_color_factor", [1.0, 1.0, 1.0, 1.0]), to_str(minfo.get("alpha_mode", "OPAQUE")))
       def metallic_u8 = band(int((clamp01(float(minfo.get("metallic_factor", 1.0))) * 255.0)), 255)
       def rough_u8 = band(int((clamp01(float(minfo.get("roughness_factor", 1.0))) * 255.0)), 255)
       def material_u32 = bor(band(metallic_u8, 255), bshl(band(rough_u8, 255), 8))
       def alpha_cutoff_u8 = band(int((clamp01(float(minfo.get("alpha_cutoff", 0.5))) * 255.0)), 255)
       def occlusion_strength_u8 = band(int((clamp01(float(minfo.get("occlusion_strength", 1.0))) * 255.0)), 255)
-      def alpha_u32 = bor(bshl(alpha_cutoff_u8, 8), bshl(occlusion_strength_u8, 16))
+      def alpha_mode_code = _mat_alpha_mode_code(to_str(minfo.get("alpha_mode", "OPAQUE")))
+      def alpha_u32 = bor(alpha_mode_code, bor(bshl(alpha_cutoff_u8, 8), bshl(occlusion_strength_u8, 16)))
       mat_records = mat_records.append({
             "base_color_u32": base_color_u32, "base": base_id,
             "normal": -1, "normal_tex_word": normal_tex_word_default, "normal_uv_set": 0,
@@ -4254,7 +4499,8 @@ fn _mat_mr_word(int met_rough_id, int met_rough_uv_set) int {
 }
 
 fn _mat_alpha_mode_code(str alpha_mode) int {
-   return case alpha_mode {
+   def m = str.upper(str.strip(to_str(alpha_mode)))
+   return case m {
       "MASK" -> 1
       "BLEND" -> 2
       _ -> 0
@@ -4439,7 +4685,7 @@ fn _mat_slow_factor_state(dict st) dict {
    mut out = st
    mut spec = out.get("spec", dict(0))
    def base_color_factor = spec.get("base_color_factor", [1.0, 1.0, 1.0, 1.0])
-   out["base_color_u32"] = _mat_pack_base_color_u32(base_color_factor)
+   out["base_color_u32"] = _mat_pack_base_color_u32(base_color_factor, to_str(spec.get("alpha_mode", "OPAQUE")))
    mut metallic_u8 = band(int((clamp01(float(spec.get("metallic_factor", 1.0))) * 255.0)), 255)
    if spec.get("specular_glossiness", false) { metallic_u8 = 0 }
    out["metallic_u8"] = metallic_u8
@@ -4453,7 +4699,7 @@ fn _mat_slow_factor_state(dict st) dict {
    def diffuse_transmission_factor_live = float(spec.get("diffuse_transmission_factor", 0.0))
    out["transmission_factor_live"] = transmission_factor_live
    spec = _mat_apply_diffuse_transmission_color_fallback(spec, diffuse_transmission_factor_live)
-   def alpha_mode_code = _mat_alpha_mode_code(str.upper(to_str(spec.get("alpha_mode", "OPAQUE"))))
+   def alpha_mode_code = _mat_alpha_mode_code(to_str(spec.get("alpha_mode", "OPAQUE")))
    def alpha_cutoff_u8 = band(int((clamp01(float(spec.get("alpha_cutoff", 0.5))) * 255.0)), 255)
    def occlusion_strength_u8 = band(int((clamp01(float(spec.get("occlusion_strength", 1.0))) * 255.0)), 255)
    mut alpha_u32 = bor(alpha_mode_code, bor(bshl(alpha_cutoff_u8, 8), bshl(occlusion_strength_u8, 16)))
@@ -4597,9 +4843,16 @@ fn _mat_slow_apply_emissive_aux(dict st) dict {
 
 fn _mat_slow_apply_clearcoat_normal(dict st) dict {
    mut out = st
-   if int(out.get("normal_id", -1)) >= 0 || int(out.get("clearcoat_normal_id", -1)) < 0 { return out }
+   def cc_normal_id = int(out.get("clearcoat_normal_id", -1))
+   if cc_normal_id < 0 { return out }
    def spec = out.get("spec", dict(0))
-   out["normal_id"] = int(out.get("clearcoat_normal_id", -1))
+   def has_clearcoat = float(spec.get("clearcoat_factor", 0.0)) > 0.0001 || int(out.get("bsdf4_u32", 0)) != 0
+   ;; The packed material path has one normal texture slot.  For clearcoat test
+   ;; assets the clearcoat normal is the one that must drive the coat lobe, so
+   ;; prefer it for the normal slot and mark it coat-only to avoid bending the
+   ;; base diffuse/specular layer as if it were the base normal map.
+   if !has_clearcoat && int(out.get("normal_id", -1)) >= 0 { return out }
+   out["normal_id"] = cc_normal_id
    out["normal_uv_set"] = _scene_texcoord_one(spec, "clearcoat_normal_texcoord")
    out["normal_uv_xf"] = out.get("clearcoat_normal_uv_xf", [0, 0])
    out["active_normal_scale"] = float(spec.get("clearcoat_normal_scale", 1.0))
@@ -4788,12 +5041,14 @@ fn build_material_records(list material_infos, str base_path) list {
 }
 
 fn _packed_material_is_optical(int alpha_u32, int bsdf0_u32, int bsdf2_u32, int bsdf4_u32, int bsdf5_u32) bool {
-   "Returns true when a material needs scene-color capture/refraction."
-   if (int(alpha_u32) & 3) == 2 { return false }
-   if ((int(bsdf0_u32)>> 16) & 255) > 0 { return true }
-   if (int(bsdf5_u32) & 255) > 0 { return true }
-   if ((int(bsdf5_u32)>> 8) & 255) > 0 { return true }
-   false
+   "Returns true when a material needs scene-color capture/refraction.
+   Alpha-blended transmission/refraction materials are still optical; routing them
+   through the plain alpha pass drops refraction/dispersion and makes glassy sample
+   models look milky, opaque, or missing their dark frame edges."
+   def transmission_u8 = (int(bsdf0_u32) >> 16) & 255
+   def diffuse_transmission_u8 = int(bsdf5_u32) & 255
+   def refraction_u8 = (int(bsdf5_u32) >> 8) & 255
+   transmission_u8 > 0 || diffuse_transmission_u8 > 0 || refraction_u8 > 0
 }
 
 fn _gpu_rec_is_optical(any rec) bool {
@@ -4848,7 +5103,7 @@ fn _gpu_rec_pipeline_sort_key(any rec) int {
    def alpha_u32 = int(rec.get(17, 0))
    def is_blend = (alpha_u32 & 3) == 2
    def is_optical = _gpu_rec_is_optical(rec)
-   def pass = is_blend ? 2 : (is_optical ? 1 : 0)
+   def pass = is_optical ? 1 : (is_blend ? 2 : 0)
    mut pipe_class = 0
    if is_lines {
       pipe_class = 80
@@ -4897,59 +5152,108 @@ fn _cpu_part_is_optical(any part) bool {
    int(part.get("bsdf5_u32", 0)))
 }
 
+@inline
 fn _gpu_rec_pass_bucket(any rec) int {
    if !is_list(rec)|| rec.len < 18 { return 0 }
+   if _gpu_rec_is_optical(rec) { return 1 }
    if (int(rec.get(17, 0)) & 3) == 2 { return 2 }
-   _gpu_rec_is_optical(rec) ? 1 : 0
+   0
 }
 
+@inline
 fn _cpu_part_pass_bucket(any part) int {
    if !is_dict(part) { return 0 }
+   if _cpu_part_is_optical(part) { return 1 }
    if (int(part.get("alpha_u32", 0)) & 3) == 2 { return 2 }
-   _cpu_part_is_optical(part) ? 1 : 0
+   0
 }
 
+@inline
 fn _scene_sort_part_tex(any item, bool cpu_parts) int {
    cpu_parts ? int(item.get("tex_id", 0)) : int(item.get(0, 0))
 }
 
+@inline
 fn _scene_sort_part_pipe(any item, bool cpu_parts) int {
    cpu_parts ? 0 : _gpu_rec_pipeline_sort_key(item)
 }
 
+@inline
 fn _scene_sort_part_bucket(any item, bool cpu_parts) int {
    cpu_parts ? _cpu_part_pass_bucket(item) : _gpu_rec_pass_bucket(item)
 }
 
+@inline
+fn _scene_sort_part_packed_key(any item, bool cpu_parts) int {
+   def bucket = _scene_sort_part_bucket(item, cpu_parts)
+   def pipe = _scene_sort_part_pipe(item, cpu_parts)
+   def tex = _scene_sort_part_tex(item, cpu_parts)
+   bucket * 10000000000000000 + pipe * 4294967296 + (tex + 2147483648)
+}
+
+@inline
+fn _scene_sort_part_packed_key_idx(any item, bool cpu_parts, int order_idx) int {
+   def bucket = _scene_sort_part_bucket(item, cpu_parts)
+   ;; Opaque parts are safe to pipeline/texture sort for fewer binds.  Any
+   ;; translucent parts are not: Khronos alpha/transmission samples depend on
+   ;; authored order both within and across optical + alpha-blend primitives.
+   ;; Putting optical before blend globally breaks Transmission Order Test and
+   ;; can also hide coplanar black frames/labels in the alpha coverage card.
+   ;; Keep one shared translucent bucket and preserve source order by index.
+   if bucket != 0 { return 10000000000000000 + order_idx }
+   def pipe = _scene_sort_part_pipe(item, cpu_parts)
+   def tex = _scene_sort_part_tex(item, cpu_parts)
+   pipe * 4294967296 + (tex + 2147483648)
+}
+
 fn _sort_scene_parts_by_blend_tex(any parts, bool cpu_parts=false) any {
-   "Sorts part records: solid opaque first, optical opaque next, blend last, with opaque backdrops before foreground samples."
+   "Sorts opaque part records for speed while preserving authored order for optical/blend records."
    if !is_list(parts) { return parts }
-   if parts.len <= 1 { return parts }
    def part_count = parts.len
+   if part_count <= 1 { return parts }
+   mut prev_key = _scene_sort_part_packed_key_idx(parts.get(0, 0), cpu_parts, 0)
    mut i = 1
+   mut sorted_already = true
+   while i < part_count {
+      def key = _scene_sort_part_packed_key_idx(parts.get(i, 0), cpu_parts, i)
+      if key < prev_key { sorted_already = false break }
+      prev_key = key
+      i += 1
+   }
+   if sorted_already { return parts }
+   mut keys = []
+   i = 0
+   while i < part_count {
+      keys = keys.append(_scene_sort_part_packed_key_idx(parts.get(i, 0), cpu_parts, i))
+      i += 1
+   }
+   if part_count > 16 {
+      mut keyed = []
+      i = 0
+      while i < part_count {
+         keyed = keyed.append([keys.get(i, 0), i, parts.get(i, 0)])
+         i += 1
+      }
+      sort(keyed)
+      i = 0
+      while i < part_count {
+         parts[i] = keyed.get(i, [0, 0, 0]).get(2, 0)
+         i += 1
+      }
+      return parts
+   }
+   i = 1
    while i < part_count {
       def cur = parts.get(i, 0)
-      def cur_bucket = _scene_sort_part_bucket(cur, cpu_parts)
-      def cur_backdrop = 0
-      def cur_pipe = _scene_sort_part_pipe(cur, cpu_parts)
-      def cur_tex = _scene_sort_part_tex(cur, cpu_parts)
+      def cur_key = keys.get(i, 0)
       mut j = i - 1
-      while j >= 0 {
-         def prev = parts.get(j, 0)
-         def prev_bucket = _scene_sort_part_bucket(prev, cpu_parts)
-         def prev_backdrop = 0
-         def prev_pipe = _scene_sort_part_pipe(prev, cpu_parts)
-         def prev_tex = _scene_sort_part_tex(prev, cpu_parts)
-         def move = (prev_bucket > cur_bucket) ||
-         (prev_bucket == cur_bucket && (
-               prev_backdrop < cur_backdrop ||
-               (prev_backdrop == cur_backdrop && (prev_pipe > cur_pipe ||
-         (prev_pipe == cur_pipe && prev_tex > cur_tex)))))
-         if !move { break }
-         parts[j + 1] = prev
+      while j >= 0 && keys.get(j, 0) > cur_key {
+         parts[j + 1] = parts.get(j, 0)
+         keys[j + 1] = keys.get(j, 0)
          j -= 1
       }
       parts[j + 1] = cur
+      keys[j + 1] = cur_key
       i += 1
    }
    parts
@@ -4963,24 +5267,43 @@ fn _sort_cpu_parts_by_blend_tex(any parts) any {
    _sort_scene_parts_by_blend_tex(parts, true)
 }
 
+fn _scene_blend_camera_sort_enabled() bool {
+   ;; Depth sorting by part center is only an approximation.  It breaks the
+   ;; glTF alpha conformance card because coplanar translucent quads, frames,
+   ;; labels, and decals get reordered by their bounding centers.  Keep source
+   ;; order by default; enable this only for scenes that explicitly prefer
+   ;; distance sorting over authored layer order.
+   common.env_enabled("NY_GLTF_SORT_BLEND") || common.env_enabled("NY_SCENE_SORT_BLEND_CAMERA")
+}
+
 fn _scene_part_center_world_depth2(any model_m, any minv, any maxv, f64 cam_x, f64 cam_y, f64 cam_z) f64 {
-   "Returns squared camera distance of a part bounds center after model transform."
-   def model = _as_render_model_mat4(model_m)
+   "Returns squared camera distance of a part bounds center after model transform without allocating a normalized matrix."
    def cx = (float(minv.get(0, 0.0)) + float(maxv.get(0, 0.0))) * 0.5
    def cy = (float(minv.get(1, 0.0)) + float(maxv.get(1, 0.0))) * 0.5
    def cz = (float(minv.get(2, 0.0)) + float(maxv.get(2, 0.0))) * 0.5
-   def m00 = float(model.get(2, 1.0))
-   def m10 = float(model.get(3, 0.0))
-   def m20 = float(model.get(4, 0.0))
-   def m01 = float(model.get(6, 0.0))
-   def m11 = float(model.get(7, 1.0))
-   def m21 = float(model.get(8, 0.0))
-   def m02 = float(model.get(10, 0.0))
-   def m12 = float(model.get(11, 0.0))
-   def m22 = float(model.get(12, 1.0))
-   def m03 = float(model.get(14, 0.0))
-   def m13 = float(model.get(15, 0.0))
-   def m23 = float(model.get(16, 0.0))
+   mut m00, m10, m20 = 1.0, 0.0, 0.0
+   mut m01, m11, m21 = 0.0, 1.0, 0.0
+   mut m02, m12, m22 = 0.0, 0.0, 1.0
+   mut m03, m13, m23 = 0.0, 0.0, 0.0
+   if is_list(model_m) {
+      def n = model_m.len
+      if n == 18 && int(model_m.get(0, 0)) == 4 && int(model_m.get(1, 0)) == 4 {
+         m00 = float(model_m.get(2, 1.0))  m10 = float(model_m.get(3, 0.0))  m20 = float(model_m.get(4, 0.0))
+         m01 = float(model_m.get(6, 0.0))  m11 = float(model_m.get(7, 1.0))  m21 = float(model_m.get(8, 0.0))
+         m02 = float(model_m.get(10, 0.0)) m12 = float(model_m.get(11, 0.0)) m22 = float(model_m.get(12, 1.0))
+         m03 = float(model_m.get(14, 0.0)) m13 = float(model_m.get(15, 0.0)) m23 = float(model_m.get(16, 0.0))
+      } elif n == 18 && is_str(model_m.get(16, 0)) {
+         m00 = float(model_m.get(0, 1.0))  m10 = float(model_m.get(1, 0.0))  m20 = float(model_m.get(2, 0.0))
+         m01 = float(model_m.get(4, 0.0))  m11 = float(model_m.get(5, 1.0))  m21 = float(model_m.get(6, 0.0))
+         m02 = float(model_m.get(8, 0.0))  m12 = float(model_m.get(9, 0.0))  m22 = float(model_m.get(10, 1.0))
+         m03 = float(model_m.get(12, 0.0)) m13 = float(model_m.get(13, 0.0)) m23 = float(model_m.get(14, 0.0))
+      } elif n == 16 {
+         m00 = float(model_m.get(0, 1.0))  m10 = float(model_m.get(1, 0.0))  m20 = float(model_m.get(2, 0.0))
+         m01 = float(model_m.get(4, 0.0))  m11 = float(model_m.get(5, 1.0))  m21 = float(model_m.get(6, 0.0))
+         m02 = float(model_m.get(8, 0.0))  m12 = float(model_m.get(9, 0.0))  m22 = float(model_m.get(10, 1.0))
+         m03 = float(model_m.get(12, 0.0)) m13 = float(model_m.get(13, 0.0)) m23 = float(model_m.get(14, 0.0))
+      }
+   }
    def wx = m00 * cx + m01 * cy + m02 * cz + m03
    def wy = m10 * cx + m11 * cy + m12 * cz + m13
    def wz = m20 * cx + m21 * cy + m22 * cz + m23
@@ -4991,75 +5314,115 @@ fn _scene_part_center_world_depth2(any model_m, any minv, any maxv, f64 cam_x, f
 }
 
 fn _sort_gpu_parts_blend_camera(any gpu_parts, f64 cam_x, f64 cam_y, f64 cam_z) any {
-   "Back-to-front sorts only the blend suffix of GPU part records."
+   "Back-to-front sorts only the blend suffix of GPU part records, decoding each depth once."
    if !is_list(gpu_parts)|| gpu_parts.len <= 1 { return gpu_parts }
    def gpu_n = gpu_parts.len
    def blend_start = _gpu_parts_blend_start(gpu_parts)
-   mut i = blend_start + 1
-   while i < gpu_n {
-      def cur = gpu_parts.get(i, 0)
-      def cur_depth = _scene_part_center_world_depth2(
-         cur.get(10, 0),
-         cur.get(38, [0.0, 0.0, 0.0]),
-         cur.get(39, [0.0, 0.0, 0.0]),
-      cam_x, cam_y, cam_z)
+   def blend_n = gpu_n - blend_start
+   if blend_n <= 1 { return gpu_parts }
+   mut depths = []
+   mut sorted_already = true
+   mut prev_depth = 0.0
+   mut i = 0
+   while i < blend_n {
+      def rec = gpu_parts.get(blend_start + i, 0)
+      def depth = _scene_part_center_world_depth2(rec.get(10, 0), rec.get(38, _SCENE_ZERO3), rec.get(39, _SCENE_ZERO3), cam_x, cam_y, cam_z)
+      depths = depths.append(depth)
+      if i > 0 && prev_depth < depth { sorted_already = false }
+      prev_depth = depth
+      i += 1
+   }
+   if sorted_already { return gpu_parts }
+   if blend_n > 16 {
+      mut keyed = []
+      i = 0
+      while i < blend_n {
+         keyed = keyed.append([0.0 - depths.get(i, 0.0), i, gpu_parts.get(blend_start + i, 0)])
+         i += 1
+      }
+      sort(keyed)
+      i = 0
+      while i < blend_n {
+         gpu_parts[blend_start + i] = keyed.get(i, [0.0, 0, 0]).get(2, 0)
+         i += 1
+      }
+      return gpu_parts
+   }
+   i = 1
+   while i < blend_n {
+      def cur = gpu_parts.get(blend_start + i, 0)
+      def cur_depth = depths.get(i, 0.0)
       mut j = i - 1
-      while j >= blend_start {
-         def prev = gpu_parts.get(j, 0)
-         def prev_depth = _scene_part_center_world_depth2(
-            prev.get(10, 0),
-            prev.get(38, [0.0, 0.0, 0.0]),
-            prev.get(39, [0.0, 0.0, 0.0]),
-         cam_x, cam_y, cam_z)
-         if prev_depth >= cur_depth { break }
-         gpu_parts[j + 1] = prev
+      while j >= 0 && depths.get(j, 0.0) < cur_depth {
+         gpu_parts[blend_start + j + 1] = gpu_parts.get(blend_start + j, 0)
+         depths[j + 1] = depths.get(j, 0.0)
          j -= 1
       }
-      gpu_parts[j + 1] = cur
+      gpu_parts[blend_start + j + 1] = cur
+      depths[j + 1] = cur_depth
       i += 1
    }
    gpu_parts
 }
 
 fn _sort_cpu_parts_blend_camera(any parts, f64 cam_x, f64 cam_y, f64 cam_z) any {
-   "Back-to-front sorts only the blend suffix of CPU part dicts."
+   "Back-to-front sorts only the blend suffix of CPU part dicts, decoding each depth once."
    if !is_list(parts)|| parts.len <= 1 { return parts }
    def parts_n = parts.len
    mut blend_start = parts_n
    mut bi = 0
    while bi < parts_n {
-      if _cpu_part_pass_bucket(parts.get(bi, 0)) == 2 {
-         blend_start = bi
-         break
-      }
+      if _cpu_part_pass_bucket(parts.get(bi, 0)) == 2 { blend_start = bi break }
       bi += 1
    }
-   mut i = blend_start + 1
-   while i < parts_n {
-      def cur = parts.get(i, 0)
-      def cur_depth = _scene_part_center_world_depth2(
-         cur.get("model", 0),
-         cur.get("min", [0.0, 0.0, 0.0]),
-         cur.get("max", [0.0, 0.0, 0.0]),
-      cam_x, cam_y, cam_z)
+   def blend_n = parts_n - blend_start
+   if blend_n <= 1 { return parts }
+   mut depths = []
+   mut sorted_already = true
+   mut prev_depth = 0.0
+   mut i = 0
+   while i < blend_n {
+      def part = parts.get(blend_start + i, 0)
+      def depth = _scene_part_center_world_depth2(part.get("model", 0), part.get("min", _SCENE_ZERO3), part.get("max", _SCENE_ZERO3), cam_x, cam_y, cam_z)
+      depths = depths.append(depth)
+      if i > 0 && prev_depth < depth { sorted_already = false }
+      prev_depth = depth
+      i += 1
+   }
+   if sorted_already { return parts }
+   if blend_n > 16 {
+      mut keyed = []
+      i = 0
+      while i < blend_n {
+         keyed = keyed.append([0.0 - depths.get(i, 0.0), i, parts.get(blend_start + i, 0)])
+         i += 1
+      }
+      sort(keyed)
+      i = 0
+      while i < blend_n {
+         parts[blend_start + i] = keyed.get(i, [0.0, 0, 0]).get(2, 0)
+         i += 1
+      }
+      return parts
+   }
+   i = 1
+   while i < blend_n {
+      def cur = parts.get(blend_start + i, 0)
+      def cur_depth = depths.get(i, 0.0)
       mut j = i - 1
-      while j >= blend_start {
-         def prev = parts.get(j, 0)
-         def prev_depth = _scene_part_center_world_depth2(
-            prev.get("model", 0),
-            prev.get("min", [0.0, 0.0, 0.0]),
-            prev.get("max", [0.0, 0.0, 0.0]),
-         cam_x, cam_y, cam_z)
-         if prev_depth >= cur_depth { break }
-         parts[j + 1] = prev
+      while j >= 0 && depths.get(j, 0.0) < cur_depth {
+         parts[blend_start + j + 1] = parts.get(blend_start + j, 0)
+         depths[j + 1] = depths.get(j, 0.0)
          j -= 1
       }
-      parts[j + 1] = cur
+      parts[blend_start + j + 1] = cur
+      depths[j + 1] = cur_depth
       i += 1
    }
    parts
 }
 
+@inline
 fn _gpu_parts_first_bucket(any gpu_parts, int want_bucket, bool want_nonzero=false) int {
    if !is_list(gpu_parts) { return 0 }
    mut i = 0
@@ -5072,11 +5435,13 @@ fn _gpu_parts_first_bucket(any gpu_parts, int want_bucket, bool want_nonzero=fal
    n
 }
 
+@inline
 fn _gpu_parts_blend_start(any gpu_parts) int {
    "Returns the first blend part index in a sorted GPU part list."
    _gpu_parts_first_bucket(gpu_parts, 2)
 }
 
+@inline
 fn _gpu_parts_optical_start(any gpu_parts) int {
    "Returns the first non-solid GPU part index in a sorted part list."
    _gpu_parts_first_bucket(gpu_parts, 0, true)
@@ -5162,25 +5527,30 @@ fn _scene_store_gpu_part_header(any base, list rec, any pipe, bool is_lines, boo
 }
 
 fn _scene_store_gpu_part_model(any base, any model_m) bool {
-   def model_len = is_list(model_m) ? model_m.len : 0
-   if model_len <= 0 { return false }
-   if model_len == 18 && int(model_m.get(0, 0)) == 4 && int(model_m.get(1, 0)) == 4 {
-      mut j = 0
-      while j < 16 {
-         store32_f32(base + 64, float(model_m.get(2 + j, 0.0)), j * 4)
-         j += 1
-      }
-      return true
+   def n = is_list(model_m) ? model_m.len : 0
+   if !base || n <= 0 { return false }
+   ;; Runtime/static glTF matrices come in two layouts:
+   ;;   renderer mat4: [4,4,m00..m15]
+   ;;   glTF mat4:     [m00..m15,"mat4",400]
+   ;; Older animation packing only accepted the renderer layout and silently
+   ;; left the slab model stale/identity for glTF node animation.  That made
+   ;; simple assets like BoxAnimated freeze or split at high/sky positions.
+   store32(base, 0, 252)
+   mut off = -1
+   if n == 18 && int(model_m.get(0, 0)) == 4 && int(model_m.get(1, 0)) == 4 {
+      off = 2
+   } elif n >= 18 && is_str(model_m.get(16, 0)) {
+      off = 0
+   } elif n >= 16 {
+      off = 0
    }
-   if model_len == 16 {
-      mut j = 0
-      while j < 16 {
-         store32_f32(base + 64, float(model_m.get(j, 0.0)), j * 4)
-         j += 1
-      }
-      return true
+   if off < 0 { return false }
+   mut j = 0
+   while j < 16 {
+      store32_f32(base + 64, float(model_m.get(off + j, (j == 0 || j == 5 || j == 10 || j == 15) ? 1.0 : 0.0)), j * 4)
+      j += 1
    }
-   false
+   true
 }
 
 fn _scene_gpu_rec_mat_idx(list rec) int {
@@ -5279,7 +5649,7 @@ fn _pack_scene_gpu_parts_slab(list parts, bool no_punctual_lights=false) any {
          def alpha_u32 = int(rec.get(17, 0))
          def is_blend = (alpha_u32 & 3) == 2
          def is_optical = _gpu_rec_is_optical(rec)
-         def wants_alpha_pipe = is_blend
+         def wants_alpha_pipe = is_blend || is_optical
          def fast_lit = _gpu_rec_fast_lit_ok(rec, alpha_u32, unlit, is_blend, is_optical)
          if trace_pipe {
             if nocull { trace_nocull += 1 }
@@ -5428,7 +5798,7 @@ fn _scene_part_merge_less(any a, any b, f64 scene_area_like) bool {
    def idx_a, idx_b = _scene_part_index_u32(a) ? 1 : 0, _scene_part_index_u32(b) ? 1 : 0
    if idx_a != idx_b { return idx_a < idx_b }
    mut i = 0
-   def fields = _scene_merge_i32_field_defaults()
+   def fields = _SCENE_MERGE_I32_FIELDS
    def fields_n = fields.len
    while i < fields_n {
       def row = fields.get(i, [])
@@ -6092,6 +6462,7 @@ fn _scene_gpu_record_for_part(
    mut normal_tex_word = int(part.get("normal_tex_word", render_utils.pack_normal_tex_word(normal_tex_id,
             int(part.get("normal_uv_set",
    0)))))
+   normal_tex_word = bor(normal_tex_word, 0x80000)
    if double_sided != 0 && flip_winding != 0 { normal_tex_word = bor(normal_tex_word, 0x20000) }
    if double_sided != 0 { normal_tex_word = bor(normal_tex_word, 0x40000) }
    def normal_uv_set = int(part.get("normal_uv_set",0))
@@ -6892,7 +7263,7 @@ fn _scene_render_view_stage(list src_parts, dict upload_stage, bool use_fit, f64
          _scene_prof_elapsed(prof_on, "gpu_prebake", t_gpu_prebake0)
          fit_applied = true
       }
-      if upload_has_blend {
+      if upload_has_blend && _scene_blend_camera_sort_enabled() {
          def t_gpu_sort0 = ticks()
          _sort_gpu_parts_blend_camera(upload_gpu_parts, sort_cam_x, sort_cam_y, sort_cam_z)
          _scene_prof_elapsed(prof_on, "gpu_blend_sort", t_gpu_sort0)
@@ -6936,7 +7307,7 @@ fn _scene_render_view_stage(list src_parts, dict upload_stage, bool use_fit, f64
       render_parts_baked = true
       fit_applied = true
    }
-   if upload_has_blend {
+   if upload_has_blend && _scene_blend_camera_sort_enabled() {
       def t_cpu_sort0 = ticks()
       _sort_cpu_parts_blend_camera(render_parts, sort_cam_x, sort_cam_y, sort_cam_z)
       _scene_prof_elapsed(prof_on, "cpu_blend_sort", t_cpu_sort0)
@@ -7338,12 +7709,13 @@ fn load_scene_mesh(str gltf_path, str scene_name="Scene", any cam3d=0, any M_SP=
    def skin_cnt_pre = int(deform_state.get("skin_cnt", 0))
    def morph_cnt_pre = int(deform_state.get("morph_cnt", 0))
    def deform_runtime_active = bool(deform_state.get("deform_runtime_active", false))
+   def gpu_blocks_anim = skin_cnt_pre > 0 || morph_cnt_pre > 0 || morph_runtime_active
    def base_path = to_str(gltf_data.get("base_path", ""))
    def _t1 = ticks()
    def mat_stage = _scene_material_stage(gltf_data, scene_name, base_path, diag_on, stage_trace, prof_on)
    def material_infos, mat_records = mat_stage.get("material_infos", []), mat_stage.get("mat_records", [])
    def node_perf_limit, t_mat_ms = int(mat_stage.get("node_perf_limit", 0)), float(mat_stage.get("mat_ms", 0.0))
-   def mesh_stage = _scene_mesh_convert_stage(gltf_path, gltf_data, prefetched_raw_mesh, mat_records, morph_runtime_active, deform_runtime_active, diag_on, stage_trace, prof_on)
+   def mesh_stage = _scene_mesh_convert_stage(gltf_path, gltf_data, prefetched_raw_mesh, mat_records, morph_runtime_active, gpu_blocks_anim, diag_on, stage_trace, prof_on)
    mut mesh = mesh_stage.get("mesh", 0)
    def t_mesh_ms = float(mesh_stage.get("mesh_ms", 0.0))
    mut mesh_parts = 0
@@ -7353,7 +7725,7 @@ fn load_scene_mesh(str gltf_path, str scene_name="Scene", any cam3d=0, any M_SP=
    mesh = ready_stage.get("mesh", mesh)
    mesh_parts = ready_stage.get("mesh_parts", mesh_parts)
    mut src_parts = ready_stage.get("src_parts", mesh_parts)
-   def upload_stage = _scene_grouped_upload_stage(src_parts, deform_runtime_active, diag_on, stage_trace, prof_on)
+   def upload_stage = _scene_grouped_upload_stage(src_parts, gpu_blocks_anim, diag_on, stage_trace, prof_on)
    def force_cpu_group, gpu_upload_usable = bool(upload_stage.get("force_cpu_group", false)), bool(upload_stage.get("gpu_upload_usable", false))
    def upload_ok, upload_fail = int(upload_stage.get("upload_ok", 0)), int(upload_stage.get("upload_fail", 0))
    def t_upload_ms = float(upload_stage.get("upload_ms", 0.0))
@@ -7384,7 +7756,7 @@ fn load_scene_mesh(str gltf_path, str scene_name="Scene", any cam3d=0, any M_SP=
       mesh["anim_cpu_parts_ready"] = false
    }
    def t_render0 = ticks()
-   def runtime_deform_parts = morph_runtime_active || deform_runtime_active
+   def runtime_deform_parts = morph_runtime_active || skin_cnt_pre > 0 || morph_cnt_pre > 0
    def render_stage = _scene_render_view_stage(src_parts, upload_stage, use_fit, sp_sc, fit_tx, fit_ty, fit_tz, sort_cam_x, sort_cam_y, sort_cam_z, runtime_deform_parts, scene_lights_pipeline_count, diag_on, prof_on)
    mut render_parts = render_stage.get("render_parts", [])
    if !is_list(render_parts) { render_parts = [] }
@@ -7657,17 +8029,22 @@ fn _scene_fast_bind_state(any model_matrix) bool {
       render.renderer_set_scene_lights_slab(_scene_fast_gpu_light_slab, _scene_fast_gpu_light_count)
       _scene_fast_lights_bound = true
    }
-   if _scene_fast_gpu_model_baked {
-      render.renderer_set_mask(2)
-      render.set_model_matrix(model_matrix)
-      _scene_fast_mask_bound = false
-   } else {
-      if !_scene_fast_mask_bound {
-         render.renderer_set_mask(0)
-         _scene_fast_mask_bound = true
-      }
-      render.set_model_matrix(model_matrix)
+   ;; gpu_model_baked only means the load-time fit is folded into the packed
+   ;; part model. Live edit/rotation still needs the normal/tangent matrix.
+   ;; Leaving mask bit 2 set made sky edits update positions while lighting and
+   ;; later draws kept stale state, so rotation looked frozen or split.
+   if !_scene_fast_mask_bound {
+      render.renderer_set_mask(0)
+      _scene_fast_mask_bound = true
    }
+   render.set_model_matrix(model_matrix)
+   true
+}
+
+fn _scene_fast_restore_state_after_draw() bool {
+   render.renderer_set_mask(0)
+   render.set_unlit(false)
+   _scene_fast_mask_bound = true
    true
 }
 
@@ -7696,12 +8073,16 @@ fn _scene_fast_draw_multi_static_ranges() bool {
    drawn += _scene_fast_draw_flat_range(0, _scene_fast_gpu_optical_start, 0, use_material_state)
    if _scene_fast_gpu_has_optical && _scene_fast_gpu_optical_start < _scene_fast_gpu_count {
       render.renderer_capture_scene_color_resume_pass()
-   }
-   drawn += _scene_fast_draw_flat_range(_scene_fast_gpu_optical_start, _scene_fast_gpu_blend_start, 0, use_material_state)
-   if _scene_fast_gpu_has_blend && _scene_fast_gpu_blend_start < _scene_fast_gpu_count {
-      drawn += _scene_fast_draw_flat_range(_scene_fast_gpu_blend_start, _scene_fast_gpu_count, 1, false)
-   } elif drawn <= 0 && _scene_fast_gpu_count > 0 {
-      drawn += _scene_fast_draw_flat_range(0, _scene_fast_gpu_count, 0, use_material_state)
+      ;; Preserve authored order for every translucent primitive once optical
+      ;; capture begins.  This keeps optical/blend interleaving intact.
+      drawn += _scene_fast_draw_flat_range(_scene_fast_gpu_optical_start, _scene_fast_gpu_count, 0, false)
+   } else {
+      drawn += _scene_fast_draw_flat_range(_scene_fast_gpu_optical_start, _scene_fast_gpu_blend_start, 0, use_material_state)
+      if _scene_fast_gpu_has_blend && _scene_fast_gpu_blend_start < _scene_fast_gpu_count {
+         drawn += _scene_fast_draw_flat_range(_scene_fast_gpu_blend_start, _scene_fast_gpu_count, 1, false)
+      } elif drawn <= 0 && _scene_fast_gpu_count > 0 {
+         drawn += _scene_fast_draw_flat_range(0, _scene_fast_gpu_count, 0, use_material_state)
+      }
    }
    if _scene_fast_gpu_has_optical { render.renderer_clear_scene_color_capture() }
    if !use_material_state && drawn > 0 && !_scene_fast_gpu_has_optical && !_scene_fast_gpu_has_blend {
@@ -7722,7 +8103,11 @@ fn _scene_fast_group_deform_active(any group) bool {
    if !is_dict(group) { return false }
    def has_anim = int(group.get("anim_count", 0)) > 0 || int(group.get("skin_count", 0)) > 0 || int(group.get("morph_target_count", 0)) > 0
    if !has_anim { return false }
-   bool(group.get("anim_playing", false)) || bool(group.get("anim_time_override", false))
+   if bool(group.get("anim_playing", false)) || bool(group.get("anim_time_override", false)) { return true }
+   ;; scene_fast_draw runs before render.draw_mesh_group().  Keep autoplay
+   ;; glTF clips out of the static packed color path, otherwise animated
+   ;; models render as stale/split static frames until another edit dirties it.
+   ui_profile.env_toggle_cached("NY_GLTF_AUTOPLAY", true)
 }
 
 fn scene_fast_draw(any group, any model_matrix, bool log_enabled=false) bool {
@@ -7730,6 +8115,10 @@ fn scene_fast_draw(any group, any model_matrix, bool log_enabled=false) bool {
    if ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE") { ui_profile.print_text("[scene:fast] enter") }
    if !is_dict(group) { return false }
    if _scene_fast_group_deform_active(group) { return _scene_fast_draw_generic(group, model_matrix) }
+   ;; Transform edits can move a fitted scene far from its cached packed/cull
+   ;; state. Use the normal scene draw so the active model, visibility, and
+   ;; material state are refreshed together instead of reusing a stale slab.
+   if scene_has_edit_transform(group) { return _scene_fast_draw_generic(group, model_matrix) }
    if !render.renderer_packed_scene_supported() {
       if ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE") { ui_profile.print_text("[scene:fast] packed unsupported") }
       return _scene_fast_draw_generic(group, model_matrix)
@@ -7756,6 +8145,7 @@ fn scene_fast_draw(any group, any model_matrix, bool log_enabled=false) bool {
    _scene_fast_bind_state(model_matrix)
    if ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE") { ui_profile.print_text("[scene:fast] packed draw") }
    def ok = _scene_fast_gpu_single_opaque ? _scene_fast_draw_single_opaque() : _scene_fast_draw_multi_static_ranges()
+   _scene_fast_restore_state_after_draw()
    if ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE") { ui_profile.print_text("[scene:fast] packed ok=" + to_str(ok)) }
    ok ? true : _scene_fast_draw_generic(group, model_matrix)
 }

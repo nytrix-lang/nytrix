@@ -5,14 +5,14 @@ Syntax records source spellings. Topic pages define behavior.
 ## Lexical
 
 ```ny
-comment        := ";" text-until-newline
+comment        := ";" text-until-newline | ";" marker text-block marker ";"
+marker         := [A-Za-z_][A-Za-z0-9_]*
 identifier     := [A-Za-z_][A-Za-z0-9_]*
 module-path    := identifier ("." identifier)*
 block          := "{" source* "}"
 ```
 
-There are no block comments. Semicolons are comments, not statement
-terminators.
+There are no standard C-style block comments. Heredoc-style multiline comments can be written as `;MARKER ... MARKER;`. Semicolons are comments, not statement terminators.
 
 ## Literals
 

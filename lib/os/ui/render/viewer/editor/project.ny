@@ -20,8 +20,8 @@ use std.os.fs as osfs
 use std.os.path as ospath
 use std.os.subprocess (run_capture)
 
-def TREE_ROW_H = 24.0
-def TREE_HEADER_H = 31.0
+def TREE_ROW_H = 22.0
+def TREE_HEADER_H = 27.0
 def MAX_TREE_ROWS = 5000
 def FILE_OP_HISTORY_LIMIT = 128
 def TRASH_DIR_NAME = ".nytrix-trash"

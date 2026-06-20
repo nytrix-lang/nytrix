@@ -89,6 +89,7 @@ fn _gltf_make_indexed_part_from_state(
       "skin_joint_nodes": skin_joints,
       "skin_joint_count": is_list(skin_joints) ? skin_joints.len : 0,
       "skin_inv_bind_accessor": int(skin_state.get("skin_inv_bind_accessor", -1)),
+      "skin_single_influence": bool(skin_state.get("skin_single_influence", false)),
       "visible": part_visible,
       "instanced_part": has_gpu_instancing,
       "primitive_mode": prim_mode,
@@ -390,6 +391,11 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
             tz = shr._gltf_read_f32_acc(t_ptr, tbase + t_cs * 2, t_comp, t_norm)
             tw = shr._gltf_read_f32_acc(t_ptr, tbase + t_cs * 3, t_comp, t_norm)
          }
+         def morph_tan = _gltf_apply_morph_vec3(morph_targets, morph_targets_n, vi, tx, ty, tz, "tan_res")
+         tx, ty = float(morph_tan.get(0, tx)), float(morph_tan.get(1, ty))
+         tz = float(morph_tan.get(2, tz))
+         def tl = sqrt(tx * tx + ty * ty + tz * tz)
+         if tl > 0.00001 { tx /= tl ty /= tl tz /= tl }
          def off = ptr_add(buf, vi * shr._GLTF_VTX_STRIDE)
          def color_u32 = shr._gltf_vertex_color_u32(c_res, vi, 0xffffffff)
          store32_f32(off, mx, shr._GLTF_VTX_OFF_X)
@@ -589,6 +595,31 @@ fn _gltf_copy_part_opts(any opts) dict {
    def storage = opts.get("storage", "")
    if is_str(storage) && storage.len > 0 { out["storage"] = storage }
    out
+}
+
+
+fn _gltf_node_or_mesh_morph_weights(any g, int mesh_idx, int node_idx, int target_count) list {
+   "Returns the morph weights that apply to one mesh instance. Node weights override mesh defaults."
+   mut out = anim._gltf_mesh_morph_weights(g, mesh_idx, target_count)
+   if target_count <= 0 { return out }
+   def nodes = g.get("nodes", 0)
+   if is_list(nodes) && node_idx >= 0 && node_idx < nodes.len {
+      def node = nodes[node_idx]
+      def node_w = is_dict(node) ? node.get("weights", 0) : 0
+      if is_list(node_w) {
+         mut wi = 0
+         while wi < target_count && wi < node_w.len {
+            out[wi] = float(node_w[wi])
+            wi += 1
+         }
+      }
+   }
+   out
+}
+
+fn _gltf_instance_node_idx(any inst_pair) int {
+   if is_list(inst_pair) && inst_pair.len == 2 && is_list(inst_pair.get(0)) { return int(inst_pair.get(1, -1)) }
+   -1
 }
 
 fn _gltf_pack_cacheable_meta(any meta) bool {
@@ -793,6 +824,7 @@ fn gltf_to_mesh_group_indexed(any gltf_data, any color=0, any material_tex_ids=0
             def targets_n = is_list(targets) ? targets.len : 0
             if targets_n > 0 {
                meta["targets"] = targets
+               meta["morph_target_count"] = targets_n
                meta["morph_weights"] = anim._gltf_mesh_morph_weights(g, mesh_idx, targets_n)
             }
          }
@@ -806,35 +838,49 @@ fn gltf_to_mesh_group_indexed(any gltf_data, any color=0, any material_tex_ids=0
             def uv_xform = material_state.get("uv_xform", 0)
             def tex_id = int(material_state.get("tex_id", -1))
             def prim_packed_color = int(material_state.get("prim_packed_color", packed_color))
-            def packed_buffers = _gltf_pack_primitive_buffers(g, data, meta, prim_packed_color, tex_id, uv_set, uv_xform, pack_cache_enabled, vertex_pack_cache, index_pack_cache)
-            def verts = packed_buffers.get(0, 0)
-            def inds = packed_buffers.get(1, 0)
-            vertex_pack_cache = packed_buffers.get(2, vertex_pack_cache)
-            index_pack_cache = packed_buffers.get(3, index_pack_cache)
-            if is_dict(verts) && is_dict(inds) {
-               mut vptr = verts.get("ptr", 0)
-               mut vcnt = verts.get("count", 0)
-               mut iptr = inds.get("ptr", 0)
-               mut icnt = inds.get("count", 0)
-               mut idx_u32 = inds.get("u32", false)
-               def prim_mode = int(meta.get("mode", shr.GLTF_MODE_TRIANGLES))
-               if shr._gltf_prim_mode_expands_to_vertices(prim_mode) {
-                  def expanded_prim = _gltf_expand_primitive_vertices(vptr, vcnt, iptr, icnt, idx_u32)
-                  if is_dict(expanded_prim) {
-                     vptr = expanded_prim.get("ptr", 0)
-                     vcnt = int(expanded_prim.get("count", 0))
-                     iptr = 0
-                     icnt = 0
-                     idx_u32 = false
-                  }
+            def prim_mode = int(meta.get("mode", shr.GLTF_MODE_TRIANGLES))
+            def lbs = meta.get("local_bounds", 0)
+            def inst_n = is_list(instance_mats) ? instance_mats.len : 0
+            def has_morph_targets = int(meta.get("morph_target_count", 0)) > 0 || is_list(meta.get("targets", 0))
+            mut inst_i = 0
+            while inst_i < (has_morph_targets ? max(inst_n, 1) : 1) {
+               def inst_pair = (has_morph_targets && inst_n > 0) ? instance_mats.get(inst_i) : 0
+               def inst_node_idx = has_morph_targets ? _gltf_instance_node_idx(inst_pair) : -1
+               mut meta_inst = meta
+               if has_morph_targets {
+                  meta_inst = dict_clone(meta)
+                  meta_inst["morph_weights"] = _gltf_node_or_mesh_morph_weights(g, mesh_idx, inst_node_idx, int(meta.get("morph_target_count", 0)))
                }
-               def mesh_opts = mat._gltf_indexed_mesh_opts(material_state, idx_u32, meta, prim_mode, use_static)
-               def lbs = meta.get("local_bounds", 0)
-               def emitted = _gltf_indexed_append_instance_parts(parts, scene_bounds, gltf_data, g, data, nodes, instance_mats,
-                  node_vis_map, meta, vptr, vcnt, iptr, icnt, mesh_opts, material_state,
-               uv_set, packed_color, prim_mode, lbs)
-               parts = emitted.get(0, parts)
-               scene_bounds = emitted.get(1, scene_bounds)
+               def packed_buffers = _gltf_pack_primitive_buffers(g, data, meta_inst, prim_packed_color, tex_id, uv_set, uv_xform, pack_cache_enabled, vertex_pack_cache, index_pack_cache)
+               def verts = packed_buffers.get(0, 0)
+               def inds = packed_buffers.get(1, 0)
+               vertex_pack_cache = packed_buffers.get(2, vertex_pack_cache)
+               index_pack_cache = packed_buffers.get(3, index_pack_cache)
+               if is_dict(verts) && is_dict(inds) {
+                  mut vptr = verts.get("ptr", 0)
+                  mut vcnt = verts.get("count", 0)
+                  mut iptr = inds.get("ptr", 0)
+                  mut icnt = inds.get("count", 0)
+                  mut idx_u32 = inds.get("u32", false)
+                  if shr._gltf_prim_mode_expands_to_vertices(prim_mode) {
+                     def expanded_prim = _gltf_expand_primitive_vertices(vptr, vcnt, iptr, icnt, idx_u32)
+                     if is_dict(expanded_prim) {
+                        vptr = expanded_prim.get("ptr", 0)
+                        vcnt = int(expanded_prim.get("count", 0))
+                        iptr = 0
+                        icnt = 0
+                        idx_u32 = false
+                     }
+                  }
+                  def mesh_opts = mat._gltf_indexed_mesh_opts(material_state, idx_u32, meta_inst, prim_mode, use_static)
+                  def emit_instances = has_morph_targets ? [inst_pair] : instance_mats
+                  def emitted = _gltf_indexed_append_instance_parts(parts, scene_bounds, gltf_data, g, data, nodes, emit_instances,
+                     node_vis_map, meta_inst, vptr, vcnt, iptr, icnt, mesh_opts, material_state,
+                  uv_set, packed_color, prim_mode, lbs)
+                  parts = emitted.get(0, parts)
+                  scene_bounds = emitted.get(1, scene_bounds)
+               }
+               inst_i += 1
             }
          }
          pi += 1

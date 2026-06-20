@@ -7,7 +7,7 @@ module std.os.ui.render.viewer.engine.state *
 use std.core
 use std.os.ui.render.matrix as rmat
 
-mut int APP_MSAA = 1
+mut int APP_MSAA = 4
 mut bool APP_VSYNC = false
 mut bool APP_FILTER_LINEAR = false
 mut list APP_BG = [0.000, 0.000, 0.000, 1.0]

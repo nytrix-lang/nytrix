@@ -256,35 +256,82 @@ static void skip_whitespace(lexer_t *lx) {
       advance(lx);
     } else if (c == ';') {
       size_t semi_pos = lx->pos;
-      advance(lx);
-      size_t comment_start = lx->pos;
-      while (peek(lx) != '\n' && peek(lx) != '\0')
-        advance(lx);
-      size_t comment_end = lx->pos;
+      advance(lx); // Consume ';'
+      if (peek(lx) == '{') {
+        // Codeblock-style multiline comment: ;{ ... };
+        advance(lx); // Consume '{'
+        bool found = false;
+        while (peek(lx) != '\0') {
+          if (peek(lx) == '}' && peek_next(lx) == ';') {
+            advance(lx); // Consume '}'
+            advance(lx); // Consume ';'
+            found = true;
+            break;
+          }
+          advance(lx);
+        }
+        if (!found) {
+          lexer_error(lx, semi_pos, "unterminated block comment",
+                      "make sure the closing '};' is present");
+        }
+      } else if (IS_ALPHA(peek(lx)) || peek(lx) == '_') {
+        // Heredoc-style multiline comment: ;MARKER ... MARKER;
+        size_t marker_start = lx->pos;
+        while (IS_ALNUM(peek(lx)) || peek(lx) == '_') {
+          advance(lx);
+        }
+        size_t marker_len = lx->pos - marker_start;
+        const char *marker = lx->src + marker_start;
 
-      if (comment_end > comment_start) {
+        bool found = false;
+        while (peek(lx) != '\0') {
+          size_t cur_pos = lx->pos;
+          if (strncmp(lx->src + cur_pos, marker, marker_len) == 0 &&
+              lx->src[cur_pos + marker_len] == ';') {
+            char prev = (cur_pos > 0) ? lx->src[cur_pos - 1] : '\0';
+            if (!(IS_ALNUM(prev) || prev == '_')) {
+              // Consume the marker and the closing ';'
+              for (size_t k = 0; k < marker_len + 1; k++) {
+                advance(lx);
+              }
+              found = true;
+              break;
+            }
+          }
+          advance(lx);
+        }
+        if (!found) {
+          lexer_error(lx, semi_pos, "unterminated multiline comment",
+                      "make sure the closing marker followed by ';' is present");
+        }
+      } else {
+        size_t comment_start = lx->pos;
+        while (peek(lx) != '\n' && peek(lx) != '\0')
+          advance(lx);
+        size_t comment_end = lx->pos;
 
-        if (!lx->source_has_newline) {
-
-          const char *p = lx->src + comment_start;
-          const char *end = lx->src + comment_end;
-          while (p < end && (*p == ' ' || *p == '\t'))
-            p++;
-          if (p < end && *p != ';') {
-            size_t line_start = semi_pos;
-            while (line_start > 0 && lx->src[line_start - 1] != '\n')
-              line_start--;
-            const char *before = lx->src + semi_pos - 1;
-            while (before > lx->src + line_start &&
-                   (*before == ' ' || *before == '\t'))
-              before--;
-            if (before >= lx->src + line_start) {
-              lexer_error(lx, semi_pos,
-                          "';' starts a line comment — all text after it on "
-                          "this line is ignored",
-                          "In Nytrix, use newlines or just spaces to separate "
-                          "statements, not ';' "
-                          "(like Python)");
+        if (comment_end > comment_start) {
+          if (!lx->source_has_newline) {
+            const char *p = lx->src + comment_start;
+            const char *end = lx->src + comment_end;
+            while (p < end && (*p == ' ' || *p == '\t'))
+              p++;
+            if (p < end && *p != ';') {
+              size_t line_start = semi_pos;
+              while (line_start > 0 && lx->src[line_start - 1] != '\n')
+                line_start--;
+              const char *before = lx->src + semi_pos - 1;
+              while (before > lx->src + line_start &&
+                     (*before == ' ' || *before == '\t'))
+                before--;
+              if (before >= lx->src + line_start) {
+                lexer_error(lx, semi_pos,
+                            "';' starts a line comment — all text after it on "
+                            "this line is ignored",
+                            "In Nytrix, use newlines or just spaces to separate "
+                            "statements, not ';' "
+                            "(like Python)");
+              }
             }
           }
         }

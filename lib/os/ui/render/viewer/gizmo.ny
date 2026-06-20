@@ -3,7 +3,7 @@
 ;; References:
 ;; - std.os.ui.render.viewer.gui
 ;; - std.os.ui.render.matrix
-module std.os.ui.render.viewer.gizmo(compact_view, metrics, draw_box, draw_box_corners, draw_axes, project_point, axis_tangent, hit_test, draw_overlay)
+module std.os.ui.render.viewer.gizmo(compact_view, metrics, metrics_screen, draw_box, draw_box_corners, draw_axes, project_point, axis_tangent, hit_test, hit_test_screen, draw_overlay)
 use std.core
 use std.math (PI, abs, clamp, cos, max, min, sin, sqrt)
 use std.os.ui.render.dump as ui_profile
@@ -271,6 +271,51 @@ fn metrics(bounds, mode) list {
    [px, py, pz, span, axis_len, axis_thick, box_thick, handle_size, center_size]
 }
 
+fn _screen_world_per_pixel(any mvp, any win_w, any win_h, f64 px, f64 py, f64 pz, f64 span) f64 {
+   def c = project_point(mvp, win_w, win_h, px, py, pz)
+   if !is_list(c) { return max(span, 1.0) / 180.0 }
+   def probe = clamp(max(span * 0.001, 1.0), 0.05, max(span * 0.08, 2.0))
+   def qx = project_point(mvp, win_w, win_h, px + probe, py, pz)
+   def qy = project_point(mvp, win_w, win_h, px, py + probe, pz)
+   def qz = project_point(mvp, win_w, win_h, px, py, pz + probe)
+   mut best = 0.0
+   def cx = float(c.get(0, 0.0))
+   def cy = float(c.get(1, 0.0))
+   if is_list(qx) {
+      def dx = float(qx.get(0, 0.0)) - cx
+      def dy = float(qx.get(1, 0.0)) - cy
+      best = max(best, sqrt(dx * dx + dy * dy))
+   }
+   if is_list(qy) {
+      def dx = float(qy.get(0, 0.0)) - cx
+      def dy = float(qy.get(1, 0.0)) - cy
+      best = max(best, sqrt(dx * dx + dy * dy))
+   }
+   if is_list(qz) {
+      def dx = float(qz.get(0, 0.0)) - cx
+      def dy = float(qz.get(1, 0.0)) - cy
+      best = max(best, sqrt(dx * dx + dy * dy))
+   }
+   if best <= 0.0001 { return max(span, 1.0) / 180.0 }
+   clamp(probe / best, max(span, 1.0) / 16000.0, max(span, 1.0) / 16.0)
+}
+
+fn metrics_screen(any bounds, any mode, any mvp, any win_w, any win_h) list {
+   "Computes screen-stable gizmo metrics for huge or tiny scenes."
+   def m = metrics(bounds, mode)
+   def px, py = float(m.get(0, 0.0)), float(m.get(1, 0.0))
+   def pz = float(m.get(2, 0.0))
+   def span = max(0.001, float(m.get(3, 1.0)))
+   def wpp = _screen_world_per_pixel(mvp, win_w, win_h, px, py, pz, span)
+   def target = compact_view(win_w, win_h) ? 74.0 : 104.0
+   def axis_len = clamp(wpp * target, max(0.10, span * 0.020), max(0.28, span * 0.38))
+   def thick = clamp(wpp * 2.25, span * 0.00020, max(0.018, span * 0.0040))
+   def box_thick = clamp(wpp * 1.15, span * 0.00012, max(0.010, span * 0.0020))
+   def handle = clamp(wpp * (int(mode) == 2 ? 9.5 : 7.5), max(0.018, span * 0.0010), max(0.085, span * 0.030))
+   def center = clamp(wpp * 8.0, max(0.014, span * 0.0008), max(0.070, span * 0.024))
+   [px, py, pz, span, axis_len, thick, box_thick, handle, center]
+}
+
 fn _axis_col(any col, int axis, int active_axis) list {
    if active_axis <= 0 || active_axis == axis {
       return col
@@ -321,10 +366,10 @@ fn draw_axes(px, py, pz, span, axis_len, axis_thick, handle_size, red, green, bl
    true
 }
 
-fn hit_test(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, any mouse_y) dict {
+fn _hit_test_metric(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, any mouse_y, any m) dict {
    "Hit-tests the projected world gizmo. Returns mode, axis, and screen drag tangent."
    if !is_list(bounds) || bounds.len < 6 { return {"hit": false, "axis": 0, "mode": int(mode)} }
-   def m = metrics(bounds, mode)
+   if !is_list(m) || m.len < 9 { return {"hit": false, "axis": 0, "mode": int(mode)} }
    def px = float(m.get(0, 0.0))
    def py = float(m.get(1, 0.0))
    def pz = float(m.get(2, 0.0))
@@ -408,6 +453,17 @@ fn hit_test(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, an
    }
 }
 
+
+fn hit_test(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, any mouse_y) dict {
+   "Hit-tests the projected world gizmo. Returns mode, axis, and screen drag tangent."
+   _hit_test_metric(mvp, win_w, win_h, bounds, mode, mouse_x, mouse_y, metrics(bounds, mode))
+}
+
+fn hit_test_screen(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, any mouse_y) dict {
+   "Hit-tests using screen-stable gizmo metrics for large scenes."
+   _hit_test_metric(mvp, win_w, win_h, bounds, mode, mouse_x, mouse_y, metrics_screen(bounds, mode, mvp, win_w, win_h))
+}
+
 fn project_point(mvp, win_w, win_h, px, py, pz) any {
    "Projects a world-space point to screen coordinates."
    def x = float(px)
@@ -464,6 +520,7 @@ fn draw_overlay(mvp, win_w, win_h, px, py, pz, axis_len, mode) bool {
 #main {
    assert(compact_view(320, 800) && !compact_view(800, 800), "viewer gizmo compact")
    assert(metrics([0, 0, 0, 2, 2, 2], 0).len == 9, "viewer gizmo metrics")
+   assert(metrics_screen([-500, -10, -500, 500, 80, 500], 0, [4, 4, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 1280, 720).len == 9, "viewer gizmo screen metrics")
    def id = [4, 4, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
    assert(bool(hit_test(id, 100, 100, [-1, -1, -1, 1, 1, 1], 0, 50, 50).get("hit", false)), "viewer gizmo center hit")
    assert(int(hit_test(id, 100, 100, [-1, -1, -1, 1, 1, 1], 0, 80, 50).get("axis", 0)) == 1, "viewer gizmo x hit")

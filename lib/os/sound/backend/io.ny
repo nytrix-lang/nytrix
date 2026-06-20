@@ -3,7 +3,7 @@
 ;; References:
 ;; - std.os.sound.backend
 ;; - std.os
-module std.os.sound.backend.io(create, connect, disconnect, get_output_device_count, get_output_device, get_default_output_device_index, outstream_create, outstream_open, outstream_start, outstream_stop, outstream_write, outstream_write_frames, outstream_destroy, get_backend_name, FORMAT_S16LE, FORMAT_FLOAT32LE)
+module std.os.sound.backend.io(create, connect, connect_backend, disconnect, get_output_device_count, get_output_device, get_default_output_device_index, outstream_create, outstream_open, outstream_start, outstream_stop, outstream_write, outstream_write_frames, outstream_destroy, get_backend_name, FORMAT_S16LE, FORMAT_FLOAT32LE)
 use std.core
 use std.core.dict_mod
 use std.os
@@ -18,7 +18,10 @@ use std.os.sound.backend.shared as shared
 def FORMAT_S16LE = 1
 def FORMAT_FLOAT32LE = 2
 
-fn _forced_backend() str { common.env_lower("NY_AUDIO_BACKEND") }
+fn _forced_backend() str {
+   def v = common.env_lower("NY_AUDIO_BACKEND")
+   v ? to_str(v) : ""
+}
 
 fn _set_backend(dict ctx, int id, str name) dict {
    ctx = ctx.set("backend", id)
@@ -49,6 +52,13 @@ fn _connect_backend(dict ctx, str backend) any {
    }
    if new_ctx { return _set_backend(new_ctx, id, name) }
    0
+}
+
+
+fn connect_backend(any ctx, str backend) any {
+   "Connects `ctx` to one named backend without applying automatic fallback order."
+   if !ctx { return 0 }
+   _connect_backend(ctx, backend)
 }
 
 fn _connect_linux_desktop(dict ctx, bool allow_jack=false) any {

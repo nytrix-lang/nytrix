@@ -1195,12 +1195,12 @@ fn index_read(any obj, any key) any {
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return _index_read_key_error(key) }
       if !__is_int(k) { return _index_read_key_error(key) }
-      def n = obj.len
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { return _index_read_oob_error(k, n) }
-      _index_read_probe(tag, k, 0)
       use std.core.str
-      return chr(load8(obj, k))
+      def total = utf8_len(obj)
+      if __lt(k, 0) { k = __add(k, total) }
+      if __lt(k, 0) || __ge(k, total) { return _index_read_oob_error(k, total) }
+      _index_read_probe(tag, k, 0)
+      return chr(ord_at(obj, k))
    }
    if __eq(tag, _TAG_BYTES) || _is_bytes(obj) {
       mut k = 0
@@ -1263,12 +1263,12 @@ fn get(any obj, any key, any default=0) any {
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return default }
       if !__is_int(k) { return default }
-      def n = obj.len
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { return default }
+      use std.core.str
+      def total = utf8_len(obj)
+      if __lt(k, 0) { k = __add(k, total) }
+      if __lt(k, 0) || __ge(k, total) { return default }
       else {
-         use std.core.str
-         return chr(load8(obj, k))
+         return chr(ord_at(obj, k))
       }
    }
    if __eq(tag, _TAG_BYTES) || _is_bytes(obj) {
