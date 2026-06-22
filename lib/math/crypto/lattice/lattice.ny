@@ -1060,3 +1060,26 @@ fn pow(any base, any exp, any max_exp) any {
    }
    result
 }
+
+#main {
+   def text = "[[ 1 0 0 ]\n [ 2 -1 0 ]\n [ 3 2 1 ]]"
+   def m = lattice_text_parse_matrix(text)
+   assert(matrix._matrix_rows(m) == 3, "lattice text parse rows")
+   assert(matrix.mat_get(m, 1, 1) == Z(-1), "lattice text parse entry")
+   def round = lattice_text_parse_matrix(lattice_text_format(m))
+   assert(matrix.mat_get(round, 2, 2) == Z(1), "lattice text format roundtrip")
+   def v = lattice_text_parse_vector("[361 1143 -778]")
+   assert(v.len == 3 && v[2] == Z(-778), "lattice text vector parse")
+   assert(lattice_dot([1, 2, 3], [4, 5, 6]) == Z(32), "lattice dot product")
+   assert(lattice_norm2([2, -3, 6]) == Z(49), "lattice norm")
+   def red2 = gaussian_reduce_2d([10, 0], [9, 1])
+   assert(lattice_norm2(red2[0]) <= lattice_norm2(red2[1]), "gaussian reduce orders vectors")
+   def qrep = latticegen_report("qary", 4, 2, 17, nil, 7, false)
+   assert(qrep.get("method", "") == "qary", "latticegen qary method")
+   assert(qrep.get("rows", 0) == 4 && qrep.get("cols", 0) == 4, "latticegen qary shape")
+   def modrep = gen_lattice_report("modular", 2, 4, 17, 11, nil, false, true, false)
+   assert(modrep.get("type", "") == "modular", "gen_lattice_report modular type")
+   assert(modrep.get("determinant_ok", false), "gen_lattice_report determinant")
+   assert(modrep.get("formatted", "").len > 0, "gen_lattice_report formatted")
+   print("✓ std.math.crypto.lattice.lattice self-test passed")
+}

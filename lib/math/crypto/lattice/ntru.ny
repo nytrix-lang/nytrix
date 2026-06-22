@@ -451,7 +451,7 @@ fn _ntru_known_plaintext_candidates(list ciphertext, list known_bits, int n, any
    candidates
 }
 
-fn ntru_recover_text_from_known_plaintext(list ciphertexts, int n, any p, any q, str known_prefix, str needle="MSG{") str {
+fn ntru_recover_text_from_known_plaintext(list ciphertexts, int n, any p, any q, str known_prefix, str needle="fixture:") str {
    "Recover NTRU plaintext when known plaintext covers a full block, using a GF(p) convolution kernel for `f`."
    if ciphertexts.len == 0 { return "" }
    def known_bits = _ntru_text_to_bits(known_prefix)
@@ -481,7 +481,7 @@ fn ntru_recover_ternary_key_rows(list h, int n, any p, any q, int chunk_steps=50
    found
 }
 
-fn ntru_recover_text_from_public_key_lattice(list h, list ciphertexts, int n, any p, any q, str needle="MSG{", int chunk_steps=50000, int chunks=12) str {
+fn ntru_recover_text_from_public_key_lattice(list h, list ciphertexts, int n, any p, any q, str needle="fixture:", int chunk_steps=50000, int chunks=12) str {
    "Recover an NTRU plaintext by reducing the public-key lattice in bounded native chunks and testing ternary key rows."
    if needle.len * 8 >= n {
       def known_hit = ntru_recover_text_from_known_plaintext(ciphertexts, n, p, q, needle, needle)
@@ -501,4 +501,26 @@ fn ntru_recover_text_from_public_key_lattice(list h, list ciphertexts, int n, an
    def live_hit = _ntru_scan_rows(live_rows, n, ciphertexts, p, q, needle)
    if live_hit.len > 0 { return live_hit }
    ""
+}
+
+#main {
+   def rows = ntru_circulant_rows([1, 2, 3], 3)
+   assert(rows == [[1, 2, 3], [3, 1, 2], [2, 3, 1]], "row-circulant basis order")
+   assert(ntru_cyclic_convolution([1, 1, 0], [1, 2, 3], 3, 97) == [4, 3, 5], "cyclic convolution wraps coefficients")
+   assert(ntru_centered(8, 11) == -3, "centered representative above half modulus")
+   assert(ntru_is_ternary([0, 1, -1, 2], 0, 3), "ternary prefix accepted")
+   assert(!ntru_is_ternary([0, 1, -1, 2], 0, 4), "non-ternary coefficient rejected")
+   def inv = ntru_cyclic_inverse_mod([1, 1, 0], 3, 3)
+   assert(ntru_cyclic_convolution([1, 1, 0], inv, 3, 3) == [1, 0, 0], "cyclic inverse multiplies to one")
+   def basis = ntru_public_key_lattice_basis([2, 4, 6], 3, 3, 11)
+   assert(basis.get(0) == 6 && basis.get(1) == 6, "ntru public-key basis dimensions")
+   def bits = [0, 1, 0, 0, 1, 1, 1, 1]
+   assert(ntru_bits_to_text(bits) == "O", "ntru bit text packing")
+   def f = [1, 1, 0]
+   def finv3 = ntru_cyclic_inverse_mod(f, 3, 3)
+   assert(finv3.len == 3, "ntru inverse fixture exists")
+   def qrep = lllmod.lll_quality_report(basis)
+   assert(qrep.contains("size_reduced"), "ntru lattice lll quality size_reduced")
+   assert(qrep.contains("ok"), "ntru lattice lll quality ok field")
+   print("✓ std.math.crypto.lattice.ntru self-test passed")
 }

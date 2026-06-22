@@ -1812,3 +1812,55 @@ impl gf2bv_linear {
       bv.evaluate_raw(raw)
    }
 }
+
+#main {
+   def F8 = GF(2, 11)
+   assert(F8.order == Z(8) && F8.degree == 3, "binary field metadata(raw GF)")
+   def gen8_val = gf2_mod(2, 11)
+   assert(gf2_pow(gen8_val, 2, 11) == Z(4), "binary frobenius(raw)")
+   assert(gf2_pow(gen8_val, 4, 11) == Z(6), "binary frobenius^2(raw)")
+   assert(gf2_pow(gen8_val, 1, 11) == Z(2), "binary frobenius identity(raw)")
+   assert(gfp_add(10, 9, 17) == 2, "gfp add wrap")
+   assert(gfp_mul(5, 7, 17) == 1, "gfp mul")
+   assert(gfp_inv(3, 17) == 6, "gfp inverse")
+   assert(gfp_pow(3, 4, 17) == 13, "gfp pow")
+   def alpha = [0, 1]
+   def irred4 = [1, 1, 1]
+   assert(gfpk_pow(alpha, 3, irred4, 2) == [1], "gfpk pow")
+   assert(gfpk_inv(alpha, irred4, 2) == [1, 1], "gfpk inv")
+   assert(gf2_mul(6, 5) == 30, "gf2 mul")
+   assert(gf2_mod(30, 11) == 3, "gf2 mod")
+   assert(gf2_mul_mod(6, 5, 11) == 3, "gf2 mul mod")
+   assert(gf2_inv(2, 11) == 5, "gf2 inv")
+   assert(gf2_pow(2, 7, 11) == 1, "gf2 pow")
+   def F17 = GF(17)
+   assert(F17.characteristic == 17 && F17.order == 17, "prime field metadata")
+   def a17_val = gfp_elem(5, 17)
+   def b17_val = gfp_elem(15, 17)
+   assert(gfp_add(a17_val, b17_val, 17) == 3, "prime field add")
+   assert(gfp_mul(a17_val, b17_val, 17) == 7, "prime field mul")
+   assert(gfp_inv(b17_val, 17) == 8, "prime field inv")
+   def F9 = GF(3, [1, 0, 1])
+   assert(F9.order == 9 && F9.degree == 2, "extension field metadata")
+   def A = [[1, 1], [1, 0]]
+   def b = [1, 0]
+   def sol = solve_gf2(A, b)
+   assert(sol == [0, 1], "solve_gf2")
+   assert(vec2num(num2vec(13, 4)) == 13, "num2vec roundtrip")
+   def lin = GF2BVLinearSystem([1, 1, 1, 1])
+   def vars = lin.gens
+   def gf2bv_bv va = vars.get(0)
+   def gf2bv_bv vb = vars.get(1)
+   def gf2bv_bv vc = vars.get(2)
+   def gf2bv_bv vd = vars.get(3)
+   def zeros = [va ^^ vb ^^ vc ^^ 1, vb ^^ vd, va ^^ vc ^^ 1]
+   def one_sol = lin.solve_one(zeros)
+   assert(one_sol != nil && one_sol.len == 4, "GF2BV solve_one")
+   mut zi = 0
+   while zi < zeros.len {
+      assert(lin.evaluate(zeros.get(zi), one_sol) == 0, "GF2BV evaluate")
+      zi += 1
+   }
+   assert(lin.solve_all(zeros, 8).len == 2, "GF2BV solve_all")
+   print("✓ math.crypto.gf self-test passed")
+}

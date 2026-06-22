@@ -168,12 +168,6 @@ assert(min_small < 0, "min_small")
 def empty = ""
 assert(empty.len == 0, "empty string")
 
-#main {
-   def s = "   "
-   def stripped = strip(s)
-   assert(stripped.len == 0, "strip whitespace")
-}
-
 mut l = list(0)
 assert(l.len == 0, "empty list")
 mut i = 0
@@ -185,3 +179,9 @@ while i < 100 {
 assert(l.len == 100, "list growth")
 assert(l.get(99) == 99, "list last")
 print("✓ Edge cases passed")
+
+#main {
+   def s = "   "
+   def stripped = strip(s)
+   assert(stripped.len == 0, "strip whitespace")
+}

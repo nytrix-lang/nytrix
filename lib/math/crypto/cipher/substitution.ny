@@ -368,3 +368,11 @@ fn substitution_score(str text) int {
    }
    score
 }
+
+#main {
+   def key = substitution_key_from_pairs("THEQUICKBROWN", "XQATZCDOHYFVE")
+   assert(key == "BHDGAIJQCKOLMEFNTYPXZRVSUW", "known plaintext fills partial substitution key")
+   assert(substitution_decrypt("XQA TZCDO HYFVE", key) == "THE QUICK BROWN", "derived key decrypts known pair")
+   print("SUBSTITUTION_KNOWN_PLAINTEXT_OK")
+   print("✓ std.math.crypto.cipher.substitution self-test passed")
+}

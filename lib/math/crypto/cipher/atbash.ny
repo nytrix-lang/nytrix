@@ -27,3 +27,9 @@ fn atbash_text(str s) str {
    builder_free(out)
    text
 }
+
+#main {
+   assert(atbash_text("XIBKGLTIZKSRV") == "CRYPTOGRAPHIE", "atbash upper")
+   assert(atbash_text("zyx") == "abc", "atbash lower")
+   print("✓ std.math.crypto.cipher.atbash self-test passed")
+}

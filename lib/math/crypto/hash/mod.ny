@@ -1499,3 +1499,51 @@ fn hash_brute_crack(any target_hash, str charset, int max_len, fnptr hash_fn) an
    }
    nil
 }
+
+#main {
+   def msg = "abc"
+   def sha_expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+   def md5_expected = "900150983cd24fb0d6963f7d28e17f72"
+   def ripe_expected = "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc"
+   def sha_direct = sha256(msg).hex
+   def sha_bytes = sha256_bytes(msg).hex
+   def md5_hex = md5_bytes(msg).hex
+   def ripe_bytes = ripemd160_bytes(msg).hex
+   def sha_method = sha256_hex(msg)
+   def sha_list_method = sha256_hex([97, 98, 99])
+   assert(sha_direct == sha_expected, "sha256(...).hex")
+   assert(sha_bytes == sha_expected, "sha256_bytes(...).hex")
+   assert(md5_hex == md5_expected, "md5_bytes(...).hex")
+   assert(ripe_bytes == ripe_expected, "ripemd160_bytes(...).hex")
+   assert(sha_method == sha256_hex(msg), "sha256_hex str")
+   assert(sha_list_method == sha256_hex(msg), "sha256_hex list")
+     def tag = sha256_hmac("key", msg).hex
+     assert(tag == "9c196e32dc0175f86f4b1cb89289d6619de6bee699e4c378e68309ed97a1a6ab", "hash hmac direct")
+    def fox_msg = "The quick brown fox jumps over the lazy dog"
+    assert(md5_hmac("key", fox_msg) == "80070713463e7749b90c2dc24911e275", "hmac-md5 vector")
+    def s = "123456789"
+    assert(crc32(s, 0, 0) == 3421780262, "crc32")
+    assert(adler32(s, 0, 0) == 152961502, "adler32")
+    assert(xxh32(s, 0, 0, 0) == 2474356071, "xxh32")
+    assert(md5(s, 0, 0) == "25f9e794323b453885f5181f1b624d0b", "md5")
+    assert(sha1(s, 0, 0) == "f7c3bc1d808e04732adf679965ccc34ca7ae3441", "sha1")
+    def empty = sha256_hex([])
+    assert(empty == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "sha256 empty")
+    assert(sha3_256("abc") == "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532", "sha3_256 abc")
+    assert(blake2s("abc") == "508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982", "blake2s abc")
+    def s2 = sha512(s, 0, 0)
+    def s2_expected = "d9e6762dd1c8eaf6d61b3c6192fc408d4d6d5f1176d0c29169bc24e71c3f274" +
+    "ad27fcd5811b313d681f7e55ec02d73d499c95455b6b5bb503acf574fba8ffe85"
+    assert(s2 == s2_expected, "sha512")
+    def abc_list = [97, 98, 99]
+    assert(abc_list.md5 == "900150983cd24fb0d6963f7d28e17f72", "list md5")
+    assert(abc_list.sha1 == "a9993e364706816aba3e25717850c26c9cd0d89d", "list sha1")
+    assert(abc_list.sha256_hex == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "list sha256")
+    assert(abc_list.sha3_256 == "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532", "list sha3")
+    assert(abc_list.blake2s == "508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982", "list blake2s")
+    assert(crc32(abc_list) == crc32("abc"), "list crc32")
+    assert(adler32(abc_list) == adler32("abc"), "list adler32")
+    assert(fnv1a(abc_list) == fnv1a("abc"), "list fnv1a")
+    assert(xxh32(abc_list) == xxh32("abc"), "list xxh32")
+    print("✓ std.math.crypto.hash.mod self-test passed")
+}

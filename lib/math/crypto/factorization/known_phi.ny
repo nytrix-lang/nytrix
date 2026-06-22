@@ -177,3 +177,17 @@ fn recover_phi_from_d(any n, any e, any d) any {
    }
    nil
 }
+
+#main {
+   def p, q = 61, 53
+   def n = p * q
+   def phi = (p - 1) * (q - 1)
+   def e = 17
+   def d = e.invmod(phi)
+   assert(factor_from_phi(n, phi) == [q, p], "factor from phi")
+   assert(factor_from_multiple_phi(n, phi * 13) == [q, p], "factor from multiple phi")
+   assert(solve_quadratic_roots(p + q, p * q) == [p, q], "quadratic roots")
+   assert(factor_from_phi_with_e_d(n, e, d) == [q, p], "factor from e d")
+   assert(recover_phi_from_d(n, e, d) == phi, "recover phi")
+   print("✓ std.math.crypto.factorization.known_phi self-test passed")
+}

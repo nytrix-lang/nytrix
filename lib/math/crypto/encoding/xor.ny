@@ -291,3 +291,34 @@ fn crib_drag(list ciphertext, list crib) list {
    store64(results, pos, 0)
    results
 }
+
+#main {
+   def data = [72, 101, 108, 108, 111]
+   def keyed = xor_with_repeating_key(data, [0x1B])
+   def back = xor_with_repeating_key(keyed, [0x1B])
+   assert(back[0] == 72, "xor round-trip")
+   assert(hamming_distance([255], [0]) == 8, "hamming 8")
+   assert(hamming_distance([0], [0]) == 0, "hamming 0")
+   assert(hamming_distance([170], [85]) == 8, "hamming alternating bits")
+   def hex_ct = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736".unhex
+   def res = single_byte_xor_bruteforce(hex_ct)
+   assert(res[0] == 88, "single byte key = 88")
+   def eng = "Hello World, this is English text!".to_bytes
+   def rand = "Xzq%kj@#!nop8823...,".to_bytes
+   assert(english_score(eng) > english_score(rand), "english scoring")
+   def xored = xor_bytes_hex("1c0111001f010100061a024b53535009181c", "686974207468652062756c6c277320657965")
+   assert(xored == "746865206b696420646f6e277420706c6179", "hex xor fixed vector")
+   def ct_a, ct_b = [10, 20, 30], [5, 15, 25]
+   def xor_two = xor_two_ciphertexts(ct_a, ct_b)
+   assert(xor_two[0] == 15, "xor_two_ciphertexts[0]")
+   assert(xor_two[1] == 27, "xor_two_ciphertexts[1]")
+   def test_ct = [72, 69, 76, 76, 79]
+   def crib_bytes = [72, 69]
+   def drags = crib_drag(test_ct, crib_bytes)
+   assert(drags.len == 4, "crib_drag produces 4 positions")
+   assert(drags[0][0] == 0, "crib_drag first pos = 0")
+   def multi = [[1, 2, 3], [4, 5, 6]]
+   def ks = multi_text_xor_keystream(multi)
+   assert(ks.len == 3, "multi_text keystream length")
+   print("✓ std.math.crypto.encoding.xor self-test passed")
+}

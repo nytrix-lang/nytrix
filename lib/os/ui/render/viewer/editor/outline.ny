@@ -50,7 +50,7 @@ fn symbols(list lines, str filename="", int max_lines=0) list {
       elif str.startswith(s, "struct ") { out = _push_symbol(out, "struct", _ident_after(s, 7), i) }
       elif str.startswith(s, "enum ") { out = _push_symbol(out, "enum", _ident_after(s, 5), i) }
       elif str.startswith(s, "module ") { out = _push_symbol(out, "module", _ident_after(s, 7), i) }
-      elif str.startswith(s, "#main") { out = _push_symbol(out, "main", "#main", i) }
+      elif str.startswith(s, "#main") { out = _push_symbol(out, "main", "main", i) }
       i += 1
    }
    out
@@ -71,7 +71,7 @@ fn row_at(f64 panel_x, f64 panel_y, f64 panel_w, f64 panel_h, f64 x, f64 y, int 
 }
 
 #main {
-   def syms = symbols(["module a", "fn main() int {", "struct Thing {", "#main {"])
+   def syms = symbols(["module a", "#main {", "struct Thing {", "#main {"])
    assert(syms.len == 4 && syms.get(1).get("name") == "main", "outline symbols")
    assert(row_at(0.0, 0.0, 100.0, 100.0, 5.0, 37.0, 2) == 0, "outline row hit")
    print("✓ viewer editor outline test passed")

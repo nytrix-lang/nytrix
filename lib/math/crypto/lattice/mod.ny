@@ -136,3 +136,18 @@ fn lattice_reduction_report(any basis, str strategy="auto", any opts=nil) dict {
       "basis": _lattice_public_basis(rep.get("basis")),
    }
 }
+
+#main {
+   def core = lattice_core_coverage_report()
+   assert(core.get("coverage", []).len > 0, "lattice coverage has capabilities")
+   assert(is_list(core.get("coverage", [])), "lattice coverage list")
+   def repl = lattice_replacement_report()
+   assert(repl.get("auto_means_ny", false), "lattice replacement ny policy")
+   assert(repl.get("public_dependency_free", false), "lattice replacement dependency-free")
+   def red = lattice_reduction_report([[4, 0], [1, 2]], "auto")
+   assert(red.get("selected_strategy", "") == "lll", "lattice auto reducer selects lll for small basis")
+   assert(red.get("basis", nil) != nil, "lattice reduction exposes basis")
+   def flat = lattice_reduction_report([[97, 0, 0, 0], [14, 1, 0, 0], [35, 0, 1, 0], [62, 0, 0, 1]], "flatter", {"max_rounds": 1})
+   assert(flat.get("selected_strategy", "") == "flatter", "lattice explicit flatter reducer")
+   print("✓ std.math.crypto.lattice self-test passed")
+}
