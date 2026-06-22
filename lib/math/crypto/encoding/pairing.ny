@@ -8,6 +8,7 @@
 module std.math.crypto.encoding.pairing(cantor_pair, cantor_unpair, cantor_unpair_leaves)
 use std.core
 use std.math.nt
+use std.math.bin
 
 fn cantor_pair(any x, any y) any {
    "Cantor-pair two non-negative integers into one integer."
@@ -42,4 +43,15 @@ fn cantor_unpair_leaves(any z, int leaf_limit=256) list {
       }
    }
    out
+}
+
+#main {
+   def p = cantor_pair(17, 29)
+   assert(cantor_unpair(p) == [Z(17), Z(29)], "Cantor unpair roundtrip")
+   def nested = cantor_pair(cantor_pair(65, 66), cantor_pair(67, 68))
+   def leaves = cantor_unpair_leaves(nested)
+   assert(leaves == [65, 66, 67, 68], "nested Cantor leaves")
+   assert(leaves.text == "ABCD", "nested Cantor text")
+   print("CANTOR_PAIRING_OK")
+   print("✓ std.math.crypto.encoding.pairing self-test passed")
 }

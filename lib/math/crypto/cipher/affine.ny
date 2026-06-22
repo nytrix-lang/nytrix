@@ -490,3 +490,34 @@ fn affine_crack_known_pt(str ct, str pt, number m=26) any {
    def a, b = (dy * dx_inv) % m, ((y1 - a * x1) % m + m) % m
    [a, b]
 }
+
+#main {
+   def msg = "AFFINE"
+   def a = 5
+   def b = 8
+   def m = 26
+   def enc = affine_encrypt(msg, a, b, m)
+   def dec = affine_decrypt(enc, a, b, m)
+   assert(dec == msg, "affine encrypt decrypt roundtrip")
+   def ct = affine_encrypt("HELP", a, b, m)
+   def keys = affine_crack_known_pt(ct, "HELP", m)
+   assert(keys != nil, "affine crack known plaintext")
+   assert(keys[0] == a, "affine crack recovers a")
+   assert(keys[1] == b, "affine crack recovers b")
+   def bpt = [68, 72, 123, 111, 107, 125]
+   mut bct = []
+   mut bi = 0
+   while bi < bpt.len {
+      bct = bct.append((3 * bpt[bi] + 7) % 251)
+      bi += 1
+   }
+   def bhit = affine_crack_bytes_contains(bct, [68, 72, 123], 251)
+   assert(bhit != nil, "affine byte crack hit")
+   assert(bhit[0] == 3 && bhit[1] == 7, "affine byte crack keys")
+   assert(bhit[2] == bpt, "affine byte plaintext")
+   def khit = affine_crack_bytes_known_substring(bct, [68, 72], 251)
+   assert(khit != nil, "affine byte known substring hit")
+   assert(khit[0] == 3 && khit[1] == 7, "affine byte known substring keys")
+   assert(khit[3] == bpt, "affine byte known substring plaintext")
+   print("✓ std.math.crypto.cipher.affine self-test passed")
+}

@@ -51,9 +51,13 @@ fn assert(any cond, str msg="assert failed") any {
    if !cond { panic(msg) }
 }
 
+fn _assert_render(any x) str {
+   to_str(x) + " (" + type(x) + ")"
+}
+
 fn assert_eq(any a, any b, str msg="assert eq failed") any {
    "Panics with `msg` if `a` and `b` are not structurally equal. Uses the built-in `eq` operator."
-   if !eq(a, b) { panic(msg + ": expected " + to_str(b) + ", got " + to_str(a)) }
+   if !eq(a, b) { panic(msg + ": expected " + _assert_render(b) + ", got " + _assert_render(a)) }
 }
 
 fn _core_pow_float_arg(any x) any {

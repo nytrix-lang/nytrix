@@ -54,7 +54,7 @@ fn adfgvx_build_matrix(str keyword, bool include_digits) str {
    mut ki = 0
    while ki < keyword.len {
       def ck = _normalized_char(_char_at(keyword, ki))
-      if !seen.get(ck, false) {
+      if !seen.get(ck, false){
          seen.set(ck, true)
          matrix = str_add(matrix, ck)
       }
@@ -65,7 +65,7 @@ fn adfgvx_build_matrix(str keyword, bool include_digits) str {
    mut ai = 0
    while ai < alphabet.len {
       def ch = _char_at(alphabet, ai)
-      if !seen.get(ch, false) {
+      if !seen.get(ch, false){
          seen.set(ch, true)
          matrix = str_add(matrix, ch)
       }
@@ -103,21 +103,26 @@ fn adfgvx_desubstitute(str coded, str matrix) str {
 
 fn _col_order(str key) list {
    def n = key.len
-   mut used = list(n)
-   mut order = list(n)
+   mut used = list()
+   mut i = 0
+   while i < n {
+      used = used.append(false)
+      i += 1
+   }
+   mut order = list()
    mut out_i = 0
    while out_i < n {
       mut best = -1
       mut i = 0
       while i < n {
-         if !used.get(i, false) {
+         if !used.get(i, false){
             def ch = _char_at(key, i)
-            if best < 0 || ch < _char_at(key, best) { best = i }
+            if best < 0 || ch < _char_at(key, best){ best = i }
          }
          i += 1
       }
       if best >= 0 {
-         order[out_i] = best
+         order = order.append(best)
          used[best] = true
       }
       out_i += 1
@@ -152,23 +157,23 @@ fn adfgvx_encrypt(str plaintext, str matrix, str transposition_key) str {
 fn _column_lengths(list order, int n_chars, int n_cols) list {
    def n_full_rows = n_chars / n_cols
    def extra = n_chars % n_cols
-   mut lens = list(n_cols)
+   mut lens = list()
    mut oi = 0
    while oi < n_cols {
       def c = order.get(oi)
-      lens[oi] = n_full_rows + (c < extra ? 1 : 0)
+      lens = lens.append(n_full_rows + (c < extra ? 1 : 0))
       oi += 1
    }
    lens
 }
 
 fn _cipher_columns(str ciphertext, list col_lens) list {
-   mut cols = list(col_lens.len)
+   mut cols = list()
    mut pos = 0
    mut ci = 0
    while ci < col_lens.len {
       def clen = col_lens.get(ci)
-      cols[ci] = utf8_slice(ciphertext, pos, pos + clen, 1)
+      cols = cols.append(utf8_slice(ciphertext, pos, pos + clen, 1))
       pos = pos + clen
       ci += 1
    }
@@ -176,10 +181,10 @@ fn _cipher_columns(str ciphertext, list col_lens) list {
 }
 
 fn _blank_grid(int n_chars) list {
-   mut grid = list(n_chars)
+   mut grid = list()
    mut i = 0
    while i < n_chars {
-      grid[i] = ""
+      grid = grid.append("")
       i += 1
    }
    grid
@@ -187,7 +192,12 @@ fn _blank_grid(int n_chars) list {
 
 fn _read_rows(list cols, list order, int n_chars, int n_cols) list {
    mut grid = _blank_grid(n_chars)
-   mut off = list(n_cols)
+   mut off = list()
+   mut oi = 0
+   while oi < n_cols {
+      off = off.append(0)
+      oi += 1
+   }
    mut r = 0
    while r < n_chars / n_cols + 1 {
       mut c2 = 0
@@ -221,4 +231,25 @@ fn adfgvx_decrypt(str ciphertext, str matrix, str transposition_key) str {
    def grid = _read_rows(cols, order, n_chars, n_cols)
    def subst = join(grid, "")
    adfgvx_desubstitute(subst, matrix)
+}
+
+#main {
+   def matrix = adfgvx_build_matrix("KEYWORD", true)
+   assert(matrix == "KEYWORDABCFGHILMNPQSTUVXZ0123456789", "keyword matrix")
+   assert(matrix.len == 35, "matrix length with merged J")
+   def coded = adfgvx_substitute("JIG7", matrix)
+   assert(coded == "FDFDDXXF", "substitution pairs")
+   assert(adfgvx_desubstitute(coded, matrix) == "IIG7", "desubstitute normalizes J")
+   assert(adfgvx_substitute("!", matrix) == "", "skip unknown characters")
+   def ct = adfgvx_encrypt("ATTACKATDAWN42", matrix, "PRIVACY")
+   print("ct = '" + ct + "'")
+   assert(ct == "GADXFDDVGGDVDDGGDDFFFAAVDDAG", "privacy transposition")
+   assert(adfgvx_decrypt(ct, matrix, "PRIVACY") == "ATTACKATDAWN42", "privacy roundtrip")
+   def dup_key_ct = adfgvx_encrypt("BALLOON99", matrix, "BALLOON")
+   assert(dup_key_ct == "FAVDFXDVXDAVFVFVFF", "duplicate-key transposition")
+   assert(adfgvx_decrypt(dup_key_ct, matrix, "BALLOON") == "BALLOON99", "duplicate-key roundtrip")
+   def no_key_ct = adfgvx_encrypt("CODE", matrix, "")
+   assert(no_key_ct == adfgvx_substitute("CODE", matrix), "empty key skips transposition")
+   assert(adfgvx_decrypt(no_key_ct, matrix, "") == "CODE", "empty key decrypt")
+   print("✓ std.math.crypto.cipher.adfgvx self-test passed")
 }

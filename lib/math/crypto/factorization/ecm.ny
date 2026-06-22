@@ -798,3 +798,22 @@ fn ecm_factor(any n, int B1=1000, int curves=32, int B2=0) any {
    "Return one non-trivial factor found by ECM, or nil."
    ecm_factor_report(n, B1, curves, B2).get("factor", nil)
 }
+
+#main {
+   assert(ecm_factor(Z(10403), 1000, 16, 5000) != nil, "ecm factor")
+   assert(ecm_factor(Z(7), 100, 1) == nil, "ecm no factor for prime")
+   assert(montgomery_ecm_factor(Z(10403), 1000, 16, 5000) != nil, "mont ecm factor")
+   assert(ecm_scheduled_factor_report(Z(10403), false, 24, 2000, 5000) != nil, "ecm schedule")
+   assert(ecm_work_plan_report(Z(100)) != nil, "ecm work plan")
+   def n_prime = Z(1000000007)
+   def rep = montgomery_ecm_factor_report(n_prime, 205, 4, 0, 6, 16)
+   assert(!rep.get("success", false), "prime ECM does not factor")
+   assert(rep.get("status", "") == "not-found", "prime ECM status")
+   assert(rep.get("attempts").get(0).get("stage1_kernel", "") == "prime-power-product-ladder", "product scalar stage1 kernel")
+   assert(int(rep.get("total_stage1_ops", 0)) == 4, "one product ladder per curve")
+   def rep2 = montgomery_ecm_factor_report(n_prime, 70, 2, 350, 6, 16)
+   assert(!rep2.get("success", false), "stage2 prime ECM does not factor")
+   assert(rep2.get("attempts").get(0).get("stage2_kernel", "") == "prime-product-ladder", "product scalar stage2 kernel")
+   assert(int(rep2.get("total_stage2_ops", 0)) == 2, "one stage2 product ladder per curve")
+   print("✓ std.math.crypto.factorization.ecm self-test passed")
+}

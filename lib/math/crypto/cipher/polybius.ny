@@ -109,3 +109,19 @@ fn polybius_decode_text(str text, str grid, int row_min=49, int row_max=53, int 
    }
    out
 }
+
+#main {
+   def grid = polybius_make_grid("KEYWORD")
+   assert(grid == "KEYWORDABCFGHILMNPQSTUVXZ", "keyed 5x5 grid")
+   assert(polybius_encode_char("J", grid) == polybius_encode_char("I", grid), "J merges to I")
+   def encoded = polybius_encode_text("JOLLY 7", grid)
+   assert(encoded == "34 15 35 35 13", "encoded text")
+   assert(polybius_decode_text(encoded, grid) == "IOLLY", "decode text")
+   assert(polybius_decode_text("34,15\t35 35 13", grid) == "IOLLY", "decode strips separators")
+   assert(polybius_decode_pair("99", grid) == "?", "bad pair")
+   def grid6 = polybius_make_grid("SECRET", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 6)
+   assert(grid6 == "SECRTABDFGHIJKLMNOPQUVWXYZ0123456789", "keyed 6x6 grid")
+   assert(polybius_encode_text("A9Z", grid6, "123456", "123456", "-", 6) == "16-66-52", "6x6 encode")
+   assert(polybius_decode_text("11-66,52", grid6, 49, 54, 49, 54, 6) == "S9Z", "6x6 decode")
+   print("✓ std.math.crypto.cipher.polybius self-test passed")
+}

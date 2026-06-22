@@ -1199,15 +1199,21 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
    def lo_off = lo * stride
    def hi_off = hi * stride
    if n_comp == 4 && int(rec.get(1, 0)) == 2 {
-      def ax, ay = f32le(out_ptr, lo_off + 0), f32le(out_ptr, lo_off + 4)
-      def az, aw = f32le(out_ptr, lo_off + 8), f32le(out_ptr, lo_off + 12)
-      mut bx, by = f32le(out_ptr, hi_off + 0), f32le(out_ptr, hi_off + 4)
-      mut bz, bw = f32le(out_ptr, hi_off + 8), f32le(out_ptr, hi_off + 12)
+      def ax = f32le(out_ptr, lo_off + 0)
+      def ay = f32le(out_ptr, lo_off + 4)
+      def az = f32le(out_ptr, lo_off + 8)
+      def aw = f32le(out_ptr, lo_off + 12)
+      mut bx = f32le(out_ptr, hi_off + 0)
+      mut by = f32le(out_ptr, hi_off + 4)
+      mut bz = f32le(out_ptr, hi_off + 8)
+      mut bw = f32le(out_ptr, hi_off + 12)
       mut dot = ax * bx + ay * by + az * bz + aw * bw
       if dot < 0.0 { bx = -bx by = -by bz = -bz bw = -bw dot = 0.0 - dot }
       if dot > 0.9995 {
-         def rx, ry = ax + (bx - ax) * t, ay + (by - ay) * t
-         def rz, rw = az + (bz - az) * t, aw + (bw - aw) * t
+         def rx = ax + (bx - ax) * t
+         def ry = ay + (by - ay) * t
+         def rz = az + (bz - az) * t
+         def rw = aw + (bw - aw) * t
          def len2 = rx * rx + ry * ry + rz * rz + rw * rw
          if len2 <= 0.000001 { return [0.0, 0.0, 0.0, 1.0] }
          def inv_len = 1.0 / sqrt(len2)
@@ -1226,8 +1232,10 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
       def sin_theta = sin(theta)
       def s0 = cos(theta) - dot * sin_theta / sin_theta_0
       def s1 = sin_theta / sin_theta_0
-      def rx, ry = ax * s0 + bx * s1, ay * s0 + by * s1
-      def rz, rw = az * s0 + bz * s1, aw * s0 + bw * s1
+      def rx = ax * s0 + bx * s1
+      def ry = ay * s0 + by * s1
+      def rz = az * s0 + bz * s1
+      def rw = aw * s0 + bw * s1
       def len2 = rx * rx + ry * ry + rz * rz + rw * rw
       if len2 <= 0.000001 { return [0.0, 0.0, 0.0, 1.0] }
       def inv_len = 1.0 / sqrt(len2)
@@ -1239,10 +1247,14 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
       ]
    }
    if n_comp == 4 {
-      def ax, ay = f32le(out_ptr, lo_off + 0), f32le(out_ptr, lo_off + 4)
-      def az, aw = f32le(out_ptr, lo_off + 8), f32le(out_ptr, lo_off + 12)
-      def bx, by = f32le(out_ptr, hi_off + 0), f32le(out_ptr, hi_off + 4)
-      def bz, bw = f32le(out_ptr, hi_off + 8), f32le(out_ptr, hi_off + 12)
+      def ax = f32le(out_ptr, lo_off + 0)
+      def ay = f32le(out_ptr, lo_off + 4)
+      def az = f32le(out_ptr, lo_off + 8)
+      def aw = f32le(out_ptr, lo_off + 12)
+      def bx = f32le(out_ptr, hi_off + 0)
+      def by = f32le(out_ptr, hi_off + 4)
+      def bz = f32le(out_ptr, hi_off + 8)
+      def bw = f32le(out_ptr, hi_off + 12)
       return [
          _gltf_anim_clean_tiny(ax + (bx - ax) * t),
          _gltf_anim_clean_tiny(ay + (by - ay) * t),
@@ -1250,7 +1262,8 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
          _gltf_anim_clean_tiny(aw + (bw - aw) * t)
       ]
    }
-   def ax, ay = f32le(out_ptr, lo_off + 0), f32le(out_ptr, lo_off + 4)
+   def ax = f32le(out_ptr, lo_off + 0)
+   def ay = f32le(out_ptr, lo_off + 4)
    def az = f32le(out_ptr, lo_off + 8)
    def bx = f32le(out_ptr, hi_off + 0)
    def by = f32le(out_ptr, hi_off + 4)

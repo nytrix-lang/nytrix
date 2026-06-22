@@ -96,5 +96,12 @@ while mut i = 0 i < 5 ++i {
    acc += i
 }
 
+def P1 = [0, 1], P2 = [1, 0]
+assert(P1.get(0) == 0, "per-binding def init first binding")
+assert(P2.get(0) == 1, "per-binding def init second binding")
+
+mut A = 10, B = 20
+assert(A == 10 && B == 20, "per-binding mut init")
+
 assert(acc == 10, "while header sugar")
 print("✓ all pipeline/option tests passed")

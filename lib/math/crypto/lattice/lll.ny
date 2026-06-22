@@ -3708,5 +3708,19 @@ fn round(any x) int {
       r.get("reduction_complete", false) && r.get("ok", false) && r.get("is_reduced", false),
       "LLL reduce report completes and carries reduced quality",
    )
+   def backend = lll_backend_report([[1, 0], [0, 1]])
+   assert(backend.get("default_method", "") == "ny", "lll default method")
+   assert(backend.get("ny_default", false), "lll default policy")
+   def bounded = lll_reduce_bounded_report(Matrix([[105, 0, 0, 0], [41, 1, 0, 0], [37, 0, 1, 0]]), 1024, 0.99, "bounded-int-no-transform", 0.60)
+   assert(bounded.get("rows") == 3, "bounded LLL report keeps Matrix row count")
+   assert(bounded.get("cols") == 4, "bounded LLL report keeps Matrix col count")
+   assert(bounded.get("first_norm_before") == 11025, "bounded LLL report first norm before")
+   assert(bounded.get("best_norm_before") == 1370, "bounded LLL report best norm before")
+   def B4 = Matrix([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+   def q4 = lll_quality_report(B4)
+   assert(q4.get("rows", 0) == 4, "identity quality row count")
+   assert(q4.get("ok", false), "identity quality ok")
+   def rep_auto = lll_reduce_report(Matrix([[105, 821, 17], [31, 251, 11], [1, 0, 3]]), 0.75, "auto")
+   assert(rep_auto.get("transform_verified", false), "auto LLL transform verified")
    print("✓ std.math.crypto.lattice.lll self-test passed")
 }

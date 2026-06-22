@@ -201,3 +201,14 @@ fn scream_decode_text(str text) str {
    builder_free(out)
    decoded
 }
+
+#main {
+   def xkcd_scream = "ÃA̧ȂÁAǍ"
+   assert(scream_decode_text(xkcd_scream) == "SCREAM", "Scream Cipher combining-mark text")
+   def precomposed = "ÉȨḂṔ"
+   assert(scream_decode_text(precomposed) == "ECBE", "Scream Cipher precomposed synthetic vector")
+   def marks = scream_extract_marks("ÁB")
+   assert(marks.len == 2 && marks[0] == 0x0301 && marks[1] == 0, "Scream Cipher mark extraction")
+   assert(scream_mark_decode(0x0301) == "E", "Scream Cipher mark decode")
+   print("✓ std.math.crypto.encoding.scream self-test passed")
+}

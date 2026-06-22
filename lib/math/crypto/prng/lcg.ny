@@ -523,10 +523,11 @@ fn tlcg_recover_state(any outputs_high, any a, any b, int modulus_bits, int low_
 
 #main {
    def seed = 18765
-   def key = msvc_rand_key(seed, 32)
-   def msg = "MSG{lcg}"
+   def charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789-"
+   def key = msvc_rand_key(seed, 32, charset)
+   def msg = "plain-lcg-fixture"
    def ct = msvc_rand_crypt(msg, key)
-   def hit = msvc_rand_bruteforce_seed(ct, "MSG{", 18000, 19000, 32, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789", "}")
+   def hit = msvc_rand_bruteforce_seed(ct, "plain-", 18000, 19000, 32, charset, "")
    assert(hit != nil && hit[0] == seed && hit[2] == msg.to_bytes, "MSVC rand brute-force roundtrip")
    print("✓ std.math.crypto.prng.lcg self-test passed")
 }

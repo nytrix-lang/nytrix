@@ -12,15 +12,19 @@ fn fail(str message) int {
    __exit(1)
 }
 
+fn _assert_render(any x) str {
+   to_str(x) + " (" + type(x) + ")"
+}
+
 fn assert_eq(any actual, any expected, str message="assert eq failed") int {
    "Fails unless `actual` and `expected` are structurally equal."
-   if !eq(actual, expected) { fail(message + ": expected " + to_str(expected) + ", got " + to_str(actual)) }
+   if !eq(actual, expected) { fail(message + ": expected " + _assert_render(expected) + ", got " + _assert_render(actual)) }
    0
 }
 
 fn assert_ne(any actual, any unexpected, str message="assert ne failed") int {
    "Fails when `actual` and `unexpected` are structurally equal."
-   if eq(actual, unexpected) { fail(message + ": did not expect " + to_str(unexpected)) }
+   if eq(actual, unexpected) { fail(message + ": did not expect " + _assert_render(unexpected)) }
    0
 }
 

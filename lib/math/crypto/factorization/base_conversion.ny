@@ -215,3 +215,17 @@ fn base_conversion_factor_pow2(any n, int coefficient_threshold=32, int max_base
    }
    nil
 }
+
+#main {
+   def r1 = base_conversion_factor(Z(143), 8, 32)
+   assert(r1 != nil, "base conversion finds 143")
+   assert(r1[0] == Z(11) && r1[1] == Z(13), "base conversion factors 143")
+   assert(r1[2] >= Z(2) && r1[2] <= Z(32), "base conversion records base")
+   def r2 = base_conversion_factor_pow2(Z(99), 8, 64)
+   assert(r2 != nil, "pow2 base conversion finds 99")
+   assert(r2[0] == Z(9) && r2[1] == Z(11), "pow2 base conversion factors 99")
+   assert(r2[2] == Z(2) || r2[2] == Z(4) || r2[2] == Z(8) || r2[2] == Z(16) || r2[2] == Z(32) || r2[2] == Z(64), "pow2 base shape")
+   assert(base_conversion_factor(Z(143), 2, 32) == nil, "threshold can reject")
+   assert(base_conversion_factor_pow2(Z(101), 8, 64) == nil, "prime miss")
+   print("✓ std.math.crypto.factorization.base_conversion self-test passed")
+}

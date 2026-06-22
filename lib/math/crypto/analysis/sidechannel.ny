@@ -111,3 +111,15 @@ fn aes_sbox_lsb_recover_key(list leak_rows) list {
    store64(key, leak_rows.len, 0)
    key
 }
+
+#main {
+   def traces = [
+      [30, 140, 160, 35],
+      [20, 150, 170, 40],
+      [25, 130, 150, 45],
+   ]
+   assert(trace_column_sums(traces) == [75, 420, 480, 120], "trace column sums")
+   assert(threshold_trace_bits(traces, 120) == [0, 1, 1, 0], "threshold trace bits")
+   assert(bits_lsb_to_bigint([1, 0, 1, 1]) == Z(13), "lsb bit packing")
+   print("✓ std.math.crypto.analysis.sidechannel self-test passed")
+}

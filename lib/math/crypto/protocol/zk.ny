@@ -110,3 +110,30 @@ fn fiat_shamir_challenge(list parts, any q) any {
    }
    mod(acc, q)
 }
+
+#main {
+   def q = Z(101)
+   def r = Z(17)
+   def c1, c2 = Z(5), Z(3)
+   def z1, z2 = mod(r + c1 * Z(9), q), mod(r + c2 * Z(9), q)
+   def w = sigma_linear_witness_from_reuse(z1, c1, z2, c2, q)
+   assert(w == Z(9), "sigma linear witness from reuse")
+   def s1 = Z(42)
+   def sig1 = [Z(7), Z(3), mod(Z(17) + Z(3) * s1, Z(101))]
+   def sig2 = [Z(7), Z(5), mod(Z(17) + Z(5) * s1, Z(101))]
+   assert(zk_transcript_reused_commitment(sig1, sig2), "reused commitment")
+   assert(schnorr_secret_from_nonce_reuse(sig1, sig2, Z(101)) == s1, "schnorr nonce reuse")
+   def n77 = Z(77)
+   def oss = oss_sign(Z(10), n77, Z(3))
+   assert(oss != nil, "oss sign")
+   assert(oss_verify(Z(10), [oss[0], oss[1]], n77, oss[2]), "oss verify")
+   def h = oss_public_h(n77, Z(3))
+   assert(h != nil, "oss_public_h")
+   def challenge = fiat_shamir_challenge(["test", Z(42)], Z(101))
+   assert(challenge >= Z(0) && challenge < Z(101), "fiat_shamir_challenge in range")
+   assert(!zk_transcript_reused_commitment([Z(1), Z(2)], [Z(3), Z(4)]), "distinct commitments")
+   def ext = girault_malicious_challenge_extract(Z(100), Z(7), Z(20))
+   assert(ext == Z(14), "girault extract w=14")
+   assert(girault_malicious_challenge_extract(Z(0), Z(5), Z(10)) == nil, "girault nil for zero z")
+   print("✓ std.math.crypto.protocol.zk self-test passed")
+}

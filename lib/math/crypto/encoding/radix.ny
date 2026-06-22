@@ -491,3 +491,11 @@ fn base91_pair_decode(str s, str alphabet="") list {
    store64(out, oi, 0)
    out
 }
+
+#main {
+   assert(digit_value(ord("7")) == 7, "digit value decimal")
+   assert(digit_value(ord("B")) == 11, "digit value alpha")
+   assert(parse_radix_int("152", 8) == 106, "parse radix")
+   assert(keyed_alpha_decode("152 162", "nnj", 8) == "we", "keyed alpha")
+   print("✓ std.math.crypto.encoding.radix self-test passed")
+}

@@ -181,3 +181,30 @@ fn dlog_brute(any g, any h, any p, any max_iter) any {
    }
    nil
 }
+
+#main {
+   def p, g = 23, 5
+   def x, h = 6, power_mod(g, x, p)
+   def m, k = 7, 3
+   def c1 = power_mod(g, k, p)
+   def c2 = (m * power_mod(h, k, p)) % p
+   assert(elgamal_decrypt(c1, c2, x, p) == m, "elgamal_decrypt")
+   def pub = elgamal_public_key(h, p, g)
+   def ct = elgamal_encrypt(m, pub, k)
+   assert(elgamal_decrypt(ct[0], ct[1], x, p) == m, "elgamal_encrypt/decrypt")
+   def m2 = 11
+   def c2b = (m2 * power_mod(h, k, p)) % p
+   def reuse = elgamal_nonce_reuse(c1, c2, m, c2b, m2, p)
+   assert(reuse == nil, "nonce reuse detected")
+   def k2 = 4
+   def c2c = (m2 * power_mod(h, k2, p)) % p
+   def no_reuse = elgamal_nonce_reuse(c1, c2, m, c2c, m2, p)
+   assert(no_reuse == [6, 2], "nonce reuse exact")
+   def ksig = 7
+   def sig = elgamal_sign(m, x, p, g, ksig)
+   assert(sig != nil, "elgamal_sign")
+   assert(elgamal_verify(m, sig, h, p, g), "elgamal_verify")
+   def mal = elgamal_multiply_ciphertext(ct, 3, p)
+   assert(elgamal_decrypt(mal[0], mal[1], x, p) == (m * 3) % p, "malleability")
+   print("✓ std.math.crypto.ecc.elgamal self-test passed")
+}
