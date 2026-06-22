@@ -214,7 +214,7 @@ fn des_encrypt_ecb(list key, list plaintext) list {
    assert((plaintext.len % 8) == 0, "DES-ECB plaintext length must be a multiple of 8")
    assert(key.len == 8, "DES key must be 8 bytes")
    def keys = _subkeys(key)
-   mut out = []
+   mut out = list(plaintext.len)
    store64(out, plaintext.len, 0)
    mut i = 0
    while i < plaintext.len {
@@ -229,7 +229,7 @@ fn des_decrypt_ecb(list key, list ciphertext) list {
    assert((ciphertext.len % 8) == 0, "DES-ECB ciphertext length must be a multiple of 8")
    assert(key.len == 8, "DES key must be 8 bytes")
    def keys = _subkeys(key)
-   mut out = []
+   mut out = list(ciphertext.len)
    store64(out, ciphertext.len, 0)
    mut i = 0
    while i < ciphertext.len {

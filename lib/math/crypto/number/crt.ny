@@ -56,3 +56,21 @@ fn fast_crt(list xs, list ms, int segment_size=8) any {
    }
    _crt_out(xr.get(0), mr.get(0))
 }
+
+#main {
+   def r0 = fast_crt([Z(2), Z(3), Z(2)], [Z(3), Z(5), Z(7)])
+   assert(r0 != nil, "fast_crt returns result")
+   assert(r0.get(0) == Z(23), "fast_crt residue")
+   assert(r0.get(1) == Z(105), "fast_crt modulus")
+   def consistent = fast_crt([Z(2), Z(6)], [Z(4), Z(8)])
+   assert(consistent != nil, "non-coprime consistent")
+   assert(consistent.get(0) == Z(6), "non-coprime residue")
+   assert(consistent.get(1) == Z(8), "non-coprime modulus")
+   assert(fast_crt([Z(1), Z(2)], [Z(2), Z(4)]) == nil, "inconsistent congruences")
+   assert(fast_crt([], []) == nil, "empty congruences")
+   def r2 = fast_crt([Z(2), Z(3)], [Z(3), Z(5)])
+   assert(r2 != nil, "two-congruence result exists")
+   assert(r2.get(0) == Z(8), "two-congruence residue")
+   assert(r2.get(1) == Z(15), "two-congruence modulus")
+   print("✓ math.crypto.number.crt self-test passed")
+}

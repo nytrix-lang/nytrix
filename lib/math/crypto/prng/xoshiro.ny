@@ -10,12 +10,12 @@
 module std.math.crypto.prng.xoshiro(xorshift32_next, xorshift64star_next, xoroshiro128plus_next, xoroshiro128plus_jump, xoshiro256plusplus_next, xoshiro256plusplus_jump, prng_output_family_hint)
 use std.math.nt
 
-def _X64_MOD = Z("18446744073709551616")
-def _X32_MOD = Z("4294967296")
+fn _X64_MOD() any { Z("18446744073709551616") }
+fn _X32_MOD() any { Z("4294967296") }
 
-fn _u64(any x) any { mod(Z(x), _X64_MOD) }
+fn _u64(any x) any { mod(Z(x), _X64_MOD()) }
 
-fn _u32(any x) any { mod(Z(x), _X32_MOD) }
+fn _u32(any x) any { mod(Z(x), _X32_MOD()) }
 
 fn _rotl64(any x, any k) any {
    def kk = Z(k)
@@ -111,4 +111,17 @@ fn prng_output_family_hint(str name) str {
       "plusplus", "++" -> "rotated addition with carries; harder than raw/star, model bit carries explicitly"
       _ -> "unknown family"
    }
+}
+
+#main {
+   def xs = xorshift32_next(1)
+   assert(xs.get(0) != 1, "xorshift32 moves")
+   def xr = xoroshiro128plus_next([1, 2])
+   assert(len(xr.get(0)) == 2, "xoroshiro state")
+   def xo = xoshiro256plusplus_next([1, 2, 3, 4])
+   assert(len(xo.get(0)) == 4, "xoshiro state")
+   assert(prng_output_family_hint("raw").contains("GF(2)"), "raw hint")
+   assert(prng_output_family_hint("*").contains("odd multiplication"), "star alias hint")
+   assert(prng_output_family_hint("++").contains("rotated addition"), "plusplus alias hint")
+   print("✓ std.math.crypto.prng.xoshiro self-test passed")
 }

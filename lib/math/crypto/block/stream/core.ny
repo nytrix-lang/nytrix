@@ -203,3 +203,48 @@ fn mtp_crib_drag(list ciphertexts, list crib) list {
    }
    matches
 }
+
+#main {
+   def key = [42, 17, 99]
+   def p1 = [116, 104, 101, 32, 113, 117, 105, 99, 107]
+   def p2 = [115, 101, 99, 114, 101, 116, 32, 116, 101]
+   def p3 = [97, 116, 116, 97, 99, 107, 32, 110, 111, 119]
+   def c1 = ctr_apply_periodic_keystream(p1, key)
+   def c2 = ctr_apply_periodic_keystream(p2, key)
+   def c3 = ctr_apply_periodic_keystream(p3, key)
+   assert(ctr_apply_periodic_keystream(c1, key) == p1, "periodic keystream round trip")
+   assert(ctr_recover_keystream(c1, p1) == [42, 17, 99, 42, 17, 99, 42, 17, 99],
+   "recover matching keystream")
+   def recovered_period = ctr_recover_periodic_keystream_english([c1, c2], 3)
+   assert(recovered_period.len == 3, "recover periodic english key length")
+   assert(ctr_apply_periodic_keystream(c1, recovered_period).len == p1.len,
+   "recovered periodic key is usable")
+   def x12 = ctr_xor_plaintexts(c1, c2)
+   mut expected_x12 = []
+   mut i = 0
+   while i < p1.len {
+       expected_x12 = expected_x12.append(p1[i] ^^ p2[i])
+      i += 1
+   }
+   assert(x12 == expected_x12, "ctr xor plaintexts")
+   def flipped = ctr_bit_flip_byte(c1, 1, p1[1], 65)
+   def flipped_plain = ctr_apply_periodic_keystream(flipped, key)
+   assert(flipped_plain[1] == 65, "single byte flip changes plaintext")
+   assert(ctr_bit_flip_byte(c1, -1, 0, 1) == c1, "out-of-range flip clones")
+   def batch = ctr_bit_flipping(c1, [[0, p1[0], 65], [3, p1[3], 33], ["bad"]])
+   def batch_plain = ctr_apply_periodic_keystream(batch, key)
+   assert(batch_plain[0] == 65 && batch_plain[3] == 33, "batch bit flips")
+   assert(ctr_score_english_byte(101) > ctr_score_english_byte(0), "english byte score")
+    def pairs = mtp_xor_all([c1, c2, c3])
+    assert(pairs.get(1) == expected_x12, "mtp pair xor c1/c2")
+    assert(is_list(pairs.get(2)), "mtp pair xor c1/c3")
+   def guess = mtp_guess_key_byte([c1, c2, c3], 0, key[0])
+   assert(guess.get("score") == 3, "mtp key byte score")
+   assert(guess.get("plaintexts").get(0) == p1[0], "mtp guessed plaintext")
+   assert(guess.get("valid").get(2), "mtp guessed validity")
+   def crib = mtp_crib_drag([c1, c2, c3], [116, 104])
+   assert(is_list(crib), "crib drag returns list")
+   assert(crib.len > 0, "crib drag finds plausible matches")
+   assert(is_dict(crib.get(0)), "crib drag match shape")
+   print("✓ std.math.crypto.block.stream.core self-test passed")
+}

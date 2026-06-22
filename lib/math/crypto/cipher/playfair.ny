@@ -230,3 +230,29 @@ fn playfair_decrypt_both_offsets(str ciphertext, list square, bool strip_x=false
       playfair_decrypt_offset(ciphertext, square, 1, strip_x)
    ]
 }
+
+#main {
+   def square = playfair_make_square("PLAYFAIR EXAMPLE")
+   assert(square.len == 25, "playfair square length")
+   assert(square[0] == "P", "playfair square starts with key")
+   assert(square[1] == "L", "playfair square preserves key order")
+   def plaintext = "HIDETHEGOLDINTHETREXESTUMP"
+   def ciphertext = playfair_encrypt(plaintext, square)
+   assert(ciphertext == "BMODZBXDNABEKUDMUIXMMOUVIF", "classic playfair example encrypt")
+   def decrypted = playfair_decrypt(ciphertext, square)
+   assert(decrypted == plaintext, "classic playfair example decrypt")
+   def noisy_square = playfair_make_square("play fair, jelly")
+   def noisy_ct = playfair_encrypt("jolly balloon", noisy_square)
+   def noisy_pt = playfair_decrypt(noisy_ct, noisy_square)
+   assert(noisy_pt == "IOLXLYBALXLOON", "lowercase and J normalize through round trip")
+   def both = playfair_decrypt_both_offsets("Z" + ciphertext, square, false)
+   assert(both.len == 2, "both offsets returns two strings")
+   assert(both[1] == plaintext, "offset-one decrypt recovers classic plaintext")
+   def ct = playfair_encrypt("Hide the gold in the tree stump", square)
+   assert(ct == "BMODZBXDNABEKUDMUIXMMOUVIF", "playfair known ciphertext")
+   def pt = playfair_decrypt(ct, square)
+   assert(pt == "HIDETHEGOLDINTHETREXESTUMP", "playfair decrypts known ciphertext")
+   def offsets = playfair_decrypt_both_offsets("X" + ct, square, false)
+   assert(offsets[1] == pt, "offset decrypt recovers shifted ciphertext")
+   print("✓ std.math.crypto.cipher.playfair self-test passed")
+}

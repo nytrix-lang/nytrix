@@ -55,6 +55,10 @@ fn test() {
    ;; last comment
 }
 
+;{
+Multiline comment block
+};
+
 ;; @#$%^&*()_+-=[]{}|;':",.<>?/
 ;; 言 🫪
 ;; very long comment used to exercise comment scanning
@@ -69,11 +73,5 @@ EOFMARK;
 ;TEST_BLOCK
 mut val_ignored = 123
 TEST_BLOCK;
-
-// C-style line comment
-/*
-C-style block comment
-def dummy2 = "fail"
-*/
 
 print("✓ comments tests passed")

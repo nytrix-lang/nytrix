@@ -80,3 +80,21 @@ fn mod_2kth_roots(number c, int k, number p, number q) list {
    }
    result
 }
+
+#main {
+   def sqrt_roots = mod_sqrt_all(9, 13)
+   assert(sqrt_roots.len == 2, "sqrt roots count")
+   assert(power_mod(sqrt_roots.get(0), 2, 13) == 9, "sqrt root 1")
+   assert(power_mod(sqrt_roots.get(1), 2, 13) == 9, "sqrt root 2")
+   assert(mod_sqrt_all(2, 3).len == 0, "non-residue has no roots")
+   assert(mod_sqrt_all(0, 7) == [0], "zero root")
+   def roots15 = mod_2kth_roots(1, 1, 3, 5)
+   assert(roots15.len == 4, "square roots mod 15")
+   mut idx = 0
+   while idx < roots15.len {
+      assert(power_mod(roots15.get(idx), 2, 15) == 1, "square root validates")
+      idx += 1
+   }
+   assert(mod_2kth_roots(1, 2, 3, 5).len == 8, "fourth roots mod 15")
+   print("✓ std.math.crypto.rsa.repeated_roots self-test passed")
+}

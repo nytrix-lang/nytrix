@@ -9,6 +9,7 @@
 module std.math.crypto.block.mode.cbc(cbc_bit_flipping, cbc_bit_flip_byte, cbc_padding_oracle_step, cbc_padding_oracle_decrypt, cbc_padding_oracle_decrypt_block, cbc_mac_forge, cbc_mac_length_extension, cbc_and_cbc_mac_forge)
 use std.core
 use std.math.bin
+use std.math.crypto.block.mode.tools
 
 fn _cbc_pair(list iv, list ct) list {
    mut out = []
@@ -221,4 +222,23 @@ fn cbc_and_cbc_mac_forge(list iv, list ct, list tag, list target_msg) list {
       bi += 1
    }
    [clone(iv), forged_ct, clone(tag)]
+}
+
+#main {
+   def iv = [1, 2, 3, 4]
+   def ct = [10, 20, 30, 40, 50, 60, 70, 80]
+   def r0 = cbc_bit_flip_byte(iv, ct, 4, 0, 2, 3, 99)
+   assert(r0[0] == [1, 2, 99, 4], "cbc bit flip block zero edits iv")
+   assert(r0[1] == ct, "cbc bit flip block zero keeps ciphertext")
+   def r1 = cbc_bit_flip_byte(iv, ct, 4, 1, 1, 20, 99)
+   assert(r1[0] == iv, "cbc bit flip later block keeps iv")
+   assert(r1[1] == [10, 99, 30, 40, 50, 60, 70, 80], "cbc bit flip later block edits previous ct")
+   def delta = cbc_bitflip_delta([65, 66, 67], [66, 65, 67])
+   assert(delta == [3, 3, 0], "cbc bitflip delta xor prefix")
+   assert(cbc_apply_bitflip_delta([10, 20, 30, 40], [1, 2]) == [11, 22, 30, 40], "cbc apply bitflip delta preserves tail")
+   assert(detect_block_mode([1,2,3,4, 1,2,3,4, 9,9,9,9], 4) == "ecb", "detect ecb")
+   assert(detect_block_mode([1,2,3,4, 4,3,2,1], 4) == "cbc_or_ctr", "detect non-ecb")
+   assert(detect_block_mode([1,2,3], 4) == "too_short", "detect too short")
+   print("block_mode_cbc_probe ok")
+   print("✓ std.math.crypto.block.mode.cbc self-test passed")
 }

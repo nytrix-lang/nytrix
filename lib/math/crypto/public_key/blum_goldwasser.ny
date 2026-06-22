@@ -9,6 +9,7 @@ module std.math.crypto.public_key.blum_goldwasser(bg_keygen, bg_random_keygen, b
 use std.core
 use std.math.nt
 use std.math.crypto.number.arith
+use std.math.crypto.number.pseudoprimes
 
 fn _bg_require_blum_prime(any p, str name) int {
    if !is_blum_prime(p) { panic("blum_goldwasser: " + name + " must be a Blum prime") }
@@ -124,4 +125,36 @@ fn bg_encrypt_int(any m, int bit_count, any n, any seed=nil) dict {
 fn bg_decrypt_int(dict cipher, any p, any q) any {
    "Decrypts a Blum-Goldwasser integer ciphertext."
    bits_to_int_le(bg_decrypt_bits(cipher, p, q))
+}
+
+#main {
+   def key = bg_keygen(7, 11)
+   def n = key.get("n")
+   def msg_bits = [1, 0, 1, 1, 0, 0, 1]
+   def cipher = bg_encrypt_bits(msg_bits, n, 5)
+   assert(cipher.get("bits") == [0, 0, 1, 0, 1, 0, 1], "bg ciphertext bits")
+   assert(cipher.get("final") == 16, "bg final state")
+   assert(bg_decrypt_bits(cipher, 7, 11) == msg_bits, "bg bit decrypt")
+   def int_cipher = bg_encrypt_int(45, 6, n, 5)
+   assert(bg_decrypt_int(int_cipher, 7, 11) == 45, "bg int decrypt")
+   def generated = bg_keygen(11, 19)
+   assert(is_blum_prime(generated.get("p")), "generated p")
+   assert(is_blum_prime(generated.get("q")), "generated q")
+   assert(generated.get("p") != generated.get("q"), "generated distinct primes")
+   def pp = generate_pseudoprime([Z(2)], Z(3), Z(5), 0)
+   assert(pp == [Z(29341), Z(13), Z(37), Z(61)], "deterministic pseudoprime")
+   assert(pp[0] == pp[1] * pp[2] * pp[3], "pseudoprime factors multiply")
+   assert(!is_prime(pp[0]), "pseudoprime is composite")
+   assert(power_mod(Z(2), pp[0] - Z(1), pp[0]) == Z(1), "base-2 Fermat pass")
+   def n2 = bg_keygen(7, 11).get("n")
+   assert(n2 == Z(77), "bg modulus")
+   assert(bg_seed_state(5, n2) == Z(25), "bg seed state")
+   def bits = [1, 0, 1, 1, 0, 0, 1]
+   def cipher2 = bg_encrypt_bits(bits, n2, 5)
+   assert(cipher2.get("bits") == [0, 0, 1, 0, 1, 0, 1], "bg deterministic bits")
+   assert(cipher2.get("final") == Z(16), "bg final state")
+   assert(bg_decrypt_bits(cipher2, 7, 11) == bits, "bg bit decrypt")
+   def cipher_int = bg_encrypt_int(45, 6, n2, 5)
+   assert(bg_decrypt_int(cipher_int, 7, 11) == 45, "bg integer decrypt")
+   print("✓ std.math.crypto.public_key.blum_goldwasser self-test passed")
 }

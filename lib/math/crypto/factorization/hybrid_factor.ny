@@ -784,3 +784,21 @@ fn hybrid_factor_report(any n, any source=false, any reserved=false) dict {
       "elapsed_ms": float(ticks() - t0) / 1000000.0,
    }
 }
+
+#main {
+   def plan = factor_plan(Z(8051))
+   assert(plan != nil, "factor plan exists")
+   assert(plan.len > 3, "factor plan has steps")
+   def sched = factor_work_schedule_report(Z(8051))
+   assert(sched != nil, "factor work schedule")
+   assert(sched.get("step_count", 0) > 0, "schedule has steps")
+   def validate = factor_validate(Z(8051), [97, 83])
+   assert(validate, "factor validation passes")
+   assert(!factor_validate(Z(8051), [97, 84]), "factor validation rejects wrong product")
+   assert(factor_plan(Z(97)).len > 0, "prime factor plan")
+   def hr = hybrid_factor_one_report(Z(1143416711) * Z(1209577819197883))
+   assert(hr.get("success", false), "hybrid_factor_one_report success")
+   assert(hr.get("factor", nil) != nil, "hybrid_factor_one_report finds factor")
+   assert(hr.get("steps", []).len > 0, "hybrid_factor_one_report has steps")
+   print("✓ math.crypto.factorization.hybrid_factor self-test passed")
+}

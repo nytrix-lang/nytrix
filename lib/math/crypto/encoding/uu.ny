@@ -28,3 +28,8 @@ fn uu_decode_line(any line) str {
    }
    return out
 }
+
+#main {
+   assert(uu_decode_line("#06)C") == "Abc", "uu line")
+   print("✓ std.math.crypto.encoding.uu self-test passed")
+}

@@ -1638,3 +1638,57 @@ fn solve_qf_bv_ascii(str script, str prefix, int n) any {
    session_free(sess)
    result
 }
+
+#main {
+   if z3_available() {
+      ;; int-api style tests
+      def ctx = z3_ctx_new()
+      if ctx {
+         def solver = z3_solver_new(ctx)
+         if solver {
+            def x = z3_int_const(ctx, "x")
+            def y = z3_int_const(ctx, "y")
+            solver_assert(ctx, solver, int_ge(ctx, x, int_val(ctx, 0)))
+            solver_assert(ctx, solver, int_le(ctx, x, int_val(ctx, 2)))
+            solver_assert(ctx, solver, int_ge(ctx, y, int_val(ctx, 0)))
+            solver_assert(ctx, solver, int_le(ctx, y, int_val(ctx, 2)))
+            solver_assert(ctx, solver, mk_eq(ctx, int_mod(ctx, int_add(ctx, [
+                           int_mul(ctx, [int_val(ctx, 7), x]),
+                           int_mul(ctx, [int_val(ctx, 5), y]),
+            ]), int_val(ctx, 11)), int_val(ctx, 8)))
+            solver_assert(ctx, solver, mk_eq(ctx, int_add(ctx, [x, y]), int_val(ctx, 3)))
+            if solver_check(ctx, solver) {
+               def xv = model_eval_u64(ctx, solver, x)
+               def yv = model_eval_u64(ctx, solver, y)
+               assert(xv == 2 && yv == 1, "integer model values")
+            }
+            solver_del(ctx, solver)
+         }
+         ctx_del(ctx)
+      }
+      ;; z3-style tests
+      def ctx2 = z3_ctx_new()
+      if ctx2 {
+         def s = z3_solver_new(ctx2)
+         if s {
+            def sort = z3_bv_sort(ctx2, 32)
+            def sym = z3_sym(ctx2, "x")
+            def x2 = z3_bv_const(ctx2, "x2", 32)
+            assert(x2 != 0, "x is null")
+            def k = z3_bv_u64(ctx2, 0x1337, 32)
+            assert(k != 0, "k is null")
+            def eq = z3_eq(ctx2, x2, k)
+            z3_solver_assert(ctx2, s, eq)
+            def sat = z3_solver_check(ctx2, s)
+            if sat {
+               def xv2 = z3_model_eval_u64(ctx2, s, x2)
+               assert(xv2 != nil, "x eval")
+               assert((int(xv2) & 0xFFFFFFFF) == 0x1337, "x value")
+            }
+            z3_solver_del(ctx2, s)
+         }
+         z3_ctx_del(ctx2)
+      }
+   }
+   print("✓ std.math.smt self-test passed")
+}

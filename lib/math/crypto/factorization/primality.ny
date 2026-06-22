@@ -1631,5 +1631,37 @@ fn primality_certificate_report(any n, int max_base=128) dict {
    assert(!l91.get("prime", true), "Lucas n+1 certificate rejects composite")
    def c2047 = primality_certificate_report(Z(2047), 128)
    assert(c2047.get("status", "") == "composite", "BPSW layer rejects 2047")
+   fn show(any n) any {
+      def r = primality_certificate_report(n, 128)
+      assert(r.get("status", "") != "", "primality demo report status")
+   }
+   fn expect(str name, bool cond) any {
+      if !cond { panic("failed: " + name) }
+   }
+   show(Z(97))
+   show(Z(1000003))
+   show(Z(2047))
+   def prime = Z(1000003)
+   def composite = Z(21)
+   def square = Z(121)
+   expect("fermat prime", prp(prime, 2))
+   expect("fermat carmichael can pass", prp(Z(341), 2))
+   expect("euler prime", euler_prp(prime, 2))
+   expect("strong prime", strong_prp(prime, 2))
+   expect("strong catches composite", !strong_prp(composite, 2))
+   expect("strong handles zero", strong_prp_report(0, 2).get("status", "") == "composite")
+   expect("lucas explicit prime", lucas_prp(prime, 1, -1))
+   expect("strong lucas explicit prime", strong_lucas_prp(prime, 1, -1))
+   expect("fibonacci prime", fibonacci_prp(prime, 1, -1))
+   expect("extra strong lucas prime", extra_strong_lucas_prp(prime, 3))
+   expect("selfridge prime", selfridge_prp(prime))
+   expect("strong selfridge prime", strong_selfridge_prp(prime))
+   expect("strong bpsw prime", strong_bpsw_prp(prime))
+   def sqr = selfridge_prp_report(square)
+   expect("square rejected", sqr.get("status", "") == "perfect-square")
+   def bpsw = strong_bpsw_prp_report(prime)
+   expect("report method", bpsw.get("method", "") == "strong-bpsw-prp")
+   expect("report nested mr", bpsw.get("strong_base2", nil) != nil)
+   expect("report nested lucas", bpsw.get("strong_lucas_selfridge", nil) != nil)
    print("✓ std.math.crypto.factorization.primality self-test passed")
 }

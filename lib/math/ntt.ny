@@ -118,3 +118,27 @@ fn ntt_mul(list a, list b, any p) list {
    }
    intt(fc, q, g)
 }
+
+#main {
+def p = 7681
+assert(ntt_is_power_of_2(1), "power of two 1")
+assert(ntt_is_power_of_2(8), "power of two 8")
+assert(!ntt_is_power_of_2(0), "power of two rejects zero")
+assert(!ntt_is_power_of_2(6), "power of two rejects six")
+def g4 = ntt_get_root(4, p)
+assert(g4 != nil, "root exists")
+assert(ntt_get_root(7, p) == nil, "missing root returns nil")
+def a = [1, 2, 3, 4]
+def transformed = ntt(a, p, g4)
+assert(transformed == [10, 6764, 7679, 913], "ntt transform")
+assert(intt(transformed, p, g4) == a, "ntt inverse roundtrip")
+def product = ntt_mul([1, 2, 3, 4], [1, 1, 1, 1], p)
+assert(product.get(0) == 1, "ntt_mul[0]")
+assert(product.get(1) == 3, "ntt_mul[1]")
+assert(product.get(2) == 6, "ntt_mul[2]")
+assert(product.get(3) == 10, "ntt_mul[3]")
+assert(product.get(4) == 9, "ntt_mul[4]")
+assert(product.get(5) == 7, "ntt_mul[5]")
+assert(product.get(6) == 4, "ntt_mul[6]")
+    print("✓ math.crypto.ntt self-test passed")
+}

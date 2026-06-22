@@ -68,3 +68,22 @@ fn hensel_roots(list poly, int p, int k) list {
    }
    roots
 }
+
+#main {
+   assert(poly_eval_mod([1, 2, 3], 2, 5) == Z(2), "poly eval")
+   def lifted = hensel_lift_linear([-1, 0, 1], 5, 1, [1, 4])
+   assert(lifted.len == 2, "linear lift count")
+   mut i = 0
+   while i < lifted.len {
+      assert(poly_eval_mod([-1, 0, 1], lifted.get(i), 25) == Z(0), "lifted root")
+      i += 1
+   }
+   def roots0 = hensel_roots([-1, 0, 1], 5, 3)
+   assert(roots0.len == 2, "hensel roots count")
+   assert(poly_eval_mod([-1, 0, 1], roots0.get(0), 125) == Z(0), "hensel root 0")
+   assert(poly_eval_mod([-1, 0, 1], roots0.get(1), 125) == Z(0), "hensel root 1")
+   def singular = hensel_roots([0, 0, 1], 2, 3)
+   assert(singular.len > 0, "singular roots present")
+   assert(hensel_roots([1, 0, 1], 2, 0) == [], "non-positive lift")
+   print("✓ math.crypto.number.hensel self-test passed")
+}

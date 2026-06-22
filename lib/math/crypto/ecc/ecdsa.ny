@@ -11,6 +11,7 @@ use std.math.nt
 use std.math.crypto.ecc.ecc
 use std.math.crypto.hnp.hnp as hnp
 use std.core.str as str
+use std.math.matrix as matrix
 
 fn ecdsa_nonce_reuse(list sig1, list sig2, any msg1, any msg2, any curve_n) any {
    "Recover nonce k and private key d when two ECDSA signatures share the same k.
@@ -366,4 +367,56 @@ fn ecdsa_recover_key_from_nonce_msb(list sig, any msg, any n, any leak, any bits
       lo += Z(1)
    }
    nil
+}
+
+#main {
+   def curve = ecc_curve_p256()
+   def ecc_p256_p = curve[0]
+   def ecc_p256_a = curve[1]
+   def ecc_p256_b = curve[2]
+   def ecc_p256_G = curve[3]
+   def ecc_p256_n = curve[4]
+   def ecc_p256_gx = ecc_p256_G[0]
+   def ecc_p256_gy = ecc_p256_G[1]
+   def h = Z(12345)
+   def d = Z(67890)
+   def k = Z(98765)
+   def sig = ecdsa_sign(h, k, ecc_p256_G, d, ecc_p256_a, ecc_p256_p, ecc_p256_n)
+   assert(sig != nil, "ecdsa sign returns sig")
+   def Q = ecc_scalar_mult(d, ecc_p256_G, ecc_p256_a, ecc_p256_p)
+   assert(ecdsa_verify(h, sig, ecc_p256_G, Q, ecc_p256_a, ecc_p256_p, ecc_p256_n), "ecdsa verify passes")
+   def pk = ecdsa_private_key_from_nonce(sig, h, ecc_p256_n, k)
+   assert(pk == d, "ecdsa private key from nonce")
+   def parsed = ecdsa_hnp_parse_line("0xdeadbeef cafebabedeadbeef")
+   assert(parsed != nil, "hnp parse line succeeds")
+   assert(parsed[0] == Z(3735928559), "hnp parse line hash")
+   assert(parsed[1][0] == Z(3405691582), "hnp parse line r")
+   assert(parsed[1][1] == Z(3735928559), "hnp parse line s")
+
+   def leaked_bits = 8
+   def leaked_lsb = k % (Z(1) << leaked_bits)
+   def sample = ecdsa_hnp_lsb_sample(sig, h, leaked_lsb, leaked_bits, ecc_p256_n)
+   assert(sample != nil, "hnp lsb sample built")
+   def residual = ecdsa_hnp_sample_residual(sample, d, ecc_p256_n)
+   def expected_residual = ((k - leaked_lsb) * inverse_mod(Z(1) << leaked_bits, ecc_p256_n)) % ecc_p256_n
+   assert(residual == ((expected_residual % ecc_p256_n) + ecc_p256_n) % ecc_p256_n, "hnp residual matches expected relation")
+   assert(ecdsa_hnp_check_samples([sample], d, ecc_p256_n, leaked_bits) == true, "hnp check samples")
+   def samples = ecdsa_hnp_lsb_samples([sig], [h], [leaked_lsb], leaked_bits, ecc_p256_n)
+   assert(samples.len == 1, "hnp lsb samples count")
+   assert(samples[0] == sample, "hnp lsb samples matches single sample")
+
+   def h3 = Z(54321)
+   def sig3 = ecdsa_sign(h3, k, ecc_p256_G, d, ecc_p256_a, ecc_p256_p, ecc_p256_n)
+   def reused = ecdsa_nonce_reuse(sig, sig3, h, h3, ecc_p256_n)
+   assert(reused != nil, "nonce reuse detection")
+   assert(reused[0] == k, "nonce reuse recovers k")
+   assert(reused[1] == d, "nonce reuse recovers d")
+
+   def k2 = Z(123456)
+   def sig2 = ecdsa_sign(h, k2, ecc_p256_G, d, ecc_p256_a, ecc_p256_p, ecc_p256_n)
+   assert(sig2 != nil, "second ecdsa sign")
+   def recovered = ecdsa_recover_key_from_two_sigs(sig[0], sig[1], h, sig2[0], sig2[1], h, ecc_p256_n)
+   assert(recovered == nil, "nonce reuse with distinct ks returns nil")
+   assert(ecdsa_forge_with_known_k(h, k, ecc_p256_G, d, ecc_p256_a, ecc_p256_p, ecc_p256_n) == sig, "forge with known k reproduces signature")
+   print("✓ std.math.crypto.ecc.ecdsa self-test passed")
 }

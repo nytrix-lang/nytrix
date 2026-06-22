@@ -275,3 +275,24 @@ fn lfsr_crack_from_output(list bits) list {
    Use the returned length and polynomial to predict future bits."
    lfsr_berlekamp_massey(bits)
 }
+
+#main {
+   def initial = 1
+   def taps = [4, 1]
+   def n_bits = 4
+   def ks = lfsr_keystream(initial, taps, n_bits, 15)
+   assert(ks.len == 15, "keystream length")
+   def step = lfsr_next(initial, taps, n_bits)
+   assert(step.get(0) == 1, "first output bit")
+   def run = lfsr_run(initial, taps, n_bits, 15)
+   assert(run.get(0) == ks, "run returns keystream")
+   def bm = lfsr_crack_from_output(lfsr_keystream(initial, taps, n_bits, 2 * n_bits))
+   assert(bm.get(0) <= n_bits, "berlekamp massey length bound")
+   def state = lfsr_recover_state(ks, taps, n_bits)
+   assert(state == initial, "state recovery")
+   def seq = lfsr_sequence([1, 0, 0, 1], [1, 1, 0, 1], 20)
+   assert(seq == [1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0], "lfsr sequence sample")
+   assert(lfsr_autocorrelation(seq, 15, 7) == [4, 15], "autocorrelation sample")
+   assert(lfsr_connection_polynomial(seq) == [1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1], "connection polynomial sample")
+   print("✓ std.math.crypto.prng.lfsr self-test passed")
+}

@@ -68,3 +68,26 @@ fn repeated_prime_phi(any p, int r) any {
    }
    acc * (pp - Z(1))
 }
+
+#main {
+   fn roundtrip(list primes, any e, any m) bool {
+      mut n = 1
+      mut i = 0
+      while i < primes.len {
+         n = n * primes.get(i)
+         i += 1
+      }
+      def phi = multiprime_phi(primes)
+      def d = inverse_mod(e, phi)
+      def c = power_mod(m, e, n)
+      multiprime_decrypt(c, d, n) == m
+   }
+   assert(roundtrip([5, 7, 11], 7, 100), "three-prime RSA")
+   assert(roundtrip([61, 53], 17, 314), "two-prime RSA")
+   assert(roundtrip([3, 5, 7, 11], 7, 50), "four-prime RSA")
+   def pp = repeated_prime_factor(Z(13) * Z(13) * Z(13), 2, 5)
+   assert(pp != nil, "repeated_prime_factor")
+   assert(pp.get(0) == Z(13) && pp.get(1) == 3, "repeated_prime_factor result")
+   assert(repeated_prime_phi(Z(13), 3) == Z(13) * Z(13) * Z(12), "repeated_prime_phi")
+   print("✓ std.math.crypto.rsa.multiprime self-test passed")
+}

@@ -27,6 +27,11 @@ fn md5_padding(int msg_len_bits) list {
    mut padding = list(pad_len)
    store64(padding, pad_len, 0)
    __store_item_fast(padding, 0, 128)
+   mut zi = 1
+   while zi < pad_len - 8 {
+      __store_item_fast(padding, zi, 0)
+      zi += 1
+   }
    mut j = 0
    while j < 8 {
       __store_item_fast(padding, pad_len - 8 + j, (msg_len_bits >> (j * 8)) & 255)
@@ -462,6 +467,11 @@ fn _sha_padding(int msg_len_bytes, int block_size, int len_field_bytes) list {
    mut padding = list(pad_len)
    store64(padding, pad_len, 0)
    __store_item_fast(padding, 0, 128)
+   mut zi = 1
+   while zi < pad_len - len_field_bytes {
+      __store_item_fast(padding, zi, 0)
+      zi += 1
+   }
    def msg_len_bits = msg_len_bytes * 8
    mut j = 0
    if len_field_bytes == 16 {

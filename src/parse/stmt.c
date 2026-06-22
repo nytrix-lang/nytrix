@@ -4423,6 +4423,88 @@ static stmt_t *parse_hash_stmt(parser_t *p) {
   return s;
 }
 
+/* Parses a single 'def'/'mut' binding target (optional type + name) and
+ * pushes it onto s->as.var.names / s->as.var.types. Shared by the initial
+ * binding-target list and by per-binding initializers like
+ * 'def P1 = [0, 1], P2 = [1, 0]'. On failure, emits a parser error and
+ * leaves cleanup (stmt_free_members) to the caller. */
+static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
+  const char *var_type = NULL;
+  token_t ident = {0};
+  if (stmt_looks_type_first_binding(p)) {
+    var_type = parse_type_ref(p, "expected type name");
+    if (p->cur.kind != NY_T_IDENT) {
+      parser_error(p, p->cur, "expected variable name after type", NULL);
+      if (p->cur.kind != NY_T_EOF)
+        parser_advance(p);
+      return false;
+    }
+    ident = p->cur;
+    parser_advance(p);
+  } else if (((p->cur.kind == NY_T_IDENT || p->cur.kind == NY_T_NUMBER) &&
+              (parser_peek(p).kind == NY_T_COLON ||
+               parser_peek(p).kind == NY_T_LT)) ||
+             p->cur.kind == NY_T_QUESTION || p->cur.kind == NY_T_STAR) {
+    var_type = parse_type_ref(p, "expected type name before ':'");
+    if (parser_match(p, NY_T_COLON)) {
+
+    }
+    if (p->cur.kind != NY_T_IDENT) {
+      parser_error(p, p->cur, "expected variable name", NULL);
+      if (p->cur.kind != NY_T_EOF) parser_advance(p);
+      return false;
+    }
+    ident = p->cur;
+    parser_advance(p);
+  } else {
+    if (p->cur.kind != NY_T_IDENT) {
+      parser_error(p, p->cur, "expected identifier after 'def'",
+                   parse_missing_ident_hint(p->cur, "variable"));
+      if (p->cur.kind != NY_T_EOF) parser_advance(p);
+      return false;
+    }
+    ident = p->cur;
+    parser_advance(p);
+  }
+  char *final_name = (char *)ident.lexeme;
+  size_t nlen = ident.len;
+  bool mangled = false;
+  if (p->block_depth == 0 && p->current_module) {
+    size_t mlen = strlen(p->current_module);
+    size_t total = mlen + 1 + nlen + 1;
+    char *prefixed = malloc(total);
+    snprintf(prefixed, total, "%s.%.*s", p->current_module, (int)nlen,
+             ident.lexeme);
+    final_name = prefixed;
+    nlen = strlen(prefixed);
+    mangled = true;
+  }
+  const char *name_s = arena_strndup(p->arena, final_name, nlen);
+  if (mangled) free(final_name);
+  vec_push_arena(p->arena, &s->as.var.names, name_s);
+  vec_push_arena(p->arena, &s->as.var.types, var_type);
+  return true;
+}
+
+/* Lookahead used inside a 'def'/'mut' initializer list: after consuming a
+ * comma, decide whether what follows is another binding target owning its
+ * own initializer ('P2 = ...') rather than just another expression in the
+ * same initializer list ('def a, b = 1, 2'). Deliberately bounded to the
+ * unambiguous 'IDENT =' shape only: this grammar never parses '=' as an
+ * expression operator, so a bare identifier immediately followed by '='
+ * can never be the start of a value expression. We do NOT reuse the
+ * type-first speculative scan here (stmt_looks_type_first_binding /
+ * parse_type_ref) because that scanner has no notion of statement
+ * boundaries -- given a dead-end candidate like a trailing NUMBER literal
+ * ('..., 0'), it will happily keep scanning into the *next*, unrelated
+ * statement looking for a token sequence that satisfies it, and can
+ * misfire across that boundary (e.g. mistaking '0' followed by the next
+ * statement's 'i = ...' for a fake 'Type name' binding). Keeping this
+ * check to a fixed 2-token lookahead avoids that entirely. */
+static bool stmt_comma_starts_next_var_binding(parser_t *p) {
+  return p->cur.kind == NY_T_IDENT && parser_peek(p).kind == NY_T_ASSIGN;
+}
+
 stmt_t *p_parse_stmt(parser_t *p) {
   switch (p->cur.kind) {
   case NY_T_SEMI:
@@ -4588,63 +4670,10 @@ stmt_t *p_parse_stmt(parser_t *p) {
       parser_expect(p, NY_T_RBRACK, "']' after destructuring list", NULL);
     } else {
       while (true) {
-        const char *var_type = NULL;
-        token_t ident = {0};
-        if (stmt_looks_type_first_binding(p)) {
-          var_type = parse_type_ref(p, "expected type name");
-          if (p->cur.kind != NY_T_IDENT) {
-            parser_error(p, p->cur, "expected variable name after type", NULL);
-            if (p->cur.kind != NY_T_EOF)
-              parser_advance(p);
-            stmt_free_members(s);
-            return NULL;
-          }
-          ident = p->cur;
-          parser_advance(p);
-        } else if (((p->cur.kind == NY_T_IDENT || p->cur.kind == NY_T_NUMBER) &&
-                    (parser_peek(p).kind == NY_T_COLON ||
-                     parser_peek(p).kind == NY_T_LT)) ||
-                   p->cur.kind == NY_T_QUESTION || p->cur.kind == NY_T_STAR) {
-          var_type = parse_type_ref(p, "expected type name before ':'");
-          if (parser_match(p, NY_T_COLON)) {
-
-          }
-          if (p->cur.kind != NY_T_IDENT) {
-            parser_error(p, p->cur, "expected variable name", NULL);
-            if (p->cur.kind != NY_T_EOF) parser_advance(p);
-            stmt_free_members(s);
-            return NULL;
-          }
-          ident = p->cur;
-          parser_advance(p);
-        } else {
-          if (p->cur.kind != NY_T_IDENT) {
-            parser_error(p, p->cur, "expected identifier after 'def'",
-                         parse_missing_ident_hint(p->cur, "variable"));
-            if (p->cur.kind != NY_T_EOF) parser_advance(p);
-            stmt_free_members(s);
-            return NULL;
-          }
-          ident = p->cur;
-          parser_advance(p);
+        if (!parse_var_binding_target(p, s)) {
+          stmt_free_members(s);
+          return NULL;
         }
-        char *final_name = (char *)ident.lexeme;
-        size_t nlen = ident.len;
-        bool mangled = false;
-        if (p->block_depth == 0 && p->current_module) {
-          size_t mlen = strlen(p->current_module);
-          size_t total = mlen + 1 + nlen + 1;
-          char *prefixed = malloc(total);
-          snprintf(prefixed, total, "%s.%.*s", p->current_module, (int)nlen,
-                   ident.lexeme);
-          final_name = prefixed;
-          nlen = strlen(prefixed);
-          mangled = true;
-        }
-        const char *name_s = arena_strndup(p->arena, final_name, nlen);
-        if (mangled) free(final_name);
-        vec_push_arena(p->arena, &s->as.var.names, name_s);
-        vec_push_arena(p->arena, &s->as.var.types, var_type);
         if (!parser_match(p, NY_T_COMMA)) break;
       }
     }
@@ -4653,6 +4682,24 @@ stmt_t *p_parse_stmt(parser_t *p) {
         vec_push_arena(p->arena, &s->as.var.exprs, p_parse_expr(p, 0));
         if (!parser_match(p, NY_T_COMMA))
           break;
+        /* Support per-binding initializers: 'def P1 = [0,1], P2 = [1,0]'.
+         * A comma inside the initializer list normally starts another
+         * expression for the existing binding targets ('def a, b = 1, 2').
+         * But if what follows is itself a fresh binding target owning its
+         * own '=', treat it as a new binding instead. */
+        if (!s->as.var.is_destructure &&
+            s->as.var.names.len == s->as.var.exprs.len &&
+            stmt_comma_starts_next_var_binding(p)) {
+          if (!parse_var_binding_target(p, s)) {
+            stmt_free_members(s);
+            return NULL;
+          }
+          if (!parser_match(p, NY_T_ASSIGN)) {
+            parser_error(p, p->cur, "expected '=' after variable name", NULL);
+            stmt_free_members(s);
+            return NULL;
+          }
+        }
       }
     } else {
       token_t zero_tok = {0};

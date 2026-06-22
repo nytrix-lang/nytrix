@@ -9,13 +9,13 @@
 module std.math.crypto.prng.pcg(pcg32_default_multiplier, pcg32_step, pcg32_output, pcg32_next, pcg32_stream_increment, pcg32_advance, pcg32_rewind, poly_pcg_choose_window, poly_pcg_newton_coeffs, poly_pcg_eval_next, poly_pcg_advance_from_states)
 use std.math.nt
 
-def _PCG64_MOD = Z("18446744073709551616")
-def _PCG32_MOD = Z("4294967296")
-def _PCG32_MULT = Z("6364136223846793005")
+fn _PCG64_MOD() bigint { Z("18446744073709551616") }
+fn _PCG32_MOD() bigint { Z("4294967296") }
+fn _PCG32_MULT() bigint { Z("6364136223846793005") }
 
-fn _u64(any x) bigint { mod(Z(x), _PCG64_MOD) }
+fn _u64(any x) bigint { mod(Z(x), _PCG64_MOD()) }
 
-fn _u32(any x) bigint { mod(Z(x), _PCG32_MOD) }
+fn _u32(any x) bigint { mod(Z(x), _PCG32_MOD()) }
 
 fn _rotr32(any x, any r) bigint {
    def rr = int(r) & 31
@@ -24,7 +24,7 @@ fn _rotr32(any x, any r) bigint {
 
 fn pcg32_default_multiplier() bigint {
    "Return the standard PCG32 64-bit LCG multiplier."
-   _PCG32_MULT
+   _PCG32_MULT()
 }
 
 fn pcg32_stream_increment(any stream) bigint {
@@ -34,7 +34,7 @@ fn pcg32_stream_increment(any stream) bigint {
 
 fn pcg32_step(any state, any inc) bigint {
    "Advance the internal PCG32 LCG state by one step."
-   _u64(Z(state) * _PCG32_MULT + Z(inc))
+   _u64(Z(state) * _PCG32_MULT() + Z(inc))
 }
 
 fn pcg32_output(any state) bigint {
@@ -53,7 +53,7 @@ fn pcg32_next(any state, any inc) list {
 
 fn pcg32_advance(any state, any inc, any delta) bigint {
    "Advance PCG32 state by delta steps using LCG exponentiation."
-   mut cur_mult = _PCG32_MULT
+   mut cur_mult = _PCG32_MULT()
    mut cur_plus = _u64(inc)
    mut acc_mult = Z(1)
    mut acc_plus = Z(0)
@@ -72,7 +72,7 @@ fn pcg32_advance(any state, any inc, any delta) bigint {
 
 fn pcg32_rewind(any state, any inc, any delta=1) bigint {
    "Rewind PCG32 state by delta steps. Requires odd multiplier modulo 2^64."
-   def inv_mult = inverse_mod(_PCG32_MULT, _PCG64_MOD)
+   def inv_mult = inverse_mod(_PCG32_MULT(), _PCG64_MOD())
    mut cur = _u64(state)
    mut i = Z(0)
    while i < Z(delta) {
@@ -197,4 +197,13 @@ fn poly_pcg_advance_from_states(list states, int steps, any modulus=(Z(1) << 128
       i += 1
    }
    cur
+}
+
+#main {
+   def inc = pcg32_stream_increment(54)
+   def st0 = Z(42)
+   def pair = pcg32_next(st0, inc)
+   assert(pcg32_rewind(pair.get(0), inc) == st0, "pcg rewind")
+   assert(pcg32_advance(st0, inc, 1) == pair.get(0), "pcg advance")
+   print("✓ std.math.crypto.prng.pcg self-test passed")
 }

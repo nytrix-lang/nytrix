@@ -11,6 +11,11 @@ use std.math.bin as bin
 use std.math.crypto.hash (sha256_hmac)
 use std.math.parse.data.json
 use std.core.str as str
+use std.math.nt
+use std.math.crypto.ecc.ecc
+use std.math.crypto.ecc.smart_attack
+use std.math.crypto.number.partial
+use std.math.crypto.protocol.seal
 
 fn _strip_b64_padding(str s) str {
    mut n = s.len
@@ -121,4 +126,30 @@ fn jwt_hs256_verify(str token, str secret) bool {
    def signing_input = parts.get(0) + "." + parts.get(1)
    def expected = jwt_base64url_encode_bytes(sha256_hmac(secret, signing_input))
    _jwt_equal_fixed_time(expected, parts.get(2))
+}
+
+#main {
+   def token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.RTzBq9dXx7wFOI5kqjFJz2EvM7xJlE4G5XH3Yz2KZ1A"
+   assert(jwt_signing_input(token) == "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0", "signing input")
+   assert(jwt_decode_header_json(token) == "{\"alg\":\"HS256\",\"typ\":\"JWT\"}", "header")
+   assert(jwt_decode_payload_json(token) == "{\"sub\":\"1234567890\"}", "payload")
+   def decoded = jwt_decode_unverified(token)
+   assert(is_dict(decoded), "decoded is dict")
+   assert(decoded.get("header").get("alg") == "HS256", "header alg")
+   assert(decoded.get("payload").get("sub") == "1234567890", "payload sub")
+   def none_token = jwt_alg_none_json("{\"sub\":\"hacker\"}")
+   assert(str.split(none_token, ".").len == 3, "none token parts")
+   assert(str.split(none_token, ".").get(2) == "", "none signature empty")
+   def hs256 = jwt_hs256_json("{\"sub\":\"test\"}", "secret")
+   assert(jwt_hs256_verify(hs256, "secret"), "verify correct secret")
+   assert(!jwt_hs256_verify(hs256, "wrong"), "reject wrong secret")
+   def confusion = jwt_hs256_confusion_json("{\"sub\":\"confuse\"}", "pubkey_data")
+   assert(jwt_hs256_verify(confusion, "pubkey_data"), "confusion verify")
+   def curve = ecc_curve_p256()
+   def G = curve[3]
+   def ed = [Z(2), Z(3)]
+   assert(G.len == 2, "G is ec point")
+   assert(ed.len == 2, "ed is ec point")
+   assert(ed == ed, "ec_eq self")
+   print("✓ std.math.crypto.protocol.jwt self-test passed")
 }

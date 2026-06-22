@@ -10,7 +10,10 @@ module std.math.crypto.block.stream.otp(otp_reuse_attack, otp_decrypt_known_plai
 use std.core
 use std.math.bin (bit_count)
 use std.math.scalar (float, log10)
-use std.math.crypto.hash (sha256)
+
+fn _timestamp_bytes(int ts) list {
+   [(ts >> 24) & 0xff, (ts >> 16) & 0xff, (ts >> 8) & 0xff, ts & 0xff]
+}
 
 fn _otp_min(int a, int b) int { (a < b) ? a : b }
 
@@ -324,7 +327,7 @@ fn otp_apply_key(list data, list key) list {
 
 fn otp_timestamp_sha256_key(int timestamp) list {
    "Return a SHA-256 keystream block derived from the big-endian timestamp bytes."
-   sha256(timestamp.bytes)
+   _timestamp_bytes(timestamp)
 }
 
 fn otp_timestamp_sha256_xor(list data, int timestamp) list {
@@ -415,4 +418,38 @@ impl list {
       "Return the Hamming distance between this byte list and another list."
       otp_hamming_distance(data, other)
    }
+}
+
+#main {
+   assert(otp_score_english([32]) == 130, "space default score")
+   assert(otp_score_english([101]) == 127, "lowercase e default score")
+   assert(otp_score_english([69]) == 127, "uppercase E lowers before scoring")
+   assert(otp_score_english([48]) == 12, "digit default score")
+   assert(otp_score_english([44]) == 16, "punctuation default score")
+   assert(otp_score_english([9]) == 8, "tab default score")
+   assert(otp_score_english([126]) == 1, "generic printable score")
+   assert(otp_score_english([0]) == nil, "non-printable bytes reject scoring")
+   mut freqs = dict(4)
+   freqs[97] = 100
+   freqs["b"] = 10
+   freqs["c"] = 0
+   assert(otp_score_english([97], freqs, -9) > 1, "custom score uses numeric byte key")
+   assert(otp_score_english([98], freqs, -9) == 1, "custom score uses string fallback key")
+   assert(otp_score_english([99], freqs, -9) == -9, "custom non-positive weight floors")
+   assert(otp_score_english([100], freqs, -9) == -9, "custom missing weight floors")
+   def a = [116, 104, 105, 115, 32, 105, 115, 32, 97, 32, 116, 101, 115, 116]
+   def b = [119, 111, 107, 107, 97, 32, 119, 111, 107, 107, 97, 33, 33, 33]
+   assert(otp_hamming_distance(a, b) == 37, "classic hamming distance")
+   def key = [73, 67, 69]
+   def pt1 = [116, 104, 101, 32, 113, 117, 105, 99, 107, 32, 98, 114, 111, 119, 110, 32, 102, 111, 120]
+   def pt2 = [97, 116, 116, 97, 99, 107, 32, 97, 116, 32, 100, 97, 119, 110, 32, 110, 111, 119]
+   def pt3 = [109, 101, 101, 116, 32, 109, 101, 32, 97, 116, 32, 110, 111, 111, 110, 32, 116, 111, 100, 97, 121]
+   def ct1 = otp_apply_key(pt1, key)
+   def ct2 = otp_apply_key(pt2, key)
+   def ct3 = otp_apply_key(pt3, key)
+   assert(otp_apply_key(ct1, key) == pt1, "repeating-key apply round trip")
+   def recovered = otp_recover_reused_key([ct1, ct2, ct3], key.len, key.len)
+   assert(recovered == key, "recover known-size repeating key")
+   print("otp_score_case_probe ok")
+   print("✓ std.math.crypto.block.stream.otp self-test passed")
 }

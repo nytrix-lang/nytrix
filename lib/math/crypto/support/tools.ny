@@ -211,3 +211,28 @@ fn str_strip_bytes_literal(any s) str {
    }
    t
 }
+
+#main {
+   assert(collect_lines(" a \n\n b \r\n") == ["a", "b"], "collect_lines")
+   assert(bytes_contains([1, 2, 3, 4], [2, 3]), "bytes_contains")
+   assert(!bytes_contains([1, 2, 3], [3, 2]), "bytes_contains miss")
+   assert(find_subseq([9, 8, 7, 6], [7, 6]) == 2, "find_subseq")
+   assert(find_subseq([9, 8, 7], [1]) == -1, "find_subseq miss")
+   assert(rol_bits(9, 1, 4) == 3, "rol_bits")
+   assert(ror_bits(9, 1, 4) == 12, "ror_bits")
+   assert(bytes_fixed_from_bigint(0x1234, 4) == [0, 0, 0x12, 0x34], "bytes_fixed_from_bigint")
+   assert(bytes_is_printable_ascii([65, 66, 10], 1, 95), "bytes_is_printable_ascii")
+   assert(!bytes_is_printable_ascii([0, 65], 1, 95), "bytes_is_printable_ascii rejects binary")
+   assert(!bytes_is_printable_ascii(nil, 1, 95), "bytes_is_printable_ascii nil")
+   assert(bytes_has_prefix([65, 66, 67], "AB"), "bytes_has_prefix str")
+   assert(bytes_has_prefix([1, 2, 3], [1, 2]), "bytes_has_prefix list")
+   assert(!bytes_has_prefix(nil, [1]), "bytes_has_prefix nil")
+   assert(list_uniq([3, 1, 3, 2, 1]) == [3, 1, 2], "list_uniq")
+   assert(list_uniq(nil) == [], "list_uniq nil")
+   assert(str_strip_ws(" \t hi\r\n") == "hi", "str_strip_ws")
+   assert(str_strip_ws(nil) == "", "str_strip_ws nil")
+   assert(str_strip_bytes_literal(" b'abc' ") == "abc", "str_strip_bytes_literal single")
+   assert(str_strip_bytes_literal('b"abc"') == "abc", "str_strip_bytes_literal double")
+   assert(str_strip_bytes_literal(nil) == "", "str_strip_bytes_literal nil")
+   print("✓ std.math.crypto.support.tools self-test passed")
+}

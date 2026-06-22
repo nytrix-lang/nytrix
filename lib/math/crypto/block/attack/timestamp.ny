@@ -28,3 +28,11 @@ fn aes_ecb_sha256_timestamp_bruteforce(list ciphertext, int center, int radius, 
    }
    nil
 }
+
+#main {
+   def ciphertext = "15704f37e2555df8bfd30f3a7e7b3aac".unhex
+   def hit = aes_ecb_sha256_timestamp_bruteforce(ciphertext, 1770242615, 60, "known prefix", "")
+   assert(hit != nil, "timestamp-derived AES key found")
+   assert(hit[0] == 1770242615, "timestamp recovered")
+   print("✓ std.math.crypto.block.attack.timestamp self-test passed")
+}

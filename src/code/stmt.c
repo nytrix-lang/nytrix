@@ -2032,48 +2032,22 @@ static const char *stmt_list_fastpath_bail_reason(codegen_t *cg, scope *scopes,
 static bool stmt_can_elide_static_int_list_object(
     codegen_t *cg, scope *scopes, size_t depth, stmt_t *decl_stmt,
     const char *name, bool escapes, expr_t *init, const char **bail_reason) {
+  // This optimization was found to be unsound: it can elide a module-level
+  // (or otherwise escaping) immutable int-list object even when the list is
+  // later indexed from a different function in the same module, since that
+  // usage isn't visible to the safety scan below. That mismatch between the
+  // elided fast representation and ordinary list access corrupts memory
+  // (observed as segfaults/garbage reads). Disabled unconditionally.
+  (void)cg;
+  (void)scopes;
+  (void)depth;
+  (void)decl_stmt;
+  (void)name;
+  (void)escapes;
+  (void)init;
   if (bail_reason)
     *bail_reason = NULL;
-  if (!ny_env_enabled_default_on("NYTRIX_STATIC_INT_LIST_ELIDE"))
-    return false;
-  if (!cg || !name || !decl_stmt) {
-    if (bail_reason)
-      *bail_reason = "internal";
-    return false;
-  }
-  if (decl_stmt->as.var.is_mut) {
-    if (bail_reason)
-      *bail_reason = "mutable";
-    return false;
-  }
-  if (!stmt_expr_is_int_list_literal(cg, scopes, depth, init)) {
-    if (bail_reason)
-      *bail_reason = "mixed-type";
-    return false;
-  }
-  stmt_t top_level_root = {0};
-  stmt_t *root = cg->current_fn_body;
-  if (!root && cg->prog) {
-    top_level_root.kind = NY_S_BLOCK;
-    top_level_root.tok = decl_stmt->tok;
-    top_level_root.as.block.body = cg->prog->body;
-    root = &top_level_root;
-  }
-  if (!root) {
-    if (bail_reason)
-      *bail_reason = "module-scope";
-    return false;
-  }
-  if (!stmt_static_list_only_uses(cg, scopes, depth, root, decl_stmt, name)) {
-    if (bail_reason)
-      *bail_reason = stmt_list_fastpath_bail_reason(cg, scopes, depth, root,
-                                                    decl_stmt, name, false);
-    if (bail_reason && !*bail_reason)
-      *bail_reason = "unsupported-use";
-    return false;
-  }
-  (void)escapes;
-  return true;
+  return false;
 }
 
 static void stmt_update_static_int_list_elide_metadata(

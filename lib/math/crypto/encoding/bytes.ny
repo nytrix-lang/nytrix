@@ -35,3 +35,21 @@ fn bytes_get(bytes b, int i) int {
    if i < 0 || i >= n { return 0 }
    load8(b, i)
 }
+
+#main {
+   def b = bytes(4)
+   assert(b.len == 4, "bytes len")
+   bytes_set(b, 0, 65)
+   bytes_set(b, 1, 66)
+   bytes_set(b, 2, 67)
+   bytes_set(b, 3, 68)
+   assert(bytes_get(b, 0) == 65, "bytes_get first")
+   assert(bytes_get(b, 3) == 68, "bytes_get last")
+   bytes_set(b, -1, 1)
+   bytes_set(b, 4, 1)
+   assert(bytes_get(b, 0) == 65, "bytes_set ignores negative index")
+   assert(bytes_get(b, 3) == 68, "bytes_set ignores out-of-range index")
+   assert(bytes_get(b, -1) == 0, "bytes_get negative index")
+   assert(bytes_get(b, 4) == 0, "bytes_get out of range")
+   print("✓ std.math.crypto.encoding.bytes self-test passed")
+}

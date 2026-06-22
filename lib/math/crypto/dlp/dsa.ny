@@ -152,3 +152,39 @@ fn dsa_recover_key_from_quadratic_nonces(list records, any q) any {
    "Recover [x, [a0, a1, a2]] when DSA nonces are quadratic in record index."
    dsa_recover_key_from_nonce_polynomial(records, 2, q)
 }
+
+#main {
+   def p, q = Z(23), Z(11)
+   def g, x = Z(4), Z(7)
+   def y = power_mod(g, x, p)
+   def h1 = Z(3)
+   def h2 = Z(8)
+   def k = Z(1)
+   def sig1 = dsa_sign_hash(h1, x, k, p, q, g)
+   def sig2 = dsa_sign_hash(h2, x, k, p, q, g)
+   assert(sig1 != nil && sig2 != nil, "dsa sign")
+   assert(dsa_verify_hash(h1, sig1, y, p, q, g), "dsa verify")
+   def reuse = dsa_recover_nonce_reuse(h1, sig1[0], sig1[1], h2, sig2[0], sig2[1], q)
+   assert(reuse != nil && reuse[0] == k && reuse[1] == x, "dsa nonce reuse")
+   def a, c = Z(2), Z(1)
+   def k1 = Z(1)
+   def k2 = mod(a * k1 + c, q)
+   def s1 = dsa_sign_hash(h1, x, k1, p, q, g)
+   def s2 = dsa_sign_hash(h2, x, k2, p, q, g)
+   def lcg = dsa_recover_nonce_lcg_two_sigs(h1, s1[0], s1[1], h2, s2[0], s2[1], a, c, q)
+   assert(lcg != nil && lcg[0] == k1 && lcg[1] == k2 && lcg[2] == x, "dsa lcg nonce")
+   def fq, fx = Z(101), Z(17)
+   def coeffs = [Z(3), Z(5), Z(7)]
+   def records = [
+      [1, Z(8), Z(11), Z(13)],
+      [2, Z(14), Z(19), Z(23)],
+      [3, Z(99), Z(29), Z(31)],
+      [4, Z(58), Z(37), Z(41)],
+      [5, Z(23), Z(43), Z(47)]
+   ]
+   assert(dsa_verify_nonce_polynomial(records, fx, coeffs, fq), "dsa quadratic verify")
+   def recovered = dsa_recover_key_from_quadratic_nonces(records, fq)
+   assert(recovered != nil && recovered[0] == fx, "dsa quadratic key")
+   assert(recovered[1] == coeffs, "dsa quadratic coeffs")
+   print("✓ std.math.crypto.dlp.dsa self-test passed")
+}

@@ -109,7 +109,7 @@ fn _gf128_is_zero(list a) bool {
 
 fn gf128_inv(list x) any {
    "Multiplicative inverse in GF(2^128), or nil for zero."
-   if _gf128_is_zero(x) { return nil }
+   if _gf128_is_zero(x){ return nil }
    mut result = _gf128_one()
    mut i = 127
    while i >= 0 {
@@ -309,7 +309,7 @@ fn gcm_decrypt(list key, list nonce, list ad, list ciphertext, list tag) any {
    def s = gcm_auth_ghash(h, ad, ciphertext)
    def e0 = aes_encrypt_block(ctx, j0)
    def expected = _gcm_xor(s, e0, 16)
-   if !gcm_verify_tag(expected, tag) { return nil }
+   if !gcm_verify_tag(expected, tag){ return nil }
    _gcm_ctr_crypt(ctx, j0, ciphertext)
 }
 
@@ -401,9 +401,51 @@ fn gcm_recover_auth_key_one_block(list a1, list c1, list t1, list a2, list c2, l
    if a1.len != 0 || a2.len != 0 { return nil }
    if c1.len != 16 || c2.len != 16 || t1.len != 16 || t2.len != 16 { return nil }
    def dc = _gf128_xor(c1, c2)
-   if _gf128_is_zero(dc) { return nil }
+   if _gf128_is_zero(dc){ return nil }
    def dt = _gf128_xor(t1, t2)
    def inv_dc = gf128_inv(dc)
    if inv_dc == nil { return nil }
    gf128_sqrt(gf128_mult(dt, inv_dc))
+}
+
+#main {
+   def h = [102,233,75,212,239,138,44,59,136,76,250,89,202,52,43,46]
+   def c1 = [3,136,218,206,96,182,163,146,243,40,194,185,113,178,254,120]
+   def c2 = [2,136,218,206,96,182,163,146,243,40,194,185,113,178,254,120]
+   def e0 = [88,226,252,206,250,126,48,97,54,127,29,87,164,231,69,90]
+   def t1 = gcm_forge_tag(h, [], c1, e0)
+   def t2 = gcm_forge_tag(h, [], c2, e0)
+   assert(gcm_recover_auth_key_one_block([], c1, t1, [], c2, t2) == h, "GCM one-block H recovery")
+   def forged = gcm_forge_tag(h, [], c2, e0)
+   assert(forged == t2, "GCM tag forgery with recovered H substrate")
+   def h0 = [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+   def blocks = [[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]]
+   def gh = ghash(h0, blocks)
+   assert(gh.len == 16, "ghash output is 16 bytes")
+   def x, y = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1], [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2]
+   def prod = gf128_mult(x, y)
+   assert(prod.len == 16, "gf128_mult output is 16 bytes")
+   def ct1, ct2 = [10, 20, 30, 40], [15, 25, 35, 45]
+   def reuse = gcm_nonce_reuse_decrypt(ct1, [], ct2, [])
+   assert(reuse.get(0).get(0) == (10 ^^ 15), "nonce reuse xor")
+   def ks = gcm_recover_keystream(ct1, [100, 110, 120, 130])
+   assert(ks.get(0) == (10 ^^ 100), "keystream recovery")
+   def hh = [102,233,75,212,239,138,44,59,136,76,250,89,202,52,43,46]
+   def cta = [3,136,218,206,96,182,163,146,243,40,194,185,113,178,254,120]
+   def ctb = [2,136,218,206,96,182,163,146,243,40,194,185,113,178,254,120]
+   def ta = gcm_forge_tag(hh, [], cta, e0)
+   def tb = gcm_forge_tag(hh, [], ctb, e0)
+   assert(gcm_recover_auth_key_one_block([], cta, ta, [], ctb, tb) == hh, "recover one-block H")
+   assert(gcm_recover_ectr0_from_sample(hh, [], cta, ta) == e0, "recover E(K,J0)")
+   assert(gcm_forge_tag_from_known_message(hh, [], cta, ta, [], ctb) == tb, "forge tag from known tuple")
+   def key = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+   def nonce = [0,0,0,0,0,0,0,0,0,0,0,0]
+   def empty = gcm_encrypt(key, nonce, [], [])
+   assert(empty[0] == [], "empty ciphertext")
+   print("actual tag: " + to_str(empty[1]))
+   assert(gcm_decrypt(key, nonce, [], empty[0], empty[1]) == [], "empty decrypt")
+   mut bad_tag = empty[1]
+   bad_tag[0] = bad_tag[0] ^^ 1
+   assert(gcm_decrypt(key, nonce, [], empty[0], bad_tag) == nil, "bad tag rejected")
+   print("✓ std.math.crypto.block.mode.gcm self-test passed")
 }
