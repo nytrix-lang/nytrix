@@ -33,7 +33,7 @@ assert(greet("Nytrix") == "Hello, Nytrix!", "greet")
 ./make ny -run hello.ny
 ./make ny -o hello hello.ny
 ./hello
-./make ny https://raw.githubusercontent.com/user/project/main/tool.ny
+./make ny https://raw.githubusercontent.com/x3ric/xtool/refs/heads/main/xtool
 ```
 
 ## Install

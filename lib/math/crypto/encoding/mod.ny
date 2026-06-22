@@ -262,12 +262,19 @@ fn bits_to_text_width(any bits, int width=8) str {
 
 fn ascii_integer(any bits) int {
    "Convert exactly 8 MSB-first bits to an ASCII integer."
-   if bits.len != 8 { panic("ascii_integer: B must consist of 8 bits") }
-   mut v, i = 0, 0
+   def n = bits.len
+   if n != 8 { panic("ascii_integer: B must consist of 8 bits") }
+   mut v = 0
+   mut i = 0
    while i < 8 {
-      def raw = is_str(bits) ? utf8_slice(bits, i, i + 1, 1) : bits[i]
-      if is_str(raw) && raw != "0" && raw != "1" { panic("ascii_integer: bits must contain only 0 or 1") }
-      def b = is_str(raw) ? atoi(raw) : int(raw)
+      mut b = 0
+      if is_str(bits) {
+         def raw = utf8_slice(bits, i, i + 1, 1)
+         if raw != "0" && raw != "1" { panic("ascii_integer: bits must contain only 0 or 1") }
+         b = atoi(raw)
+      } else {
+         b = int(__load_item(bits, i))
+      }
       if b != 0 && b != 1 { panic("ascii_integer: bits must contain only 0 or 1") }
       v = (v << 1) | (b & 1)
       i += 1
@@ -729,4 +736,70 @@ impl bytes {
       "Affine-decrypt this byte buffer modulo 256."
       affine_bytes_decrypt(b.to_list, a, off)
    }
+}
+
+#main {
+   def b64 = base64_encode_str("Hello")
+   def back = base64_decode_str(b64)
+   assert(back == "Hello", "base64 round-trip")
+   def b32 = base32_encode("Hello")
+   assert(b32.len > 0, "base32 non-empty")
+   def b32back = base32_decode(b32)
+   assert(b32back == "Hello", "base32 round-trip")
+   def nested = base64_decode_nested("SGVsbG8=", 1)
+   assert(nested == "Hello", "nested base64 1 layer")
+   def bin_str = text_to_binary("A")
+   assert(bin_str == "01000001", "A = 01000001")
+   def back2 = binary_to_text("01000001")
+   assert(back2 == "A", "binary->text A")
+   assert(ascii_integer("01000001") == 65, "ascii_integer string")
+   assert(ascii_integer([0, 1, 0, 0, 0, 0, 1, 1]) == 67, "ascii_integer list")
+   assert(ascii_to_bin(["A", "b"]) == "0100000101100010", "ascii_to_bin list chunks")
+   assert(bin_to_ascii("0100000101100010") == "Ab", "bin_to_ascii string")
+   assert(bin_to_ascii([0,1,0,0,0,0,0,1]) == "A", "bin_to_ascii list")
+   def oct_text = octal_to_text("101 102")
+   assert(oct_text == "AB", "octal to text")
+   assert(rot13("Hello") == "Uryyb", "rot13 Hello")
+   assert(rot13("Uryyb") == "Hello", "rot13 inverse")
+   assert(rot_alphabet("Z9", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 1) == "0A", "custom alphabet rot")
+   def hx = text_to_hex("AB")
+   assert(hx == "4142", "text to hex")
+   def back3 = hex_to_text("4142")
+   assert(back3 == "AB", "hex to text")
+   assert(hex_to_text("0x41 42") == "AB", "hex to text with prefix/spaces")
+   def hb = hex_to_byte_list("4142")
+   assert(hb.get(0) == 65 && hb.get(1) == 66, "hex to byte list")
+   def hb2 = hex_to_byte_list("0X41 42")
+   assert(hb2.get(0) == 65 && hb2.get(1) == 66, "hex to byte list with uppercase prefix")
+   def bts = bytes_to_bits([65])
+   assert(bts.get(0) == 0, "65 MSB = 0")
+   assert(bts.get(7) == 1, "65 LSB = 1")
+   assert(byte_list_to_ascii([65, 66]) == "AB", "byte list to ascii")
+   assert(ascii_contains([65, 66, 67], "BC"), "ascii contains")
+   assert(
+      extract_ascii_span([120, 66, 69, 71, 73, 78, 32, 75, 69, 89, 32, 69, 78, 68, 121], "BEGIN ", " END") ==
+      "BEGIN KEY END",
+      "extract ascii span"
+   )
+   assert(byte_list_to_ascii(xor_with_repeating_key([65, 66], [1])) == "@C", "xor repeating key")
+   assert(base91_pair_decode("!!").get(0) == 0, "base91 pair decode !! -> 0")
+   def pt0 = [0, 1, 2, 250, 255]
+   mut ct0 = []
+   mut i = 0
+   while i < pt0.len {
+      ct0 = ct0.append((7 * pt0.get(i) + 13) & 255)
+      i += 1
+   }
+   assert(affine_bytes_decrypt(ct0, 7, 13) == pt0, "affine bytes decrypt")
+   def raw = bytes(3)
+   bytes_set(raw, 0, 65)
+   bytes_set(raw, 1, 66)
+   bytes_set(raw, 2, 67)
+   assert(raw.b64 == [65, 66, 67].b64, "bytes b64 method")
+   assert(raw.b58 == [65, 66, 67].b58, "bytes b58 method")
+   assert(raw.b58check == [65, 66, 67].b58check, "bytes b58check method")
+   assert(raw.bits == [65, 66, 67].bits, "bytes bits method")
+   assert(raw.ascii == "ABC", "bytes ascii method")
+   assert(raw.xor_key([1]).ascii == "@CB", "bytes xor_key method")
+   print("✓ std.math.crypto.encoding.encoding self-test passed")
 }

@@ -243,3 +243,13 @@ fn factor_multiple_base_inversion_gcd(any n, int max_pow=5) any {
    }
    nil
 }
+
+#main {
+fn pair_ok(any xs) bool {
+   xs != nil && xs.get(0) == Z(7) && xs.get(1) == Z(13)
+}
+assert(pair_ok(factor_fibonacci_gcd(Z(91), 12)), "Fibonacci gcd finds 7*13")
+assert(pair_ok(factor_lucas_gcd(Z(91), 12)), "Lucas gcd finds 7*13")
+assert(pair_ok(factor_mersenne_pm1_gcd(Z(91))), "Mersenne +/-1 gcd finds 7*13")
+    print("✓ math.crypto.factorization.sequence_gcd self-test passed")
+}

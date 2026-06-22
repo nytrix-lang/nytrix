@@ -18,7 +18,7 @@ module std.math.nt(Z, ZZ, Int, Integer, nt_bigint, is_bigint, bigint, bigint_fro
    crt, CRT, crt2, garner,
    extended_gcd, bezout_coefficients,
    solve_linear_congruence,
-   tonelli_shanks, cipolla, mod_nth_roots_prime,
+   tonelli_shanks, cipolla, mod_nth_roots_prime, nthroot_mod,
    mod_quadratic_roots_prime,
    continued_fraction, cf_convergents,
    rational_reconstruction, mqrr_rational_reconstruction,
@@ -374,6 +374,13 @@ fn mod_nth_roots_prime(any m, any exp, any p) list {
       i += 1
    }
    roots
+}
+
+fn nthroot_mod(any a, any n, any p, bool all_roots=false) any {
+   "SymPy-style alias for roots x^n = a mod prime p.
+   If all_roots is true, returns a list. Otherwise returns one root or nil."
+   def roots = mod_nth_roots_prime(a, n, p)
+   all_roots ? roots : (roots.len == 0 ? nil : roots.get(0))
 }
 
 fn inverse_mod(any a, any m) bigint {
@@ -1590,4 +1597,74 @@ fn is_square(any n) int {
 fn is_perfect_square(any n) bool {
    "Returns true if n is a perfect square."
    is_square(n) == 1
+}
+
+#main {
+   assert(is_prime(3), "is_prime")
+   assert(next_prime(14) == 17, "next_prime")
+   assert(factor(60) == [[2, 2], [3, 1], [5, 1]], "factor")
+    assert(euler_phi(10) == 4, "euler_phi")
+    assert(Z("0xff") == Z(255), "hex string constructor")
+    assert(Z(21) + Z(13) == Z(34), "bigint add operator")
+    assert(gcd(48, 18) == Z(6), "gcd")
+    assert(lcm(12, 18) == Z(36), "lcm")
+    assert(xgcd(30, 12).get(0) == Z(6), "xgcd")
+     assert(mod(Z(-3), 11) == Z(8), "mod positive representative")
+    assert(power_mod(2, 10, 1000) == Z(24), "power_mod")
+    assert(power_mod_montgomery(2, 10, 17) == Z(4), "montgomery pow")
+    assert(power_mod_montgomery(2, 10, 1000) == Z(24), "montgomery even fallback")
+    def mont = _mont_init(Z(11))
+    assert(mont.get(0) == Z(11), "mont context modulus")
+    def ctx = mod_ctx_new(11)
+    assert(mod_kernel_mul(7, 9, ctx) == Z(8), "mod context mul")
+    assert(mod_kernel_pow(2, 10, ctx) == Z(1), "mod context pow")
+    assert(mod_kernel_inv(3, ctx) == Z(4), "mod context inv")
+    assert(_barrett_reduce(63, _barrett_init(11)) == Z(8), "barrett reduce")
+    assert(is_prime(97), "is_prime")
+    assert(next_prime(97) == Z(101), "next_prime")
+    assert(prev_prime(97) == Z(89), "prev_prime")
+    assert(prime(5) == Z(13), "prime index")
+    assert(prime_range(10, 20) == [Z(11), Z(13), Z(17), Z(19)], "prime_range")
+    def facs = factor(60)
+    assert(_factor_product(facs) == Z(60), "factor product")
+    assert(divisors(12).len == 6, "divisors count")
+    assert(euler_phi(10) == Z(4), "euler_phi")
+    assert(carmichael_lambda(8) == Z(2), "carmichael")
+    assert(moebius(30) == -1, "moebius")
+    assert(legendre(4, 7) == 1, "legendre")
+    assert(jacobi(5, 9) == 1, "jacobi")
+    assert(crt([2, 3], [3, 5]) == Z(8), "crt")
+    assert(CRT([2, 3], [3, 5]) == Z(8), "CRT alias")
+    assert(crt2(2, 3, 3, 5) == 8, "crt2")
+    assert(garner([2, 3], [3, 5]) == Z(8), "garner")
+     def roots = mod_nth_roots_prime(4, 2, 7)
+     assert(roots == [2, 5], "mod_nth_roots_prime")
+     def qroots = mod_quadratic_roots_prime(1, 0, -4, 17)
+     assert(qroots == [2, 15], "quadratic roots")
+     def sr = tonelli_shanks(4, 17)
+     assert(power_mod(sr, 2, 17) == Z(4), "tonelli_shanks")
+     def cr = cipolla(4, 17)
+     assert(power_mod(cr, 2, 17) == Z(4), "cipolla")
+     assert(continued_fraction(415, 93) == [4, 2, 6, 7], "continued_fraction")
+     assert(is_smooth(72, 3), "is_smooth")
+    assert(smooth_part(840, 5) == Z(120), "smooth_part")
+    def bs = bigint_to_bytes(Z(0x01020304))
+    assert(bs == [1, 2, 3, 4], "bigint_to_bytes")
+    assert(bytes_to_bigint(bs) == Z(0x01020304), "bytes_to_bigint")
+    assert(bytes_to_long(bs) == Z(0x01020304), "bytes_to_long")
+    assert(long_to_bytes(0x01020304) == bs, "long_to_bytes")
+    assert(xor_bytes([1, 2, 3], [1, 1, 1]) == [0, 3, 2], "xor_bytes")
+    assert(bytes_to_str(str_to_bytes("ny")) == "ny", "string bytes")
+    assert(int_to_hex(255) == "0xff", "int_to_hex")
+    assert(bigint_to_hex(Z(255)) == "ff", "bigint_to_hex")
+    assert(hex_to_int("0xff") == 255, "hex_to_int")
+    assert(hex_to_bigint("ff") == Z(255), "hex_to_bigint")
+    assert(bit_length(Z(255)) == 8, "bit_length")
+    assert(is_square(144) == 1, "is_square")
+    assert(is_perfect_square(144), "is_perfect_square")
+    assert(nth_root(27, 3) == Z(3), "nth_root")
+     assert(power_mod(tonelli_shanks(Z(4), 17), 2, 17) == Z(4), "bigint impl sqrt_mod")
+     assert(power_mod(tonelli_shanks(4, 17), 2, 17) == Z(4), "int impl sqrt_mod")
+     assert(hex_to_bigint("ff") == Z(255), "str impl hex_bigint")
+    print("✓ std.math.nt self-test passed")
 }

@@ -115,3 +115,12 @@ fn generate_pseudoprime(list bases, any k2=nil, any k3=nil, int min_bit_length=0
    }
    nil
 }
+
+#main {
+   def r = generate_pseudoprime([Z(2)], Z(3), Z(5), 0)
+   if r != nil {
+      assert(r.len == 4, "generate_pseudoprime tuple size")
+      assert(r.get(0) == r.get(1) * r.get(2) * r.get(3), "generate_pseudoprime product")
+   }
+   print("✓ std.math.crypto.number.pseudoprimes self-test passed")
+}

@@ -10,6 +10,9 @@ use std.core
 use std.math.bin as bin
 use std.math.nt
 use std.core.str
+use std.math.crypto.encoding.xor
+use std.math.crypto.encoding.radix
+use std.math.crypto.encoding.uu
 
 layout shape Asn1Node derive(load) pack(8){
    int tag = 0,
@@ -185,4 +188,32 @@ fn pem_decode(str s) list {
    def b64_s = builder_to_str(b64)
    builder_free(b64)
    base64_decode(b64_s)
+}
+
+#main {
+   def data = [72, 101, 108, 108, 111]
+   def key = [0x1B]
+   def masked = xor_with_repeating_key(data, key)
+   assert(xor_with_repeating_key(masked, key) == data, "xor repeating round-trip")
+   assert(hamming_distance([255], [0]) == 8, "hamming distance")
+   assert(xor_bytes_hex("1c0111001f010100061a024b53535009181c", "686974207468652062756c6c277320657965") == "746865206b696420646f6e277420706c6179", "hex xor")
+   assert(english_score("Hello World".to_bytes) > english_score([1, 2, 3, 255]), "english score")
+   assert(crib_drag([72, 69, 76, 76, 79], [72, 69]).len == 4, "crib drag")
+   assert(digit_value(ord("B")) == 11, "digit value")
+   assert(parse_radix_int("152", 8) == 106, "parse radix")
+   assert(parse_octal_int("141") == 97, "parse octal")
+   assert(octal_chunks_to_text("101 142 143") == "Abc", "octal chunks")
+   assert(keyed_alpha_decode("152 162", "nnj", 8) == "we", "keyed alpha")
+   assert(base64_encode([65, 66, 67]) == "QUJD", "base64 encode")
+   assert(base64_decode("QUJD") == [65, 66, 67], "base64 decode")
+   assert(hex_encode([65, 66, 67]) == "414243", "hex encode")
+   assert(hex_decode("414243") == [65, 66, 67], "hex decode")
+   def nodes = asn1_parse([0x02, 0x01, 0x05])
+   assert(nodes.len == 1, "asn1 parse count")
+   assert(nodes[0].get("tag") == 0x02, "asn1 integer tag")
+   assert(asn1_get_integer(nodes[0]) == Z(5), "asn1 integer value")
+   def pem = "-----BEGIN TEST-----\nQUJD\n-----END TEST-----\n"
+   assert(pem_decode(pem) == [65, 66, 67], "pem decode")
+   assert(uu_decode_line("#06)C") == "Abc", "uu decode")
+   print("✓ std.math.crypto.encoding.encoding self-test passed")
 }

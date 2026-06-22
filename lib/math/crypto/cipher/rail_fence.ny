@@ -120,3 +120,24 @@ fn rail_fence_crack(str ciphertext) list {
    }
    results
 }
+
+#main {
+   def plain = "WEAREDISCOVEREDFLEEATONCE"
+   def cipher = rail_fence_encrypt(plain, 3)
+   assert(cipher == "WECRLTEERDSOEEFEAOCAIVDEN", "classic rail fence encrypt")
+   assert(rail_fence_decrypt(cipher, 3) == plain, "classic rail fence decrypt")
+   assert(rail_fence_encrypt("ABC", 1) == "ABC", "rails below two leaves text")
+   assert(rail_fence_decrypt("ABC", 99) == "ABC", "rails above length clamps safely")
+   def cracked = rail_fence_crack(cipher)
+   assert(cracked.len == cipher.len - 2, "rail fence crack tries all rail counts")
+   assert(cracked[1] == [3, plain], "rail fence crack includes rails three plaintext")
+   def plain2 = "OFFSET RAIL FENCE"
+   def enc = rail_fence_encrypt_offset(plain2, 4, 3)
+   assert(rail_fence_decrypt_offset(enc, 4, 3) == plain2, "rail fence offset roundtrip")
+   assert(rail_fence_encrypt_offset(plain2, 4, 0) == rail_fence_encrypt(plain2, 4), "rail fence offset zero encrypt")
+   assert(rail_fence_decrypt_offset(enc, 4, -3) == plain2, "rail fence negative offset normalizes")
+   def long = "this is a test message for rail fence cipher test"
+   def long_enc = rail_fence_encrypt_offset(long, 7, 4)
+    assert(rail_fence_decrypt_offset(long_enc, 7, 4) == long, "rail fence offset roundtrip long")
+    print("✓ std.math.crypto.cipher.rail_fence self-test passed")
+}

@@ -1021,3 +1021,18 @@ fn nfs_factor(any n, int rational_bound=64, int algebraic_bound=64, int sieve_ra
    "Return one factor from nfs_factor_report, or nil."
    nfs_factor_report(n, rational_bound, algebraic_bound, sieve_radius, degree, b_bound).get("factor", nil)
 }
+
+#main {
+   def poly = nfs_polynomial_report(Z(8051))
+   assert(poly != nil, "nfs polynomial report")
+   assert(poly.get("valid", false), "polynomial valid for 8051")
+   def fb = nfs_factor_base_report(16, 16)
+   assert(fb != nil, "nfs factor base report")
+   assert(fb.get("rational_base_size", 0) > 0, "non-empty rational base")
+   def trial = nfs_trial_relation_report(Z(8051), 16, 8)
+   assert(trial != nil, "nfs trial relation report")
+   assert(nfs_line_relation_report(Z(8051), 16, 16, 8) != nil, "nfs line relation report")
+   def snfs = snfs_shape_report(Z(8051))
+   assert(snfs != nil, "snfs shape report")
+   print("✓ math.crypto.factorization.nfs self-test passed")
+}

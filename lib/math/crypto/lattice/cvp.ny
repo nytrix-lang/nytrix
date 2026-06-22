@@ -3354,3 +3354,39 @@ fn mod_arc_solve_range(any A, any M, any L, any R, any S, any E, int max_solutio
    }
    ans
 }
+
+#main {
+   def near_cvp = cvp([[1, 0], [0, 1]], [Z(3), Z(-2)], false)
+   assert(near_cvp.len == 2 && near_cvp[0] == Z(3) && near_cvp[1] == Z(-2), "cvp identity basis keeps exact target")
+   def near_rep = cvp_report([[1, 0], [0, 1]], [Z(3), Z(-2)], false)
+   assert(near_rep.get("ok", false) && near_rep.get("verified", false), "cvp report verifies identity nearest vector")
+   def enum_direct = cvp_enumerate_report([[3, 0], [2, 1]], [2, 1], true, 2, 10000)
+   assert(enum_direct.get("ok", false), "cvp enumerate report ok")
+   assert(enum_direct.get("verified", false), "cvp enumerate report verified")
+   assert(enum_direct.get("method", "") == "gso-bounded-enumeration", "cvp enumerate report method")
+   def babai = cvp_babai_report([[3, 0], [2, 1]], [2, 1], true)
+   assert(babai.get("ok", false), "cvp babai report ok")
+   assert(babai.get("verified", false), "cvp babai report verified")
+   def bounds = cvp_gso_bound_report([[3, 0], [2, 1]], [1, 1], true, 2)
+   assert(bounds.get("method", "") == "cvp-gso-offset-bounds", "cvp gso bound method")
+   assert(bounds.get("offset_bounds", []).len == 2, "cvp gso bound length")
+   def bounded_hit = solve_weighted_bounds([[1, 0], [0, 1]], [Z(2), Z(-3)], [Z(2), Z(-3)], Z(1), true)
+   assert(bounded_hit[3], "weighted bounded CVP exact identity bounds")
+   assert(bounded_hit[0][0] == Z(2) && bounded_hit[0][1] == Z(-3), "weighted bounded CVP returns unscaled vector")
+   def sm = solve_multi_mod_linear([[1, 1], [2, -1]], [1, 3], [11, 11], [0, 0], [11, 11])
+   assert(sm[0] == 6 && sm[1] == 4, "solve_multi_mod_linear fixture")
+   def su = solve_underconstrained_linear([[1], [1]], [5], [0, 0], [5, 5])
+   assert(is_list(su) && su.len == 2 && su[0] + su[1] == 5, "solve_underconstrained_linear fixture")
+   def eb = enum_brute([0, 0], [[1, 0], [0, 1]], [0, 0], [1, 1], 1)
+   assert(eb.len == 4, "enum_brute bounded count")
+   def arc_hits = mod_arc_solve_range(3, 17, 4, 8, 0, 10, 3)
+   assert(arc_hits.len > 0, "modular arc solver finds a bounded solution")
+   mut arc_ok = true
+   mut ai = 0
+   while ai < arc_hits.len {
+      if !mod_arc_is_inside(4, 8, 17, 3 * arc_hits[ai]) { arc_ok = false }
+      ai += 1
+   }
+   assert(arc_ok, "modular arc solver results satisfy interval")
+   print("✓ std.math.crypto.lattice.cvp self-test passed")
+}

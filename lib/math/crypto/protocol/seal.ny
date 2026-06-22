@@ -215,3 +215,13 @@ fn seal_single_byte_sub(list blob, int k) list {
    }
    out
 }
+
+#main {
+   def framed = "v1;alg=sha256-counter;nonce=00000000;payload=sealed message"
+   def key = bin.str_to_bytes("analysis-key")
+   def ct = seal_counter_xor(bin.str_to_bytes(framed), key, "sha256", "be4", "seed-counter", 0)
+   def rt = seal_counter_xor(ct, key, "sha256", "be4", "seed-counter", 0)
+   assert(bin.bytes_to_str(rt) == framed, "seal counter roundtrip")
+   assert(seal_ascii_envelope(rt, "v1;alg=", "sealed message"), "seal ascii envelope")
+   print("✓ std.math.crypto.protocol.seal self-test passed")
+}

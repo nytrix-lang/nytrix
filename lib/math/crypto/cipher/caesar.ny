@@ -100,3 +100,22 @@ fn caesar_progressive_decrypt(str text, int start_shift=0, bool step_all=false) 
    "Decrypt text encrypted by caesar_progressive_encrypt."
    _caesar_progressive_apply(text, start_shift, step_all, -1)
 }
+
+#main {
+   def msg = "Abc XyZ! 123"
+   def enc = caesar_encrypt(msg, 2)
+   assert(enc == "Cde ZaB! 123", "caesar encrypt preserves match and punctuation")
+   assert(caesar_decrypt(enc, 2) == msg, "caesar decrypt reverses encrypt")
+   assert(caesar_encrypt("Az", -1) == "Zy", "caesar negative shift wraps")
+   def all = caesar_bruteforce("B")
+   assert(all.len == 26, "caesar bruteforce returns all shifts")
+   assert(all[0] == [0, "B"], "caesar bruteforce shift zero")
+   assert(all[1] == [1, "A"], "caesar bruteforce shift one")
+   def plain = "hello world this is a test"
+   def cipher = caesar_progressive_encrypt(plain, 5, true)
+   assert(cipher == "mkstx haezs kzbm ep z ugvx", "progressive caesar step-all encrypt")
+   assert(caesar_progressive_decrypt(cipher, 5, true) == plain, "progressive caesar step-all decrypt")
+   assert(caesar_progressive_encrypt("abc-xyz", 0, false) == "ace-ace", "progressive caesar alpha-only")
+   assert(caesar_progressive_decrypt("ace-ace", 0, false) == "abc-xyz", "progressive caesar alpha-only decrypt")
+   print("✓ std.math.crypto.cipher.caesar self-test passed")
+}
