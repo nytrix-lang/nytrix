@@ -293,3 +293,41 @@ fn solve_dlp(any g, any h, any p, any order=nil) list {
    if x2 != -1 { return [x2, "brute"] }
    [-1, "none"]
 }
+
+#main {
+   def p, g = Z(23), Z(5)
+   def h1 = power_mod(g, Z(6), p)
+   def brute = dlp_brute_force(g, h1, p, Z(22))
+   assert(brute == Z(6), "brute-force exact solution")
+   assert(power_mod(g, brute, p) == h1, "brute-force verifies")
+   def bsgs = baby_step_giant_step(g, h1, p, Z(22))
+   assert(bsgs == Z(6), "bsgs exact solution")
+   assert(power_mod(g, bsgs, p) == h1, "bsgs verifies")
+   def solved = solve_dlp(g, h1, p, Z(22))
+   assert(solved != nil, "solve_dlp returns result")
+   assert(solved[0] == Z(6), "solve_dlp exact solution")
+   assert(solved[1] == "bsgs", "solve_dlp method")
+   def h2 = power_mod(Z(5), Z(9), Z(23))
+   def ph = pohlig_hellman(Z(5), h2, Z(23), [[2, 1], [11, 1]])
+   assert(ph == Z(9), "pohlig-hellman exact solution")
+   assert(power_mod(Z(5), ph, Z(23)) == h2, "pohlig-hellman verifies")
+   assert(multiplicative_order_from_factors(Z(2), Z(23), [[2, 1], [11, 1]]) == Z(11), "multiplicative order from factors")
+   assert(multiplicative_order_factorization(Z(2), Z(23), [[2, 1], [11, 1]]) == [[Z(11), 1]], "multiplicative order factorization")
+   def p5, g5 = 5, 2
+   def h5 = power_mod(g5, 3, p5)
+   def ph_pp = pohlig_hellman(g5, h5, p5, [[2, 2]])
+   assert(ph_pp == 3, "pohlig-hellman prime power")
+   assert(power_mod(g5, ph_pp, p5) == h5, "pohlig-hellman prime power verifies")
+   def pp = pohlig_hellman_prime_power(g5, h5, p5, 2, 2)
+   assert(pp == 3, "pohlig_hellman_prime_power exact")
+   def p_big, g_big = Z(10007), Z(25)
+   def h_big = power_mod(g_big, Z(1234), p_big)
+   def x_big = pohlig_hellman(g_big, h_big, p_big, [[5003, 1]])
+   assert(x_big == Z(1234), "pohlig-hellman bsgs digit")
+   assert(pohlig_hellman_recombine([1, 2], [3, 5]) == 7, "pohlig_hellman_recombine")
+   def rho_h = power_mod(Z(2), Z(77), Z(383))
+   def rho = pollard_rho_dlp(Z(2), rho_h, Z(383), Z(191))
+   assert(rho == Z(77), "pollard rho exact solution")
+   assert(power_mod(Z(2), rho, Z(383)) == rho_h, "pollard rho verifies")
+   print("✓ std.math.crypto.dlp.dlp self-test passed")
+}

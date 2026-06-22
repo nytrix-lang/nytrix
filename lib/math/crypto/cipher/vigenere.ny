@@ -432,7 +432,13 @@ fn vigenere_crack(str ciphertext) list {
 }
 
 #main {
-   def f64 ic = index_of_coincidence("ABAB")
-   assert(ic > 0.33 && ic < 0.34, "index_of_coincidence uses floating division")
-   print("✓ std.math.crypto.cipher.vigenere self-test passed")
+    def f64 ic = index_of_coincidence("ABAB")
+    assert(ic > 0.33 && ic < 0.34, "index_of_coincidence uses floating division")
+    assert(vigenere_encrypt("ATTACK AT DAWN", "LEMON") == "LXFOPV EF RNHR", "vigenere encrypt preserves spaced uppercase text")
+    assert(vigenere_decrypt("LXFOPV EF RNHR", "LEMON") == "ATTACK AT DAWN", "vigenere decrypt reverses uppercase text")
+    assert(vigenere_encrypt("attack", "LEMON") == "LXFOPV", "lowercase plaintext still encrypts to uppercase")
+    assert(vigenere_decrypt("lxfopv", "LEMON") == "attack", "lowercase ciphertext still decrypts to lowercase")
+    def lens = vigenere_guess_key_lengths("LXFOPV EF RNHR", 8)
+    assert(lens.len > 0, "key length guess returns candidates")
+    print("✓ std.math.crypto.cipher.vigenere self-test passed")
 }

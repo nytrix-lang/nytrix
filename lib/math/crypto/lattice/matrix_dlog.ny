@@ -42,3 +42,10 @@ fn matrix_dlog_brute(any A, any B, any p, any order) any {
    }
    nil
 }
+
+#main {
+   def A = matrix.Matrix([[1, 1], [0, 1]])
+   def B = matrix_pow_mod(A, 3, 5)
+   assert(matrix_dlog_brute(A, B, 5, 8) == 3, "matrix dlog brute")
+   print("✓ std.math.crypto.lattice.matrix_dlog self-test passed")
+}

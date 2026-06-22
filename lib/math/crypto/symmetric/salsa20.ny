@@ -105,3 +105,33 @@ fn salsa20_decrypt(list key, list nonce, int counter, list ciphertext) list {
    "Decrypt with Salsa20; encryption and decryption are identical."
    salsa20_encrypt(key, nonce, counter, ciphertext)
 }
+
+#main {
+   mut key = list(32)
+   mut i = 0
+   while i < 32 {
+      key[i] = 0
+      i += 1
+   }
+   mut nonce = list(8)
+   i = 0
+   while i < 8 {
+      nonce[i] = 0
+      i += 1
+   }
+   mut zeros = list(16)
+   i = 0
+   while i < 16 {
+      zeros[i] = 0
+      i += 1
+   }
+   assert(
+      salsa20_encrypt(key, nonce, 0, zeros) == [154, 151, 246, 91, 155, 76, 114, 27, 150, 10, 103, 33, 69, 252, 168, 212],
+      "zero key stream prefix"
+   )
+   def msg = "trim salsa20 loop".to_bytes
+   def enc = salsa20_encrypt(key, nonce, 0, msg)
+   assert(enc != msg, "ciphertext differs")
+   assert(salsa20_decrypt(key, nonce, 0, enc) == msg, "roundtrip")
+   print("✓ std.math.crypto.symmetric.salsa20 self-test passed")
+}
