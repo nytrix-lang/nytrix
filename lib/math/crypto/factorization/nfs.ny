@@ -361,7 +361,7 @@ fn nfs_lattice_sieve_report(any n, int rational_bound=64, int algebraic_bound=64
                               "rational_exponents": rexps, "algebraic_exponents": aexps,
                               "parity": _nfs_relation_parity(rat, rexps, alg, aexps), "smooth": true,
                               "segment_start_b": b0, "segment_end_b": b1 - 1,
-                        })
+                           })
                         seg_relations += 1
                         if target_relations > 0 && relations.len >= target_relations { stopped_early = true }
                      }
@@ -377,7 +377,7 @@ fn nfs_lattice_sieve_report(any n, int rational_bound=64, int algebraic_bound=64
             "candidates": seg_candidates, "coprime_pairs": seg_coprime,
             "rational_smooth": seg_rational_smooth, "algebraic_smooth": seg_algebraic_smooth,
             "relations": seg_relations,
-      })
+         })
       b0 = b1
    }
    {
@@ -861,7 +861,7 @@ fn nfs_qadic_sqrt_report(list product_poly, list monic_poly, int min_q=3, int it
          "success": lift.get("verified_square_mod_final_modulus", false),
          "status": lift.get("verified_square_mod_final_modulus", false) ? "verified-square" : "unverified-square",
          "elapsed_ms": _nfs_elapsed_ms(t0),
-   })
+      })
 }
 
 fn nfs_algebraic_product_report(any n, list relations, any polynomial=nil, list dependency=[], bool include_qadic=true) dict {
@@ -924,7 +924,7 @@ fn _nfs_try_square_root_candidate(any n, list relations, list dependency, list r
    out.merge({
          "rational_sqrt_mod_n": rroot, "algebraic_norm_sqrt_mod_n": aroot,
          "gcd_minus": g1, "gcd_plus": g2, "factor": factor, "success": factor != nil,
-   })
+      })
 }
 
 fn nfs_dependency_report(any n, int rational_bound=64, int algebraic_bound=64, int sieve_radius=32, int degree=0, int b_bound=1) dict {
@@ -989,7 +989,7 @@ fn nfs_square_root_report(any n, int rational_bound=64, int algebraic_bound=64, 
                      "algebraic_qadic_sqrt_mod_n": qroot,
                      "qadic_gcd_minus": g1q, "qadic_gcd_plus": g2q,
                      "qadic_factor": qfactor,
-               })
+                  })
                if factor == nil && qfactor != nil { factor = qfactor }
             }
          }

@@ -24,7 +24,7 @@ fn franklin_reiter_attack(any n, int e, any c1, any c2, list f1_coeffs, list f2_
    def g = poly_gcd_mod(g1, g2, n)
    if g.len == 2 {
       def a, b = g.get(1), g.get(0)
-      return((0 - b) * inverse_mod(a, n)) % n
+      return ((0 - b) * inverse_mod(a, n)) % n
    }
    nil
 }

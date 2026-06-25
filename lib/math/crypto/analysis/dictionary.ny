@@ -690,7 +690,7 @@ fn _crack_many_result(list targets, dict found, int attempts, int word_attempts,
       i += 1
    }
    {"found": found_count == targets.len, "found_count": found_count, "passwords": passwords, "by_hash": found,
-   "attempts": attempts, "word_attempts": word_attempts, "wordlist": wordlist_path}
+      "attempts": attempts, "word_attempts": word_attempts, "wordlist": wordlist_path}
 }
 
 fn dictionary_crack_many(list targets, list words, fnptr verify_fn, str wordlist_path="") dict {
@@ -870,7 +870,7 @@ fn analysis_dictionary_crack_many_with_variants(list targets, fnptr verify_fn, i
    def words = load_analysis_words_limit(max_words, lang, min_len, max_len)
    dictionary_crack_many_with_variants(targets, words, verify_fn, max_variants).merge({
          "wordlist": analysis_wordlist_path(lang),
-   })
+      })
 }
 
 fn unix_crypt_available() bool {

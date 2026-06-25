@@ -6,123 +6,46 @@
 ;; References:
 ;; - std.math.crypto.symmetric
 ;; - std.math.crypto
-module std.math.crypto.symmetric.aes(aes_encrypt_block, aes_decrypt_block, aes_init, aes_encrypt_ecb, aes_decrypt_ecb, aes_encrypt_cbc, aes_decrypt_cbc, aes_encrypt_ctr, aes_sbox, aes_inv_sbox, aes_matrix_to_bytes, aes_add_round_key_matrix, aes_sub_bytes_matrix, aes_inv_shift_rows_matrix, aes_inv_mix_columns_matrix)
+module std.math.crypto.symmetric.aes(aes_encrypt_block, aes_decrypt_block, aes_init,
+   aes_encrypt_ecb, aes_decrypt_ecb, aes_encrypt_cbc, aes_decrypt_cbc, aes_encrypt_ctr,
+   aes_sbox, aes_inv_sbox, aes_matrix_to_bytes, aes_add_round_key_matrix,
+   aes_sub_bytes_matrix, aes_inv_shift_rows_matrix, aes_inv_mix_columns_matrix)
 use std.core
 use std.math.bin (unpack_be32)
 use std.math.simmd as simmd
 
 fn _build_aes_sbox() list {
-   mut sbox = list()
-   sbox = sbox.append(0x63) sbox = sbox.append(0x7c) sbox = sbox.append(0x77) sbox = sbox.append(0x7b) sbox = sbox.append(0xf2)
-   sbox = sbox.append(0x6b) sbox = sbox.append(0x6f) sbox = sbox.append(0xc5) sbox = sbox.append(0x30) sbox = sbox.append(0x01)
-   sbox = sbox.append(0x67) sbox = sbox.append(0x2b) sbox = sbox.append(0xfe) sbox = sbox.append(0xd7) sbox = sbox.append(0xab)
-   sbox = sbox.append(0x76) sbox = sbox.append(0xca) sbox = sbox.append(0x82) sbox = sbox.append(0xc9) sbox = sbox.append(0x7d)
-   sbox = sbox.append(0xfa) sbox = sbox.append(0x59) sbox = sbox.append(0x47) sbox = sbox.append(0xf0) sbox = sbox.append(0xad)
-   sbox = sbox.append(0xd4) sbox = sbox.append(0xa2) sbox = sbox.append(0xaf) sbox = sbox.append(0x9c) sbox = sbox.append(0xa4)
-   sbox = sbox.append(0x72) sbox = sbox.append(0xc0) sbox = sbox.append(0xb7) sbox = sbox.append(0xfd) sbox = sbox.append(0x93)
-   sbox = sbox.append(0x26) sbox = sbox.append(0x36) sbox = sbox.append(0x3f) sbox = sbox.append(0xf7) sbox = sbox.append(0xcc)
-   sbox = sbox.append(0x34) sbox = sbox.append(0xa5) sbox = sbox.append(0xe5) sbox = sbox.append(0xf1) sbox = sbox.append(0x71)
-   sbox = sbox.append(0xd8) sbox = sbox.append(0x31) sbox = sbox.append(0x15) sbox = sbox.append(0x04) sbox = sbox.append(0xc7)
-   sbox = sbox.append(0x23) sbox = sbox.append(0xc3) sbox = sbox.append(0x18) sbox = sbox.append(0x96) sbox = sbox.append(0x05)
-   sbox = sbox.append(0x9a) sbox = sbox.append(0x07) sbox = sbox.append(0x12) sbox = sbox.append(0x80) sbox = sbox.append(0xe2)
-   sbox = sbox.append(0xeb) sbox = sbox.append(0x27) sbox = sbox.append(0xb2) sbox = sbox.append(0x75) sbox = sbox.append(0x09)
-   sbox = sbox.append(0x83) sbox = sbox.append(0x2c) sbox = sbox.append(0x1a) sbox = sbox.append(0x1b) sbox = sbox.append(0x6e)
-   sbox = sbox.append(0x5a) sbox = sbox.append(0xa0) sbox = sbox.append(0x52) sbox = sbox.append(0x3b) sbox = sbox.append(0xd6)
-   sbox = sbox.append(0xb3) sbox = sbox.append(0x29) sbox = sbox.append(0xe3) sbox = sbox.append(0x2f) sbox = sbox.append(0x84)
-   sbox = sbox.append(0x53) sbox = sbox.append(0xd1) sbox = sbox.append(0x00) sbox = sbox.append(0xed) sbox = sbox.append(0x20)
-   sbox = sbox.append(0xfc) sbox = sbox.append(0xb1) sbox = sbox.append(0x5b) sbox = sbox.append(0x6a) sbox = sbox.append(0xcb)
-   sbox = sbox.append(0xbe) sbox = sbox.append(0x39) sbox = sbox.append(0x4a) sbox = sbox.append(0x4c) sbox = sbox.append(0x58)
-   sbox = sbox.append(0xcf) sbox = sbox.append(0xd0) sbox = sbox.append(0xef) sbox = sbox.append(0xaa) sbox = sbox.append(0xfb)
-   sbox = sbox.append(0x43) sbox = sbox.append(0x4d) sbox = sbox.append(0x33) sbox = sbox.append(0x85) sbox = sbox.append(0x45)
-   sbox = sbox.append(0xf9) sbox = sbox.append(0x02) sbox = sbox.append(0x7f) sbox = sbox.append(0x50) sbox = sbox.append(0x3c)
-   sbox = sbox.append(0x9f) sbox = sbox.append(0xa8) sbox = sbox.append(0x51) sbox = sbox.append(0xa3) sbox = sbox.append(0x40)
-   sbox = sbox.append(0x8f) sbox = sbox.append(0x92) sbox = sbox.append(0x9d) sbox = sbox.append(0x38) sbox = sbox.append(0xf5)
-   sbox = sbox.append(0xbc) sbox = sbox.append(0xb6) sbox = sbox.append(0xda) sbox = sbox.append(0x21) sbox = sbox.append(0x10)
-   sbox = sbox.append(0xff) sbox = sbox.append(0xf3) sbox = sbox.append(0xd2) sbox = sbox.append(0xcd) sbox = sbox.append(0x0c)
-   sbox = sbox.append(0x13) sbox = sbox.append(0xec) sbox = sbox.append(0x5f) sbox = sbox.append(0x97) sbox = sbox.append(0x44)
-   sbox = sbox.append(0x17) sbox = sbox.append(0xc4) sbox = sbox.append(0xa7) sbox = sbox.append(0x7e) sbox = sbox.append(0x3d)
-   sbox = sbox.append(0x64) sbox = sbox.append(0x5d) sbox = sbox.append(0x19) sbox = sbox.append(0x73) sbox = sbox.append(0x60)
-   sbox = sbox.append(0x81) sbox = sbox.append(0x4f) sbox = sbox.append(0xdc) sbox = sbox.append(0x22) sbox = sbox.append(0x2a)
-   sbox = sbox.append(0x90) sbox = sbox.append(0x88) sbox = sbox.append(0x46) sbox = sbox.append(0xee) sbox = sbox.append(0xb8)
-   sbox = sbox.append(0x14) sbox = sbox.append(0xde) sbox = sbox.append(0x5e) sbox = sbox.append(0x0b) sbox = sbox.append(0xdb)
-   sbox = sbox.append(0xe0) sbox = sbox.append(0x32) sbox = sbox.append(0x3a) sbox = sbox.append(0x0a) sbox = sbox.append(0x49)
-   sbox = sbox.append(0x06) sbox = sbox.append(0x24) sbox = sbox.append(0x5c) sbox = sbox.append(0xc2) sbox = sbox.append(0xd3)
-   sbox = sbox.append(0xac) sbox = sbox.append(0x62) sbox = sbox.append(0x91) sbox = sbox.append(0x95) sbox = sbox.append(0xe4)
-   sbox = sbox.append(0x79) sbox = sbox.append(0xe7) sbox = sbox.append(0xc8) sbox = sbox.append(0x37) sbox = sbox.append(0x6d)
-   sbox = sbox.append(0x8d) sbox = sbox.append(0xd5) sbox = sbox.append(0x4e) sbox = sbox.append(0xa9) sbox = sbox.append(0x6c)
-   sbox = sbox.append(0x56) sbox = sbox.append(0xf4) sbox = sbox.append(0xea) sbox = sbox.append(0x65) sbox = sbox.append(0x7a)
-   sbox = sbox.append(0xae) sbox = sbox.append(0x08) sbox = sbox.append(0xba) sbox = sbox.append(0x78) sbox = sbox.append(0x25)
-   sbox = sbox.append(0x2e) sbox = sbox.append(0x1c) sbox = sbox.append(0xa6) sbox = sbox.append(0xb4) sbox = sbox.append(0xc6)
-   sbox = sbox.append(0xe8) sbox = sbox.append(0xdd) sbox = sbox.append(0x74) sbox = sbox.append(0x1f) sbox = sbox.append(0x4b)
-   sbox = sbox.append(0xbd) sbox = sbox.append(0x8b) sbox = sbox.append(0x8a) sbox = sbox.append(0x70) sbox = sbox.append(0x3e)
-   sbox = sbox.append(0xb5) sbox = sbox.append(0x66) sbox = sbox.append(0x48) sbox = sbox.append(0x03) sbox = sbox.append(0xf6)
-   sbox = sbox.append(0x0e) sbox = sbox.append(0x61) sbox = sbox.append(0x35) sbox = sbox.append(0x57) sbox = sbox.append(0xb9)
-   sbox = sbox.append(0x86) sbox = sbox.append(0xc1) sbox = sbox.append(0x1d) sbox = sbox.append(0x9e) sbox = sbox.append(0xe1)
-   sbox = sbox.append(0xf8) sbox = sbox.append(0x98) sbox = sbox.append(0x11) sbox = sbox.append(0x69) sbox = sbox.append(0xd9)
-   sbox = sbox.append(0x8e) sbox = sbox.append(0x94) sbox = sbox.append(0x9b) sbox = sbox.append(0x1e) sbox = sbox.append(0x87)
-   sbox = sbox.append(0xe9) sbox = sbox.append(0xce) sbox = sbox.append(0x55) sbox = sbox.append(0x28) sbox = sbox.append(0xdf)
-   sbox = sbox.append(0x8c) sbox = sbox.append(0xa1) sbox = sbox.append(0x89) sbox = sbox.append(0x0d) sbox = sbox.append(0xbf)
-   sbox = sbox.append(0xe6) sbox = sbox.append(0x42) sbox = sbox.append(0x68) sbox = sbox.append(0x41) sbox = sbox.append(0x99)
-   sbox = sbox.append(0x2d) sbox = sbox.append(0x0f) sbox = sbox.append(0xb0) sbox = sbox.append(0x54) sbox = sbox.append(0xbb)
-   sbox = sbox.append(0x16) sbox
+   [
+      0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+      0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+      0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+      0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+      0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+      0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+      0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+      0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+      0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+      0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+      0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+      0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+      0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+      0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+      0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+      0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
+   ]
 }
 
 def AES_SBOX = _build_aes_sbox()
 
 fn _build_aes_inv_sbox() list {
-   mut sbox = list()
-   sbox = sbox.append(0x52) sbox = sbox.append(0x09) sbox = sbox.append(0x6a) sbox = sbox.append(0xd5) sbox = sbox.append(0x30)
-   sbox = sbox.append(0x36) sbox = sbox.append(0xa5) sbox = sbox.append(0x38) sbox = sbox.append(0xbf) sbox = sbox.append(0x40)
-   sbox = sbox.append(0xa3) sbox = sbox.append(0x9e) sbox = sbox.append(0x81) sbox = sbox.append(0xf3) sbox = sbox.append(0xd7)
-   sbox = sbox.append(0xfb) sbox = sbox.append(0x7c) sbox = sbox.append(0xe3) sbox = sbox.append(0x39) sbox = sbox.append(0x82)
-   sbox = sbox.append(0x9b) sbox = sbox.append(0x2f) sbox = sbox.append(0xff) sbox = sbox.append(0x87) sbox = sbox.append(0x34)
-   sbox = sbox.append(0x8e) sbox = sbox.append(0x43) sbox = sbox.append(0x44) sbox = sbox.append(0xc4) sbox = sbox.append(0xde)
-   sbox = sbox.append(0xe9) sbox = sbox.append(0xcb) sbox = sbox.append(0x54) sbox = sbox.append(0x7b) sbox = sbox.append(0x94)
-   sbox = sbox.append(0x32) sbox = sbox.append(0xa6) sbox = sbox.append(0xc2) sbox = sbox.append(0x23) sbox = sbox.append(0x3d)
-   sbox = sbox.append(0xee) sbox = sbox.append(0x4c) sbox = sbox.append(0x95) sbox = sbox.append(0x0b) sbox = sbox.append(0x42)
-   sbox = sbox.append(0xfa) sbox = sbox.append(0xc3) sbox = sbox.append(0x4e) sbox = sbox.append(0x08) sbox = sbox.append(0x2e)
-   sbox = sbox.append(0xa1) sbox = sbox.append(0x66) sbox = sbox.append(0x28) sbox = sbox.append(0xd9) sbox = sbox.append(0x24)
-   sbox = sbox.append(0xb2) sbox = sbox.append(0x76) sbox = sbox.append(0x5b) sbox = sbox.append(0xa2) sbox = sbox.append(0x49)
-   sbox = sbox.append(0x6d) sbox = sbox.append(0x8b) sbox = sbox.append(0xd1) sbox = sbox.append(0x25) sbox = sbox.append(0x72)
-   sbox = sbox.append(0xf8) sbox = sbox.append(0xf6) sbox = sbox.append(0x64) sbox = sbox.append(0x86) sbox = sbox.append(0x68)
-   sbox = sbox.append(0x98) sbox = sbox.append(0x16) sbox = sbox.append(0xd4) sbox = sbox.append(0xa4) sbox = sbox.append(0x5c)
-   sbox = sbox.append(0xcc) sbox = sbox.append(0x5d) sbox = sbox.append(0x65) sbox = sbox.append(0xb6) sbox = sbox.append(0x92)
-   sbox = sbox.append(0x6c) sbox = sbox.append(0x70) sbox = sbox.append(0x48) sbox = sbox.append(0x50) sbox = sbox.append(0xfd)
-   sbox = sbox.append(0xed) sbox = sbox.append(0xb9) sbox = sbox.append(0xda) sbox = sbox.append(0x5e) sbox = sbox.append(0x15)
-   sbox = sbox.append(0x46) sbox = sbox.append(0x57) sbox = sbox.append(0xa7) sbox = sbox.append(0x8d) sbox = sbox.append(0x9d)
-   sbox = sbox.append(0x84) sbox = sbox.append(0x90) sbox = sbox.append(0xd8) sbox = sbox.append(0xab) sbox = sbox.append(0x00)
-   sbox = sbox.append(0x8c) sbox = sbox.append(0xbc) sbox = sbox.append(0xd3) sbox = sbox.append(0x0a) sbox = sbox.append(0xf7)
-   sbox = sbox.append(0xe4) sbox = sbox.append(0x58) sbox = sbox.append(0x05) sbox = sbox.append(0xb8) sbox = sbox.append(0xb3)
-   sbox = sbox.append(0x45) sbox = sbox.append(0x06) sbox = sbox.append(0xd0) sbox = sbox.append(0x2c) sbox = sbox.append(0x1e)
-   sbox = sbox.append(0x8f) sbox = sbox.append(0xca) sbox = sbox.append(0x3f) sbox = sbox.append(0x0f) sbox = sbox.append(0x02)
-   sbox = sbox.append(0xc1) sbox = sbox.append(0xaf) sbox = sbox.append(0xbd) sbox = sbox.append(0x03) sbox = sbox.append(0x01)
-   sbox = sbox.append(0x13) sbox = sbox.append(0x8a) sbox = sbox.append(0x6b) sbox = sbox.append(0x3a) sbox = sbox.append(0x91)
-   sbox = sbox.append(0x11) sbox = sbox.append(0x41) sbox = sbox.append(0x4f) sbox = sbox.append(0x67) sbox = sbox.append(0xdc)
-   sbox = sbox.append(0xea) sbox = sbox.append(0x97) sbox = sbox.append(0xf2) sbox = sbox.append(0xcf) sbox = sbox.append(0xce)
-   sbox = sbox.append(0xf0) sbox = sbox.append(0xb4) sbox = sbox.append(0xe6) sbox = sbox.append(0x73) sbox = sbox.append(0x96)
-   sbox = sbox.append(0xac) sbox = sbox.append(0x74) sbox = sbox.append(0x22) sbox = sbox.append(0xe7) sbox = sbox.append(0xad)
-   sbox = sbox.append(0x35) sbox = sbox.append(0x85) sbox = sbox.append(0xe2) sbox = sbox.append(0xf9) sbox = sbox.append(0x37)
-   sbox = sbox.append(0xe8) sbox = sbox.append(0x1c) sbox = sbox.append(0x75) sbox = sbox.append(0xdf) sbox = sbox.append(0x6e)
-   sbox = sbox.append(0x47) sbox = sbox.append(0xf1) sbox = sbox.append(0x1a) sbox = sbox.append(0x71) sbox = sbox.append(0x1d)
-   sbox = sbox.append(0x29) sbox = sbox.append(0xc5) sbox = sbox.append(0x89) sbox = sbox.append(0x6f) sbox = sbox.append(0xb7)
-   sbox = sbox.append(0x62) sbox = sbox.append(0x0e) sbox = sbox.append(0xaa) sbox = sbox.append(0x18) sbox = sbox.append(0xbe)
-   sbox = sbox.append(0x1b) sbox = sbox.append(0xfc) sbox = sbox.append(0x56) sbox = sbox.append(0x3e) sbox = sbox.append(0x4b)
-   sbox = sbox.append(0xc6) sbox = sbox.append(0xd2) sbox = sbox.append(0x79) sbox = sbox.append(0x20) sbox = sbox.append(0x9a)
-   sbox = sbox.append(0xdb) sbox = sbox.append(0xc0) sbox = sbox.append(0xfe) sbox = sbox.append(0x78) sbox = sbox.append(0xcd)
-   sbox = sbox.append(0x5a) sbox = sbox.append(0xf4) sbox = sbox.append(0x1f) sbox = sbox.append(0xdd) sbox = sbox.append(0xa8)
-   sbox = sbox.append(0x33) sbox = sbox.append(0x88) sbox = sbox.append(0x07) sbox = sbox.append(0xc7) sbox = sbox.append(0x31)
-   sbox = sbox.append(0xb1) sbox = sbox.append(0x12) sbox = sbox.append(0x10) sbox = sbox.append(0x59) sbox = sbox.append(0x27)
-   sbox = sbox.append(0x80) sbox = sbox.append(0xec) sbox = sbox.append(0x5f) sbox = sbox.append(0x60) sbox = sbox.append(0x51)
-   sbox = sbox.append(0x7f) sbox = sbox.append(0xa9) sbox = sbox.append(0x19) sbox = sbox.append(0xb5) sbox = sbox.append(0x4a)
-   sbox = sbox.append(0x0d) sbox = sbox.append(0x2d) sbox = sbox.append(0xe5) sbox = sbox.append(0x7a) sbox = sbox.append(0x9f)
-   sbox = sbox.append(0x93) sbox = sbox.append(0xc9) sbox = sbox.append(0x9c) sbox = sbox.append(0xef) sbox = sbox.append(0xa0)
-   sbox = sbox.append(0xe0) sbox = sbox.append(0x3b) sbox = sbox.append(0x4d) sbox = sbox.append(0xae) sbox = sbox.append(0x2a)
-   sbox = sbox.append(0xf5) sbox = sbox.append(0xb0) sbox = sbox.append(0xc8) sbox = sbox.append(0xeb) sbox = sbox.append(0xbb)
-   sbox = sbox.append(0x3c) sbox = sbox.append(0x83) sbox = sbox.append(0x53) sbox = sbox.append(0x99) sbox = sbox.append(0x61)
-   sbox = sbox.append(0x17) sbox = sbox.append(0x2b) sbox = sbox.append(0x04) sbox = sbox.append(0x7e) sbox = sbox.append(0xba)
-   sbox = sbox.append(0x77) sbox = sbox.append(0xd6) sbox = sbox.append(0x26) sbox = sbox.append(0xe1) sbox = sbox.append(0x69)
-   sbox = sbox.append(0x14) sbox = sbox.append(0x63) sbox = sbox.append(0x55) sbox = sbox.append(0x21) sbox = sbox.append(0x0c)
-   sbox = sbox.append(0x7d) sbox
+   mut inv = list(256)
+   __list_set_len(inv, 256)
+   mut i = 0
+   while i < 256 {
+      __store_item_fast(inv, __load_item_fast(AES_SBOX, i), i)
+      i += 1
+   }
+   inv
 }
 
 def AES_INV_SBOX = _build_aes_inv_sbox()
@@ -211,9 +134,7 @@ fn aes_inv_mix_columns_matrix(list state) list {
 }
 
 fn _build_aes_rcon() list {
-   mut rcon = list()
-   rcon = rcon.append(0x00) rcon = rcon.append(0x01) rcon = rcon.append(0x02) rcon = rcon.append(0x04) rcon = rcon.append(0x08)
-   rcon = rcon.append(0x10) rcon = rcon.append(0x20) rcon = rcon.append(0x40) rcon = rcon.append(0x80) rcon = rcon.append(0x1b) rcon = rcon.append(0x36) rcon
+   [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36]
 }
 
 def AES_RCON = _build_aes_rcon()
@@ -224,10 +145,8 @@ fn _xtime(int x) int {
 }
 
 fn _sub_word(any w) any {
-   def b0 = AES_SBOX[w & 0xff]
-   def b1 = AES_SBOX[(w >> 8) & 0xff] << 8
-   def b2 = AES_SBOX[(w >> 16) & 0xff] << 16
-   def b3 = AES_SBOX[(w >> 24) & 0xff] << 24
+   def b0, b1 = AES_SBOX[w & 0xff], AES_SBOX[(w >> 8) & 0xff] << 8
+   def b2, b3 = AES_SBOX[(w >> 16) & 0xff] << 16, AES_SBOX[(w >> 24) & 0xff] << 24
    b0 | b1 | b2 | b3
 }
 
@@ -247,7 +166,11 @@ fn aes_init(list key) list {
    }
    while i < words {
       mut temp = w[i - 1]
-      if i % nk == 0 { temp = _sub_word(_rot_word(temp)) ^^ (AES_RCON[i / nk] << 24) } elif nk > 6 && i % nk == 4 { temp = _sub_word(temp) }
+      if i % nk == 0 {
+         temp = _sub_word(_rot_word(temp)) ^^ (AES_RCON[i / nk] << 24)
+      } elif nk > 6 && i % nk == 4 {
+         temp = _sub_word(temp)
+      }
       w[i] = w[i - nk] ^^ temp
       i += 1
    }
@@ -272,8 +195,7 @@ fn _shift_rows(list st) any {
 fn _mix_columns(list st) any {
    mut i = 0 while i < 4 {
       def b0 = st[i*4] def b1 = st[i*4+1] def b2 = st[i*4+2] def b3 = st[i*4+3]
-      def t = b0 ^^ b1 ^^ b2 ^^ b3
-      def u = b0
+      def t, u = b0 ^^ b1 ^^ b2 ^^ b3, b0
       st[i*4] = b0 ^^ t ^^ _xtime(b0 ^^ b1)
       st[i*4+1] = b1 ^^ t ^^ _xtime(b1 ^^ b2)
       st[i*4+2] = b2 ^^ t ^^ _xtime(b2 ^^ b3)
@@ -300,8 +222,7 @@ fn _inv_shift_rows(list st) any {
 fn _inv_mix_columns(list st) any {
    mut i = 0 while i < 4 {
       def b0 = st[i*4] def b1 = st[i*4+1] def b2 = st[i*4+2] def b3 = st[i*4+3]
-      def u = _xtime(_xtime(b0 ^^ b2))
-      def v = _xtime(_xtime(b1 ^^ b3))
+      def u, v = _xtime(_xtime(b0 ^^ b2)), _xtime(_xtime(b1 ^^ b3))
       st[i*4] = b0 ^^ u
       st[i*4+1] = b1 ^^ v
       st[i*4+2] = b2 ^^ u

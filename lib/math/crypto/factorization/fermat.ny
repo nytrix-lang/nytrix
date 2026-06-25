@@ -83,7 +83,7 @@ fn fermat_factor_bounded(any n, int max_iter) any {
       if diff >= 0 && is_perfect_square(diff) {
          def b = isqrt(diff)
          mut p, q = a - b, a + b
-         return(p > 1 && q > 1) ? ((p < q) ? [p, q] : [q, p]) : nil
+         return (p > 1 && q > 1) ? ((p < q) ? [p, q] : [q, p]) : nil
       }
       a += 1
       count += 1

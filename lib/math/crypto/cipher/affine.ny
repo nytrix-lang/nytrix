@@ -6,7 +6,12 @@
 ;; References:
 ;; - std.math.crypto.cipher
 ;; - std.math.crypto.analysis
-module std.math.crypto.cipher.affine(affine_encrypt, affine_decrypt, affine_decrypt_bytes, affine_crack_bytes_contains, affine_crack_bytes_known_substring, affine_encrypt_alphabet, affine_decrypt_alphabet, affine_decrypt_block_pairs_alphabet, affine_cbc_decrypt_alphabet, affine_score_ngrams, affine_cbc_crack_alphabet, affine_crack_block_pairs_alphabet, affine_cbc_crack_known_prefix_alphabet, affine_crack_block_pairs_known_prefix_alphabet, affine_crack_known_pt_alphabet, affine_crack_known_pt)
+module std.math.crypto.cipher.affine(affine_encrypt, affine_decrypt, affine_decrypt_bytes,
+   affine_crack_bytes_contains, affine_crack_bytes_known_substring,
+   affine_encrypt_alphabet, affine_decrypt_alphabet, affine_decrypt_block_pairs_alphabet,
+   affine_cbc_decrypt_alphabet, affine_score_ngrams, affine_cbc_crack_alphabet,
+   affine_crack_block_pairs_alphabet, affine_cbc_crack_known_prefix_alphabet,
+   affine_crack_block_pairs_known_prefix_alphabet, affine_crack_known_pt_alphabet, affine_crack_known_pt)
 use std.core
 use std.math.nt
 use std.core.str
@@ -42,7 +47,7 @@ fn _affine_builder_take(list b) str {
 }
 
 fn _affine_map_value(number value, number a, number b, number m, bool decrypt) number {
-   if decrypt { return(a * ((value - b + m) % m)) % m }
+   if decrypt { return (a * ((value - b + m) % m)) % m }
    (a * value + b) % m
 }
 

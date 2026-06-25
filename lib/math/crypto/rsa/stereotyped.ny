@@ -70,7 +70,7 @@ fn stereotyped_solve(number n, int e, number c, number known_msg, int unknown_bi
    def roots = coppersmith_univariate(f, n, X)
    if roots.len > 0 {
       def x0 = roots.get(0)
-      return(known_msg + x0)
+      return (known_msg + x0)
    }
    nil
 }

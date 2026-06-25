@@ -56,7 +56,8 @@ def siqs_factor = qs.siqs_factor
 def siqs_factor_report = qs.siqs_factor_report
 def siqs_polynomial_report = qs.siqs_polynomial_report
 def siqs_relation_report = qs.siqs_relation_report
-fn require_factor_pair(any factors, any a, any b, str label){
+
+fn require_factor_pair(any factors, any a, any b, str label) any {
    assert(factors != nil, label + " returned nil")
    assert(
       (factors.get(0, 0) == a && factors.get(1, 0) == b) ||
