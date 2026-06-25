@@ -262,13 +262,13 @@ fn _lll_quality_report_fast_native(any basis, any delta=0.75, any eta=0.51) any 
             ["method", "small-int-f64buf-gso"], ["rows", 0], ["cols", cols], ["b_star", []], ["mu", []],
             ["norms_sq", []], ["profile", []], ["zero_rows", 0], ["rank_estimate", 0],
             ["profile_slope", 0.0], ["gso_recomputes", 1], ["elapsed_ms", _lll_elapsed_ms(t0)],
-      ])
+         ])
       def empty = _lll_set_fields(dict(16), [
             ["rows", 0], ["cols", cols], ["delta", delta], ["eta", eta], ["reduced", true], ["is_reduced", true],
             ["ok", true], ["size_reduced", true], ["lovasz", true], ["max_mu", 0.0], ["profile", []],
             ["violations", []], ["numeric_kernel", "small-int-f64buf-gso"], ["quality_fast_path", true],
             ["gso", empty_gso], ["elapsed_ms", _lll_elapsed_ms(t0)],
-      ])
+         ])
       return empty
    }
    def supports = _lll_fast_supports(rows)
@@ -319,14 +319,14 @@ fn _lll_quality_report_fast_native(any basis, any delta=0.75, any eta=0.51) any 
          ["b_star", _lll_skipped("compact quality report")], ["mu", _lll_fast_mu_bufs_to_lists(mu, n)], ["norms_sq", profile], ["profile", profile],
          ["zero_rows", zero_rows], ["rank_estimate", n - zero_rows], ["min_nonzero_norm_sq", min_norm],
          ["max_norm_sq", max_norm], ["profile_slope", 0.0], ["gso_recomputes", 1], ["elapsed_ms", _lll_elapsed_ms(t0)],
-   ])
+      ])
    _lll_set_fields(dict(16), [
          ["rows", n], ["cols", cols], ["delta", delta], ["eta", eta], ["reduced", size_reduced && lovasz],
          ["is_reduced", size_reduced && lovasz], ["ok", size_reduced && lovasz], ["size_reduced", size_reduced],
          ["lovasz", lovasz], ["max_mu", max_mu], ["profile", profile], ["violations", violations],
          ["numeric_kernel", "small-int-f64buf-gso"], ["quality_fast_path", true], ["gso", gso_out],
          ["elapsed_ms", _lll_elapsed_ms(t0)],
-   ])
+      ])
 }
 
 fn _lll_auto_threshold() int {
@@ -2061,7 +2061,7 @@ fn _lll_xf_div(any a, any b, any scale) bigint {
 fn _lll_xf_from_scalar(any x, any scale) bigint {
    if is_float(x) {
       def ppm = bigint_from_int(round(float(x) * 1000000.0))
-      return(ppm * scale) / Z(1000000)
+      return (ppm * scale) / Z(1000000)
    }
    Z(x) * scale
 }
@@ -2858,7 +2858,7 @@ fn _lll_gram_gso_report_exact(any G) dict {
          ["method", "gram-gso-exact-rational"], ["rows", n], ["cols", _lll_cols(G)], ["mu", mu],
          ["norms_sq", norms], ["profile", norms], ["mu_exact", mu_exact], ["norms_exact", norms_exact],
          ["exact", true], ["scale_digits", scale_digits], ["elapsed_ms", _lll_elapsed_ms(t0)],
-   ])
+      ])
 }
 
 fn _lll_gram_gso_report_float(any gram) dict {
@@ -2897,7 +2897,7 @@ fn _lll_gram_gso_report_float(any gram) dict {
    _lll_set_fields(dict(10), [
          ["method", "gram-gso"], ["rows", n], ["cols", _lll_cols(G)], ["mu", mu], ["norms_sq", norms],
          ["profile", norms], ["scale_digits", scale_digits], ["elapsed_ms", _lll_elapsed_ms(t0)],
-   ])
+      ])
 }
 
 fn _lll_gram_gso_fast_float(any G, int scale_digits) list {
@@ -3064,7 +3064,7 @@ fn _lll_gram_quality_from_gso(any G, any gso, any delta, any eta) dict {
          ["method", "gram-lll-quality"], ["reduced", size_reduced && lovasz], ["size_reduced", size_reduced],
          ["lovasz", lovasz], ["max_mu", max_mu], ["gso", gso], ["profile", gso.get("profile", [])],
          ["violations", violations],
-   ])
+      ])
 }
 
 fn lll_gram_quality_report(any gram, any delta=0.75, any eta=0.51) dict {
@@ -3139,7 +3139,7 @@ fn lll_gram_first_column_reduce_report(any gram, any delta=0.75, any eta=0.51) d
          ["before_max_mu", _lll_gram_first_column_max_mu(G)], ["after_max_mu", _lll_gram_first_column_max_mu(reduced)],
          ["transform", transform], ["transform_verified", _lll_gram_verify_transform(G, transform, reduced)],
          ["elapsed_ms", _lll_elapsed_ms(t0)], ["gram", reduced],
-   ])
+      ])
 }
 
 fn _lll_env_positive_int(str name, int fallback) int {
@@ -3314,7 +3314,7 @@ fn lll_quality_report(any basis, any delta=0.75, any eta=0.51) dict {
             size_reduced = false
             violations = violations.append({
                   "kind": "size", "i": i, "j": j, "mu": mu_ij, "eta": eta,
-            })
+               })
          }
          j += 1
       }
@@ -3327,7 +3327,7 @@ fn lll_quality_report(any basis, any delta=0.75, any eta=0.51) dict {
             violations = violations.append({
                   "kind": "lovasz", "i": i, "lhs": lhs, "rhs": rhs,
                   "mu": mu_prev, "delta": delta,
-            })
+               })
          }
       }
       i += 1

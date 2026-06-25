@@ -69,14 +69,14 @@ fn _cvp_attach_gso_reuse_report(any out, int input_gso_builds, int work_gso_buil
    _cvp_set_fields(out, [
          ["input_gso_builds", input_gso_builds], ["work_gso_builds", work_gso_builds],
          ["input_gso_reused", input_gso_reused], ["work_gso_source", work_gso_source],
-   ])
+      ])
 }
 
 fn _cvp_attach_enum_context(any out, any reduction_report, str candidate_mode, any residual, any coords, int input_gso_builds, int work_gso_builds, bool input_gso_reused, str work_gso_source) dict {
    out = _cvp_set_fields(out, [
          ["reduction", reduction_report], ["candidate_mode", candidate_mode],
          ["residualization", residual], ["target_coordinates", coords],
-   ])
+      ])
    _cvp_attach_gso_reuse_report(out, input_gso_builds, work_gso_builds, input_gso_reused, work_gso_source)
 }
 
@@ -84,7 +84,7 @@ fn _cvp_enum_context_common(dict out, bool reduced, int coeff_bound, int max_nod
    _cvp_attach_enum_context(
       _cvp_enum_report_common(out, reduced, coeff_bound, max_nodes, nodes, nodes_by_level, hit_limit, radius_levels, radius_sq, vector, distance_sq, verified, basis),
       reduction_report, candidate_mode, residual, coords,
-   input_gso_builds, work_gso_builds, input_gso_reused, work_gso_source)
+      input_gso_builds, work_gso_builds, input_gso_reused, work_gso_source)
 }
 
 fn _cvp_big_float(any x) f64 {
@@ -188,7 +188,7 @@ fn _round_div(any num, any den) bigint {
    if den == 0 { return Z(0) }
    def nn = _z(num)
    def dd = _z(den)
-   if nn >= 0 { return(nn + dd / 2) / dd }
+   if nn >= 0 { return (nn + dd / 2) / dd }
    -(((-nn) + dd / 2) / dd)
 }
 
@@ -196,7 +196,7 @@ fn _ceil_div(any num, any den) bigint {
    if den == 0 { panic("cvp: ceil_div division by zero") }
    def nn = _z(num)
    def dd = _z(den)
-   if nn >= 0 { return(nn + dd - 1) / dd }
+   if nn >= 0 { return (nn + dd - 1) / dd }
    nn / dd
 }
 
@@ -544,7 +544,7 @@ fn _cvp_gso_profile(list basis) dict {
    }
    _cvp_set_fields(dict(6), [
          ["rows", basis.len], ["b_star", gs], ["norms_sq", norms], ["profile", norms],
-   ])
+      ])
 }
 
 fn _cvp_mu_get(list mu, int i, int j) any {
@@ -687,7 +687,7 @@ fn cvp_gso_bound_report(list basis, list target, bool reduce=true, int coeff_bou
          ["method", "cvp-gso-offset-bounds"], ["reduced", reduce], ["coeff_bound", coeff_bound],
          ["radius_sq", seed_norm], ["offset_bounds", bounds], ["offset_radius_max", _cvp_bounds_sum(bounds)],
          ["offset_bound_estimate", _cvp_bounds_product(bounds, 200000)], ["gso_profile", gso], ["basis", work],
-   ])
+      ])
 }
 
 fn _cvp_target_coords(list basis, list target) list {
@@ -950,7 +950,7 @@ fn _cvp_babai_coeff_report(list basis, list target) dict {
    _cvp_set_fields(dict(12), [
          ["method", "babai-coefficients"], ["coeffs", coeffs], ["vector", vector],
          ["residual_target", residual], ["distance_sq", _cvp_distance_sq(vector, target)], ["gso_profile", gso],
-   ])
+      ])
 }
 
 fn _cvp_coeffs_max_abs(list coeffs) bigint {
@@ -993,7 +993,7 @@ fn _cvp_babai_residual_report(list basis, list target, int max_loops=256, any gs
          ["method", "babai-residual-target"], ["shift", shift], ["target", residual_target], ["loops", loops],
          ["max_coeff", max_coeff], ["hit_limit", loops >= max_loops], ["last_babai", last],
          ["changed", !_vec_equal(shift, _zero_vec(target.len))],
-   ])
+      ])
 }
 
 fn _cvp_center_vector(list basis, list coeffs, int dim) list {
@@ -1054,7 +1054,7 @@ fn _cvp_babai_gso_report_with_profile(list basis, list target, any gso) dict {
             "bstar": is_list(bstar) ? bstar.len : -1,
             "mu": is_list(mu) ? mu.len : -1,
             "norms": is_list(norms) ? norms.len : -1
-      })
+         })
       return _cvp_babai_coeff_report(basis, target)
    }
    mut coords = _cvp_gso_target_coords(target, gso)
@@ -1225,7 +1225,7 @@ fn _cvp_local_descent_report(list basis, list target, list seed, any seed_norm, 
    _cvp_set_fields(dict(10), [
          ["method", "local-row-descent"], ["vector", best], ["distance_sq", best_norm], ["steps", steps],
          ["passes", passes], ["hit_limit", steps >= max_steps], ["improved", best_norm < seed_norm],
-   ])
+      ])
 }
 
 fn _cvp_round_float_coords(list coords) list {
@@ -1433,7 +1433,7 @@ fn _cvp_gso_enumerate_report(list basis, list target, list seed, any seed_norm, 
          ["early_accept", state[5]],
          ["early_accept_norm", early_norm],
          ["gso_profile", gso],
-   ])
+      ])
    out
 }
 
@@ -1492,7 +1492,7 @@ fn _cvp_isqrt_int(int n) int {
 
 @inline
 fn _cvp_round_div_nearest(int x, int scale) int {
-   if x >= 0 { return(x + scale / 2) / scale }
+   if x >= 0 { return (x + scale / 2) / scale }
    0 - ((0 - x + scale / 2) / scale)
 }
 
@@ -2022,7 +2022,7 @@ fn cvp_list_gso_count_report(list basis, any radius_sq=32.5, any target_coords=n
          ["center_kernel", fixed[0] ? "sparse-fixed-mu" : "dense-float-mu"],
          ["fixed_point_scale", fixed[0] ? 10000 : 0],
          ["gso_profile", gso],
-   ])
+      ])
    _cvp_finish_report(out, t0)
 }
 
@@ -2449,7 +2449,7 @@ fn cvp_babai_report(list basis, list target, bool reduce=true) dict {
             ["reason", "empty basis"],
             ["nodes", 0],
             ["hit_limit", false],
-      ])
+         ])
       return _cvp_finish_report(out, t0)
    }
    def raw_gso = _cvp_gso_mu_profile(basis)
@@ -2490,7 +2490,7 @@ fn cvp_babai_report(list basis, list target, bool reduce=true) dict {
          ["input_gso_reused", bool(selection.get("input_gso_reused", false))],
          ["work_gso_source", work_gso_source],
          ["phase_times", {"reduction_ms": selection.get("reduction_ms", nil)}],
-   ])
+      ])
    _cvp_finish_report(out, t0)
 }
 

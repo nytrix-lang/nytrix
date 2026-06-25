@@ -172,11 +172,11 @@ fn _roca_search_residue_near_sqrt(any n, any M, any residue, int search_range) a
       def p2 = p0 - step
       if p1 > Z(1) && p1 < n && mod(n, p1) == Z(0) {
          mut q = n / p1
-         return(p1 < q) ? [p1, q] : [q, p1]
+         return (p1 < q) ? [p1, q] : [q, p1]
       }
       if k > 0 && p2 > Z(1) && p2 < n && mod(n, p2) == Z(0) {
          mut q = n / p2
-         return(p2 < q) ? [p2, q] : [q, p2]
+         return (p2 < q) ? [p2, q] : [q, p2]
       }
       k += 1
    }
@@ -219,14 +219,14 @@ fn roca_factor_with_prime_info(any n, any M, any a) any {
          def candidate = p1 * Z(M) + target_res
          if candidate > Z(1) && candidate < n && mod(n, candidate) == Z(0) {
             mut q = n / candidate
-            return(candidate < q) ? [candidate, q] : [q, candidate]
+            return (candidate < q) ? [candidate, q] : [q, candidate]
          }
       }
       if k > 0 && p2 > Z(1) {
          def candidate = p2 * Z(M) + target_res
          if candidate > Z(1) && candidate < n && mod(n, candidate) == Z(0) {
             mut q = n / candidate
-            return(candidate < q) ? [candidate, q] : [q, candidate]
+            return (candidate < q) ? [candidate, q] : [q, candidate]
          }
       }
       k += 1
@@ -277,11 +277,11 @@ fn coppersmith_approximation(any n, int bits_p) any {
       def p1, p2 = a_init + Z(offset), a_init - Z(offset)
       if p1 > Z(1) && mod(n, p1) == Z(0) {
          mut q = n / p1
-         return(p1 < q) ? [p1, q] : [q, p1]
+         return (p1 < q) ? [p1, q] : [q, p1]
       }
       if offset > 0 && p2 > Z(1) && mod(n, p2) == Z(0) {
          mut q = n / p2
-         return(p2 < q) ? [p2, q] : [q, p2]
+         return (p2 < q) ? [p2, q] : [q, p2]
       }
       offset += 1
    }
