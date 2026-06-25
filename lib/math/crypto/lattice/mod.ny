@@ -1,9 +1,13 @@
-;; Keywords: lattice lll cvp svp bkz flatter basis gram-schmidt gso matrix reduction small-roots coppersmith ntru lwe acd linmod mvpoly math crypto number-theory
+;; Keywords: lattice lll cvp svp bkz flatter basis gram-schmidt gso matrix reduction
+;; Keywords: small-roots coppersmith ntru lwe acd linmod mvpoly math crypto number-theory
 ;; Cryptography lattice helpers for algorithms, analysis, validation, or supporting math.
 ;; References:
 ;; - https://web.cs.elte.hu/~lovasz/scans/lll.pdf
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
-module std.math.crypto.lattice(lattice, lll, flatter, bkz, coppersmith, small_roots, mvpoly, howgrave_graham, lwe, ntru, acd, linmod, matrix_dlog, cvp, noisy_linear, lattice_core_coverage_report, lattice_replacement_report, lattice_reduction_report, gen_lattice_report, lattice_matrix_ntl_format, lattice_matrix_object_str)
+module std.math.crypto.lattice(lattice, lll, flatter, bkz, coppersmith, small_roots,
+   mvpoly, howgrave_graham, lwe, ntru, acd, linmod, matrix_dlog, cvp, noisy_linear,
+   lattice_core_coverage_report, lattice_replacement_report, lattice_reduction_report,
+   gen_lattice_report, lattice_matrix_ntl_format, lattice_matrix_object_str)
 use std.math.matrix as matrix
 use std.math.crypto.lattice.lll
 use std.math.crypto.lattice.lattice
@@ -45,7 +49,8 @@ fn _lattice_completed(list rows) list {
    mut i = 0
    while i < rows.len {
       def row = rows[i]
-      if row.get("ny_default", false) && row.get("tested", false) && row.get("benchmarked", false) && !row.get("remove_blocker", true) {
+      if row.get("ny_default", false) && row.get("tested", false) &&
+      row.get("benchmarked", false) && !row.get("remove_blocker", true) {
          completed = completed.append(row)
       }
       i += 1
@@ -81,8 +86,8 @@ fn lattice_core_coverage_report() dict {
       "blockers": blockers,
       "blocker_count": blockers.len,
       "can_remove_tmp_inspiration_flatter": removal_ready,
-      "can_remove_tmp_inspiration_fplll": removal_ready,
-      "removal_ready_by_source": {"flatter": removal_ready, "fplll": removal_ready},
+      "can_remove_tmp_inspiration_lattice_external": removal_ready,
+      "removal_ready_by_source": {"flatter": removal_ready, "lattice_external": removal_ready},
       "remove_policy": "declare replacement-ready only after APIs, tests, and benchmarks clear every blocker",
    }
 }
@@ -100,7 +105,7 @@ fn lattice_replacement_report() dict {
       "blockers": core.get("blockers", []),
       "blocker_count": core.get("blocker_count", 0),
       "can_remove_tmp_inspiration_flatter": core.get("can_remove_tmp_inspiration_flatter", false),
-      "can_remove_tmp_inspiration_fplll": core.get("can_remove_tmp_inspiration_fplll", false),
+      "can_remove_tmp_inspiration_lattice_external": core.get("can_remove_tmp_inspiration_lattice_external", false),
       "removal_ready_by_source": core.get("removal_ready_by_source", dict(0)),
       "benchmark_gate": "quality first, then same-or-faster runtime on accepted fixtures",
    }
@@ -118,7 +123,11 @@ fn lattice_reduction_report(any basis, str strategy="auto", any opts=nil) dict {
    mut selected = strategy
    if strategy == "bkz" {
       selected = "bkz"
-      rep = bkz_report(input, int(o.get("block_size", 10)), delta, "ny", eta, int(o.get("max_tours", 0)), true, int(o.get("svp_coeff_bound", 1)), int(o.get("svp_max_nodes", 200000)))
+      rep = bkz_report(
+         input, int(o.get("block_size", 10)), delta, "ny", eta,
+         int(o.get("max_tours", 0)), true,
+         int(o.get("svp_coeff_bound", 1)), int(o.get("svp_max_nodes", 200000))
+      )
    } else if strategy == "flatter" || (strategy == "auto" && rows >= flatter_threshold) {
       selected = "flatter"
       rep = flatter_reduce_report(input, delta, int(o.get("max_rounds", 3)), eta)
@@ -147,7 +156,10 @@ fn lattice_reduction_report(any basis, str strategy="auto", any opts=nil) dict {
    def red = lattice_reduction_report([[4, 0], [1, 2]], "auto")
    assert(red.get("selected_strategy", "") == "lll", "lattice auto reducer selects lll for small basis")
    assert(red.get("basis", nil) != nil, "lattice reduction exposes basis")
-   def flat = lattice_reduction_report([[97, 0, 0, 0], [14, 1, 0, 0], [35, 0, 1, 0], [62, 0, 0, 1]], "flatter", {"max_rounds": 1})
+   def flat = lattice_reduction_report(
+      [[97, 0, 0, 0], [14, 1, 0, 0], [35, 0, 1, 0], [62, 0, 0, 1]],
+      "flatter", {"max_rounds": 1}
+   )
    assert(flat.get("selected_strategy", "") == "flatter", "lattice explicit flatter reducer")
    print("✓ std.math.crypto.lattice self-test passed")
 }

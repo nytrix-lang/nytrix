@@ -253,7 +253,7 @@ fn _ecm_curve_report(any n, int B1, int curve, int B2=0) dict {
                "factor": f, "success": true, "stage": 1,
                "stage1_ops": stage1_ops, "stage2_ops": 0,
                "ops": stage1_ops, "status": "stage1-factor",
-         })
+            })
       }
       pnt = mr.get("point")
       prime = int(next_prime(prime))
@@ -271,7 +271,7 @@ fn _ecm_curve_report(any n, int B1, int curve, int B2=0) dict {
                   "stage1_ops": stage1_ops, "stage2_ops": stage2_ops,
                   "ops": stage1_ops + stage2_ops,
                   "point_after_stage1": pnt, "status": "stage2-factor",
-            })
+               })
          }
          pnt = mr2.get("point")
          prime = int(next_prime(prime))
@@ -281,7 +281,7 @@ fn _ecm_curve_report(any n, int B1, int curve, int B2=0) dict {
          "stage": 0, "stage1_ops": stage1_ops, "stage2_ops": stage2_ops,
          "point_after_stage1": pnt, "ops": stage1_ops + stage2_ops,
          "status": "not-found",
-   })
+      })
 }
 
 fn _ecm_mont_point(any x, any z) list { [_ecm_z(x), _ecm_z(z)] }
@@ -440,7 +440,7 @@ fn _ecm_mont_curve_report(any n, int B1, int curve, int B2=0, int sigma_start=6,
    out = out.merge({
          "stage1_kernel": "prime-power-product-ladder",
          "stage1_product_bits": bit_length(stage1_product),
-   })
+      })
    if stage1_product > Z(1) {
       pnt = _ecm_mont_mul(pnt, stage1_product, a24, nn)
       stage1_ops = 1
@@ -504,7 +504,7 @@ fn _ecm_mont_curve_report(any n, int B1, int curve, int B2=0, int sigma_start=6,
       out = out.merge({
             "stage2_kernel": "prime-product-ladder",
             "stage2_product_bits": bit_length(stage2_product),
-      })
+         })
       if stage2_product > Z(1) {
          pnt = _ecm_mont_mul(pnt, stage2_product, a24, nn)
          stage2_ops = 1
@@ -593,7 +593,7 @@ fn montgomery_ecm_factor_report(any n, int B1=1000, int curves=32, int B2=0, int
                "attempts": attempts, "total_gcd_checks": total_gcd_checks,
                "total_stage1_ops": total_stage1_ops, "total_stage2_ops": total_stage2_ops,
                "elapsed_ms": _ecm_elapsed_ms(t0), "status": cr.get("status", "factor"),
-         })
+            })
       }
       c += 1
    }
@@ -601,7 +601,7 @@ fn montgomery_ecm_factor_report(any n, int B1=1000, int curves=32, int B2=0, int
          "attempts": attempts, "total_gcd_checks": total_gcd_checks,
          "total_stage1_ops": total_stage1_ops, "total_stage2_ops": total_stage2_ops,
          "elapsed_ms": _ecm_elapsed_ms(t0), "status": "not-found",
-   })
+      })
 }
 
 fn montgomery_ecm_factor(any n, int B1=1000, int curves=32, int B2=0, int sigma_start=6, int gcd_interval=16) any {
@@ -639,7 +639,7 @@ fn ecm_scheduled_factor_report(any n, bool deep=false, int max_curves=24, int ma
                "total_stage1_ops": int(pm1.get("stage1_ops", 0)),
                "total_stage2_ops": 0, "elapsed_ms": _ecm_elapsed_ms(t0),
                "status": "pm1-precheck-factor",
-         })
+            })
       }
    }
    while curves_done < curves {
@@ -658,7 +658,7 @@ fn ecm_scheduled_factor_report(any n, bool deep=false, int max_curves=24, int ma
                "total_gcd_checks": total_gcd_checks, "total_stage1_ops": total_stage1_ops,
                "total_stage2_ops": total_stage2_ops, "elapsed_ms": _ecm_elapsed_ms(t0),
                "status": br.get("status", "factor"),
-         })
+            })
       }
    }
    out.merge({
@@ -666,7 +666,7 @@ fn ecm_scheduled_factor_report(any n, bool deep=false, int max_curves=24, int ma
          "total_gcd_checks": total_gcd_checks, "total_stage1_ops": total_stage1_ops,
          "total_stage2_ops": total_stage2_ops, "elapsed_ms": _ecm_elapsed_ms(t0),
          "status": "not-found",
-   })
+      })
 }
 
 fn _ecm_batch_lane_entry(any raw, int index, bool arbitrary_precheck, int max_curves, int max_B1, int max_B2) dict {
@@ -694,7 +694,7 @@ fn _ecm_batch_lane_entry(any raw, int index, bool arbitrary_precheck, int max_cu
             return entry.merge({
                   "factor": pf, "success": true, "stage": pr.get("stage", 0),
                   "pre_attempt": pi, "pre_report": pr, "status": "pre-ecm-factor",
-            })
+               })
          }
          pi += 1
       }
@@ -707,7 +707,7 @@ fn _ecm_batch_lane_entry(any raw, int index, bool arbitrary_precheck, int max_cu
          return entry.merge({
                "factor": pf, "success": true, "stage": -1,
                "pre_pm1_report": pm1, "status": "pm1-precheck-factor",
-         })
+            })
       }
       entry = entry.set("pre_pm1_report", pm1)
    }
@@ -716,7 +716,7 @@ fn _ecm_batch_lane_entry(any raw, int index, bool arbitrary_precheck, int max_cu
          "factor": rep.get("factor", nil), "success": rep.get("success", false),
          "stage": rep.get("stage", 0), "report": rep,
          "status": rep.get("status", "not-found"),
-   })
+      })
 }
 
 fn ecm_batch_lane_factor_report(list values, bool arbitrary_precheck=false, int lane_width=8, int max_curves=42, int max_B1=205, int max_B2=5125) dict {
@@ -787,7 +787,7 @@ fn ecm_factor_report(any n, int B1=1000, int curves=32, int B2=0) dict {
                "factor": cr.get("factor"), "success": true, "curve": c,
                "stage": cr.get("stage", 0), "attempts": attempts,
                "elapsed_ms": _ecm_elapsed_ms(t0), "status": cr.get("status", "factor"),
-         })
+            })
       }
       c += 1
    }

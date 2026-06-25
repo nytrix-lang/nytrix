@@ -49,7 +49,7 @@ fn factor_close_primes(any n, any k_max) any {
       if diff >= 0 && is_perfect_square(diff) {
          def b = isqrt(diff)
          mut p, q = a - b, a + b
-         if p > 1 && q > 1 && p * q == n { return(p < q) ? [p, q] : [q, p] }
+         if p > 1 && q > 1 && p * q == n { return (p < q) ? [p, q] : [q, p] }
       }
       a += 1
       count += 1

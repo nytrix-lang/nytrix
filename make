@@ -238,6 +238,19 @@ def ok(msg: str) -> None:
 def err(msg: str) -> None:
     print(msg, file=sys.stderr)
 
+def _cmd_display(cmd: list[str] | str, shell: bool = False) -> str:
+    if isinstance(cmd, str):
+        return cmd
+    return " ".join(shlex.quote(str(x)) for x in cmd)
+
+def _fmt_elapsed(seconds: float) -> str:
+    if seconds < 1:
+        return f"{int(seconds * 1000)}ms"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    mins = int(seconds // 60)
+    return f"{mins}m{seconds - mins * 60:04.1f}s"
+
 def boot_log(tag: str, msg: str) -> None:
     if QUIET_BOOTSTRAP:
         return
@@ -333,6 +346,10 @@ def run(cmd: list[str] | str, *, shell: bool = False, env: dict[str, str] | None
     if env:
         merged.update(env)
     merged.setdefault("NYTRIX_ROOT", str(ROOT))
+    show_cmd = _env_flag("NYTRIX_MAKE_COMMANDS", False)
+    started = time.perf_counter()
+    if show_cmd and not quiet:
+        step("$ " + _cmd_display(cmd, shell))
     if COLOR:
         merged.setdefault("FORCE_COLOR", "1")
         merged.setdefault("CLICOLOR_FORCE", "1")
@@ -350,6 +367,8 @@ def run(cmd: list[str] | str, *, shell: bool = False, env: dict[str, str] | None
             if res.stdout:
                 sys.stderr.write(res.stdout)
             raise subprocess.CalledProcessError(res.returncode, cmd)
+        if show_cmd:
+            ok("done in " + _fmt_elapsed(time.perf_counter() - started))
         return
     proc = subprocess.Popen(
         cmd,
@@ -367,6 +386,8 @@ def run(cmd: list[str] | str, *, shell: bool = False, env: dict[str, str] | None
     rc = proc.wait()
     if rc != 0:
         raise subprocess.CalledProcessError(rc, cmd)
+    if show_cmd:
+        ok("done in " + _fmt_elapsed(time.perf_counter() - started))
 
 NINJA_PROGRESS_RE = re.compile(r"^(\s*)\[(\d+)/(\d+)\]\s*(.*)$")
 
@@ -4019,7 +4040,7 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     cache_mode = "off" if cold else "on"
     exec_cache_mode = "on" if (exec_cache and not cold) else "off"
     std_cache_mode = "off" if cold else ("off" if os.environ.get("NYTRIX_STD_CACHE") == "0" else "on")
-    log("TEST", f"make test: full matrix with jit/repl/native and benchmarks; result_cache {cache_mode}, exec_cache {exec_cache_mode}, std_cache {std_cache_mode} (set NYTRIX_TEST_EXEC_CACHE=1 to enable binary caches)")
+    log("TEST", f"make test: fixture-flag matrix with runtime/repl/error/bench suites; result_cache {cache_mode}, exec_cache {exec_cache_mode}, std_cache {std_cache_mode} (set NYTRIX_TEST_EXEC_CACHE=1 to enable binary caches)")
     test_timeout_s = int(os.environ.get("NYTRIX_TEST_TIMEOUT") or "1800")  # 30 min default
     step(f"run tests: bin=ny jobs={test_jobs} timeout={test_timeout_s}s")
     rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(test_timeout_s))
@@ -4031,7 +4052,7 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     return rc
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
-    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web-demos", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web-demos", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -4164,7 +4185,7 @@ def print_help() -> None:
             ("clean", "remove generated artifacts"),
         )),
         ("Check", (
-            ("fmt/check/tidy", "format, parse-check, or tidy source"),
+            ("fmt/check/tidy/audit", "format, parse-check, tidy, or deep source audit"),
             ("test/fuzz", "run tests and smoke fuzzing"),
             ("bench", "run public C-vs-Ny benchmark shapes"),
             ("asan/ubsan", "run tests under sanitizer builds"),
@@ -5584,7 +5605,7 @@ def main() -> int:
     build_root, notice = resolve_build_dir()
     first_repl_bootstrap = bootstrap_needed_for_repl(build_root, kind, cmds)
     inspect_cmds = {"env", "targets", "doctor"}
-    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "test", "perf", "profile", "docs", "web-demos", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
+    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web-demos", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
     all_tool_style = all(c in tool_style_cmds for c in cmds)
     if all_tool_style and not first_repl_bootstrap:
         # Keep tool invocations clean by default (./make fmt/test/ny...) even if env
@@ -5597,6 +5618,7 @@ def main() -> int:
         use_bootstrap_logs = cli_bootstrap_logs
     if verbose:
         use_bootstrap_logs = True
+        os.environ["NYTRIX_MAKE_COMMANDS"] = "1"
     QUIET_BOOTSTRAP = not use_bootstrap_logs
 
     if notice and not QUIET_BOOTSTRAP:
@@ -5659,7 +5681,7 @@ def main() -> int:
         targets = ["ny"]
         if cmd in ("all", "bin"):
             targets = ["ny", "std", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"]
-        elif cmd in ("fmt", "analyze", "check", "tidy"):
+        elif cmd in ("fmt", "analyze", "check", "tidy", "audit"):
             targets = ["ny-fmt"]
         elif cmd in ("test", "asan", "ubsan"):
             targets = ["ny", "ny-test"]
@@ -5714,6 +5736,8 @@ def main() -> int:
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--check", *extra])
         elif cmd == "tidy":
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--tidy", *extra])
+        elif cmd == "audit":
+            rc = run_tool(build_root, active_kind, "ny-fmt", ["--audit", *extra])
         elif cmd == "perf":
             rc = run_tool(build_root, active_kind, "ny-perf", extra)
         elif cmd == "docs":

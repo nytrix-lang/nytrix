@@ -138,6 +138,6 @@ fn rail_fence_crack(str ciphertext) list {
    assert(rail_fence_decrypt_offset(enc, 4, -3) == plain2, "rail fence negative offset normalizes")
    def long = "this is a test message for rail fence cipher test"
    def long_enc = rail_fence_encrypt_offset(long, 7, 4)
-    assert(rail_fence_decrypt_offset(long_enc, 7, 4) == long, "rail fence offset roundtrip long")
-    print("✓ std.math.crypto.cipher.rail_fence self-test passed")
+   assert(rail_fence_decrypt_offset(long_enc, 7, 4) == long, "rail fence offset roundtrip long")
+   print("✓ std.math.crypto.cipher.rail_fence self-test passed")
 }

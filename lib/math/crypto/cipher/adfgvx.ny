@@ -54,7 +54,7 @@ fn adfgvx_build_matrix(str keyword, bool include_digits) str {
    mut ki = 0
    while ki < keyword.len {
       def ck = _normalized_char(_char_at(keyword, ki))
-      if !seen.get(ck, false){
+      if !seen.get(ck, false) {
          seen.set(ck, true)
          matrix = str_add(matrix, ck)
       }
@@ -65,7 +65,7 @@ fn adfgvx_build_matrix(str keyword, bool include_digits) str {
    mut ai = 0
    while ai < alphabet.len {
       def ch = _char_at(alphabet, ai)
-      if !seen.get(ch, false){
+      if !seen.get(ch, false) {
          seen.set(ch, true)
          matrix = str_add(matrix, ch)
       }
@@ -115,9 +115,9 @@ fn _col_order(str key) list {
       mut best = -1
       mut i = 0
       while i < n {
-         if !used.get(i, false){
+         if !used.get(i, false) {
             def ch = _char_at(key, i)
-            if best < 0 || ch < _char_at(key, best){ best = i }
+            if best < 0 || ch < _char_at(key, best) { best = i }
          }
          i += 1
       }

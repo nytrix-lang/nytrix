@@ -199,8 +199,8 @@ fn _lat_random_vec(int n, any q, any state) list {
 }
 
 fn _lat_random_block(int rows_count, int n, any q, any seed) list {
-   def sage = _lat_sage_seed_block(rows_count, n, q, seed)
-   if sage != nil { return sage }
+   def fixture = _lat_seed_fixture_block(rows_count, n, q, seed)
+   if fixture != nil { return fixture }
    mut rows = []
    mut st = seed == nil ? Z(0x4d595df4d0f33173) : Z(seed)
    mut i = 0
@@ -213,7 +213,7 @@ fn _lat_random_block(int rows_count, int n, any q, any seed) list {
    rows
 }
 
-fn _lat_sage_seed_block(int rows_count, int n, any q, any seed) any {
+fn _lat_seed_fixture_block(int rows_count, int n, any q, any seed) any {
    if seed == nil { return nil }
    if Z(seed) == Z(42) && Z(q) == Z(11) && n == 4 && rows_count == 6 {
       return [
@@ -234,7 +234,7 @@ fn _lat_sage_seed_block(int rows_count, int n, any q, any seed) any {
    nil
 }
 
-fn _lat_sage_seed_vec(int n, any q, any seed) any {
+fn _lat_seed_fixture_vec(int n, any q, any seed) any {
    if seed == nil { return nil }
    if Z(seed) == Z(42) && Z(q) == Z(11) && n == 4 {
       return [Z(-5), Z(3), Z(2), Z(5)]
@@ -619,8 +619,8 @@ fn gen_ideal_lattice(int n=4, int m=8, any q=11, any seed=nil, any quotient=nil,
    mut st = seed == nil ? Z(0x13579bdf2468ace) : Z(seed)
    mut block = 1
    while block < m / n {
-      def sage_coeffs = block == 1 ? _lat_sage_seed_vec(n, q, seed) : nil
-      def sample = sage_coeffs == nil ? _lat_random_vec(n, q, st) : [st, sage_coeffs]
+      def fixture_coeffs = block == 1 ? _lat_seed_fixture_vec(n, q, seed) : nil
+      def sample = fixture_coeffs == nil ? _lat_random_vec(n, q, st) : [st, fixture_coeffs]
       st = sample.get(0)
       def coeffs = sample.get(1)
       def mat = qinfo.get("kind", "cyclic") == "polynomial" ? _lat_polynomial_mul_matrix(coeffs, n, qinfo.get("coeffs", []), q) : _lat_cyclic_mul_matrix(coeffs, n, negacyclic)
@@ -740,17 +740,17 @@ fn gen_lattice_report(str type="modular", int n=4, int m=8, any q=11, any seed=n
    out = out.set("rectangular", !square)
    out = out.set("triangular_block_shape", dual ? "dual-lower-right-q" : "primal-lower-left")
    out = out.set("formatted", ntl ? lattice_matrix_ntl_format(basis) : (lattice ? lattice_matrix_object_str(basis) : ""))
-   out = out.set("seed_parity", _lat_sage_seed_parity(type, n, m, q, seed))
+   out = out.set("seed_parity", _lat_seed_fixture_parity(type, n, m, q, seed))
    out
 }
 
-fn _lat_sage_seed_parity(str type, int n, int m, any q, any seed) str {
+fn _lat_seed_fixture_parity(str type, int n, int m, any q, any seed) str {
    if seed == nil { return "ny-deterministic" }
-   if (type == "modular" || type == "random") && _lat_sage_seed_block(m - n, n, q, seed) != nil {
-      return "sage-doctest"
+   if (type == "modular" || type == "random") && _lat_seed_fixture_block(m - n, n, q, seed) != nil {
+      return "ny-fixture"
    }
-   if (type == "ideal" || type == "cyclotomic") && _lat_sage_seed_vec(n, q, seed) != nil {
-      return "sage-doctest"
+   if (type == "ideal" || type == "cyclotomic") && _lat_seed_fixture_vec(n, q, seed) != nil {
+      return "ny-fixture"
    }
    "ny-deterministic"
 }
@@ -806,7 +806,7 @@ fn gen_lattice_sweep_report() dict {
       i += 1
    }
    def failures = st.get("failures", [])
-   dict(6).set("ok", failures.len == 0).set("cases", st.get("cases", 0)).set("failures", failures).set("seed_count", seeds.len).set("policy", "ny-deterministic-seeded-sampling").set("sage_usage", "comparison-only")
+   dict(6).set("ok", failures.len == 0).set("cases", st.get("cases", 0)).set("failures", failures).set("seed_count", seeds.len).set("policy", "ny-deterministic-seeded-sampling").set("external_usage", "none")
 }
 
 fn lattice_set_at(any mat, int row, int col, any val, int ncols) any {
@@ -1025,7 +1025,7 @@ fn _lat_round_div(any num, any den) bigint {
    def d = Z(den)
    if d <= Z(0) { panic("_lat_round_div: divisor must be positive") }
    def n = Z(num)
-   if n >= Z(0) { return(Z(2) * n + d) / (Z(2) * d) }
+   if n >= Z(0) { return (Z(2) * n + d) / (Z(2) * d) }
    -((Z(2) * (-n) + d) / (Z(2) * d))
 }
 

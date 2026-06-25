@@ -676,14 +676,14 @@ fn _flatter_round_div(any num, any den) any {
       def ni = int(num)
       def di = int(den)
       if di > 0 && ni >= -1000000000000 && ni <= 1000000000000 && di <= 1000000000000 {
-         if ni >= 0 { return(2 * ni + di) / (2 * di) }
+         if ni >= 0 { return (2 * ni + di) / (2 * di) }
          return -((2 * (-ni) + di) / (2 * di))
       }
    }
    def d = Z(den)
    if d <= Z(0) { return Z(0) }
    def n = Z(num)
-   if n >= Z(0) { return(Z(2) * n + d) / (Z(2) * d) }
+   if n >= Z(0) { return (Z(2) * n + d) / (Z(2) * d) }
    -((Z(2) * (-n) + d) / (Z(2) * d))
 }
 
@@ -693,7 +693,7 @@ fn _flatter_round_div_signed(any num, any den) any {
       def di = int(den)
       if di != 0 && ni >= -1000000000000 && ni <= 1000000000000 && di >= -1000000000000 && di <= 1000000000000 {
          if di < 0 { return -_flatter_round_div_signed(ni, -di) }
-         if ni >= 0 { return(2 * ni + di) / (2 * di) }
+         if ni >= 0 { return (2 * ni + di) / (2 * di) }
          return -((2 * (-ni) + di) / (2 * di))
       }
    }
@@ -712,7 +712,7 @@ fn _flatter_round_div_signed_int(int num, int den) int {
       d = -d
    }
    if n < -2000000000000000000 || n > 2000000000000000000 || d > 2000000000000000000 { return 2147483647 }
-   if n >= 0 { return(2 * n + d) / (2 * d) }
+   if n >= 0 { return (2 * n + d) / (2 * d) }
    -((2 * (-n) + d) / (2 * d))
 }
 
@@ -2355,7 +2355,7 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
                         "col_end": c1,
                         "op_count": tile_ops.len,
                         "ops": tile_ops
-                  })
+                     })
                }
                cb -= 1
             }
@@ -2500,7 +2500,7 @@ fn triangular_bounded_lll_prepass_report(any basis, int chunk_budget=2048, int m
             "best_norm_before": before_chunk,
             "best_norm_after": after_chunk,
             "elapsed_ms": rep.get("elapsed_ms", 0.0) + sort.get("elapsed_ms", 0.0)
-      })
+         })
       i += 1
    }
    def out_basis = _flatter_reduce_matrix(work)
@@ -3135,7 +3135,7 @@ fn lagrange_pair_reduce_report(any basis, int window=4, int rounds=2, int max_pa
             "pair_count": pass_pairs,
             "op_count": pass_ops,
             "swap_count": pass_swaps
-      })
+         })
       if changed { p += 1 } else { p = pass_limit }
    }
    def final_sorted = _flatter_norm_sort_rows(work, transform, rows, track)
@@ -3794,7 +3794,7 @@ fn lattice_matmul_threaded_report(any left, any right, int max_threads=0) dict {
             "stop": rep.get("stop", 0),
             "nonzero_products": rep.get("nonzero_products", 0),
             "skipped_zero_products": rep.get("skipped_zero_products", 0)
-      })
+         })
       def rows = rep.get("rows")
       mut j = 0
       while j < rows.len {
@@ -4387,7 +4387,7 @@ fn _flatter_strategy_iterations(int n, str strategy, int max_iterations) list {
             "sublattice_count": windows.len,
             "sublattices": windows,
             "stopping_point": stopping
-      })
+         })
       i += 1
    }
    out
@@ -4416,7 +4416,7 @@ fn recursive_strategy_plan_report(int rows, str strategy="proved3", int max_iter
             "sublattice_count": 1,
             "sublattices": [_flatter_strategy_window("padded-all", 0, padded_rows, "phase3")],
             "stopping_point": false
-      }]
+         }]
    } else {
       iterations = _flatter_strategy_iterations(plan_rows, strategy, max_iterations)
    }
@@ -4604,7 +4604,7 @@ fn schoenhage_reduce_report(any basis, str strategy="proved3", int max_rounds=3,
             "profile_shape": round_shape,
             "profile_goal": round_goal,
             "profile_goal_satisfied": round_goal.get("satisfied", false)
-      })
+         })
       goal_after = round_goal
       if bool(stop_on_goal) && round_goal.get("satisfied", false) {
          stopped_reason = "profile-goal-after-round"
@@ -4709,7 +4709,7 @@ fn sublattice_reduce_report(any basis, int window_size=16, int stride=8, any del
                "profile_before": before.get("profile", []),
                "profile_after": red.get("profile_after", []),
                "elapsed_ms": rsz.get("elapsed_ms", 0.0) + red.get("elapsed_ms", 0.0)
-         })
+            })
       }
       if stop >= rows { start = rows } else { start += step }
    }
@@ -4960,7 +4960,7 @@ fn recursive_reduce_report(any basis, int min_window=8, any delta=0.99, int roun
             "profile_goal": level_goal,
             "profile_goal_satisfied": level_goal.get("satisfied", false),
             "elapsed_ms": rep.get("elapsed_ms", 0.0)
-      })
+         })
       goal_after = level_goal
       if bool(stop_on_goal) && level_goal.get("satisfied", false) {
          stopped_reason = "profile-goal-after-level"
@@ -5578,7 +5578,7 @@ fn blocked_qr_factor_report(any basis, int block_size=16) dict {
             "reflection_count": qr.get("reflection_count", 0),
             "orthogonality_error": qr.get("orthogonality_error", 0.0),
             "reconstruction_error": qr.get("reconstruction_error", 0.0)
-      })
+         })
       k += width
    }
    def rmat = matrix.Matrix(work)
@@ -5755,7 +5755,7 @@ fn tall_skinny_qr_factor_report(any basis, int block_size=32, str qr_method="reo
             "qr_method": local.get("method", qr_method),
             "orthogonality_error": local.get("orthogonality_error", 0.0),
             "reconstruction_error": local.get("reconstruction_error", 0.0)
-      })
+         })
       start = end
    }
    def r_stack = matrix.Matrix(r_stack_rows)
@@ -5864,7 +5864,7 @@ fn fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, str qr_met
             "reconstruction_error": 0.0,
             "profile": gso.get("profile", []),
             "profile_slope": gso.get("profile_slope", 0.0)
-      })
+         })
       if pass_ops.len == 0 { p = run_passes } else { p += 1 }
    }
    def out_basis = matrix.Matrix(work)
@@ -5959,7 +5959,7 @@ fn _flatter_gso_size_reduce_report(any basis, int passes=2, any eta=0.51) dict {
             "profile": profile.get("profile", []),
             "profile_slope": profile.get("profile_slope", 0.0),
             "profile_source": profile.get("method", "row-norm-profile")
-      })
+         })
       if pass_ops.len == 0 { p = run_passes } else { p += 1 }
    }
    def out_basis = matrix.Matrix(work)
@@ -6076,7 +6076,7 @@ fn _flatter_iterated_gso_size_reduce_compact_report(any basis, int max_iteration
             "qr_method": "gso-only",
             "gso_recomputes": 0,
             "elapsed_ms": rep.get("elapsed_ms", 0.0)
-      })
+         })
       if rep.get("op_count", 0) == 0 {
          stopped_reason = "identity-transform"
          keep_going = false
@@ -6177,7 +6177,7 @@ fn refined_fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, st
                "repeat_count": repeats,
                "op_count": row_ops.len,
                "ops": row_ops
-         })
+            })
          i += 1
       }
       pass_reports = pass_reports.append({
@@ -6190,7 +6190,7 @@ fn refined_fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, st
             "qr_input_transposed": rows < cols,
             "orthogonality_error": 0.0,
             "reconstruction_error": 0.0
-      })
+         })
       if !changed { p = run_passes } else { p += 1 }
    }
    def out_basis = matrix.Matrix(work)
@@ -6264,7 +6264,7 @@ fn iterated_fused_qr_size_reduce_report(any basis, int max_iterations=4, any eta
             "profile_before": rep.get("profile_before", []),
             "profile_after": rep.get("profile_after", []),
             "elapsed_ms": rep.get("elapsed_ms", 0.0)
-      })
+         })
       if rep.get("op_count", 0) == 0 {
          stopped_reason = "identity-transform"
          keep_going = false
@@ -6968,7 +6968,7 @@ fn lattice_high_precision_fixture_report() dict {
          [100000000, 1, -100000000],
          [100000000, 1, 100000000],
          [1, 0, 0]
-   ])
+      ])
    def cancellation = lattice_numeric_backend_report(cancellation_basis, "householder", 1)
    def huge = bigint_pow(Z(10), 200)
    def huge_basis = matrix.Matrix([[huge, Z(1)], [Z(1), huge]])
@@ -6984,7 +6984,7 @@ fn lattice_high_precision_fixture_report() dict {
          [5.0, 8.0, 13.0],
          [8.0, 13.0, 21.0],
          [13.0, 21.0, 34.0]
-   ])
+      ])
    def tsqr = tall_skinny_qr_factor_report(panel_basis, 3, "reorthogonalized")
    def blocked = blocked_qr_factor_report(panel_basis, 2)
    def cancellation_ok =
@@ -7101,7 +7101,7 @@ fn hlll_reduce_report(any basis, any delta=0.99, int max_rounds=2, any eta=0.51)
             "first_norm_after": first,
             "profile_after": prof,
             "elapsed_ms": fused.get("elapsed_ms", 0.0) + lllrep.get("elapsed_ms", 0.0) + qr.get("elapsed_ms", 0.0)
-      })
+         })
       changed = first < prev_first || fused.get("op_count", 0) > 0 || lllrep.get("steps", 0) > 0
       prev_first = first
       r += 1
@@ -7734,7 +7734,7 @@ fn _flatter_triangular_prepass_path(any work_in, any total_transform_in, int row
                "best_norm_after": col_best, "first_norm_before": col.get("first_norm_before", Z(0)),
                "first_norm_after": col.get("first_norm_after", Z(0)), "transform_tracked": false,
                "transform_verified": false, "verification_skipped": true, "elapsed_ms": col.get("elapsed_ms", 0.0)
-         })
+            })
       }
    }
    if rows < 64 && !track_transform {
@@ -7778,7 +7778,7 @@ fn _flatter_triangular_prepass_path(any work_in, any total_transform_in, int row
                "reduction_ops": normal.get("reduction_ops", 0), "best_norm_before": normal.get("best_norm_before", Z(0)),
                "best_norm_after": normal.get("best_norm_after", Z(0)), "transform_verified": normal.get("transform_verified", false),
                "elapsed_ms": normal.get("elapsed_ms", 0.0)
-         })
+            })
       }
    }
    if _flatter_is_lower_triangular(work) && (track_transform || rows >= 64) && !(bounded_triangular_prepass && !track_transform) {
@@ -7792,7 +7792,7 @@ fn _flatter_triangular_prepass_path(any work_in, any total_transform_in, int row
             "block_size": tri.get("block_size", 32), "block_count": tri.get("block_count", 0),
             "violations_before": tri.get("violations_before", 0), "violations_after": tri.get("violations_after", 0),
             "transform_verified": tri.get("transform_verified", false), "elapsed_ms": tri.get("elapsed_ms", 0.0)
-      })
+         })
    }
    {"work": work, "transform": total_transform, "reports": prepass_reports, "op_count": total_prepass_ops, "triangular": triangular_prepass, "warmup": triangular_warmup_prepass, "bounded": bounded_triangular_prepass}
 }

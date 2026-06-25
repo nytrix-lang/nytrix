@@ -214,16 +214,16 @@ fn mtp_crib_drag(list ciphertexts, list crib) list {
    def c3 = ctr_apply_periodic_keystream(p3, key)
    assert(ctr_apply_periodic_keystream(c1, key) == p1, "periodic keystream round trip")
    assert(ctr_recover_keystream(c1, p1) == [42, 17, 99, 42, 17, 99, 42, 17, 99],
-   "recover matching keystream")
+      "recover matching keystream")
    def recovered_period = ctr_recover_periodic_keystream_english([c1, c2], 3)
    assert(recovered_period.len == 3, "recover periodic english key length")
    assert(ctr_apply_periodic_keystream(c1, recovered_period).len == p1.len,
-   "recovered periodic key is usable")
+      "recovered periodic key is usable")
    def x12 = ctr_xor_plaintexts(c1, c2)
    mut expected_x12 = []
    mut i = 0
    while i < p1.len {
-       expected_x12 = expected_x12.append(p1[i] ^^ p2[i])
+      expected_x12 = expected_x12.append(p1[i] ^^ p2[i])
       i += 1
    }
    assert(x12 == expected_x12, "ctr xor plaintexts")
@@ -235,9 +235,9 @@ fn mtp_crib_drag(list ciphertexts, list crib) list {
    def batch_plain = ctr_apply_periodic_keystream(batch, key)
    assert(batch_plain[0] == 65 && batch_plain[3] == 33, "batch bit flips")
    assert(ctr_score_english_byte(101) > ctr_score_english_byte(0), "english byte score")
-    def pairs = mtp_xor_all([c1, c2, c3])
-    assert(pairs.get(1) == expected_x12, "mtp pair xor c1/c2")
-    assert(is_list(pairs.get(2)), "mtp pair xor c1/c3")
+   def pairs = mtp_xor_all([c1, c2, c3])
+   assert(pairs.get(1) == expected_x12, "mtp pair xor c1/c2")
+   assert(is_list(pairs.get(2)), "mtp pair xor c1/c3")
    def guess = mtp_guess_key_byte([c1, c2, c3], 0, key[0])
    assert(guess.get("score") == 3, "mtp key byte score")
    assert(guess.get("plaintexts").get(0) == p1[0], "mtp guessed plaintext")

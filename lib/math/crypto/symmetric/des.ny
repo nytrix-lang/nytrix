@@ -51,7 +51,7 @@ def _DES_S = [[ 14,4,13,1,2,15,11,8,3,10,6,12,5,9,0,7, 0,15,7,4,14,2,13,1,10,6,1
 
 fn _byte_bit(list bytes, int off, int bit_pos) int {
    def b = __load_item_fast(bytes, off + ((bit_pos - 1) / 8))
-   return(b >> (7 - ((bit_pos - 1) % 8))) & 1
+   return (b >> (7 - ((bit_pos - 1) % 8))) & 1
 }
 
 fn _permute_bytes_int(list bytes, int off, list table) int {

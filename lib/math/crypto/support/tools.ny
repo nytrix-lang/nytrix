@@ -5,7 +5,10 @@
 ;; References:
 ;; - std.math.crypto.support
 ;; - std.math.crypto
-module std.math.crypto.support.tools(scan_lines, collect_lines, bytes_contains, find_subseq, rol_bits, ror_bits, bytes_fixed_from_bigint, bytes_ascii, bytes_is_printable_ascii, bytes_has_prefix, extract_flag, extract_flag_bytes, list_uniq, max_bit_length, str_strip_ws, str_strip_bytes_literal)
+module std.math.crypto.support.tools(scan_lines, collect_lines, bytes_contains, find_subseq,
+   rol_bits, ror_bits, bytes_fixed_from_bigint, bytes_ascii, bytes_is_printable_ascii,
+   bytes_has_prefix, extract_flag, extract_flag_bytes, list_uniq, max_bit_length,
+   str_strip_ws, str_strip_bytes_literal)
 use std.core
 use std.math.bin
 use std.math.big
@@ -19,13 +22,15 @@ fn scan_lines(str txt, fnptr on_line) any {
    mut i = 0
    mut start = 0
    while i <= n {
-      if i == n || load8(txt, i) == 10 {
-         mut line = str_slice(txt, start, i)
-         start = i + 1
-         if line.len > 0 && load8(line, line.len - 1) == 13 { line = str_slice(line, 0, line.len - 1) }
-         line = str.strip(line)
-         if line.len > 0 { if on_line(line) == false { return nil } }
+      if i < n && load8(txt, i) != 10 {
+         i += 1
+         continue
       }
+      mut line = str_slice(txt, start, i)
+      start = i + 1
+      if line.len > 0 && load8(line, line.len - 1) == 13 { line = str_slice(line, 0, line.len - 1) }
+      line = str.strip(line)
+      if line.len > 0 { if on_line(line) == false { return nil } }
       i += 1
    }
    nil
@@ -38,13 +43,15 @@ fn collect_lines(str txt) list {
    mut i = 0
    mut start = 0
    while i <= n {
-      if i == n || load8(txt, i) == 10 {
-         mut line = str_slice(txt, start, i)
-         start = i + 1
-         if line.len > 0 && load8(line, line.len - 1) == 13 { line = str_slice(line, 0, line.len - 1) }
-         line = str.strip(line)
-         if line.len > 0 { out = out.append(line) }
+      if i < n && load8(txt, i) != 10 {
+         i += 1
+         continue
       }
+      mut line = str_slice(txt, start, i)
+      start = i + 1
+      if line.len > 0 && load8(line, line.len - 1) == 13 { line = str_slice(line, 0, line.len - 1) }
+      line = str.strip(line)
+      if line.len > 0 { out = out.append(line) }
       i += 1
    }
    out

@@ -11,6 +11,7 @@ module std.math.crypto.prng.xoshiro(xorshift32_next, xorshift64star_next, xorosh
 use std.math.nt
 
 fn _X64_MOD() any { Z("18446744073709551616") }
+
 fn _X32_MOD() any { Z("4294967296") }
 
 fn _u64(any x) any { mod(Z(x), _X64_MOD()) }

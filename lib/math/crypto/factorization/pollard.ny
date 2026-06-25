@@ -153,7 +153,7 @@ fn _pollard_record_pm1_stage1(dict out, dict st, any d) dict {
          "stage1_prime_count": st.get("stage1_prime_count", 0),
          "stage1_last_prime_power": st.get("stage1_last_prime_power", Z(1)),
          "stage1_gcd": d,
-   })
+      })
 }
 
 fn pollard_rho(any n) any {
@@ -277,7 +277,7 @@ fn _pollard_brent_report_i31(int n, int y0=2, int c0=1, int m0=128, int max_gcds
          "pm1_precheck_used": false, "pm1_precheck_B": 0, "pm1_precheck_status": "", "pm1_precheck_stage1_ops": 0,
          "fermat_precheck_used": false, "fermat_precheck_max_iters": 0, "fermat_precheck_status": "",
          "kernel": "i31-brent",
-   })
+      })
    if n <= 1 { return _pollard_finish(out, t0, "invalid-input") }
    if (n & 1) == 0 { return _pollard_finish_factor(out, nz, Z(2), t0, "even") }
    def r = _pollard_brent_factor_i31(n, y0, c0, m0, max_gcds)
@@ -293,7 +293,7 @@ fn _pollard_brent_core(any n, any y0=2, any c0=1, any m0=128, int max_gcds=20000
    def nz = Z(n)
    mut out = _pollard_report("pollard-brent", nz).merge({
          "y0": y0, "c": c0, "block": m0, "max_gcds": max_gcds,
-   })
+      })
    if nz <= Z(1) { return _pollard_finish(out, t0, "invalid-input") }
    if nz % 2 == 0 { return _pollard_finish_factor(out, nz, Z(2), t0, "even") }
    def tuned = _pollard_brent_tuned_precheck_params(nz, y0, c0, m0, max_gcds)
@@ -307,7 +307,7 @@ fn _pollard_brent_core(any n, any y0=2, any c0=1, any m0=128, int max_gcds=20000
             "tuned_precheck_block": tuned.get(2),
             "tuned_precheck_gcds": tuned_pre.get("gcds", 0),
             "tuned_precheck_status": tuned_pre.get("status", ""),
-      })
+         })
       if tuned_pre.get("success", false) {
          return _pollard_finish_factor(out, nz, tuned_pre.get("factor", nil), t0, "factor")
       }
@@ -322,13 +322,13 @@ fn _pollard_brent_core(any n, any y0=2, any c0=1, any m0=128, int max_gcds=20000
                "pm1_precheck_status": pm1.get("status", "factor"),
                "pm1_precheck_stage1_ops": pm1.get("stage1_ops", 0),
                "gcds": 0, "fallback_gcds": 0,
-         })
+            })
          return _pollard_finish_factor(out, nz, fp, t0, "factor")
       }
       out = out.merge({
             "pm1_precheck_status": pm1.get("status", "smoothness-bound-exhausted"),
             "pm1_precheck_stage1_ops": pm1.get("stage1_ops", 0),
-      })
+         })
    } else {
       out = out.merge({"pm1_precheck_used": false, "pm1_precheck_B": 0, "pm1_precheck_status": "", "pm1_precheck_stage1_ops": 0})
    }
@@ -502,7 +502,7 @@ fn pollard_pm1_stage2_report(any n, any B1, any B2) dict {
    out = out.merge({
          "stage2_ops": stage2_ops, "stage2_prime_count": stage2_ops,
          "stage2_batch_gcds": batch_gcds + 1, "stage2_gcd": d2,
-   })
+      })
    if _is_nontrivial_factor(d2, nz) { return _pollard_finish_factor(out, nz, d2, t0, "stage2-factor") }
    if d2 == nz {
       pi = 0
@@ -794,7 +794,7 @@ fn _lehman_finish_precheck(dict out, any n, any f, str kernel, str precheck_stat
          "square_prefilter_rejects": 0,
          "residue_adjustments": 0,
          "skipped_by_stride": 0,
-   })
+      })
 }
 
 fn _lehman_factor_report_int_kernel(any nz, dict out_in, int k_limit, any sixth_root, int max_window) dict {
@@ -884,7 +884,7 @@ fn lehman_factor_report(any n, int max_k=20000, int max_window=256, bool prechec
                "squfof_precheck_status": sq.get("status", ""),
                "squfof_precheck_forward_iterations": sq.get("forward_iterations", 0),
                "squfof_precheck_reverse_iterations": sq.get("reverse_iterations", 0),
-         })
+            })
          if sq.get("success", false) {
             return _lehman_finish_precheck(out, nz, sq.get("factor", nil), "squfof-precheck", sq.get("status", "factor"))
          }
@@ -900,7 +900,7 @@ fn lehman_factor_report(any n, int max_k=20000, int max_window=256, bool prechec
                "pm1_precheck_status": pm1.get("status", ""),
                "pm1_precheck_stage1_ops": pm1.get("stage1_ops", 0),
                "pm1_precheck_stage2_ops": pm1.get("stage2_ops", 0),
-         })
+            })
          if pm1.get("success", false) {
             return _lehman_finish_precheck(out, nz, pm1.get("factor", nil), "pminus1-precheck", pm1.get("status", "factor"))
          }
@@ -1035,7 +1035,7 @@ fn _squfof_report_init(any nz, any iter_mul) dict {
          "brent_precheck_used": false, "brent_precheck_gcds": 0, "brent_precheck_max_gcds": 0,
          "brent_precheck_status": "", "brent_precheck_y0": 0, "brent_precheck_c": 0,
          "brent_precheck_block": 0,
-   })
+      })
 }
 
 fn _squfof_counter_snapshot(int attempts, int valid_multipliers, int failed_multipliers, int forward_iterations, int reverse_iterations, int square_candidates, int sqrt_checks, int square_prefilter_rejects, int saved_q_entries, int saved_q_hits, int saved_q_overflows, int trivial_square_rejects, int saved_q_max, any last_multiplier) list {
@@ -1127,7 +1127,7 @@ fn _squfof_run_prechecks(any nz, dict out) dict {
             "brent_precheck_gcds": fast_pre.get("gcds", 0),
             "brent_precheck_max_gcds": fast_pre.get("max_gcds", fast_brent_budget),
             "brent_precheck_status": fast_pre.get("status", ""),
-      })
+         })
       if fast_pre.get("success", false) { return {"done": true, "out": out, "factor": fast_pre.get("factor", nil), "status": "brent-precheck-factor"} }
    }
    def fermat_budget_full = _squfof_fermat_precheck_budget(nz)
@@ -1154,7 +1154,7 @@ fn _squfof_run_prechecks(any nz, dict out) dict {
             "pm1_precheck_B2": pm1_b2, "pm1_precheck_status": pm1.get("status", ""),
             "pm1_precheck_stage1_ops": pm1.get("stage1_ops", 0),
             "pm1_precheck_stage2_ops": pm1.get("stage2_ops", 0),
-      })
+         })
       if pm1.get("success", false) { return {"done": true, "out": out, "factor": pm1.get("factor", nil), "status": "pminus1-precheck-factor"} }
    }
    def brent_params = _squfof_brent_precheck_params(nz)
@@ -1170,7 +1170,7 @@ fn _squfof_run_prechecks(any nz, dict out) dict {
             "brent_precheck_gcds": pre.get("gcds", 0),
             "brent_precheck_max_gcds": pre.get("max_gcds", brent_budget),
             "brent_precheck_status": pre.get("status", ""),
-      })
+         })
       if pre.get("success", false) { return {"done": true, "out": out, "factor": pre.get("factor", nil), "status": "brent-precheck-factor"} }
    }
    if fast_fermat_budget > 0 && fermat_budget_full > fast_fermat_budget {
@@ -1201,7 +1201,7 @@ fn _squfof_report_u62(any nz, any iter_mul, dict out_in, any t0) dict {
          "round_budget_hint": rounds,
          "multiplier_count": multipliers.len,
          "numeric_kernel": "u62-int-squfof",
-   })
+      })
    mut attempts, valid_multipliers, failed_multipliers = 0, 0, 0
    mut forward_iterations, reverse_iterations, square_candidates = 0, 0, 0
    mut sqrt_checks, square_prefilter_rejects, saved_q_entries = 0, 0, 0
@@ -1336,12 +1336,12 @@ fn _squfof_report_u62(any nz, any iter_mul, dict out_in, any t0) dict {
          attempts, valid_multipliers, failed_multipliers, forward_iterations, reverse_iterations,
          square_candidates, sqrt_checks, square_prefilter_rejects, saved_q_entries, saved_q_hits,
          saved_q_overflows, trivial_square_rejects, saved_q_max, last_multiplier
-   ))
+      ))
    def br = pollard_brent_report(nz)
    out = out.merge({
          "fallback_used": true, "fallback_method": br.get("method", "pollard-brent"),
          "fallback_status": br.get("status", ""), "fallback_gcds": br.get("gcds", 0),
-   })
+      })
    if br.get("success", false) {
       return _pollard_finish_factor(out, nz, br.get("factor", nil), t0, "brent-fallback-factor")
    }
@@ -1358,7 +1358,7 @@ fn _squfof_report_int_state(any nz, any iter_mul, dict out_in, any t0) dict {
          "round_budget_hint": rounds,
          "multiplier_count": multipliers.len,
          "numeric_kernel": "int-state-squfof",
-   })
+      })
    mut attempts, valid_multipliers, failed_multipliers = 0, 0, 0
    mut forward_iterations, reverse_iterations, square_candidates = 0, 0, 0
    mut sqrt_checks, square_prefilter_rejects, saved_q_entries = 0, 0, 0
@@ -1492,12 +1492,12 @@ fn _squfof_report_int_state(any nz, any iter_mul, dict out_in, any t0) dict {
          attempts, valid_multipliers, failed_multipliers, forward_iterations, reverse_iterations,
          square_candidates, sqrt_checks, square_prefilter_rejects, saved_q_entries, saved_q_hits,
          saved_q_overflows, trivial_square_rejects, saved_q_max, last_multiplier
-   ))
+      ))
    def br = pollard_brent_report(nz)
    out = out.merge({
          "fallback_used": true, "fallback_method": br.get("method", "pollard-brent"),
          "fallback_status": br.get("status", ""), "fallback_gcds": br.get("gcds", 0),
-   })
+      })
    if br.get("success", false) {
       return _pollard_finish_factor(out, nz, br.get("factor", nil), t0, "brent-fallback-factor")
    }
@@ -1653,12 +1653,12 @@ fn squfof_report(any n, any iter_mul=3) dict {
          attempts, valid_multipliers, failed_multipliers, forward_iterations, reverse_iterations,
          square_candidates, sqrt_checks, square_prefilter_rejects, saved_q_entries, saved_q_hits,
          saved_q_overflows, trivial_square_rejects, saved_q_max, last_multiplier
-   ))
+      ))
    def br = pollard_brent_report(nz)
    out = out.merge({
          "fallback_used": true, "fallback_method": br.get("method", "pollard-brent"),
          "fallback_status": br.get("status", ""), "fallback_gcds": br.get("gcds", 0),
-   })
+      })
    if br.get("success", false) {
       return _pollard_finish_factor(out, nz, br.get("factor", nil), t0, "brent-fallback-factor")
    }
@@ -1688,7 +1688,7 @@ fn pollard_strassen_report(any n) dict {
          "block_gcds": 0,
          "scan_gcds": 0,
          "probes": 0,
-   })
+      })
    if nz <= Z(1) { return _pollard_finish(out, t0, "invalid-input") }
    if nz % Z(2) == Z(0) { return _pollard_finish_factor(out, nz, Z(2), t0, "even") }
    def c = _pollard_ceil_fourth_root(nz)
@@ -1727,7 +1727,7 @@ fn pollard_strassen_report(any n) dict {
          "fallback_method": br.get("method", "pollard-brent"),
          "fallback_status": br.get("status", ""),
          "fallback_gcds": br.get("gcds", 0),
-   })
+      })
    if br.get("success", false) { return _pollard_finish_factor(out, nz, br.get("factor", nil), t0, "brent-fallback-factor") }
    _pollard_finish(out, t0, "search-exhausted")
 }
@@ -1745,7 +1745,7 @@ fn batch_gcd_factor_report(any n, int start=2, int width=4096, int block_size=64
          "start": start, "width": width, "block_size": block_size,
          "avx2_available": simmd.has_avx2(), "avx512_available": simmd.has_avx512f(),
          "bmi2_available": simmd.has_bmi2(),
-   })
+      })
    if nz <= Z(1) { return _pollard_finish(out, t0, "invalid-input") }
    if nz % Z(2) == Z(0) { return _pollard_finish_factor(out, nz, Z(2), t0, "even") }
    def bs = max(1, block_size)
@@ -1861,7 +1861,7 @@ fn batch_gcd_tree_factor_report(any n, int start=2, int width=4096, int leaf_siz
          "start": start, "width": width, "leaf_size": leaf_size,
          "avx2_available": simmd.has_avx2(), "avx512_available": simmd.has_avx512f(),
          "bmi2_available": simmd.has_bmi2(),
-   })
+      })
    if nz <= Z(1) { return _pollard_finish(out, t0, "invalid-input") }
    if nz % Z(2) == Z(0) { return _pollard_finish_factor(out, nz, Z(2), t0, "even") }
    def lo = max(2, start)
@@ -1871,7 +1871,7 @@ fn batch_gcd_tree_factor_report(any n, int start=2, int width=4096, int leaf_siz
          "tree_nodes": scan.get("nodes", 0), "tree_leaves": scan.get("leaves", 0),
          "tree_products": scan.get("products", 0), "tree_gcds": scan.get("gcds", 0),
          "tree_max_depth": scan.get("max_depth", 0), "hit_value": scan.get("hit_value", 0),
-   })
+      })
    def f = scan.get("factor", nil)
    if f != nil { return _pollard_finish_factor(out, nz, f, t0, "factor") }
    _pollard_finish(out, t0, "search-exhausted")

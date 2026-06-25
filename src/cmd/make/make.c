@@ -693,7 +693,7 @@ static int run_test_tool(const char *root, const char *kind, int jobs, const cha
     ny_setenv("NYTRIX_STD_CACHE", "1", 1);
 
   nyt_msg("TEST", NYT_MAGENTA,
-          "make test: full matrix with jit/repl/native and benchmarks; result_cache %s, "
+          "make test: fixture-flag matrix with runtime/repl/error/bench suites; result_cache %s, "
           "exec_cache %s, std_cache %s (set NYTRIX_TEST_EXEC_CACHE=1 to enable binary caches)",
           cold ? "off" : "on", (!cold && exec_cache) ? "on" : "off",
           (getenv("NYTRIX_STD_CACHE") && strcmp(getenv("NYTRIX_STD_CACHE"), "0") == 0) ? "off" : "on");

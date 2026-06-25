@@ -11,8 +11,7 @@ module std.math.crypto.ecc.ecc(ecc_point_add, ecc_point_double, ecc_scalar_mult,
    ecc_negate, ecc_sub, ecc_is_on_curve, ecc_parameter_recovery,
    ecc_curve_secp256k1, ecc_curve_p256, ecc_curve_p384, ecc_sqrt_mod,
    ecc_to_jacobian, ecc_from_jacobian, ecc_jacobian_add, ecc_jacobian_double,
-ecc_precompute_table, ecc_glv_decompose)
-
+   ecc_precompute_table, ecc_glv_decompose)
 use std.math.nt
 
 fn ecc_point_add(any P, any Q, any a, any p) any {
@@ -141,7 +140,7 @@ fn ecc_parameter_recovery(list pts, any p) any {
    def x1 = P1[0] def y1 = P1[1]
    def x2 = P2[0] def y2 = P2[1]
    def num = mod_sub(mod_sub(mod_mul(y1, y1, p), bigint_pow(Z(x1), Z(3)), p),
-   mod_sub(mod_mul(y2, y2, p), bigint_pow(Z(x2), Z(3)), p), p)
+      mod_sub(mod_mul(y2, y2, p), bigint_pow(Z(x2), Z(3)), p), p)
    def den = mod_sub(x1, x2, p)
    def a = mod_mul(num, inverse_mod(den, p), p)
    def b = mod_sub(mod_sub(mod_mul(y1, y1, p), bigint_pow(Z(x1), Z(3)), p), mod_mul(a, x1, p), p)
@@ -153,7 +152,7 @@ fn ecc_curve_secp256k1() list {
    def p, a = hex_to_bigint("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F"), Z(0)
    def b, n = Z(7), hex_to_bigint("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
    def G = [hex_to_bigint("79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798"),
-   hex_to_bigint("483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8")]
+      hex_to_bigint("483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8")]
    [p, a, b, G, n]
 }
 
@@ -163,7 +162,7 @@ fn ecc_curve_p256() list {
    def b = hex_to_bigint("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B")
    def n = hex_to_bigint("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551")
    def G = [hex_to_bigint("6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296"),
-   hex_to_bigint("4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5")]
+      hex_to_bigint("4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5")]
    [p, a, b, G, n]
 }
 

@@ -392,7 +392,6 @@ fn ecdsa_recover_key_from_nonce_msb(list sig, any msg, any n, any leak, any bits
    assert(parsed[0] == Z(3735928559), "hnp parse line hash")
    assert(parsed[1][0] == Z(3405691582), "hnp parse line r")
    assert(parsed[1][1] == Z(3735928559), "hnp parse line s")
-
    def leaked_bits = 8
    def leaked_lsb = k % (Z(1) << leaked_bits)
    def sample = ecdsa_hnp_lsb_sample(sig, h, leaked_lsb, leaked_bits, ecc_p256_n)
@@ -404,14 +403,12 @@ fn ecdsa_recover_key_from_nonce_msb(list sig, any msg, any n, any leak, any bits
    def samples = ecdsa_hnp_lsb_samples([sig], [h], [leaked_lsb], leaked_bits, ecc_p256_n)
    assert(samples.len == 1, "hnp lsb samples count")
    assert(samples[0] == sample, "hnp lsb samples matches single sample")
-
    def h3 = Z(54321)
    def sig3 = ecdsa_sign(h3, k, ecc_p256_G, d, ecc_p256_a, ecc_p256_p, ecc_p256_n)
    def reused = ecdsa_nonce_reuse(sig, sig3, h, h3, ecc_p256_n)
    assert(reused != nil, "nonce reuse detection")
    assert(reused[0] == k, "nonce reuse recovers k")
    assert(reused[1] == d, "nonce reuse recovers d")
-
    def k2 = Z(123456)
    def sig2 = ecdsa_sign(h, k2, ecc_p256_G, d, ecc_p256_a, ecc_p256_p, ecc_p256_n)
    assert(sig2 != nil, "second ecdsa sign")

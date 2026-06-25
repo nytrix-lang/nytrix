@@ -331,7 +331,7 @@ fn factor_work_schedule_report(any n, str pretest_policy="default", any explicit
    def terminal = trivial_ecm ? (digits <= 96 ? "siqs" : "nfs") : (digits >= 75 ? "nfs" : "siqs")
    steps = steps.append(_hf_work_step(terminal == "nfs" ? "state_nfs" : "state_qs", "sieve", steps.len, 0, 0, 0, target_digits)
       .set("sieve_method", terminal)
-   .set("stop_reason", trivial_ecm ? "trivial-ecm-skip" : "target-pretest-then-sieve"))
+      .set("stop_reason", trivial_ecm ? "trivial-ecm-skip" : "target-pretest-then-sieve"))
    {
       "method": "factor-work-schedule",
       "source_model": "adaptive autofactor work scheduler",

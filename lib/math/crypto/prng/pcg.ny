@@ -10,7 +10,9 @@ module std.math.crypto.prng.pcg(pcg32_default_multiplier, pcg32_step, pcg32_outp
 use std.math.nt
 
 fn _PCG64_MOD() bigint { Z("18446744073709551616") }
+
 fn _PCG32_MOD() bigint { Z("4294967296") }
+
 fn _PCG32_MULT() bigint { Z("6364136223846793005") }
 
 fn _u64(any x) bigint { mod(Z(x), _PCG64_MOD()) }

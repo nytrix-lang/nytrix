@@ -612,7 +612,7 @@ fn worldfreq_detect(str text, any langs=nil, int limit=8) list {
                score,
                int(word_stats[2]),
                int(word_stats[3])
-         ])
+            ])
       }
       i += 1
    }

@@ -780,6 +780,8 @@ static void drop_control_condition_parens(char *s, size_t cap) {
 }
 
 static int starts_with_use_line(const char *s);
+static int fmt_keyword_at(const char *s, size_t i, const char *kw);
+static int fmt_ensure_one_space_before(char *s, size_t cap, size_t idx);
 
 static int fmt_word_ending_at_is_control(const char *s, size_t end) {
   if (!s || end == (size_t)-1 || (!isalnum((unsigned char)s[end]) && s[end] != '_'))
@@ -797,6 +799,18 @@ static int fmt_word_ending_at_is_control(const char *s, size_t end) {
   return 0;
 }
 
+static int fmt_word_ending_at_keeps_paren_space(const char *s, size_t end) {
+  if (fmt_word_ending_at_is_control(s, end))
+    return 1;
+  if (!s || end == (size_t)-1 || (!isalnum((unsigned char)s[end]) && s[end] != '_'))
+    return 0;
+  size_t start = end;
+  while (start > 0 && (isalnum((unsigned char)s[start - 1]) || s[start - 1] == '_'))
+    start--;
+  size_t n = end - start + 1;
+  return n == 6 && strncmp(s + start, "return", 6) == 0;
+}
+
 static void short_forms(char *s) {
   drop_control_condition_parens(s, 8192);
   char *p = strstr(s, "comptime {");
@@ -808,13 +822,43 @@ static void short_forms(char *s) {
     return;
   for (size_t i = 0; s[i]; i++) {
     if ((isalnum((unsigned char)s[i]) || s[i] == '_') && s[i + 1] == ' ' && s[i + 2] == '(') {
-      if (fmt_word_ending_at_is_control(s, i))
+      if (fmt_word_ending_at_keeps_paren_space(s, i))
         continue;
       memmove(s + i + 1, s + i + 2, strlen(s + i + 2) + 1);
       i++;
     }
   }
   drop_control_condition_parens(s, 8192);
+}
+
+static void normalize_return_paren_space(char *s, size_t cap) {
+  if (!s || cap == 0)
+    return;
+  int quote = 0, esc = 0;
+  for (size_t i = 0; s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (!fmt_keyword_at(s, i, "return"))
+      continue;
+    size_t p = i + 6;
+    while (s[p] == ' ' || s[p] == '\t')
+      p++;
+    if (s[p] == '(' && p == i + 6)
+      fmt_ensure_one_space_before(s, cap, p);
+    i = p;
+  }
 }
 
 static size_t fmt_find_matching_paren(const char *s, size_t open) {
@@ -1129,6 +1173,112 @@ static void normalize_control_scope_space(char *s, size_t cap) {
       break;
     }
   }
+}
+
+static int compact_control_scope_col(const char *s) {
+  static const char *keys[] = {"if", "elif", "while", "for", "match", "else"};
+  int quote = 0, esc = 0;
+  for (size_t i = 0; s && s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '$' && s[i + 1] == '{') {
+      size_t next = fmt_skip_template_hole(s, i);
+      if (next == i || s[next] == '\0')
+        break;
+      i = next - 1;
+      continue;
+    }
+    for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
+      const char *kw = keys[k];
+      size_t n = strlen(kw);
+      if (!fmt_keyword_at(s, i, kw))
+        continue;
+      size_t brace = fmt_control_body_brace(s, i + n);
+      if (brace == (size_t)-1 || brace == 0)
+        continue;
+      if (s[brace - 1] != ' ' && s[brace - 1] != '\t')
+        return (int)brace + 1;
+      i = brace;
+      break;
+    }
+  }
+  return -1;
+}
+
+static int compact_return_paren_col(const char *s) {
+  int quote = 0, esc = 0;
+  for (size_t i = 0; s && s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (fmt_keyword_at(s, i, "return") && s[i + 6] == '(')
+      return (int)i + 7;
+  }
+  return -1;
+}
+
+static int repeated_append_chain_col(const char *s) {
+  int quote = 0, esc = 0, hits = 0;
+  char first_receiver[96] = {0};
+  for (size_t i = 0; s && s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == ';')
+      break;
+    if (strncmp(s + i, ".append(", 8) == 0) {
+      char receiver[96] = {0};
+      size_t start = i;
+      while (start > 0 && (isalnum((unsigned char)s[start - 1]) || s[start - 1] == '_'))
+        start--;
+      if (start < i && i - start < sizeof(receiver)) {
+        memcpy(receiver, s + start, i - start);
+        receiver[i - start] = '\0';
+      }
+      hits++;
+      if (hits == 1) {
+        snprintf(first_receiver, sizeof(first_receiver), "%s", receiver);
+      } else if (s[i - 1] == ')' || (receiver[0] && strcmp(receiver, first_receiver) == 0)) {
+        return (int)i + 1;
+      }
+      i += 7;
+    }
+  }
+  return -1;
 }
 
 static void normalize_use_import_star(char *s) {
@@ -2021,6 +2171,7 @@ static char *format_ny_text(const char *in) {
     short_forms(code_stripped);
     normalize_fn_scope_space(code_stripped, sizeof(code_stripped));
     normalize_control_scope_space(code_stripped, sizeof(code_stripped));
+    normalize_return_paren_space(code_stripped, sizeof(code_stripped));
     normalize_use_import_star(code_stripped);
     normalize_use_import_list_space(code_stripped, sizeof(code_stripped));
 
@@ -2048,9 +2199,7 @@ static char *format_ny_text(const char *in) {
     int starts_with_close = 0;
     int delta = count_brace_delta_state(merged, &starts_with_close, &quote_state, &esc_state);
     int eff = indent;
-    if (delta < 0)
-      eff = indent + delta;
-    else if (starts_with_close)
+    if (starts_with_close)
       eff = indent - 1;
     if (eff < 0)
       eff = 0;
@@ -2457,6 +2606,76 @@ static int parse_ny_fn_line(const char *line, char *name, size_t name_sz, char *
   return 1;
 }
 
+static int ny_param_piece_typed(const char *a, const char *b) {
+  int quote = 0, esc = 0, depth = 0;
+  const char *end = b;
+  while (a < b && isspace((unsigned char)*a))
+    a++;
+  while (b > a && isspace((unsigned char)b[-1]))
+    b--;
+  while (a < b && *a == '.')
+    a++;
+  for (const char *p = a; p < b; p++) {
+    char ch = *p;
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
+      depth++;
+      continue;
+    }
+    if (ch == ')' || ch == ']' || ch == '}' || ch == '>') {
+      if (depth > 0)
+        depth--;
+      continue;
+    }
+    if (ch == ':' && depth == 0)
+      return 1;
+    if (ch == '=' && depth == 0) {
+      end = p;
+      break;
+    }
+  }
+  int words = 0;
+  for (const char *p = a; p < end;) {
+    while (p < end && isspace((unsigned char)*p))
+      p++;
+    if (p >= end)
+      break;
+    if (*p == '?')
+      p++;
+    if (!(isalpha((unsigned char)*p) || *p == '_'))
+      break;
+    words++;
+    while (p < end && (isalnum((unsigned char)*p) || *p == '_'))
+      p++;
+    if (*p == '<') {
+      int angle = 1;
+      p++;
+      while (p < end && angle > 0) {
+        if (*p == '<')
+          angle++;
+        else if (*p == '>')
+          angle--;
+        p++;
+      }
+    }
+    if (words >= 2)
+      return 1;
+  }
+  return 0;
+}
+
 static int ny_params_untyped_count(const char *params) {
   int count = 0;
   int quote = 0, esc = 0, depth = 0;
@@ -2504,14 +2723,7 @@ static int ny_params_untyped_count(const char *params) {
       }
       while (b > a && *a == '.')
         a++;
-      int typed = 0;
-      for (const char *q = a; q < b; q++) {
-        if (*q == ':') {
-          typed = 1;
-          break;
-        }
-      }
-      if (!typed)
+      if (!ny_param_piece_typed(a, b))
         count++;
     }
     if (at_end)
@@ -2991,6 +3203,24 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
         issue_push(issues, path, ln, compact_list_col + 1, "NYFMT1301", "note",
                    "missing space before import list",
                    "prefer 'use module (name)' so formatter, docs, and LSP stay aligned");
+      }
+      int compact_scope_col = compact_control_scope_col(line);
+      if (compact_scope_col >= 0) {
+        issue_push(issues, path, ln, compact_scope_col, "NYFMT1306", "note",
+                   "missing space before control block",
+                   "write control flow as 'if expr {'; ny-fmt rewrites compact braces automatically");
+      }
+      int return_paren_col = compact_return_paren_col(line);
+      if (return_paren_col >= 0) {
+        issue_push(issues, path, ln, return_paren_col, "NYFMT1308", "note",
+                   "compact return expression is hard to scan",
+                   "write 'return (expr)' or 'return expr'; ny-fmt keeps return as keyword syntax");
+      }
+      int append_chain_col = repeated_append_chain_col(line);
+      if (append_chain_col >= 0) {
+        issue_push(issues, path, ln, append_chain_col, "NYFMT1307", "note",
+                   "same-line append chain is hard to scan",
+                   "prefer a list literal for fixed data, or a builder/loop for generated data");
       }
       int repeated_mut_col = repeated_mut_decl_col(line);
       if (repeated_mut_col >= 0) {
@@ -4484,6 +4714,16 @@ static const char *audit_branch_condition_bounds(const char *line, const char **
   }
   if (!p)
     return NULL;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  if (*p != '(') {
+    size_t brace_idx = fmt_control_body_brace(s, (size_t)(p - s));
+    if (brace_idx == (size_t)-1 || s + brace_idx <= p)
+      return NULL;
+    if (close_out)
+      *close_out = s + brace_idx;
+    return p;
+  }
   while (*p && *p != '(')
     p++;
   if (*p != '(')
@@ -6174,35 +6414,7 @@ static int audit_backend_contract_fn(const char *name) {
 }
 
 static int audit_param_piece_typed(const char *a, const char *b) {
-  int quote = 0, esc = 0, depth = 0;
-  for (const char *p = a; p && p < b; p++) {
-    char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
-      continue;
-    }
-    if (ch == '"' || ch == '\'') {
-      quote = ch;
-      continue;
-    }
-    if (ch == '(' || ch == '[' || ch == '{') {
-      depth++;
-      continue;
-    }
-    if (ch == ')' || ch == ']' || ch == '}') {
-      if (depth > 0)
-        depth--;
-      continue;
-    }
-    if (ch == ':' && depth == 0)
-      return 1;
-  }
-  return 0;
+  return ny_param_piece_typed(a, b);
 }
 
 static int audit_param_piece_name(const char *a, const char *b, char *out, size_t out_sz) {

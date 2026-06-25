@@ -258,7 +258,7 @@ fn _hnp_result(
          ["samples", samples], ["lattice_samples", lattice_samples],
          ["checks", checks], ["method", method], ["volume_bits", volume_bits],
          ["row", row_index], ["target", target], ["tau", tau], ["errors", errors],
-   ])
+      ])
 }
 
 fn _hnp_opt(dict opts, str key, any fallback) any { opts.get(key, fallback) }
@@ -332,7 +332,7 @@ fn hnp_recover(any samples, any modulus, any leaked_bits, any opts=nil) dict {
    def lattice_samples = use_counts ? hnp_partition_samples(samples, counts)[0] : _hnp_slice(samples, 0, cfg[6])
    if lattice_samples.len < 2 {
       return _hnp_result(false, nil, "need at least two lattice samples",
-      samples.len, lattice_samples.len, samples.len, method, volume_bits)
+         samples.len, lattice_samples.len, samples.len, method, volume_bits)
    }
    def basis = volume_bits > 0 ? hnp_lsb_lattice_increase_volume(lattice_samples, q, leaked_bits, volume_bits, embedding) :
    hnp_lsb_lattice_eliminate_alpha(lattice_samples, q, leaked_bits, embedding)
@@ -341,7 +341,7 @@ fn hnp_recover(any samples, any modulus, any leaked_bits, any opts=nil) dict {
    def failure = basis == nil ? "lattice construction failed" : (reduced == nil ? "lattice reduction failed" : nil)
    if failure != nil {
       return _hnp_result(false, nil, failure,
-      samples.len, lattice_samples.len, samples.len, method, volume_bits).set("lattice_report", reduction_report)
+         samples.len, lattice_samples.len, samples.len, method, volume_bits).set("lattice_report", reduction_report)
    }
    def rows = reduced[2]
    mut i = 0
@@ -351,7 +351,7 @@ fn hnp_recover(any samples, any modulus, any leaked_bits, any opts=nil) dict {
          def alpha = hit[0]
          def errors = _hnp_count_errors(alpha, samples, q, leaked_bits)
          return _hnp_result(true, alpha, "ok", samples.len, lattice_samples.len, samples.len, method, volume_bits,
-         i, hit[1], hit[2], errors).set("lattice_report", reduction_report)
+            i, hit[1], hit[2], errors).set("lattice_report", reduction_report)
       }
       i += 1
    }

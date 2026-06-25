@@ -522,7 +522,7 @@ fn _bkz_append_transform_check(list checks, str stage, any original, any transfo
          "start": start,
          "ok": mismatch.len == 0,
          "mismatch": mismatch
-   })
+      })
 }
 
 fn bkz_projected_block_report(any basis, int start, int stop) dict {
@@ -927,7 +927,7 @@ fn bkz_backend_report(any basis=nil) dict {
             "cols", _matrix_cols(B),
             "max_default_passes", rows,
             "strategy_report", bkz_strategy_report(rows, min(10, max(2, rows)))
-      ])
+         ])
    }
    out
 }
@@ -1206,7 +1206,7 @@ fn _svp_gso_enumerate_prepped(any reduced, any reduce_transform, any radius_sq=n
             "basis_min_index", seed.get("index", -1),
             "initial_bound_source", seed.get("source", "basis-min-row"),
             "dimension_trimmed", search_n < n
-      ])
+         ])
       return _svp_state_with_input_coeffs(skipped, reduce_transform)
    }
    def nodes_by_level = _bkz_nodes_vec(search_n)
@@ -1232,7 +1232,7 @@ fn _svp_gso_enumerate_prepped(any reduced, any reduce_transform, any radius_sq=n
          "basis_min_index", seed.get("index", -1),
          "initial_bound_source", seed.get("source", "basis-min-row"),
          "dimension_trimmed", search_n < n
-   ])
+      ])
    _svp_state_with_input_coeffs(state, reduce_transform)
 }
 
@@ -1669,7 +1669,7 @@ fn svp_gram_report(any gram, any radius_sq=nil, int coeff_bound=2, int max_nodes
          "basis_conversion", "none",
          "elapsed_ms", elapsed,
          "nodes_per_sec", _bkz_nodes_per_sec(nodes, elapsed)
-   ])
+      ])
    out
 }
 
@@ -1858,14 +1858,14 @@ fn _bkz_gram_block_report(int start,
          "candidate_improved", candidate_improved,
          "applied", applied,
          "improved", improved
-   ])
+      ])
    if bounded_exact_fallback {
       def cleanup = cleanup_report == nil ? {"skipped": true, "reason": insertion_reason == "none" ? "no-improving-candidate" : insertion_reason} : cleanup_report
       out = _bkz_set_fields(out, [
             "bounded_exact_fallback", true,
             "post_insertion_cleanup", cleanup,
             "cleanup_complete", cleanup_complete
-      ])
+         ])
    }
    out = _bkz_set_fields(out, ["elapsed_ms", _bkz_elapsed_ms(block_t0)])
    out
@@ -1926,7 +1926,7 @@ fn _bkz_gram_block_step(any G, any transform, int n, int i, int block_size, any 
       report = _bkz_gram_block_report(
          i, h, before_norm, sv_norm, coeffs, sv, completion,
          local_verified, insertion_reason, candidate_improved, applied, improved,
-      block_t0, cleanup_report, cleanup_complete, bounded_exact_fallback)
+         block_t0, cleanup_report, cleanup_complete, bounded_exact_fallback)
    }
    [outG, out_transform, changed, report]
 }
@@ -2038,7 +2038,7 @@ fn bkz_gram_reduce_report(any gram, int block_size=10, any delta=0.75, str metho
          "after_first_norm", _bkz_entry_z(_matrix_get(G, 0, 0)),
          "tour_reports", core[1],
          "initial_lll", core[4]
-   ])
+      ])
    if core.len > 5 { out = out.set("final_lll", core[5]) }
    out = _bkz_set_fields(out, [
          "transform", transform,
@@ -2047,7 +2047,7 @@ fn bkz_gram_reduce_report(any gram, int block_size=10, any delta=0.75, str metho
          "transform_first_mismatch", _bkz_first_matrix_mismatch(_bkz_gram_transform(transform, G0), G),
          "gram", G,
          "elapsed_ms", _bkz_elapsed_ms(t0)
-   ])
+      ])
    out
 }
 
