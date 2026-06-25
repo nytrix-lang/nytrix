@@ -116,7 +116,7 @@ fn _smart_attack_p2(any Px, any Py, any Qx, any Qy, any a, any p) any {
                def phiP, phiQ = _smart_phi_from_jac_divp(pPj, p, p2), _smart_phi_from_jac_divp(pQj, p, p2)
                if os.env("NYTRIX_SMART_TRACE") != 0 {
                   print("[smart] ra=" + to_str(ra) + " rb=" + to_str(rb) +
-                  " phiP=" + to_str(phiP) + " phiQ=" + to_str(phiQ))
+                     " phiP=" + to_str(phiP) + " phiQ=" + to_str(phiQ))
                }
                if phiP >= 0 && phiQ >= 0 && phiP != 0 {
                   def inv = inverse_mod(phiP, p)

@@ -5,13 +5,21 @@
 ;; References:
 ;; - std.math.crypto.encoding
 ;; - std.math.crypto
-module std.math.crypto.encoding.radix(digit_value, parse_radix_int, parse_octal_int, decimal_chunks_to_text, octal_chunks_to_text, keyed_alpha_decode, base45_decode, ascii85_decode, base92_decode, base65536_decode, base58_encode_bytes, base58_decode_str, base58check_encode_bytes, base58check_decode_str, base91_pair_decode)
+module std.math.crypto.encoding.radix(digit_value, parse_radix_int, parse_octal_int,
+   decimal_chunks_to_text, octal_chunks_to_text, keyed_alpha_decode,
+   base_n_encode_int, base_n_decode_int, base_n_encode_bytes, base_n_decode_bytes,
+   base36_encode_int, base36_decode_int, base62_encode_int, base62_decode_int,
+   base62_encode_bytes, base62_decode_bytes, base45_decode, ascii85_decode,
+   base92_decode, base65536_decode, base58_encode_bytes, base58_decode_str,
+   base58check_encode_bytes, base58check_decode_str, base91_pair_decode)
 use std.core
 use std.core.str
 use std.math.nt
 use std.math.crypto.hash as h
 
 def BASE58_CHARS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+def BASE36_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz"
+def BASE62_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 mut _BASE91_DEFAULT = nil
 
 fn digit_value(int ch) int {
@@ -41,6 +49,134 @@ fn parse_radix_int(any s, int base) int {
 fn parse_octal_int(any s) int {
    "Parse an octal integer string, returning -1 on invalid input."
    return parse_radix_int(s, 8)
+}
+
+fn _base_n_index(str alphabet, int ch) int {
+   mut i = 0
+   while i < alphabet.len {
+      if load8(alphabet, i) == ch { return i }
+      i += 1
+   }
+   -1
+}
+
+fn _base_n_valid_alphabet(str alphabet) bool {
+   if !is_str(alphabet) || alphabet.len < 2 { return false }
+   mut i = 0
+   while i < alphabet.len {
+      if _base_n_index(alphabet, load8(alphabet, i)) != i { return false }
+      i += 1
+   }
+   true
+}
+
+fn base_n_encode_int(any n, str alphabet) str {
+   "Encode a non-negative integer with an arbitrary unique alphabet."
+   assert(_base_n_valid_alphabet(alphabet), "base_n_encode_int: alphabet must contain at least two unique bytes")
+   mut x = Z(n)
+   assert(x >= Z(0), "base_n_encode_int: negative integers are not supported")
+   if x == Z(0) { return chr(load8(alphabet, 0)) }
+   def base = Z(alphabet.len)
+   mut digits = []
+   while x > Z(0) {
+      def q, r = x / base, x - q * base
+      digits = digits.append(bigint_to_int(r))
+      x = q
+   }
+   mut out = Builder(max(8, digits.len + 4))
+   mut i = digits.len
+   while i > 0 {
+      i -= 1
+      out = builder_append_byte(out, load8(alphabet, digits[i]))
+   }
+   _radix_finish_builder(out)
+}
+
+fn base_n_decode_int(str s, str alphabet) any {
+   "Decode an arbitrary-alphabet integer. Returns -1 on invalid input."
+   if !_base_n_valid_alphabet(alphabet) || !is_str(s) || s.len == 0 { return Z(-1) }
+   def base = Z(alphabet.len)
+   mut n, i = Z(0), 0
+   while i < s.len {
+      def d = _base_n_index(alphabet, load8(s, i))
+      if d < 0 { return Z(-1) }
+      n = n * base + Z(d)
+      i += 1
+   }
+   n
+}
+
+fn base_n_encode_bytes(list bytes, str alphabet) str {
+   "Encode a byte list with an arbitrary unique alphabet, preserving leading zero bytes."
+   if bytes == nil || bytes.len == 0 { return "" }
+   assert(_base_n_valid_alphabet(alphabet), "base_n_encode_bytes: alphabet must contain at least two unique bytes")
+   mut out = Builder(max(8, bytes.len * 2 + 4))
+   mut z = 0
+   while z < bytes.len && bytes[z] == 0 {
+      out = builder_append_byte(out, load8(alphabet, 0))
+      z += 1
+   }
+   def n = bytes_to_bigint(bytes)
+   if n != Z(0) {
+      def enc = base_n_encode_int(n, alphabet)
+      out = builder_append(out, enc)
+   }
+   _radix_finish_builder(out)
+}
+
+fn base_n_decode_bytes(str s, str alphabet) ?list {
+   "Decode arbitrary-alphabet text into a byte list, preserving leading zero digits. Returns nil on invalid input."
+   if !_base_n_valid_alphabet(alphabet) || !is_str(s) { return nil }
+   if s.len == 0 { return [] }
+   mut z = 0
+   while z < s.len && load8(s, z) == load8(alphabet, 0) { z += 1 }
+   def n = base_n_decode_int(s, alphabet)
+   if n < Z(0) { return nil }
+   mut raw = []
+   if n != Z(0) { raw = bigint_to_bytes(n) }
+   mut out = list(z + raw.len)
+   __list_set_len(out, z + raw.len)
+   mut i = 0
+   while i < z {
+      __store_item_fast(out, i, 0)
+      i += 1
+   }
+   i = 0
+   while i < raw.len {
+      __store_item_fast(out, z + i, raw[i])
+      i += 1
+   }
+   out
+}
+
+fn base36_encode_int(any n) str {
+   "Encode a non-negative integer as base36 using 0-9a-z."
+   base_n_encode_int(n, BASE36_CHARS)
+}
+
+fn base36_decode_int(str s) any {
+   "Decode a base36 integer using 0-9a-z. Returns -1 on invalid input."
+   base_n_decode_int(s, BASE36_CHARS)
+}
+
+fn base62_encode_int(any n) str {
+   "Encode a non-negative integer as base62 using 0-9A-Za-z."
+   base_n_encode_int(n, BASE62_CHARS)
+}
+
+fn base62_decode_int(str s) any {
+   "Decode a base62 integer using 0-9A-Za-z. Returns -1 on invalid input."
+   base_n_decode_int(s, BASE62_CHARS)
+}
+
+fn base62_encode_bytes(list bytes) str {
+   "Encode a byte list as base62 using 0-9A-Za-z."
+   base_n_encode_bytes(bytes, BASE62_CHARS)
+}
+
+fn base62_decode_bytes(str s) ?list {
+   "Decode base62 text into a byte list. Returns nil on invalid input."
+   base_n_decode_bytes(s, BASE62_CHARS)
 }
 
 @inline
@@ -124,8 +260,7 @@ fn base45_decode(str s) str {
       def c0 = _base45_value(load8(clean, i))
       assert(c0 >= 0, "base45_decode: invalid character")
       if i + 2 < n {
-         def c1 = _base45_value(load8(clean, i + 1))
-         def c2 = _base45_value(load8(clean, i + 2))
+         def c1, c2 = _base45_value(load8(clean, i + 1)), _base45_value(load8(clean, i + 2))
          assert(c1 >= 0 && c2 >= 0, "base45_decode: invalid character")
          def v = c0 + c1 * 45 + c2 * 45 * 45
          assert(v >= 0 && v <= 65535, "base45_decode: triplet out of byte-pair range")
@@ -221,8 +356,7 @@ fn base92_decode(str s) str {
    mut out = Builder(max(8, clean.len))
    mut i = 0
    while i < clean.len - 1 {
-      def v0 = _base92_value(load8(clean, i) & 255)
-      def v1 = _base92_value(load8(clean, i + 1) & 255)
+      def v0, v1 = _base92_value(load8(clean, i) & 255), _base92_value(load8(clean, i + 1) & 255)
       assert(v0 >= 0 && v1 >= 0, "base92_decode: invalid character")
       def chunk = v0 * 91 + v1
       assert(chunk < 8192, "base92_decode: invalid 13-bit chunk")
@@ -349,8 +483,7 @@ fn base58_encode_bytes(list bytes) str {
    def z58 = Z(58)
    mut digits = list(0)
    while nn > zero {
-      def q = nn / z58
-      def r = nn - q * z58
+      def q, r = nn / z58, nn - q * z58
       digits = digits.append(bigint_to_int(r))
       nn = q
    }
@@ -497,5 +630,19 @@ fn base91_pair_decode(str s, str alphabet="") list {
    assert(digit_value(ord("B")) == 11, "digit value alpha")
    assert(parse_radix_int("152", 8) == 106, "parse radix")
    assert(keyed_alpha_decode("152 162", "nnj", 8) == "we", "keyed alpha")
+   assert(base36_encode_int(35) == "z", "base36 max digit")
+   assert(base36_encode_int(123456789) == "21i3v9", "base36 encode")
+   assert(base36_decode_int("21i3v9") == 123456789, "base36 decode")
+   assert(base36_decode_int("21I3V9") == Z(-1), "base36 strict alphabet")
+   assert(base62_encode_int(61) == "z", "base62 max digit")
+   assert(base62_encode_int(3843) == "zz", "base62 encode")
+   assert(base62_decode_int("zz") == 3843, "base62 decode")
+   assert(base62_decode_int("!") == Z(-1), "base62 invalid digit")
+   def payload = [0, 0, 1, 2, 255]
+   def encoded = base62_encode_bytes(payload)
+   assert(encoded.len > 2, "base62 bytes encoded")
+   assert(base62_decode_bytes(encoded) == payload, "base62 bytes round trip")
+   assert(base_n_encode_int(255, "01") == "11111111", "base-n binary encode")
+   assert(base_n_decode_int("11111111", "01") == 255, "base-n binary decode")
    print("✓ std.math.crypto.encoding.radix self-test passed")
 }

@@ -32,9 +32,9 @@ fn quadgrams_default_cache_path() str {
 
 fn _quadgrams_ensure_text(str path) str {
    def p = ospath.normalize(path)
-   if file_exists(p){ return unwrap(file_read(p)) }
+   if file_exists(p) { return unwrap(file_read(p)) }
    def repo_p = worldfreq.worldfreq_profile_paths("english").get("quadgrams_path", "")
-   if is_str(repo_p) && repo_p.len > 0 && file_exists(repo_p){ return unwrap(file_read(repo_p)) }
+   if is_str(repo_p) && repo_p.len > 0 && file_exists(repo_p) { return unwrap(file_read(repo_p)) }
    def url = "https://raw.githubusercontent.com/gibsjose/statistical-attack/master/english-quadgrams.txt"
    def body = fetch(url)
    if !is_str(body) || body.len == 0 { panic("quadgrams: fetch failed(missing libcurl?)") }
@@ -78,7 +78,7 @@ fn _quadgrams_load_packed(any path=0) bool {
    mut i = 0
    def n = txt.len
    while i < n {
-      while i < n && (load8(txt, i) == 10 || load8(txt, i) == 13 || load8(txt, i) == 32 || load8(txt, i) == 9){ i += 1 }
+      while i < n && (load8(txt, i) == 10 || load8(txt, i) == 13 || load8(txt, i) == 32 || load8(txt, i) == 9) { i += 1 }
       if i + 4 <= n {
          def c0 = load8(txt, i)
          def c1 = load8(txt, i + 1)
@@ -87,7 +87,7 @@ fn _quadgrams_load_packed(any path=0) bool {
          if c0 >= 65 && c0 <= 90 && c1 >= 65 && c1 <= 90 && c2 >= 65 && c2 <= 90 && c3 >= 65 && c3 <= 90 {
             def packed = (((c0 - 65) * 26 + c1 - 65) * 26 + c2 - 65) * 26 + c3 - 65
             i += 4
-            while i < n && (load8(txt, i) == 32 || load8(txt, i) == 9){ i += 1 }
+            while i < n && (load8(txt, i) == 32 || load8(txt, i) == 9) { i += 1 }
             mut cnt_i = 0
             while i < n && load8(txt, i) >= 48 && load8(txt, i) <= 57 {
                cnt_i = cnt_i * 10 + load8(txt, i) - 48
@@ -127,7 +127,7 @@ fn quadgrams_load(any path=0) list {
    mut i = 0
    def n = txt.len
    while i < n {
-      while i < n && (load8(txt, i) == 10 || load8(txt, i) == 13 || load8(txt, i) == 32 || load8(txt, i) == 9){ i += 1 }
+      while i < n && (load8(txt, i) == 10 || load8(txt, i) == 13 || load8(txt, i) == 32 || load8(txt, i) == 9) { i += 1 }
       if i + 4 <= n {
          def c0 = load8(txt, i)
          def c1 = load8(txt, i + 1)
@@ -136,7 +136,7 @@ fn quadgrams_load(any path=0) list {
          if c0 >= 65 && c0 <= 90 && c1 >= 65 && c1 <= 90 && c2 >= 65 && c2 <= 90 && c3 >= 65 && c3 <= 90 {
             def gram = str.str_slice(txt, i, i + 4)
             i += 4
-            while i < n && (load8(txt, i) == 32 || load8(txt, i) == 9){ i += 1 }
+            while i < n && (load8(txt, i) == 32 || load8(txt, i) == 9) { i += 1 }
             mut cnt_i = 0
             while i < n && load8(txt, i) >= 48 && load8(txt, i) <= 57 {
                cnt_i = cnt_i * 10 + load8(txt, i) - 48
@@ -217,7 +217,9 @@ fn quadgrams_score_upper_ascii(str s) f64 {
 }
 
 #main {
-   def model = quadgrams_load("tmp/test/crypto/cipher/assets/quadgrams-sample.txt")
+   def sample_path = ospath.join(ospath.temp_dir(), "nytrix_quadgrams_selftest.txt")
+   unwrap(file_write(sample_path, "TION 1000\nTHAT 400\nZZZZ 1\n"))
+   def model = quadgrams_load(sample_path)
    assert(model.len == 2, "quadgram model tuple")
    assert(model[0].get("TION", 0.0) > model[0].get("ZZZZ", model[1]), "quadgram probabilities")
    assert(quadgrams_score("TION") > quadgrams_score("ZZZZ"), "quadgram score")

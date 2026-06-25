@@ -686,7 +686,7 @@ fn _sss_ascii_hex_affine_smt_recover(list shares, list part, list kernel, int de
       def rhs = smt.z3_int_sub(ctx, [
             smt.z3_int_add(ctx, [smt.z3_int_val(ctx, base[i]), smt.z3_int_mul(ctx, [smt.z3_int_val(ctx, g[i]), t])]),
             smt.z3_int_mul(ctx, [smt.z3_int_val(ctx, p), wrap])
-      ])
+         ])
       smt.z3_solver_assert(ctx, solver, smt.z3_eq(ctx, c, rhs))
       i += 1
    }
@@ -763,7 +763,7 @@ fn _sss_ascii_hex_embedding_scan(list shares, any rows_or_basis, int const_idx, 
                      "coeff1_ascii": coeffs.len > 1 ? _sss_ascii_hex_bytes(coeffs[1], byte_count) : false,
                      "eval0": coeffs.len > 0 ? _sss_eval_coeffs(coeffs, shares[0][0], p) : nil,
                      "want0": shares[0][1],
-               })
+                  })
             }
             share_fail += 1
          }
