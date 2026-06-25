@@ -13,7 +13,7 @@
            ,cos(v) R=r+2.0 ;{               };J,N,G=e*r ;{##
           };,r*P,s*Q mut ;{                 };any u=0.0 ;{##
          };while u<6.28{                   p,q=sin(u) ;{/##*
-        };,cos(u) ;{=;~                   };rs,rc=R*p ,R*q
+        };,cos(u) ;{=;~                   ;=};rs,rc=R*p ,R*q
         y0=b*rs-a*s ;{                   };z0=a*rs+b*s d=1.0
        / ;{/////#*!;~                  };(7-e*rc+f*z0) ;{**!
        #////////#*!;                 };vx=f*rc+e*z0 ;{###*!;

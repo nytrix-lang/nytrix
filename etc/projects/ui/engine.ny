@@ -6312,6 +6312,9 @@ fn _render_bench_frame() bool {
 }
 
 fn _render_thread_obj_fast_bench() {
+   if !_anim_enabled {
+      return _render_bench_frame()
+   }
    def now = ticks()
    if _last_frame_time == 0 { _last_frame_time = now }
    _current_frame_time = (now - _last_frame_time) / 1000000000.0

@@ -258,6 +258,10 @@ fn _gltf_apply_morph_vec3(list morph_targets, int morph_targets_n, int vi, f64 x
    while mi < morph_targets_n {
       def mt = morph_targets[mi]
       def mt_w = float(mt.get("weight", 0.0))
+      if abs(mt_w) <= 0.0000001 {
+         mi += 1
+         continue
+      }
       def mt_res = mt.get(res_key, 0)
       if is_dict(mt_res) && vi < int(mt_res.get("count", 0)) {
          def mt_ptr = mt_res.get("ptr", 0)
@@ -273,6 +277,36 @@ fn _gltf_apply_morph_vec3(list morph_targets, int morph_targets_n, int vi, f64 x
       mi += 1
    }
    [ox, oy, oz]
+}
+
+fn _gltf_apply_morph_vec3_into(list morph_targets, int morph_targets_n, int vi, f64 x, f64 y, f64 z, str res_key, list out) list {
+   mut ox, oy = x, y
+   mut oz = z
+   mut mi = 0
+   while mi < morph_targets_n {
+      def mt = morph_targets[mi]
+      def mt_w = float(mt.get("weight", 0.0))
+      if abs(mt_w) > 0.0000001 {
+         def mt_res = mt.get(res_key, 0)
+         if is_dict(mt_res) && vi < int(mt_res.get("count", 0)) {
+            def mt_ptr = mt_res.get("ptr", 0)
+            def mt_comp = mt_res.get("comp", shr.GLTF_COMP_FLOAT)
+            def mt_norm = mt_res.get("normalized", false)
+            def mt_stride = mt_res.get("stride", 0)
+            def mt_cs = shr._gltf_comp_size(mt_comp)
+            def mt_off = vi * mt_stride
+            ox += shr._gltf_read_f32_acc(mt_ptr, mt_off + mt_cs * 0, mt_comp, mt_norm) * mt_w
+            oy += shr._gltf_read_f32_acc(mt_ptr, mt_off + mt_cs * 1, mt_comp, mt_norm) * mt_w
+            oz += shr._gltf_read_f32_acc(mt_ptr, mt_off + mt_cs * 2, mt_comp, mt_norm) * mt_w
+         }
+      }
+      mi += 1
+   }
+   if out.len < 3 { __list_set_len(out, 3) }
+   out[0] = ox
+   out[1] = oy
+   out[2] = oz
+   out
 }
 
 fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int tex_id, int uv_set=0, int uv_xform=0) any {
@@ -331,6 +365,15 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
    }
    def morph_targets = anim._gltf_collect_morph_targets(g, data, meta.get("targets", 0), meta.get("morph_weights", 0))
    def morph_targets_n = morph_targets.len
+   mut morph_has_norm = false
+   mut morph_has_tan = false
+   mut morph_i = 0
+   while morph_i < morph_targets_n {
+      def mt = morph_targets[morph_i]
+      if is_dict(mt.get("norm_res", 0)) { morph_has_norm = true }
+      if is_dict(mt.get("tan_res", 0)) { morph_has_tan = true }
+      morph_i += 1
+   }
    def pos_cs = shr._gltf_comp_size(pos_comp)
    def uv0_cs = shr._gltf_comp_size(uv0_comp)
    def n_cs = shr._gltf_comp_size(n_comp)
@@ -349,6 +392,9 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
       c_norm = c_res.get("normalized", false) || c_comp != shr.GLTF_COMP_FLOAT
    }
    def c_valid = c_ptr && c_cnt > 0 && c_stride > 0 && (c_type_count == 3 || c_type_count == 4)
+   mut morph_pos = [0.0, 0.0, 0.0]
+   mut morph_norm = [0.0, 0.0, 0.0]
+   mut morph_tan = [0.0, 0.0, 0.0]
    if _gltf_try_pack_vertices_pnc_raw(buf, count, pos_ptr, pos_comp, pos_norm, pos_stride,
       uv0_valid, uv0_comp, uv0_norm, uv1_valid, n_valid, n_ptr, n_cnt, n_comp, n_norm, n_stride,
       t_valid, t_comp, t_norm, c_valid, c_ptr, c_cnt, c_stride, c_comp, c_type_count, c_norm,
@@ -366,7 +412,7 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
          def px = shr._gltf_read_f32_acc(pos_ptr, pbase + pos_cs * 0, pos_comp, pos_norm)
          def py = shr._gltf_read_f32_acc(pos_ptr, pbase + pos_cs * 1, pos_comp, pos_norm)
          def pz = shr._gltf_read_f32_acc(pos_ptr, pbase + pos_cs * 2, pos_comp, pos_norm)
-         def morph_pos = _gltf_apply_morph_vec3(morph_targets, morph_targets_n, vi, px, py, pz, "pos_res")
+         morph_pos = _gltf_apply_morph_vec3_into(morph_targets, morph_targets_n, vi, px, py, pz, "pos_res", morph_pos)
          def mx, my = float(morph_pos.get(0, px)), float(morph_pos.get(1, py))
          def mz = float(morph_pos.get(2, pz))
          mut nx, ny = 0.0, 0.0
@@ -377,9 +423,11 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
             ny = shr._gltf_read_f32_acc(n_ptr, nbase + n_cs * 1, n_comp, n_norm)
             nz = shr._gltf_read_f32_acc(n_ptr, nbase + n_cs * 2, n_comp, n_norm)
          }
-         def morph_norm = _gltf_apply_morph_vec3(morph_targets, morph_targets_n, vi, nx, ny, nz, "norm_res")
-         nx, ny = float(morph_norm.get(0, nx)), float(morph_norm.get(1, ny))
-         nz = float(morph_norm.get(2, nz))
+         if morph_has_norm {
+            morph_norm = _gltf_apply_morph_vec3_into(morph_targets, morph_targets_n, vi, nx, ny, nz, "norm_res", morph_norm)
+            nx, ny = float(morph_norm.get(0, nx)), float(morph_norm.get(1, ny))
+            nz = float(morph_norm.get(2, nz))
+         }
          def nl = sqrt(nx * nx + ny * ny + nz * nz)
          if nl > 0.00001 { nx /= nl ny /= nl nz /= nl }
          mut tx, ty = 0.0, 0.0
@@ -391,9 +439,11 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
             tz = shr._gltf_read_f32_acc(t_ptr, tbase + t_cs * 2, t_comp, t_norm)
             tw = shr._gltf_read_f32_acc(t_ptr, tbase + t_cs * 3, t_comp, t_norm)
          }
-         def morph_tan = _gltf_apply_morph_vec3(morph_targets, morph_targets_n, vi, tx, ty, tz, "tan_res")
-         tx, ty = float(morph_tan.get(0, tx)), float(morph_tan.get(1, ty))
-         tz = float(morph_tan.get(2, tz))
+         if morph_has_tan {
+            morph_tan = _gltf_apply_morph_vec3_into(morph_targets, morph_targets_n, vi, tx, ty, tz, "tan_res", morph_tan)
+            tx, ty = float(morph_tan.get(0, tx)), float(morph_tan.get(1, ty))
+            tz = float(morph_tan.get(2, tz))
+         }
          def tl = sqrt(tx * tx + ty * ty + tz * tz)
          if tl > 0.00001 { tx /= tl ty /= tl tz /= tl }
          def off = ptr_add(buf, vi * shr._GLTF_VTX_STRIDE)

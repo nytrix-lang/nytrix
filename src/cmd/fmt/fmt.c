@@ -2652,7 +2652,7 @@ static int ny_param_piece_typed(const char *a, const char *b) {
       p++;
     if (p >= end)
       break;
-    if (*p == '?')
+    while (p < end && (*p == '?' || *p == '*'))
       p++;
     if (!(isalpha((unsigned char)*p) || *p == '_'))
       break;
@@ -4303,7 +4303,7 @@ static void audit_add_metaprog_findings(const char *path, const char *txt, FnVec
                     extern_first ? extern_first : (key_table_first ? key_table_first : 1),
                     "NYAUD4601", "note",
                     "data-driven backend module candidate",
-                    "platform/Vulkan files with repeated wrappers or maps can use module ... generated from Spec { props; emit template(...) }");
+                    "platform/Vulkan files with repeated wrappers or maps can use module ... generated from Spec { props, emit template(...) }");
   }
 
   for (size_t i = 0; i < fns->len; i++) {
@@ -6201,7 +6201,8 @@ static void audit_add_battery_findings(const char *path, StrVec *lines, IssueVec
         const char *near_line = lines->items[j];
         if (strstr(near_line, "defer") || strstr(near_line, "free(") ||
             strstr(near_line, "with ") || strstr(near_line, "if(!") ||
-            strstr(near_line, "if (!") || strstr(near_line, "== 0"))
+            strstr(near_line, "if (!") || strstr(near_line, "if !") ||
+            strstr(near_line, "== 0") || strstr(near_line, "== nil"))
           guarded = 1;
       }
       if (!guarded) {
@@ -6291,6 +6292,8 @@ static void audit_add_profile_findings(const char *path, const char *txt, StrVec
     const char *line = lines->items[i];
     const char *site = find_outside_string(line, "internal(");
     if (!site)
+      continue;
+    if (site > line && (isalnum((unsigned char)site[-1]) || site[-1] == '_'))
       continue;
     const char *p = site + 9;
     while (*p && *p != ')') {
@@ -7090,6 +7093,80 @@ static void audit_add_continue_findings(const char *path, StrVec *lines, IssueVe
   }
 }
 
+static int audit_parse_prealloc_list_var(const char *line, char *out, size_t out_sz) {
+  const char *p = lstrip_ws(line);
+  if (!starts_with_word(p, "mut") && !starts_with_word(p, "def"))
+    return 0;
+  p += 3;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  if (starts_with_word(p, "list")) {
+    p += 4;
+    while (*p == ' ' || *p == '\t')
+      p++;
+  }
+  if (!(isalpha((unsigned char)*p) || *p == '_'))
+    return 0;
+  size_t n = 0;
+  while ((isalnum((unsigned char)*p) || *p == '_') && n + 1 < out_sz)
+    out[n++] = *p++;
+  out[n] = '\0';
+  while (*p == ' ' || *p == '\t')
+    p++;
+  if (*p != '=')
+    return 0;
+  p++;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  return strncmp(p, "list(", 5) == 0;
+}
+
+static int audit_line_appends_to_var(const char *line, const char *name) {
+  if (!line || !name || !*name)
+    return 0;
+  const char *s = lstrip_ws(line);
+  size_t n = strlen(name);
+  if (strncmp(s, name, n) != 0 || (isalnum((unsigned char)s[n]) || s[n] == '_'))
+    return 0;
+  s += n;
+  while (*s == ' ' || *s == '\t')
+    s++;
+  if (*s != '=')
+    return 0;
+  s++;
+  while (*s == ' ' || *s == '\t')
+    s++;
+  return strncmp(s, name, n) == 0 &&
+         !(isalnum((unsigned char)s[n]) || s[n] == '_') &&
+         strstr(s + n, ".append(") != NULL;
+}
+
+static void audit_add_prealloc_append_findings(const char *path, StrVec *lines,
+                                               IssueVec *issues, AuditStats *stats) {
+  if (!nyt_ends_with(path, ".ny"))
+    return;
+  for (size_t i = 0; i < lines->len; i++) {
+    char name[96];
+    if (!audit_parse_prealloc_list_var(lines->items[i], name, sizeof(name)))
+      continue;
+    size_t stop = i + 12;
+    if (stop > lines->len)
+      stop = lines->len;
+    for (size_t j = i + 1; j < stop; j++) {
+      if (audit_line_appends_to_var(lines->items[j], name)) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "preallocated list '%s' is filled with append", name);
+        issue_push(issues, path, (int)i + 1, 1, "NYAUD3009", "note", msg,
+                   "when length is known, call __list_set_len(out, n) and fill out[i] to avoid growth churn");
+        stats->findings++;
+        stats->trim_targets++;
+        stats->append_builders++;
+        break;
+      }
+    }
+  }
+}
+
 static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files,
                             FunctionPressureVec *functions, IssueVec *issues, AuditStats *stats,
                             const char *mode) {
@@ -7302,6 +7379,8 @@ static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files
     audit_add_metaprog_findings(path, txt, fns, &lines, issues, stats);
   if (audit_wants(mode, "methods"))
     audit_add_method_syntax_findings(path, &lines, issues, stats);
+  if (audit_wants(mode, "trim"))
+    audit_add_prealloc_append_findings(path, &lines, issues, stats);
   if (audit_wants(mode, "trim") || audit_wants(mode, "legacy") || audit_wants(mode, "methods"))
     audit_add_variadic_free_findings(path, &lines, issues, stats);
   if (audit_wants(mode, "layout") && (fp.dict_gets >= 40 || fp.dict_sets >= 20)) {
@@ -7633,72 +7712,73 @@ typedef struct {
 } AuditHint;
 
 static const AuditHint k_audit_hints[] = {
-    {1001, "split-file", "split module Foo(...); keep public exports in mod.ny"},
-    {1002, "split-function", "fn small_part(T x) R { ... }; call it from the wrapper"},
-    {1101, "condition-assignment-check", "if(x == y){ ... }; lift x = y before the branch"},
-    {1102, "constant-branch-check", "if(comptime{ return cond }){ ... } or delete dead branch"},
-    {1103, "empty-control-body-check", "if(cond){ ... }"},
+    {1001, "split-file", "split module Foo(...), keep public exports in mod.ny"},
+    {1002, "split-function", "fn small_part(T x) R { ... }, then call it from the wrapper"},
+    {1101, "condition-assignment-check", "if x == y { ... }, with assignment lifted before the branch"},
+    {1102, "constant-branch-check", "if comptime{ return cond } { ... } or delete dead branch"},
+    {1103, "empty-control-body-check", "if cond { ... }"},
     {1104, "bounded-c-string-check", "snprintf(dst, dst_len, \"%s\", src)"},
     {1105, "nil-return-contract-check", "fn f(...) any { return nil } or return a typed fallback"},
-    {1106, "unreachable-code-check", "return value; delete or move later statements before it"},
-    {1107, "loop-progress-check", "while(i < n){ ...; i += 1 }"},
-    {1108, "duplicate-branch-check", "elif(other_cond){ ... } or merge identical branches"},
-    {1109, "duplicate-boolean-operand", "if(a && b){ ... }; remove repeated a && a / a || a"},
-    {1110, "self-comparison-check", "if(x == y){ ... }; avoid x == x / x != x"},
-    {1111, "impossible-equality-chain", "if(x == a || x == b){ ... } for alternatives"},
-    {1112, "tautological-inequality-chain", "if(x != a && x != b){ ... } to reject both"},
-    {1113, "duplicate-dict-key-check", "{\"key\": value}; keep each key once"},
-    {1114, "duplicate-case-arm-check", "case x { a -> one; b -> two; _ -> fallback }"},
-    {1115, "literal-zero-divisor-check", "if(den != 0){ value / den }"},
-    {1116, "negative-index-check", "idx = xs.len - 1; xs[idx]"},
+    {1106, "unreachable-code-check", "return value, then delete or move later statements before it"},
+    {1107, "loop-progress-check", "while i < n { ... i += 1 }"},
+    {1108, "duplicate-branch-check", "elif other_cond { ... } or merge identical branches"},
+    {1109, "duplicate-boolean-operand", "if a && b { ... }, with repeated a && a / a || a removed"},
+    {1110, "self-comparison-check", "if x == y { ... }, avoiding x == x / x != x"},
+    {1111, "impossible-equality-chain", "if x == a || x == b { ... } for alternatives"},
+    {1112, "tautological-inequality-chain", "if x != a && x != b { ... } to reject both"},
+    {1113, "duplicate-dict-key-check", "{\"key\": value}, keeping each key once"},
+    {1114, "duplicate-case-arm-check", "case x { a -> one, b -> two, _ -> fallback }"},
+    {1115, "literal-zero-divisor-check", "if den != 0 { value / den }"},
+    {1116, "negative-index-check", "idx = xs.len - 1, then xs[idx]"},
     {1117, "overwritten-assignment-check", "def x = one_expression"},
-    {1118, "allocation-size-check", "if(n >= 0){ malloc(n) }"},
+    {1118, "allocation-size-check", "if n >= 0 { malloc(n) }"},
     {2001, "cached-env-bool", "def enabled = env(\"NAME\", \"\") == \"1\""},
     {2002, "centralized-env-parser", "fn env_bool(str name, bool fallback=false) bool { ... }"},
     {2003, "boolean-expression-return", "return cond"},
-    {2004, "cached-loop-length", "def n = xs.len; while(i < n){ ... }"},
-    {2005, "guarded-allocation", "def p = malloc(n); if(!p){ return nil }"},
+    {2004, "cached-loop-length", "def n = xs.len, then while i < n { ... }"},
+    {2005, "guarded-allocation", "def p = malloc(n), then if !p { return nil }"},
     {2006, "typed-operator", "impl T { operator + T: T = add }"},
     {3001, "trim-refactor", "lift helper/table; keep leaf fn short and typed"},
-    {3002, "case-range-dispatch", "case x { 0, 1 -> a; 2..9 -> b; _ -> c }"},
+    {3002, "case-range-dispatch", "case x { 0, 1 -> a, 2..9 -> b, _ -> c }"},
     {3003, "indexed-assignment", "x[i] = value"},
-    {3004, "preallocated-builder", "def out = list(n); out[i] = value"},
-    {3005, "layout-boundary-unpack", "layout guard Shape: row = input else { ... }; row.field"},
+    {3004, "preallocated-builder", "def out = list(n), then out[i] = value"},
+    {3005, "layout-boundary-unpack", "layout guard Shape: row = input else { ... }, then row.field"},
     {3006, "data-module-or-generated-table", "def rows = load_table(\"asset\") or comptime{ emit_rows(spec) }"},
-    {3101, "comptime-case-selector", "case comptime{ return selector } { key -> value; _ -> fallback }"},
-    {3102, "comptime-branch", "if(comptime{ return cond }){ ... }"},
-    {3103, "comptime-table-dispatch", "comptime table Name = {...}; comptime match Name(key, fallback)"},
+    {3009, "preallocated-list-fill", "__list_set_len(out, n), then out[i] = value"},
+    {3101, "comptime-case-selector", "case comptime{ return selector } { key -> value, _ -> fallback }"},
+    {3102, "comptime-branch", "if comptime{ return cond } { ... }"},
+    {3103, "comptime-table-dispatch", "comptime table Name = {...}, then comptime match Name(key, fallback)"},
     {3104, "generated-layout-metadata", "comptime fields(Type) as f { emit accessor(f) }"},
     {3105, "comptime-match-keyword", "comptime match Table(value, fallback)"},
     {4101, "layout-shape-boundary", "layout shape Shape derive(load) { T: field = default }"},
-    {4102, "layout-guard-boundary", "layout guard Shape: v = input else { return nil }; v.field"},
+    {4102, "layout-guard-boundary", "layout guard Shape: v = input else { return nil }, then v.field"},
     {4103, "layout-record-constructor", "layout record Type derive(default, store) { T: field = default }"},
-    {4104, "layout-record-accessors", "layout record/shape Type derive(load, store); value.field"},
+    {4104, "layout-record-accessors", "layout record/shape Type derive(load, store), then value.field"},
     {4105, "layout-guard-boundary", "layout guard Shape: v = input else { fallback }"},
     {4201, "with-ptr-resource", "with ptr: p = alloc { ... }"},
     {4202, "with-ptr-defer-free", "with ptr: p = alloc { ... }"},
     {4203, "with-closeable-resource", "with Type: r = create { ... close(r) }"},
     {4204, "variadic-free", "free(a, b, c)"},
     {4301, "comptime-table", "def TABLE = comptime{ return {\"k\": v} }"},
-    {4302, "case-or-comptime-table", "case key { \"a\" -> A; \"b\" -> B; _ -> fallback }"},
-    {4401, "generated-ffi-surface", "extern \"lib\" { fn a(...); fn b(...); }"},
-    {4501, "diagnostic-rule", "diag rule Name { when pattern; fix \"...\" }"},
+    {4302, "case-or-comptime-table", "case key { \"a\" -> A, \"b\" -> B, _ -> fallback }"},
+    {4401, "generated-ffi-surface", "extern \"lib\" { fn a(...) fn b(...) }"},
+    {4501, "diagnostic-rule", "diag rule Name { when pattern, fix \"...\" }"},
     {4502, "audit-diagnostic-table", "static const table[] = {{code, severity, message, fix}}"},
-    {4503, "diagnostic-rule", "diag rule Name { when check; fix \"...\" }"},
+    {4503, "diagnostic-rule", "diag rule Name { when check, fix \"...\" }"},
     {4601, "generated-backend-module", "module backend from Spec { emit fn wrapper(...) }"},
     {4701, "comptime-template-family", "for name in comptime [...] { emit make(name) }"},
     {4801, "derive-block", "layout record Type derive(default, eq, hash, debug_str) { ... }"},
     {4901, "main-guard", "#main { ... }"},
     {4902, "inline-trivial-main", "#main { body() } only when body is also a public entry"},
-    {5001, "extern-block", "extern \"lib\" { fn a(...); fn b(...); }"},
+    {5001, "extern-block", "extern \"lib\" { fn a(...) fn b(...) }"},
     {6001, "typed-layout-accessors", "layout shape Row derive(load, store) { T: field = default }"},
-    {6101, "backend-contract", "layout BackendContract pack(4){ i32: caps }"},
+    {6101, "backend-contract", "layout BackendContract pack(4) { i32: caps }"},
     {7001, "delete-or-wire-private-helper", "delete unused helper or wire it into the call path"},
     {7201, "delete-or-export-internal-helper", "export helper or keep it private and used"},
     {7301, "remove-dead-constant", "delete unused constant"},
     {7302, "remove-dead-key-constant", "delete unused key/table constant"},
     {8001, "receiver-methods", "d.get(k), b.hex, b.text, x.len, x[i] = v"},
-    {8101, "property-method", "impl T { fn prop(T self) R { ... } }; value.prop"},
+    {8101, "property-method", "impl T { fn prop(T self) R { ... } }, then value.prop"},
     {8102, "receiver-methods", "s.to_bytes, h.unhex, b.hex, b.text, b.long, a.concat(b)"},
     {9001, "typed-signature", "fn f(str s, int n=0) bool { ... }"},
     {9002, "typed-parameter", "fn f(Type arg) R { ... }"},
