@@ -561,6 +561,11 @@ static int install_prefix_writable(const char *prefix) {
   }
   return 1;
 }
+
+static int sudo_noninteractive_ok(void) {
+  char *argv[] = {"sudo", "-n", "true", NULL};
+  return run_cmd(argv) == 0;
+}
 #endif
 
 static int resolve_tool_bin(const char *root, const char *kind, const char *name, char *out, size_t out_sz) {
@@ -1005,8 +1010,19 @@ int ny_make_main(int argc, char **argv) {
       char prefix[PATH_MAX] = "/usr/local";
       (void)cmake_cache_value(bdir, "CMAKE_INSTALL_PREFIX", prefix, sizeof(prefix));
       if (geteuid() != 0 && !install_prefix_writable(prefix)) {
-        nyt_err("ny-make", "install prefix %s is not writable; run: sudo ny make install",
-                prefix);
+        if (isatty(STDIN_FILENO)) {
+          nyt_msg("INSTALL", NYT_YELLOW, "install prefix %s needs root; running sudo cmake --install",
+                  prefix);
+          char *sudo_argv[] = {"sudo", "cmake", "--install", bdir, NULL};
+          return run_cmd_build_output(sudo_argv);
+        }
+        if (sudo_noninteractive_ok()) {
+          nyt_msg("INSTALL", NYT_YELLOW, "install prefix %s needs root; running sudo -n cmake --install",
+                  prefix);
+          char *sudo_argv[] = {"sudo", "-n", "cmake", "--install", bdir, NULL};
+          return run_cmd_build_output(sudo_argv);
+        }
+        nyt_err("ny-make", "install prefix %s is not writable; run: sudo ny make install", prefix);
         return 1;
       }
 #endif

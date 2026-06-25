@@ -132,7 +132,8 @@ fn gltf_skin_joint_mats(any gltf_data, int skin_idx, dict node_world_mats, any m
    def skin_invbind_first = shr._gltf_skin_invbind_first_enabled()
    def mesh_inv = skin_no_mesh_inv ? gltf_math.mat4_identity() : _gltf_mesh_inv_cached(mesh_node_world)
    def world_list = is_dict(node_world_mats) ? node_world_mats.get("__world_list", 0) : 0
-   mut out = list(0)
+   mut out = list(joints_n)
+   __list_set_len(out, joints_n)
    mut ji = 0
    while ji < joints_n {
       def joint_idx = int(joints.get(ji, -1))
@@ -141,7 +142,7 @@ fn gltf_skin_joint_mats(any gltf_data, int skin_idx, dict node_world_mats, any m
       if skin_transpose_inv_bind { inv_bind = _gltf_mat4_transpose(inv_bind) }
       mut jm = skin_invbind_first ? gltf_math.mat4_mul(inv_bind, joint_world) : gltf_math.mat4_mul(joint_world, inv_bind)
       jm = gltf_math.mat4_mul(mesh_inv, jm)
-      out = out.append(jm)
+      out[ji] = jm
       ji += 1
    }
    out
@@ -163,9 +164,10 @@ fn _gltf_skin_inv_bind_mats(any gltf_data, int skin_idx) list {
    if is_list(cached) && cached.len == joints_n { return cached }
    def inv_bind_res = ld._gltf_resolve_accessor_data(g, inv_bind_acc, data)
    mut mats = list(joints_n)
+   __list_set_len(mats, joints_n)
    mut ji = 0
    while ji < joints_n {
-      if is_dict(inv_bind_res) && ji < int(inv_bind_res.get("count", 0)) { mats = mats.append(_gltf_read_mat4_accessor_value(inv_bind_res, ji)) } else { mats = mats.append(gltf_math.mat4_identity()) }
+      if is_dict(inv_bind_res) && ji < int(inv_bind_res.get("count", 0)) { mats[ji] = _gltf_read_mat4_accessor_value(inv_bind_res, ji) } else { mats[ji] = gltf_math.mat4_identity() }
       ji += 1
    }
    ld._gltf_release_accessor_data(inv_bind_res)
@@ -659,9 +661,10 @@ fn gltf_morph_target_count(any gltf_data) int {
 }
 
 fn _gltf_mesh_morph_weights(any g, int mesh_idx, int target_count) list {
-   mut out = []
+   mut out = list(max(0, target_count))
+   if target_count > 0 { __list_set_len(out, target_count) }
    mut i = 0
-   while i < target_count { out = out.append(0.0) i += 1 }
+   while i < target_count { out[i] = 0.0 i += 1 }
    if target_count <= 0 { return out }
    def meshes = g.get("meshes")
    if !is_list(meshes) || mesh_idx < 0 || mesh_idx >= meshes.len { return out }
@@ -739,10 +742,11 @@ fn _gltf_read_acc_f32(any data, dict acc_res, int elem_idx, int comp_idx) f64 {
 }
 
 fn _gltf_read_acc_components(any data, any acc_res, int elem_idx, int n_comp) list {
-   mut out = []
+   mut out = list(max(0, n_comp))
+   if n_comp > 0 { __list_set_len(out, n_comp) }
    mut i = 0
    while i < n_comp {
-      out = out.append(_gltf_read_acc_f32(data, acc_res, elem_idx, i))
+      out[i] = _gltf_read_acc_f32(data, acc_res, elem_idx, i)
       i += 1
    }
    out
@@ -752,11 +756,12 @@ fn _gltf_read_acc_scalar_tuple(any data, any acc_res, int tuple_idx, int n_comp)
    "Read n_comp adjacent scalar accessor elements starting at tuple_idx*n_comp.
    Needed for animation outputs like morph weights, which are commonly
    stored as SCALAR accessors with count = keyframes * weight_count."
-   mut out = []
+   mut out = list(max(0, n_comp))
+   if n_comp > 0 { __list_set_len(out, n_comp) }
    def base_idx = tuple_idx * n_comp
    mut i = 0
    while i < n_comp {
-      out = out.append(_gltf_read_acc_f32(data, acc_res, base_idx + i, 0))
+      out[i] = _gltf_read_acc_f32(data, acc_res, base_idx + i, 0)
       i += 1
    }
    out
@@ -792,11 +797,12 @@ fn _gltf_anim_alpha(f64 time_sec, f64 t_lo, f64 t_hi) f64 {
 
 fn _gltf_lerp_vec(list a, list b, f64 t, int n) list {
    def tc = _gltf_clamp01(t)
-   mut out = []
+   mut out = list(max(0, n))
+   if n > 0 { __list_set_len(out, n) }
    mut i = 0
    while i < n {
       def av, bv = 0.0 + a.get(i, 0.0), 0.0 + b.get(i, 0.0)
-      out = out.append(av + (bv - av) * tc)
+      out[i] = av + (bv - av) * tc
       i += 1
    }
    out
@@ -931,13 +937,14 @@ fn _gltf_sample_channel(any data, dict sampler, dict input_res, dict output_res,
       def t2, t3 = t * t, t2 * t
       def h00, h10 = 2.0 * t3 - 3.0 * t2 + 1.0, t3 - 2.0 * t2 + t
       def h01, h11 = -2.0 * t3 + 3.0 * t2, t3 - t2
-      mut out = []
+      mut out = list(max(0, n_comp))
+      if n_comp > 0 { __list_set_len(out, n_comp) }
       mut i = 0
       while i < n_comp {
-         out = out.append(h00 * (0.0 + vk.get(i, 0.0)) +
+         out[i] = h00 * (0.0 + vk.get(i, 0.0)) +
             h10 * td * (0.0 + bk.get(i, 0.0)) +
             h01 * (0.0 + vk1.get(i, 0.0)) +
-         h11 * td * (0.0 + ak1.get(i, 0.0)))
+         h11 * td * (0.0 + ak1.get(i, 0.0))
          i += 1
       }
       if is_rotation { return _gltf_normalize_quat(out) }
@@ -1280,10 +1287,10 @@ fn _gltf_sample_animation_fast(any gltf_data, int anim_idx, f64 time_sec) any {
    ;; record-cache sampler remains available with NY_GLTF_ANIM_FAST=1, but it is
    ;; deliberately opt-in because broken cached timing made simple rigid clips
    ;; such as AnimatedCube look like integer/keyframe stepping.
-   if !common.env_toggle("NY_GLTF_ANIM_FAST", false) { return 0 }
+   if !shr._gltf_anim_fast_enabled() { return 0 }
    def g = gltf_data.get("gltf", 0)
    def skins = is_dict(g) ? g.get("skins", 0) : 0
-   if is_list(skins) && skins.len > 0 && !common.env_toggle("NY_GLTF_ANIM_FAST_SKIN", true) { return 0 }
+   if is_list(skins) && skins.len > 0 && !shr._gltf_anim_fast_skin_enabled() { return 0 }
    def records = _gltf_anim_fast_records(gltf_data, anim_idx)
    if !is_list(records) { return 0 }
    def nodes = is_dict(g) ? g.get("nodes", 0) : 0
@@ -1319,10 +1326,11 @@ fn _gltf_sample_animation_fast(any gltf_data, int anim_idx, f64 time_sec) any {
       elif path_code == 3 { s_values[slot] = val }
       i += 1
    }
-   mut fast_node_overrides = []
+   mut fast_node_overrides = list(nodes_n)
+   if nodes_n > 0 { __list_set_len(fast_node_overrides, nodes_n) }
    mut ni = 0
    while ni < nodes_n {
-      fast_node_overrides = fast_node_overrides.append(0)
+      fast_node_overrides[ni] = 0
       ni += 1
    }
    def node_n = node_ids.len
@@ -1711,18 +1719,20 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    ;; every skeleton node every frame, which made recursive rigs very slow.
    def fast_numeric = true
    def base_local_mats = shr._gltf_node_local_mats(g)
-   mut world_list = []
+   mut world_list = list(nodes_n)
+   if nodes_n > 0 { __list_set_len(world_list, nodes_n) }
    mut wi = 0
    while wi < nodes_n {
-      world_list = world_list.append(0)
+      world_list[wi] = 0
       wi += 1
    }
    mut fast_node_overrides = overrides.get("__fast_node_overrides", 0)
    if !is_list(fast_node_overrides) {
-      fast_node_overrides = []
+      fast_node_overrides = list(nodes_n)
+      if nodes_n > 0 { __list_set_len(fast_node_overrides, nodes_n) }
       wi = 0
       while wi < nodes_n {
-         fast_node_overrides = fast_node_overrides.append(0)
+         fast_node_overrides[wi] = 0
          wi += 1
       }
       def ov_nodes = overrides.get("__nodes", 0)
@@ -1769,10 +1779,11 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    if is_list(world_list) {
       node_world_mats["__world_list"] = world_list
    } else {
-      mut world_list2 = []
+      mut world_list2 = list(nodes_n)
+      if nodes_n > 0 { __list_set_len(world_list2, nodes_n) }
       mut wi2 = 0
       while wi2 < nodes_n {
-         world_list2 = world_list2.append(node_world_mats.get(wi2, 0))
+         world_list2[wi2] = node_world_mats.get(wi2, 0)
          wi2 += 1
       }
       node_world_mats["__world_list"] = world_list2
