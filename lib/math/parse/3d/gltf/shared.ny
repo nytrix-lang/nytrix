@@ -1,5 +1,5 @@
 ;; Keywords: 3d gltf glb parse
-module std.math.parse.3d.gltf.shared(GLTF_COMP_NONE, GLTF_COMP_BYTE, GLTF_COMP_UBYTE, GLTF_COMP_SHORT, GLTF_COMP_USHORT, GLTF_COMP_UINT, GLTF_COMP_FLOAT, GLTF_TYPE_SCALAR, GLTF_TYPE_VEC2, GLTF_TYPE_VEC3, GLTF_TYPE_VEC4, GLTF_TYPE_MAT2, GLTF_TYPE_MAT3, GLTF_TYPE_MAT4, _GLB_MAGIC, _GLB_CHUNK_JSON, _GLB_CHUNK_BIN, _gltf_is_json_ws, GltfCompSize, GltfTypeCount, GltfTypeCols, GltfTypeRows, GltfImageMimeSupported, GltfImageExtFromMime, GltfExtensionStatus, _gltf_img_uri_cache, _gltf_material_infos_cache, _gltf_anim_info_cache, _gltf_acc_res_cache, _gltf_anim_sample_cache, _gltf_node_local_mats_cache, _gltf_skin_inv_bind_cache, _gltf_mesh_inv_cache, _gltf_visibility_flag_cache, _gltf_disable_skinning_mode, _gltf_skin_raw_off_mode, _gltf_skin_validate_mode, _gltf_skin_no_mesh_inv_mode, _gltf_skin_transpose_inv_bind_mode, _gltf_skin_invbind_first_mode, _gltf_ensure_caches, _gltf_env_truthy_flag, _gltf_disable_skinning_enabled, _gltf_skin_raw_off_enabled, _gltf_skin_validate_enabled, _gltf_skin_no_mesh_inv_enabled, _gltf_skin_transpose_inv_bind_enabled, _gltf_skin_invbind_first_enabled, _gltf_cache_key_from_g, _gltf_cache_key_from_data, _gltf_stamp_cache_key, _GLTF_CACHE_LIMIT_SMALL, _GLTF_CACHE_LIMIT_MED, _GLTF_CACHE_LIMIT_BIG, GLTF_MODE_TRIANGLES, _GLTF_VTX_STRIDE, _GLTF_VTX_OFF_X, _GLTF_VTX_OFF_Y, _GLTF_VTX_OFF_Z, _GLTF_VTX_OFF_U, _GLTF_VTX_OFF_V, _GLTF_VTX_OFF_C, _GLTF_VTX_OFF_NX, _GLTF_VTX_OFF_NY, _GLTF_VTX_OFF_NZ, _GLTF_VTX_OFF_TX, _GLTF_VTX_OFF_TY, _GLTF_VTX_OFF_TZ, _GLTF_VTX_OFF_TW, _GLTF_VTX_OFF_U2, _GLTF_VTX_OFF_V2, _GLTF_VTX_OFF_TEX, _GLTF_INV_255, _GLTF_INV_127, _GLTF_INV_65535, _GLTF_INV_32767, _gltf_copy_bytes, _gltf_copy_blob_bytes, _gltf_blob_ptr, _gltf_is_path_sep, _gltf_path_dirname, _gltf_url_decode, _gltf_float_bad, _gltf_float3_bad, _gltf_float6_bad, _gltf_list_has_bad_float, _gltf_mat3x4_bad, _gltf_num_or, _gltf_vec3, _gltf_vec4, _gltf_anim_duration_valid, _gltf_doc_has_invalid_node_trs, _gltf_align_up, _gltf_elem_size, _gltf_read_f32_fast, _gltf_read_f32_acc, _gltf_read_index_acc, _gltf_node_local_mats, _gltf_node_visit_key, _gltf_make_material_slot, _gltf_alpha_mode_code, _gltf_prim_mode_expands_to_vertices, _gltf_apply_prim_mode_opts, _gltf_active_scene_idx, _gltf_vertex_color_u32, _gltf_make_uv_xform, _gltf_mat3x4_num, _gltf_mat3_num, _gltf_pack_uv_xform_words_from_values, _gltf_pack_uv_xform_words, _gltf_uv_xf_force_uv0, _gltf_pick_primary_uv_props, _gltf_extension_status, _gltf_meshes, _gltf_transform_aabb, _gltf_comp_size, _gltf_type_count)
+module std.math.parse.3d.gltf.shared(GLTF_COMP_NONE, GLTF_COMP_BYTE, GLTF_COMP_UBYTE, GLTF_COMP_SHORT, GLTF_COMP_USHORT, GLTF_COMP_UINT, GLTF_COMP_FLOAT, GLTF_TYPE_SCALAR, GLTF_TYPE_VEC2, GLTF_TYPE_VEC3, GLTF_TYPE_VEC4, GLTF_TYPE_MAT2, GLTF_TYPE_MAT3, GLTF_TYPE_MAT4, _GLB_MAGIC, _GLB_CHUNK_JSON, _GLB_CHUNK_BIN, _gltf_is_json_ws, GltfCompSize, GltfTypeCount, GltfTypeCols, GltfTypeRows, GltfImageMimeSupported, GltfImageExtFromMime, GltfExtensionStatus, _gltf_img_uri_cache, _gltf_material_infos_cache, _gltf_anim_info_cache, _gltf_acc_res_cache, _gltf_anim_sample_cache, _gltf_node_local_mats_cache, _gltf_skin_inv_bind_cache, _gltf_mesh_inv_cache, _gltf_visibility_flag_cache, _gltf_disable_skinning_mode, _gltf_skin_raw_off_mode, _gltf_skin_validate_mode, _gltf_skin_no_mesh_inv_mode, _gltf_skin_transpose_inv_bind_mode, _gltf_skin_invbind_first_mode, _gltf_anim_fast_mode, _gltf_anim_fast_skin_mode, _gltf_ensure_caches, _gltf_env_truthy_flag, _gltf_env_toggle_flag, _gltf_disable_skinning_enabled, _gltf_skin_raw_off_enabled, _gltf_skin_validate_enabled, _gltf_skin_no_mesh_inv_enabled, _gltf_skin_transpose_inv_bind_enabled, _gltf_skin_invbind_first_enabled, _gltf_anim_fast_enabled, _gltf_anim_fast_skin_enabled, _gltf_cache_key_from_g, _gltf_cache_key_from_data, _gltf_stamp_cache_key, _GLTF_CACHE_LIMIT_SMALL, _GLTF_CACHE_LIMIT_MED, _GLTF_CACHE_LIMIT_BIG, GLTF_MODE_TRIANGLES, _GLTF_VTX_STRIDE, _GLTF_VTX_OFF_X, _GLTF_VTX_OFF_Y, _GLTF_VTX_OFF_Z, _GLTF_VTX_OFF_U, _GLTF_VTX_OFF_V, _GLTF_VTX_OFF_C, _GLTF_VTX_OFF_NX, _GLTF_VTX_OFF_NY, _GLTF_VTX_OFF_NZ, _GLTF_VTX_OFF_TX, _GLTF_VTX_OFF_TY, _GLTF_VTX_OFF_TZ, _GLTF_VTX_OFF_TW, _GLTF_VTX_OFF_U2, _GLTF_VTX_OFF_V2, _GLTF_VTX_OFF_TEX, _GLTF_INV_255, _GLTF_INV_127, _GLTF_INV_65535, _GLTF_INV_32767, _gltf_copy_bytes, _gltf_copy_blob_bytes, _gltf_blob_ptr, _gltf_is_path_sep, _gltf_path_dirname, _gltf_url_decode, _gltf_float_bad, _gltf_float3_bad, _gltf_float6_bad, _gltf_list_has_bad_float, _gltf_mat3x4_bad, _gltf_num_or, _gltf_vec3, _gltf_vec4, _gltf_anim_duration_valid, _gltf_doc_has_invalid_node_trs, _gltf_align_up, _gltf_elem_size, _gltf_read_f32_fast, _gltf_read_f32_acc, _gltf_read_index_acc, _gltf_node_local_mats, _gltf_node_visit_key, _gltf_make_material_slot, _gltf_alpha_mode_code, _gltf_prim_mode_expands_to_vertices, _gltf_apply_prim_mode_opts, _gltf_active_scene_idx, _gltf_vertex_color_u32, _gltf_make_uv_xform, _gltf_mat3x4_num, _gltf_mat3_num, _gltf_pack_uv_xform_words_from_values, _gltf_pack_uv_xform_words, _gltf_uv_xf_force_uv0, _gltf_pick_primary_uv_props, _gltf_extension_status, _gltf_meshes, _gltf_transform_aabb, _gltf_comp_size, _gltf_type_count)
 use std.core
 use std.math.bin
 use std.math
@@ -110,6 +110,8 @@ mut _gltf_skin_validate_mode = -1
 mut _gltf_skin_no_mesh_inv_mode = -1
 mut _gltf_skin_transpose_inv_bind_mode = -1
 mut _gltf_skin_invbind_first_mode = -1
+mut _gltf_anim_fast_mode = -1
+mut _gltf_anim_fast_skin_mode = -1
 
 fn _gltf_ensure_caches() any {
    if !is_dict(_gltf_img_uri_cache) { _gltf_img_uri_cache = dict(128) }
@@ -125,6 +127,10 @@ fn _gltf_ensure_caches() any {
 
 fn _gltf_env_truthy_flag(int flag, str name) int {
    flag != -1 ? flag : (common.env_truthy(name) ? 1 : 0)
+}
+
+fn _gltf_env_toggle_flag(int flag, str name, bool default_value=false) int {
+   flag != -1 ? flag : (common.env_toggle(name, default_value) ? 1 : 0)
 }
 
 fn _gltf_disable_skinning_enabled() bool {
@@ -155,6 +161,16 @@ fn _gltf_skin_transpose_inv_bind_enabled() bool {
 fn _gltf_skin_invbind_first_enabled() bool {
    _gltf_skin_invbind_first_mode = _gltf_env_truthy_flag(_gltf_skin_invbind_first_mode, "NY_GLTF_SKIN_INVBIND_FIRST")
    _gltf_skin_invbind_first_mode == 1
+}
+
+fn _gltf_anim_fast_enabled() bool {
+   _gltf_anim_fast_mode = _gltf_env_toggle_flag(_gltf_anim_fast_mode, "NY_GLTF_ANIM_FAST", false)
+   _gltf_anim_fast_mode == 1
+}
+
+fn _gltf_anim_fast_skin_enabled() bool {
+   _gltf_anim_fast_skin_mode = _gltf_env_toggle_flag(_gltf_anim_fast_skin_mode, "NY_GLTF_ANIM_FAST_SKIN", true)
+   _gltf_anim_fast_skin_mode == 1
 }
 
 fn _gltf_cache_key_from_g(any g) str {

@@ -1397,7 +1397,15 @@ fn _mat4_ptr_mul_store(any a, any b, any dst) bool {
 fn _sync_flat_part_model_composed(?ptr base, any base_model) any {
    if !base_model || _mat4_ptr_is_identity(base_model) { return _sync_flat_part_model(base) }
    def model_ptr = base + 64
-   _mat4_ptr_mul_store(base_model, model_ptr, _current_model)
+   if !_scratch_model_saved_b || !_current_model {
+      _mat4_ptr_mul_store(base_model, model_ptr, _current_model)
+      _model_dirty = true
+      _pc_dirty = true
+      return 0
+   }
+   _mat4_ptr_mul_store(base_model, model_ptr, _scratch_model_saved_b)
+   if memcmp(_scratch_model_saved_b, _current_model, 64) == 0 { return 0 }
+   memcpy(_current_model, _scratch_model_saved_b, 64)
    _model_dirty = true
    _pc_dirty = true
    0
