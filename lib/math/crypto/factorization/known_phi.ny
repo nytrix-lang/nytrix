@@ -58,7 +58,7 @@ fn factor_from_multiple_phi(any n, any multiple_phi, any bases=[2, 3, 5, 7, 11, 
       def g0 = gcd(a0, n)
       if g0 > 1 && g0 < n {
          def q0 = n / g0
-         return(g0 < q0) ? [g0, q0] : [q0, g0]
+         return (g0 < q0) ? [g0, q0] : [q0, g0]
       }
       mut y = power_mod(a0, r, n)
       if y == 1 || y == n - 1 { continue }
@@ -69,7 +69,7 @@ fn factor_from_multiple_phi(any n, any multiple_phi, any bases=[2, 3, 5, 7, 11, 
             def p = gcd(y - 1, n)
             if p > 1 && p < n {
                def q = n / p
-               return(p < q) ? [p, q] : [q, p]
+               return (p < q) ? [p, q] : [q, p]
             }
             break
          }

@@ -62,6 +62,6 @@ fn hill_decrypt(str msg, any key_mat) any {
             ((0 - mat_get(key, 1, 0)) * inv_det % 26 + 26) % 26,
             (mat_get(key, 0, 0) * inv_det) % 26
          ]
-   ])
+      ])
    _hill_apply_matrix(msg, inv_mat)
 }

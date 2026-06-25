@@ -420,7 +420,7 @@ fn deterministic_miller_rabin64_report(any n) dict {
          "proof_system": "deterministic-miller-rabin-64",
          "domain_bits": 64, "bases": bases, "prime": false,
          "probable_prime": false, "deterministic": false,
-   })
+      })
    if nz < Z(2) { return _pc_finish(out, t0, "composite") }
    if nz == Z(2) || nz == Z(3) {
       return _pc_finish_with(out, t0, "proven-prime", {"prime": true, "probable_prime": true, "deterministic": true})
@@ -441,7 +441,7 @@ fn deterministic_miller_rabin64_report(any n) dict {
          if !ok {
             return _pc_finish_with(out, t0, "composite", {
                   "base": b, "checks": checks,
-            })
+               })
          }
       }
       i += 1
@@ -449,7 +449,7 @@ fn deterministic_miller_rabin64_report(any n) dict {
    _pc_finish_with(out, t0, "proven-prime", {
          "prime": true, "probable_prime": true, "deterministic": true,
          "checks": checks, "checked_bases": checks.len,
-   })
+      })
 }
 
 fn deterministic_miller_rabin64(any n) bool {
@@ -729,7 +729,7 @@ fn aprcl_primality_report(any n, int max_base=128) dict {
    mut out = _pc_report("aprcl-primality-report", nz, {
          "source_model": "APRCL decision pipeline",
          "prime": false, "probable_prime": false,
-   })
+      })
    out = out.set("aprcl_parameter_plan", aprcl_parameter_plan_report(nz))
    def screen = bpsw_prp_report(nz)
    out = out.set("bpsw", screen)
@@ -737,7 +737,7 @@ fn aprcl_primality_report(any n, int max_base=128) dict {
       return _pc_finish_with(out, t0, "composite", {
             "reason": screen.get("status", "screen-rejected"),
             "factor": screen.get("factor", nil),
-      })
+         })
    }
    out = out.set("probable_prime", true)
    if bit_length(nz) <= 64 {
@@ -747,7 +747,7 @@ fn aprcl_primality_report(any n, int max_base=128) dict {
          return _pc_finish_with(out, t0, "proven-prime", {
                "prime": true, "proof_system": "deterministic-miller-rabin-64",
                "certificate": mr, "certificate_size": int(mr.get("checked_bases", 0)),
-         })
+            })
       }
       return _pc_finish_with(out, t0, "composite", {"proof_system": "deterministic-miller-rabin-64", "certificate": mr})
    }
@@ -758,7 +758,7 @@ fn aprcl_primality_report(any n, int max_base=128) dict {
             "prime": true, "proof_system": cert.get("proof_system", "recursive-certificate"),
             "certificate": cert.get("certificate", cert),
             "certificate_size": int(cert.get("certificate_size", 0)),
-      })
+         })
    }
    def aprcl = aprcl_data.aprcl_proof_report(nz)
    out = out.set("aprcl_proof", aprcl)
@@ -767,7 +767,7 @@ fn aprcl_primality_report(any n, int max_base=128) dict {
             "reason": aprcl.get("reason", "aprcl rejected"),
             "proof_system": "aprcl",
             "certificate": aprcl.get("certificate", aprcl),
-      })
+         })
    }
    if aprcl.get("proof_valid", false) {
       return _pc_finish_with(out, t0, "proven-prime", {
@@ -775,13 +775,13 @@ fn aprcl_primality_report(any n, int max_base=128) dict {
             "certificate": aprcl.get("certificate", aprcl),
             "verification": aprcl.get("verification", nil),
             "certificate_size": aprcl.get("certificate", dict(0)).get("pairs", []).len,
-      })
+         })
    }
    _pc_finish_with(out, t0, "probable-prime", {
          "proof_status": cert.get("status", "inconclusive"),
          "aprcl_status": aprcl.get("status", "inconclusive"),
          "reason": "BPSW accepted but deterministic/certificate/APRCL layers did not certify",
-   })
+      })
 }
 
 fn _pc_lucas_common_setup(str method, any n, any P, any Q) dict {
@@ -1074,7 +1074,7 @@ fn _pc_strong_lucas_selfridge_report(any n) dict {
    if params.get("status", "") == "factor" {
       return _pc_finish_with(out, t0, "factor", {
             "D": params.get("D"), "factor": params.get("factor"), "cofactor": params.get("cofactor"),
-      })
+         })
    }
    if params.get("status", "") != "params" {
       return _pc_finish_with(out, t0, "no-selfridge-params", {"params": params})
@@ -1088,7 +1088,7 @@ fn _pc_strong_lucas_selfridge_report(any n) dict {
    out = out.merge({
          "D": params.get("D"), "P": P, "Q": Q,
          "d": d, "s": s, "selfridge_tries": params.get("tries", 0),
-   })
+      })
    if _pc_strong_lucas_p1_accept_bool(nz, Q, params.get("D"), d, s) {
       return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true})
    }
@@ -1140,7 +1140,7 @@ fn selfridge_prp_report(any n) dict {
    if params.get("status", "") == "factor" {
       return _pc_finish_with(out, t0, "factor", {
             "D": params.get("D"), "factor": params.get("factor"), "cofactor": params.get("cofactor"),
-      })
+         })
    }
    if params.get("status", "") != "params" {
       return _pc_finish_with(out, t0, "no-selfridge-params", {"params": params})
@@ -1149,7 +1149,7 @@ fn selfridge_prp_report(any n) dict {
    out = out.merge({
          "D": params.get("D"), "P": params.get("P"), "Q": params.get("Q"),
          "selfridge_tries": params.get("tries", 0), "lucas": luc,
-   })
+      })
    if luc.get("probable_prime", false) {
       return _pc_finish_with(out, t0, "probable-prime", {"probable_prime": true})
    }
@@ -1297,7 +1297,7 @@ fn verify_pratt_certificate_report(any cert) dict {
    _pc_finish_with(out, t0, "verified-prime", {
          "prime": true, "proof_valid": true, "witness": a,
          "checks": checks, "verified_nodes": verified_nodes,
-   })
+      })
 }
 
 fn verify_pratt_certificate(any cert) bool {
@@ -1310,11 +1310,11 @@ fn pratt_certificate_report(any n, int max_base=512, int max_depth=64) dict {
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("pratt-certificate", nz, {
          "max_base": max_base, "max_depth": max_depth, "prime": false,
-   })
+      })
    def basic = _pc_certificate_trivial_case(out, t0, nz, {
          "prime": true, "witness": Z(1), "factors_n_minus_1": [],
          "subcertificates": [], "certificate_size": 1, "verified": true,
-   })
+      })
    if basic != nil { return basic }
    def prep = _pc_recursive_factor_setup(out, t0, nz, max_base, max_depth, "factors_n_minus_1", nz - Z(1), "n-1 factorization incomplete")
    if prep.get("done", false) { return prep.get("report") }
@@ -1330,7 +1330,7 @@ fn pratt_certificate_report(any n, int max_base=512, int max_depth=64) dict {
          "witness_checks": w.get("checks", []),
          "subcertificates": subcerts.get("subcertificates", []),
          "certificate_size": subcerts.get("certificate_size", 1),
-   })
+      })
    def verified = verify_pratt_certificate_report(out)
    _pc_finish_verified_certificate(out, t0, verified)
 }
@@ -1382,7 +1382,7 @@ fn _pc_lucas_nplus1_witness_report(any n, list qs, int max_tries) dict {
             if attempts.len < 8 {
                attempts = attempts.append({
                      "D": D, "P": P, "Q": Q, "U_n_plus_1": UN, "checks": checks,
-               })
+                  })
             }
          }
       }
@@ -1428,12 +1428,12 @@ fn verify_lucas_nplus1_certificate_report(any cert) dict {
             "reason": "Lucas rank check failed for a prime factor of n+1",
             "q": rank.get("q"), "gcd": rank.get("gcd"), "checks": checks,
             "factor": rank.get("factor", nil),
-      })
+         })
    }
    _pc_finish_with(out, t0, "verified-prime", {
          "prime": true, "proof_valid": true,
          "checks": checks, "verified_nodes": verified_nodes,
-   })
+      })
 }
 
 fn verify_lucas_nplus1_certificate(any cert) bool {
@@ -1446,13 +1446,13 @@ fn lucas_nplus1_certificate_report(any n, int max_tries=128, int max_depth=64) d
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("lucas-nplus1-certificate", nz, {
          "max_tries": max_tries, "max_depth": max_depth, "prime": false,
-   })
+      })
    def basic = _pc_certificate_trivial_case(out, t0, nz, {
          "prime": true, "D": Z(5), "P": Z(1), "Q": Z(-1),
          "factors_n_plus_1": [[Z(3), 1]],
          "subcertificates": [pratt_certificate_report(Z(3), max_tries, max_depth - 1)],
          "certificate_size": 2, "verified": true,
-   })
+      })
    if basic != nil { return basic }
    def prep = _pc_recursive_factor_setup(out, t0, nz, max_tries, max_depth, "factors_n_plus_1", nz + Z(1), "n+1 factorization incomplete")
    if prep.get("done", false) { return prep.get("report") }
@@ -1469,7 +1469,7 @@ fn lucas_nplus1_certificate_report(any n, int max_tries=128, int max_depth=64) d
          "rank_checks": w.get("checks", []),
          "subcertificates": subcerts.get("subcertificates", []),
          "certificate_size": subcerts.get("certificate_size", 1),
-   })
+      })
    def verified = verify_lucas_nplus1_certificate_report(out)
    _pc_finish_verified_certificate(out, t0, verified)
 }
@@ -1517,12 +1517,12 @@ fn pocklington_certificate_report(any n, int max_base=128) dict {
    if nz % Z(2) == Z(0) {
       return _pc_finish_with(out, t0, "composite", {
             "prime": false, "factor": Z(2), "cofactor": nz / Z(2),
-      })
+         })
    }
    if !is_prime(nz) {
       return _pc_finish_with(out, t0, "composite", {
             "prime": false, "reason": "base primality screen rejected n",
-      })
+         })
    }
    def facs = factor(nz - Z(1))
    def factor_fields = _pc_factorization_fields("factors_n_minus_1", facs, nz - Z(1))
@@ -1531,7 +1531,7 @@ fn pocklington_certificate_report(any n, int max_base=128) dict {
    if !complete {
       return _pc_finish_with(out, t0, "inconclusive", {
             "prime": false, "reason": "n-1 factorization incomplete",
-      })
+         })
    }
    def qs = _pc_unique_primes(facs)
    mut cert, i = [], 0
@@ -1541,19 +1541,19 @@ fn pocklington_certificate_report(any n, int max_base=128) dict {
          return _pc_finish_with(out, t0, "composite", {
                "prime": false, "factor": w.get("factor"),
                "cofactor": w.get("cofactor"), "certificate": cert,
-         })
+            })
       }
       if w.get("status", "") != "witness" {
          return _pc_finish_with(out, t0, "inconclusive", {
                "prime": false, "missing_q": qs.get(i), "certificate": cert,
-         })
+            })
       }
       cert = cert.append(w)
       i += 1
    }
    _pc_finish_with(out, t0, "proven-prime", {
          "prime": true, "certificate": cert, "certificate_size": cert.len,
-   })
+      })
 }
 
 fn pocklington_certificate(any n, int max_base=128) bool {
@@ -1566,14 +1566,14 @@ fn primality_certificate_report(any n, int max_base=128) dict {
    def t0, nz = ticks(), _pc_z(n)
    mut out = _pc_report("primality-certificate", nz, {
          "max_base": max_base, "prime": false, "probable_prime": false,
-   })
+      })
    def screen = bpsw_prp_report(nz)
    out = out.set("screen", screen)
    if !screen.get("probable_prime", false) {
       return _pc_finish_with(out, t0, "composite", {
             "reason": screen.get("status", "screen-rejected"),
             "factor": screen.get("factor", nil),
-      })
+         })
    }
    out = out.set("probable_prime", true)
    def pratt = pratt_certificate_report(nz, max_base)
@@ -1591,7 +1591,7 @@ fn primality_certificate_report(any n, int max_base=128) dict {
    _pc_finish_with(out, t0, "probable-prime", {
          "proof_status": proof.get("status", "inconclusive"),
          "reason": "BPSW accepted but proof layer did not certify",
-   })
+      })
 }
 
 #main {

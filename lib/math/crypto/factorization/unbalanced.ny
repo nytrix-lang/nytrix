@@ -60,7 +60,7 @@ fn unbalanced_factor_fermat(any n) any {
          mut s = isqrt(diff)
          if s * s == diff {
             mut p, q = a - s, a + s
-            if p > 1 && p * q == n { return(p < q) ? [p, q] : [q, p] }
+            if p > 1 && p * q == n { return (p < q) ? [p, q] : [q, p] }
          }
       }
       a += 1

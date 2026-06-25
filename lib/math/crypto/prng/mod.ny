@@ -1,10 +1,11 @@
-;; Keywords: prng rng random pseudorandom lcg msvc-rand mt19937 mersenne-twister pcg xoshiro xoroshiro lfsr berlekamp-massey python-random math crypto
+;; Keywords: prng rng random pseudorandom lcg msvc-rand mt19937 mersenne-twister pcg xoshiro xoroshiro lfsr berlekamp-massey py-compatible-mt math crypto
 ;; Cryptography prng helpers for algorithms, analysis, validation, or supporting math.
 ;; References:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap5.pdf
 ;; - https://cseweb.ucsd.edu/~mihir/papers/dss-lcg.pdf
 module std.math.crypto.prng(lcg, mt19937, dual_ec_drbg, lfsr, pcg, xoshiro, lcg_next, lcg_previous, lcg_predict_next, lcg_crack_multiplier, lcg_crack_increment, lcg_crack_modulus, lcg_crack_full, lcg_recover_state_mod_outputs, lcg_smt_recover_seed_from_bit_outputs, msvc_rand_next_state, msvc_rand_output, msvc_rand_outputs, msvc_rand_key_bytes, msvc_rand_key, msvc_rand_crypt, msvc_rand_bruteforce_seed, tlcg_modulus, tlcg_next_state, tlcg_high_output, tlcg_output_at, tlcg_recover, tlcg_recover_state, mt_untemper, mt_temper, mt_clone, mt_predict, mt_generate, mt19937_next, mt_twist_output_candidates, mt19937_smt_recover_state_prefix, dual_ec_drbg_predict, dual_ec_backdoor, dual_ec_backdoor_recover_tail, lfsr_next, lfsr_run, lfsr_keystream, lfsr_sequence, lfsr_autocorrelation, lfsr_connection_polynomial, lfsr_connection_polynomial_mod, lfsr_berlekamp_massey, lfsr_berlekamp_massey_mod, berlekamp_massey_mod, lfsr_polynomial_str, lfsr_connection_polynomial_str, lfsr_berlekamp_massey_polynomial_str, lfsr_rewind_sequence, lfsr_recover_state, lfsr_crack_from_output, pcg32_default_multiplier, pcg32_step, pcg32_output, pcg32_next, pcg32_stream_increment, pcg32_advance, pcg32_rewind, poly_pcg_choose_window, poly_pcg_newton_coeffs, poly_pcg_eval_next, poly_pcg_advance_from_states, xorshift32_next, xorshift64star_next, xoroshiro128plus_next, xoroshiro128plus_jump, xoshiro256plusplus_next, xoshiro256plusplus_jump, prng_output_family_hint, py_mt19937_seed_int, py_mt19937_getrandbits, py_getrandbits_unpack_words_full, py_getrandbits_word_constraints, py_random_float_to_mt_parts, py_mt19937_randbytes, py_mt19937_randbelow, py_mt19937_randrange, py_mt19937_sample_range)
 use std.math.nt
+
 #main {
    def inc = pcg32_stream_increment(54)
    def st0 = Z(42)

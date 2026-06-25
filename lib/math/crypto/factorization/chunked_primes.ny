@@ -120,7 +120,7 @@ fn _chunked_append_divisors(list facs, int i, any a, any bound, int lo, int hi, 
    if a > bound { return out }
    if i == facs.len {
       def bits = bit_length(a)
-      return(lo <= bits && bits <= hi) ? out.append(a) : out
+      return (lo <= bits && bits <= hi) ? out.append(a) : out
    }
    def f = facs.get(i)
    def p, k = f.get(0), int(f.get(1))

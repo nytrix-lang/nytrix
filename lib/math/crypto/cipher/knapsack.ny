@@ -31,11 +31,22 @@ fn _sum_weighted(list a, list bits) bigint {
    s
 }
 
-fn _knapsack_mask_sum(list a, int start, int count, int mask) bigint {
+fn _knapsack_z_weights(list a) list {
+   mut out = list(a.len)
+   __list_set_len(out, a.len)
+   mut i = 0
+   while i < a.len {
+      __store_item_fast(out, i, Z(a.get(i, 0)))
+      i += 1
+   }
+   out
+}
+
+fn _knapsack_mask_sum_z(list weights, int start, int count, int mask) bigint {
    mut s = Z(0)
    mut i = 0
    while i < count {
-      if ((mask >> i) & 1) != 0 { s += Z(a.get(start + i, 0)) }
+      if ((mask >> i) & 1) != 0 { s += weights.get(start + i, Z(0)) }
       i += 1
    }
    s
@@ -61,11 +72,12 @@ fn knapsack_mitm_table(list a, int split=0) dict {
    Sums are stored directly as bigint keys."
    def n = a.len
    if split <= 0 { split = n / 2 }
+   def weights = _knapsack_z_weights(a)
    mut table = dict(1 << split)
    mut mask = 0
    def limit = 1 << split
    while mask < limit {
-      def s = _knapsack_mask_sum(a, 0, split, mask)
+      def s = _knapsack_mask_sum_z(weights, 0, split, mask)
       if table.get(s, nil) == nil { table[s] = mask + 1 }
       mask += 1
    }
@@ -78,10 +90,11 @@ fn knapsack_mitm_right_table(list a, int split=0) list {
    if split <= 0 { split = n / 2 }
    def right_count = n - split
    def limit = 1 << right_count
+   def weights = _knapsack_z_weights(a)
    mut pairs = []
    mut mask = 0
    while mask < limit {
-      pairs = pairs.append([_knapsack_mask_sum(a, split, right_count, mask), mask])
+      pairs = pairs.append([_knapsack_mask_sum_z(weights, split, right_count, mask), mask])
       mask += 1
    }
    pairs
@@ -94,11 +107,12 @@ fn knapsack_mitm_solve_prepared(list a, any s, dict table, int split=0) any {
    if n <= 0 { return nil }
    if split <= 0 { split = n / 2 }
    def right_count = n - split
+   def weights = _knapsack_z_weights(a)
    mut right_mask = 0
    def limit = 1 << right_count
    def target = Z(s)
    while right_mask < limit {
-      def rs = _knapsack_mask_sum(a, split, right_count, right_mask)
+      def rs = _knapsack_mask_sum_z(weights, split, right_count, right_mask)
       def need = target - rs
       def packed = table.get(need, nil)
       if packed != nil {
@@ -305,17 +319,22 @@ fn _knapsack_embed_legacy(list a, any s) any {
 fn _knapsack_bruteforce_small(list a, any s) any {
    def n = a.len
    if n <= 0 || n > 28 { return nil }
-   def limit = Z(1) << n
-   mut mask = Z(0)
+   def weights = _knapsack_z_weights(a)
+   def target = Z(s)
+   def limit = 1 << n
+   mut mask = 0
    while mask < limit {
       mut bits = []
       mut i = 0
+      mut sum = Z(0)
       while i < n {
-         bits = bits.append(int((mask >> i) & Z(1)))
+         def bit = (mask >> i) & 1
+         bits = bits.append(bit)
+         if bit != 0 { sum += weights.get(i, Z(0)) }
          i += 1
       }
-      if _sum_weighted(a, bits) == Z(s) { return bits }
-      mask = mask + Z(1)
+      if sum == target { return bits }
+      mask += 1
    }
    nil
 }

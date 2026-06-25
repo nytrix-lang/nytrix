@@ -63,12 +63,12 @@ fn _gf2_sparse_is_clean(list row, int width) bool {
 }
 
 fn _gf2_sparse_normalize(list row, int width) list {
-   if _gf2_sparse_is_clean(row, width){ return row }
+   if _gf2_sparse_is_clean(row, width) { return row }
    mut out = []
    mut i = 0
    while i < row.len {
       def c = int(row[i])
-      if c >= 0 && (width <= 0 || c < width){ out = _gf2_sparse_toggle(out, c) }
+      if c >= 0 && (width <= 0 || c < width) { out = _gf2_sparse_toggle(out, c) }
       i += 1
    }
    out
@@ -125,7 +125,7 @@ fn _gf2_sparse_from_dense_rows(list rows) list {
       mut sparse = []
       mut j = 0
       while j < r.len {
-         if(r[j] & 1) == 1 { sparse = sparse.append(j) }
+         if (r[j] & 1) == 1 { sparse = sparse.append(j) }
          j += 1
       }
       out[i] = sparse
@@ -147,7 +147,7 @@ fn _gf2_sparse_from_dense_rows_until(list rows, int max_entries, int profile_pre
       mut j = 0
       mut row_entries = 0
       while j < r.len {
-         if(r[j] & 1) == 1 {
+         if (r[j] & 1) == 1 {
             entries += 1
             row_entries += 1
             if max_entries >= 0 && entries > max_entries {
@@ -236,7 +236,7 @@ fn _gf2_sparse_matvec_is_zero(list<list<int>> sparse_rows, list<int> vector) boo
          acc = acc ^^ (vector[row[j]] & 1)
          j += 1
       }
-      if(acc & 1) != 0 { return false }
+      if (acc & 1) != 0 { return false }
       i += 1
    }
    true
@@ -248,7 +248,7 @@ fn _gf2_sparse_transpose_matvec(list<list<int>> sparse_rows, list<int> y, int wi
    mut entry_xor_ops = 0
    mut i = 0
    while i < sparse_rows.len {
-      if(y[i] & 1) != 0 {
+      if (y[i] & 1) != 0 {
          def list<int> row = sparse_rows[i]
          mut j = 0
          while j < row.len {
@@ -275,7 +275,7 @@ fn _gf2_sparse_transpose_matvec_into(list<list<int>> sparse_rows, list<int> y, l
    }
    i = 0
    while i < sparse_rows.len {
-      if(y[i] & 1) != 0 {
+      if (y[i] & 1) != 0 {
          def list<int> row = sparse_rows[i]
          mut j = 0
          while j < row.len {
@@ -311,7 +311,7 @@ fn sparse_gf2_matvec_report(list sparse_rows, list vector, int width=0) dict {
          ["rows", clean.len], ["cols", w],
          ["nonzeros", _gf2_sparse_entry_count(clean)],
          ["result", mv.get(0)], ["entry_ops", mv.get(1, 0)],
-   ])
+      ])
 }
 
 fn sparse_gf2_normal_matvec_report(list sparse_rows, list vector, int width=0) dict {
@@ -333,7 +333,7 @@ fn sparse_gf2_normal_matvec_report(list sparse_rows, list vector, int width=0) d
          ["entry_dot_ops", mv.get(1, 0)],
          ["transpose_row_xor_ops", tv.get(1, 0)],
          ["transpose_entry_xor_ops", tv.get(2, 0)],
-   ])
+      ])
 }
 
 fn _gf2_sparse_width(list sparse_rows, int width) int {
@@ -358,7 +358,7 @@ fn _gf2_sparse_elim_state() dict {
          ["pivots", []], ["pivot_rows", []], ["pivot_index", dict()],
          ["pivot_lookup_hits", 0], ["pivot_lookup_misses", 0],
          ["row_xor_ops", 0], ["back_eliminate_ops", 0],
-   ])
+      ])
 }
 
 fn _gf2_sparse_back_eliminate(list pivot_rows_in, list row, int pivot) dict {
@@ -366,7 +366,7 @@ fn _gf2_sparse_back_eliminate(list pivot_rows_in, list row, int pivot) dict {
    mut ops = 0
    mut k = 0
    while k < pivot_rows.len {
-      if _gf2_sparse_contains(pivot_rows.get(k), pivot){
+      if _gf2_sparse_contains(pivot_rows.get(k), pivot) {
          pivot_rows[k] = _gf2_sparse_xor(pivot_rows.get(k), row)
          ops += 1
       }
@@ -386,7 +386,7 @@ fn _gf2_sparse_insert_pivot(dict state, list row, int pivot, str pkey) dict {
          ["pivot_index", pivot_index],
          ["pivot_lookup_misses", int(state.get("pivot_lookup_misses", 0)) + 1],
          ["back_eliminate_ops", int(state.get("back_eliminate_ops", 0)) + int(back.get("ops", 0))],
-   ])
+      ])
 }
 
 fn _gf2_sparse_eliminate_row(dict state_in, list sparse_row, int width) dict {
@@ -421,11 +421,11 @@ fn _gf2_sparse_basis_from_pivots(list pivots, list pivot_rows, dict pivot_index,
    mut basis = []
    mut col = 0
    while col < width {
-      if !pivot_index.contains(to_str(col)){
+      if !pivot_index.contains(to_str(col)) {
          mut sparse_v = [col]
          mut i = 0
          while i < pivots.len {
-            if _gf2_sparse_contains(pivot_rows.get(i), col){ sparse_v = _gf2_sparse_insert(sparse_v, int(pivots.get(i))) }
+            if _gf2_sparse_contains(pivot_rows.get(i), col) { sparse_v = _gf2_sparse_insert(sparse_v, int(pivots.get(i))) }
             i += 1
          }
          basis = basis.append(_gf2_sparse_to_dense(sparse_v, width))
@@ -452,7 +452,7 @@ fn sparse_gf2_nullspace_report(list sparse_rows, int width=0) dict {
          ["pivot_lookup_misses", eliminated.get("pivot_lookup_misses", 0)],
          ["row_xor_ops", eliminated.get("row_xor_ops", 0)],
          ["back_eliminate_ops", eliminated.get("back_eliminate_ops", 0)],
-   ])
+      ])
 }
 
 fn sparse_gf2_nullspace(list sparse_rows, int width=0) list {
@@ -486,7 +486,7 @@ fn gf2_nullspace_report(list rows) dict {
          ["rows", nr], ["cols", nc],
          ["rank", rr.get(1).len], ["nullity", basis.len],
          ["pivots", rr.get(1)], ["basis", basis],
-   ])
+      ])
 }
 
 fn gf2_nullspace(list rows) list {
@@ -516,7 +516,7 @@ fn _gf2_pack_dense_row(list row, int width) list {
    mut i = 0
    def limit = min(width, row.len)
    while i < limit {
-      if(int(row[i]) & 1) != 0 {
+      if (int(row[i]) & 1) != 0 {
          def wi, bi = i / wb, i % wb
          out[wi] = int(out[wi]) | (1 << bi)
       }
@@ -545,7 +545,7 @@ fn _gf2_packed_words_equal(list a, list b) bool {
    if a.len != b.len { return false }
    mut i = 0
    while i < a.len {
-      if int(a[i]) != int(b[i]){ return false }
+      if int(a[i]) != int(b[i]) { return false }
       i += 1
    }
    true
@@ -556,7 +556,7 @@ fn _gf2_seen_packed_words_add(dict seen, list words) list {
    mut bucket = seen.get(key, [])
    mut i = 0
    while i < bucket.len {
-      if _gf2_packed_words_equal(bucket[i], words){ return [true, seen] }
+      if _gf2_packed_words_equal(bucket[i], words) { return [true, seen] }
       i += 1
    }
    bucket = bucket.append(words)
@@ -712,7 +712,7 @@ fn _gf2_packed_matvec_is_zero(list packed_rows, list vec_words) list {
       }
       word_and_ops += limit
       popcount_ops += limit
-      if(parity & 1) != 0 { return [false, word_and_ops, popcount_ops] }
+      if (parity & 1) != 0 { return [false, word_and_ops, popcount_ops] }
       i += 1
    }
    [true, word_and_ops, popcount_ops]
@@ -724,7 +724,7 @@ fn _gf2_packed_transpose_matvec_words(list packed_rows, list y, int width) list 
    mut word_xor_ops = 0
    mut i = 0
    while i < packed_rows.len {
-      if(int(y[i]) & 1) != 0 {
+      if (int(y[i]) & 1) != 0 {
          def row = packed_rows[i]
          mut w = 0
          def limit = min(out_words.len, row.len)
@@ -746,7 +746,7 @@ fn _gf2_packed_transpose_matvec_words_only(list packed_rows, list y, int width) 
    mut word_xor_ops = 0
    mut i = 0
    while i < packed_rows.len {
-      if(int(y[i]) & 1) != 0 {
+      if (int(y[i]) & 1) != 0 {
          def row = packed_rows[i]
          mut w = 0
          def limit = min(out_words.len, row.len)
@@ -778,7 +778,7 @@ fn packed_gf2_matvec_report(list rows, list vector, int width=0, bool sparse=fal
          ["result", mv.get(0)],
          ["word_and_ops", mv.get(1, 0)],
          ["popcount_ops", mv.get(2, 0)],
-   ])
+      ])
 }
 
 fn packed_gf2_normal_matvec_report(list rows, list vector, int width=0, bool sparse=false) dict {
@@ -800,7 +800,7 @@ fn packed_gf2_normal_matvec_report(list rows, list vector, int width=0, bool spa
          ["popcount_ops", mv.get(2, 0)],
          ["transpose_row_xor_ops", tv.get(1, 0)],
          ["transpose_word_xor_ops", tv.get(2, 0)],
-   ])
+      ])
 }
 
 fn _gf2_columns_to_packed_rows(list cols, int row_count) list {
@@ -814,7 +814,7 @@ fn _gf2_columns_to_packed_rows(list cols, int row_count) list {
       mut c = 0
       while c < width {
          def list<int> col = cols[c]
-         if(col[r] & 1) != 0 {
+         if (col[r] & 1) != 0 {
             def wi, bi = c / wb, c % wb
             words[wi] = int(words[wi]) | (1 << bi)
          }
@@ -914,15 +914,15 @@ fn _gf2_packed_eliminate_rows(list packed_rows, int width) dict {
          ["pivot_cols", pivot_cols], ["row_swaps", row_swaps],
          ["xor_ops", xor_ops], ["word_xor_ops", word_xor_ops],
          ["pivot_scans", pivot_scans],
-   ])
+      ])
 }
 
 fn _gf2_packed_basis_from_pivots(list packed, list pivots, dict pivot_cols, int width, int max_basis) dict {
    mut basis = []
    mut basis_packed = []
    mut col = 0
-   while col < width && (max_basis <= 0 || basis.len < max_basis){
-      if !pivot_cols.contains(to_str(col)){
+   while col < width && (max_basis <= 0 || basis.len < max_basis) {
+      if !pivot_cols.contains(to_str(col)) {
          mut v, i = _gf2_packed_set_bit(_gf2_zero_words(_gf2_word_count(width)), col), 0
          while i < pivots.len {
             if _gf2_packed_bit(packed.get(i), col) != 0 { v = _gf2_packed_set_bit(v, int(pivots.get(i))) }
@@ -940,7 +940,7 @@ fn _gf2_packed_nonzero_rows(list packed) int {
    mut nonzero_rows = 0
    mut i = 0
    while i < packed.len {
-      if !_gf2_packed_is_zero(packed.get(i)){ nonzero_rows += 1 }
+      if !_gf2_packed_is_zero(packed.get(i)) { nonzero_rows += 1 }
       i += 1
    }
    nonzero_rows
@@ -970,7 +970,7 @@ fn _gf2_packed_rows_nullspace_report(list packed_rows, int width=0, int max_basi
          ["word_xor_ops", eliminated.get("word_xor_ops", 0)],
          ["pivot_scans", eliminated.get("pivot_scans", 0)],
          ["basis", basis], ["basis_packed", basis_report.get("basis_packed", [])],
-   ])
+      ])
 }
 
 fn packed_gf2_nullspace_report(list rows, int width=0, bool sparse=false, int max_basis=0) dict {
@@ -1010,7 +1010,7 @@ fn _gf2_vec_is_zero(list<int> v) bool {
    def n = v.len
    mut i = 0
    while i < n {
-      if(int(v[i]) & 1) != 0 { return false }
+      if (int(v[i]) & 1) != 0 { return false }
       i += 1
    }
    true
@@ -1020,7 +1020,7 @@ fn _gf2_vec_weight(list<int> v) int {
    def n = v.len
    mut w, i = 0, 0
    while i < n {
-      if(int(v[i]) & 1) != 0 { w += 1 }
+      if (int(v[i]) & 1) != 0 { w += 1 }
       i += 1
    }
    w
@@ -1030,7 +1030,7 @@ fn _gf2_vec_pivot(list<int> v) int {
    def n = v.len
    mut i = 0
    while i < n {
-      if(int(v[i]) & 1) != 0 { return i }
+      if (int(v[i]) & 1) != 0 { return i }
       i += 1
    }
    -1
@@ -1067,7 +1067,7 @@ fn _gf2_precondition_row_counts2(list active, list col_rows, int nrows) list {
    mut counts = _gf2_zero_vec(nrows)
    mut j = 0
    while j < col_rows.len {
-      if j < active.len && bool(active[j]){
+      if j < active.len && bool(active[j]) {
          def cr = col_rows[j]
          mut i = 0
          while i < cr.len {
@@ -1084,7 +1084,7 @@ fn _gf2_precondition_row_counts2(list active, list col_rows, int nrows) list {
 fn _gf2_precondition_active_cols2(list active) int {
    mut n, j = 0, 0
    while j < active.len {
-      if bool(active[j]){ n += 1 }
+      if bool(active[j]) { n += 1 }
       j += 1
    }
    n
@@ -1093,7 +1093,7 @@ fn _gf2_precondition_active_cols2(list active) int {
 fn _gf2_precondition_find_other_col2(list active, list col_rows, int row, int skip) int {
    mut j = 0
    while j < col_rows.len {
-      if j != skip && j < active.len && bool(active[j]) && _gf2_sparse_contains(col_rows[j], row){ return j }
+      if j != skip && j < active.len && bool(active[j]) && _gf2_sparse_contains(col_rows[j], row) { return j }
       j += 1
    }
    -1
@@ -1192,7 +1192,7 @@ fn _gf2_precondition_quick_noop(list rows, int width, bool prune_singletons, boo
       mut row_weight = 0
       mut c = 0
       while c < row.len && c < width {
-         if(int(row.get(c, 0)) & 1) != 0 {
+         if (int(row.get(c, 0)) & 1) != 0 {
             counts[c] = int(counts.get(c, 0)) + 1
             row_weight += 1
          }
@@ -1205,7 +1205,7 @@ fn _gf2_precondition_quick_noop(list rows, int width, bool prune_singletons, boo
    mut j = 0
    while j < width {
       def n = int(counts.get(j, 0))
-      if n == 0 || (prune_singletons && n == 1){ return false }
+      if n == 0 || (prune_singletons && n == 1) { return false }
       j += 1
    }
    true
@@ -1215,7 +1215,7 @@ fn _gf2_precondition_prune_pass(list active, list col_rows_all, list col_cycles_
    def row_counts = _gf2_precondition_row_counts2(active, col_rows_all, row_count)
    mut empty_columns_removed, singleton_columns_removed, immediate_dependencies, changed, j = 0, 0, [], false, 0
    while j < active.len {
-      if bool(active[j]){
+      if bool(active[j]) {
          def cr = col_rows_all[j]
          mut drop = cr.len == 0
          if prune_singletons && !drop {
@@ -1245,7 +1245,7 @@ fn _gf2_precondition_clique_pass(list active, list col_rows_all, list col_cycles
       merged = false
       mut j = 0
       while j < active.len && !merged {
-         if bool(active[j]){
+         if bool(active[j]) {
             def c1_rows = col_rows_all[j]
             mut base, i = -1, 0
             while i < c1_rows.len && base < 0 {
@@ -1275,7 +1275,7 @@ fn _gf2_precondition_trim_heavy(list active, list col_rows_all, int row_count, i
    while _gf2_precondition_active_cols2(active) > keep_limit {
       mut best_col, best_weight, j = -1, -1, 0
       while j < active.len {
-         if bool(active[j]){
+         if bool(active[j]) {
             def cw = col_rows_all[j].len
             if cw > best_weight { best_weight, best_col = cw, j }
          }
@@ -1298,7 +1298,7 @@ fn _gf2_precondition_reduced_state(list active, list col_rows_all, list col_cycl
    mut j = 0
    mut out_j = 0
    while j < active.len {
-      if active.get(j, false){
+      if active.get(j, false) {
          col_map[out_j] = j
          col_cycles[out_j] = col_cycles_all.get(j)
          col_rows[out_j] = col_rows_all.get(j)
@@ -1362,7 +1362,7 @@ fn gf2_matrix_precondition_report(list rows, int width=0, int num_excess=8, bool
          ["trimmed_heavy_columns", trimmed_heavy_columns],
          ["row_map", row_map], ["col_map", col_map],
          ["col_cycles", col_cycles], ["reduced_rows", reduced],
-   ])
+      ])
 }
 
 fn _gf2_seed_vec(int width, int seed) list {
@@ -1376,10 +1376,10 @@ fn _gf2_seed_vec(int width, int seed) list {
    mut i = 0
    while i < width {
       state = (state * 1103515245 + 12345) & 1073741823
-      if((state >> 7) & 1) == 1 { out[i] = 1 }
+      if ((state >> 7) & 1) == 1 { out[i] = 1 }
       i += 1
    }
-   if _gf2_vec_is_zero(out){ out[seed % width] = 1 }
+   if _gf2_vec_is_zero(out) { out[seed % width] = 1 }
    out
 }
 
@@ -1416,7 +1416,7 @@ fn _gf2_independent_basis_report(list candidates, int width=0) dict {
    mut i = 0
    while i < candidates.len {
       def v = candidates[i]
-      if !_gf2_vec_is_zero(v){
+      if !_gf2_vec_is_zero(v) {
          mut red = _gf2_copy_vec(v)
          mut p = _gf2_vec_pivot(red)
          while p >= 0 && p < pivot_index.len && int(pivot_index[p]) >= 0 {
@@ -1444,7 +1444,7 @@ fn _gf2_independent_basis_report(list candidates, int width=0) dict {
          ["input_count", candidates.len], ["cols", w], ["rank", rank],
          ["basis", out], ["reduced_rows", reduced_rows],
          ["reduction_xors", reduction_xors], ["dependent_skips", dependent_skips],
-   ])
+      ])
 }
 
 fn _gf2_verified_basis_report(list rows, list candidates, int width=0) dict {
@@ -1473,7 +1473,7 @@ fn _gf2_verified_basis_report(list rows, list candidates, int width=0) dict {
          zero_skips += 1
       } else {
          def seen_add = _gf2_seen_packed_words_add(seen, words)
-         if bool(seen_add[0]){
+         if bool(seen_add[0]) {
             duplicate_skips += 1
          } else {
             seen = seen_add[1]
@@ -1481,7 +1481,7 @@ fn _gf2_verified_basis_report(list rows, list candidates, int width=0) dict {
             def mv = _gf2_packed_matvec_is_zero(packed_rows, words)
             packed_word_and_ops += int(mv[1])
             packed_popcount_ops += int(mv[2])
-            if bool(mv[0]){
+            if bool(mv[0]) {
                verified[verified_count] = v
                verified_count += 1
             } else {
@@ -1504,7 +1504,7 @@ fn _gf2_verified_basis_report(list rows, list candidates, int width=0) dict {
          ["packed_popcount_ops", packed_popcount_ops],
          ["seen_key_pack_ops", seen_key_pack_ops],
          ["seen_key_words", seen_key_words],
-   ])
+      ])
 }
 
 fn _gf2_verified_sparse_basis_report(list sparse_rows, list candidates, int width=0) dict {
@@ -1549,13 +1549,13 @@ fn _gf2_verified_sparse_basis_report(list sparse_rows, list candidates, int widt
          zero_skips += 1
       } else {
          def seen_add = _gf2_seen_packed_words_add(seen, words)
-         if bool(seen_add[0]){
+         if bool(seen_add[0]) {
             duplicate_skips += 1
          } else {
             seen = seen_add[1]
             matvec_checks += 1
             sparse_entry_dot_ops += sparse_entries
-            if _gf2_sparse_matvec_is_zero(sparse_rows, v){
+            if _gf2_sparse_matvec_is_zero(sparse_rows, v) {
                verified[verified_count] = v
                verified_count += 1
             } else {
@@ -1577,7 +1577,7 @@ fn _gf2_verified_sparse_basis_report(list sparse_rows, list candidates, int widt
          ["sparse_entry_dot_ops", sparse_entry_dot_ops],
          ["seen_key_pack_ops", seen_key_pack_ops], ["seen_key_words", seen_key_words],
          ["dense_seen_key_string_ops", dense_seen_key_string_ops],
-   ])
+      ])
 }
 
 fn _gf2_block_krylov_core_fields(str vector_count_key, bool use_sparse_kernel, list rows, list sparse_work_rows, int w, int bs, int iters, bool bounded_default_iters, int vector_count, bool image_packed_transpose, int image_packed_row_words, int sparse_entries, int packed_row_word_ops) list {
@@ -1657,7 +1657,7 @@ fn _gf2_block_krylov_candidates(bool use_sparse_kernel, list deps, int vector_co
          mut cand_words = _gf2_zero_words(word_count)
          mut j = 0
          while j < dep.len && j < vector_count {
-            if(int(dep.get(j, 0)) & 1) != 0 {
+            if (int(dep.get(j, 0)) & 1) != 0 {
                cand_words = _gf2_packed_xor_inplace(cand_words, vectors_packed.get(j), 0)
                candidate_packed_xor_ops += word_count
                if use_sparse_kernel { candidate_dense_xor_avoided += w }
@@ -1675,7 +1675,7 @@ fn _gf2_block_krylov_candidates(bool use_sparse_kernel, list deps, int vector_co
          mut cand = []
          mut j = 0
          while j < dep.len && j < vector_count {
-            if(int(dep.get(j, 0)) & 1) != 0 {
+            if (int(dep.get(j, 0)) & 1) != 0 {
                cand = _gf2_xor_vec(cand, vectors.get(j))
                candidate_dense_xor_ops += w
             }
@@ -1692,7 +1692,7 @@ fn _gf2_block_krylov_candidates(bool use_sparse_kernel, list deps, int vector_co
          ["candidate_packed_xor_ops", candidate_packed_xor_ops],
          ["candidate_dense_xor_ops", candidate_dense_xor_ops],
          ["candidate_dense_xor_avoided", candidate_dense_xor_avoided],
-   ])
+      ])
 }
 
 fn _gf2_block_krylov_image_report(bool use_sparse_kernel, list images, list sparse_work_rows, list rows, int vector_count, int image_basis_limit) dict {
@@ -1765,11 +1765,11 @@ fn _gf2_block_krylov_solution_report(bool use_sparse_kernel, list rows, list spa
          ["candidate_packed_xor_ops", candidate_report.get("candidate_packed_xor_ops", 0)],
          ["candidate_dense_xor_ops", candidate_report.get("candidate_dense_xor_ops", 0)],
          ["candidate_dense_xor_avoided", candidate_report.get("candidate_dense_xor_avoided", 0)],
-   ])
+      ])
    _dict_with(2, [
          ["packed_vector_decode_ops", int(candidate_report.get("packed_vector_decode_ops", 0))],
          ["fields", fields],
-   ])
+      ])
 }
 
 fn _gf2_block_krylov_walk_report(bool use_sparse_kernel, bool shifted_seed, list packed_rows, list sparse_work_rows, int sparse_work_entries, int w, int bs, int iters) dict {
@@ -1829,7 +1829,7 @@ fn _gf2_block_krylov_walk_report(bool use_sparse_kernel, bool shifted_seed, list
             v_key_words = v_words
          }
          def seen_add = nonzero_vec ? _gf2_seen_packed_words_add(seen, v_key_words) : [true, seen]
-         if nonzero_vec && !bool(seen_add[0]){
+         if nonzero_vec && !bool(seen_add[0]) {
             seen = seen_add[1]
             if use_sparse_kernel {
                vectors_packed[vector_count] = v_key_words
@@ -1852,7 +1852,7 @@ fn _gf2_block_krylov_walk_report(bool use_sparse_kernel, bool shifted_seed, list
             packed_transpose_word_xor_ops += int(normal_pack[1])
          }
          normal_matvecs += 1
-         if !use_sparse_kernel && _gf2_packed_is_zero(v_words){ iter = iters }
+         if !use_sparse_kernel && _gf2_packed_is_zero(v_words) { iter = iters }
          iter += 1
       }
       seed += 1
@@ -1882,13 +1882,13 @@ fn _gf2_block_krylov_walk_report(bool use_sparse_kernel, bool shifted_seed, list
          ["sparse_seen_key_repack_avoided", sparse_seen_key_repack_avoided],
          ["sparse_dual_transpose_enabled", use_sparse_kernel],
          ["sparse_dual_transpose_matvecs", sparse_dual_transpose_matvecs],
-   ])
+      ])
 }
 
 fn _gf2_block_krylov_iteration_plan(int width, int block_size, int max_iters, bool complete) dict {
    mut bs = block_size
    if bs <= 0 { bs = 8 }
-   if bs > max(1, width){ bs = max(1, width) }
+   if bs > max(1, width) { bs = max(1, width) }
    mut iters = max_iters
    mut bounded_default_iters = false
    if iters <= 0 {
@@ -1935,7 +1935,7 @@ fn _gf2_block_krylov_setup(list rows, int width, int block_size, int max_iters, 
          ["block_size", plan.get("block_size")],
          ["iters", plan.get("iters")],
          ["bounded_default_iters", plan.get("bounded_default_iters")],
-   ])
+      ])
 }
 
 fn _gf2_block_krylov_report_fields(str vector_count_key, list rows, dict setup, dict walk, dict image_report, dict solution, int vector_count) list {
@@ -1962,7 +1962,7 @@ fn _gf2_block_krylov_report_fields(str vector_count_key, list rows, dict setup, 
          ["sparse_seen_key_repack_avoided", walk.get("sparse_seen_key_repack_avoided", 0)],
          ["sparse_dual_transpose_enabled", walk.get("sparse_dual_transpose_enabled", false)],
          ["sparse_dual_transpose_matvecs", walk.get("sparse_dual_transpose_matvecs", 0)],
-   ])
+      ])
    _fields_extend(fields, solution.get("fields", []))
 }
 
@@ -2009,7 +2009,7 @@ fn _gf2_block_krylov_sparse_setup(list sparse_rows, int width, int block_size, i
          ["block_size", plan.get("block_size")],
          ["iters", plan.get("iters")],
          ["bounded_default_iters", plan.get("bounded_default_iters")],
-   ])
+      ])
 }
 
 fn _gf2_block_krylov_sparse_report(str method, str vector_count_key, bool shifted_seed, list sparse_rows, int width, int block_size, int max_iters) dict {
@@ -2061,7 +2061,7 @@ fn _gf2_dependency_candidates(list basis, int width, int max_count=4096) list {
       mut dep = _gf2_zero_vec(width)
       mut i = 0
       while i < basis.len {
-         if((mask >> i) & 1) == 1 { dep = _gf2_xor_vec(dep, basis.get(i)) }
+         if ((mask >> i) & 1) == 1 { dep = _gf2_xor_vec(dep, basis.get(i)) }
          i += 1
       }
       out[out_i] = dep
@@ -2096,7 +2096,7 @@ fn gf2_dependency_candidates_report(list basis, int width=0, int max_count=4096,
          ["large_basis_passthrough", large_passthrough],
          ["candidate_count", candidates.len], ["truncated", candidates.len < expected],
          ["candidates", candidates], ["candidate_weights", weights],
-   ])
+      ])
 }
 
 fn gf2_dependency_candidates(list basis, int width=0, int max_count=4096) list {
@@ -2120,7 +2120,7 @@ fn _gf2_expand_precondition_dependency(list dep, any precondition, int original_
    mut out = _gf2_zero_vec(original_width)
    mut j = 0
    while j < dep.len && j < cycles.len {
-      if(int(dep.get(j, 0)) & 1) != 0 {
+      if (int(dep.get(j, 0)) & 1) != 0 {
          def cyc = cycles.get(j)
          mut k = 0
          while k < cyc.len {
@@ -2140,7 +2140,7 @@ fn _gf2_pipeline_precondition(list rows, int width, bool enabled) dict {
    mut precondition = nil
    if enabled {
       def skip_shape = rows.len >= 256 && width >= rows.len * 2
-      if !skip_shape && !_gf2_precondition_quick_noop(rows, width, true, true){
+      if !skip_shape && !_gf2_precondition_quick_noop(rows, width, true, true) {
          precondition = gf2_matrix_precondition_report(rows, width, 8, true, false, true)
          def reduced_cols = int(precondition.get("output_cols", width))
          def no_effect = reduced_cols == width
@@ -2161,13 +2161,13 @@ fn _gf2_pipeline_precondition(list rows, int width, bool enabled) dict {
          ["solve_matrix", solve_matrix],
          ["solve_width", solve_width],
          ["precondition", precondition],
-   ])
+      ])
 }
 
 fn _gf2_pipeline_empty_linear_algebra() dict {
    _set_fields(_report("empty-gf2-linear-algebra", 8), [
          ["basis", []], ["verified_count", 0], ["matrix_kernel", ""],
-   ])
+      ])
 }
 
 fn _gf2_pipeline_linear_algebra(list solve_matrix, int solve_width, str backend, int block_size, int max_iters) dict {
@@ -2202,7 +2202,7 @@ fn _gf2_pipeline_expand_candidates(dict lin, any precondition, int width, int ma
          ["expanded", expanded],
          ["immediate", immediate],
          ["raw_basis", raw_basis],
-   ])
+      ])
 }
 
 fn _gf2_pipeline_verify(list rows, int width, list expanded) dict {
@@ -2229,7 +2229,7 @@ fn _gf2_pipeline_exact_closure(list rows, int width, list basis_in, dict verifie
          ["exact", exact],
          ["exact_added", exact_added],
          ["exact_nullity", exact_nullity],
-   ])
+      ])
 }
 
 fn _gf2_pipeline_immediate_linear_algebra(dict lin, list basis, list immediate, dict verified, int solve_width) dict {
@@ -2241,7 +2241,7 @@ fn _gf2_pipeline_immediate_linear_algebra(dict lin, list basis, list immediate, 
             ["precondition_only", true],
             ["immediate_dependency_count", immediate.len],
             ["verified_basis_report", verified],
-      ])
+         ])
    }
    lin
 }
@@ -2326,5 +2326,5 @@ fn _gf2_dependency_sparse_pipeline_report(list sparse_rows, int width, str backe
          ["verified_basis_report", verified],
          ["exact_closure_report", exact_report],
          ["complete", false],
-   ])
+      ])
 }
