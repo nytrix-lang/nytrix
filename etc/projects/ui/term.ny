@@ -85,12 +85,28 @@ mut _mouse_update_budget_ns = 3000000
 mut _scroll_update_max = 96
 mut _scroll_update_budget_ns = 6000000
 mut _pending_mouse_motion = 0
+mut _term_shutdown_done = false
 mut _repeat_key = 0
 mut _repeat_mod = 0
 mut _repeat_down = false
 mut _repeat_next_ticks = 0
 mut _input_debug_count = 0
 mut _input_debug_max = 0
+
+fn _term_shutdown() any {
+   "Closes the child terminal and renderer/window resources once."
+   if _term_shutdown_done { return 0 }
+   _term_shutdown_done = true
+   if vt { vterm.close(vt) }
+   close_window()
+   if is_dict(win) { window.close(win) }
+   0
+}
+
+fn _term_exit(int code) any {
+   _term_shutdown()
+   exit(code)
+}
 
 fn _arm_plus_char_suppress() any {
    if _suppress_plus_char_count < 32 {
@@ -511,9 +527,7 @@ fn _auto_close_if_idle(any win, any last_ticks, int default_ns=0) bool {
 fn _live_window() any {
    def last_win = window.last()
    if is_dict(last_win) { return last_win }
-   if is_dict(win) { return win }
-   if win_id { return window.get_win(win_id) }
-   0
+   win
 }
 
 fn _font_map() dict {
@@ -545,7 +559,7 @@ fn _sync_framebuffer_size_if_due(any now_ticks, bool force=false) bool {
 
 fn _refresh_update_budget(any now_ticks) any {
    if now_ticks < _update_budget_reload_ticks { return 0 }
-   mut budget_ms = 6.0
+   mut budget_ms = 4.0
    def budget_env = common.env_trim("NY_TERM_UPDATE_BUDGET_MS")
    if budget_env.len > 0 {
       def bv = str.atof(budget_env)
@@ -555,11 +569,11 @@ fn _refresh_update_budget(any now_ticks) any {
    _max_events_per_frame = common.env_int_clamped("NY_TERM_MAX_EVENTS_PER_FRAME", 128, 32, 1024)
    _input_event_budget_ns = common.env_int_clamped("NY_TERM_INPUT_EVENT_BUDGET_MS", 1, 1, 12) * 1000000
    _key_update_max = common.env_int_clamped("NY_TERM_KEY_UPDATE_MAX", 64, 16, 512)
-   _key_update_budget_ns = common.env_int_clamped("NY_TERM_KEY_UPDATE_BUDGET_MS", 4, 1, 24) * 1000000
+   _key_update_budget_ns = common.env_int_clamped("NY_TERM_KEY_UPDATE_BUDGET_MS", 2, 1, 24) * 1000000
    _mouse_update_max = common.env_int_clamped("NY_TERM_MOUSE_UPDATE_MAX", 48, 16, 512)
-   _mouse_update_budget_ns = common.env_int_clamped("NY_TERM_MOUSE_UPDATE_BUDGET_MS", 3, 1, 24) * 1000000
+   _mouse_update_budget_ns = common.env_int_clamped("NY_TERM_MOUSE_UPDATE_BUDGET_MS", 2, 1, 24) * 1000000
    _scroll_update_max = common.env_int_clamped("NY_TERM_SCROLL_UPDATE_MAX", 64, 8, 256)
-   _scroll_update_budget_ns = common.env_int_clamped("NY_TERM_SCROLL_UPDATE_BUDGET_MS", 5, 1, 16) * 1000000
+   _scroll_update_budget_ns = common.env_int_clamped("NY_TERM_SCROLL_UPDATE_BUDGET_MS", 3, 1, 16) * 1000000
    _update_budget_reload_ticks = now_ticks + 1000000000
    0
 }
@@ -582,7 +596,7 @@ fn _refresh_dump_flags() any {
    0
 }
 
-fn startup() {
+fn startup() any {
    _refresh_dump_flags()
    if _headless_mode {
       platform.init_hint(platform.PLATFORM, platform.PLATFORM_NULL)
@@ -610,7 +624,7 @@ fn startup() {
    }
    if !win {
       _term_print_startup_failure(flags | WINDOW_VULKAN)
-      exit(1)
+      _term_exit(1)
    }
    win_id = window.id(win)
    set_clear_color([0.0, 0.0, 0.0, 1.0])
@@ -637,7 +651,7 @@ fn startup() {
    win = window.get_win(win)
 }
 
-fn _init_vt() {
+fn _init_vt() any {
    def cell = view.terminal_cell_size(font, font_size)
    def cw = float(cell.get(0, font_size * 0.6))
    def ch = float(cell.get(1, max(font_size, 20.0)))
@@ -647,9 +661,13 @@ fn _init_vt() {
    vt = vterm.new(cols, rows, _font_map(), 0, 0)
    if !vt || !is_dict(vt) {
       print("[term] failed to allocate terminal state")
-      exit(1)
+      _term_exit(1)
    }
-   vt = vt.set("char_w", cw).set("char_h", ch).set("px_w", int(float(cols) * cw)).set("px_h", int(float(rows) * ch)).set("window_id", win_id)
+   vt["char_w"] = cw
+   vt["char_h"] = ch
+   vt["px_w"] = int(float(cols) * cw)
+   vt["px_h"] = int(float(rows) * ch)
+   vt["window_id"] = win_id
    def launch = _term_launch_spec()
    def shell_path = launch.get("path", vterm.default_shell_path())
    def shell_args = launch.get("args", vterm.default_shell_args(common.env_truthy("NY_TERM_LOGIN")))
@@ -658,7 +676,7 @@ fn _init_vt() {
       ok(next_vt) -> { vt = next_vt }
       err(e) -> {
          print("[term] failed to open vterm: " + to_str(e))
-         exit(1)
+         _term_exit(1)
       }
    }
    set_clear_color(_term_bg_color())
@@ -700,7 +718,7 @@ fn _term_backend_flag(any arg) bool {
    a == "--direct" || a == "--run-direct" || a == "--host"
 }
 
-fn _reload_fonts() {
+fn _reload_fonts() any {
    def reg_path = common.env_trim("NY_TERM_FONT_REG")
    def bold_path = common.env_trim("NY_TERM_FONT_BOLD")
    def ital_path = common.env_trim("NY_TERM_FONT_ITAL")
@@ -884,7 +902,7 @@ fn _flush_pending_mouse_events() bool {
 }
 
 fn _event_budget_done(any event_start_ticks, int event_count) bool {
-   event_count > 0 && (event_count % 16) == 0 && (ticks() - event_start_ticks) >= _input_event_budget_ns
+   event_count > 0 && (event_count % 8) == 0 && (ticks() - event_start_ticks) >= _input_event_budget_ns
 }
 
 fn _term_synth_repeat_enabled() bool {
@@ -1052,7 +1070,7 @@ fn _handle_app_key(int k, int md) bool {
    false
 }
 
-fn update(now_ticks) {
+fn update(int now_ticks) any {
    def live = _live_window()
    if is_dict(live) { win = live }
    window.poll_events()
@@ -1202,7 +1220,7 @@ fn update(now_ticks) {
    mut budget_ns = _update_budget_ns
    if input_hot && !(key_input_hot || mouse_input_hot || scroll_input_hot) {
       max_updates = 16
-      if budget_ns > 4000000 { budget_ns = 4000000 }
+      if budget_ns > 2000000 { budget_ns = 2000000 }
    } elif scroll_input_hot {
       max_updates = _scroll_update_max
       budget_ns = _scroll_update_budget_ns
@@ -1256,7 +1274,7 @@ fn update(now_ticks) {
    if !_needs_draw { msleep(_term_idle_sleep_ms(now_ticks)) }
 }
 
-fn _resize_term() {
+fn _resize_term() any {
    def cell = view.terminal_cell_size(font, font_size)
    def cw = float(cell.get(0, float(font_size) * 0.6))
    def ch = float(cell.get(1, max(float(font_size), 20.0)))
@@ -1267,13 +1285,13 @@ fn _resize_term() {
    ;; first and then returning leaves vt with stale cols/rows while the ortho
    ;; projection has already moved to the new (sub-cell) win size, causing
    ;; text to overflow or clip for one or more frames.
-   if cols <= 0 || rows <= 0 { return }
+   if cols <= 0 || rows <= 0 { return 0 }
    set_win_size(int(win_w), int(win_h))
    vt = vterm.resize(vt, cols, rows)
    vt = vt.set("char_w", cw).set("char_h", ch).set("px_w", int(float(cols) * cw)).set("px_h", int(float(rows) * ch))
 }
 
-fn draw() {
+fn draw() any {
    def live = _live_window()
    if is_dict(live) { win = live }
    def dump_enabled = _auto_dump_requested && !_auto_dump_done
@@ -1284,7 +1302,7 @@ fn draw() {
       }
    }
    if !_needs_draw && _redraw_frames <= 0 && !dump_enabled {
-      return
+      return 0
    }
    _sync_lost_left_release()
    if vterm.selection_dragging(vt) && !window.mouse_down(win, 0) { _hard_clear_vterm_selection() }
@@ -1300,7 +1318,7 @@ fn draw() {
          _warn_draw_failure("begin_frame_clear failed on backend=" + get_active_backend_name() + "; retrying instead of crashing", ticks())
       }
       msleep(1)
-      return
+      return 0
    }
    _headless_begin_fail_count = 0
    _draw_fail_count = 0
@@ -1313,6 +1331,8 @@ fn draw() {
       def dump_path = _auto_dump_path.len > 0 ? _auto_dump_path : ospath.join(ospath.temp_dir(), "nytrix-term.png")
       if snapshot(dump_path) {
          _auto_dump_done = true
+         def hash_line = ui_dump.framebuffer_hash_line()
+         if hash_line.len > 0 { print("[term:framedump] " + hash_line + " " + dump_path) }
          if _auto_dump_exit_enabled {
             window.set_should_close(win, true)
          }
@@ -1336,8 +1356,8 @@ fn draw() {
    if dump_enabled && !_auto_dump_done { _needs_draw = true }
 }
 
-if _term_has_help_arg() { _term_print_help() exit(0) }
-if _term_should_direct_command() { exit(_term_run_direct_command()) }
+if _term_has_help_arg() { _term_print_help() _term_exit(0) }
+if _term_should_direct_command() { _term_exit(_term_run_direct_command()) }
 startup()
 def startup_ticks = ticks()
 _last_activity_ticks = startup_ticks
@@ -1351,8 +1371,4 @@ while live_win && !window.should_close(live_win) {
    live_win = _live_window()
 }
 
-vterm.close(vt)
-close_window()
-
-if is_dict(win) { window.close(win) }
-exit(0)
+_term_exit(0)
