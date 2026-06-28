@@ -32,7 +32,7 @@ fn decompress_zlib_limit(any s, int out_cap) str {
    "Inflates zlib data into a fixed-size buffer to avoid realloc loops."
    def n = s.len
    if out_cap < 256 { out_cap = 256 }
-   mut raw_buf = malloc(out_cap + 1)
+   mut raw_buf = malloc(out_cap + 32)
    if raw_buf == 0 { return _set_error("output alloc failed") }
    def out_len_p = zalloc(8)
    if out_len_p == 0 { free(raw_buf) return _set_error("output len alloc failed") }
@@ -50,12 +50,8 @@ fn decompress_zlib_limit(any s, int out_cap) str {
       free(raw_buf)
       return _set_error("invalid uncompressed size")
    }
-   def m = malloc(out_len + 17)
-   if m == 0 { free(raw_buf) return _set_error("output string alloc failed") }
-   def out = init_str(m, out_len)
-   __copy_mem(to_int(out), raw_buf, out_len)
+   def out = init_str(raw_buf, out_len)
    store8(out, 0, out_len)
-   free(raw_buf)
    _last_out_len = out_len
    _error = ""
    out
@@ -67,7 +63,7 @@ fn decompress_zlib(any s, int out_cap=0) str {
    def n = s.len
    mut cap = n * 4
    if cap < 4096 { cap = 4096 }
-   mut raw_buf = malloc(cap + 1)
+   mut raw_buf = malloc(cap + 32)
    if raw_buf == 0 { return _set_error("output alloc failed") }
    def out_len_p = zalloc(8)
    if out_len_p == 0 { free(raw_buf) return _set_error("output len alloc failed") }
@@ -75,7 +71,7 @@ fn decompress_zlib(any s, int out_cap=0) str {
    mut r = __zlib_uncompress(raw_buf, out_len_p, to_int(s), n)
    while r == -5 {
       cap = cap * 2
-      def next_buf = realloc(raw_buf, cap + 1)
+      def next_buf = realloc(raw_buf, cap + 32)
       if next_buf == 0 {
          free(out_len_p, raw_buf)
          return _set_error("output realloc failed")
@@ -91,12 +87,8 @@ fn decompress_zlib(any s, int out_cap=0) str {
    }
    def out_len = load64_h(out_len_p, 0)
    free(out_len_p)
-   def m = malloc(out_len + 17)
-   if m == 0 { free(raw_buf) return _set_error("output string alloc failed") }
-   def out = init_str(m, out_len)
-   __copy_mem(to_int(out), raw_buf, out_len)
+   def out = init_str(raw_buf, out_len)
    store8(out, 0, out_len)
-   free(raw_buf)
    _last_out_len = out_len
    _error = ""
    out
