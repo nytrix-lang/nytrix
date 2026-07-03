@@ -1,0 +1,18 @@
+shape oracle_call_loop_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result call loop]
+  template ny-test-case
+  flags "--native-result-oracle=4"
+  expect compile_and_run
+  source ny <<'NY'
+fn inc(i64 x) i64 {
+  x + 1
+}
+mut x = 0
+while x < 4 {
+  x = inc(x)
+}
+x
+NY
+}

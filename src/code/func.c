@@ -1097,11 +1097,12 @@ void ny_apply_decl_fn_attrs(codegen_t *cg, LLVMValueRef fn, stmt_t *fn_stmt) {
   }
   for (size_t i = 0; i < fn_stmt->attributes.len; i++) {
     const attribute_t *attr = &fn_stmt->attributes.data[i];
-    if (!attr_name_eq(attr, "llvm"))
+    if (!attr_name_eq(attr, "backend"))
       continue;
     if (attr->args.len < 1 || attr->args.len > 2) {
-      ny_diag_error(attr_diag_tok(fn_stmt, attr, 0), "@llvm expects 1 or 2 arguments");
-      ny_diag_hint("use @llvm(name) or @llvm(name, value)");
+      ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
+                    "@backend expects 1 or 2 arguments");
+      ny_diag_hint("use @backend(name) or @backend(name, value)");
       cg->had_error = 1;
       continue;
     }
@@ -1109,15 +1110,16 @@ void ny_apply_decl_fn_attrs(codegen_t *cg, LLVMValueRef fn, stmt_t *fn_stmt) {
     size_t attr_name_len = 0;
     if (!attr_arg_text_view(attr->args.data[0], &attr_name, &attr_name_len) || attr_name_len == 0) {
       ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
-                    "@llvm first argument must be an identifier or string");
+                    "@backend first argument must be an identifier or string");
       cg->had_error = 1;
       continue;
     }
     if (attr->args.len == 1) {
       unsigned kind_id = LLVMGetEnumAttributeKindForName(attr_name, (unsigned)attr_name_len);
       if (kind_id != 0) {
-        LLVMAttributeRef llvm_attr = LLVMCreateEnumAttribute(cg->ctx, kind_id, 0);
-        LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, llvm_attr);
+        LLVMAttributeRef backend_attr =
+            LLVMCreateEnumAttribute(cg->ctx, kind_id, 0);
+        LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, backend_attr);
       } else {
         char *name_owned = ny_strndup(attr_name, attr_name_len);
         add_fn_string_attr(cg, fn, name_owned, "");
@@ -1129,7 +1131,7 @@ void ny_apply_decl_fn_attrs(codegen_t *cg, LLVMValueRef fn, stmt_t *fn_stmt) {
     size_t attr_value_len = 0;
     if (!attr_arg_text_view(attr->args.data[1], &attr_value, &attr_value_len)) {
       ny_diag_error(attr_diag_tok(fn_stmt, attr, 1),
-                    "@llvm second argument must be an identifier or string");
+                    "@backend second argument must be an identifier or string");
       cg->had_error = 1;
       continue;
     }
@@ -2343,10 +2345,6 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
   }
   if (split_worker_attached_method)
     LLVMSetLinkage(f, LLVMWeakODRLinkage);
-  if (cg->skip_stdlib && !fn_is_synthetic_closure(fn, name) &&
-      ny_is_stdlib_tok(fn->tok)) {
-    return;
-  }
   if (prof_func) {
     ny_tick_t now = ny_ticks_now();
     prof_sig_ms = ny_ticks_delta_ms(prof_mark, now);
@@ -2933,14 +2931,19 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
             LLVMSetLinkage(g, LLVMPrivateLinkage);
           }
           bool define_here = true;
-          if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok)) {
+          bool direct_source_global =
+              ny_codegen_stmt_is_source_file(cg, s) ||
+              ny_codegen_module_is_source_file(cg, cg->current_module_name);
+          if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
+              !direct_source_global) {
             define_here = false;
           }
           if (cg->emit_module_decls_only) {
             define_here = ny_emit_module_match(cg, cg->current_module_name);
           }
           if (define_here) {
-            if (!(cg->skip_stdlib && ny_is_stdlib_tok(s->tok)))
+            if (!(cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
+                  !direct_source_global))
               LLVMSetInitializer(g, LLVMConstNull(global_type));
           } else {
             LLVMSetLinkage(g, LLVMExternalLinkage);

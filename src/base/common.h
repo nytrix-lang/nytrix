@@ -120,25 +120,39 @@ static inline const char *clr(const char *code) { return color_enabled() ? code 
 
 extern int verbose_enabled;
 bool ny_log_should_emit(const char *fmt);
+void ny_progress_stderr_lock(void);
+void ny_progress_stderr_unlock(void);
+
+#define NY_LOG_WITH_PROGRESS_LOCK(body)                                                            \
+  do {                                                                                             \
+    ny_progress_stderr_lock();                                                                     \
+    do {                                                                                           \
+      body                                                                                         \
+    } while (0);                                                                                   \
+    ny_progress_stderr_unlock();                                                                   \
+  } while (0)
 
 #define NY_LOG_V1(fmt, ...)                                                                        \
   do {                                                                                             \
     if (verbose_enabled >= 1 && ny_log_should_emit(fmt)) {                                         \
-      fprintf(stderr, "%s[*]%s " fmt, clr(NY_CLR_CYAN), clr(NY_CLR_RESET), ##__VA_ARGS__);         \
+      NY_LOG_WITH_PROGRESS_LOCK(                                                                   \
+          fprintf(stderr, "%s[*]%s " fmt, clr(NY_CLR_CYAN), clr(NY_CLR_RESET), ##__VA_ARGS__););   \
     }                                                                                              \
   } while (0)
 
 #define NY_LOG_V2(fmt, ...)                                                                        \
   do {                                                                                             \
     if (verbose_enabled >= 2 && ny_log_should_emit(fmt)) {                                         \
-      fprintf(stderr, "%s[**]%s " fmt, clr(NY_CLR_MAGENTA), clr(NY_CLR_RESET), ##__VA_ARGS__);     \
+      NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%s[**]%s " fmt, clr(NY_CLR_MAGENTA),              \
+                                        clr(NY_CLR_RESET), ##__VA_ARGS__););                       \
     }                                                                                              \
   } while (0)
 
 #define NY_LOG_V3(fmt, ...)                                                                        \
   do {                                                                                             \
     if (verbose_enabled >= 3 && ny_log_should_emit(fmt)) {                                         \
-      fprintf(stderr, "%s[***]%s " fmt, clr(NY_CLR_YELLOW), clr(NY_CLR_RESET), ##__VA_ARGS__);     \
+      NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%s[***]%s " fmt, clr(NY_CLR_YELLOW),              \
+                                        clr(NY_CLR_RESET), ##__VA_ARGS__););                       \
     }                                                                                              \
   } while (0)
 
@@ -147,20 +161,23 @@ bool ny_log_should_emit(const char *fmt);
 #define NY_LOG_ERR(fmt, ...)                                                                       \
   do {                                                                                             \
     if (ny_log_should_emit(fmt)) {                                                                 \
-      fprintf(stderr, "%sError:%s " fmt, clr(NY_CLR_RED), clr(NY_CLR_RESET), ##__VA_ARGS__);       \
+      NY_LOG_WITH_PROGRESS_LOCK(                                                                   \
+          fprintf(stderr, "%sError:%s " fmt, clr(NY_CLR_RED), clr(NY_CLR_RESET), ##__VA_ARGS__);); \
     }                                                                                              \
   } while (0)
 
 #define NY_LOG_WARN(fmt, ...)                                                                      \
   do {                                                                                             \
     if (ny_log_should_emit(fmt)) {                                                                 \
-      fprintf(stderr, "%sWarning:%s " fmt, clr(NY_CLR_YELLOW), clr(NY_CLR_RESET), ##__VA_ARGS__);  \
+      NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%sWarning:%s " fmt, clr(NY_CLR_YELLOW),           \
+                                        clr(NY_CLR_RESET), ##__VA_ARGS__););                       \
     }                                                                                              \
   } while (0)
 
 #define NY_LOG_SUCCESS(fmt, ...)                                                                   \
   do {                                                                                             \
-    fprintf(stderr, "%sSuccess:%s " fmt, clr(NY_CLR_GREEN), clr(NY_CLR_RESET), ##__VA_ARGS__);     \
+    NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%sSuccess:%s " fmt, clr(NY_CLR_GREEN),              \
+                                      clr(NY_CLR_RESET), ##__VA_ARGS__););                         \
   } while (0)
 
 extern int debug_enabled;
@@ -169,7 +186,8 @@ extern int debug_enabled;
 #define NY_LOG_DEBUG(fmt, ...)                                                                     \
   do {                                                                                             \
     if (debug_enabled) {                                                                           \
-      fprintf(stderr, "%s[DEBUG]%s " fmt, clr(NY_CLR_GRAY), clr(NY_CLR_RESET), ##__VA_ARGS__);     \
+      NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%s[DEBUG]%s " fmt, clr(NY_CLR_GRAY),              \
+                                        clr(NY_CLR_RESET), ##__VA_ARGS__););                       \
     }                                                                                              \
   } while (0)
 #else

@@ -1,0 +1,26 @@
+shape oracle_f64_compare_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result f64 compare promotion]
+  template ny-test-case
+  flags "--native-result-oracle=31"
+  expect compile_and_run
+  source ny <<'NY'
+fn score(f64 a, i64 b, f64 c) i64 {
+  if a < c {
+    if b <= c {
+      if c != a {
+        31
+      } else {
+        11
+      }
+    } else {
+      13
+    }
+  } else {
+    17
+  }
+}
+score(1.5, 2, 3.25)
+NY
+}

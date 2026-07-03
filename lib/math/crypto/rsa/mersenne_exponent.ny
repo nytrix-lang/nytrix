@@ -12,7 +12,7 @@ use std.core.str as str
 
 fn _rsa_mersenne_plain_from_power(any mg, any g) any {
    if g == Z(1) { return Z(mg).bytes.text }
-   def gi = bigint_to_int(g)
+   def gi = int(g)
    if gi <= 1 || gi > 1000000 { return nil }
    def m = nth_root(mg, gi)
    if m == nil || bigint_pow(m, g) != mg { return nil }
@@ -54,7 +54,7 @@ fn rsa_mersenne_plaintext_scan_from_factors(
    while k <= max_k {
       def e = (Z(1) << Z(k)) - Z(1)
       def g = gcd(e, phi)
-      def gi = bigint_to_int(g)
+      def gi = int(g)
       if g == Z(1) || gi <= 1 || gi > 64 {
          k += 1
          continue

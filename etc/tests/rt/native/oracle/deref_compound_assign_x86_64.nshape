@@ -1,0 +1,23 @@
+shape oracle_deref_compound_assign_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result pointer deref assign compound]
+  template ny-test-case
+  flags "--native-result-oracle=42"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn ptr_compound_assign() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  *p = 40
+  *p += 2
+  def i64 v = *p
+  free(p)
+  v
+}
+
+ptr_compound_assign()
+NY
+}

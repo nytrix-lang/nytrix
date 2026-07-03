@@ -148,28 +148,29 @@ fn echo_once(x) {
 
 assert(echo_once(77) == 77, "@effects(...) function failed")
 print("✓ @pure/@effects passed")
-print("Testing @llvm attribute...")
+print("Testing @backend attribute...")
 
-@llvm(noinline)
-fn llvm_noinline_add(a, b) {
+@backend(noinline)
+fn backend_noinline_add(a, b) {
    return a + b
 }
 
-assert(llvm_noinline_add(5, 7) == 12, "@llvm(noinline) function failed")
+assert(backend_noinline_add(5, 7) == 12, "@backend(noinline) function failed")
 
-@llvm("frame-pointer", "all")
-fn llvm_fp_add(a, b) {
+@backend("frame-pointer", "all")
+fn backend_fp_add(a, b) {
    return a + b
 }
 
-assert(llvm_fp_add(8, 9) == 17, "@llvm(name, value) function failed")
-assert(llvm("llvm.ctpop.i64", 0xf0f0) == 8, "llvm(...) ctpop intrinsic failed")
-assert(llvm("ctpop.i64", 0xf0f0) == 8, "llvm(...) shorthand intrinsic failed")
-assert(llvm("llvm.cttz.i64", 8, false) == 3, "llvm(...) cttz intrinsic failed")
-assert(llvm("llvm.ctlz.i64", 1, false) == 63, "llvm(...) ctlz intrinsic failed")
-assert(llvm("llvm.bswap.i32", 0x01020304) == 0x04030201, "llvm(...) bswap intrinsic failed")
-assert(llvm("llvm.fshl.i64", 1, 1, 4) == 16, "llvm(...) fshl intrinsic failed")
-print("✓ @llvm passed")
+assert(backend_fp_add(8, 9) == 17, "@backend(name, value) function failed")
+
+assert(backend_intrinsic("ctpop.i64", 0xf0f0) == 8, "backend_intrinsic(...) ctpop intrinsic failed")
+assert(backend_intrinsic("ctpop.i64", 0xf0f0) == 8, "backend_intrinsic(...) shorthand intrinsic failed")
+assert(backend_intrinsic("cttz.i64", 8, false) == 3, "backend_intrinsic(...) cttz intrinsic failed")
+assert(backend_intrinsic("ctlz.i64", 1, false) == 63, "backend_intrinsic(...) ctlz intrinsic failed")
+assert(backend_intrinsic("bswap.i32", 0x01020304) == 0x04030201, "backend_intrinsic(...) bswap intrinsic failed")
+assert(backend_intrinsic("fshl.i64", 1, 1, 4) == 16, "backend_intrinsic(...) fshl intrinsic failed")
+print("✓ @backend passed")
 print("Testing optimization attributes...")
 
 @readnone

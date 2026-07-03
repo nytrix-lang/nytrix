@@ -1,0 +1,27 @@
+shape i386_elf32_object_link_run_calloc_stub {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run pointer calloc]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-link-run-elf32-calloc-stub.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+extern {
+  fn calloc(i64 count, i64 size) ptr
+}
+
+fn probe() i64 {
+  def *int p = calloc(2, 8)
+  if p == nil { return 0 }
+  def before = load64_i(p)
+  store64_i(p, 42)
+  def after = load64_i(p)
+  free(p)
+  if before == 0 && after == 42 { 42 } else { 0 }
+}
+
+probe()
+NY
+}

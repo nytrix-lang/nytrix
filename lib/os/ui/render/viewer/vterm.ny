@@ -3110,6 +3110,7 @@ fn _get_scratch(int len) any {
 
 fn _cp_to_str(int cp, any acache) any {
    if cp < 0 || cp > 0x10ffff { return "" }
+   if cp < 128 && acache { return load64(acache, cp * 8) }
    chr(cp)
 }
 
@@ -3245,9 +3246,10 @@ fn _vterm_draw_cpu(dict vt, any st, int co, int ro, any g, list history, int his
          elif abs_r == e_row { sel_in_row = true sel_s = 0 sel_e = e_col }
       }
       mut c = 0
-      mut run_text = ""
+      mut run_bld = str.Builder()
       mut run_x = 0.0
       mut run_fg = 0
+      mut run_active = false
       while c < co {
          def off = c * 16
          def cp = load32(line_ptr, off)
@@ -3266,29 +3268,31 @@ fn _vterm_draw_cpu(dict vt, any st, int co, int ro, any g, list history, int his
          def rx = floor(px + float(c) * cw + 0.5)
          if rbg != db && rbg != 0 && (rbg & 0xFF000000) != 0 { draw_rect(rx, ry, cw, ch, rbg) }
          if text_visible {
-            if run_text.len <= 0 || run_fg != rfg {
-               if run_text.len > 0 {
-                  text_runs = text_runs.append(run_text)
+            if !run_active || run_fg != rfg {
+               if run_active {
+                  text_runs = text_runs.append(str.builder_to_str(run_bld))
                   text_runs = text_runs.append(run_x)
                   text_runs = text_runs.append(ry + gy_reg)
                   text_runs = text_runs.append(run_fg)
                }
-               run_text = ""
+               run_bld = str.Builder()
                run_x = rx
                run_fg = rfg
+               run_active = true
             }
-            run_text = run_text + _cp_to_str(cp, acache)
-         } elif run_text.len > 0 {
-            text_runs = text_runs.append(run_text)
+            run_bld = str.builder_append(run_bld, _cp_to_str(cp, acache))
+         } elif run_active {
+            text_runs = text_runs.append(str.builder_to_str(run_bld))
             text_runs = text_runs.append(run_x)
             text_runs = text_runs.append(ry + gy_reg)
             text_runs = text_runs.append(run_fg)
-            run_text = ""
+            run_bld = str.Builder()
+            run_active = false
          }
          c += 1
       }
-      if run_text.len > 0 {
-         text_runs = text_runs.append(run_text)
+      if run_active {
+         text_runs = text_runs.append(str.builder_to_str(run_bld))
          text_runs = text_runs.append(run_x)
          text_runs = text_runs.append(ry + gy_reg)
          text_runs = text_runs.append(run_fg)

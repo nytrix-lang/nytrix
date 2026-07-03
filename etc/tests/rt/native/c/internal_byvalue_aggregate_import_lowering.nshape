@@ -1,0 +1,23 @@
+shape internal_byvalue_aggregate_import_lowering {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi import-lowering aggregate-return no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/ffi/internal_byvalue_aggregate_import.h" as "c"
+use std.core
+
+fn probe() i64 {
+  def r = c.div(7, 3)
+  def i64 q = load_layout(r, "NytrixInternalDiv", "quot")
+  def i64 m = load_layout(r, "NytrixInternalDiv", "rem")
+  free(r)
+  q * 10 + m
+}
+
+assert(probe() == 21, "internal c by-value aggregate return div")
+1 + 2
+NY
+}

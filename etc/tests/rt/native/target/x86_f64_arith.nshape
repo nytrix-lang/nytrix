@@ -1,0 +1,13 @@
+shape native_x86_f64_arith {
+  family "runtime-native"
+  generator "native"
+  features [native x86 oracle f64]
+  template ny-test-case
+  flags "--native-backend x86 --native-result-oracle=4615626668101337088"
+  expect compile_and_run
+  source ny <<'NY'
+def a = 1.5
+def b = 2.25
+a + b
+NY
+}

@@ -1,0 +1,14 @@
+shape nyir_vm_recursion_limit {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "recursion", "budget", "negative"]
+  template ny-test-case
+  flags "--nyir-run --nyir-run-recursion-limit=2"
+  expect compile_fail
+  source ny <<'NY'
+fn spin(i64 n) i64 {
+  if n <= 0 { 0 } else { spin(n - 1) }
+}
+spin(5)
+NY
+}

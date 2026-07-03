@@ -1,0 +1,13 @@
+shape x86_elf32_object_writer {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-object-smoke.o"
+  expect compile_and_run
+  source ny <<'NY'
+def a = 7
+def b = 3
+(a * 6) + b
+NY
+}

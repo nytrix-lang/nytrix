@@ -1712,91 +1712,16 @@ fn _draw_parts_flat_range_impl(
    drawn
 }
 
-fn begin_frame() bool {
-   "Prepares the renderer for a new frame(sync, acquire image, begin recording)."
-   _vk_stage("begin.enter")
-   def _prof_on = _vk_profile_enabled()
-   def _t_begin = _prof_on ? ticks() : 0
-   def _profile_frame = _total_frames + 1
-   def _deep_on = (_vk_deep_debug == 1) && ((_prof_on && ((_profile_frame % _vk_profile_every()) == 0)) || ((_profile_frame % _vk_deep_every()) == 0))
-   def _t_begin_deep = _deep_on ? ticks() : 0
-   _vk_stage("begin.validate")
-   if !_handles_valid {
-      if !_handle_ok(_device) { ui_profile.print_text("[begin_frame] FAIL: no device") return false }
-      if !_handle_ok(_render_pass) { ui_profile.print_text("[begin_frame] FAIL: no render pass") return false }
-      if !_handle_ok(_ubo_map) { ui_profile.print_text("[begin_frame] FAIL: no UBO map(uniform buffer not allocated or null)") return false }
-      if !_handle_ok(_vertex_buffer) { ui_profile.print_text("[begin_frame] FAIL: no vertex buffer allocated") return false }
-      if !_vk_frame_scratch_ready() { ui_profile.print_text("[begin_frame] FAIL: frame scratch buffers unavailable") return false }
-      _handles_valid = true
-   }
-   def has_surface = _has_valid_surface_fast()
-   def backend_is_wayland = has_surface && _backend_is_wayland_fast()
-   def backend_is_win32 = has_surface && _backend_is_win32_fast()
-   if _swapchain_image_count < 1 { ui_profile.print_text("[begin_frame] FAIL: invalid swapchain image count") return false }
-   if _framebuffers_count < 1 { ui_profile.print_text("[begin_frame] FAIL: no framebuffers allocated") return false }
-   if _command_buffers_count < 1 { ui_profile.print_text("[begin_frame] FAIL: no command buffers allocated") return false }
-   if !_vk_frame_targets_ready(has_surface) { ui_profile.print_text("[begin_frame] FAIL: frame targets unavailable") return false }
-   _vk_stage("begin.resize")
+fn _vk_begin_frame_prepare_swapchain(bool has_surface) bool {
    if _swapchain_recreate_pending {
       mut cur_ww = _pending_resize_w > 0 ? _pending_resize_w : _swapchain_extent_w
       mut cur_wh = _pending_resize_h > 0 ? _pending_resize_h : _swapchain_extent_h
       if cur_ww <= 0 || cur_wh <= 0 { return _vk_begin_false("pending_invalid_size") }
       _pending_resize_w, _pending_resize_h = cur_ww, cur_wh
    }
-   _vk_stage("begin.reset")
-   _frame_open = false
-   _active_scene_color_tex_id = -1
-   _flush_total = 0
-   _flush_reason_tex = 0
-   _flush_reason_pipe = 0
-   _flush_reason_static = 0
-   _flush_reason_special = 0
-   _flush_reason_vertex_full = 0
-   _pipeline_bind_count = 0
-   _descriptor_bind_count = 0
-   _prim_rect_quads = 0
-   _prim_outline_quads = 0
-   _prim_line_quads = 0
-   _prim_raw_lines = 0
-   _prim_raw_points = 0
-   _prim_text_calls = 0
-   _prim_text_glyphs = 0
-   _frame_draw_calls = 0
-   _frame_dynamic_draw_calls = 0
-   _frame_static_draw_calls = 0
-   _frame_indexed_draw_calls = 0
-   _frame_begin_cpu_us = 0
-   _frame_end_cpu_us = 0
-   _frame_flush_cpu_us = 0
-   _frame_sync_pc_cpu_us = 0
-   _vk_deep_emit_frame = 0
-   if _deep_on || _prof_on {
-      _vk_deep_begin_recreate_ms = 0.0
-      _vk_deep_begin_acquire_ms = 0.0
-      _vk_deep_begin_wait_ms = 0.0
-      _vk_deep_begin_reset_fence_ms = 0.0
-      _vk_deep_begin_cmd_ms = 0.0
-      _vk_deep_begin_rp_ms = 0.0
-      _vk_deep_begin_vp_ms = 0.0
-      _vk_deep_begin_total_ms = 0.0
-      _vk_deep_end_flush_ms = 0.0
-      _vk_deep_end_cmd_ms = 0.0
-      _vk_deep_end_submit_ms = 0.0
-      _vk_deep_end_present_ms = 0.0
-      _vk_deep_end_total_ms = 0.0
-   }
-   _vk_stage("begin.maybe_recreate")
-   if _deep_on && _vk_deep_should_emit(_profile_frame) && _deep_last_report_frame != _profile_frame {
-      _deep_last_report_frame = _profile_frame
-      print(
-         "[vk] frame=" + to_str(_profile_frame)
-         + " " + to_str(_swapchain_extent_w) + "x" + to_str(_swapchain_extent_h)
-         + " img=" + to_str(_current_frame) + "/" + to_str(_swapchain_image_count)
-      )
-   }
    if _swapchain_recreate_pending {
       _vk_stage("begin.recreate")
-      def _t_recreate = _deep_on ? ticks() : 0
+      def _t_recreate = _vk_profile_enabled() ? ticks() : 0
       def force_recreate = _swapchain_recreate_force
       if _resize_debounce_waiting(force_recreate) {
          _vk_stage("begin.recreate.defer")
@@ -1829,11 +1754,11 @@ fn begin_frame() bool {
       }
       if !_vk_frame_scratch_ready() { ui_profile.print_text("[begin_frame] FAIL: frame scratch buffers unavailable after recreate") return _vk_begin_false("scratch_after_recreate") }
       if !_vk_frame_targets_ready(has_surface) { ui_profile.print_text("[begin_frame] FAIL: frame targets unavailable after recreate") return _vk_begin_false("targets_after_recreate") }
-      if _deep_on { _vk_deep_begin_recreate_ms = ui_profile.elapsed_ms(_t_recreate) }
-      ;; Continue into the same frame after a successful recreate. Returning
-      ;; false here made the caller skip drawing for one refresh, which looked
-      ;; like black bars or flicker during resize/load churn.
    }
+   true
+}
+
+fn _vk_begin_frame_acquire_image(bool has_surface, bool backend_is_wayland, bool backend_is_win32, bool _deep_on) bool {
    _vk_stage("begin.fence")
    _vk_stage("begin.fence.slab")
    if !_vk_handle_slab_ready(_fences_slab, _in_flight_fences_count, _current_frame) { return _vk_begin_false("fence_slab_not_ready") }
@@ -1912,6 +1837,10 @@ fn begin_frame() bool {
       }
       _image_index = (_image_index + 1) % _swapchain_image_count
    }
+   true
+}
+
+fn _vk_begin_frame_record_commands(bool _deep_on, bool has_surface) bool {
    _vk_stage("begin.acquire.done")
    _vk_stage("begin.reset_fence")
    def _t_reset_fence = _deep_on ? ticks() : 0
@@ -2012,6 +1941,88 @@ fn begin_frame() bool {
       _fps_curr = _fps_count
       _fps_count = 0
    }
+   true
+}
+
+fn begin_frame() bool {
+   "Prepares the renderer for a new frame(sync, acquire image, begin recording)."
+   _vk_stage("begin.enter")
+   def _prof_on = _vk_profile_enabled()
+   def _t_begin = _prof_on ? ticks() : 0
+   def _profile_frame = _total_frames + 1
+   def _deep_on = (_vk_deep_debug == 1) && ((_prof_on && ((_profile_frame % _vk_profile_every()) == 0)) || ((_profile_frame % _vk_deep_every()) == 0))
+   def _t_begin_deep = _deep_on ? ticks() : 0
+   _vk_stage("begin.validate")
+   if !_handles_valid {
+      if !_handle_ok(_device) { ui_profile.print_text("[begin_frame] FAIL: no device") return false }
+      if !_handle_ok(_render_pass) { ui_profile.print_text("[begin_frame] FAIL: no render pass") return false }
+      if !_handle_ok(_ubo_map) { ui_profile.print_text("[begin_frame] FAIL: no UBO map(uniform buffer not allocated or null)") return false }
+      if !_handle_ok(_vertex_buffer) { ui_profile.print_text("[begin_frame] FAIL: no vertex buffer allocated") return false }
+      if !_vk_frame_scratch_ready() { ui_profile.print_text("[begin_frame] FAIL: frame scratch buffers unavailable") return false }
+      _handles_valid = true
+   }
+   def has_surface = _has_valid_surface_fast()
+   def backend_is_wayland = has_surface && _backend_is_wayland_fast()
+   def backend_is_win32 = has_surface && _backend_is_win32_fast()
+   if _swapchain_image_count < 1 { ui_profile.print_text("[begin_frame] FAIL: invalid swapchain image count") return false }
+   if _framebuffers_count < 1 { ui_profile.print_text("[begin_frame] FAIL: no framebuffers allocated") return false }
+   if _command_buffers_count < 1 { ui_profile.print_text("[begin_frame] FAIL: no command buffers allocated") return false }
+   if !_vk_frame_targets_ready(has_surface) { ui_profile.print_text("[begin_frame] FAIL: frame targets unavailable") return false }
+   _vk_stage("begin.resize")
+   if !_vk_begin_frame_prepare_swapchain(has_surface) { return false }
+   _vk_stage("begin.reset")
+   _frame_open = false
+   _active_scene_color_tex_id = -1
+   _flush_total = 0
+   _flush_reason_tex = 0
+   _flush_reason_pipe = 0
+   _flush_reason_static = 0
+   _flush_reason_special = 0
+   _flush_reason_vertex_full = 0
+   _pipeline_bind_count = 0
+   _descriptor_bind_count = 0
+   _prim_rect_quads = 0
+   _prim_outline_quads = 0
+   _prim_line_quads = 0
+   _prim_raw_lines = 0
+   _prim_raw_points = 0
+   _prim_text_calls = 0
+   _prim_text_glyphs = 0
+   _frame_draw_calls = 0
+   _frame_dynamic_draw_calls = 0
+   _frame_static_draw_calls = 0
+   _frame_indexed_draw_calls = 0
+   _frame_begin_cpu_us = 0
+   _frame_end_cpu_us = 0
+   _frame_flush_cpu_us = 0
+   _frame_sync_pc_cpu_us = 0
+   _vk_deep_emit_frame = 0
+   if _deep_on || _prof_on {
+      _vk_deep_begin_recreate_ms = 0.0
+      _vk_deep_begin_acquire_ms = 0.0
+      _vk_deep_begin_wait_ms = 0.0
+      _vk_deep_begin_reset_fence_ms = 0.0
+      _vk_deep_begin_cmd_ms = 0.0
+      _vk_deep_begin_rp_ms = 0.0
+      _vk_deep_begin_vp_ms = 0.0
+      _vk_deep_begin_total_ms = 0.0
+      _vk_deep_end_flush_ms = 0.0
+      _vk_deep_end_cmd_ms = 0.0
+      _vk_deep_end_submit_ms = 0.0
+      _vk_deep_end_present_ms = 0.0
+      _vk_deep_end_total_ms = 0.0
+   }
+   _vk_stage("begin.maybe_recreate")
+   if _deep_on && _vk_deep_should_emit(_profile_frame) && _deep_last_report_frame != _profile_frame {
+      _deep_last_report_frame = _profile_frame
+      print(
+         "[vk] frame=" + to_str(_profile_frame)
+         + " " + to_str(_swapchain_extent_w) + "x" + to_str(_swapchain_extent_h)
+         + " img=" + to_str(_current_frame) + "/" + to_str(_swapchain_image_count)
+      )
+   }
+   if !_vk_begin_frame_acquire_image(has_surface, backend_is_wayland, backend_is_win32, _deep_on) { return false }
+   if !_vk_begin_frame_record_commands(_deep_on, has_surface) { return false }
    _vk_stage("begin.mvp")
    if !_skip_default_mvp_this_frame() { _update_default_mvp(_window_ref) }
    _vk_stage("begin.mvp.done")
@@ -3174,22 +3185,7 @@ fn end_frame() bool {
    _end_frame_internal(true)
 }
 
-fn _end_frame_internal(bool present) bool {
-   def _prof_on = _vk_profile_enabled()
-   def _t_end = _prof_on ? ticks() : 0
-   def _profile_frame = _total_frames
-   def _deep_on = (_vk_deep_debug == 1) && ((_prof_on && ((_profile_frame % _vk_profile_every()) == 0)) || ((_profile_frame % _vk_deep_every()) == 0))
-   def _t_end_deep = _deep_on ? ticks() : 0
-   if !_frame_open { return false }
-   def has_surface = _has_valid_surface_fast()
-   def backend_is_win32 = has_surface && _backend_is_win32_fast()
-   if !_vk_frame_targets_ready(has_surface) { return false }
-   def _t_flush = _deep_on ? ticks() : 0
-   _flush()
-   if _deep_on { _vk_deep_end_flush_ms = ui_profile.elapsed_ms(_t_flush) }
-   def cb = load64(_cmd_bufs_slab, _current_frame * 8)
-   cmd_end_render_pass(cb)
-   if _offscreen_draw_enabled() && !_record_draw_image_to_swapchain(cb, has_surface) { return false }
+fn _vk_end_frame_record_capture(any cb, bool has_surface) bool {
    if _capture_request {
       def w, h = _swapchain_extent_w, _swapchain_extent_h
       def size = w * h * 4
@@ -3213,57 +3209,10 @@ fn _end_frame_internal(bool present) bool {
          }
       }
    }
-   if _vk_markers_enabled {
-      vk_debug_marker_end(cb)
-      vk_debug_marker_end(cb)
-   }
-   def _t_end_cmd = _deep_on ? ticks() : 0
-   def ecb = end_command_buffer(cb)
-   if _deep_on { _vk_deep_end_cmd_ms = ui_profile.elapsed_ms(_t_end_cmd) }
-   if ecb != 0 { return false }
-   if has_surface {
-      def sem_avail = load64_h(_sem_avail_slab, _current_frame * 8)
-      def sem_finish = load64_h(_sem_finish_slab, _current_frame * 8)
-      store64_h(_ptr_wait_sems, sem_avail, 0)
-      store64_h(_ptr_sig_sems, sem_finish, 0)
-      store32(_ptr_stages,
-         _offscreen_draw_enabled() ? (VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT) : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-      0)
-   }
-   store32(_ptr_sub, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
-   store64_h(_ptr_sub, 0, 8)
-   if has_surface {
-      store32(_ptr_sub, 1, 16)
-      store64_h(_ptr_sub, _ptr_wait_sems, 24)
-      store64_h(_ptr_sub, _ptr_stages, 32)
-   } else {
-      store32(_ptr_sub, 0, 16)
-      store64_h(_ptr_sub, 0, 24)
-      store64_h(_ptr_sub, 0, 32)
-   }
-   store32(_ptr_sub, 1, 40)
-   mut cb_ptr = _ptr_sub + 80
-   store64_h(cb_ptr, cb, 0)
-   store64_h(_ptr_sub, cb_ptr, 48)
-   if has_surface {
-      store32(_ptr_sub, 1, 56)
-      store64_h(_ptr_sub, _ptr_sig_sems, 64)
-   } else {
-      store32(_ptr_sub, 0, 56)
-      store64_h(_ptr_sub, 0, 64)
-   }
-   def fence = load64_h(_fences_slab, _current_frame * 8)
-   if _vk_debug_basic == 1 {
-      ui_profile.print_text("[gfx:vulkan] end_frame before submit frame=" + to_str(_current_frame) +
-      " image=" + to_str(_image_index))
-   }
-   def _t_submit = _deep_on ? ticks() : 0
-   if backend_is_win32 { _pump_host_messages_if_needed() }
-   def sub_res = queue_submit(_graphics_queue, 1, _ptr_sub, fence)
-   if backend_is_win32 { _pump_host_messages_if_needed() }
-   if _deep_on { _vk_deep_end_submit_ms = ui_profile.elapsed_ms(_t_submit) }
-   if _vk_debug_basic == 1 { ui_profile.print_text("[gfx:vulkan] end_frame after submit result=" + to_str(sub_res)) }
-   if sub_res != 0 { return false }
+   true
+}
+
+fn _vk_end_frame_download_capture(bool has_surface) bool {
    if _capture_request {
       _capture_request = false
       _capture_ready = false
@@ -3316,70 +3265,138 @@ fn _end_frame_internal(bool present) bool {
          ui_profile.print_text("[gfx:vulkan] capture fence wait failed code=" + to_str(capture_wait_res))
       }
    }
-   if present && has_surface && _swapchain != 0 {
-      def sc = _swapchain
-      def img_idx = _image_index
-      mut scs = _ptr_ri
-      store64_h(scs, sc, 0)
-      mut idxs = scs + 8
-      store32(idxs, img_idx, 0)
-      mut pi = _ptr_ri + 32
-      store32(pi, VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, 0)
-      store64_h(pi, 0, 8)
-      store32(pi, 1, 16)
-      store64_h(pi, _ptr_sig_sems, 24)
-      store32(pi, 1, 32)
-      store64_h(pi, scs, 40)
-      store64_h(pi, idxs, 48)
-      store64_h(pi, 0, 56)
-      if _vk_debug_basic == 1 {
-         ui_profile.print_text("[gfx:vulkan] pre-present stats draws=" + to_str(_frame_draw_calls) +
-            " dyn=" + to_str(_frame_dynamic_draw_calls) +
-            " static=" + to_str(_frame_static_draw_calls) +
-            " indexed=" + to_str(_frame_indexed_draw_calls) +
-            " flush=" + to_str(_flush_total) +
-         " verts=" + to_str(_vertex_offset / _VKR_VERT_STRIDE))
-         ui_profile.print_text("[gfx:vulkan] end_frame before present image=" + to_str(img_idx))
-      }
-      def _t_present = _deep_on ? ticks() : 0
-      if backend_is_win32 { _pump_host_messages_if_needed() }
-      def pr = queue_present_khr(_present_queue, pi)
-      if backend_is_win32 { _pump_host_messages_if_needed() }
-      if _deep_on { _vk_deep_end_present_ms = ui_profile.elapsed_ms(_t_present) }
-      if _vk_debug_basic == 1 { ui_profile.print_text("[gfx:vulkan] end_frame after present result=" + to_str(pr)) }
-      if pr == 0xC460C464 || pr == -1000001004 {
-         _frame_open = false
-         _schedule_swapchain_recreate()
-         return false
-      }
-      if pr == 1000001003 {
-         if vk_state._debug_gfx_enabled && !_logged_suboptimal_present {
-            ui_profile.print_text("[gfx:vulkan] present suboptimal continuing=true")
-            _logged_suboptimal_present = true
-         }
-      } elif pr != 0 {
-         ;; Surface lost / device lost / full-screen exclusive lost: previously
-         ;; these error codes were silently ignored and the frame was treated
-         ;; as successful, leaving a dead swapchain that the next begin_frame
-         ;; would fail on without any link back to the present error. Surface
-         ;; the failure and schedule a recreate so the next frame has a chance
-         ;; to recover.
-         if vk_state._debug_gfx_enabled {
-            ui_profile.print_text("[gfx:vulkan] present failed code=" + to_str(pr) + " — scheduling recreate")
-         }
-         _frame_open = false
-         _schedule_swapchain_recreate(true)
-         return false
-      }
-      if backend_is_win32 {
-         _pump_host_messages_if_needed()
-         msleep(1)
-         _pump_host_messages_if_needed()
-      }
+   true
+}
+
+fn _vk_end_frame_present_image(bool backend_is_win32, bool _deep_on) bool {
+   def sc = _swapchain
+   def img_idx = _image_index
+   mut scs = _ptr_ri
+   store64_h(scs, sc, 0)
+   mut idxs = scs + 8
+   store32(idxs, img_idx, 0)
+   mut pi = _ptr_ri + 32
+   store32(pi, VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, 0)
+   store64_h(pi, 0, 8)
+   store32(pi, 1, 16)
+   store64_h(pi, _ptr_sig_sems, 24)
+   store32(pi, 1, 32)
+   store64_h(pi, scs, 40)
+   store64_h(pi, idxs, 48)
+   store64_h(pi, 0, 56)
+   if _vk_debug_basic == 1 {
+      ui_profile.print_text("[gfx:vulkan] pre-present stats draws=" + to_str(_frame_draw_calls) +
+         " dyn=" + to_str(_frame_dynamic_draw_calls) +
+         " static=" + to_str(_frame_static_draw_calls) +
+         " indexed=" + to_str(_frame_indexed_draw_calls) +
+         " flush=" + to_str(_flush_total) +
+      " verts=" + to_str(_vertex_offset / _VKR_VERT_STRIDE))
+      ui_profile.print_text("[gfx:vulkan] end_frame before present image=" + to_str(img_idx))
    }
-   ;; Backend-local sleep fights the window-system present mode and makes camera,
-   ;; gizmo and FPS text cadence visibly uneven under compositors/WMs.  Keep it
-   ;; as an explicit diagnostic throttle only.
+   def _t_present = _deep_on ? ticks() : 0
+   if backend_is_win32 { _pump_host_messages_if_needed() }
+   def pr = queue_present_khr(_present_queue, pi)
+   if backend_is_win32 { _pump_host_messages_if_needed() }
+   if _deep_on { _vk_deep_end_present_ms = ui_profile.elapsed_ms(_t_present) }
+   if _vk_debug_basic == 1 { ui_profile.print_text("[gfx:vulkan] end_frame after present result=" + to_str(pr)) }
+   if pr == 0xC460C464 || pr == -1000001004 {
+      _frame_open = false
+      _schedule_swapchain_recreate()
+      return false
+   }
+   if pr == 1000001003 {
+      if vk_state._debug_gfx_enabled && !_logged_suboptimal_present {
+         ui_profile.print_text("[gfx:vulkan] present suboptimal continuing=true")
+         _logged_suboptimal_present = true
+      }
+   } elif pr != 0 {
+      if vk_state._debug_gfx_enabled {
+         ui_profile.print_text("[gfx:vulkan] present failed code=" + to_str(pr) + " — scheduling recreate")
+      }
+      _frame_open = false
+      _schedule_swapchain_recreate(true)
+      return false
+   }
+   if backend_is_win32 {
+      _pump_host_messages_if_needed()
+      msleep(1)
+      _pump_host_messages_if_needed()
+   }
+   true
+}
+
+fn _end_frame_internal(bool present) bool {
+   def _prof_on = _vk_profile_enabled()
+   def _t_end = _prof_on ? ticks() : 0
+   def _profile_frame = _total_frames
+   def _deep_on = (_vk_deep_debug == 1) && ((_prof_on && ((_profile_frame % _vk_profile_every()) == 0)) || ((_profile_frame % _vk_deep_every()) == 0))
+   def _t_end_deep = _deep_on ? ticks() : 0
+   if !_frame_open { return false }
+   def has_surface = _has_valid_surface_fast()
+   def backend_is_win32 = has_surface && _backend_is_win32_fast()
+   if !_vk_frame_targets_ready(has_surface) { return false }
+   def _t_flush = _deep_on ? ticks() : 0
+   _flush()
+   if _deep_on { _vk_deep_end_flush_ms = ui_profile.elapsed_ms(_t_flush) }
+   def cb = load64(_cmd_bufs_slab, _current_frame * 8)
+   cmd_end_render_pass(cb)
+   if _offscreen_draw_enabled() && !_record_draw_image_to_swapchain(cb, has_surface) { return false }
+   if !_vk_end_frame_record_capture(cb, has_surface) { return false }
+   if _vk_markers_enabled {
+      vk_debug_marker_end(cb)
+      vk_debug_marker_end(cb)
+   }
+   def _t_end_cmd = _deep_on ? ticks() : 0
+   def ecb = end_command_buffer(cb)
+   if _deep_on { _vk_deep_end_cmd_ms = ui_profile.elapsed_ms(_t_end_cmd) }
+   if ecb != 0 { return false }
+   if has_surface {
+      def sem_avail = load64_h(_sem_avail_slab, _current_frame * 8)
+      def sem_finish = load64_h(_sem_finish_slab, _current_frame * 8)
+      store64_h(_ptr_wait_sems, sem_avail, 0)
+      store64_h(_ptr_sig_sems, sem_finish, 0)
+      store32(_ptr_stages,
+         _offscreen_draw_enabled() ? (VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT) : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      0)
+   }
+   store32(_ptr_sub, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
+   store64_h(_ptr_sub, 0, 8)
+   if has_surface {
+      store32(_ptr_sub, 1, 16)
+      store64_h(_ptr_sub, _ptr_wait_sems, 24)
+      store64_h(_ptr_sub, _ptr_stages, 32)
+   } else {
+      store32(_ptr_sub, 0, 16)
+      store64_h(_ptr_sub, 0, 24)
+      store64_h(_ptr_sub, 0, 32)
+   }
+   store32(_ptr_sub, 1, 40)
+   mut cb_ptr = _ptr_sub + 80
+   store64_h(cb_ptr, cb, 0)
+   store64_h(_ptr_sub, cb_ptr, 48)
+   if has_surface {
+      store32(_ptr_sub, 1, 56)
+      store64_h(_ptr_sub, _ptr_sig_sems, 64)
+   } else {
+      store32(_ptr_sub, 0, 56)
+      store64_h(_ptr_sub, 0, 64)
+   }
+   def fence = load64_h(_fences_slab, _current_frame * 8)
+   if _vk_debug_basic == 1 {
+      ui_profile.print_text("[gfx:vulkan] end_frame before submit frame=" + to_str(_current_frame) +
+      " image=" + to_str(_image_index))
+   }
+   def _t_submit = _deep_on ? ticks() : 0
+   if backend_is_win32 { _pump_host_messages_if_needed() }
+   def sub_res = queue_submit(_graphics_queue, 1, _ptr_sub, fence)
+   if backend_is_win32 { _pump_host_messages_if_needed() }
+   if _deep_on { _vk_deep_end_submit_ms = ui_profile.elapsed_ms(_t_submit) }
+   if _vk_debug_basic == 1 { ui_profile.print_text("[gfx:vulkan] end_frame after submit result=" + to_str(sub_res)) }
+   if sub_res != 0 { return false }
+   if !_vk_end_frame_download_capture(has_surface) { return false }
+   if present && has_surface && _swapchain != 0 {
+      if !_vk_end_frame_present_image(backend_is_win32, _deep_on) { return false }
+   }
    def frame_sleep_default = 0
    def frame_sleep_ms = ui_profile.env_present_cached("NY_VK_FRAME_SLEEP_MS") ? ui_profile.env_int_cached("NY_VK_FRAME_SLEEP_MS", 0, 0, 64) : frame_sleep_default
    if frame_sleep_ms > 0 { msleep(frame_sleep_ms) }
@@ -3406,9 +3423,6 @@ fn _end_frame_internal(bool present) bool {
    if _deep_on { _vk_deep_end_total_ms = ui_profile.elapsed_ms(_t_end_deep) }
    if ui_profile.trace_process_enabled() {
       mut proc_every_frames = ui_profile.env_int_cached("NY_TRACE_PROC_EVERY_FRAMES", 120, 1, 1000000)
-      ;; Keep NY_TRACE=1 cheap even if the trace layer/cache resolves the proc
-      ;; cadence incorrectly.  The renderer gates before calling into /proc, so
-      ;; the sampler cannot become the allocation/perf problem.
       if !common.env_present("NY_TRACE_PROC_EVERY_FRAMES") && common.env_present("NY_TRACE") {
          def tm = common.env_lower("NY_TRACE")
          if tm == "spam" || tm == "3" { proc_every_frames = 1 }
@@ -3450,77 +3464,27 @@ fn _end_frame_internal(bool present) bool {
          " dyn=" + to_str(_frame_dynamic_draw_calls) +
          " static=" + to_str(_frame_static_draw_calls) +
          " indexed=" + to_str(_frame_indexed_draw_calls) +
-         " verts=" + to_str(_vertex_offset / _VKR_VERT_STRIDE) +
-         " img=" + to_str(_image_index) +
-         " present=" + to_str(present) +
-      " surface=" + to_str(has_surface))
-   }
-   if _prof_on && (_total_frames % _vk_profile_every()) == 0 {
-      def _profile_surface = has_surface
-      ui_profile.print_text("[vk:prof] frame=" + to_str(_total_frames) +
-         " draws=" + to_str(_frame_draw_calls) +
-         " dyn=" + to_str(_frame_dynamic_draw_calls) +
-         " static=" + to_str(_frame_static_draw_calls) +
-         " indexed=" + to_str(_frame_indexed_draw_calls) +
          " flush=" + to_str(_flush_total) +
-         " tex=" + to_str(_flush_reason_tex) +
-         " state=" + to_str(_flush_reason_pipe) +
-         " static=" + to_str(_flush_reason_static) +
-         " special=" + to_str(_flush_reason_special) +
-         " full=" + to_str(_flush_reason_vertex_full) +
-         " pipe=" + to_str(_pipeline_bind_count) +
-         " ds=" + to_str(_descriptor_bind_count) +
-         " begin_ms=" + to_str(float(_frame_begin_cpu_us) / 1000.0) +
-         " syncpc_ms=" + to_str(float(_frame_sync_pc_cpu_us) / 1000.0) +
-         " flush_ms=" + to_str(float(_frame_flush_cpu_us) / 1000.0) +
-         " end_ms=" + to_str(float(_frame_end_cpu_us) / 1000.0) +
-         " verts=" + to_str(_vertex_offset / _VKR_VERT_STRIDE) +
-         " rectq=" + to_str(_prim_rect_quads) +
-         " outlineq=" + to_str(_prim_outline_quads) +
-         " lineq=" + to_str(_prim_line_quads) +
-         " text=" + to_str(_prim_text_calls) + "/" + to_str(_prim_text_glyphs) +
-      " surface=" + to_str(_profile_surface))
-      if _vk_profile_dump_enabled() {
-         def row = {
-            "format": "nytrix.vk.profile.v1", "frame": _total_frames,
-            "draws": _frame_draw_calls, "draws_dynamic": _frame_dynamic_draw_calls,
-            "draws_static": _frame_static_draw_calls, "draws_indexed": _frame_indexed_draw_calls,
-            "flush_total": _flush_total, "flush_tex": _flush_reason_tex,
-            "flush_pipe": _flush_reason_pipe, "flush_static": _flush_reason_static,
-            "flush_special": _flush_reason_special, "flush_vertex_full": _flush_reason_vertex_full,
-            "pipeline_binds": _pipeline_bind_count, "descriptor_binds": _descriptor_bind_count,
-            "begin_ms": float(_frame_begin_cpu_us) / 1000.0,
-            "syncpc_ms": float(_frame_sync_pc_cpu_us) / 1000.0,
-            "flush_ms": float(_frame_flush_cpu_us) / 1000.0,
-            "end_ms": float(_frame_end_cpu_us) / 1000.0,
-            "deep_recreate_ms": _vk_deep_begin_recreate_ms,
-            "deep_acquire_ms": _vk_deep_begin_acquire_ms,
-            "deep_wait_ms": _vk_deep_begin_wait_ms,
-            "deep_reset_fence_ms": _vk_deep_begin_reset_fence_ms,
-            "deep_begin_cmd_ms": _vk_deep_begin_cmd_ms,
-            "deep_begin_rp_ms": _vk_deep_begin_rp_ms,
-            "deep_vp_ms": _vk_deep_begin_vp_ms,
-            "deep_begin_total_ms": _vk_deep_begin_total_ms,
-            "deep_end_flush_ms": _vk_deep_end_flush_ms,
-            "deep_end_cmd_ms": _vk_deep_end_cmd_ms,
-            "deep_submit_ms": _vk_deep_end_submit_ms,
-            "deep_present_ms": _vk_deep_end_present_ms,
-            "deep_end_total_ms": _vk_deep_end_total_ms,
-            "verts": _vertex_offset / _VKR_VERT_STRIDE,
-            "prim_rect_quads": _prim_rect_quads,
-            "prim_outline_quads": _prim_outline_quads,
-            "prim_line_quads": _prim_line_quads,
-            "prim_raw_lines": _prim_raw_lines,
-            "prim_raw_points": _prim_raw_points,
-            "prim_text_calls": _prim_text_calls,
-            "prim_text_glyphs": _prim_text_glyphs,
-            "surface": _profile_surface, "present": present && _profile_surface
-         }
-         ui_profile.append_line(_vk_profile_dump_file(), json_encode(row))
-      }
+         " valids=" + to_str(_handles_valid) +
+         " open=" + to_str(_frame_open) +
+         " img=" + to_str(_image_index) +
+         " curr=" + to_str(_current_frame) +
+         " cb=" + to_str(cb) +
+         " pipe=" + to_str(_pipeline) +
+         " boundPipe=" + to_str(_last_bound_pipe) +
+         " layout=" + to_str(_pipeline_layout) +
+         " ds=" + to_str(_bindless_ds) +
+         " boundDs=" + to_str(_last_bound_ds) +
+         " uboDs=" + to_str(load64_h(_ubo_ds_slab, _current_frame * 8)) +
+         " boundUboDs=" + to_str(_last_bound_ubo_ds) +
+         " vbo=" + to_str(_vertex_buffer) +
+         " mapped=" + to_str(_vertex_map) +
+         " local=" + to_str(_local_vertex_map) +
+         " off=" + to_str(_vertex_offset) +
+         " lastFlush=" + to_str(_last_flush_offset) +
+         " limit=" + to_str(_vertex_limit_hit) +
+      " reason=" + to_str(_flush_reason))
    }
-   _frame_open = false
-   _current_frame = (_current_frame + 1) % _frames_in_flight()
    true
 }
 
@@ -4600,33 +4564,37 @@ fn _window_swapchain_extent(any win, int fallback_w, int fallback_h) list {
    [w, h]
 }
 
+fn _vk_create_headless_swapchain(any win) bool {
+   _vk_stage("swapchain.headless")
+   if !_allow_headless_surface() {
+      if vk_state._debug_gfx_enabled { ui_profile.print_text("[gfx:vulkan] headless swapchain disabled no_surface=true") }
+      return false
+   }
+   _swapchain_extent_w, _swapchain_extent_h = 400, 300
+   if win { _swapchain_extent_w, _swapchain_extent_h = win.get("w", 400), win.get("h", 300) }
+   _swapchain_format = 37
+   _swapchain_image_count = 3
+   _swapchain_images = []
+   mut i = 0
+   while i < 3 {
+      def img = _create_headless_image(_swapchain_extent_w, _swapchain_extent_h)
+      if img == 0 {
+         if vk_state._debug_gfx_enabled { ui_profile.print_text("[gfx:vulkan] headless image creation failed index=" + to_str(i)) }
+         _swapchain_images = []
+         _swapchain_image_count = 0
+         return false
+      }
+      _swapchain_images = _swapchain_images.append(img)
+      i += 1
+   }
+   _swapchain = _headless_swapchain_sentinel()
+   true
+}
+
 fn _create_swapchain(any win) bool {
    _vk_stage("swapchain.enter")
    if !_has_valid_surface() {
-      _vk_stage("swapchain.headless")
-      if !_allow_headless_surface() {
-         if vk_state._debug_gfx_enabled { ui_profile.print_text("[gfx:vulkan] headless swapchain disabled no_surface=true") }
-         return false
-      }
-      _swapchain_extent_w, _swapchain_extent_h = 400, 300
-      if win { _swapchain_extent_w, _swapchain_extent_h = win.get("w", 400), win.get("h", 300) }
-      _swapchain_format = 37
-      _swapchain_image_count = 3
-      _swapchain_images = []
-      mut i = 0
-      while i < 3 {
-         def img = _create_headless_image(_swapchain_extent_w, _swapchain_extent_h)
-         if img == 0 {
-            if vk_state._debug_gfx_enabled { ui_profile.print_text("[gfx:vulkan] headless image creation failed index=" + to_str(i)) }
-            _swapchain_images = []
-            _swapchain_image_count = 0
-            return false
-         }
-         _swapchain_images = _swapchain_images.append(img)
-         i += 1
-      }
-      _swapchain = _headless_swapchain_sentinel()
-      return true
+      return _vk_create_headless_swapchain(win)
    }
    _vk_stage("swapchain.caps")
    mut caps = _renderer_alloc(128)

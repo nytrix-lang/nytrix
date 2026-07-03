@@ -1,0 +1,27 @@
+shape i386_elf32_object_link_run_memchr_stub {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run pointer memchr]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-link-run-elf32-memchr-stub.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+extern {
+  fn memchr(any p, i64 c, i64 n) ptr
+}
+
+fn probe() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  store64_i(p, 67305985)
+  def found = memchr(p, 3, 4)
+  def missing = memchr(p, 9, 4)
+  free(p)
+  if found == p + 2 && missing == nil { 42 } else { 0 }
+}
+
+probe()
+NY
+}

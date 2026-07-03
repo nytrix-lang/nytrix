@@ -1,0 +1,17 @@
+shape elf64_object_f64 {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 f64]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-native-elf64-object-f64.o"
+  expect compile_and_run
+  source ny <<'NY'
+def a = 1.5
+def b = 2.25
+if a + b == 3.75 {
+  a + b
+} else {
+  0.0
+}
+NY
+}

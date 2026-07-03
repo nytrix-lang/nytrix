@@ -43,8 +43,7 @@ fn _knapsack_z_weights(list a) list {
 }
 
 fn _knapsack_mask_sum_z(list weights, int start, int count, int mask) bigint {
-   mut s = Z(0)
-   mut i = 0
+   mut s, i = Z(0), 0
    while i < count {
       if ((mask >> i) & 1) != 0 { s += weights.get(start + i, Z(0)) }
       i += 1

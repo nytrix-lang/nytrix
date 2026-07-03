@@ -1,0 +1,2 @@
+long labs(long value);
+

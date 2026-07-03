@@ -1,0 +1,23 @@
+shape i386_elf32_object_link_run_memset_stub {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 i386 x86 nyir link-run pointer memset]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-memset-stub.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+fn memzero() i64 {
+  def ptr p = malloc(8)
+  if p == nil { return 0 }
+  store64_i(p, 42)
+  memset(p, 0, 8)
+  def i64 v = load64_i(p)
+  free(p)
+  if v == 0 { 42 } else { v }
+}
+
+memzero()
+NY
+}

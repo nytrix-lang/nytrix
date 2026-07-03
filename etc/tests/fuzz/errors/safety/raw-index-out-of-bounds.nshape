@@ -10,7 +10,7 @@ shape safety-raw-index-out-of-bounds {
   source ny <<'NY'
 use std.core
 
-with ptr: p = malloc(4){
+with ptr p = malloc(4){
    load32(p, 2)
 }
 NY

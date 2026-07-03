@@ -20,6 +20,7 @@ def gf2_nullspace_report = gf2.gf2_nullspace_report
 def packed_gf2_matvec_report = gf2.packed_gf2_matvec_report
 
 fn packed_gf2_normal_matvec_report(list rows, list vector, int width=0, bool sparse=false) dict {
+   "Computes packed GF(2) matrix-vector product with optional sparse mode. Returns a report dict with `result`."
    gf2.packed_gf2_normal_matvec_report(rows, vector, width, sparse)
 }
 
@@ -28,6 +29,7 @@ def packed_gf2_nullspace_report = gf2.packed_gf2_nullspace_report
 def sparse_gf2_matvec_report = gf2.sparse_gf2_matvec_report
 
 fn sparse_gf2_normal_matvec_report(list sparse_rows, list vector, int width=0) dict {
+   "Computes sparse GF(2) matrix-vector product. Returns a report dict with `result`."
    gf2.sparse_gf2_normal_matvec_report(sparse_rows, vector, width)
 }
 
@@ -58,6 +60,7 @@ def siqs_polynomial_report = qs.siqs_polynomial_report
 def siqs_relation_report = qs.siqs_relation_report
 
 fn require_factor_pair(any factors, any a, any b, str label) any {
+   "Asserts that `factors` is a [a,b] or [b,a] pair. Used in self-tests to validate factorization results."
    assert(factors != nil, label + " returned nil")
    assert(
       (factors.get(0, 0) == a && factors.get(1, 0) == b) ||

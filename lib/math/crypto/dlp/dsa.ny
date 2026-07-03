@@ -61,8 +61,7 @@ fn dsa_recover_nonce_reuse(any h1, any r1, any s1, any h2, any r2, any s2, any q
    def den = mod(Z(s1) - Z(s2), q)
    def inv = inverse_mod(den, q)
    if inv == nil || inv == 0 { return nil }
-   def k = mod((Z(h1) - Z(h2)) * inv, q)
-   def x = dsa_recover_key_from_nonce(h1, r1, s1, k, q)
+   def k, x = mod((Z(h1) - Z(h2)) * inv, q), dsa_recover_key_from_nonce(h1, r1, s1, mod((Z(h1) - Z(h2)) * inv, q), q)
    if x == nil { return nil }
    [k, x]
 }
@@ -83,8 +82,7 @@ fn dsa_recover_nonce_lcg_two_sigs(any h1, any r1, any s1, any h2, any r2, any s2
 fn dsa_nonce_polynomial_value(list coeffs, any i, any q) any {
    "Evaluate a nonce polynomial at index i modulo q.
    coeffs are low-to-high: [a0, a1, a2, ...]."
-   mut acc = Z(0)
-   mut pow_i = Z(1)
+   mut acc, pow_i = Z(0), Z(1)
    def ii = Z(i)
    mut j = 0
    while j < coeffs.len {
@@ -122,13 +120,10 @@ fn dsa_recover_key_from_nonce_polynomial(list records, int degree, any q) any {
    mut row_i = 0
    while row_i < records.len {
       def rec = records[row_i]
-      def idx = Z(rec[0])
-      def h = Z(rec[1])
-      def r = Z(rec[2])
-      def s = Z(rec[3])
+      def idx, h = Z(rec[0]), Z(rec[1])
+      def r, s = Z(rec[2]), Z(rec[3])
       mut row = [mod(Z(0) - r, q)]
-      mut pow_idx = Z(1)
-      mut j = 0
+      mut pow_idx, j = Z(1), 0
       while j <= degree {
          row = row.append(mod(s * pow_idx, q))
          pow_idx = mod(pow_idx * idx, q)
@@ -139,8 +134,7 @@ fn dsa_recover_key_from_nonce_polynomial(list records, int degree, any q) any {
    }
    def sol = matrix.matrix_solve_mod(matrix.Matrix(A), b, q)
    if sol == nil { return nil }
-   mut coeffs = []
-   mut j = 0
+   mut coeffs, j = [], 0
    while j <= degree {
       coeffs = coeffs.append(mod(sol[j + 1], q))
       j += 1
@@ -157,8 +151,7 @@ fn dsa_recover_key_from_quadratic_nonces(list records, any q) any {
    def p, q = Z(23), Z(11)
    def g, x = Z(4), Z(7)
    def y = power_mod(g, x, p)
-   def h1 = Z(3)
-   def h2 = Z(8)
+   def h1, h2 = Z(3), Z(8)
    def k = Z(1)
    def sig1 = dsa_sign_hash(h1, x, k, p, q, g)
    def sig2 = dsa_sign_hash(h2, x, k, p, q, g)
@@ -167,8 +160,7 @@ fn dsa_recover_key_from_quadratic_nonces(list records, any q) any {
    def reuse = dsa_recover_nonce_reuse(h1, sig1[0], sig1[1], h2, sig2[0], sig2[1], q)
    assert(reuse != nil && reuse[0] == k && reuse[1] == x, "dsa nonce reuse")
    def a, c = Z(2), Z(1)
-   def k1 = Z(1)
-   def k2 = mod(a * k1 + c, q)
+   def k1, k2 = Z(1), mod(a * Z(1) + c, q)
    def s1 = dsa_sign_hash(h1, x, k1, p, q, g)
    def s2 = dsa_sign_hash(h2, x, k2, p, q, g)
    def lcg = dsa_recover_nonce_lcg_two_sigs(h1, s1[0], s1[1], h2, s2[0], s2[1], a, c, q)

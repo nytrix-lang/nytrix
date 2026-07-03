@@ -1,0 +1,33 @@
+shape x86_64_elf64_object_link_run_strcmp_stub {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir link-run pointer strcmp]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-strcmp-stub.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+extern {
+  fn strcmp(any a, any b) i64
+}
+
+fn probe() i64 {
+  def *int a = malloc(8)
+  def *int b = malloc(8)
+  def *int c = malloc(8)
+  if a == nil || b == nil || c == nil { return 0 }
+  store64_i(a, 6513249)
+  store64_i(b, 6513249)
+  store64_i(c, 6578785)
+  def same = strcmp(a, b)
+  def diff = strcmp(a, c)
+  free(a)
+  free(b)
+  free(c)
+  if same == 0 && diff != 0 { 42 } else { 0 }
+}
+
+probe()
+NY
+}

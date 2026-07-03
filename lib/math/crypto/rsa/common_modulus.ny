@@ -32,7 +32,7 @@ fn common_modulus_attack_root(number N, number e1, number c1, number e2, number 
    def part1, part2 = power_mod(c1_mod, a_use, N), power_mod(c2_mod, b_use, N)
    mut m = (part1 * part2) % N
    if g != 1 {
-      def g_int = bigint_to_int(Z(g))
+      def g_int = int(g)
       if g_int <= 0 { return nil }
       def root = nth_root(m, g_int)
       if bigint_pow(root, Z(g_int)) != m { return nil }

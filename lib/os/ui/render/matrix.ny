@@ -124,7 +124,11 @@ fn mat4_rotate_into(f64 angle, any axis, list m) list {
    mut ax, ay, az = 0.0, 0.0, 0.0
    if is_list(axis) || is_tuple(axis) {
       def n = axis.len
-      if n == 5 && is_int(axis[0]) && is_int(axis[1]) && axis[0]==1 && axis[1]==3 { ax = axis[2] ay = axis[3] az = axis[4] } else if n >= 3 { ax, ay, az = axis[0], axis[1], axis[2] }
+      if n == 5 && is_int(axis[0]) && is_int(axis[1]) && axis[0]==1 && axis[1]==3 {
+         ax = axis[2] ay = axis[3] az = axis[4]
+      } elif n >= 3 {
+         ax, ay, az = axis[0], axis[1], axis[2]
+      }
    }
    def l = sqrt(ax*ax + ay*ay + az*az)
    mut x, y, z = ax, ay, az
@@ -259,17 +263,29 @@ fn mat4_look_at_into(any eye, any center, any up, list m) list {
    mut ex, ey, ez = 0.0, 0.0, 0.0
    if is_list(eye) || is_tuple(eye) {
       def n = eye.len
-      if n == 5 && is_int(eye[0]) && is_int(eye[1]) && eye[0]==1 && eye[1]==3 { ex = eye[2] ey = eye[3] ez = eye[4] } else if n >= 3 { ex, ey, ez = eye[0], eye[1], eye[2] }
+      if n == 5 && is_int(eye[0]) && is_int(eye[1]) && eye[0]==1 && eye[1]==3 {
+         ex = eye[2] ey = eye[3] ez = eye[4]
+      } elif n >= 3 {
+         ex, ey, ez = eye[0], eye[1], eye[2]
+      }
    }
    mut cx, cy, cz = 0.0, 0.0, 0.0
    if is_list(center) || is_tuple(center) {
       def n = center.len
-      if n == 5 && is_int(center[0]) && is_int(center[1]) && center[0]==1 && center[1]==3 { cx = center[2] cy = center[3] cz = center[4] } else if n >= 3 { cx, cy, cz = center[0], center[1], center[2] }
+      if n == 5 && is_int(center[0]) && is_int(center[1]) && center[0]==1 && center[1]==3 {
+         cx = center[2] cy = center[3] cz = center[4]
+      } elif n >= 3 {
+         cx, cy, cz = center[0], center[1], center[2]
+      }
    }
    mut ux, uy, uz = 0.0, 0.0, 0.0
    if is_list(up) || is_tuple(up) {
       def n = up.len
-      if n == 5 && is_int(up[0]) && is_int(up[1]) && up[0]==1 && up[1]==3 { ux = up[2] uy = up[3] uz = up[4] } else if n >= 3 { ux, uy, uz = up[0], up[1], up[2] }
+      if n == 5 && is_int(up[0]) && is_int(up[1]) && up[0]==1 && up[1]==3 {
+         ux = up[2] uy = up[3] uz = up[4]
+      } elif n >= 3 {
+         ux, uy, uz = up[0], up[1], up[2]
+      }
    }
    mat4_look_at_into_xyz(ex, ey, ez, cx, cy, cz, ux, uy, uz, m)
 }

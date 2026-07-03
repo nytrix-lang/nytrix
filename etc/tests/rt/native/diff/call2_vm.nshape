@@ -1,0 +1,12 @@
+shape diff_call2_vm {
+  family "runtime-native"
+  generator "native"
+  features [native nyir vm differential call]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+fn add2(i64 a, i64 b) i64 { a + b }
+add2(19, 23)
+NY
+}

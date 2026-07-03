@@ -1,0 +1,16 @@
+shape oracle_f32_call_stack_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result f32 call stack]
+  template ny-test-case
+  flags "--native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+fn sum9(f32 a, f32 b, f32 c, f32 d, f32 e, f32 f, f32 g, f32 h, f32 i) f32 {
+  a + b + c + d + e + f + g + h + i
+}
+
+def f64 y = sum9(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.5)
+y
+NY
+}

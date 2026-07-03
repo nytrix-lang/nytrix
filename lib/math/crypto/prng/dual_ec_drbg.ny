@@ -175,8 +175,7 @@ fn _ec_point_add(any x1, any y1, any x2, any y2, any p) list {
 }
 
 #main {
-   def p = 23
-   def Q = [1, 5]
+   def p, Q = 23, [1, 5]
    def P = dual_ec_backdoor(Q, 5, p)
    assert(P == [1, 5], "dual ec backdoor point")
    assert(dual_ec_drbg_predict([1], P, Q, p) == 0, "dual ec prediction")

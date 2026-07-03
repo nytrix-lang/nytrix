@@ -1,0 +1,11 @@
+shape tier_plan {
+  family "runtime-native"
+  generator "native"
+  features ["native", "tier", "x86_64"]
+  template ny-test-case
+  flags "--emit-asm=/tmp/nytrix-native-tier-plan.s --native-backend x86_64 --native-tier-budget=7 --native-hot-threshold=3 --native-cold-threshold=1 --native-cache-score=9 --native-prefer-vm"
+  expect compile_and_run
+  source ny <<'NY'
+1 + 2
+NY
+}

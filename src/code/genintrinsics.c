@@ -198,7 +198,8 @@ static LLVMValueRef ny_llvm_splice_coerce_arg(codegen_t *cg, scope *scopes,
       return ny_llvm_splice_to_i1(cg, scopes, depth, arg, tok);
     const char *abi_name = ny_llvm_splice_int_abi_name(bits);
     if (!abi_name) {
-      ny_diag_error(tok, "llvm(...) does not support i%u intrinsic arguments",
+      ny_diag_error(tok,
+                    "backend_intrinsic(...) does not support i%u intrinsic arguments",
                     bits);
       cg->had_error = 1;
       return ny_c0(cg);
@@ -220,7 +221,8 @@ static LLVMValueRef ny_llvm_splice_coerce_arg(codegen_t *cg, scope *scopes,
                                                         : "f128";
     return ny_coerce_to_abi(cg, v, abi_name);
   }
-  ny_diag_error(tok, "llvm(...) intrinsic parameter type is not supported");
+  ny_diag_error(tok,
+                "backend_intrinsic(...) intrinsic parameter type is not supported");
   ny_diag_hint("supported parameter classes: integer scalars, i1, pointers, f32, f64, f128");
   cg->had_error = 1;
   return ny_c0(cg);
@@ -240,7 +242,8 @@ static LLVMValueRef ny_llvm_splice_box_result(codegen_t *cg, LLVMValueRef raw,
       return ny_intrinsic_tag_bool(cg, raw, NY_LLVM_NAME(cg, "llvm_i1_ret"));
     const char *abi_name = ny_llvm_splice_int_abi_name(bits);
     if (!abi_name) {
-      ny_diag_error(tok, "llvm(...) does not support i%u intrinsic returns",
+      ny_diag_error(tok,
+                    "backend_intrinsic(...) does not support i%u intrinsic returns",
                     bits);
       cg->had_error = 1;
       return ny_c0(cg);
@@ -256,7 +259,8 @@ static LLVMValueRef ny_llvm_splice_box_result(codegen_t *cg, LLVMValueRef raw,
                                                         : "f128";
     return ny_box_abi_result(cg, raw, abi_name);
   }
-  ny_diag_error(tok, "llvm(...) intrinsic return type is not supported");
+  ny_diag_error(tok,
+                "backend_intrinsic(...) intrinsic return type is not supported");
   ny_diag_hint("supported return classes: void, integer scalars, i1, pointers, f32, f64, f128");
   cg->had_error = 1;
   return ny_c0(cg);
@@ -266,12 +270,15 @@ LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
                                           size_t depth, expr_t *e,
                                           const char *callee_name,
                                           bool shadowed, expr_call_t *c) {
-  if (!cg || !e || !callee_name || !c || shadowed ||
-      strcmp(callee_name, "llvm") != 0)
+  if (!cg || !e || !callee_name || !c || shadowed)
     return NULL;
+  if (strcmp(callee_name, "backend_intrinsic") != 0)
+    return NULL;
+  const char *call_spelling = "backend_intrinsic";
   if (c->args.len < 1) {
-    ny_diag_error(e->tok, "llvm(...) expects an intrinsic name and arguments");
-    ny_diag_hint("use llvm(\"llvm.ctpop.i64\", value)");
+    ny_diag_error(e->tok, "%s(...) expects an intrinsic name and arguments",
+                  call_spelling);
+    ny_diag_hint("use backend_intrinsic(\"ctpop.i64\", value)");
     cg->had_error = 1;
     return ny_c0(cg);
   }
@@ -280,13 +287,15 @@ LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
   if (!ny_llvm_splice_name_from_expr(c->args.data[0].val, &intr_name,
                                      &intr_len)) {
     ny_diag_error(c->args.data[0].val ? c->args.data[0].val->tok : e->tok,
-                  "llvm(...) first argument must be a string literal intrinsic name");
+                  "%s(...) first argument must be a string literal intrinsic name",
+                  call_spelling);
     cg->had_error = 1;
     return ny_c0(cg);
   }
   if (!ny_llvm_splice_name_allowed(intr_name, intr_len)) {
     ny_diag_error(c->args.data[0].val->tok,
-                  "llvm(...) intrinsic name must contain only LLVM name characters");
+                  "%s(...) intrinsic name must contain only backend intrinsic name characters",
+                  call_spelling);
     cg->had_error = 1;
     return ny_c0(cg);
   }
@@ -297,7 +306,7 @@ LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
   if (intr_len < 5 || strncmp(intr_name, "llvm.", 5) != 0) {
     if (intr_len + 5 >= sizeof(prefixed_name)) {
       ny_diag_error(c->args.data[0].val->tok,
-                    "llvm(...) intrinsic name is too long");
+                    "%s(...) intrinsic name is too long", call_spelling);
       cg->had_error = 1;
       return ny_c0(cg);
     }
@@ -310,8 +319,9 @@ LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
 
   unsigned id = LLVMLookupIntrinsicID(lookup_name, lookup_len);
   if (id == 0) {
-    ny_diag_error(c->args.data[0].val->tok, "unknown LLVM intrinsic '%.*s'",
-                  (int)lookup_len, lookup_name);
+    ny_diag_error(c->args.data[0].val->tok,
+                  "unknown backend intrinsic '%.*s'", (int)lookup_len,
+                  lookup_name);
     cg->had_error = 1;
     return ny_c0(cg);
   }
@@ -324,9 +334,9 @@ LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
         sizeof(overload_types) / sizeof(overload_types[0]));
     if (overload_count == 0) {
       ny_diag_error(c->args.data[0].val->tok,
-                    "overloaded LLVM intrinsic '%.*s' needs a typed intrinsic spelling",
+                    "overloaded backend intrinsic '%.*s' needs a typed intrinsic spelling",
                     (int)lookup_len, lookup_name);
-      ny_diag_hint("example: llvm(\"llvm.ctpop.i64\", value)");
+      ny_diag_hint("example: backend_intrinsic(\"ctpop.i64\", value)");
       cg->had_error = 1;
       return ny_c0(cg);
     }
@@ -336,8 +346,8 @@ LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
       LLVMIntrinsicGetType(cg->ctx, id, overload_types, overload_count);
   if (!fn_ty) {
     ny_diag_error(c->args.data[0].val->tok,
-                  "could not resolve LLVM intrinsic '%.*s'", (int)lookup_len,
-                  lookup_name);
+                  "could not resolve backend intrinsic '%.*s'",
+                  (int)lookup_len, lookup_name);
     cg->had_error = 1;
     return ny_c0(cg);
   }
@@ -346,8 +356,9 @@ LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
   unsigned got_argc = (unsigned)(c->args.len - 1);
   if (got_argc != want_argc) {
     ny_diag_error(e->tok,
-                  "llvm(...) intrinsic '%.*s' expects %u argument(s), got %u",
-                  (int)lookup_len, lookup_name, want_argc, got_argc);
+                  "%s(...) intrinsic '%.*s' expects %u argument(s), got %u",
+                  call_spelling, (int)lookup_len, lookup_name, want_argc,
+                  got_argc);
     cg->had_error = 1;
     return ny_c0(cg);
   }

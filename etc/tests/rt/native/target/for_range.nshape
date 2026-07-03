@@ -1,0 +1,15 @@
+shape for_range_target {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "for", "range", "x86_64"]
+  template ny-test-case
+  flags "--native-backend x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+mut s = 0
+for i in 0..4 {
+  s += i
+}
+s
+NY
+}

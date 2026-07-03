@@ -50,7 +50,7 @@ fn _dict_str_eq(any a, any b) bool { __str_eq(a, b) }
 @inline
 fn _dict_key_eq(any a, any b) bool {
    if is_str(a) && is_str(b) { return _dict_str_eq(a, b) }
-   return(a == b)
+   a == b
 }
 
 @inline
@@ -379,8 +379,7 @@ fn dict_values(dict d) list {
    _dict_check(!dict_has(d, "b") && dict_len(d) == 3, "dict delete")
    _dict_check(dict_keys(d).contains("a") && dict_values(d).contains(4) && dict_items(d).len == 3, "dict views")
    mut fd = dict(8)
-   def half_a = 0.5
-   def half_b = 0.25 + 0.25
+   def half_a, half_b = 0.5, 0.25 + 0.25
    fd[half_a] = "half"
    _dict_check(dict_read(fd, half_b, "") == "half", "dict float keys")
    print("✓ std.core.dict_mod self-test passed")

@@ -1,0 +1,13 @@
+shape logical_target {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "logical", "x86_64"]
+  template ny-test-case
+  flags "--native-backend x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+def a = 1
+def b = 0
+(a || b) + (a && b)
+NY
+}

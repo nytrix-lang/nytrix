@@ -26,8 +26,7 @@ fn tea_encrypt_block(list key, list block) list {
    "Encrypt one 8-byte TEA block using a 16-byte key."
    crypto_require_len(block, 8, "symmetric.tea_encrypt_block", "block")
    def k = _tea_key_words(key)
-   mut v0 = unpack_be32(block, 0)
-   mut v1 = unpack_be32(block, 4)
+   mut v0, v1 = unpack_be32(block, 0), unpack_be32(block, 4)
    mut sum = 0
    def delta = 0x9e3779b9
    mut i = 0
@@ -44,8 +43,7 @@ fn tea_decrypt_block(list key, list block) list {
    "Decrypt one 8-byte TEA block using a 16-byte key."
    crypto_require_len(block, 8, "symmetric.tea_decrypt_block", "block")
    def k = _tea_key_words(key)
-   mut v0 = unpack_be32(block, 0)
-   mut v1 = unpack_be32(block, 4)
+   mut v0, v1 = unpack_be32(block, 0), unpack_be32(block, 4)
    def delta = 0x9e3779b9
    mut sum = _tea_u32(delta * 32)
    mut i = 0
@@ -67,10 +65,8 @@ fn tea_equivalent_keys(list key) list {
    Flipping the high bit of both first-half words and/or both second-half words
    gives keys with identical encryption behavior."
    crypto_require_len(key, 16, "symmetric.tea_equivalent_keys", "key")
-   def k0 = slice(key, 0, 4)
-   def k1 = slice(key, 4, 8)
-   def k2 = slice(key, 8, 12)
-   def k3 = slice(key, 12, 16)
+   def k0, k1 = slice(key, 0, 4), slice(key, 4, 8)
+   def k2, k3 = slice(key, 8, 12), slice(key, 12, 16)
    [
       k0 + k1 + k2 + k3,
       k0 + k1 + _tea_xor_80000000(k2) + _tea_xor_80000000(k3),

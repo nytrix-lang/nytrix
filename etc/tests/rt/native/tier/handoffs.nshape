@@ -1,0 +1,19 @@
+shape tier_handoffs {
+  family "runtime-native"
+  generator "native"
+  features ["native", "tier", "handoff", "deopt"]
+  template ny-test-case
+  flags "--native-backend x86_64 --native-tier-report=/tmp/nytrix-native-tier-handoffs.txt --native-tier-budget=64 --native-hot-threshold=4 --native-cache-score=80"
+  expect compile_and_run
+  source ny <<'NY'
+fn choose(i64 x) i64 {
+  if x > 3 {
+    x * 2
+  } else {
+    x + 1
+  }
+}
+
+choose(5) + choose(2)
+NY
+}

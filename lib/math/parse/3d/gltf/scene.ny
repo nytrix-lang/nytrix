@@ -76,20 +76,14 @@ fn gltf_scene_punctual_lights(any gltf_data, any overrides=0) list {
       if is_list(roots) {
          def roots_n = roots.len
          def id = gltf_math.mat4_identity()
-         mut ri = 0
-         while ri < roots_n {
-            if is_dict(overrides) {
-               node_world_mats = anim._gltf_build_node_world_mats_animated(
-                  g,
-                  int(roots[ri]),
-                  id,
-                  node_world_mats,
-                  overrides
-               )
-            } else {
+         if is_dict(overrides) {
+            node_world_mats = anim.gltf_rebuild_animated_mats(gltf_data, overrides)
+         } else {
+            mut ri = 0
+            while ri < roots_n {
                node_world_mats = _gltf_build_node_world_mats(g, int(roots[ri]), id, node_world_mats)
+               ri += 1
             }
-            ri += 1
          }
       }
    }

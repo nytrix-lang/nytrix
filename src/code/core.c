@@ -574,7 +574,8 @@ bool ny_lazy_emit_stdlib_var_needed(codegen_t *cg, stmt_t *s,
   if (!cg || !s || s->kind != NY_S_VAR)
     return true;
   if (!cg->lazy_emit_stdlib_enabled || !ny_is_stdlib_tok(s->tok) ||
-      ny_codegen_stmt_is_source_file(cg, s))
+      ny_codegen_stmt_is_source_file(cg, s) ||
+      ny_codegen_module_is_source_file(cg, cur_mod))
     return true;
   if (cur_mod && strcmp(cur_mod, "std.core.syntax.type") == 0)
     return true;
@@ -895,7 +896,41 @@ bool ny_codegen_stmt_is_source_file(codegen_t *cg, stmt_t *s) {
   return s && ny_codegen_token_is_source_file(cg, s->tok);
 }
 
-static bool ny_stmt_tree_has_source_file(codegen_t *cg, stmt_t *s) {
+bool ny_codegen_module_is_source_file(codegen_t *cg, const char *module_name) {
+  if (!cg || !cg->source_main_file || !*cg->source_main_file ||
+      !module_name || !*module_name)
+    return false;
+  if (strncmp(module_name, "std.", 4) != 0)
+    return false;
+
+  char rel[1024];
+  size_t pos = 0;
+  const char *p = module_name + 4;
+  memcpy(rel, "lib/", 4);
+  pos = 4;
+  while (*p && pos + 4 < sizeof(rel)) {
+    rel[pos++] = *p == '.' ? '/' : *p;
+    p++;
+  }
+  if (*p || pos + 3 >= sizeof(rel))
+    return false;
+  memcpy(rel + pos, ".ny", 4);
+  pos += 3;
+  rel[pos] = '\0';
+
+  size_t want_len = strlen(cg->source_main_file);
+  size_t rel_len = strlen(rel);
+  if (want_len == rel_len && strcmp(cg->source_main_file, rel) == 0)
+    return true;
+  if (want_len > rel_len &&
+      strcmp(cg->source_main_file + want_len - rel_len, rel) == 0) {
+    char sep = cg->source_main_file[want_len - rel_len - 1];
+    return sep == '/' || sep == '\\';
+  }
+  return false;
+}
+
+bool ny_stmt_tree_has_source_file(codegen_t *cg, stmt_t *s) {
   if (!s)
     return false;
   if (ny_codegen_stmt_is_source_file(cg, s))
@@ -939,6 +974,15 @@ static bool ny_stmt_tree_has_source_file(codegen_t *cg, stmt_t *s) {
   default:
     return false;
   }
+}
+
+static bool ny_stmt_tree_is_source_context(codegen_t *cg, stmt_t *s) {
+  if (!s)
+    return false;
+  if (ny_stmt_tree_has_source_file(cg, s))
+    return true;
+  return s->kind == NY_S_MODULE &&
+         ny_codegen_module_is_source_file(cg, s->as.module.name);
 }
 
 static bool ny_stmt_tree_has_zero_arg_call_named(const stmt_t *s,
@@ -1120,7 +1164,7 @@ bool ny_program_has_explicit_main_entry(codegen_t *cg, program_t *prog) {
     if (!s)
       continue;
     if (cg && cg->source_main_file && *cg->source_main_file) {
-      if (!ny_stmt_tree_has_source_file(cg, s))
+      if (!ny_stmt_tree_is_source_context(cg, s))
         continue;
     } else if (ny_is_stdlib_tok(s->tok)) {
       continue;
@@ -1134,9 +1178,11 @@ bool ny_program_has_explicit_main_entry(codegen_t *cg, program_t *prog) {
   return false;
 }
 
-static bool ny_lazy_emit_treat_as_root(codegen_t *cg, stmt_t *s) {
+static bool ny_lazy_emit_treat_as_root(codegen_t *cg, stmt_t *s,
+                                       const char *cur_mod) {
   return s &&
-         (!ny_is_stdlib_tok(s->tok) || ny_codegen_stmt_is_source_file(cg, s));
+         (!ny_is_stdlib_tok(s->tok) || ny_codegen_stmt_is_source_file(cg, s) ||
+          ny_codegen_module_is_source_file(cg, cur_mod));
 }
 
 static void ny_lazy_emit_seed_stmt(codegen_t *cg, stmt_t *s,
@@ -1146,7 +1192,7 @@ static void ny_lazy_emit_seed_stmt(codegen_t *cg, stmt_t *s,
   switch (s->kind) {
   case NY_S_FUNC: {
     const char *final_name = codegen_qname(cg, s->as.fn.name, cur_mod);
-    if (ny_lazy_emit_treat_as_root(cg, s)) {
+    if (ny_lazy_emit_treat_as_root(cg, s, cur_mod)) {
       ny_lazy_emit_add_function_name(cg, final_name);
       if (!ny_lazy_emit_collected_function(cg, final_name)) {
         ny_lazy_emit_mark_collected_function(cg, final_name);
@@ -1174,11 +1220,11 @@ static void ny_lazy_emit_seed_stmt(codegen_t *cg, stmt_t *s,
   case NY_S_BLOCK:
     for (size_t i = 0; i < s->as.block.body.len; i++)
       ny_lazy_emit_seed_stmt(cg, s->as.block.body.data[i], cur_mod);
-    if (ny_lazy_emit_treat_as_root(cg, s))
+    if (ny_lazy_emit_treat_as_root(cg, s, cur_mod))
       ny_lazy_emit_collect_stmt(cg, s);
     return;
   default:
-    if (ny_lazy_emit_treat_as_root(cg, s))
+    if (ny_lazy_emit_treat_as_root(cg, s, cur_mod))
       ny_lazy_emit_collect_stmt(cg, s);
     return;
   }
@@ -1277,6 +1323,8 @@ static bool ny_lazy_emit_should_emit_func(codegen_t *cg, stmt_t *s,
                                           const char *final_name) {
   if (!cg || !cg->lazy_emit_stdlib_enabled || !s || !ny_is_stdlib_tok(s->tok))
     return true;
+  if (ny_codegen_stmt_is_source_file(cg, s))
+    return true;
   if (ny_lazy_emit_is_conservative_keep(final_name))
     return true;
   return ny_lazy_emit_function_reached(cg, final_name);
@@ -1339,8 +1387,6 @@ static bool ny_emit_referenced_function_declarations(codegen_t *cg, scope *gsc,
     fun_sig *sig = &cg->fun_sigs.data[i];
     if (!sig || sig->is_extern || !sig->stmt_t ||
         sig->stmt_t->kind != NY_S_FUNC || !sig->value)
-      continue;
-    if (cg->skip_stdlib && ny_is_stdlib_tok(sig->stmt_t->tok))
       continue;
     if (ny_fn_has_body(sig->value))
       continue;
@@ -2076,7 +2122,8 @@ void codegen_emit(codegen_t *cg) {
                         "null top-level stmt during emit at index %zu", i);
     if (!s)
       continue;
-    if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok)) {
+    if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
+        !ny_stmt_tree_is_source_context(cg, s)) {
       continue;
     }
     emit_top_functions(cg, s, gsc, gd, NULL);
@@ -2099,7 +2146,8 @@ void codegen_emit(codegen_t *cg) {
                           p, i);
       if (!s)
         continue;
-      if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok)) {
+      if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
+          !ny_stmt_tree_is_source_context(cg, s)) {
         continue;
       }
       emit_top_functions(cg, s, gsc, gd, NULL);
@@ -2296,7 +2344,7 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
       if (!s)
         continue;
       if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
-          !cg->emit_cached_stdlib_init)
+          !cg->emit_cached_stdlib_init && !ny_stmt_tree_is_source_context(cg, s))
         continue;
       if (s->kind != NY_S_FUNC)
         typeinfer_walk_stmt(&infer_ctx, s);
@@ -2308,7 +2356,7 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
       if (!s)
         continue;
       if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
-          !cg->emit_cached_stdlib_init)
+          !cg->emit_cached_stdlib_init && !ny_stmt_tree_is_source_context(cg, s))
         continue;
       if (s->kind != NY_S_FUNC)
         ny_apply_top_level_typeinfer_to_sema(&infer_ctx, s);
@@ -2420,7 +2468,7 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
     if (!s)
       continue;
     if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
-        !cg->emit_cached_stdlib_init)
+        !cg->emit_cached_stdlib_init && !ny_stmt_tree_is_source_context(cg, s))
       continue;
     if (s->kind != NY_S_FUNC) {
       cg->current_module_name = NULL;

@@ -91,12 +91,10 @@ fn twisted_edwards_scalar_mult(any k, any P, any a, any d, any p) any {
 }
 
 #main {
-   def d1 = 123456789
-   def p1 = 1000000007
+   def d1, p1 = 123456789, 1000000007
    assert(edwards_is_on_curve(0, 1, d1, p1), "(0,1) on Edwards")
    assert(edwards_is_on_curve(1, 0, d1, p1), "(1,0) on Edwards")
-   def P1 = [0, 1]
-   def P2 = [1, 0]
+   def P1, P2 = [0, 1], [1, 0]
    assert(edwards_point_add(P1, nil, d1, p1) == P1, "add identity")
    assert(edwards_point_add(P1, P2, d1, p1) == P2, "add identity exact")
    def Q1 = edwards_scalar_mult(1, P1, d1, p1)
@@ -104,9 +102,7 @@ fn twisted_edwards_scalar_mult(any k, any P, any a, any d, any p) any {
    def Q2 = edwards_scalar_mult(2, P1, d1, p1)
    assert(Q2 == P1, "scalar mult 2 identity")
    assert(edwards_is_on_curve(Q2[0], Q2[1], d1, p1), "result on curve")
-   def a2 = 2
-   def d2 = 3
-   def p2 = 1000000007
+   def a2, d2, p2 = 2, 3, 1000000007
    def TE_P = [0, 1]
    def TE_Q1 = twisted_edwards_scalar_mult(1, TE_P, a2, d2, p2)
    assert(TE_Q1[0] == 0 && TE_Q1[1] == 1, "twisted mult 1")

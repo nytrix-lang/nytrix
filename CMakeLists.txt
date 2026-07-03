@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(nytrix C CXX)
+if("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
+    message(FATAL_ERROR "In-source builds are not allowed. Create a separate build directory (e.g., build/native) and run cmake from there.")
+endif()
 if (APPLE)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
@@ -694,7 +697,11 @@ add_custom_target(std_bc ALL DEPENDS "${STD_BC}")
 
 file(GLOB SRC_BASE CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/base/*.c")
 file(GLOB SRC_SEMA CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/sema/*.c")
-file(GLOB SRC_CODE CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/*.c")
+file(GLOB SRC_CODE CONFIGURE_DEPENDS
+  "${NYTRIX_ROOT}/src/code/*.c"
+  "${NYTRIX_ROOT}/src/code/native/*.c"
+  "${NYTRIX_ROOT}/src/code/native/backend/*.c"
+  "${NYTRIX_ROOT}/src/code/c/*.c")
 file(GLOB SRC_REPL CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/repl/*.c")
 file(GLOB SRC_WIRE CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/wire/*.c")
 
@@ -707,6 +714,10 @@ set(SRC_COMPILER
   "${NYTRIX_ROOT}/src/parse/ast.c"
   "${NYTRIX_ROOT}/src/parse/lexer.c"
   "${NYTRIX_ROOT}/src/parse/shared.c"
+  "${NYTRIX_ROOT}/src/code/gencall/init.c"
+  "${NYTRIX_ROOT}/src/code/typepipeline/init.c"
+  "${NYTRIX_ROOT}/src/code/expr/init.c"
+  "${NYTRIX_ROOT}/src/wire/pipe/init.c"
 )
 
 set(RT_INIT "${NYTRIX_ROOT}/src/rt/init.c")
@@ -952,10 +963,10 @@ endif()
 add_executable(ny
   "${NYTRIX_ROOT}/src/cmd/ny/main.c"
   "${NYTRIX_ROOT}/src/cmd/ny/pkg.c"
-  "${NYTRIX_ROOT}/src/cmd/fmt/fmt.c"
+  "${NYTRIX_ROOT}/src/cmd/fmt/init.c"
   "${NYTRIX_ROOT}/src/cmd/perf/perf.c"
-  "${NYTRIX_ROOT}/src/cmd/test/test.c"
-  "${NYTRIX_ROOT}/src/cmd/web/web.c"
+  "${NYTRIX_ROOT}/src/cmd/test/init.c"
+  "${NYTRIX_ROOT}/src/cmd/web/init.c"
   "${NYTRIX_ROOT}/src/cmd/make/make.c"
   $<TARGET_OBJECTS:nytrix_compiler>
   $<TARGET_OBJECTS:nytrix_runtime>
@@ -1023,13 +1034,13 @@ function(nytrix_add_tool tool_target tool_name)
     "${NYTRIX_ROOT}/src/base/args.c"
   )
   if ("${tool_name}" STREQUAL "fmt")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/fmt/fmt.c")
+    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/fmt/init.c")
   elseif ("${tool_name}" STREQUAL "perf")
     list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/perf/perf.c")
   elseif ("${tool_name}" STREQUAL "test")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/test/test.c")
+    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/test/init.c")
   elseif ("${tool_name}" STREQUAL "doc")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/web/web.c")
+    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/web/init.c")
   elseif ("${tool_name}" STREQUAL "make")
     list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/make/make.c")
   endif()
@@ -1075,7 +1086,7 @@ nytrix_add_tool(ny-make "make")
 
 add_executable(ny-fuzz
   "${NYTRIX_ROOT}/src/cmd/fuzz/analyze.c"
-  "${NYTRIX_ROOT}/src/cmd/fuzz/compare.c"
+  "${NYTRIX_ROOT}/src/cmd/fuzz/compare/init.c"
   "${NYTRIX_ROOT}/src/cmd/fuzz/generate.c"
   "${NYTRIX_ROOT}/src/cmd/fuzz/proc.c"
   "${NYTRIX_ROOT}/src/cmd/fuzz/shape.c"

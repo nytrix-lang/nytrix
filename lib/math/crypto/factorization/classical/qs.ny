@@ -283,11 +283,8 @@ fn _siqs_apply_a_exponents(list exps, list a_exps) list {
 
 fn _siqs_poly_int_scan_allowed(any A, any B, any C, int radius) bool {
    def r = Z(max(0, radius))
-   def a = bigint_abs(_z(A))
-   def b = bigint_abs(_z(B))
-   def c = bigint_abs(_z(C))
-   def q_bound = a * r * r + Z(2) * b * r + c
-   def x_bound = a * r + b
+   def a, b, c = bigint_abs(_z(A)), bigint_abs(_z(B)), bigint_abs(_z(C))
+   def q_bound, x_bound = a * r * r + Z(2) * b * r + c, a * r + b
    bit_length(a) <= 60 && bit_length(b) <= 60 && bit_length(c) <= 60 && bit_length(q_bound) <= 60 && bit_length(x_bound) <= 60
 }
 
@@ -312,9 +309,9 @@ fn _siqs_cutoff_measurement_raw(any modulus, list base, list sqrt_roots, list pl
    mut marked_roots = 0
    mut skipped_noninvertible = 0
    def trial_base = _qs_factor_base_ints(base)
-   with ptr: raw_scores = malloc(sample_radius * 2 + 1){
+   with ptr raw_scores = malloc(sample_radius * 2 + 1){
       if !raw_scores { return nil }
-      with ptr: raw_counts = malloc(24){
+      with ptr raw_counts = malloc(24){
          if !raw_counts { return nil }
          memset(raw_counts, 0, 24)
          pi = 0
@@ -886,14 +883,13 @@ fn _mpqs_byte_sieve_window_int_roots_into(ptr scratch, list<int> base_ints, list
    def tiny_limit = max(1, sieve_len / 16)
    mut skipped_noninvertible = 0
    mut list<int> root_filters = list(base_ints.len * 4)
-   with ptr: totals_raw = malloc(48){
+   with ptr totals_raw = malloc(48){
       if !totals_raw { panic("mpqs byte-sieve counter allocation failed") }
       memset(totals_raw, 0, 48)
       store64_i(totals_raw, 1, 0)
       mut i = 0
       while i < base_ints.len {
-         def k = i * 4
-         def p = base_ints[i]
+         def k, p = i * 4, base_ints[i]
          if p > 2 {
             def r = i < sqrt_roots_int.len ? sqrt_roots_int[i] : -1
             if r < 0 {
@@ -990,8 +986,7 @@ fn _mpqs_raw_byte_sieve_score_window_int_roots(ptr scratch, ptr root_filters, li
 }
 
 fn _mpqs_popcount_mask(int mask) int {
-   mut x = mask
-   mut c = 0
+   mut x, c = mask, 0
    while x > 0 {
       if (x & 1) != 0 { c += 1 }
       x = x >> 1
@@ -1167,16 +1162,14 @@ fn _mpqs_source_factor_bit_schedule(list usable, int a_bits) dict {
 fn _mpqs_poly_from_primes_with_signs(any modulus, list primes, int sign_mask) any {
    if primes.len == 0 { return nil }
    mut A = Z(1)
-   mut roots = []
-   mut mods = []
-   mut i = 0
-   while i < primes.len {
-      def p = _z(primes.get(i))
-      def r = tonelli_shanks(mod(modulus, p), p)
+   def n = primes.len
+   mut roots, mods, i = list(n), list(n), 0
+   while i < n {
+      def p, r = _z(primes.get(i)), tonelli_shanks(mod(modulus, p), p)
       if r == Z(-1) { return nil }
       def bit = (sign_mask >> i) & 1
-      roots = roots.append(bit == 0 ? r : mod(Z(0) - r, p))
-      mods = mods.append(p)
+      roots[i] = bit == 0 ? r : mod(Z(0) - r, p)
+      mods[i] = p
       A = A * p
       i += 1
    }
@@ -1193,8 +1186,7 @@ fn _mpqs_poly_from_primes_with_signs(any modulus, list primes, int sign_mask) an
 }
 
 fn _mpqs_adiv_product_from_mask(list pool, int mask) any {
-   mut A = Z(1)
-   mut i = 0
+   mut A, i = Z(1), 0
    while i < pool.len {
       if ((mask >> i) & 1) != 0 { A = A * _z(pool.get(i)) }
       i += 1
@@ -1470,22 +1462,16 @@ fn _mpqs_poly_byte_sieve_window_into(ptr scratch, list<int> sieve_base_ints, lis
    def tiny_limit = max(1, sieve_len / 16)
    mut skipped_noninvertible = 0
    mut list<int> root_filters = list(root_base_ints.len * 4)
-   def A_z = _z(A)
-   def B_z = _z(B)
-   def A_abs = A_z < Z(0) ? -A_z : A_z
-   def B_abs = B_z < Z(0) ? -B_z : B_z
-   def int_mod_path = bit_length(A_abs) <= 62 && bit_length(B_abs) <= 62
-   def A_i = int_mod_path ? bigint_to_int(A_z) : 0
-   def B_i = int_mod_path ? bigint_to_int(B_z) : 0
-   with ptr: totals_raw = malloc(48){
+   def A_z, B_z = _z(A), _z(B)
+   def A_abs, B_abs, int_mod_path = A_z < Z(0) ? -A_z : A_z, B_z < Z(0) ? -B_z : B_z, bit_length(A_abs) <= 62 && bit_length(B_abs) <= 62
+   def A_i, B_i = int_mod_path ? bigint_to_int(A_z) : 0, int_mod_path ? bigint_to_int(B_z) : 0
+   with ptr totals_raw = malloc(48){
       if !totals_raw { panic("mpqs byte-sieve counter allocation failed") }
       memset(totals_raw, 0, 48)
       store64_i(totals_raw, 1, 0)
-      mut i = 0
-      mut mark_i = 0
+      mut i, mark_i = 0, 0
       while i < root_base_ints.len {
-         def k = i * 4
-         def p = root_base_ints[i]
+         def k, p = i * 4, root_base_ints[i]
          while mark_i < sieve_base_ints.len && sieve_base_ints[mark_i] < p { mark_i += 1 }
          def mark_root = mark_i < sieve_base_ints.len && sieve_base_ints[mark_i] == p
          if p > 2 {
@@ -3645,7 +3631,7 @@ fn _siqs_collect_poly_pass_int_raw(
    mut int poly_trial_prime_tests = 0
    mut int poly_trial_divisions = 0
    def bool has_root_filters = root_filters ? true : false
-   with ptr: raw_counts = malloc(24){
+   with ptr raw_counts = malloc(24){
       if !raw_counts { return _siqs_poly_scan_result(relations_in, state_in, poly, pi, A, B, found, poly_candidates, poly_smooth_tests, poly_trial_prime_tests, poly_trial_divisions, skipped_negative, score_report, include_poly_report && pass == 0) }
       memset(raw_counts, 0, 24)
       def scan = _siqs_collect_poly_pass_int_raw_loop(scores, root_filters, relations, relation_count, poly, A, Ai, Bi, Ci, base, trial_base, sieve_radius, score_min, max_relations, pass == 0, has_root_filters, include_relation_details, raw_counts)
@@ -3686,9 +3672,9 @@ fn _siqs_collect_poly_pass(
    def B = _z(poly.get("B"))
    def C = _z(poly.get("C"))
    if _siqs_poly_int_scan_allowed(A, B, C, sieve_radius) {
-      with ptr: raw_scores = malloc(sieve_radius * 2 + 1){
+      with ptr raw_scores = malloc(sieve_radius * 2 + 1){
          if raw_scores {
-            with ptr: raw_root_filters = malloc(base.len * 32){
+            with ptr raw_root_filters = malloc(base.len * 32){
                def raw_report = _qs_sieve_scores_siqs_raw_into(raw_scores, raw_root_filters, modulus, base, sqrt_roots, A, B, sieve_radius)
                return _siqs_collect_poly_pass_int_raw(raw_scores, raw_root_filters, relations, state, poly, pi, pass, A, B, C, raw_report, base, trial_base, sieve_radius, score_min, max_relations, multiplier, include_relation_details, include_poly_report)
             }
@@ -4077,7 +4063,7 @@ fn quadratic_sieve_factor_report(any n, int factor_base_bound=64, int scan=20000
    if small_scan {
       def int n_i = bigint_to_int(nz)
       mut int x_i = bigint_to_int(x)
-      with ptr: raw_counts = malloc(24){
+      with ptr raw_counts = malloc(24){
          if !raw_counts { return _finish_report_with(out, t0, [["factor", nil], ["success", false], ["relations", relations], ["reason", "qs scan counter allocation failed"]]) }
          memset(raw_counts, 0, 24)
          while scanned < scan && relations.len < max_relations {
@@ -4293,107 +4279,30 @@ fn _mpqs_byte_window_choice(
    [nil, _mpqs_byte_sieve_window_int_roots_into(scratch, base_ints, base_sqrt_roots_int, center_mods, base_buckets, center, window_radius, score_min, start), 0]
 }
 
-fn _mpqs_collect_byte_window_relations(any nz, any modulus, list factor_base, list<int> trial_base, dict byte_report, any poly, int w, any center, int max_relations, list relations_in) dict {
+fn _mpqs_collect_byte_window_relations_int(any nz, int modulus_i, list factor_base, list<int> trial_base, list<int> survivors, int survivor_count, int radius, int fallback_score_min, bool has_poly, int poly_A_i, int poly_B_i, int center_i, list<int> root_filters, int max_relations, list relations_in, bool large_relation_target) dict {
    mut relation_count = relations_in.len
    mut relations = _mpqs_relation_buffer(relations_in, max_relations)
    mut found, smooth_tests, smooth_hits = 0, 0, 0
    mut trial_prime_tests, trial_divisions, nonzero_terms = 0, 0, 0
    mut prefilter_tested, a_divisor_relations = 0, 0
-   def list<int> survivors = byte_report.get("survivors", [])
-   def survivor_count = survivors.len
-   def large_relation_target = max_relations >= 256 || factor_base.len >= 80
-   def has_poly = poly != nil
-   def raw_poly_A = has_poly ? poly.get("A") : 0
-   def raw_poly_B = has_poly ? poly.get("B") : 0
-   mut list<int> root_filters = byte_report.get("root_filters", [])
-   if root_filters.len != factor_base.len * 4 { root_filters = _mpqs_plain_root_filter(modulus, factor_base, center) }
-   def radius = int(byte_report.get("radius", 0))
-   def fallback_score_min = int(byte_report.get("score_threshold", 0)) + 2
-   def modulus_bits = bit_length(modulus)
    def trial_base_len = trial_base.len
-   mut int_residue_path = false
-   mut modulus_i, center_i, poly_A_i, poly_B_i = 0, 0, 0, 0
-   if modulus_bits <= 62 {
-      modulus_i = is_int(modulus) ? int(modulus) : bigint_to_int(modulus)
-      if has_poly {
-         if bit_length(raw_poly_A) <= 31 && bit_length(raw_poly_B) <= 62 {
-            poly_A_i = is_int(raw_poly_A) ? int(raw_poly_A) : bigint_to_int(raw_poly_A)
-            poly_B_i = is_int(raw_poly_B) ? int(raw_poly_B) : bigint_to_int(raw_poly_B)
-            def high_i = poly_A_i * radius + poly_B_i
-            def low_i = poly_B_i - poly_A_i * radius
-            int_residue_path = (high_i < 0 ? -high_i : high_i) <= 3037000499 && (low_i < 0 ? -low_i : low_i) <= 3037000499
-         }
-      } else if is_int(center) || bit_length(center) <= 62 {
-         center_i = is_int(center) ? int(center) : bigint_to_int(center)
-         def high_i = center_i + radius
-         def low_i = center_i - radius
-         int_residue_path = (high_i < 0 ? -high_i : high_i) <= 3037000499 && (low_i < 0 ? -low_i : low_i) <= 3037000499
-      }
-   }
-   if int_residue_path {
-      def root_filter_bytes = max(32, factor_base.len * 16)
-      def exp_scratch_bytes = max(8, trial_base_len * 16)
-      with ptr: raw_root_filters = malloc(root_filter_bytes + 32 + exp_scratch_bytes){
-         if raw_root_filters {
-            _mpqs_root_filter_list_to_raw_shifted32(raw_root_filters, root_filters, factor_base.len, radius)
-            def raw_counts = ptr_add(raw_root_filters, root_filter_bytes)
-            def raw_exp_idxs = ptr_add(raw_counts, 32)
-            def raw_exp_vals = ptr_add(raw_exp_idxs, trial_base_len * 8)
-            memset(raw_counts, 0, 32)
-            if has_poly {
-               mut ri = 0
-               while ri < survivor_count && relation_count < max_relations {
-                  def survivor = int(survivors[ri])
-                  def pos = survivor >> 8
-                  def off = pos - radius
-                  def score = survivor & 255
-                  def x_i = poly_A_i * off + poly_B_i
-                  mut residue_i = (x_i * x_i) % modulus_i
-                  if residue_i < 0 { residue_i += modulus_i }
-                  if residue_i == 0 {
-                     def gx = _qs_square_relation_factor(Z(x_i), Z(0), nz)
-                     if gx != nil { return _mpqs_collect_result(gx, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations) }
-                  } else {
-                     prefilter_tested += 1
-                     smooth_tests += 1
-                     mut rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_collect32(residue_i, trial_base_len, raw_root_filters, pos, raw_counts, raw_exp_idxs, raw_exp_vals)
-                     mut exps_i = nil
-                     if rem_i != 1 && a_divisor_relations == 0 && factor_base.len >= 50 && (!large_relation_target || score >= fallback_score_min) {
-                        def smooth = _qs_factor_over_base_profile_intbase(residue_i, trial_base)
-                        trial_prime_tests += int(smooth[3])
-                        trial_divisions += int(smooth[4])
-                        nonzero_terms += int(smooth[5])
-                        if smooth[0] {
-                           rem_i = 1
-                           exps_i = smooth[1]
-                        }
-                     }
-                     if rem_i == 1 {
-                        smooth_hits += 1
-                        if exps_i == nil {
-                           relations[relation_count] = _qs_relation_int_sparse_mpqs(x_i, trial_base_len, raw_exp_idxs, raw_exp_vals, load64_i(raw_counts, 24))
-                        } else {
-                           relations[relation_count] = _qs_relation_compact(x_i, exps_i)
-                        }
-                        relation_count += 1
-                        found += 1
-                        a_divisor_relations += 1
-                     }
-                  }
-                  ri += 1
-               }
-               trial_prime_tests += load64_i(raw_counts, 0)
-               trial_divisions += load64_i(raw_counts, 8)
-               nonzero_terms += load64_i(raw_counts, 16)
-               return _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
-            }
+   def root_filter_bytes = max(32, factor_base.len * 16)
+   def exp_scratch_bytes = max(8, trial_base_len * 16)
+   with ptr raw_root_filters = malloc(root_filter_bytes + 32 + exp_scratch_bytes){
+      if raw_root_filters {
+         _mpqs_root_filter_list_to_raw_shifted32(raw_root_filters, root_filters, factor_base.len, radius)
+         def raw_counts = ptr_add(raw_root_filters, root_filter_bytes)
+         def raw_exp_idxs = ptr_add(raw_counts, 32)
+         def raw_exp_vals = ptr_add(raw_exp_idxs, trial_base_len * 8)
+         memset(raw_counts, 0, 32)
+         if has_poly {
             mut ri = 0
             while ri < survivor_count && relation_count < max_relations {
                def survivor = int(survivors[ri])
                def pos = survivor >> 8
                def off = pos - radius
                def score = survivor & 255
-               def x_i = center_i + off
+               def x_i = poly_A_i * off + poly_B_i
                mut residue_i = (x_i * x_i) % modulus_i
                if residue_i < 0 { residue_i += modulus_i }
                if residue_i == 0 {
@@ -4402,12 +4311,28 @@ fn _mpqs_collect_byte_window_relations(any nz, any modulus, list factor_base, li
                } else {
                   prefilter_tested += 1
                   smooth_tests += 1
-                  def rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect32(residue_i, trial_base_len, raw_root_filters, pos, score + 1, raw_counts, raw_exp_idxs, raw_exp_vals)
+                  mut rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_collect32(residue_i, trial_base_len, raw_root_filters, pos, raw_counts, raw_exp_idxs, raw_exp_vals)
+                  mut exps_i = nil
+                  if rem_i != 1 && a_divisor_relations == 0 && factor_base.len >= 50 && (!large_relation_target || score >= fallback_score_min) {
+                     def smooth = _qs_factor_over_base_profile_intbase(residue_i, trial_base)
+                     trial_prime_tests += int(smooth[3])
+                     trial_divisions += int(smooth[4])
+                     nonzero_terms += int(smooth[5])
+                     if smooth[0] {
+                        rem_i = 1
+                        exps_i = smooth[1]
+                     }
+                  }
                   if rem_i == 1 {
                      smooth_hits += 1
-                     relations[relation_count] = _qs_relation_int_sparse_mpqs(x_i, trial_base_len, raw_exp_idxs, raw_exp_vals, load64_i(raw_counts, 24))
+                     if exps_i == nil {
+                        relations[relation_count] = _qs_relation_int_sparse_mpqs(x_i, trial_base_len, raw_exp_idxs, raw_exp_vals, load64_i(raw_counts, 24))
+                     } else {
+                        relations[relation_count] = _qs_relation_compact(x_i, exps_i)
+                     }
                      relation_count += 1
                      found += 1
+                     a_divisor_relations += 1
                   }
                }
                ri += 1
@@ -4417,47 +4342,85 @@ fn _mpqs_collect_byte_window_relations(any nz, any modulus, list factor_base, li
             nonzero_terms += load64_i(raw_counts, 16)
             return _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
          }
+         mut ri = 0
+         while ri < survivor_count && relation_count < max_relations {
+            def survivor = int(survivors[ri])
+            def pos = survivor >> 8
+            def off = pos - radius
+            def score = survivor & 255
+            def x_i = center_i + off
+            mut residue_i = (x_i * x_i) % modulus_i
+            if residue_i < 0 { residue_i += modulus_i }
+            if residue_i == 0 {
+               def gx = _qs_square_relation_factor(Z(x_i), Z(0), nz)
+               if gx != nil { return _mpqs_collect_result(gx, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations) }
+            } else {
+               prefilter_tested += 1
+               smooth_tests += 1
+               def rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect32(residue_i, trial_base_len, raw_root_filters, pos, score + 1, raw_counts, raw_exp_idxs, raw_exp_vals)
+               if rem_i == 1 {
+                  smooth_hits += 1
+                  relations[relation_count] = _qs_relation_int_sparse_mpqs(x_i, trial_base_len, raw_exp_idxs, raw_exp_vals, load64_i(raw_counts, 24))
+                  relation_count += 1
+                  found += 1
+               }
+            }
+            ri += 1
+         }
+         trial_prime_tests += load64_i(raw_counts, 0)
+         trial_divisions += load64_i(raw_counts, 8)
+         nonzero_terms += load64_i(raw_counts, 16)
+         return _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
       }
-      mut fi = 0
-      while fi < survivor_count && relation_count < max_relations {
-         def survivor = int(survivors[fi])
-         def off = (survivor >> 8) - radius
-         def score = survivor & 255
-         def x_i = has_poly ? (poly_A_i * off + poly_B_i) : center_i + off
-         mut residue_i = (x_i * x_i) % modulus_i
-         if residue_i < 0 { residue_i += modulus_i }
-         if residue_i == 0 {
-            def gx = _qs_square_relation_factor(Z(x_i), Z(0), nz)
-            if gx != nil { return _mpqs_collect_result(gx, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations) }
-         } else {
-            prefilter_tested += 1
-            smooth_tests += 1
-            mut smooth = _qs_factor_over_base_profile_filtered_int(residue_i, factor_base, root_filters, off)
+   }
+   mut fi = 0
+   while fi < survivor_count && relation_count < max_relations {
+      def survivor = int(survivors[fi])
+      def off = (survivor >> 8) - radius
+      def score = survivor & 255
+      def x_i = has_poly ? (poly_A_i * off + poly_B_i) : center_i + off
+      mut residue_i = (x_i * x_i) % modulus_i
+      if residue_i < 0 { residue_i += modulus_i }
+      if residue_i == 0 {
+         def gx = _qs_square_relation_factor(Z(x_i), Z(0), nz)
+         if gx != nil { return _mpqs_collect_result(gx, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations) }
+      } else {
+         prefilter_tested += 1
+         smooth_tests += 1
+         mut smooth = _qs_factor_over_base_profile_filtered_int(residue_i, factor_base, root_filters, off)
+         trial_prime_tests += int(smooth[3])
+         trial_divisions += int(smooth[4])
+         nonzero_terms += int(smooth[5])
+         if !smooth[0] && has_poly && a_divisor_relations == 0 && factor_base.len >= 50 && (!large_relation_target || score >= fallback_score_min) {
+            smooth = _qs_factor_over_base_profile_intbase(residue_i, trial_base)
             trial_prime_tests += int(smooth[3])
             trial_divisions += int(smooth[4])
             nonzero_terms += int(smooth[5])
-            if !smooth[0] && has_poly && a_divisor_relations == 0 && factor_base.len >= 50 && (!large_relation_target || score >= fallback_score_min) {
-               smooth = _qs_factor_over_base_profile_intbase(residue_i, trial_base)
-               trial_prime_tests += int(smooth[3])
-               trial_divisions += int(smooth[4])
-               nonzero_terms += int(smooth[5])
-            }
-            if smooth[0] {
-               smooth_hits += 1
-               relations[relation_count] = _qs_relation_compact(x_i, smooth[1])
-               relation_count += 1
-               found += 1
-               if has_poly { a_divisor_relations += 1 }
-            }
          }
-         fi += 1
+         if smooth[0] {
+            smooth_hits += 1
+            relations[relation_count] = _qs_relation_compact(x_i, smooth[1])
+            relation_count += 1
+            found += 1
+            if has_poly { a_divisor_relations += 1 }
+         }
       }
-      return _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
+      fi += 1
    }
+   _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
+}
+
+fn _mpqs_collect_byte_window_relations_big(any nz, any modulus, list factor_base, list<int> trial_base, list<int> survivors, int survivor_count, int radius, int fallback_score_min, bool has_poly, any raw_poly_A, any raw_poly_B, any center, list<int> root_filters, int max_relations, list relations_in, bool large_relation_target, int modulus_bits) dict {
+   mut relation_count = relations_in.len
+   mut relations = _mpqs_relation_buffer(relations_in, max_relations)
+   mut found, smooth_tests, smooth_hits = 0, 0, 0
+   mut trial_prime_tests, trial_divisions, nonzero_terms = 0, 0, 0
+   mut prefilter_tested, a_divisor_relations = 0, 0
+   def trial_base_len = trial_base.len
    def poly_A = has_poly ? _z(raw_poly_A) : Z(0)
    def poly_B = has_poly ? _z(raw_poly_B) : Z(0)
    def raw_root_filter_bytes2 = max(32, factor_base.len * 32)
-   with ptr: raw_root_filters2 = malloc(raw_root_filter_bytes2 + 24){
+   with ptr raw_root_filters2 = malloc(raw_root_filter_bytes2 + 24){
       if raw_root_filters2 {
          _mpqs_root_filter_list_to_raw_shifted(raw_root_filters2, root_filters, factor_base.len, radius)
          def raw_counts2 = ptr_add(raw_root_filters2, raw_root_filter_bytes2)
@@ -4567,13 +4530,54 @@ fn _mpqs_collect_byte_window_relations(any nz, any modulus, list factor_base, li
    _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
 }
 
+fn _mpqs_collect_byte_window_relations(any nz, any modulus, list factor_base, list<int> trial_base, dict byte_report, any poly, int w, any center, int max_relations, list relations_in) dict {
+   def list<int> survivors = byte_report.get("survivors", [])
+   def survivor_count = survivors.len
+   if survivor_count == 0 {
+      return _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(_mpqs_relation_buffer(relations_in, max_relations), relations_in.len), 0, 0, 0, 0, 0, 0, 0, 0, 0)
+   }
+   def large_relation_target = max_relations >= 256 || factor_base.len >= 80
+   def has_poly = poly != nil
+   def raw_poly_A = has_poly ? poly.get("A") : 0
+   def raw_poly_B = has_poly ? poly.get("B") : 0
+   mut list<int> root_filters = byte_report.get("root_filters", [])
+   if root_filters.len != factor_base.len * 4 { root_filters = _mpqs_plain_root_filter(modulus, factor_base, center) }
+   def radius = int(byte_report.get("radius", 0))
+   def fallback_score_min = int(byte_report.get("score_threshold", 0)) + 2
+   def modulus_bits = bit_length(modulus)
+   mut int_residue_path = false
+   mut modulus_i, center_i, poly_A_i, poly_B_i = 0, 0, 0, 0
+   if modulus_bits <= 62 {
+      modulus_i = is_int(modulus) ? int(modulus) : bigint_to_int(modulus)
+      if has_poly {
+         if bit_length(raw_poly_A) <= 31 && bit_length(raw_poly_B) <= 62 {
+            poly_A_i = is_int(raw_poly_A) ? int(raw_poly_A) : bigint_to_int(raw_poly_A)
+            poly_B_i = is_int(raw_poly_B) ? int(raw_poly_B) : bigint_to_int(raw_poly_B)
+            def high_i = poly_A_i * radius + poly_B_i
+            def low_i = poly_B_i - poly_A_i * radius
+            int_residue_path = (high_i < 0 ? -high_i : high_i) <= 3037000499 && (low_i < 0 ? -low_i : low_i) <= 3037000499
+         }
+      } else if is_int(center) || bit_length(center) <= 62 {
+         center_i = is_int(center) ? int(center) : bigint_to_int(center)
+         def high_i = center_i + radius
+         def low_i = center_i - radius
+         int_residue_path = (high_i < 0 ? -high_i : high_i) <= 3037000499 && (low_i < 0 ? -low_i : low_i) <= 3037000499
+      }
+   }
+   if int_residue_path {
+      _mpqs_collect_byte_window_relations_int(nz, modulus_i, factor_base, trial_base, survivors, survivor_count, radius, fallback_score_min, has_poly, poly_A_i, poly_B_i, center_i, root_filters, max_relations, relations_in, large_relation_target)
+   } else {
+      _mpqs_collect_byte_window_relations_big(nz, modulus, factor_base, trial_base, survivors, survivor_count, radius, fallback_score_min, has_poly, raw_poly_A, raw_poly_B, center, root_filters, max_relations, relations_in, large_relation_target, modulus_bits)
+   }
+}
+
 fn _mpqs_collect_fallback_window_relations(ptr scratch, any nz, any modulus, list base, list base_sqrt_roots, list<int> base_ints, list<int> base_sqrt_roots_int, list<int> center_mods, list factor_base, list<int> trial_base, any center, any start, int window_radius, int score_min, int w, int max_relations, list relations_in) dict {
    mut relation_count = relations_in.len
    mut relations = _mpqs_relation_buffer(relations_in, max_relations)
    mut found, smooth_tests, smooth_hits = 0, 0, 0
    mut trial_prime_tests, trial_divisions, nonzero_terms, fallback_tests = 0, 0, 0, 0
    def root_filter_bytes = max(32, base.len * 32)
-   with ptr: root_filters = malloc(root_filter_bytes + 24){
+   with ptr root_filters = malloc(root_filter_bytes + 24){
       if !root_filters {
          return _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, 0, fallback_tests, 0)
       }

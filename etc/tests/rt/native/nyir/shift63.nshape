@@ -1,0 +1,11 @@
+shape nyir_shift63 {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "shift"]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+1 << 63
+NY
+}

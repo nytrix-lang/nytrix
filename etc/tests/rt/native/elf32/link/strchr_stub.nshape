@@ -1,0 +1,28 @@
+shape i386_elf32_object_link_run_strchr_stub {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run libc-stub string]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-link-run-elf32-strchr.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+extern {
+  fn strchr(any s, i64 c) any
+}
+
+fn probe() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  store64_i(p, 6513249)
+  def hit = strchr(p, 98)
+  def miss = strchr(p, 122)
+  def delta = hit - p
+  free(p)
+  if delta == 1 && miss == nil { 42 } else { 0 }
+}
+
+probe()
+NY
+}
