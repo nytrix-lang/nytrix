@@ -1,15 +1,15 @@
 use std.core
 
-#include "etc/tests/rt/ffi/fficonsts.h" as ""
-#include "etc/tests/rt/ffi/transitive.h" as ""
+#include "etc/tests/rt/ffi/fficonsts.h"
+#include "etc/tests/rt/ffi/transitive.h"
 #include <stdlib.h> as "getenv"
 #include <math.h> as "cos"
 #windows {
    #include <windows.h> as "GetCurrentProcess"
 } #else {
-   #include <sys/types.h> as ""
+   #include <sys/types.h>
    #include <unistd.h> as "get"
-   #include <sys/time.h> as ""
+   #include <sys/time.h>
 } #endif
 print("Testing FFI include resolution...")
 assert(NYTRIX_FFI_CONST_HEX == 42, "FFI exposes object-like integer macros")

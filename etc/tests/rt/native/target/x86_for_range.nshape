@@ -1,0 +1,15 @@
+shape x86_for_range_target {
+  family "runtime-native"
+  generator "native"
+  features [native nyir for range x86 target]
+  template ny-test-case
+  flags "--emit-asm=/tmp/nytrix-native-x86-for-range-target.s --native-backend x86"
+  expect compile_and_run
+  source ny <<'NY'
+mut s = 0
+for i in 0..4 {
+  s += i
+}
+s
+NY
+}

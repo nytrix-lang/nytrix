@@ -1,0 +1,15 @@
+shape x86_64_elf64_link_archive_data {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir link-run archive data]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-native-elf64-archive-data.o"
+  expect object_link_run_i64_42
+  link "etc/tests/rt/native/elf64/link/ar_helper_data.a"
+  source ny <<'NY'
+extern "c" {
+  fn get_global() i64
+}
+def main = get_global()
+NY
+}

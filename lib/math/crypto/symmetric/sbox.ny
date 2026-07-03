@@ -3,7 +3,34 @@
 ;; References:
 ;; - std.math.crypto.symmetric
 ;; - std.math.crypto
-module std.math.crypto.symmetric.sbox(sbox_repr, sbox_len, sbox_equal, sbox_not_equal, sbox_get, sbox_items, sbox_input_size, sbox_output_size, sbox_to_bits, sbox_from_bits, sbox_coeff_vector, sbox_from_coeff_vector, sbox_apply_gf2m, sbox_apply, sbox_solutions, sbox_is_permutation, sbox_inverse, sbox_fixed_points, sbox_ddt, sbox_difference_distribution_table, sbox_differential_uniformity, sbox_lat, sbox_linear_approximation_table, sbox_linearity, sbox_maximal_linear_bias_absolute, sbox_maximal_linear_bias_relative, sbox_maximal_difference_probability_absolute, sbox_maximal_difference_probability, sbox_nonlinearity, sbox_derivative, sbox_component_function, sbox_autocorrelation_table, sbox_component_anf, sbox_polynomials, sbox_interpolation_polynomial, sbox_interpolation_polynomial_gf2m, sbox_interpolation_polynomial_gf2m_str, sbox_eval_polynomial_gf2m, sbox_from_polynomial_gf2m, sbox_from_interpolation_polynomial_gf2m, sbox_is_monomial_function, sbox_monomial_str, sbox_component_anf_str, sbox_polynomial_strs, sbox_degree_fit_polynomial_strs, sbox_degree_fit_basis_report, sbox_direct_polynomial_strs, sbox_groebner_polynomial_strs, sbox_groebner_basis_report, sbox_ring_str, sbox_ring, sbox_eval_anf, sbox_cnf, sbox_cnf_clauses, sbox_cnf_satisfied, sbox_boomerang_connectivity_table, sbox_boomerang_uniformity, sbox_linear_structures, sbox_has_linear_structure, sbox_is_linear_structure, sbox_is_apn, sbox_is_balanced, sbox_is_almost_bent, sbox_is_bent, sbox_is_plateaued, sbox_is_involution, sbox_feistel_construction, sbox_misty_construction, sbox_branch_number, sbox_differential_branch_number, sbox_linear_branch_number, sbox_algebraic_degree, sbox_max_degree, sbox_min_degree)
+module std.math.crypto.symmetric.sbox(
+   sbox_repr, sbox_len, sbox_equal, sbox_not_equal, sbox_get, sbox_items,
+   sbox_input_size, sbox_output_size, sbox_to_bits, sbox_from_bits,
+   sbox_coeff_vector, sbox_from_coeff_vector, sbox_apply_gf2m, sbox_apply,
+   sbox_solutions, sbox_is_permutation, sbox_inverse, sbox_fixed_points,
+   sbox_ddt, sbox_difference_distribution_table, sbox_differential_uniformity,
+   sbox_lat, sbox_linear_approximation_table, sbox_linearity,
+   sbox_maximal_linear_bias_absolute, sbox_maximal_linear_bias_relative,
+   sbox_maximal_difference_probability_absolute,
+   sbox_maximal_difference_probability, sbox_nonlinearity, sbox_derivative,
+   sbox_component_function, sbox_autocorrelation_table, sbox_component_anf,
+   sbox_polynomials, sbox_interpolation_polynomial,
+   sbox_interpolation_polynomial_gf2m, sbox_interpolation_polynomial_gf2m_str,
+   sbox_eval_polynomial_gf2m, sbox_from_polynomial_gf2m,
+   sbox_from_interpolation_polynomial_gf2m, sbox_is_monomial_function,
+   sbox_monomial_str, sbox_component_anf_str, sbox_polynomial_strs,
+   sbox_degree_fit_polynomial_strs, sbox_degree_fit_basis_report,
+   sbox_direct_polynomial_strs, sbox_groebner_polynomial_strs,
+   sbox_groebner_basis_report, sbox_ring_str, sbox_ring, sbox_eval_anf,
+   sbox_cnf, sbox_cnf_clauses, sbox_cnf_satisfied,
+   sbox_boomerang_connectivity_table, sbox_boomerang_uniformity,
+   sbox_linear_structures, sbox_has_linear_structure,
+   sbox_is_linear_structure, sbox_is_apn, sbox_is_balanced,
+   sbox_is_almost_bent, sbox_is_bent, sbox_is_plateaued, sbox_is_involution,
+   sbox_feistel_construction, sbox_misty_construction, sbox_branch_number,
+   sbox_differential_branch_number, sbox_linear_branch_number,
+   sbox_algebraic_degree, sbox_max_degree, sbox_min_degree
+)
 use std.math.bin as bin
 use std.math.matrix as matrix
 
@@ -214,8 +241,7 @@ fn sbox_solutions(list S, bool big_endian=true) list {
    mut out = []
    mut x = 0
    while x < S.len {
-      def xb = sbox_to_bits(S, x, sbox_input_size(S), big_endian)
-      def yb = sbox_apply(S, xb, big_endian)
+      def xb, yb = sbox_to_bits(S, x, sbox_input_size(S), big_endian), sbox_apply(S, xb, big_endian)
       out = out.append([xb, yb])
       x += 1
    }
@@ -364,8 +390,7 @@ fn _sbox_walsh_table(list S) any {
          while base < in_n {
             x = 0
             while x < step {
-               def u = vec[base + x]
-               def v = vec[base + x + step]
+               def u, v = vec[base + x], vec[base + x + step]
                __store_item_fast(vec, base + x, u + v)
                __store_item_fast(vec, base + x + step, u - v)
                x += 1
@@ -446,8 +471,7 @@ fn sbox_linearity(list S) int {
          while base < in_n {
             x = 0
             while x < step {
-               def u = __load_item_fast(vec, base + x)
-               def v = __load_item_fast(vec, base + x + step)
+               def u, v = __load_item_fast(vec, base + x), __load_item_fast(vec, base + x + step)
                __store_item_fast(vec, base + x, u + v)
                __store_item_fast(vec, base + x + step, u - v)
                x += 1
@@ -684,8 +708,7 @@ fn sbox_from_interpolation_polynomial_gf2m(list coeffs, int m) list {
    mut out = []
    mut i = 0
    while i < q {
-      def x = _sbox_bit_reverse(i, m)
-      def y = sbox_eval_polynomial_gf2m(coeffs, x, m)
+      def x, y = _sbox_bit_reverse(i, m), sbox_eval_polynomial_gf2m(coeffs, x, m)
       out = out.append(_sbox_bit_reverse(y, m))
       i += 1
    }
@@ -709,8 +732,7 @@ fn sbox_interpolation_polynomial_gf2m(list S) list {
    }
    i = 0
    while i < q {
-      def xi = _sbox_bit_reverse(i, m)
-      def yi = _sbox_bit_reverse(int(S.get(i)), m)
+      def xi, yi = _sbox_bit_reverse(i, m), _sbox_bit_reverse(int(S.get(i)), m)
       mut basis = [1]
       mut den = 1
       mut j = 0
@@ -793,8 +815,7 @@ fn sbox_is_monomial_function(list S) bool {
 
 fn sbox_ring_str(list S, str x_prefix="x", str y_prefix="y") str {
    "Return a Sage-style description of the Boolean polynomial ring for S-box equations."
-   def m = sbox_input_size(S)
-   def n = sbox_output_size(S)
+   def m, n = sbox_input_size(S), sbox_output_size(S)
    mut vars = ""
    mut i = 0
    while i < m {
@@ -1138,8 +1159,7 @@ fn _sbox_cnf_clauses_with_indices(list S, list xi, list yi, bool big_endian) lis
    mut clauses = []
    mut x = 0
    while x < S.len {
-      def xbits = sbox_to_bits(S, x, in_bits, big_endian)
-      def ybits = sbox_apply(S, xbits, big_endian)
+      def xbits, ybits = sbox_to_bits(S, x, in_bits, big_endian), sbox_apply(S, xbits, big_endian)
       mut oi = 0
       while oi < output_order.len {
          def output_bit = int(output_order.get(oi))
@@ -1398,8 +1418,7 @@ fn sbox_has_linear_structure(list S) bool {
 
 fn sbox_is_linear_structure(list S, any a, any b, bool big_endian=true) bool {
    "Return true if a is a linear structure of component b dot S(x)."
-   def ai = _sbox_input_mask_loose(S, a, big_endian)
-   def bi = _sbox_component_mask(S, b, big_endian)
+   def ai, bi = _sbox_input_mask_loose(S, a, big_endian), _sbox_component_mask(S, b, big_endian)
    if ai == 0 || bi == 0 { return false }
    def act = sbox_autocorrelation_table(S)
    _sbox_abs_int(matrix.mat_get(act, ai, bi)) == S.len
@@ -1438,8 +1457,7 @@ fn sbox_is_almost_bent(list S) bool {
 
 fn sbox_is_bent(list S) bool {
    "Return true when the S-box reaches the bent nonlinearity bound."
-   def m = sbox_input_size(S)
-   def n = sbox_output_size(S)
+   def m, n = sbox_input_size(S), sbox_output_size(S)
    if (m & 1) != 0 || n > m / 2 { return false }
    sbox_nonlinearity(S) == ((1 << (m - 1)) - (1 << (m / 2 - 1)))
 }
@@ -1499,14 +1517,12 @@ fn sbox_feistel_construction(list sboxes) list {
    mut out = []
    mut x = 0
    while x < size {
-      mut xl = (x >> w) & mask
-      mut xr = x & mask
+      mut xl, xr = (x >> w) & mask, x & mask
       mut r = 0
       while r < sboxes.len {
          def sb = sboxes.get(r)
          def next_l = sb.get(xl) ^^ xr
-         xr = xl
-         xl = next_l
+         xr, xl = xl, next_l
          r += 1
       }
       out = out.append((xl << w) | xr)
@@ -1523,14 +1539,12 @@ fn sbox_misty_construction(list sboxes) list {
    mut out = []
    mut x = 0
    while x < size {
-      mut xl = (x >> w) & mask
-      mut xr = x & mask
+      mut xl, xr = (x >> w) & mask, x & mask
       mut r = 0
       while r < sboxes.len {
          def sb = sboxes.get(r)
          def next_l = sb.get(xr) ^^ xl
-         xr = xl
-         xl = next_l
+         xr, xl = xl, next_l
          r += 1
       }
       out = out.append((xl << w) | xr)
@@ -1581,8 +1595,7 @@ fn sbox_linear_branch_number(list S) int {
          while base < in_n {
             x = 0
             while x < step {
-               def u = __load_item_fast(vec, base + x)
-               def v = __load_item_fast(vec, base + x + step)
+               def u, v = __load_item_fast(vec, base + x), __load_item_fast(vec, base + x + step)
                __store_item_fast(vec, base + x, u + v)
                __store_item_fast(vec, base + x + step, u - v)
                x += 1

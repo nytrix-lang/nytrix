@@ -1,6 +1,6 @@
 ;; Keywords: 3d gltf glb parse
 ;; Submodule: animation
-module std.math.parse.3d.gltf.animation(_gltf_read_mat4_accessor_value, _gltf_mat4_transpose, _gltf_pack_skin_sidecars, gltf_skin_joint_mats, _gltf_skin_inv_bind_mats, _gltf_mesh_inv_key, _gltf_mesh_inv_cached, _gltf_pack_skin_mat_slab, _gltf_write_skin_mat_slab, _gltf_skin_mats_cache_record, gltf_free_skin_mats_cache, _gltf_apply_skinning_slab, _gltf_skin_weighted_mat4_vec3, _gltf_apply_skinning_fallback, gltf_apply_skinning, gltf_skin_count, gltf_skin_info, gltf_morph_target_count, _gltf_mesh_morph_weights, _gltf_collect_morph_targets, _gltf_release_morph_targets, _gltf_read_acc_f32, _gltf_read_acc_components, _gltf_read_acc_scalar_tuple, _gltf_read_anim_tuple, _gltf_lerp_vec, _gltf_nlerp_quat, _gltf_normalize_quat, _gltf_read_norm_i16_quat, _gltf_find_time_bracket, _gltf_sample_channel, gltf_animation_count, _gltf_animation_duration_from_anim, _gltf_animation_duration_from_samples, gltf_animation_info, _gltf_anim_fast_records, _gltf_anim_record_bracket, _gltf_anim_clean_tiny, _gltf_anim_fast_value, _gltf_sample_animation_fast, _gltf_anim_sample_component_count, _gltf_anim_store_override, gltf_sample_animation, gltf_sample_animation_merged, gltf_apply_morph_weights, _gltf_build_node_world_mats_animated, _gltf_build_node_world_mats_animated_fast, gltf_rebuild_animated_mats)
+module std.math.parse.3d.gltf.animation(_gltf_read_mat4_accessor_value, _gltf_mat4_transpose, _gltf_pack_skin_sidecars, gltf_skin_joint_mats, _gltf_skin_inv_bind_mats, _gltf_mesh_inv_key, _gltf_mesh_inv_cached, _gltf_pack_skin_mat_slab, _gltf_write_skin_mat_slab, _gltf_skin_mats_cache_record, gltf_free_skin_mats_cache, _gltf_apply_skinning_slab, _gltf_skin_weighted_mat4_vec3, _gltf_apply_skinning_fallback, gltf_apply_skinning, gltf_skin_count, gltf_skin_info, gltf_morph_target_count, _gltf_mesh_morph_weights, _gltf_collect_morph_targets, _gltf_release_morph_targets, _gltf_read_acc_f32, _gltf_read_acc_components, _gltf_read_acc_scalar_tuple, _gltf_read_anim_tuple, _gltf_lerp_vec, _gltf_nlerp_quat, _gltf_normalize_quat, _gltf_read_norm_i16_quat, _gltf_find_time_bracket, _gltf_sample_channel, gltf_animation_count, _gltf_animation_duration_from_anim, _gltf_animation_duration_from_samples, gltf_animation_info, _gltf_anim_fast_records, _gltf_anim_record_bracket, _gltf_anim_clean_tiny, _gltf_anim_fast_value, _gltf_sample_animation_fast, _gltf_anim_sample_component_count, _gltf_anim_store_override, gltf_sample_animation, gltf_sample_animation_merged, gltf_apply_morph_weights, _gltf_build_node_world_mats_animated_fast, gltf_rebuild_animated_mats)
 use std.core
 use std.math.bin
 use std.math
@@ -725,12 +725,12 @@ fn _gltf_release_morph_targets(list morph_targets) bool {
 fn _gltf_read_acc_f32(any data, dict acc_res, int elem_idx, int comp_idx) f64 {
    def ptr = acc_res.get("ptr", 0)
    if !ptr { return 0.0 }
-   def stride = acc_res.get("stride", 4)
-   def comp = acc_res.get("comp", shr.GLTF_COMP_FLOAT)
+   def stride = int(acc_res.get("stride", 4))
+   def comp = int(acc_res.get("comp", shr.GLTF_COMP_FLOAT))
    def norm = acc_res.get("normalized", false)
    def cs = shr._gltf_comp_size(comp)
    def cols = int(acc_res.get("cols", 1))
-   def rows = int(acc_res.get("rows", acc_res.get("type_count", 1)))
+   def rows = int(acc_res.get("rows", int(acc_res.get("type_count", 1))))
    mut byte_off = 0
    if cols <= 1 { byte_off = elem_idx * stride + comp_idx * cs } else {
       def col = comp_idx / rows
@@ -742,26 +742,47 @@ fn _gltf_read_acc_f32(any data, dict acc_res, int elem_idx, int comp_idx) f64 {
 }
 
 fn _gltf_read_acc_components(any data, any acc_res, int elem_idx, int n_comp) list {
+   def ptr = acc_res.get("ptr", 0)
+   if !ptr { mut out = list(max(0, n_comp)) if n_comp > 0 { __list_set_len(out, n_comp) } return out }
+   def stride = int(acc_res.get("stride", 4))
+   def comp = int(acc_res.get("comp", shr.GLTF_COMP_FLOAT))
+   def norm = acc_res.get("normalized", false)
+   def cs = shr._gltf_comp_size(comp)
+   def cols = int(acc_res.get("cols", 1))
+   def rows = int(acc_res.get("rows", int(acc_res.get("type_count", 1))))
+   def col_size = cols <= 1 ? 0 : shr._gltf_align_up(rows * cs, 4)
+   def base_off = elem_idx * stride
    mut out = list(max(0, n_comp))
    if n_comp > 0 { __list_set_len(out, n_comp) }
    mut i = 0
    while i < n_comp {
-      out[i] = _gltf_read_acc_f32(data, acc_res, elem_idx, i)
+      if cols <= 1 {
+         out[i] = shr._gltf_read_f32_acc(ptr, base_off + i * cs, comp, norm)
+      } else {
+         def col = i / rows
+         def row = i % rows
+         out[i] = shr._gltf_read_f32_acc(ptr, base_off + col * col_size + row * cs, comp, norm)
+      }
       i += 1
    }
    out
 }
 
 fn _gltf_read_acc_scalar_tuple(any data, any acc_res, int tuple_idx, int n_comp) list {
-   "Read n_comp adjacent scalar accessor elements starting at tuple_idx*n_comp.
-   Needed for animation outputs like morph weights, which are commonly
-   stored as SCALAR accessors with count = keyframes * weight_count."
    mut out = list(max(0, n_comp))
    if n_comp > 0 { __list_set_len(out, n_comp) }
+   def ptr = acc_res.get("ptr", 0)
+   if !ptr { return out }
+   def stride = int(acc_res.get("stride", 4))
+   def comp = int(acc_res.get("comp", shr.GLTF_COMP_FLOAT))
+   def norm = acc_res.get("normalized", false)
+   def cs = shr._gltf_comp_size(comp)
    def base_idx = tuple_idx * n_comp
    mut i = 0
    while i < n_comp {
-      out[i] = _gltf_read_acc_f32(data, acc_res, base_idx + i, 0)
+      def elem_idx = base_idx + i
+      def byte_off = elem_idx * stride
+      out[i] = shr._gltf_read_f32_acc(ptr, byte_off, comp, norm)
       i += 1
    }
    out
@@ -874,23 +895,25 @@ fn _gltf_read_norm_i16_quat(any data_ptr, int off) list {
 }
 
 fn _gltf_find_time_bracket(any data, any input_res, f64 time_sec) list {
-   def count = input_res.get("count", 0)
-   if count <= 0 { return [0, 0, 0.0] }
+   def ptr = input_res.get("ptr", 0)
+   def count = int(input_res.get("count", 0))
+   if !ptr || count <= 0 { return [0, 0, 0.0] }
+   def stride = int(input_res.get("stride", 4))
    if count == 1 { return [0, 0, 0.0] }
-   def t_first = _gltf_read_acc_f32(data, input_res, 0, 0)
-   def t_last  = _gltf_read_acc_f32(data, input_res, count - 1, 0)
+   def t_first = f32le(ptr, 0)
+   def t_last  = f32le(ptr, (count - 1) * stride)
    if time_sec <= t_first { return [0, 0, 0.0] }
    if time_sec >= t_last { return [count-1, count-1, 0.0] }
    mut lo = 0
    mut hi = count - 1
    while hi - lo > 1 {
       def mid = (lo + hi) / 2
-      def t_mid = _gltf_read_acc_f32(data, input_res, mid, 0)
+      def t_mid = f32le(ptr, mid * stride)
       if t_mid <= time_sec { lo = mid }
       else { hi = mid }
    }
-   def t_lo = _gltf_read_acc_f32(data, input_res, lo, 0)
-   def t_hi = _gltf_read_acc_f32(data, input_res, hi, 0)
+   def t_lo = f32le(ptr, lo * stride)
+   def t_hi = f32le(ptr, hi * stride)
    def alpha = _gltf_anim_alpha(time_sec, t_lo, t_hi)
    [lo, hi, alpha]
 }
@@ -1283,10 +1306,6 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
 }
 
 fn _gltf_sample_animation_fast(any gltf_data, int anim_idx, f64 time_sec) any {
-   ;; Keep the direct accessor sampler as the default correctness path.  The
-   ;; record-cache sampler remains available with NY_GLTF_ANIM_FAST=1, but it is
-   ;; deliberately opt-in because broken cached timing made simple rigid clips
-   ;; such as AnimatedCube look like integer/keyframe stepping.
    if !shr._gltf_anim_fast_enabled() { return 0 }
    def g = gltf_data.get("gltf", 0)
    def skins = is_dict(g) ? g.get("skins", 0) : 0
@@ -1626,44 +1645,6 @@ fn gltf_apply_morph_weights(any gltf_data, any overrides) list {
 }
 
 
-fn _gltf_build_node_world_mats_animated(dict g, int node_idx, list parent_m, dict node_world_mats, dict overrides) dict {
-   def nodes = g.get("nodes")
-   if !is_list(nodes) || node_idx < 0 || node_idx >= nodes.len { return node_world_mats }
-   def visit_key = shr._gltf_node_visit_key(node_idx)
-   if node_world_mats.get(visit_key, false) { return node_world_mats }
-   if node_world_mats.contains(node_idx) { return node_world_mats }
-   def node = nodes[node_idx]
-   if !is_dict(node) { return node_world_mats }
-   node_world_mats[visit_key] = true
-   def anim_ov = shr._gltf_anim_override_for_node(overrides, node_idx)
-   mut local_m = 0
-   if is_dict(anim_ov) {
-      def nodes_g = g.get("nodes")
-      def orig_node = is_list(nodes_g) ? nodes_g[node_idx] : 0
-      def t = anim_ov.get("T", is_dict(orig_node) ? orig_node.get("translation", [0.0,0.0,0.0]) : [0.0,0.0,0.0])
-      def r_raw = anim_ov.get("R", is_dict(orig_node) ? orig_node.get("rotation", [0.0,0.0,0.0,1.0]) : [0.0,0.0,0.0,1.0])
-      def r = _gltf_normalize_quat(r_raw)
-      def s = anim_ov.get("S", is_dict(orig_node) ? orig_node.get("scale",       [1.0,1.0,1.0]) : [1.0,1.0,1.0])
-      local_m = gltf_math.mat4_from_trs(t, r, s)
-   } else {
-      local_m = gltf_math.node_local_matrix(node)
-   }
-   def world_m = gltf_math.mat4_mul(parent_m, local_m)
-   node_world_mats[node_idx] = world_m
-   def children = node.get("children")
-   if is_list(children) {
-      def children_n = children.len
-      mut i = 0
-      while i < children_n {
-         def child_idx = int(children[i])
-         if child_idx >= 0 && child_idx != node_idx { node_world_mats = _gltf_build_node_world_mats_animated(g, child_idx, world_m, node_world_mats, overrides) }
-         i += 1
-      }
-   }
-   node_world_mats = node_world_mats.delete(visit_key)
-   node_world_mats
-}
-
 fn _gltf_build_node_world_mats_animated_fast(list nodes, any base_local_mats, list world_list, any fast_node_overrides, int node_idx, list parent_m, dict node_world_mats, dict overrides) dict {
    if !is_list(nodes) || node_idx < 0 || node_idx >= nodes.len { return node_world_mats }
    def node = nodes[node_idx]
@@ -1714,10 +1695,6 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    def nodes = g.get("nodes", 0)
    def nodes_n = is_list(nodes) ? nodes.len : 0
    mut node_world_mats = dict(max(16, nodes_n * 2))
-   ;; Build a dense local/world cache for every animation path.  The old generic
-   ;; path recursively recomputed node local matrices and did dict lookups for
-   ;; every skeleton node every frame, which made recursive rigs very slow.
-   def fast_numeric = true
    def base_local_mats = shr._gltf_node_local_mats(g)
    mut world_list = list(nodes_n)
    if nodes_n > 0 { __list_set_len(world_list, nodes_n) }
@@ -1760,18 +1737,14 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
          mut ri = 0
          while ri < roots_n {
             def root_idx = int(roots[ri])
-            if fast_numeric {
-               node_world_mats = _gltf_build_node_world_mats_animated_fast(nodes,
-                  base_local_mats,
-                  world_list,
-                  fast_node_overrides,
-                  root_idx,
-                  id,
-                  node_world_mats,
-               overrides)
-            } else {
-               node_world_mats = _gltf_build_node_world_mats_animated(g, root_idx, id, node_world_mats, overrides)
-            }
+          node_world_mats = _gltf_build_node_world_mats_animated_fast(nodes,
+             base_local_mats,
+             world_list,
+             fast_node_overrides,
+             root_idx,
+             id,
+             node_world_mats,
+          overrides)
             ri += 1
          }
       }

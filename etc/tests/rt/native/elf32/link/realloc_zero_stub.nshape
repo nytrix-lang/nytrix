@@ -1,0 +1,20 @@
+shape i386_elf32_object_link_run_realloc_zero_stub {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run pointer realloc]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-link-run-elf32-realloc-zero-stub.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+fn probe() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  def *int q = realloc(p, 0)
+  if q == nil { 42 } else { 0 }
+}
+
+probe()
+NY
+}

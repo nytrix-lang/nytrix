@@ -58,15 +58,15 @@ fn _attr_effects(any node, list args) any {
    node
 }
 
-fn _attr_llvm(any node, list args) any {
-   if args.len < 1 || args.len > 2 { panic("@llvm expects 1 or 2 argument(s)") }
-   node = _attr_flag(node, "llvm_attr", args[0])
-   if args.len == 2 { node = _attr_flag(node, "llvm_value", args[1]) }
+fn _attr_backend(any node, list args) any {
+   if args.len < 1 || args.len > 2 { panic("@backend expects 1 or 2 argument(s)") }
+   node = _attr_flag(node, "backend_attr", args[0])
+   if args.len == 2 { node = _attr_flag(node, "backend_value", args[1]) }
    node
 }
 
 fn _builtin_attr_names() list {
-   ["extern", "naked", "jit", "thread", "pure", "cache", "effects", "llvm"]
+   ["extern", "naked", "jit", "thread", "pure", "cache", "effects", "backend"]
 }
 
 fn _builtin_attr_handler(str name) any {
@@ -77,7 +77,7 @@ fn _builtin_attr_handler(str name) any {
    if name == "pure" { return _attr_pure }
    if name == "cache" { return _attr_cache }
    if name == "effects" { return _attr_effects }
-   if name == "llvm" { return _attr_llvm }
+   if name == "backend" { return _attr_backend }
    nil
 }
 

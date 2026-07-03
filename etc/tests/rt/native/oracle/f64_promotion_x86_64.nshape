@@ -1,0 +1,14 @@
+shape oracle_f64_promotion_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result f64 promotion]
+  template ny-test-case
+  flags "--native-result-oracle=4620974692658839552"
+  expect compile_and_run
+  source ny <<'NY'
+fn mix(i64 a, f64 b) f64 {
+  a * b + 1
+}
+mix(3, 2.5)
+NY
+}

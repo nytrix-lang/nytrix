@@ -1,0 +1,15 @@
+shape native_x86_f64_call {
+  family "runtime-native"
+  generator "native"
+  features [native x86 oracle f64 call]
+  template ny-test-case
+  flags "--native-backend x86 --native-result-oracle=4615626668101337088"
+  expect compile_and_run
+  source ny <<'NY'
+fn val() f64 {
+  3.75
+}
+
+val()
+NY
+}

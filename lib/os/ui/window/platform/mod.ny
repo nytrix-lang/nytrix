@@ -1103,10 +1103,13 @@ fn get_current_context() any { _get_platform_val("current_win_context", 0) }
 #linux {
    #link "libGL.so"
    #include <GL/gl.h>
+   extern {
+      fn _platform_glGetString(u32 name) ptr as "glGetString"
+   }
 } #else {
-   fn glGetString(any _name) any {
+   fn _platform_glGetString(any _name) ptr {
       "Runs the glGetString operation."
-      0
+      nil
    }
 } #endif
 
@@ -1114,7 +1117,7 @@ fn extension_supported(str name) bool {
    "Checks if the specified OpenGL extension is supported."
    def win = _get_platform_val("current_win_context", 0)
    if !win { return false }
-   def exts_ptr = glGetString(0x1F03)
+   def exts_ptr = _platform_glGetString(0x1F03)
    if !exts_ptr { return false }
    def exts = str.cstr_to_str(exts_ptr)
    str.find(exts, name) != -1

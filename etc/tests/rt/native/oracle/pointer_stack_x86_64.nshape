@@ -1,0 +1,14 @@
+shape oracle_pointer_stack_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result pointer stack-args]
+  template ny-test-case
+  flags "--native-result-oracle=1"
+  expect compile_and_run
+  source ny <<'NY'
+fn ptr_stack(*int a, *int b, *int c, *int d, *int e, *int f, *int g, *int h) bool {
+  a == nil && h == nil
+}
+ptr_stack(nil, nil, nil, nil, nil, nil, nil, nil)
+NY
+}

@@ -267,6 +267,14 @@ const char *parser_token_name(token_kind k) {
     return "/=";
   case NY_T_PERCENT_EQ:
     return "%=";
+  case NY_T_POW_EQ:
+    return "^=";
+  case NY_T_BITXOR_EQ:
+    return "^^=";
+  case NY_T_LSHIFT_EQ:
+    return "<<=";
+  case NY_T_RSHIFT_EQ:
+    return ">>=";
   case NY_T_ARROW:
     return "->";
   case NY_T_BITOR:

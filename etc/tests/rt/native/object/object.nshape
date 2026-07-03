@@ -1,0 +1,11 @@
+shape x86_64_object {
+  family "runtime-native"
+  generator "native"
+  features ["native", "object", "x86_64"]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-native-object-smoke.o"
+  expect compile_and_run
+  source ny <<'NY'
+1 + 2
+NY
+}

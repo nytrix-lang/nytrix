@@ -1,0 +1,26 @@
+shape nyir_case_match {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "case", "match", "vm"]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+fn classify(v) {
+  case v {
+    1..9 if v % 2 == 0 -> 20
+    1..9 -> 10
+    _ -> 0
+  }
+}
+
+fn guard_skip() {
+  case 1 {
+    0 if 10 / 0 == 1 -> 99
+    _ -> 7
+  }
+}
+
+classify(4) + classify(5) + classify(12) + guard_skip()
+NY
+}

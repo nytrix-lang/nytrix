@@ -1,0 +1,13 @@
+shape nyir_ternary {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "ternary", "vm"]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+def a = 5
+def b = 9
+a > b ? 100 : 42
+NY
+}

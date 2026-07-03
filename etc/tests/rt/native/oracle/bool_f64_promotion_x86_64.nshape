@@ -1,0 +1,14 @@
+shape oracle_bool_f64_promotion_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result f64 bool promotion]
+  template ny-test-case
+  flags "--native-result-oracle=4611686018427387904"
+  expect compile_and_run
+  source ny <<'NY'
+fn add_bool_f64(f64 x) f64 {
+  true + x
+}
+add_bool_f64(1.0)
+NY
+}

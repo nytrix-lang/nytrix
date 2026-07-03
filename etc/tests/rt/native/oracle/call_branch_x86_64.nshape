@@ -1,0 +1,14 @@
+shape oracle_call_branch_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result call branch]
+  template ny-test-case
+  flags "--native-result-oracle=111"
+  expect compile_and_run
+  source ny <<'NY'
+fn add4(i64 a, i64 b, i64 c, i64 d) i64 {
+  a + b + c + d
+}
+if add4(1, 2, 3, 4) == 10 { 111 } else { 222 }
+NY
+}

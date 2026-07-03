@@ -1,0 +1,12 @@
+shape x86_64_macho_object_writer {
+  family "runtime-native"
+  generator "native"
+  features ["native", "object", "macho", "x86_64", "nyir"]
+  template ny-test-case
+  flags "--native-backend x86_64 --host-triple x86_64-apple-darwin -emit-only -o /tmp/nytrix-native-macho64-object-smoke.o"
+  expect compile_and_run
+  source ny <<'NY'
+def x = 42
+x / 3 + x % 5
+NY
+}

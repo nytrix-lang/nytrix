@@ -1,0 +1,22 @@
+shape oracle_pointer_memory_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result pointer memory load64 store64]
+  template ny-test-case
+  flags "--native-result-oracle=42"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn ptr_mem() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  store64_i(p, 41)
+  def i64 v = load64_i(p)
+  free(p)
+  v + 1
+}
+
+ptr_mem()
+NY
+}

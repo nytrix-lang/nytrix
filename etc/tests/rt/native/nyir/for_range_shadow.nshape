@@ -1,0 +1,16 @@
+shape nyir_for_range_shadow {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "for", "range", "scope", "shadow", "vm"]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+def i = 99
+mut s = 0
+for i in 0..3 {
+  s += i
+}
+i + s
+NY
+}

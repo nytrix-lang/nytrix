@@ -1,0 +1,12 @@
+shape enum_array_layout {
+  family "runtime-native"
+  generator "native"
+  features ["c-frontend", "ffi", "enum", "array", "layout"]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/ffi/internal_aggregate.h"
+1 + 2
+NY
+}

@@ -46,8 +46,7 @@ fn dh_derive(list pubkey, any x_or_privkey) any {
 
 #main {
    def p, g = Z(23), Z(5)
-   def a = dh_keygen(p, g, p - 1, 6)
-   def b = dh_keygen(p, g, p - 1, 9)
+   def a, b = dh_keygen(p, g, p - 1, 6), dh_keygen(p, g, p - 1, 9)
    def sa = dh_derive(b[0], a[1])
    def sb = dh_derive(a[0], b[1])
    assert(sa == sb, "dh shared secret")

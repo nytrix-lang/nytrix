@@ -215,9 +215,7 @@ fn _vg_kasiski_factor_counts(str text, int max_len) list {
    mut last3 = _vg_zero_list(26 * 26 * 26)
    mut pos = 0
    while pos + 2 < text_len {
-      def a = load8(text, pos) - 65
-      def b = load8(text, pos + 1) - 65
-      def c = load8(text, pos + 2) - 65
+      def a, b, c = load8(text, pos) - 65, load8(text, pos + 1) - 65, load8(text, pos + 2) - 65
       def p3 = (a * 26 + b) * 26 + c
       def prev3 = last3[p3]
       if prev3 > 0 {

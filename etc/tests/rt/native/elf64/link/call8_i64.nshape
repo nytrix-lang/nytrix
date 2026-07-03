@@ -1,0 +1,14 @@
+shape x86_64_elf64_object_link_run_call8_i64 {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir link-run]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-call8-i64.o"
+  expect object_link_run_i64_36
+  source ny <<'NY'
+fn add8(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g, i64 h) i64 {
+  a + b + c + d + e + f + g + h
+}
+add8(1, 2, 3, 4, 5, 6, 7, 8)
+NY
+}

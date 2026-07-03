@@ -1,0 +1,12 @@
+shape oracle_pointer_nil_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result pointer nil]
+  template ny-test-case
+  flags "--native-result-oracle=1"
+  expect compile_and_run
+  source ny <<'NY'
+fn is_null(*int p) bool { p == nil }
+is_null(nil)
+NY
+}

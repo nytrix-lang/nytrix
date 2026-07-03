@@ -11,7 +11,7 @@
 module std.math.crypto.rsa.hastad(hastad_solve, hastad_find, hastad_attack, hastad_attack_report, hastads_attack)
 use std.math.nt
 
-fn _hastad_exp(any e) int { is_bigint(e) ? bigint_to_int(e) : int(e) }
+fn _hastad_exp(any e) int { int(e) }
 
 fn hastad_solve(list ns, list cs, any e) any {
    "Recover plaintext m from Hastad's broadcast attack.

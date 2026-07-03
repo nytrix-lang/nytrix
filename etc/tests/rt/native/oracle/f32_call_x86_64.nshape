@@ -1,0 +1,16 @@
+shape oracle_f32_call_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result f32 call]
+  template ny-test-case
+  flags "--native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(f32 a, f32 b) f32 {
+  a + b
+}
+
+def f64 y = add(0.1, 0.2)
+y
+NY
+}

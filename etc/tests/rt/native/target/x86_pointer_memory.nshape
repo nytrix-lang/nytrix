@@ -1,0 +1,22 @@
+shape x86_target_pointer_memory {
+  family "runtime-native"
+  generator "native"
+  features [native x86 target pointer memory]
+  template ny-test-case
+  flags "--native-backend x86 --emit-asm /tmp/nytrix-native-x86-pointer-memory.s"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn ptr_mem() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  store64_i(p, 41)
+  def i64 v = load64_i(p)
+  free(p)
+  v + 1
+}
+
+ptr_mem()
+NY
+}

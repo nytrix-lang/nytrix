@@ -432,7 +432,7 @@ fn accel_targets() list {
 }
 
 fn accel_target_triple(any target="") str {
-   "Returns LLVM-style target triple for the resolved accelerator target."
+   "Returns backend target triple for the resolved accelerator target."
    def t = _resolve_accel_target(target)
    if t == "nvptx" { return "nvptx64-nvidia-cuda" }
    if t == "amdgpu" || t == "hsaco" { return "amdgcn-amd-amdhsa" }

@@ -1,0 +1,15 @@
+shape x86_call7_target {
+  family "runtime-native"
+  generator "native"
+  features [native x86 target call]
+  template ny-test-case
+  flags "--emit-asm=/tmp/nytrix-native-x86-call7-target.s --native-backend x86"
+  expect compile_and_run
+  source ny <<'NY'
+fn add7(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g) i64 {
+  a + b + c + d + e + f + g
+}
+
+add7(1, 2, 3, 4, 5, 6, 7)
+NY
+}

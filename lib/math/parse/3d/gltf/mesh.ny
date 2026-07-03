@@ -243,13 +243,94 @@ fn _gltf_release_vertex_pack_accessors(any pos_res, any uv0_res, any uv1_res, an
 
 fn _gltf_try_pack_vertices_pnc_raw(
    any buf, int count, any pos_ptr, int pos_comp, bool pos_norm, int pos_stride,
-   bool uv0_valid, int uv0_comp, bool uv0_norm, bool uv1_valid,
+   bool uv0_valid, any uv0_ptr, int uv0_cnt, int uv0_comp, bool uv0_norm, int uv0_stride, bool uv1_valid, any uv1_ptr, int uv1_cnt, int uv1_comp, bool uv1_norm, int uv1_stride,
    bool n_valid, any n_ptr, int n_cnt, int n_comp, bool n_norm, int n_stride,
-   bool t_valid, int t_comp, bool t_norm,
+   bool t_valid, any t_ptr, int t_cnt, int t_comp, bool t_norm, int t_stride,
    bool c_valid, any c_ptr, int c_cnt, int c_stride, int c_comp, int c_type_count, bool c_norm,
    int tex_id, int morph_targets_n
 ) bool {
-   false
+   if morph_targets_n > 0 { return false }
+   if pos_comp != shr.GLTF_COMP_FLOAT || pos_norm { return false }
+   if n_valid && (n_comp != shr.GLTF_COMP_FLOAT || n_norm) { return false }
+   if t_valid && (t_comp != shr.GLTF_COMP_FLOAT || t_norm) { return false }
+   if uv0_valid && (uv0_comp != shr.GLTF_COMP_FLOAT || uv0_norm) { return false }
+   if uv1_valid && (uv1_comp != shr.GLTF_COMP_FLOAT || uv1_norm) { return false }
+   if c_valid && c_comp != shr.GLTF_COMP_UBYTE && c_comp != shr.GLTF_COMP_FLOAT { return false }
+   if count <= 0 { return false }
+   mut vi = 0
+   while vi < count {
+      def off = ptr_add(buf, vi * shr._GLTF_VTX_STRIDE)
+      def pbase = vi * pos_stride
+      store32_f32(off, f32le(pos_ptr, pbase + 0), shr._GLTF_VTX_OFF_X)
+      store32_f32(off, f32le(pos_ptr, pbase + 4), shr._GLTF_VTX_OFF_Y)
+      store32_f32(off, f32le(pos_ptr, pbase + 8), shr._GLTF_VTX_OFF_Z)
+      store32_f32(off, 0.0, shr._GLTF_VTX_OFF_U)
+      store32_f32(off, 0.0, shr._GLTF_VTX_OFF_V)
+      if uv0_valid && vi < uv0_cnt {
+         def ubase = vi * uv0_stride
+         store32_f32(off, f32le(uv0_ptr, ubase + 0), shr._GLTF_VTX_OFF_U)
+         store32_f32(off, f32le(uv0_ptr, ubase + 4), shr._GLTF_VTX_OFF_V)
+      }
+      if c_valid && vi < c_cnt {
+         def cbase = vi * c_stride
+         if c_comp == shr.GLTF_COMP_UBYTE {
+            def ir, ig = load8(c_ptr, cbase + 0), load8(c_ptr, cbase + 1)
+            def ib, ia = load8(c_ptr, cbase + 2), c_type_count == 4 ? load8(c_ptr, cbase + 3) : 255
+            store32(off, ir | (ig << 8) | (ib << 16) | (ia << 24), shr._GLTF_VTX_OFF_C)
+         } else {
+            def ir = band(int(clamp01(f32le(c_ptr, cbase + 0)) * 255.0 + 0.5), 255)
+            def ig = band(int(clamp01(f32le(c_ptr, cbase + 4)) * 255.0 + 0.5), 255)
+            def ib = band(int(clamp01(f32le(c_ptr, cbase + 8)) * 255.0 + 0.5), 255)
+            def ia = c_type_count == 4 ? band(int(clamp01(f32le(c_ptr, cbase + 12)) * 255.0 + 0.5), 255) : 255
+            store32(off, ir | (ig << 8) | (ib << 16) | (ia << 24), shr._GLTF_VTX_OFF_C)
+         }
+      } else {
+         store32(off, 0xffffffff, shr._GLTF_VTX_OFF_C)
+      }
+      if n_valid && vi < n_cnt {
+         def nbase = vi * n_stride
+         mut nx = f32le(n_ptr, nbase + 0)
+         mut ny = f32le(n_ptr, nbase + 4)
+         mut nz = f32le(n_ptr, nbase + 8)
+         def nl = sqrt(nx * nx + ny * ny + nz * nz)
+         if nl > 0.00001 { nx /= nl ny /= nl nz /= nl }
+         store32_f32(off, nx, shr._GLTF_VTX_OFF_NX)
+         store32_f32(off, ny, shr._GLTF_VTX_OFF_NY)
+         store32_f32(off, nz, shr._GLTF_VTX_OFF_NZ)
+      } else {
+         store32_f32(off, 0.0, shr._GLTF_VTX_OFF_NX)
+         store32_f32(off, 0.0, shr._GLTF_VTX_OFF_NY)
+         store32_f32(off, 0.0, shr._GLTF_VTX_OFF_NZ)
+      }
+      if t_valid && vi < t_cnt {
+         def tbase = vi * t_stride
+         mut tx = f32le(t_ptr, tbase + 0)
+         mut ty = f32le(t_ptr, tbase + 4)
+         mut tz = f32le(t_ptr, tbase + 8)
+         mut tw = f32le(t_ptr, tbase + 12)
+         def tl = sqrt(tx * tx + ty * ty + tz * tz)
+         if tl > 0.00001 { tx /= tl ty /= tl tz /= tl }
+         store32_f32(off, tx, shr._GLTF_VTX_OFF_TX)
+         store32_f32(off, ty, shr._GLTF_VTX_OFF_TY)
+         store32_f32(off, tz, shr._GLTF_VTX_OFF_TZ)
+         store32_f32(off, tw, shr._GLTF_VTX_OFF_TW)
+      } else {
+         store32_f32(off, 0.0, shr._GLTF_VTX_OFF_TX)
+         store32_f32(off, 0.0, shr._GLTF_VTX_OFF_TY)
+         store32_f32(off, 0.0, shr._GLTF_VTX_OFF_TZ)
+         store32_f32(off, 1.0, shr._GLTF_VTX_OFF_TW)
+      }
+      store32_f32(off, 0.0, shr._GLTF_VTX_OFF_U2)
+      store32_f32(off, 0.0, shr._GLTF_VTX_OFF_V2)
+      if uv1_valid && vi < uv1_cnt {
+         def sbase = vi * uv1_stride
+         store32_f32(off, f32le(uv1_ptr, sbase + 0), shr._GLTF_VTX_OFF_U2)
+         store32_f32(off, f32le(uv1_ptr, sbase + 4), shr._GLTF_VTX_OFF_V2)
+      }
+      store32(off, tex_id, shr._GLTF_VTX_OFF_TEX)
+      vi += 1
+   }
+   true
 }
 
 fn _gltf_apply_morph_vec3(list morph_targets, int morph_targets_n, int vi, f64 x, f64 y, f64 z, str res_key) list {
@@ -392,18 +473,68 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
       c_norm = c_res.get("normalized", false) || c_comp != shr.GLTF_COMP_FLOAT
    }
    def c_valid = c_ptr && c_cnt > 0 && c_stride > 0 && (c_type_count == 3 || c_type_count == 4)
-   mut morph_pos = [0.0, 0.0, 0.0]
-   mut morph_norm = [0.0, 0.0, 0.0]
-   mut morph_tan = [0.0, 0.0, 0.0]
    if _gltf_try_pack_vertices_pnc_raw(buf, count, pos_ptr, pos_comp, pos_norm, pos_stride,
-      uv0_valid, uv0_comp, uv0_norm, uv1_valid, n_valid, n_ptr, n_cnt, n_comp, n_norm, n_stride,
-      t_valid, t_comp, t_norm, c_valid, c_ptr, c_cnt, c_stride, c_comp, c_type_count, c_norm,
+      uv0_valid, uv0_ptr, uv0_cnt, uv0_comp, uv0_norm, uv0_stride, uv1_valid, uv1_ptr, uv1_cnt, uv1_comp, uv1_norm, uv1_stride,
+      n_valid, n_ptr, n_cnt, n_comp, n_norm, n_stride,
+      t_valid, t_ptr, t_cnt, t_comp, t_norm, t_stride,
+      c_valid, c_ptr, c_cnt, c_stride, c_comp, c_type_count, c_norm,
       tex_id, morph_targets_n){
       _gltf_release_vertex_pack_accessors(pos_res, uv0_res, uv1_res, c_res, n_res, t_res)
       mut out = dict(4)
       out["ptr"] = buf
       out["count"] = count
       return out
+   }
+   ;; Pre-compute morph target flat arrays so the per-vertex loop avoids dict lookups
+   mut mt_weight = list(morph_targets_n)
+   mut mt_pos_ptr = list(morph_targets_n)
+   mut mt_pos_cnt = list(morph_targets_n)
+   mut mt_pos_comp = list(morph_targets_n)
+   mut mt_pos_norm = list(morph_targets_n)
+   mut mt_pos_stride = list(morph_targets_n)
+   mut mt_norm_ptr = list(morph_targets_n)
+   mut mt_norm_cnt = list(morph_targets_n)
+   mut mt_norm_comp = list(morph_targets_n)
+   mut mt_norm_norm = list(morph_targets_n)
+   mut mt_norm_stride = list(morph_targets_n)
+   mut mt_tan_ptr = list(morph_targets_n)
+   mut mt_tan_cnt = list(morph_targets_n)
+   mut mt_tan_comp = list(morph_targets_n)
+   mut mt_tan_norm = list(morph_targets_n)
+   mut mt_tan_stride = list(morph_targets_n)
+   mut mi = 0
+   while mi < morph_targets_n {
+      def mt = morph_targets[mi]
+      mt_weight[mi] = float(mt.get("weight", 0.0))
+      def rr = mt.get("pos_res", 0)
+      if is_dict(rr) {
+         mt_pos_ptr[mi] = rr.get("ptr", 0)
+         mt_pos_cnt[mi] = int(rr.get("count", 0))
+         mt_pos_comp[mi] = int(rr.get("comp", shr.GLTF_COMP_FLOAT))
+         mt_pos_norm[mi] = rr.get("normalized", false)
+         mt_pos_stride[mi] = int(rr.get("stride", 0))
+      }
+      if morph_has_norm {
+         def nr = mt.get("norm_res", 0)
+         if is_dict(nr) {
+            mt_norm_ptr[mi] = nr.get("ptr", 0)
+            mt_norm_cnt[mi] = int(nr.get("count", 0))
+            mt_norm_comp[mi] = int(nr.get("comp", shr.GLTF_COMP_FLOAT))
+            mt_norm_norm[mi] = nr.get("normalized", false)
+            mt_norm_stride[mi] = int(nr.get("stride", 0))
+         }
+      }
+      if morph_has_tan {
+         def tr = mt.get("tan_res", 0)
+         if is_dict(tr) {
+            mt_tan_ptr[mi] = tr.get("ptr", 0)
+            mt_tan_cnt[mi] = int(tr.get("count", 0))
+            mt_tan_comp[mi] = int(tr.get("comp", shr.GLTF_COMP_FLOAT))
+            mt_tan_norm[mi] = tr.get("normalized", false)
+            mt_tan_stride[mi] = int(tr.get("stride", 0))
+         }
+      }
+      mi += 1
    }
    mut vi = 0
    if vi < count {
@@ -412,9 +543,22 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
          def px = shr._gltf_read_f32_acc(pos_ptr, pbase + pos_cs * 0, pos_comp, pos_norm)
          def py = shr._gltf_read_f32_acc(pos_ptr, pbase + pos_cs * 1, pos_comp, pos_norm)
          def pz = shr._gltf_read_f32_acc(pos_ptr, pbase + pos_cs * 2, pos_comp, pos_norm)
-         morph_pos = _gltf_apply_morph_vec3_into(morph_targets, morph_targets_n, vi, px, py, pz, "pos_res", morph_pos)
-         def mx, my = float(morph_pos.get(0, px)), float(morph_pos.get(1, py))
-         def mz = float(morph_pos.get(2, pz))
+         mut mx, my, mz = px, py, pz
+         mi = 0
+         while mi < morph_targets_n {
+            def w = mt_weight[mi]
+            if abs(w) > 0.0000001 {
+               def ptr = mt_pos_ptr[mi]
+               if ptr && vi < mt_pos_cnt[mi] {
+                  def off = vi * mt_pos_stride[mi]
+                  def cs = shr._gltf_comp_size(mt_pos_comp[mi])
+                  mx += shr._gltf_read_f32_acc(ptr, off + cs * 0, mt_pos_comp[mi], mt_pos_norm[mi]) * w
+                  my += shr._gltf_read_f32_acc(ptr, off + cs * 1, mt_pos_comp[mi], mt_pos_norm[mi]) * w
+                  mz += shr._gltf_read_f32_acc(ptr, off + cs * 2, mt_pos_comp[mi], mt_pos_norm[mi]) * w
+               }
+            }
+            mi += 1
+         }
          mut nx, ny = 0.0, 0.0
          mut nz = 0.0
          if n_valid && vi < n_cnt {
@@ -424,9 +568,21 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
             nz = shr._gltf_read_f32_acc(n_ptr, nbase + n_cs * 2, n_comp, n_norm)
          }
          if morph_has_norm {
-            morph_norm = _gltf_apply_morph_vec3_into(morph_targets, morph_targets_n, vi, nx, ny, nz, "norm_res", morph_norm)
-            nx, ny = float(morph_norm.get(0, nx)), float(morph_norm.get(1, ny))
-            nz = float(morph_norm.get(2, nz))
+            mi = 0
+            while mi < morph_targets_n {
+               def w = mt_weight[mi]
+               if abs(w) > 0.0000001 {
+                  def ptr = mt_norm_ptr[mi]
+                  if ptr && vi < mt_norm_cnt[mi] {
+                     def off = vi * mt_norm_stride[mi]
+                     def cs = shr._gltf_comp_size(mt_norm_comp[mi])
+                     nx += shr._gltf_read_f32_acc(ptr, off + cs * 0, mt_norm_comp[mi], mt_norm_norm[mi]) * w
+                     ny += shr._gltf_read_f32_acc(ptr, off + cs * 1, mt_norm_comp[mi], mt_norm_norm[mi]) * w
+                     nz += shr._gltf_read_f32_acc(ptr, off + cs * 2, mt_norm_comp[mi], mt_norm_norm[mi]) * w
+                  }
+               }
+               mi += 1
+            }
          }
          def nl = sqrt(nx * nx + ny * ny + nz * nz)
          if nl > 0.00001 { nx /= nl ny /= nl nz /= nl }
@@ -440,9 +596,21 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
             tw = shr._gltf_read_f32_acc(t_ptr, tbase + t_cs * 3, t_comp, t_norm)
          }
          if morph_has_tan {
-            morph_tan = _gltf_apply_morph_vec3_into(morph_targets, morph_targets_n, vi, tx, ty, tz, "tan_res", morph_tan)
-            tx, ty = float(morph_tan.get(0, tx)), float(morph_tan.get(1, ty))
-            tz = float(morph_tan.get(2, tz))
+            mi = 0
+            while mi < morph_targets_n {
+               def w = mt_weight[mi]
+               if abs(w) > 0.0000001 {
+                  def ptr = mt_tan_ptr[mi]
+                  if ptr && vi < mt_tan_cnt[mi] {
+                     def off = vi * mt_tan_stride[mi]
+                     def cs = shr._gltf_comp_size(mt_tan_comp[mi])
+                     tx += shr._gltf_read_f32_acc(ptr, off + cs * 0, mt_tan_comp[mi], mt_tan_norm[mi]) * w
+                     ty += shr._gltf_read_f32_acc(ptr, off + cs * 1, mt_tan_comp[mi], mt_tan_norm[mi]) * w
+                     tz += shr._gltf_read_f32_acc(ptr, off + cs * 2, mt_tan_comp[mi], mt_tan_norm[mi]) * w
+                  }
+               }
+               mi += 1
+            }
          }
          def tl = sqrt(tx * tx + ty * ty + tz * tz)
          if tl > 0.00001 { tx /= tl ty /= tl tz /= tl }

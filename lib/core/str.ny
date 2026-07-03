@@ -215,8 +215,7 @@ fn parse_int(any s, int base=10) int {
    }
    mut out = 0
    while i < n {
-      def c = load8(s, i)
-      def v = _ascii_radix_value(c)
+      def c, v = load8(s, i), _ascii_radix_value(c)
       if v < 0 || v >= base { break }
       out = out * base + v
       i += 1
@@ -655,31 +654,32 @@ fn to_fixed(number v, int precision=2) str {
 fn chr(int code) str {
    "Returns a single-character string from an integer Unicode code point."
    if code < 0 || code > 1114111 { return "" }
-   with ptr: char_buf = malloc(5){
-      if !char_buf { return "" }
-      mut len = 0
-      if code <= 127 {
-         store8(char_buf, code, 0)
-         len = 1
-      } else if code <= 2047 {
-         store8(char_buf, (192 | (code >> 6)), 0)
-         store8(char_buf, (128 | (code & 63)), 1)
-         len = 2
-      } else if code <= 65535 {
-         store8(char_buf, (224 | (code >> 12)), 0)
-         store8(char_buf, (128 | ((code >> 6) & 63)), 1)
-         store8(char_buf, (128 | (code & 63)), 2)
-         len = 3
-      } else {
-         store8(char_buf, (240 | (code >> 18)), 0)
-         store8(char_buf, (128 | ((code >> 12) & 63)), 1)
-         store8(char_buf, (128 | ((code >> 6) & 63)), 2)
-         store8(char_buf, (128 | (code & 63)), 3)
-         len = 4
-      }
-      store8(char_buf, 0, len)
-      return cstr_to_str(char_buf)
+   def char_buf = malloc(5)
+   if !char_buf { return "" }
+   mut len = 0
+   if code <= 127 {
+      store8(char_buf, code, 0)
+      len = 1
+   } elif code <= 2047 {
+      store8(char_buf, (192 | (code >> 6)), 0)
+      store8(char_buf, (128 | (code & 63)), 1)
+      len = 2
+   } elif code <= 65535 {
+      store8(char_buf, (224 | (code >> 12)), 0)
+      store8(char_buf, (128 | ((code >> 6) & 63)), 1)
+      store8(char_buf, (128 | (code & 63)), 2)
+      len = 3
+   } else {
+      store8(char_buf, (240 | (code >> 18)), 0)
+      store8(char_buf, (128 | ((code >> 12) & 63)), 1)
+      store8(char_buf, (128 | ((code >> 6) & 63)), 2)
+      store8(char_buf, (128 | (code & 63)), 3)
+      len = 4
    }
+   store8(char_buf, 0, len)
+   def out = cstr_to_str(char_buf)
+   free(char_buf)
+   out
 }
 
 @returns_owned
@@ -745,16 +745,16 @@ fn _utf8_decode_at(str s, int i, int w) int {
    if w == 1 { return b0 }
    if w == 2 {
       def b1 = load8(s, i + 1) & 255
-      return( ((b0 & 31) << 6) | (b1 & 63) )
+      return (((b0 & 31) << 6) | (b1 & 63))
    }
    if w == 3 {
       def b1, b2 = load8(s, i + 1) & 255, load8(s, i + 2) & 255
-      return( ( ((b0 & 15) << 12) | ((b1 & 63) << 6) ) | (b2 & 63) )
+      return ((((b0 & 15) << 12) | ((b1 & 63) << 6)) | (b2 & 63))
    }
    if w == 4 {
       def b1, b2 = load8(s, i + 1) & 255, load8(s, i + 2) & 255
       def b3 = load8(s, i + 3) & 255
-      return( ( ( ((b0 & 7) << 18) | ((b1 & 63) << 12) ) | ((b2 & 63) << 6) ) | (b3 & 63) )
+      return (((((b0 & 7) << 18) | ((b1 & 63) << 12)) | ((b2 & 63) << 6)) | (b3 & 63))
    }
    0
 }

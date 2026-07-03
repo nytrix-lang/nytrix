@@ -146,7 +146,7 @@ fn is_ptr(any x) bool {
    "Returns **true** if `x` appears to be a valid heap pointer."
    if !x { return false }
    if __is_int(x) { return false }
-   return(__and(x, 7) == 0)
+   __and(x, 7) == 0
 }
 
 @jit

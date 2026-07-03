@@ -1,7 +1,7 @@
 ;; flags: --safe-mode
 use std.core
 
-with ptr: p = malloc(8){
+with ptr p = malloc(8){
    store8(p, 65, 0)
    assert(load8(p, 0) == 65, "safe-mode literal raw load")
    def int idx = 3

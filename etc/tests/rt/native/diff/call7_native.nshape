@@ -1,0 +1,14 @@
+shape diff_call7_native {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 differential call stack-args]
+  template ny-test-case
+  flags "--native-backend x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+fn add7(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g) i64 {
+  a + b + c + d + e + f + g
+}
+add7(1, 2, 3, 4, 5, 6, 7)
+NY
+}

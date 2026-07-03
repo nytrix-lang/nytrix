@@ -1,0 +1,15 @@
+shape i386_elf32_object_link_run_f64_compare {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 i386 x86 nyir link-run f64 compare]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64-compare.o"
+  expect object_link_run_i64_1
+  source ny <<'NY'
+fn gt(f64 x, f64 y) bool {
+  x > y
+}
+
+gt(2.25, 1.5)
+NY
+}

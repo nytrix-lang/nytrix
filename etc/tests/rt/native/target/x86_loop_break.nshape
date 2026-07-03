@@ -1,0 +1,15 @@
+shape x86_loop_break_target {
+  family "runtime-native"
+  generator "native"
+  features [native nyir loop break x86 target]
+  template ny-test-case
+  flags "--emit-asm=/tmp/nytrix-native-x86-loop-break-target.s --native-backend x86"
+  expect compile_and_run
+  source ny <<'NY'
+def x = 7
+while 1 {
+  break
+}
+x
+NY
+}

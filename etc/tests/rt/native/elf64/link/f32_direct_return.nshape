@@ -1,0 +1,13 @@
+shape x86_64_elf64_object_link_run_f32_direct_return {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir link-run f32 abi return]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f32-direct-return.o"
+  expect object_link_run_f32_3.75
+  source ny <<'NY'
+def f32 x = 1.5f32
+def f32 y = 2.25f32
+x + y
+NY
+}

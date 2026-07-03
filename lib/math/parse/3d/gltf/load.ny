@@ -262,7 +262,7 @@ fn parse_gltf_str(any json_str, str base_path="", any binary_override=0) dict {
          }
          if !found { errors = errors.append("extensionsRequired contains " + name + " not present in extensionsUsed") }
          def st = shr._gltf_extension_status(name)
-         if st == "unknown" || st == "todo" || st == "fallback-or-todo" { errors = errors.append("extensionsRequired contains unsupported " + name + " (" + st + ")") }
+         if !shr._gltf_extension_required_supported(st) { errors = errors.append("extensionsRequired contains unsupported " + name + " (" + st + ")") }
          ri += 1
       }
    }

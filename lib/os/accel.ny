@@ -214,7 +214,7 @@ fn accel_target_available(str target="") bool {
 }
 
 fn accel_target_triple(str target="") str {
-   "Returns LLVM-style triple for selected accelerator target."
+   "Returns backend target triple for selected accelerator target."
    _os_accel_target_triple(target)
 }
 

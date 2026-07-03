@@ -1,0 +1,15 @@
+shape x86_elf32_link_archive_multilevel {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run archive multilevel]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-elf32-archive-multilevel-link.o"
+  expect object_link_run_i32_82
+  link "etc/tests/rt/native/elf32/link/ar_multi32.a"
+  source ny <<'NY'
+extern "c" {
+  fn ar_multi_a(i32 x) i32
+}
+def main = ar_multi_a(0)
+NY
+}

@@ -80,7 +80,7 @@ fn base_n_encode_int(any n, str alphabet) str {
    mut digits = []
    while x > Z(0) {
       def q, r = x / base, x - q * base
-      digits = digits.append(bigint_to_int(r))
+      digits = digits.append(int(r))
       x = q
    }
    mut out = Builder(max(8, digits.len + 4))
@@ -484,7 +484,7 @@ fn base58_encode_bytes(list bytes) str {
    mut digits = list(0)
    while nn > zero {
       def q, r = nn / z58, nn - q * z58
-      digits = digits.append(bigint_to_int(r))
+      digits = digits.append(int(r))
       nn = q
    }
    mut out = Builder(max(8, bytes.len * 2 + 4))

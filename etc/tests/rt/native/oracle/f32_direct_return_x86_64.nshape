@@ -1,0 +1,13 @@
+shape oracle_f32_direct_return_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result f32 direct-return]
+  template ny-test-case
+  flags "--native-result-oracle=1081081856"
+  expect compile_and_run
+  source ny <<'NY'
+def f32 x = 1.5f32
+def f32 y = 2.25f32
+x + y
+NY
+}

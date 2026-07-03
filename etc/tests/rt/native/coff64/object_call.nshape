@@ -1,0 +1,12 @@
+shape x86_64_coff_object_call_reloc {
+  family "runtime-native"
+  generator "native"
+  features ["native", "object", "coff", "reloc", "x86_64", "nyir"]
+  template ny-test-case
+  flags "--native-backend x86_64 --host-triple x86_64-w64-windows-gnu -emit-only -o /tmp/nytrix-native-coff64-object-call.obj"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(i64 x, i64 y) i64 { x + y }
+add(40, 2)
+NY
+}

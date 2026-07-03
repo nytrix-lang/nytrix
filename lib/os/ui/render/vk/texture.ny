@@ -500,6 +500,135 @@ fn texture_count() int {
    return is_list(_textures) ? int(_textures.len) : 0
 }
 
+fn _vk_create_image_and_memory(int width, int height, int format, int mip_levels, int bpp) list {
+   mut img_ci = malloc(88)
+   mut img_ptr = malloc(8)
+   if !img_ci || !img_ptr { return [0, 0, 0, 0, img_ci, img_ptr] }
+   memset(img_ci, 0, 88)
+   store32(img_ci, _vk_stype_image_create_info(), 0)
+   store32(img_ci, 0, 16)
+   store32(img_ci, 1, 20)
+   store32(img_ci, format, 24)
+   store32(img_ci, width, 28)
+   store32(img_ci, height, 32)
+   store32(img_ci, 1, 36)
+   store32(img_ci, mip_levels, 40)
+   store32(img_ci, 1, 44)
+   store32(img_ci, 1, 48)
+   store32(img_ci, 0, 52)
+   store32(img_ci,
+      _vk_image_usage_transfer_dst() | _vk_image_usage_sampled() | (mip_levels > 1 ? _vk_image_usage_transfer_src() : 0),
+   56)
+   store32(img_ci, _vk_sharing_mode_exclusive(), 60)
+   store32(img_ci, 0, 80)
+   def r1 = create_image(_device, img_ci, 0, img_ptr)
+   if r1 != 0 {
+      _tex_debug("[gfx:vulkan] create_texture_ex create_image failed res=" + to_str(r1) + " w=" + to_str(width) + " h=" + to_str(height) + " fmt=" + to_str(format))
+      free(img_ci)
+      free(img_ptr)
+      return [0, 0, 0, 0, 0, 0]
+   }
+   def image = load64_h(img_ptr, 0)
+   mut mem_req = malloc(24)
+   if !mem_req {
+      destroy_image(_device, image, 0)
+      free(img_ci) free(img_ptr)
+      return [0, 0, 0, 0, 0, 0]
+   }
+   get_image_memory_requirements(_device, image, mem_req)
+   def size = load64_h(mem_req, 0)
+   def type_bits = load32(mem_req, 16)
+   if size <= 0 {
+      _tex_debug("[gfx:vulkan] create_texture_ex invalid mem requirements size=" + to_str(int(size)) + " w=" + to_str(width) + " h=" + to_str(height) + " fmt=" + to_str(format))
+      destroy_image(_device, image, 0)
+      _free_image_create_allocs(img_ci, img_ptr, mem_req)
+      return [0, 0, 0, 0, 0, 0]
+   }
+   def mem_idx = _find_memory_type(type_bits, _vk_memory_device_local())
+   if mem_idx < 0 {
+      _tex_debug("[gfx:vulkan] create_texture_ex no mem type type_bits=0x" + str.to_hex(type_bits) + " req=0x" + str.to_hex(_vk_memory_device_local()))
+      destroy_image(_device, image, 0)
+      _free_image_create_allocs(img_ci, img_ptr, mem_req)
+      return [0, 0, 0, 0, 0, 0]
+   }
+   mut alloc_info = malloc(64)
+   memset(alloc_info, 0, 64)
+   store32(alloc_info, _vk_stype_memory_allocate_info(), 0)
+   store64_h(alloc_info, size, 16)
+   store32(alloc_info, mem_idx, 24)
+   mut mem_ptr = malloc(8)
+   if !alloc_info || !mem_ptr {
+      destroy_image(_device, image, 0)
+      _free_image_create_allocs(img_ci, img_ptr, mem_req)
+      if alloc_info { free(alloc_info) }
+      if mem_ptr { free(mem_ptr) }
+      return [0, 0, 0, 0, 0, 0]
+   }
+   _tex_debug("[gfx:vulkan] create_texture_ex alloc mem size=" + to_str(int(size)) + " type=" + to_str(int(mem_idx)))
+   def alloc_res = allocate_memory(_device, alloc_info, 0, mem_ptr)
+   if alloc_res != 0 {
+      _tex_debug("[gfx:vulkan] create_texture_ex allocate_memory failed res=" + to_str(int(alloc_res)) + " bytes=" + to_str(int(size)))
+      destroy_image(_device, image, 0)
+      _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr)
+      return [0, 0, 0, 0, 0, 0]
+   }
+   def memory = load64_h(mem_ptr, 0)
+   def bind_res = bind_image_memory(_device, image, memory, 0)
+   if bind_res != 0 {
+      _tex_debug("[gfx:vulkan] create_texture_ex bind_image_memory failed res=" + to_str(int(bind_res)))
+      _destroy_texture_image_resources(0, image, memory)
+      _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr)
+      return [0, 0, 0, 0, 0, 0]
+   }
+   [image, memory, img_ci, img_ptr, mem_req, alloc_info, mem_ptr]
+}
+
+fn _vk_upload_texture_data_mips(any image, int width, int height, int format, int mip_levels, any pixels, any mip_pixels, any upload_pixels, int prebaked_total, int expected_mip_total) bool {
+   mut total = prebaked_total
+   if total <= 0 { total = expected_mip_total }
+   if total > _staging_capacity {
+      _tex_debug("[gfx:vulkan] staging too small mip_bytes=" + to_str(total) + " staging_bytes=" + to_str(_staging_capacity))
+      return false
+   }
+   if !_copy_upload_bytes(_staging_map, upload_pixels, total) { return false }
+   def cb = _ensure_upload_cb()
+   if !cb { return false }
+   if !_begin_upload_cb(cb) { return false }
+   VkImageMemoryBarrierColor(_upload_bar1, image, 0, _vk_access_transfer_write(), _vk_layout_undefined(), _vk_layout_transfer_dst(), 0, 1, mip_levels)
+   cmd_pipeline_barrier(cb, _vk_pipeline_top_of_pipe(), _vk_pipeline_transfer(), 0, 0, 0, 0, 0, 1, _upload_bar1)
+   def region = _upload_region
+   if !region { return false }
+   mut off = 0
+   mut cw = width
+   mut ch = height
+   mut level = 0
+   while level < mip_levels {
+      memset(region, 0, 56)
+      store64_h(region, off, 0)
+      store32(region, _vk_image_aspect_color(), 16)
+      store32(region, level, 20)
+      store32(region, 0, 24)
+      store32(region, 1, 28)
+      store32(region, 0, 32)
+      store32(region, 0, 36)
+      store32(region, 0, 40)
+      store32(region, cw, 44)
+      store32(region, ch, 48)
+      store32(region, 1, 52)
+      cmd_copy_buffer_to_image(cb, _staging_buffer, image, _vk_layout_transfer_dst(), 1, region)
+      off += cw * ch * 4
+      cw, ch = max(1, cw >> 1), max(1, ch >> 1)
+      level += 1
+   }
+   _record_upload_shader_read_barrier(cb, image, mip_levels)
+   end_command_buffer(cb)
+   if !_submit_upload_cb(cb) {
+      _tex_debug("[gfx:vulkan] create_texture_ex upload submit failed")
+      return false
+   }
+   true
+}
+
 fn create_texture_ex(int width,
    int height,
    any pixels,
@@ -533,75 +662,17 @@ fn create_texture_ex(int width,
    def tex_filter = _normalize_filter(filter)
    def tex_sampler = _texture_sampler(tex_filter, wrap_s, wrap_t)
    def mip_levels = use_mipmaps_live ? _mip_level_count(width, height) : 1
-   mut img_ci = malloc(88)
-   mut img_ptr = malloc(8)
-   if !img_ci || !img_ptr { return -1 }
-   memset(img_ci, 0, 88)
-   store32(img_ci, _vk_stype_image_create_info(), 0)
-   store32(img_ci, 0, 16)
-   store32(img_ci, 1, 20)
-   store32(img_ci, format, 24)
-   store32(img_ci, width, 28)
-   store32(img_ci, height, 32)
-   store32(img_ci, 1, 36)
-   store32(img_ci, mip_levels, 40)
-   store32(img_ci, 1, 44)
-   store32(img_ci, 1, 48)
-   store32(img_ci, 0, 52)
-   store32(img_ci,
-      _vk_image_usage_transfer_dst() | _vk_image_usage_sampled() | (use_mipmaps_live ? _vk_image_usage_transfer_src() : 0),
-   56)
-   store32(img_ci, _vk_sharing_mode_exclusive(), 60)
-   store32(img_ci, 0, 80)
-   def r1 = create_image(_device, img_ci, 0, img_ptr)
-   if r1 != 0 {
-      _tex_debug("[gfx:vulkan] create_texture_ex create_image failed res=" + to_str(r1) + " w=" + to_str(width) + " h=" + to_str(height) + " fmt=" + to_str(format))
-      free(img_ci)
-      free(img_ptr)
-      return -1
-   }
-   def image = load64_h(img_ptr, 0)
-   mut mem_req = malloc(24)
-   if !mem_req { return -1 }
-   get_image_memory_requirements(_device, image, mem_req)
-   def size = load64_h(mem_req, 0)
-   def type_bits = load32(mem_req, 16)
-   if size <= 0 {
-      _tex_debug("[gfx:vulkan] create_texture_ex invalid mem requirements size=" + to_str(int(size)) + " w=" + to_str(width) + " h=" + to_str(height) + " fmt=" + to_str(format))
-      destroy_image(_device, image, 0)
-      _free_image_create_allocs(img_ci, img_ptr, mem_req)
-      return -1
-   }
-   def mem_idx = _find_memory_type(type_bits, _vk_memory_device_local())
-   if mem_idx < 0 {
-      _tex_debug("[gfx:vulkan] create_texture_ex no mem type type_bits=0x" + str.to_hex(type_bits) + " req=0x" + str.to_hex(_vk_memory_device_local()))
-      destroy_image(_device, image, 0)
-      _free_image_create_allocs(img_ci, img_ptr, mem_req)
-      return -1
-   }
-   mut alloc_info = malloc(64)
-   memset(alloc_info, 0, 64)
-   store32(alloc_info, _vk_stype_memory_allocate_info(), 0)
-   store64_h(alloc_info, size, 16)
-   store32(alloc_info, mem_idx, 24)
-   mut mem_ptr = malloc(8)
-   if !alloc_info || !mem_ptr { return -1 }
-   _tex_debug("[gfx:vulkan] create_texture_ex alloc mem size=" + to_str(int(size)) + " type=" + to_str(int(mem_idx)))
-   def alloc_res = allocate_memory(_device, alloc_info, 0, mem_ptr)
-   if alloc_res != 0 {
-      _tex_debug("[gfx:vulkan] create_texture_ex allocate_memory failed res=" + to_str(int(alloc_res)) + " bytes=" + to_str(int(size)))
-      destroy_image(_device, image, 0)
-      _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr)
-      return -1
-   }
-   def memory = load64_h(mem_ptr, 0)
-   def bind_res = bind_image_memory(_device, image, memory, 0)
-   if bind_res != 0 {
-      _tex_debug("[gfx:vulkan] create_texture_ex bind_image_memory failed res=" + to_str(int(bind_res)))
-      _destroy_texture_image_resources(0, image, memory)
-      _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr)
-      return -1
-   }
+
+   def res = _vk_create_image_and_memory(width, height, format, mip_levels, bpp)
+   def image = res[0]
+   if !image { return -1 }
+   def memory = res[1]
+   def img_ci = res[2]
+   def img_ptr = res[3]
+   def mem_req = res[4]
+   def alloc_info = res[5]
+   def mem_ptr = res[6]
+
    mut view_ci = _tex_alloc(80)
    store32(view_ci, _vk_stype_image_view_create_info(), 0)
    store64_h(view_ci, image, 24)
@@ -614,6 +685,8 @@ fn create_texture_ex(int width,
    def r3 = create_image_view(_device, view_ci, 0, view_ptr)
    if r3 != 0 {
       _tex_debug("[gfx:vulkan] create_texture_ex image_view failed res=" + to_str(r3))
+      _destroy_texture_image_resources(0, image, memory)
+      _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr, view_ci, view_ptr)
       return -1
    }
    def view = load64_h(view_ptr, 0)
@@ -635,92 +708,31 @@ fn create_texture_ex(int width,
    }
    if pixels && _staging_map {
       if use_mipmaps_live && mip_pixels {
-         mut total = prebaked_total
-         if total <= 0 { total = expected_mip_total }
-         if total > _staging_capacity {
-            _tex_debug(f"[gfx:vulkan] staging too small mip_bytes={total} staging_bytes={_staging_capacity}")
+         if !_vk_upload_texture_data_mips(image, width, height, format, mip_levels, pixels, mip_pixels, upload_pixels, prebaked_total, expected_mip_total) {
             if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
-            return -1
-         }
-         if !_copy_upload_bytes(_staging_map, upload_pixels, total) {
-            if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
-            return -1
-         }
-         def cb = _ensure_upload_cb()
-         if !cb {
-            if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
-            return -1
-         }
-         if !_begin_upload_cb(cb) {
-            if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
-            return -1
-         }
-         VkImageMemoryBarrierColor(_upload_bar1,
-            image,
-            0,
-            _vk_access_transfer_write(),
-            _vk_layout_undefined(),
-            _vk_layout_transfer_dst(),
-            0,
-            1,
-         mip_levels)
-         cmd_pipeline_barrier(cb,
-            _vk_pipeline_top_of_pipe(),
-            _vk_pipeline_transfer(),
-            0,
-            0,
-            0,
-            0,
-            0,
-            1,
-         _upload_bar1)
-         def region = _upload_region
-         if !region {
-            if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
-            return -1
-         }
-         mut off = 0
-         mut cw = width
-         mut ch = height
-         mut level = 0
-         while level < mip_levels {
-            memset(region, 0, 56)
-            store64_h(region, off, 0)
-            store32(region, _vk_image_aspect_color(), 16)
-            store32(region, level, 20)
-            store32(region, 0, 24)
-            store32(region, 1, 28)
-            store32(region, 0, 32)
-            store32(region, 0, 36)
-            store32(region, 0, 40)
-            store32(region, cw, 44)
-            store32(region, ch, 48)
-            store32(region, 1, 52)
-            cmd_copy_buffer_to_image(cb, _staging_buffer, image, _vk_layout_transfer_dst(), 1, region)
-            off += cw * ch * 4
-            cw, ch = max(1, cw >> 1), max(1, ch >> 1)
-            level += 1
-         }
-         _record_upload_shader_read_barrier(cb, image, mip_levels)
-         end_command_buffer(cb)
-         if !_submit_upload_cb(cb) {
-            _tex_debug("[gfx:vulkan] create_texture_ex upload submit failed")
-            if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
+            _destroy_texture_image_resources(view, image, memory)
+            _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr, view_ci, view_ptr)
             return -1
          }
       } else {
          if img_size > _staging_capacity {
-            _tex_debug(f"[gfx:vulkan] staging too small image_bytes={img_size} staging_bytes={_staging_capacity}")
+            _tex_debug("[gfx:vulkan] staging too small image_bytes=" + to_str(img_size) + " staging_bytes=" + to_str(_staging_capacity))
             if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
+            _destroy_texture_image_resources(view, image, memory)
+            _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr, view_ci, view_ptr)
             return -1
          }
          if !_copy_upload_bytes(_staging_map, upload_pixels, img_size) {
             if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
+            _destroy_texture_image_resources(view, image, memory)
+            _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr, view_ci, view_ptr)
             return -1
          }
          if !_upload_image_region(image, 0, 0, width, height, _vk_layout_undefined()) {
             _tex_debug("[gfx:vulkan] create_texture_ex upload_image_region failed w=" + to_str(width) + " h=" + to_str(height) + " bytes=" + to_str(img_size))
             if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
+            _destroy_texture_image_resources(view, image, memory)
+            _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr, view_ci, view_ptr)
             return -1
          }
       }
@@ -728,6 +740,8 @@ fn create_texture_ex(int width,
       if !_upload_image_region(image, 0, 0, width, height, _vk_layout_undefined()) {
          _tex_debug("[gfx:vulkan] create_texture_ex upload_image_region failed empty pixels w=" + to_str(width) + " h=" + to_str(height))
          if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
+         _destroy_texture_image_resources(view, image, memory)
+         _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr, view_ci, view_ptr)
          return -1
       }
    }

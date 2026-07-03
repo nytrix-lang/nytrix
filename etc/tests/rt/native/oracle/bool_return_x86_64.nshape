@@ -1,0 +1,14 @@
+shape oracle_bool_return_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result bool]
+  template ny-test-case
+  flags "--native-result-oracle=7"
+  expect compile_and_run
+  source ny <<'NY'
+fn gt(i64 a, i64 b) bool {
+  a > b
+}
+if gt(5, 3) { 7 } else { 9 }
+NY
+}

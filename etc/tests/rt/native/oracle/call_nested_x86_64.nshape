@@ -1,0 +1,17 @@
+shape oracle_call_nested_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result nested call]
+  template ny-test-case
+  flags "--native-result-oracle=10"
+  expect compile_and_run
+  source ny <<'NY'
+fn add2(i64 a, i64 b) i64 {
+  a + b
+}
+fn add4(i64 a, i64 b, i64 c, i64 d) i64 {
+  add2(a, b) + add2(c, d)
+}
+add4(1, 2, 3, 4)
+NY
+}
