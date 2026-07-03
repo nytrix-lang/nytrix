@@ -1,5 +1,5 @@
 ;; Keywords: 3d gltf glb parse
-module std.math.parse.3d.gltf.shared(GLTF_COMP_NONE, GLTF_COMP_BYTE, GLTF_COMP_UBYTE, GLTF_COMP_SHORT, GLTF_COMP_USHORT, GLTF_COMP_UINT, GLTF_COMP_FLOAT, GLTF_TYPE_SCALAR, GLTF_TYPE_VEC2, GLTF_TYPE_VEC3, GLTF_TYPE_VEC4, GLTF_TYPE_MAT2, GLTF_TYPE_MAT3, GLTF_TYPE_MAT4, _GLB_MAGIC, _GLB_CHUNK_JSON, _GLB_CHUNK_BIN, _gltf_is_json_ws, GltfCompSize, GltfTypeCount, GltfTypeCols, GltfTypeRows, GltfImageMimeSupported, GltfImageExtFromMime, GltfExtensionStatus, _gltf_img_uri_cache, _gltf_material_infos_cache, _gltf_anim_info_cache, _gltf_acc_res_cache, _gltf_anim_sample_cache, _gltf_node_local_mats_cache, _gltf_skin_inv_bind_cache, _gltf_mesh_inv_cache, _gltf_visibility_flag_cache, _gltf_disable_skinning_mode, _gltf_skin_raw_off_mode, _gltf_skin_validate_mode, _gltf_skin_no_mesh_inv_mode, _gltf_skin_transpose_inv_bind_mode, _gltf_skin_invbind_first_mode, _gltf_anim_fast_mode, _gltf_anim_fast_skin_mode, _gltf_ensure_caches, _gltf_env_truthy_flag, _gltf_env_toggle_flag, _gltf_disable_skinning_enabled, _gltf_skin_raw_off_enabled, _gltf_skin_validate_enabled, _gltf_skin_no_mesh_inv_enabled, _gltf_skin_transpose_inv_bind_enabled, _gltf_skin_invbind_first_enabled, _gltf_anim_fast_enabled, _gltf_anim_fast_skin_enabled, _gltf_cache_key_from_g, _gltf_cache_key_from_data, _gltf_stamp_cache_key, _GLTF_CACHE_LIMIT_SMALL, _GLTF_CACHE_LIMIT_MED, _GLTF_CACHE_LIMIT_BIG, GLTF_MODE_TRIANGLES, _GLTF_VTX_STRIDE, _GLTF_VTX_OFF_X, _GLTF_VTX_OFF_Y, _GLTF_VTX_OFF_Z, _GLTF_VTX_OFF_U, _GLTF_VTX_OFF_V, _GLTF_VTX_OFF_C, _GLTF_VTX_OFF_NX, _GLTF_VTX_OFF_NY, _GLTF_VTX_OFF_NZ, _GLTF_VTX_OFF_TX, _GLTF_VTX_OFF_TY, _GLTF_VTX_OFF_TZ, _GLTF_VTX_OFF_TW, _GLTF_VTX_OFF_U2, _GLTF_VTX_OFF_V2, _GLTF_VTX_OFF_TEX, _GLTF_INV_255, _GLTF_INV_127, _GLTF_INV_65535, _GLTF_INV_32767, _gltf_copy_bytes, _gltf_copy_blob_bytes, _gltf_blob_ptr, _gltf_is_path_sep, _gltf_path_dirname, _gltf_url_decode, _gltf_float_bad, _gltf_float3_bad, _gltf_float6_bad, _gltf_list_has_bad_float, _gltf_mat3x4_bad, _gltf_num_or, _gltf_vec3, _gltf_vec4, _gltf_anim_duration_valid, _gltf_doc_has_invalid_node_trs, _gltf_align_up, _gltf_elem_size, _gltf_read_f32_fast, _gltf_read_f32_acc, _gltf_read_index_acc, _gltf_node_local_mats, _gltf_node_visit_key, _gltf_make_material_slot, _gltf_alpha_mode_code, _gltf_prim_mode_expands_to_vertices, _gltf_apply_prim_mode_opts, _gltf_active_scene_idx, _gltf_vertex_color_u32, _gltf_make_uv_xform, _gltf_mat3x4_num, _gltf_mat3_num, _gltf_pack_uv_xform_words_from_values, _gltf_pack_uv_xform_words, _gltf_uv_xf_force_uv0, _gltf_pick_primary_uv_props, _gltf_extension_status, _gltf_meshes, _gltf_transform_aabb, _gltf_comp_size, _gltf_type_count)
+module std.math.parse.3d.gltf.shared(GLTF_COMP_NONE, GLTF_COMP_BYTE, GLTF_COMP_UBYTE, GLTF_COMP_SHORT, GLTF_COMP_USHORT, GLTF_COMP_UINT, GLTF_COMP_FLOAT, GLTF_TYPE_SCALAR, GLTF_TYPE_VEC2, GLTF_TYPE_VEC3, GLTF_TYPE_VEC4, GLTF_TYPE_MAT2, GLTF_TYPE_MAT3, GLTF_TYPE_MAT4, _GLB_MAGIC, _GLB_CHUNK_JSON, _GLB_CHUNK_BIN, _gltf_is_json_ws, GltfCompSize, GltfTypeCount, GltfTypeCols, GltfTypeRows, GltfImageMimeSupported, GltfImageExtFromMime, GltfExtensionStatus, _gltf_img_uri_cache, _gltf_material_infos_cache, _gltf_anim_info_cache, _gltf_acc_res_cache, _gltf_anim_sample_cache, _gltf_node_local_mats_cache, _gltf_skin_inv_bind_cache, _gltf_mesh_inv_cache, _gltf_visibility_flag_cache, _gltf_disable_skinning_mode, _gltf_skin_raw_off_mode, _gltf_skin_validate_mode, _gltf_skin_no_mesh_inv_mode, _gltf_skin_transpose_inv_bind_mode, _gltf_skin_invbind_first_mode, _gltf_anim_fast_mode, _gltf_anim_fast_skin_mode, _gltf_ensure_caches, _gltf_env_truthy_flag, _gltf_env_toggle_flag, _gltf_disable_skinning_enabled, _gltf_skin_raw_off_enabled, _gltf_skin_validate_enabled, _gltf_skin_no_mesh_inv_enabled, _gltf_skin_transpose_inv_bind_enabled, _gltf_skin_invbind_first_enabled, _gltf_anim_fast_enabled, _gltf_anim_fast_skin_enabled, _gltf_cache_key_from_g, _gltf_cache_key_from_data, _gltf_stamp_cache_key, _GLTF_CACHE_LIMIT_SMALL, _GLTF_CACHE_LIMIT_MED, _GLTF_CACHE_LIMIT_BIG, GLTF_MODE_TRIANGLES, _GLTF_VTX_STRIDE, _GLTF_VTX_OFF_X, _GLTF_VTX_OFF_Y, _GLTF_VTX_OFF_Z, _GLTF_VTX_OFF_U, _GLTF_VTX_OFF_V, _GLTF_VTX_OFF_C, _GLTF_VTX_OFF_NX, _GLTF_VTX_OFF_NY, _GLTF_VTX_OFF_NZ, _GLTF_VTX_OFF_TX, _GLTF_VTX_OFF_TY, _GLTF_VTX_OFF_TZ, _GLTF_VTX_OFF_TW, _GLTF_VTX_OFF_U2, _GLTF_VTX_OFF_V2, _GLTF_VTX_OFF_TEX, _GLTF_INV_255, _GLTF_INV_127, _GLTF_INV_65535, _GLTF_INV_32767, _gltf_copy_bytes, _gltf_copy_blob_bytes, _gltf_blob_ptr, _gltf_is_path_sep, _gltf_path_dirname, _gltf_url_decode, _gltf_float_bad, _gltf_float3_bad, _gltf_float6_bad, _gltf_list_has_bad_float, _gltf_mat3x4_bad, _gltf_num_or, _gltf_vec3, _gltf_vec4, _gltf_anim_duration_valid, _gltf_doc_has_invalid_node_trs, _gltf_align_up, _gltf_elem_size, _gltf_read_f32_fast, _gltf_read_f32_acc, _gltf_read_index_acc, _gltf_node_local_mats, _gltf_node_visit_key, _gltf_make_material_slot, _gltf_alpha_mode_code, _gltf_prim_mode_expands_to_vertices, _gltf_apply_prim_mode_opts, _gltf_active_scene_idx, _gltf_vertex_color_u32, _gltf_make_uv_xform, _gltf_mat3x4_num, _gltf_mat3_num, _gltf_pack_uv_xform_words_from_values, _gltf_pack_uv_xform_words, _gltf_uv_xf_force_uv0, _gltf_pick_primary_uv_props, _gltf_extension_status, _gltf_extension_required_supported, gltf_supported_extension_caps, gltf_extensions_report, gltf_required_extension_failures, _gltf_meshes, _gltf_transform_aabb, _gltf_comp_size, _gltf_type_count)
 use std.core
 use std.math.bin
 use std.math
@@ -87,9 +87,9 @@ comptime table GltfExtensionStatus {
    "KHR_materials_anisotropy", "KHR_materials_dispersion", "KHR_materials_refraction",
    "KHR_materials_subsurface" -> "parse+packed"
    "EXT_texture_webp" -> "parse+decode"
-   "KHR_meshopt_compression", "EXT_meshopt_compression" -> "fallback-or-todo"
-   "KHR_texture_basisu" -> "fallback-or-todo"
-   "KHR_draco_mesh_compression" -> "todo"
+   "KHR_meshopt_compression", "EXT_meshopt_compression" -> "fallback-or-unsupported"
+   "KHR_texture_basisu" -> "fallback-or-unsupported"
+   "KHR_draco_mesh_compression" -> "unsupported"
    "KHR_materials_volume_scatter", "KHR_materials_diffuse_transmission", "KHR_materials_pbrSpecularGlossiness",
    "KHR_materials_variants", "KHR_lights_punctual", "KHR_node_visibility", "KHR_animation_pointer",
    "EXT_mesh_gpu_instancing", "KHR_materials_alpha_coverage", "MSFT_lod", "KHR_mesh_quantization", "KHR_xmp", "KHR_xmp_json_ld" -> "parse"
@@ -164,7 +164,7 @@ fn _gltf_skin_invbind_first_enabled() bool {
 }
 
 fn _gltf_anim_fast_enabled() bool {
-   _gltf_anim_fast_mode = _gltf_env_toggle_flag(_gltf_anim_fast_mode, "NY_GLTF_ANIM_FAST", false)
+   _gltf_anim_fast_mode = _gltf_env_toggle_flag(_gltf_anim_fast_mode, "NY_GLTF_ANIM_FAST", true)
    _gltf_anim_fast_mode == 1
 }
 
@@ -706,6 +706,109 @@ fn _gltf_pick_primary_uv_props(any info, any texrec=0) list {
 }
 
 fn _gltf_extension_status(str name) str { comptime match GltfExtensionStatus(name, "unknown") }
+
+fn _gltf_extension_required_supported(str status) bool {
+   status != "unknown" && status != "unsupported" && status != "fallback-or-unsupported"
+}
+
+fn _gltf_extension_status_rows() list {
+   [
+      ["KHR_texture_transform", "parse+shader"],
+      ["KHR_materials_unlit", "parse+shader"],
+      ["KHR_materials_emissive_strength", "parse+shader"],
+      ["KHR_materials_specular", "parse+packed"],
+      ["KHR_materials_ior", "parse+packed"],
+      ["KHR_materials_sheen", "parse+packed"],
+      ["KHR_materials_clearcoat", "parse+packed"],
+      ["KHR_materials_transmission", "parse+packed"],
+      ["KHR_materials_volume", "parse+packed"],
+      ["KHR_materials_iridescence", "parse+packed"],
+      ["KHR_materials_anisotropy", "parse+packed"],
+      ["KHR_materials_dispersion", "parse+packed"],
+      ["KHR_materials_refraction", "parse+packed"],
+      ["KHR_materials_subsurface", "parse+packed"],
+      ["EXT_texture_webp", "parse+decode"],
+      ["KHR_meshopt_compression", "fallback-or-unsupported"],
+      ["EXT_meshopt_compression", "fallback-or-unsupported"],
+      ["KHR_texture_basisu", "fallback-or-unsupported"],
+      ["KHR_draco_mesh_compression", "unsupported"],
+      ["KHR_materials_volume_scatter", "parse"],
+      ["KHR_materials_diffuse_transmission", "parse"],
+      ["KHR_materials_pbrSpecularGlossiness", "parse"],
+      ["KHR_materials_variants", "parse"],
+      ["KHR_lights_punctual", "parse"],
+      ["KHR_node_visibility", "parse"],
+      ["KHR_animation_pointer", "parse"],
+      ["EXT_mesh_gpu_instancing", "parse"],
+      ["KHR_materials_alpha_coverage", "parse"],
+      ["MSFT_lod", "parse"],
+      ["KHR_mesh_quantization", "parse"],
+      ["KHR_xmp", "parse"],
+      ["KHR_xmp_json_ld", "parse"]
+   ]
+}
+
+fn gltf_supported_extension_caps() dict {
+   "Returns known glTF extension names mapped to Nytrix support status strings."
+   def rows = _gltf_extension_status_rows()
+   mut out = dict(rows.len * 2)
+   mut i = 0
+   while i < rows.len {
+      def row = rows.get(i, [])
+      if is_list(row) && row.len >= 2 { out[row.get(0, "")] = row.get(1, "unknown") }
+      i += 1
+   }
+   out
+}
+
+fn _gltf_extension_doc(any gltf_data) any {
+   if is_dict(gltf_data) && is_dict(gltf_data.get("gltf", 0)) { return gltf_data.get("gltf", 0) }
+   gltf_data
+}
+
+fn _gltf_extension_report_row(str name) dict {
+   def status = _gltf_extension_status(name)
+   {
+      "name": name,
+      "status": status,
+      "known": status != "unknown",
+      "supported": _gltf_extension_required_supported(status)
+   }
+}
+
+fn _gltf_extension_report_list(any names) list {
+   if !is_list(names) { return [] }
+   mut out = []
+   mut i = 0
+   while i < names.len {
+      out = out.append(_gltf_extension_report_row(to_str(names.get(i, ""))))
+      i += 1
+   }
+   out
+}
+
+fn gltf_extensions_report(any gltf_data) dict {
+   "Reports used and required glTF extensions with known/support status."
+   def g = _gltf_extension_doc(gltf_data)
+   if !is_dict(g) { return {"used": [], "required": []} }
+   {
+      "used": _gltf_extension_report_list(g.get("extensionsUsed", [])),
+      "required": _gltf_extension_report_list(g.get("extensionsRequired", []))
+   }
+}
+
+fn gltf_required_extension_failures(any gltf_data) list {
+   "Returns required glTF extensions that Nytrix cannot safely satisfy."
+   def required = gltf_extensions_report(gltf_data).get("required", [])
+   mut out = []
+   mut i = 0
+   while i < required.len {
+      def row = required.get(i, 0)
+      if is_dict(row) && !row.get("supported", false) { out = out.append(row) }
+      i += 1
+   }
+   out
+}
 
 fn _gltf_meshes(any gltf_data) any {
    def g = gltf_data.get("gltf", 0)

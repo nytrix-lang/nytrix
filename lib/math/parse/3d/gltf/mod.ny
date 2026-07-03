@@ -30,6 +30,9 @@ module std.math.parse.3d.gltf(
    gltf_skin_joint_mats,
    gltf_apply_skinning,
    gltf_free_skin_mats_cache,
+   gltf_supported_extension_caps,
+   gltf_extensions_report,
+   gltf_required_extension_failures,
    gltf_has_node_visibility,
    gltf_resolve_node_visibility,
    gltf_apply_morph_weights,
@@ -112,6 +115,12 @@ fn gltf_skin_joint_mats(any a, any b, any c, any d) any = sub_anim.gltf_skin_joi
 fn gltf_apply_skinning(any a, any b, any c, any d) any = sub_anim.gltf_apply_skinning(a, b, c, d)
 
 fn gltf_free_skin_mats_cache(any a) any = sub_anim.gltf_free_skin_mats_cache(a)
+
+fn gltf_supported_extension_caps() any = sub_shared.gltf_supported_extension_caps()
+
+fn gltf_extensions_report(any a) any = sub_shared.gltf_extensions_report(a)
+
+fn gltf_required_extension_failures(any a) any = sub_shared.gltf_required_extension_failures(a)
 
 fn gltf_has_node_visibility(any a, any b) any = sub_scene.gltf_has_node_visibility(a, b)
 

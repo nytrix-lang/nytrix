@@ -1,0 +1,19 @@
+shape tier_profile {
+  family "runtime-native"
+  generator "native"
+  features ["native", "tier", "profile", "vm"]
+  template ny-test-case
+  flags "--native-backend x86_64 --native-tier-report=/tmp/nytrix-native-tier-profile.txt --nyir-run-profile=/tmp/nytrix-native-tier-vm-profile.txt --native-tier-budget=128 --native-hot-threshold=4 --native-cache-score=80"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(i64 x, i64 y) i64 {
+  x + y
+}
+
+mut acc = 0
+for i in 0..5 {
+  acc = add(acc, i)
+}
+acc
+NY
+}

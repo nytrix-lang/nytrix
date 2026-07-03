@@ -250,11 +250,11 @@ fn pure_inc(x) {
 
 assert(pure_inc(9) == 10, "@pure function failed")
 
-fn llvm_ctpop(x) {
-   llvm("llvm.ctpop.i64", x)
+fn backend_ctpop(x) {
+   backend_intrinsic("ctpop.i64", x)
 }
 
-assert(llvm_ctpop(0xf0f0) == 8, "llvm(...) ctpop intrinsic failed")
+assert(backend_ctpop(0xf0f0) == 8, "backend_intrinsic(...) ctpop intrinsic failed")
 
 @hot
 @jit

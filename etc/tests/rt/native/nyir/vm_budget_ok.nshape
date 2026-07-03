@@ -1,0 +1,14 @@
+shape nyir_vm_budget_ok {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "budget"]
+  template ny-test-case
+  flags "--nyir-run --nyir-run-max-steps=256 --nyir-run-recursion-limit=16"
+  expect compile_and_run
+  source ny <<'NY'
+fn sum_to(i64 n) i64 {
+  if n <= 0 { 0 } else { n + sum_to(n - 1) }
+}
+sum_to(5)
+NY
+}

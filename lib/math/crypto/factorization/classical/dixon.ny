@@ -1,5 +1,8 @@
 ;; Keywords: factorization classical dixon euler gcd
-;; References: std.math.crypto.factorization
+;; Reference:
+;; - J. D. Dixon, Asymptotically Fast Factorization of Integers.
+;; References:
+;; - std.math.crypto.factorization
 module std.math.crypto.factorization.classical.dixon(dixon_factor, euler_factor)
 use std.math.nt
 use std.math.scalar as math

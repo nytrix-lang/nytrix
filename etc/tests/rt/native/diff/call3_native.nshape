@@ -1,0 +1,14 @@
+shape diff_call3_native {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 differential call]
+  template ny-test-case
+  flags "--native-backend x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+fn add3(i64 a, i64 b, i64 c) i64 {
+  a + b + c
+}
+add3(1, 2, 3)
+NY
+}

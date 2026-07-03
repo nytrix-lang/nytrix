@@ -2154,6 +2154,159 @@ fn _flatter_triangular_violation_report(any basis) dict {
    }
 }
 
+fn _flatter_blocked_triangular_reduce_tile(dict state, int r0, int r1, int c0, int c1, int cols, any row_i64_safe, bool track, bool record_ops, int p, int rb, int cb) any {
+   mut work = state.get("work")
+   mut transform = state.get("transform")
+   mut row_bounds = state.get("row_bounds")
+   mut fast_row_ops = int(state.get("fast_row_ops", 0))
+   mut generic_row_ops = int(state.get("generic_row_ops", 0))
+   mut generic_checked_overflow_ops = int(state.get("generic_checked_overflow_ops", 0))
+   mut generic_unbounded_row_ops = int(state.get("generic_unbounded_row_ops", 0))
+   mut generic_big_coeff_ops = int(state.get("generic_big_coeff_ops", 0))
+   mut generic_dynamic_ops = int(state.get("generic_dynamic_ops", 0))
+   mut op_count = int(state.get("op_count", 0))
+   mut ops = state.get("ops")
+   mut tile_reports = state.get("tile_reports")
+   mut tile_count = int(state.get("tile_count", 0))
+
+   mut tile_ops = []
+   mut changed = false
+   mut i = r0
+   while i < r1 {
+      mut row_i = work.get(i)
+      if row_bounds.get(i) == -1 {
+         def compressed_i = _flatter_compress_row_i64_bound(row_i, row_i64_safe)
+         if compressed_i.get(1) >= 0 {
+            row_i = compressed_i.get(0)
+            row_bounds[i] = compressed_i.get(1)
+         } else {
+            row_bounds[i] = -2
+         }
+      }
+      mut transform_i = track ? transform.get(i) : []
+      mut j = min(min(i, cols - 1), c1) - 1
+      while j >= c0 {
+         mut row_j = work.get(j)
+         if row_bounds.get(j) == -1 {
+            def compressed_j = _flatter_compress_row_i64_bound(row_j, row_i64_safe)
+            if compressed_j.get(1) >= 0 {
+               row_j = compressed_j.get(0)
+               row_bounds[j] = compressed_j.get(1)
+               work[j] = row_j
+            } else {
+               row_bounds[j] = -2
+            }
+         }
+         def pivot = row_j.get(j)
+         def pivot_nonzero = is_int(pivot) ? int(pivot) != 0 : Z(pivot) != Z(0)
+         if pivot_nonzero {
+            def raw_num = row_i.get(j)
+            if is_int(raw_num) && is_int(pivot) {
+               def coeff_i = _flatter_round_div_signed_int(int(raw_num), int(pivot))
+               if coeff_i != 2147483647 && coeff_i != 0 {
+                  def abs_coeff_i = coeff_i < 0 ? -coeff_i : coeff_i
+                  def row_bound_i = int(row_bounds.get(i))
+                  def row_bound_j = int(row_bounds.get(j))
+                  if abs_coeff_i <= 1000000000 && row_bound_i >= 0 && row_bound_j >= 0 && row_bound_i < row_i64_safe && row_bound_j <= (row_i64_safe - row_bound_i) / abs_coeff_i {
+                     def fast = _flatter_row_submul_prefix_i64_bound_cached(row_i, row_j, coeff_i, j, row_bound_i)
+                     row_i = fast.get(0)
+                     row_bounds[i] = fast.get(1)
+                     fast_row_ops += 1
+                  } elif row_bound_i >= 0 && row_bound_j >= 0 {
+                     def checked = _flatter_row_submul_prefix_i64_checked_cached(row_i, row_j, coeff_i, j, row_i64_safe, row_bound_i)
+                     if checked.get(1) >= 0 {
+                        row_i = checked.get(0)
+                        row_bounds[i] = checked.get(1)
+                        fast_row_ops += 1
+                     } else {
+                        row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff_i, j)
+                        row_bounds[i] = -1
+                        generic_row_ops += 1
+                        generic_checked_overflow_ops += 1
+                     }
+                  } else {
+                     row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff_i, j)
+                     row_bounds[i] = -1
+                     generic_row_ops += 1
+                     generic_unbounded_row_ops += 1
+                  }
+                  if track { transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff_i) }
+                  op_count += 1
+                  if record_ops {
+                     def op = {"pass": p + 1, "row_block": rb, "col_block": cb, "row": i, "against": j, "coeff": coeff_i}
+                     tile_ops = tile_ops.append(op)
+                     ops = ops.append(op)
+                  }
+                  changed = true
+               } elif coeff_i == 2147483647 {
+                  def coeff = _flatter_round_div_signed(raw_num, pivot)
+                  if coeff != Z(0) {
+                     row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff, j)
+                     row_bounds[i] = -1
+                     generic_row_ops += 1
+                     generic_big_coeff_ops += 1
+                     if track { transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff) }
+                     op_count += 1
+                     if record_ops {
+                        def op = {"pass": p + 1, "row_block": rb, "col_block": cb, "row": i, "against": j, "coeff": coeff}
+                        tile_ops = tile_ops.append(op)
+                        ops = ops.append(op)
+                     }
+                     changed = true
+                  }
+               }
+            } else {
+               def coeff = _flatter_round_div_signed(raw_num, pivot)
+               if coeff != Z(0) {
+                  row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff, j)
+                  row_bounds[i] = -1
+                  generic_row_ops += 1
+                  generic_dynamic_ops += 1
+                  if track { transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff) }
+                  op_count += 1
+                  if record_ops {
+                     def op = {"pass": p + 1, "row_block": rb, "col_block": cb, "row": i, "against": j, "coeff": coeff}
+                     tile_ops = tile_ops.append(op)
+                     ops = ops.append(op)
+                  }
+                  changed = true
+               }
+            }
+         }
+         j -= 1
+      }
+      work[i] = row_i
+      if track { transform[i] = transform_i }
+      i += 1
+   }
+   tile_count += 1
+   if record_ops {
+      tile_reports = tile_reports.append({
+            "pass": p + 1,
+            "row_block": rb,
+            "col_block": cb,
+            "row_start": r0,
+            "row_end": r1,
+            "col_start": c0,
+            "col_end": c1,
+            "op_count": tile_ops.len,
+            "ops": tile_ops
+         })
+   }
+   state["fast_row_ops"] = fast_row_ops
+   state["generic_row_ops"] = generic_row_ops
+   state["generic_checked_overflow_ops"] = generic_checked_overflow_ops
+   state["generic_unbounded_row_ops"] = generic_unbounded_row_ops
+   state["generic_big_coeff_ops"] = generic_big_coeff_ops
+   state["generic_dynamic_ops"] = generic_dynamic_ops
+   state["op_count"] = op_count
+   state["ops"] = ops
+   state["tile_reports"] = tile_reports
+   state["tile_count"] = tile_count
+   state["changed"] = changed
+   0
+}
+
 fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passes=1, bool track_transform=true) dict {
    "Exact blocked size reduction for lower-triangular row bases."
    def t0 = ticks()
@@ -2222,6 +2375,15 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
    mut work = cloned.get("rows")
    mut row_bounds = _flatter_row_i64_abs_bounds(work, row_i64_safe)
    mut transform = track ? _flatter_identity_rows(rows) : []
+   def state = {
+      "work": work, "transform": transform, "row_bounds": row_bounds,
+      "fast_row_ops": fast_row_ops, "generic_row_ops": generic_row_ops,
+      "generic_checked_overflow_ops": generic_checked_overflow_ops,
+      "generic_unbounded_row_ops": generic_unbounded_row_ops,
+      "generic_big_coeff_ops": generic_big_coeff_ops,
+      "generic_dynamic_ops": generic_dynamic_ops,
+      "op_count": op_count, "ops": ops, "tile_reports": tile_reports, "tile_count": tile_count
+   }
    if triangular {
       mut p = 0
       while p < max(1, passes) {
@@ -2234,129 +2396,8 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
             while cb >= 0 {
                def c0 = cb * bs
                def c1 = min(rows, c0 + bs)
-               mut tile_ops = []
-               mut i = r0
-               while i < r1 {
-                  mut row_i = work.get(i)
-                  if row_bounds.get(i) == -1 {
-                     def compressed_i = _flatter_compress_row_i64_bound(row_i, row_i64_safe)
-                     if compressed_i.get(1) >= 0 {
-                        row_i = compressed_i.get(0)
-                        row_bounds[i] = compressed_i.get(1)
-                     } else {
-                        row_bounds[i] = -2
-                     }
-                  }
-                  mut transform_i = track ? transform.get(i) : []
-                  mut j = min(min(i, cols - 1), c1) - 1
-                  while j >= c0 {
-                     mut row_j = work.get(j)
-                     if row_bounds.get(j) == -1 {
-                        def compressed_j = _flatter_compress_row_i64_bound(row_j, row_i64_safe)
-                        if compressed_j.get(1) >= 0 {
-                           row_j = compressed_j.get(0)
-                           row_bounds[j] = compressed_j.get(1)
-                           work[j] = row_j
-                        } else {
-                           row_bounds[j] = -2
-                        }
-                     }
-                     def pivot = row_j.get(j)
-                     def pivot_nonzero = is_int(pivot) ? int(pivot) != 0 : Z(pivot) != Z(0)
-                     if pivot_nonzero {
-                        def raw_num = row_i.get(j)
-                        if is_int(raw_num) && is_int(pivot) {
-                           def coeff_i = _flatter_round_div_signed_int(int(raw_num), int(pivot))
-                           if coeff_i != 2147483647 && coeff_i != 0 {
-                              def abs_coeff_i = coeff_i < 0 ? -coeff_i : coeff_i
-                              def row_bound_i = int(row_bounds.get(i))
-                              def row_bound_j = int(row_bounds.get(j))
-                              if abs_coeff_i <= 1000000000 && row_bound_i >= 0 && row_bound_j >= 0 && row_bound_i < row_i64_safe && row_bound_j <= (row_i64_safe - row_bound_i) / abs_coeff_i {
-                                 def fast = _flatter_row_submul_prefix_i64_bound_cached(row_i, row_j, coeff_i, j, row_bound_i)
-                                 row_i = fast.get(0)
-                                 row_bounds[i] = fast.get(1)
-                                 fast_row_ops += 1
-                              } elif row_bound_i >= 0 && row_bound_j >= 0 {
-                                 def checked = _flatter_row_submul_prefix_i64_checked_cached(row_i, row_j, coeff_i, j, row_i64_safe, row_bound_i)
-                                 if checked.get(1) >= 0 {
-                                    row_i = checked.get(0)
-                                    row_bounds[i] = checked.get(1)
-                                    fast_row_ops += 1
-                                 } else {
-                                    row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff_i, j)
-                                    row_bounds[i] = -1
-                                    generic_row_ops += 1
-                                    generic_checked_overflow_ops += 1
-                                 }
-                              } else {
-                                 row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff_i, j)
-                                 row_bounds[i] = -1
-                                 generic_row_ops += 1
-                                 generic_unbounded_row_ops += 1
-                              }
-                              if track { transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff_i) }
-                              op_count += 1
-                              if record_ops {
-                                 def op = {"pass": p + 1, "row_block": rb, "col_block": cb, "row": i, "against": j, "coeff": coeff_i}
-                                 tile_ops = tile_ops.append(op)
-                                 ops = ops.append(op)
-                              }
-                              changed = true
-                           } elif coeff_i == 2147483647 {
-                              def coeff = _flatter_round_div_signed(raw_num, pivot)
-                              if coeff != Z(0) {
-                                 row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff, j)
-                                 row_bounds[i] = -1
-                                 generic_row_ops += 1
-                                 generic_big_coeff_ops += 1
-                                 if track { transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff) }
-                                 op_count += 1
-                                 if record_ops {
-                                    def op = {"pass": p + 1, "row_block": rb, "col_block": cb, "row": i, "against": j, "coeff": coeff}
-                                    tile_ops = tile_ops.append(op)
-                                    ops = ops.append(op)
-                                 }
-                                 changed = true
-                              }
-                           }
-                        } else {
-                           def coeff = _flatter_round_div_signed(raw_num, pivot)
-                           if coeff != Z(0) {
-                              row_i = _flatter_row_submul_prefix_bigint_inplace(row_i, row_j, coeff, j)
-                              row_bounds[i] = -1
-                              generic_row_ops += 1
-                              generic_dynamic_ops += 1
-                              if track { transform_i = _flatter_row_submul(transform_i, transform.get(j), coeff) }
-                              op_count += 1
-                              if record_ops {
-                                 def op = {"pass": p + 1, "row_block": rb, "col_block": cb, "row": i, "against": j, "coeff": coeff}
-                                 tile_ops = tile_ops.append(op)
-                                 ops = ops.append(op)
-                              }
-                              changed = true
-                           }
-                        }
-                     }
-                     j -= 1
-                  }
-                  work[i] = row_i
-                  if track { transform[i] = transform_i }
-                  i += 1
-               }
-               tile_count += 1
-               if record_ops {
-                  tile_reports = tile_reports.append({
-                        "pass": p + 1,
-                        "row_block": rb,
-                        "col_block": cb,
-                        "row_start": r0,
-                        "row_end": r1,
-                        "col_start": c0,
-                        "col_end": c1,
-                        "op_count": tile_ops.len,
-                        "ops": tile_ops
-                     })
-               }
+               _flatter_blocked_triangular_reduce_tile(state, r0, r1, c0, c1, cols, row_i64_safe, track, record_ops, p, rb, cb)
+               if state.get("changed") { changed = true }
                cb -= 1
             }
             rb += 1
@@ -2364,6 +2405,20 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
          if !changed { p = passes } else { p += 1 }
       }
    }
+
+   work = state.get("work")
+   transform = state.get("transform")
+   fast_row_ops = int(state.get("fast_row_ops"))
+   generic_row_ops = int(state.get("generic_row_ops"))
+   generic_checked_overflow_ops = int(state.get("generic_checked_overflow_ops"))
+   generic_unbounded_row_ops = int(state.get("generic_unbounded_row_ops"))
+   generic_big_coeff_ops = int(state.get("generic_big_coeff_ops"))
+   generic_dynamic_ops = int(state.get("generic_dynamic_ops"))
+   op_count = int(state.get("op_count"))
+   ops = state.get("ops")
+   tile_reports = state.get("tile_reports")
+   tile_count = int(state.get("tile_count"))
+
    def out_basis = matrix.Matrix(work)
    def transform_matrix = track ? matrix.Matrix(transform) : nil
    def applied = track ? _flatter_matmul(transform_matrix, a) : out_basis

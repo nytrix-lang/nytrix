@@ -17,7 +17,7 @@ fn _set_str_eq(any a, any b) bool {
 @inline
 fn _set_key_eq(any a, any b) bool {
    if is_str(a) && is_str(b) { return _set_str_eq(a, b) }
-   return(a == b)
+   a == b
 }
 
 @inline

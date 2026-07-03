@@ -1,0 +1,15 @@
+shape native_x86_f32_compare {
+  family "runtime-native"
+  generator "native"
+  features [native x86 oracle f32 compare]
+  template ny-test-case
+  flags "--native-backend x86 --native-result-oracle=1"
+  expect compile_and_run
+  source ny <<'NY'
+def f32 a = 0.1
+def f32 b = 0.2
+def f32 c = a + b
+def f32 t = 0.30000001
+c == t
+NY
+}

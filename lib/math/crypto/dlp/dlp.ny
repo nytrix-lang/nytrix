@@ -175,8 +175,7 @@ fn _ph_pow(any base, any exp) any {
    mut e = Z(exp)
    while e > Z(0) {
       if mod(e, Z(2)) == Z(1) { result = result * b }
-      b = b * b
-      e = bigint_div(e, Z(2))
+      b, e = b * b, bigint_div(e, Z(2))
    }
    result
 }
@@ -185,7 +184,7 @@ fn _ph_solve_prime_power(any g, any h, any p, any q, any e) any {
    "Solve g^x = h(mod p) where g has order q^e.
    Uses iterative lifting: recover x mod q, then x mod q^2, etc.
    Returns x in [0, q^e) or nil."
-   def ee = bigint_to_int(Z(e))
+   def ee = int(e)
    def q_e = _ph_pow(q, e)
    def g_q = power_mod(g, _ph_pow(q, ee - 1), p)
    mut x = Z(0)

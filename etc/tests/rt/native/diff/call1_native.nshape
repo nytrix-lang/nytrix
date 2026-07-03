@@ -1,0 +1,12 @@
+shape diff_call1_native {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 differential call]
+  template ny-test-case
+  flags "--native-backend x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+fn id(i64 a) i64 { a }
+id(42)
+NY
+}

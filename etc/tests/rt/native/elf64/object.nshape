@@ -1,0 +1,16 @@
+shape x86_64_elf64_object_writer {
+  family "runtime-native"
+  generator "native"
+  features ["native", "object", "elf", "x86_64", "nyir"]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-native-elf64-object-smoke.o"
+  expect compile_and_run
+  source ny <<'NY'
+def x = 99
+if x > 10 {
+  x / 3 + x % 5
+} else {
+  1
+}
+NY
+}

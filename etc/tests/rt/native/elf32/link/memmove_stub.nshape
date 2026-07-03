@@ -1,0 +1,27 @@
+shape i386_elf32_object_link_run_memmove_stub {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run pointer memmove]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-link-run-elf32-memmove-stub.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+extern {
+  fn memmove(any dst, any src, i64 n) ptr
+}
+
+fn probe() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  store64_i(p, 67305985)
+  memmove(p + 1, p, 3)
+  def got = load64_i(p)
+  free(p)
+  if got == 50462977 { 42 } else { 0 }
+}
+
+probe()
+NY
+}

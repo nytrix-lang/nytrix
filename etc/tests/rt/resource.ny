@@ -9,7 +9,7 @@ fn close(str name) {
 
 fn test_with_ptr() {
    mut seen = 0
-   with ptr: buf = malloc(8){
+   with ptr buf = malloc(8){
       assert(buf != 0, "with ptr binds allocation")
       store8(buf, 65, 0)
       seen = load8(buf, 0)
@@ -19,14 +19,14 @@ fn test_with_ptr() {
 
 fn test_with_cleanup() {
    cleanup_log = ""
-   with str: label = "C" {
+   with str label = "C" {
       cleanup_log = cleanup_log + "B"
    }
    assert(cleanup_log == "BC", "with runs close after body")
 }
 
 fn return_through_with() {
-   with str: label = "R" {
+   with str label = "R" {
       cleanup_log = cleanup_log + "body|"
       return 7
    }
@@ -34,7 +34,7 @@ fn return_through_with() {
 
 fn panic_through_with() {
    try {
-      with str: label = "P" {
+      with str label = "P" {
          panic("resource boom")
       }
    } catch err {

@@ -1,0 +1,15 @@
+shape native_x86_f64_compare_lt {
+  family "runtime-native"
+  generator "native"
+  features [native x86 oracle f64 compare]
+  template ny-test-case
+  flags "--native-backend x86 --native-result-oracle=1"
+  expect compile_and_run
+  source ny <<'NY'
+fn lt(f64 x, f64 y) bool {
+  x < y
+}
+
+lt(1.5, 2.25)
+NY
+}

@@ -1,0 +1,11 @@
+shape diff_branch_vm {
+  family "runtime-native"
+  generator "native"
+  features [native nyir vm differential]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+if 1 { 42 } else { 0 }
+NY
+}

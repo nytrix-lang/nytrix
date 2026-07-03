@@ -434,10 +434,13 @@ fn _char_repeat_ms() f64 {
 fn _inject(int c) bool {
    if c < 32 || c == 127 { return false }
    def char_str = str.chr(c)
-   def left  = str.str_slice(_input, 0, _cursor)
-   def right = str.str_slice(_input, _cursor, _input.len)
-   _input    = left + char_str + right
-   _cursor  += char_str.len
+   if _cursor >= _input.len {
+      _input = _input + char_str
+      _cursor = _input.len
+   } else {
+      _input = str.str_slice(_input, 0, _cursor) + char_str + str.str_slice(_input, _cursor, _input.len)
+      _cursor += char_str.len
+   }
    _mark_cursor_dirty()
    _last_char_t, _last_char_c = ticks(), c
    true

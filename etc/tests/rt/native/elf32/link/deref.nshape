@@ -1,0 +1,22 @@
+shape x86_elf32_object_link_run_deref {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run pointer deref]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-deref.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+fn ptr_deref() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  store64_i(p, 42)
+  def i64 v = *p
+  free(p)
+  v
+}
+
+ptr_deref()
+NY
+}

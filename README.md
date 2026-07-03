@@ -7,17 +7,9 @@
 
   [![Version](https://img.shields.io/badge/version-0.6.0-2f6fed)](docs/CHANGELOG.md)
   [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-  [![LLVM](https://img.shields.io/badge/LLVM-%3E%3D16-orange)](#install)
   [![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-x86__64%20%7C%20arm64-lightgrey)](#install)
 
-  [Install](#install) |
-  [Language](#language) |
-  [Docs](docs/README.md) |
-  [Learn](docs/learn/start.md) |
-  [Spec](docs/spec) |
-  [Examples](docs/learn/examples.md) |
-  [Changelog](docs/CHANGELOG.md) |
-  [Website](https://nytrix.x3ric.com/)
+  [Website](https://nytrix.x3ric.com/) · [Changelog](https://nytrix.x3ric.com/#CHANGELOG)
 </div>
 
 ```ny
@@ -111,8 +103,7 @@ Send security reports privately by email with the affected commit, platform,
 command, proof of concept. Reports are voluntary; there is no paid
 bounty program right now `;(`.
 
-Discuss feature direction on Discord or by email before opening a PR for syntax,
-compiler, runtime, or stdlib.
+Discuss feature direction on Discord or by email.
 
 ## Status
 

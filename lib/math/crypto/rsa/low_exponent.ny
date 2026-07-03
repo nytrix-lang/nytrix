@@ -11,7 +11,7 @@
 module std.math.crypto.rsa.low_exponent(low_exp_attack, low_exp_attack_report, low_exp_cube_root, nth_root)
 use std.math.nt
 
-fn _low_exp_exp(any e) int { is_bigint(e) ? bigint_to_int(e) : int(e) }
+fn _low_exp_exp(any e) int { int(e) }
 
 fn _low_exp_pow(any base, int exp) any {
    mut out = Z(1)

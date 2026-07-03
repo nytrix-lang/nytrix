@@ -50,6 +50,34 @@ typedef enum {
   NY_TYPE_SOLVER_Z3 = 2,
 } ny_type_solver_t;
 
+typedef enum {
+  NY_NATIVE_BACKEND_LLVM = 0,
+  NY_NATIVE_BACKEND_X86_64 = 1,
+  NY_NATIVE_BACKEND_X86 = 2,
+  NY_NATIVE_BACKEND_AARCH64 = 3,
+  NY_NATIVE_BACKEND_AMDGPU = 4,
+  NY_NATIVE_BACKEND_ARM = 5,
+  NY_NATIVE_BACKEND_AVR = 6,
+  NY_NATIVE_BACKEND_BPF = 7,
+  NY_NATIVE_BACKEND_MIPS = 8,
+  NY_NATIVE_BACKEND_POWERPC = 9,
+  NY_NATIVE_BACKEND_RISCV = 10,
+  NY_NATIVE_BACKEND_WASM = 11,
+} ny_native_backend_t;
+
+typedef enum {
+  NY_NATIVE_ABI_AUTO = 0,
+  NY_NATIVE_ABI_SYSV = 1,
+  NY_NATIVE_ABI_WIN64 = 2,
+  NY_NATIVE_ABI_AAPCS = 3,
+} ny_native_abi_t;
+
+typedef enum {
+  NY_C_FRONTEND_AUTO = 0,
+  NY_C_FRONTEND_LIBCLANG = 1,
+  NY_C_FRONTEND_NYTRIX = 2,
+} ny_c_frontend_t;
+
 typedef enum ny_opt_profile_kind_t {
   NY_OPT_PROFILE_DEFAULT = 0,
   NY_OPT_PROFILE_SPEED,
@@ -84,6 +112,8 @@ typedef struct {
   bool run_aot;
   bool emit_only;
   bool do_timing;
+  bool progress;
+  bool no_progress;
   bool profiler_mode;
   bool dump_ast;
   bool expand;
@@ -137,6 +167,39 @@ typedef struct {
   const char *host_cflags;
   const char *host_ldflags;
   const char *host_triple;
+  const char *native_backend_raw;
+  const char *native_abi_raw;
+  const char *c_frontend_raw;
+  ny_native_backend_t native_backend;
+  ny_native_abi_t native_abi;
+  int native_tier_budget;
+  int native_hot_threshold;
+  int native_cold_threshold;
+  int native_cache_score;
+  bool native_prefer_vm;
+  bool native_prefer_asm;
+  bool native_tier_report;
+  const char *native_tier_report_path;
+  bool native_result_oracle;
+  const char *native_result_oracle_expected;
+  ny_c_frontend_t c_frontend;
+  bool native_dump_ir;
+  bool nyir_dump_text;
+  bool nyir_dump_raw;
+  bool nyir_dump_stats;
+  bool nyir_dump_bin;
+  const char *nyir_dump_bin_path;
+  bool nyir_metadata_report;
+  const char *nyir_metadata_report_path;
+  const char *nyir_metadata_bin_path;
+  bool nyir_run;
+  const char *nyir_run_path;
+  const char *nyir_run_bin_path;
+  bool nyir_run_profile;
+  const char *nyir_run_profile_path;
+  int nyir_run_max_steps;
+  int nyir_run_recursion_limit;
+  const char *native_dump_ir_path;
   const char *arm_float_abi;
   const char *std_path;
   const char *bundle_std_path;

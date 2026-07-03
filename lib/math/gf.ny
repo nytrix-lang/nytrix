@@ -647,7 +647,7 @@ impl gf2e {
    fn value(gf2e a) any { _gf2e_val(a) }
    fn modulus(gf2e a) any { _gf2e_mod(a) }
    fn field(gf2e a) gf2 { GF2(_gf2e_mod(a)) }
-   fn hex(gf2e a) str { bigint_to_hex(_gf2e_val(a)) }
+   fn hex(gf2e a) str { _gf2e_val(a).hex }
    fn str(gf2e a) str { bigint_to_str(_gf2e_val(a)) }
    fn add(gf2e a, gf2e b) gf2e {
       def modulus = _gf2e_check_same(a, b)
@@ -1185,7 +1185,7 @@ impl gfe {
    fn kind(gfe a) str { _gfe_kind(a) }
    fn hex(gfe a) str {
       def v = _gfe_value(a)
-      is_list(v) ? to_str(v) : bigint_to_hex(v)
+      is_list(v) ? to_str(v) : v.hex
    }
    fn str(gfe a) str { to_str(_gfe_value(a)) }
    fn add(gfe a, gfe b) gfe {

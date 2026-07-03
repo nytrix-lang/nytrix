@@ -1,0 +1,14 @@
+shape oracle_f32_arith_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result f32 arithmetic]
+  template ny-test-case
+  flags "--native-result-oracle=4599075939685498880"
+  expect compile_and_run
+  source ny <<'NY'
+def f32 a = 0.1
+def f32 b = 0.2
+def f64 c = a + b
+c
+NY
+}

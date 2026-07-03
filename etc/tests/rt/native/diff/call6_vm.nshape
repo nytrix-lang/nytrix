@@ -1,0 +1,14 @@
+shape diff_call6_vm {
+  family "runtime-native"
+  generator "native"
+  features [native nyir differential call]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+fn add6(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f) i64 {
+  a + b + c + d + e + f
+}
+add6(1, 2, 3, 4, 5, 6)
+NY
+}

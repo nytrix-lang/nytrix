@@ -92,7 +92,7 @@ fn test_defaults_and_surface() {
    def attrs = syntax.list_attributes()
    assert(__list_has(attrs, "extern"), "builtin @extern should be present")
    assert(__list_has(attrs, "effects"), "builtin @effects should be present")
-   assert(__list_has(attrs, "llvm"), "builtin @llvm should be present")
+   assert(__list_has(attrs, "backend"), "builtin @backend should be present")
    assert(!syntax.is_macro_registered("double"),
    "reset should not keep custom macro registrations")
    assert(!syntax.get_macro_handler("double"),
@@ -291,9 +291,9 @@ fn test_attribute_surface_and_fallback() {
    def effect_contract = effects_node.get("effect_contract", list(0))
    assert(effect_contract.len == 1 && effect_contract.get(0, "") == "none",
    "builtin @effects should keep provided effect contract")
-   def llvm_node = syntax.apply_attribute("llvm", fn_node, ["noinline"])
-   assert(llvm_node.get("llvm_attr", "") == "noinline",
-   "builtin @llvm should set llvm attribute name")
+   def backend_node = syntax.apply_attribute("backend", fn_node, ["noinline"])
+   assert(backend_node.get("backend_attr", "") == "noinline",
+   "builtin @backend should set backend attribute name")
    def extern_node = syntax.apply_attribute("extern", fn_node, ["puts"])
    assert(extern_node.get("is_extern", false),
    "builtin @extern should mark extern")

@@ -1,0 +1,13 @@
+shape x86_logical_target {
+  family "runtime-native"
+  generator "native"
+  features [native nyir logical x86 target]
+  template ny-test-case
+  flags "--emit-asm=/tmp/nytrix-native-x86-logical-target.s --native-backend x86"
+  expect compile_and_run
+  source ny <<'NY'
+def a = 1
+def b = 0
+(a || b) + (a && b)
+NY
+}

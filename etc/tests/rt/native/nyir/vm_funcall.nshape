@@ -1,0 +1,13 @@
+shape nyir_vm_funcall {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "call", "function"]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(i64 a, i64 b) i64 { a + b }
+fn mix(i64 x) i64 { add(x, 5) * 2 }
+mix(7)
+NY
+}

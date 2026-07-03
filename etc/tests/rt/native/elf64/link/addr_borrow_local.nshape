@@ -1,0 +1,20 @@
+shape x86_64_elf64_object_link_run_addr_borrow_local {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir link-run pointer addr-local borrow]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-addr-borrow-local.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+fn stack_addr() i64 {
+  mut i64 x = 41
+  def ptr p = &x
+  store64_i(p, 42)
+  x
+}
+
+stack_addr()
+NY
+}

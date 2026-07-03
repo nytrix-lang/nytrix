@@ -1,0 +1,14 @@
+shape diff_call_locals_vm {
+  family "runtime-native"
+  generator "native"
+  features [native nyir vm differential call locals]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+fn add4(i64 a, i64 b, i64 c, i64 d) i64 { a + b + c + d }
+mut x = 10
+mut y = 20
+add4(1, 2, 3, 4) + x + y
+NY
+}

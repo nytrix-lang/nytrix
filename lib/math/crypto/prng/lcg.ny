@@ -110,13 +110,10 @@ fn _lcg_state_matches_mod_outputs(any state, list outputs_mod, any a, any c, any
 }
 
 fn _lcg_recover_state_mod_outputs_pruned(list outputs_mod, any a, any c, any m, any output_mod) any {
-   def om = _z(output_mod)
-   def mm = _z(m)
-   def aa = _z(a)
-   def cc = _z(c)
+   def om, mm = _z(output_mod), _z(m)
+   def aa, cc = _z(a), _z(c)
    if outputs_mod.len < 2 || aa <= Z(0) { return Z(-1) }
-   def r0 = mod(_z(outputs_mod[0]), om)
-   def r1 = mod(_z(outputs_mod[1]), om)
+   def r0, r1 = mod(_z(outputs_mod[0]), om), mod(_z(outputs_mod[1]), om)
    def t_max = (mm - Z(1) - r0) / om
    if t_max < Z(0) { return Z(-1) }
    def y0 = aa * r0 + cc
@@ -154,8 +151,7 @@ fn lcg_recover_state_mod_outputs(list outputs_mod, any a, any c, any m, any outp
       def pruned = _lcg_recover_state_mod_outputs_pruned(outputs_mod, a, c, m, output_mod)
       if pruned != Z(-1) { return pruned }
    }
-   def om = _z(output_mod)
-   def mm = _z(m)
+   def om, mm = _z(output_mod), _z(m)
    mut state = mod(_z(outputs_mod[0]), om)
    while state < mm {
       if _lcg_state_matches_mod_outputs(state, outputs_mod, a, c, m, om) { return state }
@@ -250,8 +246,7 @@ fn msvc_rand_key(any seed, int key_len=32, str charset="abcdefghijklmnopqrstuvwx
 
 fn msvc_rand_crypt(any data, any key) list<int> {
    "XOR `data` with repeating `key`. `data` and `key` may be strings, bytes, or byte lists."
-   def n = _byte_len(data)
-   def k = _byte_len(key)
+   def n, k = _byte_len(data), _byte_len(key)
    if k == 0 { return [] }
    mut out = list(n)
    __list_set_len(out, n)
@@ -288,8 +283,7 @@ fn _msvc_rand_build_checks(any data, any known_prefix, any known_suffix, int key
    mut max_ki = -1
    mut i = 0
    while i < _byte_len(known_prefix) {
-      def ki = i % key_len
-      def kb = _byte_at(data, i) ^^ _byte_at(known_prefix, i)
+      def ki, kb = i % key_len, _byte_at(data, i) ^^ _byte_at(known_prefix, i)
       if expected[ki] >= 0 && expected[ki] != kb { return [expected, max_ki, false] }
       expected[ki] = kb
       if ki > max_ki { max_ki = ki }

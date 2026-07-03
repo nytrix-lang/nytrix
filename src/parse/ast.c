@@ -469,11 +469,11 @@ static void ny_ast_verify_stmt(stmt_t *s, const char *phase) {
                        "iterator for has empty index var");
       ny_ast_verify_expr(s->as.fr.iterable, phase);
     } else {
-      ny_ast_require(!s->as.fr.iter_var, phase, s->tok, "c-style for has iter var");
+      ny_ast_require(!s->as.fr.iter_var, phase, s->tok, "header-style for has iter var");
       ny_ast_require(!s->as.fr.iter_index_var, phase, s->tok,
-                     "c-style for has index var");
+                     "header-style for has index var");
       ny_ast_require(s->as.fr.init && s->as.fr.cond, phase, s->tok,
-                     "c-style for missing init/cond");
+                     "header-style for missing init/cond");
       ny_ast_verify_stmt(s->as.fr.init, phase);
       ny_ast_verify_expr(s->as.fr.cond, phase);
       if (s->as.fr.update)

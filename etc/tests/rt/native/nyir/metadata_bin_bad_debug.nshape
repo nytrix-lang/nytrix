@@ -1,0 +1,11 @@
+shape nyir_metadata_bin_bad_debug {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "metadata", "binary", "negative"]
+  template ny-test-case
+  flags "--nyir-metadata-bin=etc/tests/rt/native/fixtures/nyir_bad_debug.nyir"
+  expect compile_fail
+  source ny <<'NY'
+1 + 2
+NY
+}

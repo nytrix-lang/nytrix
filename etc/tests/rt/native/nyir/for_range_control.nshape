@@ -1,0 +1,17 @@
+shape nyir_for_range_control {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "for", "range", "break", "continue", "vm"]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+mut s = 0
+for i in 0..5 {
+  if i == 3 { continue }
+  if i == 5 { break }
+  s += i
+}
+s
+NY
+}

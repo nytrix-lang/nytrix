@@ -1,0 +1,17 @@
+shape oracle_signed_compare_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result signedness]
+  template ny-test-case
+  flags "--native-result-oracle=31"
+  expect compile_and_run
+  source ny <<'NY'
+def a = 0 - 1
+def b = 1
+def c = 0 - 2
+def x = if a < b { 10 } else { 0 }
+def y = if b > a { 20 } else { 0 }
+def z = if c <= a { 1 } else { 0 }
+x + y + z
+NY
+}

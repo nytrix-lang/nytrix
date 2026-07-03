@@ -1,0 +1,14 @@
+shape oracle_call5_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result call]
+  template ny-test-case
+  flags "--native-result-oracle=15"
+  expect compile_and_run
+  source ny <<'NY'
+fn add5(i64 a, i64 b, i64 c, i64 d, i64 e) i64 {
+  a + b + c + d + e
+}
+add5(1, 2, 3, 4, 5)
+NY
+}

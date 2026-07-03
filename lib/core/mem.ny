@@ -75,7 +75,7 @@ fn cstr_dup(any s, str fallback="") any {
 }
 
 #main {
-   with ptr: dst = malloc(32){
+   with ptr dst = malloc(32){
       assert(dst != 0, "mem alloc dst")
       memset(dst, 0, 32)
       memcpy(dst, "abcdef", 6)

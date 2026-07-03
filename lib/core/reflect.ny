@@ -408,10 +408,10 @@ fn len(any x) int {
       if step == 0 { return 0 }
       if step > 0 {
          if start >= stop { return 0 }
-         return((stop - start - 1) / step) + 1
+         return ((stop - start - 1) / step) + 1
       }
       if start <= stop { return 0 }
-      return((start - stop - 1) / (0 - step)) + 1
+      return ((start - stop - 1) / (0 - step)) + 1
    }
    if _is_bytes(x) { return _raw_len(x) }
    if _is_float(x) { return 0 }
@@ -747,11 +747,9 @@ fn _list_zip2(any a, any b, int op) any {
 fn _list_scale(any a, any s, int op) any {
    def n = a.len
    def want_tuple = _is_tuple(a)
-   mut out = _list_like(n)
-   mut i = 0
+   mut out, i = _list_like(n), 0
    while i < n {
-      def x = __load_item(a, i)
-      def z = case op {
+      def x, z = __load_item(a, i), case op {
          0 -> __mul(x, s)
          _ -> __div(x, s)
       }
@@ -1005,8 +1003,7 @@ fn hash(any x) int {
       return h
    }
    if _is_list(x) || _is_tuple(x) {
-      mut h = 2166136261
-      mut i = 0
+      mut h, i = 2166136261, 0
       while i < x.len {
          h = _hash_mix(h, x.get(i))
          i += 1
@@ -1589,9 +1586,7 @@ fn to_str(any v) str {
    writable[1] = 9
    _reflect_check(writable.get(1) == 9, "reflect set_idx raw store")
    _reflect_check(slice((1, 2, 3), 1, 3) == (2, 3), "reflect tuple slice")
-   def v2 = Vector2([3, 4])
-   def v3 = Vector3([1, 2, 3])
-   def v4 = Vector4([5, 6, 7, 8])
+   def v2, v3, v4 = Vector2([3, 4]), Vector3([1, 2, 3]), Vector4([5, 6, 7, 8])
    _reflect_check(len(v2) == 2 && len(v3) == 3 && len(v4) == 4, "reflect vector dimensions")
    _reflect_check(get(v2, "__type", "") == "vec2" && get(v3, "__type", "") == "vec3" && get(v4, "__type", "") == "vec4", "reflect vector type markers")
    _reflect_check(contains((1, 2, 3), 3), "reflect tuple contains")

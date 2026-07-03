@@ -266,8 +266,8 @@ stmt_t *ny_parse_for_stmt(parser_t *p) {
     }
   }
 
-  parser_error(p, p->cur, "for expects loop variable or C-style init",
-               "use 'for x in iterable' or 'for(mut i=0; cond; update)'");
+  parser_error(p, p->cur, "for expects an iterator binding",
+               "use Nytrix iterator syntax such as `for x in 0..n { ... }`; ';' starts a comment");
   return NULL;
 }
 

@@ -103,7 +103,7 @@ fn _ecdsa_hex_clean(str hex) str {
    h
 }
 
-fn _ecdsa_hex_to_z(str hex) any { hex_to_bigint(_ecdsa_hex_clean(hex)) }
+fn _ecdsa_hex_to_z(str hex) any { _ecdsa_hex_clean(hex).hex_bigint }
 
 fn ecdsa_hnp_parse_signature_hex(str signature_hex, any baselen=nil) any {
    "Parse a concatenated ECDSA r||s hex signature into [r,s].

@@ -164,10 +164,8 @@ fn substitution_key_from_pairs(str plaintext, str ciphertext) str {
    mut used_cipher = ""
    i = 0
    while i < plaintext.len {
-      def pc = ord(utf8_slice(upper(plaintext), i, i + 1, 1))
-      def cc = ord(utf8_slice(upper(ciphertext), i, i + 1, 1))
-      def pa = _sub_is_alpha_code(pc)
-      def ca = _sub_is_alpha_code(cc)
+      def pc, cc = ord(utf8_slice(upper(plaintext), i, i + 1, 1)), ord(utf8_slice(upper(ciphertext), i, i + 1, 1))
+      def pa, ca = _sub_is_alpha_code(pc), _sub_is_alpha_code(cc)
       if pa || ca {
          crypto_require(pa && ca, "cipher.substitution_key_from_pairs", "alpha/non-alpha mismatch")
          def pidx = pc - 65

@@ -16,8 +16,10 @@ fn _quarter_round(list v, int a, int b, int c, int d) any {
    vc = vc ^^ _rotl32((vb + va) & 0xffffffff, 9)
    vd = vd ^^ _rotl32((vc + vb) & 0xffffffff, 13)
    va = va ^^ _rotl32((vd + vc) & 0xffffffff, 18)
-   v[a] = va v[b] = vb
-   v[c] = vc v[d] = vd
+   v[a] = va
+   v[b] = vb
+   v[c] = vc
+   v[d] = vd
 }
 
 fn salsa20_block(list st) list {
@@ -79,8 +81,7 @@ fn salsa20_encrypt(list key, list nonce, int counter, list plaintext) list {
    mut st_orig = list(16)
    store64(st, 16, 0)
    store64(st_orig, 16, 0)
-   mut p = 0
-   mut block_counter = counter
+   mut p, block_counter = 0, counter
    while p < plaintext.len {
       mut i = 0
       while i < 16 {

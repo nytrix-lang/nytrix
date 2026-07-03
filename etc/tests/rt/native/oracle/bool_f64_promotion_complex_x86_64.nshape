@@ -1,0 +1,18 @@
+shape oracle_bool_f64_promotion_complex_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result f64 bool promotion mixed]
+  template ny-test-case
+  flags "--native-result-oracle=4611686018427387904"
+  expect compile_and_run
+  source ny <<'NY'
+fn mixed_promotion(i64 x, f64 y, bool ok) f64 {
+  if ok {
+    x + y
+  } else {
+    false + y
+  }
+}
+mixed_promotion(1, 1.0, true)
+NY
+}

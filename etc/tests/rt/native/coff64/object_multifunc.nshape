@@ -1,0 +1,13 @@
+shape x86_64_coff_object_multifunc {
+  family "runtime-native"
+  generator "native"
+  features ["native", "object", "coff", "multifunc", "reloc", "x86_64", "nyir"]
+  template ny-test-case
+  flags "--native-backend x86_64 --host-triple x86_64-w64-windows-gnu -emit-only -o /tmp/nytrix-native-coff64-object-multifunc.obj"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(i64 x, i64 y) i64 { x + y }
+fn mix(i64 z) i64 { add(z, 5) * 2 }
+mix(7)
+NY
+}

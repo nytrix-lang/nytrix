@@ -105,7 +105,7 @@ fn rsa_pkcs1_v15_sign(any msg, number d, number n, str algo="sha256") any {
    def k = (bit_length(n) + 7) / 8
    def em = emsa_pkcs1_v15_encode(msg, k, algo)
    if em == nil { return nil }
-   power_mod(bytes_to_bigint(em), d, n)
+   power_mod(em.to_bigint, d, n)
 }
 
 fn rsa_pkcs1_v15_verify(any msg, number sig, number e, number n, str algo="sha256") bool {
@@ -113,7 +113,7 @@ fn rsa_pkcs1_v15_verify(any msg, number sig, number e, number n, str algo="sha25
    def k = (bit_length(n) + 7) / 8
    def em_expect = emsa_pkcs1_v15_encode(msg, k, algo)
    if em_expect == nil { return false }
-   power_mod(sig, e, n) == bytes_to_bigint(em_expect)
+   power_mod(sig, e, n) == em_expect.to_bigint
 }
 
 fn eme_pkcs1_v15_encode(list message, int k, any ps=nil) any {
@@ -189,7 +189,7 @@ fn rsa_pkcs1_v15_encrypt(list message, number e, number n, any ps=nil) any {
    def k = (bit_length(n) + 7) / 8
    def em = eme_pkcs1_v15_encode(message, k, ps)
    if em == nil { return nil }
-   power_mod(bytes_to_bigint(em), e, n)
+   power_mod(em.to_bigint, e, n)
 }
 
 fn rsa_pkcs1_v15_decrypt(number ciphertext, number d, number n) any {

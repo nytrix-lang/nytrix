@@ -1,0 +1,15 @@
+shape diff_call_nested_vm {
+  family "runtime-native"
+  generator "native"
+  features [native nyir vm differential call nested]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+fn add2(i64 a, i64 b) i64 { a + b }
+fn add4(i64 a, i64 b, i64 c, i64 d) i64 {
+  add2(a, b) + add2(c, d)
+}
+add4(1, 2, 3, 4)
+NY
+}

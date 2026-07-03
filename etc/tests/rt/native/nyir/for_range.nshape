@@ -1,0 +1,15 @@
+shape nyir_for_range {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "for", "range", "vm"]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+mut s = 0
+for i in 0..4 {
+  s += i
+}
+s
+NY
+}

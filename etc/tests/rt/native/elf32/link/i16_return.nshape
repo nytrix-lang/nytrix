@@ -1,0 +1,14 @@
+shape x86_elf32_object_link_run_i16_return {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run abi]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-i16-return.o"
+  expect object_link_run_i16_65535
+  source ny <<'NY'
+fn ret_i16() i16 {
+  -1
+}
+ret_i16()
+NY
+}

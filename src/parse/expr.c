@@ -468,6 +468,54 @@ static int precedence(token_kind kind) {
   }
 }
 
+static bool expr_token_is_deref_assign_op(token_t tok) {
+  if (tok.kind == NY_T_ASSIGN || tok.kind == NY_T_PLUS_EQ ||
+      tok.kind == NY_T_MINUS_EQ || tok.kind == NY_T_STAR_EQ ||
+      tok.kind == NY_T_SLASH_EQ || tok.kind == NY_T_PERCENT_EQ ||
+      tok.kind == NY_T_POW_EQ || tok.kind == NY_T_BITXOR_EQ ||
+      tok.kind == NY_T_LSHIFT_EQ || tok.kind == NY_T_RSHIFT_EQ)
+    return true;
+  return tok.len == 2 && tok.lexeme &&
+         ((tok.lexeme[0] == '+' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '-' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '*' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '/' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '%' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '^' && tok.lexeme[1] == '='));
+}
+
+static bool expr_assign_op_is_plain(token_t tok) {
+  return tok.kind == NY_T_ASSIGN ||
+         (tok.len == 1 && tok.lexeme && tok.lexeme[0] == '=');
+}
+
+static token_kind expr_assign_op_binary_kind(token_t tok) {
+  if (tok.kind == NY_T_PLUS_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '+'))
+    return NY_T_PLUS;
+  if (tok.kind == NY_T_MINUS_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '-'))
+    return NY_T_MINUS;
+  if (tok.kind == NY_T_STAR_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '*'))
+    return NY_T_STAR;
+  if (tok.kind == NY_T_SLASH_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '/'))
+    return NY_T_SLASH;
+  if (tok.kind == NY_T_PERCENT_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '%'))
+    return NY_T_PERCENT;
+  if (tok.kind == NY_T_POW_EQ)
+    return NY_T_POW;
+  if (tok.kind == NY_T_BITXOR_EQ)
+    return NY_T_BITXOR;
+  if (tok.kind == NY_T_LSHIFT_EQ)
+    return NY_T_LSHIFT;
+  if (tok.kind == NY_T_RSHIFT_EQ)
+    return NY_T_RSHIFT;
+  return NY_T_PERCENT;
+}
+
 static const char *decode_fstring_part(parser_t *p, const char *s, size_t len,
                                        size_t *out_len) {
   return parser_unescape_string(p->arena, s, len, out_len);
@@ -1392,12 +1440,59 @@ static expr_t *parse_unary(parser_t *p) {
     vec_push_arena(p->arena, &call->as.call.args, call_arg);
     return call;
   }
+  if (p->cur.kind == NY_T_STAR) {
+    token_t tok = p->cur;
+    parser_advance(p);
+    expr_t *target = parse_unary(p);
+    if (!target) {
+      parser_error(p, tok, "expected expression after dereference operator '*'",
+                   NULL);
+      return NULL;
+    }
+    if (expr_token_is_deref_assign_op(p->cur)) {
+      token_t assign_tok = p->cur;
+      parser_advance(p);
+      expr_t *rhs = p_parse_expr(p, 0);
+      if (!rhs) {
+        parser_error(p, assign_tok, "expected expression after dereference assignment",
+                     NULL);
+        return NULL;
+      }
+      if (!expr_assign_op_is_plain(assign_tok)) {
+        token_kind bin_kind = expr_assign_op_binary_kind(assign_tok);
+        token_t op_tok = {0};
+        expr_t *left = expr_new(p->arena, NY_E_DEREF, tok);
+        left->as.deref.target = target;
+        expr_t *bin = expr_new(p->arena, NY_E_BINARY, op_tok);
+        bin->as.binary.op = parser_token_name(bin_kind);
+        bin->as.binary.left = left;
+        bin->as.binary.right = rhs;
+        rhs = bin;
+      }
+      expr_t *callee = expr_new(p->arena, NY_E_IDENT, tok);
+      callee->as.ident.name = parser_intern(p, "store64_i", 9);
+      callee->as.ident.sym_id = ny_intern_str("store64_i", 9);
+      callee->as.ident.hash = ny_hash64("store64_i", 9);
+      expr_t *call = expr_new(p->arena, NY_E_CALL, tok);
+      call->as.call.callee = callee;
+      vec_push_arena(p->arena, &call->as.call.args,
+                     ((call_arg_t){.name = NULL, .val = target}));
+      vec_push_arena(p->arena, &call->as.call.args,
+                     ((call_arg_t){.name = NULL, .val = rhs}));
+      return call;
+    }
+    expr_t *e = expr_new(p->arena, NY_E_DEREF, tok);
+    e->as.deref.target = target;
+    return e;
+  }
   return parse_postfix(p);
 }
 
 expr_t *p_parse_expr(parser_t *p, int prec) {
   expr_t *left = parse_unary(p);
   while (true) {
+    if (p->stop_expr_at_newline && p->skipped_newline)
+      break;
     int pcur = precedence(p->cur.kind);
     if (pcur < prec || pcur == 0)
       break;

@@ -861,14 +861,20 @@ token_t lexer_next(lexer_t *lx) {
   case '<':
     if (match(lx, '='))
       return make_token(lx, NY_T_LE, start);
-    if (match(lx, '<'))
+    if (match(lx, '<')) {
+      if (match(lx, '='))
+        return make_token(lx, NY_T_LSHIFT_EQ, start);
       return make_token(lx, NY_T_LSHIFT, start);
+    }
     return make_token(lx, NY_T_LT, start);
   case '>':
     if (match(lx, '='))
       return make_token(lx, NY_T_GE, start);
-    if (match(lx, '>'))
+    if (match(lx, '>')) {
+      if (match(lx, '='))
+        return make_token(lx, NY_T_RSHIFT_EQ, start);
       return make_token(lx, NY_T_RSHIFT, start);
+    }
     return make_token(lx, NY_T_GT, start);
   case '&':
     if (match(lx, '&'))
@@ -881,8 +887,13 @@ token_t lexer_next(lexer_t *lx) {
       return make_token(lx, NY_T_PIPE, start);
     return make_token(lx, NY_T_BITOR, start);
   case '^':
-    if (match(lx, '^'))
+    if (match(lx, '^')) {
+      if (match(lx, '='))
+        return make_token(lx, NY_T_BITXOR_EQ, start);
       return make_token(lx, NY_T_BITXOR, start);
+    }
+    if (match(lx, '='))
+      return make_token(lx, NY_T_POW_EQ, start);
     return make_token(lx, NY_T_POW, start);
   case '~':
     return make_token(lx, NY_T_BITNOT, start);

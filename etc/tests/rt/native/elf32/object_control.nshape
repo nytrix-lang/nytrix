@@ -1,0 +1,15 @@
+shape x86_elf32_object_control {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir control]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-object-control.o"
+  expect compile_and_run
+  source ny <<'NY'
+mut s = 0
+for i in 0..4 {
+  s += i
+}
+if s == 6 { 11 } else { 22 }
+NY
+}

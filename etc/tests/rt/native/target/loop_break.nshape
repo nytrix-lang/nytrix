@@ -1,0 +1,15 @@
+shape loop_break_target {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "loop", "break", "x86_64"]
+  template ny-test-case
+  flags "--native-backend x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+def x = 7
+while 1 {
+  break
+}
+x
+NY
+}

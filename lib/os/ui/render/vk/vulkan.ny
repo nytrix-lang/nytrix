@@ -149,20 +149,20 @@ fn VkImageMemoryBarrierColor(any bar, any image, int src_access, int dst_access,
    #define VK_USE_PLATFORM_XCB_KHR 1
    #define VK_USE_PLATFORM_XLIB_KHR 1
    #define VK_USE_PLATFORM_WAYLAND_KHR 1
-   #include <vulkan/vulkan.h> as ""
-   #include <vulkan/vulkan_xcb.h> as ""
-   #include <vulkan/vulkan_xlib.h> as ""
-   #include <vulkan/vulkan_wayland.h> as ""
+   #include <vulkan/vulkan.h>
+   #include <vulkan/vulkan_xcb.h>
+   #include <vulkan/vulkan_xlib.h>
+   #include <vulkan/vulkan_wayland.h>
 } #elif windows {
    #link "vulkan-1.dll"
    #define VK_USE_PLATFORM_WIN32_KHR 1
-   #include <vulkan/vulkan.h> as ""
-   #include <vulkan/vulkan_win32.h> as ""
+   #include <vulkan/vulkan.h>
+   #include <vulkan/vulkan_win32.h>
 } #elif macos {
    #link "libMoltenVK.dylib"
    #define VK_USE_PLATFORM_METAL_EXT 1
-   #include <vulkan/vulkan.h> as ""
-   #include <vulkan/vulkan_metal.h> as ""
+   #include <vulkan/vulkan.h>
+   #include <vulkan/vulkan_metal.h>
 } #endif
 extern "" {
    fn vkGetInstanceProcAddr(ptr inst, ptr name) ptr
