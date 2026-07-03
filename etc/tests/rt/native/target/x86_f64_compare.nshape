@@ -1,0 +1,15 @@
+shape native_x86_f64_compare {
+  family "runtime-native"
+  generator "native"
+  features [native x86 oracle f64 compare]
+  template ny-test-case
+  flags "--native-backend x86 --native-result-oracle=1"
+  expect compile_and_run
+  source ny <<'NY'
+fn gt(f64 x, f64 y) bool {
+  x > y
+}
+
+gt(2.25, 1.5)
+NY
+}

@@ -20,8 +20,10 @@ fn _quarter_round(list st, int a, int b, int c, int d) any {
    vd = _rotl32(vd ^^ va, 8)
    vc = (vc + vd) & 0xffffffff
    vb = _rotl32(vb ^^ vc, 7)
-   st[a] = va st[b] = vb
-   st[c] = vc st[d] = vd
+   st[a] = va
+   st[b] = vb
+   st[c] = vc
+   st[d] = vd
 }
 
 fn chacha20_block(list st) list {
@@ -82,8 +84,7 @@ fn _chacha20_crypt_ctx(list ctx, int counter, list data, bool wide_counter) list
    store64(res, data.len, 0)
    mut st = zero_list(16)
    mut st_orig = zero_list(16)
-   mut p = 0
-   mut block_counter = counter
+   mut p, block_counter = 0, counter
    while p < data.len {
       mut i = 0
       while i < 16 {

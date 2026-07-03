@@ -66,11 +66,11 @@ fn attr_effects(any node, list args) any {
    node
 }
 
-fn attr_llvm(any node, list args) any {
-   "Builtin @llvm metadata transform."
-   if args.len < 1 || args.len > 2 { panic("@llvm expects 1 or 2 argument(s)") }
-   node = _set_flag(node, "llvm_attr", args[0])
-   if args.len == 2 { node = _set_flag(node, "llvm_value", args[1]) }
+fn attr_backend(any node, list args) any {
+   "Builtin backend metadata transform."
+   if args.len < 1 || args.len > 2 { panic("@backend expects 1 or 2 argument(s)") }
+   node = _set_flag(node, "backend_attr", args[0])
+   if args.len == 2 { node = _set_flag(node, "backend_value", args[1]) }
    node
 }
 
@@ -83,7 +83,7 @@ fn register_defaults(dict reg) dict {
    reg = syntax_impl.register_attribute(reg, "pure", attr_pure)
    reg = syntax_impl.register_attribute(reg, "cache", attr_cache)
    reg = syntax_impl.register_attribute(reg, "effects", attr_effects)
-   reg = syntax_impl.register_attribute(reg, "llvm", attr_llvm)
+   reg = syntax_impl.register_attribute(reg, "backend", attr_backend)
    reg
 }
 
@@ -102,8 +102,8 @@ fn register_defaults(dict reg) dict {
    def fx = syntax_impl.apply_attribute(reg, "effects", dict(2), ["io"])
    assert(fx.get("effect_contract_known", false), "syntax builtin effects flag")
    assert(fx.get("effect_contract", list(0)).len == 1, "syntax builtin effects list")
-   def ll = syntax_impl.apply_attribute(reg, "llvm", dict(2), ["alwaysinline", 1])
-   assert(ll.get("llvm_attr", "") == "alwaysinline", "syntax builtin llvm attr")
-   assert(ll.get("llvm_value", 0) == 1, "syntax builtin llvm value")
+   def be = syntax_impl.apply_attribute(reg, "backend", dict(2), ["alwaysinline", 1])
+   assert(be.get("backend_attr", "") == "alwaysinline", "syntax builtin backend attr")
+   assert(be.get("backend_value", 0) == 1, "syntax builtin backend value")
    print("✓ std.core.syntax.builtin self-test passed")
 }

@@ -78,8 +78,7 @@ fn _gf2_sparse_xor(list a, list b) list {
    mut out = list(a.len + b.len)
    mut i, j, oi = 0, 0, 0
    while i < a.len && j < b.len {
-      def av = int(a[i])
-      def bv = int(b[j])
+      def av, bv = int(a[i]), int(b[j])
       if av == bv {
          i += 1
          j += 1
@@ -531,8 +530,7 @@ fn _gf2_dense_vec_packed_words(list row, int width) list {
 }
 
 fn _gf2_packed_words_hash(list words) int {
-   mut h = 2166136261
-   mut i = 0
+   mut h, i = 2166136261, 0
    while i < words.len {
       h = (h * 16777619 + int(words[i]) + i) % 2147483647
       if h < 0 { h = 0 - h }
@@ -1102,8 +1100,7 @@ fn _gf2_precondition_find_other_col2(list active, list col_rows, int row, int sk
 fn _gf2_precondition_decrement_intersection_counts(list counts, list a, list b) list {
    mut i, j = 0, 0
    while i < a.len && j < b.len {
-      def av = int(a[i])
-      def bv = int(b[j])
+      def av, bv = int(a[i]), int(b[j])
       if av == bv {
          if av >= 0 && av < counts.len { counts[av] = int(counts[av]) - 2 }
          i += 1

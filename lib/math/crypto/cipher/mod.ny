@@ -1,4 +1,4 @@
-;; Keywords: cipher classical caesar vigenere affine atbash hill playfair rail-fence keyboard-shift morse adfgvx bifid substitution polybius knapsack scoring frequency math crypto
+;; Keywords: cipher classical caesar vigenere affine atbash hill playfair rail-fence keyboard-shift morse adfgvx bifid substitution polybius knapsack decode-chain scoring frequency math crypto
 ;; Cryptography cipher helpers for algorithms, analysis, validation, or supporting math.
 ;; References:
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf

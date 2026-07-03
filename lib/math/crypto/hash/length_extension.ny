@@ -89,9 +89,9 @@ fn md5_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) s
          mut f, g = 0, 0
          if ri < 16 {
             f, g = ((bb & cc) | ((bb ^^ 4294967295) & dd)), ri
-         } else if ri < 32 {
+         } elif ri < 32 {
             f, g = ((dd & bb) | ((dd ^^ 4294967295) & cc)), (5 * ri + 1) % 16
-         } else if ri < 48 {
+         } elif ri < 48 {
             f, g = (bb ^^ cc ^^ dd), (3 * ri + 5) % 16
          } else {
             f, g = (cc ^^ (bb | (dd ^^ 4294967295))), (7 * ri) % 16
@@ -172,9 +172,11 @@ fn sha1_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) 
       while ri2 < 80 {
          def ki = ri2 < 20 ? 1518500249 : (ri2 < 40 ? 1859775393 : (ri2 < 60 ? 2400959708 : 3395469782))
          mut f2 = 0
-         if ri2 < 20 { f2 = ((bb2 & cc2) | ((bb2 ^^ 4294967295) & dd2)) } else if ri2 < 40 {
+         if ri2 < 20 {
+            f2 = ((bb2 & cc2) | ((bb2 ^^ 4294967295) & dd2))
+         } elif ri2 < 40 {
             f2 = (bb2 ^^ cc2 ^^ dd2)
-         } else if ri2 < 60 {
+         } elif ri2 < 60 {
             f2 = ((bb2 & cc2) | (bb2 & dd2) | (cc2 & dd2))
          } else {
             f2 = (bb2 ^^ cc2 ^^ dd2)

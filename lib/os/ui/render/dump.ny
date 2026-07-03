@@ -250,11 +250,10 @@ fn apply_verbose_argv(int start_index=1) bool {
       set_str("NY_TRACE", "0")
       set_bool("NY_TRACE", false)
    }
-   ;; Useful-by-default diagnostics: startup/backend choice, input events,
-   ;; renderer failures, and Vulkan initialization timing.  Do not enable
-   ;; NY_UI_TRACE/NY_RENDER_DEBUG/NY_FONT_LOAD_TRACE for plain -v: those feed
-   ;; hot frame/profile/proc/font paths and change performance while debugging.
-   set_bools(["NY_UI_STARTUP_TRACE", "NY_UI_INPUT_TRACE", "NY_VK_INIT_TRACE"], true)
+   ;; Useful-by-default diagnostics stay quiet at level 1.  Deeper UI startup,
+   ;; input, renderer, and Vulkan initialization traces are available with -vv
+   ;; without making a normal verbose run look like a trace session.
+   set_bools(["NY_UI_STARTUP_TRACE", "NY_UI_INPUT_TRACE", "NY_VK_INIT_TRACE"], level >= 2)
    if level >= 2 {
       set_bools(["NY_UI_TRACE", "NY_RENDER_DEBUG", "NY_FONT_LOAD_TRACE"], true)
    } else {
@@ -287,9 +286,10 @@ fn apply_verbose_argv(int start_index=1) bool {
             "NY_UI_TEX_TRACE", "NY_TEX_TRACE", "NY_TRACE_SPAM"
       ], true)
    }
-   eprint_text(level >= 3 ? "[ui:verbose] enabled spam tracing by --trace-spam" :
-      (level >= 2 ? "[ui:verbose] enabled compact deep diagnostics by -vv" :
-   "[ui:verbose] enabled useful diagnostics by -v/--verbose"))
+   if level >= 2 {
+      eprint_text(level >= 3 ? "[ui:verbose] enabled spam tracing by --trace-spam" :
+         "[ui:verbose] enabled compact deep diagnostics by -vv")
+   }
    true
 }
 

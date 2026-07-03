@@ -1,0 +1,14 @@
+shape x86_64_elf64_object_link_run_mixed_f64_stack {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir link-run]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-mixed-f64-stack.o"
+  expect object_link_run_f64_55.5
+  source ny <<'NY'
+fn mix(i64 a, f64 b, f64 c, f64 d, f64 e, f64 f, f64 g, f64 h, f64 i, f64 j) f64 {
+  a + b + c + d + e + f + g + h + i + j
+}
+mix(10, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.5)
+NY
+}

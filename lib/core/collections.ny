@@ -77,8 +77,7 @@ fn group_by(any xs, fnptr key_fn) dict {
    if _collection_missing(xs) { return out }
    mut i = 0
    while i < xs.len {
-      def v = xs.get(i)
-      def k = key_fn(v)
+      def v, k = xs.get(i), key_fn(v)
       mut bucket = out.get(k, [])
       bucket = bucket.append(v)
       out[k] = bucket

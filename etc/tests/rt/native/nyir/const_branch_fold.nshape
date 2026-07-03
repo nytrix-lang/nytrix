@@ -1,0 +1,13 @@
+shape nyir_const_branch_fold {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "optimizer", "cfg", "branch-fold"]
+  template ny-test-case
+  flags "--nyir-run --nyir-dump-stats"
+  expect compile_and_run
+  source ny <<'NY'
+def x = 200
+def masked = x & 255
+if (masked / 2) < 128 { 17 } else { 99 }
+NY
+}

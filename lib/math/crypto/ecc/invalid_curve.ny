@@ -69,8 +69,7 @@ fn twist_attack(fnptr oracle_fn, any Gx, any Gy, any a, any b, any p, list facto
 
 fn invalid_curve_dlog(list g, any q, any a, any p, int order) int {
    "Brute-force dlog in a small invalid-curve subgroup. Returns -1 if not found."
-   mut r = nil
-   mut k = 0
+   mut r, k = nil, 0
    while k < order {
       if r == q { return k }
       r = ecc_point_add(r, g, a, p)
@@ -82,16 +81,11 @@ fn invalid_curve_dlog(list g, any q, any a, any p, int order) int {
 fn invalid_curve_recover_transcript(list transcript, any a, any p) any {
    "Recover a scalar from fixed invalid-curve query rows [x,y,order,qx,qy]. " +
    "Returns [scalar, combined_modulus], or nil if a row is inconsistent."
-   mut rems = []
-   mut mods = []
-   mut product = Z(1)
-   mut i = 0
+   mut rems, mods, product, i = [], [], Z(1), 0
    while i < transcript.len {
       def row = transcript[i]
       if row.len < 5 { return nil }
-      def g = [Z(row[0]), Z(row[1])]
-      def q = [Z(row[3]), Z(row[4])]
-      def n = int(row[2])
+      def g, q, n = [Z(row[0]), Z(row[1])], [Z(row[3]), Z(row[4])], int(row[2])
       if ecc_scalar_mult(n, g, a, p) != nil { return nil }
       def d = invalid_curve_dlog(g, q, a, p, n)
       if d < 0 { return nil }

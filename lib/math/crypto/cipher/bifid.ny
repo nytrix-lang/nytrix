@@ -41,10 +41,8 @@ fn bifid_cbc_decrypt_block(str key, str ciphertext_block, int period=8) str {
    mut out = ""
    mut i = 0
    while i < period {
-      def a = _bifid_ch(ciphertext_block, i / 2)
-      def b = _bifid_ch(ciphertext_block, (period + i) / 2)
-      def ai = _bifid_index(key, a, "cipher.bifid_cbc_decrypt_block")
-      def bi = _bifid_index(key, b, "cipher.bifid_cbc_decrypt_block")
+      def a, b = _bifid_ch(ciphertext_block, i / 2), _bifid_ch(ciphertext_block, (period + i) / 2)
+      def ai, bi = _bifid_index(key, a, "cipher.bifid_cbc_decrypt_block"), _bifid_index(key, b, "cipher.bifid_cbc_decrypt_block")
       def ar, ac = ai / 5, ai % 5
       def br, bc = bi / 5, bi % 5
       out += (i % 2 == 0) ? _bifid_ch(key, 5 * ar + br) : _bifid_ch(key, 5 * ac + bc)

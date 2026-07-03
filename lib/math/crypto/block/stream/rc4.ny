@@ -65,9 +65,7 @@ fn rc4_decrypt_known_key(list ct, list key) list {
    def ct_len = ct.len
    mut plaintext = list(ct_len)
    store64(plaintext, ct_len, 0)
-   mut i = 0
-   mut j = 0
-   mut k = 0
+   mut i, j, k = 0, 0, 0
    while k < ct_len {
       i = (i + 1) % 256
       def si = __load_item_fast(s, i)

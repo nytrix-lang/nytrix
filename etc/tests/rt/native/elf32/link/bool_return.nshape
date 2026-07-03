@@ -1,0 +1,14 @@
+shape x86_elf32_object_link_run_bool_return {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run abi bool]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-bool-return.o"
+  expect object_link_run_bool_1
+  source ny <<'NY'
+fn ret_bool(i64 a, i64 b) bool {
+  a < b
+}
+ret_bool(3, 5)
+NY
+}

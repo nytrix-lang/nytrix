@@ -1,0 +1,24 @@
+shape i386_elf32_object_link_run_int_cmp {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 i386 x86 nyir link-run cmp]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-elf32-intcmp.o"
+  expect object_link_run_i64_1
+  source ny <<'NY'
+fn check(i64 a, i64 b) i64 {
+  if a > b {
+    if a >= b {
+      if b < a {
+        if b <= a {
+          if a != b {
+            1
+          } else { 0 }
+        } else { 0 }
+      } else { 0 }
+    } else { 0 }
+  } else { 0 }
+}
+check(10, 3)
+NY
+}

@@ -402,7 +402,7 @@ fn _normalize_path(any p) str {
    mut out = ""
    if prefix.len > 0 {
       if abs && _is_drive_prefix(prefix) { out = prefix + sepch } else { out = prefix }
-   } else if abs {
+   } elif abs {
       out = sepch
    }
    mut idx = 0

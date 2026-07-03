@@ -1,0 +1,22 @@
+shape x86_target_deref_assign {
+  family "runtime-native"
+  generator "native"
+  features [native x86 target pointer deref assign]
+  template ny-test-case
+  flags "--native-backend x86 --emit-asm /tmp/nytrix-native-x86-deref-assign.s"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn ptr_assign() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  *p = 42
+  def i64 v = *p
+  free(p)
+  v
+}
+
+ptr_assign()
+NY
+}

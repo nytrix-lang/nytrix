@@ -1,0 +1,22 @@
+shape oracle_deref_read_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result pointer deref]
+  template ny-test-case
+  flags "--native-result-oracle=42"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn ptr_deref() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  store64_i(p, 42)
+  def i64 v = *p
+  free(p)
+  v
+}
+
+ptr_deref()
+NY
+}

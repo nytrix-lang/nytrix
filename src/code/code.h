@@ -488,6 +488,7 @@ typedef struct codegen_options_t {
   bool opt_sys_mode;
   bool opt_unsafe_arith;
   const char *type_solver;
+  const char *c_frontend;
   bool user_native_abi;
   bool skip_stdlib;
   bool emit_cached_stdlib_init;
@@ -748,6 +749,7 @@ struct codegen_t {
       bool opt_sys_mode;
       bool opt_unsafe_arith;
       const char *type_solver;
+      const char *c_frontend;
       bool user_native_abi;
       bool skip_stdlib;
       bool emit_cached_stdlib_init;

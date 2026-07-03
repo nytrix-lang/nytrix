@@ -264,8 +264,7 @@ fn ascii_integer(any bits) int {
    "Convert exactly 8 MSB-first bits to an ASCII integer."
    def n = bits.len
    if n != 8 { panic("ascii_integer: B must consist of 8 bits") }
-   mut v = 0
-   mut i = 0
+   mut v, i = 0, 0
    while i < 8 {
       mut b = 0
       if is_str(bits) {
@@ -573,7 +572,7 @@ fn affine_bytes_decrypt(list byte_list, int a, int b) list {
    def n = byte_list.len
    while i < n {
       def c, p = mod(Z(byte_list[i]), Z(256)), mod(inva * (c - bb), Z(256))
-      out = out.append(bigint_to_int(p))
+      out = out.append(int(p))
       i += 1
    }
    out

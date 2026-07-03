@@ -1,6 +1,6 @@
 use std.core
 
-#include <stdlib.h> as ""
+#include <stdlib.h>
 
 ;; Builtin-shaped user functions must shadow compiler fast paths without
 ;; hiding unrelated unprefixed C imports.

@@ -1,5 +1,10 @@
 ;; Keywords: rsa non-coprime roots nthroot crt plaintext candidates ctf
 ;; Compact helpers for RSA plaintext recovery when e is not coprime to phi(n).
+;; Reference:
+;; - D. Boneh, Twenty Years of Attacks on the RSA Cryptosystem.
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.roots(
    rsa_crt_pq,
    rsa_plaintexts_from_pq,
@@ -51,7 +56,7 @@ fn _rsa_hit_bytes(list bs, list prefixes, bool allow_brace, bool allow_printable
       if bytes_has_prefix(bs, prefixes.get(i)) { return true }
       i += 1
    }
-   if allow_brace && bytes_contains(bs, str_to_bytes("{")) { return true }
+   if allow_brace && bytes_contains(bs, "{".to_bytes) { return true }
    if allow_printable && bytes_is_printable_ascii(bs, 1, 100) { return true }
    false
 }
@@ -70,7 +75,7 @@ fn rsa_ascii_hits_from_pq(
    mut out = []
    mut i = 0
    while i < ms.len {
-      def bs = long_to_bytes(ms.get(i))
+      def bs = ms.get(i).to_bytes
       if _rsa_hit_bytes(bs, prefixes, allow_brace, allow_printable) {
          out = out.append(bytes_ascii(bs))
       }
@@ -84,7 +89,7 @@ fn rsa_find_flag_from_pq(any c, any e, any p, any q, str prefix="FlagY{", str su
    def ms = rsa_plaintexts_from_pq(c, e, p, q)
    mut i = 0
    while i < ms.len {
-      def flag = extract_flag_bytes(long_to_bytes(ms.get(i)), prefix, suffix)
+      def flag = extract_flag_bytes(ms.get(i).to_bytes, prefix, suffix)
       if flag != "" { return flag }
       i += 1
    }

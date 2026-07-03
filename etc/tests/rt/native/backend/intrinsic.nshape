@@ -1,0 +1,16 @@
+shape backend_intrinsic {
+  family "runtime-native"
+  generator "native"
+  features ["backend", "intrinsic", "portable-surface"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn pop(i64 x) i64 {
+  backend_intrinsic("ctpop.i64", x)
+}
+
+pop(0xf0f0) + backend_intrinsic("cttz.i64", 8, false)
+NY
+}

@@ -1,0 +1,17 @@
+shape nyir_vm_profile {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "profile"]
+  template ny-test-case
+  flags "--nyir-run --nyir-run-profile=/tmp/nytrix-nyir-vm-profile.txt"
+  expect compile_and_run
+  source ny <<'NY'
+mut acc = 0
+for i in 0..5 {
+  if i % 2 == 0 {
+    acc += i
+  }
+}
+acc
+NY
+}

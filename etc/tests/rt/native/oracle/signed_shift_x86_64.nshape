@@ -1,0 +1,12 @@
+shape oracle_signed_shift_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result signedness shift]
+  template ny-test-case
+  flags "--native-result-oracle=-4"
+  expect compile_and_run
+  source ny <<'NY'
+def x = 0 - 8
+x >> 1
+NY
+}

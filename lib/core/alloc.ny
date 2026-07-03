@@ -282,8 +282,7 @@ fn _alloc_selftest_thunk() ptr { ctx_alloc(_alloc_selftest_n) }
 #main {
    def state = bump_new(64)
    assert(bump_capacity(state) == 64 && bump_used(state) == 0, "alloc bump init")
-   def p1 = bump_alloc(state, 8)
-   def p2 = bump_alloc(state, 8)
+   def p1, p2 = bump_alloc(state, 8), bump_alloc(state, 8)
    assert(p1 != 0 && p2 == p1 + 8, "alloc bump sequential")
    assert(bump_available(state) == 48, "alloc bump available")
    def mark = bump_mark(state)

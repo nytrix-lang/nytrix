@@ -1,0 +1,13 @@
+shape i386_elf32_object_link_run_f64 {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 i386 x86 nyir link-run f64]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64.o"
+  expect object_link_run_f64_3.75
+  source ny <<'NY'
+def a = 1.5
+def b = 2.25
+a + b
+NY
+}

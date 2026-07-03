@@ -1,0 +1,19 @@
+shape case_target {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "case", "x86_64"]
+  template ny-test-case
+  flags "--native-backend x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+fn classify(v) {
+  case v {
+    1..9 if v % 2 == 0 -> 20
+    1..9 -> 10
+    _ -> 0
+  }
+}
+
+classify(4) + classify(5) + classify(12)
+NY
+}

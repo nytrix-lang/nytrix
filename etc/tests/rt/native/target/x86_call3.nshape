@@ -1,0 +1,15 @@
+shape x86_call3_target {
+  family "runtime-native"
+  generator "native"
+  features [native x86 target call]
+  template ny-test-case
+  flags "--emit-asm=/tmp/nytrix-native-x86-call3-target.s --native-backend x86"
+  expect compile_and_run
+  source ny <<'NY'
+fn add3(i64 a, i64 b, i64 c) i64 {
+  a + b + c
+}
+
+add3(1, 2, 3)
+NY
+}

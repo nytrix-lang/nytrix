@@ -1,0 +1,14 @@
+shape nyir_vm_recursion {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "call", "recursion"]
+  template ny-test-case
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+fn fact(i64 n) i64 {
+  if n <= 1 { 1 } else { n * fact(n - 1) }
+}
+fact(6)
+NY
+}

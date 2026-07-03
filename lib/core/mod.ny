@@ -2,7 +2,7 @@
 ;; Core runtime facade: primitives, containers, strings, assertions, Result values, queues, and channels.
 ;; References:
 ;; - std
-module std.core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, malloc, free, malloc_raw, free_raw, realloc, zalloc, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, print, eprint, chr, retain, rc_count, _pow2, __big_add_abs, __big_sub_abs, __big_mul_abs, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
+module std.core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, free_raw, realloc, zalloc, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, print, eprint, chr, retain, rc_count, _pow2, __big_add_abs, __big_sub_abs, __big_mul_abs, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
 use std.core.primitives
 use std.core.reflect as core_ref
 use std.core.dict_mod
@@ -67,10 +67,8 @@ fn _core_pow_float_arg(any x) any {
 
 fn pow(any a, any b) any {
    "Raises `a` to exponent `b`. Integer powers are exact; float operands and negative exponents use floating-point power."
-   def ta = type(a)
-   def tb = type(b)
-   def a_num = ta == "int" || ta == "float" || ta == "bigint"
-   def b_num = tb == "int" || tb == "float" || tb == "bigint"
+   def ta, tb = type(a), type(b)
+   def a_num, b_num = ta == "int" || ta == "float" || ta == "bigint", tb == "int" || tb == "float" || tb == "bigint"
    if !a_num || !b_num { panic("pow expects numeric operands") }
    if ta == "float" || tb == "float" || b < 0 {
       return __flt_pow(_core_pow_float_arg(a), _core_pow_float_arg(b))
@@ -426,6 +424,33 @@ fn sqrt(any x) f64 {
 }
 
 @inline
+fn abs(any x) any {
+   "Returns the absolute value of `x`."
+   if __is_int(x) { return x < 0 ? -x : x }
+   if is_float(x) {
+      def f = float(x)
+      return f < 0.0 ? -f : f
+   }
+   x < 0 ? -x : x
+}
+
+@inline
+fn round(any x, int n=0) any {
+   "Rounds a number `x` to `n` decimal places."
+   if __is_int(x) { return x }
+   def f = float(x)
+   if n == 0 { return __flt_round(f) }
+   def factor = pow(10.0, float(n))
+   __flt_round(f * factor) / factor
+}
+
+@inline
+fn divmod(any a, any b) list {
+   "Returns the tuple [a // b, a % b] (quotient and remainder)."
+   [a / b, a % b]
+}
+
+@inline
 fn panic(any msg) any {
    "Raises a panic with `msg`."
    __panic(msg)
@@ -600,6 +625,13 @@ fn store64_i(any p, any v, int i=0) any {
    "Stores an ordinary integer as a raw signed 64-bit scalar."
    def any addr = p
    __store64_h(addr, i, v)
+}
+
+@jit
+fn addr_of(any x) ptr {
+   "Returns the native address of a stack local in native NYIR backends."
+   panic("addr_of is only available in native NYIR lowering")
+   0
 }
 
 @jit
@@ -889,11 +921,11 @@ fn _core_bytes_like_len(any x) int { load64(x, -16) }
 
 @returns_owned
 fn _core_bytes_like_to_list(any x) list<int> {
-   mut out = []
-   mut i = 0
    def n = _core_bytes_like_len(x)
+   mut out = list(n)
+   mut i = 0
    while i < n {
-      out = out.append(load8(x, i) & 255)
+      out[i] = load8(x, i) & 255
       i += 1
    }
    out
@@ -912,16 +944,18 @@ fn _core_hex_nibble(int c) int {
 fn _core_unhex(str hex) list<int> {
    def n = _core_bytes_like_len(hex)
    if n <= 0 { return [] }
-   mut out = []
-   mut i = 0
+   def out_len = (n + 1) / 2
+   mut out = list(out_len)
+   mut i, oi = 0, 0
    if (n % 2) == 1 {
-      out = out.append(_core_hex_nibble(load8(hex, 0)))
+      out[oi] = _core_hex_nibble(load8(hex, 0))
+      oi += 1
       i = 1
    }
    while i < n {
-      def hi = _core_hex_nibble(load8(hex, i))
-      def lo = _core_hex_nibble(load8(hex, i + 1))
-      out = out.append((hi << 4) | lo)
+      def hi, lo = _core_hex_nibble(load8(hex, i)), _core_hex_nibble(load8(hex, i + 1))
+      out[oi] = (hi << 4) | lo
+      oi += 1
       i += 2
    }
    out

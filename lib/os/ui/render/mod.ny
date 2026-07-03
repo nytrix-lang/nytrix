@@ -5192,7 +5192,7 @@ fn _draw_radial_polyline_fallback(
 ) bool {
    steps = max(1, int(steps))
    def limit = closed ? steps : steps + 1
-   mut points, i = [], 0
+   mut points, i = list(limit), 0
    while i < limit {
       def angle = start_rad + (span_rad * float(i) / float(steps))
       points = points.append([cx + cos(angle) * rx, cy + sin(angle) * ry, 0.0])
@@ -5302,7 +5302,7 @@ fn draw_triangle_lines(any v1, any v2, any v3, any color, f64 thickness=1.0) boo
 fn draw_triangle_fan(list points, any color) bool {
    "Draws a triangle fan where points[0] is the center."
    if !is_list(points) || points.len < 3 { return false }
-   mut tris = []
+   mut tris = list((points.len - 2) * 3)
    mut i = 1
    while i + 1 < points.len {
       tris = tris.append([vector.at(points[0], 0, 0.0), vector.at(points[0], 1, 0.0), 0.0])
@@ -5316,7 +5316,7 @@ fn draw_triangle_fan(list points, any color) bool {
 fn draw_triangle_strip(list points, any color) bool {
    "Draws a triangle strip."
    if !is_list(points) || points.len < 3 { return false }
-   mut tris = []
+   mut tris = list((points.len - 2) * 3)
    mut i = 0
    while i + 2 < points.len {
       def a = (i % 2 == 0) ? points[i] : points[i + 1]
@@ -5345,7 +5345,7 @@ fn draw_poly_lines_ex(any center, int sides, f64 radius, f64 rotation_deg, f64 t
    sides = max(3, int(sides))
    def cx, cy = float(vector.at(center, 0, 0.0)), float(vector.at(center, 1, 0.0))
    def rot = rotation_deg * PI / 180.0
-   mut pts = []
+   mut pts = list(sides)
    mut i = 0
    while i < sides {
       def a = rot + TAU * float(i) / float(sides)

@@ -565,6 +565,8 @@ bool ny_resolve_module_function_path(codegen_t *cg, const char *module_name,
                                      size_t out_cap);
 bool ny_codegen_token_is_source_file(codegen_t *cg, token_t tok);
 bool ny_codegen_stmt_is_source_file(codegen_t *cg, stmt_t *s);
+bool ny_codegen_module_is_source_file(codegen_t *cg, const char *module_name);
+bool ny_stmt_tree_has_source_file(codegen_t *cg, stmt_t *s);
 bool ny_program_has_explicit_main_entry(codegen_t *cg, program_t *prog);
 
 void ny_sym_state_free(codegen_t *cg);

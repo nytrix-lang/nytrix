@@ -1,6 +1,7 @@
 #include "fficlang.h"
 #include "base/util.h"
 #include "priv.h"
+#include "code/c/c.h"
 #include <clang-c/Index.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -254,6 +255,72 @@ static const ny_autolink_entry_t *ny_ffi_header_entry(const char *header_path) {
       return e;
   }
   return NULL;
+}
+
+static bool ny_ffi_internal_c_parse_header(codegen_t *cg,
+                                           const char *header_path,
+                                           bool is_std,
+                                           bool strict_internal,
+                                           size_t *parsed_out,
+                                           ny_c_header_summary_t *summary_out) {
+  if (parsed_out)
+    *parsed_out = 0;
+  if (summary_out)
+    memset(summary_out, 0, sizeof(*summary_out));
+  if (is_std) {
+    if (strict_internal) {
+      NY_LOG_ERR("[ffi:c] internal frontend does not support system include <%s> yet\n",
+                 header_path ? header_path : "");
+      if (cg)
+        cg->had_error = 1;
+      return false;
+    }
+    return true;
+  }
+
+  size_t n = 0;
+  char *src = ny_read_file_raw(header_path, &n);
+  if (!src) {
+    if (strict_internal) {
+      NY_LOG_ERR("[ffi:c] internal frontend could not read header \"%s\"\n",
+                 header_path ? header_path : "");
+      if (cg)
+        cg->had_error = 1;
+      return false;
+    }
+    return true;
+  }
+
+  ny_c_header_summary_t summary = {0};
+  char parse_err[256] = {0};
+  bool ok = ny_parse_header_summary(src, n, &summary, parse_err, sizeof(parse_err)) != 0;
+  free(src);
+  if (!ok && strict_internal) {
+    NY_LOG_ERR("[ffi:c] internal frontend rejected \"%s\": %s\n",
+               header_path ? header_path : "",
+               parse_err[0] ? parse_err : "unsupported C declaration");
+    if (cg)
+      cg->had_error = 1;
+    return false;
+  }
+  if (parsed_out)
+    *parsed_out = summary.declarations;
+  if (summary_out)
+    *summary_out = summary;
+  if (summary.declarations || summary.preprocessor_lines) {
+    NY_LOG_V2("[ffi:c] internal frontend summary %s: decls=%zu funcs=%zu vars=%zu typedefs=%zu tags=%zu aggregates=%zu fields=%zu aggregate_bytes=%zu fnptrs=%zu preproc=%zu includes=%zu defines=%zu object_defines=%zu function_defines=%zu unsupported_defines=%zu undefs=%zu conditionals=%zu active=%zu inactive=%zu unsupported=%zu\n",
+              header_path ? header_path : "<memory>", summary.declarations,
+              summary.functions, summary.variables, summary.typedefs,
+              summary.tag_decls, summary.aggregate_layouts,
+              summary.aggregate_fields, summary.aggregate_bytes,
+              summary.function_pointers, summary.preprocessor_lines,
+              summary.include_lines, summary.define_lines,
+              summary.object_like_define_lines, summary.function_like_define_lines,
+              summary.unsupported_define_lines, summary.undef_lines,
+              summary.conditional_lines, summary.conditional_active_lines,
+              summary.conditional_inactive_lines, summary.unsupported);
+  }
+  return true;
 }
 
 static char *ny_pkgconfig_lib(const char *pkg) {
@@ -755,6 +822,470 @@ static const char *ny_ffi_public_symbol_name(ffi_context *ctx,
   if (n <= 0 || (size_t)n >= buf_len)
     return c_name;
   return buf;
+}
+
+static bool ny_ffi_import_allowed(ffi_context *ctx, const char *name,
+                                  const char *kind);
+static void ny_ffi_register_int_constant(ffi_context *ctx, const char *name,
+                                         int64_t value);
+static bool ny_ffi_layout_uses_sret(layout_def_t *layout);
+static bool ny_ffi_layout_uses_byval(layout_def_t *layout);
+static void ny_ffi_add_type_attr(ffi_context *ctx, LLVMValueRef fn,
+                                 LLVMAttributeIndex idx, const char *name,
+                                 LLVMTypeRef type);
+static void ny_ffi_add_align_attr(ffi_context *ctx, LLVMValueRef fn,
+                                  LLVMAttributeIndex idx, size_t align);
+
+static char *ny_ffi_ctok_strdup(ny_ctok_t tok) {
+  if (!tok.start || tok.len == 0)
+    return NULL;
+  char *s = (char *)malloc(tok.len + 1);
+  if (!s)
+    return NULL;
+  memcpy(s, tok.start, tok.len);
+  s[tok.len] = '\0';
+  return s;
+}
+
+static const char *ny_ffi_map_internal_c_type(const ny_ctype_t *ty, char *buf,
+                                              size_t cap) {
+  if (!ty)
+    return NULL;
+  if (ty->flags & NY_CTYPEF_FUNCTION_PTR)
+    return "fnptr";
+  if (ty->ptr_depth > 0)
+    return "ptr";
+  switch (ty->kind) {
+  case NY_CTYPE_VOID:
+    return "void";
+  case NY_CTYPE_BOOL:
+    return "u8";
+  case NY_CTYPE_CHAR:
+    return (ty->flags & NY_CTYPEF_UNSIGNED) ? "u8" : "i8";
+  case NY_CTYPE_SHORT:
+    return (ty->flags & NY_CTYPEF_UNSIGNED) ? "u16" : "i16";
+  case NY_CTYPE_INT:
+  case NY_CTYPE_ENUM:
+    return (ty->flags & NY_CTYPEF_UNSIGNED) ? "u32" : "i32";
+  case NY_CTYPE_LONG:
+    return (ty->flags & NY_CTYPEF_UNSIGNED) ? "u64" : "i64";
+  case NY_CTYPE_FLOAT:
+    return "f32";
+  case NY_CTYPE_DOUBLE:
+    return "f64";
+  case NY_CTYPE_NAMED:
+  case NY_CTYPE_STRUCT:
+  case NY_CTYPE_UNION:
+    if (buf && cap > 0 && ty->name.start && ty->name.len > 0 &&
+        ty->name.len < cap) {
+      memcpy(buf, ty->name.start, ty->name.len);
+      buf[ty->name.len] = '\0';
+      return buf;
+    }
+    return NULL;
+  case NY_CTYPE_INVALID:
+  default:
+    return NULL;
+  }
+}
+
+static const char *ny_ffi_map_internal_c_field_type(const ny_c_field_t *field,
+                                                    char *buf, size_t cap) {
+  if (!field)
+    return NULL;
+  ny_ctype_t ty = {0};
+  ty.kind = field->kind;
+  ty.flags = field->flags;
+  ty.ptr_depth = field->ptr_depth;
+  ty.name = field->type_name;
+  return ny_ffi_map_internal_c_type(&ty, buf, cap);
+}
+
+static bool ny_ffi_internal_c_type_is_builtin(const char *ty) {
+  if (!ty || !*ty)
+    return false;
+  static const char *const builtins[] = {
+      "void", "u8", "i8", "u16", "i16", "u32", "i32",
+      "u64",  "i64", "f32", "f64", "ptr", "fnptr", "str", "cstr",
+  };
+  for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
+    if (strcmp(ty, builtins[i]) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool ny_ffi_internal_c_type_requires_layout(const char *ty) {
+  return ty && *ty && !ny_ffi_internal_c_type_is_builtin(ty);
+}
+
+static bool ny_ffi_internal_c_type_supported(codegen_t *cg, const char *ty) {
+  if (!ny_ffi_internal_c_type_requires_layout(ty))
+    return true;
+  return cg && lookup_layout(cg, ty) != NULL;
+}
+
+static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
+                                              const ny_cdecl_t *decl) {
+  if (!cg || !decl || decl->kind != NY_CDECL_TYPEDEF ||
+      !decl->type.aggregate_has_layout || decl->type.field_count == 0)
+    return true;
+  if (decl->type.field_count != decl->type.aggregate_fields)
+    return true;
+  char *name = ny_ffi_ctok_strdup(decl->name);
+  if (!name || !*name) {
+    free(name);
+    return false;
+  }
+  if (lookup_layout(cg, name)) {
+    free(name);
+    return true;
+  }
+
+  LLVMTypeRef elems[NY_C_MAX_FIELDS];
+  const char *field_types[NY_C_MAX_FIELDS];
+  char field_type_bufs[NY_C_MAX_FIELDS][128];
+  type_layout_t field_layouts[NY_C_MAX_FIELDS];
+  unsigned elem_count = 0;
+  token_t empty_tok = {0};
+  for (unsigned i = 0; i < decl->type.field_count && i < NY_C_MAX_FIELDS; i++) {
+    const ny_c_field_t *field = &decl->type.fields[i];
+    const char *ny_type =
+        ny_ffi_map_internal_c_field_type(field, field_type_bufs[i],
+                                         sizeof(field_type_bufs[i]));
+    if (!ny_type) {
+      NY_LOG_V1("[ffi:c] internal frontend cannot lower field %u for layout %s\n",
+                i + 1, name);
+      free(name);
+      return true;
+    }
+    if (ny_ffi_internal_c_type_requires_layout(ny_type) &&
+        !lookup_layout(cg, ny_type)) {
+      NY_LOG_V1("[ffi:c] internal frontend cannot lower nested field %u for layout %s yet\n",
+                i + 1, name);
+      free(name);
+      return true;
+    }
+    type_layout_t tl = resolve_raw_layout(cg, ny_type, empty_tok);
+    LLVMTypeRef llvm_ty = (tl.is_valid && tl.llvm_type)
+                              ? tl.llvm_type
+                              : resolve_abi_type_name(cg, ny_type, empty_tok);
+    if (!llvm_ty || !tl.is_valid || tl.size != field->size) {
+      free(name);
+      return true;
+    }
+    field_types[i] = ny_type;
+    field_layouts[i] = tl;
+    elems[elem_count++] = llvm_ty;
+  }
+
+  LLVMTypeRef st = LLVMStructCreateNamed(cg->ctx, name);
+  layout_def_t *def = (layout_def_t *)calloc(1, sizeof(*def));
+  if (!def) {
+    free(name);
+    return false;
+  }
+  def->name = ny_strdup(name);
+  def->llvm_type = st;
+  def->is_layout = true;
+  def->heap_allocated = true;
+  def->size = decl->type.aggregate_size;
+  def->align = decl->type.aggregate_align ? decl->type.aggregate_align : 1;
+
+  for (unsigned i = 0; i < decl->type.field_count && i < NY_C_MAX_FIELDS; i++) {
+    const ny_c_field_t *field = &decl->type.fields[i];
+    char *field_name = ny_ffi_ctok_strdup(field->name);
+    if (!field_name) {
+      for (size_t j = 0; j < def->fields.len; j++) {
+        free((char *)def->fields.data[j].name);
+        free((char *)def->fields.data[j].type_name);
+      }
+      free(def->fields.data);
+      free((char *)def->name);
+      free(def);
+      free(name);
+      return false;
+    }
+    layout_field_info_t info = {
+        .name = field_name,
+        .type_name = ny_strdup(field_types[i]),
+        .offset = field->offset,
+        .size = field_layouts[i].size,
+        .align = field_layouts[i].align ? field_layouts[i].align : 1,
+    };
+    vec_push(&def->fields, info);
+  }
+  LLVMStructSetBody(st, elems, elem_count, false);
+  vec_push(&cg->layouts, def);
+  free(name);
+  return true;
+}
+
+static void ny_ffi_add_link_once(codegen_t *cg, const char *lib) {
+  if (!cg || !lib || !*lib)
+    return;
+#ifndef _WIN32
+  (void)dlopen(lib, RTLD_LAZY | RTLD_GLOBAL);
+#endif
+  for (size_t i = 0; i < cg->links.len; i++) {
+    if (strcmp(cg->links.data[i], lib) == 0)
+      return;
+  }
+  vec_push(&cg->links, ny_strdup(lib));
+}
+
+static bool ny_ffi_register_internal_c_function(codegen_t *cg,
+                                                const ny_cdecl_t *decl,
+                                                const char *prefix,
+                                                const char *lib,
+                                                size_t *lowered_out) {
+  if (!cg || !decl || decl->kind != NY_CDECL_FUNC)
+    return true;
+  if (decl->is_variadic) {
+    NY_LOG_V1("[ffi:c] internal frontend does not lower variadic function declarations yet\n");
+    return false;
+  }
+  char *c_name_owned = ny_ffi_ctok_strdup(decl->name);
+  if (!c_name_owned || !*c_name_owned) {
+    free(c_name_owned);
+    NY_LOG_ERR("[ffi:c] internal frontend saw a function declaration without a name\n");
+    return false;
+  }
+  if (c_name_owned[0] == '_') {
+    free(c_name_owned);
+    return true;
+  }
+
+  ffi_context ctx = {
+      .cg = cg,
+      .prefix = prefix,
+      .prefix_len = prefix ? strlen(prefix) : 0,
+      .explicit_prefix = prefix && *prefix,
+      .namespace_alias = ny_ffi_prefix_is_namespace_alias(prefix),
+  };
+  if (ctx.prefix && ctx.prefix_len > 0 && !ctx.namespace_alias &&
+      strncmp(c_name_owned, ctx.prefix, ctx.prefix_len) != 0) {
+    free(c_name_owned);
+    return true;
+  }
+
+  char public_name_buf[512];
+  const char *ny_name =
+      ny_ffi_public_symbol_name(&ctx, c_name_owned, public_name_buf,
+                                sizeof(public_name_buf));
+  fun_sig *existing_sig = lookup_fun_exact(cg, ny_name);
+  if (existing_sig && existing_sig->is_native_abi) {
+    free(c_name_owned);
+    return true;
+  }
+  if (!ny_ffi_import_allowed(&ctx, ny_name, "function")) {
+    free(c_name_owned);
+    return true;
+  }
+
+  char ret_buf[128];
+  const char *ny_ret =
+      ny_ffi_map_internal_c_type(&decl->type, ret_buf, sizeof(ret_buf));
+  if (!ny_ret) {
+    NY_LOG_V1("[ffi:c] internal frontend cannot lower return type for %s\n",
+               c_name_owned);
+    free(c_name_owned);
+    return false;
+  }
+  if (!ny_ffi_internal_c_type_supported(cg, ny_ret)) {
+    NY_LOG_V1("[ffi:c] internal frontend cannot lower return layout %s for %s yet\n",
+              ny_ret, c_name_owned);
+    free(c_name_owned);
+    return false;
+  }
+  layout_def_t *ret_layout = lookup_layout(cg, ny_ret);
+  bool native_sret_return = ny_ffi_layout_uses_sret(ret_layout);
+
+  token_t empty_tok = {0};
+  LLVMTypeRef *param_llvm_types = NULL;
+  const char **param_ny_types = NULL;
+  char (*param_bufs)[128] = NULL;
+  layout_def_t **param_byval_layouts = NULL;
+  unsigned actual_params = decl->param_count + (native_sret_return ? 1u : 0u);
+  if (actual_params > 0) {
+    param_llvm_types =
+        (LLVMTypeRef *)alloca(sizeof(LLVMTypeRef) * actual_params);
+    if (native_sret_return)
+      param_llvm_types[0] = cg->type_i8ptr;
+  }
+  if (decl->param_count > 0) {
+    param_ny_types =
+        (const char **)alloca(sizeof(const char *) * decl->param_count);
+    param_byval_layouts =
+        (layout_def_t **)alloca(sizeof(layout_def_t *) * decl->param_count);
+    param_bufs = (char (*)[128])alloca(sizeof(char[128]) * decl->param_count);
+    for (unsigned i = 0; i < decl->param_count; i++) {
+      param_byval_layouts[i] = NULL;
+      const char *ny_arg_type = ny_ffi_map_internal_c_type(
+          &decl->params[i], param_bufs[i], sizeof(param_bufs[i]));
+      if (!ny_arg_type || strcmp(ny_arg_type, "void") == 0) {
+        NY_LOG_V1("[ffi:c] internal frontend cannot lower parameter %u for %s\n",
+                   i + 1, c_name_owned);
+        free(c_name_owned);
+        return false;
+      }
+      if (!ny_ffi_internal_c_type_supported(cg, ny_arg_type)) {
+        NY_LOG_V1("[ffi:c] internal frontend cannot lower parameter layout %s for %s yet\n",
+                  ny_arg_type, c_name_owned);
+        free(c_name_owned);
+        return false;
+      }
+      param_ny_types[i] = ny_arg_type;
+      layout_def_t *arg_layout = lookup_layout(cg, ny_arg_type);
+      if (ny_ffi_layout_uses_byval(arg_layout))
+        param_byval_layouts[i] = arg_layout;
+      param_llvm_types[i + (native_sret_return ? 1u : 0u)] =
+          resolve_abi_type_name(cg, ny_arg_type, empty_tok);
+    }
+  }
+
+  LLVMTypeRef llvm_ret = native_sret_return
+                             ? LLVMVoidTypeInContext(cg->ctx)
+                             : resolve_abi_type_name(cg, ny_ret, empty_tok);
+  LLVMTypeRef ft = LLVMFunctionType(llvm_ret, param_llvm_types, actual_params,
+                                    false);
+  LLVMValueRef f = LLVMGetNamedFunction(cg->module, c_name_owned);
+  if (!f) {
+    f = LLVMAddFunction(cg->module, c_name_owned, ft);
+    LLVMSetLinkage(f, LLVMExternalLinkage);
+  }
+  ffi_context attr_ctx = {.cg = cg};
+  if (native_sret_return && ret_layout) {
+    ny_ffi_add_type_attr(&attr_ctx, f, 1, "sret", ret_layout->llvm_type);
+    ny_ffi_add_align_attr(&attr_ctx, f, 1, ret_layout->align);
+  }
+  for (unsigned i = 0; i < decl->param_count; i++) {
+    layout_def_t *arg_layout = param_byval_layouts ? param_byval_layouts[i] : NULL;
+    if (!arg_layout)
+      continue;
+    LLVMAttributeIndex idx =
+        (LLVMAttributeIndex)(i + 1 + (native_sret_return ? 1u : 0u));
+    ny_ffi_add_type_attr(&attr_ctx, f, idx, "byval", arg_layout->llvm_type);
+    ny_ffi_add_align_attr(&attr_ctx, f, idx, arg_layout->align);
+  }
+
+  bool already_known = false;
+  bool existing_is_ny_fn = false;
+  for (int si = 0; si < (int)cg->fun_sigs.len; si++) {
+    fun_sig *existing = &((fun_sig *)cg->fun_sigs.data)[si];
+    if (existing->name && strcmp(existing->name, ny_name) == 0) {
+      already_known = true;
+      existing_is_ny_fn = existing->stmt_t != NULL;
+      break;
+    }
+  }
+  if (!already_known || existing_is_ny_fn) {
+    fun_sig sig;
+    ny_fun_sig_init(&sig, ny_name, ft, f, NULL, (int)decl->param_count, false,
+                    true);
+    sig.link_name = ny_strdup(c_name_owned);
+    sig.is_native_abi = true;
+    sig.native_sret_return = native_sret_return;
+    sig.return_type = ny_strdup(ny_ret);
+    for (unsigned i = 0; i < decl->param_count; i++)
+      vec_push(&sig.param_types, ny_strdup(param_ny_types[i]));
+    vec_push(&cg->fun_sigs, sig);
+  }
+  ny_ffi_add_link_once(cg, lib);
+  if (lowered_out)
+    (*lowered_out)++;
+  free(c_name_owned);
+  return true;
+}
+
+static void ny_ffi_register_internal_c_defines(codegen_t *cg,
+                                               const ny_parser_t *p,
+                                               const char *prefix,
+                                               size_t *lowered_out) {
+  if (lowered_out)
+    *lowered_out = 0;
+  if (!cg || !p || p->define_count == 0)
+    return;
+  ffi_context ctx = {
+      .cg = cg,
+      .prefix = prefix,
+      .prefix_len = prefix ? strlen(prefix) : 0,
+      .explicit_prefix = prefix && *prefix,
+      .namespace_alias = ny_ffi_prefix_is_namespace_alias(prefix),
+  };
+  size_t lowered = 0;
+  for (unsigned i = 0; i < p->define_count; i++) {
+    char *name = ny_ffi_ctok_strdup(p->define_names[i]);
+    if (!name)
+      continue;
+    size_t before = cg->global_vars.len;
+    ny_ffi_register_int_constant(&ctx, name, (int64_t)p->define_values[i]);
+    if (cg->global_vars.len > before)
+      lowered++;
+    free(name);
+  }
+  if (lowered_out)
+    *lowered_out = lowered;
+}
+
+static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
+                                           const char *header_path,
+                                           const char *prefix,
+                                           const char *lib,
+                                           size_t *lowered_out,
+                                           size_t *constants_out) {
+  if (lowered_out)
+    *lowered_out = 0;
+  if (constants_out)
+    *constants_out = 0;
+  if (!cg || !header_path || !*header_path)
+    return false;
+  size_t n = 0;
+  char *src = ny_read_file_raw(header_path, &n);
+  if (!src) {
+    NY_LOG_ERR("[ffi:c] internal frontend could not read header \"%s\"\n",
+               header_path);
+    cg->had_error = 1;
+    return false;
+  }
+  ny_parser_t p;
+  ny_parse_init(&p, src, n);
+  bool ok = true;
+  size_t lowered = 0;
+  while (p.tok.kind != NY_CTOK_EOF) {
+    ny_cdecl_t decl;
+    int rc = ny_parse_decl(&p, &decl);
+    if (rc > 0) {
+      if (!ny_ffi_register_internal_c_layout(cg, &decl)) {
+        ok = false;
+        break;
+      }
+      if (!ny_ffi_register_internal_c_function(cg, &decl, prefix, lib,
+                                               &lowered)) {
+        ok = false;
+        break;
+      }
+      continue;
+    }
+    if (rc < 0) {
+      NY_LOG_ERR("[ffi:c] internal frontend rejected \"%s\": %s\n",
+                 header_path, ny_parse_error(&p));
+      cg->had_error = 1;
+      ok = false;
+    }
+    break;
+  }
+  size_t constants = 0;
+  ny_ffi_register_internal_c_defines(cg, &p, prefix, &constants);
+  free(src);
+  if (lowered_out)
+    *lowered_out = lowered;
+  if (constants_out)
+    *constants_out = constants;
+  if (ok)
+    NY_LOG_V1("[ffi:c] internal frontend lowered %zu function declaration(s) and %zu integer constant(s) without libclang\n",
+              lowered, constants);
+  return ok;
 }
 
 static const char *ny_ffi_basename(const char *path) {
@@ -1585,6 +2116,58 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
       prefix = entry->prefix;
   }
 
+  if (cg->c_frontend && (strcmp(cg->c_frontend, "nytrix") == 0 ||
+                         strcmp(cg->c_frontend, "auto") == 0)) {
+    bool strict_internal = strcmp(cg->c_frontend, "nytrix") == 0;
+    size_t parsed = 0;
+    ny_c_header_summary_t summary = {0};
+    if (!ny_ffi_internal_c_parse_header(cg, header_path, is_std,
+                                        strict_internal, &parsed, &summary))
+      return;
+    if (parsed || strict_internal) {
+      NY_LOG_V1("[ffi:c] internal frontend parsed %zu declaration(s)%s\n",
+                parsed, strict_internal
+                            ? "; attempting internal import lowering first"
+                            : "; libclang remains fallback/import backend");
+    }
+    if (strict_internal && !is_std) {
+      char *internal_auto_lib = NULL;
+      const char *internal_lib = lib;
+      if (!internal_lib || !*internal_lib) {
+        internal_auto_lib = ny_autolink_resolve(header_path);
+        internal_lib = internal_auto_lib;
+      }
+      size_t lowered = 0;
+      size_t constants = 0;
+      bool lowered_ok = ny_ffi_internal_c_lower_header(
+          cg, header_path, prefix, internal_lib, &lowered, &constants);
+      free(internal_auto_lib);
+      bool simple_function_only =
+          summary.declarations > 0 && summary.functions == summary.declarations &&
+          summary.variables == 0 && summary.typedefs == 0 &&
+          summary.tag_decls == 0 && summary.aggregate_layouts == 0 &&
+          summary.unsupported == 0;
+      bool internally_complete =
+          lowered_ok && summary.variables == 0 && summary.unsupported == 0 &&
+          ((summary.functions > 0 && lowered == summary.functions) ||
+           (summary.functions == 0 && summary.declarations == 0 &&
+            summary.object_like_define_lines > 0 && constants > 0));
+      if (internally_complete) {
+        NY_LOG_V1("[ffi:c] internal frontend completed import lowering for %s; libclang skipped\n",
+                  header_path);
+        return;
+      }
+      if (simple_function_only) {
+        NY_LOG_ERR("[ffi:c] internal frontend could not lower simple function-only header \"%s\"\n",
+                   header_path);
+        cg->had_error = 1;
+        return;
+      }
+      NY_LOG_V1("[ffi:c] internal frontend import lowering incomplete for %s; libclang fallback remains active\n",
+                header_path);
+    }
+  }
+
   char *auto_lib = NULL;
   const char *resolved_lib = lib;
   if (!resolved_lib || !*resolved_lib) {
@@ -1762,8 +2345,48 @@ void ny_ffi_clang_include(codegen_t *cg, const char *header_path,
   cg->ffi.includes_len++;
 }
 
+static bool ny_ffi_internal_c_frontend_probe(codegen_t *cg) {
+  if (!cg || !cg->c_frontend)
+    return true;
+  if (strcmp(cg->c_frontend, "nytrix") != 0 &&
+      strcmp(cg->c_frontend, "auto") != 0)
+    return true;
+  bool strict_internal = strcmp(cg->c_frontend, "nytrix") == 0;
+  size_t parsed = 0;
+  size_t skipped = 0;
+  for (size_t i = 0; i < cg->ffi.includes_len; ++i) {
+    if (cg->ffi.includes[i].is_std) {
+      size_t parsed_one = 0;
+      if (!ny_ffi_internal_c_parse_header(cg, cg->ffi.includes[i].path,
+                                          cg->ffi.includes[i].is_std,
+                                          strict_internal, &parsed_one, NULL))
+        return false;
+      parsed += parsed_one;
+      skipped++;
+      continue;
+    }
+    size_t parsed_one = 0;
+    if (!ny_ffi_internal_c_parse_header(cg, cg->ffi.includes[i].path,
+                                        cg->ffi.includes[i].is_std,
+                                        strict_internal, &parsed_one, NULL))
+      return false;
+    parsed += parsed_one;
+  }
+  if (parsed || strict_internal) {
+    NY_LOG_V1("[ffi:c] internal frontend parsed %zu declaration(s)%s\n",
+              parsed, strict_internal
+                          ? "; attempting internal import lowering first"
+                          : "; libclang remains fallback/import backend");
+  }
+  (void)skipped;
+  return true;
+}
+
 void ny_ffi_clang_process(codegen_t *cg) {
   if (!cg || cg->ffi.includes_len == 0)
+    return;
+
+  if (!ny_ffi_internal_c_frontend_probe(cg))
     return;
 
   char *buf = NULL;

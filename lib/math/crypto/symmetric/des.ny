@@ -65,8 +65,7 @@ fn _permute_bytes_int(list bytes, int off, list table) int {
 }
 
 fn _initial_halves(list block, int off) list {
-   mut l = 0
-   mut i = 0
+   mut l, i = 0, 0
    while i < 32 {
       l = (l << 1) | _byte_bit(block, off, __load_item_fast(_DES_IP, i))
       i += 1
@@ -86,8 +85,7 @@ fn _pair_bit(int hi, int lo, int bit_pos) int {
 fn _final_bytes_into(int hi, int lo, list out, int out_off) any {
    mut i = 0
    while i < 8 {
-      mut b = 0
-      mut j = 0
+      mut b, j = 0, 0
       while j < 8 {
          b = (b << 1) | _pair_bit(hi, lo, __load_item_fast(_DES_FP, i * 8 + j))
          j += 1
@@ -101,8 +99,7 @@ fn _final_bytes_list(int hi, int lo) list {
    mut out = []
    mut i = 0
    while i < 8 {
-      mut b = 0
-      mut j = 0
+      mut b, j = 0, 0
       while j < 8 {
          b = (b << 1) | _pair_bit(hi, lo, __load_item_fast(_DES_FP, i * 8 + j))
          j += 1
@@ -129,14 +126,11 @@ fn _rotl28(int x, int shift) int {
 
 fn _subkeys(list key) list {
    def kb = _permute_bytes_int(key, 0, _DES_PC1)
-   mut c = (kb >> 28) & 0x0fffffff
-   mut d = kb & 0x0fffffff
-   mut keys = []
-   mut i = 0
+   mut c, d = (kb >> 28) & 0x0fffffff, kb & 0x0fffffff
+   mut keys, i = [], 0
    while i < 16 {
       def sh = __load_item_fast(_DES_SHIFTS, i)
-      c = _rotl28(c, sh)
-      d = _rotl28(d, sh)
+      c, d = _rotl28(c, sh), _rotl28(d, sh)
       keys = keys.append(int(_permute_int((c << 28) | d, 56, _DES_PC2)))
       i += 1
    }
@@ -145,12 +139,10 @@ fn _subkeys(list key) list {
 
 fn _f(int r, int k) int {
    def x = _permute_int(r, 32, _DES_E) ^^ k
-   mut s = 0
-   mut box = 0
+   mut s, box = 0, 0
    while box < 8 {
       def chunk = (x >> (42 - box * 6)) & 63
-      def row = ((chunk & 32) >> 4) | (chunk & 1)
-      def col = (chunk >> 1) & 15
+      def row, col = ((chunk & 32) >> 4) | (chunk & 1), (chunk >> 1) & 15
       s = (s << 4) | __load_item_fast(__load_item_fast(_DES_S, box), row * 16 + col)
       box += 1
    }
@@ -159,14 +151,12 @@ fn _f(int r, int k) int {
 
 fn _crypt_halves(list keys, list block, int off, bool decrypt) list {
    def halves = _initial_halves(block, off)
-   mut l = __load_item_fast(halves, 0)
-   mut r = __load_item_fast(halves, 1)
+   mut l, r = __load_item_fast(halves, 0), __load_item_fast(halves, 1)
    mut round = 0
    while round < 16 {
       def ki = __load_item_fast(keys, decrypt ? 15 - round : round)
       def next_r = (l ^^ _f(r, ki)) & 0xffffffff
-      l = r
-      r = next_r
+      l, r = r, next_r
       round += 1
    }
    return [r, l]
@@ -174,14 +164,12 @@ fn _crypt_halves(list keys, list block, int off, bool decrypt) list {
 
 fn _crypt_block_into(list keys, list block, int off, bool decrypt, list out, int out_off) any {
    def halves = _initial_halves(block, off)
-   mut l = __load_item_fast(halves, 0)
-   mut r = __load_item_fast(halves, 1)
+   mut l, r = __load_item_fast(halves, 0), __load_item_fast(halves, 1)
    mut round = 0
    while round < 16 {
       def ki = __load_item_fast(keys, decrypt ? 15 - round : round)
       def next_r = (l ^^ _f(r, ki)) & 0xffffffff
-      l = r
-      r = next_r
+      l, r = r, next_r
       round += 1
    }
    _final_bytes_into(r, l, out, out_off)

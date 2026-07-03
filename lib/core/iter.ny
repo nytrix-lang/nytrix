@@ -2,7 +2,7 @@
 ;; Iterator and sequence operations for map, filter, reduce, chunking, and traversal.
 ;; References:
 ;; - std.core
-module std.core.iter(range, range2, enumerate, map, filter, repeat, take, drop, reverse, zip2, any, all, fold, reduce, each, count, count_if, first, last, find_if, find_index_if, chain, flatten, filter_map, compact, zip_with, cycle, partition, chunk, windowed, mapcat)
+module std.core.iter(range, range2, enumerate, map, filter, repeat, take, drop, reverse, zip2, any, all, fold, reduce, sum, each, count, count_if, first, last, find_if, find_index_if, chain, flatten, filter_map, compact, zip_with, cycle, partition, chunk, windowed, mapcat)
 use std.core
 use std.core.primitives as prim
 
@@ -98,6 +98,18 @@ fn find_index_if(seq xs, fnptr pred) int {
 fn reduce(seq xs, any init, fnptr fn2) any {
    "Alias for fold; reduces `xs` left-to-right starting from `init`."
    fold(xs, init, fn2)
+}
+
+fn sum(seq xs, any start=0) any {
+   "Returns the sum of all elements in `xs`, optionally starting with `start`."
+   mut total = start
+   def n = _iter_seq_len(xs, "sum")
+   mut i = 0
+   while i < n {
+      total = total + xs.get(i)
+      i += 1
+   }
+   total
 }
 
 fn each(seq xs, fnptr fn1) any {
@@ -589,6 +601,8 @@ fn zip2(seq a, seq b) list {
    assert(!all([4, 5, 6], fn(v) { v > 5 }), "iter all false")
    assert(fold([1, 2, 3, 4], 0, fn(a, v) { a + v }) == 10, "iter fold")
    assert(reduce([1, 2, 3], 1, fn(a, v) { a * v }) == 6, "iter reduce")
+   assert(sum([1, 2, 3, 4]) == 10, "iter sum")
+   assert(sum([1, 2], 5) == 8, "iter sum start")
    assert(find_if([10, 20, 30], fn(v) { v > 15 }) == 20, "iter find_if")
    assert(chain("ab", "cd") == "abcd", "iter chain str")
    assert(flatten([[1, 2], 3, [4]]) == [1, 2, 3, 4], "iter flatten")

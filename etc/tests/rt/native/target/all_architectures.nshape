@@ -1,0 +1,15 @@
+shape native_all_architectures {
+  family "runtime-native"
+  generator "native"
+  features ["native", "target", "architecture-matrix", "divmod"]
+  template ny-test-case
+  flags_matrix "--emit-asm=/tmp/nytrix-native-all-aarch64.s --native-backend aarch64; --emit-asm=/tmp/nytrix-native-all-arm.s --native-backend arm --native-abi aapcs; --emit-asm=/tmp/nytrix-native-all-avr.s --native-backend avr; --emit-asm=/tmp/nytrix-native-all-bpf.s --native-backend bpf; --emit-asm=/tmp/nytrix-native-all-mips.s --native-backend mips; --emit-asm=/tmp/nytrix-native-all-powerpc.s --native-backend powerpc; --emit-asm=/tmp/nytrix-native-all-riscv.s --native-backend riscv; --emit-asm=/tmp/nytrix-native-all-wasm.s --native-backend wasm; --emit-asm=/tmp/nytrix-native-all-x86.s --native-backend x86"
+  expect compile_and_run
+  source ny <<'NY'
+fn mix(i64 a, i64 b) i64 {
+  (a / b) + (a % b)
+}
+
+(1 + 2) + mix(10, 3)
+NY
+}

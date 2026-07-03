@@ -52,9 +52,7 @@ fn _encode64_internal(str data, str alphabet, bool padding=true) str {
    mut out = str.Builder(max(16, ((n + 2) / 3) * 4 + 8))
    mut i = 0
    while i < n {
-      def b1 = load8(data, i) & 255
-      def b2 = (i + 1 < n) ? (load8(data, i + 1) & 255) : 0
-      def b3 = (i + 2 < n) ? (load8(data, i + 2) & 255) : 0
+      def b1, b2, b3 = load8(data, i) & 255, (i + 1 < n) ? (load8(data, i + 1) & 255) : 0, (i + 2 < n) ? (load8(data, i + 2) & 255) : 0
       out = str.builder_append(out, chr(load8(alphabet, b1 >> 2)))
       out = str.builder_append(out, chr(load8(alphabet, ((b1 & 3) << 4) | (b2 >> 4))))
       if i + 1 < n { out = str.builder_append(out, chr(load8(alphabet, ((b2 & 15) << 2) | (b3 >> 6)))) } elif padding { out = str.builder_append(out, "=") }
@@ -154,10 +152,8 @@ fn _encode32_internal(str data, str alphabet, bool padding=true) str {
    mut out = str.Builder(max(16, ((n + 4) / 5) * 8 + 8))
    mut i = 0
    while i < n {
-      def b1 = load8(data, i) & 255
-      def b2 = (i + 1 < n) ? (load8(data, i + 1) & 255) : 0
-      def b3 = (i + 2 < n) ? (load8(data, i + 2) & 255) : 0
-      def b4 = (i + 3 < n) ? (load8(data, i + 3) & 255) : 0
+      def b1, b2 = load8(data, i) & 255, (i + 1 < n) ? (load8(data, i + 1) & 255) : 0
+      def b3, b4 = (i + 2 < n) ? (load8(data, i + 2) & 255) : 0, (i + 3 < n) ? (load8(data, i + 3) & 255) : 0
       def b5 = (i + 4 < n) ? (load8(data, i + 4) & 255) : 0
       out = str.builder_append(out, chr(load8(alphabet, b1 >> 3)))
       out = str.builder_append(out, chr(load8(alphabet, ((b1 & 7) << 2) | (b2 >> 6))))

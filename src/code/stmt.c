@@ -7879,12 +7879,16 @@ static void gen_stmt_module(codegen_t *cg, scope *scopes, size_t *depth,
                             stmt_t *s, size_t func_root, bool is_tail) {
   const char *prev = cg->current_module_name;
   cg->current_module_name = s->as.module.name;
+  bool direct_source_module =
+      ny_stmt_tree_has_source_file(cg, s) ||
+      ny_codegen_module_is_source_file(cg, s->as.module.name);
   for (size_t i = 0; i < s->as.module.body.len; ++i) {
     stmt_t *child = s->as.module.body.data[i];
     if (!child || child->kind == NY_S_FUNC)
       continue;
     if (cg->lazy_emit_stdlib_enabled && ny_is_stdlib_tok(child->tok) &&
-        !ny_codegen_stmt_is_source_file(cg, child) && child->kind == NY_S_VAR) {
+        !direct_source_module && !ny_codegen_stmt_is_source_file(cg, child) &&
+        child->kind == NY_S_VAR) {
       if (!ny_lazy_emit_stdlib_var_needed(cg, child, cg->current_module_name))
         continue;
     }

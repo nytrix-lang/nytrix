@@ -21,6 +21,13 @@ use std.os.sound.source
 #linux {
    #link "libsndfile.so"
    #include <sndfile.h> as "sf_"
+   extern {
+      fn sf_open(ptr path, int mode, ptr info) ptr as "sf_open"
+      fn sf_error(ptr sf) int as "sf_error"
+      fn sf_error_number(int errnum) ptr as "sf_error_number"
+      fn sf_close(ptr sf) int as "sf_close"
+      fn sf_read_short(ptr sf, ptr out, int items) int as "sf_read_short"
+   }
 } #else {
    fn sf_open(any _path, int _mode, any _info) any {
       "Runs the sf open operation."

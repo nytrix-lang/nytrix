@@ -47,6 +47,7 @@ typedef struct parser_t {
   int error_limit;
   bool had_error;
   bool skipped_newline;
+  bool stop_expr_at_newline;
   int last_error_line;
   int last_error_col;
   int last_error_end_col;

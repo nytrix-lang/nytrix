@@ -1,0 +1,14 @@
+shape oracle_f64_object_call_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle object f64 call]
+  template ny-test-case
+  flags "--native-result-oracle=4630263366890291200"
+  expect compile_and_run
+  source ny <<'NY'
+fn f(f64 a, i64 b, f64 c, bool ok, f64 d, i64 e, f64 g, f64 h, f64 i, f64 j, f64 k) f64 {
+  a + c + d + g + h + i + j + k
+}
+f(1.0, 99, 2.0, true, 3.0, 42, 4.0, 5.0, 6.0, 7.0, 8.0)
+NY
+}

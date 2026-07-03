@@ -1,0 +1,19 @@
+shape tier_report_functions {
+  family "runtime-native"
+  generator "native"
+  features ["native", "tier", "report", "functions"]
+  template ny-test-case
+  flags "--native-backend x86_64 --native-tier-report=/tmp/nytrix-native-tier-functions.txt --native-tier-budget=32 --native-hot-threshold=4 --native-cache-score=80"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(i64 x, i64 y) i64 {
+  x + y
+}
+
+fn mix(i64 x) i64 {
+  add(x, 4) * 3
+}
+
+mix(5)
+NY
+}

@@ -128,8 +128,7 @@ fn _rat_to_mod(list a, any modulus) bigint {
    def m = Z(modulus)
    while (d & Z(1)) == Z(0) {
       assert((n & Z(1)) == Z(0), "rational denominator is not invertible modulo target")
-      n = n >> Z(1)
-      d = d >> Z(1)
+      n, d = n >> Z(1), d >> Z(1)
    }
    mod(mod(n, m) * inverse_mod(mod(d, m), m), m)
 }

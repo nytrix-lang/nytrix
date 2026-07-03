@@ -304,9 +304,7 @@ fn _parse_piece(dict ctx, int pos) list {
    elif c == 123 {
       def r1 = _parse_number(pat, p + 1)
       if !r1[2] { return [node, p] }
-      mn = r1[0]
-      mx = mn
-      p = r1[1]
+      mn, mx, p = r1[0], r1[0], r1[1]
       if p < pat.len && load8(pat, p) == 44 {
          p += 1
          def r2 = _parse_number(pat, p)
@@ -374,21 +372,23 @@ fn compile(any pattern, int flags=0) dict {
 }
 
 fn _empty_caps(int groups) list {
-   mut out = []
+   def n = groups + 1
+   mut out = list(n)
    mut i = 0
-   while i <= groups {
-      out = out.append([-1, -1])
+   while i < n {
+      out[i] = [-1, -1]
       i += 1
    }
    out
 }
 
 fn _copy_caps(list caps) list {
-   mut out = []
+   def n = caps.len
+   mut out = list(n)
    mut i = 0
-   while i < caps.len {
+   while i < n {
       def p = caps.get(i, [-1, -1])
-      out = out.append([p.get(0, -1), p.get(1, -1)])
+      out[i] = [p.get(0, -1), p.get(1, -1)]
       i += 1
    }
    out
@@ -427,13 +427,9 @@ fn _class_item_match(list item, int c, int flags) bool {
    def k = item.get(0, "")
    if k == "ch" { return _eq_ch(c, item.get(1, 0), flags) }
    if k == "range" {
-      mut a = item.get(1, 0)
-      mut b = item.get(2, 0)
-      mut cc = c
+      mut a, b, cc = item.get(1, 0), item.get(2, 0), c
       if (flags & IGNORECASE) != 0 {
-         a = _lower_byte(a)
-         b = _lower_byte(b)
-         cc = _lower_byte(cc)
+         a, b, cc = _lower_byte(a), _lower_byte(b), _lower_byte(cc)
       }
       return cc >= a && cc <= b
    }
@@ -541,7 +537,10 @@ fn _match_anchor(str k, str text, int pos, list caps, int flags) list {
       return ok ? [_state(pos, caps)] : []
    }
    if k == "A" { return pos == 0 ? [_state(pos, caps)] : [] }
-   if k == "Z" { return(pos == text.len || (pos == text.len - 1 && load8(text, pos) == 10)) ? [_state(pos, caps)] : [] }
+   if k == "Z" {
+      def ok = pos == text.len || (pos == text.len - 1 && load8(text, pos) == 10)
+      return ok ? [_state(pos, caps)] : []
+   }
    if k == "b" { return _word_boundary(text, pos) ? [_state(pos, caps)] : [] }
    if k == "B" { return !_word_boundary(text, pos) ? [_state(pos, caps)] : [] }
    []
@@ -595,11 +594,13 @@ fn _match_node(dict node, str text, int pos, list caps, int flags, int depth) li
    }
    if t == "look" {
       def ok = _match_node(node["child"], text, pos, caps, flags, depth + 1).len > 0
-      return(node.get("neg", false) ? !ok : ok) ? [_state(pos, caps)] : []
+      def matched = node.get("neg", false) ? !ok : ok
+      return matched ? [_state(pos, caps)] : []
    }
    if t == "lookbehind" {
       def ok = _lookbehind_ok(node["child"], text, pos, caps, flags, depth + 1)
-      return(node.get("neg", false) ? !ok : ok) ? [_state(pos, caps)] : []
+      def matched = node.get("neg", false) ? !ok : ok
+      return matched ? [_state(pos, caps)] : []
    }
    if t == "backref" { return _backref_match(node, text, pos, caps, flags) }
    []
@@ -685,19 +686,18 @@ fn group(dict m, any idx=0) ?str {
    def gi = _group_index(m, idx)
    if !is_int(gi) || gi < 0 || gi >= m.get("caps", []).len { return nil }
    def p = m["caps"].get(gi, [-1, -1])
-   def a = p.get(0, -1)
-   def b = p.get(1, -1)
+   def a, b = p.get(0, -1), p.get(1, -1)
    if a < 0 || b < a { return nil }
    _slice(m["text"], a, b)
 }
 
 fn groups(dict m) list {
    "Runs the groups operation."
-   mut out = []
    def n = m["re"].get("groups", 0)
+   mut out = list(n)
    mut i = 1
    while i <= n {
-      out = out.append(group(m, i))
+      out[i - 1] = group(m, i)
       i += 1
    }
    out
@@ -718,8 +718,7 @@ fn finditer(any pattern, any text, int flags=0) list {
       }
       if !found { break }
       out = out.append(found)
-      def a = found.get("start", pos)
-      def b = found.get("end", a)
+      def a, b = found.get("start", pos), found.get("end", pos)
       pos = b > a ? b : a + 1
    }
    out
@@ -728,14 +727,14 @@ fn finditer(any pattern, any text, int flags=0) list {
 fn findall(any pattern, any text, int flags=0) list {
    "Runs the findall operation."
    def ms = finditer(pattern, text, flags)
-   mut out = []
+   def ms_len = ms.len
+   mut out = list(ms_len)
    mut i = 0
-   while i < ms.len {
-      def m = ms[i]
-      def n = m["re"].get("groups", 0)
-      if n == 0 { out = out.append(group(m, 0)) }
-      elif n == 1 { out = out.append(group(m, 1)) }
-      else { out = out.append(groups(m)) }
+   while i < ms_len {
+      def m, n = ms[i], ms[i]["re"].get("groups", 0)
+      if n == 0 { out[i] = group(m, 0) }
+      elif n == 1 { out[i] = group(m, 1) }
+      else { out[i] = groups(m) }
       i += 1
    }
    out
@@ -743,15 +742,13 @@ fn findall(any pattern, any text, int flags=0) list {
 
 fn _expand_repl(any repl, dict m) str {
    if !is_str(repl) { repl = to_str(repl) }
-   mut b = strmod.Builder(repl.len + 16)
-   mut i = 0
+   mut b, i = strmod.Builder(repl.len + 16), 0
    while i < repl.len {
       def c = load8(repl, i)
       if c == 92 && i + 1 < repl.len {
          def n = load8(repl, i + 1)
          if _is_digit(n) {
-            def r = _parse_number(repl, i + 1)
-            def g = group(m, r[0])
+            def r, g = _parse_number(repl, i + 1), group(m, r[0])
             if g != nil { b = strmod.builder_append(b, g) }
             i = r[1]
          } elif n == 103 && i + 2 < repl.len && load8(repl, i + 2) == 60 {
@@ -837,8 +834,7 @@ fn split(any pattern, any text, int maxsplit=0, int flags=0) list {
 fn escape(any s) str {
    "Escapes a literal string so it can be used as a regex pattern."
    if !is_str(s) { s = to_str(s) }
-   mut b = strmod.Builder(s.len * 2 + 8)
-   mut i = 0
+   mut b, i = strmod.Builder(s.len * 2 + 8), 0
    while i < s.len {
       def c = load8(s, i)
       if !_is_word(c) { b = strmod.builder_append_byte(b, 92) }

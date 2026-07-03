@@ -1,0 +1,25 @@
+shape i386_elf32_object_link_run_memcmp_stub {
+  family "runtime-native"
+  generator "native"
+  features [native object elf32 x86 nyir link-run pointer memcmp]
+  template ny-test-case
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-link-run-elf32-memcmp-stub.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+fn probe() i64 {
+  def *int a = malloc(8)
+  def *int b = malloc(8)
+  if a == nil || b == nil { return 0 }
+  store64_i(a, 42)
+  store64_i(b, 42)
+  def ok = memcmp(a, b, 8) == 0
+  free(a)
+  free(b)
+  if ok { 42 } else { 0 }
+}
+
+probe()
+NY
+}

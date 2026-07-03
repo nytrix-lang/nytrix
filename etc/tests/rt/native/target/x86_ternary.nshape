@@ -1,0 +1,13 @@
+shape x86_ternary_target {
+  family "runtime-native"
+  generator "native"
+  features [native nyir ternary x86 target]
+  template ny-test-case
+  flags "--emit-asm=/tmp/nytrix-native-x86-ternary-target.s --native-backend x86"
+  expect compile_and_run
+  source ny <<'NY'
+def a = 7
+def b = 3
+a > b ? a * 6 : b * 100
+NY
+}

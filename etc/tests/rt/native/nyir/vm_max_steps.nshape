@@ -1,0 +1,11 @@
+shape nyir_vm_max_steps {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "budget", "negative"]
+  template ny-test-case
+  flags "--nyir-run --nyir-run-max-steps=1"
+  expect compile_fail
+  source ny <<'NY'
+1 + 2
+NY
+}

@@ -1,0 +1,14 @@
+shape internal_scalar_import_lowering {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi import-lowering scalar no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/ffi/internal_scalar_import.h"
+assert(labs(-7) == 7, "internal c scalar import labs")
+1 + 2
+NY
+}
+

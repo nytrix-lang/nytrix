@@ -2430,6 +2430,24 @@ def _demo_wasm_name(demo_id: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in demo_id.strip())
     return (safe or "demo") + ".wasm"
 
+def _extract_nshape_ny_source(source: Path, out_dir: Path, demo_id: str) -> tuple[Path | None, str]:
+    text = source.read_text(encoding="utf-8")
+    m = re.search(r"(?m)^[ \t]*source[ \t]+ny[ \t]+<<'([^']+)'[ \t]*\n", text)
+    if not m:
+        return None, "missing source ny heredoc"
+    tag = m.group(1)
+    start = m.end()
+    end_re = re.compile(r"(?m)^" + re.escape(tag) + r"[ \t]*$")
+    end_m = end_re.search(text, start)
+    if not end_m:
+        return None, f"unterminated source ny heredoc {tag}"
+    safe = Path(_demo_wasm_name(demo_id)).with_suffix(".ny").name
+    extracted_dir = out_dir / "ny-src"
+    extracted_dir.mkdir(parents=True, exist_ok=True)
+    extracted = extracted_dir / safe
+    extracted.write_text(text[start:end_m.start()], encoding="utf-8")
+    return extracted, ""
+
 def _tail_text(value: object, limit: int = 4000) -> str:
     if value is None:
         return ""
@@ -2446,12 +2464,39 @@ WASM_DEFAULT_EXPORTS = (
     "ny_web_render",
 )
 
+_WASM_CLANG_PROBE_CACHE: dict[str, tuple[bool, str]] = {}
+
+def _clang_supports_wasm(clang: str) -> tuple[bool, str]:
+    cached = _WASM_CLANG_PROBE_CACHE.get(clang)
+    if cached is not None:
+        return cached
+    with tempfile.TemporaryDirectory(prefix="nytrix-wasm-probe-") as td:
+        src = Path(td) / "probe.c"
+        obj = Path(td) / "probe.o"
+        src.write_text("int main(void){return 0;}\n", encoding="utf-8")
+        res = subprocess.run(
+            [clang, "--target=wasm32-unknown-unknown", "-x", "c", "-c", "-o", str(obj), str(src)],
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=30,
+        )
+        if res.returncode != 0 or not obj.exists():
+            detail = _tail_text(res.stdout, 1000).strip() or "clang cannot emit wasm32 objects"
+            cached = (False, detail)
+        else:
+            cached = (True, "")
+    _WASM_CLANG_PROBE_CACHE[clang] = cached
+    return cached
+
 def _wasm_toolchain() -> tuple[str | None, str]:
     clang = which("clang")
     if not clang:
         return None, "clang missing"
-    if "WebAssembly" not in _llvm_targets_built():
-        return None, "LLVM WebAssembly backend not built"
+    ok_wasm, wasm_issue = _clang_supports_wasm(clang)
+    if not ok_wasm:
+        return None, wasm_issue or "clang WebAssembly backend not available"
     if not which("wasm-ld"):
         return None, "wasm-ld missing"
     return clang, ""
@@ -2557,9 +2602,36 @@ def _build_ny_demo_wasm(out_dir: Path, build_root: Path, kind: str, manifest: li
         if not source:
             report.append({"id": demo_id, "ok": True, "wasm": str(item.get("wasm", "")), "source": ""})
             continue
+        compile_source = Path(source)
+        if compile_source.suffix == ".nshape":
+            nshape_source = _resolve_wasm_path(compile_source)
+            if not nshape_source.exists():
+                failed += 1
+                report.append({
+                    "id": demo_id,
+                    "source": source,
+                    "ok": False,
+                    "stage": "source",
+                    "detail": f"missing source {nshape_source}",
+                    "output": "",
+                })
+                continue
+            compile_source, extract_err = _extract_nshape_ny_source(nshape_source, out_dir, demo_id)
+            if compile_source is None:
+                failed += 1
+                item["wasmStatus"] = extract_err
+                report.append({
+                    "id": demo_id,
+                    "source": source,
+                    "ok": False,
+                    "stage": "source",
+                    "detail": extract_err,
+                    "output": "",
+                })
+                continue
         ir = ir_dir / (Path(_demo_wasm_name(demo_id)).with_suffix(".ll").name)
         wasm = wasm_dir / _demo_wasm_name(demo_id)
-        res = _compile_ny_to_wasm(build_root, kind, Path(source), wasm, ir, step_timeout=step_timeout)
+        res = _compile_ny_to_wasm(build_root, kind, compile_source, wasm, ir, step_timeout=step_timeout)
         if not bool(res.get("ok", False)):
             failed += 1
             item["wasmStatus"] = str(res.get("detail", "wasm failed"))
@@ -2727,10 +2799,21 @@ def run_wasm(build_root: Path, kind: str, args: list[str]) -> int:
     if bool(cfg.get("help", False)):
         print_wasm_help()
         return 0
+    source = cfg["source"]  # type: ignore[assignment]
+    assert isinstance(source, Path)
+    if source.suffix == ".nshape":
+        extracted, extract_err = _extract_nshape_ny_source(
+            source,
+            build_root / "wasm-extracted",
+            source.stem or "demo",
+        )
+        if extracted is None:
+            raise SystemExit("wasm: " + extract_err)
+        source = extracted
     res = _compile_ny_to_wasm(
         build_root,
         kind,
-        cfg["source"],  # type: ignore[arg-type]
+        source,
         cfg["out"],     # type: ignore[arg-type]
         cfg["ir"],      # type: ignore[arg-type]
         exports=cfg["exports"],  # type: ignore[arg-type]

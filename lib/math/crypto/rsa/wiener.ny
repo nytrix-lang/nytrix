@@ -108,8 +108,8 @@ fn _wiener_square_residue_filter_int(int n) bool {
 fn _wiener_attack_small_int(any N, any e) any {
    def NN_big = Z(N)
    if bit_length(NN_big) > 52 { return nil }
-   def NN = bigint_to_int(NN_big)
-   def ee = bigint_to_int(Z(e))
+   def NN = int(NN_big)
+   def ee = int(e)
    if NN <= 0 || ee <= 0 { return nil }
    mut a_num = ee
    mut a_den = NN
@@ -136,7 +136,7 @@ fn _wiener_attack_small_int(any N, any e) any {
       def disc = sum_pq * sum_pq - 4 * NN
       if disc < 0 { continue }
       if !_wiener_square_residue_filter_int(disc) { continue }
-      def s = bigint_to_int(isqrt(Z(disc)))
+      def s = int(isqrt(Z(disc)))
       if s * s != disc { continue }
       def p_cand = (sum_pq + s) / 2
       def q_cand = (sum_pq - s) / 2

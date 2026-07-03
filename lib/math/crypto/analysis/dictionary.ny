@@ -16,7 +16,7 @@ use std.core.str as str
 
 if comptime { __os_name() == "linux" }{
    #link "libcrypt.so.1"
-   #include <crypt.h> as ""
+   #include <crypt.h>
 }
 
 mut _wordlist_cache = dict(8)

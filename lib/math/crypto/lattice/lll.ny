@@ -390,7 +390,7 @@ fn _lll_round_float_string_to_z(str raw) bigint {
       def c = load8(mant, i)
       if c == 46 {
          seen_dot = true
-      } else if c >= 48 && c <= 57 {
+      } elif c >= 48 && c <= 57 {
          digits = digits + str.str_slice(mant, i, i + 1)
          if seen_dot { frac += 1 }
       }
@@ -1545,7 +1545,7 @@ fn _lll_reduce_state_fast_native_work_no_transform_with_budget(list initial_work
       if gso_upto < 0 {
          gso_cache = _lll_fast_gso_prefix_int_support(work, supports, k)
          gso_upto = k
-      } else if gso_upto < k {
+      } elif gso_upto < k {
          gso_cache = _lll_fast_gso_extend_int_support(gso_cache, work, supports, k)
          gso_upto = k
       }
@@ -1564,7 +1564,7 @@ fn _lll_reduce_state_fast_native_work_no_transform_with_budget(list initial_work
          gso_cache = row_state[5]
          gso_upto = k
          k += 1
-      } else if ok {
+      } elif ok {
          def int old_k = k
          def int insert_at = _lll_fast_insertion_index_buf(row_state[5], old_k, delta_f)
          work = _lll_fast_move_row(work, old_k, insert_at)
@@ -1697,7 +1697,7 @@ fn lll_find_ternary_pair_rows(any basis, int n, int step_cap=300000, any delta=0
       if gso_upto < 0 {
          gso_cache = _lll_fast_gso_prefix_int_support(work, supports, k)
          gso_upto = k
-      } else if gso_upto < k {
+      } elif gso_upto < k {
          gso_cache = _lll_fast_gso_extend_int_support(gso_cache, work, supports, k)
          gso_upto = k
       }
@@ -1765,7 +1765,7 @@ fn lll_find_ntru_key_rows(any basis, int n, any p, int step_cap=300000, any delt
       if gso_upto < 0 {
          gso_cache = _lll_fast_gso_prefix_int_support(work, supports, k)
          gso_upto = k
-      } else if gso_upto < k {
+      } elif gso_upto < k {
          gso_cache = _lll_fast_gso_extend_int_support(gso_cache, work, supports, k)
          gso_upto = k
       }
@@ -1827,7 +1827,7 @@ fn _lll_reduce_state_fast_native_transform_with_budget(any basis, any delta, any
       if gso_upto < 0 {
          gso_cache = _lll_fast_gso_prefix_int_support(work, supports, k)
          gso_upto = k
-      } else if gso_upto < k {
+      } elif gso_upto < k {
          gso_cache = _lll_fast_gso_extend_int_support(gso_cache, work, supports, k)
          gso_upto = k
       }
@@ -1848,7 +1848,7 @@ fn _lll_reduce_state_fast_native_transform_with_budget(any basis, any delta, any
          gso_cache = row_state[7]
          gso_upto = k
          k += 1
-      } else if ok {
+      } elif ok {
          def old_k = k
          def insert_at = _lll_fast_insertion_index_buf(row_state[7], old_k, delta_f)
          work = _lll_fast_move_row(work, old_k, insert_at)

@@ -1,0 +1,20 @@
+shape oracle_addr_local_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result pointer addr-local]
+  template ny-test-case
+  flags "--native-result-oracle=42"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn stack_addr() i64 {
+  mut i64 x = 41
+  def ptr p = addr_of(x)
+  store64_i(p, 42)
+  x
+}
+
+stack_addr()
+NY
+}

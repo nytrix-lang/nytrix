@@ -26,6 +26,10 @@ ny test --pattern name
 ny test --with-stdlib module-or-path
 ```
 
+`.nshape` checks may use `flags_matrix` when the same source must be compiled
+through several native backends. Rows are separated by `;` or escaped newlines,
+and each row is appended to the normal `flags` for one focused harness run.
+
 ## Check classes
 
 | Class | Scope |
