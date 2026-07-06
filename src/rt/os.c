@@ -27,6 +27,14 @@
 #ifdef __linux__
 #include <pty.h>
 #include <utmp.h>
+#include <sys/inotify.h>
+#endif
+#ifdef __APPLE__
+#include <sys/event.h>
+#include <fcntl.h>
+#endif
+#ifdef _WIN32
+#include <windows.h>
 #endif
 #ifdef __APPLE__
 #include <util.h>
@@ -3055,3 +3063,127 @@ int64_t rt_arch_name(void) {
 int64_t rt_main(void) {
   return (getenv("NYTRIX_TEST_MODE") != NULL) ? NY_IMM_TRUE : NY_IMM_FALSE;
 }
+
+#ifdef __linux__
+int64_t rt_inotify_init(int64_t flags) {
+  int fl = is_int(flags) ? (int)(flags >> 1) : (int)flags;
+  int fd = inotify_init1(fl);
+  if (fd < 0) fd = inotify_init();
+  return rt_tag_v((int64_t)fd);
+}
+
+int64_t rt_inotify_add_watch(int64_t fd, int64_t path, int64_t mask) {
+  if (is_int(fd)) fd >>= 1;
+  const char *p = NULL;
+  if (path && !is_int(path)) p = (const char *)path;
+  else if (is_int(path) && (path >> 1) != 0) p = (const char *)(uintptr_t)(path >> 1);
+  if (!p) return rt_tag_v(-1);
+  int m = is_int(mask) ? (int)(mask >> 1) : (int)mask;
+  int wd = inotify_add_watch((int)fd, p, (uint32_t)m);
+  return rt_tag_v((int64_t)wd);
+}
+
+int64_t rt_inotify_rm_watch(int64_t fd, int64_t wd) {
+  if (is_int(fd)) fd >>= 1;
+  if (is_int(wd)) wd >>= 1;
+  int r = inotify_rm_watch((int)fd, (int)wd);
+  return rt_tag_v((int64_t)r);
+}
+#else
+int64_t rt_inotify_init(int64_t flags) { (void)flags; return rt_tag_v(-1); }
+int64_t rt_inotify_add_watch(int64_t fd, int64_t path, int64_t mask) { (void)fd; (void)path; (void)mask; return rt_tag_v(-1); }
+int64_t rt_inotify_rm_watch(int64_t fd, int64_t wd) { (void)fd; (void)wd; return rt_tag_v(-1); }
+#endif
+
+/* macOS / BSD kqueue for file/directory watching (EVFILT_VNODE) */
+#ifdef __APPLE__
+int64_t rt_kqueue(void) {
+  int kq = kqueue();
+  return rt_tag_v((int64_t)kq);
+}
+
+int64_t rt_kevent(int64_t kq, int64_t ident, int64_t filter, int64_t flags, int64_t fflags, int64_t data, int64_t udata) {
+  if (is_int(kq)) kq >>= 1;
+  if (is_int(ident)) ident >>= 1;
+  struct kevent chlist[1];
+  struct kevent *ch = NULL;
+  int nch = 0;
+  int do_wait = 1;
+  /* If ident or flags indicate register, setup changelist and do not wait for events. */
+  if (ident != 0 || flags != 0) {
+    int16_t f = (int16_t)(filter ? (filter >> 1) : EVFILT_VNODE);
+    uint16_t fl = (uint16_t)(flags ? (flags >> 1) : (EV_ADD | EV_CLEAR));
+    uint32_t ff = (uint32_t)(fflags ? (fflags >> 1) : (NOTE_WRITE | NOTE_DELETE | NOTE_RENAME | NOTE_ATTRIB | NOTE_EXTEND));
+    EV_SET(&chlist[0], (uintptr_t)ident, f, fl, ff,
+           (intptr_t)(data ? (data >> 1) : 0),
+           (void*)(uintptr_t)(udata ? (udata >> 1) : 0));
+    ch = chlist;
+    nch = 1;
+    do_wait = 0;
+  }
+  struct kevent out[4];
+  struct kevent *evout = do_wait ? out : NULL;
+  int nout = do_wait ? 4 : 0;
+  int n = kevent((int)kq, ch, nch, evout, nout, NULL);
+  if (!do_wait) {
+    return (n >= 0 ? 1 : 0);  /* register result */
+  }
+  if (n <= 0) return 0;
+  return rt_tag_v((int64_t)out[0].fflags);
+}
+
+int64_t rt_kqueue_close(int64_t kq) {
+  if (is_int(kq)) kq >>= 1;
+  close((int)kq);
+  return 0;
+}
+
+/* helper to open a path for vnode watching (returns fd or 0) */
+int64_t rt_watch_open_vnode(int64_t path) {
+  const char *p = NULL;
+  if (path && !is_int(path)) p = (const char*)path;
+  else if (is_int(path) && (path>>1)) p = (const char*)(uintptr_t)(path>>1);
+  if (!p) return 0;
+  int fd = open(p, O_EVTONLY | O_CLOEXEC);
+  if (fd < 0) fd = open(p, O_EVTONLY);
+  return fd > 0 ? rt_tag_v((int64_t)fd) : 0;
+}
+#else
+int64_t rt_kqueue(void) { return rt_tag_v(-1); }
+int64_t rt_kevent(int64_t kq, int64_t ident, int64_t filter, int64_t flags, int64_t fflags, int64_t data, int64_t udata) { (void)kq;(void)ident;(void)filter;(void)flags;(void)fflags;(void)data;(void)udata; return 0; }
+int64_t rt_kqueue_close(int64_t kq) { (void)kq; return 0; }
+int64_t rt_watch_open_vnode(int64_t path) { (void)path; return 0; }
+#endif
+
+/* Windows directory change notifications (basic support) */
+#ifdef _WIN32
+int64_t rt_win32_find_first_change(int64_t path, int64_t watch_subtree, int64_t filter) {
+  const char *p = NULL;
+  if (path && !is_int(path)) p = (const char*)path;
+  else if (is_int(path) && (path>>1)) p = (const char*)(uintptr_t)(path>>1);
+  if (!p) return 0;
+  int subtree = is_int(watch_subtree) ? (int)(watch_subtree >> 1) : (int)watch_subtree;
+  int filt = is_int(filter) ? (int)(filter >> 1) : (int)filter;
+  if (filt == 0) filt = FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME;
+  HANDLE h = FindFirstChangeNotificationA(p, subtree ? TRUE : FALSE, (DWORD)filt);
+  return h != INVALID_HANDLE_VALUE ? (int64_t)(uintptr_t)h : 0;
+}
+
+int64_t rt_win32_find_next_change(int64_t handle) {
+  if (!handle) return 0;
+  HANDLE h = (HANDLE)(uintptr_t)handle;
+  BOOL ok = FindNextChangeNotification(h);
+  return ok ? 1 : 0;
+}
+
+int64_t rt_win32_find_close_change(int64_t handle) {
+  if (!handle) return 0;
+  HANDLE h = (HANDLE)(uintptr_t)handle;
+  FindCloseChangeNotification(h);
+  return 0;
+}
+#else
+int64_t rt_win32_find_first_change(int64_t path, int64_t watch_subtree, int64_t filter) { (void)path;(void)watch_subtree;(void)filter; return 0; }
+int64_t rt_win32_find_next_change(int64_t handle) { (void)handle; return 0; }
+int64_t rt_win32_find_close_change(int64_t handle) { (void)handle; return 0; }
+#endif

@@ -7702,7 +7702,7 @@ static void selftest_validate_selftest_catalog(const char *json,
       top_cockpit > summary_section || top_cockpit_probe > summary_section)
     (void)string_list_push_copy(
         errors, "selftest catalog command aliases missing at top level");
-  if (strstr(json, "/home/e/nytrix/tmp/projects/test") ||
+  if (strstr(json, "/home/e/nytrix/build/cache/projects/test") ||
       strstr(json, "/home/e/nytrix/fuzz") ||
       strstr(json, "/home/e/nynth/build/cache/scratch"))
     (void)string_list_push_copy(errors, "selftest catalog leaked stale absolute paths");
@@ -7772,7 +7772,7 @@ static void selftest_validate_selftest_catalog(const char *json,
         !strstr(md.data, "--full --json build/fuzz/all/selftest-full.json --markdown build/fuzz/all/selftest-full.md") ||
         !strstr(md.data, "--markdown build/fuzz/all/selftest-catalog.md"))
       (void)string_list_push_copy(errors, "selftest catalog markdown omitted focused handoff rows");
-    if (strstr(md.data, "/home/e/nytrix/tmp/projects/test") ||
+    if (strstr(md.data, "/home/e/nytrix/build/cache/projects/test") ||
         strstr(md.data, "/home/e/nytrix/fuzz") ||
         strstr(md.data, "/home/e/nynth/build/cache/scratch"))
       (void)string_list_push_copy(errors, "selftest catalog markdown leaked stale absolute paths");

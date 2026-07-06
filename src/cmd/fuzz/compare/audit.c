@@ -6783,9 +6783,7 @@ static bool cmdline_looks_readonly_path_probe(const char *cmdline) {
 
 static bool cmdline_mentions_old_nytrix_output_path(const char *cmdline) {
   if (!cmdline || !*cmdline) return false;
-  return strstr(cmdline, "/home/e/nytrix/tmp/projects/test") ||
-         strstr(cmdline, "../nytrix/tmp/projects/test") ||
-         strstr(cmdline, "/home/e/nytrix/fuzz") ||
+  return strstr(cmdline, "/home/e/nytrix/fuzz") ||
          strstr(cmdline, "../nytrix/fuzz") ||
          strstr(cmdline, "/home/e/nytrix/build/cache") ||
          strstr(cmdline, "../nytrix/build/cache");
@@ -6794,8 +6792,8 @@ static bool cmdline_mentions_old_nytrix_output_path(const char *cmdline) {
 static bool cmdline_has_nytrix_repo_cache_writer_context(const char *cmdline) {
   if (!cmdline || !*cmdline) return false;
   const char *markers[] = {
-    "tmp/tools/public publish",
-    "tmp/tools/public",
+    "build/cache/tools/public publish",
+    "build/cache/tools/public",
     "ny tools web",
     "build/release/ny tools web",
     "build/debug/ny tools web",
@@ -6818,7 +6816,7 @@ static bool cmdline_has_nytrix_webasm_build_context(const char *cmdline) {
 
 static bool cmdline_has_nytrix_rev_cache_spawner_context(const char *cmdline) {
   if (!cmdline || !*cmdline) return false;
-  if (!strstr(cmdline, "tmp/tools/rev/tool")) return false;
+  if (!strstr(cmdline, "build/cache/tools/rev/tool")) return false;
   return cmdline_has_tool_token(cmdline, "dec") ||
          cmdline_has_tool_token(cmdline, "triage") ||
          cmdline_has_tool_token(cmdline, "parity") ||
@@ -6894,9 +6892,9 @@ static bool process_cmdline_is_old_nytrix_output_writer(const char *cmdline,
   if (cmdline_has_nytrix_rev_cache_spawner_context(cmdline)) return true;
   if (cmdline_has_no_write_mode(cmdline) &&
       !cmdline_mentions_relative_path(cmdline, "build/cache") &&
-      !cmdline_mentions_relative_path(cmdline, "tmp/test/probe"))
+      !cmdline_mentions_relative_path(cmdline, "build/cache/test/probe"))
     return false;
-  return cmdline_mentions_relative_path(cmdline, "tmp/test/probe") ||
+  return cmdline_mentions_relative_path(cmdline, "build/cache/test/probe") ||
          cmdline_mentions_relative_path(cmdline, "build/cache");
 }
 
@@ -6956,7 +6954,7 @@ static bool status_find_old_nytrix_output_writer_for_root(
   char old_fuzz[4096] = {0};
   char old_cache[4096] = {0};
   (void)path_join(old_test, sizeof(old_test), selected_root,
-                  "tmp/projects/test");
+                  "build/cache/projects/test");
   (void)path_join(old_fuzz, sizeof(old_fuzz), selected_root, "fuzz");
   (void)path_join(old_cache, sizeof(old_cache), selected_root, "build/cache");
 
@@ -7024,7 +7022,7 @@ static void status_capture_provenance(fuzz_all_status_summary_t *s,
                   "build/cache/nytrix");
   (void)path_join(s->old_nytrix_test_scratch,
                   sizeof(s->old_nytrix_test_scratch), root,
-                  "../nytrix/tmp/projects/test");
+                  "../nytrix/build/cache/projects/test");
   (void)path_join(s->old_nytrix_fuzz_dir, sizeof(s->old_nytrix_fuzz_dir),
                   root, "../nytrix/fuzz");
   (void)path_join(s->old_nytrix_build_cache_dir,
@@ -7303,9 +7301,7 @@ static bool old_path_artifact_contains_stale_reference(const char *path) {
               "NYNTH_RUN_REPEAT=good ./build/fuzz/all/run-next.sh") ||
        strstr(f.data,
               "NYNTH_RUN_DRY_RUN=1 NYNTH_RUN_REPEAT=good"));
-  bool hit = strstr(f.data, "/home/e/nytrix/tmp/projects/test") ||
-             strstr(f.data, "../nytrix/tmp/projects/test") ||
-             strstr(f.data, "/home/e/nytrix/fuzz") ||
+  bool hit = strstr(f.data, "/home/e/nytrix/fuzz") ||
              strstr(f.data, "../nytrix/fuzz") ||
              strstr(f.data, "/home/e/nytrix/build/cache") ||
              strstr(f.data, "../nytrix/build/cache") ||
@@ -7624,7 +7620,7 @@ static int cmd_public_fuzz_all_old_paths(int argc, char **argv) {
            archive_dir, stamp, (long)getpid());
 
   fuzz_all_old_path_item_t items[] = {
-      {"old-test-scratch", "tmp/projects/test", "tmp-projects-test", "", "",
+      {"old-test-scratch", "build/cache/projects/test", "tmp-projects-test", "", "",
        false, false, false, false, false, false, ""},
       {"old-fuzz", "fuzz", "fuzz", "", "", false, false, false, false,
        false, false, ""},

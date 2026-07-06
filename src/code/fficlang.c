@@ -1041,10 +1041,6 @@ static bool ny_ffi_register_internal_c_function(codegen_t *cg,
                                                 size_t *lowered_out) {
   if (!cg || !decl || decl->kind != NY_CDECL_FUNC)
     return true;
-  if (decl->is_variadic) {
-    NY_LOG_V1("[ffi:c] internal frontend does not lower variadic function declarations yet\n");
-    return false;
-  }
   char *c_name_owned = ny_ffi_ctok_strdup(decl->name);
   if (!c_name_owned || !*c_name_owned) {
     free(c_name_owned);
@@ -1135,10 +1131,13 @@ static bool ny_ffi_register_internal_c_function(codegen_t *cg,
         free(c_name_owned);
         return false;
       }
-      param_ny_types[i] = ny_arg_type;
-      layout_def_t *arg_layout = lookup_layout(cg, ny_arg_type);
-      if (ny_ffi_layout_uses_byval(arg_layout))
-        param_byval_layouts[i] = arg_layout;
+      layout_def_t *ly = lookup_layout(cg, ny_arg_type);
+      if (ly && ny_ffi_layout_uses_byval(ly)) {
+        param_ny_types[i] = "ptr";
+        param_byval_layouts[i] = ly;
+      } else {
+        param_ny_types[i] = ny_arg_type;
+      }
       param_llvm_types[i + (native_sret_return ? 1u : 0u)] =
           resolve_abi_type_name(cg, ny_arg_type, empty_tok);
     }
@@ -1148,7 +1147,7 @@ static bool ny_ffi_register_internal_c_function(codegen_t *cg,
                              ? LLVMVoidTypeInContext(cg->ctx)
                              : resolve_abi_type_name(cg, ny_ret, empty_tok);
   LLVMTypeRef ft = LLVMFunctionType(llvm_ret, param_llvm_types, actual_params,
-                                    false);
+                                    decl->is_variadic ? true : false);
   LLVMValueRef f = LLVMGetNamedFunction(cg->module, c_name_owned);
   if (!f) {
     f = LLVMAddFunction(cg->module, c_name_owned, ft);
@@ -1181,14 +1180,19 @@ static bool ny_ffi_register_internal_c_function(codegen_t *cg,
   }
   if (!already_known || existing_is_ny_fn) {
     fun_sig sig;
-    ny_fun_sig_init(&sig, ny_name, ft, f, NULL, (int)decl->param_count, false,
-                    true);
+    ny_fun_sig_init(&sig, ny_name, ft, f, NULL, (int)decl->param_count,
+                    decl->is_variadic ? true : false, true);
     sig.link_name = ny_strdup(c_name_owned);
     sig.is_native_abi = true;
     sig.native_sret_return = native_sret_return;
     sig.return_type = ny_strdup(ny_ret);
-    for (unsigned i = 0; i < decl->param_count; i++)
+    for (unsigned i = 0; i < decl->param_count; i++) {
       vec_push(&sig.param_types, ny_strdup(param_ny_types[i]));
+      vec_push(&sig.native_byval_param_layouts,
+               param_byval_layouts[i] && ny_ffi_layout_uses_byval(param_byval_layouts[i])
+                   ? ny_strdup(param_byval_layouts[i]->name)
+                   : NULL);
+    }
     vec_push(&cg->fun_sigs, sig);
   }
   ny_ffi_add_link_once(cg, lib);
@@ -2012,10 +2016,13 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
           token_t empty_tok = {0};
           const char *ny_arg_type = map_clang_type_named(
               arg_cxtype, param_bufs[i], sizeof(param_bufs[i]));
-          param_ny_types[i] = ny_arg_type;
           layout_def_t *arg_layout = lookup_layout(ctx->cg, ny_arg_type);
-          if (ny_ffi_layout_uses_byval(arg_layout))
+          if (ny_ffi_layout_uses_byval(arg_layout)) {
+            param_ny_types[i] = "ptr";
             param_byval_layouts[i] = arg_layout;
+          } else {
+            param_ny_types[i] = ny_arg_type;
+          }
           param_llvm_types[i + (native_sret_return ? 1 : 0)] =
               resolve_abi_type_name(ctx->cg, ny_arg_type, empty_tok);
         }
@@ -2071,8 +2078,13 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
         sig.return_type = ny_strdup(ny_ret);
         if (strcmp(abi_ret, ny_ret) != 0)
           sig.abi_return_type = ny_strdup(abi_ret);
-        for (int i = 0; i < num_params; i++)
+        for (int i = 0; i < num_params; i++) {
           vec_push(&sig.param_types, ny_strdup(param_ny_types[i]));
+          vec_push(&sig.native_byval_param_layouts,
+                   param_byval_layouts[i] && ny_ffi_layout_uses_byval(param_byval_layouts[i])
+                       ? ny_strdup(param_byval_layouts[i]->name)
+                       : NULL);
+        }
         vec_push(&ctx->cg->fun_sigs, sig);
       }
     }

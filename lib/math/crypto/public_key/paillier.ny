@@ -5,7 +5,7 @@
 ;; References:
 ;; - std.math.crypto.public_key
 ;; - std.math.crypto
-;; - tmp/crypto/inspiration/crypto-commons/crypto_commons/asymmetric/asymmetric.py
+;; - inspiration from crypto-commons (asymmetric)
 module std.math.crypto.public_key.paillier(paillier_keygen, paillier_encrypt, paillier_decrypt, paillier_encrypt_default, paillier_add, paillier_mul_plain, paillier_rerandomize)
 use std.core
 use std.math.nt

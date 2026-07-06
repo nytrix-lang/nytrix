@@ -4090,10 +4090,10 @@ def run_tool(build_root: Path, kind: str, name: str, args: list[str], timeout: f
             restore_tty_visuals()
 
 def default_fuzz_shape_dir() -> str:
-    for rel in ("tmp/tests/fuzz/shapes", "etc/tests/fuzz/shapes", "etc/tests/fuzz"):
+    for rel in ("build/cache/tests/fuzz/shapes", "etc/tests/fuzz/shapes", "etc/tests/fuzz"):
         if (ROOT / rel).exists():
             return rel
-    return "tmp/tests/fuzz/shapes"
+    return "build/cache/tests/fuzz/shapes"
 
 def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     started = time.perf_counter()
