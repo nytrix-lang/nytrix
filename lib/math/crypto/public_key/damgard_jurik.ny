@@ -7,7 +7,7 @@
 ;; References:
 ;; - std.math.crypto.public_key
 ;; - std.math.crypto
-;; - tmp/crypto/inspiration/crypto-commons/crypto_commons/asymmetric/asymmetric.py
+;; - inspiration from crypto-commons (asymmetric)
 module std.math.crypto.public_key.damgard_jurik(damgard_jurik_keygen, damgard_jurik_encrypt, damgard_jurik_decrypt)
 use std.core
 use std.math.nt

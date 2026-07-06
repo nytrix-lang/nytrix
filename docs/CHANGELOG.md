@@ -1,6 +1,32 @@
 # Changelog
 
-Nytrix uses dated release milestones. Build snapshots are identified by `ny --version`.
+Nytrix uses dated milestones. `ny --version` for snapshots.
+
+## Unreleased
+
+### Changed
+- Full cross-platform real file watchers for language-level hot reloading via `.so`/`.dylib`/`.dll` and file watchers (Linux inotify, macOS kqueue EVFILT_VNODE, Windows FindFirstChangeNotification). New `std.os.fs.watch` module with `create`/`close`/`poll`/`has_event`/`wait_any`. Extended `std.os.fs`. New runtime `__kqueue` etc. CLI `--hot-reload`/`--watch` uses real kernel events (`select`/`kevent`/`WaitForSingleObject`) + mtime fallback for lower idle CPU and faster change detection vs polling. Specialized per-platform in compiler and stdlib. Foundation for reloadable native modules via watch + dlopen. All self-test prints start with ✓ .
+
+## [0.8.0] — LLVM-free Native + C Interop + Polish
+
+### Added
+- Internal C frontend tolerant support for more complex headers; `_Complex`, `_Bool`, unknown types, and recoverable declarations continue on errors.
+- NYIR asm: polished headers/comments for clean readable output.
+- Docs: compact 1:1 TLDRs, direct explanations in README/start/perf/syntax/CHANGELOG.
+
+### Changed
+- Strict relative paths only (build/cache, NYNTH_ROOT).
+- FFI tests: etc/tests/rt/c (internal C frontend).
+- Public TODO list trimmed to remaining hard roadmap items.
+- Module decls: short `module foo` / `module foo(internal)` auto-export (no bloat lists).
+- Render/UI: removed deprecated, relative-safe resources.
+- Native default x86_64, internal C for headers.
+
+### Fixed
+- C frontend: bumped parser capacities, fewer hard aborts, tolerant on unsupported declarations.
+- No -O default (opt_level=0); explicit for perf.
+- Compile time: prealloc, hash, no realloc churn in hot paths.
+- Codegen: smarter lowering, clean output when -O.
 
 ## [0.7.0] - 2026-06-30 — Native backend & C frontend foundation
 

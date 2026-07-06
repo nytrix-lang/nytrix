@@ -1240,7 +1240,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
     (void)string_list_push_copy(errors,
                                 "status CRT next action missing");
   if (status_crt_families &&
-      (strstr(status_crt_families, "/home/e/nytrix/tmp/projects/test") ||
+      (strstr(status_crt_families, "/home/e/nytrix/build/cache/projects/test") ||
        strstr(status_crt_families, "/home/e/nytrix/fuzz")))
     (void)string_list_push_copy(errors,
                                 "status CRT family summary leaked stale paths");
@@ -5977,7 +5977,7 @@ static void selftest_validate_fuzz_all_history_commands(const char *json,
       (void)string_list_push_copy(errors,
                                   "history markdown omitted ignored no-evidence count");
     if (strstr(md.data, "$JSON") ||
-        strstr(md.data, "/home/e/nytrix/tmp/projects/test") ||
+        strstr(md.data, "/home/e/nytrix/build/cache/projects/test") ||
         strstr(md.data, "/home/e/nytrix/fuzz"))
       (void)string_list_push_copy(errors,
                                   "history markdown leaked stale placeholders");
@@ -6475,7 +6475,7 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
         (void)string_list_push_copy(errors, "full-pressure remediation include-history worklist does not expose advisory failure evidence");
       if (strstr(hist.data, "README.txt"))
         (void)string_list_push_copy(errors, "full-pressure remediation include-history worklist treated AFL metadata as a saved input");
-      if (strstr(hist.data, "/home/e/nytrix/tmp/projects/test") ||
+      if (strstr(hist.data, "/home/e/nytrix/build/cache/projects/test") ||
           strstr(hist.data, "/home/e/nytrix/fuzz/"))
         (void)string_list_push_copy(errors, "full-pressure remediation include-history worklist used old Nytrix paths");
       if (repo_ok && strstr(hist.data, repo_root))
@@ -6838,7 +6838,7 @@ static void selftest_validate_perf_triage_args(const char *json,
       (void)string_list_push_copy(
           errors, "perf triage markdown rendered a malformed slowdown sign");
     } else if ((have_nynth_root && nynth_root[0] && strstr(md.data, nynth_root)) ||
-               strstr(md.data, "/home/e/nytrix/tmp/projects/test") ||
+               strstr(md.data, "/home/e/nytrix/build/cache/projects/test") ||
                strstr(md.data, "/home/e/nytrix/fuzz")) {
       (void)string_list_push_copy(errors, "perf triage markdown leaked local absolute paths");
     }
@@ -7233,7 +7233,7 @@ static void selftest_validate_synth_print_report(const char *json,
     (void)string_list_push_copy(errors, "synth print mode mismatch");
   char *work_dir = summary_string_from_report(json, "work_dir");
   if (!work_dir || !strstr(work_dir, "build/cache/scratch/selftest_synth_print_") ||
-      strstr(work_dir, "/tmp/"))
+      strstr(work_dir, "/build/cache/"))
     (void)string_list_push_copy(errors, "synth print work dir escaped build/cache/scratch");
   free(work_dir);
   free(mode);
@@ -7741,10 +7741,8 @@ static void selftest_validate_fuzz_all_help_stdout(const char *json,
       !strstr(json, "old-sibling-fuzz-dir") ||
       !strstr(json, "old-sibling-build-cache"))
     (void)string_list_push_copy(errors, "fuzz-all help missing cache policy");
-  if (strstr(json, "/home/e/nytrix/tmp/projects/test") ||
-      strstr(json, "/home/e/nytrix/fuzz") ||
+  if (strstr(json, "/home/e/nytrix/fuzz") ||
       strstr(json, "/home/e/nytrix/build/cache") ||
-      strstr(json, "../nytrix/tmp/projects/test") ||
       strstr(json, "../nytrix/fuzz") ||
       strstr(json, "../nytrix/build/cache"))
     (void)string_list_push_copy(errors, "fuzz-all help leaks old path strings");
@@ -7782,7 +7780,7 @@ static void selftest_validate_fuzz_all_help_stdout(const char *json,
 static void selftest_validate_old_writer_classifier(string_list_t *errors) {
   if (!errors) return;
   if (process_cmdline_is_old_nytrix_output_writer(
-          "timeout 10 bash -lc rg -n '/home/e/nytrix/fuzz|/home/e/nytrix/tmp/projects/test' src/cli.c",
+          "timeout 10 bash -lc rg -n '/home/e/nytrix/fuzz|/home/e/nytrix/build/cache' src/cli.c",
           "/home/e/nynth"))
     (void)string_list_push_copy(errors, "old-writer classifier treats rg as a writer");
   if (process_cmdline_is_old_nytrix_output_writer(
@@ -7808,13 +7806,13 @@ static void selftest_validate_old_writer_classifier(string_list_t *errors) {
           "/home/e/nytrix"))
     (void)string_list_push_copy(errors, "old-writer classifier treats absolute non-Nytrix cache as a writer");
   if (!process_cmdline_is_old_nytrix_output_writer(
-          "python3 -B ./tmp/tools/rev/tool dec tmp/inspiration/rev/sample "
+          "python3 -B ./build/cache/tools/rev/tool dec build/cache/inspiration/rev/sample "
           "--stdout --no-write --timeout 120",
           "/home/e/nytrix"))
     (void)string_list_push_copy(errors,
                                 "old-writer classifier missed no-write Nytrix rev cache parent");
   if (!process_cmdline_is_old_nytrix_output_writer(
-          "python3 -B ./tmp/tools/rev/tool dec tmp/inspiration/rev/crackmes/"
+          "python3 -B ./build/cache/tools/rev/tool dec build/cache/inspiration/rev/crackmes/"
           "angr-examples/examples/xmllint/xmllint_bin --stdout --no-write "
           "--truth --focus sub_b5f0 --timeout 90 --heartbeat 20 "
           "--max-functions 4 --max-bytes 1400 --scan-bytes 4096",
@@ -7830,42 +7828,42 @@ static void selftest_validate_old_writer_classifier(string_list_t *errors) {
           "/home/e/nynth"))
     (void)string_list_push_copy(errors, "old-writer classifier missed old AFL output dir");
   if (!process_cmdline_is_old_nytrix_output_writer(
-          "python tool.py build/cache/tmp/out.json",
+          "python tool.py build/cache/out.json",
           "/home/e/nytrix"))
     (void)string_list_push_copy(errors, "old-writer classifier missed Nytrix cwd cache writer");
   if (!process_cmdline_is_old_nytrix_output_writer(
-          "python tool.py ../build/cache/tmp/out.json",
+          "python tool.py ../build/cache/out.json",
           "/home/e/nytrix/tmp"))
     (void)string_list_push_copy(errors, "old-writer classifier missed parent-relative Nytrix cache writer");
   if (!process_cmdline_is_old_nytrix_output_writer(
-          "python3 -B ./tmp/tools/rev/tool triage tmp/inspiration/rev/sample "
+          "python3 -B ./build/cache/tools/rev/tool triage build/cache/inspiration/rev/sample "
           "--triage-dir build/cache/rev/triage-sample",
           "/home/e/nytrix"))
     (void)string_list_push_copy(errors,
                                 "old-writer classifier missed Nytrix tmp tool cache writer");
   if (!process_cmdline_is_old_nytrix_output_writer(
-          "python3 -B ./tmp/tools/rev/tool parity --all --suite ioli "
+          "python3 -B ./build/cache/tools/rev/tool parity --all --suite ioli "
           "--limit 4 --timeout 80 --heartbeat 20 --max-functions 12 "
           "--max-bytes 1024 --scan-bytes 65536 --top 8",
           "/home/e/nytrix"))
     (void)string_list_push_copy(errors,
                                 "old-writer classifier missed Nytrix rev parity cache writer");
   if (process_cmdline_is_old_nytrix_output_writer(
-          "python3 -B ./tmp/tools/rev/tool parity --all --suite ioli",
+          "python3 -B ./build/cache/tools/rev/tool parity --all --suite ioli",
           "/home/e/nynth"))
     (void)string_list_push_copy(errors,
                                 "old-writer classifier treats Nynth rev parity as old writer");
   if (!process_cmdline_is_old_nytrix_output_writer(
           "codex-linux-sandbox --sandbox-policy-cwd /home/e/nytrix "
           "--command-cwd /home/e/nytrix -- /bin/zsh -c "
-          "./tmp/tools/rev/tool parity --all --suite ioli --limit 2",
+          "./build/cache/tools/rev/tool parity --all --suite ioli --limit 2",
           "/"))
     (void)string_list_push_copy(errors,
                                 "old-writer classifier missed sandboxed Nytrix rev parity");
   if (process_cmdline_is_old_nytrix_output_writer(
           "codex-linux-sandbox --sandbox-policy-cwd /home/e/nynth "
           "--command-cwd /home/e/nynth -- /bin/zsh -c "
-          "./tmp/tools/rev/tool parity --all --suite ioli --limit 2",
+          "./build/cache/tools/rev/tool parity --all --suite ioli --limit 2",
           "/"))
     (void)string_list_push_copy(errors,
                                 "old-writer classifier treats sandboxed Nynth rev parity as old writer");
@@ -7876,7 +7874,7 @@ static void selftest_validate_old_writer_classifier(string_list_t *errors) {
     (void)string_list_push_copy(errors,
                                 "old-writer classifier missed absolute Nytrix cache probe");
   if (!process_cmdline_is_old_nytrix_output_writer(
-          "python3 -B tmp/tools/public publish --all --apply --push --site-source public",
+          "python3 -B build/cache/tools/public publish --all --apply --push --site-source public",
           "/home/e/nytrix"))
     (void)string_list_push_copy(errors, "old-writer classifier missed Nytrix public publish");
   if (!process_cmdline_is_old_nytrix_output_writer(
@@ -8086,7 +8084,7 @@ static void selftest_validate_fuzz_all_old_paths(const char *json,
     if (path_is_absolute(markdown)) snprintf(md_abs, sizeof(md_abs), "%s", markdown);
     else (void)path_join(md_abs, sizeof(md_abs), root, markdown);
   }
-  const char *old_rels[] = {"tmp/projects/test", "fuzz", "build/cache"};
+  const char *old_rels[] = {"build/cache/projects/test", "fuzz", "build/cache"};
   for (size_t i = 0; i < sizeof(old_rels) / sizeof(old_rels[0]); ++i) {
     char p[4096] = {0};
     if (!path_join(p, sizeof(p), ny_abs, old_rels[i]) || exists_path(p))
@@ -8191,7 +8189,7 @@ static void selftest_validate_fuzz_all_old_paths_dry_run(const char *json,
     if (path_is_absolute(markdown)) snprintf(md_abs, sizeof(md_abs), "%s", markdown);
     else (void)path_join(md_abs, sizeof(md_abs), root, markdown);
   }
-  const char *old_rels[] = {"tmp/projects/test", "fuzz", "build/cache"};
+  const char *old_rels[] = {"build/cache/projects/test", "fuzz", "build/cache"};
   for (size_t i = 0; i < sizeof(old_rels) / sizeof(old_rels[0]); ++i) {
     char p[4096] = {0};
     if (!path_join(p, sizeof(p), ny_abs, old_rels[i]) || !exists_path(p))
@@ -9303,7 +9301,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
     (void)string_list_push_copy(errors,
                                 "progress CRT next action missing");
   if (progress_crt_families &&
-      (strstr(progress_crt_families, "/home/e/nytrix/tmp/projects/test") ||
+      (strstr(progress_crt_families, "/home/e/nytrix/build/cache/projects/test") ||
        strstr(progress_crt_families, "/home/e/nytrix/fuzz")))
     (void)string_list_push_copy(errors,
                                 "progress CRT family summary leaked stale paths");
@@ -11296,7 +11294,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     char *stale_command_artifact = NULL, *stale_run_good_artifact = NULL;
     char *test_marker = NULL, *fuzz_marker = NULL, *cache_marker = NULL;
     bool path_ok =
-        asprintf(&test_dir, "%s/%s/fake_nytrix/tmp/projects/test",
+        asprintf(&test_dir, "%s/%s/fake_nytrix/build/cache/projects/test",
                  work_dir ? work_dir : "/tmp", base) >= 0 &&
         asprintf(&fuzz_dir, "%s/%s/fake_nytrix/fuzz",
                  work_dir ? work_dir : "/tmp", base) >= 0 &&
@@ -11320,7 +11318,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
               write_file_text(fuzz_marker, "old fuzz\n") &&
               write_file_text(cache_marker, "old build cache\n") &&
               write_file_text(artifact_file,
-                              "{\"wrapper\":\"/home/e/nytrix/tmp/projects/test/scratch/old.ny\"}\n") &&
+                              "{\"wrapper\":\"/home/e/nytrix/build/cache/projects/test/scratch/old.ny\"}\n") &&
                  write_file_text(
                      stale_command_artifact,
                      "- Cockpit: `env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 "
