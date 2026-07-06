@@ -2326,7 +2326,7 @@ static void ny_c_preproc_note_define_summary(ny_parser_t *p, const char *src,
   size_t name_len = i - name;
   if (i < line_end && src[i] == '(') {
     summary->function_like_define_lines++;
-    summary->unsupported_define_lines++;
+    /* function-like macros are noted but not expanded by internal frontend yet */
     return;
   }
   summary->object_like_define_lines++;
