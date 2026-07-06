@@ -42,8 +42,8 @@ module std.os.ui.render(
    check_collision_point_rec, check_collision_point_circle, check_collision_point_triangle,
    check_collision_point_line, check_collision_lines, get_collision_rec,
    draw_star, draw_grid, draw_grid_pair, draw_grid_pair_axes, draw_axes, draw_cube,
-   draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, get_frame_time, get_time, load_shader,
-   load_shader_agnostic, shader_transpile, get_active_backend, compile_shader,
+   draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, draw_shader_rect, get_frame_time, get_time, load_shader, load_shader_file,
+   load_shader_pipeline, load_shader_agnostic, shader_transpile, get_active_backend, compile_shader,
    create_pipeline, bind_pipeline, push_constants, store_mat4_cm, reset_pipeline,
    blit_buffer, set_clear_color, draw_vertices, draw_lines_raw, color_pack, set_unlit,
    set_material, set_cam_pos, set_env_tex, set_env_spec_tex, push_vertex, set_view_proj,
@@ -3501,7 +3501,25 @@ fn generate_studio_env_image(int w=1024, int h=512) any { render_texture.generat
 
 fn load_shader_agnostic(any _defs) int {
    "Loads a shader with architecture-agnostic source definitions."
-   0
+   if !is_dict(_defs) { return -1 }
+   def selected = lib_shader.select_shader_defs(_defs, get_active_backend_name())
+   def vs = to_str(selected.get("vs", ""))
+   def fs = to_str(selected.get("fs", ""))
+   if vs.len == 0 || fs.len == 0 { return -1 }
+   if _backend == BACKEND_VK {
+      def vert_mod = lib_vkr.create_shader_module_from_source(vs, "vert")
+      if !vert_mod { return -1 }
+      def frag_mod = lib_vkr.create_shader_module_from_source(fs, "frag")
+      if !frag_mod { return -1 }
+      def pipe = lib_vkr.create_pipeline(vert_mod, frag_mod, 3, 1, 1, 0, 0, 0, 0)
+      if !pipe { return -1 }
+      return pipe
+   }
+   if _backend == BACKEND_GL {
+      ; OpenGL custom shader pipeline support is not implemented yet.
+      return -1
+   }
+   -1
 }
 
 fn load_shader(str combined_src) int {
@@ -3509,9 +3527,23 @@ fn load_shader(str combined_src) int {
    load_shader_agnostic(lib_shader.transpile_shader_source(combined_src))
 }
 
+fn load_shader_file(str path) int {
+   "Loads a combined shader source file safely. Returns -1 when missing, invalid, or unsupported."
+   if path.len <= 0 || !file_exists(path) { return -1 }
+   match file_read(path) {
+      ok(src) -> { return load_shader(to_str(src)) }
+      err(_) -> { return -1 }
+   }
+}
+
 fn shader_transpile(str combined_src) any {
    "Transpiles an agnostic shader source into backend-specific code."
    lib_shader.transpile_shader_source(combined_src)
+}
+
+fn load_shader_pipeline(str _frag_path) int {
+   "Deprecated fragment-only shader loader. Returns -1 instead of trying to synthesize an unsafe Vulkan pipeline."
+   -1
 }
 
 fn _wait_window_ready(any win) bool {
@@ -4608,29 +4640,30 @@ fn _to_v3(any v) list {
 fn draw_triangles(list vertices, any color) bool {
    "Draws a list of triangles with a single color."
    if !is_list(vertices) { return false }
-   def tri_count = int(vertices.len / 3)
+   mut flat = vertices
+   if vertices.len > 0 && is_list(vertices[0]) && vertices[0].len >= 3 && is_list(vertices[0][0]) {
+      flat = []
+      mut ti = 0
+      while ti < vertices.len {
+         def tri = vertices[ti]
+         if is_list(tri) && tri.len >= 3 {
+            flat = flat.append(tri[0])
+            flat = flat.append(tri[1])
+            flat = flat.append(tri[2])
+         }
+         ti += 1
+      }
+   }
+   def tri_count = int(flat.len / 3)
    if tri_count < 1 { return false }
    def vertex_count = tri_count * 3
    def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
    def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
-   if _backend == BACKEND_VK {
-      mut i = 0
-      while i < tri_count {
-         def j = i * 3
-         def v0, v1, v2 = vertices[j], vertices[j + 1], vertices[j + 2]
-         lib_vkr.draw_triangle_3d(
-            v0.get(0,0.0), v0.get(1,0.0), v0.get(2,0.0),
-            v1.get(0,0.0), v1.get(1,0.0), v1.get(2,0.0),
-         v2.get(0,0.0), v2.get(1,0.0), v2.get(2,0.0), r, g, b, a)
-         i += 1
-      }
-      return true
-   }
-   def verts = malloc(vertex_count * 28)
+   def verts = malloc(vertex_count * VERTEX_STRIDE)
    if !verts { return false }
    mut i = 0
    while i < vertex_count {
-      def v = _to_v3(vertices[i])
+      def v = _to_v3(flat[i])
       _store_v3_c4(verts, i, v.get(0, 0.0), v.get(1, 0.0), v.get(2, 0.0), r, g, b, a)
       i += 1
    }
@@ -4980,6 +5013,23 @@ fn draw_rect_tex_uv(
    if tex_id <= 0 || w <= 0.0 || h <= 0.0 { return false }
    if _backend == BACKEND_VK { lib_vkr.draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
    if _backend == BACKEND_GL { lib_glr.draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
+   false
+}
+
+fn draw_shader_rect(f64 x, f64 y, f64 w, f64 h, any pipe_override, any pc_ptr=0, int pc_size=0, int pc_offset=64) bool {
+   "Draws a rectangle using a custom shader pipeline directly, bypassing standard UI batching."
+   if !pipe_override || w <= 0.0 || h <= 0.0 { return false }
+   if _backend == BACKEND_VK {
+      return lib_vkr._vk_draw_shader_rect(x, y, w, h, pipe_override, pc_ptr, pc_size, pc_offset)
+   }
+   if _backend == BACKEND_GL {
+      ; For OpenGL, fallback to draw_rect_tex_uv since we don't have the same dynamic vertex buffer system yet
+      ; Ensure pipeline is bound before drawing
+      bind_pipeline(pipe_override)
+      def res = lib_glr.draw_rect_tex_uv(x, y, w, h, -1, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+      reset_pipeline()
+      return res
+   }
    false
 }
 

@@ -4,7 +4,7 @@
 ;; - std.os.ui.render.vk
 ;; - std.os.ui.render
 ;; - std.os.ui.render.matrix
-module std.os.ui.render.vk.pipeline(compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_sdf_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_rounded_rect_pipeline, _ensure_skybox_pipeline)
+module std.os.ui.render.vk.pipeline(compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, create_pipeline_no_vertex_input, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_sdf_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_rounded_rect_pipeline, _ensure_skybox_pipeline)
 use std.core
 use std.core.mem
 use std.os (file_exists, file_read, file_remove, file_write, ticks)
@@ -239,7 +239,7 @@ fn create_shader_module_from_source(str source, str stage_ext) any {
    mod
 }
 
-fn _create_pipeline_ex(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0, int blend_enable=_PIPE_BLEND_UI, int polygon_mode=_VK_POLYGON_FILL) any {
+fn _create_pipeline_ex(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0, int blend_enable=_PIPE_BLEND_UI, int polygon_mode=_VK_POLYGON_FILL, int vertex_input=1) any {
    "Creates a custom graphics pipeline."
    mut main_str = _pipe_alloc(8)
    strcpy(main_str, "main")
@@ -249,11 +249,16 @@ fn _create_pipeline_ex(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGL
    memcpy(stages, s1, 48)
    memcpy(stages + 48, s2, 48)
    def pipe_layout = _pipeline_layout
-   mut binding_desc = _pipe_alloc(12)
-   _write_default_vertex_binding_desc(binding_desc)
-   mut attr_desc = _pipe_alloc(112)
-   _write_default_vertex_attr_desc(attr_desc)
-   def vi = VkPipelineVertexInputStateCreateInfo(1, binding_desc, 7, attr_desc)
+   mut vi = 0
+   if vertex_input != 0 {
+      mut binding_desc = _pipe_alloc(12)
+      _write_default_vertex_binding_desc(binding_desc)
+      mut attr_desc = _pipe_alloc(112)
+      _write_default_vertex_attr_desc(attr_desc)
+      vi = VkPipelineVertexInputStateCreateInfo(1, binding_desc, 7, attr_desc)
+   } else {
+      vi = VkPipelineVertexInputStateCreateInfo(0, 0, 0, 0)
+   }
    def ia = VkPipelineInputAssemblyStateCreateInfo(topology, 0)
    def viewport_state = VkPipelineViewportStateCreateInfo(1, 0, 1, 0)
    def rs = VkPipelineRasterizationStateCreateInfo(depth_clamp, 0, polygon_mode, cull_mode, front_face, depth_bias, 0.0, 0.0, 0.0, float(line_width))
@@ -319,6 +324,23 @@ fn create_pipeline(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, 
       depth_clamp,
       line_width,
    1)
+}
+
+fn create_pipeline_no_vertex_input(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0) any {
+   "Create a Vulkan graphics pipeline that does not require vertex input bindings."
+   _create_pipeline_ex(vert_mod,
+      frag_mod,
+      topology,
+      depth_test,
+      depth_write,
+      cull_mode,
+      front_face,
+      depth_bias,
+      depth_clamp,
+      line_width,
+   0,
+   _VK_POLYGON_FILL,
+   0)
 }
 
 fn _vk_eager_pipelines() bool { common.env_truthy("NY_VK_EAGER_PIPELINES") }

@@ -117,6 +117,19 @@ RT_DEF("__dir_open", rt_dir_open, 1, "fn __dir_open(path)", "Open directory hand
 RT_DEF("__dir_read", rt_dir_read, 1, "fn __dir_read(handle)", "Read next directory entry.")
 RT_DEF("__dir_close", rt_dir_close, 1, "fn __dir_close(handle)", "Close directory handle.")
 
+RT_DEF("__inotify_init", rt_inotify_init, 1, "fn __inotify_init(flags)", "inotify_init1 or inotify_init wrapper for file watching.")
+RT_DEF("__inotify_add_watch", rt_inotify_add_watch, 3, "fn __inotify_add_watch(fd, path, mask)", "Add inotify watch for path with mask.")
+RT_DEF("__inotify_rm_watch", rt_inotify_rm_watch, 2, "fn __inotify_rm_watch(fd, wd)", "Remove inotify watch.")
+
+RT_DEF("__kqueue", rt_kqueue, 0, "fn __kqueue()", "Create a kqueue (macOS/BSD) for file watching.")
+RT_DEF("__kevent", rt_kevent, 6, "fn __kevent(kq, fd, filter, flags, fflags, data, udata)", "kevent call for registering/reading vnode events.")
+RT_DEF("__kqueue_close", rt_kqueue_close, 1, "fn __kqueue_close(kq)", "Close kqueue fd.")
+RT_DEF("__watch_open_vnode", rt_watch_open_vnode, 1, "fn __watch_open_vnode(path)", "Open a file/dir fd suitable for kqueue vnode watching (macOS).")
+
+RT_DEF("__win32_find_first_change", rt_win32_find_first_change, 3, "fn __win32_find_first_change(path, watch_subtree, filter)", "Windows FindFirstChangeNotification.")
+RT_DEF("__win32_find_next_change", rt_win32_find_next_change, 1, "fn __win32_find_next_change(handle)", "Windows FindNextChangeNotification.")
+RT_DEF("__win32_find_close_change", rt_win32_find_close_change, 1, "fn __win32_find_close_change(handle)", "Windows FindCloseChangeNotification.")
+
 RT_DEF("__big_add_abs", rt_big_add_abs, 2, "fn __big_add_abs(a, b)",
        "Internal: Native absolute BigInt addition.")
 RT_DEF("__big_sub_abs", rt_big_sub_abs, 2, "fn __big_sub_abs(a, b)",

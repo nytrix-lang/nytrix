@@ -91,8 +91,8 @@ fn gltf_asset_root_envs() list {
    ["NY_UI_GLTF_ROOTS", "NY_UI_GLTF_ROOT", "NY_GLTF_ASSET_ROOT", "NY_GLTF_ROOT"]
 }
 
-fn gltf_asset_roots(any defaults=["tmp/assets/models"]) list {
-   "Returns configured glTF asset roots. Local runtime model folders default to tmp/assets/models; env vars add or override roots."
+fn gltf_asset_roots(any defaults=["build/cache/assets/models"]) list {
+   "Returns configured glTF asset roots. Local runtime model folders default to build/cache/assets/models; env vars add or override roots."
    asset_catalog.asset_dirs_from_env(defaults, gltf_asset_root_envs())
 }
 

@@ -16,6 +16,7 @@
 #include "wire/pipe.h"
 #ifndef _WIN32
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #endif
 #include <errno.h>
@@ -24,11 +25,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #ifdef _WIN32
 #include <direct.h>
 #include <process.h>
 #else
 #include <sys/stat.h>
+#include <sys/select.h>
+#include <unistd.h>
+#ifdef __linux__
+#include <sys/inotify.h>
+#endif
+#ifdef __APPLE__
+#include <sys/event.h>
+#include <fcntl.h>
+#endif
+#endif
+#ifdef _WIN32
+#include <windows.h>
 #endif
 
 extern int64_t rt_trace_dump(int64_t n);
@@ -1356,6 +1370,19 @@ static void handle_timeout(int sig) {
 #endif
 
 int main(int argc, char **argv, char **envp) {
+  // increase stack for large frames in clang_import for complex headers
+  struct rlimit rl;
+  if (getrlimit(RLIMIT_STACK, &rl) == 0) {
+    /* Limitless: request infinite stack like real compilers (no artificial cap).
+     * OS will enforce practical limits. */
+    rlim_t want = RLIM_INFINITY;
+    if (rl.rlim_cur != RLIM_INFINITY) {
+      rl.rlim_cur = want;
+      if (rl.rlim_max != RLIM_INFINITY)
+        rl.rlim_max = want;
+      (void)setrlimit(RLIMIT_STACK, &rl);
+    }
+  }
   ny_load_default_config();
   int unified_rc = 0;
   if (ny_try_unified_tool(argc, argv, &unified_rc))
@@ -1451,7 +1478,177 @@ int main(int argc, char **argv, char **envp) {
     alarm((unsigned int)opt.timeout);
 #endif
   }
-  int exit_code = ny_pipeline_run(&opt);
+
+  bool watching = opt.watch_files || opt.hot_reload;
+  int exit_code = 0;
+  char watched_path[4096] = {0};
+  if (opt.input_file) {
+    strncpy(watched_path, opt.input_file, sizeof(watched_path)-1);
+  } else if (opt.command_string) {
+    watching = false; // no file to watch for -e
+  }
+
+  long long last_mtime = 0;
+  if (watching && watched_path[0]) {
+    struct stat st0;
+    if (stat(watched_path, &st0) == 0) last_mtime = (long long)st0.st_mtime;
+  }
+
+  do {
+    exit_code = ny_pipeline_run(&opt);
+    if (!watching) break;
+
+    // Real file watcher + mtime fallback for --watch / --hot-reload
+    // Linux: inotify, macOS: kqueue, Windows: change notification, else: mtime poll
+    const char *watcher_label =
+#if defined(__linux__)
+      "inotify";
+#elif defined(__APPLE__)
+      "kqueue";
+#elif defined(_WIN32)
+      "win32+mtime";
+#else
+      "poll";
+#endif
+    fprintf(stderr, "[hot] watching for changes to '%s' (poll=%dms, watcher=%s). Press Ctrl-C to exit.\n",
+            watched_path[0] ? watched_path : "<stdin>", opt.watch_poll_ms, watcher_label);
+    fflush(stderr);
+
+    bool changed = false;
+    int poll_ms = opt.watch_poll_ms > 0 ? opt.watch_poll_ms : 250;
+
+#if defined(__linux__)
+    /* Linux real inotify */
+    {
+      int ifd = -1, iwd = -1;
+      const char *wt = watched_path[0] ? watched_path : ".";
+      char wdir[4096]; strncpy(wdir, wt, sizeof(wdir)-1); wdir[sizeof(wdir)-1] = '\0';
+      char *sl = strrchr(wdir, '/'); if (sl && sl != wdir) *sl='\0'; else { strncpy(wdir, ".", sizeof(wdir)-1); wdir[sizeof(wdir)-1]='\0'; }
+      ifd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC); if (ifd < 0) ifd = inotify_init();
+      if (ifd >= 0) iwd = inotify_add_watch(ifd, wdir[0]?wdir:".", IN_MODIFY|IN_CREATE|IN_DELETE|IN_MOVED_TO|IN_CLOSE_WRITE|IN_ATTRIB);
+      if (ifd >= 0 && iwd >= 0) {
+        char ebuf[4096]; long long t0 = (long long)time(NULL);
+        while (!changed) {
+          fd_set r; FD_ZERO(&r); FD_SET(ifd, &r);
+          struct timeval tv = {0, poll_ms * 1000};
+          if (select(ifd+1, &r, 0, 0, &tv) > 0) {
+            int n = (int)read(ifd, ebuf, sizeof(ebuf));
+            int off=0; while (off+16 <= n) {
+              uint32_t m = *(uint32_t*)(ebuf+off+4), nl=*(uint32_t*)(ebuf+off+12);
+              const char *nm = (nl>0 && off+16+nl<=(uint32_t)n) ? (ebuf+off+16) : "";
+              if (strstr(nm,".ny") || (watched_path[0]&&strstr(watched_path,nm)) || (m&(IN_MODIFY|IN_CREATE|IN_CLOSE_WRITE))) {
+                struct stat st; if (watched_path[0]&&stat(watched_path,&st)==0 && (long long)st.st_mtime != last_mtime) { changed=true; last_mtime=(long long)st.st_mtime; }
+                else if (watched_path[0]==0) changed=true;
+              }
+              off += 16 + (int)nl;
+            }
+          }
+          if (!changed && watched_path[0]) { struct stat st; if (stat(watched_path,&st)==0 && (long long)st.st_mtime!=last_mtime){changed=true;last_mtime=(long long)st.st_mtime;} }
+          if (!changed) usleep((useconds_t)(poll_ms*500));
+          if ((long long)time(NULL)-t0 > 30) break;
+        }
+        if (iwd>=0) inotify_rm_watch(ifd,iwd); if (ifd>=0) close(ifd);
+      }
+    }
+#elif defined(__APPLE__)
+    /* macOS real kqueue (EVFILT_VNODE) */
+    {
+      int kq = kqueue();
+      int vfd = -1;
+      if (kq >= 0 && watched_path[0]) {
+        vfd = open(watched_path, O_EVTONLY | O_CLOEXEC);
+        if (vfd < 0) vfd = open(watched_path, O_EVTONLY);
+        if (vfd >= 0) {
+          struct kevent ev;
+          EV_SET(&ev, vfd, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+                 NOTE_WRITE | NOTE_DELETE | NOTE_RENAME | NOTE_ATTRIB | NOTE_EXTEND, 0, NULL);
+          kevent(kq, &ev, 1, NULL, 0, NULL);
+          struct kevent out[4];
+          long long t0 = (long long)time(NULL);
+          struct timespec ts = {0, poll_ms * 1000000L};
+          while (!changed) {
+            int n = kevent(kq, NULL, 0, out, 4, &ts);
+            if (n > 0) {
+              for (int i=0; i<n; i++) {
+                if (out[i].fflags & (NOTE_WRITE|NOTE_DELETE|NOTE_RENAME|NOTE_ATTRIB)) {
+                  struct stat st;
+                  if (watched_path[0] && stat(watched_path, &st)==0) {
+                    if ((long long)st.st_mtime != last_mtime) { changed = true; last_mtime = (long long)st.st_mtime; }
+                  } else { changed = true; }
+                }
+              }
+            }
+            if (!changed && watched_path[0]) {
+              struct stat st; if (stat(watched_path,&st)==0 && (long long)st.st_mtime != last_mtime) {changed=true; last_mtime=(long long)st.st_mtime;}
+            }
+            if (!changed) usleep((useconds_t)(poll_ms * 500));
+            if ((long long)time(NULL) - t0 > 30) break;
+          }
+        }
+      }
+      if (vfd >= 0) close(vfd);
+      if (kq >= 0) close(kq);
+    }
+#elif defined(_WIN32)
+    /* Windows: use FindFirstChangeNotification when possible */
+    {
+      HANDLE h = INVALID_HANDLE_VALUE;
+      if (watched_path[0]) {
+        char dir[4096]; strncpy(dir, watched_path, sizeof(dir)-1); dir[sizeof(dir)-1] = '\0';
+        char *sl = strrchr(dir, '\\'); if (!sl) sl = strrchr(dir, '/');
+        if (sl) *sl = 0; else { strncpy(dir, ".", sizeof(dir)-1); dir[sizeof(dir)-1] = '\0'; }
+        h = FindFirstChangeNotificationA(dir, FALSE,
+              FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME);
+      }
+      long long t0 = (long long)time(NULL);
+      while (!changed) {
+        if (h != INVALID_HANDLE_VALUE) {
+          if (WaitForSingleObject(h, poll_ms) == WAIT_OBJECT_0) {
+            struct stat st;
+            if (watched_path[0] && stat(watched_path, &st)==0 && (long long)st.st_mtime != last_mtime) {
+              changed = true; last_mtime = (long long)st.st_mtime;
+            } else { changed = true; }
+            FindNextChangeNotification(h);
+          }
+        }
+        if (!changed && watched_path[0]) {
+          struct stat st; if (stat(watched_path,&st)==0 && (long long)st.st_mtime != last_mtime){ changed=true; last_mtime=(long long)st.st_mtime; }
+        }
+        if (!changed) Sleep(poll_ms / 2);
+        if ((long long)time(NULL)-t0 > 30) break;
+      }
+      if (h != INVALID_HANDLE_VALUE) FindCloseChangeNotification(h);
+    }
+#else
+    /* Generic mtime poll */
+    (void)0;
+#endif
+
+    /* universal mtime poll fallback */
+    if (!changed) {
+      while (!changed) {
+#ifndef _WIN32
+        usleep((useconds_t)(poll_ms * 1000));
+#else
+        Sleep(poll_ms);
+#endif
+        if (watched_path[0]) {
+          struct stat st;
+          if (stat(watched_path, &st) == 0) {
+            if ((long long)st.st_mtime != last_mtime) {
+              changed = true;
+              last_mtime = (long long)st.st_mtime;
+            }
+          }
+        }
+      }
+    }
+    if (changed) {
+      fprintf(stderr, "[hot] change detected, reloading...\n");
+    }
+    /* loop will recompile + rerun */
+  } while (watching);
+
   ny_options_free(&opt);
   ny_std_free_modules();
   rt_runtime_cleanup();

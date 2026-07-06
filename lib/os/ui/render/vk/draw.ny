@@ -4,7 +4,7 @@
 ;; - std.os.ui.render.vk
 ;; - std.os.ui.render
 ;; - std.os.ui.render.matrix
-module std.os.ui.render.vk.draw(draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
+module std.os.ui.render.vk.draw(draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
 use std.core
 use std.core.mem
 use std.math
@@ -692,12 +692,14 @@ fn draw_rect_tex_uv_rot(f64 cx,
 fn draw_vertices(any p, int count, int tex_id) bool {
    "Bulk-uploads raw vertex data(packed vertex stride) to the local mapping."
    if !_frame_open || count <= 0 || !p { return false }
-   bind_texture(tex_id)
+   if is_int(tex_id) && tex_id >= 0 {
+      if !_begin_ui_triangle_stream(tex_id) { return false }
+   } else {
+      if !_begin_ui_default_triangle_stream() { return false }
+   }
    def bytes = count * _VKR_VERT_STRIDE
    if !_check_flush(bytes) { return false }
    def dst = _local_vertex_map + _vertex_offset
-   simmd.prefetch_read(p, 3)
-   simmd.prefetch_write(dst, 3)
    __copy_mem(dst, p, bytes)
    _vertex_offset += bytes
    true
@@ -1681,4 +1683,39 @@ fn draw_axes_3d(f64 gizmo_len, f64 cube_sz=0.4) any {
    draw_cube_3d(0, cube_y, 0, sz, 0.0, 1.0, 0.0, 1.0)
    draw_cube_3d(0, 0, cube_z, sz, 0.0, 0.0, 1.0, 1.0)
    0
+}
+
+fn _vk_draw_shader_rect(f64 x, f64 y, f64 w, f64 h, any pipe_override, any pc_ptr=0, int pc_size=0, int pc_offset=64) bool {
+   "Draws a rectangle using a custom shader pipeline directly, bypassing standard UI batching."
+   if !_frame_open || !_current_frame_cb || !pipe_override { return false }
+   
+   if _vertex_offset != _last_flush_offset {
+      _flush_reason = 4
+      _flush()
+   }
+   if !_check_flush(_VKR_VERT_STRIDE * 6) { return false }
+   
+   def cb = _current_frame_cb
+   if !_vkr_bind_pipeline_if_needed(cb, pipe_override) { return false }
+   _pc_dirty = true
+   _bind_descriptors(cb)
+   _sync_pc()
+   
+   if pc_ptr && pc_size > 0 { push_constants(pc_ptr, pc_size, pc_offset) }
+   
+   def first_vert = _vertex_offset / _VKR_VERT_STRIDE
+   def dst = _local_vertex_map + _vertex_offset
+   _push_rect_tex_direct(dst, x, y, w, h, 0.0, 0.0, 1.0, 1.0, 0xffffffff, 0)
+   
+   _vkr_bind_dynamic_vertex_buffer(cb)
+   cmd_draw(cb, 6, 1, first_vert, 0)
+   
+   _vertex_offset += _VKR_VERT_STRIDE * 6
+   _last_flush_offset = _vertex_offset
+   _last_pipeline_bind_count += 1
+   _prim_rect_quads += 1
+   _target_pipeline = _pipeline
+   _use_custom_pc = 0
+   _pc_dirty = true
+   true
 }
