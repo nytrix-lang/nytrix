@@ -50,6 +50,7 @@ typedef enum ny_builtin_type_kind_t {
   NY_BT_ITERABLE,
   NY_BT_INDEXABLE,
   NY_BT_ALLOCATOR,
+  NY_BT_PROOF,
 } ny_builtin_type_kind_t;
 
 static const char *type_skip_nullable(const char *name) {
@@ -448,6 +449,8 @@ static ny_builtin_type_kind_t classify_builtin_type_exact(const char *name) {
       return NY_BT_RANGE;
     if (memcmp(name, "float", 5) == 0)
       return NY_BT_FLOAT;
+    if (memcmp(name, "proof", 5) == 0)
+      return NY_BT_PROOF;
     break;
   case 6:
     if (memcmp(name, "Result", 6) == 0)
@@ -2112,6 +2115,8 @@ LLVMTypeRef resolve_type_name(codegen_t *cg, const char *type_name,
     return cg->type_i64;
   }
   const char *resolved_name = type_skip_nullable(type_name);
+  if (strcmp(resolved_name, "proof") == 0)
+    return cg->type_i64;
   if (is_any_type_name(resolved_name))
     return cg->type_i64;
   if (ny_name_tail_is(resolved_name, "number"))
@@ -2165,6 +2170,7 @@ LLVMTypeRef resolve_type_name(codegen_t *cg, const char *type_name,
   case NY_BT_ITERABLE:
   case NY_BT_INDEXABLE:
   case NY_BT_ALLOCATOR:
+  case NY_BT_PROOF:
     return cg->type_i64;
   default:
     break;
@@ -2257,6 +2263,8 @@ LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *type_name,
   case NY_BT_C128:
   case NY_BT_COMPLEX:
     return complex_abi_type(cg, resolved_name);
+  case NY_BT_PROOF:
+    return cg->type_i64;
   default:
     break;
   }
@@ -2267,6 +2275,8 @@ LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *type_name,
   if (is_opaque_system_abi_type(resolved_name))
     return cg->type_i8ptr;
   if (ny_lookup_tagged_type(cg, resolved_name))
+    return cg->type_i64;
+  if (strcmp(resolved_name, "proof") == 0)
     return cg->type_i64;
   ny_diag_error(tok, "unknown type name '%s' at native ABI boundary",
                 type_name);
@@ -2376,6 +2386,8 @@ type_layout_t resolve_raw_layout(codegen_t *cg, const char *type_name,
   case NY_BT_C128:
   case NY_BT_COMPLEX:
     return make_layout(16, 8, complex_abi_type(cg, resolved_name));
+  case NY_BT_PROOF:
+    return make_layout(0, 1, cg->type_i64);
   default:
     break;
   }

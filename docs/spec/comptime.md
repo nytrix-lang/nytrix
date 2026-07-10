@@ -120,7 +120,9 @@ current rule surface supports call predicates such as `call.name`,
 
 ## Compile-time proofs
 
-Compile-time assertions move safety checks into compilation:
+Compile-time assertions move safety checks into compilation. The `proof` type
+in [types.md](types.md) provides the carrier for dependent and refinement
+facts backed by the same engine.
 
 ```ny
 assert_compile((4 * 11) == 44, "folded arithmetic")
@@ -144,6 +146,8 @@ or correctness.
 `--safe-mode` uses the same proof engine for compiler-tracked raw memory
 accesses. If an allocation size is known, `load8`/`store8` and wider raw
 loads/stores require a byte offset proven to stay inside the allocation.
+
+See [types.md](types.md) for `proof` type, dependent params, and refinement.
 
 ## Generated modules
 

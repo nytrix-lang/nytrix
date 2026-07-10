@@ -805,6 +805,8 @@ static int test_build_missing_archive(const char *archive_path) {
   sv_free(&srcs);
   return ok;
 }
+static char *decode_shape_quoted_string(const char *start, size_t len);
+
 static int object_link_run_check(const char *shape_path) {
   if (!shape_path || !nyt_ends_with(shape_path, ".nshape"))
     return 0;
@@ -887,38 +889,72 @@ static int object_link_run_check(const char *shape_path) {
     return 1;
   }
 
-  char *link_path = shape_meta_string(shape_path, "link");
-  char archive_path[PATH_MAX];
-  archive_path[0] = '\0';
-  if (link_path && *link_path) {
-    snprintf(archive_path, sizeof(archive_path), "%s", link_path);
-    (void)test_build_missing_archive(archive_path);
+  // Collect all "link" entries (support multi-link for split archive tests etc.)
+  StrVec links = {0};
+  {
+    char *data = read_small_file(shape_path);
+    if (data) {
+      char *line = data;
+      while (line && *line) {
+        char *nxt = strchr(line, '\n');
+        if (nxt) *nxt = '\0';
+        char *p = line;
+        trim_inplace(p);
+        if (strncmp(p, "link ", 5) == 0) {
+          p += 5;
+          trim_inplace(p);
+          if (*p == '"') {
+            char *st = ++p;
+            char *en = st;
+            while (*en && (*en != '"' || (en > st && en[-1] == '\\')))
+              en++;
+            char *val = decode_shape_quoted_string(st, (size_t)(en - st));
+            if (val && *val) {
+              sv_push(&links, val);
+              free(val);
+            }
+          } else if (*p) {
+            sv_push(&links, p);
+          }
+        }
+        line = nxt ? nxt + 1 : NULL;
+      }
+      free(data);
+    }
   }
-  free(link_path);
+  for (size_t i = 0; i < links.len; i++) {
+    (void)test_build_missing_archive(links.items[i]);
+  }
 
 #ifdef _WIN32
+  sv_free(&links);
   (void)ret_kind;
   (void)expected_val;
   free(expect_val);
   return 0;
 #else
+  const char *first_archive = links.len ? links.items[0] : NULL;
   int internal_rc = test_internal_elf64_link_run(obj_path, ret_kind, expected_val, shape_path,
-                                                  archive_path[0] ? archive_path : NULL);
+                                                  first_archive);
   if (internal_rc == 0) {
+    sv_free(&links);
     free(expect_val);
     return 0;
   }
   if (internal_rc == 1) {
+    sv_free(&links);
     free(expect_val);
     return 1;
   }
   internal_rc = test_internal_elf32_link_run(obj_path, ret_kind, expected_val, shape_path,
-                                              archive_path[0] ? archive_path : NULL);
+                                              first_archive);
   if (internal_rc == 0) {
+    sv_free(&links);
     free(expect_val);
     return 0;
   }
   if (internal_rc == 1) {
+    sv_free(&links);
     free(expect_val);
     return 1;
   }
@@ -997,8 +1033,9 @@ static int object_link_run_check(const char *shape_path) {
 #endif
   link_argv[link_argc++] = obj_path;
   link_argv[link_argc++] = harness_path;
-  if (archive_path[0])
-    link_argv[link_argc++] = archive_path;
+  for (size_t i = 0; i < links.len && link_argc < 10; i++) {
+    link_argv[link_argc++] = links.items[i];
+  }
   link_argv[link_argc++] = "-o";
   link_argv[link_argc++] = exe_path;
   if (ret_kind == NY_TEST_LINK_RET_F64)
@@ -1010,6 +1047,7 @@ static int object_link_run_check(const char *shape_path) {
             link_rc, disp_path(shape_path));
     remove(harness_path);
     remove(exe_path);
+    sv_free(&links);
     free(expect_val);
     return 1;
   }
@@ -1023,6 +1061,7 @@ static int object_link_run_check(const char *shape_path) {
 
   remove(harness_path);
   remove(exe_path);
+  sv_free(&links);
   free(expect_val);
   return run_ok ? 0 : 1;
 #endif

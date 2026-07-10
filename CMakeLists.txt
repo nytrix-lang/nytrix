@@ -34,7 +34,7 @@ set(NYTRIX_DWARF_VERSION "5" CACHE STRING "DWARF version for Unix-like debug bui
 set_property(CACHE NYTRIX_DWARF_VERSION PROPERTY STRINGS 2 3 4 5)
 
 set(NYTRIX_VERSION_MAJOR "0")
-set(NYTRIX_VERSION_MINOR "6")
+set(NYTRIX_VERSION_MINOR "8")
 set(NYTRIX_VERSION_PATCH "0")
 set(NYTRIX_VERSION_REF "" CACHE STRING
     "Git ref used for version metadata; empty prefers the upstream remote ref")

@@ -632,6 +632,8 @@ static bool hm_type_is_dynamic(ny_hm_type_t *t) {
     return true;
   if (t->kind == NY_HM_NAME && t->name && strcmp(t->name, "empty") == 0)
     return true;
+  if (t->kind == NY_HM_NAME && t->name && strcmp(t->name, "proof") == 0)
+    return false;
   return false;
 }
 
