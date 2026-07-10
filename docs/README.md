@@ -39,6 +39,10 @@ comptime tables/templates/checks, native layouts, C header imports, inline
 assembly, default compile-time type checks, and opt-in ownership/raw-memory
 diagnostics.
 
+## Native Definition
+
+A feature is truly native only when it works in both the NYIR VM and native codegen, without AST fallback or external compiler infrastructure. LLVM and libclang can be useful references or fallbacks, but they are not the compiler’s core.
+
 ## Learn guides
 
 | Page | Use it for |

@@ -278,6 +278,7 @@ struct fun_sig {
   uint64_t tail_hash;
   uint32_t tail_len;
   bool tail_cached;
+  struct { size_t len; size_t cap; void **data; } native_byval_param_layouts;
 };
 
 #define NY_MONO_MAX_ARITY 16

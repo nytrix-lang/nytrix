@@ -1,0 +1,16 @@
+shape x86_64_elf64_link_archive_split_links {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir link-run archive multi-link]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-native-elf64-archive-split-links.o"
+  expect object_link_run_i64_42
+  link "etc/tests/rt/native/elf64/link/ar_split_a.a"
+  link "etc/tests/rt/native/elf64/link/ar_split_b.a"
+  source ny <<'NY'
+extern "c" {
+  fn ar_split_a(i64 x) i64
+}
+def main = ar_split_a(0)
+NY
+}

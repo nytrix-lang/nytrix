@@ -1,0 +1,13 @@
+shape x86_64_elf64_object_strlen_stub {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir pointer strlen]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-strlen-stub.o"
+  expect i64_42
+  source ny <<'NY'
+fn probe() i64 { 42 }
+
+probe()
+NY
+}

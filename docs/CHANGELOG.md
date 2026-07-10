@@ -2,12 +2,29 @@
 
 Nytrix uses dated milestones. `ny --version` for snapshots.
 
-## Unreleased
+## [0.8] — Cross-platform hot reload, proof types, renderer parity + polish
 
-### Changed
-- Full cross-platform real file watchers for language-level hot reloading via `.so`/`.dylib`/`.dll` and file watchers (Linux inotify, macOS kqueue EVFILT_VNODE, Windows FindFirstChangeNotification). New `std.os.fs.watch` module with `create`/`close`/`poll`/`has_event`/`wait_any`. Extended `std.os.fs`. New runtime `__kqueue` etc. CLI `--hot-reload`/`--watch` uses real kernel events (`select`/`kevent`/`WaitForSingleObject`) + mtime fallback for lower idle CPU and faster change detection vs polling. Specialized per-platform in compiler and stdlib. Foundation for reloadable native modules via watch + dlopen. All self-test prints start with ✓ .
+### Added
+- Full cross-platform real file watchers enabling fast language-level hot reloading via dynamically linked libraries (`.so` / `.dylib` / `.dll`):
+  - Linux: full inotify support with event masks (`IN_*`), `watch_init`/`watch_add`/`watch_rm`, `watch_read_events`, and `watch_has_change`.
+  - macOS: kqueue + `EVFILT_VNODE` (NOTE_WRITE, NOTE_DELETE, NOTE_RENAME, NOTE_ATTRIB, etc.) via new runtime primitives.
+  - Windows: `FindFirstChangeNotification` / `FindNextChangeNotification` with `FILE_NOTIFY_CHANGE_*` filters.
+- New first-class module `std.os.fs.watch` with clean portable API: `create(path)`, `close(handle)`, `poll(handle)`, `has_event(handle)`, `wait_any(handle)`, plus `WATCH_*` constants. Makes implementing hot-reloading of native modules trivial from .ny code.
+- Extended `std.os.fs` with cross-platform watch facade + platform-specific low-level helpers.
+- New runtime intrinsics for efficient watching: `__kqueue`, `__kevent`, `__watch_open_vnode`, `__win32_find_first_change` / `__win32_find_next_change` / `__win32_find_close_change`.
+- CLI `--hot-reload` (`--hot`, `-H`), `--watch`, and `--watch-poll` now use real kernel event mechanisms on Linux/macOS/Windows (with mtime fallback), including proper `select`/`kevent`/`WaitForSingleObject` waiting.
 
-## [0.8.0] — LLVM-free Native + C Interop + Polish
+### Changed / Performance & Optimization
+- File watching and hot reload use OS-native event notification (inotify, kqueue, Win32 directory change APIs) with blocking waits (`select`, `kevent`, `WaitForSingleObject`) instead of busy mtime polling. This reduces CPU usage when idle and improves change detection latency.
+- The `--hot` / `--watch` loop performs edit-save-recompile-rerun with lower overhead.
+- Support for watching combined with dlopen/dlsym of compiled dynamic libraries enables faster iteration without requiring full restarts in user code (provides foundation for reloadable modules).
+- The watcher code is specialized per platform in the compiler and standard library.
+
+### Fixed
+- Various platform-conditional and watcher handle lifetime issues during cross-platform implementation.
+- Parser and dict construction robustness for the new watch handle types.
+
+## [0.7] — LLVM-free Native + C Interop + Polish
 
 ### Added
 - Internal C frontend tolerant support for more complex headers; `_Complex`, `_Bool`, unknown types, and recoverable declarations continue on errors.
@@ -76,7 +93,7 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - C frontend rejects non-positive array extents and reports unsupported field shapes as diagnostics instead of dropping them silently.
 - Binary NYIR format extended through v4 for wider call operands, preserving v1–v3 load compatibility.
 
-## [0.6.0] - 2026-06-30 — Fuzzing, crypto/math expansion, renderer polish
+## [0.6] - 2026-06-30 — Fuzzing, crypto/math expansion, renderer polish
 
 ### Added
 - Fuzz benchmark shapes (`etc/tests/fuzz/bench/*.nshape`) for call-heavy, matrix, string, and checksum workloads.
@@ -96,7 +113,7 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - Windows build integration, joystick axis handling, SDK/toolchain probing.
 - zlib decompression capacity handling.
 
-## [0.5.0] - 2026-06-05 — Editor/viewer framework
+## [0.5] - 2026-06-05 — Editor/viewer framework
 
 ### Added
 - Editor and engine viewer (`std.os.ui.render.viewer`): asset browser, hierarchy, inspector, gizmos, transform tools, runtime bootstrap.
@@ -114,7 +131,7 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - Animated glTF mesh index-buffer retention and texture reuse.
 - GLSL syntax restoration and screen redraw stability.
 
-## [0.4.0] - 2026-05-30 — Ownership, typed pipeline, CLI unification
+## [0.4] - 2026-05-30 — Ownership, typed pipeline, CLI unification
 
 ### Added
 - Cross-platform windowing/input: Win32, Cocoa, X11, Wayland, Vulkan.
@@ -134,7 +151,7 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - FFI header import collisions and ownership diagnostics for returned values.
 - Mutable closure captures across repeated calls.
 
-## [0.3.0] - 2026-04-13 — Graphics stack and platform expansion
+## [0.3] - 2026-04-13 — Graphics stack and platform expansion
 
 ### Added
 - glTF loading, Meshopt integration, mesh/glTF parsers, and an image parser stack.
@@ -154,7 +171,7 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - Asset path drift and shader-generation regressions during scene coverage expansion.
 - Runtime fixture mismatches introduced while moving platform code into `std.os`.
 
-## [0.2.0] - 2026-03-09 — Compiler, runtime, and stdlib foundation
+## [0.2] - 2026-03-09 — Compiler, runtime, and stdlib foundation
 
 ### Added
 - Parser, lowering pipeline, AST node definitions, and visitor/function lowering.
@@ -177,7 +194,7 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - First-pass parser, runtime primitive, module-loading, and diagnostic issues found by the initial test suite.
 - Standard-library import coupling and module-path drift.
 
-## [0.1.0] - 2025-12-24 — Prototype bootstrap
+## [0.1] - 2025-12-24 — Prototype bootstrap
 
 ### Added
 - Launcher skeleton, build script, and CMake scaffold (`make`, `CMakeLists.txt`, `src/cmd/ny/main.c`).
