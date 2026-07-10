@@ -25,7 +25,8 @@ use std.os.ui.render.vk.pipeline (_ensure_circle_pipeline,
    _ensure_point_pipeline,
    _get_nocull_pipeline,
 
-_get_unlit_nocull_pipeline)
+_get_unlit_nocull_pipeline,
+   push_constants)
 
 use std.os.ui.render.vk.renderer (_check_flush, _flush, _sync_pc, set_ui_material)
 use std.os.ui.render.vk.texture (bind_texture, bind_default_texture, bindless_sync_texture_slot)
@@ -1712,7 +1713,6 @@ fn _vk_draw_shader_rect(f64 x, f64 y, f64 w, f64 h, any pipe_override, any pc_pt
    
    _vertex_offset += _VKR_VERT_STRIDE * 6
    _last_flush_offset = _vertex_offset
-   _last_pipeline_bind_count += 1
    _prim_rect_quads += 1
    _target_pipeline = _pipeline
    _use_custom_pc = 0

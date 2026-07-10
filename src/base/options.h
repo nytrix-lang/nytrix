@@ -181,6 +181,9 @@ typedef struct {
   bool native_tier_report;
   const char *native_tier_report_path;
   bool native_result_oracle;
+  bool watch_files;
+  bool hot_reload;
+  int watch_poll_ms;
   const char *native_result_oracle_expected;
   ny_c_frontend_t c_frontend;
   bool native_dump_ir;

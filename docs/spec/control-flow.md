@@ -163,7 +163,7 @@ loops make the control path harder to see. Prefer `while`, `for`, `break`, and
 ## With
 
 ```ny
-with Type: name = value { body }
+with type name = value { body }
 ```
 
 `with` is a type-first resource binding. The colon separates the resource type

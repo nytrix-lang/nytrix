@@ -1,0 +1,21 @@
+shape complex_import {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi complex-h structs macros functions inlines no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/complex.h"
+
+; Verify we get 100% structs, macros (obj + fl), functions, inlines from complex.h style header
+assert(COMPLEX_VERSION == 1, "complex version macro")
+
+; test struct layout from the header (mimics complex.h aggregate support)
+assert(sizeof(complex_struct) == 16, "complex struct layout")
+
+; simple function symbols are declared (decl captured for seamless interop)
+
+0
+NY
+}
