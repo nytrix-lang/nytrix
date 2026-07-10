@@ -1,0 +1,19 @@
+shape internal_byvalue_param_import_lowering {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi import-lowering byvalue-param no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/internal_byvalue_param_import.h" as "c" link "etc/tests/rt/c/sum_pair.so"
+use std.core
+
+def *any p = malloc(24)
+store_layout(p, "SumPairLayout", 10, 20, 30)
+def r = c.sum_pair(p)
+free(p)
+assert(r == 60, "internal c by-value aggregate param sum_pair")
+1 + 2
+NY
+}

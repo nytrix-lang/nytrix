@@ -186,6 +186,7 @@ mut _blend_enabled = true
 ;; caching pattern.
 mut _texture_2d_enabled = false
 mut _depth_test_enabled = false
+mut _multisample_enabled = false
 mut _clear_r = 0.0
 mut _clear_g = 0.0
 mut _clear_b = 0.0
@@ -1471,6 +1472,7 @@ fn init(any win) bool {
    _call1("glEnable", GL_DEPTH_TEST)
    _call1("glDepthFunc", GL_LEQUAL)
    _call1("glEnable", GL_MULTISAMPLE)
+   _multisample_enabled = true
    _call2("glPixelStorei", GL_UNPACK_ALIGNMENT, 1)
    _check_gl_error("init.state")
    set_ui_material(-1, 0, 12)
@@ -1501,6 +1503,7 @@ fn shutdown() bool {
    _default_tex = 0
    _bound_tex = -999999
    _lighting_enabled = false
+   _multisample_enabled = false
    _last_tex_env_mode = -999999
    if _dynamic_vbo > 0 { _delete_name("glDeleteBuffers", _dynamic_vbo) _dynamic_vbo = 0 }
    if _scratch { free(_scratch) _scratch = 0 _scratch_cap = 0 }
@@ -1570,6 +1573,7 @@ fn begin_frame(any win=0, int w=0, int h=0) bool {
    }
    _call4("glViewport", 0, 0, _w, _h)
    _call1("glEnable", GL_MULTISAMPLE)
+   _multisample_enabled = true
    if !_mvp { _mvp = _default_ortho(_w, _h) }
    if !_model { _model = mat4_identity() }
    _apply_matrices()

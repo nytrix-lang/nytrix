@@ -787,6 +787,21 @@ static int rt_tty_mode_saved = 0;
 static struct termios rt_tty_mode_prev;
 #endif
 
+static int rt_tty_atexit_registered = 0;
+
+static void rt_tty_atexit_restore(void) {
+  if (!rt_tty_mode_saved)
+    return;
+#ifdef _WIN32
+  HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+  if (hIn != INVALID_HANDLE_VALUE)
+    SetConsoleMode(hIn, rt_tty_mode_prev);
+#else
+  tcsetattr(STDIN_FILENO, TCSANOW, &rt_tty_mode_prev);
+#endif
+  rt_tty_mode_saved = 0;
+}
+
 int64_t rt_openpty(int64_t fds_ptr) {
   intptr_t ptr = (intptr_t)rt_untag_v(fds_ptr);
 #if !defined(_WIN32)
@@ -834,6 +849,10 @@ int64_t rt_tty_raw(int64_t enable) {
     if (!SetConsoleMode(hIn, mode))
       return rt_tag_v((int64_t)-1);
     (void)rt_tty_install_cleanup();
+    if (!rt_tty_atexit_registered) {
+      atexit(rt_tty_atexit_restore);
+      rt_tty_atexit_registered = 1;
+    }
     return rt_tag_v((int64_t)0);
   }
   if (rt_tty_mode_saved && !SetConsoleMode(hIn, rt_tty_mode_prev))
@@ -881,6 +900,10 @@ int64_t rt_tty_raw(int64_t enable) {
     if (tcsetattr(STDIN_FILENO, TCSANOW, &t) != 0)
       return rt_tag_v((int64_t)-errno);
     (void)rt_tty_install_cleanup();
+    if (!rt_tty_atexit_registered) {
+      atexit(rt_tty_atexit_restore);
+      rt_tty_atexit_registered = 1;
+    }
     return rt_tag_v((int64_t)0);
   }
   if (rt_tty_mode_saved && tcsetattr(STDIN_FILENO, TCSANOW, &rt_tty_mode_prev) != 0)
@@ -3068,7 +3091,14 @@ int64_t rt_main(void) {
 int64_t rt_inotify_init(int64_t flags) {
   int fl = is_int(flags) ? (int)(flags >> 1) : (int)flags;
   int fd = inotify_init1(fl);
-  if (fd < 0) fd = inotify_init();
+  if (fd < 0) {
+    fd = inotify_init();
+    if (fd >= 0 && (fl & O_NONBLOCK) != 0) {
+      int oldfl = fcntl(fd, F_GETFL, 0);
+      if (oldfl != -1)
+        fcntl(fd, F_SETFL, oldfl | O_NONBLOCK);
+    }
+  }
   return rt_tag_v((int64_t)fd);
 }
 

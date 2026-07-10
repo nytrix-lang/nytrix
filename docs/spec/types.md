@@ -21,6 +21,7 @@ compile-time type checking.
 | `handle` | Opaque native handle scalar. |
 | `complex`, `c64`, `c128` | Complex numeric values and ABI-facing forms. |
 | `any` | Dynamic value that remains shape-checkable at runtime. |
+| `proof` | Erased carrier for a compile-time proven fact (dependent/refinement use). |
 | `number` | Language group for integer, float, bigint, and compatible numeric values. |
 | `collection` | Language group for list, dict, set, tuple, bytes, and range-like containers. |
 
@@ -271,8 +272,54 @@ dynamic checks and a compatibility probe intentionally relies on them:
 ny --no-strict-types old_probe.ny
 ```
 
+## Proof types
+
+`proof` is a builtin type (no special syntax) that carries compile-time proven
+facts. It is erased at runtime and does not affect ABI or layout.
+
+```ny
+fn sum_up_to(int n, proof p) int {
+   if n <= 1 { 1 } else { n + sum_up_to(n - 1, p ) }
+}
+
+assert_compile((2 + 2) == 4, "arith")
+```
+
+See `assert_compile*`, `range_proven`, `index_proven` in comptime docs. The
+type is usable anywhere a fact must be witnessed for a value-dependent binding.
+
+## Dependent types
+
+Value-dependent parameters are expressed by pairing a value with a `proof`
+carrier for a property of that value. This gives practical dependent typing
+without Pi/Sigma bloat.
+
+```ny
+fn sum_up_to(int n, proof p) int { ... }
+```
+
+Callers must supply a provable fact (via prior assert_compile_range or
+literal that the engine accepts). Useful for LEAN-like checked math
+properties and safe indexing without runtime cost.
+
+## Refinement types
+
+Refinements are user or engine proofs attached to base values (ranges,
+indices, custom predicates). Proofs are erased after the check; the payload
+keeps its concrete type.
+
+```ny
+def int x = ...
+assert_compile_range(x, 0, 99, "refined index")
+; x may now be used under a dependent proof param
+```
+
+`assert_compile_index`, range/index proofs, and custom `proof` tokens provide
+the mechanism. All checks are backed by the existing compile-time proof engine.
+
 ## Related
 
 - [native.md](native.md) for FFI and ABI rules.
 - [errors.md](errors.md) for diagnostics and result refinement.
+- [comptime.md](comptime.md) for assert_compile, range_proven, and the proof engine.
 - [troubleshooting.md](../learn/troubleshooting.md) for practical strict-type debugging.

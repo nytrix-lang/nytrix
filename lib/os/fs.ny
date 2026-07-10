@@ -135,6 +135,8 @@ def IN_MASK_ADD = 0x20000000
 def IN_ISDIR = 0x40000000
 def IN_ONESHOT = 0x80000000
 
+def O_NONBLOCK = 0x800  ;; O_NONBLOCK for inotify_init1 (and fallbacks); passed through as logical value (runtime >>1 yields host flag)
+
 def IN_ALL_EVENTS = bor(bor(bor(IN_MODIFY, IN_CREATE), bor(IN_DELETE, IN_MOVED_TO)), IN_CLOSE_WRITE)
 
 #linux {
@@ -210,15 +212,15 @@ fn watch_has_change(any evs, int want_mask=IN_MODIFY) bool {
 
 #main {
    ;; previous selftest already ran; add minimal watcher smoke if possible
-   def wfd = watch_init(0)
+   def wfd = watch_init(O_NONBLOCK)
    if wfd >= 0 {
       def wd = watch_add(wfd, ".", IN_MODIFY | IN_CREATE | IN_DELETE)
       if wd >= 0 {
          ;; non-destructive: just rm it
          watch_rm(wfd, wd)
       }
-      ;; cannot easily close fd here without lowlevel, but ok for smoke
-      print("✓ watch primitives available")
+      __close(wfd)
+      print("✓ std.os.fs.watch primitives self-test passed")
    }
 }
 
@@ -310,7 +312,7 @@ fn watch_create(str path) any {
    if !is_str(path) { return nil }
    def p = ospath.normalize(path)
    if platform.is_linux() {
-      def fd = watch_init(0)
+      def fd = watch_init(O_NONBLOCK)
       if fd > 0 {
          def m = bor(bor(IN_MODIFY, IN_CREATE), bor(IN_DELETE, IN_ATTRIB))
          def wd = watch_add(fd, p, m)
@@ -322,6 +324,7 @@ fn watch_create(str path) any {
             d = d.set("path", p)
             return d
          }
+         __close(fd)
       }
    } elif platform.is_macos() {
       def h = _kqueue_vnode(p)
@@ -341,11 +344,15 @@ fn watch_close(any h) int {
    if !is_dict(h) { return 0 }
    def ty = to_str(h.get("type", ""))
    if ty == "inotify" {
-      watch_rm(int(h.get("fd", -1)), int(h.get("wd", -1)))
+      def fd = int(h.get("fd", -1))
+      def wd = int(h.get("wd", -1))
+      if wd >= 0 { watch_rm(fd, wd) }
+      if fd >= 0 { __close(fd) }
    } elif ty == "kqueue" {
       def kq = int(h.get("kq", -1))
-      ; best effort close
-      if kq > 0 { }
+      def vfd = int(h.get("fd", -1))
+      if kq > 0 { __close(kq) }
+      if vfd > 0 { __close(vfd) }
    } elif ty == "win32" {
       _win32_close(h.get("handle", 0))
    }
@@ -382,6 +389,6 @@ fn watch_has_event(any h) bool { watch_poll(h).len > 0 }
    if w {
       watch_poll(w)
       watch_close(w)
-      print("✓ watch facade ok")
+      print("✓ std.os.fs.watch facade self-test passed")
    }
 }

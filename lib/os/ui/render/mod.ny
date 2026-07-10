@@ -5023,8 +5023,7 @@ fn draw_shader_rect(f64 x, f64 y, f64 w, f64 h, any pipe_override, any pc_ptr=0,
       return lib_vkr._vk_draw_shader_rect(x, y, w, h, pipe_override, pc_ptr, pc_size, pc_offset)
    }
    if _backend == BACKEND_GL {
-      ; For OpenGL, fallback to draw_rect_tex_uv since we don't have the same dynamic vertex buffer system yet
-      ; Ensure pipeline is bound before drawing
+      ; GL uses fixed-function fallback for custom shader rects (legacy backend)
       bind_pipeline(pipe_override)
       def res = lib_glr.draw_rect_tex_uv(x, y, w, h, -1, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
       reset_pipeline()

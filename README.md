@@ -5,7 +5,7 @@
 
   <strong>Programming language.</strong>
 
-  [![Version](https://img.shields.io/badge/version-0.6.0-2f6fed)](docs/CHANGELOG.md)
+  [![Version](https://img.shields.io/badge/version-0.8.0-2f6fed)](docs/CHANGELOG.md)
   [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
   [![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-x86__64%20%7C%20arm64-lightgrey)](#install)
 
