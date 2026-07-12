@@ -30,6 +30,11 @@ bool ny_native_collect_vm_profile(ny_nir_func_t *rt_main,
                                   const ny_options *opt,
                                   ny_nir_eval_result_t *profile,
                                   char *err, size_t err_len);
+bool ny_native_eval_ir_value(ny_nir_func_t *rt_main, ny_nir_func_t *funcs,
+                             const char **names, size_t count,
+                             const ny_options *opt,
+                             ny_nir_eval_result_t *out, char *err,
+                             size_t err_len);
 bool ny_native_nir_dump_function(FILE *out, const stmt_t *fn, char *err,
                                  size_t err_len, const ny_options *opt);
 bool ny_native_nir_dump_rt_main(FILE *out, const program_t *prog, char *err,
