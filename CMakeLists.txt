@@ -1036,7 +1036,10 @@ function(nytrix_add_tool tool_target tool_name)
     "${NYTRIX_ROOT}/src/base/args.c"
   )
   if ("${tool_name}" STREQUAL "fmt")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/fmt/init.c")
+    list(APPEND _tool_sources
+      "${NYTRIX_ROOT}/src/cmd/fmt/init.c"
+      "${NYTRIX_ROOT}/src/base/process.c"
+    )
   elseif ("${tool_name}" STREQUAL "perf")
     list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/perf/perf.c")
   elseif ("${tool_name}" STREQUAL "test")

@@ -78,6 +78,140 @@ static int native_backend_explicit(const char *flags);
 static int path_is_native_runtime_test(const char *p);
 static int path_is_stdlib_source(const char *p);
 static int run_progress_selftest(const char *bin, int timeout_sec);
+static int make_test_capture_tmp(char *tmp, size_t tmp_len,
+                                 const char *prefix);
+
+typedef struct {
+  FILE *stream;
+  char path[PATH_MAX];
+  int saved_stdout;
+  int saved_stderr;
+} FailureOutputCapture;
+
+static int test_fd_dup(int fd) {
+#ifdef _WIN32
+  return _dup(fd);
+#else
+  return dup(fd);
+#endif
+}
+
+static int test_fd_dup2(int from, int to) {
+#ifdef _WIN32
+  return _dup2(from, to);
+#else
+  return dup2(from, to);
+#endif
+}
+
+static void test_fd_close(int fd) {
+#ifdef _WIN32
+  _close(fd);
+#else
+  close(fd);
+#endif
+}
+
+static int failure_output_capture_begin(FailureOutputCapture *capture) {
+  if (!capture)
+    return 0;
+  memset(capture, 0, sizeof(*capture));
+  capture->saved_stdout = -1;
+  capture->saved_stderr = -1;
+  int fd = make_test_capture_tmp(capture->path, sizeof(capture->path), "failures");
+#ifndef _WIN32
+  if (fd >= 0)
+    close(fd);
+#else
+  (void)fd;
+#endif
+  capture->stream = fopen(capture->path, "w+b");
+  if (!capture->stream)
+    return 0;
+  fflush(stdout);
+  fflush(stderr);
+  capture->saved_stdout = test_fd_dup(fileno(stdout));
+  capture->saved_stderr = test_fd_dup(fileno(stderr));
+  int stdout_redirected = 0;
+  int stderr_redirected = 0;
+  if (capture->saved_stdout >= 0 && capture->saved_stderr >= 0) {
+    stdout_redirected =
+        test_fd_dup2(fileno(capture->stream), fileno(stdout)) >= 0;
+    if (stdout_redirected)
+      stderr_redirected =
+          test_fd_dup2(fileno(capture->stream), fileno(stderr)) >= 0;
+  }
+  if (!stdout_redirected || !stderr_redirected) {
+    if (stdout_redirected && capture->saved_stdout >= 0)
+      test_fd_dup2(capture->saved_stdout, fileno(stdout));
+    if (stderr_redirected && capture->saved_stderr >= 0)
+      test_fd_dup2(capture->saved_stderr, fileno(stderr));
+    if (capture->saved_stdout >= 0)
+      test_fd_close(capture->saved_stdout);
+    if (capture->saved_stderr >= 0)
+      test_fd_close(capture->saved_stderr);
+    fclose(capture->stream);
+    remove(capture->path);
+    memset(capture, 0, sizeof(*capture));
+    capture->saved_stdout = capture->saved_stderr = -1;
+    return 0;
+  }
+  return 1;
+}
+
+static int failure_marker_line(const char *line) {
+  return line && (strstr(line, "[✗/✗/✗]") || strstr(line, "[x/x/x]"));
+}
+
+static void failure_output_capture_end(FailureOutputCapture *capture) {
+  if (!capture || !capture->stream)
+    return;
+  fflush(stdout);
+  fflush(stderr);
+  test_fd_dup2(capture->saved_stdout, fileno(stdout));
+  test_fd_dup2(capture->saved_stderr, fileno(stderr));
+  test_fd_close(capture->saved_stdout);
+  test_fd_close(capture->saved_stderr);
+  rewind(capture->stream);
+
+  FILE *block = tmpfile();
+  char line[8192];
+  int capturing = 0;
+  while (fgets(line, sizeof(line), capture->stream)) {
+    if (strncmp(line, "[replay output]", 15) == 0) {
+      capturing = 1;
+      if (block) {
+        fclose(block);
+        block = tmpfile();
+      }
+    }
+    if (capturing && block)
+      fputs(line, block);
+    if (!failure_marker_line(line))
+      continue;
+    if (capturing && block) {
+      fflush(block);
+      rewind(block);
+      char chunk[8192];
+      size_t n = 0;
+      while ((n = fread(chunk, 1, sizeof(chunk), block)) > 0)
+        fwrite(chunk, 1, n, stdout);
+    } else {
+      fputs(line, stdout);
+    }
+    putchar('\n');
+    capturing = 0;
+    if (block) {
+      fclose(block);
+      block = tmpfile();
+    }
+  }
+  if (block)
+    fclose(block);
+  fclose(capture->stream);
+  remove(capture->path);
+  capture->stream = NULL;
+}
 
 typedef struct {
   int tests;
@@ -3626,6 +3760,7 @@ int ny_test_main(int argc, char **argv) {
   int timeout_sec = NY_TEST_DEFAULT_TIMEOUT_SEC;
   int phase_times = 0;
   int trace_ir = 0;
+  int failures_only = 0;
   StrVec files = {0};
   StrVec patterns = {0};
   StrVec failed_paths = {0};
@@ -3651,7 +3786,7 @@ int ny_test_main(int argc, char **argv) {
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       printf("  %s--std PATH --std-bc PATH --triple T --emulator CMD%s\n",
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--phase-times --trace-ir --debug-failures --debugger-all%s\n",
+      printf("  %s--phase-times --trace-ir --failures-only --debug-failures --debugger-all%s\n",
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       printf("  %s--color MODE --no-color%s\n\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       printf("%snotes:%s timeout defaults to 60s and is capped at 300s; error tests live under %setc/tests/fuzz/errors%s\n",
@@ -3743,6 +3878,8 @@ int ny_test_main(int argc, char **argv) {
       phase_times = 1;
     else if (!strcmp(a, "--trace-ir"))
       trace_ir = 1;
+    else if (!strcmp(a, "--failures-only"))
+      failures_only = 1;
     else if (!strcmp(a, "--progress-selftest"))
       return run_progress_selftest(bin, timeout_sec);
     else if (!strcmp(a, "--debug-failures"))
@@ -3777,6 +3914,14 @@ int ny_test_main(int argc, char **argv) {
     ny_setenv("NYTRIX_TEST_JOBS", jb, 1);
   }
   configure_test_cache_defaults();
+
+  FailureOutputCapture failure_capture = {0};
+  if (failures_only && !failure_output_capture_begin(&failure_capture)) {
+    nyt_err("ny-test", "could not initialize --failures-only output capture");
+    sv_free(&patterns);
+    sv_free(&files);
+    return 2;
+  }
 
   const char *ws = getenv("NYTRIX_TEST_WITH_STDLIB");
   if (ws && *ws && (*ws != '0') && strcmp(ws, "false") != 0)
@@ -3983,5 +4128,7 @@ int ny_test_main(int argc, char **argv) {
   sv_free(&patterns);
   sv_free(&failed_paths);
   sv_free(&files);
+  if (failures_only)
+    failure_output_capture_end(&failure_capture);
   return failed ? 1 : 0;
 }

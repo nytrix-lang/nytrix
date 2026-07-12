@@ -4127,9 +4127,12 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     exec_cache_mode = "on" if (exec_cache and not cold) else "off"
     std_cache_mode = "off" if cold else ("off" if os.environ.get("NYTRIX_STD_CACHE") == "0" else "on")
     log("TEST", f"make test: fixture-flag matrix with runtime/repl/error/bench suites; result_cache {cache_mode}, exec_cache {exec_cache_mode}, std_cache {std_cache_mode} (set NYTRIX_TEST_EXEC_CACHE=1 to enable binary caches)")
-    test_timeout_s = int(os.environ.get("NYTRIX_TEST_TIMEOUT") or "1800")  # 30 min default
-    step(f"run tests: bin=ny jobs={test_jobs} timeout={test_timeout_s}s")
-    rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(test_timeout_s))
+    # NYTRIX_TEST_TIMEOUT belongs to ny-test and limits each fixture.  Keep the
+    # outer suite deadline independent so a large, healthy suite is not killed
+    # after one fixture's allowance (notably on slower Windows runners).
+    suite_timeout_s = int(os.environ.get("NYTRIX_TEST_SUITE_TIMEOUT") or "1800")
+    step(f"run tests: bin=ny jobs={test_jobs} suite_timeout={suite_timeout_s}s")
+    rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(suite_timeout_s))
     elapsed_ms = int((time.perf_counter() - started) * 1000.0)
     if rc == 0:
         ok(f"test suite completed in {elapsed_ms}ms")

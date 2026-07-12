@@ -1,5 +1,14 @@
 # Changelog
 
+- The test runner now has `--failures-only`, an integrated cross-platform
+  failure replay filter that preserves test exit status while suppressing
+  successful fixture noise. Suite and per-fixture timeout controls are also
+  independent, so slower hosted platforms are not killed by a fixture limit.
+- `ny-fmt --cloc` now reports tracked Git additions and deletions, including
+  per-file change totals, rather than displaying an empty diff summary.
+- The x86-64 object register allocator now materializes floating constants in
+  their assigned XMM registers and preserves typed f32/f64 values across local
+  loads and stores, fixing nondeterministic native ELF float results.
 - `std.math.logic` now provides a compact self-hosted proposition API with
   evaluation, simplification, bounded decisions, and counterexamples.
   `std.math.logic.prolog` adds bounded Prolog-style facts, rules, unification,
