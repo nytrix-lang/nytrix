@@ -76,6 +76,7 @@ static char *materialize_shape_ny_source(const char *shape_path);
 static char *shape_meta_string(const char *shape_path, const char *key);
 static int native_backend_explicit(const char *flags);
 static int path_is_native_runtime_test(const char *p);
+static int path_is_stdlib_source(const char *p);
 static int run_progress_selftest(const char *bin, int timeout_sec);
 
 typedef struct {
@@ -116,7 +117,76 @@ typedef struct {
   CacheRow *items;
   size_t len;
   size_t cap;
+  size_t *ht_slot;
+  size_t ht_cap;
+  size_t ht_len;
 } CacheDb;
+
+static uint32_t cache_hash_path(const char *s) {
+  return ny_hash32_cstr(s);
+}
+
+static void cache_ht_rehash(CacheDb *db) {
+  size_t nc = db->ht_cap ? db->ht_cap * 2 : 512;
+  while (nc <= db->len * 2 && nc <= SIZE_MAX / 2)
+    nc *= 2;
+  size_t *slots = malloc(nc * sizeof(*slots));
+  if (!slots)
+    return;
+  for (size_t i = 0; i < nc; ++i)
+    slots[i] = SIZE_MAX;
+  size_t mask = nc - 1;
+  for (size_t item = 0; item < db->len; ++item) {
+    size_t pos = cache_hash_path(db->items[item].path) & mask;
+    for (size_t probe = 0; probe < nc; ++probe) {
+      if (slots[pos] == SIZE_MAX) {
+        slots[pos] = item;
+        break;
+      }
+      pos = (pos + 1) & mask;
+    }
+  }
+  free(db->ht_slot);
+  db->ht_slot = slots;
+  db->ht_cap = nc;
+  db->ht_len = db->len;
+}
+
+static void cache_ht_ensure(CacheDb *db) {
+  if (!db->ht_slot || (db->ht_len + 1) * 2 >= db->ht_cap)
+    cache_ht_rehash(db);
+}
+
+static size_t cache_ht_find(const CacheDb *db, const char *path) {
+  if (!db->ht_slot || !db->ht_cap)
+    return SIZE_MAX;
+  size_t mask = db->ht_cap - 1;
+  size_t pos = cache_hash_path(path) & mask;
+  for (size_t probe = 0; probe < db->ht_cap; ++probe) {
+    size_t item = db->ht_slot[pos];
+    if (item == SIZE_MAX)
+      return SIZE_MAX;
+    if (item < db->len && strcmp(db->items[item].path, path) == 0)
+      return item;
+    pos = (pos + 1) & mask;
+  }
+  return SIZE_MAX;
+}
+
+static void cache_ht_insert(CacheDb *db, size_t item) {
+  if (!db->ht_slot || item >= db->len)
+    return;
+  size_t mask = db->ht_cap - 1;
+  size_t pos = cache_hash_path(db->items[item].path) & mask;
+  for (size_t probe = 0; probe < db->ht_cap; ++probe) {
+    if (db->ht_slot[pos] == SIZE_MAX) {
+      db->ht_slot[pos] = item;
+      db->ht_len++;
+      return;
+    }
+    pos = (pos + 1) & mask;
+  }
+}
 
 static void timings_push(TimingVec *v, const char *path, int ms, const char *suite) {
   if (v->len == v->cap) {
@@ -151,13 +221,13 @@ static void sv_push_unique(StrVec *v, const char *s) {
 }
 
 static void cache_set(CacheDb *db, const char *path, uint64_t sig, int ok, int dur_ms) {
-  for (size_t i = 0; i < db->len; i++) {
-    if (strcmp(db->items[i].path, path) == 0) {
-      db->items[i].sig = sig;
-      db->items[i].ok = ok;
-      db->items[i].dur_ms = dur_ms;
-      return;
-    }
+  cache_ht_ensure(db);
+  size_t existing = cache_ht_find(db, path);
+  if (existing != SIZE_MAX) {
+    db->items[existing].sig = sig;
+    db->items[existing].ok = ok;
+    db->items[existing].dur_ms = dur_ms;
+    return;
   }
   if (db->len == db->cap) {
     size_t nc = db->cap ? db->cap * 2 : 256;
@@ -174,19 +244,20 @@ static void cache_set(CacheDb *db, const char *path, uint64_t sig, int ok, int d
   db->items[db->len].ok = ok;
   db->items[db->len].dur_ms = dur_ms;
   db->len++;
+  cache_ht_insert(db, db->len - 1);
 }
 
 static CacheRow *cache_find(CacheDb *db, const char *path) {
-  for (size_t i = 0; i < db->len; i++)
-    if (strcmp(db->items[i].path, path) == 0)
-      return &db->items[i];
-  return NULL;
+  cache_ht_ensure(db);
+  size_t item = cache_ht_find(db, path);
+  return item == SIZE_MAX ? NULL : &db->items[item];
 }
 
 static void cache_free(CacheDb *db) {
   for (size_t i = 0; i < db->len; i++)
     free(db->items[i].path);
   free(db->items);
+  free(db->ht_slot);
 }
 
 static int is_dir(const char *path) {
@@ -1102,6 +1173,10 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
   if (trace_exec)
     argv[argc++] = "-trace";
   push_test_warn_arg(argv, &argc, 80);
+  if (path_is_stdlib_source(path)) {
+    argv[argc++] = "--stop-after=opt";
+    argv[argc++] = "--parallel=off";
+  }
   if (std_path) {
     argv[argc++] = "--std";
     argv[argc++] = (char *)std_path;
@@ -2709,6 +2784,8 @@ static double now_ms(void) {
   return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
 }
 
+static double host_ram_gib(void);
+
 static int auto_test_jobs(void) {
   long logical = ny_cpu_count();
   if (logical <= 0)
@@ -2718,8 +2795,16 @@ static int auto_test_jobs(void) {
     jobs = 2;
   if (jobs < 1)
     jobs = 1;
-  if (jobs > 24)
-    jobs = 24;
+  double ram_gib = host_ram_gib();
+  if (ram_gib > 0.0) {
+    int ram_jobs = (int)(ram_gib / 6.0);
+    if (ram_jobs < 1)
+      ram_jobs = 1;
+    if (jobs > ram_jobs)
+      jobs = ram_jobs;
+  }
+  if (jobs > 8)
+    jobs = 8;
   return jobs;
 }
 
@@ -3011,6 +3096,12 @@ static int path_is_native_runtime_test(const char *p) {
   return p && strncmp(p, "etc/tests/rt/native/", 20) == 0;
 }
 
+static int path_is_stdlib_source(const char *p) {
+  if (!p)
+    return 0;
+  return strncmp(p, "lib/", 4) == 0 || strstr(p, "/lib/") != NULL;
+}
+
 static const char *suite_for_path(const char *p, const char *fallback) {
   if (p && strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
     return "Benchmark";
@@ -3040,10 +3131,10 @@ static int path_duration_hint(CacheDb *cache, const char *p) {
     return 0;
   if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
     return 5000;
-  if (strstr(p, "rt/bigint.ny") || strstr(p, "rt/attr.ny") || strstr(p, "rt/sizeof.ny") ||
-      strstr(p, "rt/asm.ny"))
+  if (strstr(p, "etc/tests/rt/bigint.ny") || strstr(p, "etc/tests/rt/attr.ny") || strstr(p, "etc/tests/rt/sizeof.ny") ||
+      strstr(p, "etc/tests/rt/asm.ny"))
     return 5000;
-  if (strstr(p, "rt/comptime.ny"))
+  if (strstr(p, "etc/tests/rt/comptime.ny"))
     return 3500;
   return 200;
 }

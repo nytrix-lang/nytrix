@@ -289,9 +289,15 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   memset(cg, 0, sizeof(codegen_t));
   cg->prog = prog;
   cg->arena = arena;
-  LLVMInitializeNativeTarget();
-  LLVMInitializeNativeAsmPrinter();
-  LLVMLoadLibraryPermanently(NULL);
+  /* LLVM native target init is process-global and idempotent but not free.
+   * Guard it so repeated codegen_init calls (REPL, tests) don't re-register. */
+  static int g_cg_native_initialized = 0;
+  if (!g_cg_native_initialized) {
+    LLVMInitializeNativeTarget();
+    LLVMInitializeNativeAsmPrinter();
+    LLVMLoadLibraryPermanently(NULL);
+    g_cg_native_initialized = 1;
+  }
   cg->ctx = LLVMContextCreate();
   cg->llvm_ctx_owned = true;
   cg->module = LLVMModuleCreateWithNameInContext(name, cg->ctx);
@@ -2362,12 +2368,12 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
         ny_apply_top_level_typeinfer_to_sema(&infer_ctx, s);
     }
     for (size_t i = 0; i < infer_ctx.var_names_len; ++i) {
-      const char *name = infer_ctx.vars[i].name;
-      if (!name || !*name)
+      const char *vname = infer_ctx.vars[i].name;
+      if (!vname || !*vname)
         continue;
-      if (typeinfer_needs_dynamic(&infer_ctx, name))
+      if (typeinfer_needs_dynamic(&infer_ctx, vname))
         assigned_name_add(&top_entry_blocked_names, &top_entry_blocked_hashes,
-                          top_entry_blocked_bloom, name);
+                          top_entry_blocked_bloom, vname);
     }
 
     typeinfer_apply_to_scopes(&infer_ctx, sc, 1);
@@ -2731,6 +2737,18 @@ void codegen_dispose(codegen_t *cg) {
     if (cg->ctx) {
       LLVMContextDispose(cg->ctx);
       cg->ctx = NULL;
+    }
+  }
+  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+    void *byval_data = cg->fun_sigs.data[i].native_byval_param_layouts.data;
+    if (!byval_data)
+      continue;
+    for (size_t j = i + 1; j < cg->fun_sigs.len; ++j) {
+      if (cg->fun_sigs.data[j].native_byval_param_layouts.data != byval_data)
+        continue;
+      cg->fun_sigs.data[j].native_byval_param_layouts.data = NULL;
+      cg->fun_sigs.data[j].native_byval_param_layouts.len = 0;
+      cg->fun_sigs.data[j].native_byval_param_layouts.cap = 0;
     }
   }
   for (size_t i = 0; i < cg->fun_sigs.len; i++)

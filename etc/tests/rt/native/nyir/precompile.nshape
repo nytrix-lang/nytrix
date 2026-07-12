@@ -1,0 +1,11 @@
+shape native_nyir_precompile {
+  family "runtime-native"
+  generator "native"
+  features [native nyir binary precompile llvm-free]
+  template ny-test-case
+  flags "--native-backend=x86_64 --emit-bc=/tmp/nytrix-native-precompile.bc"
+  expect compile_and_run
+  source ny <<'NY'
+20 + 22
+NY
+}

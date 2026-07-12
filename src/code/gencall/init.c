@@ -947,7 +947,8 @@ static const char *ny_static_assert_message(expr_t *msg, char *buf,
 
 static bool ny_compile_assert_name_is(const char *name) {
   return name && (strcmp(name, "static_assert") == 0 ||
-                  strcmp(name, "assert_compile") == 0);
+                  strcmp(name, "assert_compile") == 0 ||
+                  strcmp(name, "prove") == 0);
 }
 
 static LLVMValueRef ny_try_static_assert_builtin(codegen_t *cg, scope *scopes,
@@ -967,7 +968,9 @@ static LLVMValueRef ny_try_static_assert_builtin(codegen_t *cg, scope *scopes,
   }
 
   char msg_buf[512];
-  const char *msg = "static assertion failed";
+  bool want_proof = strcmp(name, "prove") == 0;
+  const char *msg = want_proof ? "proof obligation failed"
+                               : "static assertion failed";
   if (c->args.len == 2) {
     msg =
         ny_static_assert_message(c->args.data[1].val, msg_buf, sizeof(msg_buf));
@@ -994,7 +997,8 @@ static LLVMValueRef ny_try_static_assert_builtin(codegen_t *cg, scope *scopes,
     ny_diag_error(cond ? cond->tok : e->tok, "%s", msg);
     cg->had_error = 1;
   }
-  return ny_gencall_const_bool(cg, true, "static_assert_ok");
+  return want_proof ? ny_c0(cg)
+                    : ny_gencall_const_bool(cg, true, "static_assert_ok");
 }
 
 static bool ny_gencall_type_is_known_float(const char *type_name) {

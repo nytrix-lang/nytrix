@@ -15,6 +15,9 @@
 #include "priv.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/ExecutionEngine.h>
+#include <llvm-c/Error.h>
+#include <llvm-c/LLJIT.h>
+#include <llvm-c/Orc.h>
 #include <llvm-c/Support.h>
 #include <llvm-c/TargetMachine.h>
 #include <stdint.h>
@@ -851,6 +854,131 @@ apply_runtime_attrs:
       LLVMAddAttributeAtIndex(panic_fn, LLVMAttributeFunctionIndex, nr_attr);
     }
   }
+}
+
+static char *ny_orc_error_message(LLVMErrorRef err) {
+  if (!err)
+    return NULL;
+  char *llvm_msg = LLVMGetErrorMessage(err);
+  char *copy = ny_strdup(llvm_msg ? llvm_msg : "unknown ORC error");
+  if (llvm_msg)
+    LLVMDisposeErrorMessage(llvm_msg);
+  return copy;
+}
+
+static void ny_orc_register_extern_symbols(LLVMModuleRef mod, codegen_t *cg) {
+  if (!mod)
+    return;
+  ny_jit_add_runtime_symbols();
+  if (cg) {
+    for (size_t i = 0; i < cg->links.len; ++i)
+      ny_jit_load_library(cg->links.data[i]);
+  }
+  for (LLVMValueRef fn = LLVMGetFirstFunction(mod); fn;
+       fn = LLVMGetNextFunction(fn)) {
+    if (!LLVMIsDeclaration(fn) || !LLVMGetFirstUse(fn))
+      continue;
+    const char *name = LLVMGetValueName(fn);
+    if (!name || !*name || strncmp(name, "llvm.", 5) == 0)
+      continue;
+    void *ptr = resolve_symbol_with_fallback(name);
+    if (ptr)
+      LLVMAddSymbol(name, ptr);
+  }
+}
+
+bool ny_orc_jit_create(LLVMModuleRef module, LLVMContextRef context,
+                       codegen_t *cg, void **out_jit, uint64_t *script_addr,
+                       uint64_t *main_addr, bool *module_consumed,
+                       char **error_message) {
+  if (out_jit)
+    *out_jit = NULL;
+  if (script_addr)
+    *script_addr = 0;
+  if (main_addr)
+    *main_addr = 0;
+  if (error_message)
+    *error_message = NULL;
+  if (module_consumed)
+    *module_consumed = false;
+  if (!module || !context || !out_jit)
+    return false;
+
+  ny_orc_register_extern_symbols(module, cg);
+  LLVMOrcLLJITRef jit = NULL;
+  LLVMErrorRef err = LLVMOrcCreateLLJIT(&jit, NULL);
+  if (err) {
+    if (error_message)
+      *error_message = ny_orc_error_message(err);
+    return false;
+  }
+  LLVMOrcJITDylibRef dylib = LLVMOrcLLJITGetMainJITDylib(jit);
+  LLVMOrcDefinitionGeneratorRef generator = NULL;
+  err = LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess(
+      &generator, LLVMOrcLLJITGetGlobalPrefix(jit), NULL, NULL);
+  if (!err)
+    LLVMOrcJITDylibAddGenerator(dylib, generator);
+  if (err) {
+    if (error_message)
+      *error_message = ny_orc_error_message(err);
+    (void)LLVMOrcDisposeLLJIT(jit);
+    return false;
+  }
+
+  LLVMOrcThreadSafeContextRef ts_context =
+      LLVMOrcCreateNewThreadSafeContextFromLLVMContext(context);
+  if (!ts_context) {
+    if (error_message)
+      *error_message = ny_strdup("could not create ORC thread-safe context");
+    (void)LLVMOrcDisposeLLJIT(jit);
+    return false;
+  }
+  LLVMOrcThreadSafeModuleRef ts_module =
+      LLVMOrcCreateNewThreadSafeModule(module, ts_context);
+  LLVMOrcDisposeThreadSafeContext(ts_context);
+  if (!ts_module) {
+    if (error_message)
+      *error_message = ny_strdup("could not create ORC thread-safe module");
+    (void)LLVMOrcDisposeLLJIT(jit);
+    return false;
+  }
+  if (module_consumed)
+    *module_consumed = true;
+  err = LLVMOrcLLJITAddLLVMIRModule(jit, dylib, ts_module);
+  if (err) {
+    if (error_message)
+      *error_message = ny_orc_error_message(err);
+    LLVMOrcDisposeThreadSafeModule(ts_module);
+    (void)LLVMOrcDisposeLLJIT(jit);
+    return false;
+  }
+
+  LLVMOrcExecutorAddress addr = 0;
+  err = LLVMOrcLLJITLookup(jit, &addr, "_ny_top_entry");
+  if (err) {
+    if (error_message)
+      *error_message = ny_orc_error_message(err);
+    (void)LLVMOrcDisposeLLJIT(jit);
+    return false;
+  }
+  if (script_addr)
+    *script_addr = (uint64_t)addr;
+  addr = 0;
+  err = LLVMOrcLLJITLookup(jit, &addr, "main");
+  if (!err && main_addr)
+    *main_addr = (uint64_t)addr;
+  else if (err)
+    LLVMConsumeError(err);
+  *out_jit = jit;
+  return true;
+}
+
+void ny_orc_jit_dispose(void *jit) {
+  if (!jit)
+    return;
+  LLVMErrorRef err = LLVMOrcDisposeLLJIT((LLVMOrcLLJITRef)jit);
+  if (err)
+    LLVMConsumeError(err);
 }
 
 static int compare_func_info(const void *a, const void *b) {

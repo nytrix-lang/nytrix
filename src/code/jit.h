@@ -16,6 +16,11 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod);
 void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_t *cg);
 void ny_jit_write_perf_map(LLVMExecutionEngineRef ee, LLVMModuleRef mod);
 void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef mod);
+bool ny_orc_jit_create(LLVMModuleRef module, LLVMContextRef context,
+                       codegen_t *cg, void **out_jit, uint64_t *script_addr,
+                       uint64_t *main_addr, bool *module_consumed,
+                       char **error_message);
+void ny_orc_jit_dispose(void *jit);
 int64_t rt_set_args(int64_t argc, int64_t argv, int64_t envp);
 
 #endif

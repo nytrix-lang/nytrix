@@ -4848,6 +4848,9 @@ static int audit_previous_branch_same_condition(StrVec *lines, size_t idx, int i
     if (audit_extract_branch_condition(code, prev_cond, sizeof(prev_cond))) {
       if (audit_same_expr(cond, prev_cond))
         return (int)j + 1;
+      if (!audit_starts_keyword(s, "elif") &&
+          !find_outside_string(s, "else if"))
+        return 0;
       continue;
     }
     if (*s == '}')
@@ -8847,53 +8850,10 @@ static int cloc_find_row_index(const ClocRow *rows, size_t row_count, const char
 }
 
 static void cloc_attach_git_diff(const char *repo_root, ClocStats *stats, ClocRow *rows, size_t row_count) {
-  if (!stats || !rows || row_count == 0)
-    return;
-
-  FILE *pipe = popen("git --no-pager diff --numstat --no-renames HEAD -- 2>/dev/null", "r");
-  if (!pipe)
-    return;
-
-  char line[PATH_MAX * 2];
-  while (fgets(line, sizeof(line), pipe)) {
-    size_t n = strlen(line);
-    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
-      line[--n] = '\0';
-    if (!line[0])
-      continue;
-
-    char *tab1 = strchr(line, '\t');
-    if (!tab1)
-      continue;
-    *tab1++ = '\0';
-    char *tab2 = strchr(tab1, '\t');
-    if (!tab2)
-      continue;
-    *tab2++ = '\0';
-    if (!*tab2)
-      continue;
-
-    int add = (strcmp(line, "-") == 0) ? 0 : atoi(line);
-    int del = (strcmp(tab1, "-") == 0) ? 0 : atoi(tab1);
-    int idx = cloc_find_row_index(rows, row_count, tab2, repo_root);
-    if (idx < 0)
-      continue;
-
-    rows[idx].add += add;
-    rows[idx].del += del;
-  }
-
-  int code = pclose(pipe);
-  if (code == -1)
-    return;
-
-  for (size_t i = 0; i < row_count; i++) {
-    if (rows[i].add > 0 || rows[i].del > 0) {
-      stats->diff_files++;
-      stats->diff_add += rows[i].add;
-      stats->diff_del += rows[i].del;
-    }
-  }
+  (void)repo_root;
+  (void)stats;
+  (void)rows;
+  (void)row_count;
 }
 
 static void print_cloc_json(const ClocStats *s, const ClocRow *rows, size_t row_count, int top_n, int full_rows) {
@@ -9120,4 +9080,3 @@ static int run_cloc_mode(const FmtOpts *o) {
   sv_free(&files);
   return 0;
 }
-

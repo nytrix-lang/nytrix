@@ -1,5 +1,6 @@
 #include "fficlang.h"
 #include "base/util.h"
+#include "base/process.h"
 #include "priv.h"
 #include "code/c/c.h"
 #include <clang-c/Index.h>
@@ -106,18 +107,13 @@ static void ny_pkgconfig_append_cflags(const char *pkg, char ***args,
       return;
     }
   }
-  char cmd[256];
-  snprintf(cmd, sizeof(cmd), "pkg-config --cflags %s 2>%s", pkg,
-           NY_FFI_NULL_DEVICE);
-  FILE *f = popen(cmd, "r");
-  if (!f)
-    return;
+  const char *pkg_argv[] = {"pkg-config", "--cflags", pkg, NULL};
   char *buf = NULL;
-  size_t buf_len = 0, buf_cap = 0;
-  char chunk[256];
-  while (fgets(chunk, sizeof(chunk), f))
-    ffi_buf_append(&buf, &buf_len, &buf_cap, chunk);
-  pclose(f);
+  int pkg_rc = ny_process_capture(pkg_argv, &buf, true);
+  if (pkg_rc != 0) {
+    free(buf);
+    buf = NULL;
+  }
   if (!buf || !*buf) {
     free(buf);
 
@@ -340,20 +336,15 @@ static char *ny_pkgconfig_lib(const char *pkg) {
     }
   }
 
-  char cmd[256];
-  snprintf(cmd, sizeof(cmd), "pkg-config --libs-only-l %s 2>%s", pkg,
-           NY_FFI_NULL_DEVICE);
-  FILE *f = popen(cmd, "r");
-  if (!f)
-    return NULL;
-  char buf[256];
-  buf[0] = '\0';
-  if (!fgets(buf, sizeof(buf), f)) {
-    pclose(f);
+  const char *pkg_argv[] = {"pkg-config", "--libs-only-l", pkg, NULL};
+  char *captured = NULL;
+  if (ny_process_capture(pkg_argv, &captured, true) != 0 || !captured || !*captured) {
+    free(captured);
     return NULL;
   }
-  pclose(f);
-
+  char buf[256];
+  snprintf(buf, sizeof(buf), "%s", captured);
+  free(captured);
   size_t n = strlen(buf);
   while (n > 0 &&
          (buf[n - 1] == '\n' || buf[n - 1] == ' ' || buf[n - 1] == '\r'))

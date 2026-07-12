@@ -553,6 +553,8 @@ static void ny_module_stmt_index_add_program(module_stmt_slot *slots,
 static void ny_module_stmt_index_build(codegen_t *cg) {
   if (!cg)
     return;
+  if (cg->module_stmt_index)
+    return;
   size_t n = ny_count_top_modules(cg->prog);
   for (size_t p = 0; p < cg->extra_progs.len; ++p)
     n += ny_count_top_modules(cg->extra_progs.data[p]);
@@ -574,6 +576,17 @@ static void ny_module_stmt_index_build(codegen_t *cg) {
   cg->module_stmt_index = slots;
   cg->module_stmt_index_cap = cap;
   cg->module_stmt_index_len = n;
+}
+
+void codegen_module_graph_changed(codegen_t *cg) {
+  if (!cg)
+    return;
+  free(cg->module_stmt_index);
+  cg->module_stmt_index = NULL;
+  cg->module_stmt_index_cap = 0;
+  cg->module_stmt_index_len = 0;
+  free(cg->module_stmt_lookup_cache);
+  cg->module_stmt_lookup_cache = NULL;
 }
 
 static bool ny_module_stmt_cacheable_name(const char *name, size_t *len_out) {
@@ -670,7 +683,6 @@ static void ny_module_stmt_cache_put(codegen_t *cg, const char *name,
 static stmt_t *find_module_stmt_any(codegen_t *cg, const char *name) {
   if (!cg || !name || !*name)
     return NULL;
-  ny_module_stmt_index_build(cg);
   size_t name_len = 0;
   bool cacheable = ny_module_stmt_cacheable_name(name, &name_len);
   uint64_t hash = cacheable ? ny_hash_name(name, name_len) : 0;
@@ -682,6 +694,7 @@ static stmt_t *find_module_stmt_any(codegen_t *cg, const char *name) {
     if (cache_hit == 0)
       return NULL;
   }
+  ny_module_stmt_index_build(cg);
   if (cg->module_stmt_index && cg->module_stmt_index_cap) {
     if (!cacheable) {
       name_len = strlen(name);

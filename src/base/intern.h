@@ -15,6 +15,8 @@ ny_sym_id ny_intern_str(const char *str, size_t len);
 ny_sym_id ny_intern_cstr(const char *str);
 const char *ny_intern_get(ny_sym_id id);
 bool ny_intern_contains_ptr(const char *str);
+void ny_intern_cleanup_full(void);
+void ny_intern_set_atexit_mode(void);
 void ny_intern_cleanup(void);
 
 #endif

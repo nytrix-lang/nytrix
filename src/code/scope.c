@@ -343,18 +343,16 @@ bool ny_builtin_name_shadowed_by_user_symbol(codegen_t *cg, scope *scopes, size_
     return true;
   if (name_len == 0)
     name_len = strlen(name);
+  if (!hash)
+    hash = ny_hash_name(name, name_len);
   if (scope_lookup_hash(scopes, depth, name, name_len, hash))
     return true;
   binding *global = cg ? lookup_global_hash(cg, name, hash) : NULL;
-  if (cg && !global && !hash)
-    global = lookup_global(cg, name);
   if (ny_user_binding_shadows_builtin(global))
     return true;
   if (ny_any_user_fun_shadows_builtin(cg, name, name_len, hash))
     return true;
   fun_sig *sig = cg ? lookup_fun(cg, name, hash) : NULL;
-  if (cg && !sig && !hash)
-    sig = lookup_fun(cg, name, 0);
   return ny_user_fun_shadows_builtin(name, sig);
 }
 

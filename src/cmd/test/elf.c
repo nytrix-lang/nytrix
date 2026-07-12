@@ -210,6 +210,10 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path, const cha
   int argc = 0;
   argv[argc++] = (char *)bin;
   push_test_warn_arg(argv, &argc, 80);
+  if (path_is_stdlib_source(path)) {
+    argv[argc++] = "--stop-after=opt";
+    argv[argc++] = "--parallel=off";
+  }
   if (std_path) {
     argv[argc++] = "--std";
     argv[argc++] = (char *)std_path;

@@ -2400,8 +2400,10 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     embed_repl_std = (std_mode != STD_MODE_NONE && g_repl_cg.prog != NULL);
 #endif
     cg.skip_stdlib = (std_mode != STD_MODE_NONE && !embed_repl_std);
-    if (embed_repl_std)
+    if (embed_repl_std) {
       vec_push(&cg.extra_progs, g_repl_cg.prog);
+      codegen_module_graph_changed(&cg);
+    }
     for (size_t i = 0; i < g_repl_cg.fun_sigs.len; i++) {
       fun_sig s = g_repl_cg.fun_sigs.data[i];
       s.owned = false;
@@ -2760,6 +2762,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     printf("[Eval: %.3f ms]\n", ny_ticks_elapsed_ms(t0));
   if (persistent) {
     vec_push(&g_repl_cg.extra_progs, pr);
+    codegen_module_graph_changed(&g_repl_cg);
     vec_push(&g_repl_cg.extra_arenas, ps.arena);
     vec_push(&g_repl_persistent_sources, body);
     body = NULL;

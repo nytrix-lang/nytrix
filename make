@@ -1723,9 +1723,12 @@ def resolve_test_jobs(cli_jobs: int) -> int:
     if cpu >= 2:
         auto = max(2, auto)
     mem_gib = host_mem_gib()
+    # A large stdlib LLVM compile can peak above 2.5 GiB, and several phases
+    # overlap. Reserve 6 GiB per automatic worker so a sweep cannot consume the
+    # whole machine. Explicit job settings remain available for controlled CI.
     if mem_gib > 0.0:
-        auto = min(auto, max(1, int(mem_gib / 2.0)))
-    auto = min(auto, 24)
+        auto = min(auto, max(1, int(mem_gib / 6.0)))
+    auto = min(auto, 8)
     return auto
 
 def configure_macos_llvm_env() -> None:

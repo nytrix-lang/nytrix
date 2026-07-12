@@ -1,5 +1,52 @@
 # Changelog
 
+- `std.math.logic` now provides a compact self-hosted proposition API with
+  evaluation, simplification, bounded decisions, and counterexamples.
+  `std.math.logic.prolog` adds bounded Prolog-style facts, rules, unification,
+  occurs checks, recursive backtracking, and projected query answers entirely
+  in Nytrix code.
+- Added the first explicit proof witness constructor:
+  `prove(condition[, message]) -> proof`. Only compile-time true obligations
+  construct a witness; false and dynamic obligations are compiler errors, and
+  non-proof values cannot satisfy proof parameters. The specification now
+  states the current non-dependent boundary instead of implying a hidden
+  theorem kernel.
+- Native-only execution now treats compilation and execution as separate
+  operations: `--native-only -o app` produces the requested executable without
+  running it, ordinary file execution and `-c` both run the temporary native
+  executable, and `--native-precompile` remains NYIR-only. Runtime cache format
+  v7 also invalidates legacy sanitizer-contaminated objects before native links.
+- Stdlib bitcode caches now reject user script entry points and use a new cache
+  format version. This prevents a cache populated after mixed stdlib/user
+  codegen from replaying an earlier program for unrelated sources; the complete
+  uncached 928-test suite validates the corrected boundary.
+- `--emit-bc` is now backend-sensitive: LLVM emits LLVM IR bitcode, while a
+  native backend emits Nytrix-owned `NYIR` binary bytecode. The native artifact
+  is reloadable through `--nyir-run-bin`; `--native-precompile` is its explicit
+  LLVM-free alias.
+- Stdlib source sweeps now validate through optimized IR instead of MCJIT
+  materialization. This removes a measured 18-22 GiB single-process peak and
+  converts the prior JIT crash cluster into bounded compile checks. Automatic
+  test concurrency reserves 6 GiB per worker and is capped at eight.
+- Sanitizer execution now reliably creates temporary AOT binaries when no
+  output path is supplied. Sanitized runtime objects bypass the ordinary cache,
+  preventing ASan/UBSan object reuse; successful runs remove their temporary
+  executable. LLVM-unsupported generic UBSan instrumentation is no longer
+  falsely requested, while the C runtime remains UBSan-compiled and linked.
+
+- Added `--native-only` on x86-64: supported programs branch after parsing
+  directly through NYIR, the native object writer, runtime link, and execution
+  without constructing an LLVM module or MCJIT engine. Unsupported NYIR shapes
+  fail explicitly. A function/call/`print(int)` probe measured 77.0-85.1ms
+  total versus 132.6-142.8ms through MCJIT across three repeated runs.
+- Windows safe-run AOT spawning now assigns suspended children to Job Objects
+  before execution, with CPU, memory, active-process, wall, output, and
+  kill-on-close containment. Unsupported open-file and in-process JIT callback
+  limits are diagnosed instead of silently claimed.
+- Native target/ABI selection and capability registration moved out of the
+  lowering monolith into a dedicated ownership module, with ELF32/ELF64,
+  COFF64, Mach-O, and all-architecture metadata regression coverage.
+
 Nytrix uses dated milestones. `ny --version` for snapshots.
 
 ## [0.8] — Cross-platform hot reload, proof types, renderer parity + polish
@@ -32,7 +79,7 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - Docs: compact 1:1 TLDRs, direct explanations in README/start/perf/syntax/CHANGELOG.
 
 ### Changed
-- Strict relative paths only (build/cache, NYNTH_ROOT).
+- Strict relative paths only (build/cache, NYTRIX_ROOT).
 - FFI tests: etc/tests/rt/c (internal C frontend).
 - Public TODO list trimmed to remaining hard roadmap items.
 - Module decls: short `module foo` / `module foo(internal)` auto-export (no bloat lists).

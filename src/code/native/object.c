@@ -40,16 +40,28 @@ typedef struct {
   size_t size;
 } ny_x64_obj_symbol_def_t;
 
+/* Value-to-definition lookup table (defined fully below, forward-declared here) */
+typedef struct { const ny_nir_inst_t **defs; int count; } ny_x64_obj_valmap_t;
+static void ny_x64_obj_valmap_free(ny_x64_obj_valmap_t *m);
+
 typedef struct {
   ny_obj_buf_t code;
   const ny_native_target_info_t *target;
+  const ny_nir_func_t *nir;
+  ny_x64_obj_valmap_t valmap;
   int value_slots;
+  int spill_slots;
+  int callee_save_slots;
   int local_slots;
   int frame_bytes;
   bool *value_f64;
   bool *value_f32;
   bool *local_f64;
   bool *local_f32;
+  int8_t *value_reg;
+  int8_t *value_xmm;
+  int *value_spill;
+  int callee_save_slot[16];
   ny_x64_obj_label_t labels[256];
   size_t label_count;
   ny_x64_obj_patch_t patches[256];
@@ -72,14 +84,21 @@ static void ny_x64_obj_ctx_free(ny_x64_obj_ctx_t *c) {
   if (!c)
     return;
   ny_obj_free(&c->code);
+  ny_x64_obj_valmap_free(&c->valmap);
   free(c->value_f64);
   free(c->value_f32);
   free(c->local_f64);
   free(c->local_f32);
+  free(c->value_reg);
+  free(c->value_xmm);
+  free(c->value_spill);
   c->value_f64 = NULL;
   c->value_f32 = NULL;
   c->local_f64 = NULL;
   c->local_f32 = NULL;
+  c->value_reg = NULL;
+  c->value_xmm = NULL;
+  c->value_spill = NULL;
 }
 
 static bool ny_obj_reserve(ny_obj_buf_t *b, size_t add) {
@@ -1262,12 +1281,13 @@ static int ny_x64_obj_align(int n, int align) {
   return (n + align - 1) & ~(align - 1);
 }
 
-static int ny_x64_obj_value_off(int value) {
-  return -8 * (value + 1);
+static int ny_x64_obj_value_off(const ny_x64_obj_ctx_t *c, int value) {
+  int slot = c->value_spill ? c->value_spill[value] : value;
+  return -8 * (slot + 1);
 }
 
 static int ny_x64_obj_local_off(const ny_x64_obj_ctx_t *c, int local) {
-  return -8 * (c->value_slots + local + 1);
+  return -8 * (c->spill_slots + c->callee_save_slots + local + 1);
 }
 
 static bool ny_x64_obj_mov_rax_imm(ny_x64_obj_ctx_t *c, int64_t v) {
@@ -1282,6 +1302,12 @@ static bool ny_x64_obj_load_rax(ny_x64_obj_ctx_t *c, int off) {
 
 static bool ny_x64_obj_lea_rax(ny_x64_obj_ctx_t *c, int off) {
   static const unsigned char op[] = {0x48, 0x8d, 0x85};
+  return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
+}
+
+static bool ny_x64_obj_lea_reg(ny_x64_obj_ctx_t *c, int reg, int off) {
+  unsigned char op[] = {(unsigned char)(0x48 | (reg >= 8 ? 0x04 : 0)), 0x8d,
+                        (unsigned char)(0x85 | ((reg & 7) << 3))};
   return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
 }
 
@@ -1300,13 +1326,38 @@ static bool ny_x64_obj_load_rcx(ny_x64_obj_ctx_t *c, int off) {
   return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
 }
 
+static bool ny_x64_obj_mov_reg_reg(ny_x64_obj_ctx_t *c, int src, int dst) {
+  if (src < 0 || src > 15 || dst < 0 || dst > 15)
+    return false;
+  unsigned char op[] = {
+      (unsigned char)(0x48 | (src >= 8 ? 0x04 : 0) |
+                      (dst >= 8 ? 0x01 : 0)),
+      0x89,
+      (unsigned char)(0xc0 | ((src & 7) << 3) | (dst & 7))};
+  return ny_x64_obj_bytes(c, op, sizeof(op));
+}
+
+static bool ny_x64_obj_store_reg(ny_x64_obj_ctx_t *c, int reg, int off) {
+  unsigned char op[] = {(unsigned char)(0x48 | (reg >= 8 ? 0x04 : 0)), 0x89,
+                        (unsigned char)(0x85 | ((reg & 7) << 3))};
+  return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
+}
+
+static bool ny_x64_obj_load_reg(ny_x64_obj_ctx_t *c, int reg, int off) {
+  unsigned char op[] = {(unsigned char)(0x48 | (reg >= 8 ? 0x04 : 0)), 0x8b,
+                        (unsigned char)(0x85 | ((reg & 7) << 3))};
+  return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
+}
+
 static bool ny_x64_obj_load_value_rax(ny_x64_obj_ctx_t *c, int value) {
   if (value < 0 || value >= c->value_slots) {
     ny_native_set_err(c->err, c->err_len,
                       "x86-64 ELF object writer: invalid value v%d", value);
     return false;
   }
-  return ny_x64_obj_load_rax(c, ny_x64_obj_value_off(value));
+  if (c->value_reg && c->value_reg[value] >= 0)
+    return ny_x64_obj_mov_reg_reg(c, c->value_reg[value], 0);
+  return ny_x64_obj_load_rax(c, ny_x64_obj_value_off(c, value));
 }
 
 static bool ny_x64_obj_load_value_r10(ny_x64_obj_ctx_t *c, int value) {
@@ -1315,7 +1366,9 @@ static bool ny_x64_obj_load_value_r10(ny_x64_obj_ctx_t *c, int value) {
                       "x86-64 ELF object writer: invalid value v%d", value);
     return false;
   }
-  return ny_x64_obj_load_r10(c, ny_x64_obj_value_off(value));
+  if (c->value_reg && c->value_reg[value] >= 0)
+    return ny_x64_obj_mov_reg_reg(c, c->value_reg[value], 10);
+  return ny_x64_obj_load_r10(c, ny_x64_obj_value_off(c, value));
 }
 
 static bool ny_x64_obj_load_value_rcx(ny_x64_obj_ctx_t *c, int value) {
@@ -1324,7 +1377,9 @@ static bool ny_x64_obj_load_value_rcx(ny_x64_obj_ctx_t *c, int value) {
                       "x86-64 ELF object writer: invalid value v%d", value);
     return false;
   }
-  return ny_x64_obj_load_rcx(c, ny_x64_obj_value_off(value));
+  if (c->value_reg && c->value_reg[value] >= 0)
+    return ny_x64_obj_mov_reg_reg(c, c->value_reg[value], 1);
+  return ny_x64_obj_load_rcx(c, ny_x64_obj_value_off(c, value));
 }
 
 static bool ny_x64_obj_store_value_rax(ny_x64_obj_ctx_t *c, int value) {
@@ -1334,7 +1389,9 @@ static bool ny_x64_obj_store_value_rax(ny_x64_obj_ctx_t *c, int value) {
                       value);
     return false;
   }
-  return ny_x64_obj_store_rax(c, ny_x64_obj_value_off(value));
+  if (c->value_reg && c->value_reg[value] >= 0)
+    return ny_x64_obj_mov_reg_reg(c, 0, c->value_reg[value]);
+  return ny_x64_obj_store_rax(c, ny_x64_obj_value_off(c, value));
 }
 
 static bool ny_x64_obj_load_xmm(ny_x64_obj_ctx_t *c, int off, int xmm) {
@@ -1365,13 +1422,26 @@ static bool ny_x64_obj_store_xmm_f32(ny_x64_obj_ctx_t *c, int off, int xmm) {
   return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
 }
 
+static bool ny_x64_obj_mov_xmm(ny_x64_obj_ctx_t *c, int src, int dst,
+                               bool f32) {
+  if (src < 0 || src > 7 || dst < 0 || dst > 7)
+    return false;
+  unsigned char op[] = {(unsigned char)(f32 ? 0xf3 : 0xf2), 0x0f, 0x10,
+                        (unsigned char)(0xc0 | (dst << 3) | src)};
+  return ny_x64_obj_bytes(c, op, sizeof(op));
+}
+
 static bool ny_x64_obj_load_value_xmm(ny_x64_obj_ctx_t *c, int value, int xmm) {
   if (value < 0 || value >= c->value_slots) {
     ny_native_set_err(c->err, c->err_len,
                       "x86-64 ELF object writer: invalid value v%d", value);
     return false;
   }
-  return ny_x64_obj_load_xmm(c, ny_x64_obj_value_off(value), xmm);
+  if (c->value_xmm && c->value_xmm[value] >= 0)
+    return c->value_xmm[value] == xmm
+               ? true
+               : ny_x64_obj_mov_xmm(c, c->value_xmm[value], xmm, false);
+  return ny_x64_obj_load_xmm(c, ny_x64_obj_value_off(c, value), xmm);
 }
 
 static bool ny_x64_obj_load_value_xmm_f32(ny_x64_obj_ctx_t *c, int value, int xmm) {
@@ -1380,7 +1450,11 @@ static bool ny_x64_obj_load_value_xmm_f32(ny_x64_obj_ctx_t *c, int value, int xm
                       "x86-64 ELF object writer: invalid value v%d", value);
     return false;
   }
-  return ny_x64_obj_load_xmm_f32(c, ny_x64_obj_value_off(value), xmm);
+  if (c->value_xmm && c->value_xmm[value] >= 0)
+    return c->value_xmm[value] == xmm
+               ? true
+               : ny_x64_obj_mov_xmm(c, c->value_xmm[value], xmm, true);
+  return ny_x64_obj_load_xmm_f32(c, ny_x64_obj_value_off(c, value), xmm);
 }
 
 static bool ny_x64_obj_store_value_xmm_f32(ny_x64_obj_ctx_t *c, int value, int xmm) {
@@ -1390,7 +1464,11 @@ static bool ny_x64_obj_store_value_xmm_f32(ny_x64_obj_ctx_t *c, int value, int x
                       value);
     return false;
   }
-  return ny_x64_obj_store_xmm_f32(c, ny_x64_obj_value_off(value), xmm);
+  if (c->value_xmm && c->value_xmm[value] >= 0)
+    return c->value_xmm[value] == xmm
+               ? true
+               : ny_x64_obj_mov_xmm(c, xmm, c->value_xmm[value], true);
+  return ny_x64_obj_store_xmm_f32(c, ny_x64_obj_value_off(c, value), xmm);
 }
 
 static bool ny_x64_obj_store_value_xmm(ny_x64_obj_ctx_t *c, int value, int xmm) {
@@ -1400,11 +1478,225 @@ static bool ny_x64_obj_store_value_xmm(ny_x64_obj_ctx_t *c, int value, int xmm) 
                       value);
     return false;
   }
-  return ny_x64_obj_store_xmm(c, ny_x64_obj_value_off(value), xmm);
+  if (c->value_xmm && c->value_xmm[value] >= 0)
+    return c->value_xmm[value] == xmm
+               ? true
+               : ny_x64_obj_mov_xmm(c, xmm, c->value_xmm[value], false);
+  return ny_x64_obj_store_xmm(c, ny_x64_obj_value_off(c, value), xmm);
+}
+
+/* Table mapping value ID to its defining instruction index in the NYIR function.
+ * Built once per function emission, enables O(1) constant detection. */
+static void ny_x64_obj_valmap_init(ny_x64_obj_valmap_t *m, const ny_nir_func_t *nir) {
+  m->count = 0;
+  m->defs = NULL;
+  if (!nir || nir->len == 0)
+    return;
+  int max_v = 0;
+  for (size_t i = 0; i < nir->len; ++i) {
+    if (nir->data[i].dst >= 0 && nir->data[i].dst > max_v)
+      max_v = nir->data[i].dst;
+  }
+  m->count = max_v + 1;
+  m->defs = (const ny_nir_inst_t **)calloc((size_t)m->count, sizeof(ny_nir_inst_t *));
+  if (!m->defs) { m->count = 0; return; }
+  for (size_t i = 0; i < nir->len; ++i) {
+    int v = nir->data[i].dst;
+    if (v >= 0 && v < m->count)
+      m->defs[v] = &nir->data[i];
+  }
+}
+
+static void ny_x64_obj_valmap_free(ny_x64_obj_valmap_t *m) {
+  free(m->defs);
+  m->defs = NULL;
+  m->count = 0;
+}
+
+static const ny_nir_inst_t *ny_x64_obj_valmap_def(ny_x64_obj_valmap_t *m, int v) {
+  if (v < 0 || v >= m->count || !m->defs)
+    return NULL;
+  return m->defs[v];
+}
+
+/* Check if value `v` is defined by a CONST_I64 instruction with immediate `imm`.
+ * Returns true and sets *out_imm on success. */
+static bool ny_x64_obj_try_const_i64(ny_x64_obj_ctx_t *c, int v, int64_t *out_imm) {
+  if (v < 0)
+    return false;
+  const ny_nir_inst_t *inst = ny_x64_obj_valmap_def(&c->valmap, v);
+  if (!inst || inst->op != NY_NIR_CONST_I64)
+    return false;
+  if (out_imm)
+    *out_imm = inst->imm;
+  return true;
+}
+
+/* Emit `op $imm, %rax` (sign-extended 32-bit immediate in %eax).
+ * Returns true if the immediate fits in 32 bits. */
+static bool ny_x64_obj_alu_imm_rax(ny_x64_obj_ctx_t *c, int64_t imm,
+                                    const unsigned char *op_bytes, size_t op_len) {
+  if (imm < INT32_MIN || imm > INT32_MAX)
+    return false;
+  return ny_x64_obj_bytes(c, op_bytes, op_len) && ny_x64_obj_i32(c, (int32_t)imm);
+}
+
+/* Emit `cmp $imm, %rax` (comparison against immediate). */
+static bool ny_x64_obj_cmp_imm_rax(ny_x64_obj_ctx_t *c, int64_t imm) {
+  if (imm < INT32_MIN || imm > INT32_MAX)
+    return false;
+  static const unsigned char op[] = {0x48, 0x3d};
+  return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, (int32_t)imm);
+}
+
+/* Emit `add $imm, %rax` (or sub, and, or, xor with immediate). */
+static bool ny_x64_obj_binop_imm(ny_x64_obj_ctx_t *c, int64_t imm,
+                                  ny_nir_op_t binop) {
+  switch (binop) {
+  case NY_NIR_ADD_I64: {
+    static const unsigned char op[] = {0x48, 0x05};
+    return ny_x64_obj_alu_imm_rax(c, imm, op, sizeof(op));
+  }
+  case NY_NIR_SUB_I64: {
+    static const unsigned char op[] = {0x48, 0x2d};
+    return ny_x64_obj_alu_imm_rax(c, imm, op, sizeof(op));
+  }
+  case NY_NIR_AND_I64: {
+    static const unsigned char op[] = {0x48, 0x25};
+    return ny_x64_obj_alu_imm_rax(c, imm, op, sizeof(op));
+  }
+  case NY_NIR_OR_I64: {
+    static const unsigned char op[] = {0x48, 0x0d};
+    return ny_x64_obj_alu_imm_rax(c, imm, op, sizeof(op));
+  }
+  case NY_NIR_XOR_I64: {
+    static const unsigned char op[] = {0x48, 0x35};
+    return ny_x64_obj_alu_imm_rax(c, imm, op, sizeof(op));
+  }
+  default:
+    return false;
+  }
+}
+
+static int ny_x64_obj_alu_opcode(ny_nir_op_t op) {
+  switch (op) {
+  case NY_NIR_ADD_I64: return 0x03;
+  case NY_NIR_SUB_I64: return 0x2b;
+  case NY_NIR_AND_I64: return 0x23;
+  case NY_NIR_OR_I64: return 0x0b;
+  case NY_NIR_XOR_I64: return 0x33;
+  default: return -1;
+  }
+}
+
+static int ny_x64_obj_alu_imm_group(ny_nir_op_t op) {
+  switch (op) {
+  case NY_NIR_ADD_I64: return 0;
+  case NY_NIR_OR_I64: return 1;
+  case NY_NIR_AND_I64: return 4;
+  case NY_NIR_SUB_I64: return 5;
+  case NY_NIR_XOR_I64: return 6;
+  default: return -1;
+  }
+}
+
+static bool ny_x64_obj_alu_reg_source(ny_x64_obj_ctx_t *c, ny_nir_op_t op,
+                                      int dst_reg, int src_reg, int src_off,
+                                      bool src_is_reg) {
+  unsigned char rex = (unsigned char)(0x48 | (dst_reg >= 8 ? 0x04 : 0) |
+                                       (src_is_reg && src_reg >= 8 ? 0x01 : 0));
+  unsigned char modrm = (unsigned char)((src_is_reg ? 0xc0 : 0x85) |
+                                        ((dst_reg & 7) << 3) |
+                                        (src_is_reg ? src_reg & 7 : 0));
+  if (op == NY_NIR_MUL_I64) {
+    unsigned char bytes[] = {rex, 0x0f, 0xaf, modrm};
+    return ny_x64_obj_bytes(c, bytes, sizeof(bytes)) &&
+           (src_is_reg || ny_x64_obj_i32(c, src_off));
+  }
+  int opcode = ny_x64_obj_alu_opcode(op);
+  if (opcode < 0)
+    return false;
+  unsigned char bytes[] = {rex, (unsigned char)opcode, modrm};
+  return ny_x64_obj_bytes(c, bytes, sizeof(bytes)) &&
+         (src_is_reg || ny_x64_obj_i32(c, src_off));
+}
+
+static bool ny_x64_obj_alu_reg_imm(ny_x64_obj_ctx_t *c, ny_nir_op_t op,
+                                   int dst_reg, int64_t imm) {
+  if (imm < INT32_MIN || imm > INT32_MAX)
+    return false;
+  unsigned char rex = (unsigned char)(0x48 | (dst_reg >= 8 ? 0x01 : 0));
+  if (op == NY_NIR_MUL_I64) {
+    unsigned char bytes[] = {
+        rex, 0x69,
+        (unsigned char)(0xc0 | ((dst_reg & 7) << 3) | (dst_reg & 7))};
+    return ny_x64_obj_bytes(c, bytes, sizeof(bytes)) &&
+           ny_x64_obj_i32(c, (int32_t)imm);
+  }
+  int group = ny_x64_obj_alu_imm_group(op);
+  if (group < 0)
+    return false;
+  unsigned char bytes[] = {
+      rex, 0x81, (unsigned char)(0xc0 | (group << 3) | (dst_reg & 7))};
+  return ny_x64_obj_bytes(c, bytes, sizeof(bytes)) &&
+         ny_x64_obj_i32(c, (int32_t)imm);
+}
+
+static bool ny_x64_obj_try_direct_binop(ny_x64_obj_ctx_t *c,
+                                        const ny_nir_inst_t *in,
+                                        bool *handled) {
+  *handled = false;
+  const char *disabled = getenv("NYTRIX_NATIVE_NO_DIRECT_ALU");
+  if (disabled && disabled[0] && strcmp(disabled, "0") != 0 &&
+      strcmp(disabled, "false") != 0 && strcmp(disabled, "off") != 0)
+    return true;
+  if (!c->value_reg || in->dst < 0 || in->a < 0 || in->b < 0)
+    return true;
+  int dst = c->value_reg[in->dst];
+  int lhs = c->value_reg[in->a];
+  int rhs = c->value_reg[in->b];
+  bool commutative = in->op == NY_NIR_ADD_I64 ||
+                     in->op == NY_NIR_MUL_I64 ||
+                     in->op == NY_NIR_AND_I64 ||
+                     in->op == NY_NIR_OR_I64 || in->op == NY_NIR_XOR_I64;
+  int source = in->b;
+  int source_reg = rhs;
+  if (dst < 0)
+    return true;
+  if (dst != lhs) {
+    if (!commutative || dst != rhs)
+      return true;
+    source = in->a;
+    source_reg = lhs;
+  }
+  int64_t imm = 0;
+  *handled = true;
+  if (ny_x64_obj_try_const_i64(c, source, &imm) &&
+      imm >= INT32_MIN && imm <= INT32_MAX)
+    return ny_x64_obj_alu_reg_imm(c, in->op, dst, imm);
+  if (source_reg >= 0)
+    return ny_x64_obj_alu_reg_source(c, in->op, dst, source_reg, 0, true);
+  return ny_x64_obj_alu_reg_source(
+      c, in->op, dst, 0, ny_x64_obj_value_off(c, source), false);
 }
 
 static bool ny_x64_obj_binop(ny_x64_obj_ctx_t *c, const ny_nir_inst_t *in,
                              const unsigned char *op, size_t op_len) {
+  bool handled = false;
+  if (!ny_x64_obj_try_direct_binop(c, in, &handled))
+    return false;
+  if (handled)
+    return true;
+  int64_t imm = 0;
+  /* Try immediate operand for B: load A, op $imm, store.
+   * We detect the operation from the opcode's last byte to pick the
+   * correct immediate encoding. */
+  if (ny_x64_obj_try_const_i64(c, in->b, &imm) &&
+      imm >= INT32_MIN && imm <= INT32_MAX &&
+      ny_x64_obj_load_value_rax(c, in->a) &&
+      ny_x64_obj_binop_imm(c, imm, in->op) &&
+      ny_x64_obj_store_value_rax(c, in->dst))
+    return true;
   return ny_x64_obj_load_value_rax(c, in->a) &&
          ny_x64_obj_load_value_r10(c, in->b) &&
          ny_x64_obj_bytes(c, op, op_len) &&
@@ -1519,6 +1811,7 @@ static bool ny_x64_obj_add_rsp(ny_x64_obj_ctx_t *c, size_t bytes) {
 
 static bool ny_x64_obj_emit_code(ny_x64_obj_ctx_t *c, const ny_nir_func_t *nir,
                                  bool tag_return);
+static bool ny_x64_obj_emit_epilogue(ny_x64_obj_ctx_t *c);
 
 static int ny_x64_obj_symbol_index(char symbols[][256], size_t count,
                                    const char *name) {
@@ -1733,8 +2026,24 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
     return ny_x64_obj_binop(c, in, add, sizeof(add));
   case NY_NIR_SUB_I64:
     return ny_x64_obj_binop(c, in, sub, sizeof(sub));
-  case NY_NIR_MUL_I64:
+  case NY_NIR_MUL_I64: {
+    int64_t imm = 0;
+    /* imul $imm, %rax, %rax (0x69 c0 imm32) for small constants */
+    if (ny_x64_obj_try_const_i64(c, in->b, &imm) &&
+        imm >= INT32_MIN && imm <= INT32_MAX &&
+        ny_x64_obj_load_value_rax(c, in->a) &&
+        ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x69, 0xc0}, 3) &&
+        ny_x64_obj_i32(c, (int32_t)imm))
+      return ny_x64_obj_store_value_rax(c, in->dst);
+    /* Commutative: try A as immediate */
+    if (ny_x64_obj_try_const_i64(c, in->a, &imm) &&
+        imm >= INT32_MIN && imm <= INT32_MAX &&
+        ny_x64_obj_load_value_rax(c, in->b) &&
+        ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x69, 0xc0}, 3) &&
+        ny_x64_obj_i32(c, (int32_t)imm))
+      return ny_x64_obj_store_value_rax(c, in->dst);
     return ny_x64_obj_binop(c, in, imul, sizeof(imul));
+  }
   case NY_NIR_AND_I64:
     return ny_x64_obj_binop(c, in, andq, sizeof(andq));
   case NY_NIR_OR_I64:
@@ -1754,18 +2063,61 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
       return false;
     return ny_x64_obj_store_value_rax(c, in->dst);
   case NY_NIR_SHL_I64:
-  case NY_NIR_SAR_I64:
+  case NY_NIR_SAR_I64: {
+    int64_t shift_imm = 0;
+    bool is_shl = (in->op == NY_NIR_SHL_I64);
+    /* Try immediate shift count: shl $imm, %rax (0xc1 e0/ f8) */
+    if (ny_x64_obj_try_const_i64(c, in->b, &shift_imm) &&
+        shift_imm >= 1 && shift_imm <= 63 &&
+        ny_x64_obj_load_value_rax(c, in->a)) {
+      unsigned char base = is_shl ? 0xe0 : 0xf8;
+      if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc1, base}, 3) ||
+          !ny_x64_obj_u8(c, (unsigned char)shift_imm))
+        return false;
+      return ny_x64_obj_store_value_rax(c, in->dst);
+    }
+    /* Fallback: shift by %rcx */
     if (!ny_x64_obj_load_value_rax(c, in->a) ||
         !ny_x64_obj_load_value_rcx(c, in->b))
       return false;
-    if (in->op == NY_NIR_SHL_I64) {
+    if (is_shl) {
       if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xd3, 0xe0}, 3))
         return false;
     } else if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xd3, 0xf8},
-                                 3))
+                                   3))
       return false;
     return ny_x64_obj_store_value_rax(c, in->dst);
-  case NY_NIR_CMP_I64:
+  }
+  case NY_NIR_CMP_I64: {
+    int64_t imm = 0;
+    /* cmp $imm, value_a if B is constant */
+    if (ny_x64_obj_try_const_i64(c, in->b, &imm) &&
+        imm >= INT32_MIN && imm <= INT32_MAX &&
+        ny_x64_obj_load_value_rax(c, in->a) &&
+        ny_x64_obj_cmp_imm_rax(c, imm)) {
+      if (!ny_x64_obj_u8(c, 0x0f) ||
+          !ny_x64_obj_u8(c, ny_x64_obj_setcc(in->cmp)) ||
+          !ny_x64_obj_u8(c, 0xc0) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x0f, 0xb6, 0xc0},
+                            4))
+        return false;
+      return ny_x64_obj_store_value_rax(c, in->dst);
+    }
+    /* For EQ/NE, swap and try A as immediate (commutative) */
+    if ((in->cmp == NY_NIR_CMP_EQ || in->cmp == NY_NIR_CMP_NE) &&
+        ny_x64_obj_try_const_i64(c, in->a, &imm) &&
+        imm >= INT32_MIN && imm <= INT32_MAX &&
+        ny_x64_obj_load_value_rax(c, in->b) &&
+        ny_x64_obj_cmp_imm_rax(c, imm)) {
+      if (!ny_x64_obj_u8(c, 0x0f) ||
+          !ny_x64_obj_u8(c, ny_x64_obj_setcc(in->cmp)) ||
+          !ny_x64_obj_u8(c, 0xc0) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x0f, 0xb6, 0xc0},
+                            4))
+        return false;
+      return ny_x64_obj_store_value_rax(c, in->dst);
+    }
+    /* Fallback: both operands from memory */
     if (!ny_x64_obj_load_value_rax(c, in->a) ||
         !ny_x64_obj_load_value_r10(c, in->b) ||
         !ny_x64_obj_bytes(c, (const unsigned char[]){0x4c, 0x39, 0xd0}, 3) ||
@@ -1776,6 +2128,7 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
                           4))
       return false;
     return ny_x64_obj_store_value_rax(c, in->dst);
+  }
   case NYIR_ADD_F64:
   case NYIR_SUB_F64:
   case NYIR_MUL_F64:
@@ -1860,6 +2213,9 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
                         (long long)in->imm);
       return false;
     }
+    if (c->value_reg && c->value_reg[in->dst] >= 0)
+      return ny_x64_obj_load_reg(c, c->value_reg[in->dst],
+                                 ny_x64_obj_local_off(c, (int)in->imm));
     return ny_x64_obj_load_rax(c, ny_x64_obj_local_off(c, (int)in->imm)) &&
            ny_x64_obj_store_value_rax(c, in->dst);
   case NYIR_ADDR_LOCAL:
@@ -1869,6 +2225,9 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
                         (long long)in->imm);
       return false;
     }
+    if (c->value_reg && c->value_reg[in->dst] >= 0)
+      return ny_x64_obj_lea_reg(c, c->value_reg[in->dst],
+                                ny_x64_obj_local_off(c, (int)in->imm));
     return ny_x64_obj_lea_rax(c, ny_x64_obj_local_off(c, (int)in->imm)) &&
            ny_x64_obj_store_value_rax(c, in->dst);
   case NY_NIR_STORE_LOCAL:
@@ -1878,6 +2237,9 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
                         (long long)in->imm);
       return false;
     }
+    if (c->value_reg && c->value_reg[in->a] >= 0)
+      return ny_x64_obj_store_reg(c, c->value_reg[in->a],
+                                  ny_x64_obj_local_off(c, (int)in->imm));
     return ny_x64_obj_load_value_rax(c, in->a) &&
            ny_x64_obj_store_rax(c, ny_x64_obj_local_off(c, (int)in->imm));
   case NY_NIR_BR: {
@@ -1907,7 +2269,7 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
         return false;
       }
     }
-    return ny_x64_obj_bytes(c, (const unsigned char[]){0xc9, 0xc3}, 2);
+    return ny_x64_obj_emit_epilogue(c);
   case NY_NIR_CALL: {
     int argc = (int)in->imm;
     if (argc < 0 || argc > NY_NIR_CALL_MAX_ARGS) {
@@ -2188,6 +2550,184 @@ static bool ny_x64_obj_classify_values(ny_x64_obj_ctx_t *c,
   return true;
 }
 
+/* Keep non-floating SSA intervals in caller-saved r11/r9/r8 when they neither
+ * cross nor feed a call. Values with call-sensitive lifetimes remain spilled,
+ * so ABI argument setup cannot clobber an allocated value. */
+static bool ny_x64_obj_allocate_registers(ny_x64_obj_ctx_t *c,
+                                          const ny_nir_func_t *nir) {
+  const char *disabled = getenv("NYTRIX_NATIVE_NO_REGALLOC");
+  if (disabled && disabled[0] && strcmp(disabled, "0") != 0 &&
+      strcmp(disabled, "false") != 0 && strcmp(disabled, "off") != 0)
+    return true;
+  if (!c || c->value_slots <= 0)
+    return true;
+  c->value_reg = malloc((size_t)c->value_slots * sizeof(*c->value_reg));
+  c->value_xmm = malloc((size_t)c->value_slots * sizeof(*c->value_xmm));
+  int *last_use = malloc((size_t)c->value_slots * sizeof(*last_use));
+  bool *call_use = calloc((size_t)c->value_slots, sizeof(*call_use));
+  if (!c->value_reg || !c->value_xmm || !last_use || !call_use) {
+    free(last_use);
+    free(call_use);
+    ny_native_set_err(c->err, c->err_len,
+                      "x86-64 object writer: out of memory in register allocation");
+    return false;
+  }
+  memset(c->value_reg, -1,
+         (size_t)c->value_slots * sizeof(*c->value_reg));
+  memset(c->value_xmm, -1,
+         (size_t)c->value_slots * sizeof(*c->value_xmm));
+  for (int v = 0; v < c->value_slots; ++v)
+    last_use[v] = -1;
+  for (size_t i = 0; nir && i < nir->len; ++i) {
+    const ny_nir_inst_t *in = &nir->data[i];
+    const int operands[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+    for (size_t k = 0; k < sizeof(operands) / sizeof(operands[0]); ++k) {
+      int v = operands[k];
+      if (v >= 0 && v < c->value_slots) {
+        last_use[v] = (int)i;
+        if (in->op == NY_NIR_CALL)
+          call_use[v] = true;
+      }
+    }
+    if (in->op == NY_NIR_CALL) {
+      for (size_t k = 0; k < in->extra_args_len; ++k) {
+        int v = in->extra_args[k];
+        if (v >= 0 && v < c->value_slots) {
+          last_use[v] = (int)i;
+          call_use[v] = true;
+        }
+      }
+    }
+  }
+  static const int caller_regs[] = {11, 9, 8};
+  static const int callee_regs[] = {12, 13, 14, 15, 3};
+  int caller_end[sizeof(caller_regs) / sizeof(caller_regs[0])];
+  int callee_end[sizeof(callee_regs) / sizeof(callee_regs[0])];
+  for (size_t r = 0; r < sizeof(caller_regs) / sizeof(caller_regs[0]); ++r)
+    caller_end[r] = -1;
+  for (size_t r = 0; r < sizeof(callee_regs) / sizeof(callee_regs[0]); ++r)
+    callee_end[r] = -1;
+  for (size_t i = 0; nir && i < nir->len; ++i) {
+    const ny_nir_inst_t *in = &nir->data[i];
+    int v = in->dst;
+    if (v < 0 || v >= c->value_slots || last_use[v] < (int)i ||
+        (c->value_f64 && c->value_f64[v]) ||
+        (c->value_f32 && c->value_f32[v]))
+      continue;
+    bool crosses_call = false;
+    for (size_t j = i + 1; j < nir->len && (int)j < last_use[v]; ++j) {
+      if (nir->data[j].op == NY_NIR_CALL) {
+        crosses_call = true;
+        break;
+      }
+    }
+    if (in->op == NY_NIR_CONST_I64 && !crosses_call)
+      continue;
+    if (!crosses_call && !call_use[v]) {
+      for (size_t r = 0; r < sizeof(caller_regs) / sizeof(caller_regs[0]); ++r) {
+        if ((int)i >= caller_end[r]) {
+          c->value_reg[v] = (int8_t)caller_regs[r];
+          caller_end[r] = last_use[v];
+          break;
+        }
+      }
+    } else if (crosses_call) {
+      for (size_t r = 0; r < sizeof(callee_regs) / sizeof(callee_regs[0]); ++r) {
+        if ((int)i >= callee_end[r]) {
+          c->value_reg[v] = (int8_t)callee_regs[r];
+          callee_end[r] = last_use[v];
+          break;
+        }
+      }
+    }
+  }
+  static const int xmm_regs[] = {4, 5, 6, 7};
+  int xmm_end[sizeof(xmm_regs) / sizeof(xmm_regs[0])];
+  for (size_t r = 0; r < sizeof(xmm_regs) / sizeof(xmm_regs[0]); ++r)
+    xmm_end[r] = -1;
+  for (size_t i = 0; nir && i < nir->len; ++i) {
+    int v = nir->data[i].dst;
+    if (v < 0 || v >= c->value_slots || last_use[v] < (int)i || call_use[v] ||
+        !((c->value_f64 && c->value_f64[v]) ||
+          (c->value_f32 && c->value_f32[v])))
+      continue;
+    bool crosses_call = false;
+    for (size_t j = i + 1; j < nir->len && (int)j < last_use[v]; ++j) {
+      if (nir->data[j].op == NY_NIR_CALL) {
+        crosses_call = true;
+        break;
+      }
+    }
+    if (crosses_call)
+      continue;
+    for (size_t r = 0; r < sizeof(xmm_regs) / sizeof(xmm_regs[0]); ++r) {
+      if ((int)i >= xmm_end[r]) {
+        c->value_xmm[v] = (int8_t)xmm_regs[r];
+        xmm_end[r] = last_use[v];
+        break;
+      }
+    }
+  }
+  free(last_use);
+  free(call_use);
+  return true;
+}
+
+static bool ny_x64_obj_layout_spills(ny_x64_obj_ctx_t *c) {
+  if (!c || c->value_slots < 0)
+    return false;
+  if (c->value_slots > 0) {
+    c->value_spill = malloc((size_t)c->value_slots * sizeof(*c->value_spill));
+    if (!c->value_spill) {
+      ny_native_set_err(c->err, c->err_len,
+                        "x86-64 object writer: out of memory laying out spills");
+      return false;
+    }
+  }
+  c->spill_slots = 0;
+  c->callee_save_slots = 0;
+  for (int reg = 0; reg < 16; ++reg)
+    c->callee_save_slot[reg] = -1;
+  for (int v = 0; v < c->value_slots; ++v) {
+    if ((c->value_reg && c->value_reg[v] >= 0) ||
+        (c->value_xmm && c->value_xmm[v] >= 0)) {
+      c->value_spill[v] = -1;
+      int reg = c->value_reg ? c->value_reg[v] : -1;
+      if ((reg == 3 || (reg >= 12 && reg <= 15)) &&
+          c->callee_save_slot[reg] < 0)
+        c->callee_save_slot[reg] = c->callee_save_slots++;
+    } else {
+      c->value_spill[v] = c->spill_slots++;
+    }
+  }
+  c->frame_bytes =
+      ny_x64_obj_align(
+          (c->spill_slots + c->callee_save_slots + c->local_slots) * 8, 16);
+  return true;
+}
+
+static int ny_x64_obj_callee_off(const ny_x64_obj_ctx_t *c, int reg) {
+  return -8 * (c->spill_slots + c->callee_save_slot[reg] + 1);
+}
+
+static bool ny_x64_obj_save_callee(ny_x64_obj_ctx_t *c) {
+  for (int reg = 0; reg < 16; ++reg) {
+    if (c->callee_save_slot[reg] >= 0 &&
+        !ny_x64_obj_store_reg(c, reg, ny_x64_obj_callee_off(c, reg)))
+      return false;
+  }
+  return true;
+}
+
+static bool ny_x64_obj_emit_epilogue(ny_x64_obj_ctx_t *c) {
+  for (int reg = 15; reg >= 0; --reg) {
+    if (c->callee_save_slot[reg] >= 0 &&
+        !ny_x64_obj_load_reg(c, reg, ny_x64_obj_callee_off(c, reg)))
+      return false;
+  }
+  return ny_x64_obj_bytes(c, (const unsigned char[]){0xc9, 0xc3}, 2);
+}
+
 static bool ny_x64_obj_emit_param_spill(ny_x64_obj_ctx_t *c,
                                         const ny_nir_func_t *nir) {
   if (!c || !nir || c->local_slots <= 0)
@@ -2260,8 +2800,14 @@ static bool ny_x64_obj_emit_param_spill(ny_x64_obj_ctx_t *c,
 
 static bool ny_x64_obj_emit_code(ny_x64_obj_ctx_t *c, const ny_nir_func_t *nir,
                                  bool tag_return) {
+  c->nir = nir;
+  ny_x64_obj_valmap_init(&c->valmap, nir);
   ny_x64_obj_scan_frame(c, nir);
   if (!ny_x64_obj_classify_values(c, nir))
+    return false;
+  if (!ny_x64_obj_allocate_registers(c, nir))
+    return false;
+  if (!ny_x64_obj_layout_spills(c))
     return false;
   if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x55, 0x48, 0x89, 0xe5}, 4))
     return false;
@@ -2270,6 +2816,8 @@ static bool ny_x64_obj_emit_code(ny_x64_obj_ctx_t *c, const ny_nir_func_t *nir,
         !ny_x64_obj_i32(c, c->frame_bytes))
       return false;
   }
+  if (!ny_x64_obj_save_callee(c))
+    return false;
   if (!ny_x64_obj_emit_param_spill(c, nir))
     return false;
   for (size_t i = 0; nir && i < nir->len; ++i) {
@@ -2277,7 +2825,7 @@ static bool ny_x64_obj_emit_code(ny_x64_obj_ctx_t *c, const ny_nir_func_t *nir,
     if (tag_return && in->op == NY_NIR_RET && in->a >= 0) {
       if (c->value_f64 && in->a < c->value_slots && c->value_f64[in->a]) {
         if (!ny_x64_obj_load_value_xmm(c, in->a, 0) ||
-            !ny_x64_obj_bytes(c, (const unsigned char[]){0xc9, 0xc3}, 2))
+            !ny_x64_obj_emit_epilogue(c))
           return false;
         continue;
       }
@@ -2286,7 +2834,7 @@ static bool ny_x64_obj_emit_code(ny_x64_obj_ctx_t *c, const ny_nir_func_t *nir,
                                                        0x01, 0x00, 0x00,
                                                        0x00},
                             8) ||
-          !ny_x64_obj_bytes(c, (const unsigned char[]){0xc9, 0xc3}, 2))
+          !ny_x64_obj_emit_epilogue(c))
         return false;
       continue;
     }
@@ -2295,7 +2843,7 @@ static bool ny_x64_obj_emit_code(ny_x64_obj_ctx_t *c, const ny_nir_func_t *nir,
   }
   if (nir && (nir->len == 0 || nir->data[nir->len - 1].op != NY_NIR_RET)) {
     if (!ny_x64_obj_mov_rax_imm(c, 0) ||
-        !ny_x64_obj_bytes(c, (const unsigned char[]){0xc9, 0xc3}, 2))
+        !ny_x64_obj_emit_epilogue(c))
       return false;
   }
   return ny_x64_obj_patch_branches(c);
