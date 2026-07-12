@@ -1697,6 +1697,15 @@ static int test_is_ownership_error_path(const char *path) {
   return path && strstr(path, "etc/tests/fuzz/errors/ownership/") != NULL;
 }
 
+static int test_is_optional_system_stdlib(const char *path) {
+  return path &&
+         (strncmp(path, "lib/os/ui/", 10) == 0 ||
+          strncmp(path, "lib/os/sound/", 13) == 0 ||
+          strcmp(path, "lib/os/ui/mod.ny") == 0 ||
+          strcmp(path, "lib/os/sound/mod.ny") == 0 ||
+          strcmp(path, "lib/os/clipboard.ny") == 0);
+}
+
 static void gh_group_begin(const char *kind, const char *path) {
   if (test_env_truthy("GITHUB_ACTIONS"))
     printf("::group::%s: %s\n", kind ? kind : "debug", disp_path(path));
@@ -3770,6 +3779,9 @@ int ny_test_main(int argc, char **argv) {
     printf("%s[trace]%s trace_dir=%s\n", nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), td);
 
   StrVec benchmark = {0}, runtime = {0}, repl = {0}, probe = {0}, error_tests = {0}, std = {0};
+  size_t skipped_system_stdlib = 0;
+  const int skip_system_stdlib =
+      test_env_truthy("NYTRIX_TEST_SKIP_SYSTEM_STDLIB");
   SuiteStats sb = {0}, sr = {0}, srepl = {0}, sp = {0}, se = {0}, ss = {0};
   char cache_path[PATH_MAX];
   nyt_path_join(cache_path, sizeof(cache_path), nyt_default_cache_root_dir(),
@@ -3786,9 +3798,15 @@ int ny_test_main(int argc, char **argv) {
       sv_push(&probe, p);
     else if (strncmp(p, "etc/tests/fuzz/errors/", 22) == 0)
       sv_push(&error_tests, p);
+    else if (skip_system_stdlib && test_is_optional_system_stdlib(p))
+      skipped_system_stdlib++;
     else
       sv_push(&std, p);
   }
+
+  if (skipped_system_stdlib > 0)
+    printf("%s[note]%s skipped %zu optional system stdlib modules (UI/audio/clipboard)\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_system_stdlib);
 
   StrVec selected_all = {0};
   for (size_t i = 0; i < benchmark.len; i++)
