@@ -23,6 +23,12 @@ bool ny_native_emit_nir_func(ny_native_writer_t *w,
                              const ny_native_target_info_t *target,
                              const ny_nir_func_t *nir, const char *label,
                              bool tag_return, char *err, size_t err_len);
+bool ny_native_collect_vm_profile(ny_nir_func_t *rt_main,
+                                  ny_nir_func_t *funcs,
+                                  const char **names, size_t count,
+                                  const ny_options *opt,
+                                  ny_nir_eval_result_t *profile,
+                                  char *err, size_t err_len);
 
 bool ny_native_x86_64_emit_rt_main(ny_native_writer_t *w,
                                    const ny_native_target_info_t *target,
