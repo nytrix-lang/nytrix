@@ -1372,7 +1372,7 @@ static int parse_tag_body(ny_parser_t *p, ny_ctype_t *ty) {
     int flexible_array = c_type_is_flexible_array(&field_ty);
     ny_ctype_t comma_base_ty = c_type_without_array(field_ty);
     ny_c_layout_t field_layout = {0};
-    if (ny_ctype_layout(&field_ty, NULL, &field_layout) &&
+    if (ny_ctype_layout(&field_ty, p->abi, &field_layout) &&
         field_layout.align > 0) {
       if (parse_accept(p, ":")) {
         unsigned width = 0;
@@ -1504,7 +1504,7 @@ static int parse_tag_body(ny_parser_t *p, ny_ctype_t *ty) {
       }
       if (next_name.kind == NY_CTOK_IDENT) {
         ny_c_layout_t next_layout = {0};
-        if (ny_ctype_layout(&next_ty, NULL, &next_layout) &&
+        if (ny_ctype_layout(&next_ty, p->abi, &next_layout) &&
             next_layout.align > 0) {
           fields++;
           aggregate_note_field(ty, next_name, &next_ty, &next_layout,
@@ -1799,7 +1799,7 @@ static int parse_array_extent_primary(ny_parser_t *p, size_t *out) {
     if (!parse_accept(p, ")"))
       return 0;
     ny_c_layout_t layout = {0};
-    if (!ny_ctype_layout(&ty, NULL, &layout))
+    if (!ny_ctype_layout(&ty, p->abi, &layout))
       return 0;
     *out = layout.size;
     return layout.size > 0;
@@ -2210,12 +2210,18 @@ static int parse_non_import_decl(ny_parser_t *p) {
   return 1;
 }
 
-void ny_parse_init(ny_parser_t *p, const char *src, size_t len) {
+void ny_parse_init_abi(ny_parser_t *p, const char *src, size_t len,
+                       const char *abi) {
   if (!p)
     return;
   memset(p, 0, sizeof(*p));
+  p->abi = abi;
   ny_lex_init(&p->lx, src, len);
   p->tok = ny_lex_next(&p->lx);
+}
+
+void ny_parse_init(ny_parser_t *p, const char *src, size_t len) {
+  ny_parse_init_abi(p, src, len, NULL);
 }
 
 int ny_parse_decl(ny_parser_t *p, ny_cdecl_t *out) {
@@ -2467,7 +2473,7 @@ int ny_parse_header_summary(const char *src, size_t len,
         local.aggregate_layouts++;
         local.aggregate_fields += decl.type.aggregate_fields;
         local.function_pointers += decl.type.aggregate_function_pointers;
-        if (ny_ctype_layout(&decl.type, NULL, &layout))
+        if (ny_ctype_layout(&decl.type, p.abi, &layout))
           local.aggregate_bytes += layout.size;
       }
       if (c_type_is_function_pointer(&decl.type))

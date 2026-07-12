@@ -1193,6 +1193,98 @@ static bool ny_ffi_register_internal_c_function(codegen_t *cg,
   return true;
 }
 
+static bool ny_ffi_register_internal_c_variable(codegen_t *cg,
+                                                const ny_cdecl_t *decl,
+                                                const char *prefix,
+                                                const char *lib,
+                                                size_t *lowered_out) {
+  if (!cg || !decl || decl->kind != NY_CDECL_VAR)
+    return true;
+  char *c_name = ny_ffi_ctok_strdup(decl->name);
+  if (!c_name || !*c_name) {
+    free(c_name);
+    return false;
+  }
+  if (c_name[0] == '_') {
+    free(c_name);
+    return true;
+  }
+  ffi_context ctx = {
+      .cg = cg,
+      .prefix = prefix,
+      .prefix_len = prefix ? strlen(prefix) : 0,
+      .explicit_prefix = prefix && *prefix,
+      .namespace_alias = ny_ffi_prefix_is_namespace_alias(prefix),
+  };
+  if (ctx.prefix && ctx.prefix_len > 0 && !ctx.namespace_alias &&
+      strncmp(c_name, ctx.prefix, ctx.prefix_len) != 0) {
+    free(c_name);
+    return true;
+  }
+  char public_name[512];
+  const char *ny_name = ny_ffi_public_symbol_name(
+      &ctx, c_name, public_name, sizeof(public_name));
+  if (lookup_global_exact(cg, ny_name)) {
+    free(c_name);
+    return true;
+  }
+  if (!ny_ffi_import_allowed(&ctx, ny_name, "variable")) {
+    free(c_name);
+    return true;
+  }
+
+  char type_buf[128];
+  const char *ny_type = ny_ffi_map_internal_c_type(
+      &decl->type, type_buf, sizeof(type_buf));
+  if (!ny_type || strcmp(ny_type, "void") == 0 ||
+      ny_ffi_internal_c_type_requires_layout(ny_type)) {
+    NY_LOG_V1("[ffi:c] internal frontend cannot lower external variable type for %s\n",
+              c_name);
+    free(c_name);
+    return false;
+  }
+  token_t empty_tok = {0};
+  LLVMTypeRef llvm_ty = resolve_abi_type_name(cg, ny_type, empty_tok);
+  if (!llvm_ty || LLVMGetTypeKind(llvm_ty) == LLVMVoidTypeKind) {
+    free(c_name);
+    return false;
+  }
+  LLVMValueRef global = LLVMGetNamedGlobal(cg->module, c_name);
+  if (!global) {
+    global = LLVMAddGlobal(cg->module, llvm_ty, c_name);
+    LLVMSetLinkage(global, LLVMExternalLinkage);
+  }
+  binding b = {0};
+  b.name = ny_strdup(ny_name);
+  b.value = global;
+  b.raw_int_value = global;
+  b.is_slot = true;
+  b.is_stable = true;
+  b.owned = true;
+  b.is_c_abi_global = true;
+  b.is_c_abi_unsigned = (decl->type.flags & NY_CTYPEF_UNSIGNED) != 0;
+  b.is_c_abi_pointer = decl->type.ptr_depth > 0;
+  if (strcmp(ny_type, "f64") == 0) {
+    b.is_f64_slot = true;
+    b.type_name = "f64";
+  } else if (strcmp(ny_type, "f32") == 0) {
+    b.is_f32_slot = true;
+    b.type_name = "f32";
+  } else if (strcmp(ny_type, "ptr") == 0 || strcmp(ny_type, "fnptr") == 0) {
+    b.type_name = "ptr";
+  } else {
+    b.is_int_slot = true;
+    b.type_name = "int";
+  }
+  b.decl_type_name = b.type_name;
+  vec_push(&cg->global_vars, b);
+  ny_ffi_add_link_once(cg, lib);
+  if (lowered_out)
+    (*lowered_out)++;
+  free(c_name);
+  return true;
+}
+
 static void ny_ffi_register_internal_c_defines(codegen_t *cg,
                                                const ny_parser_t *p,
                                                const char *prefix,
@@ -1244,7 +1336,7 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
     return false;
   }
   ny_parser_t p;
-  ny_parse_init(&p, src, n);
+  ny_parse_init_abi(&p, src, n, LLVMGetTarget(cg->module));
   bool ok = true;
   size_t lowered = 0;
   while (p.tok.kind != NY_CTOK_EOF) {
@@ -1256,6 +1348,11 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
         break;
       }
       if (!ny_ffi_register_internal_c_function(cg, &decl, prefix, lib,
+                                               &lowered)) {
+        ok = false;
+        break;
+      }
+      if (!ny_ffi_register_internal_c_variable(cg, &decl, prefix, lib,
                                                &lowered)) {
         ok = false;
         break;
@@ -1278,7 +1375,7 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
   if (constants_out)
     *constants_out = constants;
   if (ok)
-    NY_LOG_V1("[ffi:c] internal frontend lowered %zu function declaration(s) and %zu integer constant(s) without libclang\n",
+    NY_LOG_V1("[ffi:c] internal frontend lowered %zu C declaration(s) and %zu integer constant(s) without libclang\n",
               lowered, constants);
   return ok;
 }
@@ -2151,8 +2248,9 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
           summary.tag_decls == 0 && summary.aggregate_layouts == 0 &&
           summary.unsupported == 0;
       bool internally_complete =
-          lowered_ok && summary.variables == 0 && summary.unsupported == 0 &&
-          ((summary.functions > 0 && lowered == summary.functions) ||
+          lowered_ok && summary.unsupported == 0 &&
+          (((summary.functions + summary.variables) > 0 &&
+            lowered == summary.functions + summary.variables) ||
            (summary.functions == 0 && summary.declarations == 0 &&
             summary.object_like_define_lines > 0 && constants > 0));
       if (internally_complete) {

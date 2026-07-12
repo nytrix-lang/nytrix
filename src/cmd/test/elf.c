@@ -1249,7 +1249,7 @@ static size_t test_emit_harness32(unsigned char *dst, size_t cap,
                                                    0xbb, 0x01, 0x00, 0x00, 0x00,
                                                    0xb8, 0x01, 0x00, 0x00, 0x00,
                                                    0xcd, 0x80},
-                   16))
+                   15))
       return 0;
     int32_t low_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_low_disp + 4));
     int32_t high_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_high_disp + 4));

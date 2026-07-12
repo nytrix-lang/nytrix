@@ -165,6 +165,12 @@ fn _solve(list knowledge, list goals, dict substitution, dict state,
       state["reason"] = "depth limit"
       return nil
    }
+   if state.get("nodes") >= state.get("max_nodes") {
+      state["complete"] = false
+      state["reason"] = "node limit"
+      return nil
+   }
+   state["nodes"] = state.get("nodes") + 1
    if depth > state.get("peak_depth") { state["peak_depth"] = depth }
    def cells = 1 + goals.len + substitution.len
    if state.get("memory_cells") + cells > state.get("max_memory_cells") {
@@ -253,9 +259,9 @@ fn _variables_into(any value, list variables) list {
 
 fn query(list knowledge, any goals, int max_steps=10000,
    int max_solutions=256, int max_depth=256, int max_variables=256,
-   int max_memory_cells=1000000) dict {
+   int max_memory_cells=1000000, int max_nodes=100000) dict {
    assert(max_steps > 0 && max_solutions > 0 && max_depth > 0 &&
-      max_variables > 0 && max_memory_cells > 0,
+      max_variables > 0 && max_memory_cells > 0 && max_nodes > 0,
       "query budgets must be positive")
    mut i = 0
    while i < knowledge.len {
@@ -276,12 +282,13 @@ fn query(list knowledge, any goals, int max_steps=10000,
    }
    if query_variables.len > max_variables {
       return {"decided":false, "reason":"variable limit", "steps":0,
-         "peak_depth":0, "memory_cells":0, "peak_memory_cells":0,
+         "nodes":0, "peak_depth":0, "memory_cells":0, "peak_memory_cells":0,
          "answers":[], "solutions":[]}
    }
    mut state = {"steps":0, "max_steps":max_steps,
       "max_solutions":max_solutions, "solutions":[],
       "max_depth":max_depth, "peak_depth":0,
+      "nodes":0, "max_nodes":max_nodes,
       "max_memory_cells":max_memory_cells, "memory_cells":0,
       "peak_memory_cells":0, "complete":true, "reason":"exhausted"}
    _solve(knowledge, goal_list, {}, state, 0)
@@ -293,6 +300,7 @@ fn query(list knowledge, any goals, int max_steps=10000,
    }
    return {"decided":state.get("complete"), "reason":state.get("reason"),
       "steps":state.get("steps"), "peak_depth":state.get("peak_depth"),
+      "nodes":state.get("nodes"),
       "memory_cells":state.get("memory_cells"),
       "peak_memory_cells":state.get("peak_memory_cells"), "answers":answers,
       "solutions":state.get("solutions")}

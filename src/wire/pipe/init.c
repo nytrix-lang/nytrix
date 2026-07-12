@@ -127,9 +127,43 @@ static LLVMModuleRef ny_prepare_ir_dump_module(const ny_options *opt,
 static bool ny_is_llvm_special_global(const char *name);
 static void ny_ensure_parent_dir_for_path(const char *path);
 
+typedef struct {
+  int64_t (*entry)(void);
+} ny_native_jit_call_t;
+
+static int ny_native_jit_safe_child(void *raw) {
+  ny_native_jit_call_t *call = (ny_native_jit_call_t *)raw;
+  if (!call || !call->entry)
+    return 1;
+  ny_jit_prepare_execution();
+  (void)call->entry();
+  rt_print_flush();
+  return 0;
+}
+
 static int ny_run_native_only(const program_t *prog, const ny_options *opt,
                               const char *output_path, bool execute,
                               bool remove_output) {
+  if (execute) {
+    ny_native_jit_image_t image = {0};
+    char jit_err[512] = {0};
+    if (!ny_native_jit_compile(prog, opt, &image, jit_err, sizeof(jit_err))) {
+      NY_LOG_ERR("Native in-memory JIT failed: %s\n",
+                 jit_err[0] ? jit_err : "unsupported native shape");
+      return 1;
+    }
+    ny_native_jit_call_t call = {
+        .entry = (int64_t(*)(void))image.entry,
+    };
+    int rc = ny_safe_run_requested(&opt->safe_run)
+                 ? ny_safe_run_call(&opt->safe_run, ny_native_jit_safe_child,
+                                    &call,
+                                    opt->input_file ? opt->input_file
+                                                    : "native JIT workload")
+                 : ny_native_jit_safe_child(&call);
+    ny_native_jit_image_free(&image);
+    return rc;
+  }
   char obj[4096], rto[4096], err[512] = {0};
   char obj_name[96], rto_name[96];
   snprintf(obj_name, sizeof(obj_name), "ny_native_only_%ld_%llu.o",
@@ -369,7 +403,7 @@ static int ny_run_repl_session(ny_options *opt, bool supervised) {
   ny_repl_set_max_errors(opt->max_errors);
   ny_repl_run(opt->opt_level, opt->opt_pipeline,
               opt->command_string ? opt->command_string : repl_stdin_src,
-              repl_batch);
+              repl_batch, opt);
   free(repl_stdin_src);
   return 0;
 }
@@ -1108,6 +1142,29 @@ static void run_dead_strip_if_needed(const ny_options *opt, codegen_t *cg,
 
   if (!dce_enabled)
     return;
+
+  if (is_jit && !ny_env_enabled("NYTRIX_JIT_FORCE_DCE")) {
+    size_t definitions = 0;
+    for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;
+         fn = LLVMGetNextFunction(fn)) {
+      if (!LLVMIsDeclaration(fn))
+        definitions++;
+    }
+    size_t threshold = 512;
+    const char *threshold_env = ny_env_str_nonempty("NYTRIX_JIT_DCE_MAX_FUNCS");
+    if (threshold_env) {
+      char *end = NULL;
+      unsigned long parsed = strtoul(threshold_env, &end, 10);
+      if (end && *end == '\0')
+        threshold = (size_t)parsed;
+    }
+    if (definitions > threshold) {
+      if (verbose_enabled >= 1)
+        NY_LOG_INFO("JIT dead-strip: skipped for %zu definitions (limit=%zu); lazy materialization is faster\n",
+                    definitions, threshold);
+      return;
+    }
+  }
 
   bool internalize_enabled = false;
   if (is_aot || is_jit) {

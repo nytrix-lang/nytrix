@@ -13,6 +13,10 @@ module std.math.logic(any, all,
 use std.math
 use std.core
 use std.core.reflect
+use std.math.logic.certificate as cert
+
+def LOGIC_MODULE_VERSION = "std.math.logic@1"
+def LOGIC_DEPENDENCY_DIGEST = "std.core+std.math@1"
 
 fn any(any xs) bool {
    "Returns true if at least one element in `xs` is truthy. If `xs` is not a list, returns `bool(xs)`."
@@ -157,16 +161,105 @@ fn prop_variables(dict proposition) list {
    _prop_variables_into(proposition, [])
 }
 
-fn prop_tautology_report(dict proposition, int max_variables=16) dict {
+fn _prop_measure(dict proposition, dict state, int depth) bool {
+   if depth > state.get("max_depth") {
+      state["decided"] = false
+      state["reason"] = "depth limit"
+      return false
+   }
+   if state.get("nodes") >= state.get("max_nodes") {
+      state["decided"] = false
+      state["reason"] = "node limit"
+      return false
+   }
+   if state.get("memory") >= state.get("max_memory") {
+      state["decided"] = false
+      state["reason"] = "memory limit"
+      return false
+   }
+   state["nodes"] = state.get("nodes") + 1
+   state["memory"] = state.get("memory") + 1
+   def kind = proposition.get("kind")
+   if kind == "not" {
+      return _prop_measure(proposition.get("value"), state, depth + 1)
+   }
+   if kind == "and" || kind == "or" || kind == "implies" || kind == "iff" {
+      return _prop_measure(proposition.get("left"), state, depth + 1) &&
+         _prop_measure(proposition.get("right"), state, depth + 1)
+   }
+   true
+}
+
+fn _prop_eval_bounded(dict proposition, dict environment, dict state,
+   int depth) bool {
+   if depth > state.get("max_depth") {
+      state["decided"] = false
+      state["reason"] = "depth limit"
+      return false
+   }
+   if state.get("steps") >= state.get("max_steps") {
+      state["decided"] = false
+      state["reason"] = "step limit"
+      return false
+   }
+   state["steps"] = state.get("steps") + 1
+   def kind = proposition.get("kind")
+   if kind == "true" { return true }
+   if kind == "false" { return false }
+   if kind == "atom" { return bool(environment.get(proposition.get("name"), false)) }
+   if kind == "not" {
+      return !_prop_eval_bounded(proposition.get("value"), environment,
+         state, depth + 1)
+   }
+   def left = _prop_eval_bounded(proposition.get("left"), environment,
+      state, depth + 1)
+   if !state.get("decided") { return false }
+   def right = _prop_eval_bounded(proposition.get("right"), environment,
+      state, depth + 1)
+   if kind == "and" { return left && right }
+   if kind == "or" { return left || right }
+   if kind == "implies" { return !left || right }
+   left == right
+}
+
+fn prop_tautology_report(dict proposition, int max_variables=16,
+   int max_steps=1000000, int max_depth=128, int max_nodes=100000,
+   int max_memory=100000) dict {
    assert(prop_is(proposition), "prop_tautology_report expects a proposition")
-   assert(max_variables >= 0 && max_variables <= 20,
-      "prop_tautology_report max_variables must be in 0..20")
+   if max_variables < 0 || max_variables > 20 || max_steps <= 0 ||
+      max_depth <= 0 || max_nodes <= 0 || max_memory <= 0 {
+      return {"decided":false, "valid":false, "variables":[],
+         "reason":"invalid budget", "counterexample":{},
+         "assignments_checked":0, "assignments_required":-1,
+         "steps":0, "nodes":0, "memory":0}
+   }
+   mut state = {"decided":true, "reason":"complete", "steps":0,
+      "nodes":0, "memory":0, "max_steps":max_steps,
+      "max_depth":max_depth, "max_nodes":max_nodes,
+      "max_memory":max_memory}
+   _prop_measure(proposition, state, 0)
+   if !state.get("decided") {
+      return {"decided":false, "valid":false, "variables":[],
+         "reason":state.get("reason"), "counterexample":{},
+         "assignments_checked":0, "assignments_required":-1,
+         "steps":state.get("steps"), "nodes":state.get("nodes"),
+         "memory":state.get("memory")}
+   }
    def names = prop_variables(proposition)
    if names.len > max_variables {
       return {"decided": false, "valid": false, "variables": names,
          "reason": "variable limit", "counterexample": {},
          "assignments_checked":0,
-         "assignments_required":names.len <= 20 ? 1 << names.len : -1}
+         "assignments_required":names.len <= 20 ? 1 << names.len : -1,
+         "steps":state.get("steps"), "nodes":state.get("nodes"),
+         "memory":state.get("memory")}
+   }
+   if state.get("memory") + names.len * 2 > max_memory {
+      return {"decided":false, "valid":false, "variables":names,
+         "reason":"memory limit", "counterexample":{},
+         "assignments_checked":0, "assignments_required":1 << names.len,
+         "steps":state.get("steps"), "nodes":state.get("nodes"),
+         "memory":state.get("memory")}
    }
    def assignments = 1 << names.len
    mut mask = 0
@@ -177,22 +270,37 @@ fn prop_tautology_report(dict proposition, int max_variables=16) dict {
          environment = environment.set(names[i], ((mask >> i) & 1) == 1)
          i += 1
       }
-      if !prop_eval(proposition, environment) {
+      if !_prop_eval_bounded(proposition, environment, state, 0) {
+         if !state.get("decided") {
+            return {"decided":false, "valid":false, "variables":names,
+               "reason":state.get("reason"), "counterexample":{},
+               "assignments_checked":mask,
+               "assignments_required":assignments,
+               "steps":state.get("steps"), "nodes":state.get("nodes"),
+               "memory":state.get("memory")}
+         }
          return {"decided": true, "valid": false, "variables": names,
             "reason": "counterexample", "counterexample": environment,
             "assignments_checked":mask + 1,
-            "assignments_required":assignments}
+            "assignments_required":assignments,
+            "steps":state.get("steps"), "nodes":state.get("nodes"),
+            "memory":state.get("memory")}
       }
       mask += 1
    }
    return {"decided": true, "valid": true, "variables": names,
       "reason": "exhaustive", "counterexample": {},
       "assignments_checked":assignments,
-      "assignments_required":assignments}
+      "assignments_required":assignments,
+      "steps":state.get("steps"), "nodes":state.get("nodes"),
+      "memory":state.get("memory")}
 }
 
-fn prop_tautology(dict proposition, int max_variables=16) bool {
-   def report = prop_tautology_report(proposition, max_variables)
+fn prop_tautology(dict proposition, int max_variables=16,
+   int max_steps=1000000, int max_depth=128, int max_nodes=100000,
+   int max_memory=100000) bool {
+   def report = prop_tautology_report(proposition, max_variables, max_steps,
+      max_depth, max_nodes, max_memory)
    report.get("decided") && report.get("valid")
 }
 
@@ -223,13 +331,20 @@ fn prop_digest(dict proposition) str {
    "logic-prop-v1:" + to_str(hash(encoded)) + ":" + to_str(encoded.len)
 }
 
-fn prop_certificate(dict proposition, int max_variables=16) dict {
+fn prop_certificate(dict proposition, int max_variables=16,
+   int max_steps=1000000, int max_depth=128, int max_nodes=100000,
+   int max_memory=100000) dict {
    def encoded = prop_canonical(proposition)
-   def decision = prop_tautology_report(proposition, max_variables)
-   return {"version":"logic-cert-v1", "checker":"truth-table-v1",
+   def decision = prop_tautology_report(proposition, max_variables, max_steps,
+      max_depth, max_nodes, max_memory)
+   def base = cert.envelope(encoded, LOGIC_MODULE_VERSION,
+      LOGIC_DEPENDENCY_DIGEST)
+   return base.merge({"version":"logic-cert-v1", "checker":"truth-table-v1",
       "proposition":proposition, "canonical":encoded,
       "digest":prop_digest(proposition), "max_variables":max_variables,
-      "decision":decision}
+      "max_steps":max_steps, "max_depth":max_depth,
+      "max_nodes":max_nodes, "max_memory":max_memory,
+      "decision":decision, "envelope_digest":base.get("digest")})
 }
 
 fn prop_check_certificate(any value) bool {
@@ -237,17 +352,32 @@ fn prop_check_certificate(any value) bool {
       value.get("checker", "") != "truth-table-v1" ||
       !prop_is(value.get("proposition", 0)) ||
       !is_str(value.get("canonical", 0)) || !is_str(value.get("digest", 0)) ||
+      !is_int(value.get("envelope_digest", nil)) ||
       !is_int(value.get("max_variables", nil)) ||
+      !is_int(value.get("max_steps", nil)) ||
+      !is_int(value.get("max_depth", nil)) ||
+      !is_int(value.get("max_nodes", nil)) ||
+      !is_int(value.get("max_memory", nil)) ||
       !is_dict(value.get("decision", 0)) {
       return false
    }
    def proposition = value.get("proposition")
    def encoded = prop_canonical(proposition)
+   def envelope = {"format":value.get("format", ""), "canonical":encoded,
+      "digest":value.get("envelope_digest"),
+      "module_version":value.get("module_version", ""),
+      "dependency_digest":value.get("dependency_digest", ""),
+      "checker_version":value.get("checker_version", "")}
    if encoded != value.get("canonical") ||
-      prop_digest(proposition) != value.get("digest") {
+      prop_digest(proposition) != value.get("digest") ||
+      !cert.check(envelope, value.get("max_variables"), value.get("max_nodes"),
+         value.get("max_depth"), value.get("max_steps"),
+         value.get("max_memory")) {
       return false
    }
-   def checked = prop_tautology_report(proposition, value.get("max_variables"))
+   def checked = prop_tautology_report(proposition, value.get("max_variables"),
+      value.get("max_steps"), value.get("max_depth"),
+      value.get("max_nodes"), value.get("max_memory"))
    def claimed = value.get("decision")
    checked.get("decided") && checked.get("valid") &&
       claimed.get("decided", false) && claimed.get("valid", false)
@@ -266,15 +396,22 @@ fn iff(dict left, dict right) dict { prop_iff(left, right) }
 fn evaluate(dict proposition, dict environment={}) bool { prop_eval(proposition, environment) }
 fn simplify(dict proposition) dict { prop_simplify(proposition) }
 fn variables(dict proposition) list { prop_variables(proposition) }
-fn decide(dict proposition, int max_variables=16) dict {
-   prop_tautology_report(proposition, max_variables)
+fn decide(dict proposition, int max_variables=16, int max_steps=1000000,
+   int max_depth=128, int max_nodes=100000, int max_memory=100000) dict {
+   prop_tautology_report(proposition, max_variables, max_steps, max_depth,
+      max_nodes, max_memory)
 }
-fn valid(dict proposition, int max_variables=16) bool {
-   prop_tautology(proposition, max_variables)
+fn valid(dict proposition, int max_variables=16, int max_steps=1000000,
+   int max_depth=128, int max_nodes=100000, int max_memory=100000) bool {
+   prop_tautology(proposition, max_variables, max_steps, max_depth, max_nodes,
+      max_memory)
 }
 fn canonical(dict proposition) str { prop_canonical(proposition) }
 fn digest(dict proposition) str { prop_digest(proposition) }
-fn certificate(dict proposition, int max_variables=16) dict {
-   prop_certificate(proposition, max_variables)
+fn certificate(dict proposition, int max_variables=16,
+   int max_steps=1000000, int max_depth=128, int max_nodes=100000,
+   int max_memory=100000) dict {
+   prop_certificate(proposition, max_variables, max_steps, max_depth,
+      max_nodes, max_memory)
 }
 fn check_certificate(any value) bool { prop_check_certificate(value) }

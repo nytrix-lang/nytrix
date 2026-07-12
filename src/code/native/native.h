@@ -68,6 +68,12 @@ typedef struct ny_native_handoff_summary_t {
   size_t deopt_safe_points;
 } ny_native_handoff_summary_t;
 
+typedef struct ny_native_jit_image_t {
+  void *memory;
+  size_t size;
+  void *entry;
+} ny_native_jit_image_t;
+
 bool ny_native_target_info_init(ny_native_target_info_t *info,
                                 const ny_options *opt);
 bool ny_native_tier_plan_init(ny_native_tier_plan_t *plan,
@@ -98,6 +104,10 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
 bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
                            const char *path, const char *entry_name,
                            bool tag_return, char *err, size_t err_len);
+bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
+                           ny_native_jit_image_t *image, char *err,
+                           size_t err_len);
+void ny_native_jit_image_free(ny_native_jit_image_t *image);
 bool ny_native_dump_ir_for_program(const program_t *prog, const ny_options *opt,
                                    char *err, size_t err_len);
 bool ny_native_eval_ir_for_program(const program_t *prog, const ny_options *opt,

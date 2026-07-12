@@ -769,13 +769,22 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
     }
     if (leaf && (strcmp(leaf, "addr_of") == 0 || strcmp(leaf, "borrow") == 0)) {
       if (e->as.call.args.len != 1 || e->as.call.args.data[0].name ||
-          !e->as.call.args.data[0].val ||
-          e->as.call.args.data[0].val->kind != NY_E_IDENT) {
-        ny_native_nir_fail(b, "native NYIR lower: %s requires one local identifier",
-                           leaf);
+          !e->as.call.args.data[0].val) {
+        ny_native_nir_fail(
+            b, "native NYIR lower: %s requires one addressable expression",
+            leaf);
         return -1;
       }
-      const char *local_name = e->as.call.args.data[0].val->as.ident.name;
+      const expr_t *target = e->as.call.args.data[0].val;
+      if (target->kind == NY_E_DEREF)
+        return ny_native_nir_lower_expr(b, target->as.deref.target);
+      if (target->kind != NY_E_IDENT) {
+        ny_native_nir_fail(
+            b, "native NYIR lower: %s supports local and dereferenced pointer lvalues, not expression kind %d",
+            leaf, (int)target->kind);
+        return -1;
+      }
+      const char *local_name = target->as.ident.name;
       ny_native_nir_local_t *l = ny_native_nir_find_local(b, local_name);
       if (!l) {
         ny_native_nir_fail(b, "native NYIR lower: %s target '%s' is not a local",

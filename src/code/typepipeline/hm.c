@@ -1479,7 +1479,8 @@ static ny_hm_type_t *hm_builtin_call_type(ny_hm_state_t *hm, const char *name,
   if (strcmp(leaf, "static_assert") == 0 ||
       strcmp(leaf, "assert_compile") == 0 ||
       strcmp(leaf, "assert_compile_range") == 0 ||
-      strcmp(leaf, "assert_compile_index") == 0)
+      strcmp(leaf, "assert_compile_index") == 0 ||
+      strcmp(leaf, "proof_matches") == 0)
     return hm_name(hm, "bool");
   if (strcmp(leaf, "prove") == 0)
     return hm_name(hm, "proof");

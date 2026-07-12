@@ -165,9 +165,22 @@ static LLVMValueRef ny_try_addr_of_local_intrinsic(codegen_t *cg, scope *scopes,
     return ny_c0(cg);
   }
   expr_t *arg = c->args.data[0].val;
+  if (arg && arg->kind == NY_E_DEREF && arg->as.deref.target) {
+    LLVMValueRef address = gen_expr(cg, scopes, depth, arg->as.deref.target);
+    if (!address)
+      return ny_c0(cg);
+    if (LLVMGetTypeKind(LLVMTypeOf(address)) == LLVMPointerTypeKind)
+      return ny_ptr2i64(cg, address, NY_LLVM_NAME(cg, "addr_of_deref"));
+    if (LLVMGetTypeKind(LLVMTypeOf(address)) == LLVMIntegerTypeKind)
+      return ny_cast_to_i64(cg, address, "addr_of_deref");
+    ny_diag_error(arg->tok,
+                  "addr_of(deref) target did not produce a pointer address");
+    cg->had_error = 1;
+    return ny_c0(cg);
+  }
   if (!arg || arg->kind != NY_E_IDENT || !arg->as.ident.name) {
     ny_diag_error(arg ? arg->tok : e->tok,
-                  "addr_of(local) currently supports local identifiers only");
+                  "addr_of supports local and dereferenced pointer lvalues");
     cg->had_error = 1;
     return ny_c0(cg);
   }
@@ -933,7 +946,17 @@ static const char *ny_static_assert_message(expr_t *msg, char *buf,
 static bool ny_compile_assert_name_is(const char *name) {
   return name && (strcmp(name, "static_assert") == 0 ||
                   strcmp(name, "assert_compile") == 0 ||
-                  strcmp(name, "prove") == 0);
+                  strcmp(name, "prove") == 0 ||
+                  strcmp(name, "proof_matches") == 0);
+}
+
+static uint64_t ny_proof_proposition_digest(expr_t *condition) {
+  char *json = ny_expr_to_json(condition);
+  uint64_t digest = ny_hash64_cstr(json ? json : "null");
+  if (json)
+    rt_free((int64_t)(uintptr_t)json);
+  /* Zero remains the legacy/no-certificate proof representation. */
+  return digest ? digest : UINT64_C(0x9e3779b97f4a7c15);
 }
 
 static LLVMValueRef ny_try_static_assert_builtin(codegen_t *cg, scope *scopes,
@@ -943,6 +966,24 @@ static LLVMValueRef ny_try_static_assert_builtin(codegen_t *cg, scope *scopes,
                                                  expr_call_t *c) {
   if (!cg || !e || !name || shadowed || !ny_compile_assert_name_is(name))
     return NULL;
+  if (strcmp(name, "proof_matches") == 0) {
+    if (!c || c->args.len != 2) {
+      ny_diag_error(e->tok,
+                    "proof_matches expects a proof witness and proposition");
+      cg->had_error = 1;
+      return ny_gencall_const_bool(cg, false, "proof_matches_bad_arity");
+    }
+    LLVMValueRef witness = gen_expr(cg, scopes, depth, c->args.data[0].val);
+    uint64_t expected =
+        ny_proof_proposition_digest(c->args.data[1].val);
+    LLVMValueRef matches = ny_eq(
+        cg, witness, LLVMConstInt(cg->type_i64, expected, false),
+        "proof_digest_matches");
+    return ny_select(cg, matches,
+                     LLVMConstInt(cg->type_i64, NY_IMM_TRUE, false),
+                     LLVMConstInt(cg->type_i64, NY_IMM_FALSE, false),
+                     "proof_matches");
+  }
   if (!c || c->args.len < 1 || c->args.len > 2) {
     ny_diag_error(e->tok, "%s expects condition and optional message", name);
     ny_diag_hint(
@@ -982,7 +1023,9 @@ static LLVMValueRef ny_try_static_assert_builtin(codegen_t *cg, scope *scopes,
     ny_diag_error(cond ? cond->tok : e->tok, "%s", msg);
     cg->had_error = 1;
   }
-  return want_proof ? ny_c0(cg)
+  return want_proof
+             ? LLVMConstInt(cg->type_i64,
+                            ny_proof_proposition_digest(cond), false)
                     : ny_gencall_const_bool(cg, true, "static_assert_ok");
 }
 

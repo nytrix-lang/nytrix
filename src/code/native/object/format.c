@@ -620,7 +620,7 @@ done:
   return ok;
 }
 
-static bool ny_x64_obj_build_bundle(
+bool ny_x64_obj_build_bundle(
     const ny_nir_func_t *rt_main, const ny_nir_func_t *funcs,
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, const char *entry_symbol,

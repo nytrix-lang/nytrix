@@ -89,6 +89,13 @@ bool ny_x64_obj_append_function(
     ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
     const ny_nir_func_t *nir, const ny_native_target_info_t *target,
     const char *symbol, bool tag_return, char *err, size_t err_len);
+bool ny_x64_obj_build_bundle(
+    const ny_nir_func_t *rt_main, const ny_nir_func_t *funcs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *entry_symbol,
+    bool tag_return, ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,
+    size_t *def_count, ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    char *err, size_t err_len);
 
 void ny_i386_obj_ctx_free(ny_i386_obj_ctx_t *c);
 bool ny_i386_obj_emit_code(ny_i386_obj_ctx_t *c, const ny_nir_func_t *nir,

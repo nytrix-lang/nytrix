@@ -129,6 +129,7 @@ typedef struct {
 typedef struct {
   ny_lexer_t lx;
   ny_ctok_t tok;
+  const char *abi;
   unsigned typedef_count;
   ny_ctok_t typedef_names[NY_C_MAX_TYPEDEFS];
   ny_ctype_t typedef_types[NY_C_MAX_TYPEDEFS];
@@ -178,6 +179,8 @@ int ny_ctok_eq(ny_ctok_t tok, const char *lit);
 int ny_ctok_is_ident(ny_ctok_t tok, const char *lit);
 
 void ny_parse_init(ny_parser_t *p, const char *src, size_t len);
+void ny_parse_init_abi(ny_parser_t *p, const char *src, size_t len,
+                       const char *abi);
 int ny_parse_decl(ny_parser_t *p, ny_cdecl_t *out);
 int ny_parse_header_summary(const char *src, size_t len,
                             ny_c_header_summary_t *summary, char *err,

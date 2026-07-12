@@ -50,3 +50,10 @@ def variable_bounded = prolog.query([], prolog.term("pair", Many),
 assert(!variable_bounded.get("decided") &&
    variable_bounded.get("reason") == "variable limit",
    "query reports variable-budget exhaustion")
+
+def node_bounded = prolog.query(family,
+   prolog.term("ancestor", ["alice", Who]), 1000, 10, 256, 256,
+   1000000, 1)
+assert(!node_bounded.get("decided") &&
+   node_bounded.get("reason") == "node limit",
+   "query reports node-budget exhaustion")

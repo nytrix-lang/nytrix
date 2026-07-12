@@ -113,6 +113,10 @@ assert_compile(index_proven(ct_range_values, ct_range_idx), "index_proven static
 fn ct_accept_proof(proof witness) int { 42 }
 def proof ct_true_witness = prove((6 * 7) == 42, "compile-time proof witness")
 assert(ct_accept_proof(ct_true_witness) == 42, "proof witness parameter")
+assert(proof_matches(ct_true_witness, (6 * 7) == 42),
+   "proof witness retains its canonical proposition digest")
+assert(!proof_matches(ct_true_witness, (6 * 8) == 48),
+   "proof witness rejects a different true proposition")
 assert_compile_range(ct_range_idx + 1, 2, 2, "assert_compile_range expression")
 assert_compile_index(ct_range_values, ct_range_idx, "assert_compile_index static list")
 

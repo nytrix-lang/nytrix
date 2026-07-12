@@ -142,6 +142,27 @@ static LLVMValueRef expr_value_from_binding(codegen_t *cg, binding *b) {
                             (LLVMValueRef[]){ny_bitcast(cg, fv, cg->type_i64, "")}, 1,
                             "box");
   }
+  if (b->is_c_abi_global && b->is_slot) {
+    LLVMTypeRef stored_ty = LLVMGlobalGetValueType(b->value);
+    LLVMValueRef raw = LLVMBuildLoad2(cg->builder, stored_ty, b->value,
+                                      "c_global_load");
+    LLVMTypeKind kind = LLVMGetTypeKind(stored_ty);
+    if (kind == LLVMPointerTypeKind)
+      return ny_ptr2i64(cg, raw, "c_global_ptr");
+    if (kind == LLVMIntegerTypeKind) {
+      unsigned bits = LLVMGetIntTypeWidth(stored_ty);
+      if (bits < 64)
+        raw = b->is_c_abi_unsigned
+                  ? LLVMBuildZExt(cg->builder, raw, cg->type_i64,
+                                 "c_global_zext")
+                  : LLVMBuildSExt(cg->builder, raw, cg->type_i64,
+                                 "c_global_sext");
+      else if (bits > 64)
+        raw = LLVMBuildTrunc(cg->builder, raw, cg->type_i64,
+                            "c_global_trunc");
+      return ny_tag_int(cg, raw);
+    }
+  }
   if (b->is_slot)
     return ny_load(cg, b->value, "");
   if (b->is_int_direct && b->is_int_raw_direct)

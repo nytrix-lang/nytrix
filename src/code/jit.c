@@ -322,22 +322,21 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
   if (!mm)
     return 0;
   for (ny_apple_jit_alloc_t *a = mm->allocs; a; a = a->next) {
-    int prot = PROT_READ;
-    if (a->code)
-      /* MAP_JIT mappings retain RWX VM permissions; Apple silicon switches
-         write-vs-execute access per thread with pthread_jit_write_protect_np.
-         Reducing the mapping to RX here makes some hosted runners treat the
-         page as non-executable despite the subsequent thread toggle. */
-      prot |= PROT_WRITE | PROT_EXEC;
-    else if (!a->read_only)
-      prot |= PROT_WRITE;
+    if (a->code) {
+      /* MAP_JIT owns the W^X transition. Calling mprotect on that mapping can
+         be rejected by the hardened runtime; returning early would leave this
+         thread in write mode and make the first generated instruction fault.
+         Keep the mapping's original RWX maximum permissions and switch the
+         current thread to execute mode after relocations are complete. */
+      __builtin___clear_cache((char *)a->base, (char *)a->base + a->size);
+      continue;
+    }
+    int prot = PROT_READ | (a->read_only ? 0 : PROT_WRITE);
     if (mprotect(a->base, a->size, prot) != 0) {
       if (err_msg)
-        *err_msg = LLVMCreateMessage("failed to finalize Apple arm64 JIT memory");
+        *err_msg = LLVMCreateMessage("failed to finalize Apple arm64 JIT data");
       return 1;
     }
-    if (a->code)
-      __builtin___clear_cache((char *)a->base, (char *)a->base + a->size);
   }
   ny_apple_jit_write_protect(1);
   return 0;

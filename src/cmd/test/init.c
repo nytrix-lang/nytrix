@@ -834,7 +834,8 @@ static int test_archive_source_needs_m32(const char *src_path) {
   base = base ? base + 1 : src_path;
   size_t n = strlen(base);
   return (n >= 4 && strcmp(base + n - 4, "32.c") == 0) ||
-         strstr(base, "32_") != NULL || strstr(base, "_32") != NULL;
+         strstr(base, "32_") != NULL || strstr(base, "_32") != NULL ||
+         strstr(base, "32-") != NULL || strstr(base, "-32") != NULL;
 }
 
 static int test_compile_archive_source(const char *cc, const char *src_path,
@@ -854,19 +855,6 @@ static int test_compile_archive_source(const char *cc, const char *src_path,
   cc_argv[cc_argc++] = (char *)obj_path;
   cc_argv[cc_argc] = NULL;
   int cc_rc = run_debug_argv(cc_argv, 30, 1);
-  if (cc_rc != 0 && use_m32) {
-    cc_argc = 0;
-    cc_argv[cc_argc++] = (char *)cc;
-    cc_argv[cc_argc++] = (char *)"-c";
-    cc_argv[cc_argc++] = (char *)"-fno-pic";
-    cc_argv[cc_argc++] = (char *)"-fno-builtin";
-    cc_argv[cc_argc++] = (char *)"-fno-inline";
-    cc_argv[cc_argc++] = (char *)src_path;
-    cc_argv[cc_argc++] = (char *)"-o";
-    cc_argv[cc_argc++] = (char *)obj_path;
-    cc_argv[cc_argc] = NULL;
-    cc_rc = run_debug_argv(cc_argv, 30, 1);
-  }
   return cc_rc == 0;
 }
 
@@ -901,9 +889,13 @@ static void test_collect_archive_sibling_sources(const char *archive_path, StrVe
     return;
   memcpy(stem, base, blen - 2);
   stem[blen - 2] = '\0';
+  for (char *p = stem; *p; ++p) {
+    if (*p == '_')
+      *p = '-';
+  }
 
   char prefix[PATH_MAX];
-  snprintf(prefix, sizeof(prefix), "%s_", stem);
+  snprintf(prefix, sizeof(prefix), "%s-", stem);
   size_t plen = strlen(prefix);
   DIR *d = opendir(dir);
   if (!d)
@@ -950,6 +942,17 @@ static int test_build_missing_archive(const char *archive_path) {
   char single_src[PATH_MAX];
   snprintf(single_src, sizeof(single_src), "%s", archive_path);
   snprintf(single_src + alen - 2, sizeof(single_src) - alen + 2, ".c");
+  const char *single_base = strrchr(single_src, '/');
+  char *single_name = single_base ? (char *)single_base + 1 : single_src;
+#ifdef _WIN32
+  char *single_backslash = strrchr(single_src, '\\');
+  if (single_backslash && single_backslash + 1 > single_name)
+    single_name = single_backslash + 1;
+#endif
+  for (char *p = single_name; *p; ++p) {
+    if (*p == '_')
+      *p = '-';
+  }
   if (nyt_is_file(single_src))
     sv_push(&srcs, single_src);
   else
@@ -987,19 +990,37 @@ static int test_build_missing_archive(const char *archive_path) {
   }
 
   if (ok && objs.len > 0) {
-    remove(archive_path);
+    char archive_tmp[PATH_MAX];
+    snprintf(archive_tmp, sizeof(archive_tmp), "%s.tmp-XXXXXX", archive_path);
+    int archive_fd = mkstemp(archive_tmp);
+    if (archive_fd >= 0) {
+      close(archive_fd);
+      remove(archive_tmp);
+    } else {
+      ok = 0;
+    }
     char **ar_argv = (char **)calloc(objs.len + 4, sizeof(char *));
     if (!ar_argv) {
       ok = 0;
-    } else {
+    } else if (ok) {
       size_t argc = 0;
       ar_argv[argc++] = (char *)"ar";
       ar_argv[argc++] = (char *)"rcs";
-      ar_argv[argc++] = (char *)archive_path;
+      ar_argv[argc++] = archive_tmp;
       for (size_t i = 0; i < objs.len; ++i)
         ar_argv[argc++] = objs.items[i];
       ar_argv[argc] = NULL;
-      ok = run_debug_argv(ar_argv, 30, 1) == 0 && nyt_is_file(archive_path);
+      ok = run_debug_argv(ar_argv, 30, 1) == 0 && nyt_is_file(archive_tmp);
+      if (ok) {
+#ifdef _WIN32
+        ok = MoveFileExA(archive_tmp, archive_path,
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+        ok = rename(archive_tmp, archive_path) == 0;
+#endif
+      }
+      if (!ok)
+        remove(archive_tmp);
       free(ar_argv);
     }
   }

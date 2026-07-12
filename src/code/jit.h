@@ -8,6 +8,7 @@
 void ny_jit_init_native_once(void);
 void ny_jit_prepare_execution(void);
 void *ny_jit_resolve_symbol(const char *symbol);
+void *ny_jit_load_library(const char *path);
 void ny_jit_map_unresolved_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
                                    const char *entry_name);
 void ny_jit_add_runtime_symbols(void);
