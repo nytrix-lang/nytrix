@@ -72,8 +72,10 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
   pages retain platform W^X handling; `addr_of` and `borrow` accept
   dereferenced pointer lvalues in native lowering.
 - The internal C importer now loads external scalar globals with their raw C
-  ABI representation, uses target-aware layouts, and has a combined nested
-  aggregate/callback/variadic/libc regression instead of isolated probes only.
+  ABI representation, resolves ABI-width `size_t`/`ssize_t`/`ptrdiff_t`/
+  `intptr_t`/`uintptr_t` spellings, uses target-aware layouts, and covers
+  local-header nested layouts, pointer callbacks, variadics, and libc calls
+  in one combined regression alongside the isolated probes.
 - Supported x86-64 native-only runs now encode, relocate, W^X-finalize, and
   execute directly from memory. Runtime calls use local trampolines, removing
   temporary objects, runtime recompilation, external linking, and process spawn
@@ -109,13 +111,21 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - The watcher code is specialized per platform in the compiler and standard library.
 
 ### Fixed
-- Apple-arm64 MCJIT memory now uses the correct `MAP_JIT` fallback, restores
-  execute mode after finalization errors and engine disposal, and explicitly
-  prepares persistent REPL calls before entering generated code. This fixes the
-  hosted macOS `BusError` failures in comptime dictionaries and proof-logic.
-- LLDB failure replay now supplies explicit boolean values for frame variable
-  type/location output, allowing the remaining disassembly and memory-region
-  diagnostics to run instead of stopping on an ambiguous-option error.
+- Apple-arm64 MCJIT now uses LLVM's maintained section memory manager and
+  write-then-execute finalization path. The faulty custom `MAP_JIT` allocator
+  was removed instead of keeping a second executable-page lifecycle.
+- Trace and `--debug` compilation no longer render progress bars, and
+  `--no-progress` now consistently overrides environment-driven progress on
+  every platform. Failure replay also forces `--no-progress --color=never` so
+  debugger output stays stable and readable.
+- Failure replay preserves `.nshape` compiler flags, explicit native targets,
+  and every `flags_matrix` row instead of debugging a different configuration.
+  LLDB uses valid `frame variable -T -L` switches, allowing disassembly and
+  memory-region diagnostics to continue.
+- Windows JIT symbol resolution provides a portable variadic `snprintf`
+  bridge and `optind` compatibility storage, local libc fixtures use
+  target-aware `size_t`, and the direct internal-C variadic import regression
+  now runs on Windows instead of being capability-skipped.
 - `std.core.syntax.syntax` now uses one full `std.core.dict_mod` import, keeping
   `dict_write` and the other dictionary helpers unambiguous.
 - Various platform-conditional and watcher handle lifetime issues during cross-platform implementation.

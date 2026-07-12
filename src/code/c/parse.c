@@ -383,6 +383,29 @@ static int parser_lookup_typedef(ny_parser_t *p, ny_ctok_t name,
   return 0;
 }
 
+static int parser_lookup_abi_typedef(ny_parser_t *p, ny_ctok_t name,
+                                     ny_ctype_t *out) {
+  if (!p || name.kind != NY_CTOK_IDENT || !out)
+    return 0;
+  bool is_size = ny_ctok_eq(name, "size_t") ||
+                 ny_ctok_eq(name, "uintptr_t");
+  bool is_signed_size = ny_ctok_eq(name, "ssize_t") ||
+                        ny_ctok_eq(name, "ptrdiff_t") ||
+                        ny_ctok_eq(name, "intptr_t");
+  if (!is_size && !is_signed_size)
+    return 0;
+  type_init(out);
+  out->flags = is_size ? NY_CTYPEF_UNSIGNED : NY_CTYPEF_SIGNED;
+  if (ny_c_abi_is_32(p->abi)) {
+    out->kind = NY_CTYPE_INT;
+  } else {
+    out->kind = NY_CTYPE_LONG;
+    if (ny_c_abi_is_win64(p->abi))
+      out->flags |= NY_CTYPEF_LONG_LONG;
+  }
+  return 1;
+}
+
 static void parser_note_typedef(ny_parser_t *p, ny_ctok_t name,
                                 const ny_ctype_t *ty) {
   if (!p || !ty || name.kind != NY_CTOK_IDENT)
@@ -1657,7 +1680,8 @@ static int parse_type_spec(ny_parser_t *p, ny_ctype_t *ty) {
     }
     if (!saw && p->tok.kind == NY_CTOK_IDENT) {
       ny_ctype_t named;
-      if (parser_lookup_typedef(p, p->tok, &named)) {
+      if (parser_lookup_typedef(p, p->tok, &named) ||
+          parser_lookup_abi_typedef(p, p->tok, &named)) {
         *ty = named;
         saw = 1;
         parse_advance(p);

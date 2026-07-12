@@ -1354,6 +1354,10 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
   }
   for (int i = 0; i < flagc && argc < 76; i++)
     argv[argc++] = flagv[i];
+  if (trace_exec) {
+    argv[argc++] = "--no-progress";
+    argv[argc++] = "--color=never";
+  }
   argv[argc++] = (char *)exec_path;
   argv[argc] = NULL;
 
@@ -1716,6 +1720,7 @@ static int append_arg(char **argv, int *argc, int max, char *arg) {
 }
 
 static void debug_replay_env(void) {
+  ny_setenv("NYTRIX_PROGRESS", "0", 1);
   ny_setenv("NYTRIX_JIT_CACHE", "0", 1);
   ny_setenv("NYTRIX_AOT_CACHE", "0", 1);
   ny_setenv("NYTRIX_STD_CACHE", "0", 1);
@@ -1852,10 +1857,6 @@ static int test_debugger_for_rc(int rc) {
   return 0;
 }
 
-static int test_is_error_path(const char *path) {
-  return path && strncmp(path, "etc/tests/fuzz/errors/", 22) == 0;
-}
-
 static int test_is_ownership_error_path(const char *path) {
   return path && strstr(path, "etc/tests/fuzz/errors/ownership/") != NULL;
 }
@@ -1888,8 +1889,7 @@ static int test_is_unsupported_native_platform(const char *path) {
 #endif
 #ifdef _WIN32
   if (path &&
-      (strcmp(path, "etc/tests/rt/native/c/internal-byvalue-param-import-lowering.nshape") == 0 ||
-       strcmp(path, "etc/tests/rt/native/c/internal-variadic-import-lowering.nshape") == 0))
+      strcmp(path, "etc/tests/rt/native/c/internal-byvalue-param-import-lowering.nshape") == 0)
     return 1;
 #endif
   return 0;
@@ -1923,22 +1923,26 @@ static void gh_group_end(void) {
 
 static int build_trace_argv(char **argv, int max, const char *bin, const char *path,
                             const char *exec_path, const char *std_path, const char *std_bc,
-                            char *flags_buf, char **flags_out, char **expect_out) {
+                            const char *matrix_flags, char *flags_buf,
+                            char **flags_out, char **expect_out) {
   int argc = 0;
   char *flagv[32];
   int flagc = 0;
+  int has_native_backend = 0;
   if (flags_out)
     *flags_out = NULL;
   if (expect_out)
     *expect_out = NULL;
   flags_buf[0] = '\0';
-  if (test_is_error_path(path)) {
-    read_error_meta(path, flags_out, expect_out);
-    if (flags_out && *flags_out) {
-      snprintf(flags_buf, 1024, "%s", *flags_out);
-      trim_inplace(flags_buf);
-      flagc = split_words(flags_buf, flagv, 32);
-    }
+  read_error_meta(path, flags_out, expect_out);
+  const char *base_flags = flags_out && *flags_out ? *flags_out : NULL;
+  if ((base_flags && *base_flags) || (matrix_flags && *matrix_flags)) {
+    snprintf(flags_buf, 1024, "%s%s%s", base_flags ? base_flags : "",
+             base_flags && *base_flags && matrix_flags && *matrix_flags ? " " : "",
+             matrix_flags ? matrix_flags : "");
+    trim_inplace(flags_buf);
+    has_native_backend = native_backend_explicit(flags_buf);
+    flagc = split_words(flags_buf, flagv, 32);
   }
   if (!append_arg(argv, &argc, max, (char *)bin) ||
       !append_arg(argv, &argc, max, "-trace"))
@@ -1956,7 +1960,7 @@ static int build_trace_argv(char **argv, int max, const char *bin, const char *p
         !append_arg(argv, &argc, max, (char *)std_bc))
       return 0;
   }
-  if (path_is_native_runtime_test(path)) {
+  if (path_is_native_runtime_test(path) && !has_native_backend) {
     if (!append_arg(argv, &argc, max, "--native-backend") ||
         !append_arg(argv, &argc, max, "x86_64"))
       return 0;
@@ -1969,6 +1973,9 @@ static int build_trace_argv(char **argv, int max, const char *bin, const char *p
     if (!append_arg(argv, &argc, max, "--ownership-strict"))
       return 0;
   }
+  if (!append_arg(argv, &argc, max, "--no-progress") ||
+      !append_arg(argv, &argc, max, "--color=never"))
+    return 0;
   return append_arg(argv, &argc, max, (char *)(exec_path && *exec_path ? exec_path : path));
 }
 
@@ -1991,7 +1998,7 @@ static void run_debugger_replay(const char *debugger, char *const trace_argv[], 
     append_arg(argv, &argc, 192, "-k");
     append_arg(argv, &argc, 192, "frame info");
     append_arg(argv, &argc, 192, "-k");
-    append_arg(argv, &argc, 192, "frame variable -T true -L true");
+    append_arg(argv, &argc, 192, "frame variable -T -L");
     append_arg(argv, &argc, 192, "-k");
     append_arg(argv, &argc, 192, "disassemble --frame");
     append_arg(argv, &argc, 192, "-k");
@@ -2067,9 +2074,6 @@ static void debug_replay_failed_tests(StrVec *failed_paths, const char *bin, con
            nyt_clr(NYT_RESET));
   for (size_t i = 0; i < failed_paths->len; i++) {
     const char *path = failed_paths->items[i];
-    char flags_buf[1024];
-    char *flags = NULL;
-    char *expect = NULL;
     char *materialized_path = NULL;
     const char *exec_path = path;
     if (path && nyt_ends_with(path, ".nshape")) {
@@ -2081,32 +2085,50 @@ static void debug_replay_failed_tests(StrVec *failed_paths, const char *bin, con
       }
       exec_path = materialized_path;
     }
-    char *trace_argv[96];
-    if (!build_trace_argv(trace_argv, 96, bin, path, exec_path, std_path, std_bc,
-                          flags_buf, &flags, &expect)) {
-      printf("%s[debug]%s cannot build replay argv for %s\n", nyt_clr(NYT_GRAY),
-             nyt_clr(NYT_RESET), disp_path(path));
-      if (materialized_path) {
-        remove(materialized_path);
-        free(materialized_path);
+
+    char *matrix = path && nyt_ends_with(path, ".nshape")
+                       ? shape_meta_string(path, "flags_matrix")
+                       : NULL;
+    char matrix_buf[4096] = {0};
+    char *rows[64];
+    int rowc = 0;
+    if (matrix && *matrix) {
+      snprintf(matrix_buf, sizeof(matrix_buf), "%s", matrix);
+      rowc = split_flag_matrix_rows(matrix_buf, rows, 64);
+    }
+    int variants = rowc > 0 ? rowc : 1;
+    for (int variant = 0; variant < variants; variant++) {
+      const char *matrix_flags = rowc > 0 ? rows[variant] : NULL;
+      char flags_buf[1024];
+      char *flags = NULL;
+      char *expect = NULL;
+      char *trace_argv[96];
+      if (!build_trace_argv(trace_argv, 96, bin, path, exec_path, std_path, std_bc,
+                            matrix_flags, flags_buf, &flags, &expect)) {
+        printf("%s[debug]%s cannot build replay argv for %s\n", nyt_clr(NYT_GRAY),
+               nyt_clr(NYT_RESET), disp_path(path));
+        error_meta_free(flags, expect);
+        continue;
+      }
+      if (matrix_flags && *matrix_flags)
+        printf("%s[debug]%s replay flags: %s\n", nyt_clr(NYT_GRAY),
+               nyt_clr(NYT_RESET), matrix_flags);
+      gh_group_begin("trace replay", path);
+      int trace_rc = run_debug_argv(trace_argv, timeout_sec, 0);
+      printf("trace replay exit status: %d\n", trace_rc);
+      gh_group_end();
+      if (trace_rc != 0 && debugger && test_debugger_for_rc(trace_rc)) {
+        gh_group_begin("debugger replay", path);
+        run_debugger_replay(debugger, trace_argv, timeout_sec);
+        gh_group_end();
       }
       error_meta_free(flags, expect);
-      continue;
     }
-    gh_group_begin("trace replay", path);
-    int trace_rc = run_debug_argv(trace_argv, timeout_sec, 0);
-    printf("trace replay exit status: %d\n", trace_rc);
-    gh_group_end();
-    if (trace_rc != 0 && debugger && test_debugger_for_rc(trace_rc)) {
-      gh_group_begin("debugger replay", path);
-      run_debugger_replay(debugger, trace_argv, timeout_sec);
-      gh_group_end();
-    }
+    free(matrix);
     if (materialized_path) {
       remove(materialized_path);
       free(materialized_path);
     }
-    error_meta_free(flags, expect);
   }
 }
 

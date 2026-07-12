@@ -22,8 +22,8 @@ typedef struct NyComplexDiv {
 } NyComplexDiv;
 
 extern int optind;
-int snprintf(char *dst, unsigned long cap, const char *format, ...);
-void qsort(void *base, unsigned long count, unsigned long width,
+int snprintf(char *dst, size_t cap, const char *format, ...);
+void qsort(void *base, size_t count, size_t width,
            NyComplexCompare compare);
 NyComplexDiv div(int numerator, int denominator);
 

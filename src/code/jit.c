@@ -9,9 +9,6 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #endif
-#if !defined(_WIN32) && defined(__APPLE__)
-#include <sys/mman.h>
-#endif
 #include "priv.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/ExecutionEngine.h>
@@ -21,12 +18,21 @@
 #include <llvm-c/Support.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm/Config/llvm-config.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
-extern void pthread_jit_write_protect_np(int enabled) __attribute__((weak_import));
+#ifdef _WIN32
+static int ny_jit_optind = 1;
+
+static int ny_jit_snprintf(char *dst, uint64_t cap, const char *format, ...) {
+  va_list ap;
+  va_start(ap, format);
+  int written = vsnprintf(dst, (size_t)cap, format, ap);
+  va_end(ap);
+  return written;
+}
 #endif
 
 extern int64_t rt_alloc_string(const char *s);
@@ -224,150 +230,6 @@ static void *ny_missing_extern_stub_for_arity(int arity, bool variadic) {
   }
 }
 
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
-#ifndef MAP_ANON
-#define MAP_ANON MAP_ANONYMOUS
-#endif
-#ifndef MAP_JIT
-#define MAP_JIT 0x800
-#endif
-
-typedef struct ny_apple_jit_alloc_t {
-  void *base;
-  size_t size;
-  bool code;
-  bool read_only;
-  struct ny_apple_jit_alloc_t *next;
-} ny_apple_jit_alloc_t;
-
-typedef struct ny_apple_jit_mm_t {
-  ny_apple_jit_alloc_t *allocs;
-} ny_apple_jit_mm_t;
-
-static size_t ny_jit_page_size(void) {
-  long page = sysconf(_SC_PAGESIZE);
-  return page > 0 ? (size_t)page : 16384u;
-}
-
-static uintptr_t ny_jit_align_up(uintptr_t value, uintptr_t alignment) {
-  if (alignment <= 1)
-    return value;
-  return (value + alignment - 1u) & ~(alignment - 1u);
-}
-
-static size_t ny_jit_round_page(size_t size) {
-  size_t page = ny_jit_page_size();
-  if (size == 0)
-    size = 1;
-  return (size + page - 1u) & ~(page - 1u);
-}
-
-static void ny_apple_jit_write_protect(int enabled) {
-  if (pthread_jit_write_protect_np)
-    pthread_jit_write_protect_np(enabled);
-}
-
-static uint8_t *ny_apple_jit_alloc_section(void *opaque, uintptr_t size,
-                                           unsigned alignment, bool code,
-                                           bool read_only) {
-  ny_apple_jit_mm_t *mm = (ny_apple_jit_mm_t *)opaque;
-  if (!mm)
-    return NULL;
-  uintptr_t align = alignment ? (uintptr_t)alignment : 16u;
-  if ((align & (align - 1u)) != 0)
-    align = 16u;
-  size_t alloc_size = ny_jit_round_page((size_t)size + (size_t)align);
-  int flags = MAP_PRIVATE | MAP_ANON | (code ? MAP_JIT : 0);
-  int prot = PROT_READ | PROT_WRITE | (code ? PROT_EXEC : 0);
-  void *base = mmap(NULL, alloc_size, prot, flags, -1, 0);
-  if (base == MAP_FAILED)
-    return NULL;
-
-  ny_apple_jit_alloc_t *node = calloc(1, sizeof(*node));
-  if (!node) {
-    munmap(base, alloc_size);
-    return NULL;
-  }
-  node->base = base;
-  node->size = alloc_size;
-  node->code = code;
-  node->read_only = read_only;
-  node->next = mm->allocs;
-  mm->allocs = node;
-  if (code)
-    ny_apple_jit_write_protect(0);
-  return (uint8_t *)ny_jit_align_up((uintptr_t)base, align);
-}
-
-static uint8_t *ny_apple_jit_alloc_code(void *opaque, uintptr_t size,
-                                        unsigned alignment, unsigned section_id,
-                                        const char *section_name) {
-  (void)section_id;
-  (void)section_name;
-  return ny_apple_jit_alloc_section(opaque, size, alignment, true, false);
-}
-
-static uint8_t *ny_apple_jit_alloc_data(void *opaque, uintptr_t size,
-                                        unsigned alignment, unsigned section_id,
-                                        const char *section_name,
-                                        LLVMBool is_read_only) {
-  (void)section_id;
-  (void)section_name;
-  return ny_apple_jit_alloc_section(opaque, size, alignment, false,
-                                    is_read_only != 0);
-}
-
-static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
-  ny_apple_jit_mm_t *mm = (ny_apple_jit_mm_t *)opaque;
-  if (!mm)
-    return 0;
-  LLVMBool failed = 0;
-  for (ny_apple_jit_alloc_t *a = mm->allocs; a; a = a->next) {
-    if (a->code) {
-      __builtin___clear_cache((char *)a->base, (char *)a->base + a->size);
-      continue;
-    }
-    int prot = PROT_READ | (a->read_only ? 0 : PROT_WRITE);
-    if (mprotect(a->base, a->size, prot) != 0) {
-      if (err_msg)
-        *err_msg = LLVMCreateMessage("failed to finalize Apple arm64 JIT data");
-      failed = 1;
-      break;
-    }
-  }
-  ny_apple_jit_write_protect(1);
-  return failed;
-}
-
-static void ny_apple_jit_destroy(void *opaque) {
-  ny_apple_jit_mm_t *mm = (ny_apple_jit_mm_t *)opaque;
-  if (!mm)
-    return;
-  ny_apple_jit_write_protect(1);
-  ny_apple_jit_alloc_t *a = mm->allocs;
-  while (a) {
-    ny_apple_jit_alloc_t *next = a->next;
-    if (a->base && a->size)
-      munmap(a->base, a->size);
-    free(a);
-    a = next;
-  }
-  free(mm);
-}
-
-static LLVMMCJITMemoryManagerRef ny_apple_arm64_jit_memory_manager(void) {
-  ny_apple_jit_mm_t *mm = calloc(1, sizeof(*mm));
-  if (!mm)
-    return NULL;
-  LLVMMCJITMemoryManagerRef ref = LLVMCreateSimpleMCJITMemoryManager(
-      mm, ny_apple_jit_alloc_code, ny_apple_jit_alloc_data,
-      ny_apple_jit_finalize, ny_apple_jit_destroy);
-  if (!ref)
-    free(mm);
-  return ref;
-}
-#endif
-
 void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef mod) {
   LLVMInitializeMCJITCompilerOptions(options, sizeof(*options));
   bool apple_arm64 = ny_module_target_is_apple_arm64(mod);
@@ -382,7 +244,6 @@ void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef
       opt_level = 3;
   }
   if (apple_arm64 && (!opt_env || !*opt_env)) {
-
     opt_level = 0;
   }
 
@@ -391,18 +252,12 @@ void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef
   if (fast_isel_env && *fast_isel_env) {
     fast_isel = (atoi(fast_isel_env) != 0);
   } else if (apple_arm64) {
-
     fast_isel = 0;
   }
 
   options->CodeModel = apple_arm64 ? LLVMCodeModelLarge : LLVMCodeModelJITDefault;
   options->OptLevel = (unsigned)opt_level;
   options->EnableFastISel = fast_isel;
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
-  if (apple_arm64)
-    options->MCJMM = ny_apple_arm64_jit_memory_manager();
-#endif
-
   const char *cm = getenv("NYTRIX_JIT_CODE_MODEL");
   if (cm && *cm) {
     if (strcmp(cm, "default") == 0 || strcmp(cm, "jitdefault") == 0)
@@ -427,11 +282,7 @@ void ny_jit_init_native_once(void) {
   initialized = 1;
 }
 
-void ny_jit_prepare_execution(void) {
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
-  ny_apple_jit_write_protect(1);
-#endif
-}
+void ny_jit_prepare_execution(void) {}
 
 #if !defined(_WIN32) && defined(__APPLE__)
 static const char *ny_jit_basename(const char *path) {
@@ -563,6 +414,10 @@ void *ny_jit_resolve_symbol(const char *symbol) {
   if (ptr)
     return ptr;
 #ifdef _WIN32
+  if (strcmp(symbol, "snprintf") == 0 || strcmp(symbol, "_snprintf") == 0)
+    return (void *)(uintptr_t)ny_jit_snprintf;
+  if (strcmp(symbol, "optind") == 0 || strcmp(symbol, "_optind") == 0)
+    return &ny_jit_optind;
   if (strcmp(symbol, "getpid") == 0 || strcmp(symbol, "_getpid") == 0) {
     return (void *)(uintptr_t)_getpid;
   }
@@ -670,6 +525,12 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_simmd_i32_sqlscan_sum_raw",
                 (void *)(uintptr_t)rt_simmd_i32_sqlscan_sum_raw);
   LLVMAddSymbol("__alloc_string", (void *)(uintptr_t)rt_alloc_string);
+#ifdef _WIN32
+  LLVMAddSymbol("snprintf", (void *)(uintptr_t)ny_jit_snprintf);
+  LLVMAddSymbol("_snprintf", (void *)(uintptr_t)ny_jit_snprintf);
+  LLVMAddSymbol("optind", &ny_jit_optind);
+  LLVMAddSymbol("_optind", &ny_jit_optind);
+#endif
 }
 
 static void ny_jit_define_runtime_trampoline(LLVMModuleRef mod, const char *name,

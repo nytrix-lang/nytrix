@@ -1635,13 +1635,13 @@ int ny_pipeline_run(ny_options *opt) {
   if (!ny_safe_run_requested(&opt->safe_run) &&
       ny_try_fast_command_string(opt, t_start))
     return 0;
-  bool show_progress = opt->progress ||
-#ifdef _WIN32
-                       ny_progress_enabled_from_env();
-#else
-                       (!opt->no_progress && isatty(STDERR_FILENO)) ||
-                       ny_progress_enabled_from_env();
+  bool debug_output = opt->trace_exec || debug_enabled;
+  bool show_progress = !opt->no_progress && !debug_output &&
+                       (opt->progress || ny_progress_enabled_from_env()
+#ifndef _WIN32
+                        || isatty(STDERR_FILENO)
 #endif
+                       );
   long progress_total = 8;
   if (opt->output_file)
     progress_total += 2;
