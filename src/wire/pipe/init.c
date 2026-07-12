@@ -69,19 +69,19 @@ static void ny_sanitize_setup_env(const char *sanitize_kind) {
   if (!sanitize_kind || !*sanitize_kind)
     return;
   if (strcmp(sanitize_kind, "address") == 0) {
-    setenv("ASAN_OPTIONS",
+    ny_setenv("ASAN_OPTIONS",
            "abort_on_error=1:detect_leaks=1:print_stacktrace=1:color=never"
            ":detect_odr_violation=0",
            0);
   } else if (strcmp(sanitize_kind, "undefined") == 0) {
-    setenv("UBSAN_OPTIONS",
+    ny_setenv("UBSAN_OPTIONS",
            "abort_on_error=1:print_stacktrace=1:color=never"
            ":halt_on_error=1",
            0);
   } else if (strcmp(sanitize_kind, "leak") == 0) {
-    setenv("LSAN_OPTIONS", "print_suppressions=0", 0);
+    ny_setenv("LSAN_OPTIONS", "print_suppressions=0", 0);
   } else if (strcmp(sanitize_kind, "thread") == 0) {
-    setenv("TSAN_OPTIONS",
+    ny_setenv("TSAN_OPTIONS",
            "abort_on_error=1:report_thread_leaks=0:color=never", 0);
   }
 }
