@@ -17,6 +17,12 @@ bool ny_native_printf(ny_native_writer_t *w, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 void ny_native_set_err(char *err, size_t err_len, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
+size_t ny_native_nir_local_count(const ny_nir_func_t *f);
+bool ny_native_ensure_parent_dir_for_path(const char *path);
+bool ny_native_emit_nir_func(ny_native_writer_t *w,
+                             const ny_native_target_info_t *target,
+                             const ny_nir_func_t *nir, const char *label,
+                             bool tag_return, char *err, size_t err_len);
 
 bool ny_native_x86_64_emit_rt_main(ny_native_writer_t *w,
                                    const ny_native_target_info_t *target,
