@@ -2,7 +2,7 @@
 
 Nytrix uses dated milestones. Use `ny --version` for snapshots.
 
-## [0.8] — Cross-platform hot reload, proof types, renderer parity + polish
+## [0.8.0] - 2026-07-13 — Cross-platform hot reload, proof types, renderer parity + polish
 
 ### Added
 
@@ -109,6 +109,15 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - The watcher code is specialized per platform in the compiler and standard library.
 
 ### Fixed
+- Apple-arm64 MCJIT memory now uses the correct `MAP_JIT` fallback, restores
+  execute mode after finalization errors and engine disposal, and explicitly
+  prepares persistent REPL calls before entering generated code. This fixes the
+  hosted macOS `BusError` failures in comptime dictionaries and proof-logic.
+- LLDB failure replay now supplies explicit boolean values for frame variable
+  type/location output, allowing the remaining disassembly and memory-region
+  diagnostics to run instead of stopping on an ambiguous-option error.
+- `std.core.syntax.syntax` now uses one full `std.core.dict_mod` import, keeping
+  `dict_write` and the other dictionary helpers unambiguous.
 - Various platform-conditional and watcher handle lifetime issues during cross-platform implementation.
 - Parser and dict construction robustness for the new watch handle types.
 ## [0.7] - 2026-06-30 — LLVM-Free Native Backend, C Interop & Polish

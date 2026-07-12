@@ -1991,7 +1991,7 @@ static void run_debugger_replay(const char *debugger, char *const trace_argv[], 
     append_arg(argv, &argc, 192, "-k");
     append_arg(argv, &argc, 192, "frame info");
     append_arg(argv, &argc, 192, "-k");
-    append_arg(argv, &argc, 192, "frame variable --show-types --show-location");
+    append_arg(argv, &argc, 192, "frame variable -T true -L true");
     append_arg(argv, &argc, 192, "-k");
     append_arg(argv, &argc, 192, "disassemble --frame");
     append_arg(argv, &argc, 192, "-k");

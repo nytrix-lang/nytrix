@@ -2057,6 +2057,7 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
     if (std_init_fn_name) {
       uint64_t init_addr = LLVMGetFunctionAddress(g_repl_ee, std_init_fn_name);
       if (init_addr) {
+        ny_jit_prepare_execution();
         char *saved_trace = repl_dup_env_value("NYTRIX_TRACE");
         char *saved_calls = repl_dup_env_value("NYTRIX_TRACE_CALLS");
         char *saved_values = repl_dup_env_value("NYTRIX_TRACE_VALUES");
@@ -2573,6 +2574,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       uint64_t addr = LLVMGetFunctionAddress(g_repl_ee, fn_name);
       if (addr) {
         repl_debug_stage("jit-call");
+        ny_jit_prepare_execution();
         int interrupted = 0;
 #ifndef _WIN32
         int panicked = 0;

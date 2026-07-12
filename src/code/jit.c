@@ -229,7 +229,7 @@ static void *ny_missing_extern_stub_for_arity(int arity, bool variadic) {
 #define MAP_ANON MAP_ANONYMOUS
 #endif
 #ifndef MAP_JIT
-#define MAP_JIT 0
+#define MAP_JIT 0x800
 #endif
 
 typedef struct ny_apple_jit_alloc_t {
@@ -321,13 +321,9 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
   ny_apple_jit_mm_t *mm = (ny_apple_jit_mm_t *)opaque;
   if (!mm)
     return 0;
+  LLVMBool failed = 0;
   for (ny_apple_jit_alloc_t *a = mm->allocs; a; a = a->next) {
     if (a->code) {
-      /* MAP_JIT owns the W^X transition. Calling mprotect on that mapping can
-         be rejected by the hardened runtime; returning early would leave this
-         thread in write mode and make the first generated instruction fault.
-         Keep the mapping's original RWX maximum permissions and switch the
-         current thread to execute mode after relocations are complete. */
       __builtin___clear_cache((char *)a->base, (char *)a->base + a->size);
       continue;
     }
@@ -335,18 +331,19 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
     if (mprotect(a->base, a->size, prot) != 0) {
       if (err_msg)
         *err_msg = LLVMCreateMessage("failed to finalize Apple arm64 JIT data");
-      return 1;
+      failed = 1;
+      break;
     }
   }
   ny_apple_jit_write_protect(1);
-  return 0;
+  return failed;
 }
 
 static void ny_apple_jit_destroy(void *opaque) {
   ny_apple_jit_mm_t *mm = (ny_apple_jit_mm_t *)opaque;
   if (!mm)
     return;
-  ny_apple_jit_write_protect(0);
+  ny_apple_jit_write_protect(1);
   ny_apple_jit_alloc_t *a = mm->allocs;
   while (a) {
     ny_apple_jit_alloc_t *next = a->next;
