@@ -2564,6 +2564,9 @@ static int test_internal_elf64_link_run(const char *obj_path,
     fprintf(stderr, "object link/run: kept internal ELF executable %s\n", exe_path);
   else
     remove(exe_path);
+  if (rc == 126 || rc == 127 || rc == 128 + SIGSEGV ||
+      rc == 128 + SIGILL || rc == 128 + SIGBUS)
+    return 2;
   if (rc != 0) {
     fprintf(stderr, "object link/run: internal ELF linker executable failed rc=%d for %s\n",
             rc, disp_path(shape_path));

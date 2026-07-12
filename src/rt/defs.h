@@ -122,7 +122,7 @@ RT_DEF("__inotify_add_watch", rt_inotify_add_watch, 3, "fn __inotify_add_watch(f
 RT_DEF("__inotify_rm_watch", rt_inotify_rm_watch, 2, "fn __inotify_rm_watch(fd, wd)", "Remove inotify watch.")
 
 RT_DEF("__kqueue", rt_kqueue, 0, "fn __kqueue()", "Create a kqueue (macOS/BSD) for file watching.")
-RT_DEF("__kevent", rt_kevent, 6, "fn __kevent(kq, fd, filter, flags, fflags, data, udata)", "kevent call for registering/reading vnode events.")
+RT_DEF("__kevent", rt_kevent, 7, "fn __kevent(kq, fd, filter, flags, fflags, data, udata)", "kevent call for registering/reading vnode events.")
 RT_DEF("__kqueue_close", rt_kqueue_close, 1, "fn __kqueue_close(kq)", "Close kqueue fd.")
 RT_DEF("__watch_open_vnode", rt_watch_open_vnode, 1, "fn __watch_open_vnode(path)", "Open a file/dir fd suitable for kqueue vnode watching (macOS).")
 
