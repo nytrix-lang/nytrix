@@ -701,6 +701,7 @@ file(GLOB SRC_CODE CONFIGURE_DEPENDS
   "${NYTRIX_ROOT}/src/code/*.c"
   "${NYTRIX_ROOT}/src/code/native/*.c"
   "${NYTRIX_ROOT}/src/code/native/ir/*.c"
+  "${NYTRIX_ROOT}/src/code/native/object/*.c"
   "${NYTRIX_ROOT}/src/code/native/backend/*.c"
   "${NYTRIX_ROOT}/src/code/c/*.c")
 file(GLOB SRC_REPL CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/repl/*.c")
