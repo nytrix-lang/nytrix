@@ -309,7 +309,7 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
   if (!opt || !source || !output_path)
     return;
   uint64_t h = NY_FNV1A64_OFFSET_BASIS;
-  h = ny_fnv1a64_cstr("aot-cache-v9", h);
+  h = ny_fnv1a64_cstr("aot-cache-v10", h);
   h = ny_fnv1a64_cstr(VERSION, h);
 #ifdef NYTRIX_VERSION_COMMIT
   h = ny_fnv1a64_cstr(NYTRIX_VERSION_COMMIT, h);
@@ -346,6 +346,7 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
     const char *const host_envs[] = {
         "NYTRIX_HOST_CFLAGS",
         "NYTRIX_HOST_LDFLAGS",
+        "NYTRIX_NO_PIE",
         "NYTRIX_ASSUME_INT",
         "NYTRIX_COMPILER_ASSERTS",
         "NYTRIX_DEBUG_LOCALS",

@@ -1030,6 +1030,14 @@ static int object_link_run_check(const char *shape_path) {
     return 1;
   }
 
+#if !defined(__linux__)
+  /* ELF execution/link validation belongs to the Linux internal linker.
+     A Mach-O host linker cannot consume these cross-format objects. */
+  sv_free(&links);
+  free(expect_val);
+  return 0;
+#endif
+
   char harness_path[PATH_MAX];
   snprintf(harness_path, sizeof(harness_path), "%s/ny-link-run-%ld-XXXXXX.c",
            nyt_temp_dir(), (long)getpid());
@@ -1704,6 +1712,15 @@ static int test_is_optional_system_stdlib(const char *path) {
           strcmp(path, "lib/os/ui/mod.ny") == 0 ||
           strcmp(path, "lib/os/sound/mod.ny") == 0 ||
           strcmp(path, "lib/os/clipboard.ny") == 0);
+}
+
+static int test_is_unsupported_native_host(const char *path) {
+#if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
+  (void)path;
+  return 0;
+#else
+  return path && strncmp(path, "etc/tests/rt/native/", 20) == 0;
+#endif
 }
 
 static void gh_group_begin(const char *kind, const char *path) {
@@ -3780,6 +3797,7 @@ int ny_test_main(int argc, char **argv) {
 
   StrVec benchmark = {0}, runtime = {0}, repl = {0}, probe = {0}, error_tests = {0}, std = {0};
   size_t skipped_system_stdlib = 0;
+  size_t skipped_native_host = 0;
   const int skip_system_stdlib =
       test_env_truthy("NYTRIX_TEST_SKIP_SYSTEM_STDLIB");
   SuiteStats sb = {0}, sr = {0}, srepl = {0}, sp = {0}, se = {0}, ss = {0};
@@ -3790,7 +3808,9 @@ int ny_test_main(int argc, char **argv) {
     cache_load(&cache, cache_path);
   for (size_t i = 0; i < limit; i++) {
     const char *p = files.items[i];
-    if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
+    if (test_is_unsupported_native_host(p))
+      skipped_native_host++;
+    else if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
       sv_push(&benchmark, p);
     else if (strncmp(p, "etc/tests/rt/", 13) == 0)
       sv_push(&runtime, p);
@@ -3807,6 +3827,9 @@ int ny_test_main(int argc, char **argv) {
   if (skipped_system_stdlib > 0)
     printf("%s[note]%s skipped %zu optional system stdlib modules (UI/audio/clipboard)\n",
            nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_system_stdlib);
+  if (skipped_native_host > 0)
+    printf("%s[note]%s skipped %zu native execution fixtures for a different host architecture\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_host);
 
   StrVec selected_all = {0};
   for (size_t i = 0; i < benchmark.len; i++)
