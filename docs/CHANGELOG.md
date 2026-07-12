@@ -52,6 +52,10 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 ## [0.8] — Cross-platform hot reload, proof types, renderer parity + polish
 
 ### Added
+- Added bounded self-hosted proposition, rewriting, certificate, and Prolog
+  modules, plus compile-time-only `proof` witnesses through `prove(...)`.
+- Added opt-in `--safe-run` CPU, memory, process, file, wall-time, and output
+  containment with platform-specific supervision and diagnostics.
 - Full cross-platform real file watchers enabling fast language-level hot reloading via dynamically linked libraries (`.so` / `.dylib` / `.dll`):
   - Linux: full inotify support with event masks (`IN_*`), `watch_init`/`watch_add`/`watch_rm`, `watch_read_events`, and `watch_has_change`.
   - macOS: kqueue + `EVFILT_VNODE` (NOTE_WRITE, NOTE_DELETE, NOTE_RENAME, NOTE_ATTRIB, etc.) via new runtime primitives.
@@ -62,6 +66,12 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - CLI `--hot-reload` (`--hot`, `-H`), `--watch`, and `--watch-poll` now use real kernel event mechanisms on Linux/macOS/Windows (with mtime fallback), including proper `select`/`kevent`/`WaitForSingleObject` waiting.
 
 ### Changed / Performance & Optimization
+- Native NYIR now coalesces copy/local chains, allocates scalar registers, and
+  selects immediate operands; native-only execution and NYIR bytecode avoid
+  LLVM for supported programs.
+- Native lowering, targets, tiers, reports, NYIR passes, object packaging,
+  result oracles, and compile-time proof analysis now have separate ownership
+  modules instead of growing the former monoliths.
 - File watching and hot reload use OS-native event notification (inotify, kqueue, Win32 directory change APIs) with blocking waits (`select`, `kevent`, `WaitForSingleObject`) instead of busy mtime polling. This reduces CPU usage when idle and improves change detection latency.
 - The `--hot` / `--watch` loop performs edit-save-recompile-rerun with lower overhead.
 - Support for watching combined with dlopen/dlsym of compiled dynamic libraries enables faster iteration without requiring full restarts in user code (provides foundation for reloadable modules).

@@ -1733,8 +1733,8 @@ static int test_is_unsupported_native_platform(const char *path) {
 #endif
 #ifdef _WIN32
   if (path &&
-      (strcmp(path, "etc/tests/rt/native/c/internal_byvalue_param_import_lowering.nshape") == 0 ||
-       strcmp(path, "etc/tests/rt/native/c/internal_variadic_import_lowering.nshape") == 0))
+      (strcmp(path, "etc/tests/rt/native/c/internal-byvalue-param-import-lowering.nshape") == 0 ||
+       strcmp(path, "etc/tests/rt/native/c/internal-variadic-import-lowering.nshape") == 0))
     return 1;
 #endif
   return 0;
