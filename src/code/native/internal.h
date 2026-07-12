@@ -5,6 +5,7 @@
 #include "code/native/ir.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 
 typedef struct ny_native_writer_t {
   char *data;
@@ -29,6 +30,15 @@ bool ny_native_collect_vm_profile(ny_nir_func_t *rt_main,
                                   const ny_options *opt,
                                   ny_nir_eval_result_t *profile,
                                   char *err, size_t err_len);
+bool ny_native_nir_dump_function(FILE *out, const stmt_t *fn, char *err,
+                                 size_t err_len, const ny_options *opt);
+bool ny_native_nir_dump_rt_main(FILE *out, const program_t *prog, char *err,
+                                size_t err_len, const ny_options *opt);
+bool ny_native_nir_dump_rt_main_binary(FILE *out, const program_t *prog,
+                                       char *err, size_t err_len);
+bool ny_native_write_nir_metadata_report(const program_t *prog,
+                                         const ny_options *opt, char *err,
+                                         size_t err_len);
 
 bool ny_native_x86_64_emit_rt_main(ny_native_writer_t *w,
                                    const ny_native_target_info_t *target,
