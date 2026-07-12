@@ -9,8 +9,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 /* Native-result oracle: emit, assemble, execute, capture, and compare the
  * selected backend result with the NYIR VM result. */
