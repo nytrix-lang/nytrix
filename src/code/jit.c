@@ -905,10 +905,10 @@ bool ny_orc_jit_create(LLVMModuleRef module, LLVMContextRef context,
   if (!module || !context || !out_jit)
     return false;
 
-#if LLVM_VERSION_MAJOR < 19
+#if LLVM_VERSION_MAJOR < 21
   if (error_message)
     *error_message = ny_strdup(
-        "ORC JIT requires LLVM 19 or newer; use the default MCJIT engine");
+        "ORC JIT requires LLVM 21 or newer; use the default MCJIT engine");
   return false;
 #else
 
