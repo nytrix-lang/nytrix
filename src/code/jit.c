@@ -20,6 +20,7 @@
 #include <llvm-c/Orc.h>
 #include <llvm-c/Support.h>
 #include <llvm-c/TargetMachine.h>
+#include <llvm/Config/llvm-config.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -904,6 +905,13 @@ bool ny_orc_jit_create(LLVMModuleRef module, LLVMContextRef context,
   if (!module || !context || !out_jit)
     return false;
 
+#if LLVM_VERSION_MAJOR < 19
+  if (error_message)
+    *error_message = ny_strdup(
+        "ORC JIT requires LLVM 19 or newer; use the default MCJIT engine");
+  return false;
+#else
+
   ny_orc_register_extern_symbols(module, cg);
   LLVMOrcLLJITRef jit = NULL;
   LLVMErrorRef err = LLVMOrcCreateLLJIT(&jit, NULL);
@@ -971,6 +979,7 @@ bool ny_orc_jit_create(LLVMModuleRef module, LLVMContextRef context,
     LLVMConsumeError(err);
   *out_jit = jit;
   return true;
+#endif
 }
 
 void ny_orc_jit_dispose(void *jit) {

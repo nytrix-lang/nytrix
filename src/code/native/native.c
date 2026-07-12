@@ -13,8 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 /*
  * Non-LLVM native backend entry point and target registry.
