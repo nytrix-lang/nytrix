@@ -324,7 +324,11 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
   for (ny_apple_jit_alloc_t *a = mm->allocs; a; a = a->next) {
     int prot = PROT_READ;
     if (a->code)
-      prot |= PROT_EXEC;
+      /* MAP_JIT mappings retain RWX VM permissions; Apple silicon switches
+         write-vs-execute access per thread with pthread_jit_write_protect_np.
+         Reducing the mapping to RX here makes some hosted runners treat the
+         page as non-executable despite the subsequent thread toggle. */
+      prot |= PROT_WRITE | PROT_EXEC;
     else if (!a->read_only)
       prot |= PROT_WRITE;
     if (mprotect(a->base, a->size, prot) != 0) {

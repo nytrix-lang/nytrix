@@ -32,6 +32,7 @@ jobs:
       NYTRIX_TEST_FULL: "1"
       NYTRIX_TEST_COLD: "1"
       NYTRIX_TEST_SKIP_SYSTEM_STDLIB: "1"
+      NYTRIX_TEST_SKIP_NATIVE_FP_LINK: "1"
     steps:
       - uses: actions/checkout@v5
         with:

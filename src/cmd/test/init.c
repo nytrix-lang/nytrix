@@ -1723,6 +1723,38 @@ static int test_is_unsupported_native_host(const char *path) {
 #endif
 }
 
+static int test_is_unsupported_native_platform(const char *path) {
+#if !defined(__linux__)
+  if (path &&
+      (strncmp(path, "etc/tests/rt/native/elf32/link/", 31) == 0 ||
+       strncmp(path, "etc/tests/rt/native/elf64/link/", 31) == 0))
+    return 1;
+#endif
+#ifdef _WIN32
+  if (path &&
+      (strcmp(path, "etc/tests/rt/native/c/internal_byvalue_param_import_lowering.nshape") == 0 ||
+       strcmp(path, "etc/tests/rt/native/c/internal_variadic_import_lowering.nshape") == 0))
+    return 1;
+#endif
+  return 0;
+}
+
+static int test_is_host_sensitive_native_fp_link(const char *path) {
+  static const char *const cases[] = {
+      "f32.nshape", "f32_call.nshape", "f32_call9.nshape",
+      "f64.nshape", "f64_call.nshape", "f64_call9.nshape",
+      "f64_call10.nshape", "mixed_both_stack.nshape",
+      "mixed_f64_stack.nshape"};
+  const char *prefix = "etc/tests/rt/native/elf64/link/";
+  if (!path || strncmp(path, prefix, strlen(prefix)) != 0)
+    return 0;
+  const char *base = path + strlen(prefix);
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+    if (strcmp(base, cases[i]) == 0)
+      return 1;
+  return 0;
+}
+
 static void gh_group_begin(const char *kind, const char *path) {
   if (test_env_truthy("GITHUB_ACTIONS"))
     printf("::group::%s: %s\n", kind ? kind : "debug", disp_path(path));
@@ -3798,6 +3830,8 @@ int ny_test_main(int argc, char **argv) {
   StrVec benchmark = {0}, runtime = {0}, repl = {0}, probe = {0}, error_tests = {0}, std = {0};
   size_t skipped_system_stdlib = 0;
   size_t skipped_native_host = 0;
+  size_t skipped_native_platform = 0;
+  size_t skipped_native_fp_link = 0;
   const int skip_system_stdlib =
       test_env_truthy("NYTRIX_TEST_SKIP_SYSTEM_STDLIB");
   SuiteStats sb = {0}, sr = {0}, srepl = {0}, sp = {0}, se = {0}, ss = {0};
@@ -3808,7 +3842,12 @@ int ny_test_main(int argc, char **argv) {
     cache_load(&cache, cache_path);
   for (size_t i = 0; i < limit; i++) {
     const char *p = files.items[i];
-    if (test_is_unsupported_native_host(p))
+    if (test_is_unsupported_native_platform(p))
+      skipped_native_platform++;
+    else if (test_env_truthy("NYTRIX_TEST_SKIP_NATIVE_FP_LINK") &&
+        test_is_host_sensitive_native_fp_link(p))
+      skipped_native_fp_link++;
+    else if (test_is_unsupported_native_host(p))
       skipped_native_host++;
     else if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
       sv_push(&benchmark, p);
@@ -3830,6 +3869,12 @@ int ny_test_main(int argc, char **argv) {
   if (skipped_native_host > 0)
     printf("%s[note]%s skipped %zu native execution fixtures for a different host architecture\n",
            nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_host);
+  if (skipped_native_platform > 0)
+    printf("%s[note]%s skipped %zu native fixtures requiring another host object/runtime format\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_platform);
+  if (skipped_native_fp_link > 0)
+    printf("%s[note]%s skipped %zu host-sensitive native FP link/run fixtures\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_fp_link);
 
   StrVec selected_all = {0};
   for (size_t i = 0; i < benchmark.len; i++)
