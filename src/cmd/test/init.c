@@ -1724,6 +1724,7 @@ static int test_is_unsupported_native_host(const char *path) {
 }
 
 static int test_is_unsupported_native_platform(const char *path) {
+  (void)path;
 #if !defined(__linux__)
   if (path &&
       (strncmp(path, "etc/tests/rt/native/elf32/link/", 31) == 0 ||
