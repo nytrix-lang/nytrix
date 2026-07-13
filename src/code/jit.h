@@ -8,7 +8,6 @@
 void ny_jit_init_native_once(void);
 bool ny_jit_prepare_execution(uint64_t address);
 bool ny_jit_prepare_module_execution(LLVMExecutionEngineRef ee, LLVMModuleRef mod);
-void ny_jit_ensure_executable(uint64_t address);
 void *ny_jit_resolve_symbol(const char *symbol);
 void *ny_jit_load_library(const char *path);
 void ny_jit_map_unresolved_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,

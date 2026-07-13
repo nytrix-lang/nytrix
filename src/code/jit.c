@@ -298,9 +298,6 @@ static uint8_t *ny_apple_jit_alloc_section(void *opaque, uintptr_t size,
     ny_apple_jit_write_protect(1);
     return NULL;
   }
-  fprintf(stderr,
-          "[jit] alloc_section: %s base=%p size=0x%zx prot=0x%x flags=0x%x\n",
-          code ? "CODE" : "data", base, alloc_size, prot, flags);
   ny_apple_jit_alloc_t *node = calloc(1, sizeof(*node));
   if (!node) {
     munmap(base, alloc_size);
@@ -338,7 +335,6 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
   ny_apple_jit_mm_t *mm = opaque;
   if (!mm)
     return 0;
-  fprintf(stderr, "[jit] finalize: start\n");
   for (ny_apple_jit_alloc_t *a = mm->allocs; a; a = a->next) {
     int prot = PROT_READ;
     if (a->code) {
@@ -348,13 +344,7 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
       prot |= PROT_WRITE;
     }
     prot |= PROT_EXEC;
-    int mprot_rc = mprotect(a->base, a->size, prot);
-    fprintf(stderr,
-            "[jit] finalize: %s base=%p size=0x%zx target_prot=0x%x "
-            "mprotect=%d\n",
-            a->code ? "CODE" : (a->read_only ? "rodata" : "data"), a->base,
-            a->size, prot, mprot_rc);
-    if (mprot_rc != 0) {
+    if (mprotect(a->base, a->size, prot) != 0) {
       if (err_msg)
         *err_msg = LLVMCreateMessage(a->code
                                          ? "failed to make Apple arm64 JIT code executable"
@@ -364,7 +354,6 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
     }
   }
   ny_apple_jit_write_protect(1);
-  fprintf(stderr, "[jit] finalize: done write_protect(1)\n");
   return 0;
 }
 
@@ -484,17 +473,8 @@ static bool ny_apple_jit_prepare_address(uint64_t address) {
   mach_vm_address_t base = 0;
   mach_vm_size_t size = 0;
   vm_prot_t protection = 0;
-  if (!ny_apple_jit_region(address, &base, &size, &protection)) {
-    fprintf(stderr, "[jit] prepare_address: FAIL region_not_found addr=0x%lx\n",
-            (unsigned long)address);
+  if (!ny_apple_jit_region(address, &base, &size, &protection))
     return false;
-  }
-  fprintf(stderr,
-          "[jit] prepare_address: addr=0x%lx base=0x%llx size=0x%llx "
-          "prot=0x%x has_exec=%d\n",
-          (unsigned long)address, (unsigned long long)base,
-          (unsigned long long)size, (unsigned)protection,
-          (int)!!(protection & VM_PROT_EXECUTE));
   if (!(protection & VM_PROT_EXECUTE)) {
     ny_apple_jit_write_protect(0);
     int ok = mprotect((void *)(uintptr_t)base, (size_t)size,
@@ -504,18 +484,13 @@ static bool ny_apple_jit_prepare_address(uint64_t address) {
                            VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
     ny_apple_jit_write_protect(1);
     if (!ok || !ny_apple_jit_region(address, NULL, NULL, &protection) ||
-        !(protection & VM_PROT_EXECUTE)) {
-      fprintf(stderr,
-              "[jit] prepare_address: FAIL mprotect_failed ok=%d prot=0x%x\n",
-              ok, (unsigned)protection);
+        !(protection & VM_PROT_EXECUTE))
       return false;
-    }
   } else {
     ny_apple_jit_write_protect(1);
   }
   sys_icache_invalidate((void *)(uintptr_t)base, (size_t)size);
   ny_apple_jit_write_protect(1);
-  fprintf(stderr, "[jit] prepare_address: OK\n");
   return true;
 }
 #endif
@@ -584,31 +559,6 @@ bool ny_jit_prepare_module_execution(LLVMExecutionEngineRef ee, LLVMModuleRef mo
   (void)ee;
   (void)mod;
   return true;
-#endif
-}
-
-void ny_jit_ensure_executable(uint64_t address) {
-#if defined(NY_APPLE_ARM64_JIT)
-  if (!address)
-    return;
-  mach_vm_address_t base = 0;
-  mach_vm_size_t size = 0;
-  vm_prot_t protection = 0;
-  if (ny_apple_jit_region(address, &base, &size, &protection)) {
-    fprintf(stderr,
-            "[jit] ensure_executable: addr=0x%lx base=0x%llx size=0x%llx "
-            "prot=0x%x has_exec=%d\n",
-            (unsigned long)address, (unsigned long long)base,
-            (unsigned long long)size, (unsigned)protection,
-            (int)!!(protection & VM_PROT_EXECUTE));
-  } else {
-    fprintf(stderr,
-            "[jit] ensure_executable: addr=0x%lx region_not_found\n",
-            (unsigned long)address);
-  }
-  ny_apple_jit_write_protect(1);
-#else
-  (void)address;
 #endif
 }
 
