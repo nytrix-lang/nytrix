@@ -503,6 +503,64 @@ bool ny_jit_prepare_execution(uint64_t address) {
 #endif
 }
 
+bool ny_jit_prepare_module_execution(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
+#if defined(NY_APPLE_ARM64_JIT)
+  if (!ee || !mod)
+    return false;
+
+  size_t count = 0;
+  for (LLVMValueRef fn = LLVMGetFirstFunction(mod); fn;
+       fn = LLVMGetNextFunction(fn)) {
+    if (LLVMCountBasicBlocks(fn) != 0)
+      count++;
+  }
+  if (!count)
+    return true;
+
+  uint64_t *addresses = calloc(count, sizeof(*addresses));
+  if (!addresses)
+    return false;
+
+  size_t used = 0;
+  LLVMValueRef first = NULL;
+  for (LLVMValueRef fn = LLVMGetFirstFunction(mod); fn;
+       fn = LLVMGetNextFunction(fn)) {
+    if (LLVMCountBasicBlocks(fn) == 0)
+      continue;
+    if (!first)
+      first = fn;
+    uint64_t addr = (uint64_t)(uintptr_t)LLVMGetPointerToGlobal(ee, fn);
+    if (addr)
+      addresses[used++] = addr;
+  }
+
+  if (first)
+    (void)LLVMGetPointerToGlobal(ee, first);
+
+  char *engine_error = NULL;
+  if (LLVMExecutionEngineGetErrMsg(ee, &engine_error)) {
+    if (engine_error)
+      LLVMDisposeMessage(engine_error);
+    free(addresses);
+    return false;
+  }
+
+  bool ok = true;
+  for (size_t i = 0; i < used; i++) {
+    if (!ny_apple_jit_prepare_address(addresses[i])) {
+      ok = false;
+      break;
+    }
+  }
+  free(addresses);
+  return ok;
+#else
+  (void)ee;
+  (void)mod;
+  return true;
+#endif
+}
+
 #if !defined(_WIN32) && defined(__APPLE__)
 static const char *ny_jit_basename(const char *path) {
   const char *slash = strrchr(path, '/');

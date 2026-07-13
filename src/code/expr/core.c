@@ -4470,6 +4470,16 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
 
   register_jit_symbols(ee, mod, &tcg);
   ny_jit_map_unresolved_symbols(ee, mod, entry_name);
+  if (!ny_jit_prepare_module_execution(ee, mod)) {
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    LLVMDisposeExecutionEngine(ee);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok,
+                     "failed to materialize executable comptime JIT code");
+  }
   LLVMValueRef entry_val = LLVMGetNamedFunction(mod, entry_name);
   uint64_t addr = entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
   if (!addr)
