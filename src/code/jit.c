@@ -490,6 +490,7 @@ static bool ny_apple_jit_prepare_address(uint64_t address) {
     ny_apple_jit_write_protect(1);
   }
   sys_icache_invalidate((void *)(uintptr_t)base, (size_t)size);
+  ny_apple_jit_write_protect(1);
   return true;
 }
 #endif
