@@ -4473,8 +4473,11 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
 
   uint64_t addr =
       entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
+  fprintf(stderr, "[comptime] entry_val=%p addr=0x%lx entry_name=%s\n",
+          (void *)(uintptr_t)entry_val, (unsigned long)addr, entry_name);
   if (!addr)
     addr = LLVMGetFunctionAddress(ee, entry_name);
+  fprintf(stderr, "[comptime] final addr=0x%lx\n", (unsigned long)addr);
   char *jit_exec_err = NULL;
   if (LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
     NY_LOG_ERR("Comptime JIT finalization error: %s\n",
@@ -4500,7 +4503,11 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
       return expr_fail(cg, body->tok,
                        "comptime JIT code memory is not executable");
     }
+    ny_jit_ensure_executable(addr);
+    fprintf(stderr, "[comptime] executing JIT at 0x%lx\n",
+            (unsigned long)addr);
     res = ((int64_t (*)(void))addr)();
+    fprintf(stderr, "[comptime] JIT returned %ld\n", (long)res);
   }
 
   if (prev_bb)
