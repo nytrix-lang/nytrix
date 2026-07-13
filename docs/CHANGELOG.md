@@ -111,12 +111,12 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - The watcher code is specialized per platform in the compiler and standard library.
 
 ### Fixed
-- Apple-arm64 MCJIT finalization now explicitly converts generated code pages
-  from writable JIT mappings to `r-x`, invalidates the instruction cache with
-  `sys_icache_invalidate`, and applies the execute-side pthread JIT transition
-  through the platform declaration. Both Apple compiler architecture spellings
-  (`__aarch64__` and `__arm64__`) select the same memory-manager path, and
-  permission-finalization failures are reported before generated code is called.
+- Apple-arm64 JIT execution now validates the VM region containing every
+  returned entry address immediately before the call. Writable-only regions are
+  forced to `r-x` with `mprotect`/`mach_vm_protect`, re-queried to prove execute
+  permission, and instruction-cache invalidated; failure returns a compiler or
+  REPL error instead of jumping into `rw-` memory. This covers LLVM 18 paths
+  where the MCJIT finalization callback did not affect the actual entry region.
 - Trace and `--debug` compilation no longer render progress bars, and
   `--no-progress` now consistently overrides environment-driven progress on
   every platform. Failure replay also forces `--no-progress --color=never` so

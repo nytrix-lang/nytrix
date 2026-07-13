@@ -12,6 +12,8 @@
 #include <sys/mman.h>
 #include <pthread.h>
 #include <libkern/OSCacheControl.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 #define NY_APPLE_ARM64_JIT 1
 #endif
 #endif
@@ -441,9 +443,63 @@ void ny_jit_init_native_once(void) {
   initialized = 1;
 }
 
-void ny_jit_prepare_execution(void) {
 #if defined(NY_APPLE_ARM64_JIT)
-  ny_apple_jit_write_protect(1);
+static bool ny_apple_jit_region(uint64_t address, mach_vm_address_t *base,
+                                mach_vm_size_t *size, vm_prot_t *protection) {
+  mach_vm_address_t region = (mach_vm_address_t)address;
+  mach_vm_size_t region_size = 0;
+  vm_region_basic_info_data_64_t info = {0};
+  mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+  mach_port_t object = MACH_PORT_NULL;
+  kern_return_t kr = mach_vm_region(
+      mach_task_self(), &region, &region_size, VM_REGION_BASIC_INFO_64,
+      (vm_region_info_t)&info, &count, &object);
+  if (object != MACH_PORT_NULL)
+    mach_port_deallocate(mach_task_self(), object);
+  if (kr != KERN_SUCCESS || address < region || address >= region + region_size)
+    return false;
+  if (base)
+    *base = region;
+  if (size)
+    *size = region_size;
+  if (protection)
+    *protection = info.protection;
+  return true;
+}
+
+static bool ny_apple_jit_prepare_address(uint64_t address) {
+  if (!address)
+    return true;
+  mach_vm_address_t base = 0;
+  mach_vm_size_t size = 0;
+  vm_prot_t protection = 0;
+  if (!ny_apple_jit_region(address, &base, &size, &protection))
+    return false;
+  if (!(protection & VM_PROT_EXECUTE)) {
+    ny_apple_jit_write_protect(0);
+    int ok = mprotect((void *)(uintptr_t)base, (size_t)size,
+                      PROT_READ | PROT_EXEC) == 0;
+    if (!ok)
+      ok = mach_vm_protect(mach_task_self(), base, size, 0,
+                           VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
+    ny_apple_jit_write_protect(1);
+    if (!ok || !ny_apple_jit_region(address, NULL, NULL, &protection) ||
+        !(protection & VM_PROT_EXECUTE))
+      return false;
+  } else {
+    ny_apple_jit_write_protect(1);
+  }
+  sys_icache_invalidate((void *)(uintptr_t)base, (size_t)size);
+  return true;
+}
+#endif
+
+bool ny_jit_prepare_execution(uint64_t address) {
+#if defined(NY_APPLE_ARM64_JIT)
+  return ny_apple_jit_prepare_address(address);
+#else
+  (void)address;
+  return true;
 #endif
 }
 

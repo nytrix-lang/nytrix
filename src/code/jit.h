@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 void ny_jit_init_native_once(void);
-void ny_jit_prepare_execution(void);
+bool ny_jit_prepare_execution(uint64_t address);
 void *ny_jit_resolve_symbol(const char *symbol);
 void *ny_jit_load_library(const char *path);
 void ny_jit_map_unresolved_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,

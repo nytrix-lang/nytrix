@@ -2056,8 +2056,11 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
     register_jit_symbols(g_repl_ee, mod, &g_repl_cg);
     if (std_init_fn_name) {
       uint64_t init_addr = LLVMGetFunctionAddress(g_repl_ee, std_init_fn_name);
+      if (init_addr && !ny_jit_prepare_execution(init_addr)) {
+        fprintf(stderr, "JIT code memory is not executable\n");
+        init_addr = 0;
+      }
       if (init_addr) {
-        ny_jit_prepare_execution();
         char *saved_trace = repl_dup_env_value("NYTRIX_TRACE");
         char *saved_calls = repl_dup_env_value("NYTRIX_TRACE_CALLS");
         char *saved_values = repl_dup_env_value("NYTRIX_TRACE_VALUES");
@@ -2426,8 +2429,12 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         fprintf(stderr, "Native REPL input is unsupported: %s\n",
                 native_err[0] ? native_err : "unsupported native shape");
         last_status = 1;
+      } else if (!ny_jit_prepare_execution(
+                     (uint64_t)(uintptr_t)image.entry)) {
+        fprintf(stderr, "JIT code memory is not executable\n");
+        ny_native_jit_image_free(&image);
+        last_status = 1;
       } else {
-        ny_jit_prepare_execution();
         int64_t result = ((int64_t(*)(void))image.entry)();
         rt_print_flush();
         if (!is_stmt && tty_in)
@@ -2572,9 +2579,13 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       (void)cg.global_vars;
       repl_debug_stage("jit-get-address");
       uint64_t addr = LLVMGetFunctionAddress(g_repl_ee, fn_name);
+      if (addr && !ny_jit_prepare_execution(addr)) {
+        fprintf(stderr, "JIT code memory is not executable\n");
+        last_status = 1;
+        addr = 0;
+      }
       if (addr) {
         repl_debug_stage("jit-call");
-        ny_jit_prepare_execution();
         int interrupted = 0;
 #ifndef _WIN32
         int panicked = 0;

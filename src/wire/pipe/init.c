@@ -91,9 +91,15 @@ typedef struct {
   uint64_t main_addr;
 } ny_jit_safe_call_t;
 
+static bool ny_jit_prepare_call(uint64_t script_addr, uint64_t main_addr) {
+  return script_addr && ny_jit_prepare_execution(script_addr) &&
+         (!main_addr || ny_jit_prepare_execution(main_addr));
+}
+
 static int ny_jit_safe_child(void *raw) {
   ny_jit_safe_call_t *call = (ny_jit_safe_call_t *)raw;
-  ny_jit_prepare_execution();
+  if (!call || !ny_jit_prepare_call(call->script_addr, call->main_addr))
+    return 1;
   ((void (*)(void))call->script_addr)();
   if (call->main_addr)
     (void)((int64_t (*)(void))call->main_addr)();
@@ -135,7 +141,8 @@ static int ny_native_jit_safe_child(void *raw) {
   ny_native_jit_call_t *call = (ny_native_jit_call_t *)raw;
   if (!call || !call->entry)
     return 1;
-  ny_jit_prepare_execution();
+  if (!ny_jit_prepare_execution((uint64_t)(uintptr_t)call->entry))
+    return 1;
   (void)call->entry();
   rt_print_flush();
   return 0;
@@ -2732,8 +2739,11 @@ skip_compilation:
                 opt->input_file ? opt->input_file : "inline ORC JIT workload");
             if (rc != 0)
               exit_code = rc;
+          } else if (!ny_jit_prepare_call(
+                         saddr, call_implicit_main ? main_addr : 0)) {
+            NY_LOG_ERR("JIT code memory is not executable\n");
+            exit_code = 1;
           } else {
-            ny_jit_prepare_execution();
             ((void (*)(void))saddr)();
             if (call_implicit_main && main_addr)
               (void)((int64_t (*)(void))main_addr)();
@@ -2812,8 +2822,10 @@ skip_compilation:
               opt->input_file ? opt->input_file : "inline JIT workload");
           if (rc != 0)
             exit_code = rc;
+        } else if (!ny_jit_prepare_call(saddr, main_addr)) {
+          NY_LOG_ERR("JIT code memory is not executable\n");
+          exit_code = 1;
         } else {
-          ny_jit_prepare_execution();
           if (verbose_enabled >= 3)
             fprintf(stderr, "TRACE: Executing script...\n");
           ((void (*)(void))saddr)();

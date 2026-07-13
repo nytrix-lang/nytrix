@@ -4490,7 +4490,16 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   }
   int64_t res = 1;
   if (addr) {
-    ny_jit_prepare_execution();
+    if (!ny_jit_prepare_execution(addr)) {
+      if (prev_bb)
+        ny_pos(cg, prev_bb);
+      LLVMDisposeExecutionEngine(ee);
+      codegen_dispose(&tcg);
+      if (ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok,
+                       "comptime JIT code memory is not executable");
+    }
     res = ((int64_t (*)(void))addr)();
   }
 
