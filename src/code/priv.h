@@ -481,6 +481,7 @@ bool ny_is_proven_int(codegen_t *cg, scope *scopes, size_t depth, expr_t *e, LLV
 bool ny_is_proven_bool(codegen_t *cg, scope *scopes, size_t depth, expr_t *e, LLVMValueRef v);
 
 LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
+LLVMValueRef ny_native_callback_adapter_value(codegen_t *cg, expr_t *expr);
 LLVMValueRef gen_expr_list_stack_alloc(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
 LLVMValueRef ny_try_member_property_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
 

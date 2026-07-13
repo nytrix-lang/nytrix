@@ -60,9 +60,17 @@ extern char **environ;
 #if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
 #define NY_HAS_ASAN 1
 #endif
+#if __has_feature(undefined_behavior_sanitizer)
+#define NY_HAS_UBSAN 1
+#endif
+#endif
+#if defined(__SANITIZE_UNDEFINED__)
+#define NY_HAS_UBSAN 1
 #endif
 
 #ifdef NY_HAS_ASAN
+const char *__asan_default_options(void) { return "abort_on_error=1"; }
+
 const char *__lsan_default_suppressions() {
   return "leak:rt_malloc\n"
          "leak:rt_to_str\n"
@@ -74,6 +82,10 @@ const char *__lsan_default_suppressions() {
          "leak:^__flt_box_val$\n"
          "leak:^__add$\n";
 }
+#endif
+
+#ifdef NY_HAS_UBSAN
+const char *__ubsan_default_options(void) { return "abort_on_error=1"; }
 #endif
 
 static void write_str(const char *s) {
@@ -198,6 +210,39 @@ static void handle_segv(int sig) {
   _exit(128 + sig);
 }
 
+#if defined(NY_HAS_ASAN) || defined(NY_HAS_UBSAN)
+/* Death callback registered with __sanitizer_set_death_callback.
+ * Runs before the sanitizer calls abort(), so the Nytrix trace appears
+ * after the sanitizer report but before our SIGABRT handler fires. */
+static void ny_sanitizer_death_callback(void) {
+  write_str("\nNytrix trace (most recent call last):\n");
+  int64_t files[32], lines[32], cols[32], funcs[32];
+  int count = rt_trace_get_frames(files, lines, cols, funcs, 16);
+  if (count == 0) {
+    write_str(clr(NY_CLR_GRAY));
+    write_str("  <trace unavailable; run with -trace for frames>\n");
+    write_str(clr(NY_CLR_RESET));
+  }
+  int64_t last_file = 0, last_line = 0, last_func = 0;
+  int repeats = 0;
+  int have_last = 0;
+  for (int i = count - 1; i >= 0; i--) {
+    if (have_last && files[i] == last_file && lines[i] == last_line && funcs[i] == last_func) {
+      repeats++;
+      continue;
+    }
+    write_ny_signal_repeat(repeats);
+    repeats = 0;
+    write_ny_signal_frame(files[i], lines[i], cols[i], funcs[i]);
+    last_file = files[i];
+    last_line = lines[i];
+    last_func = funcs[i];
+    have_last = 1;
+  }
+  write_ny_signal_repeat(repeats);
+}
+#endif
+
 static void ny_install_signal_handlers(void) {
 #ifndef _WIN32
 
@@ -224,6 +269,13 @@ static void ny_install_signal_handlers(void) {
   signal(SIGABRT, handle_segv);
   signal(SIGFPE, handle_segv);
   signal(SIGILL, handle_segv);
+#endif
+
+#if defined(NY_HAS_ASAN) || defined(NY_HAS_UBSAN)
+  {
+    extern void __sanitizer_set_death_callback(void (*callback)(void));
+    __sanitizer_set_death_callback(ny_sanitizer_death_callback);
+  }
 #endif
 }
 
@@ -523,8 +575,10 @@ static void ny_load_default_config(void) {
 }
 
 static void ny_global_cleanup(void) {
-  parser_global_cleanup();
-  ny_intern_cleanup();
+  /* The process is exiting; the OS reclaims all memory.  Skipping cleanup
+   * avoids crashing on corrupted heap metadata (observed with very large
+   * stdlib compilations where glibc detects a corrupted double-linked list
+   * during free). */
 }
 
 static void ny_unsetenv_force(const char *key) {
@@ -1370,6 +1424,7 @@ static void handle_timeout(int sig) {
 #endif
 
 int main(int argc, char **argv, char **envp) {
+#ifndef _WIN32
   // increase stack for large frames in clang_import for complex headers
   struct rlimit rl;
   if (getrlimit(RLIMIT_STACK, &rl) == 0) {
@@ -1383,6 +1438,7 @@ int main(int argc, char **argv, char **envp) {
       (void)setrlimit(RLIMIT_STACK, &rl);
     }
   }
+#endif
   ny_load_default_config();
   int unified_rc = 0;
   if (ny_try_unified_tool(argc, argv, &unified_rc))

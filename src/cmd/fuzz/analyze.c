@@ -185,7 +185,7 @@ int cmd_analyze_ir(const char *path) {
   int top_entry_string_inits = count_sub(f.data, f.len, "@.str.runtime.");
   int top_entry_stores = count_sub(f.data, f.len, "\n  store ");
   int const_string_inits = count_sub(f.data, f.len, "ptrtoint (");
-  printf("{\"ok\":true,\"analysis_engine\":\"nynth_core\",\"runtime_call_count\":%d,"
+  printf("{\"ok\":true,\"analysis_engine\":\"nytrix_core\",\"runtime_call_count\":%d,"
          "\"reflective_call_count\":%d,\"user_runtime_call_count\":%d,"
          "\"user_reflective_call_count\":%d,\"output_runtime_call_count\":%d,"
          "\"hot_runtime_call_count\":%d,\"print_nil_check_count\":%d,"

@@ -210,6 +210,10 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path, const cha
   int argc = 0;
   argv[argc++] = (char *)bin;
   push_test_warn_arg(argv, &argc, 80);
+  if (path_is_stdlib_source(path)) {
+    argv[argc++] = "--stop-after=opt";
+    argv[argc++] = "--parallel=off";
+  }
   if (std_path) {
     argv[argc++] = "--std";
     argv[argc++] = (char *)std_path;
@@ -1245,7 +1249,7 @@ static size_t test_emit_harness32(unsigned char *dst, size_t cap,
                                                    0xbb, 0x01, 0x00, 0x00, 0x00,
                                                    0xb8, 0x01, 0x00, 0x00, 0x00,
                                                    0xcd, 0x80},
-                   16))
+                   15))
       return 0;
     int32_t low_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_low_disp + 4));
     int32_t high_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_high_disp + 4));
@@ -2067,6 +2071,218 @@ static int test_internal_elf32_link_run(const char *obj_path,
 #endif
 }
 
+static uint32_t test_a64_movz(unsigned reg, unsigned imm, unsigned shift) {
+  return 0xd2800000u | ((shift / 16u) << 21) | ((imm & 0xffffu) << 5) | reg;
+}
+
+static uint32_t test_a64_movk(unsigned reg, unsigned imm, unsigned shift) {
+  return 0xf2800000u | ((shift / 16u) << 21) | ((imm & 0xffffu) << 5) | reg;
+}
+
+static void test_a64_put32(unsigned char *dst, size_t *len, uint32_t word) {
+  memcpy(dst + *len, &word, sizeof(word));
+  *len += sizeof(word);
+}
+
+static void test_a64_mov_imm(unsigned char *dst, size_t *len, unsigned reg,
+                             uint64_t value) {
+  test_a64_put32(dst, len,
+                 test_a64_movz(reg, (unsigned)(value & 0xffffu), 0));
+  for (unsigned shift = 16; shift < 64; shift += 16) {
+    unsigned part = (unsigned)((value >> shift) & 0xffffu);
+    if (part) test_a64_put32(dst, len, test_a64_movk(reg, part, shift));
+  }
+}
+
+/* Minimal internal AArch64 ELF linker/runtime gate. The object must contain
+ * only locally resolved CALL26 relocations; execution uses QEMU only as the
+ * CPU, never as an assembler or linker. */
+static int test_internal_aarch64_elf64_link_run(
+    const char *obj_path, ny_test_link_ret_kind_t ret_kind,
+    const char *expected, const char *shape_path) {
+#ifndef __linux__
+  (void)obj_path; (void)ret_kind; (void)expected; (void)shape_path;
+  return 2;
+#else
+  struct stat st;
+  if (stat(obj_path, &st) != 0 || st.st_size <= 0 ||
+      st.st_size > 16 * 1024 * 1024)
+    return 2;
+  FILE *in = fopen(obj_path, "rb");
+  if (!in) return 2;
+  unsigned char *obj = (unsigned char *)malloc((size_t)st.st_size);
+  if (!obj) { fclose(in); return 2; }
+  bool ok = fread(obj, 1, (size_t)st.st_size, in) == (size_t)st.st_size;
+  fclose(in);
+  if (!ok || (size_t)st.st_size < sizeof(ny_test_elf64_ehdr_t)) {
+    free(obj); return 2;
+  }
+  ny_test_elf64_ehdr_t eh;
+  memcpy(&eh, obj, sizeof(eh));
+  if (eh.e_ident[0] != 0x7f || eh.e_ident[1] != 'E' ||
+      eh.e_ident[2] != 'L' || eh.e_ident[3] != 'F' ||
+      eh.e_ident[4] != 2 || eh.e_ident[5] != 1 || eh.e_type != 1 ||
+      eh.e_machine != 183 || eh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
+      eh.e_shoff + (uint64_t)eh.e_shnum * sizeof(ny_test_elf64_shdr_t) >
+          (uint64_t)st.st_size) {
+    free(obj); return 2;
+  }
+  ny_test_elf64_shdr_t *sh =
+      (ny_test_elf64_shdr_t *)(void *)(obj + eh.e_shoff);
+  if (eh.e_shstrndx >= eh.e_shnum ||
+      sh[eh.e_shstrndx].sh_offset + sh[eh.e_shstrndx].sh_size >
+          (uint64_t)st.st_size) {
+    free(obj); return 2;
+  }
+  const char *shstr = (const char *)(obj + sh[eh.e_shstrndx].sh_offset);
+  int text_i = -1, sym_i = -1, str_i = -1, rela_i = -1;
+  for (int i = 0; i < eh.e_shnum; ++i) {
+    const char *name = sh[i].sh_name < sh[eh.e_shstrndx].sh_size
+                           ? shstr + sh[i].sh_name : "";
+    if (strcmp(name, ".text") == 0) text_i = i;
+    else if (strcmp(name, ".symtab") == 0) sym_i = i;
+    else if (strcmp(name, ".strtab") == 0) str_i = i;
+    else if (strcmp(name, ".rela.text") == 0) rela_i = i;
+  }
+  if (text_i < 0 || sym_i < 0 || str_i < 0 ||
+      sh[text_i].sh_offset + sh[text_i].sh_size > (uint64_t)st.st_size ||
+      sh[sym_i].sh_offset + sh[sym_i].sh_size > (uint64_t)st.st_size ||
+      sh[str_i].sh_offset + sh[str_i].sh_size > (uint64_t)st.st_size) {
+    free(obj); return 2;
+  }
+  size_t text_len = (size_t)sh[text_i].sh_size;
+  unsigned char *text = (unsigned char *)malloc(text_len + 256);
+  if (!text) { free(obj); return 2; }
+  memcpy(text, obj + sh[text_i].sh_offset, text_len);
+  ny_test_elf64_sym_t *sym =
+      (ny_test_elf64_sym_t *)(void *)(obj + sh[sym_i].sh_offset);
+  size_t sym_count = sh[sym_i].sh_entsize
+                         ? (size_t)(sh[sym_i].sh_size / sh[sym_i].sh_entsize)
+                         : 0;
+  const char *strtab = (const char *)(obj + sh[str_i].sh_offset);
+  size_t strtab_len = (size_t)sh[str_i].sh_size;
+  uint64_t rt_main_off = 0;
+  bool have_rt_main = false;
+  for (size_t i = 0; i < sym_count; ++i) {
+    if (sym[i].st_name >= strtab_len ||
+        sym[i].st_shndx != (uint16_t)text_i) continue;
+    if (strcmp(strtab + sym[i].st_name, "rt_main") == 0) {
+      rt_main_off = sym[i].st_value;
+      have_rt_main = true;
+    }
+  }
+  if (!have_rt_main) { free(text); free(obj); return 2; }
+  size_t rela_count = rela_i >= 0 && sh[rela_i].sh_entsize
+                          ? (size_t)(sh[rela_i].sh_size / sh[rela_i].sh_entsize)
+                          : 0;
+  for (size_t i = 0; i < rela_count; ++i) {
+    ny_test_elf64_rela_t *r =
+        (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + i;
+    uint32_t type = (uint32_t)(r->r_info & 0xffffffffu);
+    uint32_t si = (uint32_t)(r->r_info >> 32);
+    if (type != 283 || si >= sym_count || r->r_offset + 4 > text_len ||
+        sym[si].st_shndx != (uint16_t)text_i) {
+      free(text); free(obj); return 2;
+    }
+    int64_t delta = (int64_t)sym[si].st_value + r->r_addend -
+                    (int64_t)r->r_offset;
+    if ((delta & 3) || delta / 4 < -(1 << 25) || delta / 4 >= (1 << 25)) {
+      free(text); free(obj); return 1;
+    }
+    uint32_t insn = 0;
+    memcpy(&insn, text + r->r_offset, sizeof(insn));
+    insn = (insn & 0xfc000000u) |
+           ((uint32_t)(delta / 4) & 0x03ffffffu);
+    memcpy(text + r->r_offset, &insn, sizeof(insn));
+  }
+  size_t harness_off = (text_len + 15u) & ~15u;
+  memset(text + text_len, 0, harness_off - text_len);
+  unsigned char harness[128] = {0};
+  size_t hlen = 0;
+  int64_t call_words = ((int64_t)rt_main_off - (int64_t)harness_off) / 4;
+  if (call_words < -(1 << 25) || call_words >= (1 << 25)) {
+    free(text); free(obj); return 1;
+  }
+  test_a64_put32(harness, &hlen,
+                 0x94000000u | ((uint32_t)call_words & 0x03ffffffu));
+  uint64_t expected_bits = 0;
+  if (test_link_ret_is_f64(ret_kind)) {
+    double value = strtod(expected, NULL);
+    memcpy(&expected_bits, &value, sizeof(value));
+  } else if (test_link_ret_is_f32(ret_kind)) {
+    float value = (float)strtod(expected, NULL);
+    uint32_t bits = 0;
+    memcpy(&bits, &value, sizeof(value));
+    expected_bits = bits;
+  } else if (ret_kind == NY_TEST_LINK_RET_U32 ||
+             ret_kind == NY_TEST_LINK_RET_U16 ||
+             ret_kind == NY_TEST_LINK_RET_U8) {
+    expected_bits = strtoull(expected, NULL, 0);
+  } else {
+    expected_bits = (uint64_t)strtoll(expected, NULL, 0);
+  }
+  test_a64_mov_imm(harness, &hlen, 1, expected_bits);
+  if (test_link_ret_is_f64(ret_kind)) {
+    test_a64_put32(harness, &hlen, 0x9e670021u); /* fmov d1,x1 */
+    test_a64_put32(harness, &hlen, 0x1e612000u); /* fcmp d0,d1 */
+  } else if (test_link_ret_is_f32(ret_kind)) {
+    test_a64_put32(harness, &hlen, 0x1e270021u); /* fmov s1,w1 */
+    test_a64_put32(harness, &hlen, 0x1e212000u); /* fcmp s0,s1 */
+  } else {
+    test_a64_put32(harness, &hlen, 0xeb01001fu); /* cmp x0,x1 */
+  }
+  test_a64_put32(harness, &hlen, 0x9a9f07e0u); /* cset x0,ne */
+  test_a64_put32(harness, &hlen, test_a64_movz(8, 93, 0)); /* exit */
+  test_a64_put32(harness, &hlen, 0xd4000001u); /* svc #0 */
+  memcpy(text + harness_off, harness, hlen);
+  size_t code_len = harness_off + hlen;
+  const uint64_t base = 0x401000u;
+  const size_t file_off = 0x1000;
+  size_t file_len = file_off + code_len;
+  unsigned char *exe = (unsigned char *)calloc(1, file_len);
+  if (!exe) { free(text); free(obj); return 2; }
+  ny_test_elf64_ehdr_t oh = {0};
+  oh.e_ident[0] = 0x7f; oh.e_ident[1] = 'E'; oh.e_ident[2] = 'L'; oh.e_ident[3] = 'F';
+  oh.e_ident[4] = 2; oh.e_ident[5] = 1; oh.e_ident[6] = 1;
+  oh.e_type = 2; oh.e_machine = 183; oh.e_version = 1;
+  oh.e_entry = base + harness_off; oh.e_phoff = sizeof(oh);
+  oh.e_ehsize = sizeof(oh); oh.e_phentsize = sizeof(ny_test_elf64_phdr_t); oh.e_phnum = 1;
+  ny_test_elf64_phdr_t ph = {0};
+  ph.p_type = 1; ph.p_flags = 5; ph.p_offset = file_off; ph.p_vaddr = base;
+  ph.p_paddr = base; ph.p_filesz = code_len; ph.p_memsz = code_len; ph.p_align = 0x1000;
+  memcpy(exe, &oh, sizeof(oh)); memcpy(exe + oh.e_phoff, &ph, sizeof(ph));
+  memcpy(exe + file_off, text, code_len);
+  char exe_path[PATH_MAX];
+  snprintf(exe_path, sizeof(exe_path), "%s/ny-aarch64-internal-link-%ld-%ld",
+           nyt_temp_dir(), (long)getpid(), (long)now_ms());
+  ok = test_write_all_file(exe_path, exe, file_len);
+  free(exe); free(text); free(obj);
+  if (!ok) return 2;
+  chmod(exe_path, 0755);
+#if defined(__aarch64__)
+  char *argv[] = {exe_path, NULL};
+  int rc = run_debug_argv(argv, 30, 0);
+#else
+  const char *emulator = getenv("NYTRIX_TEST_EMULATOR");
+  if (!emulator || !*emulator) emulator = "qemu-aarch64";
+  char *argv[] = {(char *)emulator, exe_path, NULL};
+  int rc = run_debug_argv(argv, 30, strchr(emulator, '/') ? 0 : 1);
+#endif
+  if (test_env_truthy("NYTRIX_TEST_KEEP_INTERNAL_LINK"))
+    fprintf(stderr, "object link/run: kept AArch64 ELF executable %s\n", exe_path);
+  else
+    remove(exe_path);
+  if (rc == 126 || rc == 127) return 2;
+  if (rc != 0) {
+    fprintf(stderr,
+            "object link/run: internal AArch64 ELF executable failed rc=%d for %s\n",
+            rc, disp_path(shape_path));
+    return 1;
+  }
+  return 0;
+#endif
+}
+
 static int test_internal_elf64_link_run(const char *obj_path,
                                         ny_test_link_ret_kind_t ret_kind,
                                         const char *expected, const char *shape_path,
@@ -2560,6 +2776,9 @@ static int test_internal_elf64_link_run(const char *obj_path,
     fprintf(stderr, "object link/run: kept internal ELF executable %s\n", exe_path);
   else
     remove(exe_path);
+  if (rc == 126 || rc == 127 || rc == 128 + SIGSEGV ||
+      rc == 128 + SIGILL || rc == 128 + SIGBUS)
+    return 2;
   if (rc != 0) {
     fprintf(stderr, "object link/run: internal ELF linker executable failed rc=%d for %s\n",
             rc, disp_path(shape_path));

@@ -8,6 +8,7 @@ use std.os.ui.render.shared as render_shared
 use std.os.ui.render.gl.constants as gl_constants
 use std.os.ui.render.gl.state as gl_state
 
+;; Creates and returns the texture.
 fn create_texture(int width, int height, any pixels) int {
    create_texture_ex(width, height, pixels, 37, 1, GL_REPEAT, GL_REPEAT, false, 0)
 }
@@ -72,6 +73,7 @@ fn update_texture_rect(int tex_id, int x, int y, int w, int h, any pixels) bool 
    _call9("glTexSubImage2D", GL_TEXTURE_2D, 0, x, y, w, h, _format_external(int(meta.get("format", 37))), GL_UNSIGNED_BYTE, pixels)
 }
 
+;; Returns true when destroy texture.
 fn destroy_texture(int tex_id) bool {
    if tex_id <= 0 { return false }
    if !_soft_enabled() { _delete_name("glDeleteTextures", tex_id) }
@@ -84,6 +86,7 @@ fn destroy_texture(int tex_id) bool {
    true
 }
 
+;; Returns the result of the `texture_size` operation.
 fn texture_size(int tex_id) list {
    def t = _tex_live.get(tex_id, 0)
    if is_dict(t) { return [int(t.get("width", 0)), int(t.get("height", 0))] }
@@ -92,8 +95,10 @@ fn texture_size(int tex_id) list {
 
 fn texture_format(int tex_id) int { int(_tex_formats.get(tex_id, 0)) }
 
+;; Returns the texture count.
 fn texture_count() int { dict_keys(_tex_live).len }
 
+;; Returns the result of the `last_created_texture_id` operation.
 fn last_created_texture_id() int { _last_tex }
 
 fn _read_pixels_buffer(int buffer, any raw) bool {

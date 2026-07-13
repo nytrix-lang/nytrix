@@ -1,0 +1,14 @@
+shape native_only_aggregate_return {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 c-frontend ffi aggregate-return no-libclang]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --c-frontend=nytrix -no-std --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/ffi/internal-byvalue-aggregate-import.h"
+def result = c.div(7, 3)
+def packed = load64_i(result)
+1 / (packed == 4294967298)
+NY
+}

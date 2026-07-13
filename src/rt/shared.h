@@ -2,6 +2,7 @@
 #define RT_COMMON_H
 
 #include "base/compat.h"
+#include "base/util.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,6 +22,17 @@
 #endif
 #if NY_WITH_ASAN
 #include <sanitizer/asan_interface.h>
+#endif
+#if defined(__has_feature)
+#if __has_feature(undefined_behavior_sanitizer)
+#define NY_WITH_UBSAN 1
+#endif
+#endif
+#if defined(__SANITIZE_UNDEFINED__)
+#define NY_WITH_UBSAN 1
+#endif
+#ifndef NY_WITH_UBSAN
+#define NY_WITH_UBSAN 0
 #endif
 #ifndef _WIN32
 #include <errno.h>
@@ -73,11 +85,7 @@
   (((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) && (uintptr_t)(v) > NY_VALUE_PTR_MIN_ADDR)
 
 static inline bool rt_env_is_truthy(const char *v) {
-  if (!v || !*v)
-    return false;
-  return strcmp(v, "0") != 0 && strcmp(v, "false") != 0 && strcmp(v, "False") != 0 &&
-         strcmp(v, "FALSE") != 0 && strcmp(v, "off") != 0 && strcmp(v, "OFF") != 0 &&
-         strcmp(v, "no") != 0 && strcmp(v, "NO") != 0;
+  return ny_env_is_truthy(v);
 }
 
 static inline bool rt_env_enabled(const char *name) {

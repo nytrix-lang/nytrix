@@ -22,12 +22,14 @@ use std.os.ui.render.viewer.editor.project as project
 use std.os.ui.render.viewer.editor.runner as runner
 use std.os.ui.render.viewer.editor.tools as tools
 
+;; Updates the status and returns the resulting state.
 fn set_status(dict st, str msg) dict {
    st["status"] = msg
    st["status_timer"] = 1.5
    st
 }
 
+;; Returns the result of the `file_kind` operation.
 fn file_kind(str path) str {
    project.file_kind(ospath.basename(path))
 }
@@ -37,6 +39,7 @@ fn _kind_is_preview(str kind) bool {
    kind == "audio" || kind == "video" || kind == "archive" || kind == "binary"
 }
 
+;; Reads the text and returns its value.
 fn read_text(str path) str {
    if path.len <= 0 || !file_exists(path) { return "" }
    match file_read(path) { ok(v) -> to_str(v) err(_) -> "" }
@@ -181,6 +184,7 @@ fn _large_text_buffer(str path, str data, str note) dict {
    b
 }
 
+;; Reads the buffer and returns its value.
 fn read_buffer(str path) dict {
    if path.len <= 0 || !file_exists(path) { return ed.buffer("missing", "", "") }
    if is_dir(path) { return _preview_buffer(path, "dir", "", "directory") }
@@ -201,11 +205,13 @@ fn read_buffer(str path) dict {
    b
 }
 
+;; Returns true when write text.
 fn write_text(str path, str text) bool {
    if path.len <= 0 { return false }
    match file_write(path, text) { ok(_) -> true err(_) -> false }
 }
 
+;; Returns the result of the `seed_buffers` operation.
 fn seed_buffers(list args, str fallback="README.md") list {
    mut out = []
    if args.len > 1 {
@@ -219,6 +225,7 @@ fn seed_buffers(list args, str fallback="README.md") list {
    out
 }
 
+;; Returns the result of the `mark_clean` operation.
 fn mark_clean(dict st) dict {
    mut bs = st.get("buffers", [])
    mut b = ed.current_buffer(st)
@@ -241,6 +248,7 @@ fn _buffer_index_for_path(dict st, str path) int {
    -1
 }
 
+;; Returns the result of the `append_file` operation.
 fn append_file(dict st, str path) dict {
    if path.len <= 0 || !file_exists(path) { return set_status(st, "open failed") }
    mut bs = st.get("buffers", [])
@@ -251,6 +259,7 @@ fn append_file(dict st, str path) dict {
    set_status(st, (b.get("readonly", false) ? "preview " : "opened ") + ospath.basename(path))
 }
 
+;; Opens the file and returns the resulting state.
 fn open_file(dict st, str path) dict {
    if path.len <= 0 { return st }
    def idx = _buffer_index_for_path(st, path)
@@ -261,6 +270,7 @@ fn open_file(dict st, str path) dict {
    append_file(st, path)
 }
 
+;; Returns the result of the `project_entry_for_path` operation.
 fn project_entry_for_path(dict model, str path) dict {
    def want = ospath.normalize(path)
    def rows = project.tree(model)
@@ -273,6 +283,7 @@ fn project_entry_for_path(dict model, str path) dict {
    dict(0)
 }
 
+;; Opens the or toggle project row and returns the resulting state.
 fn open_or_toggle_project_row(dict st, dict model, dict entry) dict {
    if entry.get("dir", false) {
       model = project.toggle(model, to_str(entry.get("rel", "")))
@@ -282,6 +293,7 @@ fn open_or_toggle_project_row(dict st, dict model, dict entry) dict {
    {"st": st, "project": model}
 }
 
+;; Updates the output buffer and returns the resulting state.
 fn set_output_buffer(dict st, str name, str text) dict {
    mut bs = st.get("buffers", [])
    mut hit = -1
@@ -306,6 +318,7 @@ fn set_output_buffer(dict st, str name, str text) dict {
    st
 }
 
+;; Returns the result of the `save` operation.
 fn save(dict st) dict {
    def b = ed.current_buffer(st)
    if b.get("readonly", false) { return set_status(st, "read-only preview") }
@@ -324,6 +337,7 @@ fn _tool_output(dict st, str label, dict res) dict {
    set_status(st, res.get("ok", false) ? label + " ok" : label + " exit " + to_str(int(res.get("code", 0))))
 }
 
+;; Returns the result of the `run_current_file` operation.
 fn run_current_file(dict st) dict {
    st = save(st)
    def path = to_str(ed.current_buffer(st).get("path", ""))
@@ -334,6 +348,7 @@ fn run_current_file(dict st) dict {
    set_status(st, res.get("ok", false) ? "run ok" : "run exit " + to_str(int(res.get("code", 0))))
 }
 
+;; Returns the result of the `run_text` operation.
 fn run_text(dict st, str path, str text, str label="selection") dict {
    if path.len <= 0 { return set_status(st, "save before run") }
    if str.strip(text).len <= 0 { return set_status(st, "nothing to run") }
@@ -343,6 +358,7 @@ fn run_text(dict st, str path, str text, str label="selection") dict {
    set_status(st, res.get("ok", false) ? "run " + label + " ok" : "run " + label + " exit " + to_str(int(res.get("code", 0))))
 }
 
+;; Checks the current file and returns the validation result.
 fn check_current_file(dict st) dict {
    st = save(st)
    def path = to_str(ed.current_buffer(st).get("path", ""))
@@ -350,6 +366,7 @@ fn check_current_file(dict st) dict {
    _tool_output(st, "diagnostics: " + ospath.basename(path), tools.check_file(path))
 }
 
+;; Converts the current file and returns the result.
 fn format_current_file(dict st) dict {
    st = save(st)
    def b = ed.current_buffer(st)
@@ -367,6 +384,7 @@ fn format_current_file(dict st) dict {
    _tool_output(st, "format: " + ospath.basename(path), res)
 }
 
+;; Returns the result of the `debug_current_file` operation.
 fn debug_current_file(dict st) dict {
    st = save(st)
    def path = to_str(ed.current_buffer(st).get("path", ""))

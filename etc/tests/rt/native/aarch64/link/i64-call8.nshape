@@ -1,0 +1,15 @@
+shape aarch64_elf64_internal_link_run_call8 {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 aarch64 aapcs64 internal-link qemu call8]
+  template ny-test-case
+  flags "--native-backend aarch64 -emit-only -o /tmp/nytrix-aarch64-link-call8.o"
+  expect object_link_run_i64_36
+  source ny <<'NY'
+fn add8(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g, i64 h) i64 {
+  a + b + c + d + e + f + g + h
+}
+
+add8(1, 2, 3, 4, 5, 6, 7, 8)
+NY
+}

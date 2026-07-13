@@ -380,7 +380,7 @@ static void print_failures_json(FILE *out, compare_state_t *st) {
     fprintf(out, ",\"ny_source\":");
     json_str(out, st->ny_path ? st->ny_path : "");
     if (st->ir_path && *st->ir_path) {
-      fprintf(out, ",\"nynth_ir\":");
+      fprintf(out, ",\"nytrix_ir\":");
       json_str(out, st->ir_path);
     }
     if (f->stderr_text) {
@@ -453,7 +453,7 @@ static void print_compare_row(compare_state_t *st) {
   uint64_t behavior_hash = fnv1a64(behavior, strlen(behavior));
   compare_ir_meta_t meta;
   load_compare_ir_meta(st, &meta);
-  printf("{\"ok\":true,\"engine\":\"nynth_core\",\"compare_engine\":\"nynth_core\",\"case\":");
+  printf("{\"ok\":true,\"engine\":\"nytrix_core\",\"compare_engine\":\"nytrix_core\",\"case\":");
   json_str(stdout, st->case_name);
   if (meta.shape) {
     printf(",\"shape\":");
@@ -515,7 +515,7 @@ static void print_compare_row(compare_state_t *st) {
   printf(",\"ny_source\":");
   json_str(stdout, st->ny_path);
   if (st->ir_path && *st->ir_path) {
-    printf(",\"nynth_ir\":");
+    printf(",\"nytrix_ir\":");
     json_str(stdout, st->ir_path);
   }
   printf(",\"worker_ms\":%.2f,\"expected_output\":", st->worker_ms);
@@ -572,7 +572,7 @@ int native_compare_case_with_features(const char *case_name, const char *c_path,
   st.feature_count = feature_count;
   st.has_shape_counts = compute_source_shape_counts(c_path, ny_path, &st.shape_counts);
   if (!mkdir_p(bin_dir)) {
-    add_failure(&st, "nynth_core", "prepare", "", 1, false,
+    add_failure(&st, "nytrix_core", "prepare", "", 1, false,
                 "mkdir failed", NULL, NULL, NULL);
     st.worker_ms = now_ms() - start;
     print_compare_row(&st);
@@ -809,7 +809,7 @@ int cmd_replay_corpus_entry(int argc, char **argv) {
   bool ok = asprintf(&case_dir, "%s/cases/%s", corpus_dir, entry_id) >= 0 &&
             asprintf(&c_path, "%s/case.c", case_dir) >= 0 &&
             asprintf(&ny_path, "%s/case.ny", case_dir) >= 0 &&
-            asprintf(&ir_path, "%s/case.nynth.json", case_dir) >= 0;
+            asprintf(&ir_path, "%s/case.nytrix.json", case_dir) >= 0;
   if (!ok) {
     printf("{\"ok\":false,\"error\":\"allocation-failed\"}\n");
     free(case_dir); free(c_path); free(ny_path); free(ir_path);

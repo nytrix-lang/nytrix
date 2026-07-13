@@ -1,4 +1,5 @@
 #include "base/options.h"
+#include <errno.h>
 #include "base/common.h"
 #include "base/util.h"
 #include <limits.h>
@@ -636,6 +637,148 @@ static const char *ny_option_value_or_die(const char *arg, const char *flag,
   exit(1);
 }
 
+/* Parse a --safe-run value string:
+ * "cpu:10,wall:15,rss:256m,output:16m,files:128,nproc:32"
+ * Units: seconds (default), k/K=KiB, m/M=MiB, g/G=GiB.  Unknown keys
+ * produce a warning and are skipped.  An empty string sets safe defaults
+ * (cpu=30s, rss=512m, files=256, nproc=64, process group containment). */
+void ny_safe_run_parse(const char *spec, ny_safe_run_t *sr, const char *argv0) {
+  (void)argv0;
+  /* Apply safe defaults when called with empty/NULL or "defaults" */
+  if (!spec || !*spec || strcmp(spec, "defaults") == 0) {
+    sr->cpu_seconds = 30;
+    sr->wall_seconds = 30;
+    sr->max_rss_bytes = 512ULL * 1024 * 1024; /* 512 MiB */
+    sr->max_files = 256;
+    sr->max_processes = 64;
+    sr->max_output_bytes = 16ULL * 1024 * 1024;
+    sr->telemetry = true;
+    sr->telemetry_interval_ms = 250;
+    sr->telemetry_window = 3;
+    sr->contain_process_group = true;
+    return;
+  }
+
+  sr->telemetry = true;
+  if (sr->telemetry_interval_ms <= 0)
+    sr->telemetry_interval_ms = 250;
+  if (sr->telemetry_window <= 0)
+    sr->telemetry_window = 3;
+
+  /* Make a mutable copy for strtok_r. */
+  size_t len = strlen(spec);
+  char *buf = (char *)malloc(len + 1);
+  if (!buf) {
+    fprintf(stderr, "safe-run: out of memory parsing limit spec\n");
+    exit(1);
+  }
+  memcpy(buf, spec, len + 1);
+
+  char *save = NULL;
+  for (char *tok = strtok_r(buf, ",", &save); tok;
+       tok = strtok_r(NULL, ",", &save)) {
+    char *key = tok;
+    char *val = strchr(tok, ':');
+    if (!val) {
+      fprintf(stderr, "safe-run: invalid limit spec '%s' (expected key:value)\n",
+              tok);
+      free(buf);
+      exit(1);
+    }
+    *val++ = '\0';
+
+    /* Trim whitespace from key */
+    while (*key == ' ') key++;
+    char *kend = key + strlen(key) - 1;
+    while (kend > key && *kend == ' ') *kend-- = '\0';
+
+    /* Parse numeric value with optional suffix */
+    char *end = NULL;
+    errno = 0;
+    unsigned long long n = strtoull(val, &end, 10);
+    if (end == val || errno == ERANGE) {
+      fprintf(stderr, "safe-run: invalid number '%s' for key '%s'\n", val, key);
+      free(buf);
+      exit(1);
+    }
+    /* Check for unit suffix */
+    uint64_t multiplier = 1;
+    if (end && *end) {
+      switch (*end) {
+      case 'k': case 'K': multiplier = 1024ULL; break;
+      case 'm': case 'M': multiplier = 1024ULL * 1024; break;
+      case 'g': case 'G': multiplier = 1024ULL * 1024 * 1024; break;
+      case 's': case 'S': multiplier = 1; break; /* seconds (explicit) */
+      default:
+        fprintf(stderr, "safe-run: unknown unit in '%s' for key '%s'\n", val,
+                key);
+        free(buf);
+        exit(1);
+      }
+      if (end[1] != '\0') {
+        fprintf(stderr, "safe-run: invalid unit in '%s' for key '%s'\n", val,
+                key);
+        free(buf);
+        exit(1);
+      }
+    }
+
+    if (n > UINT64_MAX / multiplier) {
+      fprintf(stderr, "safe-run: value '%s' for key '%s' is too large\n", val,
+              key);
+      free(buf);
+      exit(1);
+    }
+    uint64_t amount = (uint64_t)n * multiplier;
+
+    bool has_unit = end && *end;
+    bool byte_limit = strcmp(key, "rss") == 0 || strcmp(key, "as") == 0 ||
+                      strcmp(key, "mem") == 0 ||
+                      strcmp(key, "output") == 0 || strcmp(key, "out") == 0;
+    bool time_limit = strcmp(key, "cpu") == 0 || strcmp(key, "wall") == 0 ||
+                      strcmp(key, "time") == 0;
+    if ((time_limit && has_unit && *end != 's' && *end != 'S') ||
+        (byte_limit && has_unit && (*end == 's' || *end == 'S')) ||
+        (!time_limit && !byte_limit && has_unit)) {
+      fprintf(stderr, "safe-run: unit in '%s' is invalid for key '%s'\n", val,
+              key);
+      free(buf);
+      exit(1);
+    }
+
+    if (strcmp(key, "cpu") == 0) {
+      sr->cpu_seconds = (int)((amount < (uint64_t)INT_MAX) ? amount : INT_MAX);
+    } else if (strcmp(key, "wall") == 0 || strcmp(key, "time") == 0) {
+      sr->wall_seconds = (int)((amount < (uint64_t)INT_MAX) ? amount : INT_MAX);
+    } else if (strcmp(key, "rss") == 0 || strcmp(key, "as") == 0 ||
+               strcmp(key, "mem") == 0) {
+      sr->max_rss_bytes = amount;
+    } else if (strcmp(key, "files") == 0 || strcmp(key, "nofile") == 0) {
+      sr->max_files = (int)((amount < (uint64_t)INT_MAX) ? amount : INT_MAX);
+    } else if (strcmp(key, "nproc") == 0 || strcmp(key, "procs") == 0) {
+      sr->max_processes = (int)((amount < (uint64_t)INT_MAX) ? amount : INT_MAX);
+    } else if (strcmp(key, "output") == 0 || strcmp(key, "out") == 0) {
+      sr->max_output_bytes = amount;
+    } else if (strcmp(key, "group") == 0 || strcmp(key, "contain") == 0) {
+      sr->contain_process_group = (n != 0);
+    } else if (strcmp(key, "telemetry") == 0) {
+      sr->telemetry = (n != 0);
+    } else if (strcmp(key, "sample_ms") == 0) {
+      sr->telemetry_interval_ms =
+          (int)((amount < (uint64_t)INT_MAX) ? amount : INT_MAX);
+    } else if (strcmp(key, "window") == 0) {
+      sr->telemetry_window =
+          (int)((amount < (uint64_t)INT_MAX) ? amount : INT_MAX);
+    } else {
+      fprintf(stderr, "safe-run: unknown limit key '%s'\n", key);
+      free(buf);
+      exit(1);
+    }
+  }
+
+  free(buf);
+}
+
 static bool ny_short_exec_cluster(const char *arg, bool *want_repl,
                                   bool *want_eval) {
   if (!arg || arg[0] != '-' || arg[1] == '-' || arg[1] == '\0')
@@ -949,6 +1092,24 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
                                                    int argc, char **argv,
                                                    const char *argv0) {
   const char *value = NULL;
+  if ((value = ny_option_value_or_die(a, "--native-precompile", i, argc,
+                                      argv, argv0)) != NULL) {
+#if defined(__x86_64__) || defined(_M_X64)
+    ny_set_native_backend_or_die(opt, "x86_64", argv0);
+#else
+    fprintf(stderr,
+            "--native-precompile is currently supported on x86-64 hosts\n");
+    exit(1);
+#endif
+    opt->native_only = true;
+    opt->native_dump_ir = true;
+    opt->nyir_dump_bin = true;
+    opt->nyir_dump_bin_path = value;
+    opt->emit_only = true;
+    opt->run_aot = false;
+    opt->run_jit = false;
+    return true;
+  }
   if (strcmp(a, "-o") == 0 || strcmp(a, "--output") == 0) {
     if (*i + 1 < argc && argv[*i + 1][0] != '-')
       opt->output_file = argv[++(*i)];
@@ -1519,7 +1680,6 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_MAGENTA, "--ownership-strict", "Strict ownership diagnostics"},
       {NY_CLR_MAGENTA, "--borrow-check", "Borrow/ownership diagnostics without RAII cleanup"},
       {NY_CLR_MAGENTA, "--raii", "Alias for --ownership"},
-      {NY_CLR_MAGENTA, "--owbership", "Typo-compatible alias for --ownership"},
       {NY_CLR_MAGENTA, "Note",
        "Typed contracts are non-null by default (nil requires ?T or *T)"},
       {NULL, NULL, NULL}});
@@ -1561,6 +1721,10 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_GREEN, "--host-triple=T", "Host target triple for native build"},
       {NY_CLR_GREEN, "--native-backend=B",
        "Native backend: llvm | x86_64 | x86 | aarch64 | arm | riscv | wasm | bpf | mips | powerpc | avr | amdgpu"},
+      {NY_CLR_GREEN, "--native-only",
+       "Run through NYIR/native object code without LLVM code generation"},
+      {NY_CLR_GREEN, "--native-precompile=PATH",
+       "Write an LLVM-free NYIR binary for later native/VM loading"},
       {NY_CLR_GREEN, "--native-abi=A", "Native ABI: auto | sysv | win64 | aapcs"},
       {NY_CLR_GREEN, "--native-result-oracle[=N]",
        "Compare NYIR VM and x86-64 native raw scalar result"},
@@ -1591,7 +1755,15 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
   ny_usage_items((const ny_usage_entry_t[]){
       {NY_CLR_GREEN, "-run", "Build a native executable and run it (AOT auto)"},
       {NY_CLR_GREEN, "--run=MODE", "MODE: auto | aot | jit"},
-      {NY_CLR_GREEN, "--jit", "Run through MCJIT instead of native AOT"},
+      {NY_CLR_GREEN, "--jit", "Run through LLVM JIT instead of native AOT"},
+      {NY_CLR_GREEN, "--jit-engine=ENGINE",
+       "LLVM JIT engine: orc | mcjit (default: mcjit)"},
+      {NY_CLR_GREEN, "--safe-run[=LIMITS]",
+       "Run with CPU/memory/file/process limits (off by default)"},
+      {NY_CLR_GREEN, "--sanitize=KIND",
+       "Compile with sanitizer and run under safe-exec supervisor\n"
+       "                                        "
+       "    KIND: address | undefined | thread | leak"},
       {NY_CLR_GREEN, "-emit-only", "Compile only; do not execute"},
 #ifdef _WIN32
       {NY_CLR_GREEN, "-o [path]",
@@ -1684,7 +1856,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_BLUE, "-verify", "Verify LLVM module"},
       {NY_CLR_BLUE, "-g", "Emit debug symbols"},
       {NY_CLR_BLUE, "--emit-ir=<path>", "Emit LLVM IR to file"},
-      {NY_CLR_BLUE, "--emit-bc=<path>", "Emit LLVM Bitcode to file"},
+      {NY_CLR_BLUE, "--emit-bc=<path>",
+       "Emit backend bytecode (LLVM BC or native NYIR binary)"},
       {NY_CLR_BLUE, "--entry-name=<n>", "Rename entry point (default: main)"},
       {NY_CLR_BLUE, "--ir-full", "Keep std/lib definitions in IR output"},
       {NY_CLR_BLUE, "--ir-no-std",
@@ -1879,6 +2052,36 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       if (strcmp(a, "-safe-mode") == 0 || strcmp(a, "--safe-mode") == 0 ||
           strcmp(a, "--safe") == 0) {
         opt->safe_mode = true;
+      } else if (strcmp(a, "--native-only") == 0) {
+#if defined(__x86_64__) || defined(_M_X64)
+        ny_set_native_backend_or_die(opt, "x86_64", argv[0]);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        ny_set_native_backend_or_die(opt, "aarch64", argv[0]);
+#else
+        fprintf(stderr,
+                "--native-only requires an x86-64 or AArch64 host encoder\n");
+        exit(1);
+#endif
+        opt->native_only = true;
+        opt->run_aot = true;
+        opt->run_jit = false;
+        opt->emit_only = false;
+      } else if (strcmp(a, "--safe-run") == 0) {
+        ny_safe_run_parse(NULL, &opt->safe_run, argv[0]);
+      } else if (strncmp(a, "--safe-run=", 11) == 0) {
+        ny_safe_run_parse(a + 11, &opt->safe_run, argv[0]);
+      } else if ((value = ny_option_value_or_die(a, "--sanitize", &i, argc,
+                                                  argv, argv[0])) != NULL) {
+        if (strcmp(value, "address") != 0 && strcmp(value, "undefined") != 0 &&
+            strcmp(value, "thread") != 0 && strcmp(value, "leak") != 0) {
+          fprintf(stderr,
+                  "%s: --sanitize: expected address|undefined|thread|leak, "
+                  "got '%s'\n",
+                  argv[0], value);
+          ny_options_usage(argv[0]);
+          exit(1);
+        }
+        opt->sanitize = value;
       } else if ((value = ny_option_value_or_die(a, "--mode", &i, argc, argv,
                                                  argv[0])) != NULL) {
         ny_apply_runtime_mode_or_die(opt, value, argv[0]);
@@ -2133,6 +2336,16 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
                  strcmp(a, "--run-jit") == 0 || strcmp(a, "--run=jit") == 0) {
         opt->run_jit = true;
         opt->run_aot = false;
+      } else if (strncmp(a, "--jit-engine=", 13) == 0) {
+        const char *val = a + 13;
+        if (strcmp(val, "orc") != 0 && strcmp(val, "mcjit") != 0) {
+          fprintf(stderr,
+                  "%s: --jit-engine: expected orc|mcjit, got '%s'\n",
+                  argv[0], val);
+          ny_options_usage(argv[0]);
+          exit(1);
+        }
+        opt->jit_engine = val;
       } else if (strncmp(a, "--run=", 6) == 0) {
         fprintf(stderr, "invalid run mode: %s (expected auto|aot|jit)\n",
                 a + 6);
@@ -2280,8 +2493,7 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         ny_set_heap_policy_or_die(opt, value, argv[0]);
       } else if (strcmp(a, "--rc-gc") == 0) {
         ny_set_heap_policy_or_die(opt, "rc", argv[0]);
-      } else if (strcmp(a, "--ownership") == 0 ||
-                 strcmp(a, "--owbership") == 0 || strcmp(a, "--raii") == 0) {
+      } else if (strcmp(a, "--ownership") == 0 || strcmp(a, "--raii") == 0) {
         opt->ownership = true;
         opt->heap_policy = NY_HEAP_RAII;
         opt->heap_policy_explicit = true;
@@ -2359,8 +2571,7 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
           opt->help_env = true;
           i++;
         }
-      } else if (strcmp(a, "-version") == 0 || strcmp(a, "-verison") == 0 ||
-                 strcmp(a, "--version") == 0)
+      } else if (strcmp(a, "-version") == 0 || strcmp(a, "--version") == 0)
         opt->mode = NY_MODE_VERSION;
       else {
         ny_options_usage(argv[0]);
@@ -2400,6 +2611,10 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
     opt->run_jit = false;
   else if (opt->input_file || opt->command_string || opt->mode == NY_MODE_REPL)
     opt->run_jit = true;
+  if (opt->sanitize && *opt->sanitize && opt->run_jit && !opt->output_file) {
+    opt->run_jit = false;
+    opt->run_aot = true;
+  }
   ny_sync_opt_profile_env(opt);
   if (opt->run_jit && opt->mode != NY_MODE_REPL && !opt->opt_level_explicit &&
       ny_opt_profile_kind_from_name(opt->opt_profile) == NY_OPT_PROFILE_DEFAULT) {

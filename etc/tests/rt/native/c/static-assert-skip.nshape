@@ -1,0 +1,12 @@
+shape static_assert_skip {
+  family "runtime-native"
+  generator "native"
+  features ["c-frontend", "ffi", "static-assert", "summary"]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/ffi/internal-aggregate.h"
+1 + 2
+NY
+}

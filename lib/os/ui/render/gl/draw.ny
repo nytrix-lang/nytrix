@@ -126,6 +126,7 @@ fn _store_line_quad(ptr p, f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, int c)
    true
 }
 
+;; Returns true when draw rect.
 fn draw_rect(f64 x, f64 y, f64 w, f64 h, f64 r, f64 g, f64 b, f64 a) bool {
    draw_rect_fast(x, y, w, h, render_shared.pack_rgba_u32(r, g, b, a))
 }
@@ -264,6 +265,7 @@ fn draw_ring_2d(f64 cx, f64 cy, f64 inner_r, f64 outer_r, int segments, f64 r, f
    draw_vertices(p, segments * 6, -1)
 }
 
+;; Returns true when draw rect outline fast.
 fn draw_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int color_u32, f64 thickness=1.0) bool {
    def t = max(1.0, thickness)
    if _soft_enabled() {
@@ -441,10 +443,12 @@ fn draw_glyph_bitmap_scaled(
    drew
 }
 
+;; Returns true when draw rect tex.
 fn draw_rect_tex(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 r, f64 g, f64 b, f64 a) bool {
    draw_rect_tex_uv(x, y, w, h, tex_id, 0.0, 0.0, 1.0, 1.0, r, g, b, a)
 }
 
+;; Returns true when draw rect tex uv.
 fn draw_rect_tex_uv(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 u1, f64 v1, f64 u2, f64 v2, f64 r, f64 g, f64 b, f64 a) bool {
    _reset_ui_draw_state()
    def p = _ensure_scratch(_STRIDE * 6)
@@ -453,6 +457,7 @@ fn draw_rect_tex_uv(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 u1, f64 v1, f64 
    draw_vertices(p, 6, tex_id)
 }
 
+;; Returns true when draw rect tex uv rot.
 fn draw_rect_tex_uv_rot(f64 cx, f64 cy, f64 w, f64 h, f64 rot_deg, int tex_id, f64 u1, f64 v1, f64 u2, f64 v2, f64 r, f64 g, f64 b, f64 a) bool {
    _reset_ui_draw_state()
    def p = _ensure_scratch(_STRIDE * 6)
@@ -513,6 +518,7 @@ fn draw_line_fast(f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, int color_u32) 
    draw_vertices(p, 6, -1)
 }
 
+;; Returns true when draw line.
 fn draw_line(f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, f64 r, f64 g, f64 b, f64 a) bool {
    draw_line_fast(x1, y1, x2, y2, thickness, render_shared.pack_rgba_u32(r, g, b, a))
 }
@@ -552,6 +558,7 @@ fn draw_line_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 thickness, f
    )
 }
 
+;; Returns true when draw triangle 3d.
 fn draw_triangle_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 x3, f64 y3, f64 z3, f64 r, f64 g, f64 b, f64 a) bool {
    _set_depth_mask(true)
    def p = _ensure_scratch(_STRIDE * 3)
@@ -563,6 +570,7 @@ fn draw_triangle_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 x3, f64 
    draw_vertices(p, 3, -1)
 }
 
+;; Returns true when draw quad 3d.
 fn draw_quad_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 x3, f64 y3, f64 z3, f64 x4, f64 y4, f64 z4, f64 r, f64 g, f64 b, f64 a) bool {
    _set_depth_mask(true)
    def p = _ensure_scratch(_STRIDE * 6)

@@ -1,4 +1,5 @@
 #include "base/util.h"
+#include "code/jit.h"
 #include "code/llvm.h"
 #include "code/priv.h"
 #include "code/typeinfer.h"
@@ -289,9 +290,15 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   memset(cg, 0, sizeof(codegen_t));
   cg->prog = prog;
   cg->arena = arena;
-  LLVMInitializeNativeTarget();
-  LLVMInitializeNativeAsmPrinter();
-  LLVMLoadLibraryPermanently(NULL);
+  /* LLVM native target init is process-global and idempotent but not free.
+   * Guard it so repeated codegen_init calls (REPL, tests) don't re-register. */
+  static int g_cg_native_initialized = 0;
+  if (!g_cg_native_initialized) {
+    LLVMInitializeNativeTarget();
+    LLVMInitializeNativeAsmPrinter();
+    LLVMLoadLibraryPermanently(NULL);
+    g_cg_native_initialized = 1;
+  }
   cg->ctx = LLVMContextCreate();
   cg->llvm_ctx_owned = true;
   cg->module = LLVMModuleCreateWithNameInContext(name, cg->ctx);
@@ -2100,6 +2107,7 @@ void codegen_emit(codegen_t *cg) {
   NY_COMPILER_ASSERT(cg->builder != NULL, "codegen_emit missing LLVM builder");
   if (!cg->prog)
     return;
+  cg->builtin_shadow_cache_stable_len = cg->fun_sigs.len;
   NY_COMPILER_ASSERT(cg->prog->body.len <= cg->prog->body.cap,
                      "codegen_emit program body vector len exceeds cap");
   NY_COMPILER_ASSERT(cg->prog->body.data != NULL || cg->prog->body.len == 0,
@@ -2362,12 +2370,12 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
         ny_apply_top_level_typeinfer_to_sema(&infer_ctx, s);
     }
     for (size_t i = 0; i < infer_ctx.var_names_len; ++i) {
-      const char *name = infer_ctx.vars[i].name;
-      if (!name || !*name)
+      const char *vname = infer_ctx.vars[i].name;
+      if (!vname || !*vname)
         continue;
-      if (typeinfer_needs_dynamic(&infer_ctx, name))
+      if (typeinfer_needs_dynamic(&infer_ctx, vname))
         assigned_name_add(&top_entry_blocked_names, &top_entry_blocked_hashes,
-                          top_entry_blocked_bloom, name);
+                          top_entry_blocked_bloom, vname);
     }
 
     typeinfer_apply_to_scopes(&infer_ctx, sc, 1);
@@ -2432,11 +2440,11 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
         continue;
       if (has_user_top_funcs && s->kind == NY_S_VAR) {
         for (size_t j = 0; j < s->as.var.names.len; ++j) {
-          const char *name = s->as.var.names.data[j];
-          if (name && *name)
+          const char *blocked_name = s->as.var.names.data[j];
+          if (blocked_name && *blocked_name)
             assigned_name_add(&top_entry_blocked_names,
                               &top_entry_blocked_hashes,
-                              top_entry_blocked_bloom, name);
+                              top_entry_blocked_bloom, blocked_name);
         }
       }
       ny_collect_top_entry_blocked_names(s, &top_entry_blocked_names,
@@ -2719,6 +2727,10 @@ void codegen_dispose(codegen_t *cg) {
     LLVMDisposeExecutionEngine(cg->ee);
     cg->ee = NULL;
   }
+  if (cg->orc_jit) {
+    ny_orc_jit_dispose(cg->orc_jit);
+    cg->orc_jit = NULL;
+  }
   if (cg->builder) {
     LLVMDisposeBuilder(cg->builder);
     cg->builder = NULL;
@@ -2731,6 +2743,18 @@ void codegen_dispose(codegen_t *cg) {
     if (cg->ctx) {
       LLVMContextDispose(cg->ctx);
       cg->ctx = NULL;
+    }
+  }
+  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+    void *byval_data = cg->fun_sigs.data[i].native_byval_param_layouts.data;
+    if (!byval_data)
+      continue;
+    for (size_t j = i + 1; j < cg->fun_sigs.len; ++j) {
+      if (cg->fun_sigs.data[j].native_byval_param_layouts.data != byval_data)
+        continue;
+      cg->fun_sigs.data[j].native_byval_param_layouts.data = NULL;
+      cg->fun_sigs.data[j].native_byval_param_layouts.len = 0;
+      cg->fun_sigs.data[j].native_byval_param_layouts.cap = 0;
     }
   }
   for (size_t i = 0; i < cg->fun_sigs.len; i++)

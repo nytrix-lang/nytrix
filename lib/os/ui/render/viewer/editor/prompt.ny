@@ -93,8 +93,10 @@ def _TERMINAL_ACTIONS = [
    ["Focus editor", "pane-editor", "C-SPC w e", "pane", "Return focus to the editor buffer."],
 ]
 
+;; Returns the result of the `context_actions` operation.
 fn context_actions() list { _FILE_ACTIONS }
 
+;; Returns the result of the `context_actions_for` operation.
 fn context_actions_for(dict st) list {
    def scope = to_str(context_entry(st).get("scope", "file"))
    if scope == "editor" { return _EDITOR_ACTIONS }
@@ -106,10 +108,12 @@ fn context_actions_for(dict st) list {
    _FILE_ACTIONS
 }
 
+;; Returns the result of the `context_state` operation.
 fn context_state() dict {
    {"open": false, "x": 0.0, "y": 0.0, "entry": dict(8)}
 }
 
+;; Returns the result of the `context_open` operation.
 fn context_open(dict st, f64 x, f64 y, dict entry) dict {
    st["open"] = true
    st["x"] = x
@@ -118,6 +122,7 @@ fn context_open(dict st, f64 x, f64 y, dict entry) dict {
    st
 }
 
+;; Returns the result of the `context_close` operation.
 fn context_close(dict st) dict {
    st["open"] = false
    st
@@ -131,6 +136,7 @@ fn context_x(dict st) f64 { float(st.get("x", 0.0)) }
 
 fn context_y(dict st) f64 { float(st.get("y", 0.0)) }
 
+;; Returns the result of the `context_clamp` operation.
 fn context_clamp(dict st, f64 sw, f64 sh, f64 w=156.0, f64 row_h=24.0) dict {
    def actions = context_actions_for(st)
    def ww = min(max(1.0, w), max(1.0, sw - 16.0))
@@ -140,6 +146,7 @@ fn context_clamp(dict st, f64 sw, f64 sh, f64 w=156.0, f64 row_h=24.0) dict {
    st
 }
 
+;; Returns the result of the `context_hit` operation.
 fn context_hit(dict st, f64 mx, f64 my, f64 w=156.0, f64 row_h=24.0) str {
    if !context_is_open(st) { return "" }
    def x = context_x(st)
@@ -152,6 +159,7 @@ fn context_hit(dict st, f64 mx, f64 my, f64 w=156.0, f64 row_h=24.0) str {
    is_list(row) ? to_str(row.get(1, "")) : ""
 }
 
+;; Returns the result of the `context_hover` operation.
 fn context_hover(dict st, f64 mx, f64 my, f64 w=156.0, f64 row_h=24.0) dict {
    if !context_is_open(st) { return dict(0) }
    def x = context_x(st)
@@ -164,10 +172,12 @@ fn context_hover(dict st, f64 mx, f64 my, f64 w=156.0, f64 row_h=24.0) dict {
    {"idx": idx, "id": to_str(row.get(1, "")), "title": to_str(row.get(0, "")), "key": to_str(row.get(2, "")), "tag": to_str(row.get(3, "")), "detail": to_str(row.get(4, ""))}
 }
 
+;; Updates the state and returns the resulting state.
 fn rename_state() dict {
    {"open": false, "text": "", "entry": dict(8)}
 }
 
+;; Updates the start and returns the resulting state.
 fn rename_start(dict st, dict entry) dict {
    st["open"] = true
    st["entry"] = entry
@@ -175,6 +185,7 @@ fn rename_start(dict st, dict entry) dict {
    st
 }
 
+;; Updates the close and returns the resulting state.
 fn rename_close(dict st) dict {
    st["open"] = false
    st["text"] = ""
@@ -189,6 +200,7 @@ fn rename_text(dict st) str { to_str(st.get("text", "")) }
 
 fn rename_rel(dict st) str { to_str(rename_entry(st).get("rel", "")) }
 
+;; Updates the handle key and returns the resulting state.
 fn rename_handle_key(dict st, any data) dict {
    mut submit = false
    if window.event_key_is(data, key.KEY_ESCAPE) { st = rename_close(st) }
@@ -200,6 +212,7 @@ fn rename_handle_key(dict st, any data) dict {
    {"st": st, "submit": submit}
 }
 
+;; Updates the handle char and returns the resulting state.
 fn rename_handle_char(dict st, any data) dict {
    def mods = int(data.get("mods", data.get("mod", 0)))
    if (mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 { return st }

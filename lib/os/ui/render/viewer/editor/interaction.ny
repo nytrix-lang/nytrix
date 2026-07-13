@@ -11,16 +11,19 @@ module std.os.ui.render.viewer.editor.interaction(
 use std.core
 use std.core.str as str
 
+;; Creates a new module state with the supplied configuration.
 fn new() dict {
    {"message": "ready", "timer": 0.0, "show_key": "", "key_timer": 0.0, "history": [], "last": ""}
 }
 
+;; Returns the result of the `message` operation.
 fn message(dict st, str text, f64 ttl=1.5) dict {
    st["message"] = text
    st["timer"] = ttl
    st
 }
 
+;; Returns the result of the `history_add` operation.
 fn history_add(dict st, str id) dict {
    if id.len <= 0 { return st }
    mut h = st.get("history", [])
@@ -31,11 +34,13 @@ fn history_add(dict st, str id) dict {
    st
 }
 
+;; Returns the result of the `command` operation.
 fn command(dict st, str id, str text="") dict {
    st = history_add(st, id)
    message(st, text.len > 0 ? text : id, 1.5)
 }
 
+;; Returns the result of the `key_seen` operation.
 fn key_seen(dict st, str chord) dict {
    if chord.len <= 0 { return st }
    st["show_key"] = chord
@@ -43,12 +48,14 @@ fn key_seen(dict st, str chord) dict {
    st
 }
 
+;; Releases the key.
 fn clear_key(dict st) dict {
    st["show_key"] = ""
    st["key_timer"] = 0.0
    st
 }
 
+;; Returns the result of the `tick` operation.
 fn tick(dict st, f64 dt) dict {
    if float(st.get("timer", 0.0)) > 0.0 { st["timer"] = max(0.0, float(st.get("timer", 0.0)) - dt) }
    if float(st.get("key_timer", 0.0)) > 0.0 {
@@ -60,6 +67,7 @@ fn tick(dict st, f64 dt) dict {
 
 fn show_key(dict st) str { to_str(st.get("show_key", "")) }
 
+;; Returns the result of the `status` operation.
 fn status(dict st) str { float(st.get("timer", 0.0)) > 0.0 ? to_str(st.get("message", "ready")) : "ready" }
 
 fn history(dict st) list { st.get("history", []) }

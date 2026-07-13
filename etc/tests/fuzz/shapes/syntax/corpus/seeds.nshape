@@ -1,7 +1,7 @@
-shape corpus-nynth-core {
+shape corpus-nytrix-core {
   family "corpus-replay"
   generator "typed"
-  features ["corpus", "ny-source", "nynth-ir", "baked-source", "correctness"]
+  features ["corpus", "ny-source", "nytrix-ir", "baked-source", "correctness"]
   template baked-ny-corpus
   expect ny_sources_compile
   source ny_18ec888042ef8474fd8d <<'NY'

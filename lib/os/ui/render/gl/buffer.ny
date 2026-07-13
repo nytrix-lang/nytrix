@@ -49,6 +49,7 @@ fn create_static_index_buffer(?ptr idx_ptr, int idx_count, bool use_u32=false) a
    return {"backend": "gl", "ibuf": id, "ioffset": 0, "index_count": idx_count, "index_type_u32": use_u32}
 }
 
+;; Creates and returns the static indexed buffer.
 fn create_static_indexed_buffer(?ptr vert_ptr, int count, ?ptr idx_ptr, int idx_count, any opts=0) any {
    def vb = create_static_buffer(vert_ptr, count)
    if !vb { return 0 }
@@ -84,11 +85,13 @@ fn destroy_static_buffer(any sbuf) bool {
    true
 }
 
+;; Returns true when draw static buffer.
 fn draw_static_buffer(dict sbuf, bool is_lines=false, f64 width=1.0, any pipe_override=0, bool is_points=false, bool use_material=false) bool {
    if !is_dict(sbuf) { return false }
    draw_static_buffer_raw(sbuf.get("handle", 0), sbuf.get("offset", 0), int(sbuf.get("count", 0)), is_lines, width, pipe_override, is_points, use_material)
 }
 
+;; Returns true when draw static buffer raw.
 fn draw_static_buffer_raw(any buf, any voff, int count, bool is_lines=false, f64 width=1.0, any _pipe_override=0, bool is_points=false, bool use_material=false) bool {
    _pipe_override
    if !buf || count <= 0 { return false }
@@ -110,11 +113,13 @@ fn draw_static_buffer_raw(any buf, any voff, int count, bool is_lines=false, f64
    _bind_buffer(GL_ARRAY_BUFFER, 0)
 }
 
+;; Returns true when draw static buffer indexed.
 fn draw_static_buffer_indexed(dict sbuf, any idx_buf, int index_count, bool is_lines=false, f64 width=1.0, any pipe_override=0, bool is_points=false, bool use_material=false) bool {
    if !is_dict(sbuf) { return false }
    draw_static_buffer_indexed_raw(sbuf.get("handle", 0), sbuf.get("offset", 0), idx_buf, sbuf.get("ioffset", 0), index_count, is_lines, width, pipe_override, sbuf.get("index_type_u32", false) ? 1 : 0, is_points, use_material)
 }
 
+;; Returns true when draw static buffer indexed raw.
 fn draw_static_buffer_indexed_raw(any buf, any voff, any idx_buf, any ioff, int index_count, bool is_lines=false, f64 width=1.0, any _pipe_override=0, int index_type=0, bool is_points=false, bool use_material=false) bool {
    _pipe_override
    if !buf || !idx_buf || index_count <= 0 { return false }
