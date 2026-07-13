@@ -44,6 +44,63 @@ def obj = json.json_decode("{\"ok\":true}")
 | Math | `std.math`, `integer`, `float`, `scalar`, `big`, `bigrat`, `bin`, `complex`, `ct`, `gf`, `hensel`, `logic`, `matrix`, `noise`, `nt`, `ntt`, `poly`, `quat`, `random`, `ring`, `simmd`, `smt`, `stat`, `vector` |
 | Crypto | `std.math.crypto.encoding`, `hash`, `symmetric`, `block.mode`, `block.stream`, `cipher`, `rsa`, `ecc`, `lattice`, `factorization`, `prng`, `analysis` |
 
+`std.math.logic` provides self-hosted propositional reasoning. Propositions are
+ordinary explicit dictionaries created with `prop_true`, `prop_false`,
+`prop_atom`, `prop_not`, `prop_and`, `prop_or`, `prop_implies`, and `prop_iff`.
+Use `prop_is` to validate external data, `prop_eval` with an atom environment,
+and `prop_simplify` for deterministic constant simplification.
+
+`prop_tautology_report` exhaustively decides bounded propositions and returns
+`decided`, `valid`, the variable list, a counterexample assignment, and the
+checked/required assignment counts. Its
+default limit is 16 variables and the accepted maximum is 20; exceeding the
+chosen limit returns `decided=false` instead of silently guessing or running
+without a bound. `prop_tautology` is the compact boolean facade.
+
+The short vocabulary keeps ordinary code readable:
+
+```ny
+use std.math.logic as logic
+
+def p = logic.atom("p")
+def identity = logic.implies(logic.conj(p, logic.truth()), p)
+def result = logic.decide(identity)
+assert(result.get("decided") && result.get("valid"))
+```
+
+`std.math.logic.prolog` is a self-hosted logic-programming engine with explicit
+variables, compound terms, facts, rules, occurs-checking unification, recursive
+backtracking, and bounded queries. Query results contain friendly `answers`
+for variables from the original goal, plus raw `solutions`, step count, peak
+depth, logical workspace usage, reason, and `decided`. Step, solution, depth,
+variable, and workspace limits are explicit; hitting one returns
+`decided=false`.
+
+```ny
+use std.math.logic.prolog as prolog
+
+def X = prolog.variable("X")
+def kb = [prolog.fact(prolog.term("likes", ["ada", "math"]))]
+def result = prolog.query(kb, prolog.term("likes", ["ada", X]))
+print(result.get("answers")) ; [{X: math}]
+```
+
+`std.math.logic.rewrite` reuses those terms for deterministic normalization:
+
+```ny
+use std.math.logic.prolog as prolog
+use std.math.logic.rewrite as rewrite
+
+def X = prolog.variable("X")
+def zero = prolog.term("zero")
+def rules = [rewrite.rule(prolog.term("add", [X, zero]), X)]
+def result = rewrite.normalize(prolog.term("add", [42, zero]), rules)
+assert(result.get("decided") && result.get("value") == 42)
+```
+
+Normalization reports its reason, passes, steps, and visited nodes. Pass, step,
+depth, and node limits are explicit, and exhaustion returns `decided=false`.
+
 Short names in this table continue the namespace shown earlier in the same row.
 
 ## Flat APIs

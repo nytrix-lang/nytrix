@@ -372,7 +372,10 @@ static void ny_runtime_cache_path(char *out, size_t out_len, const char *cc, con
   const char *host_flags = getenv("NYTRIX_HOST_CFLAGS");
   const char *host_triple = getenv("NYTRIX_HOST_TRIPLE");
   const char *arm_float_abi = getenv("NYTRIX_ARM_FLOAT_ABI");
-  const char *cache_rev = "rtcache-v6";
+  /* v7 invalidates objects written before sanitized runtime builds were
+   * isolated from the ordinary cache.  Such objects carry unresolved ASan or
+   * UBSan symbols and must never be restored for an unsanitized link. */
+  const char *cache_rev = "rtcache-v7";
   char dwarf_key[16];
   if (debug)
     snprintf(dwarf_key, sizeof(dwarf_key), "d%d", ny_builder_dwarf_version());
@@ -876,7 +879,8 @@ int ny_exec_spawn(const char *const argv[]) {
 }
 
 bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const char *out_ast,
-                                bool debug, bool profile, int speed_level, bool native_tune) {
+                                bool debug, bool profile, int speed_level, bool native_tune,
+                                const char *sanitize_kind) {
   const char *root = ny_src_root();
   static char include_arg[PATH_MAX + 12];
   static char llvm_include_arg[PATH_MAX + 12];
@@ -916,7 +920,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
       snprintf(gmp_include_arg, sizeof(gmp_include_arg), "%s", include_arg);
     ny_runtime_cache_path(cache_obj, sizeof(cache_obj), cc, root, debug, speed_level,
                           native_tune, llvm_include_arg);
-    if (!out_ast && ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
+    if (!out_ast && (!sanitize_kind || !*sanitize_kind) &&
+        ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
       return true;
     static char out_arg[PATH_MAX + 8];
     snprintf(out_arg, sizeof(out_arg), "/Fo%s", out_runtime);
@@ -947,7 +952,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
       NY_LOG_ERR("Runtime compilation failed (exit=%d)\n", rc);
       return false;
     }
-    if (!out_ast)
+    if (!out_ast && (!sanitize_kind || !*sanitize_kind))
       ny_update_runtime_cache(cache_obj, out_runtime);
     if (out_ast) {
       static char out_ast_arg[PATH_MAX + 8];
@@ -994,7 +999,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
 #endif
   ny_runtime_cache_path(cache_obj, sizeof(cache_obj), cc, root, debug, speed_level, native_tune,
                         llvm_include_arg);
-  if (!out_ast && ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
+  if (!out_ast && (!sanitize_kind || !*sanitize_kind) &&
+      ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
     return true;
   bool has_ccache = ny_tool_in_path("ccache");
 #if defined(__APPLE__) || defined(_WIN32)
@@ -1037,6 +1043,11 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   if (gmp_include_arg[0])
     runtime_args[ra_i++] = gmp_include_arg;
 #endif
+  if (sanitize_kind && *sanitize_kind) {
+    static char sanitize_flag[64];
+    snprintf(sanitize_flag, sizeof(sanitize_flag), "-fsanitize=%s", sanitize_kind);
+    runtime_args[ra_i++] = sanitize_flag;
+  }
   runtime_args[ra_i++] = "-c";
   runtime_args[ra_i++] = runtime_src;
   runtime_args[ra_i++] = "-o";
@@ -1061,13 +1072,18 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
   if (!target_windows)
-    runtime_args[ra_i++] = "-fno-pie";
+    runtime_args[ra_i++] = ny_env_enabled("NYTRIX_NO_PIE") ? "-fno-pie" : "-fPIE";
   runtime_args[ra_i++] = "-fvisibility=hidden";
   runtime_args[ra_i++] = "-ffunction-sections";
   runtime_args[ra_i++] = "-fdata-sections";
   runtime_args[ra_i++] = "-DNYTRIX_RUNTIME_ONLY";
   runtime_args[ra_i++] = include_arg;
   runtime_args[ra_i++] = llvm_include_arg;
+  if (sanitize_kind && *sanitize_kind) {
+    static char sanitize_flag[64];
+    snprintf(sanitize_flag, sizeof(sanitize_flag), "-fsanitize=%s", sanitize_kind);
+    runtime_args[ra_i++] = sanitize_flag;
+  }
   runtime_args[ra_i++] = "-c";
   runtime_args[ra_i++] = runtime_src;
   runtime_args[ra_i++] = "-o";
@@ -1090,7 +1106,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
     NY_LOG_ERR("Runtime compilation failed (exit=%d)\n", rc);
     return false;
   }
-  if (!out_ast)
+  if (!out_ast && (!sanitize_kind || !*sanitize_kind))
     ny_update_runtime_cache(cache_obj, out_runtime);
   if (out_ast) {
     const char *ast_args[128];
@@ -1115,10 +1131,6 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
 #if !defined(_WIN32)
     if (!target_windows)
       ast_args[aa_i++] = "-fPIC";
-#endif
-#if !defined(__APPLE__) && !defined(_WIN32)
-    if (!target_windows)
-      ast_args[aa_i++] = "-fno-pie";
 #endif
     ast_args[aa_i++] = "-fvisibility=hidden";
     ast_args[aa_i++] = "-ffunction-sections";
@@ -1154,7 +1166,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
                      const char *runtime_ast_obj, const char *const extra_objs[],
                      size_t extra_count, const char *const link_dirs[], size_t link_dir_count,
                      const char *const link_libs[], size_t link_lib_count, const char *output_path,
-                     bool link_strip, bool debug, bool profile) {
+                     bool link_strip, bool debug, bool profile, const char *sanitize_kind) {
 #define NY_MAX_LINK_ARGS 128
   const char *argv[NY_MAX_LINK_ARGS];
   size_t idx = 0;
@@ -1273,17 +1285,13 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
       NY_LOG_V2("mold/lld not selected; using default system linker.\n");
   }
 #endif
-#if defined(__APPLE__)
-  bool enable_mac_pie = ny_env_enabled("NYTRIX_MAC_PIE");
-  if (enable_mac_pie) {
+#if !defined(_WIN32)
+  if (!target_windows && !ny_env_enabled("NYTRIX_NO_PIE")) {
     argv[idx++] = "-fPIE";
     argv[idx++] = "-Wl,-pie";
-  }
-#else
-#if !defined(_WIN32)
-  if (!target_windows)
+  } else if (!target_windows) {
     argv[idx++] = "-no-pie";
-#endif
+  }
 #endif
   argv[idx++] = obj_path;
 #if defined(__arm__) && !defined(__aarch64__)
@@ -1350,6 +1358,11 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
       }
     }
 #endif
+  }
+  if (sanitize_kind && *sanitize_kind && idx + 1 < NY_MAX_LINK_ARGS) {
+    static char sanitize_flag[64];
+    snprintf(sanitize_flag, sizeof(sanitize_flag), "-fsanitize=%s", sanitize_kind);
+    argv[idx++] = sanitize_flag;
   }
   argv[idx++] = "-o";
   argv[idx++] = output_path;

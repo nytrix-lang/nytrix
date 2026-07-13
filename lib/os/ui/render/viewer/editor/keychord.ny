@@ -13,10 +13,12 @@ use std.os.ui.window.consts as key
 
 def PREFIX_TIMEOUT = 2.0
 
+;; Returns the result of the `empty_state` operation.
 fn empty_state() dict {
    {"prefix": "", "timer": 0.0}
 }
 
+;; Returns the result of the `tick` operation.
 fn tick(dict st, f64 dt) dict {
    if to_str(st.get("prefix", "")).len > 0 {
       st["timer"] = float(st.get("timer", 0.0)) - dt
@@ -25,16 +27,19 @@ fn tick(dict st, f64 dt) dict {
    st
 }
 
+;; Returns the result of the `clear` operation.
 fn clear(dict st) dict {
    st["prefix"] = ""
    st["timer"] = 0.0
    st
 }
 
+;; Returns true when pending.
 fn pending(dict st) bool {
    to_str(st.get("prefix", "")).len > 0
 }
 
+;; Returns the result of the `describe` operation.
 fn describe(dict st) str {
    to_str(st.get("prefix", ""))
 }

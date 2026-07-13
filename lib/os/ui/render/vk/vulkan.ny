@@ -338,6 +338,7 @@ fn get_buffer_device_address(any dev, any info) int { vkGetBufferDeviceAddress(d
 
 fn create_swapchain_khr(any dev, any ci, any al, any p) int { vkCreateSwapchainKHR(dev, ci, al, p) }
 
+;; Releases the swapchain khr.
 fn destroy_swapchain_khr(any dev, ?handle sc, any al) any {
    if !sc { return 0 }
    vkDestroySwapchainKHR(dev, sc, al)
@@ -350,6 +351,7 @@ fn get_swapchain_images_khr(any dev, ?handle sc, any c, any p) int {
    vkGetSwapchainImagesKHR(dev, sc, c, p)
 }
 
+;; Returns the result of the `acquire_next_image_khr` operation.
 fn acquire_next_image_khr(any dev, ?handle sc, int to, ?handle sem, ?handle f, any p) int {
    if !dev || !sc || !p { return -1 }
    vkAcquireNextImageKHR(dev, sc, to, sem, f, p)
@@ -359,6 +361,7 @@ fn queue_present_khr(any q, any p) int { vkQueuePresentKHR(q, p) }
 
 fn create_image_view(any dev, any ci, any al, any p) int { vkCreateImageView(dev, ci, al, p) }
 
+;; Releases the image view.
 fn destroy_image_view(any dev, ?handle iv, any al) any {
    if !iv { return 0 }
    vkDestroyImageView(dev, iv, al)
@@ -366,6 +369,7 @@ fn destroy_image_view(any dev, ?handle iv, any al) any {
 
 fn create_image(any dev, any ci, any al, any p) int { vkCreateImage(dev, ci, al, p) }
 
+;; Releases the image.
 fn destroy_image(any dev, ?handle img, any al) any {
    if !img { return 0 }
    vkDestroyImage(dev, img, al)
@@ -373,26 +377,31 @@ fn destroy_image(any dev, ?handle img, any al) any {
 
 fn create_buffer(any dev, any ci, any al, any p) int { vkCreateBuffer(dev, ci, al, p) }
 
+;; Releases the buffer.
 fn destroy_buffer(any dev, ?handle buf, any al) any {
    if !buf { return 0 }
    vkDestroyBuffer(dev, buf, al)
 }
 
+;; Returns the buffer memory requirements.
 fn get_buffer_memory_requirements(any dev, ?handle buf, any p) any {
    if !buf || !p { return 0 }
    vkGetBufferMemoryRequirements(dev, buf, p)
 }
 
+;; Writes the buffer memory and returns the result.
 fn bind_buffer_memory(any dev, ?handle buf, ?handle mem, int off) int {
    if !buf || !mem { return -1 }
    vkBindBufferMemory(dev, buf, mem, off)
 }
 
+;; Returns the result of the `map_memory` operation.
 fn map_memory(any dev, ?handle mem, int off, int sz, int flags, any p) int {
    if !mem || !p { return -1 }
    vkMapMemory(dev, mem, off, sz, flags, p)
 }
 
+;; Releases the memory.
 fn unmap_memory(any dev, ?handle mem) any {
    if !mem { return 0 }
    vkUnmapMemory(dev, mem)
@@ -400,6 +409,7 @@ fn unmap_memory(any dev, ?handle mem) any {
 
 fn create_command_pool(any dev, any ci, any al, any p) int { vkCreateCommandPool(dev, ci, al, p) }
 
+;; Releases the command pool.
 fn destroy_command_pool(any dev, ?handle cp, any al) any {
    if !cp { return 0 }
    vkDestroyCommandPool(dev, cp, al)
@@ -415,6 +425,7 @@ fn cmd_begin_render_pass(any cb, any bi, int c) any { vkCmdBeginRenderPass(cb, b
 
 fn cmd_end_render_pass(any cb) any { vkCmdEndRenderPass(cb) }
 
+;; Records the bind pipeline command in a command buffer.
 fn cmd_bind_pipeline(any cb, int bp, ?handle pipe) any {
    if !pipe { return 0 }
    vkCmdBindPipeline(cb, bp, pipe)
@@ -424,11 +435,13 @@ fn cmd_draw(any cb, int vc, int ic, int fv, int fi) any { vkCmdDraw(cb, vc, ic, 
 
 fn cmd_draw_indexed(any cb, int ic, int instc, int fi, int vo, int insto) any { vkCmdDrawIndexed(cb, ic, instc, fi, vo, insto) }
 
+;; Records the draw indirect command in a command buffer.
 fn cmd_draw_indirect(any cb, ?handle buf, int off, int count, int stride) any {
    if !buf { return 0 }
    vkCmdDrawIndirect(cb, buf, off, count, stride)
 }
 
+;; Records the draw indexed indirect command in a command buffer.
 fn cmd_draw_indexed_indirect(any cb, ?handle buf, int off, int count, int stride) any {
    if !buf { return 0 }
    vkCmdDrawIndexedIndirect(cb, buf, off, count, stride)
@@ -436,6 +449,7 @@ fn cmd_draw_indexed_indirect(any cb, ?handle buf, int off, int count, int stride
 
 fn cmd_dispatch(any cb, int x, int y, int z) any { vkCmdDispatch(cb, x, y, z) }
 
+;; Records the dispatch indirect command in a command buffer.
 fn cmd_dispatch_indirect(any cb, ?handle buf, int off) any {
    if !buf { return 0 }
    vkCmdDispatchIndirect(cb, buf, off)
@@ -443,6 +457,7 @@ fn cmd_dispatch_indirect(any cb, ?handle buf, int off) any {
 
 fn cmd_bind_vertex_buffers(any cb, int f, int c, any p_buf, any p_off) any { vkCmdBindVertexBuffers(cb, f, c, p_buf, p_off) }
 
+;; Records the bind index buffer command in a command buffer.
 fn cmd_bind_index_buffer(any cb, ?handle buf, int off, int idx_type) any {
    if !buf { return 0 }
    vkCmdBindIndexBuffer(cb, buf, off, idx_type)
@@ -450,21 +465,25 @@ fn cmd_bind_index_buffer(any cb, ?handle buf, int off, int idx_type) any {
 
 fn cmd_pipeline_barrier(any cb, int src, int dst, int dep, int mb_c, any mb, int bb_c, any bb, int ib_c, any ib) any { vkCmdPipelineBarrier(cb, src, dst, dep, mb_c, mb, bb_c, bb, ib_c, ib) }
 
+;; Records the copy buffer command in a command buffer.
 fn cmd_copy_buffer(any cb, ?handle src, ?handle dst, int r_count, any p_regions) any {
    if !src || !dst { return 0 }
    vkCmdCopyBuffer(cb, src, dst, r_count, p_regions)
 }
 
+;; Records the copy buffer to image command in a command buffer.
 fn cmd_copy_buffer_to_image(any cb, ?handle src, ?handle dst, int lyt, int r_count, any p_regions) any {
    if !src || !dst { return 0 }
    vkCmdCopyBufferToImage(cb, src, dst, lyt, r_count, p_regions)
 }
 
+;; Records the copy image command in a command buffer.
 fn cmd_copy_image(any cb, ?handle src_img, int src_lyt, ?handle dst_img, int dst_lyt, int r_count, any p_regions) any {
    if !src_img || !dst_img { return 0 }
    vkCmdCopyImage(cb, src_img, src_lyt, dst_img, dst_lyt, r_count, p_regions)
 }
 
+;; Records the blit image command in a command buffer.
 fn cmd_blit_image(any cb, ?handle src_img, int src_lyt, ?handle dst_img, int dst_lyt, int r_count, any p_regions, int filter) any {
    if !src_img || !dst_img { return 0 }
    vkCmdBlitImage(cb, src_img, src_lyt, dst_img, dst_lyt, r_count, p_regions, filter)
@@ -474,11 +493,13 @@ fn create_semaphore(any dev, any ci, any al, any p) int { vkCreateSemaphore(dev,
 
 fn create_fence(any dev, any ci, any al, any p) int { vkCreateFence(dev, ci, al, p) }
 
+;; Releases the semaphore.
 fn destroy_semaphore(any dev, ?handle sem, any al) any {
    if !sem { return 0 }
    vkDestroySemaphore(dev, sem, al)
 }
 
+;; Releases the fence.
 fn destroy_fence(any dev, ?handle f, any al) any {
    if !f { return 0 }
    vkDestroyFence(dev, f, al)
@@ -488,6 +509,7 @@ fn wait_for_fences(any dev, int c, any p, int wait_all, int tm) int { vkWaitForF
 
 fn reset_fences(any dev, int c, any p) int { vkResetFences(dev, c, p) }
 
+;; Returns the result of the `queue_submit` operation.
 fn queue_submit(any q, int c, any p, ?handle f) int {
    if !q || !p { return -1 }
    vkQueueSubmit(q, c, p, f)
@@ -495,6 +517,7 @@ fn queue_submit(any q, int c, any p, ?handle f) int {
 
 fn create_render_pass(any dev, any ci, any al, any p) int { vkCreateRenderPass(dev, ci, al, p) }
 
+;; Releases the render pass.
 fn destroy_render_pass(any dev, ?handle rp, any al) any {
    if !rp { return 0 }
    vkDestroyRenderPass(dev, rp, al)
@@ -502,6 +525,7 @@ fn destroy_render_pass(any dev, ?handle rp, any al) any {
 
 fn create_framebuffer(any dev, any ci, any al, any p) int { vkCreateFramebuffer(dev, ci, al, p) }
 
+;; Releases the framebuffer.
 fn destroy_framebuffer(any dev, ?handle fb, any al) any {
    if !fb { return 0 }
    vkDestroyFramebuffer(dev, fb, al)
@@ -509,6 +533,7 @@ fn destroy_framebuffer(any dev, ?handle fb, any al) any {
 
 fn create_descriptor_set_layout(any dev, any ci, any al, any p) int { vkCreateDescriptorSetLayout(dev, ci, al, p) }
 
+;; Releases the descriptor set layout.
 fn destroy_descriptor_set_layout(any dev, ?handle dsl, any al) any {
    if !dsl { return 0 }
    vkDestroyDescriptorSetLayout(dev, dsl, al)
@@ -516,6 +541,7 @@ fn destroy_descriptor_set_layout(any dev, ?handle dsl, any al) any {
 
 fn create_descriptor_pool(any dev, any ci, any al, any p) int { vkCreateDescriptorPool(dev, ci, al, p) }
 
+;; Releases the descriptor pool.
 fn destroy_descriptor_pool(any dev, ?handle dp, any al) any {
    if !dp { return 0 }
    vkDestroyDescriptorPool(dev, dp, al)
@@ -525,6 +551,7 @@ fn allocate_descriptor_sets(any dev, any ai, any p) int { vkAllocateDescriptorSe
 
 fn update_descriptor_sets(any dev, int wc, any wp, int cc, any cp) any { vkUpdateDescriptorSets(dev, wc, wp, cc, cp) }
 
+;; Records the bind descriptor sets command in a command buffer.
 fn cmd_bind_descriptor_sets(any cb, int bp, ?handle lay, int f, int c, any p_sets, int od_count, any p_od) any {
    if !lay { return 0 }
    vkCmdBindDescriptorSets(cb, bp, lay, f, c, p_sets, od_count, p_od)
@@ -532,6 +559,7 @@ fn cmd_bind_descriptor_sets(any cb, int bp, ?handle lay, int f, int c, any p_set
 
 fn create_pipeline_layout(any dev, any ci, any al, any p) int { vkCreatePipelineLayout(dev, ci, al, p) }
 
+;; Releases the pipeline layout.
 fn destroy_pipeline_layout(any dev, ?handle pl, any al) any {
    if !pl { return 0 }
    vkDestroyPipelineLayout(dev, pl, al)
@@ -541,6 +569,7 @@ fn create_graphics_pipelines(any dev, ?handle cache, int c, any p_ci, any al, an
 
 fn create_compute_pipelines(any dev, ?handle cache, int c, any p_ci, any al, any p) int { vkCreateComputePipelines(dev, cache, c, p_ci, al, p) }
 
+;; Releases the pipeline.
 fn destroy_pipeline(any dev, ?handle p, any al) any {
    if !p { return 0 }
    vkDestroyPipeline(dev, p, al)
@@ -548,6 +577,7 @@ fn destroy_pipeline(any dev, ?handle p, any al) any {
 
 fn create_shader_module(any dev, any ci, any al, any p) int { vkCreateShaderModule(dev, ci, al, p) }
 
+;; Releases the shader module.
 fn destroy_shader_module(any dev, ?handle sm, any al) any {
    if !sm { return 0 }
    vkDestroyShaderModule(dev, sm, al)
@@ -708,6 +738,7 @@ fn get_physical_device_surface_capabilities_khr(any inst, any pd, any surf, any 
    vk_result_code(res)
 }
 
+;; Releases the surface khr.
 fn destroy_surface_khr(any inst, ?handle surf, any al) any {
    if !surf { return 0 }
    vkDestroySurfaceKHR(inst, surf, al)
@@ -715,16 +746,19 @@ fn destroy_surface_khr(any inst, ?handle surf, any al) any {
 
 fn allocate_memory(any dev, any ai, any al, any p) int { vkAllocateMemory(dev, ai, al, p) }
 
+;; Returns the result of the `free_memory` operation.
 fn free_memory(any dev, ?handle mem, any al) any {
    if !mem { return 0 }
    vkFreeMemory(dev, mem, al)
 }
 
+;; Writes the image memory and returns the result.
 fn bind_image_memory(any dev, ?handle img, ?handle mem, int off) int {
    if !img || !mem { return -1 }
    vkBindImageMemory(dev, img, mem, off)
 }
 
+;; Returns the image memory requirements.
 fn get_image_memory_requirements(any dev, ?handle img, any p) any {
    if !img || !p { return 0 }
    vkGetImageMemoryRequirements(dev, img, p)
@@ -736,6 +770,7 @@ fn free_command_buffers(any dev, any pool, int count, any p) any { vkFreeCommand
 
 fn create_sampler(any dev, any ci, any al, any p) int { vkCreateSampler(dev, ci, al, p) }
 
+;; Releases the sampler.
 fn destroy_sampler(any dev, ?handle sampler, any al) any {
    if !sampler { return 0 }
    vkDestroySampler(dev, sampler, al)
@@ -751,6 +786,7 @@ fn cmd_push_constants(any cb, any lay, int stages, int off, int sz, any values) 
 
 fn cmd_clear_attachments(any cb, int count, any attachments, int rect_count, any rects) any { vkCmdClearAttachments(cb, count, attachments, rect_count, rects) }
 
+;; Records the copy image to buffer command in a command buffer.
 fn cmd_copy_image_to_buffer(any cb, ?handle img, int lay, ?handle buf, int r_count, any p_regions) any {
    if !img || !buf { return 0 }
    vkCmdCopyImageToBuffer(cb, img, lay, buf, r_count, p_regions)

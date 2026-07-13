@@ -1,11 +1,10 @@
-;; Keywords: core syntax parser ast macros
+;; Keywords: core syntax parser ast
 ;; Core Syntax internals.
 ;; References:
 ;; - std.core.syntax
 ;; - std.core
 module std.core.syntax.syntax(new_registry, clear_registry, clone_registry, merge_registry, register_macro, unregister_macro, register_attribute, unregister_attribute, get_macro_handler, get_attr_handler, is_macro_registered, is_attr_registered, list_macros, list_attributes, form, is_form, form_head, form_tail, expand_macro, expand_macro_fixpoint, expand_form, expand_form_deep, new_rewriter, clear_rewriter, register_rewrite, list_rewrites, rewrite_once, rewrite_fixpoint, apply_attribute)
 use std.core
-use std.core.dict_mod (dict_write)
 use std.core.dict_mod
 use std.core.reflect as core_ref
 

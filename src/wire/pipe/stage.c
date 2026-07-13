@@ -464,13 +464,13 @@ static size_t ny_stage_flow_eqset_candidates_program(const ny_options *opt,
 
 static bool ny_stage_stmt_in_dump_scope(const ny_options *opt,
                                         const stmt_t *s) {
-  ny_dump_scope_t scope = opt ? opt->dump_scope : NY_DUMP_SCOPE_PROGRAM;
+  ny_dump_scope_t dump_scope = opt ? opt->dump_scope : NY_DUMP_SCOPE_PROGRAM;
   if (!s)
-    return scope == NY_DUMP_SCOPE_BOTH;
+    return dump_scope == NY_DUMP_SCOPE_BOTH;
   bool is_std = ny_is_stdlib_tok(s->tok);
-  if (scope == NY_DUMP_SCOPE_BOTH)
+  if (dump_scope == NY_DUMP_SCOPE_BOTH)
     return true;
-  if (scope == NY_DUMP_SCOPE_LIB)
+  if (dump_scope == NY_DUMP_SCOPE_LIB)
     return is_std;
   return !is_std;
 }
@@ -576,9 +576,9 @@ static void ny_stage_append_shapes_json(char **buf, size_t *len, size_t *cap,
   for (size_t i = 0; cg && i < cg->tagged_types.len; ++i) {
     const char *tag = cg->tagged_types.data[i];
     bool is_std_tag = tag && strncmp(tag, "std.", 4) == 0;
-    ny_dump_scope_t scope = opt ? opt->dump_scope : NY_DUMP_SCOPE_PROGRAM;
-    if ((scope == NY_DUMP_SCOPE_PROGRAM && is_std_tag) ||
-        (scope == NY_DUMP_SCOPE_LIB && !is_std_tag))
+    ny_dump_scope_t dump_scope = opt ? opt->dump_scope : NY_DUMP_SCOPE_PROGRAM;
+    if ((dump_scope == NY_DUMP_SCOPE_PROGRAM && is_std_tag) ||
+        (dump_scope == NY_DUMP_SCOPE_LIB && !is_std_tag))
       continue;
     if (emitted++)
       ny_stage_append(buf, len, cap, ",");

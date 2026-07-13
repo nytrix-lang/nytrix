@@ -1,0 +1,15 @@
+shape internal_define_import_lowering {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi import-lowering define no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/ffi/internal-define-import.h"
+assert(NYTRIX_INTERNAL_DEFINE_A == 17, "internal define A")
+assert(NYTRIX_INTERNAL_DEFINE_B == 42, "internal define B")
+1 + 2
+NY
+}
+

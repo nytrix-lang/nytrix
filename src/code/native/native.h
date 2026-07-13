@@ -41,7 +41,7 @@ typedef struct ny_native_target_info_t {
   const char *symbol_prefix;
   const char *float_abi_name;
   size_t pointer_bits;
-  const char *gp_arg_regs[6];
+  const char *gp_arg_regs[8];
   size_t gp_arg_reg_count;
   size_t shadow_space_bytes;
   size_t stack_align;
@@ -67,6 +67,18 @@ typedef struct ny_native_handoff_summary_t {
   size_t label_points;
   size_t deopt_safe_points;
 } ny_native_handoff_summary_t;
+
+typedef struct ny_native_jit_image_t {
+  void *memory;
+  size_t size;
+  void *entry;
+} ny_native_jit_image_t;
+
+typedef void (*ny_native_link_visitor_t)(const char *library, void *ctx);
+
+void ny_native_visit_program_links(const program_t *prog,
+                                   ny_native_link_visitor_t visitor,
+                                   void *ctx);
 
 bool ny_native_target_info_init(ny_native_target_info_t *info,
                                 const ny_options *opt);
@@ -98,6 +110,10 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
 bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
                            const char *path, const char *entry_name,
                            bool tag_return, char *err, size_t err_len);
+bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
+                           ny_native_jit_image_t *image, char *err,
+                           size_t err_len);
+void ny_native_jit_image_free(ny_native_jit_image_t *image);
 bool ny_native_dump_ir_for_program(const program_t *prog, const ny_options *opt,
                                    char *err, size_t err_len);
 bool ny_native_eval_ir_for_program(const program_t *prog, const ny_options *opt,

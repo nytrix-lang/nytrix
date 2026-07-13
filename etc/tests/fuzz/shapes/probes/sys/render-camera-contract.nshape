@@ -1,0 +1,21 @@
+shape render-camera-contract {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys", "render"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.ui.render as render
+
+def camera = render.camera_init([8.0, 6.0, 11.0], -144.0, -18.0)
+assert(is_list(camera), "camera is positional list")
+assert(camera.len >= 7, "camera has projection fields")
+assert(camera.get(0).len == 3, "camera position is vec3")
+assert(camera.get(1).len == 3, "camera target is vec3")
+def view = render.mat4_look_at(camera.get(0), camera.get(1), camera.get(2))
+assert(view.len >= 18 && view.get(17) == 1.0, "camera vectors build look-at matrix")
+assert(view.get(2) != 0.0 || view.get(6) != 0.0 || view.get(10) != 0.0, "camera side basis is not degenerate")
+print("RENDER_CAMERA_CONTRACT_OK target=" + to_str(camera.get(1)))
+NY
+}

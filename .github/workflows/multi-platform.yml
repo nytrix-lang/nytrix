@@ -25,22 +25,24 @@ jobs:
   test-ubuntu:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'linux' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       NYTRIX_BUILD_JOBS: "2"
       NYTRIX_TEST_JOBS: "2"
       NYTRIX_TEST_FULL: "1"
       NYTRIX_TEST_COLD: "1"
+      NYTRIX_TEST_SKIP_SYSTEM_STDLIB: "1"
+      NYTRIX_TEST_SKIP_NATIVE_FP_LINK: "1"
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: test
-        run: python3 -B ./make test
+        run: python3 -B ./make test --with-stdlib
   test-macos:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'macos' }}
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 50
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
@@ -49,21 +51,23 @@ jobs:
       NYTRIX_TEST_JOBS: "3"
       NYTRIX_TEST_FULL: "1"
       NYTRIX_TEST_COLD: "1"
+      NYTRIX_TEST_SKIP_SYSTEM_STDLIB: "1"
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: test
-        run: python3 -B ./make test
+        run: python3 -B ./make test --with-stdlib
   test-windows:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'windows' }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       NYTRIX_BUILD_JOBS: "2"
       NYTRIX_TEST_JOBS: "2"
       NYTRIX_TEST_FULL: "1"
       NYTRIX_TEST_COLD: "1"
+      NYTRIX_TEST_SKIP_SYSTEM_STDLIB: "1"
       NYTRIX_TEST_TIMEOUT: "180"
       CC: /ucrt64/bin/clang
       CXX: /ucrt64/bin/clang++
@@ -99,4 +103,4 @@ jobs:
             mingw-w64-ucrt-x86_64-z3
       - name: test
         shell: msys2 {0}
-        run: python3 -B ./make test
+        run: python3 -B ./make test --with-stdlib

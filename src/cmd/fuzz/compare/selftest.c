@@ -1,9 +1,9 @@
 static bool selftest_command_uses_env_nice(const char *command) {
   return command &&
-         strncmp(command, "env NYNTH_LOW_PRIORITY=1", 24) == 0 &&
-         strstr(command, "NYNTH_RUN_NICE=10") &&
+         strncmp(command, "env NYTRIX_LOW_PRIORITY=1", 24) == 0 &&
+         strstr(command, "NYTRIX_RUN_NICE=10") &&
          strstr(command, "nice -n 10") &&
-         strncmp(command, "NYNTH_LOW_PRIORITY=", 19) != 0;
+         strncmp(command, "NYTRIX_LOW_PRIORITY=", 19) != 0;
 }
 
 static void selftest_validate_fuzz_reporting(const char *json,
@@ -478,7 +478,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
     if (!coverage_queue_json ||
         count_json_array_items(coverage_queue_json) <= 0 ||
         !strstr(coverage_queue_json, "\"lane\":\"afl\"") ||
-        !strstr(coverage_queue_json, "\"command\":\"./build/nynth"))
+        !strstr(coverage_queue_json, "\"command\":\"./build/nytrix"))
       (void)string_list_push_copy(errors,
                                   "status coverage queue array missing");
   }
@@ -556,7 +556,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
       (void)string_list_push_copy(errors,
                                   "coverage next reason was missing");
     if (!coverage_next_command ||
-        !strstr(coverage_next_command, "./build/nynth"))
+        !strstr(coverage_next_command, "./build/nytrix"))
       (void)string_list_push_copy(errors,
                                   "coverage next command was missing");
     if (coverage_next_command &&
@@ -576,14 +576,14 @@ static void selftest_validate_fuzz_reporting(const char *json,
            strstr(coverage_next_command, "fuzz all run") &&
            (!coverage_next_low_cpu_command ||
             !strstr(coverage_next_low_cpu_command,
-                    "env NYNTH_LOW_PRIORITY=1") ||
+                    "env NYTRIX_LOW_PRIORITY=1") ||
             !strstr(coverage_next_low_cpu_command, "nice -n 10") ||
             strncmp(coverage_next_low_cpu_command,
-                    "NYNTH_LOW_PRIORITY=", 19) == 0 ||
+                    "NYTRIX_LOW_PRIORITY=", 19) == 0 ||
             !strstr(coverage_next_low_cpu_command,
-                    "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
+                    "NYTRIX_MISSING_EVIDENCE_HOURS=1") ||
             !strstr(coverage_next_low_cpu_command,
-                    "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
+                    "NYTRIX_MISSING_EVIDENCE_THREADS=10%") ||
          !strstr(coverage_next_low_cpu_command,
                  "run-missing-evidence.sh")))
       (void)string_list_push_copy(errors,
@@ -600,12 +600,12 @@ static void selftest_validate_fuzz_reporting(const char *json,
                "run-missing-evidence-state.json") ||
             !coverage_next_state_refresh_command ||
             !strstr(coverage_next_state_refresh_command,
-                    "env NYNTH_LOW_PRIORITY=1") ||
+                    "env NYTRIX_LOW_PRIORITY=1") ||
             !strstr(coverage_next_state_refresh_command, "nice -n 10") ||
             strncmp(coverage_next_state_refresh_command,
-                    "NYNTH_LOW_PRIORITY=", 19) == 0 ||
+                    "NYTRIX_LOW_PRIORITY=", 19) == 0 ||
             !strstr(coverage_next_state_refresh_command,
-                    "NYNTH_RUN_DRY_RUN=1") ||
+                    "NYTRIX_RUN_DRY_RUN=1") ||
             !strstr(coverage_next_state_refresh_command,
                     "run-missing-evidence.sh") ||
          !coverage_next_stop_file ||
@@ -655,7 +655,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
         strstr(coverage_next_command, "fuzz all run") &&
         strstr(coverage_next_guarded_command, "run-missing-evidence.sh")) {
       char root[4096] = {0}, guarded_path[4096] = {0};
-      if (find_nynth_root(root, sizeof(root))) {
+      if (find_nytrix_root(root, sizeof(root))) {
         const char *script_ref = coverage_next_guarded_command;
         if (strncmp(script_ref, "./", 2) == 0) script_ref += 2;
         if (path_is_absolute(script_ref))
@@ -669,26 +669,26 @@ static void selftest_validate_fuzz_reporting(const char *json,
           !guarded.data) {
         (void)string_list_push_copy(errors,
                                     "coverage next guarded script unreadable");
-      } else if (!strstr(guarded.data, "nynth_require_free_space") ||
-                 !strstr(guarded.data, "nynth_wait_for_load") ||
-                 !strstr(guarded.data, "nynth_acquire_campaign_lock") ||
-                 !strstr(guarded.data, "nynth_low_priority") ||
+      } else if (!strstr(guarded.data, "nytrix_require_free_space") ||
+                 !strstr(guarded.data, "nytrix_wait_for_load") ||
+                 !strstr(guarded.data, "nytrix_acquire_campaign_lock") ||
+                 !strstr(guarded.data, "nytrix_low_priority") ||
                  !strstr(guarded.data,
-                         "NYNTH_MISSING_EVIDENCE_STATE_FILE") ||
+                         "NYTRIX_MISSING_EVIDENCE_STATE_FILE") ||
                  !strstr(guarded.data,
-                         "NYNTH_MISSING_EVIDENCE_STOP_FILE") ||
+                         "NYTRIX_MISSING_EVIDENCE_STOP_FILE") ||
                  !strstr(guarded.data,
-                         "NYNTH_MISSING_EVIDENCE_HEARTBEAT_S") ||
+                         "NYTRIX_MISSING_EVIDENCE_HEARTBEAT_S") ||
                  !strstr(guarded.data,
-                         "NYNTH_MISSING_EVIDENCE_HOURS") ||
+                         "NYTRIX_MISSING_EVIDENCE_HOURS") ||
                  !strstr(guarded.data,
-                         "NYNTH_MISSING_EVIDENCE_THREADS") ||
+                         "NYTRIX_MISSING_EVIDENCE_THREADS") ||
                  !strstr(guarded.data,
-                         "NYNTH_MISSING_EVIDENCE_PROFILE") ||
+                         "NYTRIX_MISSING_EVIDENCE_PROFILE") ||
                  !strstr(guarded.data,
-                         "NYNTH_MISSING_EVIDENCE_JSON") ||
+                         "NYTRIX_MISSING_EVIDENCE_JSON") ||
                  !strstr(guarded.data,
-                         "NYNTH_MISSING_EVIDENCE_HEARTBEAT_S must be a non-negative integer") ||
+                         "NYTRIX_MISSING_EVIDENCE_HEARTBEAT_S must be a non-negative integer") ||
                  !strstr(guarded.data, "invalid-budget") ||
                  !strstr(guarded.data, "\"state\"") ||
                  !strstr(guarded.data, "\"live\"") ||
@@ -704,29 +704,29 @@ static void selftest_validate_fuzz_reporting(const char *json,
                  !strstr(guarded.data, "\"profile\"") ||
                  !strstr(guarded.data, "\"json\"") ||
                  !strstr(guarded.data, "\"default_command\"") ||
-                 !strstr(guarded.data, "nynth_missing_command=(") ||
-                 !strstr(guarded.data, "nynth_missing_command_text") ||
-                 !strstr(guarded.data, "nynth_missing_write_state") ||
+                 !strstr(guarded.data, "nytrix_missing_command=(") ||
+                 !strstr(guarded.data, "nytrix_missing_command_text") ||
+                 !strstr(guarded.data, "nytrix_missing_write_state") ||
                  !strstr(guarded.data,
-                         "nynth_missing_run_with_heartbeat") ||
+                         "nytrix_missing_run_with_heartbeat") ||
                  !strstr(guarded.data,
-                         "nynth_missing_run_with_heartbeat nynth_low_priority \"${nynth_missing_command[@]}\"") ||
+                         "nytrix_missing_run_with_heartbeat nytrix_low_priority \"${nytrix_missing_command[@]}\"") ||
                  !strstr(guarded.data, "stop requested before run") ||
                  !strstr(guarded.data, coverage_next_command) ||
                  !strstr(guarded.data,
-                         "nynth_low_priority ./build/nynth fuzz all history") ||
+                         "nytrix_low_priority ./build/nytrix fuzz all history") ||
                  !strstr(guarded.data,
-                         "nynth_low_priority ./build/nynth fuzz all coverage --strict --history") ||
+                         "nytrix_low_priority ./build/nytrix fuzz all coverage --strict --history") ||
                  !strstr(guarded.data,
-                         "nynth_low_priority ./build/nynth fuzz all worklist") ||
+                         "nytrix_low_priority ./build/nytrix fuzz all worklist") ||
                  !strstr(guarded.data,
-                         "nynth_low_priority ./build/nynth fuzz all plan") ||
+                         "nytrix_low_priority ./build/nytrix fuzz all plan") ||
                  !strstr(guarded.data,
-                         "nynth_low_priority ./build/nynth fuzz all old-paths") ||
+                         "nytrix_low_priority ./build/nytrix fuzz all old-paths") ||
                  !strstr(guarded.data,
-                         "nynth_low_priority ./build/nynth fuzz all status") ||
+                         "nytrix_low_priority ./build/nytrix fuzz all status") ||
                  !strstr(guarded.data,
-                         "nynth_low_priority ./build/nynth fuzz all progress") ||
+                         "nytrix_low_priority ./build/nytrix fuzz all progress") ||
                  !strstr(guarded.data, "fuzz all status --strict") ||
                  !strstr(guarded.data, "fuzz all progress --strict")) {
         (void)string_list_push_copy(errors,
@@ -741,10 +741,10 @@ static void selftest_validate_fuzz_reporting(const char *json,
             (coverage_next_lane && strcmp(coverage_next_lane, "afl") == 0 &&
              !strstr(coverage_next_preview_command, "--only-lane afl")) ||
             !strstr(coverage_next_preview_command,
-                    "env NYNTH_LOW_PRIORITY=1") ||
+                    "env NYTRIX_LOW_PRIORITY=1") ||
             !strstr(coverage_next_preview_command, "nice -n 10") ||
             strncmp(coverage_next_preview_command,
-                    "NYNTH_LOW_PRIORITY=", 19) == 0 ||
+                    "NYTRIX_LOW_PRIORITY=", 19) == 0 ||
             !strstr(coverage_next_preview_command,
                     "--allow-dirty-nytrix-baseline") ||
             !strstr(coverage_next_preview_command, "build/cache/scratch")))
@@ -809,7 +809,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
       snprintf(coverage_abs, sizeof(coverage_abs), "%s", coverage_report_path);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(coverage_abs, sizeof(coverage_abs), root,
                         coverage_report_path);
     }
@@ -987,7 +987,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
                    coverage_markdown_path);
         } else {
           char root[4096];
-          if (find_nynth_root(root, sizeof(root)))
+          if (find_nytrix_root(root, sizeof(root)))
             (void)path_join(coverage_md_abs, sizeof(coverage_md_abs), root,
                             coverage_markdown_path);
         }
@@ -1124,18 +1124,18 @@ static void selftest_validate_fuzz_reporting(const char *json,
     (void)string_list_push_copy(errors,
                                 "status compiler std-audit states missing");
   if (!status_runtime_scope ||
-      strcmp(status_runtime_scope, NYNTH_RUNTIME_SURFACE_SCOPE) != 0 ||
+      strcmp(status_runtime_scope, NYTRIX_RUNTIME_SURFACE_SCOPE) != 0 ||
       !status_crt_scope ||
-      strcmp(status_crt_scope, NYNTH_CRT_SURFACE_SCOPE) != 0 ||
+      strcmp(status_crt_scope, NYTRIX_CRT_SURFACE_SCOPE) != 0 ||
       !status_crt_behavior_state ||
-      strcmp(status_crt_behavior_state, NYNTH_CRT_BEHAVIOR_STATE) != 0 ||
+      strcmp(status_crt_behavior_state, NYTRIX_CRT_BEHAVIOR_STATE) != 0 ||
       !status_crt_behavior_scope ||
-      strcmp(status_crt_behavior_scope, NYNTH_CRT_BEHAVIOR_SCOPE) != 0)
+      strcmp(status_crt_behavior_scope, NYTRIX_CRT_BEHAVIOR_SCOPE) != 0)
     (void)string_list_push_copy(errors,
                                 "status CRT claim scope missing");
   if (!status_crt_behavior_next_action ||
       strcmp(status_crt_behavior_next_action,
-             NYNTH_CRT_BEHAVIOR_NEXT_ACTION) != 0 ||
+             NYTRIX_CRT_BEHAVIOR_NEXT_ACTION) != 0 ||
       !status_crt_behavior_next_reason ||
       !strstr(status_crt_behavior_next_reason, "campaign-gated") ||
       !status_crt_behavior_next_command ||
@@ -1463,15 +1463,15 @@ static void selftest_validate_fuzz_reporting(const char *json,
                                 "status advisory recheck command is missing");
   } else if ((current_advisory_timeouts > 0.0 ||
               historical_advisory_timeouts > 0.0) &&
-             (!strstr(advisory_recheck, "NYNTH_AFL_RAW=1") ||
+             (!strstr(advisory_recheck, "NYTRIX_AFL_RAW=1") ||
               !strstr(advisory_recheck, "timeout 15s"))) {
     (void)string_list_push_copy(errors,
                                 "status advisory recheck command is incomplete");
   } else if (advisory_recheck && *advisory_recheck) {
-    char nynth_root[4096] = {0};
+    char nytrix_root[4096] = {0};
     char absolute_cache[4096] = {0};
-    if (find_nynth_root(nynth_root, sizeof(nynth_root)) &&
-        path_join(absolute_cache, sizeof(absolute_cache), nynth_root,
+    if (find_nytrix_root(nytrix_root, sizeof(nytrix_root)) &&
+        path_join(absolute_cache, sizeof(absolute_cache), nytrix_root,
                   "build/cache/scratch") &&
         strstr(advisory_recheck, absolute_cache))
       (void)string_list_push_copy(
@@ -2078,7 +2078,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
       snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
     }
   }
@@ -2226,8 +2226,8 @@ static void selftest_validate_fuzz_reporting(const char *json,
                                 "canonical status markdown self-link wrong");
   if (md.data && stale_evidence &&
       (!strstr(md.data, "Freshen evidence:") ||
-       !strstr(md.data, "NYNTH_LOW_PRIORITY=1") ||
-       !strstr(md.data, "NYNTH_RUN_NICE=10") ||
+       !strstr(md.data, "NYTRIX_LOW_PRIORITY=1") ||
+       !strstr(md.data, "NYTRIX_RUN_NICE=10") ||
        !strstr(md.data, expected_run_next) ||
        !strstr(md.data, "latest 80.") ||
        !strstr(md.data, "full-pressure 80.")))
@@ -2238,23 +2238,23 @@ static void selftest_validate_fuzz_reporting(const char *json,
                                 "fresh status markdown unexpectedly has freshness action");
   if (md.data && expected_recommended_repeat[0] &&
       (!strstr(md.data, "Preview recommended:") ||
-       !strstr(md.data, "NYNTH_RUN_DRY_RUN=1") ||
+       !strstr(md.data, "NYTRIX_RUN_DRY_RUN=1") ||
        !strstr(md.data, expected_recommended_repeat) ||
        !strstr(md.data, expected_run_next)))
     (void)string_list_push_copy(
         errors, "status markdown omits recommended dry-run preview");
   if (md.data && stale_evidence &&
       (!strstr(md.data, "Preview recommended:") ||
-       !strstr(md.data, "NYNTH_LOW_PRIORITY=1") ||
-       !strstr(md.data, "NYNTH_RUN_NICE=10") ||
-       !strstr(md.data, "NYNTH_RUN_DRY_RUN=1") ||
+       !strstr(md.data, "NYTRIX_LOW_PRIORITY=1") ||
+       !strstr(md.data, "NYTRIX_RUN_NICE=10") ||
+       !strstr(md.data, "NYTRIX_RUN_DRY_RUN=1") ||
        !strstr(md.data, expected_run_next)))
     (void)string_list_push_copy(
         errors, "status markdown omits stale-evidence dry-run preview");
   if (md.data && expect_missing_evidence_preview &&
       (!strstr(md.data, "Preview recommended:") ||
        !strstr(md.data, "fuzz all preflight") ||
-       !strstr(md.data, "NYNTH_LOW_PRIORITY=1") ||
+       !strstr(md.data, "NYTRIX_LOW_PRIORITY=1") ||
        !strstr(md.data, "--allow-dirty-nytrix-baseline") ||
        !strstr(md.data, "build/cache/scratch")))
     (void)string_list_push_copy(
@@ -2269,8 +2269,8 @@ static void selftest_validate_fuzz_reporting(const char *json,
       (!expected_recommended_repeat[0] ||
        strcmp(expected_recommended_repeat, "good") == 0) &&
       (!strstr(md.data, "Preview target:") ||
-       !strstr(md.data, "NYNTH_RUN_DRY_RUN=1") ||
-       !strstr(md.data, "NYNTH_RUN_REPEAT=target") ||
+       !strstr(md.data, "NYTRIX_RUN_DRY_RUN=1") ||
+       !strstr(md.data, "NYTRIX_RUN_REPEAT=target") ||
        !strstr(md.data, expected_run_next)))
     (void)string_list_push_copy(errors,
                                 "status markdown omits target preview");
@@ -2447,7 +2447,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
           find_n(quick_jq_line, quick_jq_end,
                  "recommended_repeat_mode,recommended_repeat_count") ||
           find_n(quick_jq_line, quick_jq_end, ".md.json") ||
-          find_n(quick_jq_line, quick_jq_end, "/home/e/nynth"))
+          find_n(quick_jq_line, quick_jq_end, "/home/e/nytrix"))
         (void)string_list_push_copy(
             errors, "status Controls omit quick jq readout");
       const char *status_jq_line = controls_section ?
@@ -2573,7 +2573,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
       if (!status_jq_line || !status_jq_end ||
           !find_n(status_jq_line, status_jq_end, expected_status_json) ||
           find_n(status_jq_line, status_jq_end, ".md.json") ||
-          find_n(status_jq_line, status_jq_end, "/home/e/nynth"))
+          find_n(status_jq_line, status_jq_end, "/home/e/nytrix"))
         (void)string_list_push_copy(
             errors, "status Controls omit compact jq readout");
       if (quick_jq_line && status_jq_line && quick_jq_line > status_jq_line)
@@ -2662,7 +2662,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
         const char *raw = strstr(next_section, raw_line);
         const char *raw_dot = strstr(next_section, raw_line_dot);
         const char *target_repeat = strstr(next_section,
-                                           "NYNTH_RUN_REPEAT=target");
+                                           "NYTRIX_RUN_REPEAT=target");
         if (repeat_count != 1)
           (void)string_list_push_copy(
               errors,
@@ -2686,7 +2686,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
               "status controls do not refresh the recommended repeat preview");
         if (controls_section &&
             strcmp(expected_recommended_repeat, "good") == 0 &&
-            strstr(controls_section, "NYNTH_RUN_REPEAT=target"))
+            strstr(controls_section, "NYTRIX_RUN_REPEAT=target"))
           (void)string_list_push_copy(
               errors,
               "status controls refresh target instead of good recommendation");
@@ -2695,14 +2695,14 @@ static void selftest_validate_fuzz_reporting(const char *json,
     if (md.data && expect_missing_evidence_preview &&
         (strstr(md.data, expected_run_next) ||
          strstr(md.data, expected_state_file) ||
-         strstr(md.data, "NYNTH_RUN_REPEAT=") ||
+         strstr(md.data, "NYTRIX_RUN_REPEAT=") ||
        strstr(md.data, "fuzz all progress --refresh") ||
        strstr(md.data, "fuzz all status --refresh") ||
        strstr(md.data, "\nunknown\n```") ||
        strstr(md.data, "--no-nytrix --no-sanitizers")))
       (void)string_list_push_copy(
           errors, "status markdown leaks stale run-next fallback in missing-evidence Next block");
-  if (md.data && stale_evidence && strstr(md.data, "NYNTH_RUN_REPEAT="))
+  if (md.data && stale_evidence && strstr(md.data, "NYTRIX_RUN_REPEAT="))
     (void)string_list_push_copy(
         errors, "stale status markdown should not suggest repeat handoff");
   if (md.data && expect_optimization_action_markdown &&
@@ -2720,11 +2720,11 @@ static void selftest_validate_fuzz_reporting(const char *json,
   if (!scratch_root || strcmp(scratch_root, "build/cache/scratch") != 0)
     (void)string_list_push_copy(errors,
                                 "status scratch root is not repo-relative");
-  char nynth_root[4096] = {0};
-  if (find_nynth_root(nynth_root, sizeof(nynth_root)) &&
-      nynth_root[0] && strstr(json, nynth_root))
+  char nytrix_root[4096] = {0};
+  if (find_nytrix_root(nytrix_root, sizeof(nytrix_root)) &&
+      nytrix_root[0] && strstr(json, nytrix_root))
     (void)string_list_push_copy(errors,
-                                "status report leaked absolute nynth paths");
+                                "status report leaked absolute nytrix paths");
   char *ny_bin = summary_string_from_report(json, "ny_bin");
   if (!ny_bin || !*ny_bin)
     (void)string_list_push_copy(errors, "status Ny binary path is missing");
@@ -2756,11 +2756,11 @@ static void selftest_validate_fuzz_reporting(const char *json,
       expected_recommended_repeat[0] ? expected_recommended_repeat : "target";
   char expected_root_repeat_env[64] = {0};
   snprintf(expected_root_repeat_env, sizeof(expected_root_repeat_env),
-           "NYNTH_RUN_REPEAT=%s", expected_root_repeat);
+           "NYTRIX_RUN_REPEAT=%s", expected_root_repeat);
   if (!preview_command ||
-      !strstr(preview_command, "NYNTH_RUN_DRY_RUN=1") ||
+      !strstr(preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
       (stale_evidence ?
-           strstr(preview_command, "NYNTH_RUN_REPEAT=") != NULL :
+           strstr(preview_command, "NYTRIX_RUN_REPEAT=") != NULL :
            strstr(preview_command, expected_root_repeat_env) == NULL) ||
       !strstr(preview_command, expected_run_next) ||
       strstr(preview_command, "fuzz_all_status_canonical.json"))
@@ -2789,11 +2789,11 @@ static void selftest_validate_fuzz_reporting(const char *json,
       summary_string_from_report(json, "run_next_gentle_command");
   if (!run_next_gentle_command ||
       !selftest_command_uses_env_nice(run_next_gentle_command) ||
-      !strstr(run_next_gentle_command, "NYNTH_RUN_HOURS=1") ||
-      !strstr(run_next_gentle_command, "NYNTH_RUN_THREADS=10%") ||
+      !strstr(run_next_gentle_command, "NYTRIX_RUN_HOURS=1") ||
+      !strstr(run_next_gentle_command, "NYTRIX_RUN_THREADS=10%") ||
       !strstr(run_next_gentle_command, expected_run_next) ||
-      strstr(run_next_gentle_command, "NYNTH_RUN_DRY_RUN=1") ||
-      strstr(run_next_gentle_command, "NYNTH_RUN_REPEAT=") ||
+      strstr(run_next_gentle_command, "NYTRIX_RUN_DRY_RUN=1") ||
+      strstr(run_next_gentle_command, "NYTRIX_RUN_REPEAT=") ||
       strstr(run_next_gentle_command, "fuzz_all_status_canonical.json"))
     (void)string_list_push_copy(errors,
                                 "status gentle run command lost low-impact handoff");
@@ -2801,20 +2801,20 @@ static void selftest_validate_fuzz_reporting(const char *json,
       summary_string_from_report(json, "run_next_gentle_preview_command");
   if (!run_next_gentle_preview_command ||
       !selftest_command_uses_env_nice(run_next_gentle_preview_command) ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_DRY_RUN=1") ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_HOURS=1") ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_THREADS=10%") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_HOURS=1") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_THREADS=10%") ||
       !strstr(run_next_gentle_preview_command, expected_run_next) ||
-      strstr(run_next_gentle_preview_command, "NYNTH_RUN_REPEAT=") ||
+      strstr(run_next_gentle_preview_command, "NYTRIX_RUN_REPEAT=") ||
       strstr(run_next_gentle_preview_command, "fuzz_all_status_canonical.json"))
     (void)string_list_push_copy(errors,
                                 "status gentle preview command lost low-impact handoff");
   char *state_refresh_command =
       summary_string_from_report(json, "state_refresh_command");
   if (state_refresh_command && *state_refresh_command &&
-      (!strstr(state_refresh_command, "NYNTH_RUN_DRY_RUN=1") ||
+      (!strstr(state_refresh_command, "NYTRIX_RUN_DRY_RUN=1") ||
       (stale_evidence ?
-           strstr(state_refresh_command, "NYNTH_RUN_REPEAT=") != NULL :
+           strstr(state_refresh_command, "NYTRIX_RUN_REPEAT=") != NULL :
            strstr(state_refresh_command, expected_root_repeat_env) == NULL) ||
       !strstr(state_refresh_command, expected_run_next) ||
       strstr(state_refresh_command, "fuzz_all_status_canonical.json")))
@@ -2834,14 +2834,14 @@ static void selftest_validate_fuzz_reporting(const char *json,
                  strstr(recommended_command, coverage_next_command) != NULL) :
            (!strstr(recommended_command, stale_evidence ?
                         expected_run_next :
-                        (runs_to_good > 0.0 ? "NYNTH_RUN_REPEAT=good" :
-                                               "NYNTH_RUN_REPEAT=target")) ||
+                        (runs_to_good > 0.0 ? "NYTRIX_RUN_REPEAT=good" :
+                                               "NYTRIX_RUN_REPEAT=target")) ||
             !strstr(recommended_command, expected_run_next))))
     (void)string_list_push_copy(errors, "status recommended command wrong");
      if (stale_evidence &&
          (!recommended_command ||
           !selftest_command_uses_env_nice(recommended_command) ||
-          strstr(recommended_command, "NYNTH_RUN_REPEAT=")))
+          strstr(recommended_command, "NYTRIX_RUN_REPEAT=")))
        (void)string_list_push_copy(
            errors, "status stale-evidence command is not low-impact");
   if (expect_missing_evidence && coverage_next_command &&
@@ -2857,7 +2857,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
       (void)string_list_push_copy(
           errors, "status recommended low-cpu command alias wrong");
      } else if (recommended_command &&
-                strstr(recommended_command, "NYNTH_LOW_PRIORITY=1")) {
+                strstr(recommended_command, "NYTRIX_LOW_PRIORITY=1")) {
        if (!recommended_low_cpu_command ||
            strcmp(recommended_low_cpu_command, recommended_command) != 0 ||
            !selftest_command_uses_env_nice(recommended_low_cpu_command))
@@ -2884,7 +2884,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
           errors, "status recommended missing-evidence preview command wrong");
   } else if (expected_recommended_repeat[0]) {
     if (!recommended_preview_command ||
-        !strstr(recommended_preview_command, "NYNTH_RUN_DRY_RUN=1") ||
+        !strstr(recommended_preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
         !strstr(recommended_preview_command, expected_recommended_repeat) ||
         !strstr(recommended_preview_command, expected_run_next))
       (void)string_list_push_copy(
@@ -2901,7 +2901,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
       if (recommended_state_refresh_command &&
           strcmp(expected_recommended_repeat, "good") == 0 &&
           strstr(recommended_state_refresh_command,
-                 "NYNTH_RUN_REPEAT=target"))
+                 "NYTRIX_RUN_REPEAT=target"))
         (void)string_list_push_copy(
             errors,
             "status recommended state refresh targets instead of good");
@@ -2909,9 +2909,9 @@ static void selftest_validate_fuzz_reporting(const char *json,
      } else if (stale_evidence) {
        if (!recommended_preview_command ||
            !selftest_command_uses_env_nice(recommended_preview_command) ||
-           !strstr(recommended_preview_command, "NYNTH_RUN_DRY_RUN=1") ||
+           !strstr(recommended_preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
            !strstr(recommended_preview_command, expected_run_next) ||
-           strstr(recommended_preview_command, "NYNTH_RUN_REPEAT="))
+           strstr(recommended_preview_command, "NYTRIX_RUN_REPEAT="))
       (void)string_list_push_copy(
           errors, "status stale-evidence preview command wrong");
     if (have_recommended_state_refresh_required &&
@@ -3237,9 +3237,9 @@ static void selftest_validate_fuzz_reporting(const char *json,
           errors, "status fresh/live state exposed refresh command");
     if (expect_state_refresh &&
         (!state_refresh_command || !*state_refresh_command ||
-         !strstr(state_refresh_command, "NYNTH_RUN_DRY_RUN=1") ||
+         !strstr(state_refresh_command, "NYTRIX_RUN_DRY_RUN=1") ||
          (stale_evidence ?
-              strstr(state_refresh_command, "NYNTH_RUN_REPEAT=") != NULL :
+              strstr(state_refresh_command, "NYTRIX_RUN_REPEAT=") != NULL :
               strstr(state_refresh_command, expected_root_repeat_env) == NULL) ||
          !strstr(state_refresh_command, expected_run_next) ||
          strstr(state_refresh_command, "fuzz_all_status_canonical.json")))
@@ -3280,39 +3280,39 @@ static void selftest_validate_fuzz_reporting(const char *json,
                                   "status freshness action command is missing");
     else if (stale_evidence) {
       if (!selftest_command_uses_env_nice(freshness_action) ||
-          strstr(freshness_action, "NYNTH_RUN_REPEAT=") ||
+          strstr(freshness_action, "NYTRIX_RUN_REPEAT=") ||
           !strstr(freshness_action, expected_run_next))
         (void)string_list_push_copy(errors,
                                     "stale status freshness action lost handoff");
       if (!latest_freshness_action ||
           !selftest_command_uses_env_nice(latest_freshness_action) ||
-          strstr(latest_freshness_action, "NYNTH_RUN_REPEAT=") ||
+          strstr(latest_freshness_action, "NYTRIX_RUN_REPEAT=") ||
           !strstr(latest_freshness_action, expected_run_next))
         (void)string_list_push_copy(
             errors, "stale status latest freshness command lost handoff");
       if (!full_pressure_freshness_action ||
           !selftest_command_uses_env_nice(full_pressure_freshness_action) ||
-          strstr(full_pressure_freshness_action, "NYNTH_RUN_REPEAT=") ||
+          strstr(full_pressure_freshness_action, "NYTRIX_RUN_REPEAT=") ||
           !strstr(full_pressure_freshness_action, expected_run_next))
         (void)string_list_push_copy(
             errors,
             "stale status full-pressure freshness command lost handoff");
       if (!full_pressure_freshen_command ||
           !selftest_command_uses_env_nice(full_pressure_freshen_command) ||
-          strstr(full_pressure_freshen_command, "NYNTH_RUN_REPEAT=") ||
+          strstr(full_pressure_freshen_command, "NYTRIX_RUN_REPEAT=") ||
           !strstr(full_pressure_freshen_command, expected_run_next))
         (void)string_list_push_copy(
             errors, "stale status full-pressure freshen command lost handoff");
       if (!full_pressure_remediation_command ||
           !selftest_command_uses_env_nice(full_pressure_remediation_command) ||
-          strstr(full_pressure_remediation_command, "NYNTH_RUN_REPEAT=") ||
+          strstr(full_pressure_remediation_command, "NYTRIX_RUN_REPEAT=") ||
           !strstr(full_pressure_remediation_command, expected_run_next))
         (void)string_list_push_copy(
             errors,
             "stale status full-pressure remediation command lost handoff");
       if (!full_pressure_action_command ||
           !selftest_command_uses_env_nice(full_pressure_action_command) ||
-          strstr(full_pressure_action_command, "NYNTH_RUN_REPEAT=") ||
+          strstr(full_pressure_action_command, "NYTRIX_RUN_REPEAT=") ||
           !strstr(full_pressure_action_command, expected_run_next))
         (void)string_list_push_copy(
             errors, "stale status full-pressure action command lost handoff");
@@ -3377,7 +3377,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
         summary_string_from_report(json, "old_path_next_reason");
     if (!old_path_probe_command ||
         !selftest_command_uses_env_nice(old_path_probe_command) ||
-        strcmp(old_path_probe_command, NYNTH_FUZZ_ALL_OLD_PATH_PROBE_COMMAND) !=
+        strcmp(old_path_probe_command, NYTRIX_FUZZ_ALL_OLD_PATH_PROBE_COMMAND) !=
             0 ||
         !strstr(old_path_probe_command, "--probe"))
       (void)string_list_push_copy(errors,
@@ -3510,9 +3510,9 @@ static void selftest_validate_fuzz_reporting(const char *json,
   if (next_script && *next_script && path_is_absolute(next_script)) {
     snprintf(script_path, sizeof(script_path), "%s", next_script);
   } else if (next_script && *next_script) {
-    char nynth_root[4096], absolute[4096];
-    if (find_nynth_root(nynth_root, sizeof(nynth_root)) &&
-        path_join(absolute, sizeof(absolute), nynth_root, next_script)) {
+    char nytrix_root[4096], absolute[4096];
+    if (find_nytrix_root(nytrix_root, sizeof(nytrix_root)) &&
+        path_join(absolute, sizeof(absolute), nytrix_root, next_script)) {
       snprintf(script_path, sizeof(script_path), "%s", absolute);
     } else {
       snprintf(script_path, sizeof(script_path), "%s", next_script);
@@ -3575,62 +3575,62 @@ static void selftest_validate_fuzz_reporting(const char *json,
           !strstr(script.data, "cd ") ||
           !shell_text_has_repo_cache_env(script.data))
         (void)string_list_push_copy(errors, "next-run script does not export repo-local cache env");
-      if (!strstr(script.data, "NYNTH_RUN_NICE=\"${NYNTH_RUN_NICE:-10}\"") ||
-          !strstr(script.data, "nynth_low_priority()") ||
-          !strstr(script.data, "ionice -c 3 nice -n \"$NYNTH_RUN_NICE\"") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all run"))
+      if (!strstr(script.data, "NYTRIX_RUN_NICE=\"${NYTRIX_RUN_NICE:-10}\"") ||
+          !strstr(script.data, "nytrix_low_priority()") ||
+          !strstr(script.data, "ionice -c 3 nice -n \"$NYTRIX_RUN_NICE\"") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all run"))
         (void)string_list_push_copy(errors, "next-run script does not lower OS priority for heavy campaign runs");
-      if (!strstr(script.data, "nynth_low_priority ./build/nynth fuzz all history") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all coverage --strict --history") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all worklist") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all plan") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all status") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all progress") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all old-paths") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all audit") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all findings") ||
-          !strstr(script.data, "nynth_low_priority ./build/nynth fuzz all coverage --report"))
+      if (!strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all history") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all coverage --strict --history") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all worklist") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all plan") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all status") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all progress") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all old-paths") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all audit") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all findings") ||
+          !strstr(script.data, "nytrix_low_priority ./build/nytrix fuzz all coverage --report"))
         (void)string_list_push_copy(errors, "next-run script does not lower OS priority for handoff refreshes");
-      if (!strstr(script.data, "NYNTH_MAX_LOAD_PCT=\"${NYNTH_MAX_LOAD_PCT:-75}\"") ||
-          !strstr(script.data, "NYNTH_LOAD_SLEEP_S=\"${NYNTH_LOAD_SLEEP_S:-60}\"") ||
-          !strstr(script.data, "nynth_wait_for_load()") ||
+      if (!strstr(script.data, "NYTRIX_MAX_LOAD_PCT=\"${NYTRIX_MAX_LOAD_PCT:-75}\"") ||
+          !strstr(script.data, "NYTRIX_LOAD_SLEEP_S=\"${NYTRIX_LOAD_SLEEP_S:-60}\"") ||
+          !strstr(script.data, "nytrix_wait_for_load()") ||
           !strstr(script.data, "/proc/loadavg") ||
-          !strstr(script.data, "nynth_wait_for_load\nnynth_run_with_heartbeat nynth_low_priority ./build/nynth fuzz all run"))
+          !strstr(script.data, "nytrix_wait_for_load\nnytrix_run_with_heartbeat nytrix_low_priority ./build/nytrix fuzz all run"))
         (void)string_list_push_copy(errors, "next-run script does not wait for system load before heavy campaign runs");
-      if (!strstr(script.data, "NYNTH_MIN_FREE_GB=\"${NYNTH_MIN_FREE_GB:-20}\"") ||
-          !strstr(script.data, "NYNTH_SPACE_PATH=\"${NYNTH_SPACE_PATH:-$NYNTH_ROOT}\"") ||
-          !strstr(script.data, "nynth_require_free_space()") ||
+      if (!strstr(script.data, "NYTRIX_MIN_FREE_GB=\"${NYTRIX_MIN_FREE_GB:-20}\"") ||
+          !strstr(script.data, "NYTRIX_SPACE_PATH=\"${NYTRIX_SPACE_PATH:-$NYTRIX_ROOT}\"") ||
+          !strstr(script.data, "nytrix_require_free_space()") ||
           !strstr(script.data, "df -Pk \"$path\"") ||
-          !strstr(script.data, "nynth_require_free_space\nnynth_wait_for_load\nnynth_run_with_heartbeat nynth_low_priority ./build/nynth fuzz all run"))
+          !strstr(script.data, "nytrix_require_free_space\nnytrix_wait_for_load\nnytrix_run_with_heartbeat nytrix_low_priority ./build/nytrix fuzz all run"))
         (void)string_list_push_copy(errors, "next-run script does not check free disk space before heavy campaign runs");
-      if (!strstr(script.data, "NYNTH_RUN_LOCK=\"${NYNTH_RUN_LOCK:-1}\"") ||
-          !strstr(script.data, "nynth_acquire_campaign_lock()") ||
-          !strstr(script.data, ".nynth-run.lock") ||
-          !strstr(script.data, "trap nynth_release_campaign_lock EXIT") ||
-          !strstr(script.data, "\nnynth_acquire_campaign_lock "))
+      if (!strstr(script.data, "NYTRIX_RUN_LOCK=\"${NYTRIX_RUN_LOCK:-1}\"") ||
+          !strstr(script.data, "nytrix_acquire_campaign_lock()") ||
+          !strstr(script.data, ".nytrix-run.lock") ||
+          !strstr(script.data, "trap nytrix_release_campaign_lock EXIT") ||
+          !strstr(script.data, "\nnytrix_acquire_campaign_lock "))
         (void)string_list_push_copy(errors, "next-run script does not lock the campaign before heavy handoff work");
       const char *dry_guard = strstr(script.data,
-                                     "if [ \"$NYNTH_RUN_DRY_RUN\" != \"0\" ]; then");
+                                     "if [ \"$NYTRIX_RUN_DRY_RUN\" != \"0\" ]; then");
       const char *lock_call = strstr(script.data,
-                                     "\nnynth_acquire_campaign_lock ");
+                                     "\nnytrix_acquire_campaign_lock ");
       if (!dry_guard || !lock_call || lock_call < dry_guard)
         (void)string_list_push_copy(errors,
                                     "next-run dry-run preview still takes campaign lock");
       const char *max_cycle_guard =
           strstr(script.data,
-                 "resolved cycles $NYNTH_RUN_REPEAT exceeds NYNTH_RUN_MAX_CYCLES=$NYNTH_RUN_MAX_CYCLES");
+                 "resolved cycles $NYTRIX_RUN_REPEAT exceeds NYTRIX_RUN_MAX_CYCLES=$NYTRIX_RUN_MAX_CYCLES");
       if (!max_cycle_guard || !lock_call || lock_call < max_cycle_guard)
         (void)string_list_push_copy(errors,
                                     "next-run max-cycle guard runs after the campaign lock");
       const char *cooldown_guard =
           strstr(script.data,
-                 "NYNTH_RUN_COOLDOWN_S must be a non-negative integer");
+                 "NYTRIX_RUN_COOLDOWN_S must be a non-negative integer");
       if (!cooldown_guard || !lock_call || lock_call < cooldown_guard)
         (void)string_list_push_copy(errors,
                                     "next-run cooldown guard runs after the campaign lock");
       const char *stop_prelock =
           strstr(script.data,
-                 "stop file present before campaign: $NYNTH_RUN_STOP_FILE");
+                 "stop file present before campaign: $NYTRIX_RUN_STOP_FILE");
       if (!stop_prelock || !lock_call || lock_call < stop_prelock) {
         (void)string_list_push_copy(errors,
                                     "next-run stop-file precheck runs after the campaign lock");
@@ -3641,7 +3641,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
           script.data,
           "refreshed missing-evidence preview state=$missing_evidence");
       const char *repeat_case = strstr(script.data,
-                                       "case \"$nynth_repeat_mode\" in auto|good)");
+                                       "case \"$nytrix_repeat_mode\" in auto|good)");
       const char *missing_preview_gate = strstr(
           script.data,
           "grep -q '\"recommended_action\"[[:space:]]*:[[:space:]]*\"run-missing-evidence\"' \"$repeat_status\"");
@@ -3650,7 +3650,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
           !missing_preview_gate ||
           !strstr(script.data, "missing_evidence=") ||
           !strstr(script.data,
-                  "NYNTH_RUN_DRY_RUN=1 \"$missing_evidence\" >/dev/null 2>&1 || true"))
+                  "NYTRIX_RUN_DRY_RUN=1 \"$missing_evidence\" >/dev/null 2>&1 || true"))
         (void)string_list_push_copy(
             errors,
             "next-run dry-run does not gate missing-evidence preview on repeat status");
@@ -3665,18 +3665,18 @@ static void selftest_validate_fuzz_reporting(const char *json,
           !strstr(script.data,
                   "--json \"$repeat_status\" --markdown \"$repeat_status_md\"") ||
           !strstr(script.data,
-                  "if [ -r \"$repeat_status\" ]; then nynth_repeat_status=\"$repeat_status\"; fi"))
+                  "if [ -r \"$repeat_status\" ]; then nytrix_repeat_status=\"$repeat_status\"; fi"))
         (void)string_list_push_copy(errors,
                                     "next-run repeat aliases resolve before fresh status");
       if (!strstr(script.data,
-                  "if [ -r \"$nynth_repeat_status\" ]; then status=\"$nynth_repeat_status\"; fi") ||
+                  "if [ -r \"$nytrix_repeat_status\" ]; then status=\"$nytrix_repeat_status\"; fi") ||
           !strstr(script.data,
                   "if [ -r \"$repeat_progress\" ]; then progress=\"$repeat_progress\"; fi"))
         (void)string_list_push_copy(
             errors,
             "next-run dry-run state does not point at repeat reports");
       const char *dry_state_write =
-          strstr(script.data, "nynth_write_terminal_state dry-run preview");
+          strstr(script.data, "nytrix_write_terminal_state dry-run preview");
       const char *dry_post_refresh =
           strstr(script.data,
                  "refreshing repeat reports after state write");
@@ -3684,7 +3684,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
           strstr(script.data,
                  "refreshing canonical cockpit after state write");
       const char *dry_summary =
-          strstr(script.data, "nynth repeat dry-run: mode=");
+          strstr(script.data, "nytrix repeat dry-run: mode=");
       if (!dry_state_write || !dry_post_refresh || !dry_canonical_refresh ||
           !dry_summary ||
           dry_post_refresh < dry_state_write ||
@@ -3692,21 +3692,21 @@ static void selftest_validate_fuzz_reporting(const char *json,
           dry_summary < dry_canonical_refresh ||
           count_sub(script.data, strlen(script.data),
                     "--json \"$repeat_status\" --markdown \"$repeat_status_md\"") < 3 ||
-          !strstr(script.data, "nynth_canonical_status=\"$status\"") ||
+          !strstr(script.data, "nytrix_canonical_status=\"$status\"") ||
           !strstr(script.data,
-                  "--json \"$nynth_canonical_status\" --markdown \"$nynth_canonical_status_md\"") ||
+                  "--json \"$nytrix_canonical_status\" --markdown \"$nytrix_canonical_status_md\"") ||
           !strstr(script.data,
-                  "--status \"$nynth_canonical_status\"") ||
+                  "--status \"$nytrix_canonical_status\"") ||
           !strstr(script.data,
-                  "--json \"$nynth_canonical_progress\" --markdown \"$nynth_canonical_progress_md\""))
+                  "--json \"$nytrix_canonical_progress\" --markdown \"$nytrix_canonical_progress_md\""))
         (void)string_list_push_copy(
             errors,
             "next-run dry-run does not refresh repeat/canonical reports after writing state");
-      if (!strstr(script.data, "NYNTH_RUN_REPEAT=\"${NYNTH_RUN_REPEAT:-1}\"") ||
-          !strstr(script.data, "nynth_repeat_status=") ||
-          !strstr(script.data, "nynth_repeat_mode=\"$NYNTH_RUN_REPEAT\"") ||
-          !strstr(script.data, "1) nynth_repeat_mode=once") ||
-          !strstr(script.data, "*) nynth_repeat_mode=count") ||
+      if (!strstr(script.data, "NYTRIX_RUN_REPEAT=\"${NYTRIX_RUN_REPEAT:-1}\"") ||
+          !strstr(script.data, "nytrix_repeat_status=") ||
+          !strstr(script.data, "nytrix_repeat_mode=\"$NYTRIX_RUN_REPEAT\"") ||
+          !strstr(script.data, "1) nytrix_repeat_mode=once") ||
+          !strstr(script.data, "*) nytrix_repeat_mode=count") ||
           !strstr(script.data, "auto|good)") ||
           !strstr(script.data, "\"runs_to_good_language_score\"") ||
           !strstr(script.data, "auto repeat count from") ||
@@ -3717,13 +3717,13 @@ static void selftest_validate_fuzz_reporting(const char *json,
           !strstr(script.data, "campaign target already complete") ||
           !strstr(script.data, "\"language_score_gap_percent\"") ||
           !strstr(script.data, "good language score reached after") ||
-          !strstr(script.data, "NYNTH_RUN_DRY_RUN=\"${NYNTH_RUN_DRY_RUN:-0}\"") ||
-          !strstr(script.data, "nynth repeat dry-run: mode=") ||
-          !strstr(script.data, "cycles=$NYNTH_RUN_REPEAT") ||
+          !strstr(script.data, "NYTRIX_RUN_DRY_RUN=\"${NYTRIX_RUN_DRY_RUN:-0}\"") ||
+          !strstr(script.data, "nytrix repeat dry-run: mode=") ||
+          !strstr(script.data, "cycles=$NYTRIX_RUN_REPEAT") ||
           !strstr(script.data, "\"target_percent_per_run\"") ||
           !strstr(script.data, "\"thread_years_per_run\"") ||
-          !strstr(script.data, "wall_hours=$nynth_wall_hours") ||
-          !strstr(script.data, "campaign_gain_percent=$nynth_campaign_gain") ||
+          !strstr(script.data, "wall_hours=$nytrix_wall_hours") ||
+          !strstr(script.data, "campaign_gain_percent=$nytrix_campaign_gain") ||
           !strstr(script.data, "\"dry_run_exceeds_max\"") ||
           !strstr(script.data, "\"dry_run_wall_hours\":%s") ||
           !strstr(script.data, "\"dry_run_wall_days\":%s") ||
@@ -3731,34 +3731,34 @@ static void selftest_validate_fuzz_reporting(const char *json,
           !strstr(script.data, "\"dry_run_campaign_gain_percent\":%s") ||
           !strstr(script.data, "\"dry_run_target_percent_per_run\":%s") ||
           !strstr(script.data, "\"dry_run_thread_years_per_run\":%s") ||
-          !strstr(script.data, "nynth_json_number \"${nynth_wall_hours:-0}\"") ||
-          !strstr(script.data, "nynth_json_number \"${nynth_campaign_gain:-0}\"") ||
+          !strstr(script.data, "nytrix_json_number \"${nytrix_wall_hours:-0}\"") ||
+          !strstr(script.data, "nytrix_json_number \"${nytrix_campaign_gain:-0}\"") ||
           !strstr(script.data, "\"canonical_status_report\":\"%s\"") ||
           !strstr(script.data, "\"canonical_progress_report\":\"%s\"") ||
-          !strstr(script.data, "nynth_dry_low_priority=$(nynth_json_enabled") ||
-          !strstr(script.data, "nynth_dry_nice=$(nynth_json_number") ||
-          !strstr(script.data, "nynth_dry_load_wait=$(nynth_json_enabled") ||
-          !strstr(script.data, "nynth_dry_max_load_pct=$(nynth_json_number") ||
-          !strstr(script.data, "nynth_dry_space_guard=false") ||
-          !strstr(script.data, "nynth_dry_min_free_gb=$(nynth_json_number") ||
-          !strstr(script.data, "nynth_dry_run_lock=$(nynth_json_enabled") ||
-          !strstr(script.data, "nynth repeat dry-run: guards low_priority=$nynth_dry_low_priority") ||
-          !strstr(script.data, "run_lock=$nynth_dry_run_lock threads=$nynth_run_threads") ||
-          !strstr(script.data, "NYNTH_RUN_REPEAT must be a positive integer") ||
-          !strstr(script.data, "NYNTH_RUN_MAX_CYCLES=\"${NYNTH_RUN_MAX_CYCLES:-0}\"") ||
-          !strstr(script.data, "NYNTH_RUN_MAX_CYCLES must be a non-negative integer") ||
-          !strstr(script.data, "NYNTH_RUN_COOLDOWN_S=\"${NYNTH_RUN_COOLDOWN_S:-0}\"") ||
-          !strstr(script.data, "NYNTH_RUN_COOLDOWN_S must be a non-negative integer") ||
-          !strstr(script.data, "NYNTH_RUN_HEARTBEAT_S=\"${NYNTH_RUN_HEARTBEAT_S:-300}\"") ||
-          !strstr(script.data, "NYNTH_RUN_HEARTBEAT_S must be a non-negative integer") ||
-          !strstr(script.data, "nynth_default_stop_file=") ||
-          !strstr(script.data, "/stop\nNYNTH_RUN_STOP_FILE=\"${NYNTH_RUN_STOP_FILE:-$nynth_default_stop_file}\"") ||
-          !strstr(script.data, "nynth_default_state_file=") ||
-          !strstr(script.data, "/run-next-state.json\nNYNTH_RUN_STATE_FILE=\"${NYNTH_RUN_STATE_FILE:-$nynth_default_state_file}\"") ||
-            !strstr(script.data, "nynth_json_uint()") ||
-          !strstr(script.data, "nynth_json_number()") ||
-          !strstr(script.data, "nynth_json_enabled()") ||
-            !strstr(script.data, "nynth_write_state()") ||
+          !strstr(script.data, "nytrix_dry_low_priority=$(nytrix_json_enabled") ||
+          !strstr(script.data, "nytrix_dry_nice=$(nytrix_json_number") ||
+          !strstr(script.data, "nytrix_dry_load_wait=$(nytrix_json_enabled") ||
+          !strstr(script.data, "nytrix_dry_max_load_pct=$(nytrix_json_number") ||
+          !strstr(script.data, "nytrix_dry_space_guard=false") ||
+          !strstr(script.data, "nytrix_dry_min_free_gb=$(nytrix_json_number") ||
+          !strstr(script.data, "nytrix_dry_run_lock=$(nytrix_json_enabled") ||
+          !strstr(script.data, "nytrix repeat dry-run: guards low_priority=$nytrix_dry_low_priority") ||
+          !strstr(script.data, "run_lock=$nytrix_dry_run_lock threads=$nytrix_run_threads") ||
+          !strstr(script.data, "NYTRIX_RUN_REPEAT must be a positive integer") ||
+          !strstr(script.data, "NYTRIX_RUN_MAX_CYCLES=\"${NYTRIX_RUN_MAX_CYCLES:-0}\"") ||
+          !strstr(script.data, "NYTRIX_RUN_MAX_CYCLES must be a non-negative integer") ||
+          !strstr(script.data, "NYTRIX_RUN_COOLDOWN_S=\"${NYTRIX_RUN_COOLDOWN_S:-0}\"") ||
+          !strstr(script.data, "NYTRIX_RUN_COOLDOWN_S must be a non-negative integer") ||
+          !strstr(script.data, "NYTRIX_RUN_HEARTBEAT_S=\"${NYTRIX_RUN_HEARTBEAT_S:-300}\"") ||
+          !strstr(script.data, "NYTRIX_RUN_HEARTBEAT_S must be a non-negative integer") ||
+          !strstr(script.data, "nytrix_default_stop_file=") ||
+          !strstr(script.data, "/stop\nNYTRIX_RUN_STOP_FILE=\"${NYTRIX_RUN_STOP_FILE:-$nytrix_default_stop_file}\"") ||
+          !strstr(script.data, "nytrix_default_state_file=") ||
+          !strstr(script.data, "/run-next-state.json\nNYTRIX_RUN_STATE_FILE=\"${NYTRIX_RUN_STATE_FILE:-$nytrix_default_state_file}\"") ||
+            !strstr(script.data, "nytrix_json_uint()") ||
+          !strstr(script.data, "nytrix_json_number()") ||
+          !strstr(script.data, "nytrix_json_enabled()") ||
+            !strstr(script.data, "nytrix_write_state()") ||
             !strstr(script.data, "\"phase\":\"%s\"") ||
             !strstr(script.data, "\"state\":\"%s\"") ||
             !strstr(script.data, "\"timestamp_utc\":\"%s\"") ||
@@ -3766,7 +3766,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
             !strstr(script.data, "\"live\":%s") ||
             !strstr(script.data, "\"child_status\":\"%s\"") ||
             !strstr(script.data, "\"stale_after_seconds\":%s") ||
-            !strstr(script.data, "heartbeat_s=\"${NYNTH_RUN_HEARTBEAT_S:-0}\"") ||
+            !strstr(script.data, "heartbeat_s=\"${NYTRIX_RUN_HEARTBEAT_S:-0}\"") ||
             !strstr(script.data, "stale_after=$((heartbeat_s * 2 + 30))") ||
             !strstr(script.data, "\"started_at\":\"%s\"") ||
             !strstr(script.data, "\"finished_at\":\"%s\"") ||
@@ -3793,45 +3793,45 @@ static void selftest_validate_fuzz_reporting(const char *json,
           !strstr(script.data, "\"handoff_run_lock\":%s") ||
           !strstr(script.data, "\"threads\":\"%s\"") ||
           !strstr(script.data, "\"handoff_threads\":\"%s\"") ||
-          !strstr(script.data, "nynth_run_threads=") ||
+          !strstr(script.data, "nytrix_run_threads=") ||
             !strstr(script.data, "\"status_report\":\"%s\"") ||
             !strstr(script.data, "\"status_json\":\"%s\"") ||
             !strstr(script.data, "\"progress_report\":\"%s\"") ||
             !strstr(script.data, "\"progress_json\":\"%s\"") ||
             !strstr(script.data, "\"last_report\":\"%s\"") ||
-          !strstr(script.data, "nynth_run_with_heartbeat()") ||
-          !strstr(script.data, "nynth_write_state running child-start") ||
-          !strstr(script.data, "nynth_write_state running heartbeat") ||
-          !strstr(script.data, "nynth_write_state refreshing \"child-exit-$rc\"") ||
-          !strstr(script.data, "nynth_run_with_heartbeat nynth_low_priority ./build/nynth fuzz all run") ||
-          !strstr(script.data, "nynth_write_terminal_state dry-run preview") ||
-          !strstr(script.data, "nynth_write_state running cycle-start") ||
-          !strstr(script.data, "nynth_write_state cycle-complete report-ready") ||
-          !strstr(script.data, "nynth_write_terminal_state stopped after-cycle") ||
-          !strstr(script.data, "nynth_state_exit_trap()") ||
-          !strstr(script.data, "nynth_release_campaign_lock") ||
-          !strstr(script.data, "nynth_install_state_traps") ||
-          count_sub(script.data, strlen(script.data), "nynth_install_state_traps") < 3 ||
-          !strstr(script.data, "nynth_write_terminal_state failed \"exit-$rc\"") ||
-          !strstr(script.data, "nynth_repeat_exceeds_max=0") ||
-          !strstr(script.data, "nynth_repeat_exceeds_max=1") ||
-          !strstr(script.data, "max_cycles=$NYNTH_RUN_MAX_CYCLES") ||
-          !strstr(script.data, "cooldown_s=$NYNTH_RUN_COOLDOWN_S") ||
-          !strstr(script.data, "heartbeat_s=$NYNTH_RUN_HEARTBEAT_S") ||
-          !strstr(script.data, "stop_file=$nynth_stop_file_label") ||
-          !strstr(script.data, "exceeds_max=$nynth_exceeds_max") ||
-          !strstr(script.data, "resolved cycles $NYNTH_RUN_REPEAT exceeds NYNTH_RUN_MAX_CYCLES=$NYNTH_RUN_MAX_CYCLES") ||
-          !strstr(script.data, "stop file present before campaign: $NYNTH_RUN_STOP_FILE") ||
-          !strstr(script.data, "nynth campaign stop requested before cycle ${nynth_run_i}: $NYNTH_RUN_STOP_FILE") ||
-          !strstr(script.data, "nynth campaign stop requested after cycle ${nynth_run_i}: $NYNTH_RUN_STOP_FILE") ||
-          !strstr(script.data, "nynth campaign cooldown: sleep ${NYNTH_RUN_COOLDOWN_S}s before next cycle") ||
-          !strstr(script.data, "sleep \"$NYNTH_RUN_COOLDOWN_S\"") ||
-          !strstr(script.data, "while [ \"$nynth_run_i\" -le \"$NYNTH_RUN_REPEAT\" ]; do") ||
-          !strstr(script.data, "nynth campaign cycle ${nynth_run_i}/${NYNTH_RUN_REPEAT}") ||
-          !strstr(script.data, "nynth_run_i=$((nynth_run_i + 1))") ||
+          !strstr(script.data, "nytrix_run_with_heartbeat()") ||
+          !strstr(script.data, "nytrix_write_state running child-start") ||
+          !strstr(script.data, "nytrix_write_state running heartbeat") ||
+          !strstr(script.data, "nytrix_write_state refreshing \"child-exit-$rc\"") ||
+          !strstr(script.data, "nytrix_run_with_heartbeat nytrix_low_priority ./build/nytrix fuzz all run") ||
+          !strstr(script.data, "nytrix_write_terminal_state dry-run preview") ||
+          !strstr(script.data, "nytrix_write_state running cycle-start") ||
+          !strstr(script.data, "nytrix_write_state cycle-complete report-ready") ||
+          !strstr(script.data, "nytrix_write_terminal_state stopped after-cycle") ||
+          !strstr(script.data, "nytrix_state_exit_trap()") ||
+          !strstr(script.data, "nytrix_release_campaign_lock") ||
+          !strstr(script.data, "nytrix_install_state_traps") ||
+          count_sub(script.data, strlen(script.data), "nytrix_install_state_traps") < 3 ||
+          !strstr(script.data, "nytrix_write_terminal_state failed \"exit-$rc\"") ||
+          !strstr(script.data, "nytrix_repeat_exceeds_max=0") ||
+          !strstr(script.data, "nytrix_repeat_exceeds_max=1") ||
+          !strstr(script.data, "max_cycles=$NYTRIX_RUN_MAX_CYCLES") ||
+          !strstr(script.data, "cooldown_s=$NYTRIX_RUN_COOLDOWN_S") ||
+          !strstr(script.data, "heartbeat_s=$NYTRIX_RUN_HEARTBEAT_S") ||
+          !strstr(script.data, "stop_file=$nytrix_stop_file_label") ||
+          !strstr(script.data, "exceeds_max=$nytrix_exceeds_max") ||
+          !strstr(script.data, "resolved cycles $NYTRIX_RUN_REPEAT exceeds NYTRIX_RUN_MAX_CYCLES=$NYTRIX_RUN_MAX_CYCLES") ||
+          !strstr(script.data, "stop file present before campaign: $NYTRIX_RUN_STOP_FILE") ||
+          !strstr(script.data, "nytrix campaign stop requested before cycle ${nytrix_run_i}: $NYTRIX_RUN_STOP_FILE") ||
+          !strstr(script.data, "nytrix campaign stop requested after cycle ${nytrix_run_i}: $NYTRIX_RUN_STOP_FILE") ||
+          !strstr(script.data, "nytrix campaign cooldown: sleep ${NYTRIX_RUN_COOLDOWN_S}s before next cycle") ||
+          !strstr(script.data, "sleep \"$NYTRIX_RUN_COOLDOWN_S\"") ||
+          !strstr(script.data, "while [ \"$nytrix_run_i\" -le \"$NYTRIX_RUN_REPEAT\" ]; do") ||
+          !strstr(script.data, "nytrix campaign cycle ${nytrix_run_i}/${NYTRIX_RUN_REPEAT}") ||
+          !strstr(script.data, "nytrix_run_i=$((nytrix_run_i + 1))") ||
           !strstr(script.data, "\ndone\n") ||
           !strstr(script.data,
-                  "\ndone\nnynth_write_terminal_state finished run-complete\n") ||
+                  "\ndone\nnytrix_write_terminal_state finished run-complete\n") ||
           count_sub(script.data, strlen(script.data),
                     "--json \"$status\" --markdown \"$status_md\"") < 2 ||
           count_sub(script.data, strlen(script.data),
@@ -3878,9 +3878,9 @@ static void selftest_validate_fuzz_reporting(const char *json,
             !strstr(run_line, "--hours") ||
             !strstr(run_line, "--threads") ||
             !strstr(run_line, "--profile") ||
-            !strstr(run_line, "nynth_low_priority") ||
-            !strstr(script.data, "nynth_require_free_space\nnynth_wait_for_load") ||
-            !strstr(script.data, "nynth_wait_for_load\nnynth_run_with_heartbeat nynth_low_priority") ||
+            !strstr(run_line, "nytrix_low_priority") ||
+            !strstr(script.data, "nytrix_require_free_space\nnytrix_wait_for_load") ||
+            !strstr(script.data, "nytrix_wait_for_load\nnytrix_run_with_heartbeat nytrix_low_priority") ||
             !strstr(run_line, "--json \"$report\""))
           (void)string_list_push_copy(errors, "next-run full-pressure run does not preserve campaign geometry");
         free(run_line);
@@ -3963,9 +3963,9 @@ static void selftest_validate_fuzz_all_repeat_status_progress(
   char root[4096] = {0};
   char script_abs[4096] = {0};
   char state_abs[4096] = {0};
-  if (!find_nynth_root(root, sizeof(root))) {
+  if (!find_nytrix_root(root, sizeof(root))) {
     (void)string_list_push_copy(
-        errors, "repeat status dry-run could not locate Nynth root");
+        errors, "repeat status dry-run could not locate Nytrix root");
   } else if (!next_script || !*next_script ||
              !path_join(script_abs, sizeof(script_abs), root, next_script) ||
              !state_file || !*state_file ||
@@ -3975,10 +3975,10 @@ static void selftest_validate_fuzz_all_repeat_status_progress(
   } else {
     char *dry_argv[] = {
       "env",
-      "NYNTH_LOW_PRIORITY=1",
-      "NYNTH_RUN_NICE=10",
-      "NYNTH_RUN_DRY_RUN=1",
-      "NYNTH_RUN_REPEAT=target",
+      "NYTRIX_LOW_PRIORITY=1",
+      "NYTRIX_RUN_NICE=10",
+      "NYTRIX_RUN_DRY_RUN=1",
+      "NYTRIX_RUN_REPEAT=target",
       script_abs,
       NULL
     };
@@ -4074,9 +4074,9 @@ static void selftest_validate_fuzz_all_repeat_status_progress(
     proc_result_free(&dry_pr);
     char *default_argv[] = {
       "env",
-      "NYNTH_LOW_PRIORITY=1",
-      "NYNTH_RUN_NICE=10",
-      "NYNTH_RUN_DRY_RUN=1",
+      "NYTRIX_LOW_PRIORITY=1",
+      "NYTRIX_RUN_NICE=10",
+      "NYTRIX_RUN_DRY_RUN=1",
       script_abs,
       NULL
     };
@@ -4141,7 +4141,7 @@ static void selftest_validate_fuzz_all_repeat_status_progress(
       snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
     }
   }
@@ -4212,7 +4212,7 @@ static void selftest_validate_fuzz_fresh_handoff(const char *json,
   if (!strstr(json, "\"category\":\"coverage\"") ||
       !strstr(json, "fuzz_fresh_handoff/coverage.json"))
     (void)string_list_push_copy(errors, "fresh handoff coverage command did not use custom cockpit");
-  if (strstr(json, "\"command\":\"./build/nynth fuzz all coverage --strict --history build/fuzz/all/history.json"))
+  if (strstr(json, "\"command\":\"./build/nytrix fuzz all coverage --strict --history build/fuzz/all/history.json"))
     (void)string_list_push_copy(errors, "fresh handoff coverage command leaked canonical cockpit");
   char *run_command = summary_string_from_report(json, "run_command");
   if (!run_command ||
@@ -4619,14 +4619,14 @@ static void selftest_validate_fuzz_default_pressure(const char *json,
          strstr(plan_next_command, "fuzz all run") ||
          !selftest_command_uses_env_nice(plan_next_command) ||
          (expected_repeat[0] && !strstr(plan_next_command, expected_repeat)) ||
-         (!expected_repeat[0] && strstr(plan_next_command, "NYNTH_RUN_REPEAT=")))
+         (!expected_repeat[0] && strstr(plan_next_command, "NYTRIX_RUN_REPEAT=")))
        (void)string_list_push_copy(errors,
                                    "default plan recommendation command wrong");
      if (!plan_next_preview ||
          !selftest_command_uses_env_nice(plan_next_preview) ||
-         !strstr(plan_next_preview, "NYNTH_RUN_DRY_RUN=1") ||
+         !strstr(plan_next_preview, "NYTRIX_RUN_DRY_RUN=1") ||
          (expected_repeat[0] && !strstr(plan_next_preview, expected_repeat)) ||
-         (!expected_repeat[0] && strstr(plan_next_preview, "NYNTH_RUN_REPEAT=")) ||
+         (!expected_repeat[0] && strstr(plan_next_preview, "NYTRIX_RUN_REPEAT=")) ||
          !strstr(plan_next_preview, "fuzz_default_pressure/run-next.sh"))
        (void)string_list_push_copy(errors,
                                    "default plan recommendation preview wrong");
@@ -4660,7 +4660,7 @@ static void selftest_validate_fuzz_default_pressure(const char *json,
       snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
     }
   }
@@ -4673,7 +4673,7 @@ static void selftest_validate_fuzz_default_pressure(const char *json,
   } else if (!strstr(md.data, "Recommended:") ||
              !strstr(md.data, expected_plan_action) ||
              !strstr(md.data, "Preview recommended:") ||
-             !strstr(md.data, "NYNTH_LOW_PRIORITY=1") ||
+             !strstr(md.data, "NYTRIX_LOW_PRIORITY=1") ||
              (expected_repeat[0] &&
               !strstr(md.data, expected_repeat))) {
     (void)string_list_push_copy(errors,
@@ -4735,7 +4735,7 @@ static void selftest_validate_fuzz_default_pressure(const char *json,
            !find_n(plan_jq_line, plan_jq_end,
                    "plan_next_low_cpu_command") ||
            find_n(plan_jq_line, plan_jq_end, ".md.json") ||
-           find_n(plan_jq_line, plan_jq_end, "/home/e/nynth"))
+           find_n(plan_jq_line, plan_jq_end, "/home/e/nytrix"))
          (void)string_list_push_copy(
              errors, "default plan Controls omit compact plan jq readout");
      }
@@ -4833,7 +4833,7 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
       count_json_array_items(coverage_queue_json) != 2 ||
       !strstr(coverage_queue_json, "\"lane\":\"afl\"") ||
       !strstr(coverage_queue_json, "\"lane\":\"compiler_findings\"") ||
-      !strstr(coverage_queue_json, "\"command\":\"./build/nynth"))
+      !strstr(coverage_queue_json, "\"command\":\"./build/nytrix"))
     (void)string_list_push_copy(errors,
                                 "coverage-next plan queue array missing");
   char *plan_next_action =
@@ -4882,8 +4882,8 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
                                 "coverage-next plan command did not prefer guarded handoff");
      if (!plan_next_low_cpu ||
          !selftest_command_uses_env_nice(plan_next_low_cpu) ||
-         !strstr(plan_next_low_cpu, "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
-         !strstr(plan_next_low_cpu, "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
+         !strstr(plan_next_low_cpu, "NYTRIX_MISSING_EVIDENCE_HOURS=1") ||
+         !strstr(plan_next_low_cpu, "NYTRIX_MISSING_EVIDENCE_THREADS=10%") ||
          !strstr(plan_next_low_cpu, "run-missing-evidence.sh"))
        (void)string_list_push_copy(errors,
                                    "coverage-next plan low-cpu command was missing");
@@ -4915,7 +4915,7 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
                                 "coverage-next plan recommended preview alias wrong");
      if (!plan_state_refresh ||
          !selftest_command_uses_env_nice(plan_state_refresh) ||
-         !strstr(plan_state_refresh, "NYNTH_RUN_DRY_RUN=1") ||
+         !strstr(plan_state_refresh, "NYTRIX_RUN_DRY_RUN=1") ||
          !strstr(plan_state_refresh, "run-missing-evidence.sh"))
        (void)string_list_push_copy(errors,
                                    "coverage-next plan state refresh missing");
@@ -4924,8 +4924,8 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
     (void)string_list_push_copy(errors,
                                 "coverage-next plan lost campaign handoff");
   if (!handoff_preview ||
-      !strstr(handoff_preview, "NYNTH_RUN_DRY_RUN=1") ||
-      !strstr(handoff_preview, "NYNTH_RUN_REPEAT=target") ||
+      !strstr(handoff_preview, "NYTRIX_RUN_DRY_RUN=1") ||
+      !strstr(handoff_preview, "NYTRIX_RUN_REPEAT=target") ||
       !strstr(handoff_preview, "fuzz_plan_coverage_next/run-next.sh"))
     (void)string_list_push_copy(errors,
                                 "coverage-next plan lost campaign dry-run preview");
@@ -5045,7 +5045,7 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
   if (!markdown || !*markdown) {
     (void)string_list_push_copy(errors,
                                 "coverage-next plan markdown path missing");
-  } else if (!find_nynth_root(root, sizeof(root)) ||
+  } else if (!find_nytrix_root(root, sizeof(root)) ||
              !read_file_maybe_root(root, markdown, &md) ||
              !md.data) {
     (void)string_list_push_copy(errors,
@@ -5057,14 +5057,14 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
     const char *missing_handoff = strstr(md.data,
                                          "run-missing-evidence.sh");
     const char *low_cpu_handoff =
-        strstr(md.data, "NYNTH_MISSING_EVIDENCE_THREADS=10%");
+        strstr(md.data, "NYTRIX_MISSING_EVIDENCE_THREADS=10%");
     const char *state_command =
         controls_section ?
             strstr(controls_section, "run-missing-evidence-state.json") :
             NULL;
     const char *refresh_command =
         controls_section ? strstr(controls_section,
-                                  "NYNTH_RUN_DRY_RUN=1") : NULL;
+                                  "NYTRIX_RUN_DRY_RUN=1") : NULL;
     const char *stop_command =
         controls_section ? strstr(controls_section,
                                   "missing-evidence-stop") : NULL;
@@ -5076,7 +5076,7 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
     const char *run_next = strstr(md.data, "run-next.sh");
        const char *campaign_preview =
            campaign_section ? strstr(campaign_section,
-                                     "NYNTH_RUN_DRY_RUN=1 NYNTH_RUN_REPEAT=target") : NULL;
+                                     "NYTRIX_RUN_DRY_RUN=1 NYTRIX_RUN_REPEAT=target") : NULL;
        const char *plan_jq_line =
            controls_section ?
                strstr(controls_section,
@@ -5115,7 +5115,7 @@ static void selftest_validate_fuzz_all_plan_coverage_next(const char *json,
            !find_n(plan_jq_line, plan_jq_end,
                    "plan_next_low_cpu_command") ||
            find_n(plan_jq_line, plan_jq_end, ".md.json") ||
-           find_n(plan_jq_line, plan_jq_end, "/home/e/nynth"))
+           find_n(plan_jq_line, plan_jq_end, "/home/e/nytrix"))
          (void)string_list_push_copy(
              errors, "coverage-next plan Controls omit compact plan jq readout");
        if (!strstr(md.data,
@@ -5360,8 +5360,8 @@ static void selftest_validate_fuzz_all_coverage_commands(const char *json,
             !strstr(coverage_next_guarded, "run-missing-evidence.sh") ||
             !coverage_next_low_cpu ||
             !selftest_command_uses_env_nice(coverage_next_low_cpu) ||
-            !strstr(coverage_next_low_cpu, "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
-            !strstr(coverage_next_low_cpu, "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
+            !strstr(coverage_next_low_cpu, "NYTRIX_MISSING_EVIDENCE_HOURS=1") ||
+            !strstr(coverage_next_low_cpu, "NYTRIX_MISSING_EVIDENCE_THREADS=10%") ||
             !strstr(coverage_next_low_cpu, "run-missing-evidence.sh") ||
             !coverage_next_preview ||
             !strstr(coverage_next_preview, "fuzz all preflight") ||
@@ -5376,7 +5376,7 @@ static void selftest_validate_fuzz_all_coverage_commands(const char *json,
                 "cat build/fuzz/all/run-missing-evidence-state.json") ||
             !coverage_next_state_refresh ||
             !selftest_command_uses_env_nice(coverage_next_state_refresh) ||
-            !strstr(coverage_next_state_refresh, "NYNTH_RUN_DRY_RUN=1") ||
+            !strstr(coverage_next_state_refresh, "NYTRIX_RUN_DRY_RUN=1") ||
             !strstr(coverage_next_state_refresh,
                     "run-missing-evidence.sh") ||
          !coverage_next_stop_command ||
@@ -5473,7 +5473,7 @@ static void selftest_validate_fuzz_all_coverage_commands(const char *json,
   if (!markdown || !*markdown) {
     (void)string_list_push_copy(errors,
                                 "coverage command markdown path missing");
-  } else if (!find_nynth_root(root, sizeof(root)) ||
+  } else if (!find_nytrix_root(root, sizeof(root)) ||
              !read_file_maybe_root(root, markdown, &md) ||
              !md.data) {
     (void)string_list_push_copy(errors,
@@ -5531,9 +5531,9 @@ static void selftest_validate_fuzz_all_coverage_commands(const char *json,
     const char *controls_section = strstr(md.data, "\n## Controls\n");
     const char *refresh_section = strstr(md.data, "\n## Refresh\n");
     const char *coverage_refresh =
-        strstr(md.data, "./build/nynth fuzz all coverage");
+        strstr(md.data, "./build/nytrix fuzz all coverage");
     const char *status_refresh =
-        strstr(md.data, "./build/nynth fuzz all status --refresh");
+        strstr(md.data, "./build/nytrix fuzz all status --refresh");
     const char *afl_parser_gap = strstr(md.data, "`afl_parsers`");
     if (afl_parser_gap && coverage_next_guarded &&
         *coverage_next_guarded && coverage_next_command &&
@@ -5563,7 +5563,7 @@ static void selftest_validate_fuzz_all_coverage_commands(const char *json,
               NULL;
       const char *refresh_in_controls =
           controls_section ?
-              strstr(controls_section, "NYNTH_RUN_DRY_RUN=1") : NULL;
+              strstr(controls_section, "NYTRIX_RUN_DRY_RUN=1") : NULL;
       const char *stop_in_controls =
           controls_section ? strstr(controls_section,
                                     "missing-evidence-stop") : NULL;
@@ -5686,7 +5686,7 @@ static void selftest_validate_fuzz_all_coverage_focus_companions(
   if (!markdown || !*markdown) {
     (void)string_list_push_copy(errors,
                                 "coverage focus companion markdown missing");
-  } else if (!find_nynth_root(root, sizeof(root)) ||
+  } else if (!find_nytrix_root(root, sizeof(root)) ||
              !read_file_maybe_root(root, markdown, &md) ||
              !md.data) {
     (void)string_list_push_copy(errors,
@@ -5814,9 +5814,9 @@ static void selftest_validate_fuzz_all_preflight_isolation(
                                 "preflight isolation run report points at campaign_dir");
 
   char root[4096] = {0};
-  if (!find_nynth_root(root, sizeof(root)))
+  if (!find_nytrix_root(root, sizeof(root)))
     (void)string_list_push_copy(errors,
-                                "Nynth root not found for preflight isolation");
+                                "Nytrix root not found for preflight isolation");
 
   file_buf_t run = {0};
   if (!run_report || !*run_report ||
@@ -5870,7 +5870,7 @@ static void selftest_validate_fuzz_all_preflight_isolation(
                                 "preflight isolation recommendation action wrong");
   if (!recommended_command ||
       !strstr(recommended_command, "fuzz all worklist") ||
-      strcmp(recommended_command, "./build/nynth fuzz") == 0)
+      strcmp(recommended_command, "./build/nytrix fuzz") == 0)
     (void)string_list_push_copy(errors,
                                 "preflight isolation recommendation command is stale");
   if (!status_run_command ||
@@ -5885,7 +5885,7 @@ static void selftest_validate_fuzz_all_preflight_isolation(
     (void)string_list_push_copy(errors,
                                 "preflight isolation next command missing");
   if (!preview_command ||
-      !strstr(preview_command, "NYNTH_RUN_DRY_RUN=1") ||
+      !strstr(preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
       !strstr(preview_command, "fuzz_preflight_isolation/campaign/run-next.sh"))
     (void)string_list_push_copy(errors,
                                 "preflight isolation preview command missing");
@@ -5947,7 +5947,7 @@ static void selftest_validate_fuzz_all_history_commands(const char *json,
   if (!markdown || !*markdown) {
     (void)string_list_push_copy(errors,
                                 "history command markdown path missing");
-  } else if (!find_nynth_root(root, sizeof(root)) ||
+  } else if (!find_nytrix_root(root, sizeof(root)) ||
              !read_file_maybe_root(root, markdown, &md) ||
              !md.data) {
     (void)string_list_push_copy(errors,
@@ -6120,17 +6120,17 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
   char *advisory_recheck =
       summary_string_from_report(json, "advisory_recheck_command");
   if (!advisory_recheck ||
-      !strstr(advisory_recheck, "NYNTH_AFL_RAW=1") ||
+      !strstr(advisory_recheck, "NYTRIX_AFL_RAW=1") ||
       !strstr(advisory_recheck, "timeout 15s") ||
       !strstr(advisory_recheck, "ny-core-normalize.sh") ||
       !strstr(advisory_recheck, "/hangs/"))
     (void)string_list_push_copy(errors,
                                 "full-pressure remediation advisory recheck command missing");
   else {
-    char nynth_root[4096] = {0};
+    char nytrix_root[4096] = {0};
     char absolute_cache[4096] = {0};
-    if (find_nynth_root(nynth_root, sizeof(nynth_root)) &&
-        path_join(absolute_cache, sizeof(absolute_cache), nynth_root,
+    if (find_nytrix_root(nytrix_root, sizeof(nytrix_root)) &&
+        path_join(absolute_cache, sizeof(absolute_cache), nytrix_root,
                   "build/cache/scratch") &&
         strstr(advisory_recheck, absolute_cache))
       (void)string_list_push_copy(
@@ -6234,7 +6234,7 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
                status_markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(status_markdown_abs, sizeof(status_markdown_abs),
                         root, status_markdown);
     }
@@ -6260,7 +6260,7 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
              !strstr(status_md.data, "raw replay 2/2 passed") ||
              !strstr(status_md.data, "timeouts 0") ||
              !strstr(status_md.data, "unexpected 0") ||
-             !strstr(status_md.data, "NYNTH_AFL_RAW=1") ||
+             !strstr(status_md.data, "NYTRIX_AFL_RAW=1") ||
              !strstr(status_md.data, "ny-core-normalize.sh") ||
              !strstr(status_md.data, "--include-history") ||
              !strstr(status_md.data, "worklist-history.json") ||
@@ -6277,7 +6277,7 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
       snprintf(worklist_abs, sizeof(worklist_abs), "%s", worklist_path);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(worklist_abs, sizeof(worklist_abs), root, worklist_path);
     }
   }
@@ -6314,14 +6314,14 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
         snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
       } else {
         char root[4096];
-        if (find_nynth_root(root, sizeof(root)))
+        if (find_nytrix_root(root, sizeof(root)))
           (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
       }
     }
     file_buf_t md = {0};
     if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
       (void)string_list_push_copy(errors, "full-pressure remediation worklist markdown was not readable");
-    } else if (!strstr(md.data, "# Nynth Active Worklist") ||
+    } else if (!strstr(md.data, "# Nytrix Active Worklist") ||
                !strstr(md.data, "Active items: 0; historical emitted: 0; hidden attention: 1") ||
                !strstr(md.data, "Current latest report has no open worklist items.") ||
                !strstr(md.data, "No active work items.") ||
@@ -6372,7 +6372,7 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
         !generated_hist_md.data) {
       (void)string_list_push_copy(errors,
                                   "full-pressure remediation generated historical markdown was not readable");
-    } else if (!strstr(generated_hist_md.data, "# Nynth Historical Worklist") ||
+    } else if (!strstr(generated_hist_md.data, "# Nytrix Historical Worklist") ||
                !strstr(generated_hist_md.data, "## Active Snapshot") ||
                !strstr(generated_hist_md.data,
                        "No active work items in latest report.") ||
@@ -6381,8 +6381,8 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
                        "demoted timeout: raw replay 2/2 passed, hangs 2, inputs 2, raw timeouts 0, unexpected 0") ||
                !strstr(generated_hist_md.data, "Recheck:") ||
                !strstr(generated_hist_md.data,
-                       "Recheck: `cd . && env NYNTH_AFL_RAW=1") ||
-               !strstr(generated_hist_md.data, "NYNTH_AFL_RAW=1") ||
+                       "Recheck: `cd . && env NYTRIX_AFL_RAW=1") ||
+               !strstr(generated_hist_md.data, "NYTRIX_AFL_RAW=1") ||
                !strstr(generated_hist_md.data, "ny-core-normalize.sh") ||
                !strstr(generated_hist_md.data,
                        "Historical non-reproducing AFL timeout rows: 1 verified by raw replay") ||
@@ -6408,12 +6408,12 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
         asprintf(&history_json, "%s.include-history.json", worklist_abs) >= 0 &&
         asprintf(&history_md, "%s.include-history.md", worklist_abs) >= 0;
     char repo_root[4096] = {0};
-    bool repo_ok = find_nynth_root(repo_root, sizeof(repo_root));
+    bool repo_ok = find_nytrix_root(repo_root, sizeof(repo_root));
     if (!history_paths_ok || !history_report || !*history_report || !repo_ok) {
       (void)string_list_push_copy(errors, "full-pressure remediation include-history worklist setup failed");
     } else {
       char *cmd_argv[] = {
-        "./build/nynth", "fuzz", "all", "worklist",
+        "./build/nytrix", "fuzz", "all", "worklist",
         "--history", history_report,
         "--include-history",
         "--json", history_json,
@@ -6462,9 +6462,9 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
           !strstr(hist.data, "\"repro_command\"") ||
           !strstr(hist.data, "\"raw_repro_command\"") ||
           !strstr(hist.data, "\"first_raw_repro_command\"") ||
-          !strstr(hist.data, "NYNTH_AFL_RAW=1") ||
+          !strstr(hist.data, "NYTRIX_AFL_RAW=1") ||
           !strstr(hist.data, "&& timeout 15s") ||
-            !strstr(hist.data, "build/cache/scratch/nynth_selftest_native_") ||
+            !strstr(hist.data, "build/cache/scratch/nytrix_selftest_native_") ||
           !strstr(hist.data, "ny-core-normalize.sh") ||
           !strstr(hist.data, "\"failed_reports\"") ||
           !strstr(hist.data, "\"afl_output_dirs\"") ||
@@ -6490,14 +6490,14 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
         raw_repro = json_extract_string_range(raw_field,
                                               hist.data + strlen(hist.data),
                                               "first_raw_repro_command");
-      if (!raw_repro || !strstr(raw_repro, "NYNTH_AFL_RAW=1") ||
+      if (!raw_repro || !strstr(raw_repro, "NYTRIX_AFL_RAW=1") ||
           !strstr(raw_repro, "timeout 15s")) {
         (void)string_list_push_copy(errors, "full-pressure remediation raw replay command is missing");
       } else {
-        char nynth_root[4096] = {0};
+        char nytrix_root[4096] = {0};
         char absolute_cache[4096] = {0};
-        if (find_nynth_root(nynth_root, sizeof(nynth_root)) &&
-            path_join(absolute_cache, sizeof(absolute_cache), nynth_root,
+        if (find_nytrix_root(nytrix_root, sizeof(nytrix_root)) &&
+            path_join(absolute_cache, sizeof(absolute_cache), nytrix_root,
                       "build/cache/scratch") &&
             strstr(raw_repro, absolute_cache))
           (void)string_list_push_copy(
@@ -6515,7 +6515,7 @@ static void selftest_validate_fuzz_full_pressure_remediation(const char *json,
     if (!history_md || !read_file(history_md, &hist_markdown) ||
         !hist_markdown.data) {
       (void)string_list_push_copy(errors, "full-pressure remediation include-history markdown was not readable");
-    } else if (!strstr(hist_markdown.data, "# Nynth Historical Worklist") ||
+    } else if (!strstr(hist_markdown.data, "# Nytrix Historical Worklist") ||
                !strstr(hist_markdown.data, "Active items: 0; historical emitted: 1; hidden attention: 1") ||
                !strstr(hist_markdown.data, "## Active Snapshot") ||
                !strstr(hist_markdown.data,
@@ -6601,7 +6601,7 @@ static void selftest_validate_fuzz_repro_ready_missing_wrapper(const char *json,
       snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
     }
   }
@@ -6671,7 +6671,7 @@ static void selftest_validate_fuzz_repro_ready_missing_command(const char *json,
       snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
     }
   }
@@ -6797,17 +6797,17 @@ static void selftest_validate_perf_triage_args(const char *json,
   selftest_expect_top_alias_string(json, "markdown", errors);
   char *findings_dir = summary_string_from_report(json, "findings_dir");
   if (!findings_dir || !strstr(findings_dir, "build/cache/scratch/perf_triage_findings/") ||
-      strstr(findings_dir, "fuzz/work"))
+      strstr(findings_dir, "etc/assets/dict/fuzz/work"))
     (void)string_list_push_copy(errors, "perf triage default findings dir escaped build/cache/scratch");
   if (findings_dir && path_is_absolute(findings_dir))
     (void)string_list_push_copy(errors, "perf triage findings dir was absolute");
   char *scratch_root = summary_string_from_report(json, "scratch_root");
   if (!scratch_root || strcmp(scratch_root, "build/cache/scratch") != 0)
     (void)string_list_push_copy(errors, "perf triage scratch root was not repo-relative");
-  char nynth_root[4096] = {0};
-  bool have_nynth_root = find_nynth_root(nynth_root, sizeof(nynth_root));
-  if (have_nynth_root && nynth_root[0] && strstr(json, nynth_root))
-    (void)string_list_push_copy(errors, "perf triage report leaked absolute nynth paths");
+  char nytrix_root[4096] = {0};
+  bool have_nytrix_root = find_nytrix_root(nytrix_root, sizeof(nytrix_root));
+  if (have_nytrix_root && nytrix_root[0] && strstr(json, nytrix_root))
+    (void)string_list_push_copy(errors, "perf triage report leaked absolute nytrix paths");
   char *markdown = summary_string_from_report(json, "markdown");
   if (!markdown || !strstr(markdown, "perf-triage.md")) {
     (void)string_list_push_copy(errors, "perf triage markdown path missing");
@@ -6817,19 +6817,19 @@ static void selftest_validate_perf_triage_args(const char *json,
       snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
     }
     file_buf_t md = {0};
     if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
       (void)string_list_push_copy(errors, "perf triage markdown was not readable");
-    } else if (!strstr(md.data, "Nynth Perf Triage") ||
+    } else if (!strstr(md.data, "Nytrix Perf Triage") ||
                !strstr(md.data, "TLDR") ||
                !strstr(md.data, "Ranked Cases") ||
                !strstr(md.data, "threshold 999.00x") ||
                !strstr(md.data, "Refresh") ||
-               !strstr(md.data, "env NYNTH_LOW_PRIORITY=1") ||
-               !strstr(md.data, "NYNTH_RUN_NICE=10") ||
+               !strstr(md.data, "env NYTRIX_LOW_PRIORITY=1") ||
+               !strstr(md.data, "NYTRIX_RUN_NICE=10") ||
                !strstr(md.data, "nice -n 10") ||
                !strstr(md.data, "perf triage --fast") ||
                !strstr(md.data, "--markdown")) {
@@ -6837,7 +6837,7 @@ static void selftest_validate_perf_triage_args(const char *json,
     } else if (strstr(md.data, "+-")) {
       (void)string_list_push_copy(
           errors, "perf triage markdown rendered a malformed slowdown sign");
-    } else if ((have_nynth_root && nynth_root[0] && strstr(md.data, nynth_root)) ||
+    } else if ((have_nytrix_root && nytrix_root[0] && strstr(md.data, nytrix_root)) ||
                strstr(md.data, "/home/e/nytrix/build/cache/projects/test") ||
                strstr(md.data, "/home/e/nytrix/fuzz")) {
       (void)string_list_push_copy(errors, "perf triage markdown leaked local absolute paths");
@@ -7013,16 +7013,16 @@ static void selftest_validate_compiler_std_audit(const char *json,
     (void)string_list_push_copy(errors,
                                 "compiler std audit CRT alias state mismatch");
   if (!runtime_scope ||
-      strcmp(runtime_scope, NYNTH_RUNTIME_SURFACE_SCOPE) != 0 ||
-      !crt_scope || strcmp(crt_scope, NYNTH_CRT_SURFACE_SCOPE) != 0 ||
+      strcmp(runtime_scope, NYTRIX_RUNTIME_SURFACE_SCOPE) != 0 ||
+      !crt_scope || strcmp(crt_scope, NYTRIX_CRT_SURFACE_SCOPE) != 0 ||
       !crt_behavior_state ||
-      strcmp(crt_behavior_state, NYNTH_CRT_BEHAVIOR_STATE) != 0 ||
+      strcmp(crt_behavior_state, NYTRIX_CRT_BEHAVIOR_STATE) != 0 ||
       !crt_behavior_scope ||
-      strcmp(crt_behavior_scope, NYNTH_CRT_BEHAVIOR_SCOPE) != 0)
+      strcmp(crt_behavior_scope, NYTRIX_CRT_BEHAVIOR_SCOPE) != 0)
     (void)string_list_push_copy(
         errors, "compiler std audit CRT claim scope missing");
   if (!crt_behavior_next_action ||
-      strcmp(crt_behavior_next_action, NYNTH_CRT_BEHAVIOR_NEXT_ACTION) != 0 ||
+      strcmp(crt_behavior_next_action, NYTRIX_CRT_BEHAVIOR_NEXT_ACTION) != 0 ||
       !crt_behavior_next_reason ||
       !strstr(crt_behavior_next_reason, "campaign-gated") ||
       !crt_behavior_next_command ||
@@ -7166,13 +7166,13 @@ static void selftest_validate_compiler_std_audit(const char *json,
       snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
     }
     file_buf_t md = {0};
     if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
       (void)string_list_push_copy(errors, "compiler std audit markdown was not readable");
-    } else if (!strstr(md.data, "# Nynth Compiler Std Audit") ||
+    } else if (!strstr(md.data, "# Nytrix Compiler Std Audit") ||
                   !strstr(md.data, "TLDR") ||
                   !strstr(md.data, "Runtime surface") ||
                      !strstr(md.data, "CRT aliases") ||
@@ -7192,8 +7192,8 @@ static void selftest_validate_compiler_std_audit(const char *json,
                  !strstr(md.data, "after "))) ||
                !strstr(md.data, "SIMD wrappers") ||
                !strstr(md.data, "Refresh") ||
-               !strstr(md.data, "env NYNTH_LOW_PRIORITY=1") ||
-               !strstr(md.data, "NYNTH_RUN_NICE=10") ||
+               !strstr(md.data, "env NYTRIX_LOW_PRIORITY=1") ||
+               !strstr(md.data, "NYTRIX_RUN_NICE=10") ||
                !strstr(md.data, "nice -n 10") ||
                !strstr(md.data, "compiler std-audit --json") ||
                !strstr(md.data, "--markdown") ||
@@ -7248,7 +7248,7 @@ static void selftest_validate_reduce_artifact_report(const char *json,
     (void)string_list_push_copy(errors, "reduce artifact mode mismatch");
   char *out = summary_string_from_report(json, "out");
   if (!out || !strstr(out, "build/cache/scratch/reduced/") ||
-      strstr(out, "fuzz/work") || strstr(out, "/tmp/"))
+      strstr(out, "etc/assets/dict/fuzz/work") || strstr(out, "/tmp/"))
     (void)string_list_push_copy(errors, "reduce artifact default output escaped build/cache/scratch");
   free(out);
   free(mode);
@@ -7264,7 +7264,7 @@ static void selftest_validate_cli_equals_args(const char *json,
   if (!summary_number_from_report(json, "files_scanned", &files_scanned) ||
       files_scanned <= 0.0)
     (void)string_list_push_copy(errors, "equals-form json command did not run python-clean");
-  if (!strstr(json, "\"selftest_scope\":\"nynth-tree-clean\""))
+  if (!strstr(json, "\"selftest_scope\":\"nytrix-tree-clean\""))
     (void)string_list_push_copy(errors, "equals-form json command wrote unexpected report");
 }
 
@@ -7476,48 +7476,48 @@ static void selftest_validate_fuzz_all_help_stdout(const char *json,
     (void)string_list_push_copy(errors,
                                 "fuzz-all help progress alias missing");
   if (!run_next_command ||
-      !strstr(run_next_command, "env NYNTH_LOW_PRIORITY=1") ||
-      !strstr(run_next_command, "NYNTH_RUN_NICE=10") ||
+      !strstr(run_next_command, "env NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(run_next_command, "NYTRIX_RUN_NICE=10") ||
       !strstr(run_next_command, "nice -n 10") ||
-      strstr(run_next_command, "NYNTH_RUN_DRY_RUN=1") ||
+      strstr(run_next_command, "NYTRIX_RUN_DRY_RUN=1") ||
       !strstr(run_next_command, "./build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(errors,
                                 "fuzz-all help run-next alias missing");
   if (!run_next_preview_command ||
-      !strstr(run_next_preview_command, "env NYNTH_LOW_PRIORITY=1") ||
-      !strstr(run_next_preview_command, "NYNTH_RUN_NICE=10") ||
-      !strstr(run_next_preview_command, "NYNTH_RUN_DRY_RUN=1") ||
+      !strstr(run_next_preview_command, "env NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(run_next_preview_command, "NYTRIX_RUN_NICE=10") ||
+      !strstr(run_next_preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
       !strstr(run_next_preview_command, "nice -n 10") ||
       !strstr(run_next_preview_command, "./build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(errors,
                                 "fuzz-all help preview alias missing");
   if (!run_next_low_cpu_command ||
-      !strstr(run_next_low_cpu_command, "env NYNTH_LOW_PRIORITY=1") ||
-      !strstr(run_next_low_cpu_command, "NYNTH_LOW_PRIORITY=1") ||
-      !strstr(run_next_low_cpu_command, "NYNTH_RUN_NICE=10") ||
+      !strstr(run_next_low_cpu_command, "env NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(run_next_low_cpu_command, "NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(run_next_low_cpu_command, "NYTRIX_RUN_NICE=10") ||
       !strstr(run_next_low_cpu_command, "nice -n 10") ||
-      strstr(run_next_low_cpu_command, "NYNTH_RUN_DRY_RUN=1") ||
+      strstr(run_next_low_cpu_command, "NYTRIX_RUN_DRY_RUN=1") ||
       !strstr(run_next_low_cpu_command, "./build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(errors,
                                 "fuzz-all help low-cpu run alias missing");
   if (!run_next_gentle_command ||
-      !strstr(run_next_gentle_command, "env NYNTH_LOW_PRIORITY=1") ||
-      !strstr(run_next_gentle_command, "NYNTH_LOW_PRIORITY=1") ||
-      !strstr(run_next_gentle_command, "NYNTH_RUN_NICE=10") ||
-      !strstr(run_next_gentle_command, "NYNTH_RUN_HOURS=1") ||
-      !strstr(run_next_gentle_command, "NYNTH_RUN_THREADS=10%") ||
+      !strstr(run_next_gentle_command, "env NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(run_next_gentle_command, "NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(run_next_gentle_command, "NYTRIX_RUN_NICE=10") ||
+      !strstr(run_next_gentle_command, "NYTRIX_RUN_HOURS=1") ||
+      !strstr(run_next_gentle_command, "NYTRIX_RUN_THREADS=10%") ||
       !strstr(run_next_gentle_command, "nice -n 10") ||
-      strstr(run_next_gentle_command, "NYNTH_RUN_DRY_RUN=1") ||
+      strstr(run_next_gentle_command, "NYTRIX_RUN_DRY_RUN=1") ||
       !strstr(run_next_gentle_command, "./build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(errors,
                                 "fuzz-all help gentle run alias missing");
   if (!run_next_gentle_preview_command ||
-      !strstr(run_next_gentle_preview_command, "env NYNTH_LOW_PRIORITY=1") ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_LOW_PRIORITY=1") ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_NICE=10") ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_DRY_RUN=1") ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_HOURS=1") ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_THREADS=10%") ||
+      !strstr(run_next_gentle_preview_command, "env NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_NICE=10") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_HOURS=1") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_THREADS=10%") ||
       !strstr(run_next_gentle_preview_command, "nice -n 10") ||
       !strstr(run_next_gentle_preview_command, "./build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(errors,
@@ -7537,16 +7537,16 @@ static void selftest_validate_fuzz_all_help_stdout(const char *json,
     (void)string_list_push_copy(errors,
                                 "fuzz-all help old-path aliases missing low-priority guard");
   if (strcmp(old_path_probe_command ? old_path_probe_command : "",
-             NYNTH_FUZZ_ALL_OLD_PATH_PROBE_COMMAND) != 0 ||
+             NYTRIX_FUZZ_ALL_OLD_PATH_PROBE_COMMAND) != 0 ||
       strcmp(old_path_dry_run_command ? old_path_dry_run_command : "",
-             NYNTH_FUZZ_ALL_OLD_PATH_DRY_RUN_COMMAND) != 0 ||
+             NYTRIX_FUZZ_ALL_OLD_PATH_DRY_RUN_COMMAND) != 0 ||
       strcmp(old_path_apply_command ? old_path_apply_command : "",
-             NYNTH_FUZZ_ALL_OLD_PATH_APPLY_COMMAND) != 0)
+             NYTRIX_FUZZ_ALL_OLD_PATH_APPLY_COMMAND) != 0)
     (void)string_list_push_copy(errors,
                                 "fuzz-all help old-path aliases drifted from shared commands");
   if (!selftest_catalog_command ||
-      !strstr(selftest_catalog_command, "env NYNTH_LOW_PRIORITY=1") ||
-      !strstr(selftest_catalog_command, "NYNTH_RUN_NICE=10") ||
+      !strstr(selftest_catalog_command, "env NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(selftest_catalog_command, "NYTRIX_RUN_NICE=10") ||
       !strstr(selftest_catalog_command, "nice -n 10") ||
       !strstr(selftest_catalog_command, "selftest run --list") ||
       !selftest_result_probe_command ||
@@ -7555,11 +7555,11 @@ static void selftest_validate_fuzz_all_help_stdout(const char *json,
       !strstr(selftest_result_probe_command, "build/fuzz/all/selftest-catalog.json") ||
       strstr(selftest_result_probe_command, "jq '") ||
       !selftest_cockpit_run_command ||
-      !strstr(selftest_cockpit_run_command, "env NYNTH_LOW_PRIORITY=1") ||
-      !strstr(selftest_cockpit_run_command, "NYNTH_RUN_NICE=10") ||
+      !strstr(selftest_cockpit_run_command, "env NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(selftest_cockpit_run_command, "NYTRIX_RUN_NICE=10") ||
       !strstr(selftest_cockpit_run_command, "nice -n 10") ||
       !strstr(selftest_cockpit_run_command,
-              "./build/nynth selftest run --only fuzz_all_help") ||
+              "./build/nytrix selftest run --only fuzz_all_help") ||
       !strstr(selftest_cockpit_run_command, "--only compiler_findings") ||
       !strstr(selftest_cockpit_run_command, "--only compiler_known_bugs") ||
       !strstr(selftest_cockpit_run_command, "--only compiler_std_audit") ||
@@ -7577,61 +7577,61 @@ static void selftest_validate_fuzz_all_help_stdout(const char *json,
     (void)string_list_push_copy(errors,
                                 "fuzz-all help selftest aliases missing");
   if (strcmp(selftest_catalog_command ? selftest_catalog_command : "",
-             NYNTH_FUZZ_ALL_SELFTEST_CATALOG) != 0 ||
+             NYTRIX_FUZZ_ALL_SELFTEST_CATALOG) != 0 ||
       strcmp(selftest_result_probe_command ? selftest_result_probe_command : "",
-             NYNTH_FUZZ_ALL_SELFTEST_PROBE) != 0 ||
+             NYTRIX_FUZZ_ALL_SELFTEST_PROBE) != 0 ||
       strcmp(selftest_cockpit_run_command ? selftest_cockpit_run_command : "",
-             NYNTH_FUZZ_ALL_SELFTEST_RUN) != 0 ||
+             NYTRIX_FUZZ_ALL_SELFTEST_RUN) != 0 ||
       strcmp(selftest_cockpit_result_probe_command ?
                  selftest_cockpit_result_probe_command : "",
-             NYNTH_FUZZ_ALL_SELFTEST_COCKPIT_PROBE) != 0)
+             NYTRIX_FUZZ_ALL_SELFTEST_COCKPIT_PROBE) != 0)
     (void)string_list_push_copy(errors,
                                 "fuzz-all help selftest aliases drifted from shared commands");
   if (!known_bugs_command ||
-      !strstr(known_bugs_command, "env NYNTH_LOW_PRIORITY=1") ||
-      !strstr(known_bugs_command, "NYNTH_LOW_PRIORITY=1") ||
-      !strstr(known_bugs_command, "NYNTH_RUN_NICE=10") ||
+      !strstr(known_bugs_command, "env NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(known_bugs_command, "NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(known_bugs_command, "NYTRIX_RUN_NICE=10") ||
       !strstr(known_bugs_command, "nice -n 10") ||
-      !strstr(known_bugs_command, "./build/nynth") ||
+      !strstr(known_bugs_command, "./build/nytrix") ||
       !strstr(known_bugs_command, "compiler known-bugs --timeout-s 15") ||
       !known_bugs_report ||
-      strcmp(known_bugs_report, NYNTH_FUZZ_ALL_KNOWN_BUGS_REPORT) != 0 ||
+      strcmp(known_bugs_report, NYTRIX_FUZZ_ALL_KNOWN_BUGS_REPORT) != 0 ||
       !known_bugs_result_probe_command ||
       strcmp(known_bugs_result_probe_command,
-             NYNTH_FUZZ_ALL_KNOWN_BUGS_PROBE) != 0 ||
+             NYTRIX_FUZZ_ALL_KNOWN_BUGS_PROBE) != 0 ||
       !perf_triage_command ||
-      !strstr(perf_triage_command, "env NYNTH_LOW_PRIORITY=1") ||
-      !strstr(perf_triage_command, "NYNTH_LOW_PRIORITY=1") ||
-      !strstr(perf_triage_command, "NYNTH_RUN_NICE=10") ||
+      !strstr(perf_triage_command, "env NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(perf_triage_command, "NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(perf_triage_command, "NYTRIX_RUN_NICE=10") ||
       !strstr(perf_triage_command, "nice -n 10") ||
-      !strstr(perf_triage_command, "./build/nynth") ||
+      !strstr(perf_triage_command, "./build/nytrix") ||
       !strstr(perf_triage_command, "perf triage --fast --limit 5") ||
       !perf_triage_report ||
-      strcmp(perf_triage_report, NYNTH_FUZZ_ALL_PERF_TRIAGE_REPORT) != 0 ||
+      strcmp(perf_triage_report, NYTRIX_FUZZ_ALL_PERF_TRIAGE_REPORT) != 0 ||
       !perf_triage_markdown ||
       strcmp(perf_triage_markdown,
-             NYNTH_FUZZ_ALL_PERF_TRIAGE_MARKDOWN) != 0 ||
+             NYTRIX_FUZZ_ALL_PERF_TRIAGE_MARKDOWN) != 0 ||
       !perf_triage_result_probe_command ||
       strcmp(perf_triage_result_probe_command,
-             NYNTH_FUZZ_ALL_PERF_TRIAGE_PROBE) != 0)
+             NYTRIX_FUZZ_ALL_PERF_TRIAGE_PROBE) != 0)
     (void)string_list_push_copy(errors,
                                 "fuzz-all help proof aliases missing");
   if (strcmp(known_bugs_command ? known_bugs_command : "",
-             NYNTH_FUZZ_ALL_KNOWN_BUGS_COMMAND) != 0 ||
+             NYTRIX_FUZZ_ALL_KNOWN_BUGS_COMMAND) != 0 ||
       strcmp(known_bugs_report ? known_bugs_report : "",
-             NYNTH_FUZZ_ALL_KNOWN_BUGS_REPORT) != 0 ||
+             NYTRIX_FUZZ_ALL_KNOWN_BUGS_REPORT) != 0 ||
       strcmp(known_bugs_result_probe_command ?
                  known_bugs_result_probe_command : "",
-             NYNTH_FUZZ_ALL_KNOWN_BUGS_PROBE) != 0 ||
+             NYTRIX_FUZZ_ALL_KNOWN_BUGS_PROBE) != 0 ||
       strcmp(perf_triage_command ? perf_triage_command : "",
-             NYNTH_FUZZ_ALL_PERF_TRIAGE_COMMAND) != 0 ||
+             NYTRIX_FUZZ_ALL_PERF_TRIAGE_COMMAND) != 0 ||
       strcmp(perf_triage_report ? perf_triage_report : "",
-             NYNTH_FUZZ_ALL_PERF_TRIAGE_REPORT) != 0 ||
+             NYTRIX_FUZZ_ALL_PERF_TRIAGE_REPORT) != 0 ||
       strcmp(perf_triage_markdown ? perf_triage_markdown : "",
-             NYNTH_FUZZ_ALL_PERF_TRIAGE_MARKDOWN) != 0 ||
+             NYTRIX_FUZZ_ALL_PERF_TRIAGE_MARKDOWN) != 0 ||
       strcmp(perf_triage_result_probe_command ?
                  perf_triage_result_probe_command : "",
-             NYNTH_FUZZ_ALL_PERF_TRIAGE_PROBE) != 0)
+             NYTRIX_FUZZ_ALL_PERF_TRIAGE_PROBE) != 0)
     (void)string_list_push_copy(errors,
                                 "fuzz-all help proof aliases drifted from shared commands");
   if (!strstr(json, "\"commands\"") ||
@@ -7656,7 +7656,7 @@ static void selftest_validate_fuzz_all_help_stdout(const char *json,
       !strstr(json, "crt:{state:.crt_surface_state,scope:.crt_surface_scope,behavior:.crt_behavior_state,next:.crt_behavior_next_action,done:.crt_coverage_done,total:.crt_coverage_total,families:.crt_unreferenced_family_count}") ||
       !strstr(json, "paths:{scratch:.scratch_root,tmp:.tmp_dir,xdg:.xdg_cache_home,nytrix_cache:.nytrix_cache_dir,old_test:.old_nytrix_test_scratch_absent,old_fuzz:.old_nytrix_fuzz_absent,old_cache:.old_nytrix_build_cache_absent,old_writer:.active_old_nytrix_output_writer_present,old_policy:.old_path_cache_policy_ok,old_action:.old_path_next_action,old_seen:.old_path_present_count,old_moved:.old_path_moved_count,old_current:.old_path_remaining_count,old_wait_s:.old_path_wait_remaining_seconds,old_leaks:.old_path_artifact_leak_count,artifact_remaining:.old_path_artifact_remaining_count}} build/fuzz/all/status.json") ||
       !strstr(json, "\"details\":\"Use build/fuzz/all/status.md") ||
-      !strstr(json, NYNTH_FUZZ_ALL_STATE_JQ_DEFAULT) ||
+      !strstr(json, NYTRIX_FUZZ_ALL_STATE_JQ_DEFAULT) ||
       !strstr(json, "--status build/fuzz/all/status.json") ||
       !strstr(json, "--history build/fuzz/all/history.json") ||
       !strstr(json, "--worklist build/fuzz/all/worklist.json") ||
@@ -7674,29 +7674,29 @@ static void selftest_validate_fuzz_all_help_stdout(const char *json,
       !strstr(json, "--json build/fuzz/all/old-paths.json") ||
       !strstr(json, "--markdown build/fuzz/all/old-paths.md") ||
       !strstr(json, "fuzz all old-paths --dry-run --probe --nytrix-root ../nytrix --archive-dir build/cache/old-nytrix --json build/fuzz/all/old-paths.json --markdown build/fuzz/all/old-paths.md") ||
-      !strstr(json, "env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth compiler known-bugs") ||
-      !strstr(json, "env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth perf triage") ||
+      !strstr(json, "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix compiler known-bugs") ||
+      !strstr(json, "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix perf triage") ||
       !strstr(json, "compiler known-bugs --timeout-s 15 --json build/fuzz/ultra/compiler-known-bugs.json") ||
       !strstr(json, "perf triage --fast --limit 5 --threshold 1.50 --json build/fuzz/ultra/perf-triage-current.json --markdown build/fuzz/ultra/perf-triage-current.md") ||
       !strstr(json, "selftest run --list --json build/fuzz/all/selftest-catalog.json --markdown build/fuzz/all/selftest-catalog.md") ||
       !strstr(json, "selftest run --list --probe --json build/fuzz/all/selftest-catalog.json --markdown build/fuzz/all/selftest-catalog.md") ||
       !strstr(json, "jq {ok,cases,ok_count,failure_count,requested_cases,executed_cases,skipped_slow_count,all_requested_executed} build/fuzz/all/selftest-cockpit.json") ||
-      !strstr(json, "env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth selftest run --only fuzz_all_help") ||
+      !strstr(json, "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix selftest run --only fuzz_all_help") ||
       !strstr(json, "--only compiler_findings") ||
       !strstr(json, "--only compiler_known_bugs") ||
       !strstr(json, "--only compiler_std_audit") ||
       !strstr(json, "--only perf_triage_args") ||
       strstr(json, "compiler-known-bugs-current.json") ||
       strstr(json, "perf-triage-fast.json") ||
-      !strstr(json, "NYNTH_LOW_PRIORITY=1") ||
-      !strstr(json, "NYNTH_RUN_NICE=10") ||
-      !strstr(json, "NYNTH_RUN_DRY_RUN=1 nice -n 10 ./build/fuzz/all/run-next.sh") ||
-      !strstr(json, "NYNTH_RUN_NICE=10 nice -n 10 ./build/fuzz/all/run-next.sh") ||
-      !strstr(json, "NYNTH_RUN_HOURS=1 NYNTH_RUN_THREADS=10% nice -n 10 ./build/fuzz/all/run-next.sh") ||
+      !strstr(json, "NYTRIX_LOW_PRIORITY=1") ||
+      !strstr(json, "NYTRIX_RUN_NICE=10") ||
+      !strstr(json, "NYTRIX_RUN_DRY_RUN=1 nice -n 10 ./build/fuzz/all/run-next.sh") ||
+      !strstr(json, "NYTRIX_RUN_NICE=10 nice -n 10 ./build/fuzz/all/run-next.sh") ||
+      !strstr(json, "NYTRIX_RUN_HOURS=1 NYTRIX_RUN_THREADS=10% nice -n 10 ./build/fuzz/all/run-next.sh") ||
       !strstr(json, "fuzz all run --profile insane"))
     (void)string_list_push_copy(errors, "fuzz-all help missing campaign commands");
-  if (strstr(json, "NYNTH_RUN_REPEAT=good ./build/fuzz/all/run-next.sh") ||
-      strstr(json, "NYNTH_RUN_DRY_RUN=1 NYNTH_RUN_REPEAT=good"))
+  if (strstr(json, "NYTRIX_RUN_REPEAT=good ./build/fuzz/all/run-next.sh") ||
+      strstr(json, "NYTRIX_RUN_DRY_RUN=1 NYTRIX_RUN_REPEAT=good"))
     (void)string_list_push_copy(
         errors, "fuzz-all help hardcodes stale run-good handoff");
   if (strstr(quick_probe_command, "jq '") ||
@@ -7781,11 +7781,11 @@ static void selftest_validate_old_writer_classifier(string_list_t *errors) {
   if (!errors) return;
   if (process_cmdline_is_old_nytrix_output_writer(
           "timeout 10 bash -lc rg -n '/home/e/nytrix/fuzz|/home/e/nytrix/build/cache' src/cli.c",
-          "/home/e/nynth"))
+          "/home/e/nytrix"))
     (void)string_list_push_copy(errors, "old-writer classifier treats rg as a writer");
   if (process_cmdline_is_old_nytrix_output_writer(
           "grep -R /home/e/nytrix/build/cache README.md BUGS.md",
-          "/home/e/nynth"))
+          "/home/e/nytrix"))
     (void)string_list_push_copy(errors, "old-writer classifier treats grep as a writer");
   if (process_cmdline_is_old_nytrix_output_writer(
           "python3 -m http.server 8766 --bind 127.0.0.1 --directory build/cache/web/demos",
@@ -7793,14 +7793,14 @@ static void selftest_validate_old_writer_classifier(string_list_t *errors) {
     (void)string_list_push_copy(errors,
                                 "old-writer classifier treats read-only web serving as a writer");
   if (process_cmdline_is_old_nytrix_output_writer(
-          "./build/nynth fuzz all old-paths --dry-run --nytrix-root ../nytrix --archive-dir build/cache/old-nytrix --json build/fuzz/all/old-paths.json",
-          "/home/e/nynth"))
+          "./build/nytrix fuzz all old-paths --dry-run --nytrix-root ../nytrix --archive-dir build/cache/old-nytrix --json build/fuzz/all/old-paths.json",
+          "/home/e/nytrix"))
     (void)string_list_push_copy(errors, "old-writer classifier treats cleanup scan as a writer");
   if (process_cmdline_is_old_nytrix_output_writer(
           "/home/e/nytrix/build/release/ny --compiler-asserts -emit-only "
-          "/home/e/nynth/build/cache/scratch/afl_runs/ny-core/hangs/id:000000",
+          "/home/e/nytrix/build/cache/scratch/afl_runs/ny-core/hangs/id:000000",
           "/home/e/nytrix"))
-    (void)string_list_push_copy(errors, "old-writer classifier treats Nynth cache input as an old writer");
+    (void)string_list_push_copy(errors, "old-writer classifier treats Nytrix cache input as an old writer");
   if (process_cmdline_is_old_nytrix_output_writer(
           "python tool.py /tmp/not-nytrix/build/cache/out.json",
           "/home/e/nytrix"))
@@ -7820,12 +7820,12 @@ static void selftest_validate_old_writer_classifier(string_list_t *errors) {
     (void)string_list_push_copy(errors,
                                 "old-writer classifier missed live no-write rev cache parent");
   if (!process_cmdline_is_old_nytrix_output_writer(
-          "./build/nynth fuzz all run --dir /home/e/nytrix/fuzz --json build/fuzz/all/run.json",
-          "/home/e/nynth"))
+          "./build/nytrix fuzz all run --dir /home/e/nytrix/fuzz --json build/fuzz/all/run.json",
+          "/home/e/nytrix"))
     (void)string_list_push_copy(errors, "old-writer classifier missed old fuzz all output dir");
   if (!process_cmdline_is_old_nytrix_output_writer(
-          "afl-fuzz -i seeds -o /home/e/nytrix/fuzz/afl -- ./build/nynth",
-          "/home/e/nynth"))
+          "afl-fuzz -i seeds -o /home/e/nytrix/fuzz/afl -- ./build/nytrix",
+          "/home/e/nytrix"))
     (void)string_list_push_copy(errors, "old-writer classifier missed old AFL output dir");
   if (!process_cmdline_is_old_nytrix_output_writer(
           "python tool.py build/cache/out.json",
@@ -7850,9 +7850,9 @@ static void selftest_validate_old_writer_classifier(string_list_t *errors) {
                                 "old-writer classifier missed Nytrix rev parity cache writer");
   if (process_cmdline_is_old_nytrix_output_writer(
           "python3 -B ./build/cache/tools/rev/tool parity --all --suite ioli",
-          "/home/e/nynth"))
+          "/home/e/nytrix"))
     (void)string_list_push_copy(errors,
-                                "old-writer classifier treats Nynth rev parity as old writer");
+                                "old-writer classifier treats Nytrix rev parity as old writer");
   if (!process_cmdline_is_old_nytrix_output_writer(
           "codex-linux-sandbox --sandbox-policy-cwd /home/e/nytrix "
           "--command-cwd /home/e/nytrix -- /bin/zsh -c "
@@ -7861,12 +7861,12 @@ static void selftest_validate_old_writer_classifier(string_list_t *errors) {
     (void)string_list_push_copy(errors,
                                 "old-writer classifier missed sandboxed Nytrix rev parity");
   if (process_cmdline_is_old_nytrix_output_writer(
-          "codex-linux-sandbox --sandbox-policy-cwd /home/e/nynth "
-          "--command-cwd /home/e/nynth -- /bin/zsh -c "
+          "codex-linux-sandbox --sandbox-policy-cwd /home/e/nytrix "
+          "--command-cwd /home/e/nytrix -- /bin/zsh -c "
           "./build/cache/tools/rev/tool parity --all --suite ioli --limit 2",
           "/"))
     (void)string_list_push_copy(errors,
-                                "old-writer classifier treats sandboxed Nynth rev parity as old writer");
+                                "old-writer classifier treats sandboxed Nytrix rev parity as old writer");
   if (!process_cmdline_is_old_nytrix_output_writer(
           "/home/e/nytrix/build/release/ny --color=never "
           "/home/e/nytrix/build/cache/rev/probe/rev_decomp_selected.1.ny",
@@ -7887,7 +7887,7 @@ static void selftest_validate_old_writer_classifier(string_list_t *errors) {
     (void)string_list_push_copy(errors, "old-writer classifier missed Nytrix lsp cache user");
   if (process_cmdline_is_old_nytrix_output_writer(
           "/home/e/nytrix/build/release/ny-lsp",
-          "/home/e/nynth"))
+          "/home/e/nytrix"))
     (void)string_list_push_copy(errors, "old-writer classifier treats non-Nytrix lsp cwd as old writer");
   if (process_cmdline_is_old_nytrix_output_writer(
           "python3 -B ./make webasm --clean --require-wasm",
@@ -8067,7 +8067,7 @@ static void selftest_validate_fuzz_all_old_paths(const char *json,
     (void)string_list_push_copy(errors, "old-path rows did not archive all expected paths");
 
   char root[4096] = {0};
-  (void)find_nynth_root(root, sizeof(root));
+  (void)find_nytrix_root(root, sizeof(root));
   char *nytrix_root = summary_string_from_report(json, "nytrix_root");
   char *archive_run = summary_string_from_report(json, "archive_run_dir");
   char *markdown = summary_string_from_report(json, "markdown");
@@ -8176,7 +8176,7 @@ static void selftest_validate_fuzz_all_old_paths_dry_run(const char *json,
     (void)string_list_push_copy(errors, "old-path dry-run action mismatch");
 
   char root[4096] = {0};
-  (void)find_nynth_root(root, sizeof(root));
+  (void)find_nytrix_root(root, sizeof(root));
   char *nytrix_root = summary_string_from_report(json, "nytrix_root");
   char *archive_dir = summary_string_from_report(json, "archive_dir");
   char *markdown = summary_string_from_report(json, "markdown");
@@ -8274,7 +8274,7 @@ static void selftest_validate_fuzz_all_old_paths_empty_dry_run(
                                 "empty old-path dry-run offered archive rows");
 
   char root[4096] = {0};
-  (void)find_nynth_root(root, sizeof(root));
+  (void)find_nytrix_root(root, sizeof(root));
   char *markdown = summary_string_from_report(json, "markdown");
   char md_abs[4096] = {0};
   if (markdown && *markdown) {
@@ -9002,9 +9002,9 @@ static void selftest_validate_fuzz_all_progress(const char *json,
            (!progress_coverage_next_low_cpu ||
             !selftest_command_uses_env_nice(progress_coverage_next_low_cpu) ||
             !strstr(progress_coverage_next_low_cpu,
-                    "NYNTH_MISSING_EVIDENCE_HOURS=1") ||
+                    "NYTRIX_MISSING_EVIDENCE_HOURS=1") ||
             !strstr(progress_coverage_next_low_cpu,
-                 "NYNTH_MISSING_EVIDENCE_THREADS=10%") ||
+                 "NYTRIX_MISSING_EVIDENCE_THREADS=10%") ||
          !strstr(progress_coverage_next_low_cpu,
                  "run-missing-evidence.sh")))
       (void)string_list_push_copy(errors,
@@ -9023,7 +9023,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
             !selftest_command_uses_env_nice(
                 progress_coverage_next_state_refresh) ||
             !strstr(progress_coverage_next_state_refresh,
-                    "NYNTH_RUN_DRY_RUN=1") ||
+                    "NYTRIX_RUN_DRY_RUN=1") ||
             !strstr(progress_coverage_next_state_refresh,
                  "run-missing-evidence.sh") ||
          !progress_coverage_next_stop_file ||
@@ -9173,18 +9173,18 @@ static void selftest_validate_fuzz_all_progress(const char *json,
     (void)string_list_push_copy(errors,
                                 "progress compiler std-audit states missing");
   if (!progress_runtime_scope ||
-      strcmp(progress_runtime_scope, NYNTH_RUNTIME_SURFACE_SCOPE) != 0 ||
+      strcmp(progress_runtime_scope, NYTRIX_RUNTIME_SURFACE_SCOPE) != 0 ||
       !progress_crt_scope ||
-      strcmp(progress_crt_scope, NYNTH_CRT_SURFACE_SCOPE) != 0 ||
+      strcmp(progress_crt_scope, NYTRIX_CRT_SURFACE_SCOPE) != 0 ||
       !progress_crt_behavior_state ||
-      strcmp(progress_crt_behavior_state, NYNTH_CRT_BEHAVIOR_STATE) != 0 ||
+      strcmp(progress_crt_behavior_state, NYTRIX_CRT_BEHAVIOR_STATE) != 0 ||
       !progress_crt_behavior_scope ||
-      strcmp(progress_crt_behavior_scope, NYNTH_CRT_BEHAVIOR_SCOPE) != 0)
+      strcmp(progress_crt_behavior_scope, NYTRIX_CRT_BEHAVIOR_SCOPE) != 0)
     (void)string_list_push_copy(errors,
                                 "progress CRT claim scope missing");
   if (!progress_crt_behavior_next_action ||
       strcmp(progress_crt_behavior_next_action,
-             NYNTH_CRT_BEHAVIOR_NEXT_ACTION) != 0 ||
+             NYTRIX_CRT_BEHAVIOR_NEXT_ACTION) != 0 ||
       !progress_crt_behavior_next_reason ||
       !strstr(progress_crt_behavior_next_reason, "campaign-gated") ||
       !progress_crt_behavior_next_command ||
@@ -9688,8 +9688,8 @@ static void selftest_validate_fuzz_all_progress(const char *json,
         errors, "progress next handoff command missing raw script");
   char *preview_command = summary_string_from_report(json, "preview_command");
   if (!preview_command ||
-      !strstr(preview_command, "NYNTH_RUN_DRY_RUN=1") ||
-      !strstr(preview_command, "NYNTH_RUN_REPEAT=target") ||
+      !strstr(preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
+      !strstr(preview_command, "NYTRIX_RUN_REPEAT=target") ||
       !strstr(preview_command, "build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(errors, "progress preview command missing");
   char *run_next_command_alias =
@@ -9715,29 +9715,29 @@ static void selftest_validate_fuzz_all_progress(const char *json,
       summary_string_from_report(json, "run_next_gentle_command");
   if (!run_next_gentle_command ||
       !selftest_command_uses_env_nice(run_next_gentle_command) ||
-      !strstr(run_next_gentle_command, "NYNTH_RUN_HOURS=1") ||
-      !strstr(run_next_gentle_command, "NYNTH_RUN_THREADS=10%") ||
+      !strstr(run_next_gentle_command, "NYTRIX_RUN_HOURS=1") ||
+      !strstr(run_next_gentle_command, "NYTRIX_RUN_THREADS=10%") ||
       !strstr(run_next_gentle_command, "build/fuzz/all/run-next.sh") ||
-      strstr(run_next_gentle_command, "NYNTH_RUN_DRY_RUN=1") ||
-      strstr(run_next_gentle_command, "NYNTH_RUN_REPEAT="))
+      strstr(run_next_gentle_command, "NYTRIX_RUN_DRY_RUN=1") ||
+      strstr(run_next_gentle_command, "NYTRIX_RUN_REPEAT="))
     (void)string_list_push_copy(errors,
                                 "progress gentle run command missing guard");
   char *run_next_gentle_preview_command =
       summary_string_from_report(json, "run_next_gentle_preview_command");
   if (!run_next_gentle_preview_command ||
       !selftest_command_uses_env_nice(run_next_gentle_preview_command) ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_DRY_RUN=1") ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_HOURS=1") ||
-      !strstr(run_next_gentle_preview_command, "NYNTH_RUN_THREADS=10%") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_HOURS=1") ||
+      !strstr(run_next_gentle_preview_command, "NYTRIX_RUN_THREADS=10%") ||
       !strstr(run_next_gentle_preview_command, "build/fuzz/all/run-next.sh") ||
-      strstr(run_next_gentle_preview_command, "NYNTH_RUN_REPEAT="))
+      strstr(run_next_gentle_preview_command, "NYTRIX_RUN_REPEAT="))
     (void)string_list_push_copy(errors,
                                 "progress gentle preview command missing guard");
   char *state_refresh_command =
       summary_string_from_report(json, "state_refresh_command");
   if (state_refresh_command && *state_refresh_command &&
-      (!strstr(state_refresh_command, "NYNTH_RUN_DRY_RUN=1") ||
-       !strstr(state_refresh_command, "NYNTH_RUN_REPEAT=target") ||
+      (!strstr(state_refresh_command, "NYTRIX_RUN_DRY_RUN=1") ||
+       !strstr(state_refresh_command, "NYTRIX_RUN_REPEAT=target") ||
        !strstr(state_refresh_command, "build/fuzz/all/run-next.sh")))
     (void)string_list_push_copy(errors,
                                 "progress state refresh command malformed");
@@ -10108,7 +10108,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
       summary_string_from_report(json, "old_path_next_reason");
   if (!old_path_probe_command ||
       !selftest_command_uses_env_nice(old_path_probe_command) ||
-      strcmp(old_path_probe_command, NYNTH_FUZZ_ALL_OLD_PATH_PROBE_COMMAND) !=
+      strcmp(old_path_probe_command, NYTRIX_FUZZ_ALL_OLD_PATH_PROBE_COMMAND) !=
           0 ||
       !strstr(old_path_probe_command, "--probe"))
     (void)string_list_push_copy(errors,
@@ -10243,7 +10243,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
       snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
     }
   }
@@ -10261,8 +10261,8 @@ static void selftest_validate_fuzz_all_progress(const char *json,
     (void)string_list_push_copy(errors,
                                 "progress markdown omits self refresh command");
     } else if (!strstr(md.data, "Preview target:") ||
-               !strstr(md.data, "NYNTH_RUN_DRY_RUN=1") ||
-               !strstr(md.data, "NYNTH_RUN_REPEAT=target") ||
+               !strstr(md.data, "NYTRIX_RUN_DRY_RUN=1") ||
+               !strstr(md.data, "NYTRIX_RUN_REPEAT=target") ||
                !strstr(md.data, "build/fuzz/all/run-next.sh")) {
       (void)string_list_push_copy(errors,
                                   "progress markdown omits dry-run preview command");
@@ -10412,11 +10412,11 @@ static void selftest_validate_fuzz_all_progress(const char *json,
              !strstr(md.data, "good lang score in 4 runs")) {
     (void)string_list_push_copy(errors, "progress markdown omits next-run language score");
   } else if (!strstr(md.data,
-                     "NYNTH_RUN_REPEAT=good ./build/fuzz/all/run-next.sh")) {
+                     "NYTRIX_RUN_REPEAT=good ./build/fuzz/all/run-next.sh")) {
     (void)string_list_push_copy(errors,
                                 "progress markdown omits guarded repeat handoff");
   } else if (!strstr(md.data,
-                     "NYNTH_RUN_REPEAT=target ./build/fuzz/all/run-next.sh")) {
+                     "NYTRIX_RUN_REPEAT=target ./build/fuzz/all/run-next.sh")) {
     (void)string_list_push_copy(errors,
                                 "progress markdown omits campaign target handoff");
   } else if (!strstr(md.data, "plan-rate")) {
@@ -10428,8 +10428,8 @@ static void selftest_validate_fuzz_all_progress(const char *json,
              !strstr(md.data, "fixture-poly")) {
     (void)string_list_push_copy(errors, "progress markdown omits full-pressure perf worst ratio");
   } else if (!strstr(md.data, "Perf watchlist:") ||
-             !strstr(md.data, "env NYNTH_LOW_PRIORITY=1") ||
-             !strstr(md.data, "NYNTH_RUN_NICE=10") ||
+             !strstr(md.data, "env NYTRIX_LOW_PRIORITY=1") ||
+             !strstr(md.data, "NYTRIX_RUN_NICE=10") ||
              !strstr(md.data, "nice -n 10") ||
              !strstr(md.data, "perf triage --fast") ||
              !strstr(md.data, "perf-watchlist.json") ||
@@ -10460,13 +10460,13 @@ static void selftest_validate_fuzz_all_progress(const char *json,
                                     expected_state_file) : NULL;
       const char *refresh_in_controls =
           progress_has_coverage_next && controls_section ?
-              strstr(controls_section, "NYNTH_RUN_DRY_RUN=1") : NULL;
+              strstr(controls_section, "NYTRIX_RUN_DRY_RUN=1") : NULL;
       const char *stop_in_controls =
           controls_section ? strstr(controls_section,
                                     expected_stop_file) : NULL;
       const char *refresh_after_next =
           progress_has_coverage_next && next_section ?
-              strstr(next_section, "NYNTH_RUN_DRY_RUN=1") : NULL;
+              strstr(next_section, "NYTRIX_RUN_DRY_RUN=1") : NULL;
       const char *stop_after_next =
           next_section ? strstr(next_section, expected_stop_file) : NULL;
       if (!controls_section || !state_in_controls ||
@@ -10538,7 +10538,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
           find_n(quick_jq_line, quick_jq_end,
                  "recommended_repeat_mode,recommended_repeat_count") ||
           find_n(quick_jq_line, quick_jq_end, ".md.json") ||
-          find_n(quick_jq_line, quick_jq_end, "/home/e/nynth"))
+          find_n(quick_jq_line, quick_jq_end, "/home/e/nytrix"))
         (void)string_list_push_copy(
             errors, "progress Controls omit quick jq readout");
       const char *progress_jq_line = controls_section ?
@@ -10664,7 +10664,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
       if (!progress_jq_line || !progress_jq_end ||
           !find_n(progress_jq_line, progress_jq_end, "progress.json") ||
           find_n(progress_jq_line, progress_jq_end, ".md.json") ||
-          find_n(progress_jq_line, progress_jq_end, "/home/e/nynth"))
+          find_n(progress_jq_line, progress_jq_end, "/home/e/nytrix"))
         (void)string_list_push_copy(
             errors, "progress Controls omit compact jq readout");
       if (quick_jq_line && progress_jq_line &&
@@ -10941,7 +10941,7 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
   char *freshness_action =
       summary_string_from_report(json, "freshness_action_command");
   if (!freshness_action || !selftest_command_uses_env_nice(freshness_action) ||
-      strstr(freshness_action, "NYNTH_RUN_REPEAT=") ||
+      strstr(freshness_action, "NYTRIX_RUN_REPEAT=") ||
       !strstr(freshness_action, "build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(errors,
                                 "stale progress freshness action missing");
@@ -10949,7 +10949,7 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
       summary_string_from_report(json, "latest_report_freshness_command");
   if (!latest_freshness_action ||
       !selftest_command_uses_env_nice(latest_freshness_action) ||
-      strstr(latest_freshness_action, "NYNTH_RUN_REPEAT=") ||
+      strstr(latest_freshness_action, "NYTRIX_RUN_REPEAT=") ||
       !strstr(latest_freshness_action, "build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(
         errors, "stale progress latest freshness command missing");
@@ -10957,7 +10957,7 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
       json, "latest_full_pressure_report_freshness_command");
   if (!full_pressure_freshness_action ||
       !selftest_command_uses_env_nice(full_pressure_freshness_action) ||
-      strstr(full_pressure_freshness_action, "NYNTH_RUN_REPEAT=") ||
+      strstr(full_pressure_freshness_action, "NYTRIX_RUN_REPEAT=") ||
       !strstr(full_pressure_freshness_action, "build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(
         errors, "stale progress full-pressure freshness command missing");
@@ -10965,7 +10965,7 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
       summary_string_from_report(json, "full_pressure_freshen_command");
   if (!full_pressure_freshen_command ||
       !selftest_command_uses_env_nice(full_pressure_freshen_command) ||
-      strstr(full_pressure_freshen_command, "NYNTH_RUN_REPEAT=") ||
+      strstr(full_pressure_freshen_command, "NYTRIX_RUN_REPEAT=") ||
       !strstr(full_pressure_freshen_command, "build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(
         errors, "stale progress full-pressure freshen command missing");
@@ -10973,7 +10973,7 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
       summary_string_from_report(json, "full_pressure_remediation_command");
   if (!full_pressure_remediation_command ||
       !selftest_command_uses_env_nice(full_pressure_remediation_command) ||
-      strstr(full_pressure_remediation_command, "NYNTH_RUN_REPEAT=") ||
+      strstr(full_pressure_remediation_command, "NYTRIX_RUN_REPEAT=") ||
       !strstr(full_pressure_remediation_command, "build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(
         errors, "stale progress full-pressure remediation command missing");
@@ -10981,7 +10981,7 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
       summary_string_from_report(json, "full_pressure_action_command");
   if (!full_pressure_action_command ||
       !selftest_command_uses_env_nice(full_pressure_action_command) ||
-      strstr(full_pressure_action_command, "NYNTH_RUN_REPEAT=") ||
+      strstr(full_pressure_action_command, "NYTRIX_RUN_REPEAT=") ||
       !strstr(full_pressure_action_command, "build/fuzz/all/run-next.sh"))
     (void)string_list_push_copy(
         errors, "stale progress full-pressure action command missing");
@@ -10993,8 +10993,8 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
                                    "freshen-evidence") == 0;
   if (freshness_selected &&
       (!preview_command || !selftest_command_uses_env_nice(preview_command) ||
-       !strstr(preview_command, "NYNTH_RUN_DRY_RUN=1") ||
-       strstr(preview_command, "NYNTH_RUN_REPEAT=") ||
+       !strstr(preview_command, "NYTRIX_RUN_DRY_RUN=1") ||
+       strstr(preview_command, "NYTRIX_RUN_REPEAT=") ||
        !strstr(preview_command, "build/fuzz/all/run-next.sh")))
     (void)string_list_push_copy(
         errors, "stale progress preview should follow freshness handoff");
@@ -11015,8 +11015,8 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
   if (freshness_selected && expect_state_refresh &&
       (!state_refresh_command ||
        !selftest_command_uses_env_nice(state_refresh_command) ||
-       !strstr(state_refresh_command, "NYNTH_RUN_DRY_RUN=1") ||
-       strstr(state_refresh_command, "NYNTH_RUN_REPEAT=") ||
+       !strstr(state_refresh_command, "NYTRIX_RUN_DRY_RUN=1") ||
+       strstr(state_refresh_command, "NYTRIX_RUN_REPEAT=") ||
        !strstr(state_refresh_command, "build/fuzz/all/run-next.sh")))
     (void)string_list_push_copy(
         errors, "stale progress state refresh should follow freshness preview");
@@ -11027,7 +11027,7 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
       snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
     } else {
       char root[4096];
-      if (find_nynth_root(root, sizeof(root)))
+      if (find_nytrix_root(root, sizeof(root)))
         (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
     }
   }
@@ -11042,12 +11042,12 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
              !strstr(md.data, "freshness 20.00") ||
              !strstr(md.data, "stale latest/full-pressure evidence") ||
              !strstr(md.data, "Freshen evidence:") ||
-             !strstr(md.data, "NYNTH_LOW_PRIORITY=1") ||
+             !strstr(md.data, "NYTRIX_LOW_PRIORITY=1") ||
              !strstr(md.data, "build/fuzz/all/run-next.sh")) {
     (void)string_list_push_copy(
         errors, "stale progress markdown omitted freshness penalty");
   }
-  if (md.data && strstr(md.data, "NYNTH_RUN_REPEAT="))
+  if (md.data && strstr(md.data, "NYTRIX_RUN_REPEAT="))
     (void)string_list_push_copy(
         errors, "stale progress markdown should not suggest repeat handoff");
   free(md.data);
@@ -11173,10 +11173,10 @@ static char *selftest_row_json(const selftest_spec_t *spec, bool ok, int cli_rc,
                    ok ? "true" : "false", cli_rc, spec->slow ? "true" : "false",
                    timeout_s, cli_rows);
   if (report_path && *report_path) {
-    char nynth_root[4096];
+    char nytrix_root[4096];
     const char *report_root = root;
-    if (find_nynth_root(nynth_root, sizeof(nynth_root)))
-      report_root = nynth_root;
+    if (find_nytrix_root(nytrix_root, sizeof(nytrix_root)))
+      report_root = nytrix_root;
     (void)sb_append(&b, ",\"report\":");
     append_rel_json_str(&b, report_root, report_path);
   }
@@ -11246,7 +11246,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     const char *kernel_json =
       "{\"rows\":[],\"failures\":[],\"summary\":{\"weak_results\":0,"
       "\"low_signal_results\":0,\"strict_signal\":true,\"failure_count\":0},"
-      "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     str_buf_t report = {0};
     (void)sb_append(&report, "{\"rows\":[");
     const char *lanes[] = {
@@ -11266,7 +11266,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "\"sub_failures\":0,\"report\":");
     (void)sb_append_json_str(&report, kernel_path ? kernel_path : "");
     (void)sb_append(&report, "}],\"failures\":[],\"summary\":{\"failure_count\":0},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n");
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
     bool ok = write_file_text(kernel_path, kernel_json) &&
               write_file_text(report_path, report.data ? report.data : "");
     free(report.data);
@@ -11321,8 +11321,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                               "{\"wrapper\":\"/home/e/nytrix/build/cache/projects/test/scratch/old.ny\"}\n") &&
                  write_file_text(
                      stale_command_artifact,
-                     "- Cockpit: `env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 "
-                     "nice -n 10 ./build/nynth selftest run --only fuzz_all_help "
+                     "- Cockpit: `env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 "
+                     "nice -n 10 ./build/nytrix selftest run --only fuzz_all_help "
                      "--only fuzz_all_default_pressure "
                      "--only fuzz_all_full_pressure_remediation "
                      "--only fuzz_all_plan_coverage_next "
@@ -11330,7 +11330,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                      "--markdown build/fuzz/all/selftest-cockpit.md`\n") &&
               write_file_text(
                   stale_run_good_artifact,
-                  "NYNTH_RUN_REPEAT=good ./build/fuzz/all/run-next.sh\n");
+                  "NYTRIX_RUN_REPEAT=good ./build/fuzz/all/run-next.sh\n");
     free(test_dir);
     free(fuzz_dir);
     free(cache_dir);
@@ -11398,7 +11398,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     }
     (void)sb_appendf(&report,
                     "],\"failures\":[],\"summary\":{\"cases\":%zu,"
-                    "\"ok\":%zu,\"failure_count\":0,\"engine\":\"nynth_core\","
+                    "\"ok\":%zu,\"failure_count\":0,\"engine\":\"nytrix_core\","
                     "\"mode\":\"fuzz-all\",\"smoke\":false,"
                     "\"full_pressure\":true,\"duration_s\":3600,"
                     "\"budget_s\":3600,\"threads\":4,"
@@ -11408,7 +11408,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "\"known_bug_lost_signal\":0,"
                     "\"known_bug_baseline_failures\":0,"
                     "\"perf_hotspots\":0,\"perf_max_ratio\":0},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n",
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n",
                     sizeof(lanes) / sizeof(lanes[0]),
                     sizeof(lanes) / sizeof(lanes[0]));
     const char *state =
@@ -11438,7 +11438,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
         "\"duration_s\":0.01,\"budget_s\":180,\"effective_budget_s\":180,"
         "\"threads\":10,\"lane_filter\":\"afl\","
         "\"lane_filter_active\":true},"
-        "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+        "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     bool ok = mkdir_p(report_dir) &&
               write_file_text(report_path, report.data ? report.data : "") &&
               write_file_text(state_path, state);
@@ -11499,10 +11499,10 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       return false;
     }
 
-    char *wrapper_dir = nynth_scratch_pathf(NULL, "afl_wrappers");
-    char *core_wrapper = nynth_scratch_pathf(NULL,
+    char *wrapper_dir = nytrix_scratch_pathf(NULL, "afl_wrappers");
+    char *core_wrapper = nytrix_scratch_pathf(NULL,
                                              "afl_wrappers/ny-core-normalize.sh");
-    char *missing_wrapper = nynth_scratch_pathf(NULL,
+    char *missing_wrapper = nytrix_scratch_pathf(NULL,
                                                 "afl_wrappers/missing-wrapper-selftest-normalize.sh");
     bool wrapper_ok = wrapper_dir && core_wrapper && missing_wrapper &&
                       mkdir_p(wrapper_dir);
@@ -11525,8 +11525,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "\"saved_crashes\":0,\"out\":");
     (void)sb_append_json_str(&child, missing_out ? missing_out : "");
     (void)sb_append(&child, "}],\"failures\":[],\"summary\":{\"failure_count\":2,"
-                    "\"mode\":\"fuzz-afl\",\"engine\":\"nynth_core\"},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n");
+                    "\"mode\":\"fuzz-afl\",\"engine\":\"nytrix_core\"},"
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
 
     (void)sb_append(&failed, "{\"rows\":[{\"name\":\"afl_compiler\","
                     "\"phase\":\"selftest\",\"ok\":false,\"required\":true,"
@@ -11536,13 +11536,13 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     (void)sb_append(&failed, "}],\"failures\":[{\"name\":\"afl_compiler\","
                     "\"reason\":\"fixture missing one replay wrapper\"}],"
                     "\"summary\":{\"cases\":1,\"ok\":0,\"failure_count\":1,"
-                    "\"engine\":\"nynth_core\",\"mode\":\"fuzz-all\","
+                    "\"engine\":\"nytrix_core\",\"mode\":\"fuzz-all\","
                     "\"full_pressure\":true,\"finding_live\":0,"
                     "\"finding_missing\":0,\"known_bug_reproduced\":0,"
                     "\"known_bug_lost_signal\":0,"
                     "\"known_bug_baseline_failures\":0,"
                     "\"perf_hotspots\":0,\"perf_max_ratio\":0},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n");
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
 
     (void)sb_append(&history, "{\"rows\":[{\"report\":");
     (void)sb_append_json_str(&history, failed_path ? failed_path : "");
@@ -11556,8 +11556,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "\"latest_report\":");
     (void)sb_append_json_str(&history, failed_path ? failed_path : "");
     (void)sb_append(&history, ",\"attention_reports\":1,"
-                    "\"failure_count\":0,\"engine\":\"nynth_core\"},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n");
+                    "\"failure_count\":0,\"engine\":\"nytrix_core\"},"
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
 
     bool ok = wrapper_ok &&
               mkdir_p(fixture_dir) &&
@@ -11620,8 +11620,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       return false;
     }
 
-    char *wrapper_dir = nynth_scratch_pathf(NULL, "afl_wrappers");
-    char *core_wrapper = nynth_scratch_pathf(NULL,
+    char *wrapper_dir = nytrix_scratch_pathf(NULL, "afl_wrappers");
+    char *core_wrapper = nytrix_scratch_pathf(NULL,
                                              "afl_wrappers/ny-core-normalize.sh");
     bool wrapper_ok = wrapper_dir && core_wrapper && mkdir_p(wrapper_dir);
     if (wrapper_ok && !exists_path(core_wrapper))
@@ -11640,8 +11640,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "\"saved_crashes\":0,\"out\":");
     (void)sb_append_json_str(&child, unsafe_out ? unsafe_out : "");
     (void)sb_append(&child, "}],\"failures\":[],\"summary\":{\"failure_count\":2,"
-                    "\"mode\":\"fuzz-afl\",\"engine\":\"nynth_core\"},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n");
+                    "\"mode\":\"fuzz-afl\",\"engine\":\"nytrix_core\"},"
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
 
     (void)sb_append(&failed, "{\"rows\":[{\"name\":\"afl_compiler\","
                     "\"phase\":\"selftest\",\"ok\":false,\"required\":true,"
@@ -11651,13 +11651,13 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     (void)sb_append(&failed, "}],\"failures\":[{\"name\":\"afl_compiler\","
                     "\"reason\":\"fixture missing one replay command\"}],"
                     "\"summary\":{\"cases\":1,\"ok\":0,\"failure_count\":1,"
-                    "\"engine\":\"nynth_core\",\"mode\":\"fuzz-all\","
+                    "\"engine\":\"nytrix_core\",\"mode\":\"fuzz-all\","
                     "\"full_pressure\":true,\"finding_live\":0,"
                     "\"finding_missing\":0,\"known_bug_reproduced\":0,"
                     "\"known_bug_lost_signal\":0,"
                     "\"known_bug_baseline_failures\":0,"
                     "\"perf_hotspots\":0,\"perf_max_ratio\":0},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n");
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
 
     (void)sb_append(&history, "{\"rows\":[{\"report\":");
     (void)sb_append_json_str(&history, failed_path ? failed_path : "");
@@ -11671,8 +11671,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "\"latest_report\":");
     (void)sb_append_json_str(&history, failed_path ? failed_path : "");
     (void)sb_append(&history, ",\"attention_reports\":1,"
-                    "\"failure_count\":0,\"engine\":\"nynth_core\"},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n");
+                    "\"failure_count\":0,\"engine\":\"nytrix_core\"},"
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
 
     bool ok = wrapper_ok &&
               mkdir_p(fixture_dir) &&
@@ -11797,7 +11797,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "],\"failures\":[{\"name\":\"afl_compiler\","
                     "\"reason\":\"fixture stale full-pressure failure\"}],"
                     "\"summary\":{\"cases\":%zu,\"ok\":%d,"
-                    "\"failure_count\":1,\"engine\":\"nynth_core\","
+                    "\"failure_count\":1,\"engine\":\"nytrix_core\","
                     "\"mode\":\"fuzz-all\",\"smoke\":false,"
                     "\"full_pressure\":true,\"duration_s\":3600,"
                     "\"budget_s\":3600,\"threads\":4,"
@@ -11807,12 +11807,12 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "\"known_bug_lost_signal\":0,"
                     "\"known_bug_baseline_failures\":0,"
                     "\"perf_hotspots\":0,\"perf_max_ratio\":0},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n",
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n",
                     lane_count, failed_ok);
     (void)sb_appendf(&clean,
                     "],\"failures\":[],\"summary\":{\"cases\":%zu,"
                     "\"ok\":%zu,\"failure_count\":0,"
-                    "\"engine\":\"nynth_core\",\"mode\":\"fuzz-all\","
+                    "\"engine\":\"nytrix_core\",\"mode\":\"fuzz-all\","
                     "\"smoke\":true,\"full_pressure\":false,"
                     "\"duration_s\":60,\"budget_s\":60,\"threads\":1,"
                     "\"finding_live\":0,\"finding_missing\":0,"
@@ -11821,7 +11821,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "\"known_bug_lost_signal\":0,"
                     "\"known_bug_baseline_failures\":0,"
                     "\"perf_hotspots\":0,\"perf_max_ratio\":0},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n",
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n",
                     lane_count, lane_count);
     str_buf_t child = {0};
     (void)sb_append(&child,
@@ -11833,16 +11833,16 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     (void)sb_append(&child, ",\"stats\":");
     (void)sb_append_json_str(&child, afl_stats ? afl_stats : "");
     (void)sb_append(&child, "}],\"failures\":[],\"summary\":{\"failure_count\":1,"
-                    "\"mode\":\"fuzz-afl\",\"engine\":\"nynth_core\"},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n");
-    char *wrapper_dir = nynth_scratch_pathf(NULL, "afl_wrappers");
-    char *wrapper_path = nynth_scratch_pathf(NULL,
+                    "\"mode\":\"fuzz-afl\",\"engine\":\"nytrix_core\"},"
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
+    char *wrapper_dir = nytrix_scratch_pathf(NULL, "afl_wrappers");
+    char *wrapper_path = nytrix_scratch_pathf(NULL,
                                              "afl_wrappers/ny-core-normalize.sh");
     bool wrapper_ok = wrapper_dir && wrapper_path && mkdir_p(wrapper_dir);
     if (wrapper_ok) {
       wrapper_ok = write_file_text(wrapper_path,
                                    "#!/usr/bin/env sh\n"
-                                   "if [ \"${NYNTH_AFL_RAW:-0}\" = \"1\" ]; then exit 0; fi\n"
+                                   "if [ \"${NYTRIX_AFL_RAW:-0}\" = \"1\" ]; then exit 0; fi\n"
                                    "exit 0\n");
     }
     if (wrapper_ok) (void)chmod(wrapper_path, 0755);
@@ -11912,14 +11912,14 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "\"sub_rows\":1,\"sub_failures\":0}],"
       "\"failures\":[],"
       "\"summary\":{\"cases\":1,\"ok\":1,\"failure_count\":0,"
-      "\"engine\":\"nynth_core\",\"mode\":\"fuzz-all\","
+      "\"engine\":\"nytrix_core\",\"mode\":\"fuzz-all\","
       "\"smoke\":true,\"full_pressure\":false,"
       "\"duration_s\":1,\"budget_s\":1,\"threads\":1,"
       "\"finding_live\":0,\"finding_missing\":0,"
       "\"known_bug_reproduced\":0,\"known_bug_fixed_candidates\":0,"
       "\"known_bug_lost_signal\":0,\"known_bug_baseline_failures\":0,"
       "\"perf_hotspots\":0,\"perf_max_ratio\":0},"
-      "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     bool ok = mkdir_p(report_dir) && write_file_text(report_path, report);
     free(report_dir);
     free(report_path);
@@ -11941,15 +11941,15 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     const char *history =
       "{\"rows\":[],\"failures\":[],\"summary\":{\"mode\":\"fuzz-all-history\","
       "\"thread_years\":0,\"thread_hours\":0,\"checked_subcases\":0,"
-      "\"failure_count\":0},\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"failure_count\":0},\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     const char *worklist =
       "{\"rows\":[],\"failures\":[],\"summary\":{\"mode\":\"fuzz-all-worklist\","
       "\"active_items\":0,\"failure_count\":0},"
-      "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     const char *coverage =
       "{\"rows\":[],\"failures\":[],\"summary\":{\"mode\":\"fuzz-all-coverage\","
       "\"blocker_gaps\":0,\"failure_count\":0},"
-      "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     bool ok = mkdir_p(report_dir) &&
               write_file_text(history_path, history) &&
               write_file_text(worklist_path, worklist) &&
@@ -11982,11 +11982,11 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     const char *history =
       "{\"rows\":[],\"failures\":[],\"summary\":{\"mode\":\"fuzz-all-history\","
       "\"thread_years\":0,\"thread_hours\":0,\"checked_subcases\":0,"
-      "\"failure_count\":0},\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"failure_count\":0},\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     const char *worklist =
       "{\"rows\":[],\"failures\":[],\"summary\":{\"mode\":\"fuzz-all-worklist\","
       "\"active_items\":0,\"failure_count\":0},"
-      "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     const char *coverage =
       "{\"rows\":[],\"failures\":[],\"summary\":{\"mode\":\"fuzz-all-coverage\","
       "\"blocker_gaps\":0,\"coverage_backlog_lanes\":2,"
@@ -12000,21 +12000,21 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "\"coverage_queue\":["
       "{\"lane\":\"afl\",\"severity\":\"medium\",\"category\":\"afl\","
       "\"reason\":\"budget too short\","
-      "\"command\":\"./build/nynth fuzz all run --only-lane afl --profile insane --hours 1.00 --threads 25% --target-thread-years 0.25 --dir build/fuzz/all --json build/fuzz/all/with-afl.json\"},"
+      "\"command\":\"./build/nytrix fuzz all run --only-lane afl --profile insane --hours 1.00 --threads 25% --target-thread-years 0.25 --dir build/fuzz/all --json build/fuzz/all/with-afl.json\"},"
       "{\"lane\":\"compiler_findings\",\"severity\":\"medium\","
       "\"category\":\"compiler\",\"reason\":\"disabled by --no-compiler-findings\","
-      "\"command\":\"./build/nynth compiler findings --timeout-s 15 --json build/fuzz/ultra/compiler-findings-current.json\"}],"
+      "\"command\":\"./build/nytrix compiler findings --timeout-s 15 --json build/fuzz/ultra/compiler-findings-current.json\"}],"
       "\"coverage_next_action\":\"run-missing-evidence\","
       "\"coverage_next_lane\":\"afl\","
       "\"coverage_next_reason\":\"budget too short\","
-      "\"coverage_next_command\":\"./build/nynth fuzz all run --only-lane afl --profile insane --hours 1.00 --threads 25% --target-thread-years 0.25 --dir build/fuzz/all --json build/fuzz/all/with-afl.json\","
+      "\"coverage_next_command\":\"./build/nytrix fuzz all run --only-lane afl --profile insane --hours 1.00 --threads 25% --target-thread-years 0.25 --dir build/fuzz/all --json build/fuzz/all/with-afl.json\","
       "\"coverage_next_guarded_command\":\"./build/fuzz/all/run-missing-evidence.sh\","
-      "\"coverage_next_preview_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/nynth fuzz all preflight --only-lane afl --profile insane --hours 1.00 --threads 25% --target-thread-years 0.25 --dir build/fuzz/all --work-dir build/cache/scratch --allow-dirty-nytrix-baseline\","
+      "\"coverage_next_preview_command\":\"env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix fuzz all preflight --only-lane afl --profile insane --hours 1.00 --threads 25% --target-thread-years 0.25 --dir build/fuzz/all --work-dir build/cache/scratch --allow-dirty-nytrix-baseline\","
       "\"coverage_next_state_command\":\"jq {state,event,live,fresh,child_status,child_pid,heartbeat_s,heartbeat_count,low_priority,nice,load_wait,max_load_pct,space_guard,min_free_gb,run_lock,hours,threads,profile,json,target_thread_years,timestamp_utc,pid,stop_file,status_report,progress_report,last_report} build/fuzz/all/run-missing-evidence-state.json\","
-      "\"coverage_next_state_refresh_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 NYNTH_RUN_DRY_RUN=1 nice -n 10 ./build/fuzz/all/run-missing-evidence.sh\","
+      "\"coverage_next_state_refresh_command\":\"env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 NYTRIX_RUN_DRY_RUN=1 nice -n 10 ./build/fuzz/all/run-missing-evidence.sh\","
       "\"coverage_next_stop_command\":\"touch build/fuzz/all/missing-evidence-stop\","
       "\"coverage_next_resume_command\":\"rm -f build/fuzz/all/missing-evidence-stop\","
-      "\"failure_count\":0},\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"failure_count\":0},\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     bool ok = mkdir_p(report_dir) &&
               write_file_text(history_path, history) &&
               write_file_text(worklist_path, worklist) &&
@@ -12053,7 +12053,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "{\"name\":\"synth_lanes\",\"kind\":\"fuzz-all\",\"phase\":\"synth\","
       "\"ok\":true,\"skipped\":true,\"reason\":\"disabled by --no-synth\"}"
       "],\"failures\":[],\"summary\":{\"mode\":\"fuzz-all\","
-      "\"failure_count\":0},\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"failure_count\":0},\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     bool ok = mkdir_p(report_dir) && write_file_text(report_path, report);
     free(report_dir);
     free(report_path);
@@ -12085,13 +12085,13 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                     "\"report\":");
     (void)sb_append_json_str(&history, report_path ? report_path : "");
     (void)sb_append(&history, ",\"ok\":true,\"attention\":false,"
-                    "\"failure_count\":0,\"engine\":\"nynth_core\"}],"
+                    "\"failure_count\":0,\"engine\":\"nytrix_core\"}],"
                     "\"failures\":[],\"summary\":{\"mode\":\"fuzz-all-history\","
                     "\"latest_report\":");
     (void)sb_append_json_str(&history, report_path ? report_path : "");
     (void)sb_append(&history, ",\"failure_count\":0,"
-                    "\"engine\":\"nynth_core\"},"
-                    "\"meta\":{\"engine\":\"nynth_core\"}}\n");
+                    "\"engine\":\"nytrix_core\"},"
+                    "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
     const char *report =
       "{\"rows\":["
       "{\"name\":\"corpus_prepare\",\"kind\":\"fuzz-all\",\"phase\":\"setup\","
@@ -12112,7 +12112,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "{\"name\":\"synth_lanes\",\"kind\":\"fuzz-all\",\"phase\":\"synth\","
       "\"ok\":true,\"skipped\":true,\"reason\":\"disabled by --no-synth\"}"
       "],\"failures\":[],\"summary\":{\"mode\":\"fuzz-all\","
-      "\"failure_count\":0},\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"failure_count\":0},\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     const char *std_audit =
       "{\"rows\":[{\"name\":\"std_runtime_surface\","
       "\"kind\":\"compiler-std-audit\",\"ok\":true,"
@@ -12121,7 +12121,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "\"failures\":[],\"summary\":{\"mode\":\"compiler-std-audit\","
       "\"failure_count\":0,\"runtime_surface_state\":\"clean\","
       "\"runtime_wrapper_gap_count\":0},"
-      "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     bool ok = mkdir_p(report_dir) && mkdir_p(focus_dir) &&
               write_file_text(report_path, report) &&
               write_file_text(history_path, history.data ? history.data : "") &&
@@ -12162,7 +12162,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "\"cases\":2,\"ok\":2,\"failure_count\":0,"
       "\"smoke\":true,\"full_pressure\":false,"
       "\"duration_s\":3600,\"budget_s\":3600,\"effective_budget_s\":3600,"
-      "\"threads\":1},\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"threads\":1},\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     const char *no_evidence =
       "{\"rows\":["
       "{\"name\":\"corpus_prepare\",\"kind\":\"fuzz-all\","
@@ -12180,7 +12180,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "\"duration_s\":0.01,\"budget_s\":180,\"effective_budget_s\":180,"
       "\"threads\":10,\"lane_filter\":\"afl\","
       "\"lane_filter_active\":true},"
-      "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     bool ok = mkdir_p(report_dir) &&
               write_file_text(report_path, report) &&
               write_file_text(no_evidence_path, no_evidence);
@@ -12211,7 +12211,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "\"budget_s\":1,\"threads\":1,\"lane_filter\":\"all\","
       "\"lane_filter_active\":false,"
       "\"isolation_sentinel\":\"campaign\"},"
-      "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     bool ok = mkdir_p(campaign_dir) && write_file_text(sentinel_path, sentinel);
     free(campaign_dir);
     free(sentinel_path);
@@ -12253,14 +12253,14 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     }
     char root[4096] = {0};
     const char *artifact_root = "";
-    if (find_nynth_root(root, sizeof(root))) artifact_root = root;
+    if (find_nytrix_root(root, sizeof(root))) artifact_root = root;
     char *latest_smoke_rel = rel_path_dup(artifact_root, latest_smoke_path);
     char *latest_full_pressure_rel =
         rel_path_dup(artifact_root, latest_full_pressure_path);
     const char *fixture_report =
       "{\"rows\":[],\"failures\":[],\"summary\":{\"mode\":\"fixture-report\","
-      "\"failure_count\":0,\"engine\":\"nynth_core\"},"
-      "\"meta\":{\"engine\":\"nynth_core\"}}\n";
+      "\"failure_count\":0,\"engine\":\"nytrix_core\"},"
+      "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
     str_buf_t state = {0};
     (void)sb_appendf(&state,
       "{\"phase\":\"running\",\"event\":\"heartbeat\","
@@ -12278,7 +12278,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "{\"rows\":[{\"kind\":\"fuzz-all-status\",\"ok\":true}],"
       "\"failures\":[],"
       "\"summary\":{\"cases\":1,\"ok\":1,\"failure_count\":0,"
-      "\"engine\":\"nynth_core\",\"mode\":\"fuzz-all-status\","
+      "\"engine\":\"nytrix_core\",\"mode\":\"fuzz-all-status\","
       "\"target_percent\":12.5,"
       "\"thread_years\":1.25,"
       "\"target_thread_years\":10.0,"
@@ -12315,10 +12315,10 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       "\"coverage_queue\":["
       "{\"lane\":\"afl\",\"severity\":\"medium\",\"category\":\"afl\","
       "\"reason\":\"budget too short\","
-      "\"command\":\"./build/nynth fuzz all run --only-lane afl --profile insane --hours 8 --threads 25% --dir build/fuzz/all --json build/fuzz/all/with-afl.json\"},"
+      "\"command\":\"./build/nytrix fuzz all run --only-lane afl --profile insane --hours 8 --threads 25% --dir build/fuzz/all --json build/fuzz/all/with-afl.json\"},"
       "{\"lane\":\"nytrix_fuzz\",\"severity\":\"advisory\","
       "\"category\":\"nytrix\",\"reason\":\"disabled by default; pass --allow-nytrix\","
-      "\"command\":\"./build/nynth fuzz all run --profile insane --hours 8 --threads 25% --dir build/fuzz/all --allow-nytrix --json build/fuzz/all/with-nytrix.json\"}],"
+      "\"command\":\"./build/nytrix fuzz all run --profile insane --hours 8 --threads 25% --dir build/fuzz/all --allow-nytrix --json build/fuzz/all/with-nytrix.json\"}],"
       "\"completion_eta_local\":\"2026-10-20 05:00:00 +0200\","
       "\"ready\":true,"
       "\"blocker_count\":0,"
@@ -12351,15 +12351,15 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
       (void)sb_append(&status,
                       "\"next_script\":\"\","
                       "\"next_handoff_command\":\"./build/fuzz/all/run-next.sh\","
-                      "\"next_command\":\"env NYNTH_LOW_PRIORITY=1 NYNTH_RUN_NICE=10 nice -n 10 ./build/fuzz/all/run-next.sh\",");
+                      "\"next_command\":\"env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/fuzz/all/run-next.sh\",");
     } else {
       (void)sb_append(&status,
                       "\"next_script\":\"build/fuzz/all/run-next.sh\",");
     }
     (void)sb_append(&status,
-          "\"run_command\":\"./build/nynth fuzz all run --profile insane --hours 8 --threads 25% --target-thread-years 10 --dir build/fuzz/all --fail-fast --no-nytrix --no-sanitizers\","
-        "\"status_command\":\"./build/nynth fuzz all status --refresh\","
-        "\"old_path_command\":\"./build/nynth fuzz all old-paths --dry-run --nytrix-root ../nytrix --archive-dir build/cache/old-nytrix --json build/fuzz/all/old-paths.json --markdown build/fuzz/all/old-paths.md\","
+          "\"run_command\":\"./build/nytrix fuzz all run --profile insane --hours 8 --threads 25% --target-thread-years 10 --dir build/fuzz/all --fail-fast --no-nytrix --no-sanitizers\","
+        "\"status_command\":\"./build/nytrix fuzz all status --refresh\","
+        "\"old_path_command\":\"./build/nytrix fuzz all old-paths --dry-run --nytrix-root ../nytrix --archive-dir build/cache/old-nytrix --json build/fuzz/all/old-paths.json --markdown build/fuzz/all/old-paths.md\","
         "\"latest_report\":");
     (void)sb_append_json_str(&status, latest_smoke_rel ? latest_smoke_rel : "");
     (void)sb_append(&status, ",\"latest_full_pressure_report\":");
@@ -12367,7 +12367,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                              latest_full_pressure_rel ?
                                  latest_full_pressure_rel : "");
     (void)sb_append(&status,
-      "},\"meta\":{\"engine\":\"nynth_core\"}}\n");
+      "},\"meta\":{\"engine\":\"nytrix_core\"}}\n");
     bool ok = mkdir_p(report_dir) &&
               write_file_text(latest_smoke_path, fixture_report) &&
               write_file_text(latest_full_pressure_path, fixture_report) &&
@@ -12414,7 +12414,7 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
   (void)sb_append(&artifact, "{\"source\":");
   (void)sb_append_json_str(&artifact, source_path);
   (void)sb_append(&artifact, ",\"mode\":\"compile_fail\",\"expect_substring\":\"not_defined_symbol\","
-                  "\"engine\":\"nynth_core\"}\n");
+                  "\"engine\":\"nytrix_core\"}\n");
   bool ok = write_file_text(source_path, source) &&
             write_file_text(artifact_path, artifact.data ? artifact.data : "{}\n");
   free(source_path);
@@ -12428,10 +12428,10 @@ static int cmd_public_selftest_run(int argc, char **argv) {
     return cmd_public_selftest_catalog(argc, argv);
   char root[4096];
   if (!find_repo_root(root, sizeof(root))) {
-    char nynth_root[4096], sibling[4096];
+    char nytrix_root[4096], sibling[4096];
     bool have_repo = false;
-    if (find_nynth_root(nynth_root, sizeof(nynth_root)) &&
-        path_join(sibling, sizeof(sibling), nynth_root, "../nytrix")) {
+    if (find_nytrix_root(nytrix_root, sizeof(nytrix_root)) &&
+        path_join(sibling, sizeof(sibling), nytrix_root, "../nytrix")) {
       have_repo = find_repo_root_from_path(sibling, root, sizeof(root));
     }
     if (!have_repo) {
@@ -12448,14 +12448,14 @@ static int cmd_public_selftest_run(int argc, char **argv) {
   if (requested_jobs < 1) requested_jobs = 1;
   const char *max_timeout_arg = value_after(argc, argv, 3, "--max-timeout-s", "");
   double max_timeout_s = max_timeout_arg && *max_timeout_arg ? atof(max_timeout_arg) : (full ? 0.0 : 45.0);
-  const char *scratch_root = nynth_scratch_root_arg(argc, argv, 3);
-  char *scratch_root_abs = nynth_absolute_scratch_root(scratch_root);
+  const char *scratch_root = nytrix_scratch_root_arg(argc, argv, 3);
+  char *scratch_root_abs = nytrix_absolute_scratch_root(scratch_root);
   string_list_t only = {0}, rows = {0}, failures = {0}, skipped_slow = {0};
   selftest_collect_only(argc, argv, &only);
   char *work_dir = NULL;
   if (scratch_root_abs && *scratch_root_abs) ny_ensure_dir_recursive(scratch_root_abs);
-  (void)asprintf(&work_dir, "%s/nynth_selftest_native_%ld",
-                 scratch_root_abs && *scratch_root_abs ? scratch_root_abs : NYNTH_DEFAULT_SCRATCH_ROOT,
+  (void)asprintf(&work_dir, "%s/nytrix_selftest_native_%ld",
+                 scratch_root_abs && *scratch_root_abs ? scratch_root_abs : NYTRIX_DEFAULT_SCRATCH_ROOT,
                  (long)getpid());
   if (!work_dir || !mkdir_p(work_dir)) {
     printf("{\"ok\":false,\"error\":\"selftest-workdir-failed\"}\n");
@@ -12511,9 +12511,9 @@ static int cmd_public_selftest_run(int argc, char **argv) {
     string_list_t errors = {0};
     bool isolated_scratch = selftest_spec_uses_scratch_root(spec->name) &&
                             work_dir && *work_dir;
-    const char *old_scratch_env = getenv("NYNTH_SCRATCH_ROOT");
+    const char *old_scratch_env = getenv("NYTRIX_SCRATCH_ROOT");
     char *old_scratch_copy = old_scratch_env ? strdup(old_scratch_env) : NULL;
-    if (isolated_scratch) (void)setenv("NYNTH_SCRATCH_ROOT", work_dir, 1);
+    if (isolated_scratch) (void)setenv("NYTRIX_SCRATCH_ROOT", work_dir, 1);
     bool prepared = selftest_prepare_spec(spec->name, work_dir);
     proc_result_t pr = {0};
     if (prepared) {
@@ -12524,8 +12524,8 @@ static int cmd_public_selftest_run(int argc, char **argv) {
       (void)string_list_push_copy(&errors, "fixture prepare failed");
     }
     if (isolated_scratch) {
-      if (old_scratch_copy) (void)setenv("NYNTH_SCRATCH_ROOT", old_scratch_copy, 1);
-      else (void)unsetenv("NYNTH_SCRATCH_ROOT");
+      if (old_scratch_copy) (void)setenv("NYTRIX_SCRATCH_ROOT", old_scratch_copy, 1);
+      else (void)unsetenv("NYTRIX_SCRATCH_ROOT");
     }
     free(old_scratch_copy);
     int cli_rows = -1;
@@ -12656,10 +12656,10 @@ static int cmd_public_selftest_run(int argc, char **argv) {
     free(case_json);
   }
 
-  char nynth_root[4096];
+  char nytrix_root[4096];
   const char *artifact_root = root;
-  if (find_nynth_root(nynth_root, sizeof(nynth_root)))
-    artifact_root = nynth_root;
+  if (find_nytrix_root(nytrix_root, sizeof(nytrix_root)))
+    artifact_root = nytrix_root;
   bool markdown_written = true;
   if (markdown_path && *markdown_path) {
     int markdown_ok_count = rows.count - failures.count;
@@ -12722,7 +12722,7 @@ static int cmd_public_selftest_run(int argc, char **argv) {
     (void)sb_appendf(&out, ",\"markdown_written\":%s",
                      markdown_written ? "true" : "false");
   }
-  (void)sb_append(&out, ",\"engine\":\"nynth_core\"},\"meta\":{\"engine\":\"nynth_core\",\"selftest_scope\":\"native-supported-commands\"}}");
+  (void)sb_append(&out, ",\"engine\":\"nytrix_core\"},\"meta\":{\"engine\":\"nytrix_core\",\"selftest_scope\":\"native-supported-commands\"}}");
   char *report_json = sb_take(&out);
   if (json_path && *json_path && !write_file_text(json_path, report_json)) {
     printf("{\"ok\":false,\"error\":\"write-failed\",\"path\":");
@@ -12835,7 +12835,7 @@ static void proof_add_report_step(report_rows_t *proof, const char *name, const 
   double failures = 0.0;
   bool has_failure_count = extract_json_number(json, "failure_count", &failures);
   bool ok = (!has_failure_count || failures == 0.0) && !json_failures_nonempty(json);
-  proof_add_row(proof, name, ok, false, "engine", "nynth_core", ok ? NULL : "subreport has failures");
+  proof_add_row(proof, name, ok, false, "engine", "nytrix_core", ok ? NULL : "subreport has failures");
 }
 
 static int prove_typed_determinism(const char *root, const char *shape_dir, bool fast,
@@ -12843,8 +12843,8 @@ static int prove_typed_determinism(const char *root, const char *shape_dir, bool
   int cases = fast ? 3 : 8;
   char *out_a = NULL, *out_b = NULL;
   long pid = (long)getpid();
-  if (nynth_asprintf(&out_a, "build/generated/proof/native_det_a_%d_%ld", seed, pid) < 0 ||
-      nynth_asprintf(&out_b, "build/generated/proof/native_det_b_%d_%ld", seed, pid) < 0) {
+  if (nytrix_asprintf(&out_a, "build/generated/proof/native_det_a_%d_%ld", seed, pid) < 0 ||
+      nytrix_asprintf(&out_b, "build/generated/proof/native_det_b_%d_%ld", seed, pid) < 0) {
     free(out_a); free(out_b);
     return 1;
   }
@@ -12867,7 +12867,7 @@ static int prove_typed_determinism(const char *root, const char *shape_dir, bool
 static int prove_typed_canary(const char *root, const char *shape_dir, const char *ny_bin,
                               int seed, double timeout_s) {
   char *out_dir = NULL;
-  if (nynth_asprintf(&out_dir, "build/generated/proof/native_canary_%d_%ld", seed, (long)getpid()) < 0)
+  if (nytrix_asprintf(&out_dir, "build/generated/proof/native_canary_%d_%ld", seed, (long)getpid()) < 0)
     return 1;
   char *json = run_generate_batch_json(root, shape_dir, out_dir, "optimizer", "typed", 1, seed, true, timeout_s);
   generated_case_list_t cases = {0};
@@ -12912,7 +12912,7 @@ static char *build_proof_report_json(const report_rows_t *proof, bool fast, int 
   (void)sb_append(&b, ",\"failures\":[");
   if (proof->failures_json.data) (void)sb_append(&b, proof->failures_json.data);
   (void)sb_appendf(&b, "],\"summary\":{\"proofs\":%d,\"ok\":%d,\"failure_count\":%d,"
-                   "\"fast\":%s,\"seed\":%d,\"engine\":\"nynth_core\","
+                   "\"fast\":%s,\"seed\":%d,\"engine\":\"nytrix_core\","
                    "\"proof_contract\":[\"shape validation\",\"deterministic typed generation\","
                    "\"typed C-vs-Ny execution\",\"metamorphic negative canary\","
                    "\"bridge suite execution\",\"corpus replay\",\"normalized report schema\"]}",
@@ -12940,8 +12940,8 @@ static int cmd_public_prove_lab(int argc, char **argv) {
   double timeout_s = atof(value_after(argc, argv, 3, "--timeout-s", "90"));
   const char *json_path = value_after(argc, argv, 3, "--json", "");
   char *shape_dir = NULL, *proof_dir = NULL;
-  if (nynth_asprintf(&shape_dir, "shapes") < 0 ||
-      nynth_asprintf(&proof_dir, "build/generated/proof/native") < 0) {
+  if (nytrix_asprintf(&shape_dir, "etc/tests/fuzz/shapes") < 0 ||
+      nytrix_asprintf(&proof_dir, "build/generated/proof/native") < 0) {
     printf("{\"ok\":false,\"error\":\"allocation-failed\"}\n");
     free(shape_dir); free(proof_dir);
     return 2;
@@ -12954,7 +12954,7 @@ static int cmd_public_prove_lab(int argc, char **argv) {
   double shape_errors = 1.0;
   if (shapes.out) (void)extract_json_number(shapes.out, "errors", &shape_errors);
   proof_add_row(&proof, "shape_validation", shapes.rc == 0 && shape_errors == 0.0,
-                false, "engine", "nynth_core", "shape validation failed");
+                false, "engine", "nytrix_core", "shape validation failed");
   proc_result_free(&shapes);
 
   str_buf_t det_detail = {0};
@@ -12966,8 +12966,8 @@ static int cmd_public_prove_lab(int argc, char **argv) {
   char *typed_json_path = make_tmp_json_path(root, "proof_typed", seed, 0);
   char *typed_out_dir = NULL, *typed_build_dir = NULL;
   long proof_pid = (long)getpid();
-  if (nynth_asprintf(&typed_out_dir, "build/generated/proof/native_typed_%d_%ld", seed, proof_pid) < 0 ||
-      nynth_asprintf(&typed_build_dir, "build/proof/native_typed_%d_%ld", seed, proof_pid) < 0) {
+  if (nytrix_asprintf(&typed_out_dir, "build/generated/proof/native_typed_%d_%ld", seed, proof_pid) < 0 ||
+      nytrix_asprintf(&typed_build_dir, "build/proof/native_typed_%d_%ld", seed, proof_pid) < 0) {
     printf("{\"ok\":false,\"error\":\"allocation-failed\"}\n");
     free(shape_dir); free(proof_dir); free(typed_json_path);
     free(typed_out_dir); free(typed_build_dir);
@@ -12995,18 +12995,18 @@ static int cmd_public_prove_lab(int argc, char **argv) {
   proc_result_t typed = run_proc(typed_argv, root, worker_outer_timeout(timeout_s, 1, 0));
   file_buf_t typed_report = {0};
   if (typed_json_path && read_file(typed_json_path, &typed_report)) proof_add_report_step(&proof, "typed_execution", typed_report.data);
-  else proof_add_row(&proof, "typed_execution", false, false, "engine", "nynth_core", "typed generation report missing");
+  else proof_add_row(&proof, "typed_execution", false, false, "engine", "nytrix_core", "typed generation report missing");
   free(typed_report.data); proc_result_free(&typed);
   free(typed_json_path); free(typed_out_dir); free(typed_build_dir);
 
   int canary_rc = prove_typed_canary(root, shape_dir, ny_bin, seed + 101, timeout_s);
-  proof_add_row(&proof, "typed_mismatch_canary", canary_rc == 0, false, "engine", "nynth_core",
+  proof_add_row(&proof, "typed_mismatch_canary", canary_rc == 0, false, "engine", "nytrix_core",
                 "intentional mismatch was not detected");
 
   char *bridge_argv[] = {g_self_path, "bridge", "suite", "--fast", "--timeout-s", timeout_buf, "--json", NULL};
   proc_result_t bridge = run_proc(bridge_argv, root, worker_outer_timeout(timeout_s, 1, 0));
   if (bridge.out && strstr(bridge.out, "\"rows\"")) proof_add_report_step(&proof, "bridge_suite", bridge.out);
-  else proof_add_row(&proof, "bridge_suite", false, false, "engine", "nynth_core", "bridge suite failed");
+  else proof_add_row(&proof, "bridge_suite", false, false, "engine", "nytrix_core", "bridge suite failed");
   proc_result_free(&bridge);
 
   char *corpus_json_path = make_tmp_json_path(root, "proof_corpus", seed, 0);
@@ -13014,7 +13014,7 @@ static int cmd_public_prove_lab(int argc, char **argv) {
   proc_result_t corpus = run_proc(corpus_argv, root, worker_outer_timeout(timeout_s, 1, 0));
   file_buf_t corpus_report = {0};
   if (corpus_json_path && read_file(corpus_json_path, &corpus_report)) proof_add_report_step(&proof, "corpus_replay", corpus_report.data);
-  else proof_add_row(&proof, "corpus_replay", false, false, "engine", "nynth_core", "corpus replay report missing");
+  else proof_add_row(&proof, "corpus_replay", false, false, "engine", "nytrix_core", "corpus replay report missing");
   free(corpus_report.data); proc_result_free(&corpus); free(corpus_json_path);
 
   char *report_json = build_proof_report_json(&proof, fast, seed, proof_dir, ny_bin);
@@ -13066,15 +13066,15 @@ static char *synth_print_embedded_ny_source(const char *shape_dir, const char *s
                                             const char *generator, int seed) {
   if ((!shape || !*shape) && !synth_print_kernel_generator(generator)) return NULL;
   char *scan_dir = NULL;
-  if (shape && *shape) (void)asprintf(&scan_dir, "%s", shape_dir ? shape_dir : "shapes");
-  else (void)nynth_asprintf(&scan_dir, "shapes/kernels");
+  if (shape && *shape) (void)asprintf(&scan_dir, "%s", shape_dir ? shape_dir : "etc/tests/fuzz/shapes");
+  else (void)nytrix_asprintf(&scan_dir, "etc/tests/fuzz/shapes/kernels");
   string_list_t candidates = {0}, files = {0};
   if (scan_dir && collect_regular_files_recursive(scan_dir, &files)) {
     qsort(files.items, (size_t)files.count, sizeof(char *), cmp_cstr);
     for (int i = 0; i < files.count; ++i) {
       if (!ny_has_suffix(files.items[i], ".nshape") ||
           !shape_file_declares_name(files.items[i], shape)) continue;
-      char *source = nynth_shape_source_block(files.items[i], "ny");
+      char *source = nytrix_shape_source_block(files.items[i], "ny");
       if (source) {
         free(source);
         (void)string_list_push_copy(&candidates, files.items[i]);
@@ -13084,7 +13084,7 @@ static char *synth_print_embedded_ny_source(const char *shape_dir, const char *s
   char *out = NULL;
   if (candidates.count > 0) {
     uint32_t pick = shape && *shape ? 0u : (uint32_t)seed % (uint32_t)candidates.count;
-    out = nynth_shape_source_block(candidates.items[pick], "ny");
+    out = nytrix_shape_source_block(candidates.items[pick], "ny");
   }
   string_list_free(&candidates);
   string_list_free(&files);
@@ -13105,8 +13105,8 @@ static bool synth_print_use_program_c(const char *shape, const char *generator,
 
 static int cmd_public_synth_print(int argc, char **argv) {
   char root[4096];
-  if (!find_nynth_root(root, sizeof(root))) {
-    printf("{\"ok\":false,\"error\":\"nynth-root-not-found\"}\n");
+  if (!find_nytrix_root(root, sizeof(root))) {
+    printf("{\"ok\":false,\"error\":\"nytrix-root-not-found\"}\n");
     return 2;
   }
   const char *generator_arg = value_after(argc, argv, 3, "--generator", "");
@@ -13127,9 +13127,9 @@ static int cmd_public_synth_print(int argc, char **argv) {
     (int)(((uint64_t)time(NULL) ^ ((uint64_t)getpid() << 16) ^
            (uint64_t)(now_ms() * 1000.0)) & UINT64_C(0x7fffffff));
   char *shape_dir = NULL, *default_out = NULL;
-  bool paths_ok = nynth_asprintf(&shape_dir, "shapes") >= 0 &&
-                  (default_out = nynth_scratch_pathf(NULL,
-                                                     "synth_print/nynth_print_%ld_%d",
+  bool paths_ok = nytrix_asprintf(&shape_dir, "etc/tests/fuzz/shapes") >= 0 &&
+                  (default_out = nytrix_scratch_pathf(NULL,
+                                                     "synth_print/nytrix_print_%ld_%d",
                                                      (long)getpid(), seed)) != NULL;
   if (!paths_ok) {
     printf("{\"ok\":false,\"error\":\"allocation-failed\"}\n");
@@ -13151,7 +13151,7 @@ static int cmd_public_synth_print(int argc, char **argv) {
     free(shape_dir); free(default_out);
     return rc;
   }
-  if (strcmp(lang, "ny") == 0 || strcmp(lang, "nynth") == 0) {
+  if (strcmp(lang, "ny") == 0 || strcmp(lang, "nytrix") == 0) {
     char *source = synth_print_embedded_ny_source(shape_dir, shape, generator, seed);
     if (source) {
       fputs(source, stdout);
@@ -13162,7 +13162,7 @@ static int cmd_public_synth_print(int argc, char **argv) {
     }
   }
   if (strcmp(lang, "c") == 0 && synth_print_use_program_c(shape, generator, generator_given)) {
-    int rc = nynth_synth_print_c_program(stdout, shape_dir, generator, profile,
+    int rc = nytrix_synth_print_c_program(stdout, shape_dir, generator, profile,
                                          shape, seed, fast, insane);
     free(shape_dir); free(default_out);
     return rc;
@@ -13209,7 +13209,7 @@ static int cmd_public_synth_print(int argc, char **argv) {
     return 0;
   }
   const char *path = gc->c_path;
-  if (strcmp(lang, "ny") == 0 || strcmp(lang, "nynth") == 0) {
+  if (strcmp(lang, "ny") == 0 || strcmp(lang, "nytrix") == 0) {
     path = gc->ny_path;
   } else if (strcmp(lang, "ir") == 0 || strcmp(lang, "json") == 0) {
     path = gc->ir_path;
@@ -13394,7 +13394,7 @@ static bool write_synth_crash_artifact(const char *root, const char *ny_bin,
   char *source_kind = gc && gc->json ? json_string_or_empty(gc->json, "source_kind") : strdup("");
   char *features = gc && gc->json ? json_array_or_empty(gc->json, "features") : strdup("[]");
   str_buf_t a = {0};
-  (void)sb_append(&a, "{\"schema\":\"nynth.synth.repro.v1\",\"captured\":true,"
+  (void)sb_append(&a, "{\"schema\":\"nytrix.synth.repro.v1\",\"captured\":true,"
                      "\"failure_kind\":\"compiler_crash\",\"mode\":\"compile_crash\","
                      "\"reducer_mode\":\"compile_crash\",\"tool\":");
   (void)sb_append_json_str(&a, failure && failure->tool ? failure->tool : "ny");
@@ -13426,7 +13426,7 @@ static bool write_synth_crash_artifact(const char *root, const char *ny_bin,
   append_rel_json_str(&a, root, gc && gc->ny_path ? gc->ny_path : "");
   (void)sb_append(&a, ",\"c_source\":");
   append_rel_json_str(&a, root, gc && gc->c_path ? gc->c_path : "");
-  (void)sb_append(&a, ",\"nynth_ir\":");
+  (void)sb_append(&a, ",\"nytrix_ir\":");
   append_rel_json_str(&a, root, gc && gc->ir_path ? gc->ir_path : "");
   (void)sb_append(&a, ",\"command\":");
   (void)sb_append_json_str(&a, command ? command : "");
@@ -13467,7 +13467,7 @@ static bool reduce_synth_crash_artifact(const char *root, const char *ny_bin,
     if (asprintf(&json_path, "%s.reduce.json", artifact_path) < 0 || !json_path)
       return false;
   } else {
-    json_path = nynth_scratch_pathf(NULL, "reduced/nynth_reduce_%ld.reduce.json",
+    json_path = nytrix_scratch_pathf(NULL, "reduced/nytrix_reduce_%ld.reduce.json",
                                     (long)getpid());
     if (!json_path) return false;
     (void)mkdir_parent(json_path);
@@ -13561,8 +13561,8 @@ static char *row_with_known_bug_fields(const char *row, const char *bug_id,
 
 static int cmd_public_synth_generate(int argc, char **argv) {
   char root[4096], ny_bin[4096];
-  if (!find_nynth_root(root, sizeof(root))) {
-    printf("{\"ok\":false,\"error\":\"nynth-root-not-found\"}\n");
+  if (!find_nytrix_root(root, sizeof(root))) {
+    printf("{\"ok\":false,\"error\":\"nytrix-root-not-found\"}\n");
     return 2;
   }
   if (!find_ny_bin(root, ny_bin, sizeof(ny_bin))) {
@@ -13593,10 +13593,10 @@ static int cmd_public_synth_generate(int argc, char **argv) {
                                            fast ? "80" : "250"));
   if (max_reduce_checks < 1) max_reduce_checks = fast ? 80 : 250;
   char *default_out = NULL, *shape_dir = NULL, *build_dir = NULL;
-  bool paths_ok = nynth_asprintf(&default_out, "%s",
+  bool paths_ok = nytrix_asprintf(&default_out, "%s",
                            default_generated_leaf_for_method(method)) >= 0 &&
-                  nynth_asprintf(&shape_dir, "shapes") >= 0 &&
-                  nynth_asprintf(&build_dir, "build/%s/native/%s_%d", method, profile, seed) >= 0;
+                  nytrix_asprintf(&shape_dir, "etc/tests/fuzz/shapes") >= 0 &&
+                  nytrix_asprintf(&build_dir, "build/%s/native/%s_%d", method, profile, seed) >= 0;
   if (!paths_ok) {
     printf("{\"ok\":false,\"error\":\"allocation-failed\"}\n");
     free(default_out); free(shape_dir); free(build_dir);

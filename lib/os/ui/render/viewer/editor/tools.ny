@@ -34,10 +34,12 @@ fn _configured_argv(str key, str path) list {
    out
 }
 
+;; Returns the result of the `ny_command` operation.
 fn ny_command() str {
    _tool("./build/release/ny", "ny")
 }
 
+;; Returns the result of the `lsp_command` operation.
 fn lsp_command() str {
    _tool("./build/release/ny-lsp", "ny-lsp")
 }
@@ -92,6 +94,7 @@ fn debug_file(str path) dict {
    run_capture(argv, [], nil, false)
 }
 
+;; Returns the result of the `status` operation.
 fn status() dict {
    {
       "ny": ny_command(),

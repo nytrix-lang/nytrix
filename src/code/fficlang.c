@@ -1,5 +1,7 @@
 #include "fficlang.h"
 #include "base/util.h"
+#include "base/process.h"
+#include "base/dirent.h"
 #include "priv.h"
 #include "code/c/c.h"
 #include <clang-c/Index.h>
@@ -7,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #ifndef _WIN32
 #include <dlfcn.h>
 #include <unistd.h>
@@ -106,18 +109,13 @@ static void ny_pkgconfig_append_cflags(const char *pkg, char ***args,
       return;
     }
   }
-  char cmd[256];
-  snprintf(cmd, sizeof(cmd), "pkg-config --cflags %s 2>%s", pkg,
-           NY_FFI_NULL_DEVICE);
-  FILE *f = popen(cmd, "r");
-  if (!f)
-    return;
+  const char *pkg_argv[] = {"pkg-config", "--cflags", pkg, NULL};
   char *buf = NULL;
-  size_t buf_len = 0, buf_cap = 0;
-  char chunk[256];
-  while (fgets(chunk, sizeof(chunk), f))
-    ffi_buf_append(&buf, &buf_len, &buf_cap, chunk);
-  pclose(f);
+  int pkg_rc = ny_process_capture(pkg_argv, &buf, true);
+  if (pkg_rc != 0) {
+    free(buf);
+    buf = NULL;
+  }
   if (!buf || !*buf) {
     free(buf);
 
@@ -257,6 +255,87 @@ static const ny_autolink_entry_t *ny_ffi_header_entry(const char *header_path) {
   return NULL;
 }
 
+static bool ny_ffi_find_system_header(const char *dir, const char *header_path,
+                                      unsigned depth, char *out,
+                                      size_t out_cap) {
+  if (!dir || !header_path || depth > 4 || !out || out_cap == 0)
+    return false;
+  int n = snprintf(out, out_cap, "%s/%s", dir, header_path);
+  if (n > 0 && (size_t)n < out_cap && ny_access(out, R_OK) == 0)
+    return true;
+  DIR *d = opendir(dir);
+  if (!d)
+    return false;
+  bool found = false;
+  struct dirent *entry = NULL;
+  while (!found && (entry = readdir(d)) != NULL) {
+    if (entry->d_name[0] == '.')
+      continue;
+    char child[4096];
+    n = snprintf(child, sizeof(child), "%s/%s", dir, entry->d_name);
+    if (n <= 0 || (size_t)n >= sizeof(child))
+      continue;
+    struct stat st;
+    if (stat(child, &st) != 0 || !S_ISDIR(st.st_mode))
+      continue;
+    found = ny_ffi_find_system_header(child, header_path, depth + 1, out,
+                                      out_cap);
+  }
+  closedir(d);
+  return found;
+}
+
+static char *ny_ffi_internal_c_read_system_header(const char *header_path,
+                                                   size_t *size_out) {
+  if (!header_path || !*header_path)
+    return NULL;
+  static const char *const roots[] = {
+      "/usr/local/include", "/usr/include",
+#if defined(__x86_64__)
+      "/usr/include/x86_64-linux-gnu",
+#elif defined(__aarch64__)
+      "/usr/include/aarch64-linux-gnu",
+#elif defined(__i386__)
+      "/usr/include/i386-linux-gnu",
+#endif
+      NULL};
+  char path[4096];
+  for (size_t i = 0; roots[i]; ++i) {
+    int n = snprintf(path, sizeof(path), "%s/%s", roots[i], header_path);
+    if (n <= 0 || (size_t)n >= sizeof(path) || ny_access(path, R_OK) != 0)
+      continue;
+    return ny_read_file_raw(path, size_out);
+  }
+#ifndef _WIN32
+  static const char *const compiler_roots[] = {"/usr/lib/gcc", "/usr/lib/clang",
+                                               NULL};
+  for (size_t i = 0; compiler_roots[i]; ++i) {
+    if (ny_ffi_find_system_header(compiler_roots[i], header_path, 0, path,
+                                  sizeof(path)))
+      return ny_read_file_raw(path, size_out);
+  }
+#endif
+#ifdef __APPLE__
+  const char *sdk = getenv("SDKROOT");
+  if (sdk && *sdk) {
+    int n = snprintf(path, sizeof(path), "%s/usr/include/%s", sdk,
+                     header_path);
+    if (n > 0 && (size_t)n < sizeof(path) && ny_access(path, R_OK) == 0)
+      return ny_read_file_raw(path, size_out);
+  }
+#endif
+  return NULL;
+}
+
+static char *ny_ffi_internal_c_read_header(const char *header_path, bool is_std,
+                                           size_t *size_out) {
+  if (size_out)
+    *size_out = 0;
+  if (is_std)
+    return ny_ffi_internal_c_read_system_header(header_path, size_out);
+  return ny_read_file_raw(header_path, size_out);
+}
+
 static bool ny_ffi_internal_c_parse_header(codegen_t *cg,
                                            const char *header_path,
                                            bool is_std,
@@ -267,23 +346,16 @@ static bool ny_ffi_internal_c_parse_header(codegen_t *cg,
     *parsed_out = 0;
   if (summary_out)
     memset(summary_out, 0, sizeof(*summary_out));
-  if (is_std) {
-    if (strict_internal) {
-      NY_LOG_ERR("[ffi:c] internal frontend does not support system include <%s> yet\n",
-                 header_path ? header_path : "");
-      if (cg)
-        cg->had_error = 1;
-      return false;
-    }
-    return true;
-  }
-
   size_t n = 0;
-  char *src = ny_read_file_raw(header_path, &n);
+  char *src = ny_ffi_internal_c_read_header(header_path, is_std, &n);
   if (!src) {
     if (strict_internal) {
-      NY_LOG_ERR("[ffi:c] internal frontend could not read header \"%s\"\n",
-                 header_path ? header_path : "");
+      if (is_std)
+        NY_LOG_ERR("[ffi:c] internal frontend does not provide system header <%s>\n",
+                   header_path ? header_path : "");
+      else
+        NY_LOG_ERR("[ffi:c] internal frontend could not read header \"%s\"\n",
+                   header_path ? header_path : "");
       if (cg)
         cg->had_error = 1;
       return false;
@@ -294,6 +366,8 @@ static bool ny_ffi_internal_c_parse_header(codegen_t *cg,
   ny_c_header_summary_t summary = {0};
   char parse_err[256] = {0};
   bool ok = ny_parse_header_summary(src, n, &summary, parse_err, sizeof(parse_err)) != 0;
+  if (!ok && is_std && summary.declarations > 0)
+    ok = true;
   free(src);
   if (!ok && strict_internal) {
     NY_LOG_ERR("[ffi:c] internal frontend rejected \"%s\": %s\n",
@@ -340,20 +414,15 @@ static char *ny_pkgconfig_lib(const char *pkg) {
     }
   }
 
-  char cmd[256];
-  snprintf(cmd, sizeof(cmd), "pkg-config --libs-only-l %s 2>%s", pkg,
-           NY_FFI_NULL_DEVICE);
-  FILE *f = popen(cmd, "r");
-  if (!f)
-    return NULL;
-  char buf[256];
-  buf[0] = '\0';
-  if (!fgets(buf, sizeof(buf), f)) {
-    pclose(f);
+  const char *pkg_argv[] = {"pkg-config", "--libs-only-l", pkg, NULL};
+  char *captured = NULL;
+  if (ny_process_capture(pkg_argv, &captured, true) != 0 || !captured || !*captured) {
+    free(captured);
     return NULL;
   }
-  pclose(f);
-
+  char buf[256];
+  snprintf(buf, sizeof(buf), "%s", captured);
+  free(captured);
   size_t n = strlen(buf);
   while (n > 0 &&
          (buf[n - 1] == '\n' || buf[n - 1] == ' ' || buf[n - 1] == '\r'))
@@ -873,6 +942,11 @@ static const char *ny_ffi_map_internal_c_type(const ny_ctype_t *ty, char *buf,
     return "f32";
   case NY_CTYPE_DOUBLE:
     return "f64";
+  case NY_CTYPE_LONG_DOUBLE:
+    /* Win64 aliases long double to double, while the supported SysV targets
+     * use an extended 16-byte representation. The mapper does not receive
+     * the target ABI yet, so decline instead of silently narrowing it. */
+    return NULL;
   case NY_CTYPE_NAMED:
   case NY_CTYPE_STRUCT:
   case NY_CTYPE_UNION:
@@ -927,12 +1001,12 @@ static bool ny_ffi_internal_c_type_supported(codegen_t *cg, const char *ty) {
 
 static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
                                               const ny_cdecl_t *decl) {
-  if (!cg || !decl || decl->kind != NY_CDECL_TYPEDEF ||
-      !decl->type.aggregate_has_layout || decl->type.field_count == 0)
+  if (!cg || !decl || (decl->kind != NY_CDECL_TYPEDEF && decl->kind != NY_CDECL_NONE) ||
+      !decl->type.aggregate_has_layout)
     return true;
   if (decl->type.field_count != decl->type.aggregate_fields)
     return true;
-  char *name = ny_ffi_ctok_strdup(decl->name);
+  char *name = ny_ffi_ctok_strdup(decl->kind == NY_CDECL_NONE ? decl->type.name : decl->name);
   if (!name || !*name) {
     free(name);
     return false;
@@ -1202,6 +1276,98 @@ static bool ny_ffi_register_internal_c_function(codegen_t *cg,
   return true;
 }
 
+static bool ny_ffi_register_internal_c_variable(codegen_t *cg,
+                                                const ny_cdecl_t *decl,
+                                                const char *prefix,
+                                                const char *lib,
+                                                size_t *lowered_out) {
+  if (!cg || !decl || decl->kind != NY_CDECL_VAR)
+    return true;
+  char *c_name = ny_ffi_ctok_strdup(decl->name);
+  if (!c_name || !*c_name) {
+    free(c_name);
+    return false;
+  }
+  if (c_name[0] == '_') {
+    free(c_name);
+    return true;
+  }
+  ffi_context ctx = {
+      .cg = cg,
+      .prefix = prefix,
+      .prefix_len = prefix ? strlen(prefix) : 0,
+      .explicit_prefix = prefix && *prefix,
+      .namespace_alias = ny_ffi_prefix_is_namespace_alias(prefix),
+  };
+  if (ctx.prefix && ctx.prefix_len > 0 && !ctx.namespace_alias &&
+      strncmp(c_name, ctx.prefix, ctx.prefix_len) != 0) {
+    free(c_name);
+    return true;
+  }
+  char public_name[512];
+  const char *ny_name = ny_ffi_public_symbol_name(
+      &ctx, c_name, public_name, sizeof(public_name));
+  if (lookup_global_exact(cg, ny_name)) {
+    free(c_name);
+    return true;
+  }
+  if (!ny_ffi_import_allowed(&ctx, ny_name, "variable")) {
+    free(c_name);
+    return true;
+  }
+
+  char type_buf[128];
+  const char *ny_type = ny_ffi_map_internal_c_type(
+      &decl->type, type_buf, sizeof(type_buf));
+  if (!ny_type || strcmp(ny_type, "void") == 0 ||
+      ny_ffi_internal_c_type_requires_layout(ny_type)) {
+    NY_LOG_V1("[ffi:c] internal frontend cannot lower external variable type for %s\n",
+              c_name);
+    free(c_name);
+    return false;
+  }
+  token_t empty_tok = {0};
+  LLVMTypeRef llvm_ty = resolve_abi_type_name(cg, ny_type, empty_tok);
+  if (!llvm_ty || LLVMGetTypeKind(llvm_ty) == LLVMVoidTypeKind) {
+    free(c_name);
+    return false;
+  }
+  LLVMValueRef global = LLVMGetNamedGlobal(cg->module, c_name);
+  if (!global) {
+    global = LLVMAddGlobal(cg->module, llvm_ty, c_name);
+    LLVMSetLinkage(global, LLVMExternalLinkage);
+  }
+  binding b = {0};
+  b.name = ny_strdup(ny_name);
+  b.value = global;
+  b.raw_int_value = global;
+  b.is_slot = true;
+  b.is_stable = true;
+  b.owned = true;
+  b.is_c_abi_global = true;
+  b.is_c_abi_unsigned = (decl->type.flags & NY_CTYPEF_UNSIGNED) != 0;
+  b.is_c_abi_pointer = decl->type.ptr_depth > 0;
+  if (strcmp(ny_type, "f64") == 0) {
+    b.is_f64_slot = true;
+    b.type_name = "f64";
+  } else if (strcmp(ny_type, "f32") == 0) {
+    b.is_f32_slot = true;
+    b.type_name = "f32";
+  } else if (strcmp(ny_type, "ptr") == 0 || strcmp(ny_type, "fnptr") == 0) {
+    b.type_name = "ptr";
+  } else {
+    b.is_int_slot = true;
+    b.type_name = "int";
+  }
+  b.decl_type_name = b.type_name;
+  vec_push(&cg->global_vars, b);
+  ny_ffi_add_link_once(cg, lib);
+  if (lowered_out)
+    (*lowered_out)++;
+  free(c_name);
+  return true;
+}
+
 static void ny_ffi_register_internal_c_defines(codegen_t *cg,
                                                const ny_parser_t *p,
                                                const char *prefix,
@@ -1234,6 +1400,7 @@ static void ny_ffi_register_internal_c_defines(codegen_t *cg,
 
 static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
                                            const char *header_path,
+                                           bool is_std,
                                            const char *prefix,
                                            const char *lib,
                                            size_t *lowered_out,
@@ -1245,7 +1412,7 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
   if (!cg || !header_path || !*header_path)
     return false;
   size_t n = 0;
-  char *src = ny_read_file_raw(header_path, &n);
+  char *src = ny_ffi_internal_c_read_header(header_path, is_std, &n);
   if (!src) {
     NY_LOG_ERR("[ffi:c] internal frontend could not read header \"%s\"\n",
                header_path);
@@ -1253,7 +1420,7 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
     return false;
   }
   ny_parser_t p;
-  ny_parse_init(&p, src, n);
+  ny_parse_init_abi(&p, src, n, LLVMGetTarget(cg->module));
   bool ok = true;
   size_t lowered = 0;
   while (p.tok.kind != NY_CTOK_EOF) {
@@ -1269,9 +1436,16 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
         ok = false;
         break;
       }
+      if (!ny_ffi_register_internal_c_variable(cg, &decl, prefix, lib,
+                                               &lowered)) {
+        ok = false;
+        break;
+      }
       continue;
     }
     if (rc < 0) {
+      if (is_std)
+        continue;
       NY_LOG_ERR("[ffi:c] internal frontend rejected \"%s\": %s\n",
                  header_path, ny_parse_error(&p));
       cg->had_error = 1;
@@ -1287,7 +1461,7 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
   if (constants_out)
     *constants_out = constants;
   if (ok)
-    NY_LOG_V1("[ffi:c] internal frontend lowered %zu function declaration(s) and %zu integer constant(s) without libclang\n",
+    NY_LOG_V1("[ffi:c] internal frontend lowered %zu C declaration(s) and %zu integer constant(s) without libclang\n",
               lowered, constants);
   return ok;
 }
@@ -1929,6 +2103,7 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
 
   if (kind == CXCursor_FunctionDecl) {
     if ((!ctx->prefix || ctx->prefix_len == 0) &&
+        !ctx->is_std_header &&
         !ny_ffi_cursor_in_requested_header(ctx, cursor))
       return CXChildVisit_Continue;
 
@@ -1977,6 +2152,11 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
       }
 
       CXType ret_cxtype = clang_getCursorResultType(cursor);
+      CXType canonical_ret = clang_getCanonicalType(ret_cxtype);
+      if (ctx->namespace_alias && canonical_ret.kind == CXType_Record) {
+        clang_disposeString(name_cx);
+        return CXChildVisit_Continue;
+      }
       char ret_buf[128];
       bool ret_is_cstr = ny_ffi_type_is_char_pointer(ret_cxtype);
       const char *ny_ret =
@@ -1994,7 +2174,20 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
       LLVMTypeRef *param_llvm_types = NULL;
       layout_def_t **param_byval_layouts = NULL;
       layout_def_t *ret_layout = lookup_layout(ctx->cg, abi_ret);
+      char ret_record_name[128];
+      if (!ret_layout && canonical_ret.kind == CXType_Record &&
+          ny_ffi_record_type_name(ret_cxtype, ret_record_name,
+                                  sizeof(ret_record_name)) &&
+          strcmp(ret_record_name, abi_ret) == 0) {
+        (void)ny_ffi_register_layout_type(ctx, abi_ret, ret_cxtype);
+        ret_layout = lookup_layout(ctx->cg, abi_ret);
+      }
+      if (ctx->namespace_alias && ret_layout) {
+        clang_disposeString(name_cx);
+        return CXChildVisit_Continue;
+      }
       bool native_sret_return = ny_ffi_layout_uses_sret(ret_layout);
+      bool alias_has_aggregate_param = false;
       int actual_params = num_params + (native_sret_return ? 1 : 0);
       if (actual_params > 0) {
         param_llvm_types =
@@ -2013,10 +2206,23 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
           param_byval_layouts[i] = NULL;
           CXCursor arg = clang_Cursor_getArgument(cursor, (unsigned)i);
           CXType arg_cxtype = clang_getCursorType(arg);
+          CXType canonical_arg = clang_getCanonicalType(arg_cxtype);
+          if (ctx->namespace_alias && canonical_arg.kind == CXType_Record)
+            alias_has_aggregate_param = true;
           token_t empty_tok = {0};
           const char *ny_arg_type = map_clang_type_named(
               arg_cxtype, param_bufs[i], sizeof(param_bufs[i]));
           layout_def_t *arg_layout = lookup_layout(ctx->cg, ny_arg_type);
+          char arg_record_name[128];
+          if (!arg_layout && canonical_arg.kind == CXType_Record &&
+              ny_ffi_record_type_name(arg_cxtype, arg_record_name,
+                                      sizeof(arg_record_name)) &&
+              strcmp(arg_record_name, ny_arg_type) == 0) {
+            (void)ny_ffi_register_layout_type(ctx, ny_arg_type, arg_cxtype);
+            arg_layout = lookup_layout(ctx->cg, ny_arg_type);
+          }
+          if (ctx->namespace_alias && arg_layout)
+            alias_has_aggregate_param = true;
           if (ny_ffi_layout_uses_byval(arg_layout)) {
             param_ny_types[i] = "ptr";
             param_byval_layouts[i] = arg_layout;
@@ -2026,6 +2232,10 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
           param_llvm_types[i + (native_sret_return ? 1 : 0)] =
               resolve_abi_type_name(ctx->cg, ny_arg_type, empty_tok);
         }
+      }
+      if (alias_has_aggregate_param) {
+        clang_disposeString(name_cx);
+        return CXChildVisit_Continue;
       }
 
       token_t empty_tok = {0};
@@ -2142,7 +2352,7 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
                             ? "; attempting internal import lowering first"
                             : "; libclang remains fallback/import backend");
     }
-    if (strict_internal && !is_std) {
+    if (strict_internal) {
       char *internal_auto_lib = NULL;
       const char *internal_lib = lib;
       if (!internal_lib || !*internal_lib) {
@@ -2152,7 +2362,7 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
       size_t lowered = 0;
       size_t constants = 0;
       bool lowered_ok = ny_ffi_internal_c_lower_header(
-          cg, header_path, prefix, internal_lib, &lowered, &constants);
+          cg, header_path, is_std, prefix, internal_lib, &lowered, &constants);
       free(internal_auto_lib);
       bool simple_function_only =
           summary.declarations > 0 && summary.functions == summary.declarations &&
@@ -2160,8 +2370,9 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
           summary.tag_decls == 0 && summary.aggregate_layouts == 0 &&
           summary.unsupported == 0;
       bool internally_complete =
-          lowered_ok && summary.variables == 0 && summary.unsupported == 0 &&
-          ((summary.functions > 0 && lowered == summary.functions) ||
+          lowered_ok && summary.unsupported == 0 &&
+          (((summary.functions + summary.variables) > 0 &&
+            lowered == summary.functions + summary.variables) ||
            (summary.functions == 0 && summary.declarations == 0 &&
             summary.object_like_define_lines > 0 && constants > 0));
       if (internally_complete) {

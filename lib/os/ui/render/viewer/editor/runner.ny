@@ -81,6 +81,7 @@ fn output_name(str path) str {
    "*run: " + (path.len > 0 ? ospath.basename(path) : "untitled") + "*"
 }
 
+;; Returns the result of the `output_text` operation.
 fn output_text(dict res) str {
    def argv = res.get("argv", [])
    def code = int(res.get("code", 0))

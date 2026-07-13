@@ -1,0 +1,16 @@
+shape native_non_x86_register_calls {
+  family "runtime-native"
+  generator "native"
+  features ["native", "target", "abi", "call", "non-x86"]
+  template ny-test-case
+  flags_matrix "--emit-asm=/tmp/nytrix-native-call8-aarch64.s --native-backend aarch64; --emit-asm=/tmp/nytrix-native-call8-riscv.s --native-backend riscv; --emit-asm=/tmp/nytrix-native-call8-mips.s --native-backend mips; --emit-asm=/tmp/nytrix-native-call8-powerpc.s --native-backend powerpc"
+  expect compile_and_run
+  source ny <<'NY'
+fn add8(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g, i64 h) i64 {
+  a + b + c + d + e + f + g + h
+}
+
+
+add8(1, 2, 3, 4, 5, 6, 7, 8)
+NY
+}

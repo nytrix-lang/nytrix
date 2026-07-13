@@ -1,0 +1,16 @@
+shape native_only_mixed_aggregate_return {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 c-frontend ffi aggregate-return mixed-class no-libclang]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --c-frontend=nytrix -no-std --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/internal-byvalue-param-import.h" link "etc/tests/rt/c/sum-pair.so"
+def mixed = c.mixed_pair()
+def sse = c.sse_pair()
+def mixed_ok = c.check_mixed_pair(mixed)
+def sse_ok = c.check_sse_pair(sse)
+1 / (mixed_ok && sse_ok)
+NY
+}

@@ -129,6 +129,7 @@ assert_compile((4 * 11) == 44, "folded arithmetic")
 static_assert((3 * 7) == 21, "folded arithmetic")
 assert_compile_range(i, 0, 3, "loop index range")
 assert_compile_index(xs, i, "list index bounds")
+def proof arithmetic = prove((4 * 11) == 44, "arithmetic witness")
 ```
 
 `static_assert` and `assert_compile` fail compilation when the condition is
@@ -138,6 +139,12 @@ closed range. `assert_compile_index` requires the compiler to prove that an
 index is in bounds for the container. `range_proven(value, lo, hi)` and
 `index_proven(container, index)` expose the same proof engine as compile-time
 booleans.
+
+`prove(condition[, message])` is the only implicit-free constructor for the
+`proof` type. It rejects false obligations and obligations whose truth is not
+known during compilation. A proof has no inspectable payload and currently
+witnesses construction success rather than carrying a proposition-indexed
+proof term.
 
 Use these checks at safety boundaries: parser tables, byte decoders, crypto
 code, native buffers, and loops where an out-of-range value would break memory
@@ -209,6 +216,15 @@ The surface covers process-wide and local registries, macro handlers,
 attribute handlers, form construction, deep/fixpoint expansion, registry
 clone/merge operations, and deterministic rewrite passes. Missing macro
 handlers return `nil`; missing attribute handlers return the original node.
+
+## Result ownership
+
+Heap results cross the comptime boundary by value. Strings, lists, tuples,
+ranges, and dictionaries are reconstructed in the receiving program before the
+temporary evaluator is destroyed; pointers into evaluator-owned storage are
+never exposed. Nested containers are supported with bounded depth and size.
+Invalid intermediate or generated evaluator modules are rejected before JIT
+execution.
 
 ## Related
 

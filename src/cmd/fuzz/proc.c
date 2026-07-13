@@ -38,25 +38,25 @@ static bool proc_path_exists(const char *path) {
   return path && *path && stat(path, &st) == 0;
 }
 
-static bool proc_looks_like_nynth_root(const char *path) {
-  char src[4096], cli[4096], core[4096], shapes[4096], makefile[4096];
+static bool proc_looks_like_nytrix_root(const char *path) {
+  char cmake[4096], src[4096], fuzz[4096], tests[4096], readme[4096];
   if (!path || !*path || path[0] != '/') return false;
+  ny_join_path(cmake, sizeof(cmake), path, "CMakeLists.txt");
   ny_join_path(src, sizeof(src), path, "src");
-  ny_join_path(cli, sizeof(cli), path, "src/cli.c");
-  ny_join_path(core, sizeof(core), path, "src/core.h");
-  ny_join_path(shapes, sizeof(shapes), path, "shapes");
-  ny_join_path(makefile, sizeof(makefile), path, "Makefile");
-  return proc_path_exists(src) && proc_path_exists(cli) &&
-         proc_path_exists(core) && proc_path_exists(shapes) &&
-         proc_path_exists(makefile);
+  ny_join_path(fuzz, sizeof(fuzz), path, "src/cmd/fuzz");
+  ny_join_path(tests, sizeof(tests), path, "etc/tests");
+  ny_join_path(readme, sizeof(readme), path, "README.md");
+  return proc_path_exists(cmake) && proc_path_exists(src) &&
+         proc_path_exists(fuzz) && proc_path_exists(tests) &&
+         proc_path_exists(readme);
 }
 
-static bool proc_find_nynth_root_from_path(const char *start, char *out, size_t out_sz) {
+static bool proc_find_nytrix_root_from_path(const char *start, char *out, size_t out_sz) {
   if (!start || !*start || !out || !out_sz) return false;
   char cur[4096];
   snprintf(cur, sizeof(cur), "%s", start);
   while (1) {
-    if (proc_looks_like_nynth_root(cur)) {
+    if (proc_looks_like_nytrix_root(cur)) {
       snprintf(out, out_sz, "%s", cur);
       return true;
     }
@@ -67,35 +67,35 @@ static bool proc_find_nynth_root_from_path(const char *start, char *out, size_t 
   return false;
 }
 
-static bool proc_find_nynth_root(char *const argv[], char *out, size_t out_sz) {
-  const char *env = getenv("NYNTH_ROOT");
-  if (env && *env && proc_find_nynth_root_from_path(env, out, out_sz)) return true;
+static bool proc_find_nytrix_root(char *const argv[], char *out, size_t out_sz) {
+  const char *env = getenv("NYTRIX_ROOT");
+  if (env && *env && proc_find_nytrix_root_from_path(env, out, out_sz)) return true;
 
   char exe[4096];
   ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1u);
   if (n > 0 && (size_t)n < sizeof(exe)) {
     exe[n] = '\0';
-    if (proc_find_nynth_root_from_path(exe, out, out_sz)) return true;
+    if (proc_find_nytrix_root_from_path(exe, out, out_sz)) return true;
   }
 
   if (argv && argv[0] && *argv[0]) {
     if (argv[0][0] == '/') {
-      if (proc_find_nynth_root_from_path(argv[0], out, out_sz)) return true;
+      if (proc_find_nytrix_root_from_path(argv[0], out, out_sz)) return true;
     } else {
       char cwd_buf[4096], abs_buf[4096];
       if (getcwd(cwd_buf, sizeof(cwd_buf))) {
         ny_join_path(abs_buf, sizeof(abs_buf), cwd_buf, argv[0]);
-        if (proc_find_nynth_root_from_path(abs_buf, out, out_sz))
+        if (proc_find_nytrix_root_from_path(abs_buf, out, out_sz))
           return true;
       }
     }
   }
 
   const char *pwd = getenv("PWD");
-  if (pwd && *pwd && proc_find_nynth_root_from_path(pwd, out, out_sz)) return true;
+  if (pwd && *pwd && proc_find_nytrix_root_from_path(pwd, out, out_sz)) return true;
   char cwd_buf[4096];
   return getcwd(cwd_buf, sizeof(cwd_buf)) &&
-         proc_find_nynth_root_from_path(cwd_buf, out, out_sz);
+         proc_find_nytrix_root_from_path(cwd_buf, out, out_sz);
 }
 
 static void proc_set_path(char *out, size_t out_sz, const char *root, const char *leaf) {
@@ -116,17 +116,17 @@ static void proc_prepare_child_cache_env(char *const argv[], char *root, size_t 
   if (scratch && scratch_sz) scratch[0] = '\0';
   if (xdg && xdg_sz) xdg[0] = '\0';
   if (nytrix_cache && nytrix_cache_sz) nytrix_cache[0] = '\0';
-  if (ny_env_is_truthy(getenv("NYNTH_KEEP_EXTERNAL_TMP"))) return;
-  if (!proc_find_nynth_root(argv, root, root_sz) || !root[0]) return;
+  if (ny_env_is_truthy(getenv("NYTRIX_KEEP_EXTERNAL_TMP"))) return;
+  if (!proc_find_nytrix_root(argv, root, root_sz) || !root[0]) return;
 
-  const char *tmp_override = getenv("NYNTH_CHILD_TMPDIR");
+  const char *tmp_override = getenv("NYTRIX_CHILD_TMPDIR");
   if (tmp_override && *tmp_override) {
     snprintf(tmp, tmp_sz, "%s", tmp_override);
     ny_ensure_dir_recursive(tmp);
   } else {
     proc_set_path(tmp, tmp_sz, root, "build/cache/tmp");
   }
-  const char *scratch_override = getenv("NYNTH_SCRATCH_ROOT");
+  const char *scratch_override = getenv("NYTRIX_SCRATCH_ROOT");
   if (scratch_override && *scratch_override) {
     snprintf(scratch, scratch_sz, "%s", scratch_override);
     ny_ensure_dir_recursive(scratch);
@@ -168,14 +168,14 @@ proc_result_t run_proc(char *const argv[], const char *cwd, double timeout_s) {
     (void)dup2(err_pipe[1], STDERR_FILENO);
     close(out_pipe[1]);
     close(err_pipe[1]);
-    if (child_root[0]) (void)setenv("NYNTH_ROOT", child_root, 1);
+    if (child_root[0]) (void)setenv("NYTRIX_ROOT", child_root, 1);
     if (child_tmp[0]) {
       (void)setenv("TMPDIR", child_tmp, 1);
       (void)setenv("TMP", child_tmp, 1);
       (void)setenv("TEMP", child_tmp, 1);
-      (void)setenv("NYNTH_CHILD_TMPDIR", child_tmp, 1);
+      (void)setenv("NYTRIX_CHILD_TMPDIR", child_tmp, 1);
     }
-    if (child_scratch[0]) (void)setenv("NYNTH_SCRATCH_ROOT", child_scratch, 1);
+    if (child_scratch[0]) (void)setenv("NYTRIX_SCRATCH_ROOT", child_scratch, 1);
     if (child_xdg[0]) (void)setenv("XDG_CACHE_HOME", child_xdg, 1);
     if (child_nytrix_cache[0]) (void)setenv("NYTRIX_CACHE_DIR", child_nytrix_cache, 1);
     if (cwd && *cwd && chdir(cwd) == 0) {
@@ -245,7 +245,7 @@ proc_result_t run_proc(char *const argv[], const char *cwd, double timeout_s) {
   if (result.timed_out) {
     result.rc = 124;
     char note[160];
-    snprintf(note, sizeof(note), "\n[nynth] timeout after %.2fs; killed process group", timeout_s);
+    snprintf(note, sizeof(note), "\n[nytrix] timeout after %.2fs; killed process group", timeout_s);
     (void)sb_append(&err, note);
   } else if (WIFEXITED(status)) {
     result.rc = WEXITSTATUS(status);

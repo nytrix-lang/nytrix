@@ -181,6 +181,7 @@ fn _gf2_sparse_tail_rows_report(list sparse_rows, int prefix) dict {
    def start = max(0, min(prefix, sparse_rows.len))
    def n = sparse_rows.len - start
    mut rows = list(n)
+   __list_set_len(rows, n)
    mut entries = 0
    mut i = start
    while i < sparse_rows.len {
@@ -2324,4 +2325,14 @@ fn _gf2_dependency_sparse_pipeline_report(list sparse_rows, int width, str backe
          ["exact_closure_report", exact_report],
          ["complete", false],
       ])
+}
+
+#main {
+   def rows = [[0], [1, 2], [], [3]]
+   def tail = _gf2_sparse_tail_rows_report(rows, 2)
+   assert(tail.get("rows") == [[], [3]], "GF2 sparse tail preserves logical row length")
+   assert(tail.get("entries") == 1, "GF2 sparse tail counts entries")
+   assert(_gf2_sparse_tail_rows_report(rows, 99).get("rows") == [], "GF2 sparse tail clamps oversized prefix")
+   assert(_gf2_sparse_tail_rows_report(rows, -1).get("rows") == rows, "GF2 sparse tail clamps negative prefix")
+   print("✓ std.math.crypto.factorization.classical.gf2 self-test passed")
 }

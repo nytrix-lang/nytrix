@@ -1,0 +1,15 @@
+shape oracle_call_live_regalloc_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result call regalloc]
+  template ny-test-case
+  flags "--native-result-oracle=14"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(a, b) {
+  a + b
+}
+
+7 + add(3, 4)
+NY
+}

@@ -804,3 +804,16 @@ void ny_print_snippet(const char *src, int line, int col, int len, const char *c
   fputc('\n', stderr);
   free(buf);
 }
+
+static int g_complexity_enabled = -1;
+
+void ny_complexity_note(const char *file, int line, const char *func,
+                        const char *category, const char *detail) {
+  if (g_complexity_enabled < 0)
+    g_complexity_enabled = ny_env_enabled("NYTRIX_COMPLEXITY_REPORT");
+  if (!g_complexity_enabled || !verbose_enabled)
+    return;
+  fprintf(stderr, "[complexity] %s:%d in %s: [%s] %s\n",
+          file ? file : "?", line, func ? func : "?",
+          category ? category : "misc", detail ? detail : "");
+}

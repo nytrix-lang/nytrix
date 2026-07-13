@@ -1,0 +1,16 @@
+shape vector-len-contract {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.vector (vec2, vec3, vec4)
+
+assert(vec2(1, 2).len == 2, "vec2 len")
+assert(vec3(1, 2, 3).len == 3, "vec3 len")
+assert(vec4(1, 2, 3, 4).len == 4, "vec4 len")
+print("VECTOR_LEN_CONTRACT_OK")
+NY
+}

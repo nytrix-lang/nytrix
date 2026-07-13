@@ -141,9 +141,13 @@ fn _check_gl_error(str where) bool {
    fn _ny_glRectd(f64 _x1, f64 _y1, f64 _x2, f64 _y2) any { nil }
    fn _ny_glGetString(int _name) ptr { nil }
    fn _ny_glGetError() int { 0 }
+   ;; Returns the result of the `glColor4d` operation.
    fn glColor4d(f64 _r, f64 _g, f64 _b, f64 _a) any { nil }
+   ;; Returns the result of the `glColor4ub` operation.
    fn glColor4ub(u32 _r, u32 _g, u32 _b, u32 _a) any { nil }
+   ;; Returns the result of the `glRectd` operation.
    fn glRectd(f64 _x1, f64 _y1, f64 _x2, f64 _y2) any { nil }
+   ;; Returns the result of the `glRecti` operation.
    fn glRecti(i32 _x1, i32 _y1, i32 _x2, i32 _y2) any { nil }
 } #endif
 mut _win = 0
@@ -1246,16 +1250,19 @@ fn _norm_i32(int v) int {
    v
 }
 
+;; Updates the unlit and returns the resulting state.
 fn set_unlit(any enabled) any {
    _current_unlit = !!enabled
    0
 }
 
+;; Updates the vertex color mode and returns the resulting state.
 fn set_vertex_color_mode(int mode) any {
    _current_vc_mode = int(mode)
    0
 }
 
+;; Updates the material and returns the resulting state.
 fn set_material(any base_color, any metallic, any roughness) any {
    metallic
    roughness
@@ -1271,6 +1278,7 @@ fn set_material(any base_color, any metallic, any roughness) any {
    0
 }
 
+;; Updates the ui material and returns the resulting state.
 fn set_ui_material(int base_tex_id=-1, int alpha_u32=0, int vc_mode=12) any {
    _current_base_color_u32 = 0xffffffff
    _current_material_u32 = 0x0000ff00
@@ -1292,6 +1300,7 @@ fn _reset_ui_draw_state() bool {
    true
 }
 
+;; Updates the material packed and returns the resulting state.
 fn set_material_packed(
    int base_color_u32, int material_u32, int emissive_u32 = 0, int emissive_tex_id = -1,
    int emissive_uv_set = 0, int base_tex_id = -1, int alpha_u32 = 0, int occlusion_tex_id = -1,
@@ -1338,6 +1347,7 @@ fn set_material_packed(
    0
 }
 
+;; Updates the material from slab and returns the resulting state.
 fn set_material_from_slab(?ptr p, int vc_mode=0) any {
    if !p { return 0 }
    set_material_packed(
@@ -1376,6 +1386,7 @@ fn set_material_from_slab(?ptr p, int vc_mode=0) any {
    )
 }
 
+;; Updates the material from slab base and returns the resulting state.
 fn set_material_from_slab_base(?ptr p, int fallback_base_tex_id=-1, int vc_mode=0) any {
    if !p { return 0 }
    ;; Some mesh records keep the correct base texture on the mesh/vertex path
@@ -1605,6 +1616,7 @@ fn end_frame() bool {
    true
 }
 
+;; Returns true when notify window resize.
 fn notify_window_resize(int w, int h) bool {
    if w > 0 { _w = w }
    if h > 0 { _h = h }
@@ -1613,14 +1625,19 @@ fn notify_window_resize(int w, int h) bool {
    true
 }
 
+;; Returns the swapchain width.
 fn get_swapchain_width() int { _w }
 
+;; Returns the swapchain height.
 fn get_swapchain_height() int { _h }
 
+;; Returns the swapchain image count.
 fn get_swapchain_image_count() int { 2 }
 
+;; Returns the result of the `renderer_vertex_offset` operation.
 fn renderer_vertex_offset() int { _frame_submitted_vertices * _STRIDE }
 
+;; Returns the result of the `frame_stats` operation.
 fn frame_stats() dict {
    {
       "draws": _last_frame_draw_calls,
@@ -1679,24 +1696,28 @@ fn clear_depth() bool {
    _call1("glClear", GL_DEPTH_BUFFER_BIT)
 }
 
+;; Returns true when set mvp.
 fn set_mvp(any mat) bool {
    _mvp = mat
    if _frame_open && !_soft_enabled() { _apply_matrices() }
    true
 }
 
+;; Returns true when set model matrix.
 fn set_model_matrix(any mat) bool {
    _model = mat
    if _frame_open && !_soft_enabled() { _apply_matrices() }
    true
 }
 
+;; Returns true when set ortho.
 fn set_ortho(f64 l, f64 r, f64 b, f64 t, f64 n, f64 f) bool {
    _mvp = mat4_ortho(l, r, b, t, n, f)
    if _frame_open && !_soft_enabled() { _apply_matrices() }
    true
 }
 
+;; Returns true when set perspective.
 fn set_perspective(f64 fovy, f64 aspect, f64 near, f64 far) bool {
    _mvp = mat4_perspective(fovy, aspect, near, far)
    if _frame_open && !_soft_enabled() { _apply_matrices() }
@@ -1730,6 +1751,7 @@ fn reset_scissor_rect() bool {
    _ny_glDisable(GL_SCISSOR_TEST)
 }
 
+;; Returns true when set wireframe.
 fn set_wireframe(bool enabled) bool {
    _wireframe = !!enabled
    if _soft_enabled() { return true }
@@ -1769,6 +1791,7 @@ fn bind_texture(int tex_id) bool {
    true
 }
 
+;; Returns true when bind default texture.
 fn bind_default_texture() bool {
    if _soft_enabled() {
       _bound_tex = _default_tex

@@ -9,4 +9,5 @@
 #include "math.c"
 #include "memory.c"
 #include "os.c"
+#include "proof.c"
 #include "string.c"

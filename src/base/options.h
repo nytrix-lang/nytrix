@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef enum {
   NY_MODE_RUN,
@@ -88,6 +89,22 @@ typedef enum ny_opt_profile_kind_t {
   NY_OPT_PROFILE_SIZE,
   NY_OPT_PROFILE_CUSTOM,
 } ny_opt_profile_kind_t;
+
+/* Runtime resource limits for --safe-run.
+ * Each field is the configured limit; 0 means "not set" (no limit applied).
+ * Positive values are in the units indicated by the field comment. */
+typedef struct {
+  int cpu_seconds;            /* CPU time limit in seconds (RLIMIT_CPU) */
+  int wall_seconds;           /* Elapsed wall-clock limit in seconds */
+  uint64_t max_rss_bytes;     /* Max address space / RSS in bytes (RLIMIT_AS) */
+  int max_files;              /* Open file descriptor limit (RLIMIT_NOFILE) */
+  int max_processes;          /* Child process limit (RLIMIT_NPROC) */
+  uint64_t max_output_bytes;  /* Combined stdout/stderr byte limit */
+  bool telemetry;             /* Bounded supervisor sampling */
+  int telemetry_interval_ms;  /* Sampling interval */
+  int telemetry_window;       /* Consecutive samples before warning */
+  bool contain_process_group; /* Use setpgid to contain descendants */
+} ny_safe_run_t;
 
 #include "base/loader.h"
 
@@ -178,6 +195,7 @@ typedef struct {
   int native_cache_score;
   bool native_prefer_vm;
   bool native_prefer_asm;
+  bool native_only;
   bool native_tier_report;
   const char *native_tier_report_path;
   bool native_result_oracle;
@@ -246,6 +264,9 @@ typedef struct {
   ny_heap_policy_t heap_policy;
   ny_runtime_mode_t runtime_mode;
   const char *runtime_mode_raw;
+  ny_safe_run_t safe_run;
+  const char *sanitize;  /* --sanitize=address|undefined|thread|leak */
+  const char *jit_engine; /* --jit-engine=orc|mcjit (default: mcjit) */
 } ny_options;
 
 void ny_options_init(ny_options *opt);
@@ -258,5 +279,19 @@ const char *ny_runtime_mode_name(ny_runtime_mode_t mode);
 ny_opt_profile_kind_t ny_opt_profile_kind_from_name(const char *profile_name);
 ny_opt_profile_kind_t ny_opt_profile_kind_from_env(void);
 int ny_opt_profile_name_is_valid(const char *profile_name);
+
+/* Apply POSIX resource limits for safe execution.  Call once before user
+ * code starts (JIT or AOT).  Returns 0 on success, -1 if any limit failed
+ * to apply (in which case a diagnostic is printed to stderr).  No-op if
+ * all fields in sr are zero / unset. */
+int ny_safe_run_apply_limits(const ny_safe_run_t *sr);
+int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
+                      const char *workload);
+typedef int (*ny_safe_run_child_fn)(void *ctx);
+int ny_safe_run_call(const ny_safe_run_t *sr, ny_safe_run_child_fn fn,
+                     void *ctx, const char *workload);
+
+/* Parse a --safe-run limit specification string into the struct. */
+void ny_safe_run_parse(const char *spec, ny_safe_run_t *sr, const char *argv0);
 
 #endif

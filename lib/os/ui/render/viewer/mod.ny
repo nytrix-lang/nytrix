@@ -94,6 +94,7 @@ fn _packed_color(color) int {
    )
 }
 
+;; Returns true when rect.
 fn rect(any x, any y, any w, any h, any color) bool {
    draw_rect_fast(float(x), float(y), float(w), float(h), _packed_color(color))
 }
@@ -106,6 +107,7 @@ fn _disc(any cx, any cy, any radius, any color) bool {
    draw_rect_rounded_sdf(cx - radius, cy - radius, radius * 2.0, radius * 2.0, radius, color)
 }
 
+;; Returns the result of the `text_w` operation.
 fn text_w(any label) f64 {
    def cached = _text_width_cache.get(label, -1.0)
    if cached >= 0.0 { return cached }
@@ -114,6 +116,7 @@ fn text_w(any label) f64 {
    tw
 }
 
+;; Returns the result of the `queue_text` operation.
 fn queue_text(any label, any x, any y, any color) int {
    def s = to_str(label)
    if s.len <= 0 { return 0 }
@@ -128,6 +131,7 @@ fn queue_text(any label, any x, any y, any color) int {
    0
 }
 
+;; Returns the result of the `flush_text` operation.
 fn flush_text() int {
    if is_list(_text_runs) && _text_runs.len > 0 {
       draw_text_runs_flat_colors(font, _text_runs)
@@ -136,6 +140,7 @@ fn flush_text() int {
    0
 }
 
+;; Returns the result of the `fit_text` operation.
 fn fit_text(any label, any max_w) str {
    if max_w <= 0.0 { return "" }
    def s = to_str(label)
@@ -152,12 +157,14 @@ fn fit_text(any label, any max_w) str {
    ell
 }
 
+;; Draws the text fit in the current render state.
 fn draw_text_fit(any label, any x, any y, any max_w, any color) int {
    def s = fit_text(label, max_w)
    if s.len > 0 { queue_text(s, x, y, color) }
    0
 }
 
+;; Draws the text right fit in the current render state.
 fn draw_text_right_fit(any label, any right_x, any y, any max_w, any color) int {
    def s = fit_text(label, max_w)
    if s.len > 0 { queue_text(s, right_x - text_w(s), y, color) }
@@ -180,6 +187,7 @@ fn _trigger01(any value) f64 {
    clamp(v, 0.0, 1.0)
 }
 
+;; Returns the result of the `panel` operation.
 fn panel(any x, any y, any w, any h, any title, any accent=0) int {
    rect(x, y, w, h, C_PANEL)
    rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, C_PANEL_ALT)
@@ -188,6 +196,7 @@ fn panel(any x, any y, any w, any h, any title, any accent=0) int {
    0
 }
 
+;; Draws the axis meter in the current render state.
 fn draw_axis_meter(any label, any value, any x, any y, any w) int {
    def axis_i = gamepad.axis_i100(value)
    def mag_i = axis_i < 0 ? -axis_i : axis_i
@@ -210,6 +219,7 @@ fn draw_axis_meter(any label, any value, any x, any y, any w) int {
    0
 }
 
+;; Draws the button chip in the current render state.
 fn draw_button_chip(any label, any active, any x, any y, any w) int {
    rect(x, y, w, 22.0, active ? C_PAD_DOWN : C_IDLE)
    rect(x, y, w, active ? 2.0 : 1.0, active ? C_PAD_DOWN_EDGE : C_SUBTLE)
@@ -220,6 +230,7 @@ fn draw_button_chip(any label, any active, any x, any y, any w) int {
    0
 }
 
+;; Draws the stage frame in the current render state.
 fn draw_stage_frame(any x, any y, any w, any h) int {
    rect(x, y, w, h, C_PANEL)
    rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, C_BG)
@@ -341,6 +352,7 @@ fn _draw_stick(f64 off_x, f64 off_y, f64 s, any st, f64 cx, f64 cy, f64 ax, f64 
    return 0
 }
 
+;; Draws the controller in the current render state.
 fn draw_controller(any st, f64 x, f64 y, f64 w, f64 h) int {
    def ref_min_x = 151.0
    def ref_min_y = 98.0
@@ -371,6 +383,7 @@ fn draw_controller(any st, f64 x, f64 y, f64 w, f64 h) int {
    return 0
 }
 
+;; Returns the result of the `line_h` operation.
 fn line_h() f64 {
    if _line_h_cache > 0.0 { return _line_h_cache }
    def sz = measure_text_fast(font, "Mg")
@@ -379,16 +392,19 @@ fn line_h() f64 {
    _line_h_cache
 }
 
+;; Returns the result of the `controller_fit_scale` operation.
 fn controller_fit_scale(any w, any h) f64 {
    if w <= 0.0 || h <= 0.0 { return 0.0 }
    min(w / 508.0, h / 232.0) * CONTROLLER_DRAW_SCALE
 }
 
+;; Returns the result of the `framebuffer_size` operation.
 fn framebuffer_size(any win, any fallback_w=1280, any fallback_h=720) list {
    def fb = ui_window.get_framebuffer_size(win)
    [max(1.0, float(fb.get(0, fallback_w))), max(1.0, float(fb.get(1, fallback_h)))]
 }
 
+;; Returns the result of the `mouse_view` operation.
 fn mouse_view(any win, any fallback_w=1280, any fallback_h=720) list {
    def fb = framebuffer_size(win, fallback_w, fallback_h)
    def ws = ui_window.size(win)
@@ -400,14 +416,17 @@ fn mouse_view(any win, any fallback_w=1280, any fallback_h=720) list {
    [sw, sh, float(mouse.get(0, 0.0)) * sw / ww, float(mouse.get(1, 0.0)) * sh / wh]
 }
 
+;; Returns true when hit.
 fn hit(f64 x, f64 y, f64 w, f64 h, f64 mx, f64 my) bool {
    mx >= x && mx <= x + w && my >= y && my <= y + h
 }
 
+;; Updates the mod and returns the resulting state.
 fn normalize_mod(any mods) int {
    int(mods) & (MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER | MOD_META)
 }
 
+;; Returns the result of the `default_override` operation.
 fn default_override(any tag, any suffix) str {
    def key_tag = "NY_" + str.upper(to_str(tag)) + "_" + str.upper(to_str(suffix))
    def key_shared = "NY_UI_" + str.upper(to_str(suffix))
@@ -416,12 +435,14 @@ fn default_override(any tag, any suffix) str {
    common.env_trim(key_shared)
 }
 
+;; Returns the result of the `default_font_size` operation.
 fn default_font_size(any tag, f64 fallback, str suffix="FONT_SIZE") any {
    def raw = default_override(tag, suffix)
    if raw.len == 0 { return fallback }
    min(max(str.atof(raw), 8.0), 96.0)
 }
 
+;; Returns the result of the `font_filter_mode` operation.
 fn font_filter_mode(any mode, int fallback) int {
    case mode {
       "nearest", "point", "pixel" -> { return FONT_FILTER_NEAREST }
@@ -430,11 +451,13 @@ fn font_filter_mode(any mode, int fallback) int {
    }
 }
 
+;; Returns the result of the `default_font_filter` operation.
 fn default_font_filter(any tag, int fallback=FONT_FILTER_DEFAULT, str suffix="FONT_FILTER") int {
    def raw = default_override(tag, suffix)
    raw.len == 0 ? fallback : font_filter_mode(str.lower(str.strip(raw)), fallback)
 }
 
+;; Returns the result of the `font_from_candidates` operation.
 fn font_from_candidates(int size, list candidates=FONT_CANDIDATES, int font_filter=-1) int {
    mut i = 0
    while i < candidates.len {
@@ -449,6 +472,7 @@ fn font_from_candidates(int size, list candidates=FONT_CANDIDATES, int font_filt
    0
 }
 
+;; Returns the result of the `terminal_font_map` operation.
 fn terminal_font_map(any size, int font_filter=FONT_FILTER_NEAREST, int emoji_filter=FONT_FILTER_LINEAR, str reg_path="", str bold_path="", str ital_path="", str emoji_path="", bool emoji_on=true) dict {
    mut f = 0
    def font_size = int(size)
@@ -470,6 +494,7 @@ fn terminal_font_map(any size, int font_filter=FONT_FILTER_NEAREST, int emoji_fi
    {"regular": f, "bold": bold, "italic": italic, "emoji": emoji}
 }
 
+;; Returns the result of the `terminal_cell_size` operation.
 fn terminal_cell_size(any font_id, any font_size) list {
    def fs = float(font_size)
    if !font_id { return [max(1.0, fs * 0.6), max(1.0, max(fs, 20.0))] }

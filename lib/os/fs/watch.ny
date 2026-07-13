@@ -18,18 +18,22 @@ def WATCH_MODIFY = fs.WATCH_MODIFY
 def WATCH_CREATE = fs.WATCH_CREATE
 def WATCH_ALL    = fs.WATCH_ALL
 
+;; Returns the result of the `create` operation.
 fn create(str path) any {
    fs.watch_create(path)
 }
 
+;; Closes resources owned by the state and returns the closed state.
 fn close(any h) int {
    fs.watch_close(h)
 }
 
+;; Returns the result of the `poll` operation.
 fn poll(any h) list {
    fs.watch_poll(h)
 }
 
+;; Returns true when has event.
 fn has_event(any h) bool {
    fs.watch_has_event(h)
 }
