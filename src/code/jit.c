@@ -8,9 +8,14 @@
 #else
 #include <dlfcn.h>
 #include <unistd.h>
-#endif
-#if !defined(_WIN32) && defined(__APPLE__)
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
 #include <sys/mman.h>
+#include <pthread.h>
+#include <libkern/OSCacheControl.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#define NY_APPLE_ARM64_JIT 1
+#endif
 #endif
 #include "priv.h"
 #include <llvm-c/Core.h>
@@ -25,10 +30,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
-extern void pthread_jit_write_protect_np(int enabled) __attribute__((weak_import));
-#endif
 
 #ifdef _WIN32
 static int ny_jit_optind = 1;
@@ -237,12 +238,12 @@ static void *ny_missing_extern_stub_for_arity(int arity, bool variadic) {
   }
 }
 
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(NY_APPLE_ARM64_JIT)
 #ifndef MAP_ANON
 #define MAP_ANON MAP_ANONYMOUS
 #endif
 #ifndef MAP_JIT
-#define MAP_JIT 0x0800
+#define MAP_JIT 0x800
 #endif
 
 typedef struct ny_apple_jit_alloc_t {
@@ -253,7 +254,7 @@ typedef struct ny_apple_jit_alloc_t {
   struct ny_apple_jit_alloc_t *next;
 } ny_apple_jit_alloc_t;
 
-typedef struct ny_apple_jit_mm_t {
+typedef struct {
   ny_apple_jit_alloc_t *allocs;
 } ny_apple_jit_mm_t;
 
@@ -270,35 +271,38 @@ static uintptr_t ny_jit_align_up(uintptr_t value, uintptr_t alignment) {
 
 static size_t ny_jit_round_page(size_t size) {
   size_t page = ny_jit_page_size();
-  if (size == 0)
+  if (!size)
     size = 1;
   return (size + page - 1u) & ~(page - 1u);
 }
 
 static void ny_apple_jit_write_protect(int enabled) {
-  if (pthread_jit_write_protect_np)
-    pthread_jit_write_protect_np(enabled);
+  pthread_jit_write_protect_np(enabled);
 }
 
 static uint8_t *ny_apple_jit_alloc_section(void *opaque, uintptr_t size,
                                            unsigned alignment, bool code,
                                            bool read_only) {
-  ny_apple_jit_mm_t *mm = (ny_apple_jit_mm_t *)opaque;
+  ny_apple_jit_mm_t *mm = opaque;
   if (!mm)
     return NULL;
-  uintptr_t align = alignment ? (uintptr_t)alignment : 16u;
-  if ((align & (align - 1u)) != 0)
+  uintptr_t align = alignment ? alignment : 16u;
+  if (align & (align - 1u))
     align = 16u;
   size_t alloc_size = ny_jit_round_page((size_t)size + (size_t)align);
   int flags = MAP_PRIVATE | MAP_ANON | (code ? MAP_JIT : 0);
   int prot = PROT_READ | PROT_WRITE | (code ? PROT_EXEC : 0);
+  if (code)
+    ny_apple_jit_write_protect(0);
   void *base = mmap(NULL, alloc_size, prot, flags, -1, 0);
-  if (base == MAP_FAILED)
+  if (base == MAP_FAILED) {
+    ny_apple_jit_write_protect(1);
     return NULL;
-
+  }
   ny_apple_jit_alloc_t *node = calloc(1, sizeof(*node));
   if (!node) {
     munmap(base, alloc_size);
+    ny_apple_jit_write_protect(1);
     return NULL;
   }
   node->base = base;
@@ -307,8 +311,6 @@ static uint8_t *ny_apple_jit_alloc_section(void *opaque, uintptr_t size,
   node->read_only = read_only;
   node->next = mm->allocs;
   mm->allocs = node;
-  if (code)
-    ny_apple_jit_write_protect(0);
   return (uint8_t *)ny_jit_align_up((uintptr_t)base, align);
 }
 
@@ -323,23 +325,32 @@ static uint8_t *ny_apple_jit_alloc_code(void *opaque, uintptr_t size,
 static uint8_t *ny_apple_jit_alloc_data(void *opaque, uintptr_t size,
                                         unsigned alignment, unsigned section_id,
                                         const char *section_name,
-                                        LLVMBool is_read_only) {
+                                        LLVMBool read_only) {
   (void)section_id;
   (void)section_name;
   return ny_apple_jit_alloc_section(opaque, size, alignment, false,
-                                    is_read_only != 0);
+                                    read_only != 0);
 }
 
 static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
-  (void)err_msg;
-  ny_apple_jit_mm_t *mm = (ny_apple_jit_mm_t *)opaque;
+  ny_apple_jit_mm_t *mm = opaque;
   if (!mm)
     return 0;
   for (ny_apple_jit_alloc_t *a = mm->allocs; a; a = a->next) {
+    int prot = PROT_READ;
     if (a->code) {
-      __builtin___clear_cache((char *)a->base, (char *)a->base + a->size);
+      sys_icache_invalidate(a->base, a->size);
+      prot |= PROT_EXEC;
     } else if (!a->read_only) {
-      mprotect(a->base, a->size, PROT_READ);
+      prot |= PROT_WRITE;
+    }
+    if (mprotect(a->base, a->size, prot) != 0) {
+      if (err_msg)
+        *err_msg = LLVMCreateMessage(a->code
+                                         ? "failed to make Apple arm64 JIT code executable"
+                                         : "failed to finalize Apple arm64 JIT data");
+      ny_apple_jit_write_protect(1);
+      return 1;
     }
   }
   ny_apple_jit_write_protect(1);
@@ -347,7 +358,7 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
 }
 
 static void ny_apple_jit_destroy(void *opaque) {
-  ny_apple_jit_mm_t *mm = (ny_apple_jit_mm_t *)opaque;
+  ny_apple_jit_mm_t *mm = opaque;
   if (!mm)
     return;
   ny_apple_jit_write_protect(0);
@@ -359,6 +370,7 @@ static void ny_apple_jit_destroy(void *opaque) {
     free(a);
     a = next;
   }
+  ny_apple_jit_write_protect(1);
   free(mm);
 }
 
@@ -388,16 +400,22 @@ void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef
     if (opt_level > 3)
       opt_level = 3;
   }
+  if (apple_arm64 && (!opt_env || !*opt_env)) {
+    opt_level = 0;
+  }
 
   int fast_isel = (opt_level <= 1) ? 1 : 0;
   const char *fast_isel_env = getenv("NYTRIX_JIT_FAST_ISEL");
-  if (fast_isel_env && *fast_isel_env)
+  if (fast_isel_env && *fast_isel_env) {
     fast_isel = (atoi(fast_isel_env) != 0);
+  } else if (apple_arm64) {
+    fast_isel = 0;
+  }
 
   options->CodeModel = apple_arm64 ? LLVMCodeModelLarge : LLVMCodeModelJITDefault;
   options->OptLevel = (unsigned)opt_level;
   options->EnableFastISel = fast_isel;
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(NY_APPLE_ARM64_JIT)
   if (apple_arm64)
     options->MCJMM = ny_apple_arm64_jit_memory_manager();
 #endif
@@ -425,18 +443,122 @@ void ny_jit_init_native_once(void) {
   initialized = 1;
 }
 
-bool ny_jit_prepare_execution(uint64_t address) {
-  (void)address;
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
-  ny_apple_jit_write_protect(1);
-#endif
+#if defined(NY_APPLE_ARM64_JIT)
+static bool ny_apple_jit_region(uint64_t address, mach_vm_address_t *base,
+                                mach_vm_size_t *size, vm_prot_t *protection) {
+  mach_vm_address_t region = (mach_vm_address_t)address;
+  mach_vm_size_t region_size = 0;
+  vm_region_basic_info_data_64_t info = {0};
+  mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+  mach_port_t object = MACH_PORT_NULL;
+  kern_return_t kr = mach_vm_region(
+      mach_task_self(), &region, &region_size, VM_REGION_BASIC_INFO_64,
+      (vm_region_info_t)&info, &count, &object);
+  if (object != MACH_PORT_NULL)
+    mach_port_deallocate(mach_task_self(), object);
+  if (kr != KERN_SUCCESS || address < region || address >= region + region_size)
+    return false;
+  if (base)
+    *base = region;
+  if (size)
+    *size = region_size;
+  if (protection)
+    *protection = info.protection;
   return true;
 }
 
+static bool ny_apple_jit_prepare_address(uint64_t address) {
+  if (!address)
+    return true;
+  mach_vm_address_t base = 0;
+  mach_vm_size_t size = 0;
+  vm_prot_t protection = 0;
+  if (!ny_apple_jit_region(address, &base, &size, &protection))
+    return false;
+  if (!(protection & VM_PROT_EXECUTE)) {
+    ny_apple_jit_write_protect(0);
+    int ok = mprotect((void *)(uintptr_t)base, (size_t)size,
+                      PROT_READ | PROT_EXEC) == 0;
+    if (!ok)
+      ok = mach_vm_protect(mach_task_self(), base, size, 0,
+                           VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
+    ny_apple_jit_write_protect(1);
+    if (!ok || !ny_apple_jit_region(address, NULL, NULL, &protection) ||
+        !(protection & VM_PROT_EXECUTE))
+      return false;
+  } else {
+    ny_apple_jit_write_protect(1);
+  }
+  sys_icache_invalidate((void *)(uintptr_t)base, (size_t)size);
+  return true;
+}
+#endif
+
+bool ny_jit_prepare_execution(uint64_t address) {
+#if defined(NY_APPLE_ARM64_JIT)
+  return ny_apple_jit_prepare_address(address);
+#else
+  (void)address;
+  return true;
+#endif
+}
+
 bool ny_jit_prepare_module_execution(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
+#if defined(NY_APPLE_ARM64_JIT)
+  if (!ee || !mod)
+    return false;
+
+  size_t count = 0;
+  for (LLVMValueRef fn = LLVMGetFirstFunction(mod); fn;
+       fn = LLVMGetNextFunction(fn)) {
+    if (LLVMCountBasicBlocks(fn) != 0)
+      count++;
+  }
+  if (!count)
+    return true;
+
+  uint64_t *addresses = calloc(count, sizeof(*addresses));
+  if (!addresses)
+    return false;
+
+  size_t used = 0;
+  LLVMValueRef first = NULL;
+  for (LLVMValueRef fn = LLVMGetFirstFunction(mod); fn;
+       fn = LLVMGetNextFunction(fn)) {
+    if (LLVMCountBasicBlocks(fn) == 0)
+      continue;
+    if (!first)
+      first = fn;
+    uint64_t addr = (uint64_t)(uintptr_t)LLVMGetPointerToGlobal(ee, fn);
+    if (addr)
+      addresses[used++] = addr;
+  }
+
+  if (first)
+    (void)LLVMGetPointerToGlobal(ee, first);
+
+  char *engine_error = NULL;
+  if (LLVMExecutionEngineGetErrMsg(ee, &engine_error)) {
+    if (engine_error)
+      LLVMDisposeMessage(engine_error);
+    free(addresses);
+    return false;
+  }
+
+  bool ok = true;
+  for (size_t i = 0; i < used; i++) {
+    if (!ny_apple_jit_prepare_address(addresses[i])) {
+      ok = false;
+      break;
+    }
+  }
+  free(addresses);
+  return ok;
+#else
   (void)ee;
   (void)mod;
   return true;
+#endif
 }
 
 #if !defined(_WIN32) && defined(__APPLE__)
