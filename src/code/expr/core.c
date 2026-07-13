@@ -4456,8 +4456,6 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   struct LLVMMCJITCompilerOptions jit_opts;
   ny_jit_init_native_once();
   ny_jit_init_options(&jit_opts, mod);
-  if (ny_module_target_is_apple_arm64(mod))
-    jit_opts.EnableFastISel = 0;
   ny_jit_add_runtime_symbols();
   if (LLVMCreateMCJITCompilerForModule(&ee, mod, &jit_opts, sizeof(jit_opts),
                                        &err) != 0) {
@@ -4473,38 +4471,36 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   LLVMValueRef entry_val = LLVMGetNamedFunction(mod, entry_name);
   int64_t res = 1;
 
-  if (ny_module_target_is_apple_arm64(mod)) {
-    if (!entry_val) {
-      if (prev_bb)
-        ny_pos(cg, prev_bb);
-      LLVMDisposeExecutionEngine(ee);
-      codegen_dispose(&tcg);
-      if (ctm_ctx_owned)
-        LLVMContextDispose(ctm_ctx);
-      return expr_fail(cg, body->tok, "missing comptime JIT entry");
-    }
-
-    LLVMGenericValueRef value = LLVMRunFunction(ee, entry_val, 0, NULL);
-    char *jit_exec_err = NULL;
-    if (!value || LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
-      NY_LOG_ERR("Comptime JIT execution error: %s\n",
-                 jit_exec_err ? jit_exec_err : "unknown error");
-      if (jit_exec_err)
-        LLVMDisposeMessage(jit_exec_err);
-      if (value)
-        LLVMDisposeGenericValue(value);
-      if (prev_bb)
-        ny_pos(cg, prev_bb);
-      LLVMDisposeExecutionEngine(ee);
-      codegen_dispose(&tcg);
-      if (ctm_ctx_owned)
-        LLVMContextDispose(ctm_ctx);
-      return expr_fail(cg, body->tok, "failed to execute comptime JIT code");
-    }
-    res = (int64_t)LLVMGenericValueToInt(value, 1);
-    LLVMDisposeGenericValue(value);
-  } else {
-    if (!ny_jit_prepare_module_execution(ee, mod)) {
+  if (!ny_jit_prepare_module_execution(ee, mod)) {
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    LLVMDisposeExecutionEngine(ee);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok,
+                     "failed to materialize executable comptime JIT code");
+  }
+  uint64_t addr =
+      entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
+  if (!addr)
+    addr = LLVMGetFunctionAddress(ee, entry_name);
+  char *jit_exec_err = NULL;
+  if (LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
+    NY_LOG_ERR("Comptime JIT finalization error: %s\n",
+               jit_exec_err ? jit_exec_err : "unknown error");
+    if (jit_exec_err)
+      LLVMDisposeMessage(jit_exec_err);
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    LLVMDisposeExecutionEngine(ee);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok, "failed to finalize comptime JIT memory");
+  }
+  if (addr) {
+    if (!ny_jit_prepare_execution(addr)) {
       if (prev_bb)
         ny_pos(cg, prev_bb);
       LLVMDisposeExecutionEngine(ee);
@@ -4512,39 +4508,9 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
       if (ctm_ctx_owned)
         LLVMContextDispose(ctm_ctx);
       return expr_fail(cg, body->tok,
-                       "failed to materialize executable comptime JIT code");
+                       "comptime JIT code memory is not executable");
     }
-    uint64_t addr =
-        entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
-    if (!addr)
-      addr = LLVMGetFunctionAddress(ee, entry_name);
-    char *jit_exec_err = NULL;
-    if (LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
-      NY_LOG_ERR("Comptime JIT finalization error: %s\n",
-                 jit_exec_err ? jit_exec_err : "unknown error");
-      if (jit_exec_err)
-        LLVMDisposeMessage(jit_exec_err);
-      if (prev_bb)
-        ny_pos(cg, prev_bb);
-      LLVMDisposeExecutionEngine(ee);
-      codegen_dispose(&tcg);
-      if (ctm_ctx_owned)
-        LLVMContextDispose(ctm_ctx);
-      return expr_fail(cg, body->tok, "failed to finalize comptime JIT memory");
-    }
-    if (addr) {
-      if (!ny_jit_prepare_execution(addr)) {
-        if (prev_bb)
-          ny_pos(cg, prev_bb);
-        LLVMDisposeExecutionEngine(ee);
-        codegen_dispose(&tcg);
-        if (ctm_ctx_owned)
-          LLVMContextDispose(ctm_ctx);
-        return expr_fail(cg, body->tok,
-                         "comptime JIT code memory is not executable");
-      }
-      res = ((int64_t (*)(void))addr)();
-    }
+    res = ((int64_t (*)(void))addr)();
   }
 
   if (prev_bb)
