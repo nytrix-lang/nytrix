@@ -1,0 +1,13 @@
+shape type-c-include-no-implicit-namespace {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "c-frontend", "ffi", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "undefined symbol 'c.labs'"
+  source ny <<'NY'
+#include <stdlib.h>
+c.labs(-2)
+NY
+}

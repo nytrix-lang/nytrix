@@ -6,8 +6,10 @@
 
 #include "pkg.h"
 #include "base/args.h"
+#include "base/process.h"
 #include "base/util.h"
 #include "cmd/tools/tool.h"
+#include "wire/build.h"
 
 #include <ctype.h>
 #ifndef _WIN32
@@ -25,8 +27,6 @@
 #include <process.h>
 #define getcwd _getcwd
 #define getpid _getpid
-#define popen _popen
-#define pclose _pclose
 #else
 #include <sys/select.h>
 #include <sys/stat.h>
@@ -205,79 +205,39 @@ static char *ny_pkg_trim_dup(const char *s, size_t n) {
   return ny_pkg_strndup(s, n);
 }
 
-static void ny_pkg_dirname(const char *path, char *out, size_t out_len) {
-  if (!out || out_len == 0)
-    return;
-  if (!path || !*path) {
-    snprintf(out, out_len, ".");
-    return;
-  }
-  snprintf(out, out_len, "%s", path);
-  char *slash = strrchr(out, '/');
-#ifdef _WIN32
-  char *bslash = strrchr(out, '\\');
-  if (bslash && (!slash || bslash > slash))
-    slash = bslash;
-#endif
-  if (!slash) {
-    snprintf(out, out_len, ".");
-  } else if (slash == out) {
-    slash[1] = '\0';
-  } else {
-    *slash = '\0';
-  }
-}
-
 static void ny_pkg_join(char *out, size_t out_len, const char *a, const char *b) {
   ny_join_path(out, out_len, a && *a ? a : ".", b && *b ? b : "");
 }
 
-static char *ny_pkg_shell_quote(const char *s) {
-  if (!s)
-    s = "";
-  size_t extra = 3;
-  for (const char *p = s; *p; ++p)
-    extra += (*p == '\'') ? 4 : 1;
-  char *out = (char *)malloc(extra);
-  if (!out)
-    return NULL;
-  char *w = out;
-  *w++ = '\'';
-  for (const char *p = s; *p; ++p) {
-    if (*p == '\'') {
-      memcpy(w, "'\\''", 4);
-      w += 4;
-    } else {
-      *w++ = *p;
-    }
+static int ny_pkg_run_argv(const char *const argv[], bool verbose) {
+  if (verbose && argv && argv[0]) {
+    fprintf(stderr, "[pkg]");
+    for (size_t i = 0; argv[i]; ++i)
+      fprintf(stderr, " %s", argv[i]);
+    fputc('\n', stderr);
   }
-  *w++ = '\'';
-  *w = '\0';
-  return out;
-}
-
-static int ny_pkg_run(const char *cmd, bool verbose) {
-  if (verbose)
-    nyt_msg("PKG", NYT_CYAN, "%s", cmd);
-  int rc = system(cmd);
-  if (rc != 0)
-    nyt_err("ny pkg", "command failed: %s", cmd);
+  int rc = ny_exec_spawn(argv);
+  if (rc != 0 && argv && argv[0])
+    nyt_err("ny pkg", "command failed: %s (rc=%d)", argv[0], rc);
   return rc == 0 ? 0 : 1;
 }
 
-static char *ny_pkg_capture(const char *cmd) {
-  FILE *fp = popen(cmd, "r");
-  if (!fp)
+static char *ny_pkg_capture_argv(const char *const argv[]) {
+  char *out = NULL;
+  int rc = ny_process_capture(argv, &out, true);
+  if (rc != 0 || !out) {
+    free(out);
     return NULL;
-  char buf[4096];
-  size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
-  int rc = pclose(fp);
-  if (rc != 0 || n == 0)
+  }
+  /* trim trailing whitespace */
+  size_t n = strlen(out);
+  while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r' || out[n - 1] == ' '))
+    out[--n] = '\0';
+  if (n == 0) {
+    free(out);
     return NULL;
-  buf[n] = '\0';
-  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' '))
-    buf[--n] = '\0';
-  return ny_strdup(buf);
+  }
+  return out;
 }
 
 static char *ny_pkg_guess_author(void) {
@@ -293,10 +253,14 @@ static char *ny_pkg_guess_author(void) {
     name = ny_strdup(env_name);
   if (env_email && *env_email)
     email = ny_strdup(env_email);
-  if (!name)
-    name = ny_pkg_capture("git config --get user.name 2>/dev/null");
-  if (!email)
-    email = ny_pkg_capture("git config --get user.email 2>/dev/null");
+  if (!name) {
+    const char *git_name_argv[] = {"git", "config", "--get", "user.name", NULL};
+    name = ny_pkg_capture_argv(git_name_argv);
+  }
+  if (!email) {
+    const char *git_email_argv[] = {"git", "config", "--get", "user.email", NULL};
+    email = ny_pkg_capture_argv(git_email_argv);
+  }
 
   char *out = NULL;
   if (name && *name && email && *email) {
@@ -800,7 +764,7 @@ static void ny_pkg_manifest_default(char *out, size_t out_len) {
 static bool ny_pkg_read_manifest(const char *path, ny_pkg_manifest_t *m) {
   memset(m, 0, sizeof(*m));
   snprintf(m->path, sizeof(m->path), "%s", path && *path ? path : "ny.pkg.json");
-  ny_pkg_dirname(m->path, m->root, sizeof(m->root));
+  ny_dir_name(m->root, sizeof(m->root), m->path);
   char *txt = ny_read_file(m->path);
   if (!txt)
     return false;
@@ -837,7 +801,7 @@ static void ny_pkg_write_json_field(FILE *f, const char *key, const char *value)
 
 static int ny_pkg_write_manifest(const ny_pkg_manifest_t *m) {
   char parent[4096];
-  ny_pkg_dirname(m->path, parent, sizeof(parent));
+  ny_dir_name(parent, sizeof(parent), m->path);
   ny_ensure_dir_recursive(parent);
   FILE *f = fopen(m->path, "wb");
   if (!f) {
@@ -964,65 +928,50 @@ static const char *ny_pkg_git_url(const char *source) {
 
 static int ny_pkg_copy_local(const char *source, const char *dest, bool force, bool verbose) {
   char parent[4096];
-  ny_pkg_dirname(dest, parent, sizeof(parent));
+  ny_dir_name(parent, sizeof(parent), dest);
   ny_ensure_dir_recursive(parent);
   if (ny_pkg_path_exists(dest) && !force)
     return 0;
-  char *qsrc = ny_pkg_shell_quote(source);
-  char *qdst = ny_pkg_shell_quote(dest);
-  if (!qsrc || !qdst) {
-    free(qsrc);
-    free(qdst);
-    return 1;
+  int rc = 0;
+  if (force && ny_pkg_path_exists(dest)) {
+    const char *rm_argv[] = {"rm", "-rf", dest, NULL};
+    rc = ny_pkg_run_argv(rm_argv, verbose);
   }
-  char cmd[12288];
-  if (force && ny_pkg_path_exists(dest))
-    snprintf(cmd, sizeof(cmd), "rm -rf %s", qdst);
-  else
-    cmd[0] = '\0';
-  int rc = cmd[0] ? ny_pkg_run(cmd, verbose) : 0;
   if (rc == 0)
     ny_ensure_dir_recursive(dest);
   if (rc == 0) {
     if (ny_pkg_is_dir(source)) {
-      snprintf(cmd, sizeof(cmd), "cp -R %s/. %s/", qsrc, qdst);
-      rc = ny_pkg_run(cmd, verbose);
+      const char *cp_argv[] = {"cp", "-R", source, dest, NULL};
+      /* Copy the whole directory; the source trailing slash handling is platform-dependent,
+       * so use the safer form: cp -R <src> <dst> where dst is the parent. */
+      const char *cp_dir_argv[] = {"cp", "-R", /* filled below */ NULL, NULL};
+      char src_slash[4096];
+      snprintf(src_slash, sizeof(src_slash), "%s/.", source);
+      cp_dir_argv[2] = src_slash;
+      cp_dir_argv[3] = dest;
+      rc = ny_pkg_run_argv(cp_dir_argv, verbose);
     } else {
       char mod_path[4096];
       ny_pkg_join(mod_path, sizeof(mod_path), dest, "mod.ny");
-      char *qmod = ny_pkg_shell_quote(mod_path);
-      if (!qmod) {
-        rc = 1;
-      } else {
-        snprintf(cmd, sizeof(cmd), "cp %s %s", qsrc, qmod);
-        rc = ny_pkg_run(cmd, verbose);
-        free(qmod);
-      }
+      const char *cp_argv[] = {"cp", source, mod_path, NULL};
+      rc = ny_pkg_run_argv(cp_argv, verbose);
     }
   }
-  free(qsrc);
-  free(qdst);
   return rc;
 }
 
 static int ny_pkg_remove_path(const char *path, bool verbose) {
   if (!ny_pkg_path_exists(path))
     return 0;
-  char *qpath = ny_pkg_shell_quote(path);
-  if (!qpath)
-    return 1;
-  char cmd[8192];
-  snprintf(cmd, sizeof(cmd), "rm -rf %s", qpath);
-  int rc = ny_pkg_run(cmd, verbose);
-  free(qpath);
-  return rc;
+  const char *rm_argv[] = {"rm", "-rf", path, NULL};
+  return ny_pkg_run_argv(rm_argv, verbose);
 }
 
 static int ny_pkg_install_archive(const char *source, const char *dest, bool force, bool verbose,
                                   bool strip_single_root) {
   source = ny_pkg_archive_source(source);
   char parent[4096];
-  ny_pkg_dirname(dest, parent, sizeof(parent));
+  ny_dir_name(parent, sizeof(parent), dest);
   ny_ensure_dir_recursive(parent);
   if (ny_pkg_path_exists(dest) && !force)
     return 0;
@@ -1038,116 +987,123 @@ static int ny_pkg_install_archive(const char *source, const char *dest, bool for
     snprintf(archive_path, sizeof(archive_path), "%s", source);
   }
 
-  char *qsrc = ny_pkg_shell_quote(source);
-  char *qarchive = ny_pkg_shell_quote(archive_path);
-  char *qtmp = ny_pkg_shell_quote(tmp_dir);
-  char *qdst = ny_pkg_shell_quote(dest);
-  if (!qsrc || !qarchive || !qtmp || !qdst) {
-    free(qsrc);
-    free(qarchive);
-    free(qtmp);
-    free(qdst);
-    return 1;
-  }
-
-  char cmd[24576];
   int rc = ny_pkg_remove_path(tmp_dir, verbose);
   if (rc == 0)
     rc = ny_pkg_remove_path(dest, verbose);
   if (rc == 0)
     ny_ensure_dir_recursive(dest);
   if (rc == 0) {
-    snprintf(cmd, sizeof(cmd), "mkdir -p %s", qtmp);
-    rc = ny_pkg_run(cmd, verbose);
+    const char *mkdir_argv[] = {"mkdir", "-p", tmp_dir, NULL};
+    rc = ny_pkg_run_argv(mkdir_argv, verbose);
   }
   if (rc == 0 && downloaded) {
-    bool progress = isatty(STDERR_FILENO) != 0 && !verbose;
-    const char *curl_flags = progress ? "-fL --progress-bar" : "-fsSL";
-    const char *wget_flags = progress ? "--show-progress -q" : "-q";
-    const char *quiet_err = progress ? "" : " 2>/dev/null";
-    snprintf(cmd, sizeof(cmd),
-             "(curl %s -o %s %s%s || wget %s -O %s %s%s)", curl_flags, qarchive, qsrc,
-             quiet_err, wget_flags, qarchive, qsrc, quiet_err);
-    rc = ny_pkg_run(cmd, verbose);
+    /* Try curl, fall back to wget */
+    const char *curl_argv[] = {"curl", "-fsSL", "-o", archive_path, source, NULL};
+    rc = ny_pkg_run_argv(curl_argv, verbose);
+    if (rc != 0) {
+      const char *wget_argv[] = {"wget", "-q", "-O", archive_path, source, NULL};
+      rc = ny_pkg_run_argv(wget_argv, verbose);
+    }
   }
   if (rc == 0) {
     if (ny_pkg_ends_with_ci(source, ".zip")) {
-      snprintf(cmd, sizeof(cmd), "unzip -q %s -d %s", qarchive, qtmp);
+      const char *unzip_argv[] = {"unzip", "-q", archive_path, "-d", tmp_dir, NULL};
+      rc = ny_pkg_run_argv(unzip_argv, verbose);
     } else {
-      snprintf(cmd, sizeof(cmd), "tar -xf %s -C %s", qarchive, qtmp);
+      const char *tar_argv[] = {"tar", "-xf", archive_path, "-C", tmp_dir, NULL};
+      rc = ny_pkg_run_argv(tar_argv, verbose);
     }
-    rc = ny_pkg_run(cmd, verbose);
   }
   if (rc == 0) {
     if (strip_single_root) {
-      snprintf(cmd, sizeof(cmd),
-               "count=$(find %s -mindepth 1 -maxdepth 1 -print | wc -l); "
-               "first=$(find %s -mindepth 1 -maxdepth 1 -print | sed -n '1p'); "
-               "if [ \"$count\" = 1 ] && [ -d \"$first\" ]; then cp -R \"$first\"/. %s/; "
-               "else cp -R %s/. %s/; fi",
-               qtmp, qtmp, qdst, qtmp, qdst);
+      /* Native check: count top-level entries in tmp_dir, if exactly one and it is
+       * a directory, move its contents instead of the directory itself. */
+      int top_count = 0;
+      char first_entry[4096];
+      first_entry[0] = '\0';
+#ifndef _WIN32
+      DIR *d = opendir(tmp_dir);
+      if (d) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+          if (ent->d_name[0] == '.' && (ent->d_name[1] == '\0' ||
+              (ent->d_name[1] == '.' && ent->d_name[2] == '\0')))
+            continue;
+          top_count++;
+          if (top_count == 1) {
+            snprintf(first_entry, sizeof(first_entry), "%s/%s", tmp_dir, ent->d_name);
+          }
+        }
+        closedir(d);
+      }
+#endif
+      if (top_count == 1 && first_entry[0] && ny_pkg_is_dir(first_entry)) {
+        /* Move contents of the single root directory into dest */
+        const char *cp_argv[] = {"cp", "-R", /* src/., dst */ NULL, NULL};
+        char src_dot[4096];
+        snprintf(src_dot, sizeof(src_dot), "%s/.", first_entry);
+        cp_argv[2] = src_dot;
+        cp_argv[3] = dest;
+        rc = ny_pkg_run_argv(cp_argv, verbose);
+      } else {
+        const char *cp_argv[] = {"cp", "-R", /* tmp/., dst */ NULL, NULL};
+        char src_dot[4096];
+        snprintf(src_dot, sizeof(src_dot), "%s/.", tmp_dir);
+        cp_argv[2] = src_dot;
+        cp_argv[3] = dest;
+        rc = ny_pkg_run_argv(cp_argv, verbose);
+      }
     } else {
-      snprintf(cmd, sizeof(cmd), "cp -R %s/. %s/", qtmp, qdst);
+      const char *cp_argv[] = {"cp", "-R", /* tmp/., dst */ NULL, NULL};
+      char src_dot[4096];
+      snprintf(src_dot, sizeof(src_dot), "%s/.", tmp_dir);
+      cp_argv[2] = src_dot;
+      cp_argv[3] = dest;
+      rc = ny_pkg_run_argv(cp_argv, verbose);
     }
-    rc = ny_pkg_run(cmd, verbose);
   }
   if (downloaded)
     (void)ny_pkg_remove_path(archive_path, verbose);
   (void)ny_pkg_remove_path(tmp_dir, verbose);
-  free(qsrc);
-  free(qarchive);
-  free(qtmp);
-  free(qdst);
   return rc;
 }
 
 static int ny_pkg_install_git(const char *source, const char *ref, const char *dest, bool force,
                               bool verbose) {
   char parent[4096];
-  ny_pkg_dirname(dest, parent, sizeof(parent));
+  ny_dir_name(parent, sizeof(parent), dest);
   ny_ensure_dir_recursive(parent);
-  char *qsrc = ny_pkg_shell_quote(ny_pkg_git_url(source));
-  char *qdst = ny_pkg_shell_quote(dest);
-  char *qref = ref && *ref ? ny_pkg_shell_quote(ref) : NULL;
-  if (!qsrc || !qdst || ((ref && *ref) && !qref)) {
-    free(qsrc);
-    free(qdst);
-    free(qref);
-    return 1;
-  }
   char git_dir[4096];
   ny_pkg_join(git_dir, sizeof(git_dir), dest, ".git");
-  char cmd[12288];
   int rc = 0;
   if (force && ny_pkg_path_exists(dest)) {
     rc = ny_pkg_remove_path(dest, verbose);
   }
   if (rc == 0) {
     if (ny_pkg_is_dir(git_dir)) {
-      snprintf(cmd, sizeof(cmd), "git -C %s remote set-url origin %s", qdst, qsrc);
-      rc = ny_pkg_run(cmd, verbose);
+      const char *remote_argv[] = {"git", "-C", dest, "remote", "set-url", "origin",
+                                  ny_pkg_git_url(source), NULL};
+      rc = ny_pkg_run_argv(remote_argv, verbose);
       if (rc == 0) {
-        snprintf(cmd, sizeof(cmd), "git -C %s fetch --all --tags --prune", qdst);
-        rc = ny_pkg_run(cmd, verbose);
+        const char *fetch_argv[] = {"git", "-C", dest, "fetch", "--all", "--tags", "--prune", NULL};
+        rc = ny_pkg_run_argv(fetch_argv, verbose);
       }
     } else if (ny_pkg_path_exists(dest)) {
       nyt_err("ny pkg", "%s exists and is not a git checkout (use --force)", dest);
       rc = 1;
     } else {
-      snprintf(cmd, sizeof(cmd), "git clone %s %s", qsrc, qdst);
-      rc = ny_pkg_run(cmd, verbose);
+      const char *clone_argv[] = {"git", "clone", ny_pkg_git_url(source), dest, NULL};
+      rc = ny_pkg_run_argv(clone_argv, verbose);
     }
   }
-  if (rc == 0 && qref) {
-    snprintf(cmd, sizeof(cmd), "git -C %s -c advice.detachedHead=false checkout %s", qdst, qref);
-    rc = ny_pkg_run(cmd, verbose);
+  if (rc == 0 && ref && *ref) {
+    const char *co_argv[] = {"git", "-C", dest, "-c", "advice.detachedHead=false",
+                               "checkout", ref, NULL};
+    rc = ny_pkg_run_argv(co_argv, verbose);
   } else if (rc == 0 && ny_pkg_is_dir(git_dir)) {
-    snprintf(cmd, sizeof(cmd), "git -C %s pull --ff-only", qdst);
-    (void)ny_pkg_run(cmd, verbose);
+    const char *pull_argv[] = {"git", "-C", dest, "pull", "--ff-only", NULL};
+    (void)ny_pkg_run_argv(pull_argv, verbose);
   }
-  free(qsrc);
-  free(qdst);
-  free(qref);
   return rc;
 }
 
@@ -1156,14 +1112,8 @@ static char *ny_pkg_git_commit(const char *dest) {
   ny_pkg_join(git_dir, sizeof(git_dir), dest, ".git");
   if (!ny_pkg_is_dir(git_dir))
     return NULL;
-  char *qdst = ny_pkg_shell_quote(dest);
-  if (!qdst)
-    return NULL;
-  char cmd[8192];
-  snprintf(cmd, sizeof(cmd), "git -C %s rev-parse HEAD", qdst);
-  char *out = ny_pkg_capture(cmd);
-  free(qdst);
-  return out;
+  const char *argv[] = {"git", "-C", dest, "rev-parse", "HEAD", NULL};
+  return ny_pkg_capture_argv(argv);
 }
 
 static void ny_pkg_config_home(char *out, size_t out_len) {
@@ -1260,7 +1210,7 @@ static void ny_pkg_registry_write_path(const ny_pkg_opts_t *opts, char *out, siz
     return;
   }
   char root[4096];
-  ny_pkg_dirname(opts && opts->manifest[0] ? opts->manifest : "ny.pkg.json", root, sizeof(root));
+  ny_dir_name(root, sizeof(root), opts && opts->manifest[0] ? opts->manifest : "ny.pkg.json");
   ny_pkg_join(out, out_len, root, ".ny.registry");
 }
 
@@ -1669,7 +1619,7 @@ static int ny_pkg_cmd_init(int argc, char **argv, ny_pkg_opts_t *opts) {
   }
   ny_pkg_manifest_t m = {0};
   snprintf(m.path, sizeof(m.path), "%s", opts->manifest);
-  ny_pkg_dirname(m.path, m.root, sizeof(m.root));
+  ny_dir_name(m.root, sizeof(m.root), m.path);
   m.name = ny_strdup(name && *name ? name : "app");
   char *guessed_author = NULL;
   if (!opts->init_author)
@@ -1720,7 +1670,7 @@ static int ny_pkg_cmd_add(int argc, char **argv, ny_pkg_opts_t *opts, const char
   if (!ny_pkg_read_manifest(opts->manifest, &m)) {
     memset(&m, 0, sizeof(m));
     snprintf(m.path, sizeof(m.path), "%s", opts->manifest);
-    ny_pkg_dirname(m.path, m.root, sizeof(m.root));
+    ny_dir_name(m.root, sizeof(m.root), m.path);
     m.name = ny_strdup("app");
     ny_pkg_manifest_set_meta(&m, opts->init_version ? opts->init_version : "0.1.0",
                              opts->init_description, opts->init_author, opts->init_license,
@@ -1891,7 +1841,7 @@ static int ny_pkg_registry_upsert_repo(const ny_pkg_opts_t *opts, const char *na
   char path[4096];
   ny_pkg_registry_write_path(opts, path, sizeof(path));
   char parent[4096];
-  ny_pkg_dirname(path, parent, sizeof(parent));
+  ny_dir_name(parent, sizeof(parent), path);
   ny_ensure_dir_recursive(parent);
   char *txt = ny_read_file(path);
   FILE *f = fopen(path, "wb");
@@ -2689,7 +2639,7 @@ static int ny_pkg_write_text_file(const char *path, const char *text, bool force
     return 1;
   }
   char parent[4096];
-  ny_pkg_dirname(path, parent, sizeof(parent));
+  ny_dir_name(parent, sizeof(parent), path);
   ny_ensure_dir_recursive(parent);
   FILE *f = fopen(path, "wb");
   if (!f) {
@@ -2737,7 +2687,7 @@ int ny_new_main(int argc, char **argv) {
 
   ny_pkg_manifest_t m = {0};
   ny_pkg_join(m.path, sizeof(m.path), dir, "ny.pkg.json");
-  ny_pkg_dirname(m.path, m.root, sizeof(m.root));
+  ny_dir_name(m.root, sizeof(m.root), m.path);
   m.name = ny_strdup(name);
   ny_pkg_manifest_set_meta(&m, opts.init_version ? opts.init_version : "0.1.0",
                            opts.init_description ? opts.init_description : "Nytrix app",

@@ -800,12 +800,12 @@ LLVMMetadataRef codegen_debug_loc_scope(codegen_t *cg, token_t tok) {
   LLVMMetadataRef file = debug_file_for(cg, tok.filename);
   if (!file)
     return cg->di_scope;
-  LLVMMetadataRef scope =
+  LLVMMetadataRef debug_scope =
       LLVMDIBuilderCreateLexicalBlockFile(cg->di_builder, cg->di_scope, file, 0);
-  if (!scope)
+  if (!debug_scope)
     return cg->di_scope;
-  cg->di_loc_file_scope = scope;
+  cg->di_loc_file_scope = debug_scope;
   cg->di_loc_file_parent = cg->di_scope;
   cg->di_loc_file_name = tok.filename;
-  return scope;
+  return debug_scope;
 }

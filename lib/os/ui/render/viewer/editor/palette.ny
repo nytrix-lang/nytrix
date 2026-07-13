@@ -15,14 +15,17 @@ use std.os.ui.render.viewer.editor.commands as cmd
 use std.os.ui.window
 use std.os.ui.window.consts as key
 
+;; Returns the result of the `commands` operation.
 fn commands() list {
    cmd.commands()
 }
 
+;; Returns the result of the `state` operation.
 fn state() dict {
    {"open": false, "query": "", "index": 0, "scroll": 0, "visible": 12, "cfg": cmd.config()}
 }
 
+;; Returns the result of the `open` operation.
 fn open(dict st) dict {
    st["open"] = true
    st["query"] = ""
@@ -31,6 +34,7 @@ fn open(dict st) dict {
    st
 }
 
+;; Closes resources owned by the state and returns the closed state.
 fn close(dict st) dict {
    st["open"] = false
    st
@@ -88,6 +92,7 @@ fn _append_level(list out, list rows, str q, int level, int limit) list {
    out
 }
 
+;; Returns the result of the `matches` operation.
 fn matches(str query, int limit=1000000) list {
    def q = str.lower(str.strip(query))
    def rows = cmd.enabled(cmd.config())
@@ -98,6 +103,7 @@ fn matches(str query, int limit=1000000) list {
    out
 }
 
+;; Returns the result of the `state_matches` operation.
 fn state_matches(dict st, int limit=1000000) list {
    def q = str.lower(str.strip(query(st)))
    def rows = cmd.enabled(_cfg(st))
@@ -123,17 +129,20 @@ fn _clamp_state(dict st, int total) dict {
    st
 }
 
+;; Updates the visible and returns the resulting state.
 fn set_visible(dict st, int rows) dict {
    st["visible"] = max(1, rows)
    _clamp_state(st, state_matches(st).len)
 }
 
+;; Updates the index and returns the resulting state.
 fn set_index(dict st, int idx) dict {
    def opts = state_matches(st)
    st["index"] = min(max(0, idx), max(0, opts.len - 1))
    _clamp_state(st, opts.len)
 }
 
+;; Returns the result of the `scroll_by` operation.
 fn scroll_by(dict st, int delta) dict {
    def opts = state_matches(st)
    def view = visible(st)
@@ -144,6 +153,7 @@ fn scroll_by(dict st, int delta) dict {
    _clamp_state(st, opts.len)
 }
 
+;; Returns the result of the `visible_matches` operation.
 fn visible_matches(dict st) list {
    def opts = state_matches(st)
    def start = _clamp_scroll(scroll(st), opts.len, visible(st))
@@ -157,11 +167,13 @@ fn visible_matches(dict st) list {
    out
 }
 
+;; Returns the result of the `selected` operation.
 fn selected(dict st) list {
    def opts = state_matches(st)
    opts.len <= 0 ? [] : opts.get(min(max(index(st), 0), opts.len - 1))
 }
 
+;; Handles the key operation and returns the resulting state.
 fn handle_key(dict st, any data) dict {
    mut choose = false
    def opts = state_matches(st)
@@ -185,6 +197,7 @@ fn handle_key(dict st, any data) dict {
    {"st": st, "choose": choose}
 }
 
+;; Handles the char operation and returns the resulting state.
 fn handle_char(dict st, any data) dict {
    def mods = int(data.get("mods", data.get("mod", 0)))
    if (mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 { return st }
@@ -197,6 +210,7 @@ fn handle_char(dict st, any data) dict {
    st
 }
 
+;; Finds the key and returns the matching result.
 fn which_key(str prefix) list {
    cmd.which_key(prefix)
 }

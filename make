@@ -1723,9 +1723,12 @@ def resolve_test_jobs(cli_jobs: int) -> int:
     if cpu >= 2:
         auto = max(2, auto)
     mem_gib = host_mem_gib()
+    # A large stdlib LLVM compile can peak above 2.5 GiB, and several phases
+    # overlap. Reserve 6 GiB per automatic worker so a sweep cannot consume the
+    # whole machine. Explicit job settings remain available for controlled CI.
     if mem_gib > 0.0:
-        auto = min(auto, max(1, int(mem_gib / 2.0)))
-    auto = min(auto, 24)
+        auto = min(auto, max(1, int(mem_gib / 6.0)))
+    auto = min(auto, 8)
     return auto
 
 def configure_macos_llvm_env() -> None:
@@ -1880,8 +1883,6 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
                 log("BUILD", f"cmake: vendored LLVM at {_rel_or_abs(vendored_llvm_config)}")
             # rpath-link so the linker resolves transitive .so deps.
             extra_ldflags.append(f"-Wl,-rpath-link,{vendor_dir}")
-            # rpath so the built binary finds libs at runtime without LD_LIBRARY_PATH.
-            extra_ldflags.append(f"-Wl,-rpath,'$ORIGIN/../vendor/lib/host'")
     host_cflags = cmake_flag_list(os.environ.get("NYTRIX_HOST_CFLAGS") or "")
     raw_ldflags = os.environ.get("NYTRIX_HOST_LDFLAGS") or ""
     if extra_ldflags:
@@ -4124,9 +4125,12 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     exec_cache_mode = "on" if (exec_cache and not cold) else "off"
     std_cache_mode = "off" if cold else ("off" if os.environ.get("NYTRIX_STD_CACHE") == "0" else "on")
     log("TEST", f"make test: fixture-flag matrix with runtime/repl/error/bench suites; result_cache {cache_mode}, exec_cache {exec_cache_mode}, std_cache {std_cache_mode} (set NYTRIX_TEST_EXEC_CACHE=1 to enable binary caches)")
-    test_timeout_s = int(os.environ.get("NYTRIX_TEST_TIMEOUT") or "1800")  # 30 min default
-    step(f"run tests: bin=ny jobs={test_jobs} timeout={test_timeout_s}s")
-    rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(test_timeout_s))
+    # NYTRIX_TEST_TIMEOUT belongs to ny-test and limits each fixture.  Keep the
+    # outer suite deadline independent so a large, healthy suite is not killed
+    # after one fixture's allowance (notably on slower Windows runners).
+    suite_timeout_s = int(os.environ.get("NYTRIX_TEST_SUITE_TIMEOUT") or "1800")
+    step(f"run tests: bin=ny jobs={test_jobs} suite_timeout={suite_timeout_s}s")
+    rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(suite_timeout_s))
     elapsed_ms = int((time.perf_counter() - started) * 1000.0)
     if rc == 0:
         ok(f"test suite completed in {elapsed_ms}ms")
@@ -5507,6 +5511,24 @@ def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> 
     vendored_bin = vendor_dir / "bin"
     vendored_include = vendor_dir / "include"
 
+    # Z3's shared library is useful to a fresh source build only when its public
+    # headers travel with it. Copy the complete public z3*.h family because
+    # z3.h includes the generated API and version headers beside it.
+    z3_include_candidates = [Path("/usr/include"), Path("/usr/local/include")]
+    z3_pc = run_capture(["pkg-config", "--variable=includedir", "z3"])
+    if z3_pc.returncode == 0 and z3_pc.stdout.strip():
+        z3_include_candidates.insert(0, Path(z3_pc.stdout.strip()))
+    z3_header = next((p / "z3.h" for p in z3_include_candidates if (p / "z3.h").exists()), None)
+    if z3_header is not None and any(p.name.startswith("libz3.so") for p in lib_dir.glob("libz3.so*")):
+        vendored_include.mkdir(parents=True, exist_ok=True)
+        copied_z3_headers = 0
+        for header in sorted(z3_header.parent.glob("z3*.h")):
+            _copy2_if_different(header, vendored_include / header.name)
+            copied_z3_headers += 1
+        log("VENDOR", f"bundled {copied_z3_headers} Z3 public headers")
+    elif any(p.name.startswith("libz3.so") for p in lib_dir.glob("libz3.so*")):
+        log("VENDOR", "libz3 was bundled but z3.h was not found; install matching Z3 development headers before creating a source package")
+
     # Find the llvm-config matching the bundled LLVM version.
     # Must use the SYSTEM llvm-config, not the vendored one (which doesn't have
     # headers yet and reports $here/include as --includedir).
@@ -5807,7 +5829,18 @@ def main() -> int:
                     if repl_build_visible:
                         QUIET_BOOTSTRAP = old_quiet
 
-        if cmd in ("all", "bin", "std", "std_bc"):
+        if cmd == "all":
+            # Keep the ordinary developer build paired with the formatter's
+            # conservative bug audit. This is diagnostic-only: ny-fmt findings
+            # are reviewed rather than rewritten automatically.
+            rc = run_tool(
+                build_root, active_kind, "ny-fmt",
+                ["--bugs", "--limit", "80", "lib"],
+            )
+            if rc != 0:
+                return rc
+            continue
+        if cmd in ("bin", "std", "std_bc"):
             continue
         if cmd == "test":
             rc = run_test(build_root, active_kind, requested_jobs, extra)

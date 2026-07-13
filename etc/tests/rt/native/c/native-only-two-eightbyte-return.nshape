@@ -1,0 +1,15 @@
+shape native_only_two_eightbyte_return {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 c-frontend ffi aggregate-return no-libclang]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --c-frontend=nytrix -no-std --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/internal-two-eightbyte-return.h"
+def result = c.ldiv(7, 3)
+def quot = load64_i(result)
+def rem = load64_i(result, 8)
+1 / (quot == 2 && rem == 1)
+NY
+}

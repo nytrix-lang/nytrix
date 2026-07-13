@@ -1,4 +1,5 @@
 #include "wire/cache.h"
+#include "wire/build.h"
 #include "base/common.h"
 #include "base/hash.h"
 #include "base/loader.h"
@@ -368,7 +369,7 @@ int ny_cache_clean(void) {
 bool ny_jit_cache_enabled(void) { return ny_env_enabled_default_on("NYTRIX_JIT_CACHE"); }
 
 enum { NY_JIT_CACHE_VERSION = 25 };
-enum { NY_STD_BC_CACHE_VERSION = 14 };
+enum { NY_STD_BC_CACHE_VERSION = 15 };
 
 static bool ny_cache_strict_file_id_enabled(void) {
   return ny_env_enabled("NYTRIX_CACHE_STRICT_FILE_ID");
@@ -718,13 +719,8 @@ bool ny_jit_cache_save(const char *cache_path, LLVMModuleRef module) {
   if (!cache_path || !module)
     return false;
 
-  LLVMModuleRef save_mod = LLVMCloneModule(module);
-  if (!save_mod)
-    return false;
-
   if (ny_cache_path_is_ir(cache_path)) {
-    char *ir = LLVMPrintModuleToString(save_mod);
-    LLVMDisposeModule(save_mod);
+    char *ir = LLVMPrintModuleToString(module);
     if (!ir)
       return false;
     bool ok = ny_write_text_file_atomic(cache_path, ir, strlen(ir));
@@ -735,16 +731,14 @@ bool ny_jit_cache_save(const char *cache_path, LLVMModuleRef module) {
   char tmp_path[1024];
   pid_t pid = getpid();
   snprintf(tmp_path, sizeof(tmp_path), "%s.%d.tmp", cache_path, (int)pid);
-  if (LLVMWriteBitcodeToFile(save_mod, tmp_path) == 0) {
+  if (LLVMWriteBitcodeToFile(module, tmp_path) == 0) {
     if (rename(tmp_path, cache_path) == 0) {
-      LLVMDisposeModule(save_mod);
       return true;
     }
     remove(tmp_path);
   }
 
-  char *ir = LLVMPrintModuleToString(save_mod);
-  LLVMDisposeModule(save_mod);
+  char *ir = LLVMPrintModuleToString(module);
   if (!ir)
     return false;
   LLVMContextRef tmp_ctx = LLVMContextCreate();
@@ -870,13 +864,9 @@ bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module, int opt
   }
   char tmp_so[1024];
   snprintf(tmp_so, sizeof(tmp_so), "%s.tmp", so_path);
-  char cmd[4096];
-  if (ny_env_enabled("NYTRIX_VERBOSE") || ny_env_enabled("NYTRIX_DEBUG"))
-    snprintf(cmd, sizeof(cmd), "ld -shared --allow-shlib-undefined -o %s %s", tmp_so, obj_path);
-  else
-    snprintf(cmd, sizeof(cmd), "ld -shared --allow-shlib-undefined -o %s %s 2>/dev/null", tmp_so,
-             obj_path);
-  int rc = system(cmd);
+  const char *ld_argv[] = {"ld", "-shared", "--allow-shlib-undefined",
+                           "-o", tmp_so, obj_path, NULL};
+  int rc = ny_exec_spawn(ld_argv);
   remove(obj_path);
   if (rc != 0) {
     remove(tmp_so);

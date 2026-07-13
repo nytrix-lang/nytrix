@@ -50,6 +50,7 @@ def GLYPH_IS_COLOR = 44
 def MAX_TEXTURES = 4096
 def SCENE_LIGHT_MAX = 8
 
+;; Returns the result of the `safe_f32_limit` operation.
 fn safe_f32_limit(any v, f64 fallback=0.0, f64 limit=1048576.0) f64 {
    def fv = fmath.float(v)
    if fmath.is_nan(fv) || fmath.is_inf(fv) { return fallback }
@@ -60,6 +61,7 @@ fn safe_f32_limit(any v, f64 fallback=0.0, f64 limit=1048576.0) f64 {
 
 @pure
 @jit
+;; Returns the result of the `pack_rgba_u32` operation.
 fn pack_rgba_u32(any r, any g, any b, any a) int {
    (int(float(r) * 255.0) & 0xFF) |
    ((int(float(g) * 255.0) & 0xFF) << 8) |
@@ -67,6 +69,7 @@ fn pack_rgba_u32(any r, any g, any b, any a) int {
    ((int(float(a) * 255.0) & 0xFF) << 24)
 }
 
+;; Returns the result of the `color_u32` operation.
 fn color_u32(any c) int {
    if is_int(c) { return c }
    if is_float(c) { return __flt_to_int(c) }
@@ -100,6 +103,7 @@ fn store_mat4_cm_raw(any dst, any mat, bool allow_plain16=false) bool {
 }
 
 @jit
+;; Returns the result of the `store_vertex64` operation.
 fn store_vertex64(any base, int idx, any x, any y, any z, any u, any v, any color, any tex_id=0, any nx=0.0, any ny=0.0, any nz=1.0) any {
    def off = base + idx * VERTEX_STRIDE
    store32_f32(off, safe_f32_limit(x), OFF_X)
@@ -121,6 +125,7 @@ fn store_vertex64(any base, int idx, any x, any y, any z, any u, any v, any colo
 }
 
 @jit
+;; Writes the vertex64 and returns the result.
 fn push_vertex64(any p, any x, any y, any z, any u, any v, any color, any tex_id=0, any nx=0.0, any ny=0.0, any nz=1.0) any {
    if !p { return 0 }
    store_vertex64(p, 0, x, y, z, u, v, color, tex_id, nx, ny, nz)

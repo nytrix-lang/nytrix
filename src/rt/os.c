@@ -2060,9 +2060,26 @@ static int64_t rt_async_find_bytes(const char *hay, int64_t hay_len, const char 
     return 0;
   if (!hay || !needle || hay_len < needle_len)
     return -1;
-  for (int64_t i = 0; i <= hay_len - needle_len; ++i) {
-    if (memcmp(hay + i, needle, (size_t)needle_len) == 0)
-      return i;
+  if (needle_len <= 2 || hay_len < 64) {
+    for (int64_t i = 0; i <= hay_len - needle_len; ++i)
+      if (memcmp(hay + i, needle, (size_t)needle_len) == 0)
+        return i;
+    return -1;
+  }
+  int64_t skip[256];
+  for (int i = 0; i < 256; ++i)
+    skip[i] = needle_len;
+  for (int64_t i = 0; i < needle_len - 1; ++i)
+    skip[(unsigned char)needle[i]] = needle_len - 1 - i;
+  int64_t pos = 0;
+  int64_t last = needle_len - 1;
+  while (pos <= hay_len - needle_len) {
+    int64_t j = last;
+    while (j >= 0 && (unsigned char)hay[pos + j] == (unsigned char)needle[j])
+      --j;
+    if (j < 0)
+      return pos;
+    pos += skip[(unsigned char)hay[pos + last]];
   }
   return -1;
 }

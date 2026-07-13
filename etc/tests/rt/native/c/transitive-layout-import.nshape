@@ -1,0 +1,13 @@
+shape transitive_layout_import {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi libclang transitive aggregate layout]
+  template ny-test-case
+  flags "--c-frontend=libclang --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/transitive-layout-outer.h"
+assert(sizeof(ny_transitive_div_t) == 16, "transitive aggregate layout")
+0
+NY
+}

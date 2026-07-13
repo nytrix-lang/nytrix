@@ -39,7 +39,7 @@ comptime tables/templates/checks, native layouts, C header imports, inline
 assembly, default compile-time type checks, and opt-in ownership/raw-memory
 diagnostics.
 
-## Native Definition
+## Native definition
 
 A feature is truly native only when it works in both the NYIR VM and native codegen, without AST fallback or external compiler infrastructure. LLVM and libclang can be useful references or fallbacks, but they are not the compiler’s core.
 
@@ -60,6 +60,7 @@ A feature is truly native only when it works in both the NYIR VM and native code
 | [metaprogramming.md](learn/metaprogramming.md) | Compile-time tables, templates, generated modules. |
 | [native.md](learn/native.md) | Layouts, externs, `#include`, pointers, handles, strings, ownership. |
 | [testing.md](learn/testing.md) | Executable checks and test command shape. |
+| [troubleshooting.md](learn/troubleshooting.md) | First-error diagnosis, debug bundles, and platform failures. |
 
 ## Specification
 

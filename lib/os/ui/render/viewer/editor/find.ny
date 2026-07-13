@@ -18,6 +18,7 @@ use std.os.ui.window.consts as key
 
 def MAX_RESULTS = 5000
 
+;; Returns the result of the `state` operation.
 fn state() dict {
    {
       "open": false, "query": "", "regex": false, "case": false, "word": false,
@@ -26,8 +27,10 @@ fn state() dict {
    }
 }
 
+;; Returns the result of the `open` operation.
 fn open(dict st) dict { st["open"] = true st }
 
+;; Closes resources owned by the state and returns the closed state.
 fn close(dict st) dict { st["open"] = false st }
 
 fn is_open(dict st) bool { bool(st.get("open", false)) }
@@ -40,13 +43,16 @@ fn error(dict st) str { to_str(st.get("error", "")) }
 
 fn results(dict st) list { st.get("results", []) }
 
+;; Returns the result of the `count` operation.
 fn count(dict st) int { results(st).len }
 
+;; Returns the result of the `index` operation.
 fn index(dict st) int {
    def n = count(st)
    n <= 0 ? 0 : min(max(0, int(st.get("index", 0))), n - 1)
 }
 
+;; Returns the result of the `current` operation.
 fn current(dict st) dict {
    def rs = results(st)
    rs.len <= 0 ? dict(8) : rs.get(index(st), dict(8))
@@ -60,6 +66,7 @@ fn word_on(dict st) bool { bool(st.get("word", false)) }
 
 fn replace_on(dict st) bool { bool(st.get("replace_open", false)) }
 
+;; Returns the result of the `active_field` operation.
 fn active_field(dict st) str { to_str(st.get("field", "find")) == "replace" && replace_on(st) ? "replace" : "find" }
 
 fn _toggle(dict st, str key_name) dict {
@@ -73,34 +80,40 @@ fn toggle_case(dict st) dict { _toggle(st, "case") }
 
 fn toggle_word(dict st) dict { _toggle(st, "word") }
 
+;; Returns the result of the `show_replace` operation.
 fn show_replace(dict st) dict {
    st["replace_open"] = true
    st["field"] = "replace"
    st
 }
 
+;; Returns the result of the `hide_replace` operation.
 fn hide_replace(dict st) dict {
    st["replace_open"] = false
    st["field"] = "find"
    st
 }
 
+;; Updates the replace and returns the resulting state.
 fn toggle_replace(dict st) dict {
    if replace_on(st) { hide_replace(st) } else { show_replace(st) }
 }
 
+;; Updates the field and returns the resulting state.
 fn toggle_field(dict st) dict {
    if !replace_on(st) { return st }
    st["field"] = active_field(st) == "replace" ? "find" : "replace"
    st
 }
 
+;; Updates the query and returns the resulting state.
 fn set_query(dict st, str text) dict {
    st["query"] = text
    st["index"] = 0
    st
 }
 
+;; Updates the replacement and returns the resulting state.
 fn set_replacement(dict st, str text) dict {
    st["replace"] = text
    st
@@ -170,6 +183,7 @@ fn _nearest_index(list rs, int cursor_line, int cursor_col) int {
    0
 }
 
+;; Returns the result of the `refresh` operation.
 fn refresh(dict st, list lines, int cursor_line=0, int cursor_col=0) dict {
    def q = query(st)
    st["error"] = ""
@@ -218,6 +232,7 @@ fn next(dict st) dict { _move(st, 1) }
 
 fn prev(dict st) dict { _move(st, -1) }
 
+;; Returns the result of the `summary` operation.
 fn summary(dict st) str {
    if error(st).len > 0 { return "bad regex" }
    def n = count(st)
@@ -261,6 +276,7 @@ fn _replace_result(dict st, list lines, dict r) dict {
    {"ok": true, "lines": out, "error": "", "line": li, "col": start + repl.len}
 }
 
+;; Updates the current and returns the resulting state.
 fn replace_current(dict st, list lines) dict {
    if count(st) <= 0 { return {"ok": true, "st": st, "lines": lines, "count": 0, "error": "", "line": 0, "col": 0} }
    def r = current(st)
@@ -269,6 +285,7 @@ fn replace_current(dict st, list lines) dict {
    {"ok": bool(rr.get("ok", false)), "st": st, "lines": rr.get("lines", lines), "count": bool(rr.get("ok", false)) ? 1 : 0, "error": to_str(rr.get("error", "")), "line": int(rr.get("line", 0)), "col": int(rr.get("col", 0))}
 }
 
+;; Updates the all and returns the resulting state.
 fn replace_all(dict st, list lines) dict {
    def rs = results(st)
    if rs.len <= 0 { return {"ok": true, "st": st, "lines": lines, "count": 0, "error": "", "line": 0, "col": 0} }
@@ -293,6 +310,7 @@ fn replace_all(dict st, list lines) dict {
    {"ok": true, "st": st, "lines": out, "count": count, "error": "", "line": last_line, "col": last_col}
 }
 
+;; Handles the key operation and returns the resulting state.
 fn handle_key(dict st, any data) dict {
    mut action = ""
    if window.event_key_is(data, key.KEY_ESCAPE) { st = close(st) action = "close" }
@@ -317,6 +335,7 @@ fn handle_key(dict st, any data) dict {
    {"st": st, "action": action}
 }
 
+;; Handles the char operation and returns the resulting state.
 fn handle_char(dict st, any data) dict {
    def mods = int(data.get("mods", data.get("mod", 0)))
    if (mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 { return st }

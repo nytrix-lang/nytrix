@@ -22,6 +22,7 @@ fn atlas_set_backend(any backend) bool {
    true
 }
 
+;; Returns the result of the `atlas_get_backend` operation.
 fn atlas_get_backend() str { _atlas_backend }
 
 fn _atlas_backend_name(any a=0) str {

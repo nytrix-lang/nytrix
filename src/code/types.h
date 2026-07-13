@@ -121,6 +121,10 @@ typedef struct binding {
   bool is_f32_direct;
   bool is_int_direct;
   bool is_int_raw_direct;
+  /* External C globals store ABI values, not tagged Nytrix values. */
+  bool is_c_abi_global;
+  bool is_c_abi_unsigned;
+  bool is_c_abi_pointer;
   bool escapes;
   bool is_list_storage;
   bool is_int_list_storage;

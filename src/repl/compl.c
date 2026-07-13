@@ -136,19 +136,10 @@ static const char **match_ht = NULL;
 static size_t match_ht_cap = 0;
 static size_t match_ht_used = 0;
 
-static uint32_t _match_hash(const char *s) {
-  uint32_t h = 2166136261u;
-  while (*s) {
-    h ^= (unsigned char)*s++;
-    h *= 16777619u;
-  }
-  return h;
-}
-
 static bool match_ht_contains(const char *s) {
   if (!match_ht || match_ht_cap == 0)
     return false;
-  uint32_t h = _match_hash(s);
+  uint32_t h = ny_hash32_cstr(s);
   size_t idx = h & (match_ht_cap - 1);
   for (size_t probe = 0; probe < match_ht_cap; probe++) {
     const char *slot = match_ht[(idx + probe) & (match_ht_cap - 1)];
@@ -169,7 +160,7 @@ static void match_ht_insert(const char *s) {
     if (match_ht) {
       for (size_t i = 0; i < match_ht_cap; i++) {
         if (match_ht[i]) {
-          uint32_t h2 = _match_hash(match_ht[i]);
+          uint32_t h2 = ny_hash32_cstr(match_ht[i]);
           size_t idx2 = h2 & (new_cap - 1);
           while (new_ht[idx2])
             idx2 = (idx2 + 1) & (new_cap - 1);
@@ -181,7 +172,7 @@ static void match_ht_insert(const char *s) {
     match_ht = new_ht;
     match_ht_cap = new_cap;
   }
-  uint32_t h = _match_hash(s);
+  uint32_t h = ny_hash32_cstr(s);
   size_t idx = h & (match_ht_cap - 1);
   while (match_ht[idx])
     idx = (idx + 1) & (match_ht_cap - 1);

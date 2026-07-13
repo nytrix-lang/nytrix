@@ -12,7 +12,7 @@ typedef struct {
 } CmdEntry;
 
 static const CmdEntry kCmds[] = {
-  {"shapes", "audit", NULL, cmd_public_shapes_audit},
+  {"etc/tests/fuzz/shapes", "audit", NULL, cmd_public_shapes_audit},
   {"bridge", "convert", NULL, cmd_public_bridge_convert},
   {"bridge", "compare", NULL, cmd_public_bridge_compare},
   {"bridge", "suite", NULL, cmd_public_bridge_suite},
@@ -81,21 +81,21 @@ static int table_dispatch(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-  init_self_path(argc > 0 ? argv[0] : "nynth");
+  init_self_path(argc > 0 ? argv[0] : "nytrix");
   if (wants_fuzz_all_help(argc, argv)) {
-    nynth_print_fuzz_all_help(stdout);
+    nytrix_print_fuzz_all_help(stdout);
     return 0;
   }
   if (selftest_run_wants_catalog(argc, argv))
     return cmd_public_selftest_run(argc, argv);
   if (argc >= 2 && (is_help_flag(argv[1]) || !strcmp(argv[1], "help"))) {
-    nynth_print_public_help(stdout);
+    nytrix_print_public_help(stdout);
     return 0;
   }
   for (int i = 2; i < argc; i++)
-    if (is_help_flag(argv[i])) { nynth_print_public_help(stdout); return 0; }
+    if (is_help_flag(argv[i])) { nytrix_print_public_help(stdout); return 0; }
   if (argc >= 3 && !strcmp(argv[2], "help")) {
-    nynth_print_public_help(stdout);
+    nytrix_print_public_help(stdout);
     return 0;
   }
   if (argc < 2) return worker_usage();

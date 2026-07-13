@@ -142,6 +142,27 @@ static LLVMValueRef expr_value_from_binding(codegen_t *cg, binding *b) {
                             (LLVMValueRef[]){ny_bitcast(cg, fv, cg->type_i64, "")}, 1,
                             "box");
   }
+  if (b->is_c_abi_global && b->is_slot) {
+    LLVMTypeRef stored_ty = LLVMGlobalGetValueType(b->value);
+    LLVMValueRef raw = LLVMBuildLoad2(cg->builder, stored_ty, b->value,
+                                      "c_global_load");
+    LLVMTypeKind kind = LLVMGetTypeKind(stored_ty);
+    if (kind == LLVMPointerTypeKind)
+      return ny_ptr2i64(cg, raw, "c_global_ptr");
+    if (kind == LLVMIntegerTypeKind) {
+      unsigned bits = LLVMGetIntTypeWidth(stored_ty);
+      if (bits < 64)
+        raw = b->is_c_abi_unsigned
+                  ? LLVMBuildZExt(cg->builder, raw, cg->type_i64,
+                                 "c_global_zext")
+                  : LLVMBuildSExt(cg->builder, raw, cg->type_i64,
+                                 "c_global_sext");
+      else if (bits > 64)
+        raw = LLVMBuildTrunc(cg->builder, raw, cg->type_i64,
+                            "c_global_trunc");
+      return ny_tag_int(cg, raw);
+    }
+  }
   if (b->is_slot)
     return ny_load(cg, b->value, "");
   if (b->is_int_direct && b->is_int_raw_direct)
@@ -2770,15 +2791,17 @@ static bool ny_fun_sig_needs_tagged_callable_adapter(fun_sig *sig) {
 static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
                                                        fun_sig *target,
                                                        token_t tok,
-                                                       bool hidden_env) {
+                                                       bool hidden_env,
+                                                       bool native_abi) {
   if (!cg || !target || !target->name)
     return NULL;
   uint64_t h =
       target->name_hash ? target->name_hash : ny_hash64_cstr(target->name);
   char adapter_name_buf[96];
   snprintf(adapter_name_buf, sizeof(adapter_name_buf),
-           hidden_env ? "__ny_callable_adapter_env_%llx_%d"
-                      : "__ny_callable_adapter_%llx_%d",
+           native_abi ? "__ny_native_callback_adapter_%llx_%d"
+           : hidden_env ? "__ny_callable_adapter_env_%llx_%d"
+                        : "__ny_callable_adapter_%llx_%d",
            (unsigned long long)h, target->arity);
   LLVMValueRef existing = ny_get_named_fn(cg, adapter_name_buf);
   if (existing)
@@ -2808,7 +2831,10 @@ static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
     char pname_buf[24];
     snprintf(pname_buf, sizeof(pname_buf), "__arg%d", i);
     const char *pname = arena_strndup(cg->arena, pname_buf, strlen(pname_buf));
-    param_t p = {.name = pname};
+    param_t p = {.name = pname,
+                 .type = native_abi
+                             ? ny_sig_param_type(target, (size_t)i)
+                             : NULL};
     vec_push_arena(cg->arena, &wrapper->as.fn.params, p);
 
     expr_t *arg_ident = arena_alloc(cg->arena, sizeof(*arg_ident));
@@ -2826,6 +2852,8 @@ static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
   stmt_t *body = stmt_new(cg->arena, NY_S_BLOCK, tok);
   vec_push_arena(cg->arena, &body->as.block.body, ret);
   wrapper->as.fn.body = body;
+  if (native_abi)
+    wrapper->as.fn.return_type = target->return_type;
 
   scope sc[64] = {0};
   binding_list empty_captures = {0};
@@ -2835,6 +2863,17 @@ static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
   if (adapter)
     LLVMSetLinkage(adapter, LLVMInternalLinkage);
   return adapter;
+}
+
+LLVMValueRef ny_native_callback_adapter_value(codegen_t *cg, expr_t *expr) {
+  if (!cg || !expr || expr->kind != NY_E_IDENT || !expr->as.ident.name)
+    return NULL;
+  fun_sig *target = lookup_fun(cg, expr->as.ident.name, expr->as.ident.hash);
+  if (!target || target->is_extern || target->is_variadic)
+    return NULL;
+  LLVMValueRef adapter = ny_fun_sig_tagged_callable_adapter(
+      cg, target, expr->tok, false, true);
+  return adapter ? ny_ptr2i64(cg, adapter, "native_callback") : NULL;
 }
 
 static bool ny_named_callable_values_need_closure(codegen_t *cg) {
@@ -3717,7 +3756,14 @@ static LLVMValueRef ny_ct_jit_value_to_llvm(codegen_t *cg, int64_t v,
   int64_t tag = 0;
   if (!ny_ct_jit_heap_tag(v, &tag))
     return NULL;
-
+  bool known_raw_tag = tag == TAG_LIST || tag == TAG_TUPLE ||
+                       tag == TAG_DICT || tag == TAG_RANGE;
+  int64_t decoded_tag = is_int(tag) ? tag >> 1 : tag;
+  bool tagged_heap_header =
+      !known_raw_tag && (decoded_tag == TAG_LIST || decoded_tag == TAG_TUPLE ||
+                         decoded_tag == TAG_DICT || decoded_tag == TAG_RANGE);
+  if (tagged_heap_header)
+    tag = decoded_tag;
   if (tag == TAG_LIST || tag == TAG_TUPLE) {
     int64_t n = 0;
     if (!ny_ct_jit_seq_len(v, &n))
@@ -3764,6 +3810,61 @@ static LLVMValueRef ny_ct_jit_value_to_llvm(codegen_t *cg, int64_t v,
                            NY_LLVM_NAME(cg, "ct_jit_tuple"));
     }
     return out;
+  }
+
+  if (tag == TAG_DICT) {
+    int64_t p = rt_heap_object_ptr(v);
+    int64_t count_v = 0, cap_v = 0;
+    if (!p || !rt_try_read_i64((uintptr_t)p, &count_v) ||
+        !rt_try_read_i64((uintptr_t)p + 8, &cap_v))
+      return NULL;
+    int64_t count = tagged_heap_header ? count_v :
+                    (is_int(count_v) ? count_v >> 1 : count_v);
+    int64_t cap = tagged_heap_header ? cap_v :
+                  (is_int(cap_v) ? cap_v >> 1 : cap_v);
+    if (count < 0 || cap < count || cap > 65536)
+      return NULL;
+    fun_sig *dict_new = lookup_fun(cg, "dict", 0);
+    if (!dict_new)
+      dict_new = lookup_fun(cg, "std.core.dict_mod.dict", 0);
+    fun_sig *dict_set = lookup_fun(cg, "__dict_write_fast", 0);
+    if (!dict_set)
+      dict_set = lookup_fun(cg, "std.core.set", 0);
+    if (!dict_new || !dict_set)
+      return expr_fail(cg, tok,
+                       "comptime dict result requires dict runtime helpers");
+    LLVMValueRef out = LLVMBuildCall2(
+        cg->builder, dict_new->type, dict_new->value,
+        (LLVMValueRef[]){LLVMConstInt(
+            cg->type_i64, ((uint64_t)(count > 0 ? count : 1) << 2) | 1u,
+            false)},
+        1, NY_LLVM_NAME(cg, "ct_jit_dict"));
+    int64_t copied = 0;
+    for (int64_t i = 0; i < cap && copied < count; i++) {
+      uintptr_t off = (uintptr_t)p + 16 + (uintptr_t)i * 24;
+      int64_t state = 0;
+      if (!rt_try_read_i64(off + 16, &state))
+        return NULL;
+      int64_t state_raw = tagged_heap_header ? state :
+                          (is_int(state) ? state >> 1 : state);
+      if (state_raw != 1)
+        continue;
+      int64_t key_raw = 0, value_raw = 0;
+      if (!rt_try_read_i64(off, &key_raw) ||
+          !rt_try_read_i64(off + 8, &value_raw))
+        return NULL;
+      LLVMValueRef key =
+          ny_ct_jit_value_to_llvm(cg, key_raw, tok, depth + 1);
+      LLVMValueRef value =
+          ny_ct_jit_value_to_llvm(cg, value_raw, tok, depth + 1);
+      if (!key || !value)
+        return NULL;
+      out = LLVMBuildCall2(cg->builder, dict_set->type, dict_set->value,
+                           (LLVMValueRef[]){out, key, value}, 3,
+                           NY_LLVM_NAME(cg, "ct_jit_dict_set"));
+      copied++;
+    }
+    return copied == count ? out : NULL;
   }
 
   if (tag == TAG_RANGE) {
@@ -4234,6 +4335,9 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
         break;
       }
     }
+    if (!broken && !LLVMIsDeclaration(f) &&
+        LLVMVerifyFunction(f, LLVMReturnStatusAction) != 0)
+      broken = true;
     if (broken) {
       if (verbose_enabled >= 1) {
         fprintf(stderr, "[jit] clearing broken function: %s\n",
@@ -4256,9 +4360,25 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
 
   char *verify_err = NULL;
   if (LLVMVerifyModule(mod, LLVMReturnStatusAction, &verify_err) != 0) {
-    NY_LOG_WARN("Comptime snapshot module verification failed: %s\n",
-                verify_err);
-    LLVMDisposeMessage(verify_err);
+    NY_LOG_WARN(
+        "Comptime snapshot verification failed; trying AST interpreter "
+        "fallback: %s\n",
+        verify_err ? verify_err : "unknown error");
+    if (verify_err)
+      LLVMDisposeMessage(verify_err);
+    if (ny_try_eval_comptime_interp(cg, body, &interp_tagged)) {
+      if (prev_bb)
+        ny_pos(cg, prev_bb);
+      LLVMDisposeModule(mod);
+      LLVMContextDispose(ctm_ctx);
+      return LLVMConstInt(cg->type_i64, (uint64_t)interp_tagged, true);
+    }
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    LLVMDisposeModule(mod);
+    LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok,
+                     "invalid comptime snapshot; JIT execution was refused");
   }
 
   LLVMBuilderRef bld = LLVMCreateBuilderInContext(ctm_ctx);
@@ -4271,6 +4391,7 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   tcg.strict_types = cg->strict_types;
   tcg.ownership_enabled = cg->ownership_enabled;
   tcg.ownership_strict = cg->ownership_strict;
+  tcg.user_native_abi = cg->user_native_abi;
   tcg.debug_symbols = cg->debug_symbols;
   tcg.di_builder = NULL;
   tcg.source_main_file = cg->source_main_file;
@@ -4290,16 +4411,6 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
 
   scope ctm_scopes[64] = {0};
   size_t ctm_depth = 0;
-  ny_ct_emit_std_init(&tcg, cg, ctm_scopes, &ctm_depth);
-  if (tcg.had_error) {
-    if (prev_bb)
-      ny_pos(cg, prev_bb);
-    cg->had_error = 1;
-    codegen_dispose(&tcg);
-    if (ctm_ctx_owned)
-      LLVMContextDispose(ctm_ctx);
-    return ny_c0(cg);
-  }
   gen_stmt(&tcg, ctm_scopes, &ctm_depth, body, 0, true);
   if (tcg.had_error) {
     if (prev_bb)
@@ -4325,17 +4436,31 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   }
   LLVMBasicBlockRef ctm_end_bb = LLVMGetInsertBlock(bld);
   LLVMBasicBlockRef ctm_entry_bb = LLVMGetEntryBasicBlock(entry_fn);
-  LLVMValueRef first_inst = LLVMGetFirstInstruction(ctm_entry_bb);
-  if (first_inst)
-    LLVMPositionBuilderBefore(bld, first_inst);
-  else
-    LLVMPositionBuilderAtEnd(bld, ctm_entry_bb);
+  LLVMBasicBlockRef ctm_init_bb =
+      LLVMInsertBasicBlockInContext(ctm_ctx, ctm_entry_bb, "init");
+  LLVMPositionBuilderAtEnd(bld, ctm_init_bb);
   ny_ct_emit_std_init(&tcg, cg, ctm_scopes, &ctm_depth);
   codegen_emit_string_init(&tcg);
+  if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(bld)))
+    LLVMBuildBr(bld, ctm_entry_bb);
   if (ctm_end_bb)
     LLVMPositionBuilderAtEnd(bld, ctm_end_bb);
 
   ny_jit_define_runtime_trampolines(mod);
+
+  verify_err = NULL;
+  if (LLVMVerifyModule(mod, LLVMReturnStatusAction, &verify_err) != 0) {
+    NY_LOG_WARN("Generated comptime module verification failed: %s\n",
+                verify_err ? verify_err : "unknown error");
+    if (verify_err)
+      LLVMDisposeMessage(verify_err);
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    codegen_dispose(&tcg);
+    LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok,
+                     "invalid generated comptime module; JIT execution was refused");
+  }
 
   if (getenv("NYTRIX_COMPTIME_DUMP_IR")) {
     char *ir = LLVMPrintModuleToString(mod);
@@ -4345,12 +4470,77 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
     }
   }
 
+
+  const char *jit_engine = getenv("NYTRIX_JIT_ENGINE");
+  if (jit_engine && strcmp(jit_engine, "orc") == 0) {
+    if (tcg.debug_symbols)
+      LLVMStripModuleDebugInfo(mod);
+
+    char *orc_error = NULL;
+    if (!ny_orc_jit_ensure_engine(cg, &orc_error)) {
+      NY_LOG_ERR("Comptime ORC JIT error (ensure): %s\n", orc_error ? orc_error : "unknown");
+      free(orc_error);
+      codegen_dispose(&tcg);
+      if (ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok, "failed to ensure orc jit engine");
+    }
+
+    uint64_t saddr = 0;
+    void *rt = NULL;
+    bool module_consumed = false;
+    bool executed = ny_orc_jit_execute(
+        &tcg, mod, ctm_ctx, &saddr, NULL, &rt, &module_consumed, &orc_error);
+    if (module_consumed) {
+      tcg.module = NULL;
+      tcg.ctx = NULL;
+      tcg.llvm_ctx_owned = false;
+      ctm_ctx_owned = false;
+    }
+    if (!executed) {
+      NY_LOG_ERR("Comptime ORC JIT error (execute): %s\n", orc_error ? orc_error : "unknown");
+      free(orc_error);
+      codegen_dispose(&tcg);
+      if (!module_consumed && ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok, "failed to execute orc jit module");
+    }
+    free(orc_error);
+
+    int64_t res = 1;
+    if (saddr) {
+      if (!ny_jit_prepare_execution(saddr)) {
+        if (prev_bb)
+          ny_pos(cg, prev_bb);
+        ny_orc_jit_remove_module(rt);
+        codegen_dispose(&tcg);
+        return expr_fail(cg, body->tok,
+                         "comptime JIT code memory is not executable");
+      }
+      res = ((int64_t (*)(void))saddr)();
+    }
+
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+
+    LLVMValueRef materialized =
+        ny_ct_jit_value_to_llvm(cg, res, body->tok, 0);
+
+    ny_orc_jit_remove_module(rt);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    if (materialized)
+      return materialized;
+    return expr_fail(cg, body->tok,
+                     "comptime value failed to materialize from AST interp or JIT");
+  }
+
   LLVMExecutionEngineRef ee = NULL;
+
   struct LLVMMCJITCompilerOptions jit_opts;
   ny_jit_init_native_once();
   ny_jit_init_options(&jit_opts, mod);
-  if (ny_module_target_is_apple_arm64(mod))
-    jit_opts.EnableFastISel = 0;
   ny_jit_add_runtime_symbols();
   if (LLVMCreateMCJITCompilerForModule(&ee, mod, &jit_opts, sizeof(jit_opts),
                                        &err) != 0) {
@@ -4364,12 +4554,37 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   register_jit_symbols(ee, mod, &tcg);
   ny_jit_map_unresolved_symbols(ee, mod, entry_name);
   LLVMValueRef entry_val = LLVMGetNamedFunction(mod, entry_name);
-  uint64_t addr = entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
+  int64_t res = 1;
+
+  uint64_t addr =
+      entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
   if (!addr)
     addr = LLVMGetFunctionAddress(ee, entry_name);
-  int64_t res = 1;
+  char *jit_exec_err = NULL;
+  if (LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
+    NY_LOG_ERR("Comptime JIT finalization error: %s\n",
+               jit_exec_err ? jit_exec_err : "unknown error");
+    if (jit_exec_err)
+      LLVMDisposeMessage(jit_exec_err);
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    LLVMDisposeExecutionEngine(ee);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok, "failed to finalize comptime JIT memory");
+  }
   if (addr) {
-    ny_jit_prepare_execution();
+    if (!ny_jit_prepare_execution(addr)) {
+      if (prev_bb)
+        ny_pos(cg, prev_bb);
+      LLVMDisposeExecutionEngine(ee);
+      codegen_dispose(&tcg);
+      if (ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok,
+                       "comptime JIT code memory is not executable");
+    }
     res = ((int64_t (*)(void))addr)();
   }
 
@@ -4607,4 +4822,3 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
   args[1] = gen_expr(cg, scopes, depth, e->as.index.start);
   return LLVMBuildCall2(cg->builder, s->type, s->value, args, 2, "");
 }
-

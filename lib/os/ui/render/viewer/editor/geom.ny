@@ -56,6 +56,7 @@ fn with_bottom_dock(dict lay, f64 sh, bool open, f64 want_h=0.0) dict {
    lay
 }
 
+;; Returns the result of the `pane_at` operation.
 fn pane_at(dict lay, f64 x, f64 y) str {
    if divider_hit(lay, x, y) { return "divider" }
    if bool(lay.get("dock_open", false)) &&
@@ -70,6 +71,7 @@ fn pane_at(dict lay, f64 x, f64 y) str {
    "top"
 }
 
+;; Returns the result of the `focus_next` operation.
 fn focus_next(str current, bool project_on=true, bool dock_on=false) str {
    if current == "project" { return "editor" }
    if current == "editor" { return dock_on ? "terminal" : (project_on ? "project" : "editor") }
@@ -77,10 +79,12 @@ fn focus_next(str current, bool project_on=true, bool dock_on=false) str {
    project_on ? "project" : "editor"
 }
 
+;; Returns the result of the `visible_rows` operation.
 fn visible_rows(f64 edit_h) int {
    max(1, int((edit_h - 12.0) / LINE_H))
 }
 
+;; Returns the result of the `row_at` operation.
 fn row_at(dict lay, f64 y, int scroll) int {
    int((y - float(lay.get("edit_y", 0.0)) - 6.0) / LINE_H) + scroll
 }
@@ -96,6 +100,7 @@ fn _mono_ascii_line(str line) bool {
    true
 }
 
+;; Returns the result of the `col_at` operation.
 fn col_at(any font, str line, f64 x, f64 text_x) int {
    def target = max(0.0, x - text_x)
    if line.len <= 0 || target <= 0.0 { return 0 }
@@ -114,6 +119,7 @@ fn col_at(any font, str line, f64 x, f64 text_x) int {
    lo
 }
 
+;; Returns the result of the `buffer_at` operation.
 fn buffer_at(dict lay, f64 x, f64 y, int count) int {
    if x < float(lay.get("rail_x", 0.0)) + 10.0 || x > float(lay.get("rail_x", 0.0)) + float(lay.get("rail_w", 0.0)) - 10.0 { return -1 }
    def rel = y - float(lay.get("rail_y", 0.0)) - 44.0
@@ -124,6 +130,7 @@ fn buffer_at(dict lay, f64 x, f64 y, int count) int {
    in_row <= 34.0 ? idx : -1
 }
 
+;; Returns true when divider hit.
 fn divider_hit(dict lay, f64 x, f64 y) bool {
    if float(lay.get("rail_w", 0.0)) <= 1.0 { return false }
    def dx = float(lay.get("divider_x", 0.0))

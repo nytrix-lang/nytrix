@@ -340,6 +340,7 @@ fn watch_create(str path) any {
    return d
 }
 
+;; Returns the result of the `watch_close` operation.
 fn watch_close(any h) int {
    if !is_dict(h) { return 0 }
    def ty = to_str(h.get("type", ""))
@@ -359,6 +360,7 @@ fn watch_close(any h) int {
    0
 }
 
+;; Returns the result of the `watch_poll` operation.
 fn watch_poll(any h) list {
    if !is_dict(h) { return [] }
    def ty = to_str(h.get("type", ""))
@@ -382,6 +384,7 @@ fn watch_poll(any h) list {
    []
 }
 
+;; Returns the result of the `watch_has_event` operation.
 fn watch_has_event(any h) bool { watch_poll(h).len > 0 }
 
 #main {

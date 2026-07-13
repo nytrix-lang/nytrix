@@ -27,6 +27,7 @@ def _BTN_CHIP_LABELS_SONY = ["X", "O", "SQ", "TRI", "L1", "R1", "SHR", "OPT", "P
 def _BTN_SIDE_LABELS_GENERIC = ["A", "B", "X", "Y", "LB", "RB", "BK", "ST", "GD", "L3", "R3", "U", "R", "D", "L", "15", "16"]
 def _BTN_SIDE_LABELS_SONY = ["X", "O", "SQ", "TR", "L1", "R1", "SH", "OP", "PS", "L3", "R3", "U", "R", "D", "L", "TC", "MC"]
 
+;; Returns the result of the `axis_i100` operation.
 fn axis_i100(any v) int {
    mut n = int(v * 100.0)
    if n > -4 && n < 4 { n = 0 }
@@ -35,6 +36,7 @@ fn axis_i100(any v) int {
    n
 }
 
+;; Returns the result of the `axis_f` operation.
 fn axis_f(int n) f64 { n * 0.01 }
 
 fn safe_axis_value(any v) f64 { axis_f(axis_i100(v)) }
@@ -65,6 +67,7 @@ fn button_chip_label(any st, any idx) str { _button_label_from(st, idx, _BTN_CHI
 
 fn button_side_label(any st, any idx) str { _button_label_from(st, idx, _BTN_SIDE_LABELS_GENERIC, _BTN_SIDE_LABELS_SONY, "B") }
 
+;; Returns the result of the `axis_label` operation.
 fn axis_label(any idx) str { ["LX", "LY", "RX", "RY", "LT", "RT"].get(idx, "A" + to_str(idx)) }
 
 fn joysticks() list { input_gamepad.gamepads() }
@@ -89,6 +92,7 @@ fn _device_score(any jid) int {
    [60, 60, 60, 70, 50, 60, 50, 40, -400, -300, -1000, -1000, -1000, -500])
 }
 
+;; Returns the result of the `device_row` operation.
 fn device_row(any jid) dict {
    def name = _native_gamepad_name(jid)
    def mapped = input_gamepad.gamepad_mapped(jid)
@@ -115,6 +119,7 @@ fn _best_jid_from_rows(any rows) int {
    best_jid
 }
 
+;; Returns the result of the `refresh` operation.
 fn refresh(any force=false) int {
    def now = ticks()
    def scan_interval = _device_rows.len == 0 ? DEVICE_SCAN_EMPTY_INTERVAL_NS : DEVICE_SCAN_INTERVAL_NS
@@ -170,6 +175,7 @@ fn _collect_pressed_buttons(any st) list {
    [last_btn, pressed_count, pressed_labels]
 }
 
+;; Returns the result of the `snapshot` operation.
 fn snapshot(any jid) any {
    def cached_row = _cached_device_row(jid)
    def cached_name = cached_row ? cached_row.get("name", "") : ""
@@ -183,8 +189,10 @@ fn snapshot(any jid) any {
    st
 }
 
+;; Returns the result of the `release` operation.
 fn release(any st) int { 0 }
 
+;; Returns true when pad button.
 fn pad_button(any st, any button) bool {
    def buttons = st.get("buttons", nil)
    if is_list(buttons) && button >= 0 && button < buttons.len { return bool(buttons.get(button, false)) }
@@ -193,6 +201,7 @@ fn pad_button(any st, any button) bool {
    input_gamepad.gamepad_raw_button(st, int(button))
 }
 
+;; Returns the result of the `pad_axis` operation.
 fn pad_axis(any st, any axis) f64 {
    def axes = st.get("axes", nil)
    if is_list(axes) && axis >= 0 && axis < axes.len { return safe_axis_value(axes.get(axis, 0.0)) }
@@ -201,14 +210,17 @@ fn pad_axis(any st, any axis) f64 {
    input_gamepad.gamepad_raw_axis(st, int(axis))
 }
 
+;; Returns the result of the `raw_axis_value` operation.
 fn raw_axis_value(any st, int idx) f64 {
    st ? input_gamepad.gamepad_raw_axis(st, idx) : 0.0
 }
 
+;; Returns true when raw button down.
 fn raw_button_down(any st, int idx) bool {
    st && input_gamepad.gamepad_raw_button(st, idx)
 }
 
+;; Returns the result of the `axes_text` operation.
 fn axes_text(any st, int max_axes, bool raw=false) str {
    if !st { return raw ? "raw axes -" : "axes -" }
    mut out = raw ? "raw axes" : (st.get("mapped", false) ? "mapped axes" : "axes")
@@ -225,6 +237,7 @@ fn axes_text(any st, int max_axes, bool raw=false) str {
    out
 }
 
+;; Returns the result of the `pad_text` operation.
 fn pad_text(any st) str {
    if !st { return "pad none" }
    def last_btn = st.get("last_button", -1)
@@ -238,6 +251,7 @@ fn pad_text(any st) str {
    " last " + (last_btn >= 0 ? button_label(st, last_btn) : "-")
 }
 
+;; Returns the result of the `button_text` operation.
 fn button_text(any st) str {
    if !st { return "buttons -" }
    def pressed = st.get("pressed_labels", [])
@@ -251,6 +265,7 @@ fn button_text(any st) str {
    out
 }
 
+;; Returns the result of the `raw_button_text` operation.
 fn raw_button_text(any st, int max_buttons) str {
    if !st { return "raw buttons -" }
    def button_count = st.get("raw_button_count", st.get("button_count", 0))
@@ -273,6 +288,7 @@ fn raw_button_text(any st, int max_buttons) str {
    out
 }
 
+;; Returns the result of the `hats_text` operation.
 fn hats_text(any st, str empty="hats -", str prefix="hats") str {
    if !st { return empty }
    def hat_count = st.get("hat_count", 0)
@@ -289,6 +305,7 @@ fn hats_text(any st, str empty="hats -", str prefix="hats") str {
    any_down ? out : empty
 }
 
+;; Returns the result of the `raw_device_text` operation.
 fn raw_device_text(any row) str {
    def jid = row.get("jid", -1)
    if jid < 0 { return "" }
@@ -307,6 +324,7 @@ fn raw_device_text(any row) str {
    " h" + to_str(raw.get("hat_count", 0)) + " " + row.get("name", "")
 }
 
+;; Returns the result of the `devices_text` operation.
 fn devices_text(list rows, int best_jid) str {
    mut out = "raw"
    mut shown = 0
@@ -330,6 +348,7 @@ fn devices_text(list rows, int best_jid) str {
    out
 }
 
+;; Returns the result of the `signature` operation.
 fn signature(any st) str {
    if !st { return "none" }
    mut out = "jid=" + to_str(st.get("jid", -1)) +
@@ -377,6 +396,7 @@ fn _axis_from_raw_map(any st, any axis, any lx, any ly, any rx, any ry, any lt, 
    pad_axis(st, (idx >= 0 && idx < slots.len) ? slots.get(idx, axis) : axis)
 }
 
+;; Returns the result of the `display_axis_slot` operation.
 fn display_axis_slot(any st, any axis) f64 {
    if st.get("mapped", false) { return pad_axis(st, axis) }
    #windows {
@@ -391,8 +411,10 @@ fn display_axis_slot(any st, any axis) f64 {
    #endif
 }
 
+;; Returns the result of the `rows` operation.
 fn rows() list { _device_rows }
 
+;; Returns the result of the `best_jid` operation.
 fn best_jid() int { _best_jid_cached }
 
 #main {

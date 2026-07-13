@@ -1,0 +1,24 @@
+shape x86_64_elf64_object_link_run_addr_deref {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir link-run pointer addr-deref]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-addr-deref.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+fn deref_addr() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  store64_i(p, 41)
+  def ptr same = addr_of(*p)
+  store64_i(same, load64_i(same) + 1)
+  def i64 answer = load64_i(p)
+  free(p)
+  answer
+}
+
+deref_addr()
+NY
+}

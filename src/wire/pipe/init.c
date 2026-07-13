@@ -55,6 +55,64 @@
 #include <stdarg.h>
 
 extern int64_t rt_free(int64_t ptr);
+extern void rt_print_flush(void);
+
+static bool ny_safe_run_requested(const ny_safe_run_t *sr) {
+  return sr && (sr->cpu_seconds > 0 || sr->wall_seconds > 0 ||
+                sr->max_rss_bytes > 0 ||
+                sr->max_files > 0 || sr->max_processes > 0 ||
+                sr->max_output_bytes > 0 || sr->telemetry ||
+                sr->contain_process_group);
+}
+
+static void ny_sanitize_setup_env(const char *sanitize_kind) {
+  if (!sanitize_kind || !*sanitize_kind)
+    return;
+  if (strcmp(sanitize_kind, "address") == 0) {
+    ny_setenv("ASAN_OPTIONS",
+           "abort_on_error=1:detect_leaks=1:print_stacktrace=1:color=never"
+           ":detect_odr_violation=0",
+           0);
+  } else if (strcmp(sanitize_kind, "undefined") == 0) {
+    ny_setenv("UBSAN_OPTIONS",
+           "abort_on_error=1:print_stacktrace=1:color=never"
+           ":halt_on_error=1",
+           0);
+  } else if (strcmp(sanitize_kind, "leak") == 0) {
+    ny_setenv("LSAN_OPTIONS", "print_suppressions=0", 0);
+  } else if (strcmp(sanitize_kind, "thread") == 0) {
+    ny_setenv("TSAN_OPTIONS",
+           "abort_on_error=1:report_thread_leaks=0:color=never", 0);
+  }
+}
+
+typedef struct {
+  uint64_t script_addr;
+  uint64_t main_addr;
+} ny_jit_safe_call_t;
+
+static bool ny_jit_prepare_call(uint64_t script_addr, uint64_t main_addr) {
+  return script_addr && ny_jit_prepare_execution(script_addr) &&
+         (!main_addr || ny_jit_prepare_execution(main_addr));
+}
+
+static int ny_jit_safe_child(void *raw) {
+  ny_jit_safe_call_t *call = (ny_jit_safe_call_t *)raw;
+  if (!call || !ny_jit_prepare_call(call->script_addr, call->main_addr))
+    return 1;
+  ((void (*)(void))call->script_addr)();
+  if (call->main_addr)
+    (void)((int64_t (*)(void))call->main_addr)();
+  rt_print_flush();
+  return 0;
+}
+
+static int ny_native_cache_safe_child(void *raw) {
+  void (*entry)(void) = (void (*)(void))raw;
+  entry();
+  rt_print_flush();
+  return 0;
+}
 
 #if defined(__GNUC__) || defined(__clang__)
 #define NY_UNUSED_FUNC __attribute__((unused))
@@ -74,6 +132,123 @@ static LLVMModuleRef ny_prepare_ir_dump_module(const ny_options *opt,
                                                LLVMModuleRef module);
 static bool ny_is_llvm_special_global(const char *name);
 static void ny_ensure_parent_dir_for_path(const char *path);
+
+typedef struct {
+  int64_t (*entry)(void);
+} ny_native_jit_call_t;
+
+typedef struct {
+  const char *items[256];
+  size_t len;
+  bool overflow;
+} ny_native_link_list_t;
+
+static void ny_native_link_list_add(const char *library, void *raw) {
+  ny_native_link_list_t *list = (ny_native_link_list_t *)raw;
+  if (!list || !library || !*library)
+    return;
+  for (size_t i = 0; i < list->len; ++i)
+    if (strcmp(list->items[i], library) == 0)
+      return;
+  if (list->len >= sizeof(list->items) / sizeof(list->items[0])) {
+    list->overflow = true;
+    return;
+  }
+  list->items[list->len++] = library;
+}
+
+static int ny_native_jit_safe_child(void *raw) {
+  ny_native_jit_call_t *call = (ny_native_jit_call_t *)raw;
+  if (!call || !call->entry)
+    return 1;
+  if (!ny_jit_prepare_execution((uint64_t)(uintptr_t)call->entry))
+    return 1;
+  (void)call->entry();
+  rt_print_flush();
+  return 0;
+}
+
+static int ny_run_native_only(const program_t *prog, const ny_options *opt,
+                              const char *output_path, bool execute,
+                              bool remove_output) {
+  if (execute) {
+    ny_native_jit_image_t image = {0};
+    char jit_err[512] = {0};
+    if (!ny_native_jit_compile(prog, opt, &image, jit_err, sizeof(jit_err))) {
+      NY_LOG_ERR("Native in-memory JIT failed: %s\n",
+                 jit_err[0] ? jit_err : "unsupported native shape");
+      return 1;
+    }
+    ny_native_jit_call_t call = {
+        .entry = (int64_t(*)(void))image.entry,
+    };
+    int rc = ny_safe_run_requested(&opt->safe_run)
+                 ? ny_safe_run_call(&opt->safe_run, ny_native_jit_safe_child,
+                                    &call,
+                                    opt->input_file ? opt->input_file
+                                                    : "native JIT workload")
+                 : ny_native_jit_safe_child(&call);
+    ny_native_jit_image_free(&image);
+    return rc;
+  }
+  char obj[4096], rto[4096], err[512] = {0};
+  char obj_name[96], rto_name[96];
+  snprintf(obj_name, sizeof(obj_name), "ny_native_only_%ld_%llu.o",
+           (long)getpid(), (unsigned long long)ny_ticks_now());
+  snprintf(rto_name, sizeof(rto_name), "ny_native_only_rt_%ld_%llu.o",
+           (long)getpid(), (unsigned long long)ny_ticks_now());
+  ny_join_path(obj, sizeof(obj), ny_get_temp_dir(), obj_name);
+  ny_join_path(rto, sizeof(rto), ny_get_temp_dir(), rto_name);
+
+  if (!ny_native_emit_object(prog, opt, obj, "main", false, err,
+                             sizeof(err))) {
+    NY_LOG_ERR("Native-only NYIR/object emission failed: %s\n",
+               err[0] ? err : "unsupported native shape");
+    return 1;
+  }
+  const char *cc = ny_builder_choose_cc();
+  if (!ny_builder_compile_runtime(cc, rto, NULL, opt->debug_symbols,
+                                   opt->gprof == 1, 0, false, opt->sanitize)) {
+    NY_LOG_ERR("Native-only runtime compilation failed\n");
+    unlink(obj);
+    return 1;
+  }
+  ny_native_link_list_t links = {0};
+  for (size_t i = 0; i < opt->link_libs.len; ++i)
+    ny_native_link_list_add(opt->link_libs.data[i], &links);
+  ny_native_visit_program_links(prog, ny_native_link_list_add, &links);
+  if (links.overflow) {
+    NY_LOG_ERR("Native-only link failed: too many source-level libraries\n");
+    unlink(obj);
+    unlink(rto);
+    return 1;
+  }
+  bool linked = ny_builder_link(
+      cc, obj, rto, NULL, NULL, 0,
+      (const char *const *)opt->link_dirs.data, opt->link_dirs.len,
+      links.items, links.len, output_path,
+      opt->strip_override == 1, opt->debug_symbols, opt->gprof == 1,
+      opt->sanitize);
+  unlink(obj);
+  unlink(rto);
+  if (!linked) {
+    NY_LOG_ERR("Native-only link failed\n");
+    return 1;
+  }
+
+  if (!execute)
+    return 0;
+
+  const char *argv_exec[] = {output_path, NULL};
+  int rc = ny_safe_run_requested(&opt->safe_run)
+               ? ny_safe_run_spawn(&opt->safe_run, argv_exec,
+                                   opt->input_file ? opt->input_file
+                                                   : "native-only workload")
+               : ny_exec_spawn(argv_exec);
+  if (remove_output)
+    unlink(output_path);
+  return rc;
+}
 
 #include "tiny.c"
 #include "stage.c"
@@ -211,6 +386,70 @@ static void maybe_log_phase_time(bool enabled, const char *label,
   fprintf(stderr, "%-12s %.4fs\n", label, ny_ticks_elapsed_sec(start_time));
 }
 
+typedef struct {
+  ny_options *opt;
+  bool supervised;
+} ny_repl_session_ctx_t;
+
+static int ny_run_repl_session(ny_options *opt, bool supervised) {
+  ny_jit_init_native_once();
+  LLVMLoadLibraryPermanently(NULL);
+  int repl_batch = 0;
+#ifdef _WIN32
+  repl_batch = (_isatty(_fileno(stdin)) == 0);
+#else
+  repl_batch = (isatty(STDIN_FILENO) == 0);
+#endif
+  std_mode_t repl_std_mode = opt->no_std ? STD_MODE_NONE : opt->std_mode;
+  if (repl_batch && ny_env_enabled("NYTRIX_REPL_BATCH_NO_STD") &&
+      !opt->repl_explicit && !opt->std_mode_explicit) {
+    const char *env_std = getenv("NYTRIX_REPL_STD");
+    const char *env_no_std = getenv("NYTRIX_REPL_NO_STD");
+    if ((!env_std || !*env_std) && (!env_no_std || !*env_no_std))
+      repl_std_mode = STD_MODE_NONE;
+  }
+  char *repl_stdin_src = NULL;
+  if (repl_batch && !opt->command_string) {
+    char *stdin_src = ny_read_stdin_all();
+    if (!stdin_src) {
+      NY_LOG_ERR("Failed to read REPL stdin\n");
+      return 1;
+    }
+    if (ny_env_enabled("NYTRIX_REPL_TRACE"))
+      fprintf(stderr, "[repl-batch] bytes=%zu fast_candidate=%d\n",
+              strlen(stdin_src), ny_repl_batch_can_fast_run(stdin_src) ? 1 : 0);
+    if (ny_repl_batch_can_fast_run(stdin_src)) {
+      if (ny_env_enabled("NYTRIX_REPL_TRACE"))
+        fprintf(stderr, "[repl-batch] dispatch=run\n");
+      ny_options run_opt = *opt;
+      run_opt.mode = NY_MODE_RUN;
+      run_opt.command_string = stdin_src;
+      run_opt.input_file = NULL;
+      if (supervised)
+        memset(&run_opt.safe_run, 0, sizeof(run_opt.safe_run));
+      int rc = ny_pipeline_run(&run_opt);
+      free(stdin_src);
+      return rc;
+    }
+    if (ny_env_enabled("NYTRIX_REPL_TRACE"))
+      fprintf(stderr, "[repl-batch] dispatch=repl\n");
+    repl_stdin_src = stdin_src;
+  }
+  ny_repl_set_std_mode(repl_std_mode);
+  ny_repl_set_plain(opt->repl_plain ? 1 : 0);
+  ny_repl_set_max_errors(opt->max_errors);
+  ny_repl_run(opt->opt_level, opt->opt_pipeline,
+              opt->command_string ? opt->command_string : repl_stdin_src,
+              repl_batch, opt);
+  free(repl_stdin_src);
+  return 0;
+}
+
+static int ny_repl_safe_child(void *raw) {
+  ny_repl_session_ctx_t *ctx = raw;
+  return ny_run_repl_session(ctx->opt, ctx->supervised);
+}
+
 static bool handle_non_compile_modes(ny_options *opt, int *exit_code) {
   if (opt->mode == NY_MODE_VERSION) {
     printf("Nytrix %s\n", VERSION);
@@ -242,59 +481,30 @@ static bool handle_non_compile_modes(ny_options *opt, int *exit_code) {
     return true;
   }
   if (opt->mode == NY_MODE_REPL) {
-    ny_jit_init_native_once();
-    LLVMLoadLibraryPermanently(NULL);
-    int repl_batch = 0;
-#ifdef _WIN32
-    repl_batch = (_isatty(_fileno(stdin)) == 0);
-#else
-    repl_batch = (isatty(STDIN_FILENO) == 0);
-#endif
-    std_mode_t repl_std_mode = opt->no_std ? STD_MODE_NONE : opt->std_mode;
-    if (repl_batch && ny_env_enabled("NYTRIX_REPL_BATCH_NO_STD") &&
-        !opt->repl_explicit && !opt->std_mode_explicit) {
-      const char *env_std = getenv("NYTRIX_REPL_STD");
-      const char *env_no_std = getenv("NYTRIX_REPL_NO_STD");
-      if ((!env_std || !*env_std) && (!env_no_std || !*env_no_std)) {
-        repl_std_mode = STD_MODE_NONE;
+    bool sanitize_active = opt->sanitize && *opt->sanitize;
+    if (opt->command_string &&
+        (opt->native_only || ny_safe_run_requested(&opt->safe_run) ||
+         sanitize_active)) {
+      ny_options run_opt = *opt;
+      run_opt.mode = NY_MODE_RUN;
+      if (opt->native_only) {
+        /* -c is represented as a one-shot REPL command by option parsing.
+         * Native-only redirects it through the ordinary run pipeline, where
+         * it must be executed rather than treated as a precompile request. */
+        run_opt.emit_only = false;
+        run_opt.run_aot = true;
+        run_opt.run_jit = false;
       }
+      *exit_code = ny_pipeline_run(&run_opt);
+      return true;
     }
-    char *repl_stdin_src = NULL;
-    if (repl_batch && !opt->command_string) {
-      char *stdin_src = ny_read_stdin_all();
-      if (!stdin_src) {
-        NY_LOG_ERR("Failed to read REPL stdin\n");
-        *exit_code = 1;
-        return true;
-      }
-      if (ny_env_enabled("NYTRIX_REPL_TRACE"))
-        fprintf(stderr, "[repl-batch] bytes=%zu fast_candidate=%d\n",
-                strlen(stdin_src),
-                ny_repl_batch_can_fast_run(stdin_src) ? 1 : 0);
-      if (ny_repl_batch_can_fast_run(stdin_src)) {
-        if (ny_env_enabled("NYTRIX_REPL_TRACE"))
-          fprintf(stderr, "[repl-batch] dispatch=run\n");
-        ny_options run_opt = *opt;
-        run_opt.mode = NY_MODE_RUN;
-        run_opt.command_string = stdin_src;
-        run_opt.input_file = NULL;
-        int rc = ny_pipeline_run(&run_opt);
-        free(stdin_src);
-        *exit_code = rc;
-        return true;
-      }
-      if (ny_env_enabled("NYTRIX_REPL_TRACE"))
-        fprintf(stderr, "[repl-batch] dispatch=repl\n");
-      repl_stdin_src = stdin_src;
+    if (ny_safe_run_requested(&opt->safe_run)) {
+      ny_repl_session_ctx_t ctx = {.opt = opt, .supervised = true};
+      *exit_code = ny_safe_run_call(&opt->safe_run, ny_repl_safe_child, &ctx,
+                                    "interactive REPL");
+      return true;
     }
-    ny_repl_set_std_mode(repl_std_mode);
-    ny_repl_set_plain(opt->repl_plain ? 1 : 0);
-    ny_repl_set_max_errors(opt->max_errors);
-    ny_repl_run(opt->opt_level, opt->opt_pipeline,
-                opt->command_string ? opt->command_string : repl_stdin_src,
-                repl_batch);
-    free(repl_stdin_src);
-    *exit_code = 0;
+    *exit_code = ny_run_repl_session(opt, false);
     return true;
   }
   return false;
@@ -621,7 +831,7 @@ static void ny_dump_diagnose_finalize(const ny_options *opt,
   (void)ny_reemit_bitcode_via_ir(art_mod, bc_path);
   ny_write_ir_stats_file(opt, "diag.stats.txt", art_mod);
   {
-    const char *scope =
+    const char *scope_name =
         (opt->dump_scope == NY_DUMP_SCOPE_LIB)
             ? "lib"
             : ((opt->dump_scope == NY_DUMP_SCOPE_BOTH) ? "both" : "program");
@@ -629,7 +839,7 @@ static void ny_dump_diagnose_finalize(const ny_options *opt,
     int n = snprintf(
         summary, sizeof(summary),
         "dump_dir=%s\nscope=%s\nwarn_level=%d\ndiag_compact=%d\nopt_level=%d\n",
-        ny_dump_dir(opt), scope, opt->warn_level, opt->diag_compact ? 1 : 0,
+        ny_dump_dir(opt), scope_name, opt->warn_level, opt->diag_compact ? 1 : 0,
         opt_level);
     if (n > 0)
       ny_write_file(summary_path, summary, (size_t)n);
@@ -797,12 +1007,12 @@ static LLVMModuleRef ny_prepare_ir_dump_module(const ny_options *opt,
     return NULL;
   if (!opt || !opt->debug_symbols)
     LLVMStripModuleDebugInfo(dump_mod);
-  ny_dump_scope_t scope = NY_DUMP_SCOPE_PROGRAM;
+  ny_dump_scope_t dump_scope = NY_DUMP_SCOPE_PROGRAM;
   if (opt)
-    scope = opt->dump_scope;
-  if (scope == NY_DUMP_SCOPE_PROGRAM)
+    dump_scope = opt->dump_scope;
+  if (dump_scope == NY_DUMP_SCOPE_PROGRAM)
     ny_ir_externalize_std_definitions(opt, dump_mod);
-  else if (scope == NY_DUMP_SCOPE_LIB)
+  else if (dump_scope == NY_DUMP_SCOPE_LIB)
     ny_ir_externalize_user_definitions(opt, dump_mod);
   return dump_mod;
 }
@@ -969,6 +1179,29 @@ static void run_dead_strip_if_needed(const ny_options *opt, codegen_t *cg,
 
   if (!dce_enabled)
     return;
+
+  if (is_jit && !ny_env_enabled("NYTRIX_JIT_FORCE_DCE")) {
+    size_t definitions = 0;
+    for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;
+         fn = LLVMGetNextFunction(fn)) {
+      if (!LLVMIsDeclaration(fn))
+        definitions++;
+    }
+    size_t threshold = 512;
+    const char *threshold_env = ny_env_str_nonempty("NYTRIX_JIT_DCE_MAX_FUNCS");
+    if (threshold_env) {
+      char *end = NULL;
+      unsigned long parsed = strtoul(threshold_env, &end, 10);
+      if (end && *end == '\0')
+        threshold = (size_t)parsed;
+    }
+    if (definitions > threshold) {
+      if (verbose_enabled >= 1)
+        NY_LOG_INFO("JIT dead-strip: skipped for %zu definitions (limit=%zu); lazy materialization is faster\n",
+                    definitions, threshold);
+      return;
+    }
+  }
 
   bool internalize_enabled = false;
   if (is_aot || is_jit) {
@@ -1244,8 +1477,8 @@ static bool ny_pipeline_load_stdlib(ny_options *opt, char **uses,
         ny_access(env_bc, R_OK) == 0) {
       std->bc_cache = env_bc;
       std->use_bc_cache = true;
-    } else if (std->mode != STD_MODE_NONE && !opt->run_jit &&
-               !std->has_local && !has_project_std &&
+    } else if (std->mode != STD_MODE_NONE && !std->has_local &&
+               !has_project_std &&
                ny_env_enabled_default_on("NYTRIX_STD_BC_CACHE_AUTO")) {
       std->auto_bc_cache = ny_std_bc_cache_path(
           std->prebuilt_path, (const char *const *)uses, use_count,
@@ -1436,15 +1669,16 @@ int ny_pipeline_run(ny_options *opt) {
   }
   if (opt->extract_code)
     return ny_run_code_extractor(opt);
-  if (ny_try_fast_command_string(opt, t_start))
+  if (!ny_safe_run_requested(&opt->safe_run) &&
+      ny_try_fast_command_string(opt, t_start))
     return 0;
-  bool show_progress = opt->progress ||
-#ifdef _WIN32
-                       ny_progress_enabled_from_env();
-#else
-                       (!opt->no_progress && isatty(STDERR_FILENO)) ||
-                       ny_progress_enabled_from_env();
+  bool debug_output = opt->trace_exec || debug_enabled;
+  bool show_progress = !opt->no_progress && !debug_output &&
+                       (opt->progress || ny_progress_enabled_from_env()
+#ifndef _WIN32
+                        || isatty(STDERR_FILENO)
 #endif
+                       );
   long progress_total = 8;
   if (opt->output_file)
     progress_total += 2;
@@ -1671,6 +1905,53 @@ int ny_pipeline_run(ny_options *opt) {
   if (opt->safe_mode && !ny_safe_mode_validate_raw_memory(&prog)) {
     dump_debug_bundle(opt, source, NULL);
     exit_code = 1;
+    goto exit_success;
+  }
+
+  /* The native-only branch deliberately occurs before codegen_init(): no LLVM
+   * context, module, instruction selection, MCJIT, or LLVM object fallback is
+   * created for this execution mode. */
+  if (opt->native_backend != NY_NATIVE_BACKEND_LLVM && opt->emit_bc_path &&
+      !opt->emit_ir_path) {
+    ny_options native_bc = *opt;
+    native_bc.native_dump_ir = true;
+    native_bc.nyir_dump_bin = true;
+    native_bc.nyir_dump_text = false;
+    native_bc.nyir_dump_bin_path = opt->emit_bc_path;
+    char native_bc_err[512] = {0};
+    if (!ny_native_dump_ir_for_program(&prog, &native_bc, native_bc_err,
+                                       sizeof(native_bc_err))) {
+      NY_LOG_ERR("Native bytecode emission failed: %s\n",
+                 native_bc_err[0] ? native_bc_err : "unknown error");
+      exit_code = 1;
+      goto exit_success;
+    }
+    if (!opt->run_aot) {
+      exit_code = 0;
+      goto exit_success;
+    }
+    exit_code = ny_run_native_only(&prog, opt, output_path, true,
+                                   aot_run_temp);
+    goto exit_success;
+  }
+
+  if (opt->native_only && !opt->emit_ir_path) {
+    if (opt->native_dump_ir) {
+      char native_dump_err[512] = {0};
+      if (!ny_native_dump_ir_for_program(&prog, opt, native_dump_err,
+                                         sizeof(native_dump_err))) {
+        NY_LOG_ERR("Native-only precompile failed: %s\n",
+                   native_dump_err[0] ? native_dump_err : "unknown error");
+        exit_code = 1;
+        goto exit_success;
+      }
+    }
+    if (opt->emit_only && !output_path) {
+      exit_code = 0;
+      goto exit_success;
+    }
+    exit_code = ny_run_native_only(&prog, opt, output_path, aot_run_temp,
+                                   aot_run_temp);
     goto exit_success;
   }
 
@@ -2082,11 +2363,25 @@ int ny_pipeline_run(ny_options *opt) {
     ny_trace_ir_stats("post_opt", cg.module);
     if (opt->do_timing && (opt->opt_level > 0 || opt->opt_pipeline))
       fprintf(stderr, "Optimization: %.4fs\n", ny_ticks_elapsed_sec(t_opt));
+    if (opt->sanitize && *opt->sanitize) {
+      NY_LOG_V2("Applying sanitizer instrumentation: %s\n", opt->sanitize);
+      if (!ny_llvm_apply_sanitize(cg.module, opt->sanitize)) {
+        NY_LOG_ERR("Warning: LLVM sanitizer pass for '%s' failed; linker will "
+                   "still link runtime\n",
+                   opt->sanitize);
+      }
+    }
   }
   ny_dump_diagnose_ir_stage(opt, cg.module, "diag.post.ll", "post-opt");
   if (opt->stop_after == NY_STOP_AFTER_OPT) {
-    ny_stage_emit_artifact(opt, NY_STOP_AFTER_OPT, &prog, &cg, parse_name,
-                           cg.module, true);
+    /* When stopping after optimization for validation (e.g. test runner),
+     * skip the full typed/resolved artifact JSON which invokes Z3 and can
+     * trigger heap-corruption detection in large stdlib compilations.  Just
+     * emit a lightweight pass-through artifact so the caller sees success. */
+    bool emit_full = opt->emit_artifact_path || opt->emit_shapes;
+    ny_stage_emit_artifact(opt, emit_full ? NY_STOP_AFTER_OPT
+                                          : NY_STOP_AFTER_PARSE,
+                           &prog, &cg, parse_name, cg.module, true);
     goto exit_success;
   }
   if ((opt->emit_artifact_path || opt->emit_shapes) &&
@@ -2320,8 +2615,8 @@ skip_compilation:
           runtime_native ? 1 : 0);
       ny_tick_t t_runtime_obj = opt->do_timing ? ny_ticks_now() : 0;
       if (!ny_builder_compile_runtime(cc, rto, NULL, opt->debug_symbols,
-                                      opt->gprof == 1, runtime_speed_level,
-                                      runtime_native)) {
+                                       opt->gprof == 1, runtime_speed_level,
+                                       runtime_native, opt->sanitize)) {
         maybe_log_phase_time(opt->do_timing, "Runtime obj:", t_runtime_obj);
         unlink(obj);
         dump_debug_bundle(opt, source, cg.module);
@@ -2350,7 +2645,8 @@ skip_compilation:
               cc, obj, rto, NULL, NULL, 0,
               (const char *const *)opt->link_dirs.data, opt->link_dirs.len,
               (const char *const *)merged_libs.data, merged_libs.len,
-              output_path, link_strip, opt->debug_symbols, opt->gprof == 1)) {
+              output_path, link_strip, opt->debug_symbols, opt->gprof == 1,
+              opt->sanitize)) {
         ny_progress_task_end(progress_node);
         maybe_log_phase_time(opt->do_timing, "Link:", t_link);
         unlink(obj);
@@ -2380,8 +2676,15 @@ skip_compilation:
     if (show_progress)
       ny_progress_finish();
     if (opt->run_aot) {
+      ny_sanitize_setup_env(opt->sanitize);
+      bool use_safe_run = ny_safe_run_requested(&opt->safe_run) ||
+                          (opt->sanitize && *opt->sanitize);
       const char *argv_exec[] = {output_path, NULL};
-      int rc = ny_exec_spawn(argv_exec);
+      int rc = use_safe_run
+                   ? ny_safe_run_spawn(
+                         &opt->safe_run, argv_exec,
+                         opt->input_file ? opt->input_file : output_path)
+                   : ny_exec_spawn(argv_exec);
       if (rc != 0)
         exit_code = rc;
       if (aot_run_temp)
@@ -2389,6 +2692,7 @@ skip_compilation:
     }
   }
   if (opt->run_jit) {
+    ny_sanitize_setup_env(opt->sanitize);
 #ifndef _WIN32
     if (native_cache_entry) {
       progress_node = ny_progress_task_begin("jit cache", 1);
@@ -2396,9 +2700,19 @@ skip_compilation:
       if (show_progress)
         ny_progress_finish();
       ny_tick_t t_run = opt->do_timing ? ny_ticks_now() : 0;
-      native_cache_entry();
-      extern void rt_print_flush(void);
-      rt_print_flush();
+      bool jit_use_safe_run = ny_safe_run_requested(&opt->safe_run) ||
+                              (opt->sanitize && *opt->sanitize);
+      if (jit_use_safe_run) {
+        int rc = ny_safe_run_call(&opt->safe_run, ny_native_cache_safe_child,
+                                  (void *)native_cache_entry,
+                                  opt->input_file ? opt->input_file
+                                                  : "native JIT cache");
+        if (rc != 0)
+          exit_code = rc;
+      } else {
+        native_cache_entry();
+        rt_print_flush();
+      }
       maybe_log_phase_time(opt->do_timing, "JIT Run:", t_run);
     } else
 #endif
@@ -2411,6 +2725,79 @@ skip_compilation:
       LLVMModuleRef jmod = cg.module;
       LLVMValueRef jit_script_fn = LLVMGetNamedFunction(jmod, "_ny_top_entry");
       LLVMValueRef jit_main_fn = LLVMGetNamedFunction(jmod, "main");
+      bool call_implicit_main =
+          jit_main_fn && !ny_program_has_explicit_main_entry(&cg, cg.prog);
+
+      const char *jit_engine = opt->jit_engine;
+      if (!jit_engine)
+        jit_engine = getenv("NYTRIX_JIT_ENGINE");
+      if (jit_engine && strcmp(jit_engine, "orc") == 0 &&
+          opt->native_backend == NY_NATIVE_BACKEND_LLVM) {
+        if (opt->debug_symbols)
+          LLVMStripModuleDebugInfo(jmod);
+        uint64_t saddr = 0, main_addr = 0;
+        char *orc_error = NULL;
+
+        if (!ny_orc_jit_ensure_engine(&cg, &orc_error)) {
+          ny_progress_task_end(progress_node);
+          NY_LOG_ERR("ORC JIT ensure failed: %s\n",
+                     orc_error ? orc_error : "unknown error");
+          free(orc_error);
+          exit_code = 1;
+          goto exit_success;
+        }
+
+        void *rt = NULL;
+        bool module_consumed = false;
+        bool executed = ny_orc_jit_execute(
+            &cg, jmod, cg.ctx, &saddr, &main_addr, &rt, &module_consumed,
+            &orc_error);
+
+        if (module_consumed) {
+          cg.module = NULL;
+          cg.ctx = NULL;
+          cg.llvm_ctx_owned = false;
+        }
+        if (!executed) {
+          ny_progress_task_end(progress_node);
+          NY_LOG_ERR("ORC JIT execute failed: %s\n",
+                     orc_error ? orc_error : "unknown error");
+          free(orc_error);
+          exit_code = 1;
+          goto exit_success;
+        }
+        free(orc_error);
+        maybe_log_phase_time(opt->do_timing, "JIT Init:", t_jit);
+        ny_progress_task_end(progress_node);
+        if (show_progress)
+          ny_progress_finish();
+        ny_tick_t t_run = opt->do_timing ? ny_ticks_now() : 0;
+        if (saddr) {
+          bool use_safe_run = ny_safe_run_requested(&opt->safe_run) ||
+                              (opt->sanitize && *opt->sanitize);
+          if (use_safe_run) {
+            ny_jit_safe_call_t call = {
+                saddr, call_implicit_main ? main_addr : 0};
+            int rc = ny_safe_run_call(
+                &opt->safe_run, ny_jit_safe_child, &call,
+                opt->input_file ? opt->input_file : "inline ORC JIT workload");
+            if (rc != 0)
+              exit_code = rc;
+          } else if (!ny_jit_prepare_call(
+                         saddr, call_implicit_main ? main_addr : 0)) {
+            NY_LOG_ERR("JIT code memory is not executable\n");
+            exit_code = 1;
+          } else {
+            ((void (*)(void))saddr)();
+            if (call_implicit_main && main_addr)
+              (void)((int64_t (*)(void))main_addr)();
+            rt_print_flush();
+          }
+        }
+        maybe_log_phase_time(opt->do_timing, "JIT Run:", t_run);
+        ny_orc_jit_remove_module(rt);
+        goto jit_execution_done;
+      }
 
       if (opt->debug_symbols)
         LLVMStripModuleDebugInfo(jmod);
@@ -2424,7 +2811,6 @@ skip_compilation:
         if (fast_isel_env && *fast_isel_env) {
           jopt.EnableFastISel = ny_env_is_truthy(fast_isel_env) ? 1 : 0;
         } else if (!ny_jit_module_is_apple_arm64(jmod)) {
-
           jopt.EnableFastISel = 1;
         }
       }
@@ -2437,19 +2823,17 @@ skip_compilation:
         goto exit_success;
       }
       cg.module = NULL;
-      {
-        if (ny_env_enabled("NYTRIX_JIT_MAP_STRINGS")) {
-          for (size_t i = 0; i < cg.interns.len; i++) {
-            if (cg.interns.data[i].gv) {
-              LLVMAddGlobalMapping(
-                  ee, cg.interns.data[i].gv,
-                  (void *)((char *)cg.interns.data[i].data - 64));
-            }
-            if (cg.interns.data[i].val &&
-                cg.interns.data[i].val != cg.interns.data[i].gv) {
-              LLVMAddGlobalMapping(ee, cg.interns.data[i].val,
-                                   &cg.interns.data[i].data);
-            }
+      if (ny_env_enabled("NYTRIX_JIT_MAP_STRINGS")) {
+        for (size_t i = 0; i < cg.interns.len; i++) {
+          if (cg.interns.data[i].gv) {
+            LLVMAddGlobalMapping(
+                ee, cg.interns.data[i].gv,
+                (void *)((char *)cg.interns.data[i].data - 64));
+          }
+          if (cg.interns.data[i].val &&
+              cg.interns.data[i].val != cg.interns.data[i].gv) {
+            LLVMAddGlobalMapping(ee, cg.interns.data[i].val,
+                                 &cg.interns.data[i].data);
           }
         }
       }
@@ -2469,21 +2853,30 @@ skip_compilation:
         ny_progress_finish();
       ny_tick_t t_run = opt->do_timing ? ny_ticks_now() : 0;
       if (saddr) {
-        ny_jit_prepare_execution();
-        if (verbose_enabled >= 3)
-          fprintf(stderr, "TRACE: Executing script...\n");
-        ((void (*)(void))saddr)();
         uint64_t main_addr =
             (jit_main_fn && !ny_program_has_explicit_main_entry(&cg, cg.prog))
                 ? (uint64_t)LLVMGetPointerToGlobal(ee, jit_main_fn)
                 : 0;
-        if (main_addr) {
+        bool jit_use_safe_run2 = ny_safe_run_requested(&opt->safe_run) ||
+                                (opt->sanitize && *opt->sanitize);
+        if (jit_use_safe_run2) {
+          ny_jit_safe_call_t call = {saddr, main_addr};
+          int rc = ny_safe_run_call(
+              &opt->safe_run, ny_jit_safe_child, &call,
+              opt->input_file ? opt->input_file : "inline JIT workload");
+          if (rc != 0)
+            exit_code = rc;
+        } else if (!ny_jit_prepare_call(saddr, main_addr)) {
+          NY_LOG_ERR("JIT code memory is not executable\n");
+          exit_code = 1;
+        } else {
           if (verbose_enabled >= 3)
-            fprintf(stderr, "TRACE: Executing main...\n");
-          (void)((int64_t (*)(void))main_addr)();
+            fprintf(stderr, "TRACE: Executing script...\n");
+          ((void (*)(void))saddr)();
+          if (main_addr)
+            (void)((int64_t (*)(void))main_addr)();
+          rt_print_flush();
         }
-        extern void rt_print_flush(void);
-        rt_print_flush();
         if (verbose_enabled >= 3)
           fprintf(stderr, "TRACE: Script finished.\n");
       } else {
@@ -2492,6 +2885,8 @@ skip_compilation:
       }
       maybe_log_phase_time(opt->do_timing, "JIT Run:", t_run);
       LLVMDisposeExecutionEngine(ee);
+    jit_execution_done:
+      ;
     }
   }
 exit_success:

@@ -3181,9 +3181,13 @@ fn _rect_seq_at(any r, int index, f64 fallback=0.0) f64 {
    (is_list(r) || is_tuple(r)) ? float(r.get(index, fallback)) : fallback
 }
 
+;; Returns the result of the `rect_x` operation.
 fn rect_x(any r) f64 { is_dict(r) ? float(r.get("x", 0.0)) : _rect_seq_at(r, 0, 0.0) }
+;; Returns the result of the `rect_y` operation.
 fn rect_y(any r) f64 { is_dict(r) ? float(r.get("y", 0.0)) : _rect_seq_at(r, 1, 0.0) }
+;; Returns the result of the `rect_w` operation.
 fn rect_w(any r) f64 { is_dict(r) ? float(r.get("w", r.get("width", 0.0))) : _rect_seq_at(r, 2, 0.0) }
+;; Returns the result of the `rect_h` operation.
 fn rect_h(any r) f64 { is_dict(r) ? float(r.get("h", r.get("height", 0.0))) : _rect_seq_at(r, 3, 0.0) }
 
 comptime table HexNibble {

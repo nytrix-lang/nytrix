@@ -1,0 +1,11 @@
+shape sanitizer_aot_execution_matrix {
+  family "runtime-sanitize"
+  generator "runtime"
+  features [sanitize address undefined aot execution]
+  template ny-test-case
+  flags_matrix "--sanitize=address --no-progress --color=never; --sanitize=undefined --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+print(42)
+NY
+}

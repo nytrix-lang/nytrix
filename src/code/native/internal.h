@@ -5,6 +5,7 @@
 #include "code/native/ir.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 
 typedef struct ny_native_writer_t {
   char *data;
@@ -17,6 +18,32 @@ bool ny_native_printf(ny_native_writer_t *w, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 void ny_native_set_err(char *err, size_t err_len, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
+size_t ny_native_nir_local_count(const ny_nir_func_t *f);
+bool ny_native_ensure_parent_dir_for_path(const char *path);
+bool ny_native_emit_nir_func(ny_native_writer_t *w,
+                             const ny_native_target_info_t *target,
+                             const ny_nir_func_t *nir, const char *label,
+                             bool tag_return, char *err, size_t err_len);
+bool ny_native_collect_vm_profile(ny_nir_func_t *rt_main,
+                                  ny_nir_func_t *funcs,
+                                  const char **names, size_t count,
+                                  const ny_options *opt,
+                                  ny_nir_eval_result_t *profile,
+                                  char *err, size_t err_len);
+bool ny_native_eval_ir_value(ny_nir_func_t *rt_main, ny_nir_func_t *funcs,
+                             const char **names, size_t count,
+                             const ny_options *opt,
+                             ny_nir_eval_result_t *out, char *err,
+                             size_t err_len);
+bool ny_native_nir_dump_function(FILE *out, const stmt_t *fn, char *err,
+                                 size_t err_len, const ny_options *opt);
+bool ny_native_nir_dump_rt_main(FILE *out, const program_t *prog, char *err,
+                                size_t err_len, const ny_options *opt);
+bool ny_native_nir_dump_rt_main_binary(FILE *out, const program_t *prog,
+                                       char *err, size_t err_len);
+bool ny_native_write_nir_metadata_report(const program_t *prog,
+                                         const ny_options *opt, char *err,
+                                         size_t err_len);
 
 bool ny_native_x86_64_emit_rt_main(ny_native_writer_t *w,
                                    const ny_native_target_info_t *target,
@@ -95,6 +122,11 @@ bool ny_native_i386_emit_nir(ny_native_writer_t *w,
 
 
 bool ny_native_emit_elf64_object_from_nirs(
+    const ny_nir_func_t *rt_main, const ny_nir_func_t *funcs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *path,
+    const char *entry_symbol, bool tag_return, char *err, size_t err_len);
+bool ny_native_emit_elf64_aarch64_object_from_nirs(
     const ny_nir_func_t *rt_main, const ny_nir_func_t *funcs,
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, const char *path,

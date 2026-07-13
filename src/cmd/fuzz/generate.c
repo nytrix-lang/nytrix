@@ -12,7 +12,7 @@ typedef struct {
 } gen_shape_t;
 
 typedef struct {
-  gen_shape_t items[128];
+  gen_shape_t items[256];
   int count;
 } gen_shapes_t;
 
@@ -207,17 +207,17 @@ static const char *canonical_generator_method(const char *generator) {
 }
 
 static const char *source_kind_for_method(const char *method, const gen_shape_t *shape) {
-  if (method && strcmp(method, "ir") == 0) return "nynth-core-ir-typed-ast";
-  if (method && strcmp(method, "stress") == 0) return "nynth-core-stress-optimizer";
-  if (shape && strcmp(shape->generator, "optimizer") == 0) return "nynth-core-optimizer-pattern";
-  if (shape && strcmp(shape->generator, "torture") == 0) return "nynth-core-gcc-torture-inspired";
-  return "nynth-core-typed-ast";
+  if (method && strcmp(method, "ir") == 0) return "nytrix-core-ir-typed-ast";
+  if (method && strcmp(method, "stress") == 0) return "nytrix-core-stress-optimizer";
+  if (shape && strcmp(shape->generator, "optimizer") == 0) return "nytrix-core-optimizer-pattern";
+  if (shape && strcmp(shape->generator, "torture") == 0) return "nytrix-core-gcc-torture-inspired";
+  return "nytrix-core-typed-ast";
 }
 
 static const char *case_prefix_for_method(const char *method) {
   if (method && strcmp(method, "ir") == 0) return "ir";
   if (method && strcmp(method, "stress") == 0) return "stress";
-  return "nynth";
+  return "nytrix";
 }
 
 static const char *emission_shape_name(const char *shape) {
@@ -319,7 +319,7 @@ static void print_shape_list_json(const gen_shapes_t *all, const gen_shape_t *po
                                   const char *shape_name, const char *method,
                                   const char *schedule) {
   int pi = profile_index(profile);
-  printf("{\"ok\":true,\"engine\":\"nynth_core\",\"mode\":\"list-shapes\",\"shape_dir\":");
+  printf("{\"ok\":true,\"engine\":\"nytrix_core\",\"mode\":\"list-shapes\",\"shape_dir\":");
   json_str(stdout, shape_dir ? shape_dir : "");
   printf(",\"profile\":");
   json_str(stdout, profile ? profile : "balanced");
@@ -366,7 +366,7 @@ static void print_int_array(FILE *f, const int *values, int n, const char *sep) 
 static void emit_c_prelude(FILE *f, bool need_get) {
   fputs("#include <stdbool.h>\n#include <stdint.h>\n#include <stdio.h>\n\n", f);
   if (need_get) {
-    fputs("static int nynth_get(const int *data, int n, int idx, int defv) {\n"
+    fputs("static int nytrix_get(const int *data, int n, int idx, int defv) {\n"
           "    if (idx < 0 || idx >= n) return defv;\n"
           "    return data[idx];\n"
           "}\n\n", f);
@@ -380,8 +380,8 @@ static bool shape_needs_get(const char *shape) {
 
 static void emit_c_metadata(FILE *f, const gen_case_t *c) {
   fprintf(f,
-          "/* nynth: seed=%d shape=%s generator=%s profile=%s insane=%s n=%d rounds=%d */\n"
-          "/* repro: ./build/nynth synth print --lang both --shape %s --generator %s --seed %d --out build/repro */\n",
+          "/* nytrix: seed=%d shape=%s generator=%s profile=%s insane=%s n=%d rounds=%d */\n"
+          "/* repro: ./build/nytrix synth print --lang both --shape %s --generator %s --seed %d --out build/repro */\n",
           c->seed, c->shape->name, c->generator, c->profile,
           c->insane ? "true" : "false", c->n, c->rounds,
           c->shape->name, c->generator, c->seed);
@@ -459,7 +459,7 @@ static void emit_c_case(FILE *f, const gen_case_t *c) {
     print_int_array(f, c->values, n, ", ");
     fprintf(f, "};\n    int acc = 0;\n    for (int i = 0; i < %d; i += 1) {\n"
                "        int idx = (i %% %d);\n"
-               "        int got = nynth_get(data, (int)(sizeof(data) / sizeof(data[0])), idx, %d);\n"
+               "        int got = nytrix_get(data, (int)(sizeof(data) / sizeof(data[0])), idx, %d);\n"
                "        if ((idx < 0) || (idx >= ((int)(sizeof(data) / sizeof(data[0]))))) {\n"
                "            acc += (got - i);\n"
                "        } else {\n"
@@ -803,8 +803,8 @@ static void emit_ny_zero_array(FILE *f, int n) {
 
 static void emit_ny_metadata(FILE *f, const gen_case_t *c) {
   fprintf(f,
-          ";; nynth: seed=%d shape=%s generator=%s profile=%s insane=%s n=%d rounds=%d\n"
-          ";; repro: ./build/nynth synth print --lang both --shape %s --generator %s --seed %d --out build/repro\n",
+          ";; nytrix: seed=%d shape=%s generator=%s profile=%s insane=%s n=%d rounds=%d\n"
+          ";; repro: ./build/nytrix synth print --lang both --shape %s --generator %s --seed %d --out build/repro\n",
           c->seed, c->shape->name, c->generator, c->profile,
           c->insane ? "true" : "false", c->n, c->rounds,
           c->shape->name, c->generator, c->seed);
@@ -1208,7 +1208,7 @@ static void safe_case_name(const char *prefix, const char *shape, int idx, char 
       safe[j++] = '_';
   }
   safe[j] = '\0';
-  snprintf(out, out_sz, "%s_%03d_%s", prefix && *prefix ? prefix : "nynth", idx, safe[0] ? safe : "case");
+  snprintf(out, out_sz, "%s_%03d_%s", prefix && *prefix ? prefix : "nytrix", idx, safe[0] ? safe : "case");
 }
 
 static void init_gen_case(gen_case_t *c, const gen_shape_t *shape, int idx, int seed,
@@ -1250,7 +1250,7 @@ static bool write_case_file(const char *path, void (*emit)(FILE *, const gen_cas
 
 static void case_repro_command(const gen_case_t *c, char *out, size_t out_sz) {
   snprintf(out, out_sz,
-           "./build/nynth synth print --lang both --shape %s --generator %s --seed %d%s --out build/repro",
+           "./build/nytrix synth print --lang both --shape %s --generator %s --seed %d%s --out build/repro",
            c->shape->name, c->generator, c->seed, c->insane ? " --insane" : "");
 }
 
@@ -1273,7 +1273,7 @@ static void write_case_ir(FILE *f, const gen_case_t *c) {
   json_str(f, c->method);
   fprintf(f, ",\n  \"source_kind\": ");
   json_str(f, c->source_kind);
-  fprintf(f, ",\n  \"emitter_engine\": \"nynth_core\",\n  \"insane\": %s,\n  \"features\": %s,\n  \"shape_source\": ",
+  fprintf(f, ",\n  \"emitter_engine\": \"nytrix_core\",\n  \"insane\": %s,\n  \"features\": %s,\n  \"shape_source\": ",
           c->insane ? "true" : "false",
           c->shape->features[0] ? c->shape->features : "[]");
   json_str(f, c->shape->source);
@@ -1302,7 +1302,7 @@ static bool write_ir_file(const char *path, const gen_case_t *c) {
 }
 
 int cmd_generate_batch(int argc, char **argv) {
-  const char *shape_dir = arg_value(argc, argv, "--shape-dir", "shapes");
+  const char *shape_dir = arg_value(argc, argv, "--shape-dir", "etc/tests/fuzz/shapes");
   const char *profile = arg_value(argc, argv, "--profile", "balanced");
   const char *out_dir = arg_value(argc, argv, "--out", "build/generated/native");
   const char *generator = arg_value(argc, argv, "--generator", "mixed");
@@ -1343,7 +1343,7 @@ int cmd_generate_batch(int argc, char **argv) {
     return 1;
   }
 
-  printf("{\"ok\":true,\"engine\":\"nynth_core\",\"out_dir\":");
+  printf("{\"ok\":true,\"engine\":\"nytrix_core\",\"out_dir\":");
   json_str(stdout, out_dir);
   printf(",\"profile\":");
   json_str(stdout, profile);
@@ -1367,7 +1367,7 @@ int cmd_generate_batch(int argc, char **argv) {
     bool path_ok = asprintf(&case_dir, "%s/%s", out_dir, c.name) >= 0 &&
                    asprintf(&c_path, "%s/%s.c", case_dir, c.name) >= 0 &&
                    asprintf(&ny_path, "%s/%s.ny", case_dir, c.name) >= 0 &&
-                   asprintf(&ir_path, "%s/%s.nynth.json", case_dir, c.name) >= 0;
+                   asprintf(&ir_path, "%s/%s.nytrix.json", case_dir, c.name) >= 0;
     if (!path_ok || !mkdir_p(case_dir) ||
         !write_case_file(c_path, emit_c_case, &c) ||
         !write_case_file(ny_path, emit_ny_case, &c) ||
@@ -1410,7 +1410,7 @@ int cmd_generate_batch(int argc, char **argv) {
     json_str(stdout, c_path);
     printf(",\"ny_source\":");
     json_str(stdout, ny_path);
-    printf(",\"nynth_ir\":");
+    printf(",\"nytrix_ir\":");
     json_str(stdout, ir_path);
     printf("}");
     free(case_dir); free(c_path); free(ny_path); free(ir_path);

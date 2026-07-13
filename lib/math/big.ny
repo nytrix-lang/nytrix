@@ -50,7 +50,7 @@ fn _big_zero() bigint { __bigint_from_int(0) }
 fn is_bigint(any x) bool {
    "Returns true if `x` is a BigInt object."
    if _big_is_rt(x) { return true }
-   is_ptr(x) && __tagof(x) == _TAG_LIST && x.get(0) == 107
+   is_ptr(x) && __tagof(x) == std.math.big._TAG_LIST && x.get(0) == 107
 }
 
 fn _big_make(int sign, list digits, bool owned=false) any {

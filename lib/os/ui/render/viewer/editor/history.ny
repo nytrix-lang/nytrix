@@ -11,6 +11,7 @@ use std.core
 use std.core.str as str
 use std.os.ui.render.viewer.editor as ed
 
+;; Creates a new module state with the supplied configuration.
 fn new() dict {
    {"undo": [], "redo": []}
 }
@@ -36,6 +37,7 @@ fn _clone_buffers(list buffers) list {
    out
 }
 
+;; Returns the result of the `snapshot` operation.
 fn snapshot(dict st) dict {
    {
       "buffers": _clone_buffers(st.get("buffers", [])),
@@ -71,6 +73,7 @@ fn _restore(dict st, dict snap) dict {
    st
 }
 
+;; Returns the result of the `push` operation.
 fn push(dict hist, dict st) dict {
    def snap = snapshot(st)
    mut undo = hist.get("undo", [])
@@ -86,6 +89,7 @@ fn _pack(dict hist, dict st, str status="") dict {
    {"hist": hist, "st": st, "status": status}
 }
 
+;; Returns the result of the `undo` operation.
 fn undo(dict hist, dict st) dict {
    mut undo = hist.get("undo", [])
    if undo.len <= 0 { return _pack(hist, st, "nothing to undo") }
@@ -98,6 +102,7 @@ fn undo(dict hist, dict st) dict {
    _pack(hist, _restore(st, snap), "undo")
 }
 
+;; Returns the result of the `redo` operation.
 fn redo(dict hist, dict st) dict {
    mut redo = hist.get("redo", [])
    if redo.len <= 0 { return _pack(hist, st, "nothing to redo") }
@@ -116,6 +121,7 @@ fn _before_edit(dict hist, dict st) dict {
    {"hist": hist, "st": st}
 }
 
+;; Writes the text and returns the result.
 fn insert_text(dict hist, dict st, str text) dict {
    if text.len <= 0 { return _pack(hist, st) }
    def p = _before_edit(hist, st)
@@ -124,11 +130,13 @@ fn insert_text(dict hist, dict st, str text) dict {
    _pack(hist, st)
 }
 
+;; Returns the result of the `newline` operation.
 fn newline(dict hist, dict st) dict {
    def p = _before_edit(hist, st)
    _pack(p.get("hist", hist), ed.newline(p.get("st", st)))
 }
 
+;; Returns the result of the `backspace` operation.
 fn backspace(dict hist, dict st) dict {
    hist = push(hist, st)
    if ed.selection_valid(st) { st = ed.delete_selection(st) }
@@ -136,6 +144,7 @@ fn backspace(dict hist, dict st) dict {
    _pack(hist, st)
 }
 
+;; Releases the char.
 fn delete_char(dict hist, dict st) dict {
    hist = push(hist, st)
    if ed.selection_valid(st) { st = ed.delete_selection(st) }
@@ -143,12 +152,14 @@ fn delete_char(dict hist, dict st) dict {
    _pack(hist, st)
 }
 
+;; Returns the result of the `cut_selection` operation.
 fn cut_selection(dict hist, dict st) dict {
    if !ed.selection_valid(st) { return _pack(hist, st, "no selection") }
    hist = push(hist, st)
    _pack(hist, ed.delete_selection(st), "cut")
 }
 
+;; Writes the pair and returns the result.
 fn insert_pair(dict hist, dict st, str open, str close) dict {
    hist = push(hist, st)
    def selected = ed.selection_text(st)

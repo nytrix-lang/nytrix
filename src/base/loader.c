@@ -240,7 +240,18 @@ static void add_module_from_path(const char *root, const char *full_path) {
   free(pkg);
 }
 
+static void scan_dir_recursive_depth(const char *root, const char *dir, int depth);
+
 static void scan_dir_recursive(const char *root, const char *dir) {
+  scan_dir_recursive_depth(root, dir, 0);
+}
+
+static void scan_dir_recursive_depth(const char *root, const char *dir, int depth) {
+  if (depth > 32) {
+    if (ny_std_trace_enabled())
+      fprintf(stderr, "STD_TRACE max recursion depth at: %s\n", dir);
+    return;
+  }
   if (ny_std_trace_enabled()) {
     fprintf(stderr, "STD_TRACE dir: %s\n", dir);
   }
@@ -259,10 +270,17 @@ static void scan_dir_recursive(const char *root, const char *dir) {
     bool handled = false;
 #if defined(_DIRENT_HAVE_D_TYPE)
     if (ent->d_type == DT_DIR) {
-      scan_dir_recursive(root, fp);
+      scan_dir_recursive_depth(root, fp, depth + 1);
       handled = true;
     } else if (ent->d_type == DT_REG) {
       if (is_ny_file(fp))
+        add_module_from_path(root, fp);
+      handled = true;
+    } else if (ent->d_type == DT_LNK) {
+      /* Resolve symlinks: follow only if target is a regular file, to avoid
+       * directory symlink cycles causing infinite recursion. */
+      struct stat st;
+      if (stat(fp, &st) == 0 && S_ISREG(st.st_mode) && is_ny_file(fp))
         add_module_from_path(root, fp);
       handled = true;
     }
@@ -271,7 +289,7 @@ static void scan_dir_recursive(const char *root, const char *dir) {
       struct stat st;
       if (stat(fp, &st) == 0) {
         if (S_ISDIR(st.st_mode)) {
-          scan_dir_recursive(root, fp);
+          scan_dir_recursive_depth(root, fp, depth + 1);
         } else if (S_ISREG(st.st_mode) && is_ny_file(fp)) {
           add_module_from_path(root, fp);
         }
@@ -314,15 +332,18 @@ static void ny_std_build_mod_lookup(void) {
       continue;
     uint64_t h = ny_hash64_cstr(k);
     size_t pos = (size_t)(h & (uint64_t)(cap - 1));
-    while (ny_std_mod_ht[pos].key) {
+    for (size_t probe = 0; probe < cap; ++probe) {
+      if (!ny_std_mod_ht[pos].key) {
+        ny_std_mod_ht[pos].key = k;
+        ny_std_mod_ht[pos].idx = (int)i;
+        goto next_mod;
+      }
       if (strcmp(ny_std_mod_ht[pos].key, k) == 0) {
         ny_std_mod_ht[pos].idx = (int)i;
         goto next_mod;
       }
       pos = (pos + 1) & (cap - 1);
     }
-    ny_std_mod_ht[pos].key = k;
-    ny_std_mod_ht[pos].idx = (int)i;
   next_mod:
     (void)0;
   }
@@ -333,7 +354,7 @@ static int ny_std_lookup_exact_fast(const char *name) {
     return -1;
   size_t mask = ny_std_mod_ht_cap - 1;
   size_t pos = (size_t)(ny_hash64_cstr(name) & (uint64_t)mask);
-  for (;;) {
+  for (size_t probe = 0; probe < ny_std_mod_ht_cap; ++probe) {
     const char *k = ny_std_mod_ht[pos].key;
     if (!k)
       return -1;
@@ -341,6 +362,7 @@ static int ny_std_lookup_exact_fast(const char *name) {
       return ny_std_mod_ht[pos].idx;
     pos = (pos + 1) & mask;
   }
+  return -1;
 }
 
 static bool ny_scan_recursive_if_dir(const char *root, const char *dir) {
@@ -1524,6 +1546,7 @@ static char *dir_from_path(const char *path) {
 
 typedef struct {
   char *path;
+  char *canonical_path;
   char *name;
   bool processed;
   bool is_std;
@@ -1541,6 +1564,7 @@ typedef struct {
   size_t len;
   size_t cap;
   const char **path_ht;
+  size_t *path_idx_ht;
   size_t path_ht_cap;
   size_t path_ht_len;
   bool skip_std;
@@ -1562,15 +1586,19 @@ static void mod_list_path_ht_init(mod_list *list, size_t want_cap) {
     return;
   list->path_ht_cap = mod_list_pow2_cap(want_cap ? want_cap : 16);
   list->path_ht = ny_loader_xmalloc(list->path_ht_cap * sizeof(list->path_ht[0]));
+  list->path_idx_ht = ny_loader_xmalloc(list->path_ht_cap * sizeof(list->path_idx_ht[0]));
   memset((void *)list->path_ht, 0, list->path_ht_cap * sizeof(list->path_ht[0]));
+  memset((void *)list->path_idx_ht, 0, list->path_ht_cap * sizeof(list->path_idx_ht[0]));
   list->path_ht_len = 0;
 }
 
 static void mod_list_path_ht_rebuild(mod_list *list, size_t want_cap) {
   const char **old_ht = list->path_ht;
+  size_t *old_idx = list->path_idx_ht;
   size_t old_cap = list->path_ht_cap;
 
   list->path_ht = NULL;
+  list->path_idx_ht = NULL;
   list->path_ht_cap = 0;
   list->path_ht_len = 0;
   mod_list_path_ht_init(list, want_cap);
@@ -1586,9 +1614,11 @@ static void mod_list_path_ht_rebuild(mod_list *list, size_t want_cap) {
     while (list->path_ht[pos])
       pos = (pos + 1u) & mask;
     list->path_ht[pos] = k;
+    list->path_idx_ht[pos] = old_idx[i];
     list->path_ht_len++;
   }
   free((void *)old_ht);
+  free(old_idx);
 }
 
 static bool mod_list_has_path(mod_list *list, const char *path) {
@@ -1597,7 +1627,7 @@ static bool mod_list_has_path(mod_list *list, const char *path) {
     return false;
   size_t mask = list->path_ht_cap - 1u;
   size_t pos = mod_list_hash_path(path) & mask;
-  for (;;) {
+  for (size_t probe = 0; probe < list->path_ht_cap; ++probe) {
     const char *k = list->path_ht[pos];
     if (!k)
       return false;
@@ -1605,18 +1635,61 @@ static bool mod_list_has_path(mod_list *list, const char *path) {
       return true;
     pos = (pos + 1u) & mask;
   }
+  return false;
 }
 
-static void mod_list_put_path(mod_list *list, const char *path) {
+static void mod_list_put_path_idx(mod_list *list, const char *path, size_t entry_idx) {
   mod_list_path_ht_init(list, list->cap ? list->cap * 2 : 16);
   if ((list->path_ht_len + 1u) * 10u >= list->path_ht_cap * 7u)
     mod_list_path_ht_rebuild(list, list->path_ht_cap ? list->path_ht_cap * 2u : 32u);
   size_t mask = list->path_ht_cap - 1u;
   size_t pos = mod_list_hash_path(path) & mask;
-  while (list->path_ht[pos])
+  for (size_t probe = 0; probe < list->path_ht_cap; ++probe) {
+    if (!list->path_ht[pos])
+      break;
     pos = (pos + 1u) & mask;
+  }
   list->path_ht[pos] = path;
+  list->path_idx_ht[pos] = entry_idx;
   list->path_ht_len++;
+}
+
+static void mod_list_put_path(mod_list *list, const char *path) {
+  mod_list_put_path_idx(list, path, (size_t)-1);
+}
+
+static void mod_list_reindex_paths(mod_list *list) {
+  if (!list)
+    return;
+  free((void *)list->path_ht);
+  free(list->path_idx_ht);
+  list->path_ht = NULL;
+  list->path_idx_ht = NULL;
+  list->path_ht_cap = 0;
+  list->path_ht_len = 0;
+  mod_list_path_ht_init(list, list->len * 2u + 1u);
+  for (size_t i = 0; i < list->len; ++i) {
+    if (list->entries[i].path)
+      mod_list_put_path_idx(list, list->entries[i].path, i);
+  }
+}
+
+static long mod_list_find_index_by_path(mod_list *list, const char *path) {
+  if (!list || !path || !list->path_ht)
+    return -1;
+  size_t mask = list->path_ht_cap - 1u;
+  size_t pos = mod_list_hash_path(path) & mask;
+  for (size_t probe = 0; probe < list->path_ht_cap; ++probe) {
+    const char *k = list->path_ht[pos];
+    if (!k)
+      return -1;
+    if (strcmp(k, path) == 0) {
+      size_t idx = list->path_idx_ht[pos];
+      return idx == (size_t)-1 ? -1 : (long)idx;
+    }
+    pos = (pos + 1u) & mask;
+  }
+  return -1;
 }
 
 static int mod_priority(const char *path) {
@@ -1680,27 +1753,42 @@ static void mod_entry_add_dep(mod_entry *entry, const char *path) {
 static long mod_list_find_entry_by_path(mod_list *list, const char *path) {
   if (!list || !path)
     return -1;
-  for (size_t i = 0; i < list->len; ++i) {
-    if (list->entries[i].path && strcmp(list->entries[i].path, path) == 0)
-      return (long)i;
-  }
-  return -1;
+  return mod_list_find_index_by_path(list, path);
 }
 
 static void mod_list_visit_deps(mod_list *list, size_t idx, unsigned char *state,
-                                size_t *order, size_t *order_len) {
+                                size_t *stack, size_t depth, size_t *order,
+                                size_t *order_len, size_t *cycle_count) {
   if (!list || idx >= list->len || !state || !order || !order_len)
     return;
   if (state[idx] == 2)
     return;
-  if (state[idx] == 1)
+  if (state[idx] == 1) {
+    size_t report = cycle_count ? ++*cycle_count : 1;
+    if (!getenv("NYTRIX_TRACE_IMPORTS") || report > 16)
+      return;
+    size_t begin = 0;
+    while (begin < depth && stack[begin] != idx)
+      ++begin;
+    fprintf(stderr, "warning: module dependency cycle detected");
+    for (size_t i = begin; i < depth; ++i)
+      fprintf(stderr, "%s%s", i == begin ? ": " : " -> ",
+              list->entries[stack[i]].name ? list->entries[stack[i]].name
+                                           : list->entries[stack[i]].path);
+    fprintf(stderr, " -> %s\n", list->entries[idx].name
+                                    ? list->entries[idx].name
+                                    : list->entries[idx].path);
     return;
+  }
   state[idx] = 1;
+  stack[depth++] = idx;
   mod_entry *entry = &list->entries[idx];
   for (size_t i = 0; i < entry->deps_len; ++i) {
     long dep_idx = mod_list_find_entry_by_path(list, entry->deps[i]);
-    if (dep_idx >= 0 && (size_t)dep_idx != idx && !list->entries[dep_idx].skip_entry)
-      mod_list_visit_deps(list, (size_t)dep_idx, state, order, order_len);
+    if (dep_idx >= 0 && (size_t)dep_idx != idx && !list->entries[dep_idx].skip_entry) {
+      mod_list_visit_deps(list, (size_t)dep_idx, state, stack, depth, order,
+                          order_len, cycle_count);
+    }
   }
   state[idx] = 2;
   order[(*order_len)++] = idx;
@@ -1709,36 +1797,35 @@ static void mod_list_visit_deps(mod_list *list, size_t idx, unsigned char *state
 static void mod_list_sort_for_bundle(mod_list *list) {
   if (!list || list->len < 2)
     return;
-  qsort(list->entries, list->len, sizeof(mod_entry), mod_entry_path_cmp);
   unsigned char *state = calloc(list->len, sizeof(unsigned char));
   size_t *order = malloc(list->len * sizeof(size_t));
-  if (!state || !order) {
+  size_t *stack = malloc(list->len * sizeof(size_t));
+  if (!state || !order || !stack) {
     free(state);
     free(order);
+    free(stack);
     return;
   }
   size_t order_len = 0;
+  size_t cycle_count = 0;
   for (size_t i = 0; i < list->len; ++i)
-    mod_list_visit_deps(list, i, state, order, &order_len);
-  if (order_len == list->len) {
-    mod_entry *sorted = ny_loader_xmalloc(list->len * sizeof(mod_entry));
-    for (size_t i = 0; i < list->len; ++i)
-      sorted[i] = list->entries[order[i]];
-    free(list->entries);
-    list->entries = sorted;
-  }
+    mod_list_visit_deps(list, i, state, stack, 0, order, &order_len,
+                        &cycle_count);
+  if (getenv("NYTRIX_TRACE_IMPORTS") && cycle_count > 16)
+    fprintf(stderr, "warning: %zu additional module dependency cycles omitted\n",
+            cycle_count - 16);
+  /* Module initialization currently follows discovery order. The graph walk
+   * validates cycles and dependencies, but must not reorder entries until
+   * initialization edges are represented separately from import edges. */
   free(state);
   free(order);
+  free(stack);
 }
 
 static long mod_list_find_path_index(mod_list *list, const char *path) {
   if (!list || !path)
     return -1;
-  for (size_t i = 0; i < list->len; ++i) {
-    if (list->entries[i].path && strcmp(list->entries[i].path, path) == 0)
-      return (long)i;
-  }
-  return -1;
+  return mod_list_find_index_by_path(list, path);
 }
 
 static bool ny_export_depth_more_permissive(int next, int cur) {
@@ -1767,15 +1854,21 @@ static void mod_list_add_ex(mod_list *list, const char *path, const char *name,
     list->cap = new_cap;
   }
   char *path_dup = ny_loader_xstrdup(path);
+  char canonical[4096];
+  char *canonical_path = ny_realpath(path, canonical)
+                             ? ny_loader_xstrdup(canonical)
+                             : ny_loader_xstrdup(path);
+  size_t entry_idx = list->len;
   list->entries[list->len++] = (mod_entry){.path = path_dup,
-                                           .name = ny_loader_xstrdup(name),
-                                           .processed = false,
-                                           .is_std = is_std,
-                                           .bundle_txt = NULL,
-                                           .bundle_len = 0,
-                                           .skip_entry = false,
-                                           .export_depth = export_depth};
-  mod_list_put_path(list, path_dup);
+                                           .canonical_path = canonical_path,
+                                            .name = ny_loader_xstrdup(name),
+                                            .processed = false,
+                                            .is_std = is_std,
+                                            .bundle_txt = NULL,
+                                            .bundle_len = 0,
+                                            .skip_entry = false,
+                                            .export_depth = export_depth};
+  mod_list_put_path_idx(list, path_dup, entry_idx);
 }
 
 static void mod_list_add(mod_list *list, const char *path, const char *name, bool is_std) {
@@ -1897,15 +1990,6 @@ static int ny_std_load_threads(size_t work_items) {
 }
 #endif
 
-static bool ny_same_path(const char *a, const char *b) {
-  if (!a || !b)
-    return false;
-  char ra[4096], rb[4096];
-  if (ny_realpath(a, ra) && ny_realpath(b, rb))
-    return strcmp(ra, rb) == 0;
-  return strcmp(a, b) == 0;
-}
-
 static char *ny_build_module_chunk(const char *path, const char *name, size_t *out_len,
                                    bool append_module_use) {
   if (!path || !name)
@@ -1988,7 +2072,6 @@ typedef struct {
   mod_entry *entries;
   size_t count;
   size_t next;
-  const char *entry_path;
   bool append_module_uses;
   pthread_mutex_t mu;
 } bundle_ctx;
@@ -2005,10 +2088,8 @@ static void *ny_std_source_worker(void *arg) {
     mod_entry *e = &ctx->entries[idx];
     if (!e->path || e->bundle_txt)
       continue;
-    if (ctx->entry_path && ny_same_path(e->path, ctx->entry_path)) {
-      e->skip_entry = true;
+    if (e->skip_entry)
       continue;
-    }
     e->bundle_txt =
         ny_build_module_chunk(e->path, e->name, &e->bundle_len, ctx->append_module_uses);
   }
@@ -2195,10 +2276,22 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
     scan_dependencies(&mods, i);
   }
   mod_list_sort_for_bundle(&mods);
+  if (entry_path) {
+    char canonical[4096];
+    const char *entry_canonical =
+        ny_realpath(entry_path, canonical) ? canonical : entry_path;
+    for (size_t i = 0; i < mods.len; ++i) {
+      if (mods.entries[i].canonical_path &&
+          strcmp(mods.entries[i].canonical_path, entry_canonical) == 0)
+        mods.entries[i].skip_entry = true;
+    }
+  }
   if (mods.len == 0 && !prebuilt_src) {
     free(entry_dir);
     if (mods.path_ht)
       free((void *)mods.path_ht);
+    if (mods.path_idx_ht)
+      free((void *)mods.path_idx_ht);
     if (mods.entries)
       free(mods.entries);
     return NULL;
@@ -2211,7 +2304,6 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
           .entries = mods.entries,
           .count = mods.len,
           .next = 0,
-          .entry_path = entry_path,
           .append_module_uses = append_module_uses};
       pthread_mutex_init(&ctx.mu, NULL);
       if ((size_t)threads > mods.len)
@@ -2233,10 +2325,8 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
       free(tids);
       if (created == 0) {
         for (size_t i = 0; i < mods.len; ++i) {
-          if (entry_path && ny_same_path(mods.entries[i].path, entry_path)) {
-            mods.entries[i].skip_entry = true;
+          if (mods.entries[i].skip_entry)
             continue;
-          }
           if (!mods.entries[i].bundle_txt) {
             mods.entries[i].bundle_txt = ny_build_module_chunk(
                 mods.entries[i].path, mods.entries[i].name, &mods.entries[i].bundle_len,
@@ -2246,10 +2336,8 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
       }
     } else {
       for (size_t i = 0; i < mods.len; ++i) {
-        if (entry_path && ny_same_path(mods.entries[i].path, entry_path)) {
-          mods.entries[i].skip_entry = true;
+        if (mods.entries[i].skip_entry)
           continue;
-        }
         if (!mods.entries[i].bundle_txt) {
           mods.entries[i].bundle_txt = ny_build_module_chunk(
               mods.entries[i].path, mods.entries[i].name, &mods.entries[i].bundle_len,
@@ -2260,10 +2348,8 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
   }
 #else
   for (size_t i = 0; i < mods.len; ++i) {
-    if (entry_path && ny_same_path(mods.entries[i].path, entry_path)) {
-      mods.entries[i].skip_entry = true;
+    if (mods.entries[i].skip_entry)
       continue;
-    }
     if (!mods.entries[i].bundle_txt) {
       mods.entries[i].bundle_txt = ny_build_module_chunk(mods.entries[i].path, mods.entries[i].name,
                                                          &mods.entries[i].bundle_len,
@@ -2297,6 +2383,7 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
   }
   for (size_t i = 0; i < mods.len; ++i) {
     free(mods.entries[i].path);
+    free(mods.entries[i].canonical_path);
     free(mods.entries[i].name);
     for (size_t j = 0; j < mods.entries[i].deps_len; ++j)
       free(mods.entries[i].deps[j]);
@@ -2308,6 +2395,8 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
     free(mods.entries);
   if (mods.path_ht)
     free((void *)mods.path_ht);
+  if (mods.path_idx_ht)
+    free((void *)mods.path_idx_ht);
   if (verbose)
     NY_LOG_INFO("Loaded module bundle: %zu bytes\n", total);
   free(entry_dir);

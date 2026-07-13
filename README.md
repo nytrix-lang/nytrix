@@ -78,7 +78,7 @@ layout Vec2 pack(4) {
     f32 x,
     f32 y
 }
-#include <math.h> as "cos"
+#include <math.h>
 assert(cos(0.0) == 1.0, "cos")
 ```
 

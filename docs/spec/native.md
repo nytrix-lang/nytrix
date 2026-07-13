@@ -3,6 +3,22 @@
 Native boundary rules cover layouts, extern blocks, pointers, handles, strings,
 ownership, and ABI behavior.
 
+## Native backend capability boundary
+
+`--native-only` selects the host encoder on x86-64 and AArch64. Both paths
+lower NYIR, encode machine code, relocate an in-memory W^X image, and support
+persistent REPL definitions without constructing LLVM state. AArch64 ELF64
+objects and internal-link runtime probes cover AAPCS64 scalar/f32/f64 calls,
+eight integer arguments, local pointer memory, branches, and signed div/mod.
+
+i386 has its separately tested ELF32 object/link slice. ARM, RISC-V, MIPS,
+PowerPC, BPF, AVR, and WebAssembly target names are assembly/inspection paths
+unless their capability record explicitly enables an object format. An
+assembly-only target fails object or JIT requests instead of invoking a hidden
+fallback. General C aggregate classification remains target-specific: the
+documented nested INTEGER/SSE/MEMORY aggregate ABI is the x86-64 System V
+boundary, not an implied cross-ABI promise.
+
 ## Layouts
 
 ```ny
@@ -33,24 +49,28 @@ current process; `extern ""` is accepted as the older spelling.
 
 ## Header imports
 
-`#include` imports declarations from C headers through the Clang-backed FFI
-path:
+`#include` imports declarations from C headers through the selected C frontend.
+The Nytrix-owned frontend handles the supported preprocessor, declaration,
+layout, callback, and aggregate-ABI subset; unsupported shapes fail explicitly
+unless an explicitly selected adapter is responsible for that import.
 
 ```ny
 #include <stdlib.h> as "c"
-#include "./ffi.h" as ""
+#include "./ffi.h"
 ```
 
-Use a namespace alias for broad system headers when you need the C spelling
-without risking Nytrix-name collisions. Unprefixed imports (`as ""`) expose
-constants, macros, enum values, and non-conflicting functions directly; if a C
-function name collides with an existing Nytrix symbol, that function import is
-skipped so wrappers such as `atoi` and `atof` remain usable. Import the header
-with an alias when you need the skipped C function.
+An explicit namespace alias exposes declarations through that namespace. An
+unaliased import (or `as ""`) exposes constants, macros, enum values, layouts,
+and non-conflicting functions directly; it does not create an implicit
+namespace. Existing Nytrix names remain authoritative on collisions; an
+explicit namespace alias makes the C declaration separately addressable.
 
 Header imports follow transitive includes. Object-like integer macros,
 shift/bitwise macro expressions, enum constants, typedef structs, and
-pointer-bearing structs become visible when libclang can resolve them.
+pointer-bearing structs become visible when the selected frontend supports
+their declarations. The internal frontend resolves installed system include
+roots and recovers past unsupported system declarations while retaining strict
+diagnostics for project headers.
 
 Imported typedef structs are available as layout constructors. Use `&value`
 when a C function expects an out pointer:

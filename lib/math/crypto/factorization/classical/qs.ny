@@ -4142,14 +4142,20 @@ fn siqs_factor_report(any n, int factor_base_bound=64, int polynomial_count=8, i
    "Self-initializing quadratic-sieve report using SIQS polynomial relation collection."
    def t0 = ticks()
    def nz = _z(n)
+   def bits = bit_length(nz < Z(0) ? -nz : nz)
+   def autotuned = factor_base_bound == 64 && polynomial_count == 8 && sieve_radius == 256 && max_relations == 32 && bits >= 41
+   def planned_factor_base_bound = autotuned ? 2000 : factor_base_bound
+   def planned_polynomial_count = autotuned ? 24 : polynomial_count
+   def planned_sieve_radius = autotuned ? 4096 : sieve_radius
+   def planned_max_relations = autotuned ? 384 : max_relations
    mut out = _set_fields(_report("self-initializing-quadratic-sieve", 26), [
-         ["n", nz], ["factor_base_bound", factor_base_bound],
-         ["polynomial_count", polynomial_count], ["sieve_radius", sieve_radius],
-         ["max_relations", max_relations],
+         ["n", nz], ["factor_base_bound", planned_factor_base_bound],
+         ["polynomial_count", planned_polynomial_count], ["sieve_radius", planned_sieve_radius],
+         ["max_relations", planned_max_relations], ["autotuned", autotuned],
       ])
    if nz <= Z(1) { return _set_factor_status(out, nil, false) }
    if nz % Z(2) == Z(0) { return _set_factor_status(out, Z(2), true) }
-   def rel_report = _siqs_relation_report(nz, factor_base_bound, polynomial_count, sieve_radius, max_relations, tune_cutoff, false)
+   def rel_report = _siqs_relation_report(nz, planned_factor_base_bound, planned_polynomial_count, planned_sieve_radius, planned_max_relations, tune_cutoff, false)
    if rel_report.get("factor", nil) != nil {
       return _finish_report_with(out, t0, [
             ["factor", rel_report.get("factor")], ["success", true],
@@ -4964,6 +4970,7 @@ fn _mpqs_attempt_policy_report(any n, int selected_multiplier, int factor_base_b
       ])
 }
 
+;; Returns the result of the `mpqs_source_parameter_rows` operation.
 fn mpqs_source_parameter_rows() list { [
       [64, 100, 40, 65536], [128, 450, 40, 65536], [183, 2000, 40, 65536],
       [200, 3000, 50, 65536], [212, 5400, 50, 3 * 65536], [233, 10000, 100, 3 * 65536],
@@ -5267,4 +5274,32 @@ fn mpqs_factor(any n, int factor_base_bound=64, int windows=4, int window_radius
 fn mpqs_source_factor(any n, int max_factor_base_count=96, int max_prime_bound=1201, int max_windows=24, int max_window_radius=32000, int max_relations=256) any {
    "Return one factor from mpqs_source_factor_report, or nil."
    mpqs_source_factor_report(n, max_factor_base_count, max_prime_bound, max_windows, max_window_radius, max_relations).get("factor", nil)
+}
+
+#main {
+   assert(quadratic_sieve_factor(nil) == nil, "quadratic sieve nil input")
+   assert(quadratic_sieve_factor(Z(-15)) == nil, "quadratic sieve negative input")
+   assert(quadratic_sieve_factor(Z(0)) == nil, "quadratic sieve zero boundary")
+   assert(quadratic_sieve_factor(Z(1)) == nil, "quadratic sieve one boundary")
+   def small = quadratic_sieve_factor(Z(1009) * Z(1013))
+   assert(small == Z(1009) || small == Z(1013), "quadratic sieve exact small semiprime factor")
+   assert(quadratic_sieve_factor(Z(1019)) == nil, "quadratic sieve prime has no factor")
+   assert(quadratic_sieve_factor(Z(2) * Z(1019)) == Z(2), "quadratic sieve even short-circuit")
+
+   def semiprimes = [
+      [Z(281458065279943), Z(16777213), Z(16776211)],
+      [Z(72057295537760999), Z(268435399), Z(268434401)],
+      [Z(9223369771259528221), Z(2147483647), Z(4294966243)],
+      [Z(1180591584296088665243), Z(34359738337), Z(34359737339)],
+   ]
+   mut i = 0
+   while i < semiprimes.len {
+      def row = semiprimes[i]
+      def factor = siqs_factor(row[0], 2000, 24, 4096, 384)
+      assert(factor == row[1] || factor == row[2], "SIQS 48/56/63/70-bit semiprime regression")
+      i += 1
+   }
+   def default_factor = siqs_factor(semiprimes[2][0])
+   assert(default_factor == semiprimes[2][1] || default_factor == semiprimes[2][2], "SIQS default plan does not silently return nil")
+   print("✓ std.math.crypto.factorization.classical.qs self-test passed")
 }

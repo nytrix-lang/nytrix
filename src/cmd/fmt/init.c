@@ -4,6 +4,7 @@
 
 #include "fmt.h"
 #include "base/args.h"
+#include "base/process.h"
 #include "base/util.h"
 #include "../tools/repo.h"
 #include "../tools/tool.h"

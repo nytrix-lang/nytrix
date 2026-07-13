@@ -251,14 +251,16 @@ static int ny_builtin_shadow_cache_get(codegen_t *cg, const char *name,
   ny_builtin_shadow_cache_entry *cache = ny_builtin_shadow_cache(cg);
   if (!cache)
     return -1;
+  size_t fun_len = cg->builtin_shadow_cache_stable_len
+                       ? cg->builtin_shadow_cache_stable_len
+                       : cg->fun_sigs.len;
   size_t base = hash & (NY_BUILTIN_SHADOW_CACHE_SLOTS - 1u);
   for (size_t probe = 0; probe < NY_BUILTIN_SHADOW_CACHE_PROBES; ++probe) {
     ny_builtin_shadow_cache_entry *e =
         &cache[(base + probe) & (NY_BUILTIN_SHADOW_CACHE_SLOTS - 1u)];
     if (!e->state)
       continue;
-    if (e->cg != cg || e->data != cg->fun_sigs.data ||
-        e->fun_len != cg->fun_sigs.len || e->hash != hash ||
+    if (e->cg != cg || e->fun_len != fun_len || e->hash != hash ||
         e->name_len != (uint16_t)name_len ||
         memcmp(e->key, name, name_len) != 0 || e->key[name_len] != '\0')
       continue;
@@ -277,6 +279,9 @@ static void ny_builtin_shadow_cache_put(codegen_t *cg, const char *name,
   ny_builtin_shadow_cache_entry *cache = ny_builtin_shadow_cache(cg);
   if (!cache)
     return;
+  size_t fun_len = cg->builtin_shadow_cache_stable_len
+                       ? cg->builtin_shadow_cache_stable_len
+                       : cg->fun_sigs.len;
   size_t base = hash & (NY_BUILTIN_SHADOW_CACHE_SLOTS - 1u);
   ny_builtin_shadow_cache_entry *e = &cache[base];
   for (size_t probe = 0; probe < NY_BUILTIN_SHADOW_CACHE_PROBES; ++probe) {
@@ -286,8 +291,7 @@ static void ny_builtin_shadow_cache_put(codegen_t *cg, const char *name,
       e = cur;
       break;
     }
-    if (cur->cg == cg && cur->data == cg->fun_sigs.data &&
-        cur->fun_len == cg->fun_sigs.len && cur->hash == hash &&
+    if (cur->cg == cg && cur->fun_len == fun_len && cur->hash == hash &&
         cur->name_len == (uint16_t)name_len &&
         memcmp(cur->key, name, name_len) == 0 &&
         cur->key[name_len] == '\0') {
@@ -297,7 +301,7 @@ static void ny_builtin_shadow_cache_put(codegen_t *cg, const char *name,
   }
   e->cg = cg;
   e->data = cg->fun_sigs.data;
-  e->fun_len = cg->fun_sigs.len;
+  e->fun_len = fun_len;
   e->hash = hash;
   e->name_len = (uint16_t)name_len;
   memcpy(e->key, name, name_len);
@@ -343,18 +347,16 @@ bool ny_builtin_name_shadowed_by_user_symbol(codegen_t *cg, scope *scopes, size_
     return true;
   if (name_len == 0)
     name_len = strlen(name);
+  if (!hash)
+    hash = ny_hash_name(name, name_len);
   if (scope_lookup_hash(scopes, depth, name, name_len, hash))
     return true;
   binding *global = cg ? lookup_global_hash(cg, name, hash) : NULL;
-  if (cg && !global && !hash)
-    global = lookup_global(cg, name);
   if (ny_user_binding_shadows_builtin(global))
     return true;
   if (ny_any_user_fun_shadows_builtin(cg, name, name_len, hash))
     return true;
   fun_sig *sig = cg ? lookup_fun(cg, name, hash) : NULL;
-  if (cg && !sig && !hash)
-    sig = lookup_fun(cg, name, 0);
   return ny_user_fun_shadows_builtin(name, sig);
 }
 

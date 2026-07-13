@@ -520,9 +520,8 @@ static int run_one_compare_ny(const char *bin, const char *path, const PerfCompa
         snprintf(c_path, sizeof(c_path), "%s/ny-perf-%ld.c", nyt_temp_dir(), (long)getpid());
         snprintf(bin_path, sizeof(bin_path), "%s/ny-perf-%ld.out", nyt_temp_dir(), (long)getpid());
         if (extract_shape_source(path, "c", "C", c_path)) {
-          char cmd[PATH_MAX * 2 + 64];
-          snprintf(cmd, sizeof(cmd), "cc -O3 '%s' -o '%s'", c_path, bin_path);
-          if (system(cmd) == 0) {
+          char *cc_argv[] = {"cc", "-O3", c_path, "-o", bin_path, NULL};
+          if (run_cmd(cc_argv, "/dev/null", err_file) == 0) {
             char *run_argv[] = {bin_path, NULL};
             execv(bin_path, run_argv);
           }

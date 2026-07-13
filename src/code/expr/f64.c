@@ -1029,10 +1029,27 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
 
     if (b && b->type_name && strcmp(b->type_name, "int") == 0) {
       b->is_used = true;
-      LLVMValueRef raw =
-          (!b->is_slot && b->is_int_raw_direct && b->raw_int_value)
-              ? b->raw_int_value
-              : ny_untag_int(cg, b->is_slot ? ny_load(cg, b->value, "") : b->value);
+      LLVMValueRef raw;
+      if (b->is_c_abi_global && b->is_slot) {
+        LLVMTypeRef stored_ty = LLVMGlobalGetValueType(b->value);
+        raw = LLVMBuildLoad2(cg->builder, stored_ty, b->value,
+                             "c_global_f64_load");
+        unsigned bits = LLVMGetIntTypeWidth(stored_ty);
+        if (bits < 64)
+          raw = b->is_c_abi_unsigned
+                    ? LLVMBuildZExt(cg->builder, raw, cg->type_i64,
+                                   "c_global_f64_zext")
+                    : LLVMBuildSExt(cg->builder, raw, cg->type_i64,
+                                   "c_global_f64_sext");
+        else if (bits > 64)
+          raw = LLVMBuildTrunc(cg->builder, raw, cg->type_i64,
+                              "c_global_f64_trunc");
+      } else {
+        raw = (!b->is_slot && b->is_int_raw_direct && b->raw_int_value)
+                  ? b->raw_int_value
+                  : ny_untag_int(cg, b->is_slot ? ny_load(cg, b->value, "")
+                                                : b->value);
+      }
       return LLVMBuildSIToFP(cg->builder, raw, f64_ty, "i2f");
     }
     break;
@@ -1468,7 +1485,8 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
           !s->is_extern && ny_named_callable_values_need_closure(cg);
       LLVMValueRef sv =
           (boxed_callable || ny_fun_sig_needs_tagged_callable_adapter(s))
-              ? ny_fun_sig_tagged_callable_adapter(cg, s, e->tok, boxed_callable)
+              ? ny_fun_sig_tagged_callable_adapter(cg, s, e->tok,
+                                                   boxed_callable, false)
               : s->value;
       if (boxed_callable) {
         LLVMValueRef raw = ny_ptr2i64(cg, sv, "");
