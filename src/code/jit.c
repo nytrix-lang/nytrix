@@ -290,10 +290,9 @@ static uint8_t *ny_apple_jit_alloc_section(void *opaque, uintptr_t size,
   if (align & (align - 1u))
     align = 16u;
   size_t alloc_size = ny_jit_round_page((size_t)size + (size_t)align);
-  int flags = MAP_PRIVATE | MAP_ANON | (code ? MAP_JIT : 0);
-  int prot = PROT_READ | PROT_WRITE | (code ? PROT_EXEC : 0);
-  if (code)
-    ny_apple_jit_write_protect(0);
+  int flags = MAP_PRIVATE | MAP_ANON | MAP_JIT;
+  int prot = PROT_READ | PROT_WRITE | PROT_EXEC;
+  ny_apple_jit_write_protect(0);
   void *base = mmap(NULL, alloc_size, prot, flags, -1, 0);
   if (base == MAP_FAILED) {
     ny_apple_jit_write_protect(1);
