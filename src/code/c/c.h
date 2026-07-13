@@ -7,7 +7,7 @@
 #define NY_C_MAX_TYPEDEFS 64
 #define NY_C_MAX_DEFINES 64
 #define NY_C_MAX_TAGS 64
-#define NY_C_MAX_FIELDS 8
+#define NY_C_MAX_FIELDS 32
 #define NY_C_MAX_PACK_STACK 16
 #define NY_C_MAX_COND_STACK 32
 
@@ -47,6 +47,7 @@ typedef enum {
   NY_CTYPE_LONG,
   NY_CTYPE_FLOAT,
   NY_CTYPE_DOUBLE,
+  NY_CTYPE_LONG_DOUBLE,
   NY_CTYPE_STRUCT,
   NY_CTYPE_UNION,
   NY_CTYPE_ENUM,
@@ -74,6 +75,7 @@ typedef enum {
   NY_CDECLF_EXTERN = 1u << 0,
   NY_CDECLF_STATIC = 1u << 1,
   NY_CDECLF_INLINE = 1u << 2,
+  NY_CDECLF_NORETURN = 1u << 3,
 } ny_cdecl_flags_t;
 
 typedef struct {

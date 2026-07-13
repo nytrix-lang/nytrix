@@ -38,8 +38,10 @@ void ny_nir_func_free(ny_nir_func_t *f) {
   for (size_t i = 0; i < f->owned_symbols_len; ++i)
     free(f->owned_symbols[i]);
   free(f->owned_symbols);
-  for (size_t i = 0; i < f->len; ++i)
+  for (size_t i = 0; i < f->len; ++i) {
     free(f->data[i].extra_args);
+    free(f->data[i].arg_sizes);
+  }
   free(f->data);
   memset(f, 0, sizeof(*f));
 }
@@ -48,6 +50,7 @@ void ny_nir_inst_discard(ny_nir_inst_t *in) {
   if (!in)
     return;
   free(in->extra_args);
+  free(in->arg_sizes);
   *in = (ny_nir_inst_t){.op = NY_NIR_NOP,
                         .dst = -1,
                         .a = -1,
@@ -140,6 +143,12 @@ const char *ny_nir_op_name(ny_nir_op_t op) {
     return "load.i64";
   case NYIR_STORE_I64:
     return "store.i64";
+  case NYIR_ADDR_SYMBOL:
+    return "addr.symbol";
+  case NYIR_ALLOCA:
+    return "alloca";
+  case NYIR_COPY_STRUCT:
+    return "copy.struct";
   case NYIR_OP_COUNT:
     break;
   }
@@ -209,6 +218,8 @@ static void ny_nir_normalize_operands(ny_nir_inst_t *inst) {
     inst->f = -1;
     break;
   case NYIR_ADDR_LOCAL:
+  case NYIR_ADDR_SYMBOL:
+  case NYIR_ALLOCA:
     inst->a = -1;
     inst->b = -1;
     inst->c = -1;
@@ -225,11 +236,15 @@ static void ny_nir_normalize_operands(ny_nir_inst_t *inst) {
     inst->f = -1;
     break;
   case NYIR_STORE_I64:
+  case NYIR_COPY_STRUCT:
     inst->dst = -1;
-    inst->b = -1;
     inst->d = -1;
     inst->e = -1;
     inst->f = -1;
+    if (inst->op == NYIR_STORE_I64)
+      inst->b = -1;
+    else
+      inst->c = -1;
     break;
   case NY_NIR_CALL:
     if (inst->imm <= 0)
@@ -387,6 +402,8 @@ void ny_nir_dump(FILE *out, const ny_nir_func_t *f, const char *name) {
              in->op == NYIR_F32_TO_F64) {
       if (in->a >= 0)
         fprintf(out, " v%d", in->a);
+    } else if (in->op == NYIR_ADDR_SYMBOL) {
+      fprintf(out, " %s", in->symbol ? in->symbol : "<null>");
     } else if (in->op == NY_NIR_LOAD_LOCAL || in->op == NY_NIR_STORE_LOCAL ||
                in->op == NYIR_ADDR_LOCAL) {
       fprintf(out, " local#%" PRId64, in->imm);

@@ -84,6 +84,10 @@ typedef struct {
   const char *c_symbol;
   unsigned param_count;
   bool owned;
+  /* Non-zero if the function returns a struct by value (SysV sret ABI). */
+  uint32_t ret_aggregate_size;
+  /* Per-argument byval sizes; 0 = scalar, >0 = aggregate of that byte size. */
+  uint32_t arg_aggregate_sizes[NY_C_MAX_PARAMS];
 } ny_extern_entry_t;
 
 typedef struct {
@@ -98,7 +102,8 @@ static void ny_extern_table_init(ny_extern_table_t *t) {
 
 static bool ny_extern_table_add(ny_extern_table_t *t, const char *ny_name,
                                 const char *c_symbol, unsigned param_count,
-                                bool owned) {
+                                bool owned, uint32_t ret_agg_size,
+                                const uint32_t *arg_agg_sizes) {
   if (!t || !ny_name || !c_symbol)
     return false;
   /* Dedup: identical redeclarations are silently accepted. */
@@ -116,6 +121,14 @@ static bool ny_extern_table_add(ny_extern_table_t *t, const char *ny_name,
   t->entries[t->count].c_symbol = c_symbol;
   t->entries[t->count].param_count = param_count;
   t->entries[t->count].owned = owned;
+  t->entries[t->count].ret_aggregate_size = ret_agg_size;
+  memset(t->entries[t->count].arg_aggregate_sizes, 0,
+         sizeof(t->entries[t->count].arg_aggregate_sizes));
+  if (arg_agg_sizes && param_count > 0) {
+    size_t n = param_count < NY_C_MAX_PARAMS ? param_count : NY_C_MAX_PARAMS;
+    for (size_t k = 0; k < n; ++k)
+      t->entries[t->count].arg_aggregate_sizes[k] = arg_agg_sizes[k];
+  }
   t->count++;
   return true;
 }
@@ -559,9 +572,15 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
   case NY_E_IDENT: {
     ny_native_nir_local_t *l = ny_native_nir_find_local(b, e->as.ident.name);
     if (!l) {
-      ny_native_nir_fail(b, "native NYIR lower: unknown local '%s'",
-                         e->as.ident.name ? e->as.ident.name : "(null)");
-      return -1;
+      int addr = ny_nir_emit(&b->nir, (ny_nir_inst_t){.op = NYIR_ADDR_SYMBOL,
+                                                      .dst = -1,
+                                                      .a = -1,
+                                                      .b = -1,
+                                                      .imm = 0,
+                                                      .symbol = e->as.ident.name});
+      if (addr < 0)
+        ny_native_nir_fail(b, "native NYIR lower: allocation failed");
+      return addr;
     }
     int v = ny_nir_emit(&b->nir, (ny_nir_inst_t){.op = NY_NIR_LOAD_LOCAL,
                                                  .dst = -1,
@@ -787,10 +806,15 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
       const char *local_name = target->as.ident.name;
       ny_native_nir_local_t *l = ny_native_nir_find_local(b, local_name);
       if (!l) {
-        ny_native_nir_fail(b, "native NYIR lower: %s target '%s' is not a local",
-                           leaf,
-                           local_name ? local_name : "<null>");
-        return -1;
+        int v = ny_nir_emit(&b->nir, (ny_nir_inst_t){.op = NYIR_ADDR_SYMBOL,
+                                                     .dst = -1,
+                                                     .a = -1,
+                                                     .b = -1,
+                                                     .imm = 0,
+                                                     .symbol = local_name});
+        if (v < 0)
+          ny_native_nir_fail(b, "native NYIR lower: allocation failed");
+        return v;
       }
       return ny_native_nir_emit_addr_local(b, l->slot, local_name);
     }
@@ -883,6 +907,51 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
     }
     const ny_extern_entry_t *ext =
         b->externs ? ny_extern_table_lookup(b->externs, name) : NULL;
+
+    bool has_sret = ext && ext->ret_aggregate_size > 0;
+    int sret_ptr = -1;
+    if (has_sret) {
+      sret_ptr = ny_nir_emit(&b->nir, (ny_nir_inst_t){.op = NYIR_ALLOCA, .dst = -1, .a = -1, .b = -1, .c = -1, .imm = ext->ret_aggregate_size});
+      if (sret_ptr < 0) {
+        ny_native_nir_fail(b, "native NYIR lower: sret allocation failed");
+        return -1;
+      }
+    }
+
+    uint32_t *arg_sizes = NULL;
+    if (ext && ext->param_count > 0) {
+      bool has_byval = false;
+      for (unsigned i = 0; i < ext->param_count; ++i) {
+        if (ext->arg_aggregate_sizes[i] > 0) has_byval = true;
+      }
+      if (has_byval) {
+        size_t total_args = e->as.call.args.len + (has_sret ? 1 : 0);
+        arg_sizes = (uint32_t *)calloc(total_args, sizeof(*arg_sizes));
+        if (!arg_sizes) {
+          ny_native_nir_fail(b, "native NYIR lower: allocation failed");
+          return -1;
+        }
+        for (unsigned i = 0;
+             i < e->as.call.args.len && i < ext->param_count; ++i) {
+          arg_sizes[i + (has_sret ? 1 : 0)] = ext->arg_aggregate_sizes[i];
+        }
+      }
+    }
+
+    size_t original_argc = e->as.call.args.len;
+    size_t argc = original_argc + (has_sret ? 1 : 0);
+    if (has_sret) {
+      if (argc > NY_NIR_CALL_MAX_ARGS) {
+        free(arg_sizes);
+        ny_native_nir_fail(b, "native NYIR lower: call exceeds maximum args with sret");
+        return -1;
+      }
+      for (int i = (int)original_argc - 1; i >= 0; --i) {
+        args[i + 1] = args[i];
+      }
+      args[0] = sret_ptr;
+    }
+
     bool builtin_c_call = leaf && (strcmp(leaf, "malloc") == 0 ||
                                    strcmp(leaf, "__malloc") == 0 ||
                                    strcmp(leaf, "realloc") == 0 ||
@@ -901,12 +970,12 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
     } else if (ny_native_nir_expr_is_f64(b, e)) {
       flags |= NY_NIR_INST_F_RET_F64;
     }
-    size_t argc = e->as.call.args.len;
     int *extra = NULL;
     if (argc > 6) {
       size_t extra_len = argc - 6;
       extra = (int *)malloc(extra_len * sizeof(*extra));
       if (!extra) {
+        free(arg_sizes);
         ny_native_nir_fail(b, "native NYIR lower: allocation failed");
         return -1;
       }
@@ -924,12 +993,15 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
                                                  .flags = flags,
                                                  .symbol = symbol,
                                                  .extra_args = extra,
-                                                 .extra_args_len = argc > 6 ? argc - 6 : 0});
+                                                 .extra_args_len = argc > 6 ? argc - 6 : 0,
+                                                 .arg_sizes = arg_sizes});
     if (v < 0) {
       free(extra);
+      free(arg_sizes);
       ny_native_nir_fail(b, "native NYIR lower: allocation failed");
+      return -1;
     }
-    return v;
+    return has_sret ? sret_ptr : v;
   }
   case NY_E_DEREF: {
     int addr = ny_native_nir_lower_expr(b, e->as.deref.target);
@@ -1741,7 +1813,7 @@ static bool ny_native_nir_collect_extern(const stmt_t *s, ny_extern_table_t *t,
     const char *ny_name = s->as.ext.name;
     const char *c_sym = s->as.ext.link_name ? s->as.ext.link_name : ny_name;
     unsigned pc = (unsigned)s->as.ext.params.len;
-    if (!ny_extern_table_add(t, ny_name, c_sym, pc, false)) {
+    if (!ny_extern_table_add(t, ny_name, c_sym, pc, false, 0, NULL)) {
       if (err && err_len > 0)
         snprintf(err, err_len,
                  "NYIR extern: conflicting or duplicate extern '%s' "
@@ -1781,10 +1853,29 @@ static bool ny_native_nir_collect_extern(const stmt_t *s, ny_extern_table_t *t,
         memcpy(ny_name, cname, nn);
         ny_name[nn] = '\0';
       }
+      /* Compute aggregate return size and per-argument aggregate sizes */
+      uint32_t ret_agg = 0;
+      if (decl.type.kind == NY_CTYPE_STRUCT || decl.type.kind == NY_CTYPE_UNION) {
+        ret_agg = (uint32_t)decl.type.aggregate_size;
+      } else if (decl.type.kind == NY_CTYPE_NAMED && decl.type.ptr_depth == 0) {
+        /* Named typedef that may be a struct — aggregate_size if present */
+        ret_agg = (uint32_t)decl.type.aggregate_size;
+      }
+      uint32_t arg_agg[NY_C_MAX_PARAMS] = {0};
+      for (unsigned pi = 0; pi < decl.param_count && pi < NY_C_MAX_PARAMS; pi++) {
+        const ny_ctype_t *pt = &decl.params[pi];
+        if ((pt->kind == NY_CTYPE_STRUCT || pt->kind == NY_CTYPE_UNION) &&
+            pt->ptr_depth == 0) {
+          arg_agg[pi] = (uint32_t)pt->aggregate_size;
+        } else if (pt->kind == NY_CTYPE_NAMED && pt->ptr_depth == 0) {
+          arg_agg[pi] = (uint32_t)pt->aggregate_size;
+        }
+      }
       char *ny_name_dup = ny_strdup(ny_name);
       char *c_sym = ny_strdup(cname);
       if (!ny_name_dup || !c_sym ||
-          !ny_extern_table_add(t, ny_name_dup, c_sym, decl.param_count, true)) {
+          !ny_extern_table_add(t, ny_name_dup, c_sym, decl.param_count, true,
+                               ret_agg, arg_agg)) {
         free(ny_name_dup);
         free(c_sym);
         free(src);

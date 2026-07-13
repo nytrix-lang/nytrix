@@ -6,6 +6,9 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 
 ### Added
 
+- The internal C frontend now accepts forward-declared aggregate tags before
+  their definitions and preserves unnamed zero-width bitfield padding in
+  aggregate layouts, with forced-internal-frontend regressions.
 - The test runner now has `--failures-only`, an integrated cross-platform
   failure replay filter that preserves test exit status while suppressing
   successful fixture noise. Suite and per-fixture timeout controls are also
@@ -71,7 +74,12 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - Native archives rebuild atomically from dash-named sources; Apple-arm64
   comptime evaluation now runs through MCJIT's managed execution API so LLVM
   finalizes all generated callees before invocation; `addr_of` and `borrow`
-  accept dereferenced pointer lvalues in native lowering.
+  accept dereferenced pointer lvalues in native lowering, and
+  `NYIR_ADDR_SYMBOL` extends address lowering to non-local (global/extern)
+  symbols: the x86-64 backend emits `leaq sym(%rip), reg` with a PC32
+  relocation, the ELF64 object writer encodes `R_X86_64_PC32` for data
+  addresses (distinct from `R_X86_64_PLT32` for calls), and the in-memory JIT
+  patches data addresses directly without a call trampoline.
 - The internal C importer now loads external scalar globals with their raw C
   ABI representation, resolves ABI-width `size_t`/`ssize_t`/`ptrdiff_t`/
   `intptr_t`/`uintptr_t` spellings, uses target-aware layouts, and covers
@@ -112,6 +120,7 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - The watcher code is specialized per platform in the compiler and standard library.
 
 ### Fixed
+- Multiplatform full-test from CI actions on linux/windows/macos.
 - Apple-arm64 comptime MCJIT now uses LLVM's managed `LLVMRunFunction`
   invocation instead of manually calling a pointer returned before MCJIT's
   final execution pass. This lets MCJIT materialize and finalize indirect

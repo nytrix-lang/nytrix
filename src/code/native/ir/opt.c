@@ -555,19 +555,7 @@ bool ny_nir_dce(ny_nir_func_t *f) {
       fallthrough = reachable;
     }
     if (!reachable && in->op != NY_NIR_LABEL) {
-      free(in->extra_args);
-      in->op = NY_NIR_NOP;
-      in->dst = -1;
-      in->a = -1;
-      in->b = -1;
-      in->c = -1;
-      in->d = -1;
-      in->e = -1;
-      in->f = -1;
-      in->imm = 0;
-      in->symbol = NULL;
-      in->extra_args = NULL;
-      in->extra_args_len = 0;
+      ny_nir_inst_discard(in);
       first_inst = false;
       continue;
     }
@@ -589,19 +577,7 @@ bool ny_nir_dce(ny_nir_func_t *f) {
       side_effect = ny_nir_label_referenced(f, in->imm);
     bool keep = side_effect || (in->dst >= 0 && used[in->dst]);
     if (!keep) {
-      free(in->extra_args);
-      in->op = NY_NIR_NOP;
-      in->dst = -1;
-      in->a = -1;
-      in->b = -1;
-      in->c = -1;
-      in->d = -1;
-      in->e = -1;
-      in->f = -1;
-      in->imm = 0;
-      in->symbol = NULL;
-      in->extra_args = NULL;
-      in->extra_args_len = 0;
+      ny_nir_inst_discard(in);
       continue;
     }
     if (in->a >= 0)

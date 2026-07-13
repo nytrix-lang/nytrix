@@ -1027,22 +1027,13 @@ static void ny_orc_register_extern_symbols(LLVMModuleRef mod, codegen_t *cg) {
   }
 }
 
-bool ny_orc_jit_create(LLVMModuleRef module, LLVMContextRef context,
-                       codegen_t *cg, void **out_jit, uint64_t *script_addr,
-                       uint64_t *main_addr, bool *module_consumed,
-                       char **error_message) {
-  if (out_jit)
-    *out_jit = NULL;
-  if (script_addr)
-    *script_addr = 0;
-  if (main_addr)
-    *main_addr = 0;
+bool ny_orc_jit_ensure_engine(codegen_t *cg, char **error_message) {
   if (error_message)
     *error_message = NULL;
-  if (module_consumed)
-    *module_consumed = false;
-  if (!module || !context || !out_jit)
+  if (!cg)
     return false;
+  if (cg->orc_jit)
+    return true;
 
 #if LLVM_VERSION_MAJOR < 21
   if (error_message)
@@ -1050,8 +1041,6 @@ bool ny_orc_jit_create(LLVMModuleRef module, LLVMContextRef context,
         "ORC JIT requires LLVM 21 or newer; use the default MCJIT engine");
   return false;
 #else
-
-  ny_orc_register_extern_symbols(module, cg);
   LLVMOrcLLJITRef jit = NULL;
   LLVMErrorRef err = LLVMOrcCreateLLJIT(&jit, NULL);
   if (err) {
@@ -1071,32 +1060,76 @@ bool ny_orc_jit_create(LLVMModuleRef module, LLVMContextRef context,
     (void)LLVMOrcDisposeLLJIT(jit);
     return false;
   }
+  cg->orc_jit = jit;
+  return true;
+#endif
+}
+
+bool ny_orc_jit_execute(codegen_t *cg, LLVMModuleRef module,
+                        LLVMContextRef context, uint64_t *script_addr,
+                        uint64_t *main_addr, void **out_rt,
+                        bool *module_consumed, char **error_message) {
+  if (script_addr)
+    *script_addr = 0;
+  if (main_addr)
+    *main_addr = 0;
+  if (out_rt)
+    *out_rt = NULL;
+  if (module_consumed)
+    *module_consumed = false;
+  if (error_message)
+    *error_message = NULL;
+
+  void *orc_jit =
+      cg ? (cg->orc_jit ? cg->orc_jit
+                        : (cg->parent ? cg->parent->orc_jit : NULL))
+         : NULL;
+
+  if (!cg || !orc_jit || !module || !context || !out_rt)
+    return false;
+
+#if LLVM_VERSION_MAJOR < 21
+  return false;
+#else
+  LLVMOrcLLJITRef jit = (LLVMOrcLLJITRef)orc_jit;
+  ny_orc_register_extern_symbols(module, cg);
+
+  LLVMOrcJITDylibRef dylib = LLVMOrcLLJITGetMainJITDylib(jit);
+  LLVMOrcResourceTrackerRef rt = LLVMOrcJITDylibCreateResourceTracker(dylib);
+  if (!rt) {
+    if (error_message)
+      *error_message = ny_strdup("failed to create resource tracker");
+    return false;
+  }
 
   LLVMOrcThreadSafeContextRef ts_context =
       LLVMOrcCreateNewThreadSafeContextFromLLVMContext(context);
   if (!ts_context) {
+    LLVMDisposeModule(module);
+    if (module_consumed)
+      *module_consumed = true;
     if (error_message)
       *error_message = ny_strdup("could not create ORC thread-safe context");
-    (void)LLVMOrcDisposeLLJIT(jit);
+    LLVMOrcReleaseResourceTracker(rt);
     return false;
   }
   LLVMOrcThreadSafeModuleRef ts_module =
       LLVMOrcCreateNewThreadSafeModule(module, ts_context);
+  if (module_consumed)
+    *module_consumed = true;
   LLVMOrcDisposeThreadSafeContext(ts_context);
   if (!ts_module) {
     if (error_message)
       *error_message = ny_strdup("could not create ORC thread-safe module");
-    (void)LLVMOrcDisposeLLJIT(jit);
+    LLVMOrcReleaseResourceTracker(rt);
     return false;
   }
-  if (module_consumed)
-    *module_consumed = true;
-  err = LLVMOrcLLJITAddLLVMIRModule(jit, dylib, ts_module);
+
+  LLVMErrorRef err = LLVMOrcLLJITAddLLVMIRModuleWithRT(jit, rt, ts_module);
   if (err) {
     if (error_message)
       *error_message = ny_orc_error_message(err);
-    LLVMOrcDisposeThreadSafeModule(ts_module);
-    (void)LLVMOrcDisposeLLJIT(jit);
+    LLVMOrcReleaseResourceTracker(rt);
     return false;
   }
 
@@ -1105,19 +1138,37 @@ bool ny_orc_jit_create(LLVMModuleRef module, LLVMContextRef context,
   if (err) {
     if (error_message)
       *error_message = ny_orc_error_message(err);
-    (void)LLVMOrcDisposeLLJIT(jit);
+    err = LLVMOrcResourceTrackerRemove(rt);
+    if (err) LLVMConsumeError(err);
+    LLVMOrcReleaseResourceTracker(rt);
     return false;
   }
+
   if (script_addr)
     *script_addr = (uint64_t)addr;
+
   addr = 0;
   err = LLVMOrcLLJITLookup(jit, &addr, "main");
   if (!err && main_addr)
     *main_addr = (uint64_t)addr;
   else if (err)
     LLVMConsumeError(err);
-  *out_jit = jit;
+
+  if (out_rt)
+    *out_rt = rt;
   return true;
+#endif
+}
+
+void ny_orc_jit_remove_module(void *rt) {
+#if LLVM_VERSION_MAJOR >= 21
+  if (!rt)
+    return;
+  LLVMOrcResourceTrackerRef tracker = (LLVMOrcResourceTrackerRef)rt;
+  LLVMErrorRef err = LLVMOrcResourceTrackerRemove(tracker);
+  if (err)
+    LLVMConsumeError(err);
+  LLVMOrcReleaseResourceTracker(tracker);
 #endif
 }
 

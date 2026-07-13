@@ -143,32 +143,50 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
       ny_native_jit_image_free(image);
       goto fail_nir;
     }
-    int def_index = ny_x64_obj_def_index(defs, def_count, relocs[i].symbol);
-    unsigned char *branch_target = (unsigned char *)target_ptr;
-    if (def_index < 0) {
-      unsigned char *stub = memory + used;
-      stub[0] = 0x48;
-      stub[1] = 0xb8;
-      uint64_t absolute = (uint64_t)(uintptr_t)target_ptr;
-      memcpy(stub + 2, &absolute, sizeof(absolute));
-      stub[10] = 0xff;
-      stub[11] = 0xe0;
-      branch_target = stub;
-      used += stub_size;
+    unsigned char *patch_at = memory + relocs[i].disp_off;
+    unsigned char *after = patch_at + 4;
+    if (relocs[i].type == NY_RELOC_PC32) {
+      /* Data address: leaq sym(%rip), reg — patch direct RIP-relative disp. */
+      intptr_t delta = (unsigned char *)target_ptr - after;
+      if (delta < INT32_MIN || delta > INT32_MAX) {
+        ny_native_set_err(err, err_len,
+                          "native JIT: PC32 relocation for '%s' is out of range",
+                          relocs[i].symbol);
+        image->memory = memory;
+        image->size = alloc_size;
+        ny_native_jit_image_free(image);
+        goto fail_nir;
+      }
+      int32_t disp = (int32_t)delta;
+      memcpy(patch_at, &disp, sizeof(disp));
+    } else {
+      /* Call address: use stub for external symbols that may be far away. */
+      int def_index = ny_x64_obj_def_index(defs, def_count, relocs[i].symbol);
+      unsigned char *branch_target = (unsigned char *)target_ptr;
+      if (def_index < 0) {
+        unsigned char *stub = memory + used;
+        stub[0] = 0x48;
+        stub[1] = 0xb8;
+        uint64_t absolute = (uint64_t)(uintptr_t)target_ptr;
+        memcpy(stub + 2, &absolute, sizeof(absolute));
+        stub[10] = 0xff;
+        stub[11] = 0xe0;
+        branch_target = stub;
+        used += stub_size;
+      }
+      intptr_t delta = branch_target - after;
+      if (delta < INT32_MIN || delta > INT32_MAX) {
+        ny_native_set_err(err, err_len,
+                          "native JIT: relocation for '%s' is out of range",
+                          relocs[i].symbol);
+        image->memory = memory;
+        image->size = alloc_size;
+        ny_native_jit_image_free(image);
+        goto fail_nir;
+      }
+      int32_t disp = (int32_t)delta;
+      memcpy(patch_at, &disp, sizeof(disp));
     }
-    unsigned char *after = memory + relocs[i].disp_off + 4;
-    intptr_t delta = branch_target - after;
-    if (delta < INT32_MIN || delta > INT32_MAX) {
-      ny_native_set_err(err, err_len,
-                        "native JIT: relocation for '%s' is out of range",
-                        relocs[i].symbol);
-      image->memory = memory;
-      image->size = alloc_size;
-      ny_native_jit_image_free(image);
-      goto fail_nir;
-    }
-    int32_t disp = (int32_t)delta;
-    memcpy(memory + relocs[i].disp_off, &disp, sizeof(disp));
   }
 
   int entry_index = ny_x64_obj_def_index(defs, def_count, "rt_main");

@@ -56,6 +56,11 @@ bool ny_nir_verify(const ny_nir_func_t *f, char *err, size_t err_len) {
   }
   for (size_t i = 0; i < f->len; ++i) {
     const ny_nir_inst_t *in = &f->data[i];
+    if (in->op != NY_NIR_CALL && in->arg_sizes) {
+      free(defined);
+      return ny_nir_inst_err(err, err_len, in, i,
+                             "non-call instruction has aggregate argument metadata");
+    }
     if (in->op < 0 || in->op >= NYIR_OP_COUNT) {
       free(defined);
       return ny_nir_inst_err(err, err_len, in, i, "unknown opcode");
@@ -140,6 +145,24 @@ bool ny_nir_verify(const ny_nir_func_t *f, char *err, size_t err_len) {
       if (in->dst < 0 || in->imm < 0) {
         free(defined);
         return ny_nir_inst_err(err, err_len, in, i, "invalid local address");
+      }
+      break;
+    case NYIR_ADDR_SYMBOL:
+      if (in->dst < 0 || !in->symbol || !in->symbol[0]) {
+        free(defined);
+        return ny_nir_inst_err(err, err_len, in, i, "addr.symbol requires a non-empty symbol");
+      }
+      break;
+    case NYIR_ALLOCA:
+      if (in->dst < 0 || in->imm < 0) {
+        free(defined);
+        return ny_nir_inst_err(err, err_len, in, i, "alloca requires a valid destination and positive size");
+      }
+      break;
+    case NYIR_COPY_STRUCT:
+      if (in->a < 0 || in->b < 0 || in->imm < 0) {
+        free(defined);
+        return ny_nir_inst_err(err, err_len, in, i, "copy.struct requires valid src, dst, and size");
       }
       break;
     case NY_NIR_STORE_LOCAL:
@@ -247,6 +270,11 @@ bool ny_nir_verify(const ny_nir_func_t *f, char *err, size_t err_len) {
         free(defined);
         return ny_nir_inst_err(err, err_len, in, i,
                             "call exceeds the maximum supported argument count");
+      }
+      if (in->arg_sizes && in->imm <= 0) {
+        free(defined);
+        return ny_nir_inst_err(err, err_len, in, i,
+                               "zero-argument call has aggregate argument metadata");
       }
       if (in->imm <= 6) {
         if (in->extra_args || in->extra_args_len != 0) {
@@ -608,6 +636,8 @@ bool ny_nir_metadata_summary(const ny_nir_func_t *f,
     case NY_NIR_STORE_LOCAL:
       if (in->imm > max_local)
         max_local = in->imm;
+      break;
+    case NYIR_ADDR_SYMBOL:
       break;
     default:
       break;

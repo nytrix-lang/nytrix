@@ -219,6 +219,9 @@ static bool ny_a64_emit_inst(ny_a64_nir_ctx_t *c, const ny_nir_inst_t *in) {
   case NYIR_F32_TO_F64:
   case NYIR_CMP_F32:
   case NYIR_ADDR_LOCAL:
+  case NYIR_ADDR_SYMBOL:
+  case NYIR_ALLOCA:
+  case NYIR_COPY_STRUCT:
   case NYIR_LOAD_I64:
   case NYIR_STORE_I64:
   case NYIR_OP_COUNT:

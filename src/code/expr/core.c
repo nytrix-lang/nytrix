@@ -4452,7 +4452,74 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
     }
   }
 
+
+  const char *jit_engine = getenv("NYTRIX_JIT_ENGINE");
+  if (jit_engine && strcmp(jit_engine, "orc") == 0) {
+    if (tcg.debug_symbols)
+      LLVMStripModuleDebugInfo(mod);
+
+    char *orc_error = NULL;
+    if (!ny_orc_jit_ensure_engine(cg, &orc_error)) {
+      NY_LOG_ERR("Comptime ORC JIT error (ensure): %s\n", orc_error ? orc_error : "unknown");
+      free(orc_error);
+      codegen_dispose(&tcg);
+      if (ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok, "failed to ensure orc jit engine");
+    }
+
+    uint64_t saddr = 0;
+    void *rt = NULL;
+    bool module_consumed = false;
+    bool executed = ny_orc_jit_execute(
+        &tcg, mod, ctm_ctx, &saddr, NULL, &rt, &module_consumed, &orc_error);
+    if (module_consumed) {
+      tcg.module = NULL;
+      tcg.ctx = NULL;
+      tcg.llvm_ctx_owned = false;
+      ctm_ctx_owned = false;
+    }
+    if (!executed) {
+      NY_LOG_ERR("Comptime ORC JIT error (execute): %s\n", orc_error ? orc_error : "unknown");
+      free(orc_error);
+      codegen_dispose(&tcg);
+      if (!module_consumed && ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok, "failed to execute orc jit module");
+    }
+    free(orc_error);
+
+    int64_t res = 1;
+    if (saddr) {
+      if (!ny_jit_prepare_execution(saddr)) {
+        if (prev_bb)
+          ny_pos(cg, prev_bb);
+        ny_orc_jit_remove_module(rt);
+        codegen_dispose(&tcg);
+        return expr_fail(cg, body->tok,
+                         "comptime JIT code memory is not executable");
+      }
+      res = ((int64_t (*)(void))saddr)();
+    }
+
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+
+    LLVMValueRef materialized =
+        ny_ct_jit_value_to_llvm(cg, res, body->tok, 0);
+
+    ny_orc_jit_remove_module(rt);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    if (materialized)
+      return materialized;
+    return expr_fail(cg, body->tok,
+                     "comptime value failed to materialize from AST interp or JIT");
+  }
+
   LLVMExecutionEngineRef ee = NULL;
+
   struct LLVMMCJITCompilerOptions jit_opts;
   ny_jit_init_native_once();
   ny_jit_init_options(&jit_opts, mod);

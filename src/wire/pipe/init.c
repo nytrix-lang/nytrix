@@ -2701,24 +2701,36 @@ skip_compilation:
       const char *jit_engine = opt->jit_engine;
       if (!jit_engine)
         jit_engine = getenv("NYTRIX_JIT_ENGINE");
-      if (jit_engine && strcmp(jit_engine, "orc") == 0) {
+      if (jit_engine && strcmp(jit_engine, "orc") == 0 &&
+          opt->native_backend == NY_NATIVE_BACKEND_LLVM) {
         if (opt->debug_symbols)
           LLVMStripModuleDebugInfo(jmod);
-        void *orc_jit = NULL;
         uint64_t saddr = 0, main_addr = 0;
-        bool consumed = false;
         char *orc_error = NULL;
-        bool created = ny_orc_jit_create(
-            jmod, cg.ctx, &cg, &orc_jit, &saddr, &main_addr, &consumed,
+
+        if (!ny_orc_jit_ensure_engine(&cg, &orc_error)) {
+          ny_progress_task_end(progress_node);
+          NY_LOG_ERR("ORC JIT ensure failed: %s\n",
+                     orc_error ? orc_error : "unknown error");
+          free(orc_error);
+          exit_code = 1;
+          goto exit_success;
+        }
+
+        void *rt = NULL;
+        bool module_consumed = false;
+        bool executed = ny_orc_jit_execute(
+            &cg, jmod, cg.ctx, &saddr, &main_addr, &rt, &module_consumed,
             &orc_error);
-        if (consumed) {
+
+        if (module_consumed) {
           cg.module = NULL;
           cg.ctx = NULL;
           cg.llvm_ctx_owned = false;
         }
-        if (!created) {
+        if (!executed) {
           ny_progress_task_end(progress_node);
-          NY_LOG_ERR("ORC JIT failed: %s\n",
+          NY_LOG_ERR("ORC JIT execute failed: %s\n",
                      orc_error ? orc_error : "unknown error");
           free(orc_error);
           exit_code = 1;
@@ -2753,7 +2765,7 @@ skip_compilation:
           }
         }
         maybe_log_phase_time(opt->do_timing, "JIT Run:", t_run);
-        ny_orc_jit_dispose(orc_jit);
+        ny_orc_jit_remove_module(rt);
         goto jit_execution_done;
       }
 

@@ -47,6 +47,9 @@ typedef enum {
   NYIR_ADDR_LOCAL,
   NYIR_LOAD_I64,
   NYIR_STORE_I64,
+  NYIR_ADDR_SYMBOL,  /* leaq symbol(%rip), dst — RIP-relative address of a named symbol */
+  NYIR_ALLOCA,       /* allocate stack space for byval/sret */
+  NYIR_COPY_STRUCT,  /* copy aggregate data */
   NYIR_OP_COUNT,
 } ny_nir_op_t;
 
@@ -152,6 +155,10 @@ typedef struct {
    * that discards the instruction. NULL/0 when unused. */
   int *extra_args;
   size_t extra_args_len;
+  /* For NY_NIR_CALL: if non-NULL, an array of length imm (the call arity)
+   * where arg_sizes[i] > 0 indicates a byval aggregate argument of that size.
+   * Owned by the instruction; freed by ny_nir_func_free. */
+  uint32_t *arg_sizes;
 } ny_nir_inst_t;
 
 typedef struct {
@@ -176,8 +183,8 @@ typedef struct {
 
 void ny_nir_func_free(ny_nir_func_t *f);
 int ny_nir_emit(ny_nir_func_t *f, ny_nir_inst_t inst);
-/* Resets *in to a NOP, freeing any owned extra_args. Used by optimizer
- * passes that discard an instruction in place. */
+/* Resets *in to a NOP, freeing all instruction-owned metadata. Used by
+ * optimizer passes that discard an instruction in place. */
 void ny_nir_inst_discard(ny_nir_inst_t *in);
 bool ny_nir_verify(const ny_nir_func_t *f, char *err, size_t err_len);
 bool ny_nir_validate_constraints(const ny_nir_func_t *f, char *err,

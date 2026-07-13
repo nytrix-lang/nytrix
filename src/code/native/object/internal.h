@@ -11,9 +11,12 @@ typedef struct {
   size_t cap;
 } ny_obj_buf_t;
 
+#define NY_RELOC_PC32 1
+#define NY_RELOC_PLT32 2
+
 typedef struct { int64_t label; size_t off; } ny_x64_obj_label_t;
 typedef struct { int64_t label; size_t disp_off; } ny_x64_obj_patch_t;
-typedef struct { char symbol[256]; size_t disp_off; } ny_x64_obj_reloc_t;
+typedef struct { char symbol[256]; size_t disp_off; int type; } ny_x64_obj_reloc_t;
 typedef struct { char name[256]; size_t off; size_t size; } ny_x64_obj_symbol_def_t;
 typedef struct { const ny_nir_inst_t **defs; int count; } ny_x64_obj_valmap_t;
 

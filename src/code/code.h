@@ -277,6 +277,7 @@ typedef struct codegen_llvm_t {
   LLVMContextRef ctx;
   bool llvm_ctx_owned;
   LLVMExecutionEngineRef ee;
+  void *orc_jit;
   LLVMValueRef setjmp_fn;
   LLVMTypeRef setjmp_ty;
 } codegen_llvm_t;
@@ -537,6 +538,7 @@ struct codegen_t {
       LLVMContextRef ctx;
       bool llvm_ctx_owned;
       LLVMExecutionEngineRef ee;
+      void *orc_jit;
       LLVMValueRef setjmp_fn;
       LLVMTypeRef setjmp_ty;
     };

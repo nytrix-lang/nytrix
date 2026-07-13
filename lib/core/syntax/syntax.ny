@@ -1,4 +1,4 @@
-;; Keywords: core syntax parser ast macros
+;; Keywords: core syntax parser ast
 ;; Core Syntax internals.
 ;; References:
 ;; - std.core.syntax

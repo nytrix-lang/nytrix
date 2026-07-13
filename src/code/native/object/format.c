@@ -324,7 +324,9 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
         goto done;
       sym_index = (uint32_t)(1 + def_count + (size_t)ext_i);
     }
-    uint64_t info = ((uint64_t)sym_index << 32) | 4u; /* R_X86_64_PLT32 */
+    /* R_X86_64_PC32 = 2, R_X86_64_PLT32 = 4 */
+    uint64_t rtype = (relocs[i].type == NY_RELOC_PC32) ? 2u : 4u;
+    uint64_t info = ((uint64_t)sym_index << 32) | rtype;
     if (!ny_obj_u64(&file, relocs[i].disp_off) || !ny_obj_u64(&file, info) ||
         !ny_obj_u64(&file, (uint64_t)-4LL))
       goto done;
@@ -816,7 +818,9 @@ bool ny_native_emit_elf64_object_from_nir(const ny_nir_func_t *nir,
                                         ctx.relocs[i].symbol);
     if (sym_i < 0)
       goto done;
-    uint64_t info = ((uint64_t)(2 + sym_i) << 32) | 4u; /* R_X86_64_PLT32 */
+    /* R_X86_64_PC32 = 2, R_X86_64_PLT32 = 4 */
+    uint64_t rtype = (ctx.relocs[i].type == NY_RELOC_PC32) ? 2u : 4u;
+    uint64_t info = ((uint64_t)(2 + sym_i) << 32) | rtype;
     if (!ny_obj_u64(&file, ctx.relocs[i].disp_off) || !ny_obj_u64(&file, info) ||
         !ny_obj_u64(&file, (uint64_t)-4LL))
       goto done;

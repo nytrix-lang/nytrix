@@ -280,6 +280,9 @@ static bool ny_i386_emit_inst(ny_i386_nir_ctx_t *c, const ny_nir_inst_t *in) {
   case NYIR_F64_TO_F32:
   case NYIR_F32_TO_F64:
   case NYIR_CMP_F32:
+  case NYIR_ADDR_SYMBOL:
+  case NYIR_ALLOCA:
+  case NYIR_COPY_STRUCT:
   case NYIR_OP_COUNT:
     break;
   }

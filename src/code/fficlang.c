@@ -864,6 +864,11 @@ static const char *ny_ffi_map_internal_c_type(const ny_ctype_t *ty, char *buf,
     return "f32";
   case NY_CTYPE_DOUBLE:
     return "f64";
+  case NY_CTYPE_LONG_DOUBLE:
+    /* Win64 aliases long double to double, while the supported SysV targets
+     * use an extended 16-byte representation. The mapper does not receive
+     * the target ABI yet, so decline instead of silently narrowing it. */
+    return NULL;
   case NY_CTYPE_NAMED:
   case NY_CTYPE_STRUCT:
   case NY_CTYPE_UNION:
@@ -918,12 +923,12 @@ static bool ny_ffi_internal_c_type_supported(codegen_t *cg, const char *ty) {
 
 static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
                                               const ny_cdecl_t *decl) {
-  if (!cg || !decl || decl->kind != NY_CDECL_TYPEDEF ||
-      !decl->type.aggregate_has_layout || decl->type.field_count == 0)
+  if (!cg || !decl || (decl->kind != NY_CDECL_TYPEDEF && decl->kind != NY_CDECL_NONE) ||
+      !decl->type.aggregate_has_layout)
     return true;
   if (decl->type.field_count != decl->type.aggregate_fields)
     return true;
-  char *name = ny_ffi_ctok_strdup(decl->name);
+  char *name = ny_ffi_ctok_strdup(decl->kind == NY_CDECL_NONE ? decl->type.name : decl->name);
   if (!name || !*name) {
     free(name);
     return false;
