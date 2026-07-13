@@ -8,8 +8,11 @@
 #else
 #include <dlfcn.h>
 #include <unistd.h>
-#if defined(__APPLE__) && defined(__aarch64__)
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
 #include <sys/mman.h>
+#include <pthread.h>
+#include <libkern/OSCacheControl.h>
+#define NY_APPLE_ARM64_JIT 1
 #endif
 #endif
 #include "priv.h"
@@ -233,10 +236,7 @@ static void *ny_missing_extern_stub_for_arity(int arity, bool variadic) {
   }
 }
 
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
-extern void pthread_jit_write_protect_np(int enabled)
-    __attribute__((weak_import));
-
+#if defined(NY_APPLE_ARM64_JIT)
 #ifndef MAP_ANON
 #define MAP_ANON MAP_ANONYMOUS
 #endif
@@ -275,8 +275,7 @@ static size_t ny_jit_round_page(size_t size) {
 }
 
 static void ny_apple_jit_write_protect(int enabled) {
-  if (pthread_jit_write_protect_np)
-    pthread_jit_write_protect_np(enabled);
+  pthread_jit_write_protect_np(enabled);
 }
 
 static uint8_t *ny_apple_jit_alloc_section(void *opaque, uintptr_t size,
@@ -336,14 +335,18 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
   if (!mm)
     return 0;
   for (ny_apple_jit_alloc_t *a = mm->allocs; a; a = a->next) {
+    int prot = PROT_READ;
     if (a->code) {
-      __builtin___clear_cache((char *)a->base, (char *)a->base + a->size);
-      continue;
+      sys_icache_invalidate(a->base, a->size);
+      prot |= PROT_EXEC;
+    } else if (!a->read_only) {
+      prot |= PROT_WRITE;
     }
-    int prot = PROT_READ | (a->read_only ? 0 : PROT_WRITE);
     if (mprotect(a->base, a->size, prot) != 0) {
       if (err_msg)
-        *err_msg = LLVMCreateMessage("failed to finalize Apple arm64 JIT data");
+        *err_msg = LLVMCreateMessage(a->code
+                                         ? "failed to make Apple arm64 JIT code executable"
+                                         : "failed to finalize Apple arm64 JIT data");
       ny_apple_jit_write_protect(1);
       return 1;
     }
@@ -410,7 +413,7 @@ void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef
   options->CodeModel = apple_arm64 ? LLVMCodeModelLarge : LLVMCodeModelJITDefault;
   options->OptLevel = (unsigned)opt_level;
   options->EnableFastISel = fast_isel;
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(NY_APPLE_ARM64_JIT)
   if (apple_arm64)
     options->MCJMM = ny_apple_arm64_jit_memory_manager();
 #endif
@@ -439,7 +442,7 @@ void ny_jit_init_native_once(void) {
 }
 
 void ny_jit_prepare_execution(void) {
-#if !defined(_WIN32) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(NY_APPLE_ARM64_JIT)
   ny_apple_jit_write_protect(1);
 #endif
 }
