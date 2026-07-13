@@ -569,6 +569,7 @@ if (NOT _nytrix_enable_z3_lc STREQUAL "off")
     NAMES z3.h
     HINTS ${NYTRIX_Z3_PC_INCLUDE_DIRS}
     PATHS
+      "${NYTRIX_ROOT}/build/vendor/include"
       "$ENV{MSYSTEM_PREFIX}/include"
       "$ENV{MINGW_PREFIX}/include"
       "/opt/homebrew/include"
@@ -591,6 +592,10 @@ if (NOT _nytrix_enable_z3_lc STREQUAL "off")
     message(STATUS "Z3 enabled: ${NYTRIX_Z3_LIBRARY}")
   elseif (_nytrix_enable_z3_lc STREQUAL "on")
     message(FATAL_ERROR "NYTRIX_ENABLE_Z3=on but z3.h/libz3 were not found")
+  elseif (NYTRIX_Z3_LIBRARY AND NOT NYTRIX_Z3_INCLUDE_DIR)
+    message(STATUS "Z3 library found at ${NYTRIX_Z3_LIBRARY}, but development header z3.h is missing; install Z3 development headers or place z3*.h in build/vendor/include; using HM-only type solver")
+  elseif (NYTRIX_Z3_INCLUDE_DIR AND NOT NYTRIX_Z3_LIBRARY)
+    message(STATUS "Z3 headers found at ${NYTRIX_Z3_INCLUDE_DIR}, but libz3 is missing; install the matching Z3 library or place it in build/vendor/lib/host; using HM-only type solver")
   else()
     message(STATUS "Z3 not found; using HM-only type solver")
   endif()
@@ -700,6 +705,8 @@ file(GLOB SRC_SEMA CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/sema/*.c")
 file(GLOB SRC_CODE CONFIGURE_DEPENDS
   "${NYTRIX_ROOT}/src/code/*.c"
   "${NYTRIX_ROOT}/src/code/native/*.c"
+  "${NYTRIX_ROOT}/src/code/native/ir/*.c"
+  "${NYTRIX_ROOT}/src/code/native/object/*.c"
   "${NYTRIX_ROOT}/src/code/native/backend/*.c"
   "${NYTRIX_ROOT}/src/code/c/*.c")
 file(GLOB SRC_REPL CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/repl/*.c")
@@ -992,6 +999,9 @@ set_target_properties(ny PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   OUTPUT_NAME_DEBUG "ny_debug"
 )
+if(UNIX AND NOT APPLE AND EXISTS "${NYTRIX_ROOT}/build/vendor/lib/host")
+  set_property(TARGET ny PROPERTY BUILD_RPATH "$ORIGIN/../vendor/lib/host")
+endif()
 if (WIN32)
   # Set PDB properties for Windows builds
   set_target_properties(ny PROPERTIES
@@ -1034,7 +1044,10 @@ function(nytrix_add_tool tool_target tool_name)
     "${NYTRIX_ROOT}/src/base/args.c"
   )
   if ("${tool_name}" STREQUAL "fmt")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/fmt/init.c")
+    list(APPEND _tool_sources
+      "${NYTRIX_ROOT}/src/cmd/fmt/init.c"
+      "${NYTRIX_ROOT}/src/base/process.c"
+    )
   elseif ("${tool_name}" STREQUAL "perf")
     list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/perf/perf.c")
   elseif ("${tool_name}" STREQUAL "test")

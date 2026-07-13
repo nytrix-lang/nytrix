@@ -120,37 +120,6 @@ static bool ny_i386_emit_binop(ny_i386_nir_ctx_t *c, const ny_nir_inst_t *in,
          ny_i386_store_value(c, in->dst, "%eax");
 }
 
-static bool ny_i386_collect_call_args(ny_i386_nir_ctx_t *c,
-                                      const ny_nir_inst_t *in,
-                                      int *args, int *argc_out) {
-  int argc = (int)in->imm;
-  if (argc < 0 || argc > NY_NIR_CALL_MAX_ARGS) {
-    ny_native_set_err(c->err, c->err_len,
-                      "i386 NYIR emit: call exceeds the maximum supported argument count");
-    return false;
-  }
-  if (argc > 0) args[0] = in->a;
-  if (argc > 1) args[1] = in->b;
-  if (argc > 2) args[2] = in->c;
-  if (argc > 3) args[3] = in->d;
-  if (argc > 4) args[4] = in->e;
-  if (argc > 5) args[5] = in->f;
-  for (int i = 6; i < argc; ++i) {
-    args[i] = (in->extra_args && (size_t)(i - 6) < in->extra_args_len)
-                  ? in->extra_args[i - 6]
-                  : -1;
-  }
-  for (int i = 0; i < argc; ++i) {
-    if (args[i] < 0 || !c->nir || args[i] >= c->nir->next_value) {
-      ny_native_set_err(c->err, c->err_len,
-                        "i386 NYIR emit: invalid call arg");
-      return false;
-    }
-  }
-  *argc_out = argc;
-  return true;
-}
-
 static bool ny_i386_emit_inst(ny_i386_nir_ctx_t *c, const ny_nir_inst_t *in) {
   switch (in->op) {
   case NY_NIR_NOP:
@@ -220,7 +189,8 @@ static bool ny_i386_emit_inst(ny_i386_nir_ctx_t *c, const ny_nir_inst_t *in) {
   case NY_NIR_CALL: {
     int args[NY_NIR_CALL_MAX_ARGS];
     int argc = 0;
-    if (!ny_i386_collect_call_args(c, in, args, &argc))
+    if (!ny_nir_call_args(in, c->nir->next_value, args,
+                          NY_NIR_CALL_MAX_ARGS, &argc, c->err, c->err_len))
       return false;
     for (int i = argc - 1; i >= 0; --i) {
       if (!ny_i386_load_value(c, "%eax", args[i]) ||
@@ -280,6 +250,10 @@ static bool ny_i386_emit_inst(ny_i386_nir_ctx_t *c, const ny_nir_inst_t *in) {
   case NYIR_F64_TO_F32:
   case NYIR_F32_TO_F64:
   case NYIR_CMP_F32:
+  case NYIR_ADDR_SYMBOL:
+  case NYIR_ALLOCA:
+  case NYIR_COPY_STRUCT:
+  case NYIR_CAPTURE_RET:
   case NYIR_OP_COUNT:
     break;
   }

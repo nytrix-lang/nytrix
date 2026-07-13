@@ -24,6 +24,7 @@ fn _ident_after(str s, int start) str {
    str.str_slice(s, begin, i)
 }
 
+;; Returns the result of the `icon_for` operation.
 fn icon_for(str kind) str {
    if kind == "fn" { return "callable" }
    if kind == "struct" { return "classlist" }
@@ -56,10 +57,12 @@ fn symbols(list lines, str filename="", int max_lines=0) list {
    out
 }
 
+;; Returns the result of the `row_y` operation.
 fn row_y(f64 panel_y, int idx) f64 {
    panel_y + 36.0 + float(idx) * ROW_H
 }
 
+;; Returns the result of the `row_at` operation.
 fn row_at(f64 panel_x, f64 panel_y, f64 panel_w, f64 panel_h, f64 x, f64 y, int count) int {
    if x < panel_x || x > panel_x + panel_w { return -1 }
    if y < panel_y + 36.0 || y > panel_y + panel_h { return -1 }

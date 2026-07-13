@@ -1,0 +1,19 @@
+shape internal_variadic_import_lowering {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi import-lowering variadic no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/internal-variadic-import.h"
+use std.core
+
+def *int p = malloc(32)
+assert(p != nil, "variadic import allocation")
+def n = snprintf(p, 32, "ny%d", 7)
+free(p)
+assert(n > 0 && n < 32, "internal c variadic import snprintf")
+1 + 2
+NY
+}

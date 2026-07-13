@@ -1,0 +1,19 @@
+shape native_only_nested_aggregate_abi {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 c-frontend ffi aggregate-param aggregate-return nested mixed-class no-libclang]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --c-frontend=nytrix -no-std --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/internal-byvalue-param-import.h" link "etc/tests/rt/c/sum-pair.so"
+def mixed = c.nested_mixed_pair()
+def sse = c.nested_sse_pair()
+def returns_ok = c.check_nested_mixed(mixed) && c.check_nested_sse(sse)
+def params_ok = c.sum_nested_mixed(mixed) == 10 && c.sum_nested_sse(sse) == 4
+def union_value = c.aggregate_union_value()
+def array_value = c.aggregate_array_value()
+def composite_ok = c.check_aggregate_union(union_value) && c.check_aggregate_array(array_value)
+1 / (returns_ok && params_ok && composite_ok)
+NY
+}

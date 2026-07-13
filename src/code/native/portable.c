@@ -286,24 +286,20 @@ static bool ny_port_jump(ny_port_ctx_t *c, int64_t label) {
 }
 
 static bool ny_port_call(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
-  if (in->imm > 2) {
+  int args[NY_NIR_CALL_MAX_ARGS];
+  int argc = 0;
+  if (!ny_nir_call_args(in, c->nir->next_value, args,
+                        NY_NIR_CALL_MAX_ARGS, &argc, c->err, c->err_len))
+    return false;
+  if ((size_t)argc > c->target->gp_arg_reg_count) {
     ny_native_set_err(c->err, c->err_len,
-                      "%s NYIR emit: calls support at most 2 arguments",
-                      c->pretty);
+                      "%s NYIR emit: %d scalar arguments exceed the %zu-register ABI slice",
+                      c->pretty, argc, c->target->gp_arg_reg_count);
     return false;
   }
-  if (in->imm > 0 && !ny_port_load_value(c, c->kind == NY_PORT_BPF ? "r1" :
-                                         c->kind == NY_PORT_MIPS ? "$a0" :
-                                         c->kind == NY_PORT_POWERPC ? "r3" :
-                                         c->kind == NY_PORT_AVR ? "r24:r31" :
-                                         "$a0", in->a))
-    return false;
-  if (in->imm > 1 && !ny_port_load_value(c, c->kind == NY_PORT_BPF ? "r2" :
-                                         c->kind == NY_PORT_MIPS ? "$a1" :
-                                         c->kind == NY_PORT_POWERPC ? "r4" :
-                                         c->kind == NY_PORT_AVR ? "r16:r23" :
-                                         "$a1", in->b))
-    return false;
+  for (int i = 0; i < argc; ++i)
+    if (!ny_port_load_value(c, c->target->gp_arg_regs[i], args[i]))
+      return false;
   const char *sym = in->symbol ? in->symbol : "";
   bool is_ext = (in->flags & NY_NIR_INST_F_EXTERN) != 0;
   (void)is_ext;
@@ -437,6 +433,10 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
   case NYIR_F32_TO_F64:
   case NYIR_CMP_F32:
   case NYIR_ADDR_LOCAL:
+  case NYIR_ADDR_SYMBOL:
+  case NYIR_ALLOCA:
+  case NYIR_COPY_STRUCT:
+  case NYIR_CAPTURE_RET:
   case NYIR_LOAD_I64:
   case NYIR_STORE_I64:
   case NYIR_OP_COUNT:
@@ -584,10 +584,11 @@ static bool ny_port_emit_nir(ny_native_writer_t *w,
     return false;
 
   if (strcmp(name, "rt_main") != 0) {
-    int max = ctx.max_local_slot < 2 ? ctx.max_local_slot : 2;
+    int max = ctx.max_local_slot < (int)target->gp_arg_reg_count
+                  ? ctx.max_local_slot
+                  : (int)target->gp_arg_reg_count;
     for (int i = 0; i < max; ++i) {
-      const char *arg = i == 0 ? ret_reg : tmp1;
-      if (!ny_port_store_local(&ctx, i, arg))
+      if (!ny_port_store_local(&ctx, i, target->gp_arg_regs[i]))
         return false;
     }
   }

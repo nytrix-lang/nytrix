@@ -1,0 +1,22 @@
+shape native_only_memory_aggregate_param {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 c-frontend ffi aggregate-param memory-class no-libclang]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --c-frontend=nytrix -no-std --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/internal-byvalue-param-import.h" link "etc/tests/rt/c/sum-pair.so"
+def p = malloc(24)
+store64_i(p, 10)
+store64_i(p, 20, 8)
+store64_i(p, 30, 16)
+def result = c.sum_pair(p)
+def returned = c.make_sum_pair()
+def returned_result = c.sum_pair(returned)
+def nested = c.nested_memory_value()
+def nested_result = c.sum_nested_memory(nested)
+free(p)
+1 / (result == 60 && returned_result == 60 && nested_result == 21)
+NY
+}

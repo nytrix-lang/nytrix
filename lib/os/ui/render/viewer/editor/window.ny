@@ -17,10 +17,12 @@ def SPLIT_VERTICAL = "vertical"
 def SPLIT_HORIZONTAL = "horizontal"
 def MIN_PANE = 96.0
 
+;; Returns the result of the `leaf` operation.
 fn leaf(any buffer=0, bool active=false) dict {
    {"split": SPLIT_NONE, "ratio": 0.5, "buffer": buffer, "active": active, "x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0, "scroll": 0}
 }
 
+;; Returns the result of the `root` operation.
 fn root(any buffer=0) dict {
    leaf(buffer, true)
 }
@@ -61,14 +63,17 @@ fn _split_selected(dict node, str kind, any new_buffer) list {
    [node, bool(right_res.get(1, false))]
 }
 
+;; Returns the result of the `split_right` operation.
 fn split_right(dict node, any new_buffer=0) dict {
    _split_selected(node, SPLIT_VERTICAL, new_buffer).get(0)
 }
 
+;; Returns the result of the `split_below` operation.
 fn split_below(dict node, any new_buffer=0) dict {
    _split_selected(node, SPLIT_HORIZONTAL, new_buffer).get(0)
 }
 
+;; Returns the result of the `pane_layout` operation.
 fn pane_layout(dict node, f64 x, f64 y, f64 w, f64 h) dict {
    node["x"] = x
    node["y"] = y
@@ -95,10 +100,12 @@ fn _leaves_into(dict node, list out) list {
    _leaves_into(_child(node, "right"), out)
 }
 
+;; Returns the result of the `leaves` operation.
 fn leaves(dict node) list {
    _leaves_into(node, [])
 }
 
+;; Returns the result of the `selected` operation.
 fn selected(dict node) dict {
    def rows = leaves(node)
    mut i = 0
@@ -120,6 +127,7 @@ fn _select_buffer(dict node, any buffer) dict {
    node
 }
 
+;; Updates the next and returns the resulting state.
 fn select_next(dict node, int dir=1) dict {
    def rows = leaves(node)
    if rows.len <= 0 { return node }
@@ -135,6 +143,7 @@ fn select_next(dict node, int dir=1) dict {
    _select_buffer(_clear_active(node), is_dict(next_row) ? next_row.get("buffer", next) : next)
 }
 
+;; Updates the at and returns the resulting state.
 fn select_at(dict node, f64 x, f64 y) dict {
    def rows = leaves(node)
    mut picked = -1
@@ -150,6 +159,7 @@ fn select_at(dict node, f64 x, f64 y) dict {
    _select_buffer(_clear_active(node), is_dict(picked_row) ? picked_row.get("buffer", picked) : picked)
 }
 
+;; Releases the selected.
 fn delete_selected(dict node) dict {
    if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE { return node }
    def left = _child(node, "left")
@@ -167,6 +177,7 @@ fn delete_selected(dict node) dict {
    node
 }
 
+;; Returns the result of the `balance` operation.
 fn balance(dict node) dict {
    if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE { return node }
    node["ratio"] = 0.5
@@ -189,6 +200,7 @@ fn _resize(dict node, f64 delta) dict {
    node
 }
 
+;; Updates the selected and returns the resulting state.
 fn resize_selected(dict node, f64 delta=0.05) dict {
    _resize(node, delta)
 }

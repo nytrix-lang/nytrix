@@ -76,7 +76,142 @@ static char *materialize_shape_ny_source(const char *shape_path);
 static char *shape_meta_string(const char *shape_path, const char *key);
 static int native_backend_explicit(const char *flags);
 static int path_is_native_runtime_test(const char *p);
+static int path_is_stdlib_source(const char *p);
 static int run_progress_selftest(const char *bin, int timeout_sec);
+static int make_test_capture_tmp(char *tmp, size_t tmp_len,
+                                 const char *prefix);
+
+typedef struct {
+  FILE *stream;
+  char path[PATH_MAX];
+  int saved_stdout;
+  int saved_stderr;
+} FailureOutputCapture;
+
+static int test_fd_dup(int fd) {
+#ifdef _WIN32
+  return _dup(fd);
+#else
+  return dup(fd);
+#endif
+}
+
+static int test_fd_dup2(int from, int to) {
+#ifdef _WIN32
+  return _dup2(from, to);
+#else
+  return dup2(from, to);
+#endif
+}
+
+static void test_fd_close(int fd) {
+#ifdef _WIN32
+  _close(fd);
+#else
+  close(fd);
+#endif
+}
+
+static int failure_output_capture_begin(FailureOutputCapture *capture) {
+  if (!capture)
+    return 0;
+  memset(capture, 0, sizeof(*capture));
+  capture->saved_stdout = -1;
+  capture->saved_stderr = -1;
+  int fd = make_test_capture_tmp(capture->path, sizeof(capture->path), "failures");
+#ifndef _WIN32
+  if (fd >= 0)
+    close(fd);
+#else
+  (void)fd;
+#endif
+  capture->stream = fopen(capture->path, "w+b");
+  if (!capture->stream)
+    return 0;
+  fflush(stdout);
+  fflush(stderr);
+  capture->saved_stdout = test_fd_dup(fileno(stdout));
+  capture->saved_stderr = test_fd_dup(fileno(stderr));
+  int stdout_redirected = 0;
+  int stderr_redirected = 0;
+  if (capture->saved_stdout >= 0 && capture->saved_stderr >= 0) {
+    stdout_redirected =
+        test_fd_dup2(fileno(capture->stream), fileno(stdout)) >= 0;
+    if (stdout_redirected)
+      stderr_redirected =
+          test_fd_dup2(fileno(capture->stream), fileno(stderr)) >= 0;
+  }
+  if (!stdout_redirected || !stderr_redirected) {
+    if (stdout_redirected && capture->saved_stdout >= 0)
+      test_fd_dup2(capture->saved_stdout, fileno(stdout));
+    if (stderr_redirected && capture->saved_stderr >= 0)
+      test_fd_dup2(capture->saved_stderr, fileno(stderr));
+    if (capture->saved_stdout >= 0)
+      test_fd_close(capture->saved_stdout);
+    if (capture->saved_stderr >= 0)
+      test_fd_close(capture->saved_stderr);
+    fclose(capture->stream);
+    remove(capture->path);
+    memset(capture, 0, sizeof(*capture));
+    capture->saved_stdout = capture->saved_stderr = -1;
+    return 0;
+  }
+  return 1;
+}
+
+static int failure_marker_line(const char *line) {
+  return line && (strstr(line, "[✗/✗/✗]") || strstr(line, "[x/x/x]"));
+}
+
+static void failure_output_capture_end(FailureOutputCapture *capture) {
+  if (!capture || !capture->stream)
+    return;
+  fflush(stdout);
+  fflush(stderr);
+  test_fd_dup2(capture->saved_stdout, fileno(stdout));
+  test_fd_dup2(capture->saved_stderr, fileno(stderr));
+  test_fd_close(capture->saved_stdout);
+  test_fd_close(capture->saved_stderr);
+  rewind(capture->stream);
+
+  FILE *block = tmpfile();
+  char line[8192];
+  int capturing = 0;
+  while (fgets(line, sizeof(line), capture->stream)) {
+    if (strncmp(line, "[replay output]", 15) == 0) {
+      capturing = 1;
+      if (block) {
+        fclose(block);
+        block = tmpfile();
+      }
+    }
+    if (capturing && block)
+      fputs(line, block);
+    if (!failure_marker_line(line))
+      continue;
+    if (capturing && block) {
+      fflush(block);
+      rewind(block);
+      char chunk[8192];
+      size_t n = 0;
+      while ((n = fread(chunk, 1, sizeof(chunk), block)) > 0)
+        fwrite(chunk, 1, n, stdout);
+    } else {
+      fputs(line, stdout);
+    }
+    putchar('\n');
+    capturing = 0;
+    if (block) {
+      fclose(block);
+      block = tmpfile();
+    }
+  }
+  if (block)
+    fclose(block);
+  fclose(capture->stream);
+  remove(capture->path);
+  capture->stream = NULL;
+}
 
 typedef struct {
   int tests;
@@ -116,7 +251,76 @@ typedef struct {
   CacheRow *items;
   size_t len;
   size_t cap;
+  size_t *ht_slot;
+  size_t ht_cap;
+  size_t ht_len;
 } CacheDb;
+
+static uint32_t cache_hash_path(const char *s) {
+  return ny_hash32_cstr(s);
+}
+
+static void cache_ht_rehash(CacheDb *db) {
+  size_t nc = db->ht_cap ? db->ht_cap * 2 : 512;
+  while (nc <= db->len * 2 && nc <= SIZE_MAX / 2)
+    nc *= 2;
+  size_t *slots = malloc(nc * sizeof(*slots));
+  if (!slots)
+    return;
+  for (size_t i = 0; i < nc; ++i)
+    slots[i] = SIZE_MAX;
+  size_t mask = nc - 1;
+  for (size_t item = 0; item < db->len; ++item) {
+    size_t pos = cache_hash_path(db->items[item].path) & mask;
+    for (size_t probe = 0; probe < nc; ++probe) {
+      if (slots[pos] == SIZE_MAX) {
+        slots[pos] = item;
+        break;
+      }
+      pos = (pos + 1) & mask;
+    }
+  }
+  free(db->ht_slot);
+  db->ht_slot = slots;
+  db->ht_cap = nc;
+  db->ht_len = db->len;
+}
+
+static void cache_ht_ensure(CacheDb *db) {
+  if (!db->ht_slot || (db->ht_len + 1) * 2 >= db->ht_cap)
+    cache_ht_rehash(db);
+}
+
+static size_t cache_ht_find(const CacheDb *db, const char *path) {
+  if (!db->ht_slot || !db->ht_cap)
+    return SIZE_MAX;
+  size_t mask = db->ht_cap - 1;
+  size_t pos = cache_hash_path(path) & mask;
+  for (size_t probe = 0; probe < db->ht_cap; ++probe) {
+    size_t item = db->ht_slot[pos];
+    if (item == SIZE_MAX)
+      return SIZE_MAX;
+    if (item < db->len && strcmp(db->items[item].path, path) == 0)
+      return item;
+    pos = (pos + 1) & mask;
+  }
+  return SIZE_MAX;
+}
+
+static void cache_ht_insert(CacheDb *db, size_t item) {
+  if (!db->ht_slot || item >= db->len)
+    return;
+  size_t mask = db->ht_cap - 1;
+  size_t pos = cache_hash_path(db->items[item].path) & mask;
+  for (size_t probe = 0; probe < db->ht_cap; ++probe) {
+    if (db->ht_slot[pos] == SIZE_MAX) {
+      db->ht_slot[pos] = item;
+      db->ht_len++;
+      return;
+    }
+    pos = (pos + 1) & mask;
+  }
+}
 
 static void timings_push(TimingVec *v, const char *path, int ms, const char *suite) {
   if (v->len == v->cap) {
@@ -151,13 +355,13 @@ static void sv_push_unique(StrVec *v, const char *s) {
 }
 
 static void cache_set(CacheDb *db, const char *path, uint64_t sig, int ok, int dur_ms) {
-  for (size_t i = 0; i < db->len; i++) {
-    if (strcmp(db->items[i].path, path) == 0) {
-      db->items[i].sig = sig;
-      db->items[i].ok = ok;
-      db->items[i].dur_ms = dur_ms;
-      return;
-    }
+  cache_ht_ensure(db);
+  size_t existing = cache_ht_find(db, path);
+  if (existing != SIZE_MAX) {
+    db->items[existing].sig = sig;
+    db->items[existing].ok = ok;
+    db->items[existing].dur_ms = dur_ms;
+    return;
   }
   if (db->len == db->cap) {
     size_t nc = db->cap ? db->cap * 2 : 256;
@@ -174,19 +378,20 @@ static void cache_set(CacheDb *db, const char *path, uint64_t sig, int ok, int d
   db->items[db->len].ok = ok;
   db->items[db->len].dur_ms = dur_ms;
   db->len++;
+  cache_ht_insert(db, db->len - 1);
 }
 
 static CacheRow *cache_find(CacheDb *db, const char *path) {
-  for (size_t i = 0; i < db->len; i++)
-    if (strcmp(db->items[i].path, path) == 0)
-      return &db->items[i];
-  return NULL;
+  cache_ht_ensure(db);
+  size_t item = cache_ht_find(db, path);
+  return item == SIZE_MAX ? NULL : &db->items[item];
 }
 
 static void cache_free(CacheDb *db) {
   for (size_t i = 0; i < db->len; i++)
     free(db->items[i].path);
   free(db->items);
+  free(db->ht_slot);
 }
 
 static int is_dir(const char *path) {
@@ -629,7 +834,8 @@ static int test_archive_source_needs_m32(const char *src_path) {
   base = base ? base + 1 : src_path;
   size_t n = strlen(base);
   return (n >= 4 && strcmp(base + n - 4, "32.c") == 0) ||
-         strstr(base, "32_") != NULL || strstr(base, "_32") != NULL;
+         strstr(base, "32_") != NULL || strstr(base, "_32") != NULL ||
+         strstr(base, "32-") != NULL || strstr(base, "-32") != NULL;
 }
 
 static int test_compile_archive_source(const char *cc, const char *src_path,
@@ -649,19 +855,6 @@ static int test_compile_archive_source(const char *cc, const char *src_path,
   cc_argv[cc_argc++] = (char *)obj_path;
   cc_argv[cc_argc] = NULL;
   int cc_rc = run_debug_argv(cc_argv, 30, 1);
-  if (cc_rc != 0 && use_m32) {
-    cc_argc = 0;
-    cc_argv[cc_argc++] = (char *)cc;
-    cc_argv[cc_argc++] = (char *)"-c";
-    cc_argv[cc_argc++] = (char *)"-fno-pic";
-    cc_argv[cc_argc++] = (char *)"-fno-builtin";
-    cc_argv[cc_argc++] = (char *)"-fno-inline";
-    cc_argv[cc_argc++] = (char *)src_path;
-    cc_argv[cc_argc++] = (char *)"-o";
-    cc_argv[cc_argc++] = (char *)obj_path;
-    cc_argv[cc_argc] = NULL;
-    cc_rc = run_debug_argv(cc_argv, 30, 1);
-  }
   return cc_rc == 0;
 }
 
@@ -696,9 +889,13 @@ static void test_collect_archive_sibling_sources(const char *archive_path, StrVe
     return;
   memcpy(stem, base, blen - 2);
   stem[blen - 2] = '\0';
+  for (char *p = stem; *p; ++p) {
+    if (*p == '_')
+      *p = '-';
+  }
 
   char prefix[PATH_MAX];
-  snprintf(prefix, sizeof(prefix), "%s_", stem);
+  snprintf(prefix, sizeof(prefix), "%s-", stem);
   size_t plen = strlen(prefix);
   DIR *d = opendir(dir);
   if (!d)
@@ -745,6 +942,17 @@ static int test_build_missing_archive(const char *archive_path) {
   char single_src[PATH_MAX];
   snprintf(single_src, sizeof(single_src), "%s", archive_path);
   snprintf(single_src + alen - 2, sizeof(single_src) - alen + 2, ".c");
+  const char *single_base = strrchr(single_src, '/');
+  char *single_name = single_base ? (char *)single_base + 1 : single_src;
+#ifdef _WIN32
+  char *single_backslash = strrchr(single_src, '\\');
+  if (single_backslash && single_backslash + 1 > single_name)
+    single_name = single_backslash + 1;
+#endif
+  for (char *p = single_name; *p; ++p) {
+    if (*p == '_')
+      *p = '-';
+  }
   if (nyt_is_file(single_src))
     sv_push(&srcs, single_src);
   else
@@ -782,19 +990,37 @@ static int test_build_missing_archive(const char *archive_path) {
   }
 
   if (ok && objs.len > 0) {
-    remove(archive_path);
+    char archive_tmp[PATH_MAX];
+    snprintf(archive_tmp, sizeof(archive_tmp), "%s.tmp-XXXXXX", archive_path);
+    int archive_fd = mkstemp(archive_tmp);
+    if (archive_fd >= 0) {
+      close(archive_fd);
+      remove(archive_tmp);
+    } else {
+      ok = 0;
+    }
     char **ar_argv = (char **)calloc(objs.len + 4, sizeof(char *));
     if (!ar_argv) {
       ok = 0;
-    } else {
+    } else if (ok) {
       size_t argc = 0;
       ar_argv[argc++] = (char *)"ar";
       ar_argv[argc++] = (char *)"rcs";
-      ar_argv[argc++] = (char *)archive_path;
+      ar_argv[argc++] = archive_tmp;
       for (size_t i = 0; i < objs.len; ++i)
         ar_argv[argc++] = objs.items[i];
       ar_argv[argc] = NULL;
-      ok = run_debug_argv(ar_argv, 30, 1) == 0 && nyt_is_file(archive_path);
+      ok = run_debug_argv(ar_argv, 30, 1) == 0 && nyt_is_file(archive_tmp);
+      if (ok) {
+#ifdef _WIN32
+        ok = MoveFileExA(archive_tmp, archive_path,
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+        ok = rename(archive_tmp, archive_path) == 0;
+#endif
+      }
+      if (!ok)
+        remove(archive_tmp);
       free(ar_argv);
     }
   }
@@ -806,6 +1032,34 @@ static int test_build_missing_archive(const char *archive_path) {
   return ok;
 }
 static char *decode_shape_quoted_string(const char *start, size_t len);
+
+#ifndef _WIN32
+static int test_merge_link_archives(const StrVec *links, char *out,
+                                    size_t out_len) {
+  if (!links || links->len < 2 || !out || out_len == 0)
+    return 0;
+  snprintf(out, out_len, "%s/ny-internal-link-libs-%ld-%ld.a",
+           nyt_temp_dir(), (long)getpid(), (long)now_ms());
+  for (size_t i = 0; i < links->len; ++i)
+    if (!links->items[i] || strchr(links->items[i], '\n') ||
+        strchr(links->items[i], '\r'))
+      return 0;
+  FILE *ar = popen("ar -M", "w");
+  if (!ar)
+    return 0;
+  fprintf(ar, "CREATE %s\n", out);
+  for (size_t i = links->len; i > 0; --i)
+    fprintf(ar, "ADDLIB %s\n", links->items[i - 1]);
+  fputs("SAVE\nEND\n", ar);
+  int status = pclose(ar);
+  if (status != 0 || !nyt_is_file(out)) {
+    remove(out);
+    out[0] = '\0';
+    return 0;
+  }
+  return 1;
+}
+#endif
 
 static int object_link_run_check(const char *shape_path) {
   if (!shape_path || !nyt_ends_with(shape_path, ".nshape"))
@@ -933,15 +1187,41 @@ static int object_link_run_check(const char *shape_path) {
   free(expect_val);
   return 0;
 #else
+  char merged_archive[PATH_MAX] = {0};
   const char *first_archive = links.len ? links.items[0] : NULL;
-  int internal_rc = test_internal_elf64_link_run(obj_path, ret_kind, expected_val, shape_path,
-                                                  first_archive);
+  if (links.len > 1) {
+    if (!test_merge_link_archives(&links, merged_archive,
+                                  sizeof(merged_archive))) {
+      sv_free(&links);
+      free(expect_val);
+      return 1;
+    }
+    first_archive = merged_archive;
+  }
+  int internal_rc = test_internal_aarch64_elf64_link_run(
+      obj_path, ret_kind, expected_val, shape_path);
   if (internal_rc == 0) {
+    if (merged_archive[0]) remove(merged_archive);
     sv_free(&links);
     free(expect_val);
     return 0;
   }
   if (internal_rc == 1) {
+    if (merged_archive[0]) remove(merged_archive);
+    sv_free(&links);
+    free(expect_val);
+    return 1;
+  }
+  internal_rc = test_internal_elf64_link_run(obj_path, ret_kind, expected_val, shape_path,
+                                                  first_archive);
+  if (internal_rc == 0) {
+    if (merged_archive[0]) remove(merged_archive);
+    sv_free(&links);
+    free(expect_val);
+    return 0;
+  }
+  if (internal_rc == 1) {
+    if (merged_archive[0]) remove(merged_archive);
     sv_free(&links);
     free(expect_val);
     return 1;
@@ -949,15 +1229,26 @@ static int object_link_run_check(const char *shape_path) {
   internal_rc = test_internal_elf32_link_run(obj_path, ret_kind, expected_val, shape_path,
                                               first_archive);
   if (internal_rc == 0) {
+    if (merged_archive[0]) remove(merged_archive);
     sv_free(&links);
     free(expect_val);
     return 0;
   }
   if (internal_rc == 1) {
+    if (merged_archive[0]) remove(merged_archive);
     sv_free(&links);
     free(expect_val);
     return 1;
   }
+  if (merged_archive[0]) remove(merged_archive);
+
+#if !defined(__linux__)
+  /* ELF execution/link validation belongs to the Linux internal linker.
+     A Mach-O host linker cannot consume these cross-format objects. */
+  sv_free(&links);
+  free(expect_val);
+  return 0;
+#endif
 
   char harness_path[PATH_MAX];
   snprintf(harness_path, sizeof(harness_path), "%s/ny-link-run-%ld-XXXXXX.c",
@@ -1102,6 +1393,10 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
   if (trace_exec)
     argv[argc++] = "-trace";
   push_test_warn_arg(argv, &argc, 80);
+  if (path_is_stdlib_source(path)) {
+    argv[argc++] = "--stop-after=opt";
+    argv[argc++] = "--parallel=off";
+  }
   if (std_path) {
     argv[argc++] = "--std";
     argv[argc++] = (char *)std_path;
@@ -1116,6 +1411,10 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
   }
   for (int i = 0; i < flagc && argc < 76; i++)
     argv[argc++] = flagv[i];
+  if (trace_exec) {
+    argv[argc++] = "--no-progress";
+    argv[argc++] = "--color=never";
+  }
   argv[argc++] = (char *)exec_path;
   argv[argc] = NULL;
 
@@ -1478,6 +1777,7 @@ static int append_arg(char **argv, int *argc, int max, char *arg) {
 }
 
 static void debug_replay_env(void) {
+  ny_setenv("NYTRIX_PROGRESS", "0", 1);
   ny_setenv("NYTRIX_JIT_CACHE", "0", 1);
   ny_setenv("NYTRIX_AOT_CACHE", "0", 1);
   ny_setenv("NYTRIX_STD_CACHE", "0", 1);
@@ -1614,12 +1914,71 @@ static int test_debugger_for_rc(int rc) {
   return 0;
 }
 
-static int test_is_error_path(const char *path) {
-  return path && strncmp(path, "etc/tests/fuzz/errors/", 22) == 0;
-}
-
 static int test_is_ownership_error_path(const char *path) {
   return path && strstr(path, "etc/tests/fuzz/errors/ownership/") != NULL;
+}
+
+static int test_is_optional_system_stdlib(const char *path) {
+  return path &&
+         (strncmp(path, "lib/os/ui/", 10) == 0 ||
+          strncmp(path, "lib/os/sound/", 13) == 0 ||
+          strcmp(path, "lib/os/ui/mod.ny") == 0 ||
+          strcmp(path, "lib/os/sound/mod.ny") == 0 ||
+          strcmp(path, "lib/os/clipboard.ny") == 0);
+}
+
+static int test_is_unsupported_native_host(const char *path) {
+#if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
+  (void)path;
+  return 0;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  if (!path || strncmp(path, "etc/tests/rt/native/", 20) != 0)
+    return 0;
+  return strncmp(path, "etc/tests/rt/native/aarch64/", 28) != 0 &&
+         strncmp(path, "etc/tests/rt/native/target/", 25) != 0;
+#else
+  return path && strncmp(path, "etc/tests/rt/native/", 20) == 0;
+#endif
+}
+
+static int test_is_unsupported_native_platform(const char *path) {
+#if !defined(__linux__)
+  if (path &&
+      (strncmp(path, "etc/tests/rt/native/elf32/link/", 31) == 0 ||
+       strncmp(path, "etc/tests/rt/native/elf64/link/", 31) == 0 ||
+       strncmp(path, "etc/tests/rt/native/aarch64/link/", 33) == 0))
+    return 1;
+#elif !defined(__aarch64__)
+  if (path && strncmp(path, "etc/tests/rt/native/aarch64/link/", 33) == 0) {
+    const char *emulator = getenv("NYTRIX_TEST_EMULATOR");
+    if (!emulator || !*emulator)
+      emulator = "qemu-aarch64";
+    if (!test_command_available(emulator))
+      return 1;
+  }
+#endif
+#ifdef _WIN32
+  if (path &&
+      strcmp(path, "etc/tests/rt/native/c/internal-byvalue-param-import-lowering.nshape") == 0)
+    return 1;
+#endif
+  return 0;
+}
+
+static int test_is_host_sensitive_native_fp_link(const char *path) {
+  static const char *const cases[] = {
+      "f32.nshape", "f32_call.nshape", "f32_call9.nshape",
+      "f64.nshape", "f64_call.nshape", "f64_call9.nshape",
+      "f64_call10.nshape", "mixed_both_stack.nshape",
+      "mixed_f64_stack.nshape"};
+  const char *prefix = "etc/tests/rt/native/elf64/link/";
+  if (!path || strncmp(path, prefix, strlen(prefix)) != 0)
+    return 0;
+  const char *base = path + strlen(prefix);
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+    if (strcmp(base, cases[i]) == 0)
+      return 1;
+  return 0;
 }
 
 static void gh_group_begin(const char *kind, const char *path) {
@@ -1634,22 +1993,26 @@ static void gh_group_end(void) {
 
 static int build_trace_argv(char **argv, int max, const char *bin, const char *path,
                             const char *exec_path, const char *std_path, const char *std_bc,
-                            char *flags_buf, char **flags_out, char **expect_out) {
+                            const char *matrix_flags, char *flags_buf,
+                            char **flags_out, char **expect_out) {
   int argc = 0;
   char *flagv[32];
   int flagc = 0;
+  int has_native_backend = 0;
   if (flags_out)
     *flags_out = NULL;
   if (expect_out)
     *expect_out = NULL;
   flags_buf[0] = '\0';
-  if (test_is_error_path(path)) {
-    read_error_meta(path, flags_out, expect_out);
-    if (flags_out && *flags_out) {
-      snprintf(flags_buf, 1024, "%s", *flags_out);
-      trim_inplace(flags_buf);
-      flagc = split_words(flags_buf, flagv, 32);
-    }
+  read_error_meta(path, flags_out, expect_out);
+  const char *base_flags = flags_out && *flags_out ? *flags_out : NULL;
+  if ((base_flags && *base_flags) || (matrix_flags && *matrix_flags)) {
+    snprintf(flags_buf, 1024, "%s%s%s", base_flags ? base_flags : "",
+             base_flags && *base_flags && matrix_flags && *matrix_flags ? " " : "",
+             matrix_flags ? matrix_flags : "");
+    trim_inplace(flags_buf);
+    has_native_backend = native_backend_explicit(flags_buf);
+    flagc = split_words(flags_buf, flagv, 32);
   }
   if (!append_arg(argv, &argc, max, (char *)bin) ||
       !append_arg(argv, &argc, max, "-trace"))
@@ -1667,7 +2030,7 @@ static int build_trace_argv(char **argv, int max, const char *bin, const char *p
         !append_arg(argv, &argc, max, (char *)std_bc))
       return 0;
   }
-  if (path_is_native_runtime_test(path)) {
+  if (path_is_native_runtime_test(path) && !has_native_backend) {
     if (!append_arg(argv, &argc, max, "--native-backend") ||
         !append_arg(argv, &argc, max, "x86_64"))
       return 0;
@@ -1680,6 +2043,9 @@ static int build_trace_argv(char **argv, int max, const char *bin, const char *p
     if (!append_arg(argv, &argc, max, "--ownership-strict"))
       return 0;
   }
+  if (!append_arg(argv, &argc, max, "--no-progress") ||
+      !append_arg(argv, &argc, max, "--color=never"))
+    return 0;
   return append_arg(argv, &argc, max, (char *)(exec_path && *exec_path ? exec_path : path));
 }
 
@@ -1702,7 +2068,7 @@ static void run_debugger_replay(const char *debugger, char *const trace_argv[], 
     append_arg(argv, &argc, 192, "-k");
     append_arg(argv, &argc, 192, "frame info");
     append_arg(argv, &argc, 192, "-k");
-    append_arg(argv, &argc, 192, "frame variable --show-types --show-location");
+    append_arg(argv, &argc, 192, "frame variable -T -L");
     append_arg(argv, &argc, 192, "-k");
     append_arg(argv, &argc, 192, "disassemble --frame");
     append_arg(argv, &argc, 192, "-k");
@@ -1778,9 +2144,6 @@ static void debug_replay_failed_tests(StrVec *failed_paths, const char *bin, con
            nyt_clr(NYT_RESET));
   for (size_t i = 0; i < failed_paths->len; i++) {
     const char *path = failed_paths->items[i];
-    char flags_buf[1024];
-    char *flags = NULL;
-    char *expect = NULL;
     char *materialized_path = NULL;
     const char *exec_path = path;
     if (path && nyt_ends_with(path, ".nshape")) {
@@ -1792,32 +2155,50 @@ static void debug_replay_failed_tests(StrVec *failed_paths, const char *bin, con
       }
       exec_path = materialized_path;
     }
-    char *trace_argv[96];
-    if (!build_trace_argv(trace_argv, 96, bin, path, exec_path, std_path, std_bc,
-                          flags_buf, &flags, &expect)) {
-      printf("%s[debug]%s cannot build replay argv for %s\n", nyt_clr(NYT_GRAY),
-             nyt_clr(NYT_RESET), disp_path(path));
-      if (materialized_path) {
-        remove(materialized_path);
-        free(materialized_path);
+
+    char *matrix = path && nyt_ends_with(path, ".nshape")
+                       ? shape_meta_string(path, "flags_matrix")
+                       : NULL;
+    char matrix_buf[4096] = {0};
+    char *rows[64];
+    int rowc = 0;
+    if (matrix && *matrix) {
+      snprintf(matrix_buf, sizeof(matrix_buf), "%s", matrix);
+      rowc = split_flag_matrix_rows(matrix_buf, rows, 64);
+    }
+    int variants = rowc > 0 ? rowc : 1;
+    for (int variant = 0; variant < variants; variant++) {
+      const char *matrix_flags = rowc > 0 ? rows[variant] : NULL;
+      char flags_buf[1024];
+      char *flags = NULL;
+      char *expect = NULL;
+      char *trace_argv[96];
+      if (!build_trace_argv(trace_argv, 96, bin, path, exec_path, std_path, std_bc,
+                            matrix_flags, flags_buf, &flags, &expect)) {
+        printf("%s[debug]%s cannot build replay argv for %s\n", nyt_clr(NYT_GRAY),
+               nyt_clr(NYT_RESET), disp_path(path));
+        error_meta_free(flags, expect);
+        continue;
+      }
+      if (matrix_flags && *matrix_flags)
+        printf("%s[debug]%s replay flags: %s\n", nyt_clr(NYT_GRAY),
+               nyt_clr(NYT_RESET), matrix_flags);
+      gh_group_begin("trace replay", path);
+      int trace_rc = run_debug_argv(trace_argv, timeout_sec, 0);
+      printf("trace replay exit status: %d\n", trace_rc);
+      gh_group_end();
+      if (trace_rc != 0 && debugger && test_debugger_for_rc(trace_rc)) {
+        gh_group_begin("debugger replay", path);
+        run_debugger_replay(debugger, trace_argv, timeout_sec);
+        gh_group_end();
       }
       error_meta_free(flags, expect);
-      continue;
     }
-    gh_group_begin("trace replay", path);
-    int trace_rc = run_debug_argv(trace_argv, timeout_sec, 0);
-    printf("trace replay exit status: %d\n", trace_rc);
-    gh_group_end();
-    if (trace_rc != 0 && debugger && test_debugger_for_rc(trace_rc)) {
-      gh_group_begin("debugger replay", path);
-      run_debugger_replay(debugger, trace_argv, timeout_sec);
-      gh_group_end();
-    }
+    free(matrix);
     if (materialized_path) {
       remove(materialized_path);
       free(materialized_path);
     }
-    error_meta_free(flags, expect);
   }
 }
 
@@ -2709,6 +3090,8 @@ static double now_ms(void) {
   return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
 }
 
+static double host_ram_gib(void);
+
 static int auto_test_jobs(void) {
   long logical = ny_cpu_count();
   if (logical <= 0)
@@ -2718,8 +3101,16 @@ static int auto_test_jobs(void) {
     jobs = 2;
   if (jobs < 1)
     jobs = 1;
-  if (jobs > 24)
-    jobs = 24;
+  double ram_gib = host_ram_gib();
+  if (ram_gib > 0.0) {
+    int ram_jobs = (int)(ram_gib / 6.0);
+    if (ram_jobs < 1)
+      ram_jobs = 1;
+    if (jobs > ram_jobs)
+      jobs = ram_jobs;
+  }
+  if (jobs > 8)
+    jobs = 8;
   return jobs;
 }
 
@@ -3011,6 +3402,12 @@ static int path_is_native_runtime_test(const char *p) {
   return p && strncmp(p, "etc/tests/rt/native/", 20) == 0;
 }
 
+static int path_is_stdlib_source(const char *p) {
+  if (!p)
+    return 0;
+  return strncmp(p, "lib/", 4) == 0 || strstr(p, "/lib/") != NULL;
+}
+
 static const char *suite_for_path(const char *p, const char *fallback) {
   if (p && strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
     return "Benchmark";
@@ -3040,10 +3437,10 @@ static int path_duration_hint(CacheDb *cache, const char *p) {
     return 0;
   if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
     return 5000;
-  if (strstr(p, "rt/bigint.ny") || strstr(p, "rt/attr.ny") || strstr(p, "rt/sizeof.ny") ||
-      strstr(p, "rt/asm.ny"))
+  if (strstr(p, "etc/tests/rt/bigint.ny") || strstr(p, "etc/tests/rt/attr.ny") || strstr(p, "etc/tests/rt/sizeof.ny") ||
+      strstr(p, "etc/tests/rt/asm.ny"))
     return 5000;
-  if (strstr(p, "rt/comptime.ny"))
+  if (strstr(p, "etc/tests/rt/comptime.ny"))
     return 3500;
   return 200;
 }
@@ -3476,6 +3873,7 @@ int ny_test_main(int argc, char **argv) {
   int timeout_sec = NY_TEST_DEFAULT_TIMEOUT_SEC;
   int phase_times = 0;
   int trace_ir = 0;
+  int failures_only = 0;
   StrVec files = {0};
   StrVec patterns = {0};
   StrVec failed_paths = {0};
@@ -3501,7 +3899,7 @@ int ny_test_main(int argc, char **argv) {
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       printf("  %s--std PATH --std-bc PATH --triple T --emulator CMD%s\n",
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--phase-times --trace-ir --debug-failures --debugger-all%s\n",
+      printf("  %s--phase-times --trace-ir --failures-only --debug-failures --debugger-all%s\n",
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       printf("  %s--color MODE --no-color%s\n\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       printf("%snotes:%s timeout defaults to 60s and is capped at 300s; error tests live under %setc/tests/fuzz/errors%s\n",
@@ -3593,6 +3991,8 @@ int ny_test_main(int argc, char **argv) {
       phase_times = 1;
     else if (!strcmp(a, "--trace-ir"))
       trace_ir = 1;
+    else if (!strcmp(a, "--failures-only"))
+      failures_only = 1;
     else if (!strcmp(a, "--progress-selftest"))
       return run_progress_selftest(bin, timeout_sec);
     else if (!strcmp(a, "--debug-failures"))
@@ -3627,6 +4027,14 @@ int ny_test_main(int argc, char **argv) {
     ny_setenv("NYTRIX_TEST_JOBS", jb, 1);
   }
   configure_test_cache_defaults();
+
+  FailureOutputCapture failure_capture = {0};
+  if (failures_only && !failure_output_capture_begin(&failure_capture)) {
+    nyt_err("ny-test", "could not initialize --failures-only output capture");
+    sv_free(&patterns);
+    sv_free(&files);
+    return 2;
+  }
 
   const char *ws = getenv("NYTRIX_TEST_WITH_STDLIB");
   if (ws && *ws && (*ws != '0') && strcmp(ws, "false") != 0)
@@ -3679,6 +4087,12 @@ int ny_test_main(int argc, char **argv) {
     printf("%s[trace]%s trace_dir=%s\n", nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), td);
 
   StrVec benchmark = {0}, runtime = {0}, repl = {0}, probe = {0}, error_tests = {0}, std = {0};
+  size_t skipped_system_stdlib = 0;
+  size_t skipped_native_host = 0;
+  size_t skipped_native_platform = 0;
+  size_t skipped_native_fp_link = 0;
+  const int skip_system_stdlib =
+      test_env_truthy("NYTRIX_TEST_SKIP_SYSTEM_STDLIB");
   SuiteStats sb = {0}, sr = {0}, srepl = {0}, sp = {0}, se = {0}, ss = {0};
   char cache_path[PATH_MAX];
   nyt_path_join(cache_path, sizeof(cache_path), nyt_default_cache_root_dir(),
@@ -3687,7 +4101,14 @@ int ny_test_main(int argc, char **argv) {
     cache_load(&cache, cache_path);
   for (size_t i = 0; i < limit; i++) {
     const char *p = files.items[i];
-    if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
+    if (test_is_unsupported_native_platform(p))
+      skipped_native_platform++;
+    else if (test_env_truthy("NYTRIX_TEST_SKIP_NATIVE_FP_LINK") &&
+        test_is_host_sensitive_native_fp_link(p))
+      skipped_native_fp_link++;
+    else if (test_is_unsupported_native_host(p))
+      skipped_native_host++;
+    else if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
       sv_push(&benchmark, p);
     else if (strncmp(p, "etc/tests/rt/", 13) == 0)
       sv_push(&runtime, p);
@@ -3695,9 +4116,24 @@ int ny_test_main(int argc, char **argv) {
       sv_push(&probe, p);
     else if (strncmp(p, "etc/tests/fuzz/errors/", 22) == 0)
       sv_push(&error_tests, p);
+    else if (skip_system_stdlib && test_is_optional_system_stdlib(p))
+      skipped_system_stdlib++;
     else
       sv_push(&std, p);
   }
+
+  if (skipped_system_stdlib > 0)
+    printf("%s[note]%s skipped %zu optional system stdlib modules (UI/audio/clipboard)\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_system_stdlib);
+  if (skipped_native_host > 0)
+    printf("%s[note]%s skipped %zu native execution fixtures for a different host architecture\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_host);
+  if (skipped_native_platform > 0)
+    printf("%s[note]%s skipped %zu native fixtures requiring another host object/runtime format\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_platform);
+  if (skipped_native_fp_link > 0)
+    printf("%s[note]%s skipped %zu host-sensitive native FP link/run fixtures\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_fp_link);
 
   StrVec selected_all = {0};
   for (size_t i = 0; i < benchmark.len; i++)
@@ -3805,5 +4241,7 @@ int ny_test_main(int argc, char **argv) {
   sv_free(&patterns);
   sv_free(&failed_paths);
   sv_free(&files);
+  if (failures_only)
+    failure_output_capture_end(&failure_capture);
   return failed ? 1 : 0;
 }

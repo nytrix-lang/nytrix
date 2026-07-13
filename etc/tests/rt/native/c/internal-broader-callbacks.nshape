@@ -1,0 +1,28 @@
+shape internal_broader_callbacks {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi callback f64 pointer-return no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/internal-callbacks.h" link "etc/tests/rt/c/internal-callbacks.so"
+use std.core
+
+fn add_callback(f64 left, f64 right) f64 {
+  left + right
+}
+
+fn offset_callback(ptr pointer, i64 offset) ptr {
+  ptr_add(pointer, offset)
+}
+
+def memory = malloc(16)
+def shifted = apply_pointer_callback(offset_callback, memory, 8)
+assert(apply_binary_callback(add_callback, 1.25, 2.5) == 3.75,
+       "internal floating callback signature")
+assert(shifted == ptr_add(memory, 8), "internal pointer-return callback signature")
+free(memory)
+1 + 2
+NY
+}

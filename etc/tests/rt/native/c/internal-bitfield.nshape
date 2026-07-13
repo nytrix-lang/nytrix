@@ -1,0 +1,17 @@
+shape internal_bitfield {
+  family "runtime-native"
+  features [c-frontend ffi structs no-libclang]
+  generator "native"
+  template ny-test-case
+  flags "--c-frontend=nytrix"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/native/c/zw_bitfield.h" as "c"
+
+assert(sizeof(ZWBitfieldA) == 5, "ZWBitfieldA size should be 5")
+assert(sizeof(ZWBitfieldB) == 1, "ZWBitfieldB size should be 1")
+assert(sizeof(ZWBitfieldC) == 9, "ZWBitfieldC size should be 9")
+
+0
+NY
+}

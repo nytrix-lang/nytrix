@@ -887,11 +887,11 @@ static void synth_emit_globals(synth_emit_t *s) {
   }
   if (s->arrays) fputc('\n', s->out);
   if (s->structs) {
-    fputs("struct nynth_node { uint32_t a; uint32_t b; uint8_t tag; };\n", s->out);
+    fputs("struct nytrix_node { uint32_t a; uint32_t b; uint8_t tag; };\n", s->out);
     for (int i = 0; i < s->structs; ++i) {
       s->struct_lens[i] = synth_rng_range(s, s->fast ? 3 : 4, s->fast ? 6 : 10);
       fprintf(s->out, "enum { G_NODE_%d_LEN = %d };\n", i, s->struct_lens[i]);
-      fprintf(s->out, "static struct nynth_node g_nodes_%d[G_NODE_%d_LEN] = {\n", i, i);
+      fprintf(s->out, "static struct nytrix_node g_nodes_%d[G_NODE_%d_LEN] = {\n", i, i);
       for (int j = 0; j < s->struct_lens[i]; ++j) {
         fputs("    {", s->out);
         synth_hex(s->out, synth_rng_u32(s));
@@ -1038,7 +1038,7 @@ static void synth_emit_main(synth_emit_t *s) {
 static void synth_emit_program(synth_emit_t *s) {
   fprintf(s->out,
           "/*\n"
-          " * RANDOMLY GENERATED Nynth C PROGRAM\n"
+          " * RANDOMLY GENERATED Nytrix C PROGRAM\n"
           " * seed: %d\n"
           " * requested-generator: %s\n"
           " * profile: %s\n"
@@ -1057,12 +1057,12 @@ static void synth_emit_program(synth_emit_t *s) {
   for (int i = 0; i < s->functions; ++i) synth_emit_function(s, i);
   synth_emit_main(s);
   fprintf(s->out,
-          "\n/* nynth statistics: globals=%d arrays=%d structs=%d functions=%d statements=%d expr_depth=%d loop_depth=%d */\n",
+          "\n/* nytrix statistics: globals=%d arrays=%d structs=%d functions=%d statements=%d expr_depth=%d loop_depth=%d */\n",
           s->globals, s->arrays, s->structs, s->functions, s->statements,
           s->expression_depth, s->loop_depth);
 }
 
-int nynth_synth_print_c_program(FILE *out, const char *shape_dir,
+int nytrix_synth_print_c_program(FILE *out, const char *shape_dir,
                                 const char *generator, const char *profile,
                                 const char *shape_name, int seed, bool fast,
                                 bool insane) {

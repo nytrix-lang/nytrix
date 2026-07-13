@@ -94,10 +94,8 @@ fn recv_line(any p) str {
    if fd < 0 { return "" }
    mut c_buf = malloc(2)
    if c_buf == 0 { return "" }
-   defer { free(c_buf) }
    init_str(c_buf, 1)
    mut b = Builder(128)
-   defer { builder_free(b) }
    while 1 {
       def got = sys_read(fd, c_buf, 1)
       mut res = 0
@@ -110,7 +108,10 @@ fn recv_line(any p) str {
       b = builder_append(b, c)
       if c == "\n" { break }
    }
-   builder_to_str(b)
+   def out = builder_to_str(b)
+   builder_free(b)
+   free(c_buf)
+   out
 }
 
 fn recv_all(any p, any n=1024) str {
@@ -118,13 +119,14 @@ fn recv_all(any p, any n=1024) str {
    if !is_int(n) || n <= 0 { n = 1024 }
    if n > 8 * 1024 * 1024 { n = 8 * 1024 * 1024 }
    mut b = Builder(4096)
-   defer { builder_free(b) }
    while 1 {
       def chunk = recv(p, n)
       if chunk.len == 0 { break }
       b = builder_append(b, chunk)
    }
-   builder_to_str(b)
+   def out = builder_to_str(b)
+   builder_free(b)
+   out
 }
 
 fn shutdown_send(any p) any {

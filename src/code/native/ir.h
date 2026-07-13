@@ -47,6 +47,10 @@ typedef enum {
   NYIR_ADDR_LOCAL,
   NYIR_LOAD_I64,
   NYIR_STORE_I64,
+  NYIR_ADDR_SYMBOL,  /* leaq symbol(%rip), dst — RIP-relative address of a named symbol */
+  NYIR_ALLOCA,       /* allocate stack space for byval/sret */
+  NYIR_COPY_STRUCT,  /* copy aggregate data */
+  NYIR_CAPTURE_RET,  /* capture a secondary ABI return register */
   NYIR_OP_COUNT,
 } ny_nir_op_t;
 
@@ -70,7 +74,22 @@ typedef enum {
 #define NY_NIR_INST_F_EXTERN 1u
 #define NY_NIR_INST_F_RET_F64 2u
 #define NY_NIR_INST_F_RET_F32 4u
-#define NYIR_INST_F_RET_F32 4u
+
+/* Packed NY_NIR_CALL aggregate-argument metadata. */
+#define NY_NIR_ARG_AGG_SIZE_MASK 0x00ffffffu
+#define NY_NIR_ARG_AGG_CLASS0_SHIFT 24u
+#define NY_NIR_ARG_AGG_CLASS1_SHIFT 28u
+#define NY_NIR_ARG_AGG_CLASS_MASK 0x0fu
+#define NY_NIR_ARG_CLASS_NONE 0u
+#define NY_NIR_ARG_CLASS_INTEGER 1u
+#define NY_NIR_ARG_CLASS_SSE 2u
+#define NY_NIR_ARG_CLASS_MEMORY 3u
+#define NY_NIR_ARG_CLASS_UNSUPPORTED 4u
+#define NY_NIR_ARG_AGG_SIZE(v) ((v) & NY_NIR_ARG_AGG_SIZE_MASK)
+#define NY_NIR_ARG_AGG_CLASS(v, n)                                         \
+  (((v) >> ((n) ? NY_NIR_ARG_AGG_CLASS1_SHIFT                              \
+                  : NY_NIR_ARG_AGG_CLASS0_SHIFT)) &                        \
+   NY_NIR_ARG_AGG_CLASS_MASK)
 
 /* Calls with more than 6 args carry args[6..] out-of-line in extra_args,
  * covering the SysV/Win64 stack-passed portion of the call ABI. The cap is
@@ -152,7 +171,26 @@ typedef struct {
    * that discards the instruction. NULL/0 when unused. */
   int *extra_args;
   size_t extra_args_len;
+  /* For NY_NIR_CALL: if non-NULL, an array of length imm (the call arity)
+   * containing packed by-value aggregate size and SysV eightbyte classes.
+   * Zero marks a scalar argument. Owned by the instruction. */
+  uint32_t *arg_sizes;
 } ny_nir_inst_t;
+
+/* Decode and validate the positional value IDs carried by a call instruction.
+ * Backends share this boundary so a..f/extra_args cannot drift by target. */
+bool ny_nir_call_args(const ny_nir_inst_t *in, int value_count, int *args,
+                      size_t args_cap, int *argc_out, char *err,
+                      size_t err_len);
+
+typedef struct {
+  bool *value_f64;
+  bool *value_f32;
+  bool *local_f64;
+  bool *local_f32;
+  size_t value_count;
+  size_t local_count;
+} ny_nir_type_map_t;
 
 typedef struct {
   ny_nir_inst_t *data;
@@ -163,6 +201,10 @@ typedef struct {
   size_t owned_symbols_len;
   size_t owned_symbols_cap;
 } ny_nir_func_t;
+
+bool ny_nir_type_map_init(ny_nir_type_map_t *map, const ny_nir_func_t *nir,
+                          size_t local_count);
+void ny_nir_type_map_free(ny_nir_type_map_t *map);
 
 typedef struct {
   size_t before_insts;
@@ -176,8 +218,8 @@ typedef struct {
 
 void ny_nir_func_free(ny_nir_func_t *f);
 int ny_nir_emit(ny_nir_func_t *f, ny_nir_inst_t inst);
-/* Resets *in to a NOP, freeing any owned extra_args. Used by optimizer
- * passes that discard an instruction in place. */
+/* Resets *in to a NOP, freeing all instruction-owned metadata. Used by
+ * optimizer passes that discard an instruction in place. */
 void ny_nir_inst_discard(ny_nir_inst_t *in);
 bool ny_nir_verify(const ny_nir_func_t *f, char *err, size_t err_len);
 bool ny_nir_validate_constraints(const ny_nir_func_t *f, char *err,

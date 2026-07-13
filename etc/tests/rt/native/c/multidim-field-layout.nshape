@@ -1,0 +1,12 @@
+shape multidim_field_layout {
+  family "runtime-native"
+  generator "native"
+  features ["c-frontend", "ffi", "aggregate", "aligned-attribute", "layout"]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/ffi/internal-aggregate.h"
+1 + 2
+NY
+}

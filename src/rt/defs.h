@@ -122,7 +122,7 @@ RT_DEF("__inotify_add_watch", rt_inotify_add_watch, 3, "fn __inotify_add_watch(f
 RT_DEF("__inotify_rm_watch", rt_inotify_rm_watch, 2, "fn __inotify_rm_watch(fd, wd)", "Remove inotify watch.")
 
 RT_DEF("__kqueue", rt_kqueue, 0, "fn __kqueue()", "Create a kqueue (macOS/BSD) for file watching.")
-RT_DEF("__kevent", rt_kevent, 6, "fn __kevent(kq, fd, filter, flags, fflags, data, udata)", "kevent call for registering/reading vnode events.")
+RT_DEF("__kevent", rt_kevent, 7, "fn __kevent(kq, fd, filter, flags, fflags, data, udata)", "kevent call for registering/reading vnode events.")
 RT_DEF("__kqueue_close", rt_kqueue_close, 1, "fn __kqueue_close(kq)", "Close kqueue fd.")
 RT_DEF("__watch_open_vnode", rt_watch_open_vnode, 1, "fn __watch_open_vnode(path)", "Open a file/dir fd suitable for kqueue vnode watching (macOS).")
 
@@ -610,6 +610,12 @@ RT_DEF("__str_builder_free", rt_str_builder_free, 1, "fn __str_builder_free(buil
        "Frees an internal string builder.")
 RT_DEF("__str_hash", rt_str_hash, 1, "fn __str_hash(s)", "Hashes a Nytrix string for dictionaries.")
 RT_DEF("__str_eq", rt_str_eq, 2, "fn __str_eq(a, b)", "Compares two Nytrix strings byte-wise.")
+RT_DEF("__proof_cert_digest", rt_proof_cert_digest, 4,
+       "fn __proof_cert_digest(canonical, module_version, dependency_digest, checker_version)",
+       "Computes the compact proof-certificate envelope digest.")
+RT_DEF("__proof_cert_check", rt_proof_cert_check, 10,
+       "fn __proof_cert_check(canonical, digest, module_version, dependency_digest, checker_version, max_variables, max_nodes, max_depth, max_steps, max_memory)",
+       "Checks a canonical propositional certificate under explicit budgets.")
 RT_DEF("__memcpy", rt_memcpy, 3, "fn __memcpy(d, s, n)", "Copies n bytes from s to d.")
 RT_DEF("__memcmp", rt_memcmp, 3, "fn __memcmp(a, b, n)", "Compares n bytes of a and b.")
 RT_DEF("__memset", rt_memset, 3, "fn __memset(p, v, n)", "Sets n bytes of p to v.")

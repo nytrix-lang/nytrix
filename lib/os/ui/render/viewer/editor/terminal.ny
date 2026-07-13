@@ -29,6 +29,7 @@ fn _fonts(any font) dict {
    {"regular": font, "bold": font, "italic": font, "emoji": font}
 }
 
+;; Creates a new module state with the supplied configuration.
 fn new(any font, int bg=0xff070707, int fg=0xfff0f0f0) dict {
    {
       "open": false, "focus": false, "mode": "shell", "font": font,
@@ -55,8 +56,10 @@ fn _tab_at(list tabs, int idx) dict {
    is_dict(tab) ? tab : dict(0)
 }
 
+;; Returns the tab count.
 fn tab_count(dict st) int { _tabs(st).len }
 
+;; Returns the result of the `active_tab` operation.
 fn active_tab(dict st) int {
    def n = tab_count(st)
    if n <= 0 { return 0 }
@@ -163,6 +166,7 @@ fn _tab_label(str m, any vt) str {
    m == "terminal" ? "shell" : m
 }
 
+;; Returns the result of the `tab_title` operation.
 fn tab_title(dict st, int idx=-1) str {
    def tabs = _tabs(st)
    if tabs.len <= 0 { return "" }
@@ -172,6 +176,7 @@ fn tab_title(dict st, int idx=-1) str {
    _tab_label(to_str(tab.get("mode", "terminal")), tab.get("vt"))
 }
 
+;; Returns the result of the `title` operation.
 fn title(dict st) str {
    if !is_open(st) { return "terminal" }
    tab_title(st)
@@ -195,10 +200,12 @@ fn _spawn(dict st, str m, str path, list args, str banner, list child_env=[]) di
    banner.len > 0 ? write_text(st, banner) : st
 }
 
+;; Opens the shell and returns the resulting state.
 fn open_shell(dict st) dict {
    _spawn(st, "terminal", vterm.default_shell_path(), vterm.default_shell_args(false), "")
 }
 
+;; Opens the repl and returns the resulting state.
 fn open_repl(dict st) dict {
    _spawn(st, "repl", tools.ny_command(), [], "", [
          "NYTRIX_REPL_QUIET=1",
@@ -227,10 +234,12 @@ fn show_shell(dict st) dict { _show_or_open(st, "terminal") }
 
 fn show_repl(dict st) dict { _show_or_open(st, "repl") }
 
+;; Opens the command and returns the resulting state.
 fn open_command(dict st, str title, str path, list args, str banner="") dict {
    _spawn(st, title.len > 0 ? title : "command", path, args, banner)
 }
 
+;; Updates the tab and returns the resulting state.
 fn select_tab(dict st, int idx) dict {
    if tab_count(st) <= 0 { return st }
    st["active"] = min(max(0, idx), tab_count(st) - 1)
@@ -240,16 +249,19 @@ fn select_tab(dict st, int idx) dict {
    resize(st, float(st.get("x", 0.0)), float(st.get("y", 0.0)), float(st.get("w", 1.0)), float(st.get("h", 1.0)))
 }
 
+;; Moves to the tab state and returns it.
 fn next_tab(dict st) dict {
    def n = tab_count(st)
    n <= 1 ? st : select_tab(st, (active_tab(st) + 1) % n)
 }
 
+;; Moves to the tab state and returns it.
 fn prev_tab(dict st) dict {
    def n = tab_count(st)
    n <= 1 ? st : select_tab(st, (active_tab(st) + n - 1) % n)
 }
 
+;; Releases the tab.
 fn close_tab(dict st, int idx=-1) dict {
    mut tabs = _tabs(st)
    if tabs.len <= 0 { return close(st) }
@@ -279,6 +291,7 @@ fn close_tab(dict st, int idx=-1) dict {
    _sync_active(st)
 }
 
+;; Returns the result of the `send_text` operation.
 fn send_text(dict st, str text) dict {
    if is_open(st) {
       st = _ensure_vt(st)
@@ -305,6 +318,7 @@ fn _display_text(str text) str {
    out
 }
 
+;; Writes the text and returns the result.
 fn write_text(dict st, str text) dict {
    if is_open(st) {
       st = _ensure_vt(st)
@@ -354,11 +368,13 @@ fn _vt_visible_cells(any vt) int {
    n
 }
 
+;; Returns the visible cell count.
 fn visible_cell_count(dict st) int {
    if !is_open(st) { return 0 }
    _vt_visible_cells(st.get("vt"))
 }
 
+;; Returns the result of the `debug_text` operation.
 fn debug_text(dict st, int max_rows=4, int max_cols=120) str {
    if !is_open(st) { return "" }
    def vt = st.get("vt")
@@ -391,6 +407,7 @@ fn debug_text(dict st, int max_rows=4, int max_cols=120) str {
    out
 }
 
+;; Closes resources owned by the state and returns the closed state.
 fn close(dict st) dict {
    def tabs = _tabs(st)
    mut i = 0
@@ -410,16 +427,19 @@ fn close(dict st) dict {
    st
 }
 
+;; Updates the shell and returns the resulting state.
 fn toggle_shell(dict st) dict {
    if !is_open(st) { return open_shell(st) }
    mode(st) == "terminal" ? close_tab(st) : show_shell(st)
 }
 
+;; Updates the repl and returns the resulting state.
 fn toggle_repl(dict st) dict {
    if !is_open(st) { return open_repl(st) }
    mode(st) == "repl" ? close_tab(st) : show_repl(st)
 }
 
+;; Advances the state once and returns the updated state.
 fn update(dict st) dict {
    if !is_open(st) { return st }
    mut tabs = _tabs(st)
@@ -452,6 +472,7 @@ fn update(dict st) dict {
    _sync_active(st)
 }
 
+;; Updates the state bounds and resizes its owned resources.
 fn resize(dict st, f64 x, f64 y, f64 w, f64 h) dict {
    st["x"] = x
    st["y"] = y
@@ -493,6 +514,7 @@ fn resize(dict st, f64 x, f64 y, f64 w, f64 h) dict {
    _sync_active(st)
 }
 
+;; Returns true when contains.
 fn contains(dict st, f64 x, f64 y) bool {
    is_open(st) &&
    x >= float(st.get("x", 0.0)) && x <= float(st.get("x", 0.0)) + float(st.get("w", 0.0)) &&
@@ -507,6 +529,7 @@ fn _event_data(dict st, any data) dict {
    d
 }
 
+;; Handles the event operation and returns the resulting state.
 fn handle_event(dict st, int typ, any data) list {
    if !is_open(st) { return [st, false] }
    st = _ensure_vt(st)
@@ -523,6 +546,7 @@ fn handle_event(dict st, int typ, any data) list {
    [st, true]
 }
 
+;; Draws the current state and returns it for continued use.
 fn draw(dict st) dict {
    if !is_open(st) { return st }
    st = _ensure_vt(st)

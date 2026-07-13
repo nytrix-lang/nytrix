@@ -10,6 +10,7 @@
 
 #include "rt/ffigates.h"
 #include "rt/shared.h"
+#include "base/util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,14 +54,6 @@ int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
 int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
                   int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
                   int64_t a12, int64_t a13, int64_t a14);
-
-static uint64_t ffi_hash_cstr(const char *s) {
-  uint64_t hash = 5381;
-  int c;
-  while ((c = *s++))
-    hash = ((hash << 5) + hash) + c;
-  return hash;
-}
 
 nyFfiState_t gNyFfi = {0};
 
@@ -116,6 +109,8 @@ void nyFfiGates_init(void) {
   gNyFfi.cache.count = 0;
   gNyFfi.gate_capacity = 64;
   gNyFfi.gates = (nyFfiGate_t *)malloc(gNyFfi.gate_capacity * sizeof(nyFfiGate_t));
+  if (!gNyFfi.gates)
+    gNyFfi.gate_capacity = 0;
   gNyFfi.gate_count = 0;
   nyFfiRegisterGate(NY_FFI_SIG_I_V, "i_v", (void *)stub_i_v);
   nyFfiRegisterGate(NY_FFI_SIG_I_I, "i_i", (void *)stub_i_i);
@@ -146,8 +141,12 @@ void nyFfiGates_dispose(void) {
 
 void nyFfiRegisterGate(nyFfiSigKind_t sig, const char *name, void *stub) {
   if (gNyFfi.gate_count >= gNyFfi.gate_capacity) {
-    gNyFfi.gate_capacity *= 2;
-    gNyFfi.gates = (nyFfiGate_t *)realloc(gNyFfi.gates, gNyFfi.gate_capacity * sizeof(nyFfiGate_t));
+    size_t next_capacity = gNyFfi.gate_capacity ? gNyFfi.gate_capacity * 2 : 64;
+    nyFfiGate_t *next = realloc(gNyFfi.gates, next_capacity * sizeof(*next));
+    if (!next)
+      return;
+    gNyFfi.gates = next;
+    gNyFfi.gate_capacity = next_capacity;
   }
   nyFfiGate_t *gate = &gNyFfi.gates[gNyFfi.gate_count++];
   gate->sig = sig;
@@ -185,25 +184,43 @@ nyFfiSigKind_t nyFfiDetectSignature(const char *name, size_t argc) {
 }
 
 void nyFfiCache_insert(const char *name, void *addr, nyFfiSigKind_t sig) {
+  if (!name || !*name || !gNyFfi.cache.entries || !gNyFfi.cache.capacity)
+    return;
+  uint64_t hash = ny_hash64_cstr(name);
+  for (size_t i = 0; i < gNyFfi.cache.count; ++i) {
+    nyFfiCacheEntry_t *entry = &gNyFfi.cache.entries[i];
+    if (entry->name_hash == hash && entry->sig == sig &&
+        strcmp(entry->name, name) == 0) {
+      entry->address = addr;
+      entry->gate = nyFfiLookupGate(entry->name, sig);
+      return;
+    }
+  }
   if (gNyFfi.cache.count >= gNyFfi.cache.capacity) {
     size_t keep = gNyFfi.cache.capacity / 2;
+    size_t drop = gNyFfi.cache.capacity - keep;
+    for (size_t i = 0; i < drop; ++i)
+      free((void *)gNyFfi.cache.entries[i].name);
     memmove(gNyFfi.cache.entries, &gNyFfi.cache.entries[gNyFfi.cache.capacity - keep],
             keep * sizeof(nyFfiCacheEntry_t));
     gNyFfi.cache.count = keep;
   }
 
+  char *owned_name = strdup(name);
+  if (!owned_name)
+    return;
   nyFfiCacheEntry_t *entry = &gNyFfi.cache.entries[gNyFfi.cache.count++];
-  entry->name = name;
-  entry->name_hash = ffi_hash_cstr(name);
+  entry->name = owned_name;
+  entry->name_hash = hash;
   entry->address = addr;
   entry->sig = sig;
-  entry->gate = nyFfiLookupGate(name, sig);
+  entry->gate = nyFfiLookupGate(owned_name, sig);
   entry->call_count = 0;
   entry->last_call_time = 0;
 }
 
 nyFfiCacheEntry_t *nyFfiCache_lookup(const char *name) {
-  uint64_t hash = ffi_hash_cstr(name);
+  uint64_t hash = ny_hash64_cstr(name);
 
   for (size_t i = 0; i < gNyFfi.cache.count; i++) {
     if (gNyFfi.cache.entries[i].name_hash == hash &&
@@ -219,10 +236,12 @@ nyFfiCacheEntry_t *nyFfiCache_lookup(const char *name) {
 }
 
 void nyFfiCache_remove(const char *name) {
-  uint64_t hash = ffi_hash_cstr(name);
+  uint64_t hash = ny_hash64_cstr(name);
 
   for (size_t i = 0; i < gNyFfi.cache.count; i++) {
-    if (gNyFfi.cache.entries[i].name_hash == hash) {
+    if (gNyFfi.cache.entries[i].name_hash == hash &&
+        strcmp(gNyFfi.cache.entries[i].name, name) == 0) {
+      free((void *)gNyFfi.cache.entries[i].name);
       gNyFfi.cache.entries[i] = gNyFfi.cache.entries[--gNyFfi.cache.count];
       return;
     }

@@ -1,0 +1,12 @@
+shape type-prove-false {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected proof failure"
+  source ny <<'NY'
+def proof impossible = prove(false, "expected proof failure")
+NY
+}

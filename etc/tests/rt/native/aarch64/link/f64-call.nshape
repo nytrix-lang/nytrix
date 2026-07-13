@@ -1,0 +1,15 @@
+shape aarch64_elf64_internal_link_run_f64_call {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 aarch64 aapcs64 internal-link qemu f64 call]
+  template ny-test-case
+  flags "--native-backend aarch64 -emit-only -o /tmp/nytrix-aarch64-link-f64.o"
+  expect object_link_run_f64_6.75
+  source ny <<'NY'
+fn combine(f64 a, f64 b) f64 {
+  (a * b) + (a / b) - 0.75
+}
+
+combine(3.0, 2.0)
+NY
+}

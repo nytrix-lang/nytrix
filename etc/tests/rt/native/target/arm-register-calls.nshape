@@ -1,0 +1,15 @@
+shape native_arm_register_calls {
+  family "runtime-native"
+  generator "native"
+  features ["native", "target", "abi", "call", "arm"]
+  template ny-test-case
+  flags "--emit-asm=/tmp/nytrix-native-call4-arm.s --native-backend arm --native-abi aapcs"
+  expect compile_and_run
+  source ny <<'NY'
+fn add4(i64 a, i64 b, i64 c, i64 d) i64 {
+  a + b + c + d
+}
+
+add4(1, 2, 3, 4)
+NY
+}

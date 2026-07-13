@@ -1,0 +1,16 @@
+shape internal_fwd_decl {
+  family "runtime-native"
+  features [c-frontend ffi structs no-libclang]
+  generator "native"
+  template ny-test-case
+  flags "--c-frontend=nytrix"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/native/c/fwd_decl.h" as "c"
+
+assert(c.take_fwd(nil) == 0, "take_fwd nil")
+assert(sizeof(MyStruct) == 8, "MyStruct size")
+
+0
+NY
+}

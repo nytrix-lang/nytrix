@@ -1448,7 +1448,7 @@ int cmd_convert_cbridge(int argc, char **argv) {
     }
     printf("{\"ok\":false,\"error\":\"unsupported\",\"reason\":");
     json_str(stdout, result.error[0] ? result.error : "conversion failed");
-    printf(",\"engine\":\"nynth_core\",\"convert_engine\":\"nynth_core\",\"c_source\":");
+    printf(",\"engine\":\"nytrix_core\",\"convert_engine\":\"nytrix_core\",\"c_source\":");
     json_str(stdout, c_path);
     printf(",\"ny_source\":");
     json_str(stdout, out_path);
@@ -1459,7 +1459,7 @@ int cmd_convert_cbridge(int argc, char **argv) {
     return 3;
   }
   if (!write_file(out_path, result.ny_source)) {
-    printf("{\"ok\":false,\"error\":\"write-failed\",\"engine\":\"nynth_core\",\"c_source\":");
+    printf("{\"ok\":false,\"error\":\"write-failed\",\"engine\":\"nytrix_core\",\"c_source\":");
     json_str(stdout, c_path);
     printf(",\"ny_source\":");
     json_str(stdout, out_path);
@@ -1467,7 +1467,7 @@ int cmd_convert_cbridge(int argc, char **argv) {
     cbridge_convert_result_free(&result);
     return 1;
   }
-  printf("{\"ok\":true,\"engine\":\"nynth_core\",\"convert_engine\":\"nynth_core\",\"c_source\":");
+  printf("{\"ok\":true,\"engine\":\"nytrix_core\",\"convert_engine\":\"nytrix_core\",\"c_source\":");
   json_str(stdout, c_path);
   printf(",\"ny_source\":");
   json_str(stdout, out_path);

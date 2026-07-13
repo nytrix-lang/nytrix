@@ -1,0 +1,37 @@
+shape internal_c_complex_program {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi complex-program nested aggregate callback variadic external-variable libc no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/internal-complex-program.h" as "c"
+use std.core
+
+fn compare_i64(ptr a, ptr b) i32 {
+  def i64 left = load64_i(a)
+  def i64 right = load64_i(b)
+  if left < right { return -1 }
+  if left > right { return 1 }
+  0
+}
+
+def *int data = malloc(16)
+assert(data != nil, "complex C program allocation")
+store64_i(data, 20)
+store64_i(data, 10, 8)
+c.qsort(data, 2, 8, compare_i64)
+assert(load64_i(data) == 10 && load64_i(data, 8) == 20,
+   "function-pointer callback import")
+
+def *int text = malloc(32)
+assert(text != nil, "complex C program text allocation")
+def written = c.snprintf(text, 32, "ny%d", 8)
+assert(written > 0 && written < 32, "variadic libc import")
+assert(c.optind > 0, "external C integer variable import preserves ABI tagging")
+free(text)
+free(data)
+1 + 2
+NY
+}

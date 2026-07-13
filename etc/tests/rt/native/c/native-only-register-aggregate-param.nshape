@@ -1,0 +1,22 @@
+shape native_only_register_aggregate_param {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 c-frontend ffi aggregate-param register-class mixed-class no-libclang]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --c-frontend=nytrix -no-std --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/c/internal-byvalue-param-import.h" link "etc/tests/rt/c/sum-pair.so"
+def mixed = malloc(16)
+store64_i(mixed, 7)
+store64_i(mixed, 4615063718147915776, 8)
+def sse = malloc(16)
+store64_i(sse, 4609434218613702656)
+store64_i(sse, 4612811918334230528, 8)
+def mixed_result = c.sum_mixed_pair(mixed)
+def sse_result = c.sum_sse_pair(sse)
+free(mixed)
+free(sse)
+1 / (mixed_result == 10 && sse_result == 4)
+NY
+}

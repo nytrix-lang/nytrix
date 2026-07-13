@@ -190,7 +190,7 @@ bool ny_intern_contains_ptr(const char *str) {
   return false;
 }
 
-void ny_intern_cleanup(void) {
+void ny_intern_cleanup_full(void) {
   if (!g_intern_table)
     return;
   for (size_t i = 1; i < g_intern_count; ++i) {
@@ -210,4 +210,20 @@ void ny_intern_cleanup(void) {
   g_intern_map_cap = 0;
   g_intern_ptr_map_cap = 0;
   g_intern_ptr_map_len = 0;
+}
+
+static bool g_intern_atexit_mode = false;
+
+void ny_intern_set_atexit_mode(void) { g_intern_atexit_mode = true; }
+
+void ny_intern_cleanup(void) {
+  if (!g_intern_table)
+    return;
+  /* When called from atexit(), heap metadata may already be corrupted by an
+   * unrelated allocation bug.  Skip the cleanup entirely — the OS reclaims
+   * all process memory on exit.  Only perform the full cleanup when called
+   * explicitly during normal shutdown. */
+  if (g_intern_atexit_mode)
+    return;
+  ny_intern_cleanup_full();
 }

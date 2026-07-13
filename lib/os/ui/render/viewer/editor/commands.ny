@@ -174,8 +174,10 @@ def _COMMANDS = [
 
 def _ALIASES = []
 
+;; Returns the result of the `commands` operation.
 fn commands() list { _COMMANDS }
 
+;; Returns the result of the `all_commands` operation.
 fn all_commands() list { _COMMANDS }
 
 fn row_id(any row) str { to_str(row.get(1, "")) }
@@ -184,23 +186,28 @@ fn row_key(any row) str { to_str(row.get(2, "")) }
 
 fn row_tag(any row) str { to_str(row.get(4, "")) }
 
+;; Returns the result of the `config` operation.
 fn config() dict {
    {"file": true, "diff": true, "run": true, "debug": true, "project": true, "ui": true, "edit": true, "buffer": true, "cursor": true, "search": true, "pane": true, "toggle": true, "terminal": true, "lsp": true}
 }
 
+;; Returns true when is enabled.
 fn is_enabled(dict cfg, any row) bool {
    cfg.get(row_tag(row), true)
 }
 
+;; Updates the enabled and returns the resulting state.
 fn set_enabled(dict cfg, str tag, bool on) dict {
    cfg[tag] = on
    cfg
 }
 
+;; Returns the result of the `toggle` operation.
 fn toggle(dict cfg, str tag) dict {
    set_enabled(cfg, tag, !bool(cfg.get(tag, true)))
 }
 
+;; Returns the result of the `enabled` operation.
 fn enabled(dict cfg=config()) list {
    mut out = []
    mut i = 0
@@ -212,6 +219,7 @@ fn enabled(dict cfg=config()) list {
    out
 }
 
+;; Returns the result of the `with_tag` operation.
 fn with_tag(str tag, dict cfg=config()) list {
    mut out = []
    def rows = enabled(cfg)
@@ -224,10 +232,12 @@ fn with_tag(str tag, dict cfg=config()) list {
    out
 }
 
+;; Returns the result of the `toggles` operation.
 fn toggles(dict cfg=config()) list {
    with_tag("toggle", cfg)
 }
 
+;; Returns the result of the `by_id` operation.
 fn by_id(str id) list {
    def rows = commands()
    mut i = 0
@@ -239,8 +249,10 @@ fn by_id(str id) list {
    []
 }
 
+;; Returns true when has id.
 fn has_id(str id) bool { by_id(id).len > 0 }
 
+;; Returns the result of the `id_for_chord` operation.
 fn id_for_chord(str chord) str {
    def rows = all_commands()
    mut i = 0
@@ -274,6 +286,7 @@ fn _group_label(str head) str {
    head
 }
 
+;; Finds the key and returns the matching result.
 fn which_key(str prefix) list {
    def p = str.strip(prefix)
    mut out = []

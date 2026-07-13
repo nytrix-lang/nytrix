@@ -1,112 +1,210 @@
 # Changelog
 
-Nytrix uses dated milestones. `ny --version` for snapshots.
+Nytrix uses dated milestones. Use `ny --version` for snapshots.
 
-## [0.8] — Cross-platform hot reload, proof types, renderer parity + polish
-
-### Added
-- Full cross-platform real file watchers enabling fast language-level hot reloading via dynamically linked libraries (`.so` / `.dylib` / `.dll`):
-  - Linux: full inotify support with event masks (`IN_*`), `watch_init`/`watch_add`/`watch_rm`, `watch_read_events`, and `watch_has_change`.
-  - macOS: kqueue + `EVFILT_VNODE` (NOTE_WRITE, NOTE_DELETE, NOTE_RENAME, NOTE_ATTRIB, etc.) via new runtime primitives.
-  - Windows: `FindFirstChangeNotification` / `FindNextChangeNotification` with `FILE_NOTIFY_CHANGE_*` filters.
-- New first-class module `std.os.fs.watch` with clean portable API: `create(path)`, `close(handle)`, `poll(handle)`, `has_event(handle)`, `wait_any(handle)`, plus `WATCH_*` constants. Makes implementing hot-reloading of native modules trivial from .ny code.
-- Extended `std.os.fs` with cross-platform watch facade + platform-specific low-level helpers.
-- New runtime intrinsics for efficient watching: `__kqueue`, `__kevent`, `__watch_open_vnode`, `__win32_find_first_change` / `__win32_find_next_change` / `__win32_find_close_change`.
-- CLI `--hot-reload` (`--hot`, `-H`), `--watch`, and `--watch-poll` now use real kernel event mechanisms on Linux/macOS/Windows (with mtime fallback), including proper `select`/`kevent`/`WaitForSingleObject` waiting.
-
-### Changed / Performance & Optimization
-- File watching and hot reload use OS-native event notification (inotify, kqueue, Win32 directory change APIs) with blocking waits (`select`, `kevent`, `WaitForSingleObject`) instead of busy mtime polling. This reduces CPU usage when idle and improves change detection latency.
-- The `--hot` / `--watch` loop performs edit-save-recompile-rerun with lower overhead.
-- Support for watching combined with dlopen/dlsym of compiled dynamic libraries enables faster iteration without requiring full restarts in user code (provides foundation for reloadable modules).
-- The watcher code is specialized per platform in the compiler and standard library.
-
-### Fixed
-- Various platform-conditional and watcher handle lifetime issues during cross-platform implementation.
-- Parser and dict construction robustness for the new watch handle types.
-
-## [0.7] — LLVM-free Native + C Interop + Polish
+## [0.8.0] - 2026-07-13 — Native execution, proof tooling, and platform parity
 
 ### Added
-- Internal C frontend tolerant support for more complex headers; `_Complex`, `_Bool`, unknown types, and recoverable declarations continue on errors.
-- NYIR asm: polished headers/comments for clean readable output.
-- Docs: compact 1:1 TLDRs, direct explanations in README/start/perf/syntax/CHANGELOG.
+
+- LLVM-free execution now covers supported x86-64 and AArch64 programs from
+  NYIR through internal object, linker, and W^X JIT paths. This includes local
+  calls, relocations, runtime symbols, persistent REPL bindings, and explicit
+  rejection of unsupported shapes.
+- The AArch64 backend gained AAPCS64 scalar and floating-point calls, control
+  flow, signed division/modulo, local pointer memory, internal ELF64 linking,
+  and assembler-, compiler-, LLVM-, and linker-free QEMU runtime validation.
+- Native ABI coverage now includes x86-64 System V aggregate classification,
+  register/stack by-value arguments, two-eightbyte returns, hidden `sret`, and
+  validated non-x86 call decoding. AArch64, ARM, and RISC-V also support proven
+  local address/load/store shapes.
+- JIT and AOT now share source-link discovery, multi-archive ELF merging,
+  global/extern relocation, pointer lvalues, and target-aware scalar imports.
+  Reloadable native NYIR artifacts are available through `--emit-bc`,
+  `--native-precompile`, and `--nyir-run-bin` without changing LLVM bitcode
+  behavior on LLVM backends.
+- The Nytrix-owned C frontend now handles supported installed and compiler
+  headers, macros, typedefs, layouts, callbacks, variadics, libc declarations,
+  and external scalar globals. Floating/pointer callbacks and complex aggregate
+  layouts gained native ABI coverage; project headers remain strictly checked.
+- Unaliased C includes expose declarations directly, never through an implicit
+  `c.*` namespace. Explicit aliases opt into namespacing, while existing Nytrix
+  declarations retain precedence.
+- `prove(condition[, message]) -> proof` introduces compile-time proof
+  witnesses; false or dynamic obligations fail compilation, and ordinary values
+  cannot satisfy proof parameters. `std.math.logic` adds evaluation,
+  simplification, certificates, bounded solvers, rewriting, and Prolog-style
+  unification and backtracking.
+- Kernel-backed file watching and hot reload use inotify, kqueue, and Windows
+  change notifications behind `std.os.fs.watch`, with an mtime fallback.
+- Opt-in `--safe-run` supervision covers CPU, memory, processes, wall time,
+  output, and supported file limits, including suspended Windows Job Object
+  startup and explicit unsupported-limit reporting.
+- Test tooling gained `--failures-only`, portable replay, separate fixture and
+  suite timeouts, and host-aware concurrency capped at eight workers with
+  6 GiB reserved per worker.
 
 ### Changed
-- Strict relative paths only (build/cache, NYNTH_ROOT).
-- FFI tests: etc/tests/rt/c (internal C frontend).
-- Public TODO list trimmed to remaining hard roadmap items.
-- Module decls: short `module foo` / `module foo(internal)` auto-export (no bloat lists).
-- Render/UI: removed deprecated, relative-safe resources.
-- Native default x86_64, internal C for headers.
+
+- Native lowering, targets, tiers, reporting, NYIR passes, object formats,
+  result oracles, JIT loading, and proof analysis now live in focused modules.
+- Native-only compile and run modes are now distinct: `-o` writes an executable
+  without running it, while ordinary files and `-c` execute through the selected
+  host-native path.
+- NYIR now coalesces copy/local chains, allocates scalar registers, selects
+  immediate operands, indexes DCE label references once, and preserves floating
+  types across collapsed equivalence classes.
+- On a deterministic 2,000-branch probe (42,004 instructions, 6,000 labels),
+  native precompile improved from 430.8 +/- 55.4 ms to 221.4 +/- 21.1 ms over
+  ten warm runs.
+- A function/call probe measured 37.6 +/- 1.4 ms natively versus
+  169.7 +/- 6.0 ms with MCJIT over ten warm runs (4.51 +/- 0.23x faster).
+  A one-shot `print(42)` native path measured 39.1 ms mean. ORC remained slower
+  on the trivial probe, so MCJIT remains the default LLVM JIT.
+- Precomputed x86-64 call boundaries and immediate constants reduced a focused
+  call body from 11 to 9 instructions and frame-relative accesses from 3 to 2.
+- Single-scan stdlib cache validation and stable builtin-shadow epochs improved
+  editor emit-only time from 7.109 +/- 0.032 s to 6.459 +/- 0.121 s.
+- Stdlib source sweeps stop after optimized IR instead of materializing MCJIT,
+  removing a measured 18-22 GiB peak. Cache format updates reject mixed
+  stdlib/user entries and sanitizer-contaminated native objects.
+- Default builds run a bounded, advisory `ny-fmt --bugs` audit after producing
+  the compiler and standard bundle.
+- All 427 previously undocumented public stdlib functions now have source
+  documentation; analysis reports no missing public API docs, and the
+  471-module portal builds successfully.
+- `ny-fmt --cloc` now reports tracked additions/deletions and per-file totals.
+- Hot reload blocks on native events instead of busy mtime polling, reducing
+  idle CPU use and edit-to-recompile latency.
 
 ### Fixed
-- C frontend: bumped parser capacities, fewer hard aborts, tolerant on unsupported declarations.
-- No -O default (opt_level=0); explicit for perf.
-- Compile time: prealloc, hash, no realloc churn in hot paths.
-- Codegen: smarter lowering, clean output when -O.
 
-## [0.7.0] - 2026-06-30 — Native backend & C frontend foundation
+- macOS transitive libc aggregates now materialize named return and parameter
+  layouts on demand, without registering anonymous carriers as builtin scalars.
+  Installed system headers recover useful declarations from unsupported syntax;
+  project headers remain strict.
+- Apple-arm64 comptime MCJIT now uses managed invocation so indirect callees
+  finalize before entry. Native-only link discovery also matches JIT behavior
+  and deduplicates source annotations.
+- Corrected x86-64 floating constant placement and typed f32/f64 local
+  preservation, eliminating nondeterministic native ELF results.
+- Hardened sanitizer AOT temporary output, cache isolation, cleanup, and UBSan
+  handling.
+- Failure replay now preserves fixture flags, target matrices, exit status,
+  plain output, and valid LLDB diagnostics.
+- Corrected Windows JIT compatibility, target-width libc fixtures, variadic C
+  imports, trace/debug progress suppression, ELF32 return bounds, watcher
+  lifetime, parser recovery, and dictionary helper ambiguity.
+- The full suite passes on Linux, macOS, and Windows through the manual
+  multi-platform workflow.
+
+## [0.7.0] - 2026-06-30 — LLVM-free native backend and C interoperability
 
 ### Added
-- NYIR: Nytrix-owned IR with verifier, optimizer, and debug VM (`--nyir-run`, `--nyir-dump-bin`, `--nyir-run-bin`).
-- Native emitters for x86-64 (primary), i386, ARM, AArch64, RISC-V, plus debug-scoped WASM/BPF/PowerPC/MIPS/AVR.
-- In-process ELF64/COFF/Mach-O object writers with relocations and multi-function aggregation.
-- Direct ELF object link/run regression gates for raw `rt_main` i64 and f64 results, including proven single and multiple stack-passed i64, f64, and mixed i64/f64 call arguments, plus f32 arithmetic and f32 register/stack call results observed through an f64 return.
-- Narrow internal ELF64 executable linker for object link/run fixtures, avoiding `cc` for all current i64/f64/f32/pointer/deref/memory-stub gates; pointer/string memory tests use tiny Linux `malloc`/`free`/`memset`/`memcpy`/`memmove`/`memcmp`/`memchr`/`strlen`/`strcmp`/`strchr` stubs plus `realloc(NULL, n)` and checked-product `calloc(count, size)` allocation semantics, not full libc linking.
-- Compiler-owned ELF link/run gates treat Nytrix's in-process ELF64/ELF32 linkers as the native path; external linkers such as `mold` or platform `cc`/linker flows remain fallback/integration paths for unsupported external symbols and general host linking.
-- Direct ELF object link/run regression gates for pointer memory helpers, source-level `*p` pointer deref reads/writes, bare deref compound assignment, and local `&local` stack address materialization.
-- Direct ELF object link/run regression gates for ABI-visible narrow integer returns (`bool/u8/i16/u32`) on ELF64 and the supported ELF32 slice.
-- Direct ELF object link/run and VM/native oracle regression gates for narrow native `addr_of(local)` stack-local address materialization.
-- Internal C frontend (`src/code/c/`) for header import without libclang: macros, conditionals, typedefs, structs/unions, bitfields, alignment attributes, `sizeof`, object-like integer define lowering, and strict scalar, typedef-struct pointer, function-pointer-parameter, plus simple by-value aggregate-return import lowering for local C headers.
-- Raw-int and f64 SysV call ABI coverage for register arguments plus focused stack-passed argument cases.
-- X86/i386 NYIR assembly coverage for cdecl call3/call7/call9 plus logical, ternary, case, loop-break, and for-range lowering.
-- Narrow compiler-owned i386 ELF32 relocatable writer and internal link/run gate for raw-int `rt_main`, local cdecl calls, x87 f64/f32 arithmetic/return/params/comparisons, high-bit u32 immediates, `R_386_PC32` relocations, pointer-memory helpers, tiny `malloc`/`free`/`memset`/`memcpy`/`memmove`/`memcmp`/`memchr`/`strlen`/`strcmp`/`strchr` stubs plus `realloc(NULL, n)` and checked-product `calloc(count, size)`, source-level deref reads/writes, arithmetic, div/mod, locals, branches, and loops.
-- F32 NYIR/VM/x86-64 assembly and direct ELF object coverage for annotated f32 constants, arithmetic, comparison, direct f32 returns, register/stack calls, and f32-to-f64 observation.
-- Signed i64 native-result oracle coverage for negative div/mod, signed comparisons, and arithmetic right shift.
-- `--native-result-oracle` gate comparing VM and native execution results.
-- Native/C-frontend regression suite under `etc/tests/rt/native/`.
-- `@backend(...)` attribute and `backend_intrinsic(...)` builtin, replacing backend-specific spellings.
+
+- NYIR: Nytrix-owned IR with verifier, optimizer, debug VM, binary format, and `--nyir-run`, `--nyir-dump-bin`, and `--nyir-run-bin`.
+- Native emitters for x86-64 (default/primary), i386, ARM, AArch64, and RISC-V, with debug-scoped WASM, BPF, PowerPC, MIPS, and AVR support.
+- In-process ELF64, ELF32, COFF, and Mach-O object writers with relocations and multi-function aggregation.
+- Compiler-owned ELF64 and ELF32 link/run paths, avoiding LLVM, `cc`, and external linkers for supported native fixtures.
+- Narrow internal ELF executable linker with runtime stubs for:
+
+  - `malloc`, `free`, `realloc`, and checked-product `calloc`
+  - `memset`, `memcpy`, `memmove`, `memcmp`, and `memchr`
+  - `strlen`, `strcmp`, and `strchr`
+- Native link/run regression coverage for:
+
+  - i64, f64, f32, pointers, dereferences, locals, branches, loops, and recursion
+  - Register and stack-passed i64/f64 arguments, including mixed calls
+  - f32 arithmetic, comparisons, register/stack calls, and f64 observation
+  - Narrow ABI returns: `bool`, `u8`, `i16`, and `u32`
+  - Signed division, modulo, comparisons, arithmetic shifts, and high-bit u32 immediates
+  - `*p` reads, writes, compound assignments, and local stack addresses
+  - `addr_of(local)` through VM, assembly, ELF64, and ELF32 paths
+- `--native-result-oracle` for VM/native result comparison.
+- Internal C frontend under `src/code/c/`, replacing libclang for supported header imports:
+
+  - Macros and conditionals
+  - Typedefs, structs, unions, bitfields, and alignment attributes
+  - `_Bool`, `_Complex`, unknown types, and recoverable declarations
+  - `sizeof` and object-like integer define lowering
+  - Scalar, typedef-struct pointer, function-pointer parameter, and simple aggregate-return imports
+  - Public aggregate layout API exposing size, alignment, and function-pointer counts
+- Increased C parser capacities and tolerant recovery for complex or unsupported declarations.
+- X86/i386 NYIR assembly coverage for cdecl call3/call7/call9, logical operations, ternaries, match cases, loops, break, and ranges.
+- Native/C frontend regression suites under `etc/tests/rt/native/` and `etc/tests/rt/c/`.
+- `@backend(...)` and `backend_intrinsic(...)`, replacing backend-specific spellings.
+- Cleaner NYIR assembly headers and comments.
+- Compact 1:1 TLDR documentation across README, start, performance, syntax, and CHANGELOG pages.
 
 ### Changed
-- Native paths run before falling back to LLVM/libclang, which remain available as legacy fallback.
-- NYIR lowering covers logical ops, ternaries, loops, break/continue, recursion, and match arms.
-- Optimizer refreshes metadata and compacts SSA values after each pass.
-- Constant/range fact propagation extended to arithmetic, bitwise ops, and comparisons.
-- C frontend reports aggregate size/alignment and function-pointer counts through a public layout API.
-- `packed, aligned(N)` now follows GCC's "aligned wins" semantics, order-independent.
-- Native test files reorganized into subdirectories by kind (`nyir/`, `diff/`, `oracle/`, `elf64/`, etc.).
-- FFI include examples drop redundant `as ""`.
+
+- Native compilation and the internal C frontend now run before LLVM/libclang fallback.
+- x86-64 is the default native target.
+- LLVM and libclang remain legacy fallbacks for unsupported cases.
+- All build, cache, resource, and `NYTRIX_ROOT` paths are strictly relative.
+- Default optimization level is now `0`; optimization must be explicitly enabled for performance builds.
+- NYIR lowering now covers logical operators, ternaries, loops, break/continue, recursion, and match arms.
+- Optimizer passes refresh metadata and compact SSA values after every pass.
+- Constant and range propagation now covers arithmetic, bitwise operations, and comparisons.
+- `packed, aligned(N)` follows GCC's order-independent “aligned wins” semantics.
+- Native tests are organized by kind under directories such as `nyir/`, `diff/`, `oracle/`, and `elf64/`.
+- Module declarations support compact auto-export forms:
+
+  - `module foo`
+  - `module foo(internal)`
+- FFI include examples no longer require redundant `as ""`.
+- Render/UI resources are deprecated-free and relative-path safe.
+- Compilation hot paths use preallocation and hashing to avoid repeated reallocations.
+- Codegen performs smarter lowering and emits cleaner optimized output.
 
 ### Fixed
-- NYIR verifier/loader reject malformed metadata (bad effect masks, duplicate labels, invalid arity) before consumers see it.
-- VM profile counters now aggregate correctly across nested calls.
-- Native x86-64 calls save argument registers to locals before executing lowered bodies.
-- i386/ARM signed division and modulo lower to real instructions instead of rejecting.
-- 64-bit shifts up to 63 verify and evaluate correctly.
-- Native object emission no longer collides with runtime `rt_main`.
-- x86-64 ELF object emission now spills SysV incoming register and proven stack-passed args to NYIR locals, emits single and multiple stack-passed i64/f64 object-call args with alignment padding, stores f64 call returns from `xmm0`, emits the proven f32 arithmetic/conversion/call slice, and uses raw returns for externally linked object checks.
-- x86-64 ELF object integer comparisons preserve flags through `setcc` and are covered by direct link/run bool comparison regression.
-- Prefix `*p` now parses as `NY_E_DEREF`, type-checks as the pointed-to type, lowers to native `NYIR_LOAD_I64` for pointer deref reads, and supports `*p = value` plus bare `*p += value` writes through the typed raw store path.
-- Native `addr_of(local)` lowers to `NYIR_ADDR_LOCAL`, executes in the debug VM oracle, and emits frame-relative `lea` on x86-64/i386 assembly and ELF object paths; address-taken local facts are invalidated after raw pointer stores so ordinary local reads observe those writes. This does not yet provide general `&expr` syntax.
-- Internal C aggregate import now declines unsupported nested/by-value layouts without poisoning fallback, and proves a strict no-libclang `div(int, int)` aggregate-return slice through `load_layout`.
-- Parser no longer suggests C-style `for(;;)` headers; points to Nytrix iterator syntax instead.
-- C frontend rejects non-positive array extents and reports unsupported field shapes as diagnostics instead of dropping them silently.
-- Binary NYIR format extended through v4 for wider call operands, preserving v1–v3 load compatibility.
+
+- NYIR verification and loading now reject malformed effect masks, duplicate labels, invalid arity, and invalid metadata before consumers process them.
+- Binary NYIR format v4 supports wider call operands while preserving v1-v3 loading compatibility.
+- VM profile counters aggregate correctly across nested calls.
+- Native x86-64 functions save incoming argument registers into locals before executing lowered bodies.
+- x86-64 ELF emission now correctly:
+
+  - Spills SysV register and stack-passed arguments
+  - Handles multiple stack-passed i64/f64 arguments with alignment padding
+  - Stores f64 returns from `xmm0`
+  - Emits the supported f32 arithmetic, conversion, and call slice
+  - Uses raw returns for externally linked object checks
+  - Preserves comparison flags through `setcc`
+- i386 and ARM signed division/modulo lower to native instructions instead of being rejected.
+- i386 ELF32 now supports cdecl calls, x87 f32/f64 operations, `R_386_PC32` relocations, pointer helpers, dereferences, locals, branches, and loops.
+- 64-bit shifts from 0 through 63 now verify and evaluate correctly.
+- Native object output no longer collides with runtime `rt_main`.
+- Prefix `*p` now:
+
+  - Parses as `NY_E_DEREF`
+  - Type-checks as the pointed-to type
+  - Lowers reads to `NYIR_LOAD_I64`
+  - Supports `*p = value` and `*p += value`
+- `addr_of(local)` now lowers to `NYIR_ADDR_LOCAL`, executes in the debug VM, and emits frame-relative `lea` on x86-64/i386.
+- Address-taken local facts are invalidated after raw pointer writes so later local reads observe mutations.
+- Internal C aggregate imports decline unsupported nested or by-value layouts without poisoning fallback.
+- Strict no-libclang aggregate-return import is covered through `load_layout`.
+- C frontend rejects non-positive array extents and diagnoses unsupported field shapes instead of silently dropping them.
+- Unsupported C declarations produce recoverable diagnostics instead of hard aborts.
+- Parser diagnostics no longer suggest C-style `for (;;)` and instead point to Nytrix iterator syntax.
 
 ## [0.6] - 2026-06-30 — Fuzzing, crypto/math expansion, renderer polish
 
 ### Added
+
 - Fuzz benchmark shapes (`etc/tests/fuzz/bench/*.nshape`) for call-heavy, matrix, string, and checksum workloads.
 - Published fuzzer and tooling for local benchmarking and error-shape discovery.
 - Radix helpers, stream/block ciphers, public-key helpers, lattice/factorization modules.
 
 ### Changed
+
 - SVG/UI rendering: 4x4 supersampling, stroke linecap/linejoin, gradient/`<use>` support, terminal 256-color output.
 - `--borrow-check` decoupled from `--ownership-strict`; Z3 enabled by default; proven-nonzero `f64` division checks elided.
 - glTF hot paths moved from `src/rt/gltf.c` into Ny code.
 - CMake dependency probing hardened for LLVM, libclang, Z3, Windows UCRT/MSYS2.
 
 ### Fixed
+
 - Canvas UTF-8 buffer type mismatches and terminal renderer edge cases.
 - Lowercase type-first local binding parsing.
 - Semicolon comment ambiguity in parser diagnostics.
@@ -116,17 +214,20 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 ## [0.5] - 2026-06-05 — Editor/viewer framework
 
 ### Added
+
 - Editor and engine viewer (`std.os.ui.render.viewer`): asset browser, hierarchy, inspector, gizmos, transform tools, runtime bootstrap.
 - OpenGL, WebGL, and Vulkan renderer paths for the viewer.
 - WebAssembly compiler backend foundation.
 - RSS feed, Discord, and Mastodon integration.
 
 ### Changed
+
 - Renderer/viewer split into distinct `render` and `viewer` layers.
 - Function syntax moved from `fn foo(type: arg): ret` to `fn foo(type arg) ret`.
 - Module self-checks moved into `#main` blocks.
 
 ### Fixed
+
 - Vulkan UI mesh caching and text-fitting crashes on startup.
 - Animated glTF mesh index-buffer retention and texture reuse.
 - GLSL syntax restoration and screen redraw stability.
@@ -134,6 +235,7 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 ## [0.4] - 2026-05-30 — Ownership, typed pipeline, CLI unification
 
 ### Added
+
 - Cross-platform windowing/input: Win32, Cocoa, X11, Wayland, Vulkan.
 - Typed compiler pipeline: Hindley-Milner inference, lambda/nested-collection inference, monomorphic specialization.
 - `&expr` shorthand for `borrow(expr)`, ownership contracts, `--safe-mode`.
@@ -141,11 +243,13 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - Unified CLI: `ny fmt`, `ny test`, `ny doc`, `ny perf`, `ny make`, `ny pkg`, `ny new`.
 
 ### Changed
+
 - Compiler/runtime/Vulkan internals standardized on raw integer representations.
 - `-O2` became the default native optimization level.
 - Bootstrap and dependency discovery reworked for cross-platform setup.
 
 ### Fixed
+
 - Emit-only compiler hangs from recursive raw-integer fast paths.
 - macOS arm64 comptime evaluation for immutable collections.
 - FFI header import collisions and ownership diagnostics for returned values.
@@ -154,6 +258,7 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 ## [0.3] - 2026-04-13 — Graphics stack and platform expansion
 
 ### Added
+
 - glTF loading, Meshopt integration, mesh/glTF parsers, and an image parser stack.
 - Vulkan rendering, scene graph, sky/SDF shaders, and split Vulkan/GUI renderer paths.
 - Terminal renderer integrated into `std.os.ui`; Win32 window backend added.
@@ -162,18 +267,21 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - Maintained sample programs, REPL import scenarios, and an updated learning guide.
 
 ### Changed
+
 - Platform APIs moved into `std.os`; window backends moved into `std.os.ui.window`.
 - Legacy native window backend path removed in favor of the new backend split.
 - Runtime, UI, and diagnostic regression fixtures reorganized alongside the code they cover.
 - Cache management, bigint support, and shader generation improved for graphics workloads.
 
 ### Fixed
+
 - Asset path drift and shader-generation regressions during scene coverage expansion.
 - Runtime fixture mismatches introduced while moving platform code into `std.os`.
 
 ## [0.2] - 2026-03-09 — Compiler, runtime, and stdlib foundation
 
 ### Added
+
 - Parser, lowering pipeline, AST node definitions, and visitor/function lowering.
 - Semantic analysis, diagnostics, and statement/call/FFI lowering.
 - JIT lowering state, module/JIT integration, and native value-runtime bridge.
@@ -185,17 +293,20 @@ Nytrix uses dated milestones. `ny --version` for snapshots.
 - Specification manuals, release notes, and initial benchmark/regression baselines.
 
 ### Changed
+
 - Standard library moved to `lib/`, reducing prelude coupling.
 - Parser, Vulkan renderer core, and UI renderer split into focused modules.
 - Std module layout reorganized; numeric modules moved into `std.math`.
 - Python build/bundle tooling replaced with native tools.
 
 ### Fixed
+
 - First-pass parser, runtime primitive, module-loading, and diagnostic issues found by the initial test suite.
 - Standard-library import coupling and module-path drift.
 
 ## [0.1] - 2025-12-24 — Prototype bootstrap
 
 ### Added
+
 - Launcher skeleton, build script, and CMake scaffold (`make`, `CMakeLists.txt`, `src/cmd/ny/main.c`).
 - Runtime placeholders and smoke fixtures for a first compilable, testable tree.

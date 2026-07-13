@@ -106,6 +106,18 @@ d = d.set("b", 11)
 clear(d)
 assert(!d.contains("b"), "clear dict")
 assert(keys(d) == [], "clear dict keys")
+mut churn = dict(64)
+def churn_alias = churn
+mut churn_i = 0
+while churn_i < 256 {
+   def churn_key = "dead-" + to_str(churn_i)
+   churn.set(churn_key, churn_i)
+   churn.delete(churn_key)
+   churn_i += 1
+}
+churn.set("live", 42)
+assert(churn_alias.get("live", 0) == 42 && churn_alias.len == 1,
+       "dict tombstone compaction preserves aliases")
 mut half_full = dict(20)
 mut fill_i = 0
 while fill_i < 16 {

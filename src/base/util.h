@@ -128,6 +128,8 @@ void ny_str_list_free(char **list, size_t count);
 
 #define NY_FNV1A64_OFFSET_BASIS UINT64_C(14695981039346656037)
 #define NY_FNV1A64_PRIME UINT64_C(1099511628211)
+#define NY_FNV1A32_OFFSET_BASIS UINT32_C(2166136261)
+#define NY_FNV1A32_PRIME UINT32_C(16777619)
 
 uint64_t ny_fnv1a64(const void *data, size_t len, uint64_t seed);
 uint64_t ny_fnv1a64_cstr(const char *s, uint64_t seed);
@@ -135,6 +137,14 @@ uint64_t ny_hash64_fast(const void *data, size_t len);
 uint64_t ny_hash64_fast_cstr(const char *s);
 static inline uint64_t ny_hash64(const void *data, size_t len) { return ny_hash64_fast(data, len); }
 static inline uint64_t ny_hash64_cstr(const char *s) { return ny_hash64_fast_cstr(s); }
+static inline uint32_t ny_hash32_cstr(const char *s) {
+  uint32_t h = NY_FNV1A32_OFFSET_BASIS;
+  for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; ++p) {
+    h ^= *p;
+    h *= NY_FNV1A32_PRIME;
+  }
+  return h;
+}
 static inline uint64_t ny_hash64_u64(uint64_t seed, uint64_t v) {
   return ny_fnv1a64(&v, sizeof(v), seed ? seed : NY_FNV1A64_OFFSET_BASIS);
 }
@@ -167,8 +177,46 @@ static inline bool ny_has_suffix(const char *str, const char *suffix) {
 }
 
 static inline const char *ny_base_name(const char *path) {
+  if (!path || !*path)
+    return ".";
   const char *s = strrchr(path, '/');
   return s ? s + 1 : path;
+}
+
+/* Returns heap-allocated joined path; caller must free. */
+static inline char *ny_path_join_alloc(const char *dir, const char *name) {
+  if (!dir || !*dir) return name && *name ? ny_strdup(name) : ny_strdup(".");
+  size_t dlen = strlen(dir);
+  int needs_sep = (dir[dlen - 1] != '/' && dir[dlen - 1] != '\\') ? 1 : 0;
+  size_t nlen = name ? strlen(name) : 0;
+  char *out = (char *)malloc(dlen + (size_t)needs_sep + nlen + 1);
+  if (!out) return NULL;
+  memcpy(out, dir, dlen);
+  if (needs_sep) out[dlen] = '/';
+  memcpy(out + dlen + (size_t)needs_sep, name ? name : "", nlen + 1);
+  return out;
+}
+
+/* Writes directory portion of path into out (modifies in-place if out==path). */
+static inline void ny_dir_name(char *out, size_t out_len, const char *path) {
+  if (!out || out_len == 0) return;
+  if (!path || !*path) { snprintf(out, out_len, "."); return; }
+  snprintf(out, out_len, "%s", path);
+  char *slash = strrchr(out, '/');
+#ifdef _WIN32
+  char *bslash = strrchr(out, '\\');
+  if (bslash && (!slash || bslash > slash)) slash = bslash;
+#endif
+  if (slash) {
+    /* Preserve trailing slash for root paths */
+    if (slash == out) {
+      out[1] = '\0';
+    } else {
+      *slash = '\0';
+    }
+  } else {
+    snprintf(out, out_len, ".");
+  }
 }
 
 static inline bool ny_is_ident_char(int c) {
@@ -250,6 +298,12 @@ static inline char *ny_generic_type_arg_owned(const char *name, size_t index) {
 
 int ny_levenshtein(const char *s1, const char *s2);
 bool ny_log_should_emit(const char *fmt);
+
+void ny_complexity_note(const char *file, int line, const char *func,
+                        const char *category, const char *detail);
+
+#define NY_COMPLEXITY_NOTE(cat, detail) \
+  ny_complexity_note(__FILE__, __LINE__, __func__, (cat), (detail))
 
 const char *ny_src_root(void);
 const char *ny_default_cache_root_dir(void);

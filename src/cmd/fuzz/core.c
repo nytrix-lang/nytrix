@@ -1,7 +1,7 @@
 #include "core.h"
 
 static int usage(void) {
-  nynth_print_worker_usage(stdout);
+  nytrix_print_worker_usage(stdout);
   return 2;
 }
 

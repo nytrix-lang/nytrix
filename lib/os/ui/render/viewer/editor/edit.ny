@@ -34,12 +34,14 @@ fn _new_lines(int n) list {
    out
 }
 
+;; Returns the result of the `line_insert` operation.
 fn line_insert(str line, int col, str text) str {
    if text.len <= 0 { return line }
    col = min(max(col, 0), line.len)
    str.str_slice(line, 0, col) + text + str.str_slice(line, col, line.len)
 }
 
+;; Returns the result of the `line_delete_before` operation.
 fn line_delete_before(str line, int col) str {
    col <= 0 ? line : str.str_slice(line, 0, min(col - 1, line.len)) + str.str_slice(line, min(col, line.len), line.len)
 }
@@ -80,6 +82,7 @@ fn insert_text(dict st, str text) dict {
    set_lines(st, out)
 }
 
+;; Returns the result of the `newline` operation.
 fn newline(dict st) dict {
    st = clamp_cursor(st)
    mut lines = current_lines(st)
@@ -96,6 +99,7 @@ fn newline(dict st) dict {
    set_lines(st, out)
 }
 
+;; Returns the result of the `backspace` operation.
 fn backspace(dict st) dict {
    st = clamp_cursor(st)
    mut lines = current_lines(st)
@@ -118,6 +122,7 @@ fn backspace(dict st) dict {
    set_lines(st, out)
 }
 
+;; Releases the char.
 fn delete_char(dict st) dict {
    st = clamp_cursor(st)
    mut lines = current_lines(st)
@@ -136,6 +141,7 @@ fn delete_char(dict st) dict {
    set_lines(st, out)
 }
 
+;; Returns the result of the `switch_buffer` operation.
 fn switch_buffer(dict st, int dir) dict {
    def bs = st.get("buffers", [])
    if bs.len <= 0 { return st }
@@ -146,6 +152,7 @@ fn switch_buffer(dict st, int dir) dict {
    st
 }
 
+;; Updates the buffer and returns the resulting state.
 fn select_buffer(dict st, int idx) dict {
    def bs = st.get("buffers", [])
    if idx < 0 || idx >= bs.len { return st }

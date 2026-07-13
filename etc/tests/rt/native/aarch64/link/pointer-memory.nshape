@@ -1,0 +1,20 @@
+shape aarch64_elf64_internal_link_run_pointer_memory {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 aarch64 internal-link qemu pointer memory]
+  template ny-test-case
+  flags "--native-backend aarch64 -emit-only -o /tmp/nytrix-aarch64-link-pointer.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use std.core
+
+fn pointer_local() i64 {
+  mut i64 value = 41
+  def *int ptr = addr_of(value)
+  store64_i(ptr, 42)
+  load64_i(ptr)
+}
+
+pointer_local()
+NY
+}

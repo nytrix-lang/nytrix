@@ -12,6 +12,7 @@ Do not mix those numbers unless compile time is part of the workload.
 | Command | Measures | Use |
 | --- | --- | --- |
 | `ny file.ny` | Compile plus JIT/runtime path. | Edit loop and behavior checks. |
+| `ny --native-only file.ny` | Host-selected LLVM-free NYIR, native object/JIT, and run path on x86-64 or AArch64. | Native compiler/startup comparisons. |
 | `ny -run file.ny` | Temporary native executable plus run. | Quick AOT smoke test. |
 | `ny -o app file.ny` | Native compilation only. | Stable runtime artifact. |
 | `ny -O3 --profile=peak -o app file.ny` | Peak native compilation only. | Upper-bound runtime check. |
@@ -22,6 +23,11 @@ Do not mix those numbers unless compile time is part of the workload.
 
 Native `-o` defaults to `-O2`. JIT and REPL default to `-O0` for edit latency.
 Use `--profile=peak` only when compile time can be traded for native speed.
+
+The internally executable host backends are x86-64 and AArch64. Other target
+names are explicit assembly/NYIR inspection backends; selecting one does not
+silently claim object, link, JIT, or runtime support. AArch64 internal-link
+regressions use QEMU only to execute already-linked machine code.
 
 ## Compile Once, Run Many
 
@@ -41,7 +47,7 @@ size checks.
 | --- | --- |
 | read/import/stdlib | Source size, import graph, stdlib cache. |
 | parse/type/codegen | Compiler work from syntax, types, generated IR. |
-| native/JIT compile | LLVM/backend cost and cache behavior. |
+| native/JIT compile | Selected backend cost and cache behavior. |
 | run | Program runtime after execution starts. |
 | total | Whole edit-loop command cost. |
 

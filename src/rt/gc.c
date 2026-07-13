@@ -8,8 +8,81 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <sched.h>
+#endif
 
 nyGcState_t gNyGc = {0};
+
+/* Sorted interval index for large objects — enables O(log n) lookup instead of
+ * O(n) linked list walk in nyGcHeaderForObject and nyGcWriteBarrier. */
+typedef struct nyGcLargeInterval {
+  uint8_t *start;
+  uint8_t *end;
+  nyGcLargeObject_t *node;
+} nyGcLargeInterval_t;
+
+static nyGcLargeInterval_t *g_large_index = NULL;
+static size_t g_large_index_count = 0;
+static size_t g_large_index_cap = 0;
+static bool   g_large_index_dirty = false;
+
+static void nyGcLargeIndexMarkDirty(void) {
+  g_large_index_dirty = true;
+}
+
+static int gc_large_interval_cmp(const void *a, const void *b) {
+  const nyGcLargeInterval_t *ia = (const nyGcLargeInterval_t *)a;
+  const nyGcLargeInterval_t *ib = (const nyGcLargeInterval_t *)b;
+  if (ia->start < ib->start) return -1;
+  if (ia->start > ib->start) return 1;
+  return 0;
+}
+
+/* Rebuild the sorted large-object index from the linked list.
+ * Called lazily before lookups when dirty. */
+static void nyGcLargeIndexRebuild(void) {
+  size_t count = gNyGc.large_count;
+  if (count > g_large_index_cap) {
+    size_t next = g_large_index_cap ? g_large_index_cap : 64;
+    while (next < count) next *= 2;
+    free(g_large_index);
+    g_large_index = (nyGcLargeInterval_t *)malloc(next * sizeof(nyGcLargeInterval_t));
+    if (!g_large_index) return;
+    g_large_index_cap = next;
+  }
+  size_t i = 0;
+  for (nyGcLargeObject_t *n = gNyGc.large_objects; n && i < count; n = n->next, ++i) {
+    g_large_index[i].start = (uint8_t *)n->header;
+    g_large_index[i].end = (uint8_t *)n->header + n->total_size;
+    g_large_index[i].node = n;
+  }
+  g_large_index_count = i;
+  if (i > 1)
+    qsort(g_large_index, i, sizeof(nyGcLargeInterval_t), gc_large_interval_cmp);
+  g_large_index_dirty = false;
+}
+
+/* Binary search: find which large object (if any) contains addr. */
+static nyGcLargeObject_t *nyGcLargeIndexFind(uint8_t *addr) {
+  if (g_large_index_dirty)
+    nyGcLargeIndexRebuild();
+  if (!g_large_index || g_large_index_count == 0)
+    return NULL;
+  /* Find the last interval where start <= addr */
+  size_t lo = 0, hi = g_large_index_count;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (g_large_index[mid].start <= addr)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  if (lo == 0) return NULL;
+  --lo;
+  if (addr >= g_large_index[lo].end) return NULL;
+  return g_large_index[lo].node;
+}
 
 typedef struct nyGcForward {
   int64_t from;
@@ -49,6 +122,13 @@ static void nyGcValidateUnlocked(const char *phase);
 
 static void nyGcLock(void) {
   while (atomic_flag_test_and_set_explicit(&gNyGcLock, memory_order_acquire)) {
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__)
+    __asm__ __volatile__("yield");
+#elif !defined(_WIN32)
+    sched_yield();
+#endif
   }
 }
 
@@ -102,10 +182,10 @@ static bool nyGcHeaderForObject(int64_t obj, nyGcHeader_t **out) {
     return true;
   if (nyGcHeaderInSpace(obj, gNyGc.tenured_start, gNyGc.tenured_free, out))
     return true;
+  /* Use sorted index for large objects — O(log n) instead of O(n) walk. */
   uint8_t *p = (uint8_t *)(uintptr_t)obj;
-  for (nyGcLargeObject_t *large = gNyGc.large_objects; large; large = large->next) {
-    if (!large->header)
-      continue;
+  nyGcLargeObject_t *large = nyGcLargeIndexFind(p);
+  if (large && large->header) {
     uint8_t *obj_ptr = nyGcObjPtr(large->header);
     if (p == obj_ptr && nyGcHeaderCandidateValid(large->header,
                                                  (uint8_t *)large->header + large->total_size)) {
@@ -168,6 +248,7 @@ static int64_t nyGcAllocLargeUnlocked(size_t size) {
   node->next = gNyGc.large_objects;
   gNyGc.large_objects = node;
   gNyGc.large_count++;
+  nyGcLargeIndexMarkDirty();
   gNyGc.stats.large_allocated += total;
   return (int64_t)(uintptr_t)nyGcObjPtr(header);
 }
@@ -559,6 +640,10 @@ void nyGcDispose(void) {
   }
   free(gNyGc.remembered_set);
   free(gNyGc.roots);
+  free(g_large_index);
+  g_large_index = NULL;
+  g_large_index_count = 0;
+  g_large_index_cap = 0;
 
   memset(&gNyGc, 0, sizeof(gNyGc));
   nyGcUnlock();
@@ -611,15 +696,7 @@ void nyGcWriteBarrier(int64_t *slot, int64_t value) {
   if (value) {
     uint8_t *slot_addr = (uint8_t *)slot;
     uint8_t *val_addr = (uint8_t *)(uintptr_t)value;
-    bool slot_in_large = false;
-    for (nyGcLargeObject_t *large = gNyGc.large_objects; large; large = large->next) {
-      uint8_t *start = (uint8_t *)large->header;
-      uint8_t *end = start + large->total_size;
-      if (slot_addr >= start && slot_addr < end) {
-        slot_in_large = true;
-        break;
-      }
-    }
+    bool slot_in_large = nyGcLargeIndexFind(slot_addr) != NULL;
     if (((slot_addr >= gNyGc.tenured_start && slot_addr < gNyGc.tenured_free) || slot_in_large) &&
         val_addr >= gNyGc.nursery_start && val_addr < gNyGc.nursery_ptr) {
       nyGcAddRememberedUnlocked(slot);
@@ -986,6 +1063,7 @@ static void nyGcSweepLargeUnlocked(void) {
     large->header->flags &= ~NYGC_MARKED;
     link = &large->next;
   }
+  nyGcLargeIndexMarkDirty();
 }
 
 void nyGcSetFinalizer(int64_t obj, void (*finalizer)(int64_t)) {

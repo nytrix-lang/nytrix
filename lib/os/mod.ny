@@ -64,31 +64,29 @@ fn set_clipboard_text(any text) bool {
       ok(ignoredok) -> { ignoredok }
       err(ignorederr) -> { ignorederr  return false }
    }
-   defer {
-      match file_remove(tmp) {
-         ok(ignoredok) -> { ignoredok }
-         err(ignorederr) -> { ignorederr }
-      }
-   }
+   mut copied = false
    #linux {
       def tool = _clipboard_tool()
       def pfx = _clipboard_env_prefix()
-      if tool == "wl" { subprocess.shell(pfx + "wl-copy < " + qtmp + " 2>/dev/null", false, false) return true }
+      if tool == "wl" { subprocess.shell(pfx + "wl-copy < " + qtmp + " 2>/dev/null", false, false) copied = true }
       if tool == "xclip" {
          subprocess.shell(pfx + "xclip -selection clipboard -i " + qtmp + " 2>/dev/null", false, false)
          subprocess.shell(pfx + "xclip -selection primary -i " + qtmp + " 2>/dev/null", false, false)
-         return true
+         copied = true
       }
-      if tool == "xsel" { subprocess.shell(pfx + "xsel --clipboard --input < " + qtmp + " 2>/dev/null", false, false) return true }
+      if tool == "xsel" { subprocess.shell(pfx + "xsel --clipboard --input < " + qtmp + " 2>/dev/null", false, false) copied = true }
    } #elif macos {
       subprocess.shell("pbcopy < " + qtmp, false, false)
-      return true
+      copied = true
    } #elif windows {
       subprocess.shell("clip < " + qtmp, false, false)
-      return true
-   } #else {
-      return false
+      copied = true
    } #endif
+   match file_remove(tmp) {
+      ok(ignoredok) -> { ignoredok }
+      err(ignorederr) -> { ignorederr }
+   }
+   copied
 }
 
 fn get_clipboard_text() str {
@@ -96,14 +94,6 @@ fn get_clipboard_text() str {
    mut res = ""
    def tmp = _clipboard_tmp_file("r")
    def qtmp = "\"" + tmp + "\""
-   defer {
-      if file_exists(tmp) {
-         match file_remove(tmp) {
-            ok(ignoredok) -> { ignoredok }
-            err(ignorederr) -> { ignorederr }
-         }
-      }
-   }
    #linux {
       def tool = _clipboard_tool()
       def pfx = _clipboard_env_prefix()
@@ -122,6 +112,10 @@ fn get_clipboard_text() str {
          def n = res.len
          if n >= 2 && load8(res, n - 2) == 13 && load8(res, n - 1) == 10 { res = str_slice(res, 0, n - 2) }
          elif n >= 1 && load8(res, n - 1) == 10 { res = str_slice(res, 0, n - 1) }
+      }
+      match file_remove(tmp) {
+         ok(ignoredok) -> { ignoredok }
+         err(ignorederr) -> { ignorederr }
       }
    }
    res

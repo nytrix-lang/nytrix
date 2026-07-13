@@ -501,6 +501,16 @@ bool ny_llvm_init_native(void) {
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
   LLVMInitializeNativeAsmParser();
+  initialized = true;
+  return true;
+}
+
+/* Full target registry init for cross-compilation/AOT. Only call when a
+ * non-native target triple is actually requested. */
+bool ny_llvm_init_all_targets(void) {
+  static bool initialized = false;
+  if (initialized)
+    return true;
   LLVMInitializeAllTargetInfos();
   LLVMInitializeAllTargets();
   LLVMInitializeAllTargetMCs();
@@ -683,6 +693,77 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
     free(raw_triple);
   else
     LLVMDisposeMessage(raw_triple);
+}
+
+bool ny_llvm_apply_sanitize(LLVMModuleRef module, const char *sanitize_kind) {
+  if (!module || !sanitize_kind || !*sanitize_kind)
+    return true;
+
+  const char *pass = NULL;
+  if (strcmp(sanitize_kind, "address") == 0)
+    pass = "asan";
+  else if (strcmp(sanitize_kind, "undefined") == 0)
+    /* UBSan checks are normally inserted by a typed frontend, not by a
+     * generic LLVM new-pass-manager pipeline. The C runtime is still compiled
+     * and linked with -fsanitize=undefined; do not claim a nonexistent pass. */
+    return true;
+  else if (strcmp(sanitize_kind, "thread") == 0)
+    pass = "tsan";
+  else if (strcmp(sanitize_kind, "leak") == 0)
+    return true; /* leak detection is runtime-only, no LLVM pass needed */
+  else
+    return false;
+
+  const char *module_triple = module ? LLVMGetTarget(module) : NULL;
+  char *raw_triple = (module_triple && *module_triple)
+                         ? ny_strdup(module_triple)
+                         : LLVMGetDefaultTargetTriple();
+  if (!raw_triple)
+    return false;
+
+  LLVMTargetRef target;
+  char *err = NULL;
+  if (LLVMGetTargetFromTriple(raw_triple, &target, &err) != 0) {
+    if (err)
+      LLVMDisposeMessage(err);
+    if (module_triple && *module_triple)
+      free(raw_triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    return false;
+  }
+
+  char cpu_buf[128] = {0};
+  char feat_buf[256] = {0};
+  derive_host_target(raw_triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
+
+  LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(2);
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, raw_triple, cpu_buf,
+                                                    feat_buf, cgo,
+                                                    LLVMRelocPIC, host_code_model());
+  if (!tm) {
+    if (module_triple && *module_triple)
+      free(raw_triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    return false;
+  }
+
+  LLVMPassBuilderOptionsRef opts = LLVMCreatePassBuilderOptions();
+  LLVMErrorRef error = LLVMRunPasses(module, pass, tm, opts);
+  bool ok = !error;
+  if (error) {
+    char *msg = LLVMGetErrorMessage(error);
+    NY_LOG_ERR("Sanitizer pass '%s' failed: %s\n", pass, msg);
+    LLVMDisposeErrorMessage(msg);
+  }
+  LLVMDisposePassBuilderOptions(opts);
+  LLVMDisposeTargetMachine(tm);
+  if (module_triple && *module_triple)
+    free(raw_triple);
+  else
+    LLVMDisposeMessage(raw_triple);
+  return ok;
 }
 
 void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level) {

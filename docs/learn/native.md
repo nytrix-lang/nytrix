@@ -62,13 +62,13 @@ values, layouts, or function declarations:
 
 ```ny
 #include <stdlib.h> as "c"
-#include "./my_header.h" as ""
+#include "./my_header.h"
 ```
 
-Aliases keep large system headers namespaced. Unprefixed imports expose
-non-conflicting names directly; if a C function collides with a Nytrix symbol,
-that C function is skipped so the Nytrix wrapper remains callable. Re-import
-with an alias to access the C function under a stable namespace.
+An explicit namespace alias keeps a header under that namespace. An unaliased
+import exposes non-conflicting names directly and does not create a hidden
+namespace. Existing Nytrix names remain authoritative on collisions; use an
+explicit namespace alias when both declarations are needed.
 
 Imported C typedef structs become layouts:
 

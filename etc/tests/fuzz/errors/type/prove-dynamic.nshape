@@ -1,0 +1,14 @@
+shape type-prove-dynamic {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+fn require_witness(bool condition) proof {
+   prove(condition)
+}
+NY
+}

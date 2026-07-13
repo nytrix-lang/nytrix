@@ -14,16 +14,19 @@ use std.core.str as str
 use std.math (clamp, max, min)
 use std.os.ui.render.viewer.gui as gui
 
+;; Returns the result of the `state` operation.
 fn state() dict {
    {"open": false, "hex": "", "line": 0, "start": 0, "end": 0}
 }
 
+;; Returns the result of the `open` operation.
 fn open(dict st, dict hit) dict {
    st = hit
    st["open"] = true
    st
 }
 
+;; Closes resources owned by the state and returns the closed state.
 fn close(dict st) dict { st["open"] = false st }
 
 fn is_open(dict st) bool { bool(st.get("open", false)) }
@@ -45,6 +48,7 @@ fn _hex_digit_value(int c) int {
 
 fn _is_hex_digit(int c) bool { _hex_digit_value(c) >= 0 }
 
+;; Returns the result of the `normalize` operation.
 fn normalize(str text) str {
    if text.len <= 0 || load8(text, 0) != 35 { return "" }
    def digits = text.len - 1
@@ -71,6 +75,7 @@ fn _hit(str line_text, int i, int j, int row) dict {
    hx.len <= 0 ? dict(0) : {"hex": hx, "line": row, "start": i, "end": j}
 }
 
+;; Returns the result of the `scan_hex_literal` operation.
 fn scan_hex_literal(str line_text, int pos, int row=0) dict {
    mut i = 0
    while i < line_text.len {
@@ -86,6 +91,7 @@ fn scan_hex_literal(str line_text, int pos, int row=0) dict {
    dict(0)
 }
 
+;; Returns the result of the `at_cursor` operation.
 fn at_cursor(list lines, int row, int col) dict {
    if lines.len <= 0 { return dict(0) }
    def r = min(max(row, 0), lines.len - 1)
@@ -114,6 +120,7 @@ fn _append_line_swatches(list out, str line_text, int row) list {
    out
 }
 
+;; Returns the result of the `swatches_visible` operation.
 fn swatches_visible(list lines, int scroll, int rows, int draw_limit) list {
    mut out = []
    mut row = max(0, scroll)
@@ -129,11 +136,13 @@ fn _hex_byte(str hx, int off) int {
    _hex_digit_value(load8(hx, off)) * 16 + _hex_digit_value(load8(hx, off + 1))
 }
 
+;; Returns the result of the `rgb` operation.
 fn rgb(str hx) list {
    hx = normalize(hx)
    hx.len < 7 ? [0, 0, 0] : [_hex_byte(hx, 1), _hex_byte(hx, 3), _hex_byte(hx, 5)]
 }
 
+;; Returns the result of the `rgb_label` operation.
 fn rgb_label(str hx) str {
    def c = rgb(hx)
    "rgb(" + to_str(int(c.get(0, 0))) + ", " + to_str(int(c.get(1, 0))) + ", " + to_str(int(c.get(2, 0))) + ")"
@@ -209,6 +218,7 @@ fn _unit_to_byte(any v) int {
    max(0, min(255, int(clamp(float(v), 0.0, 1.0) * 255.0 + 0.5)))
 }
 
+;; Returns the result of the `rgba_hex` operation.
 fn rgba_hex(any color) str {
    def c = rgba(color, [0.0, 0.0, 0.0, 1.0])
    "#" + str.to_hex(_unit_to_byte(c.get(0, 0.0)), 2) +
@@ -218,6 +228,7 @@ fn rgba_hex(any color) str {
 
 fn _absf(f64 v) f64 { v < 0.0 ? -v : v }
 
+;; Returns true when same rgba.
 fn same_rgba(any a, any b, f64 eps=0.0005) bool {
    def ca = rgba(a, [1.0, 1.0, 1.0, 1.0])
    def cb = rgba(b, ca)
@@ -227,12 +238,15 @@ fn same_rgba(any a, any b, f64 eps=0.0005) bool {
    _absf(float(ca.get(3, 1.0)) - float(cb.get(3, 1.0))) <= eps
 }
 
+;; Returns the result of the `changed` operation.
 fn changed(any before, any after, f64 eps=0.0005) bool { !same_rgba(before, after, eps) }
 
+;; Returns the result of the `edit4` operation.
 fn edit4(any id, any label, any color, any fallback=[1.0, 1.0, 1.0, 1.0]) list {
    rgba(gui.color_edit4(id, label, rgba(color, fallback)), fallback)
 }
 
+;; Returns the result of the `picker4` operation.
 fn picker4(any id, any label, any color, any fallback=[1.0, 1.0, 1.0, 1.0]) list {
    rgba(gui.color_picker4(id, label, rgba(color, fallback)), fallback)
 }

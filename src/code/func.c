@@ -2289,11 +2289,17 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
       LLVMTypeRef pty = cg->type_i64;
       if (sema && i < sema->resolved_param_types.len)
         pty = sema->resolved_param_types.data[i];
+      else if (fn->as.fn.params.data[i].type)
+        pty = fn_resolve_user_abi_type(cg, fn, function_native_abi,
+                                       fn->as.fn.params.data[i].type, fn->tok);
       pt[i + (captures ? 1 : 0)] = pty;
     }
     LLVMTypeRef rty = cg->type_i64;
     if (sema)
       rty = sema->resolved_return_type;
+    else if (fn->as.fn.return_type)
+      rty = fn_resolve_user_abi_type(cg, fn, function_native_abi,
+                                     fn->as.fn.return_type, fn->tok);
     LLVMTypeRef ft = LLVMFunctionType(rty, pt, (unsigned)total_args, 0);
     f = LLVMAddFunction(cg->module, name, ft);
     if (!cg->is_repl)

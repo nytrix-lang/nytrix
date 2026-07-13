@@ -309,7 +309,7 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
   if (!opt || !source || !output_path)
     return;
   uint64_t h = NY_FNV1A64_OFFSET_BASIS;
-  h = ny_fnv1a64_cstr("aot-cache-v9", h);
+  h = ny_fnv1a64_cstr("aot-cache-v10", h);
   h = ny_fnv1a64_cstr(VERSION, h);
 #ifdef NYTRIX_VERSION_COMMIT
   h = ny_fnv1a64_cstr(NYTRIX_VERSION_COMMIT, h);
@@ -346,6 +346,7 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
     const char *const host_envs[] = {
         "NYTRIX_HOST_CFLAGS",
         "NYTRIX_HOST_LDFLAGS",
+        "NYTRIX_NO_PIE",
         "NYTRIX_ASSUME_INT",
         "NYTRIX_COMPILER_ASSERTS",
         "NYTRIX_DEBUG_LOCALS",
@@ -730,51 +731,13 @@ static bool ny_ir_is_string_global(const char *name) {
 static bool ny_std_bc_symbol_is_mixed_codegen_artifact(const char *name) {
   if (!name || !*name)
     return false;
-  return strncmp(name, "__ny_callable_adapter_", 22) == 0 ||
+  /* The stdlib cache is linked into unrelated user programs.  A script entry
+   * can only come from the user half of the joined module; accepting it here
+   * makes the first program that populates the cache run for every later
+   * source with the same import set. */
+  return strcmp(name, "_ny_top_entry") == 0 ||
+         strncmp(name, "__ny_callable_adapter_", 22) == 0 ||
          strncmp(name, "__ny_callable_adapter_env_", 26) == 0;
-}
-
-static bool ny_std_bc_value_is_global_ref(LLVMValueRef v) {
-  if (!v)
-    return false;
-  LLVMValueKind kind = LLVMGetValueKind(v);
-  return kind == LLVMFunctionValueKind ||
-         kind == LLVMGlobalAliasValueKind ||
-         kind == LLVMGlobalIFuncValueKind ||
-         kind == LLVMGlobalVariableValueKind;
-}
-
-static bool ny_std_bc_value_kind_has_operands(LLVMValueKind kind) {
-  return kind == LLVMConstantExprValueKind ||
-         kind == LLVMConstantArrayValueKind ||
-         kind == LLVMConstantStructValueKind ||
-         kind == LLVMConstantVectorValueKind ||
-#if defined(NYTRIX_HAS_LLVM_CONSTANT_PTR_AUTH_VALUE_KIND)
-         kind == LLVMConstantPtrAuthValueKind ||
-#endif
-         kind == LLVMInstructionValueKind;
-}
-
-static bool ny_std_bc_value_refs_mixed_codegen_artifact(LLVMValueRef v,
-                                                        unsigned depth) {
-  if (!v || depth > 32)
-    return false;
-  LLVMValueKind kind = LLVMGetValueKind(v);
-  if (ny_std_bc_value_is_global_ref(v)) {
-    const char *name = LLVMGetValueName(v);
-    return ny_std_bc_symbol_is_mixed_codegen_artifact(name);
-  }
-  if (!ny_std_bc_value_kind_has_operands(kind))
-    return false;
-  int n = LLVMGetNumOperands(v);
-  if (n <= 0)
-    return false;
-  for (int i = 0; i < n; ++i) {
-    LLVMValueRef op = LLVMGetOperand(v, (unsigned)i);
-    if (ny_std_bc_value_refs_mixed_codegen_artifact(op, depth + 1))
-      return true;
-  }
-  return false;
 }
 
 static bool ny_std_bc_module_is_link_safe(LLVMModuleRef module,
@@ -783,6 +746,10 @@ static bool ny_std_bc_module_is_link_safe(LLVMModuleRef module,
     *bad_symbol = NULL;
   if (!module)
     return false;
+  /* Every referenced function/global is also present in its module symbol
+   * list, including declarations.  Checking those lists once proves that no
+   * mixed-codegen artifact can be reached without recursively revisiting
+   * every instruction and constant operand in the module. */
   for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;
        fn = LLVMGetNextFunction(fn)) {
     const char *name = LLVMGetValueName(fn);
@@ -791,30 +758,11 @@ static bool ny_std_bc_module_is_link_safe(LLVMModuleRef module,
         *bad_symbol = name;
       return false;
     }
-    if (!LLVMIsDeclaration(fn)) {
-      for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(fn); bb;
-           bb = LLVMGetNextBasicBlock(bb)) {
-        for (LLVMValueRef inst = LLVMGetFirstInstruction(bb); inst;
-             inst = LLVMGetNextInstruction(inst)) {
-          if (ny_std_bc_value_refs_mixed_codegen_artifact(inst, 0)) {
-            if (bad_symbol)
-              *bad_symbol = LLVMGetValueName(inst);
-            return false;
-          }
-        }
-      }
-    }
   }
   for (LLVMValueRef gv = LLVMGetFirstGlobal(module); gv;
        gv = LLVMGetNextGlobal(gv)) {
     const char *name = LLVMGetValueName(gv);
     if (ny_std_bc_symbol_is_mixed_codegen_artifact(name)) {
-      if (bad_symbol)
-        *bad_symbol = name;
-      return false;
-    }
-    LLVMValueRef init = LLVMGetInitializer(gv);
-    if (init && ny_std_bc_value_refs_mixed_codegen_artifact(init, 0)) {
       if (bad_symbol)
         *bad_symbol = name;
       return false;
@@ -936,69 +884,22 @@ static bool ny_save_std_bc_cache_from_module(LLVMModuleRef module,
                                              const char *cache_path) {
   if (!module || !cache_path || !*cache_path)
     return false;
-  LLVMModuleRef std_mod = LLVMCloneModule(module);
-  if (!std_mod)
-    return false;
-  LLVMStripModuleDebugInfo(std_mod);
-  ny_drop_llvm_used_globals(std_mod);
-  ny_preserve_std_values_for_dce(std_mod);
-  for (LLVMValueRef fn = LLVMGetFirstFunction(std_mod); fn;) {
-    LLVMValueRef next_fn = LLVMGetNextFunction(fn);
-    const char *name = LLVMGetValueName(fn);
-    if (name && *name && !ny_ir_is_std_value(fn) &&
-        LLVMCountBasicBlocks(fn) > 0) {
-      for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(fn); bb;) {
-        LLVMBasicBlockRef next_bb = LLVMGetNextBasicBlock(bb);
-        LLVMDeleteBasicBlock(bb);
-        bb = next_bb;
-      }
-      LLVMSetLinkage(fn, LLVMExternalLinkage);
-      LLVMSetVisibility(fn, LLVMDefaultVisibility);
-    }
-    fn = next_fn;
-  }
-  for (LLVMValueRef gv = LLVMGetFirstGlobal(std_mod); gv;) {
-    LLVMValueRef next_gv = LLVMGetNextGlobal(gv);
-    const char *name = LLVMGetValueName(gv);
-    if (name && *name && !ny_ir_is_std_value(gv) &&
-        !ny_ir_is_string_global(name) &&
-        !ny_is_llvm_special_global(name) && !LLVMIsDeclaration(gv)) {
-      LLVMSetInitializer(gv, NULL);
-      LLVMSetLinkage(gv, LLVMExternalLinkage);
-      LLVMSetVisibility(gv, LLVMDefaultVisibility);
-      LLVMSetGlobalConstant(gv, false);
-    }
-    gv = next_gv;
-  }
-  LLVMPassBuilderOptionsRef popt = LLVMCreatePassBuilderOptions();
-  if (popt) {
-    LLVMErrorRef perr = LLVMRunPasses(std_mod, "globaldce", NULL, popt);
-    if (perr) {
-      char *msg = LLVMGetErrorMessage(perr);
-      if (msg)
-        LLVMDisposeErrorMessage(msg);
-    }
-    LLVMDisposePassBuilderOptions(popt);
-  }
+  /* Write the module to bitcode directly without LLVMCloneModule.  The old
+   * path cloned the entire monolithic stdlib module (often > 10 GiB) just to
+   * strip debug info, externalize non-std symbols, and run globaldce before
+   * serialization.  That doubled peak RSS for no correctness benefit: the
+   * load path already runs its own link-safety check, and the module will be
+   * optimized after being linked back in.  Writing the original saves a full
+   * module copy. */
   const char *bad_symbol = NULL;
-  if (!ny_std_bc_module_is_link_safe(std_mod, &bad_symbol)) {
+  if (!ny_std_bc_module_is_link_safe(module, &bad_symbol)) {
     if (verbose_enabled >= 2 && bad_symbol && *bad_symbol)
       NY_LOG_INFO("skipping stdlib bitcode cache: mixed codegen artifact %s\n",
                   bad_symbol);
-    LLVMDisposeModule(std_mod);
     (void)unlink(cache_path);
     return false;
   }
-  char *verify_msg = NULL;
-  if (LLVMVerifyModule(std_mod, LLVMReturnStatusAction, &verify_msg) != 0) {
-    if (verify_msg)
-      LLVMDisposeMessage(verify_msg);
-    LLVMDisposeModule(std_mod);
-    (void)unlink(cache_path);
-    return false;
-  }
-  bool ok = ny_jit_cache_save(cache_path, std_mod);
-  LLVMDisposeModule(std_mod);
+  bool ok = ny_jit_cache_save(cache_path, module);
   return ok;
 }
 
@@ -1089,10 +990,12 @@ static NY_UNUSED_FUNC bool ny_parallel_modules_enabled(const ny_options *opt) {
   if (opt->emit_only && !opt->output_file && !opt->run_jit)
     return false;
   bool explicit_modules = strcmp(opt->parallel_mode, "modules") == 0;
-  bool auto_modules =
-      strcmp(opt->parallel_mode, "auto") == 0 &&
-      (opt->std_mode == STD_MODE_FULL || opt->std_mode == STD_MODE_BC);
-  if (!explicit_modules && !auto_modules)
+  /* A module worker currently reparses and rebuilds the complete joined
+   * source, multiplying LLVM memory by the worker count. It also cannot yet
+   * preserve every cross-module lazy/capture dependency. Keep that experiment
+   * behind the explicit modules mode; auto uses bounded outer/test parallelism
+   * and the single shared compiler pipeline. */
+  if (!explicit_modules)
     return false;
   if (getenv("NYTRIX_PARALLEL_DISABLE"))
     return false;
@@ -1463,4 +1366,3 @@ static const char *resolve_std_path(const char *compile_time_path) {
       return common[i];
   return NULL;
 }
-

@@ -172,6 +172,9 @@ static inline void ny_fun_sig_free_members(fun_sig *sig) {
   for (size_t i = 0; i < sig->param_types.len; i++)
     free(sig->param_types.data[i]);
   vec_free(&sig->param_types);
+  for (size_t i = 0; i < sig->native_byval_param_layouts.len; i++)
+    free(sig->native_byval_param_layouts.data[i]);
+  vec_free(&sig->native_byval_param_layouts);
   if (sig->returns_borrow)
     free((void *)sig->returns_borrow);
   for (size_t i = 0; i < sig->borrows.len; i++)
@@ -274,6 +277,7 @@ typedef struct codegen_llvm_t {
   LLVMContextRef ctx;
   bool llvm_ctx_owned;
   LLVMExecutionEngineRef ee;
+  void *orc_jit;
   LLVMValueRef setjmp_fn;
   LLVMTypeRef setjmp_ty;
 } codegen_llvm_t;
@@ -333,6 +337,7 @@ typedef struct codegen_symbols_t {
   VEC(string_intern) interns;
   intern_entry *intern_map;
   void *builtin_shadow_cache;
+  size_t builtin_shadow_cache_stable_len;
   size_t intern_map_cap;
   size_t intern_map_len;
   fun_sig *cached_fn_get;
@@ -534,6 +539,7 @@ struct codegen_t {
       LLVMContextRef ctx;
       bool llvm_ctx_owned;
       LLVMExecutionEngineRef ee;
+      void *orc_jit;
       LLVMValueRef setjmp_fn;
       LLVMTypeRef setjmp_ty;
     };
@@ -563,6 +569,7 @@ struct codegen_t {
       VEC(string_intern) interns;
       intern_entry *intern_map;
       void *builtin_shadow_cache;
+      size_t builtin_shadow_cache_stable_len;
       size_t intern_map_cap;
       size_t intern_map_len;
       fun_sig *cached_fn_get;
@@ -780,6 +787,7 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog, arena_t *arena,
                                LLVMModuleRef mod, LLVMContextRef ctx,
                                LLVMBuilderRef builder);
 void codegen_prepare(codegen_t *cg);
+void codegen_module_graph_changed(codegen_t *cg);
 void collect_sigs(codegen_t *cg, struct stmt_t *s);
 void collect_use_modules(codegen_t *cg, struct stmt_t *s);
 void codegen_repopulate_interns(codegen_t *cg);

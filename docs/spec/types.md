@@ -274,16 +274,25 @@ ny --no-strict-types old_probe.ny
 
 ## Proof types
 
-`proof` is a builtin type (no special syntax) that carries compile-time proven
-facts. It is erased at runtime and does not affect ABI or layout.
+`proof` is a builtin, payload-free witness type (no special syntax). Construct
+one with `prove(condition[, message])`. The compiler accepts the construction
+only when `condition` reduces to true during compilation; false and unknown
+conditions are errors. Ordinary integers and booleans never implicitly convert
+to `proof`.
 
 ```ny
 fn sum_up_to(int n, proof p) int {
    if n <= 1 { 1 } else { n + sum_up_to(n - 1, p ) }
 }
 
-assert_compile((2 + 2) == 4, "arith")
+def proof arithmetic = prove((2 + 2) == 4, "arith")
 ```
+
+The current witness records that its own construction succeeded; it does not
+yet encode a proposition in its type. Consequently, this is a checked
+refinement carrier, not a proposition-indexed theorem term. Its runtime
+representation is an opaque unit-like value and programs
+must not inspect it.
 
 See `assert_compile*`, `range_proven`, `index_proven` in comptime docs. The
 type is usable anywhere a fact must be witnessed for a value-dependent binding.
@@ -298,9 +307,9 @@ without Pi/Sigma bloat.
 fn sum_up_to(int n, proof p) int { ... }
 ```
 
-Callers must supply a provable fact (via prior assert_compile_range or
-literal that the engine accepts). Useful for LEAN-like checked math
-properties and safe indexing without runtime cost.
+Callers must supply a `proof` value constructed by `prove`. Range and index
+assertions refine compiler facts but do not implicitly synthesize an unrelated
+proof argument. Proposition-indexed witnesses are a future kernel feature.
 
 ## Refinement types
 

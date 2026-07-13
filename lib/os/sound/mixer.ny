@@ -192,9 +192,12 @@ fn _mix_one_generic(any acc, any s_ptr, any s_channels, any s_fmt, any s_bits, a
    __flt_to_int(current)
 }
 
+;; Updates the fx enabled and returns the resulting state.
 fn set_fx_enabled(bool enabled=true) any { _fx_enabled = enabled }
+;; Returns true when fx enabled.
 fn fx_enabled() bool { _fx_enabled }
 
+;; Returns the result of the `reset_fx` operation.
 fn reset_fx() any {
    _fx_enabled = true
    _fx_drive = 0.08
@@ -226,6 +229,7 @@ fn reset_fx() any {
    _fx_mod_active = false
 }
 
+;; Updates the fx param and returns the resulting state.
 fn set_fx_param(str name, any value) any {
    def v = value + 0.0
    case name {
@@ -247,6 +251,7 @@ fn set_fx_param(str name, any value) any {
    }
 }
 
+;; Returns the fx param.
 fn get_fx_param(str name) f64 {
    case name {
       "drive", "saturation", "distortion" -> _fx_drive
@@ -267,6 +272,7 @@ fn get_fx_param(str name) f64 {
    }
 }
 
+;; Returns the result of the `fx_preset` operation.
 fn fx_preset(str name) any {
    case name {
       "clean" -> {

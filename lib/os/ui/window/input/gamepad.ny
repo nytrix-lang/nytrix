@@ -215,18 +215,21 @@ fn gamepad_raw_snapshot(i32 jid) dict {
    }
 }
 
+;; Returns the result of the `gamepad_raw_axis` operation.
 fn gamepad_raw_axis(any raw, int idx) f64 {
    def ptr = raw.get("axes_ptr", 0)
    def count = int(raw.get("raw_axis_count", raw.get("axis_count", 0)))
    (ptr && _in_bounds(idx, count)) ? _sanitize_axis(load32_f32(ptr, idx * 4)) : 0.0
 }
 
+;; Returns true when gamepad raw button.
 fn gamepad_raw_button(any raw, int idx) bool {
    def ptr = raw.get("buttons_ptr", 0)
    def count = int(raw.get("raw_button_count", raw.get("button_count", 0)))
    ptr && _in_bounds(idx, count) && load8(ptr, idx) != 0
 }
 
+;; Returns the result of the `gamepad_raw_hat` operation.
 fn gamepad_raw_hat(any raw, int idx) int {
    def ptr = raw.get("hats_ptr", 0)
    def count = int(raw.get("hat_count", 0))
