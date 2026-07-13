@@ -1,0 +1,12 @@
+shape unaliased_system_function {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi system-header unaliased]
+  template ny-test-case
+  flags "--no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include <math.h>
+assert(cos(0.0) == 1.0, "unaliased math function")
+NY
+}

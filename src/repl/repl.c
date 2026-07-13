@@ -3,10 +3,12 @@
 #endif
 #include "base/common.h"
 #include "base/loader.h"
+#include "base/options.h"
 #include "base/util.h"
 #include "code/code.h"
 #include "code/jit.h"
 #include "code/llvm.h"
+#include "code/native/native.h"
 #include "code/priv.h"
 #include "parse/json.h"
 #include "priv.h"
@@ -79,6 +81,11 @@ static int g_repl_exit_hook_registered = 0;
 
 static LLVMContextRef g_repl_ctx = NULL;
 static LLVMExecutionEngineRef g_repl_ee = NULL;
+static const ny_options *g_repl_options = NULL;
+
+static bool repl_native_only(void) {
+  return g_repl_options && g_repl_options->native_only;
+}
 static codegen_t g_repl_cg = {0};
 static int g_eval_count = 0;
 static LLVMBuilderRef g_repl_builder = NULL;
@@ -2049,6 +2056,10 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
     register_jit_symbols(g_repl_ee, mod, &g_repl_cg);
     if (std_init_fn_name) {
       uint64_t init_addr = LLVMGetFunctionAddress(g_repl_ee, std_init_fn_name);
+      if (init_addr && !ny_jit_prepare_execution(init_addr)) {
+        fprintf(stderr, "JIT code memory is not executable\n");
+        init_addr = 0;
+      }
       if (init_addr) {
         char *saved_trace = repl_dup_env_value("NYTRIX_TRACE");
         char *saved_calls = repl_dup_env_value("NYTRIX_TRACE_CALLS");
@@ -2241,8 +2252,10 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     memcpy(combined, g_repl_user_source, prior_len);
     combined[prior_len] = '\n';
     memcpy(combined + prior_len + 1, full_input, input_len + 1);
-    repl_shutdown_engine();
-    repl_init_engine(std_mode, docs);
+    if (!repl_native_only()) {
+      repl_shutdown_engine();
+      repl_init_engine(std_mode, docs);
+    }
     int status =
         repl_eval_snippet(combined, is_stmt, an, std_mode, tty_in, docs, 1);
     if (status == 0 && persistent_src && *persistent_src) {
@@ -2258,6 +2271,8 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     return status;
   }
   int show_an = (an && std_mode != STD_MODE_NONE && tty_in);
+  if (repl_native_only())
+    show_an = 0;
   if (show_an) {
     if (strchr(eval_input, '\n')) {
       show_an = 0;
@@ -2386,6 +2401,67 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     }
     repl_debug_stage("preload-done");
     ny_tick_t t_preload1 = ny_ticks_now();
+    if (repl_native_only()) {
+      char *native_trimmed = ltrim((char *)eval_input);
+      bool function_definition = !strncmp(native_trimmed, "fn ", 3);
+      if (function_definition && !from_init) {
+        char *persistent_src = repl_extract_persistent_source(eval_input);
+        if (persistent_src && *persistent_src) {
+          repl_append_user_source(persistent_src);
+          repl_update_docs(docs, eval_input);
+        }
+        free(persistent_src);
+        program_free(pr, ps.arena);
+        free(pr);
+        free(body);
+        free(compile_input_owned);
+        free(lazy_imports);
+        free(eval_input_owned);
+        return 0;
+      }
+      ny_native_jit_image_t image = {0};
+      char native_err[512] = {0};
+      ny_options native_opt = *g_repl_options;
+      native_opt.native_only = true;
+#if defined(__aarch64__) || defined(_M_ARM64)
+      native_opt.native_backend = NY_NATIVE_BACKEND_AARCH64;
+#else
+      native_opt.native_backend = NY_NATIVE_BACKEND_X86_64;
+#endif
+      if (!ny_native_jit_compile(pr, &native_opt, &image, native_err,
+                                 sizeof(native_err))) {
+        fprintf(stderr, "Native REPL input is unsupported: %s\n",
+                native_err[0] ? native_err : "unsupported native shape");
+        last_status = 1;
+      } else if (!ny_jit_prepare_execution(
+                     (uint64_t)(uintptr_t)image.entry)) {
+        fprintf(stderr, "JIT code memory is not executable\n");
+        ny_native_jit_image_free(&image);
+        last_status = 1;
+      } else {
+        int64_t result = ((int64_t(*)(void))image.entry)();
+        rt_print_flush();
+        if (!is_stmt && tty_in)
+          printf("%lld\n", (long long)result);
+        ny_native_jit_image_free(&image);
+        last_status = 0;
+      }
+      if (last_status == 0 && !from_init && is_persistent_def(eval_input)) {
+        char *persistent_src = repl_extract_persistent_source(eval_input);
+        if (persistent_src && *persistent_src) {
+          repl_append_user_source(persistent_src);
+          repl_update_docs(docs, eval_input);
+        }
+        free(persistent_src);
+      }
+      program_free(pr, ps.arena);
+      free(pr);
+      free(body);
+      free(compile_input_owned);
+      free(lazy_imports);
+      free(eval_input_owned);
+      return last_status;
+    }
     LLVMModuleRef eval_mod =
         LLVMModuleCreateWithNameInContext("repl_eval", g_repl_ctx);
     ny_llvm_prepare_module(eval_mod, g_repl_opt_level);
@@ -2400,8 +2476,10 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     embed_repl_std = (std_mode != STD_MODE_NONE && g_repl_cg.prog != NULL);
 #endif
     cg.skip_stdlib = (std_mode != STD_MODE_NONE && !embed_repl_std);
-    if (embed_repl_std)
+    if (embed_repl_std) {
       vec_push(&cg.extra_progs, g_repl_cg.prog);
+      codegen_module_graph_changed(&cg);
+    }
     for (size_t i = 0; i < g_repl_cg.fun_sigs.len; i++) {
       fun_sig s = g_repl_cg.fun_sigs.data[i];
       s.owned = false;
@@ -2505,6 +2583,11 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       (void)cg.global_vars;
       repl_debug_stage("jit-get-address");
       uint64_t addr = LLVMGetFunctionAddress(g_repl_ee, fn_name);
+      if (addr && !ny_jit_prepare_execution(addr)) {
+        fprintf(stderr, "JIT code memory is not executable\n");
+        last_status = 1;
+        addr = 0;
+      }
       if (addr) {
         repl_debug_stage("jit-call");
         int interrupted = 0;
@@ -2760,6 +2843,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     printf("[Eval: %.3f ms]\n", ny_ticks_elapsed_ms(t0));
   if (persistent) {
     vec_push(&g_repl_cg.extra_progs, pr);
+    codegen_module_graph_changed(&g_repl_cg);
     vec_push(&g_repl_cg.extra_arenas, ps.arena);
     vec_push(&g_repl_persistent_sources, body);
     body = NULL;
@@ -2854,12 +2938,13 @@ static void repl_ensure_module(const char *name, std_mode_t std_mode,
 }
 
 void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
-                 int batch_mode) {
+                 int batch_mode, const ny_options *options) {
   if (!g_repl_exit_hook_registered) {
     atexit(repl_restore_terminal_state);
     g_repl_exit_hook_registered = 1;
   }
   g_repl_std_root_lazy = 0;
+  g_repl_options = options;
   g_repl_lazy_docs_loaded = 0;
   bool fast_batch_exit = repl_fast_batch_exit_enabled(batch_mode);
   g_repl_opt_level = batch_mode ? 0 : opt_level;
@@ -2894,6 +2979,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   }
   if (getenv("NYTRIX_REPL_NO_STD"))
     std_mode = STD_MODE_NONE;
+  if (repl_native_only())
+    std_mode = STD_MODE_NONE;
 #ifdef __APPLE__
   if (!g_repl_has_std_override && std_mode == STD_MODE_DEFAULT)
     std_mode = STD_MODE_FULL;
@@ -2906,7 +2993,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     add_builtin_docs(&docs);
     p_docs = &docs;
   }
-  repl_init_engine(std_mode, p_docs);
+  if (!repl_native_only())
+    repl_init_engine(std_mode, p_docs);
   g_repl_timing = 0;
   g_repl_phase_trace = 0;
   g_repl_exec_trace_enabled = 0;

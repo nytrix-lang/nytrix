@@ -1,0 +1,25 @@
+shape internal_system_headers {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi system-header libc no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+#include <stdint.h>
+#include <stdlib.h>
+#include <math.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdio.h>
+#include <time.h>
+#include <stdbool.h>
+#include <limits.h>
+assert(labs(-11) == 11, "internal stdlib system header")
+assert(fabs(-3.5) == 3.5, "internal math system header")
+assert(getpid() > 0, "internal unistd system header")
+assert(strlen("nytrix") == 6, "internal string system header")
+assert(time(nil) > 0, "internal time system header")
+1 + 2
+NY
+}

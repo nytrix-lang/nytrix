@@ -760,12 +760,16 @@ bool ny_native_x86_64_emit_rt_main(ny_native_writer_t *w,
 }
 
 /* ------------------------------------------------------------------ */
-/* NYIR -> x86-64 instruction selection                                */
+/* NYIR -> x86-64 instruction selection                               */
 /*                                                                    */
 /* The NYIR is already optimized (constant-folded, copy-propagated,   */
 /* DCE'd).  We map each live NYIR value to a dedicated stack slot so  */
-/* that multi-use values survive across instruction boundaries.  The   */
-/* optimizer has already removed most redundant slots.               */
+/* that multi-use values survive across instruction boundaries.  The  */
+/* optimizer has already removed most redundant slots.                */
+/*                                                                    */
+/* When one operand of a binop is CONST_I64 with a 32-bit immediate,  */
+/* we emit the compact immediate form (e.g. addq $imm, %rax) instead  */
+/* of the full load-load-operate-store sequence.                      */
 /* ------------------------------------------------------------------ */
 
 #define NY_X64_NIR_MAX_SLOTS 4096
@@ -782,6 +786,9 @@ typedef struct {
   bool value_f32[NY_X64_NIR_MAX_SLOTS];
   bool local_f64[NY_X64_NIR_MAX_SLOTS];
   bool local_f32[NY_X64_NIR_MAX_SLOTS];
+  /* valmap[i] = index of the NIR instruction that defines value i,
+   * or -1 if not defined.  Used for immediate-operand detection. */
+  int def_index[NY_X64_NIR_MAX_SLOTS];
   char epilogue_label[128];
   char *err;
   size_t err_len;
@@ -798,11 +805,15 @@ static int ny_x64_nir_slot(ny_x64_nir_ctx_t *c, int value_id) {
 static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
   int max_val = c->nir->next_value;
   int max_local = -1;
+  for (int v = 0; v < max_val && v < NY_X64_NIR_MAX_SLOTS; ++v)
+    c->def_index[v] = -1;
   for (size_t i = 0; i < c->nir->len; ++i) {
     const ny_nir_inst_t *in = &c->nir->data[i];
     if ((in->op == NY_NIR_LOAD_LOCAL || in->op == NY_NIR_STORE_LOCAL) &&
         (int)in->imm > max_local)
       max_local = (int)in->imm;
+    if (in->dst >= 0 && in->dst < NY_X64_NIR_MAX_SLOTS)
+      c->def_index[in->dst] = (int)i;
   }
   c->max_local_slot = max_local + 1;
   c->frame_slots = c->max_local_slot;
@@ -812,6 +823,46 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
   int total = c->frame_slots + max_val;
   int raw = total * 8;
   c->frame_bytes = ((raw + 15) & ~15) + 8;
+}
+
+/* Check whether value_id is defined by a CONST_I64 with a 32-bit
+ * sign-extended immediate.  Returns the immediate on success, or
+ * leaves *out unchanged and returns false. */
+static bool ny_x64_nir_try_const_i32(ny_x64_nir_ctx_t *c, int value_id,
+                                     int64_t *out) {
+  if (value_id < 0 || value_id >= NY_X64_NIR_MAX_SLOTS)
+    return false;
+  int di = c->def_index[value_id];
+  if (di < 0 || (size_t)di >= c->nir->len)
+    return false;
+  const ny_nir_inst_t *def = &c->nir->data[di];
+  if (def->op != NY_NIR_CONST_I64 || def->dst != value_id)
+    return false;
+  int64_t v = def->imm;
+  /* 32-bit sign-extended immediate range. */
+  if (v < INT32_MIN || v > INT32_MAX)
+    return false;
+  *out = v;
+  return true;
+}
+
+/* Check whether value_id is defined by a CONST_I64 with a shift-count
+ * immediate (1..63).  Returns the count on success. */
+static bool ny_x64_nir_try_shift_imm(ny_x64_nir_ctx_t *c, int value_id,
+                                     int *out) {
+  if (value_id < 0 || value_id >= NY_X64_NIR_MAX_SLOTS)
+    return false;
+  int di = c->def_index[value_id];
+  if (di < 0 || (size_t)di >= c->nir->len)
+    return false;
+  const ny_nir_inst_t *def = &c->nir->data[di];
+  if (def->op != NY_NIR_CONST_I64 || def->dst != value_id)
+    return false;
+  int64_t v = def->imm;
+  if (v < 1 || v > 63)
+    return false;
+  *out = (int)v;
+  return true;
 }
 
 static bool ny_x64_nir_load(ny_x64_nir_ctx_t *c, int slot) {
@@ -885,7 +936,7 @@ static void ny_x64_nir_classify_values(ny_x64_nir_ctx_t *c) {
       c->value_f64[in->dst] = true;
     if (in->dst >= 0 && in->dst < NY_X64_NIR_MAX_SLOTS &&
         (ny_x64_nir_op_is_f32(in->op) ||
-         ((in->flags & NYIR_INST_F_RET_F32) &&
+         ((in->flags & NY_NIR_INST_F_RET_F32) &&
           in->op == NY_NIR_CALL)))
       c->value_f32[in->dst] = true;
   }
@@ -1051,6 +1102,53 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
     return ny_native_printf(c->w, "\tleaq\t-%d(%%rbp), %%rax\n",
                             c->slot_offset[in->imm]) &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+  case NYIR_ADDR_SYMBOL:
+    if (in->dst < 0)
+      return true;
+    if (!in->symbol || !in->symbol[0]) {
+      ny_native_set_err(c->err, c->err_len,
+                        "nyir x86-64: addr.symbol missing symbol name");
+      return false;
+    }
+    return ny_native_printf(c->w, "\tleaq\t%s(%%rip), %%rax\n", in->symbol) &&
+           ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+  case NYIR_ALLOCA:
+    if (in->dst < 0)
+      return true;
+    return ny_native_printf(c->w, "\tsubq\t$%" PRId64 ", %%rsp\n\tandq\t$-16, %%rsp\n\tmovq\t%%rsp, %%rax\n", in->imm) &&
+           ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+  case NYIR_COPY_STRUCT:
+    if (in->imm <= 0)
+      return true;
+    return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
+           ny_native_put(c->w, "\tmovq\t%rax, %rsi\n") &&
+           ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+           ny_native_put(c->w, "\tmovq\t%rax, %rdi\n") &&
+           ny_native_printf(c->w, "\tmovq\t$%" PRId64 ", %%rcx\n\trep movsb\n", in->imm);
+  case NYIR_CAPTURE_RET:
+    if (in->dst < 0)
+      return true;
+    switch (in->imm) {
+    case 0:
+      if (!ny_native_put(c->w, "\tmovq\t%rdx, %rax\n"))
+        return false;
+      break;
+    case 1:
+      break;
+    case 2:
+      if (!ny_native_put(c->w, "\tmovq\t%xmm0, %rax\n"))
+        return false;
+      break;
+    case 3:
+      if (!ny_native_put(c->w, "\tmovq\t%xmm1, %rax\n"))
+        return false;
+      break;
+    default:
+      ny_native_set_err(c->err, c->err_len,
+                        "nyir x86-64: invalid capture.ret selector");
+      return false;
+    }
+    return ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
   case NY_NIR_STORE_LOCAL:
     if (in->imm < 0 || (int)in->imm >= c->max_local_slot) {
       ny_native_set_err(c->err, c->err_len,
@@ -1069,27 +1167,56 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpopq\t%rbx\n\tmovq\t%rbx, (%rax)\n");
-  case NY_NIR_ADD_I64:
+  case NY_NIR_ADD_I64: {
+    int64_t imm = 0;
+    /* addq $imm, %rax  (sign-extended 32-bit) */
+    if (ny_x64_nir_try_const_i32(c, in->b, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+             ny_native_printf(c->w, "\taddq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+    if (ny_x64_nir_try_const_i32(c, in->a, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
+             ny_native_printf(c->w, "\taddq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
            ny_native_put(c->w, "\tmovq\t%rax, %rbx\n\tpopq\t%rax\n") &&
            ny_native_put(c->w, "\taddq\t%rbx, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
-  case NY_NIR_SUB_I64:
+  }
+  case NY_NIR_SUB_I64: {
+    int64_t imm = 0;
+    /* subq $imm, %rax  */
+    if (ny_x64_nir_try_const_i32(c, in->b, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+             ny_native_printf(c->w, "\tsubq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
            ny_native_put(c->w, "\tmovq\t%rax, %rbx\n\tpopq\t%rax\n") &&
            ny_native_put(c->w, "\tsubq\t%rbx, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
-  case NY_NIR_MUL_I64:
+  }
+  case NY_NIR_MUL_I64: {
+    int64_t imm = 0;
+    /* imulq $imm, %rax, %rax */
+    if (ny_x64_nir_try_const_i32(c, in->b, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+             ny_native_printf(c->w, "\timulq\t$%" PRId64 ", %%rax, %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+    if (ny_x64_nir_try_const_i32(c, in->a, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
+             ny_native_printf(c->w, "\timulq\t$%" PRId64 ", %%rax, %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
            ny_native_put(c->w, "\tmovq\t%rax, %rbx\n\tpopq\t%rax\n") &&
            ny_native_put(c->w, "\timulq\t%rbx, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+  }
   case NY_NIR_DIV_I64:
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
@@ -1104,41 +1231,83 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
            ny_native_put(c->w, "\tmovq\t%rax, %rbx\n\tpopq\t%rax\n") &&
            ny_native_put(c->w, "\tcqto\n\tidivq\t%rbx\n\tmovq\t%rdx, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
-  case NY_NIR_AND_I64:
+  case NY_NIR_AND_I64: {
+    int64_t imm = 0;
+    if (ny_x64_nir_try_const_i32(c, in->b, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+             ny_native_printf(c->w, "\tandq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+    if (ny_x64_nir_try_const_i32(c, in->a, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
+             ny_native_printf(c->w, "\tandq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
            ny_native_put(c->w, "\tmovq\t%rax, %rbx\n\tpopq\t%rax\n") &&
            ny_native_put(c->w, "\tandq\t%rbx, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
-  case NY_NIR_OR_I64:
+  }
+  case NY_NIR_OR_I64: {
+    int64_t imm = 0;
+    if (ny_x64_nir_try_const_i32(c, in->b, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+             ny_native_printf(c->w, "\torq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+    if (ny_x64_nir_try_const_i32(c, in->a, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
+             ny_native_printf(c->w, "\torq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
            ny_native_put(c->w, "\tmovq\t%rax, %rbx\n\tpopq\t%rax\n") &&
            ny_native_put(c->w, "\torq\t%rbx, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
-  case NY_NIR_XOR_I64:
+  }
+  case NY_NIR_XOR_I64: {
+    int64_t imm = 0;
+    if (ny_x64_nir_try_const_i32(c, in->b, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+             ny_native_printf(c->w, "\txorq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+    if (ny_x64_nir_try_const_i32(c, in->a, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
+             ny_native_printf(c->w, "\txorq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
            ny_native_put(c->w, "\tmovq\t%rax, %rbx\n\tpopq\t%rax\n") &&
            ny_native_put(c->w, "\txorq\t%rbx, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
-  case NY_NIR_SHL_I64:
+  }
+  case NY_NIR_SHL_I64: {
+    int shift = 0;
+    if (ny_x64_nir_try_shift_imm(c, in->b, &shift))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+             ny_native_printf(c->w, "\tshlq\t$%d, %%rax\n", shift) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
            ny_native_put(c->w, "\tmovq\t%rax, %rbx\n\tpopq\t%rax\n") &&
            ny_native_put(c->w, "\tmovb\t%bl, %cl\n\tshlq\t%cl, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
-  case NY_NIR_SAR_I64:
+  }
+  case NY_NIR_SAR_I64: {
+    int shift = 0;
+    if (ny_x64_nir_try_shift_imm(c, in->b, &shift))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+             ny_native_printf(c->w, "\tsarq\t$%d, %%rax\n", shift) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
            ny_native_put(c->w, "\tmovq\t%rax, %rbx\n\tpopq\t%rax\n") &&
            ny_native_put(c->w, "\tmovb\t%bl, %cl\n\tsarq\t%cl, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+  }
   case NYIR_ADD_F64:
   case NYIR_SUB_F64:
   case NYIR_MUL_F64:
@@ -1181,7 +1350,15 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
     return ny_x64_nir_load_xmm(c, ny_x64_nir_slot(c, in->a), 0) &&
            ny_native_put(c->w, "\tcvtsd2ss\t%xmm0, %xmm0\n") &&
            ny_x64_nir_store_xmm_f32(c, ny_x64_nir_slot(c, in->dst), 0);
-  case NY_NIR_CMP_I64:
+  case NY_NIR_CMP_I64: {
+    int64_t imm = 0;
+    /* cmpq $imm, %rax + setcc */
+    if (ny_x64_nir_try_const_i32(c, in->b, &imm))
+      return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
+             ny_native_printf(c->w, "\tcmpq\t$%" PRId64 ", %%rax\n", imm) &&
+             ny_native_printf(c->w, "\t%s\t%%al\n\tmovzbq\t%%al, %%rax\n",
+                             ny_x64_nir_setcc(in->cmp)) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     return ny_x64_nir_load(c, ny_x64_nir_slot(c, in->a)) &&
            ny_native_put(c->w, "\tpushq\t%rax\n") &&
            ny_x64_nir_load(c, ny_x64_nir_slot(c, in->b)) &&
@@ -1190,6 +1367,7 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
            ny_native_printf(c->w, "\t%s\t%%al\n\tmovzbq\t%%al, %%rax\n",
                            ny_x64_nir_setcc(in->cmp)) &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+  }
   case NYIR_CMP_F64: {
     char unordered[96];
     char done[96];
@@ -1274,12 +1452,47 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
     bool arg_f32[NY_NIR_CALL_MAX_ARGS] = {0};
     int gp_index[NY_NIR_CALL_MAX_ARGS];
     int sse_index[NY_NIR_CALL_MAX_ARGS];
+    int agg_gp[NY_NIR_CALL_MAX_ARGS][2];
+    int agg_sse[NY_NIR_CALL_MAX_ARGS][2];
+    bool agg_in_regs[NY_NIR_CALL_MAX_ARGS] = {0};
     int gp = 0;
     int sse = 0;
     int stack_argc = 0;
     for (int i = 0; i < argc; ++i) {
       gp_index[i] = -1;
       sse_index[i] = -1;
+      agg_gp[i][0] = agg_gp[i][1] = -1;
+      agg_sse[i][0] = agg_sse[i][1] = -1;
+      if (in->arg_sizes && in->arg_sizes[i] > 0) {
+        arg_f64[i] = false;
+        arg_f32[i] = false;
+        uint32_t size = NY_NIR_ARG_AGG_SIZE(in->arg_sizes[i]);
+        unsigned gp_need = 0, sse_need = 0;
+        bool register_eligible = true;
+        for (int chunk = 0; chunk < 2; ++chunk) {
+          unsigned cls = NY_NIR_ARG_AGG_CLASS(in->arg_sizes[i], chunk);
+          gp_need += cls == NY_NIR_ARG_CLASS_INTEGER;
+          sse_need += cls == NY_NIR_ARG_CLASS_SSE;
+          if (cls != NY_NIR_ARG_CLASS_NONE &&
+              cls != NY_NIR_ARG_CLASS_INTEGER &&
+              cls != NY_NIR_ARG_CLASS_SSE)
+            register_eligible = false;
+        }
+        if (register_eligible && size <= 16 && gp + (int)gp_need <= 6 &&
+            sse + (int)sse_need <= 8) {
+          for (int chunk = 0; chunk < 2; ++chunk) {
+            unsigned cls = NY_NIR_ARG_AGG_CLASS(in->arg_sizes[i], chunk);
+            if (cls == NY_NIR_ARG_CLASS_INTEGER)
+              agg_gp[i][chunk] = gp++;
+            else if (cls == NY_NIR_ARG_CLASS_SSE)
+              agg_sse[i][chunk] = sse++;
+          }
+          agg_in_regs[i] = true;
+        } else {
+          stack_argc += (int)((size + 7) / 8);
+        }
+        continue;
+      }
       arg_f64[i] = arg_vals[i] < NY_X64_NIR_MAX_SLOTS && c->value_f64[arg_vals[i]];
       arg_f32[i] = arg_vals[i] < NY_X64_NIR_MAX_SLOTS && c->value_f32[arg_vals[i]];
       if (arg_f64[i] || arg_f32[i]) {
@@ -1305,8 +1518,20 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
     /* Push stack args highest-index first so the first stack arg ends up
      * closest to the top of stack (lowest address) at call time. */
     for (int i = argc - 1; i >= 0; --i) {
-      if (gp_index[i] >= 0 || sse_index[i] >= 0)
+      if (gp_index[i] >= 0 || sse_index[i] >= 0 || agg_in_regs[i])
         continue;
+      if (in->arg_sizes && in->arg_sizes[i] > 0) {
+        uint32_t size = NY_NIR_ARG_AGG_SIZE(in->arg_sizes[i]);
+        int slots = (int)((size + 7) / 8);
+        if (!ny_native_printf(c->w, "\tsubq\t$%d, %%rsp\n", slots * 8))
+          return false;
+        if (!ny_x64_nir_load(c, ny_x64_nir_slot(c, arg_vals[i])))
+          return false;
+        if (!ny_native_put(c->w, "\tmovq\t%rax, %rsi\n\tmovq\t%rsp, %rdi\n") ||
+            !ny_native_printf(c->w, "\tmovq\t$%" PRIu32 ", %%rcx\n\trep movsb\n", size))
+          return false;
+        continue;
+      }
       if (arg_f64[i]) {
         if (!ny_x64_nir_load_xmm(c, ny_x64_nir_slot(c, arg_vals[i]), 0) ||
             !ny_native_put(c->w, "\tsubq\t$8, %rsp\n\tmovsd\t%xmm0, (%rsp)\n"))
@@ -1321,7 +1546,22 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
       }
     }
     for (int i = 0; i < argc; ++i) {
-      if (sse_index[i] >= 0) {
+      if (agg_in_regs[i]) {
+        if (!ny_x64_nir_load(c, ny_x64_nir_slot(c, arg_vals[i])))
+          return false;
+        for (int chunk = 0; chunk < 2; ++chunk) {
+          int off = chunk * 8;
+          if (agg_gp[i][chunk] >= 0) {
+            if (!ny_native_printf(c->w, "\tmovq\t%d(%%rax), %s\n", off,
+                                  c->target->gp_arg_regs[agg_gp[i][chunk]]))
+              return false;
+          } else if (agg_sse[i][chunk] >= 0 &&
+                     !ny_native_printf(c->w, "\tmovq\t%d(%%rax), %%xmm%d\n",
+                                       off, agg_sse[i][chunk])) {
+            return false;
+          }
+        }
+      } else if (sse_index[i] >= 0) {
         if (arg_f32[i]) {
           if (!ny_x64_nir_load_xmm_f32(c, ny_x64_nir_slot(c, arg_vals[i]), sse_index[i]))
             return false;

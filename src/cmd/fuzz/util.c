@@ -128,7 +128,7 @@ bool read_file(const char *path, file_buf_t *out) {
   return true;
 }
 
-char *nynth_shape_source_block(const char *shape_path, const char *name) {
+char *nytrix_shape_source_block(const char *shape_path, const char *name) {
   file_buf_t f = {0};
   if (!shape_path || !name || !*name || !read_file(shape_path, &f)) return NULL;
   char needle[128];

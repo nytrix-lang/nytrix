@@ -1,0 +1,25 @@
+shape internal_aggregate_pointer_import_lowering {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi import-lowering aggregate-pointer no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/rt/ffi/internal-aggregate-pointer-import.h" as "c"
+use std.core
+
+fn probe() i64 {
+  def *int p = malloc(8)
+  if p == nil { return 0 }
+  c.memset(p, 7, 8)
+  def i64 v = load64_i(p)
+  free(p)
+  v
+}
+
+assert(probe() == 506381209866536711, "internal c aggregate pointer import memset")
+1 + 2
+NY
+}
+

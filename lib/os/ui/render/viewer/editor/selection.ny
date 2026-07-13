@@ -58,6 +58,7 @@ fn selection_range(dict st) list {
    [al, ac, bl, bc]
 }
 
+;; Returns true when selection valid.
 fn selection_valid(dict st) bool {
    st.get("sel_active", false) && (
       int(st.get("sel_a_line", 0)) != int(st.get("sel_b_line", 0)) ||

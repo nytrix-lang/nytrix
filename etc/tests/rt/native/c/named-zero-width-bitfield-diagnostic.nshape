@@ -1,0 +1,12 @@
+shape named_zero_width_bitfield_diagnostic {
+  family "runtime-native"
+  generator "native"
+  features ["c-frontend", "negative", "diagnostic", "bitfield"]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_fail
+  source ny <<'NY'
+#include "etc/tests/rt/native/fixtures/unsupported-named-zero-width-bitfield.h"
+1 + 2
+NY
+}

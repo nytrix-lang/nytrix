@@ -40,6 +40,8 @@ const char *ny_ctype_kind_name(ny_ctype_kind_t kind) {
     return "float";
   case NY_CTYPE_DOUBLE:
     return "double";
+  case NY_CTYPE_LONG_DOUBLE:
+    return "long double";
   case NY_CTYPE_STRUCT:
     return "struct";
   case NY_CTYPE_UNION:
@@ -137,6 +139,11 @@ int ny_ctype_layout(const ny_ctype_t *ty, const char *abi, ny_c_layout_t *out) {
     case NY_CTYPE_DOUBLE:
       base.size = 8;
       base.align = 8;
+      base.is_float = 1;
+      break;
+    case NY_CTYPE_LONG_DOUBLE:
+      base.size = ny_c_abi_is_win64(abi) ? 8 : 16;
+      base.align = base.size;
       base.is_float = 1;
       break;
     case NY_CTYPE_STRUCT:
@@ -343,6 +350,27 @@ static int c_type_is_anonymous_aggregate_field(const ny_ctype_t *ty,
          (ty->kind == NY_CTYPE_STRUCT || ty->kind == NY_CTYPE_UNION);
 }
 
+/* Flatten child fields of an anonymous struct/union into the parent.
+ * base_offset is where the anonymous aggregate itself starts within the parent.
+ * For union parents base_offset is always 0; for struct parents it is the
+ * aligned start of the anonymous member. */
+static void aggregate_flatten_anonymous(ny_ctype_t *parent,
+                                        const ny_ctype_t *anon,
+                                        size_t base_offset) {
+  if (!parent || !anon)
+    return;
+  for (unsigned i = 0; i < anon->field_count && i < NY_C_MAX_FIELDS; i++) {
+    if (parent->field_count >= NY_C_MAX_FIELDS)
+      break;
+    const ny_c_field_t *src = &anon->fields[i];
+    if (src->name.kind != NY_CTOK_IDENT)
+      continue;
+    ny_c_field_t *dst = &parent->fields[parent->field_count++];
+    *dst = *src;
+    dst->offset = base_offset + src->offset;
+  }
+}
+
 static size_t c_pack_cap_align(size_t align, unsigned pack_align) {
   if (pack_align > 0 && align > pack_align)
     return pack_align;
@@ -381,6 +409,29 @@ static int parser_lookup_typedef(ny_parser_t *p, ny_ctok_t name,
     }
   }
   return 0;
+}
+
+static int parser_lookup_abi_typedef(ny_parser_t *p, ny_ctok_t name,
+                                     ny_ctype_t *out) {
+  if (!p || name.kind != NY_CTOK_IDENT || !out)
+    return 0;
+  bool is_size = ny_ctok_eq(name, "size_t") ||
+                 ny_ctok_eq(name, "uintptr_t");
+  bool is_signed_size = ny_ctok_eq(name, "ssize_t") ||
+                        ny_ctok_eq(name, "ptrdiff_t") ||
+                        ny_ctok_eq(name, "intptr_t");
+  if (!is_size && !is_signed_size)
+    return 0;
+  type_init(out);
+  out->flags = is_size ? NY_CTYPEF_UNSIGNED : NY_CTYPEF_SIGNED;
+  if (ny_c_abi_is_32(p->abi)) {
+    out->kind = NY_CTYPE_INT;
+  } else {
+    out->kind = NY_CTYPE_LONG;
+    if (ny_c_abi_is_win64(p->abi))
+      out->flags |= NY_CTYPEF_LONG_LONG;
+  }
+  return 1;
 }
 
 static void parser_note_typedef(ny_parser_t *p, ny_ctok_t name,
@@ -1300,6 +1351,12 @@ static int parse_storage(ny_parser_t *p, ny_cdecl_t *decl) {
     parse_advance(p);
     return 1;
   }
+  if (parse_kw(p, "_Noreturn") || parse_kw(p, "noreturn") ||
+      parse_kw(p, "__noreturn") || parse_kw(p, "__noreturn__")) {
+    decl->flags |= NY_CDECLF_NORETURN;
+    parse_advance(p);
+    return 1;
+  }
   if (parse_decl_marker(p))
     return 1;
   return 0;
@@ -1372,7 +1429,7 @@ static int parse_tag_body(ny_parser_t *p, ny_ctype_t *ty) {
     int flexible_array = c_type_is_flexible_array(&field_ty);
     ny_ctype_t comma_base_ty = c_type_without_array(field_ty);
     ny_c_layout_t field_layout = {0};
-    if (ny_ctype_layout(&field_ty, NULL, &field_layout) &&
+    if (ny_ctype_layout(&field_ty, p->abi, &field_layout) &&
         field_layout.align > 0) {
       if (parse_accept(p, ":")) {
         unsigned width = 0;
@@ -1404,21 +1461,24 @@ static int parse_tag_body(ny_parser_t *p, ny_ctype_t *ty) {
             }
             bitfield_used_bits += width;
           } else if (ty->kind == NY_CTYPE_STRUCT) {
-            if (field_name.kind == NY_CTOK_IDENT) {
-              bitfield_unit_bits = 0;
-              bitfield_used_bits = 0;
-            } else if (bitfield_used_bits > 0) {
-              bitfield_used_bits = bitfield_unit_bits;
-            }
+            /* Zero-width unnamed bitfield: pad size to the next boundary of
+               the storage type, but do NOT increase struct alignment.
+               E.g. struct { char x; int : 0; } → sizeof=4, alignof=1. */
+            size_t storage_align = field_layout.align > 0 ? field_layout.align : 1;
+            size = ny_c_align_up(size, storage_align);
+            bitfield_unit_bits = 0;
+            bitfield_used_bits = 0;
           } else {
             bitfield_unit_bits = 0;
             bitfield_used_bits = 0;
           }
         }
       } else {
-        if (c_type_is_anonymous_aggregate_field(&field_ty, field_name))
+        if (c_type_is_anonymous_aggregate_field(&field_ty, field_name)) {
           fields += field_ty.aggregate_fields;
-        else {
+          size_t anon_offset = aggregate_field_offset(ty, &field_layout, field_ty.align_override, size);
+          aggregate_flatten_anonymous(ty, &field_ty, anon_offset);
+        } else {
           fields++;
           aggregate_note_field(ty, field_name, &field_ty, &field_layout,
                                aggregate_field_offset(ty, &field_layout,
@@ -1504,7 +1564,7 @@ static int parse_tag_body(ny_parser_t *p, ny_ctype_t *ty) {
       }
       if (next_name.kind == NY_CTOK_IDENT) {
         ny_c_layout_t next_layout = {0};
-        if (ny_ctype_layout(&next_ty, NULL, &next_layout) &&
+        if (ny_ctype_layout(&next_ty, p->abi, &next_layout) &&
             next_layout.align > 0) {
           fields++;
           aggregate_note_field(ty, next_name, &next_ty, &next_layout,
@@ -1619,7 +1679,7 @@ static int parse_type_spec(ny_parser_t *p, ny_ctype_t *ty) {
     }
     if (parse_kw(p, "double")) {
       if (ty->kind == NY_CTYPE_LONG)
-        ty->kind = NY_CTYPE_DOUBLE;
+        ty->kind = NY_CTYPE_LONG_DOUBLE;
       else
         ty->kind = NY_CTYPE_DOUBLE;
       saw = 1;
@@ -1657,7 +1717,8 @@ static int parse_type_spec(ny_parser_t *p, ny_ctype_t *ty) {
     }
     if (!saw && p->tok.kind == NY_CTOK_IDENT) {
       ny_ctype_t named;
-      if (parser_lookup_typedef(p, p->tok, &named)) {
+      if (parser_lookup_typedef(p, p->tok, &named) ||
+          parser_lookup_abi_typedef(p, p->tok, &named)) {
         *ty = named;
         saw = 1;
         parse_advance(p);
@@ -1799,7 +1860,7 @@ static int parse_array_extent_primary(ny_parser_t *p, size_t *out) {
     if (!parse_accept(p, ")"))
       return 0;
     ny_c_layout_t layout = {0};
-    if (!ny_ctype_layout(&ty, NULL, &layout))
+    if (!ny_ctype_layout(&ty, p->abi, &layout))
       return 0;
     *out = layout.size;
     return layout.size > 0;
@@ -2210,12 +2271,18 @@ static int parse_non_import_decl(ny_parser_t *p) {
   return 1;
 }
 
-void ny_parse_init(ny_parser_t *p, const char *src, size_t len) {
+void ny_parse_init_abi(ny_parser_t *p, const char *src, size_t len,
+                       const char *abi) {
   if (!p)
     return;
   memset(p, 0, sizeof(*p));
+  p->abi = abi;
   ny_lex_init(&p->lx, src, len);
   p->tok = ny_lex_next(&p->lx);
+}
+
+void ny_parse_init(ny_parser_t *p, const char *src, size_t len) {
+  ny_parse_init_abi(p, src, len, NULL);
 }
 
 int ny_parse_decl(ny_parser_t *p, ny_cdecl_t *out) {
@@ -2467,7 +2534,7 @@ int ny_parse_header_summary(const char *src, size_t len,
         local.aggregate_layouts++;
         local.aggregate_fields += decl.type.aggregate_fields;
         local.function_pointers += decl.type.aggregate_function_pointers;
-        if (ny_ctype_layout(&decl.type, NULL, &layout))
+        if (ny_ctype_layout(&decl.type, p.abi, &layout))
           local.aggregate_bytes += layout.size;
       }
       if (c_type_is_function_pointer(&decl.type))
