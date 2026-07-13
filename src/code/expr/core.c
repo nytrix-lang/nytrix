@@ -4474,6 +4474,20 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   uint64_t addr = entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
   if (!addr)
     addr = LLVMGetFunctionAddress(ee, entry_name);
+  char *jit_exec_err = NULL;
+  if (LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
+    NY_LOG_ERR("Comptime JIT finalization error: %s\n",
+               jit_exec_err ? jit_exec_err : "unknown error");
+    if (jit_exec_err)
+      LLVMDisposeMessage(jit_exec_err);
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    LLVMDisposeExecutionEngine(ee);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok, "failed to finalize comptime JIT memory");
+  }
   int64_t res = 1;
   if (addr) {
     ny_jit_prepare_execution();

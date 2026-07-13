@@ -111,9 +111,10 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - The watcher code is specialized per platform in the compiler and standard library.
 
 ### Fixed
-- Apple-arm64 MCJIT now uses LLVM's maintained section memory manager and
-  write-then-execute finalization path. The faulty custom `MAP_JIT` allocator
-  was removed instead of keeping a second executable-page lifecycle.
+- Apple-arm64 MCJIT now allocates executable sections with a real `MAP_JIT`
+  mapping, flushes instruction caches, restores per-thread execute protection,
+  and reports finalization errors instead of calling `rw-` memory. The prior
+  zero-valued `MAP_JIT` fallback and incomplete teardown transition were fixed.
 - Trace and `--debug` compilation no longer render progress bars, and
   `--no-progress` now consistently overrides environment-driven progress on
   every platform. Failure replay also forces `--no-progress --color=never` so
