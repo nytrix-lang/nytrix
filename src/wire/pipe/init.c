@@ -2698,7 +2698,9 @@ skip_compilation:
       bool call_implicit_main =
           jit_main_fn && !ny_program_has_explicit_main_entry(&cg, cg.prog);
 
-      const char *jit_engine = getenv("NYTRIX_JIT_ENGINE");
+      const char *jit_engine = opt->jit_engine;
+      if (!jit_engine)
+        jit_engine = getenv("NYTRIX_JIT_ENGINE");
       if (jit_engine && strcmp(jit_engine, "orc") == 0) {
         if (opt->debug_symbols)
           LLVMStripModuleDebugInfo(jmod);

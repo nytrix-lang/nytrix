@@ -266,6 +266,7 @@ typedef struct {
   const char *runtime_mode_raw;
   ny_safe_run_t safe_run;
   const char *sanitize;  /* --sanitize=address|undefined|thread|leak */
+  const char *jit_engine; /* --jit-engine=orc|mcjit (default: mcjit) */
 } ny_options;
 
 void ny_options_init(ny_options *opt);
