@@ -348,6 +348,7 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
     } else if (!a->read_only) {
       prot |= PROT_WRITE;
     }
+    prot |= PROT_EXEC;
     int mprot_rc = mprotect(a->base, a->size, prot);
     fprintf(stderr,
             "[jit] finalize: %s base=%p size=0x%zx target_prot=0x%x "
