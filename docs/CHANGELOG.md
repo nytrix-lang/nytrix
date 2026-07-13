@@ -68,9 +68,10 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
   comptime, generated modules, metadata, and ordinary LSP-visible exports.
   Generic law certificates operate on existing domain values and retain
   counterexamples without duplicating math models.
-- Native archives rebuild atomically from dash-named sources; Apple-arm64 JIT
-  pages retain platform W^X handling; `addr_of` and `borrow` accept
-  dereferenced pointer lvalues in native lowering.
+- Native archives rebuild atomically from dash-named sources; Apple-arm64
+  comptime evaluation now runs through MCJIT's managed execution API so LLVM
+  finalizes all generated callees before invocation; `addr_of` and `borrow`
+  accept dereferenced pointer lvalues in native lowering.
 - The internal C importer now loads external scalar globals with their raw C
   ABI representation, resolves ABI-width `size_t`/`ssize_t`/`ptrdiff_t`/
   `intptr_t`/`uintptr_t` spellings, uses target-aware layouts, and covers
@@ -111,11 +112,10 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - The watcher code is specialized per platform in the compiler and standard library.
 
 ### Fixed
-- Apple-arm64 comptime MCJIT now eagerly materializes every defined function
-  before execution, forces one final object-finalization pass, and validates
-  every materialized address. This prevents a prepared entry function from
-  lazily compiling a callee after execution starts and leaving that callee in a
-  thread-local writable, non-executable JIT state.
+- Apple-arm64 comptime MCJIT now uses LLVM's managed `LLVMRunFunction`
+  invocation instead of manually calling a pointer returned before MCJIT's
+  final execution pass. This lets MCJIT materialize and finalize indirect
+  callees before control enters generated code.
 - Trace and `--debug` compilation no longer render progress bars, and
   `--no-progress` now consistently overrides environment-driven progress on
   every platform. Failure replay also forces `--no-progress --color=never` so

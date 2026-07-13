@@ -4470,37 +4470,41 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
 
   register_jit_symbols(ee, mod, &tcg);
   ny_jit_map_unresolved_symbols(ee, mod, entry_name);
-  if (!ny_jit_prepare_module_execution(ee, mod)) {
-    if (prev_bb)
-      ny_pos(cg, prev_bb);
-    LLVMDisposeExecutionEngine(ee);
-    codegen_dispose(&tcg);
-    if (ctm_ctx_owned)
-      LLVMContextDispose(ctm_ctx);
-    return expr_fail(cg, body->tok,
-                     "failed to materialize executable comptime JIT code");
-  }
   LLVMValueRef entry_val = LLVMGetNamedFunction(mod, entry_name);
-  uint64_t addr = entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
-  if (!addr)
-    addr = LLVMGetFunctionAddress(ee, entry_name);
-  char *jit_exec_err = NULL;
-  if (LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
-    NY_LOG_ERR("Comptime JIT finalization error: %s\n",
-               jit_exec_err ? jit_exec_err : "unknown error");
-    if (jit_exec_err)
-      LLVMDisposeMessage(jit_exec_err);
-    if (prev_bb)
-      ny_pos(cg, prev_bb);
-    LLVMDisposeExecutionEngine(ee);
-    codegen_dispose(&tcg);
-    if (ctm_ctx_owned)
-      LLVMContextDispose(ctm_ctx);
-    return expr_fail(cg, body->tok, "failed to finalize comptime JIT memory");
-  }
   int64_t res = 1;
-  if (addr) {
-    if (!ny_jit_prepare_execution(addr)) {
+
+  if (ny_module_target_is_apple_arm64(mod)) {
+    if (!entry_val) {
+      if (prev_bb)
+        ny_pos(cg, prev_bb);
+      LLVMDisposeExecutionEngine(ee);
+      codegen_dispose(&tcg);
+      if (ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok, "missing comptime JIT entry");
+    }
+
+    LLVMGenericValueRef value = LLVMRunFunction(ee, entry_val, 0, NULL);
+    char *jit_exec_err = NULL;
+    if (!value || LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
+      NY_LOG_ERR("Comptime JIT execution error: %s\n",
+                 jit_exec_err ? jit_exec_err : "unknown error");
+      if (jit_exec_err)
+        LLVMDisposeMessage(jit_exec_err);
+      if (value)
+        LLVMDisposeGenericValue(value);
+      if (prev_bb)
+        ny_pos(cg, prev_bb);
+      LLVMDisposeExecutionEngine(ee);
+      codegen_dispose(&tcg);
+      if (ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok, "failed to execute comptime JIT code");
+    }
+    res = (int64_t)LLVMGenericValueToInt(value, 1);
+    LLVMDisposeGenericValue(value);
+  } else {
+    if (!ny_jit_prepare_module_execution(ee, mod)) {
       if (prev_bb)
         ny_pos(cg, prev_bb);
       LLVMDisposeExecutionEngine(ee);
@@ -4508,9 +4512,39 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
       if (ctm_ctx_owned)
         LLVMContextDispose(ctm_ctx);
       return expr_fail(cg, body->tok,
-                       "comptime JIT code memory is not executable");
+                       "failed to materialize executable comptime JIT code");
     }
-    res = ((int64_t (*)(void))addr)();
+    uint64_t addr =
+        entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
+    if (!addr)
+      addr = LLVMGetFunctionAddress(ee, entry_name);
+    char *jit_exec_err = NULL;
+    if (LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
+      NY_LOG_ERR("Comptime JIT finalization error: %s\n",
+                 jit_exec_err ? jit_exec_err : "unknown error");
+      if (jit_exec_err)
+        LLVMDisposeMessage(jit_exec_err);
+      if (prev_bb)
+        ny_pos(cg, prev_bb);
+      LLVMDisposeExecutionEngine(ee);
+      codegen_dispose(&tcg);
+      if (ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok, "failed to finalize comptime JIT memory");
+    }
+    if (addr) {
+      if (!ny_jit_prepare_execution(addr)) {
+        if (prev_bb)
+          ny_pos(cg, prev_bb);
+        LLVMDisposeExecutionEngine(ee);
+        codegen_dispose(&tcg);
+        if (ctm_ctx_owned)
+          LLVMContextDispose(ctm_ctx);
+        return expr_fail(cg, body->tok,
+                         "comptime JIT code memory is not executable");
+      }
+      res = ((int64_t (*)(void))addr)();
+    }
   }
 
   if (prev_bb)
