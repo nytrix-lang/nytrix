@@ -141,7 +141,7 @@ bool ny_nir_dump_binary(FILE *out, const ny_nir_func_t *f, const char *name) {
     return false;
   if (fwrite("NYIR", 1, 4, out) != 4)
     return false;
-  if (!ny_nir_write_u16le(out, 5) ||              /* format version */
+  if (!ny_nir_write_u16le(out, 7) ||              /* format version */
       !ny_nir_write_u16le(out, 0) ||              /* flags */
       !ny_nir_write_str(out, name && name[0] ? name : "<anon>") ||
       !ny_nir_write_i32le(out, f->next_value) ||
@@ -149,6 +149,10 @@ bool ny_nir_dump_binary(FILE *out, const ny_nir_func_t *f, const char *name) {
     return false;
   for (size_t i = 0; i < f->len; ++i) {
     const ny_nir_inst_t *in = &f->data[i];
+    if (in->arg_sizes &&
+        (in->op != NY_NIR_CALL || in->imm <= 0 ||
+         in->imm > NY_NIR_CALL_MAX_ARGS))
+      return false;
     if (!ny_nir_write_u16le(out, (uint16_t)in->op) ||
         !ny_nir_write_u16le(out, (uint16_t)in->cmp) ||
         !ny_nir_write_i32le(out, in->dst) ||
@@ -175,6 +179,13 @@ bool ny_nir_dump_binary(FILE *out, const ny_nir_func_t *f, const char *name) {
       if (!ny_nir_write_i32le(out, in->extra_args[k]))
         return false;
     }
+    uint32_t arg_sizes_len = in->arg_sizes ? (uint32_t)in->imm : 0;
+    if (!ny_nir_write_u32le(out, arg_sizes_len))
+      return false;
+    for (uint32_t k = 0; k < arg_sizes_len; ++k) {
+      if (!ny_nir_write_u32le(out, in->arg_sizes[k]))
+        return false;
+    }
   }
   return true;
 }
@@ -197,7 +208,7 @@ bool ny_nir_load_binary(FILE *in, ny_nir_func_t *out, char *name,
   if (!ny_nir_read_u16le(in, &version) || !ny_nir_read_u16le(in, &flags))
     goto malformed;
   if (version != 1 && version != 2 && version != 3 && version != 4 &&
-      version != 5)
+      version != 5 && version != 6 && version != 7)
     return ny_nir_binary_err(err, err_len, "native NYIR load: unsupported version %u",
                    (unsigned)version);
   if (flags != 0)
@@ -273,6 +284,7 @@ bool ny_nir_load_binary(FILE *in, ny_nir_func_t *out, char *name,
     }
     uint32_t extra_len = 0;
     int *extra = NULL;
+    uint32_t *arg_sizes = NULL;
     if (version >= 5) {
       if (!ny_nir_read_u32le(in, &extra_len) ||
           extra_len > NY_NIR_CALL_MAX_ARGS) {
@@ -298,11 +310,47 @@ bool ny_nir_load_binary(FILE *in, ny_nir_func_t *out, char *name,
         }
       }
     }
+    if (version >= 6) {
+      uint32_t arg_sizes_len = 0;
+      if (!ny_nir_read_u32le(in, &arg_sizes_len) ||
+          (arg_sizes_len != 0 &&
+           (op != NY_NIR_CALL || inst.imm <= 0 ||
+            arg_sizes_len != (uint32_t)inst.imm ||
+            arg_sizes_len > NY_NIR_CALL_MAX_ARGS))) {
+        free(extra);
+        free(symbol);
+        goto malformed;
+      }
+      if (arg_sizes_len > 0) {
+        arg_sizes = (uint32_t *)malloc((size_t)arg_sizes_len * sizeof(*arg_sizes));
+        if (!arg_sizes) {
+          free(extra);
+          free(symbol);
+          free(loaded_name);
+          ny_nir_func_free(&loaded);
+          return ny_nir_binary_err(err, err_len, "native NYIR load: out of memory");
+        }
+        for (uint32_t k = 0; k < arg_sizes_len; ++k) {
+          if (!ny_nir_read_u32le(in, &arg_sizes[k])) {
+            free(arg_sizes);
+            free(extra);
+            free(symbol);
+            goto malformed;
+          }
+          if (version < 7 && arg_sizes[k] > 0)
+            arg_sizes[k] =
+                (arg_sizes[k] & NY_NIR_ARG_AGG_SIZE_MASK) |
+                (NY_NIR_ARG_CLASS_MEMORY << NY_NIR_ARG_AGG_CLASS0_SHIFT);
+        }
+      }
+    }
     if (op >= NYIR_OP_COUNT || cmp > NY_NIR_CMP_GE) {
+      free(arg_sizes);
       free(extra);
       free(symbol);
       goto malformed;
     }
+    inst.arg_sizes = arg_sizes;
     inst.extra_args = extra;
     inst.extra_args_len = extra_len;
     inst.op = (ny_nir_op_t)op;
@@ -319,6 +367,7 @@ bool ny_nir_load_binary(FILE *in, ny_nir_func_t *out, char *name,
     if (debug_file && debug_file[0]) {
       inst.debug.file = ny_nir_func_own_symbol(&loaded, debug_file);
       if (!inst.debug.file) {
+        free(inst.arg_sizes);
         free(inst.extra_args);
         free(symbol);
         free(loaded_name);
@@ -331,6 +380,7 @@ bool ny_nir_load_binary(FILE *in, ny_nir_func_t *out, char *name,
     if (symbol[0]) {
       inst.symbol = ny_nir_func_own_symbol(&loaded, symbol);
       if (!inst.symbol) {
+        free(inst.arg_sizes);
         free(inst.extra_args);
         free(loaded_name);
         ny_nir_func_free(&loaded);
@@ -363,5 +413,3 @@ malformed:
   ny_nir_func_free(&loaded);
   return ny_nir_binary_err(err, err_len, "native NYIR load: malformed binary dump");
 }
-
-

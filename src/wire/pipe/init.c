@@ -69,19 +69,19 @@ static void ny_sanitize_setup_env(const char *sanitize_kind) {
   if (!sanitize_kind || !*sanitize_kind)
     return;
   if (strcmp(sanitize_kind, "address") == 0) {
-    setenv("ASAN_OPTIONS",
+    ny_setenv("ASAN_OPTIONS",
            "abort_on_error=1:detect_leaks=1:print_stacktrace=1:color=never"
            ":detect_odr_violation=0",
            0);
   } else if (strcmp(sanitize_kind, "undefined") == 0) {
-    setenv("UBSAN_OPTIONS",
+    ny_setenv("UBSAN_OPTIONS",
            "abort_on_error=1:print_stacktrace=1:color=never"
            ":halt_on_error=1",
            0);
   } else if (strcmp(sanitize_kind, "leak") == 0) {
-    setenv("LSAN_OPTIONS", "print_suppressions=0", 0);
+    ny_setenv("LSAN_OPTIONS", "print_suppressions=0", 0);
   } else if (strcmp(sanitize_kind, "thread") == 0) {
-    setenv("TSAN_OPTIONS",
+    ny_setenv("TSAN_OPTIONS",
            "abort_on_error=1:report_thread_leaks=0:color=never", 0);
   }
 }
@@ -91,9 +91,15 @@ typedef struct {
   uint64_t main_addr;
 } ny_jit_safe_call_t;
 
+static bool ny_jit_prepare_call(uint64_t script_addr, uint64_t main_addr) {
+  return script_addr && ny_jit_prepare_execution(script_addr) &&
+         (!main_addr || ny_jit_prepare_execution(main_addr));
+}
+
 static int ny_jit_safe_child(void *raw) {
   ny_jit_safe_call_t *call = (ny_jit_safe_call_t *)raw;
-  ny_jit_prepare_execution();
+  if (!call || !ny_jit_prepare_call(call->script_addr, call->main_addr))
+    return 1;
   ((void (*)(void))call->script_addr)();
   if (call->main_addr)
     (void)((int64_t (*)(void))call->main_addr)();
@@ -127,9 +133,64 @@ static LLVMModuleRef ny_prepare_ir_dump_module(const ny_options *opt,
 static bool ny_is_llvm_special_global(const char *name);
 static void ny_ensure_parent_dir_for_path(const char *path);
 
+typedef struct {
+  int64_t (*entry)(void);
+} ny_native_jit_call_t;
+
+typedef struct {
+  const char *items[256];
+  size_t len;
+  bool overflow;
+} ny_native_link_list_t;
+
+static void ny_native_link_list_add(const char *library, void *raw) {
+  ny_native_link_list_t *list = (ny_native_link_list_t *)raw;
+  if (!list || !library || !*library)
+    return;
+  for (size_t i = 0; i < list->len; ++i)
+    if (strcmp(list->items[i], library) == 0)
+      return;
+  if (list->len >= sizeof(list->items) / sizeof(list->items[0])) {
+    list->overflow = true;
+    return;
+  }
+  list->items[list->len++] = library;
+}
+
+static int ny_native_jit_safe_child(void *raw) {
+  ny_native_jit_call_t *call = (ny_native_jit_call_t *)raw;
+  if (!call || !call->entry)
+    return 1;
+  if (!ny_jit_prepare_execution((uint64_t)(uintptr_t)call->entry))
+    return 1;
+  (void)call->entry();
+  rt_print_flush();
+  return 0;
+}
+
 static int ny_run_native_only(const program_t *prog, const ny_options *opt,
                               const char *output_path, bool execute,
                               bool remove_output) {
+  if (execute) {
+    ny_native_jit_image_t image = {0};
+    char jit_err[512] = {0};
+    if (!ny_native_jit_compile(prog, opt, &image, jit_err, sizeof(jit_err))) {
+      NY_LOG_ERR("Native in-memory JIT failed: %s\n",
+                 jit_err[0] ? jit_err : "unsupported native shape");
+      return 1;
+    }
+    ny_native_jit_call_t call = {
+        .entry = (int64_t(*)(void))image.entry,
+    };
+    int rc = ny_safe_run_requested(&opt->safe_run)
+                 ? ny_safe_run_call(&opt->safe_run, ny_native_jit_safe_child,
+                                    &call,
+                                    opt->input_file ? opt->input_file
+                                                    : "native JIT workload")
+                 : ny_native_jit_safe_child(&call);
+    ny_native_jit_image_free(&image);
+    return rc;
+  }
   char obj[4096], rto[4096], err[512] = {0};
   char obj_name[96], rto_name[96];
   snprintf(obj_name, sizeof(obj_name), "ny_native_only_%ld_%llu.o",
@@ -152,10 +213,20 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
     unlink(obj);
     return 1;
   }
+  ny_native_link_list_t links = {0};
+  for (size_t i = 0; i < opt->link_libs.len; ++i)
+    ny_native_link_list_add(opt->link_libs.data[i], &links);
+  ny_native_visit_program_links(prog, ny_native_link_list_add, &links);
+  if (links.overflow) {
+    NY_LOG_ERR("Native-only link failed: too many source-level libraries\n");
+    unlink(obj);
+    unlink(rto);
+    return 1;
+  }
   bool linked = ny_builder_link(
       cc, obj, rto, NULL, NULL, 0,
       (const char *const *)opt->link_dirs.data, opt->link_dirs.len,
-      (const char *const *)opt->link_libs.data, opt->link_libs.len, output_path,
+      links.items, links.len, output_path,
       opt->strip_override == 1, opt->debug_symbols, opt->gprof == 1,
       opt->sanitize);
   unlink(obj);
@@ -369,7 +440,7 @@ static int ny_run_repl_session(ny_options *opt, bool supervised) {
   ny_repl_set_max_errors(opt->max_errors);
   ny_repl_run(opt->opt_level, opt->opt_pipeline,
               opt->command_string ? opt->command_string : repl_stdin_src,
-              repl_batch);
+              repl_batch, opt);
   free(repl_stdin_src);
   return 0;
 }
@@ -1109,6 +1180,29 @@ static void run_dead_strip_if_needed(const ny_options *opt, codegen_t *cg,
   if (!dce_enabled)
     return;
 
+  if (is_jit && !ny_env_enabled("NYTRIX_JIT_FORCE_DCE")) {
+    size_t definitions = 0;
+    for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;
+         fn = LLVMGetNextFunction(fn)) {
+      if (!LLVMIsDeclaration(fn))
+        definitions++;
+    }
+    size_t threshold = 512;
+    const char *threshold_env = ny_env_str_nonempty("NYTRIX_JIT_DCE_MAX_FUNCS");
+    if (threshold_env) {
+      char *end = NULL;
+      unsigned long parsed = strtoul(threshold_env, &end, 10);
+      if (end && *end == '\0')
+        threshold = (size_t)parsed;
+    }
+    if (definitions > threshold) {
+      if (verbose_enabled >= 1)
+        NY_LOG_INFO("JIT dead-strip: skipped for %zu definitions (limit=%zu); lazy materialization is faster\n",
+                    definitions, threshold);
+      return;
+    }
+  }
+
   bool internalize_enabled = false;
   if (is_aot || is_jit) {
     internalize_enabled =
@@ -1578,13 +1672,13 @@ int ny_pipeline_run(ny_options *opt) {
   if (!ny_safe_run_requested(&opt->safe_run) &&
       ny_try_fast_command_string(opt, t_start))
     return 0;
-  bool show_progress = opt->progress ||
-#ifdef _WIN32
-                       ny_progress_enabled_from_env();
-#else
-                       (!opt->no_progress && isatty(STDERR_FILENO)) ||
-                       ny_progress_enabled_from_env();
+  bool debug_output = opt->trace_exec || debug_enabled;
+  bool show_progress = !opt->no_progress && !debug_output &&
+                       (opt->progress || ny_progress_enabled_from_env()
+#ifndef _WIN32
+                        || isatty(STDERR_FILENO)
 #endif
+                       );
   long progress_total = 8;
   if (opt->output_file)
     progress_total += 2;
@@ -2634,25 +2728,39 @@ skip_compilation:
       bool call_implicit_main =
           jit_main_fn && !ny_program_has_explicit_main_entry(&cg, cg.prog);
 
-      const char *jit_engine = getenv("NYTRIX_JIT_ENGINE");
-      if (jit_engine && strcmp(jit_engine, "orc") == 0) {
+      const char *jit_engine = opt->jit_engine;
+      if (!jit_engine)
+        jit_engine = getenv("NYTRIX_JIT_ENGINE");
+      if (jit_engine && strcmp(jit_engine, "orc") == 0 &&
+          opt->native_backend == NY_NATIVE_BACKEND_LLVM) {
         if (opt->debug_symbols)
           LLVMStripModuleDebugInfo(jmod);
-        void *orc_jit = NULL;
         uint64_t saddr = 0, main_addr = 0;
-        bool consumed = false;
         char *orc_error = NULL;
-        bool created = ny_orc_jit_create(
-            jmod, cg.ctx, &cg, &orc_jit, &saddr, &main_addr, &consumed,
+
+        if (!ny_orc_jit_ensure_engine(&cg, &orc_error)) {
+          ny_progress_task_end(progress_node);
+          NY_LOG_ERR("ORC JIT ensure failed: %s\n",
+                     orc_error ? orc_error : "unknown error");
+          free(orc_error);
+          exit_code = 1;
+          goto exit_success;
+        }
+
+        void *rt = NULL;
+        bool module_consumed = false;
+        bool executed = ny_orc_jit_execute(
+            &cg, jmod, cg.ctx, &saddr, &main_addr, &rt, &module_consumed,
             &orc_error);
-        if (consumed) {
+
+        if (module_consumed) {
           cg.module = NULL;
           cg.ctx = NULL;
           cg.llvm_ctx_owned = false;
         }
-        if (!created) {
+        if (!executed) {
           ny_progress_task_end(progress_node);
-          NY_LOG_ERR("ORC JIT failed: %s\n",
+          NY_LOG_ERR("ORC JIT execute failed: %s\n",
                      orc_error ? orc_error : "unknown error");
           free(orc_error);
           exit_code = 1;
@@ -2675,8 +2783,11 @@ skip_compilation:
                 opt->input_file ? opt->input_file : "inline ORC JIT workload");
             if (rc != 0)
               exit_code = rc;
+          } else if (!ny_jit_prepare_call(
+                         saddr, call_implicit_main ? main_addr : 0)) {
+            NY_LOG_ERR("JIT code memory is not executable\n");
+            exit_code = 1;
           } else {
-            ny_jit_prepare_execution();
             ((void (*)(void))saddr)();
             if (call_implicit_main && main_addr)
               (void)((int64_t (*)(void))main_addr)();
@@ -2684,7 +2795,7 @@ skip_compilation:
           }
         }
         maybe_log_phase_time(opt->do_timing, "JIT Run:", t_run);
-        ny_orc_jit_dispose(orc_jit);
+        ny_orc_jit_remove_module(rt);
         goto jit_execution_done;
       }
 
@@ -2755,8 +2866,10 @@ skip_compilation:
               opt->input_file ? opt->input_file : "inline JIT workload");
           if (rc != 0)
             exit_code = rc;
+        } else if (!ny_jit_prepare_call(saddr, main_addr)) {
+          NY_LOG_ERR("JIT code memory is not executable\n");
+          exit_code = 1;
         } else {
-          ny_jit_prepare_execution();
           if (verbose_enabled >= 3)
             fprintf(stderr, "TRACE: Executing script...\n");
           ((void (*)(void))saddr)();

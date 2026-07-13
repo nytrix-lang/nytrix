@@ -1424,6 +1424,7 @@ static void handle_timeout(int sig) {
 #endif
 
 int main(int argc, char **argv, char **envp) {
+#ifndef _WIN32
   // increase stack for large frames in clang_import for complex headers
   struct rlimit rl;
   if (getrlimit(RLIMIT_STACK, &rl) == 0) {
@@ -1437,6 +1438,7 @@ int main(int argc, char **argv, char **envp) {
       (void)setrlimit(RLIMIT_STACK, &rl);
     }
   }
+#endif
   ny_load_default_config();
   int unified_rc = 0;
   if (ny_try_unified_tool(argc, argv, &unified_rc))

@@ -34,11 +34,13 @@ fn _argv_from_env(str key, str path) list {
    out
 }
 
+;; Returns true when enabled by default.
 fn enabled_by_default() bool {
    def raw = str.lower(str.strip(env("NY_EDITOR_LSP")))
    !(raw == "0" || raw == "false" || raw == "off" || raw == "no")
 }
 
+;; Handles the for operation and returns the resulting state.
 fn command_for(str path) list {
    if !enabled_by_default() { return [] }
    def per_ext = _argv_from_env("NY_EDITOR_LSP_" + _ext_key(path), path)
@@ -48,6 +50,7 @@ fn command_for(str path) list {
    [tools.lsp_command()]
 }
 
+;; Creates a new module state with the supplied configuration.
 fn new() dict {
    {
       "active": false, "popups": true, "request_id": 1, "lang": "",
@@ -85,6 +88,7 @@ fn _rpc(any body) str {
 
 fn _doc(str uri) dict { {"uri": uri} }
 
+;; Returns the result of the `start` operation.
 fn start(dict st, str path, str text="") dict {
    def argv = command_for(path)
    if argv.len <= 0 {
@@ -102,22 +106,26 @@ fn start(dict st, str path, str text="") dict {
    st
 }
 
+;; Returns the result of the `stop` operation.
 fn stop(dict st) dict {
    st["active"] = false
    st["last"] = "lsp stopped"
    st
 }
 
+;; Returns the result of the `restart` operation.
 fn restart(dict st, str path, str text="") dict {
    start(stop(st), path, text)
 }
 
+;; Updates the popups and returns the resulting state.
 fn toggle_popups(dict st) dict {
    st["popups"] = !bool(st.get("popups", true))
    st["last"] = bool(st.get("popups", true)) ? "lsp popups on" : "lsp popups off"
    st
 }
 
+;; Returns the result of the `status` operation.
 fn status(dict st) str {
    def argv = st.get("argv", command_for(to_str(st.get("path", ""))))
    (st.get("active", false) ? "active" : "idle") +
@@ -125,11 +133,13 @@ fn status(dict st) str {
    " cmd=" + (argv.len > 0 ? str.join(argv, " ") : "none")
 }
 
+;; Returns the result of the `did_open` operation.
 fn did_open(dict st, str path, str text) str {
    def uri = _uri(path)
    _rpc({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": uri, "languageId": _lang(path), "version": 1, "text": text}}})
 }
 
+;; Returns the result of the `did_change` operation.
 fn did_change(dict st, str path, str text) str {
    def uri = _uri(path)
    def id_pair = _next_id(st)
@@ -137,6 +147,7 @@ fn did_change(dict st, str path, str text) str {
    _rpc({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {"textDocument": {"uri": uri, "version": int(id_pair.get(1, 1))}, "contentChanges": [{"text": text}]}})
 }
 
+;; Returns the result of the `did_save` operation.
 fn did_save(dict st, str path) str {
    _rpc({"jsonrpc": "2.0", "method": "textDocument/didSave", "params": {"textDocument": _doc(_uri(path))}})
 }
@@ -145,6 +156,7 @@ fn _pos(int line, int col) dict {
    {"line": max(0, line), "character": max(0, col)}
 }
 
+;; Returns the result of the `completion` operation.
 fn completion(dict st, str path, int line, int col) dict {
    def id_pair = _next_id(st)
    st = id_pair.get(0)
@@ -153,6 +165,7 @@ fn completion(dict st, str path, int line, int col) dict {
    st
 }
 
+;; Returns the result of the `hover` operation.
 fn hover(dict st, str path, int line, int col) dict {
    def id_pair = _next_id(st)
    st = id_pair.get(0)
@@ -161,6 +174,7 @@ fn hover(dict st, str path, int line, int col) dict {
    st
 }
 
+;; Returns the result of the `definition` operation.
 fn definition(dict st, str path, int line, int col) dict {
    def id_pair = _next_id(st)
    st = id_pair.get(0)
@@ -169,6 +183,7 @@ fn definition(dict st, str path, int line, int col) dict {
    st
 }
 
+;; Returns the result of the `diagnostics_from_check` operation.
 fn diagnostics_from_check(dict check_res) list {
    def text = to_str(check_res.get("stdout", ""))
    def lines = str.split(text, "\n")
@@ -184,6 +199,7 @@ fn diagnostics_from_check(dict check_res) list {
    out
 }
 
+;; Returns the result of the `diagnostics_text` operation.
 fn diagnostics_text(dict st) str {
    def ds = st.get("diagnostics", [])
    if ds.len <= 0 { return "No diagnostics\n" + status(st) }

@@ -50,6 +50,7 @@ fn state(list buffers) dict {
    }
 }
 
+;; Returns the result of the `current_buffer` operation.
 fn current_buffer(dict st) dict {
    def bs = st.get("buffers", [])
    def idx = int(st.get("active", 0))
@@ -60,11 +61,13 @@ fn current_buffer(dict st) dict {
    {"name": "empty", "path": "", "lines": [""], "dirty": false}
 }
 
+;; Returns the result of the `current_lines` operation.
 fn current_lines(dict st) list {
    def lines = current_buffer(st).get("lines", nil)
    is_list(lines) && lines.len > 0 ? lines : [""]
 }
 
+;; Updates the lines and returns the resulting state.
 fn set_lines(dict st, list lines) dict {
    mut bs = st.get("buffers", [])
    def idx = int(st.get("active", 0))
@@ -77,6 +80,7 @@ fn set_lines(dict st, list lines) dict {
    st
 }
 
+;; Returns the result of the `clamp_cursor` operation.
 fn clamp_cursor(dict st) dict {
    def lines = current_lines(st)
    mut row = int(st.get("cursor_line", 0))

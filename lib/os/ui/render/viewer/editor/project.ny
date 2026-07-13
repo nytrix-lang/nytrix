@@ -156,6 +156,7 @@ fn _dir_status(dict model, str rel) str {
    ""
 }
 
+;; Returns the result of the `git_code` operation.
 fn git_code(dict model, str rel, bool dir=false) str {
    def key = _norm(rel)
    def status = model.get("git", dict(8))
@@ -209,11 +210,13 @@ fn _project_scan_tree(dict model, str dir, int depth, int max_depth, int limit) 
    out
 }
 
+;; Creates a new module state with the supplied configuration.
 fn new(str project_root="") dict {
    def r = project_root.len > 0 ? ospath.normalize(project_root) : getcwd()
    {"root": r, "open": dict(32), "tree": [], "git": dict(64), "git_dirs": dict(64), "changes": [], "branch": "", "counts": dict(8), "ops_undo": [], "ops_redo": []}
 }
 
+;; Returns the result of the `refresh` operation.
 fn refresh(dict model, int max_depth=4, int limit=0) dict {
    def r = to_str(model.get("root", "."))
    mut rows = [{
@@ -233,14 +236,17 @@ fn refresh(dict model, int max_depth=4, int limit=0) dict {
    model
 }
 
+;; Updates the status and returns the resulting state.
 fn refresh_status(dict model) dict {
    _git_refresh(model)
 }
 
+;; Updates the git and returns the resulting state.
 fn refresh_git(dict model, int max_depth=4, int limit=0) dict {
    refresh(refresh_status(model), max_depth, limit)
 }
 
+;; Returns the result of the `toggle` operation.
 fn toggle(dict model, str rel) dict {
    if rel == "." { return model }
    mut open = model.get("open", dict(32))
@@ -258,6 +264,7 @@ fn _parent_for_new(dict model, str rel) str {
    osfs.is_dir(base) ? base : ospath.dirname(base)
 }
 
+;; Creates and returns the file.
 fn create_file(dict model, str base_rel, str name) dict {
    def clean = str.strip(name)
    if clean.len <= 0 || ospath.has_sep(clean) {
@@ -279,6 +286,7 @@ fn create_file(dict model, str base_rel, str name) dict {
    model
 }
 
+;; Updates the entry and returns the resulting state.
 fn rename_entry(dict model, str rel, str new_name) dict {
    def clean = str.strip(new_name)
    if rel == "." || rel.len <= 0 || clean.len <= 0 || ospath.has_sep(clean) {
@@ -297,6 +305,7 @@ fn rename_entry(dict model, str rel, str new_name) dict {
    model
 }
 
+;; Returns the result of the `move_entry` operation.
 fn move_entry(dict model, str src_rel, str dst_rel) dict {
    def src_clean = _norm(src_rel)
    def dst_clean = _norm(dst_rel)
@@ -402,6 +411,7 @@ fn _entry_op(dict model, str rel, str trash_path, bool dirp) dict {
    }
 }
 
+;; Returns the result of the `trash_entry` operation.
 fn trash_entry(dict model, str rel) dict {
    def clean = _norm(rel)
    if clean == "." || clean.len <= 0 {
@@ -431,8 +441,10 @@ fn trash_entry(dict model, str rel) dict {
    model
 }
 
+;; Returns true when can undo file op.
 fn can_undo_file_op(dict model) bool { model.get("ops_undo", []).len > 0 }
 
+;; Returns true when can redo file op.
 fn can_redo_file_op(dict model) bool { model.get("ops_redo", []).len > 0 }
 
 fn _move_back(dict model, dict op) dict {
@@ -485,6 +497,7 @@ fn _move_to_trash_again(dict model, dict op) dict {
    model
 }
 
+;; Moves to the file op state and returns it.
 fn undo_file_op(dict model) dict {
    def undo = model.get("ops_undo", [])
    if undo.len <= 0 {
@@ -500,6 +513,7 @@ fn undo_file_op(dict model) dict {
    model
 }
 
+;; Moves to the file op state and returns it.
 fn redo_file_op(dict model) dict {
    def redo = model.get("ops_redo", [])
    if redo.len <= 0 {
@@ -515,6 +529,7 @@ fn redo_file_op(dict model) dict {
    model
 }
 
+;; Updates the file history and returns the resulting state.
 fn set_file_history(dict model, list undo, list redo) dict {
    model["ops_undo"] = _stack_limit(undo)
    model["ops_redo"] = _stack_limit(redo)
@@ -581,22 +596,27 @@ fn diff_text(dict model, dict entry) str {
    out
 }
 
+;; Returns the result of the `tree_height` operation.
 fn tree_height(f64 rail_h, int row_count) f64 {
    min(max(150.0, rail_h * 0.64), TREE_HEADER_H + float(row_count) * TREE_ROW_H)
 }
 
+;; Returns the visible count.
 fn visible_count(f64 panel_h) int {
    max(0, int((panel_h - TREE_HEADER_H) / TREE_ROW_H))
 }
 
+;; Returns the result of the `clamp_scroll` operation.
 fn clamp_scroll(int scroll, int total, int visible) int {
    min(max(0, scroll), max(0, total - visible))
 }
 
+;; Returns the result of the `row_y` operation.
 fn row_y(f64 panel_y, int idx) f64 {
    panel_y + TREE_HEADER_H + float(idx) * TREE_ROW_H
 }
 
+;; Returns the result of the `row_at` operation.
 fn row_at(f64 panel_x, f64 panel_y, f64 panel_w, f64 panel_h, f64 x, f64 y, int count) int {
    if x < panel_x || x > panel_x + panel_w { return -1 }
    if y < panel_y + TREE_HEADER_H || y > panel_y + panel_h { return -1 }
@@ -607,6 +627,7 @@ fn row_at(f64 panel_x, f64 panel_y, f64 panel_w, f64 panel_h, f64 x, f64 y, int 
    in_row >= 0.0 && in_row < TREE_ROW_H ? idx : -1
 }
 
+;; Finds the entry and returns the matching result.
 fn hit_entry(dict model, f64 panel_x, f64 panel_y, f64 panel_w, f64 panel_h, int scroll, f64 x, f64 y) dict {
    def rows = tree(model)
    def visible = visible_count(panel_h)
@@ -615,6 +636,7 @@ fn hit_entry(dict model, f64 panel_x, f64 panel_y, f64 panel_w, f64 panel_h, int
    idx < 0 ? dict(0) : rows.get(start + idx, {})
 }
 
+;; Returns the result of the `file_kind` operation.
 fn file_kind(str name) str {
    def ext = str.lower(ospath.extname(str.lower(name)))
    if ext == ".ny" || ext == ".nyt" || ext == ".c" || ext == ".h" || ext == ".cpp" || ext == ".hpp" ||
@@ -635,6 +657,7 @@ fn file_kind(str name) str {
    "file"
 }
 
+;; Returns the result of the `file_icon` operation.
 fn file_icon(dict e) str {
    if e.get("dir", false) { return "folder" }
    case to_str(e.get("kind", file_kind(to_str(e.get("name", ""))))){
@@ -647,6 +670,7 @@ fn file_icon(dict e) str {
    }
 }
 
+;; Returns the result of the `status_label` operation.
 fn status_label(str code) str {
    if code == "??" { return "?" }
    if code == "..." { return "*" }

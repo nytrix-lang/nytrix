@@ -277,6 +277,7 @@ typedef struct codegen_llvm_t {
   LLVMContextRef ctx;
   bool llvm_ctx_owned;
   LLVMExecutionEngineRef ee;
+  void *orc_jit;
   LLVMValueRef setjmp_fn;
   LLVMTypeRef setjmp_ty;
 } codegen_llvm_t;
@@ -336,6 +337,7 @@ typedef struct codegen_symbols_t {
   VEC(string_intern) interns;
   intern_entry *intern_map;
   void *builtin_shadow_cache;
+  size_t builtin_shadow_cache_stable_len;
   size_t intern_map_cap;
   size_t intern_map_len;
   fun_sig *cached_fn_get;
@@ -537,6 +539,7 @@ struct codegen_t {
       LLVMContextRef ctx;
       bool llvm_ctx_owned;
       LLVMExecutionEngineRef ee;
+      void *orc_jit;
       LLVMValueRef setjmp_fn;
       LLVMTypeRef setjmp_ty;
     };
@@ -566,6 +569,7 @@ struct codegen_t {
       VEC(string_intern) interns;
       intern_entry *intern_map;
       void *builtin_shadow_cache;
+      size_t builtin_shadow_cache_stable_len;
       size_t intern_map_cap;
       size_t intern_map_len;
       fun_sig *cached_fn_get;

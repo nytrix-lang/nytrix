@@ -165,6 +165,11 @@ bool ny_nir_eval_with_calls(const ny_nir_func_t *f, int64_t *locals,
       values[in->dst] = (int64_t)(uintptr_t)&locals[in->imm];
       known[in->dst] = true;
       break;
+    case NYIR_ADDR_SYMBOL:
+    case NYIR_ALLOCA:
+    case NYIR_COPY_STRUCT:
+    case NYIR_CAPTURE_RET:
+      goto unsupported;
     case NYIR_STORE_I64: {
       int64_t val = 0;
       if (!ny_nir_eval_read_value(values, known, in->a, &a) ||

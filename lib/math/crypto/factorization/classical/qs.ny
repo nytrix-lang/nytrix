@@ -4964,6 +4964,7 @@ fn _mpqs_attempt_policy_report(any n, int selected_multiplier, int factor_base_b
       ])
 }
 
+;; Returns the result of the `mpqs_source_parameter_rows` operation.
 fn mpqs_source_parameter_rows() list { [
       [64, 100, 40, 65536], [128, 450, 40, 65536], [183, 2000, 40, 65536],
       [200, 3000, 50, 65536], [212, 5400, 50, 3 * 65536], [233, 10000, 100, 3 * 65536],

@@ -1,0 +1,21 @@
+shape aarch64_elf64_internal_link_run_control_divmod {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 aarch64 internal-link qemu control divmod]
+  template ny-test-case
+  flags "--native-backend aarch64 -emit-only -o /tmp/nytrix-aarch64-link-control.o"
+  expect object_link_run_i64_36
+  source ny <<'NY'
+fn calculate(i64 n) i64 {
+  mut i64 i = 0
+  mut i64 total = 0
+  while i < n {
+    total = total + ((i * 10) / 3) + ((i * 10) % 3)
+    i = i + 1
+  }
+  total
+}
+
+calculate(5)
+NY
+}

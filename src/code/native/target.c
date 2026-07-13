@@ -111,13 +111,15 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
 
   info->abi = opt->native_abi;
   if (info->abi == NY_NATIVE_ABI_AUTO) {
-    if (info->target == NY_NATIVE_TARGET_ARM)
+    if (info->target == NY_NATIVE_TARGET_ARM ||
+        info->target == NY_NATIVE_TARGET_AARCH64)
       info->abi = NY_NATIVE_ABI_AAPCS;
     else
       info->abi = ny_native_triple_is_windows(triple) ? NY_NATIVE_ABI_WIN64
                                                       : NY_NATIVE_ABI_SYSV;
   } else if (info->abi == NY_NATIVE_ABI_AAPCS &&
-             info->target != NY_NATIVE_TARGET_ARM) {
+             info->target != NY_NATIVE_TARGET_ARM &&
+             info->target != NY_NATIVE_TARGET_AARCH64) {
     info->abi = ny_native_triple_is_windows(triple) ? NY_NATIVE_ABI_WIN64
                                                     : NY_NATIVE_ABI_SYSV;
   }
@@ -160,14 +162,17 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
     else if (strcmp(info->object_format, "macho") == 0)
       info->caps |= NY_NATIVE_CAP_MACHO_OBJECT;
   } else if (info->target == NY_NATIVE_TARGET_AARCH64) {
-    static const char *aarch64_regs[] = {"x0", "x1", "x2", "x3", "x4", "x5"};
-    for (size_t i = 0; i < 6; i++)
+    static const char *aarch64_regs[] = {"x0", "x1", "x2", "x3", "x4", "x5",
+                                         "x6", "x7"};
+    for (size_t i = 0; i < 8; i++)
       info->gp_arg_regs[i] = aarch64_regs[i];
-    info->gp_arg_reg_count = 6;
+    info->gp_arg_reg_count = 8;
     info->shadow_space_bytes = 0;
     info->red_zone = false;
     info->pointer_bits = 64;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_NIR_VM;
+    if (strcmp(info->object_format, "elf") == 0)
+      info->caps |= NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_ELF_OBJECT;
   } else if (info->target == NY_NATIVE_TARGET_X86) {
     info->gp_arg_reg_count = 0;
     info->shadow_space_bytes = 0;
@@ -201,19 +206,21 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
     info->stack_align = 8;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_NIR_VM;
   } else if (info->target == NY_NATIVE_TARGET_MIPS) {
-    static const char *mips_regs[] = {"$a0", "$a1", "$a2", "$a3"};
-    for (size_t i = 0; i < 4; i++)
+    static const char *mips_regs[] = {"$a0", "$a1", "$a2", "$a3", "$a4",
+                                      "$a5", "$a6", "$a7"};
+    for (size_t i = 0; i < 8; i++)
       info->gp_arg_regs[i] = mips_regs[i];
-    info->gp_arg_reg_count = 4;
+    info->gp_arg_reg_count = 8;
     info->shadow_space_bytes = 0;
     info->red_zone = false;
     info->pointer_bits = 64;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_NIR_VM;
   } else if (info->target == NY_NATIVE_TARGET_POWERPC) {
-    static const char *ppc_regs[] = {"r3", "r4", "r5", "r6", "r7", "r8"};
-    for (size_t i = 0; i < 6; i++)
+    static const char *ppc_regs[] = {"r3", "r4", "r5", "r6", "r7", "r8",
+                                     "r9", "r10"};
+    for (size_t i = 0; i < 8; i++)
       info->gp_arg_regs[i] = ppc_regs[i];
-    info->gp_arg_reg_count = 6;
+    info->gp_arg_reg_count = 8;
     info->shadow_space_bytes = 0;
     info->red_zone = false;
     info->pointer_bits = 64;
@@ -238,10 +245,11 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
     info->pointer_bits = 32;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_NIR_VM;
   } else if (info->target == NY_NATIVE_TARGET_RISCV) {
-    static const char *riscv_regs[] = {"a0", "a1", "a2", "a3", "a4", "a5"};
-    for (size_t i = 0; i < 6; i++)
+    static const char *riscv_regs[] = {"a0", "a1", "a2", "a3", "a4", "a5",
+                                       "a6", "a7"};
+    for (size_t i = 0; i < 8; i++)
       info->gp_arg_regs[i] = riscv_regs[i];
-    info->gp_arg_reg_count = 6;
+    info->gp_arg_reg_count = 8;
     info->shadow_space_bytes = 0;
     info->red_zone = false;
     info->pointer_bits = 64;

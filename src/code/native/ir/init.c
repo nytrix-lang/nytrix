@@ -7,6 +7,180 @@
 #include <stdlib.h>
 #include <string.h>
 
+bool ny_nir_call_args(const ny_nir_inst_t *in, int value_count, int *args,
+                      size_t args_cap, int *argc_out, char *err,
+                      size_t err_len) {
+  if (!in || in->op != NY_NIR_CALL || !args || !argc_out) {
+    if (err && err_len)
+      snprintf(err, err_len, "native NYIR call: invalid input");
+    return false;
+  }
+  int argc = (int)in->imm;
+  if (argc < 0 || argc > NY_NIR_CALL_MAX_ARGS || (size_t)argc > args_cap) {
+    if (err && err_len)
+      snprintf(err, err_len,
+               "native NYIR call: argument count %d exceeds capacity %zu",
+               argc, args_cap);
+    return false;
+  }
+  const int inline_args[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+  for (int i = 0; i < argc; ++i) {
+    int value = i < 6 ? inline_args[i]
+                      : in->extra_args && (size_t)(i - 6) < in->extra_args_len
+                            ? in->extra_args[i - 6]
+                            : -1;
+    if (value < 0 || value >= value_count) {
+      if (err && err_len)
+        snprintf(err, err_len,
+                 "native NYIR call: invalid argument %d value v%d", i,
+                 value);
+      return false;
+    }
+    args[i] = value;
+  }
+  *argc_out = argc;
+  return true;
+}
+
+static bool ny_nir_op_f64(ny_nir_op_t op) {
+  return op == NYIR_CONST_F64 || op == NYIR_ADD_F64 ||
+         op == NYIR_SUB_F64 || op == NYIR_MUL_F64 || op == NYIR_DIV_F64 ||
+         op == NYIR_I64_TO_F64 || op == NYIR_F32_TO_F64;
+}
+
+static bool ny_nir_op_f32(ny_nir_op_t op) {
+  return op == NYIR_CONST_F32 || op == NYIR_ADD_F32 ||
+         op == NYIR_SUB_F32 || op == NYIR_MUL_F32 || op == NYIR_DIV_F32 ||
+         op == NYIR_I64_TO_F32 || op == NYIR_F64_TO_F32;
+}
+
+static size_t ny_nir_type_root(size_t *parents, size_t node) {
+  size_t root = node;
+  while (parents[root] != root)
+    root = parents[root];
+  while (parents[node] != node) {
+    size_t next = parents[node];
+    parents[node] = root;
+    node = next;
+  }
+  return root;
+}
+
+static void ny_nir_type_union(size_t *parents, size_t left, size_t right) {
+  left = ny_nir_type_root(parents, left);
+  right = ny_nir_type_root(parents, right);
+  if (left != right)
+    parents[right] = left;
+}
+
+void ny_nir_type_map_free(ny_nir_type_map_t *map) {
+  if (!map) return;
+  free(map->value_f64); free(map->value_f32);
+  free(map->local_f64); free(map->local_f32);
+  *map = (ny_nir_type_map_t){0};
+}
+
+bool ny_nir_type_map_init(ny_nir_type_map_t *map, const ny_nir_func_t *nir,
+                          size_t local_count) {
+  if (!map || !nir) return false;
+  *map = (ny_nir_type_map_t){.value_count = (size_t)nir->next_value,
+                             .local_count = local_count};
+  if (map->value_count) {
+    map->value_f64 = calloc(map->value_count, sizeof(bool));
+    map->value_f32 = calloc(map->value_count, sizeof(bool));
+  }
+  if (local_count) {
+    map->local_f64 = calloc(local_count, sizeof(bool));
+    map->local_f32 = calloc(local_count, sizeof(bool));
+  }
+  if ((map->value_count && (!map->value_f64 || !map->value_f32)) ||
+      (local_count && (!map->local_f64 || !map->local_f32))) {
+    ny_nir_type_map_free(map);
+    return false;
+  }
+
+  size_t node_count = map->value_count + local_count;
+  size_t *parents = node_count ? malloc(node_count * sizeof(*parents)) : NULL;
+  unsigned char *root_types = node_count ? calloc(node_count, 1) : NULL;
+  if (node_count && (!parents || !root_types)) {
+    free(parents);
+    free(root_types);
+    ny_nir_type_map_free(map);
+    return false;
+  }
+  for (size_t i = 0; i < node_count; ++i)
+    parents[i] = i;
+
+  /* Copies and local loads/stores preserve type. Collapse those constraints
+   * once so long chains remain near-linear rather than requiring fixed-point
+   * rescans of the complete function. */
+  for (size_t i = 0; i < nir->len; ++i) {
+    const ny_nir_inst_t *in = &nir->data[i];
+    if (in->op == NY_NIR_COPY && in->dst >= 0 && in->a >= 0 &&
+        (size_t)in->dst < map->value_count &&
+        (size_t)in->a < map->value_count)
+      ny_nir_type_union(parents, (size_t)in->dst, (size_t)in->a);
+    if (in->op == NY_NIR_LOAD_LOCAL && in->dst >= 0 && in->imm >= 0 &&
+        (size_t)in->dst < map->value_count && (size_t)in->imm < local_count)
+      ny_nir_type_union(parents, (size_t)in->dst,
+                        map->value_count + (size_t)in->imm);
+    if (in->op == NY_NIR_STORE_LOCAL && in->a >= 0 && in->imm >= 0 &&
+        (size_t)in->a < map->value_count && (size_t)in->imm < local_count)
+      ny_nir_type_union(parents, (size_t)in->a,
+                        map->value_count + (size_t)in->imm);
+  }
+
+  for (size_t i = 0; i < nir->len; ++i) {
+    const ny_nir_inst_t *in = &nir->data[i];
+    bool f64_result = ny_nir_op_f64(in->op) ||
+        (in->op == NY_NIR_CALL && (in->flags & NY_NIR_INST_F_RET_F64));
+    bool f32_result = ny_nir_op_f32(in->op) ||
+        (in->op == NY_NIR_CALL && (in->flags & NY_NIR_INST_F_RET_F32));
+    if (in->dst >= 0 && (size_t)in->dst < map->value_count) {
+      size_t root = ny_nir_type_root(parents, (size_t)in->dst);
+      if (f64_result)
+        root_types[root] |= 1u;
+      if (f32_result)
+        root_types[root] |= 2u;
+    }
+    bool f64_operands = in->op == NYIR_ADD_F64 || in->op == NYIR_SUB_F64 ||
+                        in->op == NYIR_MUL_F64 || in->op == NYIR_DIV_F64 ||
+                        in->op == NYIR_CMP_F64;
+    bool f32_operands = in->op == NYIR_ADD_F32 || in->op == NYIR_SUB_F32 ||
+                        in->op == NYIR_MUL_F32 || in->op == NYIR_DIV_F32 ||
+                        in->op == NYIR_CMP_F32;
+    if (in->a >= 0 && (size_t)in->a < map->value_count) {
+      size_t root = ny_nir_type_root(parents, (size_t)in->a);
+      if (f64_operands)
+        root_types[root] |= 1u;
+      if (f32_operands)
+        root_types[root] |= 2u;
+    }
+    if (in->b >= 0 && (size_t)in->b < map->value_count) {
+      size_t root = ny_nir_type_root(parents, (size_t)in->b);
+      if (f64_operands)
+        root_types[root] |= 1u;
+      if (f32_operands)
+        root_types[root] |= 2u;
+    }
+  }
+
+  for (size_t i = 0; i < map->value_count; ++i) {
+    unsigned char type = root_types[ny_nir_type_root(parents, i)];
+    map->value_f64[i] = (type & 1u) != 0;
+    map->value_f32[i] = (type & 2u) != 0;
+  }
+  for (size_t i = 0; i < local_count; ++i) {
+    unsigned char type =
+        root_types[ny_nir_type_root(parents, map->value_count + i)];
+    map->local_f64[i] = (type & 1u) != 0;
+    map->local_f32[i] = (type & 2u) != 0;
+  }
+  free(parents);
+  free(root_types);
+  return true;
+}
+
 int64_t ny_nir_f64_to_bits(double v) {
   int64_t bits = 0;
   memcpy(&bits, &v, sizeof(bits));
@@ -32,14 +206,38 @@ float ny_nir_bits_to_f32(int64_t bits) {
   return v;
 }
 
+static const char *ny_nir_own_symbol_copy(ny_nir_func_t *f,
+                                          const char *symbol) {
+  if (!symbol)
+    return NULL;
+  char *copy = ny_strndup(symbol, strlen(symbol));
+  if (!copy)
+    return NULL;
+  if (f->owned_symbols_len >= f->owned_symbols_cap) {
+    size_t cap = f->owned_symbols_cap ? f->owned_symbols_cap * 2 : 16;
+    char **data =
+        (char **)realloc(f->owned_symbols, cap * sizeof(*f->owned_symbols));
+    if (!data) {
+      free(copy);
+      return NULL;
+    }
+    f->owned_symbols = data;
+    f->owned_symbols_cap = cap;
+  }
+  f->owned_symbols[f->owned_symbols_len++] = copy;
+  return copy;
+}
+
 void ny_nir_func_free(ny_nir_func_t *f) {
   if (!f)
     return;
   for (size_t i = 0; i < f->owned_symbols_len; ++i)
     free(f->owned_symbols[i]);
   free(f->owned_symbols);
-  for (size_t i = 0; i < f->len; ++i)
+  for (size_t i = 0; i < f->len; ++i) {
     free(f->data[i].extra_args);
+    free(f->data[i].arg_sizes);
+  }
   free(f->data);
   memset(f, 0, sizeof(*f));
 }
@@ -48,6 +246,7 @@ void ny_nir_inst_discard(ny_nir_inst_t *in) {
   if (!in)
     return;
   free(in->extra_args);
+  free(in->arg_sizes);
   *in = (ny_nir_inst_t){.op = NY_NIR_NOP,
                         .dst = -1,
                         .a = -1,
@@ -140,6 +339,14 @@ const char *ny_nir_op_name(ny_nir_op_t op) {
     return "load.i64";
   case NYIR_STORE_I64:
     return "store.i64";
+  case NYIR_ADDR_SYMBOL:
+    return "addr.symbol";
+  case NYIR_ALLOCA:
+    return "alloca";
+  case NYIR_COPY_STRUCT:
+    return "copy.struct";
+  case NYIR_CAPTURE_RET:
+    return "capture.ret";
   case NYIR_OP_COUNT:
     break;
   }
@@ -209,6 +416,9 @@ static void ny_nir_normalize_operands(ny_nir_inst_t *inst) {
     inst->f = -1;
     break;
   case NYIR_ADDR_LOCAL:
+  case NYIR_ADDR_SYMBOL:
+  case NYIR_ALLOCA:
+  case NYIR_CAPTURE_RET:
     inst->a = -1;
     inst->b = -1;
     inst->c = -1;
@@ -225,11 +435,15 @@ static void ny_nir_normalize_operands(ny_nir_inst_t *inst) {
     inst->f = -1;
     break;
   case NYIR_STORE_I64:
+  case NYIR_COPY_STRUCT:
     inst->dst = -1;
-    inst->b = -1;
     inst->d = -1;
     inst->e = -1;
     inst->f = -1;
+    if (inst->op == NYIR_STORE_I64)
+      inst->b = -1;
+    else
+      inst->c = -1;
     break;
   case NY_NIR_CALL:
     if (inst->imm <= 0)
@@ -323,11 +537,6 @@ int ny_nir_emit(ny_nir_func_t *f, ny_nir_inst_t inst) {
   if (!f)
     return -1;
   ny_nir_normalize_operands(&inst);
-  if (inst.dst < 0 && inst.op != NY_NIR_STORE_LOCAL && inst.op != NY_NIR_RET &&
-      inst.op != NY_NIR_BR && inst.op != NY_NIR_BR_IF &&
-      inst.op != NY_NIR_LABEL && inst.op != NY_NIR_NOP)
-    inst.dst = f->next_value++;
-  ny_nir_init_inst_metadata(&inst);
   if (f->len >= f->cap) {
     size_t cap = f->cap ? f->cap * 2 : 64;
     ny_nir_inst_t *data = (ny_nir_inst_t *)realloc(f->data, cap * sizeof(*data));
@@ -336,6 +545,16 @@ int ny_nir_emit(ny_nir_func_t *f, ny_nir_inst_t inst) {
     f->data = data;
     f->cap = cap;
   }
+  if (inst.symbol) {
+    inst.symbol = ny_nir_own_symbol_copy(f, inst.symbol);
+    if (!inst.symbol)
+      return -1;
+  }
+  if (inst.dst < 0 && inst.op != NY_NIR_STORE_LOCAL && inst.op != NY_NIR_RET &&
+      inst.op != NY_NIR_BR && inst.op != NY_NIR_BR_IF &&
+      inst.op != NY_NIR_LABEL && inst.op != NY_NIR_NOP)
+    inst.dst = f->next_value++;
+  ny_nir_init_inst_metadata(&inst);
   f->data[f->len++] = inst;
   return inst.dst;
 }
@@ -387,6 +606,8 @@ void ny_nir_dump(FILE *out, const ny_nir_func_t *f, const char *name) {
              in->op == NYIR_F32_TO_F64) {
       if (in->a >= 0)
         fprintf(out, " v%d", in->a);
+    } else if (in->op == NYIR_ADDR_SYMBOL) {
+      fprintf(out, " %s", in->symbol ? in->symbol : "<null>");
     } else if (in->op == NY_NIR_LOAD_LOCAL || in->op == NY_NIR_STORE_LOCAL ||
                in->op == NYIR_ADDR_LOCAL) {
       fprintf(out, " local#%" PRId64, in->imm);

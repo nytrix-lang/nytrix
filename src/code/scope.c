@@ -251,14 +251,16 @@ static int ny_builtin_shadow_cache_get(codegen_t *cg, const char *name,
   ny_builtin_shadow_cache_entry *cache = ny_builtin_shadow_cache(cg);
   if (!cache)
     return -1;
+  size_t fun_len = cg->builtin_shadow_cache_stable_len
+                       ? cg->builtin_shadow_cache_stable_len
+                       : cg->fun_sigs.len;
   size_t base = hash & (NY_BUILTIN_SHADOW_CACHE_SLOTS - 1u);
   for (size_t probe = 0; probe < NY_BUILTIN_SHADOW_CACHE_PROBES; ++probe) {
     ny_builtin_shadow_cache_entry *e =
         &cache[(base + probe) & (NY_BUILTIN_SHADOW_CACHE_SLOTS - 1u)];
     if (!e->state)
       continue;
-    if (e->cg != cg || e->data != cg->fun_sigs.data ||
-        e->fun_len != cg->fun_sigs.len || e->hash != hash ||
+    if (e->cg != cg || e->fun_len != fun_len || e->hash != hash ||
         e->name_len != (uint16_t)name_len ||
         memcmp(e->key, name, name_len) != 0 || e->key[name_len] != '\0')
       continue;
@@ -277,6 +279,9 @@ static void ny_builtin_shadow_cache_put(codegen_t *cg, const char *name,
   ny_builtin_shadow_cache_entry *cache = ny_builtin_shadow_cache(cg);
   if (!cache)
     return;
+  size_t fun_len = cg->builtin_shadow_cache_stable_len
+                       ? cg->builtin_shadow_cache_stable_len
+                       : cg->fun_sigs.len;
   size_t base = hash & (NY_BUILTIN_SHADOW_CACHE_SLOTS - 1u);
   ny_builtin_shadow_cache_entry *e = &cache[base];
   for (size_t probe = 0; probe < NY_BUILTIN_SHADOW_CACHE_PROBES; ++probe) {
@@ -286,8 +291,7 @@ static void ny_builtin_shadow_cache_put(codegen_t *cg, const char *name,
       e = cur;
       break;
     }
-    if (cur->cg == cg && cur->data == cg->fun_sigs.data &&
-        cur->fun_len == cg->fun_sigs.len && cur->hash == hash &&
+    if (cur->cg == cg && cur->fun_len == fun_len && cur->hash == hash &&
         cur->name_len == (uint16_t)name_len &&
         memcmp(cur->key, name, name_len) == 0 &&
         cur->key[name_len] == '\0') {
@@ -297,7 +301,7 @@ static void ny_builtin_shadow_cache_put(codegen_t *cg, const char *name,
   }
   e->cg = cg;
   e->data = cg->fun_sigs.data;
-  e->fun_len = cg->fun_sigs.len;
+  e->fun_len = fun_len;
   e->hash = hash;
   e->name_len = (uint16_t)name_len;
   memcpy(e->key, name, name_len);

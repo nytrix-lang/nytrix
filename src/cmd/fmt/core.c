@@ -8850,10 +8850,44 @@ static int cloc_find_row_index(const ClocRow *rows, size_t row_count, const char
 }
 
 static void cloc_attach_git_diff(const char *repo_root, ClocStats *stats, ClocRow *rows, size_t row_count) {
-  (void)repo_root;
-  (void)stats;
-  (void)rows;
-  (void)row_count;
+  if (!repo_root || !*repo_root || !stats)
+    return;
+  const char *argv[] = {"git", "-C", repo_root, "diff", "--numstat",
+                        "--no-renames", "HEAD", "--", "src", "lib",
+                        "etc/projects", "etc/tests", NULL};
+  char *out = NULL;
+  if (ny_process_capture(argv, &out, false) != 0 || !out) {
+    free(out);
+    return;
+  }
+
+  char *line = out;
+  while (line && *line) {
+    char *next = strchr(line, '\n');
+    if (next)
+      *next++ = '\0';
+    char *tab1 = strchr(line, '\t');
+    char *tab2 = tab1 ? strchr(tab1 + 1, '\t') : NULL;
+    if (tab1 && tab2) {
+      *tab1 = '\0';
+      *tab2 = '\0';
+      const char *path = tab2 + 1;
+      if (line[0] != '-' && tab1[1] != '-' && is_cloc_ext(path)) {
+        int add = atoi(line);
+        int del = atoi(tab1 + 1);
+        int row = cloc_find_row_index(rows, row_count, path, repo_root);
+        stats->diff_files++;
+        stats->diff_add += add;
+        stats->diff_del += del;
+        if (row >= 0) {
+          rows[row].add += add;
+          rows[row].del += del;
+        }
+      }
+    }
+    line = next;
+  }
+  free(out);
 }
 
 static void print_cloc_json(const ClocStats *s, const ClocRow *rows, size_t row_count, int top_n, int full_rows) {

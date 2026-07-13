@@ -1072,7 +1072,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
   if (!target_windows)
-    runtime_args[ra_i++] = "-fno-pie";
+    runtime_args[ra_i++] = ny_env_enabled("NYTRIX_NO_PIE") ? "-fno-pie" : "-fPIE";
   runtime_args[ra_i++] = "-fvisibility=hidden";
   runtime_args[ra_i++] = "-ffunction-sections";
   runtime_args[ra_i++] = "-fdata-sections";
@@ -1131,10 +1131,6 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
 #if !defined(_WIN32)
     if (!target_windows)
       ast_args[aa_i++] = "-fPIC";
-#endif
-#if !defined(__APPLE__) && !defined(_WIN32)
-    if (!target_windows)
-      ast_args[aa_i++] = "-fno-pie";
 #endif
     ast_args[aa_i++] = "-fvisibility=hidden";
     ast_args[aa_i++] = "-ffunction-sections";
@@ -1289,17 +1285,13 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
       NY_LOG_V2("mold/lld not selected; using default system linker.\n");
   }
 #endif
-#if defined(__APPLE__)
-  bool enable_mac_pie = ny_env_enabled("NYTRIX_MAC_PIE");
-  if (enable_mac_pie) {
+#if !defined(_WIN32)
+  if (!target_windows && !ny_env_enabled("NYTRIX_NO_PIE")) {
     argv[idx++] = "-fPIE";
     argv[idx++] = "-Wl,-pie";
-  }
-#else
-#if !defined(_WIN32)
-  if (!target_windows)
+  } else if (!target_windows) {
     argv[idx++] = "-no-pie";
-#endif
+  }
 #endif
   argv[idx++] = obj_path;
 #if defined(__arm__) && !defined(__aarch64__)

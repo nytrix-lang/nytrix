@@ -1,4 +1,5 @@
 #include "base/util.h"
+#include "code/jit.h"
 #include "code/llvm.h"
 #include "code/priv.h"
 #include "code/typeinfer.h"
@@ -2106,6 +2107,7 @@ void codegen_emit(codegen_t *cg) {
   NY_COMPILER_ASSERT(cg->builder != NULL, "codegen_emit missing LLVM builder");
   if (!cg->prog)
     return;
+  cg->builtin_shadow_cache_stable_len = cg->fun_sigs.len;
   NY_COMPILER_ASSERT(cg->prog->body.len <= cg->prog->body.cap,
                      "codegen_emit program body vector len exceeds cap");
   NY_COMPILER_ASSERT(cg->prog->body.data != NULL || cg->prog->body.len == 0,
@@ -2724,6 +2726,10 @@ void codegen_dispose(codegen_t *cg) {
   if (cg->ee) {
     LLVMDisposeExecutionEngine(cg->ee);
     cg->ee = NULL;
+  }
+  if (cg->orc_jit) {
+    ny_orc_jit_dispose(cg->orc_jit);
+    cg->orc_jit = NULL;
   }
   if (cg->builder) {
     LLVMDisposeBuilder(cg->builder);

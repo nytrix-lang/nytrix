@@ -309,7 +309,7 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
   if (!opt || !source || !output_path)
     return;
   uint64_t h = NY_FNV1A64_OFFSET_BASIS;
-  h = ny_fnv1a64_cstr("aot-cache-v9", h);
+  h = ny_fnv1a64_cstr("aot-cache-v10", h);
   h = ny_fnv1a64_cstr(VERSION, h);
 #ifdef NYTRIX_VERSION_COMMIT
   h = ny_fnv1a64_cstr(NYTRIX_VERSION_COMMIT, h);
@@ -346,6 +346,7 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
     const char *const host_envs[] = {
         "NYTRIX_HOST_CFLAGS",
         "NYTRIX_HOST_LDFLAGS",
+        "NYTRIX_NO_PIE",
         "NYTRIX_ASSUME_INT",
         "NYTRIX_COMPILER_ASSERTS",
         "NYTRIX_DEBUG_LOCALS",
@@ -739,55 +740,16 @@ static bool ny_std_bc_symbol_is_mixed_codegen_artifact(const char *name) {
          strncmp(name, "__ny_callable_adapter_env_", 26) == 0;
 }
 
-static bool ny_std_bc_value_is_global_ref(LLVMValueRef v) {
-  if (!v)
-    return false;
-  LLVMValueKind kind = LLVMGetValueKind(v);
-  return kind == LLVMFunctionValueKind ||
-         kind == LLVMGlobalAliasValueKind ||
-         kind == LLVMGlobalIFuncValueKind ||
-         kind == LLVMGlobalVariableValueKind;
-}
-
-static bool ny_std_bc_value_kind_has_operands(LLVMValueKind kind) {
-  return kind == LLVMConstantExprValueKind ||
-         kind == LLVMConstantArrayValueKind ||
-         kind == LLVMConstantStructValueKind ||
-         kind == LLVMConstantVectorValueKind ||
-#if defined(NYTRIX_HAS_LLVM_CONSTANT_PTR_AUTH_VALUE_KIND)
-         kind == LLVMConstantPtrAuthValueKind ||
-#endif
-         kind == LLVMInstructionValueKind;
-}
-
-static bool ny_std_bc_value_refs_mixed_codegen_artifact(LLVMValueRef v,
-                                                        unsigned depth) {
-  if (!v || depth > 32)
-    return false;
-  LLVMValueKind kind = LLVMGetValueKind(v);
-  if (ny_std_bc_value_is_global_ref(v)) {
-    const char *name = LLVMGetValueName(v);
-    return ny_std_bc_symbol_is_mixed_codegen_artifact(name);
-  }
-  if (!ny_std_bc_value_kind_has_operands(kind))
-    return false;
-  int n = LLVMGetNumOperands(v);
-  if (n <= 0)
-    return false;
-  for (int i = 0; i < n; ++i) {
-    LLVMValueRef op = LLVMGetOperand(v, (unsigned)i);
-    if (ny_std_bc_value_refs_mixed_codegen_artifact(op, depth + 1))
-      return true;
-  }
-  return false;
-}
-
 static bool ny_std_bc_module_is_link_safe(LLVMModuleRef module,
                                           const char **bad_symbol) {
   if (bad_symbol)
     *bad_symbol = NULL;
   if (!module)
     return false;
+  /* Every referenced function/global is also present in its module symbol
+   * list, including declarations.  Checking those lists once proves that no
+   * mixed-codegen artifact can be reached without recursively revisiting
+   * every instruction and constant operand in the module. */
   for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;
        fn = LLVMGetNextFunction(fn)) {
     const char *name = LLVMGetValueName(fn);
@@ -796,30 +758,11 @@ static bool ny_std_bc_module_is_link_safe(LLVMModuleRef module,
         *bad_symbol = name;
       return false;
     }
-    if (!LLVMIsDeclaration(fn)) {
-      for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(fn); bb;
-           bb = LLVMGetNextBasicBlock(bb)) {
-        for (LLVMValueRef inst = LLVMGetFirstInstruction(bb); inst;
-             inst = LLVMGetNextInstruction(inst)) {
-          if (ny_std_bc_value_refs_mixed_codegen_artifact(inst, 0)) {
-            if (bad_symbol)
-              *bad_symbol = LLVMGetValueName(inst);
-            return false;
-          }
-        }
-      }
-    }
   }
   for (LLVMValueRef gv = LLVMGetFirstGlobal(module); gv;
        gv = LLVMGetNextGlobal(gv)) {
     const char *name = LLVMGetValueName(gv);
     if (ny_std_bc_symbol_is_mixed_codegen_artifact(name)) {
-      if (bad_symbol)
-        *bad_symbol = name;
-      return false;
-    }
-    LLVMValueRef init = LLVMGetInitializer(gv);
-    if (init && ny_std_bc_value_refs_mixed_codegen_artifact(init, 0)) {
       if (bad_symbol)
         *bad_symbol = name;
       return false;

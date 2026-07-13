@@ -1755,7 +1755,9 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
   ny_usage_items((const ny_usage_entry_t[]){
       {NY_CLR_GREEN, "-run", "Build a native executable and run it (AOT auto)"},
       {NY_CLR_GREEN, "--run=MODE", "MODE: auto | aot | jit"},
-      {NY_CLR_GREEN, "--jit", "Run through MCJIT instead of native AOT"},
+      {NY_CLR_GREEN, "--jit", "Run through LLVM JIT instead of native AOT"},
+      {NY_CLR_GREEN, "--jit-engine=ENGINE",
+       "LLVM JIT engine: orc | mcjit (default: mcjit)"},
       {NY_CLR_GREEN, "--safe-run[=LIMITS]",
        "Run with CPU/memory/file/process limits (off by default)"},
       {NY_CLR_GREEN, "--sanitize=KIND",
@@ -2053,8 +2055,11 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       } else if (strcmp(a, "--native-only") == 0) {
 #if defined(__x86_64__) || defined(_M_X64)
         ny_set_native_backend_or_die(opt, "x86_64", argv[0]);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        ny_set_native_backend_or_die(opt, "aarch64", argv[0]);
 #else
-        fprintf(stderr, "--native-only is currently supported on x86-64 hosts\n");
+        fprintf(stderr,
+                "--native-only requires an x86-64 or AArch64 host encoder\n");
         exit(1);
 #endif
         opt->native_only = true;
@@ -2331,6 +2336,16 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
                  strcmp(a, "--run-jit") == 0 || strcmp(a, "--run=jit") == 0) {
         opt->run_jit = true;
         opt->run_aot = false;
+      } else if (strncmp(a, "--jit-engine=", 13) == 0) {
+        const char *val = a + 13;
+        if (strcmp(val, "orc") != 0 && strcmp(val, "mcjit") != 0) {
+          fprintf(stderr,
+                  "%s: --jit-engine: expected orc|mcjit, got '%s'\n",
+                  argv[0], val);
+          ny_options_usage(argv[0]);
+          exit(1);
+        }
+        opt->jit_engine = val;
       } else if (strncmp(a, "--run=", 6) == 0) {
         fprintf(stderr, "invalid run mode: %s (expected auto|aot|jit)\n",
                 a + 6);

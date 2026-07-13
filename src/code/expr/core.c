@@ -142,6 +142,27 @@ static LLVMValueRef expr_value_from_binding(codegen_t *cg, binding *b) {
                             (LLVMValueRef[]){ny_bitcast(cg, fv, cg->type_i64, "")}, 1,
                             "box");
   }
+  if (b->is_c_abi_global && b->is_slot) {
+    LLVMTypeRef stored_ty = LLVMGlobalGetValueType(b->value);
+    LLVMValueRef raw = LLVMBuildLoad2(cg->builder, stored_ty, b->value,
+                                      "c_global_load");
+    LLVMTypeKind kind = LLVMGetTypeKind(stored_ty);
+    if (kind == LLVMPointerTypeKind)
+      return ny_ptr2i64(cg, raw, "c_global_ptr");
+    if (kind == LLVMIntegerTypeKind) {
+      unsigned bits = LLVMGetIntTypeWidth(stored_ty);
+      if (bits < 64)
+        raw = b->is_c_abi_unsigned
+                  ? LLVMBuildZExt(cg->builder, raw, cg->type_i64,
+                                 "c_global_zext")
+                  : LLVMBuildSExt(cg->builder, raw, cg->type_i64,
+                                 "c_global_sext");
+      else if (bits > 64)
+        raw = LLVMBuildTrunc(cg->builder, raw, cg->type_i64,
+                            "c_global_trunc");
+      return ny_tag_int(cg, raw);
+    }
+  }
   if (b->is_slot)
     return ny_load(cg, b->value, "");
   if (b->is_int_direct && b->is_int_raw_direct)
@@ -2770,15 +2791,17 @@ static bool ny_fun_sig_needs_tagged_callable_adapter(fun_sig *sig) {
 static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
                                                        fun_sig *target,
                                                        token_t tok,
-                                                       bool hidden_env) {
+                                                       bool hidden_env,
+                                                       bool native_abi) {
   if (!cg || !target || !target->name)
     return NULL;
   uint64_t h =
       target->name_hash ? target->name_hash : ny_hash64_cstr(target->name);
   char adapter_name_buf[96];
   snprintf(adapter_name_buf, sizeof(adapter_name_buf),
-           hidden_env ? "__ny_callable_adapter_env_%llx_%d"
-                      : "__ny_callable_adapter_%llx_%d",
+           native_abi ? "__ny_native_callback_adapter_%llx_%d"
+           : hidden_env ? "__ny_callable_adapter_env_%llx_%d"
+                        : "__ny_callable_adapter_%llx_%d",
            (unsigned long long)h, target->arity);
   LLVMValueRef existing = ny_get_named_fn(cg, adapter_name_buf);
   if (existing)
@@ -2808,7 +2831,10 @@ static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
     char pname_buf[24];
     snprintf(pname_buf, sizeof(pname_buf), "__arg%d", i);
     const char *pname = arena_strndup(cg->arena, pname_buf, strlen(pname_buf));
-    param_t p = {.name = pname};
+    param_t p = {.name = pname,
+                 .type = native_abi
+                             ? ny_sig_param_type(target, (size_t)i)
+                             : NULL};
     vec_push_arena(cg->arena, &wrapper->as.fn.params, p);
 
     expr_t *arg_ident = arena_alloc(cg->arena, sizeof(*arg_ident));
@@ -2826,6 +2852,8 @@ static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
   stmt_t *body = stmt_new(cg->arena, NY_S_BLOCK, tok);
   vec_push_arena(cg->arena, &body->as.block.body, ret);
   wrapper->as.fn.body = body;
+  if (native_abi)
+    wrapper->as.fn.return_type = target->return_type;
 
   scope sc[64] = {0};
   binding_list empty_captures = {0};
@@ -2835,6 +2863,17 @@ static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
   if (adapter)
     LLVMSetLinkage(adapter, LLVMInternalLinkage);
   return adapter;
+}
+
+LLVMValueRef ny_native_callback_adapter_value(codegen_t *cg, expr_t *expr) {
+  if (!cg || !expr || expr->kind != NY_E_IDENT || !expr->as.ident.name)
+    return NULL;
+  fun_sig *target = lookup_fun(cg, expr->as.ident.name, expr->as.ident.hash);
+  if (!target || target->is_extern || target->is_variadic)
+    return NULL;
+  LLVMValueRef adapter = ny_fun_sig_tagged_callable_adapter(
+      cg, target, expr->tok, false, true);
+  return adapter ? ny_ptr2i64(cg, adapter, "native_callback") : NULL;
 }
 
 static bool ny_named_callable_values_need_closure(codegen_t *cg) {
@@ -4431,12 +4470,77 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
     }
   }
 
+
+  const char *jit_engine = getenv("NYTRIX_JIT_ENGINE");
+  if (jit_engine && strcmp(jit_engine, "orc") == 0) {
+    if (tcg.debug_symbols)
+      LLVMStripModuleDebugInfo(mod);
+
+    char *orc_error = NULL;
+    if (!ny_orc_jit_ensure_engine(cg, &orc_error)) {
+      NY_LOG_ERR("Comptime ORC JIT error (ensure): %s\n", orc_error ? orc_error : "unknown");
+      free(orc_error);
+      codegen_dispose(&tcg);
+      if (ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok, "failed to ensure orc jit engine");
+    }
+
+    uint64_t saddr = 0;
+    void *rt = NULL;
+    bool module_consumed = false;
+    bool executed = ny_orc_jit_execute(
+        &tcg, mod, ctm_ctx, &saddr, NULL, &rt, &module_consumed, &orc_error);
+    if (module_consumed) {
+      tcg.module = NULL;
+      tcg.ctx = NULL;
+      tcg.llvm_ctx_owned = false;
+      ctm_ctx_owned = false;
+    }
+    if (!executed) {
+      NY_LOG_ERR("Comptime ORC JIT error (execute): %s\n", orc_error ? orc_error : "unknown");
+      free(orc_error);
+      codegen_dispose(&tcg);
+      if (!module_consumed && ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok, "failed to execute orc jit module");
+    }
+    free(orc_error);
+
+    int64_t res = 1;
+    if (saddr) {
+      if (!ny_jit_prepare_execution(saddr)) {
+        if (prev_bb)
+          ny_pos(cg, prev_bb);
+        ny_orc_jit_remove_module(rt);
+        codegen_dispose(&tcg);
+        return expr_fail(cg, body->tok,
+                         "comptime JIT code memory is not executable");
+      }
+      res = ((int64_t (*)(void))saddr)();
+    }
+
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+
+    LLVMValueRef materialized =
+        ny_ct_jit_value_to_llvm(cg, res, body->tok, 0);
+
+    ny_orc_jit_remove_module(rt);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    if (materialized)
+      return materialized;
+    return expr_fail(cg, body->tok,
+                     "comptime value failed to materialize from AST interp or JIT");
+  }
+
   LLVMExecutionEngineRef ee = NULL;
+
   struct LLVMMCJITCompilerOptions jit_opts;
   ny_jit_init_native_once();
   ny_jit_init_options(&jit_opts, mod);
-  if (ny_module_target_is_apple_arm64(mod))
-    jit_opts.EnableFastISel = 0;
   ny_jit_add_runtime_symbols();
   if (LLVMCreateMCJITCompilerForModule(&ee, mod, &jit_opts, sizeof(jit_opts),
                                        &err) != 0) {
@@ -4450,12 +4554,37 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   register_jit_symbols(ee, mod, &tcg);
   ny_jit_map_unresolved_symbols(ee, mod, entry_name);
   LLVMValueRef entry_val = LLVMGetNamedFunction(mod, entry_name);
-  uint64_t addr = entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
+  int64_t res = 1;
+
+  uint64_t addr =
+      entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
   if (!addr)
     addr = LLVMGetFunctionAddress(ee, entry_name);
-  int64_t res = 1;
+  char *jit_exec_err = NULL;
+  if (LLVMExecutionEngineGetErrMsg(ee, &jit_exec_err)) {
+    NY_LOG_ERR("Comptime JIT finalization error: %s\n",
+               jit_exec_err ? jit_exec_err : "unknown error");
+    if (jit_exec_err)
+      LLVMDisposeMessage(jit_exec_err);
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    LLVMDisposeExecutionEngine(ee);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok, "failed to finalize comptime JIT memory");
+  }
   if (addr) {
-    ny_jit_prepare_execution();
+    if (!ny_jit_prepare_execution(addr)) {
+      if (prev_bb)
+        ny_pos(cg, prev_bb);
+      LLVMDisposeExecutionEngine(ee);
+      codegen_dispose(&tcg);
+      if (ctm_ctx_owned)
+        LLVMContextDispose(ctm_ctx);
+      return expr_fail(cg, body->tok,
+                       "comptime JIT code memory is not executable");
+    }
     res = ((int64_t (*)(void))addr)();
   }
 

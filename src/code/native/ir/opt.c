@@ -545,29 +545,45 @@ bool ny_nir_dce(ny_nir_func_t *f) {
   if (!used)
     return false;
 
+  int64_t max_label = -1;
+  for (size_t i = 0; i < f->len; ++i) {
+    const ny_nir_inst_t *in = &f->data[i];
+    if ((in->op == NY_NIR_LABEL || in->op == NY_NIR_BR ||
+         in->op == NY_NIR_BR_IF) &&
+        in->imm >= 0 && in->imm > max_label)
+      max_label = in->imm;
+  }
+  bool *label_referenced = NULL;
+  if (max_label >= 0 && (uint64_t)max_label <= (uint64_t)f->len * 4u + 1024u) {
+    label_referenced =
+        (bool *)calloc((size_t)max_label + 1u, sizeof(*label_referenced));
+    if (!label_referenced) {
+      free(used);
+      return false;
+    }
+    for (size_t i = 0; i < f->len; ++i) {
+      const ny_nir_inst_t *in = &f->data[i];
+      if ((in->op == NY_NIR_BR || in->op == NY_NIR_BR_IF) && in->imm >= 0 &&
+          in->imm <= max_label)
+        label_referenced[in->imm] = true;
+    }
+  }
+#define NIR_LABEL_REFERENCED(label)                                            \
+  (label_referenced && (label) >= 0 && (label) <= max_label                    \
+       ? label_referenced[(size_t)(label)]                                     \
+       : ny_nir_label_referenced(f, (label)))
+
   bool reachable = true;
   bool fallthrough = true;
   bool first_inst = true;
   for (size_t i = 0; i < f->len; ++i) {
     ny_nir_inst_t *in = &f->data[i];
     if (in->op == NY_NIR_LABEL) {
-      reachable = first_inst || fallthrough || ny_nir_label_referenced(f, in->imm);
+      reachable = first_inst || fallthrough || NIR_LABEL_REFERENCED(in->imm);
       fallthrough = reachable;
     }
     if (!reachable && in->op != NY_NIR_LABEL) {
-      free(in->extra_args);
-      in->op = NY_NIR_NOP;
-      in->dst = -1;
-      in->a = -1;
-      in->b = -1;
-      in->c = -1;
-      in->d = -1;
-      in->e = -1;
-      in->f = -1;
-      in->imm = 0;
-      in->symbol = NULL;
-      in->extra_args = NULL;
-      in->extra_args_len = 0;
+      ny_nir_inst_discard(in);
       first_inst = false;
       continue;
     }
@@ -586,22 +602,10 @@ bool ny_nir_dce(ny_nir_func_t *f) {
                        in->op == NY_NIR_RET || in->op == NY_NIR_BR ||
                        in->op == NY_NIR_BR_IF;
     if (in->op == NY_NIR_LABEL)
-      side_effect = ny_nir_label_referenced(f, in->imm);
+      side_effect = NIR_LABEL_REFERENCED(in->imm);
     bool keep = side_effect || (in->dst >= 0 && used[in->dst]);
     if (!keep) {
-      free(in->extra_args);
-      in->op = NY_NIR_NOP;
-      in->dst = -1;
-      in->a = -1;
-      in->b = -1;
-      in->c = -1;
-      in->d = -1;
-      in->e = -1;
-      in->f = -1;
-      in->imm = 0;
-      in->symbol = NULL;
-      in->extra_args = NULL;
-      in->extra_args_len = 0;
+      ny_nir_inst_discard(in);
       continue;
     }
     if (in->a >= 0)
@@ -621,7 +625,9 @@ bool ny_nir_dce(ny_nir_func_t *f) {
         used[in->extra_args[k]] = true;
     }
   }
+  free(label_referenced);
   free(used);
+#undef NIR_LABEL_REFERENCED
   return true;
 }
 

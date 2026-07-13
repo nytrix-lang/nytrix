@@ -6,21 +6,25 @@ module std.math.logic.prolog(
 
 use std.core
 
+;; Returns the result of the `variable` operation.
 fn variable(str name) dict {
    assert(name.len > 0, "variable expects a non-empty name")
    return {"kind":"variable", "name":name}
 }
 
+;; Returns the result of the `term` operation.
 fn term(str name, list args=[]) dict {
    assert(name.len > 0, "term expects a non-empty predicate name")
    return {"kind":"term", "name":name, "args":args}
 }
 
+;; Returns the result of the `fact` operation.
 fn fact(dict head) dict {
    assert(is_term(head), "fact expects a term")
    return {"kind":"clause", "head":head, "body":[]}
 }
 
+;; Returns the result of the `rule` operation.
 fn rule(dict head, list body) dict {
    assert(is_term(head), "rule head must be a term")
    mut i = 0
@@ -31,11 +35,13 @@ fn rule(dict head, list body) dict {
    return {"kind":"clause", "head":head, "body":body}
 }
 
+;; Returns true when is variable.
 fn is_variable(any value) bool {
    is_dict(value) && value.get("kind", "") == "variable" &&
       is_str(value.get("name", 0)) && value.get("name", "").len > 0
 }
 
+;; Returns true when is term.
 fn is_term(any value) bool {
    if !is_dict(value) || value.get("kind", "") != "term" ||
       !is_str(value.get("name", 0)) || !is_list(value.get("args", 0)) {
@@ -44,6 +50,7 @@ fn is_term(any value) bool {
    true
 }
 
+;; Returns true when is clause.
 fn is_clause(any value) bool {
    if !is_dict(value) || value.get("kind", "") != "clause" ||
       !is_term(value.get("head", 0)) || !is_list(value.get("body", 0)) {
@@ -69,6 +76,7 @@ fn _walk(any value, dict substitution) any {
    current
 }
 
+;; Returns the result of the `substitute` operation.
 fn substitute(any value, dict substitution) any {
    def walked = _walk(value, substitution)
    if is_variable(walked) { return walked }
@@ -129,6 +137,7 @@ fn _unify(any left, any right, dict substitution) dict {
    return {"ok":false, "substitution":substitution, "reason":"value mismatch"}
 }
 
+;; Returns the result of the `unify` operation.
 fn unify(any left, any right, dict substitution={}) dict {
    _unify(left, right, substitution)
 }
@@ -165,6 +174,12 @@ fn _solve(list knowledge, list goals, dict substitution, dict state,
       state["reason"] = "depth limit"
       return nil
    }
+   if state.get("nodes") >= state.get("max_nodes") {
+      state["complete"] = false
+      state["reason"] = "node limit"
+      return nil
+   }
+   state["nodes"] = state.get("nodes") + 1
    if depth > state.get("peak_depth") { state["peak_depth"] = depth }
    def cells = 1 + goals.len + substitution.len
    if state.get("memory_cells") + cells > state.get("max_memory_cells") {
@@ -218,6 +233,7 @@ fn _solve(list knowledge, list goals, dict substitution, dict state,
    nil
 }
 
+;; Returns the result of the `bindings` operation.
 fn bindings(list variables, dict substitution) dict {
    mut out = {}
    mut i = 0
@@ -251,11 +267,12 @@ fn _variables_into(any value, list variables) list {
    variables
 }
 
+;; Returns the result of the `query` operation.
 fn query(list knowledge, any goals, int max_steps=10000,
    int max_solutions=256, int max_depth=256, int max_variables=256,
-   int max_memory_cells=1000000) dict {
+   int max_memory_cells=1000000, int max_nodes=100000) dict {
    assert(max_steps > 0 && max_solutions > 0 && max_depth > 0 &&
-      max_variables > 0 && max_memory_cells > 0,
+      max_variables > 0 && max_memory_cells > 0 && max_nodes > 0,
       "query budgets must be positive")
    mut i = 0
    while i < knowledge.len {
@@ -276,12 +293,13 @@ fn query(list knowledge, any goals, int max_steps=10000,
    }
    if query_variables.len > max_variables {
       return {"decided":false, "reason":"variable limit", "steps":0,
-         "peak_depth":0, "memory_cells":0, "peak_memory_cells":0,
+         "nodes":0, "peak_depth":0, "memory_cells":0, "peak_memory_cells":0,
          "answers":[], "solutions":[]}
    }
    mut state = {"steps":0, "max_steps":max_steps,
       "max_solutions":max_solutions, "solutions":[],
       "max_depth":max_depth, "peak_depth":0,
+      "nodes":0, "max_nodes":max_nodes,
       "max_memory_cells":max_memory_cells, "memory_cells":0,
       "peak_memory_cells":0, "complete":true, "reason":"exhausted"}
    _solve(knowledge, goal_list, {}, state, 0)
@@ -293,6 +311,7 @@ fn query(list knowledge, any goals, int max_steps=10000,
    }
    return {"decided":state.get("complete"), "reason":state.get("reason"),
       "steps":state.get("steps"), "peak_depth":state.get("peak_depth"),
+      "nodes":state.get("nodes"),
       "memory_cells":state.get("memory_cells"),
       "peak_memory_cells":state.get("peak_memory_cells"), "answers":answers,
       "solutions":state.get("solutions")}
