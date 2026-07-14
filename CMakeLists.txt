@@ -569,6 +569,7 @@ if (NOT _nytrix_enable_z3_lc STREQUAL "off")
     NAMES z3.h
     HINTS ${NYTRIX_Z3_PC_INCLUDE_DIRS}
     PATHS
+      "${NYTRIX_ROOT}/build/vendor/include"
       "$ENV{MSYSTEM_PREFIX}/include"
       "$ENV{MINGW_PREFIX}/include"
       "/opt/homebrew/include"
@@ -994,6 +995,9 @@ set_target_properties(ny PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   OUTPUT_NAME_DEBUG "ny_debug"
 )
+if(UNIX AND NOT APPLE AND EXISTS "${NYTRIX_ROOT}/build/vendor/lib/host")
+  set_property(TARGET ny PROPERTY BUILD_RPATH "$ORIGIN/../vendor/lib/host")
+endif()
 if (WIN32)
   # Set PDB properties for Windows builds
   set_target_properties(ny PROPERTIES

@@ -41,7 +41,7 @@ typedef struct ny_native_target_info_t {
   const char *symbol_prefix;
   const char *float_abi_name;
   size_t pointer_bits;
-  const char *gp_arg_regs[6];
+  const char *gp_arg_regs[8];
   size_t gp_arg_reg_count;
   size_t shadow_space_bytes;
   size_t stack_align;

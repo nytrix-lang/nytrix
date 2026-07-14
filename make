@@ -1883,8 +1883,6 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
                 log("BUILD", f"cmake: vendored LLVM at {_rel_or_abs(vendored_llvm_config)}")
             # rpath-link so the linker resolves transitive .so deps.
             extra_ldflags.append(f"-Wl,-rpath-link,{vendor_dir}")
-            # rpath so the built binary finds libs at runtime without LD_LIBRARY_PATH.
-            extra_ldflags.append(f"-Wl,-rpath,'$ORIGIN/../vendor/lib/host'")
     host_cflags = cmake_flag_list(os.environ.get("NYTRIX_HOST_CFLAGS") or "")
     raw_ldflags = os.environ.get("NYTRIX_HOST_LDFLAGS") or ""
     if extra_ldflags:
@@ -5512,6 +5510,20 @@ def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> 
 
     vendored_bin = vendor_dir / "bin"
     vendored_include = vendor_dir / "include"
+
+    # Z3's shared library is useful to a fresh source build only when its public
+    # headers travel with it. Copy the complete public z3*.h family because
+    # z3.h includes the generated API and version headers beside it.
+    z3_header = next((p for p in (
+        Path("/usr/include/z3.h"), Path("/usr/local/include/z3.h"),
+    ) if p.exists()), None)
+    if z3_header is not None and any(p.name.startswith("libz3.so") for p in lib_dir.glob("libz3.so*")):
+        vendored_include.mkdir(parents=True, exist_ok=True)
+        copied_z3_headers = 0
+        for header in sorted(z3_header.parent.glob("z3*.h")):
+            _copy2_if_different(header, vendored_include / header.name)
+            copied_z3_headers += 1
+        log("VENDOR", f"bundled {copied_z3_headers} Z3 public headers")
 
     # Find the llvm-config matching the bundled LLVM version.
     # Must use the SYSTEM llvm-config, not the vendored one (which doesn't have
