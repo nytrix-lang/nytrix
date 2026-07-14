@@ -2440,11 +2440,11 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
         continue;
       if (has_user_top_funcs && s->kind == NY_S_VAR) {
         for (size_t j = 0; j < s->as.var.names.len; ++j) {
-          const char *name = s->as.var.names.data[j];
-          if (name && *name)
+          const char *blocked_name = s->as.var.names.data[j];
+          if (blocked_name && *blocked_name)
             assigned_name_add(&top_entry_blocked_names,
                               &top_entry_blocked_hashes,
-                              top_entry_blocked_bloom, name);
+                              top_entry_blocked_bloom, blocked_name);
         }
       }
       ny_collect_top_entry_blocked_names(s, &top_entry_blocked_names,

@@ -831,7 +831,7 @@ static void ny_dump_diagnose_finalize(const ny_options *opt,
   (void)ny_reemit_bitcode_via_ir(art_mod, bc_path);
   ny_write_ir_stats_file(opt, "diag.stats.txt", art_mod);
   {
-    const char *scope =
+    const char *scope_name =
         (opt->dump_scope == NY_DUMP_SCOPE_LIB)
             ? "lib"
             : ((opt->dump_scope == NY_DUMP_SCOPE_BOTH) ? "both" : "program");
@@ -839,7 +839,7 @@ static void ny_dump_diagnose_finalize(const ny_options *opt,
     int n = snprintf(
         summary, sizeof(summary),
         "dump_dir=%s\nscope=%s\nwarn_level=%d\ndiag_compact=%d\nopt_level=%d\n",
-        ny_dump_dir(opt), scope, opt->warn_level, opt->diag_compact ? 1 : 0,
+        ny_dump_dir(opt), scope_name, opt->warn_level, opt->diag_compact ? 1 : 0,
         opt_level);
     if (n > 0)
       ny_write_file(summary_path, summary, (size_t)n);
@@ -1007,12 +1007,12 @@ static LLVMModuleRef ny_prepare_ir_dump_module(const ny_options *opt,
     return NULL;
   if (!opt || !opt->debug_symbols)
     LLVMStripModuleDebugInfo(dump_mod);
-  ny_dump_scope_t scope = NY_DUMP_SCOPE_PROGRAM;
+  ny_dump_scope_t dump_scope = NY_DUMP_SCOPE_PROGRAM;
   if (opt)
-    scope = opt->dump_scope;
-  if (scope == NY_DUMP_SCOPE_PROGRAM)
+    dump_scope = opt->dump_scope;
+  if (dump_scope == NY_DUMP_SCOPE_PROGRAM)
     ny_ir_externalize_std_definitions(opt, dump_mod);
-  else if (scope == NY_DUMP_SCOPE_LIB)
+  else if (dump_scope == NY_DUMP_SCOPE_LIB)
     ny_ir_externalize_user_definitions(opt, dump_mod);
   return dump_mod;
 }

@@ -5514,9 +5514,11 @@ def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> 
     # Z3's shared library is useful to a fresh source build only when its public
     # headers travel with it. Copy the complete public z3*.h family because
     # z3.h includes the generated API and version headers beside it.
-    z3_header = next((p for p in (
-        Path("/usr/include/z3.h"), Path("/usr/local/include/z3.h"),
-    ) if p.exists()), None)
+    z3_include_candidates = [Path("/usr/include"), Path("/usr/local/include")]
+    z3_pc = run_capture(["pkg-config", "--variable=includedir", "z3"])
+    if z3_pc.returncode == 0 and z3_pc.stdout.strip():
+        z3_include_candidates.insert(0, Path(z3_pc.stdout.strip()))
+    z3_header = next((p / "z3.h" for p in z3_include_candidates if (p / "z3.h").exists()), None)
     if z3_header is not None and any(p.name.startswith("libz3.so") for p in lib_dir.glob("libz3.so*")):
         vendored_include.mkdir(parents=True, exist_ok=True)
         copied_z3_headers = 0
@@ -5524,6 +5526,8 @@ def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> 
             _copy2_if_different(header, vendored_include / header.name)
             copied_z3_headers += 1
         log("VENDOR", f"bundled {copied_z3_headers} Z3 public headers")
+    elif any(p.name.startswith("libz3.so") for p in lib_dir.glob("libz3.so*")):
+        log("VENDOR", "libz3 was bundled but z3.h was not found; install matching Z3 development headers before creating a source package")
 
     # Find the llvm-config matching the bundled LLVM version.
     # Must use the SYSTEM llvm-config, not the vendored one (which doesn't have
