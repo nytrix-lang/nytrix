@@ -173,7 +173,9 @@ static bool hm_occurs(ny_hm_type_t *needle, ny_hm_type_t *haystack) {
 
 static bool hm_numeric_name(const char *name) {
   return tp_is_int_type(name) || tp_is_float_type(name) ||
-         (name && strcmp(name, "number") == 0);
+         (name && (strcmp(name, "number") == 0 ||
+                    strcmp(name, "float") == 0 ||
+                    strcmp(name, "integer") == 0));
 }
 
 static bool hm_integer_name(const char *name) {

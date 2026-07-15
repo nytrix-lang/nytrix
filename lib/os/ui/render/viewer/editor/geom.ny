@@ -81,12 +81,14 @@ fn focus_next(str current, bool project_on=true, bool dock_on=false) str {
 
 ;; Returns the result of the `visible_rows` operation.
 fn visible_rows(f64 edit_h) int {
-   max(1, int((edit_h - 12.0) / LINE_H))
+   def line_h = LINE_H > 0.0 ? LINE_H : 22.0
+   max(1, int((edit_h - 12.0) / line_h))
 }
 
 ;; Returns the result of the `row_at` operation.
 fn row_at(dict lay, f64 y, int scroll) int {
-   int((y - float(lay.get("edit_y", 0.0)) - 6.0) / LINE_H) + scroll
+   def line_h = LINE_H > 0.0 ? LINE_H : 22.0
+   int((y - float(lay.get("edit_y", 0.0)) - 6.0) / line_h) + scroll
 }
 
 @inline

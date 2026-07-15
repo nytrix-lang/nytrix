@@ -52,7 +52,9 @@ fn _num_from_any(any v, any fallback=0) any {
 }
 
 fn _list_num_safe(any xs, int idx, any fallback=0) any {
-   if !is_list(xs) || idx < 0 || idx >= xs.len { return fallback }
+   ;; Public render APIs accept both ordinary lists and fixed vector tuples.
+   ;; Treating tuples as empty silently serialized directional lights as zero.
+   if !(is_list(xs) || is_tuple(xs)) || idx < 0 || idx >= xs.len { return fallback }
    _num_from_any(xs.get(idx, fallback), fallback)
 }
 
@@ -2782,19 +2784,28 @@ fn set_scene_lights(any lights) any {
             def outer = _num_from_any(l.get("outer_cone_cos", 0.0), 0.0)
             def typ_s = to_str(l.get("type", "point"))
             def typ = typ_s == "directional" ? 0.0 : (typ_s == "spot" ? 2.0 : 1.0)
+            def px = float(pos.get(0, 0.0))
+            def py = float(pos.get(1, 0.0))
+            def pz = float(pos.get(2, 0.0))
+            def cr = float(col.get(0, 1.0))
+            def cg = float(col.get(1, 1.0))
+            def cb = float(col.get(2, 1.0))
+            def dx = float(dir.get(0, 0.0))
+            def dy = float(dir.get(1, 0.0))
+            def dz = float(dir.get(2, -1.0))
             def light_peak = max(
-               _list_num_safe(col, 0, 1.0),
-               max(_list_num_safe(col, 1, 1.0), _list_num_safe(col, 2, 1.0))
+               cr,
+               max(cg, cb)
             ) * intensity
             if light_peak > peak_light_value { peak_light_value = light_peak }
-            def pos_type = [_list_num_safe(pos, 0, 0.0), _list_num_safe(pos, 1, 0.0), _list_num_safe(pos, 2, 0.0), typ]
+            def pos_type = [px, py, pz, typ]
             def col_rng = [
-               _list_num_safe(col, 0, 1.0) * intensity,
-               _list_num_safe(col, 1, 1.0) * intensity,
-               _list_num_safe(col, 2, 1.0) * intensity,
+               cr * intensity,
+               cg * intensity,
+               cb * intensity,
                range
             ]
-            def dir_out = [_list_num_safe(dir, 0, 0.0), _list_num_safe(dir, 1, 0.0), _list_num_safe(dir, 2, -1.0), outer]
+            def dir_out = [dx, dy, dz, outer]
             if new_count == 0 {
                new_l0p, new_l0c = pos_type, col_rng
                new_l0d = dir_out
@@ -2804,18 +2815,18 @@ fn set_scene_lights(any lights) any {
             }
             if tmp_slab {
                def dst = tmp_slab + new_count * 56
-               store32_f32(dst, _list_num_safe(pos, 0, 0.0), 0)
-               store32_f32(dst, _list_num_safe(pos, 1, 0.0), 4)
-               store32_f32(dst, _list_num_safe(pos, 2, 0.0), 8)
-               store32_f32(dst, _list_num_safe(col, 0, 1.0), 12)
-               store32_f32(dst, _list_num_safe(col, 1, 1.0), 16)
-               store32_f32(dst, _list_num_safe(col, 2, 1.0), 20)
+               store32_f32(dst, px, 0)
+               store32_f32(dst, py, 4)
+               store32_f32(dst, pz, 8)
+               store32_f32(dst, cr, 12)
+               store32_f32(dst, cg, 16)
+               store32_f32(dst, cb, 20)
                store32_f32(dst, intensity, 24)
                store32_f32(dst, range, 28)
                store32(dst, int(typ), 32)
-               store32_f32(dst, _list_num_safe(dir, 0, 0.0), 36)
-               store32_f32(dst, _list_num_safe(dir, 1, 0.0), 40)
-               store32_f32(dst, _list_num_safe(dir, 2, -1.0), 44)
+               store32_f32(dst, dx, 36)
+               store32_f32(dst, dy, 40)
+               store32_f32(dst, dz, 44)
                store32_f32(dst, outer, 48)
             }
             new_count += 1
@@ -2830,6 +2841,18 @@ fn set_scene_lights(any lights) any {
    _scene_light1_pos_type = new_l1p
    _scene_light1_color_range = new_l1c
    _scene_light1_dir_outer = new_l1d
+   ;; The immediate renderer's common world rig is a key sun plus fill.  Pack
+   ;; that proven two-light form directly instead of round-tripping it through
+   ;; the transient slab serializer used by packed scene groups.
+   if new_count <= 2 {
+      _scene_light_slab_src = 0
+      _scene_light_slab_src_count = -1
+      _scene_lights_dirty = true
+      _pc_dirty = true
+      _pack_light_ubo_slab()
+      if _sync_scene_light_ubo() { _scene_lights_dirty = false }
+      return 0
+   }
    if tmp_slab {
       def scene_exposure = _scene_light_exposure_from_peak(peak_light_value)
       if scene_exposure < 0.999999 {
