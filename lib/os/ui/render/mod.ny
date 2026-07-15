@@ -11,7 +11,7 @@ module std.os.ui.render(
    backend_capabilities, get_active_backend_name, renderer_frame_stats,
    renderer_vertex_offset, renderer_capture_requested, renderer_frame_index,
    renderer_gpu_ready, renderer_wait_idle, renderer_packed_scene_supported, renderer_mesh_pipeline,
-   renderer_set_mask, renderer_set_scene_lights_slab,
+   renderer_set_mask, renderer_set_scene_lights_slab, set_scene_lights,
    renderer_draw_part0_flat_no_restore, renderer_draw_part0_flat_state_no_restore,
    renderer_draw_parts_flat_range_no_restore, renderer_draw_parts_flat_range_state_no_restore,
    renderer_capture_scene_color_resume_pass, renderer_clear_scene_color_capture,
@@ -3360,6 +3360,15 @@ fn renderer_set_scene_lights_slab(any slab, int count) bool {
    false
 }
 
+fn set_scene_lights(any lights) bool {
+   "Sets scene lights for immediate 3D draws. Each light is a dictionary with
+   type (directional, point, or spot), color, intensity, and optional direction,
+   position, range, and outer_cone_cos fields."
+   if _backend == BACKEND_VK { lib_vkr.set_scene_lights(lights) return true }
+   ;; The GL backend owns an equivalent fixed-function fallback light rig.
+   true
+}
+
 fn renderer_draw_part0_flat_no_restore(any slab) int {
    "Draws a single packed scene part without restoring material state."
    if _backend == BACKEND_VK { return lib_vkr.draw_part0_flat_no_restore(slab) }
@@ -3515,13 +3524,9 @@ fn load_shader_agnostic(any _defs) int {
       if !vert_mod { return -1 }
       def frag_mod = lib_vkr.create_shader_module_from_source(fs, "frag")
       if !frag_mod { return -1 }
-      def pipe = lib_vkr.create_pipeline(vert_mod, frag_mod, 3, 1, 1, 0, 0, 0, 0)
-      if !pipe { return -1 }
-      return pipe
-   }
-   if _backend == BACKEND_GL {
-      ; OpenGL custom shader pipeline support is not implemented yet.
-      return -1
+      def depth_test = int(_defs.get("pipeline_depth_test", 1))
+      def depth_write = int(_defs.get("pipeline_depth_write", 1))
+      return lib_vkr.create_pipeline(vert_mod, frag_mod, 3, depth_test, depth_write)
    }
    -1
 }
@@ -3565,7 +3570,6 @@ fn _wait_window_ready(any win) bool {
 fn _init_with_window(any win, bool prefer_vulkan=true) bool {
    if !win { return false }
    _wait_window_ready(win)
-   _active_win = win
    def live_sz = lib_uiw.size(win)
    def live_w = int(live_sz.get(0, 0))
    def live_h = int(live_sz.get(1, 0))
@@ -3574,9 +3578,9 @@ fn _init_with_window(any win, bool prefer_vulkan=true) bool {
       if !lib_glr.init(win) {
          if _is_debug() { ui_profile.print_text("[gfx] OpenGL context bind failed") }
          _backend = BACKEND_NONE
-         _active_win = nil
          return false
       }
+      _active_win = win
       _backend = BACKEND_GL
       lib_atlas.atlas_set_backend("gl")
       _vk_cam_pos_valid = false
@@ -3594,9 +3598,9 @@ fn _init_with_window(any win, bool prefer_vulkan=true) bool {
          ui_profile.print_text("[gfx] requested GPU backend failed; no software fallback is active")
       }
       _backend = BACKEND_NONE
-      _active_win = nil
       return false
    }
+   _active_win = win
    _backend = BACKEND_VK
    lib_atlas.atlas_set_backend("vk")
    _vk_cam_pos_valid = false
@@ -3725,6 +3729,7 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
    _prepare_visible_vulkan_boot(win, explicit_hide, headless)
    if !_init_with_window(win, !use_gl) {
       lib_uiw.close(win)
+      lib_uiw._remove_win(win)
       if _backend_auto_requested {
          if headless { return init_mock_surface(width, height) }
          if _is_debug() { ui_profile.print_text("[gfx] Vulkan init failed; retrying auto backend with OpenGL") }
@@ -4070,6 +4075,14 @@ fn _send_vk_cam_pos(f64 x, f64 y, f64 z) bool {
    true
 }
 
+fn _camera_vec3_component(any v, int component) f64 {
+   "Reads either a plain [x,y,z] list or the tagged vec3 representation."
+   if (is_list(v) || is_tuple(v)) && v.len == 5 && is_int(v[0]) && is_int(v[1]) && v[0] == 1 && v[1] == 3 {
+      return float(v[2 + component])
+   }
+   float(v.get(component, 0.0))
+}
+
 fn set_camera(any cam) bool {
    "Sets both view and projection from a camera object."
    if !cam { return false }
@@ -4084,14 +4097,23 @@ fn set_camera(any cam) bool {
       }
       if live_w > 0 && live_h > 0 { set_win_size(live_w, live_h) }
    }
-   def pos = cam.get(0)
-   _send_vk_cam_pos(pos.get(0, 0), pos.get(1, 0), pos.get(2, 0))
-   def target = cam.get(1)
-   def up = cam.get(2)
-   def fovy = cam.get(3, _proj_fov)
+   ;; Accept both camera representations exported by this module: the compact
+   ;; facade list and the named dictionary from std.os.ui.render.camera.
+   def pos = is_dict(cam) ? cam.get("pos", [0.0, 0.0, 0.0]) : cam.get(0, [0.0, 0.0, 0.0])
+   _send_vk_cam_pos(_camera_vec3_component(pos, 0), _camera_vec3_component(pos, 1), _camera_vec3_component(pos, 2))
+   def target = is_dict(cam) ? cam.get("target", [0.0, 0.0, -1.0]) : cam.get(1, [0.0, 0.0, -1.0])
+   def up = is_dict(cam) ? cam.get("up", [0.0, 1.0, 0.0]) : cam.get(2, [0.0, 1.0, 0.0])
+   def fovy = is_dict(cam) ? cam.get("fovy", _proj_fov) : cam.get(3, _proj_fov)
    mut aspect = 1.0
    if _last_win_h > 0.0 { aspect = _last_win_w / _last_win_h }
-   mat4_look_at_into(pos, target, up, _scratch_view)
+   ;; Decode vector wrappers once at the API boundary.  Passing mixed tagged
+   ;; and plain vectors into the generic adapter made explicit targets diverge
+   ;; from yaw/pitch cameras despite representing the same pose.
+   mat4_look_at_into_xyz(
+      _camera_vec3_component(pos, 0), _camera_vec3_component(pos, 1), _camera_vec3_component(pos, 2),
+      _camera_vec3_component(target, 0), _camera_vec3_component(target, 1), _camera_vec3_component(target, 2),
+      _camera_vec3_component(up, 0), _camera_vec3_component(up, 1), _camera_vec3_component(up, 2),
+      _scratch_view)
    _view_matrix = _scratch_view
    if _scene_proj_mode == 1 {
       def z = _proj_zoom

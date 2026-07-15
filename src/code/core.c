@@ -2288,6 +2288,159 @@ static void ny_apply_top_level_typeinfer_to_sema(typeinfer_ctx_t *ctx,
   }
 }
 
+/*
+ * Collect direct module dependencies from a module's top-level use statements.
+ * Returns the number of dependency names written into deps[] (capped at max_deps).
+ * Only considers bare `use` or `use .. import *` that import an entire module
+ * present in prog->body — selective imports (e.g. `use m as x` with no import_all)
+ * do not create a module-level def initialization dependency.
+ */
+static size_t codegen_collect_module_deps(const stmt_t *mod, const char **deps,
+                                          size_t max_deps) {
+  size_t count = 0;
+  if (!mod || mod->kind != NY_S_MODULE)
+    return 0;
+  for (size_t i = 0; i < mod->as.module.body.len && count < max_deps; ++i) {
+    const stmt_t *child = mod->as.module.body.data[i];
+    if (!child || child->kind != NY_S_USE)
+      continue;
+    if (ny_stmt_is_bare_std_use(child))
+      continue;
+    const char *target = child->as.use.module;
+    if (!target || !*target)
+      continue;
+    /* Only treat full-module imports as init dependencies. */
+    if (!child->as.use.import_all && child->as.use.imports.len > 0 &&
+        !child->as.use.alias)
+      continue;
+    /* Avoid duplicates. */
+    bool dup = false;
+    for (size_t j = 0; j < count; ++j) {
+      if (strcmp(deps[j], target) == 0) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup)
+      deps[count++] = target;
+  }
+  return count;
+}
+
+/*
+ * Produce a topological ordering of NY_S_MODULE statements from prog->body.
+ * Modules that depend on other modules (via `use`) are emitted after their
+ * dependencies.  The output order[] array receives indices into prog->body
+ * for module statements, in dependency-first order.  Non-module statements
+ * are omitted from order[].
+ *
+ * Returns the number of module indices written to order[].
+ */
+static size_t codegen_topo_sort_modules(const codegen_t *cg, size_t *order,
+                                        size_t max_order) {
+  if (!cg || !cg->prog)
+    return 0;
+  size_t n = cg->prog->body.len;
+  /* Count modules and build index map. */
+  size_t mod_count = 0;
+  for (size_t i = 0; i < n; ++i) {
+    if (cg->prog->body.data[i] &&
+        cg->prog->body.data[i]->kind == NY_S_MODULE)
+      ++mod_count;
+  }
+  if (mod_count == 0)
+    return 0;
+  /* Allocate temporary arrays on the heap (freed before return). */
+  size_t *mod_indices = (size_t *)calloc(mod_count, sizeof(size_t));
+  const char **mod_names = (const char **)calloc(mod_count, sizeof(const char *));
+  int *visited = (int *)calloc(mod_count, sizeof(int));
+  /* visited: 0=unvisited, 1=in-stack, 2=done */
+  if (!mod_indices || !mod_names || !visited) {
+    free(mod_indices);
+    free(mod_names);
+    free(visited);
+    return 0;
+  }
+  {
+    size_t mi = 0;
+    for (size_t i = 0; i < n; ++i) {
+      if (cg->prog->body.data[i] &&
+          cg->prog->body.data[i]->kind == NY_S_MODULE) {
+        mod_indices[mi] = i;
+        mod_names[mi] = cg->prog->body.data[i]->as.module.name;
+        ++mi;
+      }
+    }
+  }
+  /* Build name-to-index lookup. */
+  size_t out_count = 0;
+  /* Recursive post-order DFS with cycle detection. */
+  /* We use an explicit stack to avoid recursion depth issues. */
+  enum { STACK_MAX = 4096 };
+  struct { size_t mi; size_t child_idx; } stack[STACK_MAX];
+  int sp = 0;
+  for (size_t root = 0; root < mod_count; ++root) {
+    if (visited[root] != 0)
+      continue;
+    /* Push root. */
+    if (sp >= STACK_MAX)
+      break;
+    stack[sp].mi = root;
+    stack[sp].child_idx = 0;
+    visited[root] = 1; /* in-stack */
+    ++sp;
+    while (sp > 0) {
+      size_t cur = stack[sp - 1].mi;
+      size_t ci = stack[sp - 1].child_idx;
+      const stmt_t *mod = cg->prog->body.data[mod_indices[cur]];
+      /* Collect deps of current module. */
+      const char *dep_names[256];
+      size_t ndeps = codegen_collect_module_deps(mod, dep_names, 256);
+      /* Advance to next unvisited dependency. */
+      bool found_child = false;
+      for (; ci < ndeps; ++ci) {
+        /* Find dep module index. */
+        size_t dep_mi = (size_t)-1;
+        for (size_t k = 0; k < mod_count; ++k) {
+          if (mod_names[k] && strcmp(mod_names[k], dep_names[ci]) == 0) {
+            dep_mi = k;
+            break;
+          }
+        }
+        if (dep_mi == (size_t)-1 || dep_mi == cur)
+          continue;
+        if (visited[dep_mi] == 1) {
+          /* Cycle — skip (module already on stack). */
+          continue;
+        }
+        if (visited[dep_mi] == 2)
+          continue;
+        /* Push child. */
+        stack[sp - 1].child_idx = ci + 1;
+        if (sp >= STACK_MAX)
+          break;
+        stack[sp].mi = dep_mi;
+        stack[sp].child_idx = 0;
+        visited[dep_mi] = 1;
+        ++sp;
+        found_child = true;
+        break;
+      }
+      if (!found_child) {
+        /* All deps visited — emit this module. */
+        visited[cur] = 2;
+        if (out_count < max_order)
+          order[out_count++] = mod_indices[cur];
+        --sp;
+      }
+    }
+  }
+  free(mod_indices);
+  free(mod_names);
+  free(visited);
+  return out_count;
+}
+
 LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
   NY_COMPILER_ASSERT(cg != NULL, "codegen_emit_script missing codegen");
   if (!cg)
@@ -2469,16 +2622,63 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
   }
 
   size_t stmt_count = 0;
-  for (size_t i = 0; i < cg->prog->body.len; i++) {
-    stmt_t *s = cg->prog->body.data[i];
-    NY_COMPILER_ASSERTF(s != NULL, "null top-level script stmt at index %zu",
-                        i);
-    if (!s)
-      continue;
-    if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
-        !cg->emit_cached_stdlib_init && !ny_stmt_tree_is_source_context(cg, s))
-      continue;
-    if (s->kind != NY_S_FUNC) {
+  /* Emit module-level defs in dependency order so that a module's
+   * use-dependencies are initialized before the module itself.
+   * Non-module statements keep their original source order. */
+  {
+    size_t mod_order[4096];
+    size_t mod_n = codegen_topo_sort_modules(
+        cg, mod_order, sizeof(mod_order) / sizeof(mod_order[0]));
+    bool *emitted =
+        (bool *)calloc(cg->prog->body.len > 0 ? cg->prog->body.len : 1,
+                       sizeof(bool));
+    /* Phase 1: modules in topological (dependency-first) order. */
+    for (size_t mi = 0; mi < mod_n; ++mi) {
+      size_t i = mod_order[mi];
+      stmt_t *s = cg->prog->body.data[i];
+      if (!s || s->kind != NY_S_MODULE)
+        continue;
+      if (emitted && emitted[i])
+        continue;
+      if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
+          !cg->emit_cached_stdlib_init &&
+          !ny_stmt_tree_is_source_context(cg, s))
+        continue;
+      if (emitted)
+        emitted[i] = true;
+      cg->current_module_name = NULL;
+      NY_COMPILER_ASSERTF(
+          d < 64,
+          "top-level scope depth %zu exceeds fixed stack before module %zu",
+          d, i);
+      if (stmt_count > 0 && stmt_count % 100 == 0) {
+        LLVMBasicBlockRef next_bb = ny_bb_fn(fn, "top_chunk");
+        ny_br(cg, next_bb);
+        ny_pos(cg, next_bb);
+      }
+      gen_stmt(cg, sc, &d, s, 0, false);
+      cg->current_module_name = NULL;
+      NY_COMPILER_ASSERTF(
+          d < 64,
+          "top-level scope depth %zu exceeds fixed stack after module %zu",
+          d, i);
+      stmt_count++;
+    }
+    /* Phase 2: non-module statements in original source order. */
+    for (size_t i = 0; i < cg->prog->body.len; i++) {
+      stmt_t *s = cg->prog->body.data[i];
+      NY_COMPILER_ASSERTF(s != NULL,
+                          "null top-level script stmt at index %zu", i);
+      if (!s)
+        continue;
+      if (s->kind == NY_S_MODULE || s->kind == NY_S_FUNC)
+        continue;
+      if (emitted && emitted[i])
+        continue;
+      if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok) &&
+          !cg->emit_cached_stdlib_init &&
+          !ny_stmt_tree_is_source_context(cg, s))
+        continue;
       cg->current_module_name = NULL;
       NY_COMPILER_ASSERTF(
           d < 64,
@@ -2493,9 +2693,11 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
       cg->current_module_name = NULL;
       NY_COMPILER_ASSERTF(
           d < 64,
-          "top-level scope depth %zu exceeds fixed stack after stmt %zu", d, i);
+          "top-level scope depth %zu exceeds fixed stack after stmt %zu", d,
+          i);
       stmt_count++;
     }
+    free(emitted);
   }
   ny_lazy_emit_demand_referenced(cg, sc, d, "script");
   cg->current_module_name = NULL;
