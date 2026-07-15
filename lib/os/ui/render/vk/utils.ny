@@ -436,8 +436,16 @@ fn _vkr_bind_pipeline_if_needed(any cb, any target) bool {
    if !cb || !target { return false }
    _vkr_pipe_diag("before known")
    if !_vkr_pipeline_known(target) {
-      if ui_profile.env_truthy_cached("NY_VK_PIPE_TRACE") { ui_profile.print_text("[gfx:vulkan] skip unknown pipeline 0x" + to_hex(target)) }
-      return false
+      ;; Custom pipeline: not in the built-in list but still a valid handle.
+      ;; Bind it directly so custom shaders (user pipelines) work natively.
+      if _last_bound_pipe != target {
+         _vkr_pipe_diag("before cmd bind (custom)")
+         cmd_bind_pipeline(cb, 0, target)
+         _vkr_pipe_diag("after cmd bind (custom)")
+         _last_bound_pipe = target
+         _pipeline_bind_count += 1
+      }
+      return true
    }
    _vkr_pipe_diag("after known")
    if _last_bound_pipe != target {

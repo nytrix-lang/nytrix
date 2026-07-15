@@ -115,7 +115,22 @@ fn parse_combined_shader(str combined_src) dict {
       def line = lines.get(i)
       def vs_tag = _parse_marker(line, "#vertex")
       def fs_tag = _parse_marker(line, "#fragment")
-      if vs_tag {
+      def trimmed = strip(line)
+      def is_pipeline = startswith(trimmed, "#pipeline ")
+      if is_pipeline {
+         def kvs = split(strip(str_replace(trimmed, "#pipeline ", "")), " ")
+         mut kvi = 0
+         while kvi < kvs.len {
+            def kv = strip(to_str(kvs.get(kvi, "")))
+            def parts = split(kv, "=")
+            if parts.len >= 2 {
+               def key = "pipeline_" + strip(to_str(parts.get(0, "")))
+               def val = strip(to_str(parts.get(1, "")))
+               if key.len > 9 && val.len > 0 { defs = defs.set(key, val) }
+            }
+            kvi += 1
+         }
+      } elif vs_tag {
          if target.len > 0 { defs = defs.set(target, src) }
          target = "vs_" + vs_tag
          src = ""

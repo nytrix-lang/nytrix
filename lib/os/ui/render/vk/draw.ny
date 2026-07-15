@@ -1711,11 +1711,20 @@ fn _vk_draw_shader_rect(f64 x, f64 y, f64 w, f64 h, any pipe_override, any pc_pt
    _vkr_bind_dynamic_vertex_buffer(cb)
    cmd_draw(cb, 6, 1, first_vert, 0)
    
-   _vertex_offset += _VKR_VERT_STRIDE * 6
-   _last_flush_offset = _vertex_offset
-   _prim_rect_quads += 1
-   _target_pipeline = _pipeline
-   _use_custom_pc = 0
-   _pc_dirty = true
-   true
+    _vertex_offset += _VKR_VERT_STRIDE * 6
+    _last_flush_offset = _vertex_offset
+    _prim_rect_quads += 1
+    if _current_is_unlit != 0 {
+       def up = _get_unlit_nocull_pipeline()
+       _target_pipeline = up ? up : _pipeline
+    } else {
+       _target_pipeline = _pipeline
+    }
+    _use_custom_pc = 0
+    ;; Custom shader data may occupy the standard model-matrix range (offset 64).
+    ;; Force the next regular batch to rebuild both matrices before its full PC upload.
+    _mvp_dirty = true
+    _model_dirty = true
+    _pc_dirty = true
+    true
 }

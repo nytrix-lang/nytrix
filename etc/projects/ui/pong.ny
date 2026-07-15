@@ -25,42 +25,42 @@ def BALL_ACCEL, ENGLISH = 1.01, 0.052
 def BORDER, NET_W, NET_H, NET_STEP = 4.0, 4.0, 18.0, 42.0
 def SCORE_Y, SCORE_ADV, SCORE_GAP = 36.0, 22.0, 18.0
 
-fn lim(number a, number b) number { math.max(a - b, 0.0) }
-fn mid(number a, number b) number { lim(a, b) * 0.5 }
+fn lim(a, b) { math.max(a - b, 0.0) }
+fn mid(a, b) { lim(a, b) * 0.5 }
 
-fn approach(number x, number goal, number step) number {
+fn approach(x, goal, step) {
    if x < goal { math.min(x + step, goal) } else { math.max(x - step, goal) }
 }
 
-fn axis(number v, number dir, number max_v, number accel, number drag, number dt) number {
+fn axis(v, dir, max_v, accel, drag, dt) {
    approach(v, dir * max_v, (if math.abs(dir) < 0.001 { drag } else { accel }) * dt)
 }
 
-fn wall_v(number y, number v, number max_y) number {
+fn wall_v(y, v, max_y) {
    if y <= 0.0 && v < 0.0 { 0.0 } else { if y >= max_y && v > 0.0 { 0.0 } else { v } }
 }
 
-fn control_axis() number {
+fn control_axis() {
    mut a = 0.0
    if key_down(KEY_W) || key_down(KEY_UP) { a -= 1.0 }
    if key_down(KEY_S) || key_down(KEY_DOWN) { a += 1.0 }
    a
 }
 
-fn steer(number y, number target, number zone, number width) number {
+fn steer(y, target, zone, width) {
    def d = target - y
    if math.abs(d) <= zone { 0.0 } else { math.clamp(d / width, -1.0, 1.0) }
 }
 
-fn digits(int n) number {
+fn digits(int n) {
    if n < 10 { 1.0 } else { if n < 100 { 2.0 } else { if n < 1000 { 3.0 } else { 4.0 } } }
 }
 
-fn overlap(number ax, number ay, number aw, number ah, number bx, number by, number bw, number bh) bool {
+fn overlap(ax, ay, aw, ah, bx, by, bw, bh) bool {
    ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
 }
 
-fn sweep(number px, number py, number x, number y, number plane, number pad_y) bool {
+fn sweep(px, py, x, y, plane, pad_y) bool {
    def dx = x - px
    if math.abs(dx) <= 0.0001 { return false }
 
@@ -71,7 +71,7 @@ fn sweep(number px, number py, number x, number y, number plane, number pad_y) b
    iy + BALL >= pad_y && iy <= pad_y + PAD_H
 }
 
-fn reflect(number p, number lo, number hi) number {
+fn reflect(p, lo, hi) {
    ;; Reflect p into [lo,hi] with bounce folding (for multi wall hits in predict).
    def span = hi - lo
    if span <= 0.0 { return lo }
@@ -80,7 +80,7 @@ fn reflect(number p, number lo, number hi) number {
    if x > span { hi - (x - span) } else { lo + x }
 }
 
-fn predict(number bx, number by, number vx, number vy, number plane, number h) number {
+fn predict(bx, by, vx, vy, plane, h) {
    ;; Predict ball center y when its x reaches the plane, folding over top/bottom walls.
    if vx <= 0.0 || plane <= bx {
       return by + BALL * 0.5
@@ -90,13 +90,13 @@ fn predict(number bx, number by, number vx, number vy, number plane, number h) n
    reflect(py, BALL * 0.5, h - BALL * 0.5)
 }
 
-fn bias(int rally, int score) number {
+fn bias(int rally, int score) {
    ;; small varying error to keep enemy human-like, not perfect
    def offs = [-1.0, -0.6, -0.25, 0.0, 0.25, 0.6, 1.0]
    offs[(rally * 7 + score) % 7]
 }
 
-fn enemy_goal(int rally, int score, number bx, number by, number vx, number vy, number plane, number h) number {
+fn enemy_goal(int rally, int score, bx, by, vx, vy, plane, h) {
    ;; return desired paddle top y; track ball y with lag and error when approaching
    def pad_c = PAD_H * 0.5
    def ball_c = by + BALL * 0.5
@@ -118,16 +118,16 @@ fn enemy_goal(int rally, int score, number bx, number by, number vx, number vy, 
    math.clamp(aim - pad_c, min_y, max_y)
 }
 
-fn serve_x(int n) number { if n % 2 == 0 { BALL_START } else { -BALL_START } }
-fn serve_y(int n) number { if n % 4 < 2 { -BALL_START * 0.19 } else { BALL_START * 0.19 } }
+fn serve_x(int n) { if n % 2 == 0 { BALL_START } else { -BALL_START } }
+fn serve_y(int n) { if n % 4 < 2 { -BALL_START * 0.19 } else { BALL_START * 0.19 } }
 
-fn bounce_y(number by, number py, number old_py, number dt) number {
+fn bounce_y(by, py, old_py, dt) {
    def pad_v = (py - old_py) / dt
    def hit_y = ((by + BALL * 0.5) - (py + PAD_H * 0.5)) / (PAD_H * 0.5)
    math.clamp(hit_y * BALL_START + pad_v * ENGLISH, -BALL_Y_MAX, BALL_Y_MAX)
 }
 
-fn draw_field(number w, number h) {
+fn draw_field(w, h) {
    gfx.draw_rect(0.0, 0.0, w, BORDER, gfx.WHITE)
    gfx.draw_rect(0.0, lim(h, BORDER), w, BORDER, gfx.WHITE)
 
@@ -138,7 +138,7 @@ fn draw_field(number w, number h) {
    }
 }
 
-fn draw_score(int font, int player, int enemy, number w) {
+fn draw_score(int font, int player, int enemy, w) {
    def cx = w * 0.5
    gfx.draw_text(font, f"{player}", cx - SCORE_GAP - digits(player) * SCORE_ADV, SCORE_Y, gfx.WHITE)
    gfx.draw_text(font, "-", cx - SCORE_ADV * 0.5, SCORE_Y, gfx.WHITE)

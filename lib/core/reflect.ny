@@ -9,20 +9,6 @@ use std.core.primitives
 use std.core.primitives as prim
 use std.core.dict_mod
 
-def _TAG_FFI_PTR = runtime_tag_raw("ffi_ptr")
-def _TAG_LIST = runtime_tag_raw("list")
-def _TAG_DICT = runtime_tag_raw("dict")
-def _TAG_SET = runtime_tag_raw("set")
-def _TAG_TUPLE = runtime_tag_raw("tuple")
-def _TAG_RANGE = runtime_tag_raw("range")
-def _TAG_PTR = runtime_tag_raw("ptr")
-def _TAG_FLOAT = runtime_tag_raw("float")
-def _TAG_COMPLEX = runtime_tag_raw("complex")
-def _TAG_STR = runtime_tag_raw("str")
-def _TAG_STR_CONST = runtime_tag_raw("str_const")
-def _TAG_BYTES = runtime_tag_raw("bytes")
-def _TAG_BIGINT = runtime_tag_raw("bigint")
-
 @inline
 fn _has_tag(any x, any tag) bool {
    def got = __tagof(x)
@@ -30,52 +16,52 @@ fn _has_tag(any x, any tag) bool {
 }
 
 @inline
-fn _is_dict(any x) bool { _has_tag(x, _TAG_DICT) }
+fn _is_dict(any x) bool { _has_tag(x, runtime_tag_raw("dict")) }
 
 @inline
-fn _is_list(any x) bool { _has_tag(x, _TAG_LIST) }
+fn _is_list(any x) bool { _has_tag(x, runtime_tag_raw("list")) }
 
 @inline
-fn _is_set(any x) bool { _has_tag(x, _TAG_SET) }
+fn _is_set(any x) bool { _has_tag(x, runtime_tag_raw("set")) }
 
 @inline
-fn _is_tuple(any x) bool { _has_tag(x, _TAG_TUPLE) }
+fn _is_tuple(any x) bool { _has_tag(x, runtime_tag_raw("tuple")) }
 
 @inline
-fn _is_range(any x) bool { _has_tag(x, _TAG_RANGE) }
+fn _is_range(any x) bool { _has_tag(x, runtime_tag_raw("range")) }
 
 @inline
-fn _is_bytes(any x) bool { _has_tag(x, _TAG_BYTES) }
+fn _is_bytes(any x) bool { _has_tag(x, runtime_tag_raw("bytes")) }
 
 @inline
 fn _is_raw_ptr_like(any x) bool {
    def tag = __tagof(x)
-   __eq(tag, _TAG_PTR) || __eq(tag, _TAG_FFI_PTR) || (tag == 0 && prim.is_ptr(x))
+   __eq(tag, runtime_tag_raw("ptr")) || __eq(tag, runtime_tag_raw("ffi_ptr")) || (tag == 0 && prim.is_ptr(x))
 }
 
 @inline
 fn _is_seq_tag(any tag) bool {
    if !__is_int(tag) { return false }
-   __eq(tag, _TAG_LIST) || __eq(tag, _TAG_TUPLE) || __eq(tag, _TAG_RANGE)
+   __eq(tag, runtime_tag_raw("list")) || __eq(tag, runtime_tag_raw("tuple")) || __eq(tag, runtime_tag_raw("range"))
 }
 
 @inline
 fn _is_list_tuple_tag(any tag) bool {
    if !__is_int(tag) { return false }
-   __eq(tag, _TAG_LIST) || __eq(tag, _TAG_TUPLE)
+   __eq(tag, runtime_tag_raw("list")) || __eq(tag, runtime_tag_raw("tuple"))
 }
 
 @inline
 fn _is_str_tag(any tag) bool {
    if !__is_int(tag) { return false }
-   __eq(tag, _TAG_STR) || __eq(tag, _TAG_STR_CONST)
+   __eq(tag, runtime_tag_raw("str")) || __eq(tag, runtime_tag_raw("str_const"))
 }
 
 @inline
 fn _is_seq(any x) bool { _is_seq_tag(__tagof(x)) }
 
 @inline
-fn _is_bigint(any x) bool { _has_tag(x, _TAG_BIGINT) }
+fn _is_bigint(any x) bool { _has_tag(x, runtime_tag_raw("bigint")) }
 
 @inline
 fn _is_str(any x) bool { _is_str_tag(__tagof(x)) }
@@ -493,8 +479,8 @@ fn type(any x) str {
    if _is_tuple(x) { return "tuple" }
    if _is_range(x) { return "range" }
    if _is_bytes(x) { return "bytes" }
-   if _has_tag(x, _TAG_COMPLEX) { return "complex" }
-   if __eq(__tagof(x), _TAG_FFI_PTR) { return "ffi_ptr" }
+   if _has_tag(x, runtime_tag_raw("complex")) { return "complex" }
+   if __eq(__tagof(x), runtime_tag_raw("ffi_ptr")) { return "ffi_ptr" }
    if is_ptr(x) { return "ptr" }
    if !x { return "none" }
    return "unknown"
@@ -714,7 +700,7 @@ fn div(any a, any b) any {
 fn _is_list_or_tuple(any x) bool {
    def tag = __tagof(x)
    if !__is_int(tag) { return false }
-   return __eq(tag, _TAG_LIST) || __eq(tag, _TAG_TUPLE)
+   return __eq(tag, runtime_tag_raw("list")) || __eq(tag, runtime_tag_raw("tuple"))
 }
 
 @returns_owned
@@ -867,8 +853,8 @@ fn eq(any a, any b) bool {
    if a_list_tuple && !b_list_tuple { return false }
    if !a_list_tuple && b_list_tuple { return false }
    if a_seq { if b_seq { return _seq_eq(a, b) } }
-   if __eq(ta, _TAG_DICT) {
-      if __eq(tb, _TAG_DICT) {
+   if __eq(ta, runtime_tag_raw("dict")) {
+      if __eq(tb, runtime_tag_raw("dict")) {
          def av, bv = _is_vecdict(a), _is_vecdict(b)
          if av {
             if bv { return _vec_eq(a, b) }
@@ -879,12 +865,12 @@ fn eq(any a, any b) bool {
    }
    if __lt(ta, 100) || __gt(ta, 255) || __lt(tb, 100) || __gt(tb, 255) { return false }
    if __eq(ta, tb) {
-      if __eq(ta, _TAG_LIST) || __eq(ta, _TAG_TUPLE) { return list_eq(a, b) }
-      if __eq(ta, _TAG_DICT) { return dict_eq(a, b) }
-      if __eq(ta, _TAG_SET) { return set_eq(a, b) }
-      if __eq(ta, _TAG_RANGE) { return _seq_eq(a, b) }
-      if __eq(ta, _TAG_FLOAT) { return __flt_eq(a, b) }
-      if __eq(ta, _TAG_BIGINT) { return __eq(__bigint_cmp(a, b), 0) }
+      if __eq(ta, runtime_tag_raw("list")) || __eq(ta, runtime_tag_raw("tuple")) { return list_eq(a, b) }
+      if __eq(ta, runtime_tag_raw("dict")) { return dict_eq(a, b) }
+      if __eq(ta, runtime_tag_raw("set")) { return set_eq(a, b) }
+      if __eq(ta, runtime_tag_raw("range")) { return _seq_eq(a, b) }
+      if __eq(ta, runtime_tag_raw("float")) { return __flt_eq(a, b) }
+      if __eq(ta, runtime_tag_raw("bigint")) { return __eq(__bigint_cmp(a, b), 0) }
       return false
    } else {
       return false
@@ -948,33 +934,33 @@ fn _repr_depth(any x, int depth) str {
    def kind = __tagof(x)
    if _is_bigint(x) { return __bigint_to_str(x) }
    if _is_vecdict(x) { return _vec_to_str(x) }
-   if __eq(kind, _TAG_LIST) {
+   if _is_list(x) {
       if depth >= 4 { return "[...]" }
       return _repr_seq(x, "[", "]", depth)
    }
-   if __eq(kind, _TAG_TUPLE) {
+   if _is_tuple(x) {
       if depth >= 4 { return "(...)" }
       return _repr_seq(x, "(", ")", depth)
    }
-   if __eq(kind, _TAG_RANGE) {
+   if _is_range(x) {
       def start = __load64_idx(x, 0)
       def stop = __load64_idx(x, 8)
       def step = __load64_idx(x, 16)
       return f"range({start}, {stop}, {step})"
    }
-   if __eq(kind, _TAG_DICT) {
+   if _is_dict(x) {
       if depth >= 4 { return "{...}" }
       return _repr_items(items(x), true, "{", "}", depth)
    }
-   if __eq(kind, _TAG_SET) {
+   if _is_set(x) {
       if depth >= 4 { return "{...}" }
       return _repr_items(items(x), false, "{", "}", depth)
    }
-   if __eq(kind, _TAG_FLOAT) { return to_str(x) }
-   if __eq(kind, _TAG_COMPLEX) { return __to_str(x) }
-   if __eq(kind, _TAG_BYTES) { return f"<bytes {_raw_len(x)}>" }
-   if __eq(kind, _TAG_BIGINT) { return __bigint_to_str(x) }
-   f"<ptr {x} tag={__tagof(x)}>"
+   if __eq(kind, runtime_tag_raw("float")) { return to_str(x) }
+   if __eq(kind, runtime_tag_raw("complex")) { return __to_str(x) }
+   if _is_bytes(x) { return f"<bytes {_raw_len(x)}>" }
+   if _is_bigint(x) { return __bigint_to_str(x) }
+   "<ptr " + __ptr_key(x) + " tag=" + __ptr_key(__tagof(x)) + ">"
 }
 
 fn repr(any x) str {
@@ -1158,7 +1144,7 @@ fn values(any x) list {
 fn index_read(any obj, any key) any {
    "Strict indexed read used by `obj[key]` lowering."
    def tag = __tagof(obj)
-   if __eq(tag, _TAG_LIST) || __eq(tag, _TAG_TUPLE) {
+   if _is_list(obj) || _is_tuple(obj) {
       mut k = 0
       if __is_int(key) { k = key }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
@@ -1170,7 +1156,7 @@ fn index_read(any obj, any key) any {
       _index_read_probe(tag, k, 0)
       return __load_item(obj, k)
    }
-   if __eq(tag, _TAG_DICT) {
+   if _is_dict(obj) {
       if _is_vecdict(obj) {
          mut k = 0
          if __is_int(key) { k = key }
@@ -1186,7 +1172,7 @@ fn index_read(any obj, any key) any {
       _index_read_probe(tag, key, 0)
       return _dict_get_raw(obj, key, 0)
    }
-   if __eq(tag, _TAG_STR) || __eq(tag, _TAG_STR_CONST) || __is_str_obj(obj) {
+   if _is_str(obj) || __is_str_obj(obj) {
       mut k = 0
       if __is_int(key) { k = key }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
@@ -1199,7 +1185,7 @@ fn index_read(any obj, any key) any {
       _index_read_probe(tag, k, 0)
       return chr(ord_at(obj, k))
    }
-   if __eq(tag, _TAG_BYTES) || _is_bytes(obj) {
+   if _is_bytes(obj) {
       mut k = 0
       if __is_int(key) { k = key }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
@@ -1211,7 +1197,7 @@ fn index_read(any obj, any key) any {
       _index_read_probe(tag, k, 0)
       return load8(obj, k)
    }
-   if __eq(tag, _TAG_RANGE) {
+   if _is_range(obj) {
       mut k = 0
       if __is_int(key) { k = key }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
@@ -1235,8 +1221,7 @@ fn get(any obj, any key, any default=0) any {
    - `key`: Index or Key
    - `default`: Value to return if key/index not found(default 0).
    "
-   def tag = __tagof(obj)
-   if __eq(tag, _TAG_LIST) || __eq(tag, _TAG_TUPLE) {
+   if _is_list(obj) || _is_tuple(obj) {
       mut k = 0
       if __is_int(key) { k = key }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
@@ -1247,14 +1232,14 @@ fn get(any obj, any key, any default=0) any {
       if __lt(k, 0) || __ge(k, n) { return default }
       else { return __load_item(obj, k) }
    }
-   if __eq(tag, _TAG_DICT) {
+   if _is_dict(obj) {
       if _is_vecdict(obj) {
          if __is_int(key) { return _vec_at(obj, key, default) }
          if _is_bigint(key) { return _vec_at(obj, __bigint_to_int(key), default) }
       }
       return _dict_get_raw(obj, key, default)
    }
-   if __eq(tag, _TAG_STR) || __eq(tag, _TAG_STR_CONST) || __is_str_obj(obj) {
+   if _is_str(obj) || __is_str_obj(obj) {
       mut k = 0
       if __is_int(key) { k = key }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
@@ -1268,7 +1253,7 @@ fn get(any obj, any key, any default=0) any {
          return chr(ord_at(obj, k))
       }
    }
-   if __eq(tag, _TAG_BYTES) || _is_bytes(obj) {
+   if _is_bytes(obj) {
       mut k = 0
       if __is_int(key) { k = key }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
@@ -1279,7 +1264,7 @@ fn get(any obj, any key, any default=0) any {
       if __lt(k, 0) || __ge(k, n) { return default }
       else { return load8(obj, k) }
    }
-   if __eq(tag, _TAG_RANGE) {
+   if _is_range(obj) {
       mut k = 0
       if __is_int(key) { k = key }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
@@ -1520,33 +1505,33 @@ fn _to_str_depth(any v, int depth) str {
    if !__is_ny_obj(v) { return __to_str(v) }
    if _is_bigint(v) { return __bigint_to_str(v) }
    if _is_vecdict(v) { return _vec_to_str(v) }
-   if __eq(kind, _TAG_LIST) {
+   if _is_list(v) {
       if depth >= 4 { return "[...]" }
       return _str_seq_depth(v, "[", "]", depth)
    }
-   if __eq(kind, _TAG_TUPLE) {
+   if _is_tuple(v) {
       if depth >= 4 { return "(...)" }
       return _str_seq_depth(v, "(", ")", depth)
    }
-   if __eq(kind, _TAG_RANGE) {
+   if _is_range(v) {
       def start = __load64_idx(v, 0)
       def stop = __load64_idx(v, 8)
       def step = __load64_idx(v, 16)
       return f"range({start}, {stop}, {step})"
    }
-   if __eq(kind, _TAG_DICT) {
+   if _is_dict(v) {
       if depth >= 4 { return "{...}" }
       return _str_items_depth(items(v), true, depth)
    }
-   if __eq(kind, _TAG_SET) {
+   if _is_set(v) {
       if depth >= 4 { return "{...}" }
       return _str_items_depth(items(v), false, depth)
    }
-   if __eq(kind, _TAG_BYTES) { return f"<bytes {_raw_len(v)}>" }
-   if __eq(kind, _TAG_FLOAT) { return __to_str(v) }
-   if __eq(kind, _TAG_COMPLEX) { return __to_str(v) }
-   if __eq(kind, _TAG_BIGINT) { return __bigint_to_str(v) }
-   f"<ptr {v} tag={__tagof(v)}>"
+   if _is_bytes(v) { return f"<bytes {_raw_len(v)}>" }
+   if __eq(kind, runtime_tag_raw("float")) { return __to_str(v) }
+   if __eq(kind, runtime_tag_raw("complex")) { return __to_str(v) }
+   if _is_bigint(v) { return __bigint_to_str(v) }
+   "<ptr " + __ptr_key(v) + " tag=" + __ptr_key(__tagof(v)) + ">"
 }
 
 fn to_str(any v) str {
@@ -1577,6 +1562,8 @@ fn to_str(any v) str {
    _reflect_check(to_str([1, 2, 3]) == "[1, 2, 3]", "reflect list to_str")
    _reflect_check(repr("hello") == "\"hello\"", "reflect string repr")
    _reflect_check(repr(["a", "b"]) == "[\"a\", \"b\"]", "reflect list repr")
+   def opaque_err = exception(ERR_RUNTIME, "opaque")
+   _reflect_check(to_str(opaque_err).len > 0 && repr(opaque_err).len > 0, "reflect opaque object formatting")
    _reflect_check(hash("hello") == hash("hello") && hash("hello") != hash("world") && hash([1, 2]) == hash([1, 2]), "reflect hash")
    def deep_list = [[[[[1]]]]]
    _reflect_check(repr(deep_list).contains("[...]") && to_str(deep_list).contains("[...]"), "reflect deep list rendering")
