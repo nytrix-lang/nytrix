@@ -18,9 +18,15 @@ concurrency, cleanup, and effect metadata.
 
 ## Safety profile
 
-`--safe-mode` gives Nytrix its compile-time safety profile. It keeps the
-default type checks and adds ownership/borrow checking, RC/RAII cleanup, strict
-effect/alias policy, and stricter raw-memory diagnostics.
+`--safe-mode` gives Nytrix its compile-time safety profile. It promotes
+ownership diagnostics to errors and adds RC/RAII cleanup, strict effect/alias
+policy, and stricter raw-memory diagnostics.
+
+Ordinary compilation runs the ownership/provenance pass in advisory mode by
+default. It warns about tracked use-after-move, double release, releasing or
+mutating an observed value, and escaping borrows, but it does not change the
+heap policy or insert cleanup. This makes common lifetime mistakes visible
+without turning small scripts into an annotation exercise.
 
 ```bash
 ny --safe-mode file.ny
@@ -92,23 +98,25 @@ forget(o)
 marks a value as owned. `release` consumes and drops an owned value. `forget`
 consumes an owned value without dropping it.
 
-Enable compiler checks:
+Ownership diagnostics run by default:
 
 ```bash
-ny --borrow-check file.ny
-ny --borrow-check --ownership-strict file.ny
-ny --ownership file.ny
+ny file.ny                         # advisory diagnostics, no cleanup changes
+ny --ownership-strict file.ny      # diagnostics become errors
+ny --ownership file.ny             # RAII cleanup plus diagnostics
+ny --safe-mode file.ny             # strict safety profile
 ```
 
-`--borrow-check` enables borrow/ownership diagnostics (moves, releases, borrow
-escapes, use after move, double release) without forcing RAII runtime cleanup.
-Add `--ownership-strict` for stricter tracking (e.g. no implicit borrows from
-mutable slots). Use `--ownership` (alias for `--heap=raii`) to enable both
-diagnostics and automatic runtime cleanup of owned values.
+`--borrow-check` explicitly enables the default advisory pass. It reports
+moves, releases, borrow escapes, use after move, and double release without
+forcing RAII cleanup. `--ownership-strict` promotes these diagnostics to
+errors and enables stricter tracking such as rejecting implicit borrows from
+mutable slots. `--ownership` (alias for `--heap=raii`) enables automatic
+runtime cleanup in addition to the analysis.
 
-With borrow checking disabled, the compiler still parses ownership attributes
-and keeps them as declaration metadata. Run `ny --borrow-check` or
-`ny --safe-mode` for files that rely on those contracts.
+Use `--no-borrow-check` only for a legacy migration boundary. The compiler
+still parses ownership attributes and keeps them as declaration metadata, but
+does not issue advisory ownership diagnostics for that invocation.
 
 Ownership function contracts are:
 

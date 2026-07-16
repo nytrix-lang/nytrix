@@ -6,7 +6,7 @@ shape ownership-double-release {
   expect compile_fail
 
   expect_message "double release of owned slot 'a'"
-  flags "--borrow-check"
+  flags "--ownership-strict"
   source ny <<'NY'
 use std.core
 

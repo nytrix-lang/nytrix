@@ -245,7 +245,7 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog,
   cg->owned_metadata = false;
   cg->ownership_enabled = ny_env_enabled("NYTRIX_OWNERSHIP");
   cg->ownership_strict = ny_env_enabled("NYTRIX_OWNERSHIP_STRICT");
-  cg->ownership_runtime_cleanup = cg->ownership_enabled;
+  cg->ownership_runtime_cleanup = ny_env_enabled("NYTRIX_OWNERSHIP_CLEANUP");
   cg->heap_policy = getenv("NYTRIX_HEAP_POLICY");
   if (!cg->heap_policy || !*cg->heap_policy)
     cg->heap_policy = "manual";
@@ -308,7 +308,7 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   cg->owned_metadata = true;
   cg->ownership_enabled = ny_env_enabled("NYTRIX_OWNERSHIP");
   cg->ownership_strict = ny_env_enabled("NYTRIX_OWNERSHIP_STRICT");
-  cg->ownership_runtime_cleanup = cg->ownership_enabled;
+  cg->ownership_runtime_cleanup = ny_env_enabled("NYTRIX_OWNERSHIP_CLEANUP");
   cg->heap_policy = getenv("NYTRIX_HEAP_POLICY");
   if (!cg->heap_policy || !*cg->heap_policy)
     cg->heap_policy = "manual";

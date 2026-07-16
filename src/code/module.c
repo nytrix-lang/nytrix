@@ -1242,15 +1242,33 @@ static void ny_add_module_alias_binding_unique(codegen_t *cg, const char *alias,
   vec_push(&cg->aliases, alias_bind);
 }
 
+/* Joins `base` and `leaf` into `buf` as "base.leaf". Returns true when the
+ * result fits in `buf_size`, false otherwise (buf is left unspecified). */
+static bool ny_join_scoped_name(char *buf, size_t buf_size, const char *base,
+                                const char *leaf) {
+  int nw = snprintf(buf, buf_size, "%s.%s", base, leaf);
+  return nw > 0 && (size_t)nw < buf_size;
+}
+
+/* Same join, but leaves `name` as-is (copied into `buf`) when it already
+ * contains a '.' and is therefore already fully qualified. */
+static bool ny_join_scoped_name_unless_dotted(char *buf, size_t buf_size,
+                                              const char *base,
+                                              const char *name) {
+  int nw = strchr(name, '.')
+               ? snprintf(buf, buf_size, "%s", name)
+               : snprintf(buf, buf_size, "%s.%s", base, name);
+  return nw > 0 && (size_t)nw < buf_size;
+}
+
 static void ny_add_scoped_module_alias(codegen_t *cg, const char *alias,
                                        const char *target) {
   if (!cg || !alias || !*alias || !target || !*target)
     return;
   if (cg->current_module_name && *cg->current_module_name) {
     char scoped[512];
-    int nw = snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name,
-                      alias);
-    if (nw > 0 && (size_t)nw < sizeof(scoped)) {
+    if (ny_join_scoped_name(scoped, sizeof(scoped), cg->current_module_name,
+                           alias)) {
       ny_add_module_alias_binding_unique(cg, scoped, target);
       return;
     }
@@ -1275,9 +1293,8 @@ static void ny_add_scoped_module_alias_weak(codegen_t *cg, const char *alias,
     return;
   if (cg->current_module_name && *cg->current_module_name) {
     char scoped[512];
-    int nw = snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name,
-                      alias);
-    if (nw > 0 && (size_t)nw < sizeof(scoped)) {
+    if (ny_join_scoped_name(scoped, sizeof(scoped), cg->current_module_name,
+                           alias)) {
       if (!ny_module_alias_name_exists(cg, scoped))
         ny_add_module_alias_binding_unique(cg, scoped, target);
       return;
@@ -1321,11 +1338,8 @@ static void ny_collect_exported_child_module_aliases(codegen_t *cg, stmt_t *mod,
       if (!name || !*name)
         continue;
       char child_path[1024];
-      int nw = strchr(name, '.')
-                   ? snprintf(child_path, sizeof(child_path), "%s", name)
-                   : snprintf(child_path, sizeof(child_path), "%s.%s", mod_name,
-                              name);
-      if (nw <= 0 || (size_t)nw >= sizeof(child_path))
+      if (!ny_join_scoped_name_unless_dotted(child_path, sizeof(child_path),
+                                             mod_name, name))
         continue;
       if (has_explicit_child_uses &&
           ny_module_has_explicit_child_use(cg, mod, child_path, name))
@@ -1360,10 +1374,8 @@ static void ny_collect_exported_child_module_surface(codegen_t *cg, stmt_t *mod,
       if (!name || !*name)
         continue;
       char path[1024];
-      int nw = strchr(name, '.')
-                   ? snprintf(path, sizeof(path), "%s", name)
-                   : snprintf(path, sizeof(path), "%s.%s", mod_name, name);
-      if (nw <= 0 || (size_t)nw >= sizeof(path))
+      if (!ny_join_scoped_name_unless_dotted(path, sizeof(path), mod_name,
+                                             name))
         continue;
       if (has_explicit_child_uses &&
           ny_module_has_explicit_child_use(cg, mod, path, name))
@@ -1498,9 +1510,8 @@ static void ny_add_import_aliases_scoped(codegen_t *cg, bool user_use,
                                          const char *full_name) {
   if (cg && cg->current_module_name && *cg->current_module_name) {
     char scoped[512];
-    int nw = snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name,
-                      alias);
-    if (nw > 0 && (size_t)nw < sizeof(scoped)) {
+    if (ny_join_scoped_name(scoped, sizeof(scoped), cg->current_module_name,
+                           alias)) {
       add_import_alias(cg, scoped, full_name);
       if (user_use)
         add_user_import_alias(cg, scoped, full_name);
@@ -1542,9 +1553,8 @@ static void ny_add_import_aliases_from_full_scoped_weak(codegen_t *cg,
     const char *leaf = ny_name_leaf(full_name);
     if (leaf && *leaf) {
       char scoped[512];
-      int nw = snprintf(scoped, sizeof(scoped), "%s.%s",
-                        cg->current_module_name, leaf);
-      if (nw > 0 && (size_t)nw < sizeof(scoped))
+      if (ny_join_scoped_name(scoped, sizeof(scoped), cg->current_module_name,
+                             leaf))
         if (!lookup_fun_exact(cg, scoped) && !lookup_global_exact(cg, scoped)) {
           ny_push_import_alias_unique_ex(cg, false, scoped, full_name, false);
           if (user_use)
@@ -1744,12 +1754,10 @@ void collect_use_aliases(codegen_t *cg, stmt_t *s) {
         const char *alias = k_std_root_aliases[i].alias;
         const char *target = k_std_root_aliases[i].module;
         char scoped_alias[512];
-        if (cg && cg->current_module_name && *cg->current_module_name) {
-          int nw = snprintf(scoped_alias, sizeof(scoped_alias), "%s.%s",
-                            cg->current_module_name, alias);
-          if (nw > 0 && (size_t)nw < sizeof(scoped_alias))
-            alias = scoped_alias;
-        }
+        if (cg && cg->current_module_name && *cg->current_module_name &&
+            ny_join_scoped_name(scoped_alias, sizeof(scoped_alias),
+                                cg->current_module_name, alias))
+          alias = scoped_alias;
         binding alias_bind = {0};
         alias_bind.name = ny_strdup(alias);
         alias_bind.stmt_t = (stmt_t *)ny_strdup(target);
@@ -1768,12 +1776,10 @@ void collect_use_aliases(codegen_t *cg, stmt_t *s) {
       alias = dot ? dot + 1 : mod;
     }
     char scoped_alias[512];
-    if (cg && cg->current_module_name && *cg->current_module_name) {
-      int nw = snprintf(scoped_alias, sizeof(scoped_alias), "%s.%s",
-                        cg->current_module_name, alias);
-      if (nw > 0 && (size_t)nw < sizeof(scoped_alias))
-        alias = scoped_alias;
-    }
+    if (cg && cg->current_module_name && *cg->current_module_name &&
+        ny_join_scoped_name(scoped_alias, sizeof(scoped_alias),
+                            cg->current_module_name, alias))
+      alias = scoped_alias;
     binding alias_bind = {0};
     alias_bind.name = ny_strdup(alias);
     alias_bind.stmt_t = (stmt_t *)ny_strdup(mod);

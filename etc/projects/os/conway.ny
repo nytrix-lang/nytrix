@@ -30,8 +30,8 @@ if W % 2 == 1 { W -= 1 }
 def HALF_W = W / 2
 def CANV = canvas(W, H)
 def TOTAL = HALF_W * H
-mut grid = bytes(TOTAL)
-mut next_grid = bytes(TOTAL)
+mut grid = own(bytes(TOTAL))
+mut next_grid = own(bytes(TOTAL))
 mut frames = 0
 def max_frames = cli.first_positive_int()
 
@@ -129,8 +129,8 @@ while true {
    }
    canvas_refresh(CANV)
    def tmp = grid
-   grid = next_grid
-   next_grid = tmp
+   grid = own(next_grid)
+   next_grid = own(tmp)
    frames += 1
    if max_frames > 0 && frames >= max_frames { break }
 }

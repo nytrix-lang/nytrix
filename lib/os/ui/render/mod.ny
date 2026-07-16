@@ -3593,6 +3593,7 @@ fn _init_with_window(any win, bool prefer_vulkan=true) bool {
       return true
    }
    if !lib_vkr.init(win) {
+      lib_vkr.shutdown()
       if _is_debug() {
          ui_profile.print_text("[gfx] Vulkan init failed")
          ui_profile.print_text("[gfx] requested GPU backend failed; no software fallback is active")

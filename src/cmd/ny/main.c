@@ -643,6 +643,7 @@ static void ny_clear_policy_env_overrides(void) {
                                      "NYTRIX_HEAP_POLICY",
                                      "NYTRIX_RC_GC",
                                      "NYTRIX_OWNERSHIP",
+                                     "NYTRIX_OWNERSHIP_CLEANUP",
                                      "NYTRIX_OWNERSHIP_STRICT",
                                      "NYTRIX_DEBUG_LOCALS",
                                      "NYTRIX_DWARF_VERSION",
@@ -1299,7 +1300,10 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
   ny_env_config_set_bool(env, "NYTRIX_GC", opt->enable_gc);
   ny_env_config_set(env, "NYTRIX_HEAP_POLICY", ny_heap_policy_name(opt->heap_policy));
   ny_env_config_set_bool(env, "NYTRIX_RC_GC", opt->heap_policy == NY_HEAP_RC);
-  ny_env_config_set_bool(env, "NYTRIX_OWNERSHIP", opt->ownership);
+  /* Advisory borrow checking is independent from RAII cleanup. */
+  ny_env_config_set_bool(env, "NYTRIX_OWNERSHIP",
+                         opt->ownership || opt->borrow_check);
+  ny_env_config_set_bool(env, "NYTRIX_OWNERSHIP_CLEANUP", opt->ownership);
   ny_env_config_set_bool(env, "NYTRIX_OWNERSHIP_STRICT", opt->ownership_strict);
 }
 

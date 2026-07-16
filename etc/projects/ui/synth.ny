@@ -20,22 +20,22 @@ def W0 = 1280
 def H0 = 760
 def FLAGS = key.WINDOW_CENTER | key.WINDOW_FOCUS_ON_SHOW | key.WINDOW_VULKAN
 
-def BG = [0.014, 0.017, 0.026, 1.0]
-def DOCK = [0.024, 0.030, 0.048, 1.0]
-def CARD = [0.043, 0.052, 0.078, 1.0]
-def CARD2 = [0.066, 0.078, 0.112, 1.0]
-def LINE = [0.15, 0.17, 0.26, 1.0]
-def WHITE = [0.92, 0.94, 1.0, 1.0]
-def MUTED = [0.50, 0.54, 0.68, 1.0]
-def BLUE = [0.24, 0.84, 1.0, 1.0]
-def PURPLE = [0.56, 0.34, 1.0, 1.0]
-def GREEN = [0.32, 1.0, 0.50, 1.0]
-def RED = [1.0, 0.30, 0.30, 1.0]
-def KEY_WHITE = [0.72, 0.76, 0.91, 1.0]
-def KEY_BLACK = [0.026, 0.031, 0.046, 1.0]
-def KEY_TEXT = [0.07, 0.08, 0.12, 1.0]
+def BG = own([0.014, 0.017, 0.026, 1.0])
+def DOCK = own([0.024, 0.030, 0.048, 1.0])
+def CARD = own([0.043, 0.052, 0.078, 1.0])
+def CARD2 = own([0.066, 0.078, 0.112, 1.0])
+def LINE = own([0.15, 0.17, 0.26, 1.0])
+def WHITE = own([0.92, 0.94, 1.0, 1.0])
+def MUTED = own([0.50, 0.54, 0.68, 1.0])
+def BLUE = own([0.24, 0.84, 1.0, 1.0])
+def PURPLE = own([0.56, 0.34, 1.0, 1.0])
+def GREEN = own([0.32, 1.0, 0.50, 1.0])
+def RED = own([1.0, 0.30, 0.30, 1.0])
+def KEY_WHITE = own([0.72, 0.76, 0.91, 1.0])
+def KEY_BLACK = own([0.026, 0.031, 0.046, 1.0])
+def KEY_TEXT = own([0.07, 0.08, 0.12, 1.0])
 
-def MAP = [
+def MAP = own([
    [key.KEY_A, 0,  "A", "C",  false, 0], [key.KEY_W, 1,  "W", "C#", true,  0],
    [key.KEY_S, 2,  "S", "D",  false, 1], [key.KEY_E, 3,  "E", "D#", true,  1],
    [key.KEY_D, 4,  "D", "E",  false, 2], [key.KEY_F, 5,  "F", "F",  false, 3],
@@ -45,17 +45,17 @@ def MAP = [
    [key.KEY_K, 12, "K", "C",  false, 7], [key.KEY_O, 13, "O", "C#", true,  7],
    [key.KEY_L, 14, "L", "D",  false, 8], [key.KEY_P, 15, "P", "D#", true,  8],
    [key.KEY_SEMICOLON, 16, ";", "E", false, 9]
-]
+])
 
-def PRESETS = ["clean", "wide", "echo", "space", "lofi", "crush", "flange"]
+def PRESETS = own(["clean", "wide", "echo", "space", "lofi", "crush", "flange"])
 
 mut AUDIO_OK = false
 mut SRC_PAD = 0
 mut SRC_HIT = 0
 
 mut OCT = 1
-mut held = []
-mut inst = []
+mut held = own([])
+mut inst = own([])
 mut last = "-"
 mut patch = "wide"
 mut pulse = 0.0
