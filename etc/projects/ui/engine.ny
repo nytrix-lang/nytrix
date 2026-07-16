@@ -67,7 +67,7 @@ fn _render_draw_skybox(any tex_id) bool { gfx.draw_skybox(int(tex_id)) }
 fn _render_vertex_offset() int { gfx.renderer_vertex_offset() }
 
 fn _render_reset_overlay_state() bool { gfx.reset_overlay_state() }
-def STARTUP_ONE_ARG_CMDS = ["load", "timeout", "skybox", "anim", "gizmo"]
+def STARTUP_ONE_ARG_CMDS = own(["load", "timeout", "skybox", "anim", "gizmo"])
 def HUD_BG_U32 = 0xE6000000
 def WHITE_U32 = 0xFFFFFFFF
 mut str _gui_pending_model_load_name = ""
@@ -86,7 +86,7 @@ mut str _gui_asset_state_cache_selected = "\x00"
 mut bool _gui_asset_state_cache_show_paths = false
 mut int _gui_asset_state_cache_browser_tab = -1
 mut bool _gui_asset_state_cache_has_scene = false
-mut dict _gui_asset_state_cache = dict(0)
+mut dict _gui_asset_state_cache = own(dict(0))
 
 fn create(any config) dict {
    "Create a shared demo UI app context."
@@ -264,7 +264,7 @@ fn _gui_apply_layout_state(any st) bool {
 }
 
 fn _gui_invalidate_model_filter_cache() bool {
-   _gui_filtered_model_names = []
+   _gui_filtered_model_names = own([])
    _gui_filter_cache_key = "\x00"
    _gui_filter_cache_source_len = -1
    _gui_selected_pick_cache_name = "\x00"
@@ -1090,7 +1090,7 @@ fn _load_scene_runtime_async(spec, auto_frame=true) {
    mut job = dict(4)
    job["done"] = false
    job["ok"] = false
-   _scene_load_async_job = job
+   _scene_load_async_job = own(job)
    _scene_load_async_spec = want
    _scene_load_async_path = gltf_path
    _scene_load_async_display = want

@@ -23,7 +23,7 @@ fn median(list xs) any {
    "Returns the median value of list `xs`. For even-sized lists, returns the average of the two middle elements."
    mut n = xs.len
    if n == 0 { return 0 }
-   def tmp = clone(xs)
+   mut tmp = clone(xs)
    sort(tmp)
    def mid = n / 2
    if (n % 2) == 1 { return tmp.get(mid) }

@@ -1013,7 +1013,7 @@ fn nfs_square_root_report(any n, int rational_bound=64, int algebraic_bound=64, 
 
 fn nfs_factor_report(any n, int rational_bound=64, int algebraic_bound=64, int sieve_radius=32, int degree=0, int b_bound=1) dict {
    "Run the small NFS relation, dependency, square-root, and GCD pipeline."
-   def r = nfs_square_root_report(n, rational_bound, algebraic_bound, sieve_radius, degree, 4096, b_bound)
+   mut r = nfs_square_root_report(n, rational_bound, algebraic_bound, sieve_radius, degree, 4096, b_bound)
    r.set("method", "nfs-factor-report")
 }
 

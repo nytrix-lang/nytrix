@@ -1962,8 +1962,11 @@ int ny_pipeline_run(ny_options *opt) {
   cg.type_solver = opt->type_solver_raw ? opt->type_solver_raw : "auto";
   cg.c_frontend = opt->c_frontend_raw ? opt->c_frontend_raw : "auto";
   cg.strict_types = opt->strict_types;
+  /* Advisory provenance checking is deliberately separate from hard errors
+   * and automatic cleanup. This keeps ordinary compilation informative without
+   * changing the program's lifetime or heap policy. */
   cg.ownership_enabled = opt->ownership || opt->ownership_strict || opt->borrow_check;
-  cg.ownership_strict = opt->ownership_strict || opt->borrow_check;
+  cg.ownership_strict = opt->ownership_strict;
   cg.ownership_runtime_cleanup = opt->ownership;
   if (opt->safe_mode) {
     cg.strict_diagnostics = true;

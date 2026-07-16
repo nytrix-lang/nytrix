@@ -811,14 +811,15 @@ static void stmt_ownership_post_store(codegen_t *cg, scope *scopes,
     alloc_size_known =
         stmt_ownership_alloc_size_bytes(cg, scopes, depth, rhs, &alloc_size_raw);
   }
-  if (target_global &&
+  bool explicit_own = stmt_call_tail_is(rhs, "own");
+  if (target_global && !explicit_own &&
       ny_diag_should_emit("ownership_escape_global", tok, dest->name)) {
     stmt_ownership_diag(
         cg, tok,
         "owned heap value stored in global '%s' may escape ownership cleanup",
         dest->name);
-    ny_diag_fix(
-        "use borrow(x), clone(x), release(x), or add an ownership contract");
+    ny_diag_fix("wrap process-lifetime storage in own(...), or keep it local and "
+                "release it");
   }
   dest->ownership_tracked = true;
   dest->ownership_raw_ptr = raw_ptr;
@@ -3310,7 +3311,10 @@ static bool ensure_store_ready(codegen_t *cg, token_t tok, LLVMValueRef value,
 
 static bool can_bind_decl_direct(const codegen_t *cg, const char *name,
                                  bool is_mut) {
-  if (cg && cg->ownership_enabled)
+  /* Only RAII cleanup needs an addressable slot to null out on move/drop;
+   * advisory-only ownership tracking (the default) keeps the fast direct
+   * binding path so enabling diagnostics never changes generated code. */
+  if (cg && cg->ownership_enabled && cg->ownership_runtime_cleanup)
     return false;
   if (!is_mut)
     return true;
