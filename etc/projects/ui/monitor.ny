@@ -18,7 +18,7 @@ gfx.apply_backend_argv()
 def win = gfx.init_window(960, 540, "Nytrix Monitor Detector", key.WINDOW_SCALE_TO_MONITOR | key.WINDOW_CENTER)
 
 if !win { panic("window init failed") }
-def UI_FONTS = ["etc/assets/fonts/monocraft.ttf", "etc/assets/fonts/jetbrains.ttf"]
+def UI_FONTS = own(["etc/assets/fonts/monocraft.ttf", "etc/assets/fonts/jetbrains.ttf"])
 def font_title = gfx.font_load_first(UI_FONTS, 28)
 def font_body = gfx.font_load_first(UI_FONTS, 18)
 def font_small = gfx.font_load_first(UI_FONTS, 14)
@@ -32,10 +32,10 @@ mut hidden_timer = 0.0
 mut minimized_timer = 0.0
 def MONITOR_REFRESH_NS = 500000000
 def STATE_REFRESH_NS = 100000000
-mut monitor_rows = []
+mut monitor_rows = own([])
 mut current_monitor = 0
 mut last_monitor_refresh = 0
-mut state_cache = {}
+mut state_cache = own({})
 mut last_state_refresh = 0
 mut hud_win_w = -1
 mut hud_win_h = -1
@@ -100,11 +100,12 @@ fn refresh_monitor_cache(bool force) int {
       rows = rows.append(view_window.monitor_row(monitors.get(i), i))
       i += 1
    }
-   monitor_rows = rows
-   if rows.len > 0 {
+   def rows_len = rows.len
+   monitor_rows = own(rows)
+   if rows_len > 0 {
       current_monitor = window.get_current_monitor_index(win, monitors)
       if current_monitor < 0 { current_monitor = 0 }
-      elif current_monitor >= rows.len { current_monitor = rows.len - 1 }
+      elif current_monitor >= rows_len { current_monitor = rows_len - 1 }
    } else {
       current_monitor = 0
    }

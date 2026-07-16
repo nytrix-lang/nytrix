@@ -161,7 +161,7 @@ fn _ny_trace_truthy(str name) bool {
 
 fn _bool_cache() dict {
    if !is_dict(_env_bool_cache) { _env_bool_cache = dict(64) }
-   _env_bool_cache
+   return _env_bool_cache
 }
 
 fn _int_cache() dict {
@@ -294,54 +294,37 @@ fn apply_verbose_argv(int start_index=1) bool {
 }
 
 fn env_truthy_cached(any name) bool {
-   "Returns a cached truthy environment flag."
+   "Returns a truthy environment flag without requiring cache initialization."
    def k = _key(name)
    if _ny_trace_has_value(k) { return _ny_trace_truthy(k) }
-   _bool_cache()
-   if _env_bool_cache.contains(k) { return bool(_env_bool_cache.get(k, false)) }
-   def v = common.env_truthy(k)
-   _env_bool_cache[k] = v
-   v
+   ;; This facade participates in window/render startup cycles. A profile cache
+   ;; is an optimization, never a precondition for safe startup.
+   return common.env_truthy(k)
 }
 
 fn env_present_cached(any name) bool {
-   "Returns a cached environment-presence flag."
+   "Returns an environment-presence flag without requiring cache initialization."
    def raw = _key(name)
    if _ny_trace_has_value(raw) { return true }
-   def k = "present:" + raw
-   _bool_cache()
-   if _env_bool_cache.contains(k) { return bool(_env_bool_cache.get(k, false)) }
-   def v = common.env_present(_key(name))
-   _env_bool_cache[k] = v
-   v
+   return common.env_present(raw)
 }
 
 fn env_enabled_cached(any name) bool {
-   "Returns a cached enabled environment flag."
+   "Returns an enabled environment flag without requiring cache initialization."
    def raw = _key(name)
    if _ny_trace_has_value(raw) { return _ny_trace_truthy(raw) }
-   def k = "enabled:" + raw
-   _bool_cache()
-   if _env_bool_cache.contains(k) { return bool(_env_bool_cache.get(k, false)) }
-   def v = common.env_enabled(_key(name))
-   _env_bool_cache[k] = v
-   v
+   return common.env_enabled(raw)
 }
 
 fn env_toggle_cached(any name, bool default_value=false) bool {
-   "Returns a cached toggle environment flag with a default when unset."
+   "Returns a toggle environment flag without requiring cache initialization."
    def raw = _key(name)
    if _ny_trace_has_value(raw) { return _ny_trace_truthy(raw) }
-   def k = "toggle:" + raw + ":" + to_str(bool(default_value))
-   _bool_cache()
-   if _env_bool_cache.contains(k) { return bool(_env_bool_cache.get(k, false)) }
-   def v = common.env_toggle(_key(name), bool(default_value))
-   _env_bool_cache[k] = v
-   v
+   return common.env_toggle(raw, bool(default_value))
 }
 
 fn env_int_cached(any name, int default_value=0, int min_value=-2147483648, int max_value=2147483647) int {
-   "Returns a cached clamped integer environment value."
+   "Returns a clamped integer environment value without requiring cache initialization."
    def raw = _key(name)
    if _ny_trace_has_value(raw) {
       def tv = int(_ny_trace_value(raw))
@@ -349,36 +332,21 @@ fn env_int_cached(any name, int default_value=0, int min_value=-2147483648, int 
       if tv > int(max_value) { return int(max_value) }
       return tv
    }
-   def k = "int:" + raw + ":" + to_str(int(default_value)) + ":" + to_str(int(min_value)) + ":" + to_str(int(max_value))
-   _int_cache()
-   if _env_int_cache.contains(k) { return int(_env_int_cache.get(k, default_value)) }
-   def v = common.env_int_clamped(_key(name), int(default_value), int(min_value), int(max_value))
-   _env_int_cache[k] = v
-   v
+   return common.env_int_clamped(raw, int(default_value), int(min_value), int(max_value))
 }
 
 fn env_trim_cached(any name) str {
-   "Returns a cached trimmed environment value."
+   "Returns a trimmed environment value without requiring cache initialization."
    def raw = _key(name)
    if _ny_trace_has_value(raw) { return _ny_trace_value(raw) }
-   def k = "trim:" + raw
-   _str_cache()
-   if _env_str_cache.contains(k) { return to_str(_env_str_cache.get(k, "")) }
-   def v = common.env_trim(_key(name))
-   _env_str_cache[k] = v
-   v
+   return common.env_trim(raw)
 }
 
 fn env_lower_cached(any name) str {
-   "Returns a cached lower-cased environment value."
+   "Returns a lower-cased environment value without requiring cache initialization."
    def raw = _key(name)
    if _ny_trace_has_value(raw) { return str.lower(_ny_trace_value(raw)) }
-   def k = "lower:" + raw
-   _str_cache()
-   if _env_str_cache.contains(k) { return to_str(_env_str_cache.get(k, "")) }
-   def v = common.env_lower(_key(name))
-   _env_str_cache[k] = v
-   v
+   return common.env_lower(raw)
 }
 
 fn mode_truthy_cached(any mode, any name) int {

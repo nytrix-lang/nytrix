@@ -14,9 +14,9 @@ def COLOR_WHITE = 7
 def COLOR_BG = 0
 def THRESH_HI = 29
 def THRESH_MD = 16
-def PAL = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14]
-def HEAD = [15, 15, 14, 11, 10, 7]
-def GLYPHS = ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","0","1","2","3","4","5","6","7","8","9","!","@","#","$","%","^","&","*","(",")","[","]","{","}","<",">","?","/","\\","|","+","=","-","_","~",":",";",".",",","`","'","日","一","木","山","水","火","土","金","月","天","地","人","雨","風","花","龍","鳥","虫","牛","馬","竹","弓","大","中","小","上","下","左","右","出"]
+def PAL = own([1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14])
+def HEAD = own([15, 15, 14, 11, 10, 7])
+def GLYPHS = own(["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","0","1","2","3","4","5","6","7","8","9","!","@","#","$","%","^","&","*","(",")","[","]","{","}","<",">","?","/","\\","|","+","=","-","_","~",":",";",".",",","`","'","日","一","木","山","水","火","土","金","月","天","地","人","雨","風","花","龍","鳥","虫","牛","馬","竹","弓","大","中","小","上","下","左","右","出"])
 
 fn rand_mod(int n) int {
    if n <= 1 { return 0 }
@@ -38,16 +38,16 @@ def CBUF = CANV.get(2)
 def ATTR = CANV.get(3)
 def COL = CANV.get(4)
 def BLEN = CANV.get(5)
-def INTENSITY = bytes(W * H)
-def CHARS = bytes(W * H)
+def INTENSITY = own(bytes(W * H))
+def CHARS = own(bytes(W * H))
 def max_frames = cli.first_positive_int()
 mut frame = 0
 
 rng.seed(time.ticks())
-mut drop_y = list(W)
-mut drop_speed = list(W)
-mut drop_color = list(W)
-mut drop_seq = list(W)
+mut drop_y = own(list(W))
+mut drop_speed = own(list(W))
+mut drop_color = own(list(W))
+mut drop_seq = own(list(W))
 mut col = 0
 while col < W {
    drop_y = drop_y.append(0 - rand_mod(H * 4))

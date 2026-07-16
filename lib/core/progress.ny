@@ -120,7 +120,7 @@ fn reset(list p, int n=-1) int {
 }
 
 #main {
-   def p = [4, 0, "self", 8, "green", 1, 1, 0, 0, 0, 0, 0.0]
+   mut p = [4, 0, "self", 8, "green", 1, 1, 0, 0, 0, 0, 0.0]
    assert(total(p) == 4 && current(p) == 0 && percent(p) == 0, "progress initial state")
    p.set(1, 2)
    assert(current(p) == 2 && percent(p) == 50, "progress percent mid")

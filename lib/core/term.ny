@@ -779,7 +779,7 @@ fn canvas(int w, int h) list {
 fn canvas_clear(list canv) int {
    "Clears all buffers(characters, attributes, and colors) in the canvas."
    def w, h = canv.get(0), canv.get(1)
-   def buf, attr, col = canv.get(2), canv.get(3), canv.get(4)
+   mut buf, attr, col = canv.get(2), canv.get(3), canv.get(4)
    def blen = canv.get(5)
    mut i = 0
    def n = w * h
@@ -838,7 +838,7 @@ fn canvas_set(list canv, int x, int y, any ch, int color_idx=0, int is_bold=0) i
    def w, h = canv.get(0), canv.get(1)
    if x < 0 || x >= w || y < 0 || y >= h { return 0 }
    def idx = y * w + x
-   def chars = canv.get(2)
+   mut chars = canv.get(2)
    def attr = canv.get(3)
    def col = canv.get(4)
    def blen = canv.get(5)

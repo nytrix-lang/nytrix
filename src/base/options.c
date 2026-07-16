@@ -1677,8 +1677,9 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_MAGENTA, "-gc / -no-gc", "Enable/disable GC nursery"},
       {NY_CLR_MAGENTA, "--rc-gc", "Alias for --heap=rc"},
       {NY_CLR_MAGENTA, "--ownership", "Alias for --heap=raii"},
-      {NY_CLR_MAGENTA, "--ownership-strict", "Strict ownership diagnostics"},
-      {NY_CLR_MAGENTA, "--borrow-check", "Borrow/ownership diagnostics without RAII cleanup"},
+      {NY_CLR_MAGENTA, "--ownership-strict", "Turn ownership diagnostics into errors"},
+      {NY_CLR_MAGENTA, "--borrow-check", "Enable advisory borrow/ownership diagnostics without RAII cleanup"},
+      {NY_CLR_MAGENTA, "--no-borrow-check", "Disable borrow/ownership diagnostics"},
       {NY_CLR_MAGENTA, "--raii", "Alias for --ownership"},
       {NY_CLR_MAGENTA, "Note",
        "Typed contracts are non-null by default (nil requires ?T or *T)"},
@@ -2504,8 +2505,8 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         if (!opt->heap_policy_explicit)
           opt->heap_policy = NY_HEAP_RAII;
       } else if (strcmp(a, "--borrow-check") == 0) {
+        /* Explicitly retain the default advisory provenance pass. */
         opt->borrow_check = true;
-        opt->ownership_strict = true;
       } else if (strcmp(a, "--no-ownership-strict") == 0 ||
                  strcmp(a, "--no-borrow-check") == 0) {
         opt->ownership_strict = false;

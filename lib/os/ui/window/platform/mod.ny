@@ -141,7 +141,14 @@ fn _native_handle(any win) any {
    win
 }
 
+fn _native_value_eq(any a, any b) bool {
+   if a == b { return true }
+   if is_int(a) && is_int(b) { return to_int(a) == to_int(b) }
+   false
+}
+
 fn _native_window(any win) any {
+   if is_dict(win) && win.get("display", 0) && win.get("handle", 0) { return win }
    def handle = _native_handle(win)
    if !handle { return 0 }
    def native_windows = _get_platform_val("native_windows")
@@ -152,7 +159,7 @@ fn _native_window(any win) any {
    def wins_n = wins.len
    while i < wins_n {
       def cand = wins.get(i, 0)
-      if is_dict(cand) && cand.get("handle", 0) == handle { return cand }
+      if is_dict(cand) && _native_value_eq(cand.get("handle", 0), handle) { return cand }
       i += 1
    }
    0
@@ -254,6 +261,7 @@ def PLATFORM_ERROR = int(api.PLATFORM_ERROR)
 fn _select_backend_name() str {
    def current = _get_platform_val("backend_name", "")
    if current != "" { return current }
+
    def requested = common.env_lower("NY_UI_BACKEND")
    mut name = ""
    if requested == "none" { name = "none" }
@@ -350,12 +358,12 @@ fn get_platform() int {
 
 fn init_hint(any hint, any value) any {
    "Stores an initialization hint for backend selection."
-   if hint == PLATFORM {
-      if value == PLATFORM_X11 { _set_platform_val("backend_name", "x11") }
-      elif value == PLATFORM_WAYLAND { _set_platform_val("backend_name", "wayland") }
-      elif value == PLATFORM_WIN32 { _set_platform_val("backend_name", "win32") }
-      elif value == PLATFORM_COCOA { _set_platform_val("backend_name", "cocoa") }
-      elif value == PLATFORM_NULL { _set_platform_val("backend_name", "none") }
+   if _native_value_eq(hint, PLATFORM) {
+      if _native_value_eq(value, PLATFORM_X11) { _set_platform_val("backend_name", "x11") }
+      elif _native_value_eq(value, PLATFORM_WAYLAND) { _set_platform_val("backend_name", "wayland") }
+      elif _native_value_eq(value, PLATFORM_WIN32) { _set_platform_val("backend_name", "win32") }
+      elif _native_value_eq(value, PLATFORM_COCOA) { _set_platform_val("backend_name", "cocoa") }
+      elif _native_value_eq(value, PLATFORM_NULL) { _set_platform_val("backend_name", "none") }
    }
    mut hints = _get_platform_val("init_hints", dict(8))
    hints[hint] = value
@@ -1150,6 +1158,10 @@ fn create_surface(any instance, any win, any allocator, any surface_out) int {
    "Creates a Vulkan surface for a native window."
    def b = _select_backend_name()
    def native = _native_window(win)
+   if !native {
+      _set_error(PLATFORM_ERROR, "Vulkan surface creation failed: native window state missing")
+      return -1
+   }
    mut res = 1
    if b == "x11" { res = x11_backend.create_surface(instance, native, allocator, surface_out) }
    elif b == "wayland" { res = wayland_backend.create_surface(instance, native, allocator, surface_out) }
@@ -1465,7 +1477,7 @@ comptime emit _dispatch_backend_void2(set_gamma_ramp, x11_backend.set_gamma_ramp
 fn set_gamma(any mon, f64 gamma) any {
    "Builds and applies a gamma ramp for a monitor."
    def size = 256
-   def ramp = list()
+   mut ramp = list()
    mut i = 0
    while i < size {
       def value = int(math.pow(i * 1.0 / (size - 1), 1.0 / gamma) * 65535.0 + 0.5)

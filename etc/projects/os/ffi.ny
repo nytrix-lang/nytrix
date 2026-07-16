@@ -25,7 +25,7 @@ fn read_vertex(any ptr, int idx) list {
    [load32_f32(p, 0), load32_f32(p, 4), load32_f32(p, 8)]
 }
 
-def vertices = malloc(STRIDE * 2)
+def vertices = own(malloc(STRIDE * 2))
 memset(vertices, 0, STRIDE * 2)
 store_vertex(vertices, 0, 3.0, 4.0, 0.0)
 store_vertex(vertices, 1, 1.0, 2.0, 2.0)

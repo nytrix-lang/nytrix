@@ -6,7 +6,7 @@ shape ownership-borrow-syntax-release-while-borrowed {
   expect compile_fail
 
   expect_message "cannot release owned slot 'a' while borrow 'b' is live"
-  flags "--borrow-check"
+  flags "--ownership-strict"
   source ny <<'NY'
 use std.core
 
