@@ -189,7 +189,7 @@ fn _sound_source_selftest_format(any src, int channels, int rate, int bits) bool
 }
 
 fn _sound_source_selftest_sample_fallback(any data, int bits, int tag, int expected) bool {
-   def src = make_memory_source(data, 64, 1, 44100, bits, 0, tag)
+   mut src = make_memory_source(data, 64, 1, 44100, bits, 0, tag)
    mut meta = src.get(1)
    meta = meta.set("sample_fmt", 0)
    src.set(1, meta)

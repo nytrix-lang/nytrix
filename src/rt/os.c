@@ -1955,6 +1955,7 @@ typedef struct rt_async_task {
   unsigned char addr[128];
   int64_t addrlen;
   char *heap_buf;
+  char *send_buf;
   int64_t heap_len;
   int64_t heap_cap;
   char *needle_buf;
@@ -2048,6 +2049,8 @@ static void rt_async_task_free(rt_async_task *t) {
     free(t->argv);
   if (t->heap_buf)
     free(t->heap_buf);
+  if (t->send_buf)
+    free(t->send_buf);
   if (t->needle_buf)
     free(t->needle_buf);
   t->magic = 0;
@@ -2123,6 +2126,27 @@ static void rt_async_complete(rt_async_task *t, int64_t result) {
     return;
   t->result = result;
   t->state = RT_ASYNC_DONE;
+}
+
+/* A pending send must not retain a caller-owned pointer across scheduler turns.
+ * Copying establishes an operation-local snapshot before any callback, close,
+ * or allocation can invalidate/reuse the source storage. */
+static bool rt_async_snapshot_send(rt_async_task *t, const void *src,
+                                   int64_t len) {
+  if (!t || len < 0 || len > 64 * 1024 * 1024)
+    return false;
+  size_t n = (size_t)len;
+  if (n && !src)
+    return false;
+  char *copy = n ? (char *)malloc(n) : NULL;
+  if (n && !copy)
+    return false;
+  if (n)
+    memcpy(copy, src, n);
+  t->send_buf = copy;
+  t->buf = (int64_t)(uintptr_t)copy;
+  t->len = len;
+  return true;
 }
 
 static rt_async_task *rt_async_task_alloc(rt_async_kind kind) {
@@ -2626,12 +2650,17 @@ int64_t rt_async_recv(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
 }
 
 int64_t rt_async_send(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
+  int64_t raw_buf = rt_async_raw(buf);
+  int64_t raw_len = rt_async_raw(len);
   rt_async_task *t = rt_async_task_alloc(RT_ASYNC_SEND);
   if (!t)
     return 0;
+  if (!rt_async_snapshot_send(t, (const void *)(uintptr_t)raw_buf, raw_len)) {
+    rt_async_all_remove(t);
+    rt_async_task_free(t);
+    return 0;
+  }
   t->fd = rt_async_raw(fd);
-  t->buf = rt_async_raw(buf);
-  t->len = rt_async_raw(len);
   t->flags = rt_async_raw(flags);
   return (int64_t)(uintptr_t)t;
 }
@@ -2682,9 +2711,13 @@ int64_t rt_async_write_socket_part(int64_t fd, int64_t data, int64_t off, int64_
   rt_async_task *t = rt_async_task_alloc(RT_ASYNC_SEND);
   if (!t)
     return 0;
+  if (!rt_async_snapshot_send(t, (const void *)(uintptr_t)(raw_data + raw_off),
+                              raw_size)) {
+    rt_async_all_remove(t);
+    rt_async_task_free(t);
+    return 0;
+  }
   t->fd = rt_async_raw(fd);
-  t->buf = raw_data + raw_off;
-  t->len = raw_size;
   t->flags = 0;
   return (int64_t)(uintptr_t)t;
 }
@@ -2696,9 +2729,13 @@ int64_t rt_async_write_socket_all(int64_t fd, int64_t data) {
   rt_async_task *t = rt_async_task_alloc(RT_ASYNC_WRITE_ALL);
   if (!t)
     return 0;
+  if (!rt_async_snapshot_send(t, (const void *)(uintptr_t)raw_data,
+                              (int64_t)rt_tagged_str_len(data))) {
+    rt_async_all_remove(t);
+    rt_async_task_free(t);
+    return 0;
+  }
   t->fd = rt_async_raw(fd);
-  t->buf = raw_data;
-  t->len = (int64_t)rt_tagged_str_len(data);
   t->flags = 0;
   return (int64_t)(uintptr_t)t;
 }

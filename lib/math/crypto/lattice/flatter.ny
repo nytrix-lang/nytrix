@@ -4247,7 +4247,7 @@ fn _strassen_square_report(list a, list b, int leaf_size, int depth) dict {
    def c12 = _strassen_add(r3, r5)
    def c21 = _strassen_add(r2, r4)
    def c22 = _strassen_add(_strassen_sub(_strassen_add(r1, r3), r2), r6)
-   def counts = _strassen_merge_counts([m1, m2, m3, m4, m5, m6, m7], 18 * h * h, depth)
+   mut counts = _strassen_merge_counts([m1, m2, m3, m4, m5, m6, m7], 18 * h * h, depth)
    counts.set("rows", _strassen_join(c11, c12, c21, c22))
 }
 

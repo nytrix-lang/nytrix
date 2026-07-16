@@ -6,7 +6,7 @@ shape ownership-return-owned-without-contract {
   expect compile_fail
 
   expect_message "returning owned slot 'a' requires @returns_owned"
-  flags "--borrow-check"
+  flags "--ownership-strict"
   source ny <<'NY'
 use std.core
 

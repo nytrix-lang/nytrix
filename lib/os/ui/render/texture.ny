@@ -335,7 +335,7 @@ fn rect_pack(dict ctx, list rects) int {
    mut all_packed = 1
    i = 0
    while i < n {
-      def r  = rects.get(i)
+      mut r  = rects.get(i)
       def rw = r.get("w")
       def rh = r.get("h")
       if rw == 0 || rh == 0 {
@@ -357,7 +357,7 @@ fn rect_pack(dict ctx, list rects) int {
       }
       i += 1
    }
-   def sorted = list(n)
+   mut sorted = list(n)
    i = 0
    while i < n { sorted.append(0) i += 1 }
    i = 0

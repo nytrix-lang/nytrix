@@ -34,8 +34,8 @@ if H < 1 { H = 24 }
 if W % 2 == 1 { W -= 1 }
 def HALF_W = W / 2
 def CANV = canvas(W, H)
-mut black = dict(1024)
-mut seen = dict(1024)
+mut black = own(dict(1024))
+mut seen = own(dict(1024))
 mut x = 0
 mut y = 0
 mut dir = DIR_UP

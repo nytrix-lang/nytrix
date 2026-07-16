@@ -6,7 +6,7 @@ shape ownership-use-after-consume {
   expect compile_fail
 
   expect_message "use after move of owned slot 'a'"
-  flags "--borrow-check"
+  flags "--ownership-strict"
   source ny <<'NY'
 use std.core
 

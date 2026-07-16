@@ -39,7 +39,7 @@ mut w = (tW - prefix_len) / (SX * 2)
 
 if w < 1 { w = 1 }
 write_str(color(f"Terminal Size: {tW}x{tH} | Displaying: {target_gens} Generations", "magenta") + "\n")
-mut u = bytes(w)
+mut u = own(bytes(w))
 bytes_set(u, w - 1, 1)
 def block = "██"
 def space = "  "
