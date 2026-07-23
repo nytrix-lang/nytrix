@@ -1,0 +1,15 @@
+shape oracle_overflow_boundaries_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle integer overflow boundary optimizer]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=3; -O1 --native-result-oracle=3; -O2 --native-result-oracle=3; -O3 --native-result-oracle=3"
+  expect compile_and_run
+  source ny <<'NY'
+def i64 max = 9223372036854775807
+def i64 min = -9223372036854775808
+def up = max + 1
+def down = min - 1
+(up == min ? 1 : 0) + (down == max ? 2 : 0)
+NY
+}

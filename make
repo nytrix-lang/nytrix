@@ -597,36 +597,24 @@ def _pkg_exists(name: str) -> bool:
         return False
     return run_capture([pkg_tool, "--exists", name]).returncode == 0
 
+def _gmp_available() -> bool:
+    if _pkg_exists("gmp"):
+        return True
+    if which("llvm-config"):
+        res = run_capture(["llvm-config", "--libs", "all"])
+        if res.returncode == 0 and "-lgmp" in res.stdout:
+            return True
+    for p in ("/usr/include/gmp.h", "/usr/local/include/gmp.h", "/opt/homebrew/include/gmp.h"):
+        if Path(p).exists():
+            return True
+    return False
+
 def _optional_dep_exists(name: str) -> bool:
     if _pkg_exists(name):
         return True
     if name == "z3":
         return bool(which("z3"))
     return False
-
-def _gmp_available() -> bool:
-    env_inc = (os.environ.get("NYTRIX_GMP_INCLUDE") or os.environ.get("GMP_INCLUDE_DIR") or "").strip()
-    env_lib = (os.environ.get("NYTRIX_GMP_LIBRARY") or os.environ.get("GMP_LIBRARY") or "").strip()
-    if host_os() == "windows":
-        if env_inc and env_lib and (_windows_env_path(env_inc) / "gmp.h").exists() and _windows_env_path(env_lib).exists():
-            return True
-        if _windows_find_vcpkg_gmp(_windows_vcpkg_root()) or _windows_find_msys2_gmp():
-            return True
-        return False
-    if _pkg_exists("gmp"):
-        return True
-    if env_inc and (Path(env_inc) / "gmp.h").exists():
-        return True
-    if env_inc and env_lib and Path(env_lib).exists():
-        return True
-    candidates = [
-        Path("/usr/include/gmp.h"),
-        Path("/usr/local/include/gmp.h"),
-        Path("/opt/homebrew/include/gmp.h"),
-        Path(r"C:\vcpkg\installed\x64-windows\include\gmp.h"),
-        Path(r"C:\msys64\mingw64\include\gmp.h"),
-    ]
-    return any(p.exists() for p in candidates)
 
 def _dedupe(items: list[str]) -> list[str]:
     out: list[str] = []
@@ -727,7 +715,7 @@ def _linux_optional_std_packages(distro: str, like: str) -> list[str]:
     if distro in ("debian", "ubuntu", "linuxmint", "pop", "raspbian") or "debian" in like:
         return [
             "pkg-config",
-            "libgmp-dev",
+
             "libwebp-dev",
             "libturbojpeg0-dev",
             "libpng-dev",
@@ -752,7 +740,7 @@ def _linux_optional_std_packages(distro: str, like: str) -> list[str]:
     if distro in ("arch", "manjaro") or "arch" in like:
         return [
             "pkgconf",
-            "gmp",
+
             "libwebp",
             "libjpeg-turbo",
             "libpng",
@@ -777,7 +765,7 @@ def _linux_optional_std_packages(distro: str, like: str) -> list[str]:
     if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
         return [
             "pkgconf-pkg-config",
-            "gmp-devel",
+
             "libwebp-devel",
             "libjpeg-turbo-devel",
             "libpng-devel",
@@ -853,7 +841,7 @@ def _install_optional_std_deps(force_prompt: bool = False) -> None:
                 "brew",
                 "install",
                 "pkg-config",
-                "gmp",
+
                 "webp",
                 "jpeg-turbo",
                 "libpng",
@@ -1138,7 +1126,7 @@ def _windows_msys2_packages_for(missing: list[str]) -> list[str]:
     if "pkg-config" in m:
         pkgs.append(f"{pkg_prefix}-pkgconf")
     if "gmp" in m:
-        pkgs.append(f"{pkg_prefix}-gmp")
+        pass
     if "git" in m:
         pkgs.append("git")
     return _dedupe(pkgs)
@@ -1283,7 +1271,7 @@ def _windows_ensure_llvm() -> None:
         _windows_configure_llvm_env(program_files)
         return
     if _env_flag("NYTRIX_AUTO_DEPS", True) and _windows_deps_provider() == "msys2":
-        _windows_install_msys2_deps(["llvm", "clang", "cmake", "ninja", "pkg-config", "gmp"])
+        _windows_install_msys2_deps(["llvm", "clang", "cmake", "ninja", "pkg-config"])
         root = _windows_find_msys2_llvm()
         if root:
             _windows_configure_llvm_env(root)
@@ -1301,19 +1289,6 @@ def _windows_vcpkg_root() -> Path:
     if raw:
         return _windows_env_path(raw)
     return Path(r"C:\vcpkg")
-
-def _windows_find_vcpkg_gmp(vcpkg_root: Path) -> tuple[Path, Path] | None:
-    triplet = (os.environ.get("VCPKG_DEFAULT_TRIPLET") or "x64-windows").strip() or "x64-windows"
-    installs = [ROOT / "vcpkg_installed" / triplet, vcpkg_root / "installed" / triplet]
-    for install in installs:
-        include_dir = install / "include"
-        if not (include_dir / "gmp.h").exists():
-            continue
-        for lib_name in ("gmp.lib", "libgmp.lib"):
-            lib_path = install / "lib" / lib_name
-            if lib_path.exists():
-                return include_dir, lib_path
-    return None
 
 def _windows_msys_prefixes() -> list[Path]:
     raw: list[str] = []
@@ -1345,33 +1320,6 @@ def _windows_prefers_gnu_toolchain() -> bool:
             return True
     return False
 
-def _windows_find_msys2_gmp() -> tuple[Path, Path] | None:
-    gnu_ok = _windows_prefers_gnu_toolchain()
-    for root in _windows_msys_prefixes():
-        include_dir = root / "include"
-        if not (include_dir / "gmp.h").exists():
-            continue
-        lib_dir = root / "lib"
-        names = ["gmp.lib", "libgmp.lib"]
-        if gnu_ok:
-            names.extend(["libgmp.dll.a", "libgmp.a"])
-        else:
-            # Plain cmd.exe still commonly uses the MSYS2/UCRT LLVM toolchain.
-            # Accept its GMP import/static libraries so users do not need to
-            # start inside an MSYS2 shell just to configure the build.
-            names.extend(["libgmp.dll.a", "libgmp.a"])
-        for lib_name in names:
-            lib_path = lib_dir / lib_name
-            if lib_path.exists():
-                return include_dir, lib_path
-    return None
-
-def _windows_configure_gmp_env(include_dir: Path, library: Path) -> None:
-    os.environ["NYTRIX_GMP_INCLUDE"] = str(include_dir)
-    os.environ["NYTRIX_GMP_LIBRARY"] = str(library)
-    os.environ["GMP_INCLUDE_DIR"] = str(include_dir)
-    os.environ["GMP_LIBRARY"] = str(library)
-
 def _windows_vcpkg_builtin_baseline(vcpkg_root: Path) -> str:
     raw = (os.environ.get("VCPKG_BUILTIN_BASELINE") or os.environ.get("NYTRIX_VCPKG_BASELINE") or "").strip()
     if raw:
@@ -1387,67 +1335,6 @@ def _windows_vcpkg_builtin_baseline(vcpkg_root: Path) -> str:
     if len(baseline) == 40 and all(ch in hexdigits for ch in baseline):
         return baseline
     return ""
-
-def _windows_ensure_gmp() -> None:
-    if host_os() != "windows":
-        return
-    env_inc = (os.environ.get("NYTRIX_GMP_INCLUDE") or os.environ.get("GMP_INCLUDE_DIR") or "").strip()
-    env_lib = (os.environ.get("NYTRIX_GMP_LIBRARY") or os.environ.get("GMP_LIBRARY") or "").strip()
-    if env_inc and env_lib and (_windows_env_path(env_inc) / "gmp.h").exists() and _windows_env_path(env_lib).exists():
-        _windows_configure_gmp_env(_windows_env_path(env_inc), _windows_env_path(env_lib))
-        return
-    if _windows_prefers_gnu_toolchain():
-        found = _windows_find_msys2_gmp()
-        if found:
-            _windows_configure_gmp_env(*found)
-            return
-    vcpkg_root = _windows_vcpkg_root()
-    found = _windows_find_vcpkg_gmp(vcpkg_root)
-    if found:
-        _windows_configure_gmp_env(*found)
-        return
-    found = _windows_find_msys2_gmp()
-    if found:
-        _windows_configure_gmp_env(*found)
-        return
-    provider = (os.environ.get("NYTRIX_WINDOWS_GMP_PROVIDER") or "system").strip().lower()
-    if provider not in ("vcpkg", "vcpkg-build"):
-        raise SystemExit(
-            "GMP headers/library not found for Windows. Install a prebuilt package "
-            "(MSYS2 UCRT: mingw-w64-ucrt-x86_64-gmp) or set NYTRIX_GMP_INCLUDE and "
-            "NYTRIX_GMP_LIBRARY. Set NYTRIX_WINDOWS_GMP_PROVIDER=vcpkg only when a slow "
-            "vcpkg source build is acceptable."
-        )
-    vcpkg = vcpkg_root / "vcpkg.exe"
-    if not vcpkg.exists():
-        raise SystemExit("GMP headers not found and vcpkg is unavailable; install GMP or set NYTRIX_GMP_INCLUDE/NYTRIX_GMP_LIBRARY.")
-    triplet = (os.environ.get("VCPKG_DEFAULT_TRIPLET") or "x64-windows").strip() or "x64-windows"
-    step(f"deps: vcpkg install gmp:{triplet}")
-    manifest = ROOT / "vcpkg.json"
-    created_manifest = False
-    if not manifest.exists():
-        baseline = _windows_vcpkg_builtin_baseline(vcpkg_root)
-        if not baseline:
-            raise SystemExit("vcpkg manifest mode requires a builtin-baseline; set VCPKG_BUILTIN_BASELINE or use a git checkout of vcpkg.")
-        manifest.write_text(
-            '{\n'
-            '  "name": "nytrix-local-deps",\n'
-            '  "version-string": "0.1.0",\n'
-            f'  "builtin-baseline": "{baseline}",\n'
-            '  "dependencies": ["gmp"]\n'
-            '}\n',
-            encoding="utf-8",
-        )
-        created_manifest = True
-    try:
-        run([str(vcpkg), "install", "--triplet", triplet])
-    finally:
-        if created_manifest:
-            manifest.unlink(missing_ok=True)
-    found = _windows_find_vcpkg_gmp(vcpkg_root)
-    if not found:
-        raise SystemExit(f"vcpkg installed gmp:{triplet}, but gmp.h/libgmp were not found under {vcpkg_root}")
-    _windows_configure_gmp_env(*found)
 
 def _windows_bootstrap_llvm_from_source() -> bool:
     if host_os() != "windows":
@@ -1558,13 +1445,11 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             missing.append("cmake")
         if require_git and not which("git"):
             missing.append("git")
-    if not _gmp_available():
-        missing.append("gmp")
     missing = _dedupe(missing)
 
     if not missing:
         _windows_ensure_llvm()
-        _windows_ensure_gmp()
+        pass
         if force_optional_prompt:
             _install_optional_std_deps(True)
         return
@@ -1589,7 +1474,6 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
                     pkgs += ["libclang-dev"]
             else:
                 pkgs += ["clang", "llvm-dev", "libclang-dev"]
-            pkgs += ["libgmp-dev"]
             step("deps: apt update")
             run(["sudo", "apt", "update"])
             step("deps: apt install")
@@ -1598,12 +1482,12 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             return
         if distro in ("arch", "manjaro") or "arch" in like:
             step("deps: pacman install")
-            run(["sudo", "pacman", "-Sy", "--noconfirm", "base-devel", "python", "clang", "cmake", "ninja", "git", "gdb", "llvm", "pkgconf", "gmp", "zlib"])
+            run(["sudo", "pacman", "-Sy", "--noconfirm", "base-devel", "python", "clang", "cmake", "ninja", "git", "gdb", "llvm", "pkgconf", "zlib"])
             _install_optional_std_deps(force_optional_prompt)
             return
         if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
             step("deps: dnf install")
-            run(["sudo", "dnf", "install", "-y", "@development-tools", "clang", "llvm-devel", "cmake", "ninja-build", "git", "gdb", "pkgconf-pkg-config", "gmp-devel", "zlib-devel"])
+            run(["sudo", "dnf", "install", "-y", "@development-tools", "clang", "llvm-devel", "cmake", "ninja-build", "git", "gdb", "pkgconf-pkg-config", "zlib-devel"])
             _install_optional_std_deps(force_optional_prompt)
             return
     if os_name == "macos":
@@ -1612,7 +1496,7 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             raise SystemExit(1)
         step("deps: brew install")
         pkgs: list[str] = []
-        for dep, pkg in (("cmake", "cmake"), ("ninja", "ninja"), ("pkg-config", "pkg-config"), ("gmp", "gmp")):
+        for dep, pkg in (("cmake", "cmake"), ("ninja", "ninja"), ("pkg-config", "pkg-config")):
             if dep in missing:
                 pkgs.append(pkg)
         if "git" in missing:
@@ -1636,7 +1520,7 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
                 for cmd in cmds:
                     _windows_run_install(cmd)
         _windows_ensure_llvm()
-        _windows_ensure_gmp()
+        pass
         _install_optional_std_deps(force_optional_prompt)
         return
     err(f"Unable to auto-install dependencies for host: {os_name}")
@@ -1860,7 +1744,7 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
     configure_macos_llvm_env()
     if host_os() == "windows":
         _windows_ensure_llvm()
-        _windows_ensure_gmp()
+        pass
     bdir = cmake_build_dir(build_root, kind)
     bdir.mkdir(parents=True, exist_ok=True)
     cache = bdir / "CMakeCache.txt"
@@ -1918,6 +1802,7 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
     cmd = [
         "cmake", "-S", str(ROOT), "-B", str(bdir),
         f"-DCMAKE_BUILD_TYPE={cfg}", "-DNYTRIX_FAST_BUILD=ON",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         f"-DNYTRIX_HOST_CFLAGS={host_cflags}",
         f"-DNYTRIX_HOST_LDFLAGS={host_ldflags}",
     ]
@@ -3043,10 +2928,6 @@ def _linux_cross_missing(triple: str) -> list[str]:
         missing.append(f"sysroot for {triple}")
         return missing
     sysroot = _linux_cross_sysroot_for_triple(triple)
-    if not _linux_cross_file_any(sysroot, triple, ("include/gmp.h",)):
-        missing.append("target gmp headers")
-    if not _linux_cross_file_any(sysroot, triple, ("lib/libgmp.so", "lib/libgmp.a")):
-        missing.append("target gmp library")
     if not _linux_cross_file_any(sysroot, triple, ("include/zlib.h",)):
         missing.append("target zlib headers")
     if not _linux_cross_file_any(sysroot, triple, ("lib/libz.so", "lib/libz.a")):
@@ -3107,10 +2988,6 @@ def _mingw_runtime_missing(triple: str) -> list[str]:
     if not cc:
         missing.append(f"{_mingw_prefix_for_triple(triple)}-gcc")
     sysroot = _mingw_sysroot_for_triple(triple)
-    if not _mingw_file_any(sysroot, ("include/gmp.h",)):
-        missing.append("mingw gmp headers")
-    if not _mingw_file_any(sysroot, ("lib/libgmp.dll.a", "lib/libgmp.a")):
-        missing.append("mingw gmp library")
     if not _mingw_file_any(sysroot, ("include/zlib.h",)):
         missing.append("mingw zlib headers")
     if not _mingw_file_any(sysroot, ("lib/libz.dll.a", "lib/libz.a")):
@@ -3351,7 +3228,6 @@ def _linux_mingw_packages(distro: str, like: str) -> list[str]:
             "gcc-mingw-w64-x86-64",
             "binutils-mingw-w64-x86-64",
             "libz-mingw-w64-dev",
-            "libgmp-mingw-w64-dev",
         ]
     if distro in ("arch", "manjaro") or "arch" in like:
         return [
@@ -3580,7 +3456,7 @@ def run_make_doctor(build_root: Path, kind: str, args: list[str]) -> int:
     failures += _doctor_check("ninja", bool(_tool_path("ninja")), _tool_status("ninja"))
     failures += _doctor_check("pkg-config", bool(_tool_path("pkg-config") or _tool_path("pkgconf")), _tool_status("pkg-config") if _tool_path("pkg-config") else _tool_status("pkgconf"))
     failures += _doctor_check("llvm-config", bool(_tool_path("llvm-config")) or host_os() == "windows", _tool_status("llvm-config"), required=(host_os() != "windows"))
-    failures += _doctor_check("gmp", _gmp_available(), "headers/library discoverable")
+    failures += _doctor_check("gmp", _gmp_available(), "headers/library discoverable", required=False)
     print("")
     print(c("1", "Optional std/native deps"))
     optional_missing = _detect_optional_std_missing()
@@ -3699,10 +3575,6 @@ def run_cross(build_root: Path, kind: str, args: list[str], run_after: bool) -> 
             if not sysroot:
                 compile_issues.append(f"sysroot for {triple}")
             else:
-                if not _linux_cross_file_any(sysroot, triple, ("include/gmp.h",)):
-                    compile_issues.append("target gmp headers")
-                if not _linux_cross_file_any(sysroot, triple, ("lib/libgmp.so", "lib/libgmp.a")):
-                    compile_issues.append("target gmp library")
                 if not _linux_cross_file_any(sysroot, triple, ("include/zlib.h",)):
                     compile_issues.append("target zlib headers")
                 if not _linux_cross_file_any(sysroot, triple, ("lib/libz.so", "lib/libz.a")):
@@ -3791,7 +3663,7 @@ def print_profile_help() -> None:
     print("Examples:")
     print("  ./make profile compile --runs 5 etc/projects/ui/editor.ny")
     print("  ./make profile perf -- --profile=compile -emit-only etc/projects/ui/editor.ny")
-    print("  ./make profile gdb -- -time -run etc/tests/rt/comptime.ny")
+    print("  ./make profile gdb -- -time -run etc/tests/runtime/compiler/comptime.ny")
 
 def _strip_dashdash(args: list[str]) -> list[str]:
     return args[1:] if args and args[0] == "--" else args
@@ -4024,7 +3896,7 @@ def run_make_profile(build_root: Path, kind: str, jobs: int, args: list[str]) ->
             mode, kind, base_host_cflags, base_host_ldflags,
             base_skip_optional_gates, base_test_cache, base_test_cold,
         )
-        cmake_build(build_root, san_kind, ["ny", "ny-test"], jobs)
+        cmake_build(build_root, san_kind, ["ny", "ny-full", "ny-test"], jobs)
         return run_test(build_root, san_kind, jobs, rest)
     if mode == "fuzz":
         cmake_build(build_root, kind, ["ny", "ny-test", "ny-fuzz"], jobs)
@@ -4091,7 +3963,7 @@ def run_tool(build_root: Path, kind: str, name: str, args: list[str], timeout: f
             restore_tty_visuals()
 
 def default_fuzz_shape_dir() -> str:
-    for rel in ("build/cache/tests/fuzz/shapes", "etc/tests/fuzz/shapes", "etc/tests/fuzz"):
+    for rel in ("build/cache/tests/shapes", "etc/tests/shapes", "etc/tests"):
         if (ROOT / rel).exists():
             return rel
     return "build/cache/tests/fuzz/shapes"
@@ -4131,6 +4003,8 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     suite_timeout_s = int(os.environ.get("NYTRIX_TEST_SUITE_TIMEOUT") or "1800")
     step(f"run tests: bin=ny jobs={test_jobs} suite_timeout={suite_timeout_s}s")
     rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(suite_timeout_s))
+    if rc == 0 and host_os() != "windows":
+        rc = run_tool(build_root, kind, "ny-fuzz", ["validate-shapes", "etc/tests/shapes"], timeout=float(suite_timeout_s))
     elapsed_ms = int((time.perf_counter() - started) * 1000.0)
     if rc == 0:
         ok(f"test suite completed in {elapsed_ms}ms")
@@ -5266,15 +5140,6 @@ def _check_static_libs_available() -> tuple[bool, list[str]]:
             break
         else:
             missing.append("libz3.a (libz3-dev or build z3 from source)")
-    # Check GMP
-    for p in ("/usr/lib/libgmp.a", "/usr/local/lib/libgmp.a"):
-        if Path(p).exists():
-            break
-    else:
-        for path in Path("/usr/lib").glob("libgmp*.a"):
-            break
-        else:
-            missing.append("libgmp.a (libgmp-dev not providing static lib)")
     ok = len(missing) == 0
     return ok, missing
 
@@ -5682,7 +5547,7 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
         _copytree_replace(build_root / "static", package_dir / "build" / "static")
 
     # Source tree (runtime headers, stdlib source, etc).
-    for name in ("src", "lib", "etc"):
+    for name in ("src", "lib", "etc", ".github"):
         _copytree_replace(ROOT / name, package_dir / name, ignore=_tar_source_ignore)
     for name in ("make", "CMakeLists.txt", ".clangd", "out.diff", "README.md", "LICENSE"):
         _copy_release_file(ROOT / name, package_dir / name)
@@ -5789,8 +5654,12 @@ def main() -> int:
         elif cmd in ("fmt", "analyze", "check", "tidy", "audit"):
             targets = ["ny-fmt"]
         elif cmd in ("test", "asan", "ubsan"):
-            targets = ["ny", "ny-test"]
+            targets = ["ny", "ny-full", "ny-test"]
+            if host_os() != "windows":
+                targets.append("ny-fuzz")
         elif cmd in ("fuzz", "bench"):
+            if host_os() == "windows":
+                raise SystemExit("make: fuzz tooling currently requires POSIX process APIs")
             targets = ["ny", "ny-test", "ny-fuzz"]
         elif cmd in ("cross", "cross-run"):
             targets = ["ny"]

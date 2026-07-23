@@ -291,7 +291,7 @@ fn _siqs_poly_int_scan_allowed(any A, any B, any C, int radius) bool {
 fn _siqs_cutoff_candidates(int default_cutoff) list {
    mut out = [default_cutoff]
    out = out.append(max(0, default_cutoff - 1))
-   out.append(default_cutoff + 1)
+   return out.append(default_cutoff + 1)
 }
 
 fn _siqs_cutoff_measurement_raw(any modulus, list base, list sqrt_roots, list plist, int cutoff, int sample_polynomials, int sample_radius) any {

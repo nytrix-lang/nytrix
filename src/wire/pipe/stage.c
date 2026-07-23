@@ -217,6 +217,263 @@ static bool ny_stage_write_artifact(const ny_options *opt,
   return ny_stage_write_default_artifact(opt, default_name, json);
 }
 
+static const char *ny_stage_find_in_range(const char *start, const char *end,
+                                          const char *needle) {
+  if (!start || !end || !needle || start > end)
+    return NULL;
+  size_t needle_len = strlen(needle);
+  if (needle_len == 0 || (size_t)(end - start) < needle_len)
+    return NULL;
+  for (const char *p = start; p + needle_len <= end; ++p) {
+    if (memcmp(p, needle, needle_len) == 0)
+      return p;
+  }
+  return NULL;
+}
+
+/* Semantic validation is parameterized by more than source text. Keep this
+ * compact, explicit option identity beside source/compiler provenance so an
+ * artifact cannot prove a different strictness or solver configuration. */
+static uint64_t ny_stage_semantic_config_fingerprint(const ny_options *opt) {
+  const char *solver = getenv("NYTRIX_TYPE_SOLVER");
+  if (!solver || !*solver)
+    solver = (opt && opt->type_solver_raw) ? opt->type_solver_raw : "auto";
+  const char *frontend =
+      (opt && opt->c_frontend_raw) ? opt->c_frontend_raw : "auto";
+  char config[640];
+  snprintf(config, sizeof(config),
+           "semantic-config-v2|solver=%s|strict-types=%u|safe=%u|"
+           "ownership-strict=%u|borrow-check=%u|dump-scope=%u|"
+           "native-backend=%u|native-only=%u|native-abi=%u|native-tier=%u|"
+           "native-cf-mem2reg=%u|profile=%s|target=%s|c-frontend=%s",
+           solver, opt && opt->strict_types ? 1u : 0u,
+           opt && opt->safe_mode ? 1u : 0u,
+           opt && opt->ownership_strict ? 1u : 0u,
+           opt && opt->borrow_check ? 1u : 0u,
+           opt ? (unsigned)opt->dump_scope : 0u,
+           opt ? (unsigned)opt->native_backend : 0u,
+           opt && opt->native_only ? 1u : 0u,
+           opt ? (unsigned)opt->native_abi : 0u,
+           opt ? (unsigned)opt->native_tier : 0u,
+           opt && opt->native_enable_cf_mem2reg ? 1u : 0u,
+           opt && opt->opt_profile ? opt->opt_profile : "default",
+           opt && opt->host_triple ? opt->host_triple : "host", frontend);
+  return ny_cache_semantic_fingerprint(config);
+}
+
+/**
+ * Validate an emitted semantic snapshot before a later stage consumes it.
+ *
+ * The artifact is deliberately pointer-free.  This bounded reader only accepts
+ * the versioned identity fields emitted by ny_stage_artifact_json(); malformed
+ * or stale JSON is rejected instead of being treated as a partial snapshot.
+ * `source` is the exact stdlib-expanded program bytes and remains owned by the
+ * caller.  `err` receives a concise diagnostic when supplied.
+ */
+static bool ny_stage_artifact_matches_source_file(const char *path,
+                                                  const char *source,
+                                                  char *err, size_t err_len) {
+  if (err && err_len)
+    err[0] = '\0';
+  char *json = path ? ny_read_file(path) : NULL;
+  if (!json) {
+    if (err && err_len)
+      snprintf(err, err_len, "cannot read artifact '%s'", path ? path : "");
+    return false;
+  }
+  const char *artifact_key = "\"artifact\":{";
+  const char *schema = "\"schema\":\"ny.semantic-artifact.v1\"";
+  const char *fingerprint_key = "\"source_fingerprint\":\"";
+  const char *bytes_key = "\"source_bytes\":";
+  const char *artifact = strstr(json, artifact_key);
+  const char *artifact_end = artifact ? strchr(artifact, '}') : NULL;
+  const char *fingerprint =
+      artifact_end ? ny_stage_find_in_range(artifact, artifact_end, fingerprint_key) : NULL;
+  const char *bytes =
+      artifact_end ? ny_stage_find_in_range(artifact, artifact_end, bytes_key) : NULL;
+  bool valid = artifact_end &&
+               ny_stage_find_in_range(artifact, artifact_end, schema) != NULL &&
+               fingerprint && bytes;
+  uint64_t found_fingerprint = 0;
+  unsigned long long found_bytes = 0;
+  char *end = NULL;
+  if (valid) {
+    fingerprint += strlen(fingerprint_key);
+    if (strlen(fingerprint) < 17 || fingerprint[16] != '\"') {
+      valid = false;
+    } else {
+      char hex[17];
+      memcpy(hex, fingerprint, 16);
+      hex[16] = '\0';
+      errno = 0;
+      found_fingerprint = strtoull(hex, &end, 16);
+      if (errno || !end || *end != '\0')
+        valid = false;
+    }
+  }
+  if (valid) {
+    bytes += strlen(bytes_key);
+    errno = 0;
+    found_bytes = strtoull(bytes, &end, 10);
+    if (errno || end == bytes)
+      valid = false;
+  }
+  uint64_t expected_fingerprint = ny_cache_semantic_fingerprint(source ? source : "");
+  size_t expected_bytes = source ? strlen(source) : 0;
+  if (valid && (found_fingerprint != expected_fingerprint ||
+                found_bytes != (unsigned long long)expected_bytes)) {
+    if (err && err_len)
+      snprintf(err, err_len, "artifact source identity does not match this input");
+    valid = false;
+  }
+  if (!valid && err && err_len && !err[0])
+    snprintf(err, err_len, "malformed or unsupported semantic artifact");
+  free(json);
+  return valid;
+}
+
+/**
+ * Confirm that a semantic-reuse artifact was produced by this compiler
+ * source/build identity.  Source-only verification intentionally does not
+ * require this field so older snapshots remain inspectable; replaying typed
+ * facts, however, must never cross a semantic implementation change.
+ */
+static bool ny_stage_artifact_matches_compiler_file(const char *path,
+                                                    char *err,
+                                                    size_t err_len) {
+  char *json = path ? ny_read_file(path) : NULL;
+  if (!json) {
+    if (err && err_len)
+      snprintf(err, err_len, "cannot read artifact '%s'", path ? path : "");
+    return false;
+  }
+  const char *artifact = strstr(json, "\"artifact\":{");
+  const char *artifact_end = artifact ? strchr(artifact, '}') : NULL;
+  const char *key = "\"compiler_fingerprint\":\"";
+  const char *fingerprint =
+      artifact_end ? ny_stage_find_in_range(artifact, artifact_end, key) : NULL;
+  bool valid = fingerprint != NULL;
+  uint64_t found = 0;
+  char *end = NULL;
+  if (valid) {
+    fingerprint += strlen(key);
+    if (strlen(fingerprint) < 17 || fingerprint[16] != '\"') {
+      valid = false;
+    } else {
+      char hex[17];
+      memcpy(hex, fingerprint, 16);
+      hex[16] = '\0';
+      errno = 0;
+      found = strtoull(hex, &end, 16);
+      if (errno || !end || *end != '\0')
+        valid = false;
+    }
+  }
+  if (valid && found != ny_cache_compiler_source_fingerprint())
+    valid = false;
+  if (!valid && err && err_len)
+    snprintf(err, err_len,
+             "artifact compiler identity does not match this build");
+  free(json);
+  return valid;
+}
+
+static bool ny_stage_artifact_matches_semantic_config_file(
+    const char *path, const ny_options *opt, char *err, size_t err_len) {
+  char *json = path ? ny_read_file(path) : NULL;
+  if (!json) {
+    if (err && err_len)
+      snprintf(err, err_len, "cannot read artifact '%s'", path ? path : "");
+    return false;
+  }
+  const char *artifact = strstr(json, "\"artifact\":{");
+  const char *artifact_end = artifact ? strchr(artifact, '}') : NULL;
+  const char *key = "\"semantic_config_fingerprint\":\"";
+  const char *fingerprint =
+      artifact_end ? ny_stage_find_in_range(artifact, artifact_end, key) : NULL;
+  bool valid = fingerprint != NULL;
+  uint64_t found = 0;
+  char *end = NULL;
+  if (valid) {
+    fingerprint += strlen(key);
+    if (strlen(fingerprint) < 17 || fingerprint[16] != '\"') {
+      valid = false;
+    } else {
+      char hex[17];
+      memcpy(hex, fingerprint, 16);
+      hex[16] = '\0';
+      errno = 0;
+      found = strtoull(hex, &end, 16);
+      if (errno || !end || *end != '\0')
+        valid = false;
+    }
+  }
+  if (valid && found != ny_stage_semantic_config_fingerprint(opt))
+    valid = false;
+  if (!valid && err && err_len)
+    snprintf(err, err_len,
+             "artifact semantic configuration does not match this build");
+  free(json);
+  return valid;
+}
+
+static bool ny_stage_artifact_is_completed_semantic_snapshot(const char *json) {
+  if (!json)
+    return false;
+  const char *abi_prefix =
+      "{\"schema\":\"lowered.v1\",\"stage\":\"abi\",\"source\":";
+  const char *opt_prefix =
+      "{\"schema\":\"optimized.v1\",\"stage\":\"opt\",\"source\":";
+  if (strncmp(json, abi_prefix, strlen(abi_prefix)) != 0 &&
+      strncmp(json, opt_prefix, strlen(opt_prefix)) != 0)
+    return false;
+  /* ABI-or-later artifacts emit a lowered proof section. Requiring it keeps a
+   * parse/HM snapshot from becoming reusable merely by relabeling its header. */
+  if (!strstr(json, "\"lowered\":"))
+    return false;
+  const char *tail = json + strlen(json);
+  while (tail > json && isspace((unsigned char)tail[-1]))
+    --tail;
+  static const char completed_suffix[] = ",\"errors\":[]}";
+  size_t suffix_len = sizeof(completed_suffix) - 1;
+  return (size_t)(tail - json) >= suffix_len &&
+         memcmp(tail - suffix_len, completed_suffix, suffix_len) == 0;
+}
+
+/**
+ * Accept only successful ABI-or-later snapshots for compiler reuse.
+ *
+ * The source identity check prevents applying facts to another expanded
+ * program. ABI and opt artifacts have already completed every semantic pass
+ * that ny_type_pipeline_validate_semantics would perform for a normal build;
+ * parse/HM/trait/flow snapshots are intentionally not sufficient here.
+ */
+static bool ny_stage_artifact_reusable_for_semantics(const char *path,
+                                                     const char *source,
+                                                     const ny_options *opt,
+                                                     char *err,
+                                                     size_t err_len) {
+  if (!ny_stage_artifact_matches_source_file(path, source, err, err_len))
+    return false;
+  if (!ny_stage_artifact_matches_compiler_file(path, err, err_len))
+    return false;
+  if (!ny_stage_artifact_matches_semantic_config_file(path, opt, err,
+                                                       err_len))
+    return false;
+  char *json = ny_read_file(path);
+  if (!json) {
+    if (err && err_len)
+      snprintf(err, err_len, "cannot reread artifact '%s'", path ? path : "");
+    return false;
+  }
+  bool reusable = ny_stage_artifact_is_completed_semantic_snapshot(json);
+  if (!reusable && err && err_len)
+    snprintf(err, err_len,
+             "artifact must be a successful abi or opt semantic snapshot");
+  free(json);
+  return reusable;
+}
+
 static char *ny_stage_errors_json(ny_stop_after_stage_t stage,
                                   const char *source_name, const char *message,
                                   int count) {
@@ -621,12 +878,28 @@ static char *ny_stage_artifact_json(const ny_options *opt,
   char *resolved_json = NULL;
   char *refined_json = NULL;
   char *lowered_json = NULL;
+  /* Stage output never serializes arena pointers. This byte identity lets a
+   * later consumer reject a snapshot before treating its type/proof facts as
+   * belonging to a different expanded source program. */
+  const char *semantic_source = (prog && prog->raw_src) ? prog->raw_src : "";
+  size_t semantic_source_len = (prog && prog->raw_src) ? prog->raw_src_len : 0;
+  uint64_t semantic_fingerprint = ny_cache_semantic_fingerprint(semantic_source);
+  uint64_t compiler_fingerprint = ny_cache_compiler_source_fingerprint();
+  uint64_t semantic_config_fingerprint =
+      ny_stage_semantic_config_fingerprint(opt);
   ny_stage_append(&buf, &len, &cap, "{\"schema\":");
   ny_stage_json_str(&buf, &len, &cap, ny_stage_schema(stage));
   ny_stage_append(&buf, &len, &cap, ",\"stage\":");
   ny_stage_json_str(&buf, &len, &cap, ny_stage_name(stage));
   ny_stage_append(&buf, &len, &cap, ",\"source\":");
   ny_stage_json_str(&buf, &len, &cap, source_name ? source_name : "");
+  ny_stage_append(&buf, &len, &cap,
+                  ",\"artifact\":{\"schema\":\"ny.semantic-artifact.v1\","
+                  "\"pointer_free\":true,\"source_fingerprint\":\"%016" PRIx64
+                  "\",\"source_bytes\":%zu,\"compiler_fingerprint\":\"%016" PRIx64
+                  "\",\"semantic_config_fingerprint\":\"%016" PRIx64 "\"}",
+                  semantic_fingerprint, semantic_source_len,
+                  compiler_fingerprint, semantic_config_fingerprint);
   ny_stage_append(
       &buf, &len, &cap,
       ",\"pipeline\":[\"parse\",\"hm\",\"trait\",\"flow\",\"abi\",\"opt\"]");

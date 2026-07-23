@@ -196,7 +196,8 @@ fn _asset_dir_add(list dirs, any raw) list {
       if to_str(dirs[i]) == path { return dirs }
       i += 1
    }
-   dirs.append(path)
+   dirs = dirs.append(path)
+   dirs
 }
 
 fn _asset_dir_tokens(any raw) list {

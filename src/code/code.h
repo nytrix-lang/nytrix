@@ -163,6 +163,8 @@ static inline void ny_fun_sig_free_members(fun_sig *sig) {
     free((void *)sig->source_file);
   if (sig->link_name)
     free((void *)sig->link_name);
+  if (sig->llvm_name)
+    free((void *)sig->llvm_name);
   if (sig->return_type)
     free((void *)sig->return_type);
   if (sig->abi_return_type)
@@ -303,14 +305,6 @@ typedef struct codegen_types_t {
 
 typedef struct codegen_ffi_t {
   VEC(char *) defines;
-  struct {
-    const char *path;
-    const char *prefix;
-    const char *lib;
-    bool is_std;
-  } *includes;
-  size_t includes_len;
-  size_t includes_cap;
 } codegen_ffi_t;
 
 typedef struct codegen_env_cache_t {

@@ -1,0 +1,23 @@
+shape fn_if_tail {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os as os
+fn tail_if() any {
+   def raw = os.env("DOES_NOT_EXIST")
+   if(is_str(raw) && len(raw) > 0){
+      def v = atoi(raw)
+      if(v > 0){ return v }
+   }
+   100
+}
+fn main(){
+   print("f1=", tail_if())
+}
+main()
+NY
+}

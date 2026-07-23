@@ -19,7 +19,7 @@ fn _append_tool_id(list out, any id) list {
       if to_str(out.get(i, "")) == key { return out }
       i += 1
    }
-   out.append(key)
+   return out.append(key)
 }
 
 fn _merge_tool_ids_into(list out, any ids) list {

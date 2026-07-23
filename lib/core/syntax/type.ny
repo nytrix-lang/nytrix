@@ -39,6 +39,7 @@ def TAG_STR1    = prim.runtime_tag_raw("str")
 def TAG_STR2    = prim.runtime_tag_raw("str_const")
 def TAG_BYTES   = prim.runtime_tag_raw("bytes")
 def TAG_BIGINT  = prim.runtime_tag_raw("bigint")
+def TAG_BIGFLOAT = prim.runtime_tag_raw("bigfloat")
 def TAG_POLY    = 302
 def TAG_MATRIX  = 303
 mut TYPE_NAMES = nil
@@ -67,7 +68,7 @@ fn _clone_spec_list(any members) list {
       }
       return out
    }
-   out.append(members)
+   return out.append(members)
 }
 
 fn _type_name_set(int tag, str name) str {
@@ -108,12 +109,14 @@ fn _types_init() int {
    _type_name_set(TAG_STR2, "str")
    _type_name_set(TAG_BYTES, "bytes")
    _type_name_set(TAG_BIGINT, "bigint")
+   _type_name_set(TAG_BIGFLOAT, "bigfloat")
    _type_name_set(TAG_POLY, "poly")
    _type_name_set(TAG_MATRIX, "matrix")
    _type_alias_set("none", "nil")
    _type_alias_set("string", "str")
    _type_alias_set("byte_string", "bytes")
    _type_alias_set("BigInt", "bigint")
+   _type_alias_set("BigFloat", "bigfloat")
    _type_alias_set("Poly", "poly")
    _type_alias_set("Matrix", "matrix")
    _type_alias_set("num", "number")
@@ -135,7 +138,7 @@ fn _types_init() int {
    _type_alias_set("f32", "float")
    _type_alias_set("f64", "float")
    _type_alias_set("f128", "float")
-   _type_group_set("number", ["int", "float", "bigint"])
+   _type_group_set("number", ["int", "float", "bigint", "bigfloat"])
    _type_group_set("scalar", ["number", "bool", "str"])
    _type_group_set("seq", ["list", "tuple", "str", "range"])
    _type_group_set("collection", ["list", "dict", "set", "tuple"])
@@ -261,8 +264,7 @@ fn is_bool(any x) bool {
 
 fn is_nil(any x) bool {
    "Check if x is nil. Integer 0 is NOT nil."
-   if __is_int(x) { return false }
-   x == nil
+   __is_nil(x)
 }
 
 fn is_list(any x) bool {
@@ -296,6 +298,11 @@ fn is_bigint(any x) bool {
    def f = globals().get("std.math.nt.is_bigint")
    if f { return f(x) == true }
    __tagof(x) == TAG_BIGINT
+}
+
+fn is_bigfloat(any x) bool {
+   "Check if x is a native BigFloat."
+   __tagof(x) == TAG_BIGFLOAT
 }
 
 fn is_poly(any x) bool {
@@ -354,6 +361,7 @@ fn _is_leaf_type(any x, str name) bool {
       "ptr" -> is_ptr(x)
       "ffi_ptr" -> __tagof(x) == TAG_FFI_PTR
       "bigint" -> is_bigint(x)
+      "bigfloat" -> is_bigfloat(x)
       "poly" -> is_poly(x)
       "matrix" -> is_matrix(x)
       _ -> is_registered_type(x, name)

@@ -1,0 +1,14 @@
+shape type-proof-proposition-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected proof<binary:<(int:0,int:5)>, got proof<binary:!=(int:0,int:5)>"
+  source ny <<'NY'
+fn require_positive(proof<5 > 0> p) {}
+def proof nonzero = prove(5 != 0)
+require_positive(nonzero)
+NY
+}

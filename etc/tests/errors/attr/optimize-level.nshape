@@ -1,0 +1,15 @@
+shape attr_optimize_level {
+  family "compiler-errors/attr"
+  generator "error"
+  features [error attr optimize diagnostic]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "@optimize expects one integer level from 0 through 3"
+  source ny <<'NY'
+@optimize(4)
+fn too_much() int {
+   1
+}
+NY
+}

@@ -1,59 +1,9 @@
-
-#define memset_manual(p, v, n)                                                                     \
-  do {                                                                                             \
-    unsigned char *_p = (unsigned char *)(p);                                                      \
-    unsigned char _v = (unsigned char)(v);                                                         \
-    size_t _n = (n);                                                                               \
-    while (_n-- > 0)                                                                               \
-      *_p++ = _v;                                                                                  \
-  } while (0)
-
 #include "rt/ffigates.h"
 #include "rt/shared.h"
 #include "base/util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-int64_t rt_call0(int64_t f);
-int64_t rt_call0_ptr(int64_t f);
-int64_t rt_call1(int64_t f, int64_t a0);
-int64_t rt_call1_ptr(int64_t f, int64_t a0);
-int64_t rt_call2(int64_t f, int64_t a0, int64_t a1);
-int64_t rt_call2_ptr(int64_t f, int64_t a0, int64_t a1);
-int64_t rt_call2_ptr_u32(int64_t f, int64_t a0, int64_t a1);
-int64_t rt_call3(int64_t f, int64_t a0, int64_t a1, int64_t a2);
-int64_t rt_call3_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2);
-int64_t rt_call3_ptr_u64_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2);
-int64_t rt_call3_ptr_u32_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2);
-int64_t rt_call3_ptr_ptr_u32(int64_t f, int64_t a0, int64_t a1, int64_t a2);
-int64_t rt_call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
-int64_t rt_call4_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
-int64_t rt_call4_ptr_ptr_ptr_ptr_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
-int64_t rt_call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4);
-int64_t rt_call5_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4);
-int64_t rt_call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5);
-int64_t rt_call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                 int64_t a6);
-int64_t rt_call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                 int64_t a6, int64_t a7);
-int64_t rt_call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                 int64_t a6, int64_t a7, int64_t a8);
-int64_t rt_call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9);
-int64_t rt_call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10);
-int64_t rt_call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11);
-int64_t rt_call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
-                  int64_t a12);
-int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
-                  int64_t a12, int64_t a13);
-int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
-                  int64_t a12, int64_t a13, int64_t a14);
 
 nyFfiState_t gNyFfi = {0};
 

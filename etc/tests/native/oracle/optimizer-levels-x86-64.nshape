@@ -1,0 +1,33 @@
+shape oracle_optimizer_levels_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optimizer ssa cfg loop branch modulo strength-reduction licm]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle; -O1 --native-result-oracle; -O2 --native-result-oracle; -O3 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+mut value = 1
+if value {
+  value = 42
+} else {
+  value = 7
+}
+
+mut total = 0
+for i in 0..10 {
+  total = total + i
+}
+
+mut x = 1
+mut y = 3
+for i in 0..200 {
+  if i % 3 == 0 {
+    x = x + y
+  } else {
+    x = 2 * x - i
+  }
+  y = y + (i % 7)
+}
+value + total + x + y
+NY
+}

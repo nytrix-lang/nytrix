@@ -1,0 +1,37 @@
+shape oracle_cfg_regalloc_split_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle machine-ir cfg regalloc split spill loop join]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=0; -O1 --native-result-oracle=0; -O2 --native-result-oracle=0; -O3 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+fn stress(i64 n) i64 {
+  def a0 = n + 1
+  def a1 = n + 2
+  def a2 = n + 3
+  def a3 = n + 4
+  def a4 = n + 5
+  def a5 = n + 6
+  def a6 = n + 7
+  def a7 = n + 8
+  def a8 = n + 9
+  def a9 = n + 10
+  def a10 = n + 11
+  def a11 = n + 12
+  mut acc = 0
+  for i in 0..40 {
+    if i % 2 == 0 {
+      acc = acc + a0 + a2 + a4 + a6 + a8 + a10
+    } else {
+      acc = acc + a1 + a3 + a5 + a7 + a9 + a11
+    }
+    acc = acc + (a0 & 7) + (a1 & 7) + (a2 & 7) + (a3 & 7)
+    acc = acc + (a4 & 7) + (a5 & 7) + (a6 & 7) + (a7 & 7)
+    acc = acc + (a8 & 7) + (a9 & 7) + (a10 & 7) + (a11 & 7)
+  }
+  acc + a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11
+}
+if stress(3) == 4394 { 0 } else { 1 }
+NY
+}

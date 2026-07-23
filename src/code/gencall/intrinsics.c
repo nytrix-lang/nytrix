@@ -62,7 +62,8 @@ ny_try_compile_time_type_builtin(codegen_t *cg, scope *scopes, size_t depth,
   bool want_is_int = (strcmp(name, "__is_int") == 0) ||
                      ny_gencall_builtin_name_is(name, "is_int", shadowed);
   bool want_is_bool = ny_gencall_builtin_name_is(name, "is_bool", shadowed);
-  bool want_is_nil = ny_gencall_builtin_name_is(name, "is_nil", shadowed) ||
+  bool want_is_nil = (strcmp(name, "__is_nil") == 0) ||
+                     ny_gencall_builtin_name_is(name, "is_nil", shadowed) ||
                      ny_gencall_builtin_name_is(name, "is_none", shadowed);
   bool want_has_tag = (strcmp(name, "__has_tag") == 0);
   bool want_tagof = (strcmp(name, "__tagof") == 0);
@@ -1152,7 +1153,8 @@ static LLVMValueRef ny_try_fast_scalar_rt_builtin(codegen_t *cg, scope *scopes,
   bool want_std_is_ptr =
       !want_rt_is_ptr && ny_gencall_builtin_name_is(name, "is_ptr", shadowed);
   bool want_is_bool = ny_gencall_builtin_name_is(name, "is_bool", shadowed);
-  bool want_is_nil = ny_gencall_builtin_name_is(name, "is_nil", shadowed) ||
+  bool want_is_nil = (strcmp(name, "__is_nil") == 0) ||
+                     ny_gencall_builtin_name_is(name, "is_nil", shadowed) ||
                      ny_gencall_builtin_name_is(name, "is_none", shadowed);
   if (!want_tag && !want_untag && !want_is_int && !want_rt_is_ptr &&
       !want_std_is_ptr && !want_is_bool && !want_is_nil)

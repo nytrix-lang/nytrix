@@ -131,10 +131,6 @@ static void parser_report_missing_rbrace_once(parser_t *p, token_t at,
 }
 
 static void stmt_list_push_flat(parser_t *p, ny_stmt_list *out, stmt_t *s);
-static bool stmt_token_is_assign_op(token_t tok);
-static bool stmt_assign_op_is_plain(token_t tok);
-static token_kind stmt_assign_op_binary_kind(token_t tok);
-
 static expr_t *parse_assignment_rhs_expr(parser_t *p) {
   bool prev_stop = p->stop_expr_at_newline;
   p->stop_expr_at_newline = true;
@@ -155,7 +151,7 @@ static stmt_t *parse_leading_deref_assign_stmt(parser_t *p) {
       arena_strndup(p->arena, ident_tok.lexeme, ident_tok.len);
   target->as.ident.sym_id = ident_tok.sym_id;
   parser_advance(p);
-  if (!stmt_token_is_assign_op(p->cur)) {
+  if (!parser_token_is_assign_op(p->cur)) {
     *p = save;
     return NULL;
   }
@@ -168,8 +164,8 @@ static stmt_t *parse_leading_deref_assign_stmt(parser_t *p) {
                  NULL);
     return NULL;
   }
-  if (!stmt_assign_op_is_plain(assign_tok)) {
-    token_kind bin_kind = stmt_assign_op_binary_kind(assign_tok);
+  if (!parser_assign_op_is_plain(assign_tok)) {
+    token_kind bin_kind = parser_assign_op_binary_kind(assign_tok);
     token_t op_tok = {0};
     expr_t *left = expr_new(p->arena, NY_E_DEREF, first);
     left->as.deref.target = target;
@@ -198,7 +194,7 @@ static void parse_stmt_append_or_sync(parser_t *p, ny_stmt_list *out) {
   stmt_t *s = parse_leading_deref_assign_stmt(p);
   if (!s)
     s = p_parse_stmt(p);
-  if (before.kind == NY_T_STAR && stmt_token_is_assign_op(p->cur)) {
+  if (before.kind == NY_T_STAR && parser_token_is_assign_op(p->cur)) {
     *p = saved;
     s = parse_leading_deref_assign_stmt(p);
   }
@@ -499,6 +495,19 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
     base = owner;
   }
   if (parser_match(p, NY_T_LT)) {
+    if (strcmp(base, "proof") == 0) {
+      const char *proof_type = parser_parse_proof_type_arg(p);
+      free(base);
+      if (!proof_type)
+        return NULL;
+      size_t total = nullable_depth + ptr_depth + strlen(proof_type);
+      char *out = arena_alloc(p->arena, total + 1);
+      size_t at = 0;
+      for (size_t i = 0; i < nullable_depth; i++) out[at++] = '?';
+      for (size_t i = 0; i < ptr_depth; i++) out[at++] = '*';
+      memcpy(out + at, proof_type, strlen(proof_type) + 1);
+      return out;
+    }
     size_t cap = strlen(base) + 32;
     size_t len = strlen(base);
     char *generic = malloc(cap);
@@ -680,49 +689,6 @@ static bool parse_operator_token(token_kind kind) {
   }
 }
 
-static bool stmt_token_is_assign_op(token_t tok) {
-  if (tok.kind == NY_T_ASSIGN || tok.kind == NY_T_PLUS_EQ ||
-      tok.kind == NY_T_MINUS_EQ || tok.kind == NY_T_STAR_EQ ||
-      tok.kind == NY_T_SLASH_EQ || tok.kind == NY_T_PERCENT_EQ ||
-      tok.kind == NY_T_POW_EQ || tok.kind == NY_T_BITXOR_EQ ||
-      tok.kind == NY_T_LSHIFT_EQ || tok.kind == NY_T_RSHIFT_EQ)
-    return true;
-  return tok.len == 2 && tok.lexeme &&
-         ((tok.lexeme[0] == '+' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '-' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '*' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '/' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '%' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '^' && tok.lexeme[1] == '='));
-}
-
-static bool stmt_assign_op_is_plain(token_t tok) {
-  return tok.kind == NY_T_ASSIGN ||
-         (tok.len == 1 && tok.lexeme && tok.lexeme[0] == '=');
-}
-
-static token_kind stmt_assign_op_binary_kind(token_t tok) {
-  if (tok.kind == NY_T_PLUS_EQ || (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '+'))
-    return NY_T_PLUS;
-  if (tok.kind == NY_T_MINUS_EQ || (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '-'))
-    return NY_T_MINUS;
-  if (tok.kind == NY_T_STAR_EQ || (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '*'))
-    return NY_T_STAR;
-  if (tok.kind == NY_T_SLASH_EQ || (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '/'))
-    return NY_T_SLASH;
-  if (tok.kind == NY_T_PERCENT_EQ || (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '%'))
-    return NY_T_PERCENT;
-  if (tok.kind == NY_T_POW_EQ)
-    return NY_T_POW;
-  if (tok.kind == NY_T_BITXOR_EQ)
-    return NY_T_BITXOR;
-  if (tok.kind == NY_T_LSHIFT_EQ)
-    return NY_T_LSHIFT;
-  if (tok.kind == NY_T_RSHIFT_EQ)
-    return NY_T_RSHIFT;
-  return NY_T_PERCENT;
-}
-
 static const char *parse_operator_target_for_owner(parser_t *p,
                                                    const char *owner) {
   char *owned = parse_dotted_ident_owned(
@@ -781,10 +747,6 @@ static const char *parse_operator_target_for_owner(parser_t *p,
     free(final_name);
   free(owned);
   return out;
-}
-
-static const char *parse_operator_target(parser_t *p) {
-  return parse_operator_target_for_owner(p, NULL);
 }
 
 static stmt_t *parse_operator_stmt_with_left(parser_t *p,

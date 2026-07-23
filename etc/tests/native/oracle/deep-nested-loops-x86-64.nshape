@@ -1,0 +1,173 @@
+shape oracle_deep_nested_loops_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 nyir cfg deep-loop-nesting oracle]
+  template ny-test-case
+  flags "--native-result-oracle=1 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+mut x = 0
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+while x < 1 {
+x = x + 1
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+x
+NY
+}

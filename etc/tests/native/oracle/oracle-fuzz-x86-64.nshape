@@ -1,0 +1,11 @@
+shape oracle_fuzz_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle nyir fuzz sccp]
+  template ny-test-case
+  flags_matrix "--native-oracle-fuzz=50"
+  expect compile_and_run
+  source ny <<'NY'
+1
+NY
+}

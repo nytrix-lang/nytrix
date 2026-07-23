@@ -4,6 +4,7 @@
 #include "code/priv.h"
 #include "code/typeinfer.h"
 #include "code/visitor.h"
+#include "fficlang.h"
 #include "priv.h"
 #include "rt/shared.h"
 #ifndef _WIN32
@@ -1337,7 +1338,7 @@ static bool ny_lazy_emit_should_emit_func(codegen_t *cg, stmt_t *s,
   return ny_lazy_emit_function_reached(cg, final_name);
 }
 
-void emit_top_functions(codegen_t *cg, stmt_t *s, scope *gsc, size_t gd,
+static void emit_top_functions(codegen_t *cg, stmt_t *s, scope *gsc, size_t gd,
                         const char *cur_mod) {
   if (s->kind == NY_S_FUNC) {
     if (!ny_emit_module_match(cg, cur_mod))
@@ -1730,15 +1731,20 @@ static void process_links(codegen_t *cg, stmt_t *s, const char *cur_mod) {
     if (!ny_link_allowed_for_module(cg, cur_mod))
       return;
     if (s->as.link.lib) {
+      char *resolved = ny_ensure_shared_lib(s->as.link.lib);
+      const char *lib = resolved ? resolved : s->as.link.lib;
       bool found = false;
       for (size_t i = 0; i < cg->links.len; i++) {
-        if (strcmp(cg->links.data[i], s->as.link.lib) == 0) {
+        if (strcmp(cg->links.data[i], lib) == 0 ||
+            strcmp(cg->links.data[i], s->as.link.lib) == 0) {
           found = true;
           break;
         }
       }
       if (!found)
-        vec_push(&cg->links, ny_strdup(s->as.link.lib));
+        vec_push(&cg->links, resolved ? resolved : ny_strdup(s->as.link.lib));
+      else if (resolved)
+        free(resolved);
     }
   } else if (s->kind == NY_S_MODULE) {
     for (size_t i = 0; i < s->as.module.body.len; i++)
@@ -1935,6 +1941,13 @@ void codegen_prepare(codegen_t *cg) {
     ny_register_impl_types_stmt(cg, s);
   }
 
+  {
+    struct timespec ts;
+    int64_t deadline = 0;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+      deadline = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec + 15000000000LL;
+    ny_ffi_set_global_deadline(deadline);
+  }
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     cg->current_module_name = NULL;
     stmt_t *s = cg->prog->body.data[i];
@@ -1944,6 +1957,7 @@ void codegen_prepare(codegen_t *cg) {
       continue;
     collect_sigs(cg, s);
   }
+  ny_ffi_set_global_deadline(0);
 
   process_default_core_imports(cg);
 
@@ -2050,11 +2064,12 @@ void codegen_rebind_llvm_symbols(codegen_t *cg) {
     return;
   for (size_t i = 0; i < cg->fun_sigs.len; i++) {
     fun_sig *sig = &cg->fun_sigs.data[i];
-    const char *link_name =
-        (sig->link_name && *sig->link_name) ? sig->link_name : sig->name;
-    if (!link_name || !*link_name)
+    const char *llvm_name =
+        (sig->llvm_name && *sig->llvm_name) ? sig->llvm_name :
+        ((sig->link_name && *sig->link_name) ? sig->link_name : sig->name);
+    if (!llvm_name || !*llvm_name)
       continue;
-    LLVMValueRef fn = LLVMGetNamedFunction(cg->module, link_name);
+    LLVMValueRef fn = LLVMGetNamedFunction(cg->module, llvm_name);
     if (!fn)
       continue;
     sig->value = fn;
@@ -3044,12 +3059,6 @@ void codegen_dispose(codegen_t *cg) {
   for (size_t i = 0; i < cg->ffi.defines.len; i++)
     free(cg->ffi.defines.data[i]);
   vec_free(&cg->ffi.defines);
-  for (size_t i = 0; i < cg->ffi.includes_len; i++) {
-    free((void *)cg->ffi.includes[i].path);
-    free((void *)cg->ffi.includes[i].prefix);
-    free((void *)cg->ffi.includes[i].lib);
-  }
-  free(cg->ffi.includes);
   for (size_t i = 0; i < cg->extra_progs.len; i++) {
     program_t *prog = cg->extra_progs.data[i];
     arena_t *arena = i < cg->extra_arenas.len ? cg->extra_arenas.data[i] : NULL;

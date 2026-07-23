@@ -1,0 +1,25 @@
+shape oracle_control_flow_optimizer_levels_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optimizer control-flow nested-loop branch local-state regression]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle; -O1 --native-result-oracle; -O2 --native-result-oracle; -O3 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+mut outer = 0
+mut total = 0
+while(outer < 32) {
+  mut inner = 0
+  while(inner < 64) {
+    if (inner + outer) % 5 == 0 {
+      total = total + inner + outer
+    } else {
+      total = total + 1
+    }
+    inner = inner + 1
+  }
+  outer = outer + 1
+}
+total
+NY
+}

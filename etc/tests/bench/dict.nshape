@@ -1,0 +1,23 @@
+shape bench_dict {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "dict", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def t0 = ticks()
+mut d = dict()
+for i in 0..200 {
+  d.set(to_str(i), i)
+}
+mut acc = 0
+for i in 0..200 {
+  acc += d.get(to_str(i), 0)
+}
+def t1 = ticks()
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
+NY
+}

@@ -256,7 +256,7 @@ static bool ny_is_numeric_expr_like_limited(codegen_t *cg, scope *scopes, size_t
   if (budget == 0)
     return false;
   if (e->kind == NY_E_LITERAL)
-    return e->as.literal.kind == NY_LIT_INT ||
+    return (e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL) ||
            e->as.literal.kind == NY_LIT_FLOAT;
   if (e->kind == NY_E_IDENT) {
     size_t name_len = (size_t)e->tok.len;
@@ -469,9 +469,9 @@ static LLVMValueRef gen_ownership_helper_expr(codegen_t *cg, scope *scopes, size
     if (drop_sig)
       LLVMBuildCall2(cg->builder, drop_sig->type, drop_sig->value, (LLVMValueRef[]){v}, 1,
                      "own.release");
-    return ny_c0(cg);
+    return ny_c1(cg);
   }
-  return ny_c0(cg);
+  return ny_c1(cg);
 }
 
 static bool ny_adt_type_is_param(enum_def_t *owner, const char *type_name) {
@@ -635,7 +635,7 @@ static bool ny_f64_expr_proven_nonzero(codegen_t *cg, scope *scopes,
   if (!e)
     return false;
   if (e->kind == NY_E_LITERAL) {
-    if (e->as.literal.kind == NY_LIT_INT)
+    if (e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL)
       return e->as.literal.as.i != 0;
     if (e->as.literal.kind == NY_LIT_FLOAT)
       return e->as.literal.as.f != 0.0;
@@ -687,7 +687,7 @@ static bool ny_f64_raw_int_expr_shape_supported(expr_t *e, unsigned budget) {
     return false;
   switch (e->kind) {
   case NY_E_LITERAL:
-    return e->as.literal.kind == NY_LIT_INT;
+    return e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL;
   case NY_E_IDENT:
     return true;
   case NY_E_BINARY: {
@@ -823,7 +823,7 @@ static void ny_f64_inline_bind_value(codegen_t *cg, scope *scopes,
       b->is_f64_direct = true;
     return;
   }
-  value = expr_cast_to_i64(cg, value, "inline_f64_value");
+  value = ny_llvm_cast_to_i64(cg, value, "inline_f64_value");
   bool proven_int = ny_type_is(inferred_type, "int") ||
                     ny_type_is(inferred_type, "i64") ||
                     ny_is_proven_int(cg, scopes, depth, source_expr, value);
@@ -943,7 +943,7 @@ static LLVMValueRef ny_try_inline_call_as_f64(codegen_t *cg, scope *scopes,
     if (!v)
       return NULL;
     if (!(proven_f64 && !proven_int))
-      v = expr_cast_to_i64(cg, v, "inline_f64_arg");
+      v = ny_llvm_cast_to_i64(cg, v, "inline_f64_arg");
     arg_values[i] = v;
     arg_raw_values[i] = raw_arg ? raw : NULL;
     arg_is_int[i] = proven_int;
@@ -1002,7 +1002,7 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
         d = (double)(float)d;
       return LLVMConstReal(f64_ty, d);
     }
-    if (e->as.literal.kind == NY_LIT_INT) {
+    if (e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL) {
       return LLVMConstReal(f64_ty, (double)e->as.literal.as.i);
     }
     break;
@@ -1413,6 +1413,13 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
     return gen_comptime_eval(cg, e->as.comptime_expr.body);
   case NY_E_LITERAL:
     if (e->as.literal.kind == NY_LIT_INT) {
+      /* The `nil` literal is parsed as LIT_INT with value 0 but token kind
+         NY_T_NIL.  It must materialize as raw nil (0), NOT a tagged integer
+         (which would be (0<<1)|1 == 1) — otherwise is_nil() on a nil value
+         passed through an `any` parameter silently returns false because the
+         value arrives as tagged-int-0 instead of raw nil. */
+      if (e->tok.kind == NY_T_NIL)
+        return ny_c0(cg);
       int64_t raw = e->as.literal.as.i;
       if (ny_small_int_fits_i64(raw))
         return LLVMConstInt(cg->type_i64, ((uint64_t)raw << 1) | 1, true);

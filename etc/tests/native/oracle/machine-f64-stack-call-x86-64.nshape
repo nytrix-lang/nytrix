@@ -1,0 +1,15 @@
+shape oracle_machine_f64_stack_call_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 machine-ir sysv f64 stack-call abi oracle]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=1; -O1 --native-result-oracle=1; -O2 --native-result-oracle=1; -O3 --native-result-oracle=1"
+  expect compile_and_run
+  source ny <<'NY'
+fn sum9(f64 a, f64 b, f64 c, f64 d, f64 e, f64 f, f64 g, f64 h, f64 i) f64 {
+  a + b + c + d + e + f + g + h + i
+}
+
+sum9(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0) > 40.0
+NY
+}

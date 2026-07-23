@@ -1,12 +1,117 @@
 #include "core.h"
 #include <strings.h>
 
+#ifdef _WIN32
+#include <io.h>
+#include <process.h>
+#include <windows.h>
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+#include <poll.h>
+#endif
+
 void proc_result_free(proc_result_t *r) {
   free(r->out);
   free(r->err);
   r->out = NULL;
   r->err = NULL;
 }
+
+#ifdef _WIN32
+
+static void set_nonblock(int fd) {
+  (void)fd;
+}
+
+static void drain_fd(int fd, str_buf_t *buf, bool *open_flag) {
+  char tmp[4096];
+  for (;;) {
+    int n = _read(fd, tmp, sizeof(tmp));
+    if (n > 0) {
+      (void)sb_append_n(buf, tmp, (size_t)n);
+      continue;
+    }
+    if (n == 0) {
+      _close(fd);
+      *open_flag = false;
+      return;
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return;
+    _close(fd);
+    *open_flag = false;
+    return;
+  }
+}
+
+static bool proc_path_exists(const char *path) {
+  struct _stat st;
+  return path && *path && _stat(path, &st) == 0;
+}
+
+static bool proc_looks_like_nytrix_root(const char *path) {
+  char cmake[4096], src[4096], fuzz[4096], tests[4096], readme[4096];
+  if (!path || !*path) return false;
+  ny_join_path(cmake, sizeof(cmake), path, "CMakeLists.txt");
+  ny_join_path(src, sizeof(src), path, "src");
+  ny_join_path(fuzz, sizeof(fuzz), path, "src\\cmd\\fuzz");
+  ny_join_path(tests, sizeof(tests), path, "etc\\tests");
+  ny_join_path(readme, sizeof(readme), path, "README.md");
+  return proc_path_exists(cmake) && proc_path_exists(src) &&
+         proc_path_exists(fuzz) && proc_path_exists(tests) &&
+         proc_path_exists(readme);
+}
+
+static bool proc_find_nytrix_root_from_path(const char *start, char *out, size_t out_sz) {
+  if (!start || !*start || !out || !out_sz) return false;
+  char cur[4096];
+  snprintf(cur, sizeof(cur), "%s", start);
+  while (1) {
+    if (proc_looks_like_nytrix_root(cur)) {
+      snprintf(out, out_sz, "%s", cur);
+      return true;
+    }
+    char *bslash = strrchr(cur, '\\');
+    char *slash = strrchr(cur, '/');
+    char *sep = bslash > slash ? bslash : slash;
+    if (!sep || sep == cur) break;
+    *sep = '\0';
+  }
+  return false;
+}
+
+static bool proc_find_nytrix_root(char *const argv[], char *out, size_t out_sz) {
+  const char *env = getenv("NYTRIX_ROOT");
+  if (env && *env && proc_find_nytrix_root_from_path(env, out, out_sz)) return true;
+
+  char exe[4096];
+  DWORD n = GetModuleFileNameA(NULL, exe, (DWORD)(sizeof(exe) - 1u));
+  if (n > 0 && n < sizeof(exe)) {
+    exe[n] = '\0';
+    if (proc_find_nytrix_root_from_path(exe, out, out_sz)) return true;
+  }
+
+  if (argv && argv[0] && *argv[0]) {
+    if (argv[0][0] == '\\' || (argv[0][1] == ':')) {
+      if (proc_find_nytrix_root_from_path(argv[0], out, out_sz)) return true;
+    } else {
+      char cwd_buf[4096], abs_buf[4096];
+      if (getcwd(cwd_buf, sizeof(cwd_buf))) {
+        ny_join_path(abs_buf, sizeof(abs_buf), cwd_buf, argv[0]);
+        if (proc_find_nytrix_root_from_path(abs_buf, out, out_sz))
+          return true;
+      }
+    }
+  }
+
+  const char *pwd = getenv("PWD");
+  if (pwd && *pwd && proc_find_nytrix_root_from_path(pwd, out, out_sz)) return true;
+  char cwd_buf[4096];
+  return getcwd(cwd_buf, sizeof(cwd_buf)) &&
+         proc_find_nytrix_root_from_path(cwd_buf, out, out_sz);
+}
+
+#else /* POSIX */
 
 static void set_nonblock(int fd) {
   int flags = fcntl(fd, F_GETFL, 0);
@@ -98,6 +203,8 @@ static bool proc_find_nytrix_root(char *const argv[], char *out, size_t out_sz) 
          proc_find_nytrix_root_from_path(cwd_buf, out, out_sz);
 }
 
+#endif /* _WIN32 */
+
 static void proc_set_path(char *out, size_t out_sz, const char *root, const char *leaf) {
   if (!out || !out_sz) return;
   out[0] = '\0';
@@ -136,6 +243,176 @@ static void proc_prepare_child_cache_env(char *const argv[], char *root, size_t 
   proc_set_path(xdg, xdg_sz, root, "build/cache/xdg");
   proc_set_path(nytrix_cache, nytrix_cache_sz, root, "build/cache/nytrix");
 }
+
+#ifdef _WIN32
+
+static void build_env_block(char *const envp[], char *buf, size_t buf_sz) {
+  buf[0] = '\0';
+  size_t pos = 0;
+  for (int i = 0; envp && envp[i]; ++i) {
+    size_t len = strlen(envp[i]);
+    if (pos + len + 2 >= buf_sz) break;
+    memcpy(buf + pos, envp[i], len);
+    pos += len;
+    buf[pos++] = '\0';
+  }
+  buf[pos] = '\0';
+}
+
+proc_result_t run_proc(char *const argv[], const char *cwd, double timeout_s) {
+  proc_result_t result;
+  memset(&result, 0, sizeof(result));
+  result.rc = 127;
+  str_buf_t out = {0}, err = {0};
+  double start = now_ms();
+  char child_root[4096], child_tmp[4096], child_scratch[4096];
+  char child_xdg[4096], child_nytrix_cache[4096];
+  proc_prepare_child_cache_env(argv, child_root, sizeof(child_root),
+                               child_tmp, sizeof(child_tmp),
+                               child_scratch, sizeof(child_scratch),
+                               child_xdg, sizeof(child_xdg),
+                               child_nytrix_cache, sizeof(child_nytrix_cache));
+
+  HANDLE out_read = NULL, out_write = NULL;
+  HANDLE err_read = NULL, err_write = NULL;
+  SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
+  if (!CreatePipe(&out_read, &out_write, &sa, 0) ||
+      !CreatePipe(&err_read, &err_write, &sa, 0)) {
+    (void)sb_append(&err, "CreatePipe failed");
+    result.err = sb_take(&err);
+    result.out = sb_take(&out);
+    result.elapsed_ms = now_ms() - start;
+    return result;
+  }
+  SetHandleInformation(out_read, HANDLE_FLAG_INHERIT, 0);
+  SetHandleInformation(err_read, HANDLE_FLAG_INHERIT, 0);
+
+  char cmd_line[8192];
+  cmd_line[0] = '\0';
+  if (argv && argv[0]) {
+    snprintf(cmd_line, sizeof(cmd_line), "\"%s\"", argv[0]);
+    for (int i = 1; argv[i]; ++i) {
+      size_t clen = strlen(cmd_line);
+      snprintf(cmd_line + clen, sizeof(cmd_line) - clen, " \"%s\"", argv[i]);
+    }
+  }
+
+  char env_block[16384];
+  char *envp[64];
+  int eidx = 0;
+  static char e_root[4096], e_tmp[4096], e_tmp2[4096], e_tmp3[4096];
+  static char e_tmp4[4096], e_scratch[4096], e_xdg[4096], e_cache[4096];
+  if (child_root[0]) {
+    snprintf(e_root, sizeof(e_root), "NYTRIX_ROOT=%s", child_root);
+    envp[eidx++] = e_root;
+  }
+  if (child_tmp[0]) {
+    snprintf(e_tmp, sizeof(e_tmp), "TMPDIR=%s", child_tmp);
+    snprintf(e_tmp2, sizeof(e_tmp2), "TMP=%s", child_tmp);
+    snprintf(e_tmp3, sizeof(e_tmp3), "TEMP=%s", child_tmp);
+    snprintf(e_tmp4, sizeof(e_tmp4), "NYTRIX_CHILD_TMPDIR=%s", child_tmp);
+    envp[eidx++] = e_tmp;
+    envp[eidx++] = e_tmp2;
+    envp[eidx++] = e_tmp3;
+    envp[eidx++] = e_tmp4;
+  }
+  if (child_scratch[0]) {
+    snprintf(e_scratch, sizeof(e_scratch), "NYTRIX_SCRATCH_ROOT=%s", child_scratch);
+    envp[eidx++] = e_scratch;
+  }
+  if (child_xdg[0]) {
+    snprintf(e_xdg, sizeof(e_xdg), "XDG_CACHE_HOME=%s", child_xdg);
+    envp[eidx++] = e_xdg;
+  }
+  if (child_nytrix_cache[0]) {
+    snprintf(e_cache, sizeof(e_cache), "NYTRIX_CACHE_DIR=%s", child_nytrix_cache);
+    envp[eidx++] = e_cache;
+  }
+  envp[eidx] = NULL;
+  build_env_block(envp, env_block, sizeof(env_block));
+
+  STARTUPINFOA si = {sizeof(si)};
+  si.dwFlags = STARTF_USESTDHANDLES;
+  si.hStdOutput = out_write;
+  si.hStdError = err_write;
+  si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+  DWORD creation_flags = CREATE_NO_WINDOW;
+  PROCESS_INFORMATION pi = {0};
+  BOOL ok = CreateProcessA(NULL, cmd_line, NULL, NULL, TRUE, creation_flags,
+                           env_block[0] ? env_block : NULL, cwd, &si, &pi);
+  CloseHandle(out_write); out_write = NULL;
+  CloseHandle(err_write); err_write = NULL;
+
+  if (!ok) {
+    CloseHandle(out_read);
+    CloseHandle(err_read);
+    (void)sb_append(&err, "CreateProcess failed");
+    result.err = sb_take(&err);
+    result.out = sb_take(&out);
+    result.elapsed_ms = now_ms() - start;
+    return result;
+  }
+
+  HANDLE proc_handle = pi.hProcess;
+  DWORD proc_id = pi.dwProcessId;
+  (void)proc_id;
+  CloseHandle(pi.hThread);
+
+  bool out_open = true, err_open = true, exited = false, term_sent = false;
+  DWORD exit_code = 0;
+  double deadline = start + timeout_s * 1000.0;
+  double term_deadline = 0.0;
+  (void)term_deadline;
+  while (out_open || err_open || !exited) {
+    if (!exited) {
+      if (WaitForSingleObject(proc_handle, 0) == WAIT_OBJECT_0) {
+        exited = true;
+        GetExitCodeProcess(proc_handle, &exit_code);
+      }
+    }
+    double now = now_ms();
+    if (!exited && timeout_s > 0.0 && now >= deadline && !term_sent) {
+      result.timed_out = true;
+      term_sent = true;
+      term_deadline = now + 1000.0;
+      TerminateProcess(proc_handle, 124);
+    }
+    char tmp[4096];
+    DWORD nread = 0;
+    if (out_open) {
+      if (ReadFile(out_read, tmp, sizeof(tmp), &nread, NULL) && nread > 0)
+        (void)sb_append_n(&out, tmp, (size_t)nread);
+      else
+        out_open = false;
+    }
+    if (err_open) {
+      if (ReadFile(err_read, tmp, sizeof(tmp), &nread, NULL) && nread > 0)
+        (void)sb_append_n(&err, tmp, (size_t)nread);
+      else
+        err_open = false;
+    }
+    if (!out_open && !err_open && !exited) Sleep(1);
+  }
+  CloseHandle(out_read);
+  CloseHandle(err_read);
+  CloseHandle(proc_handle);
+
+  if (result.timed_out) {
+    result.rc = 124;
+    char note[160];
+    snprintf(note, sizeof(note), "\n[nytrix] timeout after %.2fs; killed process", timeout_s);
+    (void)sb_append(&err, note);
+  } else {
+    result.rc = (int)exit_code;
+  }
+  result.out = sb_take(&out);
+  result.err = sb_take(&err);
+  result.elapsed_ms = now_ms() - start;
+  return result;
+}
+
+#else /* POSIX */
 
 proc_result_t run_proc(char *const argv[], const char *cwd, double timeout_s) {
   proc_result_t result;
@@ -259,6 +536,8 @@ proc_result_t run_proc(char *const argv[], const char *cwd, double timeout_s) {
   result.elapsed_ms = now_ms() - start;
   return result;
 }
+
+#endif /* !_WIN32 */
 
 char *normalize_output_pair(const char *out, const char *err) {
   str_buf_t combined = {0};

@@ -110,6 +110,12 @@ ny> doc_value
 
 Use `:snapshot app.nys -o app` to export through the native AOT path.
 
+New snapshots include a source fingerprint and byte length in their header.
+`:load` checks those fields before replacing the persistent session, rejecting
+an edited or truncated snapshot instead of rebuilding it as if it were intact.
+Older source-only v1 snapshots remain loadable for compatibility. A snapshot
+that declares the v2 format cannot downgrade to v1 by omitting those fields.
+
 ## Debug Loop
 
 | Symptom | Next command |

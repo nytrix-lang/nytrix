@@ -214,10 +214,11 @@ static void lexer_error(lexer_t *lx, size_t start, const char *msg,
   int col = lx->col - (int)(lx->pos - start);
   fprintf(stderr, "%s:%d:%d: %s[lex]%s %serror:%s %s\n",
           lx->filename ? lx->filename : "<input>", lx->line, col,
-          clr(NY_CLR_CYAN), clr(NY_CLR_RESET), clr(NY_CLR_RED),
+          clr(NY_CLR_BRIGHT_CYAN), clr(NY_CLR_RESET),
+          clr(NY_CLR_BRIGHT_RED),
           clr(NY_CLR_RESET), msg);
   if (hint) {
-    fprintf(stderr, "       %shint:%s %s\n", clr(NY_CLR_YELLOW),
+    fprintf(stderr, "       %shint:%s %s\n", clr(NY_CLR_BRIGHT_YELLOW),
             clr(NY_CLR_RESET), hint);
   }
   if (lx->src && lx->real_line > 0) {

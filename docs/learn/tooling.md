@@ -3,6 +3,46 @@
 Use `ny --help` and subcommand help for the full flag list. This page keeps the
 common build, run, docs, format, test, and diagnostic loops.
 
+## Core commands
+
+```bash
+./make
+./make ny --no-progress --color=never <file>
+./make test --with-stdlib --failures-only
+ny-fmt --bugs --limit 80 <changed-paths>
+git diff --check
+```
+
+Use `--no-progress --color=never` for stable, searchable output.
+
+**Recompiling C source:** `./make` and `./make ny` recompile C binaries and the
+standard-library bundle incrementally on change. The runtime is an
+amalgamation — `src/rt/init.c` `#include`s `os.c`, `core.c`, `memory.c`, etc.
+as one translation unit — so an edit to any amalgamated `.c` is picked up by
+the next `./make`. If a run looks like it ignored a source edit, force a clean
+rebuild:
+
+```bash
+./make ny --no-progress --color=never <file>   # rebuild + run (normal loop)
+./make clean && ./make                          # full recompile when in doubt
+./make test --color never
+```
+
+When validating runtime/native behavior, confirm a unique probe string appears
+in `strings build/release/ny-full` before trusting the run.
+
+## Validation depth
+
+- Generated `.ny`: execute it, fix the first real error, rerun.
+- Parser or diagnostics: run the focused parser/diagnostic fixture set.
+- Comptime or macros: inspect expansion and run the generated source.
+- Standard library: run focused probes and rebuild the standard bundle.
+- Compiler/runtime/native: run focused fixtures, then the broader set.
+- Renderer/UI: run a bounded visual, framebuffer, or artifact probe.
+- Fuzzing: run the smallest reproducible seed first.
+- Sanitizers: only claim ASan/UBSan/TSan coverage when that sanitizer is
+  enabled.
+
 ## Common Loop
 
 ```bash
@@ -197,8 +237,60 @@ ny fmt --metaprog file.ny
 ny fmt --modules path
 ```
 
-Formatting changes layout. Audit modes report findings. Use `--apply` only
-after reviewing the change class.
+Formatting changes layout. Audit modes report advisory structural rankings and
+findings; they are not proof that code is dead or an instruction to rewrite it.
+Use `--apply` only after reviewing the change class.
+
+## Compiler stage artifacts
+
+`ny --stop-after=STAGE --emit-artifact=PATH file.ny` writes a pointer-free
+semantic snapshot for `parse`, `hm`, `trait`, `flow`, `abi`, or `opt`. Every
+artifact carries `artifact.schema = "ny.semantic-artifact.v1"`, a hexadecimal
+source fingerprint and byte length for the exact expanded source it describes.
+Reusable ABI/opt artifacts also carry compiler-source and semantic-configuration
+fingerprints.
+Consumers must validate those fields before reusing type, resolution, range,
+or lowering facts; they are snapshots, never serialized parser-arena pointers.
+Use `--verify-artifact=PATH` with the same input to perform that identity check
+without compiling it. It succeeds only when both the expanded byte length and
+fingerprint match; a changed source, stale standard library, or malformed
+artifact fails explicitly.
+
+```bash
+ny --stop-after=flow --emit-artifact=/tmp/flow.json program.ny
+ny --verify-artifact=/tmp/flow.json program.ny
+```
+
+`ny --use-artifact=PATH program.ny` is the compiler-facing form. It accepts
+only a successful `abi` or `opt` artifact for the exact expanded input and
+matching compiler-source and semantic-configuration fingerprints, then skips the duplicate
+semantic-validation pass. Parsing and code generation still run, so this is
+not a serialized arena or an unchecked compilation shortcut. Older snapshots
+without those reuse identities remain source-verifiable but cannot be reused
+for semantic facts. The configuration identity includes strict-type mode,
+solver selection, validation scope, native ABI, and C frontend selection.
+
+The audit JSON contract is `ny-fmt.audit.v1`: it includes aggregate counters,
+ranked files and functions, and diagnostic records. `--selftest` is a fast,
+in-process regression check for C function-range detection and the
+high-confidence semantic patterns used by `--bugs`; it does not format files
+or require a separate test tool:
+
+```bash
+cmake --build build/release --target ny-fmt
+build/release/ny-fmt --selftest
+```
+
+Some high-confidence `--bugs` diagnostics capture Nytrix runtime semantics:
+
+| Diagnostic | Pattern | Correction |
+| --- | --- | --- |
+| `NYAUD1119` | `mut out = {}` followed by `out.set(...)` | Start mutable accumulators with `dict()`. |
+| `NYAUD1120` | A standalone `xs.append(...)` or `xs.extend(...)` | Rebind the returned value: `xs = xs.append(...)`. |
+
+These findings are still review leads: the formatter intentionally avoids
+rewriting source, and accepted exceptions can be recorded with an audit
+acceptance marker.
 
 | Mode | Use |
 | --- | --- |
@@ -300,6 +392,56 @@ ny fmt --cloc path
 
 Performance notes should include command, binary, input, cache state, and
 validation. Use [performance.md](performance.md) for timing discipline.
+
+## Native checks
+
+```bash
+LD_LIBRARY_PATH=build/vendor/lib/host \
+  ./build/release/ny-test --jobs 10 etc/tests/exec/native/c/*.nshape
+
+LD_LIBRARY_PATH=build/vendor/lib/host \
+  ./build/release/ny-test --jobs 8 etc/tests/exec/native
+```
+
+For focused x86-64 scalar checks use `--native-result-oracle[=N]`. The success
+marker is:
+
+```text
+native oracle function=rt_main vm=<value> native=<value> ok=yes
+```
+
+External-linker fallback is not internal link/run success. Assembly emission is
+not an executable-backend claim.
+
+## Debugging with gdb and DWARF
+
+When a native/AOT binary misbehaves, use gdb with DWARF:
+
+```bash
+ny -g --native-only --native-backend=x86_64 -o /tmp/ny-case \
+  --no-progress --color=never <file-or--c>
+gdb -q /tmp/ny-case
+# (gdb) break rt_main
+# (gdb) run
+# (gdb) info sharedlibrary
+# (gdb) disassemble /m
+# (gdb) bt full
+```
+
+Prefer `-g` / `opt->debug_symbols` so line tables and locals are present.
+For JIT crashes, attach after load or use a small AOT repro first.
+
+## IR and assembly-driven optimization
+
+When optimizing or diagnosing codegen quality:
+
+1. Dump high-level NYIR and machine form before guessing:
+   `--nyir-dump-raw`, `--nyir-dump-stats`, and any emit-asm / object dump the
+   backend exposes for the path under test.
+2. Reason about SSA values, machine instructions, and ABI slots from the dump
+   — not from source-level intuition alone.
+3. Profile when the cost is unclear (`perf record -g`, callgraph report).
+4. Keep the fix at the owning pass (lower, machine, regalloc, object, runtime).
 
 ## Related
 

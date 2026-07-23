@@ -84,16 +84,23 @@ static void ny_intern_ptr_map_put(const char *ptr) {
 void ny_intern_init(void) {
   if (g_intern_table)
     return;
-  g_intern_cap = 4096;
-  g_intern_table = malloc(g_intern_cap * sizeof(ny_intern_entry));
+  const size_t initial_cap = 4096;
+  ny_intern_entry *table = malloc(initial_cap * sizeof(*table));
+  if (!table)
+    return;
+  uint32_t *map = calloc(NY_INTERN_MAP_CAP_INIT, sizeof(*map));
+  if (!map) {
+    free(table);
+    return;
+  }
 
-  g_intern_table[0].str = "";
-  g_intern_table[0].len = 0;
-  g_intern_table[0].hash = 0;
+  g_intern_cap = initial_cap;
+  g_intern_table = table;
+  g_intern_map_cap = NY_INTERN_MAP_CAP_INIT;
+  g_intern_map = map;
+  g_intern_table[0] = (ny_intern_entry){.str = "", .len = 0, .hash = 0};
   g_intern_count = 1;
 
-  g_intern_map_cap = NY_INTERN_MAP_CAP_INIT;
-  g_intern_map = calloc(g_intern_map_cap, sizeof(uint32_t));
   g_intern_ptr_map_cap = NY_INTERN_PTR_MAP_CAP_INIT;
   g_intern_ptr_map = calloc(g_intern_ptr_map_cap, sizeof(const char *));
   g_intern_ptr_map_len = 0;
@@ -121,15 +128,21 @@ ny_sym_id ny_intern_str(const char *str, size_t len) {
   }
 
   if (g_intern_count >= g_intern_cap) {
-    g_intern_cap *= 2;
-    g_intern_table = realloc(g_intern_table, g_intern_cap * sizeof(ny_intern_entry));
+    size_t new_cap = g_intern_cap * 2;
+    ny_intern_entry *grown = realloc(g_intern_table, new_cap * sizeof(*grown));
+    if (!grown)
+      return 0;
+    g_intern_table = grown;
+    g_intern_cap = new_cap;
   }
 
-  uint32_t new_id = g_intern_count++;
   char *dup = malloc(len + 1);
+  if (!dup)
+    return 0;
   memcpy(dup, str, len);
   dup[len] = '\0';
 
+  uint32_t new_id = g_intern_count++;
   g_intern_table[new_id].str = dup;
   g_intern_table[new_id].len = len;
   g_intern_table[new_id].hash = hash;
@@ -141,6 +154,8 @@ ny_sym_id ny_intern_str(const char *str, size_t len) {
   if (g_intern_count * 10 > g_intern_map_cap * 7) {
     size_t new_map_cap = g_intern_map_cap * 2;
     uint32_t *new_map = calloc(new_map_cap, sizeof(uint32_t));
+    if (!new_map)
+      return new_id;
     size_t new_mask = new_map_cap - 1;
     for (size_t i = 1; i < g_intern_count; ++i) {
       uint64_t h = g_intern_table[i].hash;

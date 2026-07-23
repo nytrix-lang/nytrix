@@ -1,0 +1,15 @@
+shape oracle_cf_mem2reg_loop_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle cf-mem2reg loop control-flow regression]
+  template ny-test-case
+  flags_matrix "-O2 --native-enable-cf-mem2reg --native-result-oracle; -O3 --native-enable-cf-mem2reg --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+mut x = 5
+while x < 10 {
+  x = x + 1
+}
+x
+NY
+}

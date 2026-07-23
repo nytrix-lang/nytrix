@@ -29,7 +29,7 @@ static inline const char *ny_tail_name(const char *name) {
 #ifdef NYTRIX_VERSION
 #define VERSION NYTRIX_VERSION
 #else
-#define VERSION "0.8.0+source"
+#define VERSION "0.9.0+source"
 #endif
 #endif
 #ifndef NYTRIX_VERSION
@@ -107,13 +107,23 @@ static inline bool color_enabled(void) {
 
 #define NY_CLR_RESET "\033[0m"
 #define NY_CLR_BOLD "\033[1m"
+#define NY_CLR_BLACK "\033[30m"
 #define NY_CLR_RED "\033[31m"
 #define NY_CLR_GREEN "\033[32m"
 #define NY_CLR_YELLOW "\033[33m"
 #define NY_CLR_BLUE "\033[34m"
 #define NY_CLR_MAGENTA "\033[35m"
 #define NY_CLR_CYAN "\033[36m"
-#define NY_CLR_GRAY "\033[90m"
+#define NY_CLR_WHITE "\033[37m"
+#define NY_CLR_BRIGHT_BLACK "\033[90m"
+#define NY_CLR_BRIGHT_RED "\033[91m"
+#define NY_CLR_BRIGHT_GREEN "\033[92m"
+#define NY_CLR_BRIGHT_YELLOW "\033[93m"
+#define NY_CLR_BRIGHT_BLUE "\033[94m"
+#define NY_CLR_BRIGHT_MAGENTA "\033[95m"
+#define NY_CLR_BRIGHT_CYAN "\033[96m"
+#define NY_CLR_BRIGHT_WHITE "\033[97m"
+#define NY_CLR_GRAY NY_CLR_BRIGHT_BLACK
 #define NY_CLR_UNDER "\033[4m"
 
 static inline const char *clr(const char *code) { return color_enabled() ? code : ""; }

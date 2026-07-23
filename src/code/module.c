@@ -1079,16 +1079,10 @@ static char *normalize_use_module_name_at(codegen_t *cg, const char *raw,
   return normalize_module_name(raw);
 }
 
-static char *normalize_use_module_name(codegen_t *cg, const char *raw) {
-  return normalize_use_module_name_at(cg, raw, NULL);
-}
-
 static void ny_add_import_aliases(codegen_t *cg, bool user_use,
                                   const char *alias, const char *full_name);
 static void ny_add_import_aliases_from_full(codegen_t *cg, bool user_use,
                                             const char *full_name);
-static void ny_add_import_aliases_from_full_scoped(codegen_t *cg, bool user_use,
-                                                   const char *full_name);
 static void ny_add_import_aliases_from_full_weak(codegen_t *cg, bool user_use,
                                                  const char *full_name);
 static void ny_add_import_aliases_from_full_scoped_weak(codegen_t *cg,
@@ -1533,17 +1527,6 @@ static void ny_add_import_aliases_from_full_weak(codegen_t *cg, bool user_use,
   add_import_alias_from_full_weak(cg, full_name);
   if (user_use)
     add_user_import_alias_from_full_weak(cg, full_name);
-}
-
-static void ny_add_import_aliases_from_full_scoped(codegen_t *cg, bool user_use,
-                                                   const char *full_name) {
-  if (cg && cg->current_module_name && *cg->current_module_name) {
-    const char *leaf = ny_name_leaf(full_name);
-    if (leaf && *leaf)
-      ny_add_import_aliases_scoped(cg, false, leaf, full_name);
-    return;
-  }
-  ny_add_import_aliases_from_full(cg, user_use, full_name);
 }
 
 static void ny_add_import_aliases_from_full_scoped_weak(codegen_t *cg,
@@ -2646,6 +2629,7 @@ static bool ny_copy_exported_fun_sig(codegen_t *cg, const char *alias,
     new_sig.source_file =
         fs->source_file ? ny_strdup(fs->source_file) : NULL;
     new_sig.link_name = fs->link_name ? ny_strdup(fs->link_name) : NULL;
+    new_sig.llvm_name = fs->llvm_name ? ny_strdup(fs->llvm_name) : NULL;
     new_sig.return_type = fs->return_type ? ny_strdup(fs->return_type) : NULL;
     new_sig.abi_return_type =
         fs->abi_return_type ? ny_strdup(fs->abi_return_type) : NULL;

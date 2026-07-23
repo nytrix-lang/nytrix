@@ -309,7 +309,8 @@ static void ny_secondary(const char *label, const char *label_color, const char 
 void ny_diag_error(token_t tok, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  ny_diag_primary("error", "E1001", NY_CLR_RED, NY_CLR_CYAN, tok, fmt, ap);
+  ny_diag_primary("error", "E1001", NY_CLR_BRIGHT_RED, NY_CLR_BRIGHT_CYAN,
+                  tok, fmt, ap);
   va_end(ap);
 }
 
@@ -324,7 +325,8 @@ void ny_diag_warning(token_t tok, const char *fmt, ...) {
   }
   va_list ap;
   va_start(ap, fmt);
-  ny_diag_primary("warning", "W2000", NY_CLR_YELLOW, NY_CLR_CYAN, tok, fmt, ap);
+  ny_diag_primary("warning", "W2000", NY_CLR_BRIGHT_YELLOW,
+                  NY_CLR_BRIGHT_CYAN, tok, fmt, ap);
   va_end(ap);
 }
 
@@ -335,7 +337,8 @@ void ny_diag_error_code(token_t tok, int code, const char *fmt, ...) {
   snprintf(code_buf, sizeof(code_buf), "E%04d", code);
   va_list ap;
   va_start(ap, fmt);
-  ny_diag_primary("error", code_buf, NY_CLR_RED, NY_CLR_CYAN, tok, fmt, ap);
+  ny_diag_primary("error", code_buf, NY_CLR_BRIGHT_RED, NY_CLR_BRIGHT_CYAN,
+                  tok, fmt, ap);
   va_end(ap);
 }
 
@@ -354,7 +357,8 @@ void ny_diag_warning_code(token_t tok, int code, const char *fmt, ...) {
   snprintf(code_buf, sizeof(code_buf), "W%04d", code);
   va_list ap;
   va_start(ap, fmt);
-  ny_diag_primary("warning", code_buf, NY_CLR_YELLOW, NY_CLR_CYAN, tok, fmt, ap);
+  ny_diag_primary("warning", code_buf, NY_CLR_BRIGHT_YELLOW,
+                  NY_CLR_BRIGHT_CYAN, tok, fmt, ap);
   va_end(ap);
 }
 

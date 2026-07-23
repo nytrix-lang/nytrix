@@ -75,7 +75,7 @@ fn _dc_push(list cands, str kind, str result, int score) list {
       }
       i = i + 1
    }
-   cands.append([kind, result, score])
+   return cands.append([kind, result, score])
 }
 
 fn _dc_sort(list cands) list {

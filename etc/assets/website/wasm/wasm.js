@@ -363,7 +363,7 @@
     },
     valueToString(memoryRef, value) {
       const v = BigInt.asIntN(64, BigInt(value || 0));
-      if (v === 0n) return "none";
+      if (v === 0n) return "nil";
       if (v === NY_TRUE) return "true";
       if (v === NY_FALSE) return "false";
       const tag = ny.tagof(memoryRef, v);

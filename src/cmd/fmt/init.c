@@ -23,7 +23,7 @@ static void usage(void) {
   printf("       %sny fmt --conv%s %s--input file.texi --name NAME [--format man|md] [-o out]%s\n\n",
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("%smodes:%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
-  printf("  %s--check --fix --analyze --audit --trim --syntax --types --dead%s\n",
+  printf("  %s--check --fix --analyze --audit --selftest --trim --syntax --types --dead%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("  %s--smart --overhaul --bugs --checks --bloat --modules --profiles --layouts --loops%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
@@ -38,6 +38,8 @@ static void usage(void) {
   printf("  audit modes compose; use %s--audit=loops,trim%s to find continue/guard-loop flattening wins\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("  accept justified smells with %sny-fmt: accept NYAUDxxxx reason%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s--selftest%s validates C range analysis and high-confidence language-pattern checks\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
 }
 
@@ -135,39 +137,6 @@ static char *convert_texi_basic(const char *input, const char *name, const char 
   return out;
 }
 
-typedef struct { char *data; size_t len; size_t cap; } sb_t2;
-static int sb2_add(sb_t2 *b, const char *s) {
-  size_t sl = strlen(s);
-  size_t need = b->len + sl + 1;
-  if (need > b->cap) {
-    size_t newcap = b->cap ? b->cap : 4096;
-    while (newcap < need) newcap *= 2;
-    char *p = (char *)realloc(b->data, newcap);
-    if (!p) return 0;
-    b->data = p;
-    b->cap = newcap;
-  }
-  memcpy(b->data + b->len, s, sl);
-  b->len += sl;
-  b->data[b->len] = '\0';
-  return 1;
-}
-static int sb2_addn(sb_t2 *b, const char *s, size_t n) {
-  size_t need = b->len + n + 1;
-  if (need > b->cap) {
-    size_t newcap = b->cap ? b->cap : 4096;
-    while (newcap < need) newcap *= 2;
-    char *p = (char *)realloc(b->data, newcap);
-    if (!p) return 0;
-    b->data = p;
-    b->cap = newcap;
-  }
-  memcpy(b->data + b->len, s, n);
-  b->len += n;
-  b->data[b->len] = '\0';
-  return 1;
-}
-
 static const char *c2ny_map_type(const char *ct) {
   if (!ct || !*ct) return "any";
   if (strcmp(ct, "int") == 0 || strcmp(ct, "signed") == 0) return "int";
@@ -201,9 +170,6 @@ static void sb_add(sb_t *b, const char *s) {
   size_t n = strlen(s);
   if (sb_grow(b, b->len + n + 1)) { memcpy(b->data + b->len, s, n); b->len += n; b->data[b->len] = 0; }
 }
-static void sb_addc(sb_t *b, char c) {
-  if (sb_grow(b, b->len + 2)) { b->data[b->len++] = c; b->data[b->len] = 0; }
-}
 static void sb_addn(sb_t *b, const char *s, size_t n) {
   if (sb_grow(b, b->len + n + 1)) { memcpy(b->data + b->len, s, n); b->len += n; b->data[b->len] = 0; }
 }
@@ -212,8 +178,6 @@ static const char *skip_ws(const char *s) {
   while (*s == ' ' || *s == '\t') s++;
   return s;
 }
-
-static int is_preproc(const char *s) { return *s == '#'; }
 
 static int is_keyword(const char *s) {
   static const char *kws[] = {"if","for","while","switch","return","goto","break","continue","else","case","default","sizeof",NULL};
@@ -762,6 +726,8 @@ static int parse_args(int argc, char **argv, FmtOpts *o) {
     if (audit_mode) {
       o->audit = 1;
       fmt_audit_mode_add(o, audit_mode);
+    } else if (strcmp(a, "--selftest") == 0) {
+      o->selftest = 1;
     } else if (strcmp(a, "--analyze") == 0) {
       o->analyze = 1;
     } else if (strcmp(a, "--cloc") == 0 || strcmp(a, "cloc") == 0) {
@@ -774,16 +740,16 @@ static int parse_args(int argc, char **argv, FmtOpts *o) {
       o->dupes_emit = 1;
     } else if (strcmp(a, "--dupes-min") == 0 && i + 1 < argc) {
       o->dupes = 1;
-      o->dupes_min = atoi(argv[++i]);
+      ny_parse_int(argv[++i], &o->dupes_min);
     } else if (strncmp(a, "--dupes-min=", 12) == 0) {
       o->dupes = 1;
-      o->dupes_min = atoi(a + 12);
+      ny_parse_int(a + 12, &o->dupes_min);
     } else if (strcmp(a, "--full") == 0 || strcmp(a, "-f") == 0) {
       o->cloc_full = 1;
     } else if (strcmp(a, "--top") == 0 && i + 1 < argc) {
-      o->cloc_top = atoi(argv[++i]);
+      ny_parse_int(argv[++i], &o->cloc_top);
     } else if (strncmp(a, "--top=", 6) == 0) {
-      o->cloc_top = atoi(a + 6);
+      ny_parse_int(a + 6, &o->cloc_top);
     } else if (strcmp(a, "--audit-mode") == 0 && i + 1 < argc) {
       o->audit = 1;
       fmt_audit_mode_set(o, argv[++i]);
@@ -801,9 +767,9 @@ static int parse_args(int argc, char **argv, FmtOpts *o) {
       fmt_audit_mode_add(o, "types");
       o->types_strict = 1;
     } else if (strcmp(a, "--limit") == 0 && i + 1 < argc) {
-      o->limit = atoi(argv[++i]);
+      ny_parse_int(argv[++i], &o->limit);
     } else if (strncmp(a, "--limit=", 8) == 0) {
-      o->limit = atoi(a + 8);
+      ny_parse_int(a + 8, &o->limit);
     } else if (strcmp(a, "--threshold") == 0 && i + 1 < argc) {
       i++;
     } else if (strncmp(a, "--threshold=", 12) == 0) {
@@ -994,6 +960,11 @@ int ny_fmt_main(int argc, char **argv) {
     ny_setenv("NYTRIX_TOOL_COLOR", "auto", 1);
   if (opts.limit < 0)
     opts.limit = 0;
+
+  if (opts.selftest) {
+    sv_free(&opts.paths);
+    return cscan_selftest();
+  }
 
   if (opts.tidy) {
     opts.check = 1;

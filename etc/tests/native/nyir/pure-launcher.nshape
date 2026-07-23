@@ -1,0 +1,12 @@
+shape nyir_const_fold_native {
+  family "runtime-native"
+  generator "native"
+  features ["native", "x86_64", "const-fold", "o3"]
+  template ny-test-case
+  ; Ideal O3 result for pure arithmetic (const 43); exercises full path + MIR.
+  flags "--native-only --native-backend=x86_64 -O3 --native-result-oracle=43 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+1 + 2 * 20 + 2
+NY
+}

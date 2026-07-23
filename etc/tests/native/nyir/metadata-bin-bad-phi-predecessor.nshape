@@ -1,0 +1,12 @@
+shape nyir_metadata_bin_bad_phi_predecessor {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "phi", "metadata", "binary", "negative"]
+  template ny-test-case
+  flags "--nyir-metadata-bin=etc/tests/native/fixtures/nyir-bad-phi-predecessor.nyir"
+  expect compile_fail
+  expect_message "phi incoming label is not a CFG predecessor"
+  source ny <<'NY'
+1 + 2
+NY
+}

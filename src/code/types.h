@@ -264,6 +264,9 @@ struct fun_sig {
   bool tailcall;
   bool is_attached_method;
   const char *link_name;
+  /* LLVM symbol name.  It differs from link_name when several typed extern
+   * declarations intentionally target one C symbol with distinct ABIs. */
+  const char *llvm_name;
   const char *return_type;
   const char *abi_return_type;
   const char *inferred_return_type;

@@ -84,30 +84,18 @@ fn clamp(number x, number lo, number hi) number {
 ## Attributes
 
 Function attributes attach compile-time metadata to the following function.
-Nytrix supports codegen hints, effects, async lowering, and ownership
-contracts.
+The portable attributes describe effects, ownership, compile-time evaluation,
+or a semantic intent that Nytrix can preserve across backends.
 
 ```ny
 @pure
 @effects(none|io|alloc|ffi|thread|all)
 @async_effects
-@jit
 @thread
 @naked
 @consteval
 @constant_time
-@llvm(noinline)
-@llvm("frame-pointer", "all")
-@readnone
-@readonly
-@writeonly
-@argmemonly
-@nounwind
-@mustprogress
-@willreturn
-@hot
-@cold
-@flatten
+@optimize(0|1|2|3)
 fn work(){ 0 }
 ```
 
@@ -118,10 +106,41 @@ outside the declared mask.
 `@async_effects` marks eligible `io`-effect functions for the stackless async
 lowering path after their effect contract passes.
 
-`@jit`, `@thread`, `@naked`, `@llvm(...)`, and the LLVM-style memory/progress
-attributes affect lowering and native code metadata. A `@thread` call in
-statement position detaches; a value-position call joins and returns the
-worker result.
+`@thread` affects execution: a statement-position call detaches, while a
+value-position call joins and returns the worker result. `@naked` is a real
+target-specific ABI escape hatch for an assembly body; it is rejected when the
+selected backend cannot honor it. Prefer typed standard-library APIs and
+semantic contracts for portable application code.
+
+`@optimize(level)` selects NYIR optimization level `0` through `3` for one
+function. It is useful when a measured hot function needs a different tradeoff
+from the program default. Level `0` also asks the LLVM adapter to preserve that
+function without LLVM optimization; higher LLVM per-function pipelines are not
+claimed until they are implemented.
+
+## Function policy reference
+
+Use the smallest attribute that states the property the compiler needs. These
+attributes are metadata with an implemented compiler effect, not comments.
+
+| Goal | Attribute | Compiler contract |
+| --- | --- | --- |
+| Declare allowed effects | `@effects(...)`, `@pure` | The effect checker validates calls against the declared set. |
+| Describe ownership | `@returns_owned`, `@borrows(x)`, `@consumes(x)`, `@mutates(x)` | Ownership and alias analysis receive an explicit contract. |
+| Evaluate during compilation | `@consteval` | Requires a compile-time-safe function contract. |
+| Request async lowering | `@async_effects` | Applies only after the declared effect contract passes. |
+| Run work in a worker | `@thread` | Statement calls detach; value calls join. |
+| Choose NYIR optimization | `@optimize(0|1|2|3)` | Overrides the program NYIR level for this function. |
+| Control call shape | `@inline`, `@noinline`, `@tailcall` | Requests implemented call/inlining behavior; conflicting requests diagnose. |
+| Communicate execution frequency | `@hot`, `@cold` | Feeds the compiler's function-priority metadata. |
+| Prefer call-site expansion | `@flatten` | Requests supported flattening where function shape permits it. |
+| Mark constant-time intent | `@constant_time` | Preserves the intent and applies the supported target policy. |
+| Request an accelerator target | `@accel`, `@accel(spirv)` | Uses the validated accelerator-lowering path or reports an unsupported target. |
+| Supply target-specific code | `@naked`, `asm(...)`, `intrinsic(...)` | Requires a backend that explicitly supports the requested form. |
+
+Attributes do not replace algorithm choice. Measure a workload first, use
+`@optimize` or call-shape controls only where the measurement identifies that
+function, and keep the portable source behavior correct without them.
 
 ## Callable inference
 

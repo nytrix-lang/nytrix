@@ -36,7 +36,7 @@ fn icon_for(str kind) str {
 
 fn _push_symbol(list out, str kind, str name, int line) list {
    if name.len <= 0 { return out }
-   out.append({"kind": kind, "name": name, "line": line, "icon": icon_for(kind)})
+   return out.append({"kind": kind, "name": name, "line": line, "icon": icon_for(kind)})
 }
 
 fn symbols(list lines, str filename="", int max_lines=0) list {

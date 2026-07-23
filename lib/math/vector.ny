@@ -449,6 +449,9 @@ fn dot3(any a, any b) any {
 impl vec2 {
    @pure
    @jit
+   fn len(self v) int { dim(v) }
+   @pure
+   @jit
    fn add(self a, self b) self { v_add(a, b) }
    @pure
    @jit
@@ -476,6 +479,9 @@ impl vec2 {
 impl vec3 {
    @pure
    @jit
+   fn len(self v) int { dim(v) }
+   @pure
+   @jit
    fn add(self a, self b) self { v_add(a, b) }
    @pure
    @jit
@@ -501,6 +507,9 @@ impl vec3 {
 }
 
 impl vec4 {
+   @pure
+   @jit
+   fn len(self v) int { dim(v) }
    @pure
    @jit
    fn add(self a, self b) self { v_add(a, b) }

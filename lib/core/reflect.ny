@@ -35,8 +35,13 @@ fn _is_bytes(any x) bool { _has_tag(x, runtime_tag_raw("bytes")) }
 
 @inline
 fn _is_raw_ptr_like(any x) bool {
+   if __is_int(x) { return false }
+   if !x { return false }
    def tag = __tagof(x)
-   __eq(tag, runtime_tag_raw("ptr")) || __eq(tag, runtime_tag_raw("ffi_ptr")) || (tag == 0 && prim.is_ptr(x))
+   if __eq(tag, runtime_tag_raw("ptr")) || __eq(tag, runtime_tag_raw("ffi_ptr")) { return true }
+   if tag == 0 && prim.is_ptr(x) { return true }
+   prim.is_ptr(x) && !_has_tag(x, runtime_tag_raw("set")) && !_is_bigint(x) && !_is_bigfloat(x)
+      && !_is_str_tag(tag) && !_is_seq_tag(tag) && !_has_tag(x, runtime_tag_raw("dict"))
 }
 
 @inline
@@ -64,16 +69,19 @@ fn _is_seq(any x) bool { _is_seq_tag(__tagof(x)) }
 fn _is_bigint(any x) bool { _has_tag(x, runtime_tag_raw("bigint")) }
 
 @inline
+fn _is_bigfloat(any x) bool { _has_tag(x, runtime_tag_raw("bigfloat")) }
+
+@inline
 fn _is_str(any x) bool { _is_str_tag(__tagof(x)) }
 
 @inline
 fn _is_float(any x) bool { __is_float_obj(x) }
 
 @inline
-fn _dict_get_raw(any d, any key, any default=0) any { dict_read(d, key, default) }
+fn _dict_get_raw(any d, any key, any default=0) any { dict_get(d, key, default) }
 
 @inline
-fn _dict_put_raw(any d, any key, any value) any { dict_write(d, key, value) }
+fn _dict_put_raw(any d, any key, any value) any { dict_set(d, key, value) }
 
 @inline
 fn _dict_has_raw(any d, any key) bool { dict_exists(d, key) }
@@ -466,12 +474,14 @@ fn contains(any container, any item) bool {
 
 fn type(any x) str {
    "Returns a string representing the **tag-type** of Nytrix value `x`.
-   Return values: `none`, `int`, `float`, `str`, `list`, `dict`, `set`,
+   Return values: `nil`, `int`, `float`, `str`, `list`, `dict`, `set`,
    `tuple`, `bytes`, `bigint`, `bool`, `ptr`, `unknown`."
+   if __is_nil(x) { return "nil" }
    if __is_int(x) { return "int" }
    if __eq(x, true) || __eq(x, false) { return "bool" }
    if _is_float(x) { return "float" }
    if _is_bigint(x) { return "bigint" }
+   if _is_bigfloat(x) { return "bigfloat" }
    if _is_str(x) { return "str" }
    if _is_list(x) { return "list" }
    if _is_dict(x) { return "dict" }
@@ -482,18 +492,16 @@ fn type(any x) str {
    if _has_tag(x, runtime_tag_raw("complex")) { return "complex" }
    if __eq(__tagof(x), runtime_tag_raw("ffi_ptr")) { return "ffi_ptr" }
    if is_ptr(x) { return "ptr" }
-   if !x { return "none" }
    return "unknown"
 }
 
-fn _type_shape_union_add(list shapes, str shape) int {
+fn _type_shape_union_add(list shapes, str shape) list {
    mut i = 0
    while i < shapes.len {
-      if shapes.get(i) == shape { return 0 }
+      if shapes.get(i) == shape { return shapes }
       i += 1
    }
-   shapes.append(shape)
-   1
+   return shapes.append(shape)
 }
 
 fn _type_shape_union_from_seq(any xs, int depth) str {
@@ -502,7 +510,7 @@ fn _type_shape_union_from_seq(any xs, int depth) str {
    mut shapes = list(n)
    mut i = 0
    while i < n {
-      _type_shape_union_add(shapes, _type_shape(xs.get(i), depth - 1))
+      shapes = _type_shape_union_add(shapes, _type_shape(xs.get(i), depth - 1))
       i += 1
    }
    join(shapes, "|")
@@ -514,7 +522,7 @@ fn _type_shape_tuple(any xs, int depth) str {
    mut shapes = list(n)
    mut i = 0
    while i < n {
-      shapes.append(_type_shape(xs.get(i), depth - 1))
+      shapes = shapes.append(_type_shape(xs.get(i), depth - 1))
       i += 1
    }
    "tuple<" + join(shapes, ", ") + ">"
@@ -529,8 +537,8 @@ fn _type_shape_dict(dict d, int depth) str {
    mut i = 0
    while i < n {
       def pair = its.get(i)
-      _type_shape_union_add(key_shapes, _type_shape(pair.get(0), depth - 1))
-      _type_shape_union_add(val_shapes, _type_shape(pair.get(1), depth - 1))
+      key_shapes = _type_shape_union_add(key_shapes, _type_shape(pair.get(0), depth - 1))
+      val_shapes = _type_shape_union_add(val_shapes, _type_shape(pair.get(1), depth - 1))
       i += 1
    }
    "dict<" + join(key_shapes, "|") + ", " + join(val_shapes, "|") + ">"
@@ -871,6 +879,7 @@ fn eq(any a, any b) bool {
       if __eq(ta, runtime_tag_raw("range")) { return _seq_eq(a, b) }
       if __eq(ta, runtime_tag_raw("float")) { return __flt_eq(a, b) }
       if __eq(ta, runtime_tag_raw("bigint")) { return __eq(__bigint_cmp(a, b), 0) }
+      if __eq(ta, runtime_tag_raw("bigfloat")) { return __eq(__bigfloat_cmp(a, b), 0) }
       return false
    } else {
       return false
@@ -928,11 +937,12 @@ fn _repr_depth(any x, int depth) str {
    if __is_int(x) { return __to_str(x) }
    if __eq(x, true) { return "true" }
    if __eq(x, false) { return "false" }
-   if !__is_ptr(x) && !_is_str(x) { return "none" }
+   if !__is_ptr(x) && !_is_str(x) { return "nil" }
    if _is_str(x) { return f"\"{x}\"" }
    if !__is_ny_obj(x) { return to_str(x) }
    def kind = __tagof(x)
    if _is_bigint(x) { return __bigint_to_str(x) }
+   if _is_bigfloat(x) { return __bigfloat_to_str(x) }
    if _is_vecdict(x) { return _vec_to_str(x) }
    if _is_list(x) {
       if depth >= 4 { return "[...]" }
@@ -960,6 +970,7 @@ fn _repr_depth(any x, int depth) str {
    if __eq(kind, runtime_tag_raw("complex")) { return __to_str(x) }
    if _is_bytes(x) { return f"<bytes {_raw_len(x)}>" }
    if _is_bigint(x) { return __bigint_to_str(x) }
+   if _is_bigfloat(x) { return __bigfloat_to_str(x) }
    "<ptr " + __ptr_key(x) + " tag=" + __ptr_key(__tagof(x)) + ">"
 }
 
@@ -977,10 +988,12 @@ fn _hash_mix(int h, any v) int {
 
 fn hash(any x) int {
    "Returns a stable structural hash for primitive and collection values."
+   if is_none(x) { return 0x4e494c }
    if __is_int(x) { return x }
    if _is_str(x) { return __str_hash(x) }
    if _is_float(x) { return __flt_hash(x) }
    if _is_bigint(x) { return __str_hash(__bigint_to_str(x)) }
+   if _is_bigfloat(x) { return __str_hash(__bigfloat_to_str(x)) }
    if _is_range(x) {
       mut h = 2166136261
       h = _hash_mix(h, __load64_idx(x, 0))
@@ -1499,11 +1512,12 @@ fn _to_str_depth(any v, int depth) str {
    if __eq(v, true) { return "true" }
    if __eq(v, false) { return "false" }
    if __is_int(v) { return __to_str(v) }
-   if !v { return "none" }
+   if !v { return "nil" }
    if _is_str(v) { return v }
    def kind = __tagof(v)
    if !__is_ny_obj(v) { return __to_str(v) }
    if _is_bigint(v) { return __bigint_to_str(v) }
+   if _is_bigfloat(v) { return __bigfloat_to_str(v) }
    if _is_vecdict(v) { return _vec_to_str(v) }
    if _is_list(v) {
       if depth >= 4 { return "[...]" }
@@ -1531,6 +1545,7 @@ fn _to_str_depth(any v, int depth) str {
    if __eq(kind, runtime_tag_raw("float")) { return __to_str(v) }
    if __eq(kind, runtime_tag_raw("complex")) { return __to_str(v) }
    if _is_bigint(v) { return __bigint_to_str(v) }
+   if _is_bigfloat(v) { return __bigfloat_to_str(v) }
    "<ptr " + __ptr_key(v) + " tag=" + __ptr_key(__tagof(v)) + ">"
 }
 

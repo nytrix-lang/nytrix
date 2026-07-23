@@ -218,9 +218,10 @@ char *repl_mask_main_guards(const char *src) {
       size_t repl_len = sizeof(replacement) - 1;
       if (out_len + repl_len + 1 > out_cap) {
         out_cap = (out_len + repl_len + 1) * 2;
-        out = realloc(out, out_cap);
-        if (!out)
+        char *tmp = realloc(out, out_cap);
+        if (!tmp)
           return NULL;
+        out = tmp;
       }
       memcpy(out + out_len, replacement, repl_len);
       out_len += repl_len;
@@ -229,9 +230,10 @@ char *repl_mask_main_guards(const char *src) {
     }
     if (out_len + 2 > out_cap) {
       out_cap *= 2;
-      out = realloc(out, out_cap);
-      if (!out)
+      char *tmp = realloc(out, out_cap);
+      if (!tmp)
         return NULL;
+      out = tmp;
     }
     out[out_len++] = src[i++];
   }
@@ -247,7 +249,13 @@ char **repl_split_lines(const char *src, size_t *out_count) {
   while (line) {
     if (count >= cap) {
       cap *= 2;
-      lines = realloc(lines, cap * sizeof(char *));
+      char **tmp = realloc(lines, cap * sizeof(char *));
+      if (!tmp) {
+        free(lines);
+        *out_count = 0;
+        return NULL;
+      }
+      lines = tmp;
     }
     lines[count++] = ny_strdup(line);
     line = strtok(NULL, "\n");
@@ -268,7 +276,10 @@ void repl_append_user_source(const char *src) {
       g_repl_user_source_len + slen + (needs_newline ? 1 : 0) + (needs_prefix_newline ? 1 : 0) + 1;
   if (required >= g_repl_user_source_cap) {
     g_repl_user_source_cap = required + 1024;
-    g_repl_user_source = realloc(g_repl_user_source, g_repl_user_source_cap);
+    char *tmp = realloc(g_repl_user_source, g_repl_user_source_cap);
+    if (!tmp)
+      return;
+    g_repl_user_source = tmp;
   }
   if (!g_repl_user_source)
     return;
@@ -519,12 +530,13 @@ char *repl_extract_persistent_source(const char *src) {
             size_t need = out_len + stmt_len + (needs_nl ? 1 : 0) + 1;
             if (need > out_cap) {
               out_cap = need + 256;
-              out = realloc(out, out_cap);
-              if (!out) {
+              char *tmp = realloc(out, out_cap);
+              if (!tmp) {
                 free(persist);
                 free(stmt);
                 return NULL;
               }
+              out = tmp;
             }
             if (stmt_len > 0) {
               memcpy(out + out_len, persist, stmt_len);

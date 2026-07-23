@@ -1539,7 +1539,7 @@ static bool materialize_shape_source_block(const char *shape_path, const char *n
 static bool collect_baked_bridge_seeds(const char *root, char **seed_dir_out, string_list_t *seeds) {
   (void)root;
   char *shape_dir = NULL, *seed_dir = NULL;
-  if (nytrix_asprintf(&shape_dir, "etc/tests/fuzz/shapes/tests") < 0 ||
+  if (nytrix_asprintf(&shape_dir, "etc/tests/shapes/tests") < 0 ||
       nytrix_asprintf(&seed_dir, "build/bridge/baked-seeds") < 0) {
     free(shape_dir);
     free(seed_dir);
@@ -1646,11 +1646,19 @@ static bool tree_clean_walk(const char *dir, tree_clean_audit_t *audit) {
 }
 
 static void init_self_path(const char *argv0) {
+#ifdef _WIN32
+  DWORD n = GetModuleFileNameA(NULL, g_self_path, (DWORD)(sizeof(g_self_path) - 1u));
+  if (n > 0 && n < sizeof(g_self_path)) {
+    g_self_path[n] = '\0';
+    return;
+  }
+#else
   ssize_t n = readlink("/proc/self/exe", g_self_path, sizeof(g_self_path) - 1u);
   if (n > 0) {
     g_self_path[n] = '\0';
     return;
   }
+#endif
   if (argv0 && argv0[0] == '/') {
     snprintf(g_self_path, sizeof(g_self_path), "%s", argv0);
     return;
@@ -3582,7 +3590,7 @@ static int cmd_public_selftest_worker_args(int argc, char **argv) {
   } else {
     char *gen_argv[] = {
       g_self_path, "generate-batch",
-      "--shape-dir=etc/tests/fuzz/shapes",
+      "--shape-dir=etc/tests/shapes",
       "--profile=optimizer",
       "--generator=typed",
       "--schedule=smart",
@@ -3827,7 +3835,7 @@ static int dispatch_worker(int argc, char **argv) {
 
 static int cmd_public_shapes_audit(int argc, char **argv) {
   char *default_shape_dir = NULL;
-  if (nytrix_asprintf(&default_shape_dir, "etc/tests/fuzz/shapes") < 0) {
+  if (nytrix_asprintf(&default_shape_dir, "etc/tests/shapes") < 0) {
     printf("{\"ok\":false,\"error\":\"allocation-failed\"}\n");
     return 2;
   }
@@ -4038,7 +4046,7 @@ static int cmd_public_bridge_suite(int argc, char **argv) {
   char *seed_dir = NULL;
   if (!collect_baked_bridge_seeds(root, &seed_dir, &seeds)) {
     printf("{\"ok\":false,\"error\":\"seed-dir-read-failed\",\"seed_dir\":");
-    json_str(stdout, seed_dir ? seed_dir : "etc/tests/fuzz/shapes/tests");
+    json_str(stdout, seed_dir ? seed_dir : "etc/tests/shapes/tests");
     printf("}\n");
     free(seed_dir);
     return 1;
@@ -5679,7 +5687,7 @@ static int cmd_public_campaign_run(int argc, char **argv) {
   const char *json_path = value_after(argc, argv, 3, "--json", "");
   const char *function_db = value_after(argc, argv, 3, "--function-db", "");
   char *default_corpus = NULL;
-  if (nytrix_asprintf(&default_corpus, "etc/tests/fuzz/shapes/corpus/nytrix-core") < 0) {
+  if (nytrix_asprintf(&default_corpus, "etc/tests/shapes/corpus/nytrix-core") < 0) {
     string_list_free(&lane_reports);
     string_list_free(&skipped_lanes);
     string_list_free(&lanes);
@@ -6152,7 +6160,7 @@ static int cmd_public_campaign_optimize(int argc, char **argv) {
   }
   char *report_dir = NULL, *default_corpus = NULL;
   bool path_ok = nytrix_asprintf(&report_dir, "build/reports/campaign-optimize/native_seed_%d", seed) >= 0 &&
-                 nytrix_asprintf(&default_corpus, "etc/tests/fuzz/shapes/corpus/nytrix-core") >= 0;
+                 nytrix_asprintf(&default_corpus, "etc/tests/shapes/corpus/nytrix-core") >= 0;
   if (!path_ok || !mkdir_p(report_dir)) {
     printf("{\"ok\":false,\"error\":\"prepare-failed\"}\n");
     free(report_dir); free(default_corpus); string_list_free(&profiles);
@@ -6901,7 +6909,7 @@ static bool copy_fuzz_seed_file(const char *src, const char *dst) {
 static int materialize_kernel_fuzz_seeds(const char *root, string_list_t *rows,
                                          string_list_t *failures) {
   char *shape_dir = NULL;
-  (void)nytrix_asprintf(&shape_dir, "etc/tests/fuzz/shapes/kernels");
+  (void)nytrix_asprintf(&shape_dir, "etc/tests/shapes/kernels");
   string_list_t shapes = {0};
   if (!shape_dir || !collect_regular_files_recursive(shape_dir, &shapes)) {
     (void)string_list_push_take(failures, make_fuzz_failure(root, "ny", "kernel shape scan failed",
@@ -6917,7 +6925,7 @@ static int materialize_kernel_fuzz_seeds(const char *root, string_list_t *rows,
     char stem[160];
     stem_name(shapes.items[i], stem, sizeof(stem));
     char *dst = NULL;
-    (void)nytrix_asprintf(&dst, "etc/tests/rt/%s.ny", stem);
+    (void)nytrix_asprintf(&dst, "etc/tests/runtime/%s.ny", stem);
     if (!source || !dst || !write_file_text(dst, source)) {
       (void)string_list_push_take(failures, make_fuzz_failure(root, "ny",
                                                               "kernel source materialize failed",
@@ -6978,7 +6986,7 @@ static int cmd_public_fuzz_corpus_prepare(int argc, char **argv) {
   free(png_path);
 
   int runtime_seeds = 0;
-  const char *runtime_dirs[] = {"etc/tests/rt", "etc/tests/runtime"};
+  const char *runtime_dirs[] = {"etc/tests/runtime"};
   string_list_t runtime_files = {0};
   for (size_t d = 0; d < sizeof(runtime_dirs) / sizeof(runtime_dirs[0]); ++d) {
     char *dir = NULL;
@@ -6990,7 +6998,7 @@ static int cmd_public_fuzz_corpus_prepare(int argc, char **argv) {
   for (int i = 0; i < runtime_files.count; ++i) {
     if (!ny_has_suffix(runtime_files.items[i], ".ny")) continue;
     char *dst = NULL;
-    (void)nytrix_asprintf(&dst, "etc/tests/rt/%s", ny_base_name(runtime_files.items[i]));
+    (void)nytrix_asprintf(&dst, "etc/tests/runtime/%s", ny_base_name(runtime_files.items[i]));
     if (!dst || !copy_fuzz_seed_file(runtime_files.items[i], dst)) {
       char *fail = make_fuzz_failure(root, "ny", "failed to copy runtime seed", dst ? dst : "");
       (void)string_list_push_take(&failures, fail);
@@ -7808,7 +7816,7 @@ static int cmd_public_fuzz_kernels_smoke(int argc, char **argv) {
   bool allow_zero = has_flag_after(argc, argv, 4, "--allow-zero");
 
   char *kernel_corpus_seed_dir = NULL;
-  (void)nytrix_asprintf(&kernel_corpus_seed_dir, "etc/tests/rt");
+  (void)nytrix_asprintf(&kernel_corpus_seed_dir, "etc/tests/runtime");
   if (kernel_corpus_seed_dir) ny_ensure_dir_recursive(kernel_corpus_seed_dir);
   free(kernel_corpus_seed_dir);
   string_list_t prep_rows = {0}, rows = {0}, failures = {0}, files = {0};
@@ -7816,7 +7824,7 @@ static int cmd_public_fuzz_kernels_smoke(int argc, char **argv) {
   string_list_free(&prep_rows);
 
   char *corpus_dir = NULL;
-  (void)nytrix_asprintf(&corpus_dir, "etc/tests/rt");
+  (void)nytrix_asprintf(&corpus_dir, "etc/tests/runtime");
   if (!corpus_dir || !collect_regular_files_recursive(corpus_dir, &files)) {
     (void)string_list_push_take(&failures, make_fuzz_failure(root, "kernels",
                                                             "kernel corpus scan failed",

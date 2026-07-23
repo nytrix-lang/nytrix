@@ -1,0 +1,19 @@
+shape bench_string {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "string", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def t0 = ticks()
+mut s = ""
+for i in 0..100 {
+  s = s + "abc"
+}
+def t1 = ticks()
+print("checksum=", s.len)
+print("elapsed_ns=", t1 - t0)
+NY
+}

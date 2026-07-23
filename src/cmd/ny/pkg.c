@@ -2526,9 +2526,9 @@ static void ny_pkg_parse_opts(int *argc, char **argv, ny_pkg_opts_t *opts, const
     } else if (strcmp(a, "--interactive") == 0 || strcmp(a, "-i") == 0) {
       opts->interactive = true;
     } else if (strcmp(a, "--limit") == 0 && r + 1 < *argc) {
-      opts->limit = atoi(argv[++r]);
+      ny_parse_int(argv[++r], &opts->limit);
     } else if (strncmp(a, "--limit=", 8) == 0) {
-      opts->limit = atoi(a + 8);
+      ny_parse_int(a + 8, &opts->limit);
     } else if (strcmp(a, "--manifest") == 0 && r + 1 < *argc) {
       snprintf(opts->manifest, sizeof(opts->manifest), "%s", argv[++r]);
     } else if (strncmp(a, "--manifest=", 11) == 0) {

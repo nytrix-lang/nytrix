@@ -935,7 +935,7 @@ fn _ripemd160_append_le32(list out, int x) list {
    out = out.append(x & 255)
    out = out.append((x >> 8) & 255)
    out = out.append((x >> 16) & 255)
-   out.append((x >> 24) & 255)
+   return out.append((x >> 24) & 255)
 }
 
 fn _ripemd160_pure(any data) list {

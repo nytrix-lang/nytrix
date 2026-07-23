@@ -2,7 +2,7 @@
 ;; Core runtime facade: primitives, containers, strings, assertions, Result values, queues, and channels.
 ;; References:
 ;; - std
-module std.core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, free_raw, realloc, zalloc, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, print, eprint, chr, retain, rc_count, _pow2, __big_add_abs, __big_sub_abs, __big_mul_abs, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
+module std.core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, free_raw, realloc, zalloc, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_nil, is_none, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_get, dict_set, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, print, eprint, chr, retain, rc_count, _pow2, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
 use std.core.primitives
 use std.core.reflect as core_ref
 use std.core.dict_mod
@@ -105,6 +105,7 @@ fn endswith(any s, any suffix) bool {
 
 fn type(any x) str {
    "Returns a string describing the runtime value type."
+   if __is_nil(x) { return "nil" }
    if __is_int(x) { return "int" }
    if x == true || x == false { return "bool" }
    if is_float(x) { return "float" }
@@ -116,10 +117,10 @@ fn type(any x) str {
    if is_range(x) { return "range" }
    if is_bytes(x) { return "bytes" }
    if _core_has_tag(x, runtime_tag_raw("bigint")) { return "bigint" }
+   if _core_has_tag(x, runtime_tag_raw("bigfloat")) { return "bigfloat" }
    if _core_has_tag(x, runtime_tag_raw("complex")) { return "complex" }
    if __tagof(x) == runtime_tag_raw("ffi_ptr") { return "ffi_ptr" }
    if is_ptr(x) { return "ptr" }
-   if !x { return "none" }
    "unknown"
 }
 
@@ -382,7 +383,7 @@ fn repr(any x) str {
 
 fn is_truthy(any x) bool {
    "Returns **true** if value `x` is considered 'truthy'.
-   - `none`: false
+   - `nil`: false
    - `int`: true if not 0
    - `str/list/dict/set/tuple`: true if length > 0
    - `other`: true"
@@ -400,7 +401,7 @@ fn is_falsy(any x) bool {
 
 @inline
 fn not_none(any x, any fallback) any {
-   "Returns `x` if it is not **none**; otherwise returns `fallback`."
+   "Returns `x` if it is not **nil**; otherwise returns `fallback`."
    if x != 0 || __is_int(x) { return x }
    fallback
 }
@@ -827,6 +828,8 @@ fn bytes_get(bytes b, int i) int {
    load8(b, i)
 }
 
+@borrows(b)
+@returns_borrow(b)
 fn bytes_set(bytes b, int i, int v) bytes {
    "Stores byte `v` at index `i` and returns the same buffer."
    if !is_bytes(b) { return b }
@@ -1082,13 +1085,14 @@ fn pop(any lst) any {
 
 fn extend(any lst, any other) any {
    "Extends list-like container."
-   core_ref.extend(lst, other)
+   return core_ref.extend(lst, other)
 }
 
 @jit
 fn len(any x) int {
    "Returns the number of elements in a collection or the length of a string."
-   if is_list(x) || is_dict(x) || is_set(x) || is_tuple(x) { return __load64_idx(x, 0) }
+   if is_list(x) || is_set(x) || is_tuple(x) { return __load64_idx(x, 0) }
+   if is_dict(x) { return core_ref.len(x) }
    if is_str(x) || is_bytes(x) { return __load64_idx(x, -16) }
    core_ref.len(x)
 }
@@ -1120,7 +1124,8 @@ impl any {
    fn require_shape(any self, any spec, str msg="shape check failed", int max_depth=6) any { core_ref.require_shape(self, spec, msg, max_depth) }
    @inline
    fn len(any self) int {
-      if is_list(self) || is_dict(self) || is_set(self) || is_tuple(self) { return __load64_idx(self, 0) }
+      if is_list(self) || is_set(self) || is_tuple(self) { return __load64_idx(self, 0) }
+      if is_dict(self) { return core_ref.len(self) }
       if is_str(self) || is_bytes(self) { return __load64_idx(self, -16) }
       core_ref.len(self)
    }
@@ -1426,8 +1431,12 @@ impl bytes {
    @inline
    fn get(bytes self, int key, any default=0) any { core_ref.get(self, key, default) }
    @inline
-   fn set(bytes self, int key, int val) bytes { core_ref.set(self, key, val) }
+   @borrows(self)
+   @returns_borrow(self)
+   fn set(bytes self, int key, int val) bytes { bytes_set(self, key, val) }
    @inline
+   @borrows(self)
+   @returns_borrow(self)
    fn put(bytes self, int key, int val) bytes { self.set(key, val) }
 }
 
@@ -1717,5 +1726,38 @@ fn _pow2(int n) int {
    assert(d.keys.len == 2 && d.values.len == 2 && d.items.len == 2, "core dict item builders")
    assert(repr([1, "x"]) == "[1, \"x\"]", "core repr raw store")
    assert(to_str({"a": 1}).contains("a: 1"), "core dict to_str")
+   assert(is_str(OS) && OS.len > 0 && is_str(ARCH) && ARCH.len > 0, "core platform globals")
+   def unary_a = 10
+   assert(-unary_a == -10 && ~unary_a == -11 && ~0 == -1 && ~(-1) == 0, "core unary operators")
+   mut unary_count = 5
+   ++unary_count
+   --unary_count
+   assert(unary_count == 5, "core increment and decrement")
+   mut unary_sum = 0
+   mut unary_i = 0
+   while unary_i < 10 ++unary_i { unary_sum = unary_sum + unary_i }
+   assert(unary_sum == 45, "core loop update")
+   mut compound = 10
+   compound += 5
+   compound -= 3
+   compound *= 2
+   compound /= 4
+   compound %= 4
+   assert(compound == 2, "core compound assignment")
+   #x86 {
+      assert(asm("mov $1, $0", "=r,r", 42) == 42, "core x86 inline asm")
+   } #elif arm || aarch64 {
+      def asm_value = asm("mov $0, $1", "=r,r", 42)
+      assert((arm && !aarch64) ? (asm_value & 4294967295) == 42 : asm_value == 42, "core arm inline asm")
+   } #endif
+   @jit
+   fn selftest_fast_add(any a, any b) any { a + b }
+   @pure
+   fn selftest_pure_inc(any value) any { value + 1 }
+   fn selftest_ctpop(any value) any { intrinsic("ctpop.i64", value) }
+   assert(selftest_fast_add(10, 20) == 30 && selftest_pure_inc(9) == 10 && selftest_ctpop(0xf0f0) == 8, "core attributes and intrinsics")
+   struct SelftestVec2 { i32 x, i32 y }
+   struct SelftestPackedPair pack(1) { i32 left, i64 right }
+   assert(__layout_size("SelftestVec2") == 8 && __layout_offset("SelftestVec2", "y") == 4 && __layout_size("SelftestPackedPair") == 12, "core layouts")
    print("✓ std.core self-test passed")
 }
