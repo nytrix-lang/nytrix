@@ -2,7 +2,7 @@
 ;; Dictionary operations for lookup, mutation, deletion, merging, and compatibility calls.
 ;; References:
 ;; - std.core
-module std.core.dict_mod(dict, dict_len, dict_read, dict_exists, dict_write, dict_remove, dict_has, dict_del, dict_pop, dict_popitem, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_setdefault, dict_clear)
+module std.core.dict_mod(dict, dict_len, dict_get, dict_exists, dict_set, dict_remove, dict_has, dict_del, dict_pop, dict_popitem, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_setdefault, dict_clear)
 use std.core.primitives
 use std.core.error
 
@@ -119,13 +119,13 @@ fn _dict_resize(dict d) dict {
    mut i = 0
    while i < old_cap {
       def off = 16 + i * 24
-      if __load64_idx(d, off + 16) == 1 { dict_write(nd, __load64_idx(d, off), __load64_idx(d, off + 8)) }
+      if __load64_idx(d, off + 16) == 1 { dict_set(nd, __load64_idx(d, off), __load64_idx(d, off + 8)) }
       i += 1
    }
    nd
 }
 
-fn dict_write(dict d, any key, any val) dict {
+fn dict_set(dict d, any key, any val) dict {
    "Inserts or updates a key/value pair in dictionary `d`."
    if !is_dict(d) { return d }
    def tc = __load64_idx(d, 0)
@@ -137,7 +137,7 @@ fn dict_write(dict d, any key, any val) dict {
    }
    if off < 0 || (tc + 1) * 2 > tca {
       mut nd = _dict_resize(d)
-      return dict_write(nd, key, val)
+      return dict_set(nd, key, val)
    }
    __store64_idx(d, off, key)
    __store64_idx(d, off + 8, val)
@@ -147,7 +147,7 @@ fn dict_write(dict d, any key, any val) dict {
 }
 
 @inline
-fn dict_read(dict d, any key, any default=0) any {
+fn dict_get(dict d, any key, any default=0) any {
    "Retrieves the value for `key` in `d`, or returns `default` if not found."
    if !is_dict(d) { return default }
    def off = _dict_find_off(d, key)
@@ -190,6 +190,7 @@ fn dict_del(dict d, any key) dict {
    dict_remove(d, key)
 }
 
+
 fn dict_pop(dict d, any key, any default=0) any {
    "Removes and returns the value for `key`, or `default` if not found."
    if !is_dict(d) { return default }
@@ -229,8 +230,8 @@ fn dict_popitem(dict d) any {
 fn dict_setdefault(dict d, any key, any default=0) any {
    "Returns the value for `key`, or sets and returns `default` if not found."
    if !is_dict(d) { return default }
-   if dict_exists(d, key) { return dict_read(d, key, default) }
-   d = dict_write(d, key, default)
+   if dict_exists(d, key) { return dict_get(d, key, default) }
+   d = dict_set(d, key, default)
    default
 }
 
@@ -277,7 +278,7 @@ fn dict_merge(dict dst, dict src) dict {
    mut i = 0
    while i < cap {
       def off = 16 + i * 24
-      if __load64_idx(src, off + 16) == 1 { dst = dict_write(dst, __load64_idx(src, off), __load64_idx(src, off + 8)) }
+      if __load64_idx(src, off + 16) == 1 { dst = dict_set(dst, __load64_idx(src, off), __load64_idx(src, off + 8)) }
       i += 1
    }
    dst
@@ -363,24 +364,24 @@ fn dict_values(dict d) list {
    }
    mut d = dict(4)
    _dict_check(dict_len(d) == 0 && !dict_has(d, "a"), "dict empty")
-   d = dict_write(d, "a", 1)
-   d = dict_write(d, "b", 2)
-   d = dict_write(d, "c", 3)
-   _dict_check(dict_len(d) == 3 && dict_has(d, "b") && dict_read(d, "b", 0) == 2 && dict_read(d, "x", 77) == 77, "dict write/read")
+   d = dict_set(d, "a", 1)
+   d = dict_set(d, "b", 2)
+   d = dict_set(d, "c", 3)
+   _dict_check(dict_len(d) == 3 && dict_has(d, "b") && dict_get(d, "b", 0) == 2 && dict_get(d, "x", 77) == 77, "dict write/read")
    mut copy = dict_clone(d)
-   copy = dict_write(copy, "b", 22)
-   _dict_check(dict_read(d, "b", 0) == 2 && dict_read(copy, "b", 0) == 22, "dict clone isolates writes")
+   copy = dict_set(copy, "b", 22)
+   _dict_check(dict_get(d, "b", 0) == 2 && dict_get(copy, "b", 0) == 22, "dict clone isolates writes")
    mut other = dict(4)
-   other = dict_write(other, "b", 200)
-   other = dict_write(other, "d", 4)
+   other = dict_set(other, "b", 200)
+   other = dict_set(other, "d", 4)
    d = dict_merge(d, other)
-   _dict_check(dict_len(d) == 4 && dict_read(d, "b", 0) == 200 && dict_read(d, "d", 0) == 4, "dict merge")
+   _dict_check(dict_len(d) == 4 && dict_get(d, "b", 0) == 200 && dict_get(d, "d", 0) == 4, "dict merge")
    d = dict_del(d, "b")
    _dict_check(!dict_has(d, "b") && dict_len(d) == 3, "dict delete")
    _dict_check(dict_keys(d).contains("a") && dict_values(d).contains(4) && dict_items(d).len == 3, "dict views")
    mut fd = dict(8)
    def half_a, half_b = 0.5, 0.25 + 0.25
    fd[half_a] = "half"
-   _dict_check(dict_read(fd, half_b, "") == "half", "dict float keys")
+   _dict_check(dict_get(fd, half_b, "") == "half", "dict float keys")
    print("✓ std.core.dict_mod self-test passed")
 }

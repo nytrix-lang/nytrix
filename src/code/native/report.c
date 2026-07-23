@@ -1,4 +1,5 @@
 #include "code/native/internal.h"
+#include "code/native/object/internal.h"
 #include "base/common.h"
 
 #include <errno.h>
@@ -8,24 +9,24 @@
 
 /* Tier fact collection, recommendation, and deterministic report output. */
 
-static size_t ny_native_tier_inst_cost(const ny_nir_inst_t *in) {
+static size_t ny_native_tier_inst_cost(const nyir_inst_t *in) {
   if (!in)
     return 0;
   switch (in->op) {
-  case NY_NIR_NOP:
-  case NY_NIR_LABEL:
+  case NYIR_NOP:
+  case NYIR_LABEL:
     return 0;
-  case NY_NIR_DIV_I64:
-  case NY_NIR_MOD_I64:
+  case NYIR_DIV_I64:
+  case NYIR_MOD_I64:
     return 8;
-  case NY_NIR_CALL:
+  case NYIR_CALL:
     return 12;
-  case NY_NIR_BR:
-  case NY_NIR_BR_IF:
-  case NY_NIR_RET:
+  case NYIR_BR:
+  case NYIR_BR_IF:
+  case NYIR_RET:
     return 3;
-  case NY_NIR_LOAD_LOCAL:
-  case NY_NIR_STORE_LOCAL:
+  case NYIR_LOAD_LOCAL:
+  case NYIR_STORE_LOCAL:
     return 2;
   default:
     return 1;
@@ -45,24 +46,24 @@ typedef struct {
 } ny_native_tier_facts_t;
 
 static void ny_native_tier_facts_add(ny_native_tier_facts_t *facts,
-                                     const ny_nir_func_t *f) {
+                                     const nyir_func_t *f) {
   if (!facts || !f)
     return;
   facts->insts += f->len;
   if (f->next_value > 0)
     facts->values += f->next_value;
   for (size_t i = 0; i < f->len; ++i) {
-    const ny_nir_inst_t *in = &f->data[i];
+    const nyir_inst_t *in = &f->data[i];
     facts->cost += ny_native_tier_inst_cost(in);
-    if (in->op == NY_NIR_CALL)
+    if (in->op == NYIR_CALL)
       facts->calls++;
-    else if (in->op == NY_NIR_BR || in->op == NY_NIR_BR_IF)
+    else if (in->op == NYIR_BR || in->op == NYIR_BR_IF)
       facts->branches++;
-    else if (in->op == NY_NIR_LOAD_LOCAL || in->op == NY_NIR_STORE_LOCAL)
+    else if (in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL)
       facts->memory_ops++;
-    if (in->op == NY_NIR_DIV_I64 || in->op == NY_NIR_MOD_I64)
+    if (in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64)
       facts->divmod_ops++;
-    if ((in->effects & (unsigned)NY_NIR_EFFECT_CONTROL) != 0)
+    if ((in->effects & (unsigned)NYIR_EFFECT_CONTROL) != 0)
       facts->control_ops++;
     if (in->effects != 0)
       facts->effect_ops++;
@@ -95,7 +96,7 @@ static const char *ny_native_tier_recommendation(
 static const char *ny_native_tier_recommendation_with_profile(
     const ny_native_tier_plan_t *plan, const ny_native_target_info_t *target,
     const ny_native_tier_facts_t *facts,
-    const ny_nir_eval_result_t *profile) {
+    const nyir_eval_result_t *profile) {
   if (!profile || profile->steps == 0)
     return ny_native_tier_recommendation(plan, target, facts);
   bool has_obj =
@@ -124,13 +125,14 @@ static void ny_native_print_caps(FILE *out, unsigned caps) {
       first = false;                                                             \
     }                                                                            \
   } while (0)
-  NY_CAP("nir-asm", NY_NATIVE_CAP_NIR_ASM);
+  NY_CAP("nyir-asm", NY_NATIVE_CAP_NIR_ASM);
   NY_CAP("ast-fallback", NY_NATIVE_CAP_AST_FALLBACK);
   NY_CAP("asm-object", NY_NATIVE_CAP_ASM_OBJECT);
-  NY_CAP("nir-vm", NY_NATIVE_CAP_NIR_VM);
+  NY_CAP("nyir-vm", NY_NATIVE_CAP_NIR_VM);
   NY_CAP("elf-object", NY_NATIVE_CAP_ELF_OBJECT);
   NY_CAP("coff-object", NY_NATIVE_CAP_COFF_OBJECT);
   NY_CAP("macho-object", NY_NATIVE_CAP_MACHO_OBJECT);
+  NY_CAP("live-jit", NY_NATIVE_CAP_LIVE_JIT);
 #undef NY_CAP
   if (first)
     fputs("none", out);
@@ -153,8 +155,8 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
     return false;
   }
 
-  ny_nir_func_t rt_main = {0};
-  ny_nir_func_t funcs[128];
+  nyir_func_t rt_main = {0};
+  nyir_func_t funcs[128];
   const char *func_names[128];
   memset(funcs, 0, sizeof(funcs));
   memset(func_names, 0, sizeof(func_names));
@@ -175,7 +177,7 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
     func_names[name_index++] = stmt->as.fn.name ? stmt->as.fn.name : "<fn>";
   }
 
-  ny_nir_eval_result_t vm_profile = {0};
+  nyir_eval_result_t vm_profile = {0};
   bool vm_profile_used = false;
   if (opt->nyir_run_profile && rt_main.len) {
     char profile_err[512] = {0};
@@ -185,7 +187,7 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
       vm_profile_used = true;
     } else if (verbose_enabled) {
       fprintf(stderr, "native tier report: VM profile unavailable: %s\n",
-              profile_err[0] ? profile_err : "unknown error");
+              profile_err[0] ? profile_err : NY_NATIVE_UNKNOWN_ERR);
     }
   }
 
@@ -214,6 +216,59 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
     }
   }
 
+  size_t machine_ready = 0;
+  size_t machine_total = rt_main.len ? 1 : 0;
+  size_t machine_i64 = 0, machine_f32 = 0, machine_f64 = 0;
+  size_t machine_ptr = 0, machine_vector = 0, machine_flags = 0;
+  char machine_skip[256] = {0};
+  if (rt_main.len) {
+    ny_mach_func_t machine = {0};
+    char machine_err[256] = {0};
+    if (ny_mach_lower_nir(&rt_main, &machine, machine_err, sizeof(machine_err))) {
+      ++machine_ready;
+      for (size_t i = 0; i < machine.vreg_len; ++i) {
+        switch (machine.vreg_types[i]) {
+        case NY_MACH_TYPE_I64: ++machine_i64; break;
+        case NY_MACH_TYPE_F32: ++machine_f32; break;
+        case NY_MACH_TYPE_F64: ++machine_f64; break;
+        case NY_MACH_TYPE_PTR: ++machine_ptr; break;
+        case NY_MACH_TYPE_V128_I64:
+        case NY_MACH_TYPE_V128_F64:
+        case NY_MACH_TYPE_V128_F32: ++machine_vector; break;
+        case NY_MACH_TYPE_FLAGS: ++machine_flags; break;
+        default: break;
+        }
+      }
+    } else if (!machine_skip[0])
+      snprintf(machine_skip, sizeof(machine_skip), "%s",
+               machine_err[0] ? machine_err : "unsupported NYIR shape");
+    ny_mach_func_free(&machine);
+  }
+  for (size_t i = 0; i < func_count; ++i) {
+    ++machine_total;
+    ny_mach_func_t machine = {0};
+    char machine_err[256] = {0};
+    if (ny_mach_lower_nir(&funcs[i], &machine, machine_err, sizeof(machine_err))) {
+      ++machine_ready;
+      for (size_t v = 0; v < machine.vreg_len; ++v) {
+        switch (machine.vreg_types[v]) {
+        case NY_MACH_TYPE_I64: ++machine_i64; break;
+        case NY_MACH_TYPE_F32: ++machine_f32; break;
+        case NY_MACH_TYPE_F64: ++machine_f64; break;
+        case NY_MACH_TYPE_PTR: ++machine_ptr; break;
+        case NY_MACH_TYPE_V128_I64:
+        case NY_MACH_TYPE_V128_F64:
+        case NY_MACH_TYPE_V128_F32: ++machine_vector; break;
+        case NY_MACH_TYPE_FLAGS: ++machine_flags; break;
+        default: break;
+        }
+      }
+    } else if (!machine_skip[0])
+      snprintf(machine_skip, sizeof(machine_skip), "%s",
+               machine_err[0] ? machine_err : "unsupported NYIR shape");
+    ny_mach_func_free(&machine);
+  }
+
   FILE *out = stderr;
   if (opt->native_tier_report_path && opt->native_tier_report_path[0]) {
     ny_native_ensure_parent_dir_for_path(opt->native_tier_report_path);
@@ -222,9 +277,10 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
       ny_native_set_err(err, err_len,
                         "native tier report: failed to open %s: %s",
                         opt->native_tier_report_path, strerror(errno));
+      nyir_eval_result_free(&vm_profile);
       for (size_t i = 0; i < func_count; ++i)
-        ny_nir_func_free(&funcs[i]);
-      ny_nir_func_free(&rt_main);
+        nyir_func_free(&funcs[i]);
+      nyir_func_free(&rt_main);
       return false;
     }
   }
@@ -238,10 +294,13 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
   ny_native_print_caps(out, target.caps);
   fputc('\n', out);
   fprintf(out,
-          "plan budget=%zu hot=%zu cold=%zu cache=%u prefer_vm=%s ast_fallback=%s\n",
+          "plan budget=%zu hot=%zu cold=%zu cache=%u prefer_vm=%s ast_fallback=%s "
+          "requested_tier=%s resolved_tier=%s\n",
           plan.compile_budget, plan.hot_threshold, plan.cold_threshold,
           plan.cache_score, plan.prefer_nir_vm ? "yes" : "no",
-          plan.prefer_ast_fallback ? "yes" : "no");
+          plan.prefer_ast_fallback ? "yes" : "no",
+          plan.requested_tier ? plan.requested_tier : "auto",
+          plan.resolved_tier ? plan.resolved_tier : "baseline");
   fprintf(out,
           "facts functions=%zu insts=%zu values=%d cost=%zu calls=%zu "
           "branches=%zu locals=%zu divmod=%zu control=%zu effects=%zu\n",
@@ -254,6 +313,22 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
           handoffs.entry_points, handoffs.return_points, handoffs.call_points,
           handoffs.branch_points, handoffs.label_points,
           handoffs.deopt_safe_points);
+  fprintf(out,
+          "machine_lowering ready=%zu total=%zu types=i64:%zu,f32:%zu,f64:%zu,"
+          "ptr:%zu,v128:%zu,flags:%zu%s%s\n",
+          machine_ready, machine_total, machine_i64, machine_f32, machine_f64,
+          machine_ptr, machine_vector, machine_flags,
+          machine_skip[0] ? " first_skip=" : "",
+          machine_skip[0] ? machine_skip : "");
+  {
+    size_t supported = 0, total = 0;
+    unsigned long long mach_ok = 0, nir_fb = 0;
+    ny_mach_opcode_coverage(&supported, &total);
+    ny_native_mach_encode_stats(&mach_ok, &nir_fb);
+    fprintf(out, "mach_opcode_coverage supported=%zu total=%zu fallback=%zu\n",
+            supported, total, total - supported);
+    fprintf(out, "mach_encode mach_ok=%llu nir_fallback=%llu\n", mach_ok, nir_fb);
+  }
   fprintf(out,
           "vm_profile used=%s returned=%s result=%" PRId64
           " steps=%zu calls=%zu branches_taken=%zu branches_not_taken=%zu "
@@ -315,9 +390,10 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
 
   if (out != stderr)
     fclose(out);
+  nyir_eval_result_free(&vm_profile);
   for (size_t i = 0; i < func_count; ++i)
-    ny_nir_func_free(&funcs[i]);
-  ny_nir_func_free(&rt_main);
+    nyir_func_free(&funcs[i]);
+  nyir_func_free(&rt_main);
   if (err && err_len > 0)
     err[0] = '\0';
   return true;

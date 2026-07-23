@@ -83,7 +83,7 @@ static bool ny_const_num_eval(codegen_t *cg, scope *scopes, size_t depth, expr_t
 
   switch (e->kind) {
   case NY_E_LITERAL:
-    if (e->as.literal.kind == NY_LIT_INT) {
+    if (e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL) {
       out->kind = NY_CONST_NUM_INT;
       out->i = e->as.literal.as.i;
       return true;
@@ -295,7 +295,8 @@ static bool ny_static_indexable_int_bounds(codegen_t *cg, scope *scopes, size_t 
   int64_t max_v = 0;
   for (size_t i = 0; i < init->as.list_like.len; ++i) {
     expr_t *item = init->as.list_like.data[i];
-    if (!item || item->kind != NY_E_LITERAL || item->as.literal.kind != NY_LIT_INT)
+    if (!item || item->kind != NY_E_LITERAL ||
+        item->as.literal.kind != NY_LIT_INT || item->tok.kind == NY_T_NIL)
       return false;
     int64_t v = item->as.literal.as.i;
     if (i == 0) {
@@ -424,7 +425,8 @@ static ny_int_range_t ny_checked_int_range(int64_t lo, int64_t hi) {
 static ny_int_range_t ny_mask_literal_int_range(expr_t *rhs) {
   ny_int_range_t fail = {false, 0, 0};
   if (!rhs || rhs->kind != NY_E_LITERAL || rhs->as.literal.kind != NY_LIT_INT ||
-      rhs->as.literal.as.i < 0 || !ny_small_int_fits_i64(rhs->as.literal.as.i))
+      rhs->tok.kind == NY_T_NIL || rhs->as.literal.as.i < 0 ||
+      !ny_small_int_fits_i64(rhs->as.literal.as.i))
     return fail;
   return (ny_int_range_t){true, 0, rhs->as.literal.as.i};
 }
@@ -500,7 +502,8 @@ static ny_int_range_t ny_expr_range_with_params(codegen_t *cg, scope *scopes, si
     return fail;
   switch (e->kind) {
   case NY_E_LITERAL:
-    if (e->as.literal.kind == NY_LIT_INT && ny_small_int_fits_i64(e->as.literal.as.i))
+    if (e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL &&
+        ny_small_int_fits_i64(e->as.literal.as.i))
       return (ny_int_range_t){true, e->as.literal.as.i, e->as.literal.as.i};
     return fail;
   case NY_E_IDENT:
@@ -593,7 +596,8 @@ static ny_int_range_t ny_expr_proven_small_int_range(codegen_t *cg, scope *scope
 
   switch (e->kind) {
   case NY_E_LITERAL:
-    if (e->as.literal.kind == NY_LIT_INT && ny_small_int_fits_i64(e->as.literal.as.i))
+    if (e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL &&
+        ny_small_int_fits_i64(e->as.literal.as.i))
       return (ny_int_range_t){true, e->as.literal.as.i, e->as.literal.as.i};
     return fail;
   case NY_E_IDENT: {
@@ -675,7 +679,7 @@ static ny_int_range_t ny_expr_proven_small_int_range(codegen_t *cg, scope *scope
         e->as.call.args.len == 2) {
       expr_t *rhs = e->as.call.args.data[1].val;
       if (rhs && rhs->kind == NY_E_LITERAL && rhs->as.literal.kind == NY_LIT_INT &&
-          rhs->as.literal.as.i >= 0 &&
+          rhs->tok.kind != NY_T_NIL && rhs->as.literal.as.i >= 0 &&
           ny_is_proven_int(cg, scopes, depth, e->as.call.args.data[0].val, NULL) &&
           ny_small_int_fits_i64(rhs->as.literal.as.i))
         return (ny_int_range_t){true, 0, rhs->as.literal.as.i};
@@ -755,7 +759,7 @@ static bool ny_can_lower_raw_int_expr(codegen_t *cg, scope *scopes, size_t depth
     return false;
   switch (e->kind) {
   case NY_E_LITERAL:
-    return e->as.literal.kind == NY_LIT_INT;
+    return e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL;
   case NY_E_IDENT:
     return true;
   case NY_E_BINARY: {
@@ -817,7 +821,7 @@ static ny_raw_int_expr_t ny_lower_raw_int_expr_with_params(codegen_t *cg, scope 
 
   switch (e->kind) {
   case NY_E_LITERAL:
-    if (e->as.literal.kind != NY_LIT_INT)
+    if (e->as.literal.kind != NY_LIT_INT || e->tok.kind == NY_T_NIL)
       return fail;
     return (ny_raw_int_expr_t){LLVMConstInt(cg->type_i64, (uint64_t)e->as.literal.as.i, true),
                                LLVMConstInt(cg->type_i1, 1, false)};
@@ -1037,7 +1041,8 @@ static ny_raw_int_expr_t ny_lower_raw_int_expr_with_params(codegen_t *cg, scope 
 
 static bool ny_mask_literal_i64(expr_t *e, int64_t *out) {
   if (!e || e->kind != NY_E_LITERAL || e->as.literal.kind != NY_LIT_INT ||
-      e->as.literal.as.i < 0 || !ny_small_int_fits_i64(e->as.literal.as.i))
+      e->tok.kind == NY_T_NIL || e->as.literal.as.i < 0 ||
+      !ny_small_int_fits_i64(e->as.literal.as.i))
     return false;
   if (out)
     *out = e->as.literal.as.i;
@@ -1312,72 +1317,6 @@ static const op_map_t op_map[] = {
     {"!=", NULL, NULL, NY_BINOP_NE, false, NULL},
     {"in", NULL, NULL, NY_BINOP_IN, false, NULL},
     {NULL, NULL, NULL, NY_BINOP_UNKNOWN, false, NULL}};
-
-static __attribute__((unused)) LLVMValueRef ny_emit_raw_int_binary(codegen_t *cg,
-                                                                   const op_map_t *entry,
-                                                                   LLVMValueRef l, LLVMValueRef r) {
-
-  if (!entry)
-    return NULL;
-
-  ny_binop_kind_t kind = entry->kind;
-  LLVMValueRef result = NULL;
-
-  switch (kind) {
-  case NY_BINOP_ADD:
-    result = ny_add(cg, l, r, "raw_add");
-    break;
-  case NY_BINOP_SUB:
-    result = ny_sub(cg, l, r, "raw_sub");
-    break;
-  case NY_BINOP_MUL:
-    result = ny_mul(cg, l, r, "raw_mul");
-    break;
-  case NY_BINOP_DIV:
-    result = LLVMBuildSDiv(cg->builder, l, r, "raw_div");
-    break;
-  case NY_BINOP_MOD:
-    result = LLVMBuildSRem(cg->builder, l, r, "raw_mod");
-    break;
-  case NY_BINOP_AND:
-    result = ny_and(cg, l, r, "raw_and");
-    break;
-  case NY_BINOP_OR:
-    result = ny_or(cg, l, r, "raw_or");
-    break;
-  case NY_BINOP_XOR:
-    result = ny_xor(cg, l, r, "raw_xor");
-    break;
-  case NY_BINOP_SHL:
-    result = ny_shl(cg, l, r, "raw_shl");
-    break;
-  case NY_BINOP_SHR:
-    result = ny_ashr(cg, l, r, "raw_shr");
-    break;
-  case NY_BINOP_LT:
-    result = ny_slt(cg, l, r, "raw_lt");
-    break;
-  case NY_BINOP_LE:
-    result = ny_sle(cg, l, r, "raw_le");
-    break;
-  case NY_BINOP_GT:
-    result = ny_sgt(cg, l, r, "raw_gt");
-    break;
-  case NY_BINOP_GE:
-    result = ny_sge(cg, l, r, "raw_ge");
-    break;
-  case NY_BINOP_EQ:
-    result = ny_eq(cg, l, r, "raw_eq");
-    break;
-  case NY_BINOP_NE:
-    result = ny_ne(cg, l, r, "raw_ne");
-    break;
-  default:
-    return NULL;
-  }
-
-  return result;
-}
 
 static LLVMValueRef ny_emit_tagged_int_fast_no_slow(codegen_t *cg, const op_map_t *entry,
                                                     LLVMValueRef l, LLVMValueRef r) {

@@ -2,7 +2,7 @@
 ;; Primitive platform constants, low-level numeric types, and built-in runtime bindings.
 ;; References:
 ;; - std.core
-module std.core.primitives(add, sub, mul, div, mod, band, bor, bxor, bshl, bshr, bnot, and, or, eq, lt, le, gt, ge, argv, errno, is_int, is_ptr, is_none, globals, set_globals, argc, envc, envp, __big_add_abs, __big_sub_abs, __big_mul_abs, runtime_tag_raw, init_str_raw, bytes_new_raw, kwarg_new_raw, range_new_raw, list_as_tuple_raw)
+module std.core.primitives(add, sub, mul, div, mod, band, bor, bxor, bshl, bshr, bnot, and, or, eq, lt, le, gt, ge, argv, errno, is_nil, is_int, is_ptr, is_none, globals, set_globals, argc, envc, envp, runtime_tag_raw, init_str_raw, bytes_new_raw, kwarg_new_raw, range_new_raw, list_as_tuple_raw)
 comptime template _prim_bin(name, intr, doc){
    @jit
    @inline
@@ -48,15 +48,6 @@ comptime template _prim_zero(name, Ret, intr, doc){
    }
 }
 
-comptime template _prim_bigbin(name, intr, doc){
-   @jit
-   @inline
-   fn name(a, b) {
-      doc
-      return intr(a, b)
-   }
-}
-
 comptime template _prim_untyped_un(name, intr, doc){
    @jit
    @inline
@@ -84,9 +75,6 @@ comptime template _prim_untyped_tri(name, intr, doc){
    }
 }
 
-comptime emit _prim_bigbin(__big_add_abs, __big_add_abs, "Adds the magnitudes of two bigint values.")
-comptime emit _prim_bigbin(__big_sub_abs, __big_sub_abs, "Subtracts bigint magnitudes assuming `a >= b`.")
-comptime emit _prim_bigbin(__big_mul_abs, __big_mul_abs, "Multiplies the magnitudes of two bigint values.")
 comptime emit _prim_untyped_un(runtime_tag_raw, __runtime_tag, "Returns the runtime tag integer for a named built-in type.")
 comptime emit _prim_untyped_bin(init_str_raw, __init_str, "Initializes raw memory as a Nytrix string object.")
 comptime emit _prim_untyped_un(bytes_new_raw, __bytes_new, "Allocates a Nytrix bytes object.")
@@ -111,6 +99,7 @@ comptime emit _prim_bin_bool(lt, __lt, "Returns **true** if `a < b` (untagged)."
 comptime emit _prim_bin_bool(le, __le, "Returns **true** if `a <= b` (untagged).")
 comptime emit _prim_bin_bool(gt, __gt, "Returns **true** if `a > b` (untagged).")
 comptime emit _prim_bin_bool(ge, __ge, "Returns **true** if `a >= b` (untagged).")
+comptime emit _prim_un_bool(is_nil, __is_nil, "Returns **true** only if `x` is nil. Integer 0 is not nil.")
 comptime emit _prim_un_bool(is_int, __is_int, "Returns **true** if `x` is a tagged integer.")
 
 comptime emit _prim_zero(globals, ptr, __globals, "Returns the pointer to the global variable table.")
@@ -152,7 +141,6 @@ fn is_ptr(any x) bool {
 @jit
 @inline
 fn is_none(any x) bool {
-   "Returns **true** if `x` is **none**. Integer 0 is not **none**."
-   if __is_int(x) { return false }
-   return x == nil
+   "Alias for `is_nil`. Integer 0 is not nil."
+   is_nil(x)
 }

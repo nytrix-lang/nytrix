@@ -529,7 +529,7 @@ static ny_mono_type_kind_t ny_mono_static_expr_kind(expr_t *e,
     return NY_MONO_TYPE_NONE;
   switch (e->kind) {
   case NY_E_LITERAL:
-    if (e->as.literal.kind == NY_LIT_INT)
+    if (e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL)
       return NY_MONO_TYPE_INT;
     if (e->as.literal.kind == NY_LIT_FLOAT)
       return NY_MONO_TYPE_F64;

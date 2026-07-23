@@ -73,28 +73,28 @@ fn _load_cocoa_frameworks() bool {
    #include <objc/objc-runtime.h>
    #include <AppKit/AppKit.h>
    #include <ApplicationServices/ApplicationServices.h>
-   extern "" {
-      fn _objc_msgSend(ptr target, fnptr op) ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr(ptr target, fnptr op, ptr arg) ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_ptr(ptr target, fnptr op, ptr a1, ptr a2) ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_ptr_ptr(ptr target, fnptr op, ptr a1, ptr a2, ptr a3) ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_u64_ptr_ptr_i64(ptr target, fnptr op, u64 a1, ptr a2, ptr a3, i64 a4) ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_i64(ptr target, fnptr op, i64 a1, i64 a2) ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_i64_arg(ptr target, fnptr op, i64 arg) ptr as "objc_msgSend"
-      fn _objc_msgSend_sel(ptr target, fnptr op, fnptr arg) ptr as "objc_msgSend"
-      fn _objc_msgSend_f64(ptr target, fnptr op) f64 as "objc_msgSend"
-      fn _objc_msgSend_arg_f64(ptr target, fnptr op, f64 arg) ptr as "objc_msgSend"
-      fn _objc_msgSend_size(ptr target, fnptr op, f64 w, f64 h) ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_point(ptr target, fnptr op, ptr arg, f64 x, f64 y) ptr as "objc_msgSend"
-      fn _objc_msgSend_bitmap_init(ptr target, fnptr op, ptr planes, i64 pixels_wide, i64 pixels_high, i64 bits_per_sample, i64 samples_per_pixel, i8 has_alpha, i8 is_planar, ptr color_space_name, u64 bitmap_format, i64 bytes_per_row, i64 bits_per_pixel) ptr as "objc_msgSend"
-      fn _objc_msgSend_rect_u64_i64_i8(ptr target, fnptr op, f64 x, f64 y, f64 w, f64 h, u64 style, i64 backing, i8 do_defer) ptr as "objc_msgSend"
-      fn _objc_msgSend_i64(ptr target, fnptr op) i64 as "objc_msgSend"
-      fn _objc_msgSend_i64_arg(ptr target, fnptr op, i64 arg) i64 as "objc_msgSend"
-      fn _objc_msgSend_i64_sel(ptr target, fnptr op, fnptr arg) i64 as "objc_msgSend"
+   extern {
+      fn _objc_msgSend(ptr target, ptr op) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr(ptr target, ptr op, ptr arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_ptr(ptr target, ptr op, ptr a1, ptr a2) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_ptr_ptr(ptr target, ptr op, ptr a1, ptr a2, ptr a3) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_u64_ptr_ptr_i64(ptr target, ptr op, u64 a1, ptr a2, ptr a3, i64 a4) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_i64(ptr target, ptr op, i64 a1, i64 a2) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_i64_arg(ptr target, ptr op, i64 arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_sel(ptr target, ptr op, ptr arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_f64(ptr target, ptr op) f64 as "objc_msgSend"
+      fn _objc_msgSend_arg_f64(ptr target, ptr op, f64 arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_size(ptr target, ptr op, f64 w, f64 h) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_point(ptr target, ptr op, ptr arg, f64 x, f64 y) ptr as "objc_msgSend"
+      fn _objc_msgSend_bitmap_init(ptr target, ptr op, ptr planes, i64 pixels_wide, i64 pixels_high, i64 bits_per_sample, i64 samples_per_pixel, i8 has_alpha, i8 is_planar, ptr color_space_name, u64 bitmap_format, i64 bytes_per_row, i64 bits_per_pixel) ptr as "objc_msgSend"
+      fn _objc_msgSend_rect_u64_i64_i8(ptr target, ptr op, f64 x, f64 y, f64 w, f64 h, u64 style, i64 backing, i8 do_defer) ptr as "objc_msgSend"
+      fn _objc_msgSend_i64(ptr target, ptr op) i64 as "objc_msgSend"
+      fn _objc_msgSend_i64_arg(ptr target, ptr op, i64 arg) i64 as "objc_msgSend"
+      fn _objc_msgSend_i64_sel(ptr target, ptr op, ptr arg) i64 as "objc_msgSend"
       fn _ny_objc_getClass(ptr name) ptr as "objc_getClass"
-      fn _ny_sel_registerName(ptr name) fnptr as "sel_registerName"
+      fn _ny_sel_registerName(ptr name) ptr as "sel_registerName"
       fn _ny_objc_allocateClassPair(ptr superclass, ptr name, u64 extra_bytes) ptr as "objc_allocateClassPair"
-      fn _ny_class_addMethod(ptr cls, fnptr name, fnptr imp, ptr types) bool as "class_addMethod"
+      fn _ny_class_addMethod(ptr cls, ptr name, fnptr imp, ptr types) bool as "class_addMethod"
       fn _ny_objc_registerClassPair(ptr cls) any as "objc_registerClassPair"
       fn CGAssociateMouseAndMouseCursorPosition(any connected) any
       fn CGDisplayCopyAllDisplayModes(any display_id, any options) any
@@ -117,9 +117,9 @@ fn _load_cocoa_frameworks() bool {
 } #else {
    "Runs the CFRelease operation."
    fn _ny_objc_getClass(ptr _name) ptr { 0 }
-   fn _ny_sel_registerName(ptr _name) fnptr { return fn() { 0 } }
+   fn _ny_sel_registerName(ptr _name) ptr { 0 }
    fn _ny_objc_allocateClassPair(ptr _superclass, ptr _name, u64 _extra_bytes) ptr { 0 }
-   fn _ny_class_addMethod(ptr _cls, fnptr _name, fnptr _imp, ptr _types) bool { false }
+   fn _ny_class_addMethod(ptr _cls, ptr _name, fnptr _imp, ptr _types) bool { false }
    fn _ny_objc_registerClassPair(ptr _cls) any { 0 }
    fn CGAssociateMouseAndMouseCursorPosition(any _connected) any {
       "Runs the CGAssociateMouseAndMouseCursorPosition operation."
@@ -191,67 +191,67 @@ fn _load_cocoa_frameworks() bool {
    }
 } #endif
 
-fn objc_msgSend(any target, any op) any {
+fn objc_msgSend(ptr target, ptr op) ptr {
    "Runs the objc msgSend operation."
    #macos { return _objc_msgSend(target, op) }
    0
 }
 
-fn objc_msgSend_ptr(any target, any op, ptr arg=0) any {
+fn objc_msgSend_ptr(ptr target, ptr op, ptr arg=0) ptr {
    "Runs the objc msgSend ptr operation."
    #macos { return _objc_msgSend_ptr(target, op, arg) }
    0
 }
 
-fn objc_msgSend_ptr_ptr(any target, any op, ptr a1=0, ptr a2=0) any {
+fn objc_msgSend_ptr_ptr(ptr target, ptr op, ptr a1=0, ptr a2=0) ptr {
    "Runs the objc msgSend ptr ptr operation."
    #macos { return _objc_msgSend_ptr_ptr(target, op, a1, a2) }
    0
 }
 
-fn objc_msgSend_ptr_ptr_ptr(any target, any op, ptr a1=0, ptr a2=0, ptr a3=0) any {
+fn objc_msgSend_ptr_ptr_ptr(ptr target, ptr op, ptr a1=0, ptr a2=0, ptr a3=0) ptr {
    "Runs the objc msgSend ptr ptr ptr operation."
    #macos { return _objc_msgSend_ptr_ptr_ptr(target, op, a1, a2, a3) }
    0
 }
 
-fn objc_msgSend_ptr_u64_ptr_ptr_i64(any target, any op, u64 a1=0, ptr a2=0, ptr a3=0, i64 a4=0) any {
+fn objc_msgSend_ptr_u64_ptr_ptr_i64(ptr target, ptr op, u64 a1=0, ptr a2=0, ptr a3=0, i64 a4=0) ptr {
    "Runs the objc msgSend ptr u64 ptr ptr i64 operation."
    #macos { return _objc_msgSend_ptr_u64_ptr_ptr_i64(target, op, a1, a2, a3, a4) }
    0
 }
 
-fn objc_msgSend_ptr_i64(any target, any op, i64 a1=0, i64 a2=0) any {
+fn objc_msgSend_ptr_i64(ptr target, ptr op, i64 a1=0, i64 a2=0) ptr {
    "Runs the objc msgSend ptr i64 operation."
    #macos { return _objc_msgSend_ptr_i64(target, op, a1, a2) }
    0
 }
 
-fn objc_msgSend_ptr_i64_arg(any target, any op, i64 arg=0) any {
+fn objc_msgSend_ptr_i64_arg(ptr target, ptr op, i64 arg=0) ptr {
    "Runs the objc msgSend ptr i64 arg operation."
    #macos { return _objc_msgSend_ptr_i64_arg(target, op, arg) }
    0
 }
 
-fn objc_msgSend_sel(any target, any op, any arg) any {
+fn objc_msgSend_sel(ptr target, ptr op, ptr arg) ptr {
    "Runs the objc msgSend sel operation."
    #macos { return _objc_msgSend_sel(target, op, arg) }
    0
 }
 
-fn objc_msgSend_f64(any target, any op) f64 {
+fn objc_msgSend_f64(ptr target, ptr op) f64 {
    "Runs the objc msgSend f64 operation."
    #macos { return _objc_msgSend_f64(target, op) }
    0.0
 }
 
-fn objc_msgSend_arg_f64(any target, any op, f64 arg) any {
+fn objc_msgSend_arg_f64(ptr target, ptr op, f64 arg) ptr {
    "Runs the objc msgSend arg f64 operation."
    #macos { return _objc_msgSend_arg_f64(target, op, arg) }
    0
 }
 
-fn objc_msgSend_ptr_f64(any target, any op, any arg) any {
+fn objc_msgSend_ptr_f64(ptr target, ptr op, any arg) ptr {
    "Runs the objc msgSend ptr f64 operation."
    #macos { return _objc_msgSend_arg_f64(target, op, float(arg)) }
    0
@@ -301,20 +301,20 @@ fn objc_msgSend_i64_sel(any target, any op, any arg) int {
    0
 }
 
-fn get_class(str name) any {
+fn get_class(str name) ptr {
    "Looks up an Objective-C class by name."
    _load_cocoa_frameworks()
    #macos { return _ny_objc_getClass(cstr(name)) }
    0
 }
 
-fn get_selector(str name) any {
+fn get_selector(str name) ptr {
    "Looks up an Objective-C selector by name."
    #macos { return _ny_sel_registerName(cstr(name)) }
    0
 }
 
-fn shared_application() any {
+fn shared_application() ptr {
    "Returns `[NSApplication sharedApplication]` when AppKit is available."
    if !available() { return 0 }
    def cls = get_class("NSApplication")

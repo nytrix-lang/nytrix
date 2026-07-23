@@ -1507,7 +1507,8 @@ fn _jpeg_append_baseline_headers(list out, int wVal, int hVal, list qyz, list qc
    out = _jpeg_append_huffman_table(out, 16, _ACL, _VAL, 162)
    out = _jpeg_append_huffman_table(out, 1, _DCC, _VDC, 12)
    out = _jpeg_append_huffman_table(out, 17, _ACC, _VAC, 162)
-   _jpeg_append_scan_header(out)
+   out = _jpeg_append_scan_header(out)
+   out
 }
 
 fn _jpeg_sample_ycc_blocks(any dataV, int wVal, int hVal, int chV, int bx, int by) list {
@@ -1553,7 +1554,8 @@ fn _jpeg_append_entropy_payload(list out, list eb) list {
       kI += 1
    }
    out = out.append(255)
-   out.append(217)
+   out = out.append(217)
+   out
 }
 
 fn _jpeg_bytes_from_list(list out) any {

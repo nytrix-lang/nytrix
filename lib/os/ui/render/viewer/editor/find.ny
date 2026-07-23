@@ -137,7 +137,7 @@ fn _find_from(str text, str needle, int pos) int {
 
 fn _add_result(list out, int line, int start, int end, str text) list {
    if out.len >= MAX_RESULTS || end < start { return out }
-   out.append({"line": line, "start": start, "end": end, "text": text})
+   return out.append({"line": line, "start": start, "end": end, "text": text})
 }
 
 fn _literal_line(list out, str needle, str raw_needle, str line, int li, bool case_sensitive, bool whole_word) list {

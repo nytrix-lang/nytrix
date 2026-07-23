@@ -807,6 +807,7 @@ fn open_display(str name="") any {
 fn close_display(any display) int {
    "Closes an X display connection."
    if !display { return 0 }
+   XSync(display, 0)
    XCloseDisplay(display)
 }
 
@@ -3656,7 +3657,7 @@ fn _push_selection_to_manager(any win, int timeout_ms=250) bool {
 fn _push_translated_event(list events, int typ, any win, any data=0) list {
    def h = win.get("handle", 0)
    def e = ui_event.make_event(typ, win, h, data)
-   events.append(e)
+   return events.append(e)
 }
 
 fn _xkb_setup(any display) dict {
@@ -4731,7 +4732,7 @@ fn _x11_append_event_coalesced(any out, any ev) list {
          return out
       }
    }
-   out.append(ev)
+   out = out.append(ev)
 }
 
 fn _x11_extend_events_coalesced(any out, any events) list {

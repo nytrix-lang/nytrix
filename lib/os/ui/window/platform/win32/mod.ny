@@ -3318,7 +3318,7 @@ fn poll_messages(any hwnd=0, int max_messages=512, bool remove=true) list {
    mut out = []
    mut n = 0
    while n < max_messages && PeekMessageW(msg, hwnd, 0, 0, remove ? PM_REMOVE : PM_NOREMOVE) != 0 {
-      out.append(_message_to_dict(msg))
+      out = out.append(_message_to_dict(msg))
       n += 1
       if !remove { break }
    }
@@ -3335,7 +3335,7 @@ fn pump_window_messages(any hwnd=0, int max_messages=512) list {
    mut out = []
    mut n = 0
    while n < max_messages && PeekMessageW(msg, hwnd, 0, 0, PM_REMOVE) != 0 {
-      out.append(_message_to_dict(msg))
+      out = out.append(_message_to_dict(msg))
       TranslateMessage(msg)
       DispatchMessageW(msg)
       n += 1

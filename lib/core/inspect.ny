@@ -24,7 +24,7 @@ fn inspect(any x) int {
 
 fn repl_show(any x) any {
    "Function used by the REPL to display values."
-   if x || __is_int(x) { print(repr(x)) }
+   print(repr(x))
    x
 }
 

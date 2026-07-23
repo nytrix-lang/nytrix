@@ -394,11 +394,14 @@ void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef
   int opt_level = 3;
   const char *opt_env = getenv("NYTRIX_JIT_OPT_LEVEL");
   if (opt_env && *opt_env) {
-    opt_level = atoi(opt_env);
-    if (opt_level < 0)
-      opt_level = 0;
-    if (opt_level > 3)
-      opt_level = 3;
+    int v = 0;
+    if (ny_parse_int(opt_env, &v)) {
+      opt_level = v;
+      if (opt_level < 0)
+        opt_level = 0;
+      if (opt_level > 3)
+        opt_level = 3;
+    }
   }
   if (apple_arm64 && (!opt_env || !*opt_env)) {
     opt_level = 0;
@@ -407,7 +410,9 @@ void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options, LLVMModuleRef
   int fast_isel = (opt_level <= 1) ? 1 : 0;
   const char *fast_isel_env = getenv("NYTRIX_JIT_FAST_ISEL");
   if (fast_isel_env && *fast_isel_env) {
-    fast_isel = (atoi(fast_isel_env) != 0);
+    int v = 0;
+    if (ny_parse_int(fast_isel_env, &v))
+      fast_isel = (v != 0);
   } else if (apple_arm64) {
     fast_isel = 0;
   }
@@ -605,41 +610,117 @@ static void *ny_jit_load_apple_openssl(const char *path) {
   }
   return NULL;
 }
+
+/* Homebrew is not part of dyld's default search path.  Keep this resolution
+ * generic: a normal #link name may refer to any package, not just one known
+ * library.  Explicit paths are intentionally left untouched. */
+static void *ny_jit_load_apple_package_library(const char *path) {
+  if (!path || strchr(path, '/') || strncmp(path, "-framework ", 11) == 0)
+    return NULL;
+  const char *base = ny_jit_basename(path);
+  const char *stem = base;
+  if (strncmp(stem, "lib", 3) == 0)
+    stem += 3;
+  size_t stem_len = strcspn(stem, ".");
+  if (stem_len == 0 || stem_len >= 128)
+    return NULL;
+  char package[128];
+  memcpy(package, stem, stem_len);
+  package[stem_len] = '\0';
+
+  const char *file = base;
+  char synthesized[160];
+  if (!strstr(file, ".dylib")) {
+    snprintf(synthesized, sizeof(synthesized), "lib%s.dylib", package);
+    file = synthesized;
+  }
+  const char *patterns[] = {
+      "/opt/homebrew/opt/%s/lib/%s",
+      "/usr/local/opt/%s/lib/%s",
+      "/opt/homebrew/lib/%s",
+      "/usr/local/lib/%s",
+      NULL,
+  };
+  char candidate[512];
+  for (size_t i = 0; patterns[i]; ++i) {
+    snprintf(candidate, sizeof(candidate), patterns[i], package, file);
+    void *h = dlopen(candidate, RTLD_GLOBAL | RTLD_LAZY);
+    if (h)
+      return h;
+  }
+  return NULL;
+}
 #endif
 
 void *ny_jit_load_library(const char *path) {
   if (!path || !*path)
     return NULL;
+  char *ensured = ny_ensure_shared_lib(path);
+  const char *load_path = ensured ? ensured : path;
 #ifdef _WIN32
-  HMODULE h = LoadLibraryA(path);
-  if (h)
+  HMODULE h = LoadLibraryA(load_path);
+  if (h) {
+    free(ensured);
     return (void *)h;
+  }
+  if (ensured && strcmp(ensured, path) != 0) {
+    h = LoadLibraryA(path);
+    if (h) {
+      free(ensured);
+      return (void *)h;
+    }
+  }
   if (!strchr(path, '.') && !strchr(path, '\\') && !strchr(path, '/')) {
     char buf[256];
     snprintf(buf, sizeof(buf), "%s.dll", path);
     h = LoadLibraryA(buf);
-    if (h)
+    if (h) {
+      free(ensured);
       return (void *)h;
+    }
     snprintf(buf, sizeof(buf), "lib%s.dll", path);
     h = LoadLibraryA(buf);
-    if (h)
+    if (h) {
+      free(ensured);
       return (void *)h;
+    }
   }
+  free(ensured);
   return NULL;
 #else
 #ifdef __APPLE__
   void *apple_ssl = ny_jit_load_apple_openssl(path);
-  if (apple_ssl)
+  if (apple_ssl) {
+    free(ensured);
     return apple_ssl;
-  if (ny_jit_apple_openssl_basename(path, NULL))
+  }
+  if (ny_jit_apple_openssl_basename(path, NULL)) {
+    free(ensured);
     return NULL;
+  }
+  void *apple_package = ny_jit_load_apple_package_library(path);
+  if (apple_package) {
+    free(ensured);
+    return apple_package;
+  }
 #endif
-  void *h = dlopen(path, RTLD_GLOBAL | RTLD_LAZY);
+  void *h = dlopen(load_path, RTLD_GLOBAL | RTLD_LAZY);
   if (h) {
     if (verbose_enabled >= 2)
-      fprintf(stderr, "JIT: loaded library '%s' (handle=%p)\n", path, h);
+      fprintf(stderr, "JIT: loaded library '%s' (handle=%p)\n", load_path, h);
+    free(ensured);
     return h;
   }
+  if (ensured && strcmp(ensured, path) != 0) {
+    h = dlopen(path, RTLD_GLOBAL | RTLD_LAZY);
+    if (h) {
+      if (verbose_enabled >= 2)
+        fprintf(stderr, "JIT: loaded library '%s' (handle=%p)\n", path, h);
+      free(ensured);
+      return h;
+    }
+  }
+  free(ensured);
   const bool has_dot = strchr(path, '.') != NULL;
   const bool has_sep = strchr(path, '/') != NULL;
 #ifdef __APPLE__
@@ -901,7 +982,8 @@ static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod
 
     const char *symbol = sig->link_name ? sig->link_name : sig->name;
 
-    LLVMValueRef val = LLVMGetNamedFunction(mod, symbol);
+    const char *llvm_name = sig->llvm_name ? sig->llvm_name : symbol;
+    LLVMValueRef val = LLVMGetNamedFunction(mod, llvm_name);
     if (!val) {
       val = LLVMGetNamedFunction(mod, sig->name);
     }
@@ -918,7 +1000,7 @@ static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod
   }
 }
 
-void register_jit_sigs(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_t *cg) {
+static void register_jit_sigs(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_t *cg) {
   (void)ee;
   (void)mod;
   (void)cg;
@@ -1013,6 +1095,21 @@ static void ny_orc_register_extern_symbols(LLVMModuleRef mod, codegen_t *cg) {
   if (cg) {
     for (size_t i = 0; i < cg->links.len; ++i)
       ny_jit_load_library(cg->links.data[i]);
+  }
+  if (cg && cg->fun_sigs.len > 0) {
+    for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+      fun_sig *sig = &cg->fun_sigs.data[i];
+      if (!sig->is_extern)
+        continue;
+      const char *symbol = sig->link_name ? sig->link_name : sig->name;
+      const char *llvm_name = sig->llvm_name ? sig->llvm_name : symbol;
+      if (!symbol || !llvm_name)
+        continue;
+      void *ptr = resolve_symbol_with_fallback(symbol);
+      if (ptr)
+        LLVMAddSymbol(llvm_name, ptr);
+    }
+    return;
   }
   for (LLVMValueRef fn = LLVMGetFirstFunction(mod); fn;
        fn = LLVMGetNextFunction(fn)) {
@@ -1180,6 +1277,7 @@ void ny_orc_jit_dispose(void *jit) {
     LLVMConsumeError(err);
 }
 
+#ifndef _WIN32
 static int compare_func_info(const void *a, const void *b) {
   const uint64_t a_addr = ((const struct {
                             uint64_t addr;
@@ -1197,6 +1295,7 @@ static int compare_func_info(const void *a, const void *b) {
     return 1;
   return 0;
 }
+#endif
 
 void ny_jit_write_perf_map(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
 #ifndef _WIN32

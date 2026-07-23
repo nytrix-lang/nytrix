@@ -823,7 +823,7 @@ fn _native_queue_push(any q, any ne) list {
          return q
       }
    }
-   q.append(ne)
+   return q.append(ne)
 }
 
 fn _queue_native_events(any evs, any fallback_handle=0, bool dispatch_callbacks=false) int {
@@ -1481,7 +1481,7 @@ fn set_gamma(any mon, f64 gamma) any {
    mut i = 0
    while i < size {
       def value = int(math.pow(i * 1.0 / (size - 1), 1.0 / gamma) * 65535.0 + 0.5)
-      ramp.append([value, value, value])
+      ramp = ramp.append([value, value, value])
       i += 1
    }
    set_gamma_ramp(mon, ramp)

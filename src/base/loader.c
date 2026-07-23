@@ -54,7 +54,6 @@ static int ny_std_latest_src_mtime_known = 0;
 static uint64_t ny_std_latest_src_fingerprint = 0;
 static int ny_std_latest_src_fingerprint_known = 0;
 
-static char *read_file(const char *path);
 char *ny_read_declared_module_name(const char *path);
 
 static void ny_loader_oom(void) {
@@ -165,16 +164,6 @@ static int is_ny_file(const char *name) {
   return n > 3 && strcmp(name + n - 3, ".ny") == 0;
 }
 
-static char *path_join(const char *a, const char *b) {
-  size_t al = strlen(a), bl = strlen(b);
-  char *out = ny_loader_xmalloc(al + bl + 2);
-  memcpy(out, a, al);
-  out[al] = '/';
-  memcpy(out + al + 1, b, bl);
-  out[al + 1 + bl] = '\0';
-  return out;
-}
-
 static void add_module_from_path(const char *root, const char *full_path) {
   size_t rl = strlen(root);
   if (strncmp(full_path, root, rl) != 0)
@@ -266,7 +255,9 @@ static void scan_dir_recursive_depth(const char *root, const char *dir, int dept
       continue;
     if (ent->d_name[0] == 't' && strcmp(ent->d_name, "test") == 0)
       continue;
-    char *fp = path_join(dir, ent->d_name);
+    char *fp = ny_path_join_alloc(dir, ent->d_name);
+    if (!fp)
+      ny_loader_oom();
     bool handled = false;
 #if defined(_DIRENT_HAVE_D_TYPE)
     if (ent->d_type == DT_DIR) {
@@ -455,7 +446,9 @@ static long long ny_get_tree_mtime(const char *path) {
     if (ent->d_name[0] == 't' && strcmp(ent->d_name, "test") == 0)
       continue;
 
-    char *fp = path_join(path, ent->d_name);
+    char *fp = ny_path_join_alloc(path, ent->d_name);
+    if (!fp)
+      ny_loader_oom();
     struct stat child_st;
     if (stat(fp, &child_st) == 0) {
       long long child_mtime = 0;
@@ -981,8 +974,6 @@ static bool is_package_name(const char *pkg) {
   }
   return false;
 }
-
-static char *read_file(const char *path) { return ny_read_file(path); }
 
 static bool ny_mod_ident_start(char c) {
   unsigned char uc = (unsigned char)c;
@@ -1654,26 +1645,6 @@ static void mod_list_put_path_idx(mod_list *list, const char *path, size_t entry
   list->path_ht_len++;
 }
 
-static void mod_list_put_path(mod_list *list, const char *path) {
-  mod_list_put_path_idx(list, path, (size_t)-1);
-}
-
-static void mod_list_reindex_paths(mod_list *list) {
-  if (!list)
-    return;
-  free((void *)list->path_ht);
-  free(list->path_idx_ht);
-  list->path_ht = NULL;
-  list->path_idx_ht = NULL;
-  list->path_ht_cap = 0;
-  list->path_ht_len = 0;
-  mod_list_path_ht_init(list, list->len * 2u + 1u);
-  for (size_t i = 0; i < list->len; ++i) {
-    if (list->entries[i].path)
-      mod_list_put_path_idx(list, list->entries[i].path, i);
-  }
-}
-
 static long mod_list_find_index_by_path(mod_list *list, const char *path) {
   if (!list || !path || !list->path_ht)
     return -1;
@@ -1690,47 +1661,6 @@ static long mod_list_find_index_by_path(mod_list *list, const char *path) {
     pos = (pos + 1u) & mask;
   }
   return -1;
-}
-
-static int mod_priority(const char *path) {
-  if (!path)
-    return 100;
-  if (strstr(path, "os/sys.ny"))
-    return 1;
-  if (strstr(path, "str/mod.ny"))
-    return 2;
-  if (strstr(path, "str/io.ny"))
-    return 3;
-  if (strstr(path, "core/reflect.ny"))
-    return 4;
-  if (strstr(path, "core/error.ny"))
-    return 5;
-  if (strstr(path, "core/dict.ny"))
-    return 6;
-  if (strstr(path, "core/set.ny"))
-    return 7;
-  if (strstr(path, "core/mod.ny"))
-    return 10;
-  if (strstr(path, "/mod.ny") ||
-      (strlen(path) >= 6 && strcmp(path + strlen(path) - 6, "mod.ny") == 0))
-    return 20;
-  return 30;
-}
-
-static int mod_entry_path_cmp(const void *a, const void *b) {
-  const mod_entry *ma = (const mod_entry *)a;
-  const mod_entry *mb = (const mod_entry *)b;
-  if (!ma->path && !mb->path)
-    return 0;
-  if (!ma->path)
-    return -1;
-  if (!mb->path)
-    return 1;
-  int pa = mod_priority(ma->path);
-  int pb = mod_priority(mb->path);
-  if (pa != pb)
-    return pa - pb;
-  return strcmp(ma->path, mb->path);
 }
 
 static void mod_entry_add_dep(mod_entry *entry, const char *path) {
@@ -1978,8 +1908,10 @@ static void scan_module_export_dependencies(mod_list *list, const char *module_n
 static int ny_std_load_threads(size_t work_items) {
   const char *env = getenv("NYTRIX_STD_THREADS");
   if (env && *env) {
-    int v = atoi(env);
-    return v > 0 ? v : 1;
+    int v = 0;
+    if (ny_parse_int(env, &v) && v > 0)
+      return v;
+    return 1;
   }
   if (work_items < 4)
     return 1;
@@ -1997,7 +1929,7 @@ static char *ny_build_module_chunk(const char *path, const char *name, size_t *o
   if (ny_std_trace_enabled()) {
     fprintf(stderr, "STD_TRACE chunk: %s\n", path);
   }
-  char *txt = read_file(path);
+  char *txt = ny_read_file(path);
   if (!txt)
     return NULL;
   size_t total = 0, cap = strlen(txt) + 256;
@@ -2105,7 +2037,7 @@ static void scan_dependencies(mod_list *list, size_t idx) {
   }
   NY_LOG_V2("Scanning dependencies for %s\n", list->entries[idx].path);
   list->entries[idx].processed = true;
-  char *txt = read_file(list->entries[idx].path);
+  char *txt = ny_read_file(list->entries[idx].path);
   if (!txt) {
     NY_LOG_V2("Failed to read file: %s\n", list->entries[idx].path);
     return;
@@ -2207,7 +2139,7 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
     if (prebuilt && ny_access(prebuilt, R_OK) == 0) {
       if (verbose)
         printf("Using prebuilt standard library: %s\n", prebuilt);
-      prebuilt_src = read_file(prebuilt);
+      prebuilt_src = ny_read_file(prebuilt);
     }
   }
   mod_list mods = {0};

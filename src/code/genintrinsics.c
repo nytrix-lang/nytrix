@@ -11,15 +11,6 @@
 #include <llvm-c/Core.h>
 #include <string.h>
 
-static LLVMValueRef ny_intrinsic_cast_to_i64(codegen_t *cg, LLVMValueRef v,
-                                             const char *name) {
-  if (!cg || !v)
-    return v;
-  if (LLVMTypeOf(v) == cg->type_i64)
-    return v;
-  return ny_ptr2i64(cg, v, ny_llvm_name(cg, name));
-}
-
 static LLVMValueRef ny_intrinsic_tag_bool(codegen_t *cg, LLVMValueRef pred,
                                           const char *name) {
   return ny_select(cg, pred, ny_ctrue(cg), ny_cfalse(cg),
@@ -165,7 +156,7 @@ static LLVMValueRef ny_llvm_splice_to_i1(codegen_t *cg, scope *scopes,
   if (ty && LLVMGetTypeKind(ty) == LLVMIntegerTypeKind &&
       LLVMGetIntTypeWidth(ty) == 1)
     return v;
-  v = ny_intrinsic_cast_to_i64(cg, v, "llvm_i1_arg");
+  v = ny_llvm_cast_to_i64(cg, v, "llvm_i1_arg");
   if (LLVMIsAConstantInt(v)) {
     uint64_t raw = LLVMConstIntGetZExtValue(v);
     bool truthy = raw != NY_IMM_NIL && raw != NY_IMM_FALSE && raw != 1;
@@ -199,7 +190,7 @@ static LLVMValueRef ny_llvm_splice_coerce_arg(codegen_t *cg, scope *scopes,
     const char *abi_name = ny_llvm_splice_int_abi_name(bits);
     if (!abi_name) {
       ny_diag_error(tok,
-                    "backend_intrinsic(...) does not support i%u intrinsic arguments",
+                    "intrinsic(...) does not support i%u intrinsic arguments",
                     bits);
       cg->had_error = 1;
       return ny_c0(cg);
@@ -222,7 +213,7 @@ static LLVMValueRef ny_llvm_splice_coerce_arg(codegen_t *cg, scope *scopes,
     return ny_coerce_to_abi(cg, v, abi_name);
   }
   ny_diag_error(tok,
-                "backend_intrinsic(...) intrinsic parameter type is not supported");
+                "intrinsic(...) parameter type is not supported");
   ny_diag_hint("supported parameter classes: integer scalars, i1, pointers, f32, f64, f128");
   cg->had_error = 1;
   return ny_c0(cg);
@@ -243,7 +234,7 @@ static LLVMValueRef ny_llvm_splice_box_result(codegen_t *cg, LLVMValueRef raw,
     const char *abi_name = ny_llvm_splice_int_abi_name(bits);
     if (!abi_name) {
       ny_diag_error(tok,
-                    "backend_intrinsic(...) does not support i%u intrinsic returns",
+                    "intrinsic(...) does not support i%u intrinsic returns",
                     bits);
       cg->had_error = 1;
       return ny_c0(cg);
@@ -260,7 +251,7 @@ static LLVMValueRef ny_llvm_splice_box_result(codegen_t *cg, LLVMValueRef raw,
     return ny_box_abi_result(cg, raw, abi_name);
   }
   ny_diag_error(tok,
-                "backend_intrinsic(...) intrinsic return type is not supported");
+                "intrinsic(...) return type is not supported");
   ny_diag_hint("supported return classes: void, integer scalars, i1, pointers, f32, f64, f128");
   cg->had_error = 1;
   return ny_c0(cg);
@@ -272,13 +263,13 @@ LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
                                           bool shadowed, expr_call_t *c) {
   if (!cg || !e || !callee_name || !c || shadowed)
     return NULL;
-  if (strcmp(callee_name, "backend_intrinsic") != 0)
+  if (strcmp(callee_name, "intrinsic") != 0)
     return NULL;
-  const char *call_spelling = "backend_intrinsic";
+  const char *call_spelling = "intrinsic";
   if (c->args.len < 1) {
     ny_diag_error(e->tok, "%s(...) expects an intrinsic name and arguments",
                   call_spelling);
-    ny_diag_hint("use backend_intrinsic(\"ctpop.i64\", value)");
+    ny_diag_hint("use intrinsic(\"ctpop.i64\", value)");
     cg->had_error = 1;
     return ny_c0(cg);
   }
@@ -336,7 +327,7 @@ LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
       ny_diag_error(c->args.data[0].val->tok,
                     "overloaded backend intrinsic '%.*s' needs a typed intrinsic spelling",
                     (int)lookup_len, lookup_name);
-      ny_diag_hint("example: backend_intrinsic(\"ctpop.i64\", value)");
+      ny_diag_hint("example: intrinsic(\"ctpop.i64\", value)");
       cg->had_error = 1;
       return ny_c0(cg);
     }

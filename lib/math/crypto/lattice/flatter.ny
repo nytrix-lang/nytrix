@@ -2876,7 +2876,7 @@ fn _flatter_abs_z(any x) bigint {
    z < Z(0) ? -z : z
 }
 
-fn _flatter_bf_from_scalar(any x) bigint { is_float(x) ? bf_from_float(float(x)) : Z(x) * BF_SCALE }
+fn _flatter_bf_from_scalar(any x) any { is_float(x) ? bf_from_float(float(x)) : bf_from_int(Z(x)) }
 
 fn _flatter_bf_norm_sq(any m) bigint {
    def rows = _flatter_matrix_rows(m)
@@ -6615,7 +6615,7 @@ fn _flatter_fixed_gram_report(any basis, any exact_gram) dict {
       mut j = 0
       while j < rows {
          def got = _flatter_fixed_dot(data.get(i), data.get(j))
-         def expect = Z(matrix.mat_get(exact_gram, i, j)) * BF_SCALE
+         def expect = bf_from_int(Z(matrix.mat_get(exact_gram, i, j)))
          def err = _flatter_abs_z(got - expect)
          if err > max_scaled_error { max_scaled_error = err }
          row = row.append(got)

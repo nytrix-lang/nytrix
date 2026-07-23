@@ -116,19 +116,28 @@ int ny_process_capture(const char *const argv[], char **out,
   }
   char chunk[4096];
   size_t len = 0, cap = 0;
+  bool capture_ok = true;
   DWORD got = 0;
   while (ReadFile(read_pipe, chunk, sizeof(chunk), &got, NULL) && got) {
-    if (!ny_capture_append(out, &len, &cap, chunk, (size_t)got))
+    if (!ny_capture_append(out, &len, &cap, chunk, (size_t)got)) {
+      capture_ok = false;
       break;
+    }
   }
   CloseHandle(read_pipe);
-  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD waited = WaitForSingleObject(pi.hProcess, INFINITE);
   DWORD code = 127;
-  GetExitCodeProcess(pi.hProcess, &code);
+  BOOL got_code = GetExitCodeProcess(pi.hProcess, &code);
   CloseHandle(pi.hThread);
   CloseHandle(pi.hProcess);
+  if (!capture_ok) {
+    free(*out);
+    *out = NULL;
+  }
   if (!*out)
     *out = _strdup("");
+  if (!capture_ok || waited != WAIT_OBJECT_0 || !got_code)
+    return 127;
   return (int)code;
 }
 
@@ -167,11 +176,14 @@ int ny_process_capture(const char *const argv[], char **out,
   }
   char chunk[4096];
   size_t len = 0, cap = 0;
+  bool capture_ok = true;
   for (;;) {
     ssize_t got = read(pipefd[0], chunk, sizeof(chunk));
     if (got > 0) {
-      if (!ny_capture_append(out, &len, &cap, chunk, (size_t)got))
+      if (!ny_capture_append(out, &len, &cap, chunk, (size_t)got)) {
+        capture_ok = false;
         break;
+      }
       continue;
     }
     if (got < 0 && errno == EINTR)
@@ -180,9 +192,18 @@ int ny_process_capture(const char *const argv[], char **out,
   }
   close(pipefd[0]);
   int status = 0;
-  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+  pid_t waited;
+  do {
+    waited = waitpid(pid, &status, 0);
+  } while (waited < 0 && errno == EINTR);
+  if (!capture_ok) {
+    free(*out);
+    *out = NULL;
+  }
   if (!*out)
     *out = strdup("");
+  if (!capture_ok || waited != pid)
+    return 127;
   if (WIFEXITED(status))
     return WEXITSTATUS(status);
   if (WIFSIGNALED(status))

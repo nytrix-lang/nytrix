@@ -471,6 +471,18 @@ static void hm_unify_diag(ny_hm_state_t *hm, token_t tok, const char *code,
                           ny_hm_type_t *got) {
   char *ws = hm_type_string(want);
   char *gs = hm_type_string(got);
+  if (ws && gs && strncmp(ws, "proof<", 6) == 0 &&
+      strncmp(gs, "proof<", 6) == 0) {
+    tp_add_diag_ex(
+        hm ? hm->ctx : NULL, tok, "hm", "proof-proposition-mismatch",
+        context, ws, gs, NULL,
+        "proof propositions are structural; the received witness establishes a different fact",
+        "provide evidence for the required proposition",
+        "proof proposition does not match: expected %s, got %s", ws, gs);
+    free(ws);
+    free(gs);
+    return;
+  }
   const char *hint = hm_diag_hint_for(code, context, ws, gs);
   const char *fix = hm_diag_fix_for(code, context, ws, gs);
   if (ws && gs && strcmp(ws, "int") == 0 && strcmp(gs, "str") == 0) {
@@ -553,6 +565,12 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
   }
   if (got->kind == NY_HM_VAR)
     return hm_unify(hm, got, want, tok, context);
+  /* A bare `proof` annotation preserves the proposition inferred from
+   * prove(...); indexed proof requirements remain exact below. */
+  if (want->kind == NY_HM_NAME && got->kind == NY_HM_NAME &&
+      strcmp(want->name ? want->name : "", "proof") == 0 &&
+      strncmp(got->name ? got->name : "", "proof<", 6) == 0)
+    return true;
   if (hm_is_name(got, "nil") &&
       (want->kind == NY_HM_NULLABLE || want->kind == NY_HM_PTR))
     return true;
@@ -1484,8 +1502,14 @@ static ny_hm_type_t *hm_builtin_call_type(ny_hm_state_t *hm, const char *name,
       strcmp(leaf, "assert_compile_index") == 0 ||
       strcmp(leaf, "proof_matches") == 0)
     return hm_name(hm, "bool");
-  if (strcmp(leaf, "prove") == 0)
-    return hm_name(hm, "proof");
+  if (strcmp(leaf, "prove") == 0) {
+    if (!args || args->len == 0)
+      return hm_name(hm, "proof");
+    char *proof_type = ny_proof_type_from_expr(args->data[0].val);
+    ny_hm_type_t *out = hm_name(hm, proof_type ? proof_type : "proof");
+    free(proof_type);
+    return out;
+  }
   if (strcmp(name, "malloc") == 0)
     return hm_unary(hm, NY_HM_PTR, hm_any(hm));
   if (strcmp(name, "addr_of") == 0)
@@ -2346,6 +2370,10 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
       if (decl && *decl)
         hm_unify(hm, final_t, it, init ? init->tok : s->tok,
                  "variable declaration");
+      if (decl && strcmp(decl, "proof") == 0 && it &&
+          it->kind == NY_HM_NAME && it->name &&
+          strncmp(it->name, "proof<", 6) == 0)
+        final_t = it;
       hm_env_set(env, name, final_t);
     }
     break;

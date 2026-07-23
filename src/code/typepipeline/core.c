@@ -586,6 +586,8 @@ static int tp_diag_error_code(const ny_tp_diag_t *d) {
   const char *code = d ? d->code : NULL;
   if (!code)
     return 1003;
+  if (strcmp(code, "proof-proposition-mismatch") == 0)
+    return 701;
   if (strstr(code, "arity"))
     return 1004;
   if (strstr(code, "non-function") || strstr(code, "non-callable"))

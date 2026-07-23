@@ -159,7 +159,8 @@ fn tokenize(any sql) list {
       out = out.append(_tok("op", chr(c), i))
       i += 1
    }
-   out.append(_tok("eof", "", sql.len))
+   out = out.append(_tok("eof", "", sql.len))
+   out
 }
 
 fn _result(bool ok_v, any value, str error, int pos) dict {

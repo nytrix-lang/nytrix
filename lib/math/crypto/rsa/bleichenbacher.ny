@@ -26,7 +26,8 @@ fn _insert_interval(list M, any a, any b) list {
       }
       i += 1
    }
-   M.append([a, b])
+   M = M.append([a, b])
+   M
 }
 
 fn _bb_step1(any padding_oracle, any n, any e, any c) any {

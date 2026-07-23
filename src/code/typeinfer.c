@@ -430,7 +430,8 @@ bool typeinfer_needs_dynamic(typeinfer_ctx_t *ctx, const char *name) {
 static bool expr_is_int_lit(expr_t *e) {
   if (!e)
     return false;
-  return e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT;
+  return e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT &&
+         e->tok.kind != NY_T_NIL;
 }
 
 static bool expr_is_float_lit(expr_t *e) {

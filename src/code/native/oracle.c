@@ -18,8 +18,8 @@
  * selected backend result with the NYIR VM result. */
 
 static bool ny_native_result_oracle_emit_asm(
-    const ny_native_target_info_t *target, const ny_nir_func_t *rt_main,
-    const ny_nir_func_t *funcs, const char **names, size_t count,
+    const ny_native_target_info_t *target, const nyir_func_t *rt_main,
+    const nyir_func_t *funcs, const char **names, size_t count,
     const char *path, char *err, size_t err_len) {
   ny_native_writer_t w = {0};
   bool ok = false;
@@ -71,63 +71,36 @@ static bool ny_native_parse_i64(const char *s, int64_t *out) {
   return true;
 }
 
-static bool ny_native_nir_returns_f64(const ny_nir_func_t *f) {
+static unsigned ny_native_nir_return_float_flags(const nyir_func_t *f) {
   if (!f || f->next_value <= 0)
-    return false;
-  bool f64[4096] = {0};
-  int limit = f->next_value < 4096 ? f->next_value : 4096;
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    for (size_t i = 0; i < f->len; ++i) {
-      const ny_nir_inst_t *in = &f->data[i];
-      if (in->dst >= 0 && in->dst < limit &&
-          (in->op == NYIR_CONST_F64 || in->op == NYIR_ADD_F64 ||
-           in->op == NYIR_SUB_F64 || in->op == NYIR_MUL_F64 ||
-           in->op == NYIR_DIV_F64 || in->op == NYIR_I64_TO_F64 ||
-           in->op == NYIR_F32_TO_F64 ||
-           (in->op == NY_NIR_CALL && (in->flags & NY_NIR_INST_F_RET_F64))) &&
-          !f64[in->dst]) {
-        f64[in->dst] = true;
-        changed = true;
-      }
-      if (in->op == NY_NIR_COPY && in->a >= 0 && in->a < limit &&
-          in->dst >= 0 && in->dst < limit && f64[in->a] && !f64[in->dst]) {
-        f64[in->dst] = true;
-        changed = true;
-      }
-    }
-  }
-  for (size_t i = f->len; i > 0; --i) {
-    const ny_nir_inst_t *in = &f->data[i - 1];
-    if (in->op == NY_NIR_RET && in->a >= 0 && in->a < limit)
-      return f64[in->a];
-  }
-  return false;
-}
-
-static bool ny_native_nir_returns_f32(const ny_nir_func_t *f) {
-  if (!f || f->next_value <= 0)
-    return false;
-  bool f32v[4096] = {0};
-  int limit = f->next_value < 4096 ? f->next_value : 4096;
+    return 0;
+  size_t locals = 0;
   for (size_t i = 0; i < f->len; ++i) {
-    const ny_nir_inst_t *in = &f->data[i];
-    if (in->dst >= 0 && in->dst < limit &&
-        (in->op == NYIR_CONST_F32 || in->op == NYIR_ADD_F32 ||
-         in->op == NYIR_SUB_F32 || in->op == NYIR_MUL_F32 ||
-         in->op == NYIR_DIV_F32 || in->op == NYIR_I64_TO_F32 ||
-         in->op == NYIR_F64_TO_F32 ||
-         (in->op == NY_NIR_CALL && (in->flags & NY_NIR_INST_F_RET_F32))) &&
-        !f32v[in->dst])
-      f32v[in->dst] = true;
+    const nyir_inst_t *in = &f->data[i];
+    if ((in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL) &&
+        in->imm >= 0 && (uint64_t)in->imm < SIZE_MAX &&
+        (size_t)in->imm + 1 > locals)
+      locals = (size_t)in->imm + 1;
   }
+  nyir_type_map_t types = {0};
+  if (!nyir_type_map_init(&types, f, locals))
+    return 0;
+  unsigned flags = 0;
   for (size_t i = f->len; i > 0; --i) {
-    const ny_nir_inst_t *in = &f->data[i - 1];
-    if (in->op == NY_NIR_RET && in->a >= 0 && in->a < limit)
-      return f32v[in->a];
+    const nyir_inst_t *in = &f->data[i - 1];
+    if (in->op != NYIR_RET)
+      continue;
+    flags = in->flags & (NYIR_INST_F_RET_F64 | NYIR_INST_F_RET_F32);
+    if (in->a >= 0 && (size_t)in->a < types.value_count) {
+      if (types.value_f64[in->a])
+        flags |= NYIR_INST_F_RET_F64;
+      if (types.value_f32[in->a])
+        flags |= NYIR_INST_F_RET_F32;
+    }
+    break;
   }
-  return false;
+  nyir_type_map_free(&types);
+  return flags;
 }
 
 static int ny_native_run_capture_i64(const char *exe, int64_t *out,
@@ -206,10 +179,15 @@ static int ny_native_run_capture_i64(const char *exe, int64_t *out,
 #endif
 }
 
-bool ny_native_result_oracle_for_program(const program_t *prog,
-                                         const ny_options *opt, char *err,
-                                         size_t err_len) {
-  if (!prog || !opt || !opt->native_result_oracle)
+/* Run the VM/native comparison on an already-built NYIR bundle.  This is used
+ * both for the end-to-end program oracle and for per-pass differential checks
+ * during rt_main optimization. */
+bool ny_native_result_oracle_for_nir(nyir_func_t *rt_main,
+                                     nyir_func_t *funcs,
+                                     const char **names, size_t count,
+                                     const ny_options *opt, char *err,
+                                     size_t err_len) {
+  if (!rt_main || !opt)
     return true;
   ny_native_target_info_t target = {0};
   if (!ny_native_target_info_init(&target, opt) ||
@@ -219,28 +197,8 @@ bool ny_native_result_oracle_for_program(const program_t *prog,
     return false;
   }
 
-  ny_nir_func_t rt_main = {0};
-  ny_nir_func_t funcs[128];
-  const char *names[128];
-  memset(funcs, 0, sizeof(funcs));
-  memset(names, 0, sizeof(names));
-  size_t count = 0;
-  char local_err[512] = {0};
-  if (!ny_native_build_nir(prog, opt, &rt_main, funcs, &count, 128, local_err,
-                           sizeof(local_err))) {
-    ny_native_set_err(err, err_len, "native oracle: %s",
-                      local_err[0] ? local_err : "failed to build NYIR");
-    return false;
-  }
-  size_t name_index = 0;
-  for (size_t i = 0; prog && i < prog->body.len && name_index < count; ++i) {
-    const stmt_t *stmt = prog->body.data[i];
-    if (stmt && stmt->kind == NY_S_FUNC)
-      names[name_index++] = stmt->as.fn.name ? stmt->as.fn.name : "<fn>";
-  }
-
   bool ok = false;
-  ny_nir_eval_result_t vm = {0};
+  nyir_eval_result_t vm = {0};
   int64_t native_result = 0;
   char asm_path[4096], obj_path[4096], c_path[4096], exe_path[4096];
   unsigned long long stamp = (unsigned long long)ny_ticks_now();
@@ -253,16 +211,19 @@ bool ny_native_result_oracle_for_program(const program_t *prog,
   snprintf(exe_path, sizeof(exe_path), "%s/ny_oracle_%ld_%llu",
            ny_get_temp_dir(), (long)getpid(), stamp);
 
-  if (!ny_native_eval_ir_value(&rt_main, funcs, names, count, opt, &vm, err,
+  if (!ny_native_eval_ir_value(rt_main, funcs, names, count, opt, &vm, err,
                                err_len))
     goto done;
   if (!vm.returned) {
     ny_native_set_err(err, err_len, "native oracle: VM did not return");
     goto done;
   }
-  bool returns_f64 = ny_native_nir_returns_f64(&rt_main);
-  bool returns_f32 = ny_native_nir_returns_f32(&rt_main);
-  if (!ny_native_result_oracle_emit_asm(&target, &rt_main, funcs, names, count,
+  unsigned return_float_flags = ny_native_nir_return_float_flags(rt_main);
+  bool returns_f64 =
+      (return_float_flags & NYIR_INST_F_RET_F64) != 0;
+  bool returns_f32 =
+      (return_float_flags & NYIR_INST_F_RET_F32) != 0;
+  if (!ny_native_result_oracle_emit_asm(&target, rt_main, funcs, names, count,
                                         asm_path, err, err_len))
     goto done;
 
@@ -350,12 +311,233 @@ bool ny_native_result_oracle_for_program(const program_t *prog,
   ok = true;
 
 done:
+  nyir_eval_result_free(&vm);
   unlink(asm_path);
   unlink(obj_path);
   unlink(c_path);
   unlink(exe_path);
-  ny_nir_func_free(&rt_main);
+  return ok;
+}
+
+bool ny_native_result_oracle_for_program(const program_t *prog,
+                                         const ny_options *opt, char *err,
+                                         size_t err_len) {
+  if (!prog || !opt || !opt->native_result_oracle)
+    return true;
+
+  nyir_func_t rt_main = {0};
+  nyir_func_t funcs[128];
+  const char *names[128];
+  memset(funcs, 0, sizeof(funcs));
+  memset(names, 0, sizeof(names));
+  size_t count = 0;
+  char local_err[512] = {0};
+  if (!ny_native_build_nir(prog, opt, &rt_main, funcs, &count, 128, local_err,
+                           sizeof(local_err))) {
+    ny_native_set_err(err, err_len, "native oracle: %s",
+                      local_err[0] ? local_err : "failed to build NYIR");
+    return false;
+  }
+  size_t name_index = 0;
+  for (size_t i = 0; prog && i < prog->body.len && name_index < count; ++i) {
+    const stmt_t *stmt = prog->body.data[i];
+    if (stmt && stmt->kind == NY_S_FUNC)
+      names[name_index++] = stmt->as.fn.name ? stmt->as.fn.name : "<fn>";
+  }
+
+  bool ok = ny_native_result_oracle_for_nir(&rt_main, funcs, names, count, opt,
+                                            err, err_len);
+  nyir_func_free(&rt_main);
   for (size_t i = 0; i < count; ++i)
-    ny_nir_func_free(&funcs[i]);
+    nyir_func_free(&funcs[i]);
+  return ok;
+}
+
+/* Deterministic scalar NYIR fuzzer for the VM/native oracle.
+ * Generates straight-line integer arithmetic with a seeded LCG and verifies
+ * that the optimized native backend matches the NYIR VM on every program. */
+
+typedef struct {
+  uint64_t state;
+} ny_native_fuzz_rng_t;
+
+static uint64_t ny_native_fuzz_rng_next(ny_native_fuzz_rng_t *rng) {
+  uint64_t x = rng->state;
+  x ^= x >> 12;
+  x ^= x << 25;
+  x ^= x >> 27;
+  rng->state = x;
+  return x * UINT64_C(2685821657736338717);
+}
+
+static int64_t ny_native_fuzz_i64(ny_native_fuzz_rng_t *rng, int bits) {
+  uint64_t mask = bits >= 64 ? UINT64_MAX : ((UINT64_C(1) << bits) - 1);
+  int64_t v = (int64_t)(ny_native_fuzz_rng_next(rng) & mask);
+  /* Sign-extend. */
+  if (bits < 64 && (v >> (bits - 1)) & 1)
+    v |= ~mask;
+  return v;
+}
+
+static size_t ny_native_fuzz_pick(ny_native_fuzz_rng_t *rng, size_t n) {
+  return n ? (size_t)(ny_native_fuzz_rng_next(rng) % n) : 0;
+}
+
+static bool ny_native_fuzz_emit_noerr(nyir_func_t *f, nyir_inst_t inst) {
+  size_t before = f->len;
+  (void)nyir_emit(f, inst);
+  return f->len > before;
+}
+
+static bool ny_native_fuzz_emit_binary(nyir_func_t *f, nyir_op_t op,
+                                       int left, int right, int *dst_out) {
+  int dst = f->next_value++;
+  bool ok = ny_native_fuzz_emit_noerr(f, (nyir_inst_t){.op = op,
+                                                         .dst = dst,
+                                                         .a = left,
+                                                         .b = right,
+                                                         .c = -1,
+                                                         .d = -1,
+                                                         .e = -1,
+                                                         .f = -1,
+                                                         .imm = 0,
+                                                         .cmp = NYIR_CMP_EQ,
+                                                         .symbol = NULL,
+                                                         .flags = 0,
+                                                         .effects = NYIR_EFFECT_NONE});
+  *dst_out = dst;
+  return ok;
+}
+
+static bool ny_native_fuzz_program(ny_native_fuzz_rng_t *rng,
+                                   nyir_func_t *out, int min_insts,
+                                   int max_insts) {
+  memset(out, 0, sizeof(*out));
+  int inst_count = min_insts +
+                   (int)(ny_native_fuzz_rng_next(rng) % (max_insts - min_insts + 1));
+  int *values = malloc((size_t)inst_count * sizeof(*values));
+  if (!values)
+    return false;
+  int value_count = 0;
+  bool ok = true;
+  for (int i = 0; i < inst_count && ok; ++i) {
+    if (value_count < 2 || (ny_native_fuzz_rng_next(rng) & 3) == 0) {
+      /* Emit a constant.  Keep values small so folds stay predictable. */
+      int64_t c = ny_native_fuzz_i64(rng, 16);
+      int dst = out->next_value++;
+      ok = ny_native_fuzz_emit_noerr(out, (nyir_inst_t){.op = NYIR_CONST_I64,
+                                                          .dst = dst,
+                                                          .a = -1,
+                                                          .b = -1,
+                                                          .c = -1,
+                                                          .d = -1,
+                                                          .e = -1,
+                                                          .f = -1,
+                                                          .imm = c,
+                                                          .cmp = NYIR_CMP_EQ,
+                                                          .symbol = NULL,
+                                                          .flags = 0,
+                                                          .effects = NYIR_EFFECT_NONE});
+      values[value_count++] = dst;
+    } else {
+      /* Emit a binary op on two existing values. */
+      size_t li = ny_native_fuzz_pick(rng, (size_t)value_count);
+      size_t ri = ny_native_fuzz_pick(rng, (size_t)value_count);
+      int left = values[li];
+      int right = values[ri];
+      static const nyir_op_t ops[] = {
+          NYIR_ADD_I64, NYIR_SUB_I64, NYIR_MUL_I64,
+          NYIR_AND_I64, NYIR_OR_I64,  NYIR_XOR_I64,
+      };
+      nyir_op_t op = ops[ny_native_fuzz_pick(rng, sizeof(ops) / sizeof(ops[0]))];
+      nyir_cmp_t cmp = NYIR_CMP_EQ;
+      if ((ny_native_fuzz_rng_next(rng) & 3) == 0) {
+        op = NYIR_CMP_I64;
+        cmp = (nyir_cmp_t)ny_native_fuzz_pick(rng, 6);
+      }
+      /* Avoid division/mod by zero: skip div/mod entirely for now. */
+      int dst = 0;
+      if (op == NYIR_CMP_I64) {
+        dst = out->next_value++;
+        ok = ny_native_fuzz_emit_noerr(out, (nyir_inst_t){.op = op,
+                                                            .dst = dst,
+                                                            .a = left,
+                                                            .b = right,
+                                                            .c = -1,
+                                                            .d = -1,
+                                                            .e = -1,
+                                                            .f = -1,
+                                                            .imm = 0,
+                                                            .cmp = cmp,
+                                                            .symbol = NULL,
+                                                            .flags = 0,
+                                                            .effects = NYIR_EFFECT_NONE});
+      } else {
+        ok = ny_native_fuzz_emit_binary(out, op, left, right, &dst);
+      }
+      if (ok)
+        values[value_count++] = dst;
+    }
+  }
+  if (ok && value_count > 0) {
+    ok = ny_native_fuzz_emit_noerr(out, (nyir_inst_t){.op = NYIR_RET,
+                                                        .dst = -1,
+                                                        .a = values[value_count - 1],
+                                                        .b = -1,
+                                                        .c = -1,
+                                                        .d = -1,
+                                                        .e = -1,
+                                                        .f = -1,
+                                                        .imm = 0,
+                                                        .cmp = NYIR_CMP_EQ,
+                                                        .symbol = NULL,
+                                                        .flags = 0,
+                                                        .effects = NYIR_EFFECT_CONTROL});
+  }
+  free(values);
+  if (!ok) {
+    nyir_func_free(out);
+    return false;
+  }
+  return true;
+}
+
+bool ny_native_oracle_fuzz(const ny_options *opt, int count, char *err,
+                           size_t err_len) {
+  if (count <= 0)
+    return true;
+  ny_native_target_info_t target = {0};
+  if (!ny_native_target_info_init(&target, opt) ||
+      target.target != NY_NATIVE_TARGET_X86_64) {
+    ny_native_set_err(err, err_len,
+                      "native oracle fuzz: x86-64 native backend is required");
+    return false;
+  }
+  bool ok = true;
+  int failures = 0;
+  for (int seed = 0; seed < count && failures < 3; ++seed) {
+    ny_native_fuzz_rng_t rng = {(uint64_t)(seed + 1)};
+    nyir_func_t rt_main = {0};
+    if (!ny_native_fuzz_program(&rng, &rt_main, 3, 16)) {
+      ny_native_set_err(err, err_len,
+                        "native oracle fuzz: failed to generate program %d", seed);
+      ok = false;
+      break;
+    }
+    char local_err[512] = {0};
+    if (!ny_native_result_oracle_for_nir(&rt_main, NULL, NULL, 0, opt,
+                                         local_err, sizeof(local_err))) {
+      fprintf(stderr, "native oracle fuzz seed=%d failed: %s\n", seed,
+              local_err[0] ? local_err : NY_NATIVE_UNKNOWN_ERR);
+      nyir_dump(stderr, &rt_main, "<fuzz-failure>");
+      ++failures;
+      ok = false;
+    }
+    nyir_func_free(&rt_main);
+  }
+  if (ok)
+    fprintf(stderr, "native oracle fuzz: %d programs passed\n", count);
+  if (!ok && err && err_len > 0 && err[0] == '\0')
+    ny_native_set_err(err, err_len, "native oracle fuzz: mismatch detected");
   return ok;
 }

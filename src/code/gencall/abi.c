@@ -1274,7 +1274,7 @@ static LLVMValueRef ny_try_emit_fast_receiver_get(codegen_t *cg, scope *scopes,
       target_is_direct_dict ||
       ny_expr_has_known_dict_type(cg, scopes, depth, target);
   if (target_is_known_dict) {
-    fun_sig *dict_get_sig = lookup_fun(cg, "std.core.dict_mod.dict_read", 0);
+    fun_sig *dict_get_sig = lookup_fun(cg, "std.core.dict_mod.dict_get", 0);
     if (!dict_get_sig)
       return NULL;
     if (ny_gencall_expr_is_int_index(cg, scopes, depth, key) &&
@@ -1361,9 +1361,9 @@ static LLVMValueRef ny_try_emit_fast_receiver_set(codegen_t *cg, scope *scopes,
     fun_sig *dict_set_sig = NULL;
     if (ny_env_enabled_default_on("NYTRIX_FAST_DICT_WRITE") &&
         !ny_env_enabled("NYTRIX_DISABLE_FAST_DICT_WRITE"))
-      dict_set_sig = lookup_fun(cg, "__dict_write_fast", 0);
+      dict_set_sig = lookup_fun(cg, "std.core.dict_mod.dict_set", 0);
     if (!dict_set_sig)
-      dict_set_sig = lookup_fun(cg, "std.core.dict_mod.dict_write", 0);
+      dict_set_sig = lookup_fun(cg, "std.core.dict_mod.dict_set", 0);
     if (!dict_set_sig)
       return NULL;
     LLVMValueRef call_args[3];

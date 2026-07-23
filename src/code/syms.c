@@ -535,11 +535,6 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash);
 typedef void *(*ny_recurse_lookup_fn)(codegen_t *cg, const char *name,
                                       void *ctx);
 
-typedef struct ny_overload_recurse_ctx_t {
-  size_t argc;
-  uint64_t hash;
-} ny_overload_recurse_ctx_t;
-
 static void *ny_lookup_fun_recurse(codegen_t *cg, const char *name, void *ctx) {
   (void)ctx;
   return lookup_fun(cg, name, 0);
@@ -549,12 +544,6 @@ static void *ny_lookup_global_recurse(codegen_t *cg, const char *name,
                                       void *ctx) {
   (void)ctx;
   return lookup_global(cg, name);
-}
-
-static void *ny_lookup_overload_recurse(codegen_t *cg, const char *name,
-                                        void *ctx) {
-  ny_overload_recurse_ctx_t *ov = (ny_overload_recurse_ctx_t *)ctx;
-  return resolve_overload(cg, name, ov ? ov->argc : 0, 0);
 }
 
 static void *ny_lookup_try_scoped_or_alias(codegen_t *cg, const char *name,

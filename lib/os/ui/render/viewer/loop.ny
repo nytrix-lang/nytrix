@@ -5,7 +5,7 @@
 ;; - std.os.ui.window
 module std.os.ui.render.viewer.loop(sample_fps, print_fps_summary, print_bench_summary, profile_dump_file, record_frame_profile)
 use std.core
-use std.math.crypto.stat as stat
+use std.math.stat as stat
 use std.os.ui.render.viewer.app as ui_app
 use std.os.ui.render.dump as ui_profile
 
