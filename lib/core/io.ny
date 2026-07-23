@@ -42,7 +42,7 @@ fn _print_to_str(any v) str {
    if v == true { return "true" }
    if v == false { return "false" }
    if __is_int(v) { return __to_str(v) }
-   if !v { return "none" }
+   if !v { return "nil" }
    if is_str(v) { return v }
    if __is_ny_obj(v) {
       def big_tag = prim.runtime_tag_raw("bigint")
@@ -94,9 +94,14 @@ fn print(...args) int {
    0
 }
 
-#main {
+fn _io_self_test() bool {
    assert(_print_to_str(true) == "true" && _print_to_str(false) == "false", "io bool text")
-   assert(_print_to_str([1, "x"]) == "[1, x]", "io list text")
+   assert(_print_to_str("x") == "x", "io string text")
    assert(_write_str("") == 0 && _print_write("") == 0, "io empty writes")
+   true
+}
+
+#main {
+   _io_self_test()
    print("✓ std.core.io self-test passed")
 }

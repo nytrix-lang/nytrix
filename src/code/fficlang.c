@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <string.h>
 #include <sys/stat.h>
 #ifndef _WIN32
@@ -28,27 +29,6 @@
 #else
 #define NY_FFI_NULL_DEVICE "/dev/null"
 #endif
-
-static void ffi_buf_append(char **buf, size_t *len, size_t *cap,
-                           const char *s) {
-  if (!buf || !len || !cap || !s)
-    return;
-  size_t add = strlen(s);
-  size_t need = *len + add + 1;
-  if (need > *cap) {
-    size_t new_cap = *cap ? *cap : 256;
-    while (new_cap < need)
-      new_cap *= 2;
-    char *new_buf = (char *)realloc(*buf, new_cap);
-    if (!new_buf)
-      return;
-    *buf = new_buf;
-    *cap = new_cap;
-  }
-  memcpy(*buf + *len, s, add);
-  *len += add;
-  (*buf)[*len] = '\0';
-}
 
 static void ny_push_unique_owned_arg(char ***args, size_t *len, size_t *cap,
                                      const char *tok) {
@@ -336,6 +316,23 @@ static char *ny_ffi_internal_c_read_header(const char *header_path, bool is_std,
   return ny_read_file_raw(header_path, size_out);
 }
 
+static int64_t g_ffi_internal_deadline_ns = 0;
+
+void ny_ffi_set_global_deadline(int64_t deadline_ns) {
+  g_ffi_internal_deadline_ns = deadline_ns;
+}
+
+static void ny_ffi_apply_deadline_to_parser(ny_parser_t *p, int64_t extra_ns) {
+  if (g_ffi_internal_deadline_ns > 0) {
+    p->deadline_ns = g_ffi_internal_deadline_ns;
+  } else {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+      p->deadline_ns = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec + extra_ns;
+  }
+  p->token_limit = 2000000;
+}
+
 static bool ny_ffi_internal_c_parse_header(codegen_t *cg,
                                            const char *header_path,
                                            bool is_std,
@@ -369,13 +366,26 @@ static bool ny_ffi_internal_c_parse_header(codegen_t *cg,
   if (!ok && is_std && summary.declarations > 0)
     ok = true;
   free(src);
-  if (!ok && strict_internal) {
-    NY_LOG_ERR("[ffi:c] internal frontend rejected \"%s\": %s\n",
-               header_path ? header_path : "",
-               parse_err[0] ? parse_err : "unsupported C declaration");
-    if (cg)
-      cg->had_error = 1;
-    return false;
+  if (!ok) {
+    bool is_timeout = parse_err[0] && strstr(parse_err, "timeout");
+    if (is_timeout) {
+      NY_LOG_V1("[ffi:c] internal frontend timed out on \"%s\"; libclang will handle this header\n",
+                header_path ? header_path : "");
+      if (parsed_out)
+        *parsed_out = summary.declarations;
+      if (summary_out)
+        *summary_out = summary;
+      return true;
+    }
+    if (strict_internal) {
+      NY_LOG_ERR("[ffi:c] internal frontend rejected \"%s\": %s\n",
+                 header_path ? header_path : "",
+                 parse_err[0] ? parse_err : "unsupported C declaration");
+      NY_LOG_ERR("[ffi:c] hint: try --c-frontend=libclang for full C support\n");
+      if (cg)
+        cg->had_error = 1;
+      return false;
+    }
   }
   if (parsed_out)
     *parsed_out = summary.declarations;
@@ -478,6 +488,60 @@ static char *ny_pkgconfig_lib(const char *pkg) {
         (ny_pkgcfg_lib_entry_t){.pkg = ny_strdup(pkg), .lib = NULL};
   }
   return NULL;
+}
+
+/* F-3: libclang translation-unit cache. A persistent CXIndex is created once
+ * and shared across all TU parses. Per-header TUs are cached by path so the
+ * same system header is not reparsed at every import site. The cache is keyed
+ * on (header_path, defines_hash) — when custom -D flags are present, the
+ * cache is skipped because different define sets produce different TUs. */
+typedef struct {
+  char *path;
+  uint64_t defines_hash;
+  CXTranslationUnit tu;
+} ny_tu_cache_entry_t;
+
+static ny_tu_cache_entry_t *g_tu_cache = NULL;
+static size_t g_tu_cache_len = 0, g_tu_cache_cap = 0;
+
+static uint64_t ny_tu_defines_hash(char **defines, size_t len) {
+  uint64_t h = 0x811c9dc5;
+  for (size_t i = 0; i < len; i++) {
+    const char *s = defines[i];
+    while (*s) {
+      h ^= (uint8_t)*s++;
+      h *= 0x01000193;
+    }
+  }
+  return h;
+}
+
+static CXTranslationUnit ny_tu_cache_lookup(const char *path,
+                                            uint64_t defines_hash) {
+  for (size_t i = 0; i < g_tu_cache_len; i++) {
+    if (g_tu_cache[i].path && strcmp(g_tu_cache[i].path, path) == 0 &&
+        g_tu_cache[i].defines_hash == defines_hash)
+      return g_tu_cache[i].tu;
+  }
+  return NULL;
+}
+
+static void ny_tu_cache_insert(const char *path, uint64_t defines_hash,
+                               CXTranslationUnit tu) {
+  if (g_tu_cache_len == g_tu_cache_cap) {
+    size_t nc = g_tu_cache_cap ? g_tu_cache_cap * 2 : 64;
+    ny_tu_cache_entry_t *nn =
+        (ny_tu_cache_entry_t *)realloc(g_tu_cache, nc * sizeof(*nn));
+    if (!nn)
+      return;
+    g_tu_cache = nn;
+    g_tu_cache_cap = nc;
+  }
+  g_tu_cache[g_tu_cache_len++] = (ny_tu_cache_entry_t){
+      .path = ny_strdup(path),
+      .defines_hash = defines_hash,
+      .tu = tu,
+  };
 }
 
 static char *ny_autolink_resolve(const char *header_path) {
@@ -799,6 +863,9 @@ static const char *map_clang_type(CXType type) {
     return "i64";
   case CXType_ULongLong:
     return "u64";
+  case CXType_Float16:
+    /* _Float16: 2-byte half-float, map to u16 for correct ABI layout. */
+    return "u16";
   case CXType_Float:
     return "f32";
   case CXType_Double:
@@ -917,36 +984,76 @@ static char *ny_ffi_ctok_strdup(ny_ctok_t tok) {
 }
 
 static const char *ny_ffi_map_internal_c_type(const ny_ctype_t *ty, char *buf,
-                                              size_t cap) {
+                                               size_t cap) {
   if (!ty)
     return NULL;
   if (ty->flags & NY_CTYPEF_FUNCTION_PTR)
     return "fnptr";
   if (ty->ptr_depth > 0)
     return "ptr";
-  switch (ty->kind) {
+  if (ty->array_elems > 0 || ty->array_unknown)
+    return "ptr";
+  ny_ctype_t base = *ty;
+  /* _Complex float maps to c64 ({f32,f32}), _Complex double to c128 ({f64,f64}).
+   * _Imaginary maps to the base type (same size as the imaginary component). */
+  if (base.flags & NY_CTYPEF_COMPLEX) {
+    if (base.kind == NY_CTYPE_FLOAT)
+      return "c64";
+    if (base.kind == NY_CTYPE_DOUBLE)
+      return "c128";
+  }
+  base.flags &= ~(NY_CTYPEF_COMPLEX | NY_CTYPEF_IMAGINARY);
+  switch (base.kind) {
   case NY_CTYPE_VOID:
     return "void";
   case NY_CTYPE_BOOL:
     return "u8";
   case NY_CTYPE_CHAR:
-    return (ty->flags & NY_CTYPEF_UNSIGNED) ? "u8" : "i8";
+    return (base.flags & NY_CTYPEF_UNSIGNED) ? "u8" : "i8";
   case NY_CTYPE_SHORT:
-    return (ty->flags & NY_CTYPEF_UNSIGNED) ? "u16" : "i16";
+    return (base.flags & NY_CTYPEF_UNSIGNED) ? "u16" : "i16";
   case NY_CTYPE_INT:
   case NY_CTYPE_ENUM:
-    return (ty->flags & NY_CTYPEF_UNSIGNED) ? "u32" : "i32";
+    if (base.kind == NY_CTYPE_ENUM) {
+      if (base.enum_underlying == 3)
+        return "u64";
+      if (base.enum_underlying == 2)
+        return "i64";
+      if (base.enum_underlying == 1)
+        return "u32";
+    }
+    return (base.flags & NY_CTYPEF_UNSIGNED) ? "u32" : "i32";
   case NY_CTYPE_LONG:
-    return (ty->flags & NY_CTYPEF_UNSIGNED) ? "u64" : "i64";
+    if (base.bitint_width > 0) {
+      if (base.bitint_width <= 8)
+        return (base.flags & NY_CTYPEF_UNSIGNED) ? "u8" : "i8";
+      if (base.bitint_width <= 16)
+        return (base.flags & NY_CTYPEF_UNSIGNED) ? "u16" : "i16";
+      if (base.bitint_width <= 32)
+        return (base.flags & NY_CTYPEF_UNSIGNED) ? "u32" : "i32";
+      if (base.bitint_width <= 64)
+        return (base.flags & NY_CTYPEF_UNSIGNED) ? "u64" : "i64";
+      if (base.bitint_width <= 128)
+        return (base.flags & NY_CTYPEF_UNSIGNED) ? "u128" : "i128";
+    }
+    if (base.flags & NY_CTYPEF_LONG_LONG) {
+      /* __int128 or long long: check if this is actually 128-bit */
+      if (base.flags & NY_CTYPEF_INT128)
+        return (base.flags & NY_CTYPEF_UNSIGNED) ? "u128" : "i128";
+      return (base.flags & NY_CTYPEF_UNSIGNED) ? "u64" : "i64";
+    }
+    return (base.flags & NY_CTYPEF_UNSIGNED) ? "u64" : "i64";
   case NY_CTYPE_FLOAT:
     return "f32";
   case NY_CTYPE_DOUBLE:
     return "f64";
   case NY_CTYPE_LONG_DOUBLE:
-    /* Win64 aliases long double to double, while the supported SysV targets
-     * use an extended 16-byte representation. The mapper does not receive
-     * the target ABI yet, so decline instead of silently narrowing it. */
-    return NULL;
+    /* long double is 80-bit (16-byte slot) on SysV x86-64, 64-bit on Win64.
+     * Map to f128 for SysV, f64 for Win64. */
+    return "f128";
+  case NY_CTYPE_HALF:
+    /* _Float16 is 2 bytes; map to u16 for correct ABI layout. */
+    return "u16";
   case NY_CTYPE_NAMED:
   case NY_CTYPE_STRUCT:
   case NY_CTYPE_UNION:
@@ -967,6 +1074,8 @@ static const char *ny_ffi_map_internal_c_field_type(const ny_c_field_t *field,
                                                     char *buf, size_t cap) {
   if (!field)
     return NULL;
+  /* For array fields in structs, map to the element type so the layout
+   * registration can create an LLVM [N x T] array. */
   ny_ctype_t ty = {0};
   ty.kind = field->kind;
   ty.flags = field->flags;
@@ -981,6 +1090,10 @@ static bool ny_ffi_internal_c_type_is_builtin(const char *ty) {
   static const char *const builtins[] = {
       "void", "u8", "i8", "u16", "i16", "u32", "i32",
       "u64",  "i64", "f32", "f64", "ptr", "fnptr", "str", "cstr",
+      /* Wide scalar/complex ABI types resolvable without a registered layout.
+       * Without these, structs with _Complex/__int128/long double fields trip
+       * the "requires layout" check and fall back to libclang. */
+      "u128", "i128", "f128", "c64", "c128",
   };
   for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
     if (strcmp(ty, builtins[i]) == 0)
@@ -1015,6 +1128,16 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
     free(name);
     return true;
   }
+  /* For `typedef struct Bar { ... } Foo;`, also register under the tag name
+   * "Bar" so later `struct Bar *` references resolve correctly. */
+  char *tag_name = NULL;
+  if (decl->kind == NY_CDECL_TYPEDEF && decl->type.name.kind == NY_CTOK_IDENT) {
+    tag_name = ny_ffi_ctok_strdup(decl->type.name);
+    if (tag_name && strcmp(tag_name, name) != 0 && lookup_layout(cg, tag_name)) {
+      free(tag_name);
+      tag_name = NULL;
+    }
+  }
 
   LLVMTypeRef elems[NY_C_MAX_FIELDS];
   const char *field_types[NY_C_MAX_FIELDS];
@@ -1044,7 +1167,16 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
     LLVMTypeRef llvm_ty = (tl.is_valid && tl.llvm_type)
                               ? tl.llvm_type
                               : resolve_abi_type_name(cg, ny_type, empty_tok);
-    if (!llvm_ty || !tl.is_valid || tl.size != field->size) {
+    if (!llvm_ty || !tl.is_valid) {
+      free(name);
+      return true;
+    }
+    size_t expected_size = tl.size;
+    if (field->array_elems > 0) {
+      llvm_ty = LLVMArrayType(llvm_ty, (unsigned)field->array_elems);
+      expected_size = tl.size * field->array_elems;
+    }
+    if (expected_size != field->size) {
       free(name);
       return true;
     }
@@ -1063,8 +1195,14 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
   def->llvm_type = st;
   def->is_layout = true;
   def->heap_allocated = true;
-  def->size = decl->type.aggregate_size;
-  def->align = decl->type.aggregate_align ? decl->type.aggregate_align : 1;
+  /* Packed aggregates report the unaligned byte size, not the aligned size. */
+  if (decl->type.flags & NY_CTYPEF_PACKED) {
+    def->size = decl->type.aggregate_packed_size;
+    def->align = 1;
+  } else {
+    def->size = decl->type.aggregate_size;
+    def->align = decl->type.aggregate_align ? decl->type.aggregate_align : 1;
+  }
 
   for (unsigned i = 0; i < decl->type.field_count && i < NY_C_MAX_FIELDS; i++) {
     const ny_c_field_t *field = &decl->type.fields[i];
@@ -1089,8 +1227,31 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
     };
     vec_push(&def->fields, info);
   }
-  LLVMStructSetBody(st, elems, elem_count, false);
+  bool is_packed = (decl->type.flags & NY_CTYPEF_PACKED) != 0;
+  if (decl->type.kind == NY_CTYPE_UNION) {
+    /* Unions are represented as a byte array of the union's size.
+     * All fields share offset 0; access is via GEP + bitcast. */
+    LLVMTypeRef byte_ty = LLVMInt8TypeInContext(cg->ctx);
+    LLVMTypeRef union_ty = LLVMArrayType(byte_ty, (unsigned)def->size);
+    LLVMStructSetBody(st, &union_ty, 1, false);
+  } else {
+    LLVMStructSetBody(st, elems, elem_count, is_packed);
+  }
   vec_push(&cg->layouts, def);
+  /* Register tag-name alias for `typedef struct Bar { ... } Foo;` */
+  if (tag_name) {
+    layout_def_t *tag_def = (layout_def_t *)calloc(1, sizeof(*tag_def));
+    if (tag_def) {
+      tag_def->name = ny_strdup(tag_name);
+      tag_def->llvm_type = st;
+      tag_def->is_layout = true;
+      tag_def->heap_allocated = false;
+      tag_def->size = def->size;
+      tag_def->align = def->align;
+      vec_push(&cg->layouts, tag_def);
+    }
+    free(tag_name);
+  }
   free(name);
   return true;
 }
@@ -1098,9 +1259,9 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
 static void ny_ffi_add_link_once(codegen_t *cg, const char *lib) {
   if (!cg || !lib || !*lib)
     return;
-#ifndef _WIN32
-  (void)dlopen(lib, RTLD_LAZY | RTLD_GLOBAL);
-#endif
+  /* F-4: Skip compile-time dlopen. The library is registered for later JIT
+   * loading via cg->links. dlopen with RTLD_GLOBAL during compilation
+   * executes foreign constructors inside the compiler process. */
   for (size_t i = 0; i < cg->links.len; i++) {
     if (strcmp(cg->links.data[i], lib) == 0)
       return;
@@ -1122,6 +1283,13 @@ static bool ny_ffi_register_internal_c_function(codegen_t *cg,
     return false;
   }
   if (c_name_owned[0] == '_') {
+    free(c_name_owned);
+    return true;
+  }
+  /* static and inline functions in headers are not external symbols.
+   * static: internal linkage, not visible outside the header.
+   * inline: the compiler inlines them, no external symbol emitted. */
+  if (decl->flags & (NY_CDECLF_STATIC | NY_CDECLF_INLINE)) {
     free(c_name_owned);
     return true;
   }
@@ -1398,17 +1566,26 @@ static void ny_ffi_register_internal_c_defines(codegen_t *cg,
     *lowered_out = lowered;
 }
 
+static char *ny_ffi_internal_c_include_read(const char *path, bool is_std,
+                                             void *userdata) {
+  (void)userdata;
+  return ny_ffi_internal_c_read_header(path, is_std, NULL);
+}
+
 static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
                                            const char *header_path,
                                            bool is_std,
                                            const char *prefix,
                                            const char *lib,
                                            size_t *lowered_out,
-                                           size_t *constants_out) {
+                                           size_t *constants_out,
+                                           size_t *layouts_out) {
   if (lowered_out)
     *lowered_out = 0;
   if (constants_out)
     *constants_out = 0;
+  if (layouts_out)
+    *layouts_out = 0;
   if (!cg || !header_path || !*header_path)
     return false;
   size_t n = 0;
@@ -1421,48 +1598,90 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
   }
   ny_parser_t p;
   ny_parse_init_abi(&p, src, n, LLVMGetTarget(cg->module));
+  ny_ffi_apply_deadline_to_parser(&p, 20000000000LL);
+  p.include_read = ny_ffi_internal_c_include_read;
+  p.include_userdata = NULL;
+  p.source_file = header_path;
+  if (header_path[0] == '/') {
+    static char _ffi_dir_buf[4096];
+    const char *slash = strrchr(header_path, '/');
+    if (slash) {
+      size_t dlen = (size_t)(slash - header_path);
+      if (dlen < sizeof(_ffi_dir_buf)) {
+        memcpy(_ffi_dir_buf, header_path, dlen);
+        _ffi_dir_buf[dlen] = '\0';
+        p.source_dir = _ffi_dir_buf;
+      }
+    }
+  }
   bool ok = true;
   size_t lowered = 0;
+  size_t layouts = 0;
   while (p.tok.kind != NY_CTOK_EOF) {
+    const char *stall_pos = p.tok.start;
     ny_cdecl_t decl;
     int rc = ny_parse_decl(&p, &decl);
     if (rc > 0) {
+      size_t layouts_before = cg->layouts.len;
       if (!ny_ffi_register_internal_c_layout(cg, &decl)) {
         ok = false;
         break;
       }
+      /* Count each successfully-lowered aggregate declaration as one layout,
+       * so struct-only headers can be detected as internally complete instead
+       * of always falling back to libclang. Count once per call (typedef-tag
+       * aliases register extra entries but represent the same declaration). */
+      if (cg->layouts.len > layouts_before)
+        layouts += 1;
+      /* L-11: Skip function/variable registration failures (e.g. opaque struct
+       * by value) instead of aborting the entire header. The declaration will be
+       * handled by libclang when it falls back. */
       if (!ny_ffi_register_internal_c_function(cg, &decl, prefix, lib,
                                                &lowered)) {
-        ok = false;
-        break;
+        NY_LOG_V1("[ffi:c] skipping function registration (libclang will handle)\n");
       }
       if (!ny_ffi_register_internal_c_variable(cg, &decl, prefix, lib,
-                                               &lowered)) {
-        ok = false;
-        break;
+                                                &lowered)) {
+        NY_LOG_V1("[ffi:c] skipping variable registration (libclang will handle)\n");
       }
-      continue;
+      goto lower_next;
     }
     if (rc < 0) {
+      const char *err = ny_parse_error(&p);
+      bool is_timeout = err && strstr(err, "timeout");
+      if (is_timeout) {
+        NY_LOG_V1("[ffi:c] internal frontend timed out lowering \"%s\"; libclang will handle remaining work\n",
+                  header_path);
+        ok = true;
+        break;
+      }
       if (is_std)
-        continue;
+        goto lower_next;
       NY_LOG_ERR("[ffi:c] internal frontend rejected \"%s\": %s\n",
-                 header_path, ny_parse_error(&p));
+                 header_path, err ? err : "unsupported C declaration");
       cg->had_error = 1;
       ok = false;
     }
     break;
+  lower_next:
+    /* Stall guard: force progress if ny_parse_decl did not consume a token,
+     * so pathological macro expansion cannot loop forever here. */
+    if (p.tok.kind != NY_CTOK_EOF && p.tok.start == stall_pos)
+      p.tok = ny_lex_next(&p.lx);
   }
   size_t constants = 0;
   ny_ffi_register_internal_c_defines(cg, &p, prefix, &constants);
+  ny_parse_cleanup(&p);
   free(src);
   if (lowered_out)
     *lowered_out = lowered;
   if (constants_out)
     *constants_out = constants;
+  if (layouts_out)
+    *layouts_out = layouts;
   if (ok)
-    NY_LOG_V1("[ffi:c] internal frontend lowered %zu C declaration(s) and %zu integer constant(s) without libclang\n",
-              lowered, constants);
+    NY_LOG_V1("[ffi:c] internal frontend lowered %zu C declaration(s), %zu layout(s), and %zu integer constant(s) without libclang\n",
+              lowered, layouts, constants);
   return ok;
 }
 
@@ -2322,6 +2541,16 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
                                    : CXChildVisit_Continue;
 }
 
+static bool ny_ffi_header_path_safe(const char *path) {
+  if (!path || !*path)
+    return false;
+  for (const unsigned char *p = (const unsigned char *)path; *p; ++p) {
+    if (*p < 0x20 || *p == 0x7f || *p == '"' || *p == '<' || *p == '>')
+      return false;
+  }
+  return true;
+}
+
 void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
                          const char *prefix, bool is_std, const char *lib) {
   if (!cg || !header_path || !*header_path) {
@@ -2329,6 +2558,17 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
     ny_diag_error(fake, "null or empty header path for FFI import");
     ny_diag_hint("provide a valid path like \"<alsa/asoundlib.h>\" or "
                  "\"/usr/include/foo.h\"");
+    if (cg)
+      cg->had_error = 1;
+    return;
+  }
+
+  if (!ny_ffi_header_path_safe(header_path)) {
+    token_t fake = {0};
+    ny_diag_error(fake, "unsafe characters in FFI header path: %s", header_path);
+    ny_diag_hint("header paths cannot contain control characters, quotes, or "
+                 "angle brackets");
+    cg->had_error = 1;
     return;
   }
 
@@ -2341,18 +2581,36 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
   if (cg->c_frontend && (strcmp(cg->c_frontend, "nytrix") == 0 ||
                          strcmp(cg->c_frontend, "auto") == 0)) {
     bool strict_internal = strcmp(cg->c_frontend, "nytrix") == 0;
+    if (!strict_internal) {
+      /* F-1: In auto mode, skip the summary parse entirely. The summary parse
+       * is only needed in strict mode to decide if internal lowering succeeded.
+       * In auto mode, libclang always handles the header, so the summary parse
+       * is pure waste. */
+      goto libclang_fallback;
+    }
+    /* Skip the nytrix frontend for very large headers in strict mode. */
+    size_t file_size = 0;
+    char *test_src = ny_ffi_internal_c_read_header(header_path, is_std,
+                                                    &file_size);
+    free(test_src);
+    if (file_size > 65536) {
+      NY_LOG_V1("[ffi:c] skipping nytrix frontend for large header %s (%zu bytes)\n",
+                header_path, file_size);
+      goto libclang_fallback;
+    }
     size_t parsed = 0;
     ny_c_header_summary_t summary = {0};
     if (!ny_ffi_internal_c_parse_header(cg, header_path, is_std,
                                         strict_internal, &parsed, &summary))
       return;
-    if (parsed || strict_internal) {
-      NY_LOG_V1("[ffi:c] internal frontend parsed %zu declaration(s)%s\n",
-                parsed, strict_internal
-                            ? "; attempting internal import lowering first"
-                            : "; libclang remains fallback/import backend");
-    }
+    NY_LOG_V1("[ffi:c] internal frontend parsed %zu declaration(s); attempting internal import lowering\n",
+              parsed);
     if (strict_internal) {
+      /* F-2: Save registration counts before internal lowering. If the internal
+       * frontend is incomplete, truncate back so libclang starts clean. */
+      size_t saved_layouts = cg->layouts.len;
+      size_t saved_funsigs = cg->fun_sigs.len;
+      size_t saved_globals = cg->global_vars.len;
       char *internal_auto_lib = NULL;
       const char *internal_lib = lib;
       if (!internal_lib || !*internal_lib) {
@@ -2361,8 +2619,10 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
       }
       size_t lowered = 0;
       size_t constants = 0;
+      size_t layouts = 0;
       bool lowered_ok = ny_ffi_internal_c_lower_header(
-          cg, header_path, is_std, prefix, internal_lib, &lowered, &constants);
+          cg, header_path, is_std, prefix, internal_lib, &lowered, &constants,
+          &layouts);
       free(internal_auto_lib);
       bool simple_function_only =
           summary.declarations > 0 && summary.functions == summary.declarations &&
@@ -2374,7 +2634,14 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
           (((summary.functions + summary.variables) > 0 &&
             lowered == summary.functions + summary.variables) ||
            (summary.functions == 0 && summary.declarations == 0 &&
-            summary.object_like_define_lines > 0 && constants > 0));
+            summary.object_like_define_lines > 0 && constants > 0) ||
+           /* Struct/typedef-only headers: complete when every aggregate layout
+            * in the summary was successfully registered internally. This lets
+            * the nytrix frontend own layout lowering without a libclang round
+            * trip. */
+           (summary.functions == 0 && summary.variables == 0 &&
+            summary.aggregate_layouts > 0 &&
+            layouts == summary.aggregate_layouts));
       if (internally_complete) {
         NY_LOG_V1("[ffi:c] internal frontend completed import lowering for %s; libclang skipped\n",
                   header_path);
@@ -2388,9 +2655,17 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
       }
       NY_LOG_V1("[ffi:c] internal frontend import lowering incomplete for %s; libclang fallback remains active\n",
                 header_path);
+      /* F-2: Clear partial internal registrations so libclang starts clean.
+       * The internal registrations may have incorrect types/offsets that would
+       * win the dedup check and prevent libclang from registering correct ones. */
+      cg->layouts.len = saved_layouts;
+      cg->fun_sigs.len = saved_funsigs;
+      cg->global_vars.len = saved_globals;
     }
   }
 
+libclang_fallback:
+  ;
   char *auto_lib = NULL;
   const char *resolved_lib = lib;
   if (!resolved_lib || !*resolved_lib) {
@@ -2405,15 +2680,9 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
   }
 
   if (resolved_lib && *resolved_lib) {
-#ifndef _WIN32
-    void *handle = dlopen(resolved_lib, RTLD_LAZY | RTLD_GLOBAL);
-    if (!handle && verbose_enabled >= 1) {
-      token_t fake = {0};
-      ny_diag_warning(fake, "dlopen('%s') failed: %s", resolved_lib, dlerror());
-      ny_diag_hint("the library may still be unavailable at runtime");
-    }
-#endif
-
+    /* F-4: Skip compile-time dlopen. The library is registered for later JIT
+     * loading via cg->links. dlopen with RTLD_GLOBAL during compilation
+     * executes foreign constructors inside the compiler process. */
     bool found = false;
     for (size_t i = 0; i < cg->links.len; i++) {
       if (strcmp(cg->links.data[i], resolved_lib) == 0) {
@@ -2487,7 +2756,23 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
     }
   }
 
-  CXIndex index = clang_createIndex(0, 0);
+  /* F-3: Compute defines hash for TU cache key. */
+  uint64_t defines_hash = ny_tu_defines_hash(cg->ffi.defines.data,
+                                             cg->ffi.defines.len);
+  bool cacheable = (cg->ffi.defines.len == 0);
+  CXTranslationUnit tu = NULL;
+  CXIndex index = NULL;
+
+  if (cacheable) {
+    tu = ny_tu_cache_lookup(header_path, defines_hash);
+    if (tu) {
+      NY_LOG_V1("[ffi:clang] cache hit for %s\n", header_path);
+      index = clang_createIndex(0, 0);
+      goto visit_tu;
+    }
+  }
+
+  index = clang_createIndex(0, 0);
 
   char **clang_owned_args = NULL;
   size_t clang_args_len = 0, clang_args_cap = 0;
@@ -2507,7 +2792,7 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
   }
   int num_args = (int)clang_args_len;
 
-  CXTranslationUnit tu = clang_parseTranslationUnit(
+  tu = clang_parseTranslationUnit(
       index, clang_file, (const char *const *)clang_owned_args, num_args,
       unsaved_ptr, unsaved_count,
       CXTranslationUnit_SkipFunctionBodies |
@@ -2522,6 +2807,12 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
     clang_disposeIndex(index);
     return;
   }
+
+  if (cacheable)
+    ny_tu_cache_insert(header_path, defines_hash, tu);
+
+visit_tu:
+  ;
 
   ffi_context ctx = {
       .cg = cg,
@@ -2539,191 +2830,18 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
   ctx.pass = 1;
   clang_visitChildren(root, ffi_visitor, &ctx);
 
-  clang_disposeTranslationUnit(tu);
-  clang_disposeIndex(index);
+  /* Only dispose non-cached TUs and their indices. Cached TUs are kept for
+   * reuse by later import sites. */
+  if (!cacheable) {
+    clang_disposeTranslationUnit(tu);
+    clang_disposeIndex(index);
+  } else {
+    clang_disposeIndex(index);
+  }
 }
 
 void ny_ffi_clang_define(codegen_t *cg, const char *macro) {
   if (!cg || !macro || !*macro)
     return;
   vec_push(&cg->ffi.defines, ny_strdup(macro));
-}
-
-void ny_ffi_clang_include(codegen_t *cg, const char *header_path,
-                          const char *prefix, bool is_std, const char *lib) {
-  if (!cg || !header_path || !*header_path)
-    return;
-
-  if (cg->ffi.includes_len >= cg->ffi.includes_cap) {
-    cg->ffi.includes_cap = cg->ffi.includes_cap ? cg->ffi.includes_cap * 2 : 16;
-    cg->ffi.includes = realloc(
-        cg->ffi.includes, cg->ffi.includes_cap * sizeof(cg->ffi.includes[0]));
-  }
-
-  cg->ffi.includes[cg->ffi.includes_len].path = ny_strdup(header_path);
-  cg->ffi.includes[cg->ffi.includes_len].prefix =
-      prefix ? ny_strdup(prefix) : NULL;
-  cg->ffi.includes[cg->ffi.includes_len].lib = lib ? ny_strdup(lib) : NULL;
-  cg->ffi.includes[cg->ffi.includes_len].is_std = is_std;
-  cg->ffi.includes_len++;
-}
-
-static bool ny_ffi_internal_c_frontend_probe(codegen_t *cg) {
-  if (!cg || !cg->c_frontend)
-    return true;
-  if (strcmp(cg->c_frontend, "nytrix") != 0 &&
-      strcmp(cg->c_frontend, "auto") != 0)
-    return true;
-  bool strict_internal = strcmp(cg->c_frontend, "nytrix") == 0;
-  size_t parsed = 0;
-  size_t skipped = 0;
-  for (size_t i = 0; i < cg->ffi.includes_len; ++i) {
-    if (cg->ffi.includes[i].is_std) {
-      size_t parsed_one = 0;
-      if (!ny_ffi_internal_c_parse_header(cg, cg->ffi.includes[i].path,
-                                          cg->ffi.includes[i].is_std,
-                                          strict_internal, &parsed_one, NULL))
-        return false;
-      parsed += parsed_one;
-      skipped++;
-      continue;
-    }
-    size_t parsed_one = 0;
-    if (!ny_ffi_internal_c_parse_header(cg, cg->ffi.includes[i].path,
-                                        cg->ffi.includes[i].is_std,
-                                        strict_internal, &parsed_one, NULL))
-      return false;
-    parsed += parsed_one;
-  }
-  if (parsed || strict_internal) {
-    NY_LOG_V1("[ffi:c] internal frontend parsed %zu declaration(s)%s\n",
-              parsed, strict_internal
-                          ? "; attempting internal import lowering first"
-                          : "; libclang remains fallback/import backend");
-  }
-  (void)skipped;
-  return true;
-}
-
-void ny_ffi_clang_process(codegen_t *cg) {
-  if (!cg || cg->ffi.includes_len == 0)
-    return;
-
-  if (!ny_ffi_internal_c_frontend_probe(cg))
-    return;
-
-  char *buf = NULL;
-  size_t len = 0;
-  size_t cap = 0;
-
-  for (size_t i = 0; i < cg->ffi.defines.len; i++) {
-    const char *d = cg->ffi.defines.data[i];
-
-    char line[1024];
-    snprintf(line, sizeof(line), "#define %s\n", d);
-    ffi_buf_append(&buf, &len, &cap, line);
-  }
-
-  for (size_t i = 0; i < cg->ffi.includes_len; i++) {
-    const char *p = cg->ffi.includes[i].path;
-    bool is_std = cg->ffi.includes[i].is_std;
-    char line[1024];
-    if (is_std)
-      snprintf(line, sizeof(line), "#include <%s>\n", p);
-    else
-      snprintf(line, sizeof(line), "#include \"%s\"\n", p);
-    ffi_buf_append(&buf, &len, &cap, line);
-
-    const char *lib = cg->ffi.includes[i].lib;
-    char *auto_lib = NULL;
-    if (!lib || !*lib) {
-      auto_lib = ny_autolink_resolve(p);
-      lib = auto_lib;
-    }
-    if (lib && *lib) {
-#ifndef _WIN32
-      (void)dlopen(lib, RTLD_LAZY | RTLD_GLOBAL);
-#endif
-      bool found = false;
-      for (size_t k = 0; k < cg->links.len; k++) {
-        if (strcmp(cg->links.data[k], lib) == 0) {
-          found = true;
-          break;
-        }
-      }
-      if (!found)
-        vec_push(&cg->links, ny_strdup(lib));
-    }
-    free(auto_lib);
-  }
-
-  CXIndex index = clang_createIndex(0, 0);
-  char **clang_args = NULL;
-  size_t clang_args_len = 0, clang_args_cap = 0;
-  ny_ffi_append_default_clang_args(&clang_args, &clang_args_len,
-                                   &clang_args_cap);
-  for (size_t i = 0; i < cg->ffi.includes_len; i++)
-    ny_pkgconfig_append_header_cflags(cg->ffi.includes[i].path, &clang_args,
-                                      &clang_args_len, &clang_args_cap);
-  int num_args = (int)clang_args_len;
-
-  struct CXUnsavedFile unsaved = {
-      .Filename = "ffi_session.c",
-      .Contents = buf,
-      .Length = (unsigned long)len,
-  };
-
-  CXTranslationUnit tu = clang_parseTranslationUnit(
-      index, "ffi_session.c", (const char *const *)clang_args, num_args,
-      &unsaved, 1,
-      CXTranslationUnit_SkipFunctionBodies |
-          CXTranslationUnit_DetailedPreprocessingRecord);
-  ny_ffi_free_clang_args(clang_args, clang_args_len);
-
-  if (!tu) {
-    ny_diag_error((token_t){0}, "failed to parse FFI session block");
-    free(buf);
-    clang_disposeIndex(index);
-    return;
-  }
-
-  for (size_t i = 0; i < cg->ffi.includes_len; i++) {
-    const char *prefix = cg->ffi.includes[i].prefix;
-    const char *path = cg->ffi.includes[i].path;
-
-    if (!prefix || !*prefix) {
-      const ny_autolink_entry_t *entry = ny_ffi_header_entry(path);
-      if (entry && entry->prefix)
-        prefix = entry->prefix;
-    }
-
-    ffi_context ctx = {
-        .cg = cg,
-        .prefix = prefix,
-        .header_path = path,
-        .prefix_len = prefix ? strlen(prefix) : 0,
-        .explicit_prefix = prefix && *prefix,
-        .namespace_alias = ny_ffi_prefix_is_namespace_alias(prefix),
-        .is_std_header = cg->ffi.includes[i].is_std,
-    };
-    CXCursor root = clang_getTranslationUnitCursor(tu);
-    ctx.pass = 0;
-    clang_visitChildren(root, ffi_visitor, &ctx);
-    ctx.pass = 1;
-    clang_visitChildren(root, ffi_visitor, &ctx);
-  }
-
-  clang_disposeTranslationUnit(tu);
-  clang_disposeIndex(index);
-  free(buf);
-
-  for (size_t i = 0; i < cg->ffi.defines.len; i++)
-    free(cg->ffi.defines.data[i]);
-  cg->ffi.defines.len = 0;
-  for (size_t i = 0; i < cg->ffi.includes_len; i++) {
-    free((void *)cg->ffi.includes[i].path);
-    free((void *)cg->ffi.includes[i].prefix);
-    free((void *)cg->ffi.includes[i].lib);
-  }
-  cg->ffi.includes_len = 0;
 }

@@ -133,7 +133,7 @@ fn brute_force_factor(any n) list {
 
 fn add_factor(list factors, any factor) list {
    "Add a factor to the factor list and return the updated list."
-   factors.append(factor)
+   return factors.append(factor)
 }
 
 fn next_prime_hybrid(any n) any {

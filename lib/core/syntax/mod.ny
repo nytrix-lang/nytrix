@@ -6,7 +6,7 @@ module std.core.syntax(new_registry, registry, reset_registry, clone_registry, c
 use std.core
 use std.core.syntax.syntax as syntax_impl
 use std.core.reflect
-use std.core.dict_mod (dict_write)
+use std.core.dict_mod (dict_set)
 
 fn _attr_ensure_exact(str name, list args, int want) int {
    if args.len != want { panic("@" + name + " expects " + to_str(want) + " argument(s)") }
@@ -15,7 +15,7 @@ fn _attr_ensure_exact(str name, list args, int want) int {
 
 fn _attr_flag(any node, str key, any value=true) any {
    if type(node) != "dict" { return node }
-   dict_write(node, key, value)
+   dict_set(node, key, value)
 }
 
 fn _attr_extern(any node, list args) any {
@@ -82,17 +82,17 @@ fn _builtin_attr_handler(str name) any {
 }
 
 fn _seed_defaults(dict reg) dict {
-   reg = dict_write(reg, "attrs", dict(8))
-   reg = dict_write(reg, "attr_order", _builtin_attr_names())
+   reg = dict_set(reg, "attrs", dict(8))
+   reg = dict_set(reg, "attr_order", _builtin_attr_names())
    reg
 }
 
 fn _new_registry_raw(int cap=8) dict {
    mut reg = dict(4)
-   reg = dict_write(reg, "macros", dict(cap))
-   reg = dict_write(reg, "macro_order", list(cap))
-   reg = dict_write(reg, "attrs", dict(cap))
-   reg = dict_write(reg, "attr_order", list(cap))
+   reg = dict_set(reg, "macros", dict(cap))
+   reg = dict_set(reg, "macro_order", list(cap))
+   reg = dict_set(reg, "attrs", dict(cap))
+   reg = dict_set(reg, "attr_order", list(cap))
    reg
 }
 

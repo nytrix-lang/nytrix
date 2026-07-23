@@ -129,6 +129,8 @@ fn mat4_rotate_into(f64 angle, any axis, list m) list {
       } elif n >= 3 {
          ax, ay, az = axis[0], axis[1], axis[2]
       }
+   } elif is_dict(axis) {
+      ax = axis.get("x", 0.0) ay = axis.get("y", 0.0) az = axis.get("z", 0.0)
    }
    def l = sqrt(ax*ax + ay*ay + az*az)
    mut x, y, z = ax, ay, az
@@ -268,6 +270,8 @@ fn mat4_look_at_into(any eye, any center, any up, list m) list {
       } elif n >= 3 {
          ex, ey, ez = eye[0], eye[1], eye[2]
       }
+   } elif is_dict(eye) {
+      ex = eye.get("x", 0.0) ey = eye.get("y", 0.0) ez = eye.get("z", 0.0)
    }
    mut cx, cy, cz = 0.0, 0.0, 0.0
    if is_list(center) || is_tuple(center) {
@@ -277,6 +281,8 @@ fn mat4_look_at_into(any eye, any center, any up, list m) list {
       } elif n >= 3 {
          cx, cy, cz = center[0], center[1], center[2]
       }
+   } elif is_dict(center) {
+      cx = center.get("x", 0.0) cy = center.get("y", 0.0) cz = center.get("z", 0.0)
    }
    mut ux, uy, uz = 0.0, 0.0, 0.0
    if is_list(up) || is_tuple(up) {
@@ -286,6 +292,8 @@ fn mat4_look_at_into(any eye, any center, any up, list m) list {
       } elif n >= 3 {
          ux, uy, uz = up[0], up[1], up[2]
       }
+   } elif is_dict(up) {
+      ux = up.get("x", 0.0) uy = up.get("y", 0.0) uz = up.get("z", 0.0)
    }
    mat4_look_at_into_xyz(ex, ey, ez, cx, cy, cz, ux, uy, uz, m)
 }

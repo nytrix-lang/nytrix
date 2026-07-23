@@ -696,7 +696,29 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
       decl->attr_constant_time = true;
       continue;
     }
-    if (attr_name_eq(attr, "accel")) {
+    if (attr_name_eq(attr, "optimize")) {
+      if (decl->attr_optimize) {
+        ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
+                      "duplicate attribute '@optimize(...)'");
+        cg->had_error = 1;
+        continue;
+      }
+      if (attr->args.len != 1 || !attr->args.data[0] ||
+          attr->args.data[0]->kind != NY_E_LITERAL ||
+          attr->args.data[0]->as.literal.kind != NY_LIT_INT ||
+          attr->args.data[0]->as.literal.as.i < 0 ||
+          attr->args.data[0]->as.literal.as.i > 3) {
+        ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
+                      "@optimize expects one integer level from 0 through 3");
+        ny_diag_hint("use @optimize(0), @optimize(1), @optimize(2), or @optimize(3)");
+        cg->had_error = 1;
+        continue;
+      }
+      decl->attr_optimize = true;
+      decl->attr_optimize_level = (int)attr->args.data[0]->as.literal.as.i;
+      continue;
+    }
+    if (attr_name_eq(attr, "accel") || attr_name_eq(attr, "kernel")) {
       if (decl->attr_accel) {
         ny_diag_error(attr_diag_tok(fn_stmt, attr, 0), "duplicate attribute '@accel'");
         cg->had_error = 1;
@@ -1088,6 +1110,12 @@ void ny_apply_decl_fn_attrs(codegen_t *cg, LLVMValueRef fn, stmt_t *fn_stmt) {
     add_fn_enum_attr(cg, fn, "alwaysinline", 0);
   if (decl->attr_constant_time)
     add_fn_string_attr(cg, fn, "target-features", "+cmov");
+  if (decl->attr_optimize) {
+    char level[2] = {(char)('0' + decl->attr_optimize_level), '\0'};
+    add_fn_string_attr(cg, fn, "nytrix.optimize.level", level);
+    if (decl->attr_optimize_level == 0)
+      add_fn_enum_attr(cg, fn, "optnone", 0);
+  }
   if (decl->attr_accel) {
     add_fn_string_attr(cg, fn, "nytrix.accel", "true");
     add_fn_string_attr(cg, fn, "nytrix.accel.target",
@@ -1548,7 +1576,7 @@ static const char *ast_infer_type(expr_t *e, const type_env_t *env) {
     if (e->as.literal.kind == NY_LIT_FLOAT)
       return "f64";
     if (e->as.literal.kind == NY_LIT_INT)
-      return "int";
+      return e->tok.kind == NY_T_NIL ? "nil" : "int";
     return NULL;
   }
   if (e->kind == NY_E_IDENT)
@@ -2244,11 +2272,6 @@ static char *infer_fn_return_type(stmt_t *fn, const char **param_types) {
   return out;
 }
 
-static bool fn_is_synthetic_closure(const stmt_t *fn, const char *name) {
-  const char *raw = name && *name ? name : (fn && fn->kind == NY_S_FUNC ? fn->as.fn.name : NULL);
-  return raw && (strncmp(raw, "__defer", 7) == 0 || strncmp(raw, "__lambda", 8) == 0);
-}
-
 void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t depth,
               binding_list *captures) {
   bool prof_func = ny_codegen_func_profile_enabled();
@@ -2897,10 +2920,13 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
       pt[j] = sema_func->resolved_param_types.data[j];
     LLVMTypeRef ft =
         LLVMFunctionType(sema_func->resolved_return_type, pt, (unsigned)param_count, 0);
-    const char *ln = s->as.ext.link_name ? s->as.ext.link_name : final_name;
-    LLVMValueRef f = ny_get_named_fn(cg, ln);
+    /* Keep the IR declaration distinct from the external linker symbol.
+     * A C symbol may legitimately be exposed through multiple typed extern
+     * declarations (notably objc_msgSend); LLVM cannot represent those as
+     * one declaration with incompatible function types. */
+    LLVMValueRef f = ny_get_named_fn(cg, final_name);
     if (!f)
-      f = LLVMAddFunction(cg->module, ln, ft);
+      f = LLVMAddFunction(cg->module, final_name, ft);
     fun_sig sig;
     ny_fun_sig_init(&sig, final_name, ft, f, s, (int)param_count,
                     s->as.ext.is_variadic, true);
@@ -2908,6 +2934,7 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     ny_fun_sig_set_params(&sig, &s->as.ext.params);
     sig.is_native_abi = true;
     sig.link_name = s->as.ext.link_name ? ny_strdup(s->as.ext.link_name) : NULL;
+    sig.llvm_name = ny_strdup(final_name);
     sig.return_type = s->as.ext.return_type ? ny_strdup(s->as.ext.return_type) : NULL;
     vec_push(&cg->fun_sigs, sig);
   } else if (s->kind == NY_S_VAR) {

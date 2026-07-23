@@ -214,15 +214,6 @@ static binding *expr_member_module_alias_global(codegen_t *cg, scope *scopes, si
   }
 }
 
-static LLVMValueRef expr_cast_to_i64(codegen_t *cg, LLVMValueRef v,
-                                     const char *name) {
-  if (!cg || !v)
-    return v;
-  if (LLVMTypeOf(v) == cg->type_i64)
-    return v;
-  return ny_ptr2i64(cg, v, ny_llvm_name(cg, name));
-}
-
 static LLVMValueRef expr_build_untagged_or_raw_i64(codegen_t *cg,
                                                    LLVMValueRef v,
                                                    const char *name) {
@@ -330,7 +321,7 @@ static LLVMValueRef expr_index_raw_i64(codegen_t *cg, scope *scopes,
                                        size_t depth, expr_t *idx_expr,
                                        LLVMValueRef idx_v,
                                        const char *name) {
-  idx_v = expr_cast_to_i64(cg, idx_v, name ? name : "index");
+  idx_v = ny_llvm_cast_to_i64(cg, idx_v, name ? name : "index");
   int64_t lit = 0;
   if (ny_expr_literal_i64(idx_expr, &lit))
     return LLVMConstInt(cg->type_i64, (uint64_t)lit, true);
@@ -1312,7 +1303,8 @@ static bool ny_ct_fast_eval_long_property(codegen_t *cg, expr_t *target,
   if (!target || !out || depth > 64)
     return false;
   if (target->kind == NY_E_LITERAL) {
-    if (target->as.literal.kind == NY_LIT_INT) {
+    if (target->as.literal.kind == NY_LIT_INT &&
+        target->tok.kind != NY_T_NIL) {
       out->kind = NY_CT_FAST_INT;
       out->i = target->as.literal.as.i;
       return true;
@@ -1356,6 +1348,10 @@ static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
 
   switch (e->kind) {
   case NY_E_LITERAL:
+    if (e->tok.kind == NY_T_NIL) {
+      out->kind = NY_CT_FAST_NONE;
+      return true;
+    }
     if (e->as.literal.kind == NY_LIT_INT) {
       out->kind = NY_CT_FAST_INT;
       out->i = e->as.literal.as.i;
@@ -1996,6 +1992,10 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     return false;
   switch (e->kind) {
   case NY_E_LITERAL:
+    if (e->tok.kind == NY_T_NIL) {
+      out->kind = NY_CT_FAST_NONE;
+      return true;
+    }
     if (e->as.literal.kind == NY_LIT_INT) {
       out->kind = NY_CT_FAST_INT;
       out->i = e->as.literal.as.i;
@@ -2852,8 +2852,8 @@ static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
   stmt_t *body = stmt_new(cg->arena, NY_S_BLOCK, tok);
   vec_push_arena(cg->arena, &body->as.block.body, ret);
   wrapper->as.fn.body = body;
-  if (native_abi)
-    wrapper->as.fn.return_type = target->return_type;
+  wrapper->as.fn.return_type =
+      native_abi ? target->return_type : "any";
 
   scope sc[64] = {0};
   binding_list empty_captures = {0};
@@ -3233,11 +3233,11 @@ static LLVMValueRef ny_try_emit_f64_list_get_as_f64(codegen_t *cg,
       !expr_is_f64_default_value(cg, scopes, depth, default_expr))
     return NULL;
 
-  LLVMValueRef target_v = expr_cast_to_i64(
+  LLVMValueRef target_v = ny_llvm_cast_to_i64(
       cg, gen_expr(cg, scopes, depth, e->as.memcall.target),
       "f64_list_get_target");
   LLVMValueRef key_v =
-      expr_cast_to_i64(cg, gen_expr(cg, scopes, depth, key),
+      ny_llvm_cast_to_i64(cg, gen_expr(cg, scopes, depth, key),
                        "f64_list_get_key");
   if (!target_v || !key_v)
     return NULL;
@@ -3411,8 +3411,8 @@ static LLVMValueRef expr_try_fast_index_read(codegen_t *cg, scope *scopes,
   LLVMValueRef key_v = gen_expr(cg, scopes, depth, e->as.index.start);
   if (!target_v || !key_v)
     return NULL;
-  target_v = expr_cast_to_i64(cg, target_v, "fast_index_target");
-  key_v = expr_cast_to_i64(cg, key_v, "fast_index_key");
+  target_v = ny_llvm_cast_to_i64(cg, target_v, "fast_index_target");
+  key_v = ny_llvm_cast_to_i64(cg, key_v, "fast_index_key");
   bool assume_nonnegative =
       expr_index_is_nonnegative(cg, scopes, depth, e->as.index.start);
   bool assume_in_bounds =
@@ -3827,7 +3827,7 @@ static LLVMValueRef ny_ct_jit_value_to_llvm(codegen_t *cg, int64_t v,
     fun_sig *dict_new = lookup_fun(cg, "dict", 0);
     if (!dict_new)
       dict_new = lookup_fun(cg, "std.core.dict_mod.dict", 0);
-    fun_sig *dict_set = lookup_fun(cg, "__dict_write_fast", 0);
+    fun_sig *dict_set = lookup_fun(cg, "std.core.dict_mod.dict_set", 0);
     if (!dict_set)
       dict_set = lookup_fun(cg, "std.core.set", 0);
     if (!dict_new || !dict_set)
@@ -4091,8 +4091,8 @@ static void ny_ct_ensure_parent_fun_sig(codegen_t *tcg, const fun_sig *src,
                         ? resolve_abi_type_name(tcg, ret_name, s->tok)
                         : tcg->type_i64;
   LLVMTypeRef ft = LLVMFunctionType(rty, pt, (unsigned)param_count, 0);
-  const char *llvm_name = src->link_name && *src->link_name ? src->link_name
-                                                            : src->name;
+  const char *llvm_name = src->llvm_name && *src->llvm_name ? src->llvm_name
+                                                             : src->name;
   LLVMValueRef f = ny_get_named_fn(tcg, llvm_name);
   if (!f)
     f = LLVMAddFunction(tcg->module, llvm_name, ft);
@@ -4106,6 +4106,7 @@ static void ny_ct_ensure_parent_fun_sig(codegen_t *tcg, const fun_sig *src,
   sig.is_native_abi = src->is_native_abi;
   sig.tailcall = src->tailcall;
   sig.link_name = src->link_name ? ny_strdup(src->link_name) : NULL;
+  sig.llvm_name = src->llvm_name ? ny_strdup(src->llvm_name) : NULL;
   sig.return_type = ret_name ? ny_strdup(ret_name) : NULL;
   sig.returns_owned = src->returns_owned;
   sig.effects = src->effects;

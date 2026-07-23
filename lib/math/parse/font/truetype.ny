@@ -10,7 +10,7 @@ use std.os (file_exists)
 use std.os.ffi (dlopen_checked, dlsym, RTLD_NOW, RTLD_GLOBAL, call1, call2, call3, call4, call5)
 use std.os.path as ospath
 
-extern "" {
+extern {
    fn _ft_init(ptr lib_p) i32 as "FT_Init_FreeType"
    fn _ft_new_memory_face(ptr lib, ptr data, i64 size, i64 index, ptr face_p) i32 as "FT_New_Memory_Face"
    fn _ft_new_face(ptr lib, ptr path, i64 index, ptr face_p) i32 as "FT_New_Face"
@@ -91,6 +91,7 @@ fn _load_dyn() bool {
       if !lib { lib = dlopen_checked("libfreetype.dll", "FT_Init_FreeType", RTLD_NOW() | RTLD_GLOBAL()) }
    } else {
       lib = dlopen_checked("libfreetype.dylib", "FT_Init_FreeType", RTLD_NOW() | RTLD_GLOBAL())
+      if !lib { lib = dlopen_checked("freetype", "FT_Init_FreeType", RTLD_NOW() | RTLD_GLOBAL()) }
    }
    if !lib { return false }
    _FT_dyn_lib = lib

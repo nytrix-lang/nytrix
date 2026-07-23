@@ -1,12 +1,37 @@
 #include "code/native/object/internal.h"
+#include "base/parallel.h"
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+
+typedef struct {
+  const nyir_func_t *funcs;
+  ny_mach_func_t *out;
+  char (*errors)[256];
+} ny_mach_lower_parallel_ctx_t;
+
+static bool ny_mach_lower_parallel_task(size_t i, void *opaque) {
+  ny_mach_lower_parallel_ctx_t *ctx = (ny_mach_lower_parallel_ctx_t *)opaque;
+  return ny_mach_lower_nir(&ctx->funcs[i], &ctx->out[i], ctx->errors[i], 256);
+}
+
 /* ELF32/ELF64, COFF, and Mach-O packaging over encoded code, symbols, and
  * relocation records produced by the architecture encoders. */
+
+/* Independence metrics: machine form encode success vs NYIR object fallback. */
+unsigned long long ny_native_stat_mach_ok = 0;
+unsigned long long ny_native_stat_nir_fallback = 0;
+
+void ny_native_mach_encode_stats(unsigned long long *mach_ok,
+                                unsigned long long *nir_fallback) {
+  if (mach_ok)
+    *mach_ok = ny_native_stat_mach_ok;
+  if (nir_fallback)
+    *nir_fallback = ny_native_stat_nir_fallback;
+}
 
 static bool ny_elf64_write_sym(ny_obj_buf_t *b, uint32_t name, unsigned info,
                                uint16_t shndx, uint64_t value,
@@ -43,7 +68,6 @@ static bool ny_elf64_write_file(const char *path, const unsigned char *data,
   return ok;
 }
 
-
 static bool ny_obj_sym_name8_or_str(ny_obj_buf_t *b, const char *name,
                                     uint32_t str_off) {
   char fixed[8] = {0};
@@ -75,10 +99,10 @@ static bool ny_native_emit_coff_x64_object_code(
   ny_obj_buf_t file = {0};
   ny_obj_buf_t strings = {0};
   bool ok = false;
-  char reloc_symbols[256][256];
+  char reloc_symbols[NY_X64_OBJ_MAX_RELOCS][256];
   size_t reloc_symbol_count = 0;
   uint32_t def_name_off = 0;
-  uint32_t reloc_name_offs[256] = {0};
+  uint32_t reloc_name_offs[NY_X64_OBJ_MAX_RELOCS] = {0};
   const size_t header_size = 20;
   const size_t section_count = 1;
   const size_t section_table_size = 40 * section_count;
@@ -176,9 +200,9 @@ static bool ny_native_emit_macho_x64_object_code(
   ny_obj_buf_t file = {0};
   ny_obj_buf_t strtab = {0};
   bool ok = false;
-  char reloc_symbols[256][256];
+  char reloc_symbols[NY_X64_OBJ_MAX_RELOCS][256];
   size_t reloc_symbol_count = 0;
-  uint32_t reloc_name_offs[256] = {0};
+  uint32_t reloc_name_offs[NY_X64_OBJ_MAX_RELOCS] = {0};
   char def_name[256];
   snprintf(def_name, sizeof(def_name), "%s%s", symbol_name[0] == '_' ? "" : "_",
            symbol_name);
@@ -265,7 +289,6 @@ done:
   return ok;
 }
 
-
 static bool ny_native_emit_elf64_x64_object_bundle_code(
     const unsigned char *code, size_t code_len,
     const ny_x64_obj_reloc_t *relocs, size_t reloc_count,
@@ -278,10 +301,10 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   ny_obj_buf_t file = {0};
   ny_obj_buf_t strtab = {0};
   bool ok = false;
-  char reloc_symbols[256][256];
+  char reloc_symbols[NY_X64_OBJ_MAX_RELOCS][256];
   size_t reloc_symbol_count = 0;
   uint32_t def_name_offs[256] = {0};
-  uint32_t reloc_name_offs[256] = {0};
+  uint32_t reloc_name_offs[NY_X64_OBJ_MAX_RELOCS] = {0};
   if (!ny_x64_obj_collect_external_reloc_symbols(
           relocs, reloc_count, defs, def_count, reloc_symbols,
           &reloc_symbol_count, err, err_len))
@@ -405,10 +428,10 @@ static bool ny_native_emit_coff_x64_object_bundle_code(
   ny_obj_buf_t file = {0};
   ny_obj_buf_t strings = {0};
   bool ok = false;
-  char reloc_symbols[256][256];
+  char reloc_symbols[NY_X64_OBJ_MAX_RELOCS][256];
   size_t reloc_symbol_count = 0;
   uint32_t def_name_offs[256] = {0};
-  uint32_t reloc_name_offs[256] = {0};
+  uint32_t reloc_name_offs[NY_X64_OBJ_MAX_RELOCS] = {0};
   const size_t header_size = 20;
   const size_t section_count = 1;
   const size_t section_table_size = 40 * section_count;
@@ -517,12 +540,12 @@ static bool ny_native_emit_macho_x64_object_bundle_code(
   ny_obj_buf_t file = {0};
   ny_obj_buf_t strtab = {0};
   bool ok = false;
-  char reloc_symbols[256][256];
+  char reloc_symbols[NY_X64_OBJ_MAX_RELOCS][256];
   size_t reloc_symbol_count = 0;
   uint32_t def_name_offs[256] = {0};
-  uint32_t reloc_name_offs[256] = {0};
+  uint32_t reloc_name_offs[NY_X64_OBJ_MAX_RELOCS] = {0};
   char macho_defs[256][256];
-  char macho_relocs[256][256];
+  char macho_relocs[NY_X64_OBJ_MAX_RELOCS][256];
 
   if (!ny_x64_obj_collect_external_reloc_symbols(
           relocs, reloc_count, defs, def_count, reloc_symbols,
@@ -623,7 +646,7 @@ done:
 }
 
 bool ny_x64_obj_build_bundle(
-    const ny_nir_func_t *rt_main, const ny_nir_func_t *funcs,
+    const nyir_func_t *rt_main, const nyir_func_t *funcs,
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, const char *entry_symbol,
     bool tag_return, ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,
@@ -637,7 +660,7 @@ bool ny_x64_obj_build_bundle(
   for (size_t i = 0; i < func_count; ++i) {
     const char *name = func_names && func_names[i] ? func_names[i] : "unknown_fn";
     char symbol[256];
-    snprintf(symbol, sizeof(symbol), "%sny_fn_%s",
+    snprintf(symbol, sizeof(symbol), NY_FMT_FN,
              target->symbol_prefix ? target->symbol_prefix : "", name);
     if (!ny_x64_obj_append_function(code, defs, def_count, relocs, reloc_count,
                                     &funcs[i], target, symbol, false, err,
@@ -647,134 +670,244 @@ bool ny_x64_obj_build_bundle(
   char entry[256];
   snprintf(entry, sizeof(entry), "%s%s", target->symbol_prefix ? target->symbol_prefix : "",
            entry_symbol);
-  return ny_x64_obj_append_function(code, defs, def_count, relocs, reloc_count,
-                                    rt_main, target, entry, tag_return, err,
-                                    err_len);
+  if (!ny_x64_obj_append_function(code, defs, def_count, relocs, reloc_count,
+                                  rt_main, target, entry, tag_return, err,
+                                  err_len))
+    return false;
+  return ny_native_strtab_append_defs(code, defs, def_count, err, err_len);
 }
 
-
 bool ny_native_emit_elf64_object_from_nirs(
-    const ny_nir_func_t *rt_main, const ny_nir_func_t *funcs,
+    const nyir_func_t *rt_main, const nyir_func_t *funcs,
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, const char *path,
     const char *entry_symbol, bool tag_return, char *err, size_t err_len) {
   ny_obj_buf_t code = {0};
   ny_x64_obj_symbol_def_t defs[256];
-  ny_x64_obj_reloc_t relocs[256];
+  ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS];
   size_t def_count = 0;
   size_t reloc_count = 0;
-  bool ok = ny_x64_obj_build_bundle(rt_main, funcs, func_names, func_count,
+  /* Prefer machine form-owned encoding into the same ELF writer (no host assembler). */
+  bool ok = false;
+  {
+    char mach_err[256] = {0};
+    ny_mach_func_t top_mach = {0};
+    ny_mach_func_t *fm = NULL;
+    bool mach_ok = rt_main &&
+                  ny_mach_lower_nir(rt_main, &top_mach, mach_err, sizeof(mach_err));
+    if (mach_ok && func_count) {
+      fm = (ny_mach_func_t *)calloc(func_count, sizeof(*fm));
+      char (*lower_errors)[256] = calloc(func_count, sizeof(*lower_errors));
+      if (!fm || !lower_errors) {
+        free(lower_errors);
+        mach_ok = false;
+      } else {
+        size_t work = 0;
+        for (size_t i = 0; i < func_count; ++i)
+          work += funcs[i].len;
+        ny_mach_lower_parallel_ctx_t lower_ctx = {funcs, fm, lower_errors};
+        mach_ok = ny_parallel_for(func_count, work,
+                                  ny_mach_lower_parallel_task, &lower_ctx);
+        if (!mach_ok)
+          for (size_t i = 0; i < func_count; ++i)
+            if (lower_errors[i][0]) {
+              snprintf(mach_err, sizeof(mach_err), "%s", lower_errors[i]);
+              break;
+            }
+        free(lower_errors);
+      }
+    }
+    if (mach_ok)
+      ok = ny_x64_mach_build_bundle(&top_mach, fm, func_names, func_count, target,
+                                   entry_symbol ? entry_symbol : "rt_main",
+                                   tag_return, &code, defs, &def_count, relocs,
+                                   &reloc_count, mach_err, sizeof(mach_err));
+    ny_mach_func_free(&top_mach);
+    if (fm) {
+      for (size_t i = 0; i < func_count; ++i)
+        ny_mach_func_free(&fm[i]);
+      free(fm);
+    }
+    if (!ok) {
+      ny_obj_free(&code);
+      code = (ny_obj_buf_t){0};
+      def_count = reloc_count = 0;
+    } else {
+      ny_native_stat_mach_ok++;
+    }
+  }
+  if (!ok) {
+    ny_native_stat_nir_fallback++;
+    ok = ny_x64_obj_build_bundle(rt_main, funcs, func_names, func_count,
+                                 target, entry_symbol, tag_return, &code,
+                                 defs, &def_count, relocs, &reloc_count, err,
+                                 err_len);
+  }
+  /* Prefer denser I-cache when NyP heat is high: keep hot entry last, sort
+   * helpers by ascending size (already emit order in machine form bundle). */
+  ok = ok && ny_native_emit_elf64_x64_object_bundle_code(
+                 code.data, code.len, relocs, reloc_count, defs, def_count,
+                 path, err, err_len);
+  ny_obj_free(&code);
+  return ok;
+}
+
+typedef bool (*ny_x64_bundle_writer_fn)(const unsigned char *code, size_t code_len,
+                                        const ny_x64_obj_reloc_t *relocs,
+                                        size_t reloc_count,
+                                        const ny_x64_obj_symbol_def_t *defs,
+                                        size_t def_count, const char *path,
+                                        char *err, size_t err_len);
+typedef bool (*ny_x64_single_writer_fn)(const unsigned char *code, size_t code_len,
+                                        const ny_x64_obj_reloc_t *relocs,
+                                        size_t reloc_count, const char *path,
+                                        const char *symbol_name, char *err,
+                                        size_t err_len);
+
+static bool ny_native_emit_x64_object_from_nirs(
+    const nyir_func_t *rt_main, const nyir_func_t *funcs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *path,
+    const char *entry_symbol, bool tag_return, char *err, size_t err_len,
+    ny_x64_bundle_writer_fn write_bundle) {
+  ny_obj_buf_t code = {0};
+  ny_x64_obj_symbol_def_t defs[256];
+  ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS];
+  size_t def_count = 0, reloc_count = 0;
+  bool built = false;
+  ny_mach_func_t top_mach = {0};
+  ny_mach_func_t *fm = NULL;
+  char mach_err[256] = {0};
+  bool mach_ok = rt_main &&
+                 ny_mach_lower_nir(rt_main, &top_mach, mach_err,
+                                   sizeof(mach_err));
+  if (mach_ok && func_count) {
+    fm = calloc(func_count, sizeof(*fm));
+    char (*lower_errors)[256] = calloc(func_count, sizeof(*lower_errors));
+    if (!fm || !lower_errors) {
+      free(lower_errors);
+      mach_ok = false;
+    } else {
+      size_t work = 0;
+      for (size_t i = 0; i < func_count; ++i)
+        work += funcs[i].len;
+      ny_mach_lower_parallel_ctx_t lower_ctx = {funcs, fm, lower_errors};
+      mach_ok = ny_parallel_for(func_count, work,
+                                ny_mach_lower_parallel_task, &lower_ctx);
+      if (!mach_ok)
+        for (size_t i = 0; i < func_count; ++i)
+          if (lower_errors[i][0]) {
+            snprintf(mach_err, sizeof(mach_err), "%s", lower_errors[i]);
+            break;
+          }
+      free(lower_errors);
+    }
+  }
+  if (mach_ok)
+    built = ny_x64_mach_build_bundle(
+        &top_mach, fm, func_names, func_count, target,
+        entry_symbol ? entry_symbol : "rt_main", tag_return, &code, defs,
+        &def_count, relocs, &reloc_count, mach_err, sizeof(mach_err));
+  ny_mach_func_free(&top_mach);
+  if (fm) {
+    for (size_t i = 0; i < func_count; ++i)
+      ny_mach_func_free(&fm[i]);
+    free(fm);
+  }
+  if (!built) {
+    ny_obj_free(&code);
+    code = (ny_obj_buf_t){0};
+    def_count = reloc_count = 0;
+    if (err && err_len)
+      err[0] = '\0';
+    built = ny_x64_obj_build_bundle(rt_main, funcs, func_names, func_count,
                                     target, entry_symbol, tag_return, &code,
                                     defs, &def_count, relocs, &reloc_count,
-                                    err, err_len) &&
-            ny_native_emit_elf64_x64_object_bundle_code(
-                code.data, code.len, relocs, reloc_count, defs, def_count,
-                path, err, err_len);
+                                    err, err_len);
+  }
+  bool ok = built &&
+            write_bundle(code.data, code.len, relocs, reloc_count, defs,
+                         def_count, path, err, err_len);
   ny_obj_free(&code);
+  return ok;
+}
+
+static bool ny_native_emit_x64_object_from_nir(
+    const nyir_func_t *nyir, const ny_native_target_info_t *target,
+    const char *path, const char *symbol_name, bool tag_return, char *err,
+    size_t err_len, const char *missing_msg, ny_x64_single_writer_fn write) {
+  if (!nyir || !path || !symbol_name || !symbol_name[0]) {
+    ny_native_set_err(err, err_len, "%s", missing_msg);
+    return false;
+  }
+  ny_x64_obj_ctx_t ctx = {.target = target, .err = err, .err_len = err_len};
+  if (!ny_x64_obj_emit_code(&ctx, nyir, tag_return)) {
+    ny_x64_obj_ctx_free(&ctx);
+    return false;
+  }
+  bool ok = write(ctx.code.data, ctx.code.len, ctx.relocs, ctx.reloc_count, path,
+                  symbol_name, err, err_len);
+  ny_x64_obj_ctx_free(&ctx);
   return ok;
 }
 
 bool ny_native_emit_coff_x64_object_from_nirs(
-    const ny_nir_func_t *rt_main, const ny_nir_func_t *funcs,
+    const nyir_func_t *rt_main, const nyir_func_t *funcs,
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, const char *path,
     const char *entry_symbol, bool tag_return, char *err, size_t err_len) {
-  ny_obj_buf_t code = {0};
-  ny_x64_obj_symbol_def_t defs[256];
-  ny_x64_obj_reloc_t relocs[256];
-  size_t def_count = 0;
-  size_t reloc_count = 0;
-  bool ok = ny_x64_obj_build_bundle(rt_main, funcs, func_names, func_count,
-                                    target, entry_symbol, tag_return, &code,
-                                    defs, &def_count, relocs, &reloc_count,
-                                    err, err_len) &&
-            ny_native_emit_coff_x64_object_bundle_code(
-                code.data, code.len, relocs, reloc_count, defs, def_count,
-                path, err, err_len);
-  ny_obj_free(&code);
-  return ok;
+  return ny_native_emit_x64_object_from_nirs(
+      rt_main, funcs, func_names, func_count, target, path, entry_symbol,
+      tag_return, err, err_len, ny_native_emit_coff_x64_object_bundle_code);
 }
 
 bool ny_native_emit_macho_x64_object_from_nirs(
-    const ny_nir_func_t *rt_main, const ny_nir_func_t *funcs,
+    const nyir_func_t *rt_main, const nyir_func_t *funcs,
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, const char *path,
     const char *entry_symbol, bool tag_return, char *err, size_t err_len) {
-  ny_obj_buf_t code = {0};
-  ny_x64_obj_symbol_def_t defs[256];
-  ny_x64_obj_reloc_t relocs[256];
-  size_t def_count = 0;
-  size_t reloc_count = 0;
-  bool ok = ny_x64_obj_build_bundle(rt_main, funcs, func_names, func_count,
-                                    target, entry_symbol, tag_return, &code,
-                                    defs, &def_count, relocs, &reloc_count,
-                                    err, err_len) &&
-            ny_native_emit_macho_x64_object_bundle_code(
-                code.data, code.len, relocs, reloc_count, defs, def_count,
-                path, err, err_len);
-  ny_obj_free(&code);
-  return ok;
+  return ny_native_emit_x64_object_from_nirs(
+      rt_main, funcs, func_names, func_count, target, path, entry_symbol,
+      tag_return, err, err_len, ny_native_emit_macho_x64_object_bundle_code);
 }
 
-bool ny_native_emit_coff_x64_object_from_nir(const ny_nir_func_t *nir,
+bool ny_native_emit_coff_x64_object_from_nir(const nyir_func_t *nyir,
                                              const ny_native_target_info_t *target,
                                              const char *path,
                                              const char *symbol_name,
                                              bool tag_return, char *err,
                                              size_t err_len) {
-  if (!nir || !path || !symbol_name || !symbol_name[0]) {
-    ny_native_set_err(err, err_len, "x86-64 COFF object writer: missing input");
-    return false;
-  }
-  ny_x64_obj_ctx_t ctx = {.target = target, .err = err, .err_len = err_len};
-  if (!ny_x64_obj_emit_code(&ctx, nir, tag_return)) {
-    ny_x64_obj_ctx_free(&ctx);
-    return false;
-  }
-  bool ok = ny_native_emit_coff_x64_object_code(ctx.code.data, ctx.code.len,
-                                                ctx.relocs, ctx.reloc_count,
-                                                path, symbol_name, err,
-                                                err_len);
-  ny_x64_obj_ctx_free(&ctx);
-  return ok;
+  return ny_native_emit_x64_object_from_nir(
+      nyir, target, path, symbol_name, tag_return, err, err_len,
+      "x86-64 COFF object writer: missing input",
+      ny_native_emit_coff_x64_object_code);
 }
 
-bool ny_native_emit_macho_x64_object_from_nir(const ny_nir_func_t *nir,
+bool ny_native_emit_macho_x64_object_from_nir(const nyir_func_t *nyir,
                                               const ny_native_target_info_t *target,
                                               const char *path,
                                               const char *symbol_name,
                                               bool tag_return, char *err,
                                               size_t err_len) {
-  if (!nir || !path || !symbol_name || !symbol_name[0]) {
-    ny_native_set_err(err, err_len, "x86-64 Mach-O object writer: missing input");
-    return false;
-  }
-  ny_x64_obj_ctx_t ctx = {.target = target, .err = err, .err_len = err_len};
-  if (!ny_x64_obj_emit_code(&ctx, nir, tag_return)) {
-    ny_x64_obj_ctx_free(&ctx);
-    return false;
-  }
-  bool ok = ny_native_emit_macho_x64_object_code(ctx.code.data, ctx.code.len,
-                                                 ctx.relocs, ctx.reloc_count,
-                                                 path, symbol_name, err,
-                                                 err_len);
-  ny_x64_obj_ctx_free(&ctx);
-  return ok;
+  return ny_native_emit_x64_object_from_nir(
+      nyir, target, path, symbol_name, tag_return, err, err_len,
+      "x86-64 Mach-O object writer: missing input",
+      ny_native_emit_macho_x64_object_code);
 }
 
-bool ny_native_emit_elf64_object_from_nir(const ny_nir_func_t *nir,
+bool ny_native_emit_elf64_object_from_nir(const nyir_func_t *nyir,
                                           const ny_native_target_info_t *target,
                                           const char *path,
                                           const char *symbol_name,
                                           bool tag_return, char *err,
                                           size_t err_len) {
-  if (!nir || !path || !symbol_name || !symbol_name[0]) {
+  if (!nyir || !path || !symbol_name || !symbol_name[0]) {
     ny_native_set_err(err, err_len,
                       "x86-64 ELF object writer: missing input");
     return false;
   }
   ny_x64_obj_ctx_t ctx = {.target = target, .err = err, .err_len = err_len};
-  if (!ny_x64_obj_emit_code(&ctx, nir, tag_return)) {
+  if (!ny_x64_obj_emit_code(&ctx, nyir, tag_return)) {
     ny_x64_obj_ctx_free(&ctx);
     return false;
   }
@@ -782,9 +915,9 @@ bool ny_native_emit_elf64_object_from_nir(const ny_nir_func_t *nir,
   ny_obj_buf_t file = {0};
   ny_obj_buf_t strtab = {0};
   bool ok = false;
-  char reloc_symbols[256][256];
+  char reloc_symbols[NY_X64_OBJ_MAX_RELOCS][256];
   size_t reloc_symbol_count = 0;
-  uint32_t reloc_name_offs[256] = {0};
+  uint32_t reloc_name_offs[NY_X64_OBJ_MAX_RELOCS] = {0};
   if (!ny_x64_obj_collect_reloc_symbols(ctx.relocs, ctx.reloc_count,
                                         reloc_symbols, &reloc_symbol_count,
                                         err, err_len))
@@ -885,7 +1018,7 @@ done:
 }
 
 bool ny_native_emit_elf32_i386_object_from_nirs(
-    const ny_nir_func_t *rt_main, const ny_nir_func_t *funcs,
+    const nyir_func_t *rt_main, const nyir_func_t *funcs,
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, const char *path,
     const char *entry_symbol, bool tag_return, char *err, size_t err_len) {
@@ -912,7 +1045,7 @@ bool ny_native_emit_elf32_i386_object_from_nirs(
     }
     const char *name = func_names && func_names[i] ? func_names[i] : "unknown_fn";
     char symbol[256];
-    snprintf(symbol, sizeof(symbol), "%sny_fn_%s",
+    snprintf(symbol, sizeof(symbol), NY_FMT_FN,
              target->symbol_prefix ? target->symbol_prefix : "", name);
     if (ny_i386_obj_def_index(defs, def_count, symbol) >= 0) {
       ny_native_set_err(err, err_len,

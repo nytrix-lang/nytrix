@@ -145,7 +145,7 @@ fn _ensure_context(list ctx) list {
 
 fn new_allocator(fnptr alloc_fn, ?fnptr realloc_fn=nil, ?fnptr free_fn=nil, any state=0, str name="custom") list {
    "Creates allocator descriptor `[alloc_fn, realloc_fn, free_fn, state, name]`."
-   if !alloc_fn { panic("alloc_fn cannot be none") }
+   if !alloc_fn { panic("alloc_fn cannot be nil") }
    def res = [alloc_fn, realloc_fn, free_fn, state, name]
    return res
 }

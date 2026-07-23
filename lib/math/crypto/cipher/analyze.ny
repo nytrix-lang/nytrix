@@ -167,7 +167,7 @@ fn _push_candidate(list cands, str kind, any param, str plaintext, int score) li
       }
       i += 1
    }
-   cands.append([kind, param, plaintext, score])
+   return cands.append([kind, param, plaintext, score])
 }
 
 fn _sort_candidates_desc(list cands) list {

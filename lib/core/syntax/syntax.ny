@@ -20,7 +20,7 @@ fn _ensure_name(str name) str {
 }
 
 fn _ensure_handler(any handler) any {
-   if !handler { panic("syntax handler cannot be none") }
+   if !handler { panic("syntax handler cannot be nil") }
    handler
 }
 
@@ -97,10 +97,10 @@ fn new_registry(int cap=8) dict {
 fn clear_registry(dict reg) dict {
    "Clears all handlers from a registry while preserving object identity."
    reg = _ensure_registry(reg)
-   reg = dict_write(reg, "macros", dict(8))
-   reg = dict_write(reg, "macro_order", list(8))
-   reg = dict_write(reg, "attrs", dict(8))
-   reg = dict_write(reg, "attr_order", list(8))
+   reg = dict_set(reg, "macros", dict(8))
+   reg = dict_set(reg, "macro_order", list(8))
+   reg = dict_set(reg, "attrs", dict(8))
+   reg = dict_set(reg, "attr_order", list(8))
    reg
 }
 
@@ -123,12 +123,12 @@ fn register_macro(dict reg, str name, any handler) dict {
    mut macros = _registry_dict(reg, "macros")
    mut order = _registry_list(reg, "macro_order")
    def existed = macros.contains(name)
-   macros = dict_write(macros, name, handler)
-   reg = dict_write(reg, "macros", macros)
+   macros = dict_set(macros, name, handler)
+   reg = dict_set(reg, "macros", macros)
    if !existed {
       if type(order) != "list" { order = list(8) }
       order = order.append(name)
-      reg = dict_write(reg, "macro_order", order)
+      reg = dict_set(reg, "macro_order", order)
    }
    reg
 }
@@ -142,8 +142,8 @@ fn unregister_macro(dict reg, str name) dict {
    if !macros.contains(name) { return reg }
    macros = macros.delete(name)
    order = _list_without(order, name)
-   reg = dict_write(reg, "macros", macros)
-   reg = dict_write(reg, "macro_order", order)
+   reg = dict_set(reg, "macros", macros)
+   reg = dict_set(reg, "macro_order", order)
    reg
 }
 
@@ -155,12 +155,12 @@ fn register_attribute(dict reg, str name, any handler) dict {
    mut attrs = _registry_dict(reg, "attrs")
    mut order = _registry_list(reg, "attr_order")
    def existed = attrs.contains(name)
-   attrs = dict_write(attrs, name, handler)
-   reg = dict_write(reg, "attrs", attrs)
+   attrs = dict_set(attrs, name, handler)
+   reg = dict_set(reg, "attrs", attrs)
    if !existed {
       if type(order) != "list" { order = list(8) }
       order = order.append(name)
-      reg = dict_write(reg, "attr_order", order)
+      reg = dict_set(reg, "attr_order", order)
    }
    reg
 }
@@ -174,8 +174,8 @@ fn unregister_attribute(dict reg, str name) dict {
    if !attrs.contains(name) { return reg }
    attrs = attrs.delete(name)
    order = _list_without(order, name)
-   reg = dict_write(reg, "attrs", attrs)
-   reg = dict_write(reg, "attr_order", order)
+   reg = dict_set(reg, "attrs", attrs)
+   reg = dict_set(reg, "attr_order", order)
    reg
 }
 
@@ -219,7 +219,7 @@ fn merge_registry(dict dst, dict src, bool overwrite=true) dict {
 }
 
 fn get_macro_handler(dict reg, str name) any {
-   "Returns macro handler for `name`, or none."
+   "Returns macro handler for `name`, or nil."
    reg = _ensure_registry(reg)
    name = _ensure_name(name)
    def macros = _registry_dict(reg, "macros")
@@ -227,7 +227,7 @@ fn get_macro_handler(dict reg, str name) any {
 }
 
 fn get_attr_handler(dict reg, str name) any {
-   "Returns attribute handler for `name`, or none."
+   "Returns attribute handler for `name`, or nil."
    reg = _ensure_registry(reg)
    name = _ensure_name(name)
    def attrs = _registry_dict(reg, "attrs")
@@ -339,7 +339,7 @@ fn form_tail(any value) list {
 }
 
 fn expand_macro(dict reg, str name, any args=0, any body=0, any tok=0) any {
-   "Expands macro `name`. Returns none when no handler exists."
+   "Expands macro `name`. Returns nil when no handler exists."
    reg = _ensure_registry(reg)
    name = _ensure_name(name)
    def handler = get_macro_handler(reg, name)
@@ -412,8 +412,8 @@ fn new_rewriter(int cap=8) dict {
 fn clear_rewriter(dict rw) dict {
    "Clears rewrite rules while preserving object identity."
    rw = _ensure_rewriter(rw)
-   rw = dict_write(rw, "rules", dict(8))
-   rw = dict_write(rw, "rule_order", list(8))
+   rw = dict_set(rw, "rules", dict(8))
+   rw = dict_set(rw, "rule_order", list(8))
    rw
 }
 
@@ -425,11 +425,11 @@ fn register_rewrite(dict rw, str name, any handler) dict {
    mut rules = _rewriter_dict(rw, "rules")
    mut order = _rewriter_list(rw, "rule_order")
    def existed = rules.contains(name)
-   rules = dict_write(rules, name, handler)
-   rw = dict_write(rw, "rules", rules)
+   rules = dict_set(rules, name, handler)
+   rw = dict_set(rw, "rules", rules)
    if !existed {
       order = order.append(name)
-      rw = dict_write(rw, "rule_order", order)
+      rw = dict_set(rw, "rule_order", order)
    }
    rw
 }

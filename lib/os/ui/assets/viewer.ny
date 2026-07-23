@@ -5,6 +5,7 @@
 ;; - std.os.ui.render.scene
 module std.os.ui.assets.viewer(
    MONO_FONT_CANDIDATES, EDITOR_FONT_CANDIDATES, UI_FONT_CANDIDATES, TERM_FONT_DEFAULT, TERM_FONT_CANDIDATES,
+   GLTF_ASSET_DEFAULT_ROOTS,
    mono_font, editor_font, ui_font,
    gltf_asset_root_envs, gltf_asset_roots, gltf_asset_catalog, resolve_gltf_asset_path,
    list_gltf_asset_names, prefetch_gltf_asset, load_named_scene,
@@ -69,6 +70,13 @@ def list UI_FONT_CANDIDATES = [
    "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
 ]
 
+;; Ordered local development roots. Environment roots still take precedence.
+;; `tmp/assets/models` is intentionally optional: releases do not ship tmp/.
+def list GLTF_ASSET_DEFAULT_ROOTS = [
+   "build/cache/assets/models",
+   "tmp/assets/models"
+]
+
 fn mono_font(int size, candidates=0, int font_filter=-1) int {
    "Runs the mono font operation."
    ui_runtime.mono_font(size, common.value_or(candidates, MONO_FONT_CANDIDATES), font_filter)
@@ -91,8 +99,8 @@ fn gltf_asset_root_envs() list {
    ["NY_UI_GLTF_ROOTS", "NY_UI_GLTF_ROOT", "NY_GLTF_ASSET_ROOT", "NY_GLTF_ROOT"]
 }
 
-fn gltf_asset_roots(any defaults=["build/cache/assets/models"]) list {
-   "Returns configured glTF asset roots. Local runtime model folders default to build/cache/assets/models; env vars add or override roots."
+fn gltf_asset_roots(any defaults=GLTF_ASSET_DEFAULT_ROOTS) list {
+   "Returns configured glTF asset roots. Environment roots take precedence; local builds use build/cache/assets/models then optional tmp/assets/models."
    asset_catalog.asset_dirs_from_env(defaults, gltf_asset_root_envs())
 }
 

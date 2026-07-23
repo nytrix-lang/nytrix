@@ -16,15 +16,6 @@ static int parse_runtime_call_arity(const char *name) {
   return arity;
 }
 
-static LLVMValueRef ny_cast_to_i64(codegen_t *cg, LLVMValueRef v,
-                                   const char *name) {
-  if (!cg || !v)
-    return v;
-  if (LLVMTypeOf(v) == cg->type_i64)
-    return v;
-  return ny_ptr2i64(cg, v, ny_llvm_name(cg, name));
-}
-
 static LLVMValueRef ny_build_is_ptr_pred(codegen_t *cg, LLVMValueRef v,
                                          const char *name) {
   LLVMValueRef nonzero = LLVMBuildICmp(cg->builder, LLVMIntNE, v, ny_c0(cg),
@@ -73,7 +64,7 @@ static LLVMValueRef ny_gencall_index_raw_i64(codegen_t *cg, scope *scopes,
                                              size_t depth, expr_t *idx_expr,
                                              LLVMValueRef idx_v,
                                              const char *name) {
-  idx_v = ny_cast_to_i64(cg, idx_v, name ? name : "idx");
+  idx_v = ny_llvm_cast_to_i64(cg, idx_v, name ? name : "idx");
   int64_t lit = 0;
   if (ny_expr_literal_i64(idx_expr, &lit))
     return LLVMConstInt(cg->type_i64, (uint64_t)lit, true);
@@ -172,7 +163,7 @@ static LLVMValueRef ny_try_addr_of_local_intrinsic(codegen_t *cg, scope *scopes,
     if (LLVMGetTypeKind(LLVMTypeOf(address)) == LLVMPointerTypeKind)
       return ny_ptr2i64(cg, address, NY_LLVM_NAME(cg, "addr_of_deref"));
     if (LLVMGetTypeKind(LLVMTypeOf(address)) == LLVMIntegerTypeKind)
-      return ny_cast_to_i64(cg, address, "addr_of_deref");
+      return ny_llvm_cast_to_i64(cg, address, "addr_of_deref");
     ny_diag_error(arg->tok,
                   "addr_of(deref) target did not produce a pointer address");
     cg->had_error = 1;
@@ -320,7 +311,7 @@ static const char *ny_gencall_static_surface_type(codegen_t *cg, scope *scopes,
   case NY_E_LITERAL:
     if (e->as.literal.kind == NY_LIT_INT) {
       if (e->tok.kind == NY_T_NIL)
-        return "none";
+        return "nil";
       return ny_gencall_small_int_fits_i64(e->as.literal.as.i) ? "int"
                                                                : "bigint";
     }
@@ -951,11 +942,10 @@ static bool ny_compile_assert_name_is(const char *name) {
 }
 
 static uint64_t ny_proof_proposition_digest(expr_t *condition) {
-  char *json = ny_expr_to_json(condition);
-  uint64_t digest = ny_hash64_cstr(json ? json : "null");
-  if (json)
-    rt_free((int64_t)(uintptr_t)json);
-  /* Zero remains the legacy/no-certificate proof representation. */
+  char *type_name = ny_proof_type_from_expr(condition);
+  uint64_t digest = ny_hash64_cstr(type_name ? type_name : "proof<invalid>");
+  free(type_name);
+  /* Zero remains unavailable as a proof certificate. */
   return digest ? digest : UINT64_C(0x9e3779b97f4a7c15);
 }
 

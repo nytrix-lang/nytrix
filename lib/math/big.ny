@@ -1,5 +1,5 @@
 ;; Keywords: big bigint bignum math
-;; arbitrary-precision integer and fixed-point float arithmetic.
+;; arbitrary-precision integer and native binary floating-point arithmetic.
 ;; References:
 ;; - std.math
 module std.math.big(is_bigint, bigint, bigint_from_int, bigint_from_str, bigint_to_str,
@@ -11,8 +11,10 @@ module std.math.big(is_bigint, bigint, bigint_from_int, bigint_from_str, bigint_
    _big_make, _big_digits, _big_sign, _big_abs_cmp,
    _big_from_int, _big_add_abs, _big_sub_abs, _big_mul_abs, _big_mul_small, _big_add_small, _digits_prepend,
    _big_divmod_abs,
-   BF_SCALE, bf_zero, bf_one, bf_from_float, bf_to_float, bf_add, bf_sub,
-bf_mul, bf_div, bf_neg, bf_abs, bf_sign, bf_eq, bf_lt, bf_gt, bf_le, bf_ge, bf_sqrt, bf_pow_int)
+   BF_PRECISION, BF_SCALE, is_bigfloat, bf_zero, bf_one, bf_with_precision,
+   bf_from_int, bf_from_float, bf_to_float, bf_to_str, bf_precision,
+   bf_add, bf_sub, bf_mul, bf_div, bf_neg, bf_abs, bf_sign,
+   bf_eq, bf_lt, bf_gt, bf_le, bf_ge, bf_sqrt, bf_pow_int)
 
 use std.core
 use std.core.str
@@ -588,144 +590,70 @@ impl int {
    operator ^^ bigint: bigint = xor_bigint
 }
 
-def BF_SCALE = __bigint_from_str("1000000000000000000000000000000000000000000000000000000000000")
+def BF_PRECISION = 256
+def BF_SCALE = __bigfloat_one(BF_PRECISION)
 
-fn bf_zero() bigint {
-   "Returns the BigFloat value 0."
-   bigint(0)
+fn is_bigfloat(any x) bool { __bigfloat_is(x) }
+
+fn bf_zero() any { "Returns native arbitrary-precision zero." __bigfloat_zero(BF_PRECISION) }
+
+fn bf_one() any { "Returns native arbitrary-precision one." __bigfloat_one(BF_PRECISION) }
+
+fn bf_with_precision(any x, int precision) any {
+   "Converts x to a native BigFloat with the requested binary precision."
+   __bigfloat_from_value(x, precision)
 }
 
-fn bf_one() bigint {
-   "Returns the BigFloat value 1.0 in BigFloat representation."
-   BF_SCALE
+fn bf_from_int(any x) any {
+   "Converts an integer or BigInt to native BigFloat."
+   __bigfloat_from_value(x, BF_PRECISION)
 }
 
-fn bf_from_float(f64 f) bigint {
-   "Converts a standard float `f` to a BigFloat. Supports all magnitudes safely."
-   if f == 0.0 { return bigint(0) }
-   def neg = f < 0.0
-   mut af = f if neg { af = 0.0 - f }
-   def e, m = _big_float_floor(_big_float_log10(af)), af / __flt_pow(10.0, e)
-   def m_int = bigint(int(m * 100000000000000.0))
-   mut p = int(46.0 + e)
-   mut res = m_int
-   if p >= 0 {
-      mut sb = Builder(max(16, p + 8))
-      sb = builder_append(sb, "1")
-      mut i = 0 while i < p { sb = builder_append(sb, "0") i += 1 }
-      def s = builder_to_str(sb)
-      builder_free(sb)
-      res = bigint_mul(m_int, bigint_from_str(s))
-   } else {
-      mut sb = Builder(max(16, (0 - p) + 8))
-      sb = builder_append(sb, "1")
-      mut i = 0 while i < (0-p) { sb = builder_append(sb, "0") i += 1 }
-      def s = builder_to_str(sb)
-      builder_free(sb)
-      res = bigint_div(m_int, bigint_from_str(s))
-   }
-   if neg { res = bigint_sub(bigint(0), res) }
-   res
+fn bf_from_float(f64 x) any {
+   "Converts f64 to native BigFloat."
+   __bigfloat_from_value(x, BF_PRECISION)
 }
 
-fn _bf_decimal_prefix_to_float(str s, int max_digits) f64 {
-   mut out = 0.0
-   mut i = 0
-   def n = min(s.len, max_digits)
-   while i < n {
-      def c = load8(s, i)
-      if c < 48 || c > 57 { break }
-      out = out * 10.0 + float(c - 48)
-      i += 1
-   }
-   out
-}
+fn bf_to_float(any x) f64 { "Converts BigFloat to approximate f64." __bigfloat_to_f64(x) }
 
-fn bf_to_float(any a) f64 {
-   "Converts a BigFloat `a` back to a standard float(loses precision beyond ~15 digits)."
-   def neg = bigint_cmp(a, 0) < 0
-   mut abs_a = a
-   if neg { abs_a = bigint_sub(bigint(0), a) }
-   def s, n = bigint_to_str(abs_a), s.len
-   if n == 0 { return 0.0 }
-   mut d = 0.0
-   if n > 15 { d = _bf_decimal_prefix_to_float(s, 15) * __flt_pow(10.0, float(n - 60 - 15)) }
-   else { d = _bf_decimal_prefix_to_float(s, n) * __flt_pow(10.0, -60.0) }
-   if neg { return 0.0 - d }
-   d
-}
+fn bf_to_str(any x) str { "Formats a native BigFloat." __bigfloat_to_str(x) }
 
-fn bf_add(any a, any b) bigint {
-   "Returns a + b(BigFloat)."
-   bigint_add(a, b)
-}
+fn bf_precision(any x) int { "Returns the binary precision of x." __bigfloat_precision(x) }
 
-fn bf_sub(any a, any b) bigint {
-   "Returns a - b(BigFloat)."
-   bigint_sub(a, b)
-}
+fn bf_add(any a, any b) any { "Returns a + b." __bigfloat_add(a, b) }
 
-fn bf_mul(any a, any b) bigint {
-   "Returns a * b(BigFloat)."
-   bigint_div(bigint_mul(a, b), BF_SCALE)
-}
+fn bf_sub(any a, any b) any { "Returns a - b." __bigfloat_sub(a, b) }
 
-fn bf_div(any a, any b) bigint {
-   "Returns a / b(BigFloat). Returns zero if b is zero."
-   if bigint_cmp(b, 0) == 0 { return bigint(0) }
-   bigint_div(bigint_mul(a, BF_SCALE), b)
-}
+fn bf_mul(any a, any b) any { "Returns a * b." __bigfloat_mul(a, b) }
 
-fn bf_neg(any a) bigint {
-   "Returns -a(BigFloat)."
-   bigint_sub(bigint(0), a)
-}
+fn bf_div(any a, any b) any { "Returns a / b, or zero when b is zero." __bigfloat_div(a, b) }
 
-fn bf_abs(any a) bigint {
-   "Returns |a| (BigFloat)."
-   if bigint_cmp(a, 0) < 0 { return bigint_sub(bigint(0), a) }
-   a
-}
+fn bf_neg(any a) any { "Returns -a." __bigfloat_neg(a) }
 
-fn bf_sign(any a) int {
-   "Returns -1, 0, or 1 depending on the sign of BigFloat `a`."
-   bigint_cmp(a, 0)
-}
+fn bf_abs(any a) any { "Returns |a|." __bigfloat_abs(a) }
 
-fn bf_eq(any a, any b) bool { "Returns true if a == b(BigFloat)." bigint_eq(a, b) }
+fn bf_sign(any a) int { "Returns -1, 0, or 1." __bigfloat_cmp(a, bf_zero()) }
 
-fn bf_lt(any a, any b) bool { "Returns true if a < b(BigFloat)." bigint_cmp(a, b) < 0 }
+fn bf_eq(any a, any b) bool { "Returns true if a == b." __bigfloat_cmp(a, b) == 0 }
 
-fn bf_gt(any a, any b) bool { "Returns true if a > b(BigFloat)." bigint_cmp(a, b) > 0 }
+fn bf_lt(any a, any b) bool { "Returns true if a < b." __bigfloat_cmp(a, b) < 0 }
 
-fn bf_le(any a, any b) bool { "Returns true if a <= b(BigFloat)." !bf_gt(a, b) }
+fn bf_gt(any a, any b) bool { "Returns true if a > b." __bigfloat_cmp(a, b) > 0 }
 
-fn bf_ge(any a, any b) bool { "Returns true if a >= b(BigFloat)." !bf_lt(a, b) }
+fn bf_le(any a, any b) bool { "Returns true if a <= b." __bigfloat_cmp(a, b) <= 0 }
 
-fn bf_sqrt(any a) bigint {
-   "Returns sqrt(a) via Newton's method in BigFloat precision(20 iterations)."
-   if bigint_cmp(a, 0) <= 0 { return bigint(0) }
-   def fa = bf_to_float(a)
-   mut r = bf_from_float(_big_float_sqrt(fa))
-   def two = bf_from_float(2.0)
-   mut i = 0
-   while i < 20 {
-      r = bf_div(bf_add(r, bf_div(a, r)), two)
-      i += 1
-   }
-   r
-}
+fn bf_ge(any a, any b) bool { "Returns true if a >= b." __bigfloat_cmp(a, b) >= 0 }
 
-fn bf_pow_int(any a, int n) bigint {
-   "Returns a^n for integer exponent n >= 0(BigFloat)."
-   if n == 0 { return BF_SCALE }
-   mut res = BF_SCALE
-   mut base = a
-   mut exp = n
-   while exp > 0 {
-      if exp % 2 == 1 { res = bf_mul(res, base) }
-      base = bf_mul(base, base)
-      exp = exp / 2
-   }
-   res
+fn bf_sqrt(any a) any { "Returns sqrt(a)." __bigfloat_sqrt(a) }
+
+fn bf_pow_int(any a, int n) any { "Returns a^n for an integer exponent." __bigfloat_pow_int(a, n) }
+
+#main {
+   def a = bigint_from_str("12345678901234567890")
+   def b = bigint_from_int(10)
+   assert(bigint_to_str(bigint_add(a, b)) == "12345678901234567900", "bigint add")
+   assert(bigint_to_str(bigint_mul(bigint(12), bigint(12))) == "144", "bigint mul")
+   assert(bigint_to_str(bigint_pow(bigint(2), bigint(10))) == "1024", "bigint pow")
+   assert(bigint_cmp(bigint(-1), bigint(0)) < 0, "bigint comparison")
+   print("✓ std.math.big self-test passed")
 }

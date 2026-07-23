@@ -15,8 +15,9 @@ static bool ny_builtin_name_is_pure(const char *name) {
   case 't':
     return strcmp(name, "__tag") == 0 || strcmp(name, "__untag") == 0;
   case 'i':
-    return strcmp(name, "__is_int") == 0 || strcmp(name, "__is_ptr") == 0 ||
-           strcmp(name, "__is_ny_obj") == 0 || strcmp(name, "__is_str_obj") == 0 ||
+    return strcmp(name, "__is_nil") == 0 || strcmp(name, "__is_int") == 0 ||
+           strcmp(name, "__is_ptr") == 0 || strcmp(name, "__is_ny_obj") == 0 ||
+           strcmp(name, "__is_str_obj") == 0 ||
            strcmp(name, "__is_float_obj") == 0;
   case 'a':
     return strcmp(name, "__add") == 0 || strcmp(name, "__and") == 0;

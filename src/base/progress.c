@@ -80,6 +80,7 @@ static void fmt_rate(char *buf, size_t size, double rate) {
     snprintf(buf, size, "%.0f/s", rate);
 }
 
+#ifndef _WIN32
 static void ny_progress_draw_locked(void) {
   if (!g_progress_enabled || !g_progress_running)
     return;
@@ -199,7 +200,6 @@ static void ny_progress_draw_locked(void) {
   fflush(stderr);
 }
 
-#ifndef _WIN32
 static void *ny_progress_thread_main(void *arg) {
   (void)arg;
   usleep(200000);

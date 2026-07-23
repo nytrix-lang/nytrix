@@ -8,8 +8,8 @@ static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize, const char **
     *out_s = (const char *)(uintptr_t)v;
     *out_len = (int)rt_tagged_str_len(v);
   } else if (rt_is_nil_imm(v)) {
-    *out_s = "none";
-    *out_len = 4;
+    *out_s = "nil";
+    *out_len = 3;
   } else if (rt_is_true_imm(v)) {
     *out_s = "true";
     *out_len = 4;
@@ -51,8 +51,13 @@ static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize, const char **
         return;
       }
       if (tag == TAG_BIGINT) {
-        extern int64_t rt_bigint_to_str(int64_t a);
         int64_t s_obj = rt_bigint_to_str(v);
+        *out_s = (const char *)(uintptr_t)s_obj;
+        *out_len = (int)rt_tagged_str_len(s_obj);
+        return;
+      }
+      if (tag == TAG_BIGFLOAT) {
+        int64_t s_obj = rt_bigfloat_to_str(v);
         *out_s = (const char *)(uintptr_t)s_obj;
         *out_len = (int)rt_tagged_str_len(s_obj);
         return;
@@ -67,8 +72,8 @@ static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize, const char **
       *out_s = buf;
     }
   } else {
-    *out_s = "none";
-    *out_len = 4;
+    *out_s = "nil";
+    *out_len = 3;
   }
 }
 
@@ -223,7 +228,7 @@ static struct {
   uint64_t len_tag;
   uint64_t type_tag;
   char s[8];
-} _str_none = {((4ULL << 1) | 1), TAG_STR_CONST, "none"},
+} _str_nil = {((3ULL << 1) | 1), TAG_STR_CONST, "nil"},
   _str_true = {((4ULL << 1) | 1), TAG_STR_CONST, "true"},
   _str_false = {((5ULL << 1) | 1), TAG_STR_CONST, "false"};
 
@@ -231,7 +236,7 @@ int64_t rt_to_str(int64_t v) {
   if (is_v_str(v))
     return v;
   if (rt_is_nil_imm(v))
-    return (int64_t)(uintptr_t)_str_none.s;
+    return (int64_t)(uintptr_t)_str_nil.s;
 
   if (rt_is_true_imm(v))
     return (int64_t)(uintptr_t)_str_true.s;

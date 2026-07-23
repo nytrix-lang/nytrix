@@ -3,6 +3,7 @@
 
 #include "base/options.h"
 #include "code/native/ir.h"
+#include "code/native/ir/machine.h"
 #include "parse/ast.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -30,6 +31,10 @@ typedef enum {
   NY_NATIVE_CAP_ELF_OBJECT = 1u << 4,
   NY_NATIVE_CAP_COFF_OBJECT = 1u << 5,
   NY_NATIVE_CAP_MACHO_OBJECT = 1u << 6,
+  /* The target has a Nytrix-owned in-memory executable encoder for the host
+   * architecture.  Text assembly or an object writer alone must not imply
+   * that `--native-only` can execute it live. */
+  NY_NATIVE_CAP_LIVE_JIT = 1u << 7,
 } ny_native_target_cap_t;
 
 typedef struct ny_native_target_info_t {
@@ -43,6 +48,11 @@ typedef struct ny_native_target_info_t {
   size_t pointer_bits;
   const char *gp_arg_regs[8];
   size_t gp_arg_reg_count;
+  /* Floating-point argument registers are target/ABI-owned.  Keep them
+   * separate from GP argument registers because SysV assigns each class an
+   * independent sequence, while other ABIs may impose different rules. */
+  const char *fp_arg_regs[8];
+  size_t fp_arg_reg_count;
   size_t shadow_space_bytes;
   size_t stack_align;
   unsigned caps;
@@ -57,6 +67,8 @@ typedef struct ny_native_tier_plan_t {
   bool prefer_nir_vm;
   bool prefer_ast_fallback;
   const char *backend_name;
+  const char *requested_tier;
+  const char *resolved_tier;
 } ny_native_tier_plan_t;
 
 typedef struct ny_native_handoff_summary_t {
@@ -85,21 +97,21 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
 bool ny_native_tier_plan_init(ny_native_tier_plan_t *plan,
                               const ny_native_target_info_t *target,
                               const ny_options *opt);
-bool ny_native_handoff_summary(const ny_nir_func_t *nir,
+bool ny_native_handoff_summary(const nyir_func_t *nyir,
                                ny_native_handoff_summary_t *summary);
 bool ny_native_write_tier_report_for_program(const program_t *prog,
                                              const ny_options *opt, char *err,
                                              size_t err_len);
 
 /*
- * Build optimized NIR for a program's rt_main and all user functions.
- * On success, the caller owns *out and must free it with ny_nir_func_free.
+ * Build optimized NYIR for a program's rt_main and all user functions.
+ * On success, the caller owns *out and must free it with nyir_func_free.
  * Returns true if at least one function was lowered; false on error.
  * If only functions (not rt_main) lowered, *rt_main_out is left empty.
  */
 bool ny_native_build_nir(const program_t *prog, const ny_options *opt,
-                         ny_nir_func_t *rt_main_out,
-                         ny_nir_func_t *funcs_out, size_t *func_count,
+                         nyir_func_t *rt_main_out,
+                         nyir_func_t *funcs_out, size_t *func_count,
                          size_t max_funcs, char *err, size_t err_len);
 
 bool ny_native_emit_asm(const program_t *prog, const ny_options *opt,
@@ -123,5 +135,7 @@ bool ny_native_eval_ir_binary_file(const char *path, const ny_options *opt,
 bool ny_native_result_oracle_for_program(const program_t *prog,
                                          const ny_options *opt, char *err,
                                          size_t err_len);
+bool ny_native_oracle_fuzz(const ny_options *opt, int count, char *err,
+                           size_t err_len);
 
 #endif

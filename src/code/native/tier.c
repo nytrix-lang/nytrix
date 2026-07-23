@@ -12,6 +12,25 @@ bool ny_native_tier_plan_init(ny_native_tier_plan_t *plan,
     return false;
   memset(plan, 0, sizeof(*plan));
   plan->backend_name = target && target->target_name ? target->target_name : "unknown";
+  plan->requested_tier = opt && opt->native_tier_raw ? opt->native_tier_raw : "auto";
+  /* This planner is used only after a native target has been selected.
+   * Experimental tier requests (including `llvm`) must not claim a different
+   * executable path until that target actually has one. LLVM selection lives
+   * in the top-level backend choice, not in a native-target tier report. */
+  plan->resolved_tier = "baseline";
+  /* Honour explicit tier requests as resolved labels even while the executable
+   * path remains the shared NYIR→Machine IR→encode pipeline. Stencil/fast/opt
+   * select budgets; llvm remains a top-level backend choice. */
+  if (opt && opt->native_tier_raw && opt->native_tier_raw[0]) {
+    if (strcmp(opt->native_tier_raw, "stencil") == 0)
+      plan->resolved_tier = "stencil";
+    else if (strcmp(opt->native_tier_raw, "fast") == 0)
+      plan->resolved_tier = "fast";
+    else if (strcmp(opt->native_tier_raw, "opt") == 0)
+      plan->resolved_tier = "opt";
+    else if (strcmp(opt->native_tier_raw, "baseline") == 0)
+      plan->resolved_tier = "baseline";
+  }
   ny_opt_profile_kind_t profile =
       ny_opt_profile_kind_from_name(opt && opt->opt_profile ? opt->opt_profile
                                                             : NULL);
@@ -21,6 +40,9 @@ bool ny_native_tier_plan_init(ny_native_tier_plan_t *plan,
     plan->hot_threshold = 64;
     plan->cold_threshold = 2;
     plan->cache_score = 100;
+    if (!opt || !opt->native_tier_raw || !opt->native_tier_raw[0] ||
+        strcmp(opt->native_tier_raw, "auto") == 0)
+      plan->resolved_tier = "opt";
     break;
   case NY_OPT_PROFILE_SPEED:
     plan->compile_budget = 500000;
@@ -72,32 +94,32 @@ bool ny_native_tier_plan_init(ny_native_tier_plan_t *plan,
   return true;
 }
 
-bool ny_native_handoff_summary(const ny_nir_func_t *nir,
+bool ny_native_handoff_summary(const nyir_func_t *nyir,
                                ny_native_handoff_summary_t *summary) {
-  if (!nir || !summary)
+  if (!nyir || !summary)
     return false;
   memset(summary, 0, sizeof(*summary));
-  if (nir->len == 0)
+  if (nyir->len == 0)
     return true;
   summary->entry_points = 1;
   summary->deopt_safe_points = 1;
-  for (size_t i = 0; i < nir->len; ++i) {
-    const ny_nir_inst_t *in = &nir->data[i];
+  for (size_t i = 0; i < nyir->len; ++i) {
+    const nyir_inst_t *in = &nyir->data[i];
     switch (in->op) {
-    case NY_NIR_RET:
+    case NYIR_RET:
       summary->return_points++;
       summary->deopt_safe_points++;
       break;
-    case NY_NIR_CALL:
+    case NYIR_CALL:
       summary->call_points++;
       summary->deopt_safe_points++;
       break;
-    case NY_NIR_BR:
-    case NY_NIR_BR_IF:
+    case NYIR_BR:
+    case NYIR_BR_IF:
       summary->branch_points++;
       summary->deopt_safe_points++;
       break;
-    case NY_NIR_LABEL:
+    case NYIR_LABEL:
       summary->label_points++;
       summary->deopt_safe_points++;
       break;

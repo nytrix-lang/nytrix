@@ -6,6 +6,7 @@
 #include <stdbool.h>
 
 bool ny_llvm_init_native(void);
+bool ny_llvm_init_all_targets(void);
 void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level);
 void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
                              const char *opt_pipeline);

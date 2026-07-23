@@ -3652,7 +3652,7 @@ fn _scene_tweak_rgba(dict tweak, any fallback) list {
    out = out.append(clamp01(float(v.get(0, f0))))
    out = out.append(clamp01(float(v.get(1, f1))))
    out = out.append(clamp01(float(v.get(2, f2))))
-   out.append(clamp01(float(v.get(3, f3))))
+   out = out.append(clamp01(float(v.get(3, f3))))
 }
 
 fn _scene_tweak_vec3(dict tweak, str key, any fallback) list {
@@ -3664,7 +3664,7 @@ fn _scene_tweak_vec3(dict tweak, str key, any fallback) list {
    mut out = []
    out = out.append(clamp01(float(v.get(0, f0))))
    out = out.append(clamp01(float(v.get(1, f1))))
-   out.append(clamp01(float(v.get(2, f2))))
+   out = out.append(clamp01(float(v.get(2, f2))))
 }
 
 fn _scene_rgba_from_u32(int c) list {

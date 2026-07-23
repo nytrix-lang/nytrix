@@ -1,3 +1,22 @@
+/*
+ * Portable text-assembly backends for non-primary targets.
+ *
+ * These emit assembly text from high-level NYIR (not x86-64/AArch64 machine
+ * form) for targets that do not yet have a full object/JIT pipeline:
+ *
+ *   bpf      — eBPF / Linux BPF-style stack machine (r10 frame)
+ *   mips     — MIPS-like GPR + stack frame
+ *   powerpc  — PowerPC-like GPR + stack frame
+ *   avr      — 8-bit AVR-ish register/stack model
+ *   wasm     — WebAssembly text (local slots, no classic stack frame)
+ *
+ * Primary production backends remain x86-64 and AArch64 under
+ * code/native/backend and code/native/object. Portable emitters are for
+ * bring-up, cross-checks, and future object writers — they must not be
+ * presented as full native-only substitutes for host x86-64/AArch64.
+ *
+ * Entry points: ny_port_emit_* (see bottom of this file / internal.h).
+ */
 #include "code/native/internal.h"
 
 #include <inttypes.h>
@@ -15,7 +34,7 @@ typedef enum {
 typedef struct {
   ny_native_writer_t *w;
   const ny_native_target_info_t *target;
-  const ny_nir_func_t *nir;
+  const nyir_func_t *nyir;
   ny_port_kind_t kind;
   const char *name;
   const char *pretty;
@@ -37,13 +56,13 @@ static int ny_port_align(int n, int align) {
 
 static void ny_port_compute_frame(ny_port_ctx_t *c) {
   c->max_local_slot = 0;
-  for (size_t i = 0; c->nir && i < c->nir->len; ++i) {
-    const ny_nir_inst_t *in = &c->nir->data[i];
-    if ((in->op == NY_NIR_LOAD_LOCAL || in->op == NY_NIR_STORE_LOCAL) &&
+  for (size_t i = 0; c->nyir && i < c->nyir->len; ++i) {
+    const nyir_inst_t *in = &c->nyir->data[i];
+    if ((in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL) &&
         in->imm >= c->max_local_slot)
       c->max_local_slot = (int)in->imm + 1;
   }
-  int value_slots = c->nir && c->nir->next_value > 0 ? c->nir->next_value : 0;
+  int value_slots = c->nyir && c->nyir->next_value > 0 ? c->nyir->next_value : 0;
   c->local_base = value_slots * c->word_bytes;
   int spill = (value_slots + c->max_local_slot) * c->word_bytes;
   if (c->kind == NY_PORT_BPF)
@@ -63,7 +82,7 @@ static int ny_port_local_off(ny_port_ctx_t *c, int local) {
 }
 
 static bool ny_port_check_value(ny_port_ctx_t *c, int value, const char *what) {
-  if (value < 0 || !c || !c->nir || value >= c->nir->next_value) {
+  if (value < 0 || !c || !c->nyir || value >= c->nyir->next_value) {
     ny_native_set_err(c ? c->err : NULL, c ? c->err_len : 0,
                       "%s NYIR emit: invalid %s v%d",
                       c ? c->pretty : "portable", what ? what : "value",
@@ -160,7 +179,7 @@ static bool ny_port_mov_imm(ny_port_ctx_t *c, const char *reg, int64_t value) {
   return false;
 }
 
-static bool ny_port_binop(ny_port_ctx_t *c, const ny_nir_inst_t *in,
+static bool ny_port_binop(ny_port_ctx_t *c, const nyir_inst_t *in,
                           const char *bpf, const char *mips,
                           const char *ppc, const char *avr_helper,
                           const char *wasm) {
@@ -198,30 +217,30 @@ static bool ny_port_binop(ny_port_ctx_t *c, const ny_nir_inst_t *in,
   return ny_port_store_value(c, in->dst, c->tmp0);
 }
 
-static const char *ny_port_cmp_name(ny_nir_cmp_t cmp) {
+static const char *ny_port_cmp_name(nyir_cmp_t cmp) {
   switch (cmp) {
-  case NY_NIR_CMP_EQ:
+  case NYIR_CMP_EQ:
     return "eq";
-  case NY_NIR_CMP_NE:
+  case NYIR_CMP_NE:
     return "ne";
-  case NY_NIR_CMP_LT:
+  case NYIR_CMP_LT:
     return "lt";
-  case NY_NIR_CMP_LE:
+  case NYIR_CMP_LE:
     return "le";
-  case NY_NIR_CMP_GT:
+  case NYIR_CMP_GT:
     return "gt";
-  case NY_NIR_CMP_GE:
+  case NYIR_CMP_GE:
     return "ge";
   }
   return "eq";
 }
 
-static bool ny_port_cmp(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
+static bool ny_port_cmp(ny_port_ctx_t *c, const nyir_inst_t *in) {
   if (!ny_port_load_value(c, c->tmp0, in->a) ||
       !ny_port_load_value(c, c->tmp1, in->b))
     return false;
   const char *pred = ny_port_cmp_name(in->cmp);
-  size_t cmp_id = c->nir && c->nir->data ? (size_t)(in - c->nir->data) : 0;
+  size_t cmp_id = c->nyir && c->nyir->data ? (size_t)(in - c->nyir->data) : 0;
   switch (c->kind) {
   case NY_PORT_BPF:
     if (!ny_native_printf(c->w,
@@ -232,11 +251,11 @@ static bool ny_port_cmp(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
                           "\t%s = 1\n"
                           ".Lny_cmp_done_%zu:\n",
                           c->tmp0, c->tmp0,
-                          in->cmp == NY_NIR_CMP_EQ ? "==" :
-                          in->cmp == NY_NIR_CMP_NE ? "!=" :
-                          in->cmp == NY_NIR_CMP_LT ? "<" :
-                          in->cmp == NY_NIR_CMP_LE ? "<=" :
-                          in->cmp == NY_NIR_CMP_GT ? ">" : ">=",
+                          in->cmp == NYIR_CMP_EQ ? "==" :
+                          in->cmp == NYIR_CMP_NE ? "!=" :
+                          in->cmp == NYIR_CMP_LT ? "<" :
+                          in->cmp == NYIR_CMP_LE ? "<=" :
+                          in->cmp == NYIR_CMP_GT ? ">" : ">=",
                           c->tmp1, cmp_id, cmp_id, cmp_id, c->tmp0,
                           cmp_id))
       return false;
@@ -266,30 +285,30 @@ static bool ny_port_cmp(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
 static bool ny_port_label(ny_port_ctx_t *c, int64_t label) {
   if (c->kind == NY_PORT_WASM)
     return ny_native_printf(c->w, "\t;; label L%" PRId64 "\n", label);
-  return ny_native_printf(c->w, ".Lny_nir_L%" PRId64 ":\n", label);
+  return ny_native_printf(c->w, ".Lnyir_L%" PRId64 ":\n", label);
 }
 
 static bool ny_port_jump(ny_port_ctx_t *c, int64_t label) {
   switch (c->kind) {
   case NY_PORT_BPF:
-    return ny_native_printf(c->w, "\tgoto .Lny_nir_L%" PRId64 "\n", label);
+    return ny_native_printf(c->w, "\tgoto .Lnyir_L%" PRId64 "\n", label);
   case NY_PORT_MIPS:
-    return ny_native_printf(c->w, "\tb\t.Lny_nir_L%" PRId64 "\n", label);
+    return ny_native_printf(c->w, "\tb\t.Lnyir_L%" PRId64 "\n", label);
   case NY_PORT_POWERPC:
-    return ny_native_printf(c->w, "\tb\t.Lny_nir_L%" PRId64 "\n", label);
+    return ny_native_printf(c->w, "\tb\t.Lnyir_L%" PRId64 "\n", label);
   case NY_PORT_AVR:
-    return ny_native_printf(c->w, "\trjmp\t.Lny_nir_L%" PRId64 "\n", label);
+    return ny_native_printf(c->w, "\trjmp\t.Lnyir_L%" PRId64 "\n", label);
   case NY_PORT_WASM:
     return ny_native_printf(c->w, "\tbr $L%" PRId64 "\n", label);
   }
   return false;
 }
 
-static bool ny_port_call(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
-  int args[NY_NIR_CALL_MAX_ARGS];
+static bool ny_port_call(ny_port_ctx_t *c, const nyir_inst_t *in) {
+  int args[NYIR_CALL_MAX_ARGS];
   int argc = 0;
-  if (!ny_nir_call_args(in, c->nir->next_value, args,
-                        NY_NIR_CALL_MAX_ARGS, &argc, c->err, c->err_len))
+  if (!nyir_call_args(in, c->nyir->next_value, args,
+                        NYIR_CALL_MAX_ARGS, &argc, c->err, c->err_len))
     return false;
   if ((size_t)argc > c->target->gp_arg_reg_count) {
     ny_native_set_err(c->err, c->err_len,
@@ -301,7 +320,7 @@ static bool ny_port_call(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
     if (!ny_port_load_value(c, c->target->gp_arg_regs[i], args[i]))
       return false;
   const char *sym = in->symbol ? in->symbol : "";
-  bool is_ext = (in->flags & NY_NIR_INST_F_EXTERN) != 0;
+  bool is_ext = (in->flags & NYIR_INST_F_EXTERN) != 0;
   (void)is_ext;
   switch (c->kind) {
   case NY_PORT_BPF:
@@ -333,59 +352,59 @@ static bool ny_port_call(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
   return false;
 }
 
-static bool ny_port_emit_inst(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
+static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   switch (in->op) {
-  case NY_NIR_NOP:
+  case NYIR_NOP:
     return true;
-  case NY_NIR_CONST_I64:
+  case NYIR_CONST_I64:
     return ny_port_mov_imm(c, c->tmp0, in->imm) &&
            ny_port_store_value(c, in->dst, c->tmp0);
-  case NY_NIR_COPY:
+  case NYIR_COPY:
     return ny_port_load_value(c, c->tmp0, in->a) &&
            ny_port_store_value(c, in->dst, c->tmp0);
-  case NY_NIR_ADD_I64:
+  case NYIR_ADD_I64:
     return ny_port_binop(c, in, "+", "daddu", "add", "__ny_avr_i64_add",
                          "i64.add");
-  case NY_NIR_SUB_I64:
+  case NYIR_SUB_I64:
     return ny_port_binop(c, in, "-", "dsubu", "subf", "__ny_avr_i64_sub",
                          "i64.sub");
-  case NY_NIR_MUL_I64:
+  case NYIR_MUL_I64:
     return ny_port_binop(c, in, "*", "dmul", "mulld", "__ny_avr_i64_mul",
                          "i64.mul");
-  case NY_NIR_DIV_I64:
+  case NYIR_DIV_I64:
     return ny_port_binop(c, in, "/", "ddiv", "divd", "__ny_avr_i64_div",
                          "i64.div_s");
-  case NY_NIR_MOD_I64:
+  case NYIR_MOD_I64:
     return ny_port_binop(c, in, "%", "drem", "modsd", "__ny_avr_i64_mod",
                          "i64.rem_s");
-  case NY_NIR_AND_I64:
+  case NYIR_AND_I64:
     return ny_port_binop(c, in, "&", "and", "and", "__ny_avr_i64_and",
                          "i64.and");
-  case NY_NIR_OR_I64:
+  case NYIR_OR_I64:
     return ny_port_binop(c, in, "|", "or", "or", "__ny_avr_i64_or",
                          "i64.or");
-  case NY_NIR_XOR_I64:
+  case NYIR_XOR_I64:
     return ny_port_binop(c, in, "^", "xor", "xor", "__ny_avr_i64_xor",
                          "i64.xor");
-  case NY_NIR_SHL_I64:
+  case NYIR_SHL_I64:
     return ny_port_binop(c, in, "<<", "dsllv", "sld", "__ny_avr_i64_shl",
                          "i64.shl");
-  case NY_NIR_SAR_I64:
+  case NYIR_SAR_I64:
     return ny_port_binop(c, in, ">>", "dsrav", "srad", "__ny_avr_i64_sar",
                          "i64.shr_s");
-  case NY_NIR_CMP_I64:
+  case NYIR_CMP_I64:
     return ny_port_cmp(c, in);
-  case NY_NIR_LABEL:
+  case NYIR_LABEL:
     return ny_port_label(c, in->imm);
-  case NY_NIR_LOAD_LOCAL:
+  case NYIR_LOAD_LOCAL:
     return ny_port_load_local(c, c->tmp0, (int)in->imm) &&
            ny_port_store_value(c, in->dst, c->tmp0);
-  case NY_NIR_STORE_LOCAL:
+  case NYIR_STORE_LOCAL:
     return ny_port_load_value(c, c->tmp0, in->a) &&
            ny_port_store_local(c, (int)in->imm, c->tmp0);
-  case NY_NIR_CALL:
+  case NYIR_CALL:
     return ny_port_call(c, in);
-  case NY_NIR_RET:
+  case NYIR_RET:
     if (in->a >= 0 && !ny_port_load_value(c, c->ret_reg, in->a))
       return false;
     return ny_native_printf(c->w, "\t%s\t%s\n",
@@ -393,25 +412,25 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
                             c->kind == NY_PORT_AVR ? "rjmp" :
                             c->kind == NY_PORT_WASM ? "br" : "b",
                             c->epilogue_label);
-  case NY_NIR_BR:
+  case NYIR_BR:
     return ny_port_jump(c, in->imm);
-  case NY_NIR_BR_IF:
+  case NYIR_BR_IF:
     if (!ny_port_load_value(c, c->tmp0, in->a))
       return false;
     switch (c->kind) {
     case NY_PORT_BPF:
-      return ny_native_printf(c->w, "\tif %s != 0 goto .Lny_nir_L%" PRId64 "\n",
+      return ny_native_printf(c->w, "\tif %s != 0 goto .Lnyir_L%" PRId64 "\n",
                               c->tmp0, in->imm);
     case NY_PORT_MIPS:
-      return ny_native_printf(c->w, "\tbnez\t%s, .Lny_nir_L%" PRId64 "\n",
+      return ny_native_printf(c->w, "\tbnez\t%s, .Lnyir_L%" PRId64 "\n",
                               c->tmp0, in->imm);
     case NY_PORT_POWERPC:
       return ny_native_printf(c->w,
-                              "\tcmpdi\t%s, 0\n\tbne\t.Lny_nir_L%" PRId64 "\n",
+                              "\tcmpdi\t%s, 0\n\tbne\t.Lnyir_L%" PRId64 "\n",
                               c->tmp0, in->imm);
     case NY_PORT_AVR:
       return ny_native_printf(c->w,
-                              "\t; branch if %s != 0\n\tbrne\t.Lny_nir_L%" PRId64 "\n",
+                              "\t; branch if %s != 0\n\tbrne\t.Lnyir_L%" PRId64 "\n",
                               c->tmp0, in->imm);
     case NY_PORT_WASM:
       return ny_native_printf(c->w, "\tbr_if $L%" PRId64 "\n", in->imm);
@@ -439,11 +458,40 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const ny_nir_inst_t *in) {
   case NYIR_CAPTURE_RET:
   case NYIR_LOAD_I64:
   case NYIR_STORE_I64:
+  case NYIR_PHI:
+  case NYIR_VEC4_LOAD_F64:
+  case NYIR_VEC4_STORE_F64:
+  case NYIR_VEC4_ADD_F64:
+  case NYIR_VEC4_SUB_F64:
+  case NYIR_VEC4_MUL_F64:
+  case NYIR_VEC4_DIV_F64:
+  case NYIR_VEC4_FMA_F64:
+  case NYIR_VEC4_SET1_F64:
+  case NYIR_VEC4_SHUFFLE_F64:
+  case NYIR_VEC8_LOAD_F32:
+  case NYIR_VEC8_STORE_F32:
+  case NYIR_VEC8_ADD_F32:
+  case NYIR_VEC8_SUB_F32:
+  case NYIR_VEC8_MUL_F32:
+  case NYIR_VEC8_DIV_F32:
+  case NYIR_VEC8_FMA_F32:
+  case NYIR_VEC8_SET1_F32:
+  case NYIR_VEC8_SHUFFLE_F32:
+  case NYIR_VEC4_LOAD_I64:
+  case NYIR_VEC4_STORE_I64:
+  case NYIR_VEC4_ADD_I64:
+  case NYIR_VEC4_SUB_I64:
+  case NYIR_VEC4_AND_I64:
+  case NYIR_VEC4_OR_I64:
+  case NYIR_VEC4_XOR_I64:
+  case NYIR_VEC4_SHL_I64:
+  case NYIR_VEC4_SAR_I64:
+  case NYIR_VEC4_SET1_I64:
   case NYIR_OP_COUNT:
     break;
   }
   ny_native_set_err(c->err, c->err_len, "%s NYIR emit: unsupported op %s",
-                    c->pretty, ny_nir_op_name(in->op));
+                    c->pretty, nyir_op_name(in->op));
   return false;
 }
 
@@ -555,17 +603,17 @@ static bool ny_port_footer(ny_port_ctx_t *c, bool tag_return) {
 
 static bool ny_port_emit_nir(ny_native_writer_t *w,
                              const ny_native_target_info_t *target,
-                             const ny_nir_func_t *nir, const char *func_name,
+                             const nyir_func_t *nyir, const char *func_name,
                              bool tag_return, char *err, size_t err_len,
                              ny_port_kind_t kind, const char *pretty,
                              const char *ret_reg, const char *tmp0,
                              const char *tmp1, int word_bytes) {
-  if (!w || !target || !nir)
+  if (!w || !target || !nyir)
     return false;
   const char *name = func_name && func_name[0] ? func_name : "rt_main";
   ny_port_ctx_t ctx = {.w = w,
                        .target = target,
-                       .nir = nir,
+                       .nyir = nyir,
                        .kind = kind,
                        .name = name,
                        .pretty = pretty,
@@ -593,10 +641,10 @@ static bool ny_port_emit_nir(ny_native_writer_t *w,
     }
   }
 
-  for (size_t i = 0; i < nir->len; ++i) {
-    if (!ny_port_emit_inst(&ctx, &nir->data[i])) {
+  for (size_t i = 0; i < nyir->len; ++i) {
+    if (!ny_port_emit_inst(&ctx, &nyir->data[i])) {
       fprintf(stderr, "native NYIR repro (%s emit failed):\n", pretty);
-      ny_nir_dump(stderr, nir, name);
+      nyir_dump(stderr, nyir, name);
       return false;
     }
   }
@@ -612,43 +660,43 @@ static bool ny_port_emit_nir(ny_native_writer_t *w,
 
 bool ny_native_bpf_emit_nir(ny_native_writer_t *w,
                             const ny_native_target_info_t *target,
-                            const ny_nir_func_t *nir, const char *func_name,
+                            const nyir_func_t *nyir, const char *func_name,
                             bool tag_return, char *err, size_t err_len) {
-  return ny_port_emit_nir(w, target, nir, func_name, tag_return, err, err_len,
+  return ny_port_emit_nir(w, target, nyir, func_name, tag_return, err, err_len,
                           NY_PORT_BPF, "BPF", "r0", "r6", "r7", 8);
 }
 
 bool ny_native_mips_emit_nir(ny_native_writer_t *w,
                              const ny_native_target_info_t *target,
-                             const ny_nir_func_t *nir, const char *func_name,
+                             const nyir_func_t *nyir, const char *func_name,
                              bool tag_return, char *err, size_t err_len) {
-  return ny_port_emit_nir(w, target, nir, func_name, tag_return, err, err_len,
+  return ny_port_emit_nir(w, target, nyir, func_name, tag_return, err, err_len,
                           NY_PORT_MIPS, "MIPS", "$v0", "$t0", "$t1", 8);
 }
 
 bool ny_native_powerpc_emit_nir(ny_native_writer_t *w,
                                 const ny_native_target_info_t *target,
-                                const ny_nir_func_t *nir,
+                                const nyir_func_t *nyir,
                                 const char *func_name, bool tag_return,
                                 char *err, size_t err_len) {
-  return ny_port_emit_nir(w, target, nir, func_name, tag_return, err, err_len,
+  return ny_port_emit_nir(w, target, nyir, func_name, tag_return, err, err_len,
                           NY_PORT_POWERPC, "PowerPC", "r3", "r4", "r5", 8);
 }
 
 bool ny_native_avr_emit_nir(ny_native_writer_t *w,
                             const ny_native_target_info_t *target,
-                            const ny_nir_func_t *nir, const char *func_name,
+                            const nyir_func_t *nyir, const char *func_name,
                             bool tag_return, char *err, size_t err_len) {
-  return ny_port_emit_nir(w, target, nir, func_name, tag_return, err, err_len,
+  return ny_port_emit_nir(w, target, nyir, func_name, tag_return, err, err_len,
                           NY_PORT_AVR, "AVR", "r24:r31", "r24:r31",
                           "r16:r23", 8);
 }
 
 bool ny_native_wasm_emit_nir(ny_native_writer_t *w,
                              const ny_native_target_info_t *target,
-                             const ny_nir_func_t *nir, const char *func_name,
+                             const nyir_func_t *nyir, const char *func_name,
                              bool tag_return, char *err, size_t err_len) {
-  return ny_port_emit_nir(w, target, nir, func_name, tag_return, err, err_len,
+  return ny_port_emit_nir(w, target, nyir, func_name, tag_return, err, err_len,
                           NY_PORT_WASM, "WebAssembly", "$ret", "$t0", "$t1",
                           8);
 }

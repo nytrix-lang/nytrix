@@ -15,9 +15,11 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
+#include <process.h>
 #include <windows.h>
 #define access _access
 #else
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 #ifdef __APPLE__
@@ -455,6 +457,115 @@ char *ny_strdup(const char *s) {
     return NULL;
   memcpy(copy, s, len + 1);
   return copy;
+}
+
+static int ny_path_ends_with(const char *path, const char *suffix) {
+  if (!path || !suffix)
+    return 0;
+  size_t n = strlen(path);
+  size_t m = strlen(suffix);
+  return n >= m && strcmp(path + n - m, suffix) == 0;
+}
+
+static int ny_shlib_spawn(char *const argv[]) {
+  if (!argv || !argv[0])
+    return -1;
+#ifdef _WIN32
+  intptr_t rc = _spawnvp(_P_WAIT, argv[0], (const char *const *)argv);
+  return rc < 0 ? -1 : (int)rc;
+#else
+  pid_t pid = fork();
+  if (pid < 0)
+    return -1;
+  if (pid == 0) {
+    execvp(argv[0], argv);
+    _exit(127);
+  }
+  int status = 0;
+  if (waitpid(pid, &status, 0) < 0)
+    return -1;
+  if (WIFEXITED(status))
+    return WEXITSTATUS(status);
+  return -1;
+#endif
+}
+
+char *ny_ensure_shared_lib(const char *path) {
+  if (!path || !*path)
+    return NULL;
+
+  /* Only rewrite path-like shared objects that have a sibling .c. Bare names
+   * (curl, libz.so) and system libs stay as requested. */
+  int is_shlib = ny_path_ends_with(path, ".so") ||
+                 ny_path_ends_with(path, ".dll") ||
+                 ny_path_ends_with(path, ".dylib");
+  if (!is_shlib)
+    return ny_strdup(path);
+  if (!strchr(path, '/')
+#ifdef _WIN32
+      && !strchr(path, '\\')
+#endif
+  )
+    return ny_strdup(path);
+
+  char src[PATH_MAX];
+  size_t plen = strlen(path);
+  if (plen + 1 >= sizeof(src))
+    return ny_strdup(path);
+  memcpy(src, path, plen + 1);
+  char *dot = strrchr(src, '.');
+  if (!dot)
+    return ny_strdup(path);
+  if (strcmp(dot, ".so") != 0 && strcmp(dot, ".dll") != 0 &&
+      strcmp(dot, ".dylib") != 0)
+    return ny_strdup(path);
+  strcpy(dot, ".c");
+  if (ny_access(src, R_OK) != 0)
+    return ny_strdup(path);
+
+  const char *base = strrchr(path, '/');
+#ifdef _WIN32
+  const char *bslash = strrchr(path, '\\');
+  if (!base || (bslash && bslash > base))
+    base = bslash;
+#endif
+  base = base ? base + 1 : path;
+
+  char cache_dir[PATH_MAX];
+  ny_join_path(cache_dir, sizeof(cache_dir), ny_get_temp_dir(), "nytrix-shlib");
+  ny_ensure_dir_recursive(cache_dir);
+
+  char out[PATH_MAX];
+  ny_join_path(out, sizeof(out), cache_dir, base);
+
+  struct stat st_src, st_out;
+  int need_build = 1;
+  if (stat(src, &st_src) == 0 && stat(out, &st_out) == 0 &&
+      st_out.st_mtime >= st_src.st_mtime)
+    need_build = 0;
+
+  if (need_build) {
+    const char *cc = getenv("CC");
+    if (!cc || !*cc)
+      cc = "cc";
+    char *argv[] = {
+        (char *)cc,
+        (char *)"-shared",
+#ifndef _WIN32
+        (char *)"-fPIC",
+#endif
+        (char *)"-O2",
+        (char *)"-o",
+        out,
+        src,
+        NULL,
+    };
+    if (ny_shlib_spawn(argv) != 0 || ny_access(out, R_OK) != 0) {
+      /* Fall back to the requested path if build failed (may still exist). */
+      return ny_strdup(path);
+    }
+  }
+  return ny_strdup(out);
 }
 
 bool ny_env_enabled(const char *name) {

@@ -98,6 +98,12 @@ static inline void ny_join_path(char *out, size_t out_len, const char *dir, cons
 bool ny_extract_line(const char *src, int line, const char **out_start, size_t *out_len);
 
 char *ny_strdup(const char *s);
+
+/* If path names a project-local shared object with a sibling .c source,
+ * build (or reuse) <tmpdir>/nytrix-shlib/<basename> and return that path
+ * (malloc'd). Otherwise return a copy of path. Caller always frees. */
+char *ny_ensure_shared_lib(const char *path);
+
 static inline bool ny_env_is_truthy(const char *value) {
   if (!value || !*value)
     return false;
@@ -310,6 +316,49 @@ const char *ny_default_cache_root_dir(void);
 char *ny_get_executable_path(void);
 char *ny_get_executable_dir(void);
 
-#endif
-
 void ny_print_snippet(const char *src, int line, int col, int len, const char *color);
+
+#include <errno.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+static inline bool ny_write_all(int fd, const void *buf, size_t len) {
+  const char *p = (const char *)buf;
+  while (len > 0) {
+    ssize_t n = write(fd, p, len);
+    if (n < 0) {
+      if (errno == EINTR)
+        continue;
+      return false;
+    }
+    p += n;
+    len -= (size_t)n;
+  }
+  return true;
+}
+
+static inline bool ny_parse_int(const char *s, int *out) {
+  if (!s || !*s || !out)
+    return false;
+  char *end = NULL;
+  errno = 0;
+  long v = strtol(s, &end, 10);
+  if (end == s || *end != '\0' || errno == ERANGE || v < -2147483647L - 1 || v > 2147483647L)
+    return false;
+  *out = (int)v;
+  return true;
+}
+
+static inline bool ny_parse_f64(const char *s, double *out) {
+  if (!s || !*s || !out)
+    return false;
+  char *end = NULL;
+  errno = 0;
+  double v = strtod(s, &end);
+  if (end == s || *end != '\0' || errno == ERANGE)
+    return false;
+  *out = v;
+  return true;
+}
+
+#endif

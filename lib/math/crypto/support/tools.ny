@@ -113,7 +113,7 @@ fn bytes_fixed_from_bigint(any x, int n) list {
       pad = pad.append(0)
       i += 1
    }
-   pad.extend(bs0)
+   pad = pad.extend(bs0)
 }
 
 fn bytes_ascii(list bs) str {

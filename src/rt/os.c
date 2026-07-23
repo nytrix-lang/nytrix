@@ -41,42 +41,11 @@
 #endif
 #ifdef __APPLE__
 #include <spawn.h>
-extern char **environ;
-#elif !defined(_WIN32)
-extern char **environ;
 #endif
 #ifdef __APPLE__
 extern int openpty(int *amaster, int *aslave, char *name, struct termios *termp,
                    struct winsize *winp);
 #endif
-int64_t rt_call0(int64_t f);
-int64_t rt_call1(int64_t f, int64_t a0);
-int64_t rt_call2(int64_t f, int64_t a0, int64_t a1);
-int64_t rt_call3(int64_t f, int64_t a0, int64_t a1, int64_t a2);
-int64_t rt_call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
-int64_t rt_call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4);
-int64_t rt_call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5);
-int64_t rt_call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                 int64_t a6);
-int64_t rt_call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                 int64_t a6, int64_t a7);
-int64_t rt_call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                 int64_t a6, int64_t a7, int64_t a8);
-int64_t rt_call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9);
-int64_t rt_call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10);
-int64_t rt_call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11);
-int64_t rt_call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
-                  int64_t a12);
-int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
-                  int64_t a12, int64_t a13);
-int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
-                  int64_t a12, int64_t a13, int64_t a14);
 int64_t rt_tty_install_cleanup(void);
 
 static char **ny_native_argv(intptr_t rargv, bool *needs_free) {
@@ -126,7 +95,7 @@ static char **ny_native_envp(intptr_t renvp, bool *needs_free) {
 }
 #endif
 
-#if defined(__linux__) && defined(rt_x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(rt_x86_64__))
 int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_t e, int64_t f) {
   long rn = (n & 1) ? (n >> 1) : n;
   long ra = a;
@@ -140,15 +109,22 @@ int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_
     rb = (b & 1) ? (b >> 1) : b;
     rc = (c & 1) ? (c >> 1) : c;
   }
-  register long _num rt_asm__("rax") = rn;
-  register long _arg1 rt_asm__("rdi") = ra;
-  register long _arg2 rt_asm__("rsi") = rb;
-  register long _arg3 rt_asm__("rdx") = rc;
-  register long _arg4 rt_asm__("r10") = rd;
-  register long _arg5 rt_asm__("r8") = re;
-  register long _arg6 rt_asm__("r9") = rf;
-  rt_asm__ rt_volatile__("syscall\n" : "+r"(_num) : "r"(_arg1), "r"(_arg2), "r"(_arg3), "r"(_arg4),
-                         "r"(_arg5), "r"(_arg6) : "rcx", "r11", "memory");
+  switch (rn) {
+  case 10:  /* mprotect */
+  case 56:  /* clone */
+  case 57:  /* fork */
+  case 58:  /* vfork */
+    return (int64_t)(((uint64_t)(long)(-EPERM) << 1) | 1);
+  }
+  register long _num __asm__("rax") = rn;
+  register long _arg1 __asm__("rdi") = ra;
+  register long _arg2 __asm__("rsi") = rb;
+  register long _arg3 __asm__("rdx") = rc;
+  register long _arg4 __asm__("r10") = rd;
+  register long _arg5 __asm__("r8") = re;
+  register long _arg6 __asm__("r9") = rf;
+  __asm__ __volatile__("syscall\n" : "+r"(_num) : "r"(_arg1), "r"(_arg2), "r"(_arg3), "r"(_arg4),
+                       "r"(_arg5), "r"(_arg6) : "rcx", "r11", "memory");
   return (int64_t)(((uint64_t)_num << 1) | 1);
 }
 #else
@@ -1977,13 +1953,13 @@ static int64_t rt_async_raw(int64_t v) {
 }
 
 static int64_t rt_async_now_ms(void) {
-  struct timespec ts;
 #if defined(_WIN32)
-  timespec_get(&ts, TIME_UTC);
+  return (int64_t)GetTickCount64();
 #else
+  struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
-#endif
   return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+#endif
 }
 
 static void rt_async_ready_push(rt_async_task *t) {

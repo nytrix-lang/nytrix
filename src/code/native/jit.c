@@ -1,6 +1,8 @@
 #include "code/native/native.h"
 #include "code/native/object/internal.h"
+#include "code/native/ir/machine.h"
 #include "code/jit.h"
+#include "wire/cache.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -144,7 +146,7 @@ static void ny_native_jit_load_link(const char *library, void *ctx) {
 }
 
 static bool ny_native_jit_compile_aarch64_bundle(
-    const ny_nir_func_t *top, const ny_nir_func_t *funcs,
+    const nyir_func_t *top, const nyir_func_t *funcs,
     const char *const *names, size_t func_count,
     const ny_native_target_info_t *target, ny_native_jit_image_t *image,
     char *err, size_t err_len) {
@@ -230,6 +232,11 @@ static bool ny_native_jit_compile_aarch64_bundle(
 bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
                            ny_native_jit_image_t *image, char *err,
                            size_t err_len) {
+  nyir_set_cf_mem2reg_enabled(!opt || opt->native_enable_cf_mem2reg);
+  nyir_set_pass_controls(opt ? opt->nyir_disable_pass : NULL,
+                           opt ? opt->nyir_stop_after : NULL);
+  nyir_set_verify_each_pass(opt && opt->nyir_verify);
+  nyir_set_tv_seed(opt ? opt->native_tv_seed_trials : 0);
   if (image)
     *image = (ny_native_jit_image_t){0};
   if (!prog || !opt || !image) {
@@ -239,6 +246,12 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
   ny_native_target_info_t target;
   if (!ny_native_target_info_init(&target, opt)) {
     ny_native_set_err(err, err_len, "native JIT: backend is disabled");
+    return false;
+  }
+  if ((target.caps & (unsigned)NY_NATIVE_CAP_LIVE_JIT) == 0) {
+    ny_native_set_err(err, err_len,
+                      "native JIT is not available for target '%s'; this target supports NYIR text/VM paths only",
+                      target.target_name ? target.target_name : "unknown");
     return false;
   }
 #if defined(__aarch64__) || defined(_M_ARM64)
@@ -259,13 +272,41 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
   return false;
 #endif
 
-  ny_nir_func_t top = {0};
-  ny_nir_func_t funcs[64] = {{0}};
+  nyir_func_t top = {0};
+  nyir_func_t funcs[NY_NATIVE_LIVE_MAX_FUNCS] = {{0}};
   size_t func_count = 0;
-  if (!ny_native_build_nir(prog, opt, &top, funcs, &func_count, 64, err,
+  if (!ny_native_build_nir(prog, opt, &top, funcs, &func_count,
+                           NY_NATIVE_LIVE_MAX_FUNCS, err,
                            err_len) || top.len == 0)
     goto fail_nir;
-  const char *names[64] = {0};
+  /* Consume the shared machine form stream as a hard gate before the host
+   * in-memory encoder. The x86-64/AArch64 byte encoders still lower from the
+   * verified NYIR that produced this machine form; both forms must agree. */
+  {
+    char mach_err[256] = {0};
+    ny_mach_func_t mach = {0};
+    if (!ny_mach_lower_nir(&top, &mach, mach_err, sizeof(mach_err)) ||
+        !ny_mach_verify(&mach, mach_err, sizeof(mach_err))) {
+      ny_native_set_err(err, err_len, "native JIT: machine form gate failed for rt_main: %s",
+                        mach_err[0] ? mach_err : "verify");
+      ny_mach_func_free(&mach);
+      goto fail_nir;
+    }
+    ny_mach_func_free(&mach);
+    for (size_t i = 0; i < func_count; ++i) {
+      mach = (ny_mach_func_t){0};
+      if (!ny_mach_lower_nir(&funcs[i], &mach, mach_err, sizeof(mach_err)) ||
+          !ny_mach_verify(&mach, mach_err, sizeof(mach_err))) {
+        ny_native_set_err(err, err_len,
+                          "native JIT: machine form gate failed for function %zu: %s",
+                          i, mach_err[0] ? mach_err : "verify");
+        ny_mach_func_free(&mach);
+        goto fail_nir;
+      }
+      ny_mach_func_free(&mach);
+    }
+  }
+  const char *names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
   size_t name_count = 0;
   for (size_t i = 0; i < prog->body.len && name_count < func_count; ++i) {
     const stmt_t *stmt = prog->body.data[i];
@@ -282,21 +323,75 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
             &top, funcs, names, func_count, &target, image, err, err_len))
       goto fail_nir;
     for (size_t i = 0; i < func_count; ++i)
-      ny_nir_func_free(&funcs[i]);
-    ny_nir_func_free(&top);
+      nyir_func_free(&funcs[i]);
+    nyir_func_free(&top);
     return true;
   }
 
   ny_obj_buf_t code = {0};
   ny_x64_obj_symbol_def_t defs[256];
-  ny_x64_obj_reloc_t relocs[256];
+  ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS];
   size_t def_count = 0, reloc_count = 0;
-  if (!ny_x64_obj_build_bundle(&top, funcs, names, func_count, &target,
+  /* Primary independence path: machine form → bytes. Fall back to the legacy
+   * NYIR object encoder only when machine form encode rejects the shape. */
+  bool used_mir = false;
+  const char *encode_path = "machine";
+  /* Tier-0 stencil: const/local shell; also fold pure helper calls. */
+  if (func_count == 0 &&
+      ny_x64_try_stencil_bundle(&top, &target, &code, defs, &def_count, relocs,
+                                &reloc_count, err, err_len)) {
+    used_mir = true;
+    encode_path = "stencil";
+  } else if (func_count > 0 &&
+             ny_x64_try_stencil_bundle_calls(&top, funcs, names, func_count,
+                                             &target, &code, defs, &def_count,
+                                             relocs, &reloc_count, err,
+                                             err_len)) {
+    used_mir = true;
+    encode_path = "stencil";
+  }
+  if (!used_mir) {
+    ny_mach_func_t top_mach = {0};
+    ny_mach_func_t *fm = NULL;
+    char mach_err[256] = {0};
+    bool mach_ok = ny_mach_lower_nir(&top, &top_mach, mach_err, sizeof(mach_err));
+    if (mach_ok && func_count) {
+      fm = calloc(func_count, sizeof(*fm));
+      if (!fm)
+        mach_ok = false;
+      for (size_t i = 0; mach_ok && i < func_count; ++i)
+        mach_ok = ny_mach_lower_nir(&funcs[i], &fm[i], mach_err, sizeof(mach_err));
+    }
+    if (mach_ok &&
+        ny_x64_mach_build_bundle(&top_mach, fm, names, func_count, &target,
+                                "rt_main", false, &code, defs, &def_count,
+                                relocs, &reloc_count, mach_err,
+                                sizeof(mach_err))) {
+      used_mir = true;
+      encode_path = "machine";
+    } else {
+      ny_obj_free(&code);
+      code = (ny_obj_buf_t){0};
+      def_count = reloc_count = 0;
+    }
+    ny_mach_func_free(&top_mach);
+    if (fm) {
+      for (size_t i = 0; i < func_count; ++i)
+        ny_mach_func_free(&fm[i]);
+      free(fm);
+    }
+  }
+  if (!used_mir &&
+      !ny_x64_obj_build_bundle(&top, funcs, names, func_count, &target,
                                "rt_main", false, &code, defs, &def_count,
                                relocs, &reloc_count, err, err_len)) {
     ny_obj_free(&code);
     goto fail_nir;
   }
+  if (!used_mir)
+    encode_path = "nyir";
+  if (opt && opt->verbose >= 2)
+    fprintf(stderr, "native jit encoder=%s\n", encode_path);
 
   const size_t stub_size = 16;
   size_t used = ny_native_jit_align(code.len, 16);
@@ -309,6 +404,24 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
   }
   memset(memory, 0x90, alloc_size);
   memcpy(memory, code.data, code.len);
+  /* Stencil cache: persist self-contained code (zero relocs) so subsequent
+   * runs skip parse + lower + encode entirely.  The cache is an ELF shared
+   * object and is therefore intentionally unavailable on Windows. */
+#ifndef _WIN32
+  if (reloc_count == 0 && prog && prog->raw_src && prog->raw_src_len > 0) {
+    char *cache_path =
+        ny_jit_stencil_cache_path(prog->raw_src, opt ? opt->opt_level : 0);
+    if (cache_path) {
+      ny_jit_stencil_cache_save(cache_path, code.data, code.len, "rt_main");
+      free(cache_path);
+    }
+  } else if (opt && opt->verbose >= 2) {
+    fprintf(stderr, "stencil skip: relocs=%zu prog=%p raw=%p len=%zu\n",
+            reloc_count, (void*)prog,
+            (void*)(prog ? (const void*)prog->raw_src : 0),
+            prog ? prog->raw_src_len : 0);
+  }
+#endif
   ny_obj_free(&code);
 
   for (size_t i = 0; i < reloc_count; ++i) {
@@ -380,13 +493,13 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
   image->size = alloc_size;
   image->entry = memory + defs[entry_index].off;
   for (size_t i = 0; i < func_count; ++i)
-    ny_nir_func_free(&funcs[i]);
-  ny_nir_func_free(&top);
+    nyir_func_free(&funcs[i]);
+  nyir_func_free(&top);
   return true;
 
 fail_nir:
   for (size_t i = 0; i < func_count; ++i)
-    ny_nir_func_free(&funcs[i]);
-  ny_nir_func_free(&top);
+    nyir_func_free(&funcs[i]);
+  nyir_func_free(&top);
   return false;
 }
