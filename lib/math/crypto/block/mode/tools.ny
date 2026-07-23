@@ -49,7 +49,7 @@ fn _abc_block_int(list data, int off, int block_size) any {
 }
 
 fn _abc_append_fixed(list out, any value, int block_size) list {
-   out.extend(support.bytes_fixed_from_bigint(value, block_size))
+   return out.extend(support.bytes_fixed_from_bigint(value, block_size))
 }
 
 fn addition_block_chaining_roll(list ecb_ciphertext, list iv, int block_size=16) any {

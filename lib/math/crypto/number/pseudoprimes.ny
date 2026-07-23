@@ -20,7 +20,7 @@ fn _pp_index(list xs, any v) int {
 
 fn _pp_set_add(list xs, any v) list {
    if _pp_index(xs, v) >= 0 { return xs }
-   xs.append(v)
+   return xs.append(v)
 }
 
 fn _pp_set_intersect(list a, list b) list {

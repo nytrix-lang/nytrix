@@ -73,7 +73,8 @@ fn _push_unique(list lst, any item) list {
       if eq(lst.get(i), item) { return lst }
       i += 1
    }
-   lst.append(item)
+   lst = lst.append(item)
+   lst
 }
 
 fn _build_candidates(any dev_id) list {

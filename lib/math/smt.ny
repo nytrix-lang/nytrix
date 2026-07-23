@@ -36,7 +36,7 @@ solve_qf_bv_bytes_hex, solve_qf_bv_ascii)
 
 use std.core
 use std.os.ffi (
-   dlsym, call0, call0_ptr, call1, call1_ptr, call2, call2_ptr, call2_ptr_u32, call3, call3_ptr,
+   dlsym, dlopen_checked, RTLD_NOW, RTLD_GLOBAL, call0, call0_ptr, call1, call1_ptr, call2, call2_ptr, call2_ptr_u32, call3, call3_ptr,
    call3_ptr_u64_ptr, call3_ptr_u32_ptr, call3_ptr_ptr_u32, call4, call4_ptr, call5, call5_ptr,
    call4_ptr_ptr_ptr_ptr_void, malloc, free, cstr,
 )
@@ -161,7 +161,10 @@ fn _ffi_int(any v) int {
 
 fn _load() bool {
    if _z3 { return true }
-   def h = backends.backend_dlopen_checked("z3", "z3", "Z3_mk_config")
+   if !backends.native_enabled("z3") { return false }
+   ;; Keep optional-backend discovery out of the diagnostic registry: on macOS
+   ;; an unavailable dylib must simply make this capability false.
+   def h = dlopen_checked("z3", "Z3_mk_config", RTLD_NOW() | RTLD_GLOBAL())
    if !h { return false }
    _z3 = h
    _p_global_param_set = dlsym(h, "Z3_global_param_set")

@@ -15,6 +15,23 @@ static inline const char *ny_llvm_name(codegen_t *cg, const char *name) {
 }
 #define NY_LLVM_NAME(cg, name) ny_llvm_name((cg), (name))
 
+static inline LLVMValueRef ny_ptr2i64(codegen_t *cg, LLVMValueRef v,
+                                      const char *n);
+
+static inline LLVMValueRef ny_llvm_cast_to_i64(codegen_t *cg, LLVMValueRef v,
+                                                const char *name) {
+  if (!cg || !v || LLVMTypeOf(v) == cg->type_i64)
+    return v;
+  return ny_ptr2i64(cg, v, ny_llvm_name(cg, name));
+}
+
+/* Kept as the established gencall spelling while all lowering paths share
+ * one implementation. */
+static inline LLVMValueRef ny_cast_to_i64(codegen_t *cg, LLVMValueRef v,
+                                          const char *name) {
+  return ny_llvm_cast_to_i64(cg, v, name);
+}
+
 #define NY_SEMA_ASSERT(stmt, kind)                                                               \
   do {                                                                                           \
     const stmt_t *ny_sema_stmt__ = (stmt);                                                       \
@@ -425,6 +442,8 @@ void ny_diag_warning_code(token_t tok, int code, const char *fmt, ...);
 void ny_diag_hint(const char *fmt, ...);
 void ny_diag_fix(const char *fmt, ...);
 void ny_diag_note_tok(token_t tok, const char *fmt, ...);
+void ny_diag_error_context(token_t tok, const char *primary_msg, const char *context,
+                           const char *suggestion);
 void ny_emit_trace_loc_force(codegen_t *cg, token_t tok);
 /* Enhanced error reporting */
 void ny_diag_error_with_context(token_t tok, const char *primary_msg, const char *common_cause,

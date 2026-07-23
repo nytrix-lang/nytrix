@@ -144,7 +144,7 @@ def RECT_PACK_HEURISTIC_BF = 1
 fn _node_new(list nodes, any x, any y, any nxt) int {
    def d = [x, y, nxt]
    def idx = nodes.len
-   nodes.append(d)
+   nodes = nodes.append(d)
    idx
 }
 
@@ -359,7 +359,7 @@ fn rect_pack(dict ctx, list rects) int {
    }
    mut sorted = list(n)
    i = 0
-   while i < n { sorted.append(0) i += 1 }
+   while i < n { sorted = sorted.append(0) i += 1 }
    i = 0
    while i < n {
       def r = rects.get(i)

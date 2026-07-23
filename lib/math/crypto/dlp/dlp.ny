@@ -25,7 +25,7 @@ fn baby_step_giant_step(any g, any h, any p, any order=nil) any {
    mut i = Z(0)
    mut curr = Z(1)
    while i < m {
-      table = dict_write(table, bigint_to_str(curr), i + Z(1))
+      table = dict_set(table, bigint_to_str(curr), i + Z(1))
       curr = mod(curr * gg, pp)
       i = i + Z(1)
    }
@@ -35,7 +35,7 @@ fn baby_step_giant_step(any g, any h, any p, any order=nil) any {
    while j < m {
       def key = bigint_to_str(gamma)
       if dict_exists(table, key) {
-         def x = j * m + dict_read(table, key) - Z(1)
+         def x = j * m + dict_get(table, key) - Z(1)
          return mod(x, order)
       }
       gamma = mod(gamma * gm_inv, pp)

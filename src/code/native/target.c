@@ -133,13 +133,18 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
   info->float_abi_name = "";
   if (info->target == NY_NATIVE_TARGET_X86_64 && info->abi == NY_NATIVE_ABI_WIN64) {
     static const char *win64_regs[] = {"%rcx", "%rdx", "%r8", "%r9"};
+    static const char *win64_fp_regs[] = {"%xmm0", "%xmm1", "%xmm2", "%xmm3"};
     for (size_t i = 0; i < 4; i++)
       info->gp_arg_regs[i] = win64_regs[i];
+    for (size_t i = 0; i < 4; i++)
+      info->fp_arg_regs[i] = win64_fp_regs[i];
     info->gp_arg_reg_count = 4;
+    info->fp_arg_reg_count = 4;
     info->shadow_space_bytes = 32;
     info->red_zone = false;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_AST_FALLBACK |
-                 NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_NIR_VM;
+                 NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_NIR_VM |
+                 NY_NATIVE_CAP_LIVE_JIT;
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ELF_OBJECT;
     else if (strcmp(info->object_format, "coff") == 0)
@@ -148,13 +153,19 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
       info->caps |= NY_NATIVE_CAP_MACHO_OBJECT;
   } else if (info->target == NY_NATIVE_TARGET_X86_64) {
     static const char *sysv_regs[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
+    static const char *sysv_fp_regs[] = {"%xmm0", "%xmm1", "%xmm2", "%xmm3",
+                                         "%xmm4", "%xmm5", "%xmm6", "%xmm7"};
     for (size_t i = 0; i < 6; i++)
       info->gp_arg_regs[i] = sysv_regs[i];
+    for (size_t i = 0; i < 8; i++)
+      info->fp_arg_regs[i] = sysv_fp_regs[i];
     info->gp_arg_reg_count = 6;
+    info->fp_arg_reg_count = 8;
     info->shadow_space_bytes = 0;
     info->red_zone = true;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_AST_FALLBACK |
-                 NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_NIR_VM;
+                 NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_NIR_VM |
+                 NY_NATIVE_CAP_LIVE_JIT;
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ELF_OBJECT;
     else if (strcmp(info->object_format, "coff") == 0)
@@ -164,13 +175,19 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
   } else if (info->target == NY_NATIVE_TARGET_AARCH64) {
     static const char *aarch64_regs[] = {"x0", "x1", "x2", "x3", "x4", "x5",
                                          "x6", "x7"};
+    static const char *aarch64_fp_regs[] = {"v0", "v1", "v2", "v3", "v4", "v5",
+                                            "v6", "v7"};
     for (size_t i = 0; i < 8; i++)
       info->gp_arg_regs[i] = aarch64_regs[i];
+    for (size_t i = 0; i < 8; i++)
+      info->fp_arg_regs[i] = aarch64_fp_regs[i];
     info->gp_arg_reg_count = 8;
+    info->fp_arg_reg_count = 8;
     info->shadow_space_bytes = 0;
     info->red_zone = false;
     info->pointer_bits = 64;
-    info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_NIR_VM;
+    info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_NIR_VM |
+                 NY_NATIVE_CAP_LIVE_JIT;
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_ELF_OBJECT;
   } else if (info->target == NY_NATIVE_TARGET_X86) {

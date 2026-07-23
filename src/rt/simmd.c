@@ -1476,7 +1476,7 @@ rt_simmd_byte_class_reduce_avx2(const uint8_t *p, size_t n, uint64_t rounds, uin
   return one * (int64_t)rounds;
 }
 
-__attribute__((target("sse2"))) static int64_t
+__attribute__((target("sse2"), unused)) static int64_t
 rt_simmd_byte_class_reduce_sse2(const uint8_t *p, size_t n, uint64_t rounds, uint64_t class_lo,
                                 uint64_t class_hi, int64_t hit, int64_t miss) {
   int64_t one = 0;

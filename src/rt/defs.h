@@ -130,12 +130,41 @@ RT_DEF("__win32_find_first_change", rt_win32_find_first_change, 3, "fn __win32_f
 RT_DEF("__win32_find_next_change", rt_win32_find_next_change, 1, "fn __win32_find_next_change(handle)", "Windows FindNextChangeNotification.")
 RT_DEF("__win32_find_close_change", rt_win32_find_close_change, 1, "fn __win32_find_close_change(handle)", "Windows FindCloseChangeNotification.")
 
-RT_DEF("__big_add_abs", rt_big_add_abs, 2, "fn __big_add_abs(a, b)",
-       "Internal: Native absolute BigInt addition.")
-RT_DEF("__big_sub_abs", rt_big_sub_abs, 2, "fn __big_sub_abs(a, b)",
-       "Internal: Native absolute BigInt subtraction.")
-RT_DEF("__big_mul_abs", rt_big_mul_abs, 2, "fn __big_mul_abs(a, b)",
-       "Internal: Native absolute BigInt multiplication.")
+
+RT_DEF("__bigfloat_is", rt_bigfloat_is, 1, "fn __bigfloat_is(v)",
+       "Returns true when v is a native clean-room BigFloat.")
+RT_DEF("__bigfloat_from_value", rt_bigfloat_from_value, 2,
+       "fn __bigfloat_from_value(v, precision)",
+       "Converts an int, float, BigInt, or BigFloat to native BigFloat.")
+RT_DEF("__bigfloat_zero", rt_bigfloat_zero, 1, "fn __bigfloat_zero(precision)",
+       "Creates native BigFloat zero at the requested binary precision.")
+RT_DEF("__bigfloat_one", rt_bigfloat_one, 1, "fn __bigfloat_one(precision)",
+       "Creates native BigFloat one at the requested binary precision.")
+RT_DEF("__bigfloat_add", rt_bigfloat_add, 2, "fn __bigfloat_add(a, b)",
+       "Adds native BigFloat values without GMP.")
+RT_DEF("__bigfloat_sub", rt_bigfloat_sub, 2, "fn __bigfloat_sub(a, b)",
+       "Subtracts native BigFloat values without GMP.")
+RT_DEF("__bigfloat_mul", rt_bigfloat_mul, 2, "fn __bigfloat_mul(a, b)",
+       "Multiplies native BigFloat values without GMP.")
+RT_DEF("__bigfloat_div", rt_bigfloat_div, 2, "fn __bigfloat_div(a, b)",
+       "Divides native BigFloat values without GMP.")
+RT_DEF("__bigfloat_neg", rt_bigfloat_neg, 1, "fn __bigfloat_neg(a)",
+       "Negates a native BigFloat.")
+RT_DEF("__bigfloat_abs", rt_bigfloat_abs, 1, "fn __bigfloat_abs(a)",
+       "Returns the absolute value of a native BigFloat.")
+RT_DEF("__bigfloat_cmp", rt_bigfloat_cmp, 2, "fn __bigfloat_cmp(a, b)",
+       "Compares native BigFloat values.")
+RT_DEF("__bigfloat_precision", rt_bigfloat_precision, 1,
+       "fn __bigfloat_precision(a)", "Returns a BigFloat binary precision.")
+RT_DEF("__bigfloat_to_f64", rt_bigfloat_to_f64, 1, "fn __bigfloat_to_f64(a)",
+       "Converts native BigFloat to approximate f64.")
+RT_DEF("__bigfloat_sqrt", rt_bigfloat_sqrt, 1, "fn __bigfloat_sqrt(a)",
+       "Computes a native arbitrary-precision square root without GMP.")
+RT_DEF("__bigfloat_pow_int", rt_bigfloat_pow_int, 2,
+       "fn __bigfloat_pow_int(a, exponent)",
+       "Raises a native BigFloat to an integer exponent without GMP.")
+RT_DEF("__bigfloat_to_str", rt_bigfloat_to_str, 1, "fn __bigfloat_to_str(a)",
+       "Formats a native BigFloat.")
 RT_DEF("__bigint_add", rt_bigint_add, 2, "fn __bigint_add(a, b)",
        "Adds two BigInt values using the runtime bigint implementation.")
 RT_DEF("__bigint_sub", rt_bigint_sub, 2, "fn __bigint_sub(a, b)",
@@ -159,6 +188,14 @@ RT_DEF("__bigint_or", rt_bigint_or, 2, "fn __bigint_or(a, b)",
        "Computes bitwise OR for non-negative BigInts using the runtime bigint implementation.")
 RT_DEF("__bigint_xor", rt_bigint_xor, 2, "fn __bigint_xor(a, b)",
        "Computes bitwise XOR for non-negative BigInts using the runtime bigint implementation.")
+RT_DEF("__bigint_and", rt_bigint_and, 2, "fn __bigint_and(a, b)",
+       "Computes bitwise AND for BigInts using the runtime bigint implementation.")
+RT_DEF("__bigint_not", rt_bigint_not, 1, "fn __bigint_not(a)",
+       "Computes bitwise complement (~a = -a - 1) using the runtime bigint implementation.")
+RT_DEF("__bigint_shl", rt_bigint_shl, 2, "fn __bigint_shl(a, b)",
+       "Computes a * 2^b using the runtime bigint implementation.")
+RT_DEF("__bigint_shr", rt_bigint_shr, 2, "fn __bigint_shr(a, b)",
+       "Computes floor(a / 2^b) using the runtime bigint implementation.")
 RT_DEF("__bigint_pow", rt_bigint_pow, 2, "fn __bigint_pow(a, b)",
        "Raises a BigInt to a non-negative BigInt exponent using the runtime "
        "implementation.")
@@ -280,6 +317,7 @@ RT_DEF("__execve", rt_execve, 3, "fn __execve(path, argv, envp)", "Standard exec
 
 RT_DEF("__tag", rt_tag, 1, "fn __tag(v)", "Tags a raw integer.")
 RT_DEF("__untag", rt_untag, 1, "fn __untag(v)", "Untags a Nytrix value.")
+RT_DEF("__is_nil", rt_is_nil, 1, "fn __is_nil(v)", "Checks if value is the nil immediate.")
 RT_DEF("__is_int", rt_is_int, 1, "fn __is_int(v)", "Checks if value is a tagged integer.")
 RT_DEF("__is_ptr", rt_is_ptr, 1, "fn __is_ptr(v)", "Checks if value is a valid pointer.")
 RT_DEF("__ptr_key", rt_ptr_key, 1, "fn __ptr_key(v)",
@@ -345,8 +383,6 @@ RT_DEF("__list_sum_int_range", rt_list_sum_int_range, 3, "fn __list_sum_int_rang
        "Sums integer-like list elements over a tagged index range.")
 RT_DEF("__dict_reserve", rt_dict_reserve, 2, "fn __dict_reserve(d, additional)",
        "Ensures dictionary capacity for additional expected inserts.")
-RT_DEF("__dict_write_fast", rt_dict_write_fast, 3, "fn __dict_write_fast(d, k, v)",
-       "Hot dictionary write helper for compiler-lowered dict.set.")
 RT_DEF("__list_len", rt_list_len, 1, "fn __list_len(lst)",
        "Fast read of the element count (tagged) from a list header.")
 RT_DEF("__list_set_len", rt_list_set_len, 2, "fn __list_set_len(lst, n)",
@@ -541,15 +577,15 @@ RT_DEF("__index_read_probe_enabled", rt_index_read_probe_enabled, 0,
        "fn __index_read_probe_enabled()", "Internal: returns true when index parity probe logging is enabled.")
 RT_DEF("__index_read_probe", rt_index_read_probe, 3, "fn __index_read_probe(tag, idx, path)",
        "Internal: debug parity hook for indexed reads (path: 0 slow, 1 fast).")
-RT_DEF("__trace_loc", rt_trace_loc, 3, "fn __trace_loc(file, line, col)",
+RT_DEF("__trace_loc", rt_trace_loc, 3, "fn __trace_loc(file, line, col) int",
        "Internal: record the last executed source location.")
-RT_DEF("__trace_func", rt_trace_func, 1, "fn __trace_func(name)",
+RT_DEF("__trace_func", rt_trace_func, 1, "fn __trace_func(name) int",
        "Internal: record the current function name.")
-RT_DEF("__trace_enter", rt_trace_enter, 3, "fn __trace_enter(func, file, line)",
+RT_DEF("__trace_enter", rt_trace_enter, 3, "fn __trace_enter(func, file, line) int",
        "Internal: push function onto call stack and record entry.")
-RT_DEF("__trace_exit", rt_trace_exit, 0, "fn __trace_exit()",
+RT_DEF("__trace_exit", rt_trace_exit, 0, "fn __trace_exit() int",
        "Internal: pop function from call stack.")
-RT_DEF("__trace_ret_void", rt_trace_ret_void, 0, "fn __trace_ret_void()",
+RT_DEF("__trace_ret_void", rt_trace_ret_void, 0, "fn __trace_ret_void() int",
        "Internal: trace a return without a printable value.")
 RT_DEF("__trace_ret_tagged", rt_trace_ret_tagged, 1, "fn __trace_ret_tagged(v)",
        "Internal: trace a tagged return value.")
@@ -563,7 +599,7 @@ RT_DEF("__trace_ret_ptr", rt_trace_ret_ptr, 1, "fn __trace_ret_ptr(v)",
        "Internal: trace a pointer return value.")
 RT_DEF("__trace_ret_f64_bits", rt_trace_ret_f64_bits, 1, "fn __trace_ret_f64_bits(v)",
        "Internal: trace an f64 return value encoded as IEEE bits.")
-RT_DEF("__trace_dump", rt_trace_dump, 1, "fn __trace_dump(n)",
+RT_DEF("__trace_dump", rt_trace_dump, 1, "fn __trace_dump(n) int",
        "Internal: dump recent trace entries.")
 RT_DEF("__get_backtrace", rt_get_backtrace, 1, "fn __get_backtrace(n)",
        "Returns the current Nytrix backtrace as a list of [file, line, col, "
@@ -819,4 +855,5 @@ RT_GV("std.core.primitives.__globals_ptr", rt_globals_ptr, int64_t,
 RT_DEF("__print_int", rt_print_int, 1, "fn __print_int(v)", "Fast integer print.")
 RT_DEF("__print_newline", rt_print_newline, 0, "fn __print_newline()", "Fast newline.")
 RT_DEF("__print_str_raw", rt_print_str_raw, 1, "fn __print_str_raw(s)", "Fast string print.")
+RT_DEF("__print_cstr", rt_print_cstr, 1, "fn __print_cstr(p)", "Print null-terminated C string pointer.")
 #undef RT_GV

@@ -164,10 +164,6 @@ static expr_t *stmt_ownership_unary_arg(expr_t *e, const char *name) {
   return e->as.call.args.data[0].val;
 }
 
-static void stmt_ownership_check_live_borrows(codegen_t *cg, scope *scopes,
-                                              size_t depth, binding *source,
-                                              token_t tok, const char *action);
-
 static bool stmt_expr_is_adt_ctor(codegen_t *cg, expr_t *e) {
   char *name = ny_adt_member_call_full_name(cg, e);
   if (!name)
@@ -2758,7 +2754,8 @@ static bool stmt_expr_is_ident_plus_const(expr_t *e, const char *name,
   if (!lhs || lhs->kind != NY_E_IDENT || !lhs->as.ident.name ||
       strcmp(lhs->as.ident.name, name) != 0)
     return false;
-  if (!rhs || rhs->kind != NY_E_LITERAL || rhs->as.literal.kind != NY_LIT_INT)
+  if (!rhs || rhs->kind != NY_E_LITERAL || rhs->as.literal.kind != NY_LIT_INT ||
+      rhs->tok.kind == NY_T_NIL)
     return false;
   int64_t delta = rhs->as.literal.as.i;
   if (strcmp(e->as.binary.op, "-") == 0)
@@ -3239,6 +3236,8 @@ static LLVMValueRef stmt_const_top_level_expr_value(codegen_t *cg,
   if (!cg || !init)
     return NULL;
   if (init->kind == NY_E_LITERAL) {
+    if (init->tok.kind == NY_T_NIL)
+      return ny_c0(cg);
     if (init->as.literal.kind == NY_LIT_INT) {
       if (!ny_small_int_fits_i64(init->as.literal.as.i))
         return NULL;
@@ -3365,6 +3364,7 @@ static bool stmt_expr_is_cond_small_int(codegen_t *cg, scope *scopes,
   switch (e->kind) {
   case NY_E_LITERAL:
     return e->as.literal.kind == NY_LIT_INT &&
+           e->tok.kind != NY_T_NIL &&
            e->as.literal.as.i >= ny_small_int_min &&
            e->as.literal.as.i <= ny_small_int_max;
   case NY_E_IDENT: {
@@ -3424,7 +3424,7 @@ static int stmt_expr_numeric_kind(codegen_t *cg, scope *scopes, size_t depth,
   if (e->kind == NY_E_LITERAL) {
     if (e->as.literal.kind == NY_LIT_FLOAT)
       return 2;
-    if (e->as.literal.kind == NY_LIT_INT)
+    if (e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL)
       return 1;
     return 0;
   }
@@ -3620,7 +3620,8 @@ static bool stmt_expr_ident_lit_eq(expr_t *e, const char **name,
   expr_t *a = e->as.binary.left;
   expr_t *b = e->as.binary.right;
   if (a && b && a->kind == NY_E_IDENT && b->kind == NY_E_LITERAL &&
-      b->as.literal.kind == NY_LIT_INT && a->as.ident.name) {
+      b->as.literal.kind == NY_LIT_INT && b->tok.kind != NY_T_NIL &&
+      a->as.ident.name) {
     if (name)
       *name = a->as.ident.name;
     if (name_len) {
@@ -3635,7 +3636,8 @@ static bool stmt_expr_ident_lit_eq(expr_t *e, const char **name,
     return true;
   }
   if (a && b && b->kind == NY_E_IDENT && a->kind == NY_E_LITERAL &&
-      a->as.literal.kind == NY_LIT_INT && b->as.ident.name) {
+      a->as.literal.kind == NY_LIT_INT && a->tok.kind != NY_T_NIL &&
+      b->as.ident.name) {
     if (name)
       *name = b->as.ident.name;
     if (name_len) {
@@ -4673,7 +4675,7 @@ static bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
     return false;
   switch (e->kind) {
   case NY_E_LITERAL:
-    if (e->as.literal.kind != NY_LIT_INT)
+    if (e->as.literal.kind != NY_LIT_INT || e->tok.kind == NY_T_NIL)
       return false;
     if (out_min)
       *out_min = e->as.literal.as.i;
@@ -5048,7 +5050,8 @@ static bool stmt_try_while_trip_upper_bound(codegen_t *cg, scope *scopes,
 static bool stmt_expr_is_stable_dynamic_trip_bound(expr_t *e) {
   if (!e)
     return false;
-  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT)
+  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT &&
+      e->tok.kind != NY_T_NIL)
     return true;
   return e->kind == NY_E_IDENT && e->as.ident.name;
 }

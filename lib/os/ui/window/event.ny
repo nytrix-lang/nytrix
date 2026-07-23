@@ -71,7 +71,7 @@ fn queue_push(any q, any ev) list {
       q[q.len - 1] = ev
       return q
    }
-   q.append(ev)
+   return q.append(ev)
 }
 
 fn queue_pop(any q) any {

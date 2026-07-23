@@ -178,35 +178,6 @@ static const char *ny_llvm_default_pass_pipeline(int opt_level) {
   return "default<O3>";
 }
 
-static void ny_llvm_count_defined_functions_and_instructions(LLVMModuleRef module,
-                                                             size_t *out_defined_funcs,
-                                                             size_t *out_instructions) {
-  size_t defined_funcs = 0;
-  size_t instructions = 0;
-  if (!module) {
-    if (out_defined_funcs)
-      *out_defined_funcs = 0;
-    if (out_instructions)
-      *out_instructions = 0;
-    return;
-  }
-  for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn; fn = LLVMGetNextFunction(fn)) {
-    if (LLVMIsDeclaration(fn))
-      continue;
-    defined_funcs++;
-    for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(fn); bb; bb = LLVMGetNextBasicBlock(bb)) {
-      for (LLVMValueRef inst = LLVMGetFirstInstruction(bb); inst;
-           inst = LLVMGetNextInstruction(inst)) {
-        instructions++;
-      }
-    }
-  }
-  if (out_defined_funcs)
-    *out_defined_funcs = defined_funcs;
-  if (out_instructions)
-    *out_instructions = instructions;
-}
-
 static const char *ny_llvm_peak_default_pass_pipeline(LLVMModuleRef module) {
   (void)module;
   return "default<O3>";

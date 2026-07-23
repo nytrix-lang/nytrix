@@ -56,6 +56,10 @@
 #include <ws2tcpip.h>
 #endif
 
+#ifndef _WIN32
+extern char **environ;
+#endif
+
 #define NY_MAGIC1 0x545249584E5954ULL
 #define NY_MAGIC2 0x4E59545249584EULL
 #define NY_MAGIC3 0xDEADBEEFCAFEBABEULL
@@ -83,6 +87,15 @@
 #define is_int(v) ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) != 0)
 #define is_ptr(v)                                                                                    \
   (((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) && (uintptr_t)(v) > NY_VALUE_PTR_MIN_ADDR)
+
+#define memset_manual(p, v, n)                                                                     \
+  do {                                                                                             \
+    unsigned char *_p = (unsigned char *)(p);                                                      \
+    unsigned char _v = (unsigned char)(v);                                                         \
+    size_t _n = (n);                                                                               \
+    while (_n-- > 0)                                                                               \
+      *_p++ = _v;                                                                                  \
+  } while (0)
 
 static inline bool rt_env_is_truthy(const char *v) {
   return ny_env_is_truthy(v);
@@ -507,6 +520,7 @@ static inline int64_t rt_mask_ptr(int64_t v) { return (int64_t)((uint64_t)v & ~N
 #define TAG_STR_CONST 121
 #define TAG_BYTES 122
 #define TAG_BIGINT 130
+#define TAG_BIGFLOAT 131
 #define TAG_KWARG 150
 
 static inline int64_t rt_runtime_tag_raw_name(const char *s, size_t n) {
@@ -548,6 +562,8 @@ static inline int64_t rt_runtime_tag_raw_name(const char *s, size_t n) {
     return TAG_BYTES;
   if (n == 6 && memcmp(s, "bigint", 6) == 0)
     return TAG_BIGINT;
+  if (n == 8 && memcmp(s, "bigfloat", 8) == 0)
+    return TAG_BIGFLOAT;
   if (n == 5 && memcmp(s, "kwarg", 5) == 0)
     return TAG_KWARG;
   return 0;
@@ -738,13 +754,15 @@ int64_t rt_drop_owned_slot(int64_t slot_ptr);
 int64_t rt_runtime_cleanup(void);
 int64_t rt_fix_fn_ptr(int64_t fn);
 int64_t rt_flt_box_val(int64_t bits);
+double rt_flt_unbox_double(int64_t v);
+int64_t rt_flt_box_double(double d);
 int64_t rt_str_concat(int64_t a, int64_t b);
 int64_t rt_str_builder_new(int64_t cap_v);
 int64_t rt_str_builder_append(int64_t builder_v, int64_t value);
 int64_t rt_str_builder_to_str(int64_t builder_v);
 int64_t rt_str_builder_free(int64_t builder_v);
 int64_t rt_dict_reserve(int64_t d, int64_t additional);
-int64_t rt_dict_write_fast(int64_t d, int64_t key, int64_t value);
+
 int64_t rt_eq(int64_t a, int64_t b);
 int64_t rt_trace_last_file(void);
 int64_t rt_trace_last_line(void);
@@ -809,6 +827,12 @@ void rt_flt_free(int64_t v);
 int64_t rt_index_read_probe_enabled(void);
 int64_t rt_index_read_probe(int64_t tag, int64_t idx, int64_t path);
 
+int64_t rt_bigint_to_str(int64_t a);
+int64_t rt_bigfloat_to_str(int64_t a);
+int64_t rt_bigint_from_i64_raw(int64_t v);
+int64_t rt_bigint_to_i64_raw(int64_t a);
+int64_t rt_print_i64_raw(int64_t v);
+
 /* Phase 4: GC and FFI Gates */
 #include "rt/ffigates.h"
 #include "rt/gc.h"
@@ -850,6 +874,143 @@ static inline int64_t rt_ffi_call_fast_i_iii(int64_t fn, int64_t a0, int64_t a1,
 
 static inline int64_t rt_ffi_call_fast_i_pi(int64_t fn, int64_t ptr, int64_t idx) {
   return nyFfiFastPII(fn, ptr, idx);
+}
+
+/* FFI call dispatch forward declarations */
+int64_t rt_call0(int64_t f);
+int64_t rt_call0_ptr(int64_t f);
+int64_t rt_call1(int64_t f, int64_t a0);
+int64_t rt_call1_ptr(int64_t f, int64_t a0);
+int64_t rt_call2(int64_t f, int64_t a0, int64_t a1);
+int64_t rt_call2_ptr(int64_t f, int64_t a0, int64_t a1);
+int64_t rt_call2_ptr_u32(int64_t f, int64_t a0, int64_t a1);
+int64_t rt_call3(int64_t f, int64_t a0, int64_t a1, int64_t a2);
+int64_t rt_call3_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2);
+int64_t rt_call3_ptr_u64_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2);
+int64_t rt_call3_ptr_u32_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2);
+int64_t rt_call3_ptr_ptr_u32(int64_t f, int64_t a0, int64_t a1, int64_t a2);
+int64_t rt_call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
+int64_t rt_call4_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
+int64_t rt_call4_ptr_ptr_ptr_ptr_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
+int64_t rt_call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4);
+int64_t rt_call5_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4);
+int64_t rt_call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5);
+int64_t rt_call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                 int64_t a6);
+int64_t rt_call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                 int64_t a6, int64_t a7);
+int64_t rt_call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                 int64_t a6, int64_t a7, int64_t a8);
+int64_t rt_call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9);
+int64_t rt_call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10);
+int64_t rt_call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11);
+int64_t rt_call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
+                  int64_t a12);
+int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
+                  int64_t a12, int64_t a13);
+int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
+                  int64_t a12, int64_t a13, int64_t a14);
+
+/* ========================================================================
+ * ny_value_* — the clean boundary between typed and dynamic worlds.
+ *
+ * TYPED WORLD (compiler, NYIR, native codegen, layout slots):
+ *   i64 = raw 64-bit. No tagging. No shifting.
+ *   Every register, stack slot, function parameter, layout field, and
+ *   ABI slot holds the real value. Arithmetic is raw i64.
+ *
+ * DYNAMIC WORLD (heterogeneous containers, any boxes, runtime dispatch):
+ *   NyValue representation with tag bits for type discrimination.
+ *   Boxing: raw i64 -> tagged NyValue when entering any/dict/list.
+ *   Unboxing: tagged NyValue -> raw i64 when leaving any.
+ *
+ * These are the ONLY boundary points where tag/untag happens.
+ * All tag masks, shifts, and encoding details are private here.
+ * ======================================================================== */
+
+/* Value kind constants for ny_value_kind() */
+#define NY_VALUE_KIND_NIL     0
+#define NY_VALUE_KIND_FALSE   1
+#define NY_VALUE_KIND_TRUE    2
+#define NY_VALUE_KIND_INT     3
+#define NY_VALUE_KIND_PTR     4
+#define NY_VALUE_KIND_NATIVE  5
+
+/* --- Typed world: raw i64 operations (NO tagging, NO allocation) --- */
+
+/* Identity: raw i64 is already raw i64. The typed world never tags. */
+static inline int64_t ny_value_from_i64_raw(int64_t raw) { return raw; }
+static inline int64_t ny_value_to_i64_raw(int64_t v) { return v; }
+
+/* --- Dynamic world: tagged NyValue operations --- */
+
+/* Box a raw i64 into the tagged NyValue representation. */
+static inline int64_t ny_value_from_i64(int64_t raw) {
+  return ny_small_int_fits_i64(raw) ? rt_tag_v(raw) : rt_bigint_from_i64_raw(raw);
+}
+
+/* Unbox a tagged NyValue to raw i64. Caller must ensure is_int(v). */
+static inline int64_t ny_value_to_i64(int64_t v) {
+  return is_int(v) ? (v >> NY_VALUE_INT_SHIFT) : rt_bigint_to_i64_raw(v);
+}
+
+/* Try to unbox a tagged NyValue. Returns 1 and writes *out on success,
+ * returns 0 if v is not a tagged integer. */
+static inline int ny_value_try_i64(int64_t v, int64_t *out) {
+  if (is_int(v)) {
+    *out = v >> NY_VALUE_INT_SHIFT;
+    return 1;
+  }
+  return 0;
+}
+
+/* Check if a raw i64 fits in the tagged representation (62-bit signed range). */
+static inline int ny_value_is_small_int(int64_t raw) {
+  return ny_small_int_fits_i64(raw);
+}
+
+/* Classify a NyValue without extracting it. */
+static inline int ny_value_kind(int64_t v) {
+  if (v == NY_IMM_NIL)    return NY_VALUE_KIND_NIL;
+  if (v == NY_IMM_FALSE)  return NY_VALUE_KIND_FALSE;
+  if (v == NY_IMM_TRUE)   return NY_VALUE_KIND_TRUE;
+  if (is_int(v))          return NY_VALUE_KIND_INT;
+  if (NY_NATIVE_IS(v))    return NY_VALUE_KIND_NATIVE;
+  if (is_ptr(v))          return NY_VALUE_KIND_PTR;
+  return NY_VALUE_KIND_NIL; /* fallback */
+}
+
+/* Check if a NyValue is a heap object (not immediate, not native). */
+static inline int ny_value_is_heap_object(int64_t v) {
+  return is_ptr(v) && !NY_NATIVE_IS(v) && rt_heap_object_ptr(v) != 0;
+}
+
+/* Get the heap tag of a NyValue (0 if not a heap object). */
+static inline int64_t ny_value_heap_tag(int64_t v) {
+  int64_t hp = rt_heap_object_ptr(v);
+  if (!hp) return 0;
+  return *(int64_t *)((char *)(uintptr_t)hp - 8);
+}
+
+/* --- Boundary operations (the only places tagging happens) --- */
+
+/* Box a raw i64 into a dynamic context. Values outside the tagged range use
+ * the existing explicit bigint heap representation until a dedicated boxed
+ * i64 object is introduced. */
+static inline int64_t ny_value_box_i64(int64_t raw) {
+  return ny_value_from_i64(raw);
+}
+
+/* Unbox a dynamic integer to raw i64. Non-integer values retain the legacy
+ * zero fallback through the bigint conversion helper. */
+static inline int64_t ny_value_unbox_i64(int64_t v) {
+  return ny_value_to_i64(v);
 }
 
 #endif

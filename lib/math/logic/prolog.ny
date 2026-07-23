@@ -252,7 +252,8 @@ fn _variables_add(list variables, dict value) list {
       if variables[i].get("name") == value.get("name") { return variables }
       i += 1
    }
-   variables.append(value)
+   variables = variables.append(value)
+   variables
 }
 
 fn _variables_into(any value, list variables) list {

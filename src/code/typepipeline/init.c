@@ -3,6 +3,7 @@
 #include "base/util.h"
 #include "code/nullnarrow.h"
 #include "parse/ast.h"
+#include "parse/proof.h"
 #include "../priv.h"
 #include <stdint.h>
 #include <stdarg.h>

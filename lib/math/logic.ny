@@ -153,7 +153,8 @@ fn prop_simplify(dict proposition) dict {
 
 fn _prop_names_add(list names, str name) list {
    if names.contains(name) { return names }
-   names.append(name)
+   names = names.append(name)
+   names
 }
 
 fn _prop_variables_into(dict proposition, list names) list {

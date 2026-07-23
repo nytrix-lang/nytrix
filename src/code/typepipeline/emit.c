@@ -891,8 +891,11 @@ static void tp_emit_pattern_discriminant(ny_tp_json_t *j, bool *first,
                pattern->as.literal.as.s.data ? pattern->as.literal.as.s.data
                                              : "");
     } else if (pattern->as.literal.kind == NY_LIT_INT) {
-      snprintf(buf, sizeof(buf), "int:%lld",
-               (long long)pattern->as.literal.as.i);
+      if (pattern->tok.kind == NY_T_NIL)
+        snprintf(buf, sizeof(buf), "nil");
+      else
+        snprintf(buf, sizeof(buf), "int:%lld",
+                 (long long)pattern->as.literal.as.i);
     } else if (pattern->as.literal.kind == NY_LIT_BOOL) {
       snprintf(buf, sizeof(buf), "bool:%s",
                pattern->as.literal.as.b ? "true" : "false");
