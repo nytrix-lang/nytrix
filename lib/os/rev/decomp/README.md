@@ -12,6 +12,12 @@ Leaf modules have no dependency on `core.ny`:
   CFG, def-use, and structuring passes.
 - `symbols.ny` owns register aliases and token extraction for def-use slicing.
 - `tools.ny` contains optional external-tool probing and demangling.
+- `elf.ny` owns ELF loading, sections, symbols, relocations, and recovery.
+- `abi.ny` owns register aliases, calling-convention profiles, and stack slots.
+- `cfg.ny` builds basic blocks, jump tables, and control-flow graphs.
+- `smt_proofs.ny` owns proof-backed expression equivalence checks.
+- `syscalls.ny` owns Linux syscall number, argument, and ABI decoding.
+- `type_library.ny` owns known C-library call signatures.
 
 Keep new low-level helpers in a leaf module and import their named symbols into
 `core.ny`. A high-level pass must not import `core.ny`; that would form a cycle.
