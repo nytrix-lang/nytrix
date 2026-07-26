@@ -64,7 +64,9 @@ NY
 #include <time.h>
 
 static int64_t now_ns(void) {
-    return (int64_t)((double)clock() * 1000000000.0 / (double)CLOCKS_PER_SEC);
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
 static int64_t branch_mix(int depth, int seed) {

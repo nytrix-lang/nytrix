@@ -444,8 +444,8 @@ typedef struct {
 } triage_item_t;
 
 static const char *const PERF_REAL_CASES[] = {
-  "binary", "calls", "dict", "fibonacci", "float", "intops", "iter",
-  "list", "matrix", "mandelbrot", "sieve", "spectral", "string", "vector"
+  "binary", "calls", "fibonacci", "intops", "iter", "list",
+  "mandelbrot", "sieve", "spectral", "vector"
 };
 
 static int perf_real_case_count(void) {

@@ -4301,9 +4301,11 @@ static int cmd_public_bench_real(int argc, char **argv) {
   const char *ny_opt = value_after_equals(argc, argv, 3, "--ny-opt", "");
   if (runs < 1) runs = 1;
   if (warmup < 0) warmup = 0;
-  const char *ny_opt_arg = NULL;
+  /* Real C comparisons are release-runtime measurements, independent of the
+   * compiler's deliberately fast -O0 development default. */
+  const char *ny_opt_arg = "-O2";
   const char *ny_profile_arg = NULL;
-  const char *ny_flavor = "native";
+  const char *ny_flavor = "o2";
   if (has_flag_after(argc, argv, 3, "--ny-native") ||
       strcmp(ny_opt, "native") == 0 || strcmp(ny_opt, "none") == 0) {
     ny_opt_arg = NULL;
@@ -4409,7 +4411,15 @@ static int cmd_public_bench_real(int argc, char **argv) {
       (void)string_list_push_take(&failures, make_worker_failure_row(cases[i], "bench-real-output", 1, "", mismatch.data ? mismatch.data : ""));
       free(mismatch.data);
     }
-    double ratio = (ok && c_run.median_elapsed_ns > 0.0) ? ny_run.median_elapsed_ns / c_run.median_elapsed_ns : 0.0;
+    /* Both fixture sides use monotonic nanoseconds, so the public run ratio
+     * measures the workload itself. Keep process duration separate because it
+     * includes startup and output costs. */
+    double ratio = (ok && c_run.median_elapsed_ns > 0.0)
+                       ? ny_run.median_elapsed_ns / c_run.median_elapsed_ns
+                       : 0.0;
+    double process_ratio = (ok && c_run.process_median_ms > 0.0)
+                             ? ny_run.process_median_ms / c_run.process_median_ms
+                             : 0.0;
     double inst_ratio = (ok && c_run.median_instructions > 0.0) ? ny_run.median_instructions / c_run.median_instructions : 0.0;
     str_buf_t row = {0};
     (void)sb_append(&row, "{\"case\":");
@@ -4435,14 +4445,14 @@ static int cmd_public_bench_real(int argc, char **argv) {
                        "\"c_cycles\":%.0f,\"ny_cycles\":%.0f,"
                        "\"c_branches\":%.0f,\"ny_branches\":%.0f,"
                        "\"c_branch_misses\":%.0f,\"ny_branch_misses\":%.0f,"
-                       "\"ratios\":{\"ny_%s_vs_c_o3_run\":%.4f,\"ny_vs_c_elapsed_ns\":%.4f,\"ny_vs_c_instructions\":%.4f}",
+                       "\"ratios\":{\"ny_%s_vs_c_o3_run\":%.4f,\"ny_vs_c_process\":%.4f,\"ny_vs_c_instructions\":%.4f}",
                        c_run.median_elapsed_ns, ny_run.median_elapsed_ns,
                        c_run.process_median_ms, ny_run.process_median_ms,
                        c_run.median_instructions, ny_run.median_instructions,
                        c_run.median_cycles, ny_run.median_cycles,
                        c_run.median_branches, ny_run.median_branches,
                        c_run.median_branch_misses, ny_run.median_branch_misses,
-                       ny_flavor, ratio, ratio, inst_ratio);
+                       ny_flavor, ratio, process_ratio, inst_ratio);
     } else {
       (void)sb_append(&row, ",\"c_elapsed_ns\":null,\"ny_elapsed_ns\":null,\"ratios\":{}");
     }

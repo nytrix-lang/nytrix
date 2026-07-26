@@ -141,8 +141,8 @@ Parser error cap. Use @code{0} to disable the cap.
 
 @table @code
 @item -O0, -O1, -O2, -O3, -O
-Set optimization level. Native output defaults to @code{-O2}; JIT/REPL default
-to @code{-O0}. @code{-O} aliases @code{-O2}.
+Set optimization level. Native output, JIT, and REPL default to @code{-O0} for
+fast development builds. @code{-O} aliases @code{-O2}.
 @item --profile=speed|balanced|compile|size|none|peak
 Select the optimization profile. @code{peak} favors native benchmark speed over
 compile latency.

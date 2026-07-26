@@ -21,8 +21,9 @@ Do not mix those numbers unless compile time is part of the workload.
 | `ny -prof file.ny` | Timing and compiler/runtime stats. | Broader toolchain profile. |
 | `ny perf` | Maintained perf checks. | Regression pass. |
 
-Native `-o` defaults to `-O2`. JIT and REPL default to `-O0` for edit latency.
-Use `--profile=peak` only when compile time can be traded for native speed.
+Native `-o`, JIT, and REPL default to `-O0` for edit latency. Use `-O1` for a
+quick compact native build, `-O2` for ordinary releases, and
+`-O3 --profile=peak` only when compile time can be traded for native speed.
 
 The internally executable host backends are x86-64 and AArch64. Other target
 names are explicit assembly/NYIR inspection backends; selecting one does not
