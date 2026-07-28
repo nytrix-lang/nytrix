@@ -129,7 +129,7 @@
     ];
   }
 
-  function setStageSize(w = 1280, h = 720) {
+  function setStageSize(w = canvas.width || 1280, h = canvas.height || 720) {
     if (stage.width !== w) stage.width = w;
     if (stage.height !== h) stage.height = h;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -286,6 +286,10 @@
       canvas.height = h;
       if (gl) gl.viewport(0, 0, w, h);
     }
+    if (stage.width !== w) stage.width = w;
+    if (stage.height !== h) stage.height = h;
+    canvas.dataset.canvasSize = `${w}x${h}`;
+    canvas.dataset.framebuffer = `${stage.width}x${stage.height}`;
   }
 
   function shader(type, source) {
