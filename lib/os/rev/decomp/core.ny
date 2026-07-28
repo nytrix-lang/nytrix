@@ -28,6 +28,7 @@ use std.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique
 use std.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _set_difference)
 use std.os.rev.decomp.symbols (_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
 use std.os.rev.decomp.annotations (_safe_name, _rename_map, _rename_name, _rename_addr, with_renames, _note_key, _note_record, with_notes, notes, note_at)
+use std.os.rev.decomp.graph (_cg_edge_key, _cg_add_edge, _cg_successors, _cg_predecessors, _cg_reaches, _cg_has_self_edge, _cg_components)
 use "../symbolic.ny" as sym
 use std.os.rev.decomp.elf (
    analyze, arch, arch_profile, disassemble, disassemble_function, elf_header,
@@ -27604,104 +27605,6 @@ fn flatten_calls(any source, any root=0, int depth=2, int max_functions=24, int 
 fn _cg_name(dict bin, dict f) str {
    def addr = int(f.get("value", f.get("addr", 0)))
    _rename_addr(bin, addr, _rename_name(bin, _safe_name(f.get("name", ""), "sub_" + str.to_hex(addr, 0))))
-}
-
-fn _cg_edge_key(dict e) str {
-   e.get("from", "") + "->" + e.get("to", "") + "@" + to_str(e.get("site", 0))
-}
-
-fn _cg_add_edge(list edges, dict edge) list {
-   def k = _cg_edge_key(edge)
-   mut i = 0
-   while i < edges.len {
-      if _cg_edge_key(edges[i]) == k { return edges }
-      i += 1
-   }
-   edges = edges.append(edge)
-   edges
-}
-
-fn _cg_successors(list edges, str name, bool internal_only=true) list {
-   mut out = []
-   mut i = 0
-   while i < edges.len {
-      def e = edges[i]
-      if e.get("from", "") == name && (!internal_only || e.get("internal", false)) {
-         out = _append_unique(out, e.get("to", ""))
-      }
-      i += 1
-   }
-   out
-}
-
-fn _cg_predecessors(list edges, str name, bool internal_only=true) list {
-   mut out = []
-   mut i = 0
-   while i < edges.len {
-      def e = edges[i]
-      if e.get("to", "") == name && (!internal_only || e.get("internal", false)) {
-         out = _append_unique(out, e.get("from", ""))
-      }
-      i += 1
-   }
-   out
-}
-
-fn _cg_reaches(str start, str goal, list edges, int limit=256) bool {
-   if start == goal { return true }
-   mut seen = dict().set(start, true)
-   mut q = [start]
-   mut qi = 0
-   while qi < q.len && qi < limit {
-      def n = q[qi]
-      qi += 1
-      def succ = _cg_successors(edges, n, true)
-      mut i = 0
-      while i < succ.len {
-         def s = succ[i]
-         if s == goal { return true }
-         if !seen.get(s, false) {
-            seen = seen.set(s, true)
-            q = q.append(s)
-         }
-         i += 1
-      }
-   }
-   false
-}
-
-fn _cg_has_self_edge(str name, list edges) bool {
-   mut i = 0
-   while i < edges.len {
-      if edges[i].get("internal", false) && edges[i].get("from", "") == name && edges[i].get("to", "") == name { return true }
-      i += 1
-   }
-   false
-}
-
-fn _cg_components(list names, list edges) list {
-   mut assigned = dict()
-   mut comps = []
-   mut i = 0
-   while i < names.len {
-      def n = names[i]
-      if !assigned.get(n, false) {
-         mut comp = [n]
-         assigned = assigned.set(n, true)
-         mut j = i + 1
-         while j < names.len {
-            def m = names[j]
-            if !assigned.get(m, false) && _cg_reaches(n, m, edges) && _cg_reaches(m, n, edges) {
-               comp = comp.append(m)
-               assigned = assigned.set(m, true)
-            }
-            j += 1
-         }
-         comps = comps.append({"nodes": comp, "recursive": comp.len > 1 || _cg_has_self_edge(n, edges)})
-      }
-      i += 1
-   }
-   comps
 }
 
 fn callgraph(any source, int max_functions=64) dict {
