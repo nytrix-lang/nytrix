@@ -191,6 +191,18 @@ Build the browser runner:
 ./make web-demos
 ```
 
+Build one browser-ready Ny source into a deployable directory:
+
+```bash
+./make web etc/projects/ui/pong.ny --out build/web/pong
+```
+
+`web` currently selects the explicit `wasm-bare` + WebGL2 target. It writes
+the runner, `app.wasm`, `web-report.json`, and `build-manifest.json`; it rejects
+missing browser host APIs before publishing output. It is not
+an Emscripten compatibility spelling: requesting `wasm-emscripten` fails
+clearly until that adapter is implemented.
+
 Check that a Ny source uses only browser-hosted APIs, then run the maintained
 Pong WebGL2 smoke test in headless Chromium:
 

@@ -2891,6 +2891,182 @@ def run_web_check(build_root: Path, kind: str, args: list[str]) -> int:
     log("WEB", "report: " + _rel_or_abs(report_path))
     return 0
 
+def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
+    source: Path | None = None
+    out_dir: Path | None = None
+    assets: list[Path] = []
+    asyncify = True
+    timeout_sec = int((os.environ.get("NYTRIX_WASM_STEP_TIMEOUT") or "120").strip() or "120")
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-h", "--help"):
+            return {"help": True}
+        if a in ("-o", "--out"):
+            if i + 1 >= len(args):
+                raise SystemExit("web: missing value for " + a)
+            out_dir = Path(args[i + 1])
+            i += 2
+            continue
+        if a.startswith("--out="):
+            out_dir = Path(a.split("=", 1)[1])
+            i += 1
+            continue
+        if a in ("--assets", "--asset-root"):
+            if i + 1 >= len(args):
+                raise SystemExit("web: missing value for " + a)
+            assets.append(Path(args[i + 1]))
+            i += 2
+            continue
+        if a.startswith("--assets=") or a.startswith("--asset-root="):
+            assets.append(Path(a.split("=", 1)[1]))
+            i += 1
+            continue
+        if a == "--renderer":
+            if i + 1 >= len(args):
+                raise SystemExit("web: missing value for --renderer")
+            a = "--renderer=" + args[i + 1]
+            i += 2
+        else:
+            i += 1
+        if a.startswith("--renderer="):
+            if a.split("=", 1)[1].strip().lower() != "webgl2":
+                raise SystemExit("web: only --renderer webgl2 is supported")
+            continue
+        if a.startswith("--target="):
+            target = a.split("=", 1)[1].strip().lower()
+            if target != "wasm-bare":
+                raise SystemExit("web: only --target wasm-bare is implemented; wasm-emscripten needs its dedicated adapter")
+            continue
+        if a == "--target":
+            if i >= len(args):
+                raise SystemExit("web: missing value for --target")
+            target = args[i].strip().lower()
+            i += 1
+            if target != "wasm-bare":
+                raise SystemExit("web: only --target wasm-bare is implemented; wasm-emscripten needs its dedicated adapter")
+            continue
+        if a == "--no-asyncify":
+            asyncify = False
+            continue
+        if a == "--timeout":
+            if i >= len(args):
+                raise SystemExit("web: missing value for --timeout")
+            timeout_sec = int(float(args[i]))
+            i += 1
+            continue
+        if a.startswith("--timeout="):
+            timeout_sec = int(float(a.split("=", 1)[1]))
+            continue
+        if a.startswith("-"):
+            raise SystemExit("web: unknown option " + a)
+        if source is not None:
+            raise SystemExit("web: unexpected extra source " + a)
+        source = Path(a)
+    if source is None:
+        raise SystemExit("web: missing Ny source")
+    source = _resolve_wasm_path(source)
+    if out_dir is None:
+        out_dir = build_root / "web" / (source.stem or "app")
+    out_dir = _resolve_wasm_path(out_dir)
+    return {"help": False, "source": source, "out": out_dir, "assets": assets,
+            "asyncify": asyncify, "timeout": max(1, timeout_sec)}
+
+def print_web_help() -> None:
+    print(c("1;36", "Nytrix browser build"))
+    print("")
+    print("Usage:")
+    print("  ./make web game.ny")
+    print("  ./make web game.ny --out build/web/game --renderer webgl2")
+    print("")
+    print("Builds a deployable wasm-bare WebGL2 directory. The target rejects host imports")
+    print("that the browser runner does not implement; wasm-emscripten is not silently substituted.")
+    print("")
+    print("Flags:")
+    print("  --out DIR            deployment output directory")
+    print("  --renderer webgl2    required renderer target (default)")
+    print("  --assets DIR         package an asset root under assets/ (repeatable)")
+    print("  --no-asyncify        omit browser frame-loop instrumentation")
+    print("  --timeout SECONDS    per compiler/linker step limit")
+
+def _copy_web_runner_assets(out_dir: Path) -> None:
+    for name in WEB_DEMO_STATIC_ASSETS:
+        src = WEB_DEMO_ASSET_DIR / name
+        if not src.exists():
+            raise SystemExit(f"web: missing {src.relative_to(ROOT)}")
+        shutil.copy2(src, out_dir / name)
+    for name in WEB_DEMO_SHARED_ASSETS:
+        src = WEB_DEMO_ASSET_DIR.parent / name
+        if not src.exists():
+            raise SystemExit(f"web: missing {src.relative_to(ROOT)}")
+        shutil.copy2(src, out_dir / name)
+
+def run_web(build_root: Path, kind: str, args: list[str]) -> int:
+    """Build one portable Ny source into a deployable wasm-bare WebGL2 directory."""
+    cfg = _parse_web_args(args, build_root)
+    if bool(cfg.get("help", False)):
+        print_web_help()
+        return 0
+    source = cfg["source"]
+    out_dir = cfg["out"]
+    assert isinstance(source, Path) and isinstance(out_dir, Path)
+    compile_source = source
+    if source.suffix == ".nshape":
+        compile_source, extract_err = _extract_nshape_ny_source(source, out_dir / ".ny-src", source.stem or "app")
+        if compile_source is None:
+            raise SystemExit("web: " + extract_err)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    wasm = out_dir / "app.wasm"
+    ir = build_root / "web-ir" / ((compile_source.stem or "app") + ".ll")
+    result = _compile_ny_to_wasm(build_root, kind, compile_source, wasm, ir,
+                                 step_timeout=int(cfg["timeout"]))
+    if not bool(result.get("ok", False)):
+        output = _tail_text(result.get("output", ""), 1600)
+        if output:
+            print(output)
+        raise SystemExit("web: " + str(result.get("detail", "Wasm compilation failed")))
+    imports, detail = _wasm_function_imports(wasm)
+    if imports is None:
+        raise SystemExit("web: " + detail)
+    missing = sorted(imports - _web_host_import_names())
+    if missing:
+        raise SystemExit("web: unsupported browser imports: " + ", ".join("env." + name for name in missing[:6]))
+    if bool(cfg["asyncify"]):
+        async_res = _instrument_wasm_asyncify(wasm, step_timeout=int(cfg["timeout"]))
+        if not bool(async_res.get("ok", False)):
+            raise SystemExit("web: " + str(async_res.get("detail", "asyncify failed")))
+    _copy_web_runner_assets(out_dir)
+    packaged_assets: list[str] = []
+    asset_root = out_dir / "assets"
+    for raw in cfg["assets"]:
+        assert isinstance(raw, Path)
+        src = _resolve_wasm_path(raw)
+        if not src.is_dir():
+            raise SystemExit("web: asset root is not a directory: " + _rel_or_abs(src))
+        dst = asset_root / src.name
+        if dst.exists():
+            raise SystemExit("web: duplicate packaged asset root: " + src.name)
+        asset_root.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dst)
+        packaged_assets.append("assets/" + src.name)
+    source_display = _rel_or_abs(source)
+    demo = {"id": "app", "title": _demo_title_from_source(source_display),
+            "area": "APP", "mode": "webgl", "source": source_display,
+            "wasm": "app.wasm", "wasmKind": "ny", "asyncify": bool(cfg["asyncify"])}
+    (out_dir / "demos-data.js").write_text("window.NYTRIX_WEB_DEMOS = " + json.dumps([demo], indent=2) + ";\n", encoding="utf-8")
+    target = {"kind": "wasm-bare", "host": "browser", "graphics": "webgl2"}
+    report = {"source": source_display, "target": target,
+              "wasm": "app.wasm", "imports": sorted(imports), "unsupported": [], "assets": packaged_assets,
+              "asyncify": bool(cfg["asyncify"]), "softDependencies": []}
+    (out_dir / "web-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    build_manifest = {"source": source_display, "target": target, "artifact": "app.wasm",
+                      "toolchain": {"clang": which("clang") or "", "wasmOpt": which("wasm-opt") or ""},
+                      "assets": packaged_assets, "softDependencies": [], "asyncify": bool(cfg["asyncify"])}
+    (out_dir / "build-manifest.json").write_text(json.dumps(build_manifest, indent=2) + "\n", encoding="utf-8")
+    ok("web: " + _rel_or_abs(out_dir / "index.html"))
+    log("WEB", "report: " + _rel_or_abs(out_dir / "web-report.json"))
+    return 0
+
 def _cross_slug(triple: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.+-]+", "-", triple).strip("-") or "target"
 
@@ -4194,7 +4370,7 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     return rc
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
-    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web-demos", "web-check", "web-test", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -4271,7 +4447,7 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
                 jobs = int(v)
             except Exception:
                 raise SystemExit(f"make: invalid jobs value: {v}")
-        elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web-demos", "web-check", "web-test", "wasm"):
+        elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web", "web-demos", "web-check", "web-test", "wasm"):
             cmds.append(a)
             extra.extend(argv[i + 1 :])
             break
@@ -4337,6 +4513,7 @@ def print_help() -> None:
         ("Run", (
             ("ny/repl/run", "launch the compiler, REPL, or cached -run flow"),
             ("docs", "build documentation portal"),
+            ("web", "build one Ny source as a deployable WebGL2 browser app"),
             ("wasm", "compile a Ny source file to WebAssembly"),
             ("web-check", "verify a Ny source uses only implemented browser host APIs"),
             ("web-test", "build and prove Pong reaches the WebGL2 browser runner"),
@@ -5758,7 +5935,7 @@ def main() -> int:
     build_root, notice = resolve_build_dir()
     first_repl_bootstrap = bootstrap_needed_for_repl(build_root, kind, cmds)
     inspect_cmds = {"env", "targets", "doctor"}
-    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
+    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
     all_tool_style = all(c in tool_style_cmds for c in cmds)
     if all_tool_style and not first_repl_bootstrap:
         # Keep tool invocations clean by default (./make fmt/test/ny...) even if env
@@ -5850,7 +6027,7 @@ def main() -> int:
             targets = ["ny"]
         elif cmd == "docs":
             targets = ["ny", "std", "ny-doc"]
-        elif cmd in ("web-demos", "web-check", "web-test", "wasm"):
+        elif cmd in ("web", "web-demos", "web-check", "web-test", "wasm"):
             targets = ["ny", "std"]
         elif cmd == "std":
             targets = ["std"]
@@ -5912,6 +6089,8 @@ def main() -> int:
             std_file = str(cmake_build_dir(build_root, active_kind) / "std.ny")
             out_dir = str(build_root / "docs")
             rc = run_tool(build_root, active_kind, "ny-doc", [std_file, "-o", out_dir, *extra])
+        elif cmd == "web":
+            rc = run_web(build_root, active_kind, extra)
         elif cmd == "web-demos":
             rc = run_web_demos(build_root, active_kind, extra)
         elif cmd == "web-check":
