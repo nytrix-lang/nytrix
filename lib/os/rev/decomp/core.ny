@@ -32,6 +32,7 @@ use std.os.rev.decomp.graph (_cg_edge_key, _cg_add_edge, _cg_successors, _cg_pre
 use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_balanced_delimiters, _clean_strip_outer_balanced_parens, _clean_strip_outer_parens, _clean_top_level_find, _clean_top_level_split, _clean_literal_int_value)
 use std.os.rev.decomp.arithmetic (_ny_infix_operator, _clean_paren, _clean_literal_zero, _clean_literal_one, _clean_same_expr_text, _clean_const_mul_expr, _clean_div_expr_parts, _clean_const_mul_text, _clean_add_scaled_expr, _clean_sub_mod_expr, _clean_mba_same_expr, _clean_mba_pair_expr, _clean_mba_const_mul_expr, _clean_mba_scaled_pair_expr, _clean_mba_pair_same_unordered, _clean_mba_pair_sum, _clean_mba_pair_xor, _clean_mba_xor_pair_expr, _clean_mba_add_expr, _clean_mba_sub_expr, _clean_mba_expr_once, _clean_simplify_mba_expr, _clean_binary_expr)
 use std.os.rev.decomp.render_text (_clean_token_char, _clean_replace_token, _clean_replace_token_code, _clean_apply_render_renames, _clean_normalize_rip_relative_data_symbols)
+use std.os.rev.decomp.structure (_clean_next_nonblank_index, _clean_compact_blank_lines, _clean_structure_report, _clean_balance_trailing_braces, _clean_switch_block_at, _clean_drop_repeated_switches)
 use "../symbolic.ny" as sym
 use std.os.rev.decomp.elf (
    analyze, arch, arch_profile, disassemble, disassemble_function, elf_header,
@@ -13656,12 +13657,6 @@ fn _clean_collapse_trampoline_labels(str text) str {
    out
 }
 
-fn _clean_next_nonblank_index(list lines, int start) int {
-   mut i = start
-   while i < lines.len && str.strip(lines[i]).len == 0 { i += 1 }
-   i
-}
-
 fn _clean_drop_redundant_gotos(str text) str {
    def lines = str.split(text, "\n")
    mut b = str.Builder(text.len)
@@ -24764,139 +24759,6 @@ fn _clean_normalize_inline_pointer_table_refs_close(str text) str {
       guard += 1
    }
    changed ? out : text
-}
-
-fn _clean_compact_blank_lines(str text) str {
-   def lines = str.split(text, "\n")
-   mut b = str.Builder(text.len)
-   mut blank = 0
-   mut i = 0
-   while i < lines.len {
-      if i == lines.len - 1 && lines[i].len == 0 { break }
-      def raw = str.strip(lines[i])
-      if raw.len == 0 {
-         def j = _clean_next_nonblank_index(lines, i + 1)
-         if j < lines.len && str.strip(lines[j]) == "}" {
-            i += 1
-            continue
-         }
-         if blank > 0 {
-            i += 1
-            continue
-         }
-         blank += 1
-         b = str.builder_append(b, "\n")
-         i += 1
-         continue
-      }
-      blank = 0
-      b = str.builder_append(b, lines[i] + "\n")
-      i += 1
-   }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
-   out
-}
-
-fn _clean_structure_report(str text) dict {
-   mut depth = 0
-   mut min_depth = 0
-   mut opens = 0
-   mut closes = 0
-   mut line = 1
-   mut first_bad_line = 0
-   mut i = 0
-   while i < text.len {
-      def c = load8(text, i)
-      if c == 10 { line += 1 }
-      elif c == 123 {
-         depth += 1
-         opens += 1
-      } elif c == 125 {
-         depth -= 1
-         closes += 1
-         if depth < min_depth {
-            min_depth = depth
-            if first_bad_line == 0 { first_bad_line = line }
-         }
-      }
-      i += 1
-   }
-   {"ok": depth == 0 && min_depth >= 0, "open": opens, "close": closes,
-   "depth": depth, "min_depth": min_depth, "first_bad_line": first_bad_line}
-}
-
-fn _clean_balance_trailing_braces(str text) str {
-   mut depth = 0
-   mut i = 0
-   while i < text.len {
-      def c = load8(text, i)
-      if c == 123 { depth += 1 }
-      elif c == 125 && depth > 0 { depth -= 1 }
-      i += 1
-   }
-   if depth <= 0 { return text }
-   mut b = str.Builder(text.len + depth * 4)
-   b = str.builder_append(b, text)
-   if text.len == 0 || load8(text, text.len - 1) != 10 { b = str.builder_append(b, "\n") }
-   while depth > 0 {
-      b = str.builder_append(b, "}\n")
-      depth -= 1
-   }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
-   out
-}
-
-fn _clean_switch_block_at(list lines, int start) dict {
-   if start < 0 || start >= lines.len { return {"ok": false} }
-   def head = str.strip(lines[start])
-   if !str.startswith(head, "switch(") || !str.endswith(head, "{") { return {"ok": false} }
-   mut depth = 0
-   mut block = ""
-   mut i = start
-   while i < lines.len {
-      def line = lines[i]
-      block = block + line + "\n"
-      mut j = 0
-      while j < line.len {
-         def c = load8(line, j)
-         if c == 123 { depth += 1 }
-         elif c == 125 { depth -= 1 }
-         j += 1
-      }
-      i += 1
-      if depth <= 0 { return {"ok": true, "text": block, "next": i} }
-   }
-   {"ok": false}
-}
-
-fn _clean_drop_repeated_switches(str text) str {
-   def lines = str.split(text, "\n")
-   mut b = str.Builder(text.len)
-   mut last_switch = ""
-   mut i = 0
-   while i < lines.len {
-      if i == lines.len - 1 && lines[i].len == 0 { break }
-      def sw = _clean_switch_block_at(lines, i)
-      if sw.get("ok", false) {
-         def body = sw.get("text", "")
-         if body == last_switch {
-            i = int(sw.get("next", i + 1))
-            continue
-         }
-         b = str.builder_append(b, body)
-         last_switch = body
-         i = int(sw.get("next", i + 1))
-         continue
-      }
-      if str.strip(lines[i]).len > 0 { last_switch = "" }
-      b = str.builder_append(b, lines[i] + "\n")
-      i += 1
-   }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
-   out
 }
 
 fn _clean_local_slot_offset(str name0) dict {
