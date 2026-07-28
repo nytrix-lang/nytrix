@@ -6911,13 +6911,32 @@ static int materialize_kernel_fuzz_seeds(const char *root, string_list_t *rows,
   char *shape_dir = NULL;
   (void)nytrix_asprintf(&shape_dir, "etc/tests/shapes/kernels");
   string_list_t shapes = {0};
-  if (!shape_dir || !collect_regular_files_recursive(shape_dir, &shapes)) {
+  if (!shape_dir) {
     (void)string_list_push_take(failures, make_fuzz_failure(root, "ny", "kernel shape scan failed",
                                                             shape_dir ? shape_dir : ""));
     free(shape_dir);
     return 0;
   }
+  if (ny_access(shape_dir, F_OK) != 0) {
+    free(shape_dir);
+    return 0;
+  }
+  if (!collect_regular_files_recursive(shape_dir, &shapes)) {
+    (void)string_list_push_take(failures, make_fuzz_failure(root, "ny", "kernel shape scan failed",
+                                                            shape_dir));
+    free(shape_dir);
+    return 0;
+  }
   qsort(shapes.items, (size_t)shapes.count, sizeof(char *), cmp_cstr);
+  const char *kernel_dir = "etc/assets/dict/fuzz/corpus/ny/kernels";
+  if (!mkdir_p(kernel_dir)) {
+    (void)string_list_push_take(failures, make_fuzz_failure(root, "ny",
+                                                            "kernel corpus directory failed",
+                                                            kernel_dir));
+    string_list_free(&shapes);
+    free(shape_dir);
+    return 0;
+  }
   int count = 0;
   for (int i = 0; i < shapes.count; ++i) {
     if (!ny_has_suffix(shapes.items[i], ".nshape")) continue;
@@ -6925,7 +6944,7 @@ static int materialize_kernel_fuzz_seeds(const char *root, string_list_t *rows,
     char stem[160];
     stem_name(shapes.items[i], stem, sizeof(stem));
     char *dst = NULL;
-    (void)nytrix_asprintf(&dst, "etc/tests/runtime/%s.ny", stem);
+    (void)nytrix_asprintf(&dst, "%s/%s.ny", kernel_dir, stem);
     if (!source || !dst || !write_file_text(dst, source)) {
       (void)string_list_push_take(failures, make_fuzz_failure(root, "ny",
                                                               "kernel source materialize failed",
@@ -6995,10 +7014,16 @@ static int cmd_public_fuzz_corpus_prepare(int argc, char **argv) {
     free(dir);
   }
   qsort(runtime_files.items, (size_t)runtime_files.count, sizeof(char *), cmp_cstr);
+  if (!mkdir_p("etc/assets/dict/fuzz/corpus/ny/runtime")) {
+    (void)string_list_push_take(&failures, make_fuzz_failure(root, "ny",
+                                                              "runtime corpus directory failed",
+                                                              "etc/assets/dict/fuzz/corpus/ny/runtime"));
+  }
   for (int i = 0; i < runtime_files.count; ++i) {
     if (!ny_has_suffix(runtime_files.items[i], ".ny")) continue;
     char *dst = NULL;
-    (void)nytrix_asprintf(&dst, "etc/tests/runtime/%s", ny_base_name(runtime_files.items[i]));
+    (void)nytrix_asprintf(&dst, "etc/assets/dict/fuzz/corpus/ny/runtime/%s",
+                          ny_base_name(runtime_files.items[i]));
     if (!dst || !copy_fuzz_seed_file(runtime_files.items[i], dst)) {
       char *fail = make_fuzz_failure(root, "ny", "failed to copy runtime seed", dst ? dst : "");
       (void)string_list_push_take(&failures, fail);

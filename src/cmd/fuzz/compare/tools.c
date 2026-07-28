@@ -603,9 +603,6 @@ static bool triage_item_from_bench_row(const char *row, int default_runs,
   item->ny_source = json_string_or_empty(row, "ny_source");
   item->c_source = json_string_or_empty(row, "c_source");
   item->ok = json_bool_field(row, "ok", false);
-  if (!extract_json_number(row, "ny_peak_vs_c_o3_run", &item->ratio) &&
-      !extract_json_number(row, "ny_o3_vs_c_o3_run", &item->ratio))
-    (void)extract_json_number(row, "ny_vs_c_elapsed_ns", &item->ratio);
   double number = 0.0;
   if (extract_json_number(row, "runs", &number)) item->runs = (int)number;
   if (extract_json_number(row, "warmup", &number)) item->warmup = (int)number;
@@ -613,6 +610,12 @@ static bool triage_item_from_bench_row(const char *row, int default_runs,
   if (extract_json_number(row, "ny_elapsed_ns", &number)) item->ny_elapsed_ns = number;
   if (extract_json_number(row, "c_instructions", &number)) item->c_instructions = number;
   if (extract_json_number(row, "ny_instructions", &number)) item->ny_instructions = number;
+  /* Bench rows carry flavor-specific ratio keys. Derive the canonical timing
+   * ratio from the paired measurements instead, so O0/O1/O2/O3/peak rows all
+   * rank identically and a new flavor cannot silently become 0.0000x. */
+  item->ratio = item->ok && item->c_elapsed_ns > 0.0
+                    ? item->ny_elapsed_ns / item->c_elapsed_ns
+                    : 0.0;
   item->initial_ratio = item->ratio;
   if (!item->row) {
     triage_item_free(item);
