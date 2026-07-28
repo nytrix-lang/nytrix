@@ -3,6 +3,39 @@
 
 #include <stdarg.h>
 
+/* `asprintf` is a GNU extension.  Keep cbridge's allocation contract on
+ * macOS and Windows without making the generated text platform-dependent. */
+static int cbridge_asprintf(char **out, const char *fmt, ...) {
+  if (!out || !fmt)
+    return -1;
+  *out = NULL;
+  va_list ap;
+  va_start(ap, fmt);
+  va_list copy;
+  va_copy(copy, ap);
+  int n = vsnprintf(NULL, 0, fmt, copy);
+  va_end(copy);
+  if (n < 0) {
+    va_end(ap);
+    return -1;
+  }
+  char *buf = malloc((size_t)n + 1);
+  if (!buf) {
+    va_end(ap);
+    return -1;
+  }
+  int written = vsnprintf(buf, (size_t)n + 1, fmt, ap);
+  va_end(ap);
+  if (written != n) {
+    free(buf);
+    return -1;
+  }
+  *out = buf;
+  return n;
+}
+
+#define asprintf cbridge_asprintf
+
 typedef struct {
   char names[256][96];
   int count;

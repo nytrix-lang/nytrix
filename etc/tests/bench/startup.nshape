@@ -1,0 +1,16 @@
+shape bench_startup {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "startup", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def t0 = ticks()
+mut x = 0
+def t1 = ticks()
+print("checksum=", x)
+print("elapsed_ns=", t1 - t0)
+NY
+}

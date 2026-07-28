@@ -12,7 +12,7 @@ typedef struct {
 } CmdEntry;
 
 static const CmdEntry kCmds[] = {
-  {"etc/tests/fuzz/shapes", "audit", NULL, cmd_public_shapes_audit},
+  {"etc/tests/shapes", "audit", NULL, cmd_public_shapes_audit},
   {"bridge", "convert", NULL, cmd_public_bridge_convert},
   {"bridge", "compare", NULL, cmd_public_bridge_compare},
   {"bridge", "suite", NULL, cmd_public_bridge_suite},

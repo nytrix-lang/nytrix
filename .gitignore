@@ -18,3 +18,6 @@
 !.editorconfig
 !make
 *.a
+*.so
+*.dll
+*.dylib

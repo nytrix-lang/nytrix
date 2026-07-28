@@ -356,10 +356,11 @@ static void print_error_line(parser_t *p, const char *filename, int line,
            hint ? hint : "");
   if (!p->quiet) {
     fprintf(stderr, "%s:%d:%d: %s[parse]%s %serror:%s %s (got %s)\n", out_file,
-            line, col, clr(NY_CLR_CYAN), clr(NY_CLR_RESET), clr(NY_CLR_RED),
+            line, col, clr(NY_CLR_BRIGHT_CYAN), clr(NY_CLR_RESET),
+            clr(NY_CLR_BRIGHT_RED),
             clr(NY_CLR_RESET), msg, got);
     if (hint) {
-      fprintf(stderr, "       %shint:%s %s\n", clr(NY_CLR_YELLOW),
+      fprintf(stderr, "       %shint:%s %s\n", clr(NY_CLR_BRIGHT_YELLOW),
               clr(NY_CLR_RESET), hint);
     }
     parse_print_snippet(p, filename, line, real_line, col,

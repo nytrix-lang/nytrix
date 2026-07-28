@@ -3,7 +3,7 @@
 ;; References:
 ;; - std.os.net
 ;; - std.os
-module std.os.net.socket(htons, ipv4_parse, ipv4_format, gethostbyname, _make_sockaddr, socket_connect, socket_bind, socket_accept, socket_accept_info, read_socket, write_socket, socket_connect_async, socket_accept_async, read_socket_async, write_socket_part_async, write_socket_all_async, read_socket_until_async, socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms, read_socket_exact, write_socket_part, write_socket_all, write_socket_line, read_socket_until, close_socket)
+module std.os.net.socket(htons, ipv4_parse, ipv4_format, gethostbyname, _make_sockaddr, socket_connect, socket_bind, socket_bound_port, socket_accept, socket_accept_info, read_socket, write_socket, socket_connect_async, socket_accept_async, read_socket_async, write_socket_part_async, write_socket_all_async, read_socket_until_async, socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms, read_socket_exact, write_socket_part, write_socket_all, write_socket_line, read_socket_until, close_socket)
 use std.core
 use std.core.str
 use std.core.reflect
@@ -21,6 +21,7 @@ use std.core.mem as mem
       fn _c_connect(i64 fd, ptr addr, i32 addrlen) i32 as "connect"
       fn _c_bind(i64 fd, ptr addr, i32 addrlen) i32 as "bind"
       fn _c_listen(i64 fd, i32 backlog) i32 as "listen"
+      fn _c_getsockname(i64 fd, ptr addr, ptr addrlen) i32 as "getsockname"
       fn _c_accept(i64 fd, ptr addr, ptr addrlen) i64 as "accept"
       fn _c_send(i64 fd, ptr buf, i32 len, i32 flags) i32 as "send"
       fn _c_recv(i64 fd, ptr buf, i32 len, i32 flags) i32 as "recv"
@@ -36,6 +37,7 @@ use std.core.mem as mem
       fn _c_connect(i32 fd, ptr addr, u32 addrlen) i32 as "connect"
       fn _c_bind(i32 fd, ptr addr, u32 addrlen) i32 as "bind"
       fn _c_listen(i32 fd, i32 backlog) i32 as "listen"
+      fn _c_getsockname(i32 fd, ptr addr, ptr addrlen) i32 as "getsockname"
       fn _c_accept(i32 fd, ptr addr, ptr addrlen) i32 as "accept"
       fn _c_send(i32 fd, ptr buf, u64 len, i32 flags) i64 as "send"
       fn _c_recv(i32 fd, ptr buf, u64 len, i32 flags) i64 as "recv"
@@ -309,6 +311,23 @@ fn socket_bind(str host, int port) int {
       return -1
    }
    return fd
+}
+
+fn socket_bound_port(int fd) int {
+   "Return the local TCP port chosen for a bound socket, or -1 on failure."
+   if fd < 0 { return -1 }
+   def addr = malloc(16)
+   def len = malloc(4)
+   if addr == 0 || len == 0 {
+      if addr != 0 { free(addr) }
+      if len != 0 { free(len) }
+      return -1
+   }
+   defer { free(addr) }
+   defer { free(len) }
+   store32(len, 16)
+   if _c_getsockname(fd, addr, len) < 0 { return -1 }
+   htons(load16(addr, 2))
 }
 
 fn socket_accept(int server_fd) int {

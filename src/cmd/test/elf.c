@@ -173,22 +173,6 @@ static unsigned test_link_ret_bits(ny_test_link_ret_kind_t kind) {
   }
 }
 
-static void path_dir_only(char *path) {
-  char *last_slash = strrchr(path, '/');
-  char *last_backslash = strrchr(path, '\\');
-  char *sep = last_slash;
-  if (!sep || (last_backslash && last_backslash > sep)) sep = last_backslash;
-  if (sep) *sep = '\0';
-  else path[0] = '\0';
-}
-
-static void companion_tool_path(char *out, size_t out_sz, const char *bin, const char *tool) {
-  char dir[PATH_MAX];
-  snprintf(dir, sizeof(dir), "%s", bin ? bin : "");
-  path_dir_only(dir);
-  nyt_path_join(out, out_sz, dir, tool);
-}
-
 static ny_test_proc_t run_one_start(const char *bin, const char *path, const char *std_path,
                                     const char *std_bc, const char *output_path) {
   char flags_buf[1024];
@@ -222,7 +206,7 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path, const cha
     argv[argc++] = "--std-bc";
     argv[argc++] = (char *)std_bc;
   }
-  if (path_is_native_runtime_test(path) && !has_native_backend && argc < 78) {
+  if (path_is_native_test(path) && !has_native_backend && argc < 78) {
     argv[argc++] = "--native-backend";
     argv[argc++] = "x86_64";
   }

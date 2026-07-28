@@ -1,0 +1,9 @@
+NYP2 function=rt_main steps=10000
+pc 0 count=1
+pc 1 count=1
+pc 8 count=1000
+pc 9 count=1000
+pc 10 count=1000
+edge 8 9 count=900
+edge 8 20 count=100
+edge 18 8 count=999

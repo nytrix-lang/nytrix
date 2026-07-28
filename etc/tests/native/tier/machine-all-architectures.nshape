@@ -1,0 +1,15 @@
+shape tier_machine_all_architectures {
+  family "runtime-native"
+  generator "native"
+  features [native tier machine architecture-matrix]
+  template ny-test-case
+  flags_matrix "--native-backend x86_64 --native-tier-report=/tmp/nytrix-tier-machine-x86_64.txt; --native-backend aarch64 --native-tier-report=/tmp/nytrix-tier-machine-aarch64.txt; --native-backend arm --native-abi aapcs --native-tier-report=/tmp/nytrix-tier-machine-arm.txt; --native-backend avr --native-tier-report=/tmp/nytrix-tier-machine-avr.txt; --native-backend bpf --native-tier-report=/tmp/nytrix-tier-machine-bpf.txt; --native-backend mips --native-tier-report=/tmp/nytrix-tier-machine-mips.txt; --native-backend powerpc --native-tier-report=/tmp/nytrix-tier-machine-powerpc.txt; --native-backend riscv --native-tier-report=/tmp/nytrix-tier-machine-riscv.txt; --native-backend wasm --native-tier-report=/tmp/nytrix-tier-machine-wasm.txt; --native-backend x86 --native-tier-report=/tmp/nytrix-tier-machine-x86.txt"
+  expect compile_and_run
+  source ny <<'NY'
+fn mix(i64 x, i64 y) i64 {
+  (x + y) * 3
+}
+
+mix(4, 5)
+NY
+}

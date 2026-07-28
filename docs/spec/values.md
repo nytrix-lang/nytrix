@@ -19,6 +19,39 @@ representation.
 | Functions | Named functions and `fn(...) { ... }` values. |
 | Native values | Pointers, handles, layouts, extern values. |
 
+## Typed and dynamic representation
+
+The language distinguishes semantic values from their runtime transport
+representation. Typed arithmetic, function parameters, layout fields, and
+native ABI integer slots use raw signed 64-bit `int` values. Dynamic values
+such as `any` and heterogeneous containers may box values so the runtime can
+distinguish integers, heap objects, and native pointers.
+
+Programs must not depend on a tag bit, pointer shape, or other box encoding.
+Use type predicates and conversion APIs instead. The full typed signed-64-bit
+`int` migration is still in progress; `bigint` is the explicit
+arbitrary-precision type today.
+
+## Nil
+
+`nil` and integer `0` are distinct values, although both are falsy. Their type
+identity is preserved through compile-time evaluation, `any` values, function
+values, and dictionaries. APIs that use absence, such as `filter_map`, must
+return `nil` rather than integer `0`.
+
+```ny
+use std.core
+assert(nil != 0, "nil identity")
+assert(!nil && !0, "falsy values")
+assert(to_str(nil) == "nil", "nil string")
+def any boxed = nil
+assert(is_nil(boxed) && type(boxed) == "nil", "any identity")
+mut d = {"_": 0}
+d.delete("_")
+d.set(nil, "missing").set(0, "zero")
+assert(d.get(nil) == "missing" && d.get(0) == "zero", "dictionary keys")
+```
+
 ## Strings
 
 Strings are byte-length values. Generic string slicing uses UTF-8 code-point
@@ -92,6 +125,45 @@ def host = cfg.get("host", "127.0.0.1")
 
 `{}` is the empty dict literal in expression context. Non-empty dict literals
 use key/value pairs, for example `{"key": value}`.
+
+### Frozen and mutable literals
+
+A bare `{}` is immutable and `set` silently leaves it unchanged. Use `dict()`
+for a mutable accumulator, seed a literal with a value, or clone an existing
+literal:
+
+```ny
+mut out = dict()
+out.set("ok", true)
+```
+
+Pre-populated literals such as `{"ok": true}` are mutable.
+
+## List mutability
+
+Lists are value-typed. `list.append` and `list.extend` return new lists. They
+do not modify the source. Always reassign:
+
+```ny
+mut xs = []
+xs = xs.append(1)
+xs = xs.extend([2, 3])
+```
+
+## Core idioms
+
+| Form | Meaning |
+| --- | --- |
+| `;` | Comment marker, not a statement terminator. Newlines separate statements. |
+| `cond ? a : b` | Ternary selection. |
+| `value ?? fallback` | Nil coalescing — selects fallback when left side is `nil`. |
+| `value?.member` | Optional chaining — returns `nil` when receiver is `nil`. |
+| `dict.get(key, default)` | Safe lookup with fallback for missing keys. |
+| `dict.set(key, value)` | Mutates dict in place, returns the same dict. |
+| `list.append(item)` | Returns a new list; reassign the result. |
+| `list.extend(other)` | Returns a new list; reassign the result. |
+| `clone(value)` | Detached mutable copy of a dict or list. |
+| `is_dict(v)`, `is_list(v)`, `is_int(v)`, ... | Runtime type predicates. |
 
 ## Receiver methods
 

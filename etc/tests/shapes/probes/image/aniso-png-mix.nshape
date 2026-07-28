@@ -1,0 +1,17 @@
+shape aniso_png_mix {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.parse.img as img
+fn main(){
+   def path = "etc/assets/images/prototype/prototype_grid_dark_small.png"
+   assert(img.load(path), "decode " + path)
+   print("decoded " + path)
+   0
+}
+NY
+}

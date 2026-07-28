@@ -5,6 +5,7 @@
 #include "base/options.h"
 #include "base/util.h"
 #include "code/jit.h"
+#include "code/native/native.h"
 #include "cmd/ny/pkg.h"
 #include "cmd/fmt/fmt.h"
 #include "cmd/make/make.h"
@@ -90,7 +91,7 @@ const char *__ubsan_default_options(void) { return "abort_on_error=1"; }
 
 static void write_str(const char *s) {
   if (s)
-    (void)write(STDERR_FILENO, s, strlen(s));
+    ny_write_all(STDERR_FILENO, s, strlen(s));
 }
 
 static void write_dec(int64_t v) {
@@ -1305,6 +1306,7 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
                          opt->ownership || opt->borrow_check);
   ny_env_config_set_bool(env, "NYTRIX_OWNERSHIP_CLEANUP", opt->ownership);
   ny_env_config_set_bool(env, "NYTRIX_OWNERSHIP_STRICT", opt->ownership_strict);
+  ny_env_config_set_bool(env, "NYTRIX_ZERO_INIT", opt->zero_init);
 }
 
 static bool ny_argv_has_flag(int argc, char **argv, const char *flag) {
@@ -1505,6 +1507,21 @@ int main(int argc, char **argv, char **envp) {
   int ui_arg_bridge_rc = ny_bridge_ui_script_args_to_env(&opt, argc, argv);
   if (ui_arg_bridge_rc != 0)
     return ui_arg_bridge_rc;
+
+  /* A NYIR binary is a validated, pointer-free execution artifact. Running
+   * one directly must not fall through to the REPL/default source pipeline:
+   * that would recreate the AST boundary this option is intended to bypass. */
+  if (opt.mode == NY_MODE_RUN && opt.nyir_run_bin_path &&
+      !opt.nyir_dump_bin && !opt.command_string && !opt.input_file) {
+    char nyir_err[512] = {0};
+    if (!ny_native_eval_ir_binary_file(opt.nyir_run_bin_path, &opt, nyir_err,
+                                       sizeof(nyir_err))) {
+      fprintf(stderr, "Error: NYIR binary run failed: %s\n",
+              nyir_err[0] ? nyir_err : "unknown error");
+      return 1;
+    }
+    return 0;
+  }
 
   if (!opt.command_string && !opt.input_file && opt.mode != NY_MODE_REPL &&
       opt.mode != NY_MODE_HELP && opt.mode != NY_MODE_VERSION &&

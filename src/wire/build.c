@@ -343,8 +343,8 @@ static time_t ny_runtime_latest_dep_mtime(const char *root) {
   static const char *const deps[] = {
       "src/rt/init.c",     "src/rt/ast.c",       "src/rt/bigint.c", "src/rt/core.c",
       "src/rt/ffi.c",      "src/rt/ffigates.c",  "src/rt/gc.c",     "src/rt/math.c",
-      "src/rt/memory.c",   "src/rt/os.c",        "src/rt/simmd.c",
-      "src/rt/string.c",
+      "src/rt/memory.c",   "src/rt/os.c",        "src/rt/proof.c",
+      "src/rt/simmd.c",    "src/rt/string.c",    "src/rt/bigfloat.c",
       "src/rt/shared.h",   "src/rt/runtime.h",   "src/rt/defs.h",   "src/parse/ast.h",
       "src/parse/json.h",  "src/parse/parser.h", "src/parse/lexer.h", "src/code/types.h",
       "src/base/common.h", "src/base/compat.h",
@@ -375,7 +375,7 @@ static void ny_runtime_cache_path(char *out, size_t out_len, const char *cc, con
   /* v7 invalidates objects written before sanitized runtime builds were
    * isolated from the ordinary cache.  Such objects carry unresolved ASan or
    * UBSan symbols and must never be restored for an unsanitized link. */
-  const char *cache_rev = "rtcache-v7";
+  const char *cache_rev = "rtcache-v9-tree-shake";
   char dwarf_key[16];
   if (debug)
     snprintf(dwarf_key, sizeof(dwarf_key), "d%d", ny_builder_dwarf_version());
@@ -878,6 +878,102 @@ int ny_exec_spawn(const char *const argv[]) {
 #endif
 }
 
+#if !defined(_WIN32)
+static bool ny_builder_compile_runtime_archive(
+    const char *cc, const char *root, const char *out_runtime,
+    const char *include_arg, const char *llvm_include_arg, const char *dwarf_flag,
+    bool debug, bool profile, int speed_level, bool native_tune,
+    bool target_windows, const char *sanitize_kind, bool has_ccache) {
+  static const char *const units[] = {
+      "ast", "bigint", "core", "simmd", "ffi", "ffigates", "gc",
+      "math", "bigfloat", "memory", "os", "proof", "string",
+  };
+  char dir[PATH_MAX];
+  snprintf(dir, sizeof(dir), "%s/ny_rt_units_%ld", ny_get_temp_dir(),
+           (long)getpid());
+  ny_ensure_dir(dir);
+  char src[sizeof(units) / sizeof(units[0])][PATH_MAX];
+  char obj[sizeof(units) / sizeof(units[0])][PATH_MAX];
+  bool ok = true;
+  for (size_t u = 0; u < sizeof(units) / sizeof(units[0]); ++u) {
+    snprintf(src[u], sizeof(src[u]), "%s/src/rt/%s.c", root, units[u]);
+    snprintf(obj[u], sizeof(obj[u]), "%s/%s.o", dir, units[u]);
+    const char *args[64];
+    size_t n = 0;
+    if (has_ccache)
+      args[n++] = "ccache";
+    args[n++] = cc;
+    args[n++] = "-std=gnu11";
+    args[n++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
+    args[n++] = dwarf_flag;
+    args[n++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+    args[n++] = debug ? "-fno-optimize-sibling-calls"
+                      : "-foptimize-sibling-calls";
+    if (!debug && native_tune && !target_windows)
+      args[n++] = "-march=native";
+#if defined(__arm__) && !defined(__aarch64__)
+    args[n++] = ny_builder_arm_float_abi_flag();
+#endif
+#if defined(__APPLE__)
+    if (!target_windows)
+      args[n++] = "-fPIC";
+#else
+    if (!target_windows)
+      args[n++] = ny_env_enabled("NYTRIX_NO_PIE") ? "-fno-pie" : "-fPIE";
+#endif
+    args[n++] = "-fvisibility=hidden";
+    args[n++] = "-ffunction-sections";
+    args[n++] = "-fdata-sections";
+    args[n++] = "-DNYTRIX_RUNTIME_ONLY";
+    if (!debug)
+      args[n++] = "-DNDEBUG";
+    args[n++] = include_arg;
+    args[n++] = llvm_include_arg;
+    char sanitize_flag[64];
+    if (sanitize_kind && *sanitize_kind) {
+      snprintf(sanitize_flag, sizeof(sanitize_flag), "-fsanitize=%s",
+               sanitize_kind);
+      args[n++] = sanitize_flag;
+    }
+    if (profile)
+      args[n++] = "-pg";
+    args[n++] = "-c";
+    args[n++] = src[u];
+    args[n++] = "-o";
+    args[n++] = obj[u];
+    args[n] = NULL;
+    char *pool[16];
+    size_t pool_len = 0;
+    int rc = spawn_with_host_flags(args, getenv("NYTRIX_HOST_CFLAGS"), pool,
+                                   &pool_len);
+    ny_free_host_pool(pool, pool_len);
+    if (rc != 0) {
+      NY_LOG_ERR("Runtime unit compilation failed for %s (exit=%d)\n",
+                 units[u], rc);
+      ok = false;
+      break;
+    }
+  }
+  if (ok) {
+    const char *ar_args[32];
+    size_t n = 0;
+    ar_args[n++] = ny_tool_in_path("llvm-ar") ? "llvm-ar" : "ar";
+    ar_args[n++] = "rcs";
+    ar_args[n++] = out_runtime;
+    for (size_t u = 0; u < sizeof(units) / sizeof(units[0]); ++u)
+      ar_args[n++] = obj[u];
+    ar_args[n] = NULL;
+    ok = ny_exec_spawn(ar_args) == 0;
+    if (!ok)
+      NY_LOG_ERR("Runtime archive creation failed\n");
+  }
+  for (size_t u = 0; u < sizeof(units) / sizeof(units[0]); ++u)
+    remove(obj[u]);
+  rmdir(dir);
+  return ok;
+}
+#endif
+
 bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const char *out_ast,
                                 bool debug, bool profile, int speed_level, bool native_tune,
                                 const char *sanitize_kind) {
@@ -930,6 +1026,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
                                         "/std:c11",
                                         debug ? "/Od" : "/Os",
                                         "/MD",
+                                        "/Gy",
+                                        "/Gw",
                                         "/D_CRT_SECURE_NO_WARNINGS",
                                         "/D_CRT_NONSTDC_NO_WARNINGS",
                                         "/DNYTRIX_RUNTIME_ONLY",
@@ -962,6 +1060,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
                                       "/std:c11",
                                       debug ? "/Od" : "/Os",
                                       "/MD",
+                                      "/Gy",
+                                      "/Gw",
                                       "/D_CRT_SECURE_NO_WARNINGS",
                                       "/D_CRT_NONSTDC_NO_WARNINGS",
                                       include_arg,
@@ -1003,6 +1103,17 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
       ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
     return true;
   bool has_ccache = ny_tool_in_path("ccache");
+#if !defined(_WIN32)
+  if (!out_ast) {
+    bool ok = ny_builder_compile_runtime_archive(
+        cc, root, out_runtime, include_arg, llvm_include_arg, dwarf_flag, debug,
+        profile, speed_level, native_tune, target_windows, sanitize_kind,
+        has_ccache);
+    if (ok && (!sanitize_kind || !*sanitize_kind))
+      ny_update_runtime_cache(cache_obj, out_runtime);
+    return ok;
+  }
+#endif
 #if defined(__APPLE__) || defined(_WIN32)
   const char *runtime_args[128];
   size_t ra_i = 0;
@@ -1197,6 +1308,8 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
     }
     argv[idx++] = out_arg;
     argv[idx++] = "/link";
+    argv[idx++] = "/OPT:REF";
+    argv[idx++] = "/OPT:ICF";
     for (size_t i = 0; i < link_dir_count && idx + 2 < NY_MAX_LINK_ARGS; ++i) {
       const char *ld = link_dirs[i];
       if (!ld)
@@ -1327,15 +1440,17 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
     argv[idx++] = link_dirs[i];
   }
 #if !defined(__APPLE__) && !defined(_WIN32)
-  if (!target_windows) {
+  if (!target_windows)
     argv[idx++] = debug ? "-Wl,--build-id" : "-Wl,--build-id=none";
-    argv[idx++] = "-Wl,--gc-sections";
-    if (link_strip)
-      argv[idx++] = "-Wl,--strip-all";
-  }
-#elif defined(__APPLE__)
+  argv[idx++] = "-Wl,--gc-sections";
   if (link_strip)
-    argv[idx++] = "-Wl,-dead_strip";
+    argv[idx++] = "-Wl,--strip-all";
+#elif defined(__APPLE__)
+  argv[idx++] = "-Wl,-dead_strip";
+  if (link_strip)
+    argv[idx++] = "-Wl,-x";
+#elif defined(_WIN32)
+  argv[idx++] = "-Wl,--gc-sections";
 #endif
   if (shared_rt_path) {
 #ifndef _WIN32
@@ -1414,10 +1529,19 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
 
   char link_buf_storage[16][64];
   size_t link_buf_idx = 0;
+  char *ensured_libs[64] = {NULL};
+  size_t ensured_lib_count = 0;
   for (size_t i = 0; i < link_lib_count; ++i) {
     if (idx + 1 >= NY_MAX_LINK_ARGS)
       break;
     const char *lib = link_libs[i];
+    if (lib && ensured_lib_count < sizeof(ensured_libs) / sizeof(ensured_libs[0])) {
+      char *resolved = ny_ensure_shared_lib(lib);
+      if (resolved) {
+        ensured_libs[ensured_lib_count++] = resolved;
+        lib = resolved;
+      }
+    }
     if (lib && lib[0] == '-' && strpbrk(lib, " \t") != NULL) {
       append_link_arg_preserving_custom(lib, argv, &idx, NY_MAX_LINK_ARGS,
                                         custom_link_arg_copies, &custom_link_arg_copy_count,
@@ -1446,14 +1570,6 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
                                       custom_link_arg_copies, &custom_link_arg_copy_count,
                                       sizeof(custom_link_arg_copies) /
                                           sizeof(custom_link_arg_copies[0]));
-  }
-  bool has_gmp = false;
-  for (size_t i = 0; i < link_lib_count; ++i) {
-    const char *lib = link_libs[i];
-    if (lib && (strcmp(lib, "-lgmp") == 0 || strcmp(lib, "gmp") == 0 ||
-                strstr(lib, "/libgmp.") != NULL ||
-                strstr(lib, "\\libgmp.") != NULL))
-      has_gmp = true;
   }
 #if !defined(_WIN32)
   bool has_z = false;
@@ -1489,8 +1605,6 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   }
 #endif
 
-  if (!has_gmp && idx + 1 < NY_MAX_LINK_ARGS)
-    argv[idx++] = "-lgmp";
 #if defined(_WIN32)
   if (idx + 1 < NY_MAX_LINK_ARGS)
     argv[idx++] = "-lz";
@@ -1569,6 +1683,8 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
     free(shared_lib_copies[i]);
   for (size_t i = 0; i < custom_link_arg_copy_count; i++)
     free(custom_link_arg_copies[i]);
+  for (size_t i = 0; i < ensured_lib_count; i++)
+    free(ensured_libs[i]);
   if (shared_buf)
     free(shared_buf);
   if (rc != 0) {

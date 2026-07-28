@@ -1,0 +1,20 @@
+shape oracle_nyir_false_branch_dead_store_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 nyir false-branch local-reassignment dead-store regression]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=7; -O1 --native-result-oracle=7; -O2 --native-result-oracle=7; -O3 --native-result-oracle=7"
+  expect compile_and_run
+  source ny <<'NY'
+mut x = 1
+x = 2
+x = 9
+mut y = 3
+if x < y {
+  x = x * y
+} else {
+  x = x - y
+}
+x + 1
+NY
+}

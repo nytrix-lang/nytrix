@@ -1,0 +1,30 @@
+shape nyir_for_range {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "for", "range", "break", "continue", "scope", "shadow", "vm"]
+  template ny-test-case
+  ; Merges former for-range / for-range-control / for-range-shadow.
+  flags "--nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+def outer_i = 99
+mut s = 0
+for i in 0..4 {
+  s += i
+}
+; s = 0+1+2+3 = 6
+mut t = 0
+for i in 0..5 {
+  if i == 3 { continue }
+  if i == 5 { break }
+  t += i
+}
+; t = 0+1+2+4 = 7 (3 skipped, 5 never reached as exclusive end)
+mut u = 0
+for i in 0..3 {
+  u += i
+}
+; u = 0+1+2 = 3; outer_i still 99
+outer_i + s + t + u
+NY
+}

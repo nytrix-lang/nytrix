@@ -1,0 +1,12 @@
+shape nyir_pass_control_invalid {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "optimizer", "negative"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-disable-pass=does_not_exist"
+  expect compile_fail
+  expect_message "unknown optimizer pass 'does_not_exist'"
+  source ny <<'NY'
+1 + 2
+NY
+}

@@ -1,0 +1,17 @@
+shape oracle_per_pass_oracle_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle per-pass differential control-flow function]
+  template ny-test-case
+  flags_matrix "-O2 --native-oracle-per-pass --native-result-oracle=13; -O3 --native-oracle-per-pass --native-result-oracle=13"
+  expect compile_and_run
+  source ny <<'NY'
+fn clamp_add(i64 x, i64 y) i64 {
+  if x < 0 { x = 0 }
+  if y < 0 { y = 0 }
+  if x + y > 100 { 100 } else { x + y }
+}
+
+clamp_add(5, 8)
+NY
+}

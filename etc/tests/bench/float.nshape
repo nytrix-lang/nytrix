@@ -1,0 +1,20 @@
+shape bench_float {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "float", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def t0 = ticks()
+mut x = 0.0
+for i in 0..500 {
+  x = x + 1.5
+  x = x * 0.999
+}
+def t1 = ticks()
+print("checksum=", x > 0.0)
+print("elapsed_ns=", t1 - t0)
+NY
+}

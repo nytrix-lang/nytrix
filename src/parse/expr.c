@@ -348,6 +348,19 @@ static const char *expr_parse_type_ref(parser_t *p, const char *err_msg) {
     len = owner_len;
   }
   if (parser_match(p, NY_T_LT)) {
+    if (strcmp(buf, "proof") == 0) {
+      const char *proof_type = parser_parse_proof_type_arg(p);
+      free(buf);
+      if (!proof_type)
+        return NULL;
+      size_t total = nullable_depth + ptr_depth + strlen(proof_type);
+      char *out = arena_alloc(p->arena, total + 1);
+      size_t at = 0;
+      for (size_t i = 0; i < nullable_depth; i++) out[at++] = '?';
+      for (size_t i = 0; i < ptr_depth; i++) out[at++] = '*';
+      memcpy(out + at, proof_type, strlen(proof_type) + 1);
+      return out;
+    }
     size_t gcap = len + 32;
     char *generic = malloc(gcap);
     if (!generic) {
@@ -466,54 +479,6 @@ static int precedence(token_kind kind) {
   default:
     return 0;
   }
-}
-
-static bool expr_token_is_deref_assign_op(token_t tok) {
-  if (tok.kind == NY_T_ASSIGN || tok.kind == NY_T_PLUS_EQ ||
-      tok.kind == NY_T_MINUS_EQ || tok.kind == NY_T_STAR_EQ ||
-      tok.kind == NY_T_SLASH_EQ || tok.kind == NY_T_PERCENT_EQ ||
-      tok.kind == NY_T_POW_EQ || tok.kind == NY_T_BITXOR_EQ ||
-      tok.kind == NY_T_LSHIFT_EQ || tok.kind == NY_T_RSHIFT_EQ)
-    return true;
-  return tok.len == 2 && tok.lexeme &&
-         ((tok.lexeme[0] == '+' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '-' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '*' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '/' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '%' && tok.lexeme[1] == '=') ||
-          (tok.lexeme[0] == '^' && tok.lexeme[1] == '='));
-}
-
-static bool expr_assign_op_is_plain(token_t tok) {
-  return tok.kind == NY_T_ASSIGN ||
-         (tok.len == 1 && tok.lexeme && tok.lexeme[0] == '=');
-}
-
-static token_kind expr_assign_op_binary_kind(token_t tok) {
-  if (tok.kind == NY_T_PLUS_EQ ||
-      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '+'))
-    return NY_T_PLUS;
-  if (tok.kind == NY_T_MINUS_EQ ||
-      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '-'))
-    return NY_T_MINUS;
-  if (tok.kind == NY_T_STAR_EQ ||
-      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '*'))
-    return NY_T_STAR;
-  if (tok.kind == NY_T_SLASH_EQ ||
-      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '/'))
-    return NY_T_SLASH;
-  if (tok.kind == NY_T_PERCENT_EQ ||
-      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '%'))
-    return NY_T_PERCENT;
-  if (tok.kind == NY_T_POW_EQ)
-    return NY_T_POW;
-  if (tok.kind == NY_T_BITXOR_EQ)
-    return NY_T_BITXOR;
-  if (tok.kind == NY_T_LSHIFT_EQ)
-    return NY_T_LSHIFT;
-  if (tok.kind == NY_T_RSHIFT_EQ)
-    return NY_T_RSHIFT;
-  return NY_T_PERCENT;
 }
 
 static const char *decode_fstring_part(parser_t *p, const char *s, size_t len,
@@ -1449,7 +1414,7 @@ static expr_t *parse_unary(parser_t *p) {
                    NULL);
       return NULL;
     }
-    if (expr_token_is_deref_assign_op(p->cur)) {
+    if (parser_token_is_assign_op(p->cur)) {
       token_t assign_tok = p->cur;
       parser_advance(p);
       expr_t *rhs = p_parse_expr(p, 0);
@@ -1458,8 +1423,8 @@ static expr_t *parse_unary(parser_t *p) {
                      NULL);
         return NULL;
       }
-      if (!expr_assign_op_is_plain(assign_tok)) {
-        token_kind bin_kind = expr_assign_op_binary_kind(assign_tok);
+      if (!parser_assign_op_is_plain(assign_tok)) {
+        token_kind bin_kind = parser_assign_op_binary_kind(assign_tok);
         token_t op_tok = {0};
         expr_t *left = expr_new(p->arena, NY_E_DEREF, tok);
         left->as.deref.target = target;
@@ -1493,6 +1458,20 @@ expr_t *p_parse_expr(parser_t *p, int prec) {
   while (true) {
     if (p->stop_expr_at_newline && p->skipped_newline)
       break;
+    if (p->proof_type_depth > 0 && p->cur.kind == NY_T_GT) {
+      /* A proof type ends in `> name`, `> )`, `> {`, or `> =`.  Looking two
+       * tokens ahead keeps ordinary `left > right` comparisons intact. */
+      parser_t look = *p;
+      parser_advance(&look);
+      token_kind after = look.cur.kind;
+      if (after == NY_T_IDENT) {
+        parser_advance(&look);
+        after = look.cur.kind;
+      }
+      if (after == NY_T_COMMA || after == NY_T_RPAREN || after == NY_T_LBRACE ||
+          after == NY_T_ASSIGN || after == NY_T_ARROW)
+        break;
+    }
     int pcur = precedence(p->cur.kind);
     if (pcur < prec || pcur == 0)
       break;

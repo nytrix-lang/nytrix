@@ -1,0 +1,16 @@
+shape oracle_range_facts_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle range facts compare-fold optimizer]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=1; -O1 --native-result-oracle=1; -O2 --native-result-oracle=1; -O3 --native-result-oracle=1"
+  expect compile_and_run
+  source ny <<'NY'
+fn bounded(i64 x) i64 {
+  def y = x & 7
+  y < 8 ? 1 : 0
+}
+
+bounded(12345)
+NY
+}

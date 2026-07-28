@@ -1,0 +1,18 @@
+shape oracle_cse_float_control_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 nyir cse f64 control-flow oracle]
+  template ny-test-case
+  flags_matrix "-O2 --native-result-oracle; -O3 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+fn repeated(f64 x, int choose) f64 {
+  if choose > 0 {
+    (x * x) + (x * x)
+  } else {
+    (x * x) + (x * x)
+  }
+}
+repeated(3.5, 1)
+NY
+}

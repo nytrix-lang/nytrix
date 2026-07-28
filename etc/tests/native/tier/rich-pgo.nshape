@@ -1,0 +1,21 @@
+shape tier_rich_pgo {
+  family "runtime-native"
+  generator "native"
+  features [native tier pgo nyp2 block-layout loop-hint]
+  template ny-test-case
+  flags "-O3 --native-backend=x86_64 --native-profile-use=etc/tests/native/tier/data/rich-pgo.nyp2 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+mut x = 0
+mut y = 0
+while x < 6 {
+  if x < 5 {
+    y = y + x
+  } else {
+    y = y + 100
+  }
+  x = x + 1
+}
+if y == 110 { 0 } else { 1 }
+NY
+}

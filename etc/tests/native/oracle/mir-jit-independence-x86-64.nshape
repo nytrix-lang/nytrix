@@ -1,0 +1,20 @@
+shape oracle_mir_jit_independence_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle machine-ir jit independence]
+  template ny-test-case
+  flags_matrix "-O2 --native-result-oracle=60; -O3 --native-tv-seed=12 --native-result-oracle=60"
+  expect compile_and_run
+  source ny <<'NY'
+fn scale(i64 x) i64 {
+  def y = (x & 15) + 1
+  y * 3 + y
+}
+
+fn wrap(i64 a, i64 b) i64 {
+  scale(a) + scale(b)
+}
+
+wrap(10, 3)
+NY
+}

@@ -140,11 +140,15 @@ index is in bounds for the container. `range_proven(value, lo, hi)` and
 `index_proven(container, index)` expose the same proof engine as compile-time
 booleans.
 
-`prove(condition[, message])` is the only implicit-free constructor for the
-`proof` type. It rejects false obligations and obligations whose truth is not
-known during compilation. A proof has no inspectable payload and currently
-witnesses construction success rather than carrying a proposition-indexed
-proof term.
+`prove(condition[, message])` is the only implicit-free constructor for a
+proof. It rejects false obligations and obligations whose truth is not known
+during compilation. `prove` produces a proposition-indexed proof type; for
+example, `prove(5 > 0)` has type `proof<5 > 0>`. Proofs have no inspectable
+runtime payload and are erased after checking.
+
+The current kernel normalizes equality symmetry (`a == b` and `b == a`) and
+reversed ordered comparisons (`n > 0` and `0 < n`). It does not turn a runtime
+boolean into a proof and does not attempt general theorem proving.
 
 Use these checks at safety boundaries: parser tables, byte decoders, crypto
 code, native buffers, and loops where an out-of-range value would break memory
@@ -193,7 +197,7 @@ compile-time facts such as `arch()`, `os()`, `__os_name()`, and `__main()`.
 ## Embedded files
 
 ```ny
-def text = embed("etc/tests/rt/embed.ny")
+def text = embed("etc/tests/runtime/compiler/embed.ny")
 ```
 
 `embed(path)` reads a file into the compiled program. Paths are resolved from
@@ -225,6 +229,12 @@ temporary evaluator is destroyed; pointers into evaluator-owned storage are
 never exposed. Nested containers are supported with bounded depth and size.
 Invalid intermediate or generated evaluator modules are rejected before JIT
 execution.
+
+## Debugging generated code
+
+When behavior depends on macros, comptime, or generation, inspect the expanded
+form. Validate the generated source directly and diagnose the first real error
+rather than patching secondary symptoms.
 
 ## Related
 

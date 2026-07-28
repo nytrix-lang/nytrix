@@ -1,0 +1,12 @@
+shape nyir_target_extern_active_branch {
+  family "runtime-native"
+  generator "native"
+  features [native nyir extern target conditional platform regression]
+  template ny-test-case
+  flags_matrix "--host-triple=x86_64-unknown-linux-gnu --emit-object=/tmp/nytrix-target-extern-linux.o --native-only; --host-triple=x86_64-pc-windows-msvc --emit-object=/tmp/nytrix-target-extern-windows.obj --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use std.os.net.socket
+close_socket(-1)
+NY
+}

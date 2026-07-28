@@ -53,6 +53,32 @@ Structured errors and warnings are ordinary values with a kind and message.
 Runtime panics produced by checked operations, such as division by zero or
 invalid receiver/index access, can be captured by `try`/`catch`.
 
+### Error conventions
+
+Use structured errors for recoverable library operations and diagnostics for
+language failures. Keep messages compact and actionable.
+
+Recommended recoverable shape:
+
+```ny
+{"ok": false, "code": "invalid_graph", "message": "cycle at node 7", "at": 7}
+```
+
+Recommended success shape when a tagged result is useful:
+
+```ny
+{"ok": true, "value": result}
+```
+
+Rules:
+
+- Preserve the original failing location.
+- Report one primary cause before dependent failures.
+- Include a stable machine-readable code where tooling consumes the error.
+- Do not convert programmer errors into silent defaults.
+- Use a deliberate fallback only when the public API promises one.
+- Log degradation once, not every frame or iteration.
+
 ## Recoverable results
 
 Standard-library APIs can return `Result` values for recoverable failure.
@@ -98,6 +124,17 @@ ny --diag-rich file.ny
 | Safe-mode raw memory failure | A raw pointer access lacks a proven in-bounds byte range. |
 | Native boundary failure | Pointer, handle, layout, or ABI shape is wrong. |
 | Parser failure | Source spelling is not a valid syntax form. |
+
+## Diagnostic quality
+
+Diagnostics should always:
+
+- Preserve the original failing source location.
+- Report one primary cause before dependent failures.
+- Include a stable machine-readable code where tooling consumes the error.
+- Never convert programmer errors into silent defaults.
+- Use a deliberate fallback only when the public API promises one.
+- Log degradation once, not every frame or iteration.
 
 ## Related
 

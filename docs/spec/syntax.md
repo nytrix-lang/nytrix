@@ -208,22 +208,29 @@ Fields use the short `Type name` spelling.
 
 ## Attributes
 
+Portable source should use attributes that state a semantic contract. Effects,
+ownership, compile-time evaluation, and constant-time intent are checked or
+preserved by Nytrix independently of a particular machine-code backend.
+
 ```ny
 @pure
 @effects(none|io|alloc|ffi|thread|all)
 @async_effects
-@jit
 @thread
 @naked
 @consteval
 @constant_time
-@llvm(noinline)
-@llvm("frame-pointer", "all")
-@readnone @readonly @writeonly @argmemonly @nounwind
-@mustprogress @willreturn @hot @cold @flatten
+@optimize(0|1|2|3)
+@inline @noinline @tailcall
+@hot @cold @flatten
+@accel @accel(spirv)
 @returns_owned @returns_borrow(x)
 @borrows(x) @consumes(x) @mutates(x) @releases(x) @forgets(x)
 ```
+
+Choose behavior through typed APIs and standard-library modules first. Backend
+tuning annotations are compatibility details and are intentionally not the
+normal way to express program logic.
 
 ## Compile Time
 
@@ -255,7 +262,7 @@ assert_compile_index(container, index, "message")
 ```ny
 embed("path")
 asm("template", "constraints", args...)
-llvm("ctpop.i64", value)
+intrinsic("ctpop.i64", value)
 argc()
 __os_name()
 __main()
@@ -266,9 +273,11 @@ __layout_align("Name")
 __layout_offset("Name", "field")
 ```
 
-`embed` reads file content at compile time. `asm` lowers inline assembly for
-the active backend. `llvm` calls LLVM intrinsics. Prefer public wrappers such
-as `argc()` over double-underscore runtime helpers when one exists.
+`embed` reads file content at compile time. `asm` and `intrinsic(...)` are
+real target-specific forms; their supported backends are checked at
+compilation.
+Prefer public wrappers such as `argc()` over double-underscore runtime helpers
+when one exists.
 
 ## Runnable Shape
 

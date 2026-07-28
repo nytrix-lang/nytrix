@@ -1,0 +1,29 @@
+shape oracle_cf_mem2reg_control_flow_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle cf-mem2reg nested-loop diamond direct-call regression]
+  template ny-test-case
+  flags_matrix "-O2 --native-enable-cf-mem2reg --native-result-oracle; -O3 --native-enable-cf-mem2reg --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+fn inc(i64 x) i64 {
+  x + 1
+}
+
+mut outer = 0
+mut total = 0
+while outer < 8 {
+  mut inner = 0
+  while inner < 16 {
+    if (inner + outer) % 5 == 0 {
+      total = total + inc(inner)
+    } else {
+      total = total + 1
+    }
+    inner = inner + 1
+  }
+  outer = outer + 1
+}
+total
+NY
+}

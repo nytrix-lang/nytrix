@@ -60,7 +60,9 @@ static char *read_message(void) {
     if (len == 0)
       break;
     if (strncasecmp(line, "Content-Length:", 15) == 0) {
-      content_len = atoi(line + 15);
+      int cl = 0;
+      if (ny_parse_int(line + 15, &cl))
+        content_len = cl;
     }
   }
   if (content_len <= 0)
@@ -217,8 +219,9 @@ static bool json_extract_int_near(const char *json, const char *needle, const ch
   const char *p = colon + 1;
   while (*p && isspace((unsigned char)*p))
     p++;
-  *out = atoi(p);
-  return true;
+  *out = 0;
+  ny_parse_int(p, out);
+  return *out > 0;
 }
 
 static void send_response(const char *json) {
@@ -227,9 +230,8 @@ static void send_response(const char *json) {
   char header[64];
   int body_len = (int)strlen(json);
   int header_len = snprintf(header, sizeof(header), "Content-Length: %d\r\n\r\n", body_len);
-  write(STDOUT_FILENO, header, (size_t)header_len);
-  write(STDOUT_FILENO, json, (size_t)body_len);
-  fsync(STDOUT_FILENO);
+  ny_write_all(STDOUT_FILENO, header, (size_t)header_len);
+  ny_write_all(STDOUT_FILENO, json, (size_t)body_len);
 }
 
 typedef struct {

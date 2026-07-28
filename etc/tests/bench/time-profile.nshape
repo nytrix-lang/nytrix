@@ -1,0 +1,16 @@
+shape bench_time_profile {
+  family "runtime-native"
+  generator "native"
+  features ["native", "time", "phase", "checksum"]
+  template ny-test-case
+  flags "--native-backend x86_64 -time -vv"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut x = 0
+for i in 0..100 {
+  x += i
+}
+print("checksum=", x)
+NY
+}

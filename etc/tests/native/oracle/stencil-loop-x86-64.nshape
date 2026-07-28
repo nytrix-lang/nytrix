@@ -1,0 +1,15 @@
+shape oracle_stencil_loop_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 stencil bounded-loop regression]
+  template ny-test-case
+  flags "--native-tier=stencil --native-result-oracle=5"
+  expect compile_and_run
+  source ny <<'NY'
+mut i = 0
+while i < 5 {
+  i = i + 1
+}
+i
+NY
+}

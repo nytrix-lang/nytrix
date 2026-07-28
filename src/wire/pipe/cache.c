@@ -218,8 +218,11 @@ static bool ny_should_use_jit_cache(const ny_options *opt) {
   if (opt->output_file && !opt->run_jit &&
       !ny_env_enabled("NYTRIX_AOT_IR_CACHE"))
     return false;
+  /* File execution is the common edit-loop path. The cache manifest binds the
+   * exact expanded source and semantic configuration, so reuse is safe by
+   * default; NYTRIX_JIT_CACHE_RUN=0 remains an explicit cold-run escape. */
   if (opt->run_jit && !opt->output_file &&
-      !ny_env_enabled("NYTRIX_JIT_CACHE_RUN"))
+      !ny_env_enabled_default_on("NYTRIX_JIT_CACHE_RUN"))
     return false;
   return ny_jit_cache_enabled();
 }
@@ -309,7 +312,7 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
   if (!opt || !source || !output_path)
     return;
   uint64_t h = NY_FNV1A64_OFFSET_BASIS;
-  h = ny_fnv1a64_cstr("aot-cache-v10", h);
+  h = ny_fnv1a64_cstr("aot-cache-v11", h);
   h = ny_fnv1a64_cstr(VERSION, h);
 #ifdef NYTRIX_VERSION_COMMIT
   h = ny_fnv1a64_cstr(NYTRIX_VERSION_COMMIT, h);
@@ -328,15 +331,32 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
   h = ny_fnv1a64_cstr(opt->opt_profile, h);
   {
     const unsigned opt_fields[] = {
-        (unsigned)opt->opt_level,       (unsigned)opt->debug_symbols,
-        (unsigned)opt->strip_override,  (unsigned)opt->std_mode,
-        (unsigned)opt->no_std,          (unsigned)opt->opt_dce,
-        (unsigned)opt->opt_internalize, (unsigned)opt->opt_loops,
-        (unsigned)opt->opt_autotune,    (unsigned)opt->ownership,
-        (unsigned)opt->ownership_strict, (unsigned)opt->borrow_check};
+        (unsigned)opt->opt_level,          (unsigned)opt->debug_symbols,
+        (unsigned)opt->strip_override,     (unsigned)opt->std_mode,
+        (unsigned)opt->no_std,             (unsigned)opt->opt_dce,
+        (unsigned)opt->opt_internalize,    (unsigned)opt->opt_loops,
+        (unsigned)opt->opt_autotune,       (unsigned)opt->ownership,
+        (unsigned)opt->ownership_strict,   (unsigned)opt->borrow_check,
+        (unsigned)opt->mode,               (unsigned)opt->heap_policy,
+        (unsigned)opt->safe_mode,          (unsigned)opt->strict_types,
+        (unsigned)opt->effect_require_known,
+        (unsigned)opt->alias_require_known,
+        (unsigned)opt->alias_require_no_escape,
+        (unsigned)opt->std_builtin_ops,    (unsigned)opt->compiler_asserts,
+        (unsigned)opt->debug_locals,       (unsigned)opt->dwarf_version,
+        (unsigned)opt->dwarf_split_inlining,
+        (unsigned)opt->dwarf_profile_info, (unsigned)opt->gprof,
+        (unsigned)opt->native_backend,     (unsigned)opt->native_abi,
+        (unsigned)opt->native_only,        (unsigned)opt->c_frontend};
     h = ny_hash_u32v(h, opt_fields, sizeof(opt_fields) / sizeof(opt_fields[0]));
   }
   h = ny_fnv1a64_cstr(opt->opt_pipeline, h);
+  h = ny_fnv1a64_cstr(opt->type_solver_raw, h);
+  h = ny_fnv1a64_cstr(opt->host_triple, h);
+  h = ny_fnv1a64_cstr(opt->host_cflags, h);
+  h = ny_fnv1a64_cstr(opt->host_ldflags, h);
+  h = ny_fnv1a64_cstr(opt->sanitize, h);
+  h = ny_fnv1a64_cstr(opt->arm_float_abi, h);
   h = ny_fnv1a64_cstr(ny_builder_choose_cc(), h);
   h = ny_hash_cstrv(h, (const char *const *)opt->link_dirs.data,
                     opt->link_dirs.len);
@@ -346,6 +366,9 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
     const char *const host_envs[] = {
         "NYTRIX_HOST_CFLAGS",
         "NYTRIX_HOST_LDFLAGS",
+        "NYTRIX_TYPE_SOLVER",
+        "NYTRIX_USER_NATIVE_ABI",
+        "NYTRIX_ARM_FLOAT_ABI",
         "NYTRIX_NO_PIE",
         "NYTRIX_ASSUME_INT",
         "NYTRIX_COMPILER_ASSERTS",
@@ -723,11 +746,6 @@ static bool ny_ir_is_std_value(LLVMValueRef v);
 static void ny_build_llvm_used(LLVMModuleRef module, const LLVMValueRef *values,
                                size_t count);
 
-static bool ny_ir_is_string_global(const char *name) {
-  return name && (strncmp(name, ".str.data.", 10) == 0 ||
-                  strncmp(name, ".str.runtime.", 13) == 0);
-}
-
 static bool ny_std_bc_symbol_is_mixed_codegen_artifact(const char *name) {
   if (!name || !*name)
     return false;
@@ -780,28 +798,6 @@ static void ny_drop_llvm_used_globals(LLVMModuleRef module) {
     if (gv)
       LLVMDeleteGlobal(gv);
   }
-}
-
-static void ny_preserve_std_values_for_dce(LLVMModuleRef module) {
-  if (!module)
-    return;
-  VEC(LLVMValueRef) values;
-  vec_init(&values);
-  for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;
-       fn = LLVMGetNextFunction(fn)) {
-    if (ny_ir_is_std_value(fn) && LLVMCountBasicBlocks(fn) > 0)
-      vec_push(&values, fn);
-  }
-  for (LLVMValueRef gv = LLVMGetFirstGlobal(module); gv;
-       gv = LLVMGetNextGlobal(gv)) {
-    if (LLVMIsDeclaration(gv))
-      continue;
-    if (ny_ir_is_std_value(gv))
-      vec_push(&values, gv);
-  }
-  if (values.len)
-    ny_build_llvm_used(module, values.data, values.len);
-  vec_free(&values);
 }
 
 static bool ny_std_bc_cache_links_path(const char *cache_path, char *out,

@@ -1,0 +1,104 @@
+shape binary {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def max_depth = 18
+def min_depth = 4
+def rounds = 120000
+;; Binary decision benchmark. It is allocation-free and recursion-free so the
+;; real harness can compare native Ny and C without depending on private data.
+fn branch_mix(int depth, int seed) int {
+   mut x = seed + depth
+   mut acc = 1
+   mut i = 0
+   while i < depth {
+      if (x & 1) == 0 {
+         acc = (acc * 3) + i + depth
+      } else {
+         acc = (acc * 5) - i + depth
+      }
+      x = (x / 2) + acc + i
+      i += 1
+   }
+   acc
+}
+def start = ticks()
+mut checksum = 0
+mut d = min_depth
+while d <= max_depth {
+   mut i = 0
+   mut local = 0
+   while i < rounds / d {
+      mut x = i + d
+      mut acc = 1
+      mut j = 0
+      while j < d {
+         if (x & 1) == 0 {
+            acc = (acc * 3) + j + d
+         } else {
+            acc = (acc * 5) - j + d
+         }
+         x = (x / 2) + acc + j
+         j += 1
+      }
+      local += acc
+      i += 1
+   }
+   checksum += local
+   d += 2
+}
+def end = ticks()
+print("checksum=", checksum)
+print("elapsed_ns=", end - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int64_t branch_mix(int depth, int seed) {
+    int64_t x = (int64_t)seed + depth;
+    int64_t acc = 1;
+    for (int i = 0; i < depth; i++) {
+        if ((x & 1) == 0) {
+            acc = (acc * 3) + i + depth;
+        } else {
+            acc = (acc * 5) - i + depth;
+        }
+        x = (x / 2) + acc + i;
+    }
+    return acc;
+}
+
+int main(void) {
+    const int min_depth = 4;
+    const int max_depth = 18;
+    const int rounds = 120000;
+    int64_t start = now_ns();
+    int64_t checksum = 0;
+    for (int d = min_depth; d <= max_depth; d += 2) {
+        int64_t local = 0;
+        for (int i = 0; i < rounds / d; i++) local += branch_mix(d, i);
+        checksum += local;
+    }
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)checksum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

@@ -1,0 +1,13 @@
+shape nyir_pass_control_stop {
+  family "runtime-native"
+  generator "native"
+  features [native nyir optimizer pass-control stop-after]
+  template ny-test-case
+  flags "--native-backend=x86_64 --native-only --nyir-stop-after=const_fold -O3 --native-result-oracle=2"
+  expect compile_and_run
+  source ny <<'NY'
+mut x = 1
+x = 2
+x
+NY
+}

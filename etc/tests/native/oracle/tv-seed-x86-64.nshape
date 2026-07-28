@@ -1,0 +1,20 @@
+shape oracle_tv_seed_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle translation-validation seed straightline]
+  template ny-test-case
+  flags_matrix "-O2 --native-tv-seed=24 --native-result-oracle=99; -O3 --native-tv-seed=24 --native-result-oracle=99"
+  expect compile_and_run
+  source ny <<'NY'
+fn mix(i64 x) i64 {
+  def y = (x & 31) + 1
+  def a = y * 5
+  def b = y * 9
+  def c = y / y
+  def d = y % y
+  a + b + c + d
+}
+
+mix(6)
+NY
+}

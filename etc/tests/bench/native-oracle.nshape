@@ -1,0 +1,25 @@
+shape bench_native_oracle {
+  family "runtime-native"
+  generator "native"
+  features ["native", "oracle", "x86_64", "checksum"]
+  template ny-test-case
+  flags "--native-backend x86_64 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn fib(n) {
+  mut a = 0
+  mut b = 1
+  mut i = 2
+  while i <= n {
+    def c = a + b
+    a = b
+    b = c
+    i += 1
+  }
+  return b
+}
+def r = fib(30)
+print("checksum=", r)
+NY
+}

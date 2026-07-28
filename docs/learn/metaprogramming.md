@@ -96,7 +96,7 @@ def source = embed("docs/README.md")
 ```
 
 `embed(path)` is for static fixtures, shaders, generated tables, and source
-snippets that need to ship inside the compiled program. Inline assembly belongs
+snippets that need to ship inside the compiled program. Target-specific assembly belongs
 at native boundaries and belongs behind target checks such as `#x86_64` or
 `#if(arch() == "aarch64")`.
 

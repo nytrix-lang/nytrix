@@ -1,0 +1,30 @@
+shape asm_native_only_lowered {
+  family "runtime-native"
+  generator "native"
+  features [native nyir asm aarch64 constraints templates memory]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O2 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+mut x = asm("sub $0, $1, $2", "=r,r,r", 50, 8)
+x = asm("and $0, $1, $2", "=r,r,r", x, 63)
+x = asm("eor $0, $1, $2", "=r,r,r", x, 0)
+x = asm("lsl $0, $1, $2", "=r,r,I", x, 1)
+x = asm("lsr $0, $1, $2", "=r,r,I", x, 1)
+x = asm("asr $0, $1, $2", "=r,r,I", x, 0)
+x = asm("mul $0, $1, $2", "=&r,r,r,~{cc}", x, 1)
+x = asm("sdiv $0, $1, $2", "=r,r,r", x, 1)
+def uq = asm("udiv $0, $1, $2", "=r,r,r", -1, 6148914691236517205)
+x = asm("add $0, $1, $2", "=r,0,r", x, uq - 3)
+x = asm("sub $0, $0, $1", "+r,r", x, 0)
+x = asm("orr $0, $1, $2", "=r,r,r", x, 0)
+x = asm("mvn $0, $1", "=r,r", asm("mvn $0, $1", "=r,r", x))
+x = asm("bic $0, $1, $2", "=r,r,r", x, 0)
+x = asm("add x0, x1, #0", "={x0},{x1}", x)
+mut y = 0
+def p = addr_of(y)
+asm("str $0, [$1]", "r,r,~{memory}", x, p)
+def result = asm("ldr $0, [$1]", "=r,r,~{memory}", p)
+if result == 42 { 0 } else { 1 }
+NY
+}

@@ -1,0 +1,24 @@
+shape png-sweep {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use std.core
+use std.math.parse.img as image
+use std.math.parse.img.png as png
+fn main(){
+   def path = "etc/assets/images/prototype/prototype_grid_dark_small.png"
+   def img = image.load(path)
+   assert(is_dict(img), "decode " + path)
+   image.free(img)
+   print("PNG_OK\t" + path)
+   0
+}
+if(comptime{__main()}){
+   __exit(main())
+}
+NY
+}

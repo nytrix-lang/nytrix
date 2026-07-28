@@ -1,0 +1,29 @@
+shape bench_matrix {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "matrix", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn dot(list a, list b) number {
+  mut s = 0
+  for i in 0..a.len-1 { s += a[i] * b[i] }
+  s
+}
+def t0 = ticks()
+def n = 32
+mut acc = 0.0
+for i in 0..n-1 {
+  mut row = []
+  for j in 0..n-1 { row = row.append(i * n + j) }
+  mut col = []
+  for j in 0..n-1 { col = col.append(j * n + i) }
+  acc += dot(row, col)
+}
+def t1 = ticks()
+print("checksum=", acc > 0.0)
+print("elapsed_ns=", t1 - t0)
+NY
+}

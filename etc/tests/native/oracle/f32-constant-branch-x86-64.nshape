@@ -1,0 +1,15 @@
+shape oracle_f32_constant_branch_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 nyir f32 constant-fold comparison branch cfg]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=42; -O1 --native-result-oracle=42; -O2 --native-result-oracle=42; -O3 --native-result-oracle=42"
+  expect compile_and_run
+  source ny <<'NY'
+if 1.5f32 < 2.0f32 {
+  42
+} else {
+  7
+}
+NY
+}

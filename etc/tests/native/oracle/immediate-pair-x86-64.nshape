@@ -1,0 +1,11 @@
+shape oracle_immediate_pair_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle immediate optimizer]
+  template ny-test-case
+  flags "-O0 --native-result-oracle=3"
+  expect compile_and_run
+  source ny <<'NY'
+1 + 2
+NY
+}

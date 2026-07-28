@@ -30,6 +30,22 @@ ny test --with-stdlib module-or-path
 through several native backends. Rows are separated by `;` or escaped newlines,
 and each row is appended to the normal `flags` for one focused harness run.
 
+## Native optimizer stress
+
+Native optimizer regressions use a small, deterministic source program and an
+optimization-level matrix. Each row runs the NYIR VM and the selected native
+backend through `--native-result-oracle`; a result mismatch is a failure. Keep
+the fixture target-specific and focused on one control-flow or lowering shape,
+then cover broader input variation through the existing `shapes/` fuzz corpus.
+This gives every fixed optimizer bug a reproducible regression while keeping
+generated stress separate from correctness baselines.
+
+```bash
+LD_LIBRARY_PATH=build/vendor/lib/host \
+  ./build/release/ny-test --jobs 8 --failures-only \
+  etc/tests/native/oracle/*optimizer*levels*x86-64.nshape
+```
+
 ## Check classes
 
 | Class | Scope |
@@ -40,6 +56,32 @@ and each row is appended to the normal `flags` for one focused harness run.
 | Integration | Multiple modules cooperate. |
 | Visual | UI, image, font, renderer, or scene behavior changed. |
 | Performance | Timing, allocation, throughput, or generated-code behavior changed. |
+
+## Repository suites
+
+The repository keeps test inputs with the subsystem that owns their behavior:
+
+```text
+etc/tests/
+  runtime/   ordinary Nytrix behavior, grouped by language/runtime concern
+  errors/    expected parser, type, ownership, and safety diagnostics
+  native/    NYIR, backend, object, linker, oracle, and sanitizer checks
+  interop/   C headers, FFI fixtures, and Nytrix interop entry programs
+  bench/     checksum-producing compile and throughput workloads
+  shapes/    fuzz generators, probes, stress inputs, and compiler regressions
+```
+
+Run a `.ny` file directly. Run a `.nshape` specification through `ny-test`;
+it is harness metadata, not source code for `ny` itself.
+`ny-test` executes the repository tree as one deterministic run while reporting
+Runtime, Native, and Interop ownership separately.
+
+```bash
+./make test --with-stdlib --failures-only
+LD_LIBRARY_PATH=build/vendor/lib/host \
+  ./build/release/ny-test --jobs 8 etc/tests/native --failures-only
+./build/release/ny-fuzz compiler known-bugs --json /tmp/ny-known-bugs.json
+```
 
 ## Assertions
 

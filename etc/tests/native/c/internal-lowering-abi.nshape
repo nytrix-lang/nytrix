@@ -1,0 +1,43 @@
+shape internal_lowering_abi {
+  family "runtime-native"
+  generator "native"
+  features [c-frontend ffi lowering abi arrays unions packed int128 long-double complex typedef no-libclang]
+  template ny-test-case
+  flags "--c-frontend=nytrix -vv"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/interop/ffi/internal-lowering-abi.h"
+use std.core
+
+; L-1: struct with array fields lowers as [N x T]: char[4] + int[3] = 16.
+assert(__layout_size("NyLowerArray") == 16, "L-1 array struct size 16")
+
+; L-2: union lowers as [size x i8]; size = max member = pointer (8).
+assert(__layout_size("NyLowerWord") == 8, "L-2 union size 8")
+
+; L-3: __attribute__((packed)): 1 + 4 = 5, no padding.
+assert(__layout_size("NyLowerPacked") == 5, "L-3 packed struct size 5")
+
+; L-5: long double is a 16-byte slot on SysV x86-64.
+assert(__layout_size("NyLowerLongDouble") == 16, "L-5 long double size 16")
+
+; L-6: __int128 is 16 bytes.
+assert(__layout_size("NyLowerInt128") == 16, "L-6 int128 size 16")
+
+; L-7: _Complex float = 8 bytes, _Complex double = 16 bytes.
+assert(__layout_size("NyLowerComplexFloat") == 8, "L-7 complex float size 8")
+assert(__layout_size("NyLowerComplexDouble") == 16, "L-7 complex double size 16")
+
+; L-12: typedef struct Bar {...} Foo registers under both tag and typedef names.
+assert(__layout_size("NyLowerAliasedTypedef") == 8, "L-12 typedef name size 8")
+assert(__layout_size("NyLowerAliasedTag") == 8, "L-12 tag name size 8")
+
+; Verify field loadability through the registered layout (load_layout round-trip).
+def box = NyLowerAliasedTypedef(0, 0)
+assert(load_layout(box, "NyLowerAliasedTypedef", "a") == 0, "L-12 layout field load")
+free(box)
+
+print("ok: internal C frontend lowering ABI")
+1 + 2
+NY
+}

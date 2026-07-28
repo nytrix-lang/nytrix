@@ -1,0 +1,16 @@
+shape diff_arith_branch {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 nyir vm differential arith branch]
+  template ny-test-case
+  ; Merges former arith-native/vm + branch-native/vm into one matrix.
+  flags_matrix "--native-backend x86_64; --nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+if 1 {
+  1 + 2 * 3 + 42
+} else {
+  0
+}
+NY
+}

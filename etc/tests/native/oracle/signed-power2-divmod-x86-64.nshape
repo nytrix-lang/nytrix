@@ -1,0 +1,13 @@
+shape oracle_signed_power2_divmod_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle signed divmod power-of-two object-jit]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=-2178; -O1 --native-result-oracle=-2178; -O2 --native-result-oracle=-2178; -O3 --native-result-oracle=-2178"
+  expect compile_and_run
+  source ny <<'NY'
+def negative = 0 - 130
+def positive = 130
+(negative / 64) * 1000 + (negative % 64) * 100 + (positive / 64) * 10 + (positive % 64)
+NY
+}

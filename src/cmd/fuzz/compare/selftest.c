@@ -6751,6 +6751,10 @@ static void selftest_validate_perf_triage_args(const char *json,
       !strstr(json, "\"slowdown_percent\":") ||
       !strstr(json, "\"hotspot\":"))
     (void)string_list_push_copy(errors, "perf triage row timing aliases missing");
+  if (!strstr(json, "\"host\":{\"system\":") ||
+      !strstr(json, "\"machine\":") ||
+      !strstr(json, "\"online_cpus\":"))
+    (void)string_list_push_copy(errors, "perf triage host metadata missing");
   char *max_case = summary_string_from_report(json, "max_case");
   char *perf_max_case = summary_string_from_report(json, "perf_max_case");
   char *perf_worst_case = summary_string_from_report(json, "perf_worst_case");
@@ -6827,6 +6831,7 @@ static void selftest_validate_perf_triage_args(const char *json,
                !strstr(md.data, "TLDR") ||
                !strstr(md.data, "Ranked Cases") ||
                !strstr(md.data, "threshold 999.00x") ||
+               !strstr(md.data, "Host:") ||
                !strstr(md.data, "Refresh") ||
                !strstr(md.data, "env NYTRIX_LOW_PRIORITY=1") ||
                !strstr(md.data, "NYTRIX_RUN_NICE=10") ||
@@ -12940,7 +12945,7 @@ static int cmd_public_prove_lab(int argc, char **argv) {
   double timeout_s = atof(value_after(argc, argv, 3, "--timeout-s", "90"));
   const char *json_path = value_after(argc, argv, 3, "--json", "");
   char *shape_dir = NULL, *proof_dir = NULL;
-  if (nytrix_asprintf(&shape_dir, "etc/tests/fuzz/shapes") < 0 ||
+  if (nytrix_asprintf(&shape_dir, "etc/tests/shapes") < 0 ||
       nytrix_asprintf(&proof_dir, "build/generated/proof/native") < 0) {
     printf("{\"ok\":false,\"error\":\"allocation-failed\"}\n");
     free(shape_dir); free(proof_dir);
@@ -13066,8 +13071,8 @@ static char *synth_print_embedded_ny_source(const char *shape_dir, const char *s
                                             const char *generator, int seed) {
   if ((!shape || !*shape) && !synth_print_kernel_generator(generator)) return NULL;
   char *scan_dir = NULL;
-  if (shape && *shape) (void)asprintf(&scan_dir, "%s", shape_dir ? shape_dir : "etc/tests/fuzz/shapes");
-  else (void)nytrix_asprintf(&scan_dir, "etc/tests/fuzz/shapes/kernels");
+  if (shape && *shape) (void)asprintf(&scan_dir, "%s", shape_dir ? shape_dir : "etc/tests/shapes");
+  else (void)nytrix_asprintf(&scan_dir, "etc/tests/shapes/kernels");
   string_list_t candidates = {0}, files = {0};
   if (scan_dir && collect_regular_files_recursive(scan_dir, &files)) {
     qsort(files.items, (size_t)files.count, sizeof(char *), cmp_cstr);
@@ -13127,7 +13132,7 @@ static int cmd_public_synth_print(int argc, char **argv) {
     (int)(((uint64_t)time(NULL) ^ ((uint64_t)getpid() << 16) ^
            (uint64_t)(now_ms() * 1000.0)) & UINT64_C(0x7fffffff));
   char *shape_dir = NULL, *default_out = NULL;
-  bool paths_ok = nytrix_asprintf(&shape_dir, "etc/tests/fuzz/shapes") >= 0 &&
+  bool paths_ok = nytrix_asprintf(&shape_dir, "etc/tests/shapes") >= 0 &&
                   (default_out = nytrix_scratch_pathf(NULL,
                                                      "synth_print/nytrix_print_%ld_%d",
                                                      (long)getpid(), seed)) != NULL;
@@ -13595,7 +13600,7 @@ static int cmd_public_synth_generate(int argc, char **argv) {
   char *default_out = NULL, *shape_dir = NULL, *build_dir = NULL;
   bool paths_ok = nytrix_asprintf(&default_out, "%s",
                            default_generated_leaf_for_method(method)) >= 0 &&
-                  nytrix_asprintf(&shape_dir, "etc/tests/fuzz/shapes") >= 0 &&
+                  nytrix_asprintf(&shape_dir, "etc/tests/shapes") >= 0 &&
                   nytrix_asprintf(&build_dir, "build/%s/native/%s_%d", method, profile, seed) >= 0;
   if (!paths_ok) {
     printf("{\"ok\":false,\"error\":\"allocation-failed\"}\n");
@@ -13764,4 +13769,3 @@ static int cmd_public_synth_generate(int argc, char **argv) {
   free(default_out); free(shape_dir); free(build_dir);
   return rc;
 }
-

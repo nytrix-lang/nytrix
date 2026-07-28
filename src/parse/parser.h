@@ -48,6 +48,11 @@ typedef struct parser_t {
   bool had_error;
   bool skipped_newline;
   bool stop_expr_at_newline;
+  /* While parsing proof<proposition>, a closing '>' is also a comparison
+   * token.  The Pratt parser uses this depth to leave the type delimiter for
+   * the type parser once the following parameter/return syntax proves it is
+   * not an operator. */
+  int proof_type_depth;
   int last_error_line;
   int last_error_col;
   int last_error_end_col;

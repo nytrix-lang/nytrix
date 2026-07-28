@@ -391,6 +391,8 @@ typedef struct stmt_func_t {
   bool attr_nogc;
   bool attr_consteval;
   bool attr_constant_time;
+  bool attr_optimize;
+  int attr_optimize_level;
   bool attr_accel;
   const char *attr_accel_target;
   bool attr_returns_owned;
