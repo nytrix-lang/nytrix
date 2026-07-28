@@ -24,6 +24,13 @@ fn _socket_probe_server_task(list arg) int {
       return -1
    }
    defer { close_socket(s) }
+   def bound_port = socket_bound_port(s)
+   if bound_port <= 0 {
+      store64(state, -1)
+      print("Server: socket_bound_port failed")
+      return -1
+   }
+   store64(state + 8, bound_port)
    store64(state, 1)
    def c = socket_accept(s)
    if c < 0 {
@@ -42,12 +49,12 @@ fn _socket_probe_server_task(list arg) int {
    return 0
 }
 fn main(){
-   def PORT = 54000 + ((ticks() / 1000000) % 2000)
+   def PORT = 0
    def CONNECT_RETRIES = 200
    def CONNECT_RETRY_MS = 25
    def SERVER_READY_WAIT_MS = 5000
    def SERVER_READY_POLL_MS = 10
-   def state_ptr = malloc(8)
+   def state_ptr = malloc(16)
    if state_ptr == 0 {
       print("Skipping socket test: could not allocate shared state.")
       return 0
@@ -78,13 +85,18 @@ fn main(){
       print("Skipping socket test: server init failed. state:", server_state)
       return 0
    }
+   def bound_port = load64(state_ptr + 8)
+   if bound_port <= 0 {
+      print("Skipping socket test: server did not publish a bound port.")
+      return 0
+   }
    mut c = -1
    defer {
       if c >= 0 { close_socket(c) }
    }
    mut tries = 0
    while c < 0 && tries < CONNECT_RETRIES {
-      c = socket_connect("127.0.0.1", PORT)
+      c = socket_connect("127.0.0.1", bound_port)
       if c < 0 { msleep(CONNECT_RETRY_MS) }
       tries += 1
    }
@@ -93,7 +105,7 @@ fn main(){
       mut kick = -1
       mut kick_tries = 0
       while kick < 0 && kick_tries < CONNECT_RETRIES {
-         kick = socket_connect("127.0.0.1", PORT)
+         kick = socket_connect("127.0.0.1", bound_port)
          if kick < 0 { msleep(CONNECT_RETRY_MS) }
          kick_tries += 1
       }

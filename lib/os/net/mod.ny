@@ -4,7 +4,7 @@
 ;; - std.os
 module std.os.net(
    server,
-   htons, ipv4_parse, ipv4_format, gethostbyname, socket_connect, socket_bind, socket_accept, socket_accept_info,
+   htons, ipv4_parse, ipv4_format, gethostbyname, socket_connect, socket_bind, socket_bound_port, socket_accept, socket_accept_info,
    socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms,
    read_socket, write_socket, read_socket_exact, write_socket_part,
    write_socket_all, write_socket_line, read_socket_until,
@@ -56,6 +56,7 @@ fn socket_connect(str host, int port) { return sock.socket_connect(host, port) }
 fn socket_connect_async(str host, int port) { return sock.socket_connect_async(host, port) }
 
 fn socket_bind(str host, int port) { return sock.socket_bind(host, port) }
+fn socket_bound_port(int fd) { return sock.socket_bound_port(fd) }
 
 fn socket_accept(int fd) { return sock.socket_accept(fd) }
 
