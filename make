@@ -2146,6 +2146,7 @@ WEB_WASM_BARE_CAPABILITIES = {
     "keyboard": True,
     "mouse": True,
     "frameLoop": True,
+    "assetPreload": True,
     "fullscreen": False,
     "pointerLock": False,
     "touch": False,
@@ -3058,23 +3059,28 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
         if not bool(async_res.get("ok", False)):
             raise SystemExit("web: " + str(async_res.get("detail", "asyncify failed")))
     _copy_web_runner_assets(out_dir)
-    packaged_assets: list[str] = []
-    asset_root = out_dir / "assets"
+    packaged_assets: list[dict[str, str]] = []
     for raw in cfg["assets"]:
         assert isinstance(raw, Path)
         src = _resolve_wasm_path(raw)
         if not src.is_dir():
             raise SystemExit("web: asset root is not a directory: " + _rel_or_abs(src))
-        dst = asset_root / src.name
+        try:
+            rel_root = src.relative_to(ROOT)
+        except ValueError:
+            rel_root = Path("assets") / src.name
+        dst = out_dir / rel_root
         if dst.exists():
-            raise SystemExit("web: duplicate packaged asset root: " + src.name)
-        asset_root.mkdir(parents=True, exist_ok=True)
+            raise SystemExit("web: duplicate packaged asset root: " + rel_root.as_posix())
         shutil.copytree(src, dst)
-        packaged_assets.append("assets/" + src.name)
+        for path in sorted(p for p in dst.rglob("*") if p.is_file()):
+            rel = path.relative_to(out_dir).as_posix()
+            packaged_assets.append({"path": rel, "url": rel})
     source_display = _rel_or_abs(source)
     demo = {"id": "app", "title": _demo_title_from_source(source_display),
             "area": "APP", "mode": "webgl", "source": source_display,
-            "wasm": "app.wasm", "wasmKind": "ny", "asyncify": bool(cfg["asyncify"])}
+            "wasm": "app.wasm", "wasmKind": "ny", "asyncify": bool(cfg["asyncify"]),
+            "assets": packaged_assets}
     (out_dir / "demos-data.js").write_text("window.NYTRIX_WEB_DEMOS = " + json.dumps([demo], indent=2) + ";\n", encoding="utf-8")
     target = dict(WEB_WASM_BARE_TARGET)
     report = {"source": source_display, "target": target,

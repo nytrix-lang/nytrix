@@ -38,6 +38,9 @@
   let stdoutLine = "";
   let runArgv = ["ny"];
   let webFrameDt = 1 / 60;
+  let assetFonts = new Map();
+  let loadedAssetCount = 0;
+  let nextFontId = 1;
   const fallbackMemory = new WebAssembly.Memory({ initial: 256, maximum: 1024 });
   const input = { key: "-", codes: new Set(), pressed: new Set(), mouse: [0, 0], down: false };
 
@@ -214,6 +217,29 @@
       "Expected exports: ny_web_frame, ny_web_render, ny_web_main, or main.",
       "Optional calls: ny_web_clear, ny_web_rect, ny_web_line, ny_web_text, ny_web_present."
     ]);
+  }
+
+  async function preloadAssets(meta) {
+    assetFonts = new Map();
+    loadedAssetCount = 0;
+    const assets = Array.isArray(meta.assets) ? meta.assets : [];
+    for (const item of assets) {
+      const path = typeof item === "string" ? item : String(item && item.path || "");
+      const url = typeof item === "string" ? item : String(item && item.url || path);
+      if (!path || !url) continue;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${meta.id}: asset fetch failed (${response.status}) ${path}`);
+      const bytes = await response.arrayBuffer();
+      loadedAssetCount++;
+      if (/\.(ttf|otf|woff2?)$/i.test(path) && typeof FontFace !== "undefined") {
+        const family = `ny-${nextFontId++}`;
+        const face = new FontFace(family, bytes);
+        await face.load();
+        document.fonts.add(face);
+        assetFonts.set(path, { family, size: 0 });
+      }
+    }
+    canvas.dataset.assetsLoaded = String(loadedAssetCount);
   }
 
   function splitArgs(text) {
@@ -595,7 +621,18 @@
     return {
       "std.os.ui.render.init_window": () => ny.tag(1),
       "std.os.ui.render.close_window": () => { asyncifyRef.closed = true; return NY_TRUE; },
-      "std.os.ui.render.font_load_first": () => ny.tag(0),
+      "std.os.ui.render.font_load_first": (paths, size = 0n) => {
+        const count = ny.listLen(memoryRef, paths);
+        for (let i = 0; i < count; i++) {
+          const path = ny.text(memoryRef, ny.listGet(memoryRef, paths, ny.tag(i), 0n), 0);
+          const font = assetFonts.get(path);
+          if (!font) continue;
+          const id = nextFontId++;
+          assetFonts.set(id, { family: font.family, size: Math.max(1, ny.int(size)) });
+          return ny.tag(id);
+        }
+        return ny.tag(0);
+      },
       "std.os.ui.render.window_should_close": () => bool(asyncifyRef.closed),
       "std.os.ui.window.set_should_close": () => { asyncifyRef.closed = true; return 0n; },
       "std.os.ui.window.close": () => { asyncifyRef.closed = true; return NY_TRUE; },
@@ -631,10 +668,11 @@
         ctx.fill();
         return 0n;
       },
-      "std.os.ui.render.draw_text": (_font, text, x, y, fill) => {
+      "std.os.ui.render.draw_text": (fontId, text, x, y, fill) => {
         frameTouched = true;
         ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
-        ctx.font = "35px ui-monospace, monospace";
+        const font = assetFonts.get(ny.int(fontId));
+        ctx.font = font ? `${font.size}px "${font.family}", monospace` : "35px ui-monospace, monospace";
         ctx.textBaseline = "top";
         ctx.fillText(ny.text(memoryRef, text, 0), x, y);
         return 0n;
@@ -892,6 +930,8 @@
       return;
     }
     try {
+      await preloadAssets(meta);
+      if (token !== runtimeToken || currentMeta !== meta) return;
       const bytes = meta.wasmBytes || (meta.wasmBase64 ? (() => {
         const raw = atob(meta.wasmBase64);
         const b = new Uint8Array(raw.length);

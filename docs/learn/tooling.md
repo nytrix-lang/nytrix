@@ -208,6 +208,11 @@ an Asyncify frame loop. Audio, filesystem, network, threads, native windows,
 Vulkan, touch, gamepad, fullscreen, and pointer lock remain explicitly
 unsupported on this target; they are not host fallbacks.
 
+Use `--assets` to package a directory and preload every file before Wasm starts.
+Repository-relative roots retain their logical paths, so a program that refers
+to `etc/assets/fonts/name.ttf` can use `--assets etc/assets`; preloaded TTF,
+OTF, WOFF, and WOFF2 fonts are available to browser text drawing.
+
 Check that a Ny source uses only browser-hosted APIs, then run the maintained
 Pong WebGL2 smoke test in headless Chromium:
 
