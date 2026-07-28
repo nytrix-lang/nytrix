@@ -1,3 +1,4 @@
+;; Keywords: bytes binary endian strings elf
 ;; Bounds-checked binary byte and string primitives for ELF readers.
 module std.os.rev.decomp.bytes(_u16, _u32, _u64, _slice, _slice_list, _cstring)
 

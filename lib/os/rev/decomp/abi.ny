@@ -1,3 +1,4 @@
+;; Keywords: abi registers calling-convention stack immediates
 ;; ABI, register-alias, stack-slot, and immediate parsing primitives.
 module std.os.rev.decomp.abi *
 

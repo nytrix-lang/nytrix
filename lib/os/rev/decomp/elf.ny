@@ -1,3 +1,4 @@
+;; Keywords: elf sections symbols relocations imports disassembly flirt
 ;; ELF loading, recovery, symbols, imports, disassembly, and FLIRT signatures.
 module std.os.rev.decomp.elf *
 
@@ -66,6 +67,23 @@ fn _hex(int v) str { "0x" + str.to_hex(v, 0) }
 
 fn _seg_perms(int flags) str {
    segment_perms(flags)
+}
+
+fn _section_call_targets(dict bin, dict section, int max_bytes=512) list {
+   "Find direct call destinations while recovering functions from one ELF section."
+   def rows = disassemble(bin, section, max_bytes)
+   def a = arch(bin)
+   mut out = []
+   mut i = 0
+   while i < rows.len {
+      def row = rows[i]
+      if dasm.instruction_kind(a, row[1]) == "call" && str.find(row[2], "[") < 0 {
+         def target = dasm.target_address(row, a)
+         if target != 0 { out = out.append({"target": target, "name": "sub_" + str.to_hex(target, 0), "kind": "direct"}) }
+      }
+      i += 1
+   }
+   out
 }
 
 fn elf_header(any source) dict {
@@ -507,7 +525,7 @@ fn recover_functions(any source, int scan_bytes=65536) list {
          seen = pros[0]
          out = pros[1]
       }
-      def calls = call_targets(bin, s, min(scan_bytes, int(s.get("size", 0))))
+      def calls = _section_call_targets(bin, s, min(scan_bytes, int(s.get("size", 0))))
       mut j = 0
       while j < calls.len {
          def ck = calls[j].get("kind", "")
@@ -1007,6 +1025,21 @@ fn _flirt_refs_from_rows(list rows) list {
    out
 }
 
+fn _flirt_refs_from_disassembly(list rows, str arch_name) list {
+   "Collect stable direct-call references without depending on high-level lifting."
+   mut out = []
+   mut i = 0
+   while i < rows.len {
+      def row = rows[i]
+      if dasm.instruction_kind(arch_name, row[1]) == "call" && str.find(row[2], "[") < 0 {
+         def target = dasm.target_address(row, arch_name)
+         if target != 0 { out = _append_unique(out, "sub_" + str.to_hex(target, 0)) }
+      }
+      i += 1
+   }
+   out
+}
+
 fn flirt_signature(any source, any target=0, any opts=dict()) dict {
    "Build a conservative FLIRT-style signature for one function.
    The signature stores a masked first-byte pattern, CRC16 over the next stable
@@ -1023,12 +1056,11 @@ fn flirt_signature(any source, any target=0, any opts=dict()) dict {
    def a = arch(bin)
    def family = dasm.arch_family(a)
    def rows = disassemble(bin, target, maxb)
-   def lifted = lift(bin, target, maxb)
    def mask = _flirt_variant_mask(rows, int(tb.get("addr", 0)), bytes.len, family)
    def plen = min(pat_cap, bytes.len)
    def tail_len = _flirt_tail_len(mask, plen, tail_cap)
    def crc = _crc16_ccitt(bytes, plen, tail_len)
-   def refs = _flirt_refs_from_rows(lifted)
+   def refs = _flirt_refs_from_disassembly(rows, a)
    def accepted = bytes.len >= min_len || refs.len > 0
    def strength = !accepted ? "rejected" : ((refs.len > 0 || tail_len >= 8 || bytes.len >= pat_cap) ? "strong" : "weak")
    {"ok": true, "kind": "flirt_signature", "name": tb.get("name", ""), "addr": int(tb.get("addr", 0)),
@@ -1143,5 +1175,5 @@ fn flirt_apply(any source, list signatures, any opts=dict()) dict {
       }
       i += 1
    }
-   with_renames(bin, renames).set("flirt_matches", matches).set("flirt_renames", renames)
+   bin.set("renames", bin.get("renames", dict()).merge(renames)).set("flirt_matches", matches).set("flirt_renames", renames)
 }

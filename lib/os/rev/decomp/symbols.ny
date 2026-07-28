@@ -1,3 +1,4 @@
+;; Keywords: symbols registers aliases tokens def-use slicing
 ;; Register aliases and token extraction for def-use and slicing passes.
 module std.os.rev.decomp.symbols(_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
 

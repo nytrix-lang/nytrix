@@ -1,7 +1,5 @@
-;; Basic-block, control-flow graph, and jump-table recovery.
-;;
-;; This module keeps graph construction separate from lifting so callers can
-;; inspect a binary's control flow without running the higher-level pipeline.
+;; Keywords: cfg blocks edges dominance loops jump-tables
+;; Basic-block, jump-table, and control-flow graph recovery.
 module std.os.rev.decomp.cfg *
 
 use std.core

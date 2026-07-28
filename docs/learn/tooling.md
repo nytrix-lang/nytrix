@@ -191,6 +191,14 @@ Build the browser runner:
 ./make web-demos
 ```
 
+Check that a Ny source uses only browser-hosted APIs, then run the maintained
+Pong WebGL2 smoke test in headless Chromium:
+
+```bash
+./make web-check etc/projects/ui/pong.ny
+./make web-test
+```
+
 The output lands in `build/wasm/`. The runner is a small static browser shell:
 `index.html`, `web.css`, `wasm.js`, and `demos-data.js`. It can load a local
 `.wasm` file from the page, or load optional manifest entries from
@@ -199,8 +207,10 @@ The output lands in `build/wasm/`. The runner is a small static browser shell:
 Browser-facing Ny modules should export one of `ny_web_frame`, `ny_web_render`,
 `ny_web_main`, or `main`. The runner provides a compact host ABI:
 `ny_web_clear`, `ny_web_rect`, `ny_web_line`, `ny_web_text`, `ny_web_present`,
-input queries, and minimal OS/runtime stubs. Native window, sound, network, and
-filesystem APIs are not faked in the browser.
+keyboard, mouse-pointer, and minimal OS/runtime stubs. Keyboard state tracks each
+held key and one press edge per key. Native sound, network, and filesystem APIs
+are not faked in the browser; `web-check` reports unsupported host imports and
+writes a machine-readable report beside its output.
 
 Use `--out DIR` to choose a different output directory, `--no-ny-wasm` to copy
 only the static browser files, or `--require-ny-wasm` to fail unless every

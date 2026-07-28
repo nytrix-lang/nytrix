@@ -37,8 +37,9 @@
   let outputLines = [];
   let stdoutLine = "";
   let runArgv = ["ny"];
+  let webFrameDt = 1 / 60;
   const fallbackMemory = new WebAssembly.Memory({ initial: 256, maximum: 1024 });
-  const input = { key: "-", code: 0, mouse: [0, 0], down: false };
+  const input = { key: "-", codes: new Set(), pressed: new Set(), mouse: [0, 0], down: false };
 
   function wantsCliStage(meta = currentMeta, runtime = currentRuntime) {
     if (runtime && runtime.oneShot) return true;
@@ -270,9 +271,8 @@
   }
 
   function initGL() {
-    gl = canvas.getContext("webgl2", { alpha: false, antialias: false, preserveDrawingBuffer: true }) ||
-         canvas.getContext("webgl", { alpha: false, antialias: false, preserveDrawingBuffer: true });
-    if (!gl) { setStatus("webglStatus", "WebGL missing", "warn"); return false; }
+    gl = canvas.getContext("webgl2", { alpha: false, antialias: false, preserveDrawingBuffer: true });
+    if (!gl) { setStatus("webglStatus", "WebGL2 missing", "warn"); return false; }
     const vs = shader(gl.VERTEX_SHADER, "attribute vec2 p;varying vec2 v;void main(){v=(p+1.0)*0.5;gl_Position=vec4(p,0.0,1.0);}");
     const fs = shader(gl.FRAGMENT_SHADER, "precision mediump float;varying vec2 v;uniform sampler2D tex;void main(){gl_FragColor=texture2D(tex,vec2(v.x,1.0-v.y));}");
     program = gl.createProgram();
@@ -300,8 +300,7 @@
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     const texLoc = gl.getUniformLocation(program, "tex");
     if (texLoc) gl.uniform1i(texLoc, 0);
-    const webgl2 = typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext;
-    setStatus("webglStatus", webgl2 ? "WebGL2" : "WebGL", "ready");
+    setStatus("webglStatus", "WebGL2", "ready");
     fitCanvas();
     return true;
   }
@@ -319,11 +318,20 @@
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       const frame = ctx.getImageData(0, 0, stage.width, stage.height);
+      if (!canvas.dataset.framePixels) {
+        for (let i = 0; i < frame.data.length; i += 4) {
+          if (frame.data[i] || frame.data[i + 1] || frame.data[i + 2]) {
+            canvas.dataset.framePixels = "1";
+            break;
+          }
+        }
+      }
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, stage.width, stage.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, frame.data);
       gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       presentCount++;
+      canvas.dataset.presented = String(presentCount);
     } catch (_) { setStatus("webglStatus", "WebGL lost", "warn"); }
   }
 
@@ -519,7 +527,7 @@
       ny_web_canvas_width: () => ny.tag(stage.width),
       ny_web_canvas_height: () => ny.tag(stage.height),
       ny_web_time: () => performance.now() / 1000,
-      ny_web_key_down: (code) => ny.tag(input.code === Number(code) ? 1 : 0),
+      ny_web_key_down: (code) => ny.tag(input.codes.has(Number(code)) ? 1 : 0),
       ny_web_mouse_down: () => ny.tag(input.down ? 1 : 0),
       ny_web_mouse_x: () => ny.tag(input.mouse[0]),
       ny_web_mouse_y: () => ny.tag(input.mouse[1]),
@@ -565,21 +573,128 @@
     };
   }
 
+  function makeUiImports(memoryRef, asyncifyRef) {
+    const bool = (value) => ny.bool(Boolean(value));
+    const color = (value, fallback) => {
+      if (ny.listLen(memoryRef, value) >= 3) {
+        const channel = (index, fallback) => {
+          const item = ny.listGet(memoryRef, value, ny.tag(index), 0n);
+          return Math.max(0, Math.min(1, item === 0n ? fallback : ny.numeric(memoryRef, item)));
+        };
+        return `rgba(${Math.round(channel(0, 0) * 255)},${Math.round(channel(1, 0) * 255)},${Math.round(channel(2, 0) * 255)},${channel(3, 1)})`;
+      }
+      return value === 1n ? fallback : rgba(ny.int(value));
+    };
+    const list2f = (x, y) => {
+      const out = ny.list(memoryRef, 2);
+      ny.listSetLen(memoryRef, out, 2);
+      ny.listSet(memoryRef, out, ny.tag(0), ny.fltFromNumber(memoryRef, x));
+      ny.listSet(memoryRef, out, ny.tag(1), ny.fltFromNumber(memoryRef, y));
+      return BigInt(out);
+    };
+    return {
+      "std.os.ui.render.init_window": () => ny.tag(1),
+      "std.os.ui.render.close_window": () => { asyncifyRef.closed = true; return NY_TRUE; },
+      "std.os.ui.render.font_load_first": () => ny.tag(0),
+      "std.os.ui.render.window_should_close": () => bool(asyncifyRef.closed),
+      "std.os.ui.window.set_should_close": () => { asyncifyRef.closed = true; return 0n; },
+      "std.os.ui.window.close": () => { asyncifyRef.closed = true; return NY_TRUE; },
+      "std.os.ui.window.input.key_down": (key) => bool(input.codes.has(ny.int(key))),
+      "std.os.ui.window.input.key_pressed": (key) => {
+        const code = ny.int(key);
+        const pressed = input.pressed.has(code);
+        if (pressed) input.pressed.delete(code);
+        return bool(pressed);
+      },
+      "std.os.ui.render.begin_frame_clear": (fill) => {
+        frameTouched = true;
+        setStageSize();
+        ctx.fillStyle = color(fill, "rgba(0,0,0,1)");
+        ctx.fillRect(0, 0, stage.width, stage.height);
+        return NY_TRUE;
+      },
+      "std.os.ui.render.framebuffer_size_f64": () => list2f(stage.width, stage.height),
+      "std.os.ui.render.get_frame_time": () => webFrameDt,
+      "std.os.ui.render.set_ortho_2d": () => 0n,
+      "std.os.ui.render.matrix.mat4_identity": () => ny.tag(0),
+      "std.os.ui.render.draw_rect": (x, y, w, h, fill) => {
+        frameTouched = true;
+        ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
+        ctx.fillRect(x, y, w, h);
+        return 0n;
+      },
+      "std.os.ui.render.draw_circle": (x, y, radius, fill) => {
+        frameTouched = true;
+        ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        return 0n;
+      },
+      "std.os.ui.render.draw_text": (_font, text, x, y, fill) => {
+        frameTouched = true;
+        ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
+        ctx.font = "35px ui-monospace, monospace";
+        ctx.textBaseline = "top";
+        ctx.fillText(ny.text(memoryRef, text, 0), x, y);
+        return 0n;
+      },
+      "std.os.ui.render.end_frame": () => {
+        framePresented = true;
+        present();
+        if (asyncifyRef.controller) {
+          if (asyncifyRef.controller.rewinding()) asyncifyRef.controller.finishRewind();
+          else asyncifyRef.controller.yieldFrame();
+        }
+        return 0n;
+      },
+    };
+  }
+
+  function makeAsyncify(instance, memoryRef, entry) {
+    const state = () => Number(instance.exports.asyncify_get_state());
+    const memory = memoryRef.memory;
+    const reserve = 8 * 1024 * 1024;
+    const data = memory.buffer.byteLength;
+    memory.grow(Math.ceil((reserve + 8) / 65536));
+    const view = new DataView(memory.buffer);
+    view.setUint32(data, data + 8, true);
+    view.setUint32(data + 4, data + reserve + 8, true);
+    let pending = false;
+    return {
+      yieldFrame() {
+        if (state() !== 0 || pending) return;
+        pending = true;
+        instance.exports.asyncify_start_unwind(data);
+      },
+      resume(dt) {
+        webFrameDt = Math.max(1 / 240, Math.min(1 / 20, dt || (1 / 60)));
+        pending = false;
+        instance.exports.asyncify_start_rewind(data);
+        entry();
+      },
+      needsResume() { return state() === 1; },
+      rewinding() { return state() === 2; },
+      finishUnwind() { if (state() === 1) instance.exports.asyncify_stop_unwind(); },
+      finishRewind() { if (state() === 2) instance.exports.asyncify_stop_rewind(); },
+    };
+  }
+
   function makeRuntimeImports(meta, memoryRef) {
     return {
       rt_argc: () => ny.tag(refreshRunArgv(meta).length),
       "std.core.primitives.argc": () => ny.tag(refreshRunArgv(meta).length),
       rt_argv: () => 0n,
       rt_runtime_tag: (v) => v,
-      rt_malloc: (size) => ny.alloc(memoryRef, ny.int(size)),
-      rt_realloc: (_ptr, size) => ny.alloc(memoryRef, ny.int(size)),
+      rt_malloc: (size) => BigInt(ny.alloc(memoryRef, ny.int(size))),
+      rt_realloc: (_ptr, size) => BigInt(ny.alloc(memoryRef, ny.int(size))),
       rt_free: () => 0n,
       rt_memset: (dst, val, count) => { ny.u8(memoryRef).fill(Number(val) & 255, ny.ptr(dst), ny.ptr(dst) + ny.ptr(count)); return 0n; },
       rt_memcpy: (dst, src, count) => { ny.u8(memoryRef).copyWithin(ny.ptr(dst), ny.ptr(src), ny.ptr(src) + ny.ptr(count)); return 0n; },
       rt_load8_idx: (base, idx) => BigInt(ny.u8(memoryRef)[ny.ptr(base) + ny.int(idx)] || 0),
       rt_store8_idx: (base, idx, val) => { ny.u8(memoryRef)[ny.ptr(base) + ny.int(idx)] = Number(val) & 255; return 0n; },
       rt_store64_idx: (base, idx, val) => { ny.writeI64(memoryRef, ny.ptr(base) + ny.int(idx) * 8, val); return 0n; },
-      rt_list_new: (n) => ny.list(memoryRef, ny.int(n)),
+      rt_list_new: (n) => BigInt(ny.list(memoryRef, ny.int(n))),
       rt_list_set_len: (lst, n) => ny.listSetLen(memoryRef, lst, n),
       rt_append: (lst, val) => ny.listAppend(memoryRef, lst, val),
       rt_store_item_fast: (lst, idx, val) => ny.listSet(memoryRef, lst, idx, val),
@@ -595,7 +710,7 @@
         ny.listSet(memoryRef, r, ny.tag(0), start);
         ny.listSet(memoryRef, r, ny.tag(1), stop);
         ny.listSet(memoryRef, r, ny.tag(2), step);
-        return r;
+        return BigInt(r);
       },
       rt_tagof: (v) => ny.tag(Number(ny.tagof(memoryRef, v))),
       rt_is_ok: (v) => ny.bool(ny.tagof(memoryRef, v) === 104n),
@@ -628,7 +743,14 @@
         return ny.bool(ny.tagof(memoryRef, v) === want);
       },
       rt_is_float_obj: (v) => ny.bool(ny.isFloat(memoryRef, v)),
+      rt_bigint_from_str: (v) => ny.tag(parseInt(ny.text(memoryRef, v, 0), 10) || 0),
       rt_bigint_to_int: (v) => v,
+      rt_fix_fn_ptr: (v) => v,
+      // Browser apps do not unwind their top-level frame loop. Native defer
+      // callbacks only run during that unwind, so this host keeps the stack
+      // entry inert until browser lifecycle cleanup is implemented.
+      rt_push_defer: () => 0n,
+      rt_trace_loc: () => 0n,
       rt_flt_box_val: (bits) => ny.fltBox(memoryRef, bits),
       rt_flt_box_val32: (bits32) => {
         const buf = new ArrayBuffer(4);
@@ -651,6 +773,7 @@
       rt_print_str_raw: (v) => { appendStdout(ny.valueToString(memoryRef, v)); return v; },
       rt_print_newline: () => { flushStdout(); return 1n; },
       rt_panic: () => { throw new Error("Ny wasm panic"); },
+      "std.core.panic": (message = 0n) => { throw new Error("Ny wasm panic: " + ny.text(memoryRef, message, 0)); },
       rt_os_name: () => ny.string(memoryRef, "web"),
       rt_arch_name: () => ny.string(memoryRef, "wasm32"),
       __os_name: () => ny.string(memoryRef, "web"),
@@ -666,6 +789,9 @@
         return fallback;
       },
       "std.os.prim.env": () => ny.string(memoryRef, ""),
+      "std.os.prim.os": () => ny.string(memoryRef, "web"),
+      "std.os.os": () => ny.string(memoryRef, "web"),
+      "std.core.dict_mod.dict": () => 0n,
       "std.os.args.args": () => {
         const argv = refreshRunArgv(meta);
         const lst = ny.list(memoryRef, argv.length);
@@ -683,7 +809,7 @@
         const step = Math.max(1, ny.int(ny.listGet(memoryRef, r, ny.tag(2), ny.tag(1))));
         return ny.tag(Math.max(0, Math.ceil((stop - start) / step)));
       },
-      "std.core.malloc": (size) => ny.alloc(memoryRef, ny.int(size)),
+      "std.core.malloc": (size) => BigInt(ny.alloc(memoryRef, ny.int(size))),
       "std.core.free": () => 0n,
       "std.core.assert": (cond, msg = 0n) => {
         if (BigInt(cond || 0) === NY_FALSE || BigInt(cond || 0) === 0n) throw new Error("assert failed: " + ny.text(memoryRef, msg, 0));
@@ -697,6 +823,14 @@
       },
       "std.core.eq": (a, b) => BigInt(a || 0) === BigInt(b || 0) ? NY_TRUE : NY_FALSE,
       "std.core.lt": (a, b) => ny.bool(ny.numeric(memoryRef, a) < ny.numeric(memoryRef, b)),
+      "std.core.le": (a, b) => ny.bool(ny.numeric(memoryRef, a) <= ny.numeric(memoryRef, b)),
+      "std.core.ge": (a, b) => ny.bool(ny.numeric(memoryRef, a) >= ny.numeric(memoryRef, b)),
+      "std.core.gt": (a, b) => ny.bool(ny.numeric(memoryRef, a) > ny.numeric(memoryRef, b)),
+      "std.math.max": (a, b) => ny.numericResult(memoryRef, Math.max(ny.numeric(memoryRef, a), ny.numeric(memoryRef, b)), ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b)),
+      "std.math.min": (a, b) => ny.numericResult(memoryRef, Math.min(ny.numeric(memoryRef, a), ny.numeric(memoryRef, b)), ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b)),
+      "std.math.abs": (a) => ny.numericResult(memoryRef, Math.abs(ny.numeric(memoryRef, a)), ny.isFloat(memoryRef, a)),
+      "std.math.clamp": (v, lo, hi) => ny.numericResult(memoryRef, Math.min(Math.max(ny.numeric(memoryRef, v), ny.numeric(memoryRef, lo)), ny.numeric(memoryRef, hi)), ny.isFloat(memoryRef, v) || ny.isFloat(memoryRef, lo) || ny.isFloat(memoryRef, hi)),
+      "std.math.lerp": (a, b, t) => ny.numericResult(memoryRef, ny.numeric(memoryRef, a) + (ny.numeric(memoryRef, b) - ny.numeric(memoryRef, a)) * ny.numeric(memoryRef, t), ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b) || ny.isFloat(memoryRef, t)),
       "std.core.is_str": (v) => {
         const tag = ny.tagof(memoryRef, v);
         return ny.bool(tag === 120n || tag === 121n);
@@ -732,7 +866,8 @@
   }
 
   function makeImports(meta, module, memoryRef) {
-    const host = { ...makeRuntimeImports(meta, memoryRef), ...makeWebImports(meta, memoryRef) };
+    const asyncifyRef = { controller: null, closed: false };
+    const host = { ...makeRuntimeImports(meta, memoryRef), ...makeWebImports(meta, memoryRef), ...makeUiImports(memoryRef, asyncifyRef) };
     const imports = {};
     for (const imp of WebAssembly.Module.imports(module)) {
       if (!imports[imp.module]) imports[imp.module] = {};
@@ -741,7 +876,7 @@
       else if (imp.kind === "global") imports[imp.module][imp.name] = new WebAssembly.Global({ value: "i64", mutable: true }, 0n);
       else if (imp.kind === "function") imports[imp.module][imp.name] = host[imp.name] || (() => { throw new Error(`${meta.id}: unsupported import ${imp.module}.${imp.name}`); });
     }
-    return imports;
+    return { imports, asyncifyRef };
   }
 
   async function loadRuntime(meta) {
@@ -766,13 +901,19 @@
 
       const module = await WebAssembly.compile(bytes);
       const memoryRef = { memory: fallbackMemory, heapTop: 1048576 };
-      const instance = await WebAssembly.instantiate(module, makeImports(meta, module, memoryRef));
+      const importState = makeImports(meta, module, memoryRef);
+      const instance = await WebAssembly.instantiate(module, importState.imports);
       if (token !== runtimeToken || currentMeta !== meta) return;
       memoryRef.memory = instance.exports.memory || memoryRef.memory;
       const entry = selectedEntry(instance.exports);
-      const browserEntry = ["ny_web_frame", "ny_web_render", "ny_web_main"].some(n => typeof instance.exports[n] === "function");
+      const browserEntry = Boolean(meta.asyncify) || ["ny_web_frame", "ny_web_render", "ny_web_main"].some(n => typeof instance.exports[n] === "function");
       const oneShot = !browserEntry;
-      currentRuntime = { id: meta.id, exports: instance.exports, memory: memoryRef.memory, entry, ran: false, oneShot };
+      currentRuntime = { id: meta.id, exports: instance.exports, memory: memoryRef.memory, entry, ran: false, oneShot, asyncify: null };
+      if (meta.asyncify) {
+        if (!entry || typeof instance.exports.asyncify_get_state !== "function") throw new Error(`${meta.id}: asyncify metadata does not match this Wasm module`);
+        currentRuntime.asyncify = makeAsyncify(instance, memoryRef, () => instance.exports[entry]());
+        importState.asyncifyRef.controller = currentRuntime.asyncify;
+      }
       setStageMode(oneShot ? "cli" : "web");
       setKernelStatus();
       resetOutput(runtimeHeader(meta, currentRuntime));
@@ -798,7 +939,25 @@
     try {
       frameTouched = false;
       framePresented = false;
-      if (typeof ex.ny_web_frame === "function") ex.ny_web_frame(Number(dt), stage.width, stage.height);
+      if (currentRuntime.asyncify) {
+        if (!currentRuntime.ran && currentRuntime.entry) {
+          currentRuntime.ran = true;
+          ex[currentRuntime.entry]();
+        }
+        if (currentRuntime.asyncify.needsResume()) {
+          currentRuntime.asyncify.finishUnwind();
+          requestAnimationFrame((ts) => {
+            if (!currentRuntime || !currentRuntime.asyncify) return;
+            const nextDt = lastTime ? Math.min(0.05, (ts - lastTime) / 1000) : dt;
+            lastTime = ts;
+            currentRuntime.asyncify.resume(nextDt);
+            if (currentRuntime.asyncify.needsResume()) {
+              currentRuntime.asyncify.finishUnwind();
+              requestAnimationFrame((nextTs) => runFrame(Math.min(0.05, (nextTs - lastTime) / 1000)));
+            }
+          });
+        }
+      } else if (typeof ex.ny_web_frame === "function") ex.ny_web_frame(Number(dt), stage.width, stage.height);
       else if (typeof ex.ny_web_render === "function") ex.ny_web_render(stage.width, stage.height);
       else if (!currentRuntime.ran && typeof ex.ny_web_main === "function") { currentRuntime.ran = true; ex.ny_web_main(); }
       else if (!currentRuntime.ran && currentRuntime.entry && typeof ex[currentRuntime.entry] === "function") {
@@ -815,7 +974,7 @@
       console.error(err && err.stack ? err.stack : err);
       currentRuntime = null;
       setKernelStatus("Error", "warn");
-      resetOutput([currentMeta.id, "runtime error", err.message]);
+      resetOutput([currentMeta.id, "runtime error", err.stack || err.message]);
       if (wantsCliStage(currentMeta, currentRuntime)) refreshCliStage();
       else drawStatusSurface("Runtime Error", [err.message]);
     }
@@ -872,17 +1031,23 @@
   function loop(ts) {
     const dt = lastTime ? Math.min(0.05, (ts - lastTime) / 1000) : 0.016;
     lastTime = ts;
-    if (running && (!currentRuntime || !currentRuntime.oneShot)) runFrame(dt);
+    if (running && (!currentRuntime || (!currentRuntime.oneShot && !currentRuntime.asyncify))) runFrame(dt);
     requestAnimationFrame(loop);
   }
 
   window.addEventListener("resize", fitCanvas);
   window.addEventListener("hashchange", () => selectDemo(window.location.hash.slice(1), false));
-  window.addEventListener("keydown", (e) => { input.key = e.key; input.code = e.keyCode || 0; });
-  window.addEventListener("keyup", () => { input.code = 0; });
+  window.addEventListener("keydown", (e) => {
+    const code = e.keyCode || e.which || 0;
+    input.key = e.key;
+    if (!input.codes.has(code)) input.pressed.add(code);
+    input.codes.add(code);
+  });
+  window.addEventListener("keyup", (e) => { input.codes.delete(e.keyCode || e.which || 0); });
+  window.addEventListener("blur", () => { input.codes.clear(); input.pressed.clear(); input.down = false; });
   canvas.addEventListener("mousemove", (e) => { const r = canvas.getBoundingClientRect(); input.mouse = [e.clientX - r.left, e.clientY - r.top]; });
   canvas.addEventListener("mousedown", () => { input.down = true; });
-  canvas.addEventListener("mouseup", () => { input.down = false; });
+  window.addEventListener("mouseup", () => { input.down = false; });
 
   wasmFile.addEventListener("change", async () => {
     const file = wasmFile.files[0];

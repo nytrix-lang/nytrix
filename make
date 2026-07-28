@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -2350,6 +2351,8 @@ WASM_DEFAULT_EXPORTS = (
     "ny_web_render",
 )
 
+WASM_ASYNCIFY_FRAME_IMPORT = "env.std.os.ui.render.end_frame"
+
 _WASM_CLANG_PROBE_CACHE: dict[str, tuple[bool, str]] = {}
 
 def _clang_supports_wasm(clang: str) -> tuple[bool, str]:
@@ -2473,6 +2476,27 @@ def _compile_ny_to_wasm(
         return {"ok": False, "stage": "clang", "detail": "wasm link failed", "output": _tail_text(clang_res.stdout)}
     return {"ok": True, "source": str(source), "ir": str(ir), "wasm": str(wasm)}
 
+def _instrument_wasm_asyncify(wasm: Path, step_timeout: int = 120) -> dict[str, object]:
+    wasm_opt = which("wasm-opt")
+    if not wasm_opt:
+        return {"ok": False, "stage": "toolchain", "detail": "wasm-opt missing (install Binaryen for browser frame scheduling)"}
+    tmp = wasm.with_suffix(".asyncify.wasm")
+    cmd = [
+        wasm_opt,
+        str(wasm),
+        "--asyncify",
+        "--pass-arg=" + "asyncify-imports@" + WASM_ASYNCIFY_FRAME_IMPORT,
+        "-o", str(tmp),
+    ]
+    try:
+        res = subprocess.run(cmd, cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=step_timeout)
+    except subprocess.TimeoutExpired as exc:
+        return {"ok": False, "stage": "asyncify", "detail": "wasm-opt asyncify timed out", "output": _tail_text(exc.stdout), "timeout": step_timeout}
+    if res.returncode != 0 or not tmp.exists():
+        return {"ok": False, "stage": "asyncify", "detail": "wasm-opt asyncify failed", "output": _tail_text(res.stdout)}
+    tmp.replace(wasm)
+    return {"ok": True}
+
 def _build_ny_demo_wasm(out_dir: Path, build_root: Path, kind: str, manifest: list[dict[str, object]]) -> tuple[int, int, str]:
     wasm_dir = out_dir / "wasm"
     ir_dir = out_dir / "ny-ir"
@@ -2530,6 +2554,20 @@ def _build_ny_demo_wasm(out_dir: Path, build_root: Path, kind: str, manifest: li
                 "output": _tail_text(res.get("output", "")),
             })
             continue
+        if bool(item.get("asyncify", False)):
+            async_res = _instrument_wasm_asyncify(wasm, step_timeout=step_timeout)
+            if not bool(async_res.get("ok", False)):
+                failed += 1
+                item["wasmStatus"] = str(async_res.get("detail", "asyncify failed"))
+                report.append({
+                    "id": demo_id,
+                    "source": source,
+                    "ok": False,
+                    "stage": str(async_res.get("stage", "asyncify")),
+                    "detail": str(async_res.get("detail", "asyncify failed")),
+                    "output": _tail_text(async_res.get("output", "")),
+                })
+                continue
         built += 1
         item["wasm"] = "wasm/" + wasm.name
         item["wasmBase64"] = base64.b64encode(wasm.read_bytes()).decode("ascii")
@@ -2582,6 +2620,55 @@ def run_web_demos(build_root: Path, kind: str, args: list[str]) -> int:
             log("WEB", "no manifest Ny sources compiled (" + ny_detail + ")")
     ok("web runner: " + _rel_or_abs(out_dir / "index.html"))
     print("Serve or open: " + _rel_or_abs(out_dir / "index.html"))
+    return 0
+
+def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
+    """Build the WebGL2 runner and prove that the unchanged Pong demo starts."""
+    if args and args[0] in ("-h", "--help"):
+        print("Usage: ./make web-test")
+        print("Builds the demo runner, serves it locally, and checks Pong in headless Chromium.")
+        return 0
+    if args:
+        raise SystemExit("web-test: no options supported")
+    browser = next((which(name) for name in ("chromium", "chromium-browser", "google-chrome") if which(name)), None)
+    if not browser:
+        raise SystemExit("web-test: Chromium missing (optional browser test dependency)")
+    out_dir = build_root / "web-test"
+    if run_web_demos(build_root, kind, ["--out", str(out_dir), "--clean", "--require-ny-wasm"]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = int(probe.getsockname()[1])
+    server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(out_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        result = subprocess.run([
+            browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+            "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+            "--virtual-time-budget=4000", "--dump-dom", f"http://127.0.0.1:{port}/index.html#ui-pong",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: Chromium timed out")
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            server.kill()
+    dom = result.stdout if 'result' in locals() else ""
+    required = ("id=\"webglStatus\">WebGL2", "browser runnable")
+    rejected = ("runtime error", "Load failed", "unsupported import", "WebGL2 missing")
+    presented = re.search(r'data-presented="[1-9][0-9]*"', dom) is not None
+    visible = 'data-frame-pixels="1"' in dom
+    if result.returncode != 0 or not presented or not visible or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
+        output = _tail_text(dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: Pong did not reach the WebGL2 browser runnable state")
+    ok("web-test: Pong reached WebGL2 browser runnable state")
     return 0
 
 def print_wasm_help() -> None:
@@ -2714,6 +2801,94 @@ def run_wasm(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("wasm: " + detail)
     ok("wasm: " + _rel_or_abs(Path(str(res["wasm"]))))
     log("WASM", "ir: " + _rel_or_abs(Path(str(res["ir"]))))
+    return 0
+
+def _web_host_import_names() -> set[str]:
+    """Return the browser runner's explicitly implemented Wasm host functions."""
+    source = (WEB_DEMO_ASSET_DIR / "wasm.js").read_text(encoding="utf-8")
+    quoted = re.findall(r'["\']([^"\']+)["\']\s*:', source)
+    bare = re.findall(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:', source, flags=re.MULTILINE)
+    return set(quoted) | set(bare)
+
+def _wasm_function_imports(wasm: Path) -> tuple[set[str] | None, str]:
+    objdump = which("wasm-objdump")
+    if not objdump:
+        return None, "wasm-objdump missing (install wabt to inspect WebAssembly imports)"
+    res = subprocess.run([objdump, "-x", str(wasm)], text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, timeout=30)
+    if res.returncode != 0:
+        return None, _tail_text(res.stdout, 1000) or "wasm-objdump failed"
+    imports: set[str] = set()
+    for line in res.stdout.splitlines():
+        match = re.search(r'<env\.([^>]+)>\s+<-\s+env\.([^\s]+)', line)
+        if match:
+            imports.add(match.group(2))
+    return imports, ""
+
+def _web_import_category(name: str) -> str:
+    if name.startswith("std.os.process."):
+        return "native process"
+    if name.startswith("std.os.ui.window."):
+        return "native window"
+    if name.startswith("std.os.ui.render.viewer.") or name.startswith("std.os.ui.render.dump."):
+        return "native renderer tooling"
+    return "browser host gap"
+
+def run_web_check(build_root: Path, kind: str, args: list[str]) -> int:
+    """Compile a Ny source and reject browser imports missing from the WebGL2 host."""
+    cfg = _parse_wasm_args(args, build_root)
+    if bool(cfg.get("help", False)):
+        print("Usage: ./make web-check path/to/app.ny [--timeout seconds]")
+        return 0
+    source = cfg["source"]
+    assert isinstance(source, Path)
+    if source.suffix == ".nshape":
+        extracted, extract_err = _extract_nshape_ny_source(source, build_root / "web-check-extracted", source.stem or "source")
+        if extracted is None:
+            raise SystemExit("web-check: " + extract_err)
+        source = extracted
+    out_dir = build_root / "web-check"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    wasm = out_dir / (source.stem + ".wasm")
+    ir = out_dir / (source.stem + ".ll")
+    result = _compile_ny_to_wasm(build_root, kind, source, wasm, ir,
+                                 step_timeout=int(cfg.get("timeout", 120)))
+    if not bool(result.get("ok", False)):
+        output = _tail_text(result.get("output", ""), 1600)
+        if output:
+            print(output)
+        raise SystemExit("web-check: " + str(result.get("detail", "Wasm compilation failed")))
+    imports, detail = _wasm_function_imports(wasm)
+    if imports is None:
+        raise SystemExit("web-check: " + detail)
+    missing = sorted(imports - _web_host_import_names())
+    report = {
+        "source": _rel_or_abs(source),
+        "target": "wasm-bare-webgl2",
+        "wasm": _rel_or_abs(wasm),
+        "imports": sorted(imports),
+        "supported": sorted(imports - set(missing)),
+        "unsupported": missing,
+        "ok": not missing,
+    }
+    report_path = out_dir / (source.stem + ".web-report.json")
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    if missing:
+        print("web-check: unsupported browser imports:")
+        groups: dict[str, list[str]] = {}
+        for name in missing:
+            groups.setdefault(_web_import_category(name), []).append(name)
+        for category in sorted(groups):
+            names = groups[category]
+            print(f"  {category}: {len(names)}")
+            for name in names[:12]:
+                print("    env." + name)
+            if len(names) > 12:
+                print(f"    ... {len(names) - 12} more (see report)")
+        print("web-check: report: " + _rel_or_abs(report_path))
+        raise SystemExit("web-check: add a portable adapter or keep this API native-only")
+    ok("web-check: " + _rel_or_abs(source) + f" ({len(imports)} host imports supported)")
+    log("WEB", "report: " + _rel_or_abs(report_path))
     return 0
 
 def _cross_slug(triple: str) -> str:
@@ -3469,6 +3644,12 @@ def run_make_doctor(build_root: Path, kind: str, args: list[str]) -> int:
     else:
         _doctor_check("stdlib extras", True, "all detected")
     print("")
+    print(c("1", "Optional browser tooling"))
+    _doctor_check("wasm-ld", bool(_tool_path("wasm-ld")), _tool_status("wasm-ld"), required=False)
+    _doctor_check("wasm-opt", bool(_tool_path("wasm-opt")), _tool_status("wasm-opt") + " (needed for async browser frame loops)", required=False)
+    _doctor_check("wasm-objdump", bool(_tool_path("wasm-objdump")), _tool_status("wasm-objdump") + " (needed by web-check)", required=False)
+    _doctor_check("emcc", bool(_tool_path("emcc")), _tool_status("emcc") + " (optional Emscripten target SDK)", required=False)
+    print("")
     print(c("1", "Built tools"))
     for name in ("ny", "ny-fmt", "ny-test"):
         path = _built_tool_status(build_root, kind, name)
@@ -4013,7 +4194,7 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     return rc
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
-    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web-demos", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web-demos", "web-check", "web-test", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -4090,7 +4271,7 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
                 jobs = int(v)
             except Exception:
                 raise SystemExit(f"make: invalid jobs value: {v}")
-        elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web-demos", "wasm"):
+        elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web-demos", "web-check", "web-test", "wasm"):
             cmds.append(a)
             extra.extend(argv[i + 1 :])
             break
@@ -4157,6 +4338,8 @@ def print_help() -> None:
             ("ny/repl/run", "launch the compiler, REPL, or cached -run flow"),
             ("docs", "build documentation portal"),
             ("wasm", "compile a Ny source file to WebAssembly"),
+            ("web-check", "verify a Ny source uses only implemented browser host APIs"),
+            ("web-test", "build and prove Pong reaches the WebGL2 browser runner"),
             ("web-demos", "build the browser WebGL/Wasm demo portal"),
         )),
         ("Inspect", (
@@ -5575,7 +5758,7 @@ def main() -> int:
     build_root, notice = resolve_build_dir()
     first_repl_bootstrap = bootstrap_needed_for_repl(build_root, kind, cmds)
     inspect_cmds = {"env", "targets", "doctor"}
-    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web-demos", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
+    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
     all_tool_style = all(c in tool_style_cmds for c in cmds)
     if all_tool_style and not first_repl_bootstrap:
         # Keep tool invocations clean by default (./make fmt/test/ny...) even if env
@@ -5667,7 +5850,7 @@ def main() -> int:
             targets = ["ny"]
         elif cmd == "docs":
             targets = ["ny", "std", "ny-doc"]
-        elif cmd in ("web-demos", "wasm"):
+        elif cmd in ("web-demos", "web-check", "web-test", "wasm"):
             targets = ["ny", "std"]
         elif cmd == "std":
             targets = ["std"]
@@ -5731,6 +5914,10 @@ def main() -> int:
             rc = run_tool(build_root, active_kind, "ny-doc", [std_file, "-o", out_dir, *extra])
         elif cmd == "web-demos":
             rc = run_web_demos(build_root, active_kind, extra)
+        elif cmd == "web-check":
+            rc = run_web_check(build_root, active_kind, extra)
+        elif cmd == "web-test":
+            rc = run_web_test(build_root, active_kind, extra)
         elif cmd == "c2ny":
             if not extra:
                 nyt_err("c2ny", "usage: ./make c2ny <file.c> [-o <out.ny>]")

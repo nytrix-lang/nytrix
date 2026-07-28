@@ -49,6 +49,14 @@
     "source": "etc/tests/bench/vector.nshape"
   },
   {
+    "id": "ui-pong",
+    "title": "Pong",
+    "area": "UI",
+    "mode": "webgl",
+    "source": "etc/projects/ui/pong.ny",
+    "asyncify": true
+  },
+  {
     "id": "project-args",
     "title": "Project Args",
     "area": "PROJECT",

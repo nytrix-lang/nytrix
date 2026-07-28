@@ -1,9 +1,5 @@
-;; Keywords: decompiler disassembler elf reverse
-;; ELF reversing tools for Nytrix code: load, inspect, disassemble, recover
-;; functions/imports/strings, bridge into symbolic execution, and render Ny
-;; pseudocode instead of C. Dependency-free tool and ELF classification helpers
-;; live in `decomp/`; keep higher-level passes here until their shared analysis
-;; contracts can be extracted without a cycle.
+;; Keywords: decompiler elf disassembly lifting analysis pseudocode
+;; Public decompiler facade: ELF inspection, lifting, analysis, and Ny pseudocode.
 module std.os.rev.decomp(
    sleep, msleep,
    tool_status, plan, analyze, load, elf_header, sections, section, section_bytes,
@@ -32,8 +28,14 @@ use std.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique
 use std.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _set_difference)
 use std.os.rev.decomp.symbols (_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
 use "../symbolic.ny" as sym
-use std.os.rev.decomp.elf
-use std.os.rev.decomp.cfg
+use std.os.rev.decomp.elf (
+   analyze, arch, arch_profile, disassemble, disassemble_function, elf_header,
+   entry, executable_sections, flirt_apply, flirt_match, flirt_signature,
+   flirt_signatures, function_at, function_extent, function_ranges, functions,
+   imports, import_sites, load, msleep, recover_functions, relocations, section,
+   section_bytes, sections, segments, sleep, strings, symbols,
+)
+use std.os.rev.decomp.cfg (basic_blocks, cfg, cfg_control_dependence, cfg_dominators, cfg_loops, cfg_postdominators, jump_tables)
 use std.os.rev.decomp.abi
 use std.os.rev.decomp.smt_proofs
 use std.os.rev.decomp.syscalls
@@ -4842,65 +4844,6 @@ fn _calls_model(list rows, any bin0=dict(), any sig0=dict()) list {
    out
 }
 
-fn _type_int_arg_value(dict arg) dict {
-   def v = str.strip(arg.get("value", ""))
-   if v.len == 0 || !_looks_int_literal(v) { return {"ok": false} }
-   {"ok": true, "value": _parse_int_piece(v)}
-}
-
-fn _type_alloc_size_from_args(str name0, list args) int {
-   def name = _type_call_name(name0)
-   if name == "malloc" && args.len >= 1 {
-      def a = _type_int_arg_value(args[0])
-      return a.get("ok", false) ? int(a.get("value", 0)) : 0
-   }
-   if name == "calloc" && args.len >= 2 {
-      def a = _type_int_arg_value(args[0])
-      def b = _type_int_arg_value(args[1])
-      if a.get("ok", false) && b.get("ok", false) { return int(a.get("value", 0)) * int(b.get("value", 0)) }
-   }
-   if name == "realloc" && args.len >= 2 {
-      def a = _type_int_arg_value(args[1])
-      return a.get("ok", false) ? int(a.get("value", 0)) : 0
-   }
-   0
-}
-
-fn _type_apply_call_signature(dict libsig, list args) list {
-   if libsig.len == 0 { return args }
-   def specs = libsig.get("args", [])
-   mut out = []
-   mut i = 0
-   while i < args.len {
-      mut a = args[i]
-      if i < specs.len {
-         def s = specs[i]
-         a = a.set("name", s.get("name", a.get("name", "")))
-         .set("type", s.get("type", a.get("type", "unknown")))
-         .set("role", s.get("role", a.get("role", "")))
-      }
-      out = out.append(a)
-      i += 1
-   }
-   out
-}
-
-fn _type_known_call_record(str name0, list args0, dict extra=dict()) dict {
-   def libsig = _type_library_signature(name0)
-   if libsig.len == 0 { return dict() }
-   def args = _type_apply_call_signature(libsig, args0)
-   extra.set("name", libsig.get("name", _type_call_name(name0))).set("category", libsig.get("category", "other"))
-   .set("return", libsig.get("return", dict())).set("args", args)
-   .set("signature", libsig)
-}
-
-fn _type_field_type_from_width(int w) str {
-   if w == 1 { return "u8" }
-   if w == 2 { return "u16" }
-   if w == 4 { return "u32" }
-   if w == 8 { return "u64_or_ptr" }
-   "unknown"
-}
 
 fn _type_fields_from_offsets_widths(list offsets, list widths) list {
    mut out = []

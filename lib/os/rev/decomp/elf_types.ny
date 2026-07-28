@@ -1,3 +1,4 @@
+;; Keywords: elf machine symbols segments permissions
 ;; Stable ELF classification helpers shared by decompiler passes.
 module std.os.rev.decomp.elf_types(machine, file_type, symbol_bind, symbol_type, segment_perms)
 

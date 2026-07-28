@@ -1,4 +1,4 @@
-
+;; Keywords: smt z3 proofs equivalence bitvectors semantics
 ;; SMT-backed equivalence proofs used by semantic recovery.
 module std.os.rev.decomp.smt_proofs *
 

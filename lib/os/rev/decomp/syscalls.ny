@@ -1,4 +1,5 @@
-;; Linux syscall-number decoders used by pseudocode rendering.
+;; Keywords: linux syscalls abi arguments pseudocode
+;; Linux syscall number, ABI, and argument-name decoding for pseudocode.
 module std.os.rev.decomp.syscalls *
 
 use std.core

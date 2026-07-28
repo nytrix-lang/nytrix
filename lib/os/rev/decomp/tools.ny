@@ -1,3 +1,4 @@
+;; Keywords: tools demangle cxxfilt subprocess disassembly
 ;; External tool boundary for the Nytrix decompiler.
 module std.os.rev.decomp.tools(tool_status, demangle)
 

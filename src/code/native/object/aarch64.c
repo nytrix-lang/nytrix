@@ -2052,7 +2052,14 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
             in->dst.kind == NY_MACH_OPERAND_VREG && in->dst.as.reg < mach->vreg_len &&
             mach->vreg_types[in->dst.as.reg] == NY_MACH_TYPE_F32;
         if (is_f64 || is_f32) {
-          if (!a64_ldur_fp(code, is_f32, 0, a) ||
+          if (in->src0.kind == NY_MACH_OPERAND_IMM) {
+            if (!a64_mov_imm64(code, 0, (uint64_t)in->src0.as.imm) ||
+                !a64_u32(code, is_f32 ? 0x1E270000u : 0x9E670000u))
+              goto fail;
+          } else if (!a64_ldur_fp(code, is_f32, 0, a)) {
+            goto fail;
+          }
+          if (
               !a64_stur_fp(code, is_f32, 0, dst))
             goto fail;
           break;
@@ -2216,7 +2223,7 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
             goto fail;
           if (!a64_ldur_fp(code, is_f32, 0, a) ||
               !a64_ldur_fp(code, is_f32, 1, b) ||
-              !a64_u32(code, falu) ||
+              !a64_u32(code, falu | (1u << 16)) ||
               !a64_stur_fp(code, is_f32, 0, dst))
             goto fail;
           break;
@@ -2286,7 +2293,8 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
           if (in->opcode != NY_MACH_DIV ||
               !a64_ldur_fp(code, is_f32, 0, a) ||
               !a64_ldur_fp(code, is_f32, 1, b) ||
-              !a64_u32(code, is_f32 ? 0x1E211800u : 0x1E611800u) ||
+              !a64_u32(code, (is_f32 ? 0x1E211800u : 0x1E611800u) |
+                                (1u << 16)) ||
               !a64_stur_fp(code, is_f32, 0, dst))
             goto fail;
           break;
