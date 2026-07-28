@@ -203,6 +203,11 @@ missing browser host APIs before publishing output. It is not
 an Emscripten compatibility spelling: requesting `wasm-emscripten` fails
 clearly until that adapter is implemented.
 
+The manifest declares the implemented baseline: WebGL2, keyboard, mouse, and
+an Asyncify frame loop. Audio, filesystem, network, threads, native windows,
+Vulkan, touch, gamepad, fullscreen, and pointer lock remain explicitly
+unsupported on this target; they are not host fallbacks.
+
 Check that a Ny source uses only browser-hosted APIs, then run the maintained
 Pong WebGL2 smoke test in headless Chromium:
 

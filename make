@@ -2136,6 +2136,27 @@ WEB_DEMO_SHARED_ASSETS = (
     "logo.svg",
     "favicon.svg",
 )
+WEB_WASM_BARE_TARGET = {
+    "kind": "wasm-bare",
+    "host": "browser",
+    "graphics": "webgl2",
+}
+WEB_WASM_BARE_CAPABILITIES = {
+    "webgl2": True,
+    "keyboard": True,
+    "mouse": True,
+    "frameLoop": True,
+    "fullscreen": False,
+    "pointerLock": False,
+    "touch": False,
+    "gamepad": False,
+    "audio": False,
+    "filesystem": False,
+    "network": False,
+    "threads": False,
+    "nativeWindow": False,
+    "vulkan": False,
+}
 
 def _demo_id_from_source(source: str) -> str:
     path = Path(source)
@@ -2864,7 +2885,8 @@ def run_web_check(build_root: Path, kind: str, args: list[str]) -> int:
     missing = sorted(imports - _web_host_import_names())
     report = {
         "source": _rel_or_abs(source),
-        "target": "wasm-bare-webgl2",
+        "target": WEB_WASM_BARE_TARGET,
+        "capabilities": WEB_WASM_BARE_CAPABILITIES,
         "wasm": _rel_or_abs(wasm),
         "imports": sorted(imports),
         "supported": sorted(imports - set(missing)),
@@ -3054,12 +3076,14 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
             "area": "APP", "mode": "webgl", "source": source_display,
             "wasm": "app.wasm", "wasmKind": "ny", "asyncify": bool(cfg["asyncify"])}
     (out_dir / "demos-data.js").write_text("window.NYTRIX_WEB_DEMOS = " + json.dumps([demo], indent=2) + ";\n", encoding="utf-8")
-    target = {"kind": "wasm-bare", "host": "browser", "graphics": "webgl2"}
+    target = dict(WEB_WASM_BARE_TARGET)
     report = {"source": source_display, "target": target,
+              "capabilities": WEB_WASM_BARE_CAPABILITIES,
               "wasm": "app.wasm", "imports": sorted(imports), "unsupported": [], "assets": packaged_assets,
               "asyncify": bool(cfg["asyncify"]), "softDependencies": []}
     (out_dir / "web-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    build_manifest = {"source": source_display, "target": target, "artifact": "app.wasm",
+    build_manifest = {"source": source_display, "target": target,
+                      "capabilities": WEB_WASM_BARE_CAPABILITIES, "artifact": "app.wasm",
                       "toolchain": {"clang": which("clang") or "", "wasmOpt": which("wasm-opt") or ""},
                       "assets": packaged_assets, "softDependencies": [], "asyncify": bool(cfg["asyncify"])}
     (out_dir / "build-manifest.json").write_text(json.dumps(build_manifest, indent=2) + "\n", encoding="utf-8")
