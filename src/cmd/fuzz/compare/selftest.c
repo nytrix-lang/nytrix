@@ -6751,6 +6751,10 @@ static void selftest_validate_perf_triage_args(const char *json,
       !strstr(json, "\"slowdown_percent\":") ||
       !strstr(json, "\"hotspot\":"))
     (void)string_list_push_copy(errors, "perf triage row timing aliases missing");
+  if (!strstr(json, "\"host\":{\"system\":") ||
+      !strstr(json, "\"machine\":") ||
+      !strstr(json, "\"online_cpus\":"))
+    (void)string_list_push_copy(errors, "perf triage host metadata missing");
   char *max_case = summary_string_from_report(json, "max_case");
   char *perf_max_case = summary_string_from_report(json, "perf_max_case");
   char *perf_worst_case = summary_string_from_report(json, "perf_worst_case");
@@ -6827,6 +6831,7 @@ static void selftest_validate_perf_triage_args(const char *json,
                !strstr(md.data, "TLDR") ||
                !strstr(md.data, "Ranked Cases") ||
                !strstr(md.data, "threshold 999.00x") ||
+               !strstr(md.data, "Host:") ||
                !strstr(md.data, "Refresh") ||
                !strstr(md.data, "env NYTRIX_LOW_PRIORITY=1") ||
                !strstr(md.data, "NYTRIX_RUN_NICE=10") ||

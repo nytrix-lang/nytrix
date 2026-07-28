@@ -4505,6 +4505,36 @@ static int clean_perf_triage_stale_artifacts(const char *dir) {
   return removed;
 }
 
+static void append_perf_triage_host_json(str_buf_t *out) {
+  struct utsname host = {0};
+  long online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+  (void)sb_append_c(out, '{');
+  (void)sb_append(out, "\"system\":");
+  (void)sb_append_json_str(out, uname(&host) == 0 ? host.sysname : "unknown");
+  (void)sb_append(out, ",\"release\":");
+  (void)sb_append_json_str(out, host.release[0] ? host.release : "unknown");
+  (void)sb_append(out, ",\"machine\":");
+  (void)sb_append_json_str(out, host.machine[0] ? host.machine : "unknown");
+  (void)sb_appendf(out, ",\"online_cpus\":%ld", online_cpus > 0 ? online_cpus : 0);
+  (void)sb_append_c(out, '}');
+}
+
+static void append_perf_triage_host_markdown(str_buf_t *md) {
+  struct utsname host = {0};
+  long online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+  if (uname(&host) != 0) {
+    (void)sb_append(md, "- Host: unavailable.\n");
+    return;
+  }
+  (void)sb_append(md, "- Host: ");
+  md_append_code(md, host.sysname);
+  (void)sb_append(md, " ");
+  md_append_code(md, host.release);
+  (void)sb_append(md, " ");
+  md_append_code(md, host.machine);
+  (void)sb_appendf(md, "; online CPUs %ld.\n", online_cpus > 0 ? online_cpus : 0);
+}
+
 static bool write_perf_triage_markdown(const char *root,
                                        const char *markdown_path,
                                        const char *json_path,
@@ -4570,6 +4600,7 @@ static bool write_perf_triage_markdown(const char *root,
     (void)sb_append(&md, "; confirmation disabled");
   }
   (void)sb_append(&md, ".\n");
+  append_perf_triage_host_markdown(&md);
   if (json_rel && *json_rel) {
     (void)sb_append(&md, "- JSON: ");
     md_append_code(&md, json_rel);
@@ -5055,6 +5086,8 @@ static int cmd_public_perf_triage(int argc, char **argv) {
                      threshold_ratio, bench_limit, bench_timeout_s, runs_i,
                          warmup_i, runs_i, cleaned_stale);
     append_rel_json_str(&summary, artifact_root, tmp_json ? tmp_json : "");
+    (void)sb_append(&summary, ",\"host\":");
+    append_perf_triage_host_json(&summary);
     (void)sb_append_c(&summary, '}');
     if (summary_path) (void)write_file_text(summary_path, summary.data ? summary.data : "{}");
       free(summary.data);
@@ -5130,6 +5163,8 @@ static int cmd_public_perf_triage(int argc, char **argv) {
     (void)sb_append(&extra, ",\"markdown\":");
     append_rel_json_str(&extra, artifact_root, markdown_path);
   }
+  (void)sb_append(&extra, ",\"host\":");
+  append_perf_triage_host_json(&extra);
     char *report = build_native_report_json_with_top_aliases(
         &rows, &failures, "perf-triage", extra.data, true);
   int rc = emit_native_report(report, json_path, "perf", rows.count, failures.count);
