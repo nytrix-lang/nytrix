@@ -221,7 +221,9 @@ to browser text drawing. This avoids shipping an unrelated asset tree and
 blocking startup on unnecessary fetches.
 
 Check that a Ny source uses only browser-hosted APIs, then run the maintained
-Pong WebGL2 smoke test in headless Chromium:
+Pong WebGL2 smoke test in headless Chromium. The smoke test also proves that a
+native process call is rejected with the exact machine-readable unsupported
+import record:
 
 ```bash
 ./make web-check etc/projects/ui/pong.ny

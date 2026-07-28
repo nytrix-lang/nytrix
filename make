@@ -2681,7 +2681,7 @@ def run_web_demos(build_root: Path, kind: str, args: list[str]) -> int:
     return 0
 
 def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
-    """Build browser outputs and prove packaged Pong starts with WebGL2 assets."""
+    """Prove a portable app runs and native-only imports fail before packaging."""
     if args and args[0] in ("-h", "--help"):
         print("Usage: ./make web-test")
         print("Builds the demo runner and deployable Pong app, then checks WebGL2 assets in headless Chromium.")
@@ -2694,6 +2694,20 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     out_dir = build_root / "web-test"
     if run_web_demos(build_root, kind, ["--out", str(out_dir), "--clean", "--require-ny-wasm"]) != 0:
         return 1
+    negative = ROOT / "etc" / "tests" / "web" / "unsupported-process.ny"
+    try:
+        run_web_check(build_root, kind, [str(negative)])
+    except SystemExit:
+        negative_report = build_root / "web-check" / "unsupported-process.web-report.json"
+        try:
+            negative_data = json.loads(negative_report.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit("web-test: native-process rejection did not write a valid report") from exc
+        if (negative_data.get("ok") is not False or
+                negative_data.get("unsupported") != ["std.os.process.run"]):
+            raise SystemExit("web-test: native-process rejection report lost its exact unsupported import")
+    else:
+        raise SystemExit("web-test: native process fixture unexpectedly passed browser portability analysis")
     app_dir = build_root / "web-test-app"
     if run_web(build_root, kind, ["etc/projects/ui/pong.ny", "--out", str(app_dir),
                                   "--assets", "etc/assets"]) != 0:
