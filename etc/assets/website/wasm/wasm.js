@@ -292,6 +292,12 @@
     canvas.dataset.framebuffer = `${stage.width}x${stage.height}`;
   }
 
+  function clearInput() {
+    input.codes.clear();
+    input.pressed.clear();
+    input.down = false;
+  }
+
   function shader(type, source) {
     const s = gl.createShader(type);
     gl.shaderSource(s, source);
@@ -1088,7 +1094,13 @@
     input.codes.add(code);
   });
   window.addEventListener("keyup", (e) => { input.codes.delete(e.keyCode || e.which || 0); });
-  window.addEventListener("blur", () => { input.codes.clear(); input.pressed.clear(); input.down = false; });
+  window.addEventListener("blur", clearInput);
+  document.addEventListener("visibilitychange", () => {
+    const visible = !document.hidden;
+    canvas.dataset.visible = visible ? "1" : "0";
+    if (!visible) clearInput();
+  });
+  canvas.dataset.visible = document.hidden ? "0" : "1";
   canvas.addEventListener("mousemove", (e) => { const r = canvas.getBoundingClientRect(); input.mouse = [e.clientX - r.left, e.clientY - r.top]; });
   canvas.addEventListener("mousedown", () => { input.down = true; });
   window.addEventListener("mouseup", () => { input.down = false; });

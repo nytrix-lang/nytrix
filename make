@@ -2690,10 +2690,11 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     presented = re.search(r'data-presented="[1-9][0-9]*"', dom) is not None
     visible = 'data-frame-pixels="1"' in dom
     assets_loaded = re.search(r'data-assets-loaded="[1-9][0-9]*"', dom) is not None
+    visible_document = 'data-visible="1"' in dom
     canvas_size = re.search(r'data-canvas-size="([0-9]+x[0-9]+)"', dom)
     framebuffer = re.search(r'data-framebuffer="([0-9]+x[0-9]+)"', dom)
     resized = canvas_size is not None and framebuffer is not None and canvas_size.group(1) == framebuffer.group(1)
-    if result.returncode != 0 or not presented or not visible or not assets_loaded or not resized or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
+    if result.returncode != 0 or not presented or not visible or not assets_loaded or not visible_document or not resized or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
         output = _tail_text(dom, 3000)
         if output:
             print(output)
