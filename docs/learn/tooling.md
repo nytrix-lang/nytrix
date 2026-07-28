@@ -208,6 +208,11 @@ an Asyncify frame loop. Audio, filesystem, network, threads, native windows,
 Vulkan, touch, gamepad, fullscreen, and pointer lock remain explicitly
 unsupported on this target; they are not host fallbacks.
 
+`web` keeps Asyncify enabled for ordinary `main`-style games so they cannot
+block the browser event loop. `--no-asyncify` is accepted only when the module
+exports `ny_web_frame` or `ny_web_render`, which the runner calls from its
+browser frame callback.
+
 Use `--assets` to package and preload the files referenced by string literals in
 the source under that directory. Repository-relative paths are retained, so a
 program that refers to `etc/assets/fonts/name.ttf` can use

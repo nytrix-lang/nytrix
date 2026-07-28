@@ -2892,6 +2892,17 @@ def _wasm_function_imports(wasm: Path) -> tuple[set[str] | None, str]:
             imports.add(match.group(2))
     return imports, ""
 
+def _wasm_export_names(wasm: Path) -> tuple[set[str] | None, str]:
+    """Return exported Wasm symbols for browser event-loop safety checks."""
+    objdump = which("wasm-objdump")
+    if not objdump:
+        return None, "wasm-objdump missing (install wabt to inspect WebAssembly exports)"
+    res = subprocess.run([objdump, "-x", str(wasm)], text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, timeout=30)
+    if res.returncode != 0:
+        return None, _tail_text(res.stdout, 1000) or "wasm-objdump failed"
+    return set(re.findall(r'-> "([^"]+)"', res.stdout)), ""
+
 def _web_import_category(name: str) -> str:
     if name.startswith("std.os.process."):
         return "native process"
@@ -3052,7 +3063,7 @@ def print_web_help() -> None:
     print("  --out DIR            deployment output directory")
     print("  --renderer webgl2    required renderer target (default)")
     print("  --assets DIR         package an asset root under assets/ (repeatable)")
-    print("  --no-asyncify        omit browser frame-loop instrumentation")
+    print("  --no-asyncify        only for exported ny_web_frame/ny_web_render callbacks")
     print("  --timeout SECONDS    per compiler/linker step limit")
 
 def _copy_web_runner_assets(out_dir: Path) -> None:
@@ -3097,6 +3108,16 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
     missing = sorted(imports - _web_host_import_names())
     if missing:
         raise SystemExit("web: unsupported browser imports: " + ", ".join("env." + name for name in missing[:6]))
+    if not bool(cfg["asyncify"]):
+        exports, detail = _wasm_export_names(wasm)
+        if exports is None:
+            raise SystemExit("web: " + detail)
+        callbacks = {"ny_web_frame", "ny_web_render"}
+        if not (callbacks & exports):
+            raise SystemExit(
+                "web: --no-asyncify requires an exported ny_web_frame or ny_web_render callback; "
+                "ordinary main loops must keep Asyncify enabled"
+            )
     if bool(cfg["asyncify"]):
         async_res = _instrument_wasm_asyncify(wasm, step_timeout=int(cfg["timeout"]))
         if not bool(async_res.get("ok", False)):
@@ -6128,23 +6149,22 @@ def main() -> int:
         elif cmd == "perf":
             targets = ["ny", "ny-perf"]
         if cmd not in ("uninstall", "static", "bin-static", "tar", "vendor"):
-            if cmd in ("ny", "repl") and not cmake_build_has_work(build_root, active_kind, targets):
+            ny_missing = cmd in ("ny", "repl") and cmake_build_has_work(build_root, active_kind, targets)
+            if ny_missing:
                 clean_bad_tool_build(build_root, active_kind, "ny")
-            if cmd in ("ny", "repl") and not cmake_build_has_work(build_root, active_kind, targets):
-                pass
-            else:
-                repl_build_visible = cmd in ("ny", "repl")
-                old_quiet = QUIET_BOOTSTRAP
-                if repl_build_visible:
-                    QUIET_BOOTSTRAP = False
+            repl_build_visible = cmd in ("ny", "repl")
+            old_quiet = QUIET_BOOTSTRAP
+            if repl_build_visible:
+                QUIET_BOOTSTRAP = False
+                if ny_missing:
                     boot_notice("ny binary missing: compiling before launch")
-                try:
-                    cmake_build(build_root, active_kind, targets, jobs)
-                    if repl_build_visible:
-                        boot_notice("ny compiled; launching")
-                finally:
-                    if repl_build_visible:
-                        QUIET_BOOTSTRAP = old_quiet
+            try:
+                cmake_build(build_root, active_kind, targets, jobs)
+                if repl_build_visible and ny_missing:
+                    boot_notice("ny compiled; launching")
+            finally:
+                if repl_build_visible:
+                    QUIET_BOOTSTRAP = old_quiet
 
         if cmd == "all":
             # Keep the ordinary developer build paired with the formatter's
