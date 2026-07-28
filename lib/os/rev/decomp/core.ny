@@ -29,6 +29,7 @@ use std.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _se
 use std.os.rev.decomp.symbols (_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
 use std.os.rev.decomp.annotations (_safe_name, _rename_map, _rename_name, _rename_addr, with_renames, _note_key, _note_record, with_notes, notes, note_at)
 use std.os.rev.decomp.graph (_cg_edge_key, _cg_add_edge, _cg_successors, _cg_predecessors, _cg_reaches, _cg_has_self_edge, _cg_components)
+use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_balanced_delimiters, _clean_strip_outer_balanced_parens)
 use "../symbolic.ny" as sym
 use std.os.rev.decomp.elf (
    analyze, arch, arch_profile, disassemble, disassemble_function, elf_header,
@@ -10342,81 +10343,6 @@ fn _clean_sub_mod_expr(str left0, str right0) str {
    if div <= 1 || int(rm.get("factor", 0)) != div { return "" }
    if !_clean_same_expr_text(left, q.get("base", "")) { return "" }
    left + " % " + to_str(div)
-}
-
-fn _clean_outer_balanced_parens_wrap(str expr0) bool {
-   def expr = str.strip(expr0)
-   if expr.len <= 2 || load8(expr, 0) != 40 || load8(expr, expr.len - 1) != 41 { return false }
-   mut depth = 0
-   mut quote = 0
-   mut i = 0
-   while i < expr.len {
-      def ch = load8(expr, i)
-      if quote != 0 {
-         if ch == 92 && i + 1 < expr.len { i += 2 continue }
-         if ch == quote { quote = 0 }
-         i += 1
-         continue
-      }
-      if ch == 34 || ch == 39 {
-         quote = ch
-         i += 1
-         continue
-      }
-      if ch == 40 { depth += 1 }
-      elif ch == 41 {
-         depth -= 1
-         if depth < 0 { return false }
-         if depth == 0 && i < expr.len - 1 { return false }
-      }
-      i += 1
-   }
-   depth == 0
-}
-
-fn _clean_balanced_delimiters(str expr0) bool {
-   def expr = str.strip(expr0)
-   mut parens = 0
-   mut brackets = 0
-   mut quote = 0
-   mut i = 0
-   while i < expr.len {
-      def ch = load8(expr, i)
-      if quote != 0 {
-         if ch == 92 && i + 1 < expr.len {
-            i += 2
-            continue
-         }
-         if ch == quote { quote = 0 }
-         i += 1
-         continue
-      }
-      if ch == 34 || ch == 39 {
-         quote = ch
-      } elif ch == 40 {
-         parens += 1
-      } elif ch == 41 {
-         parens -= 1
-         if parens < 0 { return false }
-      } elif ch == 91 {
-         brackets += 1
-      } elif ch == 93 {
-         brackets -= 1
-         if brackets < 0 { return false }
-      }
-      i += 1
-   }
-   quote == 0 && parens == 0 && brackets == 0
-}
-
-fn _clean_strip_outer_balanced_parens(str expr0) str {
-   mut expr = str.strip(expr0)
-   mut guard = 0
-   while guard < 8 && _clean_outer_balanced_parens_wrap(expr) {
-      expr = str.strip(slice(expr, 1, expr.len - 1, 1))
-      guard += 1
-   }
-   expr
 }
 
 fn _clean_mba_same_expr(str a0, str b0) bool {
