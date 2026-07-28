@@ -742,9 +742,10 @@ fn load(str p, any opts=dict()) dict {
    bin
 }
 
-fn analyze(str p, any opts=dict()) dict {
-   "Alias for load(...)."
-   load(p, opts)
+fn analyze(any source, any opts=dict()) dict {
+   "Load a path or return an existing ELF analysis record unchanged."
+   if is_dict(source) && source.contains("header") { return source }
+   load(to_str(source), opts)
 }
 
 fn entry(any source) int {

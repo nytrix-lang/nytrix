@@ -5,10 +5,10 @@ module std.os.rev.decomp.tools(tool_status, demangle)
 use std.core
 use std.core.str as str
 use std.os.disasm as dasm
-use std.os.subprocess as sub
+use std.os.subprocess (run_capture)
 
 fn _available(str name, list args) bool {
-   sub.run_capture(name, args, nil, false).get("code", 127) == 0
+   run_capture(name, args, nil, false).get("code", 127) == 0
 }
 
 fn tool_status() dict {
@@ -26,7 +26,7 @@ fn tool_status() dict {
 fn demangle(str name) str {
    "Return an Itanium C++ symbol demangled by c++filt when available."
    if !str.startswith(name, "_Z") { return name }
-   def r = sub.run_capture("c++filt", [name], nil, false)
+   def r = run_capture("c++filt", [name], nil, false)
    if r.get("code", 1) != 0 { return name }
    def out = str.strip(r.get("stdout", ""))
    out.len > 0 ? out : name

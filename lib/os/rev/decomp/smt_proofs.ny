@@ -524,30 +524,26 @@ fn _smt_expression_proofs_from_facts(dict bundle, any opts=dict()) dict {
    def bits = int(opts.get("bits", bundle.get("arch", "") == "x86_64" || bundle.get("arch", "") == "aarch64" ? 64 : 32))
    def proof_bits = bits >= 32 ? bits : 32
    def endian_modes = _smt_endian_modes(bundle)
-   def cache_key = to_str(proof_bits) + "|" + str.join(endian_modes, ",") + "|" + (smt.z3_available() ? "z3" : "noz3")
-   mut archetypes = _smt_archetype_proof_cache.get(cache_key, [])
-   if archetypes.len == 0 {
-      archetypes = archetypes.append(_smt_division_power2_proof(proof_bits).set("source", "archetype"))
-      archetypes = archetypes.append(_smt_signed_division_power2_nonnegative_proof(proof_bits).set("source", "archetype"))
-      archetypes = archetypes.append(_smt_remainder_power2_mask_proof(proof_bits).set("source", "archetype"))
-      mut ei = 0
-      while ei < endian_modes.len {
-         archetypes = archetypes.append(_smt_byte_pack_proof(32, endian_modes[ei]).set("source", "archetype").set("target_arch", bundle.get("arch", "")).set("target_endianness", endian_modes[ei]))
-         ei += 1
-      }
-      archetypes = archetypes.append(_smt_mask_low8_proof(proof_bits).set("source", "archetype"))
-      archetypes = archetypes.append(_smt_mask_byte_window_proof(proof_bits).set("source", "archetype"))
-      archetypes = archetypes.append(_smt_bitfield_extract_proof(proof_bits).set("source", "archetype"))
-      archetypes = archetypes.append(_smt_self_mask_idempotent_proof(proof_bits).set("source", "archetype"))
-      archetypes = archetypes.append(_smt_rotate_left_proof(proof_bits).set("source", "archetype"))
-      archetypes = archetypes.append(_smt_rotate_right_proof(proof_bits).set("source", "archetype"))
-      archetypes = archetypes.append(_smt_unbounded_integer_wrap_proof(proof_bits).set("source", "archetype"))
-      archetypes = archetypes.append(_smt_byte_swap32_proof().set("source", "archetype"))
-      archetypes = archetypes.append(_smt_magic_unsigned_div3_proof().set("source", "archetype"))
-      archetypes = archetypes.append(_smt_affine_byte_mix_proof().set("source", "archetype"))
-      archetypes = archetypes.append(_smt_rotate_xor_hash_round_proof(8).set("source", "archetype"))
-      _smt_archetype_proof_cache = _smt_archetype_proof_cache.set(cache_key, archetypes)
+   mut archetypes = []
+   archetypes = archetypes.append(_smt_division_power2_proof(proof_bits).set("source", "archetype"))
+   archetypes = archetypes.append(_smt_signed_division_power2_nonnegative_proof(proof_bits).set("source", "archetype"))
+   archetypes = archetypes.append(_smt_remainder_power2_mask_proof(proof_bits).set("source", "archetype"))
+   mut ei = 0
+   while ei < endian_modes.len {
+      archetypes = archetypes.append(_smt_byte_pack_proof(32, endian_modes[ei]).set("source", "archetype").set("target_arch", bundle.get("arch", "")).set("target_endianness", endian_modes[ei]))
+      ei += 1
    }
+   archetypes = archetypes.append(_smt_mask_low8_proof(proof_bits).set("source", "archetype"))
+   archetypes = archetypes.append(_smt_mask_byte_window_proof(proof_bits).set("source", "archetype"))
+   archetypes = archetypes.append(_smt_bitfield_extract_proof(proof_bits).set("source", "archetype"))
+   archetypes = archetypes.append(_smt_self_mask_idempotent_proof(proof_bits).set("source", "archetype"))
+   archetypes = archetypes.append(_smt_rotate_left_proof(proof_bits).set("source", "archetype"))
+   archetypes = archetypes.append(_smt_rotate_right_proof(proof_bits).set("source", "archetype"))
+   archetypes = archetypes.append(_smt_unbounded_integer_wrap_proof(proof_bits).set("source", "archetype"))
+   archetypes = archetypes.append(_smt_byte_swap32_proof().set("source", "archetype"))
+   archetypes = archetypes.append(_smt_magic_unsigned_div3_proof().set("source", "archetype"))
+   archetypes = archetypes.append(_smt_affine_byte_mix_proof().set("source", "archetype"))
+   archetypes = archetypes.append(_smt_rotate_xor_hash_round_proof(8).set("source", "archetype"))
    mut proofs = []
    mut ai = 0
    while ai < archetypes.len {
@@ -570,4 +566,10 @@ fn _smt_expression_proofs_from_facts(dict bundle, any opts=dict()) dict {
       "ok": smt.z3_available(), "bits": proof_bits,
       "translation": "expr_to_z3_ast", "endianness_modes": endian_modes,
    "proofs": proofs, "proof_count": proofs.len, "proved_count": proved}
+}
+
+#main {
+   def proofs = _smt_expression_proofs_from_facts({"arch": "x86_64", "rows": []})
+   assert(proofs.get("proof_count", 0) > 0, "SMT archetype proofs")
+   print("✓ std.os.rev.decomp.smt_proofs self-test passed")
 }

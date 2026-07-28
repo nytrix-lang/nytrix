@@ -77,8 +77,8 @@ fn arch_profile(any source) dict {
    dc.arch_profile(source)
 }
 
-fn analyze(str path, any opts=dict()) dict {
-   dc.analyze(path, opts)
+fn analyze(any source, any opts=dict()) dict {
+   dc.analyze(source, opts)
 }
 
 fn triage(any source, any opts=dict()) dict {

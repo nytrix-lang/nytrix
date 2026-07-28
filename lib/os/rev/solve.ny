@@ -21,7 +21,7 @@ use std.core.str as str
 use std.os as os
 use std.math.smt as smt
 use std.math.big as big
-use "./decomp.ny" as dc
+use std.os.rev.decomp as dc
 
 def _BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
