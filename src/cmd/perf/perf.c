@@ -87,17 +87,20 @@ typedef struct {
 enum { PERF_MAX_EXEC_TARGETS = 64 };
 
 static const PerfCase k_cases[] = {
-    {"etc/tests/fuzz/bench/binary.nshape", "compile"},
-    {"etc/tests/fuzz/bench/dict.nshape", "balanced"},
-    {"etc/tests/fuzz/bench/fibonacci.nshape", "speed"},
-    {"etc/tests/fuzz/bench/float.nshape", "speed"},
-    {"etc/tests/fuzz/bench/intops.nshape", "speed"},
-    {"etc/tests/fuzz/bench/iter.nshape", "balanced"},
-    {"etc/tests/fuzz/bench/list.nshape", "balanced"},
-    {"etc/tests/fuzz/bench/mandelbrot.nshape", "speed"},
-    {"etc/tests/fuzz/bench/sieve.nshape", "size"},
-    {"etc/tests/fuzz/bench/spectral.nshape", "speed"},
-    {"etc/tests/fuzz/bench/vector.nshape", "speed"},
+    {"etc/tests/bench/binary.nshape", "compile"},
+    {"etc/tests/bench/calls.nshape", "speed"},
+    {"etc/tests/bench/dict.nshape", "balanced"},
+    {"etc/tests/bench/fibonacci.nshape", "speed"},
+    {"etc/tests/bench/float.nshape", "speed"},
+    {"etc/tests/bench/intops.nshape", "speed"},
+    {"etc/tests/bench/iter.nshape", "balanced"},
+    {"etc/tests/bench/list.nshape", "balanced"},
+    {"etc/tests/bench/mandelbrot.nshape", "speed"},
+    {"etc/tests/bench/matrix.nshape", "speed"},
+    {"etc/tests/bench/sieve.nshape", "size"},
+    {"etc/tests/bench/spectral.nshape", "speed"},
+    {"etc/tests/bench/string.nshape", "balanced"},
+    {"etc/tests/bench/vector.nshape", "speed"},
 };
 
 enum { PERF_CASE_COUNT = (int)(sizeof(k_cases) / sizeof(k_cases[0])) };
@@ -589,6 +592,15 @@ static int run_one_compare_ny(const char *bin, const char *path, const PerfCompa
 
 static int run_one_gate(const char *bin, const char *path, const char *profile, const char *cache_dir,
                         int use_native_cache, int timeout_sec, double *elapsed_ms) {
+  char materialized[PATH_MAX] = {0};
+  const char *run_path = path;
+  if (nyt_ends_with(path, ".nshape")) {
+    snprintf(materialized, sizeof(materialized), "%s/ny-perf-gate-%ld.ny",
+             nyt_temp_dir(), (long)getpid());
+    if (!extract_shape_source(path, "ny", "NY", materialized))
+      return 1;
+    run_path = materialized;
+  }
   int status = 0;
   struct timespec t0, t1;
   clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -611,7 +623,7 @@ static int run_one_gate(const char *bin, const char *path, const char *profile, 
       ny_setenv("NYTRIX_CACHE_DIR", cache_dir, 1);
     if (use_native_cache && nyt_env_truthy("NYTRIX_PERF_NATIVE_CACHE"))
       ny_setenv("NYTRIX_JIT_NATIVE_CACHE", "1", 1);
-    execl(bin, bin, "-time", "-run", path, (char *)NULL);
+    execl(bin, bin, "-time", "-run", run_path, (char *)NULL);
     _exit(127);
   }
 
@@ -627,6 +639,8 @@ static int run_one_gate(const char *bin, const char *path, const char *profile, 
     if (elapsed_s >= (double)timeout_sec) {
       kill(pid, SIGKILL);
       waitpid(pid, &status, 0);
+      if (materialized[0])
+        remove(materialized);
       return 2;
     }
     struct timespec ts = {0, 1000000L};
@@ -636,6 +650,8 @@ static int run_one_gate(const char *bin, const char *path, const char *profile, 
   clock_gettime(CLOCK_MONOTONIC, &t1);
   *elapsed_ms = ((double)(t1.tv_sec - t0.tv_sec) * 1000.0) +
                 ((double)(t1.tv_nsec - t0.tv_nsec) / 1000000.0);
+  if (materialized[0])
+    remove(materialized);
   if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
     return 1;
   return 0;
@@ -674,7 +690,7 @@ static double load_baseline_value(const char *path, const char *id) {
     char *p = strrchr(line, ':');
     if (!p)
       continue;
-    out = atof(p + 1);
+    ny_parse_f64(p + 1, &out);
     break;
   }
   free(line);
@@ -1585,7 +1601,7 @@ static void usage(void) {
   printf("%sexamples:%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
   printf("  %sny perf gate --bin build/release/ny%s\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sNYTRIX_PERF_COLD=1 ny perf gate%s\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
-  printf("  %sny perf profile etc/tests/fuzz/bench/sieve.nshape -- --bench%s\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
+  printf("  %sny perf profile etc/tests/bench/sieve.nshape -- --bench%s\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sny perf compare --target old=./bench-old --target new=./bench-new --samples 5 -- --bench%s\n",
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
 }

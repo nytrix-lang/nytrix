@@ -4,49 +4,57 @@
     "title": "Bench Fibonacci",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/fuzz/bench/fibonacci.nshape"
+    "source": "etc/tests/bench/fibonacci.nshape"
   },
   {
     "id": "bench-intops",
     "title": "Bench Intops",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/fuzz/bench/intops.nshape"
+    "source": "etc/tests/bench/intops.nshape"
   },
   {
     "id": "bench-float",
     "title": "Bench Float",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/fuzz/bench/float.nshape"
+    "source": "etc/tests/bench/float.nshape"
   },
   {
     "id": "bench-sieve",
     "title": "Bench Sieve",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/fuzz/bench/sieve.nshape"
+    "source": "etc/tests/bench/sieve.nshape"
   },
   {
     "id": "bench-list",
     "title": "Bench List",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/fuzz/bench/list.nshape"
+    "source": "etc/tests/bench/list.nshape"
   },
   {
     "id": "bench-mandelbrot",
     "title": "Bench Mandelbrot",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/fuzz/bench/mandelbrot.nshape"
+    "source": "etc/tests/bench/mandelbrot.nshape"
   },
   {
     "id": "bench-vector",
     "title": "Bench Vector",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/fuzz/bench/vector.nshape"
+    "source": "etc/tests/bench/vector.nshape"
+  },
+  {
+    "id": "ui-pong",
+    "title": "Pong",
+    "area": "UI",
+    "mode": "webgl",
+    "source": "etc/projects/ui/pong.ny",
+    "asyncify": true
   },
   {
     "id": "project-args",

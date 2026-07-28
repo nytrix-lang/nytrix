@@ -1,0 +1,27 @@
+shape bench_call_chain {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "call", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+fn add(int a, int b) int { a + b }
+fn mul(int a, int b) int { a * b }
+fn chain(int n) int {
+  def a = add(n, 1)
+  def b = mul(a, 2)
+  def c = add(b, n)
+  c
+}
+def t0 = ticks()
+mut r = 0
+for i in 0..500 {
+  r = chain(i)
+}
+def t1 = ticks()
+print("checksum=", r)
+print("elapsed_ns=", t1 - t0)
+NY
+}

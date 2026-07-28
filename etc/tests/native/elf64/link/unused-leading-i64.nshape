@@ -1,0 +1,14 @@
+shape x86_64_elf64_object_link_run_unused_leading_i64 {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 x86_64 nyir link-run]
+  template ny-test-case
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-unused-leading-i64.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+fn pick(i64 unused, i64 value) i64 {
+  value
+}
+pick(7, 42)
+NY
+}

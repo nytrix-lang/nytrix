@@ -16,6 +16,7 @@
 #include "rt/runtime.h"
 #include "rt/shared.h"
 #include "wire/build.h"
+#include "wire/cache.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -104,7 +105,6 @@ static int g_repl_exec_trace_ir = 0;
 static char *g_repl_exec_trace_filter = NULL;
 static int g_repl_opt_level = 1;
 static int g_repl_std_root_lazy = 0;
-static int g_repl_lazy_docs_loaded = 0;
 volatile sig_atomic_t g_repl_sigint = 0;
 extern int g_trace_requested;
 extern int g_trace_suspended;
@@ -120,7 +120,6 @@ static bool repl_fast_batch_exit_enabled(int batch_mode) {
 
 #ifndef _WIN32
 static volatile sig_atomic_t g_repl_eval_active = 0;
-static __attribute__((unused)) sigjmp_buf g_repl_eval_jmp;
 #endif
 
 static void repl_on_sigint(int sig) {
@@ -684,6 +683,7 @@ repl_collect_existing_jit_function_mappings(LLVMExecutionEngineRef ee,
   return items;
 }
 
+#ifdef __APPLE__
 static bool repl_define_jit_function_trampoline(LLVMValueRef fn,
                                                 uint64_t addr) {
   if (!fn || !addr || !LLVMIsDeclaration(fn))
@@ -719,6 +719,7 @@ static bool repl_define_jit_function_trampoline(LLVMValueRef fn,
   LLVMDisposeBuilder(b);
   return true;
 }
+#endif
 
 static void repl_define_existing_jit_function_trampolines(
     repl_pending_fn_mapping_t *items, size_t len) {
@@ -884,67 +885,6 @@ static int repl_lazy_ident_ignored(const char *name) {
       return 1;
   }
   return 0;
-}
-
-static void repl_lazy_load_all_std_docs(doc_list_t *docs) {
-  if (!docs || g_repl_lazy_docs_loaded)
-    return;
-  for (size_t i = 0; i < ny_std_module_count(); ++i)
-    repl_load_module_docs(docs, ny_std_module_name(i));
-  g_repl_lazy_docs_loaded = 1;
-}
-
-static char *repl_lazy_module_prefix_for_doc_name(const char *name) {
-  if (!name || strncmp(name, "std.", 4) != 0)
-    return NULL;
-  char buf[512];
-  int nw = snprintf(buf, sizeof(buf), "%s", name);
-  if (nw <= 0 || (size_t)nw >= sizeof(buf))
-    return NULL;
-  while (1) {
-    char *dot = strrchr(buf, '.');
-    if (!dot)
-      return NULL;
-    *dot = '\0';
-    if (ny_std_find_module_by_name(buf) >= 0)
-      return ny_strdup(buf);
-  }
-}
-
-static int repl_lazy_module_score(const char *module) {
-  if (!module || !*module)
-    return -1000000;
-  int score = 10000 - (int)strlen(module) * 4;
-  int depth = 0;
-  for (const char *p = module; *p; ++p) {
-    if (*p == '.')
-      depth++;
-  }
-  score -= depth * 80;
-  if (strcmp(module, "std.math") == 0)
-    score += 900;
-  if (strncmp(module, "std.core", 8) == 0)
-    score += 200;
-  if (strstr(module, ".crypto."))
-    score -= 700;
-  if (strstr(module, ".ui."))
-    score -= 700;
-  return score;
-}
-
-static int repl_doc_leaf_equals(const char *full, const char *leaf) {
-  if (!full || !leaf || !*leaf)
-    return 0;
-  const char *dot = strrchr(full, '.');
-  const char *got = dot ? dot + 1 : full;
-  return strcmp(got, leaf) == 0;
-}
-
-static const char *repl_name_leaf(const char *name) {
-  if (!name || !*name)
-    return NULL;
-  const char *dot = strrchr(name, '.');
-  return dot ? dot + 1 : name;
 }
 
 static char *repl_lazy_std_module_for_leaf(doc_list_t *docs, const char *leaf) {
@@ -1499,6 +1439,9 @@ static const char *repl_std_mode_name(std_mode_t mode) {
 
 #define REPL_SNAPSHOT_MAGIC "#!nytrix-repl-snapshot v1"
 #define REPL_SNAPSHOT_BEGIN "; nytrix-snapshot-begin"
+#define REPL_SNAPSHOT_FORMAT_V2 "; nytrix-snapshot-format: source-v2"
+#define REPL_SNAPSHOT_FINGERPRINT "; nytrix-snapshot-source-fingerprint: "
+#define REPL_SNAPSHOT_BYTES "; nytrix-snapshot-source-bytes: "
 
 static void repl_ensure_parent_dir_for_path(const char *path) {
   if (!path || !*path)
@@ -1563,6 +1506,49 @@ static char *repl_snapshot_payload_copy(const char *src) {
   return ny_strdup(payload);
 }
 
+/* New snapshots bind their header to the payload before it enters the
+ * persistent REPL engine. Old v1 source-only snapshots intentionally remain
+ * readable: the identity fields are an additive corruption/staleness guard. */
+static bool repl_snapshot_identity_matches(const char *src, const char *payload) {
+  if (!src || !payload)
+    return false;
+  const char *begin = strstr(src, REPL_SNAPSHOT_BEGIN);
+  if (!begin)
+    return false;
+  const char *format_v2 = strstr(src, REPL_SNAPSHOT_FORMAT_V2);
+  const char *fingerprint = strstr(src, REPL_SNAPSHOT_FINGERPRINT);
+  const char *bytes = strstr(src, REPL_SNAPSHOT_BYTES);
+  /* Source-v1 snapshots had no integrity lines.  A declared source-v2 image
+   * must not silently downgrade to that compatibility path when truncation or
+   * editing removes one of its required header fields. */
+  if (!fingerprint && !bytes)
+    return format_v2 == NULL || format_v2 >= begin;
+  if (format_v2 && format_v2 >= begin)
+    format_v2 = NULL;
+  if (format_v2 && (!fingerprint || !bytes))
+    return false;
+  if (!fingerprint || !bytes || fingerprint >= begin || bytes >= begin)
+    return false;
+  fingerprint += sizeof(REPL_SNAPSHOT_FINGERPRINT) - 1;
+  bytes += sizeof(REPL_SNAPSHOT_BYTES) - 1;
+  if (strlen(fingerprint) < 17 || fingerprint[16] != '\n')
+    return false;
+  char hex[17];
+  memcpy(hex, fingerprint, sizeof(hex) - 1);
+  hex[sizeof(hex) - 1] = '\0';
+  char *end = NULL;
+  errno = 0;
+  uint64_t expected_fingerprint = strtoull(hex, &end, 16);
+  if (errno || !end || *end != '\0')
+    return false;
+  errno = 0;
+  unsigned long long expected_bytes = strtoull(bytes, &end, 10);
+  if (errno || end == bytes || (*end != '\n' && *end != '\0'))
+    return false;
+  return expected_fingerprint == ny_cache_semantic_fingerprint(payload) &&
+         expected_bytes == (unsigned long long)strlen(payload);
+}
+
 static size_t repl_snapshot_source_len(void) {
   return (g_repl_user_source && *g_repl_user_source)
              ? strlen(g_repl_user_source)
@@ -1573,15 +1559,19 @@ static char *repl_build_snapshot_image(std_mode_t std_mode) {
   const char *payload =
       (g_repl_user_source && *g_repl_user_source) ? g_repl_user_source : "";
   size_t payload_len = strlen(payload);
+  uint64_t payload_fingerprint = ny_cache_semantic_fingerprint(payload);
   char header[512];
   snprintf(header, sizeof(header),
            "%s\n"
-           "; nytrix-snapshot-format: source-v1\n"
+           REPL_SNAPSHOT_FORMAT_V2 "\n"
            "; nytrix-snapshot-std: %s\n"
            "; nytrix-snapshot-created: %lld\n"
+           REPL_SNAPSHOT_FINGERPRINT "%016llx\n"
+           REPL_SNAPSHOT_BYTES "%zu\n"
            "%s\n",
            REPL_SNAPSHOT_MAGIC, repl_std_mode_name(std_mode),
-           (long long)time(NULL), REPL_SNAPSHOT_BEGIN);
+           (long long)time(NULL), (unsigned long long)payload_fingerprint,
+           payload_len, REPL_SNAPSHOT_BEGIN);
   size_t header_len = strlen(header);
   int add_newline = payload_len > 0 && payload[payload_len - 1] != '\n';
   char *out = malloc(header_len + payload_len + (add_newline ? 1 : 0) + 1);
@@ -1641,7 +1631,6 @@ static void repl_reset_docs_from_source(doc_list_t *docs, const char *src,
     return;
   doclist_free(docs);
   memset(docs, 0, sizeof(*docs));
-  g_repl_lazy_docs_loaded = 0;
   add_builtin_docs(docs);
   repl_add_docs_from_source(docs, src, name);
 }
@@ -1651,6 +1640,12 @@ static int repl_load_snapshot_image(const char *path, const char *src,
   char *payload = repl_snapshot_payload_copy(src);
   if (!payload)
     return -1;
+  if (!repl_snapshot_identity_matches(src, payload)) {
+    fprintf(stderr, "Snapshot source identity check failed: %s\n",
+            path ? path : "<snapshot>");
+    free(payload);
+    return -1;
+  }
   char *old_source = (g_repl_user_source && *g_repl_user_source)
                          ? ny_strdup(g_repl_user_source)
                          : NULL;
@@ -2031,12 +2026,14 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
   {
     const char *jit_opt = getenv("NYTRIX_REPL_JIT_OPT");
     if (jit_opt && *jit_opt) {
-      int lvl = atoi(jit_opt);
-      if (lvl < 0)
-        lvl = 0;
-      if (lvl > 3)
-        lvl = 3;
-      options.OptLevel = (unsigned)lvl;
+      int lvl = 0;
+      if (ny_parse_int(jit_opt, &lvl)) {
+        if (lvl < 0)
+          lvl = 0;
+        if (lvl > 3)
+          lvl = 3;
+        options.OptLevel = (unsigned)lvl;
+      }
     }
   }
   {
@@ -2606,8 +2603,14 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
           _pe2.defer_base = 0;
           if (g_panic_env_stack.len >= g_panic_env_stack.cap) {
             size_t _nc2 = g_panic_env_stack.cap ? g_panic_env_stack.cap * 2 : 8;
-            g_panic_env_stack.data =
-                realloc(g_panic_env_stack.data, _nc2 * sizeof(_rpe));
+            void *_tmp2 = realloc(g_panic_env_stack.data, _nc2 * sizeof(_rpe));
+            if (!_tmp2) {
+              last_status = 1;
+              g_repl_eval_active = 0;
+              g_trace_suspended = saved_trace_suspended;
+              return 1;
+            }
+            g_panic_env_stack.data = _tmp2;
             g_panic_env_stack.cap = _nc2;
           }
           g_panic_env_stack.data[g_panic_env_stack.len++] = _pe2;
@@ -2945,7 +2948,6 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   }
   g_repl_std_root_lazy = 0;
   g_repl_options = options;
-  g_repl_lazy_docs_loaded = 0;
   bool fast_batch_exit = repl_fast_batch_exit_enabled(batch_mode);
   g_repl_opt_level = batch_mode ? 0 : opt_level;
   if (g_repl_opt_level < 0)
@@ -3331,7 +3333,6 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           g_repl_user_source_len = 0;
         }
         g_repl_std_root_lazy = 0;
-        g_repl_lazy_docs_loaded = 0;
         repl_set_last_expand_source(NULL, NULL);
         repl_init_engine(std_mode, &docs);
         printf("Reset\n");

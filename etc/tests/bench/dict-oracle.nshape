@@ -1,0 +1,17 @@
+shape bench_dict_oracle {
+  family "runtime-native"
+  generator "native"
+  features ["native", "oracle", "dict", "checksum"]
+  template ny-test-case
+  flags "--native-backend x86_64 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut d = dict()
+d.set("a", 1)
+d.set("b", 2)
+d.set("c", 3)
+def r = d.get("a", 0) + d.get("b", 0) + d.get("c", 0)
+print("checksum=", r)
+NY
+}

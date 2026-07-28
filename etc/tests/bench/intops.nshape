@@ -1,0 +1,57 @@
+shape intops {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+def n = 200000
+def start = ticks()
+mut acc = 0
+mut i = 1
+def xs = [3, 7, 11, 13]
+while i < n {
+   def x = xs.get(i % 4)
+   acc = acc + x
+   acc = acc - (x / 3)
+   acc = acc + ((x * 7) % 97)
+   i = i + 1
+}
+def end = ticks()
+print("checksum=", acc)
+print("elapsed_ns=", end - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int n = 200000;
+    const int xs[4] = {3, 7, 11, 13};
+    int64_t acc = 0;
+    int64_t start = now_ns();
+    for (int i = 1; i < n; i++) {
+        int x = xs[i & 3];
+        acc = acc + x;
+        acc = acc - (x / 3);
+        acc = acc + ((x * 7) % 97);
+    }
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)acc);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

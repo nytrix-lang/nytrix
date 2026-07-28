@@ -1,0 +1,12 @@
+shape nyir_metadata_bin_bad_range {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "metadata", "binary", "negative"]
+  template ny-test-case
+  flags "--nyir-metadata-bin=etc/tests/native/fixtures/nyir-bad-range.nyir"
+  expect compile_fail
+  expect_message "incomplete range fact"
+  source ny <<'NY'
+1 + 2
+NY
+}

@@ -358,10 +358,6 @@ static int run_doc_tool_with_fontconfig(char *const argv[],
 #endif
 }
 
-static int run_doc_tool(char *const argv[]) {
-  return run_doc_tool_with_fontconfig(argv, NULL);
-}
-
 static int dirname_into(char *out, size_t out_n, const char *path) {
   if (!out || !out_n || !path || !*path)
     return 0;
@@ -2048,199 +2044,6 @@ static void append_symbol_json(sb_t *json, const char *id_src, const char *name,
   free(id);
 }
 
-typedef struct {
-  int total;
-  char examples[10][80];
-  int example_n;
-  char tags[64][40];
-  int tag_counts[64];
-  int tag_n;
-} module_export_summary_t;
-
-static int module_doc_has_summary_text(const char *doc) {
-  const char *p = doc ? doc : "";
-  while (*p) {
-    const char *line = p;
-    size_t n = 0;
-    while (p[n] && p[n] != '\n')
-      n++;
-    char *trimmed = trim_copy(line, n);
-    if (trimmed && *trimmed && strncasecmp(trimmed, "keywords:", 9) != 0) {
-      free(trimmed);
-      return 1;
-    }
-    free(trimmed);
-    p += n;
-    if (*p == '\n')
-      p++;
-  }
-  return 0;
-}
-
-static int module_export_stop_word(const char *s) {
-  const char *words[] = {"get",  "set",   "read",    "write", "load",
-                         "save", "parse", "make",    "new",   "init",
-                         "free", "to",    "from",    "is",    "has",
-                         "as",   "try",   "default", "with"};
-  for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++)
-    if (strcmp(s, words[i]) == 0)
-      return 1;
-  return 0;
-}
-
-static void module_summary_add_tag(module_export_summary_t *st,
-                                   const char *tag) {
-  if (!st || !tag || !*tag || strlen(tag) < 2)
-    return;
-  for (int i = 0; i < st->tag_n; i++) {
-    if (strcmp(st->tags[i], tag) == 0) {
-      st->tag_counts[i]++;
-      return;
-    }
-  }
-  if (st->tag_n >= (int)(sizeof(st->tags) / sizeof(st->tags[0])))
-    return;
-  snprintf(st->tags[st->tag_n], sizeof(st->tags[st->tag_n]), "%s", tag);
-  st->tag_counts[st->tag_n] = 1;
-  st->tag_n++;
-}
-
-static void module_summary_add_export(module_export_summary_t *st,
-                                      const char *name) {
-  if (!st || !name || !*name)
-    return;
-  st->total++;
-  if (st->example_n < (int)(sizeof(st->examples) / sizeof(st->examples[0])) &&
-      name[0] != '_') {
-    snprintf(st->examples[st->example_n], sizeof(st->examples[st->example_n]),
-             "%s", name);
-    st->example_n++;
-  }
-
-  char first[40] = {0}, second[40] = {0};
-  int part = 0, pos = 0;
-  for (const char *p = name; *p; p++) {
-    char c = (char)tolower((unsigned char)*p);
-    if (c == '_' || c == '-' || c == '.') {
-      if (part == 0) {
-        first[pos] = '\0';
-        part = 1;
-        pos = 0;
-      } else if (part == 1) {
-        second[pos] = '\0';
-        part = 2;
-      }
-      continue;
-    }
-    if (!isalnum((unsigned char)c))
-      continue;
-    if (part == 0 && pos < (int)sizeof(first) - 1)
-      first[pos++] = c;
-    else if (part == 1 && pos < (int)sizeof(second) - 1)
-      second[pos++] = c;
-  }
-  if (part == 0)
-    first[pos] = '\0';
-  else if (part == 1)
-    second[pos] = '\0';
-  const char *tag = (first[0] && second[0] && module_export_stop_word(first))
-                        ? second
-                        : first;
-  if (tag && tag[0] && strcmp(tag, "std") != 0)
-    module_summary_add_tag(st, tag);
-}
-
-static void module_summary_collect_exports(const char *decl_tail, size_t n,
-                                           module_export_summary_t *st) {
-  if (!decl_tail || !st)
-    return;
-  size_t p = 0;
-  while (p < n && isspace((unsigned char)decl_tail[p]))
-    p++;
-  if (p >= n || decl_tail[p] != '(')
-    return;
-  p++;
-  int depth = 1;
-  while (p < n && depth > 0) {
-    if (decl_tail[p] == ';') {
-      while (p < n && decl_tail[p] != '\n')
-        p++;
-      continue;
-    }
-    if (decl_tail[p] == '(') {
-      depth++;
-      p++;
-      continue;
-    }
-    if (decl_tail[p] == ')') {
-      depth--;
-      p++;
-      continue;
-    }
-    if (depth == 1 &&
-        (isalpha((unsigned char)decl_tail[p]) || decl_tail[p] == '_')) {
-      size_t s = p;
-      p++;
-      while (p < n &&
-             (isalnum((unsigned char)decl_tail[p]) || decl_tail[p] == '_'))
-        p++;
-      char *name = strndup0(decl_tail + s, p - s);
-      module_summary_add_export(st, name);
-      free(name);
-      continue;
-    }
-    p++;
-  }
-}
-
-static void module_summary_append_topic(sb_t *out, const char *mod_name) {
-  const char *p = mod_name ? mod_name : "";
-  if (strncmp(p, "std.", 4) == 0)
-    p += 4;
-  int any = 0;
-  for (; *p; p++) {
-    if (*p == '.') {
-      sb_add(out, any ? " / " : "");
-      any = 0;
-    } else if (*p == '_' || *p == '-') {
-      sb_add(out, " ");
-      any = 1;
-    } else {
-      char c[2] = {*p, 0};
-      sb_add(out, c);
-      any = 1;
-    }
-  }
-  if (!any)
-    sb_add(out, "runtime");
-}
-
-static void module_summary_append_tags(sb_t *out, module_export_summary_t *st) {
-  int used[64] = {0};
-  int written = 0;
-  for (;;) {
-    int best = -1;
-    for (int i = 0; i < st->tag_n; i++) {
-      if (!used[i] && (best < 0 || st->tag_counts[i] > st->tag_counts[best]))
-        best = i;
-    }
-    if (best < 0 || written >= 8)
-      break;
-    used[best] = 1;
-    if (written)
-      sb_add(out, ", ");
-    sb_add(out, st->tags[best]);
-    written++;
-  }
-}
-
-static char *synthesize_module_doc(const char *mod_name, const char *decl_tail,
-                                   size_t decl_tail_n) {
-  (void)mod_name;
-  (void)decl_tail;
-  (void)decl_tail_n;
-  return strdup("");
-}
 
 static char *module_doc_with_generated_summary(const char *mod_name,
                                                const char *mod_doc,
@@ -2900,16 +2703,6 @@ static int line_number_at(const char *s, size_t pos) {
   return line;
 }
 
-static char *join_args_query(int start, int argc, char **argv) {
-  sb_t q = {0};
-  for (int i = start; i < argc; i++) {
-    if (q.len)
-      sb_add(&q, " ");
-    sb_add(&q, argv[i]);
-  }
-  return q.data ? q.data : strdup("");
-}
-
 static int docs_file_supported(const char *name) {
   return path_has_suffix(name, ".md") || path_has_suffix(name, ".txt") ||
          path_has_suffix(name, ".texi");
@@ -2936,30 +2729,6 @@ static char *markdown_heading_title(const char *line, size_t n) {
   while (e > p && isspace((unsigned char)line[e - 1]))
     e--;
   return e > p ? strndup0(line + p, e - p) : NULL;
-}
-
-static char *first_nonblank_excerpt(const char *s, size_t n) {
-  size_t p = 0;
-  while (p < n) {
-    while (p < n && isspace((unsigned char)s[p]))
-      p++;
-    size_t e = p;
-    while (e < n && s[e] != '\n')
-      e++;
-    size_t a = p, b = e;
-    while (a < b && isspace((unsigned char)s[a]))
-      a++;
-    while (b > a && isspace((unsigned char)s[b - 1]))
-      b--;
-    if (b > a) {
-      size_t len = b - a;
-      if (len > 800)
-        len = 800;
-      return strndup0(s + a, len);
-    }
-    p = e < n ? e + 1 : e;
-  }
-  return strdup("");
 }
 
 static void add_markdown_doc_entries(doc_search_index_t *idx, const char *root,

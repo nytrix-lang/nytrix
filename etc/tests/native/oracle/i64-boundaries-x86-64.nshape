@@ -1,0 +1,13 @@
+shape oracle_i64_boundaries_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle i64 boundary]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=0; -O3 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+fn id(i64 x) i64 { x }
+if id(9223372036854775807) == 9223372036854775807 &&
+   id(-9223372036854775808) == -9223372036854775808 { 0 } else { 1 }
+NY
+}

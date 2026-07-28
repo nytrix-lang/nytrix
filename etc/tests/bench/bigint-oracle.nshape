@@ -1,0 +1,97 @@
+shape bigint-oracle {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "checksum", "gmp"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.big
+use std.math.nt (Z)
+use std.os.time
+
+def S = bigint_from_str("1000000000000000000000000000000000000000000000000000000000000")
+def oa = bigint_mul(Z(3), S)
+def ob = bigint_mul(Z(7), S)
+def na = bf_from_int(3)
+def nb = bf_from_int(7)
+
+def n1 = 20000
+mut i = 0
+mut x = na
+def t0 = ticks()
+while i < n1 { x = bf_add(na, nb) i += 1 }
+def nadd = ticks() - t0
+i = 0
+mut ox = oa
+def t1 = ticks()
+while i < n1 { ox = bigint_add(oa, ob) i += 1 }
+def oadd = ticks() - t1
+
+i = 0
+def t2 = ticks()
+while i < n1 { x = bf_sub(nb, na) i += 1 }
+def nsub = ticks() - t2
+i = 0
+def t3 = ticks()
+while i < n1 { ox = bigint_sub(ob, oa) i += 1 }
+def osub = ticks() - t3
+
+def n2 = 5000
+i = 0
+def t4 = ticks()
+while i < n2 { x = bf_mul(na, nb) i += 1 }
+def nmul = ticks() - t4
+i = 0
+def t5 = ticks()
+while i < n2 { ox = bigint_div(bigint_mul(oa, ob), S) i += 1 }
+def omul = ticks() - t5
+
+i = 0
+def t6 = ticks()
+while i < n2 { x = bf_div(nb, na) i += 1 }
+def ndiv = ticks() - t6
+i = 0
+def t7 = ticks()
+while i < n2 { ox = bigint_div(bigint_mul(ob, S), oa) i += 1 }
+def odiv = ticks() - t7
+
+def n3 = 300
+i = 0
+def t8 = ticks()
+while i < n3 { x = bf_sqrt(bf_from_int(2)) i += 1 }
+def nsqrt = ticks() - t8
+mut two = bigint_mul(Z(2), S)
+mut guess = bigint_from_str("1414213562373095048801688724209698078569671875376948073176679")
+i = 0
+def t9 = ticks()
+while i < n3 {
+  mut r = guess
+  mut j = 0
+  while j < 20 { r = bigint_div(bigint_add(r, bigint_div(bigint_mul(two, S), r)), Z(2)) j += 1 }
+  ox = r
+  i += 1
+}
+def osqrt = ticks() - t9
+
+def n4 = 1000
+i = 0
+def t10 = ticks()
+while i < n4 { x = bf_pow_int(na, 9) i += 1 }
+def npow = ticks() - t10
+i = 0
+def t11 = ticks()
+while i < n4 {
+  mut r = S
+  mut base = oa
+  mut e = 9
+  while e > 0 { if e % 2 == 1 { r = bigint_div(bigint_mul(r, base), S) } base = bigint_div(bigint_mul(base, base), S) e = e / 2 }
+  ox = r
+  i += 1
+}
+def opow = ticks() - t11
+
+print("checksum=", bf_to_float(x), " ", bigint_to_str(ox).len)
+print("elapsed_ns=", t11 - t0)
+NY
+}

@@ -386,29 +386,33 @@ static void audit_shape_fixtures(const char *shape_dir, const char *path,
     const char *key = keys[ki];
     size_t key_len = strlen(key);
     const char *p = data;
-    while ((p = strstr(p, key)) != NULL) {
-      bool before_ok = p == data || !ident_char(p[-1]);
-      bool after_ok = !ident_char(p[key_len]);
-      if (!before_ok || !after_ok) {
-        p += key_len;
+    while (p && *p) {
+      const char *line = p;
+      while (*line == ' ' || *line == '\t')
+        ++line;
+      const char *next = strchr(line, '\n');
+      if (strncmp(line, key, key_len) != 0 || ident_char(line[key_len])) {
+        p = next ? next + 1 : NULL;
         continue;
       }
-      const char *q = p + key_len;
+      const char *q = line + key_len;
       if (*q != ' ' && *q != '\t' && *q != ':') {
-        p += key_len;
+        p = next ? next + 1 : NULL;
         continue;
       }
       while (*q == ' ' || *q == '\t' || *q == ':') ++q;
       if (*q != '"') {
         audit_error_key(audit, path, "invalid-fixture", key);
-        p = q;
+        p = next ? next + 1 : NULL;
         continue;
       }
       ++q;
-      const char *end = strchr(q, '"');
-      if (!end || end == q) {
+      const char *end = q;
+      while (end && *end && *end != '"' && end != next)
+        ++end;
+      if (!end || *end != '"' || end == q) {
         audit_error_key(audit, path, "invalid-fixture", key);
-        p = q;
+        p = next ? next + 1 : NULL;
         continue;
       }
       char rel[512];
@@ -422,7 +426,7 @@ static void audit_shape_fixtures(const char *shape_dir, const char *path,
       } else if (!audit_path_exists(shape_dir, rel)) {
         audit_error_key(audit, path, "missing-fixture", key);
       }
-      p = end + 1;
+      p = next ? next + 1 : NULL;
     }
   }
 }

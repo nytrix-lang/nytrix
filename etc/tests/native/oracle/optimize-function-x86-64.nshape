@@ -1,0 +1,16 @@
+shape oracle_optimize_function_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle function-optimize nyir]
+  template ny-test-case
+  flags "-O0 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+@optimize(3)
+fn folded() int {
+  6 ^ 3
+}
+
+folded()
+NY
+}
