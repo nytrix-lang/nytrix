@@ -2159,6 +2159,42 @@ WEB_WASM_BARE_CAPABILITIES = {
     "vulkan": False,
 }
 
+def _web_target_descriptor(raw: str, command: str) -> dict[str, str]:
+    """Resolve the one implemented browser target at the command boundary."""
+    target = raw.strip().lower()
+    if target == "wasm-bare":
+        return dict(WEB_WASM_BARE_TARGET)
+    if target == "wasm-emscripten":
+        raise SystemExit(
+            f"{command}: wasm-emscripten needs its dedicated adapter; "
+            "use --target wasm-bare for the implemented browser runner"
+        )
+    raise SystemExit(f"{command}: unknown browser target {raw!r} (expected wasm-bare)")
+
+def _parse_web_check_args(args: list[str], build_root: Path) -> dict[str, object]:
+    """Accept web-check target selection without teaching the general wasm parser."""
+    target = "wasm-bare"
+    wasm_args: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--target":
+            if i + 1 >= len(args):
+                raise SystemExit("web-check: missing value for --target")
+            target = args[i + 1]
+            i += 2
+            continue
+        if arg.startswith("--target="):
+            target = arg.split("=", 1)[1]
+            i += 1
+            continue
+        wasm_args.append(arg)
+        i += 1
+    cfg = _parse_wasm_args(wasm_args, build_root)
+    if not bool(cfg.get("help", False)):
+        cfg["target"] = _web_target_descriptor(target, "web-check")
+    return cfg
+
 def _demo_id_from_source(source: str) -> str:
     path = Path(source)
     parts = list(path.parts)
@@ -2867,9 +2903,9 @@ def _web_import_category(name: str) -> str:
 
 def run_web_check(build_root: Path, kind: str, args: list[str]) -> int:
     """Compile a Ny source and reject browser imports missing from the WebGL2 host."""
-    cfg = _parse_wasm_args(args, build_root)
+    cfg = _parse_web_check_args(args, build_root)
     if bool(cfg.get("help", False)):
-        print("Usage: ./make web-check path/to/app.ny [--timeout seconds]")
+        print("Usage: ./make web-check path/to/app.ny [--target wasm-bare] [--timeout seconds]")
         return 0
     source = cfg["source"]
     assert isinstance(source, Path)
@@ -2895,7 +2931,7 @@ def run_web_check(build_root: Path, kind: str, args: list[str]) -> int:
     missing = sorted(imports - _web_host_import_names())
     report = {
         "source": _rel_or_abs(source),
-        "target": WEB_WASM_BARE_TARGET,
+        "target": cfg["target"],
         "capabilities": WEB_WASM_BARE_CAPABILITIES,
         "wasm": _rel_or_abs(wasm),
         "imports": sorted(imports),
@@ -2928,6 +2964,7 @@ def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
     out_dir: Path | None = None
     assets: list[Path] = []
     asyncify = True
+    target = "wasm-bare"
     timeout_sec = int((os.environ.get("NYTRIX_WASM_STEP_TIMEOUT") or "120").strip() or "120")
     i = 0
     while i < len(args):
@@ -2966,17 +3003,13 @@ def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
                 raise SystemExit("web: only --renderer webgl2 is supported")
             continue
         if a.startswith("--target="):
-            target = a.split("=", 1)[1].strip().lower()
-            if target != "wasm-bare":
-                raise SystemExit("web: only --target wasm-bare is implemented; wasm-emscripten needs its dedicated adapter")
+            target = a.split("=", 1)[1]
             continue
         if a == "--target":
             if i >= len(args):
                 raise SystemExit("web: missing value for --target")
-            target = args[i].strip().lower()
+            target = args[i]
             i += 1
-            if target != "wasm-bare":
-                raise SystemExit("web: only --target wasm-bare is implemented; wasm-emscripten needs its dedicated adapter")
             continue
         if a == "--no-asyncify":
             asyncify = False
@@ -3002,7 +3035,8 @@ def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
         out_dir = build_root / "web" / (source.stem or "app")
     out_dir = _resolve_wasm_path(out_dir)
     return {"help": False, "source": source, "out": out_dir, "assets": assets,
-            "asyncify": asyncify, "timeout": max(1, timeout_sec)}
+            "asyncify": asyncify, "timeout": max(1, timeout_sec),
+            "target": _web_target_descriptor(target, "web")}
 
 def print_web_help() -> None:
     print(c("1;36", "Nytrix browser build"))
@@ -3105,7 +3139,8 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
             "wasm": "app.wasm", "wasmKind": "ny", "asyncify": bool(cfg["asyncify"]),
             "assets": packaged_assets}
     (out_dir / "demos-data.js").write_text("window.NYTRIX_WEB_DEMOS = " + json.dumps([demo], indent=2) + ";\n", encoding="utf-8")
-    target = dict(WEB_WASM_BARE_TARGET)
+    target = cfg["target"]
+    assert isinstance(target, dict)
     report = {"source": source_display, "target": target,
               "capabilities": WEB_WASM_BARE_CAPABILITIES,
               "wasm": "app.wasm", "imports": sorted(imports), "unsupported": [], "assets": packaged_assets,

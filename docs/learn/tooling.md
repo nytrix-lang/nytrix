@@ -220,8 +220,13 @@ Pong WebGL2 smoke test in headless Chromium:
 
 ```bash
 ./make web-check etc/projects/ui/pong.ny
+./make web-check etc/projects/ui/pong.ny --target wasm-bare
 ./make web-test
 ```
+
+Both `web` and `web-check` resolve the same browser target descriptor. Asking
+either command for `wasm-emscripten` reports that the dedicated adapter is not
+implemented; it is never silently treated as `wasm-bare`.
 
 The output lands in `build/wasm/`. The runner is a small static browser shell:
 `index.html`, `web.css`, `wasm.js`, and `demos-data.js`. It can load a local
