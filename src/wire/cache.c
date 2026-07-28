@@ -36,12 +36,10 @@
 #define PATH_MAX 4096
 #endif
 
-static unsigned long ny_hash_string(const char *str) {
-  unsigned long hash = 5381;
-  int c;
-  while ((c = *str++))
-    hash = ((hash << 5) + hash) + c;
-  return hash;
+uint64_t ny_cache_semantic_fingerprint(const char *source) {
+  if (!source)
+    return 0;
+  return ny_hash64(source, strlen(source));
 }
 
 static bool ny_write_text_file_atomic(const char *path, const char *content, size_t len);
@@ -164,7 +162,7 @@ static void ny_cache_write_compiler_fingerprint_stamp(const char *path,
     (void)ny_write_text_file_atomic(path, buf, (size_t)n);
 }
 
-static uint64_t ny_cache_compiler_source_fingerprint(void) {
+uint64_t ny_cache_compiler_source_fingerprint(void) {
   static int cached = 0;
   static uint64_t cached_hash = 0;
   if (cached)
@@ -368,7 +366,7 @@ int ny_cache_clean(void) {
 
 bool ny_jit_cache_enabled(void) { return ny_env_enabled_default_on("NYTRIX_JIT_CACHE"); }
 
-enum { NY_JIT_CACHE_VERSION = 25 };
+enum { NY_JIT_CACHE_VERSION = 27 };
 enum { NY_STD_BC_CACHE_VERSION = 15 };
 
 static bool ny_cache_strict_file_id_enabled(void) {
@@ -397,15 +395,16 @@ static bool ny_std_bc_path_is_generated_build_artifact(const char *path) {
 
 char *ny_jit_cache_path(const char *source, const char *stdlib_path, unsigned long std_src_hash,
                         int opt_level, int opt_dce, int opt_internalize, bool debug_symbols,
-                        unsigned long std_latest_mtime) {
+                        unsigned long std_latest_mtime,
+                        uint64_t semantic_config_fingerprint) {
   if (!source)
     return NULL;
   char *dir = ny_get_cache_dir();
   if (!dir)
     return NULL;
   ny_ensure_dir_recursive(dir);
-  unsigned long src_hash = ny_hash_string(source);
-  unsigned long std_hash = 0;
+  uint64_t src_hash = ny_cache_semantic_fingerprint(source);
+  uint64_t std_hash = 0;
   if (stdlib_path) {
     if (std_src_hash) {
       std_hash = std_src_hash;
@@ -415,18 +414,18 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path, unsigned lo
         std_hash = (unsigned long)st.st_mtime;
       }
     }
-    std_hash ^= ny_hash_string(stdlib_path);
+    std_hash ^= ny_cache_semantic_fingerprint(stdlib_path);
   }
 
   if (std_latest_mtime && ny_env_enabled("NYTRIX_JIT_CACHE_STRICT_MTIME")) {
     std_hash ^= std_latest_mtime;
   }
 #ifdef LLVM_VERSION_STRING
-  std_hash ^= ny_hash_string(LLVM_VERSION_STRING);
+  std_hash ^= ny_cache_semantic_fingerprint(LLVM_VERSION_STRING);
 #endif
-  std_hash ^= ny_hash_string(VERSION);
+  std_hash ^= ny_cache_semantic_fingerprint(VERSION);
 #ifdef NYTRIX_VERSION_COMMIT
-  std_hash ^= ny_hash_string(NYTRIX_VERSION_COMMIT);
+  std_hash ^= ny_cache_semantic_fingerprint(NYTRIX_VERSION_COMMIT);
 #endif
 #ifdef NYTRIX_VERSION_DIRTY
   std_hash ^= (unsigned long)NYTRIX_VERSION_DIRTY;
@@ -434,6 +433,7 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path, unsigned lo
   std_hash ^= (unsigned long)opt_level;
   std_hash ^= (unsigned long)opt_dce;
   std_hash ^= (unsigned long)opt_internalize;
+  std_hash ^= semantic_config_fingerprint;
   if (debug_symbols)
     std_hash ^= 0xDEADBEEF;
   if (ny_env_enabled("NYTRIX_FAST_MODE"))
@@ -485,7 +485,7 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path, unsigned lo
                                             sizeof(envs) / sizeof(envs[0]));
   }
 
-  unsigned long compiler_hash = 0;
+  uint64_t compiler_hash = 0;
   char *exe_path = ny_get_executable_path();
   if (exe_path) {
     struct stat st;
@@ -495,23 +495,24 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path, unsigned lo
       ch = ny_hash64_u64(ch, (uint64_t)st.st_size);
       ch = ny_hash64_u64(ch, ny_stat_mtime_nsec(&st));
 #ifdef NYTRIX_VERSION_COMMIT
-      ch = ny_hash64_u64(ch, (uint64_t)ny_hash_string(NYTRIX_VERSION_COMMIT));
+      ch = ny_hash64_u64(ch, ny_cache_semantic_fingerprint(NYTRIX_VERSION_COMMIT));
 #endif
 #ifdef NYTRIX_VERSION_DIRTY
       ch = ny_hash64_u64(ch, (uint64_t)NYTRIX_VERSION_DIRTY);
 #endif
 #ifdef NYTRIX_BUILD_HASH
-      ch = ny_hash64_u64(ch, (uint64_t)ny_hash_string(NYTRIX_BUILD_HASH));
+      ch = ny_hash64_u64(ch, ny_cache_semantic_fingerprint(NYTRIX_BUILD_HASH));
 #endif
-      compiler_hash = (unsigned long)ch;
+      compiler_hash = ch;
     }
   }
 
   std_hash ^= compiler_hash;
-  std_hash ^= (unsigned long)NY_JIT_CACHE_VERSION;
+  std_hash ^= (uint64_t)NY_JIT_CACHE_VERSION;
   static char path[1024];
   const char *ext = ny_jit_cache_use_ir() ? "ll" : "bc";
-  snprintf(path, sizeof(path), "%s/%lx_%lx.%s", dir, src_hash, std_hash, ext);
+  snprintf(path, sizeof(path), "%s/%016llx_%016llx.%s", dir,
+           (unsigned long long)src_hash, (unsigned long long)std_hash, ext);
   return strdup(path);
 }
 
@@ -598,7 +599,7 @@ char *ny_std_bc_cache_path(const char *stdlib_path, const char *const *uses, siz
       h = ny_hash64_u64(h, argv0_ctime);
   }
 #ifdef NYTRIX_BUILD_HASH
-  h = ny_hash64_u64(h, (uint64_t)ny_hash_string(NYTRIX_BUILD_HASH));
+  h = ny_hash64_u64(h, ny_cache_semantic_fingerprint(NYTRIX_BUILD_HASH));
 #endif
   {
     const char *const envs[] = {"NYTRIX_ASSUME_INT",
@@ -669,6 +670,68 @@ char *ny_std_bc_cache_path(const char *stdlib_path, const char *const *uses, siz
 }
 
 static bool ny_jit_cache_verify_enabled(void) { return ny_env_enabled("NYTRIX_JIT_CACHE_VERIFY"); }
+
+static bool ny_cache_artifact_manifest_path(char *out, size_t out_len, const char *cache_path) {
+  if (!out || out_len == 0 || !cache_path || !*cache_path)
+    return false;
+  int n = snprintf(out, out_len, "%s.manifest", cache_path);
+  return n > 0 && (size_t)n < out_len;
+}
+
+static void ny_cache_remove_native_sibling(const char *cache_path) {
+#ifndef _WIN32
+  size_t len = cache_path ? strlen(cache_path) : 0;
+  if (len < 4 || strcmp(cache_path + len - 3, ".bc") != 0)
+    return;
+  char native_path[PATH_MAX + 32];
+  int n = snprintf(native_path, sizeof(native_path), "%.*s.so", (int)(len - 3), cache_path);
+  if (n > 0 && (size_t)n < sizeof(native_path))
+    remove(native_path);
+#else
+  (void)cache_path;
+#endif
+}
+
+bool ny_cache_artifact_manifest_valid(const char *cache_path, const char *source) {
+  char path[PATH_MAX + 32];
+  if (!ny_cache_artifact_manifest_path(path, sizeof(path), cache_path) || !source)
+    return false;
+  FILE *in = fopen(path, "rb");
+  if (!in)
+    return false;
+  unsigned long long fingerprint = 0;
+  size_t bytes = 0;
+  int fields = fscanf(in, "nytrix-artifact-manifest-v1 %llx %zu", &fingerprint, &bytes);
+  fclose(in);
+  /* Do not let a bad sidecar turn into a soft cache hit. Removing both sides
+   * makes the next compilation the single recovery path and keeps LLVM/native
+   * loaders away from an artifact with unknown provenance. */
+  if (fields != 2 || (uint64_t)fingerprint != ny_cache_semantic_fingerprint(source) ||
+      bytes != strlen(source)) {
+    remove(cache_path);
+    remove(path);
+    /* Native JIT images are derived from bitcode. They must not survive a
+     * rejected bitcode manifest, otherwise a repaired sidecar could bless a
+     * stale shared object without ever rebuilding it. */
+    ny_cache_remove_native_sibling(cache_path);
+    return false;
+  }
+  return true;
+}
+
+bool ny_cache_artifact_manifest_save(const char *cache_path, const char *source) {
+  char path[PATH_MAX + 32];
+  if (!ny_cache_artifact_manifest_path(path, sizeof(path), cache_path) || !source)
+    return false;
+  char content[128];
+  int n = snprintf(content, sizeof(content), "nytrix-artifact-manifest-v1 %016llx %zu\n",
+                   (unsigned long long)ny_cache_semantic_fingerprint(source), strlen(source));
+  /* Publish after the artifact rename succeeds. A reader that sees an
+   * artifact without this sidecar treats it as a miss instead of racing a
+   * writer or accepting an entry produced by an older cache protocol. */
+  return n > 0 && (size_t)n < sizeof(content) &&
+         ny_write_text_file_atomic(path, content, (size_t)n);
+}
 
 bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx, LLVMModuleRef *out_module) {
   if (!cache_path || !ctx || !out_module)
@@ -782,8 +845,11 @@ bool ny_jit_cache_save_ir(const char *cache_path, LLVMModuleRef module) {
 
 #ifndef _WIN32
 static bool ny_jit_cache_use_native(void) {
-
-  return ny_env_enabled("NYTRIX_JIT_NATIVE_CACHE");
+  /* Native artifacts are guarded by the matching bitcode manifest. Looking
+   * for an existing validated artifact is cheap and avoids making every later
+   * edit-loop invocation repeat LLVM code generation. Creation remains an
+   * explicit policy choice in the pipeline because it adds cold-start work. */
+  return true;
 }
 
 char *ny_jit_native_cache_path(const char *bc_path) {
@@ -892,4 +958,180 @@ bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module, int opt
 }
 
 bool ny_jit_native_cache_enabled(void) { return ny_jit_cache_use_native(); }
+
+/* Stencil-native cache: persist raw JIT code as a minimal ELF .so
+ * using objcopy (binary→.o) + ld -shared, same pattern as the LLVM
+ * native cache but without any LLVM dependency. */
+char *ny_jit_stencil_cache_path(const char *source, int opt_level) {
+  if (!source || !*source)
+    return NULL;
+  uint64_t src_hash = ny_hash64(source, strlen(source));
+  uint64_t key = ny_hash64_u64(src_hash, (uint64_t)opt_level);
+  const char *root = ny_cache_root_dir();
+  if (!root || !*root)
+    return NULL;
+  char path[1024];
+  snprintf(path, sizeof(path), "%s/jit/stencil_%016llx.so", root,
+           (unsigned long long)key);
+  return strdup(path);
+}
+
+bool ny_jit_stencil_cache_load(const char *so_path, void **out_handle,
+                                void (**out_entry)(void)) {
+  if (!so_path || !out_handle || !out_entry)
+    return false;
+  if (ny_access(so_path, R_OK) != 0)
+    return false;
+  dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
+  void *h = dlopen(so_path, RTLD_LAZY | RTLD_GLOBAL);
+  if (!h)
+    return false;
+  void (*entry)(void) = (void (*)(void))dlsym(h, "_ny_top_entry");
+  if (!entry)
+    entry = (void (*)(void))dlsym(h, "rt_main");
+  if (!entry) {
+    dlclose(h);
+    return false;
+  }
+  *out_handle = h;
+  *out_entry = entry;
+  return true;
+}
+
+
+/* Toolless native ELF64 .so writer — no ld, objcopy, or external tools.
+ * Writes a minimal ELF64 shared object directly from raw code bytes,
+ * inspired by mold's direct-emit philosophy. */
+static bool elf64_write_u16(unsigned char *p, uint16_t v) { memcpy(p, &v, 2); return true; }
+static bool elf64_write_u32(unsigned char *p, uint32_t v) { memcpy(p, &v, 4); return true; }
+static bool elf64_write_u64(unsigned char *p, uint64_t v) { memcpy(p, &v, 8); return true; }
+
+bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
+                                size_t code_len, const char *entry_symbol) {
+  (void)entry_symbol; /* reserved for future per-symbol cache keying */
+  if (!so_path || !code || code_len == 0)
+    return false;
+  /* Ensure cache directory exists. */
+  {
+    char dir[1024];
+    snprintf(dir, sizeof(dir), "%s", so_path);
+    char *slash = strrchr(dir, '/');
+    if (slash) { *slash = '\0'; mkdir(dir, 0755); *slash = '/'; }
+  }
+  const char *sym_name = "_ny_top_entry";
+  size_t name_len = strlen(sym_name) + 1; /* include NUL */
+  /* --- Layout --- */
+  size_t ehdr_sz  = 64;
+  size_t phdr2_sz = 2 * 56;               /* 2 program headers */
+  size_t text_off = ehdr_sz + phdr2_sz;   /* 176, already 16-aligned */
+  size_t text_pad = (code_len + 15) & ~(size_t)15;
+  size_t str_off  = text_off + text_pad;
+  size_t str_sz   = 1 + name_len;         /* "\0_name\0" */
+  size_t sym_off  = str_off + ((str_sz + 7) & ~(size_t)7);
+  size_t sym_cnt  = 2;                    /* NULL + entry */
+  size_t sym_sz   = sym_cnt * 24;
+  size_t hash_off = sym_off + ((sym_sz + 7) & ~(size_t)7);
+  /* Minimal .hash: header(8) + bucket(4)*nbucket + chain(4)*nchain */
+  size_t hash_sz  = 8 + 4 * 1 + 4 * sym_cnt; /* = 8+4+8 = 20 */
+  size_t dyn_off  = hash_off + hash_sz;
+  /* 6 dynamic entries × 16 bytes = 96 */
+  size_t dyn_cnt  = 6;
+  size_t dyn_sz   = dyn_cnt * 16;
+  size_t total    = dyn_off + dyn_sz;
+  unsigned char *buf = (unsigned char *)calloc(1, total);
+  if (!buf) return false;
+  /* --- ELF header --- */
+  buf[0] = 0x7f; buf[1]='E'; buf[2]='L'; buf[3]='F';
+  buf[4] = 2;    /* ELFCLASS64 */
+  buf[5] = 1;    /* ELFDATA2LSB */
+  buf[6] = 1;    /* EV_CURRENT */
+  elf64_write_u16(buf + 16, 3);       /* e_type = ET_DYN */
+  elf64_write_u16(buf + 18, 0x3E);    /* e_machine = EM_X86_64 */
+  elf64_write_u32(buf + 20, 1);       /* e_version */
+  elf64_write_u64(buf + 24, text_off);/* e_entry = code offset */
+  elf64_write_u64(buf + 32, ehdr_sz); /* e_phoff */
+  elf64_write_u64(buf + 40, 0);       /* e_shoff (none) */
+  elf64_write_u32(buf + 48, 0);       /* e_flags */
+  elf64_write_u16(buf + 52, ehdr_sz); /* e_ehsize */
+  elf64_write_u16(buf + 54, 56);      /* e_phentsize */
+  elf64_write_u16(buf + 56, 2);       /* e_phnum */
+  /* --- Phdr[0]: PT_LOAD (RX) --- */
+  {
+    unsigned char *p = buf + ehdr_sz;
+    elf64_write_u32(p + 0,  1);       /* p_type = PT_LOAD */
+    elf64_write_u32(p + 4,  7);       /* p_flags = PF_R|PF_W|PF_X */
+    elf64_write_u64(p + 8,  0);       /* p_offset */
+    elf64_write_u64(p + 16, 0);       /* p_vaddr */
+    elf64_write_u64(p + 24, 0);       /* p_paddr */
+    elf64_write_u64(p + 32, total);   /* p_filesz */
+    elf64_write_u64(p + 40, total);   /* p_memsz */
+    elf64_write_u64(p + 48, 0x1000);  /* p_align */
+  }
+  /* --- Phdr[1]: PT_DYNAMIC --- */
+  {
+    unsigned char *p = buf + ehdr_sz + 56;
+    elf64_write_u32(p + 0,  2);       /* p_type = PT_DYNAMIC */
+    elf64_write_u32(p + 4,  6);       /* p_flags = PF_R|PF_W */
+    elf64_write_u64(p + 8,  dyn_off); /* p_offset */
+    elf64_write_u64(p + 16, dyn_off); /* p_vaddr */
+    elf64_write_u64(p + 24, dyn_off); /* p_paddr */
+    elf64_write_u64(p + 32, dyn_sz);  /* p_filesz */
+    elf64_write_u64(p + 40, dyn_sz);  /* p_memsz */
+    elf64_write_u64(p + 48, 8);       /* p_align */
+  }
+  /* --- .text --- */
+  memcpy(buf + text_off, code, code_len);
+  /* --- .dynstr --- */
+  buf[str_off] = '\0';                 /* index 0: empty */
+  memcpy(buf + str_off + 1, sym_name, name_len); /* index 1: _ny_top_entry */
+  /* --- .dynsym --- */
+  {
+    unsigned char *s = buf + sym_off;
+    /* sym[0] = NULL (all zeros, already zeroed by calloc) */
+    s += 24;
+    /* sym[1] = _ny_top_entry */
+    elf64_write_u32(s + 0, 1);        /* st_name = 1 */
+    s[4] = 0x12;                       /* st_info = STB_GLOBAL<<4|STT_FUNC */
+    s[5] = 0;                          /* st_other = STV_DEFAULT */
+    elf64_write_u16(s + 6, 1);         /* st_shndx = 1 (defined, not UND) */
+    elf64_write_u64(s + 8, text_off);  /* st_value = code offset */
+    elf64_write_u64(s + 16, code_len); /* st_size */
+  }
+  /* --- .hash --- */
+  {
+    unsigned char *h = buf + hash_off;
+    elf64_write_u32(h + 0, 1);         /* nbucket */
+    elf64_write_u32(h + 4, sym_cnt);   /* nchain */
+    elf64_write_u32(h + 8, 1);         /* bucket[0] = 1 (entry sym index) */
+    elf64_write_u32(h + 12, 0);        /* chain[0] = 0 (end of sym 0) */
+    elf64_write_u32(h + 16, 0);        /* chain[1] = 0 (end of sym 1) */
+  }
+  /* --- .dynamic --- */
+  {
+    unsigned char *d = buf + dyn_off;
+    /* DT_HASH */
+    elf64_write_u64(d + 0,  4);  elf64_write_u64(d + 8,  hash_off);  d += 16;
+    /* DT_STRTAB */
+    elf64_write_u64(d + 0,  5);  elf64_write_u64(d + 8,  str_off);   d += 16;
+    /* DT_STRSZ */
+    elf64_write_u64(d + 0,  10); elf64_write_u64(d + 8,  str_sz);    d += 16;
+    /* DT_SYMTAB */
+    elf64_write_u64(d + 0,  6);  elf64_write_u64(d + 8,  sym_off);   d += 16;
+    /* DT_SYMENT */
+    elf64_write_u64(d + 0,  11); elf64_write_u64(d + 8, 24);         d += 16;
+    /* DT_NULL */
+    elf64_write_u64(d + 0,  0);  elf64_write_u64(d + 8,  0);
+  }
+  /* --- Write atomically --- */
+  char tmp[1080];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", so_path);
+  FILE *f = fopen(tmp, "wb");
+  if (!f) { free(buf); return false; }
+  bool ok = fwrite(buf, 1, total, f) == total;
+  if (fclose(f) != 0) ok = false;
+  free(buf);
+  if (!ok) { remove(tmp); return false; }
+  if (rename(tmp, so_path) != 0) { remove(tmp); return false; }
+  return true;
+}
 #endif

@@ -1,0 +1,22 @@
+shape nyir_vm_profile {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "profile", "call"]
+  template ny-test-case
+  ; Merges former vm-profile + vm-profile-detail (loop + direct call).
+  flags "--nyir-run --nyir-run-profile=/tmp/nytrix-nyir-vm-profile.txt"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(i64 x, i64 y) i64 {
+  x + y
+}
+
+mut acc = 0
+for i in 0..5 {
+  if i % 2 == 0 {
+    acc = add(acc, i)
+  }
+}
+acc
+NY
+}

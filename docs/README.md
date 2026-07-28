@@ -99,8 +99,9 @@ ny pkg repo list
 ny test
 ```
 
-Native `-o` builds use the optimized native profile. JIT and REPL paths favor
-edit latency. Use `-O3` and `--profile=peak` for peak-speed measurements.
+Native `-o`, JIT, and REPL default to fast `-O0` development builds. Use `-O1`
+for a quick compact native build, `-O2` for normal releases, or
+`-O3 --profile=peak` for peak-speed measurements.
 
 ## Conventions
 

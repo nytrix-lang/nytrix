@@ -1,0 +1,22 @@
+shape oracle_roadmap_seeds_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle roadmap tv rules egraph bounds inline]
+  template ny-test-case
+  flags_matrix "-O2 --native-tv-seed=16 --native-result-oracle=12; -O3 --native-tv-seed=16 --native-enable-cf-mem2reg --native-result-oracle=12"
+  expect compile_and_run
+  source ny <<'NY'
+fn pure_const() i64 { 3 }
+
+fn body(i64 x) i64 {
+  ; bounds: (x & 7) < 16 is always true → 1
+  def m = x & 7
+  def b = m < 16 ? 1 : 0
+  ; iv-ish cancel: (x + 1) - 1
+  def y = (x + 1) - 1
+  pure_const() + b + y
+}
+
+body(8)
+NY
+}

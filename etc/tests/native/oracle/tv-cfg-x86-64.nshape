@@ -1,0 +1,16 @@
+shape oracle_tv_cfg_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle translation-validation cfg branch]
+  template ny-test-case
+  flags_matrix "-O2 --native-tv-seed=20 --native-result-oracle=11; -O3 --native-enable-cf-mem2reg --native-tv-seed=20 --native-result-oracle=11"
+  expect compile_and_run
+  source ny <<'NY'
+fn clamp(i64 x) i64 {
+  if x < 0 { x = 0 }
+  if x > 10 { x = 10 }
+  x + 1
+}
+clamp(10)
+NY
+}

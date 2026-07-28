@@ -140,6 +140,129 @@ If a UI example fails before opening a window, check the platform backend,
 display server, graphics driver, and asset paths before changing rendering
 code.
 
+## Renderer API quick reference
+
+These are the `std.os.ui.render` receiver methods. Use `ny doc get std.os.ui.render`
+for the full typed signatures.
+
+### Window and frame
+
+Core lifecycle: create a window, draw inside frame boundaries, present, and
+check for close requests.
+
+```text
+r.init_window(width, height, title)
+r.window_should_close()
+r.begin_frame()
+r.end_frame()
+r.clear_background(color)
+r.get_screen_width()
+r.get_screen_height()
+```
+
+### 2D drawing
+
+Screen-space drawing after `set_ortho_2d`. Coordinates are pixels from the
+top-left corner.
+
+```text
+r.draw_rect(x, y, w, h, color)
+r.draw_line_2d(x1, y1, x2, y2, color, thickness)
+r.draw_triangles(verts, color)
+r.draw_text(font_id, text, x, y, color)
+r.measure_text(font_id, text) -> [width, height]
+r.font_load(path, size) -> font_id
+r.set_ortho_2d(left, right, bottom, top)
+r.set_unlit(bool)
+```
+
+### 3D drawing
+
+World-space drawing inside `begin_mode_3d` / `end_mode_3d`. Matrix helpers
+build model transforms.
+
+```text
+r.begin_mode_3d(camera)
+r.end_mode_3d()
+r.set_model_matrix(mat4)
+r.draw_mesh(mesh_id)
+r.set_scene_lights(lights)
+r.mat4_translate(x, y, z) -> mat4
+r.mat4_scale(x, y, z) -> mat4
+r.mat4_mul(a, b) -> mat4
+r.mat4_identity() -> mat4
+```
+
+### Mesh creation
+
+Upload vertex buffers to the GPU. The vertex layout is 64 bytes with position,
+texcoord, packed RGBA color, normal, and reserved space.
+
+```text
+r.mesh_create_ex(buffer, vertex_count, options, free_buffer)
+options = {"unlit": bool, "vc_mode": 1, "storage": "static"}
+```
+
+Vertex layout (64 bytes):
+
+```text
+offset 0:  position x,y,z   3 x f32
+offset 12: texcoord u,v     2 x f32
+offset 20: color            packed u32 RGBA
+offset 24: normal x,y,z     3 x f32
+offset 36: reserved         28 bytes
+```
+
+### Color
+
+Color constructors. `color_hex` accepts `"#RRGGBBAA"` or shorter forms.
+`color_alpha` scales the alpha channel of an existing color.
+
+```text
+r.color_rgb(r, g, b)
+r.color_rgba(r, g, b, a)
+r.color_hex("#RRGGBBAA")
+r.color_alpha(color, factor)
+```
+
+### Camera
+
+Create a camera dict with position, yaw, pitch, and field of view. The
+`target` key can be set to look at a world-space point.
+
+```text
+cam.camera_init(position, yaw, pitch, fov) -> camera_dict
+camera["target"] = [x, y, z]
+```
+
+### Input
+
+Poll keyboard and mouse state. `key_pressed` is true for one frame on press;
+`key_down` is true while held.
+
+```text
+inp.key_down(keycode)
+inp.key_pressed(keycode)
+inp.mouse_button_pressed(button)
+inp.MOUSE_LEFT
+inp.MOUSE_RIGHT
+```
+
+Common constants live in `window.consts`, including WASD, arrows, space, enter,
+escape, digits, common action keys, backspace, tab, and delete.
+
+### Raw memory
+
+Low-level allocation for passing buffers to the renderer. Use `malloc_raw` for
+GPU-side or staging buffers that bypass the managed heap.
+
+```text
+use std.core (malloc_raw, free_raw, store32_f32)
+ptr = malloc_raw(bytes)
+store32_f32(ptr, value, byte_offset)
+free_raw(ptr)
+```
+
 ## Related
 
 - [library.md](library.md) for the UI module map.

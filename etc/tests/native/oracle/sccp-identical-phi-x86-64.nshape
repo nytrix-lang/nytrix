@@ -1,0 +1,20 @@
+shape oracle_sccp_identical_phi_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle nyir sccp executable-edge phi]
+  template ny-test-case
+  flags_matrix "-O2 --native-enable-cf-mem2reg --native-result-oracle=14; -O3 --native-enable-cf-mem2reg --native-result-oracle=14"
+  expect compile_and_run
+  source ny <<'NY'
+fn branch_constant(i64 x) i64 {
+  if x < 0 {
+    x = 7
+  } else {
+    x = 7
+  }
+  x
+}
+
+branch_constant(-3) + branch_constant(4)
+NY
+}

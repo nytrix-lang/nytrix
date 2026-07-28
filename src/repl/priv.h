@@ -156,6 +156,7 @@ void repl_redisplay(void);
 void repl_reset_redisplay(void);
 void repl_display_match_list(char **matches, int len, int max);
 char **repl_enhanced_completion(const char *text, int start, int end);
+char *repl_enhanced_completion_generator(const char *text, int state);
 int is_persistent_def(const char *src);
 void repl_update_docs(doc_list_t *dl, const char *src);
 void repl_print_error_snippet(const char *src, int line, int col);

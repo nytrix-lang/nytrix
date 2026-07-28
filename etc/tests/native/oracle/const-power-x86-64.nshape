@@ -1,0 +1,11 @@
+shape oracle_const_power_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle constant-power nyir]
+  template ny-test-case
+  flags "--native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+6 ^ 3 + 2 ^ 8 + 10 ^ 0
+NY
+}

@@ -1,0 +1,22 @@
+shape oracle_strength_reduce_add_mul_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle nyir strength-reduction add mul shl]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=161; -O1 --native-result-oracle=161; -O2 --native-enable-cf-mem2reg --native-result-oracle=161; -O3 --native-enable-cf-mem2reg --native-result-oracle=161"
+  expect compile_and_run
+  source ny <<'NY'
+fn sr(i64 x) i64 {
+  ; x+x → x<<1; x*3/5/9 → (x<<k)+x; x*4 → x<<2 under strength reduction.
+  ; sr(7) = 14 + 21 + 35 + 63 + 28 = 161 across -O0..-O3.
+  def a = x + x
+  def b = x * 3
+  def c = x * 5
+  def d = x * 9
+  def e = x * 4
+  a + b + c + d + e
+}
+
+sr(7)
+NY
+}

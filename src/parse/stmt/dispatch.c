@@ -565,13 +565,13 @@ stmt_t *p_parse_stmt(parser_t *p) {
       parser_sync_stmt_boundary(p);
       return NULL;
     }
-    if (stmt_token_is_assign_op(p->cur)) {
+    if (parser_token_is_assign_op(p->cur)) {
       token_t assign_tok = p->cur;
       parser_advance(p);
       expr_t *rhs = p_parse_expr(p, 0);
       parser_match(p, NY_T_SEMI);
-      if (!stmt_assign_op_is_plain(assign_tok)) {
-        token_kind bin_kind = stmt_assign_op_binary_kind(assign_tok);
+      if (!parser_assign_op_is_plain(assign_tok)) {
+        token_kind bin_kind = parser_assign_op_binary_kind(assign_tok);
         token_t op_tok = {0};
         expr_t *left = expr_new(p->arena, NY_E_DEREF, first);
         left->as.deref.target = target;
@@ -622,13 +622,13 @@ stmt_t *p_parse_stmt(parser_t *p) {
       parser_sync_stmt_boundary(p);
       return NULL;
     }
-    if (e->kind == NY_E_DEREF && stmt_token_is_assign_op(p->cur)) {
+    if (e->kind == NY_E_DEREF && parser_token_is_assign_op(p->cur)) {
       token_t assign_tok = p->cur;
       parser_advance(p);
       expr_t *rhs = p_parse_expr(p, 0);
       parser_match(p, NY_T_SEMI);
-      if (!stmt_assign_op_is_plain(assign_tok)) {
-        token_kind bin_kind = stmt_assign_op_binary_kind(assign_tok);
+      if (!parser_assign_op_is_plain(assign_tok)) {
+        token_kind bin_kind = parser_assign_op_binary_kind(assign_tok);
         token_t op_tok = {0};
         expr_t *bin = expr_new(p->arena, NY_E_BINARY, op_tok);
         bin->as.binary.op = parser_token_name(bin_kind);

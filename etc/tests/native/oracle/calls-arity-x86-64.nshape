@@ -1,0 +1,19 @@
+shape oracle_calls_arity_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result call arity]
+  template ny-test-case
+  ; Covers former call0/call4/call5/call6: zero-arg and 4/5/6 GP-arg SysV paths.
+  flags "--native-result-oracle=88"
+  expect compile_and_run
+  source ny <<'NY'
+fn zero_arg() i64 { 42 }
+fn add4(i64 a, i64 b, i64 c, i64 d) i64 { a + b + c + d }
+fn add5(i64 a, i64 b, i64 c, i64 d, i64 e) i64 { a + b + c + d + e }
+fn add6(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f) i64 {
+  a + b + c + d + e + f
+}
+; 42 + 10 + 15 + 21 = 88
+zero_arg() + add4(1, 2, 3, 4) + add5(1, 2, 3, 4, 5) + add6(1, 2, 3, 4, 5, 6)
+NY
+}

@@ -1,0 +1,22 @@
+shape oracle_peephole_range_identities_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle nyir peephole range identities divmod mul]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=-5; -O1 --native-result-oracle=-5; -O2 --native-enable-cf-mem2reg --native-result-oracle=-5; -O3 --native-enable-cf-mem2reg --native-result-oracle=-5"
+  expect compile_and_run
+  source ny <<'NY'
+fn peep(i64 x) i64 {
+  ; y in 1..8 excludes zero and INT64_MIN.
+  def y = (x & 7) + 1
+  def same_div = y / y
+  def same_mod = y % y
+  def neg_mul = y * -1
+  def neg_div = y / -1
+  ; 1 + 0 + (-y) + (-y) + y = 1 - y; peep(5) => y=6 => -5
+  same_div + same_mod + neg_mul + neg_div + y
+}
+
+peep(5)
+NY
+}

@@ -1,151 +1,87 @@
 # Types
 
-Types cover named values, nullable values, native boundary forms, and
-compile-time type checking.
+Types describe the values a binding, parameter, return value, or container may
+hold. Start with the concrete type you expect; use `?T` only when absence is a
+real result, and use `any` only at a deliberately dynamic boundary.
 
-## Type expressions
+## Everyday forms
 
-| Form | Meaning |
-| --- | --- |
-| `T` | Named type. |
-| `T<A>` | Generic type with one type argument. |
-| `T<A, B>` | Generic type with multiple type arguments. |
-| `?T` | Nullable type. |
-| `*T` | Pointer type. |
-| `fnptr` | Callable function/lambda pointer. |
-| `seq` / `sequence` | List, tuple, string, bytes, or range. |
-| `numeric` | Integer, float, bigint, or compatible numeric value. |
-| `indexable` | Value accepted by static indexing. |
-| `iterable` | Value accepted by static iteration. |
-| `allocator` | Pointer/handle allocator capability. |
-| `handle` | Opaque native handle scalar. |
-| `complex`, `c64`, `c128` | Complex numeric values and ABI-facing forms. |
-| `any` | Dynamic value that remains shape-checkable at runtime. |
-| `proof` | Erased carrier for a compile-time proven fact (dependent/refinement use). |
-| `number` | Language group for integer, float, bigint, and compatible numeric values. |
-| `collection` | Language group for list, dict, set, tuple, bytes, and range-like containers. |
+| Write | Meaning | Common use |
+| --- | --- | --- |
+| `int`, `str`, `bool`, `f64` | A concrete value type. | Bindings and function signatures. |
+| `list<T>`, `dict<K, V>`, `set<T>` | A typed collection. | Data kept within Nytrix. |
+| `?T` | `T` or `nil`. | Optional input or lookup result. |
+| `T<A>` | A generic type. | `Option<int>`, `Result<T, E>`. |
+| `struct Name` | A Nytrix record value. | Ordinary program data. |
+| `enum Name` | A finite set of variants. | State and alternatives. |
+| `layout Name` | An ABI-shaped record. | FFI and raw memory only. |
+| `*T`, `handle`, `fnptr` | Native-boundary values. | Explicit interop. |
+| `any` | A dynamic value. | A checked boundary or compatibility API. |
+| `proof<P>` | Compile-time evidence for proposition `P`. | A verified precondition. |
 
-Generic type expressions are part of the compiler surface. Common forms are
-`list<int>`, `list<list<f64>>`, `dict<str, int>`, `set<str>`,
-`Result<T, E>`, and user ADTs such as `Option<int>`.
+`numeric`, `number`, `seq`, `indexable`, `iterable`, and `collection` are type
+groups for APIs that accept a family of values. They are useful constraints,
+not replacements for a precise result type.
 
-## Typed bindings
+## Integer range and dynamic boundaries
+
+The intended `int` model is a signed 64-bit two's-complement value in typed
+code, with range `-9223372036854775808` through `9223372036854775807`.
+The typed/native migration that enforces this throughout the compiler remains
+in progress; use `bigint` when a calculation intentionally exceeds the
+currently supported small-integer dynamic range.
+
+`any` and heterogeneous containers are dynamic boundaries. Their runtime
+representation may box an integer, but that representation does not reduce
+the range of a typed `int`. Keep conversion or dynamic dispatch at those
+boundaries explicit when an API needs to distinguish a numeric zero from an
+absent value.
+
+## Bindings and functions
+
+The order is always `Type name`:
 
 ```ny
 def int port = 8080
 mut str name = "ny"
-fn add(int a, int b) int { a + b }
+
+fn add(int left, int right) int {
+   left + right
+}
 ```
 
-Typed binding order is `Type name`.
+`def` prevents rebinding; `mut` permits rebinding. That does not by itself
+change whether a referenced value, such as a dictionary, may be mutated. See
+[runtime.md](runtime.md) for collection and ownership behavior.
 
-## Numeric casts
-
-Fixed-width scalar casts use callable type names:
+Fixed-width conversions use callable type names and take exactly one value:
 
 ```ny
-def u64 n = u64(42)
-def i32 small = i32(n)
+def u64 count = u64(42)
+def i32 small = i32(count)
 def f64 ratio = f64(small) / 2.0
 ```
 
-Available cast names are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`,
-`i64`, `f32`, and `f64`. Casts take one value.
-
 ## Nullable values
 
-`?T` allows `nil` or a `T` value. Code that consumes nullable values must refine
-or handle `nil` before using the payload as non-null.
+`?T` must be refined before it is used as `T`:
 
 ```ny
 def ?str maybe_name = nil
+
 if(maybe_name != nil){
    def str name = maybe_name
+   print(name)
 }
 ```
 
-Nil checks narrow nullable values in the guarded branch. Reversed comparisons
-such as `nil != value`, `else` branches after a `nil` return, and logical
-`&&`/`||` guards participate in the same narrowing.
+Nil checks refine the guarded branch. The same applies to an `else` after an
+early nil return and to compatible `&&`/`||` guards. Prefer this explicit flow
+over inventing sentinel values when absence matters.
 
-## Algebraic data types
+## Structs, enums, and generics
 
-Simple enums bind integer constants. Values start at `0` and increase by one
-unless a variant sets an explicit value.
-
-```ny
-enum Color {
-   Red,
-   Green,
-   Blue
-}
-
-enum Status {
-   Ok = 0,
-   Error = 1,
-   Pending = 2
-}
-
-assert(Color.Red == 0, "enum value")
-```
-
-`enum` declares an algebraic data type. Variants can be payload-less or carry
-ordered payload fields.
-
-```ny
-enum Shape {
-   Circle(int radius),
-   Rect(int width, int height),
-   Empty
-}
-
-def c = Shape.Circle(4)
-def also_c = Circle(2)
-```
-
-Payload constructors use positional values. Pattern matching binds payload
-values positionally in each arm:
-
-```ny
-fn area(Shape s) int {
-   match s {
-      Shape.Circle(r) -> r * r
-      Shape.Rect(w, h) -> w * h
-      Shape.Empty -> 0
-   }
-}
-```
-
-Generic ADTs declare type parameters and work in typed bindings:
-
-```ny
-enum Option<T> {
-   Some(T value),
-   None
-}
-
-def Option<int> value = Option.Some(41)
-```
-
-The compiler checks generic ADT payloads in typed contexts; for example,
-`Option<int>` rejects `Option.Some("text")`.
-
-## Native types
-
-Pointers, handles, layouts, and function pointers represent native boundary
-values. They are not interchangeable.
-
-| Type | Use |
-| --- | --- |
-| `*T` | Addressable pointer to `T`. |
-| `handle` | Opaque native scalar resource. |
-| `fnptr` | Callable native/function pointer boundary. |
-| `layout Name` | ABI-shaped record. |
-
-## Structs and layouts
-
-Use `struct` for Nytrix values and pass them as tagged values inside Nytrix
-code.
+Use a `struct` for named fields that stay in Nytrix:
 
 ```ny
 struct Box {
@@ -157,178 +93,107 @@ fn read(Box box) int {
 }
 ```
 
-Use `layout` or `layout record` when the value needs a native ABI shape for FFI
-or raw memory work. Layout fields belong to the native boundary; ordinary
-structs need an explicit layout boundary before they become ABI compatible.
-
-Layout forms include packing, alignment, derived helpers, and guards:
+Use an `enum` when a value has alternatives. Payloads are positional and
+`match` binds them in the selected arm:
 
 ```ny
-layout Packed pack(1){
-   u8 tag,
-   i32 value
+enum Shape {
+   Circle(int radius),
+   Rect(int width, int height),
+   Empty
 }
 
-layout record Row derive(default, eq, hash, debug_str) pack(4){
-   i32 id
-}
-
-layout shape Header derive(load, store, zero) pack(8){
-   str sender
-}
-
-layout guard Header h = value else {
-   return err("bad header")
+fn area(Shape shape) int {
+   match shape {
+      Shape.Circle(radius) -> radius * radius
+      Shape.Rect(width, height) -> width * height
+      Shape.Empty -> 0
+   }
 }
 ```
 
-`layout guard` checks boundary data and narrows the guarded binding to the
-layout pointer type. Derived layout shapes emit `LayoutName_from(value)` and
-`*_load_*` helpers when requested.
-
-Structs, layouts, functions, and local declarations use `Type name`.
-
-## Impl self and operators
-
-Inside an `impl`, `self` names the owner type for receivers, parameters, return
-types, and operators:
+Enums can also carry type parameters:
 
 ```ny
-impl ShapeBox {
-   fn value(self b) list { b.get("value", []) }
-   fn concat(self a, self b) self { ShapeBox({"value": a.value + b.value}) }
-   operator + self: self = concat
+enum Option<T> {
+   Some(T value),
+   None
 }
 
-impl int, f32 {
-   fn twice(self x) self { x + x }
-}
+def Option<int> answer = Option.Some(41)
 ```
 
-Pointer receivers can use `*self`, and nullable receivers can use `?self`.
+Typed contexts check generic arguments and payloads. For example,
+`Option<int>` cannot accept `Option.Some("text")`.
 
-## Runtime shape reflection
+## Collections and dynamic values
 
-`type(value)` returns the top-level runtime tag. `type_shape(value)` returns a
-recursive shape string such as `list<list<int>>` or `dict<str, int|bool>`.
+Use typed collections for ordinary code:
 
 ```ny
-type_shape([[1], [2]])
-is_shape(rows, "list<list<int>>")
+def list<int> ids = [1, 2, 3]
+def dict<str, int> scores = {"ny": 1}
+```
+
+`any` is still inspectable at runtime. `type_shape`, `is_shape`,
+`require_shape`, and `assert_shape` validate values received from a dynamic
+source. A shape check is useful at the boundary; a typed binding is clearer
+inside the program.
+
+```ny
 require_shape(rows, "list<list<int>>")
-assert_shape(rows, "list<list<int>>")
 ```
 
-Shape specs can be a string or a list of accepted strings. `require_shape` and
-`assert_shape` return the checked value or panic with expected and actual
-shapes.
+`--strict-types` turns high-risk dynamic fallbacks into errors. Use it for code
+that should remain statically explainable; use `--no-strict-types` only for an
+intentional compatibility boundary.
 
-Shape strings validate and debug runtime values. Prefer typed bindings when
-the compiler should enforce the shape.
+## Native boundary types
 
-## Type groups
-
-The runtime type helpers can define aliases and groups:
+`layout`, `*T`, `handle`, and `fnptr` are distinct. Use `layout` for a record
+whose field order and representation are part of an ABI; use `struct` for an
+ordinary Nytrix value. Do not use a handle as a pointer unless the foreign API
+documents that conversion.
 
 ```ny
-use std.core.syntax.type as ty
-
-ty.define_type_alias("amount", "number")
-ty.define_type_group("math_input", ["amount"])
-ty.extend_type_group("math_input", ["seq"])
+layout Pixel {
+   u8 r,
+   u8 g,
+   u8 b,
+   u8 a
+}
 ```
 
-`is_type`, `require_type`, `assert_type`, and typed function annotations such
-as `number x` accept groups.
+The full boundary contract—headers, ownership, strings, packing, and
+alignment—is in [native.md](native.md).
 
-## Compile-time checks
+## Proof and refinement types
 
-Nytrix runs compile-time type checks by default for typed bindings, function
-arguments and returns, ADT payloads, generics, layouts, and native boundaries.
-That catches type mistakes without ownership ceremony.
-When an expression loses static evidence and falls back to dynamic `any`, the
-checker emits capped source warnings for the high-risk cases.
-
-`--strict-types` turns those dynamic-cliff warnings into rejection. In that
-mode, the checker rejects places where the compiler would otherwise have to
-fall back to unchecked dynamic behavior:
-
-- accidental heterogeneous dict literals
-- unknown dynamic arithmetic
-- unknown member/index access
-- unrefined `Result` payload use
-- native values used as the wrong native kind
-
-Use it when a file should stay fully statically explainable:
-
-```bash
-ny --strict-types file.ny
-```
-
-Use `--no-strict-types` only when an outer tool or environment enabled strict
-dynamic checks and a compatibility probe intentionally relies on them:
-
-```bash
-ny --no-strict-types old_probe.ny
-```
-
-## Proof types
-
-`proof` is a builtin, payload-free witness type (no special syntax). Construct
-one with `prove(condition[, message])`. The compiler accepts the construction
-only when `condition` reduces to true during compilation; false and unknown
-conditions are errors. Ordinary integers and booleans never implicitly convert
-to `proof`.
+`proof<P>` is erased compile-time evidence that proposition `P` was proved.
+It is not a runtime boolean and ordinary values cannot stand in for it.
 
 ```ny
-fn sum_up_to(int n, proof p) int {
-   if n <= 1 { 1 } else { n + sum_up_to(n - 1, p ) }
+fn require_positive(proof<5 > 0> evidence) int {
+   5
 }
 
-def proof arithmetic = prove((2 + 2) == 4, "arith")
+def proof positive = prove(5 > 0, "positive constant")
+require_positive(positive)
 ```
 
-The current witness records that its own construction succeeded; it does not
-yet encode a proposition in its type. Consequently, this is a checked
-refinement carrier, not a proposition-indexed theorem term. Its runtime
-representation is an opaque unit-like value and programs
-must not inspect it.
+Proposition matching is structural: equivalent equality/order spellings are
+normalized, while unrelated propositions are rejected. `prove` accepts only a
+condition the compiler can establish; false and unknown conditions fail.
 
-See `assert_compile*`, `range_proven`, `index_proven` in comptime docs. The
-type is usable anywhere a fact must be witnessed for a value-dependent binding.
-
-## Dependent types
-
-Value-dependent parameters are expressed by pairing a value with a `proof`
-carrier for a property of that value. This gives practical dependent typing
-without Pi/Sigma bloat.
-
-```ny
-fn sum_up_to(int n, proof p) int { ... }
-```
-
-Callers must supply a `proof` value constructed by `prove`. Range and index
-assertions refine compiler facts but do not implicitly synthesize an unrelated
-proof argument. Proposition-indexed witnesses are a future kernel feature.
-
-## Refinement types
-
-Refinements are user or engine proofs attached to base values (ranges,
-indices, custom predicates). Proofs are erased after the check; the payload
-keeps its concrete type.
-
-```ny
-def int x = ...
-assert_compile_range(x, 0, 99, "refined index")
-; x may now be used under a dependent proof param
-```
-
-`assert_compile_index`, range/index proofs, and custom `proof` tokens provide
-the mechanism. All checks are backed by the existing compile-time proof engine.
+This is refinement-proof support, not full dependent typing. Current indexed
+proofs do not substitute parameter-dependent propositions through calls or
+survive mutation of their referenced values; unsupported forms are rejected
+rather than accepted as evidence. See [comptime.md](comptime.md) for compile-
+time assertions and the proof section in that document for construction rules.
 
 ## Related
 
+- [runtime.md](runtime.md) for mutability, ownership, and collections.
 - [native.md](native.md) for FFI and ABI rules.
+- [comptime.md](comptime.md) for compile-time assertions and refinements.
 - [errors.md](errors.md) for diagnostics and result refinement.
-- [comptime.md](comptime.md) for assert_compile, range_proven, and the proof engine.
-- [troubleshooting.md](../learn/troubleshooting.md) for practical strict-type debugging.

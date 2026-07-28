@@ -6,6 +6,12 @@ small boundary checks.
 Keep native wrappers explicit. A wrapper states the ABI shape, error shape, and
 ownership shape close to the declaration that crosses the boundary.
 
+Native execution does not change Nytrix semantics. Choose `--native-only` to
+check a supported program on Nytrix's native path, or use `-run`/`-o` when you
+need an executable. If a feature is not supported on the selected native path,
+the compiler reports that boundary instead of silently choosing a different
+mode.
+
 ## Boundary contract
 
 Identify the native contract before writing Nytrix declarations:

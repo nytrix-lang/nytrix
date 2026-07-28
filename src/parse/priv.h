@@ -3,6 +3,7 @@
 
 #include "base/common.h"
 #include "parse/parser.h"
+#include "parse/proof.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,57 @@ static inline bool parser_match(parser_t *p, token_kind kind) {
     return true;
   }
   return false;
+}
+
+/* Assignment spelling is accepted in both the expression and statement
+ * parsers. Keep this mapping here so dereference assignment cannot drift
+ * between those two entry points. */
+static inline bool parser_token_is_assign_op(token_t tok) {
+  if (tok.kind == NY_T_ASSIGN || tok.kind == NY_T_PLUS_EQ ||
+      tok.kind == NY_T_MINUS_EQ || tok.kind == NY_T_STAR_EQ ||
+      tok.kind == NY_T_SLASH_EQ || tok.kind == NY_T_PERCENT_EQ ||
+      tok.kind == NY_T_POW_EQ || tok.kind == NY_T_BITXOR_EQ ||
+      tok.kind == NY_T_LSHIFT_EQ || tok.kind == NY_T_RSHIFT_EQ)
+    return true;
+  return tok.len == 2 && tok.lexeme &&
+         ((tok.lexeme[0] == '+' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '-' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '*' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '/' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '%' && tok.lexeme[1] == '=') ||
+          (tok.lexeme[0] == '^' && tok.lexeme[1] == '='));
+}
+
+static inline bool parser_assign_op_is_plain(token_t tok) {
+  return tok.kind == NY_T_ASSIGN ||
+         (tok.len == 1 && tok.lexeme && tok.lexeme[0] == '=');
+}
+
+static inline token_kind parser_assign_op_binary_kind(token_t tok) {
+  if (tok.kind == NY_T_PLUS_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '+'))
+    return NY_T_PLUS;
+  if (tok.kind == NY_T_MINUS_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '-'))
+    return NY_T_MINUS;
+  if (tok.kind == NY_T_STAR_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '*'))
+    return NY_T_STAR;
+  if (tok.kind == NY_T_SLASH_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '/'))
+    return NY_T_SLASH;
+  if (tok.kind == NY_T_PERCENT_EQ ||
+      (tok.len == 2 && tok.lexeme && tok.lexeme[0] == '%'))
+    return NY_T_PERCENT;
+  if (tok.kind == NY_T_POW_EQ)
+    return NY_T_POW;
+  if (tok.kind == NY_T_BITXOR_EQ)
+    return NY_T_BITXOR;
+  if (tok.kind == NY_T_LSHIFT_EQ)
+    return NY_T_LSHIFT;
+  if (tok.kind == NY_T_RSHIFT_EQ)
+    return NY_T_RSHIFT;
+  return NY_T_PERCENT;
 }
 
 static inline void parser_sync_stmt_boundary(parser_t *p) {

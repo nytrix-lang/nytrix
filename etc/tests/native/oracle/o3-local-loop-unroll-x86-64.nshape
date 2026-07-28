@@ -1,0 +1,17 @@
+shape oracle_o3_local_loop_unroll_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle o3 local-loop-unroll phi-dominance regression]
+  template ny-test-case
+  flags "-O3 --nyir-verify --native-result-oracle=6"
+  expect compile_and_run
+  source ny <<'NY'
+mut i = 0
+mut total = 0
+while i < 4 {
+  total = total + i
+  i = i + 1
+}
+total
+NY
+}

@@ -1,0 +1,15 @@
+shape oracle_early_return_cfg_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 nyir cfg early-return unreachable oracle]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=3; -O1 --native-result-oracle=3; -O2 --native-result-oracle=3; -O3 --native-result-oracle=3"
+  expect compile_and_run
+  source ny <<'NY'
+fn early(int x) int {
+  if x < 0 { return 3 }
+  x + 1
+}
+early(-1)
+NY
+}

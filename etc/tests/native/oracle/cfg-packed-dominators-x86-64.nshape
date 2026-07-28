@@ -1,0 +1,228 @@
++shape oracle_cfg_packed_dominators_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle nyir cfg packed-dominators word-boundary]
+  template ny-test-case
+  flags "-O2 --nyir-verify --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+mut x = 0
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+if false {
+  x = x + 1
+}
+x
+NY
+}

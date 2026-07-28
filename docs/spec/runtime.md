@@ -130,6 +130,29 @@ Ownership function contracts are:
 | `@releases(x)` | The function releases parameter `x`. |
 | `@forgets(x)` | The function forgets parameter `x` without dropping it. |
 
+## Receiver aliasing
+
+When a function receives a dictionary and calls `set`, it changes the caller's
+object. Choose one of two conventions for a public API and do not mix them:
+
+- In-place mutator: mutate and return the same object.
+- Functional mutator: clone, mutate the clone, and return it.
+
+```ny
+; In-place: mutates caller's dict, returns it
+fn add_name(any input, str name) any {
+   input.set("name", name)
+   input
+}
+
+; Functional: returns a new dict, caller's dict unchanged
+fn with_name(any input, str name) any {
+   mut out = clone(input)
+   out.set("name", name)
+   out
+}
+```
+
 ## Scoped cleanup
 
 `defer` and `with` provide cleanup. `with` uses the resource spelling

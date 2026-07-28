@@ -1,0 +1,17 @@
+shape oracle_algebraic_combine_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle algebraic rewrite_fuel qbe-inspired]
+  template ny-test-case
+  flags_matrix "-O2 --native-result-oracle=3; -O3 --native-tv-seed=12 --native-result-oracle=3"
+  expect compile_and_run
+  source ny <<'NY'
+fn f(i64 x) i64 {
+  ; nested and/or + double negate — clean-room QBE/Firm-style rewrites
+  def a = (x & 15) & 7
+  def b = (a | 1) | 2
+  0 - (0 - b)
+}
+f(99)
+NY
+}

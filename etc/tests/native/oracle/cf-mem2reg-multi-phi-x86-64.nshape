@@ -1,0 +1,25 @@
+shape oracle_cf_mem2reg_multi_phi_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle cf-mem2reg multi-phi branch-edge swap regression]
+  template ny-test-case
+  flags_matrix "-O2 --native-enable-cf-mem2reg --native-result-oracle=45; -O3 --native-enable-cf-mem2reg --native-result-oracle=45"
+  expect compile_and_run
+  source ny <<'NY'
+mut a = 1
+mut b = 2
+mut i = 0
+while i < 4 {
+  if i % 2 == 0 {
+    mut saved = a
+    a = b
+    b = saved
+  } else {
+    a = a + 1
+    b = b + 2
+  }
+  i = i + 1
+}
+a * 10 + b
+NY
+}

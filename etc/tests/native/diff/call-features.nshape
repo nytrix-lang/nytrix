@@ -1,0 +1,38 @@
+shape diff_call_features {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 nyir vm differential call bool nested branch locals loop]
+  template ny-test-case
+  ; Merges bool-arg/return, nested, branch, locals, loop native/vm pairs.
+  flags_matrix "--native-backend x86_64; --nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+fn choose(bool ok, i64 a, i64 b) i64 { if ok { a } else { b } }
+fn gt(i64 a, i64 b) bool { a > b }
+fn add2(i64 a, i64 b) i64 { a + b }
+fn add4(i64 a, i64 b, i64 c, i64 d) i64 {
+  add2(a, b) + add2(c, d)
+}
+fn inc(i64 x) i64 { x + 1 }
+
+mut part = 0
+; bool arg: 7
+part = part + choose(true, 7, 9)
+; bool return: 7
+if gt(5, 3) { part = part + 7 } else { part = part + 9 }
+; nested: 10
+part = part + add4(1, 2, 3, 4)
+; branch on call: 111
+if add4(1, 2, 3, 4) == 10 { part = part + 111 } else { part = part + 222 }
+; locals: 10+20+10 = 40
+mut x = 10
+mut y = 20
+part = part + add4(1, 2, 3, 4) + x + y
+; loop: 4
+mut i = 0
+while i < 4 { i = inc(i) }
+part = part + i
+; 7+7+10+111+40+4 = 179
+part
+NY
+}

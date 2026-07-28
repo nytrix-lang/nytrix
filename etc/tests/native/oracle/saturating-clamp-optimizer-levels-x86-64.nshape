@@ -1,0 +1,17 @@
+shape oracle_saturating_clamp_optimizer_levels_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 nyir saturating-arithmetic clamp control-flow optimizer regression]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=297; -O1 --native-result-oracle=297; -O2 --native-result-oracle=297; -O3 --native-result-oracle=297"
+  expect compile_and_run
+  source ny <<'NY'
+fn sat_u8(i64 x) i64 {
+  if x < 0 { return 0 }
+  if x > 255 { return 255 }
+  x
+}
+
+sat_u8(-5) + sat_u8(42) + sat_u8(300)
+NY
+}

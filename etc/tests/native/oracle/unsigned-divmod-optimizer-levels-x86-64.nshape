@@ -1,0 +1,12 @@
+shape oracle_unsigned_divmod_optimizer_levels_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle unsigned divmod optimizer object-jit]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=67108863063; -O1 --native-result-oracle=67108863063; -O2 --native-result-oracle=67108863063; -O3 --native-result-oracle=67108863063"
+  expect compile_and_run
+  source ny <<'NY'
+def u64 value = 4294967295
+(value / 64) * 1000 + (value % 64)
+NY
+}

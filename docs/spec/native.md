@@ -1,23 +1,28 @@
 # Native boundary
 
-Native boundary rules cover layouts, extern blocks, pointers, handles, strings,
-ownership, and ABI behavior.
+Rules for layouts, extern blocks, pointers, handles, strings, ownership, and
+ABI behavior at native boundaries.
 
-## Native backend capability boundary
+## Running native code
 
-`--native-only` selects the host encoder on x86-64 and AArch64. Both paths
-lower NYIR, encode machine code, relocate an in-memory W^X image, and support
-persistent REPL definitions without constructing LLVM state. AArch64 ELF64
-objects and internal-link runtime probes cover AAPCS64 scalar/f32/f64 calls,
-eight integer arguments, local pointer memory, branches, and signed div/mod.
+Use `--native-only` to force the native execution path. Use `-run` or `-o` for
+a native executable. Use the default mode while iterating unless native-only
+behavior itself is what you are checking.
 
-i386 has its separately tested ELF32 object/link slice. ARM, RISC-V, MIPS,
-PowerPC, BPF, AVR, and WebAssembly target names are assembly/inspection paths
-unless their capability record explicitly enables an object format. An
-assembly-only target fails object or JIT requests instead of invoking a hidden
-fallback. General C aggregate classification remains target-specific: the
-documented nested INTEGER/SSE/MEMORY aggregate ABI is the x86-64 System V
-boundary, not an implied cross-ABI promise.
+Unsupported native shapes fail with a diagnostic — they never silently fall
+back to a different execution mode.
+
+## Portable artifacts
+
+Save a validated program artifact and run it later:
+
+```bash
+ny --nyir-dump-bin=build/cache/program.nyir myprog.ny
+ny --nyir-run-bin=build/cache/program.nyir
+```
+
+Capacity is checked before output is written. A program is never silently
+truncated.
 
 ## Layouts
 
@@ -28,8 +33,7 @@ layout Name {
 }
 ```
 
-Layout field order is part of the ABI. A layout describes memory shape at a
-native boundary. Reordering fields changes the ABI.
+Field order is part of the ABI. Reordering fields changes the ABI.
 
 ## Extern blocks
 
@@ -43,66 +47,100 @@ extern {
 }
 ```
 
-An extern block declares native symbols. The library string selects the linked
-or loaded library. A bare extern block names symbols already available from the
-current process; `extern ""` is accepted as the older spelling.
+A bare `extern` names symbols from the current process. The library string
+selects which linked or loaded library provides the symbol.
 
 ## Header imports
 
-`#include` imports declarations from C headers through the selected C frontend.
-The Nytrix-owned frontend handles the supported preprocessor, declaration,
-layout, callback, and aggregate-ABI subset; unsupported shapes fail explicitly
-unless an explicitly selected adapter is responsible for that import.
+`#include` imports declarations from C headers:
 
 ```ny
-#include <stdlib.h> as "c"
+#include <stdlib.h>
 #include "./ffi.h"
 ```
 
-An explicit namespace alias exposes declarations through that namespace. An
-unaliased import (or `as ""`) exposes constants, macros, enum values, layouts,
-and non-conflicting functions directly; it does not create an implicit
-namespace. Existing Nytrix names remain authoritative on collisions; an
-explicit namespace alias makes the C declaration separately addressable.
-
-Header imports follow transitive includes. Object-like integer macros,
-shift/bitwise macro expressions, enum constants, typedef structs, and
-pointer-bearing structs become visible when the selected frontend supports
-their declarations. The internal frontend resolves installed system include
-roots and recovers past unsupported system declarations while retaining strict
-diagnostics for project headers.
-
-Imported typedef structs are available as layout constructors. Use `&value`
-when a C function expects an out pointer:
+An optional namespace alias exposes declarations under that name:
 
 ```ny
-#include <sys/time.h> as ""
-
-mut timeval tv = timeval(0, 0)
-gettimeofday(&tv, NULL)
+#include <stdlib.h> as "c"
+c.malloc(64)
 ```
 
-`NULL` is accepted as the C null pointer spelling and lowers to `nil`/`0`.
+Without `as`, constants, macros, layouts, and non-conflicting functions are
+available directly. Existing Nytrix names win on collisions.
 
-For production native calls, prefer `extern`, `#include`, and `layout`. The
-dynamic `std.os.ffi` helpers are useful at the REPL or for exploratory probes,
-but they trade compile-time ABI knowledge for runtime descriptors and capped
-dynamic dispatch.
+### C frontend selector
 
-## Pointers
+| `--c-frontend` | Behavior |
+|---|---|
+| *(default)* | Internal frontend for diagnostics; libclang does lowering |
+| `nytrix` | Internal frontend does all lowering; no libclang fallback |
+| `libclang` | Always use libclang; skip the internal frontend |
 
-`*T` is an addressable pointer to `T`. Pointer values model memory addresses.
-They require correct lifetime, alignment, and element type.
+### Include resolution
 
-## Handles
+1. `"path"` resolves relative to the current file.
+2. `<path>` searches `/usr/include`, `/usr/local/include`, and platform paths.
+3. Max depth is 16. Recursive includes inherit the parser's typedef, tag, and
+   macro state.
 
-`handle` is an opaque native scalar. A handle is not a pointer unless the API
-documents that conversion. Handle cleanup uses the close, destroy, or release
-function documented by the owning API.
+### Supported C constructs
+
+**Types:** `void`, `_Bool`/`bool`, `char`, `short`, `int`, `long`, `float`,
+`double`, `long double`, `_Complex`/`_Imaginary` (base type), `_BitInt(N)`,
+`signed`/`unsigned`, `const`, `volatile`, `restrict`, `_Atomic`.
+
+**Declarators:** pointers, arrays (flexible and unknown-size), function
+parameters (variadic), deep function pointer nesting, typedefs.
+
+**Declarations:** `extern`, `static`, `inline`; struct, union, enum with
+fields, bitfields, anonymous members, and nested definitions;
+`#pragma pack(push, N)` / `#pragma pack(pop)`.
+
+**Attributes:** `packed`, `aligned(N)`, `unused`, `deprecated`, `weak`,
+`format(...)`, `visibility(...)`, `alloc_size(...)`, `const`, `pure`,
+`noreturn`, `malloc`, `warn_unused_result`, `vector_size(...)`, `__declspec`,
+`_Alignas`, `_Static_assert`, `__asm__`, `__extension__`.
+
+**Preprocessor:** object-like and function-like `#define` with `__VA_ARGS__`
+expansion, `#undef`, `#if`/`#ifdef`/`#ifndef`/`#elif`, `#include` with
+recursive resolution, `__has_include`, `__has_builtin`, predefined platform
+macros.
+
+### Unsupported
+
+- Function definitions (prototypes only)
+- Statements, expressions, compound literals, designated initializers
+- `_Generic` selections
+
+### C-to-Nytrix type mapping
+
+| C type | Nytrix | C type | Nytrix |
+|---|---|---|---|
+| `void` | `void` | `_Bool`/`bool` | `u8` |
+| `char` | `i8`/`u8` | `short` | `i16`/`u16` |
+| `int` | `i32`/`u32` | `long` | `i64`/`u64` |
+| `float` | `f32` | `double` | `f64` |
+| `long double` | `f64` | `enum` | `i32` |
+| pointers | `ptr` | function pointers | `fnptr` |
+| struct/union | named type | arrays | `ptr` |
+
+Use `&value` when a C function expects an out pointer:
+
+```ny
+#include <sys/time.h>
+mut timeval tv = timeval(0, 0)
+gettimeofday(&tv, nil)
+```
+
+`NULL` lowers to `nil`/`0`.
+
+## Pointers and handles
+
+`*T` is an addressable pointer to `T`. `handle` is an opaque native scalar —
+not a pointer unless the API documents the conversion.
 
 ## Layout helpers
-
-Runtime layout helpers expose ABI metadata and field access:
 
 ```ny
 __layout_size("Name")
@@ -112,60 +150,52 @@ store_layout(ptr, "Name", values...)
 load_layout(ptr, "Name", "field")
 ```
 
-Typed raw loads and stores include integer, float, bool, pointer, and handle
-forms such as `load8`, `load16`, `load32`, `load32_f32`, `load64_f64`,
-`load64_h`, `store8`, `store32`, and `store_layout`.
+Raw load/store helpers:
 
-Raw memory helpers use byte offsets. The public wrappers default the offset to
-zero:
+| Helper | Use |
+|---|---|
+| `load8`, `store8` | Raw bytes |
+| `load16`, `load32`, `load64` | Tagged int/value |
+| `load64_i`, `store64_i` | Typed integer |
+| `load64_h`, `store64_h` | Handle/pointer |
+| `load32_f32`, `load64_f64` | Float read |
+| `store32_f32`, `store64_f64` | Float write |
 
-| Helper | Shape | Use |
-| --- | --- | --- |
-| `load8(p, i=0)` / `store8(p, v, i=0)` | byte | Raw bytes. |
-| `load16`, `load32`, `load64` | tagged int/value load | Nytrix scalar slots and raw integer data. |
-| `load64_i(p, i=0)` / `store64_i(p, v, i=0)` | `int` view | Typed integer reads and writes. |
-| `load64_h(p, i=0)` / `store64_h(p, v, i=0)` | handle view | Pointer or handle-sized native values. |
-| `load32_f32`, `load64_f64` | float view | Native float fields. |
-| `store32_f32`, `store64_f64` | float store | Native float fields. |
-
-The runtime intrinsics behind these wrappers use `(p, offset, value)` store
-order. User code should call the `std.core` wrappers above.
-
-`std.os.ffi.CStruct` is a dynamic descriptor form. It is intentionally flexible
-and slower than `layout`; compiled layout access resolves offsets directly.
-
-## Inline assembly and intrinsics
+## Inline assembly
 
 ```ny
 asm("mov $1, $0", "=r,r", value)
-llvm("ctpop.i64", value)
-llvm("llvm.cttz.i64", value, false)
+intrinsic("ctpop.i64", value)
 ```
 
-`asm` lowers inline assembly for the active backend and target architecture.
-`@naked` functions can contain complete target-specific assembly bodies. The
-`llvm` builtin calls LLVM intrinsics; the `llvm.` prefix is optional for
-intrinsic names.
+`asm` emits target-specific code. `intrinsic` resolves a backend intrinsic.
+Both are backend-specific; use ordinary operations when source must run
+everywhere.
+
+## Machine form
+
+NYIR lowers to typed machine form before target emitters. The target descriptor
+owns register-assignment tables; machine form must use those tables rather than
+embedding a calling convention. Scalar calls beyond the register set place
+overflow arguments in aligned stack slots.
+
+- `--native-oracle-per-pass`: compare interpreter and native result after
+  every optimization pass.
+- `--native-tv-seed[=N]`: translation-validation seed for pure i64 scalar NYIR.
+- `--nyir-dump-cfg`: print reconstructed blocks, predecessors, successors.
+- `--nyir-dump-raw`: deterministic before/after dump per pass.
+- `--nyir-verify`: enable verifier after every pass (useful for CI).
+- `--nyir-disable-pass=NAME`, `--nyir-stop-after=NAME`: diagnostic controls.
 
 ## Strings and bytes
 
-FFI text handling is a boundary. APIs document whether strings are:
-
-- managed Nytrix text
-- UTF-8 bytes
-- null-terminated native strings
-- raw buffers with explicit length
-
-These forms are not interchangeable.
+FFI text handling is a boundary. APIs document whether strings are managed
+Nytrix text, UTF-8 bytes, null-terminated native strings, or raw buffers with
+explicit length. These forms are not interchangeable.
 
 ## Ownership
 
-Ownership attributes and API docs define who allocates and who frees native
-values. A wrapper can provide scoped cleanup, but raw native values require
-explicit ownership handling.
-
-When a native call returns owned memory or a handle, model that in the wrapper
-with ownership contracts and cleanup:
+Ownership attributes define who allocates and who frees:
 
 ```ny
 @returns_owned
@@ -179,8 +209,22 @@ fn free_buffer(p) int {
 }
 ```
 
+## Unity build boundaries
+
+The compiler uses unity builds (single translation units that `#include`
+other `.c` files) for faster compilation:
+
+- **Runtime** (`src/rt/init.c`): 13 modules — `ast.c`, `bigint.c`,
+  `core.c`, `simmd.c`, `ffi.c`, `ffigates.c`, `gc.c`, `math.c`,
+  `bigfloat.c`, `memory.c`, `os.c`, `proof.c`, `string.c`.
+- **Pipeline** (`src/wire/pipe/init.c`): compilation and bundling stages.
+- **C frontend** (`src/code/fficlang.c`): includes `lex.c` and `parse.c`.
+
+Each module must be self-contained. Changes to a module must not break other
+modules in the same unity build.
+
 ## Related
 
-- [types.md](types.md) for pointer and handle type forms.
-- [runtime.md](runtime.md) for ownership and resource scopes.
-- [native.md](../learn/native.md) for practical FFI checks.
+- [types.md](types.md) — pointer and handle type forms.
+- [runtime.md](runtime.md) — ownership and resource scopes.
+- [native.md](../learn/native.md) — practical FFI checks.

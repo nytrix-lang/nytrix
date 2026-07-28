@@ -1,0 +1,19 @@
+shape oracle_sccp_f64_phi_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle nyir sccp f64 phi]
+  template ny-test-case
+  flags_matrix "-O2 --native-enable-cf-mem2reg --native-result-oracle=3; -O3 --native-enable-cf-mem2reg --native-result-oracle=3"
+  expect compile_and_run
+  source ny <<'NY'
+fn same_float(i64 x) f64 {
+  if x < 0 {
+    1.5
+  } else {
+    1.5
+  }
+}
+
+same_float(-1) + same_float(2)
+NY
+}

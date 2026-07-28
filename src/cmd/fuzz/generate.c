@@ -1302,7 +1302,7 @@ static bool write_ir_file(const char *path, const gen_case_t *c) {
 }
 
 int cmd_generate_batch(int argc, char **argv) {
-  const char *shape_dir = arg_value(argc, argv, "--shape-dir", "etc/tests/fuzz/shapes");
+  const char *shape_dir = arg_value(argc, argv, "--shape-dir", "etc/tests/shapes");
   const char *profile = arg_value(argc, argv, "--profile", "balanced");
   const char *out_dir = arg_value(argc, argv, "--out", "build/generated/native");
   const char *generator = arg_value(argc, argv, "--generator", "mixed");

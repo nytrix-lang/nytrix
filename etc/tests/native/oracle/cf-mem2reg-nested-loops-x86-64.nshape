@@ -1,0 +1,17 @@
+shape oracle_cf_mem2reg_nested_loops_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle ssa cfg phi mem2reg nested-loop]
+  template ny-test-case
+  flags_matrix "-O0 --native-enable-cf-mem2reg --native-result-oracle=2838; -O1 --native-enable-cf-mem2reg --native-result-oracle=2838; -O2 --native-enable-cf-mem2reg --native-result-oracle=2838; -O3 --native-enable-cf-mem2reg --native-result-oracle=2838"
+  expect compile_and_run
+  source ny <<'NY'
+mut total = 0
+for i in 0..10 {
+  for j in 0..5 {
+    total = total + i * 8 + 3
+  }
+}
+total
+NY
+}

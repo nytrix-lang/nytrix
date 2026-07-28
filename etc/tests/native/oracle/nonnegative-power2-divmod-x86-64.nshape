@@ -1,0 +1,16 @@
+shape oracle_nonnegative_power2_divmod_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle range strength-reduction divmod power-of-two]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=1503; -O1 --native-result-oracle=1503; -O2 --native-result-oracle=1503; -O3 --native-result-oracle=1503"
+  expect compile_and_run
+  source ny <<'NY'
+fn reduce(i64 x) i64 {
+  def y = x & 255
+  (y / 8) * 100 + (y % 8)
+}
+
+reduce(123)
+NY
+}

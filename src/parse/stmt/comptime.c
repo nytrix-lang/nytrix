@@ -118,6 +118,12 @@ static bool tok_is_platform_guard(token_t tok) {
   return false;
 }
 
+static expr_t *ct_make_ident_expr(parser_t *p, token_t tok, const char *name) {
+  expr_t *id = expr_new(p->arena, NY_E_IDENT, tok);
+  id->as.ident.name = parser_intern(p, name, strlen(name));
+  return id;
+}
+
 static expr_t *make_comptime_return_expr(parser_t *p, token_t tok,
                                          expr_t *value) {
   if (!value)
@@ -1950,6 +1956,38 @@ static stmt_t *parse_hash_stmt(parser_t *p) {
   parser_advance(p);
   if (tok_is_platform_guard(p->cur))
     return parse_hash_platform_guard_stmt(p, tok);
+  if (tok_is_hash_kw(p->cur, "assert", NY_T_IDENT)) {
+    parser_advance(p);
+    bool has_paren = parser_match(p, NY_T_LPAREN);
+    expr_t *cond = p_parse_expr(p, 0);
+    if (!cond)
+      return NULL;
+    if (has_paren)
+      parser_expect(p, NY_T_RPAREN, "')' after #assert condition", NULL);
+    expr_t *msg = NULL;
+    if (p->cur.kind == NY_T_STRING) {
+      size_t slen = 0;
+      const char *text = parser_decode_string(p, p->cur, &slen);
+      msg = expr_new(p->arena, NY_E_LITERAL, p->cur);
+      msg->as.literal.kind = NY_LIT_STR;
+      msg->as.literal.as.s.data = text;
+      msg->as.literal.as.s.len = slen;
+      parser_advance(p);
+    }
+    parser_match(p, NY_T_SEMI);
+    expr_t *callee = ct_make_ident_expr(p, tok, "static_assert");
+    expr_t *call = expr_new(p->arena, NY_E_CALL, tok);
+    call->as.call.callee = callee;
+    vec_push_arena(p->arena, &call->as.call.args,
+                   ((call_arg_t){.name = NULL, .val = cond}));
+    if (msg)
+      vec_push_arena(p->arena, &call->as.call.args,
+                     ((call_arg_t){.name = NULL, .val = msg}));
+    expr_t *ct = make_comptime_return_expr(p, tok, call);
+    stmt_t *s = stmt_new(p->arena, NY_S_EXPR, tok);
+    s->as.expr.expr = ct;
+    return s;
+  }
   if (tok_is_hash_kw(p->cur, "if", NY_T_IF) ||
       tok_is_hash_kw(p->cur, "elif", NY_T_ELIF))
     return parse_hash_if_stmt(p, tok);

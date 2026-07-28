@@ -1,0 +1,18 @@
+shape oracle_machine_scalar_control_flow_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 machine-ir text-assembly scalar control-flow oracle]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=43; -O1 --native-result-oracle=43; -O2 --native-result-oracle=43; -O3 --native-result-oracle=43"
+  expect compile_and_run
+  source ny <<'NY'
+mut x = 6
+mut y = 7
+if x < y {
+  x = x * y
+} else {
+  x = x - y
+}
+x + 1
+NY
+}

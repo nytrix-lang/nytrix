@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#include "base/util.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,8 +50,10 @@ static char *read_message(void) {
 
 static void send_json(const char *json) {
   int n = (int)strlen(json);
-  printf("Content-Length: %d\r\n\r\n%s", n, json);
-  fflush(stdout);
+  char header[64];
+  int hlen = snprintf(header, sizeof(header), "Content-Length: %d\r\n\r\n", n);
+  ny_write_all(STDOUT_FILENO, header, (size_t)hlen);
+  ny_write_all(STDOUT_FILENO, json, (size_t)n);
 }
 
 static char *json_string(const char *json, const char *key) {
@@ -86,7 +89,9 @@ static int json_int(const char *json, const char *key, int fallback) {
   p = strchr(p + strlen(pat), ':');
   if (!p)
     return fallback;
-  return atoi(p + 1);
+  int v = fallback;
+  ny_parse_int(p + 1, &v);
+  return v;
 }
 
 static void respond(int request_seq, const char *command, int success, const char *body) {
