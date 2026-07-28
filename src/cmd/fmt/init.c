@@ -25,6 +25,7 @@ static void usage(void) {
   printf("%smodes:%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
   printf("  %s--check --fix --analyze --audit --selftest --trim --syntax --types --dead%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  Formatting is read-only by default; pass --fix to rewrite files.\n");
   printf("  %s--smart --overhaul --bugs --checks --bloat --modules --profiles --layouts --loops%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("  %s--contracts --ffi --constants --specialize --metaprog --constfold%s\n\n",
@@ -1004,10 +1005,14 @@ int ny_fmt_main(int argc, char **argv) {
     return rc;
   }
 
-  int only_default_fmt =
-      !(opts.analyze || opts.audit || opts.check || opts.optimize || opts.tidy || opts.dupes);
+  int rewrite_format = opts.fix || opts.tidy;
 
-  if (only_default_fmt || opts.tidy) {
+  if (!rewrite_format &&
+      !(opts.analyze || opts.audit || opts.check || opts.optimize || opts.dupes)) {
+    nyt_msg("FMT", NYT_GRAY, "read-only; pass --fix to rewrite files");
+  }
+
+  if (rewrite_format) {
     StrVec files = {0};
     if (opts.paths.len == 0) {
       collect_files_rec("src", &files, 0);

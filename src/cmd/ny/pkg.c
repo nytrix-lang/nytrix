@@ -2727,7 +2727,7 @@ int ny_new_main(int argc, char **argv) {
            "```\n\n"
            "## Tooling\n\n"
            "```bash\n"
-           "ny fmt                  # format source\n"
+           "ny fmt --fix            # format source\n"
            "ny fmt --check          # check formatting\n"
            "ny test                 # run tests\n"
            "ny doc search imports   # search docs and stdlib APIs\n"
