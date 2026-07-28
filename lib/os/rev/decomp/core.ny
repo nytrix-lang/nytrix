@@ -29,7 +29,7 @@ use std.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _se
 use std.os.rev.decomp.symbols (_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
 use std.os.rev.decomp.annotations (_safe_name, _rename_map, _rename_name, _rename_addr, with_renames, _note_key, _note_record, with_notes, notes, note_at)
 use std.os.rev.decomp.graph (_cg_edge_key, _cg_add_edge, _cg_successors, _cg_predecessors, _cg_reaches, _cg_has_self_edge, _cg_components)
-use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_balanced_delimiters, _clean_strip_outer_balanced_parens)
+use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_balanced_delimiters, _clean_strip_outer_balanced_parens, _clean_top_level_find, _clean_top_level_split, _clean_literal_int_value)
 use "../symbolic.ny" as sym
 use std.os.rev.decomp.elf (
    analyze, arch, arch_profile, disassemble, disassemble_function, elf_header,
@@ -15057,107 +15057,6 @@ fn _clean_drop_unreachable_unused_labels(str text) str {
    def out = str.builder_to_str(b)
    str.builder_free(b)
    out
-}
-
-fn _clean_top_level_find(str expr, str needle) int {
-   if needle.len == 0 || expr.len < needle.len { return -1 }
-   mut depth = 0
-   mut quote = 0
-   mut i = 0
-   while i + needle.len <= expr.len {
-      def ch = load8(expr, i)
-      if quote != 0 {
-         if ch == 92 && i + 1 < expr.len { i += 2 continue }
-         if ch == quote { quote = 0 }
-         i += 1
-         continue
-      }
-      if ch == 34 || ch == 39 {
-         quote = ch
-         i += 1
-         continue
-      }
-      if depth == 0 && slice(expr, i, i + needle.len, 1) == needle { return i }
-      if ch == 40 { depth += 1 }
-      elif ch == 41 && depth > 0 { depth -= 1 }
-      elif ch == 91 { depth += 1 }
-      elif ch == 93 && depth > 0 { depth -= 1 }
-      i += 1
-   }
-   -1
-}
-
-fn _clean_top_level_split(str expr, str sep) list {
-   mut out = []
-   if sep.len == 0 { return [expr] }
-   mut depth = 0
-   mut quote = 0
-   mut start = 0
-   mut i = 0
-   while i + sep.len <= expr.len {
-      def ch = load8(expr, i)
-      if quote != 0 {
-         if ch == 92 && i + 1 < expr.len { i += 2 continue }
-         if ch == quote { quote = 0 }
-         i += 1
-         continue
-      }
-      if ch == 34 || ch == 39 {
-         quote = ch
-         i += 1
-         continue
-      }
-      if depth == 0 && slice(expr, i, i + sep.len, 1) == sep {
-         out = out.append(str.strip(slice(expr, start, i, 1)))
-         i += sep.len
-         start = i
-         continue
-      }
-      if ch == 40 { depth += 1 }
-      elif ch == 41 && depth > 0 { depth -= 1 }
-      elif ch == 91 { depth += 1 }
-      elif ch == 93 && depth > 0 { depth -= 1 }
-      i += 1
-   }
-   if start == 0 {
-      out = out.append(expr)
-      return out
-   }
-   out = out.append(str.strip(slice(expr, start, expr.len, 1)))
-   out
-}
-
-fn _clean_literal_int_value(str raw) dict {
-   if raw.len > 80 { return {"ok": false} }
-   mut s = _clean_strip_outer_parens(raw)
-   s = str.strip(s)
-   if s.len == 0 { return {"ok": false} }
-   mut sign = 1
-   if str.startswith(s, "-") {
-      sign = -1
-      s = str.strip(slice(s, 1, s.len, 1))
-   } elif str.startswith(s, "+") {
-      s = str.strip(slice(s, 1, s.len, 1))
-   }
-   if s.len == 0 { return {"ok": false} }
-   if str.startswith(s, "0x") || str.startswith(s, "0X") {
-      if s.len <= 2 { return {"ok": false} }
-      mut i = 2
-      while i < s.len {
-         def c = load8(s, i)
-         if !((c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102)) {
-            return {"ok": false}
-         }
-         i += 1
-      }
-      return {"ok": true, "value": sign * str.parse_int(slice(s, 2, s.len, 1), 16)}
-   }
-   mut i = 0
-   while i < s.len {
-      if !str.ascii_is_digit(load8(s, i)) { return {"ok": false} }
-      i += 1
-   }
-   {"ok": true, "value": sign * str.parse_int(s, 10)}
 }
 
 fn _clean_subtracts_one_from(str expr0, str base0) bool {
