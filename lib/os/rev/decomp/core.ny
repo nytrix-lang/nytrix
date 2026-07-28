@@ -29,7 +29,8 @@ use std.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _se
 use std.os.rev.decomp.symbols (_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
 use std.os.rev.decomp.annotations (_safe_name, _rename_map, _rename_name, _rename_addr, with_renames, _note_key, _note_record, with_notes, notes, note_at)
 use std.os.rev.decomp.graph (_cg_edge_key, _cg_add_edge, _cg_successors, _cg_predecessors, _cg_reaches, _cg_has_self_edge, _cg_components)
-use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_balanced_delimiters, _clean_strip_outer_balanced_parens, _clean_top_level_find, _clean_top_level_split, _clean_literal_int_value)
+use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_balanced_delimiters, _clean_strip_outer_balanced_parens, _clean_strip_outer_parens, _clean_top_level_find, _clean_top_level_split, _clean_literal_int_value)
+use std.os.rev.decomp.arithmetic (_ny_infix_operator, _clean_paren, _clean_literal_zero, _clean_literal_one, _clean_same_expr_text, _clean_const_mul_expr, _clean_div_expr_parts, _clean_const_mul_text, _clean_add_scaled_expr, _clean_sub_mod_expr, _clean_mba_same_expr, _clean_mba_pair_expr, _clean_mba_const_mul_expr, _clean_mba_scaled_pair_expr, _clean_mba_pair_same_unordered, _clean_mba_pair_sum, _clean_mba_pair_xor, _clean_mba_xor_pair_expr, _clean_mba_add_expr, _clean_mba_sub_expr, _clean_mba_expr_once, _clean_simplify_mba_expr, _clean_binary_expr)
 use "../symbolic.ny" as sym
 use std.os.rev.decomp.elf (
    analyze, arch, arch_profile, disassemble, disassemble_function, elf_header,
@@ -1351,10 +1352,6 @@ fn _attach_compare_context(dict bin, list rows) list {
 
 fn _arith_symbol(str m) str {
    dasm.arithmetic_operator(m)
-}
-
-fn _ny_infix_operator(str sym) str {
-   sym == "^" ? "^^" : sym
 }
 
 fn _x86_vector_zeroing_idiom(str arch0, str mnemonic, str operands) bool {
@@ -10257,237 +10254,6 @@ fn _clean_row_feeds_store_inline(list rows, int idx) bool {
    false
 }
 
-fn _clean_paren(str expr) str {
-   def e = str.strip(expr)
-   if e.len == 0 { return e }
-   if str.find(e, " ") < 0 { return e }
-   if _clean_outer_balanced_parens_wrap(e) { return e }
-   "(" + e + ")"
-}
-
-fn _clean_literal_zero(str expr) bool {
-   def e = str.strip(expr)
-   e == "0" || e == "0x0"
-}
-
-fn _clean_literal_one(str expr) bool {
-   def e = str.strip(expr)
-   e == "1" || e == "0x1"
-}
-
-fn _clean_same_expr_text(str a0, str b0) bool {
-   _clean_strip_outer_parens(a0) == _clean_strip_outer_parens(b0)
-}
-
-fn _clean_const_mul_expr(str expr0) dict {
-   def expr = _clean_strip_outer_parens(expr0)
-   def p = _clean_top_level_find(expr, " * ")
-   if p < 0 { return dict() }
-   def left = str.strip(slice(expr, 0, p, 1))
-   def right = str.strip(slice(expr, p + 3, expr.len, 1))
-   def lv = _clean_literal_int_value(left)
-   if lv.get("ok", false) {
-      return {"factor": int(lv.get("value", 0)), "value": _clean_strip_outer_parens(right)}
-   }
-   def rv = _clean_literal_int_value(right)
-   if rv.get("ok", false) {
-      return {"factor": int(rv.get("value", 0)), "value": _clean_strip_outer_parens(left)}
-   }
-   dict()
-}
-
-fn _clean_div_expr_parts(str expr0) dict {
-   def expr = _clean_strip_outer_parens(expr0)
-   def p = _clean_top_level_find(expr, " / ")
-   if p < 0 { return dict() }
-   def base = _clean_strip_outer_parens(slice(expr, 0, p, 1))
-   def raw_div = _clean_literal_int_value(slice(expr, p + 3, expr.len, 1))
-   if !raw_div.get("ok", false) { return dict() }
-   def div = int(raw_div.get("value", 0))
-   if base.len == 0 || div <= 1 { return dict() }
-   {"base": base, "divisor": div}
-}
-
-fn _clean_const_mul_text(int factor, str value0) str {
-   def value = _clean_strip_outer_parens(value0)
-   if factor == 0 { return "0" }
-   if factor == 1 { return value }
-   to_str(factor) + " * " + _clean_paren(value)
-}
-
-fn _clean_add_scaled_expr(str left0, str right0) str {
-   def left = _clean_strip_outer_parens(left0)
-   def right = _clean_strip_outer_parens(right0)
-   if _clean_same_expr_text(left, right) { return _clean_const_mul_text(2, left) }
-   def lm = _clean_const_mul_expr(left)
-   if lm.len > 0 && _clean_same_expr_text(lm.get("value", ""), right) {
-      return _clean_const_mul_text(int(lm.get("factor", 0)) + 1, right)
-   }
-   def rm = _clean_const_mul_expr(right)
-   if rm.len > 0 && _clean_same_expr_text(rm.get("value", ""), left) {
-      return _clean_const_mul_text(int(rm.get("factor", 0)) + 1, left)
-   }
-   if lm.len > 0 && rm.len > 0 && _clean_same_expr_text(lm.get("value", ""), rm.get("value", "")) {
-      return _clean_const_mul_text(int(lm.get("factor", 0)) + int(rm.get("factor", 0)), lm.get("value", ""))
-   }
-   ""
-}
-
-fn _clean_sub_mod_expr(str left0, str right0) str {
-   def left = _clean_strip_outer_parens(left0)
-   def rm = _clean_const_mul_expr(right0)
-   if rm.len == 0 { return "" }
-   def q = _clean_div_expr_parts(rm.get("value", ""))
-   if q.len == 0 { return "" }
-   def div = int(q.get("divisor", 0))
-   if div <= 1 || int(rm.get("factor", 0)) != div { return "" }
-   if !_clean_same_expr_text(left, q.get("base", "")) { return "" }
-   left + " % " + to_str(div)
-}
-
-fn _clean_mba_same_expr(str a0, str b0) bool {
-   _clean_strip_outer_balanced_parens(a0) == _clean_strip_outer_balanced_parens(b0)
-}
-
-fn _clean_mba_pair_expr(str expr0, str sym) dict {
-   def expr = _clean_strip_outer_balanced_parens(expr0)
-   def op = " " + sym + " "
-   def p = _clean_top_level_find(expr, op)
-   if p < 0 { return dict() }
-   def left = _clean_strip_outer_balanced_parens(slice(expr, 0, p, 1))
-   def right = _clean_strip_outer_balanced_parens(slice(expr, p + op.len, expr.len, 1))
-   if left.len == 0 || right.len == 0 { return dict() }
-   {"left": left, "right": right, "op": sym}
-}
-
-fn _clean_mba_const_mul_expr(str expr0) dict {
-   def expr = _clean_strip_outer_balanced_parens(expr0)
-   def p = _clean_top_level_find(expr, " * ")
-   if p < 0 { return dict() }
-   def left = _clean_strip_outer_balanced_parens(slice(expr, 0, p, 1))
-   def right = _clean_strip_outer_balanced_parens(slice(expr, p + 3, expr.len, 1))
-   def lv = _clean_literal_int_value(left)
-   if lv.get("ok", false) { return {"factor": int(lv.get("value", 0)), "value": right} }
-   def rv = _clean_literal_int_value(right)
-   if rv.get("ok", false) { return {"factor": int(rv.get("value", 0)), "value": left} }
-   dict()
-}
-
-fn _clean_mba_scaled_pair_expr(str expr0, str sym, int factor) dict {
-   def mul = _clean_mba_const_mul_expr(expr0)
-   if mul.len == 0 || int(mul.get("factor", 0)) != factor { return dict() }
-   _clean_mba_pair_expr(mul.get("value", ""), sym)
-}
-
-fn _clean_mba_pair_same_unordered(dict a, dict b) bool {
-   if a.len == 0 || b.len == 0 { return false }
-   (_clean_mba_same_expr(a.get("left", ""), b.get("left", "")) &&
-   _clean_mba_same_expr(a.get("right", ""), b.get("right", ""))) ||
-   (_clean_mba_same_expr(a.get("left", ""), b.get("right", "")) &&
-   _clean_mba_same_expr(a.get("right", ""), b.get("left", "")))
-}
-
-fn _clean_mba_pair_sum(dict pair) str {
-   _clean_paren(pair.get("left", "")) + " + " + _clean_paren(pair.get("right", ""))
-}
-
-fn _clean_mba_pair_xor(dict pair) str {
-   _clean_paren(pair.get("left", "")) + " ^^ " + _clean_paren(pair.get("right", ""))
-}
-
-fn _clean_mba_xor_pair_expr(str expr0) dict {
-   _clean_mba_pair_expr(expr0, "^^")
-}
-
-fn _clean_mba_add_expr(str left0, str right0) str {
-   def lx = _clean_mba_xor_pair_expr(left0)
-   def r2a = _clean_mba_scaled_pair_expr(right0, "&", 2)
-   if _clean_mba_pair_same_unordered(lx, r2a) { return _clean_mba_pair_sum(lx) }
-   def l2a = _clean_mba_scaled_pair_expr(left0, "&", 2)
-   def rx = _clean_mba_xor_pair_expr(right0)
-   if _clean_mba_pair_same_unordered(l2a, rx) { return _clean_mba_pair_sum(rx) }
-   def lo = _clean_mba_pair_expr(left0, "|")
-   def ra = _clean_mba_pair_expr(right0, "&")
-   if _clean_mba_pair_same_unordered(lo, ra) { return _clean_mba_pair_sum(lo) }
-   def la = _clean_mba_pair_expr(left0, "&")
-   def ro = _clean_mba_pair_expr(right0, "|")
-   if _clean_mba_pair_same_unordered(la, ro) { return _clean_mba_pair_sum(ro) }
-   ""
-}
-
-fn _clean_mba_sub_expr(str left0, str right0) str {
-   def lo = _clean_mba_pair_expr(left0, "|")
-   def ra = _clean_mba_pair_expr(right0, "&")
-   if _clean_mba_pair_same_unordered(lo, ra) { return _clean_mba_pair_xor(lo) }
-   def lp = _clean_mba_pair_expr(left0, "+")
-   def r2a = _clean_mba_scaled_pair_expr(right0, "&", 2)
-   if _clean_mba_pair_same_unordered(lp, r2a) { return _clean_mba_pair_xor(lp) }
-   ""
-}
-
-fn _clean_mba_expr_once(str expr0) str {
-   def expr = _clean_strip_outer_balanced_parens(expr0)
-   def plus = _clean_top_level_find(expr, " + ")
-   if plus > 0 {
-      def add = _clean_mba_add_expr(slice(expr, 0, plus, 1), slice(expr, plus + 3, expr.len, 1))
-      if add.len > 0 { return add }
-   }
-   def minus = _clean_top_level_find(expr, " - ")
-   if minus > 0 {
-      def sub = _clean_mba_sub_expr(slice(expr, 0, minus, 1), slice(expr, minus + 3, expr.len, 1))
-      if sub.len > 0 { return sub }
-   }
-   ""
-}
-
-fn _clean_simplify_mba_expr(str expr0) str {
-   def raw = str.strip(expr0)
-   def expr = _clean_strip_outer_balanced_parens(raw)
-   def cmps = [" == ", " != ", " <= ", " >= ", " < ", " > "]
-   mut i = 0
-   while i < cmps.len {
-      def cmp = cmps[i]
-      def p = _clean_top_level_find(expr, cmp)
-      if p > 0 {
-         def raw_lhs = str.strip(slice(expr, 0, p, 1))
-         def raw_rhs = str.strip(slice(expr, p + cmp.len, expr.len, 1))
-         def lhs = _clean_simplify_mba_expr(raw_lhs)
-         def rhs = _clean_simplify_mba_expr(raw_rhs)
-         if lhs != raw_lhs || rhs != raw_rhs { return lhs + cmp + rhs }
-         return raw
-      }
-      i += 1
-   }
-   def direct = _clean_mba_expr_once(expr)
-   direct.len > 0 ? direct : raw
-}
-
-fn _clean_binary_expr(str left0, str sym, str right0) str {
-   def left = str.strip(left0)
-   def right = str.strip(right0)
-   if sym == "+" {
-      if _clean_literal_zero(left) { return right }
-      if _clean_literal_zero(right) { return left }
-      def mba_add = _clean_mba_add_expr(left, right)
-      if mba_add.len > 0 { return mba_add }
-      def scaled = _clean_add_scaled_expr(left, right)
-      if scaled.len > 0 { return scaled }
-   }
-   if sym == "-" {
-      if _clean_literal_zero(right) { return left }
-      def mba_sub = _clean_mba_sub_expr(left, right)
-      if mba_sub.len > 0 { return mba_sub }
-      def modded = _clean_sub_mod_expr(left, right)
-      if modded.len > 0 { return modded }
-   }
-   if sym == "*" {
-      if _clean_literal_one(left) { return right }
-      if _clean_literal_one(right) { return left }
-      if _clean_literal_zero(left) || _clean_literal_zero(right) { return "0" }
-   }
-   _clean_paren(left) + " " + _ny_infix_operator(sym) + " " + _clean_paren(right)
-}
-
 fn _clean_saved_param_alias_before(list rows, int before_idx, str family, str reg0) str {
    def reg = _canonical_value_reg(family, reg0)
    if reg.len == 0 || !_callee_saved_value_reg(family, reg) { return "" }
@@ -11761,14 +11527,6 @@ fn _clean_test_expr(str lhs, str rhs, str cond, str op) str {
    }
    if cond == "negative" || cond == "non_negative" { return texpr + " " + op }
    texpr + " " + op
-}
-
-fn _clean_strip_outer_parens(str expr) str {
-   def e = str.strip(expr)
-   if e.len > 1 && load8(e, 0) == 40 && load8(e, e.len - 1) == 41 {
-      return str.strip(slice(e, 1, e.len - 1, 1))
-   }
-   e
 }
 
 fn _clean_xor_one_base(str expr) str {

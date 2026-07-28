@@ -80,6 +80,14 @@ fn _clean_strip_outer_balanced_parens(str expr0) str {
    expr
 }
 
+fn _clean_strip_outer_parens(str expr) str {
+   def clean = str.strip(expr)
+   if clean.len > 1 && load8(clean, 0) == 40 && load8(clean, clean.len - 1) == 41 {
+      return str.strip(slice(clean, 1, clean.len - 1, 1))
+   }
+   clean
+}
+
 fn _clean_top_level_find(str expr, str needle) int {
    if needle.len == 0 || expr.len < needle.len { return -1 }
    mut depth = 0
@@ -176,6 +184,7 @@ fn _clean_literal_int_value(str raw) dict {
 
 #main {
    assert(_clean_strip_outer_balanced_parens("((item))") == "item", "outer parentheses")
+   assert(_clean_strip_outer_parens("(item)") == "item", "single outer parentheses")
    assert(_clean_balanced_delimiters("fn(\"[ok]\")"), "quoted delimiters")
    assert(!_clean_balanced_delimiters("fn([)"), "unbalanced delimiters")
    assert(_clean_top_level_find("call(a + b) + c", " + ") == 11, "top-level find")
