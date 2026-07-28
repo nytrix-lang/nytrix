@@ -2645,10 +2645,10 @@ def run_web_demos(build_root: Path, kind: str, args: list[str]) -> int:
     return 0
 
 def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
-    """Build the WebGL2 runner and prove that the unchanged Pong demo starts."""
+    """Build browser outputs and prove packaged Pong starts with WebGL2 assets."""
     if args and args[0] in ("-h", "--help"):
         print("Usage: ./make web-test")
-        print("Builds the demo runner, serves it locally, and checks Pong in headless Chromium.")
+        print("Builds the demo runner and deployable Pong app, then checks WebGL2 assets in headless Chromium.")
         return 0
     if args:
         raise SystemExit("web-test: no options supported")
@@ -2658,11 +2658,15 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     out_dir = build_root / "web-test"
     if run_web_demos(build_root, kind, ["--out", str(out_dir), "--clean", "--require-ny-wasm"]) != 0:
         return 1
+    app_dir = build_root / "web-test-app"
+    if run_web(build_root, kind, ["etc/projects/ui/pong.ny", "--out", str(app_dir),
+                                  "--assets", "etc/assets"]) != 0:
+        return 1
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         port = int(probe.getsockname()[1])
     server = subprocess.Popen(
-        [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(out_dir)],
+        [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(app_dir)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:
@@ -2670,7 +2674,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         result = subprocess.run([
             browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
             "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
-            "--virtual-time-budget=4000", "--dump-dom", f"http://127.0.0.1:{port}/index.html#ui-pong",
+            "--virtual-time-budget=5000", "--dump-dom", f"http://127.0.0.1:{port}/index.html#app",
         ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
     except subprocess.TimeoutExpired:
         raise SystemExit("web-test: Chromium timed out")
@@ -2685,12 +2689,13 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     rejected = ("runtime error", "Load failed", "unsupported import", "WebGL2 missing")
     presented = re.search(r'data-presented="[1-9][0-9]*"', dom) is not None
     visible = 'data-frame-pixels="1"' in dom
-    if result.returncode != 0 or not presented or not visible or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
+    assets_loaded = re.search(r'data-assets-loaded="[1-9][0-9]*"', dom) is not None
+    if result.returncode != 0 or not presented or not visible or not assets_loaded or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
         output = _tail_text(dom, 3000)
         if output:
             print(output)
-        raise SystemExit("web-test: Pong did not reach the WebGL2 browser runnable state")
-    ok("web-test: Pong reached WebGL2 browser runnable state")
+        raise SystemExit("web-test: packaged Pong did not reach the WebGL2 browser runnable state")
+    ok("web-test: packaged Pong reached WebGL2 with loaded assets")
     return 0
 
 def print_wasm_help() -> None:
@@ -3060,22 +3065,36 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
             raise SystemExit("web: " + str(async_res.get("detail", "asyncify failed")))
     _copy_web_runner_assets(out_dir)
     packaged_assets: list[dict[str, str]] = []
+    source_text = source.read_text(encoding="utf-8", errors="replace")
+    asset_literals = set(re.findall(r'["\']([^"\']+)["\']', source_text))
+    selected_assets: set[Path] = set()
     for raw in cfg["assets"]:
         assert isinstance(raw, Path)
         src = _resolve_wasm_path(raw)
         if not src.is_dir():
             raise SystemExit("web: asset root is not a directory: " + _rel_or_abs(src))
+        matched = 0
+        for literal in asset_literals:
+            candidate = _resolve_wasm_path(Path(literal))
+            try:
+                candidate.relative_to(src)
+            except ValueError:
+                continue
+            if candidate.is_file():
+                selected_assets.add(candidate)
+                matched += 1
+        if not matched:
+            raise SystemExit("web: no source-referenced files under asset root: " + _rel_or_abs(src))
+    for src in sorted(selected_assets):
         try:
-            rel_root = src.relative_to(ROOT)
+            rel = src.relative_to(ROOT)
         except ValueError:
-            rel_root = Path("assets") / src.name
-        dst = out_dir / rel_root
-        if dst.exists():
-            raise SystemExit("web: duplicate packaged asset root: " + rel_root.as_posix())
-        shutil.copytree(src, dst)
-        for path in sorted(p for p in dst.rglob("*") if p.is_file()):
-            rel = path.relative_to(out_dir).as_posix()
-            packaged_assets.append({"path": rel, "url": rel})
+            rel = Path("assets") / src.name
+        dst = out_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        url = rel.as_posix()
+        packaged_assets.append({"path": url, "url": url})
     source_display = _rel_or_abs(source)
     demo = {"id": "app", "title": _demo_title_from_source(source_display),
             "area": "APP", "mode": "webgl", "source": source_display,
