@@ -220,6 +220,7 @@
     if (stage.width !== w) stage.width = w;
     if (stage.height !== h) stage.height = h;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = "#050708";
     ctx.fillRect(0, 0, w, h);
   }
@@ -234,16 +235,16 @@
     ctx.strokeStyle = "#1d1f24";
     ctx.strokeRect(96.5, 76.5, 1087, 567);
     ctx.fillStyle = "#edf2ef";
-    ctx.font = "650 30px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    ctx.font = "30px 'Nytrix Monocraft', ui-monospace, monospace";
     ctx.fillText(title, 132, 128);
     // branding
-    ctx.font = "700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    ctx.font = "12px 'Nytrix Monocraft', ui-monospace, monospace";
     ctx.textAlign = "right";
     ctx.fillStyle = "rgba(147, 160, 155, 0.35)";
     ctx.fillText("NYTRIX", 1184, 114);
     ctx.textAlign = "left";
     // lines
-    ctx.font = "15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    ctx.font = "15px 'Nytrix Monocraft', ui-monospace, monospace";
     ctx.fillStyle = "#8a9691";
     lines.forEach((line, i) => ctx.fillText(String(line), 132, 180 + i * 26));
     present();
@@ -280,15 +281,15 @@
     ctx.strokeStyle = "#1d1f24";
     ctx.strokeRect(96.5, 76.5, 1087, 567);
     ctx.fillStyle = "#edf2ef";
-    ctx.font = "650 25px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    ctx.font = "25px 'Nytrix Monocraft', ui-monospace, monospace";
     ctx.fillText(title, 132, 126);
     // branding
-    ctx.font = "700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    ctx.font = "12px 'Nytrix Monocraft', ui-monospace, monospace";
     ctx.textAlign = "right";
     ctx.fillStyle = "rgba(147, 160, 155, 0.35)";
     ctx.fillText("NYTRIX", 1184, 114);
     ctx.textAlign = "left";
-    ctx.font = "13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    ctx.font = "13px 'Nytrix Monocraft', ui-monospace, monospace";
     ctx.fillStyle = "#93a09b";
     const visible = [];
     for (const line of outputLines) {
@@ -310,17 +311,46 @@
     assetFonts = new Map();
     loadedAssetCount = 0;
     const assets = Array.isArray(meta.assets) ? meta.assets : [];
+    const sha256 = async (bytes) => {
+      if (!window.crypto || !window.crypto.subtle) return "";
+      const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+      return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+    };
+    const pack = meta.assetPack && typeof meta.assetPack === "object" ? meta.assetPack : null;
+    let packedBytes = null;
+    if (pack && typeof pack.url === "string") {
+      const response = await fetch(pack.url);
+      if (!response.ok) throw new Error(`${meta.id}: asset pack fetch failed (${response.status})`);
+      packedBytes = new Uint8Array(await response.arrayBuffer());
+      if (Number.isFinite(pack.bytes) && packedBytes.byteLength !== Number(pack.bytes)) {
+        throw new Error(`${meta.id}: asset pack size mismatch`);
+      }
+    }
     for (const item of assets) {
       const path = typeof item === "string" ? item : String(item && item.path || "");
-      const url = typeof item === "string" ? item : String(item && item.url || path);
-      if (!path || !url) continue;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`${meta.id}: asset fetch failed (${response.status}) ${path}`);
-      const bytes = await response.arrayBuffer();
+      if (!path) continue;
+      let bytes;
+      if (packedBytes && item && typeof item === "object" && Number.isInteger(item.offset) && Number.isInteger(item.size)) {
+        const offset = Number(item.offset);
+        const size = Number(item.size);
+        if (offset < 0 || size < 0 || offset + size > packedBytes.byteLength) {
+          throw new Error(`${meta.id}: invalid packed asset range for ${path}`);
+        }
+        bytes = packedBytes.slice(offset, offset + size);
+      } else {
+        const url = typeof item === "string" ? item : String(item && item.url || path);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`${meta.id}: asset fetch failed (${response.status}) ${path}`);
+        bytes = new Uint8Array(await response.arrayBuffer());
+      }
+      if (item && typeof item === "object" && typeof item.sha256 === "string") {
+        const digest = await sha256(bytes);
+        if (digest && digest !== item.sha256) throw new Error(`${meta.id}: asset hash mismatch for ${path}`);
+      }
       loadedAssetCount++;
       if (/\.(ttf|otf|woff2?)$/i.test(path) && typeof FontFace !== "undefined") {
         const family = `ny-${nextFontId++}`;
-        const face = new FontFace(family, bytes);
+        const face = new FontFace(family, bytes.buffer);
         await face.load();
         document.fonts.add(face);
         assetFonts.set(path, { family, size: 0 });
@@ -416,14 +446,17 @@
     tex = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    /* The stage contains UI, pixel art, and bitmap fonts. Filtering this
+       final blit changes authored pixels, so scale it exactly. */
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     const texLoc = gl.getUniformLocation(program, "tex");
     if (texLoc) gl.uniform1i(texLoc, 0);
     setStatus("webglStatus", "WebGL2", "ready");
+    canvas.dataset.presentFilter = "nearest";
     fitCanvas();
     return true;
   }
@@ -431,10 +464,13 @@
   function present() {
     setStageMode("web");
     if (!ctx) return;
-    canvas.style.backgroundImage = `url("${stage.toDataURL("image/png")}")`;
-    canvas.style.backgroundSize = "100% 100%";
-    canvas.style.backgroundRepeat = "no-repeat";
-    if (!gl || gl.isContextLost()) return;
+    if (!gl || gl.isContextLost()) {
+      canvas.style.backgroundImage = `url("${stage.toDataURL("image/png")}")`;
+      canvas.style.backgroundSize = "100% 100%";
+      canvas.style.backgroundRepeat = "no-repeat";
+      return;
+    }
+    canvas.style.backgroundImage = "none";
     fitCanvas();
     try {
       gl.useProgram(program);
@@ -686,7 +722,7 @@
       ny_web_text: (ptr, len, x, y, size, color) => {
         frameTouched = true;
         ctx.fillStyle = rgba(color);
-        ctx.font = `${Math.max(8, Number(size) || 14)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+        ctx.font = `${Math.max(8, Math.round(Number(size) || 14))}px 'Nytrix Monocraft', ui-monospace, monospace`;
         ctx.textBaseline = "top";
         ctx.fillText(ny.text(memoryRef, ptr, len), Number(x), Number(y));
         return 0n;
@@ -772,9 +808,10 @@
         frameTouched = true;
         ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
         const font = assetFonts.get(ny.int(fontId));
-        ctx.font = font ? `${font.size}px "${font.family}", monospace` : "35px ui-monospace, monospace";
+        const size = font ? Math.max(1, Math.round(font.size)) : 35;
+        ctx.font = font ? `${size}px "${font.family}", monospace` : "35px 'Nytrix Monocraft', ui-monospace, monospace";
         ctx.textBaseline = "top";
-        ctx.fillText(ny.text(memoryRef, text, 0), x, y);
+        ctx.fillText(ny.text(memoryRef, text, 0), Math.round(x), Math.round(y));
         return 0n;
       },
       "std.os.ui.render.end_frame": () => {

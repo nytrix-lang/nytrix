@@ -226,11 +226,25 @@ exports `ny_web_frame` or `ny_web_render`, which the runner calls from its
 browser frame callback.
 
 Use `--assets` to package and preload the files referenced by string literals in
-the source under that directory. Repository-relative paths are retained, so a
-program that refers to `etc/assets/fonts/name.ttf` can use
-`--assets etc/assets`; preloaded TTF, OTF, WOFF, and WOFF2 fonts are available
-to browser text drawing. This avoids shipping an unrelated asset tree and
-blocking startup on unnecessary fetches.
+the source under that directory. The build writes a deterministic
+`assets.data` blob and `assets.data.json` index (logical path, aligned offset,
+size, and SHA-256) rather than scattering selected files through output.
+Repository-relative paths are retained, so a program that refers to
+`etc/assets/fonts/name.ttf` can use `--assets etc/assets`; preloaded TTF, OTF,
+WOFF, and WOFF2 fonts are available to browser text drawing. This is an
+Emscripten-style data pack for the implemented browser runner; it is not a
+claim of general synchronous POSIX filesystem support inside Wasm.
+
+The browser stage uses nearest-neighbour WebGL sampling and disables Canvas2D
+image smoothing. This preserves pixel-art and bitmap-font pixels at the final
+present step. Text positions and requested font sizes are snapped to whole
+stage pixels; a future direct WebGL glyph-atlas path is still needed for a
+fully renderer-native text pipeline.
+
+Every deployable browser output also packages `assets/monocraft.ttf` for the
+runner UI and its Canvas fallback text. It uses the same Monocraft face with a
+readable monospace fallback, so local browser font installation never changes
+the tool's layout.
 
 Check that a Ny source uses only browser-hosted APIs, then run the maintained
 Pong WebGL2 smoke test in headless Chromium. The smoke test also proves that a

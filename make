@@ -2136,6 +2136,9 @@ WEB_DEMO_SHARED_ASSETS = (
     "logo.svg",
     "favicon.svg",
 )
+WEB_DEMO_FONT_ASSETS = (
+    (ROOT / "etc" / "assets" / "fonts" / "monocraft.ttf", Path("assets") / "monocraft.ttf"),
+)
 WEB_WASM_BARE_TARGET = {
     "kind": "wasm-bare",
     "host": "browser",
@@ -2715,6 +2718,10 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     if run_web(build_root, kind, ["etc/projects/ui/pong.ny", "--out", str(app_dir),
                                   "--assets", "etc/assets"]) != 0:
         return 1
+    if not (app_dir / "assets" / "monocraft.ttf").is_file():
+        raise SystemExit("web-test: runner did not package its declared Monocraft font")
+    if not (app_dir / "assets.data").is_file() or not (app_dir / "assets.data.json").is_file():
+        raise SystemExit("web-test: browser assets were not packed into assets.data")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         port = int(probe.getsockname()[1])
@@ -2765,10 +2772,11 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     assets_loaded = re.search(r'data-assets-loaded="[1-9][0-9]*"', dom) is not None
     visible_document = 'data-visible="1"' in dom
     audio_state = re.search(r'data-audio-state="(ready|suspended|running)"', dom) is not None
+    nearest_present = 'data-present-filter="nearest"' in dom
     canvas_size = re.search(r'data-canvas-size="([0-9]+x[0-9]+)"', dom)
     framebuffer = re.search(r'data-framebuffer="([0-9]+x[0-9]+)"', dom)
     resized = canvas_size is not None and framebuffer is not None and canvas_size.group(1) == framebuffer.group(1)
-    if result.returncode != 0 or not presented or not visible or not assets_loaded or not visible_document or not audio_state or not resized or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
+    if result.returncode != 0 or not presented or not visible or not assets_loaded or not visible_document or not audio_state or not nearest_present or not resized or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
         output = _tail_text(dom, 3000)
         if output:
             print(output)
@@ -3149,6 +3157,12 @@ def _copy_web_runner_assets(out_dir: Path) -> None:
         if not src.exists():
             raise SystemExit(f"web: missing {src.relative_to(ROOT)}")
         shutil.copy2(src, out_dir / name)
+    for src, rel in WEB_DEMO_FONT_ASSETS:
+        if not src.exists():
+            raise SystemExit(f"web: missing {src.relative_to(ROOT)}")
+        dst = out_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
 
 def run_web(build_root: Path, kind: str, args: list[str]) -> int:
     """Build one portable Ny source into a deployable wasm-bare WebGL2 directory."""
@@ -3195,7 +3209,7 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
         if not bool(async_res.get("ok", False)):
             raise SystemExit("web: " + str(async_res.get("detail", "asyncify failed")))
     _copy_web_runner_assets(out_dir)
-    packaged_assets: list[dict[str, str]] = []
+    packaged_assets: list[dict[str, object]] = []
     source_text = source.read_text(encoding="utf-8", errors="replace")
     asset_literals = set(re.findall(r'["\']([^"\']+)["\']', source_text))
     selected_assets: set[Path] = set()
@@ -3216,33 +3230,47 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
                 matched += 1
         if not matched:
             raise SystemExit("web: no source-referenced files under asset root: " + _rel_or_abs(src))
+    asset_blob = bytearray()
     for src in sorted(selected_assets):
         try:
             rel = src.relative_to(ROOT)
         except ValueError:
             rel = Path("assets") / src.name
-        dst = out_dir / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        url = rel.as_posix()
-        packaged_assets.append({"path": url, "url": url})
+        while len(asset_blob) % 16:
+            asset_blob.append(0)
+        data = src.read_bytes()
+        offset = len(asset_blob)
+        asset_blob.extend(data)
+        packaged_assets.append({
+            "path": rel.as_posix(), "offset": offset, "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        })
+    asset_pack: dict[str, object] | None = None
+    if packaged_assets:
+        pack_path = out_dir / "assets.data"
+        pack_path.write_bytes(asset_blob)
+        asset_pack = {"format": "nytrix-web-data-v1", "url": "assets.data",
+                      "bytes": len(asset_blob), "assets": packaged_assets}
+        (out_dir / "assets.data.json").write_text(
+            json.dumps(asset_pack, indent=2) + "\n", encoding="utf-8")
     source_display = _rel_or_abs(source)
     demo = {"id": "app", "title": _demo_title_from_source(source_display),
             "area": "APP", "mode": "webgl", "source": source_display,
             "wasm": "app.wasm", "wasmKind": "ny", "asyncify": bool(cfg["asyncify"]),
-            "assets": packaged_assets}
+            "assets": packaged_assets, "assetPack": asset_pack}
     (out_dir / "demos-data.js").write_text("window.NYTRIX_WEB_DEMOS = " + json.dumps([demo], indent=2) + ";\n", encoding="utf-8")
     target = cfg["target"]
     assert isinstance(target, dict)
     report = {"source": source_display, "target": target,
               "capabilities": WEB_WASM_BARE_CAPABILITIES,
-              "wasm": "app.wasm", "imports": sorted(imports), "unsupported": [], "assets": packaged_assets,
+              "wasm": "app.wasm", "imports": sorted(imports), "unsupported": [], "assets": packaged_assets, "assetPack": asset_pack,
               "asyncify": bool(cfg["asyncify"]), "softDependencies": []}
     (out_dir / "web-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     build_manifest = {"source": source_display, "target": target,
                       "capabilities": WEB_WASM_BARE_CAPABILITIES, "artifact": "app.wasm",
                       "toolchain": {"clang": which("clang") or "", "wasmOpt": which("wasm-opt") or ""},
-                      "assets": packaged_assets, "softDependencies": [], "asyncify": bool(cfg["asyncify"])}
+                      "assets": packaged_assets, "assetPack": asset_pack,
+                      "softDependencies": [], "asyncify": bool(cfg["asyncify"])}
     (out_dir / "build-manifest.json").write_text(json.dumps(build_manifest, indent=2) + "\n", encoding="utf-8")
     ok("web: " + _rel_or_abs(out_dir / "index.html"))
     log("WEB", "report: " + _rel_or_abs(out_dir / "web-report.json"))
