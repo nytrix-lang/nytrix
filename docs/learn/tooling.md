@@ -232,6 +232,11 @@ Use `--assets` to package and preload the files referenced by string literals in
 the source under that directory. The build writes a deterministic
 `assets.data` blob and `assets.data.json` index (logical path, aligned offset,
 size, and SHA-256) rather than scattering selected files through output.
+Pass `--preload-all` with one or more `--assets` roots when a game loads assets
+indirectly or needs a complete bundle: every regular file below those roots is
+included in the same deterministic data pack. It fetches the complete pack but
+does not blindly activate every file as a font or other browser resource;
+source-referenced font assets keep their normal eager font registration.
 Repository-relative paths are retained, so a program that refers to
 `etc/assets/fonts/name.ttf` can use `--assets etc/assets`; preloaded TTF, OTF,
 WOFF, and WOFF2 fonts are available to browser text drawing. This is an

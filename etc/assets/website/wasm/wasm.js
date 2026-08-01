@@ -349,7 +349,7 @@
         if (digest && digest !== item.sha256) throw new Error(`${meta.id}: asset hash mismatch for ${path}`);
       }
       loadedAssetCount++;
-      if (/\.(ttf|otf|woff2?)$/i.test(path) && typeof FontFace !== "undefined") {
+      if (item && item.preload !== false && /\.(ttf|otf|woff2?)$/i.test(path) && typeof FontFace !== "undefined") {
         const family = `ny-${nextFontId++}`;
         const face = new FontFace(family, bytes.buffer);
         await face.load();

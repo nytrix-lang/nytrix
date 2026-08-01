@@ -2717,12 +2717,19 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: native process fixture unexpectedly passed browser portability analysis")
     app_dir = build_root / "web-test-app"
     if run_web(build_root, kind, ["etc/projects/ui/pong.ny", "--out", str(app_dir),
-                                  "--assets", "etc/assets"]) != 0:
+                                  "--assets", "etc/assets/fonts", "--preload-all"]) != 0:
         return 1
     if not (app_dir / "assets" / "monocraft.ttf").is_file():
         raise SystemExit("web-test: runner did not package its declared Monocraft font")
     if not (app_dir / "assets.data").is_file() or not (app_dir / "assets.data.json").is_file():
         raise SystemExit("web-test: browser assets were not packed into assets.data")
+    try:
+        asset_index = json.loads((app_dir / "assets.data.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("web-test: browser asset pack index is not valid JSON") from exc
+    expected_fonts = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "etc" / "assets" / "fonts").rglob("*") if path.is_file())
+    if sorted(item.get("path", "") for item in asset_index.get("assets", [])) != expected_fonts:
+        raise SystemExit("web-test: --preload-all did not package the complete asset root")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         port = int(probe.getsockname()[1])
@@ -3093,6 +3100,7 @@ def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
     source: Path | None = None
     out_dir: Path | None = None
     assets: list[Path] = []
+    preload_all = False
     asyncify = True
     target = "wasm-bare"
     timeout_sec = int((os.environ.get("NYTRIX_WASM_STEP_TIMEOUT") or "120").strip() or "120")
@@ -3119,6 +3127,10 @@ def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
             continue
         if a.startswith("--assets=") or a.startswith("--asset-root="):
             assets.append(Path(a.split("=", 1)[1]))
+            i += 1
+            continue
+        if a == "--preload-all":
+            preload_all = True
             i += 1
             continue
         if a == "--renderer":
@@ -3164,7 +3176,9 @@ def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
     if out_dir is None:
         out_dir = build_root / "web" / (source.stem or "app")
     out_dir = _resolve_wasm_path(out_dir)
-    return {"help": False, "source": source, "out": out_dir, "assets": assets,
+    if preload_all and not assets:
+        raise SystemExit("web: --preload-all requires at least one --assets directory")
+    return {"help": False, "source": source, "out": out_dir, "assets": assets, "preload_all": preload_all,
             "asyncify": asyncify, "timeout": max(1, timeout_sec),
             "target": _web_target_descriptor(target, "web")}
 
@@ -3182,6 +3196,7 @@ def print_web_help() -> None:
     print("  --out DIR            deployment output directory")
     print("  --renderer webgl2    required renderer target (default)")
     print("  --assets DIR         package an asset root under assets/ (repeatable)")
+    print("  --preload-all        package every regular file under each asset root")
     print("  --no-asyncify        only for exported ny_web_frame/ny_web_render callbacks")
     print("  --timeout SECONDS    per compiler/linker step limit")
 
@@ -3252,12 +3267,24 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
     source_text = source.read_text(encoding="utf-8", errors="replace")
     asset_literals = set(re.findall(r'["\']([^"\']+)["\']', source_text))
     selected_assets: set[Path] = set()
+    referenced_assets: set[Path] = set()
     for raw in cfg["assets"]:
         assert isinstance(raw, Path)
         src = _resolve_wasm_path(raw)
         if not src.is_dir():
             raise SystemExit("web: asset root is not a directory: " + _rel_or_abs(src))
         matched = 0
+        if bool(cfg["preload_all"]):
+            for candidate in src.rglob("*"):
+                if not candidate.is_file():
+                    continue
+                candidate = candidate.resolve()
+                try:
+                    candidate.relative_to(src)
+                except ValueError:
+                    continue
+                selected_assets.add(candidate)
+                matched += 1
         for literal in asset_literals:
             candidate = _resolve_wasm_path(Path(literal))
             try:
@@ -3266,9 +3293,11 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
                 continue
             if candidate.is_file():
                 selected_assets.add(candidate)
+                referenced_assets.add(candidate)
                 matched += 1
         if not matched:
-            raise SystemExit("web: no source-referenced files under asset root: " + _rel_or_abs(src))
+            qualifier = "files" if bool(cfg["preload_all"]) else "source-referenced files"
+            raise SystemExit("web: no " + qualifier + " under asset root: " + _rel_or_abs(src))
     asset_blob = bytearray()
     for src in sorted(selected_assets):
         try:
@@ -3282,7 +3311,7 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
         asset_blob.extend(data)
         packaged_assets.append({
             "path": rel.as_posix(), "offset": offset, "size": len(data),
-            "sha256": hashlib.sha256(data).hexdigest(),
+            "sha256": hashlib.sha256(data).hexdigest(), "preload": src in referenced_assets,
         })
     asset_pack: dict[str, object] | None = None
     if packaged_assets:
