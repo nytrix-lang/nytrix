@@ -23,7 +23,7 @@ int debug_enabled __attribute__((weak)) = 0;
 
 int64_t rt_globals_ptr = 1;
 
-/* LLVM-free native lowering uses these raw typed-buffer helpers directly.
+/* LLVM-free native lowering uses this raw typed-buffer allocator directly.
  * The public std.core.tbuf API returns the data pointer (metadata lives in the
  * preceding 16 bytes), so keep this ABI raw and independent of NyValue tags. */
 int64_t rt_native_tbuf_new(int64_t count, int64_t elem_size) {
@@ -40,27 +40,6 @@ int64_t rt_native_tbuf_new(int64_t count, int64_t elem_size) {
   memcpy(base, &count, sizeof(count));
   memcpy(base + 8, &elem_size, sizeof(elem_size));
   return (int64_t)(uintptr_t)(base + 16);
-}
-
-double rt_native_tbuf_load_f64(int64_t data, int64_t index) {
-  double value = 0.0;
-  if (!data || index < 0)
-    return value;
-  uintptr_t base = (uintptr_t)data;
-  if ((uint64_t)index > (UINTPTR_MAX - base) / sizeof(value))
-    return value;
-  memcpy(&value, (const void *)(base + (size_t)index * sizeof(value)), sizeof(value));
-  return value;
-}
-
-int64_t rt_native_tbuf_store_f64(int64_t data, int64_t index, double value) {
-  if (!data || index < 0)
-    return data;
-  uintptr_t base = (uintptr_t)data;
-  if ((uint64_t)index > (UINTPTR_MAX - base) / sizeof(value))
-    return data;
-  memcpy((void *)(base + (size_t)index * sizeof(value)), &value, sizeof(value));
-  return data;
 }
 
 int g_trace_requested = 0;
