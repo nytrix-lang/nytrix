@@ -114,6 +114,7 @@ typedef enum {
 #define NYIR_INST_F_RET_F64 2u
 #define NYIR_INST_F_RET_F32 4u
 #define NYIR_INST_F_SRET 8u
+#define NYIR_INST_F_MEM_F64 16u
 
 /* Packed NYIR_CALL aggregate-argument metadata. */
 #define NYIR_ARG_AGG_SIZE_MASK 0x00ffffffu

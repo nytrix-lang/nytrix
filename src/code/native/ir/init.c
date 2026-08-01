@@ -187,6 +187,7 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
   for (size_t i = 0; i < nyir->len; ++i) {
     const nyir_inst_t *in = &nyir->data[i];
     bool f64_result = nyir_op_f64(in->op) ||
+        (in->op == NYIR_LOAD_I64 && (in->flags & NYIR_INST_F_MEM_F64)) ||
         ((in->op == NYIR_CALL || in->op == NYIR_RET) &&
          (in->flags & NYIR_INST_F_RET_F64));
     bool f32_result = nyir_op_f32(in->op) ||
@@ -263,10 +264,14 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
         root_types[root] |= 16u;
     }
     if (in->c >= 0 && (size_t)in->c < map->value_count &&
-        (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32)) {
+        (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32 ||
+         (in->op == NYIR_STORE_I64 && (in->flags & NYIR_INST_F_MEM_F64)))) {
       size_t root = nyir_type_root(parents, (size_t)in->c);
       if (in->op == NYIR_VEC4_FMA_F64)
         root_types[root] |= 8u;
+      else if (in->op == NYIR_STORE_I64 &&
+               (in->flags & NYIR_INST_F_MEM_F64))
+        root_types[root] |= 1u;
       else
         root_types[root] |= 16u;
     }

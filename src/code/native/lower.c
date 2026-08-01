@@ -695,6 +695,14 @@ static int ny_native_nir_emit_add_i64(ny_native_nir_builder_t *b, int a,
 static int ny_native_nir_emit_load_i64(ny_native_nir_builder_t *b, int addr) {
   return ny_native_nir_push_val(b, NYIR_LOAD_I64, addr, -1, 0, NULL);
 }
+static int ny_native_nir_emit_load_f64(ny_native_nir_builder_t *b, int addr) {
+  int value = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_LOAD_I64,
+                                                .dst = -1, .a = addr, .b = -1,
+                                                .flags = NYIR_INST_F_MEM_F64});
+  if (value < 0)
+    ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+  return value;
+}
 static int ny_native_nir_emit_addr_local(ny_native_nir_builder_t *b, int slot,
                                          const char *symbol) {
   return ny_native_nir_push_val(b, NYIR_ADDR_LOCAL, -1, -1, slot, symbol);
@@ -709,6 +717,14 @@ static bool ny_native_nir_emit_store_i64(ny_native_nir_builder_t *b, int addr,
                                        .c = value});
   return b->nyir.len != before ||
          ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+}
+static bool ny_native_nir_emit_store_f64(ny_native_nir_builder_t *b, int addr,
+                                         int value) {
+  size_t before = b->nyir.len;
+  nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_STORE_I64,
+                                     .dst = -1, .a = addr, .b = -1, .c = value,
+                                     .flags = NYIR_INST_F_MEM_F64});
+  return b->nyir.len != before || ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
 }
 
 static int ny_native_nir_emit_runtime_call(ny_native_nir_builder_t *b,
@@ -2453,9 +2469,12 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
       }
       int data = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
       int index = ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
-      return data < 0 || index < 0 ? -1 :
-          ny_native_nir_emit_runtime_call(b, "rt_native_tbuf_load_f64", data,
-                                          index, -1, 2, NYIR_INST_F_RET_F64);
+      int width = ny_native_nir_emit_const(b, 8);
+      int offset = width < 0 ? -1 : ny_native_nir_push_val(b, NYIR_MUL_I64,
+                                                              index, width, 0, NULL);
+      int addr = offset < 0 ? -1 : ny_native_nir_emit_add_i64(b, data, offset);
+      return data < 0 || index < 0 || addr < 0 ? -1 :
+          ny_native_nir_emit_load_f64(b, addr);
     }
     if (leaf && strcmp(leaf, "f64buf_store") == 0) {
       if (e->as.call.args.len != 3 || e->as.call.args.data[0].name ||
@@ -2466,9 +2485,12 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
       int data = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
       int index = ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
       int value = ny_native_nir_lower_expr(b, e->as.call.args.data[2].val);
-      return data < 0 || index < 0 || value < 0 ? -1 :
-          ny_native_nir_emit_runtime_call(b, "rt_native_tbuf_store_f64", data,
-                                          index, value, 3, 0);
+      int width = ny_native_nir_emit_const(b, 8);
+      int offset = width < 0 ? -1 : ny_native_nir_push_val(b, NYIR_MUL_I64,
+                                                              index, width, 0, NULL);
+      int addr = offset < 0 ? -1 : ny_native_nir_emit_add_i64(b, data, offset);
+      return data < 0 || index < 0 || value < 0 || addr < 0 ? -1 :
+          (ny_native_nir_emit_store_f64(b, addr, value) ? value : -1);
     }
     if (leaf && (strcmp(leaf, "load64_i") == 0 ||
                  strcmp(leaf, "load64_h") == 0 ||

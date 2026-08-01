@@ -2340,17 +2340,16 @@ static bool ny_x64_mach_scalar_supported(const ny_mach_func_t *mach,
       if ((!ny_x64_mach_is_i64(mach, &in->dst) &&
            !ny_x64_mach_is_float(mach, &in->dst)) ||
           (in->src0.kind != NY_MACH_OPERAND_FRAME &&
-           (!ny_x64_mach_is_i64(mach, &in->dst) ||
-            !ny_x64_mach_is_ptr(mach, &in->src0))))
+           !ny_x64_mach_is_ptr(mach, &in->src0) &&
+           !ny_x64_mach_is_i64(mach, &in->src0)))
         return false;
       break;
     case NY_MACH_STORE:
       if ((in->dst.kind != NY_MACH_OPERAND_FRAME &&
-           !ny_x64_mach_is_ptr(mach, &in->dst)) ||
+           !ny_x64_mach_is_ptr(mach, &in->dst) &&
+           !ny_x64_mach_is_i64(mach, &in->dst)) ||
           (!ny_x64_mach_is_i64(mach, &in->src0) &&
-           !ny_x64_mach_is_float(mach, &in->src0)) ||
-          (ny_x64_mach_is_float(mach, &in->src0) &&
-           in->dst.kind != NY_MACH_OPERAND_FRAME))
+           !ny_x64_mach_is_float(mach, &in->src0)))
         return false;
       break;
     case NY_MACH_ADD: case NY_MACH_SUB: case NY_MACH_MUL: case NY_MACH_DIV:
@@ -2584,7 +2583,9 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
       case NY_MACH_LOAD:
         if (ny_x64_mach_is_float(mach, &in->dst)) {
           const char *move = ny_x64_mach_is_f32(mach, &in->dst) ? "movss" : "movsd";
-          if (!ny_native_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t%%xmm0, -%d(%%rbp)\n", move, a, move, dst)) return false;
+          if (in->src0.kind == NY_MACH_OPERAND_FRAME) {
+            if (!ny_native_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t%%xmm0, -%d(%%rbp)\n", move, a, move, dst)) return false;
+          } else if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n\t%s\t(%%rax), %%xmm0\n\t%s\t%%xmm0, -%d(%%rbp)\n", a, move, move, dst)) return false;
           break;
         }
         if (in->src0.kind == NY_MACH_OPERAND_FRAME) {
@@ -2597,7 +2598,9 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
       case NY_MACH_STORE:
         if (ny_x64_mach_is_float(mach, &in->src0)) {
           const char *move = ny_x64_mach_is_f32(mach, &in->src0) ? "movss" : "movsd";
-          if (!ny_native_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t%%xmm0, -%d(%%rbp)\n", move, a, move, dst)) return false;
+          if (in->dst.kind == NY_MACH_OPERAND_FRAME) {
+            if (!ny_native_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t%%xmm0, -%d(%%rbp)\n", move, a, move, dst)) return false;
+          } else if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n\tmovq\t-%d(%%rbp), %%rcx\n\t%s\t(%%rax), %%xmm0\n\t%s\t%%xmm0, (%%rcx)\n", a, dst, move, move)) return false;
           break;
         }
         if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n", a)) return false;

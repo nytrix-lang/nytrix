@@ -1757,6 +1757,17 @@ static bool a64_is_v128(const ny_mach_func_t *mach,
   return a64_mach_type_v128(a64_operand_type(mach, op));
 }
 
+static bool a64_is_f32(const ny_mach_func_t *mach,
+                       const ny_mach_operand_t *op) {
+  return a64_operand_type(mach, op) == NY_MACH_TYPE_F32;
+}
+
+static bool a64_is_float(const ny_mach_func_t *mach,
+                         const ny_mach_operand_t *op) {
+  ny_mach_type_t type = a64_operand_type(mach, op);
+  return type == NY_MACH_TYPE_F32 || type == NY_MACH_TYPE_F64;
+}
+
 static bool a64_frame_addr(ny_obj_buf_t *code, unsigned reg, int off) {
   if (!code || reg > 30 || off < -4095 || off > 4095)
     return false;
@@ -1871,6 +1882,17 @@ static bool a64_ldr_fp_base(ny_obj_buf_t *code, bool f32, unsigned reg,
       off / (int)scale > 4095)
     return false;
   uint32_t op = f32 ? 0xBD400000u : 0xFD400000u;
+  return a64_u32(code, op | ((uint32_t)(off / (int)scale) << 10) |
+                           (base << 5) | reg);
+}
+
+static bool a64_str_fp_base(ny_obj_buf_t *code, bool f32, unsigned reg,
+                            unsigned base, int off) {
+  unsigned scale = f32 ? 4u : 8u;
+  if (reg > 31 || base > 31 || off < 0 || off % (int)scale ||
+      off / (int)scale > 4095)
+    return false;
+  uint32_t op = f32 ? 0xBD000000u : 0xFD000000u;
   return a64_u32(code, op | ((uint32_t)(off / (int)scale) << 10) |
                            (base << 5) | reg);
 }
@@ -2144,9 +2166,23 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
             goto fail;
           break;
         }
-        if (in->src0.kind != NY_MACH_OPERAND_FRAME) goto fail;
-        if (!a64_ldur_x(code, 0, a) || !a64_stur_x(code, 0, dst))
-          goto fail;
+        if (a64_is_float(mach, &in->dst)) {
+          bool f32 = a64_is_f32(mach, &in->dst);
+          if (in->src0.kind == NY_MACH_OPERAND_FRAME) {
+            if (!a64_ldur_fp(code, f32, 0, a) || !a64_stur_fp(code, f32, 0, dst))
+              goto fail;
+          } else if (in->src0.kind == NY_MACH_OPERAND_VREG) {
+            if (!a64_ldur_x(code, 0, a) || !a64_ldr_fp_base(code, f32, 0, 0, 0) ||
+                !a64_stur_fp(code, f32, 0, dst))
+              goto fail;
+          } else {
+            goto fail;
+          }
+        } else {
+          if (in->src0.kind != NY_MACH_OPERAND_FRAME) goto fail;
+          if (!a64_ldur_x(code, 0, a) || !a64_stur_x(code, 0, dst))
+            goto fail;
+        }
         break;
       case NY_MACH_STORE:
         if (a64_is_v128(mach, &in->src0)) {
@@ -2163,9 +2199,23 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
           }
           break;
         }
-        if (in->dst.kind != NY_MACH_OPERAND_FRAME) goto fail;
-        if (!a64_ldur_x(code, 0, a) || !a64_stur_x(code, 0, dst))
-          goto fail;
+        if (a64_is_float(mach, &in->src0)) {
+          bool f32 = a64_is_f32(mach, &in->src0);
+          if (in->dst.kind == NY_MACH_OPERAND_FRAME) {
+            if (!a64_ldur_fp(code, f32, 0, a) || !a64_stur_fp(code, f32, 0, dst))
+              goto fail;
+          } else if (in->dst.kind == NY_MACH_OPERAND_VREG) {
+            if (!a64_ldur_x(code, 1, dst) || !a64_ldur_fp(code, f32, 0, a) ||
+                !a64_str_fp_base(code, f32, 0, 1, 0))
+              goto fail;
+          } else {
+            goto fail;
+          }
+        } else {
+          if (in->dst.kind != NY_MACH_OPERAND_FRAME) goto fail;
+          if (!a64_ldur_x(code, 0, a) || !a64_stur_x(code, 0, dst))
+            goto fail;
+        }
         break;
       case NY_MACH_ADD:
       case NY_MACH_SUB:

@@ -59,6 +59,10 @@ static bool nir_flags_valid(const nyir_inst_t *in) {
   case NYIR_RET:
     allowed = NYIR_INST_F_RET_F64 | NYIR_INST_F_RET_F32;
     break;
+  case NYIR_LOAD_I64:
+  case NYIR_STORE_I64:
+    allowed = NYIR_INST_F_MEM_F64;
+    break;
   default:
     return in->flags == 0;
   }

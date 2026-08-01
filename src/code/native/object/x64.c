@@ -751,6 +751,11 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
           if (in->dst.kind == NY_MACH_OPERAND_FRAME) {
             if (!mach_load_xmm0(e, a, f32) || !mach_store_xmm0(e, dst, f32))
               return false;
+          } else if (in->dst.kind == NY_MACH_OPERAND_VREG) {
+            if (!mach_load_rcx(e, dst) || !mach_load_xmm0(e, a, f32) ||
+                !mach_u8(e, f32 ? 0xf3 : 0xf2) || !mach_u8(e, 0x0f) ||
+                !mach_u8(e, 0x11) || !mach_u8(e, 0x01))
+              return false;
           } else
             return mach_err(e, "x64 machine form encode: float store to ptr");
           break;
