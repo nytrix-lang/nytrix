@@ -212,8 +212,13 @@ decode/playback and sound-instance state have real browser coverage; this is
 not a claim that every desktop sound backend or synchronous file decoder is
 portable yet.
 Filesystem, network, threads, native windows, Vulkan, touch/gamepad queries,
-fullscreen, and pointer lock remain explicitly unsupported; they are not host
-fallbacks.
+and persistence remain explicitly unsupported; they are not host fallbacks.
+The normal window facade does expose browser fullscreen and input-exclusive
+requests. Those requests return the current browser state, never an optimistic
+success value: query again after the browser's `fullscreenchange` or
+`pointerlockchange` event. The manifest records them as `fullscreenRequest`
+and `pointerLockRequest`, while `fullscreen` and `pointerLock` remain false
+until the facade has an event/result API and interaction coverage.
 
 `web` keeps Asyncify enabled for ordinary `main`-style games so they cannot
 block the browser event loop. `--no-asyncify` is accepted only when the module

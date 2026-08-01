@@ -2148,7 +2148,9 @@ WEB_WASM_BARE_CAPABILITIES = {
     "frameLoop": True,
     "assetPreload": True,
     "fullscreen": False,
+    "fullscreenRequest": True,
     "pointerLock": False,
+    "pointerLockRequest": True,
     "touch": False,
     "gamepad": False,
     "audio": False,
@@ -2746,6 +2748,16 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: audio check did not write a valid report") from exc
     if audio_data.get("ok") is not True or audio_data.get("unsupported") != []:
         raise SystemExit("web-test: browser audio lifecycle imports are not fully hosted")
+    requests = ROOT / "etc" / "tests" / "web" / "window-requests.ny"
+    if run_web_check(build_root, kind, [str(requests)]) != 0:
+        return 1
+    request_report = build_root / "web-check" / "window-requests.web-report.json"
+    try:
+        request_data = json.loads(request_report.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("web-test: browser window-request check did not write a valid report") from exc
+    if request_data.get("ok") is not True or request_data.get("unsupported") != []:
+        raise SystemExit("web-test: fullscreen/pointer-lock request imports are not fully hosted")
     required = ("id=\"webglStatus\">WebGL2", "browser runnable", "id=\"audioStatus\">")
     rejected = ("runtime error", "Load failed", "unsupported import", "WebGL2 missing")
     presented = re.search(r'data-presented="[1-9][0-9]*"', dom) is not None

@@ -159,6 +159,46 @@
     else refreshAudioStatus();
   }
 
+  function fullscreenActive() {
+    return document.fullscreenElement === canvas;
+  }
+
+  function pointerLockActive() {
+    return document.pointerLockElement === canvas;
+  }
+
+  function refreshBrowserRequestState() {
+    canvas.dataset.fullscreen = fullscreenActive() ? "1" : "0";
+    canvas.dataset.pointerLock = pointerLockActive() ? "1" : "0";
+  }
+
+  function requestFullscreen(enabled) {
+    if (enabled) {
+      if (!fullscreenActive() && typeof canvas.requestFullscreen === "function") {
+        canvas.requestFullscreen().catch(() => {}).finally(refreshBrowserRequestState);
+      }
+    } else if (document.fullscreenElement && typeof document.exitFullscreen === "function") {
+      document.exitFullscreen().catch(() => {}).finally(refreshBrowserRequestState);
+    }
+    refreshBrowserRequestState();
+    return fullscreenActive();
+  }
+
+  function requestPointerLock(enabled) {
+    if (enabled) {
+      if (!pointerLockActive() && typeof canvas.requestPointerLock === "function") {
+        try {
+          const pending = canvas.requestPointerLock();
+          if (pending && typeof pending.catch === "function") pending.catch(() => {}).finally(refreshBrowserRequestState);
+        } catch (_) {}
+      }
+    } else if (pointerLockActive() && typeof document.exitPointerLock === "function") {
+      document.exitPointerLock();
+    }
+    refreshBrowserRequestState();
+    return pointerLockActive();
+  }
+
   function runtimeModeText(runtime) {
     if (!runtime) return "initializing...";
     if (runtime.oneShot) return "native wasm";
@@ -678,6 +718,9 @@
     return {
       "std.os.ui.render.init_window": () => ny.tag(1),
       "std.os.ui.render.close_window": () => { asyncifyRef.closed = true; return NY_TRUE; },
+      "std.os.ui.window.set_window_fullscreen": (_win, enabled) => bool(requestFullscreen(ny.int(enabled) !== 0)),
+      "std.os.ui.window.is_window_fullscreen": () => bool(fullscreenActive()),
+      "std.os.ui.window.set_input_exclusive": (_win, enabled) => bool(requestPointerLock(ny.int(enabled) !== 0)),
       "std.os.ui.render.font_load_first": (paths, size = 0n) => {
         const count = ny.listLen(memoryRef, paths);
         for (let i = 0; i < count; i++) {
@@ -1157,6 +1200,8 @@
     canvas.dataset.visible = visible ? "1" : "0";
     if (!visible) clearInput();
   });
+  document.addEventListener("fullscreenchange", refreshBrowserRequestState);
+  document.addEventListener("pointerlockchange", refreshBrowserRequestState);
   canvas.dataset.visible = document.hidden ? "0" : "1";
   canvas.addEventListener("mousemove", (e) => { const r = canvas.getBoundingClientRect(); input.mouse = [e.clientX - r.left, e.clientY - r.top]; });
   canvas.addEventListener("mousedown", () => { input.down = true; resumeAudio(); });
@@ -1205,6 +1250,7 @@
   renderList();
   initGL();
   refreshAudioStatus();
+  refreshBrowserRequestState();
   selectDemo(window.location.hash.slice(1) || (demos[0] && demos[0].id), false);
   requestAnimationFrame(loop);
 })();
