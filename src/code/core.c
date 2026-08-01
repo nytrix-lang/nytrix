@@ -2551,11 +2551,15 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
   }
 
   if (cg->prog && cg->prog->body.len > 0) {
+    /* Source tokens keep the parser spelling (often repository-relative),
+     * while -g resolves debug_main_file to an absolute path.  Compilation
+     * ownership must use the parser spelling; using the debug path here made
+     * the top-level filter silently omit user functions in debug builds. */
     const char *root_file =
-        (cg->debug_main_file && *cg->debug_main_file) ? cg->debug_main_file
-                                                      : NULL;
-    if (!root_file && cg->source_main_file && *cg->source_main_file)
-      root_file = cg->source_main_file;
+        (cg->source_main_file && *cg->source_main_file) ? cg->source_main_file
+                                                         : NULL;
+    if (!root_file && cg->debug_main_file && *cg->debug_main_file)
+      root_file = cg->debug_main_file;
     bool has_user_top_funcs = false;
     if (!root_file) {
       for (size_t i = 0; i < cg->prog->body.len; i++) {

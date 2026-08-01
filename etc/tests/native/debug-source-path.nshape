@@ -1,0 +1,34 @@
+shape native_debug_source_path {
+  family "runtime-native"
+  generator "native"
+  features ["native", "debug", "source-path", "function-call"]
+  template ny-test-case
+  flags "-O2 -g"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.tbuf
+
+def values = f64buf_new(4)
+fn fill(ptr out) ptr {
+  mut i = 0
+  while i < 4 {
+    f64buf_store(out, i, float(i + 1))
+    i += 1
+  }
+  out
+}
+fn sum(ptr xs) f64 {
+  mut total = 0.0
+  mut i = 0
+  while i < 4 {
+    total += f64buf_load(xs, i)
+    i += 1
+  }
+  total
+}
+fill(values)
+assert(sum(values) == 10.0, "debug source path preserves function calls")
+print("checksum=debug-source-path")
+NY
+}
