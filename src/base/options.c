@@ -374,6 +374,7 @@ static void ny_set_native_backend_or_die(ny_options *opt, const char *value,
     exit(1);
   }
   opt->native_backend_raw = ny_native_backend_name(opt->native_backend);
+  opt->native_backend_explicit = true;
 }
 
 static void ny_set_native_abi_or_die(ny_options *opt, const char *value,
@@ -2284,7 +2285,7 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
          * The pipeline diagnoses an incompatible LLVM/native-only pairing;
          * silently replacing it with the host encoder makes `--native-backend`
          * misleading and can select an unrelated cached artifact. */
-        if (!opt->native_backend_raw) {
+        if (!opt->native_backend_explicit) {
 #if defined(__x86_64__) || defined(_M_X64)
           ny_set_native_backend_or_die(opt, "x86_64", argv[0]);
 #elif defined(__aarch64__) || defined(_M_ARM64)

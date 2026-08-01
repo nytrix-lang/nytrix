@@ -4309,11 +4309,13 @@ static int cmd_public_bench_real(int argc, char **argv) {
   const char *ny_opt_arg = "-O2";
   const char *ny_profile_arg = NULL;
   const char *ny_flavor = "o2";
+  bool ny_native_only = false;
   if (has_flag_after(argc, argv, 3, "--ny-native") ||
       strcmp(ny_opt, "native") == 0 || strcmp(ny_opt, "none") == 0) {
     ny_opt_arg = NULL;
     ny_profile_arg = NULL;
-    ny_flavor = "native";
+    ny_flavor = "native-only";
+    ny_native_only = true;
   } else if (has_flag_after(argc, argv, 3, "--ny-o3") ||
       strcmp(ny_opt, "o3") == 0 || strcmp(ny_opt, "O3") == 0 || strcmp(ny_opt, "-O3") == 0) {
     ny_opt_arg = "-O3";
@@ -4382,6 +4384,13 @@ static int cmd_public_bench_real(int argc, char **argv) {
         ny_compile = run_proc(ny_argv, root, timeout_s);
       } else if (ny_opt_arg) {
         char *ny_argv[] = {ny_bin, "--compiler-asserts", (char *)ny_opt_arg,
+                           "-o", ny_elf, ny_path, NULL};
+        ny_compile = run_proc(ny_argv, root, timeout_s);
+      } else if (ny_native_only) {
+        /* This mode is specifically an LLVM-free backend measurement.  Do not
+         * silently turn an unsupported NYIR workload into a default LLVM AOT
+         * run just because it happens to produce a native executable. */
+        char *ny_argv[] = {ny_bin, "--compiler-asserts", "--native-only",
                            "-o", ny_elf, ny_path, NULL};
         ny_compile = run_proc(ny_argv, root, timeout_s);
       } else {

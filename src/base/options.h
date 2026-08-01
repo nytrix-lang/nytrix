@@ -210,6 +210,7 @@ typedef struct {
   bool native_prefer_vm;
   bool native_prefer_asm;
   bool native_only;
+  bool native_backend_explicit;
   bool native_enable_cf_mem2reg;
   bool native_tier_report;
   const char *native_tier_report_path;
