@@ -921,8 +921,10 @@ bool ny_i386_obj_emit_code(ny_i386_obj_ctx_t *c, const nyir_func_t *nyir,
     case NYIR_CMP_F64:
       if (!ny_i386_obj_load_value_f64(c, in->a) ||
           !ny_i386_obj_fcompl(c, ny_i386_obj_value_off(in->b)) ||
-          !ny_i386_obj_bytes(c, (const unsigned char[]){0xdf, 0xe0, 0x9e, 0x0f},
-                             4) ||
+          /* FSTSW is the waiting x87 status read.  The comparison flags must
+           * be committed before SAHF transfers C3/C2/C0 into EFLAGS. */
+          !ny_i386_obj_bytes(c, (const unsigned char[]){0x9b, 0xdf, 0xe0, 0x9e, 0x0f},
+                             5) ||
           !ny_i386_obj_u8(c, ny_i386_obj_f64_setcc(in->cmp)) ||
           !ny_i386_obj_u8(c, 0xc0) ||
           !ny_i386_obj_bytes(c, (const unsigned char[]){0x0f, 0xb6, 0xc0}, 3) ||
@@ -932,8 +934,8 @@ bool ny_i386_obj_emit_code(ny_i386_obj_ctx_t *c, const nyir_func_t *nyir,
     case NYIR_CMP_F32:
       if (!ny_i386_obj_load_value_f32(c, in->a) ||
           !ny_i386_obj_fcomps(c, ny_i386_obj_value_off(in->b)) ||
-          !ny_i386_obj_bytes(c, (const unsigned char[]){0xdf, 0xe0, 0x9e, 0x0f},
-                             4) ||
+          !ny_i386_obj_bytes(c, (const unsigned char[]){0x9b, 0xdf, 0xe0, 0x9e, 0x0f},
+                             5) ||
           !ny_i386_obj_u8(c, ny_i386_obj_f64_setcc(in->cmp)) ||
           !ny_i386_obj_u8(c, 0xc0) ||
           !ny_i386_obj_bytes(c, (const unsigned char[]){0x0f, 0xb6, 0xc0}, 3) ||
