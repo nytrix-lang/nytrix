@@ -203,10 +203,17 @@ missing browser host APIs before publishing output. It is not
 an Emscripten compatibility spelling: requesting `wasm-emscripten` fails
 clearly until that adapter is implemented.
 
-The manifest declares the implemented baseline: WebGL2, keyboard, mouse, and
-an Asyncify frame loop. Audio, filesystem, network, threads, native windows,
-Vulkan, touch, gamepad, fullscreen, and pointer lock remain explicitly
-unsupported on this target; they are not host fallbacks.
+The manifest declares the implemented baseline: WebGL2, keyboard, mouse, an
+Asyncify frame loop, and `audioLifecycle`. `std.os.sound.init()` opens Web
+Audio in its browser-required suspended state; the runner resumes it only after
+a key, pointer, or touch gesture and visibly reports `Audio suspended`,
+`Audio`, or `Audio unavailable`. The manifest keeps `audio: false` until asset
+decode/playback and sound-instance state have real browser coverage; this is
+not a claim that every desktop sound backend or synchronous file decoder is
+portable yet.
+Filesystem, network, threads, native windows, Vulkan, touch/gamepad queries,
+fullscreen, and pointer lock remain explicitly unsupported; they are not host
+fallbacks.
 
 `web` keeps Asyncify enabled for ordinary `main`-style games so they cannot
 block the browser event loop. `--no-asyncify` is accepted only when the module

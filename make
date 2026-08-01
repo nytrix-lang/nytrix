@@ -2152,6 +2152,7 @@ WEB_WASM_BARE_CAPABILITIES = {
     "touch": False,
     "gamepad": False,
     "audio": False,
+    "audioLifecycle": True,
     "filesystem": False,
     "network": False,
     "threads": False,
@@ -2735,21 +2736,66 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         except subprocess.TimeoutExpired:
             server.kill()
     dom = result.stdout if 'result' in locals() else ""
-    required = ("id=\"webglStatus\">WebGL2", "browser runnable")
+    audio = ROOT / "etc" / "tests" / "web" / "audio-init.ny"
+    if run_web_check(build_root, kind, [str(audio)]) != 0:
+        return 1
+    audio_report = build_root / "web-check" / "audio-init.web-report.json"
+    try:
+        audio_data = json.loads(audio_report.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("web-test: audio check did not write a valid report") from exc
+    if audio_data.get("ok") is not True or audio_data.get("unsupported") != []:
+        raise SystemExit("web-test: browser audio lifecycle imports are not fully hosted")
+    required = ("id=\"webglStatus\">WebGL2", "browser runnable", "id=\"audioStatus\">")
     rejected = ("runtime error", "Load failed", "unsupported import", "WebGL2 missing")
     presented = re.search(r'data-presented="[1-9][0-9]*"', dom) is not None
     visible = 'data-frame-pixels="1"' in dom
     assets_loaded = re.search(r'data-assets-loaded="[1-9][0-9]*"', dom) is not None
     visible_document = 'data-visible="1"' in dom
+    audio_state = re.search(r'data-audio-state="(ready|suspended|running)"', dom) is not None
     canvas_size = re.search(r'data-canvas-size="([0-9]+x[0-9]+)"', dom)
     framebuffer = re.search(r'data-framebuffer="([0-9]+x[0-9]+)"', dom)
     resized = canvas_size is not None and framebuffer is not None and canvas_size.group(1) == framebuffer.group(1)
-    if result.returncode != 0 or not presented or not visible or not assets_loaded or not visible_document or not resized or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
+    if result.returncode != 0 or not presented or not visible or not assets_loaded or not visible_document or not audio_state or not resized or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
         output = _tail_text(dom, 3000)
         if output:
             print(output)
         raise SystemExit("web-test: packaged Pong did not reach the WebGL2 browser runnable state")
     ok("web-test: packaged Pong reached WebGL2 with loaded assets")
+    audio_dir = build_root / "web-test-audio"
+    if run_web(build_root, kind, [str(audio), "--out", str(audio_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        audio_port = int(probe.getsockname()[1])
+    audio_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(audio_port), "--bind", "127.0.0.1", "--directory", str(audio_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        audio_result = subprocess.run([
+            browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+            "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+            "--virtual-time-budget=5000", "--dump-dom", f"http://127.0.0.1:{audio_port}/index.html#app",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: Chromium timed out while checking audio lifecycle")
+    finally:
+        audio_server.terminate()
+        try:
+            audio_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            audio_server.kill()
+    audio_dom = audio_result.stdout if 'audio_result' in locals() else ""
+    audio_suspended = 'data-audio-state="suspended"' in audio_dom
+    audio_presented = re.search(r'data-presented="[1-9][0-9]*"', audio_dom) is not None
+    if audio_result.returncode != 0 or not audio_suspended or not audio_presented or "runtime error" in audio_dom:
+        output = _tail_text(audio_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser audio did not remain gesture-gated and visible")
+    ok("web-test: browser audio is visible and waits for a user gesture")
     return 0
 
 def print_wasm_help() -> None:

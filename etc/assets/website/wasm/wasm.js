@@ -41,6 +41,8 @@
   let assetFonts = new Map();
   let loadedAssetCount = 0;
   let nextFontId = 1;
+  let audioContext = null;
+  let audioUnavailable = false;
   const fallbackMemory = new WebAssembly.Memory({ initial: 256, maximum: 1024 });
   const input = { key: "-", codes: new Set(), pressed: new Set(), mouse: [0, 0], down: false };
 
@@ -110,6 +112,51 @@
   function setKernelStatus(text = "", cls = "") {
     const ready = currentRuntime && currentMeta && currentRuntime.id === currentMeta.id;
     setStatus("wasmStatus", text || (ready ? (currentRuntime.oneShot ? "Native" : "Web Frame") : "None"), cls || (ready ? "ready" : "warn"));
+  }
+
+  function audioState() {
+    if (audioUnavailable || typeof window.AudioContext !== "function") return "unavailable";
+    if (!audioContext) return "ready";
+    return audioContext.state || "suspended";
+  }
+
+  function refreshAudioStatus() {
+    const state = audioState();
+    const text = state === "running" ? "Audio" : state === "suspended" ? "Audio suspended" :
+      state === "ready" ? "Audio ready" : "Audio unavailable";
+    setStatus("audioStatus", text, state === "running" ? "ready" : state === "unavailable" ? "warn" : "");
+    canvas.dataset.audioState = state;
+  }
+
+  function ensureAudio() {
+    if (audioUnavailable || typeof window.AudioContext !== "function") {
+      audioUnavailable = true;
+      refreshAudioStatus();
+      return null;
+    }
+    if (!audioContext) {
+      try {
+        audioContext = new window.AudioContext();
+        audioContext.addEventListener("statechange", refreshAudioStatus);
+      } catch (_) {
+        audioUnavailable = true;
+      }
+    }
+    refreshAudioStatus();
+    return audioContext;
+  }
+
+  function resumeAudio() {
+    const context = ensureAudio();
+    if (!context || context.state === "running") return;
+    context.resume().catch(() => {}).finally(refreshAudioStatus);
+  }
+
+  function shutdownAudio() {
+    const context = audioContext;
+    audioContext = null;
+    if (context && context.state !== "closed") context.close().catch(() => {}).finally(refreshAudioStatus);
+    else refreshAudioStatus();
   }
 
   function runtimeModeText(runtime) {
@@ -839,6 +886,15 @@
       "std.os.prim.env": () => ny.string(memoryRef, ""),
       "std.os.prim.os": () => ny.string(memoryRef, "web"),
       "std.os.os": () => ny.string(memoryRef, "web"),
+      "std.os.sound.init": () => {
+        const context = ensureAudio();
+        return context ? NY_TRUE : NY_FALSE;
+      },
+      "std.os.sound.shutdown": () => {
+        shutdownAudio();
+        return 0n;
+      },
+      "std.os.sound.get_backend_name": () => ny.string(memoryRef, ensureAudio() ? "web-audio" : "none"),
       "std.core.dict_mod.dict": () => 0n,
       "std.os.args.args": () => {
         const argv = refreshRunArgv(meta);
@@ -1092,6 +1148,7 @@
     input.key = e.key;
     if (!input.codes.has(code)) input.pressed.add(code);
     input.codes.add(code);
+    resumeAudio();
   });
   window.addEventListener("keyup", (e) => { input.codes.delete(e.keyCode || e.which || 0); });
   window.addEventListener("blur", clearInput);
@@ -1102,7 +1159,8 @@
   });
   canvas.dataset.visible = document.hidden ? "0" : "1";
   canvas.addEventListener("mousemove", (e) => { const r = canvas.getBoundingClientRect(); input.mouse = [e.clientX - r.left, e.clientY - r.top]; });
-  canvas.addEventListener("mousedown", () => { input.down = true; });
+  canvas.addEventListener("mousedown", () => { input.down = true; resumeAudio(); });
+  canvas.addEventListener("touchstart", resumeAudio, { passive: true });
   window.addEventListener("mouseup", () => { input.down = false; });
 
   wasmFile.addEventListener("change", async () => {
@@ -1146,6 +1204,7 @@
   renderAreas();
   renderList();
   initGL();
+  refreshAudioStatus();
   selectDemo(window.location.hash.slice(1) || (demos[0] && demos[0].id), false);
   requestAnimationFrame(loop);
 })();
