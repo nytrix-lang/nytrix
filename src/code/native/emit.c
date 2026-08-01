@@ -301,30 +301,34 @@ static bool ny_native_try_emit_x64_machine_object(
     const nyir_func_t *top, const nyir_func_t *funcs,
     const char *const *names, size_t func_count,
     const ny_native_target_info_t *target, const char *path,
-    const char *entry_symbol, bool tag_return) {
+    const char *entry_symbol, bool tag_return, char *err, size_t err_len) {
   if (!top || !target || target->target != NY_NATIVE_TARGET_X86_64)
     return false;
   ny_native_writer_t text = {0};
+  char machine_err[256] = {0};
   bool ok = true;
   for (size_t i = 0; ok && i < func_count; ++i) {
     ny_mach_func_t mach = {0};
-    char ignored[256] = {0};
     char label[256];
     snprintf(label, sizeof(label), "ny_fn_%s", names[i] ? names[i] : "unknown_fn");
-    ok = ny_mach_lower_nir(&funcs[i], &mach, ignored, sizeof(ignored)) &&
+    ok = ny_mach_lower_nir(&funcs[i], &mach, machine_err, sizeof(machine_err)) &&
          ny_native_x86_64_emit_mach_scalar(&text, target, &mach, label, false,
-                                           ignored, sizeof(ignored));
+                                           machine_err, sizeof(machine_err));
     ny_mach_func_free(&mach);
   }
   ny_mach_func_t top_mach = {0};
-  char ignored[256] = {0};
   if (ok)
-    ok = ny_mach_lower_nir(top, &top_mach, ignored, sizeof(ignored)) &&
+    ok = ny_mach_lower_nir(top, &top_mach, machine_err, sizeof(machine_err)) &&
          ny_native_x86_64_emit_mach_scalar(&text, target, &top_mach,
-                                           entry_symbol, tag_return, ignored,
-                                           sizeof(ignored));
+                                           entry_symbol, tag_return, machine_err,
+                                           sizeof(machine_err));
   ny_mach_func_free(&top_mach);
-  if (!ok) { free(text.data); return false; }
+  if (!ok) {
+    ny_native_set_err(err, err_len, "machine form: %s",
+                      machine_err[0] ? machine_err : "unsupported machine shape");
+    free(text.data);
+    return false;
+  }
   char asm_path[4096];
   char asm_name[96];
   snprintf(asm_name, sizeof(asm_name), "ny_machine_%ld_%llu.s", (long)getpid(),
@@ -428,12 +432,20 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
        * existing machine form coverage while its direct byte encoder grows. */
       if (ny_native_try_emit_x64_machine_object(&rt_main_nir, func_nirs,
                                                 func_names, func_count, &target,
-                                                path, obj_symbol, tag_return)) {
+                                                path, obj_symbol, tag_return,
+                                                obj_err, sizeof(obj_err))) {
         for (size_t i = 0; i < func_count; ++i)
           nyir_func_free(&func_nirs[i]);
         nyir_func_free(&rt_main_nir);
         if (err && err_len > 0) err[0] = '\0';
         return true;
+      }
+      if (opt->native_only && obj_err[0]) {
+        ny_native_set_err(err, err_len, "%s", obj_err);
+        for (size_t i = 0; i < func_count; ++i)
+          nyir_func_free(&func_nirs[i]);
+        nyir_func_free(&rt_main_nir);
+        return false;
       }
       if (target.target == NY_NATIVE_TARGET_X86 &&
           ny_native_target_has(&target, NY_NATIVE_CAP_ELF_OBJECT)) {

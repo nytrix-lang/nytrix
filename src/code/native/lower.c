@@ -814,6 +814,22 @@ static const stmt_t *ny_native_nir_find_user_function(ny_native_nir_builder_t *b
   return NULL;
 }
 
+static const expr_t *ny_native_nir_find_top_level_value(
+    const ny_native_nir_builder_t *b, const char *name) {
+  if (!b || !b->prog || !name)
+    return NULL;
+  for (size_t i = 0; i < b->prog->body.len; ++i) {
+    const stmt_t *s = b->prog->body.data[i];
+    if (!s || s->kind != NY_S_VAR)
+      continue;
+    for (size_t n = 0; n < s->as.var.names.len && n < s->as.var.exprs.len; ++n)
+      if (s->as.var.names.data[n] &&
+          strcmp(s->as.var.names.data[n], name) == 0)
+        return s->as.var.exprs.data[n];
+  }
+  return NULL;
+}
+
 static bool ny_native_nir_store_local_value(ny_native_nir_builder_t *b,
                                             int slot, int value) {
   size_t before = b->nyir.len;
@@ -1463,6 +1479,11 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
     return ny_native_nir_emit_const(b, e->as.literal.as.i);
   case NY_E_IDENT: {
     ny_native_nir_local_t *l = ny_native_nir_find_local(b, e->as.ident.name);
+    if (!l) {
+      const expr_t *global = ny_native_nir_find_top_level_value(b, e->as.ident.name);
+      if (global && global != e && global->kind == NY_E_LITERAL)
+        return ny_native_nir_lower_expr(b, global);
+    }
     if (!l) {
       int addr = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ADDR_SYMBOL,
                                                       .dst = -1,
@@ -2354,6 +2375,14 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
         return -1;
       return ny_native_nir_expr_is_f64(b, arg) ? value :
           ny_native_nir_emit_i64_to_f64(b, value);
+    }
+    if (leaf && strcmp(leaf, "ticks") == 0) {
+      if (e->as.call.args.len != 0) {
+        ny_native_nir_fail(b, "native NYIR lower: ticks takes no arguments");
+        return -1;
+      }
+      return ny_native_nir_emit_runtime_call(b, "rt_ticks_ns", -1, -1, -1,
+                                             0, 0);
     }
     if (leaf && (strcmp(leaf, "addr_of") == 0 || strcmp(leaf, "borrow") == 0)) {
       if (e->as.call.args.len != 1 || e->as.call.args.data[0].name ||

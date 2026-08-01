@@ -650,7 +650,8 @@ bool ny_mach_verify(const ny_mach_func_t *func, char *err, size_t err_len) {
                        "machine IR verify: call instruction %zu has an invalid argument", i);
     if (!mach_verify_opcode_shape(func, inst))
       return nyir_err(err, err_len,
-                     "machine IR verify: instruction %zu has an invalid opcode shape", i);
+                     "machine IR verify: instruction %zu (%s) has an invalid opcode shape",
+                     i, ny_mach_opcode_name(inst->opcode));
   }
   for (size_t block = 0; block < func->block_len; ++block) {
     const ny_mach_block_t *current = &func->blocks[block];
