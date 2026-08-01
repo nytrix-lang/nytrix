@@ -23,7 +23,7 @@
   let gl = null;
   let program = null;
   let tex = null;
-  let cube3d = null;
+  let webgl3d = null;
   let currentMeta = null;
   let currentRuntime = null;
   let selectedArea = "All";
@@ -456,14 +456,14 @@
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     const texLoc = gl.getUniformLocation(program, "tex");
     if (texLoc) gl.uniform1i(texLoc, 0);
-    cube3d = makeCubeRenderer();
+    webgl3d = makeWebgl3dRenderer();
     setStatus("webglStatus", "WebGL2", "ready");
     canvas.dataset.presentFilter = "nearest";
     fitCanvas();
     return true;
   }
 
-  function makeCubeRenderer() {
+  function makeWebgl3dRenderer() {
     if (!gl) return null;
     const vs = shader(gl.VERTEX_SHADER, `#version 300 es
       in vec3 p; uniform vec3 origin; uniform vec3 camera; uniform float scale; uniform float aspect; uniform float angle;
@@ -490,8 +490,21 @@
       cameraPosition: [0, 0, 4], active: false, drawn: false };
   }
 
+  function beginWebgl3d() {
+    if (!gl || !webgl3d) return false;
+    webgl3d.active = true;
+    webgl3d.drawn = true;
+    ctx.clearRect(0, 0, stage.width, stage.height);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    return true;
+  }
+
   function drawCube(memoryRef, position, size, color) {
-    if (!gl || !cube3d) return false;
+    if (!gl || !webgl3d || !webgl3d.active) return false;
     const at = (i) => ny.numeric(memoryRef, ny.listGet(memoryRef, position, ny.tag(i), ny.tag(0)));
     const c = Number(color || 0) >>> 0;
     const colorLength = ny.listLen(memoryRef, color);
@@ -500,16 +513,13 @@
       return Math.max(0, Math.min(1, ny.numeric(memoryRef, value)));
     }).concat(colorLength >= 4 ? Math.max(0, Math.min(1, ny.numeric(memoryRef, ny.listGet(memoryRef, color, ny.tag(3), 0n)))) : 1)
       : [(c & 255) / 255, ((c >>> 8) & 255) / 255, ((c >>> 16) & 255) / 255, ((c >>> 24) & 255) / 255 || 1];
-    cube3d.active = true; cube3d.drawn = true;
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.useProgram(cube3d.prog); gl.bindBuffer(gl.ARRAY_BUFFER, cube3d.buffer);
-    gl.enableVertexAttribArray(cube3d.pos); gl.vertexAttribPointer(cube3d.pos, 3, gl.FLOAT, false, 0, 0);
-    gl.uniform3f(cube3d.origin, at(0), at(1), at(2)); gl.uniform1f(cube3d.scale, Math.max(0.001, Number(size) || 1));
-    gl.uniform3fv(cube3d.camera, cube3d.cameraPosition);
-    gl.uniform1f(cube3d.aspect, Math.max(1, canvas.width) / Math.max(1, canvas.height));
-    gl.uniform1f(cube3d.angle, performance.now() * 0.0007);
-    gl.uniform4f(cube3d.color, channels[0], channels[1], channels[2], channels[3]);
+    gl.useProgram(webgl3d.prog); gl.bindBuffer(gl.ARRAY_BUFFER, webgl3d.buffer);
+    gl.enableVertexAttribArray(webgl3d.pos); gl.vertexAttribPointer(webgl3d.pos, 3, gl.FLOAT, false, 0, 0);
+    gl.uniform3f(webgl3d.origin, at(0), at(1), at(2)); gl.uniform1f(webgl3d.scale, Math.max(0.001, Number(size) || 1));
+    gl.uniform3fv(webgl3d.camera, webgl3d.cameraPosition);
+    gl.uniform1f(webgl3d.aspect, Math.max(1, canvas.width) / Math.max(1, canvas.height));
+    gl.uniform1f(webgl3d.angle, performance.now() * 0.0007);
+    gl.uniform4f(webgl3d.color, channels[0], channels[1], channels[2], channels[3]);
     gl.drawArrays(gl.TRIANGLES, 0, 36); canvas.dataset.framePixels = "1"; canvas.dataset.webgl3d = "1";
     return true;
   }
@@ -523,11 +533,8 @@
       canvas.style.backgroundRepeat = "no-repeat";
       return;
     }
-    if (cube3d && cube3d.drawn) {
-      cube3d.drawn = false;
-      presentCount++; canvas.dataset.presented = String(presentCount);
-      return;
-    }
+    const overlay3d = webgl3d && webgl3d.drawn;
+    if (overlay3d) webgl3d.drawn = false;
     canvas.style.backgroundImage = "none";
     fitCanvas();
     try {
@@ -544,9 +551,17 @@
         }
       }
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, stage.width, stage.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, frame.data);
-      gl.clearColor(0, 0, 0, 1);
-      gl.clear(gl.COLOR_BUFFER_BIT);
+      if (overlay3d) {
+        gl.disable(gl.DEPTH_TEST);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      } else {
+        gl.disable(gl.BLEND);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
       gl.drawArrays(gl.TRIANGLES, 0, 6);
+      if (overlay3d) gl.disable(gl.BLEND);
       presentCount++;
       canvas.dataset.presented = String(presentCount);
     } catch (_) { setStatus("webglStatus", "WebGL lost", "warn"); }
@@ -849,13 +864,13 @@
       "std.os.ui.render.set_ortho_2d": () => 0n,
       "std.os.ui.render.matrix.mat4_identity": () => ny.tag(0),
       "std.os.ui.render.camera_init": (position) => {
-        if (cube3d && ny.listLen(memoryRef, position) >= 3) {
-          cube3d.cameraPosition = [0, 1, 2].map((i) => ny.numeric(memoryRef, ny.listGet(memoryRef, position, ny.tag(i), 0n)));
+        if (webgl3d && ny.listLen(memoryRef, position) >= 3) {
+          webgl3d.cameraPosition = [0, 1, 2].map((i) => ny.numeric(memoryRef, ny.listGet(memoryRef, position, ny.tag(i), 0n)));
         }
         return ny.tag(1);
       },
-      "std.os.ui.render.begin_mode_3d": () => { if (cube3d) cube3d.active = true; return NY_TRUE; },
-      "std.os.ui.render.end_mode_3d": () => { if (cube3d) cube3d.active = false; return NY_TRUE; },
+      "std.os.ui.render.begin_mode_3d": () => bool(beginWebgl3d()),
+      "std.os.ui.render.end_mode_3d": () => { if (webgl3d) webgl3d.active = false; return NY_TRUE; },
       "std.os.ui.render.draw_cube": (position, size, fill) => bool(drawCube(memoryRef, position, size, fill)),
       "std.os.ui.render.draw_rect": (x, y, w, h, fill) => {
         frameTouched = true;
