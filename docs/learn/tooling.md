@@ -280,7 +280,9 @@ Browser-facing Ny modules should export one of `ny_web_frame`, `ny_web_render`,
 `ny_web_main`, or `main`. The runner provides a compact host ABI:
 `ny_web_clear`, `ny_web_rect`, `ny_web_line`, `ny_web_text`, `ny_web_present`,
 keyboard, mouse-pointer, and minimal OS/runtime stubs. Keyboard state tracks each
-held key and one press edge per key. Native sound, network, and filesystem APIs
+held key and one press edge per key; `std.os.ui.window.input.mouse_pos`,
+`mouse_button_down`, and `mouse_button_pressed` use logical-stage coordinates
+and per-button held/edge state. Native sound, network, and filesystem APIs
 are not faked in the browser; `web-check` reports unsupported host imports and
 writes a machine-readable report beside its output.
 

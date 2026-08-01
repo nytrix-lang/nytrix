@@ -45,7 +45,7 @@
   let audioContext = null;
   let audioUnavailable = false;
   const fallbackMemory = new WebAssembly.Memory({ initial: 256, maximum: 1024 });
-  const input = { key: "-", codes: new Set(), pressed: new Set(), mouse: [0, 0], down: false };
+  const input = { key: "-", codes: new Set(), pressed: new Set(), mouse: [0, 0], buttons: new Set(), pressedButtons: new Set() };
 
   function wantsCliStage(meta = currentMeta, runtime = currentRuntime) {
     if (runtime && runtime.oneShot) return true;
@@ -413,7 +413,8 @@
   function clearInput() {
     input.codes.clear();
     input.pressed.clear();
-    input.down = false;
+    input.buttons.clear();
+    input.pressedButtons.clear();
   }
 
   function shader(type, source) {
@@ -760,7 +761,7 @@
       ny_web_canvas_height: () => ny.tag(stage.height),
       ny_web_time: () => performance.now() / 1000,
       ny_web_key_down: (code) => ny.tag(input.codes.has(Number(code)) ? 1 : 0),
-      ny_web_mouse_down: () => ny.tag(input.down ? 1 : 0),
+      ny_web_mouse_down: () => ny.tag(input.buttons.has(0) ? 1 : 0),
       ny_web_mouse_x: () => ny.tag(input.mouse[0]),
       ny_web_mouse_y: () => ny.tag(input.mouse[1]),
       ny_web_clear: (r, g, b, a) => {
@@ -850,6 +851,14 @@
         const code = ny.int(key);
         const pressed = input.pressed.has(code);
         if (pressed) input.pressed.delete(code);
+        return bool(pressed);
+      },
+      "std.os.ui.window.input.mouse_pos": () => list2f(input.mouse[0], input.mouse[1]),
+      "std.os.ui.window.input.mouse_button_down": (button = 0n) => bool(input.buttons.has(ny.int(button))),
+      "std.os.ui.window.input.mouse_button_pressed": (button = 0n) => {
+        const code = ny.int(button);
+        const pressed = input.pressedButtons.has(code);
+        if (pressed) input.pressedButtons.delete(code);
         return bool(pressed);
       },
       "std.os.ui.render.begin_frame_clear": (fill) => {
@@ -1322,10 +1331,22 @@
   document.addEventListener("fullscreenchange", refreshBrowserRequestState);
   document.addEventListener("pointerlockchange", refreshBrowserRequestState);
   canvas.dataset.visible = document.hidden ? "0" : "1";
-  canvas.addEventListener("mousemove", (e) => { const r = canvas.getBoundingClientRect(); input.mouse = [e.clientX - r.left, e.clientY - r.top]; });
-  canvas.addEventListener("mousedown", () => { input.down = true; resumeAudio(); });
+  function updatePointer(e) {
+    const r = canvas.getBoundingClientRect();
+    input.mouse = [
+      (e.clientX - r.left) * stage.width / Math.max(1, r.width),
+      (e.clientY - r.top) * stage.height / Math.max(1, r.height),
+    ];
+  }
+  canvas.addEventListener("mousemove", updatePointer);
+  canvas.addEventListener("mousedown", (e) => {
+    updatePointer(e);
+    if (!input.buttons.has(e.button)) input.pressedButtons.add(e.button);
+    input.buttons.add(e.button);
+    resumeAudio();
+  });
   canvas.addEventListener("touchstart", resumeAudio, { passive: true });
-  window.addEventListener("mouseup", () => { input.down = false; });
+  window.addEventListener("mouseup", (e) => { input.buttons.delete(e.button); });
 
   wasmFile.addEventListener("change", async () => {
     const file = wasmFile.files[0];

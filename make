@@ -2862,6 +2862,42 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             print(output)
         raise SystemExit("web-test: browser 3D baseline did not reach the WebGL2 draw path")
     ok("web-test: browser 3D baseline reached the WebGL2 draw path")
+    pointer = ROOT / "etc" / "tests" / "web" / "input-pointer.ny"
+    if run_web_check(build_root, kind, [str(pointer)]) != 0:
+        return 1
+    pointer_dir = build_root / "web-test-input-pointer"
+    if run_web(build_root, kind, [str(pointer), "--out", str(pointer_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        pointer_port = int(probe.getsockname()[1])
+    pointer_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(pointer_port), "--bind", "127.0.0.1", "--directory", str(pointer_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        pointer_result = subprocess.run([
+            browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+            "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+            "--virtual-time-budget=5000", "--dump-dom", f"http://127.0.0.1:{pointer_port}/index.html#app",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: Chromium timed out while checking pointer input")
+    finally:
+        pointer_server.terminate()
+        try:
+            pointer_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pointer_server.kill()
+    pointer_dom = pointer_result.stdout if 'pointer_result' in locals() else ""
+    pointer_presented = re.search(r'data-presented="[1-9][0-9]*"', pointer_dom) is not None
+    if pointer_result.returncode != 0 or not pointer_presented or "runtime error" in pointer_dom:
+        output = _tail_text(pointer_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser pointer input fixture did not execute")
+    ok("web-test: browser pointer input facade executed")
     return 0
 
 def print_wasm_help() -> None:
