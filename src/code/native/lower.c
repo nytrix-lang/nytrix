@@ -115,7 +115,7 @@ typedef struct {
   int end_label;
 } ny_native_nir_loop_frame_t;
 
-#define NY_EXTERN_MAX 256
+#define NY_EXTERN_MAX 1024
 
 typedef enum {
   NY_SYSV_AGG_NONE = 0,
