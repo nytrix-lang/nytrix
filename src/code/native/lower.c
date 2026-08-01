@@ -747,6 +747,12 @@ static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b, const expr_t *
   case NY_E_UNARY:
     return ny_native_nir_expr_is_f64(b, e->as.unary.right);
   case NY_E_CALL:
+    if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
+      const char *leaf = ny_native_leaf_name(e->as.call.callee->as.ident.name);
+      if (leaf && (strcmp(leaf, "float") == 0 ||
+                   strcmp(leaf, "f64buf_load") == 0))
+        return true;
+    }
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT && b && b->prog) {
       const char *name = e->as.call.callee->as.ident.name;
       for (size_t i = 0; i < b->prog->body.len; ++i) {
@@ -2300,35 +2306,31 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
      * only be used after an explicit box operation exists. */
     if (leaf && strcmp(leaf, "print") == 0 &&
         !ny_native_nir_find_user_function(b, name)) {
-      if (e->as.call.args.len != 1 || e->as.call.args.data[0].name) {
+      if (e->as.call.args.len == 0) {
         ny_native_nir_fail(
-            b, "native NYIR lower: print currently requires one positional argument");
+            b, "native NYIR lower: print requires at least one positional argument");
         return -1;
       }
-      const expr_t *arg = e->as.call.args.data[0].val;
-      if (ny_native_nir_expr_is_f64(b, arg) || ny_native_nir_expr_is_f32(b, arg)) {
-        ny_native_nir_fail(
-            b, "native NYIR lower: print currently supports integer/string arguments only");
-        return -1;
-      }
-      int raw = ny_native_nir_lower_expr(b, arg);
-      if (raw < 0)
-        return -1;
-      const char *print_sym = "rt_print_i64_raw";
-      int call_arg = raw;
-      if (arg && arg->kind == NY_E_LITERAL &&
-          arg->as.literal.kind == NY_LIT_STR) {
-        print_sym = "rt_print_cstr";
+      for (size_t i = 0; i < e->as.call.args.len; ++i) {
+        if (e->as.call.args.data[i].name) {
+          ny_native_nir_fail(b, "native NYIR lower: print accepts positional arguments only");
+          return -1;
+        }
+        const expr_t *arg = e->as.call.args.data[i].val;
+        if (ny_native_nir_expr_is_f64(b, arg) || ny_native_nir_expr_is_f32(b, arg)) {
+          ny_native_nir_fail(
+              b, "native NYIR lower: print currently supports integer/string arguments only");
+          return -1;
+        }
+        int raw = ny_native_nir_lower_expr(b, arg);
+        const char *print_sym = arg && arg->kind == NY_E_LITERAL &&
+                                        arg->as.literal.kind == NY_LIT_STR
+                                    ? "rt_print_cstr" : "rt_print_i64_raw";
+        if (raw < 0 || ny_native_nir_emit_runtime_call(
+                           b, print_sym, raw, -1, -1, 1, 0) < 0)
+          return -1;
       }
       if (nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_CALL,
-                                               .dst = -1,
-                                               .a = call_arg,
-                                               .b = -1,
-                                               .c = -1,
-                                               .imm = 1,
-                                               .flags = NYIR_INST_F_EXTERN,
-                                               .symbol = print_sym}) < 0 ||
-          nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_CALL,
                                                .dst = -1,
                                                .a = -1,
                                                .b = -1,
@@ -2340,6 +2342,18 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
         return -1;
       }
       return ny_native_nir_emit_const(b, 0);
+    }
+    if (leaf && strcmp(leaf, "float") == 0) {
+      if (e->as.call.args.len != 1 || e->as.call.args.data[0].name) {
+        ny_native_nir_fail(b, "native NYIR lower: float requires one positional argument");
+        return -1;
+      }
+      const expr_t *arg = e->as.call.args.data[0].val;
+      int value = ny_native_nir_lower_expr(b, arg);
+      if (value < 0)
+        return -1;
+      return ny_native_nir_expr_is_f64(b, arg) ? value :
+          ny_native_nir_emit_i64_to_f64(b, value);
     }
     if (leaf && (strcmp(leaf, "addr_of") == 0 || strcmp(leaf, "borrow") == 0)) {
       if (e->as.call.args.len != 1 || e->as.call.args.data[0].name ||
