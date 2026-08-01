@@ -2855,7 +2855,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     renderer3d_dom = renderer3d_result.stdout if 'renderer3d_result' in locals() else ""
     renderer3d_presented = re.search(r'data-presented="[1-9][0-9]*"', renderer3d_dom) is not None
     if (renderer3d_result.returncode != 0 or not renderer3d_presented or
-            'data-webgl3d="1"' not in renderer3d_dom or "runtime error" in renderer3d_dom or
+            'data-webgl3d="1"' not in renderer3d_dom or 'data-webgl3d-alpha="1"' not in renderer3d_dom or "runtime error" in renderer3d_dom or
             "WebGL2 missing" in renderer3d_dom):
         output = _tail_text(renderer3d_dom, 3000)
         if output:

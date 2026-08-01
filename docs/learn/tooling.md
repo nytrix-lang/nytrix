@@ -209,7 +209,9 @@ baseline (`camera_init`, `begin_mode_3d`, `draw_cube`, `end_mode_3d`). It is a
 portable proof path, not yet a claim that every desktop renderer primitive or
 camera option has browser parity. A 3D pass clears depth once, accepts multiple
 draws, and is composited with later 2D stage drawing at `end_frame`; it is not a
-special fullscreen cube replacement. `std.os.sound.init()` opens Web
+special fullscreen cube replacement. Translucent baseline draws use standard
+source-alpha blending without writing depth, while opaque draws remain
+depth-writing. `std.os.sound.init()` opens Web
 Audio in its browser-required suspended state; the runner resumes it only after
 a key, pointer, or touch gesture and visibly reports `Audio suspended`,
 `Audio`, or `Audio unavailable`. The manifest keeps `audio: false` until asset

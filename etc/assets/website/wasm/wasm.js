@@ -521,7 +521,20 @@
     gl.uniform1f(webgl3d.aspect, Math.max(1, canvas.width) / Math.max(1, canvas.height));
     gl.uniform1f(webgl3d.angle, performance.now() * 0.0007);
     gl.uniform4f(webgl3d.color, channels[0], channels[1], channels[2], channels[3]);
-    gl.drawArrays(gl.TRIANGLES, 0, 36); canvas.dataset.framePixels = "1"; canvas.dataset.webgl3d = "1";
+    const translucent = channels[3] < 0.999;
+    if (translucent) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+    }
+    gl.drawArrays(gl.TRIANGLES, 0, 36);
+    if (translucent) {
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      canvas.dataset.webgl3dAlpha = "1";
+    }
+    canvas.dataset.framePixels = "1";
+    canvas.dataset.webgl3d = "1";
     return true;
   }
 
