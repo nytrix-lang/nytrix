@@ -2146,6 +2146,7 @@ WEB_WASM_BARE_TARGET = {
 }
 WEB_WASM_BARE_CAPABILITIES = {
     "webgl2": True,
+    "webgl3dBaseline": True,
     "keyboard": True,
     "mouse": True,
     "frameLoop": True,
@@ -2816,6 +2817,44 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             print(output)
         raise SystemExit("web-test: browser audio did not remain gesture-gated and visible")
     ok("web-test: browser audio is visible and waits for a user gesture")
+    renderer3d = ROOT / "etc" / "tests" / "web" / "renderer-3d.ny"
+    if run_web_check(build_root, kind, [str(renderer3d)]) != 0:
+        return 1
+    renderer3d_dir = build_root / "web-test-renderer-3d"
+    if run_web(build_root, kind, [str(renderer3d), "--out", str(renderer3d_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        renderer3d_port = int(probe.getsockname()[1])
+    renderer3d_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(renderer3d_port), "--bind", "127.0.0.1", "--directory", str(renderer3d_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        renderer3d_result = subprocess.run([
+            browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+            "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+            "--virtual-time-budget=5000", "--dump-dom", f"http://127.0.0.1:{renderer3d_port}/index.html#app",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: Chromium timed out while checking the 3D baseline")
+    finally:
+        renderer3d_server.terminate()
+        try:
+            renderer3d_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            renderer3d_server.kill()
+    renderer3d_dom = renderer3d_result.stdout if 'renderer3d_result' in locals() else ""
+    renderer3d_presented = re.search(r'data-presented="[1-9][0-9]*"', renderer3d_dom) is not None
+    if (renderer3d_result.returncode != 0 or not renderer3d_presented or
+            'data-webgl3d="1"' not in renderer3d_dom or "runtime error" in renderer3d_dom or
+            "WebGL2 missing" in renderer3d_dom):
+        output = _tail_text(renderer3d_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser 3D baseline did not reach the WebGL2 draw path")
+    ok("web-test: browser 3D baseline reached the WebGL2 draw path")
     return 0
 
 def print_wasm_help() -> None:

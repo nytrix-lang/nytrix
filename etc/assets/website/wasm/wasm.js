@@ -23,6 +23,7 @@
   let gl = null;
   let program = null;
   let tex = null;
+  let cube3d = null;
   let currentMeta = null;
   let currentRuntime = null;
   let selectedArea = "All";
@@ -455,9 +456,61 @@
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     const texLoc = gl.getUniformLocation(program, "tex");
     if (texLoc) gl.uniform1i(texLoc, 0);
+    cube3d = makeCubeRenderer();
     setStatus("webglStatus", "WebGL2", "ready");
     canvas.dataset.presentFilter = "nearest";
     fitCanvas();
+    return true;
+  }
+
+  function makeCubeRenderer() {
+    if (!gl) return null;
+    const vs = shader(gl.VERTEX_SHADER, `#version 300 es
+      in vec3 p; uniform vec3 origin; uniform vec3 camera; uniform float scale; uniform float aspect; uniform float angle;
+      void main(){ float c=cos(angle), s=sin(angle); vec3 q=vec3(c*p.x+s*p.z,p.y,-s*p.x+c*p.z)*scale+origin;
+        q-=camera; gl_Position=vec4((q.x/-q.z)*1.8/aspect,(q.y/-q.z)*1.8,(-q.z-0.1)/12.0,1.0); }`);
+    const fs = shader(gl.FRAGMENT_SHADER, `#version 300 es
+      precision mediump float; uniform vec4 color; out vec4 outColor; void main(){ outColor=color; }`);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    const points = new Float32Array([
+      -1,-1, 1, 1,-1, 1, 1, 1, 1, -1,-1, 1, 1, 1, 1, -1, 1, 1,
+       1,-1,-1,-1,-1,-1,-1, 1,-1, 1,-1,-1,-1, 1,-1, 1, 1,-1,
+      -1,-1,-1,-1,-1, 1,-1, 1, 1,-1,-1,-1,-1, 1, 1,-1, 1,-1,
+       1,-1, 1, 1,-1,-1, 1, 1,-1, 1,-1, 1, 1, 1,-1, 1, 1, 1,
+      -1, 1, 1, 1, 1, 1, 1, 1,-1,-1, 1, 1, 1, 1,-1,-1, 1,-1,
+      -1,-1,-1, 1,-1,-1, 1,-1, 1,-1,-1,-1, 1,-1, 1,-1,-1, 1,
+    ]);
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, points, gl.STATIC_DRAW);
+    return { prog, buffer, pos: gl.getAttribLocation(prog, "p"), origin: gl.getUniformLocation(prog, "origin"), camera: gl.getUniformLocation(prog, "camera"),
+      scale: gl.getUniformLocation(prog, "scale"), aspect: gl.getUniformLocation(prog, "aspect"),
+      angle: gl.getUniformLocation(prog, "angle"), color: gl.getUniformLocation(prog, "color"),
+      cameraPosition: [0, 0, 4], active: false, drawn: false };
+  }
+
+  function drawCube(memoryRef, position, size, color) {
+    if (!gl || !cube3d) return false;
+    const at = (i) => ny.numeric(memoryRef, ny.listGet(memoryRef, position, ny.tag(i), ny.tag(0)));
+    const c = Number(color || 0) >>> 0;
+    const colorLength = ny.listLen(memoryRef, color);
+    const channels = colorLength >= 3 ? [0, 1, 2].map((i) => {
+      const value = ny.listGet(memoryRef, color, ny.tag(i), 0n);
+      return Math.max(0, Math.min(1, ny.numeric(memoryRef, value)));
+    }).concat(colorLength >= 4 ? Math.max(0, Math.min(1, ny.numeric(memoryRef, ny.listGet(memoryRef, color, ny.tag(3), 0n)))) : 1)
+      : [(c & 255) / 255, ((c >>> 8) & 255) / 255, ((c >>> 16) & 255) / 255, ((c >>> 24) & 255) / 255 || 1];
+    cube3d.active = true; cube3d.drawn = true;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.useProgram(cube3d.prog); gl.bindBuffer(gl.ARRAY_BUFFER, cube3d.buffer);
+    gl.enableVertexAttribArray(cube3d.pos); gl.vertexAttribPointer(cube3d.pos, 3, gl.FLOAT, false, 0, 0);
+    gl.uniform3f(cube3d.origin, at(0), at(1), at(2)); gl.uniform1f(cube3d.scale, Math.max(0.001, Number(size) || 1));
+    gl.uniform3fv(cube3d.camera, cube3d.cameraPosition);
+    gl.uniform1f(cube3d.aspect, Math.max(1, canvas.width) / Math.max(1, canvas.height));
+    gl.uniform1f(cube3d.angle, performance.now() * 0.0007);
+    gl.uniform4f(cube3d.color, channels[0], channels[1], channels[2], channels[3]);
+    gl.drawArrays(gl.TRIANGLES, 0, 36); canvas.dataset.framePixels = "1"; canvas.dataset.webgl3d = "1";
     return true;
   }
 
@@ -468,6 +521,11 @@
       canvas.style.backgroundImage = `url("${stage.toDataURL("image/png")}")`;
       canvas.style.backgroundSize = "100% 100%";
       canvas.style.backgroundRepeat = "no-repeat";
+      return;
+    }
+    if (cube3d && cube3d.drawn) {
+      cube3d.drawn = false;
+      presentCount++; canvas.dataset.presented = String(presentCount);
       return;
     }
     canvas.style.backgroundImage = "none";
@@ -790,6 +848,15 @@
       "std.os.ui.render.get_frame_time": () => webFrameDt,
       "std.os.ui.render.set_ortho_2d": () => 0n,
       "std.os.ui.render.matrix.mat4_identity": () => ny.tag(0),
+      "std.os.ui.render.camera_init": (position) => {
+        if (cube3d && ny.listLen(memoryRef, position) >= 3) {
+          cube3d.cameraPosition = [0, 1, 2].map((i) => ny.numeric(memoryRef, ny.listGet(memoryRef, position, ny.tag(i), 0n)));
+        }
+        return ny.tag(1);
+      },
+      "std.os.ui.render.begin_mode_3d": () => { if (cube3d) cube3d.active = true; return NY_TRUE; },
+      "std.os.ui.render.end_mode_3d": () => { if (cube3d) cube3d.active = false; return NY_TRUE; },
+      "std.os.ui.render.draw_cube": (position, size, fill) => bool(drawCube(memoryRef, position, size, fill)),
       "std.os.ui.render.draw_rect": (x, y, w, h, fill) => {
         frameTouched = true;
         ctx.fillStyle = color(fill, "rgba(255,255,255,1)");

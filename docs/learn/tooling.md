@@ -204,7 +204,10 @@ an Emscripten compatibility spelling: requesting `wasm-emscripten` fails
 clearly until that adapter is implemented.
 
 The manifest declares the implemented baseline: WebGL2, keyboard, mouse, an
-Asyncify frame loop, and `audioLifecycle`. `std.os.sound.init()` opens Web
+Asyncify frame loop, `audioLifecycle`, and a small depth-tested WebGL2 3D
+baseline (`camera_init`, `begin_mode_3d`, `draw_cube`, `end_mode_3d`). It is a
+portable proof path, not yet a claim that every desktop renderer primitive or
+camera option has browser parity. `std.os.sound.init()` opens Web
 Audio in its browser-required suspended state; the runner resumes it only after
 a key, pointer, or touch gesture and visibly reports `Audio suspended`,
 `Audio`, or `Audio unavailable`. The manifest keeps `audio: false` until asset
