@@ -346,9 +346,9 @@ static bool nyir_run_finish_scalar(nyir_func_t *f,
     nyir_run_pass(f, nyir_compact, stats, dump, ok);
   } else {
     static bool (*const base[])(nyir_func_t *) = {
-        nyir_const_fold, nyir_peephole, nyir_apply_rules,
+        nyir_const_fold, nyir_strength_reduce, nyir_peephole, nyir_apply_rules,
         nyir_copy_prop, nyir_cse};
-    nyir_run_seq(f, base, 5, stats, dump, ok);
+    nyir_run_seq(f, base, 6, stats, dump, ok);
     if (*ok && has_locals) {
       static bool (*const memory[])(nyir_func_t *) = {
           nyir_memory_ssa_forward, nyir_points_to_sroa,
