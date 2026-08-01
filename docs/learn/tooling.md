@@ -282,7 +282,8 @@ Browser-facing Ny modules should export one of `ny_web_frame`, `ny_web_render`,
 keyboard, mouse-pointer, and minimal OS/runtime stubs. Keyboard state tracks each
 held key and one press edge per key; `std.os.ui.window.input.mouse_pos`,
 `mouse_button_down`, and `mouse_button_pressed` use logical-stage coordinates
-and per-button held/edge state. Native sound, network, and filesystem APIs
+and per-button held/edge state. `std.os.ui.window.scroll_pos` accumulates
+browser wheel deltas. Native sound, network, and filesystem APIs
 are not faked in the browser; `web-check` reports unsupported host imports and
 writes a machine-readable report beside its output.
 

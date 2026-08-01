@@ -45,7 +45,7 @@
   let audioContext = null;
   let audioUnavailable = false;
   const fallbackMemory = new WebAssembly.Memory({ initial: 256, maximum: 1024 });
-  const input = { key: "-", codes: new Set(), pressed: new Set(), mouse: [0, 0], buttons: new Set(), pressedButtons: new Set() };
+  const input = { key: "-", codes: new Set(), pressed: new Set(), mouse: [0, 0], buttons: new Set(), pressedButtons: new Set(), scroll: [0, 0] };
 
   function wantsCliStage(meta = currentMeta, runtime = currentRuntime) {
     if (runtime && runtime.oneShot) return true;
@@ -861,6 +861,7 @@
         if (pressed) input.pressedButtons.delete(code);
         return bool(pressed);
       },
+      "std.os.ui.window.scroll_pos": () => list2f(input.scroll[0], input.scroll[1]),
       "std.os.ui.render.begin_frame_clear": (fill) => {
         frameTouched = true;
         setStageSize();
@@ -1345,6 +1346,11 @@
     input.buttons.add(e.button);
     resumeAudio();
   });
+  canvas.addEventListener("wheel", (e) => {
+    updatePointer(e);
+    input.scroll[0] += e.deltaX;
+    input.scroll[1] += e.deltaY;
+  }, { passive: true });
   canvas.addEventListener("touchstart", resumeAudio, { passive: true });
   window.addEventListener("mouseup", (e) => { input.buttons.delete(e.button); });
 
