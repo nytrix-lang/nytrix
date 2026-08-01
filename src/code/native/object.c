@@ -243,16 +243,6 @@ static bool ny_i386_obj_f32_memop(ny_i386_obj_ctx_t *c, unsigned modrm,
          ny_i386_obj_i32(c, off);
 }
 
-static bool ny_i386_obj_fcompl(ny_i386_obj_ctx_t *c, int off) {
-  static const unsigned char op[] = {0xdc, 0x9d};
-  return ny_i386_obj_bytes(c, op, sizeof(op)) && ny_i386_obj_i32(c, off);
-}
-
-static bool ny_i386_obj_fcomps(ny_i386_obj_ctx_t *c, int off) {
-  static const unsigned char op[] = {0xd8, 0x9d};
-  return ny_i386_obj_bytes(c, op, sizeof(op)) && ny_i386_obj_i32(c, off);
-}
-
 static bool ny_i386_obj_load_value_f64(ny_i386_obj_ctx_t *c, int value) {
   if (value < 0 || value >= c->value_slots) {
     ny_native_set_err(c->err, c->err_len, "i386 ELF object writer: invalid f64 value v%d", value);
@@ -919,11 +909,11 @@ bool ny_i386_obj_emit_code(ny_i386_obj_ctx_t *c, const nyir_func_t *nyir,
         return false;
       break;
     case NYIR_CMP_F64:
-      if (!ny_i386_obj_load_value_f64(c, in->a) ||
-          !ny_i386_obj_fcompl(c, ny_i386_obj_value_off(in->b)) ||
-          /* FSTSW is the waiting x87 status read.  The comparison flags must
-           * be committed before SAHF transfers C3/C2/C0 into EFLAGS. */
-          !ny_i386_obj_bytes(c, (const unsigned char[]){0x9b, 0xdf, 0xe0, 0x9e, 0x0f},
+      /* FCOMIP writes EFLAGS directly.  Keep the x87 stack balanced after
+       * its implicit pop so conditional branches do not depend on SAHF. */
+      if (!ny_i386_obj_load_value_f64(c, in->b) ||
+          !ny_i386_obj_load_value_f64(c, in->a) ||
+          !ny_i386_obj_bytes(c, (const unsigned char[]){0xdf, 0xf1, 0xdd, 0xd8, 0x0f},
                              5) ||
           !ny_i386_obj_u8(c, ny_i386_obj_f64_setcc(in->cmp)) ||
           !ny_i386_obj_u8(c, 0xc0) ||
@@ -932,9 +922,9 @@ bool ny_i386_obj_emit_code(ny_i386_obj_ctx_t *c, const nyir_func_t *nyir,
         return false;
       break;
     case NYIR_CMP_F32:
-      if (!ny_i386_obj_load_value_f32(c, in->a) ||
-          !ny_i386_obj_fcomps(c, ny_i386_obj_value_off(in->b)) ||
-          !ny_i386_obj_bytes(c, (const unsigned char[]){0x9b, 0xdf, 0xe0, 0x9e, 0x0f},
+      if (!ny_i386_obj_load_value_f32(c, in->b) ||
+          !ny_i386_obj_load_value_f32(c, in->a) ||
+          !ny_i386_obj_bytes(c, (const unsigned char[]){0xdf, 0xf1, 0xdd, 0xd8, 0x0f},
                              5) ||
           !ny_i386_obj_u8(c, ny_i386_obj_f64_setcc(in->cmp)) ||
           !ny_i386_obj_u8(c, 0xc0) ||
