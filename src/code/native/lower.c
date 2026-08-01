@@ -750,7 +750,8 @@ static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b, const expr_t *
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
       const char *leaf = ny_native_leaf_name(e->as.call.callee->as.ident.name);
       if (leaf && (strcmp(leaf, "float") == 0 ||
-                   strcmp(leaf, "f64buf_load") == 0))
+                   strcmp(leaf, "f64buf_load") == 0 ||
+                   strcmp(leaf, "__flt_sqrt") == 0))
         return true;
     }
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT && b && b->prog) {
@@ -2384,6 +2385,23 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
       return ny_native_nir_emit_runtime_call(b, "rt_ticks_ns", -1, -1, -1,
                                              0, 0);
     }
+    if (leaf && strcmp(leaf, "__flt_sqrt") == 0) {
+      if (e->as.call.args.len != 1 || e->as.call.args.data[0].name) {
+        ny_native_nir_fail(b, "native NYIR lower: __flt_sqrt requires one positional argument");
+        return -1;
+      }
+      const expr_t *arg = e->as.call.args.data[0].val;
+      int value = ny_native_nir_lower_expr(b, arg);
+      if (value < 0)
+        return -1;
+      if (!ny_native_nir_expr_is_f64(b, arg)) {
+        value = ny_native_nir_emit_i64_to_f64(b, value);
+        if (value < 0)
+          return -1;
+      }
+      return ny_native_nir_emit_runtime_call(b, "rt_native_sqrt_f64", value,
+                                             -1, -1, 1, NYIR_INST_F_RET_F64);
+    }
     if (leaf && (strcmp(leaf, "addr_of") == 0 || strcmp(leaf, "borrow") == 0)) {
       if (e->as.call.args.len != 1 || e->as.call.args.data[0].name ||
           !e->as.call.args.data[0].val) {
@@ -3043,6 +3061,29 @@ static bool ny_native_nir_lower_if(ny_native_nir_builder_t *b, const stmt_t *s) 
   int cond = ny_native_nir_lower_expr(b, s->as.iff.test);
   if (cond < 0)
     return false;
+  /* Statement-only `if` has no expression result.  Do not synthesize a
+   * merge local from the prior statement's value: that can mix unrelated
+   * scalar types across the branch (for example f64 work before int code). */
+  if (!s->as.iff.alt) {
+    int then_label = b->next_label++;
+    int end_label = b->next_label++;
+    bool entry_return = b->emitted_return;
+    int entry_last_value = b->last_value;
+    if (!ny_native_nir_emit_br_if(b, cond, then_label) ||
+        !ny_native_nir_emit_br(b, end_label) ||
+        !ny_native_nir_emit_label(b, then_label))
+      return false;
+    b->emitted_return = false;
+    if (!ny_native_nir_lower_stmt(b, s->as.iff.conseq))
+      return false;
+    if (!b->emitted_return && !ny_native_nir_emit_br(b, end_label))
+      return false;
+    if (!ny_native_nir_emit_label(b, end_label))
+      return false;
+    b->emitted_return = entry_return;
+    b->last_value = entry_last_value;
+    return true;
+  }
   int then_label = b->next_label++;
   int else_label = b->next_label++;
   int merge_label = b->next_label++;

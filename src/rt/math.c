@@ -540,6 +540,8 @@ int64_t rt_flt_atan2(int64_t y, int64_t x) {
   return rt_flt_box_double(atan2(rt_flt_unbox_double(y), rt_flt_unbox_double(x)));
 }
 int64_t rt_flt_sqrt(int64_t v) { return rt_flt_box_double(sqrt(rt_flt_unbox_double(v))); }
+
+double rt_native_sqrt_f64(double value) { return sqrt(value); }
 int64_t rt_flt_exp(int64_t v) { return rt_flt_box_double(exp(rt_flt_unbox_double(v))); }
 int64_t rt_flt_log(int64_t v) { return rt_flt_box_double(log(rt_flt_unbox_double(v))); }
 int64_t rt_flt_log2(int64_t v) { return rt_flt_box_double(log2(rt_flt_unbox_double(v))); }
