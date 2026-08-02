@@ -33,7 +33,7 @@ use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_balanced_d
 use std.os.rev.decomp.arithmetic (_ny_infix_operator, _clean_paren, _clean_literal_zero, _clean_literal_one, _clean_same_expr_text, _clean_const_mul_expr, _clean_div_expr_parts, _clean_const_mul_text, _clean_add_scaled_expr, _clean_sub_mod_expr, _clean_mba_same_expr, _clean_mba_pair_expr, _clean_mba_const_mul_expr, _clean_mba_scaled_pair_expr, _clean_mba_pair_same_unordered, _clean_mba_pair_sum, _clean_mba_pair_xor, _clean_mba_xor_pair_expr, _clean_mba_add_expr, _clean_mba_sub_expr, _clean_mba_expr_once, _clean_simplify_mba_expr, _clean_binary_expr)
 use std.os.rev.decomp.render_text (_clean_token_char, _clean_replace_token, _clean_replace_token_code, _clean_apply_render_renames, _clean_normalize_rip_relative_data_symbols)
 use std.os.rev.decomp.structure (_clean_next_nonblank_index, _clean_compact_blank_lines, _clean_structure_report, _clean_balance_trailing_braces, _clean_switch_block_at, _clean_drop_repeated_switches)
-use "../symbolic.ny" as sym
+use std.os.rev.symbolic as sym
 use std.os.rev.decomp.elf (
    analyze, arch, arch_profile, disassemble, disassemble_function, elf_header,
    entry, executable_sections, flirt_apply, flirt_match, flirt_signature,
@@ -227,10 +227,7 @@ fn _operand_looks_immediate_literal(str op0) bool {
    str.ascii_is_digit(load8(op, 0))
 }
 
-fn data_refs(any source, any target=".text", int max_bytes=2048) list {
-   "Return data/import/string references from a decompiled range."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
-   def rows = disassemble(bin, target, max_bytes)
+fn _data_refs_from_rows(dict bin, list rows) list {
    mut out = []
    mut seen = dict()
    mut i = 0
@@ -260,6 +257,12 @@ fn data_refs(any source, any target=".text", int max_bytes=2048) list {
       i += 1
    }
    out
+}
+
+fn data_refs(any source, any target=".text", int max_bytes=2048) list {
+   "Return data/import/string references from a decompiled range."
+   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   _data_refs_from_rows(bin, disassemble(bin, target, max_bytes))
 }
 
 fn _ref_targets(any targets) list {
@@ -1570,10 +1573,7 @@ fn _lift_row(dict bin, list r) dict {
    row
 }
 
-fn lift(any source, any target=0, int max_bytes=1024) list {
-   "Lift disassembly rows into compact Nytrix IR rows for later CFG/symbolic passes."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
-   def rows = disassemble(bin, target, max_bytes)
+fn _lift_rows(dict bin, list rows) list {
    mut out = []
    mut i = 0
    while i < rows.len {
@@ -1591,6 +1591,12 @@ fn lift(any source, any target=0, int max_bytes=1024) list {
       i += 1
    }
    out
+}
+
+fn lift(any source, any target=0, int max_bytes=1024) list {
+   "Lift disassembly rows into compact Nytrix IR rows for later CFG/symbolic passes."
+   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   _lift_rows(bin, disassemble(bin, target, max_bytes))
 }
 
 fn _slice_operand_symbol(str op) str {
@@ -3422,10 +3428,7 @@ fn _labels_for_rows(list rows, str a="x86_64") dict {
    m
 }
 
-fn labels(any source, any target=0, int max_bytes=1024) list {
-   "Return local labels needed by branch and jump-table targets inside a decompiled range."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
-   def rows = disassemble(bin, target, max_bytes)
+fn _labels_from_rows(dict bin, list rows, list jts) list {
    def lm = _labels_for_rows(rows, arch(bin))
    mut out = []
    mut i = 0
@@ -3437,7 +3440,6 @@ fn labels(any source, any target=0, int max_bytes=1024) list {
       }
       i += 1
    }
-   def jts = jump_tables(bin, target, max_bytes)
    mut ti = 0
    while ti < jts.len {
       def es = jts[ti].get("entries", [])
@@ -3456,6 +3458,14 @@ fn labels(any source, any target=0, int max_bytes=1024) list {
       ti += 1
    }
    out
+}
+
+fn labels(any source, any target=0, int max_bytes=1024) list {
+   "Return local labels needed by branch and jump-table targets inside a decompiled range."
+   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def rows = disassemble(bin, target, max_bytes)
+   def jts = target == 0 ? _jump_tables_from_rows(bin, disassemble(bin, ".text", max_bytes)) : _jump_tables_from_rows(bin, rows)
+   _labels_from_rows(bin, rows, jts)
 }
 
 fn _branch_condition_expr(list rows, int idx, str cond) str {
@@ -5647,11 +5657,8 @@ fn _global_access(dict row) str {
    "read"
 }
 
-fn variables(any source, any target=0, int max_bytes=1024) list {
-   "Return decompiler symbols with use sites: locals, params, globals/imports/strings, and labels."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
-   def rows = lift(bin, target, max_bytes)
-   def tb = _target_bytes(bin, target, max_bytes)
+fn _variables_from_rows(dict bin, list rows, dict sig0, str sig_name) list {
+   def sig = _signature_main_aliases(sig0, sig_name)
    mut out = []
    def frame = _frame_model(rows)
    def slots = frame.get("slots", [])
@@ -5662,8 +5669,6 @@ fn variables(any source, any target=0, int max_bytes=1024) list {
       {"addr": 0, "access": "declare", "role": "stack_slot", "mnemonic": "", "operand": ""})
       i += 1
    }
-   def sig_name = is_str(target) ? _safe_name(target, "sub") : _safe_name(tb.get("name", ""), "sub")
-   def sig = _signature_main_aliases(_function_signature_for (bin, target, rows, int(tb.get("addr", 0)), max_bytes), sig_name)
    def ps = sig.get("params", [])
    i = 0
    while i < ps.len {
@@ -5729,6 +5734,15 @@ fn variables(any source, any target=0, int max_bytes=1024) list {
       i += 1
    }
    out
+}
+
+fn variables(any source, any target=0, int max_bytes=1024) list {
+   "Return decompiler symbols with use sites: locals, params, globals/imports/strings, and labels."
+   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def rows = lift(bin, target, max_bytes)
+   def tb = _target_bytes(bin, target, max_bytes)
+   def sig_name = is_str(target) ? _safe_name(target, "sub") : _safe_name(tb.get("name", ""), "sub")
+   _variables_from_rows(bin, rows, _function_signature_for (bin, target, rows, int(tb.get("addr", 0)), max_bytes), sig_name)
 }
 
 fn _call_render(str name, list args, str family="x86") str {
@@ -7411,8 +7425,9 @@ fn function_model(any source, any target=0, int max_bytes=1024) dict {
    "Return Ny decompiler function metadata: rows, labels, refs, CFG, frame, signature, and call args."
    def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
    def tb = _target_bytes(bin, target, max_bytes)
-   def rows = lift(bin, target, max_bytes)
-   def graph = cfg(bin, target, max_bytes)
+   def raw = disassemble(bin, target, max_bytes)
+   def rows = _lift_rows(bin, raw)
+   def graph = _cfg_from_rows(bin, raw)
    def factset = _facts_from(bin, target, rows, graph)
    def machines = _state_machines_from_rows(bin, rows)
    def sig = _function_signature_for (bin, target, rows, int(tb.get("addr", 0)), max_bytes)
@@ -7428,16 +7443,20 @@ fn function_model(any source, any target=0, int max_bytes=1024) dict {
       }
       ni += 1
    }
+   def jts = target == 0 ? _jump_tables_from_rows(bin, disassemble(bin, ".text", max_bytes)) : _jump_tables_from_rows(bin, raw)
+   def sig_name = is_str(target) ? _safe_name(target, "sub") : _safe_name(tb.get("name", ""), "sub")
+   def dominfo = _cfg_dominators_for_graph(graph)
+   def pdominfo = _cfg_postdominators_for_graph(graph)
    {"language": "ny", "target": target, "name": _rename_addr(bin, tb.get("addr", 0), _rename_name(bin, tb.get("name", ""))), "addr": tb.get("addr", 0),
-      "rows": rows, "labels": labels(bin, target, max_bytes), "refs": data_refs(bin, target, max_bytes),
-      "jump_tables": jump_tables(bin, target, max_bytes),
-      "cfg": graph, "dominators": cfg_dominators(bin, target, max_bytes),
-      "postdominators": cfg_postdominators(bin, target, max_bytes),
-      "control_dependence": cfg_control_dependence(bin, target, max_bytes),
-      "loops": cfg_loops(bin, target, max_bytes),
+      "rows": rows, "labels": _labels_from_rows(bin, raw, jts), "refs": _data_refs_from_rows(bin, raw),
+      "jump_tables": jts,
+      "cfg": graph, "dominators": dominfo,
+      "postdominators": pdominfo,
+      "control_dependence": _cfg_control_dependence_for_graph(graph, pdominfo),
+      "loops": _cfg_loops_for_graph(graph, dominfo),
       "state_machines": machines,
       "frame": _frame_model(rows), "signature": sig,
-      "calls": _calls_model(rows, bin, sig), "syscalls": _syscalls_model(rows), "variables": variables(bin, target, max_bytes),
+      "calls": _calls_model(rows, bin, sig), "syscalls": _syscalls_model(rows), "variables": _variables_from_rows(bin, rows, sig, sig_name),
    "def_use": factset.get("def_use", dict()), "facts": factset, "type_recovery": trec, "notes": local_notes}
 }
 

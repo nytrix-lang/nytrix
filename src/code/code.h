@@ -786,6 +786,7 @@ void collect_sigs(codegen_t *cg, struct stmt_t *s);
 void collect_use_modules(codegen_t *cg, struct stmt_t *s);
 void codegen_repopulate_interns(codegen_t *cg);
 void codegen_rebind_llvm_symbols(codegen_t *cg);
+void codegen_export_extern_link_names(codegen_t *cg);
 void codegen_emit(codegen_t *cg);
 LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name);
 void codegen_collect_links(codegen_t *cg, program_t *prog);

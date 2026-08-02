@@ -2660,6 +2660,10 @@ skip_compilation:
     }
     ny_trace_file_size("emit_bc", opt->emit_bc_path);
   }
+  /* Extern declarations with `as "cname"` must emit their linker symbol, not
+   * the Nytrix name.  Rename before any LLVM assembly/object emission. */
+  if (opt->native_backend == NY_NATIVE_BACKEND_LLVM)
+    codegen_export_extern_link_names(&cg);
   if (opt->emit_asm_path) {
     ny_ensure_parent_dir_for_path(opt->emit_asm_path);
     if (opt->native_backend != NY_NATIVE_BACKEND_LLVM) {

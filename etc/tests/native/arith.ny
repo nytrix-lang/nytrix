@@ -28,6 +28,19 @@ assert_eq(6 ^ 3, 216)
 assert_eq(2 ^ 8, 256)
 assert_eq(10 ^ 0, 1)
 
+; POW with a variable base must lower through std.core.pow (bigint), not the
+; tagged-int fast path — this is the regression that once returned ~4.7e13
+; because the result was wrongly treated as a tagged small int.
+def int base = 3
+def int exp = 2
+assert_eq(base ^ exp, 9)
+assert_eq(base ^ 2, 9)
+assert_eq(2 ^ exp, 4)
+fn ipow(int x) int { return x ^ 2 }
+assert_eq(ipow(2), 4)
+assert_eq(ipow(4), 16)
+assert_eq(ipow(5), 25)
+
 ; Comparison
 assert_eq(3 < 5, true)
 assert_eq(5 < 3, false)

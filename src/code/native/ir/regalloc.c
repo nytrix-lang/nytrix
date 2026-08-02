@@ -187,10 +187,24 @@ static bool color_segments(ny_mach_regalloc_t *a) {
 
 static bool block_has_color_conflict(const ny_mach_regalloc_t *a,
                                      const ny_mach_live_segment_t *target,
-                                     int color) {
-  for (size_t i = 0; i < a->segment_len; ++i) {
-    const ny_mach_live_segment_t *s = &a->segments[i];
-    if (s == target || s->block != target->block || s->color != color)
+                                     int color,
+                                     const size_vec_t *by_block) {
+  /* Scan only segments in target->block.  by_block is an index keyed by block
+   * id; segment block membership is immutable during coalescing, so the index
+   * stays valid even though colors are updated in place. */
+  size_t count = a->segment_len;
+  const size_t *indices = NULL;
+  if (by_block && target->block < a->block_count) {
+    indices = by_block[target->block].data;
+    count = by_block[target->block].len;
+  }
+  for (size_t k = 0; k < count; ++k) {
+    const ny_mach_live_segment_t *s = &a->segments[indices ? indices[k] : k];
+    if (s == target)
+      continue;
+    if (indices == NULL && (s->block != target->block))
+      continue;
+    if (s->color != color)
       continue;
     if (!(s->end < target->start || target->end < s->start))
       return true;
@@ -202,6 +216,28 @@ static void coalesce_segments(const ny_mach_func_t *mach,
                               ny_mach_regalloc_t *a,
                               const size_vec_t *succ,
                               const size_vec_t *pred) {
+  /* Index segments by block so the per-step conflict check scans only segments
+   * in the relevant block instead of every segment.  Block membership is fixed
+   * after coloring, so this index is built once and reused. */
+  size_vec_t *by_block = NULL;
+  if (mach->block_len > 0) {
+    by_block = calloc(mach->block_len, sizeof(*by_block));
+    if (by_block) {
+      for (size_t i = 0; i < a->segment_len; ++i) {
+        uint32_t b = a->segments[i].block;
+        if (b >= mach->block_len)
+          continue;
+        if (!size_vec_push(&by_block[b], i)) {
+          for (size_t k = 0; k < mach->block_len; ++k)
+            free(by_block[k].data);
+          free(by_block);
+          by_block = NULL;
+          break;
+        }
+      }
+    }
+  }
+
   for (size_t i = 0; i < a->segment_len; ++i) {
     ny_mach_live_segment_t *x = &a->segments[i];
     if (x->color < 0)
@@ -211,7 +247,7 @@ static void coalesce_segments(const ny_mach_func_t *mach,
       if (y->vreg != x->vreg || y->color < 0 || y->start != x->end + 1)
         continue;
       if (x->block == y->block) {
-        if (!block_has_color_conflict(a, y, x->color)) {
+        if (!block_has_color_conflict(a, y, x->color, by_block)) {
           y->color = x->color;
           x->spill = false;
           y->reload = false;
@@ -228,12 +264,18 @@ static void coalesce_segments(const ny_mach_func_t *mach,
       if (x->end + 1 != xb->first_inst + xb->inst_count ||
           y->start != yb->first_inst)
         continue;
-      if (!block_has_color_conflict(a, y, x->color)) {
+      if (!block_has_color_conflict(a, y, x->color, by_block)) {
         y->color = x->color;
         x->spill = false;
         y->reload = false;
       }
     }
+  }
+
+  if (by_block) {
+    for (size_t b = 0; b < mach->block_len; ++b)
+      free(by_block[b].data);
+    free(by_block);
   }
 }
 

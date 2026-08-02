@@ -2917,11 +2917,16 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
     if (!l_ok || !r_ok)
       return false;
     if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0 || strcmp(op, "*") == 0 ||
-        strcmp(op, "^") == 0 || strcmp(op, "&") == 0 || strcmp(op, "|") == 0 || strcmp(op, "^^") == 0 ||
+        strcmp(op, "&") == 0 || strcmp(op, "|") == 0 || strcmp(op, "^^") == 0 ||
         strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0)
       return true;
     if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0)
       return true;
+    /* `^` (power) lowers to std.core.pow, which returns a heap bigint for
+       integer operands rather than a tagged small int, so it must NOT be
+       treated as a proven-int-producing binary op (the fast untag would
+       shift a pointer and yield garbage). Const-folded `^` never reaches
+       here. */
     return false;
   }
   case NY_E_UNARY:

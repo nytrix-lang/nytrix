@@ -334,10 +334,7 @@ fn _relative_switch_for_lift_rows(dict bin, list rows, int idx, int max_entries=
    "count": entries.len, "entries": entries, "consumes": consumes}
 }
 
-fn jump_tables(any source, any target=0, int max_bytes=2048, int max_entries=32) list {
-   "Recover bounded pointer jump tables used by compiler switch lowering."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
-   def rows = target == 0 ? disassemble(bin, ".text", max_bytes) : disassemble(bin, target, max_bytes)
+fn _jump_tables_from_rows(dict bin, list rows, int max_entries=32) list {
    mut out = []
    mut seen = dict()
    mut i = 0
@@ -353,6 +350,13 @@ fn jump_tables(any source, any target=0, int max_bytes=2048, int max_entries=32)
       i += 1
    }
    out
+}
+
+fn jump_tables(any source, any target=0, int max_bytes=2048, int max_entries=32) list {
+   "Recover bounded pointer jump tables used by compiler switch lowering."
+   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def rows = target == 0 ? disassemble(bin, ".text", max_bytes) : disassemble(bin, target, max_bytes)
+   _jump_tables_from_rows(bin, rows, max_entries)
 }
 
 fn _cfg_from_blocks(dict bin, list blocks) dict {
@@ -561,11 +565,9 @@ fn _cfg_exits(dict graph) list {
    out
 }
 
-fn cfg_postdominators(any source, any target=0, int max_bytes=2048) dict {
-   "Compute local CFG postdominator sets for structured Ny rendering."
-   def graph = cfg(source, target, max_bytes)
+fn _cfg_postdominators_for_graph(dict graph) dict {
    def nodes = graph.get("nodes", [])
-   if nodes.len == 0 { return {"exits": [], "postdominators": dict(), "ipostdominators": dict(), "nodes": []} }
+   if nodes.len == 0 { return {"cfg": graph, "exits": [], "postdominators": dict(), "ipostdominators": dict(), "nodes": []} }
    mut all = []
    mut i = 0
    while i < nodes.len { all = all.append(int(nodes[i].get("addr", 0))) i += 1 }
@@ -626,11 +628,12 @@ fn cfg_postdominators(any source, any target=0, int max_bytes=2048) dict {
    {"cfg": graph, "exits": exits, "postdominators": pdom, "ipostdominators": ipdom, "nodes": all}
 }
 
-fn cfg_control_dependence(any source, any target=0, int max_bytes=2048) dict {
-   "Return control-dependence regions from CFG postdominators.
-   Each region identifies a branch block and the blocks controlled by each outgoing edge."
-   def graph = cfg(source, target, max_bytes)
-   def post = cfg_postdominators(source, target, max_bytes)
+fn cfg_postdominators(any source, any target=0, int max_bytes=2048) dict {
+   "Compute local CFG postdominator sets for structured Ny rendering."
+   _cfg_postdominators_for_graph(cfg(source, target, max_bytes))
+}
+
+fn _cfg_control_dependence_for_graph(dict graph, dict post) dict {
    def pdom = post.get("postdominators", dict())
    def edges = graph.get("edges", [])
    mut regions = []
@@ -656,6 +659,13 @@ fn cfg_control_dependence(any source, any target=0, int max_bytes=2048) dict {
    {"cfg": graph, "postdominators": post, "regions": regions, "dependents": dependents, "count": regions.len}
 }
 
+fn cfg_control_dependence(any source, any target=0, int max_bytes=2048) dict {
+   "Return control-dependence regions from CFG postdominators.
+   Each region identifies a branch block and the blocks controlled by each outgoing edge."
+   def graph = cfg(source, target, max_bytes)
+   _cfg_control_dependence_for_graph(graph, _cfg_postdominators_for_graph(graph))
+}
+
 fn _cfg_loops_for_graph(dict graph, dict dominfo) dict {
    def dom = dominfo.get("dominators", dict())
    def edges = graph.get("edges", [])
@@ -666,10 +676,11 @@ fn _cfg_loops_for_graph(dict graph, dict dominfo) dict {
       def e = edges[i]
       def from = int(e.get("from", 0))
       def to = int(e.get("to", 0))
-      if _list_has(dom.get(to_str(from), []), to) {
-         back = back.append(e.set("kind", "back_edge"))
-         loops = loops.append({"header": to, "latch": from, "back_edge": e, "body_hint": [to, from]})
-      }
+   if _list_has(dom.get(to_str(from), []), to) {
+      def e2 = clone(e).set("kind", "back_edge")
+      back = back.append(e2)
+      loops = loops.append({"header": to, "latch": from, "back_edge": e2, "body_hint": [to, from]})
+   }
       i += 1
    }
    {"cfg": graph, "back_edges": back, "loops": loops, "count": loops.len}

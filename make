@@ -324,6 +324,30 @@ def clean_bad_tool_build(build_root: Path, kind: str, name: str) -> None:
     boot_notice(f"stale/cpu-incompatible {name} binary detected; cleaning {bdir.name} before rebuild")
     shutil.rmtree(bdir, ignore_errors=True)
 
+def cached_run_binary_ok(path: Path) -> bool:
+    """Return False only if a cached ny-run binary dies on a signal when started.
+
+    A cached executable is an arbitrary user program, so we cannot probe it with
+    --version like a named tool.  We only reject it when launching it crashes
+    the process with a signal (SIGILL=132, or any negative returncode) -- the
+    same CPU-incompatibility signal clean_bad_tool_build watches for.  A normal
+    non-zero exit (e.g. the program rejecting unknown args) is accepted; we
+    never want to discard a good cache entry because the user's program printed
+    usage and exited 1.
+    """
+    try:
+        res = subprocess.run(
+            [str(path), "--nytrix-cache-smoke"],
+            cwd=str(ROOT),
+            env=os.environ.copy(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=4,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return not (res.returncode == 132 or res.returncode < 0)
+
 def restore_tty_visuals() -> None:
     if not sys.stdout.isatty():
         return
@@ -807,7 +831,14 @@ def _install_optional_std_deps(force_prompt: bool = False) -> None:
         want = _ask_yes_no("Install optional std/native deps used by the standard library?", False)
     if not want:
         if missing:
+            # The skip is allowed (these deps are optional and a minimal CI may
+            # legitimately lack them), but it must never be silent: a non-TTY
+            # build that exits 0 while missing std/native deps would otherwise
+            # ship a stdlib with quietly-disabled features.  Emit a prominent,
+            # machine-parseable marker to stderr so logs and CI cannot miss it.
             log("DEPS", "skipping optional std/native deps; set NYTRIX_INSTALL_STD_DEPS=1 or run ./make deps later")
+            err(f"NYTRIX_MISSING_STD_DEPS={','.join(missing)}")
+            err("NYTRIX_STD_DEPS_SKIPPED=1 (stdlib features that need these deps will be disabled)")
         return
 
     os_name = host_os()
@@ -1973,7 +2004,7 @@ NY_RUN_CACHE_BLOCKERS = {
     "--dump-on-error", "--dump-diagnose", "-trace",
 }
 
-NY_SUBCOMMANDS = {"fmt", "test", "doc", "web", "perf", "make", "pkg", "get", "install", "new", "c2ny", "ny-lsp"}
+NY_SUBCOMMANDS = {"fmt", "test", "doc", "web", "perf", "make", "pkg", "get", "install", "new", "c2ny", "py2ny", "ny-lsp"}
 
 def _ny_arg_takes_value(arg: str) -> bool:
     return arg in NY_VALUE_OPTS
@@ -2105,7 +2136,23 @@ def run_ny_cached(build_root: Path, kind: str, args: list[str]) -> int | None:
             return rc
         chmod_executable(cached)
     else:
-        log("CACHE", f"ny -run using {cached.relative_to(ROOT)}")
+        # Validate the cached executable before reuse: a stale, corrupted, or
+        # CPU-incompatible binary would otherwise run silently.  This mirrors
+        # clean_bad_tool_build's guard on the compiler binary itself.  On signal
+        # death, drop the entry and rebuild instead of executing a bad binary.
+        if not cached_run_binary_ok(cached):
+            log("CACHE", f"ny -run cache entry {cached.relative_to(ROOT)} failed smoke check; rebuilding")
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            compile_front = [a for a in args[:src_i] if a != "-run"]
+            compile_args = [launch, "--profile=compile", *compile_front, "-o", str(cached), source_arg]
+            rc = subprocess.Popen(compile_args, cwd=str(ROOT), env=env).wait()
+            if rc != 0:
+                cached.unlink(missing_ok=True)
+                return rc
+            chmod_executable(cached)
+        else:
+            log("CACHE", f"ny -run using {cached.relative_to(ROOT)}")
     try:
         return subprocess.Popen([str(cached), *program_args], cwd=str(ROOT), env=env).wait()
     except KeyboardInterrupt:
@@ -4683,7 +4730,7 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     return rc
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
-    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -6414,6 +6461,11 @@ def main() -> int:
                 nyt_err("c2ny", "usage: ./make c2ny <file.c> [-o <out.ny>]")
                 raise SystemExit(1)
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--c2ny", *extra])
+        elif cmd == "py2ny":
+            if not extra:
+                nyt_err("py2ny", "usage: ./make py2ny <file.py> [-o <out.ny>]")
+                raise SystemExit(1)
+            rc = run_tool(build_root, active_kind, "ny-fmt", ["--py2ny", *extra])
         elif cmd == "wasm":
             rc = run_wasm(build_root, active_kind, extra)
         elif cmd == "install":
@@ -6483,7 +6535,12 @@ def main() -> int:
         elif cmd == "bench":
             rc = run_tool(build_root, active_kind, "ny-fuzz", ["bench", "real", *extra])
         elif cmd in ("optcheck", "fb"):
-            raise SystemExit(f"make: command '{cmd}' is not yet ported to native C path")
+            raise SystemExit(
+                f"make: command '{cmd}' is not implemented on the native C path.\n"
+                "  For optimization correctness, use: ./make test\n"
+                "  For fuzz/shape validation, use:  ./make fuzz [validate-shapes etc/tests/shapes]\n"
+                "  For benchmarks, use:             ./make bench"
+            )
         else:
             raise SystemExit(f"make: unsupported command: {cmd}")
 

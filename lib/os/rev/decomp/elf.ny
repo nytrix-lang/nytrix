@@ -14,6 +14,8 @@ use std.os.rev.decomp.elf_types (machine, file_type, symbol_bind, symbol_type, s
 use std.os.rev.decomp.bytes (_u16, _u32, _u64, _slice, _slice_list, _cstring)
 use std.os.rev.decomp.source (_read, _source_data, _looks_path)
 use std.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique, _symbols_intersect)
+use std.os.rev.decomp.pe as pe
+use std.os.rev.decomp.macho as macho
 
 def SHT_SYMTAB = 2
 def SHT_STRTAB = 3
@@ -156,7 +158,9 @@ fn _section_table(str b, dict h) list {
 }
 
 fn sections(any source) list {
-   "Return ELF section records."
+   "Return section records. Loaded records return their cached sections; raw
+   sources are parsed as ELF (or the containing format's loader)."
+   if is_dict(source) && source.contains("sections") { return source.get("sections", []) }
    def b = _source_data(source)
    _section_table(b, elf_header(b))
 }
@@ -180,7 +184,9 @@ fn section_bytes(any source, str name) str {
 }
 
 fn segments(any source) list {
-   "Return ELF program headers/segments."
+   "Return segment/load records. Loaded records return their cached segments;
+   raw sources are parsed as ELF (or the containing format's loader)."
+   if is_dict(source) && source.contains("segments") { return source.get("segments", []) }
    def b = _source_data(source)
    def h = elf_header(b)
    if !h.get("ok", false) { return [] }
@@ -253,7 +259,9 @@ fn _symbols_from_section(str b, dict h, list ss, dict symsec) list {
 }
 
 fn symbols(any source) list {
-   "Return ELF symbols from `.symtab` and `.dynsym` when present."
+   "Return symbol records. Loaded records return their cached symbols; raw
+   sources are parsed as ELF (or the containing format's loader)."
+   if is_dict(source) && source.contains("symbols") { return source.get("symbols", []) }
    def b = _source_data(source)
    def h = elf_header(b)
    def ss = _section_table(b, h)
@@ -300,13 +308,14 @@ fn functions(any source) list {
 }
 
 fn executable_sections(any source) list {
-   "Return executable ELF sections, usually `.init`, `.plt`, `.text`, `.fini`."
+   "Return executable sections, usually `.init`, `.plt`, `.text`, `.fini`."
    def ss = is_dict(source) && source.contains("sections") ? source.get("sections", []) : sections(source)
    mut out = []
    mut i = 0
    while i < ss.len {
       def s = ss[i]
-      if (int(s.get("flags", 0)) & SHF_EXECINSTR) != 0 && int(s.get("size", 0)) > 0 {
+      def exe = s.contains("exec") ? s.get("exec", false) : (int(s.get("flags", 0)) & SHF_EXECINSTR) != 0
+      if exe && int(s.get("size", 0)) > 0 {
          out = out.append(s)
       }
       i += 1
@@ -562,10 +571,140 @@ fn _reloc_type_name(int machine, int typ) str {
       case typ {
          1 -> "x86_64_64"
          2 -> "x86_64_pc32"
+         3 -> "x86_64_got32"
+         4 -> "x86_64_plt32"
+         5 -> "x86_64_copy"
          6 -> "x86_64_glob_dat"
          7 -> "x86_64_jump_slot"
          8 -> "x86_64_relative"
+         9 -> "x86_64_gotpcrel"
+         10 -> "x86_64_32"
+         11 -> "x86_64_32s"
+         16 -> "x86_64_pc64"
+         18 -> "x86_64_size32"
+         19 -> "x86_64_size64"
+         24 -> "x86_64_gotpcrelx"
+         25 -> "x86_64_rex_gotpcrelx"
+         37 -> "x86_64_gotpcrel64"
+         41 -> "x86_64_irelative"
          _ -> "x86_64_" + to_str(typ)
+      }
+   } else if machine == 183 {
+      case typ {
+         257 -> "aarch64_none"
+         276 -> "aarch64_abs64"
+         277 -> "aarch64_abs32"
+         278 -> "aarch64_abs16"
+         279 -> "aarch64_prel64"
+         280 -> "aarch64_prel32"
+         281 -> "aarch64_prel16"
+         282 -> "aarch64_movw_uabs_g0"
+         283 -> "aarch64_movw_uabs_g0_nc"
+         284 -> "aarch64_movw_uabs_g1"
+         285 -> "aarch64_movw_uabs_g1_nc"
+         286 -> "aarch64_movw_uabs_g2"
+         287 -> "aarch64_movw_uabs_g2_nc"
+         288 -> "aarch64_movw_uabs_g3"
+         295 -> "aarch64_ld_prel_lo19"
+         296 -> "aarch64_adr_prel_lo21"
+         297 -> "aarch64_adr_prel_pg_hi21"
+         298 -> "aarch64_adr_prel_pg_hi21_nc"
+         299 -> "aarch64_add_abs_lo12_nc"
+         300 -> "aarch64_ldst8_abs_lo12_nc"
+         301 -> "aarch64_tstbr14"
+         302 -> "aarch64_condbr19"
+         303 -> "aarch64_jump26"
+         304 -> "aarch64_call26"
+         305 -> "aarch64_ldst16_abs_lo12_nc"
+         306 -> "aarch64_ldst32_abs_lo12_nc"
+         307 -> "aarch64_ldst64_abs_lo12_nc"
+         308 -> "aarch64_ldst128_abs_lo12_nc"
+         309 -> "aarch64_adr_got_page"
+         310 -> "aarch64_ld64_got_lo12_nc"
+         313 -> "aarch64_ld32_got_lo12_nc"
+         320 -> "aarch64_adr_gotpage_lo21"
+         1024 -> "aarch64_copy"
+         1025 -> "aarch64_glob_dat"
+         1026 -> "aarch64_jump_slot"
+         1027 -> "aarch64_relative"
+         1028 -> "aarch64_tls_dtpmod"
+         1029 -> "aarch64_tls_dtprel"
+         1030 -> "aarch64_tls_tprel"
+         1031 -> "aarch64_tlsdesc"
+         1032 -> "aarch64_irelative"
+         _ -> "aarch64_" + to_str(typ)
+      }
+   } else if machine == 40 {
+      case typ {
+         0 -> "arm_none"
+         1 -> "arm_pc24"
+         2 -> "arm_abs32"
+         3 -> "arm_rel32"
+         8 -> "arm_abs8"
+         17 -> "arm_tls_dtpmod32"
+         18 -> "arm_tls_dtpoff32"
+         19 -> "arm_tls_tpoff32"
+         20 -> "arm_copy"
+         21 -> "arm_glob_dat"
+         22 -> "arm_jump_slot"
+         23 -> "arm_relative"
+         24 -> "arm_gotoff32"
+         26 -> "arm_got_brel"
+         27 -> "arm_plt32"
+         28 -> "arm_call"
+         29 -> "arm_jump24"
+         30 -> "arm_thm_jump24"
+         38 -> "arm_target1"
+         41 -> "arm_target2"
+         42 -> "arm_prel31"
+         160 -> "arm_irelative"
+         _ -> "arm_" + to_str(typ)
+      }
+   } else if machine == 243 {
+      case typ {
+         0 -> "riscv_none"
+         1 -> "riscv_32"
+         2 -> "riscv_64"
+         3 -> "riscv_relative"
+         4 -> "riscv_copy"
+         5 -> "riscv_jump_slot"
+         6 -> "riscv_tls_dtpmod32"
+         7 -> "riscv_tls_dtpmod64"
+         8 -> "riscv_tls_dtprel32"
+         9 -> "riscv_tls_dtprel64"
+         10 -> "riscv_tls_tprel32"
+         11 -> "riscv_tls_tprel64"
+         12 -> "riscv_branch"
+         13 -> "riscv_jal"
+         14 -> "riscv_call"
+         15 -> "riscv_call_plt"
+         16 -> "riscv_got_hi20"
+         18 -> "riscv_tls_gd_hi20"
+         19 -> "riscv_pcrel_hi20"
+         20 -> "riscv_pcrel_lo12_i"
+         21 -> "riscv_pcrel_lo12_s"
+         22 -> "riscv_hi20"
+         23 -> "riscv_lo12_i"
+         24 -> "riscv_lo12_s"
+         25 -> "riscv_tprel_hi20"
+         26 -> "riscv_tprel_lo12_i"
+         27 -> "riscv_tprel_lo12_s"
+         29 -> "riscv_add8"
+         30 -> "riscv_add16"
+         31 -> "riscv_add32"
+         32 -> "riscv_add64"
+         33 -> "riscv_sub8"
+         34 -> "riscv_sub16"
+         35 -> "riscv_sub32"
+         36 -> "riscv_sub64"
+         41 -> "riscv_gprel_i"
+         42 -> "riscv_gprel_s"
+         43 -> "riscv_tprel_i"
+         44 -> "riscv_tprel_s"
+         45 -> "riscv_relax"
+         51 -> "riscv_32_pcrel"
+         55 -> "riscv_irelative"
+         _ -> "riscv_" + to_str(typ)
       }
    } else {
       "reloc_" + to_str(typ)
@@ -719,23 +858,49 @@ fn strings(any source, int min_len=4, int limit=512) list {
    rev_strings.scan(_source_data(source), min_len, limit)
 }
 
+fn _detect_format(str data) str {
+   if data.len >= 4 {
+      if load8(data, 0) == 0x7f && load8(data, 1) == 69 && load8(data, 2) == 76 && load8(data, 3) == 70 {
+         return "elf"
+      }
+      if load8(data, 0) == 77 && load8(data, 1) == 90 {
+         return "pe"
+      }
+      def m = _u32(data, 0, false)
+      if m == 0xfeedfacf || m == 0xfeedface || m == 0xcffaedfe || m == 0xcefaedfe ||
+         m == 0xcafebabe || m == 0xbebafeca || m == 0xcafebabf || m == 0xbfbafeca {
+         return "macho"
+      }
+   }
+   "unknown"
+}
+
 fn load(str p, any opts=dict()) dict {
-   "Load and analyze an ELF file. The returned record is intentionally compact
-   and stable for scripts, UI panels, and later symbolic/decompiler passes."
+   "Load and analyze a binary file (ELF, PE, or Mach-O). The returned record is
+   intentionally compact and stable for scripts, UI panels, and later
+   symbolic/decompiler passes."
    def r = _read(p)
    if !r.get("ok", false) { return r }
    def data = r.get("data", "")
-   def h = elf_header(data)
-   def ss = _section_table(data, h)
-   def segs = segments(data)
-   def sy = symbols({"data": data})
-   def rel = relocations({"data": data, "sections": ss, "symbols": sy, "header": h})
-   def sym_funcs = functions({"symbols": sy})
-   mut bin = {"ok": h.get("ok", false), "path": p, "name": path.basename(p), "data": data, "header": h,
-      "sections": ss, "segments": segs, "symbols": sy, "functions": sym_funcs,
-      "imports": imports({"symbols": sy}), "relocations": rel, "import_sites": _plt_import_sites({"sections": ss, "relocations": rel}),
-      "strings": strings(data, int(opts.get("min_string", 4)), int(opts.get("string_limit", 256))),
-   "tools": tool_status()}
+   def fmt = _detect_format(data)
+   mut bin = dict()
+   if fmt == "pe" {
+      bin = pe.load(p, opts)
+   } elif fmt == "macho" {
+      bin = macho.load(p, opts)
+   } else {
+      def h = elf_header(data)
+      def ss = _section_table(data, h)
+      def segs = segments(data)
+      def sy = symbols({"data": data})
+      def rel = relocations({"data": data, "sections": ss, "symbols": sy, "header": h})
+      def sym_funcs = functions({"symbols": sy})
+      bin = {"ok": h.get("ok", false), "path": p, "name": path.basename(p), "data": data, "header": h,
+         "sections": ss, "segments": segs, "symbols": sy, "functions": sym_funcs,
+         "imports": imports({"symbols": sy}), "relocations": rel, "import_sites": _plt_import_sites({"sections": ss, "relocations": rel}),
+         "strings": strings(data, int(opts.get("min_string", 4)), int(opts.get("string_limit", 256))),
+      "tools": tool_status()}
+   }
    if bin.get("ok", false) && bool(opts.get("recover_functions", true)) {
       bin = bin.set("functions", recover_functions(bin, int(opts.get("scan_bytes", 65536))))
    }
@@ -1177,4 +1342,17 @@ fn flirt_apply(any source, list signatures, any opts=dict()) dict {
       i += 1
    }
    bin.set("renames", bin.get("renames", dict()).merge(renames)).set("flirt_matches", matches).set("flirt_renames", renames)
+}
+
+#main {
+   assert(_reloc_type_name(62, 8) == "x86_64_relative", "x86_64 relocation names")
+   assert(_reloc_type_name(62, 41) == "x86_64_irelative", "x86_64 irelative")
+   assert(_reloc_type_name(183, 1026) == "aarch64_jump_slot", "aarch64 relocation names")
+   assert(_reloc_type_name(183, 304) == "aarch64_call26", "aarch64 call26")
+   assert(_reloc_type_name(40, 22) == "arm_jump_slot", "arm relocation names")
+   assert(_reloc_type_name(40, 160) == "arm_irelative", "arm irelative")
+   assert(_reloc_type_name(243, 5) == "riscv_jump_slot", "riscv relocation names")
+   assert(_reloc_type_name(243, 19) == "riscv_pcrel_hi20", "riscv pcrel_hi20")
+   assert(_reloc_type_name(8, 3) == "reloc_3", "unknown machine falls back")
+   print("✓ std.os.rev.decomp.elf relocation names passed")
 }

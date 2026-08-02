@@ -1081,7 +1081,12 @@ int ny_make_main(int argc, char **argv) {
       if (rc != 0)
         return rc;
     } else if (strcmp(cmd, "optcheck") == 0 || strcmp(cmd, "fb") == 0) {
-      nyt_err("ny-make", "command '%s' is not yet ported to native C path", cmd);
+      nyt_err("ny-make",
+              "command '%s' is not implemented on the native C path.\n"
+              "  For optimization correctness, use: ./make test\n"
+              "  For fuzz/shape validation, use:  ./make fuzz [validate-shapes etc/tests/shapes]\n"
+              "  For benchmarks, use:             ./make bench",
+              cmd);
       return 2;
     } else {
       nyt_err("ny-make", "unsupported command: %s", cmd);

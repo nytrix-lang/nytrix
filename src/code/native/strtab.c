@@ -1,5 +1,6 @@
 #include "code/native/internal.h"
 #include "code/native/object/internal.h"
+#include "base/util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,9 +8,12 @@
 
 /* Session-local C-string pool for the pure native path. Strings are interned
  * during NYIR lower as .Lnystr.N symbols and emitted into the code blob after
- * functions so LEA/PC32 can resolve them without a separate .rodata section. */
+ * functions so LEA/PC32 can resolve them without a separate .rodata section.
+ *
+ * Lookup is indexed by an open-addressing hash table keyed on (len, hash) so a
+ * dedup hit is O(1) average instead of a linear scan over all prior entries. */
 
-enum { NY_STRTAB_MAX = 256, NY_STRTAB_NAME = 32 };
+enum { NY_STRTAB_MAX = 256, NY_STRTAB_NAME = 32, NY_STRTAB_HASH_CAP = 512 };
 
 typedef struct {
   char name[NY_STRTAB_NAME];
@@ -19,6 +23,15 @@ typedef struct {
 
 static ny_strtab_ent_t ny_strtab[NY_STRTAB_MAX];
 static size_t ny_strtab_len = 0;
+/* Maps each hash slot to a 1-based index into ny_strtab (0 = empty).  Sized to
+ * a power of two above NY_STRTAB_MAX so the table never needs to grow and stays
+ * below a 0.5 load factor at full capacity. */
+static uint16_t ny_strtab_hash[NY_STRTAB_HASH_CAP];
+
+static inline size_t ny_strtab_slot(size_t len, uint64_t hash) {
+  return (size_t)((hash ^ ((uint64_t)len * 0x9E3779B97F4A7C15ULL)) &
+                  (NY_STRTAB_HASH_CAP - 1u));
+}
 
 void ny_native_strtab_clear(void) {
   for (size_t i = 0; i < ny_strtab_len; ++i) {
@@ -28,6 +41,7 @@ void ny_native_strtab_clear(void) {
     ny_strtab[i].name[0] = '\0';
   }
   ny_strtab_len = 0;
+  memset(ny_strtab_hash, 0, sizeof(ny_strtab_hash));
 }
 
 const char *ny_native_strtab_intern(const char *s, size_t len, char *name_out,
@@ -36,13 +50,20 @@ const char *ny_native_strtab_intern(const char *s, size_t len, char *name_out,
     s = "";
   if (len == (size_t)-1)
     len = strlen(s);
-  for (size_t i = 0; i < ny_strtab_len; ++i) {
-    if (ny_strtab[i].len == len &&
-        memcmp(ny_strtab[i].bytes, s, len) == 0) {
+  uint64_t hash = ny_hash64(s, len);
+  size_t mask = NY_STRTAB_HASH_CAP - 1u;
+  size_t idx = ny_strtab_slot(len, hash);
+  for (;;) {
+    uint16_t existing = ny_strtab_hash[idx];
+    if (existing == 0)
+      break;
+    const ny_strtab_ent_t *e = &ny_strtab[existing - 1u];
+    if (e->len == len && memcmp(e->bytes, s, len) == 0) {
       if (name_out && name_cap)
-        snprintf(name_out, name_cap, "%s", ny_strtab[i].name);
-      return ny_strtab[i].name;
+        snprintf(name_out, name_cap, "%s", e->name);
+      return e->name;
     }
+    idx = (idx + 1u) & mask;
   }
   if (ny_strtab_len >= NY_STRTAB_MAX)
     return NULL;
@@ -55,6 +76,9 @@ const char *ny_native_strtab_intern(const char *s, size_t len, char *name_out,
   snprintf(e->name, sizeof(e->name), ".Lnystr.%zu", ny_strtab_len);
   e->bytes = copy;
   e->len = len;
+  /* ny_strtab_hash was advanced to the first empty slot during the dedup
+   * probe, so install the new entry (1-based) there. */
+  ny_strtab_hash[idx] = (uint16_t)(ny_strtab_len + 1u);
   ny_strtab_len++;
   if (name_out && name_cap)
     snprintf(name_out, name_cap, "%s", e->name);

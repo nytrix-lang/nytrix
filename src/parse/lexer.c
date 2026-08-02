@@ -661,7 +661,7 @@ token_t lexer_next(lexer_t *lx) {
     token_t tok = make_token(lx, NY_T_IDENT, start);
     tok.hash = ny_hash64(tok.lexeme, tok.len);
     if (lx->intern_identifiers)
-      tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
+      tok.sym_id = ny_intern_str_hashed(tok.lexeme, tok.len, tok.hash);
     tok.kind = identifier_type(lx, tok.lexeme, tok.len);
     return tok;
   }
@@ -681,7 +681,7 @@ token_t lexer_next(lexer_t *lx) {
         token_t tok = make_token(lx, NY_T_IDENT, start);
         tok.hash = ny_hash64(tok.lexeme, tok.len);
         if (lx->intern_identifiers)
-          tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
+          tok.sym_id = ny_intern_str_hashed(tok.lexeme, tok.len, tok.hash);
         tok.kind = identifier_type(lx, tok.lexeme, tok.len);
         return tok;
       }

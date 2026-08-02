@@ -48,6 +48,8 @@ typedef struct {
   const char *conv_output;
   int c2ny;
   const char *c2ny_output;
+  int py2ny;
+  const char *py2ny_output;
   int align_macros;
   StrVec paths;
 } FmtOpts;

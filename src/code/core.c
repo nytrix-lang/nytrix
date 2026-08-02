@@ -2085,6 +2085,34 @@ void codegen_rebind_llvm_symbols(codegen_t *cg) {
   }
 }
 
+void codegen_export_extern_link_names(codegen_t *cg) {
+  /* Extern declarations declared with `as "cname"` carry their linker symbol
+   * in link_name, but the LLVM value is emitted under the Nytrix name (for
+   * example `std.os.disasm._cs_version`).  Calls already reference the value
+   * handle, so renaming the value right before object emission makes the
+   * emitted relocation match the C symbol that the linked library exports.
+   * Skip a rename when the linker name is already claimed by a different
+   * value; the old (broken) mapping is kept instead of inventing a new one. */
+  if (!cg || !cg->module)
+    return;
+  for (size_t i = 0; i < cg->fun_sigs.len; i++) {
+    fun_sig *sig = &cg->fun_sigs.data[i];
+    if (!sig->is_extern || !sig->link_name || !*sig->link_name)
+      continue;
+    const char *llvm_name =
+        (sig->llvm_name && *sig->llvm_name) ? sig->llvm_name : sig->name;
+    if (!llvm_name || !*llvm_name || strcmp(llvm_name, sig->link_name) == 0)
+      continue;
+    LLVMValueRef fn = LLVMGetNamedFunction(cg->module, llvm_name);
+    if (!fn)
+      continue;
+    LLVMValueRef clash = LLVMGetNamedFunction(cg->module, sig->link_name);
+    if (clash && clash != fn)
+      continue;
+    LLVMSetValueName2(fn, sig->link_name, strlen(sig->link_name));
+  }
+}
+
 static LLVMValueRef ny_const_string_runtime_initializer(
     codegen_t *cg, LLVMValueRef str_array_global,
     LLVMValueRef runtime_ptr_global, LLVMTypeRef i8_ty) {

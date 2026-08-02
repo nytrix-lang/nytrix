@@ -107,14 +107,13 @@ void ny_intern_init(void) {
   ny_intern_ptr_map_put(g_intern_table[0].str);
 }
 
-ny_sym_id ny_intern_str(const char *str, size_t len) {
+ny_sym_id ny_intern_str_hashed(const char *str, size_t len, uint64_t hash) {
   if (!str || len == 0)
     return 0;
   if (!g_intern_table)
     ny_intern_init();
   if (!g_intern_table || !g_intern_map)
     return 0;
-  uint64_t hash = ny_hash64(str, len);
   size_t mask = g_intern_map_cap - 1;
   size_t idx = hash & mask;
 
@@ -171,6 +170,10 @@ ny_sym_id ny_intern_str(const char *str, size_t len) {
   }
 
   return new_id;
+}
+
+ny_sym_id ny_intern_str(const char *str, size_t len) {
+  return ny_intern_str_hashed(str, len, ny_hash64(str, len));
 }
 
 ny_sym_id ny_intern_cstr(const char *str) {

@@ -487,6 +487,7 @@ fn _smt_rotate_xor_hash_round_proof(int bits) dict {
 
 fn _smt_row_expr_proofs(dict bundle, int bits, int limit) list {
    def rows = bundle.get("rows", [])
+   def archetypes = _smt_archetype_proofs(bits, to_str(bundle.get("arch", "")), _smt_endian_modes(bundle))
    mut out = []
    mut saw_div = false
    mut saw_rot = false
@@ -496,17 +497,37 @@ fn _smt_row_expr_proofs(dict bundle, int bits, int limit) list {
       def r = rows[i]
       def kind = r.get("kind", "")
       def op = r.get("operator", "")
+      def tag = int(r.get("addr", 0))
       if !saw_div && (kind == "signed_div" || kind == "unsigned_div" || op == "/") {
-         def p = kind == "signed_div" ? _smt_signed_division_power2_nonnegative_proof(bits) : _smt_division_power2_proof(bits)
-         out = out.append(p.set("row", i).set("addr", int(r.get("addr", 0))).set("source", "row"))
-         saw_div = true
+         def p0 = _smt_archetype_by_name(archetypes, kind == "signed_div" ? "signed_div_power2_nonnegative" : "unsigned_div_power2")
+         if p0.len > 0 {
+            mut p = clone(p0)
+            p.set("source", "row")
+            p.set("row", i)
+            p.set("addr", tag)
+            out = out.append(p)
+            saw_div = true
+         }
       } elif !saw_rot && kind == "rotate" {
-         def p = op == "ror" ? _smt_rotate_right_proof(bits) : _smt_rotate_left_proof(bits)
-         out = out.append(p.set("row", i).set("addr", int(r.get("addr", 0))).set("source", "row"))
-         saw_rot = true
+         def p0 = _smt_archetype_by_name(archetypes, op == "ror" ? "rotate_right" : "rotate_left")
+         if p0.len > 0 {
+            mut p = clone(p0)
+            p.set("source", "row")
+            p.set("row", i)
+            p.set("addr", tag)
+            out = out.append(p)
+            saw_rot = true
+         }
       } elif !saw_mask && str.startswith(str.lower(r.get("mnemonic", "")), "test") {
-         out = out.append(_smt_mask_low8_proof(bits).set("row", i).set("addr", int(r.get("addr", 0))).set("source", "row"))
-         saw_mask = true
+         def p0 = _smt_archetype_by_name(archetypes, "low_byte_mask")
+         if p0.len > 0 {
+            mut p = clone(p0)
+            p.set("source", "row")
+            p.set("row", i)
+            p.set("addr", tag)
+            out = out.append(p)
+            saw_mask = true
+         }
       }
       i += 1
    }
@@ -520,17 +541,22 @@ fn _smt_endian_modes(dict bundle) list {
    ["little", "big"]
 }
 
-fn _smt_expression_proofs_from_facts(dict bundle, any opts=dict()) dict {
-   def bits = int(opts.get("bits", bundle.get("arch", "") == "x86_64" || bundle.get("arch", "") == "aarch64" ? 64 : 32))
-   def proof_bits = bits >= 32 ? bits : 32
-   def endian_modes = _smt_endian_modes(bundle)
+mut _smt_archetype_cache = dict()
+
+fn _smt_archetype_key(int bits, str arch, list endian_modes) str {
+   to_str(bits) + "|" + arch + "|" + str.join(endian_modes, ",")
+}
+
+fn _smt_archetype_proofs(int proof_bits, str arch, list endian_modes) list {
+   def key = _smt_archetype_key(proof_bits, arch, endian_modes)
+   if _smt_archetype_cache.contains(key) { return _smt_archetype_cache.get(key, []) }
    mut archetypes = []
    archetypes = archetypes.append(_smt_division_power2_proof(proof_bits).set("source", "archetype"))
    archetypes = archetypes.append(_smt_signed_division_power2_nonnegative_proof(proof_bits).set("source", "archetype"))
    archetypes = archetypes.append(_smt_remainder_power2_mask_proof(proof_bits).set("source", "archetype"))
    mut ei = 0
    while ei < endian_modes.len {
-      archetypes = archetypes.append(_smt_byte_pack_proof(32, endian_modes[ei]).set("source", "archetype").set("target_arch", bundle.get("arch", "")).set("target_endianness", endian_modes[ei]))
+      archetypes = archetypes.append(_smt_byte_pack_proof(32, endian_modes[ei]).set("source", "archetype").set("target_arch", arch).set("target_endianness", endian_modes[ei]))
       ei += 1
    }
    archetypes = archetypes.append(_smt_mask_low8_proof(proof_bits).set("source", "archetype"))
@@ -544,10 +570,28 @@ fn _smt_expression_proofs_from_facts(dict bundle, any opts=dict()) dict {
    archetypes = archetypes.append(_smt_magic_unsigned_div3_proof().set("source", "archetype"))
    archetypes = archetypes.append(_smt_affine_byte_mix_proof().set("source", "archetype"))
    archetypes = archetypes.append(_smt_rotate_xor_hash_round_proof(8).set("source", "archetype"))
+   _smt_archetype_cache = _smt_archetype_cache.set(key, archetypes)
+   archetypes
+}
+
+fn _smt_archetype_by_name(list archetypes, str name) dict {
+   mut i = 0
+   while i < archetypes.len {
+      if archetypes[i].get("archetype", "") == name { return archetypes[i] }
+      i += 1
+   }
+   dict()
+}
+
+fn _smt_expression_proofs_from_facts(dict bundle, any opts=dict()) dict {
+   def bits = int(opts.get("bits", bundle.get("arch", "") == "x86_64" || bundle.get("arch", "") == "aarch64" ? 64 : 32))
+   def proof_bits = bits >= 32 ? bits : 32
+   def endian_modes = _smt_endian_modes(bundle)
+   def archetypes = _smt_archetype_proofs(proof_bits, to_str(bundle.get("arch", "")), endian_modes)
    mut proofs = []
    mut ai = 0
    while ai < archetypes.len {
-      proofs = proofs.append(archetypes[ai])
+      proofs = proofs.append(clone(archetypes[ai]))
       ai += 1
    }
    def row_proofs = _smt_row_expr_proofs(bundle, proof_bits, int(opts.get("row_limit", 8)))
