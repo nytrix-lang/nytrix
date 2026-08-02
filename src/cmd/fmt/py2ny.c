@@ -743,7 +743,14 @@ static int pny_word_at_off(const pny_t *p, size_t off, const char *w) {
   return pny_word_eq(&p->toks[p->ti + off], w);
 }
 
-/* take one comparison operator; returns 1 and fills opbuf if it consumed one */
+/*
+ * Take one comparison operator.
+ * Returns:
+ *   0  = no comparison operator here
+ *   1  = a relational/equality op; its Ny text is in opbuf (<, ==, etc.)
+ *   2  = `in`  membership; caller emits contains(right, left)
+ *   3  = `not in` membership; caller emits !contains(right, left)
+ */
 static int pny_take_comp_op(pny_t *p, char *opbuf, size_t opsz) {
   if (pny_at_word(p, "is")) {
     pny_advance(p);
@@ -756,22 +763,13 @@ static int pny_take_comp_op(pny_t *p, char *opbuf, size_t opsz) {
     return 1;
   }
   if (pny_at_word(p, "in")) {
-    pny_warn_at(p, pny_cur(p)->line, "unsupported", "'in' membership operator");
     pny_advance(p);
-    pny_sb_t dummy = {0};
-    pny_binexpr(p, &dummy, 4); /* consume operand to stay in sync */
-    free(dummy.data);
-    return 0;
+    return 2;
   }
   if (pny_word_at_off(p, 0, "not") && pny_word_at_off(p, 1, "in")) {
-    pny_warn_at(p, pny_cur(p)->line, "unsupported",
-                "'not in' membership operator");
     pny_advance(p);
     pny_advance(p);
-    pny_sb_t dummy = {0};
-    pny_binexpr(p, &dummy, 4);
-    free(dummy.data);
-    return 0;
+    return 3;
   }
   static const char *const cmps[] = {"<=", ">=", "==", "!=", "<", ">", NULL};
   for (int k = 0; cmps[k]; k++) {
@@ -784,12 +782,35 @@ static int pny_take_comp_op(pny_t *p, char *opbuf, size_t opsz) {
   return 0;
 }
 
+/* Python `x in xs` / `x not in xs` have no operator form in Ny; lower them to
+   contains(container, item). `left` is the item, the following operand is the
+   container. negate selects `not in`. */
+static void pny_emit_membership(pny_t *p, pny_sb_t *out, pny_sb_t *left,
+                                int negate) {
+  pny_sb_t right = {0};
+  pny_binexpr(p, &right, 4);
+  if (negate)
+    pny_ebuf(p, out, "!");
+  pny_ebuf(p, out, "contains(");
+  pny_ebuf(p, out, right.data ? right.data : "");
+  pny_ebuf(p, out, ", ");
+  pny_ebuf(p, out, left->data ? left->data : "");
+  pny_ebuf(p, out, ")");
+  free(right.data);
+}
+
 static void pny_comparison(pny_t *p, pny_sb_t *out) {
   pny_sb_t first = {0};
   pny_binexpr(p, &first, 4);
   char opbuf[8];
-  if (!pny_take_comp_op(p, opbuf, sizeof(opbuf))) {
+  int kind = pny_take_comp_op(p, opbuf, sizeof(opbuf));
+  if (kind == 0) {
     pny_ebuf(p, out, first.data ? first.data : "");
+    free(first.data);
+    return;
+  }
+  if (kind == 2 || kind == 3) {
+    pny_emit_membership(p, out, &first, kind == 3);
     free(first.data);
     return;
   }
@@ -813,13 +834,34 @@ static void pny_comparison(pny_t *p, pny_sb_t *out) {
     pny_sb_clear(&prev);
     pny_sb_add(&prev, right.data ? right.data : "");
     free(right.data);
-  } while (pny_take_comp_op(p, opbuf, sizeof(opbuf)));
+    kind = pny_take_comp_op(p, opbuf, sizeof(opbuf));
+    if (kind == 2 || kind == 3) {
+      /* trailing membership in a chain: emit contains() for the last link */
+      pny_sb_t last = {0};
+      pny_sb_add(&last, prev.data ? prev.data : "");
+      pny_sb_clear(&prev);
+      pny_sb_add(&acc, " && ");
+      pny_sb_t mb = {0};
+      pny_emit_membership(p, &mb, &last, kind == 3);
+      pny_sb_add(&acc, mb.data ? mb.data : "");
+      free(last.data);
+      free(mb.data);
+      break;
+    }
+  } while (kind == 1);
   free(prev.data);
   pny_ebuf(p, out, acc.data ? acc.data : "");
   free(acc.data);
 }
 
 static void pny_not_test(pny_t *p, pny_sb_t *out) {
+  /* Check for "not in" - this is a single comparison operator in Python.
+     If we see "not" followed by "in", don't treat it as unary "not",
+     fall through to pny_comparison which will handle "not in" as a unit. */
+  if (pny_at_word(p, "not") && pny_word_at_off(p, 1, "in")) {
+    pny_comparison(p, out);
+    return;
+  }
   if (pny_at_word(p, "not")) {
     int line = pny_cur(p)->line;
     pny_advance(p);
@@ -1355,7 +1397,8 @@ static void pny_parse_for(pny_t *p) {
     pny_expr(p, &it);
     if (pny_at_op(p, ")"))
       pny_advance(p);
-    /* Python: for idx, val in enumerate(it); Ny binds value first */
+    /* Python: for idx, val in enumerate(it); Nytrix for binds (val, idx).
+       Swap targets to preserve user's intended meaning. */
     pny_emit(p, "for ");
     pny_emit(p, targets[1]); /* value */
     pny_emit(p, ", ");
@@ -1536,7 +1579,31 @@ static void pny_parse_return(pny_t *p) {
   if (!pny_at_kind(p, PNTK_NEWLINE) && !pny_at_kind(p, PNTK_EOF) &&
       !pny_at_kind(p, PNTK_DEDENT) && !pny_at_op(p, ";")) {
     pny_emit(p, " ");
-    pny_expr(p, NULL);
+    pny_sb_t first = {0};
+    pny_expr(p, &first);
+    if (pny_at_op(p, ",")) {
+      /* multiple return values -> list literal */
+      pny_sb_t val = {0};
+      pny_sb_add(&val, "[");
+      pny_sb_add(&val, first.data ? first.data : "");
+      while (pny_at_op(p, ",")) {
+        pny_advance(p);
+        if (pny_at_kind(p, PNTK_NEWLINE) || pny_at_kind(p, PNTK_DEDENT) ||
+            pny_at_kind(p, PNTK_EOF) || pny_at_op(p, ";"))
+          break;
+        pny_sb_t e = {0};
+        pny_expr(p, &e);
+        pny_sb_add(&val, ", ");
+        pny_sb_add(&val, e.data ? e.data : "");
+        free(e.data);
+      }
+      pny_sb_add(&val, "]");
+      pny_emit_sb(p, &val);
+      free(val.data);
+    } else {
+      pny_emit_sb(p, &first);
+    }
+    free(first.data);
   }
   while (pny_at_op(p, ";"))
     pny_advance(p);
@@ -1894,9 +1961,21 @@ static int py2ny_selftest(void) {
       "            return x\n"
       "    return -1\n"
       "\n"
+      "def has_item(xs, x):\n"
+      "    return x in xs\n"
+      "\n"
+      "def lacks_item(xs, x):\n"
+      "    return x not in xs\n"
+      "\n"
+      "def swap(a, b):\n"
+      "    a, b = b, a\n"
+      "    return a, b\n"
+      "\n"
       "print(classify(5))\n"
       "print(factorial(5))\n"
-      "print(first_even([1, 3, 4, 5]))\n";
+      "print(first_even([1, 3, 4, 5]))\n"
+      "print(has_item([1, 2, 3], 2))\n"
+      "print(lacks_item([1, 2, 3], 9))\n";
   pny_sb_t out = {0};
   if (pny_convert(probe, sizeof(probe) - 1, &out) != 0) {
     fprintf(stderr, "ny-fmt py2ny selftest: pny_convert reported unsupported "
@@ -1917,6 +1996,10 @@ static int py2ny_selftest(void) {
       "r = r * i\n",
       "for x in xs {\n",
       "if (x % 2 == 0) {\n",
+      "return contains(xs, x)\n",
+      "return !contains(xs, x)\n",
+      "a, b = b, a\n",
+      "return [a, b]\n",
       "#main {\n",
       "print(classify(5))\n",
       "print(first_even([1, 3, 4, 5]))\n",
@@ -1931,7 +2014,7 @@ static int py2ny_selftest(void) {
   /* leak / merge regression checks */
   if (strstr(o, "}elif") || strstr(o, "}else") || strstr(o, "r = r * ireturn") ||
       strstr(o, "fn classify(x)any") || strstr(o, "1 i<") ||
-      strstr(o, "mut r = 1for")) {
+      strstr(o, "mut r = 1for") || strstr(o, "__py2ny_")) {
     fprintf(stderr, "ny-fmt py2ny selftest: emission leak detected\n");
     fail = 1;
   }
