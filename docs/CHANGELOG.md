@@ -2,225 +2,55 @@
 
 Nytrix uses dated milestones. Use `ny --version` for snapshots.
 
-## [0.9.0] - 2026-07-23 — Language security, in-tree C frontend, and clean build
-
-Deep analysis of the C frontend, FFI layer, and language security, informed by
-the Fil-C/zig discussion (codeberg.org/ziglang/zig/issues/36237). The goal is
-for Nytrix programs, including C dependencies, to remain memory safe without
-an unrestricted escape hatch and with acceptable overhead.
+## [0.9.0] - 2026-07-21 → 2026-07-23 — Language security, native tooling, and runtime reliability
 
 ### Added
 
-- In-tree Nytrix C frontend (`src/code/c/`) replaces libclang for FFI header
-  parsing: arrays, unions, packed structs, bitfields, `__int128`, `_Complex`,
-  `long double`, function pointers, typedefs, string/object-like macros, and
-  variadics. Validated by `etc/tests/native/c/internal-lowering-abi.nshape`
-  (L-1…L-12 ABI lowering probes).
-- Parse-time hardening for untrusted C headers: a monotonic-clock deadline,
-  recursion-depth limit (`NY_C_MAX_RECURSION_DEPTH`), and bounded tables defeat
-  pathological/expansion bombs; `ny_parse_cleanup` frees parser intern buffers.
-- Syscall denylist in `rt_syscall` (linux/x86_64): `mprotect`, `clone`, `fork`,
-  and `vfork` return `-EPERM`, so Nytrix programs and FFI C code reaching
-  `__syscall` cannot spawn processes or remap executable memory. Regression:
-  `etc/tests/runtime/execution/syscall-filter.ny`.
-- `#assert(cond[, msg])` comptime assertion and an `assert(cond[, msg])`
-  lowering that embeds the condition source text in the panic message with a
-  `file:line:col` location.
-- `std.core.report` diagnostic-formatting module (error/warning/note/location
-  with source-line underline), imported explicitly like `std.core.term`.
-- `--zero-init` / `--no-zero-init` flag (default: zero) controls whether
-  `rt_malloc` zero-fills managed heap allocations. Env var `NYTRIX_ZERO_INIT`
-  also accepted. `rt_malloc_uninit` remains uninitialized. S-7 from security
-  roadmap.
-- Panic messages now report `at file:line:col` from the active trace.
+- In-tree C frontend for FFI headers, replacing libclang for supported arrays,
+  unions, packed structs, bitfields, extended numeric types, function pointers,
+  typedefs, macros, and variadics.
+- Hardened parsing of untrusted C headers with deadlines, recursion limits,
+  bounded tables, and parser cleanup.
+- Linux/x86-64 syscall restrictions block process creation and executable-memory
+  remapping through `mprotect`, `clone`, `fork`, and `vfork`.
+- `#assert(cond[, msg])` for compile-time assertions and improved runtime
+  assertions with source expressions and `file:line:col` diagnostics.
+- `std.core.report` for formatted errors, warnings, notes, locations, and source
+  underlines.
+- `--zero-init`, `--no-zero-init`, and `NYTRIX_ZERO_INIT` controls for managed
+  heap initialization.
+- Optional GMP support with native bigint fallbacks for arithmetic, roots,
+  modular operations, conversion, and number-theory helpers.
+- `-Oz` size optimization.
+- Public `std.os.rev` modules for decompilation, symbolic execution, constraint
+  solving, and string analysis.
 
 ### Changed
 
-- `./make` and `./make ny` recompile the C binaries and std bundle
-  incrementally on change; documented the runtime amalgamation model
-  (`src/rt/init.c` includes `os.c`, `core.c`, …) in AGENTS.md.
-- The FFI layer no longer stages includes into `codegen_ffi_t`; headers are
-  processed directly through the in-tree frontend under a bounded deadline.
+- FFI headers are processed directly by the in-tree C frontend instead of being
+  staged through the previous FFI pipeline.
+- Typed `extern` declarations may expose the same native symbol through multiple
+  valid Nytrix signatures without LLVM symbol collisions.
+- macOS JIT library discovery now checks standard Homebrew locations.
+- Windows native-only execution bypasses ELF-specific caching while retaining
+  the in-memory JIT path.
+- Panic traces now include the active source location.
 
 ### Fixed
 
-- **Security: S-3/S-5/S-6 verified.** No hidden allocations (S-3) enforced by
-  reference-typed dicts and value-typed lists; no unsafe escape hatch (S-5)
-  confirmed — no `unsafe` keyword exists; language subset enforcement (S-6)
-  confirmed — C frontend rejects unsupported constructs with clear diagnostics.
-  Security roadmap updated with S-7 implementation and S-1/S-2/S-8 research.
-- **Security: syscall denylist was dead code.** The inline-syscall path in
-  `src/rt/os.c` (denylist) and the hardware `rdrand` path in `src/rt/math.c`
-  were guarded by `rt_x86_64__` / `rt_asm__` / `rt_volatile__` — three macros
-  never defined anywhere. Every build silently `#if`'d the block out and fell
-  through to an unfiltered libc `syscall()`, so `syscall(56)` actually cloned.
-  Switched the guards to the standard `__x86_64__` / `__asm__` / `__volatile__`
-  the rest of `src/rt/` already uses.
-- **Name collision: `std.core` leaked a `report` identifier.** `lib/core/mod.ny`
-  re-exported the new `std.core.report` submodule, so every `use std.core`
-  consumer saw `report` as a module name and shadowed ubiquitous local
-  `def report` variables (broke `shapes/probes/sys/gltf-index-modes.nshape`).
-  Removed the re-export; the diagnostic module is now imported explicitly.
-- C frontend: `parse_integer_size`/define lookup bridged `int64_t` parser
-  output into `size_t` extents instead of passing mismatched pointer types
-  (`-Wpointer-sign`); negative extents are now rejected.
-- `fficlang.c` label-then-declaration made C11-portable; `c/parse.c` integer
-  slicing no longer passes `size_t*` as `int64_t*`.
-
-### Build hygiene
-
-- Eliminated all 464 C compiler warnings (411 runtime `-Wmissing-prototypes`
-  via a scoped pragma documenting the RT_DEF dispatch contract; 53 compiler
-  warnings fixed at the owning layer: missing `static`, missing prototypes in
-  `priv.h`/`llvm.h`/`internal.h`, two dead web helpers removed, one reserved
-  parameter marked). The runtime and compiler now build clean under
-  `-Wall -Wextra -Wmissing-prototypes -Wstrict-prototypes`.
-
-## [0.9.0] - 2026-07-21 → 2026-07-22 — Native pipeline polish, runtime boundaries, and tooling
-
-### Added
-
-- Optional GMP backend behind `NYTRIX_USE_GMP` CMake flag (default ON); builds
-  cleanly without GMP using native bigint fallbacks for all operations.
-- Full native bigint fallback: divmod, pow, modinv, iroot, clz/ctz, xor,
-  to_str, to_bytes, from_bytes, powmod, sqrt_mod, quadratic_roots_mod.
-- `-Oz` size-optimization profile alongside existing `-O0`/`-O1`/`-O2`/`-O3`.
-- Public `std.os.rev` reverse-engineering stack, with decompilation, symbolic
-  execution, constraint solving, and string-analysis modules plus executable
-  facade self-tests.
-- Reusable all-black Nytrix startup ident and deterministic project fixture
-  capture.
-- `ci skip` nshape metadata for probes that require optional desktop services
-  or host-installed libraries; such probes remain part of local coverage.
-- Optional development glTF asset discovery after the existing build-cache
-  root; configured environment roots retain resolution priority.
-
-### Changed
-
-- Typed `extern` declarations now retain a distinct LLVM symbol identity from
-  their native linker symbol, allowing one C ABI symbol to be exposed through
-  multiple valid typed declarations.
-- macOS JIT library loading searches standard Homebrew package locations for
-  ordinary `#link` libraries without adding library-specific runtime paths.
-- Windows native-only execution bypasses the ELF-only stencil-cache path while
-  retaining the in-memory native JIT path.
-- `-DNDEBUG` on runtime archive for release builds, eliminating debug-only
-  destructors and their libc pulls.
-- `RT_PRINT_BUF_SIZE` reduced from 64 KB to 8 KB with auto-flush, cutting
-  per-process BSS by 57 KB.
-- Added `rt_print_cstr` for pure-native C string output.
-- Unified native IR naming to `NYIR_` prefix throughout codebase.
-- Per-unit runtime archive compilation with per-function sections and
-  `gc-sections` for aggressive dead code elimination at link time.
-- Extended linker flags: `gc-sections`, `strip-all`, `dead_strip`, `OPT:REF`,
-  `OPT:ICF` for platform-specific dead code elimination.
-- Removed `rt_dict_write_fast` / `__dict_write_fast` in favor of `dict_set`.
-- Removed unconditional `-lgmp` from linker flags.
-- CMake GMP `find_library` now searches `/usr/lib` and `/usr/lib64`.
-- Moved printable-string scanning out of the decompiler core into
-  `std.os.rev.strings`, keeping binary analysis focused on ELF and lifting
-  while making string extraction independently testable.
-
-### Fixed
-
-- Heap corruption from uninitialized `_bn_t` locals passed to `realloc` in
-  bigint arithmetic, iroot, and `rt_long` list path.
-- `_bn_iroot` Newton convergence: replaced broken inline long division with
-  proven `_bn_divmod_unsigned`.
-- `rt_bigint_from_int` now always allocates heap bigint for consistency with
-  GMP path semantics.
-- AArch64 `cset` encoding for inverted condition codes in mach IR path.
-- Dominant-tree iteration to skip unreachable predecessors.
-- JIT exit-code propagation from entry function.
-- Stencil early-cache check for cold/warm path distinction.
-- Large-ELF relocation analysis now indexes symbols once per scan instead of
-  repeatedly searching the full symbol table, removing quadratic load-time
-  behavior in `std.os.rev.decomp`.
-- Removed an orphaned bigint source fragment that broke clean Linux and macOS
-  runtime builds.
-- Restored portable clean-build behavior for the native pipeline on Windows.
-- Cross-platform test selection now uses explicit fixture metadata rather than
-  implicit path exceptions for optional system probes.
-
-### Added
-
-- Reusable all-black Nytrix startup ident and deterministic project fixture
-  capture.
-- Public reverse-engineering and symbolic-analysis modules with executable
-  decompiler fixtures.
-- `ci skip` nshape metadata for probes that require optional desktop services
-  or host-installed libraries; such probes remain part of local coverage.
-
-### Changed
-
-- Typed `extern` declarations now retain a distinct LLVM symbol identity from
-  their native linker symbol, allowing one C ABI symbol to be exposed through
-  multiple valid typed declarations.
-- macOS JIT library loading searches standard Homebrew package locations for
-  ordinary `#link` libraries without adding library-specific runtime paths.
-- Windows native-only execution bypasses the ELF-only stencil-cache path while
-  retaining the in-memory native JIT path.
-
-### Fixed
-
-- Removed an orphaned bigint source fragment that broke clean Linux and macOS
-  runtime builds.
-- Restored portable clean-build behavior for the native pipeline on Windows.
-- Cross-platform test selection now uses explicit fixture metadata rather than
-  implicit path exceptions for optional system probes.
-
-## [0.9.0] - 2026-07-21 — Native pipeline polish, optional GMP, and binary compaction
-
-### Added
-
-- Optional GMP backend behind `NYTRIX_USE_GMP` CMake flag (default ON); builds
-  cleanly without GMP using native bigint fallbacks for all operations.
-- Full native bigint fallback: divmod, pow, modinv, iroot, clz/ctz, xor,
-  to_str, to_bytes, from_bytes, powmod, sqrt_mod, quadratic_roots_mod.
-- `-Oz` size-optimization profile alongside existing `-O0`/`-O1`/`-O2`/`-O3`.
-- Public `std.os.rev` reverse-engineering stack, with decompilation, symbolic
-  execution, constraint solving, and string-analysis modules plus executable
-  facade self-tests.
-- Optional development glTF asset discovery after the existing build-cache
-  root; configured environment roots retain resolution priority.
-
-### Fixed
-
-- Heap corruption from uninitialized `_bn_t` locals passed to `realloc` in
-  bigint arithmetic, iroot, and `rt_long` list path.
-- `_bn_iroot` Newton convergence: replaced broken inline long division with
-  proven `_bn_divmod_unsigned`.
-- `rt_bigint_from_int` now always allocates heap bigint for consistency with
-  GMP path semantics.
-- AArch64 `cset` encoding for inverted condition codes in mach IR path.
-- Dominant-tree iteration to skip unreachable predecessors.
-- JIT exit-code propagation from entry function.
-- Stencil early-cache check for cold/warm path distinction.
-- Large-ELF relocation analysis now indexes symbols once per scan instead of
-  repeatedly searching the full symbol table, removing quadratic load-time
-  behavior in `std.os.rev.decomp`.
-
-### Changed
-
-- `-DNDEBUG` on runtime archive for release builds, eliminating debug-only
-  destructors and their libc pulls.
-- `RT_PRINT_BUF_SIZE` reduced from 64 KB to 8 KB with auto-flush, cutting
-  per-process BSS by 57 KB.
-- Added `rt_print_cstr` for pure-native C string output.
-- Unified native IR naming to `NYIR_` prefix throughout codebase.
-- Per-unit runtime archive compilation with per-function sections and
-  `gc-sections` for aggressive dead code elimination at link time.
-- Extended linker flags: `gc-sections`, `strip-all`, `dead_strip`, `OPT:REF`,
-  `OPT:ICF` for platform-specific dead code elimination.
-- Removed `rt_dict_write_fast` / `__dict_write_fast` in favor of `dict_set`.
-- Removed unconditional `-lgmp` from linker flags.
-- CMake GMP `find_library` now searches `/usr/lib` and `/usr/lib64`.
-- Cleaned up Python benchmark dependencies; converted to `.nshape` format.
-- Test suite at 637 passing (342 native, 73 runtime, 90 error, 5 interop,
-  2 pre-existing system skips).
-- Moved printable-string scanning out of the decompiler core into
-  `std.os.rev.strings`, keeping binary analysis focused on ELF and lifting
-  while making string extraction independently testable.
+- Restored the syscall filter and hardware `rdrand` paths by correcting invalid
+  architecture and inline-assembly guards.
+- Verified that managed collections do not hide allocations, Nytrix exposes no
+  unrestricted `unsafe` escape hatch, and unsupported C constructs are rejected.
+- Prevented `std.core.report` from leaking a `report` name into every
+  `use std.core` consumer.
+- Corrected C array-extent conversion, rejected negative extents, and fixed C11
+  portability issues in the frontend.
+- Fixed bigint heap corruption, integer-root convergence, and inconsistent
+  native/GMP bigint allocation behavior.
+- Corrected AArch64 inverted-condition encoding, unreachable predecessor
+  handling, JIT exit-code propagation, and stencil cold/warm cache detection.
+- Removed quadratic symbol lookup during large-ELF relocation analysis.
 
 ## [0.8.0] - 2026-07-13 — Native execution, proof tooling, and platform parity
 

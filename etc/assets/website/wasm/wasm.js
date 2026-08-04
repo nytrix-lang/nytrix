@@ -40,12 +40,91 @@
   let runArgv = ["ny"];
   let webFrameDt = 1 / 60;
   let assetFonts = new Map();
+  let assetCache = new Map();
   let loadedAssetCount = 0;
   let nextFontId = 1;
+  let g2dTextures = new Map();
+  let nextTextureId = 1;
   let audioContext = null;
   let audioUnavailable = false;
   const fallbackMemory = new WebAssembly.Memory({ initial: 256, maximum: 1024 });
-  const input = { key: "-", codes: new Set(), pressed: new Set(), mouse: [0, 0], buttons: new Set(), pressedButtons: new Set(), scroll: [0, 0] };
+  const input = {
+    key: "-", codes: new Set(), pressed: new Set(),
+    mouse: [0, 0], buttons: new Set(), pressedButtons: new Set(), scroll: [0, 0],
+    /* touches: Map<touchId, [x, y]> in logical stage coordinates */
+    touches: new Map(),
+    /* startedThisFrame: Set<touchId> for one-shot edge queries */
+    touchStarts: new Set(),
+  };
+  /* Standard Gamepad mapping (https://w3c.github.io/gamepad/): buttons 0..15
+     follow the standard layout (0 = bottom "A", 1 = right "B", ...) and
+     axes 0..3 are left/right stick X/Y. `readGamepads` honours an injected
+     fake set for headless self-tests (no real device exists under --dump-dom). */
+  function readGamepads() {
+    const override = window.__nyFakeGamepads;
+    const src = (override && override()) || (typeof navigator !== "undefined" && typeof navigator.getGamepads === "function" ? navigator.getGamepads() : null);
+    const out = [];
+    if (Array.isArray(src)) {
+      for (const p of src) if (p && p.connected) out.push(p);
+    }
+    return out;
+  }
+
+  /* Synchronous PCM WAV decoder: parse RIFF/WAVE fmt+data and hand the samples
+     to Web Audio as an AudioBuffer. Only the async decodeAudioData handles
+     compressed formats (MP3/OGG); WAV PCM is decoded here so the browser asset
+     gate can assert decode + playback deterministically. */
+  function decodeWavPcm(context, bytes) {
+    if (!bytes || bytes.byteLength < 44) return null;
+    const u8 = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const tag = (i, s) => u8[i] === s.charCodeAt(0) && u8[i + 1] === s.charCodeAt(1) && u8[i + 2] === s.charCodeAt(2) && u8[i + 3] === s.charCodeAt(3);
+    if (!tag(0, "RIFF") || !tag(8, "WAVE")) return null;
+    const findChunk = (id) => {
+      let off = 12;
+      const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      while (off + 8 <= u8.byteLength) {
+        const size = view.getUint32(off + 4, true);
+        if (tag(off, id)) return { off, size };
+        off += 8 + size + (size & 1);
+      }
+      return null;
+    };
+    const fmt = findChunk("fmt ");
+    const data = findChunk("data");
+    if (!fmt || !data || data.size === 0) return null;
+    const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const audioFormat = view.getUint16(fmt.off + 8, true);
+    const channels = view.getUint16(fmt.off + 10, true);
+    const sampleRate = view.getUint32(fmt.off + 12, true);
+    const bitsPerSample = view.getUint16(fmt.off + 22, true);
+    if (channels < 1 || sampleRate < 1 || bitsPerSample < 8) return null;
+    const pcm = audioFormat === 1;
+    const bytesPerSample = bitsPerSample / 8;
+    const frames = Math.floor(data.size / (bytesPerSample * channels));
+    const buffer = context.createBuffer(channels, frames, sampleRate);
+    const dataOff = data.off + 8;
+    for (let c = 0; c < channels; c++) {
+      const ch = buffer.getChannelData(c);
+      for (let f = 0; f < frames; f++) {
+        const idx = dataOff + (f * channels + c) * bytesPerSample;
+        let sample = 0;
+        if (pcm) {
+          if (bitsPerSample === 8) sample = (u8[idx] - 128) / 128;
+          else if (bitsPerSample === 16) sample = view.getInt16(idx, true) / 32768;
+          else if (bitsPerSample === 24) {
+            const b0 = u8[idx], b1 = u8[idx + 1], b2 = u8[idx + 2];
+            let v = (b0 << 8) | (b1 << 16) | (b2 << 24);
+            if (v & 0x800000) v |= 0xff000000;
+            sample = v / 8388608;
+          } else if (bitsPerSample === 32) sample = view.getInt32(idx, true) / 2147483648;
+        } else {
+          sample = view.getFloat32(idx, true);
+        }
+        ch[f] = Math.max(-1, Math.min(1, sample));
+      }
+    }
+    return buffer;
+  }
 
   function wantsCliStage(meta = currentMeta, runtime = currentRuntime) {
     if (runtime && runtime.oneShot) return true;
@@ -309,7 +388,7 @@
   }
 
   async function preloadAssets(meta) {
-    assetFonts = new Map();
+assetFonts = new Map();
     loadedAssetCount = 0;
     const assets = Array.isArray(meta.assets) ? meta.assets : [];
     const sha256 = async (bytes) => {
@@ -349,12 +428,16 @@
         if (digest && digest !== item.sha256) throw new Error(`${meta.id}: asset hash mismatch for ${path}`);
       }
       loadedAssetCount++;
+      assetCache.set(path, bytes);
+      const base = path.split("/").pop();
+      if (base && base !== path) assetCache.set(base, bytes);
       if (item && item.preload !== false && /\.(ttf|otf|woff2?)$/i.test(path) && typeof FontFace !== "undefined") {
         const family = `ny-${nextFontId++}`;
         const face = new FontFace(family, bytes.buffer);
         await face.load();
         document.fonts.add(face);
         assetFonts.set(path, { family, size: 0 });
+        if (base && base !== path) assetFonts.set(base, { family, size: 0 });
       }
     }
     canvas.dataset.assetsLoaded = String(loadedAssetCount);
@@ -415,6 +498,7 @@
     input.pressed.clear();
     input.buttons.clear();
     input.pressedButtons.clear();
+    input.touchStarts.clear();
   }
 
   function shader(type, source) {
@@ -838,6 +922,22 @@
       ny.listSet(memoryRef, out, ny.tag(1), ny.fltFromNumber(memoryRef, y));
       return BigInt(out);
     };
+    const list2i = (x, y) => {
+      const out = ny.list(memoryRef, 2);
+      ny.listSetLen(memoryRef, out, 2);
+      ny.listSet(memoryRef, out, ny.tag(0), ny.tag(x));
+      ny.listSet(memoryRef, out, ny.tag(1), ny.tag(y));
+      return BigInt(out);
+    };
+    const list4f = (v0, v1, v2, v3) => {
+      const out = ny.list(memoryRef, 4);
+      ny.listSetLen(memoryRef, out, 4);
+      ny.listSet(memoryRef, out, ny.tag(0), ny.fltFromNumber(memoryRef, v0));
+      ny.listSet(memoryRef, out, ny.tag(1), ny.fltFromNumber(memoryRef, v1));
+      ny.listSet(memoryRef, out, ny.tag(2), ny.fltFromNumber(memoryRef, v2));
+      ny.listSet(memoryRef, out, ny.tag(3), ny.fltFromNumber(memoryRef, v3));
+      return BigInt(out);
+    };
     return {
       "std.os.ui.render.init_window": () => ny.tag(1),
       "std.os.ui.render.close_window": () => { asyncifyRef.closed = true; return NY_TRUE; },
@@ -875,6 +975,63 @@
         return bool(pressed);
       },
       "std.os.ui.window.scroll_pos": () => list2f(input.scroll[0], input.scroll[1]),
+      "std.os.ui.window.input.touch_count": () => ny.tag(input.touches.size),
+      "std.os.ui.window.input.touch_pos": (index = 0n) => {
+        const i = ny.int(index);
+        if (i < 0 || i >= input.touches.size) return list2f(0, 0);
+        const pos = Array.from(input.touches.values())[i];
+        return list2f(pos[0], pos[1]);
+      },
+      "std.os.ui.window.input.touch_active": (index = 0n) => bool(ny.int(index) >= 0 && ny.int(index) < input.touches.size),
+      "std.os.ui.window.gamepad_count": () => ny.tag(readGamepads().length),
+      "std.os.ui.window.gamepad_connected": (pad = 0n) => bool(ny.int(pad) >= 0 && ny.int(pad) < readGamepads().length),
+      "std.os.ui.window.gamepad_name": (pad = 0n) => {
+        const p = readGamepads()[ny.int(pad)];
+        return p ? ny.string(memoryRef, String(p.id || "")) : ny.string(memoryRef, "");
+      },
+      "std.os.ui.window.gamepad_guid": (pad = 0n) => {
+        const p = readGamepads()[ny.int(pad)];
+        return p ? ny.string(memoryRef, String(p.mapping || "standard")) : ny.string(memoryRef, "");
+      },
+      "std.os.ui.window.gamepad_axis_count": (pad = 0n) => {
+        const p = readGamepads()[ny.int(pad)];
+        return p ? ny.tag((p.axes || []).length) : ny.tag(0);
+      },
+      "std.os.ui.window.gamepad_button_count": (pad = 0n) => {
+        const p = readGamepads()[ny.int(pad)];
+        return p ? ny.tag((p.buttons || []).length) : ny.tag(0);
+      },
+      "std.os.ui.window.gamepad_axis": (pad, axis) => {
+        const p = readGamepads()[ny.int(pad)];
+        const a = p ? (p.axes || [])[ny.int(axis)] : 0;
+        return ny.fltFromNumber(memoryRef, Math.abs(a) < 1e-6 ? 0 : a);
+      },
+      "std.os.ui.window.gamepad_button": (pad, button) => {
+        const p = readGamepads()[ny.int(pad)];
+        const b = p ? (p.buttons || [])[ny.int(button)] : null;
+        return bool(b && !!b.pressed);
+      },
+      "std.os.ui.window.test_report_touch": (count, x, y) => {
+        canvas.dataset.touchCount = String(ny.int(count));
+        canvas.dataset.touchX = String(ny.numeric(memoryRef, x));
+        canvas.dataset.touchY = String(ny.numeric(memoryRef, y));
+        return NY_TRUE;
+      },
+      "std.os.ui.window.test_report_gamepad": (count, buttonA, leftX) => {
+        const pads = readGamepads();
+        const padCount = pads.length;
+        let mappedButtonA = 0;
+        let mappedLeftX = 0;
+        if (pads[0]) {
+          const pressed = (pads[0].buttons || [])[0];
+          mappedButtonA = pressed && !!pressed.pressed ? 1 : 0;
+          mappedLeftX = Number((pads[0].axes || [])[0]) || 0;
+        }
+        canvas.setAttribute("data-gamepad-count", String(padCount));
+        canvas.setAttribute("data-gamepad-buttonA", String(mappedButtonA));
+        canvas.setAttribute("data-gamepad-leftX", String(mappedLeftX));
+        return NY_TRUE;
+      },
       "std.os.ui.render.begin_frame_clear": (fill) => {
         frameTouched = true;
         setStageSize();
@@ -883,6 +1040,7 @@
         return NY_TRUE;
       },
       "std.os.ui.render.framebuffer_size_f64": () => list2f(stage.width, stage.height),
+      "std.os.ui.render.get_framebuffer_size": () => list2i(stage.width, stage.height),
       "std.os.ui.render.get_frame_time": () => webFrameDt,
       "std.os.ui.render.set_ortho_2d": () => 0n,
       "std.os.ui.render.matrix.mat4_identity": () => ny.tag(0),
@@ -918,6 +1076,54 @@
         ctx.textBaseline = "top";
         ctx.fillText(ny.text(memoryRef, text, 0), Math.round(x), Math.round(y));
         return 0n;
+      },
+      "std.os.ui.render.texture_create_rgba": (w, h, pixels, format, filter, wrap_s, wrap_t, use_mipmaps) => {
+        const width = ny.int(w);
+        const height = ny.int(h);
+        const total = width * height * 4;
+        const isList = pixels !== 0n && ny.listLen(memoryRef, pixels) >= total;
+        if (width <= 0 || height <= 0 || (!isList && !pixels)) return ny.tag(-1);
+        const byte = (i) => {
+          if (isList) {
+            const raw = ny.listGet(memoryRef, pixels, ny.tag(i), 0n);
+            return typeof raw === "bigint" ? Number(raw) & 255 : (Number(raw) || 0) & 255;
+          }
+          return ny.u8(memoryRef)[ny.ptr(pixels) + i] || 0;
+        };
+        const rgba8 = new Uint8ClampedArray(total);
+        for (let i = 0; i < total; i++) rgba8[i] = byte(i);
+        const cvs = document.createElement("canvas");
+        cvs.width = width;
+        cvs.height = height;
+        const cctx = cvs.getContext("2d");
+        cctx.putImageData(new ImageData(new Uint8ClampedArray(rgba8), width, height), 0, 0);
+        const id = nextTextureId++;
+        g2dTextures.set(id, { canvas: cvs, w: width, h: height, filter });
+        return ny.tag(id);
+      },
+      "std.os.ui.render.texture_size": (tex) => {
+        const t = g2dTextures.get(ny.int(tex));
+        return list2i(t ? t.w : 0, t ? t.h : 0);
+      },
+      "std.os.ui.render.texture_destroy": (tex) => {
+        g2dTextures.delete(ny.int(tex));
+        return NY_TRUE;
+      },
+      "std.os.ui.render.draw_texture": (texId, x, y, scale, fill) => {
+        const t = g2dTextures.get(ny.int(texId));
+        if (!t) return 0n;
+        frameTouched = true;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(t.canvas,
+          Math.round(x),
+          Math.round(y),
+          t.w * Math.max(0.001, scale),
+          t.h * Math.max(0.001, scale));
+        return 0n;
+      },
+      "std.os.ui.render.get_pixel": (x, y) => {
+        const data = ctx.getImageData(Math.round(Number(x)), Math.round(Number(y)), 1, 1).data;
+        return list4f(data[0] / 255, data[1] / 255, data[2] / 255, data[3] / 255);
       },
       "std.os.ui.render.end_frame": () => {
         framePresented = true;
@@ -1080,6 +1286,35 @@
         return 0n;
       },
       "std.os.sound.get_backend_name": () => ny.string(memoryRef, ensureAudio() ? "web-audio" : "none"),
+      "std.os.sound.web_play": (path) => {
+        const key = ny.text(memoryRef, path, 0);
+        const bytes = assetCache.get(key);
+        const context = ensureAudio();
+        if (!bytes || !context) {
+          canvas.setAttribute("data-audio-decode", "0");
+          return NY_FALSE;
+        }
+        const startSource = (buffer) => {
+          canvas.setAttribute("data-audio-decode", "1");
+          canvas.setAttribute("data-audio-decode-length", String(buffer.length));
+          canvas.setAttribute("data-audio-decode-duration", String(Math.round(buffer.duration * 1000)));
+          const source = context.createBufferSource();
+          source.buffer = buffer;
+          source.connect(context.destination);
+          source.start(0);
+          canvas.setAttribute("data-audio-source-started", "1");
+          if (context.state === "suspended") context.resume().catch(() => {});
+        };
+        const wav = decodeWavPcm(context, bytes);
+        if (wav) {
+          startSource(wav);
+          return NY_TRUE;
+        }
+        context.decodeAudioData(bytes.slice().buffer)
+          .then(startSource)
+          .catch(() => canvas.setAttribute("data-audio-decode", "0"));
+        return NY_TRUE;
+      },
       "std.core.dict_mod.dict": () => 0n,
       "std.os.args.args": () => {
         const argv = refreshRunArgv(meta);
@@ -1168,6 +1403,56 @@
     return { imports, asyncifyRef };
   }
 
+  /*
+   * Headless-Chromium self-test for the touch host imports.
+   *
+   * The browser test harness runs `chromium --dump-dom` with no CDP, so it
+   * cannot synthesize input events itself. Instead, when the page is loaded
+   * with `#touch-selftest`, this routine dispatches a real TouchEvent
+   * sequence on the canvas after the app starts; the fixture reads the touch
+   * state through the public input facade and echoes it back via
+   * `std.os.ui.window.test_report_touch` into data-touch-* attributes, which
+   * the harness greps out of --dump-dom.
+   */
+  function scheduleTouchSelftest(canvas) {
+    if (!canvas || !window.TouchEvent) return;
+    const r = canvas.getBoundingClientRect();
+    /* Map a logical stage point (e.g. stage 80,60) back to a CSS client point
+       that updateTouches() will scale back to the same stage coordinates. */
+    const sx = r.width / Math.max(1, stage.width);
+    const sy = r.height / Math.max(1, stage.height);
+    const mk = (type, id, stageX, stageY) => {
+      const cx = r.left + stageX * sx;
+      const cy = r.top + stageY * sy;
+      const touch = new Touch({ identifier: id, target: canvas, clientX: cx, clientY: cy });
+      return new TouchEvent(type, { cancelable: true, bubbles: true, changedTouches: [touch], touches: [touch] });
+    };
+    /* The fixture stops the loop as soon as it observes active touch and
+       echoes the observed count, so keep the touch held rather than racing a
+       quick touchend: any frame after touchstart reliably sees count > 0. */
+    setTimeout(() => {
+      canvas.dispatchEvent(mk("touchstart", 7, 80, 60));
+      canvas.dispatchEvent(mk("touchmove", 7, 90, 70));
+      setTimeout(() => canvas.dispatchEvent(mk("touchend", 7, 90, 70)), 4600);
+      canvas.dataset.touchSelftest = "1";
+    }, 0);
+  }
+
+  /* Inject a synthetic standard-mapped Gamepad so the headless self-test can
+     prove the mapping code: connect one pad, press button 0 ("A") and move the
+     left stick, which the fixture echoes back via test_report_gamepad. */
+  function scheduleGamepadSelftest() {
+    window.__nyFakeGamepads = () => [null, {
+      id: "NY-Fake-Gamepad",
+      index: 1,
+      connected: true,
+      mapping: "standard",
+      touch: true,
+      axes: [0.5, -0.25, 0, 0],
+      buttons: Array.from({ length: 16 }, (_, i) => ({ pressed: i === 0, touched: i === 0, value: i === 0 ? 1.0 : 0.0 })),
+    }];
+  }
+
   async function loadRuntime(meta) {
     const token = ++runtimeToken;
     currentRuntime = null;
@@ -1214,6 +1499,8 @@
       if (frameTouched && !framePresented) present();
       if (!frameTouched && oneShot) refreshCliStage();
       else if (!frameTouched) drawStatusSurface("Web Ready", [meta.title, `entry: ${entry}`]);
+      if (window.location.hash === "#touch-selftest") scheduleTouchSelftest(canvas);
+      if (window.location.hash === "#gamepad-selftest") scheduleGamepadSelftest();
       if (running) setTimeout(() => runFrame(0.016), 0);
     } catch (err) {
       if (token !== runtimeToken || currentMeta !== meta) return;
@@ -1364,7 +1651,28 @@
     input.scroll[0] += e.deltaX;
     input.scroll[1] += e.deltaY;
   }, { passive: true });
-  canvas.addEventListener("touchstart", resumeAudio, { passive: true });
+  /* Touch input: map to logical stage coordinates, same scaling as the mouse. */
+  function updateTouches(e) {
+    const r = canvas.getBoundingClientRect();
+    const sx = stage.width / Math.max(1, r.width);
+    const sy = stage.height / Math.max(1, r.height);
+    for (const t of e.changedTouches) {
+      input.touches.set(t.identifier, [(t.clientX - r.left) * sx, (t.clientY - r.top) * sy]);
+    }
+  }
+  canvas.addEventListener("touchstart", (e) => {
+    resumeAudio();
+    updateTouches(e);
+    for (const t of e.changedTouches) input.touchStarts.add(t.identifier);
+  }, { passive: true });
+  canvas.addEventListener("touchmove", (e) => { updateTouches(e); }, { passive: true });
+  canvas.addEventListener("touchend", (e) => {
+    updateTouches(e);
+    for (const t of e.changedTouches) input.touches.delete(t.identifier);
+  }, { passive: true });
+  canvas.addEventListener("touchcancel", (e) => {
+    for (const t of e.changedTouches) input.touches.delete(t.identifier);
+  }, { passive: true });
   window.addEventListener("mouseup", (e) => { input.buttons.delete(e.button); });
 
   wasmFile.addEventListener("change", async () => {

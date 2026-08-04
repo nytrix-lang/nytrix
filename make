@@ -2748,7 +2748,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     out_dir = build_root / "web-test"
     if run_web_demos(build_root, kind, ["--out", str(out_dir), "--clean", "--require-ny-wasm"]) != 0:
         return 1
-    negative = ROOT / "etc" / "tests" / "web" / "unsupported-process.ny"
+    negative = ROOT / "etc" / "tests" / "native" / "web" / "unsupported-process.ny"
     try:
         run_web_check(build_root, kind, [str(negative)])
     except SystemExit:
@@ -2800,7 +2800,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         except subprocess.TimeoutExpired:
             server.kill()
     dom = result.stdout if 'result' in locals() else ""
-    audio = ROOT / "etc" / "tests" / "web" / "audio-init.ny"
+    audio = ROOT / "etc" / "tests" / "native" / "web" / "audio-init.ny"
     if run_web_check(build_root, kind, [str(audio)]) != 0:
         return 1
     audio_report = build_root / "web-check" / "audio-init.web-report.json"
@@ -2810,7 +2810,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: audio check did not write a valid report") from exc
     if audio_data.get("ok") is not True or audio_data.get("unsupported") != []:
         raise SystemExit("web-test: browser audio lifecycle imports are not fully hosted")
-    requests = ROOT / "etc" / "tests" / "web" / "window-requests.ny"
+    requests = ROOT / "etc" / "tests" / "native" / "web" / "window-requests.ny"
     if run_web_check(build_root, kind, [str(requests)]) != 0:
         return 1
     request_report = build_root / "web-check" / "window-requests.web-report.json"
@@ -2871,7 +2871,45 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             print(output)
         raise SystemExit("web-test: browser audio did not remain gesture-gated and visible")
     ok("web-test: browser audio is visible and waits for a user gesture")
-    renderer3d = ROOT / "etc" / "tests" / "web" / "renderer-3d.ny"
+    decode = ROOT / "etc" / "tests" / "native" / "web" / "audio-decode.ny"
+    decode_assets = ROOT / "etc" / "tests" / "native" / "web" / "assets"
+    decode_dir = build_root / "web-test-audio-decode"
+    if run_web(build_root, kind, [str(decode), "--out", str(decode_dir),
+                                  "--assets", str(decode_assets), "--preload-all"]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        decode_port = int(probe.getsockname()[1])
+    decode_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(decode_port), "--bind", "127.0.0.1", "--directory", str(decode_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        decode_result = subprocess.run([
+            browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+            "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+            "--virtual-time-budget=16000", "--dump-dom", f"http://127.0.0.1:{decode_port}/index.html#app",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: Chromium timed out while checking audio decode")
+    finally:
+        decode_server.terminate()
+        try:
+            decode_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            decode_server.kill()
+    decode_dom = decode_result.stdout if 'decode_result' in locals() else ""
+    decode_ok = 'data-audio-decode="1"' in decode_dom
+    decode_length = re.search(r'data-audio-decode-length="([1-9][0-9]*)"', decode_dom)
+    decode_source = 'data-audio-source-started="1"' in decode_dom
+    if decode_result.returncode != 0 or not decode_ok or decode_length is None or not decode_source or "runtime error" in decode_dom:
+        output = _tail_text(decode_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser did not decode and start the packed audio asset")
+    ok("web-test: browser decoded and started the packed audio asset")
+    renderer3d = ROOT / "etc" / "tests" / "native" / "web" / "renderer-3d.ny"
     if run_web_check(build_root, kind, [str(renderer3d)]) != 0:
         return 1
     renderer3d_dir = build_root / "web-test-renderer-3d"
@@ -2909,7 +2947,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             print(output)
         raise SystemExit("web-test: browser 3D baseline did not reach the WebGL2 draw path")
     ok("web-test: browser 3D baseline reached the WebGL2 draw path")
-    pointer = ROOT / "etc" / "tests" / "web" / "input-pointer.ny"
+    pointer = ROOT / "etc" / "tests" / "native" / "web" / "input-pointer.ny"
     if run_web_check(build_root, kind, [str(pointer)]) != 0:
         return 1
     pointer_dir = build_root / "web-test-input-pointer"
@@ -2945,6 +2983,170 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             print(output)
         raise SystemExit("web-test: browser pointer input fixture did not execute")
     ok("web-test: browser pointer input facade executed")
+    touch = ROOT / "etc" / "tests" / "native" / "web" / "input-touch.ny"
+    if run_web_check(build_root, kind, [str(touch)]) != 0:
+        return 1
+    touch_dir = build_root / "web-test-input-touch"
+    if run_web(build_root, kind, [str(touch), "--out", str(touch_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        touch_port = int(probe.getsockname()[1])
+    touch_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(touch_port), "--bind", "127.0.0.1", "--directory", str(touch_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        # #touch-selftest makes wasm.js synthesize a TouchEvent sequence; the
+        # fixture echoes the observed touch state via test_report_touch into
+        # data-touch-* attributes that this regex reads back from --dump-dom.
+        touch_result = subprocess.run([
+            browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+            "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+            "--virtual-time-budget=5000", "--dump-dom", f"http://127.0.0.1:{touch_port}/index.html#touch-selftest",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: Chromium timed out while checking touch input")
+    finally:
+        touch_server.terminate()
+        try:
+            touch_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            touch_server.kill()
+    touch_dom = touch_result.stdout if 'touch_result' in locals() else ""
+    touch_presented = re.search(r'data-presented="[1-9][0-9]*"', touch_dom) is not None
+    touch_observed = re.search(r'data-touch-count="1"', touch_dom) is not None
+    if touch_result.returncode != 0 or not touch_presented or not touch_observed or "runtime error" in touch_dom:
+        output = _tail_text(touch_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser touch input did not flow through the public facade")
+    ok("web-test: browser touch input flowed through the public facade")
+    gamepad = ROOT / "etc" / "tests" / "native" / "web" / "input-gamepad.ny"
+    if run_web_check(build_root, kind, [str(gamepad)]) != 0:
+        return 1
+    gamepad_dir = build_root / "web-test-input-gamepad"
+    if run_web(build_root, kind, [str(gamepad), "--out", str(gamepad_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        gamepad_port = int(probe.getsockname()[1])
+    gamepad_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(gamepad_port), "--bind", "127.0.0.1", "--directory", str(gamepad_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        # #gamepad-selftest makes wasm.js inject a standard-mapped fake Gamepad;
+        # the fixture maps it through the public facade into data-gamepad-* attrs.
+        gamepad_result = subprocess.run([
+            browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+            "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+            "--virtual-time-budget=5000", "--dump-dom", f"http://127.0.0.1:{gamepad_port}/index.html#gamepad-selftest",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: Chromium timed out while checking gamepad mapping")
+    finally:
+        gamepad_server.terminate()
+        try:
+            gamepad_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            gamepad_server.kill()
+    gamepad_dom = (gamepad_result.stdout if 'gamepad_result' in locals() else "").lower()
+    gamepad_count_ok = re.search(r'data-gamepad-count="1"', gamepad_dom) is not None
+    gamepad_button_ok = re.search(r'data-gamepad-buttona="1"', gamepad_dom) is not None
+    gamepad_leftx_ok = re.search(r'data-gamepad-leftx="0\.5"', gamepad_dom) is not None
+    if gamepad_result.returncode != 0 or not gamepad_count_ok or not gamepad_button_ok or not gamepad_leftx_ok or "runtime error" in gamepad_dom:
+        output = _tail_text(gamepad_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser gamepad mapping did not flow through the public facade")
+    ok("web-test: browser gamepad mapping flowed through the public facade")
+    framebuf = ROOT / "etc" / "tests" / "native" / "web" / "renderer-framebuffer.ny"
+    if run_web_check(build_root, kind, [str(framebuf)]) != 0:
+        return 1
+    framebuf_dir = build_root / "web-test-renderer-framebuffer"
+    if run_web(build_root, kind, [str(framebuf), "--out", str(framebuf_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        framebuf_port = int(probe.getsockname()[1])
+    framebuf_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(framebuf_port), "--bind", "127.0.0.1", "--directory", str(framebuf_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        framebuf_result = subprocess.run([
+            browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+            "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+            "--virtual-time-budget=5000", "--dump-dom", f"http://127.0.0.1:{framebuf_port}/index.html#app",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: Chromium timed out while checking the framebuffer probe")
+    finally:
+        framebuf_server.terminate()
+        try:
+            framebuf_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            framebuf_server.kill()
+    framebuf_dom = (framebuf_result.stdout if 'framebuf_result' in locals() else "").lower()
+    framebuf_fb = re.search(r'data-framebuffer="(\d+)x(\d+)"', framebuf_dom)
+    framebuf_presented = re.search(r'data-presented="[1-9][0-9]*"', framebuf_dom) is not None
+    framebuf_probe_ok = bool(
+        framebuf_fb and
+        re.search(r'\b' + framebuf_fb.group(1) + ' ' + framebuf_fb.group(2) + r'\b', framebuf_dom) is not None
+    )
+    if framebuf_result.returncode != 0 or not framebuf_presented or not framebuf_probe_ok or "runtime error" in framebuf_dom:
+        output = _tail_text(framebuf_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser framebuffer probe did not round-trip through the host")
+    ok("web-test: browser framebuffer probe round-tripped through the host")
+    texture = ROOT / "etc" / "tests" / "native" / "web" / "renderer-2d-texture.ny"
+    if run_web_check(build_root, kind, [str(texture)]) != 0:
+        return 1
+    texture_dir = build_root / "web-test-renderer-texture"
+    if run_web(build_root, kind, [str(texture), "--out", str(texture_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        texture_port = int(probe.getsockname()[1])
+    texture_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(texture_port), "--bind", "127.0.0.1", "--directory", str(texture_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        texture_result = subprocess.run([
+            browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+            "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+            "--virtual-time-budget=5000", "--dump-dom", f"http://127.0.0.1:{texture_port}/index.html#app",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: Chromium timed out while checking the texture probe")
+    finally:
+        texture_server.terminate()
+        try:
+            texture_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            texture_server.kill()
+    texture_dom = (texture_result.stdout if 'texture_result' in locals() else "").lower()
+    texture_presented = re.search(r'data-presented="[1-9][0-9]*"', texture_dom) is not None
+    texture_triples = [tuple(int(t) for t in g) for g in re.findall(r'\b(\d+) (\d+) (\d+)\b', texture_dom)]
+    texture_has_red = any(len(g) == 3 and g[0] >= 250 for g in texture_triples)
+    texture_has_dark = any(len(g) == 3 and g[0] <= 4 for g in texture_triples)
+    texture_probe_ok = bool(
+        re.search(r'\b2 2\b', texture_dom) is not None and
+        texture_has_red and texture_has_dark
+    )
+    if texture_result.returncode != 0 or not texture_presented or not texture_probe_ok or "runtime error" in texture_dom:
+        output = _tail_text(texture_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser texture probe did not round-trip through the host")
+    ok("web-test: browser texture probe round-tripped through the host")
     return 0
 
 def print_wasm_help() -> None:

@@ -4150,6 +4150,7 @@ int ny_test_main(int argc, char **argv) {
   size_t skipped_native_platform = 0;
   size_t skipped_native_fp_link = 0;
   size_t skipped_ci = 0;
+  size_t skipped_web_browser = 0;
   const int ci_mode = test_env_truthy("CI") || test_env_truthy("GITHUB_ACTIONS");
   const int skip_system_stdlib =
       test_env_truthy("NYTRIX_TEST_SKIP_SYSTEM_STDLIB");
@@ -4174,8 +4175,12 @@ int ny_test_main(int argc, char **argv) {
       sv_push(&benchmark, p);
     else if (strncmp(p, "etc/tests/runtime/", 18) == 0)
       sv_push(&runtime, p);
-    else if (strncmp(p, "etc/tests/native/", 17) == 0)
-      sv_push(&native, p);
+    else if (strncmp(p, "etc/tests/native/", 17) == 0) {
+      if (strncmp(p, "etc/tests/native/web/", 21) == 0)
+        skipped_web_browser++;
+      else
+        sv_push(&native, p);
+    }
     else if (strncmp(p, "etc/tests/interop/", 18) == 0)
       sv_push(&interop, p);
     else if (path_is_probe_test(p))
@@ -4203,6 +4208,9 @@ int ny_test_main(int argc, char **argv) {
   if (skipped_ci > 0)
     printf("%s[note]%s skipped %zu nshape fixtures marked ci skip\n",
            nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_ci);
+  if (skipped_web_browser > 0)
+    printf("%s[note]%s skipped %zu browser-only fixtures under etc/tests/native/web (run via ./make web-test)\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_web_browser);
 
   StrVec selected_all = {0};
   for (size_t i = 0; i < benchmark.len; i++)

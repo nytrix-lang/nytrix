@@ -2442,6 +2442,18 @@ static const char *ny_x64_mach_float_setcc(ny_mach_cond_t condition) {
   }
 }
 
+/* Emit `movq -off(%rbp), %rax` unless %rax already holds this vreg slot, as
+ * tracked by rax_cached_off (set only when the previous instruction stored or
+ * loaded that slot and nothing since clobbered %rax). Only vreg operands are
+ * cached: frame slots can be address-taken and are always reloaded. */
+static bool ny_x64_scalar_emit_rax_load(ny_native_writer_t *w,
+                                        const ny_mach_operand_t *op, int off,
+                                        int rax_cached_off) {
+  if (op->kind == NY_MACH_OPERAND_VREG && rax_cached_off == off)
+    return true;
+  return ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n", off);
+}
+
 bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
                                       const ny_native_target_info_t *target,
                                       const ny_mach_func_t *mach,
@@ -2525,9 +2537,17 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
       }
     free(params);
   }
+  /* Tracks the mach-offset of the vreg whose value currently sits live in
+   * %rax within the current block, or -1 if unknown/stale. Only vregs are
+   * ever cached here: frame slots can be address-taken (aliased through a
+   * pointer), vregs by construction cannot be, so caching them is always
+   * safe. Reset at every block boundary since %rax's contents on entry to
+   * a block with multiple predecessors can't be assumed. */
+  int rax_cached_off = -1;
   for (size_t block = 0; block < mach->block_len; ++block) {
     if (!ny_native_printf(w, ".Lny_mach_%s_%zu:\n", name, block))
       return false;
+    rax_cached_off = -1;
     const ny_mach_block_t *b = &mach->blocks[block];
     for (size_t n = 0; n < b->inst_count; ++n) {
       const ny_mach_inst_t *in = &mach->insts[b->first_inst + n];
@@ -2551,8 +2571,11 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
         }
         if (in->src0.kind == NY_MACH_OPERAND_IMM) {
           if (!ny_native_printf(w, "\tmovabsq\t$%" PRId64 ", %%rax\n", in->src0.as.imm)) return false;
-        } else if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n", a)) return false;
+        } else if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
         if (!ny_native_printf(w, "\tmovq\t%%rax, -%d(%%rbp)\n", dst)) return false;
+        rax_cached_off = in->dst.kind == NY_MACH_OPERAND_VREG
+                             ? dst
+                             : (in->src0.kind == NY_MACH_OPERAND_VREG ? a : -1);
         break;
       case NY_MACH_LEA:
         if (in->src0.kind == NY_MACH_OPERAND_FRAME) {
@@ -2562,6 +2585,7 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
           return false;
         }
         if (!ny_native_printf(w, "\tmovq\t%%rax, -%d(%%rbp)\n", dst)) return false;
+        rax_cached_off = in->dst.kind == NY_MACH_OPERAND_VREG ? dst : -1;
         break;
       case NY_MACH_CONVERT:
         if (ny_x64_mach_is_f64(mach, &in->dst)) {
@@ -2579,6 +2603,7 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
           }
           if (!ny_native_printf(w, "\tmovss\t%%xmm0, -%d(%%rbp)\n", dst)) return false;
         }
+        rax_cached_off = -1;
         break;
       case NY_MACH_LOAD:
         if (ny_x64_mach_is_float(mach, &in->dst)) {
@@ -2586,14 +2611,17 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
           if (in->src0.kind == NY_MACH_OPERAND_FRAME) {
             if (!ny_native_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t%%xmm0, -%d(%%rbp)\n", move, a, move, dst)) return false;
           } else if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n\t%s\t(%%rax), %%xmm0\n\t%s\t%%xmm0, -%d(%%rbp)\n", a, move, move, dst)) return false;
+          rax_cached_off = -1;
           break;
         }
         if (in->src0.kind == NY_MACH_OPERAND_FRAME) {
-          if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n", a)) return false;
-        } else if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n\tmovq\t(%%rax), %%rax\n", a)) {
-          return false;
+          if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
+        } else {
+          if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
+          if (!ny_native_printf(w, "\tmovq\t(%%rax), %%rax\n")) return false;
         }
         if (!ny_native_printf(w, "\tmovq\t%%rax, -%d(%%rbp)\n", dst)) return false;
+        rax_cached_off = in->dst.kind == NY_MACH_OPERAND_VREG ? dst : -1;
         break;
       case NY_MACH_STORE:
         if (ny_x64_mach_is_float(mach, &in->src0)) {
@@ -2601,14 +2629,16 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
           if (in->dst.kind == NY_MACH_OPERAND_FRAME) {
             if (!ny_native_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t%%xmm0, -%d(%%rbp)\n", move, a, move, dst)) return false;
           } else if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n\tmovq\t-%d(%%rbp), %%rcx\n\t%s\t(%%rax), %%xmm0\n\t%s\t%%xmm0, (%%rcx)\n", a, dst, move, move)) return false;
+          rax_cached_off = -1;
           break;
         }
-        if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n", a)) return false;
+        if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
         if (in->dst.kind == NY_MACH_OPERAND_FRAME) {
           if (!ny_native_printf(w, "\tmovq\t%%rax, -%d(%%rbp)\n", dst)) return false;
         } else if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rcx\n\tmovq\t%%rax, (%%rcx)\n", dst)) {
           return false;
         }
+        rax_cached_off = in->src0.kind == NY_MACH_OPERAND_VREG ? a : -1;
         break;
       case NY_MACH_ADD: case NY_MACH_SUB: case NY_MACH_AND: case NY_MACH_OR: case NY_MACH_XOR:
       case NY_MACH_MUL:
@@ -2621,13 +2651,15 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
           if (!ny_native_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t%%xmm0, -%d(%%rbp)\n",
                                 f32 ? "movss" : "movsd", a, op, b_off,
                                 f32 ? "movss" : "movsd", dst)) return false;
+          rax_cached_off = -1;
           break;
         }
-        if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n", a)) return false;
+        if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
         { const char *op = in->opcode == NY_MACH_ADD ? "addq" : in->opcode == NY_MACH_SUB ? "subq" :
                            in->opcode == NY_MACH_AND ? "andq" : in->opcode == NY_MACH_OR ? "orq" :
                            in->opcode == NY_MACH_XOR ? "xorq" : "imulq";
           if (!ny_native_printf(w, "\t%s\t-%d(%%rbp), %%rax\n\tmovq\t%%rax, -%d(%%rbp)\n", op, b_off, dst)) return false; }
+        rax_cached_off = in->dst.kind == NY_MACH_OPERAND_VREG ? dst : -1;
         break;
       case NY_MACH_DIV: case NY_MACH_MOD:
         if (ny_x64_mach_is_float(mach, &in->dst)) {
@@ -2636,14 +2668,22 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
                                 f32 ? "movss" : "movsd", a,
                                 f32 ? "divss" : "divsd", b_off,
                                 f32 ? "movss" : "movsd", dst)) return false;
+          rax_cached_off = -1;
           break;
         }
-        if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n\tcqto\n\tidivq\t-%d(%%rbp)\n\tmovq\t%%%s, -%d(%%rbp)\n",
-                              a, b_off, in->opcode == NY_MACH_DIV ? "rax" : "rdx", dst)) return false;
+        if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
+        if (!ny_native_printf(w, "\tcqto\n\tidivq\t-%d(%%rbp)\n\tmovq\t%%%s, -%d(%%rbp)\n",
+                              b_off, in->opcode == NY_MACH_DIV ? "rax" : "rdx", dst)) return false;
+        rax_cached_off = in->opcode == NY_MACH_DIV &&
+                                 in->dst.kind == NY_MACH_OPERAND_VREG
+                             ? dst
+                             : -1;
         break;
       case NY_MACH_SHL: case NY_MACH_SAR:
-        if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n\tmovq\t-%d(%%rbp), %%rcx\n\t%s\t%%cl, %%rax\n\tmovq\t%%rax, -%d(%%rbp)\n",
-                              a, b_off, in->opcode == NY_MACH_SHL ? "shlq" : "sarq", dst)) return false;
+        if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
+        if (!ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rcx\n\t%s\t%%cl, %%rax\n\tmovq\t%%rax, -%d(%%rbp)\n",
+                              b_off, in->opcode == NY_MACH_SHL ? "shlq" : "sarq", dst)) return false;
+        rax_cached_off = in->dst.kind == NY_MACH_OPERAND_VREG ? dst : -1;
         break;
       case NY_MACH_CMP: {
         if (ny_x64_mach_is_float(mach, &in->src0)) {
@@ -2661,10 +2701,13 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
               "\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t-%d(%%rbp), %%xmm1\n\t%s\t%%xmm1, %%xmm0\n\tjp\t%s\n\t%s\t%%al\n\tjmp\t%s\n%s:\n\tmovb\t$%d, %%al\n%s:\n\tmovzbq\t%%al, %%rax\n\tmovq\t%%rax, -%d(%%rbp)\n",
               move, a, move, b_off, cmp, unordered, cc, done, unordered,
               unordered_result, done, dst)) return false;
+          rax_cached_off = -1;
           break;
         }
         const char *cc = ny_x64_mach_setcc(in->condition);
-        if (!cc || !ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n\tcmpq\t-%d(%%rbp), %%rax\n\t%s\t%%al\n\tmovzbq\t%%al, %%rax\n\tmovq\t%%rax, -%d(%%rbp)\n", a, b_off, cc, dst)) return false;
+        if (!cc || !ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
+        if (!cc || !ny_native_printf(w, "\tcmpq\t-%d(%%rbp), %%rax\n\t%s\t%%al\n\tmovzbq\t%%al, %%rax\n\tmovq\t%%rax, -%d(%%rbp)\n", b_off, cc, dst)) return false;
+        rax_cached_off = in->dst.kind == NY_MACH_OPERAND_VREG ? dst : -1;
         break;
       }
       case NY_MACH_BR:
@@ -2741,6 +2784,10 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
         } else if (in->dst.kind != NY_MACH_OPERAND_NONE &&
                    !ny_native_printf(w, "\tmovq\t%%rax, -%d(%%rbp)\n", dst)) return false;
         }
+        rax_cached_off = in->dst.kind == NY_MACH_OPERAND_VREG &&
+                                 !ny_x64_mach_is_float(mach, &in->dst)
+                             ? dst
+                             : -1;
         break;
       case NY_MACH_RET:
         if (ny_x64_mach_is_float(mach, &in->src0)) {
@@ -2748,8 +2795,9 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
             if (!ny_native_printf(w, "\tmovss\t-%d(%%rbp), %%xmm0\n\tmovd\t%%xmm0, %%eax\n", a)) return false;
           } else if (!ny_native_printf(w, "\tmovsd\t-%d(%%rbp), %%xmm0\n\tmovq\t%%xmm0, %%rax\n", a)) return false;
         } else if (in->src0.kind != NY_MACH_OPERAND_NONE &&
-            !ny_native_printf(w, "\tmovq\t-%d(%%rbp), %%rax\n", a)) return false;
+            !ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
         if (!ny_native_printf(w, "\tjmp\t%s\n", epilogue)) return false;
+        rax_cached_off = -1;
         break;
       default:
         return false;
