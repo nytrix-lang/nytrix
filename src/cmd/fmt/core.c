@@ -9,12 +9,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "cscan.h"
+#include "cscan.c"
+
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
 
 typedef struct {
   int analyze;
+  int selftest;
   int check;
   int fix;
   int json;
@@ -44,6 +48,8 @@ typedef struct {
   const char *conv_output;
   int c2ny;
   const char *c2ny_output;
+  int py2ny;
+  const char *py2ny_output;
   int align_macros;
   StrVec paths;
 } FmtOpts;
@@ -253,6 +259,48 @@ typedef struct {
   int min_len;
 } DupStats;
 
+static int audit_patterns_selftest(void);
+
+static int cscan_selftest(void) {
+  static const char probe[] =
+      "#define WRAP(x) \\\n"
+      "  do { if (x) call(x); } while (0)\n\n"
+      "static int single(void) { return 1; }\n\n"
+      "int\nmulti(int x)\n{\n"
+      "  if (strcmp(\"}\", \"{\") == 0) {\n"
+      "    while (x && nested(x, \"{\")) { return nested(x, \"}\"); }\n"
+      "  }\n  /* braces in a comment: { } */\n  return x;\n}\n\n"
+      "int continuation(int x)\n{\n"
+      "  if (strcmp(\"a\", \"b\") == 0) { return x; }\n  return 0;\n}\n";
+  static const char malformed[] = "int broken(void) {\n/* unterminated\n";
+  CScanFunctions functions = {0};
+  int ok = cscan_functions(probe, sizeof(probe) - 1, &functions) && functions.len == 3 &&
+           strcmp(functions.items[0].name, "single") == 0 &&
+           functions.items[0].start_line == 4 && functions.items[0].end_line == 4 &&
+           strcmp(functions.items[1].name, "multi") == 0 &&
+           functions.items[1].start_line == 6 && functions.items[1].end_line == 14 &&
+           strcmp(functions.items[2].name, "continuation") == 0 &&
+           functions.items[2].start_line == 16 && functions.items[2].end_line == 20;
+  if (!ok) {
+    fprintf(stderr, "ny-fmt C scanner selftest: expected 3 definitions, got %zu\n", functions.len);
+    for (size_t i = 0; i < functions.len; i++)
+      fprintf(stderr, "  %s:%d-%d\n", functions.items[i].name,
+              functions.items[i].start_line, functions.items[i].end_line);
+  }
+  cscan_functions_free(&functions);
+  if (!ok || !cscan_functions(malformed, sizeof(malformed) - 1, &functions) ||
+      !functions.malformed || functions.len != 0) {
+    cscan_functions_free(&functions);
+    fprintf(stderr, "ny-fmt C scanner selftest: failed\n");
+    return 1;
+  }
+  cscan_functions_free(&functions);
+  if (audit_patterns_selftest() != 0)
+    return 1;
+  printf("ny-fmt selftest: C scanner and semantic pattern checks: ok\n");
+  return 0;
+}
+
 static int cmp_cstr_ptr(const void *a, const void *b) {
   const char *const *sa = (const char *const *)a;
   const char *const *sb = (const char *const *)b;
@@ -452,7 +500,7 @@ static int is_expected_error_fixture(const char *path) {
   char rel[PATH_MAX];
   if (!normalized_repo_path(path, rel, sizeof(rel)))
     return 0;
-  return strncmp(rel, "etc/tests/fuzz/errors/", 22) == 0;
+  return strncmp(rel, "etc/tests/errors/", 17) == 0;
 }
 
 static int path_is_std_lib_source(const char *path) {
@@ -703,18 +751,6 @@ static int split_comment_index(const char *line) {
 
 static size_t fmt_find_matching_paren(const char *s, size_t open);
 static int fmt_keyword_at(const char *s, size_t i, const char *kw);
-
-static void collapse_kw_paren(char *s, const char *kw) {
-  size_t k = strlen(kw);
-  size_t n = strlen(s);
-  for (size_t i = 0; i + k + 2 <= n; i++) {
-    if ((i == 0 || !isalnum((unsigned char)s[i - 1])) && memcmp(s + i, kw, k) == 0 &&
-        s[i + k] == ' ' && s[i + k + 1] == '(') {
-      memmove(s + i + k, s + i + k + 1, n - (i + k));
-      n--;
-    }
-  }
-}
 
 static void fmt_set_one_space_after(char *s, size_t cap, size_t pos) {
   size_t n = strlen(s);
@@ -2911,69 +2947,11 @@ static int ny_fn_is_forwarding_wrapper(const char *line) {
   return 0;
 }
 
-static int c_keyword_fn_name(const char *name) {
-  static const char *bad[] = {"if", "for", "while", "switch", "return", "sizeof", "defined", NULL};
-  for (int i = 0; bad[i]; i++)
-    if (strcmp(name, bad[i]) == 0)
-      return 1;
-  return 0;
-}
-
-static int parse_c_fn_line(const char *line, const char *next, char *name, size_t name_sz) {
-  const char *s = lstrip_ws(line);
-  if (!*s || *s == '#' || strstr(s, "typedef") || strstr(s, " return ") || strchr(s, ';'))
-    return 0;
-  const char *open = strchr(s, '(');
-  const char *close = strrchr(s, ')');
-  if (!open || !close || close < open)
-    return 0;
-  if (!strchr(close, '{') && (!next || lstrip_ws(next)[0] != '{'))
-    return 0;
-  const char *p = open;
-  while (p > s && (isalnum((unsigned char)p[-1]) || p[-1] == '_'))
-    p--;
-  if (p == open)
-    return 0;
-  size_t n = (size_t)(open - p);
-  if (n >= name_sz)
-    n = name_sz - 1;
-  memcpy(name, p, n);
-  name[n] = '\0';
-  return !c_keyword_fn_name(name);
-}
-
-static int c_brace_delta_line(const char *line) {
-  int delta = 0, quote = 0, esc = 0;
-  for (int i = 0; line[i]; i++) {
-    char ch = line[i];
-    if (!quote && ch == '/' && line[i + 1] == '/')
-      break;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
-      continue;
-    }
-    if (ch == '"' || ch == '\'') {
-      quote = ch;
-      continue;
-    }
-    if (ch == '{')
-      delta++;
-    else if (ch == '}')
-      delta--;
-  }
-  return delta;
-}
-
-static int find_end_line(StrVec *lines, size_t start, int is_c) {
+static int find_end_line(StrVec *lines, size_t start) {
   int depth = 0;
   for (size_t i = start; i < lines->len; i++) {
     int starts_close = 0;
-    int d = is_c ? c_brace_delta_line(lines->items[i]) : count_brace_delta(lines->items[i], &starts_close);
+    int d = count_brace_delta(lines->items[i], &starts_close);
     depth += d;
     if (depth <= 0 && i > start)
       return (int)i + 1;
@@ -3104,18 +3082,21 @@ static void scan_c_file_dupes(const char *path, DupFnVec *out, int min_len,
   char *txt = ny_read_file_raw(path, &n);
   if (!txt)
     return;
-  StrVec lines = {0};
-  split_lines_keep_empty(txt, &lines);
-  for (size_t i = 0; i < lines.len; i++) {
-    char name[128] = {0};
-    const char *next = (i + 1 < lines.len) ? lines.items[i + 1] : "";
-    if (!parse_c_fn_line(lines.items[i], next, name, sizeof(name)))
-      continue;
+  CScanFunctions funcs = {0};
+  if (!cscan_functions(txt, n, &funcs)) {
+    free(txt);
+    return;
+  }
+  for (size_t i = 0; i < funcs.len; i++) {
+    const CScanFunction *found = &funcs.items[i];
     if (fn_total)
       (*fn_total)++;
-    int end_line = find_end_line(&lines, i, 1);
-    size_t end_idx = end_line > 0 ? (size_t)(end_line - 1) : i;
-    char *fn_src = dupe_join_lines(&lines, i, end_idx);
+    size_t span = found->end_offset - found->start_offset;
+    char *fn_src = (char *)malloc(span + 1);
+    if (!fn_src)
+      continue;
+    memcpy(fn_src, txt + found->start_offset, span);
+    fn_src[span] = '\0';
     int norm_len = 0;
     char *norm = dupe_normalize_c_body(fn_src, &norm_len);
     free(fn_src);
@@ -3126,9 +3107,9 @@ static void scan_c_file_dupes(const char *path, DupFnVec *out, int min_len,
     DupFn f;
     memset(&f, 0, sizeof(f));
     snprintf(f.file, sizeof(f.file), "%s", path);
-    snprintf(f.name, sizeof(f.name), "%s", name);
-    f.line = (int)i + 1;
-    f.end_line = end_line;
+    snprintf(f.name, sizeof(f.name), "%s", found->name);
+    f.line = found->start_line;
+    f.end_line = found->end_line;
     f.norm_len = norm_len;
     f.hash = fnv1a64_mem(norm, (size_t)norm_len);
     f.norm = norm;
@@ -3136,7 +3117,7 @@ static void scan_c_file_dupes(const char *path, DupFnVec *out, int min_len,
     if (kept_total)
       (*kept_total)++;
   }
-  sv_free(&lines);
+  cscan_functions_free(&funcs);
   free(txt);
 }
 
@@ -3153,6 +3134,12 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
   int is_h_file = nyt_ends_with(path, ".h");
   int is_py_file = nyt_ends_with(path, ".py");
   int wants_public_docs = is_ny_file && path_is_std_lib_source(path);
+  CScanFunctions c_functions = {0};
+  if ((is_c_file || is_h_file) && !cscan_functions(txt, n, &c_functions)) {
+    sv_free(&lines);
+    free(txt);
+    return;
+  }
   stats->files++;
   stats->ny_files += is_ny_file;
   stats->c_files += is_c_file;
@@ -3270,7 +3257,7 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
         snprintf(fn.params, sizeof(fn.params), "%s", params);
         snprintf(fn.file, sizeof(fn.file), "%s", path);
         fn.line = ln;
-        fn.end_line = find_end_line(&lines, i, 0);
+        fn.end_line = find_end_line(&lines, i);
         fn.is_method = in_impl;
         fn.is_private = (fn.name[0] == '_') || fn.is_method || in_main_guard;
         fn.has_doc = !fn_has_body || ny_fn_has_doc(&lines, i) || ny_fn_is_forwarding_wrapper(line);
@@ -3297,16 +3284,17 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
         }
       }
     } else if (is_c_file || is_h_file) {
-      char name[128] = {0};
-      const char *next = (i + 1 < lines.len) ? lines.items[i + 1] : "";
-      if (parse_c_fn_line(line, next, name, sizeof(name))) {
+      for (size_t c = 0; c < c_functions.len; c++) {
+        const CScanFunction *found = &c_functions.items[c];
+        if (found->start_line != ln)
+          continue;
         Fn fn;
         memset(&fn, 0, sizeof(fn));
-        snprintf(fn.name, sizeof(fn.name), "%s", name);
+        snprintf(fn.name, sizeof(fn.name), "%s", found->name);
         snprintf(fn.file, sizeof(fn.file), "%s", path);
-        fn.line = ln;
-        fn.end_line = find_end_line(&lines, i, 1);
-        fn.is_private = strstr(line, "static") != NULL;
+        fn.line = found->start_line;
+        fn.end_line = found->end_line;
+        fn.is_private = found->is_static;
         fn.has_doc = previous_doc_comment(&lines, i);
         fn.is_c = 1;
         fv_push(fns, &fn);
@@ -3318,6 +3306,7 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
                      "large C function; split into focused helpers",
                      "large tooling functions are where formatter bugs hide");
         }
+        break;
       }
       if (find_outside_string(line, "strcpy(") || find_outside_string(line, "strcat(") ||
           find_outside_string(line, "sprintf(")) {
@@ -3352,6 +3341,7 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
     }
   }
 
+  cscan_functions_free(&c_functions);
   sv_free(&lines);
   free(txt);
 }
@@ -5920,6 +5910,113 @@ static int audit_expr_mentions_name(const char *expr, const char *name) {
   return count_word_occurrences(expr, name) > 0;
 }
 
+static int audit_ident_start(unsigned char ch) {
+  return isalpha(ch) || ch == '_';
+}
+
+static int audit_ident_char(unsigned char ch) {
+  return isalnum(ch) || ch == '_';
+}
+
+/* Lists are persistent values in Nytrix: append/extend return a replacement
+ * list. Restrict this to a standalone receiver call so passing an appended
+ * value onward (or assigning it) remains silent. */
+static int audit_ny_discarded_list_update(const char *line, char *receiver,
+                                          size_t receiver_sz,
+                                          char *method, size_t method_sz) {
+  if (!line)
+    return 0;
+  const char *s = lstrip_ws(line);
+  static const char *blocked[] = {"return", "def", "mut", "if", "elif",
+                                  "while", "for", "case", "match", "defer", NULL};
+  for (int i = 0; blocked[i]; i++)
+    if (audit_starts_keyword(s, blocked[i]))
+      return 0;
+  const char *dot = strstr(s, ".append(");
+  const char *name = "append";
+  if (!dot) {
+    dot = strstr(s, ".extend(");
+    name = "extend";
+  }
+  const char *equals = strchr(s, '=');
+  if (!dot || (equals && equals < dot))
+    return 0;
+  const char *open = dot + 1 + strlen(name);
+  const char *close = audit_find_matching_paren(open);
+  if (!close)
+    return 0;
+  const char *tail = lstrip_ws(close + 1);
+  if (*tail)
+    return 0;
+  const char *start = s;
+  while (start < dot && isspace((unsigned char)*start))
+    start++;
+  if (start == dot || !audit_ident_start((unsigned char)*start))
+    return 0;
+  for (const char *p = start; p < dot; p++)
+    if (!(audit_ident_char((unsigned char)*p) || *p == '.'))
+      return 0;
+  copy_trim_span(receiver, receiver_sz, start, dot);
+  snprintf(method, method_sz, "%s", name);
+  return receiver[0] != '\0';
+}
+
+static int audit_ny_empty_dict_binding(const char *line, char *name,
+                                       size_t name_sz) {
+  if (!line)
+    return 0;
+  const char *s = lstrip_ws(line);
+  if (!audit_starts_keyword(s, "mut") && !audit_starts_keyword(s, "def"))
+    return 0;
+  s += 3;
+  s = lstrip_ws(s);
+  const char *start = s;
+  if (!audit_ident_start((unsigned char)*s))
+    return 0;
+  while (audit_ident_char((unsigned char)*s))
+    s++;
+  copy_trim_span(name, name_sz, start, s);
+  s = lstrip_ws(s);
+  if (*s++ != '=')
+    return 0;
+  s = lstrip_ws(s);
+  if (s[0] != '{' || s[1] != '}')
+    return 0;
+  s = lstrip_ws(s + 2);
+  return name[0] && *s == '\0';
+}
+
+static int audit_ny_receiver_set_call(const char *line, const char *name) {
+  if (!line || !name || !*name)
+    return 0;
+  const char *s = lstrip_ws(line);
+  size_t n = strlen(name);
+  return strncmp(s, name, n) == 0 && s[n] == '.' &&
+         strncmp(s + n, ".set(", 5) == 0;
+}
+
+static int audit_patterns_selftest(void) {
+  char receiver[64] = {0};
+  char method[16] = {0};
+  char dict_name[64] = {0};
+  int ok = audit_ny_discarded_list_update("xs.append(2)", receiver,
+                                           sizeof(receiver), method,
+                                           sizeof(method)) &&
+           strcmp(receiver, "xs") == 0 && strcmp(method, "append") == 0 &&
+           !audit_ny_discarded_list_update("xs = xs.append(2)", receiver,
+                                           sizeof(receiver), method,
+                                           sizeof(method)) &&
+           audit_ny_empty_dict_binding("mut out = {}", dict_name,
+                                       sizeof(dict_name)) &&
+           strcmp(dict_name, "out") == 0 &&
+           audit_ny_receiver_set_call("out.set(\"ok\", true)", dict_name) &&
+           !audit_ny_empty_dict_binding("mut out = dict()", dict_name,
+                                        sizeof(dict_name));
+  if (!ok)
+    fprintf(stderr, "ny-fmt semantic pattern selftest: failed\n");
+  return ok ? 0 : 1;
+}
+
 static void audit_add_bug_findings(const char *path, StrVec *lines, IssueVec *issues,
                                    AuditStats *stats) {
   const int is_ny_file = nyt_ends_with(path, ".ny");
@@ -5940,7 +6037,14 @@ static void audit_add_bug_findings(const char *path, StrVec *lines, IssueVec *is
   int last_write_line = 0;
   int last_write_decl = 0;
   int previous_code_line = 0;
+  struct {
+    char name[64];
+    int line;
+    int reported;
+  } frozen_dicts[32];
+  int frozen_dict_count = 0;
   memset(&last_write, 0, sizeof(last_write));
+  memset(frozen_dicts, 0, sizeof(frozen_dicts));
 
   for (size_t i = 0; i < lines->len; i++) {
     int quote_before = ny_quote_state;
@@ -5962,6 +6066,35 @@ static void audit_add_bug_findings(const char *path, StrVec *lines, IssueVec *is
       continue;
 
     if (is_ny_file) {
+      char empty_dict_name[64];
+      if (audit_ny_empty_dict_binding(code, empty_dict_name,
+                                      sizeof(empty_dict_name)) &&
+          frozen_dict_count < (int)(sizeof(frozen_dicts) / sizeof(frozen_dicts[0]))) {
+        snprintf(frozen_dicts[frozen_dict_count].name,
+                 sizeof(frozen_dicts[frozen_dict_count].name), "%s",
+                 empty_dict_name);
+        frozen_dicts[frozen_dict_count].line = ln;
+        frozen_dict_count++;
+      }
+      for (int k = 0; k < frozen_dict_count; k++) {
+        if (!frozen_dicts[k].reported &&
+            audit_ny_receiver_set_call(code, frozen_dicts[k].name)) {
+          char msg[320];
+          snprintf(msg, sizeof(msg), "'%s' was initialized as frozen {} on line %d",
+                   frozen_dicts[k].name, frozen_dicts[k].line);
+          audit_push_bug(issues, stats, path, ln, "NYAUD1119", "warning", msg,
+                         "use dict() for a mutable accumulator, or seed/clone a mutable dictionary before set()");
+          frozen_dicts[k].reported = 1;
+        }
+      }
+      char receiver[128], method[16];
+      if (audit_ny_discarded_list_update(code, receiver, sizeof(receiver), method,
+                                         sizeof(method))) {
+        char msg[320];
+        snprintf(msg, sizeof(msg), "discarded list.%s result for '%s'", method, receiver);
+        audit_push_bug(issues, stats, path, ln, "NYAUD1120", "warning", msg,
+                       "lists are value-typed; reassign the returned list (for example, xs = xs.append(value))");
+      }
       NySimpleAssign write;
       int write_is_decl = 0;
       int simple_write = audit_simple_write_from_line(code, &write, &write_is_decl);
@@ -8032,8 +8165,8 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int 
     collect_code_files_rec("lib", &scan);
     collect_code_files_rec("src", &scan);
     collect_code_files_rec("etc/projects", &scan);
-    collect_code_files_rec("etc/tests/rt", &scan);
-    collect_code_files_rec("etc/tests/fuzz/bench", &scan);
+    collect_code_files_rec("etc/tests/runtime", &scan);
+    collect_code_files_rec("etc/tests/bench", &scan);
   } else {
     for (size_t i = 0; i < paths->len; i++)
       collect_code_files_rec(paths->items[i], &scan);

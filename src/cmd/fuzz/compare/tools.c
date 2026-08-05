@@ -9,7 +9,7 @@ static int cmd_public_selftest_synth_print(int argc, char **argv) {
   const char *cc = getenv("CC");
   if (!cc || !*cc) cc = "cc";
   char *shape_dir = NULL, *work_dir = NULL;
-  bool path_ok = nytrix_asprintf(&shape_dir, "etc/tests/fuzz/shapes") >= 0 &&
+  bool path_ok = nytrix_asprintf(&shape_dir, "etc/tests/shapes") >= 0 &&
                  (work_dir = nytrix_scratch_pathf(NULL, "selftest_synth_print_%ld",
                                                  (long)getpid())) != NULL;
   string_list_t rows = {0}, failures = {0};
@@ -253,7 +253,7 @@ static int synth_schedule_run_batch(const char *root, const char *work_dir,
     return 2;
   char *argv[] = {
     g_self_path, "generate-batch",
-    "--shape-dir", "etc/tests/fuzz/shapes",
+    "--shape-dir", "etc/tests/shapes",
     "--profile", "optimizer",
     "--generator", "mixed",
     "--schedule", (char *)(schedule ? schedule : "smart"),
@@ -291,7 +291,7 @@ static int cmd_public_selftest_synth_schedule(int argc, char **argv) {
                                                                   1, "", "scratch workdir failed"));
   } else {
     char *list_argv[] = {
-      g_self_path, "generate-batch", "--shape-dir", "etc/tests/fuzz/shapes",
+      g_self_path, "generate-batch", "--shape-dir", "etc/tests/shapes",
       "--profile", "optimizer", "--generator", "mixed",
       "--schedule", "smart", "--list", NULL
     };
@@ -301,8 +301,8 @@ static int cmd_public_selftest_synth_schedule(int argc, char **argv) {
                    extract_json_number(list_pr.out, "count", &pool_count_d) &&
                    pool_count_d >= 8.0;
     int pool_count = list_ok ? (int)pool_count_d : 0;
-    int pool_unique_shapes = list_ok ? json_array_unique_string_field_count(list_pr.out, "etc/tests/fuzz/shapes", "name") : 0;
-    int pool_unique_generators = list_ok ? json_array_unique_string_field_count(list_pr.out, "etc/tests/fuzz/shapes", "generator") : 0;
+    int pool_unique_shapes = list_ok ? json_array_unique_string_field_count(list_pr.out, "etc/tests/shapes", "name") : 0;
+    int pool_unique_generators = list_ok ? json_array_unique_string_field_count(list_pr.out, "etc/tests/shapes", "generator") : 0;
     list_ok = list_ok && pool_unique_shapes == pool_count && pool_unique_generators >= 4;
     (void)string_list_push_take(&rows, synth_schedule_row_json("shape_pool", list_ok,
                                                               pool_count, pool_unique_shapes,
@@ -603,9 +603,6 @@ static bool triage_item_from_bench_row(const char *row, int default_runs,
   item->ny_source = json_string_or_empty(row, "ny_source");
   item->c_source = json_string_or_empty(row, "c_source");
   item->ok = json_bool_field(row, "ok", false);
-  if (!extract_json_number(row, "ny_peak_vs_c_o3_run", &item->ratio) &&
-      !extract_json_number(row, "ny_o3_vs_c_o3_run", &item->ratio))
-    (void)extract_json_number(row, "ny_vs_c_elapsed_ns", &item->ratio);
   double number = 0.0;
   if (extract_json_number(row, "runs", &number)) item->runs = (int)number;
   if (extract_json_number(row, "warmup", &number)) item->warmup = (int)number;
@@ -613,6 +610,12 @@ static bool triage_item_from_bench_row(const char *row, int default_runs,
   if (extract_json_number(row, "ny_elapsed_ns", &number)) item->ny_elapsed_ns = number;
   if (extract_json_number(row, "c_instructions", &number)) item->c_instructions = number;
   if (extract_json_number(row, "ny_instructions", &number)) item->ny_instructions = number;
+  /* Bench rows carry flavor-specific ratio keys. Derive the canonical timing
+   * ratio from the paired measurements instead, so O0/O1/O2/O3/peak rows all
+   * rank identically and a new flavor cannot silently become 0.0000x. */
+  item->ratio = item->ok && item->c_elapsed_ns > 0.0
+                    ? item->ny_elapsed_ns / item->c_elapsed_ns
+                    : 0.0;
   item->initial_ratio = item->ratio;
   if (!item->row) {
     triage_item_free(item);
@@ -879,7 +882,7 @@ static int cmd_public_compiler_smoke(int argc, char **argv) {
   double timeout_s = atof(value_after(argc, argv, 3, "--timeout-s", "90"));
   if (timeout_s <= 0.0) timeout_s = 90.0;
   string_list_t rows = {0}, failures = {0};
-  compiler_smoke_add_case(root, ny_bin, selector, "type", "etc/tests/rt/type.ny",
+  compiler_smoke_add_case(root, ny_bin, selector, "type", "etc/tests/runtime/language/type.ny",
                           timeout_s, &rows, &failures);
   compiler_smoke_add_case(root, ny_bin, selector, "simmd", "lib/math/simmd.ny",
                           timeout_s, &rows, &failures);
@@ -1215,66 +1218,9 @@ static int cmd_public_compiler_findings(int argc, char **argv) {
   const char *selector = value_after(argc, argv, 3, "--only", "all");
   double timeout_s = atof(value_after(argc, argv, 3, "--timeout-s", "15"));
   if (timeout_s <= 0.0) timeout_s = 15.0;
-  static const compiler_active_finding_t specs[] = {
-    {
-      "NY-001-sig04",
-      "syntax fuzz target crash seed",
-      "syntax-target",
-      "etc/assets/dict/fuzz/work/afl_runs/syntax_1779469604_2801121/default/crashes/"
-      "id:000000,sig:04,src:000005,time:615428,execs:264020,op:havoc,rep:2",
-      "etc/assets/dict/fuzz/targets/fuzz_syntax.ny",
-      "crash",
-      15.0
-    },
-    {
-      "NY-001-sig11",
-      "syntax fuzz target crash seed",
-      "syntax-target",
-      "etc/assets/dict/fuzz/work/afl_runs/syntax_1779469604_2801121/default/crashes/"
-      "id:000001,sig:11,src:000005,time:615542,execs:264021,op:havoc,rep:1",
-      "etc/assets/dict/fuzz/targets/fuzz_syntax.ny",
-      "crash",
-      15.0
-    },
-    {
-      "NY-002-hang-a",
-      "compiler emit-only hang seed",
-      "emit-only",
-      "etc/assets/dict/fuzz/work/afl_runs/ny-core_1779470422_2801121/hangs/"
-      "id:000000,src:000001,time:905478,execs:21077,op:havoc,rep:6",
-      NULL,
-      "timeout",
-      15.0
-    },
-    {
-      "NY-002-hang-b",
-      "compiler emit-only hang seed",
-      "emit-only",
-      "etc/assets/dict/fuzz/work/afl_runs/ny-core_1779447084_1097816/hangs/"
-      "id:000000,src:000001,time:46143,execs:765,op:havoc,rep:30",
-      NULL,
-      "timeout",
-      15.0
-    },
-    {
-      "NY-002-hang-c",
-      "compiler emit-only hang seed",
-      "emit-only",
-      "etc/assets/dict/fuzz/work/afl_runs/ny-core_1779447084_1097816/hangs/"
-      "id:000001,src:000001,time:61419,execs:934,op:havoc,rep:44",
-      NULL,
-      "timeout",
-      15.0
-    }
-  };
   string_list_t rows = {0}, failures = {0};
   int matched = 0, live = 0, cleared = 0, missing = 0;
-  for (int i = 0; i < (int)(sizeof(specs) / sizeof(specs[0])); ++i) {
-    matched += compiler_findings_add_case(root, ny_bin, &specs[i], selector,
-                                          timeout_s, &rows, &failures,
-                                          &live, &cleared, &missing);
-  }
-  if (matched == 0) {
+  if (selector && *selector && strcmp(selector, "all") != 0) {
     (void)string_list_push_take(&failures,
                                 make_worker_failure_row(selector ? selector : "",
                                                         "compiler-findings", 1, "",
@@ -1482,11 +1428,13 @@ static int cmd_public_compiler_known_bugs(int argc, char **argv) {
   char *out_root = NULL;
   (void)asprintf(&out_root, "%s/build/repro/known_bugs", root);
   if (out_root) ny_ensure_dir_recursive(out_root);
+  /* Canonical regression sources stay in etc/tests; this tool writes only
+   * replay artifacts below build/repro and must never depend on stale copies. */
   static const compiler_known_bug_t specs[] = {
     {
       "NY-008",
       "peak profile stale def snapshot after mutable source update",
-      "repro/nytrix/NY-008-peak-def-snapshot.ny",
+      "etc/tests/shapes/compiler/regressions/compiler/peak-def-snapshot.ny",
       "-1",
       "0",
       "o3_peak"
@@ -1496,7 +1444,7 @@ static int cmd_public_compiler_known_bugs(int argc, char **argv) {
     {
       "NY-006",
       "std.os.args.argv out-of-range runtime crash",
-      "repro/nytrix/NY-006-argv-oob.ny",
+      "etc/tests/shapes/compiler/regressions/runtime/argv-oob.ny",
       "crash",
       NULL,
       NULL,
@@ -1505,7 +1453,7 @@ static int cmd_public_compiler_known_bugs(int argc, char **argv) {
     {
       "NY-007",
       "std.math.parse.syntax CMake tokenizer timeout on tiny seed",
-      "repro/nytrix/NY-007-cmake-tokenizer-hang.ny",
+      "etc/tests/shapes/compiler/regressions/parser/cmake-tokenizer-hang.ny",
       "timeout",
       NULL,
       NULL,
@@ -1514,10 +1462,10 @@ static int cmd_public_compiler_known_bugs(int argc, char **argv) {
     {
       "NY-005",
       "bare std.core.dict import fails without prior std.core import",
-      "repro/nytrix/NY-005-bare-dict-import.ny",
+      "etc/tests/shapes/compiler/regressions/stdlib/bare-dict-import.ny",
       "compile_error",
       "Could not load std.ny or standard library source files",
-      "repro/nytrix/NY-005-dict-import-with-core-baseline.ny",
+      "etc/tests/shapes/compiler/regressions/stdlib/bare-dict-import-baseline.ny",
       8.0
     }
   };
@@ -1960,7 +1908,7 @@ static char *audit_runtime_next_inspect_command_dup(
   (void)path_join(lib_dir, sizeof(lib_dir), nytrix_root ? nytrix_root : "",
                   "lib");
   (void)path_join(rt_dir, sizeof(rt_dir), nytrix_root ? nytrix_root : "",
-                  "etc/tests/rt");
+                  "etc/tests/runtime");
   char *defs_rel =
       repo_or_sibling_rel_path_dup(artifact_root ? artifact_root : "",
                                    defs_path ? defs_path : "");
@@ -2374,7 +2322,7 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
   char *defs_path = NULL, *lib_dir = NULL, *rt_dir = NULL;
   (void)asprintf(&defs_path, "%s/src/rt/defs.h", root);
   (void)asprintf(&lib_dir, "%s/lib", root);
-  (void)asprintf(&rt_dir, "%s/etc/tests/rt", root);
+  (void)asprintf(&rt_dir, "%s/etc/tests/runtime", root);
   file_buf_t defs_file = {0};
   bool ok = defs_path && read_file(defs_path, &defs_file);
   if (ok) {
@@ -2385,7 +2333,7 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
   if (lib_dir && !collect_regular_files_recursive(lib_dir, &files))
     (void)string_list_push_copy(&scan_errors, "lib");
   if (rt_dir && !collect_regular_files_recursive(rt_dir, &files))
-    (void)string_list_push_copy(&scan_errors, "etc/tests/rt");
+    (void)string_list_push_copy(&scan_errors, "etc/tests/runtime");
   qsort(files.items, (size_t)files.count, sizeof(char *), cmp_cstr);
   int ny_files = 0;
   for (int i = 0; i < files.count; ++i) {
@@ -4356,14 +4304,18 @@ static int cmd_public_bench_real(int argc, char **argv) {
   const char *ny_opt = value_after_equals(argc, argv, 3, "--ny-opt", "");
   if (runs < 1) runs = 1;
   if (warmup < 0) warmup = 0;
-  const char *ny_opt_arg = NULL;
+  /* Real C comparisons are release-runtime measurements, independent of the
+   * compiler's deliberately fast -O0 development default. */
+  const char *ny_opt_arg = "-O2";
   const char *ny_profile_arg = NULL;
-  const char *ny_flavor = "native";
+  const char *ny_flavor = "o2";
+  bool ny_native_only = false;
   if (has_flag_after(argc, argv, 3, "--ny-native") ||
       strcmp(ny_opt, "native") == 0 || strcmp(ny_opt, "none") == 0) {
     ny_opt_arg = NULL;
     ny_profile_arg = NULL;
-    ny_flavor = "native";
+    ny_flavor = "native-only";
+    ny_native_only = true;
   } else if (has_flag_after(argc, argv, 3, "--ny-o3") ||
       strcmp(ny_opt, "o3") == 0 || strcmp(ny_opt, "O3") == 0 || strcmp(ny_opt, "-O3") == 0) {
     ny_opt_arg = "-O3";
@@ -4404,7 +4356,7 @@ static int cmd_public_bench_real(int argc, char **argv) {
   for (int i = 0; i < case_count; ++i) {
     char *ny_path = NULL, *c_path = NULL, *shape_path = NULL, *case_dir = NULL, *c_elf = NULL, *ny_elf = NULL;
     (void)asprintf(&ny_path, "%s/build/perf/baked-sources/%s/perf_ny.ny", root, cases[i]);
-    (void)asprintf(&shape_path, "%s/etc/tests/fuzz/bench/%s.nshape", root, cases[i]);
+    (void)asprintf(&shape_path, "%s/etc/tests/bench/%s.nshape", root, cases[i]);
     (void)asprintf(&c_path, "%s/build/perf/baked-sources/%s/perf_c.c", root, cases[i]);
     (void)asprintf(&case_dir, "%s/%s", bench_dir ? bench_dir : "build/native_perf", cases[i]);
     (void)asprintf(&c_elf, "%s/%s_c_o3.elf", case_dir ? case_dir : "", cases[i]);
@@ -4432,6 +4384,13 @@ static int cmd_public_bench_real(int argc, char **argv) {
         ny_compile = run_proc(ny_argv, root, timeout_s);
       } else if (ny_opt_arg) {
         char *ny_argv[] = {ny_bin, "--compiler-asserts", (char *)ny_opt_arg,
+                           "-o", ny_elf, ny_path, NULL};
+        ny_compile = run_proc(ny_argv, root, timeout_s);
+      } else if (ny_native_only) {
+        /* This mode is specifically an LLVM-free backend measurement.  Do not
+         * silently turn an unsupported NYIR workload into a default LLVM AOT
+         * run just because it happens to produce a native executable. */
+        char *ny_argv[] = {ny_bin, "--compiler-asserts", "--native-only",
                            "-o", ny_elf, ny_path, NULL};
         ny_compile = run_proc(ny_argv, root, timeout_s);
       } else {
@@ -4464,7 +4423,15 @@ static int cmd_public_bench_real(int argc, char **argv) {
       (void)string_list_push_take(&failures, make_worker_failure_row(cases[i], "bench-real-output", 1, "", mismatch.data ? mismatch.data : ""));
       free(mismatch.data);
     }
-    double ratio = (ok && c_run.median_elapsed_ns > 0.0) ? ny_run.median_elapsed_ns / c_run.median_elapsed_ns : 0.0;
+    /* Both fixture sides use monotonic nanoseconds, so the public run ratio
+     * measures the workload itself. Keep process duration separate because it
+     * includes startup and output costs. */
+    double ratio = (ok && c_run.median_elapsed_ns > 0.0)
+                       ? ny_run.median_elapsed_ns / c_run.median_elapsed_ns
+                       : 0.0;
+    double process_ratio = (ok && c_run.process_median_ms > 0.0)
+                             ? ny_run.process_median_ms / c_run.process_median_ms
+                             : 0.0;
     double inst_ratio = (ok && c_run.median_instructions > 0.0) ? ny_run.median_instructions / c_run.median_instructions : 0.0;
     str_buf_t row = {0};
     (void)sb_append(&row, "{\"case\":");
@@ -4490,14 +4457,14 @@ static int cmd_public_bench_real(int argc, char **argv) {
                        "\"c_cycles\":%.0f,\"ny_cycles\":%.0f,"
                        "\"c_branches\":%.0f,\"ny_branches\":%.0f,"
                        "\"c_branch_misses\":%.0f,\"ny_branch_misses\":%.0f,"
-                       "\"ratios\":{\"ny_%s_vs_c_o3_run\":%.4f,\"ny_vs_c_elapsed_ns\":%.4f,\"ny_vs_c_instructions\":%.4f}",
+                       "\"ratios\":{\"ny_%s_vs_c_o3_run\":%.4f,\"ny_vs_c_process\":%.4f,\"ny_vs_c_instructions\":%.4f}",
                        c_run.median_elapsed_ns, ny_run.median_elapsed_ns,
                        c_run.process_median_ms, ny_run.process_median_ms,
                        c_run.median_instructions, ny_run.median_instructions,
                        c_run.median_cycles, ny_run.median_cycles,
                        c_run.median_branches, ny_run.median_branches,
                        c_run.median_branch_misses, ny_run.median_branch_misses,
-                       ny_flavor, ratio, ratio, inst_ratio);
+                       ny_flavor, ratio, process_ratio, inst_ratio);
     } else {
       (void)sb_append(&row, ",\"c_elapsed_ns\":null,\"ny_elapsed_ns\":null,\"ratios\":{}");
     }
@@ -4545,6 +4512,36 @@ static int clean_perf_triage_stale_artifacts(const char *dir) {
   }
   closedir(d);
   return removed;
+}
+
+static void append_perf_triage_host_json(str_buf_t *out) {
+  struct utsname host = {0};
+  long online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+  (void)sb_append_c(out, '{');
+  (void)sb_append(out, "\"system\":");
+  (void)sb_append_json_str(out, uname(&host) == 0 ? host.sysname : "unknown");
+  (void)sb_append(out, ",\"release\":");
+  (void)sb_append_json_str(out, host.release[0] ? host.release : "unknown");
+  (void)sb_append(out, ",\"machine\":");
+  (void)sb_append_json_str(out, host.machine[0] ? host.machine : "unknown");
+  (void)sb_appendf(out, ",\"online_cpus\":%ld", online_cpus > 0 ? online_cpus : 0);
+  (void)sb_append_c(out, '}');
+}
+
+static void append_perf_triage_host_markdown(str_buf_t *md) {
+  struct utsname host = {0};
+  long online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+  if (uname(&host) != 0) {
+    (void)sb_append(md, "- Host: unavailable.\n");
+    return;
+  }
+  (void)sb_append(md, "- Host: ");
+  md_append_code(md, host.sysname);
+  (void)sb_append(md, " ");
+  md_append_code(md, host.release);
+  (void)sb_append(md, " ");
+  md_append_code(md, host.machine);
+  (void)sb_appendf(md, "; online CPUs %ld.\n", online_cpus > 0 ? online_cpus : 0);
 }
 
 static bool write_perf_triage_markdown(const char *root,
@@ -4612,6 +4609,7 @@ static bool write_perf_triage_markdown(const char *root,
     (void)sb_append(&md, "; confirmation disabled");
   }
   (void)sb_append(&md, ".\n");
+  append_perf_triage_host_markdown(&md);
   if (json_rel && *json_rel) {
     (void)sb_append(&md, "- JSON: ");
     md_append_code(&md, json_rel);
@@ -5097,6 +5095,8 @@ static int cmd_public_perf_triage(int argc, char **argv) {
                      threshold_ratio, bench_limit, bench_timeout_s, runs_i,
                          warmup_i, runs_i, cleaned_stale);
     append_rel_json_str(&summary, artifact_root, tmp_json ? tmp_json : "");
+    (void)sb_append(&summary, ",\"host\":");
+    append_perf_triage_host_json(&summary);
     (void)sb_append_c(&summary, '}');
     if (summary_path) (void)write_file_text(summary_path, summary.data ? summary.data : "{}");
       free(summary.data);
@@ -5172,6 +5172,8 @@ static int cmd_public_perf_triage(int argc, char **argv) {
     (void)sb_append(&extra, ",\"markdown\":");
     append_rel_json_str(&extra, artifact_root, markdown_path);
   }
+  (void)sb_append(&extra, ",\"host\":");
+  append_perf_triage_host_json(&extra);
     char *report = build_native_report_json_with_top_aliases(
         &rows, &failures, "perf-triage", extra.data, true);
   int rc = emit_native_report(report, json_path, "perf", rows.count, failures.count);
@@ -5191,11 +5193,11 @@ static int cmd_public_corpus_real_db(int argc, char **argv, const char *kind) {
   }
   const char *json_path = value_after(argc, argv, 3, "--json", "");
   string_list_t rows = {0}, failures = {0}, files = {0};
-  const char *scan_dir = "etc/tests/rt";
+  const char *scan_dir = "etc/tests/runtime";
   if (strcmp(kind, "functions") == 0) scan_dir = "lib";
   char *dir = NULL, *default_corpus = NULL;
   if (strcmp(kind, "mined-hosts") == 0) {
-    (void)nytrix_asprintf(&dir, "etc/tests/rt");
+    (void)nytrix_asprintf(&dir, "etc/tests/runtime");
   } else {
     (void)asprintf(&dir, "%s/%s", root, scan_dir);
   }
@@ -5768,7 +5770,7 @@ static int cmd_public_fuzz_frontend(int argc, char **argv) {
   double timeout_s = atof(value_after(argc, argv, 3, "--timeout-s", "20"));
   string_list_t rows = {0}, failures = {0}, files = {0};
   char *dir = NULL, *replay_dir = NULL;
-  (void)nytrix_asprintf(&dir, "etc/tests/rt");
+  (void)nytrix_asprintf(&dir, "etc/tests/runtime");
   replay_dir = nytrix_cache_replay_dir();
   char *legacy_replay_dir = NULL;
   (void)nytrix_asprintf(&legacy_replay_dir, "etc/assets/dict/fuzz/work/replay");
@@ -6414,7 +6416,7 @@ static const char *SELFTEST_GC_CAMPAIGN_COMPACT[] = {
   "fuzz", "gc", "run", "--profile=smoke", "--smoke", "--direct-only",
   "--no-sanitizers", "--no-ny", "--threads", "1", "--json", "$JSON"
 };
-static const char *SELFTEST_SHAPES[] = {"etc/tests/fuzz/shapes", "audit", "--json", "$JSON"};
+static const char *SELFTEST_SHAPES[] = {"etc/tests/shapes", "audit", "--json", "$JSON"};
 static const char *SELFTEST_CHILD_TMP_ENV[] = {"selftest", "child-tmp-env", "--json", "$JSON"};
 static const char *SELFTEST_PYTHON_CLEAN[] = {"selftest", "python-clean", "--json", "$JSON"};
 static const char *SELFTEST_CLI_EQUALS_ARGS_CMD[] = {"selftest", "python-clean", "--json=$JSON"};
@@ -8442,4 +8444,3 @@ static void selftest_validate_fuzz_all_top_aliases(const char *json,
   selftest_expect_top_alias_string(json, "crt_next_unreferenced_family",
                                    errors);
 }
-

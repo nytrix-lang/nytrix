@@ -1,6 +1,7 @@
 #include "base/common.h"
 #include "rt/runtime.h"
 #include "rt/shared.h"
+#include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,9 +11,9 @@ int64_t rt_division_by_zero(void) { return rt_panic(rt_alloc_string("division by
 
 int64_t rt_modulo_by_zero(void) { return rt_panic(rt_alloc_string("modulo by zero")); }
 
-static inline int64_t rt_flt_box_double(double d);
+int64_t rt_flt_box_double(double d);
 
-static inline double get_flt(int64_t v) {
+double rt_flt_unbox_double(int64_t v) {
   if (v & 1)
     return (double)(v >> 1);
   if (v == 0)
@@ -45,7 +46,7 @@ static inline double rt_complex_re_raw(int64_t v) {
     memcpy(&d, (const void *)(uintptr_t)v, 8);
     return d;
   }
-  return get_flt(v);
+  return rt_flt_unbox_double(v);
 }
 
 static inline double rt_complex_im_raw(int64_t v) {
@@ -70,7 +71,7 @@ static int64_t rt_complex_box_double(double re, double im) {
 int64_t rt_is_complex_obj(int64_t v) { return rt_is_complex_raw(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
 
 int64_t rt_complex_new(int64_t re, int64_t im) {
-  return rt_complex_box_double(get_flt(re), get_flt(im));
+  return rt_complex_box_double(rt_flt_unbox_double(re), rt_flt_unbox_double(im));
 }
 
 int64_t rt_complex_new_bits(int64_t re_bits, int64_t im_bits) {
@@ -104,11 +105,13 @@ extern int64_t rt_bigint_mul(int64_t a, int64_t b);
 extern int64_t rt_bigint_div(int64_t a, int64_t b);
 extern int64_t rt_bigint_mod(int64_t a, int64_t b);
 extern int64_t rt_bigint_cmp(int64_t a, int64_t b);
+extern int64_t rt_bigint_and(int64_t a, int64_t b);
+extern int64_t rt_bigint_or(int64_t a, int64_t b);
+extern int64_t rt_bigint_xor(int64_t a, int64_t b);
+extern int64_t rt_bigint_not(int64_t a);
+extern int64_t rt_bigint_shl(int64_t a, int64_t b);
+extern int64_t rt_bigint_shr(int64_t a, int64_t b);
 extern int64_t rt_list_new(int64_t n);
-extern void _bi_val_to_mpz(int64_t v, mpz_t result);
-extern int64_t _bi_from_mpz(const mpz_t val);
-extern bool _bi_mpz_fits_small_int(const mpz_t v);
-extern int64_t _bi_mpz_get_i64(const mpz_t v);
 
 static inline int rt_is_bigint_obj(int64_t v) {
   if (!is_ptr(v) || !is_heap_ptr(v))
@@ -202,6 +205,7 @@ static int64_t rt_seq_concat(int64_t a, int64_t b, int64_t a_tag, int64_t b_tag)
   return out;
 }
 
+#ifndef NDEBUG
 typedef struct {
   uint64_t add_int_fast;
   uint64_t add_bigint;
@@ -307,6 +311,9 @@ __attribute__((destructor)) static void rt_math_stats_dump(void) {
           g_math_stats.bigint_promotions_add, g_math_stats.bigint_promotions_sub,
           g_math_stats.bigint_promotions_mul);
 }
+#else
+#define MATH_STAT_INC(field) ((void)0)
+#endif
 
 static uint64_t rt_rng_state = 0x123456789ABCDEF0ULL;
 static int rt_rng_forced_prng = 0;
@@ -320,9 +327,9 @@ int64_t rt_srand(int64_t i) {
 int64_t rt_rand64(void) {
   uint64_t val = 0;
   int ok = 0;
-#if defined(rt_x86_64__)
+#if defined(__x86_64__) || defined(rt_x86_64__)
   if (!rt_rng_forced_prng) {
-    rt_asm__ volatile("rdrand %0; setc %b1" : "=r"(val), "=q"(ok));
+    __asm__ volatile("rdrand %0; setc %b1" : "=r"(val), "=q"(ok));
   }
 #endif
   if (!ok) {
@@ -381,7 +388,7 @@ int64_t rt_flt_box_val(int64_t bits) {
   return out;
 }
 
-static inline int64_t rt_flt_box_double(double d) {
+int64_t rt_flt_box_double(double d) {
   int64_t bits;
   memcpy(&bits, &d, 8);
   return rt_flt_box_val(bits);
@@ -395,7 +402,7 @@ int64_t rt_flt_box_val32(int64_t bits32) {
 }
 
 int64_t rt_flt_unbox_val32(int64_t v) {
-  double d = get_flt(v);
+  double d = rt_flt_unbox_double(v);
   float f = (float)d;
   uint32_t b;
   memcpy(&b, &f, 4);
@@ -413,7 +420,7 @@ int64_t rt_flt_from_int(int64_t v) {
 }
 
 int64_t rt_flt_to_int(int64_t v) {
-  double d = get_flt(v);
+  double d = rt_flt_unbox_double(v);
   return rt_tag_v((int64_t)d);
 }
 
@@ -462,8 +469,8 @@ int64_t rt_complex_eq(int64_t a, int64_t b) {
 
 #define FLT_OP(name, op)                                                                           \
   int64_t rt_flt_##name(int64_t a, int64_t b) {                                                    \
-    double da = get_flt(a);                                                                        \
-    double db = get_flt(b);                                                                        \
+    double da = rt_flt_unbox_double(a);                                                                        \
+    double db = rt_flt_unbox_double(b);                                                                        \
     double r = da op db;                                                                           \
     return rt_flt_box_double(r);                                                                   \
   }
@@ -473,8 +480,8 @@ FLT_OP(sub, -)
 FLT_OP(mul, *)
 
 int64_t rt_flt_div(int64_t a, int64_t b) {
-  double da = get_flt(a);
-  double db = get_flt(b);
+  double da = rt_flt_unbox_double(a);
+  double db = rt_flt_unbox_double(b);
   if (db == 0.0)
     return rt_division_by_zero();
   return rt_flt_box_double(da / db);
@@ -482,8 +489,8 @@ int64_t rt_flt_div(int64_t a, int64_t b) {
 
 #define FLT_CMP(name, op)                                                                          \
   int64_t rt_flt_##name(int64_t a, int64_t b) {                                                    \
-    double da = get_flt(a);                                                                        \
-    double db = get_flt(b);                                                                        \
+    double da = rt_flt_unbox_double(a);                                                                        \
+    double db = rt_flt_unbox_double(b);                                                                        \
     return (da op db) ? NY_IMM_TRUE : NY_IMM_FALSE;                                                \
   }
 
@@ -494,12 +501,12 @@ FLT_CMP(ge, >=)
 FLT_CMP(eq, ==)
 
 int64_t rt_flt_is_nan(int64_t v) {
-  double d = get_flt(v);
+  double d = rt_flt_unbox_double(v);
   return isnan(d) ? NY_IMM_TRUE : NY_IMM_FALSE;
 }
 
 int64_t rt_flt_is_inf(int64_t v) {
-  double d = get_flt(v);
+  double d = rt_flt_unbox_double(v);
   return isinf(d) ? NY_IMM_TRUE : NY_IMM_FALSE;
 }
 
@@ -508,7 +515,7 @@ int64_t rt_flt_nan(void) { return rt_flt_box_double(NAN); }
 int64_t rt_flt_inf(void) { return rt_flt_box_double(INFINITY); }
 
 int64_t rt_flt_hash(int64_t v) {
-  double d = get_flt(v);
+  double d = rt_flt_unbox_double(v);
   uint64_t bits = 0;
   memcpy(&bits, &d, 8);
   if (bits == 0x8000000000000000ULL)
@@ -523,25 +530,27 @@ int64_t rt_flt_hash(int64_t v) {
   return rt_tag_v((int64_t)(h & 0x7fffffffULL));
 }
 
-int64_t rt_flt_sin(int64_t v) { return rt_flt_box_double(sin(get_flt(v))); }
-int64_t rt_flt_cos(int64_t v) { return rt_flt_box_double(cos(get_flt(v))); }
-int64_t rt_flt_tan(int64_t v) { return rt_flt_box_double(tan(get_flt(v))); }
-int64_t rt_flt_asin(int64_t v) { return rt_flt_box_double(asin(get_flt(v))); }
-int64_t rt_flt_acos(int64_t v) { return rt_flt_box_double(acos(get_flt(v))); }
-int64_t rt_flt_atan(int64_t v) { return rt_flt_box_double(atan(get_flt(v))); }
+int64_t rt_flt_sin(int64_t v) { return rt_flt_box_double(sin(rt_flt_unbox_double(v))); }
+int64_t rt_flt_cos(int64_t v) { return rt_flt_box_double(cos(rt_flt_unbox_double(v))); }
+int64_t rt_flt_tan(int64_t v) { return rt_flt_box_double(tan(rt_flt_unbox_double(v))); }
+int64_t rt_flt_asin(int64_t v) { return rt_flt_box_double(asin(rt_flt_unbox_double(v))); }
+int64_t rt_flt_acos(int64_t v) { return rt_flt_box_double(acos(rt_flt_unbox_double(v))); }
+int64_t rt_flt_atan(int64_t v) { return rt_flt_box_double(atan(rt_flt_unbox_double(v))); }
 int64_t rt_flt_atan2(int64_t y, int64_t x) {
-  return rt_flt_box_double(atan2(get_flt(y), get_flt(x)));
+  return rt_flt_box_double(atan2(rt_flt_unbox_double(y), rt_flt_unbox_double(x)));
 }
-int64_t rt_flt_sqrt(int64_t v) { return rt_flt_box_double(sqrt(get_flt(v))); }
-int64_t rt_flt_exp(int64_t v) { return rt_flt_box_double(exp(get_flt(v))); }
-int64_t rt_flt_log(int64_t v) { return rt_flt_box_double(log(get_flt(v))); }
-int64_t rt_flt_log2(int64_t v) { return rt_flt_box_double(log2(get_flt(v))); }
-int64_t rt_flt_log10(int64_t v) { return rt_flt_box_double(log10(get_flt(v))); }
-int64_t rt_flt_floor(int64_t v) { return rt_tag_v((int64_t)floor(get_flt(v))); }
-int64_t rt_flt_ceil(int64_t v) { return rt_tag_v((int64_t)ceil(get_flt(v))); }
-int64_t rt_flt_round(int64_t v) { return rt_tag_v((int64_t)llround(get_flt(v))); }
-int64_t rt_flt_fmod(int64_t a, int64_t b) { return rt_flt_box_double(fmod(get_flt(a), get_flt(b))); }
-int64_t rt_flt_pow(int64_t a, int64_t b) { return rt_flt_box_double(pow(get_flt(a), get_flt(b))); }
+int64_t rt_flt_sqrt(int64_t v) { return rt_flt_box_double(sqrt(rt_flt_unbox_double(v))); }
+
+double rt_native_sqrt_f64(double value) { return sqrt(value); }
+int64_t rt_flt_exp(int64_t v) { return rt_flt_box_double(exp(rt_flt_unbox_double(v))); }
+int64_t rt_flt_log(int64_t v) { return rt_flt_box_double(log(rt_flt_unbox_double(v))); }
+int64_t rt_flt_log2(int64_t v) { return rt_flt_box_double(log2(rt_flt_unbox_double(v))); }
+int64_t rt_flt_log10(int64_t v) { return rt_flt_box_double(log10(rt_flt_unbox_double(v))); }
+int64_t rt_flt_floor(int64_t v) { return rt_tag_v((int64_t)floor(rt_flt_unbox_double(v))); }
+int64_t rt_flt_ceil(int64_t v) { return rt_tag_v((int64_t)ceil(rt_flt_unbox_double(v))); }
+int64_t rt_flt_round(int64_t v) { return rt_tag_v((int64_t)llround(rt_flt_unbox_double(v))); }
+int64_t rt_flt_fmod(int64_t a, int64_t b) { return rt_flt_box_double(fmod(rt_flt_unbox_double(a), rt_flt_unbox_double(b))); }
+int64_t rt_flt_pow(int64_t a, int64_t b) { return rt_flt_box_double(pow(rt_flt_unbox_double(a), rt_flt_unbox_double(b))); }
 
 int64_t rt_add(int64_t a, int64_t b) {
   if ((a & 1) && (b & 1)) {
@@ -748,10 +757,6 @@ int64_t rt_eq(int64_t a, int64_t b) {
     MATH_STAT_INC(eq_bigint);
     return rt_bigint_cmp(a, b) == rt_tag_v(0) ? NY_IMM_TRUE : NY_IMM_FALSE;
   }
-  if ((rt_is_nil_imm(a) && b == rt_tag_v(0)) || (a == rt_tag_v(0) && rt_is_nil_imm(b))) {
-    MATH_STAT_INC(eq_int_mixed);
-    return NY_IMM_TRUE;
-  }
   if (is_v_flt(a) || is_v_flt(b)) {
     MATH_STAT_INC(eq_float);
     return rt_flt_eq(a, b);
@@ -821,320 +826,66 @@ static inline int rt_str_cmp3(int64_t a, int64_t b) {
   return 0;
 }
 
-int64_t rt_lt(int64_t a, int64_t b) {
+static inline int64_t rt_cmp3(int64_t a, int64_t b) {
   if ((a & 1) && (b & 1)) {
     MATH_STAT_INC(cmp_int_fast);
-    return (a >> 1) < (b >> 1) ? NY_IMM_TRUE : NY_IMM_FALSE;
+    int64_t da = a >> 1, db = b >> 1;
+    return da < db ? -1 : da > db ? 1 : 0;
   }
   if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b)) {
     MATH_STAT_INC(cmp_bigint);
-    return (rt_bigint_cmp(a, b) >> 1) < 0 ? NY_IMM_TRUE : NY_IMM_FALSE;
+    return rt_bigint_cmp(a, b) >> 1;
   }
   if (is_v_flt(a) || is_v_flt(b)) {
     MATH_STAT_INC(cmp_float);
-    return rt_flt_lt(a, b);
+    double da = rt_flt_unbox_double(a), db = rt_flt_unbox_double(b);
+    return da < db ? -1 : da > db ? 1 : 0;
   }
   if (is_v_str(a) && is_v_str(b)) {
     MATH_STAT_INC(cmp_str);
-    return rt_str_cmp3(a, b) < 0 ? NY_IMM_TRUE : NY_IMM_FALSE;
+    return rt_str_cmp3(a, b);
   }
   if (is_ptr(a) && is_ptr(b)) {
     MATH_STAT_INC(cmp_ptr);
-    return a < b ? NY_IMM_TRUE : NY_IMM_FALSE;
+    return a < b ? -1 : a > b ? 1 : 0;
   }
   MATH_STAT_INC(cmp_other);
-  return NY_IMM_FALSE;
+  return 0;
 }
-int64_t rt_le(int64_t a, int64_t b) {
-  if ((a & 1) && (b & 1)) {
-    MATH_STAT_INC(cmp_int_fast);
-    return (a >> 1) <= (b >> 1) ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b)) {
-    MATH_STAT_INC(cmp_bigint);
-    return (rt_bigint_cmp(a, b) >> 1) <= 0 ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  if (is_v_flt(a) || is_v_flt(b)) {
-    MATH_STAT_INC(cmp_float);
-    return rt_flt_le(a, b);
-  }
-  if (is_v_str(a) && is_v_str(b)) {
-    MATH_STAT_INC(cmp_str);
-    return rt_str_cmp3(a, b) <= 0 ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  if (is_ptr(a) && is_ptr(b)) {
-    MATH_STAT_INC(cmp_ptr);
-    return a <= b ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  MATH_STAT_INC(cmp_other);
-  return NY_IMM_FALSE;
-}
-int64_t rt_gt(int64_t a, int64_t b) {
-  if ((a & 1) && (b & 1)) {
-    MATH_STAT_INC(cmp_int_fast);
-    return (a >> 1) > (b >> 1) ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b)) {
-    MATH_STAT_INC(cmp_bigint);
-    return (rt_bigint_cmp(a, b) >> 1) > 0 ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  if (is_v_flt(a) || is_v_flt(b)) {
-    MATH_STAT_INC(cmp_float);
-    return rt_flt_gt(a, b);
-  }
-  if (is_v_str(a) && is_v_str(b)) {
-    MATH_STAT_INC(cmp_str);
-    return rt_str_cmp3(a, b) > 0 ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  if (is_ptr(a) && is_ptr(b)) {
-    MATH_STAT_INC(cmp_ptr);
-    return a > b ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  MATH_STAT_INC(cmp_other);
-  return NY_IMM_FALSE;
-}
-int64_t rt_ge(int64_t a, int64_t b) {
-  if ((a & 1) && (b & 1)) {
-    MATH_STAT_INC(cmp_int_fast);
-    return (a >> 1) >= (b >> 1) ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b)) {
-    MATH_STAT_INC(cmp_bigint);
-    return (rt_bigint_cmp(a, b) >> 1) >= 0 ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  if (is_v_flt(a) || is_v_flt(b)) {
-    MATH_STAT_INC(cmp_float);
-    return rt_flt_ge(a, b);
-  }
-  if (is_v_str(a) && is_v_str(b)) {
-    MATH_STAT_INC(cmp_str);
-    return rt_str_cmp3(a, b) >= 0 ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  if (is_ptr(a) && is_ptr(b)) {
-    MATH_STAT_INC(cmp_ptr);
-    return a >= b ? NY_IMM_TRUE : NY_IMM_FALSE;
-  }
-  MATH_STAT_INC(cmp_other);
-  return NY_IMM_FALSE;
-}
+int64_t rt_lt(int64_t a, int64_t b) { return rt_cmp3(a, b) < 0 ? NY_IMM_TRUE : NY_IMM_FALSE; }
+int64_t rt_le(int64_t a, int64_t b) { return rt_cmp3(a, b) <= 0 ? NY_IMM_TRUE : NY_IMM_FALSE; }
+int64_t rt_gt(int64_t a, int64_t b) { return rt_cmp3(a, b) > 0 ? NY_IMM_TRUE : NY_IMM_FALSE; }
+int64_t rt_ge(int64_t a, int64_t b) { return rt_cmp3(a, b) >= 0 ? NY_IMM_TRUE : NY_IMM_FALSE; }
 
 int64_t rt_and(int64_t a, int64_t b) {
-  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b)) {
-    mpz_t ma, mb, mr;
-    _bi_val_to_mpz(a, ma);
-    _bi_val_to_mpz(b, mb);
-    mpz_init(mr);
-    mpz_and(mr, ma, mb);
-    int64_t r;
-    if (_bi_mpz_fits_small_int(mr))
-      r = rt_tag_v(_bi_mpz_get_i64(mr));
-    else
-      r = _bi_from_mpz(mr);
-    mpz_clear(ma);
-    mpz_clear(mb);
-    mpz_clear(mr);
-    return r;
-  }
+  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b))
+    return rt_bigint_and(a, b);
   return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) & (uint64_t)(b & 1 ? b >> 1 : b))) << 1 | 1);
 }
 int64_t rt_or(int64_t a, int64_t b) {
-  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b)) {
-    mpz_t ma, mb, mr;
-    _bi_val_to_mpz(a, ma);
-    _bi_val_to_mpz(b, mb);
-    mpz_init(mr);
-    mpz_ior(mr, ma, mb);
-    int64_t r;
-    if (_bi_mpz_fits_small_int(mr))
-      r = rt_tag_v(_bi_mpz_get_i64(mr));
-    else
-      r = _bi_from_mpz(mr);
-    mpz_clear(ma);
-    mpz_clear(mb);
-    mpz_clear(mr);
-    return r;
-  }
+  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b))
+    return rt_bigint_or(a, b);
   return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) | (uint64_t)(b & 1 ? b >> 1 : b))) << 1 | 1);
 }
 int64_t rt_xor(int64_t a, int64_t b) {
-  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b)) {
-    mpz_t ma, mb, mr;
-    _bi_val_to_mpz(a, ma);
-    _bi_val_to_mpz(b, mb);
-    mpz_init(mr);
-    mpz_xor(mr, ma, mb);
-    int64_t r;
-    if (_bi_mpz_fits_small_int(mr))
-      r = rt_tag_v(_bi_mpz_get_i64(mr));
-    else
-      r = _bi_from_mpz(mr);
-    mpz_clear(ma);
-    mpz_clear(mb);
-    mpz_clear(mr);
-    return r;
-  }
+  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b))
+    return rt_bigint_xor(a, b);
   return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) ^ (uint64_t)(b & 1 ? b >> 1 : b))) << 1 | 1);
 }
 int64_t rt_shl(int64_t a, int64_t b) {
-  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b)) {
-    mpz_t ma, mb, mr;
-    _bi_val_to_mpz(a, ma);
-    _bi_val_to_mpz(b, mb);
-    mpz_init(mr);
-    if (mpz_sgn(mb) < 0) {
-      mpz_set(mr, ma);
-    } else {
-      mp_bitcnt_t shift = (mp_bitcnt_t)mpz_get_ui(mb);
-      mpz_mul_2exp(mr, ma, shift);
-    }
-    int64_t r;
-    if (_bi_mpz_fits_small_int(mr))
-      r = rt_tag_v(_bi_mpz_get_i64(mr));
-    else
-      r = _bi_from_mpz(mr);
-    mpz_clear(ma);
-    mpz_clear(mb);
-    mpz_clear(mr);
-    return r;
-  }
+  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b))
+    return rt_bigint_shl(a, b);
   return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) << (uint64_t)(b & 1 ? b >> 1 : b))) << 1 | 1);
 }
 int64_t rt_shr(int64_t a, int64_t b) {
-  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b)) {
-    mpz_t ma, mb, mr;
-    _bi_val_to_mpz(a, ma);
-    _bi_val_to_mpz(b, mb);
-    mpz_init(mr);
-    if (mpz_sgn(mb) < 0) {
-      mpz_set(mr, ma);
-    } else {
-      mp_bitcnt_t shift = (mp_bitcnt_t)mpz_get_ui(mb);
-      mpz_fdiv_q_2exp(mr, ma, shift);
-    }
-    int64_t r;
-    if (_bi_mpz_fits_small_int(mr))
-      r = rt_tag_v(_bi_mpz_get_i64(mr));
-    else
-      r = _bi_from_mpz(mr);
-    mpz_clear(ma);
-    mpz_clear(mb);
-    mpz_clear(mr);
-    return r;
-  }
+  if (rt_is_bigint_obj(a) || rt_is_bigint_obj(b))
+    return rt_bigint_shr(a, b);
   return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) >> (uint64_t)(b & 1 ? b >> 1 : b))) << 1 | 1);
 }
 int64_t rt_not(int64_t a) {
-  if (rt_is_bigint_obj(a)) {
-    mpz_t ma, mr;
-    _bi_val_to_mpz(a, ma);
-    mpz_init(mr);
-    mpz_com(mr, ma);
-    int64_t r;
-    if (_bi_mpz_fits_small_int(mr))
-      r = rt_tag_v(_bi_mpz_get_i64(mr));
-    else
-      r = _bi_from_mpz(mr);
-    mpz_clear(ma);
-    mpz_clear(mr);
-    return r;
-  }
+  if (rt_is_bigint_obj(a))
+    return rt_bigint_not(a);
   return (int64_t)(((~(uint64_t)(a & 1 ? a >> 1 : a)) << 1) | 1);
 }
 
 int64_t rt_flt_unbox_val(int64_t v) { return _rt_flt_unbox_val(v); }
-
-extern int64_t rt_list_new(int64_t n);
-extern int64_t rt_append(int64_t lst, int64_t val);
-
-static inline int64_t raw_i(int64_t v) { return (v & 1) ? (v >> 1) : v; }
-
-static inline int64_t list_len(int64_t lst) {
-  if (!is_ptr(lst))
-    return 0;
-  int64_t lv = *(int64_t *)((char *)(uintptr_t)lst + 0);
-  return raw_i(lv);
-}
-
-static inline int64_t list_get(int64_t lst, int64_t i) {
-  int64_t v = *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8);
-  return raw_i(v);
-}
-
-int64_t rt_big_add_abs(int64_t a, int64_t b) {
-  int64_t na = list_len(a);
-  int64_t nb = list_len(b);
-  int64_t nmax = na > nb ? na : nb;
-  int64_t out = rt_list_new((nmax + 1) << 1 | 1);
-
-  *(int64_t *)((char *)(uintptr_t)out + 0) = 1;
-
-  int64_t carry = 0;
-  for (int64_t i = 0; i < nmax; i++) {
-    int64_t va = (i < na) ? list_get(a, i) : 0;
-    int64_t vb = (i < nb) ? list_get(b, i) : 0;
-    int64_t sum = va + vb + carry;
-    if (sum >= 1000000000) {
-      sum -= 1000000000;
-      carry = 1;
-    } else {
-      carry = 0;
-    }
-    rt_append(out, (sum << 1) | 1);
-  }
-  if (carry > 0) {
-    rt_append(out, (1 << 1) | 1);
-  }
-  return out;
-}
-
-int64_t rt_big_sub_abs(int64_t a, int64_t b) {
-  int64_t na = list_len(a);
-  int64_t nb = list_len(b);
-  int64_t out = rt_list_new(na << 1 | 1);
-  *(int64_t *)((char *)(uintptr_t)out + 0) = 1;
-
-  int64_t borrow = 0;
-  for (int64_t i = 0; i < na; i++) {
-    int64_t va = list_get(a, i) - borrow;
-    int64_t vb = (i < nb) ? list_get(b, i) : 0;
-    if (va < vb) {
-      va += 1000000000;
-      borrow = 1;
-    } else {
-      borrow = 0;
-    }
-    rt_append(out, ((va - vb) << 1) | 1);
-  }
-  return out;
-}
-
-int64_t rt_big_mul_abs(int64_t a, int64_t b) {
-  int64_t na = list_len(a);
-  int64_t nb = list_len(b);
-  if (na == 0 || nb == 0)
-    return rt_list_new(1);
-
-  int64_t nout = na + nb;
-  int64_t out = rt_list_new(nout << 1 | 1);
-  int64_t *raw_out = (int64_t *)((char *)(uintptr_t)out + 16);
-
-  for (int64_t k = 0; k < nout; k++)
-    raw_out[k] = 1;
-
-  for (int64_t i = 0; i < na; i++) {
-    int64_t carry = 0;
-    intptr_t va = (intptr_t)list_get(a, i);
-    for (int64_t j = 0; j < nb; j++) {
-      int64_t idx = i + j;
-      intptr_t cur = (intptr_t)raw_i(raw_out[idx]);
-      intptr_t prod = cur + va * (intptr_t)list_get(b, j) + (intptr_t)carry;
-      carry = (int64_t)(prod / 1000000000);
-      raw_out[idx] = ((prod % 1000000000) << 1) | 1;
-    }
-    if (carry > 0) {
-      int64_t idx2 = i + nb;
-      raw_out[idx2] = ((raw_i(raw_out[idx2]) + carry) << 1) | 1;
-    }
-  }
-  return out;
-}

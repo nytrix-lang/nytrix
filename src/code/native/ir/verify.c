@@ -1,302 +1,649 @@
 #include "code/native/ir/internal.h"
-#include "code/native/ir.h"
 #include "base/compat.h"
 #include "base/common.h"
-#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static bool nir_value_valid(const ny_nir_func_t *f, int v) {
+static bool nir_value_valid(const nyir_func_t *f, int v) {
   return v >= 0 && v < f->next_value;
 }
 
-static bool nir_value_defined(const ny_nir_func_t *f, const bool *defined,
+static bool nir_value_defined(const nyir_func_t *f, const bool *defined,
                               int v) {
   return nir_value_valid(f, v) && defined && defined[v];
 }
 
-static bool nir_label_exists(const ny_nir_func_t *f, int64_t label) {
+static bool nir_label_exists(const nyir_func_t *f, int64_t label) {
   if (!f)
     return false;
   for (size_t i = 0; i < f->len; ++i) {
-    const ny_nir_inst_t *in = &f->data[i];
-    if (in->op == NY_NIR_LABEL && in->imm == label)
+    const nyir_inst_t *in = &f->data[i];
+    if (in->op == NYIR_LABEL && in->imm == label)
       return true;
   }
   return false;
 }
 
-bool ny_nir_label_referenced(const ny_nir_func_t *f, int64_t label) {
+bool nyir_label_referenced(const nyir_func_t *f, int64_t label) {
   if (!f)
     return false;
   for (size_t i = 0; i < f->len; ++i) {
-    const ny_nir_inst_t *in = &f->data[i];
-    if ((in->op == NY_NIR_BR || in->op == NY_NIR_BR_IF) && in->imm == label)
+    const nyir_inst_t *in = &f->data[i];
+    if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm == label)
       return true;
   }
   return false;
 }
 
 static unsigned nir_known_effect_mask(void) {
-  return NY_NIR_EFFECT_READ_LOCAL | NY_NIR_EFFECT_WRITE_LOCAL |
-         NY_NIR_EFFECT_CALL | NY_NIR_EFFECT_CONTROL;
+  return NYIR_EFFECT_READ_LOCAL | NYIR_EFFECT_WRITE_LOCAL |
+         NYIR_EFFECT_CALL | NYIR_EFFECT_CONTROL |
+         NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+         NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_VOLATILE |
+         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
 }
 
-bool ny_nir_verify(const ny_nir_func_t *f, char *err, size_t err_len) {
-  if (!f)
-    return ny_nir_err(err, err_len, "native NYIR verify: missing function");
-  if (f->next_value < 0)
-    return ny_nir_err(err, err_len, "native NYIR verify: invalid value count");
-  bool *defined = NULL;
-  if (f->next_value > 0) {
-    defined = (bool *)calloc((size_t)f->next_value, sizeof(bool));
-    if (!defined)
-      return ny_nir_err(err, err_len, "native NYIR verify: out of memory");
+/* Instruction flags are part of NYIR's typed ABI metadata.  Keeping their
+ * legality here prevents a malformed bundle from silently changing a call or
+ * return register class in Machine IR lowering. */
+static bool nir_flags_valid(const nyir_inst_t *in) {
+  if (!in)
+    return false;
+  unsigned allowed = 0;
+  switch (in->op) {
+  case NYIR_CALL:
+    allowed = NYIR_INST_F_EXTERN | NYIR_INST_F_RET_F64 |
+              NYIR_INST_F_RET_F32 | NYIR_INST_F_SRET;
+    break;
+  case NYIR_RET:
+    allowed = NYIR_INST_F_RET_F64 | NYIR_INST_F_RET_F32;
+    break;
+  case NYIR_LOAD_I64:
+  case NYIR_STORE_I64:
+    allowed = NYIR_INST_F_MEM_F64;
+    break;
+  default:
+    return in->flags == 0;
   }
+  return (in->flags & ~allowed) == 0 &&
+         !((in->flags & NYIR_INST_F_RET_F64) &&
+           (in->flags & NYIR_INST_F_RET_F32));
+}
+
+/* PHI operands live on CFG edges, not at their linear instruction position.
+ * Keep this check separate from the scalar operand verifier so malformed
+ * incoming sets cannot reach SSA destruction or a native backend. */
+static bool nir_verify_phi_edges(const nyir_func_t *f, char *err,
+                                 size_t err_len) {
+  nyir_cfg_t cfg = {0};
+  if (!nyir_cfg_build(f, &cfg))
+    return nyir_err(err, err_len, "native NYIR verify: cannot build CFG");
   for (size_t i = 0; i < f->len; ++i) {
-    const ny_nir_inst_t *in = &f->data[i];
-    if (in->op != NY_NIR_CALL && in->arg_sizes) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i,
-                             "non-call instruction has aggregate argument metadata");
+    const nyir_inst_t *phi = &f->data[i];
+    if (phi->op != NYIR_PHI)
+      continue;
+    size_t block = cfg.inst_block[i];
+    size_t predecessors = cfg.pred_offsets[block + 1] - cfg.pred_offsets[block];
+    if (phi->phi_incoming_len != predecessors) {
+      nyir_cfg_free(&cfg);
+      return nyir_inst_err(err, err_len, phi, i,
+                             "phi incoming edges do not match CFG predecessors");
     }
-    if (in->op < 0 || in->op >= NYIR_OP_COUNT) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i, "unknown opcode");
-    }
-    if ((in->op == NY_NIR_CMP_I64 || in->op == NYIR_CMP_F64 ||
-         in->op == NYIR_CMP_F32) &&
-        in->cmp > NY_NIR_CMP_GE) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i, "unknown comparison predicate");
-    }
-    unsigned required_effects = ny_nir_inst_effects(in);
-    unsigned known_effects = nir_known_effect_mask();
-    if ((in->effects & ~known_effects) != 0) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i, "invalid effect mask");
-    }
-    if (in->effects != required_effects) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i,
-                          "effect mask does not match opcode effects");
-    }
-    if ((in->range.has_min && !in->range.has_max) ||
-        (!in->range.has_min && in->range.has_max)) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i, "incomplete range fact");
-    }
-    if (in->range.has_min && in->range.has_max && in->range.min > in->range.max) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i, "invalid range fact");
-    }
-    if ((!in->debug.line && in->debug.column) ||
-        (!in->debug.line && in->debug.file && in->debug.file[0])) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i, "invalid debug location");
-    }
-    if (in->dst >= f->next_value) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i, "invalid destination value");
-    }
-    if (in->dst >= 0 && defined && defined[in->dst]) {
-      free(defined);
-      return ny_nir_inst_err(err, err_len, in, i,
-                          "destination value is already defined");
-    }
-    switch (in->op) {
-    case NY_NIR_NOP:
-      break;
-    case NY_NIR_LABEL:
-      for (size_t j = 0; j < i; ++j) {
-        if (f->data[j].op == NY_NIR_LABEL && f->data[j].imm == in->imm) {
-          free(defined);
-          return ny_nir_inst_err(err, err_len, in, i, "duplicate label");
+    for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+      bool matched = false;
+      for (size_t edge = cfg.pred_offsets[block];
+           edge < cfg.pred_offsets[block + 1]; ++edge) {
+        size_t p = cfg.pred_blocks[edge];
+        if (cfg.block_label[p] == phi->phi_incoming[k].predecessor_label) {
+          matched = true;
+          break;
         }
       }
-      break;
-    case NY_NIR_CONST_I64:
-    case NYIR_CONST_F64:
-    case NYIR_CONST_F32:
-      if (in->dst < 0) {
-        free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "constant has no destination");
+      if (!matched) {
+        nyir_cfg_free(&cfg);
+        return nyir_inst_err(err, err_len, phi, i,
+                               "phi incoming label is not a CFG predecessor");
+      }
+    }
+  }
+  nyir_cfg_free(&cfg);
+  return true;
+}
+
+static bool nir_verify_cfg_structure(const nyir_func_t *f, char *err,
+                                     size_t err_len) {
+  nyir_cfg_t cfg = {0};
+  if (!nyir_cfg_build(f, &cfg))
+    return nyir_err(err, err_len, "native NYIR verify: cannot build CFG");
+  for (size_t block = 0; block < cfg.block_count; ++block) {
+    /* Unreachable blocks are a normal transient state after SCCP or branch
+     * folding.  They are still checked structurally below, but CFG cleanup
+     * owns their deletion; rejecting them here would make it impossible to
+     * verify after every individual transformation. */
+    size_t end = cfg.block_end[block];
+    while (end > cfg.block_start[block] && f->data[end - 1].op == NYIR_NOP)
+      --end;
+    if (end == cfg.block_start[block])
+      continue;
+    nyir_op_t op = f->data[end - 1].op;
+    if ((op == NYIR_BR || op == NYIR_BR_IF || op == NYIR_RET) &&
+        end != cfg.block_end[block]) {
+      nyir_cfg_free(&cfg);
+      return nyir_inst_err(err, err_len, &f->data[end - 1], end - 1,
+                             "terminator is followed by a non-NOP instruction");
+    }
+  }
+  nyir_cfg_free(&cfg);
+  return true;
+}
+
+static bool cfg_dominates_bit_debug(const nyir_cfg_t *cfg, size_t dominator,
+                                    size_t dominated) {
+  if (!cfg || dominator >= cfg->block_count || dominated >= cfg->block_count)
+    return false;
+  return nyir_cfg_dominates(cfg, dominator, dominated);
+}
+
+static bool nir_value_dominates_use(const nyir_cfg_t *cfg,
+                                     const int *definitions, int value,
+                                     size_t use, char *err, size_t err_len,
+                                     const nyir_inst_t *in) {
+  if (value < 0 || !definitions || definitions[value] < 0)
+    return nyir_inst_err(err, err_len, in, use, "value has no definition");
+  size_t def = (size_t)definitions[value];
+  size_t def_block = cfg->inst_block[def];
+  size_t use_block = cfg->inst_block[use];
+  /* SCCP may leave structurally valid, unreachable edge blocks until CFG
+   * cleanup. They cannot execute, so executable dominance is not defined for
+   * their uses. Keep definition and structural checks intact. */
+  if (!cfg->reachable[use_block])
+    return true;
+  if ((def_block == use_block && def < use) ||
+      (def_block != use_block && nyir_cfg_dominates(cfg, def_block, use_block)))
+    return true;
+  if (getenv("NY_DEBUG_DOM")) {
+    fprintf(stderr, "[dom-debug] def_block=%zu (label=%lld reachable=%d) "
+                    "use_block=%zu (label=%lld reachable=%d)\n",
+            def_block, (long long)cfg->block_label[def_block],
+            cfg->reachable[def_block], use_block,
+            (long long)cfg->block_label[use_block], cfg->reachable[use_block]);
+    for (size_t b = 0; b < cfg->block_count; ++b) {
+      fprintf(stderr, "  block %zu label=%lld reachable=%d idom=%d succ=[",
+              b, (long long)cfg->block_label[b], cfg->reachable[b],
+              cfg->idom ? cfg->idom[b] : -2);
+      for (size_t si = cfg->succ_offsets[b]; si < cfg->succ_offsets[b + 1]; ++si)
+        fprintf(stderr, "%zu ", cfg->succ_blocks[si]);
+      fprintf(stderr, "] pred=[");
+      for (size_t pi = cfg->pred_offsets[b]; pi < cfg->pred_offsets[b + 1]; ++pi)
+        fprintf(stderr, "%zu ", cfg->pred_blocks[pi]);
+      fprintf(stderr, "] dominates_use_block=%d\n",
+              cfg_dominates_bit_debug(cfg, use_block, b));
+    }
+  }
+  return nyir_inst_err(err, err_len, in, use,
+                         "value definition does not dominate its use");
+}
+
+static bool nir_verify_dominance(const nyir_func_t *f, char *err,
+                                 size_t err_len) {
+  nyir_cfg_t cfg = {0};
+  if (!nyir_cfg_build(f, &cfg))
+    return nyir_err(err, err_len, "native NYIR verify: cannot build CFG");
+  int *definitions = NULL;
+  if (f->next_value > 0) {
+    definitions = malloc((size_t)f->next_value * sizeof(*definitions));
+    if (!definitions) {
+      nyir_cfg_free(&cfg);
+      return nyir_err(err, err_len, "native NYIR verify: out of memory");
+    }
+    for (int value = 0; value < f->next_value; ++value)
+      definitions[value] = -1;
+  }
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].dst >= 0)
+      definitions[f->data[i].dst] = (int)i;
+
+#define CHECK_DOMINATES(value)                                                \
+  do {                                                                        \
+    if (!nir_value_dominates_use(&cfg, definitions, (value), i, err, err_len, \
+                                 in))                                         \
+      goto fail;                                                              \
+  } while (0)
+
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyir_inst_t *in = &f->data[i];
+    switch (in->op) {
+    case NYIR_PHI: {
+      size_t phi_block = cfg.inst_block[i];
+      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+        int pred = -1;
+        for (size_t b = 0; b < cfg.block_count; ++b)
+          if (cfg.block_label[b] == in->phi_incoming[k].predecessor_label) {
+            pred = (int)b;
+            break;
+          }
+        int value = in->phi_incoming[k].value;
+        if (pred >= 0 && !cfg.reachable[pred])
+          continue;
+        if (pred < 0 || value < 0 || !definitions || definitions[value] < 0 ||
+            !nyir_cfg_dominates(&cfg,
+                                  cfg.inst_block[(size_t)definitions[value]],
+                                  (size_t)pred)) {
+          nyir_inst_err(err, err_len, in, i,
+                          "phi value does not dominate its predecessor edge");
+          goto fail;
+        }
+        (void)phi_block;
       }
       break;
-    case NY_NIR_COPY:
+    }
+    case NYIR_COPY:
     case NYIR_I64_TO_F64:
     case NYIR_I64_TO_F32:
     case NYIR_F64_TO_F32:
     case NYIR_F32_TO_F64:
     case NYIR_LOAD_I64:
-      if (in->dst < 0 || !nir_value_defined(f, defined, in->a)) {
+    case NYIR_VEC4_LOAD_I64:
+    case NYIR_VEC4_LOAD_F64:
+    case NYIR_VEC8_LOAD_F32:
+    case NYIR_VEC4_SET1_I64:
+    case NYIR_VEC4_SET1_F64:
+    case NYIR_VEC8_SET1_F32:
+    case NYIR_VEC4_SHUFFLE_F64:
+    case NYIR_VEC8_SHUFFLE_F32:
+    case NYIR_STORE_LOCAL:
+    case NYIR_RET:
+    case NYIR_BR_IF:
+      if (in->a >= 0) CHECK_DOMINATES(in->a);
+      break;
+    case NYIR_STORE_I64:
+      CHECK_DOMINATES(in->a);
+      CHECK_DOMINATES(in->c);
+      break;
+    case NYIR_VEC4_STORE_I64:
+    case NYIR_VEC4_STORE_F64:
+    case NYIR_VEC8_STORE_F32:
+      CHECK_DOMINATES(in->a);
+      CHECK_DOMINATES(in->b >= 0 ? in->b : in->c);
+      break;
+    case NYIR_VEC4_FMA_F64:
+    case NYIR_VEC8_FMA_F32:
+      CHECK_DOMINATES(in->a);
+      CHECK_DOMINATES(in->b);
+      CHECK_DOMINATES(in->c);
+      break;
+    case NYIR_CALL: {
+      int args[6] = {in->a, in->b, in->c, in->d, in->e, in->f};
+      size_t direct = in->imm < 6 ? (size_t)in->imm : 6;
+      for (size_t arg = 0; arg < direct; ++arg)
+        CHECK_DOMINATES(args[arg]);
+      for (size_t arg = 0; arg < in->extra_args_len; ++arg)
+        CHECK_DOMINATES(in->extra_args[arg]);
+      break;
+    }
+    case NYIR_NOP:
+    case NYIR_CONST_I64:
+    case NYIR_LABEL:
+    case NYIR_LOAD_LOCAL:
+    case NYIR_BR:
+    case NYIR_CONST_F64:
+    case NYIR_CONST_F32:
+    case NYIR_ADDR_LOCAL:
+    case NYIR_ADDR_SYMBOL:
+    case NYIR_ALLOCA:
+    case NYIR_CAPTURE_RET:
+      break;
+    default:
+      CHECK_DOMINATES(in->a);
+      CHECK_DOMINATES(in->b);
+      break;
+    }
+  }
+#undef CHECK_DOMINATES
+  free(definitions);
+  nyir_cfg_free(&cfg);
+  return true;
+fail:
+#undef CHECK_DOMINATES
+  free(definitions);
+  nyir_cfg_free(&cfg);
+  return false;
+}
+
+bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
+  if (!f)
+    return nyir_err(err, err_len, "native NYIR verify: missing function");
+  if (f->next_value < 0)
+    return nyir_err(err, err_len, "native NYIR verify: invalid value count");
+  if (f->param_count && !f->param_types)
+    return nyir_err(err, err_len, "native NYIR verify: missing parameter types");
+  for (size_t i = 0; i < f->param_count; ++i)
+    if (f->param_types[i] > NYIR_PARAM_F64)
+      return nyir_err(err, err_len, "native NYIR verify: invalid parameter type");
+  bool *defined = NULL;
+  if (f->next_value > 0) {
+    defined = (bool *)calloc((size_t)f->next_value, sizeof(bool));
+    if (!defined)
+      return nyir_err(err, err_len, "native NYIR verify: out of memory");
+  }
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyir_inst_t *in = &f->data[i];
+    if (in->op != NYIR_CALL && in->arg_sizes) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i,
+                             "non-call instruction has aggregate argument metadata");
+    }
+    if (in->op < 0 || in->op >= NYIR_OP_COUNT) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i, "unknown opcode");
+    }
+    if (!nir_flags_valid(in)) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i,
+                             "invalid instruction flags");
+    }
+    if (in->op == NYIR_PHI) {
+      /* SSA joins are a block prefix.  Keeping that invariant explicit makes
+       * edge use/dominance checks unambiguous and is required by PHI lowering.
+       * NOPs are tolerated because in-place DCE may leave them temporarily. */
+      size_t prev = i;
+      while (prev > 0 && f->data[prev - 1].op == NYIR_NOP)
+        --prev;
+      if (prev > 0 && f->data[prev - 1].op != NYIR_LABEL &&
+          f->data[prev - 1].op != NYIR_PHI) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "invalid unary value operand");
+        return nyir_inst_err(err, err_len, in, i,
+                               "phi is not at the start of its block");
+      }
+    }
+    if ((in->op == NYIR_CMP_I64 || in->op == NYIR_CMP_F64 ||
+         in->op == NYIR_CMP_F32) &&
+        in->cmp > NYIR_CMP_GE) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i, "unknown comparison predicate");
+    }
+    unsigned required_effects = nyir_inst_effects(in);
+    unsigned known_effects = nir_known_effect_mask();
+    if ((in->effects & ~known_effects) != 0) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i, "invalid effect mask");
+    }
+    if (in->effects != required_effects) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i,
+                          "effect mask does not match opcode effects");
+    }
+    if ((in->range.has_min && !in->range.has_max) ||
+        (!in->range.has_min && in->range.has_max)) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i, "incomplete range fact");
+    }
+    if (in->range.has_min && in->range.has_max && in->range.min > in->range.max) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i, "invalid range fact");
+    }
+    if ((!in->debug.line && in->debug.column) ||
+        (!in->debug.line && in->debug.file && in->debug.file[0])) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i, "invalid debug location");
+    }
+    if (in->dst >= f->next_value) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i, "invalid destination value");
+    }
+    if (in->dst >= 0 && defined && defined[in->dst]) {
+      free(defined);
+      return nyir_inst_err(err, err_len, in, i,
+                          "destination value is already defined");
+    }
+    switch (in->op) {
+    case NYIR_NOP:
+      break;
+    case NYIR_LABEL:
+      for (size_t j = 0; j < i; ++j) {
+        if (f->data[j].op == NYIR_LABEL && f->data[j].imm == in->imm) {
+          free(defined);
+          return nyir_inst_err(err, err_len, in, i, "duplicate label");
+        }
       }
       break;
-    case NY_NIR_LOAD_LOCAL:
+    case NYIR_CONST_I64:
+    case NYIR_CONST_F64:
+    case NYIR_CONST_F32:
+      if (in->dst < 0) {
+        free(defined);
+        return nyir_inst_err(err, err_len, in, i, "constant has no destination");
+      }
+      break;
+    case NYIR_COPY:
+    case NYIR_I64_TO_F64:
+    case NYIR_I64_TO_F32:
+    case NYIR_F64_TO_F32:
+    case NYIR_F32_TO_F64:
+    case NYIR_LOAD_I64:
+    case NYIR_VEC4_LOAD_I64:
+    case NYIR_VEC4_LOAD_F64:
+    case NYIR_VEC8_LOAD_F32:
+    case NYIR_VEC4_SET1_I64:
+    case NYIR_VEC4_SET1_F64:
+    case NYIR_VEC8_SET1_F32:
+    case NYIR_VEC4_SHUFFLE_F64:
+    case NYIR_VEC8_SHUFFLE_F32:
+      if (in->dst < 0 || !nir_value_defined(f, defined, in->a)) {
+        free(defined);
+        return nyir_inst_err(err, err_len, in, i, "invalid unary value operand");
+      }
+      break;
+    case NYIR_PHI:
+      if (in->dst < 0 || in->phi_incoming_len == 0 || !in->phi_incoming) {
+        free(defined);
+        return nyir_inst_err(err, err_len, in, i,
+                               "phi requires a destination and incoming edges");
+      }
+      /* PHIs may read a backedge value defined later in linear NYIR. CFG
+       * validation below establishes the edge; require a real definition
+       * somewhere rather than a linear predecessor here. */
+      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+        int v = in->phi_incoming[k].value;
+        bool has_definition = false;
+        for (size_t j = 0; j < f->len; ++j)
+          if (f->data[j].dst == v) { has_definition = true; break; }
+        if (!nir_value_valid(f, v) || !has_definition) {
+          free(defined);
+          return nyir_inst_err(err, err_len, in, i, "phi has invalid incoming value");
+        }
+        for (size_t j = 0; j < k; ++j) {
+          if (in->phi_incoming[j].predecessor_label ==
+              in->phi_incoming[k].predecessor_label) {
+            free(defined);
+            return nyir_inst_err(err, err_len, in, i, "phi has duplicate predecessor");
+          }
+        }
+      }
+      break;
+    case NYIR_LOAD_LOCAL:
       if (in->dst < 0 || in->imm < 0) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "invalid local load");
+        return nyir_inst_err(err, err_len, in, i, "invalid local load");
       }
       break;
     case NYIR_ADDR_LOCAL:
       if (in->dst < 0 || in->imm < 0) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "invalid local address");
+        return nyir_inst_err(err, err_len, in, i, "invalid local address");
       }
       break;
     case NYIR_ADDR_SYMBOL:
       if (in->dst < 0 || !in->symbol || !in->symbol[0]) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "addr.symbol requires a non-empty symbol");
+        return nyir_inst_err(err, err_len, in, i, "addr.symbol requires a non-empty symbol");
       }
       break;
     case NYIR_ALLOCA:
       if (in->dst < 0 || in->imm < 0) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "alloca requires a valid destination and positive size");
+        return nyir_inst_err(err, err_len, in, i, "alloca requires a valid destination and positive size");
       }
       break;
     case NYIR_COPY_STRUCT:
       if (in->a < 0 || in->b < 0 || in->imm < 0) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "copy.struct requires valid src, dst, and size");
+        return nyir_inst_err(err, err_len, in, i, "copy.struct requires valid src, dst, and size");
       }
       break;
     case NYIR_CAPTURE_RET:
-      if (in->dst < 0 || in->imm < 0 || in->imm > 3 || i == 0 ||
-          (f->data[i - 1].op != NY_NIR_CALL &&
+      if (in->dst < 0 || in->imm < 0 || in->imm > 13 || i == 0 ||
+          (f->data[i - 1].op != NYIR_CALL &&
            f->data[i - 1].op != NYIR_CAPTURE_RET)) {
         free(defined);
-        return ny_nir_inst_err(
+        return nyir_inst_err(
             err, err_len, in, i,
-            "capture.ret requires a call/capture chain immediately before it and selector 0..3");
+            "capture.ret requires a call/capture chain immediately before it and selector 0..13");
       }
       break;
-    case NY_NIR_STORE_LOCAL:
+    case NYIR_STORE_LOCAL:
       if (in->imm < 0 || !nir_value_defined(f, defined, in->a)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "invalid local store");
+        return nyir_inst_err(err, err_len, in, i, "invalid local store");
       }
       break;
     case NYIR_STORE_I64:
       if (!nir_value_defined(f, defined, in->a) ||
           !nir_value_defined(f, defined, in->c)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "invalid memory store");
+        return nyir_inst_err(err, err_len, in, i, "invalid memory store");
       }
       break;
-    case NY_NIR_RET:
+    case NYIR_VEC4_STORE_I64:
+    case NYIR_VEC4_STORE_F64:
+    case NYIR_VEC8_STORE_F32:
+      if (!nir_value_defined(f, defined, in->a) ||
+          !nir_value_defined(f, defined, in->b >= 0 ? in->b : in->c)) {
+        free(defined);
+        return nyir_inst_err(err, err_len, in, i,
+                               "invalid vector memory store");
+      }
+      break;
+    case NYIR_VEC4_FMA_F64:
+    case NYIR_VEC8_FMA_F32:
+      if (in->dst < 0 || !nir_value_defined(f, defined, in->a) ||
+          !nir_value_defined(f, defined, in->b) ||
+          !nir_value_defined(f, defined, in->c)) {
+        free(defined);
+        return nyir_inst_err(err, err_len, in, i,
+                               "invalid ternary vector operands");
+      }
+      break;
+    case NYIR_RET:
       if (in->a >= 0 && !nir_value_defined(f, defined, in->a)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "invalid return value");
+        return nyir_inst_err(err, err_len, in, i, "invalid return value");
       }
       break;
-    case NY_NIR_BR:
+    case NYIR_BR:
       if (!nir_label_exists(f, in->imm)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "missing branch target label");
+        return nyir_inst_err(err, err_len, in, i, "missing branch target label");
       }
       break;
-    case NY_NIR_BR_IF:
+    case NYIR_BR_IF:
       if (!nir_value_defined(f, defined, in->a) ||
           !nir_label_exists(f, in->imm)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i,
+        return nyir_inst_err(err, err_len, in, i,
                             "invalid conditional branch operand or target");
       }
       break;
-    case NY_NIR_CALL:
+    case NYIR_CALL:
       if (!in->symbol || !in->symbol[0]) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "call has no symbol");
+        return nyir_inst_err(err, err_len, in, i, "call has no symbol");
       }
       if (in->imm < 0) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "negative call arg count");
+        return nyir_inst_err(err, err_len, in, i, "negative call arg count");
       }
       if (in->imm == 0 &&
           (in->a >= 0 || in->b >= 0 || in->c >= 0 || in->d >= 0 ||
            in->e >= 0 || in->f >= 0)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i,
+        return nyir_inst_err(err, err_len, in, i,
                             "zero-argument call has value operands");
       }
       if (in->imm == 1 &&
           (in->b >= 0 || in->c >= 0 || in->d >= 0 || in->e >= 0 ||
            in->f >= 0)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i,
+        return nyir_inst_err(err, err_len, in, i,
                             "one-argument call has extra value operand");
       }
       if (in->imm == 2 &&
           (in->c >= 0 || in->d >= 0 || in->e >= 0 || in->f >= 0)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i,
+        return nyir_inst_err(err, err_len, in, i,
                             "two-argument call has extra value operand");
       }
       if (in->imm == 3 && (in->d >= 0 || in->e >= 0 || in->f >= 0)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i,
+        return nyir_inst_err(err, err_len, in, i,
                             "three-argument call has extra value operand");
       }
       if (in->imm == 4 && (in->e >= 0 || in->f >= 0)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i,
+        return nyir_inst_err(err, err_len, in, i,
                             "four-argument call has extra value operand");
       }
       if (in->imm == 5 && in->f >= 0) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i,
+        return nyir_inst_err(err, err_len, in, i,
                             "five-argument call has extra value operand");
       }
       if (in->imm > 0 && !nir_value_defined(f, defined, in->a)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "call arg0 is invalid");
+        return nyir_inst_err(err, err_len, in, i, "call arg0 is invalid");
       }
       if (in->imm > 1 && !nir_value_defined(f, defined, in->b)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "call arg1 is invalid");
+        return nyir_inst_err(err, err_len, in, i, "call arg1 is invalid");
       }
       if (in->imm > 2 && !nir_value_defined(f, defined, in->c)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "call arg2 is invalid");
+        return nyir_inst_err(err, err_len, in, i, "call arg2 is invalid");
       }
       if (in->imm > 3 && !nir_value_defined(f, defined, in->d)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "call arg3 is invalid");
+        return nyir_inst_err(err, err_len, in, i, "call arg3 is invalid");
       }
       if (in->imm > 4 && !nir_value_defined(f, defined, in->e)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "call arg4 is invalid");
+        return nyir_inst_err(err, err_len, in, i, "call arg4 is invalid");
       }
       if (in->imm > 5 && !nir_value_defined(f, defined, in->f)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "call arg5 is invalid");
+        return nyir_inst_err(err, err_len, in, i, "call arg5 is invalid");
       }
-      if (in->imm > NY_NIR_CALL_MAX_ARGS) {
+      if (in->imm > NYIR_CALL_MAX_ARGS) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i,
+        return nyir_inst_err(err, err_len, in, i,
                             "call exceeds the maximum supported argument count");
       }
       if (in->arg_sizes && in->imm <= 0) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i,
+        return nyir_inst_err(err, err_len, in, i,
                                "zero-argument call has aggregate argument metadata");
       }
       if (in->arg_sizes) {
         for (int64_t arg = 0; arg < in->imm; ++arg) {
           uint32_t packed = in->arg_sizes[arg];
-          unsigned c0 = NY_NIR_ARG_AGG_CLASS(packed, 0);
-          unsigned c1 = NY_NIR_ARG_AGG_CLASS(packed, 1);
+          unsigned c0 = NYIR_ARG_AGG_CLASS(packed, 0);
+          unsigned c1 = NYIR_ARG_AGG_CLASS(packed, 1);
           if (packed != 0 &&
-              (NY_NIR_ARG_AGG_SIZE(packed) == 0 ||
-               c0 > NY_NIR_ARG_CLASS_UNSUPPORTED ||
-               c1 > NY_NIR_ARG_CLASS_UNSUPPORTED)) {
+              (NYIR_ARG_AGG_SIZE(packed) == 0 ||
+               c0 > NYIR_ARG_CLASS_AAPCS_INTEGER_A16 ||
+               c1 > NYIR_ARG_CLASS_AAPCS_INTEGER_A16)) {
             free(defined);
-            return ny_nir_inst_err(err, err_len, in, i,
+            return nyir_inst_err(err, err_len, in, i,
                                    "invalid aggregate argument metadata");
           }
         }
@@ -304,20 +651,20 @@ bool ny_nir_verify(const ny_nir_func_t *f, char *err, size_t err_len) {
       if (in->imm <= 6) {
         if (in->extra_args || in->extra_args_len != 0) {
           free(defined);
-          return ny_nir_inst_err(err, err_len, in, i,
+          return nyir_inst_err(err, err_len, in, i,
                               "call has stray stack-args for a register-only arity");
         }
       } else {
         size_t want = (size_t)(in->imm - 6);
         if (!in->extra_args || in->extra_args_len != want) {
           free(defined);
-          return ny_nir_inst_err(err, err_len, in, i,
+          return nyir_inst_err(err, err_len, in, i,
                               "call stack-arg count does not match arity");
         }
         for (size_t k = 0; k < want; ++k) {
           if (!nir_value_defined(f, defined, in->extra_args[k])) {
             free(defined);
-            return ny_nir_inst_err(err, err_len, in, i, "call stack-arg is invalid");
+            return nyir_inst_err(err, err_len, in, i, "call stack-arg is invalid");
           }
         }
       }
@@ -325,12 +672,12 @@ bool ny_nir_verify(const ny_nir_func_t *f, char *err, size_t err_len) {
     default:
       if (in->op == NYIR_OP_COUNT) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "unknown opcode");
+        return nyir_inst_err(err, err_len, in, i, "unknown opcode");
       }
       if (!nir_value_defined(f, defined, in->a) ||
           !nir_value_defined(f, defined, in->b)) {
         free(defined);
-        return ny_nir_inst_err(err, err_len, in, i, "invalid value operands");
+        return nyir_inst_err(err, err_len, in, i, "invalid value operands");
       }
       break;
     }
@@ -338,51 +685,61 @@ bool ny_nir_verify(const ny_nir_func_t *f, char *err, size_t err_len) {
       defined[in->dst] = true;
   }
   free(defined);
-  if (!ny_nir_validate_constraints(f, err, err_len))
+  if (!nir_verify_cfg_structure(f, err, err_len))
+    return false;
+  if (!nir_verify_phi_edges(f, err, err_len))
+    return false;
+  if (!nir_verify_dominance(f, err, err_len))
+    return false;
+  if (!nyir_validate_constraints(f, err, err_len))
     return false;
   if (err && err_len > 0)
     err[0] = '\0';
   return true;
 }
 
-
-bool ny_nir_analyze_binary_fold(ny_nir_op_t op, int64_t a, int64_t b,
+bool nyir_analyze_binary_fold(nyir_op_t op, int64_t a, int64_t b,
                                        int64_t *out) {
+  if (!out)
+    return false;
   switch (op) {
-  case NY_NIR_ADD_I64:
-    *out = a + b;
+  case NYIR_ADD_I64:
+    /* Nytrix i64 add/sub/mul wrap.  Spell that in unsigned arithmetic rather
+     * than relying on signed C overflow, since this evaluator is shared by
+     * constant folding, SCCP, and the NYIR VM. */
+    *out = (int64_t)((uint64_t)a + (uint64_t)b);
     return true;
-  case NY_NIR_SUB_I64:
-    *out = a - b;
+  case NYIR_SUB_I64:
+    *out = (int64_t)((uint64_t)a - (uint64_t)b);
     return true;
-  case NY_NIR_MUL_I64:
-    *out = a * b;
+  case NYIR_MUL_I64:
+    *out = (int64_t)((uint64_t)a * (uint64_t)b);
     return true;
-  case NY_NIR_DIV_I64:
+  case NYIR_DIV_I64:
     if (b == 0 || (a == INT64_MIN && b == -1))
       return false;
     *out = a / b;
     return true;
-  case NY_NIR_MOD_I64:
+  case NYIR_MOD_I64:
     if (b == 0 || (a == INT64_MIN && b == -1))
       return false;
     *out = a % b;
     return true;
-  case NY_NIR_AND_I64:
+  case NYIR_AND_I64:
     *out = a & b;
     return true;
-  case NY_NIR_OR_I64:
+  case NYIR_OR_I64:
     *out = a | b;
     return true;
-  case NY_NIR_XOR_I64:
+  case NYIR_XOR_I64:
     *out = a ^ b;
     return true;
-  case NY_NIR_SHL_I64:
+  case NYIR_SHL_I64:
     if (b < 0 || b >= 64)
       return false;
     *out = (int64_t)((uint64_t)a << (unsigned)b);
     return true;
-  case NY_NIR_SAR_I64:
+  case NYIR_SAR_I64:
     if (b < 0 || b >= 64)
       return false;
     *out = a >> (unsigned)b;
@@ -392,32 +749,32 @@ bool ny_nir_analyze_binary_fold(ny_nir_op_t op, int64_t a, int64_t b,
   }
 }
 
-bool ny_nir_analyze_cmp_fold(ny_nir_cmp_t cmp, int64_t a, int64_t b,
+bool nyir_analyze_cmp_fold(nyir_cmp_t cmp, int64_t a, int64_t b,
                                     int64_t *out) {
   switch (cmp) {
-  case NY_NIR_CMP_EQ:
+  case NYIR_CMP_EQ:
     *out = a == b;
     return true;
-  case NY_NIR_CMP_NE:
+  case NYIR_CMP_NE:
     *out = a != b;
     return true;
-  case NY_NIR_CMP_LT:
+  case NYIR_CMP_LT:
     *out = a < b;
     return true;
-  case NY_NIR_CMP_LE:
+  case NYIR_CMP_LE:
     *out = a <= b;
     return true;
-  case NY_NIR_CMP_GT:
+  case NYIR_CMP_GT:
     *out = a > b;
     return true;
-  case NY_NIR_CMP_GE:
+  case NYIR_CMP_GE:
     *out = a >= b;
     return true;
   }
   return false;
 }
 
-static void ny_nir_fact_set_const(ny_nir_value_fact_t *fact, int64_t value) {
+static void nyir_fact_set_const(nyir_value_fact_t *fact, int64_t value) {
   if (!fact)
     return;
   fact->known_const = true;
@@ -428,7 +785,7 @@ static void ny_nir_fact_set_const(ny_nir_value_fact_t *fact, int64_t value) {
   fact->range.max = value;
 }
 
-static bool ny_nir_i64_add_checked(int64_t a, int64_t b, int64_t *out) {
+static bool nyir_i64_add_checked(int64_t a, int64_t b, int64_t *out) {
   if (!out)
     return false;
   if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b))
@@ -437,7 +794,7 @@ static bool ny_nir_i64_add_checked(int64_t a, int64_t b, int64_t *out) {
   return true;
 }
 
-static bool ny_nir_i64_sub_checked(int64_t a, int64_t b, int64_t *out) {
+static bool nyir_i64_sub_checked(int64_t a, int64_t b, int64_t *out) {
   if (!out)
     return false;
   if ((b < 0 && a > INT64_MAX + b) || (b > 0 && a < INT64_MIN + b))
@@ -446,14 +803,14 @@ static bool ny_nir_i64_sub_checked(int64_t a, int64_t b, int64_t *out) {
   return true;
 }
 
-static bool ny_nir_i64_div_checked(int64_t a, int64_t b, int64_t *out) {
+static bool nyir_i64_div_checked(int64_t a, int64_t b, int64_t *out) {
   if (!out || b == 0 || (a == INT64_MIN && b == -1))
     return false;
   *out = a / b;
   return true;
 }
 
-static bool ny_nir_i64_mul_checked(int64_t a, int64_t b, int64_t *out) {
+static bool nyir_i64_mul_checked(int64_t a, int64_t b, int64_t *out) {
 #if defined(__GNUC__) || defined(__clang__)
   if (!out)
     return false;
@@ -497,8 +854,8 @@ static bool ny_nir_i64_mul_checked(int64_t a, int64_t b, int64_t *out) {
 #endif
 }
 
-static bool ny_nir_range_from_corners(const int64_t *v, size_t n,
-                                      ny_nir_range_t *out) {
+static bool nyir_range_from_corners(const int64_t *v, size_t n,
+                                      nyir_range_t *out) {
   if (!v || n == 0 || !out)
     return false;
   int64_t lo = v[0];
@@ -509,26 +866,26 @@ static bool ny_nir_range_from_corners(const int64_t *v, size_t n,
     if (v[i] > hi)
       hi = v[i];
   }
-  *out = (ny_nir_range_t){.has_min = true, .has_max = true, .min = lo, .max = hi};
+  *out = (nyir_range_t){.has_min = true, .has_max = true, .min = lo, .max = hi};
   return true;
 }
 
-static bool ny_nir_fact_binary_range(ny_nir_op_t op,
-                                     const ny_nir_value_fact_t *a,
-                                     const ny_nir_value_fact_t *b,
-                                     ny_nir_range_t *out) {
+static bool nyir_fact_binary_range(nyir_op_t op,
+                                     const nyir_value_fact_t *a,
+                                     const nyir_value_fact_t *b,
+                                     nyir_range_t *out) {
   if (!a || !b || !out)
     return false;
-  if (op == NY_NIR_AND_I64) {
+  if (op == NYIR_AND_I64) {
     if (b->known_const && b->const_value >= 0) {
-      *out = (ny_nir_range_t){.has_min = true,
+      *out = (nyir_range_t){.has_min = true,
                               .has_max = true,
                               .min = 0,
                               .max = b->const_value};
       return true;
     }
     if (a->known_const && a->const_value >= 0) {
-      *out = (ny_nir_range_t){.has_min = true,
+      *out = (nyir_range_t){.has_min = true,
                               .has_max = true,
                               .min = 0,
                               .max = a->const_value};
@@ -541,39 +898,39 @@ static bool ny_nir_fact_binary_range(ny_nir_op_t op,
   int64_t lo = 0;
   int64_t hi = 0;
   switch (op) {
-  case NY_NIR_ADD_I64:
-    if (!ny_nir_i64_add_checked(a->range.min, b->range.min, &lo) ||
-        !ny_nir_i64_add_checked(a->range.max, b->range.max, &hi))
+  case NYIR_ADD_I64:
+    if (!nyir_i64_add_checked(a->range.min, b->range.min, &lo) ||
+        !nyir_i64_add_checked(a->range.max, b->range.max, &hi))
       return false;
     break;
-  case NY_NIR_SUB_I64:
-    if (!ny_nir_i64_sub_checked(a->range.min, b->range.max, &lo) ||
-        !ny_nir_i64_sub_checked(a->range.max, b->range.min, &hi))
+  case NYIR_SUB_I64:
+    if (!nyir_i64_sub_checked(a->range.min, b->range.max, &lo) ||
+        !nyir_i64_sub_checked(a->range.max, b->range.min, &hi))
       return false;
     break;
-  case NY_NIR_MUL_I64: {
+  case NYIR_MUL_I64: {
     int64_t corners[4];
-    if (!ny_nir_i64_mul_checked(a->range.min, b->range.min, &corners[0]) ||
-        !ny_nir_i64_mul_checked(a->range.min, b->range.max, &corners[1]) ||
-        !ny_nir_i64_mul_checked(a->range.max, b->range.min, &corners[2]) ||
-        !ny_nir_i64_mul_checked(a->range.max, b->range.max, &corners[3]) ||
-        !ny_nir_range_from_corners(corners, 4, out))
+    if (!nyir_i64_mul_checked(a->range.min, b->range.min, &corners[0]) ||
+        !nyir_i64_mul_checked(a->range.min, b->range.max, &corners[1]) ||
+        !nyir_i64_mul_checked(a->range.max, b->range.min, &corners[2]) ||
+        !nyir_i64_mul_checked(a->range.max, b->range.max, &corners[3]) ||
+        !nyir_range_from_corners(corners, 4, out))
       return false;
     return true;
   }
-  case NY_NIR_DIV_I64: {
+  case NYIR_DIV_I64: {
     if (b->range.min <= 0 && b->range.max >= 0)
       return false;
     int64_t corners[4];
-    if (!ny_nir_i64_div_checked(a->range.min, b->range.min, &corners[0]) ||
-        !ny_nir_i64_div_checked(a->range.min, b->range.max, &corners[1]) ||
-        !ny_nir_i64_div_checked(a->range.max, b->range.min, &corners[2]) ||
-        !ny_nir_i64_div_checked(a->range.max, b->range.max, &corners[3]) ||
-        !ny_nir_range_from_corners(corners, 4, out))
+    if (!nyir_i64_div_checked(a->range.min, b->range.min, &corners[0]) ||
+        !nyir_i64_div_checked(a->range.min, b->range.max, &corners[1]) ||
+        !nyir_i64_div_checked(a->range.max, b->range.min, &corners[2]) ||
+        !nyir_i64_div_checked(a->range.max, b->range.max, &corners[3]) ||
+        !nyir_range_from_corners(corners, 4, out))
       return false;
     return true;
   }
-  case NY_NIR_MOD_I64:
+  case NYIR_MOD_I64:
     if (!b->known_const || b->const_value == 0 || b->const_value == INT64_MIN)
       return false;
     hi = b->const_value < 0 ? -b->const_value - 1 : b->const_value - 1;
@@ -581,25 +938,25 @@ static bool ny_nir_fact_binary_range(ny_nir_op_t op,
     if (a->range.max <= 0)
       hi = 0;
     break;
-  case NY_NIR_SHL_I64:
+  case NYIR_SHL_I64:
     if (!b->known_const || b->const_value < 0 || b->const_value >= 63 ||
         a->range.min < 0)
       return false;
-    if (!ny_nir_i64_mul_checked(a->range.min, (int64_t)1 << b->const_value,
+    if (!nyir_i64_mul_checked(a->range.min, (int64_t)1 << b->const_value,
                                 &lo) ||
-        !ny_nir_i64_mul_checked(a->range.max, (int64_t)1 << b->const_value,
+        !nyir_i64_mul_checked(a->range.max, (int64_t)1 << b->const_value,
                                 &hi))
       return false;
     break;
-  case NY_NIR_SAR_I64:
+  case NYIR_SAR_I64:
     if (!b->known_const || b->const_value < 0 || b->const_value >= 64)
       return false;
     lo = a->range.min >> (unsigned)b->const_value;
     hi = a->range.max >> (unsigned)b->const_value;
     break;
-  case NY_NIR_AND_I64:
-  case NY_NIR_OR_I64:
-  case NY_NIR_XOR_I64:
+  case NYIR_AND_I64:
+  case NYIR_OR_I64:
+  case NYIR_XOR_I64:
     if (a->range.min < 0 || b->range.min < 0)
       return false;
     lo = 0;
@@ -610,57 +967,49 @@ static bool ny_nir_fact_binary_range(ny_nir_op_t op,
   }
   if (lo > hi)
     return false;
-  *out = (ny_nir_range_t){.has_min = true, .has_max = true, .min = lo, .max = hi};
+  *out = (nyir_range_t){.has_min = true, .has_max = true, .min = lo, .max = hi};
   return true;
 }
 
-
-bool ny_nir_metadata_summary(const ny_nir_func_t *f,
-                             ny_nir_metadata_summary_t *summary, char *err,
+bool nyir_metadata_summary(const nyir_func_t *f,
+                             nyir_metadata_summary_t *summary, char *err,
                              size_t err_len) {
   if (!f)
-    return ny_nir_err(err, err_len, "native NYIR metadata: missing function");
+    return nyir_err(err, err_len, "native NYIR metadata: missing function");
   if (!summary)
-    return ny_nir_err(err, err_len, "native NYIR metadata: missing summary output");
+    return nyir_err(err, err_len, "native NYIR metadata: missing summary output");
   char verify_err[256] = {0};
-  if (!ny_nir_verify(f, verify_err, sizeof(verify_err)))
-    return ny_nir_err(err, err_len, "native NYIR metadata: verifier rejected input: %s",
+  if (!nyir_verify(f, verify_err, sizeof(verify_err)))
+    return nyir_err(err, err_len, "native NYIR metadata: verifier rejected input: %s",
                    verify_err);
   memset(summary, 0, sizeof(*summary));
   summary->instructions = f->len;
   summary->values = f->next_value > 0 ? (size_t)f->next_value : 0;
-  int64_t max_local = -1;
   for (size_t i = 0; i < f->len; ++i) {
-    const ny_nir_inst_t *in = &f->data[i];
+    const nyir_inst_t *in = &f->data[i];
     if (in->op >= 0 && in->op < NYIR_OP_COUNT)
       summary->ops[in->op]++;
-    summary->effect_mask |= in->effects | ny_nir_inst_effects(in);
+    summary->effect_mask |= in->effects | nyir_inst_effects(in);
     if (in->range.has_min || in->range.has_max)
       summary->range_facts++;
     if (in->debug.line || (in->debug.file && in->debug.file[0]))
       summary->debug_locs++;
     switch (in->op) {
-    case NY_NIR_LABEL:
+    case NYIR_LABEL:
       summary->labels++;
       break;
-    case NY_NIR_BR:
+    case NYIR_BR:
       summary->branches++;
       break;
-    case NY_NIR_BR_IF:
+    case NYIR_BR_IF:
       summary->branches++;
       summary->conditional_branches++;
       break;
-    case NY_NIR_CALL:
+    case NYIR_CALL:
       summary->calls++;
       break;
-    case NY_NIR_RET:
+    case NYIR_RET:
       summary->returns++;
-      break;
-    case NY_NIR_LOAD_LOCAL:
-    case NYIR_ADDR_LOCAL:
-    case NY_NIR_STORE_LOCAL:
-      if (in->imm > max_local)
-        max_local = in->imm;
       break;
     case NYIR_ADDR_SYMBOL:
       break;
@@ -668,14 +1017,14 @@ bool ny_nir_metadata_summary(const ny_nir_func_t *f,
       break;
     }
   }
-  summary->locals = max_local >= 0 ? (size_t)max_local + 1 : 0;
+  summary->locals = nyir_max_local(f);
   if (err && err_len > 0)
     err[0] = '\0';
   return true;
 }
 
-void ny_nir_metadata_summary_dump(FILE *out, const char *name,
-                                  const ny_nir_metadata_summary_t *summary) {
+void nyir_metadata_summary_dump(FILE *out, const char *name,
+                                  const nyir_metadata_summary_t *summary) {
   if (!out || !summary)
     return;
   fprintf(out,
@@ -687,58 +1036,102 @@ void ny_nir_metadata_summary_dump(FILE *out, const char *name,
           summary->effect_mask);
   for (int op = 0; op < NYIR_OP_COUNT; ++op) {
     if (summary->ops[op])
-      fprintf(out, "  op %-14s %zu\n", ny_nir_op_name((ny_nir_op_t)op),
+      fprintf(out, "  op %-14s %zu\n", nyir_op_name((nyir_op_t)op),
               summary->ops[op]);
   }
 }
 
-bool ny_nir_analyze_values(const ny_nir_func_t *f, ny_nir_value_fact_t *facts,
+bool nyir_analyze_values(const nyir_func_t *f, nyir_value_fact_t *facts,
                            size_t fact_count, char *err, size_t err_len) {
   if (!f)
-    return ny_nir_err(err, err_len, "native NYIR analysis: missing function");
+    return nyir_err(err, err_len, "native NYIR analysis: missing function");
   if (f->next_value < 0)
-    return ny_nir_err(err, err_len, "native NYIR analysis: invalid value count");
+    return nyir_err(err, err_len, "native NYIR analysis: invalid value count");
   if ((size_t)f->next_value > fact_count)
-    return ny_nir_err(err, err_len,
+    return nyir_err(err, err_len,
                    "native NYIR analysis: fact table too small (%zu < %d)",
                    fact_count, f->next_value);
   if (facts && fact_count > 0)
     memset(facts, 0, fact_count * sizeof(*facts));
 
   for (size_t i = 0; i < f->len; ++i) {
-    const ny_nir_inst_t *in = &f->data[i];
+    const nyir_inst_t *in = &f->data[i];
     if (in->op < 0 || in->op >= NYIR_OP_COUNT)
-      return ny_nir_inst_err(err, err_len, in, i, "unknown opcode");
+      return nyir_inst_err(err, err_len, in, i, "unknown opcode");
     if (in->a >= 0 && facts && (size_t)in->a < fact_count)
       facts[in->a].use_count++;
     if (in->b >= 0 && facts && (size_t)in->b < fact_count)
       facts[in->b].use_count++;
-    if (in->op == NY_NIR_CALL && in->extra_args && facts) {
+    if (in->op == NYIR_CALL && in->extra_args && facts) {
       for (size_t k = 0; k < in->extra_args_len; ++k) {
         int v = in->extra_args[k];
         if (v >= 0 && (size_t)v < fact_count)
           facts[v].use_count++;
       }
     }
+    if (in->op == NYIR_PHI && in->phi_incoming && facts) {
+      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+        int v = in->phi_incoming[k].value;
+        if (v >= 0 && (size_t)v < fact_count)
+          facts[v].use_count++;
+      }
+    }
     if (in->dst < 0 || !facts || (size_t)in->dst >= fact_count)
       continue;
-    ny_nir_value_fact_t *dst = &facts[in->dst];
-    dst->effects |= in->effects | ny_nir_inst_effects(in);
+    nyir_value_fact_t *dst = &facts[in->dst];
+    dst->effects |= in->effects | nyir_inst_effects(in);
     if (in->range.has_min || in->range.has_max)
       dst->range = in->range;
 
     switch (in->op) {
-    case NY_NIR_CONST_I64:
-      ny_nir_fact_set_const(dst, in->imm);
+    case NYIR_CONST_I64:
+      nyir_fact_set_const(dst, in->imm);
       break;
-    case NY_NIR_COPY:
+    case NYIR_COPY:
       if (in->a >= 0 && (size_t)in->a < fact_count) {
         dst->known_const = facts[in->a].known_const;
         dst->const_value = facts[in->a].const_value;
         dst->range = facts[in->a].range;
       }
       break;
-    case NY_NIR_CMP_I64:
+    case NYIR_PHI: {
+      bool have_input = false;
+      bool all_const = true;
+      int64_t const_value = 0;
+      bool have_range = true;
+      int64_t lo = 0, hi = 0;
+      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+        int v = in->phi_incoming[k].value;
+        if (v < 0 || (size_t)v >= fact_count) {
+          all_const = false;
+          have_range = false;
+          continue;
+        }
+        const nyir_value_fact_t *input = &facts[v];
+        if (!have_input) {
+          have_input = true;
+          const_value = input->const_value;
+          lo = input->range.min;
+          hi = input->range.max;
+        } else {
+          if (input->range.has_min && input->range.min < lo)
+            lo = input->range.min;
+          if (input->range.has_max && input->range.max > hi)
+            hi = input->range.max;
+        }
+        if (!input->known_const || input->const_value != const_value)
+          all_const = false;
+        if (!input->range.has_min || !input->range.has_max)
+          have_range = false;
+      }
+      if (have_input && all_const)
+        nyir_fact_set_const(dst, const_value);
+      else if (have_input && have_range)
+        dst->range = (nyir_range_t){.has_min = true, .has_max = true,
+                                      .min = lo, .max = hi};
+      break;
+    }
+    case NYIR_CMP_I64:
       dst->range.has_min = true;
       dst->range.has_max = true;
       dst->range.min = 0;
@@ -747,9 +1140,9 @@ bool ny_nir_analyze_values(const ny_nir_func_t *f, ny_nir_value_fact_t *facts,
           (size_t)in->b < fact_count && facts[in->a].known_const &&
           facts[in->b].known_const) {
         int64_t folded = 0;
-        if (ny_nir_analyze_cmp_fold(in->cmp, facts[in->a].const_value,
+        if (nyir_analyze_cmp_fold(in->cmp, facts[in->a].const_value,
                                     facts[in->b].const_value, &folded))
-          ny_nir_fact_set_const(dst, folded);
+          nyir_fact_set_const(dst, folded);
       }
       break;
     default:
@@ -757,16 +1150,16 @@ bool ny_nir_analyze_values(const ny_nir_func_t *f, ny_nir_value_fact_t *facts,
           (size_t)in->b < fact_count && facts[in->a].known_const &&
           facts[in->b].known_const) {
         int64_t folded = 0;
-        if (ny_nir_analyze_binary_fold(in->op, facts[in->a].const_value,
+        if (nyir_analyze_binary_fold(in->op, facts[in->a].const_value,
                                        facts[in->b].const_value, &folded)) {
-          ny_nir_fact_set_const(dst, folded);
+          nyir_fact_set_const(dst, folded);
           break;
         }
       }
       if (in->a >= 0 && in->b >= 0 && (size_t)in->a < fact_count &&
           (size_t)in->b < fact_count) {
-        ny_nir_range_t r = {0};
-        if (ny_nir_fact_binary_range(in->op, &facts[in->a], &facts[in->b], &r))
+        nyir_range_t r = {0};
+        if (nyir_fact_binary_range(in->op, &facts[in->a], &facts[in->b], &r))
           dst->range = r;
       }
       break;
@@ -777,10 +1170,10 @@ bool ny_nir_analyze_values(const ny_nir_func_t *f, ny_nir_value_fact_t *facts,
   return true;
 }
 
-bool ny_nir_validate_constraints(const ny_nir_func_t *f, char *err,
+bool nyir_validate_constraints(const nyir_func_t *f, char *err,
                                  size_t err_len) {
   if (!f)
-    return ny_nir_err(err, err_len, "native NYIR constraints: missing function");
+    return nyir_err(err, err_len, "native NYIR constraints: missing function");
   bool *known = NULL;
   int64_t *value = NULL;
   if (f->next_value > 0) {
@@ -789,47 +1182,47 @@ bool ny_nir_validate_constraints(const ny_nir_func_t *f, char *err,
     if (!known || !value) {
       free(known);
       free(value);
-      return ny_nir_err(err, err_len, "native NYIR constraints: out of memory");
+      return nyir_err(err, err_len, "native NYIR constraints: out of memory");
     }
   }
   for (size_t i = 0; i < f->len; ++i) {
-    const ny_nir_inst_t *in = &f->data[i];
+    const nyir_inst_t *in = &f->data[i];
     if (in->op < 0 || in->op >= NYIR_OP_COUNT) {
       free(known);
       free(value);
-      return ny_nir_inst_err(err, err_len, in, i, "unknown opcode");
+      return nyir_inst_err(err, err_len, in, i, "unknown opcode");
     }
     if (in->range.has_min && in->range.has_max && in->range.min > in->range.max) {
       free(known);
       free(value);
-      return ny_nir_inst_err(err, err_len, in, i, "range minimum exceeds maximum");
+      return nyir_inst_err(err, err_len, in, i, "range minimum exceeds maximum");
     }
-    if ((in->op == NY_NIR_SHL_I64 || in->op == NY_NIR_SAR_I64) &&
+    if ((in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64) &&
         in->b >= 0 && known && known[in->b] &&
         (value[in->b] < 0 || value[in->b] >= 64)) {
       free(known);
       free(value);
-      return ny_nir_inst_err(err, err_len, in, i, "constant shift amount out of range");
+      return nyir_inst_err(err, err_len, in, i, "constant shift amount out of range");
     }
-    if ((in->op == NY_NIR_DIV_I64 || in->op == NY_NIR_MOD_I64) &&
+    if ((in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64) &&
         in->b >= 0 && known && known[in->b] && value[in->b] == 0) {
       free(known);
       free(value);
-      return ny_nir_inst_err(err, err_len, in, i, "constant divide/modulo by zero");
+      return nyir_inst_err(err, err_len, in, i, "constant divide/modulo by zero");
     }
-    if ((in->op == NY_NIR_DIV_I64 || in->op == NY_NIR_MOD_I64) &&
+    if ((in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64) &&
         in->a >= 0 && in->b >= 0 && known && known[in->a] && known[in->b] &&
         value[in->a] == INT64_MIN && value[in->b] == -1) {
       free(known);
       free(value);
-      return ny_nir_inst_err(err, err_len, in, i,
+      return nyir_inst_err(err, err_len, in, i,
                           "constant signed divide/modulo overflow");
     }
     if (in->dst >= 0 && known) {
-      if (in->op == NY_NIR_CONST_I64) {
+      if (in->op == NYIR_CONST_I64) {
         known[in->dst] = true;
         value[in->dst] = in->imm;
-      } else if (in->op == NY_NIR_COPY && in->a >= 0 && known[in->a]) {
+      } else if (in->op == NYIR_COPY && in->a >= 0 && known[in->a]) {
         known[in->dst] = true;
         value[in->dst] = value[in->a];
       } else {

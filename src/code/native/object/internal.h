@@ -23,6 +23,24 @@ typedef struct {
 
 void ny_native_mach_encode_stats(unsigned long long *mach_ok,
                                 unsigned long long *nir_fallback);
+void ny_native_mach_regalloc_record(size_t segments, size_t colored,
+                                    size_t spilled);
+void ny_native_mach_regalloc_stats(unsigned long long *segments,
+                                   unsigned long long *colored,
+                                   unsigned long long *spilled);
+void ny_native_mach_fpr_record(size_t segments, size_t colored, size_t spilled);
+void ny_native_mach_fpr_stats(unsigned long long *segments,
+                              unsigned long long *colored,
+                              unsigned long long *spilled);
+void ny_native_mach_vector_record(size_t segments, size_t colored,
+                                  size_t spilled);
+void ny_native_mach_vector_stats(unsigned long long *segments,
+                                 unsigned long long *colored,
+                                 unsigned long long *spilled);
+bool ny_mach_regalloc_build_class(const ny_mach_func_t *mach,
+                                  ny_mach_reg_class_t reg_class,
+                                  size_t color_count,
+                                  ny_mach_regalloc_t *out);
 
 typedef struct { int64_t label; size_t off; } ny_x64_obj_label_t;
 typedef struct { int64_t label; size_t disp_off; } ny_x64_obj_patch_t;
@@ -163,6 +181,7 @@ int ny_i386_obj_def_index(const ny_i386_obj_symbol_def_t *defs, size_t count,
 bool ny_i386_obj_collect_external_reloc_symbols(
     const ny_i386_obj_reloc_t *relocs, size_t reloc_count,
     const ny_i386_obj_symbol_def_t *defs, size_t def_count,
-    char symbols[][256], size_t *symbol_count, char *err, size_t err_len);
+    char symbols[][256], size_t *symbol_count,
+    char *err, size_t err_len);
 
 #endif

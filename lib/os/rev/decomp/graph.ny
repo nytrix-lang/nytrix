@@ -16,7 +16,8 @@ fn _cg_add_edge(list edges, dict edge) list {
       if _cg_edge_key(edges[i]) == k { return edges }
       i += 1
    }
-   edges.append(edge)
+   edges = edges.append(edge)
+   edges
 }
 
 fn _cg_successors(list edges, str name, bool internal_only=true) list {

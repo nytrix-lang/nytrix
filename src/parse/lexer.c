@@ -214,10 +214,11 @@ static void lexer_error(lexer_t *lx, size_t start, const char *msg,
   int col = lx->col - (int)(lx->pos - start);
   fprintf(stderr, "%s:%d:%d: %s[lex]%s %serror:%s %s\n",
           lx->filename ? lx->filename : "<input>", lx->line, col,
-          clr(NY_CLR_CYAN), clr(NY_CLR_RESET), clr(NY_CLR_RED),
+          clr(NY_CLR_BRIGHT_CYAN), clr(NY_CLR_RESET),
+          clr(NY_CLR_BRIGHT_RED),
           clr(NY_CLR_RESET), msg);
   if (hint) {
-    fprintf(stderr, "       %shint:%s %s\n", clr(NY_CLR_YELLOW),
+    fprintf(stderr, "       %shint:%s %s\n", clr(NY_CLR_BRIGHT_YELLOW),
             clr(NY_CLR_RESET), hint);
   }
   if (lx->src && lx->real_line > 0) {
@@ -281,17 +282,23 @@ static void skip_whitespace(lexer_t *lx) {
         advance(lx); // Consume opener
         bool found = false;
         while (peek(lx) != '\0') {
-          if (peek(lx) == closer && peek_next(lx) == ';') {
-            advance(lx); // Consume closer
-            advance(lx); // Consume ';'
-            found = true;
-            break;
+          if (peek(lx) == closer) {
+            size_t close_pos = lx->pos + 1;
+            while (lx->src[close_pos] == ' ' || lx->src[close_pos] == '\t' ||
+                   lx->src[close_pos] == '\r')
+              close_pos++;
+            if (lx->src[close_pos] == ';') {
+              while (lx->pos <= close_pos)
+                advance(lx);
+              found = true;
+              break;
+            }
           }
           advance(lx);
         }
         if (!found) {
           lexer_error(lx, semi_pos, "unterminated symbol comment",
-                      "make sure the matching closing symbol followed by ';' is present");
+                      "make sure the matching closing symbol and ';' are present");
         }
       } else if (IS_ALPHA(opener) || opener == '_') {
         // Heredoc-style multiline comment:
@@ -310,11 +317,15 @@ static void skip_whitespace(lexer_t *lx) {
         bool found = false;
         while (peek(lx) != '\0') {
           size_t cur_pos = lx->pos;
+          size_t marker_end = cur_pos + marker_len;
+          while (lx->src[marker_end] == ' ' || lx->src[marker_end] == '\t' ||
+                 lx->src[marker_end] == '\r')
+            marker_end++;
           if (strncmp(lx->src + cur_pos, marker, marker_len) == 0 &&
-              lx->src[cur_pos + marker_len] == ';') {
+              lx->src[marker_end] == ';') {
             char prev = (cur_pos > 0) ? lx->src[cur_pos - 1] : '\0';
             if (!(IS_ALNUM(prev) || prev == '_')) {
-              for (size_t k = 0; k < marker_len + 1; k++) {
+              while (lx->pos <= marker_end) {
                 advance(lx);
               }
               found = true;
@@ -650,7 +661,7 @@ token_t lexer_next(lexer_t *lx) {
     token_t tok = make_token(lx, NY_T_IDENT, start);
     tok.hash = ny_hash64(tok.lexeme, tok.len);
     if (lx->intern_identifiers)
-      tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
+      tok.sym_id = ny_intern_str_hashed(tok.lexeme, tok.len, tok.hash);
     tok.kind = identifier_type(lx, tok.lexeme, tok.len);
     return tok;
   }
@@ -670,7 +681,7 @@ token_t lexer_next(lexer_t *lx) {
         token_t tok = make_token(lx, NY_T_IDENT, start);
         tok.hash = ny_hash64(tok.lexeme, tok.len);
         if (lx->intern_identifiers)
-          tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
+          tok.sym_id = ny_intern_str_hashed(tok.lexeme, tok.len, tok.hash);
         tok.kind = identifier_type(lx, tok.lexeme, tok.len);
         return tok;
       }
