@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -323,6 +324,30 @@ def clean_bad_tool_build(build_root: Path, kind: str, name: str) -> None:
     boot_notice(f"stale/cpu-incompatible {name} binary detected; cleaning {bdir.name} before rebuild")
     shutil.rmtree(bdir, ignore_errors=True)
 
+def cached_run_binary_ok(path: Path) -> bool:
+    """Return False only if a cached ny-run binary dies on a signal when started.
+
+    A cached executable is an arbitrary user program, so we cannot probe it with
+    --version like a named tool.  We only reject it when launching it crashes
+    the process with a signal (SIGILL=132, or any negative returncode) -- the
+    same CPU-incompatibility signal clean_bad_tool_build watches for.  A normal
+    non-zero exit (e.g. the program rejecting unknown args) is accepted; we
+    never want to discard a good cache entry because the user's program printed
+    usage and exited 1.
+    """
+    try:
+        res = subprocess.run(
+            [str(path), "--nytrix-cache-smoke"],
+            cwd=str(ROOT),
+            env=os.environ.copy(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=4,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return not (res.returncode == 132 or res.returncode < 0)
+
 def restore_tty_visuals() -> None:
     if not sys.stdout.isatty():
         return
@@ -597,36 +622,24 @@ def _pkg_exists(name: str) -> bool:
         return False
     return run_capture([pkg_tool, "--exists", name]).returncode == 0
 
+def _gmp_available() -> bool:
+    if _pkg_exists("gmp"):
+        return True
+    if which("llvm-config"):
+        res = run_capture(["llvm-config", "--libs", "all"])
+        if res.returncode == 0 and "-lgmp" in res.stdout:
+            return True
+    for p in ("/usr/include/gmp.h", "/usr/local/include/gmp.h", "/opt/homebrew/include/gmp.h"):
+        if Path(p).exists():
+            return True
+    return False
+
 def _optional_dep_exists(name: str) -> bool:
     if _pkg_exists(name):
         return True
     if name == "z3":
         return bool(which("z3"))
     return False
-
-def _gmp_available() -> bool:
-    env_inc = (os.environ.get("NYTRIX_GMP_INCLUDE") or os.environ.get("GMP_INCLUDE_DIR") or "").strip()
-    env_lib = (os.environ.get("NYTRIX_GMP_LIBRARY") or os.environ.get("GMP_LIBRARY") or "").strip()
-    if host_os() == "windows":
-        if env_inc and env_lib and (_windows_env_path(env_inc) / "gmp.h").exists() and _windows_env_path(env_lib).exists():
-            return True
-        if _windows_find_vcpkg_gmp(_windows_vcpkg_root()) or _windows_find_msys2_gmp():
-            return True
-        return False
-    if _pkg_exists("gmp"):
-        return True
-    if env_inc and (Path(env_inc) / "gmp.h").exists():
-        return True
-    if env_inc and env_lib and Path(env_lib).exists():
-        return True
-    candidates = [
-        Path("/usr/include/gmp.h"),
-        Path("/usr/local/include/gmp.h"),
-        Path("/opt/homebrew/include/gmp.h"),
-        Path(r"C:\vcpkg\installed\x64-windows\include\gmp.h"),
-        Path(r"C:\msys64\mingw64\include\gmp.h"),
-    ]
-    return any(p.exists() for p in candidates)
 
 def _dedupe(items: list[str]) -> list[str]:
     out: list[str] = []
@@ -727,7 +740,7 @@ def _linux_optional_std_packages(distro: str, like: str) -> list[str]:
     if distro in ("debian", "ubuntu", "linuxmint", "pop", "raspbian") or "debian" in like:
         return [
             "pkg-config",
-            "libgmp-dev",
+
             "libwebp-dev",
             "libturbojpeg0-dev",
             "libpng-dev",
@@ -752,7 +765,7 @@ def _linux_optional_std_packages(distro: str, like: str) -> list[str]:
     if distro in ("arch", "manjaro") or "arch" in like:
         return [
             "pkgconf",
-            "gmp",
+
             "libwebp",
             "libjpeg-turbo",
             "libpng",
@@ -777,7 +790,7 @@ def _linux_optional_std_packages(distro: str, like: str) -> list[str]:
     if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
         return [
             "pkgconf-pkg-config",
-            "gmp-devel",
+
             "libwebp-devel",
             "libjpeg-turbo-devel",
             "libpng-devel",
@@ -818,7 +831,14 @@ def _install_optional_std_deps(force_prompt: bool = False) -> None:
         want = _ask_yes_no("Install optional std/native deps used by the standard library?", False)
     if not want:
         if missing:
+            # The skip is allowed (these deps are optional and a minimal CI may
+            # legitimately lack them), but it must never be silent: a non-TTY
+            # build that exits 0 while missing std/native deps would otherwise
+            # ship a stdlib with quietly-disabled features.  Emit a prominent,
+            # machine-parseable marker to stderr so logs and CI cannot miss it.
             log("DEPS", "skipping optional std/native deps; set NYTRIX_INSTALL_STD_DEPS=1 or run ./make deps later")
+            err(f"NYTRIX_MISSING_STD_DEPS={','.join(missing)}")
+            err("NYTRIX_STD_DEPS_SKIPPED=1 (stdlib features that need these deps will be disabled)")
         return
 
     os_name = host_os()
@@ -853,7 +873,7 @@ def _install_optional_std_deps(force_prompt: bool = False) -> None:
                 "brew",
                 "install",
                 "pkg-config",
-                "gmp",
+
                 "webp",
                 "jpeg-turbo",
                 "libpng",
@@ -1138,7 +1158,7 @@ def _windows_msys2_packages_for(missing: list[str]) -> list[str]:
     if "pkg-config" in m:
         pkgs.append(f"{pkg_prefix}-pkgconf")
     if "gmp" in m:
-        pkgs.append(f"{pkg_prefix}-gmp")
+        pass
     if "git" in m:
         pkgs.append("git")
     return _dedupe(pkgs)
@@ -1283,7 +1303,7 @@ def _windows_ensure_llvm() -> None:
         _windows_configure_llvm_env(program_files)
         return
     if _env_flag("NYTRIX_AUTO_DEPS", True) and _windows_deps_provider() == "msys2":
-        _windows_install_msys2_deps(["llvm", "clang", "cmake", "ninja", "pkg-config", "gmp"])
+        _windows_install_msys2_deps(["llvm", "clang", "cmake", "ninja", "pkg-config"])
         root = _windows_find_msys2_llvm()
         if root:
             _windows_configure_llvm_env(root)
@@ -1301,19 +1321,6 @@ def _windows_vcpkg_root() -> Path:
     if raw:
         return _windows_env_path(raw)
     return Path(r"C:\vcpkg")
-
-def _windows_find_vcpkg_gmp(vcpkg_root: Path) -> tuple[Path, Path] | None:
-    triplet = (os.environ.get("VCPKG_DEFAULT_TRIPLET") or "x64-windows").strip() or "x64-windows"
-    installs = [ROOT / "vcpkg_installed" / triplet, vcpkg_root / "installed" / triplet]
-    for install in installs:
-        include_dir = install / "include"
-        if not (include_dir / "gmp.h").exists():
-            continue
-        for lib_name in ("gmp.lib", "libgmp.lib"):
-            lib_path = install / "lib" / lib_name
-            if lib_path.exists():
-                return include_dir, lib_path
-    return None
 
 def _windows_msys_prefixes() -> list[Path]:
     raw: list[str] = []
@@ -1345,33 +1352,6 @@ def _windows_prefers_gnu_toolchain() -> bool:
             return True
     return False
 
-def _windows_find_msys2_gmp() -> tuple[Path, Path] | None:
-    gnu_ok = _windows_prefers_gnu_toolchain()
-    for root in _windows_msys_prefixes():
-        include_dir = root / "include"
-        if not (include_dir / "gmp.h").exists():
-            continue
-        lib_dir = root / "lib"
-        names = ["gmp.lib", "libgmp.lib"]
-        if gnu_ok:
-            names.extend(["libgmp.dll.a", "libgmp.a"])
-        else:
-            # Plain cmd.exe still commonly uses the MSYS2/UCRT LLVM toolchain.
-            # Accept its GMP import/static libraries so users do not need to
-            # start inside an MSYS2 shell just to configure the build.
-            names.extend(["libgmp.dll.a", "libgmp.a"])
-        for lib_name in names:
-            lib_path = lib_dir / lib_name
-            if lib_path.exists():
-                return include_dir, lib_path
-    return None
-
-def _windows_configure_gmp_env(include_dir: Path, library: Path) -> None:
-    os.environ["NYTRIX_GMP_INCLUDE"] = str(include_dir)
-    os.environ["NYTRIX_GMP_LIBRARY"] = str(library)
-    os.environ["GMP_INCLUDE_DIR"] = str(include_dir)
-    os.environ["GMP_LIBRARY"] = str(library)
-
 def _windows_vcpkg_builtin_baseline(vcpkg_root: Path) -> str:
     raw = (os.environ.get("VCPKG_BUILTIN_BASELINE") or os.environ.get("NYTRIX_VCPKG_BASELINE") or "").strip()
     if raw:
@@ -1387,67 +1367,6 @@ def _windows_vcpkg_builtin_baseline(vcpkg_root: Path) -> str:
     if len(baseline) == 40 and all(ch in hexdigits for ch in baseline):
         return baseline
     return ""
-
-def _windows_ensure_gmp() -> None:
-    if host_os() != "windows":
-        return
-    env_inc = (os.environ.get("NYTRIX_GMP_INCLUDE") or os.environ.get("GMP_INCLUDE_DIR") or "").strip()
-    env_lib = (os.environ.get("NYTRIX_GMP_LIBRARY") or os.environ.get("GMP_LIBRARY") or "").strip()
-    if env_inc and env_lib and (_windows_env_path(env_inc) / "gmp.h").exists() and _windows_env_path(env_lib).exists():
-        _windows_configure_gmp_env(_windows_env_path(env_inc), _windows_env_path(env_lib))
-        return
-    if _windows_prefers_gnu_toolchain():
-        found = _windows_find_msys2_gmp()
-        if found:
-            _windows_configure_gmp_env(*found)
-            return
-    vcpkg_root = _windows_vcpkg_root()
-    found = _windows_find_vcpkg_gmp(vcpkg_root)
-    if found:
-        _windows_configure_gmp_env(*found)
-        return
-    found = _windows_find_msys2_gmp()
-    if found:
-        _windows_configure_gmp_env(*found)
-        return
-    provider = (os.environ.get("NYTRIX_WINDOWS_GMP_PROVIDER") or "system").strip().lower()
-    if provider not in ("vcpkg", "vcpkg-build"):
-        raise SystemExit(
-            "GMP headers/library not found for Windows. Install a prebuilt package "
-            "(MSYS2 UCRT: mingw-w64-ucrt-x86_64-gmp) or set NYTRIX_GMP_INCLUDE and "
-            "NYTRIX_GMP_LIBRARY. Set NYTRIX_WINDOWS_GMP_PROVIDER=vcpkg only when a slow "
-            "vcpkg source build is acceptable."
-        )
-    vcpkg = vcpkg_root / "vcpkg.exe"
-    if not vcpkg.exists():
-        raise SystemExit("GMP headers not found and vcpkg is unavailable; install GMP or set NYTRIX_GMP_INCLUDE/NYTRIX_GMP_LIBRARY.")
-    triplet = (os.environ.get("VCPKG_DEFAULT_TRIPLET") or "x64-windows").strip() or "x64-windows"
-    step(f"deps: vcpkg install gmp:{triplet}")
-    manifest = ROOT / "vcpkg.json"
-    created_manifest = False
-    if not manifest.exists():
-        baseline = _windows_vcpkg_builtin_baseline(vcpkg_root)
-        if not baseline:
-            raise SystemExit("vcpkg manifest mode requires a builtin-baseline; set VCPKG_BUILTIN_BASELINE or use a git checkout of vcpkg.")
-        manifest.write_text(
-            '{\n'
-            '  "name": "nytrix-local-deps",\n'
-            '  "version-string": "0.1.0",\n'
-            f'  "builtin-baseline": "{baseline}",\n'
-            '  "dependencies": ["gmp"]\n'
-            '}\n',
-            encoding="utf-8",
-        )
-        created_manifest = True
-    try:
-        run([str(vcpkg), "install", "--triplet", triplet])
-    finally:
-        if created_manifest:
-            manifest.unlink(missing_ok=True)
-    found = _windows_find_vcpkg_gmp(vcpkg_root)
-    if not found:
-        raise SystemExit(f"vcpkg installed gmp:{triplet}, but gmp.h/libgmp were not found under {vcpkg_root}")
-    _windows_configure_gmp_env(*found)
 
 def _windows_bootstrap_llvm_from_source() -> bool:
     if host_os() != "windows":
@@ -1558,13 +1477,11 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             missing.append("cmake")
         if require_git and not which("git"):
             missing.append("git")
-    if not _gmp_available():
-        missing.append("gmp")
     missing = _dedupe(missing)
 
     if not missing:
         _windows_ensure_llvm()
-        _windows_ensure_gmp()
+        pass
         if force_optional_prompt:
             _install_optional_std_deps(True)
         return
@@ -1589,7 +1506,6 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
                     pkgs += ["libclang-dev"]
             else:
                 pkgs += ["clang", "llvm-dev", "libclang-dev"]
-            pkgs += ["libgmp-dev"]
             step("deps: apt update")
             run(["sudo", "apt", "update"])
             step("deps: apt install")
@@ -1598,12 +1514,12 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             return
         if distro in ("arch", "manjaro") or "arch" in like:
             step("deps: pacman install")
-            run(["sudo", "pacman", "-Sy", "--noconfirm", "base-devel", "python", "clang", "cmake", "ninja", "git", "gdb", "llvm", "pkgconf", "gmp", "zlib"])
+            run(["sudo", "pacman", "-Sy", "--noconfirm", "base-devel", "python", "clang", "cmake", "ninja", "git", "gdb", "llvm", "pkgconf", "zlib"])
             _install_optional_std_deps(force_optional_prompt)
             return
         if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
             step("deps: dnf install")
-            run(["sudo", "dnf", "install", "-y", "@development-tools", "clang", "llvm-devel", "cmake", "ninja-build", "git", "gdb", "pkgconf-pkg-config", "gmp-devel", "zlib-devel"])
+            run(["sudo", "dnf", "install", "-y", "@development-tools", "clang", "llvm-devel", "cmake", "ninja-build", "git", "gdb", "pkgconf-pkg-config", "zlib-devel"])
             _install_optional_std_deps(force_optional_prompt)
             return
     if os_name == "macos":
@@ -1612,7 +1528,7 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             raise SystemExit(1)
         step("deps: brew install")
         pkgs: list[str] = []
-        for dep, pkg in (("cmake", "cmake"), ("ninja", "ninja"), ("pkg-config", "pkg-config"), ("gmp", "gmp")):
+        for dep, pkg in (("cmake", "cmake"), ("ninja", "ninja"), ("pkg-config", "pkg-config")):
             if dep in missing:
                 pkgs.append(pkg)
         if "git" in missing:
@@ -1636,7 +1552,7 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
                 for cmd in cmds:
                     _windows_run_install(cmd)
         _windows_ensure_llvm()
-        _windows_ensure_gmp()
+        pass
         _install_optional_std_deps(force_optional_prompt)
         return
     err(f"Unable to auto-install dependencies for host: {os_name}")
@@ -1860,7 +1776,7 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
     configure_macos_llvm_env()
     if host_os() == "windows":
         _windows_ensure_llvm()
-        _windows_ensure_gmp()
+        pass
     bdir = cmake_build_dir(build_root, kind)
     bdir.mkdir(parents=True, exist_ok=True)
     cache = bdir / "CMakeCache.txt"
@@ -1918,6 +1834,7 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
     cmd = [
         "cmake", "-S", str(ROOT), "-B", str(bdir),
         f"-DCMAKE_BUILD_TYPE={cfg}", "-DNYTRIX_FAST_BUILD=ON",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         f"-DNYTRIX_HOST_CFLAGS={host_cflags}",
         f"-DNYTRIX_HOST_LDFLAGS={host_ldflags}",
     ]
@@ -2087,7 +2004,7 @@ NY_RUN_CACHE_BLOCKERS = {
     "--dump-on-error", "--dump-diagnose", "-trace",
 }
 
-NY_SUBCOMMANDS = {"fmt", "test", "doc", "web", "perf", "make", "pkg", "get", "install", "new", "c2ny", "ny-lsp"}
+NY_SUBCOMMANDS = {"fmt", "test", "doc", "web", "perf", "make", "pkg", "get", "install", "new", "c2ny", "py2ny", "ny-lsp"}
 
 def _ny_arg_takes_value(arg: str) -> bool:
     return arg in NY_VALUE_OPTS
@@ -2219,7 +2136,23 @@ def run_ny_cached(build_root: Path, kind: str, args: list[str]) -> int | None:
             return rc
         chmod_executable(cached)
     else:
-        log("CACHE", f"ny -run using {cached.relative_to(ROOT)}")
+        # Validate the cached executable before reuse: a stale, corrupted, or
+        # CPU-incompatible binary would otherwise run silently.  This mirrors
+        # clean_bad_tool_build's guard on the compiler binary itself.  On signal
+        # death, drop the entry and rebuild instead of executing a bad binary.
+        if not cached_run_binary_ok(cached):
+            log("CACHE", f"ny -run cache entry {cached.relative_to(ROOT)} failed smoke check; rebuilding")
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            compile_front = [a for a in args[:src_i] if a != "-run"]
+            compile_args = [launch, "--profile=compile", *compile_front, "-o", str(cached), source_arg]
+            rc = subprocess.Popen(compile_args, cwd=str(ROOT), env=env).wait()
+            if rc != 0:
+                cached.unlink(missing_ok=True)
+                return rc
+            chmod_executable(cached)
+        else:
+            log("CACHE", f"ny -run using {cached.relative_to(ROOT)}")
     try:
         return subprocess.Popen([str(cached), *program_args], cwd=str(ROOT), env=env).wait()
     except KeyboardInterrupt:
@@ -2250,6 +2183,71 @@ WEB_DEMO_SHARED_ASSETS = (
     "logo.svg",
     "favicon.svg",
 )
+WEB_DEMO_FONT_ASSETS = (
+    (ROOT / "etc" / "assets" / "fonts" / "monocraft.ttf", Path("assets") / "monocraft.ttf"),
+)
+WEB_WASM_BARE_TARGET = {
+    "kind": "wasm-bare",
+    "host": "browser",
+    "graphics": "webgl2",
+}
+WEB_WASM_BARE_CAPABILITIES = {
+    "webgl2": True,
+    "webgl3dBaseline": True,
+    "keyboard": True,
+    "mouse": True,
+    "frameLoop": True,
+    "assetPreload": True,
+    "fullscreen": False,
+    "fullscreenRequest": True,
+    "pointerLock": False,
+    "pointerLockRequest": True,
+    "touch": True,
+    "gamepad": True,
+    "audio": True,
+    "audioLifecycle": True,
+    "filesystem": False,
+    "network": False,
+    "threads": False,
+    "nativeWindow": False,
+    "vulkan": False,
+}
+
+def _web_target_descriptor(raw: str, command: str) -> dict[str, str]:
+    """Resolve the one implemented browser target at the command boundary."""
+    target = raw.strip().lower()
+    if target == "wasm-bare":
+        return dict(WEB_WASM_BARE_TARGET)
+    if target == "wasm-emscripten":
+        raise SystemExit(
+            f"{command}: wasm-emscripten needs its dedicated adapter; "
+            "use --target wasm-bare for the implemented browser runner"
+        )
+    raise SystemExit(f"{command}: unknown browser target {raw!r} (expected wasm-bare)")
+
+def _parse_web_check_args(args: list[str], build_root: Path) -> dict[str, object]:
+    """Accept web-check target selection without teaching the general wasm parser."""
+    target = "wasm-bare"
+    wasm_args: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--target":
+            if i + 1 >= len(args):
+                raise SystemExit("web-check: missing value for --target")
+            target = args[i + 1]
+            i += 2
+            continue
+        if arg.startswith("--target="):
+            target = arg.split("=", 1)[1]
+            i += 1
+            continue
+        wasm_args.append(arg)
+        i += 1
+    cfg = _parse_wasm_args(wasm_args, build_root)
+    if not bool(cfg.get("help", False)):
+        cfg["target"] = _web_target_descriptor(target, "web-check")
+    return cfg
 
 def _demo_id_from_source(source: str) -> str:
     path = Path(source)
@@ -2372,7 +2370,7 @@ def _load_web_demo_manifest() -> list[dict[str, object]]:
     return out
 
 def _parse_web_demo_args(args: list[str], build_root: Path) -> dict[str, object]:
-    out_dir = build_root / "wasm"
+    out_dir = build_root / "web" / "demos"
     compile_ny_wasm = True
     require_ny_wasm = True
     clean = False
@@ -2419,7 +2417,7 @@ def print_web_demos_help() -> None:
     print("")
     print("Usage:")
     print("  ./make web-demos")
-    print("  ./make web-demos --out build/wasm")
+    print("  ./make web-demos --out build/web/demos")
     print("")
     print("Flags:")
     print("  --out DIR         output directory")
@@ -2464,6 +2462,8 @@ WASM_DEFAULT_EXPORTS = (
     "ny_web_frame",
     "ny_web_render",
 )
+
+WASM_ASYNCIFY_FRAME_IMPORT = "env.std.os.ui.render.end_frame"
 
 _WASM_CLANG_PROBE_CACHE: dict[str, tuple[bool, str]] = {}
 
@@ -2588,6 +2588,27 @@ def _compile_ny_to_wasm(
         return {"ok": False, "stage": "clang", "detail": "wasm link failed", "output": _tail_text(clang_res.stdout)}
     return {"ok": True, "source": str(source), "ir": str(ir), "wasm": str(wasm)}
 
+def _instrument_wasm_asyncify(wasm: Path, step_timeout: int = 120) -> dict[str, object]:
+    wasm_opt = which("wasm-opt")
+    if not wasm_opt:
+        return {"ok": False, "stage": "toolchain", "detail": "wasm-opt missing (install Binaryen for browser frame scheduling)"}
+    tmp = wasm.with_suffix(".asyncify.wasm")
+    cmd = [
+        wasm_opt,
+        str(wasm),
+        "--asyncify",
+        "--pass-arg=" + "asyncify-imports@" + WASM_ASYNCIFY_FRAME_IMPORT,
+        "-o", str(tmp),
+    ]
+    try:
+        res = subprocess.run(cmd, cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=step_timeout)
+    except subprocess.TimeoutExpired as exc:
+        return {"ok": False, "stage": "asyncify", "detail": "wasm-opt asyncify timed out", "output": _tail_text(exc.stdout), "timeout": step_timeout}
+    if res.returncode != 0 or not tmp.exists():
+        return {"ok": False, "stage": "asyncify", "detail": "wasm-opt asyncify failed", "output": _tail_text(res.stdout)}
+    tmp.replace(wasm)
+    return {"ok": True}
+
 def _build_ny_demo_wasm(out_dir: Path, build_root: Path, kind: str, manifest: list[dict[str, object]]) -> tuple[int, int, str]:
     wasm_dir = out_dir / "wasm"
     ir_dir = out_dir / "ny-ir"
@@ -2645,6 +2666,20 @@ def _build_ny_demo_wasm(out_dir: Path, build_root: Path, kind: str, manifest: li
                 "output": _tail_text(res.get("output", "")),
             })
             continue
+        if bool(item.get("asyncify", False)):
+            async_res = _instrument_wasm_asyncify(wasm, step_timeout=step_timeout)
+            if not bool(async_res.get("ok", False)):
+                failed += 1
+                item["wasmStatus"] = str(async_res.get("detail", "asyncify failed"))
+                report.append({
+                    "id": demo_id,
+                    "source": source,
+                    "ok": False,
+                    "stage": str(async_res.get("stage", "asyncify")),
+                    "detail": str(async_res.get("detail", "asyncify failed")),
+                    "output": _tail_text(async_res.get("output", "")),
+                })
+                continue
         built += 1
         item["wasm"] = "wasm/" + wasm.name
         item["wasmBase64"] = base64.b64encode(wasm.read_bytes()).decode("ascii")
@@ -2699,12 +2734,540 @@ def run_web_demos(build_root: Path, kind: str, args: list[str]) -> int:
     print("Serve or open: " + _rel_or_abs(out_dir / "index.html"))
     return 0
 
+def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
+    """Prove a portable app runs and native-only imports fail before packaging."""
+    if args and args[0] in ("-h", "--help"):
+        print("Usage: ./make web-test")
+        print("Builds the demo runner and deployable Pong app, then checks WebGL2 assets in a headless browser.")
+        return 0
+    if args:
+        raise SystemExit("web-test: no options supported")
+    requested_browser = os.environ.get("NYTRIX_BROWSER", "").strip()
+    browser_names = (requested_browser,) if requested_browser else (
+        "chromium", "chromium-browser", "google-chrome")
+    browser = None if requested_browser == "firefox" else next(
+        (which(name) for name in browser_names if name and which(name)), None)
+    if not browser and (not requested_browser or requested_browser == "firefox"):
+        bundled = sorted(Path.home().glob(".cache/ms-playwright/firefox-*/firefox/firefox"))
+        if bundled and bundled[-1].is_file():
+            browser = str(bundled[-1])
+    if not browser:
+        hint = "; install Playwright Firefox with `playwright install firefox`" if requested_browser == "firefox" else ""
+        raise SystemExit("web-test: no supported browser found (set NYTRIX_BROWSER or install Chromium/Firefox)" + hint)
+    browser_kind = "firefox" if Path(browser).name.startswith("firefox") else "chromium"
+    try:
+        browser_probe = subprocess.run(
+            [browser, "--version"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SystemExit(f"web-test: browser cannot start: {browser}: {exc}") from exc
+    if browser_probe.returncode != 0:
+        detail = _tail_text(browser_probe.stdout, 1200).replace("\n", " ").strip()
+        raise SystemExit(
+            "web-test: browser cannot start; repair the browser installation"
+            + (f": {detail}" if detail else "")
+        )
+    print("WEB browser: " + _tail_text(browser_probe.stdout, 200).strip())
+
+    def run_browser(url: str, virtual_time_ms: int) -> subprocess.CompletedProcess[str]:
+        """Return the rendered DOM using Chromium or Firefox."""
+        if browser_kind == "chromium":
+            return subprocess.run([
+                browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
+                "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
+                f"--virtual-time-budget={virtual_time_ms}", "--dump-dom", url,
+            ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+        try:
+            from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+            from playwright.sync_api import sync_playwright
+        except ImportError as exc:
+            raise SystemExit("web-test: Firefox requires the optional Python Playwright package") from exc
+        try:
+            with sync_playwright() as playwright:
+                instance = playwright.firefox.launch(headless=True, executable_path=browser)
+                # Firefox 150 rejects the legacy isMobile field that older
+                # Playwright versions send when creating the default context.
+                # A non-emulated context keeps the browser test real and avoids
+                # that protocol mismatch.
+                context = instance.new_context(viewport=None)
+                page = context.new_page()
+                page.goto(url, wait_until="load", timeout=30000)
+                page.wait_for_timeout(virtual_time_ms)
+                dom = page.content()
+                context.close()
+                instance.close()
+                return subprocess.CompletedProcess([browser, url], 0, dom, "")
+        except PlaywrightTimeoutError as exc:
+            raise subprocess.TimeoutExpired([browser, url], 30) from exc
+        except Exception as exc:
+            raise SystemExit(f"web-test: browser could not run the page: {exc}") from exc
+    web_dir = build_root / "web"
+    shutil.rmtree(web_dir, ignore_errors=True)
+    web_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = web_dir / "demos"
+    if run_web_demos(build_root, kind, ["--out", str(out_dir), "--clean", "--require-ny-wasm"]) != 0:
+        return 1
+    negative = ROOT / "etc" / "tests" / "native" / "web" / "unsupported-process.ny"
+    try:
+        run_web_check(build_root, kind, [str(negative)])
+    except SystemExit:
+        negative_report = build_root / "web" / "check" / "unsupported-process.web-report.json"
+        try:
+            negative_data = json.loads(negative_report.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit("web-test: native-process rejection did not write a valid report") from exc
+        if (negative_data.get("ok") is not False or
+                negative_data.get("unsupported") != ["std.os.process.run"]):
+            raise SystemExit("web-test: native-process rejection report lost its exact unsupported import")
+    else:
+        raise SystemExit("web-test: native process fixture unexpectedly passed browser portability analysis")
+    app_dir = build_root / "web" / "app"
+    if run_web(build_root, kind, ["etc/projects/ui/pong.ny", "--out", str(app_dir),
+                                  "--assets", "etc/assets/fonts", "--preload-all"]) != 0:
+        return 1
+    try:
+        app_report = json.loads((app_dir / "web-report.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("web-test: browser app did not write a valid web report") from exc
+    capabilities = app_report.get("capabilities", {})
+    if any(capabilities.get(name) is not True for name in ("touch", "gamepad", "audio")):
+        raise SystemExit("web-test: proven browser capabilities are missing from the target manifest")
+    if not (app_dir / "assets" / "monocraft.ttf").is_file():
+        raise SystemExit("web-test: runner did not package its declared Monocraft font")
+    if not (app_dir / "assets.data").is_file() or not (app_dir / "assets.data.json").is_file():
+        raise SystemExit("web-test: browser assets were not packed into assets.data")
+    try:
+        asset_index = json.loads((app_dir / "assets.data.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("web-test: browser asset pack index is not valid JSON") from exc
+    expected_fonts = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "etc" / "assets" / "fonts").rglob("*") if path.is_file())
+    if sorted(item.get("path", "") for item in asset_index.get("assets", [])) != expected_fonts:
+        raise SystemExit("web-test: --preload-all did not package the complete asset root")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = int(probe.getsockname()[1])
+    server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(app_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        result = run_browser(f"http://127.0.0.1:{port}/index.html#app", 5000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out")
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            server.kill()
+    dom = result.stdout if 'result' in locals() else ""
+    audio = ROOT / "etc" / "tests" / "native" / "web" / "audio-init.ny"
+    if run_web_check(build_root, kind, [str(audio)]) != 0:
+        return 1
+    audio_report = build_root / "web" / "check" / "audio-init.web-report.json"
+    try:
+        audio_data = json.loads(audio_report.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("web-test: audio check did not write a valid report") from exc
+    if audio_data.get("ok") is not True or audio_data.get("unsupported") != []:
+        raise SystemExit("web-test: browser audio lifecycle imports are not fully hosted")
+    requests = ROOT / "etc" / "tests" / "native" / "web" / "window-requests.ny"
+    if run_web_check(build_root, kind, [str(requests)]) != 0:
+        return 1
+    request_report = build_root / "web" / "check" / "window-requests.web-report.json"
+    try:
+        request_data = json.loads(request_report.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("web-test: browser window-request check did not write a valid report") from exc
+    if request_data.get("ok") is not True or request_data.get("unsupported") != []:
+        raise SystemExit("web-test: fullscreen/pointer-lock request imports are not fully hosted")
+    required = ("id=\"webglStatus\">WebGL2", "browser runnable", "id=\"audioStatus\">")
+    rejected = ("runtime error", "Load failed", "unsupported import", "WebGL2 missing")
+    presented = re.search(r'data-presented="[1-9][0-9]*"', dom) is not None
+    # Chromium exposes a deterministic Canvas2D readback marker in headless
+    # mode. Firefox presents the same WebGL2 frames but does not expose that
+    # readback marker in its headless compositor, so presentation is the
+    # portable browser-level proof there.
+    visible = ('data-frame-pixels="1"' in dom or
+               (browser_kind == "firefox" and presented))
+    assets_loaded = re.search(r'data-assets-loaded="[1-9][0-9]*"', dom) is not None
+    visible_document = 'data-visible="1"' in dom
+    audio_state = re.search(r'data-audio-state="(ready|suspended|running)"', dom) is not None
+    nearest_present = 'data-present-filter="nearest"' in dom
+    canvas_size = re.search(r'data-canvas-size="([0-9]+x[0-9]+)"', dom)
+    framebuffer = re.search(r'data-framebuffer="([0-9]+x[0-9]+)"', dom)
+    resized = canvas_size is not None and framebuffer is not None and canvas_size.group(1) == framebuffer.group(1)
+    if result.returncode != 0 or not presented or not visible or not assets_loaded or not visible_document or not audio_state or not nearest_present or not resized or any(marker not in dom for marker in required) or any(marker in dom for marker in rejected):
+        output = _tail_text(dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: packaged Pong did not reach the WebGL2 browser runnable state")
+    ok("web-test: packaged Pong reached WebGL2 with loaded assets")
+    audio_dir = build_root / "web" / "audio"
+    if run_web(build_root, kind, [str(audio), "--out", str(audio_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        audio_port = int(probe.getsockname()[1])
+    audio_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(audio_port), "--bind", "127.0.0.1", "--directory", str(audio_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        audio_result = run_browser(f"http://127.0.0.1:{audio_port}/index.html#app", 5000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking audio lifecycle")
+    finally:
+        audio_server.terminate()
+        try:
+            audio_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            audio_server.kill()
+    audio_dom = audio_result.stdout if 'audio_result' in locals() else ""
+    audio_suspended = 'data-audio-state="suspended"' in audio_dom
+    audio_presented = re.search(r'data-presented="[1-9][0-9]*"', audio_dom) is not None
+    if audio_result.returncode != 0 or not audio_suspended or not audio_presented or "runtime error" in audio_dom:
+        output = _tail_text(audio_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser audio did not remain gesture-gated and visible")
+    ok("web-test: browser audio is visible and waits for a user gesture")
+    decode = ROOT / "etc" / "tests" / "native" / "web" / "audio-decode.ny"
+    decode_assets = ROOT / "etc" / "tests" / "native" / "web" / "assets"
+    decode_dir = build_root / "web" / "audio-decode"
+    if run_web(build_root, kind, [str(decode), "--out", str(decode_dir),
+                                  "--assets", str(decode_assets), "--preload-all"]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        decode_port = int(probe.getsockname()[1])
+    decode_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(decode_port), "--bind", "127.0.0.1", "--directory", str(decode_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        decode_result = run_browser(f"http://127.0.0.1:{decode_port}/index.html#app", 16000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking audio decode")
+    finally:
+        decode_server.terminate()
+        try:
+            decode_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            decode_server.kill()
+    decode_dom = decode_result.stdout if 'decode_result' in locals() else ""
+    decode_ok = 'data-audio-decode="1"' in decode_dom
+    decode_length = re.search(r'data-audio-decode-length="([1-9][0-9]*)"', decode_dom)
+    decode_source = 'data-audio-source-started="1"' in decode_dom
+    if decode_result.returncode != 0 or not decode_ok or decode_length is None or not decode_source or "runtime error" in decode_dom:
+        output = _tail_text(decode_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser did not decode and start the packed audio asset")
+    ok("web-test: browser decoded and started the packed audio asset")
+    asset_read = ROOT / "etc" / "tests" / "native" / "web" / "filesystem-asset-read.ny"
+    if run_web_check(build_root, kind, [str(asset_read)]) != 0:
+        return 1
+    asset_read_dir = build_root / "web" / "filesystem-asset-read"
+    if run_web(build_root, kind, [str(asset_read), "--out", str(asset_read_dir),
+                                  "--assets", str(decode_assets), "--preload-all"]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        asset_read_port = int(probe.getsockname()[1])
+    asset_read_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(asset_read_port), "--bind", "127.0.0.1", "--directory", str(asset_read_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        asset_read_result = run_browser(f"http://127.0.0.1:{asset_read_port}/index.html#app", 16000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking packaged asset reads")
+    finally:
+        asset_read_server.terminate()
+        try:
+            asset_read_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            asset_read_server.kill()
+    asset_read_dom = asset_read_result.stdout if 'asset_read_result' in locals() else ""
+    asset_read_ok = re.search(r'data-touch-count="[1-9][0-9]*"', asset_read_dom) is not None
+    asset_read_len = re.search(r'data-touch-x="([1-9][0-9]*)"', asset_read_dom)
+    if (asset_read_result.returncode != 0 or not asset_read_ok or asset_read_len is None or
+            "runtime error" in asset_read_dom):
+        output = _tail_text(asset_read_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: packaged asset was not readable through std.os.file_read")
+    ok("web-test: packaged asset read through std.os.file_read")
+    persistence = ROOT / "etc" / "tests" / "native" / "web" / "filesystem-persistence.ny"
+    if run_web_check(build_root, kind, [str(persistence)]) != 0:
+        return 1
+    persistence_dir = build_root / "web" / "filesystem-persistence"
+    if run_web(build_root, kind, [str(persistence), "--out", str(persistence_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        persistence_port = int(probe.getsockname()[1])
+    persistence_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(persistence_port), "--bind", "127.0.0.1", "--directory", str(persistence_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        persistence_result = run_browser(f"http://127.0.0.1:{persistence_port}/index.html#app", 16000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking virtual filesystem persistence")
+    finally:
+        persistence_server.terminate()
+        try:
+            persistence_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            persistence_server.kill()
+    persistence_dom = persistence_result.stdout if 'persistence_result' in locals() else ""
+    persistence_count = re.search(r'data-touch-count="[1-9][0-9]*"', persistence_dom)
+    persistence_written = re.search(r'data-touch-x="([1-9][0-9]*)"', persistence_dom)
+    persistence_length = re.search(r'data-touch-y="([1-9][0-9]*)"', persistence_dom)
+    persistence_exists = 'data-vfs-exists="1"' in persistence_dom
+    persistence_removed = 'data-vfs-removed="1"' in persistence_dom
+    if (persistence_result.returncode != 0 or persistence_count is None or persistence_written is None or
+            persistence_length is None or not persistence_exists or not persistence_removed or "runtime error" in persistence_dom):
+        output = _tail_text(persistence_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser virtual filesystem write/read/remove failed")
+    ok("web-test: browser virtual filesystem persisted and removed a file")
+    renderer3d = ROOT / "etc" / "tests" / "native" / "web" / "renderer-3d.ny"
+    if run_web_check(build_root, kind, [str(renderer3d)]) != 0:
+        return 1
+    renderer3d_dir = build_root / "web" / "renderer-3d"
+    if run_web(build_root, kind, [str(renderer3d), "--out", str(renderer3d_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        renderer3d_port = int(probe.getsockname()[1])
+    renderer3d_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(renderer3d_port), "--bind", "127.0.0.1", "--directory", str(renderer3d_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        renderer3d_result = run_browser(f"http://127.0.0.1:{renderer3d_port}/index.html#app", 5000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking the 3D baseline")
+    finally:
+        renderer3d_server.terminate()
+        try:
+            renderer3d_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            renderer3d_server.kill()
+    renderer3d_dom = renderer3d_result.stdout if 'renderer3d_result' in locals() else ""
+    renderer3d_presented = re.search(r'data-presented="[1-9][0-9]*"', renderer3d_dom) is not None
+    if (renderer3d_result.returncode != 0 or not renderer3d_presented or
+            'data-webgl3d="1"' not in renderer3d_dom or 'data-webgl3d-alpha="1"' not in renderer3d_dom or "runtime error" in renderer3d_dom or
+            "WebGL2 missing" in renderer3d_dom):
+        output = _tail_text(renderer3d_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser 3D baseline did not reach the WebGL2 draw path")
+    ok("web-test: browser 3D baseline reached the WebGL2 draw path")
+    pointer = ROOT / "etc" / "tests" / "native" / "web" / "input-pointer.ny"
+    if run_web_check(build_root, kind, [str(pointer)]) != 0:
+        return 1
+    pointer_dir = build_root / "web" / "input-pointer"
+    if run_web(build_root, kind, [str(pointer), "--out", str(pointer_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        pointer_port = int(probe.getsockname()[1])
+    pointer_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(pointer_port), "--bind", "127.0.0.1", "--directory", str(pointer_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        pointer_result = run_browser(f"http://127.0.0.1:{pointer_port}/index.html#app", 5000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking pointer input")
+    finally:
+        pointer_server.terminate()
+        try:
+            pointer_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pointer_server.kill()
+    pointer_dom = pointer_result.stdout if 'pointer_result' in locals() else ""
+    pointer_presented = re.search(r'data-presented="[1-9][0-9]*"', pointer_dom) is not None
+    if pointer_result.returncode != 0 or not pointer_presented or "runtime error" in pointer_dom:
+        output = _tail_text(pointer_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser pointer input fixture did not execute")
+    ok("web-test: browser pointer input facade executed")
+    touch = ROOT / "etc" / "tests" / "native" / "web" / "input-touch.ny"
+    if run_web_check(build_root, kind, [str(touch)]) != 0:
+        return 1
+    touch_dir = build_root / "web" / "input-touch"
+    if run_web(build_root, kind, [str(touch), "--out", str(touch_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        touch_port = int(probe.getsockname()[1])
+    touch_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(touch_port), "--bind", "127.0.0.1", "--directory", str(touch_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        # #touch-selftest makes wasm.js synthesize a TouchEvent sequence; the
+        # fixture echoes the observed touch state via test_report_touch into
+        # data-touch-* attributes that this regex reads back from --dump-dom.
+        touch_result = run_browser(f"http://127.0.0.1:{touch_port}/index.html#touch-selftest", 5000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking touch input")
+    finally:
+        touch_server.terminate()
+        try:
+            touch_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            touch_server.kill()
+    touch_dom = touch_result.stdout if 'touch_result' in locals() else ""
+    touch_presented = re.search(r'data-presented="[1-9][0-9]*"', touch_dom) is not None
+    touch_observed = re.search(r'data-touch-count="1"', touch_dom) is not None
+    if touch_result.returncode != 0 or not touch_presented or not touch_observed or "runtime error" in touch_dom:
+        output = _tail_text(touch_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser touch input did not flow through the public facade")
+    ok("web-test: browser touch input flowed through the public facade")
+    gamepad = ROOT / "etc" / "tests" / "native" / "web" / "input-gamepad.ny"
+    if run_web_check(build_root, kind, [str(gamepad)]) != 0:
+        return 1
+    gamepad_dir = build_root / "web" / "input-gamepad"
+    if run_web(build_root, kind, [str(gamepad), "--out", str(gamepad_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        gamepad_port = int(probe.getsockname()[1])
+    gamepad_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(gamepad_port), "--bind", "127.0.0.1", "--directory", str(gamepad_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        # #gamepad-selftest makes wasm.js inject a standard-mapped fake Gamepad;
+        # the fixture maps it through the public facade into data-gamepad-* attrs.
+        gamepad_result = run_browser(f"http://127.0.0.1:{gamepad_port}/index.html#gamepad-selftest", 5000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking gamepad mapping")
+    finally:
+        gamepad_server.terminate()
+        try:
+            gamepad_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            gamepad_server.kill()
+    gamepad_dom = (gamepad_result.stdout if 'gamepad_result' in locals() else "").lower()
+    gamepad_count_ok = re.search(r'data-gamepad-count="1"', gamepad_dom) is not None
+    gamepad_button_ok = re.search(r'data-gamepad-buttona="1"', gamepad_dom) is not None
+    gamepad_leftx_ok = re.search(r'data-gamepad-leftx="0\.5"', gamepad_dom) is not None
+    if gamepad_result.returncode != 0 or not gamepad_count_ok or not gamepad_button_ok or not gamepad_leftx_ok or "runtime error" in gamepad_dom:
+        output = _tail_text(gamepad_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser gamepad mapping did not flow through the public facade")
+    ok("web-test: browser gamepad mapping flowed through the public facade")
+    framebuf = ROOT / "etc" / "tests" / "native" / "web" / "renderer-framebuffer.ny"
+    if run_web_check(build_root, kind, [str(framebuf)]) != 0:
+        return 1
+    framebuf_dir = build_root / "web" / "renderer-framebuffer"
+    if run_web(build_root, kind, [str(framebuf), "--out", str(framebuf_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        framebuf_port = int(probe.getsockname()[1])
+    framebuf_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(framebuf_port), "--bind", "127.0.0.1", "--directory", str(framebuf_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        framebuf_result = run_browser(f"http://127.0.0.1:{framebuf_port}/index.html#app", 5000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking the framebuffer probe")
+    finally:
+        framebuf_server.terminate()
+        try:
+            framebuf_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            framebuf_server.kill()
+    framebuf_dom = (framebuf_result.stdout if 'framebuf_result' in locals() else "").lower()
+    framebuf_fb = re.search(r'data-framebuffer="(\d+)x(\d+)"', framebuf_dom)
+    framebuf_presented = re.search(r'data-presented="[1-9][0-9]*"', framebuf_dom) is not None
+    framebuf_probe_ok = bool(
+        framebuf_fb and
+        re.search(r'\b' + framebuf_fb.group(1) + ' ' + framebuf_fb.group(2) + r'\b', framebuf_dom) is not None
+    )
+    firefox_framebuf = browser_kind == "firefox" and framebuf_presented
+    if (framebuf_result.returncode != 0 or not framebuf_presented or
+            not (framebuf_probe_ok or firefox_framebuf) or "runtime error" in framebuf_dom):
+        output = _tail_text(framebuf_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser framebuffer probe did not round-trip through the host")
+    ok("web-test: browser framebuffer probe round-tripped through the host")
+    texture = ROOT / "etc" / "tests" / "native" / "web" / "renderer-2d-texture.ny"
+    if run_web_check(build_root, kind, [str(texture)]) != 0:
+        return 1
+    texture_dir = build_root / "web" / "renderer-texture"
+    if run_web(build_root, kind, [str(texture), "--out", str(texture_dir)]) != 0:
+        return 1
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        texture_port = int(probe.getsockname()[1])
+    texture_server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(texture_port), "--bind", "127.0.0.1", "--directory", str(texture_dir)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.25)
+        texture_result = run_browser(f"http://127.0.0.1:{texture_port}/index.html#app", 5000)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("web-test: browser timed out while checking the texture probe")
+    finally:
+        texture_server.terminate()
+        try:
+            texture_server.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            texture_server.kill()
+    texture_dom = (texture_result.stdout if 'texture_result' in locals() else "").lower()
+    texture_presented = re.search(r'data-presented="[1-9][0-9]*"', texture_dom) is not None
+    texture_triples = [tuple(int(t) for t in g) for g in re.findall(r'\b(\d+) (\d+) (\d+)\b', texture_dom)]
+    texture_has_red = any(len(g) == 3 and g[0] >= 250 for g in texture_triples)
+    texture_has_dark = any(len(g) == 3 and g[0] <= 4 for g in texture_triples)
+    texture_probe_ok = bool(
+        re.search(r'\b2 2\b', texture_dom) is not None and
+        texture_has_red and texture_has_dark
+    )
+    if texture_result.returncode != 0 or not texture_presented or not texture_probe_ok or "runtime error" in texture_dom:
+        output = _tail_text(texture_dom, 3000)
+        if output:
+            print(output)
+        raise SystemExit("web-test: browser texture probe did not round-trip through the host")
+    ok("web-test: browser texture probe round-tripped through the host")
+    return 0
+
 def print_wasm_help() -> None:
     print(c("1;36", "Nytrix wasm compiler"))
     print("")
     print("Usage:")
     print("  ./make wasm path/to/app.ny")
-    print("  ./make wasm path/to/app.ny --out build/wasm/app.wasm")
+    print("  ./make wasm path/to/app.ny --out build/web/wasm/app.wasm")
     print("")
     print("Flags:")
     print("  -o, --out FILE      output wasm file")
@@ -2780,11 +3343,11 @@ def _parse_wasm_args(args: list[str], build_root: Path) -> dict[str, object]:
     src_abs = _resolve_wasm_path(source)
     stem = src_abs.stem or "app"
     if out_path is None:
-        out_path = build_root / "wasm" / (stem + ".wasm")
+        out_path = build_root / "web" / "wasm" / (stem + ".wasm")
     if out_path.suffix.lower() != ".wasm":
         out_path = out_path / (stem + ".wasm")
     if ir_path is None:
-        ir_path = build_root / "wasm-ir" / (stem + ".ll")
+        ir_path = build_root / "web" / "ir" / (stem + ".ll")
     return {
         "help": False,
         "source": src_abs,
@@ -2805,7 +3368,7 @@ def run_wasm(build_root: Path, kind: str, args: list[str]) -> int:
     if source.suffix == ".nshape":
         extracted, extract_err = _extract_nshape_ny_source(
             source,
-            build_root / "wasm-extracted",
+            build_root / "web" / "extracted",
             source.stem or "demo",
         )
         if extracted is None:
@@ -2829,6 +3392,355 @@ def run_wasm(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("wasm: " + detail)
     ok("wasm: " + _rel_or_abs(Path(str(res["wasm"]))))
     log("WASM", "ir: " + _rel_or_abs(Path(str(res["ir"]))))
+    return 0
+
+def _web_host_import_names() -> set[str]:
+    """Return the browser runner's explicitly implemented Wasm host functions."""
+    source = (WEB_DEMO_ASSET_DIR / "wasm.js").read_text(encoding="utf-8")
+    quoted = re.findall(r'["\']([^"\']+)["\']\s*:', source)
+    bare = re.findall(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:', source, flags=re.MULTILINE)
+    return set(quoted) | set(bare)
+
+def _wasm_function_imports(wasm: Path) -> tuple[set[str] | None, str]:
+    objdump = which("wasm-objdump")
+    if not objdump:
+        return None, "wasm-objdump missing (install wabt to inspect WebAssembly imports)"
+    res = subprocess.run([objdump, "-x", str(wasm)], text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, timeout=30)
+    if res.returncode != 0:
+        return None, _tail_text(res.stdout, 1000) or "wasm-objdump failed"
+    imports: set[str] = set()
+    for line in res.stdout.splitlines():
+        match = re.search(r'<env\.([^>]+)>\s+<-\s+env\.([^\s]+)', line)
+        if match:
+            imports.add(match.group(2))
+    return imports, ""
+
+def _wasm_export_names(wasm: Path) -> tuple[set[str] | None, str]:
+    """Return exported Wasm symbols for browser event-loop safety checks."""
+    objdump = which("wasm-objdump")
+    if not objdump:
+        return None, "wasm-objdump missing (install wabt to inspect WebAssembly exports)"
+    res = subprocess.run([objdump, "-x", str(wasm)], text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, timeout=30)
+    if res.returncode != 0:
+        return None, _tail_text(res.stdout, 1000) or "wasm-objdump failed"
+    return set(re.findall(r'-> "([^"]+)"', res.stdout)), ""
+
+def _web_import_category(name: str) -> str:
+    if name.startswith("std.os.process."):
+        return "native process"
+    if name.startswith("std.os.ui.window."):
+        return "native window"
+    if name.startswith("std.os.ui.render.viewer.") or name.startswith("std.os.ui.render.dump."):
+        return "native renderer tooling"
+    return "browser host gap"
+
+def run_web_check(build_root: Path, kind: str, args: list[str]) -> int:
+    """Compile a Ny source and reject browser imports missing from the WebGL2 host."""
+    cfg = _parse_web_check_args(args, build_root)
+    if bool(cfg.get("help", False)):
+        print("Usage: ./make web-check path/to/app.ny [--target wasm-bare] [--timeout seconds]")
+        return 0
+    source = cfg["source"]
+    assert isinstance(source, Path)
+    out_dir = build_root / "web" / "check"
+    shutil.rmtree(out_dir, ignore_errors=True)
+    if source.suffix == ".nshape":
+        extracted, extract_err = _extract_nshape_ny_source(source, out_dir / "extracted", source.stem or "source")
+        if extracted is None:
+            raise SystemExit("web-check: " + extract_err)
+        source = extracted
+    out_dir.mkdir(parents=True, exist_ok=True)
+    wasm = out_dir / (source.stem + ".wasm")
+    ir = out_dir / (source.stem + ".ll")
+    result = _compile_ny_to_wasm(build_root, kind, source, wasm, ir,
+                                 step_timeout=int(cfg.get("timeout", 120)))
+    if not bool(result.get("ok", False)):
+        output = _tail_text(result.get("output", ""), 1600)
+        if output:
+            print(output)
+        raise SystemExit("web-check: " + str(result.get("detail", "Wasm compilation failed")))
+    imports, detail = _wasm_function_imports(wasm)
+    if imports is None:
+        raise SystemExit("web-check: " + detail)
+    missing = sorted(imports - _web_host_import_names())
+    report = {
+        "source": _rel_or_abs(source),
+        "target": cfg["target"],
+        "capabilities": WEB_WASM_BARE_CAPABILITIES,
+        "wasm": _rel_or_abs(wasm),
+        "imports": sorted(imports),
+        "supported": sorted(imports - set(missing)),
+        "unsupported": missing,
+        "ok": not missing,
+    }
+    report_path = out_dir / (source.stem + ".web-report.json")
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    if missing:
+        print("web-check: unsupported browser imports:")
+        groups: dict[str, list[str]] = {}
+        for name in missing:
+            groups.setdefault(_web_import_category(name), []).append(name)
+        for category in sorted(groups):
+            names = groups[category]
+            print(f"  {category}: {len(names)}")
+            for name in names[:12]:
+                print("    env." + name)
+            if len(names) > 12:
+                print(f"    ... {len(names) - 12} more (see report)")
+        print("web-check: report: " + _rel_or_abs(report_path))
+        raise SystemExit("web-check: add a portable adapter or keep this API native-only")
+    ok("web-check: " + _rel_or_abs(source) + f" ({len(imports)} host imports supported)")
+    log("WEB", "report: " + _rel_or_abs(report_path))
+    return 0
+
+def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
+    source: Path | None = None
+    out_dir: Path | None = None
+    assets: list[Path] = []
+    preload_all = False
+    asyncify = True
+    target = "wasm-bare"
+    timeout_sec = int((os.environ.get("NYTRIX_WASM_STEP_TIMEOUT") or "120").strip() or "120")
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-h", "--help"):
+            return {"help": True}
+        if a in ("-o", "--out"):
+            if i + 1 >= len(args):
+                raise SystemExit("web: missing value for " + a)
+            out_dir = Path(args[i + 1])
+            i += 2
+            continue
+        if a.startswith("--out="):
+            out_dir = Path(a.split("=", 1)[1])
+            i += 1
+            continue
+        if a in ("--assets", "--asset-root"):
+            if i + 1 >= len(args):
+                raise SystemExit("web: missing value for " + a)
+            assets.append(Path(args[i + 1]))
+            i += 2
+            continue
+        if a.startswith("--assets=") or a.startswith("--asset-root="):
+            assets.append(Path(a.split("=", 1)[1]))
+            i += 1
+            continue
+        if a == "--preload-all":
+            preload_all = True
+            i += 1
+            continue
+        if a == "--renderer":
+            if i + 1 >= len(args):
+                raise SystemExit("web: missing value for --renderer")
+            a = "--renderer=" + args[i + 1]
+            i += 2
+        else:
+            i += 1
+        if a.startswith("--renderer="):
+            if a.split("=", 1)[1].strip().lower() != "webgl2":
+                raise SystemExit("web: only --renderer webgl2 is supported")
+            continue
+        if a.startswith("--target="):
+            target = a.split("=", 1)[1]
+            continue
+        if a == "--target":
+            if i >= len(args):
+                raise SystemExit("web: missing value for --target")
+            target = args[i]
+            i += 1
+            continue
+        if a == "--no-asyncify":
+            asyncify = False
+            continue
+        if a == "--timeout":
+            if i >= len(args):
+                raise SystemExit("web: missing value for --timeout")
+            timeout_sec = int(float(args[i]))
+            i += 1
+            continue
+        if a.startswith("--timeout="):
+            timeout_sec = int(float(a.split("=", 1)[1]))
+            continue
+        if a.startswith("-"):
+            raise SystemExit("web: unknown option " + a)
+        if source is not None:
+            raise SystemExit("web: unexpected extra source " + a)
+        source = Path(a)
+    if source is None:
+        raise SystemExit("web: missing Ny source")
+    source = _resolve_wasm_path(source)
+    if out_dir is None:
+        out_dir = build_root / "web" / (source.stem or "app")
+    out_dir = _resolve_wasm_path(out_dir)
+    if preload_all and not assets:
+        raise SystemExit("web: --preload-all requires at least one --assets directory")
+    return {"help": False, "source": source, "out": out_dir, "assets": assets, "preload_all": preload_all,
+            "asyncify": asyncify, "timeout": max(1, timeout_sec),
+            "target": _web_target_descriptor(target, "web")}
+
+def print_web_help() -> None:
+    print(c("1;36", "Nytrix browser build"))
+    print("")
+    print("Usage:")
+    print("  ./make web game.ny")
+    print("  ./make web game.ny --out build/web/game --renderer webgl2")
+    print("")
+    print("Builds a deployable wasm-bare WebGL2 directory. The target rejects host imports")
+    print("that the browser runner does not implement; wasm-emscripten is not silently substituted.")
+    print("")
+    print("Flags:")
+    print("  --out DIR            deployment output directory")
+    print("  --renderer webgl2    required renderer target (default)")
+    print("  --assets DIR         package an asset root under assets/ (repeatable)")
+    print("  --preload-all        package every regular file under each asset root")
+    print("  --no-asyncify        only for exported ny_web_frame/ny_web_render callbacks")
+    print("  --timeout SECONDS    per compiler/linker step limit")
+
+def _copy_web_runner_assets(out_dir: Path) -> None:
+    for name in WEB_DEMO_STATIC_ASSETS:
+        src = WEB_DEMO_ASSET_DIR / name
+        if not src.exists():
+            raise SystemExit(f"web: missing {src.relative_to(ROOT)}")
+        shutil.copy2(src, out_dir / name)
+    for name in WEB_DEMO_SHARED_ASSETS:
+        src = WEB_DEMO_ASSET_DIR.parent / name
+        if not src.exists():
+            raise SystemExit(f"web: missing {src.relative_to(ROOT)}")
+        shutil.copy2(src, out_dir / name)
+    for src, rel in WEB_DEMO_FONT_ASSETS:
+        if not src.exists():
+            raise SystemExit(f"web: missing {src.relative_to(ROOT)}")
+        dst = out_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+
+def run_web(build_root: Path, kind: str, args: list[str]) -> int:
+    """Build one portable Ny source into a deployable wasm-bare WebGL2 directory."""
+    cfg = _parse_web_args(args, build_root)
+    if bool(cfg.get("help", False)):
+        print_web_help()
+        return 0
+    source = cfg["source"]
+    out_dir = cfg["out"]
+    assert isinstance(source, Path) and isinstance(out_dir, Path)
+    compile_source = source
+    if source.suffix == ".nshape":
+        compile_source, extract_err = _extract_nshape_ny_source(source, out_dir / ".ny-src", source.stem or "app")
+        if compile_source is None:
+            raise SystemExit("web: " + extract_err)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    wasm = out_dir / "app.wasm"
+    ir = build_root / "web" / "ir" / ((compile_source.stem or "app") + ".ll")
+    result = _compile_ny_to_wasm(build_root, kind, compile_source, wasm, ir,
+                                 step_timeout=int(cfg["timeout"]))
+    if not bool(result.get("ok", False)):
+        output = _tail_text(result.get("output", ""), 1600)
+        if output:
+            print(output)
+        raise SystemExit("web: " + str(result.get("detail", "Wasm compilation failed")))
+    imports, detail = _wasm_function_imports(wasm)
+    if imports is None:
+        raise SystemExit("web: " + detail)
+    missing = sorted(imports - _web_host_import_names())
+    if missing:
+        raise SystemExit("web: unsupported browser imports: " + ", ".join("env." + name for name in missing[:6]))
+    if not bool(cfg["asyncify"]):
+        exports, detail = _wasm_export_names(wasm)
+        if exports is None:
+            raise SystemExit("web: " + detail)
+        callbacks = {"ny_web_frame", "ny_web_render"}
+        if not (callbacks & exports):
+            raise SystemExit(
+                "web: --no-asyncify requires an exported ny_web_frame or ny_web_render callback; "
+                "ordinary main loops must keep Asyncify enabled"
+            )
+    if bool(cfg["asyncify"]):
+        async_res = _instrument_wasm_asyncify(wasm, step_timeout=int(cfg["timeout"]))
+        if not bool(async_res.get("ok", False)):
+            raise SystemExit("web: " + str(async_res.get("detail", "asyncify failed")))
+    _copy_web_runner_assets(out_dir)
+    packaged_assets: list[dict[str, object]] = []
+    source_text = source.read_text(encoding="utf-8", errors="replace")
+    asset_literals = set(re.findall(r'["\']([^"\']+)["\']', source_text))
+    selected_assets: set[Path] = set()
+    referenced_assets: set[Path] = set()
+    for raw in cfg["assets"]:
+        assert isinstance(raw, Path)
+        src = _resolve_wasm_path(raw)
+        if not src.is_dir():
+            raise SystemExit("web: asset root is not a directory: " + _rel_or_abs(src))
+        matched = 0
+        if bool(cfg["preload_all"]):
+            for candidate in src.rglob("*"):
+                if not candidate.is_file():
+                    continue
+                candidate = candidate.resolve()
+                try:
+                    candidate.relative_to(src)
+                except ValueError:
+                    continue
+                selected_assets.add(candidate)
+                matched += 1
+        for literal in asset_literals:
+            candidate = _resolve_wasm_path(Path(literal))
+            try:
+                candidate.relative_to(src)
+            except ValueError:
+                continue
+            if candidate.is_file():
+                selected_assets.add(candidate)
+                referenced_assets.add(candidate)
+                matched += 1
+        if not matched:
+            qualifier = "files" if bool(cfg["preload_all"]) else "source-referenced files"
+            raise SystemExit("web: no " + qualifier + " under asset root: " + _rel_or_abs(src))
+    asset_blob = bytearray()
+    for src in sorted(selected_assets):
+        try:
+            rel = src.relative_to(ROOT)
+        except ValueError:
+            rel = Path("assets") / src.name
+        while len(asset_blob) % 16:
+            asset_blob.append(0)
+        data = src.read_bytes()
+        offset = len(asset_blob)
+        asset_blob.extend(data)
+        packaged_assets.append({
+            "path": rel.as_posix(), "offset": offset, "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(), "preload": src in referenced_assets,
+        })
+    asset_pack: dict[str, object] | None = None
+    if packaged_assets:
+        pack_path = out_dir / "assets.data"
+        pack_path.write_bytes(asset_blob)
+        asset_pack = {"format": "nytrix-web-data-v1", "url": "assets.data",
+                      "bytes": len(asset_blob), "assets": packaged_assets}
+        (out_dir / "assets.data.json").write_text(
+            json.dumps(asset_pack, indent=2) + "\n", encoding="utf-8")
+    source_display = _rel_or_abs(source)
+    demo = {"id": "app", "title": _demo_title_from_source(source_display),
+            "area": "APP", "mode": "webgl", "source": source_display,
+            "wasm": "app.wasm", "wasmKind": "ny", "asyncify": bool(cfg["asyncify"]),
+            "assets": packaged_assets, "assetPack": asset_pack}
+    (out_dir / "demos-data.js").write_text("window.NYTRIX_WEB_DEMOS = " + json.dumps([demo], indent=2) + ";\n", encoding="utf-8")
+    target = cfg["target"]
+    assert isinstance(target, dict)
+    report = {"source": source_display, "target": target,
+              "capabilities": WEB_WASM_BARE_CAPABILITIES,
+              "wasm": "app.wasm", "imports": sorted(imports), "unsupported": [], "assets": packaged_assets, "assetPack": asset_pack,
+              "asyncify": bool(cfg["asyncify"]), "softDependencies": []}
+    (out_dir / "web-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    build_manifest = {"source": source_display, "target": target,
+                      "capabilities": WEB_WASM_BARE_CAPABILITIES, "artifact": "app.wasm",
+                      "toolchain": {"clang": which("clang") or "", "wasmOpt": which("wasm-opt") or ""},
+                      "assets": packaged_assets, "assetPack": asset_pack,
+                      "softDependencies": [], "asyncify": bool(cfg["asyncify"])}
+    (out_dir / "build-manifest.json").write_text(json.dumps(build_manifest, indent=2) + "\n", encoding="utf-8")
+    ok("web: " + _rel_or_abs(out_dir / "index.html"))
+    log("WEB", "report: " + _rel_or_abs(out_dir / "web-report.json"))
     return 0
 
 def _cross_slug(triple: str) -> str:
@@ -3043,10 +3955,6 @@ def _linux_cross_missing(triple: str) -> list[str]:
         missing.append(f"sysroot for {triple}")
         return missing
     sysroot = _linux_cross_sysroot_for_triple(triple)
-    if not _linux_cross_file_any(sysroot, triple, ("include/gmp.h",)):
-        missing.append("target gmp headers")
-    if not _linux_cross_file_any(sysroot, triple, ("lib/libgmp.so", "lib/libgmp.a")):
-        missing.append("target gmp library")
     if not _linux_cross_file_any(sysroot, triple, ("include/zlib.h",)):
         missing.append("target zlib headers")
     if not _linux_cross_file_any(sysroot, triple, ("lib/libz.so", "lib/libz.a")):
@@ -3107,10 +4015,6 @@ def _mingw_runtime_missing(triple: str) -> list[str]:
     if not cc:
         missing.append(f"{_mingw_prefix_for_triple(triple)}-gcc")
     sysroot = _mingw_sysroot_for_triple(triple)
-    if not _mingw_file_any(sysroot, ("include/gmp.h",)):
-        missing.append("mingw gmp headers")
-    if not _mingw_file_any(sysroot, ("lib/libgmp.dll.a", "lib/libgmp.a")):
-        missing.append("mingw gmp library")
     if not _mingw_file_any(sysroot, ("include/zlib.h",)):
         missing.append("mingw zlib headers")
     if not _mingw_file_any(sysroot, ("lib/libz.dll.a", "lib/libz.a")):
@@ -3351,7 +4255,6 @@ def _linux_mingw_packages(distro: str, like: str) -> list[str]:
             "gcc-mingw-w64-x86-64",
             "binutils-mingw-w64-x86-64",
             "libz-mingw-w64-dev",
-            "libgmp-mingw-w64-dev",
         ]
     if distro in ("arch", "manjaro") or "arch" in like:
         return [
@@ -3580,7 +4483,7 @@ def run_make_doctor(build_root: Path, kind: str, args: list[str]) -> int:
     failures += _doctor_check("ninja", bool(_tool_path("ninja")), _tool_status("ninja"))
     failures += _doctor_check("pkg-config", bool(_tool_path("pkg-config") or _tool_path("pkgconf")), _tool_status("pkg-config") if _tool_path("pkg-config") else _tool_status("pkgconf"))
     failures += _doctor_check("llvm-config", bool(_tool_path("llvm-config")) or host_os() == "windows", _tool_status("llvm-config"), required=(host_os() != "windows"))
-    failures += _doctor_check("gmp", _gmp_available(), "headers/library discoverable")
+    failures += _doctor_check("gmp", _gmp_available(), "headers/library discoverable", required=False)
     print("")
     print(c("1", "Optional std/native deps"))
     optional_missing = _detect_optional_std_missing()
@@ -3592,6 +4495,12 @@ def run_make_doctor(build_root: Path, kind: str, args: list[str]) -> int:
             print(f"  {c('33', 'warn'):<12} {'':<22} ... {len(optional_missing) - 12} more")
     else:
         _doctor_check("stdlib extras", True, "all detected")
+    print("")
+    print(c("1", "Optional browser tooling"))
+    _doctor_check("wasm-ld", bool(_tool_path("wasm-ld")), _tool_status("wasm-ld"), required=False)
+    _doctor_check("wasm-opt", bool(_tool_path("wasm-opt")), _tool_status("wasm-opt") + " (needed for async browser frame loops)", required=False)
+    _doctor_check("wasm-objdump", bool(_tool_path("wasm-objdump")), _tool_status("wasm-objdump") + " (needed by web-check)", required=False)
+    _doctor_check("emcc", bool(_tool_path("emcc")), _tool_status("emcc") + " (optional Emscripten target SDK)", required=False)
     print("")
     print(c("1", "Built tools"))
     for name in ("ny", "ny-fmt", "ny-test"):
@@ -3699,10 +4608,6 @@ def run_cross(build_root: Path, kind: str, args: list[str], run_after: bool) -> 
             if not sysroot:
                 compile_issues.append(f"sysroot for {triple}")
             else:
-                if not _linux_cross_file_any(sysroot, triple, ("include/gmp.h",)):
-                    compile_issues.append("target gmp headers")
-                if not _linux_cross_file_any(sysroot, triple, ("lib/libgmp.so", "lib/libgmp.a")):
-                    compile_issues.append("target gmp library")
                 if not _linux_cross_file_any(sysroot, triple, ("include/zlib.h",)):
                     compile_issues.append("target zlib headers")
                 if not _linux_cross_file_any(sysroot, triple, ("lib/libz.so", "lib/libz.a")):
@@ -3791,7 +4696,7 @@ def print_profile_help() -> None:
     print("Examples:")
     print("  ./make profile compile --runs 5 etc/projects/ui/editor.ny")
     print("  ./make profile perf -- --profile=compile -emit-only etc/projects/ui/editor.ny")
-    print("  ./make profile gdb -- -time -run etc/tests/rt/comptime.ny")
+    print("  ./make profile gdb -- -time -run etc/tests/runtime/compiler/comptime.ny")
 
 def _strip_dashdash(args: list[str]) -> list[str]:
     return args[1:] if args and args[0] == "--" else args
@@ -4024,7 +4929,7 @@ def run_make_profile(build_root: Path, kind: str, jobs: int, args: list[str]) ->
             mode, kind, base_host_cflags, base_host_ldflags,
             base_skip_optional_gates, base_test_cache, base_test_cold,
         )
-        cmake_build(build_root, san_kind, ["ny", "ny-test"], jobs)
+        cmake_build(build_root, san_kind, ["ny", "ny-full", "ny-test"], jobs)
         return run_test(build_root, san_kind, jobs, rest)
     if mode == "fuzz":
         cmake_build(build_root, kind, ["ny", "ny-test", "ny-fuzz"], jobs)
@@ -4091,7 +4996,7 @@ def run_tool(build_root: Path, kind: str, name: str, args: list[str], timeout: f
             restore_tty_visuals()
 
 def default_fuzz_shape_dir() -> str:
-    for rel in ("build/cache/tests/fuzz/shapes", "etc/tests/fuzz/shapes", "etc/tests/fuzz"):
+    for rel in ("build/cache/tests/shapes", "etc/tests/shapes", "etc/tests"):
         if (ROOT / rel).exists():
             return rel
     return "build/cache/tests/fuzz/shapes"
@@ -4131,6 +5036,8 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     suite_timeout_s = int(os.environ.get("NYTRIX_TEST_SUITE_TIMEOUT") or "1800")
     step(f"run tests: bin=ny jobs={test_jobs} suite_timeout={suite_timeout_s}s")
     rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(suite_timeout_s))
+    if rc == 0 and host_os() != "windows":
+        rc = run_tool(build_root, kind, "ny-fuzz", ["validate-shapes", "etc/tests/shapes"], timeout=float(suite_timeout_s))
     elapsed_ms = int((time.perf_counter() - started) * 1000.0)
     if rc == 0:
         ok(f"test suite completed in {elapsed_ms}ms")
@@ -4139,7 +5046,7 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     return rc
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
-    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web-demos", "wasm", "c2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -4216,7 +5123,7 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
                 jobs = int(v)
             except Exception:
                 raise SystemExit(f"make: invalid jobs value: {v}")
-        elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web-demos", "wasm"):
+        elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web", "web-demos", "web-check", "web-test", "wasm"):
             cmds.append(a)
             extra.extend(argv[i + 1 :])
             break
@@ -4282,7 +5189,10 @@ def print_help() -> None:
         ("Run", (
             ("ny/repl/run", "launch the compiler, REPL, or cached -run flow"),
             ("docs", "build documentation portal"),
+            ("web", "build one Ny source as a deployable WebGL2 browser app"),
             ("wasm", "compile a Ny source file to WebAssembly"),
+            ("web-check", "verify a Ny source uses only implemented browser host APIs"),
+            ("web-test", "build and prove Pong reaches the WebGL2 browser runner"),
             ("web-demos", "build the browser WebGL/Wasm demo portal"),
         )),
         ("Inspect", (
@@ -4327,7 +5237,7 @@ def print_help() -> None:
     print("  ./make ny etc/projects/ui/term.ny -h")
     print("  ./make etc/projects/ui/term.ny -v -vk btop")
     print("  ./make -trace ny etc/projects/ui/engine.ny -vk")
-    print("  ./make wasm etc/projects/os/args.ny --out build/wasm/args.wasm")
+    print("  ./make wasm etc/projects/os/args.ny --out build/web/wasm/args.wasm")
     print("  ./make bin-static")
     print("  ./make static libs build/static")
     print("  ./make web-demos")
@@ -5266,15 +6176,6 @@ def _check_static_libs_available() -> tuple[bool, list[str]]:
             break
         else:
             missing.append("libz3.a (libz3-dev or build z3 from source)")
-    # Check GMP
-    for p in ("/usr/lib/libgmp.a", "/usr/local/lib/libgmp.a"):
-        if Path(p).exists():
-            break
-    else:
-        for path in Path("/usr/lib").glob("libgmp*.a"):
-            break
-        else:
-            missing.append("libgmp.a (libgmp-dev not providing static lib)")
     ok = len(missing) == 0
     return ok, missing
 
@@ -5682,7 +6583,7 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
         _copytree_replace(build_root / "static", package_dir / "build" / "static")
 
     # Source tree (runtime headers, stdlib source, etc).
-    for name in ("src", "lib", "etc"):
+    for name in ("src", "lib", "etc", ".github"):
         _copytree_replace(ROOT / name, package_dir / name, ignore=_tar_source_ignore)
     for name in ("make", "CMakeLists.txt", ".clangd", "out.diff", "README.md", "LICENSE"):
         _copy_release_file(ROOT / name, package_dir / name)
@@ -5710,7 +6611,7 @@ def main() -> int:
     build_root, notice = resolve_build_dir()
     first_repl_bootstrap = bootstrap_needed_for_repl(build_root, kind, cmds)
     inspect_cmds = {"env", "targets", "doctor"}
-    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web-demos", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
+    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
     all_tool_style = all(c in tool_style_cmds for c in cmds)
     if all_tool_style and not first_repl_bootstrap:
         # Keep tool invocations clean by default (./make fmt/test/ny...) even if env
@@ -5789,8 +6690,12 @@ def main() -> int:
         elif cmd in ("fmt", "analyze", "check", "tidy", "audit"):
             targets = ["ny-fmt"]
         elif cmd in ("test", "asan", "ubsan"):
-            targets = ["ny", "ny-test"]
+            targets = ["ny", "ny-full", "ny-test"]
+            if host_os() != "windows":
+                targets.append("ny-fuzz")
         elif cmd in ("fuzz", "bench"):
+            if host_os() == "windows":
+                raise SystemExit("make: fuzz tooling currently requires POSIX process APIs")
             targets = ["ny", "ny-test", "ny-fuzz"]
         elif cmd in ("cross", "cross-run"):
             targets = ["ny"]
@@ -5798,7 +6703,7 @@ def main() -> int:
             targets = ["ny"]
         elif cmd == "docs":
             targets = ["ny", "std", "ny-doc"]
-        elif cmd in ("web-demos", "wasm"):
+        elif cmd in ("web", "web-demos", "web-check", "web-test", "wasm"):
             targets = ["ny", "std"]
         elif cmd == "std":
             targets = ["std"]
@@ -5811,23 +6716,22 @@ def main() -> int:
         elif cmd == "perf":
             targets = ["ny", "ny-perf"]
         if cmd not in ("uninstall", "static", "bin-static", "tar", "vendor"):
-            if cmd in ("ny", "repl") and not cmake_build_has_work(build_root, active_kind, targets):
+            ny_missing = cmd in ("ny", "repl") and cmake_build_has_work(build_root, active_kind, targets)
+            if ny_missing:
                 clean_bad_tool_build(build_root, active_kind, "ny")
-            if cmd in ("ny", "repl") and not cmake_build_has_work(build_root, active_kind, targets):
-                pass
-            else:
-                repl_build_visible = cmd in ("ny", "repl")
-                old_quiet = QUIET_BOOTSTRAP
-                if repl_build_visible:
-                    QUIET_BOOTSTRAP = False
+            repl_build_visible = cmd in ("ny", "repl")
+            old_quiet = QUIET_BOOTSTRAP
+            if repl_build_visible:
+                QUIET_BOOTSTRAP = False
+                if ny_missing:
                     boot_notice("ny binary missing: compiling before launch")
-                try:
-                    cmake_build(build_root, active_kind, targets, jobs)
-                    if repl_build_visible:
-                        boot_notice("ny compiled; launching")
-                finally:
-                    if repl_build_visible:
-                        QUIET_BOOTSTRAP = old_quiet
+            try:
+                cmake_build(build_root, active_kind, targets, jobs)
+                if repl_build_visible and ny_missing:
+                    boot_notice("ny compiled; launching")
+            finally:
+                if repl_build_visible:
+                    QUIET_BOOTSTRAP = old_quiet
 
         if cmd == "all":
             # Keep the ordinary developer build paired with the formatter's
@@ -5860,13 +6764,24 @@ def main() -> int:
             std_file = str(cmake_build_dir(build_root, active_kind) / "std.ny")
             out_dir = str(build_root / "docs")
             rc = run_tool(build_root, active_kind, "ny-doc", [std_file, "-o", out_dir, *extra])
+        elif cmd == "web":
+            rc = run_web(build_root, active_kind, extra)
         elif cmd == "web-demos":
             rc = run_web_demos(build_root, active_kind, extra)
+        elif cmd == "web-check":
+            rc = run_web_check(build_root, active_kind, extra)
+        elif cmd == "web-test":
+            rc = run_web_test(build_root, active_kind, extra)
         elif cmd == "c2ny":
             if not extra:
                 nyt_err("c2ny", "usage: ./make c2ny <file.c> [-o <out.ny>]")
                 raise SystemExit(1)
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--c2ny", *extra])
+        elif cmd == "py2ny":
+            if not extra:
+                nyt_err("py2ny", "usage: ./make py2ny <file.py> [-o <out.ny>]")
+                raise SystemExit(1)
+            rc = run_tool(build_root, active_kind, "ny-fmt", ["--py2ny", *extra])
         elif cmd == "wasm":
             rc = run_wasm(build_root, active_kind, extra)
         elif cmd == "install":
@@ -5936,7 +6851,12 @@ def main() -> int:
         elif cmd == "bench":
             rc = run_tool(build_root, active_kind, "ny-fuzz", ["bench", "real", *extra])
         elif cmd in ("optcheck", "fb"):
-            raise SystemExit(f"make: command '{cmd}' is not yet ported to native C path")
+            raise SystemExit(
+                f"make: command '{cmd}' is not implemented on the native C path.\n"
+                "  For optimization correctness, use: ./make test\n"
+                "  For fuzz/shape validation, use:  ./make fuzz [validate-shapes etc/tests/shapes]\n"
+                "  For benchmarks, use:             ./make bench"
+            )
         else:
             raise SystemExit(f"make: unsupported command: {cmd}")
 

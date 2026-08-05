@@ -1,0 +1,21 @@
+shape native_only_int_loop {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 loop arithmetic oracle]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-result-oracle --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+fn sum_to(i64 n) i64 {
+  mut s = 0
+  mut i = 0
+  while i < n {
+    s += i
+    i += 1
+  }
+  s
+}
+
+print(sum_to(10000))
+NY
+}

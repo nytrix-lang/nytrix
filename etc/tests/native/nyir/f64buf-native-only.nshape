@@ -1,0 +1,17 @@
+shape native_only_f64_buffer {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 f64 typed-buffer runtime oracle]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-result-oracle --no-progress --color=never"
+  expect compile_and_run
+  expect_stdout "1"
+  source ny <<'NY'
+use std.core
+use std.core.tbuf
+
+def b = f64buf_new(1)
+f64buf_store(b, 0, 3.5)
+print(f64buf_load(b, 0) == 3.5)
+NY
+}

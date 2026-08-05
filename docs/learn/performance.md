@@ -237,6 +237,25 @@ Use `--nyir-dump-raw` (and asm/object dumps) when deciding whether a pass
 should change instruction shape, not only counts. See
 [tooling.md](tooling.md#ir-and-assembly-driven-optimization).
 
+### Native scalar allocation
+
+The LLVM-free x86-64 object path uses the machine-form linear-scan allocator.
+Colored values stay in callee-saved registers while they remain live in a
+block; stack homes are used at spills, joins, and ABI boundaries. Verify both
+the allocator path and the result with the focused native fixtures:
+
+```bash
+./build/release/ny-test --with-stdlib --color=never \
+  etc/tests/native/oracle/cfg-regalloc-split-x86-64.nshape \
+  etc/tests/native/oracle/machine-scalar-control-flow-x86-64.nshape \
+  etc/tests/native/nyir/int-loop-native-only.nshape
+```
+
+`--nyir-dump-stats` reports `mach encode mach_ok=...` for native object
+emission. This proves that the machine path was selected; it does not claim
+parity with C or GMP. Compare end-to-end checksums, elapsed time, and emitted
+code before making a performance claim.
+
 ## Profiling
 
 ```bash

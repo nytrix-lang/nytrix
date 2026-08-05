@@ -17,10 +17,16 @@
   --warn: #dbc979;
   --danger: #ff9580;
   --selection: rgba(182, 160, 255, 0.16);
-  --font-ui: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-ui: "Nytrix Monocraft", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-mono: "Nytrix Monocraft", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --radius: 2px;
   --rail: clamp(320px, 24vw, 430px);
+}
+
+@font-face {
+  font-family: "Nytrix Monocraft";
+  src: url("assets/monocraft.ttf") format("truetype");
+  font-display: swap;
 }
 
 * {
@@ -42,7 +48,8 @@ body {
   min-height: 100vh;
   overflow: hidden;
   line-height: 1.42;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: none;
+  text-rendering: geometricPrecision;
 }
 
 body::before {
@@ -182,7 +189,11 @@ button { cursor: pointer; }
 .kicker { color: var(--dim); font-size: 10px; text-transform: uppercase; margin-bottom: 2px; }
 
 .stage { padding: 10px; min-height: 0; }
-#glCanvas { width: 100%; height: 100%; border: 1px solid var(--line); background: #000; }
+#glCanvas {
+  width: 100%; height: 100%; border: 1px solid var(--line); background: #000;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
 .cli-stage-output {
   display: none;
   width: 100%;

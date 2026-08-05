@@ -13,6 +13,37 @@ typedef struct {
   char (*errors)[256];
 } ny_mach_lower_parallel_ctx_t;
 
+enum { NY_I386_OBJ_MAX_RELOCS = 10000 };
+
+static bool ny_i386_obj_reserve_relocs(ny_i386_obj_reloc_t **data,
+                                       size_t *cap, size_t want,
+                                       char *err, size_t err_len) {
+  if (!data || !cap || want > NY_I386_OBJ_MAX_RELOCS) {
+    ny_native_set_err(err, err_len,
+                      "i386 ELF object writer: relocation limit is 10000");
+    return false;
+  }
+  if (want <= *cap)
+    return true;
+  size_t next = *cap ? *cap : 256;
+  while (next < want) {
+    if (next > NY_I386_OBJ_MAX_RELOCS / 2) {
+      next = NY_I386_OBJ_MAX_RELOCS;
+      break;
+    }
+    next *= 2;
+  }
+  ny_i386_obj_reloc_t *grown = realloc(*data, next * sizeof(*grown));
+  if (!grown) {
+    ny_native_set_err(err, err_len,
+                      "i386 ELF object writer: relocation allocation failed");
+    return false;
+  }
+  *data = grown;
+  *cap = next;
+  return true;
+}
+
 static bool ny_mach_lower_parallel_task(size_t i, void *opaque) {
   ny_mach_lower_parallel_ctx_t *ctx = (ny_mach_lower_parallel_ctx_t *)opaque;
   return ny_mach_lower_nir(&ctx->funcs[i], &ctx->out[i], ctx->errors[i], 256);
@@ -24,6 +55,15 @@ static bool ny_mach_lower_parallel_task(size_t i, void *opaque) {
 /* Independence metrics: machine form encode success vs NYIR object fallback. */
 unsigned long long ny_native_stat_mach_ok = 0;
 unsigned long long ny_native_stat_nir_fallback = 0;
+unsigned long long ny_native_stat_regalloc_segments = 0;
+unsigned long long ny_native_stat_regalloc_colored = 0;
+unsigned long long ny_native_stat_regalloc_spilled = 0;
+unsigned long long ny_native_stat_fpr_segments = 0;
+unsigned long long ny_native_stat_fpr_colored = 0;
+unsigned long long ny_native_stat_fpr_spilled = 0;
+unsigned long long ny_native_stat_vector_segments = 0;
+unsigned long long ny_native_stat_vector_colored = 0;
+unsigned long long ny_native_stat_vector_spilled = 0;
 
 void ny_native_mach_encode_stats(unsigned long long *mach_ok,
                                 unsigned long long *nir_fallback) {
@@ -31,6 +71,84 @@ void ny_native_mach_encode_stats(unsigned long long *mach_ok,
     *mach_ok = ny_native_stat_mach_ok;
   if (nir_fallback)
     *nir_fallback = ny_native_stat_nir_fallback;
+}
+
+void ny_native_mach_regalloc_record(size_t segments, size_t colored,
+                                     size_t spilled);
+void ny_native_mach_regalloc_record(size_t segments, size_t colored,
+                                     size_t spilled) __attribute__((used)) {
+  __atomic_fetch_add(&ny_native_stat_regalloc_segments,
+                     (unsigned long long)segments, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ny_native_stat_regalloc_colored,
+                     (unsigned long long)colored, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ny_native_stat_regalloc_spilled,
+                     (unsigned long long)spilled, __ATOMIC_RELAXED);
+}
+
+void ny_native_mach_regalloc_stats(unsigned long long *segments,
+                                   unsigned long long *colored,
+                                   unsigned long long *spilled) {
+  if (segments)
+    *segments = __atomic_load_n(&ny_native_stat_regalloc_segments,
+                                __ATOMIC_RELAXED);
+  if (colored)
+    *colored = __atomic_load_n(&ny_native_stat_regalloc_colored,
+                               __ATOMIC_RELAXED);
+  if (spilled)
+    *spilled = __atomic_load_n(&ny_native_stat_regalloc_spilled,
+                               __ATOMIC_RELAXED);
+}
+
+void ny_native_mach_fpr_record(size_t segments, size_t colored,
+                                size_t spilled);
+void ny_native_mach_fpr_record(size_t segments, size_t colored,
+                                size_t spilled) __attribute__((used)) {
+  __atomic_fetch_add(&ny_native_stat_fpr_segments,
+                     (unsigned long long)segments, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ny_native_stat_fpr_colored,
+                     (unsigned long long)colored, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ny_native_stat_fpr_spilled,
+                     (unsigned long long)spilled, __ATOMIC_RELAXED);
+}
+
+void ny_native_mach_fpr_stats(unsigned long long *segments,
+                              unsigned long long *colored,
+                              unsigned long long *spilled) {
+  if (segments)
+    *segments = __atomic_load_n(&ny_native_stat_fpr_segments,
+                                __ATOMIC_RELAXED);
+  if (colored)
+    *colored = __atomic_load_n(&ny_native_stat_fpr_colored,
+                               __ATOMIC_RELAXED);
+  if (spilled)
+    *spilled = __atomic_load_n(&ny_native_stat_fpr_spilled,
+                               __ATOMIC_RELAXED);
+}
+
+void ny_native_mach_vector_record(size_t segments, size_t colored,
+                                   size_t spilled);
+void ny_native_mach_vector_record(size_t segments, size_t colored,
+                                   size_t spilled) __attribute__((used)) {
+  __atomic_fetch_add(&ny_native_stat_vector_segments,
+                     (unsigned long long)segments, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ny_native_stat_vector_colored,
+                     (unsigned long long)colored, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ny_native_stat_vector_spilled,
+                     (unsigned long long)spilled, __ATOMIC_RELAXED);
+}
+
+void ny_native_mach_vector_stats(unsigned long long *segments,
+                                 unsigned long long *colored,
+                                 unsigned long long *spilled) {
+  if (segments)
+    *segments = __atomic_load_n(&ny_native_stat_vector_segments,
+                                __ATOMIC_RELAXED);
+  if (colored)
+    *colored = __atomic_load_n(&ny_native_stat_vector_colored,
+                               __ATOMIC_RELAXED);
+  if (spilled)
+    *spilled = __atomic_load_n(&ny_native_stat_vector_spilled,
+                               __ATOMIC_RELAXED);
 }
 
 static bool ny_elf64_write_sym(ny_obj_buf_t *b, uint32_t name, unsigned info,
@@ -1032,16 +1150,21 @@ bool ny_native_emit_elf32_i386_object_from_nirs(
   }
 
   ny_obj_buf_t code = {0};
+  ny_obj_buf_t file = {0};
+  ny_obj_buf_t strtab = {0};
   ny_i386_obj_symbol_def_t defs[256];
-  ny_i386_obj_reloc_t relocs[256];
+  ny_i386_obj_reloc_t *relocs = NULL;
   size_t def_count = 0;
   size_t reloc_count = 0;
+  size_t reloc_cap = 0;
+  char (*reloc_symbols)[256] = NULL;
+  uint32_t *reloc_name_offs = NULL;
+  bool ok = false;
 
   for (size_t i = 0; i < func_count; ++i) {
     if (def_count >= sizeof(defs) / sizeof(defs[0])) {
       ny_native_set_err(err, err_len, "i386 ELF object writer: too many functions");
-      ny_obj_free(&code);
-      return false;
+      goto done;
     }
     const char *name = func_names && func_names[i] ? func_names[i] : "unknown_fn";
     char symbol[256];
@@ -1050,33 +1173,28 @@ bool ny_native_emit_elf32_i386_object_from_nirs(
     if (ny_i386_obj_def_index(defs, def_count, symbol) >= 0) {
       ny_native_set_err(err, err_len,
                         "i386 ELF object writer: duplicate symbol %s", symbol);
-      ny_obj_free(&code);
-      return false;
+      goto done;
     }
     if (!ny_obj_pad_to(&code, 16)) {
       ny_native_set_err(err, err_len, "i386 ELF object writer: out of memory");
-      ny_obj_free(&code);
-      return false;
+      goto done;
     }
     size_t base = code.len;
     ny_i386_obj_ctx_t ctx = {.target = target, .err = err, .err_len = err_len};
     if (!ny_i386_obj_emit_code(&ctx, &funcs[i], false)) {
       ny_i386_obj_ctx_free(&ctx);
-      ny_obj_free(&code);
-      return false;
+      goto done;
     }
-    if (reloc_count + ctx.reloc_count > sizeof(relocs) / sizeof(relocs[0])) {
-      ny_native_set_err(err, err_len,
-                        "i386 ELF object writer: too many relocations");
+    if (!ny_i386_obj_reserve_relocs(&relocs, &reloc_cap,
+                                    reloc_count + ctx.reloc_count, err,
+                                    err_len)) {
       ny_i386_obj_ctx_free(&ctx);
-      ny_obj_free(&code);
-      return false;
+      goto done;
     }
     if (!ny_obj_emit(&code, ctx.code.data, ctx.code.len)) {
       ny_native_set_err(err, err_len, "i386 ELF object writer: out of memory");
       ny_i386_obj_ctx_free(&ctx);
-      ny_obj_free(&code);
-      return false;
+      goto done;
     }
     snprintf(defs[def_count].name, sizeof(defs[def_count].name), "%s", symbol);
     defs[def_count].off = base;
@@ -1092,8 +1210,7 @@ bool ny_native_emit_elf32_i386_object_from_nirs(
 
   if (def_count >= sizeof(defs) / sizeof(defs[0])) {
     ny_native_set_err(err, err_len, "i386 ELF object writer: too many functions");
-    ny_obj_free(&code);
-    return false;
+    goto done;
   }
   char entry[256];
   snprintf(entry, sizeof(entry), "%s%s",
@@ -1101,32 +1218,28 @@ bool ny_native_emit_elf32_i386_object_from_nirs(
   if (ny_i386_obj_def_index(defs, def_count, entry) >= 0) {
     ny_native_set_err(err, err_len,
                       "i386 ELF object writer: duplicate symbol %s", entry);
-    ny_obj_free(&code);
-    return false;
+    goto done;
   }
   if (!ny_obj_pad_to(&code, 16)) {
     ny_native_set_err(err, err_len, "i386 ELF object writer: out of memory");
-    ny_obj_free(&code);
-    return false;
+    goto done;
   }
   size_t entry_base = code.len;
   ny_i386_obj_ctx_t ctx = {.target = target, .err = err, .err_len = err_len};
   if (!ny_i386_obj_emit_code(&ctx, rt_main, tag_return)) {
     ny_i386_obj_ctx_free(&ctx);
-    ny_obj_free(&code);
-    return false;
+    goto done;
   }
-  if (reloc_count + ctx.reloc_count > sizeof(relocs) / sizeof(relocs[0])) {
-    ny_native_set_err(err, err_len, "i386 ELF object writer: too many relocations");
+  if (!ny_i386_obj_reserve_relocs(&relocs, &reloc_cap,
+                                  reloc_count + ctx.reloc_count, err,
+                                  err_len)) {
     ny_i386_obj_ctx_free(&ctx);
-    ny_obj_free(&code);
-    return false;
+    goto done;
   }
   if (!ny_obj_emit(&code, ctx.code.data, ctx.code.len)) {
     ny_native_set_err(err, err_len, "i386 ELF object writer: out of memory");
     ny_i386_obj_ctx_free(&ctx);
-    ny_obj_free(&code);
-    return false;
+    goto done;
   }
   snprintf(defs[def_count].name, sizeof(defs[def_count].name), "%s", entry);
   defs[def_count].off = entry_base;
@@ -1139,13 +1252,17 @@ bool ny_native_emit_elf32_i386_object_from_nirs(
   }
   ny_i386_obj_ctx_free(&ctx);
 
-  ny_obj_buf_t file = {0};
-  ny_obj_buf_t strtab = {0};
-  bool ok = false;
-  char reloc_symbols[256][256];
   size_t reloc_symbol_count = 0;
   uint32_t def_name_offs[256] = {0};
-  uint32_t reloc_name_offs[256] = {0};
+  if (reloc_count > 0) {
+    reloc_symbols = calloc(reloc_count, sizeof(*reloc_symbols));
+    reloc_name_offs = calloc(reloc_count, sizeof(*reloc_name_offs));
+    if (!reloc_symbols || !reloc_name_offs) {
+      ny_native_set_err(err, err_len,
+                        "i386 ELF object writer: relocation symbol allocation failed");
+      goto done;
+    }
+  }
   if (!ny_i386_obj_collect_external_reloc_symbols(
           relocs, reloc_count, defs, def_count, reloc_symbols,
           &reloc_symbol_count, err, err_len))
@@ -1248,6 +1365,9 @@ bool ny_native_emit_elf32_i386_object_from_nirs(
   ok = ny_elf64_write_file(path, file.data, file.len, err, err_len);
 
 done:
+  free(reloc_name_offs);
+  free(reloc_symbols);
+  free(relocs);
   ny_obj_free(&strtab);
   ny_obj_free(&file);
   ny_obj_free(&code);

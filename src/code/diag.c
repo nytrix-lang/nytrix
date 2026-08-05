@@ -35,6 +35,28 @@ typedef enum {
   W_DIV_ZERO = 2005,
 } diag_code_t;
 
+/* Diagnostic codes come in two ranges:
+ *   E1xxx / W2xxx-with-low-id — explicit semantic codes passed through
+ *     ny_diag_error_code / ny_diag_warning_code (see diag_code_t above).
+ *   E2xxx / W3xxx — stable codes derived from the diagnostic format string for
+ *     callers that go through ny_diag_error / ny_diag_warning, which do not name
+ *     a category.  Each distinct format string is assigned one stable number on
+ *     first use, so the same error kind always produces the same code across a
+ *     run.  This keeps the AGENTS.md §4 "stable category" guarantee without
+ *     retagging every call site, and it stops mislabeling every generic error
+ *     as E_SYNTAX (E1001). */
+enum { NY_DIAG_FMT_CAP = 512, NY_DIAG_FMT_MASK = NY_DIAG_FMT_CAP - 1 };
+
+typedef struct {
+  const char *fmt;
+  int code;
+} diag_fmt_code_t;
+
+static diag_fmt_code_t g_diag_err_fmt_codes[NY_DIAG_FMT_CAP];
+static diag_fmt_code_t g_diag_warn_fmt_codes[NY_DIAG_FMT_CAP];
+static int g_diag_next_err_code = 2001;
+static int g_diag_next_warn_code = 3001;
+
 typedef struct {
   char *key;
   int count;
@@ -306,10 +328,37 @@ static void ny_secondary(const char *label, const char *label_color, const char 
     fprintf(stderr, "       %s%s%s  %s\n", clr(label_color), label, clr(NY_CLR_RESET), rendered);
 }
 
+/* Assign a stable code to a diagnostic format string.  The same format always
+ * maps to the same code within a process, so error categories are stable without
+ * each call site having to name one.  Codes are drawn from the caller-supplied
+ * counter so the E2xxx (error) and W3xxx (warning) ranges stay distinct. */
+static int ny_diag_code_for_fmt(diag_fmt_code_t *table, int *next_code,
+                                const char *fmt) {
+  if (!fmt)
+    fmt = "";
+  uint64_t hash = diag_hash(fmt);
+  size_t idx = (size_t)hash & NY_DIAG_FMT_MASK;
+  for (;;) {
+    if (table[idx].fmt == NULL) {
+      int code = (*next_code)++;
+      table[idx].fmt = fmt;
+      table[idx].code = code;
+      return code;
+    }
+    if (table[idx].fmt == fmt)
+      return table[idx].code;
+    idx = (idx + 1u) & NY_DIAG_FMT_MASK;
+  }
+}
+
 void ny_diag_error(token_t tok, const char *fmt, ...) {
+  char code_buf[16];
+  int code = ny_diag_code_for_fmt(g_diag_err_fmt_codes, &g_diag_next_err_code, fmt);
+  snprintf(code_buf, sizeof(code_buf), "E%04d", code);
   va_list ap;
   va_start(ap, fmt);
-  ny_diag_primary("error", "E1001", NY_CLR_RED, NY_CLR_CYAN, tok, fmt, ap);
+  ny_diag_primary("error", code_buf, NY_CLR_BRIGHT_RED, NY_CLR_BRIGHT_CYAN,
+                  tok, fmt, ap);
   va_end(ap);
 }
 
@@ -322,9 +371,13 @@ void ny_diag_warning(token_t tok, const char *fmt, ...) {
     g_last_primary_emitted = false;
     return;
   }
+  char code_buf[16];
+  int code = ny_diag_code_for_fmt(g_diag_warn_fmt_codes, &g_diag_next_warn_code, fmt);
+  snprintf(code_buf, sizeof(code_buf), "W%04d", code);
   va_list ap;
   va_start(ap, fmt);
-  ny_diag_primary("warning", "W2000", NY_CLR_YELLOW, NY_CLR_CYAN, tok, fmt, ap);
+  ny_diag_primary("warning", code_buf, NY_CLR_BRIGHT_YELLOW,
+                  NY_CLR_BRIGHT_CYAN, tok, fmt, ap);
   va_end(ap);
 }
 
@@ -335,7 +388,8 @@ void ny_diag_error_code(token_t tok, int code, const char *fmt, ...) {
   snprintf(code_buf, sizeof(code_buf), "E%04d", code);
   va_list ap;
   va_start(ap, fmt);
-  ny_diag_primary("error", code_buf, NY_CLR_RED, NY_CLR_CYAN, tok, fmt, ap);
+  ny_diag_primary("error", code_buf, NY_CLR_BRIGHT_RED, NY_CLR_BRIGHT_CYAN,
+                  tok, fmt, ap);
   va_end(ap);
 }
 
@@ -354,7 +408,8 @@ void ny_diag_warning_code(token_t tok, int code, const char *fmt, ...) {
   snprintf(code_buf, sizeof(code_buf), "W%04d", code);
   va_list ap;
   va_start(ap, fmt);
-  ny_diag_primary("warning", code_buf, NY_CLR_YELLOW, NY_CLR_CYAN, tok, fmt, ap);
+  ny_diag_primary("warning", code_buf, NY_CLR_BRIGHT_YELLOW,
+                  NY_CLR_BRIGHT_CYAN, tok, fmt, ap);
   va_end(ap);
 }
 

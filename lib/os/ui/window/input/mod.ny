@@ -22,7 +22,7 @@ module std.os.ui.window.input(
    is_function_key, function_key_from_scancode, event_function_key, event_key, event_is_key,
    resize_event_size, resize_event_extent,
    key_down, key_pressed, key_chord, mod_down, is_input_event, is_mouse_event, event_mouse_xy, scale_event_xy,
-   mouse_pos, mouse_view_pos, mouse_view_state, mouse_button_down, mouse_button_pressed,
+   mouse_pos, mouse_view_pos, mouse_view_state, mouse_button_down, mouse_button_pressed, touch_count, touch_pos, touch_active,
    gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis,
    gamepad_button, gamepad_axis_count, gamepad_button_count, is_gamepad_connected, is_mapped,
    get_gamepad_name, get_gamepad_button, get_gamepad_axis, get_gamepad_guid, load_joysticks,
@@ -291,6 +291,29 @@ fn mouse_pos(any win_ref=0) list {
    "Returns the current mouse cursor position [x, y]. Defaults to the active window."
    def win = _resolve_window(win_ref)
    win ? window.mouse_pos(win) : [0, 0]
+}
+
+fn touch_count(any win_ref=0) int {
+   "Returns the number of currently active touches. Native desktop builds without
+    a touch device report zero; browser builds report live touch state."
+   def win = _resolve_window(win_ref)
+   win ? window.touch_count(win) : 0
+}
+
+fn touch_pos(any index=0, any win_ref=0) list {
+   "Returns [x, y] window coordinates of the touch at `index`, or [0, 0] when
+    the index is out of range or no touches are active."
+   def win = _resolve_window(win_ref)
+   def i = int(index)
+   win ? window.touch_pos(win, i) : [0.0, 0.0]
+}
+
+fn touch_active(any index=0, any win_ref=0) bool {
+   "Returns true if a touch is currently active at `index`. Native desktop builds
+    without a touch device always return false."
+   def win = _resolve_window(win_ref)
+   def i = int(index)
+   win ? window.touch_active(win, i) : false
 }
 
 fn is_input_event(int typ) bool {

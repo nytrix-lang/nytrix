@@ -149,7 +149,8 @@ fn _clean_top_level_split(str expr, str sep) list {
       i += 1
    }
    if start == 0 { return [expr] }
-   out.append(str.strip(slice(expr, start, expr.len, 1)))
+   out = out.append(str.strip(slice(expr, start, expr.len, 1)))
+   out
 }
 
 fn _clean_literal_int_value(str raw) dict {

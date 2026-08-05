@@ -3,6 +3,7 @@
 #include "base/common.h"
 #include "base/util.h"
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,10 +23,23 @@ static bool ny_parse_nonneg_int(const char *s, int *out) {
   if (!s || !*s || !out)
     return false;
   char *end = NULL;
+  errno = 0;
   long v = strtol(s, &end, 10);
-  if (end == s || *end != '\0' || v < 0 || v > INT_MAX)
+  if (end == s || *end != '\0' || errno == ERANGE || v < 0 || v > INT_MAX)
     return false;
   *out = (int)v;
+  return true;
+}
+
+static bool ny_parse_nonneg_f64(const char *s, double *out) {
+  if (!s || !*s || !out)
+    return false;
+  char *end = NULL;
+  errno = 0;
+  double v = strtod(s, &end);
+  if (end == s || *end != '\0' || errno == ERANGE || !isfinite(v) || v < 0.0)
+    return false;
+  *out = v;
   return true;
 }
 
@@ -117,8 +131,9 @@ static void ny_warn_inline_code_semicolon(const ny_options *opt) {
   if (!ny_inline_code_semicolon_can_swallow(opt->command_string))
     return;
   NY_LOG_WARN("inline -c code uses ';', which starts a line comment in Nytrix; "
-              "text after it is ignored. Use real newlines between statements, "
-              "for example: ny -c $'use std.core\\nassert(true, \"ok\")'\n");
+              "text after it is ignored. Use real newlines or spaces as "
+              "statement separators, for example: "
+              "ny -c $'use std.core\\nassert(true, \"ok\")'\n");
 }
 
 static bool ny_parse_dump_scope(const char *raw, ny_dump_scope_t *out) {
@@ -359,6 +374,7 @@ static void ny_set_native_backend_or_die(ny_options *opt, const char *value,
     exit(1);
   }
   opt->native_backend_raw = ny_native_backend_name(opt->native_backend);
+  opt->native_backend_explicit = true;
 }
 
 static void ny_set_native_abi_or_die(ny_options *opt, const char *value,
@@ -370,6 +386,66 @@ static void ny_set_native_abi_or_die(ny_options *opt, const char *value,
     exit(1);
   }
   opt->native_abi_raw = ny_native_abi_name(opt->native_abi);
+}
+
+static bool ny_parse_native_tier(const char *raw, ny_native_tier_t *out) {
+  if (!raw || !*raw || !out)
+    return false;
+  if (strcmp(raw, "auto") == 0 || strcmp(raw, "default") == 0) {
+    *out = NY_NATIVE_TIER_AUTO;
+    return true;
+  }
+  if (strcmp(raw, "baseline") == 0) {
+    *out = NY_NATIVE_TIER_BASELINE;
+    return true;
+  }
+  if (strcmp(raw, "stencil") == 0) {
+    *out = NY_NATIVE_TIER_STENCIL;
+    return true;
+  }
+  if (strcmp(raw, "fast") == 0) {
+    *out = NY_NATIVE_TIER_FAST;
+    return true;
+  }
+  if (strcmp(raw, "opt") == 0 || strcmp(raw, "optimize") == 0) {
+    *out = NY_NATIVE_TIER_OPT;
+    return true;
+  }
+  if (strcmp(raw, "llvm") == 0 || strcmp(raw, "o2") == 0 ||
+      strcmp(raw, "o3") == 0) {
+    *out = NY_NATIVE_TIER_LLVM;
+    return true;
+  }
+  return false;
+}
+
+static const char *ny_native_tier_name(ny_native_tier_t tier) {
+  switch (tier) {
+  case NY_NATIVE_TIER_BASELINE:
+    return "baseline";
+  case NY_NATIVE_TIER_STENCIL:
+    return "stencil";
+  case NY_NATIVE_TIER_FAST:
+    return "fast";
+  case NY_NATIVE_TIER_OPT:
+    return "opt";
+  case NY_NATIVE_TIER_LLVM:
+    return "llvm";
+  default:
+    return "auto";
+  }
+}
+
+static void ny_set_native_tier_or_die(ny_options *opt, const char *value,
+                                      const char *argv0) {
+  if (!ny_parse_native_tier(value, &opt->native_tier)) {
+    fprintf(stderr,
+            "invalid native tier: %s (expected auto|baseline|stencil|fast|opt|llvm)\n",
+            value ? value : "(null)");
+    ny_options_usage(argv0);
+    exit(1);
+  }
+  opt->native_tier_raw = ny_native_tier_name(opt->native_tier);
 }
 
 static void ny_set_c_frontend_or_die(ny_options *opt, const char *value,
@@ -577,6 +653,8 @@ static void ny_sync_opt_profile_env(ny_options *opt) {
     case NY_OPT_PROFILE_BALANCED:
     case NY_OPT_PROFILE_SIZE:
       opt->opt_level = 2;
+      if (profile == NY_OPT_PROFILE_SIZE)
+        opt->opt_size = true;
       break;
     case NY_OPT_PROFILE_COMPILE:
       opt->opt_level = 0;
@@ -871,6 +949,17 @@ static int ny_parse_nonneg_int_or_die(const char *raw, const char *label,
   return n;
 }
 
+static double ny_parse_nonneg_f64_or_die(const char *raw, const char *label,
+                                         const char *argv0) {
+  double value = 0.0;
+  if (!ny_parse_nonneg_f64(raw, &value)) {
+    fprintf(stderr, "invalid %s: %s\n", label, raw ? raw : "(null)");
+    ny_options_usage(argv0);
+    exit(1);
+  }
+  return value;
+}
+
 static int ny_parse_dwarf_version_or_die(const char *raw, const char *argv0) {
   int n = 0;
   if (!ny_parse_nonneg_int(raw, &n) || n < 2 || n > 5) {
@@ -1141,6 +1230,11 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     ny_set_native_abi_or_die(opt, value, argv0);
     return true;
   }
+  if ((value = ny_option_value_or_die(a, "--native-tier", i, argc, argv,
+                                      argv0)) != NULL) {
+    ny_set_native_tier_or_die(opt, value, argv0);
+    return true;
+  }
   if ((value = ny_option_value_or_die(a, "--native-tier-budget", i, argc,
                                       argv, argv0)) != NULL) {
     opt->native_tier_budget =
@@ -1184,9 +1278,34 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     opt->native_tier_report_path = a + 21;
     return true;
   }
+  if (strcmp(a, "--native-enable-cf-mem2reg") == 0) {
+    opt->native_enable_cf_mem2reg = true;
+    return true;
+  }
+  if (strcmp(a, "--native-disable-cf-mem2reg") == 0) {
+    opt->native_enable_cf_mem2reg = false;
+    return true;
+  }
   if ((value = ny_option_value_or_die(a, "--c-frontend", i, argc, argv,
                                       argv0)) != NULL) {
     ny_set_c_frontend_or_die(opt, value, argv0);
+    return true;
+  }
+  if (strcmp(a, "--inspect") == 0 || strcmp(a, "--dump-optimizer") == 0 ||
+      strcmp(a, "--dump") == 0) {
+    opt->native_dump_ir = true;
+    opt->nyir_dump_text = true;
+    opt->nyir_dump_raw = true;
+    opt->nyir_pass_stats = true;
+    opt->dump_scope = NY_DUMP_SCOPE_PROGRAM;
+    return true;
+  }
+  if (strcmp(a, "--inspect-runtime") == 0 || strcmp(a, "--dump-runtime") == 0) {
+    opt->native_dump_ir = true;
+    opt->nyir_dump_text = true;
+    opt->nyir_dump_raw = true;
+    opt->nyir_pass_stats = true;
+    opt->dump_scope = NY_DUMP_SCOPE_BOTH;
     return true;
   }
   if (strcmp(a, "--native-dump-ir") == 0 || strcmp(a, "--nyir-dump") == 0) {
@@ -1210,6 +1329,33 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     opt->native_dump_ir = true;
     opt->nyir_dump_text = true;
     opt->nyir_dump_raw = true;
+    return true;
+  }
+  if (strcmp(a, "--nyir-dump-cfg") == 0) {
+    opt->native_dump_ir = true;
+    opt->nyir_dump_text = true;
+    opt->nyir_dump_cfg = true;
+    return true;
+  }
+  if (strcmp(a, "--nyir-pass-stats") == 0) {
+    opt->native_dump_ir = true;
+    opt->nyir_dump_text = true;
+    opt->nyir_dump_raw = true;
+    opt->nyir_pass_stats = true;
+    return true;
+  }
+  if (strcmp(a, "--nyir-verify") == 0) {
+    opt->nyir_verify = true;
+    return true;
+  }
+  if ((value = ny_option_value_or_die(a, "--nyir-disable-pass", i, argc,
+                                      argv, argv0)) != NULL) {
+    opt->nyir_disable_pass = value;
+    return true;
+  }
+  if ((value = ny_option_value_or_die(a, "--nyir-stop-after", i, argc,
+                                      argv, argv0)) != NULL) {
+    opt->nyir_stop_after = value;
     return true;
   }
   if (strcmp(a, "--nyir-dump-stats") == 0) {
@@ -1265,6 +1411,32 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     opt->native_backend_raw = "x86_64";
     return true;
   }
+  if (strcmp(a, "--native-oracle-per-pass") == 0) {
+    opt->native_oracle_per_pass = true;
+    opt->native_result_oracle = true;
+    opt->native_backend = NY_NATIVE_BACKEND_X86_64;
+    opt->native_backend_raw = "x86_64";
+    return true;
+  }
+  if (strncmp(a, "--native-oracle-fuzz=", 21) == 0) {
+    opt->native_oracle_fuzz_count = ny_parse_nonneg_int_or_die(
+        a + 21, "native oracle fuzz count", argv0);
+    opt->native_result_oracle = true;
+    opt->native_backend = NY_NATIVE_BACKEND_X86_64;
+    opt->native_backend_raw = "x86_64";
+    return true;
+  }
+  if (strcmp(a, "--native-tv-seed") == 0) {
+    opt->native_tv_seed_trials = 16;
+    return true;
+  }
+  if (strncmp(a, "--native-tv-seed=", 17) == 0) {
+    opt->native_tv_seed_trials =
+        ny_parse_nonneg_int_or_die(a + 17, "native TV seed trials", argv0);
+    if (opt->native_tv_seed_trials <= 0)
+      opt->native_tv_seed_trials = 16;
+    return true;
+  }
   if (strncmp(a, "--nyir-run=", 11) == 0) {
     opt->native_dump_ir = true;
     opt->nyir_run = true;
@@ -1291,6 +1463,10 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     opt->nyir_run_profile_path = a + 19;
     return true;
   }
+  if (strncmp(a, "--native-profile-use=", 21) == 0) {
+    opt->native_profile_use_path = a + 21;
+    return true;
+  }
   if ((value = ny_option_value_or_die(a, "--nyir-run-max-steps", i, argc,
                                       argv, argv0)) != NULL) {
     opt->native_dump_ir = true;
@@ -1310,6 +1486,16 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
   if ((value = ny_option_value_or_die(a, "--emit-artifact", i, argc, argv,
                                       argv0)) != NULL) {
     opt->emit_artifact_path = value;
+    return true;
+  }
+  if ((value = ny_option_value_or_die(a, "--verify-artifact", i, argc, argv,
+                                      argv0)) != NULL) {
+    opt->verify_artifact_path = value;
+    return true;
+  }
+  if ((value = ny_option_value_or_die(a, "--use-artifact", i, argc, argv,
+                                      argv0)) != NULL) {
+    opt->use_artifact_path = value;
     return true;
   }
   if (strncmp(a, "--emit-ir=", 10) == 0) {
@@ -1481,6 +1667,10 @@ static bool ny_options_apply_toggle(ny_options *opt, const char *a) {
        NY_OPT_TOGGLE_BOOL},
       {"--nyir-dump-raw", offsetof(ny_options, nyir_dump_raw), 1,
        NY_OPT_TOGGLE_BOOL},
+      {"--nyir-dump-cfg", offsetof(ny_options, nyir_dump_cfg), 1,
+       NY_OPT_TOGGLE_BOOL},
+      {"--nyir-pass-stats", offsetof(ny_options, nyir_pass_stats), 1,
+       NY_OPT_TOGGLE_BOOL},
       {"--nyir-dump-stats", offsetof(ny_options, nyir_dump_stats), 1,
        NY_OPT_TOGGLE_BOOL},
       {"--nyir-dump-bin", offsetof(ny_options, nyir_dump_bin), 1,
@@ -1517,6 +1707,8 @@ static bool ny_options_apply_toggle(ny_options *opt, const char *a) {
       {"-verify", offsetof(ny_options, verify_module), 1, NY_OPT_TOGGLE_BOOL},
       {"-g", offsetof(ny_options, debug_symbols), 1, NY_OPT_TOGGLE_BOOL},
       {"--plain-repl", offsetof(ny_options, repl_plain), 1, NY_OPT_TOGGLE_BOOL},
+      {"--zero-init", offsetof(ny_options, zero_init), 1, NY_OPT_TOGGLE_BOOL},
+      {"--no-zero-init", offsetof(ny_options, zero_init), 0, NY_OPT_TOGGLE_BOOL},
       {NULL, 0, 0, NY_OPT_TOGGLE_BOOL}};
   for (size_t i = 0; toggles[i].name; ++i) {
     if (strcmp(a, toggles[i].name) != 0)
@@ -1567,12 +1759,17 @@ void ny_options_init(ny_options *opt) {
   opt->native_backend_raw = "llvm";
   opt->native_abi = NY_NATIVE_ABI_AUTO;
   opt->native_abi_raw = "auto";
+  opt->native_tier = NY_NATIVE_TIER_AUTO;
+  opt->native_tier_raw = "auto";
   opt->native_tier_budget = -1;
   opt->native_hot_threshold = -1;
   opt->native_cold_threshold = -1;
   opt->native_cache_score = -1;
   opt->native_prefer_vm = false;
   opt->native_prefer_asm = false;
+  /* CF mem2reg is on by default: idom fix + RPO rename before SCCP
+   * make loop-carried locals safe. Disable with --native-disable-cf-mem2reg. */
+  opt->native_enable_cf_mem2reg = true;
   opt->nyir_run_max_steps = -1;
   opt->nyir_run_recursion_limit = -1;
   opt->c_frontend = NY_C_FRONTEND_AUTO;
@@ -1722,6 +1919,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_GREEN, "--host-triple=T", "Host target triple for native build"},
       {NY_CLR_GREEN, "--native-backend=B",
        "Native backend: llvm | x86_64 | x86 | aarch64 | arm | riscv | wasm | bpf | mips | powerpc | avr | amdgpu"},
+      {NY_CLR_GREEN, "--native-tier=T",
+       "Native tier: auto | baseline | stencil | fast | opt | llvm (default: auto, currently baseline)"},
       {NY_CLR_GREEN, "--native-only",
        "Run through NYIR/native object code without LLVM code generation"},
       {NY_CLR_GREEN, "--native-precompile=PATH",
@@ -1729,6 +1928,12 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_GREEN, "--native-abi=A", "Native ABI: auto | sysv | win64 | aapcs"},
       {NY_CLR_GREEN, "--native-result-oracle[=N]",
        "Compare NYIR VM and x86-64 native raw scalar result"},
+      {NY_CLR_GREEN, "--native-oracle-per-pass",
+       "Run the VM/native result oracle after each optimization pass"},
+      {NY_CLR_GREEN, "--native-oracle-fuzz=N",
+       "Generate N deterministic scalar NYIR programs and oracle-check each"},
+      {NY_CLR_GREEN, "--native-tv-seed[=N]",
+       "After each NYIR pass, differential-eval pure i64 straight-line before/after (default N=16)"},
       {NY_CLR_GREEN, "--c-frontend=C", "C frontend: auto | libclang | nytrix"},
       {NY_CLR_GREEN, "--arm-float-abi=A", "ARM ABI: soft | softfp | hard"},
       {NY_CLR_GREEN, "--host-cflags=F", "Extra host compiler flags"},
@@ -1829,6 +2034,10 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_BLUE, "--type-solver=MODE", "Type solver: auto | hm | z3"},
       {NY_CLR_BLUE, "--emit-artifact=PATH",
        "Write the selected stage artifact JSON"},
+      {NY_CLR_BLUE, "--verify-artifact=PATH",
+       "Validate a stage artifact against expanded input and stop"},
+      {NY_CLR_BLUE, "--use-artifact=PATH",
+       "Reuse a validated ABI/opt artifact to skip semantic validation"},
       {NY_CLR_BLUE, "--collect-errors",
        "Emit stage-tagged errors.v1.json on failures"},
       {NY_CLR_BLUE, "--emit-shapes",
@@ -1870,22 +2079,36 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
        "Dump optimized NYIR for native backend diagnostics"},
       {NY_CLR_BLUE, "--nyir-dump-raw",
        "Include raw pre-optimization NYIR in the dump"},
+      {NY_CLR_BLUE, "--nyir-dump-cfg",
+       "Include the reconstructed NYIR basic-block CFG in the dump"},
+      {NY_CLR_BLUE, "--nyir-pass-stats",
+       "Include verified per-pass NYIR change, CFG, and timing diagnostics"},
+      {NY_CLR_BLUE, "--nyir-verify",
+       "Verify NYIR after every optimization pass"},
+      {NY_CLR_BLUE, "--nyir-disable-pass=NAME",
+       "Skip one named NYIR optimizer pass for diagnostics"},
+      {NY_CLR_BLUE, "--nyir-stop-after=NAME",
+       "Stop the NYIR optimizer after one named diagnostic pass"},
       {NY_CLR_BLUE, "--nyir-dump-stats",
        "Include NYIR optimization counters in the dump"},
       {NY_CLR_BLUE, "--nyir-dump-bin[=PATH]",
-       "Emit versioned binary NYIR dump for native backend diagnostics"},
+       "Emit a versioned NYIR program bundle for native diagnostics/reuse"},
       {NY_CLR_BLUE, "--nyir-metadata[=PATH]",
        "Write NYIR metadata/effect/range summary for native diagnostics"},
       {NY_CLR_BLUE, "--nyir-run[=PATH]",
        "Execute optimized rt_main NYIR in the debug VM and print the result"},
       {NY_CLR_BLUE, "--nyir-run-bin=PATH",
-       "Execute a binary NYIR dump through the debug VM"},
+       "Execute a validated binary NYIR dump directly through the debug VM"},
       {NY_CLR_BLUE, "--nyir-run-profile[=PATH]",
        "Write NYIR VM step/op/branch profile data for tiering diagnostics"},
+      {NY_CLR_BLUE, "--native-profile-use=PATH",
+       "Load NyP2 block/edge heat for layout, loop, and inline PGO"},
       {NY_CLR_BLUE, "--nyir-run-max-steps=N",
        "Limit NYIR VM execution steps before failing"},
       {NY_CLR_BLUE, "--nyir-run-recursion-limit=N",
        "Limit in-program NYIR VM recursive call depth"},
+      {NY_CLR_BLUE, "--native-tier=T",
+       "Select native compilation tier (experimental, defaults to baseline)"},
       {NY_CLR_BLUE, "--native-tier-budget=N",
        "Override native tier compile budget"},
       {NY_CLR_BLUE, "--native-hot-threshold=N",
@@ -1898,6 +2121,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
        "Select the preferred native debug tier"},
       {NY_CLR_BLUE, "--native-tier-report[=PATH]",
        "Write native tier facts and backend recommendation"},
+      {NY_CLR_BLUE, "--native-enable-cf-mem2reg",
+       "Compatibility spelling for the default control-flow NYIR mem2reg pass"},
       {NY_CLR_BLUE, "--dump-on-error",
        "Write build/debug/last_source.ny and last_ir.ll on errors"},
       {NY_CLR_BLUE, "--dump-diagnose",
@@ -1929,6 +2154,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
          "Host build tuning"},
         {NY_CLR_YELLOW, "NYTRIX_JIT_CACHE_FORMAT",
          "JIT cache format: bc (default) | ir"},
+        {NY_CLR_YELLOW, "NYTRIX_JIT_NATIVE_CACHE",
+         "Promote validated JIT bitcode entries to reusable native shared objects"},
         {NY_CLR_YELLOW, "NYTRIX_AOT_IR_CACHE",
          "Allow AOT builds to reuse cached IR"},
         {NY_CLR_YELLOW, "NYTRIX_STD_BC_CACHE_VERIFY",
@@ -1968,13 +2195,13 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
   ny_usage_section("EXAMPLES");
   char cmd[512];
   const int example_width = 67;
-  snprintf(cmd, sizeof(cmd), "%s etc/tests/rt/control.ny", prog);
+  snprintf(cmd, sizeof(cmd), "%s etc/tests/runtime/language/control.ny", prog);
   ny_usage_example(example_width, cmd, "compile and run via JIT");
-  snprintf(cmd, sizeof(cmd), "%s -O2 -run etc/tests/rt/control.ny", prog);
+  snprintf(cmd, sizeof(cmd), "%s -O2 -run etc/tests/runtime/language/control.ny", prog);
   ny_usage_example(example_width, cmd, "build native ELF and run");
-  snprintf(cmd, sizeof(cmd), "%s -O2 -o app etc/tests/rt/control.ny", prog);
+  snprintf(cmd, sizeof(cmd), "%s -O2 -o app etc/tests/runtime/language/control.ny", prog);
   ny_usage_example(example_width, cmd, "emit native executable");
-  snprintf(cmd, sizeof(cmd), "%s -v -time -verify etc/tests/rt/control.ny", prog);
+  snprintf(cmd, sizeof(cmd), "%s -v -time -verify etc/tests/runtime/language/control.ny", prog);
   ny_usage_example(example_width, cmd, "debug compilation");
   snprintf(cmd, sizeof(cmd), "%s", prog);
   ny_usage_example(example_width, cmd, "interactive REPL");
@@ -2054,15 +2281,21 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
           strcmp(a, "--safe") == 0) {
         opt->safe_mode = true;
       } else if (strcmp(a, "--native-only") == 0) {
+        /* Preserve an explicitly selected backend regardless of flag order.
+         * The pipeline diagnoses an incompatible LLVM/native-only pairing;
+         * silently replacing it with the host encoder makes `--native-backend`
+         * misleading and can select an unrelated cached artifact. */
+        if (!opt->native_backend_explicit) {
 #if defined(__x86_64__) || defined(_M_X64)
-        ny_set_native_backend_or_die(opt, "x86_64", argv[0]);
+          ny_set_native_backend_or_die(opt, "x86_64", argv[0]);
 #elif defined(__aarch64__) || defined(_M_ARM64)
-        ny_set_native_backend_or_die(opt, "aarch64", argv[0]);
+          ny_set_native_backend_or_die(opt, "aarch64", argv[0]);
 #else
-        fprintf(stderr,
-                "--native-only requires an x86-64 or AArch64 host encoder\n");
-        exit(1);
+          fprintf(stderr,
+                  "--native-only requires an x86-64 or AArch64 host encoder\n");
+          exit(1);
 #endif
+        }
         opt->native_only = true;
         opt->run_aot = true;
         opt->run_jit = false;
@@ -2115,44 +2348,21 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       } else if ((value = ny_option_value_or_die(a, "--host-triple", &i, argc,
                                                  argv, argv[0])) != NULL) {
         opt->host_triple = value;
-      } else if ((value = ny_option_value_or_die(a, "--native-backend", &i,
-                                                 argc, argv, argv[0])) !=
-                 NULL) {
-        ny_set_native_backend_or_die(opt, value, argv[0]);
-      } else if ((value = ny_option_value_or_die(a, "--native-abi", &i, argc,
-                                                 argv, argv[0])) != NULL) {
-        ny_set_native_abi_or_die(opt, value, argv[0]);
-      } else if ((value = ny_option_value_or_die(a, "--native-tier-budget", &i,
-                                                 argc, argv, argv[0])) !=
-                 NULL) {
-        opt->native_tier_budget =
-            ny_parse_nonneg_int_or_die(value, "native tier budget", argv[0]);
-      } else if ((value = ny_option_value_or_die(a, "--native-hot-threshold", &i,
-                                                 argc, argv, argv[0])) !=
-                 NULL) {
-        opt->native_hot_threshold =
-            ny_parse_nonneg_int_or_die(value, "native hot threshold", argv[0]);
-      } else if ((value = ny_option_value_or_die(a, "--native-cold-threshold", &i,
-                                                 argc, argv, argv[0])) !=
-                 NULL) {
-        opt->native_cold_threshold =
-            ny_parse_nonneg_int_or_die(value, "native cold threshold", argv[0]);
-      } else if ((value = ny_option_value_or_die(a, "--native-cache-score", &i,
-                                                 argc, argv, argv[0])) !=
-                 NULL) {
-        opt->native_cache_score =
-            ny_parse_nonneg_int_or_die(value, "native cache score", argv[0]);
-      } else if (strcmp(a, "--native-prefer-vm") == 0) {
-        opt->native_prefer_vm = true;
-        opt->native_prefer_asm = false;
-      } else if (strcmp(a, "--native-prefer-asm") == 0) {
-        opt->native_prefer_asm = true;
-        opt->native_prefer_vm = false;
-      } else if (strcmp(a, "--native-tier-report") == 0) {
-        opt->native_tier_report = true;
-      } else if (strncmp(a, "--native-tier-report=", 21) == 0) {
-        opt->native_tier_report = true;
-        opt->native_tier_report_path = a + 21;
+      } else if (strcmp(a, "--inspect") == 0 ||
+                 strcmp(a, "--dump-optimizer") == 0 ||
+                 strcmp(a, "--dump") == 0) {
+        opt->native_dump_ir = true;
+        opt->nyir_dump_text = true;
+        opt->nyir_dump_raw = true;
+        opt->nyir_pass_stats = true;
+        opt->dump_scope = NY_DUMP_SCOPE_PROGRAM;
+      } else if (strcmp(a, "--inspect-runtime") == 0 ||
+                 strcmp(a, "--dump-runtime") == 0) {
+        opt->native_dump_ir = true;
+        opt->nyir_dump_text = true;
+        opt->nyir_dump_raw = true;
+        opt->nyir_pass_stats = true;
+        opt->dump_scope = NY_DUMP_SCOPE_BOTH;
       } else if (strcmp(a, "--native-dump-ir") == 0 ||
                  strcmp(a, "--nyir-dump") == 0) {
         opt->native_dump_ir = true;
@@ -2169,6 +2379,21 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         opt->native_dump_ir = true;
         opt->nyir_dump_text = true;
         opt->nyir_dump_raw = true;
+      } else if (strcmp(a, "--nyir-dump-cfg") == 0) {
+        opt->native_dump_ir = true;
+        opt->nyir_dump_text = true;
+        opt->nyir_dump_cfg = true;
+      } else if (strcmp(a, "--nyir-pass-stats") == 0) {
+        opt->native_dump_ir = true;
+        opt->nyir_dump_text = true;
+        opt->nyir_dump_raw = true;
+        opt->nyir_pass_stats = true;
+      } else if ((value = ny_option_value_or_die(a, "--nyir-disable-pass", &i,
+                                                   argc, argv, argv[0])) != NULL) {
+        opt->nyir_disable_pass = value;
+      } else if ((value = ny_option_value_or_die(a, "--nyir-stop-after", &i,
+                                                   argc, argv, argv[0])) != NULL) {
+        opt->nyir_stop_after = value;
       } else if (strcmp(a, "--nyir-dump-stats") == 0) {
         opt->native_dump_ir = true;
         opt->nyir_dump_text = true;
@@ -2205,6 +2430,24 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         opt->native_result_oracle_expected = a + 23;
         opt->native_backend = NY_NATIVE_BACKEND_X86_64;
         opt->native_backend_raw = "x86_64";
+      } else if (strcmp(a, "--native-oracle-per-pass") == 0) {
+        opt->native_oracle_per_pass = true;
+        opt->native_result_oracle = true;
+        opt->native_backend = NY_NATIVE_BACKEND_X86_64;
+        opt->native_backend_raw = "x86_64";
+      } else if (strncmp(a, "--native-oracle-fuzz=", 21) == 0) {
+        opt->native_oracle_fuzz_count = ny_parse_nonneg_int_or_die(
+            a + 21, "native oracle fuzz count", argv[0]);
+        opt->native_result_oracle = true;
+        opt->native_backend = NY_NATIVE_BACKEND_X86_64;
+        opt->native_backend_raw = "x86_64";
+      } else if (strcmp(a, "--native-tv-seed") == 0) {
+        opt->native_tv_seed_trials = 16;
+      } else if (strncmp(a, "--native-tv-seed=", 17) == 0) {
+        opt->native_tv_seed_trials = ny_parse_nonneg_int_or_die(
+            a + 17, "native TV seed trials", argv[0]);
+        if (opt->native_tv_seed_trials <= 0)
+          opt->native_tv_seed_trials = 16;
       } else if (strncmp(a, "--nyir-run=", 11) == 0) {
         opt->native_dump_ir = true;
         opt->nyir_run = true;
@@ -2224,6 +2467,8 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         opt->nyir_run = true;
         opt->nyir_run_profile = true;
         opt->nyir_run_profile_path = a + 19;
+      } else if (strncmp(a, "--native-profile-use=", 21) == 0) {
+        opt->native_profile_use_path = a + 21;
       } else if ((value = ny_option_value_or_die(a, "--nyir-run-max-steps", &i,
                                                  argc, argv, argv[0])) !=
                  NULL) {
@@ -2264,6 +2509,9 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         ny_set_opt_level(opt, 0);
       } else if (strcmp(a, "-O3") == 0) {
         ny_set_opt_level(opt, 3);
+      } else if (strcmp(a, "-Oz") == 0) {
+        ny_set_opt_level(opt, 0);
+        opt->opt_size = true;
       } else if (strcmp(a, "--fast") == 0) {
         if (!opt->opt_level)
           opt->opt_level = 2;
@@ -2366,9 +2614,7 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         if (opt->verbose < 1)
           opt->verbose = 1;
       } else if (strncmp(a, "--verbose=", 10) == 0) {
-        int lvl = atoi(a + 10);
-        if (lvl < 0)
-          lvl = 0;
+        int lvl = ny_parse_nonneg_int_or_die(a + 10, "verbose level", argv[0]);
         if (lvl > 3)
           lvl = 3;
         if (opt->verbose < lvl)
@@ -2519,7 +2765,7 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
           opt->heap_policy = NY_HEAP_MANUAL;
       } else if (strcmp(a, "-timeout") == 0 || strcmp(a, "--timeout") == 0) {
         if (i + 1 < argc) {
-          opt->timeout = atof(argv[++i]);
+          opt->timeout = ny_parse_nonneg_f64_or_die(argv[++i], "timeout", argv[0]);
         } else {
           fprintf(stderr, "missing argument for %s\n", a);
           ny_options_usage(argv[0]);
@@ -2562,6 +2808,12 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
           opt->color_mode = 1;
         else if (strcmp(mode, "never") == 0)
           opt->color_mode = 0;
+        else {
+          fprintf(stderr, "invalid color mode: %s (expected auto|always|never)\n",
+                  mode);
+          ny_options_usage(argv[0]);
+          exit(1);
+        }
       } else if (strcmp(a, "--help-env") == 0 || strcmp(a, "--env-help") == 0) {
         opt->mode = NY_MODE_HELP;
         opt->help_env = true;

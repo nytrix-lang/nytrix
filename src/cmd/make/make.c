@@ -4,6 +4,7 @@
 
 #include "make.h"
 #include "base/args.h"
+#include "base/util.h"
 #include "../tools/repo.h"
 #include "../tools/tool.h"
 
@@ -107,10 +108,10 @@ static const char *default_fuzz_shape_dir(void) {
   struct stat st;
   if (stat("tmp/tests/fuzz/shapes", &st) == 0)
     return "tmp/tests/fuzz/shapes";
-  if (stat("etc/tests/fuzz/shapes", &st) == 0)
-    return "etc/tests/fuzz/shapes";
-  if (stat("etc/tests/fuzz", &st) == 0)
-    return "etc/tests/fuzz";
+  if (stat("etc/tests/shapes", &st) == 0)
+    return "etc/tests/shapes";
+  if (stat("etc/tests", &st) == 0)
+    return "etc/tests";
   return "tmp/tests/fuzz/shapes";
 }
 
@@ -318,8 +319,8 @@ static int resolve_jobs(int requested, int *out_jobs, char *note, size_t note_sz
   }
   const char *env_jobs = getenv("NYTRIX_BUILD_JOBS");
   if (env_jobs && *env_jobs) {
-    int v = atoi(env_jobs);
-    if (v > 0) {
+    int v = 0;
+    if (ny_parse_int(env_jobs, &v) && v > 0) {
       jobs = v;
       snprintf(note, note_sz, "jobs=%d from NYTRIX_BUILD_JOBS", jobs);
     }
@@ -734,8 +735,8 @@ static int run_test_tool(const char *root, const char *kind, int jobs, const cha
 static int resolve_test_jobs(int cli_jobs) {
   const char *env_jobs = getenv("NYTRIX_TEST_JOBS");
   if (env_jobs && *env_jobs) {
-    int v = atoi(env_jobs);
-    if (v >= 0)
+    int v = 0;
+    if (ny_parse_int(env_jobs, &v) && v >= 0)
       return v;
   }
   if (cli_jobs > 0)
@@ -1080,7 +1081,12 @@ int ny_make_main(int argc, char **argv) {
       if (rc != 0)
         return rc;
     } else if (strcmp(cmd, "optcheck") == 0 || strcmp(cmd, "fb") == 0) {
-      nyt_err("ny-make", "command '%s' is not yet ported to native C path", cmd);
+      nyt_err("ny-make",
+              "command '%s' is not implemented on the native C path.\n"
+              "  For optimization correctness, use: ./make test\n"
+              "  For fuzz/shape validation, use:  ./make fuzz [validate-shapes etc/tests/shapes]\n"
+              "  For benchmarks, use:             ./make bench",
+              cmd);
       return 2;
     } else {
       nyt_err("ny-make", "unsupported command: %s", cmd);

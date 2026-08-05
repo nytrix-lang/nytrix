@@ -1,13 +1,3 @@
-
-#define memset_manual(p, v, n)                                                                     \
-  do {                                                                                             \
-    unsigned char *_p = (unsigned char *)(p);                                                      \
-    unsigned char _v = (unsigned char)(v);                                                         \
-    size_t _n = (n);                                                                               \
-    while (_n-- > 0)                                                                               \
-      *_p++ = _v;                                                                                  \
-  } while (0)
-
 #include "base/common.h"
 #include "rt/shared.h"
 #include <ctype.h>
@@ -26,25 +16,31 @@
 #include <io.h>
 #endif
 
-#ifdef _WIN32
-#ifdef rt_argc
-#undef rt_argc
-#endif
-#ifdef rt_argv
-#undef rt_argv
-#endif
-#endif
-
-#ifndef _WIN32
-extern char **environ;
-#endif
-
 extern int64_t rt_lt(int64_t a, int64_t b);
 
 int color_mode __attribute__((weak)) = 0;
 int debug_enabled __attribute__((weak)) = 0;
 
 int64_t rt_globals_ptr = 1;
+
+/* LLVM-free native lowering uses this raw typed-buffer allocator directly.
+ * The public std.core.tbuf API returns the data pointer (metadata lives in the
+ * preceding 16 bytes), so keep this ABI raw and independent of NyValue tags. */
+int64_t rt_native_tbuf_new(int64_t count, int64_t elem_size) {
+  if (count < 0)
+    count = 0;
+  if (elem_size <= 0)
+    elem_size = 1;
+  if ((uint64_t)count > (SIZE_MAX - 16u) / (uint64_t)elem_size)
+    return 0;
+  size_t bytes = 16u + (size_t)count * (size_t)elem_size;
+  unsigned char *base = calloc(1, bytes);
+  if (!base)
+    return 0;
+  memcpy(base, &count, sizeof(count));
+  memcpy(base + 8, &elem_size, sizeof(elem_size));
+  return (int64_t)(uintptr_t)(base + 16);
+}
 
 int g_trace_requested = 0;
 int g_trace_suspended = 0;
@@ -64,7 +60,7 @@ static const char *g_trace_env_filter = NULL;
 #else
 #define NY_JMP_BUF jmp_buf
 
-#define NY_SETJMP(env) _setjmp(env, NULL)
+#define NY_SETJMP(env) setjmp(env)
 #define NY_LONGJMP(env, val) longjmp(env, val)
 #endif
 
@@ -206,7 +202,7 @@ static bool trace_is_internal_helper(int64_t func) {
          trace_func_matches(func, "std.core.error.panic");
 }
 
-#define RT_PRINT_BUF_SIZE 65536
+#define RT_PRINT_BUF_SIZE 8192
 static char rt_print_buf[RT_PRINT_BUF_SIZE];
 static uint32_t rt_print_pos = 0;
 static int rt_stdout_is_tty = -1;
@@ -286,6 +282,18 @@ int64_t rt_print_str_raw(int64_t v) {
   return v;
 }
 
+/* Pure-native path: null-terminated C string pointer (no Nytrix string header). */
+int64_t rt_print_cstr(int64_t p) {
+  if (!p)
+    return 0;
+  const char *s = (const char *)(uintptr_t)p;
+  size_t len = 0;
+  while (s[len])
+    ++len;
+  rt_print_put(s, len);
+  return p;
+}
+
 static const char rt_digit_pairs[] = "00010203040506070809"
                                      "10111213141516171819"
                                      "20212223242526272829"
@@ -297,23 +305,24 @@ static const char rt_digit_pairs[] = "00010203040506070809"
                                      "80818283848586878889"
                                      "90919293949596979899";
 
-int64_t rt_print_int(int64_t v) {
-  int64_t val = (int64_t)(v >> 1);
+int64_t rt_print_i64_raw(int64_t val) {
   if (rt_print_pos + 24 >= RT_PRINT_BUF_SIZE)
     rt_print_flush();
 
   if (val == 0) {
     rt_print_buf[rt_print_pos++] = '0';
-    return v;
+    return val;
   }
   char *start = rt_print_buf + rt_print_pos;
+  uint64_t abs_v;
   if (val < 0) {
     *start++ = '-';
-    val = -val;
+    abs_v = 0 - (uint64_t)val;
+  } else {
+    abs_v = (uint64_t)val;
   }
   char tmp[24];
   char *p = tmp + sizeof(tmp);
-  uint64_t abs_v = (uint64_t)val;
   while (abs_v >= 100) {
     unsigned r = (unsigned)(abs_v % 100);
     abs_v /= 100;
@@ -329,6 +338,99 @@ int64_t rt_print_int(int64_t v) {
   size_t len = (size_t)(tmp + sizeof(tmp) - p);
   memcpy(start, p, len);
   rt_print_pos = (uint32_t)(start - rt_print_buf + len);
+  return val;
+}
+
+int64_t rt_print_int(int64_t v) {
+  rt_print_i64_raw((int64_t)(v >> 1));
+  return v;
+}
+
+/* Type-dispatched print: handles every Nytrix value correctly.
+ * Used by the native backend and any path where the static type is unknown. */
+int64_t rt_print_value(int64_t v) {
+  /* nil */
+  if (rt_is_nil_imm(v)) {
+    rt_print_put("nil", 3);
+    return v;
+  }
+  /* booleans */
+  if (rt_is_true_imm(v)) {
+    rt_print_put("true", 4);
+    return v;
+  }
+  if (rt_is_false_imm(v)) {
+    rt_print_put("false", 5);
+    return v;
+  }
+  /* tagged integer — fast inline path */
+  if (is_int(v)) {
+    return rt_print_int(v);
+  }
+  /* string */
+  if (is_v_str(v)) {
+    return rt_print_str_raw(v);
+  }
+  /* pointer-tagged objects */
+  if (is_ptr(v)) {
+    if (is_v_flt(v)) {
+      double d;
+      memcpy(&d, (const void *)(uintptr_t)v, 8);
+      char buf[64];
+      int n = snprintf(buf, sizeof(buf), "%g", d);
+      rt_print_put(buf, (size_t)n);
+      return v;
+    }
+    if (is_heap_ptr(v)) {
+      int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
+      if (tag == TAG_COMPLEX) {
+        double re = 0.0, im = 0.0;
+        memcpy(&re, (const void *)(uintptr_t)v, 8);
+        memcpy(&im, (const void *)((uintptr_t)v + 8), 8);
+        char buf[128];
+        int n = snprintf(buf, sizeof(buf), "%g%+gi", re, im);
+        rt_print_put(buf, (size_t)n);
+        return v;
+      }
+      if (tag == TAG_BIGINT) {
+        extern int64_t rt_bigint_to_str(int64_t);
+        int64_t s = rt_bigint_to_str(v);
+        if (s)
+          rt_print_str_raw(s);
+        return v;
+      }
+      if (tag == TAG_BIGFLOAT) {
+        extern int64_t rt_bigfloat_to_str(int64_t);
+        int64_t s = rt_bigfloat_to_str(v);
+        if (s)
+          rt_print_str_raw(s);
+        return v;
+      }
+      char buf[80];
+      int n = snprintf(buf, sizeof(buf), "<ptr 0x%lx tag=%ld>",
+                       (unsigned long)v, (long)tag);
+      rt_print_put(buf, (size_t)n);
+      return v;
+    }
+    /* native/ffi pointer */
+    if (NY_NATIVE_IS(v)) {
+      char buf[64];
+      int n = snprintf(buf, sizeof(buf), "<ffi_ptr 0x%lx>",
+                       (unsigned long)(uintptr_t)NY_NATIVE_DECODE(v));
+      rt_print_put(buf, (size_t)n);
+      return v;
+    }
+    /* function pointer */
+    if ((v & 3) == 2) {
+      char buf[64];
+      int n = snprintf(buf, sizeof(buf), "<fn 0x%lx>",
+                       (unsigned long)(v & ~3ULL));
+      rt_print_put(buf, (size_t)n);
+      return v;
+    }
+  }
+  /* fallback */
+  rt_print_put("nil", 3);
   return v;
 }
 
@@ -684,16 +786,16 @@ int64_t rt_trace_loc(int64_t file, int64_t line, int64_t col) {
   g_trace_line = line;
   g_trace_col = col;
   if (g_trace_suspended)
-    return 0;
+    return rt_tag_v(0);
   trace_record(file, line, col, g_trace_func);
   if (trace_locations_enabled() && is_v_str(g_trace_func) && trace_should_print_func(g_trace_func))
     trace_print_loc();
-  return 0;
+  return rt_tag_v(0);
 }
 
 int64_t rt_trace_func(int64_t name) {
   g_trace_func = name;
-  return 0;
+  return rt_tag_v(0);
 }
 
 int64_t rt_trace_last_file(void) { return g_trace_file; }
@@ -745,7 +847,7 @@ static void print_rt_snippet(int64_t file_ptr, int64_t line_ptr, int64_t col_ptr
 
 int64_t rt_trace_dump(int64_t count) {
   if (g_trace_len == 0)
-    return 0;
+    return rt_tag_v(0);
   size_t want = (size_t)(is_int(count) ? rt_untag_v(count) : count);
   if (want == 0 || want > g_trace_len)
     want = g_trace_len;
@@ -755,7 +857,7 @@ int64_t rt_trace_dump(int64_t count) {
     print_trace_entry(g_trace_files[idx], g_trace_lines[idx], g_trace_cols[idx], g_trace_funcs[idx],
                       "  at ");
   }
-  return 0;
+  return rt_tag_v(0);
 }
 
 int64_t rt_trace_get_frames(int64_t *f, int64_t *l, int64_t *c, int64_t *fn, int count) {
@@ -780,7 +882,7 @@ int64_t rt_trace_enter(int64_t func, int64_t file, int64_t line) {
   g_trace_line = line;
   g_trace_col = 1;
   if (g_trace_suspended)
-    return 0;
+    return rt_tag_v(0);
   trace_record(file, line, 1, func);
 
   if (g_cs_depth < CALL_STACK_MAX) {
@@ -793,12 +895,12 @@ int64_t rt_trace_enter(int64_t func, int64_t file, int64_t line) {
     size_t depth = g_cs_depth > 0 ? g_cs_depth - 1 : 0;
     trace_print_call(file, line, func, depth);
   }
-  return 0;
+  return rt_tag_v(0);
 }
 
 int64_t rt_trace_exit(void) {
   if (g_trace_suspended)
-    return 0;
+    return rt_tag_v(0);
   int64_t func = g_cs_depth > 0 ? g_cs_funcs[g_cs_depth - 1] : g_trace_func;
   size_t depth = g_cs_depth > 0 ? g_cs_depth - 1 : 0;
   if (trace_calls_enabled() && !trace_values_enabled() && trace_should_print_func(func)) {
@@ -813,19 +915,19 @@ int64_t rt_trace_exit(void) {
       g_trace_func = 0;
     }
   }
-  return 0;
+  return rt_tag_v(0);
 }
 
 int64_t rt_trace_ret_void(void) {
   if (g_trace_suspended)
-    return 0;
+    return rt_tag_v(0);
   int64_t func = g_cs_depth > 0 ? g_cs_funcs[g_cs_depth - 1] : g_trace_func;
   size_t depth = g_cs_depth > 0 ? g_cs_depth - 1 : 0;
   if (!trace_values_enabled() || !trace_should_print_func(func))
-    return 0;
+    return rt_tag_v(0);
   trace_print_return_prefix(func, depth);
   fputc('\n', stderr);
-  return 0;
+  return rt_tag_v(0);
 }
 
 int64_t rt_trace_ret_tagged(int64_t v) {
@@ -1103,6 +1205,7 @@ int64_t rt_argv(int64_t i) {
 
 int64_t rt_tag(int64_t v) { return rt_tag_v(v); }
 int64_t rt_untag(int64_t v) { return rt_untag_v(v); }
+int64_t rt_is_nil(int64_t v) { return rt_is_nil_imm(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
 int64_t rt_is_int(int64_t v) { return is_int(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
 int64_t rt_is_ptr(int64_t v) { return is_ptr(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
 int64_t rt_is_ny_obj(int64_t v) { return is_ny_obj(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
@@ -1443,8 +1546,10 @@ static inline uint64_t rt_dict_hash_mix64(uint64_t bits) {
 static uint64_t rt_dict_hash_raw(int64_t key) {
   if (is_int(key))
     return (uint64_t)(key >> 1);
-  if (!key || key == NY_IMM_FALSE)
-    return 0;
+  if (rt_is_nil_imm(key))
+    return 0x4e494cULL;
+  if (key == NY_IMM_FALSE)
+    return 0x46414c5345ULL;
   if (is_v_str(key)) {
     size_t n = rt_tagged_str_len(key);
     const unsigned char *s = (const unsigned char *)(uintptr_t)key;
@@ -1524,23 +1629,6 @@ static int64_t rt_dict_insert_no_resize_fast(int64_t d, int64_t key, int64_t val
   return d;
 }
 
-static int64_t rt_dict_resize_fast(int64_t d, int64_t old_cap) {
-  int64_t new_cap = old_cap < 8 ? 8 : old_cap * 2;
-  int64_t nd = rt_dict_new_raw_cap(new_cap);
-  if (!nd)
-    return d;
-  for (int64_t i = 0; i < old_cap; i++) {
-    int64_t off = 16 + i * 24;
-    int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
-    if (state == rt_tag_v(1)) {
-      int64_t key = *(int64_t *)((char *)(uintptr_t)d + off);
-      int64_t value = *(int64_t *)((char *)(uintptr_t)d + off + 8);
-      rt_dict_insert_no_resize_fast(nd, key, value);
-    }
-  }
-  return nd;
-}
-
 int64_t rt_dict_reserve(int64_t d, int64_t additional_v) {
   if (!is_ptr(d) || !is_heap_ptr(d))
     return d;
@@ -1575,46 +1663,6 @@ int64_t rt_dict_reserve(int64_t d, int64_t additional_v) {
   return nd;
 }
 
-int64_t rt_dict_write_fast(int64_t d, int64_t key, int64_t value) {
-  if (!is_ptr(d) || !is_heap_ptr(d))
-    return d;
-  if (*(int64_t *)((char *)(uintptr_t)d - 8) != TAG_DICT)
-    return d;
-
-  int64_t cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
-  int64_t count = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 0));
-  if (cap <= 0)
-    return d;
-
-  int64_t off = rt_dict_find_off_fast(d, cap, key);
-  if (off >= 0) {
-    int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
-    if (state == rt_tag_v(1)) {
-      *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
-      return d;
-    }
-  }
-
-  if (off < 0 || (count + 1) * 2 > cap) {
-    d = rt_dict_resize_fast(d, cap);
-    cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
-    off = rt_dict_find_off_fast(d, cap, key);
-    if (off < 0)
-      return d;
-  }
-
-  int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
-  if (state != rt_tag_v(1)) {
-    count = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 0));
-    *(int64_t *)((char *)(uintptr_t)d + off) = key;
-    *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
-    *(int64_t *)((char *)(uintptr_t)d + off + 16) = rt_tag_v(1);
-    *(int64_t *)((char *)(uintptr_t)d + 0) = rt_tag_v(count + 1);
-  } else {
-    *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
-  }
-  return d;
-}
 
 int64_t rt_load_item(int64_t lst, int64_t i_v) { return rt_load_item_fast(lst, i_v); }
 
@@ -1808,9 +1856,20 @@ static bool rt_msg_in(const char *msg, size_t msg_len, const char *const *items,
 static void print_panic_msg(int64_t msg_ptr) {
   const char *red = color_mode ? clr(NY_CLR_RED) : "";
   const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
+  const char *file = is_v_str(g_trace_file) ? (const char *)(uintptr_t)g_trace_file : NULL;
+  int64_t line = g_trace_line;
+  int64_t col = g_trace_col;
+  const char *loc_fmt = "";
+  char loc_buf[256];
+  if (file && line > 0) {
+    int n = snprintf(loc_buf, sizeof(loc_buf), " at %s:%" PRId64 ":%" PRId64, file, line, col);
+    if (n > 0 && (size_t)n < sizeof(loc_buf))
+      loc_fmt = loc_buf;
+  }
 
   if (is_int(msg_ptr)) {
-    fprintf(stderr, "%sPanicError:%s %" PRId64 "\n", red, rs, (int64_t)rt_untag_v(msg_ptr));
+    fprintf(stderr, "%sPanicError:%s %" PRId64 "%s\n", red, rs,
+            (int64_t)rt_untag_v(msg_ptr), loc_fmt);
   } else if (is_v_str(msg_ptr)) {
     const char *msg = (const char *)(uintptr_t)msg_ptr;
     size_t msg_len = rt_tagged_str_len(msg_ptr);
@@ -1822,13 +1881,14 @@ static void print_panic_msg(int64_t msg_ptr) {
                   sizeof(zero_division_msgs) / sizeof(zero_division_msgs[0]))) {
       kind = "ZeroDivisionError";
     }
-    fprintf(stderr, "%s%s:%s %.*s\n", red, kind, rs, (int)msg_len, msg);
+    fprintf(stderr, "%s%s:%s %.*s%s\n", red, kind, rs, (int)msg_len, msg, loc_fmt);
   } else if (is_v_err(msg_ptr)) {
     int64_t err = rt_unwrap(msg_ptr);
     fprintf(stderr, "%sNytrixError:%s ", red, rs);
     print_panic_msg(err);
   } else {
-    fprintf(stderr, "%sPanicError:%s 0x%" PRIx64 "\n", red, rs, (uint64_t)msg_ptr);
+    fprintf(stderr, "%sPanicError:%s 0x%" PRIx64 "%s\n", red, rs, (uint64_t)msg_ptr,
+            loc_fmt);
   }
 }
 

@@ -74,7 +74,8 @@ fn _summary_count_categories(list records) dict {
 }
 
 fn _summary_add_finding(list xs, str severity, str kind, str message, any evidence=dict()) list {
-   xs.append({"severity": severity, "kind": kind, "message": message, "evidence": evidence})
+   xs = xs.append({"severity": severity, "kind": kind, "message": message, "evidence": evidence})
+   xs
 }
 
 fn _summary_call_records(list calls) list {

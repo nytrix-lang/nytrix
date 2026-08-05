@@ -2,7 +2,7 @@
 ;; Sound facade for sources, mixers, backend selection, and one-shot playback.
 ;; References:
 ;; - std.os
-module std.os.sound(init, shutdown, load, play, stop, stop_all, is_playing, set_volume, get_volume, set_pitch, get_pitch, set_pan, get_pan, set_master_volume, get_master_volume, set_fx_enabled, fx_enabled, set_fx_param, get_fx_param, reset_fx, fx_preset, play_oneshot, get_backend_name, diag, probe, probe_text, print_probe)
+module std.os.sound(init, shutdown, load, play, stop, stop_all, is_playing, set_volume, get_volume, set_pitch, get_pitch, set_pan, get_pan, set_master_volume, get_master_volume, set_fx_enabled, fx_enabled, set_fx_param, get_fx_param, reset_fx, fx_preset, play_oneshot, get_backend_name, web_play, diag, probe, probe_text, print_probe)
 use std.core
 use std.os.sound.backend as snd_backend
 use std.os.sound.res as res
@@ -96,6 +96,13 @@ fn get_master_volume() any {
 fn get_backend_name() str {
    "Returns the name of the active audio backend."
    return snd_backend.get_backend_name()
+}
+
+fn web_play(any path) bool {
+   "On the browser target, decodes the packed audio asset at `path` and starts
+    one-shot playback through Web Audio. Native desktop returns true as a no-op;
+    the browser host echoes decode results into data-audio-* attributes."
+   true
 }
 
 fn set_fx_enabled(bool enabled=true) any { snd_backend.set_fx_enabled(enabled) }
