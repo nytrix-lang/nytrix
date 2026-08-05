@@ -75,7 +75,7 @@ static char *shape_source_block(const char *shape_path, const char *name);
 static char *materialize_shape_ny_source(const char *shape_path);
 static char *shape_meta_string(const char *shape_path, const char *key);
 static int native_backend_explicit(const char *flags);
-static int path_is_native_runtime_test(const char *p);
+static int path_is_native_test(const char *p);
 static int path_is_stdlib_source(const char *p);
 static int run_progress_selftest(const char *bin, int timeout_sec);
 static int make_test_capture_tmp(char *tmp, size_t tmp_len,
@@ -407,6 +407,10 @@ static void collect_ny(const char *path, StrVec *out) {
   }
   if (!is_dir(path))
     return;
+  /* Strip trailing slash so path joins produce no double-slash. */
+  size_t plen = strlen(path);
+  while (plen > 1 && path[plen - 1] == '/')
+    plen--;
   DIR *d = opendir(path);
   if (!d)
     return;
@@ -417,7 +421,7 @@ static void collect_ny(const char *path, StrVec *out) {
     if (ent->d_name[0] == '.')
       continue;
     char child[PATH_MAX];
-    snprintf(child, sizeof(child), "%s/%s", path, ent->d_name);
+    snprintf(child, sizeof(child), "%.*s/%s", (int)plen, path, ent->d_name);
     if (is_dir(child))
       collect_ny(child, out);
     else if (nyt_ends_with(child, ".ny") || nyt_ends_with(child, ".nshape"))
@@ -1031,6 +1035,7 @@ static int test_build_missing_archive(const char *archive_path) {
   sv_free(&srcs);
   return ok;
 }
+
 static char *decode_shape_quoted_string(const char *start, size_t len);
 
 #ifndef _WIN32
@@ -1405,7 +1410,7 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
     argv[argc++] = "--std-bc";
     argv[argc++] = (char *)std_bc;
   }
-  if (path_is_native_runtime_test(path) && !has_native_backend && argc < 78) {
+  if (path_is_native_test(path) && !has_native_backend && argc < 78) {
     argv[argc++] = "--native-backend";
     argv[argc++] = "x86_64";
   }
@@ -1676,20 +1681,30 @@ static char *shape_meta_string(const char *shape_path, const char *key) {
   return NULL;
 }
 
+static int shape_skips_ci(const char *path) {
+  if (!path || !nyt_ends_with(path, ".nshape"))
+    return 0;
+  char *ci = shape_meta_string(path, "ci");
+  int skip = ci && (strcmp(ci, "skip") == 0 || strcmp(ci, "optional") == 0);
+  free(ci);
+  return skip;
+}
+
 static char *materialize_shape_ny_source(const char *shape_path) {
   char *source = shape_source_block(shape_path, "ny");
   if (!source)
     return NULL;
   char tmp[PATH_MAX];
 #ifdef _WIN32
-  char tmp_dir[PATH_MAX];
-  DWORD tmp_len = GetTempPathA((DWORD)sizeof(tmp_dir), tmp_dir);
-  if (tmp_len == 0 || tmp_len >= sizeof(tmp_dir))
-    snprintf(tmp_dir, sizeof(tmp_dir), ".\\");
-  static volatile LONG shape_seq = 0;
-  LONG seq = InterlockedIncrement((volatile LONG *)&shape_seq);
-  snprintf(tmp, sizeof(tmp), "%sny-shape-%lu-%lu-%ld.ny", tmp_dir,
-           (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount(), (long)seq);
+  /* Keep generated shape sources below the build tree.  MSYS's global temp
+   * directory can be mounted under a different Windows path from the test
+   * workspace, which makes a source path accepted by the test runner
+   * unreadable to the spawned compiler.  GetTempFileNameA creates the file
+   * atomically and gives every concurrent test a distinct relative path. */
+  if (!GetTempFileNameA("build", "nys", 0, tmp)) {
+    free(source);
+    return NULL;
+  }
   FILE *f = fopen(tmp, "wb");
   if (!f) {
     free(source);
@@ -1915,7 +1930,7 @@ static int test_debugger_for_rc(int rc) {
 }
 
 static int test_is_ownership_error_path(const char *path) {
-  return path && strstr(path, "etc/tests/fuzz/errors/ownership/") != NULL;
+  return path && strstr(path, "etc/tests/errors/ownership/") != NULL;
 }
 
 static int test_is_optional_system_stdlib(const char *path) {
@@ -1932,24 +1947,24 @@ static int test_is_unsupported_native_host(const char *path) {
   (void)path;
   return 0;
 #elif defined(__aarch64__) || defined(_M_ARM64)
-  if (!path || strncmp(path, "etc/tests/rt/native/", 20) != 0)
+  if (!path || strncmp(path, "etc/tests/native/", 17) != 0)
     return 0;
-  return strncmp(path, "etc/tests/rt/native/aarch64/", 28) != 0 &&
-         strncmp(path, "etc/tests/rt/native/target/", 25) != 0;
+  return strncmp(path, "etc/tests/native/aarch64/", 25) != 0 &&
+         strncmp(path, "etc/tests/native/target/", 24) != 0;
 #else
-  return path && strncmp(path, "etc/tests/rt/native/", 20) == 0;
+  return path && strncmp(path, "etc/tests/native/", 17) == 0;
 #endif
 }
 
 static int test_is_unsupported_native_platform(const char *path) {
 #if !defined(__linux__)
   if (path &&
-      (strncmp(path, "etc/tests/rt/native/elf32/link/", 31) == 0 ||
-       strncmp(path, "etc/tests/rt/native/elf64/link/", 31) == 0 ||
-       strncmp(path, "etc/tests/rt/native/aarch64/link/", 33) == 0))
+      (strncmp(path, "etc/tests/native/elf32/link/", 28) == 0 ||
+       strncmp(path, "etc/tests/native/elf64/link/", 28) == 0 ||
+       strncmp(path, "etc/tests/native/aarch64/link/", 30) == 0))
     return 1;
 #elif !defined(__aarch64__)
-  if (path && strncmp(path, "etc/tests/rt/native/aarch64/link/", 33) == 0) {
+  if (path && strncmp(path, "etc/tests/native/aarch64/link/", 30) == 0) {
     const char *emulator = getenv("NYTRIX_TEST_EMULATOR");
     if (!emulator || !*emulator)
       emulator = "qemu-aarch64";
@@ -1959,7 +1974,18 @@ static int test_is_unsupported_native_platform(const char *path) {
 #endif
 #ifdef _WIN32
   if (path &&
-      strcmp(path, "etc/tests/rt/native/c/internal-byvalue-param-import-lowering.nshape") == 0)
+      (strcmp(path, "etc/tests/native/c/internal-byvalue-param-import-lowering.nshape") == 0 ||
+       strcmp(path, "etc/tests/native/c/native-only-register-aggregate-param.nshape") == 0 ||
+       strcmp(path, "etc/tests/native/c/native-only-two-eightbyte-return.nshape") == 0 ||
+       strcmp(path, "etc/tests/native/c/transitive-layout-import.nshape") == 0 ||
+       strcmp(path, "etc/tests/native/c/internal-aggregate-pointer-import-lowering.nshape") == 0 ||
+       strcmp(path, "etc/tests/native/c/internal-bitfield.nshape") == 0 ||
+       strcmp(path, "etc/tests/native/c/internal-byvalue-aggregate-import-lowering.nshape") == 0 ||
+       strcmp(path, "etc/tests/native/c/internal-variadic-import-lowering.nshape") == 0 ||
+       strcmp(path, "etc/tests/native/c/native-only-aggregate-return.nshape") == 0 ||
+       strcmp(path, "etc/tests/native/nyir/asm-native-only.nshape") == 0 ||
+       strcmp(path, "etc/tests/shapes/probes/sys/interact-process.nshape") == 0 ||
+       strcmp(path, "etc/tests/shapes/probes/sys/vterm-key-state-open.nshape") == 0))
     return 1;
 #endif
   return 0;
@@ -1967,11 +1993,11 @@ static int test_is_unsupported_native_platform(const char *path) {
 
 static int test_is_host_sensitive_native_fp_link(const char *path) {
   static const char *const cases[] = {
-      "f32.nshape", "f32_call.nshape", "f32_call9.nshape",
-      "f64.nshape", "f64_call.nshape", "f64_call9.nshape",
-      "f64_call10.nshape", "mixed_both_stack.nshape",
-      "mixed_f64_stack.nshape"};
-  const char *prefix = "etc/tests/rt/native/elf64/link/";
+      "f32.nshape", "f32-call.nshape", "f32-call9.nshape",
+      "f64.nshape", "f64-call.nshape", "f64-call9.nshape",
+      "f64-call10.nshape", "mixed-both-stack.nshape",
+      "mixed-f64-stack.nshape"};
+  const char *prefix = "etc/tests/native/elf64/link/";
   if (!path || strncmp(path, prefix, strlen(prefix)) != 0)
     return 0;
   const char *base = path + strlen(prefix);
@@ -2030,7 +2056,7 @@ static int build_trace_argv(char **argv, int max, const char *bin, const char *p
         !append_arg(argv, &argc, max, (char *)std_bc))
       return 0;
   }
-  if (path_is_native_runtime_test(path) && !has_native_backend) {
+  if (path_is_native_test(path) && !has_native_backend) {
     if (!append_arg(argv, &argc, max, "--native-backend") ||
         !append_arg(argv, &argc, max, "x86_64"))
       return 0;
@@ -2798,7 +2824,7 @@ static int run_error_case(const char *bin, const char *path, const char *std_pat
     snprintf(flags_buf, sizeof(flags_buf), "%s", flags);
     trim_inplace(flags_buf);
   }
-  bool ownership_case = path && strstr(path, "etc/tests/fuzz/errors/ownership/") != NULL;
+  bool ownership_case = path && strstr(path, "etc/tests/errors/ownership/") != NULL;
   char *flagv[32];
   int flagc = split_words(flags_buf, flagv, 32);
 
@@ -3145,7 +3171,7 @@ static uint64_t file_sig(const char *p) {
 static uint64_t test_sig(const char *path, const char *bin, const char *std_path, const char *std_bc) {
   uint64_t h = 1469598103934665603ULL;
   uint64_t a = file_sig(path), b = file_sig(bin), c = file_sig(std_path), d = file_sig(std_bc);
-  const char *mode = path_is_native_runtime_test(path) ? "native:x86_64" : "default";
+  const char *mode = path_is_native_test(path) ? "native:x86_64" : "default";
   h = fnv1a_update(h, &a, sizeof(a));
   h = fnv1a_update(h, &b, sizeof(b));
   h = fnv1a_update(h, &c, sizeof(c));
@@ -3313,12 +3339,14 @@ static void host_core_counts(int *physical, int *logical) {
     while (fgets(line, sizeof(line), f)) {
       if (strncmp(line, "cpu cores", 9) == 0) {
         char *colon = strchr(line, ':');
-        if (colon && atoi(colon + 1) > 0)
-          cpu_cores = atoi(colon + 1);
+        int v = 0;
+        if (colon && ny_parse_int(colon + 1, &v) && v > 0)
+          cpu_cores = v;
       } else if (strncmp(line, "siblings", 8) == 0) {
         char *colon = strchr(line, ':');
-        if (colon && atoi(colon + 1) > 0)
-          siblings = atoi(colon + 1);
+        int v = 0;
+        if (colon && ny_parse_int(colon + 1, &v) && v > 0)
+          siblings = v;
       }
       if (cpu_cores > 0 && siblings > 0)
         break;
@@ -3395,11 +3423,12 @@ static int native_backend_explicit(const char *flags) {
 }
 
 static int path_is_probe_test(const char *p) {
-  return p && (strncmp(p, "probe/", 6) == 0 || strstr(p, "/probe/") != NULL);
+  return p && (strncmp(p, "probe/", 6) == 0 || strncmp(p, "probes/", 7) == 0 ||
+               strstr(p, "/probe/") != NULL || strstr(p, "/probes/") != NULL);
 }
 
-static int path_is_native_runtime_test(const char *p) {
-  return p && strncmp(p, "etc/tests/rt/native/", 20) == 0;
+static int path_is_native_test(const char *p) {
+  return p && strncmp(p, "etc/tests/native/", 17) == 0;
 }
 
 static int path_is_stdlib_source(const char *p) {
@@ -3409,21 +3438,30 @@ static int path_is_stdlib_source(const char *p) {
 }
 
 static const char *suite_for_path(const char *p, const char *fallback) {
-  if (p && strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
+  if (p && strncmp(p, "etc/tests/bench/", 16) == 0)
     return "Benchmark";
-  if (p && strncmp(p, "etc/tests/rt/", 13) == 0)
+  if (p && strncmp(p, "etc/tests/runtime/", 18) == 0)
     return "Runtime";
+  if (p && strncmp(p, "etc/tests/native/", 17) == 0)
+    return "Native";
+  if (p && strncmp(p, "etc/tests/interop/", 18) == 0)
+    return "Interop";
   if (path_is_probe_test(p))
     return "Probe";
   return fallback ? fallback : "Std";
 }
 
 static SuiteStats *stats_for_path(const char *p, SuiteStats *fallback, SuiteStats *benchmark,
-                                  SuiteStats *runtime, SuiteStats *probe, SuiteStats *std) {
-  if (p && strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
+                                  SuiteStats *runtime, SuiteStats *native,
+                                  SuiteStats *interop, SuiteStats *probe, SuiteStats *std) {
+  if (p && strncmp(p, "etc/tests/bench/", 16) == 0)
     return benchmark ? benchmark : fallback;
-  if (p && strncmp(p, "etc/tests/rt/", 13) == 0)
+  if (p && strncmp(p, "etc/tests/runtime/", 18) == 0)
     return runtime ? runtime : fallback;
+  if (p && strncmp(p, "etc/tests/native/", 17) == 0)
+    return native ? native : fallback;
+  if (p && strncmp(p, "etc/tests/interop/", 18) == 0)
+    return interop ? interop : fallback;
   if (path_is_probe_test(p))
     return probe ? probe : fallback;
   return std ? std : fallback;
@@ -3435,12 +3473,12 @@ static int path_duration_hint(CacheDb *cache, const char *p) {
     return row->dur_ms;
   if (!p)
     return 0;
-  if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
+  if (strncmp(p, "etc/tests/bench/", 16) == 0)
     return 5000;
-  if (strstr(p, "etc/tests/rt/bigint.ny") || strstr(p, "etc/tests/rt/attr.ny") || strstr(p, "etc/tests/rt/sizeof.ny") ||
-      strstr(p, "etc/tests/rt/asm.ny"))
+  if (strstr(p, "etc/tests/runtime/values/bigint.ny") || strstr(p, "etc/tests/runtime/language/attr.ny") || strstr(p, "etc/tests/interop/ny/sizeof.ny") ||
+      strstr(p, "etc/tests/interop/ny/asm.ny"))
     return 5000;
-  if (strstr(p, "etc/tests/rt/comptime.ny"))
+  if (strstr(p, "etc/tests/runtime/compiler/comptime.ny"))
     return 3500;
   return 200;
 }
@@ -3601,7 +3639,8 @@ static void print_bench_summary(const char *path) {
 static int run_suite(const char *suite_name, StrVec *files, const char *bin, const char *std_path,
                      const char *std_bc, StrVec *patterns, int jobs, int timeout_sec, int *passed,
                      int *failed, SuiteStats *stats, SuiteStats *benchmark_stats,
-                     SuiteStats *runtime_stats, SuiteStats *probe_stats, SuiteStats *std_stats,
+                     SuiteStats *runtime_stats, SuiteStats *native_stats,
+                     SuiteStats *interop_stats, SuiteStats *probe_stats, SuiteStats *std_stats,
                      CacheDb *cache, int use_cache, TimingVec *timings, StrVec *failed_paths) {
   if (!files || files->len == 0)
     return 0;
@@ -3609,6 +3648,14 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
   StrVec selected = {0};
   for (size_t i = 0; i < files->len; i++) {
     const char *p = files->items[i];
+    /* Generator-only shape specifications are validated by ny-fuzz.  ny-test
+     * executes only shapes that embed Ny source. */
+    if (p && nyt_ends_with(p, ".nshape")) {
+      char *source = shape_source_block(p, "ny");
+      if (!source)
+        continue;
+      free(source);
+    }
     int match = 1;
     if (patterns && patterns->len > 0) {
       match = 0;
@@ -3641,7 +3688,8 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
       CacheRow *row = cache_find(cache, p);
       if (row && row->ok == 1 && row->sig == sig) {
         SuiteStats *row_stats =
-            stats_for_path(p, stats, benchmark_stats, runtime_stats, probe_stats, std_stats);
+            stats_for_path(p, stats, benchmark_stats, runtime_stats, native_stats,
+                           interop_stats, probe_stats, std_stats);
         const char *row_suite = suite_for_path(p, suite_name);
         completed++;
         int pct = (int)((completed * 100) / (total ? total : 1));
@@ -3693,7 +3741,7 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
       run[i].tmp_out[0] = '\0';
       run[i].materialized_path[0] = '\0';
       const char *exec_path = p;
-      int is_bench = strncmp(p, "etc/tests/fuzz/bench/", 21) == 0;
+      int is_bench = strncmp(p, "etc/tests/bench/", 16) == 0;
       if (p && nyt_ends_with(p, ".nshape")) {
         char *mat = materialize_shape_ny_source(p);
         if (!mat) {
@@ -3780,7 +3828,8 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
       int rc = timed_out ? NY_TEST_TIMEOUT_RC : child_status_rc(st);
       int dur = (int)(now_ms() - run[i].start_ms);
       SuiteStats *row_stats =
-          stats_for_path(run[i].path, stats, benchmark_stats, runtime_stats, probe_stats, std_stats);
+          stats_for_path(run[i].path, stats, benchmark_stats, runtime_stats, native_stats,
+                         interop_stats, probe_stats, std_stats);
       const char *row_suite = suite_for_path(run[i].path, suite_name);
       int retried = 0;
       if (rc == 0)
@@ -3882,8 +3931,11 @@ int ny_test_main(int argc, char **argv) {
   char err[256];
 
   const char *env_timeout = getenv("NYTRIX_TEST_TIMEOUT");
-  if (env_timeout && *env_timeout)
-    timeout_sec = normalize_test_timeout(atoi(env_timeout));
+  if (env_timeout && *env_timeout) {
+    int v = 0;
+    if (ny_parse_int(env_timeout, &v))
+      timeout_sec = normalize_test_timeout(v);
+  }
 
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
@@ -3902,7 +3954,7 @@ int ny_test_main(int argc, char **argv) {
       printf("  %s--phase-times --trace-ir --failures-only --debug-failures --debugger-all%s\n",
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       printf("  %s--color MODE --no-color%s\n\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("%snotes:%s timeout defaults to 60s and is capped at 300s; error tests live under %setc/tests/fuzz/errors%s\n",
+      printf("%snotes:%s timeout defaults to 60s and is capped at 300s; error tests live under %setc/tests/errors%s\n",
              nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
       return 0;
     }
@@ -4041,17 +4093,23 @@ int ny_test_main(int argc, char **argv) {
     with_stdlib = 1;
 
   if (files.len == 0) {
-    collect_ny("etc/tests/rt", &files);
-    collect_ny("etc/tests/fuzz/errors", &files);
-    collect_ny("etc/tests/fuzz/bench", &files);
+    collect_ny("etc/tests/runtime", &files);
+    collect_ny("etc/tests/errors", &files);
+    collect_ny("etc/tests/bench", &files);
+    collect_ny("etc/tests/native", &files);
+    collect_ny("etc/tests/interop", &files);
+    collect_ny("etc/tests/shapes", &files);
     if (with_stdlib)
       collect_ny("lib", &files);
   }
 
   if (jobs <= 0) {
     const char *ej = getenv("NYTRIX_TEST_JOBS");
-    if (ej && *ej)
-      jobs = atoi(ej);
+    if (ej && *ej) {
+      int v = 0;
+      if (ny_parse_int(ej, &v))
+        jobs = v;
+    }
     if (jobs <= 0)
       jobs = auto_test_jobs();
   }
@@ -4086,14 +4144,17 @@ int ny_test_main(int argc, char **argv) {
   if (td && *td)
     printf("%s[trace]%s trace_dir=%s\n", nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), td);
 
-  StrVec benchmark = {0}, runtime = {0}, repl = {0}, probe = {0}, error_tests = {0}, std = {0};
+  StrVec benchmark = {0}, runtime = {0}, native = {0}, interop = {0}, repl = {0}, probe = {0}, error_tests = {0}, std = {0};
   size_t skipped_system_stdlib = 0;
   size_t skipped_native_host = 0;
   size_t skipped_native_platform = 0;
   size_t skipped_native_fp_link = 0;
+  size_t skipped_ci = 0;
+  size_t skipped_web_browser = 0;
+  const int ci_mode = test_env_truthy("CI") || test_env_truthy("GITHUB_ACTIONS");
   const int skip_system_stdlib =
       test_env_truthy("NYTRIX_TEST_SKIP_SYSTEM_STDLIB");
-  SuiteStats sb = {0}, sr = {0}, srepl = {0}, sp = {0}, se = {0}, ss = {0};
+  SuiteStats sb = {0}, sr = {0}, sn = {0}, si = {0}, srepl = {0}, sp = {0}, se = {0}, ss = {0};
   char cache_path[PATH_MAX];
   nyt_path_join(cache_path, sizeof(cache_path), nyt_default_cache_root_dir(),
                 "test-results.tsv");
@@ -4101,20 +4162,30 @@ int ny_test_main(int argc, char **argv) {
     cache_load(&cache, cache_path);
   for (size_t i = 0; i < limit; i++) {
     const char *p = files.items[i];
-    if (test_is_unsupported_native_platform(p))
+    if (ci_mode && shape_skips_ci(p))
+      skipped_ci++;
+    else if (test_is_unsupported_native_platform(p))
       skipped_native_platform++;
     else if (test_env_truthy("NYTRIX_TEST_SKIP_NATIVE_FP_LINK") &&
         test_is_host_sensitive_native_fp_link(p))
       skipped_native_fp_link++;
     else if (test_is_unsupported_native_host(p))
       skipped_native_host++;
-    else if (strncmp(p, "etc/tests/fuzz/bench/", 21) == 0)
+    else if (strncmp(p, "etc/tests/bench/", 16) == 0)
       sv_push(&benchmark, p);
-    else if (strncmp(p, "etc/tests/rt/", 13) == 0)
+    else if (strncmp(p, "etc/tests/runtime/", 18) == 0)
       sv_push(&runtime, p);
+    else if (strncmp(p, "etc/tests/native/", 17) == 0) {
+      if (strncmp(p, "etc/tests/native/web/", 21) == 0)
+        skipped_web_browser++;
+      else
+        sv_push(&native, p);
+    }
+    else if (strncmp(p, "etc/tests/interop/", 18) == 0)
+      sv_push(&interop, p);
     else if (path_is_probe_test(p))
       sv_push(&probe, p);
-    else if (strncmp(p, "etc/tests/fuzz/errors/", 22) == 0)
+    else if (strncmp(p, "etc/tests/errors/", 17) == 0)
       sv_push(&error_tests, p);
     else if (skip_system_stdlib && test_is_optional_system_stdlib(p))
       skipped_system_stdlib++;
@@ -4134,12 +4205,22 @@ int ny_test_main(int argc, char **argv) {
   if (skipped_native_fp_link > 0)
     printf("%s[note]%s skipped %zu host-sensitive native FP link/run fixtures\n",
            nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_fp_link);
+  if (skipped_ci > 0)
+    printf("%s[note]%s skipped %zu nshape fixtures marked ci skip\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_ci);
+  if (skipped_web_browser > 0)
+    printf("%s[note]%s skipped %zu browser-only fixtures under etc/tests/native/web (run via ./make web-test)\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_web_browser);
 
   StrVec selected_all = {0};
   for (size_t i = 0; i < benchmark.len; i++)
     sv_push(&selected_all, benchmark.items[i]);
   for (size_t i = 0; i < runtime.len; i++)
     sv_push(&selected_all, runtime.items[i]);
+  for (size_t i = 0; i < native.len; i++)
+    sv_push(&selected_all, native.items[i]);
+  for (size_t i = 0; i < interop.len; i++)
+    sv_push(&selected_all, interop.items[i]);
   for (size_t i = 0; i < probe.len; i++)
     sv_push(&selected_all, probe.items[i]);
   if (with_stdlib) {
@@ -4148,7 +4229,7 @@ int ny_test_main(int argc, char **argv) {
   }
 
   run_suite("Tests", &selected_all, bin, std_path, std_bc, &patterns, jobs, timeout_sec, &passed,
-            &failed, NULL, &sb, &sr, &sp, &ss, &cache, use_cache, &timings, &failed_paths);
+            &failed, NULL, &sb, &sr, &sn, &si, &sp, &ss, &cache, use_cache, &timings, &failed_paths);
   sv_free(&selected_all);
   run_repl_suite(&repl, bin, std_path, std_bc, &patterns, timeout_sec, &passed, &failed,
                  &srepl, &timings, &failed_paths);
@@ -4172,6 +4253,10 @@ int ny_test_main(int argc, char **argv) {
               sb.passed, sb.sum_ms, sb.max_ms);
       fprintf(f, "    \"Runtime\": {\"tests\": %d, \"passed\": %d, \"sum_ms\": %d, \"max_ms\": %d},\n", sr.tests,
               sr.passed, sr.sum_ms, sr.max_ms);
+      fprintf(f, "    \"Native\": {\"tests\": %d, \"passed\": %d, \"sum_ms\": %d, \"max_ms\": %d},\n", sn.tests,
+              sn.passed, sn.sum_ms, sn.max_ms);
+      fprintf(f, "    \"Interop\": {\"tests\": %d, \"passed\": %d, \"sum_ms\": %d, \"max_ms\": %d},\n", si.tests,
+              si.passed, si.sum_ms, si.max_ms);
       fprintf(f, "    \"Repl\": {\"tests\": %d, \"passed\": %d, \"sum_ms\": %d, \"max_ms\": %d},\n",
               srepl.tests, srepl.passed, srepl.sum_ms, srepl.max_ms);
       fprintf(f, "    \"Probe\": {\"tests\": %d, \"passed\": %d, \"sum_ms\": %d, \"max_ms\": %d},\n", sp.tests,
@@ -4202,6 +4287,12 @@ int ny_test_main(int argc, char **argv) {
   if (sr.tests > 0)
     printf("Runtime    %5d %5d %8dms %7dms %7dms\n", sr.tests, sr.passed, sr.sum_ms,
            sr.tests ? (sr.sum_ms / sr.tests) : 0, sr.max_ms);
+  if (sn.tests > 0)
+    printf("Native     %5d %5d %8dms %7dms %7dms\n", sn.tests, sn.passed, sn.sum_ms,
+           sn.tests ? (sn.sum_ms / sn.tests) : 0, sn.max_ms);
+  if (si.tests > 0)
+    printf("Interop    %5d %5d %8dms %7dms %7dms\n", si.tests, si.passed, si.sum_ms,
+           si.tests ? (si.sum_ms / si.tests) : 0, si.max_ms);
   if (srepl.tests > 0)
     printf("Repl       %5d %5d %8dms %7dms %7dms\n", srepl.tests, srepl.passed, srepl.sum_ms,
            srepl.tests ? (srepl.sum_ms / srepl.tests) : 0, srepl.max_ms);
@@ -4232,6 +4323,8 @@ int ny_test_main(int argc, char **argv) {
     debug_replay_failed_tests(&failed_paths, bin, std_path, std_bc, timeout_sec);
   sv_free(&benchmark);
   sv_free(&runtime);
+  sv_free(&native);
+  sv_free(&interop);
   sv_free(&repl);
   sv_free(&probe);
   sv_free(&error_tests);

@@ -2,10 +2,65 @@
 
 Nytrix uses dated milestones. Use `ny --version` for snapshots.
 
+## [0.9.0] - 2026-07-21 → 2026-07-23 — Language security, native tooling, and runtime reliability
+
+### Added
+
+- In-tree C frontend for FFI headers, replacing libclang for supported arrays,
+  unions, packed structs, bitfields, extended numeric types, function pointers,
+  typedefs, macros, and variadics.
+- Hardened parsing of untrusted C headers with deadlines, recursion limits,
+  bounded tables, and parser cleanup.
+- Linux/x86-64 syscall restrictions block process creation and executable-memory
+  remapping through `mprotect`, `clone`, `fork`, and `vfork`.
+- `#assert(cond[, msg])` for compile-time assertions and improved runtime
+  assertions with source expressions and `file:line:col` diagnostics.
+- `std.core.report` for formatted errors, warnings, notes, locations, and source
+  underlines.
+- `--zero-init`, `--no-zero-init`, and `NYTRIX_ZERO_INIT` controls for managed
+  heap initialization.
+- Optional GMP support with native bigint fallbacks for arithmetic, roots,
+  modular operations, conversion, and number-theory helpers.
+- `-Oz` size optimization.
+- Public `std.os.rev` modules for decompilation, symbolic execution, constraint
+  solving, and string analysis.
+
+### Changed
+
+- FFI headers are processed directly by the in-tree C frontend instead of being
+  staged through the previous FFI pipeline.
+- Typed `extern` declarations may expose the same native symbol through multiple
+  valid Nytrix signatures without LLVM symbol collisions.
+- macOS JIT library discovery now checks standard Homebrew locations.
+- Windows native-only execution bypasses ELF-specific caching while retaining
+  the in-memory JIT path.
+- Panic traces now include the active source location.
+
+### Fixed
+
+- Restored the syscall filter and hardware `rdrand` paths by correcting invalid
+  architecture and inline-assembly guards.
+- Verified that managed collections do not hide allocations, Nytrix exposes no
+  unrestricted `unsafe` escape hatch, and unsupported C constructs are rejected.
+- Prevented `std.core.report` from leaking a `report` name into every
+  `use std.core` consumer.
+- Corrected C array-extent conversion, rejected negative extents, and fixed C11
+  portability issues in the frontend.
+- Fixed bigint heap corruption, integer-root convergence, and inconsistent
+  native/GMP bigint allocation behavior.
+- Corrected AArch64 inverted-condition encoding, unreachable predecessor
+  handling, JIT exit-code propagation, and stencil cold/warm cache detection.
+- Removed quadratic symbol lookup during large-ELF relocation analysis.
+
 ## [0.8.0] - 2026-07-13 — Native execution, proof tooling, and platform parity
 
 ### Added
 
+- `ny --nyir-run-bin=PATH` now executes a validated, versioned NYIR artifact
+  directly without reparsing the source program that originally produced it.
+  `--nyir-dump-bin` now writes complete `rt_main` plus user-function bundles,
+  so reusable artifacts preserve internal calls; compatible pre-v8 members are
+  normalized before verification.
 - LLVM-free execution now covers supported x86-64 and AArch64 programs from
   NYIR through internal object, linker, and W^X JIT paths. This includes local
   calls, relocations, runtime symbols, persistent REPL bindings, and explicit
@@ -53,20 +108,13 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - NYIR now coalesces copy/local chains, allocates scalar registers, selects
   immediate operands, indexes DCE label references once, and preserves floating
   types across collapsed equivalence classes.
-- On a deterministic 2,000-branch probe (42,004 instructions, 6,000 labels),
-  native precompile improved from 430.8 +/- 55.4 ms to 221.4 +/- 21.1 ms over
-  ten warm runs.
-- A function/call probe measured 37.6 +/- 1.4 ms natively versus
-  169.7 +/- 6.0 ms with MCJIT over ten warm runs (4.51 +/- 0.23x faster).
-  A one-shot `print(42)` native path measured 39.1 ms mean. ORC remained slower
-  on the trivial probe, so MCJIT remains the default LLVM JIT.
 - Precomputed x86-64 call boundaries and immediate constants reduced a focused
-  call body from 11 to 9 instructions and frame-relative accesses from 3 to 2.
-- Single-scan stdlib cache validation and stable builtin-shadow epochs improved
-  editor emit-only time from 7.109 +/- 0.032 s to 6.459 +/- 0.121 s.
+  call body and frame-relative accesses in the native encoder.
+- Compiler and backend performance claims are now exercised through maintained
+  benchmark and native-oracle fixtures rather than release-note timing samples.
 - Stdlib source sweeps stop after optimized IR instead of materializing MCJIT,
-  removing a measured 18-22 GiB peak. Cache format updates reject mixed
-  stdlib/user entries and sanitizer-contaminated native objects.
+  and cache format updates reject mixed stdlib/user entries and
+  sanitizer-contaminated native objects.
 - Default builds run a bounded, advisory `ny-fmt --bugs` audit after producing
   the compiler and standard bundle.
 - All 427 previously undocumented public stdlib functions now have source
@@ -75,9 +123,31 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - `ny-fmt --cloc` now reports tracked additions/deletions and per-file totals.
 - Hot reload blocks on native events instead of busy mtime polling, reducing
   idle CPU use and edit-to-recompile latency.
+- The opt-in JIT shared-object tier now validates the matching bitcode
+  provenance sidecar before loading, so interrupted or stale cache entries
+  return to normal compilation instead of being trusted.
 
 ### Fixed
 
+- Stage artifacts now carry a pointer-free expanded-source identity and
+  `--verify-artifact` rejects stale or malformed snapshots before reuse.
+- New REPL snapshots bind their source payload to a fingerprint and byte length;
+  `:load` rejects corrupted v2 images before rebuilding persistent state while
+  continuing to accept older source-only snapshots.
+- `ny-fmt` C analysis now shares one lexical scanner across function ranges,
+  structural rankings, and duplicate detection. It ignores strings, comments,
+  multiline macros, control conditions, and call continuations rather than
+  reporting phantom C functions. `ny-fmt --selftest` validates that scanner
+  together with high-confidence language-pattern checks.
+- `ny-fmt --bugs` now reports discarded value-typed `list.append`/`extend`
+  results and `set()` calls on dictionaries initialized as frozen `{}` literals,
+  with stable `NYAUD1120` and `NYAUD1119` diagnostics and actionable fixes.
+- x86-64 internal JIT/object emission now carries up to 1,024 call/data
+  relocations per program bundle, so large straight-line call sites no longer
+  fail at the old 256-relocation transport ceiling.
+- Live native JIT/object requests now support up to 128 lowered user functions
+  (previously 64) and reject larger requests before lowering. Portable NYIP
+  bundles retain their separate 4,096-function NYIR VM boundary.
 - macOS transitive libc aggregates now materialize named return and parameter
   layouts on demand, without registering anonymous carriers as builtin scalars.
   Installed system headers recover useful declarations from unsupported syntax;
@@ -130,8 +200,8 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
   - Public aggregate layout API exposing size, alignment, and function-pointer counts
 - Increased C parser capacities and tolerant recovery for complex or unsupported declarations.
 - X86/i386 NYIR assembly coverage for cdecl call3/call7/call9, logical operations, ternaries, match cases, loops, break, and ranges.
-- Native/C frontend regression suites under `etc/tests/rt/native/` and `etc/tests/rt/c/`.
-- `@backend(...)` and `backend_intrinsic(...)`, replacing backend-specific spellings.
+- Native/C frontend regression suites under `etc/tests/native/` and `etc/tests/interop/c/`.
+- `@backend(...)` and `intrinsic(...)` target-selection forms.
 - Cleaner NYIR assembly headers and comments.
 - Compact 1:1 TLDR documentation across README, start, performance, syntax, and CHANGELOG pages.
 
@@ -192,7 +262,7 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 
 ### Added
 
-- Fuzz benchmark shapes (`etc/tests/fuzz/bench/*.nshape`) for call-heavy, matrix, string, and checksum workloads.
+- Benchmark shapes (`etc/tests/bench/*.nshape`) for call-heavy, matrix, string, and checksum workloads.
 - Published fuzzer and tooling for local benchmarking and error-shape discovery.
 - Radix helpers, stream/block ciphers, public-key helpers, lattice/factorization modules.
 

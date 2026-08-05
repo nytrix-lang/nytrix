@@ -1,4 +1,5 @@
 #include "base/util.h"
+#include "parse/proof.h"
 #include "priv.h"
 #include <limits.h>
 #include <stdio.h>
@@ -1124,8 +1125,8 @@ static bool call_name_is_bool_builtin(const char *name) {
          strcmp(name, "__eq") == 0 || strcmp(name, "__ne") == 0 ||
          strcmp(name, "__lt") == 0 || strcmp(name, "__le") == 0 ||
          strcmp(name, "__gt") == 0 || strcmp(name, "__ge") == 0 ||
-         strcmp(name, "__is_int") == 0 || strcmp(name, "__is_ny_obj") == 0 ||
-         strcmp(name, "__is_str_obj") == 0 ||
+         strcmp(name, "__is_nil") == 0 || strcmp(name, "__is_int") == 0 ||
+         strcmp(name, "__is_ny_obj") == 0 || strcmp(name, "__is_str_obj") == 0 ||
          strcmp(name, "__is_float_obj") == 0 || strcmp(name, "__is_ptr") == 0 ||
          strcmp(name, "__has_tag") == 0 || strcmp(name, "__runtime_tag") == 0;
 }
@@ -1473,6 +1474,8 @@ static bool type_compatible_simple(const char *want, const char *got) {
   const char *got_base = type_skip_nullable(got);
   if (!want_nullable && got_nullable)
     return false;
+  if (strcmp(want_base, "proof") == 0 && strncmp(got_base, "proof<", 6) == 0)
+    return true;
   return type_compatible_non_nullable(want_base, got_base);
 }
 
@@ -1596,6 +1599,15 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
       uint64_t h = e->as.call.callee->as.ident.hash;
       bool builtin_shadowed =
           type_call_builtin_name_shadowed(cg, scopes, depth, e->as.call.callee);
+      if (!builtin_shadowed && n && strcmp(n, "prove") == 0 &&
+          e->as.call.args.len >= 1) {
+        char *proof_type = ny_proof_type_from_expr(e->as.call.args.data[0].val);
+        if (!proof_type)
+          return "proof";
+        const char *out = arena_strndup(cg->arena, proof_type, strlen(proof_type));
+        free(proof_type);
+        return out ? out : "proof";
+      }
       enum_def_t *enum_owner = NULL;
       enum_member_def_t *enum_member =
           lookup_enum_member_owner(cg, n, &enum_owner);
@@ -2115,7 +2127,8 @@ LLVMTypeRef resolve_type_name(codegen_t *cg, const char *type_name,
     return cg->type_i64;
   }
   const char *resolved_name = type_skip_nullable(type_name);
-  if (strcmp(resolved_name, "proof") == 0)
+  if (strcmp(resolved_name, "proof") == 0 ||
+      ny_generic_type_base_is(resolved_name, "proof"))
     return cg->type_i64;
   if (is_any_type_name(resolved_name))
     return cg->type_i64;
@@ -2276,7 +2289,8 @@ LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *type_name,
     return cg->type_i8ptr;
   if (ny_lookup_tagged_type(cg, resolved_name))
     return cg->type_i64;
-  if (strcmp(resolved_name, "proof") == 0)
+  if (strcmp(resolved_name, "proof") == 0 ||
+      ny_generic_type_base_is(resolved_name, "proof"))
     return cg->type_i64;
   ny_diag_error(tok, "unknown type name '%s' at native ABI boundary",
                 type_name);
@@ -2724,6 +2738,7 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
   switch (e->kind) {
   case NY_E_LITERAL:
     return e->as.literal.kind == NY_LIT_INT &&
+           e->tok.kind != NY_T_NIL &&
            e->as.literal.as.i >= ny_small_int_min &&
            e->as.literal.as.i <= ny_small_int_max;
   case NY_E_CALL: {
@@ -2902,11 +2917,16 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
     if (!l_ok || !r_ok)
       return false;
     if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0 || strcmp(op, "*") == 0 ||
-        strcmp(op, "^") == 0 || strcmp(op, "&") == 0 || strcmp(op, "|") == 0 || strcmp(op, "^^") == 0 ||
+        strcmp(op, "&") == 0 || strcmp(op, "|") == 0 || strcmp(op, "^^") == 0 ||
         strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0)
       return true;
     if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0)
       return true;
+    /* `^` (power) lowers to std.core.pow, which returns a heap bigint for
+       integer operands rather than a tagged small int, so it must NOT be
+       treated as a proven-int-producing binary op (the fast untag would
+       shift a pointer and yield garbage). Const-folded `^` never reaches
+       here. */
     return false;
   }
   case NY_E_UNARY:

@@ -29,22 +29,22 @@ Build the browser wasm runner:
 ./make web-demos
 ```
 
-The generated `build/wasm/index.html` is a compact WebGL-backed wasm runner.
+The generated `build/web/demos/index.html` is a compact WebGL-backed wasm runner.
 Load a `.wasm` file from the page, or add explicit browser-ready entries to
 `etc/assets/website/wasm/demos.json`.
 
 ## Focused Checks
 
-Runtime checks under `etc/tests/rt/` are the quickest way to inspect one
+Runtime checks under `etc/tests/runtime/` are the quickest way to inspect one
 language surface in isolation:
 
 | Topic | Files |
 | --- | --- |
-| ADTs and matching | [adt.ny](../../etc/tests/rt/adt.ny), [match.ny](../../etc/tests/rt/match.ny) |
-| Concurrency and threads | [concurrency.ny](../../etc/tests/rt/concurrency.ny), [thread.ny](../../etc/tests/rt/thread.ny) |
-| Comptime | [comptime.ny](../../etc/tests/rt/comptime.ny), [table.ny](../../etc/tests/rt/table.ny) |
-| Native boundary | [ffi.ny](../../etc/tests/rt/ffi.ny), [extern.ny](../../etc/tests/rt/extern.ny), [asm.ny](../../etc/tests/rt/asm.ny) |
-| Ownership and safety | [ownership.ny](../../etc/tests/rt/ownership.ny), [safe.ny](../../etc/tests/rt/safe.ny), [memory.ny](../../etc/tests/rt/memory.ny) |
+| ADTs and matching | [adt.ny](../../etc/tests/runtime/language/adt.ny), [match.ny](../../etc/tests/runtime/language/match.ny) |
+| Concurrency and threads | [concurrency.ny](../../etc/tests/runtime/execution/concurrency.ny), [thread.ny](../../etc/tests/runtime/execution/thread.ny) |
+| Comptime | [comptime.ny](../../etc/tests/runtime/compiler/comptime.ny), [table.ny](../../etc/tests/runtime/values/table.ny) |
+| Native boundary | [ffi.ny](../../etc/tests/interop/ny/ffi.ny), [extern.ny](../../etc/tests/interop/ny/extern.ny), [asm.ny](../../etc/tests/interop/ny/asm.ny) |
+| Ownership and safety | [ownership.ny](../../etc/tests/runtime/ownership/ownership.ny), [safe.ny](../../etc/tests/runtime/ownership/safe.ny), [memory.ny](../../etc/tests/runtime/values/memory.ny) |
 
 Run a focused test by pattern:
 
@@ -55,11 +55,11 @@ ny test --pattern ownership
 
 ## Benchmarks
 
-Bench examples live under `etc/tests/fuzz/bench/`. Use them for rough comparisons:
+Bench examples live under `etc/tests/bench/`. Use them for rough comparisons:
 
 ```bash
 ny perf
-ny -o build/cache/bench/sieve etc/tests/fuzz/bench/sieve.nshape
+ny -o build/cache/bench/sieve etc/tests/bench/sieve.nshape
 ```
 
 ## Related

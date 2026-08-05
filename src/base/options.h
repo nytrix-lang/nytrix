@@ -74,6 +74,15 @@ typedef enum {
 } ny_native_abi_t;
 
 typedef enum {
+  NY_NATIVE_TIER_AUTO = 0,
+  NY_NATIVE_TIER_BASELINE,
+  NY_NATIVE_TIER_STENCIL,
+  NY_NATIVE_TIER_FAST,
+  NY_NATIVE_TIER_OPT,
+  NY_NATIVE_TIER_LLVM,
+} ny_native_tier_t;
+
+typedef enum {
   NY_C_FRONTEND_AUTO = 0,
   NY_C_FRONTEND_LIBCLANG = 1,
   NY_C_FRONTEND_NYTRIX = 2,
@@ -116,6 +125,7 @@ typedef struct {
   const char *entry_name;
   const char *argv0;
   int opt_level;
+  bool opt_size;
   const char *opt_profile;
   const char *opt_pipeline;
   const char *emit_ir_pre_path;
@@ -151,6 +161,8 @@ typedef struct {
   const char *expand_only;
   const char *explain_specialization;
   const char *emit_artifact_path;
+  const char *verify_artifact_path;
+  const char *use_artifact_path;
   bool extract_code;
   bool extract_json;
   const char *extract_lang;
@@ -189,6 +201,8 @@ typedef struct {
   const char *c_frontend_raw;
   ny_native_backend_t native_backend;
   ny_native_abi_t native_abi;
+  const char *native_tier_raw;
+  ny_native_tier_t native_tier;
   int native_tier_budget;
   int native_hot_threshold;
   int native_cold_threshold;
@@ -196,9 +210,14 @@ typedef struct {
   bool native_prefer_vm;
   bool native_prefer_asm;
   bool native_only;
+  bool native_backend_explicit;
+  bool native_enable_cf_mem2reg;
   bool native_tier_report;
   const char *native_tier_report_path;
   bool native_result_oracle;
+  bool native_oracle_per_pass;
+  int native_oracle_fuzz_count;
+  int native_tv_seed_trials;
   bool watch_files;
   bool hot_reload;
   int watch_poll_ms;
@@ -207,7 +226,12 @@ typedef struct {
   bool native_dump_ir;
   bool nyir_dump_text;
   bool nyir_dump_raw;
+  bool nyir_dump_cfg;
   bool nyir_dump_stats;
+  bool nyir_pass_stats;
+  bool nyir_verify;
+  const char *nyir_disable_pass;
+  const char *nyir_stop_after;
   bool nyir_dump_bin;
   const char *nyir_dump_bin_path;
   bool nyir_metadata_report;
@@ -218,6 +242,7 @@ typedef struct {
   const char *nyir_run_bin_path;
   bool nyir_run_profile;
   const char *nyir_run_profile_path;
+  const char *native_profile_use_path;
   int nyir_run_max_steps;
   int nyir_run_recursion_limit;
   const char *native_dump_ir_path;
@@ -267,6 +292,7 @@ typedef struct {
   ny_safe_run_t safe_run;
   const char *sanitize;  /* --sanitize=address|undefined|thread|leak */
   const char *jit_engine; /* --jit-engine=orc|mcjit (default: mcjit) */
+  bool zero_init;          /* --zero-init: zero all managed heap allocations */
 } ny_options;
 
 void ny_options_init(ny_options *opt);

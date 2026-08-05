@@ -107,12 +107,14 @@ static int ny_jit_safe_child(void *raw) {
   return 0;
 }
 
+#ifndef _WIN32
 static int ny_native_cache_safe_child(void *raw) {
   void (*entry)(void) = (void (*)(void))raw;
   entry();
   rt_print_flush();
   return 0;
 }
+#endif
 
 #if defined(__GNUC__) || defined(__clang__)
 #define NY_UNUSED_FUNC __attribute__((unused))
@@ -163,15 +165,46 @@ static int ny_native_jit_safe_child(void *raw) {
     return 1;
   if (!ny_jit_prepare_execution((uint64_t)(uintptr_t)call->entry))
     return 1;
-  (void)call->entry();
+  /* The compiled entry returns the top-level expression's value in rax;
+   * that value IS the process exit code for --native-only mode (matches
+   * the pureexpr fast-path contract: `-c '1+2*20+2'` exits 43). Discarding
+   * it here silently turned every native JIT / stencil-cache execution
+   * into exit 0 regardless of what the program actually computed. */
+  int64_t result = call->entry();
   rt_print_flush();
-  return 0;
+  return (int)(result & 0xff);
 }
 
 static int ny_run_native_only(const program_t *prog, const ny_options *opt,
                               const char *output_path, bool execute,
                               bool remove_output) {
   if (execute) {
+#ifndef _WIN32
+    /* Stencil cache: try to load previously-persisted self-contained code. */
+    void *cached_handle = NULL;
+    void (*cached_entry)(void) = NULL;
+    if (prog->raw_src && prog->raw_src_len > 0) {
+      char *cache_path =
+          ny_jit_stencil_cache_path(prog->raw_src, opt ? opt->opt_level : 0);
+      if (cache_path) {
+        ny_jit_stencil_cache_load(cache_path, &cached_handle, &cached_entry);
+        free(cache_path);
+      }
+    }
+    if (cached_entry) {
+      ny_native_jit_call_t call = {
+          .entry = (int64_t(*)(void))cached_entry,
+      };
+      int rc = ny_safe_run_requested(&opt->safe_run)
+                   ? ny_safe_run_call(&opt->safe_run, ny_native_jit_safe_child,
+                                      &call,
+                                      opt->input_file ? opt->input_file
+                                                      : "native JIT workload")
+                   : ny_native_jit_safe_child(&call);
+      dlclose(cached_handle);
+      return rc;
+    }
+#endif
     ny_native_jit_image_t image = {0};
     char jit_err[512] = {0};
     if (!ny_native_jit_compile(prog, opt, &image, jit_err, sizeof(jit_err))) {
@@ -207,8 +240,9 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
     return 1;
   }
   const char *cc = ny_builder_choose_cc();
+  int rt_speed = opt->opt_size ? -1 : 0;
   if (!ny_builder_compile_runtime(cc, rto, NULL, opt->debug_symbols,
-                                   opt->gprof == 1, 0, false, opt->sanitize)) {
+                                   opt->gprof == 1, rt_speed, false, opt->sanitize)) {
     NY_LOG_ERR("Native-only runtime compilation failed\n");
     unlink(obj);
     return 1;
@@ -1546,6 +1580,11 @@ static bool ny_pipeline_load_stdlib(ny_options *opt, char **uses,
             free(std->src);
             std->src = NULL;
             (void)unlink(std_cache_path);
+          } else {
+            /* The on-disk header is cache metadata, not Nytrix source. Keep
+             * the parser and downstream artifact keys identical whether the
+             * stdlib was generated just now or restored from this cache. */
+            memmove(std->src, std->src + nw, strlen(std->src + nw) + 1);
           }
         }
         if (std->src && verbose_enabled >= 2)
@@ -1765,6 +1804,7 @@ int ny_pipeline_run(ny_options *opt) {
   bool auto_std_bc_cache_needs_links = false;
   bool has_local = false;
   bool auto_std_bc_cache_saved = false;
+  bool reuse_semantic_artifact = false;
   bool write_compile_caches = ny_should_write_compile_caches(opt);
   progress_node = ny_progress_task_begin("load stdlib", 1);
   if (!ny_pipeline_load_stdlib(opt, uses, use_count, std_cache_path,
@@ -1791,6 +1831,41 @@ int ny_pipeline_run(ny_options *opt) {
     exit_code = 1;
     goto exit_success;
   }
+  /* `--native-only` promises the Nytrix-owned NYIR/object execution path.
+   * LLVM is a selectable backend for ordinary JIT/AOT compilation, but it
+   * cannot satisfy that promise. Reject this contradictory pair before any
+   * AOT cache lookup can return an artifact built by another backend. */
+  if (opt->native_only && opt->native_backend == NY_NATIVE_BACKEND_LLVM) {
+    NY_LOG_ERR("--native-only requires a Nytrix-owned backend; choose x86_64, "
+               "aarch64, or another supported native backend\n");
+    exit_code = 1;
+    goto exit_success;
+  }
+  if (opt->use_artifact_path && *opt->use_artifact_path) {
+    char artifact_err[256] = {0};
+    if (!ny_stage_artifact_reusable_for_semantics(opt->use_artifact_path,
+                                                  source, opt, artifact_err,
+                                                  sizeof(artifact_err))) {
+      NY_LOG_ERR("Semantic artifact reuse failed: %s\n", artifact_err);
+      exit_code = 1;
+      goto exit_success;
+    }
+    reuse_semantic_artifact = true;
+    if (opt->verbose)
+      fprintf(stderr, "Semantic artifact reuse: %s\n", opt->use_artifact_path);
+  }
+  if (opt->verify_artifact_path && *opt->verify_artifact_path) {
+    char artifact_err[256] = {0};
+    if (!ny_stage_artifact_matches_source_file(opt->verify_artifact_path,
+                                               source, artifact_err,
+                                               sizeof(artifact_err))) {
+      NY_LOG_ERR("Semantic artifact validation failed: %s\n", artifact_err);
+      exit_code = 1;
+    } else {
+      printf("Semantic artifact verified: %s\n", opt->verify_artifact_path);
+    }
+    goto exit_success;
+  }
 #ifndef _WIN32
   if (opt->run_jit && !opt->command_string && ny_should_use_jit_cache(opt) &&
       ny_jit_native_cache_enabled() && !opt->dump_ast && !opt->expand &&
@@ -1799,29 +1874,43 @@ int ny_pipeline_run(ny_options *opt) {
     char *early_bc = ny_jit_cache_path(source, prebuilt_path, 0, opt->opt_level,
                                        opt->opt_dce, opt->opt_internalize,
                                        opt->debug_symbols,
-                                       (unsigned long)ny_std_latest_mtime());
-    if (early_bc) {
+                                       (unsigned long)ny_std_latest_mtime(),
+                                       ny_stage_semantic_config_fingerprint(opt));
+    if (early_bc && ny_cache_artifact_manifest_valid(early_bc, source)) {
       char *early_so = ny_jit_native_cache_path(early_bc);
       if (early_so) {
         if (ny_jit_native_cache_load(early_so, &native_cache_handle,
                                      &native_cache_entry)) {
-          if (opt->verbose)
-            fprintf(stderr, "JIT native cache hit (early): %s\n", early_so);
+          fprintf(stderr, "JIT native cache hit (early): %s\n", early_so);
           loaded_from_cache = true;
           free(early_so);
           free(early_bc);
           goto skip_compilation;
         }
+        if (ny_env_enabled("NYTRIX_JIT_NATIVE_CACHE"))
+          fprintf(stderr,
+                  "JIT native cache miss (early): native artifact is absent or invalid\n");
         free(early_so);
+      } else {
+        fprintf(stderr,
+                "JIT native cache miss (early): cannot derive native artifact path\n");
       }
-      free(early_bc);
+    } else {
+      if (ny_env_enabled("NYTRIX_JIT_NATIVE_CACHE"))
+        fprintf(stderr,
+                "JIT native cache miss (early): no validated bitcode manifest\n");
     }
+    if (early_bc)
+      free(early_bc);
   }
 #endif
   if (ny_should_use_aot_cache(opt)) {
     ny_build_aot_cache_path(opt, source, parse_name, prebuilt_path, output_path,
                             aot_cache_path, sizeof(aot_cache_path));
+    /* A valid executable alone is insufficient: its sidecar proves it was
+     * produced from these exact post-stdlib source bytes. */
     if (aot_cache_path[0] != '\0' && ny_access(aot_cache_path, R_OK) == 0 &&
+        ny_cache_artifact_manifest_valid(aot_cache_path, source) &&
         strcmp(aot_cache_path, output_path) != 0) {
       if (ny_valid_native_artifact(aot_cache_path)) {
         if (ny_copy_file(aot_cache_path, output_path) == 0 &&
@@ -1848,6 +1937,38 @@ int ny_pipeline_run(ny_options *opt) {
       }
     }
   }
+#ifndef _WIN32
+  /* Stencil cache early check: skip parse/semantic/lower when a cached
+   * self-contained .so already exists for this source+opt_level. */
+  if (opt->native_only && !opt->emit_ir_path && !opt->emit_only &&
+      !opt->dump_tokens && !opt->dump_ast && !opt->expand &&
+      !opt->dump_llvm && !opt->emit_ir_path && !opt->emit_bc_path &&
+      !opt->dump_diagnose) {
+    char *stencil_path =
+        ny_jit_stencil_cache_path(source, opt->opt_level);
+    if (stencil_path) {
+      void *cached_handle = NULL;
+      void (*cached_entry)(void) = NULL;
+      if (ny_jit_stencil_cache_load(stencil_path, &cached_handle,
+                                    &cached_entry)) {
+        ny_native_jit_call_t call = {
+            .entry = (int64_t(*)(void))cached_entry,
+        };
+        int rc = ny_safe_run_requested(&opt->safe_run)
+                     ? ny_safe_run_call(&opt->safe_run,
+                                        ny_native_jit_safe_child, &call,
+                                        opt->input_file ? opt->input_file
+                                                        : "native JIT workload")
+                     : ny_native_jit_safe_child(&call);
+        dlclose(cached_handle);
+        free(stencil_path);
+        exit_code = rc;
+        goto exit_success;
+      }
+      free(stencil_path);
+    }
+  }
+#endif
   if (opt->dump_tokens) {
     lexer_t lx;
     lexer_init(&lx, source, parse_name);
@@ -1993,22 +2114,27 @@ int ny_pipeline_run(ny_options *opt) {
     jit_cache_file = ny_jit_cache_path(source, prebuilt_path, 0, opt->opt_level,
                                        opt->opt_dce, opt->opt_internalize,
                                        opt->debug_symbols,
-                                       (unsigned long)ny_std_latest_mtime());
+                                       (unsigned long)ny_std_latest_mtime(),
+                                       ny_stage_semantic_config_fingerprint(opt));
 #ifndef _WIN32
+    /* Reserve the native path even on a cold compile: the newly generated
+     * bitcode can be promoted to this faster process-startup tier below.
+     * Loading remains gated by the bitcode manifest because both artifacts
+     * represent the same source fingerprint. */
     if (jit_cache_file && opt->run_jit && !opt->command_string &&
         ny_jit_native_cache_enabled()) {
       native_cache_file = ny_jit_native_cache_path(jit_cache_file);
-      if (native_cache_file &&
+      if (native_cache_file && ny_cache_artifact_manifest_valid(jit_cache_file, source) &&
           ny_jit_native_cache_load(native_cache_file, &native_cache_handle,
                                    &native_cache_entry)) {
-        if (opt->verbose)
-          fprintf(stderr, "JIT native cache hit: %s\n", native_cache_file);
+        fprintf(stderr, "JIT native cache hit: %s\n", native_cache_file);
         loaded_from_cache = true;
         goto skip_compilation;
       }
     }
 #endif
-    if (jit_cache_file) {
+    /* LLVM parsing happens only after the provenance sidecar is accepted. */
+    if (jit_cache_file && ny_cache_artifact_manifest_valid(jit_cache_file, source)) {
       LLVMModuleRef cached_mod = NULL;
       if (ny_jit_cache_load(jit_cache_file, cg.ctx, &cached_mod)) {
         if (opt->verbose)
@@ -2074,9 +2200,11 @@ int ny_pipeline_run(ny_options *opt) {
   cg.source_string = source;
   cg.prog_owned = false;
   NY_LOG_V2("Preparing codegen (analysis & links)...\n");
+  ny_tick_t t_codegen_prepare = opt->do_timing ? ny_ticks_now() : 0;
   progress_node = ny_progress_task_begin("prepare codegen", 1);
   codegen_prepare(&cg);
   ny_progress_task_end(progress_node);
+  maybe_log_phase_time(opt->do_timing, "Codegen prepare:", t_codegen_prepare);
   if (cg.had_error) {
     NY_LOG_ERR("Codegen prepare failed\n");
     ny_stage_maybe_emit_errors(opt, NY_STOP_AFTER_TRAIT, parse_name,
@@ -2092,10 +2220,19 @@ int ny_pipeline_run(ny_options *opt) {
     max_type_stage = NY_TYPE_PIPELINE_STAGE_TRAIT;
   ny_type_pipeline_stage_t failed_type_stage = NY_TYPE_PIPELINE_STAGE_OK;
   progress_node = ny_progress_task_begin("validate types", 1);
-  int type_errors = ny_type_pipeline_validate_semantics(
-      &prog, &cg, parse_name, opt && opt->dump_scope != NY_DUMP_SCOPE_PROGRAM,
-      max_type_stage, &failed_type_stage, true, &type_errors_json);
+  ny_tick_t t_type_validation = opt->do_timing ? ny_ticks_now() : 0;
+  int type_errors = 0;
+  if (!reuse_semantic_artifact) {
+    type_errors = ny_type_pipeline_validate_semantics(
+        &prog, &cg, parse_name,
+        opt && opt->dump_scope != NY_DUMP_SCOPE_PROGRAM, max_type_stage,
+        &failed_type_stage, true, &type_errors_json);
+  }
   ny_progress_task_end(progress_node);
+  if (reuse_semantic_artifact && opt->do_timing)
+    fprintf(stderr, "Type validation: 0.0000s (reused artifact)\n");
+  else
+    maybe_log_phase_time(opt->do_timing, "Type validation:", t_type_validation);
   if (type_errors > 0) {
     ny_stop_after_stage_t error_stage = NY_STOP_AFTER_HM;
     const char *error_message = "HM type validation failed";
@@ -2347,7 +2484,11 @@ int ny_pipeline_run(ny_options *opt) {
       LLVMDisposeModule(dump_mod);
   }
 
-  if (!fast_compiler) {
+  /* JIT cache artifacts are written below only after this exact optimization
+   * stage. Re-running LLVM's pipeline on a validated hit both burns most of
+   * the warm-start budget and can make cache behavior depend on pass details
+   * outside the cache key. */
+  if (!fast_compiler && !loaded_from_cache) {
     int eff_opt = opt->opt_level;
     if (parallel_modules && !ny_env_enabled("NYTRIX_PARALLEL_OPT_LINK")) {
       eff_opt = 0;
@@ -2392,20 +2533,27 @@ int ny_pipeline_run(ny_options *opt) {
     ny_stage_emit_artifact(opt, NY_STOP_AFTER_OPT, &prog, &cg, parse_name,
                            cg.module, false);
   }
-  if (write_compile_caches && jit_cache_file && !loaded_from_cache) {
+  if (write_compile_caches && jit_cache_file) {
 #ifndef _WIN32
-    if (native_cache_file && opt->run_jit && !opt->command_string) {
+    /* A bitcode hit may be the first opportunity to build the faster native
+     * tier. Do not require a full front-end miss before promoting it. */
+    if (ny_env_enabled("NYTRIX_JIT_NATIVE_CACHE") && native_cache_file &&
+        opt->run_jit && !opt->command_string &&
+        ny_access(native_cache_file, R_OK) != 0) {
       ny_tick_t t_native = opt->do_timing ? ny_ticks_now() : 0;
       if (ny_jit_native_cache_save(native_cache_file, cg.module, opt->opt_level,
                                    (const char *const *)cg.links.data,
                                    cg.links.len)) {
-        if (opt->verbose)
-          fprintf(stderr, "JIT native cache saved: %s\n", native_cache_file);
+        fprintf(stderr, "JIT native cache saved: %s\n", native_cache_file);
+      } else {
+        fprintf(stderr,
+                "JIT native cache save failed: native tier will compile again next run\n");
       }
       maybe_log_phase_time(opt->do_timing, "Native Cache:", t_native);
     }
 #endif
-    if (ny_jit_cache_save(jit_cache_file, cg.module)) {
+    if (!loaded_from_cache && ny_jit_cache_save(jit_cache_file, cg.module) &&
+        ny_cache_artifact_manifest_save(jit_cache_file, source)) {
       if (opt->verbose)
         fprintf(stderr, "JIT cache saved: %s\n", jit_cache_file);
     }
@@ -2423,8 +2571,17 @@ skip_compilation:
   }
   if (opt->native_result_oracle) {
     char native_oracle_err[512] = {0};
-    if (!ny_native_result_oracle_for_program(&prog, opt, native_oracle_err,
-                                             sizeof(native_oracle_err))) {
+    if (opt->native_oracle_fuzz_count > 0) {
+      if (!ny_native_oracle_fuzz(opt, opt->native_oracle_fuzz_count,
+                                 native_oracle_err,
+                                 sizeof(native_oracle_err))) {
+        NY_LOG_ERR("Native oracle fuzz failed: %s\n",
+                   native_oracle_err[0] ? native_oracle_err : "unknown error");
+        exit_code = 1;
+        goto exit_success;
+      }
+    } else if (!ny_native_result_oracle_for_program(&prog, opt, native_oracle_err,
+                                                    sizeof(native_oracle_err))) {
       NY_LOG_ERR("Native result oracle failed: %s\n",
                  native_oracle_err[0] ? native_oracle_err : "unknown error");
       exit_code = 1;
@@ -2433,7 +2590,7 @@ skip_compilation:
   }
   if (opt->native_dump_ir &&
       (opt->native_backend != NY_NATIVE_BACKEND_LLVM || opt->nyir_run ||
-       opt->nyir_metadata_report)) {
+       opt->nyir_metadata_report || opt->nyir_dump_bin)) {
     char native_dump_err[512] = {0};
     if (!ny_native_dump_ir_for_program(&prog, opt, native_dump_err,
                                        sizeof(native_dump_err))) {
@@ -2503,6 +2660,10 @@ skip_compilation:
     }
     ny_trace_file_size("emit_bc", opt->emit_bc_path);
   }
+  /* Extern declarations with `as "cname"` must emit their linker symbol, not
+   * the Nytrix name.  Rename before any LLVM assembly/object emission. */
+  if (opt->native_backend == NY_NATIVE_BACKEND_LLVM)
+    codegen_export_extern_link_names(&cg);
   if (opt->emit_asm_path) {
     ny_ensure_parent_dir_for_path(opt->emit_asm_path);
     if (opt->native_backend != NY_NATIVE_BACKEND_LLVM) {
@@ -2599,7 +2760,7 @@ skip_compilation:
                            runtime_profile == NY_OPT_PROFILE_PEAK ||
                            ny_env_enabled("NYTRIX_RUNTIME_SPEED");
       const char *runtime_opt_env = ny_env_str_nonempty("NYTRIX_RUNTIME_OPT");
-      int runtime_speed_level = runtime_speed ? 3 : 0;
+      int runtime_speed_level = runtime_speed ? 3 : (opt->opt_size ? -1 : 0);
       if (runtime_opt_env) {
         if (strcmp(runtime_opt_env, "0") == 0 ||
             strcmp(runtime_opt_env, "size") == 0)
@@ -2667,7 +2828,10 @@ skip_compilation:
       if (aot_cache_path[0] != '\0' &&
           strcmp(aot_cache_path, output_path) != 0 &&
           ny_valid_native_artifact(output_path)) {
-        (void)ny_copy_file(output_path, aot_cache_path);
+        /* Publish the executable first, then its provenance marker. Readers
+         * reject an artifact without a marker, including interrupted writes. */
+        if (ny_copy_file(output_path, aot_cache_path) == 0)
+          (void)ny_cache_artifact_manifest_save(aot_cache_path, source);
       }
 #ifdef _WIN32
       NY_LOG_SUCCESS("Saved EXE: %s\n", output_path);

@@ -74,7 +74,10 @@ while(e){
 
 Focused UI project files:
 
-- [engine.ny](../../etc/projects/ui/engine.ny) is the asset viewer used by `build/cache/tools/run`.
+- [engine.ny](../../etc/projects/ui/engine.ny) is the asset viewer used by the
+  normal `./make` and browser-test workflows. Keep rendered probes in named
+  directories under `build/web/` or `build/probes/` so their inputs and output
+  artifacts remain reproducible.
 - [input.ny](../../etc/projects/ui/input.ny) switches between keyboard and active gamepad visualization.
 - [monitor.ny](../../etc/projects/ui/monitor.ny) shows monitor layout, window moves, framebuffer scale, DPI, and mouse coordinates.
 - [term.ny](../../etc/projects/ui/term.ny) shows terminal rendering.
