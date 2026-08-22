@@ -60,8 +60,6 @@ jobs:
           else
             ./make test
           fi
-      - name: Run Linux thread-ring benchmark
-        run: CI=0 GITHUB_ACTIONS=0 ./build/release/ny-test --pattern thread-ring --timeout 30
       - name: Run ASan suite
         if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
         run: |

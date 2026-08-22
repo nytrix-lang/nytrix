@@ -1,0 +1,18 @@
+shape lint-unused-import-alias {
+  family "compiler-errors/lint"
+  generator "error"
+  features ["error", "lint", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--warn-all"
+
+  expect_message "unused import"
+  source ny <<'NY'
+use std.core
+use std.core.reflect as rf
+
+def main() {
+  println("hi")
+}
+NY
+}

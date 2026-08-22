@@ -1,0 +1,56 @@
+defaults {
+  family "runtime-native"
+  generator "native"
+  template ny-test-case
+}
+
+shape x86_64_elf64_object_link_run_f32 {
+  features [native object elf64 x86_64 nyir link-run f32]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f32.o"
+  expect object_link_run_f64_0.30000001192092896
+  source ny <<'NY'
+def f32 a = 0.1
+def f32 b = 0.2
+def f64 c = a + b
+c
+NY
+}
+
+shape x86_64_elf64_object_link_run_f32_call {
+  features [native object elf64 x86_64 nyir link-run f32 call]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f32-call.o"
+  expect object_link_run_f64_0.30000001192092896
+  source ny <<'NY'
+fn add(f32 a, f32 b) f32 {
+  a + b
+}
+
+def f64 y = add(0.1, 0.2)
+y
+NY
+}
+
+shape x86_64_elf64_object_link_run_f32_call9 {
+  features [native object elf64 x86_64 nyir link-run f32 call stack]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f32-call9.o"
+  expect object_link_run_f64_45.5
+  source ny <<'NY'
+fn sum9(f32 a, f32 b, f32 c, f32 d, f32 e, f32 f, f32 g, f32 h, f32 i) f32 {
+  a + b + c + d + e + f + g + h + i
+}
+
+def f64 y = sum9(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.5)
+y
+NY
+}
+
+shape x86_64_elf64_object_link_run_f32_direct_return {
+  features [native object elf64 x86_64 nyir link-run f32 abi return]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f32-direct-return.o"
+  expect object_link_run_f32_3.75
+  source ny <<'NY'
+def f32 x = 1.5f32
+def f32 y = 2.25f32
+x + y
+NY
+}

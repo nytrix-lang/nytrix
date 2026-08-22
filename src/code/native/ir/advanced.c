@@ -1883,9 +1883,6 @@ bool nyir_loop_unroll(nyir_func_t *f) {
    */
   if (!f || f->len < 8)
     return true;
-  for (size_t i = 0; i < f->len; ++i)
-    if (f->data[i].op == NYIR_PHI)
-      return true;
 
   for (size_t bi = 0; bi < f->len; ++bi) {
     if (f->data[bi].op != NYIR_BR_IF)
@@ -1916,8 +1913,7 @@ bool nyir_loop_unroll(nyir_func_t *f) {
      * Unroll factor based on loop heat (profile-guided).
      */
     int unroll_factor = loop_heat >= 100 ? 8 : loop_heat >= 16 ? 4 : 2;
-    int64_t max_trip = loop_heat >= 100 ? 128 : loop_heat >= 16 ? 64 : 32;
-    if (trip < 2 || trip > max_trip || iv < 0)
+    if (trip < 2 || iv < 0)
       continue;
 
     /*
@@ -1937,7 +1933,7 @@ bool nyir_loop_unroll(nyir_func_t *f) {
           if (f->data[k].op == NYIR_BR || f->data[k].op == NYIR_BR_IF ||
               f->data[k].op == NYIR_LABEL || f->data[k].op == NYIR_RET) {
             body_end = k;
-            size_t body_limit = loop_heat >= 100 ? 32 : 16;
+            size_t body_limit = loop_heat >= 100 ? 96 : 64;
             have = body_end > body_start &&
                    (body_end - body_start) <= body_limit;
             break;
@@ -1962,8 +1958,8 @@ bool nyir_loop_unroll(nyir_func_t *f) {
        * Address-taken memory still needs alias-aware rematerialization.
        */
       if (op == NYIR_CALL || op == NYIR_PHI || op == NYIR_BR ||
-          op == NYIR_BR_IF || op == NYIR_LABEL || op == NYIR_LOAD_I64 ||
-          op == NYIR_STORE_I64 || op == NYIR_ADDR_LOCAL) {
+          op == NYIR_BR_IF || op == NYIR_LABEL || op == NYIR_RET ||
+          op == NYIR_ADDR_LOCAL || op == NYIR_ALLOCA) {
         pure = false;
         break;
       }
@@ -2533,9 +2529,29 @@ static bool nyir_tbuf_const_before(const nyir_func_t *f, int value,
     return false;
   for (size_t i = 0; i < before && i < f->len; ++i) {
     const nyir_inst_t *in = &f->data[i];
-    if (in->dst == value && in->op == NYIR_CONST_I64) {
-      *out = in->imm;
-      return true;
+    if (in->dst == value) {
+      if (in->op == NYIR_CONST_I64) {
+        *out = in->imm;
+        return true;
+      }
+      if (in->op == NYIR_COPY)
+        return nyir_tbuf_const_before(f, in->a, i, out);
+      if (in->op == NYIR_MUL_I64) {
+        int64_t ca = 0, cb = 0;
+        if (nyir_tbuf_const_before(f, in->a, i, &ca) &&
+            nyir_tbuf_const_before(f, in->b, i, &cb)) {
+          *out = ca * cb;
+          return true;
+        }
+      }
+      if (in->op == NYIR_ADD_I64) {
+        int64_t ca = 0, cb = 0;
+        if (nyir_tbuf_const_before(f, in->a, i, &ca) &&
+            nyir_tbuf_const_before(f, in->b, i, &cb)) {
+          *out = ca + cb;
+          return true;
+        }
+      }
     }
   }
   return false;
@@ -3180,10 +3196,19 @@ bool nyir_aggregate_sroa(nyir_func_t *f) {
   for (size_t i = 0; i < f->len; ++i) {
     nyir_inst_t *in = &f->data[i];
     if (in->op == NYIR_LABEL || in->op == NYIR_BR || in->op == NYIR_BR_IF ||
-        in->op == NYIR_CALL || in->op == NYIR_RET) {
+        in->op == NYIR_RET) {
       for (size_t l = 0; l < n; ++l) {
         last_store[l] = -1;
         field_def[l] = -1;
+      }
+      continue;
+    }
+    if (in->op == NYIR_CALL) {
+      for (size_t l = 0; l < n; ++l) {
+        if (escaped[l]) {
+          last_store[l] = -1;
+          field_def[l] = -1;
+        }
       }
       continue;
     }

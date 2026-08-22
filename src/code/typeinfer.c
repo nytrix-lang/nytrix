@@ -241,6 +241,166 @@ char *ny_type_to_string(ny_type_t *type) {
   return ny_strdup("any");
 }
 
+ny_subst_t *ny_subst_new(int cap) {
+  if (cap <= 0)
+    cap = 64;
+  ny_subst_t *s = (ny_subst_t *)calloc(1, sizeof(*s));
+  if (!s)
+    return NULL;
+  s->capacity = cap;
+  s->count = 0;
+  s->parent = (int *)malloc((size_t)cap * sizeof(int));
+  s->rank = (int *)calloc((size_t)cap, sizeof(int));
+  s->binding = (ny_type_t **)calloc((size_t)cap, sizeof(ny_type_t *));
+  if (!s->parent || !s->rank || !s->binding) {
+    ny_subst_free(s);
+    return NULL;
+  }
+  for (int i = 0; i < cap; ++i)
+    s->parent[i] = i;
+  return s;
+}
+
+void ny_subst_free(ny_subst_t *s) {
+  if (!s)
+    return;
+  free(s->parent);
+  free(s->rank);
+  free(s->binding);
+  free(s);
+}
+
+int ny_subst_fresh(ny_subst_t *s) {
+  if (!s)
+    return 0;
+  if (s->count >= s->capacity) {
+    int ncap = s->capacity ? s->capacity * 2 : 64;
+    int *np = (int *)realloc(s->parent, (size_t)ncap * sizeof(int));
+    int *nr = (int *)realloc(s->rank, (size_t)ncap * sizeof(int));
+    ny_type_t **nb =
+        (ny_type_t **)realloc(s->binding, (size_t)ncap * sizeof(ny_type_t *));
+    if (!np || !nr || !nb)
+      return -1;
+    s->parent = np;
+    s->rank = nr;
+    s->binding = nb;
+    for (int i = s->capacity; i < ncap; ++i) {
+      s->parent[i] = i;
+      s->rank[i] = 0;
+      s->binding[i] = NULL;
+    }
+    s->capacity = ncap;
+  }
+  int id = s->count++;
+  s->parent[id] = id;
+  s->rank[id] = 0;
+  s->binding[id] = NULL;
+  return id;
+}
+
+ny_type_t *ny_subst_find(ny_subst_t *s, int var_id) {
+  if (!s || var_id < 0 || var_id >= s->count)
+    return NULL;
+  int root = var_id;
+  while (root >= 0 && root < s->count && s->parent[root] != root)
+    root = s->parent[root];
+  int curr = var_id;
+  while (curr >= 0 && curr < s->count && s->parent[curr] != root) {
+    int next = s->parent[curr];
+    s->parent[curr] = root;
+    curr = next;
+  }
+  if (root >= 0 && root < s->count && s->binding[root]) {
+    ny_type_t *b = s->binding[root];
+    if (b && b->kind == NY_TYPE_VAR && b->id != root && b->id >= 0 &&
+        b->id < s->count) {
+      ny_type_t *resolved = ny_subst_find(s, b->id);
+      if (resolved)
+        s->binding[root] = resolved;
+      return s->binding[root];
+    }
+    return b;
+  }
+  return NULL;
+}
+
+void ny_subst_union(ny_subst_t *s, int a, int b) {
+  if (!s || a < 0 || a >= s->count || b < 0 || b >= s->count)
+    return;
+  int ra = a, rb = b;
+  while (s->parent[ra] != ra)
+    ra = s->parent[ra];
+  while (s->parent[rb] != rb)
+    rb = s->parent[rb];
+  if (ra == rb)
+    return;
+  if (s->rank[ra] < s->rank[rb]) {
+    s->parent[ra] = rb;
+    if (s->binding[ra] && !s->binding[rb])
+      s->binding[rb] = s->binding[ra];
+  } else if (s->rank[ra] > s->rank[rb]) {
+    s->parent[rb] = ra;
+    if (s->binding[rb] && !s->binding[ra])
+      s->binding[ra] = s->binding[rb];
+  } else {
+    s->parent[rb] = ra;
+    s->rank[ra]++;
+    if (s->binding[rb] && !s->binding[ra])
+      s->binding[ra] = s->binding[rb];
+  }
+}
+
+static bool ny_type_occurs_id(int id, ny_type_t *t) {
+  if (!t)
+    return false;
+  if (t->kind == NY_TYPE_VAR)
+    return t->id == id;
+  if (t->kind == NY_TYPE_ARROW)
+    return ny_type_occurs_id(id, t->as.arrow.param) ||
+           ny_type_occurs_id(id, t->as.arrow.ret);
+  if (t->kind == NY_TYPE_APPLY)
+    return ny_type_occurs_id(id, t->as.apply.arg0) ||
+           ny_type_occurs_id(id, t->as.apply.arg1);
+  return false;
+}
+
+void ny_subst_bind(ny_subst_t *s, int var_id, ny_type_t *t) {
+  if (!s || var_id < 0 || var_id >= s->count || !t)
+    return;
+  int root = var_id;
+  while (s->parent[root] != root)
+    root = s->parent[root];
+  if (t->kind == NY_TYPE_VAR && t->id >= 0 && t->id < s->count) {
+    int tr = t->id;
+    while (s->parent[tr] != tr)
+      tr = s->parent[tr];
+    if (root == tr)
+      return;
+    ny_subst_union(s, root, tr);
+    return;
+  }
+  if (!ny_type_occurs_id(root, t))
+    s->binding[root] = t;
+}
+
+void ny_subst_apply(ny_subst_t *s, ny_type_t *t) {
+  if (!s || !t)
+    return;
+  if (t->kind == NY_TYPE_VAR) {
+    ny_type_t *bound = ny_subst_find(s, t->id);
+    if (bound && bound != t) {
+      ny_subst_apply(s, bound);
+      *t = *bound;
+    }
+  } else if (t->kind == NY_TYPE_ARROW) {
+    ny_subst_apply(s, t->as.arrow.param);
+    ny_subst_apply(s, t->as.arrow.ret);
+  } else if (t->kind == NY_TYPE_APPLY) {
+    ny_subst_apply(s, t->as.apply.arg0);
+    ny_subst_apply(s, t->as.apply.arg1);
+  }
+}
+
 static size_t typeinfer_align_up(size_t value, size_t align) {
   if (align == 0)
     return value;

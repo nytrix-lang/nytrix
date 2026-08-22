@@ -243,6 +243,32 @@ bool ny_type_unify(ny_type_t *a, ny_type_t *b);
 const char *ny_type_kind_name(ny_type_kind_t kind);
 char *ny_type_to_string(ny_type_t *type);
 
+typedef struct ny_subst_t {
+  int *parent;
+  int *rank;
+  ny_type_t **binding;
+  int capacity;
+  int count;
+} ny_subst_t;
+
+typedef ny_subst_t NySubst;
+
+ny_subst_t *ny_subst_new(int cap);
+void ny_subst_free(ny_subst_t *s);
+int ny_subst_fresh(ny_subst_t *s);
+ny_type_t *ny_subst_find(ny_subst_t *s, int var_id);
+void ny_subst_bind(ny_subst_t *s, int var_id, ny_type_t *t);
+void ny_subst_union(ny_subst_t *s, int a, int b);
+void ny_subst_apply(ny_subst_t *s, ny_type_t *t);
+
+typedef struct ny_constraint_t {
+  ny_type_t *a;
+  ny_type_t *b;
+  const char *file;
+  int line;
+  int col;
+} ny_constraint_t;
+
 struct fun_sig {
   const char *name;
   const char *module_name;

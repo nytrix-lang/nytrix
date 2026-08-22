@@ -1,0 +1,101 @@
+defaults {
+  family "runtime-native"
+  generator "native"
+  template ny-test-case
+}
+
+shape x86_64_elf64_object_link_run_i16_return {
+  features [native object elf64 x86_64 nyir link-run abi]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-i16-return.o"
+  expect object_link_run_i16_65535
+  source ny <<'NY'
+fn ret_i16() i16 {
+  -1
+}
+ret_i16()
+NY
+}
+
+shape x86_64_elf64_object_link_run_u32_return {
+  features [native object elf64 x86_64 nyir link-run abi]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-u32-return.o"
+  expect object_link_run_u32_4294967295
+  source ny <<'NY'
+fn ret_u32() u32 {
+  4294967295
+}
+ret_u32()
+NY
+}
+
+shape x86_64_elf64_object_link_run_u8_return {
+  features [native object elf64 x86_64 nyir link-run abi]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-u8-return.o"
+  expect object_link_run_u8_255
+  source ny <<'NY'
+fn ret_u8() u8 {
+  255
+}
+ret_u8()
+NY
+}
+
+shape x86_64_elf64_object_link_run_i64 {
+  features [native object elf64 x86_64 nyir link-run]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-i64.o"
+  expect object_link_run_i64_10
+  source ny <<'NY'
+fn add4(i64 a, i64 b, i64 c, i64 d) i64 {
+  a + b + c + d
+}
+add4(1, 2, 3, 4)
+NY
+}
+
+shape x86_64_elf64_object_link_run_call7_i64 {
+  features [native object elf64 x86_64 nyir link-run]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-call7-i64.o"
+  expect object_link_run_i64_28
+  source ny <<'NY'
+fn add7(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g) i64 {
+  a + b + c + d + e + f + g
+}
+add7(1, 2, 3, 4, 5, 6, 7)
+NY
+}
+
+shape x86_64_elf64_object_link_run_call8_i64 {
+  features [native object elf64 x86_64 nyir link-run]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-call8-i64.o"
+  expect object_link_run_i64_36
+  source ny <<'NY'
+fn add8(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g, i64 h) i64 {
+  a + b + c + d + e + f + g + h
+}
+add8(1, 2, 3, 4, 5, 6, 7, 8)
+NY
+}
+
+shape x86_64_elf64_object_link_run_bool_return {
+  features [native object elf64 x86_64 nyir link-run abi bool]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-bool-return.o"
+  expect object_link_run_bool_1
+  source ny <<'NY'
+fn ret_bool(i64 a, i64 b) bool {
+  a < b
+}
+ret_bool(3, 5)
+NY
+}
+
+shape x86_64_elf64_object_link_run_bool_cmp {
+  features [native object elf64 x86_64 nyir link-run bool]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-bool-cmp.o"
+  expect object_link_run_i64_1
+  source ny <<'NY'
+fn gt(i64 a, i64 b) bool {
+  a > b
+}
+gt(5, 3)
+NY
+}

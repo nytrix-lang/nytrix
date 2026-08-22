@@ -26,6 +26,11 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
     if (!is_any && !is_cstr && i < v->exprs.len &&
         ny_native_nir_expr_is_any(b, v->exprs.data[i]))
       is_any = true;
+    bool is_bool = i < v->types.len && v->types.data[i] &&
+                   strcmp(v->types.data[i], "bool") == 0;
+    if (!is_bool && i < v->exprs.len &&
+        ny_native_nir_expr_is_bool(b, v->exprs.data[i]))
+      is_bool = true;
     ny_native_nir_local_t *l =
         v->is_decl ? ny_native_nir_bind_local_typed(b, name, is_f64, is_f32,
                                                      is_cstr)
@@ -36,6 +41,8 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
       l->is_f32 = true;
     if (l && is_cstr)
       l->is_cstr = true;
+    if (l && is_bool)
+      l->is_bool = true;
     if (l && is_any)
       l->is_any = true;
     bool is_list =
@@ -77,7 +84,10 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
     if (is_f32 && init && init->kind == NY_E_LITERAL &&
         init->as.literal.kind == NY_LIT_FLOAT)
       val = ny_native_nir_emit_const_f32(b, init->as.literal.as.f);
-    else {
+    else if (v->is_decl && !v->is_mut && init && init->kind == NY_E_LIST &&
+             init->as.list_like.len == 1) {
+      val = ny_native_nir_lower_expr(b, init->as.list_like.data[0]);
+    } else {
       val = ny_native_nir_lower_expr(b, init);
       if (val >= 0) {
         /*

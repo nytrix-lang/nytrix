@@ -1,0 +1,15 @@
+shape parser-missing-brace-semicolon {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "';' is a comment in Nytrix"
+  source ny <<'NY'
+use std.core
+
+fn f() int {
+  1; 2 }
+NY
+}

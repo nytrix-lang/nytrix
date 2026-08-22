@@ -667,7 +667,9 @@ static bool stack_push(value_stack_t *s, int v) {
  * produced infinite loops under CF mem2reg.
  */
 static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
-                       size_t locals, int zero_v) {
+                       size_t locals, int zero_v,
+                       const nyir_type_map_t *types,
+                       int zero_f64_v, int zero_f32_v) {
   if (!f || !cfg)
     return false;
   size_t *rpo = NULL;
@@ -749,8 +751,13 @@ static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
           if (!stack_push(&stacks[in->imm], in->dst))
             ok = false;
         } else {
+          int zero_for_l = (types && types->local_f64 && types->local_f64[in->imm])
+                               ? (zero_f64_v >= 0 ? zero_f64_v : zero_v)
+                               : ((types && types->local_f32 && types->local_f32[in->imm])
+                                      ? (zero_f32_v >= 0 ? zero_f32_v : zero_v)
+                                      : zero_v);
           in->op = NYIR_COPY;
-          in->a = zero_v;
+          in->a = zero_for_l;
           in->b = -1;
           in->imm = 0;
         }
@@ -765,13 +772,18 @@ static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
     for (size_t l = 0; l < locals; ++l) {
       if (!promote[l])
         exit_val[b * locals + l] = -1;
-      else if (!stacks[l].len)
-        exit_val[b * locals + l] = zero_v;
-      else
+      else if (!stacks[l].len) {
+        int zero_for_l = (types && types->local_f64 && types->local_f64[l])
+                             ? (zero_f64_v >= 0 ? zero_f64_v : zero_v)
+                             : ((types && types->local_f32 && types->local_f32[l])
+                                    ? (zero_f32_v >= 0 ? zero_f32_v : zero_v)
+                                    : zero_v);
+        exit_val[b * locals + l] = zero_for_l;
+      } else {
         exit_val[b * locals + l] =
             stacks[l].data[stacks[l].len - 1];
+      }
     }
-
     /*
      * Fill PHI operands on successors.
      */
@@ -784,7 +796,12 @@ static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
         int pi = phi_at(f, cfg, s, (int)l);
         if (pi < 0)
           continue;
-        int val = stacks[l].len ? stacks[l].data[stacks[l].len - 1] : zero_v;
+        int zero_for_l = (types && types->local_f64 && types->local_f64[l])
+                             ? (zero_f64_v >= 0 ? zero_f64_v : zero_v)
+                             : ((types && types->local_f32 && types->local_f32[l])
+                                    ? (zero_f32_v >= 0 ? zero_f32_v : zero_v)
+                                    : zero_v);
+        int val = stacks[l].len ? stacks[l].data[stacks[l].len - 1] : zero_for_l;
         nyir_inst_t *phi = &f->data[pi];
         size_t n = phi->phi_incoming_len;
         nyir_phi_incoming_t *p =
@@ -834,6 +851,8 @@ bool nyir_mem2reg(nyir_func_t *f) {
     size_t at = (f->len && f->data[0].op == NYIR_LABEL) ? 1 : 0;
     if (!insert_inst(f, at, zero_inst)) { nyir_func_free(&backup); return false; }
   }
+  int zero_f64_v = -1;
+  int zero_f32_v = -1;
   nyir_cfg_t cfg = {0};
   if (!nyir_cfg_build(f, &cfg)) { nyir_func_free(&backup); return false; }
   /*
@@ -876,10 +895,68 @@ bool nyir_mem2reg(nyir_func_t *f) {
    * stores never dominate the loop header), forcing them to live in stack
    * memory across every iteration.
    */
-  for (size_t l = 0; l < locals; ++l)
-    if (!addr[l] && has_load[l] && has_store[l] &&
-        !types.local_f64[l] && !types.local_f32[l])
+  bool has_f64_promote = false;
+  bool has_f32_promote = false;
+  for (size_t l = 0; l < locals; ++l) {
+    if (!addr[l] && has_load[l] && has_store[l]) {
       promote[l] = true;
+      if (types.local_f64 && types.local_f64[l])
+        has_f64_promote = true;
+      if (types.local_f32 && types.local_f32[l])
+        has_f32_promote = true;
+    }
+  }
+  if (has_f64_promote) {
+    for (size_t i = 0; i < f->len; ++i) {
+      if (f->data[i].op == NYIR_CONST_F64 && f->data[i].dst >= 0) {
+        double dv = 0.0;
+        memcpy(&dv, &f->data[i].imm, sizeof(dv));
+        if (dv == 0.0) {
+          zero_f64_v = f->data[i].dst;
+          break;
+        }
+      }
+    }
+    if (zero_f64_v < 0) {
+      zero_f64_v = f->next_value++;
+      double zero_d = 0.0;
+      int64_t imm_d = 0;
+      memcpy(&imm_d, &zero_d, sizeof(imm_d));
+      nyir_inst_t zero_f64_inst = {.op = NYIR_CONST_F64, .dst = zero_f64_v, .a = -1, .b = -1, .imm = imm_d};
+      size_t at = (f->len && f->data[0].op == NYIR_LABEL) ? 1 : 0;
+      if (!insert_inst(f, at, zero_f64_inst)) {
+        free(promote); free(addr); free(has_load); free(has_store);
+        nyir_type_map_free(&types); nyir_cfg_free(&cfg); nyir_func_free(&backup);
+        return false;
+      }
+    }
+  }
+  if (has_f32_promote) {
+    for (size_t i = 0; i < f->len; ++i) {
+      if (f->data[i].op == NYIR_CONST_F32 && f->data[i].dst >= 0) {
+        float fv = 0.0f;
+        uint32_t imm32 = (uint32_t)f->data[i].imm;
+        memcpy(&fv, &imm32, sizeof(fv));
+        if (fv == 0.0f) {
+          zero_f32_v = f->data[i].dst;
+          break;
+        }
+      }
+    }
+    if (zero_f32_v < 0) {
+      zero_f32_v = f->next_value++;
+      float zero_f = 0.0f;
+      uint32_t imm_f = 0;
+      memcpy(&imm_f, &zero_f, sizeof(imm_f));
+      nyir_inst_t zero_f32_inst = {.op = NYIR_CONST_F32, .dst = zero_f32_v, .a = -1, .b = -1, .imm = (int64_t)imm_f};
+      size_t at = (f->len && f->data[0].op == NYIR_LABEL) ? 1 : 0;
+      if (!insert_inst(f, at, zero_f32_inst)) {
+        free(promote); free(addr); free(has_load); free(has_store);
+        nyir_type_map_free(&types); nyir_cfg_free(&cfg); nyir_func_free(&backup);
+        return false;
+      }
+    }
+  }
   /*
    * Pruned Cytron SSA: only place a PHI at a dominance frontier where this
    * local is live-in. This avoids join values that cannot be observed.
@@ -960,7 +1037,7 @@ bool nyir_mem2reg(nyir_func_t *f) {
     if (!nyir_cfg_build(f, &cfg)) goto oom;
   }
   nyir_cfg_free(&cfg); if (!nyir_cfg_build(f, &cfg)) goto oom;
-  bool ok = rename_ssa(f, &cfg, promote, locals, zero_v);
+  bool ok = rename_ssa(f, &cfg, promote, locals, zero_v, &types, zero_f64_v, zero_f32_v);
   free(promote); free(addr); free(has_load); free(has_store);
   nyir_type_map_free(&types); nyir_cfg_free(&cfg);
   if (ok) {

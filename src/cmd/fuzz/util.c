@@ -224,9 +224,9 @@ int count_regexish_assign_list(const char *data, size_t len, const char *kw) {
     if (i != len && data[i] != '\n') continue;
     const char *line = data + start;
     size_t line_len = i - start;
-    if (memmem(line, line_len, kw, kw_len) &&
-        memmem(line, line_len, "= [", 3)) {
-      const char *eq = memmem(line, line_len, "= [", 3);
+    if (ny_memmem(line, line_len, kw, kw_len) &&
+        ny_memmem(line, line_len, "= [", 3)) {
+      const char *eq = ny_memmem(line, line_len, "= [", 3);
       if (eq && (eq + 3 < line + line_len) &&
           ((*((eq + 3)) >= '0' && *((eq + 3)) <= '9') || *((eq + 3)) == '-'))
         ++count;

@@ -1,3 +1,57 @@
+/*
+ * Emit an inline divide-by-zero guard matching the LLVM/JIT path
+ * (ny_emit_f64_div_zero_guard / the int divmod slow path): when the divisor
+ * compares equal to zero, panic with the given message ("division by zero"
+ * or "modulo by zero").  The panic block is cold; the hot path is one
+ * compare + branch.  rt_panic is noreturn (longjmp/exit), so the trailing
+ * ret 0 is only reachable if the runtime is built without panic support.
+ */
+static bool ny_native_nir_emit_div_zero_guard(ny_native_nir_builder_t *b,
+                                              nyir_op_t cmp_op, int divisor,
+                                              const char *msg) {
+  int zero = cmp_op == NYIR_CMP_F32 ? ny_native_nir_emit_const_f32(b, 0.0)
+              : cmp_op == NYIR_CMP_F64 ? ny_native_nir_emit_const_f64(b, 0.0)
+                                       : ny_native_nir_emit_const(b, 0);
+  if (zero < 0)
+    return false;
+  int is_zero = nyir_emit(&b->nyir,
+                          (nyir_inst_t){.op = cmp_op,
+                                        .dst = -1,
+                                        .a = divisor,
+                                        .b = zero,
+                                        .cmp = NYIR_CMP_EQ});
+  if (is_zero < 0)
+    return ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+  int panic_label = b->next_label++;
+  int ok_label = b->next_label++;
+  if (!ny_native_nir_emit_br_if(b, is_zero, panic_label) ||
+      !ny_native_nir_emit_br(b, ok_label) ||
+      !ny_native_nir_emit_label(b, panic_label))
+    return false;
+  int msg_v = ny_native_nir_emit_cstr_const(b, msg ? msg : "division by zero");
+  if (msg_v < 0)
+    return false;
+  int tagged =
+      ny_native_nir_emit_runtime_call(b, "rt_alloc_string", msg_v, -1, -1, 1, 0);
+  if (tagged < 0 ||
+      ny_native_nir_emit_runtime_call(b, "rt_panic", tagged, -1, -1, 1, 0) < 0)
+    return false;
+  int zero_i = ny_native_nir_emit_const(b, 0);
+  if (zero_i < 0)
+    return false;
+  /*
+   * The panic block's ret terminates only that cold block; it must not mark
+   * the enclosing statement/function as having returned, or the statement
+   * iterators would truncate the body after the first guarded division.
+   */
+  bool saved_return = b->emitted_return;
+  bool ok = ny_native_nir_emit_ret(b, zero_i);
+  b->emitted_return = saved_return;
+  if (!ok)
+    return false;
+  return ny_native_nir_emit_label(b, ok_label);
+}
+
 static int ny_native_nir_lower_binary(ny_native_nir_builder_t *b,
                                    const expr_t *e) {
   if (e->as.binary.op && strcmp(e->as.binary.op, "*") == 0) {
@@ -150,16 +204,52 @@ static int ny_native_nir_lower_binary(ny_native_nir_builder_t *b,
       (left_any || right_any) && e->as.binary.op &&
       strcmp(e->as.binary.op, "+") == 0 && !left_f64 && !right_f64 &&
       !left_f32 && !right_f32;
+  bool left_bool = ny_native_nir_expr_is_bool(b, e->as.binary.left);
+  bool right_bool = ny_native_nir_expr_is_bool(b, e->as.binary.right);
   if ((left_cstr || right_cstr || any_string_op) && !numeric_literal_sub) {
     if (!left_cstr) {
-      a = ny_native_nir_emit_runtime_call(
-          b, left_any ? "rt_native_any_to_cstr" : "rt_native_i64_to_cstr",
-          a, -1, -1, 1, 0);
+      int conv = -1;
+      if (left_any)
+        conv = ny_native_nir_emit_runtime_call(
+            b, "rt_native_any_to_cstr", a, -1, -1, 1, 0);
+      else if (left_bool)
+        conv = ny_native_nir_emit_runtime_call(
+            b, "rt_native_bool_to_cstr", a, -1, -1, 1, 0);
+      else if (left_f32) {
+        int f64 = ny_native_nir_emit_f32_to_f64(b, a);
+        conv = f64 < 0
+                   ? -1
+                   : ny_native_nir_emit_runtime_call(
+                         b, "rt_native_f64_to_cstr", f64, -1, -1, 1, 0);
+      } else if (left_f64)
+        conv = ny_native_nir_emit_runtime_call(
+            b, "rt_native_f64_to_cstr", a, -1, -1, 1, 0);
+      else
+        conv = ny_native_nir_emit_runtime_call(
+            b, "rt_native_i64_to_cstr", a, -1, -1, 1, 0);
+      a = conv;
     }
     if (!right_cstr) {
-      rhs = ny_native_nir_emit_runtime_call(
-          b, right_any ? "rt_native_any_to_cstr" : "rt_native_i64_to_cstr",
-          rhs, -1, -1, 1, 0);
+      int conv = -1;
+      if (right_any)
+        conv = ny_native_nir_emit_runtime_call(
+            b, "rt_native_any_to_cstr", rhs, -1, -1, 1, 0);
+      else if (right_bool)
+        conv = ny_native_nir_emit_runtime_call(
+            b, "rt_native_bool_to_cstr", rhs, -1, -1, 1, 0);
+      else if (right_f32) {
+        int f64 = ny_native_nir_emit_f32_to_f64(b, rhs);
+        conv = f64 < 0
+                   ? -1
+                   : ny_native_nir_emit_runtime_call(
+                         b, "rt_native_f64_to_cstr", f64, -1, -1, 1, 0);
+      } else if (right_f64)
+        conv = ny_native_nir_emit_runtime_call(
+            b, "rt_native_f64_to_cstr", rhs, -1, -1, 1, 0);
+      else
+        conv = ny_native_nir_emit_runtime_call(
+            b, "rt_native_i64_to_cstr", rhs, -1, -1, 1, 0);
+      rhs = conv;
     }
     if (a < 0 || rhs < 0)
       return -1;
@@ -231,6 +321,30 @@ static int ny_native_nir_lower_binary(ny_native_nir_builder_t *b,
         rhs = ny_native_nir_emit_i64_to_f64(b, rhs);
       }
       if (rhs < 0)
+        return -1;
+    }
+  }
+  if (op == NYIR_DIV_F64 || op == NYIR_DIV_F32 || op == NYIR_DIV_I64 ||
+      op == NYIR_MOD_I64) {
+    /*
+     * Skip the guard when the divisor is a statically-known non-zero
+     * constant (mirrors the LLVM path's divisor_nonzero check); a divide
+     * inside a hot loop then costs nothing extra.  Constant-zero divisors
+     * are rejected downstream by the NYIR verify pass.
+     */
+    const expr_t *divisor_expr = e->as.binary.right;
+    bool const_nonzero = divisor_expr && divisor_expr->kind == NY_E_LITERAL &&
+                         ((divisor_expr->as.literal.kind == NY_LIT_FLOAT &&
+                           divisor_expr->as.literal.as.f != 0.0) ||
+                          (divisor_expr->as.literal.kind == NY_LIT_INT &&
+                           divisor_expr->as.literal.as.i != 0));
+    if (!const_nonzero) {
+      const char *msg = op == NYIR_MOD_I64 ? "modulo by zero"
+                                           : "division by zero";
+      nyir_op_t cmp_op = op == NYIR_DIV_F64   ? NYIR_CMP_F64
+                         : op == NYIR_DIV_F32 ? NYIR_CMP_F32
+                                              : NYIR_CMP_I64;
+      if (!ny_native_nir_emit_div_zero_guard(b, cmp_op, rhs, msg))
         return -1;
     }
   }

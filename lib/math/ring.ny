@@ -300,9 +300,11 @@ impl poly_elem {
    fn gcd(poly_elem f, poly_elem g) poly_elem {
       def poly_ring R = _poly_check_same(f, g)
       def p = _poly_base_modulus(R)
-      ; TODO(A-ν): Implement integer polynomial gcd in packed facade
-      if p == nil { panic("poly.gcd: integer polynomial gcd is not implemented in packed facade yet") }
-      Poly(R, rawpoly.poly_mod_gcd(_poly_coeffs(f), _poly_coeffs(g), p))
+      if p == nil {
+         Poly(R, rawpoly.poly_gcd(_poly_coeffs(f), _poly_coeffs(g)))
+      } else {
+         Poly(R, rawpoly.poly_mod_gcd(_poly_coeffs(f), _poly_coeffs(g), p))
+      }
    }
    fn resultant(poly_elem f, poly_elem g) any {
       def poly_ring R = _poly_check_same(f, g)

@@ -207,6 +207,11 @@ static bool ny_is_f64_like_limited(codegen_t *cg, scope *scopes, size_t depth,
     return false;
   if (e->kind == NY_E_LITERAL)
     return e->as.literal.kind == NY_LIT_FLOAT;
+  if (e->kind == NY_E_UNARY && e->as.unary.op &&
+      (strcmp(e->as.unary.op, "+") == 0 || strcmp(e->as.unary.op, "-") == 0)) {
+    return ny_is_f64_like_limited(cg, scopes, depth, e->as.unary.right,
+                                  budget - 1);
+  }
   if (e->kind == NY_E_IDENT) {
     size_t name_len = (size_t)e->tok.len;
     if (name_len == 0)
@@ -233,6 +238,14 @@ static bool ny_is_f64_like_limited(codegen_t *cg, scope *scopes, size_t depth,
       return true;
     const char *fn_name = e->as.call.callee->as.ident.name;
     if (fn_name) {
+      const char *leaf = strrchr(fn_name, '.');
+      leaf = leaf ? leaf + 1 : fn_name;
+      if (strncmp(leaf, "__flt_", 6) == 0 || strcmp(leaf, "sqrt") == 0 ||
+          strcmp(leaf, "fabs") == 0 || strcmp(leaf, "sin") == 0 ||
+          strcmp(leaf, "cos") == 0 || strcmp(leaf, "tan") == 0 ||
+          strcmp(leaf, "exp") == 0 || strcmp(leaf, "log") == 0 ||
+          strcmp(leaf, "pow") == 0 || strcmp(leaf, "f64buf_load") == 0)
+        return true;
       fun_sig *sig = resolve_overload(cg, fn_name, e->as.call.args.len, 0);
       const char *ret_type =
           sig ? (sig->return_type ? sig->return_type
@@ -262,6 +275,11 @@ static bool ny_is_numeric_expr_like_limited(codegen_t *cg, scope *scopes, size_t
   if (e->kind == NY_E_LITERAL)
     return (e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL) ||
            e->as.literal.kind == NY_LIT_FLOAT;
+  if (e->kind == NY_E_UNARY && e->as.unary.op &&
+      (strcmp(e->as.unary.op, "+") == 0 || strcmp(e->as.unary.op, "-") == 0)) {
+    return ny_is_numeric_expr_like_limited(cg, scopes, depth, e->as.unary.right,
+                                           budget - 1);
+  }
   if (e->kind == NY_E_IDENT) {
     size_t name_len = (size_t)e->tok.len;
     if (name_len == 0)

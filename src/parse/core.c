@@ -372,7 +372,10 @@ static void print_error_line(parser_t *p, const char *filename, int line,
   }
   if (p->error_limit > 0 && p->error_count >= p->error_limit) {
     if (!p->quiet)
-      fprintf(stderr, "Too many errors, aborting.\n");
+      fprintf(stderr,
+              "[parse] %d error(s) reported; further errors suppressed "
+              "(set --max-errors=N to see more)\n",
+              p->error_count);
     if (p->exit_on_limit)
       exit(1);
     p->cur.kind = NY_T_EOF;

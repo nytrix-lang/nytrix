@@ -360,7 +360,7 @@ static LLVMValueRef expr_index_raw_i64(codegen_t *cg, scope *scopes,
                                      idx_expr->as.ident.hash);
     if (b && b->raw_int_value && b->is_int_direct)
       return b->raw_int_value;
-    if (ny_env_enabled("NYTRIX_RAW_INT_SLOT_EXPR_FAST") && b &&
+    if ((cg->opt_enabled || ny_env_enabled("NYTRIX_RAW_INT_SLOT_EXPR_FAST")) && b &&
         b->raw_int_value && b->is_int_slot && !ny_binding_is_valid(cg, b))
       return ny_load(cg, b->raw_int_value, name ? name : "index_raw");
   }
@@ -3562,14 +3562,128 @@ static LLVMValueRef expr_try_fast_index_read(codegen_t *cg, scope *scopes,
     if (b && !b->is_mut && !b->static_indexable_invalid) {
       expr_t *init =
           ny_binding_var_init_expr(b, e->as.index.target->as.ident.name);
-      if (init && init->kind == NY_E_TUPLE) {
+      if (init && (init->kind == NY_E_TUPLE || init->kind == NY_E_LIST)) {
         int64_t lit_idx = 0;
         if (ny_expr_literal_i64(e->as.index.start, &lit_idx)) {
           if (lit_idx >= 0 &&
               (size_t)lit_idx < init->as.list_like.len) {
-            return gen_expr(cg, scopes, depth,
-                            init->as.list_like.data[lit_idx]);
+            /*
+             * Only re-generate the element when it is side-effect free. The
+             * element was already evaluated once when the binding was
+             * initialized; re-generating an impure element (call, allocation)
+             * here would evaluate it a second time per read. For impure
+             * elements fall through to the ordinary stored-value read.
+             */
+            if (ny_expr_is_pure(cg, scopes, depth,
+                                init->as.list_like.data[lit_idx]))
+              return gen_expr(cg, scopes, depth,
+                              init->as.list_like.data[lit_idx]);
           }
+        }
+      }
+    }
+  }
+
+  /*
+   * Elided static int list: the object was elided away, so the binding value
+   * is a null marker.  The elements live in a static constant array, and reads
+   * must go through that array (same representation as the get() builtin).
+   * Without this branch a dynamic index read would dereference the null marker
+   * and segfault.
+   */
+  if (e->as.index.target->kind == NY_E_IDENT &&
+      e->as.index.target->as.ident.name) {
+    binding *b =
+        ny_static_int_list_target_binding(cg, scopes, depth,
+                                          e->as.index.target);
+    if (b && b->static_indexable_object_elided) {
+      expr_t *init = ny_binding_flow_static_int_list_init(b);
+      LLVMTypeRef array_ty = NULL;
+      LLVMValueRef g =
+          init ? ny_static_int_list_global(cg, b, init, &array_ty) : NULL;
+      if (g && array_ty) {
+        LLVMValueRef key_v = gen_expr(cg, scopes, depth, e->as.index.start);
+        if (key_v) {
+          key_v = ny_llvm_cast_to_i64(cg, key_v, "elided_index_key");
+          bool assume_nonnegative =
+              expr_index_is_nonnegative(cg, scopes, depth,
+                                        e->as.index.start);
+          bool assume_in_bounds =
+              assume_nonnegative &&
+              expr_index_in_list_len_min(cg, scopes, depth,
+                                         e->as.index.target,
+                                         e->as.index.start);
+          LLVMValueRef key_raw = expr_index_raw_i64(
+              cg, scopes, depth, e->as.index.start, key_v,
+              "elided_index_key_raw");
+          size_t len = init->as.list_like.len;
+          ny_dbg_loc(cg, e->tok);
+          if (assume_in_bounds) {
+            LLVMValueRef idxs[2] = {ny_c0(cg), key_raw};
+            LLVMValueRef elem_ptr = LLVMBuildInBoundsGEP2(
+                cg->builder, array_ty, g, idxs, 2,
+                "elided_index_elem_ptr");
+            LLVMValueRef val =
+                ny_load(cg, elem_ptr, NY_LLVM_NAME(cg, "elided_index_elem"));
+            return b->static_int_list_untagged ? ny_tag_int(cg, val) : val;
+          }
+          LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
+          LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
+          LLVMBasicBlockRef load_bb = ny_bb_fn(fn, "elided_index.load");
+          LLVMBasicBlockRef panic_bb = ny_bb_fn(fn, "elided_index.panic");
+          LLVMBasicBlockRef join_bb = ny_bb_fn(fn, "elided_index.join");
+          LLVMValueRef len_raw =
+              LLVMConstInt(cg->type_i64, (uint64_t)len, false);
+          LLVMValueRef adj_idx = key_raw;
+          LLVMValueRef low_ok = LLVMConstInt(cg->type_i1, 1, false);
+          if (!assume_nonnegative) {
+            LLVMValueRef is_neg = LLVMBuildICmp(
+                cg->builder, LLVMIntSLT, key_raw, ny_c0(cg),
+                "elided_index_is_neg");
+            LLVMValueRef wrapped = ny_add(cg, key_raw, len_raw,
+                                          "elided_index_wrapped");
+            adj_idx = ny_select(cg, is_neg, wrapped, key_raw,
+                                "elided_index_adj");
+            low_ok = LLVMBuildICmp(cg->builder, LLVMIntSGE, adj_idx,
+                                   ny_c0(cg), "elided_index_low_ok");
+          }
+          LLVMValueRef high_ok = LLVMBuildICmp(
+              cg->builder, LLVMIntSLT, adj_idx, len_raw,
+              "elided_index_high_ok");
+          LLVMValueRef in_bounds =
+              ny_and(cg, low_ok, high_ok, "elided_index_in_bounds");
+          ny_cond_br(cg, in_bounds, load_bb, panic_bb);
+          ny_pos(cg, load_bb);
+          LLVMValueRef idx_for_load[2] = {ny_c0(cg), adj_idx};
+          LLVMValueRef elem_ptr = LLVMBuildInBoundsGEP2(
+              cg->builder, array_ty, g, idx_for_load, 2,
+              "elided_index_elem_ptr");
+          LLVMValueRef elem_val =
+              ny_load(cg, elem_ptr, NY_LLVM_NAME(cg, "elided_index_elem"));
+          if (b->static_int_list_untagged)
+            elem_val = ny_tag_int(cg, elem_val);
+          LLVMBasicBlockRef load_end_bb = ny_cur_block(cg);
+          ny_br(cg, join_bb);
+          ny_pos(cg, panic_bb);
+          fun_sig *panic_sig = lookup_fun(cg, "__panic", 0);
+          if (panic_sig) {
+            const char *msg = "index out of range";
+            LLVMValueRef msg_global = const_string_ptr(cg, msg, strlen(msg));
+            LLVMValueRef msg_ptr =
+                ny_load(cg, msg_global, "elided_index_panic_msg");
+            LLVMBuildCall2(cg->builder, panic_sig->type, panic_sig->value,
+                           (LLVMValueRef[]){msg_ptr}, 1, "");
+          }
+          LLVMBuildUnreachable(cg->builder);
+          LLVMBasicBlockRef panic_end_bb = ny_cur_block(cg);
+          ny_br(cg, join_bb);
+          ny_pos(cg, join_bb);
+          LLVMValueRef phi =
+              ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "elided_index_result"));
+          LLVMValueRef incoming_vals[2] = {elem_val, ny_c0(cg)};
+          LLVMBasicBlockRef incoming_bbs[2] = {load_end_bb, panic_end_bb};
+          LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
+          return phi;
         }
       }
     }
@@ -4729,6 +4843,17 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   }
 
   register_jit_symbols(ee, mod, &tcg);
+  if (tcg.had_error) {
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    LLVMDisposeExecutionEngine(ee);
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok,
+                     "comptime expression references an unresolved extern "
+                     "symbol (see diagnostics above)");
+  }
   ny_jit_map_unresolved_symbols(ee, mod, entry_name);
   LLVMValueRef entry_val = LLVMGetNamedFunction(mod, entry_name);
   int64_t res = 1;

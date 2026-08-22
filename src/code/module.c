@@ -395,8 +395,10 @@ const char *ny_lookup_import_alias_indexed(codegen_t *cg, bool user_only,
     return NULL;
 
   long found = ny_alias_index_find(cg, user_only, alias, alias_len, alias_hash);
-  if (found >= 0 && (size_t)found < len && data && data[found].name)
+  if (found >= 0 && (size_t)found < len && data && data[found].name) {
+    data[found].is_used = true;
     return (const char *)data[found].stmt_t;
+  }
 
   import_alias_slot **slot_ptr = ny_alias_index_slots(cg, user_only);
   size_t *cap_ptr = ny_alias_index_cap_ptr(cg, user_only);
@@ -425,8 +427,10 @@ const char *ny_lookup_import_alias_indexed(codegen_t *cg, bool user_only,
     }
     if ((size_t)cur_len == alias_len &&
         memcmp(data[i].name, alias, alias_len) == 0 &&
-        data[i].name[alias_len] == '\0')
+        data[i].name[alias_len] == '\0') {
+      data[i].is_used = true;
       return (const char *)data[i].stmt_t;
+    }
   }
   return NULL;
 }
@@ -2809,4 +2813,95 @@ void process_exports(codegen_t *cg, stmt_t *s) {
     process_exports_inner(cg, mod_name, s->as.module.body.data[i]);
   }
   cg->current_module_name = prev_mod;
+}
+
+static void ny_lint_use_stmt(codegen_t *cg, stmt_t *s) {
+  if (!cg || !s || s->kind != NY_S_USE)
+    return;
+  if (ny_is_stdlib_tok(s->tok) || ny_stmt_is_bare_std_use(s))
+    return;
+  if (s->as.use.import_all)
+    return;
+  if (s->as.use.imports.len > 0)
+    return; /* selective imports bind via the export table, not aliases */
+
+  const char *alias = s->as.use.alias;
+  char *mod = normalize_use_module_name_at(cg, s->as.use.module, s->tok.filename);
+  if (mod) {
+    /*
+     * Root std modules are auto-imported and export into the global
+     * namespace (no alias prefix is ever resolved), so alias-usage tracking
+     * cannot prove them unused.  Only lint genuinely optional modules.
+     */
+    for (size_t i = 0;
+         i < sizeof(k_std_root_use_modules) / sizeof(k_std_root_use_modules[0]);
+         ++i) {
+      if (strcmp(mod, k_std_root_use_modules[i]) == 0) {
+        free(mod);
+        return;
+      }
+    }
+  }
+  if (!alias && mod) {
+    const char *dot = strrchr(mod, '.');
+    alias = dot ? dot + 1 : mod;
+  }
+  if (!alias || !*alias || !mod) {
+    free(mod);
+    return;
+  }
+  binding *data = cg->user_import_aliases.data;
+  size_t len = cg->user_import_aliases.len;
+  bool used = false;
+  for (size_t i = 0; i < len; ++i) {
+    if (!data[i].name || strcmp(data[i].name, alias) != 0)
+      continue;
+    used = data[i].is_used;
+    break;
+  }
+  if (!used && ny_diag_should_emit("unused_import", s->tok, alias)) {
+    ny_diag_warning_code(s->tok, 2007, "unused import %s'%s'%s",
+                         clr(NY_CLR_BOLD), s->as.use.module,
+                         clr(NY_CLR_RESET));
+    ny_diag_hint("remove the 'use' statement, or reference %s'%s.%s'%s to "
+                 "use the module",
+                 clr(NY_CLR_BOLD), s->as.use.module, alias, clr(NY_CLR_RESET));
+  }
+  free(mod);
+}
+
+static void ny_lint_unused_imports_stmt(codegen_t *cg, stmt_t *s) {
+  if (!s)
+    return;
+  switch (s->kind) {
+  case NY_S_USE:
+    ny_lint_use_stmt(cg, s);
+    break;
+  case NY_S_BLOCK:
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      ny_lint_unused_imports_stmt(cg, s->as.block.body.data[i]);
+    break;
+  case NY_S_IF:
+    ny_lint_unused_imports_stmt(cg, s->as.iff.conseq);
+    if (s->as.iff.alt)
+      ny_lint_unused_imports_stmt(cg, s->as.iff.alt);
+    break;
+  case NY_S_FUNC:
+    if (s->as.fn.body)
+      ny_lint_unused_imports_stmt(cg, s->as.fn.body);
+    break;
+  case NY_S_MODULE:
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      ny_lint_unused_imports_stmt(cg, s->as.module.body.data[i]);
+    break;
+  default:
+    break;
+  }
+}
+
+void ny_lint_unused_imports(codegen_t *cg, program_t *prog) {
+  if (!cg || !prog)
+    return;
+  for (size_t i = 0; i < prog->body.len; ++i)
+    ny_lint_unused_imports_stmt(cg, prog->body.data[i]);
 }

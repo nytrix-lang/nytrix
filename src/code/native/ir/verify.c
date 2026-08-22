@@ -843,6 +843,16 @@ bool nyir_analyze_binary_fold(nyir_op_t op, int64_t a, int64_t b,
       return false;
     *out = a >> (unsigned)b;
     return true;
+  case NYIR_ROR_I64: {
+    if (b < 0 || b >= 64)
+      return false;
+    unsigned shift = (unsigned)b;
+    if (shift == 0)
+      *out = a;
+    else
+      *out = (int64_t)(((uint64_t)a >> shift) | ((uint64_t)a << (64 - shift)));
+    return true;
+  }
   default:
     return false;
   }
