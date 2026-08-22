@@ -32,6 +32,15 @@ fn stress(i64 n) i64 {
   }
   acc + a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11
 }
-if stress(3) == 4394 { 0 } else { 1 }
+fn overlap() i64 {
+  mut i = 0
+  mut acc = 0
+  while i < 64 {
+    acc += (i / 8) + (i % 8)
+    i += 1
+  }
+  acc
+}
+if stress(3) == 4394 && overlap() == 448 { 0 } else { 1 }
 NY
 }

@@ -1,3 +1,32 @@
+/*
+ * Implements the tagged-int fast-path / slow-path dispatch for binary
+ * operators (add, sub, mul, div, mod, cmp) in the LLVM codegen layer.
+ *
+ * Architecture:
+ * - ny_emit_tagged_int_fast_no_slow() emits inline LLVM IR for the common case
+ *   where both operands are known tagged ints (no BigInt fallback needed).
+ * - ny_try_emit_tagged_int_fast_binary() wraps this with a dynamic tag check
+ *   (ny_is_tagged_int) and a fallback call to the stdlib BigInt/slow runtime.
+ * - ny_try_emit_proven_int_modexpr_fast() handles the modulo operator with
+ *   a divisor-proof fast path (NYTRIX_PROVEN_INT_MOD_FAST).
+ *
+ * Fast-path enablement is gated by environment variables set by the
+ * optimization profile (e.g. NYTRIX_RAW_INT_EXPR_FAST,
+ * NYTRIX_PROVEN_INT_MOD_FAST, NYTRIX_DYNAMIC_INT_BINOPS). These are applied
+ *
+ * Loop reduction vectorization: proven-int accumulators are lifted into
+ * loop-local SSA phis in gen_stmt_while (src/code/stmt.c), so LLVM sees a
+ * real reduction and can auto-vectorize sum/product loops.  Accumulators
+ * not covered by that path still go through the alloca store/load pattern.
+ * in ny_sync_opt_profile_env() based on the --profile=MODE setting.
+ *
+ * The slow path always calls through LLVMBuildCall2 to the fallback function
+ * pointer (typically the BigInt-allocating stdlib operator), and results are
+ * merged via a PHI node selecting between the fast and slow basic blocks.
+ *
+ * See also: src/code/gencall/init.c (monomorphic call fast/slow paths)
+ *           src/code/expr/core.c (expression-level type-dispatch)
+ */
 #include "base/util.h"
 #include "priv.h"
 #include "systems.h"
@@ -410,9 +439,71 @@ static expr_t *ny_single_return_expr(stmt_t *s) {
     return NULL;
   if (s->kind == NY_S_RETURN)
     return s->as.ret.value;
+  if (s->kind == NY_S_EXPR)
+    return s->as.expr.expr;
   if (s->kind == NY_S_BLOCK && s->as.block.body.len == 1)
     return ny_single_return_expr(s->as.block.body.data[0]);
   return NULL;
+}
+
+static bool ny_extract_simple_block_return(stmt_t *body, stmt_var_t **vars,
+                                          size_t *var_count, size_t max_vars,
+                                          expr_t **ret_out) {
+  if (!body)
+    return false;
+  if (body->kind == NY_S_RETURN) {
+    if (var_count)
+      *var_count = 0;
+    if (ret_out)
+      *ret_out = body->as.ret.value;
+    return true;
+  }
+  if (body->kind == NY_S_EXPR) {
+    if (var_count)
+      *var_count = 0;
+    if (ret_out)
+      *ret_out = body->as.expr.expr;
+    return true;
+  }
+  if (body->kind != NY_S_BLOCK)
+    return false;
+  size_t len = body->as.block.body.len;
+  if (len == 0)
+    return false;
+  size_t num_vars = 0;
+  for (size_t i = 0; i < len - 1; ++i) {
+    stmt_t *st = body->as.block.body.data[i];
+    if (!st || st->kind != NY_S_VAR || st->as.var.is_mut ||
+        st->as.var.names.len != 1 || st->as.var.exprs.len != 1)
+      return false;
+    if (num_vars >= max_vars)
+      return false;
+    if (vars)
+      vars[num_vars] = &st->as.var;
+    num_vars++;
+  }
+  stmt_t *last = body->as.block.body.data[len - 1];
+  if (!last)
+    return false;
+  expr_t *ret = NULL;
+  if (last->kind == NY_S_RETURN)
+    ret = last->as.ret.value;
+  else if (last->kind == NY_S_EXPR)
+    ret = last->as.expr.expr;
+  else if (last->kind == NY_S_BLOCK && last->as.block.body.len == 1) {
+    stmt_t *sub = last->as.block.body.data[0];
+    if (sub->kind == NY_S_RETURN)
+      ret = sub->as.ret.value;
+    else if (sub->kind == NY_S_EXPR)
+      ret = sub->as.expr.expr;
+  }
+  if (!ret)
+    return false;
+  if (var_count)
+    *var_count = num_vars;
+  if (ret_out)
+    *ret_out = ret;
+  return true;
 }
 
 static ny_int_range_t ny_checked_int_range(int64_t lo, int64_t hi) {
@@ -434,7 +525,17 @@ static ny_int_range_t ny_mask_literal_int_range(expr_t *rhs) {
 static ny_int_range_t ny_binary_small_int_range(const char *op, ny_int_range_t l,
                                                 ny_int_range_t r) {
   ny_int_range_t fail = {false, 0, 0};
-  if (!op || !l.known || !r.known)
+  if (!op)
+    return fail;
+
+  if (strcmp(op, "%") == 0 && r.known && r.min_raw == r.max_raw &&
+      r.max_raw > 0) {
+    int64_t hi = r.max_raw - 1;
+    int64_t lo = (l.known && l.min_raw >= 0) ? 0 : -hi;
+    return ny_checked_int_range(lo, hi);
+  }
+
+  if (!l.known || !r.known)
     return fail;
 
   if (strcmp(op, "+") == 0) {
@@ -545,6 +646,45 @@ static ny_int_range_t ny_expr_range_with_params(codegen_t *cg, scope *scopes, si
                                                  params, param_count, recursion + 1);
     return ny_binary_small_int_range(op, l, r);
   }
+  case NY_E_CALL: {
+    if (!e->as.call.callee || e->as.call.callee->kind != NY_E_IDENT)
+      return fail;
+    const char *name = e->as.call.callee->as.ident.name;
+    if (!name || e->as.call.args.len > 16)
+      return fail;
+    fun_sig *sig = resolve_overload(cg, name, e->as.call.args.len, e->as.call.callee->as.ident.hash);
+    if (!sig || sig->is_extern || sig->is_variadic || sig->is_recursive ||
+        !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
+      return fail;
+    stmt_t *body = sig->stmt_t->as.fn.body;
+    stmt_var_t *vars[8];
+    size_t var_count = 0;
+    expr_t *ret = NULL;
+    if (!ny_extract_simple_block_return(body, vars, &var_count, 8, &ret) ||
+        sig->stmt_t->as.fn.params.len < e->as.call.args.len)
+      return fail;
+    ny_param_int_range_t sub_params[16] = {0};
+    size_t sub_param_count = 0;
+    for (size_t i = 0; i < e->as.call.args.len; ++i) {
+      sub_params[sub_param_count].name = sig->stmt_t->as.fn.params.data[i].name;
+      sub_params[sub_param_count].range = ny_expr_range_with_params(
+          cg, scopes, depth, e->as.call.args.data[i].val, params, param_count, recursion + 1);
+      if (!sub_params[sub_param_count].name || !sub_params[sub_param_count].range.known)
+        return fail;
+      sub_param_count++;
+    }
+    for (size_t i = 0; i < var_count; ++i) {
+      if (sub_param_count >= 16)
+        return fail;
+      sub_params[sub_param_count].name = vars[i]->names.data[0];
+      sub_params[sub_param_count].range = ny_expr_range_with_params(
+          cg, scopes, depth, vars[i]->exprs.data[0], sub_params, sub_param_count, recursion + 1);
+      if (!sub_params[sub_param_count].name || !sub_params[sub_param_count].range.known)
+        return fail;
+      sub_param_count++;
+    }
+    return ny_expr_range_with_params(cg, scopes, depth, ret, sub_params, sub_param_count, recursion + 1);
+  }
   default:
     return fail;
   }
@@ -559,16 +699,24 @@ static ny_int_range_t ny_call_return_small_int_range(codegen_t *cg, scope *scope
   const char *name = call->as.call.callee->as.ident.name;
   if (!name || call->as.call.args.len > 16)
     return fail;
+  size_t n_len = strlen(name);
+  uint64_t n_hash = call->as.call.callee->as.ident.hash;
+  bool builtin_shadowed =
+      ny_builtin_name_shadowed_by_user_symbol(cg, scopes, depth, name, n_len, n_hash);
+  if (!builtin_shadowed && (ny_name_tail_is(name, "now_ms") || ny_name_tail_is(name, "ticks") ||
+                            ny_name_tail_is(name, "argc") || ny_name_tail_is(name, "len")))
+    return (ny_int_range_t){true, 0, NY_SMALL_INT_MAX};
   fun_sig *sig =
-      resolve_overload(cg, name, call->as.call.args.len, call->as.call.callee->as.ident.hash);
+      resolve_overload(cg, name, call->as.call.args.len, n_hash);
   if (!sig || sig->is_extern || sig->is_variadic || sig->is_recursive ||
       !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
     return fail;
-  if (ny_name_tail_is(name, "now_ms") && ny_is_stdlib_tok(sig->stmt_t->tok))
-    return (ny_int_range_t){true, 0, NY_SMALL_INT_MAX};
   stmt_t *body = sig->stmt_t->as.fn.body;
-  expr_t *ret = ny_single_return_expr(body);
-  if (!ret || sig->stmt_t->as.fn.params.len < call->as.call.args.len)
+  stmt_var_t *vars[8];
+  size_t var_count = 0;
+  expr_t *ret = NULL;
+  if (!ny_extract_simple_block_return(body, vars, &var_count, 8, &ret) ||
+      sig->stmt_t->as.fn.params.len < call->as.call.args.len)
     return fail;
   if (ret->kind == NY_E_CALL && ret->as.call.callee &&
       ret->as.call.callee->kind == NY_E_IDENT &&
@@ -578,14 +726,26 @@ static ny_int_range_t ny_call_return_small_int_range(codegen_t *cg, scope *scope
       ret->as.call.args.len == 0)
     return (ny_int_range_t){true, 0, NY_SMALL_INT_MAX};
   ny_param_int_range_t params[16] = {0};
+  size_t param_count = 0;
   for (size_t i = 0; i < call->as.call.args.len; ++i) {
-    params[i].name = sig->stmt_t->as.fn.params.data[i].name;
-    params[i].range =
+    params[param_count].name = sig->stmt_t->as.fn.params.data[i].name;
+    params[param_count].range =
         ny_expr_proven_small_int_range(cg, scopes, depth, call->as.call.args.data[i].val);
-    if (!params[i].name || !params[i].range.known)
+    if (!params[param_count].name || !params[param_count].range.known)
       return fail;
+    param_count++;
   }
-  return ny_expr_range_with_params(cg, scopes, depth, ret, params, call->as.call.args.len, 0);
+  for (size_t i = 0; i < var_count; ++i) {
+    if (param_count >= 16)
+      return fail;
+    params[param_count].name = vars[i]->names.data[0];
+    params[param_count].range = ny_expr_range_with_params(
+        cg, scopes, depth, vars[i]->exprs.data[0], params, param_count, 0);
+    if (!params[param_count].name || !params[param_count].range.known)
+      return fail;
+    param_count++;
+  }
+  return ny_expr_range_with_params(cg, scopes, depth, ret, params, param_count, 0);
 }
 
 static ny_int_range_t ny_expr_proven_small_int_range(codegen_t *cg, scope *scopes, size_t depth,
@@ -761,6 +921,7 @@ static bool ny_can_lower_raw_int_expr(codegen_t *cg, scope *scopes, size_t depth
   case NY_E_LITERAL:
     return e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL;
   case NY_E_IDENT:
+  case NY_E_CALL:
     return true;
   case NY_E_BINARY: {
     const char *op = e->as.binary.op;
@@ -900,18 +1061,36 @@ static ny_raw_int_expr_t ny_lower_raw_int_expr_with_params(codegen_t *cg, scope 
       bool lhs_nonnegative = lhs_range.known && lhs_range.min_raw >= 0;
       LLVMValueRef rhs = LLVMConstInt(cg->type_i64, (uint64_t)rhs_lit,
                                       !lhs_nonnegative);
-      LLVMValueRef raw =
-          strcmp(op, "%") == 0
-              ? (lhs_nonnegative
-                     ? LLVMBuildURem(cg->builder, lhs.raw, rhs,
-                                     NY_LLVM_NAME(cg, "rawi_urem"))
-                     : LLVMBuildSRem(cg->builder, lhs.raw, rhs,
-                                     NY_LLVM_NAME(cg, "rawi_rem")))
-              : (lhs_nonnegative
-                     ? LLVMBuildUDiv(cg->builder, lhs.raw, rhs,
-                                     NY_LLVM_NAME(cg, "rawi_udiv"))
-                     : LLVMBuildSDiv(cg->builder, lhs.raw, rhs,
-                                     NY_LLVM_NAME(cg, "rawi_div")));
+      bool is_pow2 = (rhs_lit > 0) && ((rhs_lit & (rhs_lit - 1)) == 0);
+      LLVMValueRef raw;
+      if (strcmp(op, "%") == 0) {
+        if (lhs_nonnegative && is_pow2) {
+          raw = LLVMBuildAnd(cg->builder, lhs.raw,
+                             LLVMConstInt(cg->type_i64, (uint64_t)(rhs_lit - 1), false),
+                             NY_LLVM_NAME(cg, "rawi_mask"));
+        } else if (lhs_nonnegative) {
+          raw = LLVMBuildURem(cg->builder, lhs.raw, rhs,
+                              NY_LLVM_NAME(cg, "rawi_urem"));
+        } else {
+          raw = LLVMBuildSRem(cg->builder, lhs.raw, rhs,
+                              NY_LLVM_NAME(cg, "rawi_rem"));
+        }
+      } else {
+        if (lhs_nonnegative && is_pow2) {
+          int shift = 0;
+          while ((1LL << (shift + 1)) <= rhs_lit)
+            shift++;
+          raw = LLVMBuildLShr(cg->builder, lhs.raw,
+                              LLVMConstInt(cg->type_i64, (uint64_t)shift, false),
+                              NY_LLVM_NAME(cg, "rawi_lshr"));
+        } else if (lhs_nonnegative) {
+          raw = LLVMBuildUDiv(cg->builder, lhs.raw, rhs,
+                              NY_LLVM_NAME(cg, "rawi_udiv"));
+        } else {
+          raw = LLVMBuildSDiv(cg->builder, lhs.raw, rhs,
+                              NY_LLVM_NAME(cg, "rawi_div"));
+        }
+      }
       return (ny_raw_int_expr_t){raw, lhs.ok};
     }
 
@@ -1001,11 +1180,14 @@ static ny_raw_int_expr_t ny_lower_raw_int_expr_with_params(codegen_t *cg, scope 
         !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC ||
         sig->stmt_t->as.fn.params.len < e->as.call.args.len)
       return fail;
-    expr_t *ret = ny_single_return_expr(sig->stmt_t->as.fn.body);
-    if (!ret)
+    stmt_var_t *vars[8];
+    size_t var_count = 0;
+    expr_t *ret = NULL;
+    if (!ny_extract_simple_block_return(sig->stmt_t->as.fn.body, vars, &var_count, 8, &ret))
       return fail;
 
     ny_raw_int_param_t call_params[16] = {0};
+    size_t cur_param_count = 0;
     for (size_t i = 0; i < e->as.call.args.len; ++i) {
       expr_t *arg = e->as.call.args.data[i].val;
       ny_raw_int_expr_t raw_arg =
@@ -1017,20 +1199,37 @@ static ny_raw_int_expr_t ny_lower_raw_int_expr_with_params(codegen_t *cg, scope 
           ny_raw_int_expr_range_with_params(cg, scopes, depth, arg, params, param_count);
       if (!arg_range.known)
         return fail;
-      call_params[i] = (ny_raw_int_param_t){
+      call_params[cur_param_count++] = (ny_raw_int_param_t){
           .name = sig->stmt_t->as.fn.params.data[i].name,
           .raw = raw_arg.raw,
           .ok = raw_arg.ok,
           .range = arg_range,
       };
-      if (!call_params[i].name)
+    }
+    for (size_t i = 0; i < var_count; ++i) {
+      if (cur_param_count >= 16)
         return fail;
+      expr_t *var_expr = vars[i]->exprs.data[0];
+      ny_raw_int_expr_t raw_var = ny_lower_raw_int_expr_with_params(
+          cg, scopes, depth, var_expr, call_params, cur_param_count, recursion + 1);
+      if (!raw_var.raw || !raw_var.ok)
+        return fail;
+      ny_int_range_t var_range = ny_raw_int_expr_range_with_params(
+          cg, scopes, depth, var_expr, call_params, cur_param_count);
+      if (!var_range.known)
+        return fail;
+      call_params[cur_param_count++] = (ny_raw_int_param_t){
+          .name = vars[i]->names.data[0],
+          .raw = raw_var.raw,
+          .ok = raw_var.ok,
+          .range = var_range,
+      };
     }
     if (!ny_raw_int_call_push(sig))
       return fail;
     ny_raw_int_expr_t lowered =
         ny_lower_raw_int_expr_with_params(cg, scopes, depth, ret, call_params,
-                                          e->as.call.args.len, recursion + 1);
+                                          cur_param_count, recursion + 1);
     ny_raw_int_call_pop(sig);
     return lowered;
   }
@@ -1408,6 +1607,28 @@ static void ny_note_raw_int_expr_fast(codegen_t *cg, ny_binop_kind_t kind) {
     name = "raw_int_expr_fast_div";
   else if (kind == NY_BINOP_MOD)
     name = "raw_int_expr_fast_mod";
+  else if (kind == NY_BINOP_AND)
+    name = "raw_int_expr_fast_and";
+  else if (kind == NY_BINOP_OR)
+    name = "raw_int_expr_fast_or";
+  else if (kind == NY_BINOP_XOR)
+    name = "raw_int_expr_fast_xor";
+  else if (kind == NY_BINOP_SHL)
+    name = "raw_int_expr_fast_shl";
+  else if (kind == NY_BINOP_SHR)
+    name = "raw_int_expr_fast_shr";
+  else if (kind == NY_BINOP_LT)
+    name = "raw_int_expr_fast_lt";
+  else if (kind == NY_BINOP_LE)
+    name = "raw_int_expr_fast_le";
+  else if (kind == NY_BINOP_GT)
+    name = "raw_int_expr_fast_gt";
+  else if (kind == NY_BINOP_GE)
+    name = "raw_int_expr_fast_ge";
+  else if (kind == NY_BINOP_EQ)
+    name = "raw_int_expr_fast_eq";
+  else if (kind == NY_BINOP_NE)
+    name = "raw_int_expr_fast_ne";
   LLVMMetadataRef s = LLVMMDStringInContext2(cg->ctx, name, strlen(name));
   LLVMMetadataRef md = LLVMMDNodeInContext2(cg->ctx, &s, 1);
   LLVMAddNamedMetadataOperand(cg->module, "nytrix.raw_int_expr_fast",
@@ -1450,6 +1671,28 @@ static bool ny_raw_int_expr_fast_op_enabled(ny_binop_kind_t kind) {
     needle = "div";
   else if (kind == NY_BINOP_MOD)
     needle = "mod";
+  else if (kind == NY_BINOP_AND)
+    needle = "and";
+  else if (kind == NY_BINOP_OR)
+    needle = "or";
+  else if (kind == NY_BINOP_XOR)
+    needle = "xor";
+  else if (kind == NY_BINOP_SHL)
+    needle = "shl";
+  else if (kind == NY_BINOP_SHR)
+    needle = "shr";
+  else if (kind == NY_BINOP_LT)
+    needle = "lt";
+  else if (kind == NY_BINOP_LE)
+    needle = "le";
+  else if (kind == NY_BINOP_GT)
+    needle = "gt";
+  else if (kind == NY_BINOP_GE)
+    needle = "ge";
+  else if (kind == NY_BINOP_EQ)
+    needle = "eq";
+  else if (kind == NY_BINOP_NE)
+    needle = "ne";
   if (!needle)
     return false;
   const size_t nlen = strlen(needle);
@@ -1526,6 +1769,21 @@ static LLVMValueRef ny_try_emit_raw_int_expr_fast_binary(codegen_t *cg, scope *s
     int64_t const_rhs = 0;
     if (ok && ny_const_tagged_int(r, &const_rhs))
       return NULL;
+  } else if (kind == NY_BINOP_SHL || kind == NY_BINOP_SHR) {
+    /*
+     * A raw shift is safe only when the shift count is provably in [0, 64);
+     * otherwise the value must take the guarded fast path so an out-of-range
+     * shift still routes to the runtime fallback.
+     */
+    ok = range_r.known && range_r.min_raw >= 0 && range_r.max_raw < 64;
+  } else if (kind == NY_BINOP_AND || kind == NY_BINOP_OR || kind == NY_BINOP_XOR ||
+             kind == NY_BINOP_LT || kind == NY_BINOP_LE || kind == NY_BINOP_GT ||
+             kind == NY_BINOP_GE || kind == NY_BINOP_EQ || kind == NY_BINOP_NE) {
+    /*
+     * Bitwise ops on proven tagged ints always yield a small tagged int, and
+     * integer comparisons always yield a tagged bool: no range bound needed.
+     */
+    ok = true;
   }
   if (!ok)
     return NULL;
@@ -1552,6 +1810,35 @@ static LLVMValueRef ny_try_emit_raw_int_expr_fast_binary(codegen_t *cg, scope *s
     raw = LLVMBuildSDiv(cg->builder, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_div"));
   else if (kind == NY_BINOP_MOD)
     raw = LLVMBuildSRem(cg->builder, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_mod"));
+  else if (kind == NY_BINOP_AND)
+    raw = ny_and(cg, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_and"));
+  else if (kind == NY_BINOP_OR)
+    raw = ny_or(cg, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_or"));
+  else if (kind == NY_BINOP_XOR)
+    raw = ny_xor(cg, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_xor"));
+  else if (kind == NY_BINOP_SHL)
+    raw = ny_shl(cg, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_shl"));
+  else if (kind == NY_BINOP_SHR)
+    raw = LLVMBuildLShr(cg->builder, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_shr"));
+  else if (kind == NY_BINOP_LT || kind == NY_BINOP_LE || kind == NY_BINOP_GT ||
+           kind == NY_BINOP_GE || kind == NY_BINOP_EQ || kind == NY_BINOP_NE) {
+    LLVMIntPredicate pred = LLVMIntEQ;
+    if (kind == NY_BINOP_NE)
+      pred = LLVMIntNE;
+    else if (kind == NY_BINOP_LT)
+      pred = LLVMIntSLT;
+    else if (kind == NY_BINOP_LE)
+      pred = LLVMIntSLE;
+    else if (kind == NY_BINOP_GT)
+      pred = LLVMIntSGT;
+    else if (kind == NY_BINOP_GE)
+      pred = LLVMIntSGE;
+    LLVMValueRef cmp = LLVMBuildICmp(cg->builder, pred, lhs, rhs,
+                                     NY_LLVM_NAME(cg, "raw_int_expr_fast_cmp"));
+    if (cmp)
+      ny_note_raw_int_expr_fast(cg, kind);
+    return cmp ? ny_tag_bool(cg, cmp) : NULL;
+  }
   if (raw)
     ny_note_raw_int_expr_fast(cg, kind);
   return raw ? ny_tag_int(cg, raw) : NULL;
@@ -1684,6 +1971,14 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg, scope *sco
   if (!proven_both && !dynamic_tagged_int_ok)
     return NULL;
 
+  /*
+   * Unproven (dynamic) operands use the runtime tag-check dispatch:
+   * a fast LLVM block (bin.int.fast), a slow BigInt-allocating fallback
+   * block (bin.runtime.slow), and a PHI merge (bin.merge) of both paths.
+   * A future runtime type-specialization pass could prove these operands
+   * and elide the guard (see ny_try_emit_raw_int_expr_fast_binary for
+   * the proven-int path).
+   */
   LLVMBasicBlockRef fast_bb = ny_bb_fn(fn, "bin.int.fast");
   LLVMBasicBlockRef slow_bb = ny_bb_fn(fn, "bin.runtime.slow");
   LLVMBasicBlockRef merge_bb = ny_bb_fn(fn, "bin.merge");
@@ -1695,8 +1990,15 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg, scope *sco
     both_int = ny_is_tagged_int(cg, r);
   else if (proven_r)
     both_int = ny_is_tagged_int(cg, l);
+  else if (l == r)
+    /*
+     * Identity/comparison cases below still need a type guard, but one value
+     * cannot benefit from testing the same tag twice.
+     */
+    both_int = ny_is_tagged_int(cg, l);
   else
-    both_int = ny_and(cg, ny_is_tagged_int(cg, l), ny_is_tagged_int(cg, r), "bin.both_int");
+    both_int = ny_and(cg, ny_is_tagged_int(cg, l), ny_is_tagged_int(cg, r),
+                      "bin.both_int");
 
   if (LLVMIsAConstantInt(both_int) && LLVMConstIntGetZExtValue(both_int)) {
     ny_br(cg, fast_bb);

@@ -1,3 +1,7 @@
+/*
+ * NYIR init: bootstraps the NYIR subsystem by amalgamating core,
+ * binary, eval, verify, ssa, regalloc, machine, and isle sources.
+ */
 #include "code/native/ir/internal.h"
 #include "code/native/ir.h"
 #include "code/native/object/internal.h"
@@ -46,9 +50,10 @@ bool nyir_call_args(const nyir_inst_t *in, int value_count, int *args,
 static bool nyir_op_f64(nyir_op_t op) {
   return op == NYIR_CONST_F64 || op == NYIR_ADD_F64 ||
          op == NYIR_SUB_F64 || op == NYIR_MUL_F64 || op == NYIR_DIV_F64 ||
-         op == NYIR_I64_TO_F64 || op == NYIR_F32_TO_F64;
+         op == NYIR_I64_TO_F64 || op == NYIR_F32_TO_F64 ||
+         op == NYIR_SQRT_F64 || op == NYIR_SIN_F64 || op == NYIR_COS_F64 ||
+         op == NYIR_VEC4_REDUCE_ADD_F64;
 }
-
 static bool nyir_op_f32(nyir_op_t op) {
   return op == NYIR_CONST_F32 || op == NYIR_ADD_F32 ||
          op == NYIR_SUB_F32 || op == NYIR_MUL_F32 || op == NYIR_DIV_F32 ||
@@ -56,11 +61,21 @@ static bool nyir_op_f32(nyir_op_t op) {
 }
 
 static bool nyir_op_v128_i64(nyir_op_t op) {
-  return op == NYIR_VEC4_LOAD_I64 || op == NYIR_VEC4_ADD_I64 ||
+  return op == NYIR_VEC4_LOAD_I64 || op == NYIR_VEC4_SET1_I64 ||
+         op == NYIR_VEC4_ADD_I64 ||
          op == NYIR_VEC4_SUB_I64 || op == NYIR_VEC4_AND_I64 ||
          op == NYIR_VEC4_OR_I64 || op == NYIR_VEC4_XOR_I64 ||
-         op == NYIR_VEC4_SHL_I64 || op == NYIR_VEC4_SAR_I64 ||
-         op == NYIR_VEC4_SET1_I64;
+         op == NYIR_VEC4_SHL_I64 || op == NYIR_VEC4_SAR_I64;
+}
+
+/*
+ * VEC8_I64 is classified as v128 in the type map until backends emit
+ * distinct 256-bit register classes.
+ */
+static bool nyir_op_v256_i64(nyir_op_t op) {
+  return op == NYIR_VEC8_LOAD_I64 || op == NYIR_VEC8_ADD_I64 ||
+         op == NYIR_VEC8_SUB_I64 || op == NYIR_VEC8_AND_I64 ||
+         op == NYIR_VEC8_OR_I64 || op == NYIR_VEC8_XOR_I64;
 }
 
 static bool nyir_op_v128_f64(nyir_op_t op) {
@@ -101,11 +116,13 @@ void nyir_type_map_free(nyir_type_map_t *map) {
   free(map->value_f64);
   free(map->value_f32);
   free(map->value_v128_i64);
+  free(map->value_v256_i64);
   free(map->value_v128_f64);
   free(map->value_v128_f32);
   free(map->local_f64);
   free(map->local_f32);
   free(map->local_v128_i64);
+  free(map->local_v256_i64);
   free(map->local_v128_f64);
   free(map->local_v128_f32);
   *map = (nyir_type_map_t){0};
@@ -122,6 +139,7 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
     map->value_f64 = calloc(map->value_count, sizeof(bool));
     map->value_f32 = calloc(map->value_count, sizeof(bool));
     map->value_v128_i64 = calloc(map->value_count, sizeof(bool));
+    map->value_v256_i64 = calloc(map->value_count, sizeof(bool));
     map->value_v128_f64 = calloc(map->value_count, sizeof(bool));
     map->value_v128_f32 = calloc(map->value_count, sizeof(bool));
   }
@@ -129,15 +147,16 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
     map->local_f64 = calloc(local_count, sizeof(bool));
     map->local_f32 = calloc(local_count, sizeof(bool));
     map->local_v128_i64 = calloc(local_count, sizeof(bool));
+    map->local_v256_i64 = calloc(local_count, sizeof(bool));
     map->local_v128_f64 = calloc(local_count, sizeof(bool));
     map->local_v128_f32 = calloc(local_count, sizeof(bool));
   }
   if ((map->value_count &&
        (!map->value_f64 || !map->value_f32 || !map->value_v128_i64 ||
-        !map->value_v128_f64 || !map->value_v128_f32)) ||
+        !map->value_v256_i64 || !map->value_v128_f64 || !map->value_v128_f32)) ||
       (local_count &&
        (!map->local_f64 || !map->local_f32 || !map->local_v128_i64 ||
-        !map->local_v128_f64 || !map->local_v128_f32))) {
+        !map->local_v256_i64 || !map->local_v128_f64 || !map->local_v128_f32))) {
     nyir_type_map_free(map);
     return false;
   }
@@ -154,9 +173,11 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
   for (size_t i = 0; i < node_count; ++i)
     parents[i] = i;
 
-  /* Copies and local loads/stores preserve type. Collapse those constraints
+  /*
+   * Copies and local loads/stores preserve type. Collapse those constraints
    * once so long chains remain near-linear rather than requiring fixed-point
-   * rescans of the complete function. */
+   * rescans of the complete function.
+   */
   for (size_t i = 0; i < nyir->len; ++i) {
     const nyir_inst_t *in = &nyir->data[i];
     if (in->op == NYIR_COPY && in->dst >= 0 && in->a >= 0 &&
@@ -195,6 +216,7 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
          (in->flags & NYIR_INST_F_RET_F32));
     bool v128_i64_result = nyir_op_v128_i64(in->op) ||
         (in->op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13);
+    bool v256_i64_result = nyir_op_v256_i64(in->op);
     bool v128_f64_result = nyir_op_v128_f64(in->op);
     bool v128_f32_result = nyir_op_v128_f32(in->op);
     if (in->dst >= 0 && (size_t)in->dst < map->value_count) {
@@ -205,6 +227,8 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
         root_types[root] |= 2u;
       if (v128_i64_result)
         root_types[root] |= 4u;
+      if (v256_i64_result)
+        root_types[root] |= 4u | 32u;
       if (v128_f64_result)
         root_types[root] |= 8u;
       if (v128_f32_result)
@@ -220,15 +244,21 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
     }
     bool f64_operands = in->op == NYIR_ADD_F64 || in->op == NYIR_SUB_F64 ||
                         in->op == NYIR_MUL_F64 || in->op == NYIR_DIV_F64 ||
-                        in->op == NYIR_CMP_F64;
+                        in->op == NYIR_CMP_F64 || in->op == NYIR_F64_TO_F32 ||
+                        in->op == NYIR_SQRT_F64 || in->op == NYIR_SIN_F64 ||
+                        in->op == NYIR_COS_F64;
     bool f32_operands = in->op == NYIR_ADD_F32 || in->op == NYIR_SUB_F32 ||
                         in->op == NYIR_MUL_F32 || in->op == NYIR_DIV_F32 ||
-                        in->op == NYIR_CMP_F32;
+                        in->op == NYIR_CMP_F32 || in->op == NYIR_F32_TO_F64;
     bool v128_i64_ops =
         in->op == NYIR_VEC4_ADD_I64 || in->op == NYIR_VEC4_SUB_I64 ||
         in->op == NYIR_VEC4_AND_I64 || in->op == NYIR_VEC4_OR_I64 ||
         in->op == NYIR_VEC4_XOR_I64 || in->op == NYIR_VEC4_SHL_I64 ||
         in->op == NYIR_VEC4_SAR_I64;
+    bool v256_i64_ops =
+        in->op == NYIR_VEC8_ADD_I64 || in->op == NYIR_VEC8_SUB_I64 ||
+        in->op == NYIR_VEC8_AND_I64 || in->op == NYIR_VEC8_OR_I64 ||
+        in->op == NYIR_VEC8_XOR_I64;
     bool v128_f64_ops =
         in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
         in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
@@ -245,6 +275,8 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
         root_types[root] |= 2u;
       if (v128_i64_ops)
         root_types[root] |= 4u;
+      if (v256_i64_ops)
+        root_types[root] |= 4u | 32u;
       if (v128_f64_ops)
         root_types[root] |= 8u;
       if (v128_f32_ops)
@@ -258,6 +290,8 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
         root_types[root] |= 2u;
       if (v128_i64_ops)
         root_types[root] |= 4u;
+      if (v256_i64_ops)
+        root_types[root] |= 4u | 32u;
       if (v128_f64_ops)
         root_types[root] |= 8u;
       if (v128_f32_ops)
@@ -275,13 +309,32 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
       else
         root_types[root] |= 16u;
     }
-    if (in->op == NYIR_VEC4_STORE_I64 ||
+    if (in->op == NYIR_VEC4_REDUCE_ADD_F64) {
+      if (in->a >= 0 && (size_t)in->a < map->value_count) {
+        size_t root = nyir_type_root(parents, (size_t)in->a);
+        root_types[root] |= 1u;
+      }
+      if (in->b >= 0 && (size_t)in->b < map->value_count) {
+        size_t root = nyir_type_root(parents, (size_t)in->b);
+        root_types[root] |= 8u;
+      }
+    }
+    if (in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
+        in->op == NYIR_VEC8_REDUCE_ADD_I64) {
+      if (in->b >= 0 && (size_t)in->b < map->value_count) {
+        size_t root = nyir_type_root(parents, (size_t)in->b);
+        root_types[root] |= in->op == NYIR_VEC8_REDUCE_ADD_I64 ? (4u | 32u) : 4u;
+      }
+    }
+    if (in->op == NYIR_VEC4_STORE_I64 || in->op == NYIR_VEC8_STORE_I64 ||
         in->op == NYIR_VEC4_STORE_F64 || in->op == NYIR_VEC8_STORE_F32) {
       int value = in->b >= 0 ? in->b : in->c;
       if (value >= 0 && (size_t)value < map->value_count) {
         size_t root = nyir_type_root(parents, (size_t)value);
         if (in->op == NYIR_VEC4_STORE_I64)
           root_types[root] |= 4u;
+        else if (in->op == NYIR_VEC8_STORE_I64)
+          root_types[root] |= 4u | 32u;
         else if (in->op == NYIR_VEC4_STORE_F64)
           root_types[root] |= 8u;
         else
@@ -295,6 +348,7 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
     map->value_f64[i] = (type & 1u) != 0;
     map->value_f32[i] = (type & 2u) != 0;
     map->value_v128_i64[i] = (type & 4u) != 0;
+    map->value_v256_i64[i] = (type & 32u) != 0;
     map->value_v128_f64[i] = (type & 8u) != 0;
     map->value_v128_f32[i] = (type & 16u) != 0;
   }
@@ -304,6 +358,7 @@ bool nyir_type_map_init(nyir_type_map_t *map, const nyir_func_t *nyir,
     map->local_f64[i] = (type & 1u) != 0;
     map->local_f32[i] = (type & 2u) != 0;
     map->local_v128_i64[i] = (type & 4u) != 0;
+    map->local_v256_i64[i] = (type & 32u) != 0;
     map->local_v128_f64[i] = (type & 8u) != 0;
     map->local_v128_f32[i] = (type & 16u) != 0;
   }
@@ -380,6 +435,9 @@ bool nyir_func_clone(const nyir_func_t *src, nyir_func_t *dst) {
     return false;
   memset(dst, 0, sizeof(*dst));
   dst->next_value = src->next_value;
+  dst->vectorize_attempted_loops = src->vectorize_attempted_loops;
+  dst->vectorize_rejected_loops = src->vectorize_rejected_loops;
+  dst->vectorized_loops = src->vectorized_loops;
   if (src->param_count) {
     if (!src->param_types)
       return false;
@@ -583,6 +641,8 @@ const char *nyir_op_name(nyir_op_t op) {
   switch (op) {
   case NYIR_NOP:
     return "nop";
+  case NYIR_BOUNDS_CHECK:
+    return "bounds.check";
   case NYIR_CONST_I64:
     return "const.i64";
   case NYIR_COPY:
@@ -639,6 +699,12 @@ const char *nyir_op_name(nyir_op_t op) {
     return "i64.to.f64";
   case NYIR_CMP_F64:
     return "cmp.f64";
+  case NYIR_SQRT_F64:
+    return "sqrt.f64";
+  case NYIR_SIN_F64:
+    return "sin.f64";
+  case NYIR_COS_F64:
+    return "cos.f64";
   case NYIR_CONST_F32:
     return "const.f32";
   case NYIR_ADD_F32:
@@ -689,6 +755,8 @@ const char *nyir_op_name(nyir_op_t op) {
     return "vec4.set1.f64";
   case NYIR_VEC4_SHUFFLE_F64:
     return "vec4.shuffle.f64";
+  case NYIR_VEC4_REDUCE_ADD_F64:
+    return "vec4.reduce_add.f64";
   case NYIR_VEC8_LOAD_F32:
     return "vec8.load.f32";
   case NYIR_VEC8_STORE_F32:
@@ -709,6 +777,8 @@ const char *nyir_op_name(nyir_op_t op) {
     return "vec8.shuffle.f32";
   case NYIR_VEC4_LOAD_I64:
     return "vec4.load.i64";
+  case NYIR_VEC4_SET1_I64:
+    return "vec4.set1.i64";
   case NYIR_VEC4_STORE_I64:
     return "vec4.store.i64";
   case NYIR_VEC4_ADD_I64:
@@ -725,8 +795,24 @@ const char *nyir_op_name(nyir_op_t op) {
     return "vec4.shl.i64";
   case NYIR_VEC4_SAR_I64:
     return "vec4.sar.i64";
-  case NYIR_VEC4_SET1_I64:
-    return "vec4.set1.i64";
+  case NYIR_VEC4_REDUCE_ADD_I64:
+    return "vec4.reduce_add.i64";
+  case NYIR_VEC8_LOAD_I64:
+    return "vec8.load.i64";
+  case NYIR_VEC8_STORE_I64:
+    return "vec8.store.i64";
+  case NYIR_VEC8_ADD_I64:
+    return "vec8.add.i64";
+  case NYIR_VEC8_SUB_I64:
+    return "vec8.sub.i64";
+  case NYIR_VEC8_AND_I64:
+    return "vec8.and.i64";
+  case NYIR_VEC8_OR_I64:
+    return "vec8.or.i64";
+  case NYIR_VEC8_XOR_I64:
+    return "vec8.xor.i64";
+  case NYIR_VEC8_REDUCE_ADD_I64:
+    return "vec8.reduce_add.i64";
   case NYIR_OP_COUNT:
     break;
   }
@@ -742,9 +828,19 @@ unsigned nyir_inst_effects(const nyir_inst_t *inst) {
   case NYIR_STORE_LOCAL:
     return NYIR_EFFECT_WRITE_LOCAL;
   case NYIR_LOAD_I64:
+  case NYIR_VEC4_LOAD_I64:
+  case NYIR_VEC8_LOAD_I64:
+  case NYIR_VEC4_LOAD_F64:
+  case NYIR_VEC8_LOAD_F32:
     return NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP;
   case NYIR_STORE_I64:
+  case NYIR_VEC4_STORE_I64:
+  case NYIR_VEC8_STORE_I64:
+  case NYIR_VEC4_STORE_F64:
+  case NYIR_VEC8_STORE_F32:
     return NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP;
+  case NYIR_BOUNDS_CHECK:
+    return NYIR_EFFECT_CONTROL | NYIR_EFFECT_MAY_TRAP;
   case NYIR_COPY_STRUCT:
     return NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
            NYIR_EFFECT_MAY_TRAP;
@@ -786,9 +882,15 @@ static void nyir_normalize_operands(nyir_inst_t *inst) {
   if (!inst)
     return;
   switch (inst->op) {
+  case NYIR_BOUNDS_CHECK:
+  case NYIR_VEC4_REDUCE_ADD_F64:
+  case NYIR_VEC4_REDUCE_ADD_I64:
+  case NYIR_VEC8_REDUCE_ADD_I64:
+    break;
   case NYIR_VEC4_LOAD_F64:
   case NYIR_VEC8_LOAD_F32:
   case NYIR_VEC4_LOAD_I64:
+  case NYIR_VEC8_LOAD_I64:
   case NYIR_VEC4_SET1_F64:
   case NYIR_VEC8_SET1_F32:
   case NYIR_VEC4_SET1_I64:
@@ -803,6 +905,7 @@ static void nyir_normalize_operands(nyir_inst_t *inst) {
   case NYIR_VEC4_STORE_F64:
   case NYIR_VEC8_STORE_F32:
   case NYIR_VEC4_STORE_I64:
+  case NYIR_VEC8_STORE_I64:
     inst->dst = -1;
     inst->c = -1;
     inst->d = -1;
@@ -830,6 +933,11 @@ static void nyir_normalize_operands(nyir_inst_t *inst) {
   case NYIR_VEC4_XOR_I64:
   case NYIR_VEC4_SHL_I64:
   case NYIR_VEC4_SAR_I64:
+  case NYIR_VEC8_ADD_I64:
+  case NYIR_VEC8_SUB_I64:
+  case NYIR_VEC8_AND_I64:
+  case NYIR_VEC8_OR_I64:
+  case NYIR_VEC8_XOR_I64:
     inst->c = -1;
     inst->d = -1;
     inst->e = -1;
@@ -840,6 +948,9 @@ static void nyir_normalize_operands(nyir_inst_t *inst) {
   case NYIR_I64_TO_F32:
   case NYIR_F64_TO_F32:
   case NYIR_F32_TO_F64:
+  case NYIR_SQRT_F64:
+  case NYIR_SIN_F64:
+  case NYIR_COS_F64:
   case NYIR_LOAD_I64:
   case NYIR_RET:
   case NYIR_BR_IF:
@@ -959,7 +1070,14 @@ void nyir_refresh_metadata(nyir_func_t *f) {
   for (size_t i = 0; i < f->len; ++i) {
     nyir_inst_t *in = &f->data[i];
     nyir_normalize_operands(in);
-    in->effects = nyir_inst_effects(in);
+    /*
+     * Calls tagged with NYIR_INST_F_EFFECTS_KNOWN carry a builder-inferred
+     * interprocedural summary in in->effects; keep it instead of restoring
+     * the static CALL|UNKNOWN_SIDE_EFFECT default.
+     */
+    if (!(in->op == NYIR_CALL &&
+          (in->flags & NYIR_INST_F_EFFECTS_KNOWN)))
+      in->effects = nyir_inst_effects(in);
     if (in->op == NYIR_CONST_I64) {
       in->range = (nyir_range_t){.has_min = true,
                                    .has_max = true,
@@ -1013,12 +1131,28 @@ bool nyir_err(char *err, size_t err_len, const char *fmt, ...) {
 
 bool nyir_inst_err(char *err, size_t err_len, const nyir_inst_t *in,
                      size_t index, const char *reason) {
+  if (in && in->debug.line) {
+    if (in->debug.file && in->debug.file[0]) {
+      return nyir_err(err, err_len,
+                      "native NYIR verify: inst %zu opcode=%s dst=v%d a=v%d b=v%d "
+                      "imm=%" PRId64 " at %s:%u:%u: %s",
+                      index, nyir_op_name(in->op), in->dst, in->a, in->b, in->imm,
+                      in->debug.file, in->debug.line, in->debug.column,
+                      reason ? reason : "invalid instruction");
+    }
+    return nyir_err(err, err_len,
+                    "native NYIR verify: inst %zu opcode=%s dst=v%d a=v%d b=v%d "
+                    "imm=%" PRId64 " at line %u:%u: %s",
+                    index, nyir_op_name(in->op), in->dst, in->a, in->b, in->imm,
+                    in->debug.line, in->debug.column,
+                    reason ? reason : "invalid instruction");
+  }
   return nyir_err(err, err_len,
-                 "native NYIR verify: inst %zu opcode=%s dst=v%d a=v%d b=v%d "
-                 "imm=%" PRId64 ": %s",
-                 index, in ? nyir_op_name(in->op) : "<null>",
-                 in ? in->dst : -1, in ? in->a : -1, in ? in->b : -1,
-                 in ? in->imm : 0, reason ? reason : "invalid instruction");
+                  "native NYIR verify: inst %zu opcode=%s dst=v%d a=v%d b=v%d "
+                  "imm=%" PRId64 ": %s",
+                  index, in ? nyir_op_name(in->op) : "<null>",
+                  in ? in->dst : -1, in ? in->a : -1, in ? in->b : -1,
+                  in ? in->imm : 0, reason ? reason : "invalid instruction");
 }
 
 static const char *nyir_dump_color(FILE *out, const char *code) {
@@ -1037,8 +1171,10 @@ static const char *nyir_cmp_i64_name(nyir_cmp_t cmp) {
   return "invalid";
 }
 
-/* Compact TUI-like dump helpers (not a real TUI): short ops, pack many
- * insts per line, elide nops, skip verbose effects/range spam. */
+/*
+ * Compact TUI-like dump helpers (not a real TUI): short ops, pack many
+ * insts per line, elide nops, skip verbose effects/range spam.
+ */
 
 static const char *nyir_op_short(const nyir_inst_t *in) {
   if (!in)
@@ -1073,6 +1209,9 @@ static const char *nyir_op_short(const nyir_inst_t *in) {
   case NYIR_MUL_F64: return "fmul";
   case NYIR_DIV_F64: return "fdiv";
   case NYIR_CMP_F64: return "fcmp";
+  case NYIR_SQRT_F64: return "sqrt.f64";
+  case NYIR_SIN_F64: return "sin.f64";
+  case NYIR_COS_F64: return "cos.f64";
   case NYIR_ADDR_LOCAL: return "lea";
   case NYIR_LOAD_I64: return "ld.i64";
   case NYIR_STORE_I64: return "st.i64";
@@ -1084,7 +1223,9 @@ static const char *nyir_op_short(const nyir_inst_t *in) {
   }
 }
 
-/* Format one inst into buf; returns false for pure nops (callers elide). */
+/*
+ * Format one inst into buf; returns false for pure nops (callers elide).
+ */
 static bool nyir_fmt_inst(const nyir_inst_t *in, char *buf, size_t n) {
   if (!in || !buf || n == 0)
     return false;
@@ -1121,6 +1262,9 @@ static bool nyir_fmt_inst(const nyir_inst_t *in, char *buf, size_t n) {
     return true;
   }
   APP("%s", nyir_op_short(in));
+  if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+      (in->flags & NYIR_INST_F_MEM_BYTE))
+    APP(".byte");
   if (in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL ||
       in->op == NYIR_ADDR_LOCAL) {
     APP(" #%" PRId64, in->imm);
@@ -1217,7 +1361,9 @@ void nyir_dump(FILE *out, const nyir_func_t *f, const char *name) {
   if (!f || !f->len)
     return;
 
-  /* Pack several live insts per line; elide nops with a run count. */
+  /*
+   * Pack several live insts per line; elide nops with a run count.
+   */
   enum { PER_LINE = 5 };
   int on_line = 0;
   size_t nop_run = 0;
@@ -1234,7 +1380,7 @@ void nyir_dump(FILE *out, const nyir_func_t *f, const char *name) {
         fprintf(out, "  %s%3zu%s ", muted, i - nop_run, reset);
       else
         fputs("  ", out);
-      fprintf(out, "%s…%zunop%s", muted, nop_run, reset);
+      fprintf(out, "%s---%zunop%s", muted, nop_run, reset);
       ++on_line;
       nop_run = 0;
       if (on_line >= PER_LINE) {
@@ -1282,7 +1428,9 @@ void nyir_dump_diff(FILE *out, const nyir_func_t *before,
   int shown = 0;
   enum { MAX_DIFF_LINES = 400 };
 
-  /* Packed changes under the · <pass> status line: ~i:new  -i  +i:new */
+  /*
+   * Packed changes under the -- <pass> status line: ~i:new  -i  +i:new
+   */
   (void)pass_tag;
   fprintf(out, "    ");
   int on_line = 0;
@@ -1318,9 +1466,9 @@ void nyir_dump_diff(FILE *out, const nyir_func_t *before,
     ++shown;
   }
   if (shown == 0)
-    fprintf(out, "%s(no live Δ)%s", muted, reset);
+    fprintf(out, "%s(no live --)%s", muted, reset);
   else if (shown >= MAX_DIFF_LINES)
-    fprintf(out, "  %s…%s", muted, reset);
+    fprintf(out, "  %s---%s", muted, reset);
   fputc('\n', out);
 }
 

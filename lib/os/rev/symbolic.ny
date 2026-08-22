@@ -365,7 +365,7 @@ fn unicorn_mem_read(any engine, int addr, int size) dict {
 fn unicorn_reg_id(any reg) int {
    "Resolve common x86/x86_64 register names to Unicorn constants."
    if is_int(reg) { return int(reg) }
-   match str.lower(str.strip(to_str(reg))){
+   match str.lower(str.strip(to_str(reg))) {
       "rax" -> UC_X86_REG_RAX
       "rbx" -> UC_X86_REG_RBX
       "rcx" -> UC_X86_REG_RCX
@@ -484,7 +484,7 @@ fn unicorn_run(any code, any regs=dict(), any opts=dict()) dict {
       oi += 1
    }
    {"ok": run.get("ok", false), "reason": run.get("reason", ""), "arch": _arch_name(arch), "mode": _mode_id(mode),
-   "base": base, "size": data_len, "run": run, "regs": out}
+      "base": base, "size": data_len, "run": run, "regs": out}
 }
 
 fn unicorn_run_x86_64(any code, any regs=dict(), int base=0x400000, int count=0) dict {
@@ -492,7 +492,7 @@ fn unicorn_run_x86_64(any code, any regs=dict(), int base=0x400000, int count=0)
    common register values. This is the concrete-execution companion to the
    symbolic solver helpers."
    unicorn_run(code, regs, {"arch": "x86_64", "mode": "64", "base": base, "count": count,
-   "read_regs": ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip"]})
+         "read_regs": ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip"]})
 }
 
 fn unicorn_session(any arch="x86_64", any mode="64", any opts=dict()) dict {
@@ -502,7 +502,7 @@ fn unicorn_session(any arch="x86_64", any mode="64", any opts=dict()) dict {
    def opened = unicorn_open(arch, mode)
    {"kind": "unicorn_session", "available": opened.get("ok", false), "engine": opened.get("engine", 0),
       "arch": _arch_name(arch), "mode": _mode_id(mode), "bits": _default_bits(arch, mode), "options": opts,
-   "reason": opened.get("ok", false) ? "ready" : opened.get("reason", "open_failed"), "native": opened}
+      "reason": opened.get("ok", false) ? "ready" : opened.get("reason", "open_failed"), "native": opened}
 }
 
 fn unicorn_plan(any arch="x86_64", any mode="64", int base=0x400000, any code="", int count=0) dict {
@@ -510,7 +510,7 @@ fn unicorn_plan(any arch="x86_64", any mode="64", int base=0x400000, any code=""
    Unicorn at import time."
    {"engine": "unicorn", "available": unicorn_available(), "arch": _arch_name(arch), "mode": _mode_id(mode),
       "bits": _default_bits(arch, mode), "base": base, "code_len": (is_str(code) || is_bytes(code)) ? code.len : 0,
-   "count": count, "implemented": unicorn_available(), "missing": unicorn_available() ? [] : ["libunicorn"]}
+      "count": count, "implemented": unicorn_available(), "missing": unicorn_available() ? [] : ["libunicorn"]}
 }
 
 fn z3_available() bool {
@@ -526,13 +526,13 @@ fn symbolic_available() bool {
 fn backend_status() dict {
    "Returns symbolic backend availability and version metadata."
    {"z3": z3_available(), "z3_version": smt.z3_version_str(), "unicorn": unicorn_available(),
-   "unicorn_version": unicorn_version(), "ready": symbolic_available()}
+      "unicorn_version": unicorn_version(), "ready": symbolic_available()}
 }
 
 fn arch_info(any arch="x86_64", any mode="64") dict {
    "Normalize architecture and word-size metadata."
    {"arch": _arch_name(arch), "arch_id": _arch_id(arch), "mode": _mode_id(mode), "bits": _default_bits(arch, mode),
-   "unicorn_supported": unicorn_arch_supported(arch)}
+      "unicorn_supported": unicorn_arch_supported(arch)}
 }
 
 fn project(any target="", any opts=dict()) dict {
@@ -540,7 +540,7 @@ fn project(any target="", any opts=dict()) dict {
    def arch = opts.get("arch", "x86_64")
    def mode = opts.get("mode", "64")
    {"kind": "project", "target": target, "arch": arch_info(arch, mode), "options": opts,
-   "entry": opts.get("entry", 0), "base": opts.get("base", 0), "backend": backend_status()}
+      "entry": opts.get("entry", 0), "base": opts.get("base", 0), "backend": backend_status()}
 }
 
 fn project_hooks(dict proj) dict {
@@ -576,7 +576,7 @@ fn procedure_library() list {
       "memcpy", "memmove", "memset", "memfrob", "strcpy", "strncpy",
       "strdup", "fgets", "gets", "atoi", "atol", "atoll", "strtol", "strtoll",
       "uncompress",
-   "malloc", "calloc", "realloc", "free", "exit", "_exit", "abort"]
+      "malloc", "calloc", "realloc", "free", "exit", "_exit", "abort"]
 }
 
 fn procedure(any name, any opts=dict()) dict {
@@ -623,7 +623,7 @@ fn blob_project(any bytes, any opts=dict()) dict {
    "Create a project for raw bytes/shellcode."
    def base = int(opts.get("base", 0x400000))
    project("<blob>", opts.merge({"base": base, "entry": opts.get("entry", base), "blob": bytes, "blob_len": _data_len(bytes),
-   "loads": opts.get("loads", [{"addr": base, "size": _data_len(bytes), "data": bytes, "perms": "r-x", "offset": 0}])}))
+            "loads": opts.get("loads", [{"addr": base, "size": _data_len(bytes), "data": bytes, "perms": "r-x", "offset": 0}])}))
 }
 
 fn shellcode_project(any code, any arch="x86_64", any base=0x400000) dict {
@@ -659,7 +659,7 @@ fn blank_state(any proj=0, int addr=0, any opts=dict()) dict {
       "fork_pid": int(opts.get("fork_pid", 0)),
       "time": int(opts.get("time", 1700000000)), "time_nsec": int(opts.get("time_nsec", 123000000)),
       "random": opts.get("random", "NYTRIX_RANDOM_STREAM"), "random_pos": 0, "rand_seed": int(opts.get("rand_seed", 1)),
-   "options": opts, "solver": solver()}
+      "options": opts, "solver": solver()}
 }
 
 fn entry_state(any proj, any opts=dict()) dict {
@@ -670,7 +670,7 @@ fn entry_state(any proj, any opts=dict()) dict {
       def spec = opts.get("symbolic_stdin", dict())
       if is_dict(spec) {
          st = state_symbolic_stdin(st, int(spec.get("n", spec.get("len", 0))), spec.get("name", "stdin"),
-         int(spec.get("lo", 0)), int(spec.get("hi", 255)))
+            int(spec.get("lo", 0)), int(spec.get("hi", 255)))
       } else {
          st = state_symbolic_stdin(st, int(spec), "stdin")
       }
@@ -678,7 +678,7 @@ fn entry_state(any proj, any opts=dict()) dict {
    if opts.contains("argv") { st = state_set_argv(st, opts.get("argv", []), int(opts.get("argv_base", 0x710000))) }
    if opts.contains("symbolic_argv") {
       st = state_symbolic_argv(st, opts.get("symbolic_argv", []), int(opts.get("argv_base", 0x720000)),
-      int(opts.get("argv_lo", 0)), int(opts.get("argv_hi", 255)))
+         int(opts.get("argv_lo", 0)), int(opts.get("argv_hi", 255)))
    }
    if opts.contains("env") { st = state_set_env(st, opts.get("env", dict())) }
    if opts.contains("fs") { st = state_set_fs(st, opts.get("fs", dict())) }
@@ -766,7 +766,7 @@ fn state_constrain_stdin_eq(dict st, any bytes) dict {
    def cs = _byte_eq_constraints(sol, xs, bytes)
    _assert_all(sol, cs)
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), cs)),
-   _constraint_eq_note("stdin", nm, bytes, cs.len))
+      _constraint_eq_note("stdin", nm, bytes, cs.len))
 }
 
 fn state_constrain_stdin_range(dict st, int lo, int hi) dict {
@@ -778,7 +778,7 @@ fn state_constrain_stdin_range(dict st, int lo, int hi) dict {
    def cs = _byte_range_constraints(sol, xs, lo, hi)
    _assert_all(sol, cs)
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), cs)),
-   _constraint_range_note("stdin", nm, lo, hi, xs.len))
+      _constraint_range_note("stdin", nm, lo, hi, xs.len))
 }
 
 fn state_eval_stdin_ascii(dict st) any {
@@ -984,7 +984,7 @@ fn state_symbolic_argv(dict st, list specs, int base=0x720000, int lo=0, int hi=
       out = mem_write_byte(out, str_base + n, 0)
       out = _mem_write_ptr(out, ptr_base + i * psz, str_base)
       def rec = {"index": i, "addr": str_base, "name": nm, "ast": xs, "count": n,
-      "ptr_addr": ptr_base + i * psz, "symbolic": true}
+         "ptr_addr": ptr_base + i * psz, "symbolic": true}
       records = records.append(rec)
       sy = sy.set(nm, rec).set(to_str(str_base), rec)
       str_base += n + 1
@@ -1020,7 +1020,7 @@ fn state_constrain_argv_eq(dict st, int index, any bytes) dict {
    def cs = _byte_eq_constraints(sol, rec.get("ast", []), bytes)
    _assert_all(sol, cs)
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), cs)),
-   _constraint_eq_note("argv", "argv[" + to_str(index) + "]", bytes, cs.len))
+      _constraint_eq_note("argv", "argv[" + to_str(index) + "]", bytes, cs.len))
 }
 
 fn state_constrain_argv_range(dict st, int index, int lo, int hi) dict {
@@ -1031,7 +1031,7 @@ fn state_constrain_argv_range(dict st, int index, int lo, int hi) dict {
    def cs = _byte_range_constraints(sol, rec.get("ast", []), lo, hi)
    _assert_all(sol, cs)
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), cs)),
-   _constraint_range_note("argv", "argv[" + to_str(index) + "]", lo, hi, rec.get("ast", []).len))
+      _constraint_range_note("argv", "argv[" + to_str(index) + "]", lo, hi, rec.get("ast", []).len))
 }
 
 fn state_set_env(dict st, any env) dict {
@@ -1086,7 +1086,7 @@ fn state_process(dict st) dict {
       "fork_pid": int(st.get("fork_pid", 0)),
       "time": int(st.get("time", 0)), "time_nsec": int(st.get("time_nsec", 0)),
       "random_pos": int(st.get("random_pos", 0)),
-   "stdout": state_stdout(st), "stderr": state_stderr(st)}
+      "stdout": state_stdout(st), "stderr": state_stderr(st)}
 }
 
 fn state_feasible(dict st) bool {
@@ -1287,12 +1287,12 @@ fn _constraint_note(dict st, dict note) dict {
 
 fn _constraint_range_note(str kind, str target, int lo, int hi, int count=0) dict {
    {"kind": kind, "target": target, "op": "range", "lo": lo, "hi": hi,
-   "count": count, "text": target + " in [" + to_str(lo) + ", " + to_str(hi) + "]"}
+      "count": count, "text": target + " in [" + to_str(lo) + ", " + to_str(hi) + "]"}
 }
 
 fn _constraint_eq_note(str kind, str target, any value, int count=0) dict {
    {"kind": kind, "target": target, "op": "eq", "value": value, "count": count,
-   "text": target + " == " + repr(value)}
+      "text": target + " == " + repr(value)}
 }
 
 fn state_symbolic_bytes(dict st, str name, int n, int lo=0, int hi=255) dict {
@@ -1415,7 +1415,7 @@ fn state_constrain_mem_eq(dict st, any addr, any bytes) dict {
    }
    if xs.len > 0 { smt.solver_assert_bytes_eq(ctx, sol.get("solver", 0), xs, bytes) }
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), cs)),
-   _constraint_eq_note("mem", "mem[" + to_hex(base_addr, 0) + "]", bytes, cs.len))
+      _constraint_eq_note("mem", "mem[" + to_hex(base_addr, 0) + "]", bytes, cs.len))
 }
 
 fn state_constrain_mem_range(dict st, any addr, int n, int lo, int hi) dict {
@@ -1442,7 +1442,7 @@ fn state_constrain_mem_range(dict st, any addr, int n, int lo, int hi) dict {
    }
    _assert_all(sol, cs)
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), cs)),
-   _constraint_range_note("mem", "mem[" + to_hex(int(addr), 0) + "]", low, high, n))
+      _constraint_range_note("mem", "mem[" + to_hex(int(addr), 0) + "]", low, high, n))
 }
 
 fn state_eval_mem_byte_u64(dict st, any addr) any {
@@ -1527,7 +1527,7 @@ fn state_constrain_reg_eq(dict st, str reg, any value) dict {
    def c = smt.mk_eq(ctx, rec.get("ast", 0), smt.bv_u64(ctx, value, bits))
    _assert_all(sol, [c])
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), [c])),
-   _constraint_eq_note("reg", r, value, 1))
+      _constraint_eq_note("reg", r, value, 1))
 }
 
 fn state_constrain_reg_range(dict st, str reg, int lo, int hi) dict {
@@ -1551,7 +1551,7 @@ fn state_constrain_reg_range(dict st, str reg, int lo, int hi) dict {
    def c1 = smt.bvule(ctx, ast, smt.bv_u64(ctx, high, bits))
    _assert_all(sol, [c0, c1])
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), [c0, c1])),
-   _constraint_range_note("reg", r, low, high, 1))
+      _constraint_range_note("reg", r, low, high, 1))
 }
 
 fn _symbolic_named(dict st, str name) any {
@@ -1600,7 +1600,7 @@ fn state_constrain_symbolic_eq(dict st, str name, any value, int offset=-1) dict
    }
    _assert_all(sol, cs)
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), cs)),
-   _constraint_eq_note("symbolic", name, value, cs.len))
+      _constraint_eq_note("symbolic", name, value, cs.len))
 }
 
 fn state_constrain_symbolic_range(dict st, str name, int lo, int hi, int offset=0, int n=0) dict {
@@ -1637,7 +1637,7 @@ fn state_constrain_symbolic_range(dict st, str name, int lo, int hi, int offset=
    }
    _assert_all(sol, cs)
    _constraint_note(st.set("solver", sol).set("constraints", _constraints_append_all(st.get("constraints", []), cs)),
-   _constraint_range_note("symbolic", name, lo, hi, cs.len))
+      _constraint_range_note("symbolic", name, lo, hi, cs.len))
 }
 
 fn state_eval_reg_u64(dict st, str reg) any {
@@ -2026,7 +2026,7 @@ fn _solver_with_constraints(dict base, list constraints) dict {
       i += 1
    }
    {"ok": true, "ctx": ctx, "solver": s, "logic": base.get("logic", "QF_BV"),
-   "vars": base.get("vars", dict()), "borrow_ctx": true}
+      "vars": base.get("vars", dict()), "borrow_ctx": true}
 }
 
 fn _set_zf(dict st, bool zf) dict {
@@ -2045,7 +2045,7 @@ fn _set_zf_ast(dict st, any ast, str expr) dict {
 fn _path_condition(dict st, str expr, bool value) dict {
    def rec = {"expr": expr, "value": value, "text": expr + " == " + to_str(value)}
    _constraint_note(st.set("path_conditions", _list_copy(st.get("path_conditions", [])).append(rec)),
-   {"kind": "branch", "target": expr, "op": "path", "value": value, "count": 1, "text": rec.get("text", "")})
+      {"kind": "branch", "target": expr, "op": "path", "value": value, "count": 1, "text": rec.get("text", "")})
 }
 
 fn _branch_state(dict st, int pc, int next, str kind, bool taken) dict {
@@ -2061,7 +2061,7 @@ fn _branch_state(dict st, int pc, int next, str kind, bool taken) dict {
       out = out.set("constraints", constraints).set("solver", _solver_with_constraints(sol, constraints))
    }
    _history_append(out.set("step_ok", true).set("step_reason", "ok").set("branch", taken ? "true" : "false"),
-   {"addr": pc, "next": next, "backend": "lite_x86", "insn": desc, "branch": taken})
+      {"addr": pc, "next": next, "backend": "lite_x86", "insn": desc, "branch": taken})
 }
 
 fn _hex_digit_value(int ch) int {
@@ -2143,7 +2143,7 @@ fn _lift_get_reg(dict st, str reg, any default=0) any {
 fn _lift_operand_value(dict st, str op) any {
    def s = str.lower(str.strip(op))
    if s.len == 0 { return 0 }
-   if (str.startswith(s, "mem(") || str.startswith(s, "mem_fs(") || str.startswith(s, "mem_gs(") || str.find(s, "[") >= 0 || _lift_paren_mem_parts(s).len > 0){ return _lift_mem_load(st, s) }
+   if str.startswith(s, "mem(") || str.startswith(s, "mem_fs(") || str.startswith(s, "mem_gs(") || str.find(s, "[") >= 0 || _lift_paren_mem_parts(s).len > 0 { return _lift_mem_load(st, s) }
    if s == "zero" || s == "x0" { return 0 }
    if str.startswith(s, "#") || str.startswith(s, "0x") || str.startswith(s, "-0x") || str.ascii_is_digit(load8(s, 0)) || load8(s, 0) == 45 { return _parse_lift_imm(s) }
    _lift_get_reg(st, op, 0)
@@ -2151,9 +2151,9 @@ fn _lift_operand_value(dict st, str op) any {
 
 fn _lift_paren_mem_parts(str op) dict {
    def s = str.strip(op)
-   if (str.startswith(s, "mem(") || str.startswith(s, "mem_fs(") || str.startswith(s, "mem_gs(")){ return dict() }
+   if str.startswith(s, "mem(") || str.startswith(s, "mem_fs(") || str.startswith(s, "mem_gs(") { return dict() }
    def open = str.find(s, "(")
-   if (open < 0 || !str.endswith(s, ")")){ return dict() }
+   if open < 0 || !str.endswith(s, ")") { return dict() }
    def off = str.strip(slice(s, 0, open, 1))
    def base = str.strip(slice(s, open + 1, s.len - 1, 1))
    if base.len == 0 { return dict() }
@@ -2373,7 +2373,7 @@ fn _cmp_text(str lhs, str cond, str rhs) str {
       (cond == "gt" || cond == "ugt" ? ">" :
          (cond == "ge" || cond == "uge" ? ">=" :
             (cond == "lt" || cond == "ult" ? "<" :
-   (cond == "le" || cond == "ule" ? "<=" : cond)))))
+               (cond == "le" || cond == "ule" ? "<=" : cond)))))
    lhs + " " + op + " " + rhs
 }
 
@@ -2512,19 +2512,19 @@ fn _cmp_ast(dict st, str lhs_name, any lhs, str cond, str rhs_name, any rhs) any
    if _is_ast(breg) { return breg }
    if (cond == "eq" || cond == "zero" || cond == "ne" || cond == "nonzero") && _lift_operand_is_mem(lhs_name) && _is_ast(rhs) {
       def mem_eq = _mem_value_eq_ast(st, lhs_name, rhs, rhs_name)
-      if _is_ast(mem_eq) { return(cond == "ne" || cond == "nonzero") ? smt.mk_not(state_solver(st).get("ctx", 0), mem_eq) : mem_eq }
+      if _is_ast(mem_eq) { return (cond == "ne" || cond == "nonzero") ? smt.mk_not(state_solver(st).get("ctx", 0), mem_eq) : mem_eq }
    }
    if (cond == "eq" || cond == "zero" || cond == "ne" || cond == "nonzero") && _lift_operand_is_mem(rhs_name) && _is_ast(lhs) {
       def mem_eq = _mem_value_eq_ast(st, rhs_name, lhs, lhs_name)
-      if _is_ast(mem_eq) { return(cond == "ne" || cond == "nonzero") ? smt.mk_not(state_solver(st).get("ctx", 0), mem_eq) : mem_eq }
+      if _is_ast(mem_eq) { return (cond == "ne" || cond == "nonzero") ? smt.mk_not(state_solver(st).get("ctx", 0), mem_eq) : mem_eq }
    }
    if (cond == "eq" || cond == "zero" || cond == "ne" || cond == "nonzero") && !_is_ast(rhs) && _lift_operand_is_mem(lhs_name) {
       def mem_eq = _mem_imm_eq_ast(st, lhs_name, int(rhs))
-      if _is_ast(mem_eq) { return(cond == "ne" || cond == "nonzero") ? smt.mk_not(state_solver(st).get("ctx", 0), mem_eq) : mem_eq }
+      if _is_ast(mem_eq) { return (cond == "ne" || cond == "nonzero") ? smt.mk_not(state_solver(st).get("ctx", 0), mem_eq) : mem_eq }
    }
    if (cond == "eq" || cond == "zero" || cond == "ne" || cond == "nonzero") && !_is_ast(lhs) && _lift_operand_is_mem(rhs_name) {
       def mem_eq = _mem_imm_eq_ast(st, rhs_name, int(lhs))
-      if _is_ast(mem_eq) { return(cond == "ne" || cond == "nonzero") ? smt.mk_not(state_solver(st).get("ctx", 0), mem_eq) : mem_eq }
+      if _is_ast(mem_eq) { return (cond == "ne" || cond == "nonzero") ? smt.mk_not(state_solver(st).get("ctx", 0), mem_eq) : mem_eq }
    }
    if !_is_ast(lhs) && !_is_ast(rhs) { return 0 }
    def sol = state_solver(st)
@@ -2686,7 +2686,7 @@ fn _lifted_branch_state(dict st, dict row, str text, any ast, bool taken, int ne
       out = out.set("constraints", constraints).set("solver", _solver_with_constraints(sol, constraints))
    }
    _history_append(out.set("step_ok", true).set("step_reason", "ok").set("branch", taken ? "true" : "false"),
-   {"addr": row.get("addr", state_addr(st)), "next": next, "backend": "lifted", "condition": text, "branch": taken})
+      {"addr": row.get("addr", state_addr(st)), "next": next, "backend": "lifted", "condition": text, "branch": taken})
 }
 
 fn _lifted_switch_successors(dict st, dict row) list {
@@ -2836,7 +2836,7 @@ fn _x86_set_group_from_full(dict st, dict info, any full_value) dict {
 fn _x86_merge_partial(dict st, str full, any old_full, any value, int bits) any {
    if !_is_ast(old_full) && !_is_ast(value) {
       def mask = _int_mask_bits(bits)
-      return(int(old_full) & ~mask) | (int(value) & mask)
+      return (int(old_full) & ~mask) | (int(value) & mask)
    }
    def ctx = state_solver(st).get("ctx", 0)
    def old64 = _is_ast(old_full) ? _bv_to_bits(st, old_full, 64, 64) : smt.bv_u64(ctx, int(old_full), 64)
@@ -2923,8 +2923,8 @@ fn _lift_unary_value(dict st, str dst, str op, any value) any {
    }
    def mask = bits >= 63 ? -1 : ((1 << bits) - 1)
    def v = int(value) & mask
-   if op == "~" { return(~v) & mask }
-   if op == "neg" { return(-v) & mask }
+   if op == "~" { return (~v) & mask }
+   if op == "neg" { return (-v) & mask }
    value
 }
 
@@ -2992,7 +2992,7 @@ fn _lift_conditioned_linear_state(dict st, dict row, any ast, bool taken, int ne
       out = out.set("constraints", constraints).set("solver", _solver_with_constraints(sol, constraints))
    }
    _history_append(out.set("step_ok", true).set("step_reason", "ok").set("branch", taken ? "true" : "false"),
-   {"addr": row.get("addr", state_addr(st)), "next": next, "backend": "lifted", "condition": text, "branch": taken, "insn": row.get("mnemonic", "cmov")})
+      {"addr": row.get("addr", state_addr(st)), "next": next, "backend": "lifted", "condition": text, "branch": taken, "insn": row.get("mnemonic", "cmov")})
 }
 
 fn _lift_cmov_successors(dict st, dict row, int next) list {
@@ -3178,10 +3178,10 @@ fn _lifted_step_state(dict st, list rows, any opts=dict()) list {
       def popped = _call_pop(st)
       if popped.get("ok", false) {
          return [_history_append(_state_set_pc(popped.get("state", st), int(popped.get("ret", state_addr(st)))).set("step_ok", true).set("step_reason", "ok"),
-         {"addr": state_addr(st), "next": int(popped.get("ret", state_addr(st))), "backend": "lifted", "insn": "return"})]
+               {"addr": state_addr(st), "next": int(popped.get("ret", state_addr(st))), "backend": "lifted", "insn": "return"})]
       }
       return [_history_append(st.set("deadended", true).set("step_ok", true).set("step_reason", "ok"),
-      {"addr": state_addr(st), "next": state_addr(st), "backend": "lifted", "insn": "return"})]
+            {"addr": state_addr(st), "next": state_addr(st), "backend": "lifted", "insn": "return"})]
    }
    mut next = int(row.get("addr", state_addr(st))) + int(row.get("size", 1))
    if op == "call" {
@@ -3192,7 +3192,7 @@ fn _lifted_step_state(dict st, list rows, any opts=dict()) list {
          if opts.get("follow_calls", false) {
             def out_call = _call_push(st, next)
             return [_history_append(_state_set_pc(out_call, target).set("step_ok", true).set("step_reason", "ok"),
-            {"addr": row.get("addr", state_addr(st)), "next": target, "backend": "lifted", "insn": "call", "call_return": next})]
+                  {"addr": row.get("addr", state_addr(st)), "next": target, "backend": "lifted", "insn": "call", "call_return": next})]
          }
       }
    }
@@ -3201,11 +3201,11 @@ fn _lifted_step_state(dict st, list rows, any opts=dict()) list {
       def out_sys = _apply_linux_syscall(st)
       return [_history_append(_state_set_pc(out_sys, next).set("step_ok", true).set("step_reason", "ok"),
             {"addr": row.get("addr", state_addr(st)), "next": next, "backend": "lifted", "insn": row.get("mnemonic", "syscall"),
-      "syscall": out_sys.get("last_syscall", -1), "syscall_name": out_sys.get("last_syscall_name", "")})]
+               "syscall": out_sys.get("last_syscall", -1), "syscall_name": out_sys.get("last_syscall_name", "")})]
    }
    def out = _apply_lifted_row_effect(st, row)
    [_history_append(_state_set_pc(out, next).set("step_ok", true).set("step_reason", "ok"),
-   {"addr": row.get("addr", state_addr(st)), "next": next, "backend": "lifted", "insn": row.get("mnemonic", op)})]
+         {"addr": row.get("addr", state_addr(st)), "next": next, "backend": "lifted", "insn": row.get("mnemonic", op)})]
 }
 
 fn _read_cstring(dict st, int addr, int max_len=4096) str {
@@ -3254,7 +3254,7 @@ fn _proc_memcmp(dict st, int a, int b, int n) int {
       def av = mem_read(st, a + i, -1)
       def bv = mem_read(st, b + i, -1)
       if !is_int(av) || !is_int(bv) { return 1 }
-      if int(av) != int(bv) { return(int(av) & 255) < (int(bv) & 255) ? -1 : 1 }
+      if int(av) != int(bv) { return (int(av) & 255) < (int(bv) & 255) ? -1 : 1 }
       i += 1
    }
    0
@@ -3578,7 +3578,7 @@ fn _state_uname(dict st, int dst) dict {
    def vals = [proc.get("sysname", "Linux"), proc.get("nodename", "nytrix"),
       proc.get("release", "6.0.0"), proc.get("version", "Nytrix virtual kernel"),
       proc.get("machine", st.get("arch", dict()).get("arch", "x86_64")),
-   proc.get("domainname", "localdomain")]
+      proc.get("domainname", "localdomain")]
    mut out = st
    mut i = 0
    while i < vals.len {
@@ -3620,7 +3620,7 @@ fn _state_socket(dict st, int domain, int typ, int proto) dict {
    def net = state_net(st)
    def data = net.get("recv", net.get("rx", ""))
    def rec = {"kind": "socket", "domain": domain, "type": typ, "protocol": proto,
-   "data": data, "pos": 0, "sent": "", "connected": false}
+      "data": data, "pos": 0, "sent": "", "connected": false}
    _fd_set(st.set("next_fd", fd + 1), fd, rec).set("last_fd", fd)
 }
 
@@ -3711,7 +3711,7 @@ fn _state_dlopen(dict st, str path, int flags) dict {
    def rec = {"path": path, "flags": flags}
    state_set_reg(st.set("next_dl_handle", handle + 0x1000)
       .set("dl_handles", st.get("dl_handles", dict()).set(to_str(handle), rec))
-   .set("last_dlopen_path", path), "rax", handle)
+      .set("last_dlopen_path", path), "rax", handle)
 }
 
 fn _state_dlsym(dict st, int handle, str name) dict {
@@ -3782,12 +3782,12 @@ fn _state_getrandom(dict st, int dst, int n, int flags) dict {
 
 fn _state_ptrace(dict st, int req, int pid, int addr, int data) dict {
    state_set_reg(st.set("last_ptrace_req", req).set("last_ptrace_pid", pid)
-   .set("last_ptrace_addr", addr).set("last_ptrace_data", data), "rax", 0)
+      .set("last_ptrace_addr", addr).set("last_ptrace_data", data), "rax", 0)
 }
 
 fn _state_prctl(dict st, int option, int arg2, int arg3, int arg4, int arg5) dict {
    state_set_reg(st.set("last_prctl_option", option).set("last_prctl_arg2", arg2)
-   .set("last_prctl_arg3", arg3).set("last_prctl_arg4", arg4).set("last_prctl_arg5", arg5), "rax", 0)
+      .set("last_prctl_arg3", arg3).set("last_prctl_arg4", arg4).set("last_prctl_arg5", arg5), "rax", 0)
 }
 
 fn _state_arch_prctl(dict st, int code, int addr) dict {
@@ -3815,7 +3815,7 @@ fn _state_nanosleep(dict st, int req, int rem) dict {
 
 fn _state_signal_result(dict st, str name, int a, int b=0, int c=0) dict {
    state_set_reg(st.set("last_signal_call", name).set("last_signal_a", a)
-   .set("last_signal_b", b).set("last_signal_c", c), "rax", 0)
+      .set("last_signal_b", b).set("last_signal_c", c), "rax", 0)
 }
 
 fn _state_fork_like(dict st, str name) dict {
@@ -3867,7 +3867,7 @@ fn _state_mmap(dict st, int addr, int length, int prot, int flags, int fd, int o
    }
    def rec = {"addr": base, "size": size, "length": length, "prot": prot,
       "perms": _map_perms(prot), "flags": flags, "fd": fd, "offset": offset,
-   "active": true, "kind": fd >= 0 ? "file" : "anonymous"}
+      "active": true, "kind": fd >= 0 ? "file" : "anonymous"}
    if fd >= 0 {
       def frec = _fd_record(out, fd)
       if frec.len > 0 {
@@ -4089,7 +4089,7 @@ fn _digit_value_ast(dict sol, any b, int base, int bits, str name) dict {
       clauses = clauses.append(smt.mk_and(ctx, [
                smt.mk_eq(ctx, b, smt.bv_u8(ctx, 48 + v)),
                smt.mk_eq(ctx, dvar, smt.bv_u64(ctx, v, bbits)),
-      ]))
+            ]))
       v += 1
    }
    v = 10
@@ -4097,11 +4097,11 @@ fn _digit_value_ast(dict sol, any b, int base, int bits, str name) dict {
       clauses = clauses.append(smt.mk_and(ctx, [
                smt.mk_eq(ctx, b, smt.bv_u8(ctx, 55 + v)),
                smt.mk_eq(ctx, dvar, smt.bv_u64(ctx, v, bbits)),
-      ]))
+            ]))
       clauses = clauses.append(smt.mk_and(ctx, [
                smt.mk_eq(ctx, b, smt.bv_u8(ctx, 87 + v)),
                smt.mk_eq(ctx, dvar, smt.bv_u64(ctx, v, bbits)),
-      ]))
+            ]))
       v += 1
    }
    clauses.len > 0 ? {"ok": true, "ast": dvar, "symbolic": true, "constraints": [smt.mk_or(ctx, clauses)]} : {"ok": false}
@@ -4375,7 +4375,7 @@ fn _symbolic_mem_search_return(dict st, str proc, int addr, int n, int needle) d
    if saw_symbolic && eqs.len > 0 {
       return _proc_symbolic_return_nullness(st, proc,
          [smt.mk_and(ctx, neqs)],
-      [smt.mk_or(ctx, eqs)])
+         [smt.mk_or(ctx, eqs)])
    }
    _abi_set_return(st, 0)
 }
@@ -4413,7 +4413,7 @@ fn _symbolic_substring_return(dict st, str proc, int hay_addr, int hay_n, list n
       }
       return _proc_symbolic_return_nullness(st, proc,
          [zero_terms.len == 1 ? zero_terms[0] : smt.mk_and(ctx, zero_terms)],
-      [matches.len == 1 ? matches[0] : smt.mk_or(ctx, matches)])
+         [matches.len == 1 ? matches[0] : smt.mk_or(ctx, matches)])
    }
    _abi_set_return(st, 0)
 }
@@ -4565,7 +4565,7 @@ fn _apply_proc(dict st, dict hook) dict {
       "mmap" -> {
          out = _state_mmap(out, int(_abi_arg(out, 0, 0)), int(_abi_arg(out, 1, 0)),
             int(_abi_arg(out, 2, 0)), int(_abi_arg(out, 3, 0)),
-         int(_abi_arg(out, 4, -1)), int(_abi_arg(out, 5, 0)))
+            int(_abi_arg(out, 4, -1)), int(_abi_arg(out, 5, 0)))
       }
       "mprotect" -> {
          out = _state_mprotect(out, int(_abi_arg(out, 0, 0)), int(_abi_arg(out, 1, 0)), int(_abi_arg(out, 2, 0)))
@@ -4653,12 +4653,12 @@ fn _apply_proc(dict st, dict hook) dict {
       }
       "ptrace" -> {
          def pt = _state_ptrace(out, int(_abi_arg(out, 0, 0)), int(_abi_arg(out, 1, 0)),
-         int(_abi_arg(out, 2, 0)), int(_abi_arg(out, 3, 0)))
+            int(_abi_arg(out, 2, 0)), int(_abi_arg(out, 3, 0)))
          out = _abi_set_return(pt, int(state_get_reg(pt, "rax", 0)))
       }
       "prctl" -> {
          def pc = _state_prctl(out, int(_abi_arg(out, 0, 0)), int(_abi_arg(out, 1, 0)),
-         int(_abi_arg(out, 2, 0)), int(_abi_arg(out, 3, 0)), int(_abi_arg(out, 4, 0)))
+            int(_abi_arg(out, 2, 0)), int(_abi_arg(out, 3, 0)), int(_abi_arg(out, 4, 0)))
          out = _abi_set_return(pc, int(state_get_reg(pc, "rax", 0)))
       }
       "arch_prctl" -> {
@@ -4680,7 +4680,7 @@ fn _apply_proc(dict st, dict hook) dict {
       }
       "tgkill" -> {
          def sg = _state_signal_result(out, "tgkill", int(_abi_arg(out, 0, 0)),
-         int(_abi_arg(out, 1, 0)), int(_abi_arg(out, 2, 0)))
+            int(_abi_arg(out, 1, 0)), int(_abi_arg(out, 2, 0)))
          out = _abi_set_return(sg, int(state_get_reg(sg, "rax", 0)))
       }
       "fork", "vfork" -> {
@@ -4689,7 +4689,7 @@ fn _apply_proc(dict st, dict hook) dict {
       }
       "clone" -> {
          def cl = _state_fork_like(out.set("last_clone_flags", int(_abi_arg(out, 0, 0)))
-         .set("last_clone_stack", int(_abi_arg(out, 1, 0))), "clone")
+            .set("last_clone_stack", int(_abi_arg(out, 1, 0))), "clone")
          out = _abi_set_return(cl, int(state_get_reg(cl, "rax", 0)))
       }
       "execve" -> {
@@ -4699,12 +4699,12 @@ fn _apply_proc(dict st, dict hook) dict {
       "wait", "waitpid" -> {
          def wt = _state_wait(out, proc == "wait" ? -1 : int(_abi_arg(out, 0, -1)),
             proc == "wait" ? int(_abi_arg(out, 0, 0)) : int(_abi_arg(out, 1, 0)),
-         proc == "wait" ? 0 : int(_abi_arg(out, 2, 0)), 0)
+            proc == "wait" ? 0 : int(_abi_arg(out, 2, 0)), 0)
          out = _abi_set_return(wt, int(state_get_reg(wt, "rax", 0)))
       }
       "wait4" -> {
          def wt = _state_wait(out, int(_abi_arg(out, 0, -1)), int(_abi_arg(out, 1, 0)),
-         int(_abi_arg(out, 2, 0)), int(_abi_arg(out, 3, 0)))
+            int(_abi_arg(out, 2, 0)), int(_abi_arg(out, 3, 0)))
          out = _abi_set_return(wt, int(state_get_reg(wt, "rax", 0)))
       }
       "system" -> {
@@ -4808,7 +4808,7 @@ fn _apply_proc(dict st, dict hook) dict {
          def bp = int(_abi_arg(out, 1, 0))
          def maxs = int(hook.get("max_string", 4096))
          out = _abi_set_return(out, _proc_cmp(_ascii_lower_str(_read_cstring(out, ap, maxs)),
-         _ascii_lower_str(_read_cstring(out, bp, maxs))))
+               _ascii_lower_str(_read_cstring(out, bp, maxs))))
       }
       "strncmp" -> {
          def ap = int(_abi_arg(out, 0, 0))
@@ -4831,7 +4831,7 @@ fn _apply_proc(dict st, dict hook) dict {
          def bp = int(_abi_arg(out, 1, 0))
          def n = max(0, int(_abi_arg(out, 2, 0)))
          out = _abi_set_return(out, _proc_cmp(_ascii_lower_str(mem_read_bytes(out, ap, n)),
-         _ascii_lower_str(mem_read_bytes(out, bp, n)), n))
+               _ascii_lower_str(mem_read_bytes(out, bp, n)), n))
       }
       "memcmp", "bcmp" -> {
          def ap = int(_abi_arg(out, 0, 0))
@@ -4851,7 +4851,7 @@ fn _apply_proc(dict st, dict hook) dict {
       }
       "memchr" -> {
          out = _symbolic_mem_search_return(out, "memchr", int(_abi_arg(out, 0, 0)),
-         max(0, int(_abi_arg(out, 2, 0))), int(_abi_arg(out, 1, 0)))
+            max(0, int(_abi_arg(out, 2, 0))), int(_abi_arg(out, 1, 0)))
       }
       "strchr" -> {
          def src = int(_abi_arg(out, 0, 0))
@@ -4886,7 +4886,7 @@ fn _apply_proc(dict st, dict hook) dict {
             def nb = needle_bytes.get("bytes", [])
             def needle_len = nb.len > 0 && int(nb[nb.len - 1]) == 0 ? nb.len - 1 : nb.len
             out = _symbolic_substring_return(out, "strstr", _symbolic_compare_addr(out, hay_addr),
-            _cstring_search_limit(out, hay_addr, maxs), slice(nb, 0, needle_len, 1))
+               _cstring_search_limit(out, hay_addr, maxs), slice(nb, 0, needle_len, 1))
          } else {
             out = _proc_symbolic_return(out, "strstr")
          }
@@ -4938,7 +4938,7 @@ fn _apply_proc(dict st, dict hook) dict {
       }
       "uncompress" -> {
          out = _proc_uncompress(out, int(_abi_arg(out, 0, 0)), int(_abi_arg(out, 1, 0)),
-         int(_abi_arg(out, 2, 0)), int(_abi_arg(out, 3, 0)))
+            int(_abi_arg(out, 2, 0)), int(_abi_arg(out, 3, 0)))
       }
       "malloc" -> {
          def alloc = _heap_alloc(out, int(_abi_arg(out, 0, 0)))
@@ -4991,7 +4991,7 @@ fn _apply_hook(dict st, dict hook) dict {
    out = _state_set_pc(out, next)
    if hook.get("deadend", false) { out = out.set("deadended", true) }
    _history_append(out.set("step_ok", true).set("step_reason", "ok"),
-   {"addr": pc, "next": next, "backend": "hook", "hook": hook.get("name", "hook")})
+      {"addr": pc, "next": next, "backend": "hook", "hook": hook.get("name", "hook")})
 }
 
 fn _apply_linux_x86_64_syscall(dict st) dict {
@@ -5019,17 +5019,17 @@ fn _apply_linux_x86_64_syscall(dict st) dict {
       }
       8 -> {
          out = _state_seek_fd(out, int(state_get_reg(out, "rdi", -1)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       9 -> {
          out = _state_mmap(out, int(state_get_reg(out, "rdi", 0)),
             int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)),
             int(state_get_reg(out, "r10", 0)), int(state_get_reg(out, "r8", -1)),
-         int(state_get_reg(out, "r9", 0)))
+            int(state_get_reg(out, "r9", 0)))
       }
       10 -> {
          out = _state_mprotect(out, int(state_get_reg(out, "rdi", 0)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       11 -> {
          out = _state_munmap(out, int(state_get_reg(out, "rdi", 0)), int(state_get_reg(out, "rsi", 0)))
@@ -5039,15 +5039,15 @@ fn _apply_linux_x86_64_syscall(dict st) dict {
       }
       16 -> {
          out = _state_ioctl(out, int(state_get_reg(out, "rdi", -1)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       19 -> {
          out = _state_readv_fd(out, int(state_get_reg(out, "rdi", -1)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       20 -> {
          out = _state_writev_fd(out, int(state_get_reg(out, "rdi", -1)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       21 -> {
          out = _state_access_path(out, _read_cstring(out, int(state_get_reg(out, "rdi", 0)), 4096))
@@ -5072,22 +5072,22 @@ fn _apply_linux_x86_64_syscall(dict st) dict {
       }
       41 -> {
          def sock = _state_socket(out, int(state_get_reg(out, "rdi", 0)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
          out = state_set_reg(sock, "rax", int(sock.get("last_fd", -1)))
       }
       42 -> {
          def connected = _state_connect_fd(out, int(state_get_reg(out, "rdi", -1)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
          out = state_set_reg(connected, "rax", int(state_get_reg(connected, "rax", 0)))
       }
       44 -> {
          out = _state_send_fd(out, int(state_get_reg(out, "rdi", -1)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
          out = state_set_reg(out, "rax", int(out.get("last_io_count", 0)))
       }
       45 -> {
          out = _state_recv_fd(out, int(state_get_reg(out, "rdi", -1)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
          out = state_set_reg(out, "rax", int(out.get("last_io_count", 0)))
       }
       96 -> {
@@ -5107,11 +5107,11 @@ fn _apply_linux_x86_64_syscall(dict st) dict {
       }
       89 -> {
          out = _state_readlink_path(out, _read_cstring(out, int(state_get_reg(out, "rdi", 0)), 4096),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       56 -> {
          out = _state_fork_like(out.set("last_clone_flags", int(state_get_reg(out, "rdi", 0)))
-         .set("last_clone_stack", int(state_get_reg(out, "rsi", 0))), "clone")
+            .set("last_clone_stack", int(state_get_reg(out, "rsi", 0))), "clone")
       }
       57 -> {
          out = _state_fork_like(out, "fork")
@@ -5121,19 +5121,19 @@ fn _apply_linux_x86_64_syscall(dict st) dict {
       }
       59 -> {
          out = _state_execve(out, int(state_get_reg(out, "rdi", 0)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       61 -> {
          out = _state_wait(out, int(state_get_reg(out, "rdi", -1)),
             int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)),
-         int(state_get_reg(out, "r10", 0)))
+            int(state_get_reg(out, "r10", 0)))
       }
       62 -> {
          out = _state_signal_result(out, "kill", int(state_get_reg(out, "rdi", 0)), int(state_get_reg(out, "rsi", 0)))
       }
       101 -> {
          out = _state_ptrace(out, int(state_get_reg(out, "rdi", 0)), int(state_get_reg(out, "rsi", 0)),
-         int(state_get_reg(out, "rdx", 0)), int(state_get_reg(out, "r10", 0)))
+            int(state_get_reg(out, "rdx", 0)), int(state_get_reg(out, "r10", 0)))
       }
       102, 107 -> {
          out = state_set_reg(out, "rax", int(out.get("uid", 1000)))
@@ -5146,11 +5146,11 @@ fn _apply_linux_x86_64_syscall(dict st) dict {
       }
       72 -> {
          out = _state_fcntl(out, int(state_get_reg(out, "rdi", -1)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       157 -> {
          out = _state_prctl(out, int(state_get_reg(out, "rdi", 0)), int(state_get_reg(out, "rsi", 0)),
-         int(state_get_reg(out, "rdx", 0)), int(state_get_reg(out, "r10", 0)), int(state_get_reg(out, "r8", 0)))
+            int(state_get_reg(out, "rdx", 0)), int(state_get_reg(out, "r10", 0)), int(state_get_reg(out, "r8", 0)))
       }
       158 -> {
          out = _state_arch_prctl(out, int(state_get_reg(out, "rdi", 0)), int(state_get_reg(out, "rsi", 0)))
@@ -5166,11 +5166,11 @@ fn _apply_linux_x86_64_syscall(dict st) dict {
       }
       234 -> {
          out = _state_signal_result(out, "tgkill", int(state_get_reg(out, "rdi", 0)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       318 -> {
          out = _state_getrandom(out, int(state_get_reg(out, "rdi", 0)),
-         int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
+            int(state_get_reg(out, "rsi", 0)), int(state_get_reg(out, "rdx", 0)))
       }
       1 -> {
          def fd = int(state_get_reg(out, "rdi", -1))
@@ -5191,7 +5191,7 @@ fn _apply_linux_x86_64_syscall(dict st) dict {
       }
       267 -> {
          out = _state_readlink_path(out, _read_cstring(out, int(state_get_reg(out, "rsi", 0)), 4096),
-         int(state_get_reg(out, "rdx", 0)), int(state_get_reg(out, "r10", 0)))
+            int(state_get_reg(out, "rdx", 0)), int(state_get_reg(out, "r10", 0)))
       }
       292 -> {
          out = _state_dup_fd(out, int(state_get_reg(out, "rdi", -1)), int(state_get_reg(out, "rsi", -1)))
@@ -5204,7 +5204,7 @@ fn _apply_linux_x86_64_syscall(dict st) dict {
       }
       332 -> {
          out = _state_statx_path(out, _read_cstring(out, int(state_get_reg(out, "rsi", 0)), 4096),
-         int(state_get_reg(out, "r8", 0)))
+            int(state_get_reg(out, "r8", 0)))
       }
       _ -> {
          out = state_set_reg(out, "rax", -38).set("syscall_unsupported", nr)
@@ -5326,17 +5326,17 @@ fn _apply_linux_profile_syscall(dict st, dict prof) dict {
       }
       "lseek" -> {
          out = _state_seek_fd(out, int(_linux_sys_arg(out, prof, 0, -1)),
-         int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
+            int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
       }
       "mmap", "mmap2" -> {
          out = _state_mmap(out, int(_linux_sys_arg(out, prof, 0, 0)),
             int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)),
             int(_linux_sys_arg(out, prof, 3, 0)), int(_linux_sys_arg(out, prof, 4, -1)),
-         int(_linux_sys_arg(out, prof, 5, 0)))
+            int(_linux_sys_arg(out, prof, 5, 0)))
       }
       "mprotect" -> {
          out = _state_mprotect(out, int(_linux_sys_arg(out, prof, 0, 0)),
-         int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
+            int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
       }
       "munmap" -> {
          out = _state_munmap(out, int(_linux_sys_arg(out, prof, 0, 0)), int(_linux_sys_arg(out, prof, 1, 0)))
@@ -5353,7 +5353,7 @@ fn _apply_linux_profile_syscall(dict st, dict prof) dict {
       }
       "readlinkat" -> {
          out = _state_readlink_path(out, _read_cstring(out, int(_linux_sys_arg(out, prof, 1, 0)), 4096),
-         int(_linux_sys_arg(out, prof, 2, 0)), int(_linux_sys_arg(out, prof, 3, 0)))
+            int(_linux_sys_arg(out, prof, 2, 0)), int(_linux_sys_arg(out, prof, 3, 0)))
       }
       "uname" -> {
          out = _state_uname(out, int(_linux_sys_arg(out, prof, 0, 0)))
@@ -5375,15 +5375,15 @@ fn _apply_linux_profile_syscall(dict st, dict prof) dict {
       }
       "getrandom" -> {
          out = _state_getrandom(out, int(_linux_sys_arg(out, prof, 0, 0)),
-         int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
+            int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
       }
       "readv" -> {
          out = _state_readv_fd(out, int(_linux_sys_arg(out, prof, 0, -1)),
-         int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
+            int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
       }
       "writev" -> {
          out = _state_writev_fd(out, int(_linux_sys_arg(out, prof, 0, -1)),
-         int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
+            int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
       }
       "dup" -> {
          out = _state_dup_fd(out, int(_linux_sys_arg(out, prof, 0, -1)))
@@ -5393,11 +5393,11 @@ fn _apply_linux_profile_syscall(dict st, dict prof) dict {
       }
       "fcntl" -> {
          out = _state_fcntl(out, int(_linux_sys_arg(out, prof, 0, -1)),
-         int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
+            int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
       }
       "ioctl" -> {
          out = _state_ioctl(out, int(_linux_sys_arg(out, prof, 0, -1)),
-         int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
+            int(_linux_sys_arg(out, prof, 1, 0)), int(_linux_sys_arg(out, prof, 2, 0)))
       }
       "kill" -> {
          out = _state_signal_result(out, "kill", int(_linux_sys_arg(out, prof, 0, 0)), int(_linux_sys_arg(out, prof, 1, 0)))
@@ -5407,7 +5407,7 @@ fn _apply_linux_profile_syscall(dict st, dict prof) dict {
       }
       "statx" -> {
          out = _state_statx_path(out, _read_cstring(out, int(_linux_sys_arg(out, prof, 1, 0)), 4096),
-         int(_linux_sys_arg(out, prof, 4, 0)))
+            int(_linux_sys_arg(out, prof, 4, 0)))
       }
       "exit", "exit_group" -> {
          out = out.set("deadended", true).set("exit_code", int(_linux_sys_arg(out, prof, 0, 0)))
@@ -5452,7 +5452,7 @@ fn _x86_lite_successors(dict st) list {
          return [take ? _branch_state(st, pc, target, b0 == 0x74 ? "je" : "jne", true) : _branch_state(st, pc, fall, b0 == 0x74 ? "je" : "jne", false)]
       }
       return [_branch_state(st, pc, target, b0 == 0x74 ? "je" : "jne", true),
-      _branch_state(st, pc, fall, b0 == 0x74 ? "je" : "jne", false)]
+         _branch_state(st, pc, fall, b0 == 0x74 ? "je" : "jne", false)]
    }
    [_x86_lite_step(st)]
 }
@@ -5702,7 +5702,7 @@ fn state_summary(dict st) dict {
    {"addr": st.get("addr", 0), "regs": st.get("regs", dict()).keys(), "mem": st.get("mem", dict()).keys(),
       "constraints": st.get("constraints", []).len, "symbolics": st.get("symbolics", dict()).keys(),
       "path_conditions": st.get("path_conditions", []).len,
-   "history": st.get("history", []).len, "deadended": st.get("deadended", false)}
+      "history": st.get("history", []).len, "deadended": st.get("deadended", false)}
 }
 
 fn state_snapshot(dict st, any opts=dict()) dict {
@@ -5714,7 +5714,7 @@ fn state_snapshot(dict st, any opts=dict()) dict {
       "symbolics": state_symbolics(st).keys(), "stdin": state_stdin(st), "argv": state_argv(st),
       "stdout": state_stdout(st), "stderr": state_stderr(st), "output": state_output(st),
       "history": st.get("history", []).len, "deadended": st.get("deadended", false),
-   "step_ok": st.get("step_ok", true), "step_reason": st.get("step_reason", "")}
+      "step_ok": st.get("step_ok", true), "step_reason": st.get("step_reason", "")}
 }
 
 fn _snap(dict x) dict {
@@ -5771,7 +5771,7 @@ fn state_diff(dict before, dict after, any opts=dict()) dict {
       "constraints": {"before": a.get("constraints", 0), "after": b.get("constraints", 0), "delta": int(b.get("constraints", 0)) - int(a.get("constraints", 0))},
       "path_conditions": {"before": a.get("path_conditions", []).len, "after": b.get("path_conditions", []).len},
       "history": {"before": a.get("history", 0), "after": b.get("history", 0), "delta": int(b.get("history", 0)) - int(a.get("history", 0))},
-   "changed": regs.len + mem.len + control.keys().len}
+      "changed": regs.len + mem.len + control.keys().len}
 }
 
 fn watch_addr() dict {
@@ -6016,7 +6016,7 @@ fn simgr_traces(dict manager, str stash="found", int limit=64) list {
    while i < states.len {
       out = out.append({"stash": stash, "index": i, "addr": state_addr(states[i]),
             "path": state_path(states[i], limit), "path_text": state_path_text(states[i], limit),
-      "trace": state_trace(states[i], limit)})
+            "trace": state_trace(states[i], limit)})
       i += 1
    }
    out
@@ -6034,7 +6034,7 @@ fn state_solution(dict st, any opts=dict()) dict {
       "output": state_output(st), "constraints": st.get("constraints", []).len,
       "constraint_notes": st.get("constraint_notes", []),
       "path_conditions": st.get("path_conditions", []), "trace": _solution_trace(st, trace_limit),
-   "deadended": st.get("deadended", false)}
+      "deadended": st.get("deadended", false)}
 }
 
 fn _solution_atom_allowed(str name, dict opts) bool {

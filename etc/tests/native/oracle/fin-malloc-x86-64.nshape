@@ -1,0 +1,17 @@
+shape native_oracle_fin_malloc_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result fin malloc]
+  template ny-test-case
+  flags "--native-result-oracle=1 -O1"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def p = malloc(8)
+def Fin<1> i = 0
+def j = i
+store64_i(p, 42, j)
+load64_i(p, j) == 42
+NY
+}

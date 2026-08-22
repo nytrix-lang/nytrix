@@ -1,3 +1,11 @@
+/*
+ * Fuzz comparison tools: synth-print selftest and other diagnostic
+ * helpers for validating the fuzzer's comparison pipeline.
+ */
+
+/*
+ * command tools, source synthesis, and diagnostic reports
+ */
 static int cmd_public_selftest_synth_print(int argc, char **argv) {
   char root[4096], ny_bin[4096];
   if (!find_nytrix_root(root, sizeof(root))) {
@@ -610,9 +618,11 @@ static bool triage_item_from_bench_row(const char *row, int default_runs,
   if (extract_json_number(row, "ny_elapsed_ns", &number)) item->ny_elapsed_ns = number;
   if (extract_json_number(row, "c_instructions", &number)) item->c_instructions = number;
   if (extract_json_number(row, "ny_instructions", &number)) item->ny_instructions = number;
-  /* Bench rows carry flavor-specific ratio keys. Derive the canonical timing
+  /*
+   * Bench rows carry flavor-specific ratio keys. Derive the canonical timing
    * ratio from the paired measurements instead, so O0/O1/O2/O3/peak rows all
-   * rank identically and a new flavor cannot silently become 0.0000x. */
+   * rank identically and a new flavor cannot silently become 0.0000x.
+   */
   item->ratio = item->ok && item->c_elapsed_ns > 0.0
                     ? item->ny_elapsed_ns / item->c_elapsed_ns
                     : 0.0;
@@ -1428,8 +1438,10 @@ static int cmd_public_compiler_known_bugs(int argc, char **argv) {
   char *out_root = NULL;
   (void)asprintf(&out_root, "%s/build/repro/known_bugs", root);
   if (out_root) ny_ensure_dir_recursive(out_root);
-  /* Canonical regression sources stay in etc/tests; this tool writes only
-   * replay artifacts below build/repro and must never depend on stale copies. */
+  /*
+   * Canonical regression sources stay in etc/tests; this tool writes only
+   * replay artifacts below build/repro and must never depend on stale copies.
+   */
   static const compiler_known_bug_t specs[] = {
     {
       "NY-008",
@@ -4304,8 +4316,10 @@ static int cmd_public_bench_real(int argc, char **argv) {
   const char *ny_opt = value_after_equals(argc, argv, 3, "--ny-opt", "");
   if (runs < 1) runs = 1;
   if (warmup < 0) warmup = 0;
-  /* Real C comparisons are release-runtime measurements, independent of the
-   * compiler's deliberately fast -O0 development default. */
+  /*
+   * Real C comparisons are release-runtime measurements, independent of the
+   * compiler's deliberately fast -O0 development default.
+   */
   const char *ny_opt_arg = "-O2";
   const char *ny_profile_arg = NULL;
   const char *ny_flavor = "o2";
@@ -4387,9 +4401,11 @@ static int cmd_public_bench_real(int argc, char **argv) {
                            "-o", ny_elf, ny_path, NULL};
         ny_compile = run_proc(ny_argv, root, timeout_s);
       } else if (ny_native_only) {
-        /* This mode is specifically an LLVM-free backend measurement.  Do not
+        /*
+         * This mode is specifically an LLVM-free backend measurement.  Do not
          * silently turn an unsupported NYIR workload into a default LLVM AOT
-         * run just because it happens to produce a native executable. */
+         * run just because it happens to produce a native executable.
+         */
         char *ny_argv[] = {ny_bin, "--compiler-asserts", "--native-only",
                            "-o", ny_elf, ny_path, NULL};
         ny_compile = run_proc(ny_argv, root, timeout_s);
@@ -4423,9 +4439,11 @@ static int cmd_public_bench_real(int argc, char **argv) {
       (void)string_list_push_take(&failures, make_worker_failure_row(cases[i], "bench-real-output", 1, "", mismatch.data ? mismatch.data : ""));
       free(mismatch.data);
     }
-    /* Both fixture sides use monotonic nanoseconds, so the public run ratio
+    /*
+     * Both fixture sides use monotonic nanoseconds, so the public run ratio
      * measures the workload itself. Keep process duration separate because it
-     * includes startup and output costs. */
+     * includes startup and output costs.
+     */
     double ratio = (ok && c_run.median_elapsed_ns > 0.0)
                        ? ny_run.median_elapsed_ns / c_run.median_elapsed_ns
                        : 0.0;

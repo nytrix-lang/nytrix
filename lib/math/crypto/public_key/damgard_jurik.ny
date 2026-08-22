@@ -86,7 +86,7 @@ fn damgard_jurik_keygen(any p, any q, int s=1, any g=nil) dict {
 
 fn damgard_jurik_encrypt(any m, dict key, any r=nil) bigint {
    "Encrypt plaintext m with a Damgard-Jurik key. The nonce r is generated randomly
-   when not provided (deterministic nonces are useful for tests)."
+   when not provided(deterministic nonces are useful for tests)."
    def n, s = Z(key.get("n")), int(key.get("s"))
    def ns, ns1 = Z(key.get("ns")), Z(key.get("ns1"))
    def g = Z(key.get("g"))
@@ -112,20 +112,16 @@ fn damgard_jurik_decrypt(any c, dict key) bigint {
    assert(paillier_encrypt(12, key1.get("n"), key1.get("g"), 5) == c12, "dj s=1 matches paillier encrypt")
    def m12 = damgard_jurik_decrypt(c12, key1)
    assert(m12 == Z(12), "dj s=1 round-trip")
-
    def c20, m20 = damgard_jurik_encrypt(20, key1, 13), damgard_jurik_decrypt(c20, key1)
    assert(m20 == Z(20), "dj s=1 second round-trip")
-
    def key2 = damgard_jurik_keygen(7, 11, 2)
    assert(key2.get("ns") == Z(77 * 77), "dj s=2 n^2")
    assert(key2.get("ns1") == Z(77 * 77 * 77), "dj s=2 n^3")
    def c2_12, m2_12 = damgard_jurik_encrypt(12, key2, 5), damgard_jurik_decrypt(c2_12, key2)
    assert(m2_12 == Z(12), "dj s=2 round-trip")
-
    def key3 = damgard_jurik_keygen(11, 13, 3)
    def c3 = damgard_jurik_encrypt(42, key3, 7)
    def m3 = damgard_jurik_decrypt(c3, key3)
    assert(m3 == Z(42), "dj s=3 round-trip")
-
    print("✓ std.math.crypto.public_key.damgard_jurik self-test passed")
 }

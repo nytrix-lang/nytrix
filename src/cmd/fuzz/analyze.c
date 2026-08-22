@@ -1,3 +1,7 @@
+/*
+ * Fuzz analyzer: post-hoc crash/triage analysis, deduplication by
+ * call-stack signature, and anomaly classification from fuzzer output.
+ */
 #include "core.h"
 
 static bool line_has_call_symbol(const char *line, size_t len, const char *symbol) {

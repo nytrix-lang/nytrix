@@ -1,0 +1,24 @@
+shape native_oracle_alloc_provenance_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle malloc calloc realloc provenance]
+  template ny-test-case
+  flags "--native-result-oracle=125 -O1"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+extern {
+  fn calloc(i64 count, i64 size) ptr
+}
+
+def Fin<1> i = 0
+def p = malloc(8)
+store64_i(p, 40, i)
+def q = calloc(1, 8)
+store64_i(q, 41, i)
+def r = realloc(q, 8)
+store64_i(r, 45, i)
+load64_i(p, i) + load64_i(r, i) + load64_i(p, i)
+NY
+}

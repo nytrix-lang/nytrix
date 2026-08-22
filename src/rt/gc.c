@@ -1,3 +1,7 @@
+/*
+ * Garbage collector: nursery/tenured generational GC with configurable
+ * heap sizes, large-object handling, and optional validation passes.
+ */
 #include "rt/gc.h"
 #include "base/common.h"
 #include "rt/shared.h"
@@ -14,8 +18,85 @@
 
 nyGcState_t gNyGc = {0};
 
-/* Sorted interval index for large objects — enables O(log n) lookup instead of
- * O(n) linked list walk in nyGcHeaderForObject and nyGcWriteBarrier. */
+/*
+ * Finalizer hash table
+ */
+typedef struct nyGcFinalizerEntry {
+  int64_t obj;
+  void (*fn)(int64_t);
+} nyGcFinalizerEntry_t;
+
+static nyGcFinalizerEntry_t *g_finalizer_table = NULL;
+static size_t g_finalizer_count = 0;
+static size_t g_finalizer_cap = 0;
+
+static void nyGcFinalizerSet(int64_t obj, void (*fn)(int64_t)) {
+  if (g_finalizer_count * 10 >= g_finalizer_cap * 7) {
+    size_t new_cap = g_finalizer_cap ? g_finalizer_cap * 2 : 256;
+    nyGcFinalizerEntry_t *new_table = calloc(new_cap, sizeof(nyGcFinalizerEntry_t));
+    for (size_t i = 0; i < g_finalizer_cap; i++) {
+      if (g_finalizer_table[i].obj) {
+        size_t idx = (size_t)g_finalizer_table[i].obj % new_cap;
+        while (new_table[idx].obj)
+          idx = (idx + 1) % new_cap;
+        new_table[idx] = g_finalizer_table[i];
+      }
+    }
+    free(g_finalizer_table);
+    g_finalizer_table = new_table;
+    g_finalizer_cap = new_cap;
+  }
+  size_t idx = (size_t)obj % g_finalizer_cap;
+  while (g_finalizer_table[idx].obj && g_finalizer_table[idx].obj != obj)
+    idx = (idx + 1) % g_finalizer_cap;
+  if (!g_finalizer_table[idx].obj)
+    g_finalizer_count++;
+  g_finalizer_table[idx].obj = obj;
+  g_finalizer_table[idx].fn = fn;
+}
+
+static void (*nyGcFinalizerGet(int64_t obj))(int64_t) {
+  if (!g_finalizer_table || !g_finalizer_cap) return NULL;
+  size_t idx = (size_t)obj % g_finalizer_cap;
+  while (g_finalizer_table[idx].obj) {
+    if (g_finalizer_table[idx].obj == obj)
+      return g_finalizer_table[idx].fn;
+    idx = (idx + 1) % g_finalizer_cap;
+  }
+  return NULL;
+}
+
+static void nyGcFinalizerRemove(int64_t obj) {
+  if (!g_finalizer_table || !g_finalizer_cap) return;
+  size_t idx = (size_t)obj % g_finalizer_cap;
+  while (g_finalizer_table[idx].obj) {
+    if (g_finalizer_table[idx].obj == obj) {
+      g_finalizer_table[idx].obj = 0;
+      g_finalizer_table[idx].fn = NULL;
+      g_finalizer_count--;
+      size_t j = idx;
+      while (1) {
+        j = (j + 1) % g_finalizer_cap;
+        if (!g_finalizer_table[j].obj)
+          break;
+        size_t k = (size_t)g_finalizer_table[j].obj % g_finalizer_cap;
+        if (idx <= j ? (k <= idx || k > j) : (k <= idx && k > j)) {
+          g_finalizer_table[idx] = g_finalizer_table[j];
+          g_finalizer_table[j].obj = 0;
+          g_finalizer_table[j].fn = NULL;
+          idx = j;
+        }
+      }
+      return;
+    }
+    idx = (idx + 1) % g_finalizer_cap;
+  }
+}
+
+/*
+ * Sorted interval index for large objects — enables O(log n) lookup instead of
+ * O(n) linked list walk in nyGcHeaderForObject and nyGcWriteBarrier.
+ */
 typedef struct nyGcLargeInterval {
   uint8_t *start;
   uint8_t *end;
@@ -39,8 +120,10 @@ static int gc_large_interval_cmp(const void *a, const void *b) {
   return 0;
 }
 
-/* Rebuild the sorted large-object index from the linked list.
- * Called lazily before lookups when dirty. */
+/*
+ * Rebuild the sorted large-object index from the linked list.
+ * Called lazily before lookups when dirty.
+ */
 static void nyGcLargeIndexRebuild(void) {
   size_t count = gNyGc.large_count;
   if (count > g_large_index_cap) {
@@ -63,13 +146,17 @@ static void nyGcLargeIndexRebuild(void) {
   g_large_index_dirty = false;
 }
 
-/* Binary search: find which large object (if any) contains addr. */
+/*
+ * Binary search: find which large object (if any) contains addr.
+ */
 static nyGcLargeObject_t *nyGcLargeIndexFind(uint8_t *addr) {
   if (g_large_index_dirty)
     nyGcLargeIndexRebuild();
   if (!g_large_index || g_large_index_count == 0)
     return NULL;
-  /* Find the last interval where start <= addr */
+  /*
+   * Find the last interval where start <= addr
+   */
   size_t lo = 0, hi = g_large_index_count;
   while (lo < hi) {
     size_t mid = lo + (hi - lo) / 2;
@@ -136,6 +223,23 @@ static void nyGcUnlock(void) {
   atomic_flag_clear_explicit(&gNyGcLock, memory_order_release);
 }
 
+/*
+ * Unrecoverable GC failure (allocation failure or a terminal invariant).
+ *
+ * Deliberately NOT routed through rt_panic: rt_panic builds its message with
+ * rt_alloc_string, which allocates via this same GC (risking recursion while
+ * already out of memory), and it longjmps to the nearest panic handler — which
+ * could unwind out of the collector while gNyGcLock is still held and the heap
+ * is mid-compaction. These conditions are terminal, so abort() yields a core
+ * dump for post-mortem analysis. The separate abort() sites in the
+ * NYTRIX_GC_VALIDATE path and the tenured-full guard stay as-is: those signal
+ * heap corruption, not OOM, and abort() is the correct response there too.
+ */
+static void nyGcFatal(const char *what) {
+  fprintf(stderr, "GC fatal: %s\n", what);
+  abort();
+}
+
 static uint8_t *nyGcObjPtr(nyGcHeader_t *header) {
   return (uint8_t *)header + NYGC_OBJECT_DATA_OFFSET;
 }
@@ -182,7 +286,9 @@ static bool nyGcHeaderForObject(int64_t obj, nyGcHeader_t **out) {
     return true;
   if (nyGcHeaderInSpace(obj, gNyGc.tenured_start, gNyGc.tenured_free, out))
     return true;
-  /* Use sorted index for large objects — O(log n) instead of O(n) walk. */
+  /*
+   * Use sorted index for large objects — O(log n) instead of O(n) walk.
+   */
   uint8_t *p = (uint8_t *)(uintptr_t)obj;
   nyGcLargeObject_t *large = nyGcLargeIndexFind(p);
   if (large && large->header) {
@@ -311,13 +417,23 @@ static void nyGcUpdateObjectRefs(nyGcHeader_t *header, const nyGcForwardMap_t *m
       nyGcForwardSlot(map, &items[i]);
   } else if (tag == TAG_DICT) {
     int64_t cap = nyGcTaggedToInt(*(int64_t *)((uint8_t *)(uintptr_t)obj + 8));
-    size_t max_slots = header->size > 16 ? (header->size - 16) / 24 : 0;
+    int64_t *table_slot = (int64_t *)((uint8_t *)(uintptr_t)obj + 16);
+    nyGcForwardSlot(map, table_slot);
+    int64_t tbl = *table_slot;
     if (cap < 0)
       cap = 0;
-    if ((uint64_t)cap > max_slots)
-      cap = (int64_t)max_slots;
     for (int64_t i = 0; i < cap; i++) {
-      uint8_t *slot = (uint8_t *)(uintptr_t)obj + 16 + (size_t)i * 24;
+      uint8_t *slot = (uint8_t *)(uintptr_t)tbl + (size_t)i * 24;
+      int64_t state = *(int64_t *)(slot + 16);
+      if (state != 1 && state != rt_tag_v(1))
+        continue;
+      nyGcForwardSlot(map, (int64_t *)slot);
+      nyGcForwardSlot(map, (int64_t *)(slot + 8));
+    }
+  } else if (tag == TAG_DICT_TBL) {
+    size_t max_slots = header->size > 16 ? (header->size - 16) / 24 : 0;
+    for (size_t i = 0; i < max_slots; i++) {
+      uint8_t *slot = (uint8_t *)(uintptr_t)obj + (size_t)i * 24;
       int64_t state = *(int64_t *)(slot + 16);
       if (state != 1 && state != rt_tag_v(1))
         continue;
@@ -391,13 +507,22 @@ static void nyGcRememberObjectRefs(nyGcHeader_t *header) {
       nyGcRememberSlotIfNursery(&items[i]);
   } else if (tag == TAG_DICT) {
     int64_t cap = nyGcTaggedToInt(*(int64_t *)((uint8_t *)(uintptr_t)obj + 8));
-    size_t max_slots = header->size > 16 ? (header->size - 16) / 24 : 0;
+    nyGcRememberSlotIfNursery((int64_t *)((uint8_t *)(uintptr_t)obj + 16));
+    int64_t tbl = *(int64_t *)((uint8_t *)(uintptr_t)obj + 16);
     if (cap < 0)
       cap = 0;
-    if ((uint64_t)cap > max_slots)
-      cap = (int64_t)max_slots;
     for (int64_t i = 0; i < cap; i++) {
-      uint8_t *slot = (uint8_t *)(uintptr_t)obj + 16 + (size_t)i * 24;
+      uint8_t *slot = (uint8_t *)(uintptr_t)tbl + (size_t)i * 24;
+      int64_t state = *(int64_t *)(slot + 16);
+      if (state != 1 && state != rt_tag_v(1))
+        continue;
+      nyGcRememberSlotIfNursery((int64_t *)slot);
+      nyGcRememberSlotIfNursery((int64_t *)(slot + 8));
+    }
+  } else if (tag == TAG_DICT_TBL) {
+    size_t max_slots = header->size > 16 ? (header->size - 16) / 24 : 0;
+    for (size_t i = 0; i < max_slots; i++) {
+      uint8_t *slot = (uint8_t *)(uintptr_t)obj + (size_t)i * 24;
       int64_t state = *(int64_t *)(slot + 16);
       if (state != 1 && state != rt_tag_v(1))
         continue;
@@ -417,8 +542,82 @@ static void nyGcRememberObjectRefs(nyGcHeader_t *header) {
   }
 }
 
+static size_t nyGcRememberedHash(const int64_t *slot) {
+  uintptr_t x = (uintptr_t)slot;
+  x >>= 3;
+#if UINTPTR_MAX > 0xffffffffu
+  x ^= x >> 33;
+  x *= UINT64_C(0xff51afd7ed558ccd);
+  x ^= x >> 33;
+#else
+  x ^= x >> 16;
+  x *= UINT32_C(0x7feb352d);
+  x ^= x >> 15;
+#endif
+  return (size_t)x;
+}
+
+static bool nyGcRememberedIndexResizeUnlocked(size_t capacity) {
+  if (capacity < 2048)
+    capacity = 2048;
+  size_t pow2 = 1;
+  while (pow2 < capacity) {
+    if (pow2 > SIZE_MAX / 2)
+      return false;
+    pow2 <<= 1;
+  }
+  int64_t **index = (int64_t **)calloc(pow2, sizeof(*index));
+  if (!index)
+    return false;
+  for (size_t i = 0; i < gNyGc.remembered_count; ++i) {
+    int64_t *slot = gNyGc.remembered_set[i];
+    size_t mask = pow2 - 1;
+    size_t at = nyGcRememberedHash(slot) & mask;
+    while (index[at])
+      at = (at + 1) & mask;
+    index[at] = slot;
+  }
+  free(gNyGc.remembered_index);
+  gNyGc.remembered_index = index;
+  gNyGc.remembered_index_capacity = pow2;
+  gNyGc.remembered_index_count = gNyGc.remembered_count;
+  return true;
+}
+
+static void nyGcRememberedIndexClearUnlocked(void) {
+  if (gNyGc.remembered_index && gNyGc.remembered_index_capacity)
+    memset(gNyGc.remembered_index, 0,
+           gNyGc.remembered_index_capacity * sizeof(*gNyGc.remembered_index));
+  gNyGc.remembered_index_count = 0;
+}
+
+static bool nyGcRememberedIndexInsertUnlocked(int64_t *slot) {
+  if (!slot)
+    return false;
+  if (!gNyGc.remembered_index_capacity ||
+      (gNyGc.remembered_index_count + 1) * 10 >=
+          gNyGc.remembered_index_capacity * 7) {
+    size_t next = gNyGc.remembered_index_capacity
+                      ? gNyGc.remembered_index_capacity * 2
+                      : 2048;
+    if (!nyGcRememberedIndexResizeUnlocked(next))
+      nyGcFatal("remembered index allocation failed");
+  }
+  size_t mask = gNyGc.remembered_index_capacity - 1;
+  size_t at = nyGcRememberedHash(slot) & mask;
+  while (gNyGc.remembered_index[at]) {
+    if (gNyGc.remembered_index[at] == slot)
+      return false;
+    at = (at + 1) & mask;
+  }
+  gNyGc.remembered_index[at] = slot;
+  gNyGc.remembered_index_count++;
+  return true;
+}
+
 static void nyGcRebuildRememberedUnlocked(void) {
   gNyGc.remembered_count = 0;
+  nyGcRememberedIndexClearUnlocked();
   uint8_t *ptr = gNyGc.tenured_start;
   while (ptr < gNyGc.tenured_free) {
     nyGcHeader_t *header = (nyGcHeader_t *)ptr;
@@ -587,8 +786,7 @@ void nyGcInit(void) {
   if (!gNyGc.nursery_start) {
     memset(&gNyGc, 0, sizeof(gNyGc));
     nyGcUnlock();
-    fprintf(stderr, "Failed to allocate GC nursery\n");
-    exit(1);
+    nyGcFatal("failed to allocate nursery");
   }
   gNyGc.nursery_ptr = gNyGc.nursery_start;
   gNyGc.nursery_limit = gNyGc.nursery_start + gNyGc.nursery_capacity;
@@ -598,25 +796,27 @@ void nyGcInit(void) {
     free(gNyGc.nursery_start);
     memset(&gNyGc, 0, sizeof(gNyGc));
     nyGcUnlock();
-    fprintf(stderr, "Failed to allocate GC tenured space\n");
-    exit(1);
+    nyGcFatal("failed to allocate tenured space");
   }
   gNyGc.tenured_free = gNyGc.tenured_start;
   gNyGc.tenured_limit = gNyGc.tenured_start + gNyGc.tenured_capacity;
 
   gNyGc.remembered_capacity = 1024;
   gNyGc.remembered_set = (int64_t **)malloc(gNyGc.remembered_capacity * sizeof(int64_t *));
+  gNyGc.remembered_index_capacity = 2048;
+  gNyGc.remembered_index = (int64_t **)calloc(
+      gNyGc.remembered_index_capacity, sizeof(int64_t *));
   gNyGc.root_capacity = 256;
   gNyGc.roots = (int64_t **)malloc(gNyGc.root_capacity * sizeof(int64_t *));
-  if (!gNyGc.remembered_set || !gNyGc.roots) {
+  if (!gNyGc.remembered_set || !gNyGc.remembered_index || !gNyGc.roots) {
     free(gNyGc.nursery_start);
     free(gNyGc.tenured_start);
     free(gNyGc.remembered_set);
+    free(gNyGc.remembered_index);
     free(gNyGc.roots);
     memset(&gNyGc, 0, sizeof(gNyGc));
     nyGcUnlock();
-    fprintf(stderr, "Failed to allocate GC metadata\n");
-    exit(1);
+    nyGcFatal("failed to allocate metadata");
   }
 
   nyGcUnlock();
@@ -639,6 +839,7 @@ void nyGcDispose(void) {
     large = next;
   }
   free(gNyGc.remembered_set);
+  free(gNyGc.remembered_index);
   free(gNyGc.roots);
   free(g_large_index);
   g_large_index = NULL;
@@ -662,8 +863,7 @@ void nyGcAddRoot(int64_t *slot) {
     gNyGc.roots = (int64_t **)realloc(gNyGc.roots, gNyGc.root_capacity * sizeof(int64_t *));
     if (!gNyGc.roots) {
       nyGcUnlock();
-      fprintf(stderr, "GC: root set allocation failed\n");
-      exit(1);
+      nyGcFatal("root set allocation failed");
     }
   }
   gNyGc.roots[gNyGc.root_count++] = slot;
@@ -692,34 +892,50 @@ void nyGcWriteBarrier(int64_t *slot, int64_t value) {
     *slot = value;
     return;
   }
+
+  /*
+   * Integers/immediates cannot create an old -> young edge.  Keep the lock
+   * around the actual slot store so a concurrent collector cannot compact the
+   * containing object while the mutator writes through a stale slot address.
+   */
+  if (!value || !is_ptr(value)) {
+    nyGcLock();
+    *slot = value;
+    nyGcUnlock();
+    return;
+  }
+
   nyGcLock();
-  if (value) {
-    uint8_t *slot_addr = (uint8_t *)slot;
-    uint8_t *val_addr = (uint8_t *)(uintptr_t)value;
+  uint8_t *slot_addr = (uint8_t *)slot;
+  bool value_in_nursery = nyGcHeaderInSpace(
+      value, gNyGc.nursery_start, gNyGc.nursery_ptr, NULL);
+  if (value_in_nursery) {
     bool slot_in_large = nyGcLargeIndexFind(slot_addr) != NULL;
-    if (((slot_addr >= gNyGc.tenured_start && slot_addr < gNyGc.tenured_free) || slot_in_large) &&
-        val_addr >= gNyGc.nursery_start && val_addr < gNyGc.nursery_ptr) {
+    if ((slot_addr >= gNyGc.tenured_start && slot_addr < gNyGc.tenured_free) ||
+        slot_in_large)
       nyGcAddRememberedUnlocked(slot);
-    }
   }
   *slot = value;
   nyGcUnlock();
 }
 
 static void nyGcAddRememberedUnlocked(int64_t *slot) {
-  for (size_t i = 0; i < gNyGc.remembered_count; i++) {
-    if (gNyGc.remembered_set[i] == slot)
-      return;
-  }
+  /*
+   * Membership used to be an O(n) scan on every pointer write.
+   */
+  if (!nyGcRememberedIndexInsertUnlocked(slot))
+    return;
 
   if (gNyGc.remembered_count >= gNyGc.remembered_capacity) {
-    gNyGc.remembered_capacity *= 2;
-    gNyGc.remembered_set =
-        (int64_t **)realloc(gNyGc.remembered_set, gNyGc.remembered_capacity * sizeof(int64_t *));
-    if (!gNyGc.remembered_set) {
-      fprintf(stderr, "GC: remembered set allocation failed\n");
-      exit(1);
-    }
+    size_t next_capacity = gNyGc.remembered_capacity
+                               ? gNyGc.remembered_capacity * 2
+                               : 1024;
+    int64_t **next = (int64_t **)realloc(
+        gNyGc.remembered_set, next_capacity * sizeof(int64_t *));
+    if (!next)
+      nyGcFatal("remembered set allocation failed");
+    gNyGc.remembered_set = next;
+    gNyGc.remembered_capacity = next_capacity;
   }
   gNyGc.remembered_set[gNyGc.remembered_count++] = slot;
 }
@@ -730,8 +946,18 @@ int64_t nyGcAllocFast(size_t size) {
   if (!gNyGc.enable_nursery) {
     return rt_malloc((int64_t)size);
   }
+  size_t total = nyGcAllocSize(size);
+  if (total < gNyGc.large_threshold && (gNyGc.nursery_ptr + total <= gNyGc.nursery_limit)) {
+    nyGcLock();
+    if (gNyGc.nursery_ptr + total <= gNyGc.nursery_limit) {
+      int64_t obj = nyGcAllocFastUnlocked(size);
+      nyGcUnlock();
+      return obj;
+    }
+    nyGcUnlock();
+  }
   nyGcLock();
-  int64_t obj = (nyGcAllocSize(size) >= gNyGc.large_threshold)
+  int64_t obj = (total >= gNyGc.large_threshold)
                     ? nyGcAllocLargeUnlocked(size)
                     : nyGcAllocFastUnlocked(size);
   nyGcUnlock();
@@ -744,9 +970,34 @@ int64_t nyGcAlloc(size_t size) {
   if (!gNyGc.enable_nursery) {
     return rt_malloc((int64_t)size);
   }
+  size_t total = nyGcAllocSize(size);
+  if (total < gNyGc.large_threshold && (gNyGc.nursery_ptr + total <= gNyGc.nursery_limit)) {
+    nyGcLock();
+    if (gNyGc.nursery_ptr + total <= gNyGc.nursery_limit) {
+      int64_t obj = nyGcAllocFastUnlocked(size);
+      nyGcUnlock();
+      return obj;
+    }
+    nyGcUnlock();
+  }
   nyGcLock();
-  if (nyGcAllocSize(size) >= gNyGc.large_threshold) {
+  if (total >= gNyGc.large_threshold) {
     int64_t obj = nyGcAllocLargeUnlocked(size);
+    nyGcUnlock();
+    if (!obj)
+      fprintf(stderr, "GC: Out of memory (requested %zu bytes)\n", size);
+    return obj;
+  }
+  if (total > gNyGc.nursery_capacity) {
+    /*
+     * A minor collection cannot make an object larger than the nursery fit.
+     * Pretenure it directly instead of paying for a guaranteed-futile GC.
+     */
+    int64_t obj = nyGcAllocTenuredUnlocked(size);
+    if (!obj) {
+      nyGcMajorCollectUnlocked();
+      obj = nyGcAllocTenuredUnlocked(size);
+    }
     nyGcUnlock();
     if (!obj)
       fprintf(stderr, "GC: Out of memory (requested %zu bytes)\n", size);
@@ -777,8 +1028,20 @@ int64_t nyGcAllocSlow(size_t size) {
     return rt_malloc((int64_t)size);
   }
   nyGcLock();
-  if (nyGcAllocSize(size) >= gNyGc.large_threshold) {
+  size_t total = nyGcAllocSize(size);
+  if (total >= gNyGc.large_threshold) {
     int64_t obj = nyGcAllocLargeUnlocked(size);
+    nyGcUnlock();
+    if (!obj)
+      fprintf(stderr, "GC: Out of memory (requested %zu bytes)\n", size);
+    return obj;
+  }
+  if (total > gNyGc.nursery_capacity) {
+    int64_t obj = nyGcAllocTenuredUnlocked(size);
+    if (!obj) {
+      nyGcMajorCollectUnlocked();
+      obj = nyGcAllocTenuredUnlocked(size);
+    }
     nyGcUnlock();
     if (!obj)
       fprintf(stderr, "GC: Out of memory (requested %zu bytes)\n", size);
@@ -884,13 +1147,22 @@ static void nyGcMarkUnlocked(int64_t obj) {
       nyGcMarkSlot(items[i]);
   } else if (tag == TAG_DICT) {
     int64_t cap = nyGcTaggedToInt(*(int64_t *)((uint8_t *)(uintptr_t)obj + 8));
-    size_t max_slots = header->size > 16 ? (header->size - 16) / 24 : 0;
+    nyGcMarkSlot(*(int64_t *)((uint8_t *)(uintptr_t)obj + 16));
+    int64_t tbl = *(int64_t *)((uint8_t *)(uintptr_t)obj + 16);
     if (cap < 0)
       cap = 0;
-    if ((uint64_t)cap > max_slots)
-      cap = (int64_t)max_slots;
     for (int64_t i = 0; i < cap; i++) {
-      uint8_t *slot = (uint8_t *)(uintptr_t)obj + 16 + (size_t)i * 24;
+      uint8_t *slot = (uint8_t *)(uintptr_t)tbl + (size_t)i * 24;
+      int64_t state = *(int64_t *)(slot + 16);
+      if (state != 1 && state != rt_tag_v(1))
+        continue;
+      nyGcMarkSlot(*(int64_t *)slot);
+      nyGcMarkSlot(*(int64_t *)(slot + 8));
+    }
+  } else if (tag == TAG_DICT_TBL) {
+    size_t max_slots = header->size > 16 ? (header->size - 16) / 24 : 0;
+    for (size_t i = 0; i < max_slots; i++) {
+      uint8_t *slot = (uint8_t *)(uintptr_t)obj + (size_t)i * 24;
       int64_t state = *(int64_t *)(slot + 16);
       if (state != 1 && state != rt_tag_v(1))
         continue;
@@ -953,8 +1225,7 @@ static void nyGcPromoteSurvivors(void) {
         rt_heap_ptr_cache_store((uintptr_t)nyGcObjPtr(dst));
         if (!nyGcForwardPush(&forwards, from_obj, (int64_t)(uintptr_t)nyGcObjPtr(dst))) {
           free(forwards.data);
-          fprintf(stderr, "GC: nursery compaction map allocation failed\n");
-          exit(1);
+          nyGcFatal("nursery compaction map allocation failed");
         }
         nursery_to += total;
       } else if (gNyGc.tenured_free + total <= gNyGc.tenured_limit) {
@@ -968,8 +1239,7 @@ static void nyGcPromoteSurvivors(void) {
         rt_heap_ptr_cache_store((uintptr_t)nyGcObjPtr(dst));
         if (!nyGcForwardPush(&forwards, from_obj, (int64_t)(uintptr_t)nyGcObjPtr(dst))) {
           free(forwards.data);
-          fprintf(stderr, "GC: promotion map allocation failed\n");
-          exit(1);
+          nyGcFatal("promotion map allocation failed");
         }
       } else {
         free(forwards.data);
@@ -977,6 +1247,15 @@ static void nyGcPromoteSurvivors(void) {
         abort();
       }
     } else {
+      if (header->flags & NYGC_FINALIZER) {
+        void (*fn)(int64_t) = nyGcFinalizerGet(from_obj);
+        if (fn) {
+          nyGcFinalizerRemove(from_obj);
+          nyGcUnlock();
+          fn(from_obj);
+          nyGcLock();
+        }
+      }
       gNyGc.stats.objects_swept++;
       gNyGc.stats.bytes_freed += header->size;
     }
@@ -1006,11 +1285,20 @@ static void nyGcSweepTenured(void) {
       int64_t to = (int64_t)(uintptr_t)(new_free + NYGC_OBJECT_DATA_OFFSET);
       if (!nyGcForwardPush(&forwards, from, to)) {
         free(forwards.data);
-        fprintf(stderr, "GC: tenured compaction map allocation failed\n");
-        exit(1);
+        nyGcFatal("tenured compaction map allocation failed");
       }
       new_free += total;
     } else {
+      if (header->flags & NYGC_FINALIZER) {
+        int64_t from = (int64_t)(uintptr_t)nyGcObjPtr(header);
+        void (*fn)(int64_t) = nyGcFinalizerGet(from);
+        if (fn) {
+          nyGcFinalizerRemove(from);
+          nyGcUnlock();
+          fn(from);
+          nyGcLock();
+        }
+      }
       gNyGc.stats.objects_swept++;
       gNyGc.stats.bytes_freed += header->size;
     }
@@ -1050,6 +1338,16 @@ static void nyGcSweepLargeUnlocked(void) {
     if (!large->header || !(large->header->flags & NYGC_MARKED)) {
       *link = large->next;
       if (large->header) {
+        if (large->header->flags & NYGC_FINALIZER) {
+          int64_t from = (int64_t)(uintptr_t)nyGcObjPtr(large->header);
+          void (*fn)(int64_t) = nyGcFinalizerGet(from);
+          if (fn) {
+            nyGcFinalizerRemove(from);
+            nyGcUnlock();
+            fn(from);
+            nyGcLock();
+          }
+        }
         gNyGc.stats.objects_swept++;
         gNyGc.stats.bytes_freed += large->header->size;
         gNyGc.stats.large_freed += large->total_size;
@@ -1074,12 +1372,87 @@ void nyGcSetFinalizer(int64_t obj, void (*finalizer)(int64_t)) {
   nyGcLock();
   nyGcHeader_t *header = NULL;
   if (nyGcHeaderForObject(obj, &header)) {
-    if (finalizer)
+    if (finalizer) {
       header->flags |= NYGC_FINALIZER;
-    else
+      nyGcFinalizerSet(obj, finalizer);
+    } else {
       header->flags &= ~NYGC_FINALIZER;
+      nyGcFinalizerRemove(obj);
+    }
   }
   nyGcUnlock();
+}
+
+typedef struct nyGcWeakEntry_t {
+  int64_t weak_obj;
+  int64_t target_obj;
+} nyGcWeakEntry_t;
+
+typedef struct nyGcWeakTable_t {
+  nyGcWeakEntry_t *entries;
+  size_t capacity;
+  size_t count;
+} nyGcWeakTable_t;
+
+static nyGcWeakTable_t g_weak_table = {0};
+
+int64_t nyGcMakeWeak(int64_t target) {
+  if (!target)
+    return 0;
+  int64_t weak_obj = nyGcAlloc(sizeof(int64_t));
+  if (!weak_obj)
+    return 0;
+  nyGcLock();
+  nyGcHeader_t *header = NULL;
+  if (nyGcHeaderForObject(weak_obj, &header))
+    header->flags |= NYGC_WEAK;
+  if (g_weak_table.count * 2 >= g_weak_table.capacity) {
+    size_t new_cap = g_weak_table.capacity ? g_weak_table.capacity * 2 : 64;
+    nyGcWeakEntry_t *new_entries = calloc(new_cap, sizeof(*new_entries));
+    if (new_entries) {
+      for (size_t i = 0; i < g_weak_table.capacity; i++) {
+        if (g_weak_table.entries[i].weak_obj) {
+          size_t idx = (uint64_t)g_weak_table.entries[i].weak_obj % new_cap;
+          while (new_entries[idx].weak_obj)
+            idx = (idx + 1) % new_cap;
+          new_entries[idx] = g_weak_table.entries[i];
+        }
+      }
+      free(g_weak_table.entries);
+      g_weak_table.entries = new_entries;
+      g_weak_table.capacity = new_cap;
+    }
+  }
+  if (g_weak_table.capacity) {
+    size_t idx = (uint64_t)weak_obj % g_weak_table.capacity;
+    while (g_weak_table.entries[idx].weak_obj && g_weak_table.entries[idx].weak_obj != weak_obj)
+      idx = (idx + 1) % g_weak_table.capacity;
+    if (!g_weak_table.entries[idx].weak_obj)
+      g_weak_table.count++;
+    g_weak_table.entries[idx].weak_obj = weak_obj;
+    g_weak_table.entries[idx].target_obj = target;
+  }
+  nyGcUnlock();
+  return weak_obj;
+}
+
+int64_t nyGcGetWeak(int64_t weak_obj) {
+  if (!weak_obj)
+    return 0;
+  nyGcLock();
+  int64_t target = 0;
+  if (g_weak_table.capacity) {
+    size_t idx = (uint64_t)weak_obj % g_weak_table.capacity;
+    while (g_weak_table.entries[idx].weak_obj) {
+      if (g_weak_table.entries[idx].weak_obj == weak_obj) {
+        target = g_weak_table.entries[idx].target_obj;
+        break;
+      }
+      idx = (idx + 1) % g_weak_table.capacity;
+    }
+  }
+  nyGcUnlock();
+  return target;
 }
 
 size_t nyGcGetHeapUsage(void) {

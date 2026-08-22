@@ -1,0 +1,30 @@
+shape oracle_addr_local_multi_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result pointer addr-local multi-local]
+  template ny-test-case
+  ;; -O1 pins the oracle onto the optimized path: it validates the stored
+  ;; result (42) AND covers the memory-SSA store-through-pointer clobber.
+  ;; At -O0 the text-asm oracle emits a stale value; this fixture pins the
+  ;; check to -O1 until that legacy text-asm path is retired.
+  flags "--native-result-oracle=42 -O1"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+;; Regression: addr_of(x) must work when the function has other locals.
+;; Before the fix, any reassigned sibling local made can_bind_decl_direct
+;; bind `x` to an SSA register, so addr_of(x) failed with E2001
+;; "addr_of(local) requires an addressable stack local".
+fn stack_addr() i64 {
+  mut i64 x = 41
+  def ptr p = addr_of(x)
+  mut i = 0
+  i = i + 1
+  store64_i(p, 42)
+  x
+}
+
+stack_addr()
+NY
+}

@@ -1,4 +1,5 @@
-# Errors and diagnostics
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":180,"summary":"Recoverable results, compiler diagnostics, failure categories, and error propagation."} -->
+# Errors
 
 Errors use assertions, panics, recoverable result values, and compiler
 diagnostics.
@@ -34,6 +35,19 @@ try {
 `panic` aborts the current execution path. It is for unrecoverable states.
 The abort is catchable by `try`/`catch` on the language/runtime path.
 
+## Choosing the failure form
+
+| Condition | Form |
+| --- | --- |
+| Programmer error, impossible state, or invalid index/receiver | `panic` or `assert` |
+| Recoverable operation whose caller can handle failure | Structured `Result` value |
+| Language-level invalid source | Compiler diagnostic |
+| Boundary worth a machine-readable code | Structured error with `error_kind` |
+
+A panic aborts the current execution path and is catchable by `try`/`catch`.
+A `Result` value flows through ordinary data. Prefer the recoverable form when
+the caller has a real fallback, and `panic` when continuing would be wrong.
+
 ## Structured errors
 
 ```ny
@@ -56,7 +70,7 @@ invalid receiver/index access, can be captured by `try`/`catch`.
 ### Error conventions
 
 Use structured errors for recoverable library operations and diagnostics for
-language failures. Keep messages compact and actionable.
+language failures. Keep messages compact and practical.
 
 Recommended recoverable shape:
 
@@ -138,6 +152,6 @@ Diagnostics should always:
 
 ## Related
 
-- [types.md](types.md) for compile-time type rules.
-- [syntax.md](syntax.md) for parser-level forms.
-- [troubleshooting.md](../learn/troubleshooting.md) for debugging workflow and fixes by symptom.
+- [Types](types.md) for compile-time type rules.
+- [Syntax](syntax.md) for parser-level forms.
+- [Troubleshooting](../learn/troubleshooting.md) for debugging workflow and fixes by symptom.

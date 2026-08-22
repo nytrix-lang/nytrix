@@ -1,4 +1,4 @@
-+shape oracle_cfg_packed_dominators_x86_64 {
+shape oracle_cfg_packed_dominators_x86_64 {
   family "runtime-native"
   generator "native"
   features [native x86_64 oracle nyir cfg packed-dominators word-boundary]

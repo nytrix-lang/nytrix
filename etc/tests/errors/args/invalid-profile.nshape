@@ -1,0 +1,14 @@
+shape args-invalid-profile {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--profile=peaked"
+  expect_message "invalid optimization profile: peaked"
+  source ny <<'NY'
+use std.core
+print("ok")
+NY
+}

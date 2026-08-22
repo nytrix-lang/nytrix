@@ -1,3 +1,7 @@
+/*
+ * Intrinsic call codegen: lowers compiler-known intrinsic functions
+ * (type checks, casts, bit ops) to inline LLVM IR instead of call sites.
+ */
 static bool ny_try_bad_std_call_type_diag(codegen_t *cg, scope *scopes,
                                           size_t depth, expr_t *e,
                                           const char *name, bool shadowed,
@@ -282,6 +286,89 @@ static LLVMValueRef ny_try_fast_numeric_builtin(codegen_t *cg, scope *scopes,
     ny_dbg_loc(cg, call_expr->tok);
     return LLVMBuildCall2(cg->builder, box->type, box->value, &bits, 1,
                           NY_LLVM_NAME(cg, "fast_float"));
+  }
+
+  if (strcmp(name, "__flt_sqrt") == 0 || strcmp(name, "sqrt") == 0 ||
+      strcmp(name, "std.math.sqrt") == 0) {
+    fun_sig *box = ny_gencall_flt_box(cg);
+    if (!box)
+      return 0;
+    LLVMValueRef dbl = gen_expr_as_f64(cg, scopes, depth, arg_expr);
+    LLVMTypeRef f64_ty = LLVMDoubleTypeInContext(cg->ctx);
+    LLVMValueRef sqrt_fn = LLVMGetNamedFunction(cg->module, "llvm.sqrt.f64");
+    LLVMTypeRef sqrt_ft =
+        LLVMFunctionType(f64_ty, (LLVMTypeRef[]){f64_ty}, 1, 0);
+    if (!sqrt_fn)
+      sqrt_fn = LLVMAddFunction(cg->module, "llvm.sqrt.f64", sqrt_ft);
+    LLVMValueRef res =
+        LLVMBuildCall2(cg->builder, sqrt_ft, sqrt_fn, &dbl, 1, "fast_sqrt");
+    LLVMValueRef bits =
+        ny_bitcast(cg, res, cg->type_i64, NY_LLVM_NAME(cg, "fast_sqrt_bits"));
+    ny_dbg_loc(cg, call_expr->tok);
+    return LLVMBuildCall2(cg->builder, box->type, box->value, &bits, 1,
+                          NY_LLVM_NAME(cg, "fast_sqrt_box"));
+  }
+
+  if (strcmp(name, "__flt_abs") == 0 || strcmp(name, "fabs") == 0) {
+    fun_sig *box = ny_gencall_flt_box(cg);
+    if (!box)
+      return 0;
+    LLVMValueRef dbl = gen_expr_as_f64(cg, scopes, depth, arg_expr);
+    LLVMTypeRef f64_ty = LLVMDoubleTypeInContext(cg->ctx);
+    LLVMValueRef fabs_fn = LLVMGetNamedFunction(cg->module, "llvm.fabs.f64");
+    LLVMTypeRef fabs_ft =
+        LLVMFunctionType(f64_ty, (LLVMTypeRef[]){f64_ty}, 1, 0);
+    if (!fabs_fn)
+      fabs_fn = LLVMAddFunction(cg->module, "llvm.fabs.f64", fabs_ft);
+    LLVMValueRef res =
+        LLVMBuildCall2(cg->builder, fabs_ft, fabs_fn, &dbl, 1, "fast_fabs");
+    LLVMValueRef bits =
+        ny_bitcast(cg, res, cg->type_i64, NY_LLVM_NAME(cg, "fast_fabs_bits"));
+    ny_dbg_loc(cg, call_expr->tok);
+    return LLVMBuildCall2(cg->builder, box->type, box->value, &bits, 1,
+                          NY_LLVM_NAME(cg, "fast_fabs_box"));
+  }
+
+  if (strcmp(name, "__flt_sin") == 0 || strcmp(name, "sin") == 0 ||
+      strcmp(name, "std.math.sin") == 0) {
+    fun_sig *box = ny_gencall_flt_box(cg);
+    if (!box)
+      return 0;
+    LLVMValueRef dbl = gen_expr_as_f64(cg, scopes, depth, arg_expr);
+    LLVMTypeRef f64_ty = LLVMDoubleTypeInContext(cg->ctx);
+    LLVMValueRef sin_fn = LLVMGetNamedFunction(cg->module, "llvm.sin.f64");
+    LLVMTypeRef sin_ft =
+        LLVMFunctionType(f64_ty, (LLVMTypeRef[]){f64_ty}, 1, 0);
+    if (!sin_fn)
+      sin_fn = LLVMAddFunction(cg->module, "llvm.sin.f64", sin_ft);
+    LLVMValueRef res =
+        LLVMBuildCall2(cg->builder, sin_ft, sin_fn, &dbl, 1, "fast_sin");
+    LLVMValueRef bits =
+        ny_bitcast(cg, res, cg->type_i64, NY_LLVM_NAME(cg, "fast_sin_bits"));
+    ny_dbg_loc(cg, call_expr->tok);
+    return LLVMBuildCall2(cg->builder, box->type, box->value, &bits, 1,
+                          NY_LLVM_NAME(cg, "fast_sin_box"));
+  }
+
+  if (strcmp(name, "__flt_cos") == 0 || strcmp(name, "cos") == 0 ||
+      strcmp(name, "std.math.cos") == 0) {
+    fun_sig *box = ny_gencall_flt_box(cg);
+    if (!box)
+      return 0;
+    LLVMValueRef dbl = gen_expr_as_f64(cg, scopes, depth, arg_expr);
+    LLVMTypeRef f64_ty = LLVMDoubleTypeInContext(cg->ctx);
+    LLVMValueRef cos_fn = LLVMGetNamedFunction(cg->module, "llvm.cos.f64");
+    LLVMTypeRef cos_ft =
+        LLVMFunctionType(f64_ty, (LLVMTypeRef[]){f64_ty}, 1, 0);
+    if (!cos_fn)
+      cos_fn = LLVMAddFunction(cg->module, "llvm.cos.f64", cos_ft);
+    LLVMValueRef res =
+        LLVMBuildCall2(cg->builder, cos_ft, cos_fn, &dbl, 1, "fast_cos");
+    LLVMValueRef bits =
+        ny_bitcast(cg, res, cg->type_i64, NY_LLVM_NAME(cg, "fast_cos_bits"));
+    ny_dbg_loc(cg, call_expr->tok);
+    return LLVMBuildCall2(cg->builder, box->type, box->value, &bits, 1,
+                          NY_LLVM_NAME(cg, "fast_cos_box"));
   }
 
   if (strcmp(name, "int") == 0 || strcmp(name, "to_int") == 0) {
@@ -585,6 +672,11 @@ ny_gencall_load_idx_intrinsic(codegen_t *cg, expr_t *e, scope *scopes,
   ny_dbg_loc(cg, e->tok);
   LLVMValueRef idx_raw = ny_gencall_index_raw_i64(cg, scopes, depth, idx_expr,
                                                   idx_v, "ldx_idx_raw");
+  if (!idx_raw) {
+    ny_diag_error(e->tok, "failed to evaluate index for %s", diag_name);
+    cg->had_error = 1;
+    return ny_c0(cg);
+  }
   LLVMValueRef base_ptr =
       LLVMBuildIntToPtr(cg->builder, addr_v, cg->type_i8ptr, "ldx_base_p");
   LLVMValueRef byte_ptr = LLVMBuildGEP2(cg->builder, cg->type_i8, base_ptr,
@@ -688,11 +780,14 @@ static bool ny_gencall_raw_alloc_size_from_init(codegen_t *cg, scope *scopes,
   const char *callee = init->as.call.callee->as.ident.name;
   const char *leaf = strrchr(callee, '.');
   leaf = leaf ? leaf + 1 : callee;
+  ny_builtin_alloc_kind_t alloc_kind = ny_builtin_alloc_kind(leaf);
   size_t arg_idx = SIZE_MAX;
-  if ((strcmp(leaf, "malloc") == 0 || strcmp(leaf, "zalloc") == 0) &&
+  if ((alloc_kind == NY_BUILTIN_ALLOC_MALLOC ||
+       alloc_kind == NY_BUILTIN_ALLOC_CALLOC) &&
       init->as.call.args.len >= 1) {
-    arg_idx = 0;
-  } else if (strcmp(leaf, "realloc") == 0 && init->as.call.args.len >= 2) {
+    arg_idx = alloc_kind == NY_BUILTIN_ALLOC_CALLOC ? 1 : 0;
+  } else if (alloc_kind == NY_BUILTIN_ALLOC_REALLOC &&
+             init->as.call.args.len >= 2) {
     arg_idx = 1;
   }
   if (arg_idx == SIZE_MAX)
@@ -846,15 +941,15 @@ static LLVMValueRef ny_emit_f64buf_load_raw(codegen_t *cg, scope *scopes,
   idx_v = ny_cast_to_i64(cg, idx_v, "f64buf_idx");
   LLVMValueRef idx_raw = ny_gencall_index_raw_i64(
       cg, scopes, depth, c->args.data[1].val, idx_v, "f64buf_idx_raw");
-  LLVMValueRef byte_off =
-      LLVMBuildShl(cg->builder, idx_raw, LLVMConstInt(cg->type_i64, 3, false),
-                   "f64buf_byte_off");
-  LLVMValueRef base_ptr =
-      LLVMBuildIntToPtr(cg->builder, buf_v, cg->type_i8ptr, "f64buf_base_p");
-  LLVMValueRef byte_ptr = LLVMBuildGEP2(cg->builder, cg->type_i8, base_ptr,
-                                        &byte_off, 1, "f64buf_byte_p");
-  LLVMValueRef ptr = LLVMBuildPointerCast(
-      cg->builder, byte_ptr, LLVMPointerType(cg->type_f64, 0), "f64buf_p");
+  if (!idx_raw) {
+    ny_diag_error(tok, "failed to evaluate index for f64buf_load");
+    cg->had_error = 1;
+    return LLVMConstReal(cg->type_f64, 0.0);
+  }
+  LLVMValueRef base_ptr = LLVMBuildIntToPtr(
+      cg->builder, buf_v, LLVMPointerType(cg->type_f64, 0), "f64buf_base_p");
+  LLVMValueRef ptr = LLVMBuildGEP2(cg->builder, cg->type_f64, base_ptr,
+                                   &idx_raw, 1, "f64buf_p");
   LLVMValueRef load =
       LLVMBuildLoad2(cg->builder, cg->type_f64, ptr, "f64buf_load_raw");
   LLVMSetAlignment(load, 8);
@@ -883,10 +978,6 @@ static LLVMValueRef ny_gencall_store_idx_intrinsic(
   size_t idx_arg = value_before_index ? 2u : 1u;
   bool has_idx_arg = value_before_index ? c->args.len >= 3 : c->args.len >= 2;
   expr_t *idx_expr = has_idx_arg ? c->args.data[idx_arg].val : NULL;
-  if (!ny_gencall_check_safe_raw_access(
-          cg, scopes, depth, c->args.data[0].val, idx_expr,
-          ny_gencall_raw_elem_bytes(elem_ty), e->tok, diag_name))
-    return ny_c0(cg);
   LLVMValueRef addr_v = gen_expr(cg, scopes, depth, c->args.data[0].val);
   LLVMValueRef idx_v =
       idx_expr ? gen_expr(cg, scopes, depth, idx_expr) : ny_c0(cg);
@@ -903,16 +994,21 @@ static LLVMValueRef ny_gencall_store_idx_intrinsic(
   ny_dbg_loc(cg, e->tok);
   LLVMValueRef idx_raw = ny_gencall_index_raw_i64(cg, scopes, depth, idx_expr,
                                                   idx_v, "stx_idx_raw");
+  if (!idx_raw) {
+    ny_diag_error(e->tok, "failed to evaluate index for %s", diag_name);
+    cg->had_error = 1;
+    return ny_c0(cg);
+  }
   LLVMValueRef raw_v =
       untag_before_store
           ? ny_build_untagged_or_raw_i64(cg, val_v, "stx_val_raw")
           : val_v;
   LLVMValueRef base_ptr =
       LLVMBuildIntToPtr(cg->builder, addr_v, cg->type_i8ptr, "stx_base_p");
-  LLVMValueRef byte_ptr = LLVMBuildGEP2(cg->builder, cg->type_i8, base_ptr,
-                                        &idx_raw, 1, "stx_byte_p");
-  LLVMValueRef ptr = LLVMBuildPointerCast(cg->builder, byte_ptr,
-                                          LLVMPointerType(elem_ty, 0), "stx_p");
+  LLVMValueRef byte_ptr =
+      LLVMBuildGEP2(cg->builder, cg->type_i8, base_ptr, &idx_raw, 1, "stx_byte_p");
+  LLVMValueRef ptr =
+      LLVMBuildPointerCast(cg->builder, byte_ptr, LLVMPointerType(elem_ty, 0), "stx_p");
   LLVMValueRef cast_v = raw_v;
   if (LLVMTypeOf(cast_v) != elem_ty)
     cast_v = LLVMBuildTrunc(cg->builder, cast_v, elem_ty, "stx_trunc");
@@ -957,16 +1053,15 @@ static LLVMValueRef ny_try_fast_tbuf_builtin(codegen_t *cg, expr_t *e,
     idx_v = ny_cast_to_i64(cg, idx_v, "f64buf_store_idx");
     LLVMValueRef idx_raw = ny_gencall_index_raw_i64(
         cg, scopes, depth, c->args.data[1].val, idx_v, "f64buf_store_idx_raw");
-    LLVMValueRef byte_off =
-        LLVMBuildShl(cg->builder, idx_raw, LLVMConstInt(cg->type_i64, 3, false),
-                     "f64buf_store_byte_off");
+    if (!idx_raw) {
+      ny_diag_error(e->tok, "failed to evaluate index for f64buf_store");
+      cg->had_error = 1;
+      return ny_c0(cg);
+    }
     LLVMValueRef base_ptr = LLVMBuildIntToPtr(
-        cg->builder, buf_v, cg->type_i8ptr, "f64buf_store_base_p");
-    LLVMValueRef byte_ptr = LLVMBuildGEP2(cg->builder, cg->type_i8, base_ptr,
-                                          &byte_off, 1, "f64buf_store_byte_p");
-    LLVMValueRef ptr = LLVMBuildPointerCast(cg->builder, byte_ptr,
-                                            LLVMPointerType(cg->type_f64, 0),
-                                            "f64buf_store_p");
+        cg->builder, buf_v, LLVMPointerType(cg->type_f64, 0), "f64buf_store_base_p");
+    LLVMValueRef ptr = LLVMBuildGEP2(cg->builder, cg->type_f64, base_ptr,
+                                     &idx_raw, 1, "f64buf_store_p");
     LLVMValueRef st = LLVMBuildStore(cg->builder, val_v, ptr);
     LLVMSetAlignment(st, 8);
     return ny_c0(cg);

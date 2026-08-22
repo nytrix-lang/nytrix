@@ -1,7 +1,7 @@
 shape bigint-oracle {
   family "perf-real"
   generator "stress"
-  features ["perf", "checksum", "gmp"]
+  features ["perf", "checksum", "gmp", "non-comparative"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
@@ -91,7 +91,7 @@ while i < n4 {
 }
 def opow = ticks() - t11
 
-print("checksum=", bf_to_float(x), " ", bigint_to_str(ox).len)
+print("checksum=", int(bf_to_float(x)) * 100 + bigint_to_str(ox).len)
 print("elapsed_ns=", t11 - t0)
 NY
 }

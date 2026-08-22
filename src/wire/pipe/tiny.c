@@ -1,3 +1,7 @@
+/*
+ * Tiny compiler pipeline: a minimal, self-contained compilation path
+ * used for REPL evaluations, inline -c execution, and quick smoke tests.
+ */
 static bool ny_trace_compile_enabled(void) {
   return ny_env_enabled("NYTRIX_TRACE_COMPILE") ||
          ny_env_enabled("NYTRIX_TRACE_CODEGEN");
@@ -63,7 +67,10 @@ static bool ny_decode_tiny_string_literal(const char *src, const char **end_out,
   if (!src || !(*src == '"' || *src == '\'') || !end_out || !out_text)
     return false;
   char quote = *src++;
-  size_t cap = strlen(src) + 1;
+  size_t src_len = strlen(src);
+  if (src_len > SIZE_MAX - 1)
+    return false;
+  size_t cap = src_len + 1;
   char *out = malloc(cap ? cap : 1);
   if (!out)
     return false;
@@ -228,7 +235,10 @@ static bool ny_parse_tiny_command_string(const char *src,
 static char *ny_c_escape_string_literal(const char *src) {
   if (!src)
     src = "";
-  size_t cap = strlen(src) * 4 + 1;
+  size_t src_len = strlen(src);
+  if (src_len > SIZE_MAX / 4)
+    return NULL;
+  size_t cap = src_len * 4 + 1;
   char *out = malloc(cap ? cap : 1);
   if (!out)
     return NULL;
@@ -561,6 +571,10 @@ static char *ny_read_stdin_all(void) {
   int ch;
   while ((ch = fgetc(stdin)) != EOF) {
     if (len + 1 >= cap) {
+      if (cap > SIZE_MAX / 2) {
+        free(buf);
+        return NULL;
+      }
       size_t next_cap = cap * 2;
       char *next = realloc(buf, next_cap);
       if (!next) {

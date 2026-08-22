@@ -1,3 +1,8 @@
+/*
+ * ny compiler main: unified entry point routing to sub-tools (test, fmt,
+ * perf, doc, make, pkg, new), option parsing, signal handling, hot-reload
+ * loop, and the interactive REPL when no subcommand is given.
+ */
 #include "base/common.h"
 #include "base/args.h"
 #include "base/intern.h"
@@ -5,7 +10,9 @@
 #include "base/options.h"
 #include "base/util.h"
 #include "code/jit.h"
+#include "code/incremental/incremental.h"
 #include "code/native/native.h"
+#include "code/priv.h"
 #include "cmd/ny/pkg.h"
 #include "cmd/fmt/fmt.h"
 #include "cmd/make/make.h"
@@ -18,6 +25,7 @@
 #ifndef _WIN32
 #include <sys/mman.h>
 #include <sys/resource.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #endif
 #include <errno.h>
@@ -48,6 +56,8 @@
 
 extern int64_t rt_trace_dump(int64_t n);
 extern int64_t rt_trace_get_call_stack(int64_t *fn, int64_t *f, int64_t *l, int count);
+extern int64_t rt_trace_get_frames(int64_t *f, int64_t *l, int64_t *c,
+                                   int64_t *fn, int count);
 extern int g_trace_requested;
 #ifdef _WIN32
 extern int64_t rt_enable_vt(void);
@@ -176,7 +186,6 @@ static void handle_segv(int sig) {
                                         : "SignalError";
 
   int64_t files[32], lines[32], cols[32], funcs[32];
-  extern int64_t rt_trace_get_frames(int64_t *f, int64_t *l, int64_t *c, int64_t *fn, int count);
   int count = rt_trace_get_frames(files, lines, cols, funcs, 16);
   write_str("\nNytrix trace (most recent call last):\n");
   if (count == 0) {
@@ -212,9 +221,11 @@ static void handle_segv(int sig) {
 }
 
 #if defined(NY_HAS_ASAN) || defined(NY_HAS_UBSAN)
-/* Death callback registered with __sanitizer_set_death_callback.
+/*
+ * Death callback registered with __sanitizer_set_death_callback.
  * Runs before the sanitizer calls abort(), so the Nytrix trace appears
- * after the sanitizer report but before our SIGABRT handler fires. */
+ * after the sanitizer report but before our SIGABRT handler fires.
+ */
 static void ny_sanitizer_death_callback(void) {
   write_str("\nNytrix trace (most recent call last):\n");
   int64_t files[32], lines[32], cols[32], funcs[32];
@@ -576,10 +587,12 @@ static void ny_load_default_config(void) {
 }
 
 static void ny_global_cleanup(void) {
-  /* The process is exiting; the OS reclaims all memory.  Skipping cleanup
+  /*
+   * The process is exiting; the OS reclaims all memory.  Skipping cleanup
    * avoids crashing on corrupted heap metadata (observed with very large
    * stdlib compilations where glibc detects a corrupted double-linked list
-   * during free). */
+   * during free).
+   */
 }
 
 static void ny_unsetenv_force(const char *key) {
@@ -1251,9 +1264,16 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
   }
   if (opt->profiler_mode) {
     ny_env_config_set(env, "NYTRIX_PROFILER", "1");
-    ny_env_config_set(env, "NYTRIX_JIT_PERF_MAP", "1");
     ny_env_config_set(env, "NYTRIX_MEM_STATS", "1");
   }
+  if (opt->profiler_mode || opt->jit_perf_map)
+    ny_env_config_set(env, "NYTRIX_JIT_PERF_MAP", "1");
+  if (opt->jit_fast_isel)
+    ny_env_config_set(env, "NYTRIX_JIT_FAST_ISEL", "1");
+  if (opt->jit_opt_level > 0)
+    ny_env_config_set_int(env, "NYTRIX_JIT_OPT_LEVEL", opt->jit_opt_level);
+  if (opt->jit_code_model)
+    ny_env_config_set(env, "NYTRIX_JIT_CODE_MODEL", opt->jit_code_model);
   if (opt->std_builtin_ops >= 0)
     ny_env_config_set_bool(env, "NYTRIX_STD_BUILTIN_OPS", opt->std_builtin_ops != 0);
   if (opt->compiler_asserts >= 0)
@@ -1301,7 +1321,9 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
   ny_env_config_set_bool(env, "NYTRIX_GC", opt->enable_gc);
   ny_env_config_set(env, "NYTRIX_HEAP_POLICY", ny_heap_policy_name(opt->heap_policy));
   ny_env_config_set_bool(env, "NYTRIX_RC_GC", opt->heap_policy == NY_HEAP_RC);
-  /* Advisory borrow checking is independent from RAII cleanup. */
+  /*
+   * Advisory borrow checking is independent from RAII cleanup.
+   */
   ny_env_config_set_bool(env, "NYTRIX_OWNERSHIP",
                          opt->ownership || opt->borrow_check);
   ny_env_config_set_bool(env, "NYTRIX_OWNERSHIP_CLEANUP", opt->ownership);
@@ -1422,20 +1444,339 @@ static bool ny_try_unified_tool(int argc, char **argv, int *out_rc) {
 
 #ifndef _WIN32
 static double g_timeout = 0;
+static void write_timeout(double v) {
+  if (v < 0) {
+    write_str("-");
+    v = -v;
+  }
+  int64_t whole = (int64_t)v;
+  int64_t frac = (int64_t)((v - (double)whole) * 100.0 + 0.5);
+  if (frac >= 100) {
+    whole++;
+    frac = 0;
+  }
+  write_dec(whole);
+  write_str(".");
+  if (frac < 10)
+    write_str("0");
+  write_dec(frac);
+}
 static void handle_timeout(int sig) {
   (void)sig;
-  fprintf(stderr, "\n\033[1;31mERROR: Execution timed out after %.2f seconds.\033[0m\n", g_timeout);
-  exit(124);
+  write_str("\n");
+  write_str(clr(NY_CLR_RED));
+  write_str("ERROR: Execution timed out after ");
+  write_timeout(g_timeout);
+  write_str(" seconds");
+  write_str(clr(NY_CLR_RESET));
+  write_str("\n");
+  _exit(124);
 }
 #endif
 
+static int ny_incremental_selftest(void) {
+  /*
+   * Self-contained regression test for the incremental compilation driver:
+   * stable fingerprints, dependency graph + transitive dependents, and a
+   * save/load round-trip. Uses only the incremental C API over temp files.
+   */
+  char dir[PATH_MAX];
+snprintf(dir, sizeof(dir), "%s/ny-inc-self-%ld", ny_get_temp_dir(),
+         (long)getpid());
+  ny_ensure_dir_recursive(dir);
+  char path_leaf[PATH_MAX], path_mid[PATH_MAX], path_root[PATH_MAX];
+  snprintf(path_root, sizeof(path_root), "%s/a.ny", dir); /* depends on b */
+  snprintf(path_mid, sizeof(path_mid), "%s/b.ny", dir);   /* depends on c */
+  snprintf(path_leaf, sizeof(path_leaf), "%s/c.ny", dir);
+  const char *fails = NULL;
+#define SELFCHECK(cond)                              \
+  do {                                               \
+    if (!(cond)) {                                   \
+      fails = #cond;                                 \
+      goto cleanup;                                  \
+    }                                                \
+  } while (0)
+
+  FILE *f = fopen(path_root, "w");
+  SELFCHECK(f != NULL);
+  fprintf(f, "module root(root)\nuse \"./b.ny\"\nfn x() int { 1 }\n");
+  fclose(f);
+  f = fopen(path_mid, "w");
+  SELFCHECK(f != NULL);
+  fprintf(f, "module mid(mid)\nuse \"./c.ny\"\nfn y() int { 2 }\n");
+  fclose(f);
+  f = fopen(path_leaf, "w");
+  SELFCHECK(f != NULL);
+  fprintf(f, "module leaf(leaf)\nfn z() int { 3 }\n");
+  fclose(f);
+
+  const char *files[3] = {path_root, path_mid, path_leaf};
+
+  /*
+   * stable fingerprint: identical bytes -> identical fingerprint
+   */
+  ny_file_fingerprint_t fp1 = {0}, fp2 = {0};
+  SELFCHECK(ny_incremental_file_fingerprint(path_leaf, &fp1));
+  SELFCHECK(ny_incremental_file_fingerprint(path_leaf, &fp2));
+  SELFCHECK(fp1.content_hash == fp2.content_hash);
+
+  /*
+   * graph build: root -> mid -> leaf, so mid&leaf are transitive dependents
+   */
+  ny_dep_graph_t g = {0};
+  SELFCHECK(ny_incremental_build_graph(files, 3, &g));
+  SELFCHECK(g.node_count == 3);
+
+  /*
+   * simulate a change to the leaf c.ny, then require root+mid to recompile
+   */
+  f = fopen(path_leaf, "w");
+  SELFCHECK(f != NULL);
+  fprintf(f, "module leaf(leaf)\nuse \"./extra.ny\"\nfn z() int { 4 }\n");
+  fclose(f);
+  char **changed = NULL;
+  size_t changed_count = 0;
+  SELFCHECK(ny_incremental_check_changes(&g, &changed, &changed_count));
+  SELFCHECK(changed_count == 1);
+  char **rset = NULL;
+  size_t rset_count = 0;
+  SELFCHECK(ny_incremental_compute_recompile_set(&g, (const char **)changed,
+                                                 changed_count, &rset,
+                                                 &rset_count));
+  SELFCHECK(rset_count == 3); /* leaf + mid + root */
+
+  /*
+   * save/load round-trip preserves node count and closure shape
+   */
+  char graph_path[PATH_MAX];
+  snprintf(graph_path, sizeof(graph_path), "%s/incgraph.bin", dir);
+  SELFCHECK(ny_incremental_save_graph(&g, graph_path));
+  ny_dep_graph_t loaded = {0};
+  SELFCHECK(ny_incremental_load_graph(graph_path, &loaded));
+  SELFCHECK(loaded.node_count == 3);
+
+  puts("incremental selftest: fingerprints, dependency graph, transitive "
+       "recompile set, and graph persistence passed");
+  ny_incremental_free_graph(&loaded);
+  ny_incremental_free_graph(&g);
+  {
+    size_t i;
+    for (i = 0; i < rset_count; i++) free(rset[i]);
+    free(rset);
+    for (i = 0; i < changed_count; i++) free(changed[i]);
+    free(changed);
+  }
+  remove(graph_path);
+  remove(path_root);
+  remove(path_mid);
+  remove(path_leaf);
+  rmdir(dir);
+  return 0;
+
+cleanup:
+  if (fails) {
+    fprintf(stderr, "incremental file selftest: FAILED at %s\n", fails);
+    return 1;
+  }
+  return 0;
+}
+
+static char *ny_doctor_which(const char *name) {
+  char cmd[512];
+  snprintf(cmd, sizeof(cmd), "which '%s' 2>/dev/null", name);
+  FILE *fp = popen(cmd, "r");
+  if (!fp) return NULL;
+  char buf[4096] = {0};
+  size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+  pclose(fp);
+  if (n == 0) return NULL;
+  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = '\0';
+  return n > 0 ? ny_strdup(buf) : NULL;
+}
+
+static void ny_doctor_check(bool required, const char *label, const char *tool, const char *fallback) {
+  char *path = ny_doctor_which(tool);
+  if (!path && fallback) path = ny_doctor_which(fallback);
+  printf("  %s %-18s %-10s %s\n", path ? "✓" : "✗", label, required ? "[required]" : "[optional]", path ? path : "(not found)");
+  free(path);
+}
+
+static void ny_doctor_file_check(bool required, const char *label, const char *path) {
+  int ok = access(path, F_OK) == 0;
+  printf("  %s %-18s %-10s %s\n", ok ? "✓" : "✗", label, required ? "[required]" : "[optional]", ok ? path : "(not found)");
+}
+
+static void ny_run_doctor(void) {
+  printf("Nytrix Doctor — system toolchain diagnostics\n\n");
+  printf("Core tools:\n");
+  ny_doctor_check(true, "cmake", "cmake", NULL);
+  ny_doctor_check(true, "clang", "clang", NULL);
+  ny_doctor_check(true, "ninja", "ninja", NULL);
+  ny_doctor_check(true, "pkg-config", "pkg-config", "pkgconf");
+  ny_doctor_check(true, "llvm-config", "llvm-config", NULL);
+  printf("\nWASM / web tooling:\n");
+  ny_doctor_check(false, "wasm-ld", "wasm-ld", NULL);
+  ny_doctor_check(false, "wasm-opt", "wasm-opt", NULL);
+  ny_doctor_check(false, "wasm-objdump", "wasm-objdump", NULL);
+  ny_doctor_check(false, "emcc", "emcc", NULL);
+  /*
+   * Check if clang actually supports wasm32 target (compile test)
+   */
+  {
+    char *clang = ny_doctor_which("clang");
+    if (clang) {
+      int ok = system("clang --target=wasm32-unknown-unknown -x c -c -o /dev/null - </dev/null 2>/dev/null") == 0;
+      printf("  %s %-18s %s\n", ok ? "✓" : "✗", "clang+wasm32", ok ? "[optional] clang wasm32 backend OK" : "[optional] clang lacks wasm32 target");
+      free(clang);
+    }
+  }
+  printf("\nCross-compilation:\n");
+  ny_doctor_check(false, "qemu-aarch64", "qemu-aarch64", NULL);
+  ny_doctor_check(false, "qemu-arm", "qemu-arm", NULL);
+  ny_doctor_check(false, "qemu-riscv64", "qemu-riscv64", NULL);
+  ny_doctor_check(false, "qemu-x86_64", "qemu-x86_64", NULL);
+  ny_doctor_check(false, "wine", "wine", NULL);
+  ny_doctor_check(false, "aarch64-linux-gnu-gcc", "aarch64-linux-gnu-gcc", NULL);
+  ny_doctor_check(false, "arm-linux-gnueabihf-gcc", "arm-linux-gnueabihf-gcc", NULL);
+  ny_doctor_check(false, "riscv64-linux-gnu-gcc", "riscv64-linux-gnu-gcc", NULL);
+  ny_doctor_check(false, "x86_64-w64-mingw32-gcc", "x86_64-w64-mingw32-gcc", NULL);
+#ifdef __linux__
+  printf("\nDisplay:\n");
+  printf("  %s display server\n", (getenv("DISPLAY") || getenv("WAYLAND_DISPLAY")) ? "✓" : "✗");
+#endif
+  printf("\nBuilt tools:\n");
+  ny_doctor_file_check(false, "ny", "build/release/ny");
+  ny_doctor_file_check(false, "ny-fmt", "build/release/ny-fmt");
+  ny_doctor_file_check(false, "ny-test", "build/release/ny-test");
+  ny_doctor_file_check(false, "std.ny", "build/std.ny");
+  printf("\nQuick reference:\n");
+  printf("  ny --wasm file.ny               # compile to WebAssembly\n");
+  printf("  ny --host-triple=aarch64-linux-gnu file.ny  # cross-compile\n");
+  printf("  ny --profile-time --runs=N file.ny       # benchmark compilation\n");
+  printf("\nDoctor complete.\n");
+}
+
+static void ny_run_env(void) {
+  printf("Nytrix environment\n");
+  /*
+   * Root / host
+   */
+  const char *root = getenv("NYTRIX_ROOT");
+  if (!root || !*root) root = ny_src_root();
+  printf("  root:                %s\n", root ? root : "(unknown)");
+#ifdef __linux__
+  {
+    struct utsname u;
+    if (uname(&u) == 0)
+      printf("  host:                %s %s\n", u.sysname, u.machine);
+  }
+#elif defined(__APPLE__)
+  {
+    struct utsname u;
+    if (uname(&u) == 0)
+      printf("  host:                %s %s\n", u.sysname, u.machine);
+  }
+#elif defined(_WIN32)
+  printf("  host:                windows\n");
+#endif
+  /*
+   * Toolchain
+   */
+  printf("\nToolchain:\n");
+  ny_doctor_check(false, "cmake", "cmake", NULL);
+  ny_doctor_check(false, "ninja", "ninja", NULL);
+  ny_doctor_check(false, "clang", "clang", NULL);
+  ny_doctor_check(false, "llvm-config", "llvm-config", NULL);
+  ny_doctor_check(false, "pkg-config", "pkg-config", "pkgconf");
+  /*
+   * Key overrides
+   */
+  printf("\nOverrides (set):\n");
+  static const char *keys[] = {
+    "NYTRIX_CC", "CC", "CXX", "NYTRIX_HOST_TRIPLE",
+    "NYTRIX_HOST_CFLAGS", "NYTRIX_HOST_LDFLAGS",
+    "NYTRIX_STD_PATH", "NYTRIX_BUILD_STD_PATH",
+    "NYTRIX_BUILD_JOBS", "NYTRIX_CONFIG", "NY_CONFIG",
+    "NYTRIX_PKG_HOME", "NYTRIX_PKG_PATH", "NYTRIX_CROSS_RUNNER",
+    NULL
+  };
+  for (int i = 0; keys[i]; i++) {
+    const char *v = getenv(keys[i]);
+    if (v && *v) printf("  %-22s %s\n", keys[i], v);
+  }
+  printf("\nEnv complete.\n");
+}
+
+static void ny_run_targets(void) {
+  printf("Nytrix cross-compilation targets (use with --cross=<name>):\n\n");
+  static const char *presets[][3] = {
+    {"linux-x64",       "x86_64-linux-gnu",       "qemu-x86_64"},
+    {"linux-x86_64",    "x86_64-linux-gnu",       "qemu-x86_64"},
+    {"linux-arm64",     "aarch64-linux-gnu",      "qemu-aarch64"},
+    {"linux-aarch64",   "aarch64-linux-gnu",      "qemu-aarch64"},
+    {"linux-armhf",     "arm-linux-gnueabihf",    "qemu-arm"},
+    {"linux-arm",       "arm-linux-gnueabihf",    "qemu-arm"},
+    {"linux-riscv64",   "riscv64-linux-gnu",       "qemu-riscv64"},
+    {"windows-x64",     "x86_64-w64-windows-gnu", "wine"},
+  };
+  int np = sizeof(presets) / sizeof(presets[0]);
+  printf("  %-20s %-30s %s\n", "PRESET", "TRIPLE", "RUNNER");
+  for (int i = 0; i < np; i++) {
+    char *runner_path = ny_doctor_which(presets[i][2]);
+    printf("  %-20s %-30s %s\n", presets[i][0], presets[i][1],
+           runner_path ? runner_path : presets[i][2]);
+    free(runner_path);
+  }
+  printf("\n  Usage: ny --cross=<preset> [--cross-run] file.ny\n");
+  printf("  Raw triples also accepted: ny --cross=aarch64-linux-gnu file.ny\n");
+  printf("\nTargets complete.\n");
+}
+
+static void ny_run_wasm_info(const char *path) {
+  if (!path || !*path) {
+    fprintf(stderr, "ny: --wasm-info requires a .wasm file path\n");
+    return;
+  }
+  char *objdump = ny_doctor_which("wasm-objdump");
+  if (!objdump) {
+    fprintf(stderr, "ny: --wasm-info requires wasm-objdump (install wabt)\n");
+    return;
+  }
+  char cmd[1024];
+  snprintf(cmd, sizeof(cmd), "%s -x '%s' 2>&1", objdump, path);
+  free(objdump);
+  FILE *fp = popen(cmd, "r");
+  if (!fp) {
+    fprintf(stderr, "ny: failed to run wasm-objdump\n");
+    return;
+  }
+  printf("Wasm info: %s\n\n", path);
+  char line[1024];
+  int in_import = 0, in_export = 0;
+  while (fgets(line, sizeof(line), fp)) {
+    if (strstr(line, "Import[")) { in_import = 1; continue; }
+    if (strstr(line, "Export[")) { in_import = 0; in_export = 1; continue; }
+    if (line[0] != ' ' && line[0] != '\t') { in_import = 0; in_export = 0; }
+    if (in_import || in_export) printf("  %s", line);
+  }
+  int rc = pclose(fp);
+  if (rc != 0) fprintf(stderr, "ny: wasm-objdump exited %d\n", rc);
+}
+
+
+
+
 int main(int argc, char **argv, char **envp) {
 #ifndef _WIN32
-  // increase stack for large frames in clang_import for complex headers
+  /*
+   * increase stack for large frames in clang_import for complex headers
+   */
   struct rlimit rl;
   if (getrlimit(RLIMIT_STACK, &rl) == 0) {
-    /* Limitless: request infinite stack like real compilers (no artificial cap).
-     * OS will enforce practical limits. */
+    /*
+     * Limitless: request infinite stack like real compilers (no artificial cap).
+     * OS will enforce practical limits.
+     */
     rlim_t want = RLIM_INFINITY;
     if (rl.rlim_cur != RLIM_INFINITY) {
       rl.rlim_cur = want;
@@ -1449,9 +1790,197 @@ int main(int argc, char **argv, char **envp) {
   int unified_rc = 0;
   if (ny_try_unified_tool(argc, argv, &unified_rc))
     return unified_rc;
+  if (ny_argv_has_flag(argc, argv, "--native-vector-selftest")) {
+    char selftest_err[256] = {0};
+    if (!ny_native_vector_selftest(selftest_err, sizeof(selftest_err))) {
+      fprintf(stderr, "native vector selftest: %s\n",
+              selftest_err[0] ? selftest_err : "failed");
+      return 1;
+    }
+    puts("native register selftest: x86-64 XMM and AArch64 scalar FP/NEON allocation and encoding passed");
+    return 0;
+  }
+  if (ny_argv_has_flag(argc, argv, "--incremental-selftest")) {
+    return ny_incremental_selftest();
+  }
+  if (ny_argv_has_flag(argc, argv, "--proof-solver-selftest"))
+    return ny_proof_solver_differential_selftest();
 
   bool trace_requested =
       ny_argv_has_flag(argc, argv, "-trace") || ny_argv_has_flag(argc, argv, "--trace");
+  if (ny_argv_has_flag(argc, argv, "--doctor")) {
+    ny_run_doctor();
+    return 0;
+  }
+  if (ny_argv_has_flag(argc, argv, "--env")) {
+    ny_run_env();
+    return 0;
+  }
+  if (ny_argv_has_flag(argc, argv, "--targets")) {
+    ny_run_targets();
+    return 0;
+  }
+  for (int i = 1; i < argc; i++) {
+    if (strncmp(argv[i], "--wasm-info=", 12) == 0) {
+      ny_run_wasm_info(argv[i] + 12);
+      return 0;
+    }
+  }
+  /*
+   * --wasm is a convenience shorthand for wasm32 target compilation
+   */
+  if (ny_argv_has_flag(argc, argv, "--wasm")) {
+    static char *expanded_argv[256];
+    int dst = 1;
+    expanded_argv[0] = argv[0];
+    for (int i = 1; i < argc; i++) {
+      if (strcmp(argv[i], "--wasm") == 0) continue;
+      expanded_argv[dst++] = argv[i];
+    }
+    expanded_argv[dst++] = (char *)"--native-backend=wasm";
+    expanded_argv[dst++] = (char *)"--host-triple=wasm32-unknown-unknown";
+    expanded_argv[dst] = NULL;
+    argv = expanded_argv;
+    argc = dst;
+  }
+  /*
+   * Parse --profile-time and --runs=N early, then strip them from argv so
+   * ny_options_parse doesn't choke on them. The actual timing loop runs after
+   * all initialization is complete.
+   */
+  int profile_runs = 0;
+  if (ny_argv_has_flag(argc, argv, "--profile-time")) {
+    profile_runs = 3;
+    for (int i = 1; i < argc; i++) {
+      if (strncmp(argv[i], "--runs=", 7) == 0) {
+        profile_runs = atoi(argv[i] + 7);
+        if (profile_runs < 1) profile_runs = 1;
+        break;
+      }
+    }
+    /*
+     * Strip --profile-time and --runs=N from argv
+     */
+    int dst = 1;
+    for (int i = 1; i < argc; i++) {
+      if (strcmp(argv[i], "--profile-time") == 0) continue;
+      if (strncmp(argv[i], "--runs=", 7) == 0) continue;
+      argv[dst++] = argv[i];
+    }
+    argc = dst;
+  }
+  /*
+   * --cross=<triple> [--cross-run]: cross-compile with auto-detected toolchain
+   */
+  bool cross_run = false;
+  const char *cross_triple = NULL;
+  const char *cross_qemu = NULL;
+  for (int i = 1; i < argc; i++) {
+    if (strncmp(argv[i], "--cross=", 8) == 0) {
+      cross_triple = argv[i] + 8;
+      break;
+    }
+  }
+  if (cross_triple && *cross_triple) {
+    /*
+     * Resolve preset names (e.g. "linux-arm64" → "aarch64-linux-gnu")
+     */
+    static const char *presets[][3] = {
+      {"linux-x64",       "x86_64-linux-gnu",       "qemu-x86_64"},
+      {"linux-x86_64",    "x86_64-linux-gnu",       "qemu-x86_64"},
+      {"x86_64-linux",    "x86_64-linux-gnu",       "qemu-x86_64"},
+      {"linux-arm64",     "aarch64-linux-gnu",      "qemu-aarch64"},
+      {"linux-aarch64",   "aarch64-linux-gnu",      "qemu-aarch64"},
+      {"aarch64-linux",   "aarch64-linux-gnu",      "qemu-aarch64"},
+      {"linux-armhf",     "arm-linux-gnueabihf",    "qemu-arm"},
+      {"linux-arm",       "arm-linux-gnueabihf",    "qemu-arm"},
+      {"linux-riscv64",   "riscv64-linux-gnu",       "qemu-riscv64"},
+      {"riscv64-linux",   "riscv64-linux-gnu",       "qemu-riscv64"},
+      {"windows-x64",     "x86_64-w64-windows-gnu", "wine"},
+      {"windows-x86_64",  "x86_64-w64-windows-gnu", "wine"},
+    };
+    int np = sizeof(presets) / sizeof(presets[0]);
+    for (int p = 0; p < np; p++) {
+      if (strcmp(cross_triple, presets[p][0]) == 0) {
+        cross_triple = presets[p][1];
+        cross_qemu = presets[p][2];
+        break;
+      }
+    }
+  }
+  if (ny_argv_has_flag(argc, argv, "--cross-run")) {
+    if (!cross_triple) {
+      fprintf(stderr, "ny: --cross-run requires --cross=<triple>\n");
+      return 2;
+    }
+    cross_run = true;
+    int dst = 1;
+    for (int i = 1; i < argc; i++) {
+      if (strcmp(argv[i], "--cross-run") == 0) continue;
+      argv[dst++] = argv[i];
+    }
+    argc = dst;
+  }
+  if (cross_triple) {
+    if (!cross_triple || !*cross_triple) {
+      fprintf(stderr, "ny: --cross requires a target triple (e.g. --cross=aarch64-linux-gnu)\n");
+      return 2;
+    }
+    /*
+     * Auto-detect cross-compiler: try <triple>-gcc, then <triple>-clang
+     */
+    char cc_name[256];
+    snprintf(cc_name, sizeof(cc_name), "%s-gcc", cross_triple);
+    char *cc_path = ny_doctor_which(cc_name);
+    if (!cc_path) {
+      snprintf(cc_name, sizeof(cc_name), "%s-clang", cross_triple);
+      cc_path = ny_doctor_which(cc_name);
+    }
+    if (cc_path) {
+      ny_setenv_force("NYTRIX_CC", cc_path);
+      free(cc_path);
+    }
+    /*
+     * If cross-run, find QEMU/Wine.  Use preset runner if available, else probe.
+     */
+    if (cross_run) {
+      const char *runner = cross_qemu;
+      if (!runner) {
+        if (strstr(cross_triple, "aarch64") || strstr(cross_triple, "arm64"))
+          runner = "qemu-aarch64";
+        else if (strstr(cross_triple, "arm"))
+          runner = "qemu-arm";
+        else if (strstr(cross_triple, "riscv64"))
+          runner = "qemu-riscv64";
+        else if (strstr(cross_triple, "x86_64") || strstr(cross_triple, "amd64"))
+          runner = "qemu-x86_64";
+        else if (strstr(cross_triple, "windows") || strstr(cross_triple, "mingw"))
+          runner = "wine";
+      }
+      if (runner) {
+        char *qemu = ny_doctor_which(runner);
+        if (qemu) {
+          ny_setenv_force("NYTRIX_CROSS_RUNNER", qemu);
+          free(qemu);
+        }
+      }
+    }
+    /*
+     * Strip --cross=... and insert --host-triple=...
+     */
+    static char *xargv[256];
+    int dst = 1;
+    xargv[0] = argv[0];
+    for (int j = 1; j < argc; j++) {
+      if (strncmp(argv[j], "--cross=", 8) == 0) continue;
+      xargv[dst++] = argv[j];
+    }
+    xargv[dst++] = (char *)"--host-triple";
+    xargv[dst++] = (char *)cross_triple;
+    xargv[dst] = NULL;
+    argv = xargv;
+    argc = dst;
+  }
   if (!getenv("NYTRIX_SHARE_ROOT") || !*getenv("NYTRIX_SHARE_ROOT")) {
     const char *share_root = ny_src_root();
     if (share_root && *share_root)
@@ -1508,9 +2037,11 @@ int main(int argc, char **argv, char **envp) {
   if (ui_arg_bridge_rc != 0)
     return ui_arg_bridge_rc;
 
-  /* A NYIR binary is a validated, pointer-free execution artifact. Running
+  /*
+   * A NYIR binary is a validated, pointer-free execution artifact. Running
    * one directly must not fall through to the REPL/default source pipeline:
-   * that would recreate the AST boundary this option is intended to bypass. */
+   * that would recreate the AST boundary this option is intended to bypass.
+   */
   if (opt.mode == NY_MODE_RUN && opt.nyir_run_bin_path &&
       !opt.nyir_dump_bin && !opt.command_string && !opt.input_file) {
     char nyir_err[512] = {0};
@@ -1571,12 +2102,42 @@ int main(int argc, char **argv, char **envp) {
     if (stat(watched_path, &st0) == 0) last_mtime = (long long)st0.st_mtime;
   }
 
+  /*
+   * --emit-wasm: auto-generate IR path so the pipeline emits .ll for clang
+   */
+  if (opt.emit_wasm_path && !opt.emit_ir_path) {
+    static char tmp_ir[512];
+    snprintf(tmp_ir, sizeof(tmp_ir), "/tmp/ny-emit-wasm-%d.ll", (int)getpid());
+    opt.emit_ir_path = tmp_ir;
+  }
+
   do {
+    if (profile_runs > 0) {
+      double min_t = 1e99, max_t = 0.0, sum_t = 0.0;
+      fprintf(stderr, "profile-time: %d run(s)\n", profile_runs);
+      for (int r = 1; r <= profile_runs; r++) {
+        fprintf(stderr, "  run %d/%d ... ", r, profile_runs);
+        fflush(stderr);
+        ny_tick_t t0 = ny_ticks_now();
+        exit_code = ny_pipeline_run(&opt);
+        double elapsed = ny_ticks_elapsed_sec(t0);
+        fprintf(stderr, "%.3fs%s\n", elapsed, exit_code != 0 ? " (FAILED)" : "");
+        if (elapsed < min_t) min_t = elapsed;
+        if (elapsed > max_t) max_t = elapsed;
+        sum_t += elapsed;
+      }
+      fprintf(stderr,
+              "profile-time summary: min=%.3fs  mean=%.3fs  max=%.3fs  runs=%d\n",
+              min_t, sum_t / profile_runs, max_t, profile_runs);
+      break;
+    }
     exit_code = ny_pipeline_run(&opt);
     if (!watching) break;
 
-    // Real file watcher + mtime fallback for --watch / --hot-reload
-    // Linux: inotify, macOS: kqueue, Windows: change notification, else: mtime poll
+    /*
+     * Real file watcher + mtime fallback for --watch / --hot-reload
+     * Linux: inotify, macOS: kqueue, Windows: change notification, else: mtime poll
+     */
     const char *watcher_label =
 #if defined(__linux__)
       "inotify";
@@ -1595,7 +2156,9 @@ int main(int argc, char **argv, char **envp) {
     int poll_ms = opt.watch_poll_ms > 0 ? opt.watch_poll_ms : 250;
 
 #if defined(__linux__)
-    /* Linux real inotify */
+    /*
+     * Linux real inotify
+     */
     {
       int ifd = -1, iwd = -1;
       const char *wt = watched_path[0] ? watched_path : ".";
@@ -1628,7 +2191,9 @@ int main(int argc, char **argv, char **envp) {
       }
     }
 #elif defined(__APPLE__)
-    /* macOS real kqueue (EVFILT_VNODE) */
+    /*
+     * macOS real kqueue (EVFILT_VNODE)
+     */
     {
       int kq = kqueue();
       int vfd = -1;
@@ -1667,7 +2232,9 @@ int main(int argc, char **argv, char **envp) {
       if (kq >= 0) close(kq);
     }
 #elif defined(_WIN32)
-    /* Windows: use FindFirstChangeNotification when possible */
+    /*
+     * Windows: use FindFirstChangeNotification when possible
+     */
     {
       HANDLE h = INVALID_HANDLE_VALUE;
       if (watched_path[0]) {
@@ -1697,11 +2264,15 @@ int main(int argc, char **argv, char **envp) {
       if (h != INVALID_HANDLE_VALUE) FindCloseChangeNotification(h);
     }
 #else
-    /* Generic mtime poll */
+    /*
+     * Generic mtime poll
+     */
     (void)0;
 #endif
 
-    /* universal mtime poll fallback */
+    /*
+     * universal mtime poll fallback
+     */
     if (!changed) {
       while (!changed) {
 #ifndef _WIN32
@@ -1723,8 +2294,48 @@ int main(int argc, char **argv, char **envp) {
     if (changed) {
       fprintf(stderr, "[hot] change detected, reloading...\n");
     }
-    /* loop will recompile + rerun */
+    /*
+     * loop will recompile + rerun
+     */
   } while (watching);
+
+  /*
+   * --emit-wasm: after successful compilation, invoke clang to produce .wasm
+   */
+  if (opt.emit_wasm_path && exit_code == 0) {
+    const char *ir = opt.emit_ir_path;
+    char *clang = ny_doctor_which("clang");
+    if (!clang) {
+      fprintf(stderr, "ny: --emit-wasm requires clang (not found)\n");
+      exit_code = 1;
+    } else if (!ir || !*ir) {
+      fprintf(stderr, "ny: --emit-wasm: no IR file available\n");
+      exit_code = 1;
+      free(clang);
+    } else {
+      char cmd[4096];
+      snprintf(cmd, sizeof(cmd),
+        "%s --target=wasm32 -O2 -nostdlib "
+        "-Wl,--no-entry -Wl,--export-memory -Wl,--allow-undefined "
+        "-Wl,--export-if-defined=_ny_top_entry "
+        "-Wl,--export-if-defined=main "
+        "-Wl,--export-if-defined=ny_web_init "
+        "-Wl,--export-if-defined=ny_web_main "
+        "-Wl,--export-if-defined=ny_web_frame "
+        "-Wl,--export-if-defined=ny_web_render "
+        "-Wl,--initial-memory=16777216 -Wl,--max-memory=67108864 "
+        "-o '%s' '%s' 2>&1",
+        clang, opt.emit_wasm_path, ir);
+      free(clang);
+      int rc = system(cmd);
+      if (rc != 0) {
+        fprintf(stderr, "ny: --emit-wasm: clang failed (exit %d)\n", rc);
+        exit_code = 1;
+      } else {
+        fprintf(stderr, "ny: emitted %s\n", opt.emit_wasm_path);
+      }
+    }
+  }
 
   ny_options_free(&opt);
   ny_std_free_modules();

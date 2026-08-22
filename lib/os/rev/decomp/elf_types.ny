@@ -1,7 +1,6 @@
 ;; Keywords: elf machine symbols segments permissions
 ;; Stable ELF classification helpers shared by decompiler passes.
 module std.os.rev.decomp.elf_types(machine, file_type, symbol_bind, symbol_type, segment_perms)
-
 use std.core
 
 fn machine(int id) str {
@@ -47,7 +46,7 @@ fn symbol_type(int info) str {
 
 fn segment_perms(int flags) str {
    ((flags & 4) != 0 ? "r" : "-") + ((flags & 2) != 0 ? "w" : "-") +
-      ((flags & 1) != 0 ? "x" : "-")
+   ((flags & 1) != 0 ? "x" : "-")
 }
 
 #main {

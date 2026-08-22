@@ -1,0 +1,16 @@
+shape nyir_extern_comptime_branch {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "extern", "comptime", "platform"]
+  template ny-test-case
+  flags "--native-backend x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+if comptime { __os_name() == "windows" } {
+  extern { fn branch_pid() i64 as "GetCurrentProcessId" }
+} else {
+  extern { fn branch_pid() i64 as "getpid" }
+}
+assert(branch_pid() > 0, "selected platform extern")
+NY
+}

@@ -497,11 +497,10 @@ fn join(list items, str sep="") str {
    while i < n {
       mut part = items.get(i)
       if !is_str(part) { part = to_str(part) }
-      parts[i] = part
+      _list_push_reserved(parts, part)
       total += part.len
       i += 1
    }
-   store64(parts, n, 0)
    mut out = malloc(total + 1)
    if !out { return "" }
    init_str(out, total)

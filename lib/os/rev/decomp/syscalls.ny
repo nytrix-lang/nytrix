@@ -1,7 +1,6 @@
 ;; Keywords: linux syscalls abi arguments pseudocode
 ;; Linux syscall number, ABI, and argument-name decoding for pseudocode.
 module std.os.rev.decomp.syscalls *
-
 use std.core
 
 fn _syscall_name_x86_64(int nr) str {
@@ -146,7 +145,7 @@ fn _syscall_name_linux_arm(int nr) str {
    }
 }
 
-fn _syscall_name_for (str family, int nr) str {
+fn _syscall_name_for(str family, int nr) str {
    if nr < 0 { return "syscall_unknown" }
    if family == "aarch64" || family == "riscv" { return _syscall_name_linux_generic(nr) }
    if family == "arm" { return _syscall_name_linux_arm(nr) }
@@ -156,6 +155,7 @@ fn _syscall_name_for (str family, int nr) str {
 fn _syscall_name(int nr) str {
    _syscall_name_x86_64(nr)
 }
+
 fn _syscall_arg_label(int nr, str reg) str {
    if reg == "rax" { return "syscall_nr" }
    if nr == 0 || nr == 1 || nr < 0 {
@@ -425,7 +425,7 @@ fn _syscall_arg_label_generic(str family, int nr, str reg) str {
       i += 1
    }
    if pos < 0 { return "syscall_" + reg }
-   def name = _syscall_name_for (family, nr)
+   def name = _syscall_name_for(family, nr)
    if name == "read" || name == "write" {
       if pos == 0 { return "syscall_fd" }
       if pos == 1 { return "syscall_buf" }
@@ -498,7 +498,7 @@ fn _syscall_arg_label_generic(str family, int nr, str reg) str {
    "syscall_arg" + to_str(pos)
 }
 
-fn _syscall_arg_label_for (str family, int nr, str reg) str {
+fn _syscall_arg_label_for(str family, int nr, str reg) str {
    if family == "x86" || family == "x86_64" { return _syscall_arg_label(nr, reg) }
    _syscall_arg_label_generic(family, nr, reg)
 }

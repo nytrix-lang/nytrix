@@ -833,7 +833,7 @@ fn _create_input_context(any im, any window_handle) any {
       cstr("inputStyle"), XIMPreeditNothing | XIMStatusNothing,
       cstr("clientWindow"), window_handle,
       cstr("focusWindow"), window_handle,
-   0)
+      0)
    if !ic { _dbg_input("XCreateIC failed; continuing without text input context") }
    ic
 }
@@ -886,7 +886,7 @@ fn _emit_utf8_chars(list events, dict win, ptr buffer, int count, int mods, bool
          char_data["plain"] = plain
          _dbg_input("char utf8 codepoint=" + to_str(codepoint) +
             " mods=0x" + str.to_hex(mods) +
-         " plain=" + to_str(plain))
+            " plain=" + to_str(plain))
          events = _push_translated_event(events, 3, win, char_data)
       }
       if next > i { i = next }
@@ -915,7 +915,7 @@ fn _emit_ic_chars(list events, dict win, ptr event_ptr, int mods, bool plain) li
    if ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") {
       _dbg_input("xim lookup count=" + to_str(count) +
          " status=" + to_str(status) +
-      " keysym=0x" + str.to_hex(load64_h(keysym_ptr, 0)))
+         " keysym=0x" + str.to_hex(load64_h(keysym_ptr, 0)))
    }
    if status == XBufferOverflow && count > 0 {
       free(buffer)
@@ -932,7 +932,7 @@ fn _emit_ic_chars(list events, dict win, ptr event_ptr, int mods, bool plain) li
       if ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") {
          _dbg_input("xim lookup resize count=" + to_str(count) +
             " status=" + to_str(status) +
-         " keysym=0x" + str.to_hex(load64_h(keysym_ptr, 0)))
+            " keysym=0x" + str.to_hex(load64_h(keysym_ptr, 0)))
       }
    }
    if count > 0 && (status == XLookupChars || status == XLookupBoth) {
@@ -1021,7 +1021,7 @@ fn get_window_property(any display, any win, any property, any typ, int long_len
    }
    store64_h(prop, 0, 0)
    def status = XGetWindowProperty(display, win, property, 0, long_length, 0, typ,
-   actual_type, actual_format, nitems, bytes_after, prop)
+      actual_type, actual_format, nitems, bytes_after, prop)
    if status != Success {
       free(actual_type, actual_format, nitems, bytes_after, prop)
       return false
@@ -1215,7 +1215,7 @@ fn send_wm_state_event(
 ) bool {
    "Sends an EWMH `_NET_WM_STATE` client message."
    send_client_message(display, root, win, net_wm_state_atom,
-   action, first_atom, second_atom, source_indication, 0)
+      action, first_atom, second_atom, source_indication, 0)
 }
 
 fn _iconify_window_raw(any display, any window_handle, int screen_number) bool {
@@ -1459,7 +1459,7 @@ fn _reply_wm_ping(any display, any root, any event_ptr) bool {
    store64_h(reply, root, 32)
    XSendEvent(display, root, 0,
       SubstructureNotifyMask | SubstructureRedirectMask,
-   reply)
+      reply)
    free(reply)
    true
 }
@@ -1518,7 +1518,7 @@ fn _update_normal_hints_for_size(
    def size = get_window_size(display, win)
    if !size || !is_dict(size) { return false }
    def ok = update_normal_hints(display, win, size.get("width", 0), size.get("height", 0),
-   resizable, monitor, minwidth, minheight, maxwidth, maxheight, numer, denom)
+      resizable, monitor, minwidth, minheight, maxwidth, maxheight, numer, denom)
    flush(display)
    ok
 }
@@ -1530,7 +1530,7 @@ fn _set_window_size_limits_raw(
 ) bool {
    "Set native X11 window size limits."
    _update_normal_hints_for_size(display, win, resizable, monitor,
-   minwidth, minheight, maxwidth, maxheight, numer, denom)
+      minwidth, minheight, maxwidth, maxheight, numer, denom)
 }
 
 fn _set_window_aspect_ratio_raw(
@@ -1540,13 +1540,13 @@ fn _set_window_aspect_ratio_raw(
 ) bool {
    "Set native X11 window aspect-ratio hints."
    _update_normal_hints_for_size(display, win, resizable, monitor,
-   minwidth, minheight, maxwidth, maxheight, numer, denom)
+      minwidth, minheight, maxwidth, maxheight, numer, denom)
 }
 
 fn _maximize_window_raw(any display, any root, any window_handle, any net_wm_state_atom, any max_vert_atom, any max_horz_atom) bool {
    if is_window_visible(display, window_handle) {
       def ok_visible = send_wm_state_event(display, root, window_handle, net_wm_state_atom,
-      NET_WM_STATE_ADD, max_vert_atom, max_horz_atom)
+         NET_WM_STATE_ADD, max_vert_atom, max_horz_atom)
       flush(display)
       return ok_visible
    }
@@ -1577,7 +1577,7 @@ fn _restore_window_raw(any display, any root, any window_handle, any wm_state_at
    }
    if root && is_window_visible(display, window_handle) && net_wm_state_atom && max_vert_atom && max_horz_atom {
       def ok = send_wm_state_event(display, root, window_handle, net_wm_state_atom,
-      NET_WM_STATE_REMOVE, max_vert_atom, max_horz_atom)
+         NET_WM_STATE_REMOVE, max_vert_atom, max_horz_atom)
       flush(display)
       return ok
    }
@@ -1635,7 +1635,7 @@ fn _set_window_decorated_raw(any display, any win, any motif_wm_hints_atom, bool
    store32(hints, MWM_HINTS_DECORATIONS, 0)
    store32(hints, enabled ? MWM_DECOR_ALL : 0, 16)
    def ok = XChangeProperty(display, win, motif_wm_hints_atom, motif_wm_hints_atom, 32,
-   PropModeReplace, hints, 5) == 0
+      PropModeReplace, hints, 5) == 0
    free(hints)
    ok
 }
@@ -1655,7 +1655,7 @@ fn _update_window_hints(
    if !display || !handle { return false }
    def sz = get_size(win)
    update_normal_hints(display, handle, sz.get(0), sz.get(1), resizable, false,
-   min_w, min_h, max_w, max_h, numer, denom)
+      min_w, min_h, max_w, max_h, numer, denom)
    XFlush(display)
    true
 }
@@ -1742,7 +1742,7 @@ fn set_window_opacity(any win, f64 opacity) bool {
    def scaled = int(opacity * 4294967295.0 + 0.5)
    store32(value, scaled, 0)
    def ok = XChangeProperty(display, handle, net_wm_window_opacity_atom, XA_CARDINAL, 32,
-   PropModeReplace, value, 1) == 0
+      PropModeReplace, value, 1) == 0
    free(value)
    flush(display)
    ok
@@ -1917,7 +1917,7 @@ fn _capture_cursor(any display, any win, any cursor=0) bool {
    if common.env_truthy("NY_UI_HEADLESS") { return true }
    XGrabPointer(display, win, 1,
       ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-   GrabModeAsync, GrabModeAsync, win, cursor, CurrentTime) == GrabSuccess
+      GrabModeAsync, GrabModeAsync, win, cursor, CurrentTime) == GrabSuccess
 }
 
 fn _release_cursor(any display) bool {
@@ -1960,28 +1960,29 @@ fn _set_cursor_visibility(any display, any win, bool visible) bool {
    true
 }
 
-fn get_key_state(dict win, int key) int {
+fn get_key_state(any win, int key) int {
    "Returns live key state for the native X11 window, falling back to cached events."
-   if !win || !is_dict(win) { return 0 }
-   def display = win.get("display", 0)
-   if display {
-      mut code = int(win.get("x11_scancodes", dict(8)).get(key, 0))
-      if code <= 0 {
-         def keysym = x11_keymap.keysym_from_key(int(key))
-         if keysym != 0 { code = int(XKeysymToKeycode(display, keysym)) }
-      }
-      if code > 0 && code < 256 {
-         def keys = zalloc(32)
-         if keys {
-            XQueryKeymap(display, keys)
-            def byte = load8(keys, int(code / 8))
-            def down = band(byte, 1 << (code % 8)) != 0
-            free(keys)
-            return down ? 1 : 0
-         }
+   mut display = 0
+   if is_dict(win) { display = win.get("display", 0) }
+   if !display { display = _get_x11_val("display", 0) }
+   mut code = 0
+   if is_dict(win) { code = int(win.get("x11_scancodes", dict(8)).get(key, 0)) }
+   if code <= 0 {
+      def keysym = x11_keymap.keysym_from_key(int(key))
+      if keysym != 0 && display { code = int(XKeysymToKeycode(display, keysym)) }
+   }
+   if display && code > 0 && code < 256 {
+      def keys = zalloc(32)
+      if keys {
+         XQueryKeymap(display, keys)
+         def byte = load8(keys, int(code / 8))
+         def down = band(byte, 1 << (code % 8)) != 0
+         free(keys)
+         return down ? 1 : 0
       }
    }
-   win.get("key_states", dict(8)).get(key, false) ? 1 : 0
+   if is_dict(win) { return win.get("key_states", dict(8)).get(key, false) ? 1 : 0 }
+   0
 }
 
 fn _x11_mouse_button_mask_for_ny_button(int button) int {
@@ -2108,7 +2109,7 @@ fn set_input_mode(dict win, int mode, int value) dict {
       _dbg_input("raw mode request=" + to_str(value) +
          " xi=" + to_str(xi_available) +
          " cursor=" + to_str(cursor_mode) +
-      " enabled=" + to_str(win.get("raw_mouse_motion", false)))
+         " enabled=" + to_str(win.get("raw_mouse_motion", false)))
       return win
    }
    if mode == INPUT_MODE_STICKY_KEYS {
@@ -2200,7 +2201,7 @@ fn set_input_mode(dict win, int mode, int value) dict {
          " auto_raw=" + to_str(win.get("raw_mouse_lock_auto", false)) +
          " center=(" + to_str(center_x) + "," + to_str(center_y) + ")" +
          " restore=(" + to_str(win.get("restore_cursor_x", center_x)) +
-      "," + to_str(win.get("restore_cursor_y", center_y)) + ")")
+         "," + to_str(win.get("restore_cursor_y", center_y)) + ")")
       return win
    }
    win
@@ -2236,7 +2237,7 @@ fn get_key_scancode(any win, int key) int {
 fn _request_window_attention_raw(any display, any root, any win, any net_wm_state_atom, any demands_attention_atom) bool {
    if !display || !root || !win || !net_wm_state_atom || !demands_attention_atom { return false }
    def ok = send_wm_state_event(display, root, win, net_wm_state_atom,
-   NET_WM_STATE_ADD, demands_attention_atom)
+      NET_WM_STATE_ADD, demands_attention_atom)
    flush(display)
    ok
 }
@@ -2395,7 +2396,7 @@ fn _icon_image_pixels(any image) any {
    if !is_dict(image) { return 0 }
    image.get("pixels_ptr",
       image.get("pixels",
-   image.get("data", 0)))
+         image.get("data", 0)))
 }
 
 fn _icon_pixel_source_len(any pixels) int {
@@ -2507,7 +2508,7 @@ fn _realize_cursor_handle(any display, any cursor) any {
       handle = _create_native_cursor_handle(display,
          spec.get("image", 0),
          spec.get("xhot", 0),
-      spec.get("yhot", 0))
+         spec.get("yhot", 0))
    }
    spec["display"] = display
    spec["handle"] = handle
@@ -2610,7 +2611,7 @@ fn set_window_icon(dict win, any images) bool {
       i += 1
    }
    def ok = XChangeProperty(display, handle, net_wm_icon_atom, XA_CARDINAL, 32,
-   PropModeReplace, icon, long_count) == 0
+      PropModeReplace, icon, long_count) == 0
    free(icon)
    flush(display)
    ok
@@ -2620,12 +2621,12 @@ fn _xevent_client_l(any event_ptr, int index) any { load64_h(event_ptr, 56 + ind
 
 fn _send_xdnd_status(any display, any source, any target, bool accept, any action_copy_atom=0) bool {
    _send_xdnd_client_message(display, source, target.get("xdnd_status", 0),
-   target.get("handle", 0), accept ? 1 : 0, 0, 0, accept ? action_copy_atom : 0)
+      target.get("handle", 0), accept ? 1 : 0, 0, 0, accept ? action_copy_atom : 0)
 }
 
 fn _send_xdnd_finished(any display, any source, any target, bool accepted, any action_copy_atom=0) bool {
    _send_xdnd_client_message(display, source, target.get("xdnd_finished", 0),
-   target.get("handle", 0), accepted ? 1 : 0, accepted ? action_copy_atom : 0)
+      target.get("handle", 0), accepted ? 1 : 0, accepted ? action_copy_atom : 0)
 }
 
 fn _send_xdnd_client_message(any display, any source, any message, any window_handle, any l0=0, any l1=0, any l2=0, any l3=0) bool {
@@ -3094,7 +3095,7 @@ fn set_window_monitor(dict win, any monitor, int xpos, int ypos, int width, int 
             if chosen_mode && chosen_mode != current_mode {
                XRRSetCrtcConfig(display, resources, crtc, CurrentTime,
                   load32(crtc_info, 8), load32(crtc_info, 12), chosen_mode,
-               rotation, load64(crtc_info, 40), load32(crtc_info, 36))
+                  rotation, load64(crtc_info, 40), load32(crtc_info, 36))
                win["monitor_old_mode"] = current_mode
             }
             XRRFreeOutputInfo(output_info)
@@ -3112,11 +3113,11 @@ fn set_window_monitor(dict win, any monitor, int xpos, int ypos, int width, int 
       }
       update_normal_hints(display, handle, width, height, win.get("resizable", true), true)
       _set_fullscreen_monitors(display, root, handle,
-      win.get("net_wm_fullscreen_monitors", 0), monitor)
+         win.get("net_wm_fullscreen_monitors", 0), monitor)
       if ewmh_fullscreen {
          set_window_fullscreen(display, root, handle,
             win.get("net_wm_state", 0),
-         win.get("net_wm_state_fullscreen", 0), true)
+            win.get("net_wm_state_fullscreen", 0), true)
       } else {
          _set_override_redirect(display, handle, true)
       }
@@ -3146,18 +3147,18 @@ fn set_window_monitor(dict win, any monitor, int xpos, int ypos, int width, int 
          if crtc_info && old_mode {
             XRRSetCrtcConfig(display, resources, crtc, CurrentTime,
                load32(crtc_info, 8), load32(crtc_info, 12), old_mode,
-            load16(crtc_info, 32), load64(crtc_info, 40), load32(crtc_info, 36))
+               load16(crtc_info, 32), load64(crtc_info, 40), load32(crtc_info, 36))
          }
          if crtc_info { XRRFreeCrtcInfo(crtc_info) }
          XRRFreeScreenResources(resources)
       }
    }
    _set_fullscreen_monitors(display, root, handle,
-   win.get("net_wm_fullscreen_monitors", 0), false)
+      win.get("net_wm_fullscreen_monitors", 0), false)
    if ewmh_fullscreen {
       set_window_fullscreen(display, root, handle,
          win.get("net_wm_state", 0),
-      win.get("net_wm_state_fullscreen", 0), false)
+         win.get("net_wm_state_fullscreen", 0), false)
    } else {
       _set_override_redirect(display, handle, false)
    }
@@ -3487,7 +3488,7 @@ fn _get_selection_text(any win, str selection_key, str local_key) str {
                selection_property_atom,
                target,
                incr_atom,
-            timeout_ms)
+               timeout_ms)
             if text { return text }
          }
       } else {
@@ -3509,7 +3510,7 @@ fn set_title(any win, str title) bool {
    store_name(win.get("display", 0), win.get("handle", 0), title,
       win.get("net_wm_name", 0),
       win.get("net_wm_icon_name", 0),
-   win.get("utf8_string", 0))
+      win.get("utf8_string", 0))
 }
 
 fn get_window_attrib(any win, int attrib) int {
@@ -3528,13 +3529,13 @@ fn get_window_attrib(any win, int attrib) int {
          result = is_window_maximized(display, handle,
             win.get("net_wm_state", 0),
             win.get("net_wm_state_maximized_vert", 0),
-         win.get("net_wm_state_maximized_horz", 0)) ? 1 : 0
+            win.get("net_wm_state_maximized_horz", 0)) ? 1 : 0
       }
       TRANSPARENT_FRAMEBUFFER -> { result = win.get("transparent", false) ? 1 : 0 }
       FLOATING -> {
          result = is_window_floating(display, handle,
             win.get("net_wm_state", 0),
-         win.get("net_wm_state_above", 0)) ? 1 : 0
+            win.get("net_wm_state_above", 0)) ? 1 : 0
       }
       HOVERED -> {
          result = _window_hovered(display, handle) ? 1 : 0
@@ -3640,7 +3641,7 @@ fn _push_selection_to_manager(any win, int timeout_ms=250) bool {
                win.get("targets_atom", 0),
                win.get("multiple_atom", 0),
                win.get("atom_pair_atom", 0),
-            save_targets)
+               save_targets)
             _send_selection_notify(display, requestor, selection, target, reply_property, time)
          } elif typ == SelectionNotify && load64_h(event_buf, 56) == save_targets {
             free(event_buf)
@@ -3656,7 +3657,7 @@ fn _push_selection_to_manager(any win, int timeout_ms=250) bool {
 
 fn _push_translated_event(list events, int typ, any win, any data=0) list {
    def h = win.get("handle", 0)
-   def e = ui_event.make_event(typ, win, h, data)
+   def e = ui_event.make_event(typ, h, h, data)
    return events.append(e)
 }
 
@@ -3806,13 +3807,13 @@ fn _translate_raw_motion_event(any win, any event_ptr, list events) list {
          " mask_len=" + to_str(mask_len) +
          " vals=[" + debug_vals + "]" +
          " dx=" + to_str(dx) +
-      " dy=" + to_str(dy))
+         " dy=" + to_str(dy))
    } elif !raw_nonzero && raw_zero_dbg_count < 4 {
       win["raw_motion_zero_debug_count"] = raw_zero_dbg_count + 1
       _dbg_input("raw motion zero dev=" + to_str(deviceid) +
          " src=" + to_str(sourceid) +
          " mask_len=" + to_str(mask_len) +
-      " vals=[" + debug_vals + "]")
+         " vals=[" + debug_vals + "]")
    }
    if raw_nonzero {
       win["raw_motion_nonzero_seen"] = true
@@ -3879,7 +3880,7 @@ fn _create_key_tables(any display) dict {
    def keysyms = XGetKeyboardMapping(display,
       scancode_min,
       scancode_max - scancode_min + 1,
-   width_ptr)
+      width_ptr)
    def width = load32(width_ptr, 0)
    free(width_ptr)
    mut scancode = scancode_min
@@ -3973,7 +3974,7 @@ fn _translate_key_press_event(any win, any event_ptr, list events, any key_state
       _dbg_input("key press key=" + _dbg_key_name(win, key, scancode) +
          " scancode=" + to_str(scancode) +
          " mods=0x" + str.to_hex(mods) +
-      " repeat=" + to_str(is_repeat))
+         " repeat=" + to_str(is_repeat))
    }
    events = _push_translated_event(events, 1, win, data)
    if ic && !was_filtered {
@@ -4029,7 +4030,7 @@ fn _translate_key_release_event(any win, any event_ptr, list events, any key_sta
       if _input_debug_enabled() {
          _dbg_input("key release key=" + _dbg_key_name(win, key, scancode) +
             " scancode=" + to_str(scancode) +
-         " mods=0x" + str.to_hex(mods))
+            " mods=0x" + str.to_hex(mods))
       }
       events = _push_translated_event(events, 2, win, data)
    }
@@ -4051,7 +4052,7 @@ fn _translate_button_press_event(any win, any event_ptr, list events, any mouse_
       win["modifiers"] = mods
       _dbg_input("mouse scroll dx=" + to_str(data.get("dx", 0.0)) +
          " dy=" + to_str(data.get("dy", 0.0)) +
-      " mods=0x" + str.to_hex(mods))
+         " mods=0x" + str.to_hex(mods))
       events = _push_translated_event(events, 6, win, data)
    } else {
       def x, y = load32(event_ptr, 64), load32(event_ptr, 68)
@@ -4071,7 +4072,7 @@ fn _translate_button_press_event(any win, any event_ptr, list events, any mouse_
       win["mouse_y"] = y
       _dbg_input("mouse press button=" + to_str(ny_button) +
          " x=" + to_str(x) + " y=" + to_str(y) +
-      " mods=0x" + str.to_hex(mods))
+         " mods=0x" + str.to_hex(mods))
       events = _push_translated_event(events, 4, win, data)
    }
    [win, events]
@@ -4099,7 +4100,7 @@ fn _translate_button_release_event(any win, any event_ptr, list events, any mous
       win["mouse_y"] = y
       _dbg_input("mouse release button=" + to_str(ny_button) +
          " x=" + to_str(x) + " y=" + to_str(y) +
-      " mods=0x" + str.to_hex(mods))
+         " mods=0x" + str.to_hex(mods))
       events = _push_translated_event(events, 5, win, data)
    }
    [win, events]
@@ -4160,7 +4161,7 @@ fn _translate_motion_event(
                " pos=(" + to_str(x) + "," + to_str(y) + ")" +
                " center=(" + to_str(center_x) + "," + to_str(center_y) + ")" +
                " delta=(" + to_str(dx) + "," + to_str(dy) + ")" +
-            " size=(" + to_str(win_w) + "," + to_str(win_h) + ")")
+               " size=(" + to_str(win_w) + "," + to_str(win_h) + ")")
          }
          def virt_x = float(win.get("virtual_cursor_x", center_x)) + float(dx)
          def virt_y = float(win.get("virtual_cursor_y", center_y)) + float(dy)
@@ -5133,7 +5134,7 @@ fn _x11_window_atom_state(any display) dict {
          "NYTRIX_SELECTION", "XdndAware", "XdndEnter", "XdndPosition",
          "XdndStatus", "XdndActionCopy", "XdndDrop", "XdndFinished",
          "XdndSelection", "XdndTypeList", "text/uri-list",
-   ])
+      ])
    {
       "wm_protocols": raw.get("WM_PROTOCOLS", 0),
       "wm_delete": raw.get("WM_DELETE_WINDOW", 0),
@@ -5323,7 +5324,7 @@ fn create_basic_window(
          " flags=0x" + str.to_hex(flags) +
          " event_arg=0x" + str.to_hex(event_mask) +
          " provided_visual=0x" + str.to_hex(provided_visual) +
-      " provided_depth=" + to_str(provided_depth))
+         " provided_depth=" + to_str(provided_depth))
    }
    def display = provided_display ? provided_display : open_display()
    if !display { return false }
@@ -5375,7 +5376,7 @@ fn create_basic_window(
    _set_window_type_normal(display, handle, net_wm_window_type, net_wm_window_type_normal)
    _set_window_manager_hints(display, handle)
    _set_initial_normal_hints(display, handle, width, height, !band(flags, WINDOW_NO_RESIZE),
-   x, y, x != 0 || y != 0)
+      x, y, x != 0 || y != 0)
    _set_class_hint(display, handle, instance_name, class_name)
    if im { ic = _create_input_context(im, handle) }
    _x11_enable_xdnd(display, handle, xdnd_aware)
@@ -5399,7 +5400,7 @@ fn create_basic_window(
    if randr_event_base { free(randr_event_base) }
    if randr_error_base { free(randr_error_base) }
    def cursor_mode = band(flags, WINDOW_CAPTURE_MOUSE) ? CURSOR_MODE_CAPTURED : (band(flags,
-   WINDOW_HIDE_MOUSE) ? CURSOR_MODE_HIDDEN : CURSOR_MODE_NORMAL)
+         WINDOW_HIDE_MOUSE) ? CURSOR_MODE_HIDDEN : CURSOR_MODE_NORMAL)
    mut win = _x11_build_window_state(
       display, im, ic, xkb, xi, key_tables, screen, root, colormap, visual, depth, handle, atoms,
       title, x, y, width, height, flags, event_mask, resizable, decorated, floating, fullscreen, hidden,
@@ -5409,7 +5410,7 @@ fn create_basic_window(
    if !hidden {
       if ic && focus_on_show { _c_xseticfocus(ic) }
       win = set_input_mode(win, INPUT_MODE_RAW_MOUSE,
-      win.get("raw_mouse_motion", false) ? 1 : 0)
+         win.get("raw_mouse_motion", false) ? 1 : 0)
       def initial_cursor_mode = win.get("cursor_mode", CURSOR_MODE_NORMAL)
       if initial_cursor_mode != CURSOR_MODE_NORMAL { win = set_input_mode(win, INPUT_MODE_CURSOR, initial_cursor_mode) }
       if focus_on_show {
@@ -5752,7 +5753,7 @@ fn xdnd_begin_drag(any win, any data, str mime_type="text/uri-list") bool {
    }
    XGrabPointer(display, handle, 1,
       bor(ButtonPressMask, bor(ButtonReleaseMask, PointerMotionMask)),
-   GrabModeAsync, GrabModeAsync, 0, 0, CurrentTime)
+      GrabModeAsync, GrabModeAsync, 0, 0, CurrentTime)
    flush(display)
    true
 }
@@ -5822,7 +5823,7 @@ fn set_video_mode(any monitor, int width, int height, int refresh_rate=0, any di
    def ok = best_mode != 0
    if ok {
       XRRSetCrtcConfig(display, resources, crtc, 0,
-      cx, cy, best_mode, rotation, outputs_ptr, noutputs)
+         cx, cy, best_mode, rotation, outputs_ptr, noutputs)
       XRRFreeCrtcInfo(crtc_info)
       flush(display)
    } else {

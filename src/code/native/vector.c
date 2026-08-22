@@ -1,3 +1,7 @@
+/*
+ * Native vector codegen: packed SIMD (v128) lowering for x86-64 SSE
+ * and AArch64 NEON, including register allocation and instruction selection.
+ */
 #include "code/native/internal.h"
 #include "code/native/object/internal.h"
 
@@ -99,7 +103,7 @@ static bool vector_backend_selftest(ny_native_backend_t backend,
         .effects = NY_MACH_EFFECT_WRITE_MEMORY}) &&
          ny_mach_emit(&mach, (ny_mach_inst_t){
         .opcode = NY_MACH_RET, .effects = NY_MACH_EFFECT_CONTROL});
-  if (ok && !ny_mach_verify(&mach, err, err_len))
+  if (ok && !ny_mach_verify(&mach, 0, err, err_len))
     ok = false;
 
   ny_obj_buf_t code = {0};
@@ -127,8 +131,10 @@ static bool vector_backend_selftest(ny_native_backend_t backend,
       memcpy(&word, code.data + i, sizeof(word));
       if ((word & 0xffe00000u) == 0x3cc00000u)
         has_load = true;
-      /* add v2.2d,v0.2d,v1.2d: the non-zero destination proves this was
-       * the allocated Q-register path rather than the q0 scratch fallback. */
+      /*
+       * add v2.2d,v0.2d,v1.2d: the non-zero destination proves this was
+       * the allocated Q-register path rather than the q0 scratch fallback.
+       */
       if ((word & 0xffe0fc00u) == 0x4e60d400u && (word & 31u) != 0)
         has_add = true;
     }
@@ -161,9 +167,11 @@ static bool vector_backend_selftest(ny_native_backend_t backend,
   return true;
 }
 
-/* Values crossing a CFG edge must be homed before the branch and reloaded in
+/*
+ * Values crossing a CFG edge must be homed before the branch and reloaded in
  * the destination block. The extra movdqu proves the x64 allocator took that
- * path instead of retaining a volatile XMM value. */
+ * path instead of retaining a volatile XMM value.
+ */
 static bool x64_vector_cfg_selftest(char *err, size_t err_len) {
   ny_options options = {0};
   options.native_backend = NY_NATIVE_BACKEND_X86_64;
@@ -214,7 +222,7 @@ static bool x64_vector_cfg_selftest(char *err, size_t err_len) {
              .effects = NY_MACH_EFFECT_WRITE_MEMORY}) &&
          ny_mach_emit(&mach, (ny_mach_inst_t){
              .opcode = NY_MACH_RET, .effects = NY_MACH_EFFECT_CONTROL});
-  if (ok && !ny_mach_verify(&mach, err, err_len))
+  if (ok && !ny_mach_verify(&mach, 0, err, err_len))
     ok = false;
 
   ny_obj_buf_t code = {0};
@@ -246,9 +254,11 @@ static bool x64_vector_cfg_selftest(char *err, size_t err_len) {
   return ok;
 }
 
-/* A scalar call may overwrite every caller-saved XMM register. This checks
+/*
+ * A scalar call may overwrite every caller-saved XMM register. This checks
  * that vector values live across the call are written to homes and reloaded
- * afterwards; vector argument/return ABI lowering is deliberately separate. */
+ * afterwards; vector argument/return ABI lowering is deliberately separate.
+ */
 static bool x64_vector_call_selftest(char *err, size_t err_len) {
   ny_options options = {0};
   options.native_backend = NY_NATIVE_BACKEND_X86_64;
@@ -298,7 +308,7 @@ static bool x64_vector_call_selftest(char *err, size_t err_len) {
              .effects = NY_MACH_EFFECT_WRITE_MEMORY}) &&
          ny_mach_emit(&mach, (ny_mach_inst_t){
              .opcode = NY_MACH_RET, .effects = NY_MACH_EFFECT_CONTROL});
-  if (ok && !ny_mach_verify(&mach, err, err_len))
+  if (ok && !ny_mach_verify(&mach, 0, err, err_len))
     ok = false;
 
   ny_obj_buf_t code = {0};
@@ -380,7 +390,7 @@ static bool aarch64_vector_cfg_selftest(char *err, size_t err_len) {
              .effects = NY_MACH_EFFECT_WRITE_MEMORY}) &&
          ny_mach_emit(&mach, (ny_mach_inst_t){
              .opcode = NY_MACH_RET, .effects = NY_MACH_EFFECT_CONTROL});
-  if (ok && !ny_mach_verify(&mach, err, err_len))
+  if (ok && !ny_mach_verify(&mach, 0, err, err_len))
     ok = false;
 
   ny_obj_buf_t code = {0};
@@ -413,9 +423,11 @@ static bool aarch64_vector_cfg_selftest(char *err, size_t err_len) {
   return ok;
 }
 
-/* A scalar call may overwrite every caller-saved Q register. This checks
+/*
+ * A scalar call may overwrite every caller-saved Q register. This checks
  * that vector values live across the call are written to homes and reloaded
- * afterwards; vector argument/return ABI lowering is deliberately separate. */
+ * afterwards; vector argument/return ABI lowering is deliberately separate.
+ */
 static bool aarch64_vector_call_selftest(char *err, size_t err_len) {
   ny_options options = {0};
   options.native_backend = NY_NATIVE_BACKEND_AARCH64;
@@ -465,7 +477,7 @@ static bool aarch64_vector_call_selftest(char *err, size_t err_len) {
              .effects = NY_MACH_EFFECT_WRITE_MEMORY}) &&
         ny_mach_emit(&mach, (ny_mach_inst_t){
              .opcode = NY_MACH_RET, .effects = NY_MACH_EFFECT_CONTROL});
-  if (ok && !ny_mach_verify(&mach, err, err_len))
+  if (ok && !ny_mach_verify(&mach, 0, err, err_len))
     ok = false;
 
   ny_obj_buf_t code = {0};
@@ -536,7 +548,7 @@ static bool aarch64_fpr_selftest(char *err, size_t err_len) {
         .src0 = selftest_fpr_vreg(sum), .effects = NY_MACH_EFFECT_WRITE_MEMORY}) &&
          ny_mach_emit(&mach, (ny_mach_inst_t){
         .opcode = NY_MACH_RET, .effects = NY_MACH_EFFECT_CONTROL});
-  if (ok && !ny_mach_verify(&mach, err, err_len))
+  if (ok && !ny_mach_verify(&mach, 0, err, err_len))
     ok = false;
   ny_obj_buf_t code = {0};
   ny_x64_obj_symbol_def_t defs[8] = {0};

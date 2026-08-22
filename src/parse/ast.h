@@ -266,6 +266,7 @@ typedef enum stmt_kind_t {
   NY_S_FOR,
   NY_S_TRY,
   NY_S_FUNC,
+  NY_S_LEMMA,
   NY_S_EXTERN,
   NY_S_LINK,
   NY_S_RETURN,
@@ -330,6 +331,7 @@ typedef struct stmt_guard_t {
 
 typedef struct stmt_while_t {
   expr_t *test;
+  expr_t *invariant; /* optional compile-time proof obligation */
   stmt_t *body;
   stmt_t *update;
   stmt_t *init;
@@ -393,6 +395,7 @@ typedef struct stmt_func_t {
   bool attr_constant_time;
   bool attr_optimize;
   int attr_optimize_level;
+  expr_t *attr_proves;   /* @proves(cond) post-condition */
   bool attr_accel;
   const char *attr_accel_target;
   bool attr_returns_owned;
@@ -411,6 +414,14 @@ typedef struct stmt_func_t {
   bool body_has_try;
   bool body_has_label_or_goto;
 } stmt_func_t;
+
+typedef struct stmt_lemma_t {
+  const char *name;
+  ny_param_list params;
+  expr_t *proposition;
+  const char *src_start;
+  const char *src_end;
+} stmt_lemma_t;
 
 typedef struct stmt_extern_t {
   const char *name;
@@ -467,15 +478,18 @@ typedef enum stmt_sema_kind_t {
 typedef struct layout_field_t {
   const char *name;
   const char *type_name;
-  int width;
+  int width; /* per-field 'align' override (bytes) */
   expr_t *default_value;
   const char *default_src;
+  int is_array;                /* field is `[elem, size]` — element type in type_name */
+  expr_t *array_len;           /* array extent expression: integer literal or def-bound deftype param name */
 } layout_field_t;
 
 typedef VEC(layout_field_t) ny_layout_field_list;
 
 typedef struct stmt_layout_t {
   const char *name;
+  ny_param_list deftype_params;
   ny_layout_field_list fields;
   ny_stmt_list methods;
   size_t align_override;
@@ -524,6 +538,7 @@ struct stmt_t {
     stmt_for_t fr;
     stmt_try_t tr;
     stmt_func_t fn;
+    stmt_lemma_t lemma;
     stmt_extern_t ext;
     struct {
       const char *lib;

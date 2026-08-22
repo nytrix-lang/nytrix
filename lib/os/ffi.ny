@@ -26,8 +26,7 @@ module std.os.ffi(RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL,
    __call3_f32_void, __call4_f32_void, __call4_ptr_ptr_ptr_ptr_void,
    CStruct, CType, cstr, cptr, u8, i8, u16, i16, u32, i32, u64, i64,
    f32, f64, ptr, handle, sizeof_struct, offsetof_struct, malloc, free,
-cstruct_set, cstruct_get, bind_lib, tag_native)
-
+   cstruct_set, cstruct_get, bind_lib, tag_native)
 use std.core
 use std.core.mem as mem
 use std.core.dict_mod as _d

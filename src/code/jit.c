@@ -1,3 +1,7 @@
+/*
+ * LLVM JIT engine: MCJIT and ORC backends for just-in-time compilation,
+ * native code caching, perf-map generation, and runtime code execution.
+ */
 #include "code/jit.h"
 #include "base/common.h"
 #include "base/util.h"
@@ -31,6 +35,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <stdlib.h>
 #ifdef _WIN32
 static int ny_jit_optind = 1;
 
@@ -54,189 +59,13 @@ extern int64_t rt_simmd_byte_class_reduce_raw(int64_t ptr_raw, int64_t len_raw,
 extern int64_t rt_simmd_i32_sqlscan_sum_raw(int64_t region_raw, int64_t tier_raw,
                                             int64_t amount_raw, int64_t flags_raw,
                                             int64_t n_raw, int64_t rounds_raw);
-
-static int64_t ny_missing_extern_stub0(void) { return 0; }
-static int64_t ny_missing_extern_stub1(int64_t a0) {
-  (void)a0;
-  return 0;
-}
-static int64_t ny_missing_extern_stub2(int64_t a0, int64_t a1) {
-  (void)a0;
-  (void)a1;
-  return 0;
-}
-static int64_t ny_missing_extern_stub3(int64_t a0, int64_t a1, int64_t a2) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  return 0;
-}
-static int64_t ny_missing_extern_stub4(int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  return 0;
-}
-static int64_t ny_missing_extern_stub5(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  (void)a4;
-  return 0;
-}
-static int64_t ny_missing_extern_stub6(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
-                                       int64_t a5) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  (void)a4;
-  (void)a5;
-  return 0;
-}
-static int64_t ny_missing_extern_stub7(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
-                                       int64_t a5, int64_t a6) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  (void)a4;
-  (void)a5;
-  (void)a6;
-  return 0;
-}
-static int64_t ny_missing_extern_stub8(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
-                                       int64_t a5, int64_t a6, int64_t a7) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  (void)a4;
-  (void)a5;
-  (void)a6;
-  (void)a7;
-  return 0;
-}
-static int64_t ny_missing_extern_stub9(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
-                                       int64_t a5, int64_t a6, int64_t a7, int64_t a8) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  (void)a4;
-  (void)a5;
-  (void)a6;
-  (void)a7;
-  (void)a8;
-  return 0;
-}
-static int64_t ny_missing_extern_stub10(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
-                                        int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                                        int64_t a9) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  (void)a4;
-  (void)a5;
-  (void)a6;
-  (void)a7;
-  (void)a8;
-  (void)a9;
-  return 0;
-}
-static int64_t ny_missing_extern_stub11(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
-                                        int64_t a5, int64_t a6, int64_t a7, int64_t a8, int64_t a9,
-                                        int64_t a10) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  (void)a4;
-  (void)a5;
-  (void)a6;
-  (void)a7;
-  (void)a8;
-  (void)a9;
-  (void)a10;
-  return 0;
-}
-static int64_t ny_missing_extern_stub12(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
-                                        int64_t a5, int64_t a6, int64_t a7, int64_t a8, int64_t a9,
-                                        int64_t a10, int64_t a11) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  (void)a4;
-  (void)a5;
-  (void)a6;
-  (void)a7;
-  (void)a8;
-  (void)a9;
-  (void)a10;
-  (void)a11;
-  return 0;
-}
-static int64_t ny_missing_extern_stub16(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
-                                        int64_t a5, int64_t a6, int64_t a7, int64_t a8, int64_t a9,
-                                        int64_t a10, int64_t a11, int64_t a12, int64_t a13,
-                                        int64_t a14, int64_t a15) {
-  (void)a0;
-  (void)a1;
-  (void)a2;
-  (void)a3;
-  (void)a4;
-  (void)a5;
-  (void)a6;
-  (void)a7;
-  (void)a8;
-  (void)a9;
-  (void)a10;
-  (void)a11;
-  (void)a12;
-  (void)a13;
-  (void)a14;
-  (void)a15;
-  return 0;
+_Noreturn static void ny_missing_extern_fail(const char *symbol) {
+  fprintf(stderr, "Nytrix JIT error: unresolved external symbol '%s'\n",
+          symbol && *symbol ? symbol : "<unknown>");
+  fflush(stderr);
+  abort();
 }
 
-static void *ny_missing_extern_stub_for_arity(int arity, bool variadic) {
-  if (variadic)
-    return (void *)(uintptr_t)ny_missing_extern_stub16;
-  switch (arity) {
-  case 0:
-    return (void *)(uintptr_t)ny_missing_extern_stub0;
-  case 1:
-    return (void *)(uintptr_t)ny_missing_extern_stub1;
-  case 2:
-    return (void *)(uintptr_t)ny_missing_extern_stub2;
-  case 3:
-    return (void *)(uintptr_t)ny_missing_extern_stub3;
-  case 4:
-    return (void *)(uintptr_t)ny_missing_extern_stub4;
-  case 5:
-    return (void *)(uintptr_t)ny_missing_extern_stub5;
-  case 6:
-    return (void *)(uintptr_t)ny_missing_extern_stub6;
-  case 7:
-    return (void *)(uintptr_t)ny_missing_extern_stub7;
-  case 8:
-    return (void *)(uintptr_t)ny_missing_extern_stub8;
-  case 9:
-    return (void *)(uintptr_t)ny_missing_extern_stub9;
-  case 10:
-    return (void *)(uintptr_t)ny_missing_extern_stub10;
-  case 11:
-    return (void *)(uintptr_t)ny_missing_extern_stub11;
-  case 12:
-    return (void *)(uintptr_t)ny_missing_extern_stub12;
-  default:
-    return (void *)(uintptr_t)ny_missing_extern_stub16;
-  }
-}
 
 #if defined(NY_APPLE_ARM64_JIT)
 #ifndef MAP_ANON
@@ -611,9 +440,11 @@ static void *ny_jit_load_apple_openssl(const char *path) {
   return NULL;
 }
 
-/* Homebrew is not part of dyld's default search path.  Keep this resolution
+/*
+ * Homebrew is not part of dyld's default search path.  Keep this resolution
  * generic: a normal #link name may refer to any package, not just one known
- * library.  Explicit paths are intentionally left untouched. */
+ * library.  Explicit paths are intentionally left untouched.
+ */
 static void *ny_jit_load_apple_package_library(const char *path) {
   if (!path || strchr(path, '/') || strncmp(path, "-framework ", 11) == 0)
     return NULL;
@@ -884,6 +715,64 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_simmd_i32_sqlscan_sum_raw",
                 (void *)(uintptr_t)rt_simmd_i32_sqlscan_sum_raw);
   LLVMAddSymbol("__alloc_string", (void *)(uintptr_t)rt_alloc_string);
+  LLVMAddSymbol("rt_bigint_from_i64_raw",
+                (void *)(uintptr_t)rt_bigint_from_i64_raw);
+  LLVMAddSymbol("rt_bigint_to_i64_raw",
+                (void *)(uintptr_t)rt_bigint_to_i64_raw);
+  LLVMAddSymbol("rt_native_has_tag",
+                (void *)(uintptr_t)rt_native_has_tag);
+  LLVMAddSymbol("rt_native_bigint_cmp",
+                (void *)(uintptr_t)rt_native_bigint_cmp);
+  LLVMAddSymbol("rt_native_bigfloat_from_value",
+                (void *)(uintptr_t)rt_native_bigfloat_from_value);
+  LLVMAddSymbol("rt_native_bigfloat_to_f64",
+                (void *)(uintptr_t)rt_native_bigfloat_to_f64);
+  LLVMAddSymbol("rt_native_bigfloat_cmp",
+                (void *)(uintptr_t)rt_native_bigfloat_cmp);
+  LLVMAddSymbol("rt_native_bigfloat_precision",
+                (void *)(uintptr_t)rt_native_bigfloat_precision);
+  LLVMAddSymbol("rt_native_bigfloat_pow_int",
+                (void *)(uintptr_t)rt_native_bigfloat_pow_int);
+  LLVMAddSymbol("rt_native_f64_to_i64",
+                (void *)(uintptr_t)rt_native_f64_to_i64);
+  LLVMAddSymbol("rt_native_sin_f64",
+                (void *)(uintptr_t)rt_native_sin_f64);
+  LLVMAddSymbol("rt_native_cos_f64",
+                (void *)(uintptr_t)rt_native_cos_f64);
+  LLVMAddSymbol("rt_native_tbuf_new",
+                (void *)(uintptr_t)rt_native_tbuf_new);
+  LLVMAddSymbol("rt_native_tbuf_append",
+                (void *)(uintptr_t)rt_native_tbuf_append);
+  LLVMAddSymbol("rt_native_tbuf_len",
+                (void *)(uintptr_t)rt_native_tbuf_len);
+  LLVMAddSymbol("rt_native_tbuf_pop",
+                (void *)(uintptr_t)rt_native_tbuf_pop);
+  LLVMAddSymbol("rt_native_load8_idx",
+                (void *)(uintptr_t)rt_native_load8_idx);
+  LLVMAddSymbol("rt_native_store8_idx",
+                (void *)(uintptr_t)rt_native_store8_idx);
+  LLVMAddSymbol("rt_native_cstr_len",
+                (void *)(uintptr_t)rt_native_cstr_len);
+  LLVMAddSymbol("rt_native_cstr_builder_new",
+                (void *)(uintptr_t)rt_native_cstr_builder_new);
+  LLVMAddSymbol("rt_native_cstr_builder_append",
+                (void *)(uintptr_t)rt_native_cstr_builder_append);
+  LLVMAddSymbol("rt_native_cstr_builder_finalize",
+                (void *)(uintptr_t)rt_native_cstr_builder_finalize);
+  LLVMAddSymbol("rt_native_bool_to_cstr",
+                (void *)(uintptr_t)rt_native_bool_to_cstr);
+  LLVMAddSymbol("rt_native_dict_new",
+                (void *)(uintptr_t)rt_native_dict_new);
+  LLVMAddSymbol("rt_native_dict_get",
+                (void *)(uintptr_t)rt_native_dict_get);
+  LLVMAddSymbol("rt_native_dict_set",
+                (void *)(uintptr_t)rt_native_dict_set);
+  LLVMAddSymbol("rt_native_dict_has",
+                (void *)(uintptr_t)rt_native_dict_has);
+  LLVMAddSymbol("rt_native_dict_len",
+                (void *)(uintptr_t)rt_native_dict_len);
+  LLVMAddSymbol("rt_native_dict_delete",
+                (void *)(uintptr_t)rt_native_dict_delete);
 #ifdef _WIN32
   LLVMAddSymbol("snprintf", (void *)(uintptr_t)ny_jit_snprintf);
   LLVMAddSymbol("_snprintf", (void *)(uintptr_t)ny_jit_snprintf);
@@ -948,6 +837,40 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_simmd_i32_sqlscan_sum_raw);
   ny_jit_define_runtime_trampoline(mod, "__alloc_string",
                                    (void *)(uintptr_t)rt_alloc_string);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_tbuf_new",
+                                   (void *)(uintptr_t)rt_native_tbuf_new);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_tbuf_append",
+                                   (void *)(uintptr_t)rt_native_tbuf_append);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_load8_idx",
+                                   (void *)(uintptr_t)rt_native_load8_idx);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_store8_idx",
+                                   (void *)(uintptr_t)rt_native_store8_idx);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_tbuf_len",
+                                   (void *)(uintptr_t)rt_native_tbuf_len);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_tbuf_pop",
+                                   (void *)(uintptr_t)rt_native_tbuf_pop);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_cstr_len",
+                                   (void *)(uintptr_t)rt_native_cstr_len);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_cstr_builder_new",
+                                   (void *)(uintptr_t)rt_native_cstr_builder_new);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_cstr_builder_append",
+                                   (void *)(uintptr_t)rt_native_cstr_builder_append);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_cstr_builder_finalize",
+                                   (void *)(uintptr_t)rt_native_cstr_builder_finalize);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_bool_to_cstr",
+                                   (void *)(uintptr_t)rt_native_bool_to_cstr);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_dict_new",
+                                   (void *)(uintptr_t)rt_native_dict_new);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_dict_get",
+                                   (void *)(uintptr_t)rt_native_dict_get);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_dict_set",
+                                   (void *)(uintptr_t)rt_native_dict_set);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_dict_has",
+                                   (void *)(uintptr_t)rt_native_dict_has);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_dict_len",
+                                   (void *)(uintptr_t)rt_native_dict_len);
+  ny_jit_define_runtime_trampoline(mod, "rt_native_dict_delete",
+                                   (void *)(uintptr_t)rt_native_dict_delete);
 }
 
 static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_t *cg) {
@@ -963,13 +886,10 @@ static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod
       const char *name = LLVMGetValueName(f);
       if (!name || strncmp(name, "llvm.", 5) == 0)
         continue;
-      LLVMTypeRef fty = LLVMGlobalGetValueType(f);
-      unsigned arity = LLVMCountParamTypes(fty);
-      bool variadic = LLVMIsFunctionVarArg(fty);
       void *ptr = resolve_symbol_with_fallback(name);
       if (!ptr) {
         NY_LOG_DEBUG("extern symbol '%s' not found (cache fallback)", name);
-        ptr = ny_missing_extern_stub_for_arity((int)arity, variadic);
+        ny_missing_extern_fail(name);
       }
       LLVMAddGlobalMapping(ee, f, ptr);
     }
@@ -993,9 +913,8 @@ static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod
       continue;
 
     void *ptr = resolve_symbol_with_fallback(symbol);
-    if (!ptr) {
-      ptr = ny_missing_extern_stub_for_arity(sig->arity, sig->is_variadic);
-    }
+    if (!ptr)
+      ny_missing_extern_fail(symbol);
     LLVMAddGlobalMapping(ee, val, ptr);
   }
 }

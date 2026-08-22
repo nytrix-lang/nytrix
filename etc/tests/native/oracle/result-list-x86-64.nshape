@@ -1,0 +1,12 @@
+shape oracle_result_list_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result list]
+  template ny-test-case
+  flags "--native-result-oracle=42"
+  expect compile_and_run
+  source ny <<'NY'
+def values = [20, 22]
+values[0] + values[1]
+NY
+}

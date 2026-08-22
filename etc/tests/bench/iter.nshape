@@ -7,42 +7,38 @@ shape iter {
   source ny <<'NY'
 use std.core
 use std.os.time
+;; Iterator-pipeline: map, reverse, chain over Ny lists.
 def n = 20000
-def xs = malloc(n * 8)
-def mapped = malloc(n * 8)
-def reversed = malloc(n * 8)
-def chained = malloc(n * 16)
+mut xs = []
 mut i = 0
 while i < n {
-   store64(xs, i, i * 8)
+   xs = append(xs, i)
    i += 1
 }
 def start = ticks()
+mut mapped = []
+mut reversed = []
+mut chained = []
 i = 0
 while i < n {
-   def v = load64(xs, i * 8) + 1
-   store64(mapped, v, i * 8)
-   store64(chained, v, i * 8)
+   mapped = append(mapped, xs[i] + 1)
+   chained = append(chained, xs[i] + 1)
    i += 1
 }
 i = 0
 while i < n {
-   def v = load64(mapped, (n - 1 - i) * 8)
-   store64(reversed, v, i * 8)
-   store64(chained, v, (n + i) * 8)
+   def v = mapped[n - 1 - i]
+   reversed = append(reversed, v)
+   chained = append(chained, v)
    i += 1
 }
 mut sum = 0
 i = 0
 while i < n * 2 {
-   sum += load64(chained, i * 8)
+   sum += chained[i]
    i += 1
 }
 def end = ticks()
-free(xs)
-free(mapped)
-free(reversed)
-free(chained)
 print("checksum=", sum)
 print("elapsed_ns=", end - start)
 NY
@@ -61,17 +57,17 @@ static int64_t now_ns(void) {
 
 int main(void) {
     const int n = 20000;
-    int *xs = (int *)malloc((size_t)n * sizeof(int));
-    int *mapped = (int *)malloc((size_t)n * sizeof(int));
-    int *reversed = (int *)malloc((size_t)n * sizeof(int));
-    int *chained = (int *)malloc((size_t)n * 2 * sizeof(int));
+    int64_t *xs = malloc((size_t)n * sizeof(*xs));
+    int64_t *mapped = malloc((size_t)n * sizeof(*mapped));
+    int64_t *reversed = malloc((size_t)n * sizeof(*reversed));
+    int64_t *chained = malloc((size_t)n * 2 * sizeof(*chained));
     if (!xs || !mapped || !reversed || !chained) return 2;
     for (int i = 0; i < n; i++) xs[i] = i;
     int64_t start = now_ns();
     for (int i = 0; i < n; i++) mapped[i] = xs[i] + 1;
     for (int i = 0; i < n; i++) reversed[i] = mapped[n - 1 - i];
-    memcpy(chained, mapped, (size_t)n * sizeof(int));
-    memcpy(chained + n, reversed, (size_t)n * sizeof(int));
+    memcpy(chained, mapped, (size_t)n * sizeof(*chained));
+    memcpy(chained + n, reversed, (size_t)n * sizeof(*chained));
     int64_t sum = 0;
     for (int i = 0; i < n * 2; i++) sum += chained[i];
     int64_t end = now_ns();

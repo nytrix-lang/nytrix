@@ -1,0 +1,16 @@
+shape oracle_tail_recursion_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle tail recursion loop conversion]
+  flags_matrix "-O2 --native-backend x86_64 --native-result-oracle=500000500000; -O3 --native-backend x86_64 --native-result-oracle=500000500000"
+  expect compile_and_run
+ci windows-skip
+  source ny <<'NY'
+fn tsum(int n, int acc) int {
+  if n == 0 { return acc }
+  tsum(n - 1, acc + n)
+}
+
+tsum(1000000, 0)
+NY
+}

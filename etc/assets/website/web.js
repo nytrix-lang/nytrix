@@ -106,6 +106,7 @@ const cleanHTML = (html) =>
       "r",
       "rel",
       "role",
+      "src",
       "rx",
       "stroke",
       "stroke-linecap",
@@ -182,16 +183,19 @@ const MARKDOWN_DOC_PRIORITY = [
   "learn/networking",
   "learn/packages",
   "learn/performance",
-  "learn/metaprogramming",
+  "learn/comptime",
+  "learn/proofs",
+  "learn/effects",
+  "learn/ownership",
   "learn/native",
   "learn/diagnostics",
   "learn/testing",
   "learn/troubleshooting",
   "spec/language",
-  "spec/source",
-  "spec/imports",
-  "spec/modules",
+  "spec/units",
+  "spec/pipeline",
   "spec/values",
+  "spec/memory",
   "spec/functions",
   "spec/types",
   "spec/operators",
@@ -206,6 +210,42 @@ const MARKDOWN_DOC_PRIORITY = [
   "NY",
   "NYTRIX",
 ];
+// The home page is a curated entry point. Every documentation page remains
+// available in the manual tree and search, but only these routes become cards.
+const OVERVIEW_DOC_ROUTES = {
+  learn: new Set([
+    "learn/start",
+    "learn/examples",
+    "learn/library",
+    "learn/native",
+    "learn/testing",
+    "learn/ui",
+    "learn/comptime",
+    "learn/proofs",
+    "learn/effects",
+    "learn/ownership",
+    "learn/performance",
+    "learn/tooling",
+    "learn/programs",
+    "learn/troubleshooting",
+  ]),
+  spec: new Set([
+    "spec/units",
+    "spec/pipeline",
+    "spec/syntax",
+    "spec/types",
+    "spec/values",
+    "spec/memory",
+    "spec/functions",
+    "spec/operators",
+    "spec/patterns",
+    "spec/control-flow",
+    "spec/errors",
+    "spec/comptime",
+    "spec/native",
+    "spec/runtime",
+  ]),
+};
 const DOC_CARD_SUMMARIES = new Map(
   Object.entries({
     README: "Docs map and command index.",
@@ -220,16 +260,19 @@ const DOC_CARD_SUMMARIES = new Map(
     "learn/networking": "HTTP, sockets, servers, TLS, processes.",
     "learn/packages": "Manifests, dependencies, installs, lockfiles.",
     "learn/performance": "Compile-time and runtime measurement.",
-    "learn/metaprogramming": "Comptime tables, templates, generated code.",
+    "learn/comptime": "Comptime tables, templates, and generated code.",
+    "learn/proofs": "Compile-time facts and proof witnesses.",
+    "learn/effects": "Effect contracts and checked boundaries.",
+    "learn/ownership": "Borrowing, transfer, and cleanup contracts.",
     "learn/native": "C ABI, layouts, pointers, handles.",
     "learn/diagnostics": "Import, type, runtime, and FFI failures.",
     "learn/testing": "Executable assertions and test runs.",
     "learn/troubleshooting": "Common failures and quick fixes.",
     "spec/language": "Specification index and execution model.",
-    "spec/source": "Source units, files, and execution.",
-    "spec/imports": "Module, file, package, and alias imports.",
-    "spec/modules": "Exports and public module boundaries.",
+    "spec/units": "Source units, imports, modules, and execution.",
+    "spec/pipeline": "How source becomes a checked program and running artifact.",
     "spec/values": "Literals, strings, containers, equality.",
+    "spec/memory": "Value representation, allocation prefixes, and ABI conversion.",
     "spec/functions": "Parameters, returns, lambdas, attributes.",
     "spec/types": "Typed values, generics, ADTs, strict checks.",
     "spec/operators": "Arithmetic, calls, indexing, member access.",
@@ -242,6 +285,14 @@ const DOC_CARD_SUMMARIES = new Map(
     "spec/syntax": "Source spellings and grammar forms.",
   }),
 );
+const MARKDOWN_DOC_LABELS = new Map([
+  ["learn/comptime", "Comptime"],
+  ["learn/syntax", "Syntax"],
+  ["spec/units", "Units"],
+  ["spec/pipeline", "Pipeline"],
+  ["spec/memory", "Memory"],
+  ["spec/control-flow", "ControlFlow"],
+]);
 const API_NAMESPACE_SUMMARIES = new Map(
   Object.entries({
     "std.core":
@@ -277,6 +328,9 @@ const API_NAMESPACE_SUMMARIES = new Map(
 const SEARCH_LIMIT = 120;
 const sortMarkdownDocs = (docs) =>
   docs.slice().sort((docA, docB) => {
+    const metaA = markdownDocMeta(docA);
+    const metaB = markdownDocMeta(docB);
+    if (metaA.order !== metaB.order) return metaA.order - metaB.order;
     const a = docA.name,
       b = docB.name,
       ia = MARKDOWN_DOC_PRIORITY.indexOf(a),
@@ -286,6 +340,35 @@ const sortMarkdownDocs = (docs) =>
     if (ib !== -1) return 1;
     return a.localeCompare(b);
   });
+const markdownDocMeta = (doc) => {
+  if (!doc)
+    return { audience: "user", featured: false, order: 1000, overview: true };
+  if (doc._nytrixMeta) return doc._nytrixMeta;
+  const raw = String(doc.html || "");
+  const match = raw.match(/<!--\s*nytrix-doc:\s*(\{[\s\S]*?\})\s*-->/i);
+  let meta = {};
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (parsed && typeof parsed === "object") meta = parsed;
+    } catch (_) {
+      meta = {};
+    }
+  }
+  const route = String(doc.name || "");
+  doc._nytrixMeta = {
+    audience: typeof meta.audience === "string" ? meta.audience : "user",
+    featured: meta.featured === true,
+    group:
+      typeof meta.group === "string"
+        ? meta.group
+        : route.split("/")[0] || "manual",
+    order: Number.isFinite(Number(meta.order)) ? Number(meta.order) : 1000,
+    overview: meta.overview !== false,
+    summary: typeof meta.summary === "string" ? meta.summary.trim() : "",
+  };
+  return doc._nytrixMeta;
+};
 const stripDocText = (text) =>
   String(text ?? "")
     .replace(/```[\s\S]*?```/g, " ")
@@ -300,6 +383,8 @@ const stripDocText = (text) =>
     .replace(/\s+/g, " ")
     .trim();
 const markdownDocSummary = (doc) => {
+  const meta = markdownDocMeta(doc);
+  if (meta.summary) return meta.summary;
   const raw = String((doc && doc.html) || "")
     .replace(/\r\n?/g, "\n")
     .replace(/```[\s\S]*?```/g, "\n");
@@ -362,57 +447,12 @@ const markdownDocCardSummary = (doc) => {
   if (sentence) text = sentence[1];
   return text.length > 96 ? `${text.slice(0, 93).trim()}...` : text;
 };
-const markdownDocLabel = (doc) =>
-  String((doc && (doc.title || doc.name)) || "")
-    .split(" / ")
-    .pop();
-const ICONS = {
-  alert: `<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>`,
-  atom: `<circle cx="12" cy="12" r="1.4"/><path d="M20.2 12c0 2-3.7 3.7-8.2 3.7S3.8 14 3.8 12 7.5 8.3 12 8.3s8.2 1.7 8.2 3.7Z"/><path d="M16.1 19.1c-1.7 1-4.9-1.5-7.1-5.4S6.3 5.9 8 4.9s4.9 1.5 7.1 5.4 2.7 7.8 1 8.8Z"/><path d="M7.9 19.1c-1.7-1-1.2-4.9 1-8.8s5.4-6.4 7.1-5.4 1.2 4.9-1 8.8-5.4 6.4-7.1 5.4Z"/>`,
-  book: `<path d="M12 7v14"/><path d="M3 5a7 7 0 0 1 9 2v14a7 7 0 0 0-9-2Z"/><path d="M21 5a7 7 0 0 0-9 2v14a7 7 0 0 1 9-2Z"/>`,
-  box: `<path d="m21 8-9-5-9 5 9 5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>`,
-  check: `<path d="M20 6 9 17l-5-5"/><circle cx="12" cy="12" r="10"/>`,
-  chevron: `<path d="m9 18 6-6-6-6"/>`,
-  cloud: `<path d="M17.5 19H7a5 5 0 1 1 1.1-9.9 6 6 0 0 1 11.4 2.5A3.8 3.8 0 0 1 17.5 19Z"/>`,
-  code: `<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/><path d="m14 4-4 16"/>`,
-  copy: `<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`,
-  cpu: `<rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 1v4"/><path d="M15 1v4"/><path d="M9 19v4"/><path d="M15 19v4"/><path d="M1 9h4"/><path d="M1 15h4"/><path d="M19 9h4"/><path d="M19 15h4"/><rect x="9" y="9" width="6" height="6" rx="1"/>`,
-  database: `<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>`,
-  dice: `<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="8.5" cy="8.5" r=".7"/><circle cx="15.5" cy="8.5" r=".7"/><circle cx="12" cy="12" r=".7"/><circle cx="8.5" cy="15.5" r=".7"/><circle cx="15.5" cy="15.5" r=".7"/>`,
-  file: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h6"/>`,
-  file3d: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="m9 13 3-1.7 3 1.7v3.4L12 18l-3-1.6Z"/><path d="M12 14.7V18"/>`,
-  folder: `<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>`,
-  github: `<path d="M15 22v-3.9a4.7 4.7 0 0 0-1.2-3.6c4 0 6.7-1.9 6.7-5.4 0-1.2-.4-2.3-1.1-3.2.1-.4.5-2-.2-3.3 0 0-1-.3-3.3 1.2a11.4 11.4 0 0 0-5.8 0C7.8 2.3 6.8 2.6 6.8 2.6c-.7 1.3-.3 2.9-.2 3.3A5 5 0 0 0 5.5 9.1c0 3.5 2.7 5.4 6.7 5.4a4.7 4.7 0 0 0-1.2 3.6V22"/><path d="M10.8 18.2c-3.2 1-4.5-.8-5.2-2.1-.4-.8-1.2-1.4-2.1-1.4"/>`,
-  home: `<path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/>`,
-  image: `<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="10" r="1.4"/><path d="m21 15-4.5-4.5L7 19"/>`,
-  key: `<circle cx="7.5" cy="14.5" r="3.5"/><path d="M10 12 21 1"/><path d="m16 6 2 2"/><path d="m14 8 2 2"/>`,
-  layers: `<path d="m12 2 10 6-10 6L2 8Z"/><path d="m2 14 10 6 10-6"/><path d="m2 10 10 6 10-6"/>`,
-  library: `<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5Z"/><path d="M8 7h8"/><path d="M8 11h6"/>`,
-  list: `<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>`,
-  lock: `<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><path d="M12 15v2"/>`,
-  hash: `<path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="m16 3-2 18"/>`,
-  math: `<path d="M3 4h18"/><path d="M6 8l4 4-4 4"/><path d="M14 16h5"/><path d="M14 12h5"/>`,
-  network: `<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><path d="M12 8v8"/>`,
-  new: `<path d="m16.5 9.4-9-5.2"/><path d="M21 13.5V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l2.1-1.2"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/><path d="M18 16v6"/><path d="M15 19h6"/>`,
-  package: `<path d="m16.5 9.4-9-5.2"/><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>`,
-  play: `<circle cx="12" cy="12" r="10"/><path d="m10 8 6 4-6 4Z"/>`,
-  route: `<circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M6 16v-4a4 4 0 0 1 4-4h4"/>`,
-  rss: `<path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>`,
-  search: `<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>`,
-  server: `<rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01"/><path d="M7 17h.01"/>`,
-  shield: `<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="M9 12l2 2 4-4"/>`,
-  sound: `<path d="M4 10v4h4l5 5V5L8 10Z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/>`,
-  tag: `<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><path d="M7.5 7.5h.01"/>`,
-  terminal: `<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>`,
-  timer: `<path d="M10 2h4"/><path d="M12 14v-4"/><path d="M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"/><path d="m17 7 1.5-1.5"/>`,
-  window: `<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 4v5"/>`,
-  zap: `<path d="M13 2 3 14h8l-1 8 11-14h-8Z"/>`,
-  wrench: `<path d="M14.7 6.3a5 5 0 0 0-6.4 6.4L2 19l3 3 6.3-6.3a5 5 0 0 0 6.4-6.4l-3.1 3.1-3-3Z"/>`,
-  gear: `<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>`,
-  globe: `<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/>`,
-  external: `<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="m10 14 11-11"/>`,
-  info: `<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>`,
-  dots: `<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>`,
+const markdownDocLabel = (doc) => {
+  const route = String((doc && doc.name) || "");
+  return (
+    MARKDOWN_DOC_LABELS.get(route) ||
+    String((doc && (doc.title || doc.name)) || "").split(" / ").pop()
+  );
 };
 
 function icon(name, cls = "ico") {
@@ -420,8 +460,7 @@ function icon(name, cls = "ico") {
     String(name || "box")
       .replace(/[^a-z0-9-]/gi, "")
       .toLowerCase() || "box";
-  const body = ICONS[safe] || ICONS.box;
-  return `<svg class="${cls} ico-${safe}" viewBox="0 0 24 24" aria-hidden="true" role="img" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+  return `<img class="${cls} ico-${safe}" src="assets/website/svg/${safe}.svg" alt="" aria-hidden="true">`;
 }
 
 const collapseIcon = () =>
@@ -895,6 +934,15 @@ function highlightBash(code) {
 function renderRichDocstring(text) {
   if (!text) return "";
   let html = esc(text);
+  // Protect TeX delimiters while applying the small Markdown subset below.
+  // Otherwise emphasis/code substitutions can corrupt expressions such as
+  // `\(p \mathbin{\oplus} q\)` before MathJax sees the document.
+  const math = [];
+  html = html.replace(/\\\(([^]*?)\\\)|\\\[([^]*?)\\\]/g, (_, inline, display) => {
+    const token = `\u0000NYMATH${math.length}\u0000`;
+    math.push(display !== undefined ? `\\[${display}\\]` : `\\(${inline}\\)`);
+    return token;
+  });
   html = html
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/\*([^*]+)\*/g, "<i>$1</i>")
@@ -911,15 +959,17 @@ function renderRichDocstring(text) {
       const mod = p1.trim();
       return `<a href="${routeHash(mod)}" onclick="selectModule('${jsArg(mod)}');event.preventDefault();">${esc(mod)}</a>`;
     });
+  html = html.replace(/\u0000NYMATH(\d+)\u0000/g, (_, index) => math[Number(index)]);
   return html;
 }
 
 function parseModuleDoc(text) {
-  const info = { summary: "", keywords: [], sections: [], refs: [] };
+  const info = { summary: "", keywords: [], sections: [], refs: [], markdown: "" };
   const raw = String(text ?? "").replace(/\r\n?/g, "\n");
   const lines = raw.split("\n").map((line) => line.trim());
   let intro = [];
   let section = null;
+  let documentation = null;
   const topSections = new Set(
     "abstract algorithm api bigint bigrational contract encoding example examples format invariant invariants layout note notes reference references security storage".split(
       " ",
@@ -941,6 +991,10 @@ function parseModuleDoc(text) {
   };
 
   lines.forEach((line) => {
+    if (documentation) {
+      documentation.push(line);
+      return;
+    }
     if (!line) {
       if (
         section &&
@@ -963,6 +1017,11 @@ function parseModuleDoc(text) {
             .map((s) => s.trim())
             .filter(Boolean),
         );
+        return;
+      }
+      if (normalized === "documentation") {
+        documentation = [];
+        if (body) documentation.push(body);
         return;
       }
       if (
@@ -989,6 +1048,9 @@ function parseModuleDoc(text) {
   });
 
   info.keywords = [...new Set(info.keywords)];
+  info.markdown = documentation
+    ? documentation.join("\n").replace(/\n{3,}/g, "\n\n").trim()
+    : "";
   info.summary = intro
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -1061,6 +1123,8 @@ function renderModuleDoc(modOrText) {
   }
   if (doc.summary)
     html += `<div class="module-summary">${renderRichDocstring(doc.summary)}</div>`;
+  if (doc.markdown)
+    html += `<div class="module-doc-markdown markdown-content">${DOMPurify.sanitize(marked.parse(doc.markdown))}</div>`;
   doc.sections.forEach((section) => {
     html += `<div class="module-doc-section"><div class="module-doc-title">${esc(section.title)}</div><div class="module-doc-body">${renderRichDocstring(section.body)}</div></div>`;
   });
@@ -1162,6 +1226,8 @@ function initDataIndexes() {
   sortNavTree(navTreeCache);
   markdownDocsCache = sortMarkdownDocs(
     overviewModule ? overviewModule.markdown_docs : [],
+  ).filter(
+    (doc) => !isOverviewDoc(doc) && markdownDocMeta(doc).overview,
   );
   docTreeCache = buildDocTree(
     markdownDocsCache.filter((d) => d.name !== "NY" && d.name !== "NYTRIX"),
@@ -1512,6 +1578,11 @@ function setupDesktopNav() {
     trigger.addEventListener("focus", open);
     trigger.addEventListener("blur", close);
     trigger.addEventListener("click", open);
+    trigger.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      setDesktopNav(!document.body.classList.contains("nav-open"));
+    });
   }
   if (aside) {
     aside.addEventListener("mouseenter", open);
@@ -1584,10 +1655,6 @@ function toggleSidebar() {
   if (isDesktopNav()) {
     const nextOpen = !document.body.classList.contains("nav-open");
     setDesktopNav(nextOpen);
-    if (!nextOpen) {
-      const searchInput = $("search");
-      if (searchInput) searchInput.value = "";
-    }
     return;
   }
   if (asideElement && mainElement) {
@@ -1597,10 +1664,6 @@ function toggleSidebar() {
     if (hamburger) {
       hamburger.classList.toggle("active", isActive);
       hamburger.setAttribute("aria-expanded", isActive ? "true" : "false");
-    }
-    if (!isActive) {
-      const searchInput = $("search");
-      if (searchInput) searchInput.value = "";
     }
   }
 }
@@ -1613,6 +1676,24 @@ function tagEntriesByWeight(limit = null) {
   return limit == null ? entries : entries.slice(0, limit);
 }
 
+const PRIMARY_TAGS = [
+  "core", "runtime", "primitives", "containers", "list", "dict", "set",
+  "tuple", "range", "string", "bytes", "assert", "reflection", "queue",
+  "memory",
+  "os", "filesystem", "path", "process", "subprocess", "io", "time",
+  "thread", "async", "parallel", "atomic", "hardware",
+  "math", "crypto", "ui", "parse", "input", "networking", "sound", "pattern",
+];
+
+function primaryTagEntries() {
+  const byName = new Map(tagEntries.map((entry) => [entry.tag, entry]));
+  return PRIMARY_TAGS.map((tag) => byName.get(tag)).filter(Boolean);
+}
+
+function isOverviewDoc(doc) {
+  return String(doc && doc.name || "").toLowerCase() === "readme";
+}
+
 function renderTagSection(depth = 0) {
   if (!tagEntries.length) return "";
   const tagId = "nav-tags";
@@ -1620,7 +1701,7 @@ function renderTagSection(depth = 0) {
   const open = true;
   const currentTag =
     current && current.startsWith("tag::") ? current.slice(5) : "";
-  const visible = tagEntriesByWeight(28);
+  const visible = primaryTagEntries();
   if (currentTag && !visible.some((entry) => entry.tag === currentTag)) {
     const selected = tagEntries.find((entry) => entry.tag === currentTag);
     if (selected) visible.unshift(selected);
@@ -1790,8 +1871,6 @@ function renderNav() {
             ),
           };
           nodeHtml += renderMarkdownDocTree(rootGroups, depth + 1);
-          const isOverviewActive = current === "Overview";
-          nodeHtml += `<a class="item ${isOverviewActive ? "active" : ""}" href="#Overview" onclick="selectModule('Overview');event.preventDefault();" style="padding-left: ${12 + (depth + 1) * 10}px;"><span class="nav-label">${icon("book", "ico nav-ico")}<span>OVERVIEW</span></span></a>`;
           nodeHtml += renderMarkdownDocTree(rootDocs, depth + 1);
           nodeHtml += `</div>`;
         }
@@ -1892,6 +1971,18 @@ function renderDocGroup(title, docs, desc = "") {
   return `<section class="docs-section"><div class="docs-section-head"><div><h2>${esc(title)}</h2>${desc ? `<p>${esc(desc)}</p>` : ""}</div><span>${docs.filter(Boolean).length}</span></div><div class="doc-card-grid">${cards}</div></section>`;
 }
 
+function renderProjectCard(doc) {
+  if (!doc) return "";
+  const route = String(doc.name || "CHANGELOG");
+  return `<a class="project-card" href="${routeHash(route)}" data-select-module="${esc(route)}"><div class="project-card-icon">${icon("route", "ico ico-lg")}</div><div><div class="doc-card-kicker">Manual</div><div class="project-card-title">${esc(markdownDocLabel(doc))}</div><p>${esc(markdownDocCardSummary(doc))}</p></div><div class="project-card-route">${esc(route)}</div></a>`;
+}
+
+function renderProjectSection(docs, title = "Project", desc = "") {
+  const cards = docs.filter(Boolean).map(renderProjectCard).join("");
+  if (!cards) return "";
+  return `<section class="docs-section"><div class="docs-section-head"><div><h2>${esc(title)}</h2>${desc ? `<p>${esc(desc)}</p>` : ""}</div><span>${docs.filter(Boolean).length}</span></div><div class="project-card-grid">${cards}</div></section>`;
+}
+
 function renderApiCard(route, title, summary, meta = "") {
   return `<a class="api-card" href="${routeHash(route)}" data-select-module="${esc(route)}"><div class="api-card-title">${icon(moduleIconName(route), "ico api-card-ico")}<span class="syn-module">${esc(title)}</span></div><p>${esc(summary || "Source-linked reference entry.")}</p>${meta ? `<div class="api-card-meta">${esc(meta)}</div>` : ""}</a>`;
 }
@@ -1924,73 +2015,111 @@ const SOCIAL_LINKS = [
 function renderHeroUpdates() {
   const socialLinks = SOCIAL_LINKS.map(
     ([label, href]) =>
-      `<a class="hero-action" href="${esc(href)}" target="_blank" rel="me noopener noreferrer" title="Open ${esc(label)}">${icon("external", "ico ico-xs")}<span>${esc(label)}</span></a>`,
+      `<a class="hero-action hero-action-${label.toLowerCase()}" href="${esc(href)}" target="_blank" rel="me noopener noreferrer" title="Open ${esc(label)}">${icon("external", "ico ico-xs")}<span>${esc(label)}</span></a>`,
   ).join("");
-  return `<div class="hero-updates" aria-label="Nytrix updates feed and social links"><a class="hero-action" href="feed.xml" data-feed-copy rel="noopener noreferrer" title="Copy RSS feed URL" aria-label="Copy RSS feed URL">${icon("rss", "ico ico-xs")}<span>RSS</span></a>${socialLinks}</div>`;
+  return `<div class="hero-updates" aria-label="Nytrix updates feed and social links"><a class="hero-action hero-action-rss" href="feed.xml" data-feed-copy rel="noopener noreferrer" title="Copy RSS feed URL" aria-label="Copy RSS feed URL">${icon("rss", "ico ico-xs")}<span>RSS</span></a>${socialLinks}</div>`;
+}
+
+function renderReferenceSection(title, desc) {
+  const apiCards = ["std.core", "std.os", "std.math"]
+    .map((route) => {
+      const mod = moduleByName.get(route);
+      return renderApiCard(
+        route,
+        route,
+        mod ? moduleDocSummary(mod) : "Public standard-library facade.",
+        "module",
+      );
+    })
+    .join("");
+  return `<section class="docs-section"><div class="docs-section-head"><div><h2>${esc(title)}</h2>${desc ? `<p>${esc(desc)}</p>` : ""}</div><span>API</span></div><div class="api-card-grid">${apiCards}</div></section>`;
+}
+
+function renderOverviewBody(source, sections) {
+  const marker = /<!--\s*overview:cards\s+({[\s\S]*?})\s*-->/g;
+  let html = "";
+  let start = 0;
+  let match;
+  while ((match = marker.exec(source))) {
+    const prose = source.slice(start, match.index);
+    if (prose.trim()) html += `<section class="overview-body markdown-content">${DOMPurify.sanitize(marked.parse(prose))}</section>`;
+    try {
+      const config = JSON.parse(match[1]);
+      const title = String(config.title || "");
+      const summary = String(config.summary || "");
+      if (config.kind === "learn")
+        html += renderDocGroup(title, sections.learn, summary);
+      else if (config.kind === "spec")
+        html += renderDocGroup(title, sections.spec, summary);
+      else if (config.kind === "project")
+        html += renderProjectSection(sections.project, title, summary);
+      else if (config.kind === "reference")
+        html += renderReferenceSection(title, summary);
+    } catch (err) {
+      console.warn("Invalid overview card marker", err);
+    }
+    start = marker.lastIndex;
+  }
+  const tail = source.slice(start);
+  if (tail.trim()) html += `<section class="overview-body markdown-content">${DOMPurify.sanitize(marked.parse(tail))}</section>`;
+  return html;
 }
 
 function renderDocsHome(overviewMod) {
   setPageTitle("Home");
   const docs = sortMarkdownDocs(
     (overviewMod && overviewMod.markdown_docs) || [],
-  ).filter((doc) => doc.name !== "NY" && doc.name !== "NYTRIX");
-  const learnDocs = docs.filter((doc) => doc.name.startsWith("learn/"));
-  const specDocs = docs.filter((doc) => doc.name.startsWith("spec/"));
-  const projectDocs = docs.filter(
-    (doc) => !doc.name.includes("/") && doc.name !== "README",
-  );
-  const quickStart = [
-    ["wrench", "Build", "./make"],
-    ["play", "Run", "ny hello.ny"],
-    ["terminal", "REPL", "ny"],
-    ["check", "Fmt", "ny fmt file.ny"],
-    ["search", "Symbols", "ny doc search --symbols print"],
-    ["new", "New", "ny new app"],
-  ];
-  const sampleProgram = `use std
-def scale = comptime { 2^5 }
-fn tag(n) case n {
-   0..31 -> "small"
-   32..63 -> "mid"
-   _ -> "big"
-}
-def lens = [[3,4],[6,8],[5,12],[8,15]].map(fn(p){ int(sqrt(p[0]*p[0] + p[1]*p[1])) })
-def sum = lens.reduce(0, fn(a,n){ a + n })
-print(f"{scale=} {lens=} {sum=} tag={tag(sum)}")`;
+  ).filter((doc) => !isOverviewDoc(doc));
+  const learnDocs = docs.filter((doc) => OVERVIEW_DOC_ROUTES.learn.has(doc.name));
+  const specDocs = docs.filter((doc) => OVERVIEW_DOC_ROUTES.spec.has(doc.name));
+  const projectDocs = docs.filter((doc) => doc.name === "CHANGELOG");
+  const overviewDoc =
+    (overviewMod && overviewMod.markdown_docs || []).find(
+      (doc) => isOverviewDoc(doc),
+    );
+  const overviewParts = overviewDoc
+    ? String(overviewDoc.html || "").split("<!-- overview:body -->")
+    : [];
+  const overviewLeadParts = overviewParts.length
+    ? overviewParts[0].split("<!-- overview:quick-start -->")
+    : [];
+  const overviewLeadHtml = overviewLeadParts.length
+    ? DOMPurify.sanitize(marked.parse(overviewLeadParts[0]))
+    : "<p>Read the manual to explore Nytrix.</p>";
+  const overviewQuickStartHtml = overviewLeadParts.length > 1
+    ? DOMPurify.sanitize(marked.parse(overviewLeadParts.slice(1).join("<!-- overview:quick-start -->")))
+    : "";
+  const overviewBodySource = overviewParts.length > 1
+    ? overviewParts.slice(1).join("<!-- overview:body -->")
+    : "";
+  const overviewBodyHtml = renderOverviewBody(overviewBodySource, {
+    learn: learnDocs,
+    spec: specDocs,
+    project: projectDocs,
+  });
+  const heroLines = String((overviewMod && overviewMod.hero_source) || "").split("\n");
+  const heroSource = heroLines
+    .filter((line) => !line.startsWith("#!") && !line.startsWith(";;"))
+    .join("\n")
+    .trim();
+  const heroPanel = heroSource
+    ? `<div class="docs-hero-aside"><pre class="docs-example overview-hero-code"><code class="language-ny">${highlightNytrixCode(heroSource)}</code></pre></div>`
+    : "";
   let html = header(
     "Nytrix",
     "Manual, specification, and source-linked API reference.",
     "Manual · API · source",
   );
   html += `<div class="docs-home">`;
-  html += `<section class="docs-hero"><div class="docs-hero-copy"><div class="docs-eyebrow">${icon("zap", "ico ico-xs")}<span>Overview</span></div><h1>Think freely.</h1><p>Native. Explicit. Comptime. Cross-platform.</p><div class="hero-actions"><a class="hero-action primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">${icon("github", "ico ico-xs")}<span>GitHub</span></a><a class="hero-action" href="${routeHash("learn/start")}" data-select-module="learn/start">${icon("play", "ico ico-xs")}<span>Start</span></a>${renderHeroUpdates()}</div><div class="quick-start-list">${quickStart.map(([name, label, command]) => `<div><b>${icon(name, "ico ico-xs")}<span>${esc(label)}</span></b><code>${esc(command)}</code></div>`).join("")}</div></div><div class="docs-hero-aside"><pre class="docs-example"><code class="language-ny">${highlight(sampleProgram)}</code></pre></div></section>`;
-  html += renderDocGroup(
-    "Learn",
-    learnDocs,
-    "Everyday workflow.",
-  );
-  html += renderDocGroup(
-    "Spec",
-    specDocs,
-    "Exact behavior.",
-  );
-  html += renderDocGroup(
-    "Project",
-    projectDocs,
-    "Repository notes.",
-  );
-  const apiCards = [
-    ["std.core", "std.core", "Core language helpers and runtime primitives.", "module"],
-    ["std.os", "std.os", "Operating-system APIs, process utilities, and platform support.", "namespace"],
-    ["std.math.parse", "std.math.parse", "Data, syntax, images, and asset parsers.", "namespace"],
-  ]
-    .map(([route, title, summary, meta]) =>
-      renderApiCard(route, title, summary, meta),
-    )
-    .join("");
-  html += `<section class="docs-section"><div class="docs-section-head"><div><h2>Reference</h2><p>Source-linked library entry points.</p></div><span>API</span></div><div class="api-card-grid">${apiCards}</div></section>`;
+  html += `<section class="docs-hero"><div class="docs-hero-copy overview-hero-lead"><div class="docs-eyebrow">${icon("zap", "ico ico-xs")}<span>Overview</span></div><div class="overview-source overview-lead markdown-content">${overviewLeadHtml}</div><div class="hero-actions"><a class="hero-action hero-action-github primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">${icon("github", "ico ico-xs")}<span>GitHub</span></a><a class="hero-action hero-action-start" href="${routeHash("learn/start")}" data-select-module="learn/start">${icon("play", "ico ico-xs")}<span>Start</span></a>${renderHeroUpdates()}</div>${overviewQuickStartHtml}</div>${heroPanel}</section>`;
+  html += overviewBodyHtml;
   html += `</div>`;
   setHTML("content", html);
+  rewriteMarkdownDocLinks();
+  highlightAllCodeBlocks(".markdown-content");
+  highlightInlineCode(".markdown-content");
+  if (window.MathJax && window.MathJax.typesetPromise)
+    window.MathJax.typesetPromise();
 }
 
 function normalizeCodeBlock(code) {
@@ -2027,9 +2156,10 @@ function normalizeCodeBlock(code) {
   return lines.join("\n");
 }
 
-function codeBox(code) {
+function codeBox(code, label = "IMPLEMENTATION") {
   const s = normalizeCodeBlock(code);
-  return `<div class="codebox collapsed"><div class="codehd"><button class="code-toggle" data-code-toggle aria-expanded="false">${icon("code", "ico ico-xs")}<span>SHOW CODE</span></button><button class="copy" data-copy="${esc(s)}">${icon("copy", "ico ico-xs")}<span>COPY</span></button></div><pre><code class="language-ny">${highlight(s)}</code></pre></div>`;
+  const title = String(label || "IMPLEMENTATION").toUpperCase();
+  return `<div class="codebox collapsed" data-code-label="${esc(title)}"><div class="codehd"><button class="code-toggle" data-code-toggle data-code-label="${esc(title)}" aria-expanded="false">${icon("code", "ico ico-xs")}<span>SHOW ${esc(title)}</span></button><button class="copy" data-copy="${esc(s)}">${icon("copy", "ico ico-xs")}<span>COPY</span></button></div><pre><code class="language-ny">${highlight(s)}</code></pre></div>`;
 }
 
 function sourceBox(mod) {
@@ -2043,7 +2173,7 @@ function setCodeBoxOpen(box, open) {
   if (!box || !btn) return;
   box.classList.toggle("expanded", open);
   box.classList.toggle("collapsed", !open);
-  const label = btn.dataset.codeLabel || "CODE";
+  const label = btn.dataset.codeLabel || "IMPLEMENTATION";
   const ico = label === "SOURCE" ? "file" : "code";
   btn.innerHTML = `${icon(ico, "ico ico-xs")}<span>${open ? `HIDE ${label}` : `SHOW ${label}`}</span>`;
   btn.setAttribute("aria-expanded", open ? "true" : "false");
@@ -2292,9 +2422,9 @@ function renderOverviewPage(overviewMod, specificDocName = null) {
     "",
   );
   const docsToRender = specificDocName
-    ? overviewMod.markdown_docs.filter((d) => d.name === specificDocName)
+    ? overviewMod.markdown_docs.filter((d) => d.name === specificDocName && !isOverviewDoc(d))
     : overviewMod.markdown_docs.filter(
-        (d) => d.name !== "NY" && d.name !== "NYTRIX",
+        (d) => d.name !== "NY" && d.name !== "NYTRIX" && !isOverviewDoc(d),
       );
   docsToRender.forEach((doc) => {
     const body = DOMPurify.sanitize(
@@ -2349,7 +2479,7 @@ function renderModuleContent(mod, selectedId = null) {
   syms.forEach((s) => {
     const arg = getArgs(s.sig);
     const internal = isInternalSymbol(s);
-    html += `<div class="card symbol-card ${internal ? "internal-symbol" : ""}" id="${esc(s.id)}" data-select-module="${esc(mod.name)}" data-select-symbol="${esc(s.id)}"><div class="row"><div class="name">${icon(s.kind === "function" ? "code" : "box", "ico api-card-ico")}<span class="syn-module">${esc(mod.name)}</span> <span class="syn-call">${esc(s.name)}</span>${arg ? `(${esc(arg)})` : ""}</div><div class="kind">${esc(internal ? `internal ${s.kind}` : s.kind)}</div></div><div class="card-body"><div class="doc">${renderRichDocstring(s.doc)}</div>${renderImports(s.imports)}${s.code ? codeBox(s.code) : ""}</div></div>`;
+    html += `<div class="card symbol-card ${internal ? "internal-symbol" : ""}" id="${esc(s.id)}" data-select-module="${esc(mod.name)}" data-select-symbol="${esc(s.id)}"><div class="row"><div class="name">${icon(s.kind === "function" ? "code" : "box", "ico api-card-ico")}<span class="syn-module">${esc(mod.name)}</span> <span class="syn-call">${esc(s.name)}</span>${arg ? `(${esc(arg)})` : ""}</div><div class="kind">${esc(internal ? `internal ${s.kind}` : s.kind)}</div></div><div class="card-body"><div class="doc-label">DOCUMENTATION</div><div class="doc">${renderRichDocstring(s.doc)}</div>${renderImports(s.imports)}${s.code ? codeBox(s.code) : ""}</div></div>`;
   });
   html += `</div>`;
   return html;
@@ -2532,14 +2662,17 @@ function selectModule(name, symbolNameOrId = null, options = {}) {
   let actualId = symbolNameOrId;
 
   const overviewMod = moduleByName.get("Overview");
-  const isMarkdown = markdownDocByName.has(name);
+  const markdownDoc = markdownDocByName.get(name);
+  const isMarkdown = Boolean(markdownDoc);
   const isModule = moduleByName.has(name);
   const hasChildren = categorySet.has(name);
 
   if (name === "Tags") {
     renderTagIndexPage();
-  } else if (name === "Overview" || isMarkdown) {
-    renderOverviewPage(overviewMod, isMarkdown ? name : null);
+  } else if (name === "Overview" || (isMarkdown && isOverviewDoc(markdownDoc))) {
+    renderOverviewPage(overviewMod);
+  } else if (isMarkdown) {
+    renderOverviewPage(overviewMod, name);
   } else if (hasChildren) {
     renderCategoryOverview(name);
   } else if (isModule) {
@@ -2633,7 +2766,7 @@ function doSearch() {
     if (!showInternalSymbols && isInternalSymbol(s)) return;
     const arg = getArgs(s.sig);
     const internal = isInternalSymbol(s);
-    html += `<div class="card symbol-card ${internal ? "internal-symbol" : ""}" data-select-module="${esc(row.mod)}" data-select-symbol="${esc(s.id)}"><div class="row"><div class="name">${icon(s.kind === "function" ? "code" : "box", "ico api-card-ico")}<span class="syn-module">${esc(row.mod)}</span> <span class="syn-call">${esc(s.name)}</span>${arg ? `(${esc(arg)})` : ""}</div><div class="kind">${esc(internal ? `internal ${s.kind}` : s.kind)}</div></div><div class="card-body"><div class="doc">${renderRichDocstring(s.doc)}</div>${renderImports(s.imports)}${s.code ? codeBox(s.code) : ""}</div></div>`;
+    html += `<div class="card symbol-card ${internal ? "internal-symbol" : ""}" data-select-module="${esc(row.mod)}" data-select-symbol="${esc(s.id)}"><div class="row"><div class="name">${icon(s.kind === "function" ? "code" : "box", "ico api-card-ico")}<span class="syn-module">${esc(row.mod)}</span> <span class="syn-call">${esc(s.name)}</span>${arg ? `(${esc(arg)})` : ""}</div><div class="kind">${esc(internal ? `internal ${s.kind}` : s.kind)}</div></div><div class="card-body"><div class="doc-label">DOCUMENTATION</div><div class="doc">${renderRichDocstring(s.doc)}</div>${renderImports(s.imports)}${s.code ? codeBox(s.code) : ""}</div></div>`;
   });
   setHTML("content", html + `</div>`);
 }
@@ -2645,8 +2778,6 @@ function scheduleSearch() {
 
 initDataIndexes();
 setupDesktopNav();
-$("modcount").textContent = "API index";
-$("symcount").textContent = "Source linked";
 
 const brandEl = document.querySelector(".brand");
 if (brandEl) {
@@ -2821,11 +2952,13 @@ document.addEventListener("keydown", (e) => {
     return;
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   if (e.key.length === 1) {
-    const aside = $("aside");
-    if (isDesktopNav()) setDesktopNav(true);
-    else if (aside && !aside.classList.contains("active")) toggleSidebar();
     const searchInput = $("search");
-    if (searchInput) searchInput.focus();
+    if (searchInput) {
+      searchInput.focus();
+      searchInput.value += e.key;
+      scheduleSearch();
+      e.preventDefault();
+    }
   }
 });
 

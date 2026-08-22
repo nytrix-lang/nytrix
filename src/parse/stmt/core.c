@@ -1,3 +1,7 @@
+/*
+ * Statement parser core: fn, let, mut, def, type, module, extern,
+ * and top-level declaration parsing with attribute/directive handling.
+ */
 static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
                                       const char *after_dot_err) {
   if (p->cur.kind != NY_T_IDENT && p->cur.kind != NY_T_NUMBER) {
@@ -9,8 +13,8 @@ static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
   size_t len = 0;
   char *buf = malloc(cap);
   if (!buf) {
-    fprintf(stderr, "oom\n");
-    exit(1);
+    parser_error(p, p->cur, "out of memory", NULL);
+    return NULL;
   }
   memcpy(buf, p->cur.lexeme, p->cur.len);
   len += p->cur.len;
@@ -23,8 +27,8 @@ static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
       char *nb = realloc(buf, cap);
       if (!nb) {
         free(buf);
-        fprintf(stderr, "oom\n");
-        exit(1);
+        parser_error(p, p->cur, "out of memory", NULL);
+        return NULL;
       }
       buf = nb;
     }
@@ -48,8 +52,8 @@ static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
       char *nb = realloc(buf, cap);
       if (!nb) {
         free(buf);
-        fprintf(stderr, "oom\n");
-        exit(1);
+        parser_error(p, p->cur, "out of memory", NULL);
+        return NULL;
       }
       buf = nb;
     }
@@ -65,8 +69,8 @@ static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
         char *nb = realloc(buf, cap);
         if (!nb) {
           free(buf);
-          fprintf(stderr, "oom\n");
-          exit(1);
+          parser_error(p, p->cur, "out of memory", NULL);
+          return NULL;
         }
         buf = nb;
       }
@@ -454,8 +458,8 @@ static char *parse_qualified_name(parser_t *p) {
       char *prefixed = malloc(clen + 1 + result_len + 1);
       if (!prefixed) {
         free(owned);
-        fprintf(stderr, "oom\n");
-        exit(1);
+        parser_error(p, p->cur, "out of memory", NULL);
+        return NULL;
       }
       memcpy(prefixed, p->current_module, clen);
       prefixed[clen] = '.';
@@ -487,8 +491,8 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
     char *owner = malloc(owner_len + 1);
     if (!owner) {
       free(base);
-      fprintf(stderr, "oom\n");
-      exit(1);
+      parser_error(p, p->cur, "out of memory", NULL);
+      return NULL;
     }
     memcpy(owner, p->current_impl_owner, owner_len + 1);
     free(base);
@@ -508,12 +512,19 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
       memcpy(out + at, proof_type, strlen(proof_type) + 1);
       return out;
     }
+    /*
+     * Layout deftype params take comptime integer args (Buf<16>) or def-bound
+     * names; the arg loop above passes integer literals through as-is and
+     * def-bound names resolve through the type-name path.  The remaining
+     * step is instantiating the deftype layout at the concrete bound in the
+     * type pipeline (see deftype_param_names in func.c).
+     */
     size_t cap = strlen(base) + 32;
     size_t len = strlen(base);
     char *generic = malloc(cap);
     if (!generic) {
-      fprintf(stderr, "oom\n");
-      exit(1);
+      parser_error(p, p->cur, "out of memory", NULL);
+      return NULL;
     }
     memcpy(generic, base, len);
     generic[len++] = '<';
@@ -521,7 +532,17 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
     bool first = true;
     while (p->cur.kind != NY_T_GT && p->cur.kind != NY_T_RSHIFT &&
            p->cur.kind != NY_T_EOF) {
-      const char *arg = parse_type_ref(p, "expected generic type argument");
+      /*
+       * Deftype layouts take comptime integer args (e.g. Buf<16>); an
+       * integer literal is not a type name, so pass it through as-is.
+       */
+      const char *arg;
+      if (p->cur.kind == NY_T_NUMBER) {
+        arg = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+        parser_advance(p);
+      } else {
+        arg = parse_type_ref(p, "expected generic type argument");
+      }
       if (!arg)
         break;
       size_t arg_len = strlen(arg);
@@ -532,8 +553,8 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
         char *nb = realloc(generic, cap);
         if (!nb) {
           free(generic);
-          fprintf(stderr, "oom\n");
-          exit(1);
+          parser_error(p, p->cur, "out of memory", NULL);
+          return NULL;
         }
         generic = nb;
       }
@@ -562,8 +583,8 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
       char *nb = realloc(generic, len + 2);
       if (!nb) {
         free(generic);
-        fprintf(stderr, "oom\n");
-        exit(1);
+        parser_error(p, p->cur, "out of memory", NULL);
+        return NULL;
       }
       generic = nb;
     }
@@ -706,8 +727,8 @@ static const char *parse_operator_target_for_owner(parser_t *p,
       scoped_owner = malloc(mlen + 1 + olen + 1);
       if (!scoped_owner) {
         free(owned);
-        fprintf(stderr, "oom\n");
-        exit(1);
+        parser_error(p, p->cur, "out of memory", NULL);
+        return NULL;
       }
       memcpy(scoped_owner, p->current_module, mlen);
       scoped_owner[mlen] = '.';
@@ -721,8 +742,8 @@ static const char *parse_operator_target_for_owner(parser_t *p,
       free(owned);
       if (scoped_owner)
         free(scoped_owner);
-      fprintf(stderr, "oom\n");
-      exit(1);
+      parser_error(p, p->cur, "out of memory", NULL);
+      return NULL;
     }
     memcpy(final_name, owner_prefix, olen);
     final_name[olen] = '.';
@@ -735,8 +756,8 @@ static const char *parse_operator_target_for_owner(parser_t *p,
     final_name = malloc(mlen + 1 + nlen + 1);
     if (!final_name) {
       free(owned);
-      fprintf(stderr, "oom\n");
-      exit(1);
+      parser_error(p, p->cur, "out of memory", NULL);
+      return NULL;
     }
     memcpy(final_name, p->current_module, mlen);
     final_name[mlen] = '.';
@@ -843,14 +864,21 @@ static size_t parse_align_attr(parser_t *p, const char *kind) {
 static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_FN, "'fn'", NULL);
+  bool is_lemma = tok_is_ident_text(p->cur, "lemma");
+  if (is_lemma)
+    parser_advance(p);
   char *name = parse_qualified_name(p);
   if (!name)
     return NULL;
   parser_expect(p, NY_T_LPAREN, NULL, "'(' ");
   ny_param_list params = {0};
-  stmt_t *fn_stmt = stmt_new(p->arena, NY_S_FUNC, tok);
+  stmt_t *fn_stmt = stmt_new(p->arena, is_lemma ? NY_S_LEMMA : NY_S_FUNC, tok);
   while (p->cur.kind != NY_T_RPAREN) {
     if (parser_match(p, NY_T_ELLIPSIS)) {
+      if (is_lemma) {
+        parser_error(p, p->prev, "lemma parameters cannot be variadic", NULL);
+        return NULL;
+      }
       fn_stmt->as.fn.is_variadic = true;
     }
     param_t pr = {0};
@@ -874,6 +902,40 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
       break;
   }
   parser_expect(p, NY_T_RPAREN, NULL, NULL);
+  if (is_lemma) {
+    if (!parser_match(p, NY_T_LBRACE)) {
+      parser_error(p, p->cur, "expected lemma proposition body",
+                   "write 'fn lemma name(params) { proposition }'");
+      return NULL;
+    }
+    expr_t *left = p_parse_expr(p, 0);
+    expr_t *proposition = left;
+    if (parser_match(p, NY_T_ARROW)) {
+      expr_t *right = p_parse_expr(p, 0);
+      if (!right) {
+        parser_error(p, p->cur,
+                     "expected proposition after lemma implication", NULL);
+        return NULL;
+      }
+      expr_t *neg = expr_new(p->arena, NY_E_UNARY, tok);
+      neg->as.unary.op = "!";
+      neg->as.unary.right = left;
+      proposition = expr_new(p->arena, NY_E_LOGICAL, tok);
+      proposition->as.logical.op = "||";
+      proposition->as.logical.left = neg;
+      proposition->as.logical.right = right;
+    }
+    parser_match(p, NY_T_SEMI);
+    parser_expect(p, NY_T_RBRACE, "'}' after lemma proposition", NULL);
+    if (!proposition)
+      return NULL;
+    fn_stmt->as.lemma.name = name;
+    fn_stmt->as.lemma.params = params;
+    fn_stmt->as.lemma.proposition = proposition;
+    fn_stmt->as.lemma.src_start = tok.lexeme;
+    fn_stmt->as.lemma.src_end = p->prev.lexeme + p->prev.len;
+    return fn_stmt;
+  }
   if (parser_match(p, NY_T_ARROW)) {
     parser_error(p, p->prev, "function return types do not use '->'",
                  "write 'fn name(params) RetType { ... }'");
@@ -1360,8 +1422,10 @@ static stmt_t *parse_use_one(parser_t *p, token_t tok) {
         size_t full_len = strlen(owned) + 1 + strlen(tail);
         char *full = malloc(full_len + 1);
         if (!full) {
-          fprintf(stderr, "oom\n");
-          exit(1);
+          free(owned);
+          free(tail);
+          parser_error(p, p->cur, "out of memory", NULL);
+          return NULL;
         }
         snprintf(full, full_len + 1, "%s.%s", owned, tail);
         free(owned);
@@ -1575,10 +1639,13 @@ typedef struct layout_gen_buf_t {
   char *data;
   size_t len;
   size_t cap;
+  bool oom;
 } layout_gen_buf_t;
 typedef VEC(const char *) layout_derive_list;
 
 static void layout_gen_append(layout_gen_buf_t *b, const char *fmt, ...) {
+  if (b->oom)
+    return;
   va_list ap;
   va_start(ap, fmt);
   int n = vsnprintf(NULL, 0, fmt, ap);
@@ -1592,8 +1659,8 @@ static void layout_gen_append(layout_gen_buf_t *b, const char *fmt, ...) {
       cap *= 2;
     char *nb = realloc(b->data, cap);
     if (!nb) {
-      fprintf(stderr, "oom\n");
-      exit(1);
+      b->oom = true;
+      return;
     }
     b->data = nb;
     b->cap = cap;
@@ -1936,6 +2003,11 @@ static stmt_t *layout_wrap_generated(parser_t *p, stmt_t *layout_stmt,
   if (layout_derive_has(derives, "debug_str"))
     layout_emit_debug_str_derive(&b, owner, fields);
 
+  if (b.oom) {
+    free(b.data);
+    parser_error(p, layout_stmt->tok, "out of memory", NULL);
+    return NULL;
+  }
   if (b.data) {
     layout_append_generated_stmts(p, block, b.data);
     free(b.data);
@@ -2009,6 +2081,22 @@ static stmt_t *parse_struct(parser_t *p) {
     s->as.layout.name = name;
   else
     s->as.struc.name = name;
+  if (is_layout && p->cur.kind == NY_T_LPAREN) {
+    parser_advance(p);
+    while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
+      param_t pr = {0};
+      if (!parse_param_type_first(p, &pr))
+        break;
+      if (parser_match(p, NY_T_ASSIGN))
+        pr.def = p_parse_expr(p, 0);
+      vec_push_arena(p->arena, &s->as.layout.deftype_params, pr);
+      if (!parser_match(p, NY_T_COMMA))
+        break;
+      if (p->cur.kind == NY_T_RPAREN)
+        break;
+    }
+    parser_expect(p, NY_T_RPAREN, "')' after deftype params", NULL);
+  }
   size_t align_override = 0;
   size_t pack = 0;
   layout_derive_list derives = {0};
@@ -2085,6 +2173,38 @@ static stmt_t *parse_struct(parser_t *p) {
       parser_match(p, NY_T_SEMI);
       continue;
     }
+    /*
+     * Array field: `[elem, size] name` (type-first, comma separator — `;` is
+     * a comment in Nytrix). `size` is an integer literal or a def-bound
+     * deftype param name.
+     */
+    if (p->cur.kind == NY_T_LBRACK) {
+      parser_advance(p);
+      if (p->cur.kind != NY_T_IDENT) {
+        parser_error(p, p->cur, "expected array element type after '['", NULL);
+        break;
+      }
+      const char *elem =
+          arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+      parser_advance(p);
+      parser_expect(p, NY_T_COMMA,
+                    "',' between element type and size in array field",
+                    "write '[byte, 32] data' or '[byte, n] data'");
+      expr_t *arr_len = p_parse_expr(p, 0);
+      parser_expect(p, NY_T_RBRACK, "']' after array field size", NULL);
+      if (p->cur.kind != NY_T_IDENT) {
+        parser_error(p, p->cur, "expected field name after array type", NULL);
+        break;
+      }
+      const char *aname =
+          arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+      parser_advance(p);
+      layout_field_t af = {aname, elem, 0, NULL, NULL, 1, arr_len};
+      vec_push_arena(p->arena, fields, af);
+      if (p->cur.kind == NY_T_COMMA)
+        parser_advance(p);
+      continue;
+    }
     if (p->cur.kind != NY_T_IDENT) {
       parser_error(p, p->cur, "expected field name",
                    "keywords cannot be used as field names");
@@ -2141,7 +2261,7 @@ static stmt_t *parse_struct(parser_t *p) {
       }
     }
     layout_field_t f_field = {fname, tname, field_align, default_value,
-                              default_src};
+                              default_src, 0, NULL};
     vec_push_arena(p->arena, fields, f_field);
     if (p->cur.kind == NY_T_COMMA)
       parser_advance(p);

@@ -150,7 +150,7 @@ typedef struct {
   unsigned is_variadic;
 } ny_cdecl_t;
 
-#define NY_C_MAX_INCLUDE_DEPTH 16
+#define NY_C_MAX_INCLUDE_DEPTH 64
 
 typedef char *(*ny_c_include_read_fn)(const char *path, bool is_std,
                                        void *userdata);
@@ -164,6 +164,11 @@ typedef struct {
   unsigned include_depth;
   ny_c_include_read_fn include_read;
   void *include_userdata;
+  /* Include metadata/source ownership shared by recursive include handling.
+   * Guarded headers can be skipped without reparsing while retained source
+   * buffers keep parser token/type references valid until cleanup. */
+  void *include_cache;
+  unsigned include_cache_owner;
   unsigned typedef_count;
   ny_ctok_t typedef_names[NY_C_MAX_TYPEDEFS];
   ny_ctype_t typedef_types[NY_C_MAX_TYPEDEFS];

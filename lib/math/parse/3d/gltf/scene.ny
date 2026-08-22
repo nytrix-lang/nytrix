@@ -241,7 +241,7 @@ fn gltf_has_node_visibility(any gltf_data, any overrides=0) bool {
             key,
             true,
             shr._GLTF_CACHE_LIMIT_MED,
-         64)
+            64)
          return true
       }
       ni += 1
@@ -250,7 +250,7 @@ fn gltf_has_node_visibility(any gltf_data, any overrides=0) bool {
       key,
       false,
       shr._GLTF_CACHE_LIMIT_MED,
-   64)
+      64)
    false
 }
 
@@ -285,7 +285,7 @@ fn _gltf_resolve_part_skin(dict gltf_data, dict g, any data, list nodes, int par
          "skin_weights_ptr": 0,
          "skin_vcnt": vcnt,
          "skin_joints": [],
-      "skin_inv_bind_accessor": -1}
+         "skin_inv_bind_accessor": -1}
    }
    def node_obj = nodes.get(part_node_idx, 0)
    def skin_idx = is_dict(node_obj) ? int(node_obj.get("skin", -1)) : -1
@@ -339,12 +339,12 @@ fn gltf_camera_info(any gltf_data, int cam_idx) any {
       def zfar = is_dict(p) ? p.get("zfar", 0) : 0
       return {"index": cam_idx,
          "name": to_str(cam.get("name",
-         "")),
+               "")),
          "type": typ,
          "aspect_ratio": aspect_ratio,
          "yfov": yfov,
          "znear": znear,
-      "zfar": zfar}
+         "zfar": zfar}
    }
    if eq(typ, "orthographic") {
       def o = cam.get("orthographic", 0)
@@ -354,12 +354,12 @@ fn gltf_camera_info(any gltf_data, int cam_idx) any {
       def zfar = is_dict(o) ? float(o.get("zfar", 0.0)) : 0.0
       return {"index": cam_idx,
          "name": to_str(cam.get("name",
-         "")),
+               "")),
          "type": typ,
          "xmag": xmag,
          "ymag": ymag,
          "znear": znear,
-      "zfar": zfar}
+         "zfar": zfar}
    }
    {"index": cam_idx, "name": to_str(cam.get("name", "")), "type": typ}
 }

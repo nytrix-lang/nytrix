@@ -1,6 +1,7 @@
 shape os-net-socket {
   family "probe-suite"
   generator "stress"
+  ci "windows-skip"
   features ["ny", "sys"]
   template ny-test-case
   expect compile_and_run

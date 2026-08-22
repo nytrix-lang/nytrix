@@ -1,3 +1,7 @@
+/*
+ * Translation validation: after each NYIR pass, re-runs a bounded
+ * set of deterministic pure-i64 programs to catch optimizer regressions.
+ */
 #include "code/native/ir/internal.h"
 #include "code/native/ir.h"
 #include "base/common.h"
@@ -11,9 +15,11 @@
 #include <z3.h>
 #endif
 
-/* Real SMT translation validation for pure i64 straight-line NYIR.
+/*
+ * Real SMT translation validation for pure i64 straight-line NYIR.
  * With Z3: prove before ≡ after for all free local inputs (bitvector).
- * Without Z3 / with branches: multi-input interpreter differential. */
+ * Without Z3 / with branches: multi-input interpreter differential.
+ */
 
 static bool nyir_has_cfg_or_phi(const nyir_func_t *f) {
   if (!f)
@@ -514,7 +520,9 @@ bool nyir_tv_smt_equiv(const nyir_func_t *before, const nyir_func_t *after,
     return nyir_tv_equiv_straightline(before, after, 64, err, err_len);
   }
 
-  /* Ask: exists inputs s.t. ret_before != ret_after? */
+  /*
+   * Ask: exists inputs s.t. ret_before != ret_after?
+   */
   Z3_solver_assert(z3, solver, Z3_mk_not(z3, Z3_mk_eq(z3, ret_b, ret_a)));
   Z3_lbool st = Z3_solver_check(z3, solver);
   bool ok = (st == Z3_L_FALSE);

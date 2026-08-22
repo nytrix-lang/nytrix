@@ -1,0 +1,34 @@
+shape proof_boolean_normalization {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "normalization", "boolean"]
+  template ny-test-case
+  flags "--color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+;; Boolean proof propositions normalize to stable canonical forms. Double
+;; negation and De Morgan spellings match their direct equivalents.
+
+;; Double negation: !!true and !(!true) → same canonical form
+def proof nn = prove(!!true == true, "double negation")
+assert(proof_matches(nn, !(!true) == true), "double negation canonical")
+
+;; Boolean identity: true && true folds
+def proof id_and = prove((true && true) == true, "true && true")
+
+;; De Morgan: !(p && !q) ≡ (!p || q) → same canonical digest
+def bool p = true
+def bool q = true
+def proof dm = prove(!(p && !q) == true, "de morgan and")
+assert(proof_matches(dm, (!p || q) == true), "de morgan canonical equivalence")
+
+;; Contradiction: !(x && !x) folds to trivially true
+;; (the whole condition collapses to a canonical ==(true,true) form)
+def proof contra = prove(!(true && !true) == true, "contradiction")
+assert(proof_matches(contra, !(true && !true) == true), "contradiction canonical")
+
+assert(true, "boolean normalization complete")
+NY
+}

@@ -1,9 +1,14 @@
+/*
+ * Function codegen: lowers Nytrix function definitions to LLVM IR
+ * including signature construction, argument marshalling, and bodies.
+ */
 #include "base/util.h"
 #include "base/options.h"
 
 #include "llvm.h"
 #include "priv.h"
 #include "typeinfer.h"
+#include "parse/proof.h"
 #ifndef _WIN32
 #include <alloca.h>
 #else
@@ -148,6 +153,8 @@ static bool layout_has_field(layout_def_t *def, const char *name) {
   return false;
 }
 
+static bool ny_layout_array_extent(codegen_t *cg, layout_def_t *def, expr_t *e, int64_t *out);
+
 static bool layout_add_field(codegen_t *cg, layout_def_t *def, layout_field_t *field, token_t tok,
                              size_t *offset, size_t *max_align) {
   if (!cg || !def || !field || !field->name || !field->type_name)
@@ -166,18 +173,77 @@ static bool layout_add_field(codegen_t *cg, layout_def_t *def, layout_field_t *f
     cg->had_error = 1;
     return false;
   }
+  size_t field_size = tl.size;
+  size_t array_count = 0;
+  if (field->is_array) {
+    int64_t n = 0;
+    if (!ny_layout_array_extent(cg, def, field->array_len, &n)) {
+      ny_diag_error(tok,
+                    "layout array field '%s' extent must be a comptime integer "
+                    "(literal or def-bound deftype param already resolved)",
+                    field->name);
+      cg->had_error = 1;
+      return false;
+    }
+    if (n <= 0) {
+      ny_diag_error(tok, "layout array field '%s' extent must be positive",
+                    field->name);
+      cg->had_error = 1;
+      return false;
+    }
+    field_size = tl.size * (size_t)n;
+    array_count = (size_t)n;
+  }
   size_t align = tl.align ? tl.align : 1;
   if (field->width > 0)
     align = (size_t)field->width;
   if (def->pack > 0 && align > def->pack)
     align = def->pack;
   *offset = align_up_size(*offset, align);
-  layout_field_info_t info = {field->name, field->type_name, *offset, tl.size, align};
+  layout_field_info_t info = {field->name,    field->type_name, *offset,
+                              field_size,     align,           field->is_array,
+                              array_count};
   vec_push(&def->fields, info);
-  *offset += tl.size;
+  *offset += field_size;
   if (align > *max_align)
     *max_align = align;
   return true;
+}
+
+static bool ny_layout_array_extent(codegen_t *cg, layout_def_t *def, expr_t *e,
+                                   int64_t *out) {
+  (void)cg;
+  if (!e || !out)
+    return false;
+  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT &&
+      e->tok.kind != NY_T_NIL) {
+    *out = e->as.literal.as.i;
+    return true;
+  }
+  /*
+   * Resolve a def-bound deftype param name to its explicit instantiation
+   * bound (Buf<16>) or its `= default` value (int n = 16).
+   */
+  if (e->kind == NY_E_IDENT && e->as.ident.name && def && def->stmt &&
+      def->stmt->kind == NY_S_LAYOUT) {
+    for (size_t i = 0; i < def->stmt->as.layout.deftype_params.len; ++i) {
+      const param_t *pr = &def->stmt->as.layout.deftype_params.data[i];
+      if (pr->name && strcmp(pr->name, e->as.ident.name) == 0) {
+        if (i < def->deftype_param_vals.len &&
+            def->deftype_param_vals.data[i] >= 0) {
+          *out = def->deftype_param_vals.data[i];
+          return true;
+        }
+        if (pr->def && pr->def->kind == NY_E_LITERAL &&
+            pr->def->as.literal.kind == NY_LIT_INT &&
+            pr->def->tok.kind != NY_T_NIL) {
+          *out = pr->def->as.literal.as.i;
+          return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 static int ny_should_disable_trace_emission(codegen_t *cg) {
@@ -628,6 +694,21 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
       mark_simple_flag_attr(cg, fn_stmt, attr, "@cache", &is_cache);
       continue;
     }
+    if (attr_name_eq(attr, "proves")) {
+      if (decl->attr_proves) {
+        ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
+                      "duplicate attribute '@proves'");
+        cg->had_error = 1;
+      }
+      if (attr->args.len != 1) {
+        ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
+                      "@proves requires exactly one condition argument");
+        cg->had_error = 1;
+      } else {
+        decl->attr_proves = attr->args.data[0];
+      }
+      continue;
+    }
     if (attr_name_eq(attr, "inline")) {
       decl->attr_inline = true;
       continue;
@@ -1002,6 +1083,8 @@ static void stmt_scan_body_summary(const stmt_t *s, bool *has_try,
     }
     stmt_scan_body_summary(s->as.match.default_conseq, has_try, has_label_or_goto);
     break;
+  case NY_S_LEMMA:
+    break;
   case NY_S_MODULE:
     for (size_t i = 0; i < s->as.module.body.len; ++i) {
       stmt_scan_body_summary(s->as.module.body.data[i], has_try, has_label_or_goto);
@@ -1212,7 +1295,11 @@ static LLVMTypeRef build_layout_llvm_type(codegen_t *cg, layout_def_t *def, toke
       free(elems);
       return NULL;
     }
-    elems[elem_count++] = tl.llvm_type;
+    if (field->is_array && field->array_count > 0)
+      elems[elem_count++] =
+          LLVMArrayType(tl.llvm_type, (unsigned)field->array_count);
+    else
+      elems[elem_count++] = tl.llvm_type;
     cursor = field->offset + field->size;
   }
   if (def->size > cursor)
@@ -1243,6 +1330,19 @@ static void register_layout_def(codegen_t *cg, stmt_t *s, bool is_layout) {
   def->is_layout = is_layout;
   def->align_override = align_override;
   def->pack = pack;
+  if (is_layout && s->as.layout.deftype_params.len > 0) {
+    /*
+     * deftype-param array extents (`[u8, n]`) resolve from an explicit
+     * instantiation bound (Buf<16>, via ny_layout_instantiate) or the param's
+     * `= default` literal, in layout_add_field (ny_layout_array_extent).
+     */
+    for (size_t i = 0; i < s->as.layout.deftype_params.len; i++) {
+      const char *pname = s->as.layout.deftype_params.data[i].name;
+      if (pname)
+        vec_push(&def->deftype_param_names, pname);
+      vec_push(&def->deftype_param_vals, (int64_t)-1);
+    }
+  }
   size_t offset = 0;
   size_t max_align = 1;
   for (size_t i = 0; i < fields->len; i++) {
@@ -1268,6 +1368,55 @@ static void register_layout_def(codegen_t *cg, stmt_t *s, bool is_layout) {
   s->sema = def;
   s->sema_kind = NY_STMT_SEMA_LAYOUT;
   vec_push(&cg->layouts, def);
+}
+
+/*
+ * Instantiate a deftype layout at an explicit comptime-int bound (Buf<16>).
+ * Creates a cached layout_def whose deftype_param_vals bind the first param to
+ * `bound`, so array extents `[u8, n]` resolve to the bound instead of the
+ * param default.
+ */
+layout_def_t *ny_layout_instantiate(codegen_t *cg, const char *inst_name,
+                                    const char *generic_name, int64_t bound) {
+  if (!cg || !inst_name || !generic_name)
+    return NULL;
+  for (size_t i = 0; i < cg->layouts.len; i++)
+    if (cg->layouts.data[i] && cg->layouts.data[i]->name &&
+        strcmp(cg->layouts.data[i]->name, inst_name) == 0)
+      return cg->layouts.data[i];
+  layout_def_t *gen = lookup_layout(cg, generic_name);
+  if (!gen || !gen->is_layout || gen->deftype_param_names.len == 0 ||
+      !gen->stmt || gen->stmt->kind != NY_S_LAYOUT)
+    return NULL;
+  layout_def_t *def = arena_alloc(cg->arena, sizeof(layout_def_t));
+  memset(def, 0, sizeof(layout_def_t));
+  def->name = ny_strdup(inst_name);
+  def->stmt = gen->stmt;
+  def->is_layout = true;
+  def->align_override = gen->align_override;
+  def->pack = gen->pack;
+  for (size_t i = 0; i < gen->deftype_param_names.len &&
+                     i < gen->stmt->as.layout.deftype_params.len;
+       i++) {
+    vec_push(&def->deftype_param_names, gen->deftype_param_names.data[i]);
+    vec_push(&def->deftype_param_vals, i == 0 ? bound : (int64_t)-1);
+  }
+  size_t offset = 0;
+  size_t max_align = 1;
+  ny_layout_field_list *fields = &gen->stmt->as.layout.fields;
+  for (size_t i = 0; i < fields->len; i++)
+    layout_add_field(cg, def, &fields->data[i], gen->stmt->tok, &offset,
+                     &max_align);
+  size_t effective_align = max_align;
+  if (def->pack > 0 && def->pack < effective_align)
+    effective_align = def->pack;
+  if (def->align_override > 0 && def->align_override >= effective_align)
+    effective_align = def->align_override;
+  def->align = effective_align;
+  def->size = align_up_size(offset, def->align);
+  def->llvm_type = build_layout_llvm_type(cg, def, gen->stmt->tok);
+  vec_push(&cg->layouts, def);
+  return def;
 }
 
 static void collect_assigned_names_expr(expr_t *e, assigned_name_list *out_names,
@@ -1338,10 +1487,32 @@ static void collect_assigned_names_expr(expr_t *e, assigned_name_list *out_names
     collect_assigned_names_expr(e->as.ternary.true_expr, out_names, out_hashes, out_bloom);
     collect_assigned_names_expr(e->as.ternary.false_expr, out_names, out_hashes, out_bloom);
     break;
-  case NY_E_CALL:
+  case NY_E_CALL: {
+    /*
+     * addr_of(local) / borrow(local) require an addressable stack slot.
+     * Record the target so can_bind_decl_direct keeps it in a slot even
+     * when the local is never reassigned (which would otherwise bind it
+     * straight to an SSA register with no address to take).
+     */
+    if (e->as.call.args.len == 1 && !e->as.call.args.data[0].name &&
+        e->as.call.args.data[0].val &&
+        e->as.call.args.data[0].val->kind == NY_E_IDENT &&
+        e->as.call.args.data[0].val->as.ident.name) {
+      const char *callee_name =
+          e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT
+              ? e->as.call.callee->as.ident.name
+              : NULL;
+      const char *leaf = callee_name ? strrchr(callee_name, '.') : NULL;
+      leaf = leaf ? leaf + 1 : callee_name;
+      if (leaf &&
+          (strcmp(leaf, "addr_of") == 0 || strcmp(leaf, "borrow") == 0))
+        assigned_name_add(out_names, out_hashes, out_bloom,
+                          e->as.call.args.data[0].val->as.ident.name);
+    }
     collect_assigned_names_expr(e->as.call.callee, out_names, out_hashes, out_bloom);
     collect_assigned_names_call_args(&e->as.call.args, out_names, out_hashes, out_bloom);
     break;
+  }
   case NY_E_MEMCALL:
     collect_assigned_names_expr(e->as.memcall.target, out_names, out_hashes, out_bloom);
     collect_assigned_names_call_args(&e->as.memcall.args, out_names, out_hashes, out_bloom);
@@ -1454,6 +1625,9 @@ static void collect_assigned_names_stmt(stmt_t *s, assigned_name_list *out_names
     collect_assigned_names_expr(s->as.match.test, out_names, out_hashes, out_bloom);
     collect_assigned_names_match_arms(&s->as.match.arms, out_names, out_hashes, out_bloom);
     collect_assigned_names_stmt(s->as.match.default_conseq, out_names, out_hashes, out_bloom);
+    break;
+  case NY_S_LEMMA:
+    collect_assigned_names_expr(s->as.lemma.proposition, out_names, out_hashes, out_bloom);
     break;
   case NY_S_FUNC:
     break;
@@ -1815,6 +1989,10 @@ static void scan_body_for_param_types(stmt_t *body, type_env_t *env, const char 
     if (body->as.match.default_conseq)
       scan_body_for_param_types(body->as.match.default_conseq, env, param_names, param_types,
                                 nparam);
+    return;
+  }
+  if (body->kind == NY_S_LEMMA) {
+    mark_expr_params(body->as.lemma.proposition, env, param_names, param_types, nparam);
     return;
   }
   if (body->kind == NY_S_RETURN) {
@@ -2744,6 +2922,8 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
   if (stmt_func_body_has_label_or_goto(fn))
     collect_labels(cg, f, fn->as.fn.body, root);
   gen_stmt(cg, scopes, &fd, fn->as.fn.body, root, true);
+  if (fn->as.fn.attr_proves)
+    ny_proof_check_fn_proves(cg, scopes, depth, fn);
   for (size_t i = 0; i < cg->labels.len; ++i)
     free((void *)cg->labels.data[i].name);
   free(cg->labels.data);
@@ -2901,6 +3081,30 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
       }
     }
     vec_push(&cg->fun_sigs, sig);
+  } else if (s->kind == NY_S_LEMMA) {
+    lemma_def_t *def = arena_alloc(cg->arena, sizeof(*def));
+    if (!def)
+      return;
+    memset(def, 0, sizeof(*def));
+    def->name = s->as.lemma.name;
+    def->module_name = cg->current_module_name;
+    def->proposition = s->as.lemma.proposition;
+    def->stmt = s;
+    def->proved = ny_proof_check_lemma_definition(cg, s);
+    if (def->proved) {
+      char *prop_form = ny_proof_type_from_expr(s->as.lemma.proposition);
+      def->proposition_hash =
+          ny_hash64_cstr(prop_form ? prop_form : "");
+      free(prop_form);
+    } else {
+      def->proposition_hash = 0;
+    }
+    for (size_t i = 0; i < cg->registry.lemmas.len; ++i) {
+      lemma_def_t *old = cg->registry.lemmas.data[i];
+      if (old && old->name && strcmp(old->name, def->name) == 0)
+        return;
+    }
+    vec_push(&cg->registry.lemmas, def);
   } else if (s->kind == NY_S_EXTERN) {
     sema_func_t *sema_func = arena_alloc(cg->arena, sizeof(sema_func_t));
     memset(sema_func, 0, sizeof(sema_func_t));
@@ -2920,10 +3124,12 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
       pt[j] = sema_func->resolved_param_types.data[j];
     LLVMTypeRef ft =
         LLVMFunctionType(sema_func->resolved_return_type, pt, (unsigned)param_count, 0);
-    /* Keep the IR declaration distinct from the external linker symbol.
+    /*
+     * Keep the IR declaration distinct from the external linker symbol.
      * A C symbol may legitimately be exposed through multiple typed extern
      * declarations (notably objc_msgSend); LLVM cannot represent those as
-     * one declaration with incompatible function types. */
+     * one declaration with incompatible function types.
+     */
     LLVMValueRef f = ny_get_named_fn(cg, final_name);
     if (!f)
       f = LLVMAddFunction(cg->module, final_name, ft);

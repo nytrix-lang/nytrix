@@ -20,8 +20,7 @@ module std.math.matrix(Matrix, is_matrix, mat_new, mat_get, mat_set, mat_mul, ma
    matrix_change_ring,
    matrix_solve, matrix_solve_mod, matrix_solve_right_mod, matrix_solve_left_mod,
    matrix_lu, matrix_gauss_eliminate,
-_matrix_rows, _matrix_cols, _matrix_data, _matrix_get, _matrix_set)
-
+   _matrix_rows, _matrix_cols, _matrix_data, _matrix_get, _matrix_set)
 use std.core
 use std.core.str as str
 use std.math.big
@@ -970,11 +969,13 @@ fn matrix_hnf(any m) list {
    return matrix_hermite_form(m)
 }
 
+; TODO(A-ν): Implement unimodular transform matrix
 fn matrix_hnf_transform(any m) any {
    "Reserved transform-returning HNF surface. Returns [H, U] once unimodular transforms are implemented."
    panic("matrix_hnf_transform: unimodular transform matrix is not implemented")
 }
 
+; TODO(A-ν): Implement unimodular transform matrices
 fn matrix_snf_transform(any m) any {
    "Reserved transform-returning SNF surface. Returns [S, U, V] once unimodular transforms are implemented."
    panic("matrix_snf_transform: unimodular transform matrices are not implemented")
@@ -1133,7 +1134,7 @@ fn matrix_lu(any m) list {
             mut j = k
             while j < cols {
                def new_val = bigint_sub(_matrix_get_from_data(U_data, i, j),
-               bigint_mul(factor, _matrix_get_from_data(U_data, k, j)))
+                  bigint_mul(factor, _matrix_get_from_data(U_data, k, j)))
                U_data = U_data.set(i, U_data.get(i).set(j, new_val))
                j += 1
             }
@@ -1496,7 +1497,7 @@ fn matrix_gauss_eliminate(any A, list b) list {
             mut j = k
             while j <= cols {
                def new_val = bigint_sub(_matrix_get_from_data(aug_data, i, j),
-               bigint_mul(factor, _matrix_get_from_data(aug_data, k, j)))
+                  bigint_mul(factor, _matrix_get_from_data(aug_data, k, j)))
                aug_data = aug_data.set(i, aug_data.get(i).set(j, new_val))
                j += 1
             }

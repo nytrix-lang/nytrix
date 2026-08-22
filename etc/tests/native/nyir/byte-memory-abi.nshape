@@ -1,0 +1,13 @@
+shape native_byte_memory_abi {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "x86_64", "memory", "load8", "store8"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+def p = zalloc(4)
+store8(p, 65, 0)
+load8(p, 0) - 65
+NY
+}

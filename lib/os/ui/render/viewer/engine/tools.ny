@@ -99,7 +99,7 @@ fn draw_gallery(any state) dict {
             "frame_stats": st.get("frame_stats", dict(0)), "renderer_hotspot": st.get("renderer_hotspot", ""),
             "last_frame_ms": st.get("last_frame_ms", 0.0), "last_draw_ms": st.get("last_draw_ms", 0.0),
             "last_ui_ms": st.get("last_ui_ms", 0.0), "fps": st.get("fps", 0), "model_count": st.get("model_count", 0)
-      })
+         })
    }
    ui_editor.end_tool()
    _finish(st, true)
@@ -122,7 +122,7 @@ fn draw_graph(any state) dict {
          st["nodes"] = demo_editor.draw_graph_body(nodes, st.get("links", []), demo_editor.selected_graph_node(nodes),
             ui_app.app_card_w("node_graph", 3, 10.0, 100.0),
             clamp(ui_app.app_window_body_h("node_graph", 260.0, 168.0), 220.0, 560.0),
-         float(st.get("workspace_grid", 32.0)))
+            float(st.get("workspace_grid", 32.0)))
       }
    }
    ui_editor.end_tool()
@@ -148,7 +148,7 @@ fn draw_probe(any state) dict {
             "probe_w": probe_w, "card_w": ui_app.app_card_w("widget_probe", probe_w < 560.0 ? 2 : 3, 8.0, 112.0),
             "win_w": st.get("win_w", 1.0), "win_h": st.get("win_h", 1.0),
             "last_frame_ms": st.get("last_frame_ms", 0.0), "last_probe_text": st.get("last_probe_text", "")
-      })
+         })
       st["action"] = to_str(res.get("action", ""))
    }
    ui_editor.end_tool()
@@ -163,7 +163,7 @@ fn draw_profiler(any state) dict {
    st = opened.get(1, st)
    if bool(opened.get(0, false)) {
       viewer_panels.profiler_body(st.get("renderer", dict(0)), st.get("profile", dict(0)), _txt(st.get("renderer_hotspot", ""), ""),
-      ui_app.app_card_w("profiler", 3, 10.0, 110.0), ui_app.app_card_w("profiler", 4, 10.0, 84.0))
+         ui_app.app_card_w("profiler", 3, 10.0, 110.0), ui_app.app_card_w("profiler", 4, 10.0, 84.0))
    }
    ui_editor.end_tool()
    _finish(st, true)
@@ -178,7 +178,7 @@ fn draw_workspace(any state) dict {
    st = opened.get(1, st)
    if bool(opened.get(0, false)) {
       def out = viewer_panels.workspace_body(clamp(ui_app.app_window_body_h("workspace_grid", 210.0, 170.0), 190.0, 520.0),
-      st.get("grid", 32.0), st.get("major", 4), st.get("cam_x", 0.0), st.get("cam_y", 0.0), st.get("cam_z", 0.0), st.get("font", 0))
+         st.get("grid", 32.0), st.get("major", 4), st.get("cam_x", 0.0), st.get("cam_y", 0.0), st.get("cam_z", 0.0), st.get("font", 0))
       st["grid"] = float(out.get(0, st.get("grid", 32.0)))
       st["major"] = int(out.get(1, st.get("major", 4)))
    }

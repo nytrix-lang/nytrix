@@ -5285,7 +5285,6 @@ fn mpqs_source_factor(any n, int max_factor_base_count=96, int max_prime_bound=1
    assert(small == Z(1009) || small == Z(1013), "quadratic sieve exact small semiprime factor")
    assert(quadratic_sieve_factor(Z(1019)) == nil, "quadratic sieve prime has no factor")
    assert(quadratic_sieve_factor(Z(2) * Z(1019)) == Z(2), "quadratic sieve even short-circuit")
-
    def semiprimes = [
       [Z(281458065279943), Z(16777213), Z(16776211)],
       [Z(72057295537760999), Z(268435399), Z(268434401)],

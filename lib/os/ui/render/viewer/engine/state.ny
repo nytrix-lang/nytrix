@@ -340,6 +340,7 @@ fn _scene_selection_cache_remember_current() bool {
    }
    true
 }
+
 mut int _gui_workspace_mode = 1
 mut int _gui_center_tab = 0
 mut int _gui_side_tab = 0

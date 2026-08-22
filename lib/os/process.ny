@@ -104,7 +104,7 @@ fn waitpid(int pid, int options) int {
       if res < 0 { return res }
       def status = load32(status_ptr, 0)
       if (status & 127) != 0 { return 128 + (status & 127) }
-      return(status / 256) % 256
+      return (status / 256) % 256
    } #endif
 }
 
@@ -118,16 +118,7 @@ fn run(str path, list args) int {
       def code = __spawn_wait(rpath, argv)
       return code
    } #else {
-      mut pid = __fork()
-      if pid == 0 {
-         def argv = _build_argv(path, rpath, args)
-         if argv == 0 { __exit(127) }
-         __execve(rpath, argv, __envp())
-         __exit(127)
-      } else {
-         if pid < 0 { return -1 }
-         return waitpid(pid, 0)
-      }
+      return __spawn_wait(rpath, args)
    } #endif
 }
 
@@ -153,50 +144,18 @@ fn popen(str path, list args) any {
       return [pid, stdin_write, stdout_read]
    }
    #endif
-   def n = args.len
-   def p_stdin = malloc(8)
-   def p_stdout = malloc(8)
-   if p_stdin == 0 || p_stdout == 0 {
-      if p_stdin != 0 { free(p_stdin) }
-      if p_stdout != 0 { free(p_stdout) }
-      return 0
-   }
-   defer { free(p_stdin) }
-   defer { free(p_stdout) }
-   if __pipe(p_stdin) < 0 { return 0 }
-   if __pipe(p_stdout) < 0 {
-      def in_r, in_w = load32(p_stdin, 0), load32(p_stdin, 4)
-      sys_close_quiet(in_r)
-      sys_close_quiet(in_w)
-      return 0
-   }
-   def stdin_read = load32(p_stdin, 0)
-   def stdin_write = load32(p_stdin, 4)
-   def stdout_read = load32(p_stdout, 0)
-   def stdout_write = load32(p_stdout, 4)
-   def pid = __fork()
-   if pid < 0 {
-      sys_close_quiet(stdin_read)
+   def fds = malloc(8)
+   if fds == 0 { return 0 }
+   defer { free(fds) }
+   def pid = __spawn_pipe(rpath, args, fds)
+   if pid <= 0 { return 0 }
+   def stdin_write = load32(fds, 0)
+   def stdout_read = load32(fds, 4)
+   if stdin_write < 0 || stdout_read < 0 {
       sys_close_quiet(stdin_write)
       sys_close_quiet(stdout_read)
-      sys_close_quiet(stdout_write)
       return 0
    }
-   if pid == 0 {
-      __dup2(stdin_read, 0)
-      __dup2(stdout_write, 1)
-      __dup2(stdout_write, 2)
-      sys_close_quiet(stdin_write)
-      sys_close_quiet(stdout_read)
-      sys_close_quiet(stdin_read)
-      sys_close_quiet(stdout_write)
-      def argv = _build_argv(path, rpath, args)
-      if argv == 0 { __exit(127) }
-      __execve(rpath, argv, __envp())
-      __exit(127)
-   }
-   sys_close_quiet(stdin_read)
-   sys_close_quiet(stdout_write)
    [pid, stdin_write, stdout_read]
 }
 

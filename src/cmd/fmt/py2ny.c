@@ -15,9 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------------------------------------------------------------ */
-/* string builder                                                      */
-/* ------------------------------------------------------------------ */
+/*
+ * string builder
+ */
 
 typedef struct {
   char *data;
@@ -62,9 +62,9 @@ static void pny_sb_clear(pny_sb_t *b) {
   b->len = 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* tokenizer                                                           */
-/* ------------------------------------------------------------------ */
+/*
+ * tokenizer
+ */
 
 #define PN_IS_DIGIT(c) ((c) >= '0' && (c) <= '9')
 #define PN_IS_ALPHA(c) \
@@ -152,9 +152,11 @@ static int pny_is_prefix(const char *s, size_t n) {
   return 1;
 }
 
-/* scan a string literal beginning at `start` (which may include a prefix).
-   emits one PNTK_STR token; returns the index past the closing quote.
-   updates *line for multiline (triple-quoted) strings. */
+/*
+ * scan a string literal beginning at `start` (which may include a prefix).
+ * emits one PNTK_STR token; returns the index past the closing quote.
+ * updates *line for multiline (triple-quoted) strings.
+ */
 static size_t pny_scan_string(const char *src, size_t start, size_t n,
                               int *line, pny_toks_t *out) {
   int start_line = *line;
@@ -219,7 +221,9 @@ static void pny_lex(const char *src, size_t n, pny_toks_t *out) {
 
   while (i < n) {
     if (at_line_start && bracket == 0) {
-      /* peek: is this line blank or comment-only? */
+      /*
+       * peek: is this line blank or comment-only?
+       */
       size_t j = i;
       while (j < n && (src[j] == ' ' || src[j] == '\t'))
         j++;
@@ -236,7 +240,9 @@ static void pny_lex(const char *src, size_t n, pny_toks_t *out) {
         }
         continue; /* stay at_line_start */
       }
-      /* non-blank line: compute indentation (tab = 8, column-aligned) */
+      /*
+       * non-blank line: compute indentation (tab = 8, column-aligned)
+       */
       int ind = 0;
       while (i < n && src[i] == ' ') {
         ind++;
@@ -370,7 +376,9 @@ static void pny_lex(const char *src, size_t n, pny_toks_t *out) {
       i += ol;
       continue;
     }
-    /* unknown byte: skip */
+    /*
+     * unknown byte: skip
+     */
     i++;
   }
 
@@ -383,9 +391,9 @@ static void pny_lex(const char *src, size_t n, pny_toks_t *out) {
   pny_toks_push(out, PNTK_EOF, src + n, 0, line);
 }
 
-/* ------------------------------------------------------------------ */
-/* parser / emitter                                                    */
-/* ------------------------------------------------------------------ */
+/*
+ * parser / emitter
+ */
 
 typedef struct {
   const pny_tok_t *toks;
@@ -442,7 +450,9 @@ static void pny_emit_sb(pny_t *p, const pny_sb_t *b) {
   pny_sb_add(&p->ln, b->data ? b->data : "");
 }
 
-/* append to either a buffer or the current line */
+/*
+ * append to either a buffer or the current line
+ */
 static void pny_ebuf(pny_t *p, pny_sb_t *out, const char *s) {
   if (out)
     pny_sb_add(out, s);
@@ -493,7 +503,9 @@ static void pny_flush(pny_t *p) {
   pny_sb_clear(&p->warn);
 }
 
-/* declared names tracking (per-scope) */
+/*
+ * declared names tracking (per-scope)
+ */
 
 static int pny_decl_known(pny_t *p, const char *name) {
   for (size_t i = 0; i < p->ndecls; i++)
@@ -522,7 +534,9 @@ static void pny_decl_clear(pny_t *p) {
   p->ndecls = 0;
 }
 
-/* forward declarations */
+/*
+ * forward declarations
+ */
 static void pny_expr(pny_t *p, pny_sb_t *out);
 static void pny_factor(pny_t *p, pny_sb_t *out);
 static void pny_binexpr(pny_t *p, pny_sb_t *out, int minprec);
@@ -530,9 +544,9 @@ static void pny_parse_stmt(pny_t *p);
 static void pny_parse_simple_stmt(pny_t *p);
 static void pny_parse_suite(pny_t *p);
 
-/* ------------------------------------------------------------------ */
-/* atom emission helpers                                               */
-/* ------------------------------------------------------------------ */
+/*
+ * atom emission helpers
+ */
 
 static void pny_emit_number(pny_t *p, pny_sb_t *out, const pny_tok_t *t) {
   size_t n = t->n;
@@ -568,9 +582,9 @@ static void pny_emit_str(pny_t *p, pny_sb_t *out, const pny_tok_t *t) {
   pny_ebuf_n(p, out, s + i, n - i); /* quotes + body, verbatim */
 }
 
-/* ------------------------------------------------------------------ */
-/* expression parser                                                   */
-/* ------------------------------------------------------------------ */
+/*
+ * expression parser
+ */
 
 static void pny_atom(pny_t *p, pny_sb_t *out);
 
@@ -648,15 +662,19 @@ static void pny_power(pny_t *p, pny_sb_t *out) {
   if (pny_at_op(p, "**")) {
     pny_advance(p);
     pny_sb_t r = {0};
-    /* Python `**` is right-associative; its right operand is a unary/factor
-       (which itself may contain `**`), NOT a full additive expression.
-       Parsing `factor` here keeps `x ** 2 + 3` as `(x ** 2) + 3`. */
+    /*
+     * Python `**` is right-associative; its right operand is a unary/factor
+     * (which itself may contain `**`), NOT a full additive expression.
+     * Parsing `factor` here keeps `x ** 2 + 3` as `(x ** 2) + 3`.
+     */
     pny_factor(p, &r);
-    /* Wrap the whole power in parens: Ny `^` is exponentiation with its own
-       parser-defined precedence (looser than `+`/`*`), so without outer
-       grouping `(x) ^ (2) + 3` would parse as `x ^ (2 + 3)`. Parenthesizing
-       both the whole expression and each operand preserves Python's
-       tighter-than-multiply binding for `**`. */
+    /*
+     * Wrap the whole power in parens: Ny `^` is exponentiation with its own
+     * parser-defined precedence (looser than `+`/`*`), so without outer
+     * grouping `(x) ^ (2) + 3` would parse as `x ^ (2 + 3)`. Parenthesizing
+     * both the whole expression and each operand preserves Python's
+     * tighter-than-multiply binding for `**`.
+     */
     pny_ebuf(p, out, "((");
     pny_ebuf(p, out, base.data ? base.data : "");
     pny_ebuf(p, out, ") ^ (");
@@ -715,9 +733,11 @@ static void pny_binexpr(pny_t *p, pny_sb_t *out, int minprec) {
     const struct pny_opinfo *oi = pny_bin_lookup(pny_cur(p));
     if (!oi || oi->prec < minprec)
       break;
-    /* Python `/` is true (float) division; Ny `/` on ints is integer
-       division. Flag once so the user can review the affected expressions
-       rather than silently producing a different result. */
+    /*
+     * Python `/` is true (float) division; Ny `/` on ints is integer
+     * division. Flag once so the user can review the affected expressions
+     * rather than silently producing a different result.
+     */
     if (oi->py[0] == '/' && oi->py[1] == 0 && !p->noted_truediv) {
       p->noted_truediv = 1;
       pny_warn_at(p, pny_cur(p)->line, "note",
@@ -782,9 +802,11 @@ static int pny_take_comp_op(pny_t *p, char *opbuf, size_t opsz) {
   return 0;
 }
 
-/* Python `x in xs` / `x not in xs` have no operator form in Ny; lower them to
-   contains(container, item). `left` is the item, the following operand is the
-   container. negate selects `not in`. */
+/*
+ * Python `x in xs` / `x not in xs` have no operator form in Ny; lower them to
+ * contains(container, item). `left` is the item, the following operand is the
+ * container. negate selects `not in`.
+ */
 static void pny_emit_membership(pny_t *p, pny_sb_t *out, pny_sb_t *left,
                                 int negate) {
   pny_sb_t right = {0};
@@ -814,7 +836,9 @@ static void pny_comparison(pny_t *p, pny_sb_t *out) {
     free(first.data);
     return;
   }
-  /* one or more comparisons: chain with && (a < b && b < c) */
+  /*
+   * one or more comparisons: chain with && (a < b && b < c)
+   */
   pny_sb_t acc = {0};
   pny_sb_t prev = {0};
   pny_sb_add(&prev, first.data ? first.data : "");
@@ -836,7 +860,9 @@ static void pny_comparison(pny_t *p, pny_sb_t *out) {
     free(right.data);
     kind = pny_take_comp_op(p, opbuf, sizeof(opbuf));
     if (kind == 2 || kind == 3) {
-      /* trailing membership in a chain: emit contains() for the last link */
+      /*
+       * trailing membership in a chain: emit contains() for the last link
+       */
       pny_sb_t last = {0};
       pny_sb_add(&last, prev.data ? prev.data : "");
       pny_sb_clear(&prev);
@@ -855,9 +881,11 @@ static void pny_comparison(pny_t *p, pny_sb_t *out) {
 }
 
 static void pny_not_test(pny_t *p, pny_sb_t *out) {
-  /* Check for "not in" - this is a single comparison operator in Python.
-     If we see "not" followed by "in", don't treat it as unary "not",
-     fall through to pny_comparison which will handle "not in" as a unit. */
+  /*
+   * Check for "not in" - this is a single comparison operator in Python.
+   * If we see "not" followed by "in", don't treat it as unary "not",
+   * fall through to pny_comparison which will handle "not in" as a unit.
+   */
   if (pny_at_word(p, "not") && pny_word_at_off(p, 1, "in")) {
     pny_comparison(p, out);
     return;
@@ -907,7 +935,9 @@ static void pny_or_test(pny_t *p, pny_sb_t *out) {
   }
 }
 
-/* conditional expression: or_test ['if' or_test 'else' expr] */
+/*
+ * conditional expression: or_test ['if' or_test 'else' expr]
+ */
 static void pny_ternary(pny_t *p, pny_sb_t *out) {
   pny_sb_t body = {0};
   pny_or_test(p, &body);
@@ -983,7 +1013,9 @@ static void pny_expr(pny_t *p, pny_sb_t *out) {
   pny_ternary(p, out);
 }
 
-/* detect a comprehension `for` after the first element; consume to closer */
+/*
+ * detect a comprehension `for` after the first element; consume to closer
+ */
 static void pny_skip_comprehension(pny_t *p, char closer) {
   pny_warn_at(p, pny_cur(p)->line, "unsupported", "comprehension");
   int depth = 1;
@@ -1098,15 +1130,17 @@ static void pny_atom(pny_t *p, pny_sb_t *out) {
     pny_ebuf(p, out, "}");
     return;
   }
-  /* unexpected */
+  /*
+   * unexpected
+   */
   pny_warn_at(p, t->line, "unsupported", "unexpected token '%.*s' in expression",
               (int)t->n, t->s);
   pny_advance(p);
 }
 
-/* ------------------------------------------------------------------ */
-/* type annotation parsing                                             */
-/* ------------------------------------------------------------------ */
+/*
+ * type annotation parsing
+ */
 
 static void pny_parse_type(pny_t *p, char *buf, size_t sz) {
   pny_sb_t tb = {0};
@@ -1152,9 +1186,9 @@ static void pny_parse_type(pny_t *p, char *buf, size_t sz) {
   free(tb.data);
 }
 
-/* ------------------------------------------------------------------ */
-/* skip helpers                                                        */
-/* ------------------------------------------------------------------ */
+/*
+ * skip helpers
+ */
 
 static void pny_skip_to_newline(pny_t *p) {
   while (!pny_at_kind(p, PNTK_NEWLINE) && !pny_at_kind(p, PNTK_EOF) &&
@@ -1194,9 +1228,9 @@ static void pny_skip_suite(pny_t *p) {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* statement parsers                                                   */
-/* ------------------------------------------------------------------ */
+/*
+ * statement parsers
+ */
 
 static void pny_parse_suite(pny_t *p) {
   while (pny_at_kind(p, PNTK_NEWLINE))
@@ -1272,7 +1306,9 @@ static void pny_parse_while(pny_t *p) {
   pny_flush(p);
 }
 
-/* parse a comma-separated list of target names; returns count */
+/*
+ * parse a comma-separated list of target names; returns count
+ */
 static int pny_parse_targets(pny_t *p, char names[][64], int maxn) {
   int n = 0;
   int had_paren = 0;
@@ -1342,7 +1378,9 @@ static void pny_parse_for(pny_t *p) {
     if (b.data) {
       stop = b.data;
     } else {
-      /* single-arg range: stop = a, start = 0 */
+      /*
+       * single-arg range: stop = a, start = 0
+       */
       snprintf(stopbuf, sizeof(stopbuf), "%s", a.data ? a.data : "0");
       stop = stopbuf;
       start = "0";
@@ -1397,8 +1435,10 @@ static void pny_parse_for(pny_t *p) {
     pny_expr(p, &it);
     if (pny_at_op(p, ")"))
       pny_advance(p);
-    /* Python: for idx, val in enumerate(it); Nytrix for binds (val, idx).
-       Swap targets to preserve user's intended meaning. */
+    /*
+     * Python: for idx, val in enumerate(it); Nytrix for binds (val, idx).
+     * Swap targets to preserve user's intended meaning.
+     */
     pny_emit(p, "for ");
     pny_emit(p, targets[1]); /* value */
     pny_emit(p, ", ");
@@ -1427,7 +1467,9 @@ static void pny_parse_for(pny_t *p) {
     return;
   }
 
-  /* general for-in */
+  /*
+   * general for-in
+   */
   pny_sb_t it = {0};
   pny_expr(p, &it);
   pny_emit(p, "for ");
@@ -1474,7 +1516,9 @@ static void pny_parse_def(pny_t *p) {
   if (pny_at_op(p, "(")) {
     pny_advance(p);
     int first = 1;
-    /* save + reset scope for this function */
+    /*
+     * save + reset scope for this function
+     */
     char **sd = p->decls;
     size_t sn = p->ndecls, sc = p->cdecls;
     p->decls = NULL;
@@ -1500,7 +1544,9 @@ static void pny_parse_def(pny_t *p) {
         if (pny_cur(p)->kind == PNTK_IDENT) {
           pny_emit_n(p, pny_cur(p)->s, pny_cur(p)->n);
           pny_decl_add(p, name); /* placeholder; real name below */
-          /* overwrite last added if it was the placeholder */
+          /*
+           * overwrite last added if it was the placeholder
+           */
           (void)0;
           char pn[128];
           snprintf(pn, sizeof(pn), "%.*s", (int)pny_cur(p)->n, pny_cur(p)->s);
@@ -1582,7 +1628,9 @@ static void pny_parse_return(pny_t *p) {
     pny_sb_t first = {0};
     pny_expr(p, &first);
     if (pny_at_op(p, ",")) {
-      /* multiple return values -> list literal */
+      /*
+       * multiple return values -> list literal
+       */
       pny_sb_t val = {0};
       pny_sb_add(&val, "[");
       pny_sb_add(&val, first.data ? first.data : "");
@@ -1612,7 +1660,9 @@ static void pny_parse_return(pny_t *p) {
   pny_flush(p);
 }
 
-/* augmented assignment? fills opbuf with the Ny form (with spaces) */
+/*
+ * augmented assignment? fills opbuf with the Ny form (with spaces)
+ */
 static int pny_take_aug(pny_t *p, char *opbuf, size_t opsz) {
   const pny_tok_t *t = pny_cur(p);
   if (t->kind != PNTK_OP)
@@ -1662,7 +1712,9 @@ static void pny_parse_simple_stmt(pny_t *p) {
   pny_expr(p, &first);
 
   if (pny_at_op(p, "=")) {
-    /* plain assignment */
+    /*
+     * plain assignment
+     */
     pny_advance(p);
     pny_sb_t val = {0};
     pny_expr(p, &val);
@@ -1686,9 +1738,11 @@ static void pny_parse_simple_stmt(pny_t *p) {
       pny_emit_sb(p, &val);
       free(val.data);
     } else if (pny_at_op(p, ",")) {
-      /* tuple unpacking: target_list = expr_list
-         Collect LHS target names, then parse the RHS as a full tuple
-         expression so `a, b = b, a` captures both RHS values. */
+      /*
+       * tuple unpacking: target_list = expr_list
+       * Collect LHS target names, then parse the RHS as a full tuple
+       * expression so `a, b = b, a` captures both RHS values.
+       */
       pny_sb_t tup = {0};
       pny_sb_add(&tup, first.data ? first.data : "");
       int ntargets = 1;
@@ -1708,7 +1762,9 @@ static void pny_parse_simple_stmt(pny_t *p) {
       }
       if (pny_at_op(p, "=") && ntargets > 1) {
         pny_advance(p);
-        /* RHS: parse the full comma-separated expression list */
+        /*
+         * RHS: parse the full comma-separated expression list
+         */
         pny_sb_t val = {0};
         pny_expr(p, &val);
         while (pny_at_op(p, ",")) {
@@ -1719,11 +1775,15 @@ static void pny_parse_simple_stmt(pny_t *p) {
           pny_sb_add(&val, e.data ? e.data : "");
           free(e.data);
         }
-        /* Ny: `mut a, b = ...` declares; bare `a, b = ...` reassigns.
-           Emit `mut` only when every target is a fresh bare identifier. */
+        /*
+         * Ny: `mut a, b = ...` declares; bare `a, b = ...` reassigns.
+         * Emit `mut` only when every target is a fresh bare identifier.
+         */
         if (all_new) {
           pny_emit(p, "mut ");
-          /* register each target name */
+          /*
+           * register each target name
+           */
           for (char *s = tup.data ? tup.data : ""; *s;) {
             char name[128];
             size_t k = 0;
@@ -1749,7 +1809,9 @@ static void pny_parse_simple_stmt(pny_t *p) {
       }
       free(tup.data);
     } else {
-      /* expression statement */
+      /*
+       * expression statement
+       */
       pny_emit_sb(p, &first);
     }
   }
@@ -1866,9 +1928,9 @@ static void pny_parse_stmt(pny_t *p) {
   pny_parse_simple_stmt(p);
 }
 
-/* ------------------------------------------------------------------ */
-/* top level + entry                                                   */
-/* ------------------------------------------------------------------ */
+/*
+ * top level + entry
+ */
 
 static void pny_parse_top(pny_t *p) {
   while (!pny_at_kind(p, PNTK_EOF)) {
@@ -1899,7 +1961,9 @@ static void pny_parse_top(pny_t *p) {
         continue;
       }
     }
-    /* executable statement -> collect into #main */
+    /*
+     * executable statement -> collect into #main
+     */
     pny_sb_t *saved = p->out;
     int si = p->indent;
     p->out = &p->main_buf;
@@ -1935,9 +1999,9 @@ static int pny_convert(const char *src, size_t n, pny_sb_t *out) {
   return p.errors == 0 ? 0 : 1;
 }
 
-/* ------------------------------------------------------------------ */
-/* selftest                                                            */
-/* ------------------------------------------------------------------ */
+/*
+ * selftest
+ */
 
 static int py2ny_selftest(void) {
   static const char probe[] =
@@ -2011,7 +2075,9 @@ static int py2ny_selftest(void) {
       fail = 1;
     }
   }
-  /* leak / merge regression checks */
+  /*
+   * leak / merge regression checks
+   */
   if (strstr(o, "}elif") || strstr(o, "}else") || strstr(o, "r = r * ireturn") ||
       strstr(o, "fn classify(x)any") || strstr(o, "1 i<") ||
       strstr(o, "mut r = 1for") || strstr(o, "__py2ny_")) {

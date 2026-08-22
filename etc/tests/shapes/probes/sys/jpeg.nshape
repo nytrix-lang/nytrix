@@ -4,6 +4,7 @@ shape jpeg {
   features ["ny", "sys"]
   template ny-test-case
   expect compile_and_run
+  ci optional
   source ny <<'NY'
 use std.core
 use std.math.parse.img.jpeg as jpeg

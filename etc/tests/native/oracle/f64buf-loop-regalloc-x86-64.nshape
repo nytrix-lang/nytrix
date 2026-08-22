@@ -1,0 +1,24 @@
+shape oracle_f64buf_loop_regalloc_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle machine-ir regalloc f64-buffer pointer]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=0; -O1 --native-result-oracle=0; -O2 --native-result-oracle=0; -O3 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.tbuf
+fn fill() i64 {
+  def re = f64buf_new(8)
+  def im = f64buf_new(8)
+  mut i = 0
+  while i < 8 {
+    f64buf_store(re, i, float(i))
+    f64buf_store(im, i, float(i + 1))
+    i += 1
+  }
+  int(f64buf_load(re, 7) + f64buf_load(im, 7))
+}
+if fill() == 15 { 0 } else { 1 }
+NY
+}

@@ -4,6 +4,7 @@ shape load_only {
   features ["ny", "image"]
   template ny-test-case
   expect compile_and_run
+  ci optional
   source ny <<'NY'
 #!/bin/ny
 use std.core

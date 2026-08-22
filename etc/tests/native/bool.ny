@@ -31,5 +31,4 @@ assert_eq(-1, -1)
 ; Constant folding with mixed operations
 fn complex_const() i64 { (2 + 3) * (10 - 4) / 3 }
 assert_eq(complex_const(), 10)
-
 print("✓ native boolean tests passed")

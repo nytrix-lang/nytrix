@@ -1,0 +1,96 @@
+[
+  {
+    "id": "time-now",
+    "source": "etc/tests/native/web/time-now.ny",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required_regex": [
+      "data-touch-count=\"[1-9][0-9]*\"",
+      "data-touch-y=\"[1-9][0-9]*\""
+    ]
+  },
+  {
+    "id": "time-sleep",
+    "source": "etc/tests/native/web/time-sleep.ny",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required_regex": [
+      "data-touch-x=\"([5-9][0-9]|1[0-9][0-9])\"",
+      "data-touch-y=\"([5-9][0-9]|1[0-9][0-9])\""
+    ]
+  },
+  {
+    "id": "filesystem-directories",
+    "source": "etc/tests/native/web/filesystem-directories.ny",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\"",
+      "data-touch-count=\"1\""
+    ]
+  },
+  {
+    "id": "network-fetch",
+    "source": "etc/tests/native/web/network-fetch.ny",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\""
+    ]
+  },
+  {
+    "id": "clipboard",
+    "source": "etc/tests/native/web/clipboard.ny",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "clipboard": true,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\"",
+      "data-clipboard-write=\"1\"",
+      "data-clipboard-read=\"nytrix-clipboard-fixture\""
+    ]
+  },
+  {
+    "id": "websocket-lifecycle",
+    "source": "etc/tests/native/web/websocket-lifecycle.ny",
+    "route": "app",
+    "skip_headless": true,
+    "virtual_time_ms": 16000,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\""
+    ],
+    "required_regex": [
+      "data-touch-count=\"[1-9][0-9]*\""
+    ]
+  },
+  {
+    "id": "websocket-echo",
+    "source": "etc/tests/native/web/websocket-echo.ny",
+    "route": "app",
+    "virtual_time_ms": 3000,
+    "websocket_echo": true,
+    "real_time_browser": true,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\""
+    ],
+    "required_regex": [
+      "data-touch-count=\"[1-9][0-9]*\""
+    ]
+  },
+  {
+    "id": "websocket-rejection",
+    "source": "etc/tests/native/web/websocket-rejection.ny",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required_regex": [
+      "data-touch-count=\"[1-9][0-9]*\"",
+      "data-touch-x=\"0\"",
+      "data-touch-y=\"0\""
+    ]
+  }
+]

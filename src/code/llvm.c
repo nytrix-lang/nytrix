@@ -1,3 +1,7 @@
+/*
+ * LLVM bridge: target-machine initialization, pass-manager setup,
+ * module creation, and the primary LLVM-C API wrapping layer.
+ */
 #include "llvm.h"
 #include "base/common.h"
 #include "base/util.h"
@@ -476,8 +480,10 @@ bool ny_llvm_init_native(void) {
   return true;
 }
 
-/* Full target registry init for cross-compilation/AOT. Only call when a
- * non-native target triple is actually requested. */
+/*
+ * Full target registry init for cross-compilation/AOT. Only call when a
+ * non-native target triple is actually requested.
+ */
 bool ny_llvm_init_all_targets(void) {
   static bool initialized = false;
   if (initialized)
@@ -674,9 +680,11 @@ bool ny_llvm_apply_sanitize(LLVMModuleRef module, const char *sanitize_kind) {
   if (strcmp(sanitize_kind, "address") == 0)
     pass = "asan";
   else if (strcmp(sanitize_kind, "undefined") == 0)
-    /* UBSan checks are normally inserted by a typed frontend, not by a
+    /*
+     * UBSan checks are normally inserted by a typed frontend, not by a
      * generic LLVM new-pass-manager pipeline. The C runtime is still compiled
-     * and linked with -fsanitize=undefined; do not claim a nonexistent pass. */
+     * and linked with -fsanitize=undefined; do not claim a nonexistent pass.
+     */
     return true;
   else if (strcmp(sanitize_kind, "thread") == 0)
     pass = "tsan";

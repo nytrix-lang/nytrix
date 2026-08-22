@@ -1,3 +1,7 @@
+/*
+ * Global string interner: deduplicates short-lived C strings into
+ * pointer-comparable, long-lived atoms used across parser and codegen.
+ */
 #include "base/intern.h"
 #include "base/util.h"
 #include <stdint.h>
@@ -35,13 +39,17 @@ static size_t ny_intern_ptr_hash(const char *ptr) {
 }
 
 static void ny_intern_ptr_map_resize(size_t new_cap) {
+  if (new_cap == 0)
+    return;
+  size_t bytes = 0;
+  if (!ny_size_mul_ok(new_cap, sizeof(const char *), &bytes))
+    return;
   const char **old_map = g_intern_ptr_map;
   size_t old_cap = g_intern_ptr_map_cap;
-  g_intern_ptr_map = calloc(new_cap, sizeof(const char *));
-  if (!g_intern_ptr_map) {
-    g_intern_ptr_map = old_map;
+  const char **new_map = calloc(1, bytes);
+  if (!new_map)
     return;
-  }
+  g_intern_ptr_map = new_map;
   g_intern_ptr_map_cap = new_cap;
   g_intern_ptr_map_len = 0;
   for (size_t i = 0; i < old_cap; ++i) {
@@ -67,8 +75,9 @@ static void ny_intern_ptr_map_put(const char *ptr) {
     g_intern_ptr_map_len = 0;
     if (!g_intern_ptr_map)
       return;
-  } else if ((g_intern_ptr_map_len + 1) * 10 > g_intern_ptr_map_cap * 7) {
-    ny_intern_ptr_map_resize(g_intern_ptr_map_cap * 2);
+  } else if (g_intern_ptr_map_len >= g_intern_ptr_map_cap * 7 / 10) {
+    if (g_intern_ptr_map_cap <= SIZE_MAX / 2)
+      ny_intern_ptr_map_resize(g_intern_ptr_map_cap * 2);
   }
   size_t mask = g_intern_ptr_map_cap - 1;
   size_t idx = ny_intern_ptr_hash(ptr) & mask;
@@ -127,15 +136,25 @@ ny_sym_id ny_intern_str_hashed(const char *str, size_t len, uint64_t hash) {
   }
 
   if (g_intern_count >= g_intern_cap) {
+    if (g_intern_cap > SIZE_MAX / 2)
+      return 0;
     size_t new_cap = g_intern_cap * 2;
-    ny_intern_entry *grown = realloc(g_intern_table, new_cap * sizeof(*grown));
+    size_t table_bytes = 0;
+    if (!ny_size_mul_ok(new_cap, sizeof(ny_intern_entry), &table_bytes))
+      return 0;
+    ny_intern_entry *grown = realloc(g_intern_table, table_bytes);
     if (!grown)
       return 0;
     g_intern_table = grown;
     g_intern_cap = new_cap;
   }
 
-  char *dup = malloc(len + 1);
+  if (len == SIZE_MAX || g_intern_count > UINT32_MAX - 1)
+    return 0;
+  size_t dup_bytes = 0;
+  if (!ny_size_add_ok(len, 1, &dup_bytes))
+    return 0;
+  char *dup = malloc(dup_bytes);
   if (!dup)
     return 0;
   memcpy(dup, str, len);
@@ -150,9 +169,14 @@ ny_sym_id ny_intern_str_hashed(const char *str, size_t len, uint64_t hash) {
 
   g_intern_map[idx] = new_id;
 
-  if (g_intern_count * 10 > g_intern_map_cap * 7) {
+  if (g_intern_count >= g_intern_map_cap / 2) {
+    if (g_intern_map_cap > SIZE_MAX / 2)
+      return new_id;
     size_t new_map_cap = g_intern_map_cap * 2;
-    uint32_t *new_map = calloc(new_map_cap, sizeof(uint32_t));
+    size_t map_bytes = 0;
+    if (!ny_size_mul_ok(new_map_cap, sizeof(uint32_t), &map_bytes))
+      return new_id;
+    uint32_t *new_map = calloc(1, map_bytes);
     if (!new_map)
       return new_id;
     size_t new_mask = new_map_cap - 1;
@@ -237,10 +261,12 @@ void ny_intern_set_atexit_mode(void) { g_intern_atexit_mode = true; }
 void ny_intern_cleanup(void) {
   if (!g_intern_table)
     return;
-  /* When called from atexit(), heap metadata may already be corrupted by an
+  /*
+   * When called from atexit(), heap metadata may already be corrupted by an
    * unrelated allocation bug.  Skip the cleanup entirely — the OS reclaims
    * all process memory on exit.  Only perform the full cleanup when called
-   * explicitly during normal shutdown. */
+   * explicitly during normal shutdown.
+   */
   if (g_intern_atexit_mode)
     return;
   ny_intern_cleanup_full();

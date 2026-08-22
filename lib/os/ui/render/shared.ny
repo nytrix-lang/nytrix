@@ -61,6 +61,7 @@ fn safe_f32_limit(any v, f64 fallback=0.0, f64 limit=1048576.0) f64 {
 
 @pure
 @jit
+
 ;; Returns the result of the `pack_rgba_u32` operation.
 fn pack_rgba_u32(any r, any g, any b, any a) int {
    (int(float(r) * 255.0) & 0xFF) |
@@ -103,6 +104,7 @@ fn store_mat4_cm_raw(any dst, any mat, bool allow_plain16=false) bool {
 }
 
 @jit
+
 ;; Returns the result of the `store_vertex64` operation.
 fn store_vertex64(any base, int idx, any x, any y, any z, any u, any v, any color, any tex_id=0, any nx=0.0, any ny=0.0, any nz=1.0) any {
    def off = base + idx * VERTEX_STRIDE
@@ -125,6 +127,7 @@ fn store_vertex64(any base, int idx, any x, any y, any z, any u, any v, any colo
 }
 
 @jit
+
 ;; Writes the vertex64 and returns the result.
 fn push_vertex64(any p, any x, any y, any z, any u, any v, any color, any tex_id=0, any nx=0.0, any ny=0.0, any nz=1.0) any {
    if !p { return 0 }

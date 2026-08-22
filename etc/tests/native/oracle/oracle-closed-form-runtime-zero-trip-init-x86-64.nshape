@@ -1,0 +1,23 @@
+shape oracle_closed_form_runtime_zero_trip_init_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime zero-trip init regression]
+  template ny-test-case
+  flags "--native-result-oracle=42 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+; Zero-trip loop must leave the non-zero accumulator untouched.
+fn zero_trip(n) i64 {
+  mut s = 42
+  mut i = 0
+  while i < n {
+    s = s + i
+    i = i + 1
+  }
+  s
+}
+zero_trip(0)
+NY
+}

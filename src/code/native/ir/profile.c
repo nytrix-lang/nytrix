@@ -1,3 +1,7 @@
+/*
+ * NYIR profile I/O: reads and writes block/edge heat data for
+ * profile-guided optimization (PGO) tiering and layout decisions.
+ */
 #include "code/native/ir.h"
 
 #include <inttypes.h>

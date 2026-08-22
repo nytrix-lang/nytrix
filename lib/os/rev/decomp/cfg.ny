@@ -1,7 +1,6 @@
 ;; Keywords: cfg blocks edges dominance loops jump-tables
 ;; Basic-block, jump-table, and control-flow graph recovery.
 module std.os.rev.decomp.cfg *
-
 use std.core
 use std.core.str as str
 use std.os.disasm as dasm
@@ -331,7 +330,7 @@ fn _relative_switch_for_lift_rows(dict bin, list rows, int idx, int max_entries=
    if entries.len < 2 { return dict() }
    {"kind": "jump_table", "from": int(jr.get("addr", 0)), "operand": jr.get("operands", ""),
       "base": table_base, "entry_size": 4, "relative": true, "index_reg": index_reg,
-   "count": entries.len, "entries": entries, "consumes": consumes}
+      "count": entries.len, "entries": entries, "consumes": consumes}
 }
 
 fn _jump_tables_from_rows(dict bin, list rows, int max_entries=32) list {
@@ -676,11 +675,11 @@ fn _cfg_loops_for_graph(dict graph, dict dominfo) dict {
       def e = edges[i]
       def from = int(e.get("from", 0))
       def to = int(e.get("to", 0))
-   if _list_has(dom.get(to_str(from), []), to) {
-      def e2 = clone(e).set("kind", "back_edge")
-      back = back.append(e2)
-      loops = loops.append({"header": to, "latch": from, "back_edge": e2, "body_hint": [to, from]})
-   }
+      if _list_has(dom.get(to_str(from), []), to) {
+         def e2 = clone(e).set("kind", "back_edge")
+         back = back.append(e2)
+         loops = loops.append({"header": to, "latch": from, "back_edge": e2, "body_hint": [to, from]})
+      }
       i += 1
    }
    {"cfg": graph, "back_edges": back, "loops": loops, "count": loops.len}

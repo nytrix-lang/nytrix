@@ -1,7 +1,6 @@
 ;; Keywords: decompiler annotations names renames notes
 ;; Analysis rename overlays, notes, and safe rendering identifiers.
 module std.os.rev.decomp.annotations *
-
 use std.core
 use std.core.str as str
 use std.os.rev.decomp.elf

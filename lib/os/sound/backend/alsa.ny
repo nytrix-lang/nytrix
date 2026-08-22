@@ -25,11 +25,11 @@ use std.os.sound.backend.shared as backend_shared
 } #else {
    fn snd_pcm_open(..._args) int {
       "Runs the snd pcm open operation."
-      -1
+      return -1
    }
    fn snd_pcm_set_params(..._args) int {
       "Runs the snd pcm set params operation."
-      -1
+      return -1
    }
    fn snd_pcm_close(any _pcm) int {
       "Runs the snd pcm close operation."
@@ -37,7 +37,7 @@ use std.os.sound.backend.shared as backend_shared
    }
    fn snd_pcm_prepare(any _pcm) int {
       "Runs the snd pcm prepare operation."
-      -1
+      return -1
    }
    fn snd_pcm_drain(any _pcm) int {
       "Runs the snd pcm drain operation."
@@ -45,11 +45,11 @@ use std.os.sound.backend.shared as backend_shared
    }
    fn snd_pcm_writei(..._args) int {
       "Runs the snd pcm writei operation."
-      -1
+      return -1
    }
    fn snd_pcm_recover(..._args) int {
       "Runs the snd pcm recover operation."
-      -1
+      return -1
    }
 } #endif
 def SND_PCM_STREAM_PLAYBACK = 0

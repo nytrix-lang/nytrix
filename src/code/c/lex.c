@@ -1,3 +1,7 @@
+/*
+ * In-tree C lexer: tokenizes C header source for the internal C frontend
+ * used by FFI imports, producing a token stream consumed by c/parse.c.
+ */
 #include "code/c/c.h"
 #include <ctype.h>
 #include <string.h>

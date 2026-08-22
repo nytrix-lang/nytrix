@@ -1,0 +1,21 @@
+shape native_x86_f64_regalloc_pointer {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 object oracle f64 regalloc pointer memory]
+  template ny-test-case
+  flags "--native-only --native-backend x86_64 --native-result-oracle=4616752568008179712"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn pointer_round_trip() f64 {
+  def *f64 p = malloc(8)
+  if p == nil { return 0.0 }
+  store64_f64(p, 3.5)
+  def f64 value = load64_f64(p)
+  free(p)
+  value + 1.0
+}
+pointer_round_trip()
+NY
+}

@@ -1,3 +1,7 @@
+/*
+ * ny-make entry point: project scaffolding, build graph construction,
+ * and CMake/Ninja invocation wrapper bundled under `ny make`.
+ */
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -330,10 +334,14 @@ static int resolve_jobs(int requested, int *out_jobs, char *note, size_t note_sz
 }
 
 static int is_known_command(const char *s) {
-  static const char *cmds[] = {"all",   "bin",      "fmt",   "std",   "std_bc", "test", "repl",
-                               "fuzz",  "bench",    "docs",  "install", "uninstall", "clean", "debug",
-                               "tidy",  "perf",     "gprof", "asan",  "ubsan", "optcheck",
-                               "analyze", "check",  "fb",    "ny",    "run", "release"};
+  static const char *cmds[] = {
+    "all",     "bin",      "fmt",     "std",     "std_bc",    "test",
+    "repl",    "fuzz",     "bench",   "docs",    "install",   "uninstall",
+    "clean",   "debug",    "tidy",    "perf",    "gprof",     "asan",
+    "ubsan",   "optcheck", "analyze", "check",   "ny",        "run",
+    "release", "audit",    "c2ny",    "py2ny",   "wasm",      "env",
+    "targets", "doctor",   "deps",    "profile", "cross",     "cross-run",
+  };
   for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
     if (strcmp(s, cmds[i]) == 0)
       return 1;
@@ -431,7 +439,7 @@ static void print_help(void) {
   printf("  %sinstall%s    install ny and ny-lsp; tools are available as ny <tool>\n",
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sclean%s      remove build outputs\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
-  printf("  more: std, std_bc, repl, run, fuzz, bench, tidy, gprof, asan, ubsan, optcheck, analyze, fb, ny\n");
+  printf("  more: std, std_bc, repl, run, fuzz, bench, tidy, gprof, asan, ubsan, optcheck, analyze, ny\n");
   printf("\n%soptions:%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
   printf("  %s-j, --jobs N%s                  parallel build jobs\n", nyt_clr(NYT_GREEN),
          nyt_clr(NYT_RESET));
@@ -615,6 +623,10 @@ static void tool_launch_path(const char *root, const char *bin, char *out, size_
   snprintf(out, out_sz, "%s", bin);
 }
 
+/*
+ * Build the argv[] and apply envs for launching a ny tool, then fork+exec it.
+ * Used when ny-make needs to wait for the result (build pipeline, tests, etc).
+ */
 static int run_ny_tool(const char *root, const char *kind, const char *name, const char *fixed_arg,
                        const char **unknown, int unknown_count) {
   char bin[PATH_MAX];
@@ -659,6 +671,51 @@ static int run_ny_tool(const char *root, const char *kind, const char *name, con
     envs[envc++] = (EnvPair){"NYTRIX_JIT_CACHE", "1", 0};
   }
   return run_cmd_env(argv, envs, envc);
+}
+
+/*
+ * Exec-replace: for terminal pass-through commands where ny-make has nothing
+ * left to do — replace the current process with the tool directly.
+ * On Windows, falls back to fork+exec (_spawnvp) since execvp replaces the
+ * console host, which is fine there too.
+ */
+static int run_ny_tool_exec(const char *root, const char *kind, const char *name,
+                            const char *fixed_arg, const char **unknown, int unknown_count) {
+  char bin[PATH_MAX];
+  int unified = 0;
+  if (!resolve_tool_bin(root, kind, name, bin, sizeof(bin))) {
+    if (strcmp(name, "ny") != 0 && resolve_tool_bin(root, kind, "ny", bin, sizeof(bin)))
+      unified = 1;
+  }
+  if (!bin[0]) {
+    nyt_err("ny-make", "tool not found: %s", name);
+    return 1;
+  }
+  char launch[PATH_MAX];
+  tool_launch_path(root, bin, launch, sizeof(launch));
+  char *argv[640];
+  int k = 0;
+  argv[k++] = launch;
+  if (unified)
+    argv[k++] = (char *)unified_tool_name(name);
+  if (fixed_arg && *fixed_arg)
+    argv[k++] = (char *)fixed_arg;
+  for (int i = 0; i < unknown_count; i++)
+    argv[k++] = (char *)unknown[i];
+  argv[k] = NULL;
+  fflush(stdout);
+  fflush(stderr);
+#ifdef _WIN32
+  intptr_t rc = _spawnvp(_P_WAIT, argv[0], (const char *const *)argv);
+  return rc < 0 ? 127 : (int)rc;
+#else
+  execvp(argv[0], argv);
+  /*
+   * execvp only returns on error
+   */
+  nyt_err("ny-make", "exec failed: %s: %s", argv[0], strerror(errno));
+  return 127;
+#endif
 }
 
 static int run_test_tool(const char *root, const char *kind, int jobs, const char **unknown,
@@ -830,7 +887,14 @@ static int run_uninstall_manifest(const char *root, const char *kind) {
 }
 
 static int cmd_needs_build(const char *cmd) {
-  return strcmp(cmd, "clean") != 0 && strcmp(cmd, "uninstall") != 0;
+  static const char *no_build[] = {
+    "clean", "uninstall", "deps", "env", "targets", "doctor",
+  };
+  for (size_t i = 0; i < sizeof(no_build) / sizeof(no_build[0]); i++) {
+    if (strcmp(cmd, no_build[i]) == 0)
+      return 0;
+  }
+  return 1;
 }
 
 static int run_sanitizer_tests(const char *root, const char *kind, const char *name,
@@ -859,15 +923,16 @@ static const char *fmt_flag_for_cmd(const char *cmd) {
 }
 
 static void build_targets_for_cmd(const char *cmd, const char ***targets, int *target_count) {
-  static const char *all[] = {"ny",      "std",    "ny-fmt", "ny-perf",
-                              "ny-test", "ny-doc", "ny-make"};
-  static const char *test[] = {"ny", "ny-test"};
-  static const char *fuzz[] = {"ny", "ny-test", "ny-fuzz"};
-  static const char *fmt[] = {"ny-fmt"};
+  static const char *all[]  = {"ny",      "std",    "ny-fmt", "ny-perf",
+                               "ny-test", "ny-doc", "ny-make", "ny-lsp"};
+  static const char *test[] = {"ny", "ny-full", "ny-test"};
+  static const char *fuzz[] = {"ny", "ny-test",  "ny-fuzz"};
+  static const char *fmt[]  = {"ny-fmt"};
   static const char *docs[] = {"ny", "std", "ny-doc"};
-  static const char *std[] = {"std"};
+  static const char *std[]  = {"std"};
   static const char *perf[] = {"ny", "ny-perf"};
-  static const char *ny[] = {"ny"};
+  static const char *ny[]   = {"ny"};
+  static const char *profgprof[] = {"ny", "ny-perf", "ny-test", "ny-fuzz"};
 #ifdef _WIN32
   static const char *install[] = {"ny",      "ny-lsp",  "std",    "ny-fmt",
                                   "ny-perf", "ny-test", "ny-doc", "ny-make"};
@@ -879,14 +944,17 @@ static void build_targets_for_cmd(const char *cmd, const char ***targets, int *t
   if (strcmp(cmd, "all") == 0 || strcmp(cmd, "bin") == 0) {
     *targets = all;
     *target_count = (int)(sizeof(all) / sizeof(all[0]));
-  } else if (strcmp(cmd, "test") == 0) {
+  } else if (strcmp(cmd, "test") == 0 || strcmp(cmd, "optcheck") == 0 ||
+             strcmp(cmd, "asan") == 0 || strcmp(cmd, "ubsan") == 0) {
     *targets = test;
     *target_count = (int)(sizeof(test) / sizeof(test[0]));
   } else if (strcmp(cmd, "fuzz") == 0 || strcmp(cmd, "bench") == 0) {
     *targets = fuzz;
     *target_count = (int)(sizeof(fuzz) / sizeof(fuzz[0]));
-  } else if (strcmp(cmd, "fmt") == 0 || strcmp(cmd, "analyze") == 0 ||
-             strcmp(cmd, "check") == 0 || strcmp(cmd, "tidy") == 0) {
+  } else if (strcmp(cmd, "fmt") == 0    || strcmp(cmd, "analyze") == 0 ||
+             strcmp(cmd, "check") == 0  || strcmp(cmd, "tidy") == 0 ||
+             strcmp(cmd, "audit") == 0  || strcmp(cmd, "c2ny") == 0 ||
+             strcmp(cmd, "py2ny") == 0) {
     *targets = fmt;
     *target_count = (int)(sizeof(fmt) / sizeof(fmt[0]));
   } else if (strcmp(cmd, "docs") == 0) {
@@ -901,10 +969,90 @@ static void build_targets_for_cmd(const char *cmd, const char ***targets, int *t
   } else if (strcmp(cmd, "perf") == 0) {
     *targets = perf;
     *target_count = (int)(sizeof(perf) / sizeof(perf[0]));
+  } else if (strcmp(cmd, "profile") == 0 || strcmp(cmd, "gprof") == 0) {
+    /*
+     * profile gprof-mode needs ny-perf and ny-fuzz; time-mode only ny.
+     */
+    *targets = profgprof;
+    *target_count = (int)(sizeof(profgprof) / sizeof(profgprof[0]));
   } else {
+    /*
+     * audit/c2ny/py2ny use ny-fmt; cross/cross-run/wasm/env/targets/doctor use ny
+     */
     *targets = ny;
     *target_count = (int)(sizeof(ny) / sizeof(ny[0]));
   }
+}
+
+static void ny_make_load_config_file(const char *path) {
+  FILE *f = fopen(path, "r");
+  if (!f)
+    return;
+  char line[1024];
+  while (fgets(line, sizeof(line), f)) {
+    char *s = line;
+    while (*s == ' ' || *s == '\t')
+      s++;
+    if (*s == '\0' || *s == '#' || *s == ';')
+      continue;
+    if (strncmp(s, "export ", 7) == 0)
+      s += 7;
+    char *eq = strchr(s, '=');
+    if (!eq)
+      continue;
+    *eq = '\0';
+    char *key = s;
+    char *val = eq + 1;
+    size_t klen = strlen(key);
+    while (klen > 0 && (key[klen - 1] == ' ' || key[klen - 1] == '\t' ||
+                        key[klen - 1] == '\n' || key[klen - 1] == '\r'))
+      key[--klen] = '\0';
+    size_t vlen = strlen(val);
+    while (vlen > 0 && (val[vlen - 1] == ' ' || val[vlen - 1] == '\t' ||
+                        val[vlen - 1] == '\n' || val[vlen - 1] == '\r'))
+      val[--vlen] = '\0';
+    if (vlen >= 2 && ((val[0] == '"' && val[vlen - 1] == '"') ||
+                      (val[0] == '\'' && val[vlen - 1] == '\''))) {
+      val[vlen - 1] = '\0';
+      val++;
+    }
+    if (key[0] != '\0')
+      ny_setenv(key, val, 0);
+  }
+  fclose(f);
+}
+
+static void ny_make_load_default_configs(const char *root) {
+  char buf[PATH_MAX];
+  snprintf(buf, sizeof(buf), "%s/.nytrix/config", root);
+  ny_make_load_config_file(buf);
+  snprintf(buf, sizeof(buf), "%s/nytrix.config", root);
+  ny_make_load_config_file(buf);
+  const char *home = getenv("HOME");
+  if (home) {
+    snprintf(buf, sizeof(buf), "%s/.config/nytrix/config", home);
+    ny_make_load_config_file(buf);
+  }
+}
+
+static void ny_make_init_env_defaults(const char *root) {
+  if (!getenv("NYTRIX_ROOT"))
+    ny_setenv("NYTRIX_ROOT", root, 0);
+  char rt_path[PATH_MAX];
+  snprintf(rt_path, sizeof(rt_path), "%s/src/rt/init.c", root);
+  struct stat st;
+  if (stat(rt_path, &st) == 0)
+    ny_setenv("NYTRIX_RT_SRC", rt_path, 0);
+#ifndef _WIN32
+  if (!getenv("CC")) {
+    if (system("which clang > /dev/null 2>&1") == 0)
+      ny_setenv("CC", "clang", 0);
+    else if (system("which cc > /dev/null 2>&1") == 0)
+      ny_setenv("CC", "cc", 0);
+    else if (system("which gcc > /dev/null 2>&1") == 0)
+      ny_setenv("CC", "gcc", 0);
+  }
+#endif
 }
 
 int ny_make_main(int argc, char **argv) {
@@ -940,6 +1088,9 @@ int ny_make_main(int argc, char **argv) {
     nyt_err("ny-make", "could not chdir to %s", root);
     return 1;
   }
+
+  ny_make_load_default_configs(root);
+  ny_make_init_env_defaults(root);
 
   int jobs = 0;
   char jobs_note[256];
@@ -1080,14 +1231,129 @@ int ny_make_main(int argc, char **argv) {
       int rc = run_ny_tool(root, kind, "ny-fuzz", "bench", bench_args, bench_argc);
       if (rc != 0)
         return rc;
-    } else if (strcmp(cmd, "optcheck") == 0 || strcmp(cmd, "fb") == 0) {
-      nyt_err("ny-make",
-              "command '%s' is not implemented on the native C path.\n"
-              "  For optimization correctness, use: ./make test\n"
-              "  For fuzz/shape validation, use:  ./make fuzz [validate-shapes etc/tests/shapes]\n"
-              "  For benchmarks, use:             ./make bench",
-              cmd);
-      return 2;
+    } else if (strcmp(cmd, "optcheck") == 0) {
+      char opt_dir[PATH_MAX];
+      nyt_path_join(opt_dir, sizeof(opt_dir), root, "etc/tests/native/optcheck");
+      if (ny_access(opt_dir, R_OK) != 0) {
+        nyt_err("ny-make", "optcheck: missing fixture directory %s", opt_dir);
+        return 2;
+      }
+      int had_std_cache = getenv("NYTRIX_STD_CACHE") != NULL;
+      int had_std_bc = getenv("NYTRIX_STD_BC_CACHE_AUTO") != NULL;
+      if (!had_std_cache)
+        ny_setenv("NYTRIX_STD_CACHE", "0", 1);
+      if (!had_std_bc)
+        ny_setenv("NYTRIX_STD_BC_CACHE_AUTO", "0", 1);
+      const char *opt_args[] = {"--with-stdlib", "--color=never", opt_dir};
+      int rc = run_ny_tool(root, kind, "ny-test", NULL, opt_args, 3);
+      if (!had_std_cache)
+        ny_unsetenv("NYTRIX_STD_CACHE");
+      if (!had_std_bc)
+        ny_unsetenv("NYTRIX_STD_BC_CACHE_AUTO");
+      if (rc != 0)
+        return rc;
+      nyt_msg("OK", NYT_GREEN, "optcheck: ny-test completed native oracle directory");
+
+    } else if (strcmp(cmd, "audit") == 0) {
+      const char *audit_args[514];
+      int audit_argc = 0;
+      audit_args[audit_argc++] = "--audit";
+      for (int j = 0; j < a.unknown_count && audit_argc < 513; j++)
+        audit_args[audit_argc++] = a.unknown[j];
+      audit_args[audit_argc] = NULL;
+      return run_ny_tool_exec(root, kind, "ny-fmt", NULL, audit_args, audit_argc);
+
+    } else if (strcmp(cmd, "c2ny") == 0) {
+      if (a.unknown_count == 0) {
+        nyt_err("c2ny", "usage: ny make c2ny <file.c> [-o <out.ny>]");
+        return 1;
+      }
+      const char *c2ny_args[514];
+      int c2ny_argc = 0;
+      c2ny_args[c2ny_argc++] = "--c2ny";
+      for (int j = 0; j < a.unknown_count && c2ny_argc < 513; j++)
+        c2ny_args[c2ny_argc++] = a.unknown[j];
+      c2ny_args[c2ny_argc] = NULL;
+      return run_ny_tool_exec(root, kind, "ny-fmt", NULL, c2ny_args, c2ny_argc);
+
+    } else if (strcmp(cmd, "py2ny") == 0) {
+      if (a.unknown_count == 0) {
+        nyt_err("py2ny", "usage: ny make py2ny <file.py> [-o <out.ny>]");
+        return 1;
+      }
+      const char *py2ny_args[514];
+      int py2ny_argc = 0;
+      py2ny_args[py2ny_argc++] = "--py2ny";
+      for (int j = 0; j < a.unknown_count && py2ny_argc < 513; j++)
+        py2ny_args[py2ny_argc++] = a.unknown[j];
+      py2ny_args[py2ny_argc] = NULL;
+      return run_ny_tool_exec(root, kind, "ny-fmt", NULL, py2ny_args, py2ny_argc);
+
+    } else if (strcmp(cmd, "wasm") == 0) {
+      const char *wasm_args[514];
+      int wasm_argc = 0;
+      wasm_args[wasm_argc++] = "--wasm";
+      for (int j = 0; j < a.unknown_count && wasm_argc < 513; j++)
+        wasm_args[wasm_argc++] = a.unknown[j];
+      wasm_args[wasm_argc] = NULL;
+      return run_ny_tool_exec(root, kind, "ny", NULL, wasm_args, wasm_argc);
+
+    } else if (strcmp(cmd, "env") == 0) {
+      return run_ny_tool_exec(root, kind, "ny", "--env", NULL, 0);
+
+    } else if (strcmp(cmd, "targets") == 0) {
+      return run_ny_tool_exec(root, kind, "ny", "--targets", NULL, 0);
+
+    } else if (strcmp(cmd, "doctor") == 0) {
+      return run_ny_tool_exec(root, kind, "ny", "--doctor", a.unknown, a.unknown_count);
+
+    } else if (strcmp(cmd, "deps") == 0) {
+      /*
+       * Dependency checks run before ny-make is invoked; nothing to do here.
+       */
+      continue;
+
+    } else if (strcmp(cmd, "cross") == 0 || strcmp(cmd, "cross-run") == 0) {
+      if (a.unknown_count == 0) {
+        nyt_err("ny-make", "usage: ny make %s <triple-or-preset> [file.ny] [-- flags]", cmd);
+        return 1;
+      }
+      char cross_flag[512];
+      snprintf(cross_flag, sizeof(cross_flag), "--cross=%s", a.unknown[0]);
+      const char *cross_args[514];
+      int cross_argc = 0;
+      cross_args[cross_argc++] = cross_flag;
+      if (strcmp(cmd, "cross-run") == 0)
+        cross_args[cross_argc++] = "--cross-run";
+      for (int j = 1; j < a.unknown_count && cross_argc < 513; j++)
+        cross_args[cross_argc++] = a.unknown[j];
+      cross_args[cross_argc] = NULL;
+      return run_ny_tool_exec(root, kind, "ny", NULL, cross_args, cross_argc);
+
+    } else if (strcmp(cmd, "profile") == 0) {
+      if (a.unknown_count == 0) {
+        printf("Usage: ny make profile <mode> [args]\n");
+        printf("Modes: time/bench -> ny --profile-time; gprof -> ny-perf profile\n");
+        continue;
+      }
+      const char *mode = a.unknown[0];
+      const char **rest = (const char **)a.unknown + 1;
+      int rest_count = a.unknown_count - 1;
+      if (strcmp(mode, "time") == 0 || strcmp(mode, "bench") == 0) {
+        const char *pt_args[514];
+        int pt_argc = 0;
+        pt_args[pt_argc++] = "--profile-time";
+        for (int j = 0; j < rest_count && pt_argc < 513; j++)
+          pt_args[pt_argc++] = rest[j];
+        pt_args[pt_argc] = NULL;
+        return run_ny_tool_exec(root, kind, "ny", NULL, pt_args, pt_argc);
+      } else if (strcmp(mode, "gprof") == 0 || strcmp(mode, "fuzz") == 0) {
+        return run_ny_tool_exec(root, kind, "ny-perf", "profile", rest, rest_count);
+      } else {
+        nyt_err("ny-make", "profile: unknown mode '%s' (try: time, gprof)", mode);
+        return 1;
+      }
+
     } else {
       nyt_err("ny-make", "unsupported command: %s", cmd);
       return 2;

@@ -3,7 +3,6 @@
 ;; every decompiler pass (disassembly, lifting, decompilation) works on Mach-O
 ;; binaries unchanged. Supports thin 32/64-bit files and universal (FAT) files.
 module std.os.rev.decomp.macho(macho_header, sections, segments, symbols, functions, imports, relocations, strings, entry, arch, load)
-
 use std.core
 use std.core.str as str
 use std.os.path as path
@@ -21,24 +20,20 @@ def _FAT_MAGIC = 0xcafebabe
 def _FAT_CIGAM = 0xbebafeca
 def _FAT_MAGIC_64 = 0xcafebabf
 def _FAT_CIGAM_64 = 0xbfbafeca
-
 def _CPU_X86 = 7
 def _CPU_X86_64 = 0x01000007
 def _CPU_ARM = 12
 def _CPU_ARM64 = 0x0100000c
-
 def _LC_SEGMENT = 0x1
 def _LC_SYMTAB = 0x2
 def _LC_SEGMENT_64 = 0x19
 def _LC_DYSYMTAB = 0xb
 def _LC_LOAD_DYLIB = 0xc
 def _LC_MAIN = 0x80000028
-
 def _N_UNDF = 0x0
 def _N_ABS = 0x2
 def _N_SECT = 0xe
 def _N_EXT = 0x1
-
 def _S_ATTR_PURE_INSTRUCTIONS = 0x80000000
 
 fn _hex(int v) str { "0x" + str.to_hex(v, 0) }
@@ -73,7 +68,7 @@ fn _seg_perms(int prot) str {
 
 fn _is_macho_magic(int m) bool {
    m == _MH_MAGIC || m == _MH_MAGIC_64 || m == _MH_CIGAM || m == _MH_CIGAM_64 ||
-      m == _FAT_MAGIC || m == _FAT_MAGIC_64 || m == _FAT_CIGAM || m == _FAT_CIGAM_64
+   m == _FAT_MAGIC || m == _FAT_MAGIC_64 || m == _FAT_CIGAM || m == _FAT_CIGAM_64
 }
 
 fn _thin(str b, int fat_magic) dict {
@@ -202,8 +197,8 @@ fn _macho_segments(str b, dict h, list cmds) list {
          def initprot = _u32(b, off + (bits == 64 ? 60 : 44), !big)
          def nsects = _u32(b, off + (bits == 64 ? 64 : 48), !big)
          out = out.append({"index": out.len, "type": "segment", "name": name, "load": true,
-            "vaddr": vmaddr, "vsize": vmsize, "offset": fileoff, "filesz": filesize,
-            "perms": _seg_perms(initprot), "nsects": nsects})
+               "vaddr": vmaddr, "vsize": vmsize, "offset": fileoff, "filesz": filesize,
+               "perms": _seg_perms(initprot), "nsects": nsects})
       }
       i += 1
    }
@@ -277,8 +272,8 @@ fn _macho_symbols(str b, dict h, list cmds, list ss) list {
          sec = -1
       }
       out = out.append({"index": i, "name": nm, "value": n_value, "size": 0,
-         "shndx": sec, "bind": bind, "type": is_func ? "function" : "object",
-         "source": "macho", "desc": n_desc})
+            "shndx": sec, "bind": bind, "type": is_func ? "function" : "object",
+            "source": "macho", "desc": n_desc})
       i += 1
    }
    out
@@ -298,7 +293,7 @@ fn _macho_undefined_imports(list sy) list {
 }
 
 fn symbols(any source) list {
-   "Return Mach-O symbol records (nlist entries)."
+   "Return Mach-O symbol records(nlist entries)."
    if is_dict(source) && source.contains("symbols") { return source.get("symbols", []) }
    def b = _source_data(source)
    def h = macho_header(b)
@@ -357,9 +352,9 @@ fn _section_relocations(str b, dict h, dict sec) list {
       def r_extern = (flags >> 27) & 1
       def r_type = (flags >> 28) & 15
       out = out.append({"index": i, "section": sec.get("name", ""), "offset": int(sec.get("addr", 0)) + r_address,
-         "info": flags, "sym_index": r_symbolnum, "type": r_type, "type_name": _reloc_type_name(r_type),
-         "symbol": "", "symbol_record": dict(), "addend": 0, "rela": false, "pcrel": r_pcrel != 0,
-         "length": r_length, "extern": r_extern != 0})
+            "info": flags, "sym_index": r_symbolnum, "type": r_type, "type_name": _reloc_type_name(r_type),
+            "symbol": "", "symbol_record": dict(), "addend": 0, "rela": false, "pcrel": r_pcrel != 0,
+            "length": r_length, "extern": r_extern != 0})
       i += 1
    }
    out
@@ -385,7 +380,7 @@ fn _resolve_reloc_symbols(list rels, list sy) list {
 }
 
 fn relocations(any source) list {
-   "Return Mach-O relocation records (object external/local relocations)."
+   "Return Mach-O relocation records(object external/local relocations)."
    if is_dict(source) && source.contains("relocations") { return source.get("relocations", []) }
    def b = _source_data(source)
    def h = macho_header(b)
@@ -476,7 +471,7 @@ fn load(str p, any opts=dict()) dict {
       "sections": ss, "segments": segs, "symbols": sy, "functions": sym_funcs,
       "imports": imp, "relocations": rel, "import_sites": [],
       "strings": strings(data, int(opts.get("min_string", 4)), int(opts.get("string_limit", 256))),
-   "tools": tool_status()}
+      "tools": tool_status()}
    if bin.get("ok", false) {
       def e = entry(bin)
       if e != 0 {
@@ -488,7 +483,7 @@ fn load(str p, any opts=dict()) dict {
          }
          if !has_entry {
             bin = bin.set("functions", sym_funcs.append({"name": "entry_" + _hex(e), "value": e,
-               "size": 0, "type": "function", "kind": "entry"}))
+                     "size": 0, "type": "function", "kind": "entry"}))
          }
       }
    }
@@ -496,23 +491,27 @@ fn load(str p, any opts=dict()) dict {
 }
 
 fn _le16(int v) str { chr(v & 0xff) + chr((v >> 8) & 0xff) }
+
 fn _le32(int v) str { _le16(v) + _le16(v >> 16) }
+
 fn _le64(int v) str { _le32(v) + _le32(v >> 32) }
+
 fn _macho_name(str s, int n) str {
    mut out = s
    while out.len < n { out = out + "\x00" }
    out
 }
+
 fn _macho_sample() str {
    def seg = _le32(_LC_SEGMENT_64) + _le32(152) + _macho_name("__TEXT", 16) +
-      _le64(0x100000000) + _le64(0x1000) + _le64(0) + _le64(0x1000) +
-      _le32(5) + _le32(5) + _le32(1) + _le32(0)
+   _le64(0x100000000) + _le64(0x1000) + _le64(0) + _le64(0x1000) +
+   _le32(5) + _le32(5) + _le32(1) + _le32(0)
    def sec = _macho_name("__text", 16) + _macho_name("__TEXT", 16) +
-      _le64(0x100000000) + _le64(0x40) + _le32(0x1000) + _le32(0) + _le32(0) + _le32(0) +
-      _le32(_S_ATTR_PURE_INSTRUCTIONS) + _le32(0) + _le32(0) + _le32(0)
+   _le64(0x100000000) + _le64(0x40) + _le32(0x1000) + _le32(0) + _le32(0) + _le32(0) +
+   _le32(_S_ATTR_PURE_INSTRUCTIONS) + _le32(0) + _le32(0) + _le32(0)
    def main = _le32(_LC_MAIN) + _le32(24) + _le64(0) + _le64(0)
    _le32(_MH_CIGAM_64) + _le32(_CPU_X86_64) + _le32(3) + _le32(2) +
-      _le32(2) + _le32(152 + 24) + _le32(0) + _le32(0) + seg + sec + main
+   _le32(2) + _le32(152 + 24) + _le32(0) + _le32(0) + seg + sec + main
 }
 
 #main {

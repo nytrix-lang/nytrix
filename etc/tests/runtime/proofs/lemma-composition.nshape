@@ -1,0 +1,22 @@
+shape lemma_composition {
+  family "runtime/proofs"
+  generator "program"
+  features ["proof", "lemma", "composition", "positive"]
+  template ny-test-case
+  flags "--color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn lemma positive_sum(int x, int y) {
+  x > 0 && y > 0 → x + y > 0
+}
+
+fn lemma inherited_positive(int x, int y) {
+  positive_sum(x, y)
+}
+
+def proof p = prove(inherited_positive(3, 4))
+assert(proof_matches(p, inherited_positive(3, 4)), "composed lemma proof digest")
+NY
+}

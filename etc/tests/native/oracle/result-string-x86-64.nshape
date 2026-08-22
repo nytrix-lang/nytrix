@@ -1,0 +1,12 @@
+shape oracle_result_string_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result string]
+  template ny-test-case
+  flags "--native-result-oracle=42"
+  expect compile_and_run
+  source ny <<'NY'
+def text = "nytrix"
+text.len * 7
+NY
+}

@@ -1,3 +1,7 @@
+/*
+ * Parser core: top-level driver, token dispatch, error recovery,
+ * and the main parse loop that orchestrates statement/expression lowering.
+ */
 #include "base/common.h"
 #include "base/util.h"
 #include "priv.h"

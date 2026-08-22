@@ -1,10 +1,16 @@
+/*
+ * C-bridge codegen: emits C source stubs and glue for Nytrix-to-C
+ * interop, managing type translation and ABI-compatible wrapper generation.
+ */
 #include "cbridge.h"
 #include "base/util.h"
 
 #include <stdarg.h>
 
-/* `asprintf` is a GNU extension.  Keep cbridge's allocation contract on
- * macOS and Windows without making the generated text platform-dependent. */
+/*
+ * `asprintf` is a GNU extension.  Keep cbridge's allocation contract on
+ * macOS and Windows without making the generated text platform-dependent.
+ */
 static int cbridge_asprintf(char **out, const char *fmt, ...) {
   if (!out || !fmt)
     return -1;

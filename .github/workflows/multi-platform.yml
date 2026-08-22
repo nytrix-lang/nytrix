@@ -17,6 +17,24 @@ on:
           - ubuntu
           - macos
           - windows
+      suite:
+        description: Test breadth for manual runs
+        required: false
+        default: standard
+        type: choice
+        options:
+          - standard
+          - full-stdlib
+      checks:
+        description: Optional checks for manual runs
+        required: false
+        default: tests
+        type: choice
+        options:
+          - tests
+          - memory-safety
+          - coverage
+          - all
 
 concurrency:
   group: test-${{ github.workflow }}-${{ github.ref }}
@@ -27,7 +45,7 @@ env:
 
 jobs:
   test-ubuntu:
-    if: ${{ inputs.target == 'all' || inputs.target == 'ubuntu' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'ubuntu' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -36,10 +54,63 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: ./make test
+      - run: |
+          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
+            ./make test --with-stdlib
+          else
+            ./make test
+          fi
+      - name: Run Linux thread-ring benchmark
+        run: CI=0 GITHUB_ACTIONS=0 ./build/release/ny-test --pattern thread-ring --timeout 30
+      - name: Run ASan suite
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
+        run: |
+          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
+            ./make asan --with-stdlib
+          else
+            ./make asan
+          fi
+      - name: Run UBSan suite
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
+        run: |
+          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
+            ./make ubsan --with-stdlib
+          else
+            ./make ubsan
+          fi
+      - name: Run Valgrind smoke
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+          ./make bin
+          valgrind --leak-check=full --show-leak-kinds=definite \
+            --errors-for-leak-kinds=definite --error-exitcode=97 \
+            build/release/ny-full etc/tests/runtime/values/memory-safety-smoke.ny
+      - name: Run coverage smoke
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'coverage' || inputs.checks == 'all') }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+          cmake -S . -B build/coverage -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="--coverage -O0 -g"
+          cmake --build build/coverage --target ny-full -j 2
+          build/coverage/ny-full_debug \
+            etc/tests/runtime/values/memory-safety-smoke.ny
+          lcov --capture --directory build/coverage --output-file coverage.raw.info
+          lcov --remove coverage.raw.info '/usr/*' --output-file coverage.info
+          genhtml coverage.info --output-directory coverage-html
+      - name: Upload coverage
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'coverage' || inputs.checks == 'all') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-ubuntu
+          path: |
+            coverage.info
+            coverage-html/
 
   test-macos:
-    if: ${{ inputs.target == 'all' || inputs.target == 'macos' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'macos' }}
     runs-on: macos-latest
     timeout-minutes: 90
     env:
@@ -48,14 +119,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: ./make test
+      - run: |
+          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
+            ./make test --with-stdlib
+          else
+            ./make test
+          fi
 
   test-windows:
-    if: ${{ inputs.target == 'all' || inputs.target == 'windows' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'windows' }}
     runs-on: windows-latest
     timeout-minutes: 90
+    # Native test artifacts share Windows temp paths and compiler state.
+    # Keep this platform serialized until those paths are isolated.
     env:
-      NYTRIX_TEST_JOBS: "2"
+      NYTRIX_TEST_JOBS: "1"
     defaults:
       run:
         shell: bash
@@ -63,4 +141,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: ./make test
+      - run: |
+          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
+            ./make test --with-stdlib
+          else
+            ./make test
+          fi

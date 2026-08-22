@@ -1,3 +1,7 @@
+/*
+ * REPL line reader: line-editing with history, syntax highlighting
+ * hints, and multi-line input continuation for the interactive prompt.
+ */
 #include "repl/read.h"
 #include "base/common.h"
 #include "base/util.h"

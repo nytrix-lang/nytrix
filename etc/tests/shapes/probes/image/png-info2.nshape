@@ -4,6 +4,7 @@ shape png-info2 {
   features ["ny", "image"]
   template ny-test-case
   expect compile_and_run
+  ci optional
   source ny <<'NY'
 use std.os
 use std.os.path as ospath

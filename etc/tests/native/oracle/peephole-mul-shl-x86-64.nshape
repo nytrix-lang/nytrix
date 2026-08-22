@@ -1,0 +1,25 @@
+shape oracle_peephole_mul_pow2_shl_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle peephole mul-to-shl strength-reduce regression]
+  template ny-test-case
+  flags_matrix "-O1 --native-result-oracle=1984; -O2 --native-result-oracle=1984; -O3 --native-result-oracle=1984"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn mul_pows(i64 x) i64 {
+  ;; x * 2 + x * 4 + x * 8 + x * 16 + x * 32
+  ;; = x * (2 + 4 + 8 + 16 + 32) = x * 62
+  ;; For x=32: 32 * 62 = 1984
+  def a = x * 2
+  def b = x * 4
+  def c = x * 8
+  def d = x * 16
+  def e = x * 32
+  a + b + c + d + e
+}
+
+mul_pows(32)
+NY
+}

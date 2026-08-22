@@ -55,7 +55,7 @@ fn get_required(ptr c) i32 { return load_layout(c, "WindowBackendContract", "req
 
 fn has(ptr c, i32 cap) bool {
    "Runs the has operation."
-   return(get_mask(c) & cap) == cap
+   return (get_mask(c) & cap) == cap
 }
 
 fn missing_mask(ptr c) i32 {

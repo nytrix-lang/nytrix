@@ -492,11 +492,11 @@ fn tile_editor_shell_preset(str name, f64 ww, f64 wh, f64 gap=10.0) dict {
    def preset = str.lower(str.strip(to_str(name)))
    case preset {
       "probe", "validate", "validation" -> _tile_editor_shell_cfg(ww, wh, gap, 0.30, 0.30, 0.22,
-      [0.30, 0.22, 0.48], [1.02, 1.04], [1.10, 0.88, 0.82, 0.88])
+         [0.30, 0.22, 0.48], [1.02, 1.04], [1.10, 0.88, 0.82, 0.88])
       "graph", "nodes" -> _tile_editor_shell_cfg(ww, wh, gap, 0.24, 0.42, 0.18,
-      [0.48, 0.18, 0.34], [1.16, 0.78], [0.92, 0.84, 0.70, 0.74])
+         [0.48, 0.18, 0.34], [1.16, 0.78], [0.92, 0.84, 0.70, 0.74])
       "compact", "dense" -> _tile_editor_shell_cfg(ww, wh, max(0.0, gap - 2.0), 0.22, 0.24, 0.20,
-      [0.24, 0.20, 0.56], [0.92, 1.12], [1.10, 0.90, 0.82, 0.92])
+         [0.24, 0.20, 0.56], [0.92, 1.12], [1.10, 0.90, 0.82, 0.92])
       _ -> tile_editor_shell(ww, wh, gap, 0.27, 0.33, 0.24)
    }
 }
@@ -507,12 +507,12 @@ fn _theme_refresh() any {
    _press_u32 = _theme_pack(_press_rgba)
    _press_soft_u32 = color_pack(float(_press_rgba.get(0, 0.0)), float(_press_rgba.get(1, 0.0)), float(_press_rgba.get(2, 0.0)), 0.58)
    _accent_soft_u32 = color_pack(float(_accent_rgba.get(0,
-      0.0)),
+            0.0)),
       float(_accent_rgba.get(1,
-      0.0)),
+            0.0)),
       float(_accent_rgba.get(2,
-      0.0)),
-   0.24)
+            0.0)),
+      0.24)
    _window_bg_u32 = _theme_pack(_window_bg_rgba)
    _window_body_u32 = _theme_pack(_window_body_rgba)
    _window_hdr_u32 = _theme_pack(_window_hdr_rgba)
@@ -523,19 +523,19 @@ fn _theme_refresh() any {
    _border_u32 = _theme_pack(_border_rgba)
    _scroll_track_u32 = color_pack(0.018, 0.018, 0.020, 0.62)
    _scroll_thumb_u32 = color_pack(float(_accent_rgba.get(0,
-      0.0)),
+            0.0)),
       float(_accent_rgba.get(1,
-      0.0)),
+            0.0)),
       float(_accent_rgba.get(2,
-      0.0)),
-   0.46)
+            0.0)),
+      0.46)
    _scroll_thumb_hot_u32 = color_pack(float(_accent_rgba.get(0,
-      0.0)),
+            0.0)),
       float(_accent_rgba.get(1,
-      0.0)),
+            0.0)),
       float(_accent_rgba.get(2,
-      0.0)),
-   0.62)
+            0.0)),
+      0.62)
    _grid_major_u32 = color_pack(0.220, 0.220, 0.230, 0.18)
    _grid_minor_u32 = color_pack(0.080, 0.080, 0.085, 0.10)
    _text_u32 = _theme_pack(_text_rgba)
@@ -1102,7 +1102,7 @@ fn _pointer_over_scroll_area(any window_id) bool {
       float(_scroll_area_capture_rect.get(0, 0.0)),
       float(_scroll_area_capture_rect.get(1, 0.0)),
       float(_scroll_area_capture_rect.get(2, 0.0)),
-   float(_scroll_area_capture_rect.get(3, 0.0)))
+      float(_scroll_area_capture_rect.get(3, 0.0)))
 }
 
 fn _request_focus_step(int dir) any {
@@ -1475,17 +1475,17 @@ fn end_frame() any {
    if _debug_overlay {
       if _hot_rect.len >= 4 && (_hot_id != "") {
          _gui_rect_outline_fast(float(_hot_rect.get(0, 0.0)), float(_hot_rect.get(1, 0.0)),
-         float(_hot_rect.get(2, 0.0)), float(_hot_rect.get(3, 0.0)), _accent_u32)
+            float(_hot_rect.get(2, 0.0)), float(_hot_rect.get(3, 0.0)), _accent_u32)
       }
       if _active_rect.len >= 4 && (_active_widget_id != "") {
          _gui_rect_outline_fast(float(_active_rect.get(0, 0.0)), float(_active_rect.get(1, 0.0)),
-         float(_active_rect.get(2, 0.0)), float(_active_rect.get(3, 0.0)), _danger_u32)
+            float(_active_rect.get(2, 0.0)), float(_active_rect.get(3, 0.0)), _danger_u32)
       }
       if _window_hovered != "" {
          def st = _window_lookup(_window_hovered)
          if is_dict(st) {
             _gui_rect_outline_fast(float(st.get("x", 0.0)), float(st.get("y", 0.0)),
-            float(st.get("w", 0.0)), float(st.get("h", 0.0)), _ok_u32)
+               float(st.get("w", 0.0)), float(st.get("h", 0.0)), _ok_u32)
          }
       }
       _gui_rect_fast(_mouse_x - 6.0, _mouse_y, 13.0, 1.0, _warn_u32)
@@ -1767,7 +1767,7 @@ fn _begin_interact_widget(any full_id, f64 x, f64 y, f64 w, f64 h, bool visible=
    _iw_visible = !!visible && _rect_intersects(rect, clip)
    _iw_hovered = _iw_visible && _rect_hit(_mouse_x, _mouse_y,
       float(clip.get(0, 0.0)), float(clip.get(1, 0.0)),
-   float(clip.get(2, 0.0)), float(clip.get(3, 0.0))) && _current_window_pointer_hit(x, y, w, h)
+      float(clip.get(2, 0.0)), float(clip.get(3, 0.0))) && _current_window_pointer_hit(x, y, w, h)
    if _iw_hovered {
       _hot_id = full_id
       _hot_rect = rect
@@ -1875,7 +1875,7 @@ fn remaining_h(any reserve=0.0) f64 {
    "Returns remaining vertical room in the current window body."
    max(0.0,
       (_current_body_y_cache + _current_body_h_cache) -
-   _current_cursor_y_cache - _gap() - float(reserve))
+      _current_cursor_y_cache - _gap() - float(reserve))
 }
 
 fn _current_clip() list {
@@ -1997,7 +1997,7 @@ fn text_colored(any msg, any color) any {
          clamp(float(color.get(1, 1.0)), 0.0, 1.0),
          clamp(float(color.get(2, 1.0)), 0.0, 1.0),
          clamp(float(color.get(3, 1.0)), 0.0, 1.0)
-   ])
+      ])
 }
 
 fn property_row(any id, any label, any value, any tone=0) list {
@@ -2021,12 +2021,12 @@ fn property_row(any id, any label, any value, any tone=0) list {
          y,
          w,
          h,
-   1.0))
+         1.0))
    _draw_text_ui_small_clipped(val, x + label_w, ty, tone_col, max(1.0, w - label_w - _item_pad_x()), _clip_rect_inset(x,
          y,
          w,
          h,
-   1.0))
+         1.0))
    rect
 }
 
@@ -2161,14 +2161,14 @@ fn icon_button(any id, any tex_id, any label="", f64 w=0.0, f64 h=0.0, bool sele
    _register_focusable(full)
    _begin_interact_widget(full,
       float(rect.get(0,
-      0.0)),
+            0.0)),
       float(rect.get(1,
-      0.0)),
+            0.0)),
       float(rect.get(2,
-      0.0)),
+            0.0)),
       float(rect.get(3,
-      0.0)),
-   true)
+            0.0)),
+      true)
    def visible = _iw_visible
    def hovered = _iw_hovered
    def held = _iw_held
@@ -2181,7 +2181,7 @@ fn icon_button(any id, any tex_id, any label="", f64 w=0.0, f64 h=0.0, bool sele
          y,
          rwf,
          rhf,
-      selected ? _accent_soft_u32 : (held ? _press_u32 : (hovered ? _panel_hover_u32 : _panel_u32)))
+         selected ? _accent_soft_u32 : (held ? _press_u32 : (hovered ? _panel_hover_u32 : _panel_u32)))
       if selected || focused || hovered || held { _gui_rect_fast(x, y, rwf, held ? _sx(3.0) : _sx(2.0), _accent_u32) }
       _gui_rect_outline_fast(x, y, rwf, rhf, held ? _accent_u32 : ((selected || focused) ? _accent_u32 : _border_u32))
       def ix, iy = x + _item_pad_x(), y + max(0.0, (rhf - icon_sz) * 0.5)
@@ -2190,7 +2190,7 @@ fn icon_button(any id, any tex_id, any label="", f64 w=0.0, f64 h=0.0, bool sele
             iy + icon_sz * 0.25,
             icon_sz * 0.50,
             icon_sz * 0.50,
-         selected ? _accent_u32 : _text_dim_u32)
+            selected ? _accent_u32 : _text_dim_u32)
       }
       if has_txt {
          def text_col = held ? _text_u32 : ((selected || focused || hovered) ? _text_u32 : _text_dim_u32)
@@ -2219,14 +2219,14 @@ fn selectable(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0, any 
    _register_focusable(full)
    _begin_interact_widget(full,
       float(rect.get(0,
-      0.0)),
+            0.0)),
       float(rect.get(1,
-      0.0)),
+            0.0)),
       float(rect.get(2,
-      0.0)),
+            0.0)),
       float(rect.get(3,
-      0.0)),
-   true)
+            0.0)),
+      true)
    def visible = _iw_visible
    def hovered = _iw_hovered
    def held = _iw_held
@@ -2245,7 +2245,7 @@ fn selectable(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0, any 
       if selected || focused || hovered { _gui_rect_outline_fast(x, y, rwf, rhf, (selected || focused) ? _accent_u32 : _border_u32) }
       if icon_sz > 0.0 {
          _gui_tex_ref_uv(x + _item_pad_x(), y + max(_sx(5.0), (rhf - icon_sz) * 0.5), icon_sz, icon_sz,
-         tex_id, 1.0, 1.0, 1.0, selected ? 1.0 : 0.88)
+            tex_id, 1.0, 1.0, 1.0, selected ? 1.0 : 0.88)
       }
       _draw_text_ui_clipped(txt, text_x, title_y, _text_u32, text_w, clip)
       if d.len > 0 { _draw_text_ui_small_clipped(d, text_x, y + _sx(5.0) + _text_h() + _tiny_gap(), _text_dim_u32, text_w, clip) }
@@ -2263,14 +2263,14 @@ fn selectable_file(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0,
    def full = _wid(id)
    _begin_interact_widget(full,
       float(rect.get(0,
-      0.0)),
+            0.0)),
       float(rect.get(1,
-      0.0)),
+            0.0)),
       float(rect.get(2,
-      0.0)),
+            0.0)),
       float(rect.get(3,
-      0.0)),
-   true)
+            0.0)),
+      true)
    if _iw_visible {
       def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
       def rwf, rhf = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
@@ -2284,7 +2284,7 @@ fn selectable_file(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0,
       if selected || hovered { _gui_rect_fast(x, y, selected ? _sx(4.0) : _sx(2.0), rhf, selected ? _accent_u32 : _border_u32) }
       if icon_sz > 0.0 {
          _gui_tex_ref_uv(x + _item_pad_x(), y + max(_sx(4.0), (rhf - icon_sz) * 0.5), icon_sz, icon_sz,
-         tex_id, 1.0, 1.0, 1.0, selected ? 1.0 : 0.82)
+            tex_id, 1.0, 1.0, 1.0, selected ? 1.0 : 0.82)
       }
       _draw_text_ui_ex(_font_body(), txt, text_x, _text_center_y_for(_font_body(), y, rhf), _text_u32, 0.0, text_w)
    }
@@ -2386,14 +2386,14 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
    def rect = _layout_rect(rw, _slider_h())
    _begin_interact_widget(full,
       float(rect.get(0,
-      0.0)),
+            0.0)),
       float(rect.get(1,
-      0.0)),
+            0.0)),
       float(rect.get(2,
-      0.0)),
+            0.0)),
       float(rect.get(3,
-      0.0)),
-   true)
+            0.0)),
+      true)
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
    def rwf = float(rect.get(2, 0.0))
    def field_y = y + _text_h() + _tiny_gap()
@@ -2511,16 +2511,16 @@ fn title_input_text(any id, any value, any placeholder="", any w=0.0) str {
       tx,
       _text_center_y_for(_font_small_id(),
          y,
-      field_h),
+         field_h),
       draw_col,
       max(1.0,
-      rw - _sx(16.0)),
+         rw - _sx(16.0)),
       [x + 1.0,
          y + 1.0,
          max(1.0,
-         rw - 2.0),
+            rw - 2.0),
          max(1.0,
-   field_h - 2.0)])
+            field_h - 2.0)])
    if active_text && ((int(get_time() * 2.0) % 2) == 0) {
       def before = str.str_slice(out, 0, cursor)
       def mw = _measure_text_ui(_font_small_id(), before)
@@ -2538,14 +2538,14 @@ fn _choice_box_interact(any id, any txt, any box) list {
    _register_focusable(full)
    _begin_interact_widget(full,
       float(rect.get(0,
-      0.0)),
+            0.0)),
       float(rect.get(1,
-      0.0)),
+            0.0)),
       float(rect.get(2,
-      0.0)),
+            0.0)),
       float(rect.get(3,
-      0.0)),
-   true)
+            0.0)),
+      true)
    [rect, full, _kbd_focus_id == full]
 }
 
@@ -2606,7 +2606,7 @@ fn toggle(any id, any label, any value) bool {
          _text_center_y_for(_font_body(), y, hh),
          _text_u32,
          ww - tw - _gap(),
-      clip)
+         clip)
       _gui_rect_fast(tx, ty, tw, th, out ? _accent_soft_u32 : _panel_u32)
       _gui_rect_outline_fast(tx, ty, tw, th, (_iw_hovered || focused) ? _accent_u32 : _border_u32)
       def knob = th - _sx(4.0)
@@ -2652,7 +2652,7 @@ fn tab_strip(any id, list labels, int selected=0, f64 w=0.0, f64 h=0.0) int {
          y,
          tw,
          hh,
-      active ? _accent_soft_u32 : (held ? _panel_active_u32 : (hovered ? _panel_hover_u32 : _panel_u32)))
+         active ? _accent_soft_u32 : (held ? _panel_active_u32 : (hovered ? _panel_hover_u32 : _panel_u32)))
       if focused && !active { _gui_rect_outline_fast(tx, y, tw, hh, _accent_u32) }
       if i > 0 { _gui_rect_fast(tx, y + _sx(5.0), 1.0, hh - _sx(10.0), _border_u32) }
       if active { _gui_rect_fast(tx + _sx(6.0), y + hh - _sx(3.0), max(_sx(12.0), tw - _sx(12.0)), _sx(3.0), _accent_u32) }
@@ -2716,7 +2716,7 @@ fn _combo_popup_draw_items(str full, list values, int out, f64 x, f64 popup_y, f
                _text_center_y_for(_font_body(), item_y, row_h),
                active ? _text_u32 : _text_dim_u32,
                rwf - _item_pad_x() * 2.0 - _sx(8.0),
-            [x + 1.0, item_y, max(1.0, rwf - 2.0), row_h])
+               [x + 1.0, item_y, max(1.0, rwf - 2.0), row_h])
          }
       }
       i += 1
@@ -2871,7 +2871,7 @@ fn _combo_popup_draw_labels(list labels, int first_i, int out, f64 x, f64 popup_
             _text_center_y_for(_font_body(), item_y, row_h),
             active ? _text_u32 : _text_dim_u32,
             rwf - _item_pad_x() * 2.0 - _sx(8.0),
-         [x + 1.0, item_y, max(1.0, rwf - 2.0), row_h])
+            [x + 1.0, item_y, max(1.0, rwf - 2.0), row_h])
       }
       li += 1
    }
@@ -2980,13 +2980,13 @@ fn _draw_combo_field(str full, str lbl, list values, int out, bool open, f64 x, 
       text_y,
       show_col,
       rwf - _item_pad_x() * 2.0 - _sx(14.0),
-   field_clip)
+      field_clip)
    _draw_text_ui_small_clipped(open ? "^" : "v",
       x + rwf - _item_pad_x() - _sx(8.0),
       text_y,
       _text_dim_u32,
       _sx(10.0),
-   field_clip)
+      field_clip)
 }
 
 fn combo_box(any id, any label, list items, int selected=0, f64 w=0.0, int max_visible=6) int {
@@ -3038,14 +3038,14 @@ fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0) f
    _register_focusable(full)
    _begin_interact_widget(full,
       float(rect.get(0,
-      0.0)),
+            0.0)),
       float(rect.get(1,
-      0.0)),
+            0.0)),
       float(rect.get(2,
-      0.0)),
+            0.0)),
       float(rect.get(3,
-      0.0)),
-   true)
+            0.0)),
+      true)
    if _kbd_focus_id == full {
       def step = max((hi - lo) / 100.0, 0.0001)
       if _key_event_present(KEY_LEFT) || _key_event_present(KEY_DOWN) { out = clamp(out - step, lo, hi) }
@@ -3107,10 +3107,10 @@ fn progress_bar(any id, any value, any label="", any w=0.0) any {
       _gui_rect_fast(x + inset,
          y + inset,
          max(_sx(2.0),
-         (rw - inset * 2.0) * p),
+            (rw - inset * 2.0) * p),
          max(1.0,
-         rh - inset * 2.0),
-      _accent_u32)
+            rh - inset * 2.0),
+         _accent_u32)
       _gui_rect_outline_fast(x, y, rw, rh, _border_u32)
       def pct = f"{p * 100.0:.0f}%"
       def txt = (label_s.len > 0) ? (label_s + "  " + pct) : (to_str(id) + "  " + pct)
@@ -3139,12 +3139,12 @@ fn stat_card(any id, any label, any value, any detail="", f64 w=0.0, f64 h=0.0, 
    def hdr_h = _sx(20.0)
    _gui_rect_fast(x + 1.0, y + 1.0, max(1.0, ww - 2.0), hdr_h, _window_hdr_u32)
    _gui_rect_fast(x + 1.0, y + 1.0, max(1.0, ww - 2.0), _sx(3.0), color_pack(float(accent_col.get(0,
-         0.31)),
+               0.31)),
          float(accent_col.get(1,
-         0.71)),
+               0.71)),
          float(accent_col.get(2,
-         1.0)),
-   0.92))
+               1.0)),
+         0.92))
    _gui_rect_outline_fast(x, y, ww, hh, _border_u32)
    mut value_font = ((hh >= _sx(88.0)) ? _font_title_id() : _font_body())
    def detail_font = _font_small_id()
@@ -3167,14 +3167,14 @@ fn stat_card(any id, any label, any value, any detail="", f64 w=0.0, f64 h=0.0, 
       _text_u32,
       0.0,
       ww - _item_pad_x() * 2.0,
-   clip)
+      clip)
    if detail_s.len > 0 && detail_y >= value_y + value_h + _sx(4.0) {
       _draw_text_ui_small_clipped(detail_s,
          x + _item_pad_x(),
          detail_y,
          _text_dim_u32,
          ww - _item_pad_x() * 2.0,
-      clip)
+         clip)
    }
    rect
 }
@@ -3208,16 +3208,16 @@ fn plot_lines(any id, any values, any label="", any w=0.0, any h=120.0, any colo
          y + _sx(4.0),
          _text_u32,
          max(1.0,
-         ww - _sx(70.0)),
-      text_clip)
+            ww - _sx(70.0)),
+         text_clip)
    }
    _draw_text_ui_small_clipped("plot disabled",
       x + _item_pad_x(),
       y + _sx(28.0),
       _text_dim_u32,
       max(1.0,
-      ww - _sx(16.0)),
-   text_clip)
+         ww - _sx(16.0)),
+      text_clip)
    pop_clip_rect()
    rect
 }
@@ -3254,7 +3254,7 @@ fn grid_canvas(any id, any label="", f64 w=0.0, f64 h=220.0, f64 cell=32.0, int 
             y,
             ww,
             hh,
-      1.0))
+            1.0))
    }
    pop_clip_rect()
    rect
@@ -3300,7 +3300,7 @@ fn _node_canvas_draw_shell(dict node, bool selected, f64 hx, f64 hy, f64 nw, f64
          hy,
          nw,
          nh,
-   1.0))
+         1.0))
 }
 
 fn _node_canvas_draw_input_slots(dict slot_pos, int ni, list ins, f64 hx, f64 hy, f64 nw, f64 nh, f64 header_h, f64 row_h, f64 slot_w, f64 pad) dict {
@@ -3427,14 +3427,14 @@ fn collapsing_header(any id, any label, bool default_open=true) bool {
    def rect = _layout_rect(_current_body_w(), _item_h())
    _begin_interact_widget(full,
       float(rect.get(0,
-      0.0)),
+            0.0)),
       float(rect.get(1,
-      0.0)),
+            0.0)),
       float(rect.get(2,
-      0.0)),
+            0.0)),
       float(rect.get(3,
-      0.0)),
-   true)
+            0.0)),
+      true)
    def focused = _kbd_focus_id == full
    if _iw_clicked || _widget_key_activate(full) {
       open = !open
@@ -3442,41 +3442,41 @@ fn collapsing_header(any id, any label, bool default_open=true) bool {
    }
    if _iw_visible {
       _gui_rect_fast(float(rect.get(0, 0.0)), float(rect.get(1, 0.0)), float(rect.get(2, 0.0)), float(rect.get(3, 0.0)),
-      _iw_held ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
+         _iw_held ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
       _gui_rect_outline_fast(float(rect.get(0,
-         0.0)),
+               0.0)),
          float(rect.get(1,
-         0.0)),
+               0.0)),
          float(rect.get(2,
-         0.0)),
+               0.0)),
          float(rect.get(3,
-         0.0)),
-      focused ? _accent_u32 : _border_u32)
+               0.0)),
+         focused ? _accent_u32 : _border_u32)
       def clip = _clip_rect_inset(float(rect.get(0,
-         0.0)),
+               0.0)),
          float(rect.get(1,
-         0.0)),
+               0.0)),
          float(rect.get(2,
-         0.0)),
+               0.0)),
          float(rect.get(3,
-         0.0)),
-      1.0)
+               0.0)),
+         1.0)
       def text_y = _text_center_y_for(_font_body(), float(rect.get(1, 0.0)), float(rect.get(3, 0.0)))
       _draw_text_ui_clipped(open ? "[-]" : "[+]",
          float(rect.get(0,
-         0.0)) + _item_pad_x(),
+               0.0)) + _item_pad_x(),
          text_y,
          _accent_u32,
          _sx(42.0),
-      clip)
+         clip)
       _draw_text_ui_clipped(_ui_text(label),
          float(rect.get(0,
-         0.0)) + _item_pad_x() + _sx(48.0),
+               0.0)) + _item_pad_x() + _sx(48.0),
          text_y,
          _text_u32,
          float(rect.get(2,
-         0.0)) - _sx(54.0),
-      clip)
+               0.0)) - _sx(54.0),
+         clip)
    }
    open
 }
@@ -3558,12 +3558,12 @@ fn _color_preview_row(str full, any label, list rgba) any {
    def clip = _clip_rect_inset(x, y, w, h, 1.0)
    _draw_text_ui_clipped(_ui_text(label), x, y, _text_u32, max(_sx(40.0), w - sw - _gap()), clip)
    _draw_text_ui_small_clipped(_color_hex_rgb(rgba) + "  A " + f"{float(rgba.get(3, 1.0)):.2f}",
-   x, y + _text_h() + _sx(3.0), _text_dim_u32, max(_sx(40.0), w - sw - _gap()), clip)
+      x, y + _text_h() + _sx(3.0), _text_dim_u32, max(_sx(40.0), w - sw - _gap()), clip)
    def px = x + w - sw
    def py = y
    _gui_rect_fast(px, py, sw, h, _panel_u32)
    _gui_rect_fast(px + 1.0, py + 1.0, max(1.0, sw - 2.0), max(1.0, h - 2.0),
-   color_pack(float(rgba.get(0, 1.0)), float(rgba.get(1, 1.0)), float(rgba.get(2, 1.0)), float(rgba.get(3, 1.0))))
+      color_pack(float(rgba.get(0, 1.0)), float(rgba.get(1, 1.0)), float(rgba.get(2, 1.0)), float(rgba.get(3, 1.0))))
    _gui_rect_outline_fast(px, py, sw, h, _border_u32)
 }
 
@@ -3591,7 +3591,7 @@ fn _color_sv_plane(str full, list rgba, f64 hue, f64 x, f64 y, f64 w, f64 h) lis
             def cv = clamp(1.0 - ((float(row) + 0.5) / float(rows)), 0.0, 1.0)
             def rgb = _color_hsv_to_rgb(hue, cs, cv)
             _gui_rect_fast(x + float(col) * cw, y + float(row) * ch, cw + 1.0, ch + 1.0,
-            color_pack(float(rgb.get(0, 1.0)), float(rgb.get(1, 1.0)), float(rgb.get(2, 1.0)), 1.0))
+               color_pack(float(rgb.get(0, 1.0)), float(rgb.get(1, 1.0)), float(rgb.get(2, 1.0)), 1.0))
             col += 1
          }
          row += 1
@@ -3624,7 +3624,7 @@ fn _color_hue_strip(str full, list rgba, f64 hue, f64 x, f64 y, f64 w, f64 h) li
       while i < segs {
          def rgb = _color_hsv_to_rgb(float(i) / float(max(1, segs - 1)), 1.0, 1.0)
          _gui_rect_fast(x + float(i) * sw, y, sw + 1.0, h,
-         color_pack(float(rgb.get(0, 1.0)), float(rgb.get(1, 1.0)), float(rgb.get(2, 1.0)), 1.0))
+            color_pack(float(rgb.get(0, 1.0)), float(rgb.get(1, 1.0)), float(rgb.get(2, 1.0)), 1.0))
          i += 1
       }
       def mx = x + hval * w
@@ -3650,7 +3650,7 @@ fn _color_swatch(str full, int idx, list color, list rgba, f64 x, f64 y, f64 siz
    }
    if _iw_visible {
       _gui_rect_fast(x, y, size, size,
-      color_pack(float(color.get(0, 1.0)), float(color.get(1, 1.0)), float(color.get(2, 1.0)), 1.0))
+         color_pack(float(color.get(0, 1.0)), float(color.get(1, 1.0)), float(color.get(2, 1.0)), 1.0))
       _gui_rect_outline_fast(x, y, size, size, _iw_hovered ? _accent_u32 : _border_u32)
    }
    out
@@ -3702,13 +3702,13 @@ fn color_picker4(any id, any label, any rgba) list {
    def plane = _layout_rect(_current_body_w(), plane_h)
    out = _color_sv_plane(full, out, hue,
       float(plane.get(0, 0.0)), float(plane.get(1, 0.0)),
-   float(plane.get(2, 0.0)), float(plane.get(3, 0.0)))
+      float(plane.get(2, 0.0)), float(plane.get(3, 0.0)))
    def hue_rect = _layout_rect(_current_body_w(), _sx(18.0))
    def hsv2 = _color_rgb_to_hsv(out)
    if float(hsv2.get(1, 0.0)) > 0.0005 { hue = float(hsv2.get(0, hue)) }
    out = _color_hue_strip(full, out, hue,
       float(hue_rect.get(0, 0.0)), float(hue_rect.get(1, 0.0)),
-   float(hue_rect.get(2, 0.0)), float(hue_rect.get(3, 0.0)))
+      float(hue_rect.get(2, 0.0)), float(hue_rect.get(3, 0.0)))
    out = _color_swatch_row(full, out)
    out[0] = slider_float(to_str(id) + ".r", "R", out.get(0, 1.0), 0.0, 1.0)
    out[1] = slider_float(to_str(id) + ".g", "G", out.get(1, 1.0), 0.0, 1.0)
@@ -3884,7 +3884,7 @@ fn end_scroll_area() any {
          thumb_y,
          track_w,
          thumb_h,
-      (_active_widget_id == scroll_id || thumb_hover) ? _scroll_thumb_hot_u32 : _scroll_thumb_u32)
+         (_active_widget_id == scroll_id || thumb_hover) ? _scroll_thumb_hot_u32 : _scroll_thumb_u32)
    }
    _state_set_num(_scroll_area_id, "scroll_y", scroll_y)
    _scroll_area_active = false
@@ -4128,7 +4128,7 @@ fn end_window() any {
          bar_y,
          track_w,
          bar_h,
-      (_active_widget_id == scroll_id || thumb_hover) ? _scroll_thumb_hot_u32 : _scroll_thumb_u32)
+         (_active_widget_id == scroll_id || thumb_hover) ? _scroll_thumb_hot_u32 : _scroll_thumb_u32)
    }
    _window_store(st)
    _current_window = 0

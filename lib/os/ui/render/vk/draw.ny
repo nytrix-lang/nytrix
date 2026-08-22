@@ -24,10 +24,8 @@ use std.os.ui.render.vk.pipeline (_ensure_circle_pipeline,
    _ensure_sdf_line_pipeline,
    _ensure_point_pipeline,
    _get_nocull_pipeline,
-
-_get_unlit_nocull_pipeline,
+   _get_unlit_nocull_pipeline,
    push_constants)
-
 use std.os.ui.render.vk.renderer (_check_flush, _flush, _sync_pc, set_ui_material)
 use std.os.ui.render.vk.texture (bind_texture, bind_default_texture, bindless_sync_texture_slot)
 
@@ -89,7 +87,7 @@ fn _static_bind_diag(any cb, any buf, any vbo_ptr, any off_ptr, any off) any {
          " off=" + to_str(off) +
          " pbuf=0x" + _static_bind_bits(vbo_ptr) +
          " pbuf0=0x" + _static_bind_bits(load64(vbo_ptr, 0)) +
-      " poff0=" + to_str(load64_h(off_ptr, 0)))
+         " poff0=" + to_str(load64_h(off_ptr, 0)))
    }
    _static_bind_diag_count += 1
    0
@@ -940,7 +938,7 @@ fn draw_rounded_rect_2d(f64 x, f64 y, f64 w, f64 h, f64 radius, int segments, f6
       0.0,
       0.0,
       c,
-   _current_tex_index)
+      _current_tex_index)
    _push_rect_tex_direct(base + 6 * _VKR_VERT_STRIDE,
       fx,
       fy + rr,
@@ -951,7 +949,7 @@ fn draw_rounded_rect_2d(f64 x, f64 y, f64 w, f64 h, f64 radius, int segments, f6
       0.0,
       0.0,
       c,
-   _current_tex_index)
+      _current_tex_index)
    _push_rect_tex_direct(base + 12 * _VKR_VERT_STRIDE,
       fx + fw - rr,
       fy + rr,
@@ -962,7 +960,7 @@ fn draw_rounded_rect_2d(f64 x, f64 y, f64 w, f64 h, f64 radius, int segments, f6
       0.0,
       0.0,
       c,
-   _current_tex_index)
+      _current_tex_index)
    def step = (PI * 0.5) / float(cs_count)
    def cs = cos(step)
    def sn = sin(step)
@@ -1689,42 +1687,36 @@ fn draw_axes_3d(f64 gizmo_len, f64 cube_sz=0.4) any {
 fn _vk_draw_shader_rect(f64 x, f64 y, f64 w, f64 h, any pipe_override, any pc_ptr=0, int pc_size=0, int pc_offset=64) bool {
    "Draws a rectangle using a custom shader pipeline directly, bypassing standard UI batching."
    if !_frame_open || !_current_frame_cb || !pipe_override { return false }
-   
    if _vertex_offset != _last_flush_offset {
       _flush_reason = 4
       _flush()
    }
    if !_check_flush(_VKR_VERT_STRIDE * 6) { return false }
-   
    def cb = _current_frame_cb
    if !_vkr_bind_pipeline_if_needed(cb, pipe_override) { return false }
    _pc_dirty = true
    _bind_descriptors(cb)
    _sync_pc()
-   
    if pc_ptr && pc_size > 0 { push_constants(pc_ptr, pc_size, pc_offset) }
-   
    def first_vert = _vertex_offset / _VKR_VERT_STRIDE
    def dst = _local_vertex_map + _vertex_offset
    _push_rect_tex_direct(dst, x, y, w, h, 0.0, 0.0, 1.0, 1.0, 0xffffffff, 0)
-   
    _vkr_bind_dynamic_vertex_buffer(cb)
    cmd_draw(cb, 6, 1, first_vert, 0)
-   
-    _vertex_offset += _VKR_VERT_STRIDE * 6
-    _last_flush_offset = _vertex_offset
-    _prim_rect_quads += 1
-    if _current_is_unlit != 0 {
-       def up = _get_unlit_nocull_pipeline()
-       _target_pipeline = up ? up : _pipeline
-    } else {
-       _target_pipeline = _pipeline
-    }
-    _use_custom_pc = 0
-    ;; Custom shader data may occupy the standard model-matrix range (offset 64).
-    ;; Force the next regular batch to rebuild both matrices before its full PC upload.
-    _mvp_dirty = true
-    _model_dirty = true
-    _pc_dirty = true
-    true
+   _vertex_offset += _VKR_VERT_STRIDE * 6
+   _last_flush_offset = _vertex_offset
+   _prim_rect_quads += 1
+   if _current_is_unlit != 0 {
+      def up = _get_unlit_nocull_pipeline()
+      _target_pipeline = up ? up : _pipeline
+   } else {
+      _target_pipeline = _pipeline
+   }
+   _use_custom_pc = 0
+   ;; Custom shader data may occupy the standard model-matrix range (offset 64).
+   ;; Force the next regular batch to rebuild both matrices before its full PC upload.
+   _mvp_dirty = true
+   _model_dirty = true
+   _pc_dirty = true
+   true
 }

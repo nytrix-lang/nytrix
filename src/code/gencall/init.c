@@ -1,3 +1,24 @@
+/*
+ * Implements the monomorphic call dispatch layer in the LLVM codegen
+ * pipeline.  Handles specialized call lowering including:
+ *
+ * - Monomorphic concrete-type call generation (mono.c provides the type-driven
+ *   clone dispatch; init.c emits the LLVM call sites)
+ * - Fast/slow fallback for dynamic call targets: when a call target type
+ *   cannot be proven at compile time, the codegen emits a tag check guard
+ *   before the monomorphic fast path and falls back to a dynamic dispatch
+ *   call through the function table (see mono.call.fallback basic block at
+ *   line ~2505 in the original source)
+ * - ABI-specific argument marshalling (abi.c handles per-platform calling
+ *   convention details invoked from this file)
+ *
+ * The call fast/slow dispatch pattern mirrors the tagged-int binary operator
+ * pattern in src/code/binary.c: a guard block checks type invariants, then
+ * branches to either the inline fast path or the generic slow fallback.
+ *
+ * See also: src/code/binary.c (tagged-int fast/slow binary ops)
+ *           src/code/gencall/mono.c (type-driven monomorphization logic)
+ */
 #include "base/util.h"
 #include "parse/json.h"
 #include "parse/proof.h"
@@ -21,7 +42,9 @@
 
 #include "intrinsics.c"
 
-/* Assert condition text extraction: walk expression tree to find the source span. */
+/*
+ * Assert condition text extraction: walk expression tree to find the source span.
+ */
 static const char *expr_leftmost_lexeme(expr_t *e) {
   if (!e)
     return NULL;
@@ -704,6 +727,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         cg, scopes, depth, e, c, c->callee->as.ident.name);
     if (scalar_cast)
       return scalar_cast;
+
   }
   if (mc && mc->name && strcmp(mc->name, "append") == 0 && mc->args.len == 1) {
     LLVMValueRef fast_append = ny_try_emit_direct_list_append(
@@ -763,8 +787,10 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       return ny_codegen_token_is_source_file(cg, e->tok) ? ny_ctrue(cg)
                                                          : ny_cfalse(cg);
     }
-    /* Assert condition text: intercept assert(cond, msg) and inline-expand to
-     * include the condition source text in the panic message. */
+    /*
+     * Assert condition text: intercept assert(cond, msg) and inline-expand to
+     * include the condition source text in the panic message.
+     */
     if (!builtin_name_shadowed && strcmp(builtin_name, "assert") == 0 &&
         c->args.len >= 1 && c->args.len <= 2) {
       expr_t *cond_expr = c->args.data[0].val;
@@ -780,10 +806,14 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
             char cond_text_buf[512];
             memcpy(cond_text_buf, start, cond_len);
             cond_text_buf[cond_len] = '\0';
-            /* Evaluate condition */
+            /*
+             * Evaluate condition
+             */
             LLVMValueRef cond_val =
                 gen_expr(cg, scopes, depth, cond_expr);
-            /* Build: panic(msg + " [" + cond_text + "]") */
+            /*
+             * Build: panic(msg + " [" + cond_text + "]")
+             */
             const char *user_msg = "assert failed";
             size_t user_msg_len = 13;
             if (c->args.len >= 2 && c->args.data[1].val &&
@@ -792,7 +822,9 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
               user_msg = c->args.data[1].val->as.literal.as.s.data;
               user_msg_len = c->args.data[1].val->as.literal.as.s.len;
             }
-            /* Build combined message: msg + " [" + cond_text + "]" */
+            /*
+             * Build combined message: msg + " [" + cond_text + "]"
+             */
             char msg_buf[1024];
             size_t msg_len = 0;
             if (user_msg_len < sizeof(msg_buf) - 4 - cond_len) {
@@ -1026,6 +1058,10 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         want_builtin_get && (c->args.len == 2 || c->args.len == 3) &&
         ny_raw_int_list_target_binding(cg, scopes, depth,
                                        c->args.data[0].val) != NULL;
+    bool get_target_is_raw_f64_list =
+        want_builtin_get && (c->args.len == 2 || c->args.len == 3) &&
+        ny_raw_f64_list_target_binding(cg, scopes, depth,
+                                       c->args.data[0].val) != NULL;
     bool get_target_is_known_list_like =
         want_builtin_get && (c->args.len == 2 || c->args.len == 3) &&
         ny_expr_has_known_list_like_type(cg, scopes, depth,
@@ -1036,8 +1072,9 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                                                 c->args.data[0].val);
     if (want_builtin_get && (c->args.len == 2 || c->args.len == 3) &&
         ny_gencall_expr_is_int_index(cg, scopes, depth, c->args.data[1].val) &&
-        (get_target_is_raw_int_list || get_target_is_direct_list ||
-         get_target_is_known_list_like)) {
+        (get_target_is_raw_int_list || get_target_is_raw_f64_list ||
+         get_target_is_direct_list || get_target_is_known_list_like ||
+         get_target_object_elided)) {
       expr_t *default_expr = (c->args.len == 3) ? c->args.data[2].val : NULL;
       bool assume_nonnegative = ny_gencall_expr_is_safe_fast_set_index(
           cg, scopes, depth, c->args.data[1].val);
@@ -1045,6 +1082,11 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           assume_nonnegative &&
           ny_gencall_expr_in_list_len_min(
               cg, scopes, depth, c->args.data[0].val, c->args.data[1].val);
+      LLVMValueRef raw_f64_list_get = ny_try_emit_raw_f64_list_get(
+          cg, scopes, depth, c->args.data[0].val, c->args.data[1].val,
+          default_expr, e->tok, assume_nonnegative, assume_in_bounds);
+      if (raw_f64_list_get)
+        return raw_f64_list_get;
       LLVMValueRef raw_int_list_get = ny_try_emit_raw_int_list_get(
           cg, scopes, depth, c->args.data[0].val, c->args.data[1].val,
           default_expr, e->tok, assume_nonnegative, assume_in_bounds);
@@ -1071,7 +1113,8 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       }
       return ny_emit_fast_indexable_get(cg, scopes, depth, c->args.data[0].val,
                                         c->args.data[1].val, default_expr,
-                                        e->tok, assume_nonnegative);
+                                        e->tok, assume_nonnegative,
+                                        assume_in_bounds);
     }
     if (get_target_object_elided) {
       ny_diag_error(
@@ -1142,6 +1185,19 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           key_is_existing_index &&
           ny_f64_list_target_binding(cg, scopes, depth,
                                      c->args.data[0].val) != NULL;
+      LLVMValueRef raw_f64_list_set = ny_try_emit_raw_f64_list_set(
+          cg, scopes, depth, c->args.data[0].val, c->args.data[1].val,
+          c->args.data[2].val, e->tok, key_is_safe_fast_index,
+          key_is_existing_index);
+      if (raw_f64_list_set)
+        return raw_f64_list_set;
+      if (ny_raw_f64_list_target_binding(cg, scopes, depth,
+                                         c->args.data[0].val)) {
+        ny_diag_error(e->tok,
+                      "internal raw f64-list proof failed for set_idx(...)");
+        cg->had_error = 1;
+        return ny_c0(cg);
+      }
       LLVMValueRef raw_int_list_set = ny_try_emit_raw_int_list_set(
           cg, scopes, depth, c->args.data[0].val, c->args.data[1].val,
           c->args.data[2].val, e->tok, key_is_safe_fast_index,
@@ -2002,6 +2058,13 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       func_params = &sig_meta->stmt_t->as.fn.params;
     else if (sig_meta->stmt_t->kind == NY_S_EXTERN)
       func_params = &sig_meta->stmt_t->as.ext.params;
+  }
+  if (has_sig && sig_meta && sig_meta->stmt_t &&
+      ((c && c->args.len > 0) || mc) &&
+      !ny_proof_call_params_ok(cg, scopes, depth, sig_meta,
+                               sig_meta->stmt_t, c, mc, e->tok)) {
+    cg->had_error = 1;
+    goto call_fail;
   }
   for (size_t i = 0; i < final_argc; i++) {
     size_t user_idx = (mc && !skip_target) ? (i - 1) : i;

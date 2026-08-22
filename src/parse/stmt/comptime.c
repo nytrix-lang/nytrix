@@ -1,3 +1,7 @@
+/*
+ * Comptime statement parser: compile-time evaluation blocks, templates,
+ * table generators, compile-time reflection, and comptime control flow.
+ */
 static bool tok_is_ident_text(token_t tok, const char *text) {
   if (tok.kind != NY_T_IDENT || !text)
     return false;
@@ -1184,8 +1188,20 @@ static stmt_t *ct_clone_stmt(parser_t *p, stmt_t *s, ct_reflect_ctx_t *ctx) {
           .default_value =
               ct_clone_expr(p, s->as.layout.fields.data[i].default_value, ctx),
           .default_src = s->as.layout.fields.data[i].default_src,
+          .is_array = s->as.layout.fields.data[i].is_array,
+          .array_len = ct_clone_expr(p, s->as.layout.fields.data[i].array_len, ctx),
       };
       vec_push_arena(p->arena, &out->as.layout.fields, f);
+    }
+    out->as.layout.deftype_params = (ny_param_list){0};
+    for (size_t i = 0; i < s->as.layout.deftype_params.len; i++) {
+      param_t pr = {
+          .name = ct_substitute_name(p, s->as.layout.deftype_params.data[i].name, ctx),
+          .type =
+              ct_substitute_symbol_name(p, s->as.layout.deftype_params.data[i].type, ctx),
+          .def = ct_clone_expr(p, s->as.layout.deftype_params.data[i].def, ctx),
+      };
+      vec_push_arena(p->arena, &out->as.layout.deftype_params, pr);
     }
     out->as.layout.methods = (ny_stmt_list){0};
     for (size_t i = 0; i < s->as.layout.methods.len; i++)
@@ -1204,6 +1220,8 @@ static stmt_t *ct_clone_stmt(parser_t *p, stmt_t *s, ct_reflect_ctx_t *ctx) {
           .default_value =
               ct_clone_expr(p, s->as.struc.fields.data[i].default_value, ctx),
           .default_src = s->as.struc.fields.data[i].default_src,
+          .is_array = s->as.struc.fields.data[i].is_array,
+          .array_len = ct_clone_expr(p, s->as.struc.fields.data[i].array_len, ctx),
       };
       vec_push_arena(p->arena, &out->as.struc.fields, f);
     }

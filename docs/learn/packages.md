@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":130,"summary":"Organize reusable code into packages and keep project boundaries clear."} -->
 # Packages
 
 Nytrix packages are source packages. The package manager records direct
@@ -167,13 +168,41 @@ configured package path, user package home, and system package home.
 
 ## Lockfile
 
-`ny.pkg.json.lock` records installed paths, git refs, source metadata, and
-package state. It records installed direct state; it is not a full dependency
-solver.
+`ny.pkg.json.lock` uses schema `ny.pkg.lock.v2`. It records every package
+reachable from the root manifest, parent→child dependency edges, installed
+paths, and immutable source identity. Git dependencies retain the resolved
+commit. Archive dependencies retain a SHA-256 digest computed from the archive
+bytes before extraction. Relative local dependencies inside a package are
+resolved relative to that package's own manifest, not the root project.
 
-Commit the lockfile for applications when reproducibility matters. Libraries
-can keep the manifest broad and document the tested dependency refs in release
-notes or examples.
+Resolution is intentionally deterministic rather than version-solving: one
+package name identifies one source/ref pair for the complete graph. If two
+parents request the same package name from different sources or refs,
+installation fails with a conflict instead of silently choosing traversal
+order. Identical requests are deduplicated while every parent→child edge is
+retained. A package is reserved in the graph before descending into its
+manifest, so dependency cycles terminate; a depth bound remains as defense in
+depth for malformed graphs. Nested install failures propagate to the root and
+do not produce a successful lockfile.
+
+Commit the lockfile for applications when reproducibility matters. The lock is
+a record of the complete resolved graph. Successful online installs snapshot
+immutable git/archive package contents into the package content cache. Run
+`ny pkg sync --offline` (or another package install command with `--offline`)
+to replay strictly from that lock plus local package content: no registry or
+network lookup is attempted, source/ref mismatches fail, and a missing cached
+package is an error instead of silently falling back online. Local path
+dependencies remain path-backed and therefore must still be present locally.
+
+### Integrity and trust
+
+Content identity and publisher authenticity are separate. Git commits and
+archive SHA-256 digests detect content changes after an identity is trusted,
+but a digest learned from an untrusted registry is not authentication. Local
+paths are trusted as local filesystem input, and Git authenticity follows the
+configured transport/repository trust. A security-sensitive public registry
+would need authenticated or signed metadata that binds package name, immutable
+content identity, and release metadata.
 
 ## Common package failures
 
@@ -184,5 +213,5 @@ notes or examples.
 | Package name mismatch | Confirm the dependency key matches the import name. |
 | Repo package not found | Run `ny pkg repo list` and `ny pkg repo sync <repo>`. |
 
-See [tooling.md](tooling.md) for package command families and
-[troubleshooting.md](troubleshooting.md) for import failures.
+See [Tooling](tooling.md) for package command families and
+[Troubleshooting](troubleshooting.md) for import failures.

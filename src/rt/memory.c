@@ -1,3 +1,7 @@
+/*
+ * Memory runtime: allocator, deallocator, realloc, zero-init, and
+ * heap management primitives with ownership and GC integration hooks.
+ */
 #include "rt/shared.h"
 #include <inttypes.h>
 #include <stdatomic.h>
@@ -73,7 +77,14 @@ static inline void ny_aligned_free(void *p) {
 #endif
 }
 
-static const size_t g_pool_sizes[] = {32, 64, 128, 256, 512, 1024, 2048, 4096};
+/*
+ * Finer segregated classes keep the 32-byte header while avoiding the former
+ * power-of-two fragmentation cliff.  All entries retain 16-byte alignment.
+ */
+static const size_t g_pool_sizes[] = {
+    32,   48,   64,   80,   96,   112,  128,  160,  192,  224,  256,
+    320,  384,  448,  512,  640,  768,  896,  1024, 1280, 1536, 1792,
+    2048, 2560, 3072, 3584, 4096};
 #define NUM_POOLS (sizeof(g_pool_sizes) / sizeof(g_pool_sizes[0]))
 typedef struct mem_pool_node {
   struct mem_pool_node *next;
@@ -176,6 +187,23 @@ static inline int ny_mem_pool_slot(size_t total) {
   return -1;
 }
 
+/*
+ * Two independent heap systems, NOT interconvertible:
+ *
+ *   GC-traced heap: rt_malloc / rt_malloc_uninit / rt_free / rt_realloc.
+ *     Each allocation carries a 32-byte header (NY_MAGIC1 + body size); the
+ *     returned pointer is base+32.  rt_free inspects the header, recycles
+ *     small allocations through per-size-class pools, and frees large ones.
+ *
+ *   Raw heap: rt_malloc_raw / rt_free_raw.
+ *     A plain malloc/free with no header and no GC participation, used for
+ *     unmanaged FFI/native buffers.
+ *
+ * Crossing the boundary is an error: free_raw on a traced pointer would free
+ * the wrong address (base+32), and rt_free on a raw pointer is a silent no-op
+ * (leak).  rt_free_raw detects and re-routes traced pointers; callers must
+ * keep the two heaps separate.
+ */
 static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
   int64_t n = is_int(size) ? (size >> 1) : size;
   if (n < 0)
@@ -217,6 +245,62 @@ int64_t rt_malloc(int64_t size) { return rt_malloc_impl(size, 1); }
 
 int64_t rt_malloc_uninit(int64_t size) { return rt_malloc_impl(size, 0); }
 
+typedef struct raw_ptr_node {
+  uintptr_t ptr;
+  struct raw_ptr_node *next;
+} raw_ptr_node_t;
+
+#define RAW_PTR_HASH_BUCKETS 2048
+static atomic_flag g_raw_ptr_lock = ATOMIC_FLAG_INIT;
+static raw_ptr_node_t *g_raw_ptr_table[RAW_PTR_HASH_BUCKETS] = {0};
+
+static inline void raw_ptr_lock(void) {
+  while (atomic_flag_test_and_set_explicit(&g_raw_ptr_lock, memory_order_acquire)) {
+  }
+}
+
+static inline void raw_ptr_unlock(void) {
+  atomic_flag_clear_explicit(&g_raw_ptr_lock, memory_order_release);
+}
+
+static inline size_t raw_ptr_bucket(uintptr_t p) {
+  return ((p >> 4) ^ (p >> 12)) & (RAW_PTR_HASH_BUCKETS - 1);
+}
+
+static void raw_ptr_register(uintptr_t p) {
+  if (!p)
+    return;
+  size_t b = raw_ptr_bucket(p);
+  raw_ptr_lock();
+  raw_ptr_node_t *node = (raw_ptr_node_t *)malloc(sizeof(raw_ptr_node_t));
+  if (node) {
+    node->ptr = p;
+    node->next = g_raw_ptr_table[b];
+    g_raw_ptr_table[b] = node;
+  }
+  raw_ptr_unlock();
+}
+
+static bool raw_ptr_unregister(uintptr_t p) {
+  if (!p)
+    return false;
+  size_t b = raw_ptr_bucket(p);
+  raw_ptr_lock();
+  raw_ptr_node_t **slot = &g_raw_ptr_table[b];
+  while (*slot) {
+    if ((*slot)->ptr == p) {
+      raw_ptr_node_t *match = *slot;
+      *slot = match->next;
+      free(match);
+      raw_ptr_unlock();
+      return true;
+    }
+    slot = &(*slot)->next;
+  }
+  raw_ptr_unlock();
+  return false;
+}
+
 int64_t rt_malloc_raw(int64_t size) {
   int64_t n = is_int(size) ? (size >> 1) : size;
   if (n <= 0)
@@ -225,6 +309,7 @@ int64_t rt_malloc_raw(int64_t size) {
   if (!p)
     return 0;
   rt_heap_ptr_neg_cache_store((uintptr_t)p);
+  raw_ptr_register((uintptr_t)p);
   return (int64_t)(uintptr_t)p;
 }
 
@@ -263,6 +348,10 @@ static int64_t rt_free_direct(int64_t ptr) {
     }
     ny_aligned_free(base);
     return 1;
+  } else if (raw_ptr_unregister((uintptr_t)ptr)) {
+    rt_heap_ptr_cache_forget((uintptr_t)ptr);
+    free((void *)(uintptr_t)ptr);
+    return 1;
   } else if (is_v_flt(ptr)) {
     rt_flt_free(ptr);
     return 1;
@@ -279,7 +368,18 @@ int64_t rt_free(int64_t ptr) {
 int64_t rt_free_raw(int64_t ptr) {
   if (!ptr)
     return 1;
+  /*
+   * Cheap while the neg cache holds the pointer; falls back to a header probe
+   * (a page-readability check) only when that entry was evicted.
+   */
+  if (is_heap_ptr(ptr)) {
+    fprintf(stderr,
+            "[mem] cross-system free: GC-traced pointer passed to free_raw; "
+            "rerouting to rt_free\n");
+    return rt_free(ptr);
+  }
   rt_heap_ptr_cache_forget((uintptr_t)ptr);
+  raw_ptr_unregister((uintptr_t)ptr);
   free((void *)(uintptr_t)ptr);
   return 1;
 }
@@ -356,11 +456,38 @@ int64_t rt_drop_owned_slot(int64_t slot_ptr) {
   return rt_drop_owned(v);
 }
 
+int64_t rt_pool_release(void) {
+  int64_t freed_count = 0;
+  for (size_t i = 0; i < NUM_POOLS; i++) {
+    mem_pool_node_t *node = g_mem_pools[i];
+    g_mem_pools[i] = NULL;
+    while (node) {
+      mem_pool_node_t *next = node->next;
+      ny_aligned_free(node);
+      freed_count++;
+      node = next;
+    }
+  }
+  return rt_tag_v(freed_count);
+}
+
 int64_t rt_runtime_cleanup(void) {
   extern int64_t rt_print_flush(void);
   rt_print_flush();
+  const char *counter_report = getenv("NYTRIX_REPORT_RUNTIME_COUNTERS");
+  if (counter_report && *counter_report && strcmp(counter_report, "0") != 0 &&
+      strcmp(counter_report, "false") != 0 && strcmp(counter_report, "off") != 0) {
+    uint_fast64_t allocs =
+        atomic_load_explicit(&g_ny_alloc_count, memory_order_relaxed);
+    uint_fast64_t reallocs =
+        atomic_load_explicit(&g_ny_realloc_count, memory_order_relaxed);
+    fprintf(stderr, "ny_runtime_counters alloc=%" PRIuFAST64
+                    " realloc=%" PRIuFAST64 "\n",
+            allocs, reallocs);
+  }
   rt_cleanup_args();
   rt_cleanup_small_strings();
+  rt_pool_release();
   return 0;
 }
 
@@ -376,6 +503,26 @@ int64_t rt_realloc(int64_t p_val, int64_t newsz) {
     old_cap >>= 1;
   if ((size_t)newsz <= old_cap)
     return p_val;
+
+  /*
+   * A pooled allocation owns the whole size-class chunk, even though the
+   * public heap-size header records only the requested body.  Growth that
+   * remains in that same class is therefore genuinely in place: publish the
+   * larger logical capacity and zero the newly exposed bytes when required.
+   */
+  size_t old_total = ((old_cap + 15) & ~15ULL) + 32;
+  size_t new_body = ((size_t)newsz + 15) & ~15ULL;
+  size_t new_total = new_body + 32;
+  int old_slot = ny_mem_pool_slot(old_total);
+  int new_slot = ny_mem_pool_slot(new_total);
+  if (old_slot >= 0 && old_slot == new_slot) {
+    if (rt_zero_init_enabled())
+      memset((char *)(uintptr_t)p_val + old_cap, 0, (size_t)newsz - old_cap);
+    *(uint64_t *)((char *)(uintptr_t)p_val - 24) =
+        (uint64_t)((new_body << 1) | 1u);
+    atomic_fetch_add_explicit(&g_ny_realloc_count, 1, memory_order_relaxed);
+    return p_val;
+  }
 
   int64_t res = rt_malloc(newsz << 1 | 1);
   if (!res)

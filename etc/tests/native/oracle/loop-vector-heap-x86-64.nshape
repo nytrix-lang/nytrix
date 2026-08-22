@@ -1,0 +1,36 @@
+shape oracle_loop_vector_heap_x86_64 {
+ family "runtime-native"
+ generator "native"
+ features [native x86_64 oracle loop vector heap provenance regression]
+ template ny-test-case
+ flags_matrix "-O2 --native-result-oracle; -O3 --native-result-oracle"
+ expect compile_and_run
+ source ny <<'NY'
+use std.core
+
+fn heap_loop() i64 {
+  def src = malloc(64)
+  def dst = malloc(64)
+  store64_i(src, 10, 0)
+  store64_i(src, 11, 8)
+  store64_i(src, 12, 16)
+  store64_i(src, 13, 24)
+  store64_i(src, 14, 32)
+  store64_i(src, 15, 40)
+  store64_i(src, 16, 48)
+  store64_i(src, 17, 56)
+  mut i = 0
+  while i < 8 {
+    def v = load64_i(src, i * 8)
+    store64_i(dst, v, i * 8)
+    i = i + 1
+  }
+  def out = load64_i(dst, 24)
+  free(src)
+  free(dst)
+  out
+}
+
+heap_loop()
+NY
+}

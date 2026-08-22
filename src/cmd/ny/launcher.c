@@ -1,5 +1,7 @@
-/* Thin ny entry: pure native-only -c arithmetic never loads LLVM/Z3/clang.
- * Everything else execs the full compiler (ny-full) next to this binary. */
+/*
+ * Thin ny entry: pure native-only -c arithmetic never loads LLVM/Z3/clang.
+ * Everything else execs the full compiler (ny-full) next to this binary.
+ */
 #include "cmd/ny/pureexpr.h"
 
 #include <errno.h>
@@ -19,7 +21,9 @@
 #include <windows.h>
 #endif
 
-/* Build path to ny-full beside `self` (mutates a copy of self for dirname). */
+/*
+ * Build path to ny-full beside `self` (mutates a copy of self for dirname).
+ */
 static int ny_full_path_from(const char *self, char *out, size_t out_len) {
   if (!self || !self[0] || !out || out_len < 16)
     return -1;
@@ -47,7 +51,9 @@ static int ny_full_path_from(const char *self, char *out, size_t out_len) {
 #endif
 }
 
-/* Debug/sanitizer builds retain their suffixed executable names. */
+/*
+ * Debug/sanitizer builds retain their suffixed executable names.
+ */
 static int ny_full_debug_path_from(const char *self, char *out, size_t out_len) {
   if (!self || !self[0] || !out || out_len < 22)
     return -1;
@@ -80,7 +86,9 @@ static int ny_exec_full(int argc, char **argv) {
   full[0] = '\0';
 
 #ifndef _WIN32
-  /* 1) dirname(argv[0])/ny-full */
+  /*
+   * 1) dirname(argv[0])/ny-full
+   */
   if (argv[0] && argv[0][0] &&
       ny_full_path_from(argv[0], full, sizeof(full)) == 0) {
     execv(full, argv);
@@ -89,7 +97,9 @@ static int ny_exec_full(int argc, char **argv) {
       ny_full_debug_path_from(argv[0], full, sizeof(full)) == 0) {
     execv(full, argv);
   }
-  /* 2) dirname(/proc/self/exe)/ny-full — robust when invoked via PATH */
+  /*
+   * 2) dirname(/proc/self/exe)/ny-full — robust when invoked via PATH
+   */
   {
     char self[PATH_MAX];
     ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
@@ -101,17 +111,21 @@ static int ny_exec_full(int argc, char **argv) {
         execv(full, argv);
     }
   }
-  /* 3) PATH search */
+  /*
+   * 3) PATH search
+   */
   execvp("ny-full", argv);
   execvp("ny-full_debug", argv);
   fprintf(stderr, "ny: failed to exec ny-full: %s\n", strerror(errno));
   (void)argc;
   return 127;
 #else
-  /* Windows has no exec replacement primitive.  _execv may report success
+  /*
+   * Windows has no exec replacement primitive.  _execv may report success
    * once ny-full has been launched, which loses its eventual compiler exit
    * status to callers such as ny-test.  Spawn synchronously instead so `ny`
-   * remains a transparent launcher. */
+   * remains a transparent launcher.
+   */
   if (argv[0] && argv[0][0] &&
       ny_full_path_from(argv[0], full, sizeof(full)) == 0) {
     errno = 0;
@@ -164,7 +178,9 @@ int main(int argc, char **argv) {
     int64_t v = 0;
     if (ny_pure_expr_eval(expr, &v))
       return (int)((uint64_t)v & 0xffu);
-    /* Malformed "pure" match edge → full compiler (may still reject). */
+    /*
+     * Malformed "pure" match edge → full compiler (may still reject).
+     */
   }
   return ny_exec_full(argc, argv);
 }

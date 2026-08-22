@@ -1,0 +1,71 @@
+shape gcbench {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "gc", "alloc", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+;; Mixed-depth tree allocation with partial retention (GC survivability).
+fn tree_count(int depth) int {
+   def n = [depth]
+   if depth <= 0 { return 1 }
+   1 + tree_count(depth - 1) + tree_count(depth - 1)
+}
+def t0 = ticks()
+mut total = 0
+mut i = 0
+while i < 1000 {
+   def c = tree_count(4)
+   if i % 2 == 0 { total += c }
+   i += 1
+}
+i = 0
+while i < 200 {
+   def c2 = tree_count(10)
+   if i % 3 == 0 { total += c2 }
+   i += 1
+}
+def t1 = ticks()
+print("checksum=", total)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static long tree_count(int depth) {
+    long *n = (long *)malloc(16);
+    n[0] = (long)depth;
+    if (depth <= 0) return 1;
+    return 1 + tree_count(depth - 1) + tree_count(depth - 1);
+}
+
+int main(void) {
+    int64_t start = now_ns();
+    long total = 0;
+    for (int i = 0; i < 1000; i++) {
+        long c = tree_count(4);
+        if (i % 2 == 0) total += c;
+    }
+    for (int i = 0; i < 200; i++) {
+        long c = tree_count(10);
+        if (i % 3 == 0) total += c;
+    }
+    int64_t end = now_ns();
+    printf("checksum=%ld\n", total);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

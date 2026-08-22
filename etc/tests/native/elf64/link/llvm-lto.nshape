@@ -1,0 +1,15 @@
+shape llvm_lto_linked_modules {
+  family "runtime-native"
+  generator "native"
+  features [native llvm lto modules link]
+  template ny-test-case
+  flags "-O2 -flto --parallel=modules"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn twice(i64 value) i64 { value * 2 }
+assert_eq(twice(21), 42, "whole-program LLVM optimization preserves calls")
+print("lto linked modules passed")
+NY
+}

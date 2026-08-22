@@ -333,7 +333,7 @@ fn __vkr_push_rect_sdf(any p, any x, any y, any w, any h, any c, any nx, any ny,
    store32_f32(bv, ny, _VKR_OFF_NY)
    store32_f32(bv,
       nz,
-   _VKR_OFF_NZ)
+      _VKR_OFF_NZ)
 }
 
 fn _check_debug_env() any {
@@ -439,9 +439,9 @@ fn _vkr_bind_pipeline_if_needed(any cb, any target) bool {
       ;; Custom pipeline: not in the built-in list but still a valid handle.
       ;; Bind it directly so custom shaders (user pipelines) work natively.
       if _last_bound_pipe != target {
-         _vkr_pipe_diag("before cmd bind (custom)")
+         _vkr_pipe_diag("before cmd bind(custom)")
          cmd_bind_pipeline(cb, 0, target)
-         _vkr_pipe_diag("after cmd bind (custom)")
+         _vkr_pipe_diag("after cmd bind(custom)")
          _last_bound_pipe = target
          _pipeline_bind_count += 1
       }

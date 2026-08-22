@@ -15,6 +15,7 @@
 #endif
 #endif
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -61,8 +62,41 @@ extern int sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
 #endif
 
 #ifdef _WIN32
+
 typedef SSIZE_T ssize_t;
 #endif
+static inline bool ny_size_add_ok(size_t a, size_t b, size_t *out) {
+  if (b > SIZE_MAX - a)
+    return false;
+  if (out)
+    *out = a + b;
+  return true;
+}
+
+static inline bool ny_size_mul_ok(size_t a, size_t b, size_t *out) {
+  if (a != 0 && b > SIZE_MAX / a)
+    return false;
+  if (out)
+    *out = a * b;
+  return true;
+}
+
+/* Array allocation helpers reject a size_t product that cannot be represented.
+ * They preserve malloc/calloc/realloc failure semantics by returning NULL. */
+static inline void *ny_malloc_array(size_t count, size_t size) {
+  size_t bytes = 0;
+  return ny_size_mul_ok(count, size, &bytes) ? malloc(bytes) : NULL;
+}
+
+static inline void *ny_calloc_array(size_t count, size_t size) {
+  size_t bytes = 0;
+  return ny_size_mul_ok(count, size, &bytes) ? calloc(1, bytes) : NULL;
+}
+
+static inline void *ny_realloc_array(void *ptr, size_t count, size_t size) {
+  size_t bytes = 0;
+  return ny_size_mul_ok(count, size, &bytes) ? realloc(ptr, bytes) : NULL;
+}
 
 #ifndef STDIN_FILENO
 #define STDIN_FILENO 0

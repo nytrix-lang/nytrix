@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":150,"summary":"Structure complete Nytrix programs, commands, modules, and executable entry points."} -->
 # Programs
 
 A Nytrix file can be a script, a module, or both. Use a script when the file is
@@ -221,7 +222,7 @@ ny etc/projects/os/server.ny
 
 ### UI Projects
 
-[ui.md](ui.md) covers the engine viewer and focused UI input/project files.
+[UI](ui.md) covers the engine viewer and focused UI input/project files.
 
 - [ui/engine.ny](../../etc/projects/ui/engine.ny)
 - [ui/input.ny](../../etc/projects/ui/input.ny)
@@ -230,6 +231,6 @@ ny etc/projects/os/server.ny
 
 ## Related
 
-- [source.md](../spec/source.md) for exact source-unit rules.
-- [functions.md](../spec/functions.md) for function and block behavior.
-- [testing.md](testing.md) for executable checks.
+- [Units](../spec/units.md) for exact source-unit rules.
+- [Functions](../spec/functions.md) for function and block behavior.
+- [Testing](testing.md) for executable checks.

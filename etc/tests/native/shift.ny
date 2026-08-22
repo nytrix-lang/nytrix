@@ -25,5 +25,4 @@ assert_eq(extract_byte(0xAABBCCDD, 0), 0xDD)
 assert_eq(extract_byte(0xAABBCCDD, 1), 0xCC)
 assert_eq(extract_byte(0xAABBCCDD, 2), 0xBB)
 assert_eq(extract_byte(0xAABBCCDD, 3), 0xAA)
-
 print("✓ native shift tests passed")

@@ -14,7 +14,7 @@ fn enabled() bool {
    "Returns whether viewer idle-frame reuse is enabled."
    if _mode == -1 {
       _mode = (ui_profile.env_toggle_cached("NY_UI_GUI_IDLE_REUSE", true) &&
-      !ui_profile.env_truthy_cached("NY_UI_DISABLE_GUI_IDLE_REUSE")) ? 1 : 0
+         !ui_profile.env_truthy_cached("NY_UI_DISABLE_GUI_IDLE_REUSE")) ? 1 : 0
    }
    _mode == 1
 }

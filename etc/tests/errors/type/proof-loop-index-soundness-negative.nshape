@@ -1,0 +1,27 @@
+shape type_proof_loop_index_soundness_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "loop", "soundness", "negative", "range"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use std.core
+
+;; A loop index advances every iteration, so a range-based proof inside the
+;; body may only rely on the loop bound, never on the pre-loop value.  With a
+;; known bound the index spans [0, 9], so `i < 9` is false at i = 9 and must be
+;; rejected; with a runtime bound the index range is unknown and the same
+;; claim must also be rejected instead of inheriting the stale [0, 0] range.
+fn known_bound(int n) int {
+  mut int i = 0
+  while i < 10 {
+    prove(i < 9, "i reaches 9")
+    i += 1
+  }
+  0
+}
+known_bound(0)
+NY
+}

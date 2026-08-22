@@ -173,7 +173,6 @@ fn tui_end() int {
    0
 }
 
-
 fn tui_canvas_loop(any draw, int delay=16) int {
    "Runs a resize-aware TUI canvas loop. Calls draw(canvas, zbuf, width, height) once per frame."
    tui_begin()
@@ -793,7 +792,6 @@ fn canvas_clear(list canv) int {
    0
 }
 
-
 fn canvas_zclear(list canv, list z) int {
    "Clears a canvas and zeroes a matching depth/z buffer."
    mut i = 0
@@ -939,44 +937,44 @@ fn canvas_refresh(any canv) int {
             if c == 0 && b == 0 {
                bytes_set(r_buf, p, 48)
                p += 1
-             } else {
-                if b {
-                   bytes_set(r_buf, p, 49)
-                   bytes_set(r_buf, p + 1, 59)
-                   p += 2
-                }
-                if c >= 9 && c <= 255 {
-                   bytes_set(r_buf, p, 51)
-                   bytes_set(r_buf, p + 1, 56)
-                   bytes_set(r_buf, p + 2, 59)
-                   bytes_set(r_buf, p + 3, 53)
-                   bytes_set(r_buf, p + 4, 59)
-                   p += 5
-                   if c >= 100 {
-                      bytes_set(r_buf, p, 48 + c / 100)
-                      bytes_set(r_buf, p + 1, 48 + (c / 10) % 10)
-                      bytes_set(r_buf, p + 2, 48 + c % 10)
-                      p += 3
-                   } elif c >= 10 {
-                      bytes_set(r_buf, p, 48 + c / 10)
-                      bytes_set(r_buf, p + 1, 48 + c % 10)
-                      p += 2
-                   } else {
-                      bytes_set(r_buf, p, 48 + c)
-                      p += 1
-                   }
-                } else {
-                   def code = case c {
-                      1 -> 49 2 -> 50 3 -> 51
-                      4 -> 52 5 -> 53 6 -> 54
-                      7 -> 55 8 -> 48 _ -> 55
-                   }
-                   bytes_set(r_buf, p, 51)
-                   if c == 8 { bytes_set(r_buf, p, 57) }
-                   bytes_set(r_buf, p + 1, code)
-                   p += 2
-                }
-             }
+            } else {
+               if b {
+                  bytes_set(r_buf, p, 49)
+                  bytes_set(r_buf, p + 1, 59)
+                  p += 2
+               }
+               if c >= 9 && c <= 255 {
+                  bytes_set(r_buf, p, 51)
+                  bytes_set(r_buf, p + 1, 56)
+                  bytes_set(r_buf, p + 2, 59)
+                  bytes_set(r_buf, p + 3, 53)
+                  bytes_set(r_buf, p + 4, 59)
+                  p += 5
+                  if c >= 100 {
+                     bytes_set(r_buf, p, 48 + c / 100)
+                     bytes_set(r_buf, p + 1, 48 + (c / 10) % 10)
+                     bytes_set(r_buf, p + 2, 48 + c % 10)
+                     p += 3
+                  } elif c >= 10 {
+                     bytes_set(r_buf, p, 48 + c / 10)
+                     bytes_set(r_buf, p + 1, 48 + c % 10)
+                     p += 2
+                  } else {
+                     bytes_set(r_buf, p, 48 + c)
+                     p += 1
+                  }
+               } else {
+                  def code = case c {
+                     1 -> 49 2 -> 50 3 -> 51
+                     4 -> 52 5 -> 53 6 -> 54
+                     7 -> 55 8 -> 48 _ -> 55
+                  }
+                  bytes_set(r_buf, p, 51)
+                  if c == 8 { bytes_set(r_buf, p, 57) }
+                  bytes_set(r_buf, p + 1, code)
+                  p += 2
+               }
+            }
             bytes_set(r_buf, p, 109)
             p += 1
             last_c, last_b = c, b

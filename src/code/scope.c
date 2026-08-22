@@ -1,3 +1,7 @@
+/*
+ * Scope management: lexical scope tracking, symbol resolution,
+ * shadowing detection, and scope-stack push/pop during codegen.
+ */
 #include "base/util.h"
 #include "priv.h"
 

@@ -5,6 +5,7 @@ shape svg {
   ci skip
   template ny-test-case
   expect compile_and_run
+  ci optional
   source ny <<'NY'
 use std.core
 use std.core.error

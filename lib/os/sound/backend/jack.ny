@@ -40,7 +40,7 @@ fn jack_port_name(any _port) any {
 
 fn jack_connect(..._args) int {
    "Runs the jack connect operation."
-   -1
+   return -1
 }
 
 fn jack_free(any _ptr) any {
@@ -80,7 +80,7 @@ fn jack_port_register(..._args) any {
 
 fn jack_activate(any _client) int {
    "Runs the jack activate operation."
-   -1
+   return -1
 }
 
 fn jack_deactivate(any _client) int {

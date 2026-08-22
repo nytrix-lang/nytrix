@@ -1,0 +1,15 @@
+shape args-accept-native {
+  family "runtime/args"
+  generator "program"
+  features ["args", "cli", "positive", "native"]
+  template ny-test-case
+
+  flags_matrix "--native-backend=llvm; --native-tier=baseline; --native-hot-threshold=5; --native-cold-threshold=1000; --native-cache-score=9; --native-prefer-vm; --native-prefer-asm; --native-enable-cf-mem2reg; --native-tier-budget=50; --accel-target=none; --dwarf-version=4; --gpu=off; --gpu=auto; --gpu-min-work=1; --std-builtin-ops"
+  source ny <<'NY'
+use std.core
+def int a = 13
+def int b = 8
+assert_eq(a - b, 5, "native flag arithmetic")
+print("args native toolchain flags passed")
+NY
+}

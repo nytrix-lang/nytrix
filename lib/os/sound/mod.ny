@@ -100,18 +100,22 @@ fn get_backend_name() str {
 
 fn web_play(any path) bool {
    "On the browser target, decodes the packed audio asset at `path` and starts
-    one-shot playback through Web Audio. Native desktop returns true as a no-op;
-    the browser host echoes decode results into data-audio-* attributes."
+   one-shot playback through Web Audio. Native desktop returns true as a no-op ;
+   the browser host echoes decode results into data-audio-* attributes."
    true
 }
 
 fn set_fx_enabled(bool enabled=true) any { snd_backend.set_fx_enabled(enabled) }
-fn fx_enabled() bool { snd_backend.fx_enabled() }
-fn set_fx_param(str name, any value) any { snd_backend.set_fx_param(name, value) }
-fn get_fx_param(str name) f64 { snd_backend.get_fx_param(name) }
-fn reset_fx() any { snd_backend.reset_fx() }
-fn fx_preset(str name) any { snd_backend.fx_preset(name) }
 
+fn fx_enabled() bool { snd_backend.fx_enabled() }
+
+fn set_fx_param(str name, any value) any { snd_backend.set_fx_param(name, value) }
+
+fn get_fx_param(str name) f64 { snd_backend.get_fx_param(name) }
+
+fn reset_fx() any { snd_backend.reset_fx() }
+
+fn fx_preset(str name) any { snd_backend.fx_preset(name) }
 use std.os.sound.diag as diag
 
 fn probe() any {

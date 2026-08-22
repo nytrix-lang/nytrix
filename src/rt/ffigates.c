@@ -1,3 +1,7 @@
+/*
+ * FFI gate tables: per-platform shim dispatch for libc, POSIX,
+ * and OS-specific native calls exposed through the FFI bridge.
+ */
 #include "rt/ffigates.h"
 #include "rt/shared.h"
 #include "base/util.h"

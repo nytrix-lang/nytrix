@@ -1,3 +1,7 @@
+/*
+ * FFI Clang bridge: invokes libclang or the in-tree C frontend to
+ * parse C headers and extract function signatures, types, and layouts.
+ */
 #include "fficlang.h"
 #include "base/util.h"
 #include "base/process.h"
@@ -490,11 +494,13 @@ static char *ny_pkgconfig_lib(const char *pkg) {
   return NULL;
 }
 
-/* F-3: libclang translation-unit cache. A persistent CXIndex is created once
+/*
+ * F-3: libclang translation-unit cache. A persistent CXIndex is created once
  * and shared across all TU parses. Per-header TUs are cached by path so the
  * same system header is not reparsed at every import site. The cache is keyed
  * on (header_path, defines_hash) — when custom -D flags are present, the
- * cache is skipped because different define sets produce different TUs. */
+ * cache is skipped because different define sets produce different TUs.
+ */
 typedef struct {
   char *path;
   uint64_t defines_hash;
@@ -864,7 +870,9 @@ static const char *map_clang_type(CXType type) {
   case CXType_ULongLong:
     return "u64";
   case CXType_Float16:
-    /* _Float16: 2-byte half-float, map to u16 for correct ABI layout. */
+    /*
+     * _Float16: 2-byte half-float, map to u16 for correct ABI layout.
+     */
     return "u16";
   case CXType_Float:
     return "f32";
@@ -994,8 +1002,10 @@ static const char *ny_ffi_map_internal_c_type(const ny_ctype_t *ty, char *buf,
   if (ty->array_elems > 0 || ty->array_unknown)
     return "ptr";
   ny_ctype_t base = *ty;
-  /* _Complex float maps to c64 ({f32,f32}), _Complex double to c128 ({f64,f64}).
-   * _Imaginary maps to the base type (same size as the imaginary component). */
+  /*
+   * _Complex float maps to c64 ({f32,f32}), _Complex double to c128 ({f64,f64}).
+   * _Imaginary maps to the base type (same size as the imaginary component).
+   */
   if (base.flags & NY_CTYPEF_COMPLEX) {
     if (base.kind == NY_CTYPE_FLOAT)
       return "c64";
@@ -1037,7 +1047,9 @@ static const char *ny_ffi_map_internal_c_type(const ny_ctype_t *ty, char *buf,
         return (base.flags & NY_CTYPEF_UNSIGNED) ? "u128" : "i128";
     }
     if (base.flags & NY_CTYPEF_LONG_LONG) {
-      /* __int128 or long long: check if this is actually 128-bit */
+      /*
+       * __int128 or long long: check if this is actually 128-bit
+       */
       if (base.flags & NY_CTYPEF_INT128)
         return (base.flags & NY_CTYPEF_UNSIGNED) ? "u128" : "i128";
       return (base.flags & NY_CTYPEF_UNSIGNED) ? "u64" : "i64";
@@ -1048,11 +1060,15 @@ static const char *ny_ffi_map_internal_c_type(const ny_ctype_t *ty, char *buf,
   case NY_CTYPE_DOUBLE:
     return "f64";
   case NY_CTYPE_LONG_DOUBLE:
-    /* long double is 80-bit (16-byte slot) on SysV x86-64, 64-bit on Win64.
-     * Map to f128 for SysV, f64 for Win64. */
+    /*
+     * long double is 80-bit (16-byte slot) on SysV x86-64, 64-bit on Win64.
+     * Map to f128 for SysV, f64 for Win64.
+     */
     return "f128";
   case NY_CTYPE_HALF:
-    /* _Float16 is 2 bytes; map to u16 for correct ABI layout. */
+    /*
+     * _Float16 is 2 bytes; map to u16 for correct ABI layout.
+     */
     return "u16";
   case NY_CTYPE_NAMED:
   case NY_CTYPE_STRUCT:
@@ -1074,8 +1090,10 @@ static const char *ny_ffi_map_internal_c_field_type(const ny_c_field_t *field,
                                                     char *buf, size_t cap) {
   if (!field)
     return NULL;
-  /* For array fields in structs, map to the element type so the layout
-   * registration can create an LLVM [N x T] array. */
+  /*
+   * For array fields in structs, map to the element type so the layout
+   * registration can create an LLVM [N x T] array.
+   */
   ny_ctype_t ty = {0};
   ty.kind = field->kind;
   ty.flags = field->flags;
@@ -1090,9 +1108,11 @@ static bool ny_ffi_internal_c_type_is_builtin(const char *ty) {
   static const char *const builtins[] = {
       "void", "u8", "i8", "u16", "i16", "u32", "i32",
       "u64",  "i64", "f32", "f64", "ptr", "fnptr", "str", "cstr",
-      /* Wide scalar/complex ABI types resolvable without a registered layout.
+      /*
+       * Wide scalar/complex ABI types resolvable without a registered layout.
        * Without these, structs with _Complex/__int128/long double fields trip
-       * the "requires layout" check and fall back to libclang. */
+       * the "requires layout" check and fall back to libclang.
+       */
       "u128", "i128", "f128", "c64", "c128",
   };
   for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
@@ -1128,8 +1148,10 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
     free(name);
     return true;
   }
-  /* For `typedef struct Bar { ... } Foo;`, also register under the tag name
-   * "Bar" so later `struct Bar *` references resolve correctly. */
+  /*
+   * For `typedef struct Bar { ... } Foo;`, also register under the tag name
+   * "Bar" so later `struct Bar *` references resolve correctly.
+   */
   char *tag_name = NULL;
   if (decl->kind == NY_CDECL_TYPEDEF && decl->type.name.kind == NY_CTOK_IDENT) {
     tag_name = ny_ffi_ctok_strdup(decl->type.name);
@@ -1195,7 +1217,9 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
   def->llvm_type = st;
   def->is_layout = true;
   def->heap_allocated = true;
-  /* Packed aggregates report the unaligned byte size, not the aligned size. */
+  /*
+   * Packed aggregates report the unaligned byte size, not the aligned size.
+   */
   if (decl->type.flags & NY_CTYPEF_PACKED) {
     def->size = decl->type.aggregate_packed_size;
     def->align = 1;
@@ -1229,8 +1253,10 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
   }
   bool is_packed = (decl->type.flags & NY_CTYPEF_PACKED) != 0;
   if (decl->type.kind == NY_CTYPE_UNION) {
-    /* Unions are represented as a byte array of the union's size.
-     * All fields share offset 0; access is via GEP + bitcast. */
+    /*
+     * Unions are represented as a byte array of the union's size.
+     * All fields share offset 0; access is via GEP + bitcast.
+     */
     LLVMTypeRef byte_ty = LLVMInt8TypeInContext(cg->ctx);
     LLVMTypeRef union_ty = LLVMArrayType(byte_ty, (unsigned)def->size);
     LLVMStructSetBody(st, &union_ty, 1, false);
@@ -1238,7 +1264,9 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
     LLVMStructSetBody(st, elems, elem_count, is_packed);
   }
   vec_push(&cg->layouts, def);
-  /* Register tag-name alias for `typedef struct Bar { ... } Foo;` */
+  /*
+   * Register tag-name alias for `typedef struct Bar { ... } Foo;`
+   */
   if (tag_name) {
     layout_def_t *tag_def = (layout_def_t *)calloc(1, sizeof(*tag_def));
     if (tag_def) {
@@ -1259,9 +1287,11 @@ static bool ny_ffi_register_internal_c_layout(codegen_t *cg,
 static void ny_ffi_add_link_once(codegen_t *cg, const char *lib) {
   if (!cg || !lib || !*lib)
     return;
-  /* F-4: Skip compile-time dlopen. The library is registered for later JIT
+  /*
+   * F-4: Skip compile-time dlopen. The library is registered for later JIT
    * loading via cg->links. dlopen with RTLD_GLOBAL during compilation
-   * executes foreign constructors inside the compiler process. */
+   * executes foreign constructors inside the compiler process.
+   */
   for (size_t i = 0; i < cg->links.len; i++) {
     if (strcmp(cg->links.data[i], lib) == 0)
       return;
@@ -1286,9 +1316,11 @@ static bool ny_ffi_register_internal_c_function(codegen_t *cg,
     free(c_name_owned);
     return true;
   }
-  /* static and inline functions in headers are not external symbols.
+  /*
+   * static and inline functions in headers are not external symbols.
    * static: internal linkage, not visible outside the header.
-   * inline: the compiler inlines them, no external symbol emitted. */
+   * inline: the compiler inlines them, no external symbol emitted.
+   */
   if (decl->flags & (NY_CDECLF_STATIC | NY_CDECLF_INLINE)) {
     free(c_name_owned);
     return true;
@@ -1627,15 +1659,19 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
         ok = false;
         break;
       }
-      /* Count each successfully-lowered aggregate declaration as one layout,
+      /*
+       * Count each successfully-lowered aggregate declaration as one layout,
        * so struct-only headers can be detected as internally complete instead
        * of always falling back to libclang. Count once per call (typedef-tag
-       * aliases register extra entries but represent the same declaration). */
+       * aliases register extra entries but represent the same declaration).
+       */
       if (cg->layouts.len > layouts_before)
         layouts += 1;
-      /* L-11: Skip function/variable registration failures (e.g. opaque struct
+      /*
+       * L-11: Skip function/variable registration failures (e.g. opaque struct
        * by value) instead of aborting the entire header. The declaration will be
-       * handled by libclang when it falls back. */
+       * handled by libclang when it falls back.
+       */
       if (!ny_ffi_register_internal_c_function(cg, &decl, prefix, lib,
                                                &lowered)) {
         NY_LOG_V1("[ffi:c] skipping function registration (libclang will handle)\n");
@@ -1664,8 +1700,10 @@ static bool ny_ffi_internal_c_lower_header(codegen_t *cg,
     }
     break;
   lower_next:
-    /* Stall guard: force progress if ny_parse_decl did not consume a token,
-     * so pathological macro expansion cannot loop forever here. */
+    /*
+     * Stall guard: force progress if ny_parse_decl did not consume a token,
+     * so pathological macro expansion cannot loop forever here.
+     */
     if (p.tok.kind != NY_CTOK_EOF && p.tok.start == stall_pos)
       p.tok = ny_lex_next(&p.lx);
   }
@@ -2582,13 +2620,17 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
                          strcmp(cg->c_frontend, "auto") == 0)) {
     bool strict_internal = strcmp(cg->c_frontend, "nytrix") == 0;
     if (!strict_internal) {
-      /* F-1: In auto mode, skip the summary parse entirely. The summary parse
+      /*
+       * F-1: In auto mode, skip the summary parse entirely. The summary parse
        * is only needed in strict mode to decide if internal lowering succeeded.
        * In auto mode, libclang always handles the header, so the summary parse
-       * is pure waste. */
+       * is pure waste.
+       */
       goto libclang_fallback;
     }
-    /* Skip the nytrix frontend for very large headers in strict mode. */
+    /*
+     * Skip the nytrix frontend for very large headers in strict mode.
+     */
     size_t file_size = 0;
     char *test_src = ny_ffi_internal_c_read_header(header_path, is_std,
                                                     &file_size);
@@ -2606,8 +2648,10 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
     NY_LOG_V1("[ffi:c] internal frontend parsed %zu declaration(s); attempting internal import lowering\n",
               parsed);
     if (strict_internal) {
-      /* F-2: Save registration counts before internal lowering. If the internal
-       * frontend is incomplete, truncate back so libclang starts clean. */
+      /*
+       * F-2: Save registration counts before internal lowering. If the internal
+       * frontend is incomplete, truncate back so libclang starts clean.
+       */
       size_t saved_layouts = cg->layouts.len;
       size_t saved_funsigs = cg->fun_sigs.len;
       size_t saved_globals = cg->global_vars.len;
@@ -2635,10 +2679,12 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
             lowered == summary.functions + summary.variables) ||
            (summary.functions == 0 && summary.declarations == 0 &&
             summary.object_like_define_lines > 0 && constants > 0) ||
-           /* Struct/typedef-only headers: complete when every aggregate layout
+           /*
+            * Struct/typedef-only headers: complete when every aggregate layout
             * in the summary was successfully registered internally. This lets
             * the nytrix frontend own layout lowering without a libclang round
-            * trip. */
+            * trip.
+            */
            (summary.functions == 0 && summary.variables == 0 &&
             summary.aggregate_layouts > 0 &&
             layouts == summary.aggregate_layouts));
@@ -2655,9 +2701,11 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
       }
       NY_LOG_V1("[ffi:c] internal frontend import lowering incomplete for %s; libclang fallback remains active\n",
                 header_path);
-      /* F-2: Clear partial internal registrations so libclang starts clean.
+      /*
+       * F-2: Clear partial internal registrations so libclang starts clean.
        * The internal registrations may have incorrect types/offsets that would
-       * win the dedup check and prevent libclang from registering correct ones. */
+       * win the dedup check and prevent libclang from registering correct ones.
+       */
       cg->layouts.len = saved_layouts;
       cg->fun_sigs.len = saved_funsigs;
       cg->global_vars.len = saved_globals;
@@ -2680,9 +2728,11 @@ libclang_fallback:
   }
 
   if (resolved_lib && *resolved_lib) {
-    /* F-4: Skip compile-time dlopen. The library is registered for later JIT
+    /*
+     * F-4: Skip compile-time dlopen. The library is registered for later JIT
      * loading via cg->links. dlopen with RTLD_GLOBAL during compilation
-     * executes foreign constructors inside the compiler process. */
+     * executes foreign constructors inside the compiler process.
+     */
     bool found = false;
     for (size_t i = 0; i < cg->links.len; i++) {
       if (strcmp(cg->links.data[i], resolved_lib) == 0) {
@@ -2756,7 +2806,9 @@ libclang_fallback:
     }
   }
 
-  /* F-3: Compute defines hash for TU cache key. */
+  /*
+   * F-3: Compute defines hash for TU cache key.
+   */
   uint64_t defines_hash = ny_tu_defines_hash(cg->ffi.defines.data,
                                              cg->ffi.defines.len);
   bool cacheable = (cg->ffi.defines.len == 0);
@@ -2830,8 +2882,10 @@ visit_tu:
   ctx.pass = 1;
   clang_visitChildren(root, ffi_visitor, &ctx);
 
-  /* Only dispose non-cached TUs and their indices. Cached TUs are kept for
-   * reuse by later import sites. */
+  /*
+   * Only dispose non-cached TUs and their indices. Cached TUs are kept for
+   * reuse by later import sites.
+   */
   if (!cacheable) {
     clang_disposeTranslationUnit(tu);
     clang_disposeIndex(index);

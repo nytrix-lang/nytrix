@@ -1,7 +1,6 @@
 ;; Keywords: sets lists intersection difference dominance
 ;; Set-shaped list operations used by CFG dominance analysis.
 module std.os.rev.decomp.cfg_sets(_set_intersection, _same_set, _list_without, _set_difference)
-
 use std.core
 use std.os.rev.decomp.collections (_list_has, _append_unique)
 

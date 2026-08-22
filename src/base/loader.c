@@ -1,3 +1,7 @@
+/*
+ * Source-loader and module resolver: reads files, resolves import paths,
+ * manages stdlib discovery, and owns the compilation-unit lifecycle.
+ */
 #include "base/loader.h"
 #include "parse/ast.h"
 #include "base/common.h"
@@ -268,8 +272,10 @@ static void scan_dir_recursive_depth(const char *root, const char *dir, int dept
         add_module_from_path(root, fp);
       handled = true;
     } else if (ent->d_type == DT_LNK) {
-      /* Resolve symlinks: follow only if target is a regular file, to avoid
-       * directory symlink cycles causing infinite recursion. */
+      /*
+       * Resolve symlinks: follow only if target is a regular file, to avoid
+       * directory symlink cycles causing infinite recursion.
+       */
       struct stat st;
       if (stat(fp, &st) == 0 && S_ISREG(st.st_mode) && is_ny_file(fp))
         add_module_from_path(root, fp);
@@ -919,7 +925,7 @@ int ny_std_find_module_by_name(const char *name) {
     return -1;
   ny_std_init_modules();
   const char *tries[5] = {name, NULL, NULL, NULL, NULL};
-  char buf_mod[256], buf_core[256], buf_compat_mod[256];
+  char buf_mod[256], buf_core[256], buf_compat_mod[256] = "";
   snprintf(buf_mod, sizeof(buf_mod), "%s.mod", name);
   snprintf(buf_core, sizeof(buf_core), "%s.core", name);
   size_t name_len = strlen(name);
@@ -1744,9 +1750,11 @@ static void mod_list_sort_for_bundle(mod_list *list) {
   if (getenv("NYTRIX_TRACE_IMPORTS") && cycle_count > 16)
     fprintf(stderr, "warning: %zu additional module dependency cycles omitted\n",
             cycle_count - 16);
-  /* Module initialization currently follows discovery order. The graph walk
+  /*
+   * Module initialization currently follows discovery order. The graph walk
    * validates cycles and dependencies, but must not reorder entries until
-   * initialization edges are represented separately from import edges. */
+   * initialization edges are represented separately from import edges.
+   */
   free(state);
   free(order);
   free(stack);

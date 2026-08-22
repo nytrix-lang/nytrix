@@ -61,11 +61,11 @@ fn fdiv_zero(f64 a, f64 b) {
 }
 
 assert(flatten_inline([1, [2, [3, 4, [1, 2, 3, "ny"]], 5]]) == [1, 2, 3, 4, 1, 2, 3, "ny", 5],
-"inline function-body flatten should preserve scalar leaves")
+   "inline function-body flatten should preserve scalar leaves")
 assert(flatten_try([1, [2, [3, 4, [1, 2, 3, "ny"]], 5]]) == [1, 2, 3, 4, 1, 2, 3, "ny", 5],
-"try/catch flatten should recover scalar leaves")
+   "try/catch flatten should recover scalar leaves")
 assert(flatten_recursive([1, [2, [3, 4, [1, 2, 3, "ny"]], 5]]) == [1, 2, 3, 4, 1, 2, 3, "ny", 5],
-"recursive flatten should preserve scalar leaves")
+   "recursive flatten should preserve scalar leaves")
 assert(catch_len("abc") == 3, "try/catch len should pass through valid sequence")
 assert(catch_len(1) == -1, "try/catch len should recover from invalid scalar input")
 assert(str_contains(capture(fn() { len(id(1)) }), "len expects"), "len should reject ints")
@@ -97,9 +97,9 @@ assert(did_catch(fn() { slice(id(1), 0, 1) }), "slice should reject ints")
 assert(did_catch(fn() { set([1], 9, 2) }), "receiver set should reject out-of-range writes")
 assert(did_catch(fn() { id(1) / id(0) }), "division by zero should be catchable")
 assert(did_catch(fn() { it.mapcat(fn(v) { [v] }, any_id(1)) }),
-"mapcat should reject non-sequences")
+   "mapcat should reject non-sequences")
 assert(did_catch(fn() { it.any(any_id(1), fn(v) { v }) }),
-"any should reject non-sequences")
+   "any should reject non-sequences")
 assert(get(any_id(nil), 0, 55) == 55, "receiver get should return default for nil")
 assert(set_idx(any_id(nil), 0, 1) == 0, "receiver set_idx should reject nil")
 def raw_probe = malloc(8)

@@ -1,3 +1,7 @@
+/*
+ * ny-tools entry point: internal dev tools (repo introspection, platform
+ * probes, artifact management) not part of the public-facing CLI.
+ */
 #ifndef _WIN32
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
@@ -10,6 +14,13 @@
 
 #include "base/args.h"
 #include "tool.h"
+
+/*
+ * Shared utility code uses the process-wide logging/color state that the
+ * compiler normally owns in options.c. Tool binaries do not link options.c.
+ */
+int color_mode = -1;
+int verbose_enabled = 0;
 
 #ifdef NY_TOOL_HAS_FMT
 #include "../fmt/fmt.h"

@@ -1,3 +1,8 @@
+/*
+ * NYIR SSA builder: constructs static-single-assignment form from
+ * lowered IR with dominance frontiers and phi-node insertion.
+ */
+#include "base/compat.h"
 #include "code/native/ir.h"
 #include "code/native/ir/internal.h"
 
@@ -5,8 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* CFG construction deliberately lives with NYIR instead of a backend: SSA,
- * verifier tooling, and future allocators all need the same edge semantics. */
+/*
+ * CFG construction deliberately lives with NYIR instead of a backend: SSA,
+ * verifier tooling, and future allocators all need the same edge semantics.
+ */
 typedef struct {
   int64_t *keys;
   size_t *values;
@@ -49,9 +56,9 @@ static bool cfg_label_map_init(nyir_label_map_t *map, size_t count) {
       cap > SIZE_MAX / sizeof(*map->values)) {
     return false;
   }
-  map->keys = calloc(cap, sizeof(*map->keys));
-  map->values = calloc(cap, sizeof(*map->values));
-  map->used = calloc(cap, sizeof(*map->used));
+  map->keys = ny_calloc_array(cap, sizeof(*map->keys));
+  map->values = ny_calloc_array(cap, sizeof(*map->values));
+  map->used = ny_calloc_array(cap, sizeof(*map->used));
   if (!map->keys || !map->values || !map->used) {
     cfg_label_map_free(map);
     return false;
@@ -158,10 +165,10 @@ bool nyir_cfg_reverse_postorder(const nyir_cfg_t *cfg,
   if (!cfg || cfg->block_count == 0)
     return true;
   size_t count = cfg->block_count;
-  bool *seen = calloc(count, sizeof(*seen));
-  size_t *stack = malloc(count * sizeof(*stack));
-  size_t *next_succ = calloc(count, sizeof(*next_succ));
-  size_t *post = malloc(count * sizeof(*post));
+  bool *seen = ny_calloc_array(count, sizeof(*seen));
+  size_t *stack = ny_malloc_array(count, sizeof(*stack));
+  size_t *next_succ = ny_calloc_array(count, sizeof(*next_succ));
+  size_t *post = ny_malloc_array(count, sizeof(*post));
   if (!seen || !stack || !next_succ || !post) {
     free(seen);
     free(stack);
@@ -191,7 +198,7 @@ bool nyir_cfg_reverse_postorder(const nyir_cfg_t *cfg,
     post[post_len++] = block;
     --depth;
   }
-  size_t *rpo = malloc(post_len * sizeof(*rpo));
+  size_t *rpo = ny_malloc_array(post_len, sizeof(*rpo));
   if (!rpo) {
     free(seen);
     free(stack);
@@ -215,7 +222,7 @@ static bool nyir_cfg_build_impl(const nyir_func_t *f, nyir_cfg_t *cfg,
   if (!f || !cfg) return false;
   nyir_cfg_free(cfg);
   size_t n = f->len;
-  bool *boundary = calloc(n + 1, sizeof(*boundary));
+  bool *boundary = ny_calloc_array(n + 1, sizeof(*boundary));
   if (!boundary) return false;
   boundary[0] = true;
   for (size_t i = 0; i < n; ++i) {
@@ -227,17 +234,19 @@ static bool nyir_cfg_build_impl(const nyir_func_t *f, nyir_cfg_t *cfg,
   size_t blocks = 0;
   for (size_t i = 0; i < n; ++i) if (boundary[i]) ++blocks;
   if (blocks == 0) { free(boundary); return true; }
-  /* CFG topology is bounded by two outgoing edges per block. */
+  /*
+   * CFG topology is bounded by two outgoing edges per block.
+   */
   if (blocks > SIZE_MAX - 63 || blocks > SIZE_MAX / 2) {
     free(boundary);
     return false;
   }
   cfg->block_count = blocks;
-  cfg->block_start = calloc(blocks, sizeof(*cfg->block_start));
-  cfg->block_end = calloc(blocks, sizeof(*cfg->block_end));
-  cfg->block_label = malloc(blocks * sizeof(*cfg->block_label));
-  cfg->inst_block = n ? calloc(n, sizeof(*cfg->inst_block)) : NULL;
-  cfg->reachable = calloc(blocks, sizeof(*cfg->reachable));
+  cfg->block_start = ny_calloc_array(blocks, sizeof(*cfg->block_start));
+  cfg->block_end = ny_calloc_array(blocks, sizeof(*cfg->block_end));
+  cfg->block_label = ny_malloc_array(blocks, sizeof(*cfg->block_label));
+  cfg->inst_block = n ? ny_calloc_array(n, sizeof(*cfg->inst_block)) : NULL;
+  cfg->reachable = ny_calloc_array(blocks, sizeof(*cfg->reachable));
   if (!cfg->block_start || !cfg->block_end || !cfg->block_label ||
       (n && !cfg->inst_block) || !cfg->reachable) {
     free(boundary); nyir_cfg_free(cfg); return false;
@@ -265,8 +274,14 @@ static bool nyir_cfg_build_impl(const nyir_func_t *f, nyir_cfg_t *cfg,
       return false;
     }
   }
-  size_t *successors = calloc(blocks * 2, sizeof(*successors));
-  size_t *successor_counts = calloc(blocks, sizeof(*successor_counts));
+  size_t successor_cap = 0;
+  if (!ny_size_mul_ok(blocks, 2, &successor_cap)) {
+    cfg_label_map_free(&labels);
+    nyir_cfg_free(cfg);
+    return false;
+  }
+  size_t *successors = ny_calloc_array(successor_cap, sizeof(*successors));
+  size_t *successor_counts = ny_calloc_array(blocks, sizeof(*successor_counts));
   if (!successors || !successor_counts) {
     free(successors);
     free(successor_counts);
@@ -301,8 +316,8 @@ static bool nyir_cfg_build_impl(const nyir_func_t *f, nyir_cfg_t *cfg,
     }
   }
   cfg_label_map_free(&labels);
-  cfg->succ_offsets = calloc(blocks + 1, sizeof(*cfg->succ_offsets));
-  cfg->pred_offsets = calloc(blocks + 1, sizeof(*cfg->pred_offsets));
+  cfg->succ_offsets = ny_calloc_array(blocks + 1, sizeof(*cfg->succ_offsets));
+  cfg->pred_offsets = ny_calloc_array(blocks + 1, sizeof(*cfg->pred_offsets));
   if (!cfg->succ_offsets || !cfg->pred_offsets) {
     free(successors);
     free(successor_counts);
@@ -319,15 +334,15 @@ static bool nyir_cfg_build_impl(const nyir_func_t *f, nyir_cfg_t *cfg,
     cfg->pred_offsets[block + 1] += cfg->pred_offsets[block];
   }
   size_t edge_count = cfg->succ_offsets[blocks];
-  cfg->succ_blocks = edge_count ? calloc(edge_count, sizeof(*cfg->succ_blocks)) : NULL;
-  cfg->pred_blocks = edge_count ? calloc(edge_count, sizeof(*cfg->pred_blocks)) : NULL;
+  cfg->succ_blocks = edge_count ? ny_calloc_array(edge_count, sizeof(*cfg->succ_blocks)) : NULL;
+  cfg->pred_blocks = edge_count ? ny_calloc_array(edge_count, sizeof(*cfg->pred_blocks)) : NULL;
   if (edge_count && (!cfg->succ_blocks || !cfg->pred_blocks)) {
     free(successors);
     free(successor_counts);
     nyir_cfg_free(cfg);
     return false;
   }
-  size_t *pred_next = malloc(blocks * sizeof(*pred_next));
+  size_t *pred_next = ny_malloc_array(blocks, sizeof(*pred_next));
   if (!pred_next) {
     free(successors);
     free(successor_counts);
@@ -344,7 +359,7 @@ static bool nyir_cfg_build_impl(const nyir_func_t *f, nyir_cfg_t *cfg,
   free(successors);
   free(successor_counts);
   free(pred_next);
-  size_t *reach_work = malloc(blocks * sizeof(*reach_work));
+  size_t *reach_work = ny_malloc_array(blocks, sizeof(*reach_work));
   if (!reach_work) {
     nyir_cfg_free(cfg);
     return false;
@@ -372,20 +387,20 @@ static bool nyir_cfg_build_impl(const nyir_func_t *f, nyir_cfg_t *cfg,
     nyir_cfg_free(cfg);
     return false;
   }
-  cfg->dominators = calloc(blocks * cfg->dominator_words,
-                           sizeof(*cfg->dominators));
-  cfg->frontiers = calloc(blocks * cfg->frontier_words,
-                          sizeof(*cfg->frontiers));
-  cfg->idom = malloc(blocks * sizeof(*cfg->idom));
-  cfg->backedge_edges = edge_count ? calloc(edge_count, sizeof(*cfg->backedge_edges)) : NULL;
+  cfg->dominators = ny_calloc_array(blocks * cfg->dominator_words, sizeof(*cfg->dominators));
+  cfg->frontiers = ny_calloc_array(blocks * cfg->frontier_words, sizeof(*cfg->frontiers));
+  cfg->idom = ny_malloc_array(blocks, sizeof(*cfg->idom));
+  cfg->backedge_edges = edge_count ? ny_calloc_array(edge_count, sizeof(*cfg->backedge_edges)) : NULL;
   if (!cfg->dominators || !cfg->frontiers || !cfg->idom ||
       (edge_count && !cfg->backedge_edges)) {
     nyir_cfg_free(cfg);
     return false;
   }
-  /* Iterative packed-bitset dominators. This keeps the required dominance
-   * relation while avoiding one byte per block-pair. */
-  uint64_t *dom_row = malloc(cfg->dominator_words * sizeof(*dom_row));
+  /*
+   * Iterative packed-bitset dominators. This keeps the required dominance
+   * relation while avoiding one byte per block-pair.
+   */
+  uint64_t *dom_row = ny_malloc_array(cfg->dominator_words, sizeof(*dom_row));
   if (!dom_row) {
     nyir_cfg_free(cfg);
     return false;
@@ -412,9 +427,11 @@ static bool nyir_cfg_build_impl(const nyir_func_t *f, nyir_cfg_t *cfg,
       for (size_t edge = cfg->pred_offsets[b];
            edge < cfg->pred_offsets[b + 1]; ++edge) {
         size_t p = cfg->pred_blocks[edge];
-        /* Dead fall-through blocks (created after explicit terminators) are
+        /*
+         * Dead fall-through blocks (created after explicit terminators) are
          * unreachable with dom={self}; intersecting them would empty the
-         * merge's dominator set and strand the merge with idom=-1. */
+         * merge's dominator set and strand the merge with idom=-1.
+         */
         if (!cfg->reachable[p])
           continue;
         if (!have_pred) {
@@ -441,31 +458,41 @@ static bool nyir_cfg_build_impl(const nyir_func_t *f, nyir_cfg_t *cfg,
         }
     }
   } while (changed);
-  /* Immediate dominator of b: the unique strict dominator d such that every
-   * other strict dominator of b also dominates d.  (The previous "intersection
-   * closer" test treated the entry block as immediate for every node, so loop
-   * bodies inherited entry stacks and CF mem2reg rewrote loads to init consts.) */
-  for (b = 1; b < blocks; ++b) {
-    cfg->idom[b] = -1;
-    for (size_t d = 0; d < blocks; ++d) {
-      if (d == b || !cfg_dominates_bit(cfg, b, d))
-        continue;
-      bool is_idom = true;
-      for (size_t e = 0; e < blocks; ++e) {
-        if (e == b || e == d || !cfg_dominates_bit(cfg, b, e))
-          continue;
-        /* e strictly dominates b; require e dominates d. */
-        if (!cfg_dominates_bit(cfg, d, e)) {
-          is_idom = false;
-          break;
-        }
-      }
-      if (is_idom) {
-        cfg->idom[b] = (int)d;
-        break;
+  /*
+   * Strict dominators of one block form a chain in the dominator tree.
+   * Therefore the immediate dominator is the strict dominator with the
+   * deepest dominator set.  Count each row once instead of testing every
+   * (block, candidate, ancestor) triple: the former cubic scan dominated
+   * large branch-heavy functions.
+   */
+  size_t *dom_depth = ny_calloc_array(blocks, sizeof(*dom_depth));
+  if (!dom_depth) {
+    free(dom_row);
+    nyir_cfg_free(cfg);
+    return false;
+  }
+  for (size_t d = 0; d < blocks; ++d) {
+    const uint64_t *row =
+        &cfg->dominators[d * cfg->dominator_words];
+    for (size_t word = 0; word < cfg->dominator_words; ++word) {
+      uint64_t bits = row[word];
+      while (bits) {
+        bits &= bits - 1;
+        ++dom_depth[d];
       }
     }
   }
+  for (b = 1; b < blocks; ++b) {
+    size_t best_depth = 0;
+    for (size_t d = 0; d < blocks; ++d) {
+      if (d == b || !cfg_dominates_bit(cfg, b, d) ||
+          dom_depth[d] <= best_depth)
+        continue;
+      cfg->idom[b] = (int)d;
+      best_depth = dom_depth[d];
+    }
+  }
+  free(dom_depth);
   for (size_t pred = 0; pred < blocks; ++pred)
     for (size_t edge = cfg->succ_offsets[pred];
          edge < cfg->succ_offsets[pred + 1]; ++edge) {
@@ -501,6 +528,14 @@ bool nyir_cfg_build_topology(const nyir_func_t *f, nyir_cfg_t *cfg) {
 bool nyir_prune_phis(nyir_func_t *f) {
   if (!f)
     return false;
+  bool has_phi = false;
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].op == NYIR_PHI) {
+      has_phi = true;
+      break;
+    }
+  if (!has_phi)
+    return true;
   nyir_cfg_t cfg = {0};
   if (!nyir_cfg_build(f, &cfg))
     return false;
@@ -558,10 +593,44 @@ bool nyir_cfg_is_backedge(const nyir_cfg_t *cfg, size_t predecessor,
   return false;
 }
 
+
+bool nyir_cfg_natural_loop_blocks(const nyir_cfg_t *cfg, size_t latch,
+                                  size_t header, bool *member,
+                                  size_t member_count) {
+  if (!cfg || !member || member_count < cfg->block_count ||
+      latch >= cfg->block_count || header >= cfg->block_count ||
+      !nyir_cfg_is_backedge(cfg, latch, header))
+    return false;
+  memset(member, 0, cfg->block_count * sizeof(*member));
+  size_t *work = ny_malloc_array(cfg->block_count, sizeof(*work));
+  if (!work)
+    return false;
+  size_t len = 0;
+  member[header] = true;
+  if (latch != header) {
+    member[latch] = true;
+    work[len++] = latch;
+  }
+  while (len) {
+    size_t block = work[--len];
+    for (size_t e = cfg->pred_offsets[block]; e < cfg->pred_offsets[block + 1];
+         ++e) {
+      size_t pred = cfg->pred_blocks[e];
+      if (member[pred] || !nyir_cfg_dominates(cfg, header, pred))
+        continue;
+      member[pred] = true;
+      if (pred != header)
+        work[len++] = pred;
+    }
+  }
+  free(work);
+  return true;
+}
+
 static bool insert_inst(nyir_func_t *f, size_t at, nyir_inst_t in) {
   if (f->len == f->cap) {
     size_t cap = f->cap ? f->cap * 2 : 32;
-    nyir_inst_t *data = realloc(f->data, cap * sizeof(*data));
+    nyir_inst_t *data = ny_realloc_array(f->data, cap, sizeof(*data));
     if (!data) return false;
     f->data = data; f->cap = cap;
   }
@@ -587,23 +656,27 @@ static int phi_at(const nyir_func_t *f, const nyir_cfg_t *cfg, size_t b, int loc
 
 typedef struct { int *data; size_t len, cap; } value_stack_t;
 static bool stack_push(value_stack_t *s, int v) {
-  if (s->len == s->cap) { size_t cap = s->cap ? s->cap * 2 : 8; int *p = realloc(s->data, cap * sizeof(*p)); if (!p) return false; s->data = p; s->cap = cap; }
+  if (s->len == s->cap) { size_t cap = s->cap ? s->cap * 2 : 8; int *p = ny_realloc_array(s->data, cap, sizeof(*p)); if (!p) return false; s->data = p; s->cap = cap; }
   s->data[s->len++] = v; return true;
 }
 
-/* Cytron rename in reverse postorder with stack state inherited from the
+/*
+ * Cytron rename in reverse postorder with stack state inherited from the
  * immediate dominator. The prior recursive idom-child walk left some loop
  * bodies inheriting entry-block stacks (loads rewrote to init consts), which
- * produced infinite loops under CF mem2reg. */
+ * produced infinite loops under CF mem2reg.
+ */
 static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
-                       size_t locals) {
+                       size_t locals, int zero_v) {
   if (!f || !cfg)
     return false;
   size_t *rpo = NULL;
   size_t rpo_n = 0;
   if (!nyir_cfg_reverse_postorder(cfg, &rpo, &rpo_n) || rpo_n == 0) {
     free(rpo);
-    /* Empty or single-block: fall through with trivial walk from 0. */
+    /*
+     * Empty or single-block: fall through with trivial walk from 0.
+     */
     if (cfg->block_count == 0)
       return true;
     rpo = malloc(sizeof(size_t));
@@ -612,22 +685,30 @@ static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
     rpo[0] = 0;
     rpo_n = 1;
   }
-  /* exit_val[b * locals + l] = SSA value of local l at end of block b, or -1. */
-  int *exit_val = malloc(cfg->block_count * locals * sizeof(int));
-  value_stack_t *stacks = calloc(locals, sizeof(*stacks));
+  /*
+   * exit_val[b * locals + l] = SSA value of local l at end of block b, or -1.
+   */
+  size_t exit_value_count = 0;
+  if (!ny_size_mul_ok(cfg->block_count, locals, &exit_value_count)) {
+    free(rpo);
+    return false;
+  }
+  int *exit_val = ny_malloc_array(exit_value_count, sizeof(*exit_val));
+  value_stack_t *stacks = ny_calloc_array(locals, sizeof(*stacks));
   if ((locals && !stacks) || !exit_val) {
     free(rpo);
     free(exit_val);
     free(stacks);
     return false;
   }
-  for (size_t i = 0; i < cfg->block_count * locals; ++i)
+  for (size_t i = 0; i < exit_value_count; ++i)
     exit_val[i] = -1;
-
   bool ok = true;
   for (size_t ri = 0; ri < rpo_n && ok; ++ri) {
     size_t b = rpo[ri];
-    /* Inherit reaching defs from immediate dominator (empty at entry). */
+    /*
+     * Inherit reaching defs from immediate dominator (empty at entry).
+     */
     int id = cfg->idom ? cfg->idom[b] : -1;
     for (size_t l = 0; l < locals; ++l) {
       stacks[l].len = 0;
@@ -659,11 +740,17 @@ static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
           nyir_inst_discard(in);
       } else if (in->op == NYIR_LOAD_LOCAL && in->imm >= 0 &&
                  (size_t)in->imm < locals && promote[in->imm]) {
-        if (!stacks[in->imm].len)
-          ok = false;
-        else {
+        if (stacks[in->imm].len) {
           in->op = NYIR_COPY;
           in->a = stacks[in->imm].data[stacks[in->imm].len - 1];
+          in->b = -1;
+          in->imm = 0;
+        } else if ((size_t)in->imm < f->param_count) {
+          if (!stack_push(&stacks[in->imm], in->dst))
+            ok = false;
+        } else {
+          in->op = NYIR_COPY;
+          in->a = zero_v;
           in->b = -1;
           in->imm = 0;
         }
@@ -672,16 +759,22 @@ static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
     if (!ok)
       break;
 
-    /* Record exit values for idom inheritance. */
+    /*
+     * Record exit values for idom inheritance.
+     */
     for (size_t l = 0; l < locals; ++l) {
-      if (!promote[l] || !stacks[l].len)
+      if (!promote[l])
         exit_val[b * locals + l] = -1;
+      else if (!stacks[l].len)
+        exit_val[b * locals + l] = zero_v;
       else
         exit_val[b * locals + l] =
             stacks[l].data[stacks[l].len - 1];
     }
 
-    /* Fill PHI operands on successors. */
+    /*
+     * Fill PHI operands on successors.
+     */
     for (size_t edge = cfg->succ_offsets[b];
          edge < cfg->succ_offsets[b + 1] && ok; ++edge) {
       size_t s = cfg->succ_blocks[edge];
@@ -691,14 +784,11 @@ static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
         int pi = phi_at(f, cfg, s, (int)l);
         if (pi < 0)
           continue;
-        if (!stacks[l].len) {
-          ok = false;
-          break;
-        }
+        int val = stacks[l].len ? stacks[l].data[stacks[l].len - 1] : zero_v;
         nyir_inst_t *phi = &f->data[pi];
         size_t n = phi->phi_incoming_len;
         nyir_phi_incoming_t *p =
-            realloc(phi->phi_incoming, (n + 1) * sizeof(*p));
+            ny_realloc_array(phi->phi_incoming, (n + 1), sizeof(*p));
         if (!p) {
           ok = false;
           break;
@@ -706,7 +796,7 @@ static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
         phi->phi_incoming = p;
         phi->phi_incoming[n] = (nyir_phi_incoming_t){
             .predecessor_label = cfg->block_label[b],
-            .value = stacks[l].data[stacks[l].len - 1]};
+            .value = val};
         phi->phi_incoming_len = n + 1;
       }
     }
@@ -722,16 +812,35 @@ static bool rename_ssa(nyir_func_t *f, const nyir_cfg_t *cfg, bool *promote,
 
 bool nyir_mem2reg(nyir_func_t *f) {
   if (!f) return false;
-  /* Give entry a concrete predecessor label for phi metadata. */
+  nyir_func_t backup = {0};
+  if (!nyir_func_clone(f, &backup)) return false;
+  /*
+   * Give entry a concrete predecessor label for phi metadata.
+   */
   if (f->len && f->data[0].op != NYIR_LABEL) {
     nyir_inst_t label = {.op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1, .imm = next_label(f)};
-    if (!insert_inst(f, 0, label)) return false;
+    if (!insert_inst(f, 0, label)) { nyir_func_free(&backup); return false; }
+  }
+  int zero_v = -1;
+  for (size_t i = 0; i < f->len; ++i) {
+    if (f->data[i].op == NYIR_CONST_I64 && f->data[i].imm == 0 && f->data[i].dst >= 0) {
+      zero_v = f->data[i].dst;
+      break;
+    }
+  }
+  if (zero_v < 0) {
+    zero_v = f->next_value++;
+    nyir_inst_t zero_inst = {.op = NYIR_CONST_I64, .dst = zero_v, .a = -1, .b = -1, .imm = 0};
+    size_t at = (f->len && f->data[0].op == NYIR_LABEL) ? 1 : 0;
+    if (!insert_inst(f, at, zero_inst)) { nyir_func_free(&backup); return false; }
   }
   nyir_cfg_t cfg = {0};
-  if (!nyir_cfg_build(f, &cfg)) return false;
-  /* Every block that can feed a PHI needs a stable label.  Loop bodies and
+  if (!nyir_cfg_build(f, &cfg)) { nyir_func_free(&backup); return false; }
+  /*
+   * Every block that can feed a PHI needs a stable label.  Loop bodies and
    * other fall-through regions may be CFG blocks without a LABEL in the
-   * instruction stream; assign fresh labels before PHI placement. */
+   * instruction stream; assign fresh labels before PHI placement.
+   */
   for (size_t b = cfg.block_count; b-- > 0;) {
     if (cfg.block_label[b] >= 0) continue;
     nyir_inst_t label = {.op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1, .imm = next_label(f)};
@@ -742,35 +851,47 @@ bool nyir_mem2reg(nyir_func_t *f) {
     if (!nyir_cfg_build(f, &cfg)) return false;
   }
   size_t locals = 0;
-  for (size_t i = 0; i < f->len; ++i) if ((f->data[i].op == NYIR_LOAD_LOCAL || f->data[i].op == NYIR_STORE_LOCAL || f->data[i].op == NYIR_ADDR_LOCAL) && f->data[i].imm >= 0 && (size_t)f->data[i].imm + 1 > locals) locals = (size_t)f->data[i].imm + 1;
-  bool *promote = calloc(locals, sizeof(*promote));
-  bool *addr = calloc(locals, sizeof(*addr));
-  bool *has_load = calloc(locals, sizeof(*has_load));
-  bool *has_store = calloc(locals, sizeof(*has_store));
-  if ((locals && (!promote || !addr || !has_load || !has_store))) goto oom;
+  for (size_t i = 0; i < f->len; ++i)
+    if ((f->data[i].op == NYIR_LOAD_LOCAL ||
+         f->data[i].op == NYIR_STORE_LOCAL ||
+         f->data[i].op == NYIR_ADDR_LOCAL) &&
+        f->data[i].imm >= 0 && (size_t)f->data[i].imm + 1 > locals)
+      locals = (size_t)f->data[i].imm + 1;
+  nyir_type_map_t types = {0};
+  bool *promote = NULL, *addr = NULL, *has_load = NULL, *has_store = NULL;
+  if (!nyir_type_map_init(&types, f, locals))
+    goto oom;
+  promote = ny_calloc_array(locals, sizeof(*promote));
+  addr = ny_calloc_array(locals, sizeof(*addr));
+  has_load = ny_calloc_array(locals, sizeof(*has_load));
+  has_store = ny_calloc_array(locals, sizeof(*has_store));
+  if ((locals && (!promote || !addr || !has_load || !has_store)))
+    goto oom;
   for (size_t i = 0; i < f->len; ++i) { nyir_inst_t *in = &f->data[i]; if (in->imm < 0 || (size_t)in->imm >= locals) continue; if (in->op == NYIR_ADDR_LOCAL) addr[in->imm] = true; else if (in->op == NYIR_LOAD_LOCAL) has_load[in->imm] = true; else if (in->op == NYIR_STORE_LOCAL) has_store[in->imm] = true; }
-  for (size_t l = 0; l < locals; ++l) if (!addr[l] && has_load[l] && has_store[l]) {
-    bool safe = true;
-    for (size_t i = 0; i < f->len && safe; ++i) if (f->data[i].op == NYIR_LOAD_LOCAL && f->data[i].imm == (int64_t)l) {
-      size_t use_b = cfg.inst_block[i]; bool found = false;
-      for (size_t j = 0; j < f->len; ++j) if (f->data[j].op == NYIR_STORE_LOCAL && f->data[j].imm == (int64_t)l) {
-        size_t def_b = cfg.inst_block[j];
-        if (nyir_cfg_dominates(&cfg, def_b, use_b) && (def_b != use_b || j < i)) { found = true; break; }
-      }
-      if (!found) safe = false;
-    }
-    promote[l] = safe;
-  }
-  /* Pruned Cytron SSA: only place a PHI at a dominance frontier where this
-   * local is live-in. This avoids join values that cannot be observed. */
+  /*
+   * Any non-address-taken local with both loads and stores can be
+   * promoted: Cytron PHI placement at dominance frontiers handles loop
+   * back-edges and join points correctly.  The old per-load dominator
+   * check incorrectly rejected every loop induction variable (back-edge
+   * stores never dominate the loop header), forcing them to live in stack
+   * memory across every iteration.
+   */
+  for (size_t l = 0; l < locals; ++l)
+    if (!addr[l] && has_load[l] && has_store[l] &&
+        !types.local_f64[l] && !types.local_f32[l])
+      promote[l] = true;
+  /*
+   * Pruned Cytron SSA: only place a PHI at a dominance frontier where this
+   * local is live-in. This avoids join values that cannot be observed.
+   */
   for (size_t l = 0; l < locals; ++l) if (promote[l]) {
     size_t n = cfg.block_count;
-    bool *defs = calloc(n, sizeof(*defs));
-    bool *uses = calloc(n, sizeof(*uses));
-    bool *live_in = calloc(n, sizeof(*live_in));
-    bool *live_out = calloc(n, sizeof(*live_out));
-    bool *placed = calloc(n, sizeof(*placed));
-    bool *work = calloc(n, sizeof(*work));
+    bool *defs = ny_calloc_array(n, sizeof(*defs));
+    bool *uses = ny_calloc_array(n, sizeof(*uses));
+    bool *live_in = ny_calloc_array(n, sizeof(*live_in));
+    bool *live_out = ny_calloc_array(n, sizeof(*live_out));
+    bool *placed = ny_calloc_array(n, sizeof(*placed));
+    bool *work = ny_calloc_array(n, sizeof(*work));
     if (!defs || !uses || !live_in || !live_out || !placed || !work) {
       free(defs); free(uses); free(live_in); free(live_out); free(placed); free(work);
       goto oom;
@@ -831,33 +952,45 @@ bool nyir_mem2reg(nyir_func_t *f) {
       }
     }
     free(defs); free(uses); free(live_in); free(live_out); free(placed); free(work);
-    /* Insertions shift instruction indices; rebuild before considering the
-     * next local rather than reusing stale block boundaries. */
+    /*
+     * Insertions shift instruction indices; rebuild before considering the
+     * next local rather than reusing stale block boundaries.
+     */
     nyir_cfg_free(&cfg);
     if (!nyir_cfg_build(f, &cfg)) goto oom;
   }
   nyir_cfg_free(&cfg); if (!nyir_cfg_build(f, &cfg)) goto oom;
-  bool ok = rename_ssa(f, &cfg, promote, locals);
-  free(promote); free(addr); free(has_load); free(has_store); nyir_cfg_free(&cfg);
-  if (ok) nyir_refresh_metadata(f);
-  return ok;
+  bool ok = rename_ssa(f, &cfg, promote, locals, zero_v);
+  free(promote); free(addr); free(has_load); free(has_store);
+  nyir_type_map_free(&types); nyir_cfg_free(&cfg);
+  if (ok) {
+    nyir_func_free(&backup);
+    nyir_refresh_metadata(f);
+    return true;
+  }
+  nyir_func_free(f);
+  *f = backup;
+  return false;
 oom:
-  free(promote); free(addr); free(has_load); free(has_store); nyir_cfg_free(&cfg); return false;
+  free(promote); free(addr); free(has_load); free(has_store);
+  nyir_type_map_free(&types); nyir_cfg_free(&cfg);
+  nyir_func_free(f);
+  *f = backup;
+  return false;
 }
 
-/* --------------------------------------------------------------------- */
-/* MemorySSA for NYIR locals (and a single global memory chain).         */
-/*                                                                       */
-/* Each STORE_LOCAL creates a new version of that local. LOAD_LOCAL      */
-/* reads the dominating version. CALL / unknown memory ops clobber the   */
-/* global chain and, conservatively, all locals that may escape.         */
-/*                                                                       */
-/* Forwarding rewrites LOADs to COPYs of the store value when the        */
-/* version is a concrete store in the same straight-line region (or      */
-/* after single-pred labels without intervening clobber). Multi-pred     */
-/* joins clobber until full memory PHIs land.                            */
-/* --------------------------------------------------------------------- */
-
+/*
+ * MemorySSA for NYIR locals (and a single global memory chain).
+ *
+ * Each STORE_LOCAL creates a new version of that local. LOAD_LOCAL
+ * reads the dominating version. CALL / unknown memory ops clobber the
+ * global chain and, conservatively, all locals that may escape.
+ *
+ * Forwarding rewrites LOADs to COPYs of the store value when the
+ * version is a concrete store in the same straight-line region (or
+ * after single-pred labels without intervening clobber). Multi-pred
+ * joins clobber until full memory PHIs land.
+ */
 typedef struct {
   int *local_def; /* value id that last stored each local, or -1 */
   size_t local_n;
@@ -871,13 +1004,34 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
   if (!local_n)
     return true;
 
+  /*
+   * A local whose address was taken (ADDR_LOCAL) may be written through a
+   * general memory store (STORE_I64).  Any such store invalidates every
+   * address-taken local's forwarded value; without this, a LOAD_LOCAL after
+   * a pointer store would be rewritten to the stale pre-store value.
+   * addr_taken is function-wide (not per-encounter) so a STORE_I64 that
+   * appears before its ADDR_LOCAL in program order still clobbers it.
+   */
+  bool *addr_taken = calloc(local_n, sizeof(bool));
+  if (!addr_taken)
+    return false;
+  for (size_t i = 0; i < f->len; ++i) {
+    if (f->data[i].op == NYIR_ADDR_LOCAL && f->data[i].imm >= 0 &&
+        (size_t)f->data[i].imm < local_n)
+      addr_taken[f->data[i].imm] = true;
+  }
+
   nyir_cfg_t cfg = {0};
   if (!nyir_cfg_build(f, &cfg) || cfg.block_count == 0) {
     nyir_cfg_free(&cfg);
-    /* Fall back: straight-line only forwarding. */
-    int *def = malloc(local_n * sizeof(int));
-    if (!def)
+    /*
+     * Fall back: straight-line only forwarding.
+     */
+    int *def = ny_malloc_array(local_n, sizeof(int));
+    if (!def) {
+      free(addr_taken);
       return false;
+    }
     for (size_t i = 0; i < local_n; ++i)
       def[i] = -1;
     for (size_t i = 0; i < f->len; ++i) {
@@ -886,6 +1040,13 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
           in->op == NYIR_CALL) {
         for (size_t l = 0; l < local_n; ++l)
           def[l] = -1;
+      } else if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 &&
+                 (size_t)in->imm < local_n) {
+        def[in->imm] = -1;
+      } else if (in->op == NYIR_STORE_I64) {
+        for (size_t l = 0; l < local_n; ++l)
+          if (addr_taken[l])
+            def[l] = -1;
       } else if (in->op == NYIR_STORE_LOCAL && in->imm >= 0 &&
                  (size_t)in->imm < local_n && in->a >= 0) {
         def[in->imm] = in->a;
@@ -897,12 +1058,37 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
       }
     }
     free(def);
+    free(addr_taken);
     return true;
   }
 
-  /* exit_def[b*local_n + l] = value id of local l at end of block b, or -1. */
-  int *exit_def = malloc(cfg.block_count * local_n * sizeof(int));
-  int *cur = malloc(local_n * sizeof(int));
+  /*
+   * This forwarder computes joins in one RPO walk; loop-carried definitions
+   * need an iterative MemorySSA fixed point instead.  Keep those locals in
+   * memory rather than forwarding a body-only PHI into a loop exit.
+   */
+  for (size_t b = 0; b < cfg.block_count; ++b) {
+    for (size_t edge = cfg.succ_offsets[b];
+         edge < cfg.succ_offsets[b + 1]; ++edge) {
+      if (nyir_cfg_is_backedge(&cfg, b, cfg.succ_blocks[edge])) {
+        nyir_cfg_free(&cfg);
+        free(addr_taken);
+        return true;
+      }
+    }
+  }
+
+  /*
+   * exit_def[b*local_n + l] = value id of local l at end of block b, or -1.
+   */
+  size_t exit_def_count = 0;
+  if (!ny_size_mul_ok(cfg.block_count, local_n, &exit_def_count)) {
+    free(addr_taken);
+    nyir_cfg_free(&cfg);
+    return false;
+  }
+  int *exit_def = ny_malloc_array(exit_def_count, sizeof(*exit_def));
+  int *cur = ny_malloc_array(local_n, sizeof(*cur));
   size_t *rpo = NULL;
   size_t rpo_n = 0;
   if (!exit_def || !cur ||
@@ -910,13 +1096,15 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
     free(exit_def);
     free(cur);
     free(rpo);
+    free(addr_taken);
     nyir_cfg_free(&cfg);
     return false;
   }
-  for (size_t i = 0; i < cfg.block_count * local_n; ++i)
+  for (size_t i = 0; i < exit_def_count; ++i)
     exit_def[i] = -1;
-
-  /* Pass 1: compute exit_def with same-value / const-equal joins. */
+  /*
+   * Pass 1: compute exit_def with same-value / const-equal joins.
+   */
   for (size_t ri = 0; ri < rpo_n; ++ri) {
     size_t b = rpo[ri];
     size_t pc = cfg.pred_offsets[b + 1] - cfg.pred_offsets[b];
@@ -966,6 +1154,13 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
       if (in->op == NYIR_CALL) {
         for (size_t l = 0; l < local_n; ++l)
           cur[l] = -1;
+      } else if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 &&
+                 (size_t)in->imm < local_n) {
+        cur[in->imm] = -1;
+      } else if (in->op == NYIR_STORE_I64) {
+        for (size_t l = 0; l < local_n; ++l)
+          if (addr_taken[l])
+            cur[l] = -1;
       } else if (in->op == NYIR_STORE_LOCAL && in->imm >= 0 &&
                  (size_t)in->imm < local_n && in->a >= 0) {
         cur[in->imm] = in->a;
@@ -975,9 +1170,11 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
       exit_def[b * local_n + l] = cur[l];
   }
 
-  /* Pass 2: insert real PHIs when every pred has a concrete def, all pred
+  /*
+   * Pass 2: insert real PHIs when every pred has a concrete def, all pred
    * labels are known, and values disagree. Skip blocks that already have a
-   * PHI for that local (mem2reg). Process high→low so indices stay valid. */
+   * PHI for that local (mem2reg). Process high→low so indices stay valid.
+   */
   for (size_t bi = cfg.block_count; bi-- > 0;) {
     size_t pc = cfg.pred_offsets[bi + 1] - cfg.pred_offsets[bi];
     if (pc < 2 || cfg.block_label[bi] < 0)
@@ -1024,11 +1221,12 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
                            .b = -1,
                            .imm = (int64_t)l};
       phi.phi_incoming_len = pc;
-      phi.phi_incoming = calloc(pc, sizeof(*phi.phi_incoming));
+      phi.phi_incoming = ny_calloc_array(pc, sizeof(*phi.phi_incoming));
       if (!phi.phi_incoming) {
         free(exit_def);
         free(cur);
         free(rpo);
+        free(addr_taken);
         nyir_cfg_free(&cfg);
         return false;
       }
@@ -1044,6 +1242,7 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
         free(exit_def);
         free(cur);
         free(rpo);
+        free(addr_taken);
         nyir_cfg_free(&cfg);
         return false;
       }
@@ -1057,12 +1256,16 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
         cfg.block_end[bi] = at + 1;
       else
         cfg.block_end[bi]++;
-      /* Seed exit_def so successors of this block see the PHI. */
+      /*
+       * Seed exit_def so successors of this block see the PHI.
+       */
       exit_def[bi * local_n + l] = phi_dst;
     }
   }
 
-  /* Pass 3: forward loads using joins + PHIs. */
+  /*
+   * Pass 3: forward loads using joins + PHIs.
+   */
   for (size_t ri = 0; ri < rpo_n; ++ri) {
     size_t b = rpo[ri];
     size_t pc = cfg.pred_offsets[b + 1] - cfg.pred_offsets[b];
@@ -1089,6 +1292,13 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
       } else if (in->op == NYIR_CALL) {
         for (size_t l = 0; l < local_n; ++l)
           cur[l] = -1;
+      } else if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 &&
+                 (size_t)in->imm < local_n) {
+        cur[in->imm] = -1;
+      } else if (in->op == NYIR_STORE_I64) {
+        for (size_t l = 0; l < local_n; ++l)
+          if (addr_taken[l])
+            cur[l] = -1;
       } else if (in->op == NYIR_STORE_LOCAL && in->imm >= 0 &&
                  (size_t)in->imm < local_n && in->a >= 0) {
         cur[in->imm] = in->a;
@@ -1106,6 +1316,7 @@ bool nyir_memory_ssa_forward(nyir_func_t *f) {
   free(exit_def);
   free(cur);
   free(rpo);
+  free(addr_taken);
   nyir_cfg_free(&cfg);
   return true;
 }

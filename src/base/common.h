@@ -19,6 +19,31 @@ static inline const char *ny_tail_name(const char *name) {
   return tail ? tail + 1 : name;
 }
 
+typedef enum {
+  NY_BUILTIN_ALLOC_NONE = 0,
+  NY_BUILTIN_ALLOC_MALLOC,
+  NY_BUILTIN_ALLOC_CALLOC,
+  NY_BUILTIN_ALLOC_REALLOC,
+  NY_BUILTIN_ALLOC_FREE,
+} ny_builtin_alloc_kind_t;
+
+static inline ny_builtin_alloc_kind_t ny_builtin_alloc_kind(const char *name) {
+  const char *leaf = ny_tail_name(name);
+  if (!leaf)
+    return NY_BUILTIN_ALLOC_NONE;
+  if (strncmp(leaf, "__", 2) == 0)
+    leaf += 2;
+  if (strcmp(leaf, "malloc") == 0 || strcmp(leaf, "zalloc") == 0)
+    return NY_BUILTIN_ALLOC_MALLOC;
+  if (strcmp(leaf, "calloc") == 0)
+    return NY_BUILTIN_ALLOC_CALLOC;
+  if (strcmp(leaf, "realloc") == 0)
+    return NY_BUILTIN_ALLOC_REALLOC;
+  if (strcmp(leaf, "free") == 0)
+    return NY_BUILTIN_ALLOC_FREE;
+  return NY_BUILTIN_ALLOC_NONE;
+}
+
 #if defined(__has_include)
 #if __has_include("nytrix_version.h")
 #include "nytrix_version.h"
@@ -35,7 +60,7 @@ static inline const char *ny_tail_name(const char *name) {
 #ifndef NYTRIX_VERSION
 #define NYTRIX_VERSION VERSION
 #define NYTRIX_VERSION_MAJOR 0
-#define NYTRIX_VERSION_MINOR 8
+#define NYTRIX_VERSION_MINOR 9
 #define NYTRIX_VERSION_PATCH 0
 #define NYTRIX_VERSION_BUILD 0
 #define NYTRIX_VERSION_COMMIT "source"
@@ -207,16 +232,79 @@ extern int debug_enabled;
   } while (0)
 #endif
 
+static inline bool ny_strndup_try(const char *s, size_t n, char **out) {
+  if (!out)
+    return false;
+  *out = NULL;
+  if (!s)
+    return false;
+  size_t bytes = 0;
+  if (!ny_size_add_ok(n, 1, &bytes))
+    return false;
+  char *r = (char *)malloc(bytes);
+  if (!r)
+    return false;
+  memcpy(r, s, n);
+  r[n] = '\0';
+  *out = r;
+  return true;
+}
+
 static inline char *ny_strndup(const char *s, size_t n) {
-  char *r = (char *)malloc(n + 1);
-  if (!r) {
+  char *r = NULL;
+  if (!ny_strndup_try(s, n, &r)) {
     fprintf(stderr, "oom\n");
     exit(1);
   }
-  memcpy(r, s, n);
-  r[n] = '\0';
   return r;
 }
+
+/* Legacy vector macros below retain their fatal allocation contract.  New
+ * code that can recover from allocation failure must use the explicit
+ * ny_vec_*_try helpers, which leave vector storage unchanged on failure. */
+static inline bool ny_vec_reserve_try(void **data, size_t *cap,
+                                      size_t new_cap, size_t elem_size) {
+  if (!data || !cap || elem_size == 0)
+    return false;
+  if (new_cap <= *cap)
+    return true;
+  size_t bytes = 0;
+  if (!ny_size_mul_ok(new_cap, elem_size, &bytes))
+    return false;
+  void *grown = realloc(*data, bytes);
+  if (!grown)
+    return false;
+  *data = grown;
+  *cap = new_cap;
+  return true;
+}
+
+static inline bool ny_vec_push_try(void **data, size_t *len, size_t *cap,
+                                   size_t elem_size, const void *value) {
+  if (!data || !len || !cap || elem_size == 0 || !value || *len > *cap)
+    return false;
+  size_t offset = 0;
+  if (!ny_size_mul_ok(*len, elem_size, &offset))
+    return false;
+  if (*len == *cap) {
+    if (*cap > SIZE_MAX / 2)
+      return false;
+    size_t next = *cap ? *cap * 2 : 8;
+    if (!ny_vec_reserve_try(data, cap, next, elem_size))
+      return false;
+  }
+  memcpy((unsigned char *)*data + offset, value, elem_size);
+  ++*len;
+  return true;
+}
+
+#define vec_reserve_try(vec, new_cap) \
+  ny_vec_reserve_try((void **)&(vec)->data, &(vec)->cap, (new_cap), \
+                     sizeof(*(vec)->data))
+
+#define vec_reserve_arena_try(arena, vec, new_cap) \
+  ny_vec_reserve_arena_try((arena), (void **)&(vec)->data, (vec)->len, \
+                           &(vec)->cap, (new_cap), sizeof(*(vec)->data))
 
 #define VEC(type)                                                                                  \
   struct {                                                                                         \
@@ -224,43 +312,41 @@ static inline char *ny_strndup(const char *s, size_t n) {
     size_t len, cap;                                                                               \
   }
 
-#define vec_reserve(vec, new_cap)                                                                  \
-  do {                                                                                             \
-    if ((new_cap) > (vec)->cap) {                                                                  \
-      void *tmp = realloc((vec)->data, (new_cap) * sizeof(*(vec)->data));                          \
-      if (!tmp) {                                                                                  \
-        fprintf(stderr, "oom\n");                                                                  \
-        exit(1);                                                                                   \
-      }                                                                                            \
-      (vec)->data = tmp;                                                                           \
-      (vec)->cap = (new_cap);                                                                      \
-    }                                                                                              \
+#define vec_reserve(vec, new_cap) \
+  do { \
+    if (!vec_reserve_try((vec), (new_cap))) { \
+      fprintf(stderr, "oom\n"); \
+      exit(1); \
+    } \
   } while (0)
 
-#define vec_reserve_arena(arena, vec, new_cap)                                                     \
-  do {                                                                                             \
-    if ((new_cap) > (vec)->cap) {                                                                  \
-      void *new_data = arena_alloc((arena), (new_cap) * sizeof(*(vec)->data));                     \
-      if ((vec)->data)                                                                             \
-        memcpy(new_data, (vec)->data, (vec)->len * sizeof(*(vec)->data));                          \
-      (vec)->data = new_data;                                                                      \
-      (vec)->cap = (new_cap);                                                                      \
-    }                                                                                              \
+#define vec_reserve_arena(arena, vec, new_cap) \
+  do { \
+    if (!vec_reserve_arena_try((arena), (vec), (new_cap))) { \
+      fprintf(stderr, "oom\n"); \
+      exit(1); \
+    } \
   } while (0)
 
-#define vec_push(vec, value)                                                                       \
-  do {                                                                                             \
-    if ((vec)->len == (vec)->cap) {                                                                \
-      size_t new_cap = (vec)->cap ? (vec)->cap * 2 : 8;                                            \
-      void *tmp = realloc((vec)->data, new_cap * sizeof(*(vec)->data));                            \
-      if (!tmp) {                                                                                  \
-        fprintf(stderr, "oom\n");                                                                  \
-        exit(1);                                                                                   \
-      }                                                                                            \
-      (vec)->data = tmp;                                                                           \
-      (vec)->cap = new_cap;                                                                        \
-    }                                                                                              \
-    (vec)->data[(vec)->len++] = (value);                                                           \
+/* Capacity growth is checked before both doubling and byte-size conversion. */
+
+/*
+ * vec_push / vec_push_arena / vec_insert_arena grow via the reserve macros and
+ * then assign directly, rather than calling ny_vec_push_try: that helper takes
+ * `const void *value`, which would force `&(value)` and break rvalue arguments
+ * such as `vec_push(v, make_item())`.
+ */
+
+#define vec_push(vec, value) \
+  do { \
+    if ((vec)->len == (vec)->cap) { \
+      if ((vec)->cap > SIZE_MAX / 2) { \
+        fprintf(stderr, "oom\n"); \
+        exit(1); \
+      } \
+      vec_reserve((vec), (vec)->cap ? (vec)->cap * 2 : 8); \
+    } \
+    (vec)->data[(vec)->len++] = (value); \
   } while (0)
 
 #define vec_free(vec)                                                                              \
@@ -276,36 +362,34 @@ static inline char *ny_strndup(const char *s, size_t n) {
     (vec)->len = (vec)->cap = 0;                                                                   \
   } while (0)
 
-#define vec_push_arena(arena, vec, value)                                                          \
-  do {                                                                                             \
-    if ((vec)->len == (vec)->cap) {                                                                \
-      size_t new_cap = (vec)->cap ? (vec)->cap * 2 : 8;                                            \
-      void *new_data = arena_alloc(arena, new_cap * sizeof(*(vec)->data));                         \
-      if ((vec)->data)                                                                             \
-        memcpy(new_data, (vec)->data, (vec)->len * sizeof(*(vec)->data));                          \
-      (vec)->data = new_data;                                                                      \
-      (vec)->cap = new_cap;                                                                        \
-    }                                                                                              \
-    (vec)->data[(vec)->len++] = (value);                                                           \
+#define vec_push_arena(arena, vec, value) \
+  do { \
+    if ((vec)->len == (vec)->cap) { \
+      if ((vec)->cap > SIZE_MAX / 2) { \
+        fprintf(stderr, "oom\n"); \
+        exit(1); \
+      } \
+      vec_reserve_arena((arena), (vec), (vec)->cap ? (vec)->cap * 2 : 8); \
+    } \
+    (vec)->data[(vec)->len++] = (value); \
   } while (0)
 
-#define vec_insert_arena(arena, vec, idx, value)                                                   \
-  do {                                                                                             \
-    if ((vec)->len == (vec)->cap) {                                                                \
-      size_t new_cap = (vec)->cap ? (vec)->cap * 2 : 8;                                            \
-      void *new_data = arena_alloc(arena, new_cap * sizeof(*(vec)->data));                         \
-      if ((vec)->data)                                                                             \
-        memcpy(new_data, (vec)->data, (vec)->len * sizeof(*(vec)->data));                          \
-      (vec)->data = new_data;                                                                      \
-      (vec)->cap = new_cap;                                                                        \
-    }                                                                                              \
-    size_t _idx = (idx);                                                                           \
-    if (_idx < (vec)->len) {                                                                       \
-      memmove((vec)->data + _idx + 1, (vec)->data + _idx,                                          \
-              ((vec)->len - _idx) * sizeof(*(vec)->data));                                         \
-    }                                                                                              \
-    (vec)->data[_idx] = (value);                                                                   \
-    (vec)->len++;                                                                                  \
+#define vec_insert_arena(arena, vec, idx, value) \
+  do { \
+    if ((vec)->len == (vec)->cap) { \
+      if ((vec)->cap > SIZE_MAX / 2) { \
+        fprintf(stderr, "oom\n"); \
+        exit(1); \
+      } \
+      vec_reserve_arena((arena), (vec), (vec)->cap ? (vec)->cap * 2 : 8); \
+    } \
+    size_t _idx = (idx); \
+    if (_idx < (vec)->len) { \
+      memmove((vec)->data + _idx + 1, (vec)->data + _idx, \
+              ((vec)->len - _idx) * sizeof(*(vec)->data)); \
+    } \
+    (vec)->data[_idx] = (value); \
+    (vec)->len++; \
   } while (0)
 
 typedef struct arena_region_t {
@@ -331,19 +415,26 @@ typedef struct arena_t {
 #endif
 
 static inline size_t arena_align_up_size(size_t v, size_t align) {
+  if (align == 0 || (align & (align - 1)) != 0 ||
+      v > SIZE_MAX - (align - 1))
+    return SIZE_MAX;
   return (v + (align - 1)) & ~(align - 1);
 }
 
 static inline uintptr_t arena_align_up_ptr(uintptr_t v, size_t align) {
+  if (align == 0 || (align & (align - 1)) != 0 ||
+      v > UINTPTR_MAX - (uintptr_t)(align - 1))
+    return UINTPTR_MAX;
   return (v + (uintptr_t)(align - 1)) & ~(uintptr_t)(align - 1);
 }
 
 static inline arena_region_t *arena_region_new(size_t payload_cap) {
-  arena_region_t *r = (arena_region_t *)calloc(1, sizeof(*r) + payload_cap);
-  if (!r) {
-    fprintf(stderr, "oom\n");
-    exit(1);
-  }
+  size_t total = 0;
+  if (!ny_size_add_ok(sizeof(arena_region_t), payload_cap, &total))
+    return NULL;
+  arena_region_t *r = (arena_region_t *)calloc(1, total);
+  if (!r)
+    return NULL;
   r->cap = payload_cap;
   return r;
 }
@@ -359,7 +450,11 @@ static inline void arena_push_region(arena_t *a, arena_region_t *r) {
   a->current = r;
 }
 
-static inline void *arena_alloc_aligned(arena_t *a, size_t size, size_t align) {
+static inline bool ny_arena_alloc_aligned_try(arena_t *a, size_t size,
+                                              size_t align, void **out) {
+  if (!out)
+    return false;
+  *out = NULL;
   if (size == 0)
     size = 1;
   if (align < sizeof(void *))
@@ -367,55 +462,120 @@ static inline void *arena_alloc_aligned(arena_t *a, size_t size, size_t align) {
   if ((align & (align - 1)) != 0)
     align = sizeof(max_align_t);
 
+  size_t rounded = arena_align_up_size(size, align);
+  if (rounded == SIZE_MAX)
+    return false;
   if (!a) {
-    size_t rounded = arena_align_up_size(size, align);
-    void *mem = calloc(1, rounded);
-    if (!mem) {
-      fprintf(stderr, "oom\n");
-      exit(1);
-    }
-    return mem;
+    *out = calloc(1, rounded);
+    return *out != NULL;
   }
 
-  size_t rounded = arena_align_up_size(size, align);
   size_t default_region = a->region_size ? a->region_size : NY_ARENA_BLOCK_SIZE;
-  arena_region_t *r = a->current;
-  while (r) {
+  for (arena_region_t *r = a->current; r; r = r->next) {
     uintptr_t base = (uintptr_t)(r->data + r->off);
     uintptr_t aligned = arena_align_up_ptr(base, align);
+    if (aligned == UINTPTR_MAX)
+      return false;
     size_t aligned_off = (size_t)(aligned - (uintptr_t)r->data);
     if (aligned_off <= r->cap && rounded <= r->cap - aligned_off) {
-      void *mem = r->data + aligned_off;
+      *out = r->data + aligned_off;
       r->off = aligned_off + rounded;
-      memset(mem, 0, rounded);
-      return mem;
+      a->current = r;
+      memset(*out, 0, rounded);
+      return true;
     }
-    r = r->next;
-    a->current = r;
+    a->current = r->next;
   }
 
   size_t region_cap = default_region;
-  if (rounded + align > region_cap)
-    region_cap = rounded + align;
-  r = arena_region_new(region_cap);
-  arena_push_region(a, r);
-  uintptr_t base = (uintptr_t)r->data;
-  uintptr_t aligned = arena_align_up_ptr(base, align);
+  size_t required = 0;
+  if (!ny_size_add_ok(rounded, align, &required))
+    return false;
+  if (required > region_cap)
+    region_cap = required;
+  arena_region_t *r = arena_region_new(region_cap);
+  if (!r)
+    return false;
+  uintptr_t aligned = arena_align_up_ptr((uintptr_t)r->data, align);
+  if (aligned == UINTPTR_MAX) {
+    free(r);
+    return false;
+  }
   size_t aligned_off = (size_t)(aligned - (uintptr_t)r->data);
-  void *mem = r->data + aligned_off;
+  if (aligned_off > r->cap || rounded > r->cap - aligned_off) {
+    free(r);
+    return false;
+  }
+  arena_push_region(a, r);
+  *out = r->data + aligned_off;
   r->off = aligned_off + rounded;
-  memset(mem, 0, rounded);
-  return mem;
+  memset(*out, 0, rounded);
+  return true;
+}
+
+static inline void *arena_alloc_aligned(arena_t *a, size_t size, size_t align) {
+  void *out = NULL;
+  if (!ny_arena_alloc_aligned_try(a, size, align, &out)) {
+    fprintf(stderr, "oom\n");
+    exit(1);
+  }
+  return out;
 }
 
 static inline void *arena_alloc(arena_t *a, size_t size) {
   return arena_alloc_aligned(a, size, sizeof(max_align_t));
 }
+static inline bool ny_vec_reserve_arena_try(
+    arena_t *arena, void **data, size_t len, size_t *cap, size_t new_cap,
+    size_t elem_size) {
+  if (!data || !cap || elem_size == 0 || len > *cap)
+    return false;
+  if (new_cap <= *cap)
+    return true;
+  size_t bytes = 0;
+  if (!ny_size_mul_ok(new_cap, elem_size, &bytes))
+    return false;
+  size_t copied_bytes = 0;
+  if (!ny_size_mul_ok(len, elem_size, &copied_bytes))
+    return false;
+  void *new_data = NULL;
+  if (!ny_arena_alloc_aligned_try(arena, bytes, sizeof(max_align_t),
+                                  &new_data))
+    return false;
+  if (*data && copied_bytes)
+    memcpy(new_data, *data, copied_bytes);
+  *data = new_data;
+  *cap = new_cap;
+  return true;
+}
 
-static inline char *arena_strndup(arena_t *a, const char *s, size_t n) {
-  char *mem = (char *)arena_alloc(a, n + 1);
+
+static inline bool ny_arena_strndup_try(arena_t *a, const char *s, size_t n,
+                                        char **out) {
+  if (!out)
+    return false;
+  *out = NULL;
+  if (!s)
+    return false;
+  size_t bytes = 0;
+  if (!ny_size_add_ok(n, 1, &bytes))
+    return false;
+  char *mem = NULL;
+  if (!ny_arena_alloc_aligned_try(a, bytes, sizeof(max_align_t),
+                                  (void **)&mem))
+    return false;
   memcpy(mem, s, n);
   mem[n] = '\0';
+  *out = mem;
+  return true;
+}
+
+static inline char *arena_strndup(arena_t *a, const char *s, size_t n) {
+  char *mem = NULL;
+  if (!ny_arena_strndup_try(a, s, n, &mem)) {
+    fprintf(stderr, "oom\n");
+    exit(1);
+  }
   return mem;
 }
 

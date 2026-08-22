@@ -179,7 +179,16 @@ fn replay(any rows, any level="", int chunk_size=0) dict { return tube_replay(ro
 
 fn process(str path, list args=[], any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Starts a local process and returns a buffered tube over its stdin/stdout."
-   def p = pio.spawn(path, args)
+   mut argv = args
+   if args.len == 0 || args[0] != path {
+      argv = [path]
+      mut i = 0
+      while i < args.len {
+         argv = append(argv, args[i])
+         i += 1
+      }
+   }
+   def p = pio.spawn(path, argv)
    if p == 0 { return 0 }
    tube_process(p, path, level, timeout_ms, chunk_size)
 }

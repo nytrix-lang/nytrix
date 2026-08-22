@@ -1,3 +1,7 @@
+/*
+ * SIMD runtime: portable SIMD/intrinsic wrappers for vectorized
+ * f32/f64/i64 operations with platform-specific fast paths.
+ */
 #include "rt/shared.h"
 #include <math.h>
 #include <stdbool.h>

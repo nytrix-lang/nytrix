@@ -1,3 +1,7 @@
+/*
+ * Fuzz generator: synthesizes random Nytrix programs from shape
+ * templates, covering parser, type checker, and codegen edge cases.
+ */
 #include "core.h"
 
 typedef struct {

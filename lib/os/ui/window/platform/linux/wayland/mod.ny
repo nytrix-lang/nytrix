@@ -251,7 +251,7 @@ use std.os.ffi as ffi
    }
    fn mmap(..._args) any {
       "Runs the mmap operation."
-      -1
+      return -1
    }
    fn munmap(..._args) any {
       "Runs the munmap operation."
@@ -259,7 +259,7 @@ use std.os.ffi as ffi
    }
    fn pipe(..._args) any {
       "Runs the pipe operation."
-      -1
+      return -1
    }
    fn poll(..._args) any {
       "Polls poll."
@@ -506,7 +506,8 @@ fn _translate_wayland_scancode(any scancode) int { comptime match WaylandScancod
 
 fn _push_event(any win, int typ, any data=0) any {
    if !win { return 0 }
-   _pending_events = _pending_events.append(ui_event.make_event(typ, win, win.get("handle", 0), data))
+   def h = win.get("handle", 0)
+   _pending_events = _pending_events.append(ui_event.make_event(typ, h, h, data))
 }
 
 fn _broadcast_event(int typ, any data=0) any {
@@ -799,8 +800,8 @@ fn _init_xdg_interfaces() any {
          ["set_anchor", "u", 0],
          ["set_gravity", "u", 0],
          ["set_constraint_adjustment", "u", 0],
-      ["set_offset", "ii", 0]],
-   0)
+         ["set_offset", "ii", 0]],
+      0)
    _xdg_toplevel_interface = _create_interface("xdg_toplevel", 1,
       [["destroy", "", 0],
          ["set_parent", "?o", [0]],
@@ -815,22 +816,22 @@ fn _init_xdg_interfaces() any {
          ["unset_maximized", "", 0],
          ["set_fullscreen", "?o", [wl_output_iface]],
          ["unset_fullscreen", "", 0],
-      ["set_minimized", "", 0]],
+         ["set_minimized", "", 0]],
       [["configure", "iia", 0],
-   ["close", "", 0]])
+         ["close", "", 0]])
    _xdg_surface_interface = _create_interface("xdg_surface", 1,
       [["destroy", "", 0],
          ["get_toplevel", "n", [_xdg_toplevel_interface]],
          ["get_popup", "n?oo", [0, _xdg_surface_interface, _xdg_positioner_interface]],
          ["set_window_geometry", "iiii", 0],
-      ["ack_configure", "u", 0]],
-   [["configure", "u", 0]])
+         ["ack_configure", "u", 0]],
+      [["configure", "u", 0]])
    _xdg_wm_base_interface = _create_interface("xdg_wm_base", 1,
       [["destroy", "", 0],
          ["create_positioner", "n", [_xdg_positioner_interface]],
          ["get_xdg_surface", "no", [_xdg_surface_interface, wl_surface_iface]],
-      ["pong", "u", 0]],
-   [["ping", "u", 0]])
+         ["pong", "u", 0]],
+      [["ping", "u", 0]])
 }
 
 fn _init_unstable_interfaces() any {
@@ -843,21 +844,21 @@ fn _init_unstable_interfaces() any {
    def wl_seat_iface = _interface_symbol("wl_seat_interface")
    _wp_relative_pointer_interface = _create_interface("zwp_relative_pointer_v1", 1,
       [["destroy", "n", 0]],
-   [["relative_motion", "uuffff", 0]])
+      [["relative_motion", "uuffff", 0]])
    _wp_relative_pointer_manager_interface = _create_interface("zwp_relative_pointer_manager_v1", 1,
       [["destroy", "n", 0],
-   ["get_relative_pointer", "no", [_wp_relative_pointer_interface, wl_pointer_iface]]])
+         ["get_relative_pointer", "no", [_wp_relative_pointer_interface, wl_pointer_iface]]])
    _wp_locked_pointer_interface = _create_interface("zwp_locked_pointer_v1", 1,
       [["destroy", "n", 0],
          ["set_cursor_position_hint", "ff", 0],
-      ["set_region", "?o", [wl_region_iface]]],
+         ["set_region", "?o", [wl_region_iface]]],
       [["locked", "", 0],
-   ["unlocked", "", 0]])
+         ["unlocked", "", 0]])
    _wp_confined_pointer_interface = _create_interface("zwp_confined_pointer_v1", 1,
       [["destroy", "n", 0],
-      ["set_region", "?o", [wl_region_iface]]],
+         ["set_region", "?o", [wl_region_iface]]],
       [["confined", "", 0],
-   ["unconfined", "", 0]])
+         ["unconfined", "", 0]])
    def lock_pointer_types = [
       _wp_locked_pointer_interface,
       wl_surface_iface,
@@ -875,15 +876,15 @@ fn _init_unstable_interfaces() any {
    _wp_pointer_constraints_interface = _create_interface("zwp_pointer_constraints_v1", 1,
       [["destroy", "n", 0],
          ["lock_pointer", "noo?ou", lock_pointer_types],
-   ["confine_pointer", "noo?ou", confine_pointer_types]])
+         ["confine_pointer", "noo?ou", confine_pointer_types]])
    _wp_toplevel_decoration_interface = _create_interface("zxdg_toplevel_decoration_v1", 1,
       [["destroy", "n", 0],
          ["set_mode", "u", 0],
-      ["unset_mode", "n", 0]],
-   [["configure", "u", 0]])
+         ["unset_mode", "n", 0]],
+      [["configure", "u", 0]])
    _wp_decoration_manager_interface = _create_interface("zxdg_decoration_manager_v1", 1,
       [["destroy", "n", 0],
-   ["get_toplevel_decoration", "no", [_wp_toplevel_decoration_interface, _xdg_toplevel_interface]]])
+         ["get_toplevel_decoration", "no", [_wp_toplevel_decoration_interface, _xdg_toplevel_interface]]])
    _wp_text_input_interface = _create_interface("zwp_text_input_v3", 1,
       [["destroy", "n", 0],
          ["enable", "", 0],
@@ -891,33 +892,33 @@ fn _init_unstable_interfaces() any {
          ["set_content_type", "uu", 0],
          ["set_cursor_rectangle", "iiii", 0],
          ["set_surrounding_text", "sii", 0],
-      ["commit", "", 0]],
+         ["commit", "", 0]],
       [["enter", "o", [wl_surface_iface]],
          ["leave", "o", [wl_surface_iface]],
          ["preedit_string", "?si", 0],
          ["commit_string", "?s", 0],
          ["delete_surrounding_text", "uu", 0],
-   ["done", "u", 0]])
+         ["done", "u", 0]])
    _wp_text_input_manager_interface = _create_interface("zwp_text_input_manager_v3", 1,
       [["destroy", "n", 0],
-      ["get_text_input", "no", [_wp_text_input_interface, wl_seat_iface]]],
-   0)
+         ["get_text_input", "no", [_wp_text_input_interface, wl_seat_iface]]],
+      0)
    _wp_viewport_interface = _create_interface("wp_viewport", 1,
       [["destroy", "n", 0],
          ["set_source", "ffff", 0],
-      ["set_destination", "ii", 0]],
-   0)
+         ["set_destination", "ii", 0]],
+      0)
    _wp_viewporter_interface = _create_interface("wp_viewporter", 1,
       [["destroy", "n", 0],
-      ["get_viewport", "no", [_wp_viewport_interface, wl_surface_iface]]],
-   0)
+         ["get_viewport", "no", [_wp_viewport_interface, wl_surface_iface]]],
+      0)
    _wp_fractional_scale_interface = _create_interface("wp_fractional_scale_v1", 1,
       [["destroy", "n", 0]],
-   [["preferred_scale", "u", 0]])
+      [["preferred_scale", "u", 0]])
    _wp_fractional_scale_manager_interface = _create_interface("wp_fractional_scale_manager_v1", 1,
       [["destroy", "n", 0],
-      ["get_fractional_scale", "no", [_wp_fractional_scale_interface, wl_surface_iface]]],
-   0)
+         ["get_fractional_scale", "no", [_wp_fractional_scale_interface, wl_surface_iface]]],
+      0)
 }
 
 #include <sys/mman.h>
@@ -1036,7 +1037,7 @@ fn _wl_registry_bind(any registry, any name, any interface, any version) any {
    def iface_name = load64_h(interface, 0)
    if !iface_name { return 0 }
    wl_proxy_marshal_flags_registry_bind(registry, WL_REGISTRY_BIND, interface, int(version), 0,
-   int(name), iface_name, int(version), 0)
+      int(name), iface_name, int(version), 0)
 }
 
 fn _wl_compositor_create_surface(any compositor) any {
@@ -1359,7 +1360,7 @@ fn _xdg_toplevel_handle_configure(any surface, any toplevel, any width, any heig
    if !win || !is_dict(win) { return 0 }
    _dbgu("xdg_toplevel.configure surface=0x" + str.to_hex(surface) +
       " width=" + to_str(int(from_int(width))) +
-   " height=" + to_str(int(from_int(height))))
+      " height=" + to_str(int(from_int(height))))
    mut next_maximized = false
    mut next_fullscreen = false
    mut next_activated = false
@@ -1630,7 +1631,7 @@ fn set_cursor_pos(any win, any x, any y) bool {
    def locked_ptr = win.get("locked_pointer", 0)
    if !locked_ptr { return false }
    wl_proxy_marshal_flags_ptr_ii(locked_ptr, 1, 0, int(get_proxy_version(locked_ptr)), 0,
-   int(x * 256), int(y * 256))
+      int(x * 256), int(y * 256))
    true
 }
 
@@ -1740,7 +1741,7 @@ fn _ensure_data_source_iface() any {
    if !_wl_data_source_iface {
       _wl_data_source_iface = _create_interface("wl_data_source", 3,
          [["offer", "s", 0], ["destroy", "n", 0], ["set_actions", "u", 0]],
-      [["target", "?s", 0], ["send", "sh", 0], ["cancelled", "", 0]])
+         [["target", "?s", 0], ["send", "sh", 0], ["cancelled", "", 0]])
    }
    _wl_data_source_iface
 }
@@ -2485,8 +2486,8 @@ fn _pointer_flush_frame(any data, any pointer=0) any {
          def win = _windows.get(next_surface, 0)
          if win {
             _pointer_apply_cursor(data, common.value_or(pointer, load64_h(data, _WG_POINTER)), load64_h(data,
-               _WG_POINTER_ENTER_SERIAL),
-            win)
+                  _WG_POINTER_ENTER_SERIAL),
+               win)
             _push_event(win, EVENT_MOUSE_ENTER, 0)
          }
       }
@@ -2778,11 +2779,11 @@ fn _keyboard_handle_key(any data, any keyboard, any serial, any time, any key, a
                )
             } elif band(b0, 0xf0) == 0xe0 && nbytes >= 3 {
                cp = bor(bshl(band(b0, 0x0f), 12),
-               bor(bshl(band(load8(utf8_buf, 1), 0x3f), 6), band(load8(utf8_buf, 2), 0x3f)))
+                  bor(bshl(band(load8(utf8_buf, 1), 0x3f), 6), band(load8(utf8_buf, 2), 0x3f)))
             } elif band(b0, 0xf8) == 0xf0 && nbytes >= 4 {
                cp = bor(bshl(band(b0, 0x07), 18),
                   bor(bshl(band(load8(utf8_buf, 1), 0x3f), 12),
-               bor(bshl(band(load8(utf8_buf, 2), 0x3f), 6), band(load8(utf8_buf, 3), 0x3f))))
+                     bor(bshl(band(load8(utf8_buf, 2), 0x3f), 6), band(load8(utf8_buf, 3), 0x3f))))
             }
             if cp > 0 {
                mut char_data = dict(8)
@@ -3436,13 +3437,13 @@ comptime template _wl_monitor_get1(name, doc, key, defv, fallback){
 
 comptime emit _wl_monitor_get2(get_monitor_pos,
    "Returns [x, y] of a Wayland output.",
-"x", 0, "y", 0)
+   "x", 0, "y", 0)
 comptime emit _wl_monitor_get4(get_monitor_workarea,
    "Returns [x, y, w, h] of a Wayland output.",
-"x", 0, "y", 0, "w", 0, "h", 0)
+   "x", 0, "y", 0, "w", 0, "h", 0)
 comptime emit _wl_monitor_get2(get_monitor_physical_size,
    "Returns [width_mm, height_mm] of a Wayland output.",
-"physical_w", 0, "physical_h", 0)
+   "physical_w", 0, "physical_h", 0)
 
 fn get_monitor_content_scale(any monitor) list {
    "Returns [xscale, yscale] of a Wayland output."
@@ -3453,7 +3454,7 @@ fn get_monitor_content_scale(any monitor) list {
 
 comptime emit _wl_monitor_get1(get_monitor_name,
    "Returns the human-readable name of a Wayland output.",
-"name", "", "")
+   "name", "", "")
 
 fn get_video_mode(any monitor) any {
    "Returns current video mode(w, h, refresh) for a Wayland output."
@@ -3495,7 +3496,7 @@ fn set_input_mode(any win, int mode, int value) dict {
                surface,
                pointer,
                0,
-            2)
+               2)
             if confined_ptr {
                wl_proxy_add_listener(confined_ptr, conf_listener, conf_data)
                next_win = next_win.set("confined_pointer", confined_ptr)
@@ -3522,7 +3523,7 @@ fn set_input_mode(any win, int mode, int value) dict {
                surface,
                pointer,
                0,
-            2)
+               2)
             if locked_ptr {
                wl_proxy_add_listener(locked_ptr, lock_listener, lock_data)
                next_win = next_win.set("locked_pointer", locked_ptr)
@@ -3539,7 +3540,7 @@ fn set_input_mode(any win, int mode, int value) dict {
                1,
                1,
                0,
-            pointer)
+               pointer)
             if relative_ptr {
                wl_proxy_add_listener(relative_ptr, rel_listener, rel_data)
                next_win = next_win.set("relative_pointer", relative_ptr)
@@ -3579,7 +3580,7 @@ fn get_input_mode(any win, int mode) int {
 
 fn get_key_scancode(any win, int key) int {
    "Wayland has no stable hardware scancode mapping; returns -1."
-   -1
+   return -1
 }
 
 fn wl_proxy_marshal_flags_full_set_cursor(any pointer, int serial, any surface, int x, int y) any {
@@ -3606,12 +3607,12 @@ fn _text_input_handle_commit(any data, any text_input, any text) any {
          next = i + 2
       } elif band(b0, 0xf0) == 0xe0 && load8(text, i + 1) != 0 && load8(text, i + 2) != 0 {
          cp = bor(bshl(band(b0, 0x0f), 12),
-         bor(bshl(band(load8(text, i + 1), 0x3f), 6), band(load8(text, i + 2), 0x3f)))
+            bor(bshl(band(load8(text, i + 1), 0x3f), 6), band(load8(text, i + 2), 0x3f)))
          next = i + 3
       } elif band(b0, 0xf8) == 0xf0 && load8(text, i + 1) != 0 && load8(text, i + 2) != 0 && load8(text, i + 3) != 0 {
          cp = bor(bshl(band(b0, 0x07), 18),
             bor(bshl(band(load8(text, i + 1), 0x3f), 12),
-         bor(bshl(band(load8(text, i + 2), 0x3f), 6), band(load8(text, i + 3), 0x3f))))
+               bor(bshl(band(load8(text, i + 2), 0x3f), 6), band(load8(text, i + 3), 0x3f))))
          next = i + 4
       }
       if cp > 0 {

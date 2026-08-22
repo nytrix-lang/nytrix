@@ -14,9 +14,7 @@ use std.os.ui.render.vk.vulkan
 use std.os.ui.render.vk.buffers (_find_memory_type,
    _ensure_upload_cb,
    _begin_upload_cb,
-
-_submit_upload_cb)
-
+   _submit_upload_cb)
 use std.os.ui.render.matrix (mat4_identity)
 use std.os.ui.render.vk.draw (_draw_raw_stream_current_material, draw_rect_tex)
 use std.os.ui.render.vk.pipeline (bind_pipeline, _ensure_skybox_pipeline)
@@ -174,7 +172,7 @@ fn _record_image_readback_to_buffer(any cb,
       src_access,
       _vk_access_transfer_read(),
       old_layout,
-   _vk_layout_transfer_src())
+      _vk_layout_transfer_src())
    cmd_pipeline_barrier(cb,
       src_stage,
       _vk_pipeline_transfer(),
@@ -184,7 +182,7 @@ fn _record_image_readback_to_buffer(any cb,
       0,
       0,
       1,
-   barrier)
+      barrier)
    memset(region, 0, 56)
    store32(region, _vk_image_aspect_color(), 16)
    store32(region, 1, 28)
@@ -197,7 +195,7 @@ fn _record_image_readback_to_buffer(any cb,
       _vk_access_transfer_read(),
       0,
       _vk_layout_transfer_src(),
-   old_layout)
+      old_layout)
    cmd_pipeline_barrier(cb, _vk_pipeline_transfer(), restore_stage, 0, 0, 0, 0, 0, 1, barrier)
    true
 }
@@ -383,7 +381,7 @@ fn _upload_image_region(any image, int x, int y, int w, int h, int old_layout) b
       src_access,
       _vk_access_transfer_write(),
       old_layout,
-   _vk_layout_transfer_dst())
+      _vk_layout_transfer_dst())
    cmd_pipeline_barrier(cb, src_stage, _vk_pipeline_transfer(), 0, 0, 0, 0, 0, 1, _upload_bar1)
    memset(_upload_region, 0, 56)
    store32(_upload_region, _vk_image_aspect_color(), 16)
@@ -411,7 +409,7 @@ fn _record_upload_shader_read_barrier(any cb, any image, int level_count=1) any 
       _vk_layout_shader_read_only(),
       0,
       1,
-   level_count)
+      level_count)
    cmd_pipeline_barrier(cb,
       _vk_pipeline_transfer(),
       _vk_pipeline_fragment_shader(),
@@ -421,7 +419,7 @@ fn _record_upload_shader_read_barrier(any cb, any image, int level_count=1) any 
       0,
       0,
       1,
-   _upload_bar2)
+      _upload_bar2)
    0
 }
 
@@ -446,7 +444,7 @@ fn bindless_sync_texture_slot(any tex_id) bool {
          " w=" + to_str(int(tex_obj.get("width", 0))) +
          " h=" + to_str(int(tex_obj.get("height", 0))) +
          " fmt=" + to_str(int(tex_obj.get("format", 0))) +
-      " path=" + to_str(tex_obj.get("path", "")))
+         " path=" + to_str(tex_obj.get("path", "")))
    }
    if synced && synced_view == tex_view && synced_sampler == tex_sampler { return true }
    mut im_info = _tex_alloc(24)
@@ -518,7 +516,7 @@ fn _vk_create_image_and_memory(int width, int height, int format, int mip_levels
    store32(img_ci, 0, 52)
    store32(img_ci,
       _vk_image_usage_transfer_dst() | _vk_image_usage_sampled() | (mip_levels > 1 ? _vk_image_usage_transfer_src() : 0),
-   56)
+      56)
    store32(img_ci, _vk_sharing_mode_exclusive(), 60)
    store32(img_ci, 0, 80)
    def r1 = create_image(_device, img_ci, 0, img_ptr)
@@ -655,14 +653,13 @@ fn create_texture_ex(int width,
          _tex_debug_or_trace("[gfx:vulkan] mip upload too large; using base level only w=" + to_str(width) +
             " h=" + to_str(height) +
             " mip_bytes=" + to_str(mip_bytes) +
-         " staging_bytes=" + to_str(_staging_capacity))
+            " staging_bytes=" + to_str(_staging_capacity))
          use_mipmaps_live = false
       }
    }
    def tex_filter = _normalize_filter(filter)
    def tex_sampler = _texture_sampler(tex_filter, wrap_s, wrap_t)
    def mip_levels = use_mipmaps_live ? _mip_level_count(width, height) : 1
-
    def res = _vk_create_image_and_memory(width, height, format, mip_levels, bpp)
    def image = res[0]
    if !image { return -1 }
@@ -672,7 +669,6 @@ fn create_texture_ex(int width,
    def mem_req = res[4]
    def alloc_info = res[5]
    def mem_ptr = res[6]
-
    mut view_ci = _tex_alloc(80)
    store32(view_ci, _vk_stype_image_view_create_info(), 0)
    store64_h(view_ci, image, 24)
@@ -771,7 +767,7 @@ fn create_texture_ex(int width,
       " fmt=" + to_str(format) +
       " bpp=" + to_str(bpp) +
       " view=0x" + str.to_hex(view) +
-   " sampler=0x" + str.to_hex(tex_sampler))
+      " sampler=0x" + str.to_hex(tex_sampler))
    if _bindless_ds { bindless_sync_texture_slot(tex_id) }
    _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr, view_ci, view_ptr)
    if mip_pixels && mip_pixels != pixels { free(mip_pixels) }
@@ -1123,7 +1119,7 @@ fn read_framebuffer() any {
          " size=" + to_str(w) + "x" + to_str(h) +
          " img=" + to_str(_image_index) +
          " p0=0x" + str.to_hex(p0) +
-      " pc=0x" + str.to_hex(c0))
+         " pc=0x" + str.to_hex(c0))
    }
    def res = {"data": pixels, "width": w, "height": h, "bpp": 4}
    res
@@ -1179,7 +1175,7 @@ fn _upload_cubemap_face_dedicated(any image, int face_size, any pixels, int laye
    def mem_sz = load64_h(mem_req, 0)
    def type_bits = load32(mem_req, 16)
    def mem_type = _find_memory_type(type_bits,
-   _vk_memory_host_visible_coherent())
+      _vk_memory_host_visible_coherent())
    mut alloc_info = _tex_alloc(64)
    store32(alloc_info, _vk_stype_memory_allocate_info(), 0)
    store64_h(alloc_info, mem_sz, 16)
@@ -1219,7 +1215,7 @@ fn _upload_cubemap_face_dedicated(any image, int face_size, any pixels, int laye
       _vk_layout_undefined(),
       _vk_layout_transfer_dst(),
       layer,
-   1)
+      1)
    cmd_pipeline_barrier(cb, _vk_pipeline_top_of_pipe(), _vk_pipeline_transfer(), 0, 0, 0, 0, 0, 1, bar)
    mut copy_region = _tex_alloc(56)
    store32(copy_region, _vk_image_aspect_color(), 16)
@@ -1240,7 +1236,7 @@ fn _upload_cubemap_face_dedicated(any image, int face_size, any pixels, int laye
       _vk_layout_transfer_dst(),
       _vk_layout_shader_read_only(),
       layer,
-   1)
+      1)
    cmd_pipeline_barrier(cb,
       _vk_pipeline_transfer(),
       _vk_pipeline_fragment_shader(),
@@ -1250,7 +1246,7 @@ fn _upload_cubemap_face_dedicated(any image, int face_size, any pixels, int laye
       0,
       0,
       1,
-   bar)
+      bar)
    end_command_buffer(cb)
    mut submit_info = _tex_alloc(72)
    store32(submit_info, _vk_stype_submit_info(), 0)

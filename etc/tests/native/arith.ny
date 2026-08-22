@@ -36,6 +36,7 @@ def int exp = 2
 assert_eq(base ^ exp, 9)
 assert_eq(base ^ 2, 9)
 assert_eq(2 ^ exp, 4)
+
 fn ipow(int x) int { return x ^ 2 }
 assert_eq(ipow(2), 4)
 assert_eq(ipow(4), 16)
@@ -51,5 +52,4 @@ assert_eq(5 >= 5, true)
 assert_eq(5 == 5, true)
 assert_eq(5 != 3, true)
 assert_eq(5 == 3, false)
-
 print("✓ native arithmetic tests passed")

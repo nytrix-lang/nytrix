@@ -1,0 +1,13 @@
+shape oracle_argc_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result argc]
+  template ny-test-case
+  flags "--native-result-oracle=1 -O1"
+  expect compile_and_run
+  source ny <<'NY'
+use std.os
+
+argc()
+NY
+}

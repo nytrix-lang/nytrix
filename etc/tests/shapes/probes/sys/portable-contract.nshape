@@ -1,0 +1,42 @@
+shape portable-contract {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys", "render"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.ui.render as render
+
+;; Conformance of the shared rendering contract (std.os.ui.render.
+;; portable_contract): every guarantee must be reported and every named
+;; entry point callable, independent of the active backend.  Device-specific
+;; rendering (windows, GPUs) is not required to pass this probe.
+def c = render.portable_contract()
+assert(is_dict(c), "portable contract is a dict")
+assert(c.get("version", 0) == 1, "contract version 1")
+assert(c.get("coordinate_system", "") == "2d-top-left-pixels-3d-right-handed", "coordinate system")
+assert(c.get("depth_3d", false) == true, "depth_3d is guaranteed")
+assert(c.get("alpha_blend", "") == "source-alpha", "source-alpha blending")
+def frame = c.get("frame", {})
+assert(is_dict(frame), "frame guarantees dict")
+assert(frame.get("begin", false) == true, "frame.begin guaranteed")
+assert(frame.get("clear", false) == true, "frame.clear guaranteed")
+assert(frame.get("draw", false) == true, "frame.draw guaranteed")
+assert(frame.get("present", false) == true, "frame.present guaranteed")
+def prim = c.get("primitives", {})
+assert(is_dict(prim), "primitives dict")
+assert(prim.get("rect", false) == true, "rect guaranteed")
+assert(prim.get("line", false) == true, "line guaranteed")
+assert(prim.get("triangle", false) == true, "triangle guaranteed")
+assert(prim.get("texture", false) == true, "texture guaranteed")
+assert(prim.get("text", false) == true, "text guaranteed")
+def ng = c.get("not_guaranteed", [])
+assert(is_list(ng) && ng.len > 0, "not_guaranteed documented")
+def backends = c.get("backend_specific", [])
+assert(is_list(backends) && backends.len > 0, "backend_specific documented")
+def backend_name = render.get_active_backend_name()
+assert(is_str(backend_name), "active backend name queryable")
+print("PORTABLE_CONTRACT_OK version=" + to_str(c.get("version")) + " backend=" + backend_name)
+NY
+}

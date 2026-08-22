@@ -35,7 +35,12 @@ typedef enum {
    * architecture.  Text assembly or an object writer alone must not imply
    * that `--native-only` can execute it live. */
   NY_NATIVE_CAP_LIVE_JIT = 1u << 7,
+  /* The target can lower pointer byte loads/stores through machine form. */
+  NY_NATIVE_CAP_MACH_BYTE = 1u << 9,
+  /* The target can lower NYIR_BOUNDS_CHECK to a native trap instruction. */
+  NY_NATIVE_CAP_MACH_TRAP = 1u << 8
 } ny_native_target_cap_t;
+
 
 typedef struct ny_native_target_info_t {
   ny_native_target_t target;
@@ -91,9 +96,14 @@ typedef void (*ny_native_link_visitor_t)(const char *library, void *ctx);
 void ny_native_visit_program_links(const program_t *prog,
                                    ny_native_link_visitor_t visitor,
                                    void *ctx);
+void ny_native_visit_program_links_for_options(const program_t *prog,
+                                               const ny_options *opt,
+                                               ny_native_link_visitor_t visitor,
+                                               void *ctx);
 
 bool ny_native_target_info_init(ny_native_target_info_t *info,
                                 const ny_options *opt);
+bool ny_native_vector_selftest(char *err, size_t err_len);
 bool ny_native_tier_plan_init(ny_native_tier_plan_t *plan,
                               const ny_native_target_info_t *target,
                               const ny_options *opt);
@@ -112,8 +122,8 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
 bool ny_native_build_nir(const program_t *prog, const ny_options *opt,
                          nyir_func_t *rt_main_out,
                          nyir_func_t *funcs_out, size_t *func_count,
-                         size_t max_funcs, char *err, size_t err_len);
-
+                         const char **func_names_out, size_t max_funcs,
+                         char *err, size_t err_len);
 bool ny_native_emit_asm(const program_t *prog, const ny_options *opt,
                         const char *path, char *err, size_t err_len);
 bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,

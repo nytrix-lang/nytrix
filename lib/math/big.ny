@@ -15,7 +15,6 @@ module std.math.big(is_bigint, bigint, bigint_from_int, bigint_from_str, bigint_
    bf_from_int, bf_from_float, bf_to_float, bf_to_str, bf_precision,
    bf_add, bf_sub, bf_mul, bf_div, bf_neg, bf_abs, bf_sign,
    bf_eq, bf_lt, bf_gt, bf_le, bf_ge, bf_sqrt, bf_pow_int)
-
 use std.core
 use std.core.str
 use std.math.float (float)

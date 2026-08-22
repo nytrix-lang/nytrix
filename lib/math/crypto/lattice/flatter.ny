@@ -2168,7 +2168,6 @@ fn _flatter_blocked_triangular_reduce_tile(dict state, int r0, int r1, int c0, i
    mut ops = state.get("ops")
    mut tile_reports = state.get("tile_reports")
    mut tile_count = int(state.get("tile_count", 0))
-
    mut tile_ops = []
    mut changed = false
    mut i = r0
@@ -2405,7 +2404,6 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
          if !changed { p = passes } else { p += 1 }
       }
    }
-
    work = state.get("work")
    transform = state.get("transform")
    fast_row_ops = int(state.get("fast_row_ops"))
@@ -2418,7 +2416,6 @@ fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passe
    ops = state.get("ops")
    tile_reports = state.get("tile_reports")
    tile_count = int(state.get("tile_count"))
-
    def out_basis = matrix.Matrix(work)
    def transform_matrix = track ? matrix.Matrix(transform) : nil
    def applied = track ? _flatter_matmul(transform_matrix, a) : out_basis

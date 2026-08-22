@@ -1,3 +1,7 @@
+/*
+ * Systems layer: platform-specific codegen helpers for OS-dependent
+ * features (signals, stack limits, watchdog, sanitizer integration).
+ */
 #include "code/systems.h"
 #include "priv.h"
 #include <string.h>

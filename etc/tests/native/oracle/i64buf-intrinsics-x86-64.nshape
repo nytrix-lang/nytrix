@@ -1,0 +1,18 @@
+shape oracle_i64buf_intrinsics_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle nyir i64-buffer pointer parameter]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=0; -O1 --native-result-oracle=0; -O2 --native-result-oracle=0; -O3 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.tbuf
+fn put(ptr b, int i, int v) int {
+  i64buf_store(b, i, v)
+  i64buf_load(b, i)
+}
+def b = i64buf_new(4)
+if put(b, 1, 42) == 42 { 0 } else { 1 }
+NY
+}

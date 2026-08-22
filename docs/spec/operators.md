@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":160,"summary":"Operator precedence, comparisons, arithmetic, assignment, and overload rules."} -->
 # Operators
 
 Operators cover arithmetic, comparison, logic, bitwise work, ternary selection,
@@ -21,121 +22,44 @@ native-code behavior.
 `^` is exponentiation. It is right-associative, so `2^3^2` parses as
 `2^(3^2)`.
 
-Nytrix has no `+%` or `*%` operators. Use `%` for remainder. Put overflow
-handling at the value/type boundary.
+Nytrix has no `+%` or `*%` wrapping operators. Unsigned arithmetic uses
+the ordinary operators and wraps on overflow.
 
-## Assignment
+## Precedence
 
-```ny
-name = expr
-name += expr
-name -= expr
-name *= expr
-name /= expr
-name %= expr
-++name
---name
-```
+Higher rows bind more tightly.
 
-Plain assignment writes a mutable binding or settable target. Compound
-assignment reads the current value, applies the matching operator, and writes
-the result back through the same assignment path. The operator keeps its type,
-overflow, and native-boundary rules.
+| Level | Operators | Associativity |
+| --- | --- | --- |
+| 8 | `^` | right |
+| 7 | `&`, `|`, bitwise xor, `<<`, `>>` | left |
+| 6 | `*`, `/`, `%` | left |
+| 5 | `+`, `-` | left |
+| 4 | `<`, `<=`, `>`, `>=`, `lo..hi` range | left |
+| 3 | `==`, `!=` | left |
+| 2 | `&&`, `??` | left |
+| 1 | `||`, `a |> f` | left |
+| - | `cond ? a : b`, assignment `=` and compound forms | right |
 
-Nytrix has no bitwise or shift compound assignment forms such as `&=` or
-`<<=`. Write the assignment out.
+Consequences worth noting:
 
-`++name` and `--name` are prefix increment/decrement statement forms for
-mutable numeric targets. Use `name += 1` or `name -= 1` when that is clearer.
+- `2^3^2` is `2^(3^2)` because exponentiation is right-associative.
+- Bitwise and shift operators bind tighter than `+` and `-`, so
+ `a & b + c` is `a & (b + c)`.
+- The range operator `..` binds with the ordering comparisons, so
+ `1..n == 1..n` compares two range values.
+- `??` binds with `&&`, looser than `==`: `x == y ?? z` parses as
+ `x == (y ?? z)`.
+- Ternary and assignment are loosest. `a ? b : c = d` groups as
+ `a ? b : (c = d)`.
 
-## Comparison
-
-```ny
-a == b
-a != b
-a < b
-a <= b
-a > b
-a >= b
-```
-
-Value kind defines equality. Ordering comparisons work on numeric values and
-text-like values that the runtime/API exposes as comparable.
-
-## Logic
+Parentheses override any of these rules:
 
 ```ny
-cond && other
-cond || other
-!cond
+(a + b) * c
+(flags & mask) != 0
+cond ? a : (b ?? fallback)
 ```
-
-Logical operators evaluate truthiness. Use explicit comparisons when a native
-or numeric boundary needs an exact integer value.
-
-## Bitwise and shifts
-
-```ny
-x & mask
-x | mask
-x ^^ mask
-~x
-x << bits
-x >> bits
-```
-
-Bitwise operators work on integers. Use typed integer values when width, sign,
-or native ABI result matters.
-
-`^^` is bitwise XOR. Use `bxor(a, b)` when a named helper is clearer.
-
-Unary `&value` is not bitwise; it is ownership borrow syntax and is equivalent
-to `borrow(value)`. See [runtime.md](runtime.md) for ownership checks.
-
-## Ternary
-
-```ny
-cond ? when_true : when_false
-```
-
-The ternary form chooses between two expressions. Use `if` for branches that
-need multiple statements or cleanup.
-
-## Coalescing and pipeline
-
-```ny
-value ?? fallback
-value |> fn_call
-value |> [index]
-value |> .member
-```
-
-`??` selects a fallback when the language coalescing rule treats the left side
-as absent. `|>` pipes a value into the next expression form that the parser and
-compiler support.
-
-## Optional chaining
-
-```ny
-value?.member
-value?.member ?? fallback
-```
-
-Optional member access returns `nil` for a `nil` receiver. Otherwise, it
-performs the normal member lookup.
-
-## Calls, indexing, and members
-
-```ny
-fn_name(arg)
-value[index]
-value.member
-module.helper(value)
-```
-
-Calls evaluate arguments and invoke a callable value or named function.
-Indexing uses indexable values. Modules define member and receiver forms;
-`value.member` exists only when a module documents that receiver shape.
 
 ## Custom operators
 
@@ -152,23 +76,12 @@ impl Meter {
 
 The operator body is a named function. The colon separates the right operand
 type from the return type; parameters elsewhere use the normal `Type name`
-spelling.
-
-## Precedence
-
-Parentheses define grouping:
-
-```ny
-(a + b) * c
-(flags & mask) != 0
-cond ? a : (b ?? fallback)
-```
-
-The parser defines precedence. Use parentheses anywhere you need grouping.
+spelling. Operator overloading never changes the fixed precedence of the
+operator spelling; it only supplies a definition for a type.
 
 ## Related
 
-- [syntax.md](syntax.md) for source spelling.
-- [values.md](values.md) for equality and representation.
-- [types.md](types.md) for numeric and native type constraints.
-- [control-flow.md](control-flow.md) for `if`, loops, `case`, and `match`.
+- [Syntax](syntax.md) for source spelling.
+- [Values](values.md) for equality and representation.
+- [Types](types.md) for numeric and native type constraints.
+- [Control Flow](control-flow.md) for `if`, loops, `case`, and `match`.

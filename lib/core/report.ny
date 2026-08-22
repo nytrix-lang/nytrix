@@ -1,11 +1,8 @@
 ;; Keywords: core report diagnostic error warning format style terminal
 ;; Diagnostic report formatting for compiler tools and diagnostics.
-
 use std.core.str
 use std.core.term as term
-
 module std.core.report(format_error, format_warning, format_note, format_location, format_line, format_source_line, indent)
-
 fn format_error(str message, str file="", int line=0, int col=0) str {
    "Formats a diagnostic error message with optional file:line:col location."
    mut out = ""

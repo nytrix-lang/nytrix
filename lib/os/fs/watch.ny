@@ -7,8 +7,7 @@
 ;;   Windows: directory change notifications
 ;;
 ;; The compiler's --hot/--watch uses efficient platform mechanisms.
-
-module std.os.fs.watch (create, close, poll, has_event, wait_any)
+module std.os.fs.watch(create, close, poll, has_event, wait_any)
 use std.os.fs as fs
 use std.os.platform as platform
 use std.os.time as ostime
@@ -39,7 +38,7 @@ fn has_event(any h) bool {
 }
 
 fn wait_any(any h, int timeout_ms = 200) bool {
-   "Wait (best effort) for any event using repeated polls."
+   "Wait(best effort) for any event using repeated polls."
    mut i = 0
    while i < 20 {
       if has_event(h) { return true }
@@ -53,7 +52,6 @@ fn wait_any(any h, int timeout_ms = 200) bool {
 #macos {
    ;; macOS users can access kqueue primitives via the runtime for advanced use.
 } #endif
-
 #windows {
    ;; Windows users can access change notification primitives via the runtime.
 } #endif

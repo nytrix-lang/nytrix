@@ -1,3 +1,7 @@
+/*
+ * TTY progress bar: renders a compact, rate-limited progress display
+ * with elapsed time and throughput estimates for long compilation phases.
+ */
 #include "base/progress.h"
 #include "base/compat.h"
 #include "base/util.h"
@@ -149,7 +153,9 @@ static void ny_progress_draw_locked(void) {
     eta = g_rate_initialized ? (ema_eta * 0.70 + avg_eta * 0.30) : avg_eta;
   }
 
-  /* Build two-color bar: filled (green) then empty (dim). */
+  /*
+   * Build two-color bar: filled (green) then empty (dim).
+   */
   char filled[NY_PROGRESS_BAR_WIDTH * 3 + 1];
   char empty[NY_PROGRESS_BAR_WIDTH * 3 + 1];
   int flen = 0, elen = 0;
@@ -175,7 +181,9 @@ static void ny_progress_draw_locked(void) {
     snprintf(eta_str, sizeof(eta_str), "?");
   fmt_rate(rate_str, sizeof(rate_str), rate);
 
-  /* Synchronised output + colours. */
+  /*
+   * Synchronised output + colours.
+   */
   fprintf(stderr,
     "\x1b[?2026h"                          /* begin sync */
     "\r\033[J"                             /* clear line */
@@ -315,7 +323,9 @@ void ny_progress_finish(void) {
   if (!g_progress_enabled) goto done;
   g_progress_running = 0;
 
-  /* Synchronised clear + final summary. */
+  /*
+   * Synchronised clear + final summary.
+   */
   fprintf(stderr,
     "\x1b[?2026h"
     "\r\033[J"

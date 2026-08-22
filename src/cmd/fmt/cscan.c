@@ -1,3 +1,7 @@
+/*
+ * C scanner for c2ny: tokenizes C source for the source-to-source
+ * translation bridge, producing a token stream consumed by the converter.
+ */
 #include "cscan.h"
 
 #include <ctype.h>
@@ -63,8 +67,10 @@ static int cscan_candidate(const char *src, const CScanToken *tokens, size_t cou
   }
   if (open == 0 || tokens[open - 1].kind != CSCAN_IDENT || cscan_is_control(src, &tokens[open - 1]))
     return 0;
-  /* A definition needs a declaration prefix. This rejects call continuations
-   * such as strcmp(...) == 0) { without trying to parse C types. */
+  /*
+   * A definition needs a declaration prefix. This rejects call continuations
+   * such as strcmp(...) == 0) { without trying to parse C types.
+   */
   if (open < 2 || open - 1 <= decl_start)
     return 0;
   for (size_t i = decl_start; i < open - 1; i++)

@@ -1,0 +1,22 @@
+shape oracle_nested_loop_regalloc_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle machine-ir regalloc nested-loop]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=0; -O1 --native-result-oracle=0; -O2 --native-result-oracle=0; -O3 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+fn nested() i64 {
+  mut i = 0
+  while i < 4 {
+    mut m = 2
+    while m >= 1 {
+      m = m / 2
+    }
+    i += 1
+  }
+  i
+}
+if nested() == 4 { 0 } else { 1 }
+NY
+}

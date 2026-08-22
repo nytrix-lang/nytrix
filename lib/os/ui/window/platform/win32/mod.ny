@@ -412,7 +412,7 @@ mut _cursor_visible_asserted = false
    }
    fn ChangeDisplaySettingsExW(ptr _device, ptr _mode, ptr _hwnd, u32 _flags, ptr _param) i32 {
       "Runs the ChangeDisplaySettingsExW operation."
-      -1
+      return -1
    }
    fn ChangeWindowMessageFilterEx(any _hwnd, any _msg, any _action, any _change) any {
       "Runs the ChangeWindowMessageFilterEx operation."
@@ -822,7 +822,7 @@ mut _cursor_visible_asserted = false
    }
    fn vkCreateWin32SurfaceKHR(any _instance, any _info, any _allocator, any _surface) any {
       "Runs the vkCreateWin32SurfaceKHR operation."
-      -1
+      return -1
    }
    fn WideCharToMultiByte(u32 _cp, u32 _flags, ptr _src, i32 _src_len, ptr _dst, i32 _dst_len, ptr _def, ptr _used) i32 {
       "Runs the WideCharToMultiByte operation."
@@ -1103,7 +1103,7 @@ fn _icon_image_pixels(any image) any {
    if !is_dict(image) { return 0 }
    image.get("pixels_ptr",
       image.get("pixels",
-   image.get("data", 0)))
+         image.get("data", 0)))
 }
 
 fn _icon_pixel_source_len(any pixels) int {
@@ -1533,7 +1533,7 @@ fn _update_window_styles(any win) any {
       SetWindowPos(hwnd, HWND_TOP,
          win.get("x", CW_USEDEFAULT), win.get("y", CW_USEDEFAULT),
          _rect_width(rect), _rect_height(rect),
-      SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER)
+         SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER)
       free(rect)
    }
    win
@@ -1916,7 +1916,7 @@ fn translate_vk_key(int vk, int scancode=0, bool extended=false) int {
    comptime match Win32VirtualKeyFallback(vk, -1)
 }
 
-fn _push_event(list events, int typ, any win, any data=0) list { events.append(ui_event.make_event(typ, win, win.get("handle", 0), data)) }
+fn _push_event(list events, int typ, any win, any data=0) list { def h = win.get("handle", 0) events.append(ui_event.make_event(typ, h, h, data)) }
 
 fn _emit_char_event(list events, any win, int codepoint, int mods=0) list {
    if codepoint <= 0 { return events }
@@ -2385,14 +2385,14 @@ fn translate_messages(any win, any messages) list {
       def msg = messages.get(i, 0)
       if msg && is_dict(msg) &&
       (msg.get("message", 0) == WM_KEYDOWN || msg.get("message", 0) == WM_SYSKEYDOWN ||
-      msg.get("message", 0) == WM_KEYUP || msg.get("message", 0) == WM_SYSKEYUP) &&
+         msg.get("message", 0) == WM_KEYUP || msg.get("message", 0) == WM_SYSKEYUP) &&
       int(msg.get("wparam", 0)) == VK_CONTROL &&
       !band(_hiword(msg.get("lparam", 0)), KF_EXTENDED) &&
       i + 1 < messages_n{
          def next = messages.get(i + 1, 0)
          if next && is_dict(next) &&
          (next.get("message", 0) == WM_KEYDOWN || next.get("message", 0) == WM_SYSKEYDOWN ||
-         next.get("message", 0) == WM_KEYUP || next.get("message", 0) == WM_SYSKEYUP) &&
+            next.get("message", 0) == WM_KEYUP || next.get("message", 0) == WM_SYSKEYUP) &&
          int(next.get("wparam", 0)) == VK_MENU &&
          band(_hiword(next.get("lparam", 0)), KF_EXTENDED) &&
          next.get("time", -1) == msg.get("time", -2){
@@ -2498,7 +2498,7 @@ fn ensure_window_class(any class_name="NytrixWindowClass", any icon_res=0) any {
       print("[window:win32] RegisterClassExW instance=0x" + to_hex(instance) +
          " proc=0x" + to_hex(window_proc) +
          " icon=0x" + to_hex(icon) +
-      " cursor=0x" + to_hex(class_cursor))
+         " cursor=0x" + to_hex(class_cursor))
    }
    _store_native_ptr(wc, icon, 32)
    _store_native_ptr(wc, class_cursor, 40)
@@ -2554,7 +2554,7 @@ fn create_basic_window(any title, int width, int height, int x=CW_USEDEFAULT, in
    def frame_w, frame_h = _rect_width(rect), _rect_height(rect)
    free(rect)
    def hwnd = CreateWindowExW(ex_style, class_wide, wide_title,
-   style, x, y, frame_w, frame_h, 0, 0, instance, 0)
+      style, x, y, frame_w, frame_h, 0, 0, instance, 0)
    free(wide_title)
    if !hwnd {
       if common.env_truthy("NY_DEBUG") { print("[window:win32:error] CreateWindowExW failed last_error=" + to_str(GetLastError()) + " atom=" + to_str(atom) + " style=0x" + to_hex(style) + " ex=0x" + to_hex(ex_style)) }
@@ -2597,7 +2597,7 @@ fn create_basic_window(any title, int width, int height, int x=CW_USEDEFAULT, in
    win = win.set("raw_mouse_motion", band(flags, ui_consts.WINDOW_RAW_MOUSE))
    win = win.set("cursor_mode",
       band(flags, ui_consts.WINDOW_CAPTURE_MOUSE) ? backend_api.CURSOR_CAPTURED :
-   (band(flags, ui_consts.WINDOW_HIDE_MOUSE) ? backend_api.CURSOR_HIDDEN : backend_api.CURSOR_NORMAL))
+      (band(flags, ui_consts.WINDOW_HIDE_MOUSE) ? backend_api.CURSOR_HIDDEN : backend_api.CURSOR_NORMAL))
    win = win.set("cursor_visible", !band(flags, ui_consts.WINDOW_HIDE_MOUSE))
    win = win.set("captured_cursor", band(flags, ui_consts.WINDOW_CAPTURE_MOUSE))
    win = win.set("disabled_cursor", false)
@@ -2611,7 +2611,7 @@ fn create_basic_window(any title, int width, int height, int x=CW_USEDEFAULT, in
    if !band(flags, ui_consts.WINDOW_HIDE) {
       def show_cmd = band(flags, ui_consts.WINDOW_MAXIMIZE) ? SW_SHOWMAXIMIZED :
       (band(flags, ui_consts.WINDOW_MINIMIZE) ? SW_SHOWMINIMIZED :
-      (band(flags, ui_consts.WINDOW_FOCUS_ON_SHOW) ? SW_SHOW : SW_SHOWNA))
+         (band(flags, ui_consts.WINDOW_FOCUS_ON_SHOW) ? SW_SHOW : SW_SHOWNA))
       ShowWindow(hwnd, show_cmd)
       if band(flags, ui_consts.WINDOW_FOCUS_ON_SHOW) {
          BringWindowToTop(hwnd)
@@ -2659,7 +2659,7 @@ fn show_window(any win, int cmd=8) bool {
    ShowWindow(hwnd, cmd)
    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
-   SWP_FRAMECHANGED | SWP_SHOWWINDOW)
+      SWP_FRAMECHANGED | SWP_SHOWWINDOW)
    UpdateWindow(hwnd)
    true
 }
@@ -2810,7 +2810,7 @@ fn set_size(any win, int width, int height) bool {
    mut ok = MoveWindow(hwnd, frame_x, frame_y,
       int(frame_sz.get(0, common.max(1, width))),
       int(frame_sz.get(1, common.max(1, height))),
-   1) != 0
+      1) != 0
    def live = _window_client_size(win, false)
    if !_size_matches(live, width, height) {
       def dw = width - int(live.get(0, width))
@@ -2819,7 +2819,7 @@ fn set_size(any win, int width, int height) bool {
       ok = MoveWindow(hwnd, frame_x, frame_y,
          int(retry_sz.get(0, common.max(1, width + dw))),
          int(retry_sz.get(1, common.max(1, height + dh))),
-      1) != 0 || ok
+         1) != 0 || ok
    }
    free(rect)
    ok
@@ -3006,7 +3006,7 @@ fn set_window_size_limits(any win, int min_w, int min_h, int max_w, int max_h) b
    def hwnd = win.get("handle", 0)
    if !hwnd { return false }
    _windows = _windows.set(hwnd,
-   win.set("min_w", min_w).set("min_h", min_h).set("max_w", max_w).set("max_h", max_h))
+      win.set("min_w", min_w).set("min_h", min_h).set("max_w", max_w).set("max_h", max_h))
    true
 }
 
@@ -3031,7 +3031,7 @@ fn set_window_floating(any win, bool enabled) any {
    def hwnd = win.get("handle", 0)
    if hwnd {
       SetWindowPos(hwnd, enabled ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
-      SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)
+         SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)
    }
    win.set("floating", !!enabled)
 }
@@ -3202,7 +3202,7 @@ fn set_input_mode(any win, int mode, any value) any {
       if previous == backend_api.CURSOR_DISABLED {
          set_cursor_pos(win,
             win.get("restore_cursor_x", win.get("mouse_x", 0)),
-         win.get("restore_cursor_y", win.get("mouse_y", 0)))
+            win.get("restore_cursor_y", win.get("mouse_y", 0)))
       }
       win = win.set("captured_cursor", false)
       win = win.set("disabled_cursor", false)

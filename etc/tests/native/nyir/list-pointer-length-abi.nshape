@@ -1,0 +1,18 @@
+shape native_list_pointer_length_abi {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "x86_64", "list", "abi", "length", "index", "bounds", "locals"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+fn inspect(list paths) int {
+  def copy = paths
+  copy.len * 100 + copy[1]
+}
+
+mut paths = [10, 20, 30]
+paths = [7, 8]
+inspect(paths) - 208
+NY
+}

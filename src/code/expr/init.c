@@ -1,3 +1,7 @@
+/*
+ * Expression codegen init: bootstraps the expression-lowering layer
+ * by including core.c and f64.c into a single compilation unit.
+ */
 #include "base/common.h"
 #include "base/util.h"
 

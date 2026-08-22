@@ -1,3 +1,9 @@
+/*
+ * AArch64 object encoder: machine-form -> A64 instruction encoding
+ * for the ARM 64-bit native backend with FPR and NEON support.
+ * Target-specific object scaffolding stays local to preserve the AArch64
+ * relocation and instruction-layout invariants.
+ */
 #include "code/native/object/internal.h"
 #include "base/parallel.h"
 #include "code/native/ir/machine.h"
@@ -8,9 +14,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Internal AArch64 encoder and ELF64 packager for AAPCS64 scalar + small
+/*
+ * Internal AArch64 encoder and ELF64 packager for AAPCS64 scalar + small
  * aggregate (≤16B register / pointer) NYIR. Object success never invokes an
- * assembler or another compiler. */
+ * assembler or another compiler.
+ */
 
 typedef struct {
   int64_t label;
@@ -59,24 +67,24 @@ typedef struct {
   size_t err_len;
 } ny_a64_obj_ctx_t;
 
-/* Relocations are program-owned transport, not a property of a single
+/*
+ * Relocations are program-owned transport, not a property of a single
  * encoder stack frame.  Keep the bound explicit so a malformed/generated
- * input cannot turn object emission into unbounded allocation. */
-enum { NY_A64_OBJ_MAX_RELOCS = 10000 };
-
+ * input cannot turn object emission into unbounded allocation.
+ */
 static bool ny_a64_reserve_relocs(ny_a64_reloc_t **data, size_t *cap,
                                   size_t want, char *err, size_t err_len) {
-  if (!data || !cap || want > NY_A64_OBJ_MAX_RELOCS) {
+  if (!data || !cap || want > NY_NATIVE_MAX_RELOCS) {
     ny_native_set_err(err, err_len,
-                      "AArch64 ELF object writer: relocation limit is 10000");
+                      "AArch64 ELF object writer: relocation limit is 4096");
     return false;
   }
   if (want <= *cap)
     return true;
   size_t next = *cap ? *cap : 256;
   while (next < want) {
-    if (next > NY_A64_OBJ_MAX_RELOCS / 2) {
-      next = NY_A64_OBJ_MAX_RELOCS;
+    if (next > NY_NATIVE_MAX_RELOCS / 2) {
+      next = NY_NATIVE_MAX_RELOCS;
       break;
     }
     next *= 2;
@@ -493,6 +501,9 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
            ny_a64_load_vec_value(c, 1, in->b >= 0 ? in->b : in->c) &&
            ny_a64_u32(c, 0x3d800001u);
   case NYIR_VEC4_SET1_I64:
+    /*
+     * dup v0.2d, x0
+     */
     return ny_a64_load_value(c, 0, in->a) &&
            ny_a64_u32(c, 0x4e080c00u) &&
            ny_a64_store_vec_value(c, in->dst, 0);
@@ -536,6 +547,12 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
     return ny_a64_vec_fma(c, in, 0x4e20cc00u);
   case NYIR_VEC4_SHUFFLE_F64:
     return ny_a64_vec_shuffle(c, in, 8, 2);
+  case NYIR_VEC4_REDUCE_ADD_F64:
+    return ny_a64_load_vec_value(c, 0, in->b) &&
+           ny_a64_u32(c, 0x7e70d800u) && /* faddp d0, v0.2d */
+           ny_a64_load_fp_value(c, 1, in->a, false) &&
+           ny_a64_u32(c, 0x1e612800u) && /* fadd d0, d0, d1 */
+           ny_a64_store_fp_value(c, in->dst, 0, false);
   case NYIR_VEC8_SHUFFLE_F32:
     return ny_a64_vec_shuffle(c, in, 4, 4);
   case NYIR_VEC4_SHL_I64:
@@ -862,7 +879,8 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
     if (stack_size &&
         !ny_a64_u32(c, 0x910003ffu | (stack_size << 10)))
       return false;
-    if (in->dst < 0) return true;
+    if (in->dst < 0)
+      return true;
     if (ny_a64_value_is_v128(c, in->dst))
       return ny_a64_store_vec_value(c, in->dst, 0);
     if (in->flags & NYIR_INST_F_RET_F64)
@@ -904,29 +922,44 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
     return ny_a64_store_value(c, in->dst, 0);
   }
   case NYIR_COPY_STRUCT: {
-    /* Simple byte copy: a=dst ptr, b=src ptr, imm=size. Use x0/x1/x2 loop. */
-    if (in->imm <= 0)
+    /*
+     * Simple byte copy: a=dst ptr, b=src ptr, imm=size. Use x0/x1/x2 loop.
+     */
+    if (in->imm < 0) {
+      ny_native_set_err(c->err, c->err_len,
+                        "AArch64 object writer: COPY_STRUCT has negative size");
+      return false;
+    }
+    if (in->imm == 0)
       return true;
     if (!ny_a64_load_value(c, 0, in->a) || /* x0 = dst */
         !ny_a64_load_value(c, 1, in->b))   /* x1 = src */
       return false;
     if (!ny_a64_mov_imm(c, 2, in->imm)) /* x2 = size */
       return false;
-    /* Loop: cbz x2, done; ldrb w3,[x1],#1; strb w3,[x0],#1; sub x2,x2,#1; b loop
-     * Encode as unrolled for size<=32, else simple byte loop via patches. */
+    /*
+     * Loop: cbz x2, done; ldrb w3,[x1],#1; strb w3,[x0],#1; sub x2,x2,#1; b loop
+     * Encode as unrolled for size<=32, else simple byte loop via patches.
+     */
     int64_t n = in->imm;
     if (n <= 32) {
       for (int64_t k = 0; k < n; ++k) {
-        /* ldrb w3, [x1, #k] */
+        /*
+         * ldrb w3, [x1, #k]
+         */
         if (!ny_a64_u32(c, 0x39400023u | ((uint32_t)k << 10)))
           return false;
-        /* strb w3, [x0, #k] */
+        /*
+         * strb w3, [x0, #k]
+         */
         if (!ny_a64_u32(c, 0x39000003u | ((uint32_t)k << 10)))
           return false;
       }
       return true;
     }
-    /* Word-wise when size multiple of 8 and ≤256. */
+    /*
+     * Word-wise when size multiple of 8 and ≤256.
+     */
     if ((n & 7) == 0 && n <= 256) {
       for (int64_t k = 0; k < n; k += 8) {
         if (!ny_a64_u32(c, 0xF9400023u | ((uint32_t)(k / 8) << 10)) || /* ldr x3,[x1,#k] */
@@ -942,7 +975,9 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
     return false;
   }
   case NYIR_CAPTURE_RET: {
-    /* Capture second return register (x1) or FP after multi-reg return. */
+    /*
+     * Capture second return register (x1) or FP after multi-reg return.
+     */
     if (in->dst < 0)
       return true;
     unsigned reg = 0;
@@ -968,7 +1003,9 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
       return ny_a64_store_vec_value(c, in->dst,
                                     (unsigned)in->imm - 10u); /* q0..q3 */
     default:
-      return ny_a64_store_value(c, in->dst, 0);
+      ny_native_set_err(c->err, c->err_len,
+                        "AArch64 object writer: unsupported return capture selector");
+      return false;
     }
     return ny_a64_store_value(c, in->dst, reg);
   }
@@ -1188,7 +1225,8 @@ static bool ny_a64_append(ny_obj_buf_t *code, ny_a64_def_t *defs,
                           const ny_native_target_info_t *target,
                           const char *symbol, bool user_function,
                           bool tag_return, char *err, size_t err_len) {
-  if (*def_count >= 256 || ny_a64_def_index(defs, *def_count, symbol) >= 0)
+  if (*def_count >= NY_NATIVE_MAX_DEFS ||
+      ny_a64_def_index(defs, *def_count, symbol) >= 0)
     return false;
   if (!ny_obj_pad_to(code, 16)) return false;
   size_t start = code->len;
@@ -1295,7 +1333,7 @@ static bool ny_a64_append_functions_parallel(
   bool ok = true;
   for (size_t i = 0; i < func_count && ok; ++i) {
     ny_a64_parallel_result_t *r = &results[i];
-    if (*def_count >= 256 ||
+    if (*def_count >= NY_NATIVE_MAX_DEFS ||
         !ny_a64_reserve_relocs(relocs, reloc_cap,
                                *reloc_count + r->reloc_count, err, err_len) ||
         !ny_obj_pad_to(code, 16)) {
@@ -1368,7 +1406,7 @@ bool ny_a64_obj_build_bundle(
   if (!rt_main || !target || !entry_symbol || !*entry_symbol || !code ||
       !out_defs || !out_def_count || !out_relocs || !out_reloc_count)
     return false;
-  ny_a64_def_t defs[256];
+  ny_a64_def_t defs[NY_NATIVE_MAX_DEFS];
   ny_a64_reloc_t *relocs = NULL;
   size_t def_count = 0, reloc_count = 0;
   size_t reloc_cap = 0;
@@ -1415,7 +1453,7 @@ typedef struct {
 
 static bool ny_a64_mach_lower_task(size_t i, void *opaque) {
   ny_a64_mach_lower_ctx_t *ctx = (ny_a64_mach_lower_ctx_t *)opaque;
-  return ny_mach_lower_nir(&ctx->funcs[i], &ctx->out[i], ctx->errors[i], 256);
+  return ny_mach_lower_nir(&ctx->funcs[i], &ctx->out[i], (1u << 8), ctx->errors[i], 256);
 }
 
 bool ny_native_emit_elf64_aarch64_object_from_nirs(
@@ -1425,7 +1463,7 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
     const char *entry_symbol, bool tag_return, char *err, size_t err_len) {
   if (!rt_main || !target || !path || !entry_symbol || !*entry_symbol) return false;
   ny_obj_buf_t code = {0}, file = {0}, strtab = {0};
-  ny_a64_def_t defs[256];
+  ny_a64_def_t defs[NY_NATIVE_MAX_DEFS];
   ny_a64_reloc_t *relocs = NULL;
   size_t def_count = 0, reloc_count = 0;
   size_t reloc_cap = 0;
@@ -1434,7 +1472,7 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
   ny_mach_func_t top_mach = {0};
   ny_mach_func_t *func_mach = NULL;
   char mach_err[256] = {0};
-  bool mach_ok = ny_mach_lower_nir(rt_main, &top_mach, mach_err,
+  bool mach_ok = ny_mach_lower_nir(rt_main, &top_mach, (1u << 8), mach_err,
                                    sizeof(mach_err));
   if (mach_ok && func_count) {
     func_mach = calloc(func_count, sizeof(*func_mach));
@@ -1458,14 +1496,20 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
     }
   }
   if (mach_ok) {
-    ny_x64_obj_symbol_def_t mach_defs[256];
+    ny_x64_obj_symbol_def_t mach_defs[NY_NATIVE_MAX_DEFS];
     ny_x64_obj_reloc_t mach_relocs[NY_X64_OBJ_MAX_RELOCS];
     size_t mach_def_count = 0, mach_reloc_count = 0;
     if (ny_a64_mach_build_bundle(
             &top_mach, func_mach, func_names, func_count, target, entry_symbol,
             tag_return, &code, mach_defs, &mach_def_count, mach_relocs,
             &mach_reloc_count, mach_err, sizeof(mach_err))) {
-      if (mach_def_count <= 256 && mach_reloc_count <= 256) {
+      if (mach_def_count <= NY_NATIVE_MAX_DEFS &&
+          mach_reloc_count <= NY_X64_OBJ_MAX_RELOCS) {
+        relocs = malloc((mach_reloc_count ? mach_reloc_count : 1) *
+                        sizeof(*relocs));
+        if (!relocs)
+          goto done;
+        reloc_cap = mach_reloc_count ? mach_reloc_count : 1;
         for (size_t i = 0; i < mach_def_count; ++i) {
           snprintf(defs[i].name, sizeof(defs[i].name), "%s", mach_defs[i].name);
           defs[i].off = mach_defs[i].off;
@@ -1580,16 +1624,22 @@ done:
   return ok;
 }
 
-/* AArch64 machine form byte encoder. Encodes const-return and simple single-block
- * i64 ALU into raw bytes (no host assembler). General shapes fall back. */
+/*
+ * AArch64 machine form byte encoder. Encodes const-return and simple single-block
+ * i64 ALU into raw bytes (no host assembler). General shapes fall back.
+ */
 
 static bool a64_u32(ny_obj_buf_t *code, uint32_t w) {
   return ny_obj_emit(code, &w, sizeof(w));
 }
 
-/* movz/movk sequence for 64-bit imm into xd (0..30). */
+/*
+ * movz/movk sequence for 64-bit imm into xd (0..30).
+ */
 static bool a64_mov_imm64(ny_obj_buf_t *code, unsigned xd, uint64_t imm) {
-  /* movz xd, imm16, lsl #0 */
+  /*
+   * movz xd, imm16, lsl #0
+   */
   uint32_t movz = 0xD2800000u | ((uint32_t)(imm & 0xffff) << 5) | (xd & 31);
   if (!a64_u32(code, movz))
     return false;
@@ -1597,7 +1647,9 @@ static bool a64_mov_imm64(ny_obj_buf_t *code, unsigned xd, uint64_t imm) {
     uint16_t part = (uint16_t)((imm >> (16 * shift)) & 0xffff);
     if (!part)
       continue;
-    /* movk xd, part, lsl #(16*shift) */
+    /*
+     * movk xd, part, lsl #(16*shift)
+     */
     uint32_t movk = 0xF2800000u | ((uint32_t)shift << 21) |
                     ((uint32_t)part << 5) | (xd & 31);
     if (!a64_u32(code, movk))
@@ -1610,15 +1662,17 @@ static bool a64_ret(ny_obj_buf_t *code) {
   return a64_u32(code, 0xD65F03C0u); /* ret */
 }
 
-/* AArch64 keeps the general stack-slot encoder as the compatibility path, but
+/*
+ * AArch64 keeps the general stack-slot encoder as the compatibility path, but
  * scalar machine form can use caller-saved registers safely for colored
  * ranges. The encoder handles simple CFG branches and relocates them after
  * block layout; calls, floating point, vectors, and true uncolored spills
  * remain explicit fallback cases. x16 and x17 stay available as encoder
- * scratch registers, so the allocator uses x0 through x15 only. */
-#define A64_MACH_COLOR_N 16
+ * scratch registers, so the allocator uses x0 through x15 only.
+ */
+#define A64_MACH_COLOR_N 10
 static const unsigned a64_mach_color_reg[A64_MACH_COLOR_N] =
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    {19, 20, 21, 22, 23, 24, 25, 26, 27, 28};
 
 static int a64_slot_off(const ny_mach_func_t *mach,
                         const ny_mach_operand_t *op);
@@ -1634,17 +1688,26 @@ static ny_mach_type_t a64_operand_type(const ny_mach_func_t *mach,
 
 static bool a64_mach_scalar_regalloc_prepare(const ny_mach_func_t *mach,
                                              ny_mach_regalloc_t *alloc) {
-  if (!mach || !alloc || !mach->block_len || mach->block_len > 8)
+  /*
+   * PHI lowering materializes one edge block per predecessor.  Those blocks
+   * are ordinary machine CFG blocks and the allocator already handles an
+   * arbitrary block count; rejecting them here silently routes loop PHIs
+   * through the legacy stack-only encoder, which does not preserve parallel
+   * copies.
+   */
+  if (!mach || !alloc || !mach->block_len)
     return false;
   if (!ny_mach_regalloc_build(mach, A64_MACH_COLOR_N, alloc))
     return false;
   bool ok = true;
   for (size_t i = 0; ok && i < alloc->segment_len; ++i) {
     const ny_mach_live_segment_t *seg = &alloc->segments[i];
-    /* Split ranges are safe when every segment remains colored: the encoder
+    /*
+     * Split ranges are safe when every segment remains colored: the encoder
      * materializes the allocator's canonical stack home at spill/reload
      * boundaries. A segment with no color still requires the general encoder
-     * because it needs a true register spill. */
+     * because it needs a true register spill.
+     */
     if (seg->vreg >= mach->vreg_len || seg->color < 0 ||
         seg->color >= A64_MACH_COLOR_N)
       ok = false;
@@ -1665,6 +1728,11 @@ static bool a64_mach_scalar_regalloc_prepare(const ny_mach_func_t *mach,
     case NY_MACH_LOAD:
       if (in->dst.kind != NY_MACH_OPERAND_VREG ||
           in->src0.kind != NY_MACH_OPERAND_FRAME)
+        ok = false;
+      break;
+    case NY_MACH_STORE:
+      if (in->dst.kind != NY_MACH_OPERAND_FRAME ||
+          in->src0.kind != NY_MACH_OPERAND_VREG)
         ok = false;
       break;
     case NY_MACH_ADD:
@@ -1699,8 +1767,9 @@ static bool a64_mach_scalar_regalloc_prepare(const ny_mach_func_t *mach,
           in->src1.as.block_index >= mach->block_len)
         ok = false;
       break;
-    case NY_MACH_RET:
+case NY_MACH_RET:
     case NY_MACH_NOP:
+    case NY_MACH_TRAP:
       if (in->opcode == NY_MACH_RET &&
           in->src0.kind != NY_MACH_OPERAND_NONE &&
           in->src0.kind != NY_MACH_OPERAND_VREG &&
@@ -1814,8 +1883,10 @@ static bool a64_mach_store_spills(const ny_mach_func_t *mach,
       return false;
     stored[stored_len++] = op->as.reg;
   }
-  /* A value may remain live on an outgoing edge after its defining
-   * instruction, without being an operand of the branch itself. */
+  /*
+   * A value may remain live on an outgoing edge after its defining
+   * instruction, without being an operand of the branch itself.
+   */
   for (uint32_t v = 0; v < mach->vreg_len; ++v) {
     if (!ny_mach_regalloc_live_out(alloc, block, v))
       continue;
@@ -1888,6 +1959,11 @@ static bool a64_mach_scalar_regalloc_encode(const ny_mach_func_t *mach,
     case NY_MACH_LOAD:
       if (dst < 0 || in->src0.kind != NY_MACH_OPERAND_FRAME ||
           !a64_ldur_x(code, (unsigned)dst, a64_slot_off(mach, &in->src0)))
+        goto fail;
+      break;
+    case NY_MACH_STORE:
+      if (a < 0 || in->dst.kind != NY_MACH_OPERAND_FRAME ||
+          !a64_stur_x(code, (unsigned)a, a64_slot_off(mach, &in->dst)))
         goto fail;
       break;
     case NY_MACH_ADD:
@@ -1980,6 +2056,13 @@ static bool a64_mach_scalar_regalloc_encode(const ny_mach_func_t *mach,
       break;
     case NY_MACH_NOP:
       break;
+    case NY_MACH_TRAP:
+      /*
+       * brk #0 — raises a debug / breakpoint exception.
+       */
+      if (!a64_u32(code, 0xD4200000u))
+        goto fail;
+      break;
     default:
       goto fail;
       }
@@ -2026,12 +2109,14 @@ fail:
   return false;
 }
 
-/* Scalar FP register allocation is kept separate from the integer allocator:
+/*
+ * Scalar FP register allocation is kept separate from the integer allocator:
  * AAPCS64 uses the same v-register number for S/D values, but the files have
  * independent liveness and homes.  This gate is deliberately straight-line.
  * A comparison may produce one integer result, which is materialized in its
  * canonical home before the return; mixed CFG/call forms continue through the
- * proven stack encoder until their cross-class edge protocol is added. */
+ * proven stack encoder until their cross-class edge protocol is added.
+ */
 #define A64_MACH_FPR_COLOR_N 16
 
 typedef struct {
@@ -2214,9 +2299,11 @@ static bool a64_mach_fpr_prepare(const ny_mach_func_t *mach,
       return false;
     }
   }
-  /* Integer values are permitted only as comparison results consumed by the
+  /*
+   * Integer values are permitted only as comparison results consumed by the
    * final return. This keeps the fast path free of an implicit second-class
-   * GPR allocator and prevents mixed-class values from crossing an edge. */
+   * GPR allocator and prevents mixed-class values from crossing an edge.
+   */
   for (uint32_t v = 0; v < mach->vreg_len; ++v) {
     if (mach->vreg_types[v] == NY_MACH_TYPE_F32 ||
         mach->vreg_types[v] == NY_MACH_TYPE_F64)
@@ -2350,7 +2437,9 @@ static bool a64_mach_fpr_encode(const ny_mach_func_t *mach,
       case NY_MACH_COND_GE: cond = 0xa; break;
       default: return false;
       }
-      /* cset x0, cond; store the integer result in the vreg home. */
+      /*
+       * cset x0, cond; store the integer result in the vreg home.
+       */
       if (!a64_u32(code, 0x9A9F07E0u | ((cond ^ 1u) << 12)) ||
           !a64_stur_x(code, 0, a64_slot_off(mach, &in->dst)))
         return false;
@@ -2386,12 +2475,124 @@ static bool a64_mach_fpr_encode(const ny_mach_func_t *mach,
   return true;
 }
 
-/* Straight-line vector machine form uses the AAPCS64 Q-register file without
+/*
+ * Straight-line vector machine form uses the AAPCS64 Q-register file without
  * changing the general stack encoder.  Q16/Q17 are reserved as scratch
  * registers; Q0..Q15 are available to the allocator.  This is deliberately a
- * small, auditable fast path: calls, control flow, mixed scalar/vector values,
- * broadcasts, and uncolored ranges remain on the stack-backed encoder. */
+ * small fast path: calls, control flow, mixed scalar/vector values,
+ * broadcasts, and uncolored ranges remain on the stack-backed encoder.
+ */
 #define A64_MACH_VECTOR_COLOR_N 16
+
+
+/*
+ * Target-tier reporting uses the same physical-color budgets as the AArch64
+ * encoder.  Unlike the fast-path eligibility checks below, telemetry still
+ * summarizes uncolored segments: a spill is exactly the information the
+ * report is meant to expose rather than a reason to suppress the row.
+ */
+static bool a64_mach_profile_hot_loop_block(const ny_mach_func_t *mach,
+                                            uint32_t block) {
+  if (!mach || block >= mach->block_len)
+    return false;
+  uint32_t source_pc = mach->blocks[block].source_pc;
+  return source_pc != UINT32_MAX && ny_native_profile_loop_hot(source_pc) >= 16;
+}
+
+static size_t a64_mach_regalloc_hot_peak_live(const ny_mach_func_t *mach,
+                                              const ny_mach_regalloc_t *a,
+                                              size_t inst_len) {
+  if (!mach || !a || !inst_len)
+    return 0;
+  int *delta = calloc(inst_len + 1, sizeof(*delta));
+  if (!delta)
+    return 0;
+  for (size_t i = 0; i < a->segment_len; ++i) {
+    const ny_mach_live_segment_t *seg = &a->segments[i];
+    if (!a64_mach_profile_hot_loop_block(mach, seg->block) ||
+        seg->start >= inst_len)
+      continue;
+    size_t end = seg->end < inst_len ? seg->end : inst_len - 1;
+    ++delta[seg->start];
+    if (end + 1 < inst_len)
+      --delta[end + 1];
+  }
+  size_t peak = 0;
+  int live = 0;
+  for (size_t pc = 0; pc < inst_len; ++pc) {
+    live += delta[pc];
+    if (live > 0 && (size_t)live > peak)
+      peak = (size_t)live;
+  }
+  free(delta);
+  return peak;
+}
+
+static void a64_mach_regalloc_summarize(const ny_mach_func_t *mach,
+                                        const ny_mach_regalloc_t *a,
+                                        size_t inst_len,
+                                        ny_native_regalloc_metrics_t *out) {
+  if (!out)
+    return;
+  *out = (ny_native_regalloc_metrics_t){0};
+  if (!a)
+    return;
+  out->segments = a->segment_len;
+  for (size_t i = 0; i < a->segment_len; ++i) {
+    const ny_mach_live_segment_t *seg = &a->segments[i];
+    if (seg->color >= 0)
+      ++out->colored;
+    else
+      ++out->spilled;
+    if (seg->reload)
+      ++out->reloads;
+    if (!a64_mach_profile_hot_loop_block(mach, seg->block))
+      continue;
+    ++out->hot_loop_segments;
+    if (seg->color < 0)
+      ++out->hot_loop_spilled;
+    if (seg->reload)
+      ++out->hot_loop_reloads;
+  }
+  out->peak_live = ny_mach_regalloc_peak_live(a, inst_len);
+  out->hot_loop_peak_live = a64_mach_regalloc_hot_peak_live(mach, a, inst_len);
+}
+
+bool ny_native_a64_regalloc_metrics(const ny_mach_func_t *mach,
+                                    ny_native_regalloc_metrics_t *gpr,
+                                    ny_native_regalloc_metrics_t *fpr,
+                                    ny_native_regalloc_metrics_t *vector) {
+  if (gpr)
+    *gpr = (ny_native_regalloc_metrics_t){0};
+  if (fpr)
+    *fpr = (ny_native_regalloc_metrics_t){0};
+  if (vector)
+    *vector = (ny_native_regalloc_metrics_t){0};
+  if (!mach)
+    return false;
+
+  ny_mach_regalloc_t alloc = {0};
+  if (mach->vreg_len &&
+      !ny_mach_regalloc_build(mach, A64_MACH_COLOR_N, &alloc))
+    return false;
+  a64_mach_regalloc_summarize(mach, &alloc, mach->inst_len, gpr);
+  ny_mach_regalloc_free(&alloc);
+
+  if (mach->vreg_len &&
+      !ny_mach_regalloc_build_class(mach, NY_MACH_REGCLASS_FPR,
+                                    A64_MACH_FPR_COLOR_N, &alloc))
+    return false;
+  a64_mach_regalloc_summarize(mach, &alloc, mach->inst_len, fpr);
+  ny_mach_regalloc_free(&alloc);
+
+  if (mach->vreg_len &&
+      !ny_mach_regalloc_build_class(mach, NY_MACH_REGCLASS_VECTOR,
+                                    A64_MACH_VECTOR_COLOR_N, &alloc))
+    return false;
+  a64_mach_regalloc_summarize(mach, &alloc, mach->inst_len, vector);
+  ny_mach_regalloc_free(&alloc);
+  return true;
+}
 
 typedef struct {
   ny_mach_regalloc_t alloc;
@@ -2432,8 +2633,10 @@ static bool a64_mach_vector_carries(const a64_mach_vector_state_t *state,
     return false;
   const ny_mach_live_segment_t *prev =
       a64_mach_vector_segment(state, vreg, seg->start - 1);
-  /* Every CFG edge communicates through the vreg home. Reusing a color on
-   * both sides of an edge must not be mistaken for register residency. */
+  /*
+   * Every CFG edge communicates through the vreg home. Reusing a color on
+   * both sides of an edge must not be mistaken for register residency.
+   */
   return prev && prev->block == seg->block && prev->end + 1 == seg->start &&
          !prev->spill &&
          prev->color == seg->color;
@@ -2452,7 +2655,9 @@ static bool a64_mach_vector_begin(a64_mach_vector_state_t *state,
   return true;
 }
 
-/* Try to fold single-block machine form to a const i64 return. */
+/*
+ * Try to fold single-block machine form to a const i64 return.
+ */
 static bool a64_try_const_ret(const ny_mach_func_t *mach, int64_t *out) {
   if (!mach || !out || mach->block_len > 1)
     return false;
@@ -2547,7 +2752,9 @@ static bool a64_try_const_ret(const ny_mach_func_t *mach, int64_t *out) {
   return false;
 }
 
-/* Stack-slot AArch64 machine-form encoding. */
+/*
+ * Stack-slot AArch64 machine-form encoding.
+ */
 static size_t a64_mach_align(size_t value, size_t align) {
   if (align < 1)
     align = 1;
@@ -3030,8 +3237,10 @@ static bool a64_mach_vector_fma(const ny_mach_func_t *mach,
       !a64_mach_vector_load_operand(mach, state, &in->src2, inst, 18, &c,
                                     code))
     return false;
-  /* FMLA is destructive: Vd = Vd + Vn * Vm.  Seed Vd with the addend
-   * before applying the multiply-add. */
+  /*
+   * FMLA is destructive: Vd = Vd + Vn * Vm.  Seed Vd with the addend
+   * before applying the multiply-add.
+   */
   if (c != (unsigned)dst &&
       !a64_u32(code, 0x4EA01C00u | (c << 16) | (c << 5) |
                           (unsigned)dst))
@@ -3051,6 +3260,8 @@ static bool a64_mach_vector_encode_call(const ny_mach_func_t *mach,
                                         size_t reloc_cap,
                                         size_t code_base,
                                         const ny_native_target_info_t *target) {
+  (void)mach;
+  (void)code_base;
   if (in->call_is_extern && in->src0.kind == NY_MACH_OPERAND_SYMBOL) {
     const char *raw = in->src0.as.symbol;
     if (!raw)
@@ -3067,7 +3278,6 @@ static bool a64_mach_vector_encode_call(const ny_mach_func_t *mach,
     if (relocs && reloc_count && *reloc_count < reloc_cap) {
       snprintf(relocs[*reloc_count].symbol,
                sizeof(relocs[*reloc_count].symbol), "%s", call_sym);
-      (void)code_base;
       relocs[*reloc_count].disp_off = code->len - 4;
       relocs[*reloc_count].type = NY_RELOC_AARCH64_CALL26;
       (*reloc_count)++;
@@ -3094,6 +3304,7 @@ static bool a64_mach_vector_encode(const ny_mach_func_t *mach,
                                     size_t code_base,
                                     const ny_native_target_info_t *target,
                                     char *err, size_t err_len) {
+  (void)code_base;
   int frame = a64_mach_frame_size(mach);
   if (!a64_u32(code, 0xA9BF7BFDu) || !a64_u32(code, 0x910003FDu))
     return false;
@@ -3429,13 +3640,18 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
                                       user_function, err, err_len);
     size_t colored = 0;
     size_t spilled = 0;
+    size_t reloads = 0;
     for (size_t i = 0; i < fpr_state.alloc.segment_len; ++i) {
       if (fpr_state.alloc.segments[i].color >= 0)
         ++colored;
       else
         ++spilled;
+      if (fpr_state.alloc.segments[i].reload)
+        ++reloads;
     }
-    ny_native_mach_fpr_record(fpr_state.alloc.segment_len, colored, spilled);
+    ny_native_mach_fpr_record(
+        fpr_state.alloc.segment_len, colored, spilled, reloads,
+        ny_mach_regalloc_peak_live(&fpr_state.alloc, mach->inst_len));
     free(fpr_state.seeded);
     ny_mach_regalloc_free(&fpr_state.alloc);
     return fpr_ok;
@@ -3446,6 +3662,18 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
                                             user_function, relocs, reloc_count,
                                             reloc_cap, code_base, target,
                                             err, err_len);
+    size_t colored = 0, spilled = 0, reloads = 0;
+    for (size_t i = 0; i < vector_state.alloc.segment_len; ++i) {
+      if (vector_state.alloc.segments[i].color >= 0)
+        ++colored;
+      else
+        ++spilled;
+      if (vector_state.alloc.segments[i].reload)
+        ++reloads;
+    }
+    ny_native_mach_vector_record(
+        vector_state.alloc.segment_len, colored, spilled, reloads,
+        ny_mach_regalloc_peak_live(&vector_state.alloc, mach->inst_len));
     free(vector_state.seeded);
     ny_mach_regalloc_free(&vector_state.alloc);
     return vector_ok;
@@ -3454,17 +3682,33 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
   if (a64_mach_scalar_regalloc_prepare(mach, &scalar_alloc)) {
     bool scalar_ok = a64_mach_scalar_regalloc_encode(
         mach, &scalar_alloc, code, user_function, err, err_len);
+    size_t colored = 0, spilled = 0, reloads = 0;
+    for (size_t i = 0; i < scalar_alloc.segment_len; ++i) {
+      if (scalar_alloc.segments[i].color >= 0)
+        ++colored;
+      else
+        ++spilled;
+      if (scalar_alloc.segments[i].reload)
+        ++reloads;
+    }
+    ny_native_mach_regalloc_record(
+        scalar_alloc.segment_len, colored, spilled, reloads,
+        ny_mach_regalloc_peak_live(&scalar_alloc, mach->inst_len));
     ny_mach_regalloc_free(&scalar_alloc);
     return scalar_ok;
   }
   size_t current_inst = SIZE_MAX;
   unsigned current_opcode = 0;
   int frame = a64_mach_frame_size(mach);
-  /* stp x29,x30,[sp,#-16]!; mov x29,sp; sub sp,#frame */
+  /*
+   * stp x29,x30,[sp,#-16]!; mov x29,sp; sub sp,#frame
+   */
   if (!a64_u32(code, 0xA9BF7BFD) || !a64_u32(code, 0x910003FD))
     return false;
   if (frame) {
-    /* sub sp, sp, #frame (imm12 must fit) */
+    /*
+     * sub sp, sp, #frame (imm12 must fit)
+     */
     if (frame >= 4096) {
       if (err && err_len) snprintf(err, err_len, "a64 machine form: frame too large");
       return false;
@@ -3555,7 +3799,9 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
         break;
       }
       case NY_MACH_LEA: {
-        /* add x0, x29, #imm (imm must be non-neg; frame offs are neg — use sub) */
+        /*
+         * add x0, x29, #imm (imm must be non-neg; frame offs are neg — use sub)
+         */
         int imm9 = a;
         if (imm9 >= 0 && imm9 <= 4095) {
           if (!a64_u32(code, 0x910003A0u | ((uint32_t)imm9 << 10)))
@@ -3770,7 +4016,9 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
         }
         if (!a64_ldur_x(code, 0, a) || !a64_ldur_x(code, 1, b))
           goto fail;
-        /* lsl/asr x0, x0, x1 */
+        /*
+         * lsl/asr x0, x0, x1
+         */
         uint32_t sh = in->opcode == NY_MACH_SHL ? 0x9AC12000u : 0x9AC12800u;
         if (!a64_u32(code, sh))
           goto fail;
@@ -3810,11 +4058,15 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
         if (!a64_ldur_x(code, 0, a) || !a64_ldur_x(code, 1, b))
           goto fail;
         if (in->opcode == NY_MACH_DIV) {
-          /* sdiv x0, x0, x1 */
+          /*
+           * sdiv x0, x0, x1
+           */
           if (!a64_u32(code, 0x9AC10C00u))
             goto fail;
         } else {
-          /* sdiv x2, x0, x1; msub x0, x2, x1, x0  (mod) */
+          /*
+           * sdiv x2, x0, x1; msub x0, x2, x1, x0  (mod)
+           */
           if (!a64_u32(code, 0x9AC10C02u) || !a64_u32(code, 0x9B018040u))
             goto fail;
         }
@@ -3863,7 +4115,9 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
         if (!a64_ldur_x(code, 0, a) || !a64_ldur_x(code, 1, b)) goto fail;
         if (!a64_u32(code, 0xEB01001F)) /* cmp x0,x1 */
           goto fail;
-        /* cset x0, cond */
+        /*
+         * cset x0, cond
+         */
         unsigned cond = 0xb; /* lt */
         switch (in->condition) {
         case NY_MACH_COND_EQ: cond = 0x0; break;
@@ -3885,9 +4139,11 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
           if (!a64_ldur_x(code, 0, a)) goto fail;
           if (!a64_u32(code, 0xB4000000)) /* cbz x0, +0 placeholder - use b.ne */
             goto fail;
-          /* Use cbnz x0, label: 0xB5000000 | imm19 | Rt */
-          /* We'll emit b.ne with patch: actually emit unconditional b with
-             separate path — simplify: cbnz x0, target */
+          /*
+           * Use cbnz x0, label: 0xB5000000 | imm19 | Rt
+           * We'll emit b.ne with patch: actually emit unconditional b with
+           * separate path — simplify: cbnz x0, target
+           */
           code->len -= 4; /* undo */
           if (!a64_u32(code, 0xB5000000)) /* cbnz x0, #0 */
             goto fail;
@@ -4210,7 +4466,6 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
         if (relocs && reloc_count && *reloc_count < reloc_cap) {
           snprintf(relocs[*reloc_count].symbol,
                    sizeof(relocs[*reloc_count].symbol), "%s", call_sym);
-          (void)code_base;
           relocs[*reloc_count].disp_off = code->len - 4;
           relocs[*reloc_count].type = NY_RELOC_AARCH64_CALL26;
           (*reloc_count)++;
@@ -4260,47 +4515,59 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
       case NY_MACH_NOP:
         break;
       case NY_MACH_INLINE_ASM: {
-        /* Barrier/hint templates validated at NYIR lower.
-         * Encode common AArch64 equivalents; unknown → NOP. */
-        if (in->src0.kind == NY_MACH_OPERAND_SYMBOL && in->src0.as.symbol) {
-          const char *t = in->src0.as.symbol;
-          if (strcmp(t, "yield") == 0) {
-            if (!a64_u32(code, 0xD503203Fu)) goto fail;
-          } else if (strcmp(t, "wfe") == 0) {
-            if (!a64_u32(code, 0xD503205Fu)) goto fail;
-          } else if (strcmp(t, "wfi") == 0) {
-            if (!a64_u32(code, 0xD503207Fu)) goto fail;
-          } else if (strcmp(t, "sev") == 0) {
-            if (!a64_u32(code, 0xD503209Fu)) goto fail;
-          } else if (strcmp(t, "isb") == 0 || strcmp(t, "isb sy") == 0) {
-            if (!a64_u32(code, 0xD5033FDFu)) goto fail;
-          } else if (strcmp(t, "dmb") == 0 || strcmp(t, "dmb sy") == 0) {
-            if (!a64_u32(code, 0xD5033FBFu)) goto fail;
-          } else if (strcmp(t, "dmb ish") == 0) {
-            if (!a64_u32(code, 0xD5033BBFu)) goto fail;
-          } else if (strcmp(t, "dsb") == 0 || strcmp(t, "dsb sy") == 0) {
-            if (!a64_u32(code, 0xD5033F9Fu)) goto fail;
-          } else if (strcmp(t, "dsb ish") == 0) {
-            if (!a64_u32(code, 0xD5033B9Fu)) goto fail;
-          } else if (strncmp(t, "nop", 3) == 0) {
-            /* nop, nop;nop → one or more NOP (0xD503201F) */
-            for (const char *p = t; *p; ++p)
-              if ((p == t || p[-1] == ';') &&
-                  (p[0] == 'n' || p[0] == 'N')) {
-                if (!a64_u32(code, 0xD503201Fu)) goto fail;
-              }
-          } else {
-            /* Unknown template → single NOP */
-            if (!a64_u32(code, 0xD503201Fu)) goto fail;
+        /*
+         * Encode only templates with a defined AArch64 lowering.
+         */
+        if (in->src0.kind != NY_MACH_OPERAND_SYMBOL || !in->src0.as.symbol) {
+          if (err && err_len)
+            snprintf(err, err_len, "inline asm needs template");
+          goto fail;
+        }
+        const char *t = in->src0.as.symbol;
+        if (strcmp(t, "yield") == 0) {
+          if (!a64_u32(code, 0xD503203Fu)) goto fail;
+        } else if (strcmp(t, "wfe") == 0) {
+          if (!a64_u32(code, 0xD503205Fu)) goto fail;
+        } else if (strcmp(t, "wfi") == 0) {
+          if (!a64_u32(code, 0xD503207Fu)) goto fail;
+        } else if (strcmp(t, "sev") == 0) {
+          if (!a64_u32(code, 0xD503209Fu)) goto fail;
+        } else if (strcmp(t, "isb") == 0 || strcmp(t, "isb sy") == 0) {
+          if (!a64_u32(code, 0xD5033FDFu)) goto fail;
+        } else if (strcmp(t, "dmb") == 0 || strcmp(t, "dmb sy") == 0) {
+          if (!a64_u32(code, 0xD5033FBFu)) goto fail;
+        } else if (strcmp(t, "dmb ish") == 0) {
+          if (!a64_u32(code, 0xD5033BBFu)) goto fail;
+        } else if (strcmp(t, "dsb") == 0 || strcmp(t, "dsb sy") == 0) {
+          if (!a64_u32(code, 0xD5033F9Fu)) goto fail;
+        } else if (strcmp(t, "dsb ish") == 0) {
+          if (!a64_u32(code, 0xD5033B9Fu)) goto fail;
+        } else if (strncmp(t, "nop", 3) == 0) {
+          bool emitted = false;
+          for (const char *p = t; *p; ++p) {
+            if ((p == t || p[-1] == ';') &&
+                (p[0] == 'n' || p[0] == 'N')) {
+              if (!a64_u32(code, 0xD503201Fu)) goto fail;
+              emitted = true;
+            }
+          }
+          if (!emitted) {
+            if (err && err_len)
+              snprintf(err, err_len, "unsupported inline asm template");
+            goto fail;
           }
         } else {
-          if (!a64_u32(code, 0xD503201Fu)) goto fail;
+          if (err && err_len)
+            snprintf(err, err_len, "unsupported inline asm template '%s'", t);
+          goto fail;
         }
         break;
       }
       case NY_MACH_INTRINSIC: {
-        /* CAPTURE_RET selectors: 0=x1, 1=x0, 2=d0, 3=d1,
-         * 4..7=s0..s3, 8=d2, 9=d3, 10..13=q0..q3. */
+        /*
+         * CAPTURE_RET selectors: 0=x1, 1=x0, 2=d0, 3=d1,
+         * 4..7=s0..s3, 8=d2, 9=d3, 10..13=q0..q3.
+         */
         if (in->src0.kind == NY_MACH_OPERAND_IMM) {
           unsigned sel = (unsigned)(in->src0.as.imm & 0xff);
           if (in->dst.kind == NY_MACH_OPERAND_VREG) {
@@ -4321,14 +4588,17 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
               if (!a64_store_q(code, sel - 10, doff)) goto fail;
               break;
             } else {
+              if (err && err_len)
+                snprintf(err, err_len, "unsupported capture.ret selector %u", sel);
               goto fail;
             }
             if (!a64_stur_x(code, src_reg, doff)) goto fail;
           }
           break;
         }
-        /* Unknown intrinsic → NOP */
-        break;
+        if (err && err_len)
+          snprintf(err, err_len, "unsupported machine intrinsic shape");
+        goto fail;
       }
       default:
         goto fail;
@@ -4344,10 +4614,14 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
     uint32_t *w = (uint32_t *)(code->data + at);
     uint32_t op = *w;
     if ((op & 0xFF000000u) == 0x14000000u) {
-      /* b imm26 */
+      /*
+       * b imm26
+       */
       *w = 0x14000000u | ((uint32_t)imm & 0x03ffffffu);
     } else if ((op & 0xFF000000u) == 0xB5000000u) {
-      /* cbnz Rt, imm19 */
+      /*
+       * cbnz Rt, imm19
+       */
       *w = (op & 0xFF00001Fu) | (((uint32_t)imm & 0x7ffffu) << 5);
     } else
       goto fail;
@@ -4388,7 +4662,9 @@ bool ny_a64_mach_build_bundle(
   code->len = 0;
   size_t reloc_cap = NY_X64_OBJ_MAX_RELOCS;
 
-  /* Fast path: pure const return. */
+  /*
+   * Fast path: pure const return.
+   */
   int64_t cval = 0;
   if (a64_try_const_ret(rt_main_mir, &cval) && func_count == 0) {
     size_t start = code->len;
@@ -4415,7 +4691,7 @@ bool ny_a64_mach_build_bundle(
         snprintf(err, err_len, "a64 machine form: %s", ebuf[0] ? ebuf : "encode fail");
       return false;
     }
-    if (*def_count >= 256) return false;
+    if (*def_count >= NY_NATIVE_MAX_DEFS) return false;
     snprintf(defs[*def_count].name, sizeof(defs[*def_count].name), "%s", symbol);
     defs[*def_count].off = start;
     defs[*def_count].size = code->len - start;
@@ -4430,7 +4706,7 @@ bool ny_a64_mach_build_bundle(
         snprintf(err, err_len, "a64 machine form: %s", ebuf[0] ? ebuf : "encode fail");
       return false;
     }
-    if (*def_count >= 256) return false;
+    if (*def_count >= NY_NATIVE_MAX_DEFS) return false;
     snprintf(defs[*def_count].name, sizeof(defs[*def_count].name), "%s",
              entry_symbol);
     defs[*def_count].off = start;

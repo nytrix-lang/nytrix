@@ -1,3 +1,7 @@
+/*
+ * Debug Adapter Protocol server: stdin/stdout JSON-RPC bridge for
+ * IDE debugger integration (breakpoints, stepping, variable inspection).
+ */
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -10,6 +14,13 @@
 #include <strings.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+/*
+ * Shared base utilities use the compiler's process-wide diagnostics state;
+ * the standalone DAP bridge intentionally does not link compiler options.
+ */
+int color_mode = -1;
+int verbose_enabled = 0;
 
 static int g_seq = 1;
 static char g_program[4096];

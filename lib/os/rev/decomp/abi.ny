@@ -1,7 +1,6 @@
 ;; Keywords: abi registers calling-convention stack immediates
 ;; ABI, register-alias, stack-slot, and immediate parsing primitives.
 module std.os.rev.decomp.abi *
-
 use std.core
 use std.core.str as str
 
@@ -142,7 +141,7 @@ fn _rows_family(list rows) str {
    "x86"
 }
 
-fn _alias_reg_for (list regs, str op) str {
+fn _alias_reg_for(list regs, str op) str {
    def s = str.strip(op)
    mut i = 0
    while i < regs.len {
@@ -158,7 +157,7 @@ fn _alias_reg_for (list regs, str op) str {
 }
 
 fn _alias_reg(str op) str {
-   _alias_reg_for (["rax", "rdi", "rsi", "rdx", "rcx", "r10", "r8", "r9", "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "r0", "r1", "r2", "r3", "r4", "r5", "r7", "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"], op)
+   _alias_reg_for(["rax", "rdi", "rsi", "rdx", "rcx", "r10", "r8", "r9", "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "r0", "r1", "r2", "r3", "r4", "r5", "r7", "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"], op)
 }
 
 fn _cmp_condition_symbol(str cond) str {

@@ -1,5 +1,4 @@
 fn require_positive(proof<5 > 0> p) int { 1 }
-
 def proof positive = prove(5 > 0)
 assert(require_positive(positive) == 1, "indexed compile-time proof")
 

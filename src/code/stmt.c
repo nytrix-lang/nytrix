@@ -1,5 +1,16 @@
+/*
+ * Statement codegen: lowers Nytrix statement nodes (let, mut, if,
+ * loop, return, try/catch, defer, block) to LLVM IR basic blocks.
+ * Statement lowering keeps its PHI and block helpers in this translation unit
+ * so the LLVM builder state remains shared across statement kinds.
+ *
+ * Statement-kind dispatch is intentionally thin; large variable and expression
+ * statement lowering paths are factored into dedicated helpers below. Further
+ * translation-unit splitting can be done when build wiring is available.
+ */
 #include "base/util.h"
 
+#include "code/ownership.h"
 #include "llvm.h"
 #include "nullnarrow.h"
 #include "priv.h"
@@ -44,6 +55,7 @@ static const char *ny_stmt_kind_profile_name(int kind) {
       [NY_S_IF] = "IF",             [NY_S_GUARD] = "GUARD",
       [NY_S_WHILE] = "WHILE",       [NY_S_FOR] = "FOR",
       [NY_S_TRY] = "TRY",           [NY_S_FUNC] = "FUNC",
+      [NY_S_LEMMA] = "LEMMA",
       [NY_S_EXTERN] = "EXTERN",     [NY_S_LINK] = "LINK",
       [NY_S_RETURN] = "RETURN",     [NY_S_LABEL] = "LABEL",
       [NY_S_DEFER] = "DEFER",       [NY_S_GOTO] = "GOTO",
@@ -92,19 +104,14 @@ static void ny_codegen_stmt_kind_profile_add(int kind, double total_ms,
 
 static bool can_bind_decl_direct(const codegen_t *cg, const char *name,
                                  bool is_mut);
-static void stmt_ownership_check_live_borrows(codegen_t *cg, scope *scopes,
-                                              size_t depth, binding *source,
-                                              token_t tok, const char *action);
-static expr_t *stmt_ownership_return_borrow_arg(codegen_t *cg,
-                                                expr_t *call_expr);
-static expr_t *stmt_ownership_releases_arg(codegen_t *cg, expr_t *call_expr);
-static expr_t *stmt_ownership_forgets_arg(codegen_t *cg, expr_t *call_expr);
-static expr_t *stmt_ownership_consumes_arg(codegen_t *cg, expr_t *call_expr);
-static bool stmt_ownership_binding_is_immediate(binding *b);
-static bool stmt_expr_is_mutating_name(const char *name);
-static bool stmt_expr_is_int_list_literal(codegen_t *cg, scope *scopes,
-                                          size_t depth, expr_t *e);
-static bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
+
+/*
+ * Ownership functions extracted to src/code/ownership.c
+ */
+bool stmt_expr_is_mutating_name(const char *name);
+bool stmt_expr_is_int_list_literal(codegen_t *cg, scope *scopes,
+                                    size_t depth, expr_t *e);
+bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
                                 expr_t *e, int64_t *out_min,
                                 int64_t *out_max);
 
@@ -152,746 +159,64 @@ static const char *stmt_call_tail_name(expr_t *e) {
   const char *dot = strrchr(n, '.');
   return dot ? dot + 1 : n;
 }
-
+__attribute__((unused))
 static bool stmt_call_tail_is(expr_t *e, const char *tail) {
   const char *n = stmt_call_tail_name(e);
   return n && tail && strcmp(n, tail) == 0;
 }
 
-static expr_t *stmt_ownership_unary_arg(expr_t *e, const char *name) {
-  if (!stmt_call_tail_is(e, name) || e->as.call.args.len != 1)
-    return NULL;
-  return e->as.call.args.data[0].val;
-}
-
-static bool stmt_expr_is_adt_ctor(codegen_t *cg, expr_t *e) {
-  char *name = ny_adt_member_call_full_name(cg, e);
-  if (!name)
-    return false;
-  enum_def_t *owner = NULL;
-  enum_member_def_t *mem = lookup_enum_member_owner(cg, name, &owner);
-  return mem && owner && mem->has_payload;
-}
-
-static void stmt_ownership_diag(codegen_t *cg, token_t tok, const char *fmt,
-                                ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  char msg[512];
-  vsnprintf(msg, sizeof(msg), fmt, ap);
-  va_end(ap);
-  if (cg && cg->ownership_strict && !ny_is_stdlib_tok(tok)) {
-    ny_diag_error(tok, "%s", msg);
-    cg->had_error = 1;
-  } else {
-    ny_diag_warning(tok, "%s", msg);
-  }
-}
-
-static binding *stmt_ownership_ident_binding(codegen_t *cg, scope *scopes,
-                                             size_t depth, expr_t *e) {
-  if (!cg || !scopes || !e || e->kind != NY_E_IDENT || !e->as.ident.name)
-    return NULL;
-  size_t len = (size_t)e->tok.len;
-  if (len == 0)
-    len = strlen(e->as.ident.name);
-  return stmt_lookup_binding(cg, scopes, depth, e->as.ident.name, len,
-                             e->as.ident.hash);
-}
-
-static binding *stmt_ownership_root_binding(codegen_t *cg, scope *scopes,
-                                            size_t depth, expr_t *e) {
-  if (!e)
-    return NULL;
-  switch (e->kind) {
-  case NY_E_IDENT:
-    return stmt_ownership_ident_binding(cg, scopes, depth, e);
-  case NY_E_INDEX:
-    return stmt_ownership_root_binding(cg, scopes, depth, e->as.index.target);
-  case NY_E_MEMBER:
-    return stmt_ownership_root_binding(cg, scopes, depth, e->as.member.target);
-  case NY_E_DEREF:
-    return stmt_ownership_root_binding(cg, scopes, depth, e->as.deref.target);
-  case NY_E_TRY:
-    return stmt_ownership_root_binding(cg, scopes, depth,
-                                       e->as.try_expr.target);
-  case NY_E_UNARY:
-    return stmt_ownership_root_binding(cg, scopes, depth, e->as.unary.right);
-  case NY_E_CALL: {
-    expr_t *contract_arg = stmt_ownership_return_borrow_arg(cg, e);
-    if (!contract_arg)
-      contract_arg = stmt_ownership_consumes_arg(cg, e);
-    if (!contract_arg)
-      contract_arg = stmt_ownership_releases_arg(cg, e);
-    if (!contract_arg)
-      contract_arg = stmt_ownership_forgets_arg(cg, e);
-    if (contract_arg)
-      return stmt_ownership_root_binding(cg, scopes, depth, contract_arg);
-    const char *helper = stmt_call_tail_name(e);
-    if ((helper &&
-         (strcmp(helper, "borrow") == 0 || strcmp(helper, "own") == 0 ||
-          strcmp(helper, "release") == 0 || strcmp(helper, "forget") == 0)) &&
-        e->as.call.args.len == 1)
-      return stmt_ownership_root_binding(cg, scopes, depth,
-                                         e->as.call.args.data[0].val);
-    return NULL;
-  }
-  case NY_E_MEMCALL:
-    if (stmt_expr_is_mutating_name(e->as.memcall.name))
-      return stmt_ownership_root_binding(cg, scopes, depth, e->as.memcall.target);
-    return NULL;
-  default:
-    return NULL;
-  }
-}
-
-static binding *stmt_ownership_returned_borrow_binding(codegen_t *cg,
-                                                       scope *scopes,
-                                                       size_t depth,
-                                                       expr_t *e) {
-  if (!e)
-    return NULL;
-  expr_t *borrow_arg = stmt_ownership_return_borrow_arg(cg, e);
-  if (!borrow_arg)
-    borrow_arg = stmt_ownership_unary_arg(e, "borrow");
-  if (borrow_arg)
-    return stmt_ownership_root_binding(cg, scopes, depth, borrow_arg);
-  if (e->kind == NY_E_IDENT) {
-    binding *b = stmt_ownership_ident_binding(cg, scopes, depth, e);
-    if (stmt_ownership_binding_is_immediate(b))
-      return NULL;
-    if (b && b->ownership_borrow_source && *b->ownership_borrow_source)
-      return stmt_lookup_binding(cg, scopes, depth, b->ownership_borrow_source,
-                                 strlen(b->ownership_borrow_source),
-                                 b->ownership_borrow_source_hash);
-  }
-  return NULL;
-}
-
-static void stmt_ownership_check_returned_borrow(codegen_t *cg, scope *scopes,
-                                                 size_t depth, expr_t *e) {
-  if (!cg || !cg->ownership_strict || !e)
-    return;
-  binding *src = stmt_ownership_returned_borrow_binding(cg, scopes, depth, e);
-  if (!src || !src->ownership_tracked)
-    return;
-  const char *allowed = cg->current_fn_returns_borrow;
-  if (allowed && *allowed && strcmp(allowed, src->name) == 0)
-    return;
-  stmt_ownership_diag(
-      cg, e->tok, "returning borrow of local owner '%s' would outlive its slot",
-      src->name);
-  ny_diag_fix(
-      "return an owned value, clone(%s), or annotate a parameter borrow with "
-      "@returns_borrow(name)",
-      src->name);
-}
-
-static bool stmt_sig_contract_has(const ny_str_list *list, const char *name) {
-  if (!list || !name)
-    return false;
-  for (size_t i = 0; i < list->len; i++) {
-    if (list->data[i] && strcmp(list->data[i], name) == 0)
-      return true;
-  }
-  return false;
-}
-
-static bool stmt_ownership_type_is_immediate(const char *type_name) {
-  if (!type_name || !*type_name)
-    return false;
-  const char *leaf = strrchr(type_name, '.');
-  leaf = leaf ? leaf + 1 : type_name;
-  if (strcmp(leaf, "ptr") == 0 || leaf[0] == '*')
-    return false;
-  return ny_is_native_abi_type_name(leaf) || strcmp(leaf, "bool") == 0 ||
-         strcmp(leaf, "char") == 0;
-}
-
-static bool stmt_ownership_binding_is_immediate(binding *b) {
-  if (!b)
-    return false;
-  return b->is_int_slot || b->is_int_direct || b->is_f64_slot ||
-         b->is_f64_direct || b->is_f32_slot || b->is_f32_direct ||
-         stmt_ownership_type_is_immediate(b->type_name);
-}
-
-static bool stmt_ownership_borrow_expr_is_immediate(codegen_t *cg,
-                                                    scope *scopes, size_t depth,
-                                                    expr_t *e) {
-  const char *borrow_type = infer_expr_type(cg, scopes, depth, e);
-  if (stmt_ownership_type_is_immediate(borrow_type) ||
-      ny_is_proven_int(cg, scopes, depth, e, NULL))
-    return true;
-  if (e && e->kind == NY_E_INDEX && e->as.index.target &&
-      e->as.index.target->kind == NY_E_IDENT) {
-    binding *target =
-        stmt_ownership_ident_binding(cg, scopes, depth, e->as.index.target);
-    expr_t *init = target && !target->is_mut
-                       ? ny_binding_var_init_expr(
-                             target, e->as.index.target->as.ident.name)
-                       : NULL;
-    if (stmt_expr_is_int_list_literal(cg, scopes, depth, init))
-      return true;
-  }
-  return false;
-}
-
-static const char *stmt_sig_param_name(fun_sig *sig, size_t idx) {
-  if (!sig || !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
-    return NULL;
-  if (idx >= sig->stmt_t->as.fn.params.len)
-    return NULL;
-  return sig->stmt_t->as.fn.params.data[idx].name;
-}
-
-static fun_sig *stmt_ownership_resolve_call_sig(codegen_t *cg,
-                                                expr_t *call_expr) {
-  if (!cg || !call_expr || call_expr->kind != NY_E_CALL ||
-      !call_expr->as.call.callee ||
-      call_expr->as.call.callee->kind != NY_E_IDENT)
-    return NULL;
-  return resolve_overload(cg, call_expr->as.call.callee->as.ident.name,
-                          call_expr->as.call.args.len,
-                          call_expr->as.call.callee->as.ident.hash);
-}
-
-static expr_t *stmt_ownership_arg_for_contract(codegen_t *cg, expr_t *call_expr,
-                                               const ny_str_list *contracts) {
-  fun_sig *sig = stmt_ownership_resolve_call_sig(cg, call_expr);
-  if (!sig || !contracts || contracts->len == 0)
-    return NULL;
-  for (size_t i = 0; i < call_expr->as.call.args.len; i++) {
-    call_arg_t *arg = &call_expr->as.call.args.data[i];
-    const char *pname = arg->name ? arg->name : stmt_sig_param_name(sig, i);
-    if (stmt_sig_contract_has(contracts, pname))
-      return arg->val;
-  }
-  return NULL;
-}
-
-static expr_t *stmt_ownership_return_borrow_arg(codegen_t *cg,
-                                                expr_t *call_expr) {
-  fun_sig *sig = stmt_ownership_resolve_call_sig(cg, call_expr);
-  if (!sig || !sig->returns_borrow)
-    return NULL;
-  for (size_t i = 0; i < call_expr->as.call.args.len; i++) {
-    call_arg_t *arg = &call_expr->as.call.args.data[i];
-    const char *pname = arg->name ? arg->name : stmt_sig_param_name(sig, i);
-    if (pname && strcmp(pname, sig->returns_borrow) == 0)
-      return arg->val;
-  }
-  return NULL;
-}
-
-static expr_t *stmt_ownership_releases_arg(codegen_t *cg, expr_t *call_expr) {
-  fun_sig *sig = stmt_ownership_resolve_call_sig(cg, call_expr);
-  expr_t *arg =
-      sig ? stmt_ownership_arg_for_contract(cg, call_expr, &sig->releases)
-          : NULL;
-  if (arg)
-    return arg;
-  return stmt_ownership_unary_arg(call_expr, "release");
-}
-
-static expr_t *stmt_ownership_forgets_arg(codegen_t *cg, expr_t *call_expr) {
-  fun_sig *sig = stmt_ownership_resolve_call_sig(cg, call_expr);
-  expr_t *arg =
-      sig ? stmt_ownership_arg_for_contract(cg, call_expr, &sig->forgets)
-          : NULL;
-  if (arg)
-    return arg;
-  return stmt_ownership_unary_arg(call_expr, "forget");
-}
-
-static expr_t *stmt_ownership_consumes_arg(codegen_t *cg, expr_t *call_expr) {
-  fun_sig *sig = stmt_ownership_resolve_call_sig(cg, call_expr);
-  return sig ? stmt_ownership_arg_for_contract(cg, call_expr, &sig->consumes)
-             : NULL;
-}
-
-static void stmt_ownership_apply_call_contracts(codegen_t *cg, scope *scopes,
-                                                size_t depth,
-                                                expr_t *call_expr) {
-  if (!cg || !cg->ownership_enabled || !call_expr ||
-      call_expr->kind != NY_E_CALL || !call_expr->as.call.callee ||
-      call_expr->as.call.callee->kind != NY_E_IDENT)
-    return;
-  fun_sig *sig = stmt_ownership_resolve_call_sig(cg, call_expr);
-  if (!sig)
-    return;
-  for (size_t i = 0; i < call_expr->as.call.args.len; i++) {
-    call_arg_t *arg = &call_expr->as.call.args.data[i];
-    const char *pname = arg->name ? arg->name : stmt_sig_param_name(sig, i);
-    if (!pname)
-      continue;
-    binding *root = stmt_ownership_root_binding(cg, scopes, depth, arg->val);
-    if (!root || !root->ownership_tracked)
-      continue;
-    if (stmt_sig_contract_has(&sig->mutates, pname))
-      stmt_ownership_check_live_borrows(cg, scopes, depth, root, arg->val->tok,
-                                        "mutate");
-    if (stmt_sig_contract_has(&sig->consumes, pname)) {
-      stmt_ownership_check_live_borrows(cg, scopes, depth, root, arg->val->tok,
-                                        "move");
-      root->owner_state = NY_OWNER_MOVED;
-    }
-  }
-}
-
-static bool stmt_ownership_expr_is_fresh_heap(codegen_t *cg, expr_t *e,
-                                              bool *raw_ptr) {
-  if (raw_ptr)
-    *raw_ptr = false;
-  if (!e)
-    return false;
-  if (e->kind == NY_E_LIST || e->kind == NY_E_DICT || e->kind == NY_E_SET) {
-    return true;
-  }
-  if (stmt_expr_is_adt_ctor(cg, e))
-    return true;
-  if (e->kind != NY_E_CALL)
-    return false;
-  if (stmt_call_tail_is(e, "own")) {
-    if (raw_ptr)
-      *raw_ptr = false;
-    return true;
-  }
-  const char *n = stmt_call_tail_name(e);
-  if (!n)
-    return false;
-  if (strcmp(n, "malloc") == 0 || strcmp(n, "zalloc") == 0 ||
-      strcmp(n, "realloc") == 0) {
-    if (raw_ptr)
-      *raw_ptr = true;
-    return true;
-  }
-  if (strcmp(n, "list") == 0 || strcmp(n, "dict") == 0 ||
-      strcmp(n, "set") == 0 || strcmp(n, "__list_new") == 0 ||
-      strcmp(n, "__str_concat") == 0) {
-    return true;
-  }
-  fun_sig *sig = lookup_fun(cg, e->as.call.callee->as.ident.name,
-                            e->as.call.callee->as.ident.hash);
-  return sig && sig->returns_owned;
-}
-
-static bool stmt_ownership_alloc_size_bytes(codegen_t *cg, scope *scopes,
-                                            size_t depth, expr_t *rhs,
-                                            int64_t *out_size) {
-  if (!rhs || rhs->kind != NY_E_CALL || !rhs->as.call.callee ||
-      rhs->as.call.callee->kind != NY_E_IDENT)
-    return false;
-  const char *n = stmt_call_tail_name(rhs);
-  if (!n)
-    return false;
-  size_t arg_idx = SIZE_MAX;
-  if ((strcmp(n, "malloc") == 0 || strcmp(n, "zalloc") == 0) &&
-      rhs->as.call.args.len >= 1) {
-    arg_idx = 0;
-  } else if (strcmp(n, "realloc") == 0 && rhs->as.call.args.len >= 2) {
-    arg_idx = 1;
-  }
-  if (arg_idx == SIZE_MAX)
-    return false;
-  expr_t *size_expr = rhs->as.call.args.data[arg_idx].val;
-  int64_t lo = 0, hi = 0;
-  if (!stmt_expr_int_range(cg, scopes, depth, size_expr, &lo, &hi) ||
-      lo != hi || lo < 0)
-    return false;
-  if (out_size)
-    *out_size = lo;
-  return true;
-}
-
-static void stmt_ownership_warn_use_after_move(codegen_t *cg, scope *scopes,
-                                               size_t depth, expr_t *e) {
-  if (!cg || !cg->ownership_enabled || !e || cg->had_error)
-    return;
-  switch (e->kind) {
-  case NY_E_IDENT: {
-    binding *b = stmt_ownership_ident_binding(cg, scopes, depth, e);
-    if (b && b->ownership_tracked && b->owner_state == NY_OWNER_MOVED &&
-        ny_diag_should_emit("ownership_use_after_move", e->tok, b->name)) {
-      stmt_ownership_diag(cg, e->tok, "use after move of owned slot '%s'",
-                          b->name);
-      ny_diag_fix("use borrow(%s) before the move, clone(%s), or assign a new "
-                  "owned value",
-                  b->name, b->name);
-    }
-    break;
-  }
-  case NY_E_UNARY:
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.unary.right);
-    break;
-  case NY_E_BINARY:
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.binary.left);
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.binary.right);
-    break;
-  case NY_E_LOGICAL:
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.logical.left);
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.logical.right);
-    break;
-  case NY_E_TERNARY:
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.ternary.cond);
-    stmt_ownership_warn_use_after_move(cg, scopes, depth,
-                                       e->as.ternary.true_expr);
-    stmt_ownership_warn_use_after_move(cg, scopes, depth,
-                                       e->as.ternary.false_expr);
-    break;
-  case NY_E_CALL:
-    for (size_t i = 0; i < e->as.call.args.len; ++i)
-      stmt_ownership_warn_use_after_move(cg, scopes, depth,
-                                         e->as.call.args.data[i].val);
-    break;
-  case NY_E_MEMCALL:
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.memcall.target);
-    for (size_t i = 0; i < e->as.memcall.args.len; ++i)
-      stmt_ownership_warn_use_after_move(cg, scopes, depth,
-                                         e->as.memcall.args.data[i].val);
-    break;
-  case NY_E_INDEX:
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.index.target);
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.index.start);
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.index.stop);
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.index.step);
-    break;
-  case NY_E_MEMBER:
-    stmt_ownership_warn_use_after_move(cg, scopes, depth, e->as.member.target);
-    break;
-  default:
-    break;
-  }
-}
-
-static void stmt_ownership_emit_drop(codegen_t *cg, binding *b, token_t tok) {
-  if (!cg || !cg->ownership_enabled || !b || !b->ownership_tracked ||
-      b->owner_state != NY_OWNER_OWNED || b->ownership_forgotten)
-    return;
-  if (!cg->ownership_runtime_cleanup)
-    return;
-  if (!b->value)
-    return;
-  fun_sig *drop_sig = lookup_fun(cg, "__drop_owned", 0);
-  if (!drop_sig) {
-    stmt_ownership_diag(
-        cg, tok, "ownership cleanup requires __drop_owned; import std.core");
-    return;
-  }
-  LLVMValueRef v = b->is_slot ? LLVMBuildLoad2(cg->builder, cg->type_i64,
-                                               b->value, "own.load")
-                              : b->value;
-  LLVMBuildCall2(cg->builder, drop_sig->type, drop_sig->value,
-                 (LLVMValueRef[]){v}, 1, "own.drop");
-  if (b->is_slot)
-    ny_store(cg, b->value, ny_c0(cg));
-}
-
-static void stmt_ownership_register_slot_defer(codegen_t *cg, scope *scopes,
-                                               size_t depth, binding *b) {
-  if (!cg || !cg->ownership_enabled || !cg->ownership_runtime_cleanup ||
-      !scopes || !b || !b->is_slot ||
-      b->ownership_defer_registered)
-    return;
-  fun_sig *push_sig = lookup_fun(cg, "__push_defer", 0);
-  fun_sig *drop_slot_sig = lookup_fun(cg, "__drop_owned_slot", 0);
-  if (!push_sig || !drop_slot_sig)
-    return;
-  LLVMValueRef fn_ptr =
-      ny_ptr2i64(cg, drop_slot_sig->value, "own.drop.slot.fn");
-  LLVMValueRef env =
-      LLVMBuildPtrToInt(cg->builder, b->value, cg->type_i64, "own.slot.env");
-  LLVMBuildCall2(cg->builder, push_sig->type, push_sig->value,
-                 (LLVMValueRef[]){fn_ptr, env}, 2, "");
-  vec_push(&scopes[depth].defers, NULL);
-  b->ownership_defer_registered = true;
-}
-
-static void stmt_ownership_cleanup_scope(codegen_t *cg, scope *scopes,
-                                         size_t depth) {
-  if (!cg || !cg->ownership_enabled || !cg->ownership_runtime_cleanup || !scopes)
-    return;
-  scope *sc = &scopes[depth];
-  for (ssize_t i = (ssize_t)sc->vars.len - 1; i >= 0; --i) {
-    binding *b = &sc->vars.data[i];
-    if (b->ownership_tracked && b->owner_state == NY_OWNER_OWNED) {
-      if (b->ownership_defer_registered)
-        continue;
-      stmt_ownership_emit_drop(cg, b,
-                               b->stmt_t ? b->stmt_t->tok : (token_t){0});
-    }
-  }
-}
-
-static void stmt_ownership_clear_borrow(binding *b) {
-  if (!b)
-    return;
-  b->ownership_borrow_source = NULL;
-  b->ownership_borrow_source_hash = 0;
-}
-
-static bool stmt_ownership_is_live_borrow_of(binding *borrower,
-                                             binding *source) {
-  if (!borrower || !source || borrower == source ||
-      !borrower->ownership_borrow_source || !source->name)
-    return false;
-  uint64_t source_hash =
-      source->name_hash ? source->name_hash : ny_hash64_cstr(source->name);
-  if (borrower->ownership_borrow_source_hash &&
-      borrower->ownership_borrow_source_hash != source_hash)
-    return false;
-  return strcmp(borrower->ownership_borrow_source, source->name) == 0;
-}
-
-static void stmt_ownership_check_live_borrows(codegen_t *cg, scope *scopes,
-                                              size_t depth, binding *source,
-                                              token_t tok, const char *action) {
-  if (!cg || !cg->ownership_enabled || !scopes || !source || !source->name)
-    return;
-  for (size_t d = 0; d <= depth; ++d) {
-    scope *sc = &scopes[d];
-    for (size_t i = 0; i < sc->vars.len; ++i) {
-      binding *borrower = &sc->vars.data[i];
-      if (!stmt_ownership_is_live_borrow_of(borrower, source))
-        continue;
-      if (!ny_diag_should_emit("ownership_live_borrow", tok, source->name))
-        continue;
-      stmt_ownership_diag(
-          cg, tok, "cannot %s owned slot '%s' while borrow '%s' is live",
-          action ? action : "change", source->name, borrower->name);
-      ny_diag_fix(
-          "end the borrow scope first, clone(%s), or keep passing borrow(%s)",
-          source->name, source->name);
-    }
-  }
-}
-
-static bool stmt_ownership_same_source(binding *dest, expr_t *rhs,
-                                       codegen_t *cg, scope *scopes,
-                                       size_t depth) {
-  expr_t *src = rhs;
-  expr_t *borrow_arg = stmt_ownership_return_borrow_arg(cg, rhs);
-  expr_t *consumed_arg = stmt_ownership_consumes_arg(cg, rhs);
-  if (borrow_arg || consumed_arg)
-    src = borrow_arg ? borrow_arg : consumed_arg;
-  else if (rhs && rhs->kind == NY_E_MEMCALL &&
-           stmt_expr_is_mutating_name(rhs->as.memcall.name))
-    src = rhs->as.memcall.target;
-  else if (stmt_call_tail_is(rhs, "borrow") || stmt_call_tail_is(rhs, "own"))
-    src = stmt_ownership_unary_arg(rhs, stmt_call_tail_name(rhs));
-  return dest && src &&
-         stmt_ownership_root_binding(cg, scopes, depth, src) == dest;
-}
-
-static void stmt_ownership_release_source(codegen_t *cg, scope *scopes,
-                                          size_t depth, expr_t *arg,
-                                          bool forgotten) {
-  binding *b = stmt_ownership_ident_binding(cg, scopes, depth, arg);
-  if (!b)
-    return;
-  if (b->ownership_tracked && b->owner_state == NY_OWNER_RELEASED &&
-      ny_diag_should_emit("ownership_double_release", arg->tok, b->name)) {
-    stmt_ownership_diag(cg, arg->tok, "double release of owned slot '%s'",
-                        b->name);
-    ny_diag_fix("remove one release(%s), or use borrow(%s) if the value is "
-                "still needed",
-                b->name, b->name);
-  }
-  stmt_ownership_check_live_borrows(cg, scopes, depth, b, arg->tok,
-                                    forgotten ? "forget" : "release");
-  b->ownership_tracked = true;
-  b->ownership_forgotten = forgotten;
-  b->ownership_alloc_size_known = false;
-  b->ownership_alloc_size_raw = 0;
-  b->owner_state = forgotten ? NY_OWNER_MOVED : NY_OWNER_RELEASED;
-  stmt_ownership_clear_borrow(b);
-  if (b->is_slot && cg->ownership_runtime_cleanup)
-    ny_store(cg, b->value, ny_c0(cg));
-}
-
-static void stmt_ownership_pre_store(codegen_t *cg, scope *scopes, size_t depth,
-                                     binding *dest, expr_t *rhs, token_t tok) {
-  if (!cg || !cg->ownership_enabled || !dest || !dest->ownership_tracked ||
-      dest->owner_state != NY_OWNER_OWNED)
-    return;
-  if (stmt_ownership_same_source(dest, rhs, cg, scopes, depth))
-    return;
-  stmt_ownership_check_live_borrows(cg, scopes, depth, dest, tok, "reassign");
-  if (cg->ownership_runtime_cleanup &&
-      ny_diag_should_emit("ownership_reassign_drop", tok, dest->name))
-    ny_diag_warning(tok,
-                    "reassigning owned slot '%s' drops its previous heap value",
-                    dest->name);
-  stmt_ownership_emit_drop(cg, dest, tok);
-  dest->owner_state = NY_OWNER_RELEASED;
-  dest->ownership_alloc_size_known = false;
-  dest->ownership_alloc_size_raw = 0;
-  stmt_ownership_clear_borrow(dest);
-}
-
-static void stmt_ownership_post_store(codegen_t *cg, scope *scopes,
-                                      size_t depth, binding *dest, expr_t *rhs,
-                                      token_t tok, bool target_global) {
-  if (!cg || !cg->ownership_enabled || !dest || !rhs)
-    return;
-  stmt_ownership_warn_use_after_move(cg, scopes, depth, rhs);
-  expr_t *rel = stmt_ownership_releases_arg(cg, rhs);
-  expr_t *forget = stmt_ownership_forgets_arg(cg, rhs);
-  if (rel || forget) {
-    stmt_ownership_release_source(cg, scopes, depth, rel ? rel : forget,
-                                  forget != NULL);
-    dest->ownership_tracked = false;
-    dest->ownership_alloc_size_known = false;
-    dest->ownership_alloc_size_raw = 0;
-    dest->owner_state = NY_OWNER_BORROWED;
-    stmt_ownership_clear_borrow(dest);
-    return;
-  }
-  expr_t *borrow_arg = stmt_ownership_return_borrow_arg(cg, rhs);
-  if (!borrow_arg)
-    borrow_arg = stmt_ownership_unary_arg(rhs, "borrow");
-  if (borrow_arg) {
-    binding *borrow_src =
-        stmt_ownership_root_binding(cg, scopes, depth, borrow_arg);
-    dest->ownership_tracked = false;
-    dest->ownership_alloc_size_known = false;
-    dest->ownership_alloc_size_raw = 0;
-    dest->owner_state = NY_OWNER_BORROWED;
-    if (stmt_ownership_borrow_expr_is_immediate(cg, scopes, depth,
-                                                borrow_arg)) {
-      stmt_ownership_clear_borrow(dest);
-      return;
-    }
-    dest->ownership_borrow_source = borrow_src ? borrow_src->name : NULL;
-    dest->ownership_borrow_source_hash =
-        borrow_src ? (borrow_src->name_hash ? borrow_src->name_hash
-                                            : ny_hash64_cstr(borrow_src->name))
-                   : 0;
-    return;
-  }
-  if (rhs->kind == NY_E_MEMCALL &&
-      stmt_expr_is_mutating_name(rhs->as.memcall.name)) {
-    binding *mut_src =
-        stmt_ownership_root_binding(cg, scopes, depth, rhs->as.memcall.target);
-    if (mut_src == dest && dest->ownership_tracked &&
-        dest->owner_state == NY_OWNER_OWNED) {
-      stmt_ownership_clear_borrow(dest);
-      return;
-    }
-  }
-  bool raw_ptr = false;
-  bool fresh = stmt_ownership_expr_is_fresh_heap(cg, rhs, &raw_ptr);
-  binding *src = stmt_ownership_ident_binding(cg, scopes, depth, rhs);
-  expr_t *own_arg = stmt_ownership_consumes_arg(cg, rhs);
-  if (!own_arg)
-    own_arg = stmt_ownership_unary_arg(rhs, "own");
-  if (!src && own_arg)
-    src = stmt_ownership_ident_binding(cg, scopes, depth, own_arg);
-  bool move = src && src != dest && src->ownership_tracked &&
-              src->owner_state == NY_OWNER_OWNED;
-  if (!fresh && !move) {
-    dest->ownership_tracked = false;
-    dest->ownership_alloc_size_known = false;
-    dest->ownership_alloc_size_raw = 0;
-    dest->owner_state = NY_OWNER_BORROWED;
-    stmt_ownership_clear_borrow(dest);
-    return;
-  }
-  bool alloc_size_known = false;
-  int64_t alloc_size_raw = 0;
-  if (move) {
-    raw_ptr = src->ownership_raw_ptr;
-    alloc_size_known = src->ownership_alloc_size_known;
-    alloc_size_raw = src->ownership_alloc_size_raw;
-  } else if (raw_ptr) {
-    alloc_size_known =
-        stmt_ownership_alloc_size_bytes(cg, scopes, depth, rhs, &alloc_size_raw);
-  }
-  bool explicit_own = stmt_call_tail_is(rhs, "own");
-  if (target_global && !explicit_own &&
-      ny_diag_should_emit("ownership_escape_global", tok, dest->name)) {
-    stmt_ownership_diag(
-        cg, tok,
-        "owned heap value stored in global '%s' may escape ownership cleanup",
-        dest->name);
-    ny_diag_fix("wrap process-lifetime storage in own(...), or keep it local and "
-                "release it");
-  }
-  dest->ownership_tracked = true;
-  dest->ownership_raw_ptr = raw_ptr;
-  dest->ownership_alloc_size_known = alloc_size_known;
-  dest->ownership_alloc_size_raw = alloc_size_known ? alloc_size_raw : 0;
-  dest->ownership_forgotten = false;
-  dest->owner_state = NY_OWNER_OWNED;
-  stmt_ownership_clear_borrow(dest);
-  if (!target_global)
-    stmt_ownership_register_slot_defer(cg, scopes, depth, dest);
-  if (move) {
-    stmt_ownership_check_live_borrows(cg, scopes, depth, src, tok, "move");
-    src->owner_state = NY_OWNER_MOVED;
-    src->ownership_forgotten = false;
-    src->ownership_alloc_size_known = false;
-    src->ownership_alloc_size_raw = 0;
-    stmt_ownership_clear_borrow(src);
-    if (src->is_slot && cg->ownership_runtime_cleanup)
-      ny_store(cg, src->value, ny_c0(cg));
-  }
-}
-
-static binding *
-stmt_ownership_begin_return_transfer(codegen_t *cg, scope *scopes, size_t depth,
-                                     expr_t *value,
-                                     ny_owner_state_t *old_state) {
-  if (old_state)
-    *old_state = NY_OWNER_BORROWED;
-  if (!cg || !cg->ownership_enabled || !value)
-    return NULL;
-  expr_t *src = value;
-  if (stmt_ownership_return_borrow_arg(cg, value) ||
-      stmt_call_tail_is(value, "borrow"))
-    return NULL;
-  expr_t *consumed_arg = stmt_ownership_consumes_arg(cg, value);
-  if (consumed_arg)
-    src = consumed_arg;
-  else if (value->kind == NY_E_MEMCALL &&
-           stmt_expr_is_mutating_name(value->as.memcall.name))
-    src = value->as.memcall.target;
-  else if (stmt_call_tail_is(value, "own"))
-    src = stmt_ownership_unary_arg(value, "own");
-  binding *b = stmt_ownership_root_binding(cg, scopes, depth, src);
-  if (!b || !b->ownership_tracked || b->owner_state != NY_OWNER_OWNED)
-    return NULL;
-  stmt_ownership_check_live_borrows(cg, scopes, depth, b, value->tok, "return");
-  if (cg->ownership_strict && !cg->current_fn_returns_owned) {
-    stmt_ownership_diag(cg, value->tok,
-                        "returning owned slot '%s' requires @returns_owned",
-                        b->name);
-    ny_diag_fix("add @returns_owned to the function, return borrow(%s), "
-                "clone(%s), or release ownership before returning",
-                b->name, b->name);
-  }
-  if (old_state)
-    *old_state = b->owner_state;
-  b->owner_state = NY_OWNER_MOVED;
-  if (b->is_slot && b->value)
-    ny_store(cg, b->value, ny_c0(cg));
-  return b;
-}
-
-static void stmt_ownership_end_return_transfer(binding *b,
-                                               ny_owner_state_t old_state) {
-  if (b)
-    b->owner_state = old_state;
-}
-
-static bool stmt_expr_is_int_list_literal(codegen_t *cg, scope *scopes,
-                                          size_t depth, expr_t *e) {
+bool stmt_expr_is_int_list_literal(codegen_t *cg, scope *scopes,
+                                    size_t depth, expr_t *e) {
   if (!e || e->kind != NY_E_LIST)
     return false;
   for (size_t i = 0; i < e->as.list_like.len; ++i) {
     if (!ny_is_proven_int(cg, scopes, depth, e->as.list_like.data[i], NULL))
       return false;
   }
+  return true;
+}
+
+/*
+ * Recognize a statically sized integer-list seed, optionally repeated by a
+ * literal count.  The seed expression itself is still evaluated exactly once
+ * per element; repetition only copies the already-evaluated raw values.
+ */
+static bool stmt_expr_static_int_list_shape(codegen_t *cg, scope *scopes,
+                                            size_t depth, expr_t *e,
+                                            expr_t **out_seed,
+                                            size_t *out_repeat,
+                                            size_t *out_len) {
+  if (out_seed)
+    *out_seed = NULL;
+  if (out_repeat)
+    *out_repeat = 0;
+  if (out_len)
+    *out_len = 0;
+  expr_t *seed = e;
+  int64_t repeat = 1;
+  if (e && e->kind == NY_E_BINARY && e->as.binary.op &&
+      strcmp(e->as.binary.op, "*") == 0) {
+    int64_t lhs_count = 0, rhs_count = 0;
+    bool lhs_int = ny_expr_literal_i64(e->as.binary.left, &lhs_count);
+    bool rhs_int = ny_expr_literal_i64(e->as.binary.right, &rhs_count);
+    if (lhs_int == rhs_int)
+      return false;
+    repeat = lhs_int ? lhs_count : rhs_count;
+    seed = lhs_int ? e->as.binary.right : e->as.binary.left;
+  }
+  if (repeat < 0 || !stmt_expr_is_int_list_literal(cg, scopes, depth, seed))
+    return false;
+  size_t seed_len = seed->as.list_like.len;
+  if ((uint64_t)repeat > SIZE_MAX ||
+      (repeat > 0 && seed_len > SIZE_MAX / (size_t)repeat))
+    return false;
+  size_t len = seed_len * (size_t)repeat;
+  if (out_seed)
+    *out_seed = seed;
+  if (out_repeat)
+    *out_repeat = (size_t)repeat;
+  if (out_len)
+    *out_len = len;
   return true;
 }
 
@@ -962,6 +287,50 @@ static bool stmt_expr_is_f64_list_literal(codegen_t *cg, scope *scopes,
     if (!stmt_expr_is_f64_value(cg, scopes, depth, e->as.list_like.data[i]))
       return false;
   }
+  return true;
+}
+
+/*
+ * Recognize a statically sized homogeneous floating-point list, optionally
+ * repeated by a literal count.  Seed expressions are evaluated once and
+ * repetition copies those raw values.
+ */
+static bool stmt_expr_static_f64_list_shape(codegen_t *cg, scope *scopes,
+                                            size_t depth, expr_t *e,
+                                            expr_t **out_seed,
+                                            size_t *out_repeat,
+                                            size_t *out_len) {
+  if (out_seed)
+    *out_seed = NULL;
+  if (out_repeat)
+    *out_repeat = 0;
+  if (out_len)
+    *out_len = 0;
+  expr_t *seed = e;
+  int64_t repeat = 1;
+  if (e && e->kind == NY_E_BINARY && e->as.binary.op &&
+      strcmp(e->as.binary.op, "*") == 0) {
+    int64_t lhs_count = 0, rhs_count = 0;
+    bool lhs_int = ny_expr_literal_i64(e->as.binary.left, &lhs_count);
+    bool rhs_int = ny_expr_literal_i64(e->as.binary.right, &rhs_count);
+    if (lhs_int == rhs_int)
+      return false;
+    repeat = lhs_int ? lhs_count : rhs_count;
+    seed = lhs_int ? e->as.binary.right : e->as.binary.left;
+  }
+  if (repeat < 0 || !stmt_expr_is_f64_list_literal(cg, scopes, depth, seed))
+    return false;
+  size_t seed_len = seed->as.list_like.len;
+  if ((uint64_t)repeat > SIZE_MAX ||
+      (repeat > 0 && seed_len > SIZE_MAX / (size_t)repeat))
+    return false;
+  size_t len = seed_len * (size_t)repeat;
+  if (out_seed)
+    *out_seed = seed;
+  if (out_repeat)
+    *out_repeat = (size_t)repeat;
+  if (out_len)
+    *out_len = len;
   return true;
 }
 
@@ -1225,6 +594,12 @@ static bool stmt_contains_ident_name(stmt_t *s, const char *name) {
     if (stmt_param_list_shadows_name(&s->as.fn.params, name))
       return false;
     return stmt_contains_ident_name(s->as.fn.body, name);
+  case NY_S_LEMMA:
+    if (stmt_params_contain_ident_name(&s->as.lemma.params, name))
+      return true;
+    if (stmt_param_list_shadows_name(&s->as.lemma.params, name))
+      return false;
+    return stmt_expr_contains_ident_name(s->as.lemma.proposition, name);
   case NY_S_LAYOUT:
     return stmt_layout_fields_contain_ident_name(&s->as.layout.fields, name) ||
            stmt_list_contains_ident_name(&s->as.layout.methods, name);
@@ -1767,12 +1142,25 @@ static const char *stmt_expr_list_fastpath_bail_reason(codegen_t *cg,
   }
   case NY_E_MEMCALL:
     if (e->as.memcall.name &&
-        stmt_expr_is_static_list_builtin_target(e->as.memcall.target, name) &&
-        ny_name_tail_is(e->as.memcall.name, "get")) {
-      if (e->as.memcall.args.len != 1 && e->as.memcall.args.len != 2)
-        return "unsupported-get-arity";
-      return stmt_call_args_list_fastpath_bail_reason(
-          cg, scopes, depth, &e->as.memcall.args, 0, name, allow_set_idx);
+        stmt_expr_is_static_list_builtin_target(e->as.memcall.target, name)) {
+      if (ny_name_tail_is(e->as.memcall.name, "get")) {
+        if (e->as.memcall.args.len != 1 && e->as.memcall.args.len != 2)
+          return "unsupported-get-arity";
+        return stmt_call_args_list_fastpath_bail_reason(
+            cg, scopes, depth, &e->as.memcall.args, 0, name, allow_set_idx);
+      }
+      if (ny_name_tail_is(e->as.memcall.name, "set_idx") ||
+          ny_name_tail_is(e->as.memcall.name, "set")) {
+        if (!allow_set_idx)
+          return "set_idx";
+        if (e->as.memcall.args.len != 2)
+          return "unsupported-set-arity";
+        return stmt_call_args_list_fastpath_bail_reason(
+            cg, scopes, depth, &e->as.memcall.args, 0, name, allow_set_idx);
+      }
+      if (ny_name_tail_is(e->as.memcall.name, "len"))
+        return e->as.memcall.args.len == 0 ? NULL : "unsupported-len-arity";
+      return "unknown-call";
     }
     if (stmt_expr_contains_ident_name(e, name))
       return "unknown-call";
@@ -2026,25 +1414,40 @@ static const char *stmt_list_fastpath_bail_reason(codegen_t *cg, scope *scopes,
   }
 }
 
+static bool stmt_expr_is_constant_int_list_literal(expr_t *e) {
+  if (!e || (e->kind != NY_E_LIST && e->kind != NY_E_TUPLE))
+    return false;
+  for (size_t i = 0; i < e->as.list_like.len; ++i) {
+    if (!ny_expr_literal_i64(e->as.list_like.data[i], NULL))
+      return false;
+  }
+  return true;
+}
+
 static bool stmt_can_elide_static_int_list_object(
     codegen_t *cg, scope *scopes, size_t depth, stmt_t *decl_stmt,
     const char *name, bool escapes, expr_t *init, const char **bail_reason) {
-  // This optimization was found to be unsound: it can elide a module-level
-  // (or otherwise escaping) immutable int-list object even when the list is
-  // later indexed from a different function in the same module, since that
-  // usage isn't visible to the safety scan below. That mismatch between the
-  // elided fast representation and ordinary list access corrupts memory
-  // (observed as segfaults/garbage reads). Disabled unconditionally.
-  (void)cg;
-  (void)scopes;
-  (void)depth;
-  (void)decl_stmt;
-  (void)name;
-  (void)escapes;
-  (void)init;
   if (bail_reason)
     *bail_reason = NULL;
-  return false;
+  if (!cg || !decl_stmt || !name || escapes || depth == 0)
+    return false;
+  if (!stmt_expr_is_constant_int_list_literal(init)) {
+    if (bail_reason)
+      *bail_reason = "non-literal-elements";
+    return false;
+  }
+  stmt_t *root = cg->current_fn_body;
+  if (!root) {
+    if (bail_reason)
+      *bail_reason = "top-level-scope";
+    return false;
+  }
+  if (!stmt_static_list_only_uses(cg, scopes, depth, root, decl_stmt, name)) {
+    if (bail_reason)
+      *bail_reason = "unsupported-use";
+    return false;
+  }
+  return true;
 }
 
 static void stmt_update_static_int_list_elide_metadata(
@@ -2092,8 +1495,9 @@ static size_t stmt_count_mut_int_list_literals(codegen_t *cg, scope *scopes,
                      ? s->as.var.names.len
                      : s->as.var.exprs.len;
     for (size_t i = 0; i < lim; ++i) {
-      if (stmt_expr_is_int_list_literal(cg, scopes, depth,
-                                        s->as.var.exprs.data[i]))
+      if (stmt_expr_static_int_list_shape(cg, scopes, depth,
+                                          s->as.var.exprs.data[i], NULL, NULL,
+                                          NULL))
         ++n;
     }
     return n;
@@ -2377,6 +1781,293 @@ static bool stmt_raw_mut_list_only_uses(codegen_t *cg, scope *scopes,
   }
 }
 
+static bool stmt_expr_raw_f64_set_values_valid(codegen_t *cg, scope *scopes,
+                                                size_t depth, expr_t *e,
+                                                const char *name) {
+  if (!e)
+    return true;
+  expr_t *set_value = NULL;
+  if (stmt_expr_is_set_idx_to_name(e, name, &set_value) &&
+      !stmt_expr_is_f64_value(cg, scopes, depth, set_value))
+    return false;
+  switch (e->kind) {
+  case NY_E_IDENT:
+  case NY_E_LITERAL:
+  case NY_E_EMBED:
+  case NY_E_INFERRED_MEMBER:
+    return true;
+  case NY_E_UNARY:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.unary.right, name);
+  case NY_E_BINARY:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.binary.left, name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.binary.right, name);
+  case NY_E_LOGICAL:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.logical.left, name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.logical.right, name);
+  case NY_E_TERNARY:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.ternary.cond, name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.ternary.true_expr, name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.ternary.false_expr, name);
+  case NY_E_CALL:
+    if (!stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                            e->as.call.callee, name))
+      return false;
+    for (size_t i = 0; i < e->as.call.args.len; ++i)
+      if (!stmt_expr_raw_f64_set_values_valid(
+              cg, scopes, depth, e->as.call.args.data[i].val, name))
+        return false;
+    return true;
+  case NY_E_MEMCALL:
+    if (!stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                            e->as.memcall.target, name))
+      return false;
+    for (size_t i = 0; i < e->as.memcall.args.len; ++i)
+      if (!stmt_expr_raw_f64_set_values_valid(
+              cg, scopes, depth, e->as.memcall.args.data[i].val, name))
+        return false;
+    return true;
+  case NY_E_INDEX:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.index.target, name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.index.start, name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.index.stop, name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.index.step, name);
+  case NY_E_MEMBER:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.member.target, name);
+  case NY_E_PTR_TYPE:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.ptr_type.target, name);
+  case NY_E_DEREF:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.deref.target, name);
+  case NY_E_SIZEOF:
+    return e->as.szof.is_type ||
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.szof.target, name);
+  case NY_E_TRY:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              e->as.try_expr.target, name);
+  case NY_E_LIST:
+  case NY_E_TUPLE:
+  case NY_E_SET:
+    for (size_t i = 0; i < e->as.list_like.len; ++i)
+      if (!stmt_expr_raw_f64_set_values_valid(
+              cg, scopes, depth, e->as.list_like.data[i], name))
+        return false;
+    return true;
+  case NY_E_DICT:
+    for (size_t i = 0; i < e->as.dict.pairs.len; ++i) {
+      if (!stmt_expr_raw_f64_set_values_valid(
+              cg, scopes, depth, e->as.dict.pairs.data[i].key, name) ||
+          !stmt_expr_raw_f64_set_values_valid(
+              cg, scopes, depth, e->as.dict.pairs.data[i].value, name))
+        return false;
+    }
+    return true;
+  default:
+    return true;
+  }
+}
+
+static bool stmt_raw_f64_set_values_valid(codegen_t *cg, scope *scopes,
+                                           size_t depth, stmt_t *s,
+                                           const char *name) {
+  if (!s)
+    return true;
+  switch (s->kind) {
+  case NY_S_BLOCK:
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      if (!stmt_raw_f64_set_values_valid(cg, scopes, depth,
+                                         s->as.block.body.data[i], name))
+        return false;
+    return true;
+  case NY_S_MODULE:
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      if (!stmt_raw_f64_set_values_valid(cg, scopes, depth,
+                                         s->as.module.body.data[i], name))
+        return false;
+    return true;
+  case NY_S_VAR:
+    for (size_t i = 0; i < s->as.var.exprs.len; ++i)
+      if (!stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              s->as.var.exprs.data[i], name))
+        return false;
+    return true;
+  case NY_S_EXPR:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              s->as.expr.expr, name);
+  case NY_S_IF:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              s->as.iff.test, name) &&
+           stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.iff.init,
+                                         name) &&
+           stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.iff.conseq,
+                                         name) &&
+           stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.iff.alt,
+                                         name);
+  case NY_S_WHILE:
+    return stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.whl.init,
+                                         name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              s->as.whl.test, name) &&
+           stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.whl.body,
+                                         name) &&
+           stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.whl.update,
+                                         name);
+  case NY_S_FOR:
+    return stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.fr.init,
+                                         name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              s->as.fr.cond, name) &&
+           stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              s->as.fr.iterable, name) &&
+           stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.fr.body,
+                                         name) &&
+           stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.fr.update,
+                                         name);
+  case NY_S_RETURN:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              s->as.ret.value, name);
+  case NY_S_GUARD:
+    return stmt_expr_raw_f64_set_values_valid(cg, scopes, depth,
+                                              s->as.guard.value, name) &&
+           stmt_raw_f64_set_values_valid(cg, scopes, depth,
+                                         s->as.guard.fallback, name);
+  case NY_S_TRY:
+    return stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.tr.body,
+                                         name) &&
+           stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.tr.handler,
+                                         name);
+  case NY_S_DEFER:
+    return stmt_raw_f64_set_values_valid(cg, scopes, depth, s->as.de.body,
+                                         name);
+  default:
+    return true;
+  }
+}
+
+static bool stmt_can_use_raw_f64_list_mutation(codegen_t *cg, scope *scopes,
+                                               size_t depth, stmt_t *decl_stmt,
+                                               const char *name, bool escapes,
+                                               expr_t *init,
+                                               const char **bail_reason) {
+  if (bail_reason)
+    *bail_reason = NULL;
+  if (!ny_env_enabled_default_on("NYTRIX_RAW_F64_LIST_MUTATION"))
+    return false;
+  if (!cg || !decl_stmt || !name) {
+    if (bail_reason)
+      *bail_reason = "internal";
+    return false;
+  }
+  if (!decl_stmt->as.var.is_mut) {
+    if (bail_reason)
+      *bail_reason = "immutable";
+    return false;
+  }
+  if (escapes) {
+    if (bail_reason)
+      *bail_reason = "escapes";
+    return false;
+  }
+  expr_t *seed = NULL;
+  size_t repeat = 0, total_len = 0;
+  if (!stmt_expr_static_f64_list_shape(cg, scopes, depth, init, &seed, &repeat,
+                                       &total_len)) {
+    if (bail_reason)
+      *bail_reason = "mixed-type-or-dynamic-repeat";
+    return false;
+  }
+  if (!seed || repeat == 0 || total_len == 0) {
+    if (bail_reason)
+      *bail_reason = "empty-list";
+    return false;
+  }
+  int max_len =
+      ny_env_int_range("NYTRIX_RAW_F64_LIST_MUTATION_MAX_LEN", 4096, 1, 65536);
+  if (total_len > (size_t)max_len) {
+    if (bail_reason)
+      *bail_reason = "too-large";
+    return false;
+  }
+  stmt_t *root = cg->current_fn_body;
+  if (!root) {
+    if (bail_reason)
+      *bail_reason = "top-level-scope";
+    return false;
+  }
+  bool raw_style_ok =
+      stmt_raw_mut_list_only_uses(cg, scopes, depth, root, decl_stmt, name);
+  const char *fastpath_reason = stmt_list_fastpath_bail_reason(
+      cg, scopes, depth, root, decl_stmt, name, true);
+  if (!raw_style_ok && fastpath_reason) {
+    if (bail_reason)
+      *bail_reason = fastpath_reason;
+    return false;
+  }
+  if (!stmt_raw_f64_set_values_valid(cg, scopes, depth, root, name)) {
+    if (bail_reason)
+      *bail_reason = "non-f64-store";
+    return false;
+  }
+  return true;
+}
+
+static void stmt_init_raw_f64_list_storage(codegen_t *cg, scope *scopes,
+                                           size_t depth, binding *b,
+                                           expr_t *init) {
+  if (!cg || !b || !init)
+    return;
+  expr_t *seed = NULL;
+  size_t repeat = 0, len = 0;
+  if (!stmt_expr_static_f64_list_shape(cg, scopes, depth, init, &seed, &repeat,
+                                       &len) ||
+      !seed || len == 0)
+    return;
+  size_t seed_len = seed->as.list_like.len;
+  LLVMTypeRef array_ty = LLVMArrayType(cg->type_f64, (unsigned)len);
+  LLVMValueRef storage = build_alloca(cg, "raw.f64.list", array_ty);
+  if (!storage)
+    return;
+  LLVMValueRef *seed_vals =
+      (LLVMValueRef *)alloca(sizeof(LLVMValueRef) * (seed_len ? seed_len : 1));
+  for (size_t i = 0; i < seed_len; ++i) {
+    seed_vals[i] = gen_expr_as_f64(cg, scopes, depth, seed->as.list_like.data[i]);
+    if (!seed_vals[i]) {
+      b->raw_f64_list_bail_reason = "seed-eval-failed";
+      return;
+    }
+  }
+  for (size_t r = 0; r < repeat; ++r) {
+    for (size_t i = 0; i < seed_len; ++i) {
+      size_t out_i = r * seed_len + i;
+      LLVMValueRef idxs[2] = {
+          ny_c0(cg), LLVMConstInt(cg->type_i64, (uint64_t)out_i, false)};
+      LLVMValueRef ptr = LLVMBuildInBoundsGEP2(
+          cg->builder, array_ty, storage, idxs, 2, "raw_f64_list_init_ptr");
+      ny_store(cg, ptr, seed_vals[i]);
+    }
+  }
+  LLVMValueRef first_idxs[2] = {ny_c0(cg), ny_c0(cg)};
+  b->raw_f64_list_ptr = LLVMBuildInBoundsGEP2(
+      cg->builder, array_ty, storage, first_idxs, 2, "raw_f64_list_ptr");
+  b->raw_f64_list_len = len;
+  b->raw_f64_list_mutation = true;
+  b->raw_f64_list_bail_reason = NULL;
+}
+
 static bool stmt_can_use_raw_int_list_mutation(codegen_t *cg, scope *scopes,
                                                size_t depth, stmt_t *decl_stmt,
                                                const char *name, bool escapes,
@@ -2401,27 +2092,34 @@ static bool stmt_can_use_raw_int_list_mutation(codegen_t *cg, scope *scopes,
       *bail_reason = "escapes";
     return false;
   }
-  if (!stmt_expr_is_int_list_literal(cg, scopes, depth, init)) {
+  expr_t *seed = NULL;
+  size_t repeat = 0, total_len = 0;
+  if (!stmt_expr_static_int_list_shape(cg, scopes, depth, init, &seed, &repeat,
+                                       &total_len)) {
     if (bail_reason)
-      *bail_reason = "mixed-type";
+      *bail_reason = "mixed-type-or-dynamic-repeat";
     return false;
   }
-  if (ny_expr_is_list_or_tuple_lit(init) && init->as.list_like.len == 0) {
+  if (!seed || repeat == 0 || total_len == 0) {
     if (bail_reason)
       *bail_reason = "empty-list";
     return false;
   }
-  if (!ny_env_enabled("NYTRIX_RAW_INT_LIST_MUTATION_ALL") &&
-      ny_expr_is_list_or_tuple_lit(init)) {
+  if (!ny_env_enabled("NYTRIX_RAW_INT_LIST_MUTATION_ALL")) {
     int max_len =
         ny_env_int_range("NYTRIX_RAW_INT_LIST_MUTATION_MAX_LEN", 256, 1, 4096);
-    if (init->as.list_like.len > (size_t)max_len) {
+    if (total_len > (size_t)max_len) {
       if (bail_reason)
         *bail_reason = "too-large";
       return false;
     }
   }
-  stmt_t *root = cg->current_fn_body ? cg->current_fn_body : decl_stmt;
+  stmt_t *root = cg->current_fn_body;
+  if (!root) {
+    if (bail_reason)
+      *bail_reason = "top-level-scope";
+    return false;
+  }
   if (!ny_env_enabled("NYTRIX_RAW_INT_LIST_MUTATION_ALL")) {
     int max_bindings =
         ny_env_int_range("NYTRIX_RAW_INT_LIST_MUTATION_MAX_BINDINGS", 8, 1, 64);
@@ -2447,25 +2145,59 @@ static bool stmt_can_use_raw_int_list_mutation(codegen_t *cg, scope *scopes,
 static void stmt_init_raw_int_list_storage(codegen_t *cg, scope *scopes,
                                            size_t depth, binding *b,
                                            expr_t *init) {
-  if (!cg || !b || !init || !ny_expr_is_list_or_tuple_lit(init))
+  if (!cg || !b || !init)
     return;
-  size_t len = init->as.list_like.len;
-  LLVMTypeRef array_ty = LLVMArrayType(cg->type_i64, (unsigned)(len ? len : 1));
+  expr_t *seed = NULL;
+  size_t repeat = 0, len = 0;
+  if (!stmt_expr_static_int_list_shape(cg, scopes, depth, init, &seed, &repeat,
+                                       &len) ||
+      !seed || len == 0)
+    return;
+  size_t seed_len = seed->as.list_like.len;
+  LLVMTypeRef array_ty = LLVMArrayType(cg->type_i64, (unsigned)len);
   LLVMValueRef storage = build_alloca(cg, "raw.int.list", array_ty);
   if (!storage)
     return;
-  bool untagged =
-      ny_fast_path_enabled(cg, "NYTRIX_UNTAGGED_INT_LIST_STORAGE");
-  for (size_t i = 0; i < (len ? len : 1); ++i) {
+
+  bool all_literal = true;
+  for (size_t i = 0; i < seed_len; ++i) {
+    if (!ny_expr_literal_i64(seed->as.list_like.data[i], NULL)) {
+      all_literal = false;
+      break;
+    }
+  }
+  /*
+   * Keep computed expressions tagged.  gen_expr()'s public integer contract
+   * is tagged NyValue; restricting untagged storage to literal seeds avoids
+   * depending on transient raw-direct binding representation here.
+   */
+  bool untagged = all_literal &&
+                  ny_fast_path_enabled(cg, "NYTRIX_UNTAGGED_INT_LIST_STORAGE");
+  LLVMValueRef *seed_vals =
+      (LLVMValueRef *)alloca(sizeof(LLVMValueRef) * (seed_len ? seed_len : 1));
+  for (size_t i = 0; i < seed_len; ++i) {
     int64_t raw = 0;
-    if (i < len)
-      (void)ny_expr_literal_i64(init->as.list_like.data[i], &raw);
-    LLVMValueRef idxs[2] = {ny_c0(cg),
-                            LLVMConstInt(cg->type_i64, (uint64_t)i, false)};
-    LLVMValueRef ptr = LLVMBuildInBoundsGEP2(cg->builder, array_ty, storage,
-                                             idxs, 2, "raw_int_list_init_ptr");
-    uint64_t v = untagged ? (uint64_t)raw : (((uint64_t)raw) << 1) | 1u;
-    ny_store(cg, ptr, LLVMConstInt(cg->type_i64, v, false));
+    if (ny_expr_literal_i64(seed->as.list_like.data[i], &raw)) {
+      uint64_t v = untagged ? (uint64_t)raw : (((uint64_t)raw) << 1) | 1u;
+      seed_vals[i] = LLVMConstInt(cg->type_i64, v, false);
+    } else {
+      LLVMValueRef v = gen_expr(cg, scopes, depth, seed->as.list_like.data[i]);
+      if (!v) {
+        b->raw_int_list_bail_reason = "seed-eval-failed";
+        return;
+      }
+      seed_vals[i] = ny_cast_to_i64(cg, v, "raw_int_list_seed");
+    }
+  }
+  for (size_t r = 0; r < repeat; ++r) {
+    for (size_t i = 0; i < seed_len; ++i) {
+      size_t out_i = r * seed_len + i;
+      LLVMValueRef idxs[2] = {
+          ny_c0(cg), LLVMConstInt(cg->type_i64, (uint64_t)out_i, false)};
+      LLVMValueRef ptr = LLVMBuildInBoundsGEP2(
+          cg->builder, array_ty, storage, idxs, 2, "raw_int_list_init_ptr");
+      ny_store(cg, ptr, seed_vals[i]);
+    }
   }
   LLVMValueRef first_idxs[2] = {ny_c0(cg), ny_c0(cg)};
   b->raw_int_list_ptr = LLVMBuildInBoundsGEP2(
@@ -2481,8 +2213,6 @@ static void stmt_init_raw_int_list_storage(codegen_t *cg, scope *scopes,
                                 LLVMMetadataAsValue(cg->ctx, md));
   }
   b->raw_int_list_bail_reason = NULL;
-  (void)scopes;
-  (void)depth;
 }
 
 static void stmt_update_list_binding_proof(binding *b, bool is_list_storage,
@@ -2505,6 +2235,10 @@ static void stmt_update_list_binding_proof(binding *b, bool is_list_storage,
     b->raw_int_list_len = 0;
     b->raw_int_list_mutation = false;
     b->raw_int_list_bail_reason = "list proof lost";
+    b->raw_f64_list_ptr = NULL;
+    b->raw_f64_list_len = 0;
+    b->raw_f64_list_mutation = false;
+    b->raw_f64_list_bail_reason = "list proof lost";
     return;
   }
   if (!b->is_int_list_storage) {
@@ -2515,6 +2249,12 @@ static void stmt_update_list_binding_proof(binding *b, bool is_list_storage,
       b->raw_int_list_mutation = false;
       b->raw_int_list_bail_reason = "int proof lost";
     }
+  }
+  if (!b->is_f64_list_storage && b->raw_f64_list_mutation) {
+    b->raw_f64_list_ptr = NULL;
+    b->raw_f64_list_len = 0;
+    b->raw_f64_list_mutation = false;
+    b->raw_f64_list_bail_reason = "f64 proof lost";
   }
 }
 
@@ -2667,7 +2407,7 @@ static void stmt_update_dict_binding_range(binding *b, bool has_range,
   }
 }
 
-static bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
+bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
                                 expr_t *e, int64_t *out_min, int64_t *out_max);
 
 typedef struct stmt_binding_int_snapshot_t {
@@ -2924,9 +2664,7 @@ static bool stmt_loop_assigns_name_unproven_int(codegen_t *cg, scope *scopes,
           i >= s->as.var.exprs.len)
         return true;
       int64_t delta = 0;
-      if (stmt_find_loop_step_in_stmt(s, name, &delta))
-        continue;
-      if (!ny_is_proven_int(cg, scopes, depth, s->as.var.exprs.data[i], NULL))
+      if (!stmt_find_loop_step_in_stmt(s, name, &delta) || delta <= 0)
         return true;
     }
     return false;
@@ -3071,9 +2809,21 @@ static void stmt_var_setup_local_binding(
     }
   }
   if (!use_int_slot && !use_f64_slot && !use_f32_slot && !decl_type &&
-      var_stmt->as.var.exprs.len > idx &&
-      ny_expr_literal_i64(var_stmt->as.var.exprs.data[idx], NULL))
-    use_int_slot = true;
+      var_stmt->as.var.exprs.len > idx) {
+    expr_t *ie = var_stmt->as.var.exprs.data[idx];
+    if (ny_expr_literal_i64(ie, NULL)) {
+      use_int_slot = true;
+    } else if (ie && ie->kind == NY_E_LITERAL &&
+               ie->as.literal.kind == NY_LIT_FLOAT) {
+      if (ie->as.literal.hint == NY_LIT_HINT_F32) {
+        var_type = cg->type_f32;
+        use_f32_slot = true;
+      } else {
+        var_type = cg->type_f64;
+        use_f64_slot = true;
+      }
+    }
+  }
   *slot = build_alloca(cg, name, var_type);
   scope_bind(cg, scopes, depth, name, *slot, var_stmt, var_stmt->as.var.is_mut,
              decl_type, true);
@@ -3310,9 +3060,11 @@ static bool ensure_store_ready(codegen_t *cg, token_t tok, LLVMValueRef value,
 
 static bool can_bind_decl_direct(const codegen_t *cg, const char *name,
                                  bool is_mut) {
-  /* Only RAII cleanup needs an addressable slot to null out on move/drop;
+  /*
+   * Only RAII cleanup needs an addressable slot to null out on move/drop;
    * advisory-only ownership tracking (the default) keeps the fast direct
-   * binding path so enabling diagnostics never changes generated code. */
+   * binding path so enabling diagnostics never changes generated code.
+   */
   if (cg && cg->ownership_enabled && cg->ownership_runtime_cleanup)
     return false;
   if (!is_mut)
@@ -3326,7 +3078,7 @@ static bool can_bind_decl_direct(const codegen_t *cg, const char *name,
       cg->assigned_names_bloom, name, h);
 }
 
-static bool stmt_expr_is_mutating_name(const char *name) {
+bool stmt_expr_is_mutating_name(const char *name) {
   static const char *const k_names[] = {"add",    "append", "extend", "sub",
                                         "remove", "sort",   "clear",  "push",
                                         "insert", "set",    "put",    "delete",
@@ -4669,7 +4421,7 @@ static void stmt_store_raw_int_shadow_expr(codegen_t *cg, scope *scopes,
   stmt_store_raw_int_shadow(cg, b, tagged_value);
 }
 
-static bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
+bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
                                 expr_t *e, int64_t *out_min, int64_t *out_max) {
   if (!e)
     return false;
@@ -5532,7 +5284,8 @@ static bool stmt_prepare_str_append_loop(codegen_t *cg, scope *scopes,
     return false;
   if (!stmt_str_append_body_only_uses(cg, scopes, depth, s->as.whl.body, name))
     return false;
-  binding *b = stmt_lookup_binding_no_mark(scopes, depth, name, strlen(name), 0);
+  bool is_global = false;
+  binding *b = stmt_var_lookup_existing(cg, scopes, depth, name, &is_global);
   if (!b || !b->is_mut || !b->is_slot || !b->value)
     return false;
   const char *bt = b->decl_type_name ? b->decl_type_name : b->type_name;
@@ -6709,6 +6462,8 @@ static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   LLVMBasicBlockRef else_end = NULL;
   bool then_fallthrough = false;
   bool else_fallthrough = false;
+  stmt_binding_int_snapshot_t then_int_result = {0};
+  stmt_binding_int_snapshot_t else_int_result = {0};
   ny_dbg_loc(cg, s->tok);
   ny_cond_br(cg, c, tb, eb ? eb : next);
 
@@ -6724,6 +6479,8 @@ static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                             func_root, then_tail);
   then_end = ny_cur_block(cg);
   then_fallthrough = !LLVMGetBasicBlockTerminator(then_end);
+  if (has_int_narrow && then_fallthrough)
+    then_int_result = stmt_snapshot_binding_int_proof(int_narrow.binding);
   if (then_fallthrough)
     ny_br(cg, next);
   if (has_int_narrow)
@@ -6737,6 +6494,8 @@ static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                               func_root, else_tail);
     else_end = ny_cur_block(cg);
     else_fallthrough = !LLVMGetBasicBlockTerminator(else_end);
+    if (has_int_narrow && else_fallthrough)
+      else_int_result = stmt_snapshot_binding_int_proof(int_narrow.binding);
     if (else_fallthrough)
       ny_br(cg, next);
     if (has_int_narrow)
@@ -6745,6 +6504,28 @@ static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   ny_pos(cg, next);
 
   bool false_fallthrough = eb ? else_fallthrough : true;
+  if (has_int_narrow) {
+    if (!eb && false_fallthrough)
+      else_int_result = int_narrow.snapshot;
+    stmt_binding_int_snapshot_t merged = {0};
+    if (then_fallthrough && false_fallthrough) {
+      merged = then_int_result;
+      if (!then_int_result.has_int_range || !else_int_result.has_int_range) {
+        merged.has_int_range = false;
+      } else {
+        if (else_int_result.int_min_raw < merged.int_min_raw)
+          merged.int_min_raw = else_int_result.int_min_raw;
+        if (else_int_result.int_max_raw > merged.int_max_raw)
+          merged.int_max_raw = else_int_result.int_max_raw;
+      }
+    } else if (then_fallthrough) {
+      merged = then_int_result;
+    } else if (false_fallthrough) {
+      merged = else_int_result;
+    }
+    if (then_fallthrough || false_fallthrough)
+      stmt_restore_binding_int_proof(merged);
+  }
   if (!then_fallthrough && !false_fallthrough && !ny_has_terminator(cg))
     LLVMBuildUnreachable(cg->builder);
   if (!s->as.iff.init && then_fallthrough != false_fallthrough) {
@@ -7140,10 +6921,22 @@ static void apply_loop_metadata(codegen_t *cg, LLVMValueRef branch,
 
 static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root) {
+  /*
+   * Loop-reduction vectorisation: mut int_slot accumulators reassigned in
+   * the loop body are lifted into loop-local SSA phis (created at the
+   * preheader below, synced to the alloca at the latch), so LLVM can
+   * recognise the reduction and auto-vectorise accumulator loops.  Gated on
+   * stmt_loop_body_has_control_exit() so breaks/continues (extra CFG edges)
+   * are skipped.  Verified: sum(0..N) lowers to `phi i64` and runs correctly
+   * (native sum_to(100) = 4950).
+   */
   if (s->as.whl.init) {
     scope_enter(scopes, depth, NULL, NULL);
     gen_stmt(cg, scopes, depth, s->as.whl.init, func_root, false);
   }
+  bool invariant_ok = !s->as.whl.invariant ||
+                      ny_proof_check_loop_invariant(
+                          cg, scopes, *depth, s->as.whl.invariant);
   if (stmt_try_emit_list_sum_loop(cg, scopes, *depth, s)) {
     if (s->as.whl.init)
       scope_pop(scopes, depth);
@@ -7154,13 +6947,22 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
       stmt_prepare_str_append_loop(cg, scopes, *depth, s, &str_append_loop) &&
       stmt_begin_str_append_loop(cg, &str_append_loop);
   int64_t trip_count_hint = 0;
+  const char *range_lhs_name = stmt_while_lhs_name(s);
+  bool range_control_safe = !stmt_loop_body_has_control_exit(s->as.whl.body);
+  bool range_update_safe =
+      range_lhs_name &&
+      !stmt_loop_assigns_name_unproven_int(cg, scopes, *depth, s->as.whl.body,
+                                           range_lhs_name) &&
+      !stmt_loop_assigns_name_unproven_int(cg, scopes, *depth,
+                                           s->as.whl.update, range_lhs_name);
   bool has_trip_count_hint =
+      range_control_safe && range_update_safe &&
       stmt_try_while_trip_upper_bound(cg, scopes, *depth, s, &trip_count_hint) &&
       trip_count_hint > 0;
   LLVMValueRef dynamic_trip_count_raw =
-      has_trip_count_hint ? NULL
-                          : stmt_try_dynamic_while_trip_count_raw(
-                                cg, scopes, *depth, s);
+      has_trip_count_hint || !range_control_safe || !range_update_safe
+          ? NULL
+          : stmt_try_dynamic_while_trip_count_raw(cg, scopes, *depth, s);
   stmt_loop_append_len_snapshot_t append_len_snaps[64] = {0};
   size_t append_len_snap_count = 0;
   stmt_loop_dict_set_snapshot_t dict_set_snaps[64] = {0};
@@ -7248,6 +7050,20 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
           cg, scopes, *depth, s->as.whl.body, append_len_snaps,
           &append_len_snap_count,
           sizeof(append_len_snaps) / sizeof(append_len_snaps[0]));
+  } else if (while_lhs_binding && loop_index_snapshot.has_int_range &&
+             while_lhs_binding->has_int_range &&
+             while_lhs_binding->int_min_raw ==
+                 loop_index_snapshot.int_min_raw &&
+             while_lhs_binding->int_max_raw ==
+                 loop_index_snapshot.int_max_raw) {
+    /*
+     * No static trip bound and the loop condition could not narrow the index
+     * (unknown bound): the pre-loop range is stale inside the body, since the
+     * index advances every iteration.  Drop the range so prove() and
+     * assert_compile() cannot accept claims that only hold at the pre-loop
+     * value.  The snapshot is restored after the loop below.
+     */
+    while_lhs_binding->has_int_range = false;
   }
   const char *prev_str_append_name = cg->active_str_append_name;
   LLVMValueRef prev_str_append_builder = cg->active_str_append_builder;
@@ -7258,6 +7074,9 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
     cg->active_str_append_used = false;
   }
   gen_stmt(cg, scopes, depth, s->as.whl.body, func_root, false);
+  if (invariant_ok && s->as.whl.invariant)
+    invariant_ok = ny_proof_check_loop_invariant(
+        cg, scopes, *depth, s->as.whl.invariant);
   if (use_str_append_loop) {
     cg->active_str_append_name = prev_str_append_name;
     cg->active_str_append_builder = prev_str_append_builder;
@@ -7285,7 +7104,10 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
   }
 
   scope_pop(scopes, depth);
-  stmt_restore_binding_int_proof_if_still_int(loop_index_snapshot);
+  if (range_update_safe)
+    stmt_restore_binding_int_proof_if_still_int(loop_index_snapshot);
+  else if (loop_index_snapshot.b)
+    loop_index_snapshot.b->has_int_range = false;
   stmt_apply_loop_append_len_snapshots(append_len_snaps, append_len_snap_count,
                                        trip_count_hint);
   codegen_debug_pop_block(cg, dbg_scope);
@@ -7425,7 +7247,9 @@ static bool stmt_try_emit_fast_range_for(codegen_t *cg, scope *scopes,
                                       &name, &ambiguous);
     if (name && !ambiguous &&
         stmt_str_append_body_only_uses(cg, scopes, *depth, s->as.fr.body, name)) {
-      binding *b = stmt_lookup_binding_no_mark(scopes, *depth, name, strlen(name), 0);
+      bool is_global = false;
+      binding *b = stmt_var_lookup_existing(cg, scopes, *depth, name,
+                                            &is_global);
       if (b && b->is_mut && b->is_slot && b->value) {
         const char *bt = b->decl_type_name ? b->decl_type_name : b->type_name;
         if (ny_type_is(bt, "str")) {
@@ -7630,7 +7454,9 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                                       &name, &ambiguous);
     if (name && !ambiguous &&
         stmt_str_append_body_only_uses(cg, scopes, *depth, s->as.fr.body, name)) {
-      binding *b = stmt_lookup_binding_no_mark(scopes, *depth, name, strlen(name), 0);
+      bool is_global = false;
+      binding *b = stmt_var_lookup_existing(cg, scopes, *depth, name,
+                                            &is_global);
       if (b && b->is_mut && b->is_slot && b->value) {
         const char *bt = b->decl_type_name ? b->decl_type_name : b->type_name;
         if (ny_type_is(bt, "str")) {
@@ -7861,6 +7687,19 @@ static void gen_stmt_struct(codegen_t *cg, stmt_t *s) {
   def->is_layout = (s->kind == NY_S_LAYOUT);
   def->heap_allocated = true;
   def->stmt = s;
+  if (s->kind == NY_S_LAYOUT && s->as.layout.deftype_params.len > 0) {
+    /*
+     * deftype-param array extents resolve from an explicit instantiation
+     * bound (Buf<16>) or the param's `= default` literal (ny_layout_array_extent
+     * in func.c).
+     */
+    for (size_t i = 0; i < s->as.layout.deftype_params.len; i++) {
+      const char *pname = s->as.layout.deftype_params.data[i].name;
+      if (pname)
+        vec_push(&def->deftype_param_names, pname);
+      vec_push(&def->deftype_param_vals, (int64_t)-1);
+    }
+  }
   vec_push(&cg->layouts, def);
   size_t count = s->as.struc.fields.len;
   LLVMTypeRef *element_types =
@@ -7969,6 +7808,1177 @@ void collect_labels(codegen_t *cg, LLVMValueRef func, stmt_t *s, size_t depth) {
   }
 }
 
+/*
+ * Dispatch only; complex statement kinds are implemented by helpers.
+ *
+ * Keep the dispatcher small: the two historically largest statement cases live
+ * in dedicated helpers.  This preserves the shared LLVM builder translation
+ * unit while making statement dispatch reviewable and independently testable.
+ */
+static void gen_stmt_var(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s) {
+  bool dest = s->as.var.is_destructure;
+  NY_COMPILER_ASSERTF(s->as.var.names.len > 0,
+                      "var stmt has no bindings at line %d", s->tok.line);
+  NY_COMPILER_ASSERTF(s->as.var.types.len == 0 || s->as.var.types.len == 1 ||
+                          s->as.var.types.len == s->as.var.names.len,
+                      "var stmt type arity mismatch names=%zu types=%zu",
+                      s->as.var.names.len, s->as.var.types.len);
+  if (dest) {
+    NY_COMPILER_ASSERTF(
+        s->as.var.exprs.len == 1,
+        "destructure expects exactly one source expr, got %zu",
+        s->as.var.exprs.len);
+  } else if (s->as.var.exprs.len > 1) {
+    NY_COMPILER_ASSERTF(
+        s->as.var.exprs.len == s->as.var.names.len,
+        "parallel var assignment mismatch names=%zu exprs=%zu",
+        s->as.var.names.len, s->as.var.exprs.len);
+  }
+  bool parallel = (s->as.var.names.len == s->as.var.exprs.len) && !dest;
+  sema_var_t *sema =
+      (s->sema_kind == NY_STMT_SEMA_VAR) ? (sema_var_t *)s->sema : NULL;
+  bool prefer_direct_locals = false;
+  LLVMValueRef first_val = NULL;
+  bool first_static_list_object_elided = false;
+  bool first_static_list_elide_candidate = false;
+  const char *first_static_list_elide_bail_reason = NULL;
+  bool first_raw_int_list_mutation = false;
+  const char *first_raw_int_list_bail_reason = NULL;
+  bool first_raw_f64_list_mutation = false;
+  const char *first_raw_f64_list_bail_reason = NULL;
+  if (parallel && s->as.var.names.len == 1 && s->as.var.exprs.len == 1) {
+    expr_t *e0 = s->as.var.exprs.data[0];
+    bool first_escapes =
+        sema && sema->escapes.len > 0 && sema->escapes.data[0];
+    const char *first_name = s->as.var.names.data[0];
+    first_static_list_elide_candidate =
+        ny_env_enabled_default_on("NYTRIX_STATIC_INT_LIST_ELIDE") &&
+        !s->as.var.is_mut &&
+        stmt_expr_is_int_list_literal(cg, scopes, *depth, e0);
+    if (stmt_can_elide_static_int_list_object(
+            cg, scopes, *depth, s, first_name, first_escapes, e0,
+            &first_static_list_elide_bail_reason)) {
+      first_val = ny_c0(cg);
+      first_static_list_object_elided = true;
+      parallel = false;
+    } else if (first_static_list_elide_candidate &&
+               !first_static_list_elide_bail_reason) {
+      first_static_list_elide_bail_reason = "unsupported-use";
+    }
+    if (!first_static_list_object_elided &&
+        stmt_can_use_raw_int_list_mutation(cg, scopes, *depth, s, first_name,
+                                           first_escapes, e0,
+                                           &first_raw_int_list_bail_reason)) {
+      first_val = ny_c0(cg);
+      first_raw_int_list_mutation = true;
+      parallel = false;
+    } else if (!first_static_list_object_elided &&
+               stmt_can_use_raw_f64_list_mutation(
+                   cg, scopes, *depth, s, first_name, first_escapes, e0,
+                   &first_raw_f64_list_bail_reason)) {
+      first_val = ny_c0(cg);
+      first_raw_f64_list_mutation = true;
+      parallel = false;
+    }
+  }
+  if (!parallel && !first_static_list_object_elided &&
+      !first_raw_int_list_mutation && !first_raw_f64_list_mutation &&
+      s->as.var.exprs.len > 0) {
+    expr_t *e0 = s->as.var.exprs.data[0];
+    bool first_escapes =
+        sema && sema->escapes.len > 0 && sema->escapes.data[0];
+    const char *first_name =
+        s->as.var.names.len > 0 ? s->as.var.names.data[0] : NULL;
+    first_static_list_elide_candidate =
+        ny_env_enabled_default_on("NYTRIX_STATIC_INT_LIST_ELIDE") &&
+        !s->as.var.is_mut &&
+        stmt_expr_is_int_list_literal(cg, scopes, *depth, e0);
+    if (!dest && first_name &&
+        stmt_can_elide_static_int_list_object(
+            cg, scopes, *depth, s, first_name, first_escapes, e0,
+            &first_static_list_elide_bail_reason)) {
+      first_val = ny_c0(cg);
+      first_static_list_object_elided = true;
+    } else if (!dest && first_name && first_static_list_elide_candidate &&
+               !first_static_list_elide_bail_reason) {
+      first_static_list_elide_bail_reason = "unsupported-use";
+    } else if (!dest && first_name &&
+               stmt_can_use_raw_int_list_mutation(
+                   cg, scopes, *depth, s, first_name, first_escapes, e0,
+                   &first_raw_int_list_bail_reason)) {
+      first_val = ny_c0(cg);
+      first_raw_int_list_mutation = true;
+    } else if (!dest && first_name &&
+               stmt_can_use_raw_f64_list_mutation(
+                   cg, scopes, *depth, s, first_name, first_escapes, e0,
+                   &first_raw_f64_list_bail_reason)) {
+      first_val = ny_c0(cg);
+      first_raw_f64_list_mutation = true;
+    } else if ((cg->opt_enabled || cg->debug_opt_level >= 2 ||
+                ny_codegen_speed_profile_enabled(cg) ||
+                ny_env_enabled("NYTRIX_STACK_INT_LIST_LITERALS")) &&
+               !first_escapes &&
+               stmt_expr_is_int_list_literal(cg, scopes, *depth, e0))
+      first_val = gen_expr_list_stack_alloc(cg, scopes, *depth, e0);
+    else
+      first_val = gen_expr(cg, scopes, *depth, e0);
+  }
+  fun_sig *gs = NULL;
+  if (dest) {
+    gs = lookup_fun(cg, "get", 0);
+    if (!gs) {
+      ny_diag_error(s->tok, "destructuring requires 'get' function");
+      if (verbose_enabled >= 1)
+        ny_diag_hint("import std.core or ensure 'get' is in scope");
+      cg->had_error = 1;
+      return;
+    }
+  }
+  LLVMValueRef *parallel_assign_values = NULL;
+  if (!s->as.var.is_decl && parallel && s->as.var.names.len > 1) {
+    parallel_assign_values =
+        calloc(s->as.var.names.len, sizeof(*parallel_assign_values));
+    if (!parallel_assign_values) {
+      ny_diag_error(s->tok,
+                    "out of memory while preparing grouped assignment");
+      cg->had_error = 1;
+      return;
+    }
+    for (size_t j = 0; j < s->as.var.names.len; j++)
+      parallel_assign_values[j] =
+          gen_expr(cg, scopes, *depth, s->as.var.exprs.data[j]);
+    if (cg->had_error) {
+      free(parallel_assign_values);
+      return;
+    }
+  }
+  for (size_t i = 0; i < s->as.var.names.len; i++) {
+    const char *n = s->as.var.names.data[i];
+    NY_COMPILER_ASSERTF(n && *n, "var binding %zu missing name", i);
+    LLVMValueRef slot = NULL;
+    bool bind_direct = false;
+    binding *resolved_local = NULL;
+    binding *resolved_global = NULL;
+    bool top_level_existing_global = false;
+    expr_t *expr_for_check = NULL;
+    const char *decl_type = NULL;
+    bool decl_type_explicit = false;
+    if (s->as.var.types.len > i)
+      decl_type = s->as.var.types.data[i];
+    decl_type_explicit = decl_type && *decl_type;
+    if (parallel) {
+      expr_for_check = s->as.var.exprs.data[i];
+    } else if (!dest) {
+      if (s->as.var.exprs.len > 0)
+        expr_for_check = s->as.var.exprs.data[0];
+    }
+    if (!decl_type && expr_for_check) {
+      const char *inf = infer_expr_type(cg, scopes, *depth, expr_for_check);
+      if ((cg->strict_types &&
+           (stmt_bindable_inferred_type(inf) ||
+            stmt_type_name_is_int_value(inf))) ||
+          (!s->as.var.is_mut && stmt_bindable_inferred_type(inf)) ||
+          (s->as.var.is_mut && stmt_bindable_mut_inferred_type(inf)))
+        decl_type = inf;
+    }
+    bool top_entry_numeric_hoist = stmt_top_entry_numeric_hoist(
+        cg, scopes, *depth, s, sema, i, decl_type, expr_for_check);
+    bool top_entry_existing_local_assign = false;
+    bool top_entry_can_hoist = stmt_top_entry_can_hoist_var(cg, n);
+    if (*depth == 0 && top_entry_can_hoist && !s->as.var.is_decl) {
+      bool existing_is_global = false;
+      binding *existing = stmt_var_lookup_existing(cg, scopes, *depth, n,
+                                                   &existing_is_global);
+      top_entry_existing_local_assign = existing && !existing_is_global;
+    }
+    bool top_entry_local_path =
+        *depth == 0 && top_entry_can_hoist &&
+        (top_entry_numeric_hoist || top_entry_existing_local_assign);
+    if (s->as.var.is_del) {
+      bool target_is_global = false;
+      LLVMValueRef zero = ny_c0(cg);
+      binding *eb =
+          stmt_var_lookup_existing(cg, scopes, *depth, n, &target_is_global);
+      if (!eb) {
+        report_undef_symbol(cg, n, s->tok);
+        return;
+      }
+      if (!ensure_mutable_binding_for_assign(cg, s->tok, n, eb,
+                                             target_is_global)) {
+        continue;
+      }
+      eb->is_int_slot = false;
+      eb->is_int_direct = false;
+      eb->raw_int_value = NULL;
+      eb->is_f64_slot = false;
+      eb->is_f64_direct = false;
+      eb->is_f32_slot = false;
+      eb->is_f32_direct = false;
+      eb->is_list_storage = false;
+      eb->is_int_list_storage = false;
+      eb->is_f64_list_storage = false;
+      eb->is_dict_storage = false;
+      eb->is_int_dict_storage = false;
+      eb->has_int_range = false;
+      eb->has_list_int_range = false;
+      eb->has_list_len_min = false;
+      eb->has_dict_int_range = false;
+      eb->type_name = NULL;
+      eb->decl_type_name = NULL;
+      if (target_is_global || eb->is_slot) {
+        slot = eb->value;
+      } else {
+        eb->value = zero;
+
+        continue;
+      }
+      if (ensure_store_ready(cg, s->tok, zero, slot, "NY_S_VAR(del)")) {
+        ny_store(cg, slot, zero);
+      }
+      continue;
+    }
+    if (*depth == 0 && !top_entry_local_path) {
+      binding *gb = lookup_global(cg, n);
+      if (gb) {
+        resolved_global = gb;
+        top_level_existing_global = true;
+        slot = gb->value;
+      } else {
+        const char *type_name = decl_type;
+        if (s->as.var.types.len > i)
+          type_name = s->as.var.types.data[i];
+        bool sema_global_f64 = sema && sema->is_f64_proven.len > i &&
+                               sema->is_f64_proven.data[i];
+        if (!type_name && sema_global_f64)
+          type_name = "f64";
+        if (!type_name && s->as.var.exprs.len > i) {
+          expr_t *ie = s->as.var.exprs.data[i];
+          if (ie && ie->kind == NY_E_LITERAL &&
+              ie->as.literal.kind == NY_LIT_FLOAT) {
+            if (ie->as.literal.hint == NY_LIT_HINT_F32)
+              type_name = "f32";
+            else
+              type_name = "f64";
+          }
+        }
+        LLVMTypeRef global_type = cg->type_i64;
+        bool global_is_f64 =
+            sema_global_f64 || stmt_type_name_is_f64_value(type_name);
+        bool global_is_f32 = stmt_type_name_is_f32_value(type_name);
+        if (global_is_f64)
+          global_type = cg->type_f64;
+        else if (global_is_f32)
+          global_type = cg->type_f32;
+        slot = LLVMAddGlobal(cg->module, global_type, n);
+        if ((!cg->current_module_name || !*cg->current_module_name) &&
+            !ny_is_stdlib_tok(s->tok)) {
+          LLVMSetLinkage(slot, LLVMPrivateLinkage);
+        }
+        LLVMSetInitializer(slot, LLVMConstNull(global_type));
+        binding b = {0};
+        b.name = ny_strdup(n);
+        b.value = slot;
+        b.stmt_t = s;
+        b.is_slot = true;
+        b.is_mut = s->as.var.is_mut ? true : false;
+        b.owned = true;
+        b.type_name = type_name;
+        b.decl_type_name =
+            (decl_type_explicit || cg->strict_types) ? type_name : NULL;
+        b.is_f64_slot = global_is_f64;
+        b.is_f32_slot = global_is_f32;
+        vec_push(&cg->global_vars, b);
+        if (cg->global_vars.len > 0)
+          resolved_global = &cg->global_vars.data[cg->global_vars.len - 1];
+        if (cg->debug_symbols && cg->di_builder) {
+          codegen_debug_global_variable(cg, n, slot, type_name, s->tok);
+        }
+        if (s->tok.filename) {
+          ny_diag_warning(s->tok,
+                          "implicit declaration of global variable %s'%s'%s",
+                          clr(NY_CLR_BOLD), n, clr(NY_CLR_RESET));
+          ny_diag_fix("declare with %sdef %s = ...%s or %smut %s = ...%s at "
+                      "the top level",
+                      clr(NY_CLR_BOLD), n, clr(NY_CLR_RESET),
+                      clr(NY_CLR_BOLD), n, clr(NY_CLR_RESET));
+        }
+      }
+    }
+    LLVMValueRef target_val = NULL;
+
+    if (*depth == 0 && !top_entry_local_path) {
+      binding *gb = resolved_global ? resolved_global : lookup_global(cg, n);
+      if (gb && decl_type && !gb->type_name) {
+        gb->type_name = decl_type;
+        if (decl_type_explicit || cg->strict_types)
+          gb->decl_type_name = decl_type;
+      }
+    }
+    if (*depth == 0 && !top_entry_local_path && s->as.var.is_decl &&
+        !s->as.var.is_del && !dest && s->as.var.names.len == 1 &&
+        s->as.var.exprs.len == 1 && slot && LLVMIsAGlobalVariable(slot) &&
+        !top_level_existing_global) {
+      LLVMValueRef const_init =
+          stmt_const_top_level_expr_value(cg, expr_for_check);
+      if (const_init) {
+        LLVMSetInitializer(slot, const_init);
+        binding *gb =
+            resolved_global ? resolved_global : lookup_global(cg, n);
+        if (gb) {
+          const char *init_type =
+              decl_type ? decl_type
+                        : infer_expr_type(cg, scopes, *depth, expr_for_check);
+          if (!gb->type_name)
+            gb->type_name = init_type;
+          if ((decl_type_explicit || cg->strict_types) && !gb->decl_type_name)
+            gb->decl_type_name = init_type;
+        }
+        continue;
+      }
+    }
+
+    if (*depth > 0 || top_entry_local_path) {
+      if (s->as.var.is_decl) {
+        stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
+                                     decl_type, decl_type_explicit,
+                                     prefer_direct_locals,
+                                     &bind_direct, &slot);
+      } else {
+        bool target_is_global = false;
+        binding *eb = stmt_var_lookup_existing(cg, scopes, *depth, n,
+                                               &target_is_global);
+        if (eb) {
+          if (!ensure_mutable_binding_for_assign(cg, s->tok, n, eb,
+                                                 target_is_global)) {
+            continue;
+          }
+          if (target_is_global) {
+            resolved_global = eb;
+            if (!eb->is_slot) {
+              ny_diag_error(s->tok,
+                            "cannot assign to non-addressable value '%s'", n);
+              cg->had_error = 1;
+              continue;
+            }
+            slot = eb->value;
+          } else {
+            resolved_local = eb;
+            if (eb->is_slot)
+              slot = eb->value;
+          }
+        } else {
+          stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
+                                       decl_type, decl_type_explicit,
+                                       prefer_direct_locals,
+                                       &bind_direct, &slot);
+        }
+      }
+    }
+
+    bool target_is_f64_slot = false;
+    bool target_is_f32_slot = false;
+    if (resolved_local) {
+      if (resolved_local->is_f64_slot)
+        target_is_f64_slot = true;
+      if (resolved_local->is_f32_slot)
+        target_is_f32_slot = true;
+    } else if (resolved_global) {
+      if (resolved_global->is_f64_slot)
+        target_is_f64_slot = true;
+      if (resolved_global->is_f32_slot)
+        target_is_f32_slot = true;
+    } else if (!resolved_global && slot) {
+      size_t nlen = strlen(n);
+      binding *nb = stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
+      if (nb) {
+        if (nb->is_f64_slot)
+          target_is_f64_slot = true;
+        if (nb->is_f32_slot)
+          target_is_f32_slot = true;
+      }
+    }
+
+    if (!s->as.var.is_decl && !dest && s->as.var.names.len == 1 &&
+        s->as.var.exprs.len == 1 &&
+        stmt_try_emit_active_str_append_assignment(cg, scopes, *depth, n,
+                                                   expr_for_check)) {
+      continue;
+    }
+
+    if (expr_for_check && scopes[*depth].loop_trip_hint > 0) {
+      stmt_try_widen_loop_accumulator_binding(cg, scopes, *depth, n,
+                                              expr_for_check,
+                                              scopes[*depth].loop_trip_hint);
+    }
+
+    if ((target_is_f64_slot || target_is_f32_slot) && slot &&
+        expr_for_check &&
+        (!parallel || s->as.var.names.len == 1 || parallel_assign_values) &&
+        !dest) {
+      LLVMTypeRef target_type =
+          target_is_f32_slot ? cg->type_f32 : cg->type_f64;
+      if (parallel_assign_values) {
+        LLVMValueRef fv = parallel_assign_values[i];
+        if (fv && LLVMTypeOf(fv) != target_type) {
+          fv = ny_unbox_float(cg, fv);
+          if (target_is_f32_slot)
+            fv = LLVMBuildFPTrunc(cg->builder, fv, cg->type_f32, "f2f");
+        }
+        if (ensure_store_ready(cg, s->tok, fv, slot, "NY_S_VAR_FLT"))
+          ny_store(cg, slot, fv);
+        continue;
+      }
+      LLVMValueRef fv = gen_expr_as_f64(cg, scopes, *depth, expr_for_check);
+      if (fv) {
+        if (target_is_f32_slot)
+          fv = LLVMBuildFPTrunc(cg->builder, fv, cg->type_f32, "f2f");
+        if (ensure_store_ready(cg, s->tok, fv, slot, "NY_S_VAR_FLT"))
+          ny_store(cg, slot, fv);
+        continue;
+      }
+      const char *et = infer_expr_type(cg, scopes, *depth, expr_for_check);
+      bool rhs_is_int = stmt_type_name_is_int_value(et);
+      if (rhs_is_int) {
+        LLVMValueRef iv = gen_expr(cg, scopes, *depth, expr_for_check);
+        LLVMValueRef fv_int = LLVMBuildSIToFP(
+            cg->builder, ny_ashr(cg, iv, ny_c1(cg), ""), target_type, "i2f");
+        if (ensure_store_ready(cg, s->tok, fv_int, slot, "NY_S_VAR_FLT"))
+          ny_store(cg, slot, fv_int);
+        continue;
+      }
+
+      {
+        LLVMValueRef v = gen_expr(cg, scopes, *depth, expr_for_check);
+        LLVMValueRef fv_fallback = ny_unbox_float(cg, v);
+        if (target_is_f32_slot)
+          fv_fallback =
+              LLVMBuildFPTrunc(cg->builder, fv_fallback, cg->type_f32, "f2f");
+        if (ensure_store_ready(cg, s->tok, fv_fallback, slot, "NY_S_VAR_FLT"))
+          ny_store(cg, slot, fv_fallback);
+        continue;
+      }
+    }
+
+    bool is_f64_expr =
+        stmt_type_name_is_f64_value(decl_type) ||
+        stmt_type_name_is_f64_value(
+            infer_expr_type(cg, scopes, *depth, expr_for_check));
+    bool direct_native_float_candidate =
+        bind_direct && is_f64_expr && !dest && expr_for_check &&
+        (!parallel || s->as.var.names.len == 1);
+
+    binding *rhs_self_dest = resolved_local ? resolved_local : resolved_global;
+    if (!rhs_self_dest && slot) {
+      size_t nlen = strlen(n);
+      rhs_self_dest =
+          stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
+    }
+    bool rhs_pre_proven_int =
+        expr_for_check && ny_is_proven_int(cg, scopes, *depth,
+                                           expr_for_check, NULL);
+    bool suppress_self_raw_int =
+        rhs_self_dest && rhs_self_dest->is_int_slot && expr_for_check &&
+        stmt_expr_contains_ident_name(expr_for_check, n) &&
+        !rhs_pre_proven_int;
+    stmt_binding_int_snapshot_t self_raw_snap = {0};
+    if (suppress_self_raw_int) {
+      self_raw_snap = stmt_snapshot_binding_int_proof(rhs_self_dest);
+      rhs_self_dest->is_int_slot = false;
+      rhs_self_dest->is_int_direct = false;
+      rhs_self_dest->is_int_raw_direct = false;
+      rhs_self_dest->has_int_range = false;
+    }
+    if (direct_native_float_candidate) {
+      target_val = NULL;
+    } else if (parallel) {
+      target_val = parallel_assign_values
+                       ? parallel_assign_values[i]
+                       : gen_expr(cg, scopes, *depth, expr_for_check);
+    } else if (dest) {
+      uint64_t tagged_idx = ((uint64_t)i << 1) | 1;
+      LLVMValueRef idx_val = LLVMConstInt(cg->type_i64, tagged_idx, false);
+      target_val =
+          LLVMBuildCall2(cg->builder, gs->type, gs->value,
+                         (LLVMValueRef[]){first_val, idx_val}, 2, "");
+    } else {
+      target_val = first_val;
+    }
+    stmt_restore_binding_int_proof(self_raw_snap);
+    if (!s->as.var.is_destructure) {
+      const char *want = decl_type;
+      if (!s->as.var.is_decl) {
+        binding *cur = resolved_local;
+        if (cur)
+          want = binding_assign_type(cur);
+        else if (resolved_global)
+          want = binding_assign_type(resolved_global);
+      }
+      if (want && expr_for_check)
+        ensure_expr_type_compatible(cg, scopes, *depth, want, expr_for_check,
+                                    expr_for_check->tok, "assignment");
+    }
+    bool rhs_proven_int = false;
+    bool rhs_proven_f64 = false;
+    bool rhs_has_int_range = false;
+    int64_t rhs_int_min_raw = 0;
+    int64_t rhs_int_max_raw = 0;
+    bool rhs_list_storage = false;
+    bool rhs_int_list_storage = false;
+    bool rhs_f64_list_storage = false;
+    bool rhs_dict_storage = false;
+    bool rhs_int_dict_storage = false;
+    bool rhs_has_list_int_range = false;
+    int64_t rhs_list_min_raw = 0;
+    int64_t rhs_list_max_raw = 0;
+    bool rhs_has_list_len_min = false;
+    int64_t rhs_list_len_min_raw = 0;
+    bool rhs_has_dict_int_range = false;
+    int64_t rhs_dict_min_raw = 0;
+    int64_t rhs_dict_max_raw = 0;
+    if (expr_for_check) {
+      rhs_proven_int =
+          ny_is_proven_int(cg, scopes, *depth, expr_for_check, target_val);
+      const char *rhs_type =
+          infer_expr_type(cg, scopes, *depth, expr_for_check);
+      rhs_proven_f64 = stmt_type_name_is_float_value(rhs_type);
+      if (rhs_proven_int) {
+        rhs_has_int_range =
+            stmt_expr_int_range(cg, scopes, *depth, expr_for_check,
+                                &rhs_int_min_raw, &rhs_int_max_raw);
+      }
+      expr_t *static_int_seed = NULL;
+      size_t static_int_len = 0;
+      bool static_int_shape = stmt_expr_static_int_list_shape(
+          cg, scopes, *depth, expr_for_check, &static_int_seed, NULL,
+          &static_int_len);
+      size_t static_f64_len = 0;
+      bool static_f64_shape = stmt_expr_static_f64_list_shape(
+          cg, scopes, *depth, expr_for_check, NULL, NULL, &static_f64_len);
+      if (ny_expr_is_list_or_tuple_lit(expr_for_check) ||
+          stmt_expr_is_list_ctor(expr_for_check) || static_int_shape ||
+          static_f64_shape) {
+        rhs_list_storage = true;
+        rhs_int_list_storage = stmt_expr_is_list_ctor(expr_for_check) ||
+                               static_int_shape;
+        rhs_f64_list_storage = stmt_expr_is_list_ctor(expr_for_check) ||
+                               static_f64_shape;
+        rhs_has_list_len_min = true;
+        if (static_int_shape)
+          rhs_list_len_min_raw = (int64_t)static_int_len;
+        else if (static_f64_shape)
+          rhs_list_len_min_raw = (int64_t)static_f64_len;
+        else
+          rhs_list_len_min_raw =
+              ny_expr_is_list_or_tuple_lit(expr_for_check)
+                  ? (int64_t)expr_for_check->as.list_like.len
+                  : 0;
+        if (rhs_int_list_storage && static_int_seed) {
+          rhs_has_list_int_range = stmt_int_list_literal_range(
+              cg, scopes, *depth, static_int_seed, &rhs_list_min_raw,
+              &rhs_list_max_raw);
+        }
+      } else if (stmt_expr_is_dict_ctor(expr_for_check)) {
+        rhs_dict_storage = true;
+        rhs_int_dict_storage = true;
+      } else {
+        expr_t *append_value = NULL;
+        expr_t *set_value = NULL;
+        if (stmt_expr_is_append_to_name(expr_for_check, n, &append_value)) {
+          binding *src = resolved_local ? resolved_local : resolved_global;
+          if (!src) {
+            size_t nlen = strlen(n);
+            src = stmt_lookup_binding(cg, scopes, *depth, n, nlen, 0);
+          }
+          if (src && src->is_list_storage) {
+            rhs_list_storage = true;
+            rhs_int_list_storage =
+                src->is_int_list_storage &&
+                ny_is_proven_int(cg, scopes, *depth, append_value, NULL);
+            rhs_f64_list_storage =
+                src->is_f64_list_storage &&
+                stmt_expr_is_f64_value(cg, scopes, *depth, append_value);
+            if (src->has_list_len_min && src->list_len_min_raw < INT64_MAX) {
+              rhs_has_list_len_min = true;
+              rhs_list_len_min_raw = src->list_len_min_raw + 1;
+            }
+            if (rhs_int_list_storage) {
+              int64_t val_min = 0, val_max = 0;
+              bool val_has_range = stmt_expr_int_range(
+                  cg, scopes, *depth, append_value, &val_min, &val_max);
+              if (src->has_list_int_range && val_has_range) {
+                rhs_has_list_int_range = true;
+                rhs_list_min_raw = src->list_int_min_raw < val_min
+                                       ? src->list_int_min_raw
+                                       : val_min;
+                rhs_list_max_raw = src->list_int_max_raw > val_max
+                                       ? src->list_int_max_raw
+                                       : val_max;
+              } else if (val_has_range) {
+                rhs_has_list_int_range = true;
+                rhs_list_min_raw = val_min;
+                rhs_list_max_raw = val_max;
+              }
+            }
+          }
+        } else if (stmt_expr_is_set_idx_to_name(expr_for_check, n,
+                                                &set_value)) {
+          binding *src = resolved_local ? resolved_local : resolved_global;
+          if (!src) {
+            size_t nlen = strlen(n);
+            src = stmt_lookup_binding(cg, scopes, *depth, n, nlen, 0);
+          }
+          if (src && src->is_list_storage) {
+            rhs_list_storage = true;
+            rhs_int_list_storage =
+                src->is_int_list_storage &&
+                ny_is_proven_int(cg, scopes, *depth, set_value, NULL);
+            rhs_f64_list_storage =
+                src->is_f64_list_storage &&
+                stmt_expr_is_f64_value(cg, scopes, *depth, set_value);
+            if (src->has_list_len_min) {
+              rhs_has_list_len_min = true;
+              rhs_list_len_min_raw = src->list_len_min_raw;
+            }
+            if (rhs_int_list_storage) {
+              int64_t val_min = 0, val_max = 0;
+              bool val_has_range = stmt_expr_int_range(
+                  cg, scopes, *depth, set_value, &val_min, &val_max);
+              if (src->has_list_int_range && val_has_range) {
+                rhs_has_list_int_range = true;
+                rhs_list_min_raw = src->list_int_min_raw < val_min
+                                       ? src->list_int_min_raw
+                                       : val_min;
+                rhs_list_max_raw = src->list_int_max_raw > val_max
+                                       ? src->list_int_max_raw
+                                       : val_max;
+              } else if (src->has_list_int_range) {
+                rhs_has_list_int_range = true;
+                rhs_list_min_raw = src->list_int_min_raw;
+                rhs_list_max_raw = src->list_int_max_raw;
+              } else if (val_has_range) {
+                rhs_has_list_int_range = true;
+                rhs_list_min_raw = val_min;
+                rhs_list_max_raw = val_max;
+              }
+            }
+          }
+          if (src && src->is_dict_storage) {
+            rhs_dict_storage = true;
+            rhs_int_dict_storage =
+                src->is_int_dict_storage &&
+                ny_is_proven_int(cg, scopes, *depth, set_value, NULL);
+            if (rhs_int_dict_storage) {
+              int64_t val_min = 0, val_max = 0;
+              bool val_has_range = stmt_expr_int_range(
+                  cg, scopes, *depth, set_value, &val_min, &val_max);
+              if (src->has_dict_int_range && val_has_range) {
+                rhs_has_dict_int_range = true;
+                rhs_dict_min_raw = src->dict_int_min_raw < val_min
+                                       ? src->dict_int_min_raw
+                                       : val_min;
+                rhs_dict_max_raw = src->dict_int_max_raw > val_max
+                                       ? src->dict_int_max_raw
+                                       : val_max;
+              } else if (val_has_range) {
+                rhs_has_dict_int_range = true;
+                rhs_dict_min_raw = val_min;
+                rhs_dict_max_raw = val_max;
+              }
+            }
+          }
+        }
+      }
+    }
+    if (bind_direct) {
+      bool is_f64_direct = false;
+      bool is_int_direct = false;
+      if (direct_native_float_candidate) {
+        target_val = gen_expr_as_f64(cg, scopes, *depth, expr_for_check);
+        is_f64_direct = true;
+      } else if ((stmt_type_name_is_int_value(decl_type) && rhs_proven_int) ||
+                 rhs_proven_int) {
+        is_int_direct = true;
+      }
+
+      scope_bind(cg, scopes, *depth, n, target_val, s, s->as.var.is_mut,
+                 decl_type, false);
+      size_t nlen = strlen(n);
+      binding *b = stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
+      if (b) {
+        if (!decl_type_explicit)
+          b->decl_type_name = NULL;
+        stmt_update_numeric_binding_proof(cg, b, is_int_direct,
+                                          is_f64_direct);
+        stmt_update_int_binding_range(b, rhs_has_int_range, rhs_int_min_raw,
+                                      rhs_int_max_raw);
+        stmt_update_list_binding_proof(b, rhs_list_storage,
+                                       rhs_int_list_storage,
+                                       rhs_f64_list_storage);
+        stmt_update_dict_binding_proof(b, rhs_dict_storage,
+                                       rhs_int_dict_storage);
+        stmt_update_list_binding_range(b, rhs_has_list_int_range,
+                                       rhs_list_min_raw, rhs_list_max_raw);
+        stmt_update_list_binding_len_min(b, rhs_has_list_len_min,
+                                         rhs_list_len_min_raw);
+        stmt_update_dict_binding_range(b, rhs_has_dict_int_range,
+                                       rhs_dict_min_raw, rhs_dict_max_raw);
+        stmt_update_direct_callable_binding(cg, b, expr_for_check);
+        if (first_static_list_object_elided && i == 0)
+          b->static_indexable_object_elided = true;
+        if (first_static_list_elide_candidate && i == 0)
+          stmt_update_static_int_list_elide_metadata(
+              b, true, first_static_list_object_elided,
+              first_static_list_elide_bail_reason);
+        if (first_raw_int_list_mutation && i == 0)
+          stmt_init_raw_int_list_storage(cg, scopes, *depth, b,
+                                         expr_for_check);
+        else if (first_raw_f64_list_mutation && i == 0)
+          stmt_init_raw_f64_list_storage(cg, scopes, *depth, b,
+                                         expr_for_check);
+        else if (i == 0) {
+          if (first_raw_int_list_bail_reason)
+            b->raw_int_list_bail_reason = first_raw_int_list_bail_reason;
+          if (first_raw_f64_list_bail_reason)
+            b->raw_f64_list_bail_reason = first_raw_f64_list_bail_reason;
+        }
+        stmt_ownership_post_store(cg, scopes, *depth, b, expr_for_check,
+                                  s->tok, false);
+      }
+
+      continue;
+    }
+    if (resolved_local && !resolved_local->is_slot) {
+      bool is_self_mut_list =
+          (resolved_local->raw_int_list_mutation ||
+           resolved_local->raw_f64_list_mutation) &&
+          expr_for_check && expr_for_check->kind == NY_E_CALL &&
+          expr_for_check->as.call.args.len >= 1 &&
+          expr_for_check->as.call.args.data[0].val &&
+          expr_for_check->as.call.args.data[0].val->kind == NY_E_IDENT &&
+          expr_for_check->as.call.args.data[0].val->as.ident.name &&
+          strcmp(expr_for_check->as.call.args.data[0].val->as.ident.name,
+                 resolved_local->name) == 0;
+      if (is_self_mut_list) {
+        continue;
+      }
+      stmt_ownership_pre_store(cg, scopes, *depth, resolved_local,
+                               expr_for_check, s->tok);
+      stmt_invalidate_static_indexable(resolved_local);
+      stmt_update_numeric_binding_proof(cg, resolved_local, rhs_proven_int,
+                                        rhs_proven_f64);
+      stmt_update_int_binding_range(resolved_local, rhs_has_int_range,
+                                    rhs_int_min_raw, rhs_int_max_raw);
+      stmt_update_list_binding_proof(resolved_local, rhs_list_storage,
+                                     rhs_int_list_storage,
+                                     rhs_f64_list_storage);
+      stmt_update_dict_binding_proof(resolved_local, rhs_dict_storage,
+                                     rhs_int_dict_storage);
+      stmt_update_list_binding_range(resolved_local, rhs_has_list_int_range,
+                                     rhs_list_min_raw, rhs_list_max_raw);
+      stmt_update_list_binding_len_min(resolved_local, rhs_has_list_len_min,
+                                       rhs_list_len_min_raw);
+      stmt_update_dict_binding_range(resolved_local, rhs_has_dict_int_range,
+                                     rhs_dict_min_raw, rhs_dict_max_raw);
+      stmt_update_direct_callable_binding(cg, resolved_local,
+                                          expr_for_check);
+      if (first_static_list_object_elided && i == 0)
+        resolved_local->static_indexable_object_elided = true;
+      if (first_static_list_elide_candidate && i == 0)
+        stmt_update_static_int_list_elide_metadata(
+            resolved_local, true, first_static_list_object_elided,
+            first_static_list_elide_bail_reason);
+      if (first_raw_int_list_mutation && i == 0)
+        stmt_init_raw_int_list_storage(cg, scopes, *depth, resolved_local,
+                                       expr_for_check);
+      else if (first_raw_f64_list_mutation && i == 0)
+        stmt_init_raw_f64_list_storage(cg, scopes, *depth, resolved_local,
+                                       expr_for_check);
+      else if (i == 0) {
+        if (first_raw_int_list_bail_reason)
+          resolved_local->raw_int_list_bail_reason = first_raw_int_list_bail_reason;
+        if (first_raw_f64_list_bail_reason)
+          resolved_local->raw_f64_list_bail_reason = first_raw_f64_list_bail_reason;
+      }
+      resolved_local->value = target_val;
+      stmt_ownership_post_store(cg, scopes, *depth, resolved_local,
+                                expr_for_check, s->tok, false);
+
+      continue;
+    }
+    if (resolved_local) {
+      stmt_invalidate_static_indexable(resolved_local);
+      stmt_update_numeric_binding_proof(cg, resolved_local, rhs_proven_int,
+                                        rhs_proven_f64);
+      stmt_update_int_binding_range(resolved_local, rhs_has_int_range,
+                                    rhs_int_min_raw, rhs_int_max_raw);
+      stmt_update_list_binding_proof(resolved_local, rhs_list_storage,
+                                     rhs_int_list_storage,
+                                     rhs_f64_list_storage);
+      stmt_update_dict_binding_proof(resolved_local, rhs_dict_storage,
+                                     rhs_int_dict_storage);
+      stmt_update_list_binding_range(resolved_local, rhs_has_list_int_range,
+                                     rhs_list_min_raw, rhs_list_max_raw);
+      stmt_update_list_binding_len_min(resolved_local, rhs_has_list_len_min,
+                                       rhs_list_len_min_raw);
+      stmt_update_dict_binding_range(resolved_local, rhs_has_dict_int_range,
+                                     rhs_dict_min_raw, rhs_dict_max_raw);
+      stmt_update_direct_callable_binding(cg, resolved_local,
+                                          expr_for_check);
+      if (first_static_list_object_elided && i == 0)
+        resolved_local->static_indexable_object_elided = true;
+      if (first_static_list_elide_candidate && i == 0)
+        stmt_update_static_int_list_elide_metadata(
+            resolved_local, true, first_static_list_object_elided,
+            first_static_list_elide_bail_reason);
+      if (first_raw_int_list_mutation && i == 0)
+        stmt_init_raw_int_list_storage(cg, scopes, *depth, resolved_local,
+                                       expr_for_check);
+      else if (first_raw_f64_list_mutation && i == 0)
+        stmt_init_raw_f64_list_storage(cg, scopes, *depth, resolved_local,
+                                       expr_for_check);
+      else if (i == 0) {
+        if (first_raw_int_list_bail_reason)
+          resolved_local->raw_int_list_bail_reason = first_raw_int_list_bail_reason;
+        if (first_raw_f64_list_bail_reason)
+          resolved_local->raw_f64_list_bail_reason = first_raw_f64_list_bail_reason;
+      }
+    } else if (resolved_global) {
+      stmt_invalidate_static_indexable(resolved_global);
+      stmt_update_numeric_binding_proof(cg, resolved_global, rhs_proven_int,
+                                        rhs_proven_f64);
+      stmt_update_int_binding_range(resolved_global, rhs_has_int_range,
+                                    rhs_int_min_raw, rhs_int_max_raw);
+      stmt_update_list_binding_proof(resolved_global, rhs_list_storage,
+                                     rhs_int_list_storage,
+                                     rhs_f64_list_storage);
+      stmt_update_dict_binding_proof(resolved_global, rhs_dict_storage,
+                                     rhs_int_dict_storage);
+      stmt_update_list_binding_range(resolved_global, rhs_has_list_int_range,
+                                     rhs_list_min_raw, rhs_list_max_raw);
+      stmt_update_list_binding_len_min(resolved_global, rhs_has_list_len_min,
+                                       rhs_list_len_min_raw);
+      stmt_update_dict_binding_range(resolved_global, rhs_has_dict_int_range,
+                                     rhs_dict_min_raw, rhs_dict_max_raw);
+      stmt_update_direct_callable_binding(cg, resolved_global,
+                                          expr_for_check);
+      if (first_static_list_object_elided && i == 0)
+        resolved_global->static_indexable_object_elided = true;
+      if (first_static_list_elide_candidate && i == 0)
+        stmt_update_static_int_list_elide_metadata(
+            resolved_global, true, first_static_list_object_elided,
+            first_static_list_elide_bail_reason);
+      if (first_raw_int_list_mutation && i == 0)
+        stmt_init_raw_int_list_storage(cg, scopes, *depth, resolved_global,
+                                       expr_for_check);
+      else if (first_raw_f64_list_mutation && i == 0)
+        stmt_init_raw_f64_list_storage(cg, scopes, *depth, resolved_global,
+                                       expr_for_check);
+      else if (i == 0) {
+        if (first_raw_int_list_bail_reason)
+          resolved_global->raw_int_list_bail_reason = first_raw_int_list_bail_reason;
+        if (first_raw_f64_list_bail_reason)
+          resolved_global->raw_f64_list_bail_reason = first_raw_f64_list_bail_reason;
+      }
+    } else if (slot) {
+      size_t nlen = strlen(n);
+      binding *created =
+          stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
+      if (created) {
+        stmt_update_numeric_binding_proof(cg, created, rhs_proven_int,
+                                          rhs_proven_f64);
+        stmt_update_int_binding_range(created, rhs_has_int_range,
+                                      rhs_int_min_raw, rhs_int_max_raw);
+        stmt_update_list_binding_proof(created, rhs_list_storage,
+                                       rhs_int_list_storage,
+                                       rhs_f64_list_storage);
+        stmt_update_dict_binding_proof(created, rhs_dict_storage,
+                                       rhs_int_dict_storage);
+        stmt_update_list_binding_range(created, rhs_has_list_int_range,
+                                       rhs_list_min_raw, rhs_list_max_raw);
+        stmt_update_list_binding_len_min(created, rhs_has_list_len_min,
+                                         rhs_list_len_min_raw);
+        stmt_update_dict_binding_range(created, rhs_has_dict_int_range,
+                                       rhs_dict_min_raw, rhs_dict_max_raw);
+        stmt_update_direct_callable_binding(cg, created, expr_for_check);
+        if (first_static_list_object_elided && i == 0)
+          created->static_indexable_object_elided = true;
+        if (first_static_list_elide_candidate && i == 0)
+          stmt_update_static_int_list_elide_metadata(
+              created, true, first_static_list_object_elided,
+              first_static_list_elide_bail_reason);
+        if (first_raw_int_list_mutation && i == 0)
+          stmt_init_raw_int_list_storage(cg, scopes, *depth, created,
+                                         expr_for_check);
+        else if (first_raw_f64_list_mutation && i == 0)
+          stmt_init_raw_f64_list_storage(cg, scopes, *depth, created,
+                                         expr_for_check);
+        else if (i == 0) {
+          if (first_raw_int_list_bail_reason)
+            created->raw_int_list_bail_reason = first_raw_int_list_bail_reason;
+          if (first_raw_f64_list_bail_reason)
+            created->raw_f64_list_bail_reason = first_raw_f64_list_bail_reason;
+        }
+      }
+    }
+    binding *own_dest = resolved_local ? resolved_local : resolved_global;
+    bool own_dest_global = resolved_global != NULL;
+    if (!own_dest && *depth == 0 && !top_entry_local_path) {
+      own_dest = lookup_global(cg, n);
+      own_dest_global = own_dest != NULL;
+    } else if (!own_dest && slot) {
+      size_t nlen = strlen(n);
+      own_dest = stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
+    }
+    stmt_ownership_pre_store(cg, scopes, *depth, own_dest, expr_for_check,
+                             s->tok);
+    if (ensure_store_ready(cg, s->tok, target_val, slot, "NY_S_VAR")) {
+      if (target_is_f64_slot || target_is_f32_slot) {
+        LLVMValueRef fv = NULL;
+        LLVMTypeRef target_type =
+            target_is_f32_slot ? cg->type_f32 : cg->type_f64;
+        if (target_val && LLVMTypeOf(target_val) == target_type) {
+          fv = target_val;
+        } else {
+          fv = ny_unbox_float(cg, target_val);
+          if (target_is_f32_slot)
+            fv = LLVMBuildFPTrunc(cg->builder, fv, cg->type_f32, "f2f");
+        }
+        ny_store(cg, slot, fv);
+
+      } else {
+        ny_store(cg, slot, target_val);
+        if (own_dest && own_dest->is_int_slot)
+          stmt_store_raw_int_shadow_expr(cg, scopes, *depth, own_dest,
+                                         expr_for_check, target_val);
+      }
+      stmt_ownership_post_store(cg, scopes, *depth, own_dest, expr_for_check,
+                                s->tok, own_dest_global);
+    }
+  }
+  free(parallel_assign_values);
+}
+
+static void gen_stmt_expr_stmt(codegen_t *cg, scope *scopes, size_t *depth,
+                               stmt_t *s, size_t func_root, bool is_tail) {
+  expr_t *e = s->as.expr.expr;
+  if (!e) {
+    ny_diag_error(s->tok, "missing expression statement payload");
+    cg->had_error = 1;
+    return;
+  }
+  if (stmt_expr_is_unassigned_append_call(e) &&
+      ny_diag_should_emit("unused_append_result", s->tok, "append")) {
+    ny_diag_warning_code(
+        s->tok, 2001,
+        "result of 'append' is unused; list append returns a new list");
+    ny_diag_hint("assign the returned list, e.g. xs = xs.append(value)");
+  }
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT) {
+    fun_sig *sig = lookup_fun(cg, e->as.call.callee->as.ident.name,
+                              e->as.call.callee->as.ident.hash);
+    if (sig && sig->return_type && (size_t)sig->return_type > 0x1000) {
+      if (strcmp(sig->return_type, "Result") == 0 ||
+          strcmp(sig->return_type, "std.core.error.Result") == 0) {
+        if (ny_diag_should_emit("unused_result", s->tok, sig->name)) {
+          bool strict_err = ny_strict_error_enabled(cg, s->tok);
+          if (strict_err)
+            ny_diag_error(s->tok, "unused Result from '%s'", sig->name);
+          else
+            ny_diag_warning(s->tok, "unused Result from '%s'", sig->name);
+          ny_diag_hint("handle the value (e.g. with match/unwrap/propagate)");
+          if (strict_err) {
+            cg->had_error = 1;
+            return;
+          }
+        }
+      }
+    }
+  }
+  if (is_tail && !cg->result_store_val && cg->current_fn_ret_type) {
+    ensure_expr_type_compatible(cg, scopes, *depth, cg->current_fn_ret_type,
+                                e, e->tok, "return");
+    if (cg->had_error)
+      return;
+    if (!cg->current_fn_attr_naked && !cg->result_store_val &&
+        cg->current_fn_native_abi &&
+        stmt_type_is_native_float(cg->current_fn_ret_type) &&
+        stmt_expr_is_native_float_tail_safe(e)) {
+      LLVMValueRef v = stmt_gen_return_value(cg, scopes, *depth, e,
+                                             cg->current_fn_ret_type);
+      if (!v) {
+        ny_diag_error(s->tok, "failed to generate expression");
+        cg->had_error = 1;
+        return;
+      }
+      ny_owner_state_t old_owner_state = NY_OWNER_BORROWED;
+      binding *return_owner = stmt_ownership_begin_return_transfer(
+          cg, scopes, *depth, e, &old_owner_state);
+      emit_defers(cg, scopes, *depth, func_root);
+      stmt_ownership_end_return_transfer(return_owner, old_owner_state);
+      if (!ny_has_terminator(cg)) {
+        if (!emit_active_panic_env_clear(cg, s->tok))
+          return;
+        ny_cg_emit_trace_return(cg, v, cg->current_fn_ret_type);
+        ny_cg_emit_trace_exit(cg);
+        LLVMBuildRet(cg->builder, v);
+      }
+      return;
+    }
+  }
+  bool prev_detach_stmt_call = cg->thread_detach_stmt_call;
+  if (!is_tail && stmt_is_direct_thread_attr_call(cg, e))
+    cg->thread_detach_stmt_call = true;
+  LLVMValueRef v =
+      is_tail ? stmt_gen_expr_with_tail_call_hint(cg, scopes, *depth, e)
+              : gen_expr(cg, scopes, *depth, e);
+  cg->thread_detach_stmt_call = prev_detach_stmt_call;
+  if (!v) {
+    ny_diag_error(s->tok, "failed to generate expression");
+    cg->had_error = 1;
+    return;
+  }
+  if (!is_tail && stmt_expr_is_noreturn_call(cg, scopes, *depth, e)) {
+    LLVMBuildUnreachable(cg->builder);
+    return;
+  }
+  if (cg->ownership_enabled) {
+    expr_t *rel = stmt_ownership_releases_arg(cg, e);
+    expr_t *forget = stmt_ownership_forgets_arg(cg, e);
+    if (rel || forget)
+      stmt_ownership_release_source(cg, scopes, *depth, rel ? rel : forget,
+                                    forget != NULL);
+    else {
+      stmt_ownership_warn_use_after_move(cg, scopes, *depth, e);
+      stmt_ownership_apply_call_contracts(cg, scopes, *depth, e);
+    }
+  }
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT &&
+      stmt_expr_is_mutating_name(e->as.call.callee->as.ident.name) &&
+      e->as.call.args.len > 0) {
+    (void)stmt_expr_store_back(cg, scopes, *depth,
+                               e->as.call.args.data[0].val, v, s->tok);
+  } else if (e->kind == NY_E_MEMCALL &&
+             stmt_expr_is_mutating_name(e->as.memcall.name)) {
+    (void)stmt_expr_store_back(cg, scopes, *depth, e->as.memcall.target, v,
+                               s->tok);
+  }
+  if (e->kind == NY_E_CALL) {
+    for (size_t i = 0; i < e->as.call.args.len; ++i) {
+      expr_t *arg = e->as.call.args.data[i].val;
+      if (arg && arg->kind == NY_E_IDENT && arg->as.ident.name)
+        stmt_invalidate_static_indexable_name(cg, scopes, *depth,
+                                              arg->as.ident.name);
+    }
+  }
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT) {
+    expr_t *stored_value = NULL;
+    expr_t *target = NULL;
+    if (stmt_expr_is_set_idx_to_name(
+            e,
+            e->as.call.args.len > 0 && e->as.call.args.data[0].val &&
+                    e->as.call.args.data[0].val->kind == NY_E_IDENT
+                ? e->as.call.args.data[0].val->as.ident.name
+                : NULL,
+            &stored_value)) {
+      target = e->as.call.args.data[0].val;
+    }
+    if (target && stored_value && target->kind == NY_E_IDENT &&
+        target->as.ident.name) {
+      size_t tlen = (size_t)target->tok.len;
+      if (tlen == 0)
+        tlen = strlen(target->as.ident.name);
+      binding *b =
+          stmt_lookup_binding(cg, scopes, *depth, target->as.ident.name, tlen,
+                              target->as.ident.hash);
+      if (b && b->is_slot && b->is_mut) {
+        stmt_ownership_check_live_borrows(cg, scopes, *depth, b, s->tok,
+                                          "mutate");
+        if (ensure_store_ready(cg, s->tok, v, b->value,
+                               "indexed assignment")) {
+          ny_store(cg, b->value, v);
+          if (b->is_int_slot)
+            stmt_store_raw_int_shadow(cg, b, v);
+        }
+      }
+      if (b && b->is_list_storage) {
+        stmt_invalidate_static_indexable(b);
+        bool val_is_int =
+            ny_is_proven_int(cg, scopes, *depth, stored_value, NULL);
+        bool val_is_f64 =
+            stmt_expr_is_f64_value(cg, scopes, *depth, stored_value);
+        stmt_update_list_binding_proof(
+            b, true, b->is_int_list_storage && val_is_int,
+            b->is_f64_list_storage && val_is_f64);
+        if (b->is_int_list_storage) {
+          int64_t val_min = 0, val_max = 0;
+          bool val_has_range = stmt_expr_int_range(
+              cg, scopes, *depth, stored_value, &val_min, &val_max);
+          if (b->has_list_int_range && val_has_range) {
+            int64_t min_v =
+                b->list_int_min_raw < val_min ? b->list_int_min_raw : val_min;
+            int64_t max_v =
+                b->list_int_max_raw > val_max ? b->list_int_max_raw : val_max;
+            stmt_update_list_binding_range(b, true, min_v, max_v);
+          } else if (val_has_range) {
+            stmt_update_list_binding_range(b, true, val_min, val_max);
+          } else {
+            stmt_update_list_binding_range(b, false, 0, 0);
+          }
+        }
+      }
+      if (b && b->is_dict_storage) {
+        bool val_is_int =
+            ny_is_proven_int(cg, scopes, *depth, stored_value, NULL);
+        stmt_update_dict_binding_proof(b, true,
+                                       b->is_int_dict_storage && val_is_int);
+        if (b->is_int_dict_storage) {
+          int64_t val_min = 0, val_max = 0;
+          bool val_has_range = stmt_expr_int_range(
+              cg, scopes, *depth, stored_value, &val_min, &val_max);
+          if (b->has_dict_int_range && val_has_range) {
+            int64_t min_v =
+                b->dict_int_min_raw < val_min ? b->dict_int_min_raw : val_min;
+            int64_t max_v =
+                b->dict_int_max_raw > val_max ? b->dict_int_max_raw : val_max;
+            stmt_update_dict_binding_range(b, true, min_v, max_v);
+          } else if (val_has_range) {
+            stmt_update_dict_binding_range(b, true, val_min, val_max);
+          } else {
+            stmt_update_dict_binding_range(b, false, 0, 0);
+          }
+        }
+      }
+    }
+  }
+  if (is_tail && !cg->result_store_val &&
+      stmt_type_is_native_abi_value(cg, cg->current_fn_ret_type)) {
+    bool proven_int = ny_is_proven_int(cg, scopes, *depth, e, v);
+    v = ny_coerce_to_abi_proven_int(cg, v, cg->current_fn_ret_type,
+                                    proven_int);
+  }
+  if (is_tail && !cg->current_fn_attr_naked) {
+    if (cg->result_store_val) {
+      ny_store(cg, cg->result_store_val, v);
+    } else {
+      ny_owner_state_t old_owner_state = NY_OWNER_BORROWED;
+      binding *return_owner = stmt_ownership_begin_return_transfer(
+          cg, scopes, *depth, e, &old_owner_state);
+      emit_defers(cg, scopes, *depth, func_root);
+      stmt_ownership_end_return_transfer(return_owner, old_owner_state);
+      if (!ny_has_terminator(cg)) {
+        if (!emit_active_panic_env_clear(cg, s->tok))
+          return;
+        ny_cg_emit_trace_return(cg, v, cg->current_fn_ret_type);
+        ny_cg_emit_trace_exit(cg);
+        LLVMBuildRet(cg->builder, v);
+      }
+    }
+  }
+}
+
 static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root, bool is_tail) {
   if (!s || cg->had_error)
@@ -7978,1072 +8988,12 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
   if (cg->trace_exec)
     emit_trace_loc(cg, s->tok);
   switch (s->kind) {
-  case NY_S_VAR: {
-    bool dest = s->as.var.is_destructure;
-    NY_COMPILER_ASSERTF(s->as.var.names.len > 0,
-                        "var stmt has no bindings at line %d", s->tok.line);
-    NY_COMPILER_ASSERTF(s->as.var.types.len == 0 || s->as.var.types.len == 1 ||
-                            s->as.var.types.len == s->as.var.names.len,
-                        "var stmt type arity mismatch names=%zu types=%zu",
-                        s->as.var.names.len, s->as.var.types.len);
-    if (dest) {
-      NY_COMPILER_ASSERTF(
-          s->as.var.exprs.len == 1,
-          "destructure expects exactly one source expr, got %zu",
-          s->as.var.exprs.len);
-    } else if (s->as.var.exprs.len > 1) {
-      NY_COMPILER_ASSERTF(
-          s->as.var.exprs.len == s->as.var.names.len,
-          "parallel var assignment mismatch names=%zu exprs=%zu",
-          s->as.var.names.len, s->as.var.exprs.len);
-    }
-    bool parallel = (s->as.var.names.len == s->as.var.exprs.len) && !dest;
-    sema_var_t *sema =
-        (s->sema_kind == NY_STMT_SEMA_VAR) ? (sema_var_t *)s->sema : NULL;
-    bool prefer_direct_locals = false;
-    LLVMValueRef first_val = NULL;
-    bool first_static_list_object_elided = false;
-    bool first_static_list_elide_candidate = false;
-    const char *first_static_list_elide_bail_reason = NULL;
-    bool first_raw_int_list_mutation = false;
-    const char *first_raw_int_list_bail_reason = NULL;
-    if (parallel && s->as.var.names.len == 1 && s->as.var.exprs.len == 1) {
-      expr_t *e0 = s->as.var.exprs.data[0];
-      bool first_escapes =
-          sema && sema->escapes.len > 0 && sema->escapes.data[0];
-      const char *first_name = s->as.var.names.data[0];
-      first_static_list_elide_candidate =
-          ny_env_enabled_default_on("NYTRIX_STATIC_INT_LIST_ELIDE") &&
-          !s->as.var.is_mut &&
-          stmt_expr_is_int_list_literal(cg, scopes, *depth, e0);
-      if (stmt_can_elide_static_int_list_object(
-              cg, scopes, *depth, s, first_name, first_escapes, e0,
-              &first_static_list_elide_bail_reason)) {
-        first_val = ny_c0(cg);
-        first_static_list_object_elided = true;
-        parallel = false;
-      } else if (first_static_list_elide_candidate &&
-                 !first_static_list_elide_bail_reason) {
-        first_static_list_elide_bail_reason = "unsupported-use";
-      }
-      if (!first_static_list_object_elided &&
-          stmt_can_use_raw_int_list_mutation(cg, scopes, *depth, s, first_name,
-                                             first_escapes, e0,
-                                             &first_raw_int_list_bail_reason)) {
-        first_val = ny_c0(cg);
-        first_raw_int_list_mutation = true;
-        parallel = false;
-      }
-    }
-    if (!parallel && !first_static_list_object_elided &&
-        !first_raw_int_list_mutation && s->as.var.exprs.len > 0) {
-      expr_t *e0 = s->as.var.exprs.data[0];
-      bool first_escapes =
-          sema && sema->escapes.len > 0 && sema->escapes.data[0];
-      const char *first_name =
-          s->as.var.names.len > 0 ? s->as.var.names.data[0] : NULL;
-      first_static_list_elide_candidate =
-          ny_env_enabled_default_on("NYTRIX_STATIC_INT_LIST_ELIDE") &&
-          !s->as.var.is_mut &&
-          stmt_expr_is_int_list_literal(cg, scopes, *depth, e0);
-      if (!dest && first_name &&
-          stmt_can_elide_static_int_list_object(
-              cg, scopes, *depth, s, first_name, first_escapes, e0,
-              &first_static_list_elide_bail_reason)) {
-        first_val = ny_c0(cg);
-        first_static_list_object_elided = true;
-      } else if (!dest && first_name && first_static_list_elide_candidate &&
-                 !first_static_list_elide_bail_reason) {
-        first_static_list_elide_bail_reason = "unsupported-use";
-      } else if (!dest && first_name &&
-                 stmt_can_use_raw_int_list_mutation(
-                     cg, scopes, *depth, s, first_name, first_escapes, e0,
-                     &first_raw_int_list_bail_reason)) {
-        first_val = ny_c0(cg);
-        first_raw_int_list_mutation = true;
-      } else if (ny_env_enabled("NYTRIX_STACK_INT_LIST_LITERALS") &&
-                 !first_escapes &&
-                 stmt_expr_is_int_list_literal(cg, scopes, *depth, e0))
-        first_val = gen_expr_list_stack_alloc(cg, scopes, *depth, e0);
-      else
-        first_val = gen_expr(cg, scopes, *depth, e0);
-    }
-    fun_sig *gs = NULL;
-    if (dest) {
-      gs = lookup_fun(cg, "get", 0);
-      if (!gs) {
-        ny_diag_error(s->tok, "destructuring requires 'get' function");
-        if (verbose_enabled >= 1)
-          ny_diag_hint("import std.core or ensure 'get' is in scope");
-        cg->had_error = 1;
-        return;
-      }
-    }
-    LLVMValueRef *parallel_assign_values = NULL;
-    if (!s->as.var.is_decl && parallel && s->as.var.names.len > 1) {
-      parallel_assign_values =
-          calloc(s->as.var.names.len, sizeof(*parallel_assign_values));
-      if (!parallel_assign_values) {
-        ny_diag_error(s->tok,
-                      "out of memory while preparing grouped assignment");
-        cg->had_error = 1;
-        return;
-      }
-      for (size_t j = 0; j < s->as.var.names.len; j++)
-        parallel_assign_values[j] =
-            gen_expr(cg, scopes, *depth, s->as.var.exprs.data[j]);
-      if (cg->had_error) {
-        free(parallel_assign_values);
-        return;
-      }
-    }
-    for (size_t i = 0; i < s->as.var.names.len; i++) {
-      const char *n = s->as.var.names.data[i];
-      NY_COMPILER_ASSERTF(n && *n, "var binding %zu missing name", i);
-      LLVMValueRef slot = NULL;
-      bool bind_direct = false;
-      binding *resolved_local = NULL;
-      binding *resolved_global = NULL;
-      bool top_level_existing_global = false;
-      expr_t *expr_for_check = NULL;
-      const char *decl_type = NULL;
-      bool decl_type_explicit = false;
-      if (s->as.var.types.len > i)
-        decl_type = s->as.var.types.data[i];
-      decl_type_explicit = decl_type && *decl_type;
-      if (parallel) {
-        expr_for_check = s->as.var.exprs.data[i];
-      } else if (!dest) {
-        if (s->as.var.exprs.len > 0)
-          expr_for_check = s->as.var.exprs.data[0];
-      }
-      if (!decl_type && expr_for_check) {
-        const char *inf = infer_expr_type(cg, scopes, *depth, expr_for_check);
-        if ((cg->strict_types &&
-             (stmt_bindable_inferred_type(inf) ||
-              stmt_type_name_is_int_value(inf))) ||
-            (!s->as.var.is_mut && stmt_bindable_inferred_type(inf)) ||
-            (s->as.var.is_mut && stmt_bindable_mut_inferred_type(inf)))
-          decl_type = inf;
-      }
-      bool top_entry_numeric_hoist = stmt_top_entry_numeric_hoist(
-          cg, scopes, *depth, s, sema, i, decl_type, expr_for_check);
-      bool top_entry_existing_local_assign = false;
-      bool top_entry_can_hoist = stmt_top_entry_can_hoist_var(cg, n);
-      if (*depth == 0 && top_entry_can_hoist && !s->as.var.is_decl) {
-        bool existing_is_global = false;
-        binding *existing = stmt_var_lookup_existing(cg, scopes, *depth, n,
-                                                     &existing_is_global);
-        top_entry_existing_local_assign = existing && !existing_is_global;
-      }
-      bool top_entry_local_path =
-          *depth == 0 && top_entry_can_hoist &&
-          (top_entry_numeric_hoist || top_entry_existing_local_assign);
-      if (s->as.var.is_del) {
-        bool target_is_global = false;
-        LLVMValueRef zero = ny_c0(cg);
-        binding *eb =
-            stmt_var_lookup_existing(cg, scopes, *depth, n, &target_is_global);
-        if (!eb) {
-          report_undef_symbol(cg, n, s->tok);
-          return;
-        }
-        if (!ensure_mutable_binding_for_assign(cg, s->tok, n, eb,
-                                               target_is_global)) {
-          continue;
-        }
-        eb->is_int_slot = false;
-        eb->is_int_direct = false;
-        eb->raw_int_value = NULL;
-        eb->is_f64_slot = false;
-        eb->is_f64_direct = false;
-        eb->is_f32_slot = false;
-        eb->is_f32_direct = false;
-        eb->is_list_storage = false;
-        eb->is_int_list_storage = false;
-        eb->is_f64_list_storage = false;
-        eb->is_dict_storage = false;
-        eb->is_int_dict_storage = false;
-        eb->has_int_range = false;
-        eb->has_list_int_range = false;
-        eb->has_list_len_min = false;
-        eb->has_dict_int_range = false;
-        eb->type_name = NULL;
-        eb->decl_type_name = NULL;
-        if (target_is_global || eb->is_slot) {
-          slot = eb->value;
-        } else {
-          eb->value = zero;
-
-          continue;
-        }
-        if (ensure_store_ready(cg, s->tok, zero, slot, "NY_S_VAR(del)")) {
-          ny_store(cg, slot, zero);
-        }
-        continue;
-      }
-      if (*depth == 0 && !top_entry_local_path) {
-        binding *gb = lookup_global(cg, n);
-        if (gb) {
-          resolved_global = gb;
-          top_level_existing_global = true;
-          slot = gb->value;
-        } else {
-          const char *type_name = decl_type;
-          if (s->as.var.types.len > i)
-            type_name = s->as.var.types.data[i];
-          bool sema_global_f64 = sema && sema->is_f64_proven.len > i &&
-                                 sema->is_f64_proven.data[i];
-          if (!type_name && sema_global_f64)
-            type_name = "f64";
-          LLVMTypeRef global_type = cg->type_i64;
-          bool global_is_f64 =
-              sema_global_f64 || stmt_type_name_is_f64_value(type_name);
-          bool global_is_f32 = stmt_type_name_is_f32_value(type_name);
-          if (global_is_f64)
-            global_type = cg->type_f64;
-          else if (global_is_f32)
-            global_type = cg->type_f32;
-          slot = LLVMAddGlobal(cg->module, global_type, n);
-          if ((!cg->current_module_name || !*cg->current_module_name) &&
-              !ny_is_stdlib_tok(s->tok)) {
-            LLVMSetLinkage(slot, LLVMPrivateLinkage);
-          }
-          LLVMSetInitializer(slot, LLVMConstNull(global_type));
-          binding b = {0};
-          b.name = ny_strdup(n);
-          b.value = slot;
-          b.stmt_t = s;
-          b.is_slot = true;
-          b.is_mut = s->as.var.is_mut ? true : false;
-          b.owned = true;
-          b.type_name = type_name;
-          b.decl_type_name =
-              (decl_type_explicit || cg->strict_types) ? type_name : NULL;
-          b.is_f64_slot = global_is_f64;
-          b.is_f32_slot = global_is_f32;
-          vec_push(&cg->global_vars, b);
-          if (cg->global_vars.len > 0)
-            resolved_global = &cg->global_vars.data[cg->global_vars.len - 1];
-          if (cg->debug_symbols && cg->di_builder) {
-            codegen_debug_global_variable(cg, n, slot, type_name, s->tok);
-          }
-          if (s->tok.filename) {
-            ny_diag_warning(s->tok,
-                            "implicit declaration of global variable %s'%s'%s",
-                            clr(NY_CLR_BOLD), n, clr(NY_CLR_RESET));
-            ny_diag_fix("declare with %sdef %s = ...%s or %smut %s = ...%s at "
-                        "the top level",
-                        clr(NY_CLR_BOLD), n, clr(NY_CLR_RESET),
-                        clr(NY_CLR_BOLD), n, clr(NY_CLR_RESET));
-          }
-        }
-      }
-      LLVMValueRef target_val = NULL;
-
-      if (*depth == 0 && !top_entry_local_path) {
-        binding *gb = resolved_global ? resolved_global : lookup_global(cg, n);
-        if (gb && decl_type && !gb->type_name) {
-          gb->type_name = decl_type;
-          if (decl_type_explicit || cg->strict_types)
-            gb->decl_type_name = decl_type;
-        }
-      }
-      if (*depth == 0 && !top_entry_local_path && s->as.var.is_decl &&
-          !s->as.var.is_del && !dest && s->as.var.names.len == 1 &&
-          s->as.var.exprs.len == 1 && slot && LLVMIsAGlobalVariable(slot) &&
-          !top_level_existing_global) {
-        LLVMValueRef const_init =
-            stmt_const_top_level_expr_value(cg, expr_for_check);
-        if (const_init) {
-          LLVMSetInitializer(slot, const_init);
-          binding *gb =
-              resolved_global ? resolved_global : lookup_global(cg, n);
-          if (gb) {
-            const char *init_type =
-                decl_type ? decl_type
-                          : infer_expr_type(cg, scopes, *depth, expr_for_check);
-            if (!gb->type_name)
-              gb->type_name = init_type;
-            if ((decl_type_explicit || cg->strict_types) && !gb->decl_type_name)
-              gb->decl_type_name = init_type;
-          }
-          continue;
-        }
-      }
-
-      if (*depth > 0 || top_entry_local_path) {
-        if (s->as.var.is_decl) {
-          stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
-                                       decl_type, decl_type_explicit,
-                                       prefer_direct_locals,
-                                       &bind_direct, &slot);
-        } else {
-          bool target_is_global = false;
-          binding *eb = stmt_var_lookup_existing(cg, scopes, *depth, n,
-                                                 &target_is_global);
-          if (eb) {
-            if (!ensure_mutable_binding_for_assign(cg, s->tok, n, eb,
-                                                   target_is_global)) {
-              continue;
-            }
-            if (target_is_global) {
-              resolved_global = eb;
-              if (!eb->is_slot) {
-                ny_diag_error(s->tok,
-                              "cannot assign to non-addressable value '%s'", n);
-                cg->had_error = 1;
-                continue;
-              }
-              slot = eb->value;
-            } else {
-              resolved_local = eb;
-              if (eb->is_slot)
-                slot = eb->value;
-            }
-          } else {
-            stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
-                                         decl_type, decl_type_explicit,
-                                         prefer_direct_locals,
-                                         &bind_direct, &slot);
-          }
-        }
-      }
-
-      bool target_is_f64_slot = false;
-      bool target_is_f32_slot = false;
-      if (resolved_local) {
-        if (resolved_local->is_f64_slot)
-          target_is_f64_slot = true;
-        if (resolved_local->is_f32_slot)
-          target_is_f32_slot = true;
-      } else if (resolved_global) {
-        if (resolved_global->is_f64_slot)
-          target_is_f64_slot = true;
-        if (resolved_global->is_f32_slot)
-          target_is_f32_slot = true;
-      } else if (!resolved_global && slot) {
-        size_t nlen = strlen(n);
-        binding *nb = stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
-        if (nb) {
-          if (nb->is_f64_slot)
-            target_is_f64_slot = true;
-          if (nb->is_f32_slot)
-            target_is_f32_slot = true;
-        }
-      }
-
-      if (!s->as.var.is_decl && !dest && s->as.var.names.len == 1 &&
-          s->as.var.exprs.len == 1 &&
-          stmt_try_emit_active_str_append_assignment(cg, scopes, *depth, n,
-                                                     expr_for_check)) {
-        continue;
-      }
-
-      if (expr_for_check && scopes[*depth].loop_trip_hint > 0) {
-        stmt_try_widen_loop_accumulator_binding(cg, scopes, *depth, n,
-                                                expr_for_check,
-                                                scopes[*depth].loop_trip_hint);
-      }
-
-      if ((target_is_f64_slot || target_is_f32_slot) && slot &&
-          expr_for_check &&
-          (!parallel || s->as.var.names.len == 1 || parallel_assign_values) &&
-          !dest) {
-        LLVMTypeRef target_type =
-            target_is_f32_slot ? cg->type_f32 : cg->type_f64;
-        if (parallel_assign_values) {
-          LLVMValueRef fv = parallel_assign_values[i];
-          if (fv && LLVMTypeOf(fv) != target_type) {
-            fv = ny_unbox_float(cg, fv);
-            if (target_is_f32_slot)
-              fv = LLVMBuildFPTrunc(cg->builder, fv, cg->type_f32, "f2f");
-          }
-          if (ensure_store_ready(cg, s->tok, fv, slot, "NY_S_VAR_FLT"))
-            ny_store(cg, slot, fv);
-          continue;
-        }
-        const char *et = infer_expr_type(cg, scopes, *depth, expr_for_check);
-        bool rhs_is_float = stmt_type_name_is_float_value(et);
-        if (rhs_is_float) {
-          LLVMValueRef fv = gen_expr_as_f64(cg, scopes, *depth, expr_for_check);
-          if (target_is_f32_slot)
-            fv = LLVMBuildFPTrunc(cg->builder, fv, cg->type_f32, "f2f");
-          if (ensure_store_ready(cg, s->tok, fv, slot, "NY_S_VAR_FLT"))
-            ny_store(cg, slot, fv);
-          continue;
-        }
-        bool rhs_is_int = stmt_type_name_is_int_value(et);
-        if (rhs_is_int) {
-          LLVMValueRef iv = gen_expr(cg, scopes, *depth, expr_for_check);
-          LLVMValueRef fv = LLVMBuildSIToFP(
-              cg->builder, ny_ashr(cg, iv, ny_c1(cg), ""), target_type, "i2f");
-          if (ensure_store_ready(cg, s->tok, fv, slot, "NY_S_VAR_FLT"))
-            ny_store(cg, slot, fv);
-          continue;
-        }
-
-        {
-          LLVMValueRef v = gen_expr(cg, scopes, *depth, expr_for_check);
-          LLVMValueRef fv = ny_unbox_float(cg, v);
-          if (target_is_f32_slot)
-            fv = LLVMBuildFPTrunc(cg->builder, fv, cg->type_f32, "f2f");
-          if (ensure_store_ready(cg, s->tok, fv, slot, "NY_S_VAR_FLT"))
-            ny_store(cg, slot, fv);
-          continue;
-        }
-      }
-
-      bool direct_native_float_candidate =
-          bind_direct && stmt_type_name_is_f64_value(decl_type) && !dest &&
-          expr_for_check &&
-          (!parallel || s->as.var.names.len == 1);
-
-      binding *rhs_self_dest = resolved_local ? resolved_local : resolved_global;
-      if (!rhs_self_dest && slot) {
-        size_t nlen = strlen(n);
-        rhs_self_dest =
-            stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
-      }
-      bool rhs_pre_proven_int =
-          expr_for_check && ny_is_proven_int(cg, scopes, *depth,
-                                             expr_for_check, NULL);
-      bool suppress_self_raw_int =
-          rhs_self_dest && rhs_self_dest->is_int_slot && expr_for_check &&
-          stmt_expr_contains_ident_name(expr_for_check, n) &&
-          !rhs_pre_proven_int;
-      stmt_binding_int_snapshot_t self_raw_snap = {0};
-      if (suppress_self_raw_int) {
-        self_raw_snap = stmt_snapshot_binding_int_proof(rhs_self_dest);
-        rhs_self_dest->is_int_slot = false;
-        rhs_self_dest->is_int_direct = false;
-        rhs_self_dest->is_int_raw_direct = false;
-        rhs_self_dest->has_int_range = false;
-      }
-      if (direct_native_float_candidate) {
-        target_val = NULL;
-      } else if (parallel) {
-        target_val = parallel_assign_values
-                         ? parallel_assign_values[i]
-                         : gen_expr(cg, scopes, *depth, expr_for_check);
-      } else if (dest) {
-        uint64_t tagged_idx = ((uint64_t)i << 1) | 1;
-        LLVMValueRef idx_val = LLVMConstInt(cg->type_i64, tagged_idx, false);
-        target_val =
-            LLVMBuildCall2(cg->builder, gs->type, gs->value,
-                           (LLVMValueRef[]){first_val, idx_val}, 2, "");
-      } else {
-        target_val = first_val;
-      }
-      stmt_restore_binding_int_proof(self_raw_snap);
-      if (!s->as.var.is_destructure) {
-        const char *want = decl_type;
-        if (!s->as.var.is_decl) {
-          binding *cur = resolved_local;
-          if (cur)
-            want = binding_assign_type(cur);
-          else if (resolved_global)
-            want = binding_assign_type(resolved_global);
-        }
-        if (want && expr_for_check)
-          ensure_expr_type_compatible(cg, scopes, *depth, want, expr_for_check,
-                                      expr_for_check->tok, "assignment");
-      }
-      bool rhs_proven_int = false;
-      bool rhs_proven_f64 = false;
-      bool rhs_has_int_range = false;
-      int64_t rhs_int_min_raw = 0;
-      int64_t rhs_int_max_raw = 0;
-      bool rhs_list_storage = false;
-      bool rhs_int_list_storage = false;
-      bool rhs_f64_list_storage = false;
-      bool rhs_dict_storage = false;
-      bool rhs_int_dict_storage = false;
-      bool rhs_has_list_int_range = false;
-      int64_t rhs_list_min_raw = 0;
-      int64_t rhs_list_max_raw = 0;
-      bool rhs_has_list_len_min = false;
-      int64_t rhs_list_len_min_raw = 0;
-      bool rhs_has_dict_int_range = false;
-      int64_t rhs_dict_min_raw = 0;
-      int64_t rhs_dict_max_raw = 0;
-      if (expr_for_check) {
-        rhs_proven_int =
-            ny_is_proven_int(cg, scopes, *depth, expr_for_check, target_val);
-        const char *rhs_type =
-            infer_expr_type(cg, scopes, *depth, expr_for_check);
-        rhs_proven_f64 = stmt_type_name_is_float_value(rhs_type);
-        if (rhs_proven_int) {
-          rhs_has_int_range =
-              stmt_expr_int_range(cg, scopes, *depth, expr_for_check,
-                                  &rhs_int_min_raw, &rhs_int_max_raw);
-        }
-        if (ny_expr_is_list_or_tuple_lit(expr_for_check) ||
-            stmt_expr_is_list_ctor(expr_for_check)) {
-          rhs_list_storage = true;
-          rhs_int_list_storage =
-              stmt_expr_is_list_ctor(expr_for_check) ||
-              stmt_expr_is_int_list_literal(cg, scopes, *depth, expr_for_check);
-          rhs_f64_list_storage =
-              stmt_expr_is_list_ctor(expr_for_check) ||
-              stmt_expr_is_f64_list_literal(cg, scopes, *depth, expr_for_check);
-          rhs_has_list_len_min = true;
-          rhs_list_len_min_raw = ny_expr_is_list_or_tuple_lit(expr_for_check)
-                                     ? (int64_t)expr_for_check->as.list_like.len
-                                     : 0;
-          if (rhs_int_list_storage) {
-            rhs_has_list_int_range = stmt_int_list_literal_range(
-                cg, scopes, *depth, expr_for_check, &rhs_list_min_raw,
-                &rhs_list_max_raw);
-          }
-        } else if (stmt_expr_is_dict_ctor(expr_for_check)) {
-          rhs_dict_storage = true;
-          rhs_int_dict_storage = true;
-        } else {
-          expr_t *append_value = NULL;
-          expr_t *set_value = NULL;
-          if (stmt_expr_is_append_to_name(expr_for_check, n, &append_value)) {
-            binding *src = resolved_local ? resolved_local : resolved_global;
-            if (!src) {
-              size_t nlen = strlen(n);
-              src = stmt_lookup_binding(cg, scopes, *depth, n, nlen, 0);
-            }
-            if (src && src->is_list_storage) {
-              rhs_list_storage = true;
-              rhs_int_list_storage =
-                  src->is_int_list_storage &&
-                  ny_is_proven_int(cg, scopes, *depth, append_value, NULL);
-              rhs_f64_list_storage =
-                  src->is_f64_list_storage &&
-                  stmt_expr_is_f64_value(cg, scopes, *depth, append_value);
-              if (src->has_list_len_min && src->list_len_min_raw < INT64_MAX) {
-                rhs_has_list_len_min = true;
-                rhs_list_len_min_raw = src->list_len_min_raw + 1;
-              }
-              if (rhs_int_list_storage) {
-                int64_t val_min = 0, val_max = 0;
-                bool val_has_range = stmt_expr_int_range(
-                    cg, scopes, *depth, append_value, &val_min, &val_max);
-                if (src->has_list_int_range && val_has_range) {
-                  rhs_has_list_int_range = true;
-                  rhs_list_min_raw = src->list_int_min_raw < val_min
-                                         ? src->list_int_min_raw
-                                         : val_min;
-                  rhs_list_max_raw = src->list_int_max_raw > val_max
-                                         ? src->list_int_max_raw
-                                         : val_max;
-                } else if (val_has_range) {
-                  rhs_has_list_int_range = true;
-                  rhs_list_min_raw = val_min;
-                  rhs_list_max_raw = val_max;
-                }
-              }
-            }
-          } else if (stmt_expr_is_set_idx_to_name(expr_for_check, n,
-                                                  &set_value)) {
-            binding *src = resolved_local ? resolved_local : resolved_global;
-            if (!src) {
-              size_t nlen = strlen(n);
-              src = stmt_lookup_binding(cg, scopes, *depth, n, nlen, 0);
-            }
-            if (src && src->is_list_storage) {
-              rhs_list_storage = true;
-              rhs_int_list_storage =
-                  src->is_int_list_storage &&
-                  ny_is_proven_int(cg, scopes, *depth, set_value, NULL);
-              rhs_f64_list_storage =
-                  src->is_f64_list_storage &&
-                  stmt_expr_is_f64_value(cg, scopes, *depth, set_value);
-              if (src->has_list_len_min) {
-                rhs_has_list_len_min = true;
-                rhs_list_len_min_raw = src->list_len_min_raw;
-              }
-              if (rhs_int_list_storage) {
-                int64_t val_min = 0, val_max = 0;
-                bool val_has_range = stmt_expr_int_range(
-                    cg, scopes, *depth, set_value, &val_min, &val_max);
-                if (src->has_list_int_range && val_has_range) {
-                  rhs_has_list_int_range = true;
-                  rhs_list_min_raw = src->list_int_min_raw < val_min
-                                         ? src->list_int_min_raw
-                                         : val_min;
-                  rhs_list_max_raw = src->list_int_max_raw > val_max
-                                         ? src->list_int_max_raw
-                                         : val_max;
-                } else if (src->has_list_int_range) {
-                  rhs_has_list_int_range = true;
-                  rhs_list_min_raw = src->list_int_min_raw;
-                  rhs_list_max_raw = src->list_int_max_raw;
-                } else if (val_has_range) {
-                  rhs_has_list_int_range = true;
-                  rhs_list_min_raw = val_min;
-                  rhs_list_max_raw = val_max;
-                }
-              }
-            }
-            if (src && src->is_dict_storage) {
-              rhs_dict_storage = true;
-              rhs_int_dict_storage =
-                  src->is_int_dict_storage &&
-                  ny_is_proven_int(cg, scopes, *depth, set_value, NULL);
-              if (rhs_int_dict_storage) {
-                int64_t val_min = 0, val_max = 0;
-                bool val_has_range = stmt_expr_int_range(
-                    cg, scopes, *depth, set_value, &val_min, &val_max);
-                if (src->has_dict_int_range && val_has_range) {
-                  rhs_has_dict_int_range = true;
-                  rhs_dict_min_raw = src->dict_int_min_raw < val_min
-                                         ? src->dict_int_min_raw
-                                         : val_min;
-                  rhs_dict_max_raw = src->dict_int_max_raw > val_max
-                                         ? src->dict_int_max_raw
-                                         : val_max;
-                } else if (val_has_range) {
-                  rhs_has_dict_int_range = true;
-                  rhs_dict_min_raw = val_min;
-                  rhs_dict_max_raw = val_max;
-                }
-              }
-            }
-          }
-        }
-      }
-      if (bind_direct) {
-        bool is_f64_direct = false;
-        bool is_int_direct = false;
-        if (direct_native_float_candidate) {
-          target_val = gen_expr_as_f64(cg, scopes, *depth, expr_for_check);
-          is_f64_direct = true;
-        } else if ((stmt_type_name_is_int_value(decl_type) && rhs_proven_int) ||
-                   rhs_proven_int) {
-          is_int_direct = true;
-        }
-
-        scope_bind(cg, scopes, *depth, n, target_val, s, s->as.var.is_mut,
-                   decl_type, false);
-        size_t nlen = strlen(n);
-        binding *b = stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
-        if (b) {
-          if (!decl_type_explicit)
-            b->decl_type_name = NULL;
-          stmt_update_numeric_binding_proof(cg, b, is_int_direct,
-                                            is_f64_direct);
-          stmt_update_int_binding_range(b, rhs_has_int_range, rhs_int_min_raw,
-                                        rhs_int_max_raw);
-          stmt_update_list_binding_proof(b, rhs_list_storage,
-                                         rhs_int_list_storage,
-                                         rhs_f64_list_storage);
-          stmt_update_dict_binding_proof(b, rhs_dict_storage,
-                                         rhs_int_dict_storage);
-          stmt_update_list_binding_range(b, rhs_has_list_int_range,
-                                         rhs_list_min_raw, rhs_list_max_raw);
-          stmt_update_list_binding_len_min(b, rhs_has_list_len_min,
-                                           rhs_list_len_min_raw);
-          stmt_update_dict_binding_range(b, rhs_has_dict_int_range,
-                                         rhs_dict_min_raw, rhs_dict_max_raw);
-          stmt_update_direct_callable_binding(cg, b, expr_for_check);
-          if (first_static_list_object_elided && i == 0)
-            b->static_indexable_object_elided = true;
-          if (first_static_list_elide_candidate && i == 0)
-            stmt_update_static_int_list_elide_metadata(
-                b, true, first_static_list_object_elided,
-                first_static_list_elide_bail_reason);
-          if (first_raw_int_list_mutation && i == 0)
-            stmt_init_raw_int_list_storage(cg, scopes, *depth, b,
-                                           expr_for_check);
-          else if (first_raw_int_list_bail_reason && i == 0)
-            b->raw_int_list_bail_reason = first_raw_int_list_bail_reason;
-          stmt_ownership_post_store(cg, scopes, *depth, b, expr_for_check,
-                                    s->tok, false);
-        }
-
-        continue;
-      }
-      if (resolved_local && !resolved_local->is_slot) {
-        stmt_ownership_pre_store(cg, scopes, *depth, resolved_local,
-                                 expr_for_check, s->tok);
-        stmt_invalidate_static_indexable(resolved_local);
-        stmt_update_numeric_binding_proof(cg, resolved_local, rhs_proven_int,
-                                          rhs_proven_f64);
-        stmt_update_int_binding_range(resolved_local, rhs_has_int_range,
-                                      rhs_int_min_raw, rhs_int_max_raw);
-        stmt_update_list_binding_proof(resolved_local, rhs_list_storage,
-                                       rhs_int_list_storage,
-                                       rhs_f64_list_storage);
-        stmt_update_dict_binding_proof(resolved_local, rhs_dict_storage,
-                                       rhs_int_dict_storage);
-        stmt_update_list_binding_range(resolved_local, rhs_has_list_int_range,
-                                       rhs_list_min_raw, rhs_list_max_raw);
-        stmt_update_list_binding_len_min(resolved_local, rhs_has_list_len_min,
-                                         rhs_list_len_min_raw);
-        stmt_update_dict_binding_range(resolved_local, rhs_has_dict_int_range,
-                                       rhs_dict_min_raw, rhs_dict_max_raw);
-        stmt_update_direct_callable_binding(cg, resolved_local,
-                                            expr_for_check);
-        if (first_static_list_object_elided && i == 0)
-          resolved_local->static_indexable_object_elided = true;
-        if (first_static_list_elide_candidate && i == 0)
-          stmt_update_static_int_list_elide_metadata(
-              resolved_local, true, first_static_list_object_elided,
-              first_static_list_elide_bail_reason);
-        if (first_raw_int_list_mutation && i == 0)
-          stmt_init_raw_int_list_storage(cg, scopes, *depth, resolved_local,
-                                         expr_for_check);
-        else if (first_raw_int_list_bail_reason && i == 0)
-          resolved_local->raw_int_list_bail_reason =
-              first_raw_int_list_bail_reason;
-        resolved_local->value = target_val;
-        stmt_ownership_post_store(cg, scopes, *depth, resolved_local,
-                                  expr_for_check, s->tok, false);
-
-        continue;
-      }
-      if (resolved_local) {
-        stmt_invalidate_static_indexable(resolved_local);
-        stmt_update_numeric_binding_proof(cg, resolved_local, rhs_proven_int,
-                                          rhs_proven_f64);
-        stmt_update_int_binding_range(resolved_local, rhs_has_int_range,
-                                      rhs_int_min_raw, rhs_int_max_raw);
-        stmt_update_list_binding_proof(resolved_local, rhs_list_storage,
-                                       rhs_int_list_storage,
-                                       rhs_f64_list_storage);
-        stmt_update_dict_binding_proof(resolved_local, rhs_dict_storage,
-                                       rhs_int_dict_storage);
-        stmt_update_list_binding_range(resolved_local, rhs_has_list_int_range,
-                                       rhs_list_min_raw, rhs_list_max_raw);
-        stmt_update_list_binding_len_min(resolved_local, rhs_has_list_len_min,
-                                         rhs_list_len_min_raw);
-        stmt_update_dict_binding_range(resolved_local, rhs_has_dict_int_range,
-                                       rhs_dict_min_raw, rhs_dict_max_raw);
-        stmt_update_direct_callable_binding(cg, resolved_local,
-                                            expr_for_check);
-        if (first_static_list_object_elided && i == 0)
-          resolved_local->static_indexable_object_elided = true;
-        if (first_static_list_elide_candidate && i == 0)
-          stmt_update_static_int_list_elide_metadata(
-              resolved_local, true, first_static_list_object_elided,
-              first_static_list_elide_bail_reason);
-        if (first_raw_int_list_mutation && i == 0)
-          stmt_init_raw_int_list_storage(cg, scopes, *depth, resolved_local,
-                                         expr_for_check);
-        else if (first_raw_int_list_bail_reason && i == 0)
-          resolved_local->raw_int_list_bail_reason =
-              first_raw_int_list_bail_reason;
-      } else if (resolved_global) {
-        stmt_invalidate_static_indexable(resolved_global);
-        stmt_update_numeric_binding_proof(cg, resolved_global, rhs_proven_int,
-                                          rhs_proven_f64);
-        stmt_update_int_binding_range(resolved_global, rhs_has_int_range,
-                                      rhs_int_min_raw, rhs_int_max_raw);
-        stmt_update_list_binding_proof(resolved_global, rhs_list_storage,
-                                       rhs_int_list_storage,
-                                       rhs_f64_list_storage);
-        stmt_update_dict_binding_proof(resolved_global, rhs_dict_storage,
-                                       rhs_int_dict_storage);
-        stmt_update_list_binding_range(resolved_global, rhs_has_list_int_range,
-                                       rhs_list_min_raw, rhs_list_max_raw);
-        stmt_update_list_binding_len_min(resolved_global, rhs_has_list_len_min,
-                                         rhs_list_len_min_raw);
-        stmt_update_dict_binding_range(resolved_global, rhs_has_dict_int_range,
-                                       rhs_dict_min_raw, rhs_dict_max_raw);
-        stmt_update_direct_callable_binding(cg, resolved_global,
-                                            expr_for_check);
-        if (first_static_list_object_elided && i == 0)
-          resolved_global->static_indexable_object_elided = true;
-        if (first_static_list_elide_candidate && i == 0)
-          stmt_update_static_int_list_elide_metadata(
-              resolved_global, true, first_static_list_object_elided,
-              first_static_list_elide_bail_reason);
-        if (first_raw_int_list_mutation && i == 0)
-          stmt_init_raw_int_list_storage(cg, scopes, *depth, resolved_global,
-                                         expr_for_check);
-        else if (first_raw_int_list_bail_reason && i == 0)
-          resolved_global->raw_int_list_bail_reason =
-              first_raw_int_list_bail_reason;
-      } else if (slot) {
-        size_t nlen = strlen(n);
-        binding *created =
-            stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
-        if (created) {
-          stmt_update_numeric_binding_proof(cg, created, rhs_proven_int,
-                                            rhs_proven_f64);
-          stmt_update_int_binding_range(created, rhs_has_int_range,
-                                        rhs_int_min_raw, rhs_int_max_raw);
-          stmt_update_list_binding_proof(created, rhs_list_storage,
-                                         rhs_int_list_storage,
-                                         rhs_f64_list_storage);
-          stmt_update_dict_binding_proof(created, rhs_dict_storage,
-                                         rhs_int_dict_storage);
-          stmt_update_list_binding_range(created, rhs_has_list_int_range,
-                                         rhs_list_min_raw, rhs_list_max_raw);
-          stmt_update_list_binding_len_min(created, rhs_has_list_len_min,
-                                           rhs_list_len_min_raw);
-          stmt_update_dict_binding_range(created, rhs_has_dict_int_range,
-                                         rhs_dict_min_raw, rhs_dict_max_raw);
-          stmt_update_direct_callable_binding(cg, created, expr_for_check);
-          if (first_static_list_object_elided && i == 0)
-            created->static_indexable_object_elided = true;
-          if (first_static_list_elide_candidate && i == 0)
-            stmt_update_static_int_list_elide_metadata(
-                created, true, first_static_list_object_elided,
-                first_static_list_elide_bail_reason);
-          if (first_raw_int_list_mutation && i == 0)
-            stmt_init_raw_int_list_storage(cg, scopes, *depth, created,
-                                           expr_for_check);
-          else if (first_raw_int_list_bail_reason && i == 0)
-            created->raw_int_list_bail_reason = first_raw_int_list_bail_reason;
-        }
-      }
-      binding *own_dest = resolved_local ? resolved_local : resolved_global;
-      bool own_dest_global = resolved_global != NULL;
-      if (!own_dest && *depth == 0 && !top_entry_local_path) {
-        own_dest = lookup_global(cg, n);
-        own_dest_global = own_dest != NULL;
-      } else if (!own_dest && slot) {
-        size_t nlen = strlen(n);
-        own_dest = stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
-      }
-      stmt_ownership_pre_store(cg, scopes, *depth, own_dest, expr_for_check,
-                               s->tok);
-      if (ensure_store_ready(cg, s->tok, target_val, slot, "NY_S_VAR")) {
-        if (target_is_f64_slot || target_is_f32_slot) {
-          LLVMValueRef fv = NULL;
-          LLVMTypeRef target_type =
-              target_is_f32_slot ? cg->type_f32 : cg->type_f64;
-          if (target_val && LLVMTypeOf(target_val) == target_type) {
-            fv = target_val;
-          } else {
-            fv = ny_unbox_float(cg, target_val);
-            if (target_is_f32_slot)
-              fv = LLVMBuildFPTrunc(cg->builder, fv, cg->type_f32, "f2f");
-          }
-          ny_store(cg, slot, fv);
-
-        } else {
-          ny_store(cg, slot, target_val);
-          if (own_dest && own_dest->is_int_slot)
-            stmt_store_raw_int_shadow_expr(cg, scopes, *depth, own_dest,
-                                           expr_for_check, target_val);
-        }
-        stmt_ownership_post_store(cg, scopes, *depth, own_dest, expr_for_check,
-                                  s->tok, own_dest_global);
-      }
-    }
-    free(parallel_assign_values);
-    break;
-  }
-  case NY_S_EXPR: {
-    expr_t *e = s->as.expr.expr;
-    if (!e) {
-      ny_diag_error(s->tok, "missing expression statement payload");
-      cg->had_error = 1;
-      return;
-    }
-    if (stmt_expr_is_unassigned_append_call(e) &&
-        ny_diag_should_emit("unused_append_result", s->tok, "append")) {
-      ny_diag_warning_code(
-          s->tok, 2001,
-          "result of 'append' is unused; list append returns a new list");
-      ny_diag_hint("assign the returned list, e.g. xs = xs.append(value)");
-    }
-    if (e->kind == NY_E_CALL && e->as.call.callee &&
-        e->as.call.callee->kind == NY_E_IDENT) {
-      fun_sig *sig = lookup_fun(cg, e->as.call.callee->as.ident.name,
-                                e->as.call.callee->as.ident.hash);
-      if (sig && sig->return_type && (size_t)sig->return_type > 0x1000) {
-        if (strcmp(sig->return_type, "Result") == 0 ||
-            strcmp(sig->return_type, "std.core.error.Result") == 0) {
-          if (ny_diag_should_emit("unused_result", s->tok, sig->name)) {
-            bool strict_err = ny_strict_error_enabled(cg, s->tok);
-            if (strict_err)
-              ny_diag_error(s->tok, "unused Result from '%s'", sig->name);
-            else
-              ny_diag_warning(s->tok, "unused Result from '%s'", sig->name);
-            ny_diag_hint("handle the value (e.g. with match/unwrap/propagate)");
-            if (strict_err) {
-              cg->had_error = 1;
-              return;
-            }
-          }
-        }
-      }
-    }
-    if (is_tail && !cg->result_store_val && cg->current_fn_ret_type) {
-      ensure_expr_type_compatible(cg, scopes, *depth, cg->current_fn_ret_type,
-                                  e, e->tok, "return");
-      if (cg->had_error)
-        return;
-      if (!cg->current_fn_attr_naked && !cg->result_store_val &&
-          cg->current_fn_native_abi &&
-          stmt_type_is_native_float(cg->current_fn_ret_type) &&
-          stmt_expr_is_native_float_tail_safe(e)) {
-        LLVMValueRef v = stmt_gen_return_value(cg, scopes, *depth, e,
-                                               cg->current_fn_ret_type);
-        if (!v) {
-          ny_diag_error(s->tok, "failed to generate expression");
-          cg->had_error = 1;
-          return;
-        }
-        ny_owner_state_t old_owner_state = NY_OWNER_BORROWED;
-        binding *return_owner = stmt_ownership_begin_return_transfer(
-            cg, scopes, *depth, e, &old_owner_state);
-        emit_defers(cg, scopes, *depth, func_root);
-        stmt_ownership_end_return_transfer(return_owner, old_owner_state);
-        if (!ny_has_terminator(cg)) {
-          if (!emit_active_panic_env_clear(cg, s->tok))
-            return;
-          ny_cg_emit_trace_return(cg, v, cg->current_fn_ret_type);
-          ny_cg_emit_trace_exit(cg);
-          LLVMBuildRet(cg->builder, v);
-        }
-        break;
-      }
-    }
-    bool prev_detach_stmt_call = cg->thread_detach_stmt_call;
-    if (!is_tail && stmt_is_direct_thread_attr_call(cg, e))
-      cg->thread_detach_stmt_call = true;
-    LLVMValueRef v =
-        is_tail ? stmt_gen_expr_with_tail_call_hint(cg, scopes, *depth, e)
-                : gen_expr(cg, scopes, *depth, e);
-    cg->thread_detach_stmt_call = prev_detach_stmt_call;
-    if (!v) {
-      ny_diag_error(s->tok, "failed to generate expression");
-      cg->had_error = 1;
-      return;
-    }
-    if (!is_tail && stmt_expr_is_noreturn_call(cg, scopes, *depth, e)) {
-      LLVMBuildUnreachable(cg->builder);
-      break;
-    }
-    if (cg->ownership_enabled) {
-      expr_t *rel = stmt_ownership_releases_arg(cg, e);
-      expr_t *forget = stmt_ownership_forgets_arg(cg, e);
-      if (rel || forget)
-        stmt_ownership_release_source(cg, scopes, *depth, rel ? rel : forget,
-                                      forget != NULL);
-      else {
-        stmt_ownership_warn_use_after_move(cg, scopes, *depth, e);
-        stmt_ownership_apply_call_contracts(cg, scopes, *depth, e);
-      }
-    }
-    if (e->kind == NY_E_CALL && e->as.call.callee &&
-        e->as.call.callee->kind == NY_E_IDENT &&
-        stmt_expr_is_mutating_name(e->as.call.callee->as.ident.name) &&
-        e->as.call.args.len > 0) {
-      (void)stmt_expr_store_back(cg, scopes, *depth,
-                                 e->as.call.args.data[0].val, v, s->tok);
-    } else if (e->kind == NY_E_MEMCALL &&
-               stmt_expr_is_mutating_name(e->as.memcall.name)) {
-      (void)stmt_expr_store_back(cg, scopes, *depth, e->as.memcall.target, v,
-                                 s->tok);
-    }
-    if (e->kind == NY_E_CALL && e->as.call.callee &&
-        e->as.call.callee->kind == NY_E_IDENT) {
-      expr_t *stored_value = NULL;
-      expr_t *target = NULL;
-      if (stmt_expr_is_set_idx_to_name(
-              e,
-              e->as.call.args.len > 0 && e->as.call.args.data[0].val &&
-                      e->as.call.args.data[0].val->kind == NY_E_IDENT
-                  ? e->as.call.args.data[0].val->as.ident.name
-                  : NULL,
-              &stored_value)) {
-        target = e->as.call.args.data[0].val;
-      }
-      if (target && stored_value && target->kind == NY_E_IDENT &&
-          target->as.ident.name) {
-        size_t tlen = (size_t)target->tok.len;
-        if (tlen == 0)
-          tlen = strlen(target->as.ident.name);
-        binding *b =
-            stmt_lookup_binding(cg, scopes, *depth, target->as.ident.name, tlen,
-                                target->as.ident.hash);
-        if (b && b->is_slot && b->is_mut) {
-          stmt_ownership_check_live_borrows(cg, scopes, *depth, b, s->tok,
-                                            "mutate");
-          if (ensure_store_ready(cg, s->tok, v, b->value,
-                                 "indexed assignment")) {
-            ny_store(cg, b->value, v);
-            if (b->is_int_slot)
-              stmt_store_raw_int_shadow(cg, b, v);
-          }
-        }
-        if (b && b->is_list_storage) {
-          stmt_invalidate_static_indexable(b);
-          bool val_is_int =
-              ny_is_proven_int(cg, scopes, *depth, stored_value, NULL);
-          bool val_is_f64 =
-              stmt_expr_is_f64_value(cg, scopes, *depth, stored_value);
-          stmt_update_list_binding_proof(
-              b, true, b->is_int_list_storage && val_is_int,
-              b->is_f64_list_storage && val_is_f64);
-          if (b->is_int_list_storage) {
-            int64_t val_min = 0, val_max = 0;
-            bool val_has_range = stmt_expr_int_range(
-                cg, scopes, *depth, stored_value, &val_min, &val_max);
-            if (b->has_list_int_range && val_has_range) {
-              int64_t min_v =
-                  b->list_int_min_raw < val_min ? b->list_int_min_raw : val_min;
-              int64_t max_v =
-                  b->list_int_max_raw > val_max ? b->list_int_max_raw : val_max;
-              stmt_update_list_binding_range(b, true, min_v, max_v);
-            } else if (val_has_range) {
-              stmt_update_list_binding_range(b, true, val_min, val_max);
-            } else {
-              stmt_update_list_binding_range(b, false, 0, 0);
-            }
-          }
-        }
-        if (b && b->is_dict_storage) {
-          bool val_is_int =
-              ny_is_proven_int(cg, scopes, *depth, stored_value, NULL);
-          stmt_update_dict_binding_proof(b, true,
-                                         b->is_int_dict_storage && val_is_int);
-          if (b->is_int_dict_storage) {
-            int64_t val_min = 0, val_max = 0;
-            bool val_has_range = stmt_expr_int_range(
-                cg, scopes, *depth, stored_value, &val_min, &val_max);
-            if (b->has_dict_int_range && val_has_range) {
-              int64_t min_v =
-                  b->dict_int_min_raw < val_min ? b->dict_int_min_raw : val_min;
-              int64_t max_v =
-                  b->dict_int_max_raw > val_max ? b->dict_int_max_raw : val_max;
-              stmt_update_dict_binding_range(b, true, min_v, max_v);
-            } else if (val_has_range) {
-              stmt_update_dict_binding_range(b, true, val_min, val_max);
-            } else {
-              stmt_update_dict_binding_range(b, false, 0, 0);
-            }
-          }
-        }
-      }
-    }
-    if (is_tail && !cg->result_store_val &&
-        stmt_type_is_native_abi_value(cg, cg->current_fn_ret_type)) {
-      bool proven_int = ny_is_proven_int(cg, scopes, *depth, e, v);
-      v = ny_coerce_to_abi_proven_int(cg, v, cg->current_fn_ret_type,
-                                      proven_int);
-    }
-    if (is_tail && !cg->current_fn_attr_naked) {
-      if (cg->result_store_val) {
-        ny_store(cg, cg->result_store_val, v);
-      } else {
-        ny_owner_state_t old_owner_state = NY_OWNER_BORROWED;
-        binding *return_owner = stmt_ownership_begin_return_transfer(
-            cg, scopes, *depth, e, &old_owner_state);
-        emit_defers(cg, scopes, *depth, func_root);
-        stmt_ownership_end_return_transfer(return_owner, old_owner_state);
-        if (!ny_has_terminator(cg)) {
-          if (!emit_active_panic_env_clear(cg, s->tok))
-            return;
-          ny_cg_emit_trace_return(cg, v, cg->current_fn_ret_type);
-          ny_cg_emit_trace_exit(cg);
-          LLVMBuildRet(cg->builder, v);
-        }
-      }
-    }
-    break;
-  }
+  case NY_S_VAR:
+    gen_stmt_var(cg, scopes, depth, s);
+    return;
+  case NY_S_EXPR:
+    gen_stmt_expr_stmt(cg, scopes, depth, s, func_root, is_tail);
+    return;
   case NY_S_IF: {
     gen_stmt_if(cg, scopes, depth, s, func_root, is_tail);
     break;
@@ -9214,6 +9164,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
   case NY_S_FUNC:
     gen_func(cg, s, s->as.fn.name, scopes, *depth, NULL);
     break;
+  case NY_S_LEMMA:
+    break;
   case NY_S_DEFER: {
     gen_stmt_defer(cg, scopes, *depth, s);
     break;
@@ -9291,22 +9243,13 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
       (void)gen_expr(cg, scopes, *depth, arg);
     }
     if (s->as.macro.body) {
-      ny_diag_warning(s->tok,
-                      "macro statement '%s' fell back to direct body execution",
-                      macro_name);
-      if (verbose_enabled >= 1) {
+      if (verbose_enabled >= 2) {
         ny_diag_hint(
             "register '%s' in std.core.syntax to customize expansion behavior",
             macro_name);
       }
       gen_stmt(cg, scopes, depth, s->as.macro.body, func_root, is_tail);
       break;
-    }
-    ny_diag_warning(s->tok, "macro statement not implemented: '%s'",
-                    macro_name);
-    if (verbose_enabled >= 1) {
-      ny_diag_hint("register '%s' in std.core.syntax to implement this macro",
-                   macro_name);
     }
     break;
   }

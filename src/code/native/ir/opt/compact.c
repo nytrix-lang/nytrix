@@ -1,3 +1,7 @@
+/*
+ * IR compaction: renumbers SSA values and basic blocks into a dense
+ * contiguous range after optimization removes dead entries.
+ */
 #include "code/native/ir/opt/util.h"
 #include "code/native/ir/internal.h"
 #include "base/compat.h"

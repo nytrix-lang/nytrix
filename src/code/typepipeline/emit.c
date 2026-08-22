@@ -1,3 +1,7 @@
+/*
+ * Type pipeline emit: serializes the fully-typed AST to JSON for
+ * artifact-based compilation, tooling, and pipeline-stage validation.
+ */
 char *ny_type_pipeline_typed_json(program_t *prog, codegen_t *cg,
                                   const char *source_name, bool include_std) {
   ny_tp_ctx_t ctx;
@@ -1434,10 +1438,13 @@ char *ny_type_pipeline_lowered_json(program_t *prog, codegen_t *cg,
   size_t accepted = cg ? cg->mono_specs.len : 0;
   size_t rejected =
       ctx.mono_candidates > accepted ? ctx.mono_candidates - accepted : 0;
+  size_t acceptance_rate_percent =
+      ctx.mono_candidates ? (accepted * 100u) / ctx.mono_candidates : 0;
   tp_append(&j,
             "],\"monomorphization\":{\"candidates\":%zu,\"accepted\":%zu,"
-            "\"rejected\":%zu,\"candidate_decisions\":[",
-            ctx.mono_candidates, accepted, rejected);
+            "\"rejected\":%zu,\"acceptance_rate_percent\":%zu,"
+            "\"candidate_decisions\":[",
+            ctx.mono_candidates, accepted, rejected, acceptance_rate_percent);
   bool first_candidate = true;
   for (size_t i = 0; i < ctx.funcs.len; ++i) {
     ny_tp_func_fact_t *fact = &ctx.funcs.data[i];

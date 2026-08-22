@@ -1,0 +1,19 @@
+shape type_proof_call_site_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "mapped value ranges do not prove it"
+  source ny <<'NY'
+use std.core
+
+;; The proof<P> proposition references callee parameter `m`. The witness is
+;; valid for 200 > 100, but the call maps `m` to 50, so the check must reject
+;; the call.
+fn needs_big(int m, proof<m > 100> p) int { 2 }
+def proof big = prove(200 > 100)
+needs_big(50, big)
+NY
+}

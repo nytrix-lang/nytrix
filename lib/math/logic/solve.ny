@@ -2,7 +2,6 @@
 ;; Bounded self-hosted decision procedures with replayable reports.
 module std.math.logic.solve(
    congruence, arithmetic, linear, finite, induction)
-
 use std.core
 use std.core.reflect as reflect
 use std.math.logic.prolog as prolog
@@ -13,7 +12,7 @@ def SOLVER_VERSION = "std.math.logic.solve@1"
 fn _certificate(str method, any claim, any evidence) dict {
    def dependency = to_str(hash(reflect.repr([method, claim, evidence])))
    cert.envelope("T", SOLVER_VERSION, dependency).merge({
-      "method":method, "claim":claim, "evidence":evidence})
+         "method":method, "claim":claim, "evidence":evidence})
 }
 
 fn _term_key(any value) str {
@@ -114,8 +113,8 @@ fn _union(dict parent, str left, str right, dict state) bool {
 
 fn _congruent(any left, any right, dict parent, dict state) bool {
    if !prolog.is_term(left) || !prolog.is_term(right) ||
-      left.get("name") != right.get("name") ||
-      left.get("args").len != right.get("args").len {
+   left.get("name") != right.get("name") ||
+   left.get("args").len != right.get("args").len {
       return false
    }
    mut i = 0
@@ -133,7 +132,7 @@ fn congruence(list equalities, any left, any right, int max_steps=10000,
    int max_nodes=10000, int max_depth=128, int max_variables=256,
    int max_memory=100000) dict {
    if max_steps <= 0 || max_nodes <= 0 || max_depth <= 0 ||
-      max_variables <= 0 || max_memory <= 0 {
+   max_variables <= 0 || max_memory <= 0 {
       return {"decided":false, "reason":"invalid budget", "equal":false}
    }
    mut state = {"decided":true, "reason":"complete", "steps":0,
@@ -141,7 +140,7 @@ fn congruence(list equalities, any left, any right, int max_steps=10000,
       "max_depth":max_depth, "memory":0, "max_memory":max_memory}
    mut seen = dict(16)
    if !_variables(left, seen, 0, max_depth, max_variables) ||
-      !_variables(right, seen, 0, max_depth, max_variables) {
+   !_variables(right, seen, 0, max_depth, max_variables) {
       return {"decided":false, "reason":"variable limit", "equal":false}
    }
    mut terms = dict(32)
@@ -157,7 +156,7 @@ fn congruence(list equalities, any left, any right, int max_steps=10000,
             "nodes":state.get("nodes")}
       }
       if !_variables(pair[0], seen, 0, max_depth, max_variables) ||
-         !_variables(pair[1], seen, 0, max_depth, max_variables) {
+      !_variables(pair[1], seen, 0, max_depth, max_variables) {
          return {"decided":false, "reason":"variable limit", "equal":false}
       }
       _collect_terms(pair[0], terms, parent, state, 0)
@@ -227,7 +226,7 @@ fn _arithmetic_eval(any expression, dict state, int depth) any {
 fn arithmetic(any expression, int max_steps=10000, int max_nodes=10000,
    int max_depth=128, int max_variables=256, int max_memory=100000) dict {
    if max_steps <= 0 || max_nodes <= 0 || max_depth <= 0 ||
-      max_variables <= 0 || max_memory <= 0 {
+   max_variables <= 0 || max_memory <= 0 {
       return {"decided":false, "reason":"invalid budget", "value":nil}
    }
    mut state = {"decided":true, "reason":"normal form", "steps":0,
@@ -295,7 +294,7 @@ fn finite(dict domains, any predicate, int max_steps=100000,
    int max_memory=1000000) dict {
    def names = domains.keys()
    if max_steps <= 0 || max_nodes <= 0 || max_depth <= 0 ||
-      max_variables <= 0 || max_memory <= 0 {
+   max_variables <= 0 || max_memory <= 0 {
       return {"decided":false, "reason":"invalid budget", "found":false}
    }
    if names.len > max_variables {
@@ -386,7 +385,7 @@ fn induction(any predicate, int first, int last, int max_steps=100000,
    int max_depth=128, int max_nodes=100000, int max_memory=1000000,
    int max_variables=1) dict {
    if last < first || max_steps <= 0 || max_depth <= 0 || max_nodes <= 0 ||
-      max_memory <= 0 || max_variables < 1 {
+   max_memory <= 0 || max_variables < 1 {
       return {"decided":false, "reason":"invalid budget", "valid":false}
    }
    def count = last - first + 1

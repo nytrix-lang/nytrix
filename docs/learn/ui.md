@@ -1,4 +1,5 @@
-# UI and rendering
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":60,"summary":"Create windows, draw frames, handle input, and build portable browser and native interfaces."} -->
+# UI
 
 Use `std.os.ui.render` for drawing and `std.os.ui.window` for window/input
 state. The render module owns the active graphics context after `init_window`;
@@ -6,6 +7,20 @@ most draw calls do not take a window handle.
 
 A minimal UI program creates one window, enters one frame loop, draws visible
 state inside that loop, and releases renderer resources after the loop exits.
+
+## Portable rendering contract
+
+`gfx.portable_contract()` describes the stable subset shared by the native
+OpenGL/Vulkan paths and the browser WebGL2 path. It guarantees frame
+begin/clear/draw/present, 2D rectangles/lines/triangles, textures, text, a
+depth-tested 3D baseline, and source-alpha blending. Backend-specific Vulkan
+has, compute passes, advanced materials, and exact desktop font metrics
+remain opt-in capabilities and must be checked with
+`gfx.backend_capabilities()`.
+
+This contract is intentionally narrower than Vulkan. A program that stays
+inside it can move between native and browser targets without relying on a
+silent renderer fallback.
 
 ## Project Files
 
@@ -43,9 +58,9 @@ terminal rendering.
 Choose one coordinate model per frame:
 
 - Use `begin_frame_clear`, `framebuffer_size_f64`, and `set_ortho_2d` when UI
-  should fill the live window pixels.
+ should fill the live window pixels.
 - Use `begin_frame_layout(color, base_w, base_h)` when the app wants an
-  aspect-fit design space.
+ aspect-fit design space.
 
 `begin_frame_layout` returns `view_x`, `view_y`, `view_w`, and `view_h`. Draw a
 background over that rect when the fitted content should cover the resized
@@ -75,9 +90,9 @@ while(e){
 Focused UI project files:
 
 - [engine.ny](../../etc/projects/ui/engine.ny) is the asset viewer used by the
-  normal `./make` and browser-test workflows. Keep rendered probes in named
-  directories under `build/web/` or `build/probes/` so their inputs and output
-  artifacts remain reproducible.
+ normal `./make` and browser-test workflows. Keep rendered probes in named
+ directories under `build/web/` or `build/probes/` so their inputs and output
+ artifacts remain reproducible.
 - [input.ny](../../etc/projects/ui/input.ny) switches between keyboard and active gamepad visualization.
 - [monitor.ny](../../etc/projects/ui/monitor.ny) shows monitor layout, window moves, framebuffer scale, DPI, and mouse coordinates.
 - [term.ny](../../etc/projects/ui/term.ny) shows terminal rendering.
@@ -268,6 +283,6 @@ free_raw(ptr)
 
 ## Related
 
-- [library.md](library.md) for the UI module map.
-- [programs.md](programs.md#complete-project-examples) for runnable programs.
-- [troubleshooting.md](troubleshooting.md) for runtime and environment checks.
+- [Library](library.md) for the UI module map.
+- [Programs](programs.md#complete-project-examples) for runnable programs.
+- [Troubleshooting](troubleshooting.md) for runtime and environment checks.

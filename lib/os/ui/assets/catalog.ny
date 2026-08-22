@@ -255,7 +255,7 @@ fn _first_gltf_in_dir(str dir, str prefer="") str {
             ospath.join(ospath.join(dir, "glTF-Binary"), prefer + ".glb"),
             ospath.join(ospath.join(dir, "glTF"), prefer + ".gltf"),
             ospath.join(ospath.join(dir, "glTF"), prefer + ".glb")
-      ])
+         ])
       if named.len > 0 { return named }
    }
    mut fb = ""

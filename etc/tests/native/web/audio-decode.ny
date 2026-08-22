@@ -11,6 +11,7 @@ use std.os.ui.render as gfx
 use std.os.ui.window as window
 
 def backend = sound.init(false)
+
 if !backend { sound.shutdown() }
 def win = gfx.init_window(320, 180, "Nytrix browser audio decode", 0, true, false, 1)
 sound.web_play("beep.wav")

@@ -1,3 +1,7 @@
+/*
+ * AST visitor: generic tree-walk infrastructure used by purity
+ * analysis, null-narrowing, and other semantic pass implementations.
+ */
 #include "code/visitor.h"
 #include <stddef.h>
 
@@ -157,6 +161,7 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
       break;
     case NY_S_WHILE:
       ny_visit_expr(v, s->as.whl.test);
+      ny_visit_expr(v, s->as.whl.invariant);
       ny_visit_stmt(v, s->as.whl.body);
       if (s->as.whl.update)
         ny_visit_stmt(v, s->as.whl.update);
@@ -201,6 +206,9 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
       break;
     case NY_S_FUNC:
       ny_visit_stmt(v, s->as.fn.body);
+      break;
+    case NY_S_LEMMA:
+      ny_visit_expr(v, s->as.lemma.proposition);
       break;
     case NY_S_LAYOUT:
       for (size_t i = 0; i < s->as.layout.methods.len; i++)

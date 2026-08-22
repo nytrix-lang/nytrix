@@ -1,3 +1,7 @@
+/*
+ * REPL color support: ANSI escape sequences, terminal capability
+ * detection, and colorized output for the interactive read-eval-print loop.
+ */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif

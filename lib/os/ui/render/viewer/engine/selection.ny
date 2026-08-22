@@ -26,7 +26,7 @@ fn selection_gizmo_mode(any mode, any fallback=0) int {
    "Normalizes transform gizmo mode text or numeric aliases to move=0, rotate=1, scale=2."
    if is_int(mode) {
       def m = int(mode)
-      return(m >= 0 && m <= 2) ? m : int(fallback)
+      return (m >= 0 && m <= 2) ? m : int(fallback)
    }
    if !is_str(mode) { return int(fallback) }
    def s = str.lower(str.strip(mode))
@@ -231,7 +231,7 @@ fn _selection_bounds_apply_scene_transform(any bounds, any scene_obj) list {
       scene_obj.get("fit_scale", 1.0),
       scene_obj.get("fit_tx", 0.0),
       scene_obj.get("fit_ty", 0.0),
-   scene_obj.get("fit_tz", 0.0))
+      scene_obj.get("fit_tz", 0.0))
    _selection_bounds_apply_edit(fit_bounds, scene_obj)
 }
 

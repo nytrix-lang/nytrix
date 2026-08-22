@@ -1,3 +1,7 @@
+/*
+ * ny-web entry point: CLI dispatch for the documentation generator
+ * and website builder bundled under `ny web` / `ny doc`.
+ */
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -8,7 +12,91 @@
 #include "../tools/repo.h"
 
 #include "core.c"
+static void ny_web_meta_json_string(const char *s) {
+  putchar('"');
+  for (; s && *s; ++s) {
+    unsigned char c = (unsigned char)*s;
+    if (c == '"' || c == '\\')
+      printf("\\%c", c);
+    else if (c == '\n')
+      fputs("\\n", stdout);
+    else if (c == '\r')
+      fputs("\\r", stdout);
+    else if (c == '\t')
+      fputs("\\t", stdout);
+    else if (c >= 0x20)
+      putchar(c);
+  }
+  putchar('"');
+}
+
+static int ny_web_meta_main(const char *path) {
+  FILE *fp = fopen(path, "rb");
+  if (!fp) {
+    nyt_err("ny-doc", "metadata: cannot read %s", path);
+    return 1;
+  }
+  char line[1024], title[256] = {0}, keywords[768] = {0};
+  int header = 1;
+  while (header && fgets(line, sizeof(line), fp)) {
+    char *p = line;
+    while (*p == ' ' || *p == '\t')
+      ++p;
+    size_t n = strlen(p);
+    while (n && (p[n - 1] == '\n' || p[n - 1] == '\r'))
+      p[--n] = '\0';
+    if (strncasecmp(p, ";; keywords:", 12) == 0) {
+      snprintf(keywords, sizeof(keywords), "%s", p + 12);
+      continue;
+    }
+    if (strncmp(p, ";;", 2) == 0) {
+      char *text = p + 2;
+      while (*text == ' ' || *text == '\t')
+        ++text;
+      if (*text && !title[0] && strlen(text) < sizeof(title))
+        snprintf(title, sizeof(title), "%s", text);
+      continue;
+    }
+    if (*p && p[0] != '#')
+      header = 0;
+  }
+  fclose(fp);
+  printf("{\"title\":");
+  ny_web_meta_json_string(title);
+  printf(",\"keywords\":[");
+  int first = 1;
+  for (char *p = keywords; *p;) {
+    while (*p == ' ' || *p == '\t' || *p == ',')
+      ++p;
+    if (!*p)
+      break;
+    char word[128];
+    size_t i = 0;
+    while (*p && *p != ' ' && *p != '\t' && *p != ',') {
+      if (i + 1 < sizeof(word))
+        word[i++] = (char)tolower((unsigned char)*p);
+      ++p;
+    }
+    word[i] = '\0';
+    if (!i)
+      continue;
+    if (!first)
+      putchar(',');
+    first = 0;
+    ny_web_meta_json_string(word);
+  }
+  puts("]}");
+  return 0;
+}
+
 int ny_web_main(int argc, char **argv) {
+  if (argc > 1 && argv[1] && strcmp(argv[1], "meta") == 0) {
+    if (argc != 3) {
+      nyt_err("ny-doc", "usage: ny doc meta SOURCE");
+      return 2;
+    }
+    return ny_web_meta_main(argv[2]);
+  }
   if (argc > 1 && argv[1] &&
       (strcmp(argv[1], "search") == 0 || strcmp(argv[1], "find") == 0 ||
        strcmp(argv[1], "get") == 0 || strcmp(argv[1], "show") == 0)) {
@@ -102,13 +190,7 @@ int ny_web_main(int argc, char **argv) {
   nyt_msg("OPEN", NYT_GREEN, "%s",
           display_index_path[0] ? display_index_path : paths.index_path);
 
-  if (opts.serve) {
-#ifdef _WIN32
-    nyt_err("ny-doc", "--serve is not implemented on Windows in native mode");
-    return 1;
-#else
+  if (opts.serve)
     return serve_http_forever(opts.out_dir, opts.port);
-#endif
-  }
   return 0;
 }

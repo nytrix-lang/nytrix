@@ -10,6 +10,7 @@ match file_read("beep.wav") {
    ok(data) -> window.test_report_touch(data.len, data.len, 0)
    err(code) -> window.test_report_touch(0, code, 0)
 }
+
 gfx.begin_frame_clear(gfx.BLACK)
 gfx.draw_rect(24.0, 24.0, 272.0, 132.0, gfx.WHITE)
 gfx.end_frame()

@@ -1,0 +1,14 @@
+shape args-invalid-native-hot-threshold {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--native-hot-threshold=abc"
+  expect_message "invalid native hot threshold: abc"
+  source ny <<'NY'
+use std.core
+print("ok")
+NY
+}

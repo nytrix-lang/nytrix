@@ -1,0 +1,18 @@
+shape type_proof_solver_soundness_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "soundness", "negative", "solver"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "solver must reject 5 >= 6"
+  source ny <<'NY'
+use std.core
+
+;; The Presburger solver must only accept genuine proofs: the negation of the
+;; proposition must be unsatisfiable under the known ranges.  These constant
+;; claims are false, so prove() must reject them even though they carry no
+;; free variables.
+prove(5 >= 6, "solver must reject 5 >= 6")
+NY
+}

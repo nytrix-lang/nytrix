@@ -1,0 +1,21 @@
+shape optcheck_loop_versioning {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck loop versioning pass-fires negative-path]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=13 --nyir-pass-stats"
+  expect compile_and_run
+  source ny <<'NY'
+fn fires(i64 x) i64 {
+  mut sum = 0
+  for i in 0..5 { if x < 10 { sum = sum + i } }
+  sum
+}
+fn iv_guard(i64 x) i64 {
+  mut sum = 0
+  for i in 0..5 { if i < x { sum = sum + i } }
+  sum
+}
+fires(3) + iv_guard(3)
+NY
+}

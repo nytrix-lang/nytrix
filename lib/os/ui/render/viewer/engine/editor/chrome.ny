@@ -204,7 +204,7 @@ fn draw_header(any scene_name, any fps_value, any layout_name, any active_shot, 
          to_str(int(renderer_stats.get("draws", 0))) + " draws  " +
          hotspot + "  " +
          _ellipsize_middle(active_shot, 28),
-      [0.68, 0.68, 0.68, 0.92])
+         [0.68, 0.68, 0.68, 0.92])
       return selected
    }
    _stat_card("editor_scene_card",
@@ -212,7 +212,7 @@ fn draw_header(any scene_name, any fps_value, any layout_name, any active_shot, 
       (to_str(scene_name).len > 0) ? to_str(scene_name) : "<none>",
       "layout " + layout_now,
       float(card_w), 50.0,
-   [0.86, 0.86, 0.86, 0.96])
+      [0.86, 0.86, 0.86, 0.96])
    if summary_cols > 1 { gui.same_line() }
    def frame_ms = float(renderer_stats.get("frame_ms", 0.0))
    _stat_card("editor_runtime_card",
@@ -220,7 +220,7 @@ fn draw_header(any scene_name, any fps_value, any layout_name, any active_shot, 
       to_str(int(fps_value)) + " fps",
       f"{frame_ms:.2f}ms frame",
       float(card_w), 50.0,
-   [0.74, 0.74, 0.74, 0.94])
+      [0.74, 0.74, 0.74, 0.94])
    if summary_cols > 2 { gui.same_line() }
    if !compact {
       def hotspot = _txt(renderer_hotspot, "steady")
@@ -229,7 +229,7 @@ fn draw_header(any scene_name, any fps_value, any layout_name, any active_shot, 
          to_str(int(renderer_stats.get("draws", 0))) + " draws",
          hotspot,
          float(card_w), 50.0,
-      [0.82, 0.82, 0.82, 0.94])
+         [0.82, 0.82, 0.82, 0.94])
    }
    gui.text_colored("Shot: " + to_str(active_shot), [0.66, 0.66, 0.66, 0.90])
    selected
@@ -325,14 +325,14 @@ fn draw_graph_body(any nodes, any links, any selected, any card_w, any canvas_h,
       to_str(is_list(nodes) ? nodes.len : 0),
       "graph blocks",
       float(card_w), 58.0,
-   [0.84, 0.84, 0.84, 1.0])
+      [0.84, 0.84, 0.84, 1.0])
    gui.same_line()
    _stat_card("graph_links_card",
       "Links",
       to_str(is_list(links) ? links.len : 0),
       "edges",
       float(card_w), 58.0,
-   [0.76, 0.76, 0.76, 1.0])
+      [0.76, 0.76, 0.76, 1.0])
    gui.same_line()
    def sel_title = is_dict(selected) ? to_str(selected.get("title", "Node")) : "<none>"
    def sel_hint = is_dict(selected) ? "live details below" : "click a node header"
@@ -341,13 +341,13 @@ fn draw_graph_body(any nodes, any links, any selected, any card_w, any canvas_h,
       sel_title,
       sel_hint,
       float(card_w), 58.0,
-   [0.78, 0.78, 0.78, 1.0])
+      [0.78, 0.78, 0.78, 1.0])
    mut out = gui.node_canvas("editor_graph",
       is_list(nodes) ? nodes : [],
       is_list(links) ? links : [],
       0.0,
       float(canvas_h),
-   float(grid))
+      float(grid))
    if is_dict(selected) {
       gui.separator()
       gui.text("Selected: " + to_str(selected.get("title", "Node")))

@@ -1,4 +1,9 @@
+/*
+ * NYIR verifier: structural and semantic sanity checks on the IR
+ * after each transform pass to catch malformed ops or type mismatches.
+ */
 #include "code/native/ir/internal.h"
+#include "code/native/ir/opt/util.h"
 #include "base/compat.h"
 #include "base/common.h"
 #include <stdio.h>
@@ -7,6 +12,27 @@
 
 static bool nir_value_valid(const nyir_func_t *f, int v) {
   return v >= 0 && v < f->next_value;
+}
+
+static bool nir_verify_inst_err(const nyir_func_t *f, char *err, size_t err_len,
+                                const nyir_inst_t *in, size_t index,
+                                const char *reason) {
+  char detail[384];
+  const char *why = reason ? reason : "invalid instruction";
+  nyir_cfg_t cfg = {0};
+  if (f && index < f->len && nyir_cfg_build_topology(f, &cfg) &&
+      cfg.inst_block && index < f->len) {
+    size_t block = cfg.inst_block[index];
+    if (block < cfg.block_count && cfg.block_label && cfg.block_label[block] >= 0)
+      snprintf(detail, sizeof(detail), "%s [block=%zu label=L%lld]", why, block,
+               (long long)cfg.block_label[block]);
+    else
+      snprintf(detail, sizeof(detail), "%s [block=%zu]", why, block);
+    nyir_cfg_free(&cfg);
+    return nyir_inst_err(err, err_len, in, index, detail);
+  }
+  nyir_cfg_free(&cfg);
+  return nyir_inst_err(err, err_len, in, index, why);
 }
 
 static bool nir_value_defined(const nyir_func_t *f, const bool *defined,
@@ -41,12 +67,16 @@ static unsigned nir_known_effect_mask(void) {
          NYIR_EFFECT_CALL | NYIR_EFFECT_CONTROL |
          NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
          NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_VOLATILE |
-         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
+         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
+         NYIR_EFFECT_IO | NYIR_EFFECT_THREAD | NYIR_EFFECT_FFI |
+         NYIR_EFFECT_FENV;
 }
 
-/* Instruction flags are part of NYIR's typed ABI metadata.  Keeping their
+/*
+ * Instruction flags are part of NYIR's typed ABI metadata.  Keeping their
  * legality here prevents a malformed bundle from silently changing a call or
- * return register class in Machine IR lowering. */
+ * return register class in Machine IR lowering.
+ */
 static bool nir_flags_valid(const nyir_inst_t *in) {
   if (!in)
     return false;
@@ -54,26 +84,45 @@ static bool nir_flags_valid(const nyir_inst_t *in) {
   switch (in->op) {
   case NYIR_CALL:
     allowed = NYIR_INST_F_EXTERN | NYIR_INST_F_RET_F64 |
-              NYIR_INST_F_RET_F32 | NYIR_INST_F_SRET;
+              NYIR_INST_F_RET_F32 | NYIR_INST_F_SRET |
+              NYIR_INST_F_EFFECTS_KNOWN;
     break;
   case NYIR_RET:
     allowed = NYIR_INST_F_RET_F64 | NYIR_INST_F_RET_F32;
     break;
   case NYIR_LOAD_I64:
   case NYIR_STORE_I64:
-    allowed = NYIR_INST_F_MEM_F64;
+    allowed = NYIR_INST_F_MEM_F64 | NYIR_INST_F_MEM_BYTE;
+    break;
+  case NYIR_ADD_I64:
+  case NYIR_SUB_I64:
+  case NYIR_MUL_I64:
+  case NYIR_AND_I64:
+  case NYIR_OR_I64:
+  case NYIR_XOR_I64:
+    /*
+     * F_NARROW32 is set by the range-narrowing pass (opt/narrow.c) so the
+     * codegen backend may emit 32-bit register forms.  The internal x64
+     * encoder ignores it (emitting 64-bit ops, still correct); the scalar
+     * machine bridge honors it.  Either way the flag is legal here.
+     */
+    allowed = NYIR_INST_F_NARROW32;
     break;
   default:
     return in->flags == 0;
   }
   return (in->flags & ~allowed) == 0 &&
+         !((in->flags & NYIR_INST_F_MEM_F64) &&
+           (in->flags & NYIR_INST_F_MEM_BYTE)) &&
          !((in->flags & NYIR_INST_F_RET_F64) &&
            (in->flags & NYIR_INST_F_RET_F32));
 }
 
-/* PHI operands live on CFG edges, not at their linear instruction position.
+/*
+ * PHI operands live on CFG edges, not at their linear instruction position.
  * Keep this check separate from the scalar operand verifier so malformed
- * incoming sets cannot reach SSA destruction or a native backend. */
+ * incoming sets cannot reach SSA destruction or a native backend.
+ */
 static bool nir_verify_phi_edges(const nyir_func_t *f, char *err,
                                  size_t err_len) {
   nyir_cfg_t cfg = {0};
@@ -87,7 +136,7 @@ static bool nir_verify_phi_edges(const nyir_func_t *f, char *err,
     size_t predecessors = cfg.pred_offsets[block + 1] - cfg.pred_offsets[block];
     if (phi->phi_incoming_len != predecessors) {
       nyir_cfg_free(&cfg);
-      return nyir_inst_err(err, err_len, phi, i,
+      return nir_verify_inst_err(f, err, err_len, phi, i,
                              "phi incoming edges do not match CFG predecessors");
     }
     for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
@@ -102,7 +151,7 @@ static bool nir_verify_phi_edges(const nyir_func_t *f, char *err,
       }
       if (!matched) {
         nyir_cfg_free(&cfg);
-        return nyir_inst_err(err, err_len, phi, i,
+        return nir_verify_inst_err(f, err, err_len, phi, i,
                                "phi incoming label is not a CFG predecessor");
       }
     }
@@ -117,10 +166,12 @@ static bool nir_verify_cfg_structure(const nyir_func_t *f, char *err,
   if (!nyir_cfg_build(f, &cfg))
     return nyir_err(err, err_len, "native NYIR verify: cannot build CFG");
   for (size_t block = 0; block < cfg.block_count; ++block) {
-    /* Unreachable blocks are a normal transient state after SCCP or branch
+    /*
+     * Unreachable blocks are a normal transient state after SCCP or branch
      * folding.  They are still checked structurally below, but CFG cleanup
      * owns their deletion; rejecting them here would make it impossible to
-     * verify after every individual transformation. */
+     * verify after every individual transformation.
+     */
     size_t end = cfg.block_end[block];
     while (end > cfg.block_start[block] && f->data[end - 1].op == NYIR_NOP)
       --end;
@@ -130,7 +181,7 @@ static bool nir_verify_cfg_structure(const nyir_func_t *f, char *err,
     if ((op == NYIR_BR || op == NYIR_BR_IF || op == NYIR_RET) &&
         end != cfg.block_end[block]) {
       nyir_cfg_free(&cfg);
-      return nyir_inst_err(err, err_len, &f->data[end - 1], end - 1,
+      return nir_verify_inst_err(f, err, err_len, &f->data[end - 1], end - 1,
                              "terminator is followed by a non-NOP instruction");
     }
   }
@@ -145,18 +196,20 @@ static bool cfg_dominates_bit_debug(const nyir_cfg_t *cfg, size_t dominator,
   return nyir_cfg_dominates(cfg, dominator, dominated);
 }
 
-static bool nir_value_dominates_use(const nyir_cfg_t *cfg,
+static bool nir_value_dominates_use(const nyir_func_t *f, const nyir_cfg_t *cfg,
                                      const int *definitions, int value,
                                      size_t use, char *err, size_t err_len,
                                      const nyir_inst_t *in) {
   if (value < 0 || !definitions || definitions[value] < 0)
-    return nyir_inst_err(err, err_len, in, use, "value has no definition");
+    return nir_verify_inst_err(f, err, err_len, in, use, "value has no definition");
   size_t def = (size_t)definitions[value];
   size_t def_block = cfg->inst_block[def];
   size_t use_block = cfg->inst_block[use];
-  /* SCCP may leave structurally valid, unreachable edge blocks until CFG
+  /*
+   * SCCP may leave structurally valid, unreachable edge blocks until CFG
    * cleanup. They cannot execute, so executable dominance is not defined for
-   * their uses. Keep definition and structural checks intact. */
+   * their uses. Keep definition and structural checks intact.
+   */
   if (!cfg->reachable[use_block])
     return true;
   if ((def_block == use_block && def < use) ||
@@ -181,7 +234,7 @@ static bool nir_value_dominates_use(const nyir_cfg_t *cfg,
               cfg_dominates_bit_debug(cfg, use_block, b));
     }
   }
-  return nyir_inst_err(err, err_len, in, use,
+  return nir_verify_inst_err(f, err, err_len, in, use,
                          "value definition does not dominate its use");
 }
 
@@ -190,23 +243,22 @@ static bool nir_verify_dominance(const nyir_func_t *f, char *err,
   nyir_cfg_t cfg = {0};
   if (!nyir_cfg_build(f, &cfg))
     return nyir_err(err, err_len, "native NYIR verify: cannot build CFG");
-  int *definitions = NULL;
-  if (f->next_value > 0) {
-    definitions = malloc((size_t)f->next_value * sizeof(*definitions));
-    if (!definitions) {
-      nyir_cfg_free(&cfg);
-      return nyir_err(err, err_len, "native NYIR verify: out of memory");
-    }
-    for (int value = 0; value < f->next_value; ++value)
-      definitions[value] = -1;
+  /*
+   * value -> defining instruction index, used by the dominance checks
+   * below.  NULL when next_value <= 0; the CHECK_DOMINATES paths already
+   * tolerate a NULL map (they test definitions[value] < 0 first).  The
+   * fill loop previously ran unconditionally outside the next_value > 0
+   * guard; the helper now owns both the guard and the dst bounds check.
+   */
+  int *definitions = nyir_build_defs(f);
+  if (f->next_value > 0 && !definitions) {
+    nyir_cfg_free(&cfg);
+    return nyir_err(err, err_len, "native NYIR verify: out of memory");
   }
-  for (size_t i = 0; i < f->len; ++i)
-    if (f->data[i].dst >= 0)
-      definitions[f->data[i].dst] = (int)i;
 
 #define CHECK_DOMINATES(value)                                                \
   do {                                                                        \
-    if (!nir_value_dominates_use(&cfg, definitions, (value), i, err, err_len, \
+    if (!nir_value_dominates_use(f, &cfg, definitions, (value), i, err, err_len, \
                                  in))                                         \
       goto fail;                                                              \
   } while (0)
@@ -230,7 +282,7 @@ static bool nir_verify_dominance(const nyir_func_t *f, char *err,
             !nyir_cfg_dominates(&cfg,
                                   cfg.inst_block[(size_t)definitions[value]],
                                   (size_t)pred)) {
-          nyir_inst_err(err, err_len, in, i,
+          nir_verify_inst_err(f, err, err_len, in, i,
                           "phi value does not dominate its predecessor edge");
           goto fail;
         }
@@ -243,13 +295,17 @@ static bool nir_verify_dominance(const nyir_func_t *f, char *err,
     case NYIR_I64_TO_F32:
     case NYIR_F64_TO_F32:
     case NYIR_F32_TO_F64:
+    case NYIR_SQRT_F64:
+    case NYIR_SIN_F64:
+    case NYIR_COS_F64:
     case NYIR_LOAD_I64:
     case NYIR_VEC4_LOAD_I64:
+    case NYIR_VEC8_LOAD_I64:
     case NYIR_VEC4_LOAD_F64:
     case NYIR_VEC8_LOAD_F32:
-    case NYIR_VEC4_SET1_I64:
     case NYIR_VEC4_SET1_F64:
     case NYIR_VEC8_SET1_F32:
+    case NYIR_VEC4_SET1_I64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_SHUFFLE_F32:
     case NYIR_STORE_LOCAL:
@@ -262,6 +318,7 @@ static bool nir_verify_dominance(const nyir_func_t *f, char *err,
       CHECK_DOMINATES(in->c);
       break;
     case NYIR_VEC4_STORE_I64:
+    case NYIR_VEC8_STORE_I64:
     case NYIR_VEC4_STORE_F64:
     case NYIR_VEC8_STORE_F32:
       CHECK_DOMINATES(in->a);
@@ -293,6 +350,11 @@ static bool nir_verify_dominance(const nyir_func_t *f, char *err,
     case NYIR_ADDR_SYMBOL:
     case NYIR_ALLOCA:
     case NYIR_CAPTURE_RET:
+      break;
+    case NYIR_BOUNDS_CHECK:
+      if (in->a >= 0) CHECK_DOMINATES(in->a);
+      if (in->b >= 0) CHECK_DOMINATES(in->b);
+      if (in->c >= 0) CHECK_DOMINATES(in->c);
       break;
     default:
       CHECK_DOMINATES(in->a);
@@ -331,29 +393,31 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
     const nyir_inst_t *in = &f->data[i];
     if (in->op != NYIR_CALL && in->arg_sizes) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i,
+      return nir_verify_inst_err(f, err, err_len, in, i,
                              "non-call instruction has aggregate argument metadata");
     }
     if (in->op < 0 || in->op >= NYIR_OP_COUNT) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i, "unknown opcode");
+      return nir_verify_inst_err(f, err, err_len, in, i, "unknown opcode");
     }
     if (!nir_flags_valid(in)) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i,
+      return nir_verify_inst_err(f, err, err_len, in, i,
                              "invalid instruction flags");
     }
     if (in->op == NYIR_PHI) {
-      /* SSA joins are a block prefix.  Keeping that invariant explicit makes
+      /*
+       * SSA joins are a block prefix.  Keeping that invariant explicit makes
        * edge use/dominance checks unambiguous and is required by PHI lowering.
-       * NOPs are tolerated because in-place DCE may leave them temporarily. */
+       * NOPs are tolerated because in-place DCE may leave them temporarily.
+       */
       size_t prev = i;
       while (prev > 0 && f->data[prev - 1].op == NYIR_NOP)
         --prev;
       if (prev > 0 && f->data[prev - 1].op != NYIR_LABEL &&
           f->data[prev - 1].op != NYIR_PHI) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                                "phi is not at the start of its block");
       }
     }
@@ -361,50 +425,70 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
          in->op == NYIR_CMP_F32) &&
         in->cmp > NYIR_CMP_GE) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i, "unknown comparison predicate");
+      return nir_verify_inst_err(f, err, err_len, in, i, "unknown comparison predicate");
     }
     unsigned required_effects = nyir_inst_effects(in);
     unsigned known_effects = nir_known_effect_mask();
     if ((in->effects & ~known_effects) != 0) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i, "invalid effect mask");
+      return nir_verify_inst_err(f, err, err_len, in, i, "invalid effect mask");
     }
-    if (in->effects != required_effects) {
+    bool trusted_call_ok =
+        in->op == NYIR_CALL && (in->flags & NYIR_INST_F_EFFECTS_KNOWN) &&
+        (in->effects & NYIR_EFFECT_CALL) != 0;
+    if (in->effects != required_effects && !trusted_call_ok) {
+      char detail[192];
+      snprintf(detail, sizeof(detail),
+               "effect mask does not match opcode effects"
+               " (actual=0x%x required=0x%x symbol=%s flags=0x%x)",
+               in->effects, required_effects,
+               in->symbol ? in->symbol : "<none>", in->flags);
       free(defined);
-      return nyir_inst_err(err, err_len, in, i,
-                          "effect mask does not match opcode effects");
+      return nir_verify_inst_err(f, err, err_len, in, i, detail);
     }
     if ((in->range.has_min && !in->range.has_max) ||
         (!in->range.has_min && in->range.has_max)) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i, "incomplete range fact");
+      return nir_verify_inst_err(f, err, err_len, in, i, "incomplete range fact");
     }
     if (in->range.has_min && in->range.has_max && in->range.min > in->range.max) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i, "invalid range fact");
+      return nir_verify_inst_err(f, err, err_len, in, i, "invalid range fact");
+    }
+    if (in->dst < 0 && (in->range.has_min || in->range.has_max)) {
+      free(defined);
+      return nir_verify_inst_err(f, err, err_len, in, i,
+                           "range fact attached to non-value instruction");
+    }
+    if (in->op == NYIR_CONST_I64 && in->range.has_min && in->range.has_max &&
+        (in->imm < in->range.min || in->imm > in->range.max)) {
+      free(defined);
+      return nir_verify_inst_err(f, err, err_len, in, i,
+                           "constant is excluded by its range fact");
     }
     if ((!in->debug.line && in->debug.column) ||
         (!in->debug.line && in->debug.file && in->debug.file[0])) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i, "invalid debug location");
+      return nir_verify_inst_err(f, err, err_len, in, i, "invalid debug location");
     }
     if (in->dst >= f->next_value) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i, "invalid destination value");
+      return nir_verify_inst_err(f, err, err_len, in, i, "invalid destination value");
     }
     if (in->dst >= 0 && defined && defined[in->dst]) {
       free(defined);
-      return nyir_inst_err(err, err_len, in, i,
+      return nir_verify_inst_err(f, err, err_len, in, i,
                           "destination value is already defined");
     }
     switch (in->op) {
     case NYIR_NOP:
+    case NYIR_BOUNDS_CHECK:
       break;
     case NYIR_LABEL:
       for (size_t j = 0; j < i; ++j) {
         if (f->data[j].op == NYIR_LABEL && f->data[j].imm == in->imm) {
           free(defined);
-          return nyir_inst_err(err, err_len, in, i, "duplicate label");
+          return nir_verify_inst_err(f, err, err_len, in, i, "duplicate label");
         }
       }
       break;
@@ -413,9 +497,18 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
     case NYIR_CONST_F32:
       if (in->dst < 0) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "constant has no destination");
+        return nir_verify_inst_err(f, err, err_len, in, i, "constant has no destination");
       }
       break;
+  case NYIR_SQRT_F64:
+  case NYIR_SIN_F64:
+  case NYIR_COS_F64:
+    if (in->dst < 0 || !nir_value_defined(f, defined, in->a)) {
+      free(defined);
+      return nir_verify_inst_err(f, err, err_len, in, i,
+                           "unary f64 operand is invalid");
+    }
+    break;
     case NYIR_COPY:
     case NYIR_I64_TO_F64:
     case NYIR_I64_TO_F32:
@@ -423,27 +516,30 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
     case NYIR_F32_TO_F64:
     case NYIR_LOAD_I64:
     case NYIR_VEC4_LOAD_I64:
+    case NYIR_VEC8_LOAD_I64:
     case NYIR_VEC4_LOAD_F64:
     case NYIR_VEC8_LOAD_F32:
-    case NYIR_VEC4_SET1_I64:
     case NYIR_VEC4_SET1_F64:
     case NYIR_VEC8_SET1_F32:
+    case NYIR_VEC4_SET1_I64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_SHUFFLE_F32:
       if (in->dst < 0 || !nir_value_defined(f, defined, in->a)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "invalid unary value operand");
+        return nir_verify_inst_err(f, err, err_len, in, i, "invalid unary value operand");
       }
       break;
     case NYIR_PHI:
       if (in->dst < 0 || in->phi_incoming_len == 0 || !in->phi_incoming) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                                "phi requires a destination and incoming edges");
       }
-      /* PHIs may read a backedge value defined later in linear NYIR. CFG
+      /*
+       * PHIs may read a backedge value defined later in linear NYIR. CFG
        * validation below establishes the edge; require a real definition
-       * somewhere rather than a linear predecessor here. */
+       * somewhere rather than a linear predecessor here.
+       */
       for (size_t k = 0; k < in->phi_incoming_len; ++k) {
         int v = in->phi_incoming[k].value;
         bool has_definition = false;
@@ -451,13 +547,13 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
           if (f->data[j].dst == v) { has_definition = true; break; }
         if (!nir_value_valid(f, v) || !has_definition) {
           free(defined);
-          return nyir_inst_err(err, err_len, in, i, "phi has invalid incoming value");
+          return nir_verify_inst_err(f, err, err_len, in, i, "phi has invalid incoming value");
         }
         for (size_t j = 0; j < k; ++j) {
           if (in->phi_incoming[j].predecessor_label ==
               in->phi_incoming[k].predecessor_label) {
             free(defined);
-            return nyir_inst_err(err, err_len, in, i, "phi has duplicate predecessor");
+            return nir_verify_inst_err(f, err, err_len, in, i, "phi has duplicate predecessor");
           }
         }
       }
@@ -465,31 +561,31 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
     case NYIR_LOAD_LOCAL:
       if (in->dst < 0 || in->imm < 0) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "invalid local load");
+        return nir_verify_inst_err(f, err, err_len, in, i, "invalid local load");
       }
       break;
     case NYIR_ADDR_LOCAL:
       if (in->dst < 0 || in->imm < 0) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "invalid local address");
+        return nir_verify_inst_err(f, err, err_len, in, i, "invalid local address");
       }
       break;
     case NYIR_ADDR_SYMBOL:
       if (in->dst < 0 || !in->symbol || !in->symbol[0]) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "addr.symbol requires a non-empty symbol");
+        return nir_verify_inst_err(f, err, err_len, in, i, "addr.symbol requires a non-empty symbol");
       }
       break;
     case NYIR_ALLOCA:
       if (in->dst < 0 || in->imm < 0) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "alloca requires a valid destination and positive size");
+        return nir_verify_inst_err(f, err, err_len, in, i, "alloca requires a valid destination and positive size");
       }
       break;
     case NYIR_COPY_STRUCT:
       if (in->a < 0 || in->b < 0 || in->imm < 0) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "copy.struct requires valid src, dst, and size");
+        return nir_verify_inst_err(f, err, err_len, in, i, "copy.struct requires valid src, dst, and size");
       }
       break;
     case NYIR_CAPTURE_RET:
@@ -505,23 +601,24 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
     case NYIR_STORE_LOCAL:
       if (in->imm < 0 || !nir_value_defined(f, defined, in->a)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "invalid local store");
+        return nir_verify_inst_err(f, err, err_len, in, i, "invalid local store");
       }
       break;
     case NYIR_STORE_I64:
       if (!nir_value_defined(f, defined, in->a) ||
           !nir_value_defined(f, defined, in->c)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "invalid memory store");
+        return nir_verify_inst_err(f, err, err_len, in, i, "invalid memory store");
       }
       break;
     case NYIR_VEC4_STORE_I64:
+    case NYIR_VEC8_STORE_I64:
     case NYIR_VEC4_STORE_F64:
     case NYIR_VEC8_STORE_F32:
       if (!nir_value_defined(f, defined, in->a) ||
           !nir_value_defined(f, defined, in->b >= 0 ? in->b : in->c)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                                "invalid vector memory store");
       }
       break;
@@ -531,106 +628,106 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
           !nir_value_defined(f, defined, in->b) ||
           !nir_value_defined(f, defined, in->c)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                                "invalid ternary vector operands");
       }
       break;
     case NYIR_RET:
       if (in->a >= 0 && !nir_value_defined(f, defined, in->a)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "invalid return value");
+        return nir_verify_inst_err(f, err, err_len, in, i, "invalid return value");
       }
       break;
     case NYIR_BR:
       if (!nir_label_exists(f, in->imm)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "missing branch target label");
+        return nir_verify_inst_err(f, err, err_len, in, i, "missing branch target label");
       }
       break;
     case NYIR_BR_IF:
       if (!nir_value_defined(f, defined, in->a) ||
           !nir_label_exists(f, in->imm)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                             "invalid conditional branch operand or target");
       }
       break;
     case NYIR_CALL:
       if (!in->symbol || !in->symbol[0]) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "call has no symbol");
+        return nir_verify_inst_err(f, err, err_len, in, i, "call has no symbol");
       }
       if (in->imm < 0) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "negative call arg count");
+        return nir_verify_inst_err(f, err, err_len, in, i, "negative call arg count");
       }
       if (in->imm == 0 &&
           (in->a >= 0 || in->b >= 0 || in->c >= 0 || in->d >= 0 ||
            in->e >= 0 || in->f >= 0)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                             "zero-argument call has value operands");
       }
       if (in->imm == 1 &&
           (in->b >= 0 || in->c >= 0 || in->d >= 0 || in->e >= 0 ||
            in->f >= 0)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                             "one-argument call has extra value operand");
       }
       if (in->imm == 2 &&
           (in->c >= 0 || in->d >= 0 || in->e >= 0 || in->f >= 0)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                             "two-argument call has extra value operand");
       }
       if (in->imm == 3 && (in->d >= 0 || in->e >= 0 || in->f >= 0)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                             "three-argument call has extra value operand");
       }
       if (in->imm == 4 && (in->e >= 0 || in->f >= 0)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                             "four-argument call has extra value operand");
       }
       if (in->imm == 5 && in->f >= 0) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                             "five-argument call has extra value operand");
       }
       if (in->imm > 0 && !nir_value_defined(f, defined, in->a)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "call arg0 is invalid");
+        return nir_verify_inst_err(f, err, err_len, in, i, "call arg0 is invalid");
       }
       if (in->imm > 1 && !nir_value_defined(f, defined, in->b)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "call arg1 is invalid");
+        return nir_verify_inst_err(f, err, err_len, in, i, "call arg1 is invalid");
       }
       if (in->imm > 2 && !nir_value_defined(f, defined, in->c)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "call arg2 is invalid");
+        return nir_verify_inst_err(f, err, err_len, in, i, "call arg2 is invalid");
       }
       if (in->imm > 3 && !nir_value_defined(f, defined, in->d)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "call arg3 is invalid");
+        return nir_verify_inst_err(f, err, err_len, in, i, "call arg3 is invalid");
       }
       if (in->imm > 4 && !nir_value_defined(f, defined, in->e)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "call arg4 is invalid");
+        return nir_verify_inst_err(f, err, err_len, in, i, "call arg4 is invalid");
       }
       if (in->imm > 5 && !nir_value_defined(f, defined, in->f)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "call arg5 is invalid");
+        return nir_verify_inst_err(f, err, err_len, in, i, "call arg5 is invalid");
       }
       if (in->imm > NYIR_CALL_MAX_ARGS) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                             "call exceeds the maximum supported argument count");
       }
       if (in->arg_sizes && in->imm <= 0) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i,
+        return nir_verify_inst_err(f, err, err_len, in, i,
                                "zero-argument call has aggregate argument metadata");
       }
       if (in->arg_sizes) {
@@ -643,7 +740,7 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
                c0 > NYIR_ARG_CLASS_AAPCS_INTEGER_A16 ||
                c1 > NYIR_ARG_CLASS_AAPCS_INTEGER_A16)) {
             free(defined);
-            return nyir_inst_err(err, err_len, in, i,
+            return nir_verify_inst_err(f, err, err_len, in, i,
                                    "invalid aggregate argument metadata");
           }
         }
@@ -651,20 +748,20 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
       if (in->imm <= 6) {
         if (in->extra_args || in->extra_args_len != 0) {
           free(defined);
-          return nyir_inst_err(err, err_len, in, i,
+          return nir_verify_inst_err(f, err, err_len, in, i,
                               "call has stray stack-args for a register-only arity");
         }
       } else {
         size_t want = (size_t)(in->imm - 6);
         if (!in->extra_args || in->extra_args_len != want) {
           free(defined);
-          return nyir_inst_err(err, err_len, in, i,
+          return nir_verify_inst_err(f, err, err_len, in, i,
                               "call stack-arg count does not match arity");
         }
         for (size_t k = 0; k < want; ++k) {
           if (!nir_value_defined(f, defined, in->extra_args[k])) {
             free(defined);
-            return nyir_inst_err(err, err_len, in, i, "call stack-arg is invalid");
+            return nir_verify_inst_err(f, err, err_len, in, i, "call stack-arg is invalid");
           }
         }
       }
@@ -672,12 +769,12 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
     default:
       if (in->op == NYIR_OP_COUNT) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "unknown opcode");
+        return nir_verify_inst_err(f, err, err_len, in, i, "unknown opcode");
       }
       if (!nir_value_defined(f, defined, in->a) ||
           !nir_value_defined(f, defined, in->b)) {
         free(defined);
-        return nyir_inst_err(err, err_len, in, i, "invalid value operands");
+        return nir_verify_inst_err(f, err, err_len, in, i, "invalid value operands");
       }
       break;
     }
@@ -704,9 +801,11 @@ bool nyir_analyze_binary_fold(nyir_op_t op, int64_t a, int64_t b,
     return false;
   switch (op) {
   case NYIR_ADD_I64:
-    /* Nytrix i64 add/sub/mul wrap.  Spell that in unsigned arithmetic rather
+    /*
+     * Nytrix i64 add/sub/mul wrap.  Spell that in unsigned arithmetic rather
      * than relying on signed C overflow, since this evaluator is shared by
-     * constant folding, SCCP, and the NYIR VM. */
+     * constant folding, SCCP, and the NYIR VM.
+     */
     *out = (int64_t)((uint64_t)a + (uint64_t)b);
     return true;
   case NYIR_SUB_I64:
@@ -870,6 +969,22 @@ static bool nyir_range_from_corners(const int64_t *v, size_t n,
   return true;
 }
 
+static bool nyir_verify_fact_singleton(const nyir_value_fact_t *fact,
+                                       int64_t *value) {
+  if (!fact || !value)
+    return false;
+  if (fact->known_const) {
+    *value = fact->const_value;
+    return true;
+  }
+  if (fact->range.has_min && fact->range.has_max &&
+      fact->range.min == fact->range.max) {
+    *value = fact->range.min;
+    return true;
+  }
+  return false;
+}
+
 static bool nyir_fact_binary_range(nyir_op_t op,
                                      const nyir_value_fact_t *a,
                                      const nyir_value_fact_t *b,
@@ -892,23 +1007,47 @@ static bool nyir_fact_binary_range(nyir_op_t op,
       return true;
     }
   }
-  if (!a->range.has_min || !a->range.has_max || !b->range.has_min ||
-      !b->range.has_max)
-    return false;
   int64_t lo = 0;
   int64_t hi = 0;
   switch (op) {
-  case NYIR_ADD_I64:
-    if (!nyir_i64_add_checked(a->range.min, b->range.min, &lo) ||
-        !nyir_i64_add_checked(a->range.max, b->range.max, &hi))
+  case NYIR_ADD_I64: {
+    nyir_range_t r = {0};
+    if (a->range.has_min && b->range.has_min &&
+        nyir_i64_add_checked(a->range.min, b->range.min, &lo)) {
+      r.has_min = true;
+      r.min = lo;
+    }
+    if (a->range.has_max && b->range.has_max &&
+        nyir_i64_add_checked(a->range.max, b->range.max, &hi)) {
+      r.has_max = true;
+      r.max = hi;
+    }
+    if (!r.has_min && !r.has_max)
       return false;
-    break;
-  case NYIR_SUB_I64:
-    if (!nyir_i64_sub_checked(a->range.min, b->range.max, &lo) ||
-        !nyir_i64_sub_checked(a->range.max, b->range.min, &hi))
+    *out = r;
+    return true;
+  }
+  case NYIR_SUB_I64: {
+    nyir_range_t r = {0};
+    if (a->range.has_min && b->range.has_max &&
+        nyir_i64_sub_checked(a->range.min, b->range.max, &lo)) {
+      r.has_min = true;
+      r.min = lo;
+    }
+    if (a->range.has_max && b->range.has_min &&
+        nyir_i64_sub_checked(a->range.max, b->range.min, &hi)) {
+      r.has_max = true;
+      r.max = hi;
+    }
+    if (!r.has_min && !r.has_max)
       return false;
-    break;
+    *out = r;
+    return true;
+  }
   case NYIR_MUL_I64: {
+    if (!a->range.has_min || !a->range.has_max || !b->range.has_min ||
+        !b->range.has_max)
+      return false;
     int64_t corners[4];
     if (!nyir_i64_mul_checked(a->range.min, b->range.min, &corners[0]) ||
         !nyir_i64_mul_checked(a->range.min, b->range.max, &corners[1]) ||
@@ -919,6 +1058,9 @@ static bool nyir_fact_binary_range(nyir_op_t op,
     return true;
   }
   case NYIR_DIV_I64: {
+    if (!a->range.has_min || !a->range.has_max || !b->range.has_min ||
+        !b->range.has_max)
+      return false;
     if (b->range.min <= 0 && b->range.max >= 0)
       return false;
     int64_t corners[4];
@@ -930,33 +1072,83 @@ static bool nyir_fact_binary_range(nyir_op_t op,
       return false;
     return true;
   }
-  case NYIR_MOD_I64:
-    if (!b->known_const || b->const_value == 0 || b->const_value == INT64_MIN)
+  case NYIR_MOD_I64: {
+    if (!a->range.has_min || !a->range.has_max || !b->range.has_min ||
+        !b->range.has_max)
       return false;
-    hi = b->const_value < 0 ? -b->const_value - 1 : b->const_value - 1;
+    int64_t mod = 0;
+    if (!nyir_verify_fact_singleton(b, &mod) || mod == 0 ||
+        mod == INT64_MIN)
+      return false;
+    hi = mod < 0 ? -mod - 1 : mod - 1;
     lo = a->range.min < 0 ? -hi : 0;
     if (a->range.max <= 0)
       hi = 0;
+    /*
+     * When the non-negative dividend cannot reach the modulus, a % m == a,
+     * so its magnitude is bounded by the dividend range rather than |m|-1.
+     * Clamp the positive side to a.max so patterns like (x & 7) % 16 keep
+     * the tighter [0, 7] fact for downstream BCE instead of widening to 15.
+     *
+     * a->range.has_min/has_max are already required by the guard above, so
+     * a->range.max is a valid bound here.
+     */
+    if (a->range.min >= 0 && a->range.max < hi)
+      hi = a->range.max;
     break;
-  case NYIR_SHL_I64:
-    if (!b->known_const || b->const_value < 0 || b->const_value >= 63 ||
+  }
+  case NYIR_SHL_I64: {
+    if (!a->range.has_min || !a->range.has_max || !b->range.has_min ||
+        !b->range.has_max)
+      return false;
+    int64_t shift = 0;
+    if (!nyir_verify_fact_singleton(b, &shift) || shift < 0 || shift >= 63 ||
         a->range.min < 0)
       return false;
-    if (!nyir_i64_mul_checked(a->range.min, (int64_t)1 << b->const_value,
-                                &lo) ||
-        !nyir_i64_mul_checked(a->range.max, (int64_t)1 << b->const_value,
-                                &hi))
+    if (!nyir_i64_mul_checked(a->range.min, (int64_t)1 << shift, &lo) ||
+        !nyir_i64_mul_checked(a->range.max, (int64_t)1 << shift, &hi))
       return false;
     break;
-  case NYIR_SAR_I64:
-    if (!b->known_const || b->const_value < 0 || b->const_value >= 64)
+  }
+  case NYIR_SAR_I64: {
+    int64_t shift = 0;
+    if (!nyir_verify_fact_singleton(b, &shift) || shift < 0 || shift >= 64)
       return false;
-    lo = a->range.min >> (unsigned)b->const_value;
-    hi = a->range.max >> (unsigned)b->const_value;
-    break;
+    nyir_range_t r = {0};
+    if (a->range.has_min) {
+      r.has_min = true;
+      r.min = a->range.min >> (unsigned)shift;
+    }
+    if (a->range.has_max) {
+      r.has_max = true;
+      r.max = a->range.max >> (unsigned)shift;
+    }
+    if (!r.has_min && !r.has_max)
+      return false;
+    *out = r;
+    return true;
+  }
   case NYIR_AND_I64:
+    if (!a->range.has_min || !a->range.has_max || !b->range.has_min ||
+        !b->range.has_max)
+      return false;
+    /*
+     * For non-negative operands, a & b cannot exceed either operand, so the
+     * tightest sound upper bound from the interval maxima is min(a.max,
+     * b.max) rather than the OR-based over-approximation.  This unlocks BCE
+     * on masked-index patterns (e.g. arr[i & (len-1)]) that the looser bound
+     * would have kept.
+     */
+    if (a->range.min < 0 || b->range.min < 0)
+      return false;
+    lo = 0;
+    hi = a->range.max < b->range.max ? a->range.max : b->range.max;
+    break;
   case NYIR_OR_I64:
   case NYIR_XOR_I64:
+    if (!a->range.has_min || !a->range.has_max || !b->range.has_min ||
+        !b->range.has_max)
+      return false;
     if (a->range.min < 0 || b->range.min < 0)
       return false;
     lo = 0;
@@ -985,6 +1177,9 @@ bool nyir_metadata_summary(const nyir_func_t *f,
   memset(summary, 0, sizeof(*summary));
   summary->instructions = f->len;
   summary->values = f->next_value > 0 ? (size_t)f->next_value : 0;
+  summary->vectorize_attempted_loops = f->vectorize_attempted_loops;
+  summary->vectorize_rejected_loops = f->vectorize_rejected_loops;
+  summary->vectorized_loops = f->vectorized_loops;
   for (size_t i = 0; i < f->len; ++i) {
     const nyir_inst_t *in = &f->data[i];
     if (in->op >= 0 && in->op < NYIR_OP_COUNT)
@@ -1028,11 +1223,13 @@ void nyir_metadata_summary_dump(FILE *out, const char *name,
   if (!out || !summary)
     return;
   fprintf(out,
-          "nyir metadata function=%s insts=%zu values=%zu locals=%zu labels=%zu branches=%zu br_if=%zu calls=%zu returns=%zu ranges=%zu debug=%zu effects=0x%x\n",
+          "nyir metadata function=%s insts=%zu values=%zu locals=%zu labels=%zu branches=%zu br_if=%zu calls=%zu returns=%zu ranges=%zu debug=%zu vector_attempted=%zu vector_rejected=%zu vectorized=%zu effects=0x%x\n",
           name && name[0] ? name : "<anon>", summary->instructions,
           summary->values, summary->locals, summary->labels,
           summary->branches, summary->conditional_branches, summary->calls,
           summary->returns, summary->range_facts, summary->debug_locs,
+          summary->vectorize_attempted_loops,
+          summary->vectorize_rejected_loops, summary->vectorized_loops,
           summary->effect_mask);
   for (int op = 0; op < NYIR_OP_COUNT; ++op) {
     if (summary->ops[op])
@@ -1057,7 +1254,7 @@ bool nyir_analyze_values(const nyir_func_t *f, nyir_value_fact_t *facts,
   for (size_t i = 0; i < f->len; ++i) {
     const nyir_inst_t *in = &f->data[i];
     if (in->op < 0 || in->op >= NYIR_OP_COUNT)
-      return nyir_inst_err(err, err_len, in, i, "unknown opcode");
+      return nir_verify_inst_err(f, err, err_len, in, i, "unknown opcode");
     if (in->a >= 0 && facts && (size_t)in->a < fact_count)
       facts[in->a].use_count++;
     if (in->b >= 0 && facts && (size_t)in->b < fact_count)
@@ -1098,36 +1295,50 @@ bool nyir_analyze_values(const nyir_func_t *f, nyir_value_fact_t *facts,
       bool have_input = false;
       bool all_const = true;
       int64_t const_value = 0;
-      bool have_range = true;
+      bool have_min = true;
+      bool have_max = true;
       int64_t lo = 0, hi = 0;
       for (size_t k = 0; k < in->phi_incoming_len; ++k) {
         int v = in->phi_incoming[k].value;
         if (v < 0 || (size_t)v >= fact_count) {
           all_const = false;
-          have_range = false;
+          have_min = false;
+          have_max = false;
           continue;
         }
         const nyir_value_fact_t *input = &facts[v];
         if (!have_input) {
           have_input = true;
           const_value = input->const_value;
-          lo = input->range.min;
-          hi = input->range.max;
-        } else {
-          if (input->range.has_min && input->range.min < lo)
+          if (input->range.has_min)
             lo = input->range.min;
-          if (input->range.has_max && input->range.max > hi)
+          else
+            have_min = false;
+          if (input->range.has_max)
             hi = input->range.max;
+          else
+            have_max = false;
+        } else {
+          if (have_min) {
+            if (!input->range.has_min)
+              have_min = false;
+            else if (input->range.min < lo)
+              lo = input->range.min;
+          }
+          if (have_max) {
+            if (!input->range.has_max)
+              have_max = false;
+            else if (input->range.max > hi)
+              hi = input->range.max;
+          }
         }
         if (!input->known_const || input->const_value != const_value)
           all_const = false;
-        if (!input->range.has_min || !input->range.has_max)
-          have_range = false;
       }
       if (have_input && all_const)
         nyir_fact_set_const(dst, const_value);
-      else if (have_input && have_range)
-        dst->range = (nyir_range_t){.has_min = true, .has_max = true,
+      else if (have_input && (have_min || have_max))
+        dst->range = (nyir_range_t){.has_min = have_min, .has_max = have_max,
                                       .min = lo, .max = hi};
       break;
     }
@@ -1190,32 +1401,32 @@ bool nyir_validate_constraints(const nyir_func_t *f, char *err,
     if (in->op < 0 || in->op >= NYIR_OP_COUNT) {
       free(known);
       free(value);
-      return nyir_inst_err(err, err_len, in, i, "unknown opcode");
+      return nir_verify_inst_err(f, err, err_len, in, i, "unknown opcode");
     }
     if (in->range.has_min && in->range.has_max && in->range.min > in->range.max) {
       free(known);
       free(value);
-      return nyir_inst_err(err, err_len, in, i, "range minimum exceeds maximum");
+      return nir_verify_inst_err(f, err, err_len, in, i, "range minimum exceeds maximum");
     }
     if ((in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64) &&
         in->b >= 0 && known && known[in->b] &&
         (value[in->b] < 0 || value[in->b] >= 64)) {
       free(known);
       free(value);
-      return nyir_inst_err(err, err_len, in, i, "constant shift amount out of range");
+      return nir_verify_inst_err(f, err, err_len, in, i, "constant shift amount out of range");
     }
     if ((in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64) &&
         in->b >= 0 && known && known[in->b] && value[in->b] == 0) {
       free(known);
       free(value);
-      return nyir_inst_err(err, err_len, in, i, "constant divide/modulo by zero");
+      return nir_verify_inst_err(f, err, err_len, in, i, "constant divide/modulo by zero");
     }
     if ((in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64) &&
         in->a >= 0 && in->b >= 0 && known && known[in->a] && known[in->b] &&
         value[in->a] == INT64_MIN && value[in->b] == -1) {
       free(known);
       free(value);
-      return nyir_inst_err(err, err_len, in, i,
+      return nir_verify_inst_err(f, err, err_len, in, i,
                           "constant signed divide/modulo overflow");
     }
     if (in->dst >= 0 && known) {

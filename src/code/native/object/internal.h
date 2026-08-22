@@ -19,24 +19,56 @@ typedef struct {
  * of calls. Keep the program-level relocation transport larger than the
  * function-count limit so x86-64 JIT/object emission does not reject such a
  * program before the encoder or linker sees it. */
-#define NY_X64_OBJ_MAX_RELOCS 1024
+#define NY_X64_OBJ_MAX_RELOCS NY_NATIVE_MAX_RELOCS
+#define NY_NATIVE_MAX_DEFS NY_NATIVE_MAX_SYMBOLS
 
 void ny_native_mach_encode_stats(unsigned long long *mach_ok,
                                 unsigned long long *nir_fallback);
+void ny_native_mach_encode_fallback_detail(char *out, size_t out_len);
 void ny_native_mach_regalloc_record(size_t segments, size_t colored,
-                                    size_t spilled);
+                                    size_t spilled, size_t reloads,
+                                    size_t peak_live);
 void ny_native_mach_regalloc_stats(unsigned long long *segments,
                                    unsigned long long *colored,
-                                   unsigned long long *spilled);
-void ny_native_mach_fpr_record(size_t segments, size_t colored, size_t spilled);
+                                   unsigned long long *spilled,
+                                   unsigned long long *reloads,
+                                   unsigned long long *peak_live);
+void ny_native_mach_fpr_record(size_t segments, size_t colored, size_t spilled,
+                               size_t reloads, size_t peak_live);
 void ny_native_mach_fpr_stats(unsigned long long *segments,
                               unsigned long long *colored,
-                              unsigned long long *spilled);
+                              unsigned long long *spilled,
+                              unsigned long long *reloads,
+                              unsigned long long *peak_live);
 void ny_native_mach_vector_record(size_t segments, size_t colored,
-                                  size_t spilled);
+                                  size_t spilled, size_t reloads,
+                                  size_t peak_live);
 void ny_native_mach_vector_stats(unsigned long long *segments,
                                  unsigned long long *colored,
-                                 unsigned long long *spilled);
+                                 unsigned long long *spilled,
+                                 unsigned long long *reloads,
+                                 unsigned long long *peak_live);
+typedef struct {
+  size_t segments;
+  size_t colored;
+  size_t spilled;
+  size_t reloads;
+  size_t peak_live;
+  /* Subset whose machine block maps to a profile-hot NYIR loop region. */
+  size_t hot_loop_segments;
+  size_t hot_loop_spilled;
+  size_t hot_loop_reloads;
+  size_t hot_loop_peak_live;
+} ny_native_regalloc_metrics_t;
+
+bool ny_native_x64_regalloc_metrics(const ny_mach_func_t *mach,
+                                    ny_native_regalloc_metrics_t *gpr,
+                                    ny_native_regalloc_metrics_t *fpr,
+                                    ny_native_regalloc_metrics_t *vector);
+bool ny_native_a64_regalloc_metrics(const ny_mach_func_t *mach,
+                                    ny_native_regalloc_metrics_t *gpr,
+                                    ny_native_regalloc_metrics_t *fpr,
+                                    ny_native_regalloc_metrics_t *vector);
 bool ny_mach_regalloc_build_class(const ny_mach_func_t *mach,
                                   ny_mach_reg_class_t reg_class,
                                   size_t color_count,
@@ -51,6 +83,20 @@ typedef struct { const nyir_inst_t **defs; int count; } ny_x64_obj_valmap_t;
 /* Append interned pure-native C strings into the code blob as local defs. */
 bool ny_native_strtab_append_defs(ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,
                                   size_t *def_count, char *err, size_t err_len);
+
+/* Append foldable top-level def constants into the code blob as 8-byte
+ * .data definitions (conway's HALF_W, CELL_ALIVE, ...). */
+bool ny_native_consttab_append_defs(ny_obj_buf_t *code,
+                                    ny_x64_obj_symbol_def_t *defs,
+                                    size_t *def_count, char *err,
+                                    size_t err_len);
+
+/* Append interned constant arrays (list literals) into the code blob as
+ * count * 8 bytes of .data definitions. */
+bool ny_native_arraytab_append_defs(ny_obj_buf_t *code,
+                                    ny_x64_obj_symbol_def_t *defs,
+                                    size_t *def_count, char *err,
+                                    size_t err_len);
 
 typedef struct {
   ny_obj_buf_t code;
@@ -82,7 +128,7 @@ typedef struct {
   ny_i386_obj_label_t labels[1024]; size_t label_count;
   ny_i386_obj_patch_t patches[1024]; size_t patch_count;
   size_t epilogue_patches[1024]; size_t epilogue_patch_count;
-  ny_i386_obj_reloc_t relocs[1024]; size_t reloc_count;
+  ny_i386_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS]; size_t reloc_count;
   char *err; size_t err_len;
 } ny_i386_obj_ctx_t;
 
@@ -142,6 +188,11 @@ bool ny_x64_mach_build_bundle(
     bool tag_return, ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,
     size_t *def_count, ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
     char *err, size_t err_len);
+bool ny_x64_mach_append_function(
+    ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs, size_t *def_count,
+    ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    const ny_mach_func_t *mach, const ny_native_target_info_t *target,
+    const char *symbol, bool tag_return, char *err, size_t err_len);
 bool ny_x64_try_stencil_bundle(const nyir_func_t *rt_main,
                                const ny_native_target_info_t *target,
                                ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,

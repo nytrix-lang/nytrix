@@ -1,0 +1,18 @@
+shape type_proves_unknown_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "postcondition", "unknown", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "is not proved for a returned value range"
+  source ny <<'NY'
+use std.core
+
+;; An unconstrained parameter gives `x + 1` no range that establishes the
+;; positive post-condition.  Unknown must be rejected rather than accepted.
+@proves(result > 0)
+fn positive_unknown(int x) int { x + 1 }
+positive_unknown(4)
+NY
+}

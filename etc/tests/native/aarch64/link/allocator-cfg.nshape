@@ -1,0 +1,16 @@
+shape aarch64_elf64_internal_link_run_allocator_cfg {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 aarch64 qemu regalloc scalar control]
+  template ny-test-case
+  flags "--native-backend aarch64 -O3 -emit-only -o /tmp/nytrix-aarch64-link-allocator-cfg-v5.o"
+  expect object_link_run_i64_10
+  source ny <<'NY'
+fn choose(i64 a, i64 b, i64 c, i64 d) i64 {
+  def selected = if a < 0 { b + c } else { c + d }
+  selected * 2
+}
+
+choose(5, 1, 2, 3)
+NY
+}

@@ -1,5 +1,7 @@
-/* Pure i64 arithmetic evaluator for the thin ny launcher.
- * No LLVM/Z3/stdlib — process can finish in sub-millisecond range. */
+/*
+ * Pure i64 arithmetic evaluator for the thin ny launcher.
+ * No LLVM/Z3/stdlib — process can finish in sub-millisecond range.
+ */
 #include "cmd/ny/pureexpr.h"
 
 #include <ctype.h>
@@ -222,7 +224,9 @@ bool ny_pure_expr_eval(const char *src, int64_t *out) {
   for (const char *s = src; *s; ++s) {
     unsigned char c = (unsigned char)*s;
     if (isalpha(c) || c == '_') {
-      /* Only i64/u64 type suffixes after a digit are allowed. */
+      /*
+       * Only i64/u64 type suffixes after a digit are allowed.
+       */
       if (s == src || !isdigit((unsigned char)s[-1]))
         return false;
       if (!(strncmp(s, "i64", 3) == 0 || strncmp(s, "u64", 3) == 0))

@@ -1,3 +1,7 @@
+/*
+ * Match-expression parser: `match` arms, pattern destructuring,
+ * guards, and exhaustiveness checking for pattern-matching expressions.
+ */
 #include "priv.h"
 
 stmt_t *p_parse_match(parser_t *p) {
