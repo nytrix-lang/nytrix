@@ -1,3 +1,7 @@
+/*
+ * Wasm target driver: compiles to WebAssembly (bare and Emscripten),
+ * manages Asyncify, browser harness, and the wasm-bare contract.
+ */
 #include "wasm.h"
 
 #include <errno.h>

@@ -1,7 +1,16 @@
 ;; Keywords: render gpu compute os ui
 ;; Backend-neutral compute shader sidecars for glTF materials, IBL, refraction, and GI probes.
 ;; Provides stable shader strings and descriptors for renderer integration.
+;; Documented subset: compute is NOT guaranteed on the shared
+;; std.os.ui.render.portable_contract() (see its "not_guaranteed": ["compute"]) —
+;; WebGL2 has no compute-shader support, so these sidecar strings and feature
+;; flags are consumed only by native Vulkan pipelines; other backends must
+;; treat compute features as unsupported and use their fallback paths.
 module std.os.ui.render.compute(compute_caps, compute_workgroups, gltf_material_compute_shader, speculative_gi_probe_shader, ibl_prefilter_shader, brdf_lut_shader, transmission_blur_shader, material_ext_resolve_shader, refraction_resolve_shader, compute_pass_desc, compute_feature_mask, COMPUTE_FEATURE_REFRACTION, COMPUTE_FEATURE_TRANSMISSION, COMPUTE_FEATURE_VOLUME, COMPUTE_FEATURE_DIFFUSE_TRANSMISSION, COMPUTE_FEATURE_SPECULAR_GI, COMPUTE_FEATURE_MESH_INSTANCING)
+
+;; Compute sidecars are Vulkan-only today. WebGL2 has no compute support, so
+;; non-Vulkan backends must treat these feature flags as unsupported and use
+;; their documented fallback paths.
 use std.core
 
 def COMPUTE_FEATURE_REFRACTION = 1

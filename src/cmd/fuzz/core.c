@@ -1,3 +1,7 @@
+/*
+ * Fuzzer core: entry-point dispatch, usage, and shared infrastructure
+ * for the ny-fuzz tool's subcommands and worker lifecycle.
+ */
 #include "core.h"
 
 static int usage(void) {

@@ -3,6 +3,10 @@
 ;; References:
 ;; - std.os
 module std.os.async(Task, Future, future, async, await, await_all, detach, future_wait, yield_now, sleep_ms, run, backend, state)
+
+;; Native async uses the stackless cooperative scheduler; browser builds use
+;; Asyncify.  The public API reports this backend explicitly so callers do not
+;; assume an OS event loop or cancellation-token implementation.
 use std.core
 
 fn backend() str {

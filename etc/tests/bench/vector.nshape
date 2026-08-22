@@ -7,37 +7,32 @@ shape vector {
   source ny <<'NY'
 use std.core
 use std.os.time
-;; Vector Benchmark (Benchmark)
-; Fixed scale values (helpers may return 0 if env not set)
-fn hadamard_kernel(ptr a, ptr b, ptr out, int n) ptr {
-   mut i = 0
-   while i < n {
-      store64(out, load64(a, i * 8) * load64(b, i * 8), i * 8)
-      i += 1
-   }
-   out
-}
-def n = 1024
+;; Vector Benchmark: element-wise multiply over Ny lists.
+def n = 65536 * argc()
 def rounds = 2
-def a = malloc(n * 8)
-def b = malloc(n * 8)
-def c = malloc(n * 8)
+mut a = []
+mut b = []
+mut c = []
 mut i = 0
 while i < n {
-   store64(a, i + 1, i * 8)
-   store64(b, i + 3, i * 8)
+   a = append(a, i + 1)
+   b = append(b, i + 3)
+   c = append(c, 0)
    i += 1
 }
 def t0 = ticks()
 mut acc = 0
 mut r = 0
 while r < rounds {
-   hadamard_kernel(a, b, c, n)
-   acc += load64(c, 0) + load64(c, (n - 1) * 8)
+   mut i2 = 0
+   while i2 < n {
+      c[i2] = a[i2] * b[i2]
+      i2 += 1
+   }
+   acc += c[0] + c[n - 1]
    r += 1
 }
 def t1 = ticks()
-free(a, b, c)
 print("checksum=", acc)
 print("elapsed_ns=", t1 - t0)
 NY
@@ -54,8 +49,9 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-int main(void) {
-    const int n = 1024, rounds = 2;
+int main(int argc, char **argv) {
+    (void)argv;
+    const int n = 65536 * argc, rounds = 2;
     int64_t *a = (int64_t *)malloc((size_t)n * sizeof(int64_t));
     int64_t *b = (int64_t *)malloc((size_t)n * sizeof(int64_t));
     int64_t *c = (int64_t *)malloc((size_t)n * sizeof(int64_t));

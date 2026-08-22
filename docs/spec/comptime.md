@@ -1,7 +1,7 @@
-# Compile time
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":190,"summary":"Compile-time evaluation, generated values, and the boundaries of comptime execution."} -->
+# Comptime
 
-Compile-time forms run during compilation and produce tables, matches,
-templates, emitted declarations, and generated modules.
+Compile-time forms run during compilation and produce tables, matches, templates, emitted declarations, and generated modules.
 
 ## Compile-time blocks
 
@@ -11,13 +11,13 @@ comptime { body }
 
 Rules:
 
-- Runs during compilation.
-- Returns a value embedded in the program.
-- Uses the same resolved imports and aliases as the surrounding source unit.
-- Emits only the standard-library helpers reached by the block.
-- Can reuse earlier immutable compile-time constants.
-- Does not run unrelated top-level user code.
-- Does not capture runtime globals.
+- Runs during compilation
+- Returns a value embedded in the program
+- Uses the same resolved imports and aliases as the surrounding source unit
+- Emits only the standard-library helpers reached by the block
+- Can reuse earlier immutable compile-time constants
+- Does not run unrelated top-level user code
+- Does not capture runtime globals
 
 ```ny
 use std.core
@@ -33,12 +33,9 @@ def base = comptime{ 2^5 }
 def xs = comptime{ range(4).map(fn(i){ i + base }) }
 ```
 
-For runtime data, put the value inside the block or bind it first as an
-immutable compile-time value.
+For runtime data, put the value inside the block or bind it first as an immutable compile-time value.
 
-`return expr` or a final value-producing expression sets the value of a
-compile-time block. A block with only declarations or non-value statements
-evaluates to `nil`.
+`return expr` or a final value-producing expression sets the value of a compile-time block. **A block with only declarations or non-value statements evaluates to `nil`.**
 
 ## Tables
 
@@ -49,12 +46,9 @@ comptime table Name {
 }
 ```
 
-Compile-time tables make static dispatch visible. Use them for lookup
-surfaces, generated classifier logic, and branch-free native output.
+Compile-time tables make static dispatch visible. Use them for lookup surfaces, generated classifier logic, and branch-free native output.
 
-The compiler also emits a compatibility helper named from the table. For
-`comptime table KeyMap`, call `_key_map(key)` or `_key_map(key, fallback)`.
-Prefer `comptime match KeyMap(key, fallback)` in new code.
+The compiler also emits a compatibility helper named from the table. For `comptime table KeyMap`, call `_key_map(key)` or `_key_map(key, fallback)`. Prefer `comptime match KeyMap(key, fallback)` in new code.
 
 ## Match helpers
 
@@ -62,8 +56,7 @@ Prefer `comptime match KeyMap(key, fallback)` in new code.
 comptime match Name(key, fallback)
 ```
 
-`comptime match` queries a compile-time table by key and returns a fallback
-when no arm matches.
+`comptime match` queries a compile-time table by key and returns a fallback when no arm matches.
 
 ## Templates
 
@@ -73,8 +66,7 @@ comptime template name(args) {
 }
 ```
 
-Templates are hygienic AST templates. Template bodies emit declarations, not
-text pasted into the source file.
+Templates are hygienic AST templates. Template bodies emit declarations, not text pasted into the source file.
 
 ## Emit
 
@@ -85,9 +77,7 @@ for axis in comptime ["x", "y", "z"] {
 }
 ```
 
-`emit` inserts generated declarations from a template or generator.
-Compile-time `for` iterates a compile-time list and lets the body emit
-declarations for each value.
+`emit` inserts generated declarations from a template or generator. Compile-time `for` iterates a compile-time list and lets the body emit declarations for each value.
 
 ## Reflection loops
 
@@ -101,8 +91,7 @@ comptime exports(ModuleName) as name {
 }
 ```
 
-`fields` exposes `f.name`, `f.offset`, `f.index`, and `f.type` for each layout
-field. `exports` exposes each exported module name as a string.
+`fields` exposes `f.name`, `f.offset`, `f.index`, and `f.type` for each layout field. `exports` exposes each exported module name as a string.
 
 ## Diagnostic rules
 
@@ -114,15 +103,11 @@ comptime diagnostic rule bad_layout_store {
 }
 ```
 
-Diagnostic rules let compile-time code reject a known bad call pattern. The
-current rule surface supports call predicates such as `call.name`,
-`call.arg(N)`, and helpers such as `is_literal`.
+Diagnostic rules let compile-time code reject a known bad call pattern. The current rule surface supports call predicates such as `call.name`, `call.arg(N)`, and helpers such as `is_literal`.
 
 ## Compile-time proofs
 
-Compile-time assertions move safety checks into compilation. The `proof` type
-in [types.md](types.md) provides the carrier for dependent and refinement
-facts backed by the same engine.
+Compile-time assertions move safety checks into compilation. The `proof` type in [Types](types.md) provides the carrier for dependent and refinement facts backed by the same engine.
 
 ```ny
 assert_compile((4 * 11) == 44, "folded arithmetic")
@@ -132,33 +117,19 @@ assert_compile_index(xs, i, "list index bounds")
 def proof arithmetic = prove((4 * 11) == 44, "arithmetic witness")
 ```
 
-`static_assert` and `assert_compile` fail compilation when the condition is
-known false.
-`assert_compile_range` requires the compiler to prove an integer is within a
-closed range. `assert_compile_index` requires the compiler to prove that an
-index is in bounds for the container. `range_proven(value, lo, hi)` and
-`index_proven(container, index)` expose the same proof engine as compile-time
-booleans.
+`static_assert` and `assert_compile` fail compilation when the condition is known false. `assert_compile_range` requires the compiler to prove an integer is within a closed range. `assert_compile_index` requires the compiler to prove that an index is in bounds for the container. `range_proven(value, lo, hi)` and `index_proven(container, index)` expose the same proof engine as compile-time booleans.
 
-`prove(condition[, message])` is the only implicit-free constructor for a
-proof. It rejects false obligations and obligations whose truth is not known
-during compilation. `prove` produces a proposition-indexed proof type; for
-example, `prove(5 > 0)` has type `proof<5 > 0>`. Proofs have no inspectable
-runtime payload and are erased after checking.
+`prove(condition[, message])` is the only implicit-free constructor for a proof. It rejects false obligations and obligations whose truth is not known during compilation. `prove` produces a proposition-indexed proof type; for example, `prove(5 > 0)` has type `proof<5 > 0>`. Proofs have no inspectable runtime payload and are erased after checking.
 
-The current kernel normalizes equality symmetry (`a == b` and `b == a`) and
-reversed ordered comparisons (`n > 0` and `0 < n`). It does not turn a runtime
-boolean into a proof and does not attempt general theorem proving.
+`fn lemma name(params) { proposition }` names a reusable proposition. Its body must contain one proposition. The implication spelling `A → B` is normalized as `!A || B`; an application such as `positive_sum(3, 4)` can be passed to `prove` to construct `proof<positive_sum(3, 4)>`.
 
-Use these checks at safety boundaries: parser tables, byte decoders, crypto
-code, native buffers, and loops where an out-of-range value would break memory
-or correctness.
+The current kernel normalizes equality symmetry (`a == b` and `b == a`) and reversed ordered comparisons (`n > 0` and `0 < n`). It does not turn a runtime boolean into a proof and does not attempt general theorem proving.
 
-`--safe-mode` uses the same proof engine for compiler-tracked raw memory
-accesses. If an allocation size is known, `load8`/`store8` and wider raw
-loads/stores require a byte offset proven to stay inside the allocation.
+Use these checks at safety boundaries: parser tables, byte decoders, crypto code, native buffers, and loops where an out-of-range value would break memory or correctness.
 
-See [types.md](types.md) for `proof` type, dependent params, and refinement.
+`--safe-mode` uses the same proof engine for compiler-tracked raw memory accesses. If an allocation size is known, `load8`/`store8` and wider raw loads/stores require a byte offset proven to stay inside the allocation.
+
+See [Types](types.md) for `proof` type, dependent params, and refinement.
 
 ## Generated modules
 
@@ -169,13 +140,25 @@ module pkg.generated generated from Spec {
 }
 ```
 
-Generated modules attach compile-time configuration to a module and emit the
-declarations that become part of the module surface.
+Generated modules attach compile-time configuration to a module and emit the declarations that become part of the module surface.
 
 ## Boundaries
 
-Compile-time work emits declarations. Generated names stay stable, and emitted
-public surfaces stay visible.
+Compile-time work emits declarations. Generated names stay stable, and emitted public surfaces stay visible.
+
+### Evaluation bounds
+
+The comptime evaluator guarantees termination through:
+
+- **Recursion depth limit:** 64 levels. Deeper recursion returns `false` (evaluation failed) rather than diverging.
+- **Range length limit:** 65,536 elements.
+- **Overflow checks:** every arithmetic operation in the fast evaluator uses checked (`__builtin_*_overflow`) or bounded arithmetic.
+
+There is currently **no fuel/step-count mechanism**. This is acceptable for standalone comptime blocks (which the user controls), but it is a prerequisite for using the comptime evaluator as a type-level normalizer for dependent types - an unbounded evaluator in the type checker would make type-checking non-terminating. See [Types](types.md) for the dependent-types design.
+
+### When compile-time code re-runs
+
+Compile-time blocks run when their source unit is compiled. A change to the source unit, its resolved imports, or the compiler and option identity invalidates the cached result. Within one compilation, a compile-time block runs once per resolved position; it is not re-evaluated on every generated use. Emitted names are derived from the declaration context and stay stable across recompiles so diagnostics and imports do not churn.
 
 ## Platform selection
 
@@ -191,8 +174,7 @@ Platform guards select source at compile time:
 #if(arch() == "x86_64"){ return 64 }
 ```
 
-Guard names include OS families and CPU families. `comptime{ ... }` can call
-compile-time facts such as `arch()`, `os()`, `__os_name()`, and `__main()`.
+Guard names include OS families and CPU families. `comptime{ ... }` can call compile-time facts such as `arch()`, `os()`, `__os_name()`, and `__main()`.
 
 ## Embedded files
 
@@ -200,13 +182,11 @@ compile-time facts such as `arch()`, `os()`, `__os_name()`, and `__main()`.
 def text = embed("etc/tests/runtime/compiler/embed.ny")
 ```
 
-`embed(path)` reads a file into the compiled program. Paths are resolved from
-the source checkout or active source root used by the compiler.
+`embed(path)` reads a file into the compiled program. Paths are resolved from the source checkout or active source root used by the compiler.
 
 ## Syntax extension registry
 
-`std.core.syntax` exposes the runtime/comptime syntax registry used by the
-extension tests:
+`std.core.syntax` exposes the runtime/comptime syntax registry used by the extension tests:
 
 ```ny
 use std.core.syntax as syntax
@@ -216,28 +196,18 @@ reg = syntax.register_macro_in(reg, "double", handler)
 syntax.expand_macro_in(reg, "double", [21])
 ```
 
-The surface covers process-wide and local registries, macro handlers,
-attribute handlers, form construction, deep/fixpoint expansion, registry
-clone/merge operations, and deterministic rewrite passes. Missing macro
-handlers return `nil`; missing attribute handlers return the original node.
+The surface covers process-wide and local registries, macro handlers, attribute handlers, form construction, deep/fixpoint expansion, registry clone/merge operations, and deterministic rewrite passes. Missing macro handlers return `nil`; missing attribute handlers return the original node.
 
 ## Result ownership
 
-Heap results cross the comptime boundary by value. Strings, lists, tuples,
-ranges, and dictionaries are reconstructed in the receiving program before the
-temporary evaluator is destroyed; pointers into evaluator-owned storage are
-never exposed. Nested containers are supported with bounded depth and size.
-Invalid intermediate or generated evaluator modules are rejected before JIT
-execution.
+Heap results cross the comptime boundary by value. Strings, lists, tuples, ranges, and dictionaries are reconstructed in the receiving program before the temporary evaluator is destroyed; pointers into evaluator-owned storage are never exposed. Nested containers are supported with bounded depth and size. Invalid intermediate or generated evaluator modules are rejected before JIT execution.
 
 ## Debugging generated code
 
-When behavior depends on macros, comptime, or generation, inspect the expanded
-form. Validate the generated source directly and diagnose the first real error
-rather than patching secondary symptoms.
+When behavior depends on macros, comptime, or generation, inspect the expanded form. Validate the generated source directly and diagnose the first real error rather than patching secondary symptoms.
 
 ## Related
 
-- [source.md](source.md) for generated module syntax.
-- [metaprogramming.md](../learn/metaprogramming.md) for practical usage.
-- [tooling.md](../learn/tooling.md) for `ny fmt --metaprog`.
+- [Units](units.md#generated-source) for generated module syntax.
+- [Comptime](../learn/comptime.md) for practical usage.
+- [Tooling](../learn/tooling.md) for `ny fmt --metaprog`.

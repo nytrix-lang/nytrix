@@ -105,7 +105,7 @@ fn apply_hints(int flags) any {
       " resizable=" + to_str(hints.get(RESIZABLE, 0)) +
       " floating=" + to_str(hints.get(FLOATING, 0)) +
       " maximized=" + to_str(hints.get(MAXIMIZED, 0)) +
-   " visible=" + to_str(hints.get(VISIBLE, 0)))
+      " visible=" + to_str(hints.get(VISIBLE, 0)))
    ui_backend.apply_hints(hints)
 }
 

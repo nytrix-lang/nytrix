@@ -1,7 +1,7 @@
 shape bench_string {
   family "perf-real"
   generator "stress"
-  features ["perf", "string", "native", "checksum", "time"]
+  features ["perf", "string", "c-vs-ny", "native", "checksum", "time"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
@@ -9,11 +9,34 @@ use std.core
 use std.os.time
 def t0 = ticks()
 mut s = ""
-for i in 0..100 {
+for i in 0..100000 {
   s = s + "abc"
 }
 def t1 = ticks()
 print("checksum=", s.len)
 print("elapsed_ns=", t1 - t0)
 NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+  int64_t t0 = now_ns();
+  char s[300004] = "";
+  for (int i = 0; i <= 100000; i++)
+    strcat(s, "abc");
+  int64_t t1 = now_ns();
+  printf("checksum=%zu\n", strlen(s));
+  printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+  return 0;
+}
+C
 }

@@ -40,6 +40,8 @@ typedef enum {
   NY_MACH_TYPE_V128_I64,
   NY_MACH_TYPE_V128_F64,
   NY_MACH_TYPE_V128_F32,
+  /* 256-bit vector distinguished by element kind. */
+  NY_MACH_TYPE_V256_I64,
   NY_MACH_TYPE_FLAGS,
 } ny_mach_type_t;
 
@@ -105,16 +107,23 @@ typedef enum {
   NY_MACH_SHL,
   NY_MACH_SAR,
   NY_MACH_FMA,     /* dst = src0 * src1 + src2 (scalar or packed) */
+  NY_MACH_SQRT,    /* dst = sqrt(src0) — scalar f64 */
+  NY_MACH_SIN,     /* dst = sin(src0) — scalar f64 */
+  NY_MACH_COS,     /* dst = cos(src0) — scalar f64 */
   NY_MACH_SHUFFLE, /* dst = shuffle(src0, imm in src1.IMM) */
   NY_MACH_CMP,
   NY_MACH_CALL,
   NY_MACH_RET,
   NY_MACH_BR,
   NY_MACH_BR_IF,
+  /* Unconditional trap: terminates execution with a platform-specific
+   * fault (ud2 on x86-64, brk #0 on AArch64).  No operands. */
+  NY_MACH_TRAP,
   /* Target-legal placeholders enabled only when the backend advertises the
    * matching capability. Selection must not invent encodings without a gate. */
   NY_MACH_INLINE_ASM,
   NY_MACH_INTRINSIC,
+  NY_MACH_REDUCE_ADD,
 } ny_mach_opcode_t;
 
 typedef enum {
@@ -142,16 +151,30 @@ typedef struct {
   bool call_is_extern;
   bool call_has_sret;
   ny_mach_cond_t condition;
-  /* Bitset of physical registers clobbered by a call. Target lowering owns
-   * its register numbering; zero is valid for non-call instructions. */
   uint64_t call_clobbers;
+  /* Scalar memory width for pointer dereferences.  Frame loads/stores remain
+   * full-width homes; byte_width applies only to NY_MACH_LOAD/STORE through a
+   * pointer operand. */
+  bool byte_width;
+  /* Set from NYIR_INST_F_NARROW32 during lowering. Only meaningful on
+   * scalar ADD/SUB/MUL/AND/OR/XOR: operands and destination are provably
+   * non-negative and within [0, INT32_MAX], so the emitter may use 32-bit
+   * register forms (which zero-extend on write) instead of the 64-bit
+   * forms, saving the REX.W prefix. */
+  bool narrow32;
   unsigned effects;
+
 } ny_mach_inst_t;
 
 typedef struct {
   uint32_t first_inst;
   uint32_t inst_count;
   uint32_t label;
+  /* NYIR instruction index at the source block entry. Synthetic machine
+   * blocks (for example PHI-edge copy blocks and trap blocks) use UINT32_MAX.
+   * This preserves a cheap, explicit bridge to loaded profile heat without
+   * making target-independent NYIR passes depend on machine layout. */
+  uint32_t source_pc;
 } ny_mach_block_t;
 
 typedef struct {
@@ -192,11 +215,11 @@ bool ny_mach_begin_block(ny_mach_func_t *func, uint32_t label, uint32_t *out);
 /* Takes ownership of inst.args on success; the caller keeps ownership on
  * failure. Other operands are immediate values. */
 bool ny_mach_emit(ny_mach_func_t *func, ny_mach_inst_t inst);
-bool ny_mach_verify(const ny_mach_func_t *func, char *err, size_t err_len);
+bool ny_mach_verify(const ny_mach_func_t *func, unsigned caps, char *err, size_t err_len);
 const char *ny_mach_opcode_name(ny_mach_opcode_t op);
 void ny_mach_dump(const ny_mach_func_t *func, FILE *out);
 bool ny_mach_lower_nir(const nyir_func_t *nyir, ny_mach_func_t *out,
-                      char *err, size_t err_len);
+                      unsigned caps, char *err, size_t err_len);
 bool ny_mach_opcode_supported(nyir_op_t op);
 void ny_mach_opcode_coverage(size_t *supported, size_t *total);
 typedef struct {
@@ -207,11 +230,17 @@ typedef struct {
   int color;
   bool reload;
   bool spill;
+  /* Loop-carried register carry: the value stays resident in its colored
+   * preg across a loop backedge (phi-edge copies coalesced to the same
+   * color). The encoder skips the end-of-block home store, the edge copy,
+   * and the header reload for carried segments. Set by the regalloc pass. */
+  bool carried;
 } ny_mach_live_segment_t;
 
 typedef struct {
   ny_mach_live_segment_t *segments;
   size_t segment_len;
+  size_t segment_cap;
   size_t *vreg_offsets;
   size_t vreg_len;
   size_t color_count;
@@ -225,6 +254,10 @@ typedef struct {
  * boundaries; single-predecessor forward edges may keep the same register. */
 bool ny_mach_regalloc_build(const ny_mach_func_t *mach, size_t color_count,
                             ny_mach_regalloc_t *out);
+bool ny_mach_regalloc_build_class(const ny_mach_func_t *mach,
+                                  ny_mach_reg_class_t reg_class,
+                                  size_t color_count,
+                                  ny_mach_regalloc_t *out);
 void ny_mach_regalloc_free(ny_mach_regalloc_t *alloc);
 const ny_mach_live_segment_t *
 ny_mach_regalloc_segment_at(const ny_mach_regalloc_t *alloc, uint32_t vreg,
@@ -233,6 +266,9 @@ bool ny_mach_regalloc_live_in(const ny_mach_regalloc_t *alloc, size_t block,
                               uint32_t vreg);
 bool ny_mach_regalloc_live_out(const ny_mach_regalloc_t *alloc, size_t block,
                                uint32_t vreg);
+/* Peak simultaneously-live split segments across machine instruction positions. */
+size_t ny_mach_regalloc_peak_live(const ny_mach_regalloc_t *alloc,
+                                  size_t inst_len);
 
 /* Compatibility summary: returns the longest colored segment per vreg. */
 bool ny_mach_linear_scan(ny_mach_func_t *mach, int *colors_out, size_t colors_cap);

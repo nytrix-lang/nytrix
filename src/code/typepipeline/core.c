@@ -1,4 +1,7 @@
-
+/*
+ * Type pipeline core: JSON-structured type-pass orchestration, managing
+ * the typed AST representation flowing between pipeline stages.
+ */
 typedef struct ny_tp_json_t {
   char *data;
   size_t len;

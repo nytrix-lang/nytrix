@@ -1,0 +1,26 @@
+shape oracle_closed_form_runtime_bound_wrap_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime bound-wrap regression]
+  template ny-test-case
+  flags "--native-result-oracle=0 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+; Counter starts at 2^62 and the runtime bound is INT64_MIN.  The loop never
+; runs, so the closed form must yield 0.  N - i0 wraps to a huge positive
+; value here, so the trip-count guard must compare the bound against the
+; initial counter directly instead of testing the wrapped difference.
+fn big_start(n) i64 {
+  mut s = 0
+  mut i = 4611686018427387904
+  while i < n {
+    s = s + i
+    i = i + 1
+  }
+  s
+}
+big_start(-9223372036854775808)
+NY
+}

@@ -1,3 +1,19 @@
+/*
+ * Type definitions: Nytrix type-system data structures, type
+ * constructors, subtype checking, and type-to-LLVM-type mapping.
+ *
+ * Fin<n> (NY_BT_FIN) is a def-only, compile-time bounded integer type.
+ * It erases to plain int at codegen (untagged, native ABI, 8 bytes).
+ * ny_fin_extract_bound parses literal bounds; ny_fin_resolve_bound also
+ * resolves def-bound constants via binding lookup.  Fin<X> and Fin<Y>
+ * are compatible only when X == Y; Fin<n> → int erases freely.
+ *
+ * Fin<n> constraint propagation and generic specialization are implemented
+ * in src/code/gencall/mono.c:
+ * ny_try_monomorphize_call checks Fin<n> bound equality across param/
+ * arg pairs; NY_MONO_TYPE_FIN is recorded in the specialization key
+ * and included in the mono name via suffix 'f'.
+ */
 #include "base/util.h"
 #include "parse/proof.h"
 #include "priv.h"
@@ -52,6 +68,8 @@ typedef enum ny_builtin_type_kind_t {
   NY_BT_INDEXABLE,
   NY_BT_ALLOCATOR,
   NY_BT_PROOF,
+  NY_BT_FIN,
+  NY_BT_BUFFER,
 } ny_builtin_type_kind_t;
 
 static const char *type_skip_nullable(const char *name) {
@@ -404,6 +422,8 @@ static ny_builtin_type_kind_t classify_builtin_type_exact(const char *name) {
         return NY_BT_F32;
       if (name[1] == '6' && name[2] == '4')
         return NY_BT_F64;
+    } else if (memcmp(name, "Fin", 3) == 0) {
+      return NY_BT_FIN;
     } else if (name[0] == 'c') {
       if (name[1] == '6' && name[2] == '4')
         return NY_BT_C64;
@@ -454,6 +474,8 @@ static ny_builtin_type_kind_t classify_builtin_type_exact(const char *name) {
       return NY_BT_PROOF;
     break;
   case 6:
+    if (memcmp(name, "Buffer", 6) == 0)
+      return NY_BT_BUFFER;
     if (memcmp(name, "Result", 6) == 0)
       return NY_BT_RESULT;
     if (memcmp(name, "bigint", 6) == 0)
@@ -634,6 +656,7 @@ static bool is_int_type_name(const char *name) {
   case NY_BT_U128:
   case NY_BT_HANDLE:
   case NY_BT_INTEGER:
+  case NY_BT_FIN:
     return true;
   default:
     return false;
@@ -844,6 +867,8 @@ bool ny_type_is_tagged(const char *name) {
   case NY_BT_COMPLEX:
   case NY_BT_CHAR:
   case NY_BT_HANDLE:
+  case NY_BT_FIN:
+  case NY_BT_BUFFER:
     return false;
   case NY_BT_STR:
   case NY_BT_BOOL:
@@ -904,8 +929,10 @@ bool ny_is_native_abi_type_name(const char *name) {
   case NY_BT_CSTR:
   case NY_BT_FNPTR:
   case NY_BT_HANDLE:
+  case NY_BT_BUFFER:
     return true;
   case NY_BT_INT:
+  case NY_BT_FIN:
     return true;
   default:
     return false;
@@ -1408,6 +1435,10 @@ static bool literal_int_fits(int64_t val, const char *want) {
   }
 }
 
+static bool ny_fin_extract_bound(const char *type_name, int64_t *out_bound);
+bool ny_fin_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
+                          const char *type_name, int64_t *out_bound);
+
 static bool type_compatible_non_nullable(const char *want, const char *got) {
   if (!want || !got)
     return true;
@@ -1475,6 +1506,16 @@ static bool type_compatible_simple(const char *want, const char *got) {
   if (!want_nullable && got_nullable)
     return false;
   if (strcmp(want_base, "proof") == 0 && strncmp(got_base, "proof<", 6) == 0)
+    return true;
+  if (strcmp(want_base, "Fin") == 0 && strncmp(got_base, "Fin<", 4) == 0)
+    return true;
+  if (strncmp(want_base, "Fin<", 4) == 0 && strncmp(got_base, "Fin<", 4) == 0) {
+    int64_t wb = 0, gb = 0;
+    bool wok = ny_fin_extract_bound(want_base, &wb);
+    bool gok = ny_fin_extract_bound(got_base, &gb);
+    return wok && gok && wb == gb;
+  }
+  if (strcmp(want_base, "int") == 0 && strncmp(got_base, "Fin<", 4) == 0)
     return true;
   return type_compatible_non_nullable(want_base, got_base);
 }
@@ -1665,7 +1706,16 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
         return "str";
       if (!builtin_shadowed &&
           (call_name_tail_is(n, "float") || call_name_tail_is(n, "to_float") ||
-           call_name_tail_is(n, "f64")))
+           call_name_tail_is(n, "f64") || call_name_tail_is(n, "__flt_sqrt") ||
+           call_name_tail_is(n, "sqrt") || call_name_tail_is(n, "__flt_sin") ||
+           call_name_tail_is(n, "sin") || call_name_tail_is(n, "__flt_cos") ||
+           call_name_tail_is(n, "cos") || call_name_tail_is(n, "__flt_abs") ||
+           call_name_tail_is(n, "fabs") || call_name_tail_is(n, "__flt_tan") ||
+           call_name_tail_is(n, "tan") || call_name_tail_is(n, "__flt_atan2") ||
+           call_name_tail_is(n, "atan2") || call_name_tail_is(n, "__flt_exp") ||
+           call_name_tail_is(n, "exp") || call_name_tail_is(n, "__flt_log") ||
+           call_name_tail_is(n, "log") || call_name_tail_is(n, "__flt_pow") ||
+           call_name_tail_is(n, "pow")))
         return "f64";
       if (!builtin_shadowed && call_name_tail_is(n, "f64buf_load"))
         return "f64";
@@ -1999,6 +2049,111 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
   return infer_expr_type_uncached(cg, scopes, depth, e);
 }
 
+/*
+ * Extracts the integer bound from a Fin<N> type name.  Currently handles
+ * only literal integers (e.g. Fin<4>) via strtoll.  Symbolic bounds
+ * (e.g. Fin<n> where n is a def constant) require the comptime evaluator.
+ */
+static bool ny_fin_extract_bound(const char *type_name, int64_t *out_bound) {
+  if (!type_name || !out_bound)
+    return false;
+  const char *leaf = ny_name_leaf(type_name);
+  if (!leaf)
+    leaf = type_name;
+  if (strncmp(leaf, "Fin<", 4) != 0)
+    return false;
+  const char *start = leaf + 4;
+  const char *end = strrchr(start, '>');
+  if (!end || end == start)
+    return false;
+  char buf[32];
+  size_t len = (size_t)(end - start);
+  if (len >= sizeof(buf))
+    return false;
+  memcpy(buf, start, len);
+  buf[len] = '\0';
+  char *parsed_end = NULL;
+  int64_t val = (int64_t)strtoll(buf, &parsed_end, 10);
+  if (!parsed_end || *parsed_end != '\0' || val <= 0)
+    return false;
+  *out_bound = val;
+  return true;
+}
+
+/*
+ * Resolves a Fin<N> bound, first via strtoll (literal), then via
+ * def-binding lookup for symbolic names.  Returns false when neither
+ * path yields a positive integer.
+ */
+bool ny_fin_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
+                          const char *type_name, int64_t *out_bound) {
+  if (ny_fin_extract_bound(type_name, out_bound))
+    return true;
+  if (!cg || !scopes)
+    return false;
+  const char *leaf = ny_name_leaf(type_name);
+  if (!leaf || strncmp(leaf, "Fin<", 4) != 0)
+    return false;
+  const char *start = leaf + 4;
+  const char *end = strrchr(start, '>');
+  if (!end || end == start)
+    return false;
+  size_t name_len = (size_t)(end - start);
+  if (name_len >= 64)
+    return false;
+  char name_buf[64];
+  memcpy(name_buf, start, name_len);
+  name_buf[name_len] = '\0';
+  uint64_t hash = UINT64_C(1469598103934665603);
+  for (size_t i = 0; i < name_len; i++)
+    hash = (hash ^ (unsigned char)name_buf[i]) * UINT64_C(1099511628211);
+  binding *b = type_lookup_binding(cg, scopes, depth, name_buf, name_len, hash);
+  if (!b || b->is_mut)
+    return false;
+  expr_t *init = ny_binding_var_init_expr(b, name_buf);
+  if (!init || init->kind != NY_E_LITERAL ||
+      init->as.literal.kind != NY_LIT_INT ||
+      init->tok.kind == NY_T_NIL)
+    return false;
+  int64_t val = init->as.literal.as.i;
+  if (val <= 0)
+    return false;
+  *out_bound = val;
+  return true;
+}
+
+/*
+ * Returns true if this expression was handled (accepted or error emitted).
+ * Returns false if it was not an integer literal — caller must decide.
+ */
+static bool ny_fin_try_handle_literal(codegen_t *cg, scope *scopes,
+                                       size_t depth, const char *want,
+                                       expr_t *expr, token_t tok,
+                                       const char *ctx) {
+  (void)ctx;
+  if (!expr || expr->kind != NY_E_LITERAL ||
+      expr->as.literal.kind != NY_LIT_INT)
+    return false;
+  int64_t bound = 0;
+  if (!ny_fin_resolve_bound(cg, scopes, depth, want, &bound))
+    return false;
+  int64_t val = expr->as.literal.as.i;
+  if (val < 0 || val >= bound) {
+    ny_diag_error(tok, "Fin<%" PRId64 "> requires 0 <= value < %" PRId64
+                  ", got %" PRId64, bound, bound, val);
+    return true;
+  }
+  return true;
+}
+
+bool ny_type_is_fin(const char *type_name) {
+  return classify_builtin_type_tail(type_name) == NY_BT_FIN;
+}
+
+static bool ny_fin_is_fin_type(const char *type_name) {
+  return classify_builtin_type_tail(type_name) == NY_BT_FIN;
+}
+
 bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
                                  const char *want, expr_t *expr, token_t tok,
                                  const char *ctx) {
@@ -2006,6 +2161,18 @@ bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
     return true;
   if (is_any_type_name(want))
     return true;
+  if (ny_fin_is_fin_type(want)) {
+    int64_t bound = 0;
+    if (!ny_fin_resolve_bound(cg, scopes, depth, want, &bound)) {
+      ny_diag_error(tok, "Fin<...> bound must be a compile-time integer");
+      return true;
+    }
+    if (ny_fin_try_handle_literal(cg, scopes, depth, want, expr, tok, ctx))
+      return true;
+    const char *got_type = infer_expr_type(cg, scopes, depth, expr);
+    if (got_type && is_int_type_name(got_type))
+      return true;
+  }
   if (is_void_type_name(want)) {
     if (expr->kind == NY_E_LITERAL && expr->as.literal.kind == NY_LIT_INT) {
       if (expr->tok.kind == NY_T_NIL || expr->as.literal.as.i == 0)
@@ -2184,6 +2351,7 @@ LLVMTypeRef resolve_type_name(codegen_t *cg, const char *type_name,
   case NY_BT_INDEXABLE:
   case NY_BT_ALLOCATOR:
   case NY_BT_PROOF:
+  case NY_BT_FIN:
     return cg->type_i64;
   default:
     break;
@@ -2277,6 +2445,7 @@ LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *type_name,
   case NY_BT_COMPLEX:
     return complex_abi_type(cg, resolved_name);
   case NY_BT_PROOF:
+  case NY_BT_FIN:
     return cg->type_i64;
   default:
     break;
@@ -2326,6 +2495,36 @@ layout_def_t *lookup_layout(codegen_t *cg, const char *name) {
       layout_def_t *def = cg->layouts.data[i];
       if (def && def->name && strcmp(def->name, qname) == 0)
         return def;
+    }
+  }
+  /*
+   * Explicit deftype-layout instantiation: "Buf<16>".
+   */
+  {
+    const char *lt = strchr(name, '<');
+    if (lt && lt[1]) {
+      const char *gt = strchr(lt + 1, '>');
+      size_t base_len = (size_t)(lt - name);
+      if (base_len < 256 && gt) {
+        char base[256];
+        char num[64];
+        size_t num_len = (size_t)(gt - (lt + 1));
+        if (num_len > 63)
+          num_len = 63;
+        memcpy(base, name, base_len);
+        base[base_len] = '\0';
+        memcpy(num, lt + 1, num_len);
+        num[num_len] = '\0';
+        char *end = NULL;
+        errno = 0;
+        long long v = strtoll(num, &end, 10);
+        if (end && *end == '\0' && errno != ERANGE) {
+          layout_def_t *inst =
+              ny_layout_instantiate(cg, name, base, (int64_t)v);
+          if (inst)
+            return inst;
+        }
+      }
     }
   }
   if (cg->comptime && cg->parent)
@@ -2402,6 +2601,8 @@ type_layout_t resolve_raw_layout(codegen_t *cg, const char *type_name,
     return make_layout(16, 8, complex_abi_type(cg, resolved_name));
   case NY_BT_PROOF:
     return make_layout(0, 1, cg->type_i64);
+  case NY_BT_FIN:
+    return make_layout(8, 8, cg->type_i64);
   default:
     break;
   }
@@ -2922,11 +3123,13 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
       return true;
     if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0)
       return true;
-    /* `^` (power) lowers to std.core.pow, which returns a heap bigint for
-       integer operands rather than a tagged small int, so it must NOT be
-       treated as a proven-int-producing binary op (the fast untag would
-       shift a pointer and yield garbage). Const-folded `^` never reaches
-       here. */
+    /*
+     * `^` (power) lowers to std.core.pow, which returns a heap bigint for
+     * integer operands rather than a tagged small int, so it must NOT be
+     * treated as a proven-int-producing binary op (the fast untag would
+     * shift a pointer and yield garbage). Const-folded `^` never reaches
+     * here.
+     */
     return false;
   }
   case NY_E_UNARY:

@@ -1,3 +1,7 @@
+/*
+ * AST definitions: node constructors, helpers, and utilities for the
+ * parser-produced abstract syntax tree consumed by semantic analysis.
+ */
 #include "parse/ast.h"
 #include "base/util.h"
 #include "rt/runtime.h"
@@ -497,6 +501,12 @@ static void ny_ast_verify_stmt(stmt_t *s, const char *phase) {
       ny_ast_require(*s->as.fn.link_name, phase, s->tok, "fn has empty link name");
     ny_ast_verify_params(&s->as.fn.params, phase, s->tok, "fn");
     ny_ast_verify_stmt(s->as.fn.body, phase);
+    return;
+  case NY_S_LEMMA:
+    ny_ast_require(s->as.lemma.name && *s->as.lemma.name, phase, s->tok, "lemma missing name");
+    ny_ast_require(s->as.lemma.proposition != NULL, phase, s->tok, "lemma missing proposition");
+    ny_ast_verify_params(&s->as.lemma.params, phase, s->tok, "lemma");
+    ny_ast_verify_expr(s->as.lemma.proposition, phase);
     return;
   case NY_S_EXTERN:
     ny_ast_require(s->as.ext.name && *s->as.ext.name, phase, s->tok, "extern missing name");
@@ -1003,12 +1013,12 @@ static void dump_expr(expr_t *e, json_writer_t *out) {
       fstring_part_t *part = &e->as.fstring.parts.data[i];
       if (part->kind == NY_FSP_STR) {
         json_append(out, "{\"kind\":\"str\",\"value\":");
-        char *tmp = (char *)(uintptr_t)rt_malloc(part->as.s.len + 1);
+        char *tmp = (char *)malloc(part->as.s.len + 1);
         if (tmp) {
           memcpy(tmp, part->as.s.data, part->as.s.len);
           tmp[part->as.s.len] = '\0';
           json_string(out, tmp);
-          rt_free((int64_t)(uintptr_t)tmp);
+          free(tmp);
         } else {
           json_string(out, "");
         }
@@ -1212,6 +1222,15 @@ static void dump_stmt(stmt_t *s, json_writer_t *out) {
     json_append(out, ",\"variadic\":%s,\"body\":",
            s->as.fn.is_variadic ? "true" : "false");
     dump_stmt(s->as.fn.body, out);
+    json_append(out, "}");
+    break;
+  case NY_S_LEMMA:
+    json_append(out, "{\"type\":\"lemma\",\"name\":");
+    json_string(out, s->as.lemma.name ? s->as.lemma.name : "");
+    json_append(out, ",\"params\":");
+    dump_params(&s->as.lemma.params, out);
+    json_append(out, ",\"proposition\":");
+    dump_expr(s->as.lemma.proposition, out);
     json_append(out, "}");
     break;
   case NY_S_EXTERN:
@@ -1566,6 +1585,12 @@ static void ny_ast_append_symbol_for_stmt(char **buf, size_t *len, size_t *cap,
     if (s->as.ext.return_type && *s->as.ext.return_type)
       append(&sig, &sig_len, &sig_cap, " %s", s->as.ext.return_type);
     break;
+  case NY_S_LEMMA:
+    kind = "lemma";
+    name = name ? name : s->as.lemma.name;
+    append(&sig, &sig_len, &sig_cap, "lemma %s", name ? name : "");
+    ny_ast_append_params_signature(&sig, &sig_len, &sig_cap, &s->as.lemma.params);
+    break;
   case NY_S_LAYOUT:
     kind = "layout";
     name = name ? name : s->as.layout.name;
@@ -1627,6 +1652,9 @@ static void ny_ast_append_symbol_for_stmt(char **buf, size_t *len, size_t *cap,
     ny_ast_append_params_json(buf, len, cap, &s->as.ext.params);
     append(buf, len, cap, ",\"return\":");
     append_json_str(buf, len, cap, s->as.ext.return_type ? s->as.ext.return_type : "");
+  } else if (s->kind == NY_S_LEMMA) {
+    append(buf, len, cap, ",\"params\":");
+    ny_ast_append_params_json(buf, len, cap, &s->as.lemma.params);
   }
   append(buf, len, cap, "}");
   rt_free((int64_t)(uintptr_t)sig);
@@ -1715,6 +1743,8 @@ static bool ny_ast_stmt_matches_filter(stmt_t *s, const char *filter) {
   switch (s->kind) {
   case NY_S_FUNC:
     return ny_expand_filter_match(filter, "func", s->as.fn.name, s->as.fn.return_type);
+  case NY_S_LEMMA:
+    return ny_expand_filter_match(filter, "lemma", s->as.lemma.name, NULL);
   case NY_S_EXTERN:
     return ny_expand_filter_match(filter, "extern", s->as.ext.name, s->as.ext.link_name);
   case NY_S_LAYOUT:
@@ -1970,6 +2000,11 @@ static void ny_expand_count_stmt(stmt_t *s, ny_expand_stats_t *stats) {
     for (size_t i = 0; i < s->as.fn.params.len; ++i)
       ny_expand_count_expr(s->as.fn.params.data[i].def, stats);
     ny_expand_count_stmt(s->as.fn.body, stats);
+    break;
+  case NY_S_LEMMA:
+    for (size_t i = 0; i < s->as.lemma.params.len; ++i)
+      ny_expand_count_expr(s->as.lemma.params.data[i].def, stats);
+    ny_expand_count_expr(s->as.lemma.proposition, stats);
     break;
   case NY_S_EXTERN:
     stats->externs++;
@@ -2262,7 +2297,17 @@ static void ny_expand_report_stmt(stmt_t *s, char **buf, size_t *len, size_t *ca
     }
     for (size_t i = 0; i < s->as.fn.params.len; ++i)
       ny_expand_report_expr(s->as.fn.params.data[i].def, buf, len, cap, filter, meta_trace, stats);
-    ny_expand_report_stmt(s->as.fn.body, buf, len, cap, NULL, filter, meta_trace, explain, stats);
+    ny_expand_report_stmt(s->as.fn.body, buf, len, cap, NULL, filter, meta_trace, NULL, stats);
+    break;
+  case NY_S_LEMMA:
+    if (meta_trace && ny_expand_filter_match(filter, "lemma", s->as.lemma.name, NULL)) {
+      ny_expand_emit_site(buf, len, cap, stats, "lemma", s->as.lemma.name, s->tok,
+                          "lemma proposition is verified at compile-time",
+                          "proof pipeline", 1);
+    }
+    for (size_t i = 0; i < s->as.lemma.params.len; ++i)
+      ny_expand_report_expr(s->as.lemma.params.data[i].def, buf, len, cap, filter, meta_trace, stats);
+    ny_expand_report_expr(s->as.lemma.proposition, buf, len, cap, filter, meta_trace, stats);
     break;
   case NY_S_EXTERN:
     if (meta_trace && ny_expand_filter_match(filter, "extern", s->as.ext.name, NULL)) {

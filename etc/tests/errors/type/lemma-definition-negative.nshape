@@ -1,0 +1,17 @@
+shape type_lemma_definition_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "lemma", "definition", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "not universally provable"
+  source ny <<'NY'
+use std.core
+
+fn lemma invalid(int x) {
+  x > 0
+}
+
+prove(invalid(1))
+NY
+}

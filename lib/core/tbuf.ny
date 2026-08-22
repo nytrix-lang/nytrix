@@ -28,57 +28,57 @@ fn i32buf_new(int n) ptr { _tbuf_new(n, 4) }
 
 fn i64buf_new(int n) ptr { _tbuf_new(n, 8) }
 
-fn f32buf_load(any buf, int i) f32 { load32_f32(buf, i * 4) }
+fn f32buf_load(ptr buf, int i) f32 { load32_f32(buf, i * 4) }
 
-fn f64buf_load(any buf, int i) f64 { load64_f64(buf, i * 8) }
+fn f64buf_load(ptr buf, int i) f64 { load64_f64(buf, i * 8) }
 
-fn u8buf_load(any buf, int i) int { load8(buf, i) }
+fn u8buf_load(ptr buf, int i) int { load8(buf, i) }
 
-fn i32buf_load(any buf, int i) int {
+fn i32buf_load(ptr buf, int i) int {
    "Loads a signed 32-bit integer from `buf` at index `i`."
    def v = load32(buf, i * 4)
    v >= 0x80000000 ? v - 0x100000000 : v
 }
 
-fn i64buf_load(any buf, int i) int { load64(buf, i * 8) }
+fn i64buf_load(ptr buf, int i) int { load64(buf, i * 8) }
 
-fn f32buf_store(any buf, int i, f32 v) any { store32_f32(buf, v, i * 4) }
+fn f32buf_store(ptr buf, int i, f32 v) ptr { store32_f32(buf, v, i * 4) }
 
-fn f64buf_store(any buf, int i, f64 v) any { store64_f64(buf, v, i * 8) }
+fn f64buf_store(ptr buf, int i, f64 v) ptr { store64_f64(buf, v, i * 8) }
 
-fn u8buf_store(any buf, int i, int v) any { store8(buf, v, i) }
+fn u8buf_store(ptr buf, int i, int v) ptr { store8(buf, v, i) }
 
-fn i32buf_store(any buf, int i, int v) any { store32(buf, v, i * 4) }
+fn i32buf_store(ptr buf, int i, int v) ptr { store32(buf, v, i * 4) }
 
-fn i64buf_store(any buf, int i, int v) any { store64(buf, v, i * 8) }
+fn i64buf_store(ptr buf, int i, int v) ptr { store64(buf, v, i * 8) }
 
 @inline
-fn f32buf_load_raw(any buf, int i) int {
+fn f32buf_load_raw(ptr buf, int i) int {
    "Loads the raw IEEE-754 bit pattern of the `f32` value at index `i`."
    load32(buf, i * 4)
 }
 
 @inline
-fn f32buf_store_raw(any buf, int i, int bits) any {
+fn f32buf_store_raw(ptr buf, int i, int bits) ptr {
    "Stores raw IEEE-754 bits at index `i` without converting through `f32`."
    store32(buf, bits, i * 4)
 }
 
 @inline
-fn tbuf_len(any buf) int {
+fn tbuf_len(ptr buf) int {
    "Returns the logical element count for typed buffer `buf`."
    if !buf { return 0 }
    load64(buf - 16, 0)
 }
 
 @inline
-fn tbuf_ptr(any buf) ptr {
+fn tbuf_ptr(ptr buf) ptr {
    "Returns the raw backing pointer for typed buffer `buf`."
    buf
 }
 
 @inline
-fn tbuf_copy(any dst, int di, any src, int si, int n, int elem_size) any {
+fn tbuf_copy(ptr dst, int di, ptr src, int si, int n, int elem_size) ptr {
    "Copies `n` elements of `elem_size` bytes from `src[si]` into `dst[di]`."
    if !dst || !src || n <= 0 || elem_size <= 0 { return dst }
    memcpy(dst + di * elem_size, src + si * elem_size, n * elem_size)

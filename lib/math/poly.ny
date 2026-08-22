@@ -12,8 +12,7 @@ module std.math.crypto.poly(poly_add, poly_mod_add, poly_mul, poly_eval, poly_sm
    poly_mod_gcd_fast, poly_sylvester_matrix, poly_resultant, poly_resultant_mod,
    poly_resultant_quadratic_xn_minus_const_mod, poly_mod_roots,
    poly2_new, poly2_add, poly2_mul, poly2_eval,
-poly2_to_univariate_x, poly2_to_univariate_y, poly2_resultant_x)
-
+   poly2_to_univariate_x, poly2_to_univariate_y, poly2_resultant_x)
 use std.math.nt
 use std.math.crypto.ntt as ntt
 use std.math.matrix

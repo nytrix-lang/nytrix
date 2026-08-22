@@ -1,0 +1,22 @@
+shape oracle_closed_form_accumulator_runtime_nonzero_init_scaled_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime nonzero-init scale regression]
+  template ny-test-case
+  flags "--native-result-oracle=140 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn sum_from_5_scale3(n) {
+  mut s = 5
+  mut i = 0
+  while i < n {
+    s = s + i * 3
+    i = i + 1
+  }
+  s
+}
+sum_from_5_scale3(10)
+NY
+}

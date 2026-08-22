@@ -1,7 +1,6 @@
 ;; Keywords: decompiler pseudocode structure braces switches formatting
 ;; Structural normalization for rendered Ny pseudocode blocks and delimiters.
 module std.os.rev.decomp.structure *
-
 use std.core
 use std.core.str as str
 
@@ -62,7 +61,7 @@ fn _clean_structure_report(str text) dict {
       i += 1
    }
    {"ok": depth == 0 && min_depth >= 0, "open": opens, "close": closes,
-   "depth": depth, "min_depth": min_depth, "first_bad_line": first_bad_line}
+      "depth": depth, "min_depth": min_depth, "first_bad_line": first_bad_line}
 }
 
 fn _clean_balance_trailing_braces(str text) str {

@@ -89,7 +89,7 @@ fn _device_score(any jid) int {
    (input_gamepad.gamepad_mapped(jid) ? 100 : 0) +
    _score_name_terms(lname,
       ["controller", "gamepad", "xbox", "dual", "shock", "sony", "8bitdo", "logitech", "keyboard", "mouse", "touchpad", "motion sensor", "motion sensors", "k400"],
-   [60, 60, 60, 70, 50, 60, 50, 40, -400, -300, -1000, -1000, -1000, -500])
+      [60, 60, 60, 70, 50, 60, 50, 40, -400, -300, -1000, -1000, -1000, -500])
 }
 
 ;; Returns the result of the `device_row` operation.
@@ -98,7 +98,7 @@ fn device_row(any jid) dict {
    def mapped = input_gamepad.gamepad_mapped(jid)
    def raw = input_gamepad.gamepad_raw_snapshot(jid)
    {"jid": jid, "name": name, "mapped": mapped, "score": _device_score(jid),
-   "axis_count": raw.get("raw_axis_count", 0), "button_count": raw.get("raw_button_count", 0), "hat_count": raw.get("hat_count", 0)}
+      "axis_count": raw.get("raw_axis_count", 0), "button_count": raw.get("raw_button_count", 0), "hat_count": raw.get("hat_count", 0)}
 }
 
 fn _best_jid_from_rows(any rows) int {

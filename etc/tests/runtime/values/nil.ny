@@ -2,10 +2,11 @@
 use std.core
 
 fn identity(any v) any { v }
+
 fn classify(any v) str {
-  if is_nil(v) { "nil" }
-  elif is_int(v) { "int" }
-  else { "other" }
+   if is_nil(v) { "nil" }
+   elif is_int(v) { "int" }
+   else { "other" }
 }
 
 assert(is_nil(nil), "direct is_nil(nil)")
@@ -23,16 +24,13 @@ assert(type(nil) == "nil", "type(nil)")
 if nil { assert(false, "nil must be falsy") }
 if 0 { assert(false, "integer 0 may remain falsy") }
 assert(nil ?? 99 == 99, "nil coalesces to fallback")
-
 assert(classify(identity(nil)) == "nil", "nil survives any")
 assert(classify(identity(0)) == "int", "integer 0 survives any")
-
 mut values = {"_": 0}
 values.set("missing", nil)
 values.set("zero", 0)
 assert(is_nil(values.get("missing")), "nil survives dictionary values")
 assert(is_int(values.get("zero")), "integer 0 survives dictionary values")
-
 mut keys = {"_": 0}
 keys.delete("_")
 keys.set(nil, "missing")
@@ -44,5 +42,4 @@ assert(hash(nil) != hash(0), "nil and integer 0 have distinct hashes")
 
 fn return_nil() any { nil }
 assert(is_nil(return_nil()), "returned nil stays nil")
-
 print("✓ nil tests passed")

@@ -1,0 +1,14 @@
+shape oracle_result_allocation_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result allocation]
+  template ny-test-case
+  flags "--native-result-oracle=42"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+def p = malloc(8)
+store64_i(p, 42, 0)
+load64_i(p, 0)
+NY
+}

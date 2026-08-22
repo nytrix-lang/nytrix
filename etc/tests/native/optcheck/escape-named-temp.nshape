@@ -1,0 +1,22 @@
+shape optcheck_escape_named_temp {
+  family "runtime-native"
+  generator "native"
+  features ["native x86_64 oracle", "native-result-oracle", "native-oracle-per-pass"]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def n = 10000
+mut i = 0
+mut sum = 0
+while i < n {
+  def p = [i]
+  sum += p[0]
+  i += 1
+}
+assert(sum == 49995000)
+print("escape-named-temp-ok")
+NY
+}

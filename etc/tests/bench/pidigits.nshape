@@ -1,0 +1,78 @@
+shape pidigits {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "bigint", "pi", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.big
+use std.os.time
+;; Machin formula pi = 16*atan(1/5) - 4*atan(1/239), fixed-point 10^50.
+fn atan_inv(int x) bigint {
+   def base = bigint_from_int(10)
+   def p50 = bigint_pow(base, bigint_from_int(50))
+   def xb = bigint_from_int(x)
+   mut term = bigint_div(p50, xb)
+   def zero = bigint_from_int(0)
+   mut acc = bigint_from_int(0)
+   mut k = 0
+   while bigint_cmp(term, zero) != 0 {
+      if k % 2 == 0 { acc = bigint_add(acc, term) } else { acc = bigint_sub(acc, term) }
+      k += 1
+      term = bigint_mul(term, bigint_from_int(2 * k - 1))
+      term = bigint_div(term, bigint_from_int(2 * k + 1))
+      term = bigint_div(term, bigint_from_int(x * x))
+   }
+   acc
+}
+def t0 = ticks()
+def a5 = atan_inv(5)
+def a239 = atan_inv(239)
+def pi = bigint_sub(bigint_mul(a5, bigint_from_int(16)), bigint_mul(a239, bigint_from_int(4)))
+def pi2 = bigint_div(pi, bigint_from_int(10000000000))
+def ck = bigint_mod(pi2, bigint_from_int(10000000000))
+def t1 = ticks()
+print("checksum=", bigint_to_str(ck))
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+typedef struct { uint32_t d[8]; int n; } Big;
+static void big_set(Big *a, uint32_t v){ for(int i=0;i<8;i++) a->d[i]=0; a->d[0]=v; a->n=1; }
+static void big_mul_small(Big *a, uint32_t m){ uint64_t c=0; for(int i=0;i<a->n;i++){ uint64_t t=(uint64_t)a->d[i]*m+c; a->d[i]=(uint32_t)(t%1000000000u); c=t/1000000000u; } while(c && a->n<8){ a->d[a->n++]=(uint32_t)(c%1000000000u); c/=1000000000u; } }
+static void big_div_small(Big *a, uint32_t m){ uint64_t rem=0; for(int i=a->n-1;i>=0;i--){ uint64_t cur=rem*1000000000u+a->d[i]; a->d[i]=(uint32_t)(cur/m); rem=cur%m; } while(a->n>1 && a->d[a->n-1]==0) a->n--; }
+static int big_is_zero(const Big *a){ return a->n==1 && a->d[0]==0; }
+static void big_add(Big *r, const Big *a, const Big *b){ uint64_t c=0; int n=a->n>b->n?a->n:b->n; for(int i=0;i<n;i++){ uint64_t s=c; if(i<a->n)s+=a->d[i]; if(i<b->n)s+=b->d[i]; r->d[i]=(uint32_t)(s%1000000000u); c=s/1000000000u; } r->n=n; if(c){ r->d[n]=(uint32_t)c; r->n++; } }
+static void big_sub(Big *r, const Big *a, const Big *b){ int64_t borrow=0; r->n=a->n; for(int i=0;i<a->n;i++){ int64_t s=(int64_t)a->d[i]-borrow-(i<b->n?b->d[i]:0); if(s<0){ s+=1000000000; borrow=1; } else borrow=0; r->d[i]=(uint32_t)s; } while(r->n>1 && r->d[r->n-1]==0) r->n--; }
+static Big atan_inv(uint32_t x){ Big acc, term, t; big_set(&acc,0); big_set(&term,1); for(int i=0;i<50;i++) big_mul_small(&term,10); big_div_small(&term,x); uint64_t k=0; for(;;){ if((k&1)==0){ big_add(&t,&acc,&term); acc=t; } else { big_sub(&t,&acc,&term); acc=t; } k++; big_mul_small(&term,(uint32_t)(2*k-1)); big_div_small(&term,(uint32_t)(2*k+1)); big_div_small(&term,x*x); if(big_is_zero(&term)) break; } return acc; }
+
+int main(void) {
+    int64_t start = now_ns();
+    Big a5 = atan_inv(5);
+    Big a239 = atan_inv(239);
+    Big p;
+    big_mul_small(&a5, 16);
+    big_mul_small(&a239, 4);
+    big_sub(&p, &a5, &a239);
+    big_div_small(&p, 10);
+    for (int i = 0; i < p.n - 1; i++) p.d[i] = p.d[i + 1];
+    p.n--;
+    uint64_t ck = (uint64_t)(p.d[1] % 10) * 1000000000u + p.d[0];
+    int64_t end = now_ns();
+    printf("checksum=%llu\n", (unsigned long long)ck);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

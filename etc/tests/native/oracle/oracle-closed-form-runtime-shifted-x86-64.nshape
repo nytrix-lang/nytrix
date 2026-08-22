@@ -1,0 +1,23 @@
+shape oracle_closed_form_runtime_shifted_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime shifted regression]
+  template ny-test-case
+  flags "--native-result-oracle=180 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+; s = sum(i << 2) for i in [0,10) = 4 * 45 = 180
+fn shifted(n) i64 {
+  mut s = 0
+  mut i = 0
+  while i < n {
+    s = s + (i << 2)
+    i = i + 1
+  }
+  s
+}
+shifted(10)
+NY
+}

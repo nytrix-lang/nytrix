@@ -3,6 +3,11 @@
 ;; References:
 ;; - std.core
 module std.core.regex(IGNORECASE, MULTILINE, DOTALL, I, M, S, compile, search, match_start, fullmatch, matches, contains, finditer, findall, sub, split, escape, group, groups, start, end, span)
+
+;; The matcher is a recursive backtracking interpreter.  Matching depth is
+;; capped at 10000 so pathological patterns cannot overflow the call stack.
+;; Patterns requiring guaranteed linear-time matching should use a bounded
+;; literal or character-class search.
 use std.core
 use std.core.str as strmod
 

@@ -1489,7 +1489,7 @@ fn push_event(any win, int kind, any data=0) bool {
       q = slice(q, head, q.len, 1)
       head = 0
    }
-   q = ev.queue_push(q, ev.make_event(kind, real_win, h, event_data))
+   q = ev.queue_push(q, ev.make_event(kind, h, h, event_data))
    real_win["events"] = q
    real_win["events_head"] = head
    _save_win(real_win)
@@ -2068,7 +2068,7 @@ fn key_down(any win, any k) bool {
       if scs.get(qsc.get(i), false) { return true }
       i += 1
    }
-   if ui_backend.uses_native_events() { return false }
+   if ui_backend.uses_native_events() { return _backend_key_down(win, nk) }
    _backend_key_down(win, nk)
 }
 
@@ -2095,7 +2095,6 @@ fn key_pressed(any win, any k) bool {
    def lks = win.get("last_key_states", 0) def pk = win.get("pressed_keys", 0)
    def cached = (!!ks.get(nk, false) && !lks.get(nk, false)) || !!pk.get(nk, false)
    if cached { return true }
-   if ui_backend.uses_native_events() { return false }
    _backend_key_down(win, nk) && !lks.get(nk, false)
 }
 
@@ -2444,13 +2443,13 @@ fn scroll_pos(any win) list {
 
 fn touch_count(any win) int {
    "Returns the number of active touches. Native desktop backends report zero
-    (no touch device); the browser target overrides this with live touch state."
+   (no touch device) ; the browser target overrides this with live touch state."
    0
 }
 
 fn touch_pos(any win, int index) list {
    "Returns [x, y] in window coordinates of the touch at `index`, or [0, 0] if
-    the index is out of range. Native desktop backends report [0, 0]."
+   the index is out of range. Native desktop backends report [0, 0]."
    [0.0, 0.0]
 }
 
@@ -2461,16 +2460,16 @@ fn touch_active(any win, int index) bool {
 
 fn test_report_touch(int count, any x, any y) bool {
    "Test-only: echoes an observed touch count and position back to the host so
-    the headless-browser harness can confirm the touch facade delivered data.
-    No-op on native (returns true); the browser target writes data-touch-* attrs."
+   the headless-browser harness can confirm the touch facade delivered data.
+   No-op on native(returns true) ; the browser target writes data-touch-* attrs."
    true
 }
 
 fn test_report_gamepad(int count, any buttonA, any leftX) bool {
    "Test-only: echoes the observed gamepad count, button-A state, and left-stick
-    X back to the host so the headless-browser harness can confirm the gamepad
-    facade delivered mapped data. No-op on native (returns true); the browser
-    target writes data-gamepad-* attrs."
+   X back to the host so the headless-browser harness can confirm the gamepad
+   facade delivered mapped data. No-op on native(returns true) ; the browser
+   target writes data-gamepad-* attrs."
    true
 }
 

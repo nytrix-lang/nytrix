@@ -1,0 +1,18 @@
+shape args-accept-runtime {
+  family "runtime/args"
+  generator "program"
+  features ["args", "cli", "positive", "runtime"]
+  template ny-test-case
+
+  flags_matrix "--threads=4; --parallel=modules; --parallel-min-work=2; --heap=raii; --heap=gc; --heap=manual; --rc-gc; --ownership; --ownership-strict; --type-solver=auto; --type-solver=hm; --run=jit; --mode=fast; --mode=safe; --warn=none; --warn=useful; --warn=all; --color=never; --color=always; --strict; --no-strict-types; --alias-require-no-escape; --effect-require-known; --no-effect-require-known; --borrow-check"
+  source ny <<'NY'
+use std.core
+def items = [3, 1, 4, 1, 5]
+mut int total = 0
+for v in items {
+  total = total + v
+}
+assert_eq(total, 14, "runtime flag collection sum")
+print("args runtime flags passed")
+NY
+}

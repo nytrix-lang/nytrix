@@ -1,3 +1,7 @@
+/*
+ * Type pipeline entry: initializes the typed-pipeline subsystem by
+ * amalgamating hm.c, core.c, and emit.c into one compilation unit.
+ */
 #include "code/typepipeline.h"
 #include "base/common.h"
 #include "base/util.h"

@@ -1,3 +1,7 @@
+/*
+ * Parallel-work dispatcher: OpenMP and C11-thread backends for
+ * module-level and pipeline-stage parallelism with a shared job queue.
+ */
 #include "base/parallel.h"
 #include "base/common.h"
 

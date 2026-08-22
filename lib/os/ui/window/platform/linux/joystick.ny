@@ -163,11 +163,11 @@ fn _invoke_callback(int jid, int event) any {
 } #else {
    fn inotify_init1(any _flags) int {
       "Runs the inotify init1 operation."
-      -1
+      return -1
    }
    fn inotify_add_watch(any _fd, any _path, any _mask) int {
       "Runs the inotify add watch operation."
-      -1
+      return -1
    }
    fn inotify_rm_watch(any _fd, any _wd) int {
       "Runs the inotify rm watch operation."
@@ -306,7 +306,7 @@ fn _disconnect_js(int jid) bool {
    def js = _get_js(jid)
    _dbg("disconnected jid=" + to_str(jid) +
       " path='" + to_str(js.get("path", "")) + "'" +
-   " name='" + to_str(js.get("name", "")) + "'")
+      " name='" + to_str(js.get("name", "")) + "'")
    _invoke_callback(jid, backend_api.DISCONNECTED)
    _free_js(jid)
 }
@@ -407,7 +407,7 @@ fn _maybe_attach_js_fd(any js) any {
       _dbg("paired js name='" + to_str(name) + "'" +
          " js_fd=" + to_str(js_fd) +
          " js_axes=" + to_str(js_dev.get(1, 0)) +
-      " js_buttons=" + to_str(js_dev.get(2, 0)))
+         " js_buttons=" + to_str(js_dev.get(2, 0)))
    }
    js
 }
@@ -575,7 +575,7 @@ fn _poll_js_slot(any js) any {
       _dbg("js events jid=" + to_str(jid) +
          " count=" + to_str(event_count) +
          " axes=" + to_str(js.get("axis_count", 0)) +
-      " raw_buttons=" + to_str(js.get("raw_button_count", 0)))
+         " raw_buttons=" + to_str(js.get("raw_button_count", 0)))
    }
    free(event_ptr)
    js
@@ -710,7 +710,7 @@ fn _open_device(str path) bool {
    def button_count = raw_button_count + hat_count * 4
    if axis_count <= 0 && button_count <= 0 && hat_count <= 0 {
       _dbg("reject path='" + to_str(path) + "' no usable axes/buttons/hats raw_buttons=" + to_str(raw_button_count) +
-      " axis_count=" + to_str(axis_count) + " hat_count=" + to_str(hat_count))
+         " axis_count=" + to_str(axis_count) + " hat_count=" + to_str(hat_count))
       return _reject_open_device(fd, -1, ev_bits, key_bits, abs_bits, id_ptr, name_ptr, key_map_ptr, abs_map_ptr, abs_info_ptr)
    }
    if !_reset_js_buffers(jid) {
@@ -772,7 +772,7 @@ fn _open_device(str path) bool {
       " hats=" + to_str(hat_count) +
       " js_fd=" + to_str(js_dev.get(0, -1)) +
       " js_axes=" + to_str(js_dev.get(1, 0)) +
-   " js_buttons=" + to_str(js_dev.get(2, 0)))
+      " js_buttons=" + to_str(js_dev.get(2, 0)))
    _free_probe_allocs(ev_bits, key_bits, abs_bits, id_ptr, name_ptr)
    _invoke_callback(jid, backend_api.CONNECTED)
    true
@@ -893,7 +893,7 @@ fn _poll_slot(int jid) bool {
    if event_count > 0 && _is_debug() {
       _dbg("evdev events jid=" + to_str(jid) +
          " count=" + to_str(event_count) +
-      " path='" + to_str(js.get("path", "")) + "'")
+         " path='" + to_str(js.get("path", "")) + "'")
    }
    free(event_ptr)
    _put_js(jid, js)
@@ -909,7 +909,7 @@ fn _ensure_init() bool {
    _set_js_val("inotify_fd", inotify_fd)
    if inotify_fd >= 0 {
       def watch = inotify_add_watch(inotify_fd, cstr("/dev/input"),
-      bor(bor(bor(IN_CREATE, IN_ATTRIB), bor(IN_CLOSE_WRITE, IN_MOVED_TO)), IN_DELETE))
+         bor(bor(bor(IN_CREATE, IN_ATTRIB), bor(IN_CLOSE_WRITE, IN_MOVED_TO)), IN_DELETE))
       _set_js_val("inotify_watch", watch)
    }
    _scan_devices()

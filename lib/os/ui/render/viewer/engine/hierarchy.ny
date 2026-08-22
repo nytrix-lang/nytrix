@@ -107,7 +107,7 @@ fn _draw_node(idp, nodes, node_idx, depth, drawn, max_rows, row_w, parity_lock, 
       def children_n = children.len
       while ci < children_n && out < max_rows {
          out = _draw_node(idp, nodes, int(children[ci]), depth + 1, out, max_rows, row_w,
-         parity_lock, camera_icon, model_icon, node_icon)
+            parity_lock, camera_icon, model_icon, node_icon)
          ci += 1
       }
    }
@@ -119,7 +119,7 @@ fn _virtual_row_range(total_rows, row_step, overscan=3) {
       row_step,
       gui.scroll_area_visible_h(),
       gui.scroll_area_scroll_y(),
-   overscan)
+      overscan)
 }
 
 fn _draw_parts(idp, parts, win_w, list_h, max_rows, parity_lock, model_icon) int {
@@ -196,7 +196,7 @@ fn _draw_tree(idp, nodes, roots, win_w, tree_h, parity_lock, camera_icon, model_
    mut ri = 0
    while ri < roots.len && drawn < 180 {
       drawn = _draw_node(idp, nodes, int(roots.get(ri, -1)), 0, drawn, 180, row_w,
-      parity_lock, camera_icon, model_icon, node_icon)
+         parity_lock, camera_icon, model_icon, node_icon)
       ri += 1
    }
    if drawn >= 180 {

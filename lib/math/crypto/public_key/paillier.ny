@@ -90,22 +90,17 @@ fn paillier_rerandomize(any c, any n, any r) bigint {
    assert(key.get("n") == Z(77), "paillier modulus")
    assert(key.get("g") == Z(78), "paillier default generator")
    assert(key.get("lambda") == Z(30), "paillier lambda")
-
    def c12 = paillier_encrypt_default(12, key, 5)
    assert(c12 == Z(4469), "paillier deterministic ciphertext")
    assert(paillier_decrypt(c12, key) == Z(12), "paillier decrypt")
-
    def c20 = paillier_encrypt_default(20, key, 13)
    def sum = paillier_add(c12, c20, key.get("n"))
    assert(paillier_decrypt(sum, key) == Z(32), "paillier homomorphic add")
-
    def scaled = paillier_mul_plain(c12, 3, key.get("n"))
    assert(paillier_decrypt(scaled, key) == Z(36), "paillier plaintext multiply")
-
    def fresh = paillier_rerandomize(c12, key.get("n"), 17)
    assert(fresh != c12, "paillier rerandomizes")
    assert(paillier_decrypt(fresh, key) == Z(12), "paillier rerandomized decrypt")
-
    def wrapped = paillier_encrypt_default(80, key, 5)
    assert(paillier_decrypt(wrapped, key) == Z(3), "paillier message reduced modulo n")
    print("✓ std.math.crypto.public_key.paillier self-test passed")

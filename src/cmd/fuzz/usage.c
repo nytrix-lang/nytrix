@@ -1,3 +1,7 @@
+/*
+ * Fuzz usage: generates recommended fuzzing command lines with
+ * tuned profiles, thread counts, and duration parameters.
+ */
 #include "core.h"
 
 #define NYTRIX_FUZZ_ALL_RUN_ONE_SHOT \

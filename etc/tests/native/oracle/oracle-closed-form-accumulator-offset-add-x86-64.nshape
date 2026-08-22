@@ -1,0 +1,19 @@
+shape oracle_closed_form_accumulator_offset_add_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form offset-add regression]
+  template ny-test-case
+  flags "--native-result-oracle=95 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+mut s = 0
+mut i = 0
+while i < 10 {
+  s = s + (i + 5)
+  i = i + 1
+}
+s
+NY
+}

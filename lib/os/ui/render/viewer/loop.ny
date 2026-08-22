@@ -83,7 +83,7 @@ fn record_frame_profile(
       last_frame_ms,
       last_evt_ms,
       last_gui_prep_ms,
-   last_sim_ms)
+      last_sim_ms)
    def nprint = ui_profile.frame_print_every()
    if ui_profile.frame_samples() < nprint { return false }
    def n = ui_profile.frame_samples()
@@ -112,7 +112,7 @@ fn record_frame_profile(
       " ui=" + to_str(avg_ui) + "ms" +
       " hot=" + hot +
       " hint=" + hint +
-   deep_profile_msg)
+      deep_profile_msg)
    ui_profile.profile_dump_row(total_frames, n, fps_est, avg_fr, avg_up, avg_dr, avg_wo, avg_ui, avg_ev, avg_gp, avg_sm)
    ui_profile.frame_reset()
    true

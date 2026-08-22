@@ -28,7 +28,9 @@
 #include <sys/wait.h>
 #endif
 
-/* Check whether any safe-run limit is actually configured. */
+/*
+ * Check whether any safe-run limit is actually configured.
+ */
 static bool ny_safe_run_any_set(const ny_safe_run_t *sr) {
   return sr->cpu_seconds > 0 || sr->wall_seconds > 0 ||
          sr->max_rss_bytes > 0 ||
@@ -43,7 +45,9 @@ static bool ny_safe_run_any_set(const ny_safe_run_t *sr) {
 int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
   if (!sr || !ny_safe_run_any_set(sr))
     return 0;
-  /* Windows limits belong to a Job Object and are installed by spawn(). */
+  /*
+   * Windows limits belong to a Job Object and are installed by spawn().
+   */
   return 0;
 }
 
@@ -281,7 +285,9 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
 
   int failures = 0;
 
-  /* CPU time limit (seconds). RLIMIT_CPU counts in seconds. */
+  /*
+   * CPU time limit (seconds). RLIMIT_CPU counts in seconds.
+   */
   if (sr->cpu_seconds > 0) {
     struct rlimit rl;
     if (getrlimit(RLIMIT_CPU, &rl) == 0) {
@@ -302,7 +308,9 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
     }
   }
 
-  /* Address space limit (bytes). RLIMIT_AS caps virtual memory / RSS. */
+  /*
+   * Address space limit (bytes). RLIMIT_AS caps virtual memory / RSS.
+   */
   if (sr->max_rss_bytes > 0) {
     struct rlimit rl;
     if (getrlimit(RLIMIT_AS, &rl) == 0) {
@@ -323,7 +331,9 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
     }
   }
 
-  /* Open file descriptor limit. */
+  /*
+   * Open file descriptor limit.
+   */
   if (sr->max_files > 0) {
     struct rlimit rl;
     if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
@@ -344,8 +354,10 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
     }
   }
 
-  /* Child process limit (RLIMIT_NPROC). Available on Linux; may not exist
-   * on all BSDs. */
+  /*
+   * Child process limit (RLIMIT_NPROC). Available on Linux; may not exist
+   * on all BSDs.
+   */
 #ifdef RLIMIT_NPROC
   if (sr->max_processes > 0) {
     struct rlimit rl;
@@ -361,7 +373,9 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
         failures++;
       }
     } else {
-      /* ENOSYS / EINVAL on systems without NPROC — not an error. */
+      /*
+       * ENOSYS / EINVAL on systems without NPROC — not an error.
+       */
       if (errno != EINVAL && errno != ENOSYS) {
         fprintf(stderr, "safe-run: warning: could not get process limit: %s\n",
                 strerror(errno));
@@ -371,13 +385,17 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
   }
 #endif /* RLIMIT_NPROC */
 
-  /* Process group containment: put ourselves in a new process group so
-   * descendants can be killed as a tree on timeout/limit breach. */
+  /*
+   * Process group containment: put ourselves in a new process group so
+   * descendants can be killed as a tree on timeout/limit breach.
+   */
   if (sr->contain_process_group) {
     if (setpgid(0, 0) != 0 && errno != EPERM) {
       fprintf(stderr, "safe-run: warning: setpgid failed: %s\n",
               strerror(errno));
-      /* Non-fatal: containment is best-effort. */
+      /*
+       * Non-fatal: containment is best-effort.
+       */
     }
   }
 

@@ -3,7 +3,6 @@ use std.core,std.core.reflect,std.math,std.core.term
 assert(type([1, 2, 3]) == "list", "grouped use imports second module")
 assert(sin(0.0) == 0.0 && cos(0.0) == 1.0, "grouped use loads later std modules")
 def grouped_canvas_clear = canvas_clear
-
 print("Testing explicit std usage...")
 print("Explicit std import works")
 print("Testing relative file import...")

@@ -1,3 +1,7 @@
+/*
+ * Function purity analysis: determines whether a function is pure,
+ * impure, or effectful for optimization and safety-check gating.
+ */
 #include "base/util.h"
 #include "code/visitor.h"
 #include "priv.h"
@@ -461,6 +465,9 @@ static bool effects_visit_stmt(ny_visitor_t *v, stmt_t *s) {
                             ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0}, &cp);
     return false;
   }
+  case NY_S_LEMMA:
+    ny_visit_expr(v, s->as.lemma.proposition);
+    return false;
   case NY_S_OPERATOR:
   case NY_S_IMPL:
     return false;
@@ -796,6 +803,9 @@ static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s, assigned_name_
     ny_purity_scope_restore(local_names, local_hashes, local_bloom, &cp);
     return safe;
   }
+  case NY_S_LEMMA:
+    CHECK_PURE_EXPR(s->as.lemma.proposition);
+    return true;
   case NY_S_MATCH: {
     CHECK_PURE_EXPR(s->as.match.test);
     for (size_t i = 0; i < s->as.match.arms.len; i++) {
@@ -1000,6 +1010,8 @@ static bool ny_stmt_refs_params(stmt_t *s, const assigned_name_list *param_names
     refs |= ny_stmt_refs_params(s->as.fr.body, param_names, param_hashes, param_bloom);
     return refs;
   }
+  case NY_S_LEMMA:
+    return ny_expr_refs_params(s->as.lemma.proposition, param_names, param_hashes, param_bloom);
   case NY_S_MATCH:
     if (ny_expr_refs_params(s->as.match.test, param_names, param_hashes, param_bloom))
       return true;
@@ -1373,6 +1385,10 @@ static void ny_collect_escape_stmt(codegen_t *cg, stmt_t *s, const assigned_name
   case NY_S_DEFER:
     ny_collect_escape_stmt(cg, s->as.de.body, param_names, param_hashes, param_bloom, local_names,
                            local_hashes, local_bloom, out);
+    break;
+  case NY_S_LEMMA:
+    ny_collect_escape_expr(cg, s->as.lemma.proposition, param_names, param_hashes, param_bloom,
+                           local_names, local_hashes, local_bloom, out);
     break;
   case NY_S_MACRO:
     for (size_t i = 0; i < s->as.macro.args.len; i++) {
@@ -1750,10 +1766,12 @@ static void ny_collect_calls_stmt(codegen_t *cg, stmt_t *s, assigned_name_list *
     break;
   case NY_S_MACRO:
     for (size_t i = 0; i < s->as.macro.args.len; i++) {
-      ny_collect_calls_expr(cg, s->as.macro.args.data[i], local_names, local_hashes, local_bloom,
-                            out_calls);
+      ny_collect_calls_expr(cg, s->as.macro.args.data[i], local_names, local_hashes, local_bloom, out_calls);
     }
     ny_collect_calls_stmt(cg, s->as.macro.body, local_names, local_hashes, local_bloom, out_calls);
+    break;
+  case NY_S_LEMMA:
+    ny_collect_calls_expr(cg, s->as.lemma.proposition, local_names, local_hashes, local_bloom, out_calls);
     break;
   default:
     break;

@@ -183,6 +183,7 @@ mut _wireframe = false
 mut _lighting_enabled = false
 mut _depth_mask_enabled = true
 mut _blend_enabled = true
+
 ;; Cached GL_TEXTURE_2D / GL_DEPTH_TEST enable state. The previous code issued
 ;; glEnable/glDisable unconditionally on every draw_vertices call, which on a
 ;; 2000-cell terminal frame meant ~4000 redundant GL calls just to restate the
@@ -392,7 +393,7 @@ fn _soft_mul_color(int a, int b) int {
       (_soft_color_chan(a, 0) * _soft_color_chan(b, 0)) / 255,
       (_soft_color_chan(a, 8) * _soft_color_chan(b, 8)) / 255,
       (_soft_color_chan(a, 16) * _soft_color_chan(b, 16)) / 255,
-   (_soft_color_chan(a, 24) * _soft_color_chan(b, 24)) / 255)
+      (_soft_color_chan(a, 24) * _soft_color_chan(b, 24)) / 255)
 }
 
 fn _soft_project(f64 x, f64 y, f64 z) list {
@@ -409,7 +410,7 @@ fn _soft_color_lerp3(int c0, int c1, int c2, f64 w0, f64 w1, f64 w2) int {
       int(float(_soft_color_chan(c0, 0)) * w0 + float(_soft_color_chan(c1, 0)) * w1 + float(_soft_color_chan(c2, 0)) * w2),
       int(float(_soft_color_chan(c0, 8)) * w0 + float(_soft_color_chan(c1, 8)) * w1 + float(_soft_color_chan(c2, 8)) * w2),
       int(float(_soft_color_chan(c0, 16)) * w0 + float(_soft_color_chan(c1, 16)) * w1 + float(_soft_color_chan(c2, 16)) * w2),
-   int(float(_soft_color_chan(c0, 24)) * w0 + float(_soft_color_chan(c1, 24)) * w1 + float(_soft_color_chan(c2, 24)) * w2))
+      int(float(_soft_color_chan(c0, 24)) * w0 + float(_soft_color_chan(c1, 24)) * w1 + float(_soft_color_chan(c2, 24)) * w2))
 }
 
 fn _soft_color_lerp2(int c0, int c1, f64 t) int {
@@ -418,7 +419,7 @@ fn _soft_color_lerp2(int c0, int c1, f64 t) int {
       int(float(_soft_color_chan(c0, 0)) * u + float(_soft_color_chan(c1, 0)) * t),
       int(float(_soft_color_chan(c0, 8)) * u + float(_soft_color_chan(c1, 8)) * t),
       int(float(_soft_color_chan(c0, 16)) * u + float(_soft_color_chan(c1, 16)) * t),
-   int(float(_soft_color_chan(c0, 24)) * u + float(_soft_color_chan(c1, 24)) * t))
+      int(float(_soft_color_chan(c0, 24)) * u + float(_soft_color_chan(c1, 24)) * t))
 }
 
 fn _soft_active_tex(int tex_id=-1, bool use_material=false) int {
@@ -1128,7 +1129,7 @@ fn _apply_current_color() bool {
       _color_chan(_current_base_color_u32, 0) * shade,
       _color_chan(_current_base_color_u32, 8) * shade,
       _color_chan(_current_base_color_u32, 16) * shade,
-   _color_chan(_current_base_color_u32, 24))
+      _color_chan(_current_base_color_u32, 24))
 }
 
 fn _apply_lighting(bool enabled) bool {
@@ -1231,7 +1232,7 @@ fn _draw_immediate_vertices(any p, int count, int mode, bool use_vertex_color=tr
             float(c & 255) / 255.0,
             float((c >> 8) & 255) / 255.0,
             float((c >> 16) & 255) / 255.0,
-         float((c >> 24) & 255) / 255.0)
+            float((c >> 24) & 255) / 255.0)
       } else {
          _apply_current_color()
       }

@@ -1,0 +1,51 @@
+shape proof_range {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "range", "loop"]
+  template ny-test-case
+  flags "--color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+;; Exact and disjoint integer ranges establish comparison propositions, and
+;; loop counters retain in-bounds facts through the loop body.
+
+;; def-bound exact ranges
+def int n = 5
+def proof pos = prove(n > 0, "n > 0 via range")
+assert(proof_matches(pos, n > 0), "range proof digest")
+
+def int a = 7
+def int b = 7
+def proof eq = prove(a == b, "equal exact ranges")
+
+def int small = 1
+def int big = 100
+def proof lt = prove(small < big, "non-overlapping ranges")
+
+def int x = 3
+def int y = 9
+def proof ne = prove(x != y, "disjoint ranges unequal")
+
+;; Loop counters: prove bounds directly inside the loop body
+;; (previously required comptime{ return ... } or failed to compile)
+fn loop_bounds() int {
+   def xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+   mut int i = 0
+   mut int acc = 0
+   while i < xs.len {
+      assert_compile(i >= 0, "loop index non-negative")
+      assert_compile(i < 10, "loop index below bound")
+      acc += xs[i]
+      i += 1
+   }
+   acc
+}
+
+def int r = loop_bounds()
+assert(r == 55, "loop sum")
+
+assert(true, "range proofs complete")
+NY
+}

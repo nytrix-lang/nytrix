@@ -1,0 +1,18 @@
+shape native_x86_f64_regalloc_call {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 object oracle f64 regalloc call abi]
+  template ny-test-case
+  flags "--native-backend x86_64 --native-result-oracle=4624070917402656768"
+  expect compile_and_run
+  source ny <<'NY'
+fn twice(f64 value) f64 {
+  value + value
+}
+fn after_call(f64 value) f64 {
+  def doubled = twice(value)
+  doubled * 2.0
+}
+after_call(3.5)
+NY
+}

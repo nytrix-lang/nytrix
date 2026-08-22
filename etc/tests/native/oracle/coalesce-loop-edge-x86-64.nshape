@@ -1,0 +1,20 @@
+shape oracle_coalesce_loop_edge_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle machine-ir regalloc coalesce loop-edge]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-result-oracle=1820 --nyir-verify --no-progress"
+  expect compile_and_run
+  source ny <<'NY'
+fn carried(i64 n) i64 {
+  mut i = 0
+  mut acc = 0
+  while i < n {
+    acc = acc + i * 3 + 1
+    i = i + 1
+  }
+  acc
+}
+carried(35)
+NY
+}

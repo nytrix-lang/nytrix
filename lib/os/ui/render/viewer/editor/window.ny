@@ -51,7 +51,7 @@ fn _split_selected(dict node, str kind, any new_buffer) list {
                "left": old, "right": leaf(new_buffer, true),
                "x": float(node.get("x", 0.0)), "y": float(node.get("y", 0.0)),
                "w": float(node.get("w", 0.0)), "h": float(node.get("h", 0.0))
-         }, true]
+            }, true]
       }
       return [node, false]
    }

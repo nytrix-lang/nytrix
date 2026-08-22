@@ -3,6 +3,10 @@
 ;; References:
 ;; - std.os
 module std.os.clipboard(set_text, get_text, set_clipboard_text, get_clipboard_text)
+
+;; Native hosts use the platform clipboard tools with a temporary-file bridge;
+;; callers receive the explicit boolean/string result and the bridge cleans up
+;; its temporary path on every exit path.
 use std.core
 use std.os
 use std.os.path as ospath

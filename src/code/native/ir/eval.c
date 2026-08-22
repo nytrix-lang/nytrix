@@ -1,3 +1,7 @@
+/*
+ * NYIR debug VM: evaluates NYIR programs in-process for diagnostics,
+ * result-oracle comparison, and single-step execution tracing.
+ */
 #include "code/native/ir/internal.h"
 #include "code/native/internal.h"
 #include "code/native/ir.h"
@@ -9,7 +13,184 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
+typedef struct {
+  int64_t *values;
+  bool *known;
+  int64_t *vector_values; /* Up to four i64 lanes per vector SSA value. */
+  uint8_t *vector_width;
+  size_t value_cap;
+} nyir_eval_pool_slot_t;
+
+typedef struct {
+  const nyir_func_t *func;
+  const nyir_inst_t *data;
+  size_t len;
+  uint64_t signature;
+  size_t label_count;
+  size_t *pc;
+  bool *found;
+} nyir_eval_label_cache_t;
+
+typedef struct {
+  nyir_eval_pool_slot_t *slots;
+  size_t slot_cap;
+  size_t depth;
+  nyir_eval_label_cache_t *label_cache;
+  size_t label_cache_len;
+  size_t label_cache_cap;
+} nyir_eval_pool_t;
+/*
+ * Thread-local eval arena: slots and their value/label arrays are reused
+ * across calls and grow monotonically until thread exit.  This is
+ * intentional — it replaces the per-invocation calloc/free churn the VM
+ * used to pay — so do not add a per-call shrink/free.
+ */
+static _Thread_local nyir_eval_pool_t nyir_eval_pool;
+
+static bool nyir_eval_pool_begin(nyir_eval_pool_slot_t *slot,
+                                 size_t *depth_out) {
+  if (!slot || !depth_out)
+    return false;
+  size_t depth = nyir_eval_pool.depth;
+  if (depth == nyir_eval_pool.slot_cap) {
+    size_t cap = nyir_eval_pool.slot_cap ? nyir_eval_pool.slot_cap * 2 : 8;
+    if (cap < nyir_eval_pool.slot_cap ||
+        cap > SIZE_MAX / sizeof(*nyir_eval_pool.slots))
+      return false;
+    nyir_eval_pool_slot_t *slots =
+        realloc(nyir_eval_pool.slots, cap * sizeof(*slots));
+    if (!slots)
+      return false;
+    memset(slots + nyir_eval_pool.slot_cap, 0,
+           (cap - nyir_eval_pool.slot_cap) * sizeof(*slots));
+    nyir_eval_pool.slots = slots;
+    nyir_eval_pool.slot_cap = cap;
+  }
+  nyir_eval_pool.depth++;
+  *slot = nyir_eval_pool.slots[depth];
+  *depth_out = depth;
+  return true;
+}
+
+static void nyir_eval_pool_end(size_t depth, nyir_eval_pool_slot_t *slot) {
+  if (slot && depth < nyir_eval_pool.slot_cap)
+    nyir_eval_pool.slots[depth] = *slot;
+  if (nyir_eval_pool.depth > 0)
+    nyir_eval_pool.depth--;
+
+}
+static bool nyir_eval_pool_values(nyir_eval_pool_slot_t *slot, size_t count,
+                                  int64_t **values, bool **known) {
+  if (!slot || !values || !known)
+    return false;
+  if (count > slot->value_cap) {
+    if (count > SIZE_MAX / sizeof(*slot->values) ||
+        count > SIZE_MAX / (4 * sizeof(*slot->vector_values)))
+      return false;
+    int64_t *new_values = malloc(count * sizeof(*new_values));
+    bool *new_known = malloc(count * sizeof(*new_known));
+    int64_t *new_vector_values =
+        malloc(count * 4 * sizeof(*new_vector_values));
+    uint8_t *new_vector_width = malloc(count * sizeof(*new_vector_width));
+    if (!new_values || !new_known || !new_vector_values ||
+        !new_vector_width) {
+      free(new_values);
+      free(new_known);
+      free(new_vector_values);
+      free(new_vector_width);
+      return false;
+    }
+    free(slot->values);
+    free(slot->known);
+    free(slot->vector_values);
+    free(slot->vector_width);
+    slot->values = new_values;
+    slot->known = new_known;
+    slot->vector_values = new_vector_values;
+    slot->vector_width = new_vector_width;
+    slot->value_cap = count;
+  }
+  if (count) {
+    memset(slot->values, 0, count * sizeof(*slot->values));
+    memset(slot->known, 0, count * sizeof(*slot->known));
+    memset(slot->vector_values, 0,
+           count * 4 * sizeof(*slot->vector_values));
+    memset(slot->vector_width, 0, count * sizeof(*slot->vector_width));
+  }
+  *values = slot->values;
+  *known = slot->known;
+  return true;
+}
+
+static bool nyir_eval_cached_labels(const nyir_func_t *f, size_t *label_count,
+                                    size_t **label_pc, bool **label_found) {
+  if (!f || !label_count || !label_pc || !label_found)
+    return false;
+  size_t count = 0;
+  uint64_t signature = UINT64_C(1469598103934665603);
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyir_inst_t *in = &f->data[i];
+    if (in->op != NYIR_LABEL || in->imm < 0)
+      continue;
+    if ((size_t)in->imm >= count)
+      count = (size_t)in->imm + 1;
+    signature ^= (uint64_t)in->imm;
+    signature *= UINT64_C(1099511628211);
+  }
+  for (size_t i = 0; i < nyir_eval_pool.label_cache_len; ++i) {
+    nyir_eval_label_cache_t *entry = &nyir_eval_pool.label_cache[i];
+    if (entry->func == f && entry->data == f->data && entry->len == f->len &&
+        entry->signature == signature) {
+      *label_count = entry->label_count;
+      *label_pc = entry->pc;
+      *label_found = entry->found;
+      return true;
+    }
+  }
+  if (nyir_eval_pool.label_cache_len == nyir_eval_pool.label_cache_cap) {
+    size_t cap = nyir_eval_pool.label_cache_cap
+                     ? nyir_eval_pool.label_cache_cap * 2
+                     : 8;
+    if (cap < nyir_eval_pool.label_cache_cap ||
+        cap > SIZE_MAX / sizeof(*nyir_eval_pool.label_cache))
+      return false;
+    nyir_eval_label_cache_t *cache = realloc(
+        nyir_eval_pool.label_cache, cap * sizeof(*cache));
+    if (!cache)
+      return false;
+    nyir_eval_pool.label_cache = cache;
+    nyir_eval_pool.label_cache_cap = cap;
+  }
+  size_t *pc = count ? calloc(count, sizeof(*pc)) : NULL;
+  bool *found = count ? calloc(count, sizeof(*found)) : NULL;
+  if (count && (!pc || !found)) {
+    free(pc);
+    free(found);
+    return false;
+  }
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyir_inst_t *in = &f->data[i];
+    if (in->op == NYIR_LABEL && in->imm >= 0 &&
+        (size_t)in->imm < count) {
+      pc[(size_t)in->imm] = i;
+      found[(size_t)in->imm] = true;
+    }
+  }
+  nyir_eval_pool.label_cache[nyir_eval_pool.label_cache_len++] =
+      (nyir_eval_label_cache_t){.func = f,
+                                .data = f->data,
+                                .len = f->len,
+                                .signature = signature,
+                                .label_count = count,
+                                .pc = pc,
+                                .found = found};
+  *label_count = count;
+  *label_pc = pc;
+  *label_found = found;
+  return true;
+}
 
 void nyir_eval_result_free(nyir_eval_result_t *result) {
   if (!result)
@@ -57,6 +238,16 @@ static bool nyir_eval_read_value(const int64_t *values, const bool *known,
   return true;
 }
 
+static bool nyir_eval_read_vector(const nyir_eval_pool_slot_t *slot, int value,
+                                  unsigned width, const int64_t **out) {
+  if (!slot || !out || value < 0 || (size_t)value >= slot->value_cap ||
+      width > 4 || slot->vector_width[value] != width ||
+      !slot->known[value])
+    return false;
+  *out = slot->vector_values + (size_t)value * 4;
+  return true;
+}
+
 static void nyir_eval_note_value(nyir_eval_result_t *result, int value) {
   if (result && value >= 0 && (size_t)value > result->max_value_index)
     result->max_value_index = (size_t)value;
@@ -80,12 +271,15 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
                    verify_err);
   if (f->next_value < 0)
     return nyir_err(err, err_len, "native NYIR VM: invalid value count");
-  size_t value_count = (size_t)f->next_value;
-  int64_t *values = value_count ? (int64_t *)calloc(value_count, sizeof(*values)) : NULL;
-  bool *known = value_count ? (bool *)calloc(value_count, sizeof(*known)) : NULL;
-  if (value_count && (!values || !known)) {
-    free(values);
-    free(known);
+  size_t eval_depth = 0;
+  nyir_eval_pool_slot_t eval_slot = {0};
+  if (!nyir_eval_pool_begin(&eval_slot, &eval_depth))
+    return nyir_err(err, err_len, NY_NATIVE_OOM);
+  int64_t *values = NULL;
+  bool *known = NULL;
+  if (!nyir_eval_pool_values(&eval_slot, (size_t)f->next_value, &values,
+                            &known)) {
+    nyir_eval_pool_end(eval_depth, &eval_slot);
     return nyir_err(err, err_len, NY_NATIVE_OOM);
   }
   if (result) {
@@ -93,8 +287,7 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
     if (f->len) {
       result->pc_counts = calloc(f->len, sizeof(*result->pc_counts));
       if (!result->pc_counts) {
-        free(values);
-        free(known);
+        nyir_eval_pool_end(eval_depth, &eval_slot);
         return nyir_err(err, err_len, NY_NATIVE_OOM);
       }
       result->pc_count_len = f->len;
@@ -103,30 +296,17 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
   if (max_steps == 0)
     max_steps = 1000000;
 
-  /* Precompute label→PC table once. Previously every BR/BR_IF did an O(n)
-   * linear scan of all instructions, making loop back-edges catastrophically
-   * expensive. This is the single biggest VM dispatch bottleneck. */
+  /*
+   * Precompute label→PC once per function image.  The cache is thread-local
+   * because optimizers may mutate separate NYIR functions concurrently.
+   */
   size_t label_count = 0;
-  for (size_t i = 0; i < f->len; ++i) {
-    if (f->data[i].op == NYIR_LABEL && f->data[i].imm >= 0 &&
-        (size_t)f->data[i].imm >= label_count)
-      label_count = (size_t)f->data[i].imm + 1;
-  }
-  size_t *label_pc = label_count ? (size_t *)calloc(label_count, sizeof(size_t)) : NULL;
-  bool *label_found = label_count ? (bool *)calloc(label_count, sizeof(bool)) : NULL;
-  if (label_count && (!label_pc || !label_found)) {
-    free(values);
-    free(known);
-    free(label_pc);
-    free(label_found);
+  size_t *label_pc = NULL;
+  bool *label_found = NULL;
+  if (!nyir_eval_cached_labels(f, &label_count, &label_pc, &label_found)) {
+    nyir_eval_result_free(result);
+    nyir_eval_pool_end(eval_depth, &eval_slot);
     return nyir_err(err, err_len, NY_NATIVE_OOM);
-  }
-  for (size_t i = 0; i < f->len; ++i) {
-    if (f->data[i].op == NYIR_LABEL && f->data[i].imm >= 0 &&
-        (size_t)f->data[i].imm < label_count) {
-      label_pc[(size_t)f->data[i].imm] = i + 1;
-      label_found[(size_t)f->data[i].imm] = true;
-    }
   }
 
   size_t pc = 0;
@@ -140,10 +320,7 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
   while (pc < f->len) {
     if (++steps > max_steps) {
       nyir_eval_result_free(result);
-      free(values);
-      free(known);
-      free(label_pc);
-      free(label_found);
+      nyir_eval_pool_end(eval_depth, &eval_slot);
       return nyir_err(err, err_len, "native NYIR VM: step limit exceeded");
     }
     inst_index = pc;
@@ -164,6 +341,19 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
     int64_t out = 0;
     switch (in->op) {
     case NYIR_NOP:
+      break;
+    case NYIR_BOUNDS_CHECK:
+      if (!nyir_eval_read_value(values, known, in->a, &a) ||
+          !nyir_eval_read_value(values, known, in->b, &b))
+        goto missing_value;
+      if (in->c >= 0) {
+        if (!nyir_eval_read_value(values, known, in->c, &out))
+          goto missing_value;
+      } else {
+        out = in->imm;
+      }
+      if (b < 0 || b >= out)
+        goto bounds_violation;
       break;
     case NYIR_LABEL:
       predecessor_label = current_label;
@@ -198,6 +388,23 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
     case NYIR_I64_TO_F32:
     case NYIR_F64_TO_F32:
     case NYIR_F32_TO_F64:
+      if (in->op == NYIR_COPY && in->a >= 0 &&
+          (size_t)in->a < eval_slot.value_cap &&
+          eval_slot.vector_width[in->a] != 0) {
+        unsigned width = eval_slot.vector_width[in->a];
+        memcpy(eval_slot.vector_values + (size_t)in->dst * 4,
+               eval_slot.vector_values + (size_t)in->a * 4,
+               width * sizeof(int64_t));
+        eval_slot.vector_width[in->dst] = (uint8_t)width;
+        values[in->dst] =
+            eval_slot.vector_values[(size_t)in->dst * 4];
+        known[in->dst] = true;
+        nyir_eval_note_value(result, in->dst);
+        break;
+      }
+      if (in->a >= 0 && (size_t)in->a < eval_slot.value_cap &&
+          eval_slot.vector_width[in->a] != 0)
+        goto unsupported;
       if (!nyir_eval_read_value(values, known, in->a, &a))
         goto missing_value;
       nyir_eval_note_value(result, in->dst);
@@ -216,11 +423,13 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
     case NYIR_LOAD_I64: {
       if (!nyir_eval_read_value(values, known, in->a, &a))
         goto missing_value;
-      int64_t *ptr = (int64_t *)(uintptr_t)a;
+      uintptr_t ptr = (uintptr_t)a;
       if (!ptr)
         goto unsupported;
       nyir_eval_note_value(result, in->dst);
-      values[in->dst] = *ptr;
+      values[in->dst] = (in->flags & NYIR_INST_F_MEM_BYTE)
+                            ? *(const uint8_t *)ptr
+                            : *(const int64_t *)ptr;
       known[in->dst] = true;
       break;
     }
@@ -242,10 +451,13 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
       if (!nyir_eval_read_value(values, known, in->a, &a) ||
           !nyir_eval_read_value(values, known, in->c, &val))
         goto missing_value;
-      int64_t *ptr = (int64_t *)(uintptr_t)a;
+      uintptr_t ptr = (uintptr_t)a;
       if (!ptr)
         goto unsupported;
-      *ptr = val;
+      if (in->flags & NYIR_INST_F_MEM_BYTE)
+        *(uint8_t *)ptr = (uint8_t)val;
+      else
+        *(int64_t *)ptr = val;
       break;
     }
     case NYIR_LOAD_LOCAL:
@@ -321,6 +533,20 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
       values[in->dst] = out;
       known[in->dst] = true;
       break;
+    case NYIR_SQRT_F64:
+    case NYIR_SIN_F64:
+    case NYIR_COS_F64: {
+      if (!nyir_eval_read_value(values, known, in->a, &a))
+        goto missing_value;
+      double da = nyir_bits_to_f64(a);
+      double dout = in->op == NYIR_SQRT_F64 ? sqrt(da)
+                    : in->op == NYIR_SIN_F64  ? sin(da)
+                                               : cos(da);
+      nyir_eval_note_value(result, in->dst);
+      values[in->dst] = nyir_f64_to_bits(dout);
+      known[in->dst] = true;
+      break;
+    }
     case NYIR_ADD_F64:
     case NYIR_SUB_F64:
     case NYIR_MUL_F64:
@@ -403,10 +629,7 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
         if (result)
           result->result = a;
       }
-      free(values);
-      free(known);
-      free(label_pc);
-      free(label_found);
+      nyir_eval_pool_end(eval_depth, &eval_slot);
       if (err && err_len > 0)
         err[0] = '\0';
       return true;
@@ -415,19 +638,13 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
         result->call_count++;
       if (!resolver) {
         nyir_eval_result_free(result);
-        free(values);
-        free(known);
-        free(label_pc);
-        free(label_found);
+        nyir_eval_pool_end(eval_depth, &eval_slot);
         return nyir_inst_err(err, err_len, in, inst_index,
                             "NYIR VM does not execute external calls yet");
       }
       if (in->imm < 0 || in->imm > NYIR_CALL_MAX_ARGS) {
         nyir_eval_result_free(result);
-        free(values);
-        free(known);
-        free(label_pc);
-        free(label_found);
+        nyir_eval_pool_end(eval_depth, &eval_slot);
         return nyir_inst_err(err, err_len, in, inst_index,
                             "NYIR VM supports a bounded number of call args");
       }
@@ -454,10 +671,7 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
       if (!resolver(resolver_ctx, in->symbol, args, (size_t)in->imm, &out, err,
                     err_len)) {
         nyir_eval_result_free(result);
-        free(values);
-        free(known);
-        free(label_pc);
-        free(label_found);
+        nyir_eval_pool_end(eval_depth, &eval_slot);
         return false;
       }
       if (in->dst >= 0) {
@@ -467,6 +681,129 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
       }
       break;
     }
+    case NYIR_VEC4_LOAD_I64:
+    case NYIR_VEC8_LOAD_I64:
+    case NYIR_VEC4_STORE_I64:
+    case NYIR_VEC8_STORE_I64:
+    case NYIR_VEC4_ADD_I64:
+    case NYIR_VEC8_ADD_I64:
+    case NYIR_VEC4_SUB_I64:
+    case NYIR_VEC8_SUB_I64:
+    case NYIR_VEC4_SET1_I64:
+    case NYIR_VEC4_AND_I64:
+    case NYIR_VEC8_AND_I64:
+    case NYIR_VEC4_OR_I64:
+    case NYIR_VEC8_OR_I64:
+    case NYIR_VEC4_XOR_I64:
+    case NYIR_VEC8_XOR_I64:
+    case NYIR_VEC4_SHL_I64:
+    case NYIR_VEC4_SAR_I64:
+    case NYIR_VEC4_REDUCE_ADD_I64:
+    case NYIR_VEC8_REDUCE_ADD_I64: {
+      const unsigned width =
+          (in->op == NYIR_VEC4_LOAD_I64 ||
+           in->op == NYIR_VEC4_STORE_I64 ||
+           in->op == NYIR_VEC4_ADD_I64 ||
+           in->op == NYIR_VEC4_SUB_I64 ||
+           in->op == NYIR_VEC4_SET1_I64 ||
+           in->op == NYIR_VEC4_AND_I64 ||
+           in->op == NYIR_VEC4_OR_I64 ||
+           in->op == NYIR_VEC4_XOR_I64 ||
+           in->op == NYIR_VEC4_SHL_I64 ||
+           in->op == NYIR_VEC4_SAR_I64 ||
+           in->op == NYIR_VEC4_REDUCE_ADD_I64)
+              ? 2u
+              : 4u;
+      if (in->op == NYIR_VEC4_LOAD_I64 ||
+          in->op == NYIR_VEC8_LOAD_I64) {
+        if (!nyir_eval_read_value(values, known, in->a, &a))
+          goto missing_value;
+        int64_t *ptr = (int64_t *)(uintptr_t)a;
+        if (!ptr)
+          goto unsupported;
+        for (unsigned lane = 0; lane < width; ++lane)
+          eval_slot.vector_values[(size_t)in->dst * 4 + lane] = ptr[lane];
+        eval_slot.vector_width[in->dst] = (uint8_t)width;
+        values[in->dst] =
+            eval_slot.vector_values[(size_t)in->dst * 4];
+        known[in->dst] = true;
+        nyir_eval_note_value(result, in->dst);
+        break;
+      }
+      if (in->op == NYIR_VEC4_STORE_I64 ||
+          in->op == NYIR_VEC8_STORE_I64) {
+        const int64_t *vec = NULL;
+        int value = in->b >= 0 ? in->b : in->c;
+        if (!nyir_eval_read_value(values, known, in->a, &a) ||
+            !nyir_eval_read_vector(&eval_slot, value, width, &vec))
+          goto unsupported;
+        int64_t *ptr = (int64_t *)(uintptr_t)a;
+        if (!ptr)
+          goto unsupported;
+        for (unsigned lane = 0; lane < width; ++lane)
+          ptr[lane] = vec[lane];
+        break;
+      }
+      if (in->op == NYIR_VEC4_SET1_I64) {
+        if (!nyir_eval_read_value(values, known, in->a, &a))
+          goto missing_value;
+        for (unsigned lane = 0; lane < width; ++lane)
+          eval_slot.vector_values[(size_t)in->dst * 4 + lane] = a;
+        eval_slot.vector_width[in->dst] = (uint8_t)width;
+        values[in->dst] = a;
+        known[in->dst] = true;
+        nyir_eval_note_value(result, in->dst);
+        break;
+      }
+      if (in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
+          in->op == NYIR_VEC8_REDUCE_ADD_I64) {
+        const int64_t *vec = NULL;
+        if (!nyir_eval_read_value(values, known, in->a, &a) ||
+            !nyir_eval_read_vector(&eval_slot, in->b, width, &vec))
+          goto unsupported;
+        uint64_t sum = (uint64_t)a;
+        for (unsigned lane = 0; lane < width; ++lane)
+          sum += (uint64_t)vec[lane];
+        values[in->dst] = (int64_t)sum;
+        eval_slot.vector_width[in->dst] = 0;
+        known[in->dst] = true;
+        nyir_eval_note_value(result, in->dst);
+        break;
+      }
+      const int64_t *lhs = NULL;
+      const int64_t *rhs = NULL;
+      if (!nyir_eval_read_vector(&eval_slot, in->a, width, &lhs) ||
+          !nyir_eval_read_vector(&eval_slot, in->b, width, &rhs))
+        goto unsupported;
+      for (unsigned lane = 0; lane < width; ++lane) {
+        uint64_t ua = (uint64_t)lhs[lane];
+        uint64_t ub = (uint64_t)rhs[lane];
+        uint64_t uv = 0;
+        switch (in->op) {
+        case NYIR_VEC4_ADD_I64:
+        case NYIR_VEC8_ADD_I64: uv = ua + ub; break;
+        case NYIR_VEC4_SUB_I64:
+        case NYIR_VEC8_SUB_I64: uv = ua - ub; break;
+        case NYIR_VEC4_AND_I64:
+        case NYIR_VEC8_AND_I64: uv = ua & ub; break;
+        case NYIR_VEC4_OR_I64:
+        case NYIR_VEC8_OR_I64: uv = ua | ub; break;
+        case NYIR_VEC4_XOR_I64:
+        case NYIR_VEC8_XOR_I64: uv = ua ^ ub; break;
+        case NYIR_VEC4_SHL_I64: uv = ua << (ub & 63u); break;
+        case NYIR_VEC4_SAR_I64: uv = (uint64_t)(lhs[lane] >> (ub & 63u)); break;
+        default: goto unsupported;
+        }
+        eval_slot.vector_values[(size_t)in->dst * 4 + lane] =
+            (int64_t)uv;
+      }
+      eval_slot.vector_width[in->dst] = (uint8_t)width;
+      values[in->dst] =
+          eval_slot.vector_values[(size_t)in->dst * 4];
+      known[in->dst] = true;
+      nyir_eval_note_value(result, in->dst);
+      break;
+    }
     case NYIR_VEC4_LOAD_F64:
     case NYIR_VEC4_STORE_F64:
     case NYIR_VEC4_ADD_F64:
@@ -474,6 +811,86 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
     case NYIR_VEC4_MUL_F64:
     case NYIR_VEC4_DIV_F64:
     case NYIR_VEC4_SET1_F64:
+    case NYIR_VEC4_REDUCE_ADD_F64: {
+      const unsigned width = 2;
+      if (in->op == NYIR_VEC4_LOAD_F64) {
+        if (!nyir_eval_read_value(values, known, in->a, &a))
+          goto missing_value;
+        const uint64_t *ptr = (const uint64_t *)(uintptr_t)a;
+        if (!ptr)
+          goto unsupported;
+        for (unsigned lane = 0; lane < width; ++lane)
+          eval_slot.vector_values[(size_t)in->dst * 4 + lane] =
+              (int64_t)ptr[lane];
+        eval_slot.vector_width[in->dst] = (uint8_t)width;
+        values[in->dst] = eval_slot.vector_values[(size_t)in->dst * 4];
+        known[in->dst] = true;
+        nyir_eval_note_value(result, in->dst);
+        break;
+      }
+      if (in->op == NYIR_VEC4_STORE_F64) {
+        const int64_t *vec = NULL;
+        int value = in->b >= 0 ? in->b : in->c;
+        if (!nyir_eval_read_value(values, known, in->a, &a) ||
+            !nyir_eval_read_vector(&eval_slot, value, width, &vec))
+          goto unsupported;
+        uint64_t *ptr = (uint64_t *)(uintptr_t)a;
+        if (!ptr)
+          goto unsupported;
+        for (unsigned lane = 0; lane < width; ++lane)
+          ptr[lane] = (uint64_t)vec[lane];
+        break;
+      }
+      if (in->op == NYIR_VEC4_SET1_F64) {
+        if (!nyir_eval_read_value(values, known, in->a, &a))
+          goto missing_value;
+        for (unsigned lane = 0; lane < width; ++lane)
+          eval_slot.vector_values[(size_t)in->dst * 4 + lane] = a;
+        eval_slot.vector_width[in->dst] = (uint8_t)width;
+        values[in->dst] = a;
+        known[in->dst] = true;
+        nyir_eval_note_value(result, in->dst);
+        break;
+      }
+      if (in->op == NYIR_VEC4_REDUCE_ADD_F64) {
+        const int64_t *vec = NULL;
+        if (!nyir_eval_read_value(values, known, in->a, &a) ||
+            !nyir_eval_read_vector(&eval_slot, in->b, width, &vec))
+          goto unsupported;
+        double sum = nyir_bits_to_f64(a);
+        for (unsigned lane = 0; lane < width; ++lane)
+          sum += nyir_bits_to_f64(vec[lane]);
+        values[in->dst] = nyir_f64_to_bits(sum);
+        eval_slot.vector_width[in->dst] = 0;
+        known[in->dst] = true;
+        nyir_eval_note_value(result, in->dst);
+        break;
+      }
+      const int64_t *lhs = NULL;
+      const int64_t *rhs = NULL;
+      if (!nyir_eval_read_vector(&eval_slot, in->a, width, &lhs) ||
+          !nyir_eval_read_vector(&eval_slot, in->b, width, &rhs))
+        goto unsupported;
+      for (unsigned lane = 0; lane < width; ++lane) {
+        double da = nyir_bits_to_f64(lhs[lane]);
+        double db = nyir_bits_to_f64(rhs[lane]);
+        double dout = 0.0;
+        switch (in->op) {
+        case NYIR_VEC4_ADD_F64: dout = da + db; break;
+        case NYIR_VEC4_SUB_F64: dout = da - db; break;
+        case NYIR_VEC4_MUL_F64: dout = da * db; break;
+        case NYIR_VEC4_DIV_F64: dout = da / db; break;
+        default: goto unsupported;
+        }
+        eval_slot.vector_values[(size_t)in->dst * 4 + lane] =
+            nyir_f64_to_bits(dout);
+      }
+      eval_slot.vector_width[in->dst] = (uint8_t)width;
+      values[in->dst] = eval_slot.vector_values[(size_t)in->dst * 4];
+      known[in->dst] = true;
+      nyir_eval_note_value(result, in->dst);
+      break;
+    }
     case NYIR_VEC4_FMA_F64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_LOAD_F32:
@@ -485,68 +902,45 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
     case NYIR_VEC8_SET1_F32:
     case NYIR_VEC8_FMA_F32:
     case NYIR_VEC8_SHUFFLE_F32:
-    case NYIR_VEC4_LOAD_I64:
-    case NYIR_VEC4_STORE_I64:
-    case NYIR_VEC4_ADD_I64:
-    case NYIR_VEC4_SUB_I64:
-    case NYIR_VEC4_AND_I64:
-    case NYIR_VEC4_OR_I64:
-    case NYIR_VEC4_XOR_I64:
-    case NYIR_VEC4_SHL_I64:
-    case NYIR_VEC4_SAR_I64:
-    case NYIR_VEC4_SET1_I64:
     case NYIR_OP_COUNT:
       goto unsupported;
     }
   }
   if (result)
     result->steps = steps;
-  free(values);
-  free(known);
-  free(label_pc);
-  free(label_found);
+  nyir_eval_pool_end(eval_depth, &eval_slot);
   if (err && err_len > 0)
     err[0] = '\0';
   return true;
 
 profile_oom:
   nyir_eval_result_free(result);
-  free(values);
-  free(known);
-  free(label_pc);
-  free(label_found);
+  nyir_eval_pool_end(eval_depth, &eval_slot);
   return nyir_inst_err(err, err_len, in, inst_index,
                          "NYIR VM profile allocation failed");
 missing_value:
   nyir_eval_result_free(result);
-  free(values);
-  free(known);
-  free(label_pc);
-  free(label_found);
+  nyir_eval_pool_end(eval_depth, &eval_slot);
   return nyir_inst_err(err, err_len, in, inst_index,
                       "NYIR VM read an unavailable value");
 bad_local:
   nyir_eval_result_free(result);
-  free(values);
-  free(known);
-  free(label_pc);
-  free(label_found);
+  nyir_eval_pool_end(eval_depth, &eval_slot);
   return nyir_inst_err(err, err_len, in, inst_index,
                       "NYIR VM local slot is out of range");
 missing_label:
   nyir_eval_result_free(result);
-  free(values);
-  free(known);
-  free(label_pc);
-  free(label_found);
+  nyir_eval_pool_end(eval_depth, &eval_slot);
   return nyir_inst_err(err, err_len, in, inst_index,
                       "NYIR VM branch target is missing");
+bounds_violation:
+  nyir_eval_result_free(result);
+  nyir_eval_pool_end(eval_depth, &eval_slot);
+  return nyir_inst_err(err, err_len, in, inst_index,
+                      "NYIR VM bounds check failed: offset out of range");
 unsupported:
   nyir_eval_result_free(result);
-  free(values);
-  free(known);
-  free(label_pc);
-  free(label_found);
+  nyir_eval_pool_end(eval_depth, &eval_slot);
   return nyir_inst_err(err, err_len, in, inst_index,
                       "NYIR VM operation is unsupported for these operands");
 }
@@ -558,17 +952,19 @@ bool nyir_eval(const nyir_func_t *f, int64_t *locals, size_t local_count,
                                 NULL, err, err_len);
 }
 
-/* ------------------------------------------------------------------ */
-/* Translation-validation seed                                         */
-/*                                                                    */
-/* Bounded multi-input differential interpretation for pure integer   */
-/* straight-line NYIR. Not a full SMT harness — just the first safety */
-/* net that catches pass miscompiles before native emission.          */
-/* ------------------------------------------------------------------ */
+/*
+ * Translation-validation seed
+ *
+ * Bounded multi-input differential interpretation for pure integer
+ * straight-line NYIR. Not a full SMT harness — just the first safety
+ * net that catches pass miscompiles before native emission.
+ */
 
 bool nyir_is_pure_i64_straightline(const nyir_func_t *f) {
-  /* Historical name: now admits pure i64 scalar control-flow + PHIs + locals.
-   * Still excludes calls, floats, and non-local memory. */
+  /*
+   * Historical name: now admits pure i64 scalar control-flow + PHIs + locals.
+   * Still excludes calls, floats, and non-local memory.
+   */
   if (!f || f->len == 0)
     return false;
   for (size_t i = 0; i < f->len; ++i) {
@@ -576,6 +972,8 @@ bool nyir_is_pure_i64_straightline(const nyir_func_t *f) {
     switch (in->op) {
     case NYIR_NOP:
     case NYIR_CONST_I64:
+    case NYIR_CONST_F64:
+    case NYIR_CONST_F32:
     case NYIR_COPY:
     case NYIR_PHI:
     case NYIR_ADD_I64:
@@ -589,6 +987,20 @@ bool nyir_is_pure_i64_straightline(const nyir_func_t *f) {
     case NYIR_SHL_I64:
     case NYIR_SAR_I64:
     case NYIR_CMP_I64:
+    case NYIR_ADD_F64:
+    case NYIR_SUB_F64:
+    case NYIR_MUL_F64:
+    case NYIR_DIV_F64:
+    case NYIR_I64_TO_F64:
+    case NYIR_F64_TO_F32:
+    case NYIR_F32_TO_F64:
+    case NYIR_CMP_F64:
+    case NYIR_ADD_F32:
+    case NYIR_SUB_F32:
+    case NYIR_MUL_F32:
+    case NYIR_DIV_F32:
+    case NYIR_I64_TO_F32:
+    case NYIR_CMP_F32:
     case NYIR_LOAD_LOCAL:
     case NYIR_STORE_LOCAL:
     case NYIR_LABEL:
@@ -638,11 +1050,15 @@ static void nyir_tv_fill_locals(int64_t *locals, size_t n, int trial,
       locals[i] = edges[i % (sizeof(edges) / sizeof(edges[0]))];
     return;
   }
-  /* Deterministic LCG fill for remaining trials. */
+  /*
+   * Deterministic LCG fill for remaining trials.
+   */
   for (size_t i = 0; i < n; ++i) {
     *rng = (*rng * UINT64_C(6364136223846793005)) + UINT64_C(1);
     locals[i] = (int64_t)(*rng);
-    /* Avoid 0 in some slots so div/mod trials are more often defined. */
+    /*
+     * Avoid 0 in some slots so div/mod trials are more often defined.
+     */
     if ((trial & 1) && locals[i] == 0)
       locals[i] = (int64_t)(i + 3);
   }
@@ -655,8 +1071,10 @@ bool nyir_tv_equiv_straightline(const nyir_func_t *before,
     return nyir_err(err, err_len, "native TV: missing function");
   if (trials <= 0)
     return true;
-  /* Seed scope: pure i64 scalar NYIR (locals, arithmetic, compares, PHI,
-   * labels/branches, returns). Calls/floats/heap memory stay out of scope. */
+  /*
+   * Seed scope: pure i64 scalar NYIR (locals, arithmetic, compares, PHI,
+   * labels/branches, returns). Calls/floats/heap memory stay out of scope.
+   */
   if (!nyir_is_pure_i64_straightline(before) ||
       !nyir_is_pure_i64_straightline(after))
     return true;
@@ -726,7 +1144,9 @@ bool nyir_tv_equiv_straightline(const nyir_func_t *before,
   free(locals_a);
   free(locals_b);
   if (compared == 0 && trials > 0) {
-    /* Every trial trapped — still treat as pass for the seed, but note it. */
+    /*
+     * Every trial trapped — still treat as pass for the seed, but note it.
+     */
     return true;
   }
   return true;

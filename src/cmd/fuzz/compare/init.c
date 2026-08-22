@@ -1,3 +1,7 @@
+/*
+ * Fuzz compare entry: amalgamates the fuzz comparison tools (audit,
+ * status, util, tools, selftest) into a single compilation unit.
+ */
 #include "../core.h"
 
 #include "util.c"

@@ -1,0 +1,23 @@
+shape inline_call {
+  family "runtime-native"
+  generator "native"
+  features [native nyir inline]
+  template ny-test-case
+  flags "--nyir-opt-level=3 --nyir-run"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(i64 a, i64 b) i64 {
+  a + b
+}
+
+fn loop_sum(i64 n) i64 {
+  mut sum = 0
+  for i in 0..n {
+    sum = sum + add(i, 1)
+  }
+  sum
+}
+
+loop_sum(10)
+NY
+}

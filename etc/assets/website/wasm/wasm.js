@@ -679,7 +679,37 @@
     } catch (_) { setStatus("webglStatus", "WebGL lost", "warn"); }
   }
 
+  // Mirror of rt_runtime_tag_raw_name (src/rt/shared.h) — maps Ny type name strings to
+  // their integer tag values used by the runtime. Must stay in sync with shared.h constants.
+  function nyRuntimeTagRaw(name) {
+    switch (name) {
+      case "nil":      return 0;
+      case "int":      return 1;
+      case "ffi_ptr":  return 6;
+      case "list":     return 100;
+      case "dict":     return 101;
+      case "dict_tbl": return 108;
+      case "set":      return 102;
+      case "tuple":    return 103;
+      case "ok":       return 104;
+      case "err":      return 105;
+      case "range":    return 106;
+      case "closure":  return 107;
+      case "ptr":      return 107; // TAG_CLOSURE matches ptr per shared.h
+      case "float":    return 110;
+      case "complex":  return 111;
+      case "str":      return 120;
+      case "str_const":return 121;
+      case "bytes":    return 122;
+      case "bigint":   return 130;
+      case "bigfloat": return 131;
+      case "kwarg":    return 150;
+      default:         return 0;
+    }
+  }
+
   const ny = {
+
     ptr(v) { return typeof v === "bigint" ? Number(v) : Number(v || 0); },
     int(v) {
       if (typeof v !== "bigint") return Number(v || 0);
@@ -724,6 +754,19 @@
       if (ny.isFloat(memoryRef, v)) return String(ny.flt(memoryRef, v));
       if ((v & 1n) === 1n) return String(Number(v >> 1n));
       return String(Number(v));
+    },
+    equal(memoryRef, a, b) {
+      const left = BigInt.asIntN(64, BigInt(a || 0));
+      const right = BigInt.asIntN(64, BigInt(b || 0));
+      if (left === right) return true;
+      if (ny.isFloat(memoryRef, left) || ny.isFloat(memoryRef, right))
+        return ny.numeric(memoryRef, left) === ny.numeric(memoryRef, right);
+      const leftTag = ny.tagof(memoryRef, left);
+      const rightTag = ny.tagof(memoryRef, right);
+      if ((leftTag === 120n || leftTag === 121n) &&
+          (rightTag === 120n || rightTag === 121n))
+        return ny.text(memoryRef, left, 0) === ny.text(memoryRef, right, 0);
+      return false;
     },
     alloc(memoryRef, bytes) {
       const mem = memoryRef.memory || fallbackMemory;
@@ -1026,7 +1069,7 @@
         return bool(b && !!b.pressed);
       },
       "std.os.ui.window.test_report_touch": (count, x, y) => {
-        canvas.dataset.touchCount = String(ny.int(count));
+        canvas.dataset.touchCount = String(Number(BigInt.asIntN(64, BigInt(count || 0))));
         canvas.dataset.touchX = String(ny.numeric(memoryRef, x));
         canvas.dataset.touchY = String(ny.numeric(memoryRef, y));
         return NY_TRUE;
@@ -1089,6 +1132,28 @@
         ctx.font = font ? `${size}px "${font.family}", monospace` : "35px 'Nytrix Monocraft', ui-monospace, monospace";
         ctx.textBaseline = "top";
         ctx.fillText(ny.text(memoryRef, text, 0), Math.round(x), Math.round(y));
+        return 0n;
+      },
+      "std.os.ui.render.measure_text": (fontId, text) => {
+        const font = assetFonts.get(ny.int(fontId));
+        const size = font ? Math.max(1, Math.round(font.size)) : 35;
+        ctx.font = font ? `${size}px "${font.family}", monospace` : "35px 'Nytrix Monocraft', ui-monospace, monospace";
+        const metrics = ctx.measureText(ny.text(memoryRef, text, 0));
+        const ascent = Number(metrics.actualBoundingBoxAscent || size * 0.8);
+        const descent = Number(metrics.actualBoundingBoxDescent || size * 0.2);
+        return list2f(Number(metrics.width), ascent + descent);
+      },
+      "std.os.ui.render.draw_text_centered": (fontId, text, cx, cy, fill) => {
+        frameTouched = true;
+        ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
+        const font = assetFonts.get(ny.int(fontId));
+        const size = font ? Math.max(1, Math.round(font.size)) : 35;
+        ctx.font = font ? `${size}px "${font.family}", monospace` : "35px 'Nytrix Monocraft', ui-monospace, monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(ny.text(memoryRef, text, 0), Math.round(cx), Math.round(cy));
+        ctx.textAlign = "start";
+        ctx.textBaseline = "top";
         return 0n;
       },
       "std.os.ui.render.texture_create_rgba": (w, h, pixels, format, filter, wrap_s, wrap_t, use_mipmaps) => {
@@ -1155,34 +1220,92 @@
     const state = () => Number(instance.exports.asyncify_get_state());
     const memory = memoryRef.memory;
     const reserve = 8 * 1024 * 1024;
+    const header = 16;
     const data = memory.buffer.byteLength;
-    memory.grow(Math.ceil((reserve + 8) / 65536));
+    memory.grow(Math.ceil((reserve + header) / 65536));
     const view = new DataView(memory.buffer);
-    view.setUint32(data, data + 8, true);
-    view.setUint32(data + 4, data + reserve + 8, true);
+    view.setUint32(data, data + header, true);
+    view.setUint32(data + 4, data + reserve + header, true);
+    view.setUint32(data + 8, 1, true);
     let pending = false;
+    let resumeAt = 0;
+    let resumeValue = 0n;
+    let resumeReady = false;
+    let resumeWake = null;
+    const notifyResume = () => {
+      resumeAt = 0;
+      resumeReady = true;
+      const wake = resumeWake;
+      resumeWake = null;
+      if (wake) wake(performance.now());
+    };
     return {
       yieldFrame() {
         if (state() !== 0 || pending) return;
         pending = true;
+        resumeAt = 0;
         instance.exports.asyncify_start_unwind(data);
+      },
+      sleep(ms) {
+        if (state() === 2) {
+          instance.exports.asyncify_stop_rewind();
+          return;
+        }
+        if (state() !== 0 || pending) return;
+        pending = true;
+        resumeAt = performance.now() + Math.max(0, Number(ms) || 0);
+        instance.exports.asyncify_start_unwind(data);
+      },
+      fetch(load) {
+        if (state() === 2) {
+          instance.exports.asyncify_stop_rewind();
+          const value = resumeValue;
+          resumeValue = 0n;
+          return value;
+        }
+        if (state() !== 0 || pending) return 0n;
+        pending = true;
+        resumeAt = Infinity;
+        resumeReady = false;
+        Promise.resolve().then(load).then((value) => {
+          resumeValue = value == null ? 0n : value;
+          notifyResume();
+        }, () => {
+          resumeValue = 0n;
+          notifyResume();
+        });
+        instance.exports.asyncify_start_unwind(data);
+        return 0n;
       },
       resume(dt) {
         webFrameDt = Math.max(1 / 240, Math.min(1 / 20, dt || (1 / 60)));
         pending = false;
+        resumeAt = 0;
         instance.exports.asyncify_start_rewind(data);
-        entry();
+        try {
+          entry();
+        } finally {
+          if (state() === 2) instance.exports.asyncify_stop_rewind();
+        }
       },
       needsResume() { return state() === 1; },
+      resumeDelay() { return Math.max(0, resumeAt - performance.now()); },
+      waitForResume(wake) {
+        if (resumeReady) wake(performance.now());
+        else resumeWake = wake;
+      },
       rewinding() { return state() === 2; },
       finishUnwind() { if (state() === 1) instance.exports.asyncify_stop_unwind(); },
       finishRewind() { if (state() === 2) instance.exports.asyncify_stop_rewind(); },
     };
   }
 
-  function makeRuntimeImports(meta, memoryRef) {
+  function makeRuntimeImports(meta, memoryRef, asyncifyRef) {
     const virtualFiles = new Map();
+    const webSockets = new Map();
+    let nextWebSocket = 1;
     const persistedPrefix = "nytrix.vfs.";
+    const persistedDirPrefix = "nytrix.vfs.dir.";
     let nextVirtualFd = 0x10000;
     const assetPath = (value) => {
       const path = String(value || "").replaceAll("\\", "/");
@@ -1225,6 +1348,25 @@
         return true;
       } catch (_) { return false; }
     };
+    const storedDir = (path) => {
+      try {
+        return !!window.localStorage && window.localStorage.getItem(persistedDirPrefix + path) === "1";
+      } catch (_) { return false; }
+    };
+    const persistDir = (path) => {
+      try {
+        if (!window.localStorage) return false;
+        window.localStorage.setItem(persistedDirPrefix + path, "1");
+        return true;
+      } catch (_) { return false; }
+    };
+    const removePersistedDir = (path) => {
+      try {
+        if (!window.localStorage) return false;
+        window.localStorage.removeItem(persistedDirPrefix + path);
+        return true;
+      } catch (_) { return false; }
+    };
     const virtualBytes = (path) => storedBytes(path) || assetBytes(path);
     const virtualPath = (value) => assetPath(ny.text(memoryRef, value, 0));
     const virtualDirectory = (path) => {
@@ -1243,11 +1385,18 @@
         if (window.localStorage) {
           for (let i = 0; i < window.localStorage.length; i++) {
             const key = window.localStorage.key(i) || "";
-            if (key.startsWith(persistedPrefix)) add(key.slice(persistedPrefix.length));
+            if (key.startsWith(persistedPrefix) && !key.startsWith(persistedDirPrefix))
+              add(key.slice(persistedPrefix.length));
+            else if (key.startsWith(persistedDirPrefix))
+              add(key.slice(persistedDirPrefix.length));
           }
         }
       } catch (_) {}
       return [...names].sort();
+    };
+    const virtualDirectoryExists = (path) => {
+      const logical = assetPath(path).replace(/^\/+|\/+$/g, "") || ".";
+      return logical === "." || storedDir(logical) || virtualDirectory(logical).length > 0;
     };
     const result = (tag, value) => {
       const p = ny.alloc(memoryRef, 32) + 16;
@@ -1286,11 +1435,146 @@
       persistBytes(handle.path, handle.bytes);
       return ny.tag(count);
     };
+    const webFetch = (url) => {
+      if (!asyncifyRef.controller)
+        throw new Error("browser fetch requires Asyncify instrumentation");
+      const target = ny.text(memoryRef, url, 0);
+      return asyncifyRef.controller.fetch(async () => {
+        try {
+          const response = await globalThis.fetch(target, { credentials: "same-origin" });
+          if (!response.ok) return 0n;
+          return ny.string(memoryRef, await response.text());
+        } catch (_) {
+          return 0n;
+        }
+      });
+    };
+    const withClipboardGesture = (operation) => {
+      if (navigator.userActivation && navigator.userActivation.isActive)
+        return operation();
+      canvas.dataset.clipboardState = "waiting-for-gesture";
+      return new Promise((resolve) => {
+        let settled = false;
+        let timer = null;
+        const finish = (value) => {
+          if (settled) return;
+          settled = true;
+          if (timer !== null) clearTimeout(timer);
+          canvas.removeEventListener("click", onClick);
+          resolve(value);
+        };
+        const onClick = () => {
+          canvas.dataset.clipboardState = "gesture-received";
+          Promise.resolve().then(operation).then(finish, () => finish(null));
+        };
+        canvas.addEventListener("click", onClick, { once: true });
+        timer = setTimeout(() => {
+          canvas.dataset.clipboardState = "gesture-timeout";
+          finish(null);
+        }, 20000);
+      });
+    };
+    const webClipboardWrite = (text) => {
+      if (!asyncifyRef.controller || !navigator.clipboard || typeof navigator.clipboard.writeText !== "function")
+        return NY_FALSE;
+      const value = ny.text(memoryRef, text, 0);
+      return asyncifyRef.controller.fetch(async () => {
+        try {
+          const result = await withClipboardGesture(() => navigator.clipboard.writeText(value).then(() => true));
+          canvas.dataset.clipboardWrite = result === true ? "1" : "0";
+          return result === true ? NY_TRUE : NY_FALSE;
+        } catch (_) {
+          canvas.dataset.clipboardWrite = "error";
+          return NY_FALSE;
+        }
+      });
+    };
+    const webClipboardRead = () => {
+      if (!asyncifyRef.controller || !navigator.clipboard || typeof navigator.clipboard.readText !== "function")
+        return 0n;
+      return asyncifyRef.controller.fetch(async () => {
+        try {
+          const result = await withClipboardGesture(() => navigator.clipboard.readText());
+          canvas.dataset.clipboardRead = typeof result === "string" ? result : "error";
+          return typeof result === "string" ? ny.string(memoryRef, result) : 0n;
+        } catch (_) {
+          canvas.dataset.clipboardRead = "error";
+          return 0n;
+        }
+      });
+    };
+    const websocketRecord = (handle) => webSockets.get(ny.int(handle));
+    const websocketOpen = (url) => {
+      try {
+        if (typeof globalThis.WebSocket !== "function") return 0n;
+        const target = ny.text(memoryRef, url, 0);
+        if (!/^wss?:\/\//i.test(target)) return 0n;
+        const socket = new globalThis.WebSocket(target);
+        const id = nextWebSocket++;
+        const record = { socket, state: "CONNECTING", messages: [] };
+        webSockets.set(id, record);
+        socket.addEventListener("open", () => { record.state = "OPEN"; });
+        socket.addEventListener("message", (event) => {
+          if (typeof event.data === "string") record.messages.push(event.data);
+        });
+        socket.addEventListener("error", () => { record.state = "ERROR"; });
+        socket.addEventListener("close", () => { record.state = "CLOSED"; });
+        return ny.tag(id);
+      } catch (_) {
+        return 0n;
+      }
+    };
+    const websocketState = (handle) => {
+      const record = websocketRecord(handle);
+      if (!record) return 0n;
+      const states = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
+      const state = states[record.socket.readyState] || record.state || "ERROR";
+      record.state = state;
+      return ny.string(memoryRef, state);
+    };
+    const websocketSend = (handle, text) => {
+      const record = websocketRecord(handle);
+      if (!record || record.socket.readyState !== 1) return NY_FALSE;
+      try {
+        record.socket.send(ny.text(memoryRef, text, 0));
+        return NY_TRUE;
+      } catch (_) {
+        return NY_FALSE;
+      }
+    };
+    const websocketReceive = (handle) => {
+      const record = websocketRecord(handle);
+      if (!record || record.messages.length === 0) return 0n;
+      return ny.string(memoryRef, record.messages.shift());
+    };
+    const websocketClose = (handle) => {
+      const record = websocketRecord(handle);
+      if (!record) return NY_FALSE;
+      try {
+        record.state = "CLOSING";
+        record.socket.close();
+        return NY_TRUE;
+      } catch (_) {
+        return NY_FALSE;
+      }
+    };
     return {
       rt_argc: () => ny.tag(refreshRunArgv(meta).length),
       "std.core.primitives.argc": () => ny.tag(refreshRunArgv(meta).length),
       rt_argv: () => 0n,
-      rt_runtime_tag: (v) => v,
+      rt_runtime_tag: (v) => {
+        // rt_runtime_tag receives a tagged Ny string and returns a tagged integer tag.
+        // Used by the RT_DEF("__runtime_tag") path when the arg is not a compile-time literal.
+        const name = ny.text(memoryRef, v, 0);
+        return ny.tag(nyRuntimeTagRaw(name));
+      },
+      "std.core.primitives.runtime_tag_raw": (v) => {
+        // Surface-level runtime_tag_raw — called from module-init for global def constants
+        // like _CORE_TAG_LIST = runtime_tag_raw("list"). Receives tagged Ny string, returns
+        // tagged integer matching rt_runtime_tag_raw_name in src/rt/shared.h.
+        const name = ny.text(memoryRef, v, 0);
+        return ny.tag(nyRuntimeTagRaw(name));
+      },
       rt_malloc: (size) => BigInt(ny.alloc(memoryRef, ny.int(size))),
       rt_realloc: (_ptr, size) => BigInt(ny.alloc(memoryRef, ny.int(size))),
       rt_free: () => 0n,
@@ -1326,7 +1610,21 @@
         removePersisted(oldName);
         return ny.tag(0);
       },
-      __is_dir: (path) => ny.tag(virtualDirectory(virtualPath(path)).length ? 1 : 0),
+      __mkdir: (path) => {
+        const logical = virtualPath(path).replace(/^\/+|\/+$/g, "");
+        if (!logical || virtualDirectoryExists(logical)) return ny.tag(-17);
+        const slash = logical.lastIndexOf("/");
+        const parent = slash > 0 ? logical.slice(0, slash) : ".";
+        if (!virtualDirectoryExists(parent) || !persistDir(logical)) return ny.tag(-2);
+        return ny.tag(0);
+      },
+      __rmdir: (path) => {
+        const logical = virtualPath(path).replace(/^\/+|\/+$/g, "");
+        if (!logical || !storedDir(logical)) return ny.tag(-2);
+        if (virtualDirectory(logical).length) return ny.tag(-39);
+        return removePersistedDir(logical) ? ny.tag(0) : ny.tag(-5);
+      },
+      __is_dir: (path) => ny.tag(virtualDirectoryExists(virtualPath(path)) ? 1 : 0),
       __dir_open: (path) => {
         const names = virtualDirectory(virtualPath(path));
         if (!names.length) return 0n;
@@ -1364,12 +1662,15 @@
         return BigInt(r);
       },
       rt_tagof: (v) => ny.tag(Number(ny.tagof(memoryRef, v))),
-      rt_is_ok: (v) => ny.bool(ny.tagof(memoryRef, v) === 104n),
+      rt_is_ok: (v) => {
+        return ny.bool(ny.tagof(memoryRef, v) === 104n);
+      },
       rt_is_err: (v) => ny.bool(ny.tagof(memoryRef, v) === 105n),
       rt_unwrap: (v) => ny.readI64(memoryRef, ny.ptr(v)) || v,
       "std.os.file_read": (path) => {
         const requested = ny.text(memoryRef, path, 0);
-        const bytes = virtualBytes(assetPath(requested));
+        const logical = assetPath(requested);
+        const bytes = virtualBytes(logical);
         return bytes ? result(104, ny.string(memoryRef, dec.decode(bytes))) : result(105, ny.tag(-2));
       },
       "std.os.file_write": (path, content) => {
@@ -1397,6 +1698,41 @@
         removePersisted(oldName);
         return result(104, ny.tag(0));
       },
+      "std.os.pid": () => ny.tag(1),
+      "std.os.fs.is_dir": (path) => {
+        const value = virtualPath(path);
+        const exists = virtualDirectoryExists(value);
+        return ny.bool(exists);
+      },
+      "std.os.fs.list_dir": (path) => {
+        const names = virtualDirectory(virtualPath(path));
+        const out = ny.list(memoryRef, names.length);
+        for (let i = 0; i < names.length; i++)
+          ny.listSet(memoryRef, out, ny.tag(i), ny.string(memoryRef, names[i]));
+        ny.listSetLen(memoryRef, out, names.length);
+        return out;
+      },
+      "std.os.fs.make_dir": (path) => {
+        const logical = virtualPath(path).replace(/^\/+|\/+$/g, "");
+        if (!logical || virtualDirectoryExists(logical)) {
+          return result(105, ny.tag(-17));
+        }
+        const slash = logical.lastIndexOf("/");
+        const parent = slash > 0 ? logical.slice(0, slash) : ".";
+        const made = virtualDirectoryExists(parent) && persistDir(logical);
+        return made ? result(104, ny.tag(0)) : result(105, ny.tag(-2));
+      },
+      "std.os.fs.remove_dir": (path) => {
+        const logical = virtualPath(path).replace(/^\/+|\/+$/g, "");
+        if (!logical || !storedDir(logical)) {
+          return result(105, ny.tag(-2));
+        }
+        if (virtualDirectory(logical).length) {
+          return result(105, ny.tag(-39));
+        }
+        const removed = removePersistedDir(logical);
+        return removed ? result(104, ny.tag(0)) : result(105, ny.tag(-5));
+      },
       rt_str_concat: (a, b) => ny.string(memoryRef, ny.valueToString(memoryRef, a) + ny.valueToString(memoryRef, b)),
       rt_to_str: (v) => ny.string(memoryRef, ny.valueToString(memoryRef, v)),
       rt_add: (a, b) => {
@@ -1413,9 +1749,7 @@
       },
       rt_lt: (a, b) => ny.bool(ny.numeric(memoryRef, a) < ny.numeric(memoryRef, b)),
       rt_eq: (a, b) => {
-        if (BigInt(a || 0) === BigInt(b || 0)) return NY_TRUE;
-        if (ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b)) return ny.bool(ny.numeric(memoryRef, a) === ny.numeric(memoryRef, b));
-        return NY_FALSE;
+        return ny.bool(ny.equal(memoryRef, a, b));
       },
       rt_has_tag: (v, tag) => {
         const want = BigInt.asIntN(64, BigInt(tag || 0));
@@ -1461,7 +1795,37 @@
       __arch_name: () => ny.string(memoryRef, "wasm32"),
       "std.os.exit": () => 0n,
       "std.os.time.ticks": () => ny.tag(Math.trunc(performance.now() * 1000000)),
-      "std.os.time.msleep": () => 0n,
+      __time_seconds: () => ny.tag(Math.floor(Date.now() / 1000)),
+      __time_milliseconds: () => ny.tag(Date.now()),
+      __ticks_ns: () => ny.tag(Math.floor(performance.now() * 1000000)),
+      "std.os.time.now": () => ny.tag(Math.floor(Date.now() / 1000)),
+      "std.os.time.unix": () => ny.tag(Math.floor(Date.now() / 1000)),
+      "std.os.time.now_ms": () => ny.tag(Date.now()),
+      "std.os.time.monotonic_ns": () => ny.tag(Math.floor(performance.now() * 1000000)),
+      "std.os.time.msleep": (ms = 0n) => {
+        if (!asyncifyRef.controller)
+          throw new Error("std.os.time.msleep requires Asyncify instrumentation");
+        asyncifyRef.controller.sleep(ny.int(ms));
+        return 0n;
+      },
+      "std.os.fetch": webFetch,
+      __web_fetch: webFetch,
+      "std.os.clipboard.write": webClipboardWrite,
+      "std.os.clipboard.read": webClipboardRead,
+      "std.os.set_clipboard_text": webClipboardWrite,
+      "std.os.get_clipboard_text": webClipboardRead,
+      __web_clipboard_write: webClipboardWrite,
+      __web_clipboard_read: webClipboardRead,
+      "std.os.websocket.open": websocketOpen,
+      "std.os.websocket.state": websocketState,
+      "std.os.websocket.send": websocketSend,
+      "std.os.websocket.receive": websocketReceive,
+      "std.os.websocket.close": websocketClose,
+      __websocket_open: websocketOpen,
+      __websocket_state: websocketState,
+      __websocket_send: websocketSend,
+      __websocket_receive: websocketReceive,
+      __websocket_close: websocketClose,
       "std.os.args.first_positive_int": (fallback = 0n) => {
         for (const arg of refreshRunArgv(meta).slice(3)) {
           const n = parseInt(arg, 10);
@@ -1540,7 +1904,16 @@
         }
         return a;
       },
-      "std.core.eq": (a, b) => BigInt(a || 0) === BigInt(b || 0) ? NY_TRUE : NY_FALSE,
+      "std.core.eq": (a, b) => ny.bool(ny.equal(memoryRef, a, b)),
+      "std.core.contains": (container, item) => {
+        const containerTag = ny.tagof(memoryRef, container);
+        const itemTag = ny.tagof(memoryRef, item);
+        if ((containerTag === 120n || containerTag === 121n) &&
+            (itemTag === 120n || itemTag === 121n)) {
+          return ny.bool(ny.text(memoryRef, container, 0).includes(ny.text(memoryRef, item, 0)));
+        }
+        return NY_FALSE;
+      },
       "std.core.lt": (a, b) => ny.bool(ny.numeric(memoryRef, a) < ny.numeric(memoryRef, b)),
       "std.core.le": (a, b) => ny.bool(ny.numeric(memoryRef, a) <= ny.numeric(memoryRef, b)),
       "std.core.ge": (a, b) => ny.bool(ny.numeric(memoryRef, a) >= ny.numeric(memoryRef, b)),
@@ -1558,7 +1931,7 @@
       "std.core.to_str": (v) => ny.string(memoryRef, ny.valueToString(memoryRef, v)),
       "std.core.reflect.to_str": (v) => ny.string(memoryRef, ny.valueToString(memoryRef, v)),
       "std.core.reflect.div": (a, b) => ny.tag(Math.trunc(ny.numeric(memoryRef, a) / Math.max(1, ny.numeric(memoryRef, b)))),
-      "std.core.reflect.eq": (a, b) => BigInt(a || 0) === BigInt(b || 0) ? NY_TRUE : NY_FALSE,
+      "std.core.reflect.eq": (a, b) => ny.bool(ny.equal(memoryRef, a, b)),
       "std.core.type": (v) => ny.tag(Number(ny.tagof(memoryRef, v))),
       "std.core.ok": (v) => v,
       "std.core.term.write_str": () => 0n,
@@ -1586,7 +1959,7 @@
 
   function makeImports(meta, module, memoryRef) {
     const asyncifyRef = { controller: null, closed: false };
-    const host = { ...makeRuntimeImports(meta, memoryRef), ...makeWebImports(meta, memoryRef), ...makeUiImports(memoryRef, asyncifyRef) };
+    const host = { ...makeRuntimeImports(meta, memoryRef, asyncifyRef), ...makeWebImports(meta, memoryRef), ...makeUiImports(memoryRef, asyncifyRef) };
     const imports = {};
     for (const imp of WebAssembly.Module.imports(module)) {
       if (!imports[imp.module]) imports[imp.module] = {};
@@ -1730,18 +2103,29 @@
           currentRuntime.ran = true;
           ex[currentRuntime.entry]();
         }
-        if (currentRuntime.asyncify.needsResume()) {
-          currentRuntime.asyncify.finishUnwind();
-          requestAnimationFrame((ts) => {
+        const scheduleAsyncResume = (baseDt) => {
+          if (!currentRuntime || !currentRuntime.asyncify) return;
+          const delay = currentRuntime.asyncify.resumeDelay();
+          const resume = (ts) => {
             if (!currentRuntime || !currentRuntime.asyncify) return;
-            const nextDt = lastTime ? Math.min(0.05, (ts - lastTime) / 1000) : dt;
+            const nextDt = lastTime ? Math.min(0.05, (ts - lastTime) / 1000) : baseDt;
             lastTime = ts;
             currentRuntime.asyncify.resume(nextDt);
             if (currentRuntime.asyncify.needsResume()) {
               currentRuntime.asyncify.finishUnwind();
-              requestAnimationFrame((nextTs) => runFrame(Math.min(0.05, (nextTs - lastTime) / 1000)));
+              scheduleAsyncResume(nextDt);
             }
-          });
+          };
+          if (delay === Infinity) {
+            currentRuntime.asyncify.waitForResume((ts) => resume(ts));
+            return;
+          }
+          if (delay > 0) setTimeout(() => resume(performance.now()), delay);
+          else requestAnimationFrame(resume);
+        };
+        if (currentRuntime.asyncify.needsResume()) {
+          currentRuntime.asyncify.finishUnwind();
+          scheduleAsyncResume(dt);
         }
       } else if (typeof ex.ny_web_frame === "function") ex.ny_web_frame(Number(dt), stage.width, stage.height);
       else if (typeof ex.ny_web_render === "function") ex.ny_web_render(stage.width, stage.height);
@@ -1794,6 +2178,34 @@
     resetOutput(runtimeHeader(meta, null));
     renderControls();
     loadRuntime(meta);
+  }
+
+  async function loadLocalWasm(file) {
+    if (!file || !/\.wasm$/i.test(file.name || "")) {
+      canvas.dataset.localWasm = "rejected";
+      return false;
+    }
+    try {
+      const meta = {
+        id: "local-" + file.name,
+        title: file.name,
+        source: "local file",
+        area: "LOCAL",
+        mode: "native",
+        wasmBytes: await file.arrayBuffer(),
+      };
+      const existing = demos.findIndex((demo) => demo.id === meta.id);
+      if (existing >= 0) demos[existing] = meta;
+      else demos.push(meta);
+      renderList();
+      selectDemo(meta.id, false);
+      canvas.dataset.localWasm = "loaded";
+      return true;
+    } catch (err) {
+      canvas.dataset.localWasm = "error";
+      resetOutput(["local wasm", "error", err && err.message ? err.message : String(err)]);
+      return false;
+    }
   }
 
   function renderAreas() {
@@ -1892,15 +2304,27 @@
   window.addEventListener("gamepadconnected", refreshGamepadStatus);
   window.addEventListener("gamepaddisconnected", refreshGamepadStatus);
 
-  wasmFile.addEventListener("change", async () => {
-    const file = wasmFile.files[0];
-    if (!file) return;
-    const meta = { id: "local-" + file.name, title: file.name, source: "local file", area: "LOCAL", mode: "native", wasmBytes: await file.arrayBuffer() };
-    selectDemo(meta.id, false);
-    demos.push(meta);
-    renderList();
-    loadRuntime(meta);
-  });
+  wasmFile.addEventListener("change", () => loadLocalWasm(wasmFile.files[0]));
+  const stagePane = $("stagePane");
+  if (stagePane) {
+    stagePane.addEventListener("dragover", (event) => {
+      if (event.dataTransfer && Array.from(event.dataTransfer.items || []).some((item) => item.kind === "file")) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        stagePane.classList.add("drop-active");
+      }
+    });
+    stagePane.addEventListener("dragleave", (event) => {
+      if (!stagePane.contains(event.relatedTarget)) stagePane.classList.remove("drop-active");
+    });
+    stagePane.addEventListener("drop", (event) => {
+      event.preventDefault();
+      stagePane.classList.remove("drop-active");
+      const file = Array.from(event.dataTransfer && event.dataTransfer.files || [])
+        .find((candidate) => /\.wasm$/i.test(candidate.name || ""));
+      loadLocalWasm(file);
+    });
+  }
 
   $("runBtn").addEventListener("click", () => {
     running = !running;

@@ -1,0 +1,145 @@
+shape fft {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "fp", "fft", "simd", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+use std.core.tbuf
+;; Radix-2 FFT with Parseval checksum (forward transform only).
+def N = 256
+def PI = 3.14159265358979323846
+def re = f64buf_new(N)
+def im = f64buf_new(N)
+mut i = 0
+while i < N {
+   f64buf_store(re, i, float(i))
+   i += 1
+}
+def t0 = ticks()
+;; bit-reversal permutation
+mut j = 0
+i = 0
+while i < N {
+   if i < j {
+      def tr = f64buf_load(re, i)
+      def ti = f64buf_load(im, i)
+      f64buf_store(re, i, f64buf_load(re, j))
+      f64buf_store(im, i, f64buf_load(im, j))
+      f64buf_store(re, j, tr)
+      f64buf_store(im, j, ti)
+   }
+   mut m = N / 2
+   while m >= 1 && j >= m {
+      j -= m
+      m = m / 2
+   }
+   j += m
+   i += 1
+}
+;; butterflies
+mut len = 2
+while len <= N {
+   def ang = -2.0 * PI / float(len)
+   def wpr = __flt_cos(ang)
+   def wpi = __flt_sin(ang)
+   mut k = 0
+   while k < N {
+      mut wr = 1.0
+      mut wi = 0.0
+      mut h = 0
+      while h < len / 2 {
+         def ar = f64buf_load(re, k + h)
+         def ai = f64buf_load(im, k + h)
+         def mr = f64buf_load(re, k + h + len / 2)
+         def mi = f64buf_load(im, k + h + len / 2)
+         def br = mr * wr - mi * wi
+         def bi = mr * wi + mi * wr
+         f64buf_store(re, k + h, ar + br)
+         f64buf_store(im, k + h, ai + bi)
+         f64buf_store(re, k + h + len / 2, ar - br)
+         f64buf_store(im, k + h + len / 2, ai - bi)
+         def nwr = wr * wpr - wi * wpi
+         def nwi = wr * wpi + wi * wpr
+         wr = nwr
+         wi = nwi
+         h += 1
+      }
+      k += len
+   }
+   len = len * 2
+}
+def t1 = ticks()
+;; Monotonic checksum: sum of truncated output energies (deterministic on
+;; both engines since cos/sin come from the same libm).
+mut ck = 0
+i = 0
+while i < N {
+   def rr = f64buf_load(re, i)
+   def ii = f64buf_load(im, i)
+   ck += int(rr * rr + ii * ii)
+   i += 1
+}
+print("checksum=", ck)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    int N = 256;
+    double PI = 3.14159265358979323846;
+    double *re = (double *)malloc((size_t)N * sizeof(double));
+    double *im = (double *)malloc((size_t)N * sizeof(double));
+    for (int i = 0; i < N; i++) { re[i] = (double)i; im[i] = 0.0; }
+    int64_t start = now_ns();
+    int j = 0;
+    for (int i = 0; i < N; i++) {
+        if (i < j) {
+            double tr = re[i], ti = im[i];
+            re[i] = re[j]; im[i] = im[j];
+            re[j] = tr; im[j] = ti;
+        }
+        int m = N / 2;
+        while (m >= 1 && j >= m) { j -= m; m /= 2; }
+        j += m;
+    }
+    for (int len = 2; len <= N; len *= 2) {
+        double ang = -2.0 * PI / len;
+        double wpr = cos(ang), wpi = sin(ang);
+        for (int k = 0; k < N; k += len) {
+            double wr = 1.0, wi = 0.0;
+            for (int h = 0; h < len / 2; h++) {
+                double ar = re[k + h], ai = im[k + h];
+                double mr = re[k + h + len / 2], mi = im[k + h + len / 2];
+                double br = mr * wr - mi * wi, bi = mr * wi + mi * wr;
+                re[k + h] = ar + br; im[k + h] = ai + bi;
+                re[k + h + len / 2] = ar - br; im[k + h + len / 2] = ai - bi;
+                double nwr = wr * wpr - wi * wpi, nwi = wr * wpi + wi * wpr;
+                wr = nwr; wi = nwi;
+            }
+        }
+    }
+    int64_t end = now_ns();
+    long long ck = 0;
+    for (int i = 0; i < N; i++)
+        ck += (long long)(re[i] * re[i] + im[i] * im[i]);
+    printf("checksum=%lld\n", ck);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

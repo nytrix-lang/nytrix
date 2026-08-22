@@ -148,7 +148,6 @@ fn coppersmith_short_pad(any n, int e, any c1, any c2, int m_param=3, int t_para
    def nn = Z(n)
    def cc1, cc2 = Z(c1), Z(c2)
    def deg_res = e * e
-
    mut f1 = [mod(-cc1, nn), Z(0), Z(0), Z(1)]
    if e > 3 {
       f1 = list(e + 1)
@@ -158,7 +157,6 @@ fn coppersmith_short_pad(any n, int e, any c1, any c2, int m_param=3, int t_para
          i += 1
       }
    }
-
    mut points = []
    mut res_vals = []
    mut y_val = 0
@@ -172,24 +170,19 @@ fn coppersmith_short_pad(any n, int e, any c1, any c2, int m_param=3, int t_para
          i += 1
       }
       f2.set(0, mod(f2.get(0) - cc2, nn))
-
       def rv = poly_resultant_mod(f1, f2, nn)
       points = points.append(y_val)
       res_vals = res_vals.append(rv)
       y_val += 1
    }
-
    def h_poly = _lagrange_interpolate_mod(points, res_vals, nn)
    if h_poly.len == 0 { return nil }
-
    def n_bits = bit_length(nn)
    def delta_bits = n_bits / (e * e)
    def X = Z(1) << Z(delta_bits)
-
    def roots = modular_univariate(h_poly, nn, m_param, t_param, X)
    if roots.len == 0 { return nil }
    def r0 = Z(roots.get(0))
-
    def f2_shift = [r0, Z(1)]
    franklin_reiter_attack(nn, e, cc1, cc2, [Z(0), Z(1)], f2_shift)
 }

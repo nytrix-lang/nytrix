@@ -1,0 +1,14 @@
+shape args-invalid-native-abi {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--native-abi=bogus"
+  expect_message "invalid native ABI"
+  source ny <<'NY'
+use std.core
+print("ok")
+NY
+}

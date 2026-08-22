@@ -1,0 +1,63 @@
+shape nqueens {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "bitwise", "backtracking", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+;; N-queens via bitwise backtracking: count solutions for N=13 (=73712).
+fn solve(int cols, int ld, int rd, int n) int {
+   def full = (1 << n) - 1
+   if cols == full { return 1 }
+   mut avail = ~(cols | ld | rd) & full
+   mut count = 0
+   while avail != 0 {
+      def pos = avail & (0 - avail)
+      avail = avail - pos
+      count += solve(cols | pos, (ld | pos) << 1, (rd | pos) >> 1, n)
+   }
+   count
+}
+def t0 = ticks()
+def r = solve(0, 0, 0, 13)
+def t1 = ticks()
+print("checksum=", r)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static long solve(long cols, long ld, long rd, int n) {
+    long full = (1L << n) - 1;
+    if (cols == full) return 1;
+    long free = ~(cols | ld | rd) & full;
+    long count = 0;
+    while (free) {
+        long pos = free & (-free);
+        free -= pos;
+        count += solve(cols | pos, (ld | pos) << 1, (rd | pos) >> 1, n);
+    }
+    return count;
+}
+
+int main(void) {
+    int64_t start = now_ns();
+    long r = solve(0, 0, 0, 13);
+    int64_t end = now_ns();
+    printf("checksum=%ld\n", r);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

@@ -1,0 +1,14 @@
+shape args-invalid-threads-negative {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--threads=-1"
+  expect_message "invalid thread count: -1"
+  source ny <<'NY'
+use std.core
+print("ok")
+NY
+}

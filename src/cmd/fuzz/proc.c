@@ -1,3 +1,7 @@
+/*
+ * Fuzz process runner: spawns and monitors fuzzer worker subprocesses
+ * with timeouts, resource limits, and output capture for crash detection.
+ */
 #include "core.h"
 #include <strings.h>
 

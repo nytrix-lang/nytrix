@@ -1,0 +1,22 @@
+shape oracle_sdiv_magic_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle division modulo constant negative divisor regression]
+  flags_matrix "-O2 --native-result-oracle=527; -O3 --native-result-oracle=527"
+  expect compile_and_run
+  source ny <<'NY'
+fn trunc_div_sum(i64 lo, i64 hi) i64 {
+  mut x = lo
+  mut acc = 0
+  while x <= hi {
+    acc += (x / 3) + (x % 3)
+    acc += (x / 97) + (x % 97)
+    acc += (x / -5) + (x % -5)
+    x += 1
+  }
+  acc
+}
+
+trunc_div_sum(-997, 1000)
+NY
+}

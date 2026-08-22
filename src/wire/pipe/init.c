@@ -1,3 +1,7 @@
+/*
+ * Compiler pipeline entry: source-to-artifact orchestration,
+ * phase sequencing, error collection, and artifact emission.
+ */
 #define _CRT_RAND_S
 #include "wire/pipe.h"
 #include "base/common.h"
@@ -7,6 +11,7 @@
 #include "base/time.h"
 #include "base/util.h"
 #include "code/code.h"
+#include "code/incremental/incremental.h"
 #include "code/jit.h"
 #include "code/llvm.h"
 #include "code/native/native.h"
@@ -165,11 +170,13 @@ static int ny_native_jit_safe_child(void *raw) {
     return 1;
   if (!ny_jit_prepare_execution((uint64_t)(uintptr_t)call->entry))
     return 1;
-  /* The compiled entry returns the top-level expression's value in rax;
+  /*
+   * The compiled entry returns the top-level expression's value in rax;
    * that value IS the process exit code for --native-only mode (matches
    * the pureexpr fast-path contract: `-c '1+2*20+2'` exits 43). Discarding
    * it here silently turned every native JIT / stencil-cache execution
-   * into exit 0 regardless of what the program actually computed. */
+   * into exit 0 regardless of what the program actually computed.
+   */
   int64_t result = call->entry();
   rt_print_flush();
   return (int)(result & 0xff);
@@ -179,28 +186,38 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
                               const char *output_path, bool execute,
                               bool remove_output) {
   if (execute) {
+    ny_tick_t t_jit_compile = opt->do_timing ? ny_ticks_now() : 0;
 #ifndef _WIN32
-    /* Stencil cache: try to load previously-persisted self-contained code. */
+    /*
+     * Stencil cache: try to load previously-persisted self-contained code.
+     */
     void *cached_handle = NULL;
     void (*cached_entry)(void) = NULL;
     if (prog->raw_src && prog->raw_src_len > 0) {
-      char *cache_path =
-          ny_jit_stencil_cache_path(prog->raw_src, opt ? opt->opt_level : 0);
+      char *cache_path = ny_jit_stencil_cache_path(
+          prog->raw_src, opt ? opt->opt_level : 0,
+          opt ? opt->native_backend_raw : NULL,
+          opt ? opt->native_tier_raw : NULL);
       if (cache_path) {
         ny_jit_stencil_cache_load(cache_path, &cached_handle, &cached_entry);
         free(cache_path);
       }
     }
     if (cached_entry) {
+      if (opt->do_timing)
+        fprintf(stderr, "JIT Compile: 0.0000s (cached stencil)\n");
       ny_native_jit_call_t call = {
           .entry = (int64_t(*)(void))cached_entry,
       };
+      ny_tick_t t_jit_run = opt->do_timing ? ny_ticks_now() : 0;
       int rc = ny_safe_run_requested(&opt->safe_run)
                    ? ny_safe_run_call(&opt->safe_run, ny_native_jit_safe_child,
                                       &call,
                                       opt->input_file ? opt->input_file
                                                       : "native JIT workload")
                    : ny_native_jit_safe_child(&call);
+      if (opt->do_timing)
+        fprintf(stderr, "JIT Run:     %.4fs\n", ny_ticks_elapsed_sec(t_jit_run));
       dlclose(cached_handle);
       return rc;
     }
@@ -212,15 +229,20 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
                  jit_err[0] ? jit_err : "unsupported native shape");
       return 1;
     }
+    if (opt->do_timing)
+      fprintf(stderr, "JIT Compile: %.4fs\n", ny_ticks_elapsed_sec(t_jit_compile));
     ny_native_jit_call_t call = {
         .entry = (int64_t(*)(void))image.entry,
     };
+    ny_tick_t t_jit_run = opt->do_timing ? ny_ticks_now() : 0;
     int rc = ny_safe_run_requested(&opt->safe_run)
                  ? ny_safe_run_call(&opt->safe_run, ny_native_jit_safe_child,
                                     &call,
                                     opt->input_file ? opt->input_file
                                                     : "native JIT workload")
                  : ny_native_jit_safe_child(&call);
+    if (opt->do_timing)
+      fprintf(stderr, "JIT Run:     %.4fs\n", ny_ticks_elapsed_sec(t_jit_run));
     ny_native_jit_image_free(&image);
     return rc;
   }
@@ -250,7 +272,8 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
   ny_native_link_list_t links = {0};
   for (size_t i = 0; i < opt->link_libs.len; ++i)
     ny_native_link_list_add(opt->link_libs.data[i], &links);
-  ny_native_visit_program_links(prog, ny_native_link_list_add, &links);
+  ny_native_visit_program_links_for_options(prog, opt, ny_native_link_list_add,
+                                            &links);
   if (links.overflow) {
     NY_LOG_ERR("Native-only link failed: too many source-level libraries\n");
     unlink(obj);
@@ -522,9 +545,11 @@ static bool handle_non_compile_modes(ny_options *opt, int *exit_code) {
       ny_options run_opt = *opt;
       run_opt.mode = NY_MODE_RUN;
       if (opt->native_only) {
-        /* -c is represented as a one-shot REPL command by option parsing.
+        /*
+         * -c is represented as a one-shot REPL command by option parsing.
          * Native-only redirects it through the ordinary run pipeline, where
-         * it must be executed rather than treated as a precompile request. */
+         * it must be executed rather than treated as a precompile request.
+         */
         run_opt.emit_only = false;
         run_opt.run_aot = true;
         run_opt.run_jit = false;
@@ -549,6 +574,8 @@ static char *ny_normalize_command_source(const char *src) {
     return ny_strdup("");
 
   size_t len = strlen(src);
+  if (len > SIZE_MAX - 2)
+    return NULL;
   char *out = (char *)malloc(len + 2);
   if (!out)
     return NULL;
@@ -1581,9 +1608,11 @@ static bool ny_pipeline_load_stdlib(ny_options *opt, char **uses,
             std->src = NULL;
             (void)unlink(std_cache_path);
           } else {
-            /* The on-disk header is cache metadata, not Nytrix source. Keep
+            /*
+             * The on-disk header is cache metadata, not Nytrix source. Keep
              * the parser and downstream artifact keys identical whether the
-             * stdlib was generated just now or restored from this cache. */
+             * stdlib was generated just now or restored from this cache.
+             */
             memmove(std->src, std->src + nw, strlen(std->src + nw) + 1);
           }
         }
@@ -1601,6 +1630,8 @@ static bool ny_pipeline_load_stdlib(ny_options *opt, char **uses,
                           (unsigned long long)std_cache_sig);
         if (hn > 0 && (size_t)hn < sizeof(header)) {
           size_t sl = strlen(std->src);
+          if ((size_t)hn > SIZE_MAX - sl - 1)
+            return false;
           char *wrapped = malloc((size_t)hn + sl + 1);
           if (wrapped) {
             memcpy(wrapped, header, (size_t)hn);
@@ -1687,6 +1718,87 @@ static char *ny_pipeline_join_sources(const char *std_src, const char *user_src,
     *user_len_out = ulen;
   return source;
 }
+
+/*
+ * Env-guarded incremental recompilation inventory for an already-loaded
+ * program.  Walks the top-level module declarations and runs the file-level
+ * incremental driver over their on-disk source paths.  Default-off so the
+ * well-tested compile path is entirely unchanged; enabled with
+ * NYTRIX_INCREMENTAL=1.
+ */
+#if !defined(_WIN32)
+static bool ny_pipeline_incremental_add_file(char ***files, size_t *count,
+                                             size_t *cap, const char *path) {
+  if (!files || !count || !cap || !path || !*path ||
+      strncmp(path, "http://", 7) == 0 ||
+      strncmp(path, "https://", 8) == 0)
+    return true;
+  for (size_t i = 0; i < *count; ++i)
+    if (strcmp((*files)[i], path) == 0)
+      return true;
+  if (*count == *cap) {
+    size_t next = *cap ? *cap * 2 : 8;
+    if (next <= *cap) /* overflow */
+      return false;
+    char **grown = realloc(*files, next * sizeof(*grown));
+    if (!grown)
+      return false;
+    *files = grown;
+    *cap = next;
+  }
+  (*files)[*count] = ny_strdup(path);
+  if (!(*files)[*count])
+    return false;
+  ++*count;
+  return true;
+}
+
+static void ny_pipeline_run_incremental(program_t *prog, ny_options *opt) {
+  if (!prog || !opt || !ny_env_enabled("NYTRIX_INCREMENTAL"))
+    return;
+  size_t count = 0;
+  size_t cap = 0;
+  char **files = NULL;
+  if (opt->input_file &&
+      !ny_pipeline_incremental_add_file(&files, &count, &cap,
+                                        opt->input_file))
+    goto cleanup;
+  for (size_t i = 0; i < prog->body.len; i++) {
+    const stmt_t *s = prog->body.data[i];
+    if (!s || s->kind != NY_S_MODULE)
+      continue;
+    if (!ny_pipeline_incremental_add_file(&files, &count, &cap,
+                                          s->tok.filename))
+      goto cleanup;
+  }
+  if (count == 0)
+    goto cleanup;
+  ny_incremental_config_t cfg = {0};
+  char project_root[4096];
+  cfg.enable_incremental = true;
+  ny_dir_name(project_root, sizeof(project_root),
+              opt->input_file ? opt->input_file : ".");
+  cfg.project_root = project_root;
+  ny_incremental_result_t res =
+      ny_incremental_compile((const char **)files, count, &cfg);
+  for (size_t i = 0; i < res.recompile_count; i++)
+    fprintf(stderr, "[incremental] recompile: %s\n",
+            res.recompile_files[i] ? res.recompile_files[i] : "?");
+  fprintf(stderr, "[incremental] graph nodes=%zu recompile=%zu success=%d\n",
+          count, res.recompile_count, (int)res.success);
+  ny_incremental_free_result(&res);
+cleanup:
+  for (size_t i = 0; i < count; i++)
+    free(files[i]);
+  free(files);
+  ny_incremental_shutdown();
+}
+#else
+static void ny_pipeline_run_incremental(program_t *prog, ny_options *opt) {
+  (void)prog;
+  (void)opt;
+}
+#endif
 
 int ny_pipeline_run(ny_options *opt) {
   int exit_code = 0;
@@ -1831,10 +1943,12 @@ int ny_pipeline_run(ny_options *opt) {
     exit_code = 1;
     goto exit_success;
   }
-  /* `--native-only` promises the Nytrix-owned NYIR/object execution path.
+  /*
+   * `--native-only` promises the Nytrix-owned NYIR/object execution path.
    * LLVM is a selectable backend for ordinary JIT/AOT compilation, but it
    * cannot satisfy that promise. Reject this contradictory pair before any
-   * AOT cache lookup can return an artifact built by another backend. */
+   * AOT cache lookup can return an artifact built by another backend.
+   */
   if (opt->native_only && opt->native_backend == NY_NATIVE_BACKEND_LLVM) {
     NY_LOG_ERR("--native-only requires a Nytrix-owned backend; choose x86_64, "
                "aarch64, or another supported native backend\n");
@@ -1907,8 +2021,10 @@ int ny_pipeline_run(ny_options *opt) {
   if (ny_should_use_aot_cache(opt)) {
     ny_build_aot_cache_path(opt, source, parse_name, prebuilt_path, output_path,
                             aot_cache_path, sizeof(aot_cache_path));
-    /* A valid executable alone is insufficient: its sidecar proves it was
-     * produced from these exact post-stdlib source bytes. */
+    /*
+     * A valid executable alone is insufficient: its sidecar proves it was
+     * produced from these exact post-stdlib source bytes.
+     */
     if (aot_cache_path[0] != '\0' && ny_access(aot_cache_path, R_OK) == 0 &&
         ny_cache_artifact_manifest_valid(aot_cache_path, source) &&
         strcmp(aot_cache_path, output_path) != 0) {
@@ -1938,14 +2054,16 @@ int ny_pipeline_run(ny_options *opt) {
     }
   }
 #ifndef _WIN32
-  /* Stencil cache early check: skip parse/semantic/lower when a cached
-   * self-contained .so already exists for this source+opt_level. */
+  /*
+   * Stencil cache early check: skip parse/semantic/lower when a cached
+   * self-contained .so already exists for this source+opt_level.
+   */
   if (opt->native_only && !opt->emit_ir_path && !opt->emit_only &&
       !opt->dump_tokens && !opt->dump_ast && !opt->expand &&
-      !opt->dump_llvm && !opt->emit_ir_path && !opt->emit_bc_path &&
-      !opt->dump_diagnose) {
-    char *stencil_path =
-        ny_jit_stencil_cache_path(source, opt->opt_level);
+      !opt->dump_llvm && !opt->emit_bc_path && !opt->dump_diagnose) {
+    char *stencil_path = ny_jit_stencil_cache_path(
+        source, opt->opt_level, opt->native_backend_raw,
+        opt->native_tier_raw);
     if (stencil_path) {
       void *cached_handle = NULL;
       void (*cached_entry)(void) = NULL;
@@ -2008,6 +2126,13 @@ int ny_pipeline_run(ny_options *opt) {
     goto exit_success;
   }
   ny_ast_verify_program(&prog, "parse");
+  /*
+   * Run the opt-in dependency fingerprint pass after parsing, while the
+   * parser still owns the canonical module filenames.  The pass only updates
+   * the graph and invalidates stale artifacts; it does not alter the normal
+   * semantic/codegen path.
+   */
+  ny_pipeline_run_incremental(&prog, opt);
   if (ny_stop_after_is(opt, NY_STOP_AFTER_PARSE)) {
     ny_stage_emit_artifact(opt, NY_STOP_AFTER_PARSE, &prog, NULL, parse_name,
                            NULL, true);
@@ -2029,9 +2154,11 @@ int ny_pipeline_run(ny_options *opt) {
     goto exit_success;
   }
 
-  /* The native-only branch deliberately occurs before codegen_init(): no LLVM
+  /*
+   * The native-only branch deliberately occurs before codegen_init(): no LLVM
    * context, module, instruction selection, MCJIT, or LLVM object fallback is
-   * created for this execution mode. */
+   * created for this execution mode.
+   */
   if (opt->native_backend != NY_NATIVE_BACKEND_LLVM && opt->emit_bc_path &&
       !opt->emit_ir_path) {
     ny_options native_bc = *opt;
@@ -2081,11 +2208,14 @@ int ny_pipeline_run(ny_options *opt) {
   codegen_init(&cg, &prog, arena, "nytrix");
   cg.source_main_file = parse_name;
   cg.type_solver = opt->type_solver_raw ? opt->type_solver_raw : "auto";
+  cg.proof_solver = opt->proof_solver_raw ? opt->proof_solver_raw : "auto";
   cg.c_frontend = opt->c_frontend_raw ? opt->c_frontend_raw : "auto";
   cg.strict_types = opt->strict_types;
-  /* Advisory provenance checking is deliberately separate from hard errors
+  /*
+   * Advisory provenance checking is deliberately separate from hard errors
    * and automatic cleanup. This keeps ordinary compilation informative without
-   * changing the program's lifetime or heap policy. */
+   * changing the program's lifetime or heap policy.
+   */
   cg.ownership_enabled = opt->ownership || opt->ownership_strict || opt->borrow_check;
   cg.ownership_strict = opt->ownership_strict;
   cg.ownership_runtime_cleanup = opt->ownership;
@@ -2117,10 +2247,12 @@ int ny_pipeline_run(ny_options *opt) {
                                        (unsigned long)ny_std_latest_mtime(),
                                        ny_stage_semantic_config_fingerprint(opt));
 #ifndef _WIN32
-    /* Reserve the native path even on a cold compile: the newly generated
+    /*
+     * Reserve the native path even on a cold compile: the newly generated
      * bitcode can be promoted to this faster process-startup tier below.
      * Loading remains gated by the bitcode manifest because both artifacts
-     * represent the same source fingerprint. */
+     * represent the same source fingerprint.
+     */
     if (jit_cache_file && opt->run_jit && !opt->command_string &&
         ny_jit_native_cache_enabled()) {
       native_cache_file = ny_jit_native_cache_path(jit_cache_file);
@@ -2133,7 +2265,9 @@ int ny_pipeline_run(ny_options *opt) {
       }
     }
 #endif
-    /* LLVM parsing happens only after the provenance sidecar is accepted. */
+    /*
+     * LLVM parsing happens only after the provenance sidecar is accepted.
+     */
     if (jit_cache_file && ny_cache_artifact_manifest_valid(jit_cache_file, source)) {
       LLVMModuleRef cached_mod = NULL;
       if (ny_jit_cache_load(jit_cache_file, cg.ctx, &cached_mod)) {
@@ -2169,6 +2303,7 @@ int ny_pipeline_run(ny_options *opt) {
   ny_module_list mods = {0};
   if (!fast_compiler && !use_std_bc_cache && ny_parallel_modules_enabled(opt)) {
     ny_collect_top_modules(&prog, &mods);
+    ny_module_list_fingerprint(&prog, &mods);
     if (mods.len > 0)
       parallel_modules = true;
   }
@@ -2299,16 +2434,26 @@ int ny_pipeline_run(ny_options *opt) {
         const char *tmp_dir = ny_get_temp_dir();
         while (finished < mods.len) {
           while (started < mods.len && running < (size_t)max_jobs) {
-            if (!ny_spawn_module_job(opt, mods.names[started], tmp_dir,
-                                     &mod_jobs[started])) {
+            if (!ny_spawn_module_job(opt, mods.entries[started].name,
+                                     mods.entries[started].source_fingerprint,
+                                     tmp_dir, &mod_jobs[started])) {
               parallel_modules = false;
               break;
             }
             started++;
-            running++;
+            if (mod_jobs[started - 1].pid > 0)
+              running++;
+            else
+              finished++;
           }
           if (!parallel_modules)
             break;
+          if (finished == mods.len)
+            break;
+          if (running == 0) {
+            parallel_modules = false;
+            break;
+          }
           int status = 0;
           pid_t pid = wait(&status);
           if (pid < 0) {
@@ -2322,8 +2467,16 @@ int ny_pipeline_run(ny_options *opt) {
               mod_jobs[i].exit_code = WEXITSTATUS(status);
             else
               mod_jobs[i].exit_code = 1;
-            if (mod_jobs[i].exit_code != 0)
+            if (mod_jobs[i].exit_code == 0 &&
+                !ny_module_job_publish_cache(&mod_jobs[i]))
+              mod_jobs[i].exit_code = 1;
+            if (mod_jobs[i].exit_code != 0) {
+              if (ny_env_enabled("NYTRIX_TRACE_CACHE"))
+                fprintf(stderr, "module worker failed: %s (exit=%d)\n",
+                        mod_jobs[i].name ? mod_jobs[i].name : "<module>",
+                        mod_jobs[i].exit_code);
               parallel_modules = false;
+            }
             break;
           }
           running--;
@@ -2352,7 +2505,7 @@ int ny_pipeline_run(ny_options *opt) {
   }
   if (!parallel_modules && mod_jobs) {
     for (size_t i = 0; i < mod_job_count; i++) {
-      if (mod_jobs[i].bc_path)
+      if (mod_jobs[i].bc_path && !mod_jobs[i].persistent)
         (void)unlink(mod_jobs[i].bc_path);
       ny_module_job_free(&mod_jobs[i]);
     }
@@ -2412,7 +2565,8 @@ int ny_pipeline_run(ny_options *opt) {
         goto exit_success;
       }
       codegen_rebind_llvm_symbols(&cg);
-      (void)unlink(mod_jobs[i].bc_path);
+      if (!mod_jobs[i].persistent)
+        (void)unlink(mod_jobs[i].bc_path);
       ny_module_job_free(&mod_jobs[i]);
     }
     free(mod_jobs);
@@ -2484,13 +2638,16 @@ int ny_pipeline_run(ny_options *opt) {
       LLVMDisposeModule(dump_mod);
   }
 
-  /* JIT cache artifacts are written below only after this exact optimization
+  /*
+   * JIT cache artifacts are written below only after this exact optimization
    * stage. Re-running LLVM's pipeline on a validated hit both burns most of
    * the warm-start budget and can make cache behavior depend on pass details
-   * outside the cache key. */
+   * outside the cache key.
+   */
   if (!fast_compiler && !loaded_from_cache) {
     int eff_opt = opt->opt_level;
-    if (parallel_modules && !ny_env_enabled("NYTRIX_PARALLEL_OPT_LINK")) {
+    if (parallel_modules && !opt->llvm_lto &&
+        !ny_env_enabled("NYTRIX_PARALLEL_OPT_LINK")) {
       eff_opt = 0;
     }
     if (opt->run_jit) {
@@ -2500,7 +2657,7 @@ int ny_pipeline_run(ny_options *opt) {
     if (cg.di_builder) {
       codegen_debug_finalize(&cg);
     }
-    progress_node = ny_progress_task_begin("optimize llvm", 1);
+    progress_node = ny_progress_task_begin("optimize", 1);
     ny_llvm_optimize_module(cg.module, eff_opt, opt->opt_loops,
                             opt->opt_pipeline);
     ny_progress_task_end(progress_node);
@@ -2518,10 +2675,12 @@ int ny_pipeline_run(ny_options *opt) {
   }
   ny_dump_diagnose_ir_stage(opt, cg.module, "diag.post.ll", "post-opt");
   if (opt->stop_after == NY_STOP_AFTER_OPT) {
-    /* When stopping after optimization for validation (e.g. test runner),
+    /*
+     * When stopping after optimization for validation (e.g. test runner),
      * skip the full typed/resolved artifact JSON which invokes Z3 and can
      * trigger heap-corruption detection in large stdlib compilations.  Just
-     * emit a lightweight pass-through artifact so the caller sees success. */
+     * emit a lightweight pass-through artifact so the caller sees success.
+     */
     bool emit_full = opt->emit_artifact_path || opt->emit_shapes;
     ny_stage_emit_artifact(opt, emit_full ? NY_STOP_AFTER_OPT
                                           : NY_STOP_AFTER_PARSE,
@@ -2535,8 +2694,10 @@ int ny_pipeline_run(ny_options *opt) {
   }
   if (write_compile_caches && jit_cache_file) {
 #ifndef _WIN32
-    /* A bitcode hit may be the first opportunity to build the faster native
-     * tier. Do not require a full front-end miss before promoting it. */
+    /*
+     * A bitcode hit may be the first opportunity to build the faster native
+     * tier. Do not require a full front-end miss before promoting it.
+     */
     if (ny_env_enabled("NYTRIX_JIT_NATIVE_CACHE") && native_cache_file &&
         opt->run_jit && !opt->command_string &&
         ny_access(native_cache_file, R_OK) != 0) {
@@ -2660,8 +2821,10 @@ skip_compilation:
     }
     ny_trace_file_size("emit_bc", opt->emit_bc_path);
   }
-  /* Extern declarations with `as "cname"` must emit their linker symbol, not
-   * the Nytrix name.  Rename before any LLVM assembly/object emission. */
+  /*
+   * Extern declarations with `as "cname"` must emit their linker symbol, not
+   * the Nytrix name.  Rename before any LLVM assembly/object emission.
+   */
   if (opt->native_backend == NY_NATIVE_BACKEND_LLVM)
     codegen_export_extern_link_names(&cg);
   if (opt->emit_asm_path) {
@@ -2828,8 +2991,10 @@ skip_compilation:
       if (aot_cache_path[0] != '\0' &&
           strcmp(aot_cache_path, output_path) != 0 &&
           ny_valid_native_artifact(output_path)) {
-        /* Publish the executable first, then its provenance marker. Readers
-         * reject an artifact without a marker, including interrupted writes. */
+        /*
+         * Publish the executable first, then its provenance marker. Readers
+         * reject an artifact without a marker, including interrupted writes.
+         */
         if (ny_copy_file(output_path, aot_cache_path) == 0)
           (void)ny_cache_artifact_manifest_save(aot_cache_path, source);
       }

@@ -1,0 +1,19 @@
+shape native_oracle_fin_param_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle fin parameter bounds]
+  template ny-test-case
+  flags "--native-result-oracle=42 -O1"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn load_fin(Fin<1> idx) i64 {
+  def p = malloc(8)
+  store64_i(p, 42, idx)
+  load64_i(p, idx)
+}
+
+load_fin(0) == 42
+NY
+}

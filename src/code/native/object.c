@@ -1,3 +1,7 @@
+/*
+ * Object-file writer: produces ELF64, ELF32, COFF, and Mach-O object
+ * files from machine-form with relocations and section management.
+ */
 #include "code/native/object/internal.h"
 
 #include <limits.h>
@@ -195,7 +199,9 @@ static bool ny_i386_obj_i32(ny_i386_obj_ctx_t *c, int32_t v) {
   return ny_i386_obj_bytes(c, b, sizeof(b));
 }
 
-/* disp32(%ebp) memops: opcode bytes then i32 displacement. */
+/*
+ * disp32(%ebp) memops: opcode bytes then i32 displacement.
+ */
 #define NY_I386_EBP_OP(name, ...)                                              \
   static bool name(ny_i386_obj_ctx_t *c, int off) {                            \
     static const unsigned char op[] = {__VA_ARGS__};                           \
@@ -374,9 +380,11 @@ static bool ny_obj_reloc_symbol(char *out, size_t out_len,
                                 const char *symbol) {
   if (!out || out_len == 0 || !symbol || !symbol[0])
     return false;
-  /* Lowering emits pooled literals as local object symbols (for example
+  /*
+   * Lowering emits pooled literals as local object symbols (for example
    * .Lnystr.0).  They already name a definition in this object and must not
-   * pass through the Nytrix function-name formatter. */
+   * pass through the Nytrix function-name formatter.
+   */
   if (symbol[0] == '.') {
     int n = snprintf(out, out_len, "%s", symbol);
     return n > 0 && (size_t)n < out_len;
@@ -460,7 +468,7 @@ bool ny_i386_obj_collect_external_reloc_symbols(
       continue;
     if (ny_i386_obj_symbol_index(symbols, count, relocs[i].symbol) >= 0)
       continue;
-    if (count >= 256) {
+    if (count >= NY_X64_OBJ_MAX_RELOCS) {
       ny_native_set_err(err, err_len,
                         "i386 ELF object writer: too many relocation symbols");
       return false;
@@ -917,8 +925,10 @@ bool ny_i386_obj_emit_code(ny_i386_obj_ctx_t *c, const nyir_func_t *nyir,
         return false;
       break;
     case NYIR_CMP_F64:
-      /* FCOMIP writes EFLAGS directly.  Keep the x87 stack balanced after
-       * its implicit pop so conditional branches do not depend on SAHF. */
+      /*
+       * FCOMIP writes EFLAGS directly.  Keep the x87 stack balanced after
+       * its implicit pop so conditional branches do not depend on SAHF.
+       */
       if (!ny_i386_obj_load_value_f64(c, in->b) ||
           !ny_i386_obj_load_value_f64(c, in->a) ||
           !ny_i386_obj_bytes(c, (const unsigned char[]){0xdf, 0xf1, 0xdd, 0xd8, 0x0f},
@@ -1016,7 +1026,8 @@ bool ny_i386_obj_emit_code(ny_i386_obj_ctx_t *c, const nyir_func_t *nyir,
         } else if (in->a < c->value_slots && c->value_f32 && c->value_f32[in->a]) {
           if (!ny_i386_obj_load_value_f32(c, in->a))
             return false;
-        } else if (!ny_i386_obj_load_value_eax(c, in->a)) {
+        } else if (!ny_i386_obj_load_value_eax(c, in->a) ||
+                   !ny_i386_obj_u8(c, 0x99)) {
           return false;
         }
       }
@@ -1294,39 +1305,95 @@ static bool ny_x64_obj_store_value_rax(ny_x64_obj_ctx_t *c, int value) {
 }
 
 static bool ny_x64_obj_load_xmm(ny_x64_obj_ctx_t *c, int off, int xmm) {
-  if (xmm < 0 || xmm > 7)
+  if (xmm < 0 || xmm > 15)
     return false;
-  unsigned char op[] = {0xf2, 0x0f, 0x10, (unsigned char)(0x85 | (xmm << 3))};
+  unsigned char modrm = (unsigned char)(0x85 | ((xmm & 7) << 3));
+  if (xmm >= 8) {
+    unsigned char op[] = {0xf2, 0x44, 0x0f, 0x10, modrm};
+    return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
+  }
+  unsigned char op[] = {0xf2, 0x0f, 0x10, modrm};
   return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
 }
 
 static bool ny_x64_obj_store_xmm(ny_x64_obj_ctx_t *c, int off, int xmm) {
-  if (xmm < 0 || xmm > 7)
+  if (xmm < 0 || xmm > 15)
     return false;
-  unsigned char op[] = {0xf2, 0x0f, 0x11, (unsigned char)(0x85 | (xmm << 3))};
+  unsigned char modrm = (unsigned char)(0x85 | ((xmm & 7) << 3));
+  if (xmm >= 8) {
+    unsigned char op[] = {0xf2, 0x44, 0x0f, 0x11, modrm};
+    return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
+  }
+  unsigned char op[] = {0xf2, 0x0f, 0x11, modrm};
   return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
 }
 
 static bool ny_x64_obj_load_xmm_f32(ny_x64_obj_ctx_t *c, int off, int xmm) {
-  if (xmm < 0 || xmm > 7)
+  if (xmm < 0 || xmm > 15)
     return false;
-  unsigned char op[] = {0xf3, 0x0f, 0x10, (unsigned char)(0x85 | (xmm << 3))};
+  unsigned char modrm = (unsigned char)(0x85 | ((xmm & 7) << 3));
+  if (xmm >= 8) {
+    unsigned char op[] = {0xf3, 0x44, 0x0f, 0x10, modrm};
+    return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
+  }
+  unsigned char op[] = {0xf3, 0x0f, 0x10, modrm};
   return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
 }
 
 static bool ny_x64_obj_store_xmm_f32(ny_x64_obj_ctx_t *c, int off, int xmm) {
-  if (xmm < 0 || xmm > 7)
+  if (xmm < 0 || xmm > 15)
     return false;
-  unsigned char op[] = {0xf3, 0x0f, 0x11, (unsigned char)(0x85 | (xmm << 3))};
+  unsigned char modrm = (unsigned char)(0x85 | ((xmm & 7) << 3));
+  if (xmm >= 8) {
+    unsigned char op[] = {0xf3, 0x44, 0x0f, 0x11, modrm};
+    return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
+  }
+  unsigned char op[] = {0xf3, 0x0f, 0x11, modrm};
   return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, off);
 }
 
-static bool ny_x64_obj_mov_xmm(ny_x64_obj_ctx_t *c, int src, int dst,
-                               bool f32) {
-  if (src < 0 || src > 7 || dst < 0 || dst > 7)
+/*
+ * Register-indirect SIMD move: movsd xmm, [base] / movsd [base], xmm.  Used
+ * for MEM_F64 loads/stores whose address lives in a general register (the
+ * common `buf + index*8` buffer access pattern), avoiding an integer->xmm
+ * round-trip through rax.
+ */
+static bool ny_x64_obj_load_xmm_reg(ny_x64_obj_ctx_t *c, int xmm, int base) {
+  if (xmm < 0 || xmm > 15 || base < 0 || base > 15)
     return false;
-  unsigned char op[] = {(unsigned char)(f32 ? 0xf3 : 0xf2), 0x0f, 0x10,
-                        (unsigned char)(0xc0 | (dst << 3) | src)};
+  unsigned char modrm = (unsigned char)(((xmm & 7) << 3) | (base & 7));
+  if (xmm >= 8) {
+    unsigned char op[] = {0xf2, 0x41, 0x0f, 0x10, modrm};
+    return ny_x64_obj_bytes(c, op, sizeof(op));
+  }
+  unsigned char op[] = {0xf2, 0x0f, 0x10, modrm};
+  return ny_x64_obj_bytes(c, op, sizeof(op));
+}
+static bool ny_x64_obj_store_xmm_reg(ny_x64_obj_ctx_t *c, int xmm, int base) {
+  if (xmm < 0 || xmm > 15 || base < 0 || base > 15)
+    return false;
+  unsigned char modrm = (unsigned char)(((xmm & 7) << 3) | (base & 7));
+  if (xmm >= 8) {
+    unsigned char op[] = {0xf2, 0x41, 0x0f, 0x11, modrm};
+    return ny_x64_obj_bytes(c, op, sizeof(op));
+  }
+  unsigned char op[] = {0xf2, 0x0f, 0x11, modrm};
+  return ny_x64_obj_bytes(c, op, sizeof(op));
+}
+
+static bool ny_x64_obj_mov_xmm(ny_x64_obj_ctx_t *c, int src, int dst,
+                                bool f32) {
+  if (src < 0 || src > 15 || dst < 0 || dst > 15)
+    return false;
+  unsigned char modrm = (unsigned char)(0xc0 | ((dst & 7) << 3) | (src & 7));
+  unsigned char rex = (unsigned char)(0x40 | ((dst & 8) ? 0x04 : 0) |
+                                     ((src & 8) ? 0x01 : 0));
+  if (rex != 0x40) {
+    unsigned char op[] = {(unsigned char)(f32 ? 0xf3 : 0xf2), rex, 0x0f, 0x10,
+                          modrm};
+    return ny_x64_obj_bytes(c, op, sizeof(op));
+  }
+  unsigned char op[] = {(unsigned char)(f32 ? 0xf3 : 0xf2), 0x0f, 0x10, modrm};
   return ny_x64_obj_bytes(c, op, sizeof(op));
 }
 
@@ -1340,10 +1407,15 @@ static bool ny_x64_obj_store_float_bits(ny_x64_obj_ctx_t *c, int value,
   }
   if (c->value_xmm && c->value_xmm[value] >= 0) {
     int xmm = c->value_xmm[value];
-    unsigned char op64[] = {0x66, 0x48, 0x0f, 0x6e,
-                            (unsigned char)(0xc0 | (xmm << 3))};
-    unsigned char op32[] = {0x66, 0x0f, 0x6e,
-                            (unsigned char)(0xc0 | (xmm << 3))};
+    unsigned char modrm = (unsigned char)(0xc0 | ((xmm & 7) << 3));
+    if (xmm >= 8) {
+      unsigned char op64[] = {0x66, 0x48, 0x44, 0x0f, 0x6e, modrm};
+      unsigned char op32[] = {0x66, 0x44, 0x0f, 0x6e, modrm};
+      return f32 ? ny_x64_obj_bytes(c, op32, sizeof(op32))
+                 : ny_x64_obj_bytes(c, op64, sizeof(op64));
+    }
+    unsigned char op64[] = {0x66, 0x48, 0x0f, 0x6e, modrm};
+    unsigned char op32[] = {0x66, 0x0f, 0x6e, modrm};
     return f32 ? ny_x64_obj_bytes(c, op32, sizeof(op32))
                : ny_x64_obj_bytes(c, op64, sizeof(op64));
   }
@@ -1404,8 +1476,10 @@ static bool ny_x64_obj_store_value_xmm(ny_x64_obj_ctx_t *c, int value, int xmm) 
   return ny_x64_obj_store_xmm(c, ny_x64_obj_value_off(c, value), xmm);
 }
 
-/* Table mapping value ID to its defining instruction index in the NYIR function.
- * Built once per function emission, enables O(1) constant detection. */
+/*
+ * Table mapping value ID to its defining instruction index in the NYIR function.
+ * Built once per function emission, enables O(1) constant detection.
+ */
 static void ny_x64_obj_valmap_init(ny_x64_obj_valmap_t *m, const nyir_func_t *nyir) {
   m->count = 0;
   m->defs = NULL;
@@ -1438,8 +1512,10 @@ static const nyir_inst_t *ny_x64_obj_valmap_def(ny_x64_obj_valmap_t *m, int v) {
   return m->defs[v];
 }
 
-/* Check if value `v` is defined by a CONST_I64 instruction with immediate `imm`.
- * Returns true and sets *out_imm on success. */
+/*
+ * Check if value `v` is defined by a CONST_I64 instruction with immediate `imm`.
+ * Returns true and sets *out_imm on success.
+ */
 static bool ny_x64_obj_try_const_i64(ny_x64_obj_ctx_t *c, int v, int64_t *out_imm) {
   if (v < 0)
     return false;
@@ -1451,8 +1527,10 @@ static bool ny_x64_obj_try_const_i64(ny_x64_obj_ctx_t *c, int v, int64_t *out_im
   return true;
 }
 
-/* Emit `op $imm, %rax` (sign-extended 32-bit immediate in %eax).
- * Returns true if the immediate fits in 32 bits. */
+/*
+ * Emit `op $imm, %rax` (sign-extended 32-bit immediate in %eax).
+ * Returns true if the immediate fits in 32 bits.
+ */
 static bool ny_x64_obj_alu_imm_rax(ny_x64_obj_ctx_t *c, int64_t imm,
                                     const unsigned char *op_bytes, size_t op_len) {
   if (imm < INT32_MIN || imm > INT32_MAX)
@@ -1460,7 +1538,9 @@ static bool ny_x64_obj_alu_imm_rax(ny_x64_obj_ctx_t *c, int64_t imm,
   return ny_x64_obj_bytes(c, op_bytes, op_len) && ny_x64_obj_i32(c, (int32_t)imm);
 }
 
-/* Emit `cmp $imm, %rax` (comparison against immediate). */
+/*
+ * Emit `cmp $imm, %rax` (comparison against immediate).
+ */
 static bool ny_x64_obj_cmp_imm_rax(ny_x64_obj_ctx_t *c, int64_t imm) {
   if (imm < INT32_MIN || imm > INT32_MAX)
     return false;
@@ -1468,7 +1548,9 @@ static bool ny_x64_obj_cmp_imm_rax(ny_x64_obj_ctx_t *c, int64_t imm) {
   return ny_x64_obj_bytes(c, op, sizeof(op)) && ny_x64_obj_i32(c, (int32_t)imm);
 }
 
-/* Emit `add $imm, %rax` (or sub, and, or, xor with immediate). */
+/*
+ * Emit `add $imm, %rax` (or sub, and, or, xor with immediate).
+ */
 static bool ny_x64_obj_binop_imm(ny_x64_obj_ctx_t *c, int64_t imm,
                                   nyir_op_t binop) {
   switch (binop) {
@@ -1607,9 +1689,11 @@ static bool ny_x64_obj_binop(ny_x64_obj_ctx_t *c, const nyir_inst_t *in,
   if (handled)
     return true;
   int64_t imm = 0;
-  /* Try immediate operand for B: load A, op $imm, store.
+  /*
+   * Try immediate operand for B: load A, op $imm, store.
    * We detect the operation from the opcode's last byte to pick the
-   * correct immediate encoding. */
+   * correct immediate encoding.
+   */
   if (ny_x64_obj_try_const_i64(c, in->b, &imm) &&
       imm >= INT32_MIN && imm <= INT32_MAX &&
       ny_x64_obj_load_value_rax(c, in->a) &&
@@ -1818,7 +1902,7 @@ bool ny_x64_obj_append_function(ny_obj_buf_t *code,
     ny_native_set_err(err, err_len, "x86-64 object writer: missing function input");
     return false;
   }
-  if (*def_count >= 256) {
+  if (*def_count >= NY_NATIVE_MAX_DEFS) {
     ny_native_set_err(err, err_len, "x86-64 object writer: too many functions");
     return false;
   }
@@ -1949,9 +2033,11 @@ static unsigned ny_x64_obj_f64_setcc(nyir_cmp_t cmp) {
   return 0x94;
 }
 
-/* Signed division by a positive power of two truncates toward zero only after
+/*
+ * Signed division by a positive power of two truncates toward zero only after
  * a sign correction. Restrict the mask to imm32 so the encoder never relies
- * on a sign-extended immediate for a wider mask. */
+ * on a sign-extended immediate for a wider mask.
+ */
 static bool ny_x64_obj_try_pow2_divisor(ny_x64_obj_ctx_t *c, int value,
                                         unsigned *shift_out) {
   int64_t divisor = 0;
@@ -2030,14 +2116,18 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
     return ny_x64_obj_binop(c, in, sub, sizeof(sub));
   case NYIR_MUL_I64: {
     int64_t imm = 0;
-    /* imul $imm, %rax, %rax (0x69 c0 imm32) for small constants */
+    /*
+     * imul $imm, %rax, %rax (0x69 c0 imm32) for small constants
+     */
     if (ny_x64_obj_try_const_i64(c, in->b, &imm) &&
         imm >= INT32_MIN && imm <= INT32_MAX &&
         ny_x64_obj_load_value_rax(c, in->a) &&
         ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x69, 0xc0}, 3) &&
         ny_x64_obj_i32(c, (int32_t)imm))
       return ny_x64_obj_store_value_rax(c, in->dst);
-    /* Commutative: try A as immediate */
+    /*
+     * Commutative: try A as immediate
+     */
     if (ny_x64_obj_try_const_i64(c, in->a, &imm) &&
         imm >= INT32_MIN && imm <= INT32_MAX &&
         ny_x64_obj_load_value_rax(c, in->b) &&
@@ -2073,7 +2163,9 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
   case NYIR_SAR_I64: {
     int64_t shift_imm = 0;
     bool is_shl = (in->op == NYIR_SHL_I64);
-    /* Try immediate shift count: shl $imm, %rax (0xc1 e0/ f8) */
+    /*
+     * Try immediate shift count: shl $imm, %rax (0xc1 e0/ f8)
+     */
     if (ny_x64_obj_try_const_i64(c, in->b, &shift_imm) &&
         shift_imm >= 1 && shift_imm <= 63 &&
         ny_x64_obj_load_value_rax(c, in->a)) {
@@ -2083,7 +2175,9 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
         return false;
       return ny_x64_obj_store_value_rax(c, in->dst);
     }
-    /* Fallback: shift by %rcx */
+    /*
+     * Fallback: shift by %rcx
+     */
     if (!ny_x64_obj_load_value_rax(c, in->a) ||
         !ny_x64_obj_load_value_rcx(c, in->b))
       return false;
@@ -2097,7 +2191,9 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
   }
   case NYIR_CMP_I64: {
     int64_t imm = 0;
-    /* cmp $imm, value_a if B is constant */
+    /*
+     * cmp $imm, value_a if B is constant
+     */
     if (ny_x64_obj_try_const_i64(c, in->b, &imm) &&
         imm >= INT32_MIN && imm <= INT32_MAX &&
         ny_x64_obj_load_value_rax(c, in->a) &&
@@ -2110,7 +2206,9 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
         return false;
       return ny_x64_obj_store_value_rax(c, in->dst);
     }
-    /* For EQ/NE, swap and try A as immediate (commutative) */
+    /*
+     * For EQ/NE, swap and try A as immediate (commutative)
+     */
     if ((in->cmp == NYIR_CMP_EQ || in->cmp == NYIR_CMP_NE) &&
         ny_x64_obj_try_const_i64(c, in->a, &imm) &&
         imm >= INT32_MIN && imm <= INT32_MAX &&
@@ -2124,7 +2222,9 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
         return false;
       return ny_x64_obj_store_value_rax(c, in->dst);
     }
-    /* Fallback: both operands from memory */
+    /*
+     * Fallback: both operands from memory
+     */
     if (!ny_x64_obj_load_value_rax(c, in->a) ||
         !ny_x64_obj_load_value_r10(c, in->b) ||
         !ny_x64_obj_bytes(c, (const unsigned char[]){0x4c, 0x39, 0xd0}, 3) ||
@@ -2154,6 +2254,11 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
            ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x48, 0x0f, 0x2a,
                                                        0xc0},
                             5) &&
+           ny_x64_obj_store_value_xmm(c, in->dst, 0);
+  case NYIR_SQRT_F64:
+    return ny_x64_obj_load_value_xmm(c, in->a, 1) &&
+           ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x51, 0xc1},
+                            4) &&
            ny_x64_obj_store_value_xmm(c, in->dst, 0);
   case NYIR_ADD_F32:
   case NYIR_SUB_F32:
@@ -2422,25 +2527,37 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
       if (gp_index[i] >= 0 || sse_index[i] >= 0 || agg_in_regs[i])
         continue;
       if (in->arg_sizes && in->arg_sizes[i] > 0) {
-        /* byval: allocate stack space and copy aggregate */
+        /*
+         * byval: allocate stack space and copy aggregate
+         */
         uint32_t size = NYIR_ARG_AGG_SIZE(in->arg_sizes[i]);
         int slots = (int)((size + 7) / 8);
         if (!ny_x64_obj_sub_rsp(c, (size_t)slots * 8))
           return false;
-        /* load src ptr -> rsi, rsp -> rdi, movsb */
+        /*
+         * load src ptr -> rsi, rsp -> rdi, movsb
+         */
         if (!ny_x64_obj_load_value_rax(c, args[i]))
           return false;
-        /* mov %rax, %rsi */
+        /*
+         * mov %rax, %rsi
+         */
         if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x89, 0xc6}, 3))
           return false;
-        /* mov %rsp, %rdi */
+        /*
+         * mov %rsp, %rdi
+         */
         if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x89, 0xe7}, 3))
           return false;
-        /* mov $size, %rcx */
+        /*
+         * mov $size, %rcx
+         */
         if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc7, 0xc1}, 3) ||
             !ny_x64_obj_i32(c, (int32_t)size))
           return false;
-        /* rep movsb */
+        /*
+         * rep movsb
+         */
         if (!ny_x64_obj_bytes(c, (const unsigned char[]){0xf3, 0xa4}, 2))
           return false;
         continue;
@@ -2529,46 +2646,83 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
     return ny_x64_obj_store_value_rax(c, in->dst);
   }
   case NYIR_LOAD_I64:
+    if (in->flags & NYIR_INST_F_MEM_F64) {
+      /*
+       * Float load: read the double straight into an XMM register instead of
+       * routing it through rax (which would force an integer->xmm move at the
+       * consumer).  dst is a float value (see the register scan).
+       */
+      if (!ny_x64_obj_load_value_rax(c, in->a))
+        return false;
+      if (c->value_xmm && c->value_xmm[in->dst] >= 0)
+        return ny_x64_obj_load_xmm_reg(c, c->value_xmm[in->dst], 0);
+      if (!ny_x64_obj_load_xmm_reg(c, 0, 0))
+        return false;
+      return ny_x64_obj_store_value_xmm(c, in->dst, 0);
+    }
     return ny_x64_obj_load_value_rax(c, in->a) &&
            ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x8b, 0x00}, 3) &&
            ny_x64_obj_store_value_rax(c, in->dst);
   case NYIR_STORE_I64:
+    if (in->flags & NYIR_INST_F_MEM_F64) {
+      if (!ny_x64_obj_load_value_rax(c, in->a))
+        return false;
+      if (!ny_x64_obj_load_value_xmm(c, in->c, 0))
+        return false;
+      return ny_x64_obj_store_xmm_reg(c, 0, 0);
+    }
     return ny_x64_obj_load_value_rax(c, in->a) &&
            ny_x64_obj_load_value_r10(c, in->c) &&
            ny_x64_obj_bytes(c, (const unsigned char[]){0x4c, 0x89, 0x10}, 3);
   case NYIR_ALLOCA:
     if (in->dst < 0)
       return true;
-    /* subq $size, %rsp; andq $-16, %rsp; movq %rsp, %rax; store */
+    /*
+     * subq $size, %rsp; andq $-16, %rsp; movq %rsp, %rax; store
+     */
     if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x81, 0xec}, 3) ||
         !ny_x64_obj_i32(c, (int32_t)in->imm))
       return false;
-    /* andq $-16, %rsp: 0x48 0x83 0xe4 0xf0 */
+    /*
+     * andq $-16, %rsp: 0x48 0x83 0xe4 0xf0
+     */
     if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x83, 0xe4, 0xf0}, 4))
       return false;
-    /* mov %rsp, %rax */
+    /*
+     * mov %rsp, %rax
+     */
     if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x89, 0xe0}, 3))
       return false;
     return ny_x64_obj_store_value_rax(c, in->dst);
   case NYIR_COPY_STRUCT:
     if (in->imm <= 0)
       return true;
-    /* load src (b) -> rsi, load dst (a) -> rdi, mov size -> rcx, rep movsb */
+    /*
+     * load src (b) -> rsi, load dst (a) -> rdi, mov size -> rcx, rep movsb
+     */
     if (!ny_x64_obj_load_value_rax(c, in->b))
       return false;
-    /* mov %rax, %rsi */
+    /*
+     * mov %rax, %rsi
+     */
     if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x89, 0xc6}, 3))
       return false;
     if (!ny_x64_obj_load_value_rax(c, in->a))
       return false;
-    /* mov %rax, %rdi */
+    /*
+     * mov %rax, %rdi
+     */
     if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x89, 0xc7}, 3))
       return false;
-    /* mov $size, %rcx */
+    /*
+     * mov $size, %rcx
+     */
     if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc7, 0xc1}, 3) ||
         !ny_x64_obj_i32(c, (int32_t)in->imm))
       return false;
-    /* rep movsb */
+    /*
+     * rep movsb
+     */
     return ny_x64_obj_bytes(c, (const unsigned char[]){0xf3, 0xa4}, 2);
   case NYIR_CAPTURE_RET:
     if (in->dst < 0)
@@ -2654,7 +2808,8 @@ static bool ny_x64_obj_classify_values(ny_x64_obj_ctx_t *c,
     const nyir_inst_t *in = &nyir->data[i];
     if (in->dst >= 0 && in->dst < c->value_slots &&
         (ny_x64_obj_op_is_f64(in->op) ||
-         (in->op == NYIR_CALL && (in->flags & NYIR_INST_F_RET_F64))))
+         (in->op == NYIR_CALL && (in->flags & NYIR_INST_F_RET_F64)) ||
+         (in->op == NYIR_LOAD_I64 && (in->flags & NYIR_INST_F_MEM_F64))))
       c->value_f64[in->dst] = true;
     if (in->dst >= 0 && in->dst < c->value_slots &&
         (ny_x64_obj_op_is_f32(in->op) ||
@@ -2737,9 +2892,11 @@ static bool ny_x64_obj_classify_values(ny_x64_obj_ctx_t *c,
   return true;
 }
 
-/* Keep non-floating SSA intervals in caller-saved r11/r9/r8 when they neither
+/*
+ * Keep non-floating SSA intervals in caller-saved r11/r9/r8 when they neither
  * cross nor feed a call. Values with call-sensitive lifetimes remain spilled,
- * so ABI argument setup cannot clobber an allocated value. */
+ * so ABI argument setup cannot clobber an allocated value.
+ */
 static bool ny_x64_obj_allocate_registers(ny_x64_obj_ctx_t *c,
                                           const nyir_func_t *nyir) {
   const char *disabled = getenv("NYTRIX_NATIVE_NO_REGALLOC");
@@ -2753,10 +2910,13 @@ static bool ny_x64_obj_allocate_registers(ny_x64_obj_ctx_t *c,
   int *last_use = malloc((size_t)c->value_slots * sizeof(*last_use));
   bool *call_use = calloc((size_t)c->value_slots, sizeof(*call_use));
   int *next_call = malloc((nyir->len + 1u) * sizeof(*next_call));
-  if (!c->value_reg || !c->value_xmm || !last_use || !call_use || !next_call) {
+  int *next_struct = malloc((nyir->len + 1u) * sizeof(*next_struct));
+  if (!c->value_reg || !c->value_xmm || !last_use || !call_use || !next_call ||
+      !next_struct) {
     free(last_use);
     free(call_use);
     free(next_call);
+    free(next_struct);
     ny_native_set_err(c->err, c->err_len,
                       "x86-64 object writer: out of memory in register allocation");
     return false;
@@ -2789,11 +2949,22 @@ static bool ny_x64_obj_allocate_registers(ny_x64_obj_ctx_t *c,
     }
   }
   next_call[nyir->len] = INT_MAX;
-  for (size_t i = nyir->len; i > 0; --i)
+  next_struct[nyir->len] = INT_MAX;
+  for (size_t i = nyir->len; i > 0; --i) {
     next_call[i - 1] = nyir->data[i - 1].op == NYIR_CALL
                            ? (int)(i - 1)
                            : next_call[i];
-  static const int caller_regs[] = {11, 9, 8};
+    /*
+     * COPY_STRUCT clobbers rsi/rdi/rcx via rep movsb, so a value kept in a
+     * caller register across one would be destroyed.  Treat it like a call
+     * for the liveness decision: values live across a struct copy spill to
+     * callee-saved registers (r12-r15/rbx), which survive it untouched.
+     */
+    next_struct[i - 1] = nyir->data[i - 1].op == NYIR_COPY_STRUCT
+                             ? (int)(i - 1)
+                             : next_struct[i];
+  }
+  static const int caller_regs[] = {11, 9, 8, 6, 7};
   static const int callee_regs[] = {12, 13, 14, 15, 3};
   int caller_end[sizeof(caller_regs) / sizeof(caller_regs[0])];
   int callee_end[sizeof(callee_regs) / sizeof(callee_regs[0])];
@@ -2801,6 +2972,11 @@ static bool ny_x64_obj_allocate_registers(ny_x64_obj_ctx_t *c,
     caller_end[r] = -1;
   for (size_t r = 0; r < sizeof(callee_regs) / sizeof(callee_regs[0]); ++r)
     callee_end[r] = -1;
+  /*
+   * Pass 1: callee-saved registers for values live across a call or struct
+   * copy.  Done first so pass 2 can avoid aliasing r12-r15 with a live
+   * callee value.
+   */
   for (size_t i = 0; nyir && i < nyir->len; ++i) {
     const nyir_inst_t *in = &nyir->data[i];
     int v = in->dst;
@@ -2809,27 +2985,49 @@ static bool ny_x64_obj_allocate_registers(ny_x64_obj_ctx_t *c,
         (c->value_f32 && c->value_f32[v]))
       continue;
     bool crosses_call = next_call[i + 1] < last_use[v];
-    if (in->op == NYIR_CONST_I64 && !crosses_call)
+    bool crosses_struct = next_struct[i + 1] < last_use[v];
+    if (!(crosses_call || crosses_struct))
       continue;
-    if (!crosses_call && !call_use[v]) {
-      for (size_t r = 0; r < sizeof(caller_regs) / sizeof(caller_regs[0]); ++r) {
-        if ((int)i >= caller_end[r]) {
-          c->value_reg[v] = (int8_t)caller_regs[r];
-          caller_end[r] = last_use[v];
-          break;
-        }
-      }
-    } else if (crosses_call) {
-      for (size_t r = 0; r < sizeof(callee_regs) / sizeof(callee_regs[0]); ++r) {
-        if ((int)i >= callee_end[r]) {
-          c->value_reg[v] = (int8_t)callee_regs[r];
-          callee_end[r] = last_use[v];
-          break;
-        }
+    for (size_t r = 0; r < sizeof(callee_regs) / sizeof(callee_regs[0]); ++r) {
+      if ((int)i >= callee_end[r]) {
+        c->value_reg[v] = (int8_t)callee_regs[r];
+        callee_end[r] = last_use[v];
+        break;
       }
     }
   }
-  static const int xmm_regs[] = {4, 5, 6, 7};
+  /*
+   * Pass 2: caller-saved registers for values with call-free lifetimes.
+   * r12-r15 are also callee-saved; skip them here while a callee value is
+   * live so the two register pools never alias the same register at once.
+   */
+  for (size_t i = 0; nyir && i < nyir->len; ++i) {
+    const nyir_inst_t *in = &nyir->data[i];
+    int v = in->dst;
+    if (v < 0 || v >= c->value_slots || last_use[v] < (int)i ||
+        (c->value_f64 && c->value_f64[v]) ||
+        (c->value_f32 && c->value_f32[v]))
+      continue;
+    bool crosses_call = next_call[i + 1] < last_use[v];
+    bool crosses_struct = next_struct[i + 1] < last_use[v];
+    if (in->op == NYIR_CONST_I64 && !crosses_call && !crosses_struct)
+      continue;
+    if (crosses_call || crosses_struct || call_use[v])
+      continue;
+    for (size_t r = 0; r < sizeof(caller_regs) / sizeof(caller_regs[0]); ++r) {
+      int reg = caller_regs[r];
+      if (reg >= 12 && reg <= 15 && callee_end[reg - 12] >= 0 &&
+          i < (size_t)callee_end[reg - 12])
+        continue;
+      if ((int)i >= caller_end[r]) {
+        c->value_reg[v] = (int8_t)reg;
+        caller_end[r] = last_use[v];
+        break;
+      }
+    }
+  }
+  static const int xmm_regs[] = {2, 3, 4, 5, 6, 7, 8,
+                                 9, 10, 11, 12, 13, 14, 15};
   int xmm_end[sizeof(xmm_regs) / sizeof(xmm_regs[0])];
   for (size_t r = 0; r < sizeof(xmm_regs) / sizeof(xmm_regs[0]); ++r)
     xmm_end[r] = -1;
@@ -2853,6 +3051,7 @@ static bool ny_x64_obj_allocate_registers(ny_x64_obj_ctx_t *c,
   free(last_use);
   free(call_use);
   free(next_call);
+  free(next_struct);
   return true;
 }
 
@@ -2881,9 +3080,11 @@ static bool ny_x64_obj_immediate_use(const nyir_inst_t *in, int operand,
   }
 }
 
-/* Constants used exclusively by immediate-capable instructions need neither
+/*
+ * Constants used exclusively by immediate-capable instructions need neither
  * emitted moves nor stack slots. Prove that property once per function so the
- * emitter stays O(1) at each use and an unexpected load fails explicitly. */
+ * emitter stays O(1) at each use and an unexpected load fails explicitly.
+ */
 static bool ny_x64_obj_classify_immediates(ny_x64_obj_ctx_t *c,
                                            const nyir_func_t *nyir) {
   if (!c || !nyir || c->value_slots <= 0)
@@ -2903,9 +3104,11 @@ static bool ny_x64_obj_classify_immediates(ny_x64_obj_ctx_t *c,
   }
   for (size_t i = 0; i < nyir->len; ++i) {
     const nyir_inst_t *in = &nyir->data[i];
-    /* The scalar encoder can use one immediate operand, never two.  Keep
+    /*
+     * The scalar encoder can use one immediate operand, never two.  Keep
      * operand A materialized when both operands are otherwise eligible, so
-     * the normal A-register/B-immediate encoding remains valid at -O0 too. */
+     * the normal A-register/B-immediate encoding remains valid at -O0 too.
+     */
     if (in->a >= 0 && in->a < c->value_slots && in->b >= 0 &&
         in->b < c->value_slots && c->value_immediate[in->a] &&
         c->value_immediate[in->b]) {

@@ -1,3 +1,7 @@
+/*
+ * REPL documentation: `:doc` command implementation that extracts
+ * and displays function/type docstrings from the loaded module set.
+ */
 #include "base/loader.h"
 #include "base/util.h"
 #include "parse/parser.h"

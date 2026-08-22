@@ -1,9 +1,7 @@
 module std.core.format
-
 use std.core
 
 ; Pure-Ny string formatting with padding, alignment, and number formatting.
-
 fn pad(str s, int width, str ch, bool left_align) str {
    "Pad string `s` to at least `width` characters using `ch`."
    def n = len(s)
@@ -52,7 +50,7 @@ fn center(str s, int width, str ch) str {
 }
 
 fn fmt_int(int v, int base, bool upper) str {
-   "Format an integer in the given base (2-36)."
+   "Format an integer in the given base(2-36)."
    def digits_lower = "0123456789abcdefghijklmnopqrstuvwxyz"
    def digits_upper = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
    def digits = upper ? digits_upper : digits_lower

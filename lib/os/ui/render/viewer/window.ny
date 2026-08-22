@@ -92,7 +92,7 @@ fn desktop_bounds_with_window(list rows, list pos, list size) list {
       int(pos.get(0, 0)),
       int(pos.get(1, 0)),
       max(1, int(size.get(0, 1))),
-   max(1, int(size.get(1, 1))))
+      max(1, int(size.get(1, 1))))
 }
 
 fn desktop_map(list bounds, f64 x, f64 y, f64 w, f64 h, f64 margin=52.0) dict {

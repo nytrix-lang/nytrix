@@ -1,7 +1,6 @@
 ;; Keywords: decompiler callgraph graph edges scc
 ;; Pure call-graph edge traversal and strongly connected component helpers.
 module std.os.rev.decomp.graph *
-
 use std.core
 use std.os.rev.decomp.collections (_append_unique)
 

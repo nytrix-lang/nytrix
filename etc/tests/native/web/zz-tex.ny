@@ -1,5 +1,6 @@
 ;; Keywords: zz
 use std.os.ui.render as gfx
+
 def win = gfx.init_window(64, 64, "t", 0, true, false, 1)
 gfx.begin_frame_clear(gfx.BLACK)
 mut pix = list()

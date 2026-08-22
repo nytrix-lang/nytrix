@@ -1,3 +1,7 @@
+/*
+ * Lexer: tokenizer producing a stream of tokens from Nytrix source,
+ * handling identifiers, numbers, strings, operators, and comments.
+ */
 #include "parse/lexer.h"
 #include "base/intern.h"
 #include "base/util.h"
@@ -261,21 +265,25 @@ static void skip_whitespace(lexer_t *lx) {
 
       char opener = peek(lx);
 
-      // A bare ';' or ';' followed by whitespace is always an asm-style line
-      // comment. This makes inline notes safe:
-      //   def x = 1 ; explanation
-      // Marker/symbol block comments must start immediately after ';'.
+      /*
+       * A bare ';' or ';' followed by whitespace is always an asm-style line
+       * comment. This makes inline notes safe:
+       * def x = 1 ; explanation
+       * Marker/symbol block comments must start immediately after ';'.
+       */
       if (opener == '\0' || opener == '\n' || opener == ' ' || opener == '\t' ||
           opener == '\r') {
         while (peek(lx) != '\n' && peek(lx) != '\0')
           advance(lx);
       } else if (opener == '{' || opener == '<' || opener == '[' ||
                  opener == '(') {
-        // Symmetric/symbol multiline comments:
-        //   ;{ ... };
-        //   ;< ... >;
-        //   ;[ ... ];
-        //   ;( ... );
+        /*
+         * Symmetric/symbol multiline comments:
+         * ;{ ... };
+         * ;< ... >;
+         * ;[ ... ];
+         * ;( ... );
+         */
         char closer = (opener == '{') ? '}' :
                       (opener == '<') ? '>' :
                       (opener == '[') ? ']' : ')';
@@ -301,12 +309,14 @@ static void skip_whitespace(lexer_t *lx) {
                       "make sure the matching closing symbol and ';' are present");
         }
       } else if (IS_ALPHA(opener) || opener == '_') {
-        // Heredoc-style multiline comment:
-        //   ;MARKER
-        //     ignored text
-        //   MARKER;
-        // Because line comments require whitespace after ';', marker names are
-        // still available when they start immediately after ';'.
+        /*
+         * Heredoc-style multiline comment:
+         * ;MARKER
+         * ignored text
+         * MARKER;
+         * Because line comments require whitespace after ';', marker names are
+         * still available when they start immediately after ';'.
+         */
         size_t marker_start = lx->pos;
         while (IS_ALNUM(peek(lx)) || peek(lx) == '_') {
           advance(lx);
@@ -339,7 +349,9 @@ static void skip_whitespace(lexer_t *lx) {
                       "use '; marker' for a line comment, or close this block with MARKER;");
         }
       } else {
-        // Other semicolon forms, including ';;', are line comments.
+        /*
+         * Other semicolon forms, including ';;', are line comments.
+         */
         while (peek(lx) != '\n' && peek(lx) != '\0')
           advance(lx);
       }
@@ -761,6 +773,18 @@ token_t lexer_next(lexer_t *lx) {
     lexer_error(lx, start, "unterminated string literal",
                 "check for missing closing quote");
     return make_token(lx, NY_T_ERROR, start);
+  }
+  /*
+   * UTF-8 RIGHTWARDS ARROW (U+2192, bytes E2 86 92) is the lemma
+   * implication token. `c` already consumed the leading 0xE2 byte, so the
+   * next two source bytes are at lx->pos and lx->pos+1.
+   */
+  if ((unsigned char)c == 0xe2 &&
+      (unsigned char)lx->src[lx->pos] == 0x86 &&
+      (unsigned char)lx->src[lx->pos + 1] == 0x92) {
+    advance(lx);
+    advance(lx);
+    return make_token(lx, NY_T_ARROW, start);
   }
   switch (c) {
   case '(':

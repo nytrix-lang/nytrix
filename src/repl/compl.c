@@ -1,3 +1,7 @@
+/*
+ * REPL completion: tab-completion engine for identifiers, module paths,
+ * type names, and function signatures in the interactive environment.
+ */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif

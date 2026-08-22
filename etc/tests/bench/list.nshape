@@ -8,25 +8,23 @@ shape list {
 use std.core
 use std.os.time
 def n = 20000
-;; List (Benchmark)
-def bytes = n * 8
-def lst = malloc(bytes)
+;; List (Benchmark): fill and sum a Ny list.
 def start = ticks()
-mut idx = 0
-while idx < n {
-   store64(lst, idx, idx * 8)
-   idx = idx + 1
+mut lst = []
+mut i = 0
+while i < n {
+   lst = append(lst, i)
+   i += 1
 }
 mut sum = 0
-idx = 0
-while idx < n {
-   sum = sum + load64(lst, idx * 8)
-   idx = idx + 1
+i = 0
+while i < n {
+   sum = sum + lst[i]
+   i += 1
 }
 def end = ticks()
-def expected = (n - 1) * n / 2 ; Sum of 0..n-1
+def expected = (n - 1) * n / 2 ;; Sum of 0..n-1
 if sum != expected { sum = -2 }
-free(lst)
 print("checksum=", sum)
 print("elapsed_ns=", end - start)
 NY
@@ -45,7 +43,7 @@ static int64_t now_ns(void) {
 
 int main(void) {
     const int n = 20000;
-    int *lst = (int *)malloc((size_t)n * sizeof(int));
+    int64_t *lst = malloc((size_t)n * sizeof(*lst));
     if (!lst) return 2;
     int64_t start = now_ns();
     for (int i = 0; i < n; i++) lst[i] = i;

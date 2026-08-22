@@ -1,7 +1,6 @@
 ;; Keywords: elf sections symbols relocations imports disassembly flirt
 ;; ELF loading, recovery, symbols, imports, disassembly, and FLIRT signatures.
 module std.os.rev.decomp.elf *
-
 use std.core
 use std.core.str as str
 use std.os as os
@@ -104,14 +103,14 @@ fn elf_header(any source) dict {
          "entry": _u64(b, 24, le), "phoff": _u64(b, 32, le), "shoff": _u64(b, 40, le),
          "flags": _u32(b, 48, le), "ehsize": _u16(b, 52, le), "phentsize": _u16(b, 54, le),
          "phnum": _u16(b, 56, le), "shentsize": _u16(b, 58, le), "shnum": _u16(b, 60, le),
-      "shstrndx": _u16(b, 62, le)}
+         "shstrndx": _u16(b, 62, le)}
    }
    return {"ok": true, "format": "elf", "bits": 32, "little": le, "type": _elf_type(_u16(b, 16, le)),
       "machine": _machine(_u16(b, 18, le)), "machine_id": _u16(b, 18, le),
       "entry": _u32(b, 24, le), "phoff": _u32(b, 28, le), "shoff": _u32(b, 32, le),
       "flags": _u32(b, 36, le), "ehsize": _u16(b, 40, le), "phentsize": _u16(b, 42, le),
       "phnum": _u16(b, 44, le), "shentsize": _u16(b, 46, le), "shnum": _u16(b, 48, le),
-   "shstrndx": _u16(b, 50, le)}
+      "shstrndx": _u16(b, 50, le)}
 }
 
 fn _section_table(str b, dict h) list {
@@ -131,12 +130,12 @@ fn _section_table(str b, dict h) list {
          raw = raw.append({"index": i, "name_off": _u32(b, off, le), "type": _u32(b, off + 4, le),
                "flags": _u64(b, off + 8, le), "addr": _u64(b, off + 16, le), "offset": _u64(b, off + 24, le),
                "size": _u64(b, off + 32, le), "link": _u32(b, off + 40, le), "info": _u32(b, off + 44, le),
-         "align": _u64(b, off + 48, le), "entsize": _u64(b, off + 56, le)})
+               "align": _u64(b, off + 48, le), "entsize": _u64(b, off + 56, le)})
       } else {
          raw = raw.append({"index": i, "name_off": _u32(b, off, le), "type": _u32(b, off + 4, le),
                "flags": _u32(b, off + 8, le), "addr": _u32(b, off + 12, le), "offset": _u32(b, off + 16, le),
                "size": _u32(b, off + 20, le), "link": _u32(b, off + 24, le), "info": _u32(b, off + 28, le),
-         "align": _u32(b, off + 32, le), "entsize": _u32(b, off + 36, le)})
+               "align": _u32(b, off + 32, le), "entsize": _u32(b, off + 36, le)})
       }
       i += 1
    }
@@ -159,7 +158,7 @@ fn _section_table(str b, dict h) list {
 
 fn sections(any source) list {
    "Return section records. Loaded records return their cached sections; raw
-   sources are parsed as ELF (or the containing format's loader)."
+   sources are parsed as ELF(or the containing format's loader)."
    if is_dict(source) && source.contains("sections") { return source.get("sections", []) }
    def b = _source_data(source)
    _section_table(b, elf_header(b))
@@ -185,7 +184,7 @@ fn section_bytes(any source, str name) str {
 
 fn segments(any source) list {
    "Return segment/load records. Loaded records return their cached segments;
-   raw sources are parsed as ELF (or the containing format's loader)."
+   raw sources are parsed as ELF(or the containing format's loader)."
    if is_dict(source) && source.contains("segments") { return source.get("segments", []) }
    def b = _source_data(source)
    def h = elf_header(b)
@@ -204,11 +203,11 @@ fn segments(any source) list {
          out = out.append({"index": i, "type": _u32(b, off, le), "flags": _u32(b, off + 4, le),
                "offset": _u64(b, off + 8, le), "vaddr": _u64(b, off + 16, le),
                "filesz": _u64(b, off + 32, le), "memsz": _u64(b, off + 40, le), "align": _u64(b, off + 48, le),
-         "load": _u32(b, off, le) == PT_LOAD})
+               "load": _u32(b, off, le) == PT_LOAD})
       } else {
          out = out.append({"index": i, "type": _u32(b, off, le), "offset": _u32(b, off + 4, le),
                "vaddr": _u32(b, off + 8, le), "filesz": _u32(b, off + 16, le), "memsz": _u32(b, off + 20, le),
-         "flags": _u32(b, off + 24, le), "align": _u32(b, off + 28, le), "load": _u32(b, off, le) == PT_LOAD})
+               "flags": _u32(b, off + 24, le), "align": _u32(b, off + 28, le), "load": _u32(b, off, le) == PT_LOAD})
       }
       i += 1
    }
@@ -250,7 +249,7 @@ fn _symbols_from_section(str b, dict h, list ss, dict symsec) list {
       def nm = tab_base >= 0 ? _cstring(b, tab_base + name_off) : ""
       if nm.len > 0 || value != 0 {
          out = out.append({"index": idx, "name": nm, "value": value, "size": size, "shndx": shndx,
-         "bind": _sym_bind(info), "type": _sym_type(info), "source": symsec.get("name", "")})
+               "bind": _sym_bind(info), "type": _sym_type(info), "source": symsec.get("name", "")})
       }
       off += ent
       idx += 1
@@ -260,7 +259,7 @@ fn _symbols_from_section(str b, dict h, list ss, dict symsec) list {
 
 fn symbols(any source) list {
    "Return symbol records. Loaded records return their cached symbols; raw
-   sources are parsed as ELF (or the containing format's loader)."
+   sources are parsed as ELF(or the containing format's loader)."
    if is_dict(source) && source.contains("symbols") { return source.get("symbols", []) }
    def b = _source_data(source)
    def h = elf_header(b)
@@ -375,7 +374,7 @@ fn _extent_from_functions(dict bin, dict f, list fs, int max_bytes=4096) dict {
    if sec_end > start && end > sec_end { end = sec_end }
    {"name": f.get("name", "sub_" + str.to_hex(start, 0)), "start": start, "end": end,
       "size": max(0, end - start), "declared_size": declared, "inferred": declared <= 0,
-   "next": next, "section": sec.get("name", ""), "clipped": clipped_by_cap && end < natural_end}
+      "next": next, "section": sec.get("name", ""), "clipped": clipped_by_cap && end < natural_end}
 }
 
 fn function_extent(any source, any fn_or_addr, int max_bytes=4096) dict {
@@ -782,7 +781,7 @@ fn _relocations_from_section(str b, dict h, list ss, any syms, dict relsec) list
             "info": r_info, "sym_index": sym_idx, "type": typ,
             "type_name": _reloc_type_name(int(h.get("machine_id", 0)), typ),
             "symbol": sym.get("name", ""), "symbol_record": sym, "addend": addend,
-      "rela": rela})
+            "rela": rela})
       off += ent
       idx += 1
    }
@@ -841,7 +840,7 @@ fn _plt_import_sites(dict bin) list {
       def addr = int(plt.get("addr", 0)) + 16 * (i + 1)
       def raw = jump[i].get("symbol", "")
       out = out.append({"addr": addr, "name": _elf_safe_name(_display_symbol(raw), "import_" + str.to_hex(addr, 0)),
-      "symbol": raw, "display_name": _display_symbol(raw), "relocation": jump[i], "kind": "plt"})
+            "symbol": raw, "display_name": _display_symbol(raw), "relocation": jump[i], "kind": "plt"})
       i += 1
    }
    out
@@ -868,7 +867,7 @@ fn _detect_format(str data) str {
       }
       def m = _u32(data, 0, false)
       if m == 0xfeedfacf || m == 0xfeedface || m == 0xcffaedfe || m == 0xcefaedfe ||
-         m == 0xcafebabe || m == 0xbebafeca || m == 0xcafebabf || m == 0xbfbafeca {
+      m == 0xcafebabe || m == 0xbebafeca || m == 0xcafebabf || m == 0xbfbafeca {
          return "macho"
       }
    }
@@ -876,7 +875,7 @@ fn _detect_format(str data) str {
 }
 
 fn load(str p, any opts=dict()) dict {
-   "Load and analyze a binary file (ELF, PE, or Mach-O). The returned record is
+   "Load and analyze a binary file(ELF, PE, or Mach-O). The returned record is
    intentionally compact and stable for scripts, UI panels, and later
    symbolic/decompiler passes."
    def r = _read(p)
@@ -899,7 +898,7 @@ fn load(str p, any opts=dict()) dict {
          "sections": ss, "segments": segs, "symbols": sy, "functions": sym_funcs,
          "imports": imports({"symbols": sy}), "relocations": rel, "import_sites": _plt_import_sites({"sections": ss, "relocations": rel}),
          "strings": strings(data, int(opts.get("min_string", 4)), int(opts.get("string_limit", 256))),
-      "tools": tool_status()}
+         "tools": tool_status()}
    }
    if bin.get("ok", false) && bool(opts.get("recover_functions", true)) {
       bin = bin.set("functions", recover_functions(bin, int(opts.get("scan_bytes", 65536))))
@@ -931,7 +930,7 @@ fn arch_profile(any source) dict {
    def a = dasm.normalize_arch(h.get("machine", "unknown"))
    {"arch": a, "family": dasm.arch_family(a), "bits": int(h.get("bits", a == "aarch64" || a == "x86_64" ? 64 : 32)),
       "machine": h.get("machine", "unknown"), "machine_id": h.get("machine_id", 0),
-   "entry": int(h.get("entry", 0)), "disassembler": "capstone"}
+      "entry": int(h.get("entry", 0)), "disassembler": "capstone"}
 }
 
 fn function_at(any source, int addr) dict {
@@ -1236,7 +1235,7 @@ fn flirt_signature(any source, any target=0, any opts=dict()) dict {
       "mask": mask, "tail_start": plen, "tail_len": tail_len, "tail_crc16": crc,
       "variant_offsets": _flirt_variant_offsets(mask), "refs": refs, "row_count": rows.len,
       "strength": strength,
-   "reason": accepted ? "ok" : "too_short_without_reference"}
+      "reason": accepted ? "ok" : "too_short_without_reference"}
 }
 
 fn flirt_signatures(any source, any opts=dict()) list {
@@ -1294,7 +1293,7 @@ fn _flirt_signature_match(dict sig, dict target, bool strict_refs=false) dict {
       "target_name": target.get("name", ""), "score": score, "confidence": min(99, score),
       "pattern_len": plen, "tail_len": stail, "tail_crc16": int(sig.get("tail_crc16", 0)),
       "refs": sig.get("refs", []), "matched_refs": ref.get("matched", []),
-   "deferred": ref.get("deferred", false), "same_size": same_size}
+      "deferred": ref.get("deferred", false), "same_size": same_size}
 }
 
 fn flirt_match(any source, list signatures, any opts=dict()) list {
@@ -1320,7 +1319,7 @@ fn flirt_match(any source, list signatures, any opts=dict()) list {
       }
       if best.len > 0 {
          raw = raw.append(best.set("ambiguous", names.len > 1).set("candidates", names)
-         .set("safe", names.len == 1 && !best.get("deferred", false)))
+            .set("safe", names.len == 1 && !best.get("deferred", false)))
       }
       ti += 1
    }

@@ -1,3 +1,7 @@
+/*
+ * Pipeline stage utilities: artifact path resolution, dump-dir
+ * management, and stage-level diagnostics for the compiler pipeline.
+ */
 static const char *ny_dump_dir(const ny_options *opt) {
   if (opt && opt->dump_dir && *opt->dump_dir)
     return opt->dump_dir;
@@ -142,6 +146,8 @@ static void ny_stage_append(char **buf, size_t *len, size_t *cap,
       *len += (size_t)n;
       return;
     }
+    if (*cap > (SIZE_MAX - (size_t)n - 1) / 2)
+      return;
     size_t new_cap = *cap * 2 + (size_t)n + 1;
     char *tmp = realloc(*buf, new_cap);
     if (!tmp)
@@ -231,9 +237,11 @@ static const char *ny_stage_find_in_range(const char *start, const char *end,
   return NULL;
 }
 
-/* Semantic validation is parameterized by more than source text. Keep this
+/*
+ * Semantic validation is parameterized by more than source text. Keep this
  * compact, explicit option identity beside source/compiler provenance so an
- * artifact cannot prove a different strictness or solver configuration. */
+ * artifact cannot prove a different strictness or solver configuration.
+ */
 static uint64_t ny_stage_semantic_config_fingerprint(const ny_options *opt) {
   const char *solver = getenv("NYTRIX_TYPE_SOLVER");
   if (!solver || !*solver)
@@ -261,7 +269,8 @@ static uint64_t ny_stage_semantic_config_fingerprint(const ny_options *opt) {
   return ny_cache_semantic_fingerprint(config);
 }
 
-/**
+/*
+ *
  * Validate an emitted semantic snapshot before a later stage consumes it.
  *
  * The artifact is deliberately pointer-free.  This bounded reader only accepts
@@ -332,7 +341,8 @@ static bool ny_stage_artifact_matches_source_file(const char *path,
   return valid;
 }
 
-/**
+/*
+ *
  * Confirm that a semantic-reuse artifact was produced by this compiler
  * source/build identity.  Source-only verification intentionally does not
  * require this field so older snapshots remain inspectable; replaying typed
@@ -427,8 +437,10 @@ static bool ny_stage_artifact_is_completed_semantic_snapshot(const char *json) {
   if (strncmp(json, abi_prefix, strlen(abi_prefix)) != 0 &&
       strncmp(json, opt_prefix, strlen(opt_prefix)) != 0)
     return false;
-  /* ABI-or-later artifacts emit a lowered proof section. Requiring it keeps a
-   * parse/HM snapshot from becoming reusable merely by relabeling its header. */
+  /*
+   * ABI-or-later artifacts emit a lowered proof section. Requiring it keeps a
+   * parse/HM snapshot from becoming reusable merely by relabeling its header.
+   */
   if (!strstr(json, "\"lowered\":"))
     return false;
   const char *tail = json + strlen(json);
@@ -440,7 +452,8 @@ static bool ny_stage_artifact_is_completed_semantic_snapshot(const char *json) {
          memcmp(tail - suffix_len, completed_suffix, suffix_len) == 0;
 }
 
-/**
+/*
+ *
  * Accept only successful ABI-or-later snapshots for compiler reuse.
  *
  * The source identity check prevents applying facts to another expanded
@@ -675,6 +688,9 @@ static size_t ny_stage_flow_eqset_candidates_stmt(stmt_t *s) {
   case NY_S_FUNC:
     n += ny_stage_flow_eqset_candidates_stmt(s->as.fn.body);
     break;
+  case NY_S_LEMMA:
+    n += ny_stage_flow_eqset_candidates_expr(s->as.lemma.proposition);
+    break;
   case NY_S_RETURN:
     n += ny_stage_flow_eqset_candidates_expr(s->as.ret.value);
     break;
@@ -878,9 +894,11 @@ static char *ny_stage_artifact_json(const ny_options *opt,
   char *resolved_json = NULL;
   char *refined_json = NULL;
   char *lowered_json = NULL;
-  /* Stage output never serializes arena pointers. This byte identity lets a
+  /*
+   * Stage output never serializes arena pointers. This byte identity lets a
    * later consumer reject a snapshot before treating its type/proof facts as
-   * belonging to a different expanded source program. */
+   * belonging to a different expanded source program.
+   */
   const char *semantic_source = (prog && prog->raw_src) ? prog->raw_src : "";
   size_t semantic_source_len = (prog && prog->raw_src) ? prog->raw_src_len : 0;
   uint64_t semantic_fingerprint = ny_cache_semantic_fingerprint(semantic_source);
@@ -1557,6 +1575,9 @@ static void ny_safe_raw_validate_stmt(ny_safe_raw_ctx_t *ctx, stmt_t *s) {
     ny_safe_raw_scope_restore(ctx, mark);
     break;
   }
+  case NY_S_LEMMA:
+    ny_safe_raw_validate_expr(ctx, s->as.lemma.proposition);
+    break;
   case NY_S_LAYOUT:
     ny_safe_raw_validate_stmt_list(ctx, &s->as.layout.methods);
     break;

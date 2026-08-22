@@ -152,6 +152,10 @@ typedef struct binding {
   bool raw_int_list_mutation;
   bool raw_int_list_untagged;
   const char *raw_int_list_bail_reason;
+  LLVMValueRef raw_f64_list_ptr;
+  size_t raw_f64_list_len;
+  bool raw_f64_list_mutation;
+  const char *raw_f64_list_bail_reason;
   fun_sig *direct_callable_sig;
   bool has_dict_int_range;
   int64_t dict_int_min_raw;
@@ -296,6 +300,7 @@ typedef enum ny_mono_type_kind_t {
   NY_MONO_TYPE_F64 = 2,
   NY_MONO_TYPE_LIST = 3,
   NY_MONO_TYPE_F64_LIST = 4,
+  NY_MONO_TYPE_FIN = 5,
 } ny_mono_type_kind_t;
 
 typedef struct ny_mono_specialization_t {
@@ -376,12 +381,16 @@ typedef struct layout_field_info_t {
   size_t offset;
   size_t size;
   size_t align;
+  int is_array;        /* field is [elem, n] — type_name is the element type */
+  size_t array_count;  /* element count when is_array */
 } layout_field_info_t;
 
 typedef VEC(layout_field_info_t) ny_layout_info_list;
 
 typedef struct layout_def_t {
   const char *name;
+  VEC(const char *) deftype_param_names; /* comptime bounds are always int, so only names are needed */
+  VEC(int64_t) deftype_param_vals;       /* parallel explicit bounds (-1 = unbound / use default) */
   ny_layout_info_list fields;
   size_t size;
   size_t align;
@@ -392,6 +401,19 @@ typedef struct layout_def_t {
   bool heap_allocated;
   LLVMTypeRef llvm_type;
 } layout_def_t;
+
+typedef struct lemma_def_t {
+  const char *name;
+  const char *module_name;
+  /* Parameter declarations remain owned by stmt->as.lemma; keeping only the
+   * statement avoids a code/types.h <-> parse/ast.h include cycle. */
+  expr_t *proposition;
+  stmt_t *stmt;
+  bool proved;
+  uint64_t proposition_hash;
+} lemma_def_t;
+
+typedef VEC(lemma_def_t *) lemma_def_list;
 
 typedef struct sema_func_t {
   LLVMTypeRef resolved_return_type;

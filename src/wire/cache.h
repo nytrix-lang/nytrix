@@ -55,9 +55,11 @@ bool ny_jit_native_cache_load(const char *so_path, void **out_handle, void (**ou
 bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module, int opt_level,
                               const char *const *link_libs, size_t link_count);
 
-/* Stencil-native cache: persist in-memory JIT code as a minimal ELF .so
- * so subsequent runs skip parse + lower + encode entirely. */
-char *ny_jit_stencil_cache_path(const char *source, int opt_level);
+/* Stencil-native cache: persist in-memory JIT code as a minimal ELF .so.
+ * The key includes source, optimization level, backend, and native tier so
+ * executable artifacts cannot cross target or tier boundaries. */
+char *ny_jit_stencil_cache_path(const char *source, int opt_level,
+                                const char *backend, const char *tier);
 bool ny_jit_stencil_cache_load(const char *so_path, void **out_handle,
                                 void (**out_entry)(void));
 bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,

@@ -1,7 +1,27 @@
 ;; Keywords: math scalar integer float bigint rational complex vector matrix ring finite-field polynomial random statistics simd number-theory
-;; Math facade: scalar functions, constants, complex numbers, vectors, matrices, rings, modular integers, and polynomials.
+;; Numeric types, algorithms, vectors, matrices, parsers, and cryptographic tools.
 ;; References:
 ;; - std
+;; Documentation:
+;; ## Scope
+;; `std.math` groups numeric representations, algorithms, and parsers. Use the
+;; narrowest owning namespace so type and performance expectations remain clear.
+;;
+;; ## Namespaces
+;; - **Integers and floating point:** `std.math.integer`, `std.math.float`,
+;;   and `std.math.scalar`
+;; - **Big integers and rational values:** `std.math.big` and `std.math.bigrat`
+;; - **Vectors, matrices, quaternions, and statistics:** `std.math.vector`,
+;;   `std.math.matrix`, `std.math.quat`, and `std.math.stat`
+;; - **Data formats and parsers:** `std.math.parse.data`
+;; - **Images, fonts, and 3D assets:** `std.math.parse.img`,
+;;   `std.math.parse.font`, and `std.math.parse.3d`
+;; - **Hashes, ciphers, and number theory:** `std.math.crypto`
+;;
+;; ## Notes
+;; Crypto namespaces are focused tools. For example,
+;; `std.math.crypto.factorization.xor` searches factor pairs under an XOR
+;; constraint; it is not a general factorization engine.
 module std.math(backends,
    PI, PHI, E, TAU, LN2, LN10,
    abs, min, max, pow, mod, clamp, clamp01, sign, sqrt, gcd, lcm, factorial, lerp,
@@ -10,8 +30,7 @@ module std.math(backends,
    floor, ceil, round, fmod,
    Complex, complex, c64, c128, is_complex, real, imag, re, im, conj, abs2,
    ring, Zmod, Integers, ZmodElem, zmod_ring, zmod_elem, is_zmod_ring, is_zmod,
-PolynomialRing, Poly, poly_ring, poly_elem, is_poly_ring, is_poly_elem)
-
+   PolynomialRing, Poly, poly_ring, poly_elem, is_poly_ring, is_poly_elem)
 use std.core
 use std.math.float
 use std.math.ring

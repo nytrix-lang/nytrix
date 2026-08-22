@@ -1,0 +1,31 @@
+shape native_x86_f64_regalloc_mixed {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 object oracle f64 regalloc mixed]
+  flags "-O1 --native-backend x86_64 --native-result-oracle=4"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn score() int {
+  mut a = 1.5
+  mut b = 0.75
+  mut hits = 0
+  {
+    a = a + b * 0.000001
+    b = b + a * 0.0000005
+    if a > b { hits = hits + 1 }
+    a = a + b * 0.000001
+    b = b + a * 0.0000005
+    if a > b { hits = hits + 1 }
+    a = a + b * 0.000001
+    b = b + a * 0.0000005
+    if a > b { hits = hits + 1 }
+    a = a + b * 0.000001
+    b = b + a * 0.0000005
+    if a > b { hits = hits + 1 }
+  }
+  return hits
+}
+print(score())
+NY
+}

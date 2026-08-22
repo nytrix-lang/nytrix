@@ -62,7 +62,7 @@ fn quat_slerp(list a, list b, any t) list {
             a.get(1) * it + b_rot.get(1) * t,
             a.get(2) * it + b_rot.get(2) * t,
             a.get(3) * it + b_rot.get(3) * t
-      ))
+         ))
    }
    def theta = acos(cos_theta)
    def sin_theta = sin(theta)

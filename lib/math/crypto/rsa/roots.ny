@@ -1,4 +1,4 @@
-;; Keywords: rsa non-coprime roots nthroot crt plaintext candidates ctf
+;; Keywords: rsa non-coprime roots nthroot crt plaintext candidates
 ;; Compact helpers for RSA plaintext recovery when e is not coprime to phi(n).
 ;; Reference:
 ;; - D. Boneh, Twenty Years of Attacks on the RSA Cryptosystem.

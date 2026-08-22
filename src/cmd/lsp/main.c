@@ -1,3 +1,7 @@
+/*
+ * Language Server Protocol: JSON-RPC over stdin/stdout providing
+ * diagnostics, completion, hover, go-to-definition, and symbol search.
+ */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif

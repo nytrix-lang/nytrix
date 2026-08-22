@@ -1,3 +1,8 @@
+/*
+ * ny-doc core: manual generator, API-reference extraction, Markdown
+ * rendering, and website builder shared by `ny doc` and `ny web`.
+ */
+#include "base/util.h"
 #include "../tools/tool.h"
 
 #include <ctype.h>
@@ -23,6 +28,7 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #else
+#include <winsock2.h>
 #include <windows.h>
 #include <process.h>
 #endif
@@ -51,15 +57,6 @@ static int mkdir_p(const char *path) {
   return ny_mkdir_compat(tmp) == 0 || ny_access(tmp, F_OK) == 0;
 }
 
-static int write_file(const char *path, const char *txt) {
-  FILE *f = fopen(path, "wb");
-  if (!f)
-    return 0;
-  size_t n = strlen(txt);
-  int ok = fwrite(txt, 1, n, f) == n;
-  fclose(f);
-  return ok;
-}
 
 static int copy_file_bytes(const char *src, const char *dst) {
   FILE *in = fopen(src, "rb");
@@ -117,8 +114,12 @@ static int copy_regular_files_in_dir(const char *src_dir, const char *dst_dir,
     struct stat st;
     if (stat(src, &st) != 0)
       continue;
-    if (S_ISREG(st.st_mode) && !copy_file_bytes(src, dst))
+    if (S_ISDIR(st.st_mode)) {
+      if (!copy_regular_files_in_dir(src, dst, skip_name))
+        ok = 0;
+    } else if (S_ISREG(st.st_mode) && !copy_file_bytes(src, dst)) {
       ok = 0;
+    }
   }
   closedir(d);
   return ok;
@@ -391,7 +392,7 @@ static int write_og_fontconfig(const char *path, const char *font_path) {
                "  <dir>");
   sb_add_xml_escaped(&xml, font_dir);
   sb_add(&xml, "</dir>\n</fontconfig>\n");
-  int ok = xml.data && write_file(path, xml.data);
+  int ok = xml.data && ny_write_file(path, xml.data, strlen(xml.data)) == 0;
   free(xml.data);
   return ok;
 }
@@ -518,7 +519,7 @@ static int generate_website_og_svg(const char *path, const char *logo_path,
   free(display_font_uri);
   if (!svg.data)
     return 0;
-  int ok = write_file(path, svg.data);
+  int ok = ny_write_file(path, svg.data, svg.data ? strlen(svg.data) : 0) == 0;
   free(svg.data);
   return ok;
 }
@@ -1093,6 +1094,20 @@ static char *extract_docstring(const char *body, size_t n, size_t *code_start) {
       continue;
     }
     if (c == quote) {
+      /*
+       * Only a standalone first statement is documentation.  Without this
+       * check, the first literal in an expression such as
+       * `"prefix" + value` is incorrectly published as the docstring.
+       */
+      size_t next = i + 1;
+      while (next < n && (body[next] == ' ' || body[next] == '\t' ||
+                          body[next] == '\f' || body[next] == '\v'))
+        next++;
+      if (next < n && body[next] != '\r' && body[next] != '\n') {
+        free(doc.data);
+        *code_start = 0;
+        return strdup("");
+      }
       *code_start = i + 1;
       return doc.data ? doc.data : strdup("");
     }
@@ -1884,6 +1899,83 @@ static void append_markdown_docs_json(sb_t *json, const char *root) {
   sb_add(json, "]");
 }
 
+static int read_file_bytes(const char *path, char **out, size_t *out_n);
+
+static void append_project_examples_json(sb_t *json, const char *root) {
+  char dir_path[PATH_MAX];
+  if (!join_path(dir_path, sizeof(dir_path), root, "etc/projects/os")) {
+    sb_add(json, "[]");
+    return;
+  }
+  DIR *dir = opendir(dir_path);
+  if (!dir) {
+    sb_add(json, "[]");
+    return;
+  }
+  char **names = NULL;
+  int names_n = 0, names_cap = 0;
+  struct dirent *ent;
+  while ((ent = readdir(dir))) {
+    const char *name = ent->d_name;
+    size_t n = strlen(name);
+    if (n < 4 || strcmp(name + n - 3, ".ny") != 0)
+      continue;
+    if (names_n == names_cap) {
+      int next_cap = names_cap ? names_cap * 2 : 16;
+      char **next = (char **)realloc(names, (size_t)next_cap * sizeof(char *));
+      if (!next)
+        break;
+      names = next;
+      names_cap = next_cap;
+    }
+    names[names_n++] = strdup(name);
+  }
+  closedir(dir);
+  qsort(names, (size_t)names_n, sizeof(char *), cmp_cstr_ptr);
+  int first = 1;
+  sb_add(json, "[");
+  for (int i = 0; i < names_n; i++) {
+    char path[PATH_MAX], *source = NULL;
+    size_t source_n = 0;
+    if (!join_path(path, sizeof(path), dir_path, names[i]) ||
+        !read_file_bytes(path, &source, &source_n)) {
+      free(names[i]);
+      continue;
+    }
+    if (!first)
+      sb_add(json, ",");
+    first = 0;
+    sb_add(json, "{\"name\":");
+    sb_add_json_str(json, names[i]);
+    sb_add(json, ",\"path\":");
+    char rel[PATH_MAX];
+    snprintf(rel, sizeof(rel), "etc/projects/os/%s", names[i]);
+    sb_add_json_str(json, rel);
+    sb_add(json, ",\"source\":");
+    sb_add_json_strn(json, source, source_n);
+    sb_add(json, "}");
+    free(source);
+    free(names[i]);
+  }
+  free(names);
+  sb_add(json, "]");
+}
+
+static void append_hero_data_json(sb_t *json, const char *root) {
+  char path[PATH_MAX], *source = NULL;
+  size_t source_n = 0;
+  sb_add(json, ",\"hero_source\":");
+  if (join_path(path, sizeof(path), root, "etc/projects/os/herodoc.ny") &&
+      read_file_bytes(path, &source, &source_n)) {
+    sb_add_json_strn(json, source, source_n);
+    free(source);
+  } else {
+    sb_add(json, "null");
+  }
+  sb_add(json, ",\"project_examples\":");
+  append_project_examples_json(json, root);
+}
+
 static void append_one_import_json(sb_t *json, const char *full,
                                    const char *module, const char *symbol,
                                    const char *alias, int *first) {
@@ -2062,6 +2154,7 @@ static char *parse_docs_json(const char *bundle, const char *root,
          "[{\"name\":\"Overview\",\"module_doc\":\"Nytrix library reference.\","
          "\"symbols\":[],\"path\":[\"Home\"],\"markdown_docs\":");
   append_markdown_docs_json(&json, root);
+  append_hero_data_json(&json, root);
   sb_add(&json, "}");
 
   size_t len = strlen(bundle);
@@ -4739,7 +4832,8 @@ static int write_static_doc_page(const char *out_dir, const char *site,
   append_static_site_end_html(&html, feed.data ? feed.data : "feed.xml");
   sb_add(&html, "</main></body></html>");
 
-  int ok = write_file(path, html.data ? html.data : "");
+  int ok = ny_write_file(path, html.data ? html.data : "",
+                         html.data ? strlen(html.data) : 0) == 0;
   free(canonical.data);
   free(app.data);
   free(feed.data);
@@ -4938,7 +5032,8 @@ static void write_rss_feed(const char *out_dir, const char *site,
                   latest);
   sb_add(&rss, "  </channel>\n</rss>\n");
 
-  write_file(path, rss.data ? rss.data : "");
+  ny_write_file(path, rss.data ? rss.data : "",
+                rss.data ? strlen(rss.data) : 0);
   ny_doc_meta_list_free(&docs);
   free(root_url.data);
   free(api_url.data);
@@ -5159,8 +5254,10 @@ static void write_api_seo_index(const char *out_dir, const char *site,
   sb_add(&html, "</ul>");
   append_static_site_end_html(&html, feed.data ? feed.data : "../feed.xml");
   sb_add(&html, "</main></body></html>");
-  write_file(path, html.data ? html.data : "");
-  write_file(txt_path, txt.data ? txt.data : "");
+  ny_write_file(path, html.data ? html.data : "",
+                html.data ? strlen(html.data) : 0);
+  ny_write_file(txt_path, txt.data ? txt.data : "",
+                txt.data ? strlen(txt.data) : 0);
   append_sitemap_url(sitemap, site, "api/", "0.8");
   sb_add(plain, "- [Standard Library API](api/): source-linked map for the "
                 "bundled standard library.\n");
@@ -5219,18 +5316,22 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
 
   char path[PATH_MAX];
   if (has_site && join_path(path, sizeof(path), out_dir, "sitemap.xml"))
-    write_file(path, sitemap.data ? sitemap.data : "");
+    ny_write_file(path, sitemap.data ? sitemap.data : "",
+                  sitemap.data ? strlen(sitemap.data) : 0);
   else if (!has_site && join_path(path, sizeof(path), out_dir, "sitemap.xml"))
     unlink(path);
   if (has_site && join_path(path, sizeof(path), out_dir, "robots.txt"))
-    write_file(path, robots.data ? robots.data : "");
+    ny_write_file(path, robots.data ? robots.data : "",
+                  robots.data ? strlen(robots.data) : 0);
   else if (!has_site && join_path(path, sizeof(path), out_dir, "robots.txt"))
     unlink(path);
   write_rss_feed(out_dir, site, root);
   if (join_path(path, sizeof(path), out_dir, "manual.txt"))
-    write_file(path, plain.data ? plain.data : "");
+    ny_write_file(path, plain.data ? plain.data : "",
+                  plain.data ? strlen(plain.data) : 0);
   if (join_path(path, sizeof(path), out_dir, "manual-full.txt"))
-    write_file(path, full.data ? full.data : "");
+    ny_write_file(path, full.data ? full.data : "",
+                  full.data ? strlen(full.data) : 0);
   if (join_path(path, sizeof(path), out_dir, "site.txt")) {
     sb_t site_txt = {0};
     sb_add(&site_txt, "Nytrix Lang native programming language documentation\n");
@@ -5243,7 +5344,8 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
     sb_add(&site_txt, "RSS feed: feed.xml\n");
     sb_add(&site_txt, "Discord: https://discord.gg/XQDR6DZWb\n");
     sb_add(&site_txt, "Mastodon: https://mastodon.social/@nytrix\n");
-    write_file(path, site_txt.data ? site_txt.data : "");
+    ny_write_file(path, site_txt.data ? site_txt.data : "",
+                  site_txt.data ? strlen(site_txt.data) : 0);
     free(site_txt.data);
   }
   free(sitemap_url.data);
@@ -5253,7 +5355,17 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
   free(robots.data);
 }
 
-#ifndef _WIN32
+static int read_file_bytes(const char *path, char **out, size_t *out_n) {
+  if (!out || !out_n)
+    return 0;
+  size_t n = 0;
+  char *buf = ny_read_file_raw(path, &n);
+  if (!buf)
+    return 0;
+  *out = buf;
+  *out_n = n;
+  return 1;
+}
 static const char *guess_mime(const char *path) {
   const char *dot = strrchr(path, '.');
   if (!dot)
@@ -5281,37 +5393,20 @@ static const char *guess_mime(const char *path) {
   return "application/octet-stream";
 }
 
-static int read_file_bytes(const char *path, char **out, size_t *out_n) {
-  FILE *f = fopen(path, "rb");
-  if (!f)
-    return 0;
-  if (fseek(f, 0, SEEK_END) != 0) {
-    fclose(f);
-    return 0;
-  }
-  long n = ftell(f);
-  if (n < 0) {
-    fclose(f);
-    return 0;
-  }
-  rewind(f);
-  char *buf = (char *)malloc((size_t)n + 1);
-  if (!buf) {
-    fclose(f);
-    return 0;
-  }
-  size_t got = fread(buf, 1, (size_t)n, f);
-  fclose(f);
-  buf[got] = '\0';
-  *out = buf;
-  *out_n = got;
-  return 1;
-}
+#ifdef _WIN32
+typedef SOCKET ny_doc_socket_t;
+#else
+typedef int ny_doc_socket_t;
+#endif
 
-static int send_all(int fd, const char *buf, size_t n) {
+static int send_all(ny_doc_socket_t fd, const char *buf, size_t n) {
   size_t off = 0;
   while (off < n) {
+#ifdef _WIN32
+    int wr = send(fd, buf + off, (int)(n - off), 0);
+#else
     ssize_t wr = send(fd, buf + off, n - off, 0);
+#endif
     if (wr <= 0)
       return 0;
     off += (size_t)wr;
@@ -5319,9 +5414,13 @@ static int send_all(int fd, const char *buf, size_t n) {
   return 1;
 }
 
-static void serve_client(int cfd, const char *root) {
+static void serve_client(ny_doc_socket_t cfd, const char *root) {
   char req[4096];
+#ifdef _WIN32
+  int rn = recv(cfd, req, sizeof(req) - 1, 0);
+#else
   ssize_t rn = recv(cfd, req, sizeof(req) - 1, 0);
+#endif
   if (rn <= 0)
     return;
   req[rn] = '\0';
@@ -5384,13 +5483,30 @@ static void serve_client(int cfd, const char *root) {
 }
 
 static int serve_http_forever(const char *root, int port) {
-  int sfd = socket(AF_INET, SOCK_STREAM, 0);
+#ifdef _WIN32
+  WSADATA wsa;
+  if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+    nyt_err("ny-doc", "WSAStartup failed");
+    return 1;
+  }
+#endif
+  ny_doc_socket_t sfd = socket(AF_INET, SOCK_STREAM, 0);
+#ifdef _WIN32
+  if (sfd == INVALID_SOCKET) {
+    nyt_err("ny-doc", "socket failed: win32=%d", WSAGetLastError());
+    WSACleanup();
+    return 1;
+  }
+  BOOL one = TRUE;
+  setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof(one));
+#else
   if (sfd < 0) {
     nyt_err("ny-doc", "socket failed: %s", strerror(errno));
     return 1;
   }
   int one = 1;
   setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+#endif
 
   struct sockaddr_in addr;
   memset(&addr, 0, sizeof(addr));
@@ -5399,27 +5515,47 @@ static int serve_http_forever(const char *root, int port) {
   addr.sin_port = htons((uint16_t)port);
 
   if (bind(sfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+#ifdef _WIN32
+    nyt_err("ny-doc", "bind failed on port %d: win32=%d", port,
+            WSAGetLastError());
+    closesocket(sfd);
+    WSACleanup();
+#else
     nyt_err("ny-doc", "bind failed on port %d: %s", port, strerror(errno));
     close(sfd);
+#endif
     return 1;
   }
   if (listen(sfd, 64) != 0) {
+#ifdef _WIN32
+    nyt_err("ny-doc", "listen failed: win32=%d", WSAGetLastError());
+    closesocket(sfd);
+    WSACleanup();
+#else
     nyt_err("ny-doc", "listen failed: %s", strerror(errno));
     close(sfd);
+#endif
     return 1;
   }
 
   nyt_msg("SERVE", NYT_CYAN, "docs from %s at http://127.0.0.1:%d/", root,
           port);
   for (;;) {
-    int cfd = accept(sfd, NULL, NULL);
+    ny_doc_socket_t cfd = accept(sfd, NULL, NULL);
+#ifdef _WIN32
+    if (cfd == INVALID_SOCKET)
+#else
     if (cfd < 0)
+#endif
       continue;
     serve_client(cfd, root);
+#ifdef _WIN32
+    closesocket(cfd);
+#else
     close(cfd);
+#endif
   }
 }
-#endif
 
 typedef struct {
   const char *input;
@@ -5653,13 +5789,13 @@ static int web_render_docs_page(const char *root, const char *site_url,
     return 0;
   }
 
-  if (!write_file(paths->cache_web_path, html)) {
+  if (ny_write_file(paths->cache_web_path, html, strlen(html)) != 0) {
     free(html);
     free(docs_json);
     nyt_err("ny-doc", "failed writing %s", paths->cache_web_path);
     return 0;
   }
-  if (!write_file(paths->index_path, html)) {
+  if (ny_write_file(paths->index_path, html, strlen(html)) != 0) {
     free(html);
     free(docs_json);
     nyt_err("ny-doc", "failed writing %s", paths->index_path);
@@ -5722,4 +5858,3 @@ static int web_copy_output_assets(const web_paths_t *paths) {
   }
   return 1;
 }
-

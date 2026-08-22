@@ -1,3 +1,7 @@
+/*
+ * Bundle generator: produces self-contained std.ny and symbol
+ * headers from the standard library module tree.
+ */
 #include "wire/bundle.h"
 #include "base/loader.h"
 #include "base/util.h"

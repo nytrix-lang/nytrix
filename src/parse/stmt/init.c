@@ -1,3 +1,7 @@
+/*
+ * Statement-parser entry point: dispatches to the appropriate statement
+ * sub-parser (core, comptime, dispatch) based on token kind.
+ */
 #include "../priv.h"
 #include <ctype.h>
 #include <stdlib.h>

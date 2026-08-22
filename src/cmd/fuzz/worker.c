@@ -1,3 +1,7 @@
+/*
+ * Fuzz worker: per-thread fuzzing loop that generates, compiles, runs,
+ * and classifies programs, reporting anomalies back to the coordinator.
+ */
 #include "core.h"
 
 typedef struct {

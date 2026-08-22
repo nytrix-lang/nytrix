@@ -57,21 +57,19 @@ fn test() {
 
 ;{
 Multiline comment block
-};
+} ;
 
 ;; @#$%^&*()_+-=[]{}|;':",.<>?/
 ;; 言 🫪
 ;; very long comment used to exercise comment scanning
-
 ;; Multiline comments
 ;EOFMARK
 this is a multiline comment block
 it should be ignored entirely by the compiler
 def dummy = "should not compile"
-EOFMARK;
+EOFMARK ;
 
 ;TEST_BLOCK
 mut val_ignored = 123
-TEST_BLOCK;
-
+TEST_BLOCK ;
 print("✓ comments tests passed")

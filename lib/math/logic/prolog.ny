@@ -3,7 +3,6 @@
 module std.math.logic.prolog(
    variable, term, fact, rule, is_variable, is_term, is_clause,
    substitute, unify, bindings, query)
-
 use std.core
 
 ;; Returns the result of the `variable` operation.
@@ -38,13 +37,13 @@ fn rule(dict head, list body) dict {
 ;; Returns true when is variable.
 fn is_variable(any value) bool {
    is_dict(value) && value.get("kind", "") == "variable" &&
-      is_str(value.get("name", 0)) && value.get("name", "").len > 0
+   is_str(value.get("name", 0)) && value.get("name", "").len > 0
 }
 
 ;; Returns true when is term.
 fn is_term(any value) bool {
    if !is_dict(value) || value.get("kind", "") != "term" ||
-      !is_str(value.get("name", 0)) || !is_list(value.get("args", 0)) {
+   !is_str(value.get("name", 0)) || !is_list(value.get("args", 0)) {
       return false
    }
    true
@@ -53,7 +52,7 @@ fn is_term(any value) bool {
 ;; Returns true when is clause.
 fn is_clause(any value) bool {
    if !is_dict(value) || value.get("kind", "") != "clause" ||
-      !is_term(value.get("head", 0)) || !is_list(value.get("body", 0)) {
+   !is_term(value.get("head", 0)) || !is_list(value.get("body", 0)) {
       return false
    }
    mut i = 0
@@ -120,7 +119,7 @@ fn _unify(any left, any right, dict substitution) dict {
    if is_variable(b) { return _unify(b, a, substitution) }
    if is_term(a) || is_term(b) {
       if !is_term(a) || !is_term(b) || a.get("name") != b.get("name") ||
-         a.get("args").len != b.get("args").len {
+      a.get("args").len != b.get("args").len {
          return {"ok":false, "substitution":substitution, "reason":"term mismatch"}
       }
       mut out = substitution
@@ -202,10 +201,10 @@ fn _solve(list knowledge, list goals, dict substitution, dict state,
       return nil
    }
    if goals.len == 0 {
-      state["solutions"] = state.get("solutions").append(substitution)
+      def sol = dict_clone(substitution)
+      state["solutions"] = state.get("solutions").append(sol)
       return nil
    }
-
    def goal = substitute(goals[0], substitution)
    def rest = goals.slice(1, goals.len, 1)
    mut i = 0
@@ -217,7 +216,11 @@ fn _solve(list knowledge, list goals, dict substitution, dict state,
       }
       state["steps"] = state.get("steps") + 1
       def clause = _fresh_clause(knowledge[i], state.get("steps"))
-      def matched = _unify(goal, clause.get("head"), substitution)
+      ; Nytrix dicts mutate in place, so each alternative gets its own copy
+      ; of the substitution; otherwise a failed sibling attempt would leak
+      ; bindings into the next clause and corrupt backtracking.
+      def branch_subst = dict_clone(substitution)
+      def matched = _unify(goal, clause.get("head"), branch_subst)
       if matched.get("ok") {
          def next_goals = clause.get("body") + rest
          _solve(knowledge, next_goals, matched.get("substitution"), state,

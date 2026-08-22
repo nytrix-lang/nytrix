@@ -1,3 +1,7 @@
+/*
+ * Math runtime: f32/f64 arithmetic, trig, exp/log, rounding, and
+ * numeric conversion primitives with tagged-value dispatch.
+ */
 #include "base/common.h"
 #include "rt/runtime.h"
 #include "rt/shared.h"
@@ -426,6 +430,8 @@ int64_t rt_flt_to_int(int64_t v) {
 
 int64_t rt_flt_trunc(int64_t v) { return rt_flt_to_int(v); }
 
+int64_t rt_native_f64_to_i64(double v) { return (int64_t)v; }
+
 int64_t rt_complex_add(int64_t a, int64_t b) {
   return rt_complex_box_double(rt_complex_re_raw(a) + rt_complex_re_raw(b),
                                rt_complex_im_raw(a) + rt_complex_im_raw(b));
@@ -542,6 +548,11 @@ int64_t rt_flt_atan2(int64_t y, int64_t x) {
 int64_t rt_flt_sqrt(int64_t v) { return rt_flt_box_double(sqrt(rt_flt_unbox_double(v))); }
 
 double rt_native_sqrt_f64(double value) { return sqrt(value); }
+double rt_native_sin_f64(double value) { return sin(value); }
+double rt_native_cos_f64(double value) { return cos(value); }
+double rt_native_fmod_f64(double left, double right) {
+  return fmod(left, right);
+}
 int64_t rt_flt_exp(int64_t v) { return rt_flt_box_double(exp(rt_flt_unbox_double(v))); }
 int64_t rt_flt_log(int64_t v) { return rt_flt_box_double(log(rt_flt_unbox_double(v))); }
 int64_t rt_flt_log2(int64_t v) { return rt_flt_box_double(log2(rt_flt_unbox_double(v))); }

@@ -1,3 +1,7 @@
+/*
+ * Dynamic library loader for libcurl: opens, probes, and caches curl
+ * symbols so the runtime can fetch URLs without a hard link-time dep.
+ */
 #include "base/curl.h"
 #include "base/common.h"
 

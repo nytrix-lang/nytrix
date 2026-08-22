@@ -1,7 +1,6 @@
 ;; Keywords: logic rewrite normalize congruence bounded terms
 ;; Deterministic, bounded rewriting over std.math.logic.prolog terms.
 module std.math.logic.rewrite(rule, is_rule, rewrite_once, normalize)
-
 use std.core
 use std.math.logic.prolog as prolog
 
@@ -14,7 +13,7 @@ fn rule(any pattern, any replacement) dict {
 ;; Returns true when is rule.
 fn is_rule(any value) bool {
    is_dict(value) && value.get("kind", "") == "rewrite-rule" &&
-      value.contains("pattern") && value.contains("replacement")
+   value.contains("pattern") && value.contains("replacement")
 }
 
 fn _consume(dict state, int depth) bool {
@@ -77,7 +76,7 @@ fn _rewrite_children(any value, list rules, dict state, int depth) dict {
       changed = changed || child.get("changed")
       if !state.get("decided") {
          return {"value":prolog.term(value.get("name"), args +
-            source.slice(i + 1, source.len, 1)), "changed":changed}
+               source.slice(i + 1, source.len, 1)), "changed":changed}
       }
       i += 1
    }
@@ -99,7 +98,7 @@ fn _rewrite(any value, list rules, dict state, int depth) dict {
       def matched = prolog.unify(rules[i].get("pattern"), current)
       if matched.get("ok") {
          return {"value":prolog.substitute(rules[i].get("replacement"),
-            matched.get("substitution")), "changed":true}
+               matched.get("substitution")), "changed":true}
       }
       i += 1
    }
@@ -181,7 +180,7 @@ fn normalize(any value, list rules, int max_passes=256,
       if remaining_steps <= 0 || remaining_nodes <= 0 || remaining_memory <= 0 {
          return {"decided":false,
             "reason":remaining_steps <= 0 ? "step limit" :
-               (remaining_nodes <= 0 ? "node limit" : "memory limit"),
+            (remaining_nodes <= 0 ? "node limit" : "memory limit"),
             "value":current, "passes":passes,
             "steps":max_steps - remaining_steps,
             "nodes":max_nodes - remaining_nodes,

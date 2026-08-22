@@ -24,12 +24,12 @@ fn pa_strerror(any _err) any {
 
 fn pa_simple_drain(..._args) int {
    "Runs the pa simple drain operation."
-   -1
+   return -1
 }
 
 fn pa_simple_flush(..._args) int {
    "Runs the pa simple flush operation."
-   -1
+   return -1
 }
 
 fn pa_simple_free(any _pa) any {
@@ -39,7 +39,7 @@ fn pa_simple_free(any _pa) any {
 
 fn pa_simple_write(..._args) int {
    "Runs the pa simple write operation."
-   -1
+   return -1
 }
 
 #linux {

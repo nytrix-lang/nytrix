@@ -1,0 +1,25 @@
+shape optcheck_typed_scalar_list {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-result-oracle=1"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn typed_values(int n) int {
+  mut list<int> values = []
+  mut i = 0
+  while i < n {
+    values = append(values, i)
+    i += 1
+  }
+  values[3] = 99
+  values[3] + values.len
+}
+
+assert(typed_values(8) == 107)
+print("typed-scalar-list-ok")
+NY
+}

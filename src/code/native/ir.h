@@ -37,6 +37,7 @@ typedef enum {
   NYIR_DIV_F64,
   NYIR_I64_TO_F64,
   NYIR_CMP_F64,
+  NYIR_SQRT_F64,
   NYIR_CONST_F32,
   NYIR_ADD_F32,
   NYIR_SUB_F32,
@@ -83,7 +84,28 @@ typedef enum {
   NYIR_VEC4_XOR_I64,
   NYIR_VEC4_SHL_I64,
   NYIR_VEC4_SAR_I64,
-  NYIR_VEC4_SET1_I64,
+  NYIR_VEC4_REDUCE_ADD_I64, /* dst = scalar a + sum of four lanes in b */
+  /* SIMD vec8 packed i64 (256-bit, 4--i64).  Verifier/type-map/vectorizer
+   * are fully wired.  Object encoders lower these through the NIR-fallback
+   * path until native ymm (x86-64) / SVE (AArch64) emission is added. */
+  NYIR_VEC8_LOAD_I64,
+  NYIR_VEC8_STORE_I64,
+  NYIR_VEC8_ADD_I64,
+  NYIR_VEC8_SUB_I64,
+  NYIR_VEC8_AND_I64,
+  NYIR_VEC8_OR_I64,
+  NYIR_VEC8_XOR_I64,
+  NYIR_VEC8_REDUCE_ADD_I64, /* dst = scalar a + sum of eight lanes in b */
+  /* Bounds check: verifies addr + offset within [base, base+len).
+   * .a = base pointer, .b = offset, .imm = byte length.
+   * Elided at lowering time when the index type is Fin<N> and
+   * N matches a comptime-known buffer length. */
+  NYIR_BOUNDS_CHECK,
+  NYIR_SIN_F64,
+  NYIR_COS_F64,
+  /* Appended to preserve serialized opcode numbers from older NYIR binaries. */
+  NYIR_VEC4_REDUCE_ADD_F64, /* dst = scalar a + sum of packed lanes in b */
+  NYIR_VEC4_SET1_I64,       /* dst = {a, a} (128-bit i64 broadcast) */
   NYIR_OP_COUNT,
 } nyir_op_t;
 
@@ -108,6 +130,10 @@ typedef enum {
   NYIR_EFFECT_VOLATILE = 1u << 7,
   NYIR_EFFECT_ALLOCATION = 1u << 8,
   NYIR_EFFECT_UNKNOWN_SIDE_EFFECT = 1u << 9,
+  NYIR_EFFECT_IO = 1u << 10,
+  NYIR_EFFECT_THREAD = 1u << 11,
+  NYIR_EFFECT_FFI = 1u << 12,
+  NYIR_EFFECT_FENV = 1u << 13,
 } nyir_effect_t;
 
 #define NYIR_INST_F_EXTERN 1u
@@ -115,6 +141,26 @@ typedef enum {
 #define NYIR_INST_F_RET_F32 4u
 #define NYIR_INST_F_SRET 8u
 #define NYIR_INST_F_MEM_F64 16u
+#define NYIR_INST_F_MEM_BYTE 32u
+/* Set by nyir_narrow() on scalar-int ALU ops (add/sub/and/or/xor/mul) whose
+ * operands and destination are provably non-negative and within
+ * [0, INT32_MAX]. x86-64's 32-bit register ALU forms zero-extend the upper
+ * 32 bits of the destination on write, so a 32-bit load + 32-bit op +
+ * full 64-bit store round-trips to the identical 64-bit value as the
+ * 64-bit form, letting the emitter drop the REX.W prefix. NOTE: only
+ * sound for non-negative ranges -- a value that can go negative would
+ * need explicit sign-extension after a 32-bit op, which this flag does
+ * not provide, so nyir_narrow() must never set it otherwise. */
+#define NYIR_INST_F_NARROW32 64u
+/*
+ * Set on NYIR_CALL by the native builder after interprocedural effect
+ * inference when the callee is a user function whose full observable effect
+ * set is known (see ny_native_nir_patch_call_effects).  When set,
+ * nyir_effective_effects() trusts inst->effects instead of the
+ * symbol-table default (CALL|FFI|UNKNOWN_SIDE_EFFECT), which lets LICM and
+ * friends treat provably pure user calls like any other pure operation.
+ */
+#define NYIR_INST_F_EFFECTS_KNOWN 128u
 
 /* Packed NYIR_CALL aggregate-argument metadata. */
 #define NYIR_ARG_AGG_SIZE_MASK 0x00ffffffu
@@ -212,6 +258,9 @@ typedef struct {
   size_t returns;
   size_t range_facts;
   size_t debug_locs;
+  size_t vectorize_attempted_loops;
+  size_t vectorize_rejected_loops;
+  size_t vectorized_loops;
   unsigned effect_mask;
   size_t ops[NYIR_OP_COUNT];
 } nyir_metadata_summary_t;
@@ -262,11 +311,13 @@ typedef struct {
   bool *value_f64;
   bool *value_f32;
   bool *value_v128_i64;
+  bool *value_v256_i64;
   bool *value_v128_f64;
   bool *value_v128_f32;
   bool *local_f64;
   bool *local_f32;
   bool *local_v128_i64;
+  bool *local_v256_i64;
   bool *local_v128_f64;
   bool *local_v128_f32;
   size_t value_count;
@@ -284,6 +335,13 @@ typedef struct {
   size_t len;
   size_t cap;
   int next_value;
+  /* Optimization diagnostics retained with the function so tier/performance
+   * reports can distinguish loops that remained scalar from loops that were
+   * successfully widened. These counters are non-semantic and are not part
+   * of the NYIR binary format. */
+  size_t vectorize_attempted_loops;
+  size_t vectorize_rejected_loops;
+  size_t vectorized_loops;
   nyir_param_type_t *param_types;
   size_t param_count;
   char **owned_symbols;
@@ -335,6 +393,10 @@ typedef struct {
   double time_ms;
   size_t before_insts;
   size_t after_insts;
+  int before_values;
+  int after_values;
+  size_t before_blocks;
+  size_t after_blocks;
 } nyir_pass_stat_t;
 
 typedef struct {
@@ -379,6 +441,11 @@ bool nyir_cfg_dominates(const nyir_cfg_t *cfg, size_t dominator,
                           size_t block);
 bool nyir_cfg_is_backedge(const nyir_cfg_t *cfg, size_t predecessor,
                             size_t successor);
+/* Compute the natural-loop block set for a dominance backedge. `member`
+ * must have at least cfg->block_count entries and is cleared before use. */
+bool nyir_cfg_natural_loop_blocks(const nyir_cfg_t *cfg, size_t latch,
+                                    size_t header, bool *member,
+                                    size_t member_count);
 /**
  * Promote initialized, non-address-taken scalar locals to SSA values.
  *
@@ -416,8 +483,10 @@ void nyir_dump_cfg(FILE *out, const nyir_func_t *f, const char *name);
 void nyir_dump_stats(FILE *out, const nyir_opt_stats_t *stats);
 bool nyir_dump_binary(FILE *out, const nyir_func_t *f, const char *name);
 /** Load a versioned NYIR binary into `out`, freeing its old contents.
- * Current output is v9; v1--v7 are normalized into the current opcode table
- * and v8 effect metadata is normalized to the current effect model.
+ * Current output is v11; v1--v7 are normalized into the current opcode table,
+ * v8 effect metadata is normalized to the current effect model, v10 adds
+ * parameter-type serialization, and v11 appends f64 reduction opcodes without
+ * renumbering the older serialized opcode table.
  * Rejects incompatible format versions and writes a diagnostic to `err`. */
 bool nyir_load_binary(FILE *in, nyir_func_t *out, char *name,
                         size_t name_len, char *err, size_t err_len);
@@ -439,6 +508,8 @@ bool nyir_jump_thread(nyir_func_t *f);
  * before/after counts and per-pass timings. O2+ preserve SSA PHIs until
  * machine lowering. */
 void nyir_set_cf_mem2reg_enabled(bool enable);
+void nyir_set_preserve_phis(bool preserve);
+bool nyir_get_preserve_phis(void);
 /* Optional diagnostic controls. Names are target-independent NYIR pass names
  * such as "const_fold", "dce", or "cfg_simplify". */
 void nyir_set_pass_controls(const char *disable_pass, const char *stop_after);
@@ -471,6 +542,14 @@ bool nyir_tv_smt_equiv(const nyir_func_t *before, const nyir_func_t *after,
 bool nyir_memory_ssa_forward(nyir_func_t *f);
 
 /* Roadmap seed passes (bounded, correctness-first). */
+/*
+ * Return the audited effects for a known runtime call. Unknown calls retain
+ * the conservative CALL|UNKNOWN_SIDE_EFFECT summary.
+ */
+unsigned nyir_call_effect_summary(const nyir_inst_t *inst);
+/* Return the analysis-visible effect set, replacing a CALL's conservative
+ * stored CALL|UNKNOWN summary with its audited runtime-helper summary. */
+unsigned nyir_effective_effects(const nyir_inst_t *inst);
 bool nyir_effect_summary(const nyir_func_t *f, unsigned *out_mask,
                            size_t *out_reads, size_t *out_writes,
                            size_t *out_calls);
@@ -480,15 +559,33 @@ bool nyir_bounds_check_elim(nyir_func_t *f);
 bool nyir_egraph_local(nyir_func_t *f);
 bool nyir_apply_rules(nyir_func_t *f);
 bool nyir_inline_small(nyir_func_t *f);
+bool nyir_inline_general(nyir_func_t *f);
 bool nyir_loop_unroll(nyir_func_t *f);
-bool nyir_escape_sroa(nyir_func_t *f);
-bool nyir_sroa_scalar(nyir_func_t *f);
+bool nyir_scev_lite(nyir_func_t *f);
+bool nyir_irce(nyir_func_t *f);
+bool nyir_loop_idiom(nyir_func_t *f);
+bool nyir_loop_rotate(nyir_func_t *f);
+bool nyir_loop_interchange(nyir_func_t *f);
+bool nyir_loop_versioning(nyir_func_t *f);
+bool nyir_loop_unswitch(nyir_func_t *f);
+bool nyir_iv_elim(nyir_func_t *f);
+bool nyir_gvn_pre(nyir_func_t *f);
+bool nyir_loop_vectorize(nyir_func_t *f);
+bool nyir_slp_vectorize(nyir_func_t *f);
+bool nyir_alias_store_sink(nyir_func_t *f);
+bool nyir_narrow(nyir_func_t *f);
+bool nyir_phi_elim(nyir_func_t *f);
+bool nyir_tbuf_scalar_len(nyir_func_t *f);
+bool nyir_tbuf_private_object(nyir_func_t *f);
 bool nyir_points_to_sroa(nyir_func_t *f);
 bool nyir_store_sink(nyir_func_t *f);
 bool nyir_aggregate_sroa(nyir_func_t *f);
 bool nyir_polyhedral_nest(nyir_func_t *f);
 bool nyir_kernel_hint(nyir_func_t *f);
 bool nyir_block_layout(nyir_func_t *f);
+bool nyir_escape_sroa(nyir_func_t *f);
+bool nyir_sroa_scalar(nyir_func_t *f);
+
 
 size_t ny_isle_rule_count(void);
 const char *ny_isle_rule_name(size_t i);

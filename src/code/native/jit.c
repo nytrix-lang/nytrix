@@ -1,3 +1,7 @@
+/*
+ * Native JIT: compiles NYIR to native code in-process, manages
+ * writable-executable code pages, and provides a native call trampoline.
+ */
 #include "code/native/native.h"
 #include "code/native/object/internal.h"
 #include "code/native/ir/machine.h"
@@ -76,7 +80,7 @@ static void *ny_native_jit_symbol(
   return ny_jit_resolve_symbol(name);
 }
 
-static void ny_native_visit_stmt_links(const stmt_t *stmt,
+static void ny_native_visit_stmt_links(const stmt_t *stmt, const ny_options *opt,
                                        ny_native_link_visitor_t visitor,
                                        void *ctx) {
   if (!stmt)
@@ -92,52 +96,67 @@ static void ny_native_visit_stmt_links(const stmt_t *stmt,
     return;
   case NY_S_MODULE:
     for (size_t i = 0; i < stmt->as.module.body.len; ++i)
-      ny_native_visit_stmt_links(stmt->as.module.body.data[i], visitor, ctx);
+      ny_native_visit_stmt_links(stmt->as.module.body.data[i], opt, visitor, ctx);
     return;
   case NY_S_BLOCK:
     for (size_t i = 0; i < stmt->as.block.body.len; ++i)
-      ny_native_visit_stmt_links(stmt->as.block.body.data[i], visitor, ctx);
+      ny_native_visit_stmt_links(stmt->as.block.body.data[i], opt, visitor, ctx);
     return;
-  case NY_S_IF:
-    ny_native_visit_stmt_links(stmt->as.iff.init, visitor, ctx);
-    ny_native_visit_stmt_links(stmt->as.iff.conseq, visitor, ctx);
-    ny_native_visit_stmt_links(stmt->as.iff.alt, visitor, ctx);
+  case NY_S_IF: {
+    bool selected = false;
+    ny_native_visit_stmt_links(stmt->as.iff.init, opt, visitor, ctx);
+    if (stmt->as.iff.test && stmt->as.iff.test->kind == NY_E_COMPTIME &&
+        ny_native_target_eval_bool(opt, stmt->as.iff.test, &selected)) {
+      ny_native_visit_stmt_links(selected ? stmt->as.iff.conseq : stmt->as.iff.alt,
+                                 opt, visitor, ctx);
+      return;
+    }
+    ny_native_visit_stmt_links(stmt->as.iff.conseq, opt, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.iff.alt, opt, visitor, ctx);
     return;
+  }
   case NY_S_WHILE:
-    ny_native_visit_stmt_links(stmt->as.whl.init, visitor, ctx);
-    ny_native_visit_stmt_links(stmt->as.whl.body, visitor, ctx);
-    ny_native_visit_stmt_links(stmt->as.whl.update, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.whl.init, opt, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.whl.body, opt, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.whl.update, opt, visitor, ctx);
     return;
   case NY_S_FOR:
-    ny_native_visit_stmt_links(stmt->as.fr.init, visitor, ctx);
-    ny_native_visit_stmt_links(stmt->as.fr.body, visitor, ctx);
-    ny_native_visit_stmt_links(stmt->as.fr.update, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.fr.init, opt, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.fr.body, opt, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.fr.update, opt, visitor, ctx);
     return;
   case NY_S_TRY:
-    ny_native_visit_stmt_links(stmt->as.tr.body, visitor, ctx);
-    ny_native_visit_stmt_links(stmt->as.tr.handler, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.tr.body, opt, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.tr.handler, opt, visitor, ctx);
     return;
   case NY_S_DEFER:
-    ny_native_visit_stmt_links(stmt->as.de.body, visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.de.body, opt, visitor, ctx);
     return;
   case NY_S_MATCH:
     for (size_t i = 0; i < stmt->as.match.arms.len; ++i)
-      ny_native_visit_stmt_links(stmt->as.match.arms.data[i].conseq, visitor,
-                                 ctx);
-    ny_native_visit_stmt_links(stmt->as.match.default_conseq, visitor, ctx);
+      ny_native_visit_stmt_links(stmt->as.match.arms.data[i].conseq, opt,
+                                 visitor, ctx);
+    ny_native_visit_stmt_links(stmt->as.match.default_conseq, opt, visitor, ctx);
     return;
   default:
     return;
   }
 }
 
-void ny_native_visit_program_links(const program_t *prog,
-                                   ny_native_link_visitor_t visitor,
-                                   void *ctx) {
+void ny_native_visit_program_links_for_options(const program_t *prog,
+                                               const ny_options *opt,
+                                               ny_native_link_visitor_t visitor,
+                                               void *ctx) {
   if (!prog || !visitor)
     return;
   for (size_t i = 0; i < prog->body.len; ++i)
-    ny_native_visit_stmt_links(prog->body.data[i], visitor, ctx);
+    ny_native_visit_stmt_links(prog->body.data[i], opt, visitor, ctx);
+}
+
+void ny_native_visit_program_links(const program_t *prog,
+                                   ny_native_link_visitor_t visitor,
+                                   void *ctx) {
+  ny_native_visit_program_links_for_options(prog, NULL, visitor, ctx);
 }
 
 static void ny_native_jit_load_link(const char *library, void *ctx) {
@@ -151,8 +170,8 @@ static bool ny_native_jit_compile_aarch64_bundle(
     const ny_native_target_info_t *target, ny_native_jit_image_t *image,
     char *err, size_t err_len) {
   ny_obj_buf_t code = {0};
-  ny_x64_obj_symbol_def_t defs[256];
-  ny_x64_obj_reloc_t relocs[256];
+  ny_x64_obj_symbol_def_t defs[NY_NATIVE_MAX_DEFS];
+  ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS];
   size_t def_count = 0, reloc_count = 0;
   if (!ny_a64_obj_build_bundle(top, funcs, names, func_count, target,
                                "rt_main", false, &code, defs, &def_count,
@@ -274,19 +293,22 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
 
   nyir_func_t top = {0};
   nyir_func_t funcs[NY_NATIVE_LIVE_MAX_FUNCS] = {{0}};
+  const char *names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
   size_t func_count = 0;
-  if (!ny_native_build_nir(prog, opt, &top, funcs, &func_count,
-                           NY_NATIVE_LIVE_MAX_FUNCS, err,
-                           err_len) || top.len == 0)
+  if (!ny_native_build_nir(prog, opt, &top, funcs, &func_count, names,
+                           NY_NATIVE_LIVE_MAX_FUNCS, err, err_len) ||
+      top.len == 0)
     goto fail_nir;
-  /* Consume the shared machine form stream as a hard gate before the host
+  /*
+   * Consume the shared machine form stream as a hard gate before the host
    * in-memory encoder. The x86-64/AArch64 byte encoders still lower from the
-   * verified NYIR that produced this machine form; both forms must agree. */
+   * verified NYIR that produced this machine form; both forms must agree.
+   */
   {
     char mach_err[256] = {0};
     ny_mach_func_t mach = {0};
-    if (!ny_mach_lower_nir(&top, &mach, mach_err, sizeof(mach_err)) ||
-        !ny_mach_verify(&mach, mach_err, sizeof(mach_err))) {
+    if (!ny_mach_lower_nir(&top, &mach, target.caps, mach_err, sizeof(mach_err)) ||
+        !ny_mach_verify(&mach, 0, mach_err, sizeof(mach_err))) {
       ny_native_set_err(err, err_len, "native JIT: machine form gate failed for rt_main: %s",
                         mach_err[0] ? mach_err : "verify");
       ny_mach_func_free(&mach);
@@ -295,8 +317,8 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
     ny_mach_func_free(&mach);
     for (size_t i = 0; i < func_count; ++i) {
       mach = (ny_mach_func_t){0};
-      if (!ny_mach_lower_nir(&funcs[i], &mach, mach_err, sizeof(mach_err)) ||
-          !ny_mach_verify(&mach, mach_err, sizeof(mach_err))) {
+      if (!ny_mach_lower_nir(&funcs[i], &mach, target.caps, mach_err, sizeof(mach_err)) ||
+          !ny_mach_verify(&mach, 0, mach_err, sizeof(mach_err))) {
         ny_native_set_err(err, err_len,
                           "native JIT: machine form gate failed for function %zu: %s",
                           i, mach_err[0] ? mach_err : "verify");
@@ -306,18 +328,12 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
       ny_mach_func_free(&mach);
     }
   }
-  const char *names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
-  size_t name_count = 0;
-  for (size_t i = 0; i < prog->body.len && name_count < func_count; ++i) {
-    const stmt_t *stmt = prog->body.data[i];
-    if (stmt && stmt->kind == NY_S_FUNC)
-      names[name_count++] = stmt->as.fn.name;
-  }
 
   ny_jit_add_runtime_symbols();
   for (size_t i = 0; i < opt->link_libs.len; ++i)
     (void)ny_jit_load_library(opt->link_libs.data[i]);
-  ny_native_visit_program_links(prog, ny_native_jit_load_link, NULL);
+  ny_native_visit_program_links_for_options(prog, opt, ny_native_jit_load_link,
+                                            NULL);
   if (target.target == NY_NATIVE_TARGET_AARCH64) {
     if (!ny_native_jit_compile_aarch64_bundle(
             &top, funcs, names, func_count, &target, image, err, err_len))
@@ -329,14 +345,18 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
   }
 
   ny_obj_buf_t code = {0};
-  ny_x64_obj_symbol_def_t defs[256];
+  ny_x64_obj_symbol_def_t defs[NY_NATIVE_MAX_DEFS];
   ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS];
   size_t def_count = 0, reloc_count = 0;
-  /* Primary independence path: machine form → bytes. Fall back to the legacy
-   * NYIR object encoder only when machine form encode rejects the shape. */
+  /*
+   * Primary independence path: machine form → bytes. Fall back to the legacy
+   * NYIR object encoder only when machine form encode rejects the shape.
+   */
   bool used_mir = false;
   const char *encode_path = "machine";
-  /* Tier-0 stencil: const/local shell; also fold pure helper calls. */
+  /*
+   * Tier-0 stencil: const/local shell; also fold pure helper calls.
+   */
   if (func_count == 0 &&
       ny_x64_try_stencil_bundle(&top, &target, &code, defs, &def_count, relocs,
                                 &reloc_count, err, err_len)) {
@@ -354,13 +374,13 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
     ny_mach_func_t top_mach = {0};
     ny_mach_func_t *fm = NULL;
     char mach_err[256] = {0};
-    bool mach_ok = ny_mach_lower_nir(&top, &top_mach, mach_err, sizeof(mach_err));
+    bool mach_ok = ny_mach_lower_nir(&top, &top_mach, target.caps, mach_err, sizeof(mach_err));
     if (mach_ok && func_count) {
       fm = calloc(func_count, sizeof(*fm));
       if (!fm)
         mach_ok = false;
       for (size_t i = 0; mach_ok && i < func_count; ++i)
-        mach_ok = ny_mach_lower_nir(&funcs[i], &fm[i], mach_err, sizeof(mach_err));
+        mach_ok = ny_mach_lower_nir(&funcs[i], &fm[i], target.caps, mach_err, sizeof(mach_err));
     }
     if (mach_ok &&
         ny_x64_mach_build_bundle(&top_mach, fm, names, func_count, &target,
@@ -404,13 +424,17 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
   }
   memset(memory, 0x90, alloc_size);
   memcpy(memory, code.data, code.len);
-  /* Stencil cache: persist self-contained code (zero relocs) so subsequent
+  /*
+   * Stencil cache: persist self-contained code (zero relocs) so subsequent
    * runs skip parse + lower + encode entirely.  The cache is an ELF shared
-   * object and is therefore intentionally unavailable on Windows. */
+   * object and is therefore intentionally unavailable on Windows.
+   */
 #ifndef _WIN32
   if (reloc_count == 0 && prog && prog->raw_src && prog->raw_src_len > 0) {
-    char *cache_path =
-        ny_jit_stencil_cache_path(prog->raw_src, opt ? opt->opt_level : 0);
+    char *cache_path = ny_jit_stencil_cache_path(
+        prog->raw_src, opt ? opt->opt_level : 0,
+        opt ? opt->native_backend_raw : NULL,
+        opt ? opt->native_tier_raw : NULL);
     if (cache_path) {
       ny_jit_stencil_cache_save(cache_path, code.data, code.len, "rt_main");
       free(cache_path);
@@ -438,7 +462,9 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
     unsigned char *patch_at = memory + relocs[i].disp_off;
     unsigned char *after = patch_at + 4;
     if (relocs[i].type == NY_RELOC_PC32) {
-      /* Data address: leaq sym(%rip), reg — patch direct RIP-relative disp. */
+      /*
+       * Data address: leaq sym(%rip), reg — patch direct RIP-relative disp.
+       */
       intptr_t delta = (unsigned char *)target_ptr - after;
       if (delta < INT32_MIN || delta > INT32_MAX) {
         ny_native_set_err(err, err_len,
@@ -452,7 +478,9 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
       int32_t disp = (int32_t)delta;
       memcpy(patch_at, &disp, sizeof(disp));
     } else {
-      /* Call address: use stub for external symbols that may be far away. */
+      /*
+       * Call address: use stub for external symbols that may be far away.
+       */
       int def_index = ny_x64_obj_def_index(defs, def_count, relocs[i].symbol);
       unsigned char *branch_target = (unsigned char *)target_ptr;
       if (def_index < 0) {

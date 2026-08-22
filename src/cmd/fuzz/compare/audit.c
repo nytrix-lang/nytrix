@@ -1,3 +1,11 @@
+/*
+ * Fuzz audit: inspects fuzzer output directories and produces JSON
+ * audit reports with coverage, crash, and anomaly summaries.
+ */
+
+/*
+ * report loading, finding classification, and audit emission
+ */
 static int cmd_public_fuzz_all_audit(int argc, char **argv) {
   char root[4096];
   if (!find_nytrix_root(root, sizeof(root))) {

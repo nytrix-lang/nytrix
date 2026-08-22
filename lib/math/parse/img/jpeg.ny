@@ -807,7 +807,7 @@ def _JIDCT_FIX_3_072711026 = 25172
 fn _jpeg_descale(int v, int n) int {
    if n <= 0 { return v }
    def add = 1 << (n - 1)
-   if v >= 0 { return(v + add) >> n }
+   if v >= 0 { return (v + add) >> n }
    -(((-v) + add) >> n)
 }
 
@@ -1283,7 +1283,7 @@ fn decode(any data) any {
       print("[jpeg] blocks=" + to_str(_jpeg_diag_total_blocks) +
          " dc_fail=" + to_str(_jpeg_diag_dc_fail) +
          " ac_fail=" + to_str(_jpeg_diag_ac_fail) +
-      " size=" + to_str(wVal) + "x" + to_str(hVal))
+         " size=" + to_str(wVal) + "x" + to_str(hVal))
    }
    return rd
 }
@@ -1488,7 +1488,7 @@ fn _jpeg_append_sof0(list out, int wVal, int hVal) list {
          1, 17, 0,
          2, 17, 1,
          3, 17, 1
-   ])
+      ])
 }
 
 fn _jpeg_append_scan_header(list out) list {
@@ -1499,7 +1499,7 @@ fn _jpeg_append_baseline_headers(list out, int wVal, int hVal, list qyz, list qc
    out = _jpeg_append_bytes(out, [
          255, 216,
          255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 1, 0, 72, 0, 72, 0, 0
-   ])
+      ])
    out = _jpeg_append_quant_table(out, 0, qyz)
    out = _jpeg_append_quant_table(out, 1, qcz)
    out = _jpeg_append_sof0(out, wVal, hVal)

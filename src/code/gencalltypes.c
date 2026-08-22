@@ -1,3 +1,7 @@
+/*
+ * Generic-call type resolution: resolves type parameters at generic
+ * call sites, mapping type variables to concrete LLVM types for codegen.
+ */
 #include "priv.h"
 
 #include <stdio.h>

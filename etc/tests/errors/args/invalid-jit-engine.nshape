@@ -1,0 +1,14 @@
+shape args-invalid-jit-engine {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--jit-engine=bogus"
+  expect_message "expected orc|mcjit"
+  source ny <<'NY'
+use std.core
+print("ok")
+NY
+}

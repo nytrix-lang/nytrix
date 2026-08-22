@@ -1,0 +1,24 @@
+shape oracle_phi_elim_fib_backedge_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle phi-elim phi mem2reg loop backedge multi-var merge regression]
+  template ny-test-case
+  flags_matrix "-O2 --native-enable-cf-mem2reg --native-result-oracle=196418; -O3 --native-enable-cf-mem2reg --native-result-oracle=196418"
+  expect compile_and_run
+  source ny <<'NY'
+fn fib_big(i64 n) i64 {
+  mut a = 0
+  mut b = 1
+  mut i = 0
+  while i < n {
+    mut t = a + b
+    a = b
+    b = t
+    i = i + 1
+  }
+  a
+}
+
+fib_big(27)
+NY
+}

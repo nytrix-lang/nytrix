@@ -3,7 +3,7 @@
 
   # Nytrix
 
-  <strong>Programming language.</strong>
+  <p>Native language, toolchain, and standard library.</p>
 
   [![Version](https://img.shields.io/badge/version-0.9.0-2f6fed)](docs/CHANGELOG.md)
   [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -11,6 +11,15 @@
 
   [Website](https://nytrix.x3ric.com/) · [Changelog](https://nytrix.x3ric.com/#CHANGELOG)
 </div>
+
+Nytrix is for programs that benefit from expressive source code and direct
+control of their machine boundaries. The same workflow covers ordinary files,
+reusable modules, compile-time generation, C interfaces, and native binaries.
+
+The [Nytrix Manual](docs/README.md) covers the language overview, practical
+guides, specification, and source-linked API reference.
+
+## First program
 
 ```ny
 use std.core
@@ -96,19 +105,18 @@ Layouts use `Type name` fields. A colon may still parse as an implicit separator
 ## Community
 
 Use [Discord](https://discord.gg/XQDR6DZWb), GitHub issues, or
-[nytrixlang@gmail.com](mailto:nytrixlang@gmail.com) for questions, bugs, docs,
-and feedback.
+[nytrixlang@gmail.com](mailto:nytrixlang@gmail.com) for questions, bugs, and
+documentation feedback.
 
 Send security reports privately by email with the affected commit, platform,
-command, proof of concept. Reports are voluntary; there is no paid
-bounty program right now `;(`.
+command, and proof of concept. Reports are voluntary.
 
 Discuss feature direction on Discord or by email.
 
 ## Status
 
 Pin a commit for reproducible builds and check
-[docs/CHANGELOG.md](docs/CHANGELOG.md) before upgrading.
+[Changelog](docs/CHANGELOG.md) before upgrading.
 
 ## License
 

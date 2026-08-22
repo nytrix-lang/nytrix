@@ -1,3 +1,7 @@
+/*
+ * Hindley-Milner type inference: constraint generation, unification,
+ * and monomorphic specialization with let-polymorphism support.
+ */
 #include "typeinfer.h"
 #include "parse/ast.h"
 #include "base/util.h"
@@ -759,6 +763,7 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
 
   case NY_S_WHILE: {
     typeinfer_walk_expr(ctx, s->as.whl.test);
+    typeinfer_walk_expr(ctx, s->as.whl.invariant);
     if (s->as.whl.init)
       typeinfer_walk_stmt(ctx, s->as.whl.init);
     typeinfer_walk_stmt(ctx, s->as.whl.body);

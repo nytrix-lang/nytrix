@@ -1,0 +1,38 @@
+shape proof_bitwise_range {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "range", "bitwise"]
+  template ny-test-case
+  flags "--color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+;; Bitwise operations and conditional merges retain bounded integer ranges.
+
+;; Bitwise OR: a|b = 7 → range [7,7] fits in u8
+def int a = 3
+def int b = 5
+assert_compile_range(a | b, 0, 255, "or fits in u8")
+
+;; Bitwise XOR (^^): 10 ^^ 3 = 9 → range [9,9]
+def int x = 10
+def int y = 3
+assert_compile_range(x ^^ y, 0, 15, "xor small values")
+
+;; Shifts with exact shift amounts
+def int shift = 2
+assert_compile_range(1 << shift, 0, 16, "shift left bounded")
+assert_compile_range(64 >> shift, 0, 16, "shift right bounded")
+
+;; Bitwise AND with constant mask
+def int m = 0x0f
+assert_compile_range(0xff & m, 0, 15, "and mask")
+
+;; Conditional merge: true ? 10 : 20 → range [10, 20]
+def int val = true ? 10 : 20
+assert_compile_range(val, 0, 100, "conditional range merge")
+
+assert(true, "bitwise range proofs complete")
+NY
+}

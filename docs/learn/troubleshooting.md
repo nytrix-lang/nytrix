@@ -1,4 +1,5 @@
-# Diagnostics and Troubleshooting
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":180,"summary":"Diagnose build, runtime, ownership, native, and browser failures from observable evidence."} -->
+# Troubleshooting
 
 Run the failing command, then identify the owner of the failing name or
 boundary. Keep the input small until the error points at one module, one value
@@ -101,7 +102,7 @@ Use `--strict-types` when a command line should reject those dynamic cliffs:
 ny --strict-types file.ny
 ```
 
-See [types.md](../spec/types.md) for compile-time type rules.
+See [Types](../spec/types.md) for compile-time type rules.
 
 The default warning level keeps dynamic-fallback signal short. Use `--warn=all`
 or `NYTRIX_TYPE_FALLBACK_WARN_VERBOSE=1` when auditing optimization cliffs; use
@@ -200,5 +201,5 @@ Native crash reducers normally check three boundaries: ABI size/alignment, one
 successful call, and one cleanup path. That makes the failing boundary visible
 without depending on the whole application.
 
-For command families, use [tooling.md](tooling.md). For executable checks, use
-[testing.md](testing.md).
+For command families, use [Tooling](tooling.md). For executable checks, use
+[Testing](testing.md).

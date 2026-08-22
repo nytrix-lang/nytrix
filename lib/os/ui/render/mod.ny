@@ -8,7 +8,7 @@ module std.os.ui.render(
    WHITE, BLACK, RED, GREEN, BLUE, YELLOW, CYAN, MAGENTA, ORANGE, PURPLE, GRAY, CLEAR,
    color_rgba, color_rgb, color_gray, color_hex, color_255, color_lerp, color_alpha,
    rect, rect_x, rect_y, rect_w, rect_h,
-   backend_capabilities, get_active_backend_name, renderer_frame_stats,
+   backend_capabilities, portable_contract, get_active_backend_name, renderer_frame_stats,
    renderer_vertex_offset, renderer_capture_requested, renderer_frame_index,
    renderer_gpu_ready, renderer_wait_idle, renderer_packed_scene_supported, renderer_mesh_pipeline,
    renderer_set_mask, renderer_set_scene_lights_slab, set_scene_lights,
@@ -63,6 +63,7 @@ module std.os.ui.render(
    FONT_FILTER_LINEAR, FONT_FILTER_BILINEAR, font_load, font_load_first, font_destroy,
    font_allow_color_fallback, _font_get, font_prepare, draw_text, draw_text_3d, measure_text,
    font_line_height, font_ascent, mesh_load, mesh_create, mesh_create_cpu,
+   draw_text_centered, draw_text_centered_x, draw_text_pair,
    mesh_create_static, mesh_create_ex, mesh_create_indexed, mesh_create_cpu_part_from_raw,
    mesh_set_bounds, mesh_fit_world, mesh_fit_perspective, mesh_fit_camera, mesh_destroy,
    mesh_group_destroy, mesh_retire, mesh_collect_retired, mesh_build_grid,
@@ -587,7 +588,7 @@ fn _anim_apply_parts(
             vis_map,
             fast_numeric_anim,
             have_ptr_overrides,
-         ptr_overrides)
+            ptr_overrides)
          part = part_state.get(0, part)
          mut part_changed = part_state.get(1, false) ? true : false
          if skin_idx >= 0 {
@@ -960,7 +961,7 @@ fn _fallback_cache_load() list {
          }
          out
       }
-      err(ignorederr) -> { ignorederr  [] }
+      err(_) -> { return [] }
    }
 }
 
@@ -1023,7 +1024,7 @@ fn _cpu_pack_color(f64 r, f64 g, f64 b, f64 a) int {
    def gg = int(clamp01(g) * 255.0 + 0.5)
    def bb = int(clamp01(b) * 255.0 + 0.5)
    def a8 = int(clamp01(a) * 255.0 + 0.5)
-   return(a8 << 24) | (bb << 16) | (gg << 8) | rr
+   return (a8 << 24) | (bb << 16) | (gg << 8) | rr
 }
 
 fn _cpu_ensure_surface() bool {
@@ -1546,6 +1547,40 @@ fn _fallback_merge_ranked(list base, list extra) list {
    out
 }
 
+fn _fallback_scan_thread() {
+   def dirs = [
+      "/usr/share/fonts",
+      "/usr/local/share/fonts",
+      "/usr/share/fonts/TTF",
+      "/usr/share/fonts/OTF",
+      "/usr/share/fonts/noto",
+      "/usr/share/fonts/noto-cjk",
+      "/usr/share/fonts/truetype",
+      "/usr/share/fonts/opentype",
+      "C:/Windows/Fonts",
+      "/System/Library/Fonts",
+      "/Library/Fonts",
+      lib_path.join(home_dir(), ".fonts"),
+      lib_path.join(home_dir(), ".local/share/fonts")
+   ]
+   _fallback_scan_out = []
+   _fallback_scan_seen = dict(8)
+   _fallback_scan_active = true
+   mut di = 0
+   def dirs_n = dirs.len
+   while di < dirs_n {
+      def d = dirs.get(di)
+      if file_exists(d) { lib_fs.walk(d, fallback_scan_cb) }
+      di += 1
+   }
+   _fallback_scan_active = false
+   def merged = _fallback_merge_ranked(_fallback_paths, _fallback_scan_out)
+   if merged.len > 0 {
+      _fallback_paths = merged
+      _fallback_cache_write(merged)
+   }
+}
+
 fn _get_fallback_paths() list {
    if _fallback_paths_cached { return _fallback_paths }
    def full_scan = ui_profile.env_truthy_cached("NY_TERM_FULL_FONTS")
@@ -1604,39 +1639,7 @@ fn _get_fallback_paths() list {
    _fallback_paths_cached = true
    if full_scan && !_fallback_scan_started {
       _fallback_scan_started = true
-      thread_spawn(fn() {
-            def dirs = [
-               "/usr/share/fonts",
-               "/usr/local/share/fonts",
-               "/usr/share/fonts/TTF",
-               "/usr/share/fonts/OTF",
-               "/usr/share/fonts/noto",
-               "/usr/share/fonts/noto-cjk",
-               "/usr/share/fonts/truetype",
-               "/usr/share/fonts/opentype",
-               "C:/Windows/Fonts",
-               "/System/Library/Fonts",
-               "/Library/Fonts",
-               lib_path.join(home_dir(), ".fonts"),
-               lib_path.join(home_dir(), ".local/share/fonts")
-            ]
-            _fallback_scan_out = []
-            _fallback_scan_seen = dict(8)
-            _fallback_scan_active = true
-            mut di = 0
-            def dirs_n = dirs.len
-            while di < dirs_n {
-               def d = dirs.get(di)
-               if file_exists(d) { lib_fs.walk(d, fallback_scan_cb) }
-               di += 1
-            }
-            _fallback_scan_active = false
-            def merged = _fallback_merge_ranked(_fallback_paths, _fallback_scan_out)
-            if merged.len > 0 {
-               _fallback_paths = merged
-               _fallback_cache_write(merged)
-            }
-      })
+      thread_spawn(_fallback_scan_thread)
    }
    _fallback_paths
 }
@@ -2496,12 +2499,12 @@ fn _draw_glyph_bitmap_runs(
                      xx_gl += 1
                   }
                   draw_rect_fast(float(int(ox + run_x0_gl)), float(int(oy + yy_gl)), float(xx_gl - run_x0_gl), 1.0,
-                  render_shared.pack_rgba_u32(sr_gl, sg_gl, sb_gl, a))
+                     render_shared.pack_rgba_u32(sr_gl, sg_gl, sb_gl, a))
                   drew_gl = true
                   continue
                }
                draw_rect_fast(float(int(ox + xx_gl)), float(int(oy + yy_gl)), 1.0, 1.0,
-               render_shared.pack_rgba_u32(sr_gl, sg_gl, sb_gl, a * (float(alpha8_gl) / 255.0)))
+                  render_shared.pack_rgba_u32(sr_gl, sg_gl, sb_gl, a * (float(alpha8_gl) / 255.0)))
                drew_gl = true
             }
             xx_gl += 1
@@ -2603,7 +2606,7 @@ fn _draw_glyph_bitmap_scaled_runs(
                sb = float(sum_b / samples) / 255.0
             }
             draw_rect_fast(float(int(ox + xx)), float(int(oy + yy)), 1.0, 1.0,
-            render_shared.pack_rgba_u32(sr, sg, sb, a * (float(alpha8) / 255.0)))
+               render_shared.pack_rgba_u32(sr, sg, sb, a * (float(alpha8) / 255.0)))
             drew = true
          }
          xx += 1
@@ -3183,10 +3186,13 @@ fn _rect_seq_at(any r, int index, f64 fallback=0.0) f64 {
 
 ;; Returns the result of the `rect_x` operation.
 fn rect_x(any r) f64 { is_dict(r) ? float(r.get("x", 0.0)) : _rect_seq_at(r, 0, 0.0) }
+
 ;; Returns the result of the `rect_y` operation.
 fn rect_y(any r) f64 { is_dict(r) ? float(r.get("y", 0.0)) : _rect_seq_at(r, 1, 0.0) }
+
 ;; Returns the result of the `rect_w` operation.
 fn rect_w(any r) f64 { is_dict(r) ? float(r.get("w", r.get("width", 0.0))) : _rect_seq_at(r, 2, 0.0) }
+
 ;; Returns the result of the `rect_h` operation.
 fn rect_h(any r) f64 { is_dict(r) ? float(r.get("h", r.get("height", 0.0))) : _rect_seq_at(r, 3, 0.0) }
 
@@ -3272,6 +3278,20 @@ fn backend_capabilities() dict {
    }
    if _backend == BACKEND_GL { caps = caps.merge(lib_glr.capabilities()) }
    caps
+}
+
+fn portable_contract() dict {
+   "Returns the stable rendering subset shared by native OpenGL/Vulkan and browser WebGL2 paths."
+   {
+      "version": 1,
+      "coordinate_system": "2d-top-left-pixels-3d-right-handed",
+      "frame": {"begin": true, "clear": true, "draw": true, "present": true},
+      "primitives": {"rect": true, "line": true, "triangle": true, "texture": true, "text": true},
+      "depth_3d": true,
+      "alpha_blend": "source-alpha",
+      "backend_specific": ["vulkan", "opengl", "webgl2"],
+      "not_guaranteed": ["raw-vulkan", "compute", "advanced-materials", "desktop-font-parity"]
+   }
 }
 
 fn renderer_vertex_offset() int {
@@ -3362,7 +3382,7 @@ fn renderer_set_scene_lights_slab(any slab, int count) bool {
 
 fn set_scene_lights(any lights) bool {
    "Sets scene lights for immediate 3D draws. Each light is a dictionary with
-   type (directional, point, or spot), color, intensity, and optional direction,
+   type(directional, point, or spot), color, intensity, and optional direction,
    position, range, and outer_cone_cos fields."
    if _backend == BACKEND_VK { lib_vkr.set_scene_lights(lights) return true }
    ;; The GL backend owns an equivalent fixed-function fallback light rig.
@@ -3481,7 +3501,7 @@ fn draw_skybox(int tex_id) bool {
       def uv = _gl_skybox_uv_window()
       def ok = lib_glr.draw_rect_tex_uv(0.0, 0.0, _last_win_w, _last_win_h, tex_id,
          float(uv.get(0, 0.0)), float(uv.get(1, 0.02)), float(uv.get(2, 1.0)), float(uv.get(3, 0.58)),
-      1.0, 1.0, 1.0, 1.0)
+         1.0, 1.0, 1.0, 1.0)
       lib_glr.set_unlit(false)
       return ok
    }
@@ -3552,7 +3572,7 @@ fn shader_transpile(str combined_src) any {
 
 fn load_shader_pipeline(str _frag_path) int {
    "Deprecated fragment-only shader loader. Returns -1 instead of trying to synthesize an unsafe Vulkan pipeline."
-   -1
+   return -1
 }
 
 fn _wait_window_ready(any win) bool {
@@ -4184,17 +4204,17 @@ fn clear_background(any color=BLACK) bool {
    "Fills the background with the specified color."
    if _backend == BACKEND_VK {
       lib_vkr.clear(_color_at(color, 0, 0.0), _color_at(color, 1, 0.0),
-      _color_at(color, 2, 0.0), _color_at(color, 3, 1.0))
+         _color_at(color, 2, 0.0), _color_at(color, 3, 1.0))
    } elif _backend == BACKEND_GL {
       lib_glr.clear(_color_at(color, 0, 0.0), _color_at(color, 1, 0.0),
-      _color_at(color, 2, 0.0), _color_at(color, 3, 1.0))
+         _color_at(color, 2, 0.0), _color_at(color, 3, 1.0))
    } elif _backend == BACKEND_MOCK {
       _cpu_clear(_cpu_pack_color(
             _color_at(color, 0, 0.0),
             _color_at(color, 1, 0.0),
             _color_at(color, 2, 0.0),
             _color_at(color, 3, 1.0)
-      ))
+         ))
    }
    true
 }
@@ -4244,7 +4264,7 @@ fn _renderer_frame_stats_pack(
          "flush_ms": float(flush_us) / 1000.0,
          "end_ms": float(end_us) / 1000.0,
          "cpu_ms": float(begin_us + end_us) / 1000.0,
-   })
+      })
 }
 
 fn renderer_frame_stats() dict {
@@ -4274,7 +4294,7 @@ fn renderer_frame_stats() dict {
             "prim_raw_points": _last_prim_raw_points,
             "prim_text_calls": _last_prim_text_calls,
             "prim_text_glyphs": _last_prim_text_glyphs,
-      })
+         })
       return stats
    }
    if _backend == BACKEND_GL {
@@ -4499,10 +4519,10 @@ fn set_clear_color(any color) bool {
    "Sets the clear color for the next frame."
    if _backend == BACKEND_VK {
       lib_vkr.set_clear_color(_color_at(color, 0, 0.0), _color_at(color, 1, 0.0),
-      _color_at(color, 2, 0.0), _color_at(color, 3, 1.0))
+         _color_at(color, 2, 0.0), _color_at(color, 3, 1.0))
    } elif _backend == BACKEND_GL {
       lib_glr.set_clear_color(_color_at(color, 0, 0.0), _color_at(color, 1, 0.0),
-      _color_at(color, 2, 0.0), _color_at(color, 3, 1.0))
+         _color_at(color, 2, 0.0), _color_at(color, 3, 1.0))
    } elif _backend == BACKEND_MOCK {
       def r, g = int(_color_at(color, 0, 0.0) * 255.0), int(_color_at(color, 1, 0.0) * 255.0)
       def b, a = int(_color_at(color, 2, 0.0) * 255.0), int(_color_at(color, 3, 1.0) * 255.0)
@@ -4729,13 +4749,13 @@ fn draw_polyline(list points, any color, f64 thickness=0.02, bool closed=false) 
       while i + 1 < points.len {
          def p0, p1 = points[i], points[i + 1]
          lib_vkr.draw_line_3d(p0.get(0,0.0), p0.get(1,0.0), p0.get(2,0.0),
-         p1.get(0,0.0), p1.get(1,0.0), p1.get(2,0.0), thickness, r, g, b, a)
+            p1.get(0,0.0), p1.get(1,0.0), p1.get(2,0.0), thickness, r, g, b, a)
          i += 1
       }
       if closed {
          def p0, p1 = points[points.len - 1], points[0]
          lib_vkr.draw_line_3d(p0.get(0,0.0), p0.get(1,0.0), p0.get(2,0.0),
-         p1.get(0,0.0), p1.get(1,0.0), p1.get(2,0.0), thickness, r, g, b, a)
+            p1.get(0,0.0), p1.get(1,0.0), p1.get(2,0.0), thickness, r, g, b, a)
       }
       return true
    }
@@ -4756,12 +4776,12 @@ fn _draw_tri_quad_vk(list v1, list v2, list v3, any v4, any color) bool {
          v1.get(0,0.0), v1.get(1,0.0), v1.get(2,0.0),
          v2.get(0,0.0), v2.get(1,0.0), v2.get(2,0.0),
          v3.get(0,0.0), v3.get(1,0.0), v3.get(2,0.0),
-      v4.get(0,0.0), v4.get(1,0.0), v4.get(2,0.0), r, g, b, a)
+         v4.get(0,0.0), v4.get(1,0.0), v4.get(2,0.0), r, g, b, a)
    } else {
       lib_vkr.draw_triangle_3d(
          v1.get(0,0.0), v1.get(1,0.0), v1.get(2,0.0),
          v2.get(0,0.0), v2.get(1,0.0), v2.get(2,0.0),
-      v3.get(0,0.0), v3.get(1,0.0), v3.get(2,0.0), r, g, b, a)
+         v3.get(0,0.0), v3.get(1,0.0), v3.get(2,0.0), r, g, b, a)
    }
    true
 }
@@ -4786,7 +4806,7 @@ fn _draw_line_impl(list start, list finish, any color, f64 thickness) bool {
       lib_vkr.draw_line_3d(
          start.get(0,0.0), start.get(1,0.0), start.get(2,0.0),
          finish.get(0,0.0), finish.get(1,0.0), finish.get(2,0.0),
-      thickness, r, g, b, a)
+         thickness, r, g, b, a)
       return true
    } elif _backend == BACKEND_GL {
       def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
@@ -4794,7 +4814,7 @@ fn _draw_line_impl(list start, list finish, any color, f64 thickness) bool {
       lib_glr.draw_line_3d(
          start.get(0,0.0), start.get(1,0.0), start.get(2,0.0),
          finish.get(0,0.0), finish.get(1,0.0), finish.get(2,0.0),
-      thickness, r, g, b, a)
+         thickness, r, g, b, a)
       return true
    } elif _backend == BACKEND_MOCK && _mvp_matrix {
       _cpu_line_world(_to_v3(start), _to_v3(finish), _cpu_pack_color_from(color), max(thickness * float(min(_cpu_w, _cpu_h)) * 0.5, 1.0))
@@ -4848,7 +4868,7 @@ fn draw_line_2d(f64 x1, f64 y1, f64 x2, f64 y2, any color, f64 thickness=0.02) b
       }
       if is_int(color) { lib_vkr.draw_line_fast(x1, y1, x2, y2, thickness, color) } else {
          lib_vkr.draw_line(x1, y1, x2, y2, thickness, _color_at(color, 0, 1.0), _color_at(color, 1, 1.0),
-         _color_at(color, 2, 1.0), _color_at(color, 3, 1.0))
+            _color_at(color, 2, 1.0), _color_at(color, 3, 1.0))
       }
       return true
    }
@@ -4860,7 +4880,7 @@ fn draw_line_2d(f64 x1, f64 y1, f64 x2, f64 y2, any color, f64 thickness=0.02) b
       if is_int(color) { lib_glr.draw_line_fast(x1, y1, x2, y2, thickness, color) }
       else {
          lib_glr.draw_line(x1, y1, x2, y2, thickness, _color_at(color, 0, 1.0), _color_at(color, 1, 1.0),
-         _color_at(color, 2, 1.0), _color_at(color, 3, 1.0))
+            _color_at(color, 2, 1.0), _color_at(color, 3, 1.0))
       }
       return true
    }
@@ -5122,7 +5142,7 @@ fn _draw_filled_fan_fallback(
       vi = _store_fan_tri_c4(verts, vi, cx, cy,
          cx + cos(a0) * rx, cy + sin(a0) * ry,
          cx + cos(a1) * rx, cy + sin(a1) * ry,
-      r, g, b, alpha)
+         r, g, b, alpha)
       i += 1
    }
    _draw_triangles_impl(verts, segments, false)
@@ -5585,7 +5605,7 @@ fn draw_star(f64 cx, f64 cy, f64 inner_radius, f64 outer_radius, int pts, any co
       vi = _store_fan_tri_c4(verts, vi, cx, cy,
          cx+cos(a0)*r0, cy+sin(a0)*r0,
          cx+cos(a1)*r1, cy+sin(a1)*r1,
-      r, g, b, a)
+         r, g, b, a)
       i += 1
    }
    _draw_triangles_impl(verts, total, false)
@@ -6438,7 +6458,7 @@ fn _texture_source_sig(any path) str {
                norm,
                "",
                _TEXTURE_SOURCE_SIG_LIMIT,
-            256)
+               256)
             return ""
          }
          def rn = int(unwrap(rr))
@@ -6448,7 +6468,7 @@ fn _texture_source_sig(any path) str {
                norm,
                "",
                _TEXTURE_SOURCE_SIG_LIMIT,
-            256)
+               256)
             return ""
          }
          def prefix = init_str(buf, rn)
@@ -6457,7 +6477,7 @@ fn _texture_source_sig(any path) str {
             norm,
             sig,
             _TEXTURE_SOURCE_SIG_LIMIT,
-         256)
+            256)
          return sig
       }
       err(ignorederr) -> { ignorederr
@@ -6465,7 +6485,7 @@ fn _texture_source_sig(any path) str {
             norm,
             "",
             _TEXTURE_SOURCE_SIG_LIMIT,
-         256)
+            256)
          ""
       }
    }
@@ -6584,7 +6604,7 @@ fn _texture_cache_writer_loop() int {
             int(job.get("h", 0)),
             int(job.get("format", 37)),
             bool(job.get("use_mipmaps", false)),
-         job.get("pixels", 0))
+            job.get("pixels", 0))
          continue
       }
       if should_stop { break }
@@ -6600,7 +6620,7 @@ fn _texture_cache_writer_ensure() any {
    _texture_cache_writer_stop = false
    _texture_cache_writer_thread = thread_spawn(fn() {
          _texture_cache_writer_loop()
-   })
+      })
    _texture_cache_writer_thread
 }
 
@@ -6847,7 +6867,7 @@ fn texture_try_load_cached_ex(
          use_cache,
          false,
          false,
-      0)
+         0)
    }
    return -2
 }
@@ -6878,7 +6898,7 @@ fn texture_load_ex(
       filter,
       wrap_s,
       wrap_t,
-   allow_disk_cache)
+      allow_disk_cache)
    if use_cache {
       def cached = _texture_cache.get(cache_key, -2)
       if cached != -2 {
@@ -6900,7 +6920,7 @@ fn texture_load_ex(
          use_cache,
          trace_on,
          deep_on,
-      t0)
+         t0)
       if cached_tex >= 0 { return cached_tex }
    }
    mut img = 0
@@ -6933,7 +6953,7 @@ fn texture_load_ex(
       decode_ms,
       trace_on,
       deep_on,
-   t0)
+      t0)
    return tex_id
 }
 
@@ -6972,7 +6992,7 @@ fn texture_upload_image_ex(
       filter,
       wrap_s,
       wrap_t,
-   allow_disk_cache)
+      allow_disk_cache)
    if use_cache && cache_key_live != "" {
       def cached = _texture_cache.get(cache_key_live, -2)
       if cached != -2 {
@@ -7002,7 +7022,7 @@ fn texture_upload_image_ex(
       trace_on,
       deep_on,
       t0,
-   take_ownership)
+      take_ownership)
 }
 
 fn _texture_temp_alloc(any img, bool free_img, int bytes) ptr {
@@ -7313,8 +7333,10 @@ fn texture_create_rgba(int w, int h, any pixels, int format=37, int filter=1, in
 }
 
 fn create_cubemap(int face_size, list face_pixels_list) any {
-   "Creates a cubemap texture from 6 RGBA8 face buffers."
-   if _backend == BACKEND_GL { return 0 }
+   "Creates a cubemap texture from 6 RGBA8 face buffers on the active backend."
+   if face_size <= 0 { return 0 }
+   if !is_list(face_pixels_list) || face_pixels_list.len < 6 { return 0 }
+   if _backend == BACKEND_GL { return lib_glr.create_cubemap(face_size, face_pixels_list) }
    lib_vkr.create_cubemap(face_size, face_pixels_list)
 }
 
@@ -7520,6 +7542,39 @@ fn measure_text_fast(int font, any text) list {
    def sz = measure_text(font, text)
    _mt_cache = cache.cache_put_reset(mtc, key, sz, 4096, 256)
    sz
+}
+
+fn draw_text_centered(int font, any text, f64 cx, f64 cy, any color=WHITE) bool {
+   "Draws text centered on both axes so the measured pixel box is centered at(cx, cy)."
+   def m = measure_text(font, text)
+   def fw = m.len > 0 ? m[0] : 0.0
+   def fh = m.len > 1 ? m[1] : 0.0
+   draw_text(font, text, cx - fw * 0.5, cy - fh * 0.5, color)
+}
+
+fn draw_text_centered_x(int font, any text, f64 cx, f64 y, any color=WHITE) bool {
+   "Draws text centered horizontally on x but with the line box top placed at y(a normal draw_text y)."
+   def m = measure_text(font, text)
+   def fw = m.len > 0 ? m[0] : 0.0
+   draw_text(font, text, cx - fw * 0.5, y, color)
+}
+
+fn draw_text_pair(int big_font, any main, int sub_font=0, any sub="", f64 cx=0.0, f64 cy=0.0, f64 gap=24.0, any color=WHITE) bool {
+   "Draws a large `main` title and a smaller `sub` subtitle as one vertically centered pair around cy. Pass sub_font=0 to draw only the main line."
+   def mh = measure_text(big_font, main)
+   def fh = mh.len > 1 ? mh[1] : 0.0
+   mut sub_h = 0.0
+   if sub_font > 0 {
+      def sh = measure_text(sub_font, sub)
+      sub_h = sh.len > 1 ? sh[1] : 0.0
+   }
+   def block_h = fh + sub_h + gap
+   def top = cy - block_h * 0.5
+   draw_text_centered(big_font, main, cx, top + fh * 0.5, color)
+   if sub_font > 0 {
+      draw_text_centered(sub_font, sub, cx, top + fh + gap + sub_h * 0.5, color)
+   }
+   true
 }
 
 fn terminal_fast_text_supported() bool {
@@ -7891,7 +7946,7 @@ fn _gl_fast_text_flush(any verts, int glyphs, int tex_id) bool {
          " tex=" + to_str(tex_id) +
          " uv0=(" + to_str(load32_f32(verts, 12)) + "," + to_str(load32_f32(verts, 16)) + ")" +
          " uv1=(" + to_str(load32_f32(verts + VERTEX_STRIDE * 2, 12)) + "," + to_str(load32_f32(verts + VERTEX_STRIDE * 2, 16)) + ")" +
-      " color=0x" + lib_str.to_hex(load32(verts, 20)))
+         " color=0x" + lib_str.to_hex(load32(verts, 20)))
    }
    ;; Fast text bypasses draw_rect_tex_uv(), so it must reset the GL UI material
    ;; itself.  Otherwise a previous textured/rotated draw can leave the texture
@@ -8644,7 +8699,7 @@ fn _mesh_bounds_info(dict m) list {
       max_z - min_z,
       (min_x + max_x) * 0.5,
       (min_y + max_y) * 0.5,
-   (min_z + max_z) * 0.5]
+      (min_z + max_z) * 0.5]
 }
 
 fn _mesh_store_fit(dict m, f64 scale, f64 cx, f64 min_y, f64 cz, f64 target_z) dict {
@@ -9269,7 +9324,7 @@ fn _draw_mesh_gl_fast(dict m, bool is_lines=false, f64 width=1.0) bool {
          " unlit=" + to_str(use_unlit) +
          " nocull=" + to_str(use_nocull) +
          " flip=" + to_str(mesh_flip) +
-      " mat=" + to_str(material_slab != 0))
+         " mat=" + to_str(material_slab != 0))
    }
    lib_glr.set_unlit(use_unlit)
    lib_glr.set_mesh_raster_state(use_nocull, mesh_flip)
@@ -9652,7 +9707,7 @@ fn _draw_mesh_vk_fast(dict m, bool is_lines=false, f64 width=1.0, bool restore_u
       mesh_blend,
       use_unlit,
       use_nocull,
-   cpu_rewind ? false : mesh_flip)
+      cpu_rewind ? false : mesh_flip)
    _mesh_diag("pipeline")
    if ui_profile.env_truthy_cached("NY_MESH_PIPE_TRACE") {
       ui_profile.print_text("[mesh:pipe] draw=" + to_str(draw_count) +
@@ -9667,7 +9722,7 @@ fn _draw_mesh_vk_fast(dict m, bool is_lines=false, f64 width=1.0, bool restore_u
          " pipe=" + to_str(pipe_override) +
          " gpu=" + to_str(_has_gpu) +
          " cpu=" + to_str(cpu_ptr != 0) +
-      " rewind=" + to_str(cpu_rewind))
+         " rewind=" + to_str(cpu_rewind))
    }
    if log_mesh { ui_profile.print_text("[mesh_fast] draw=" + to_str(draw_count) + " idx=" + to_str(idx_count) + " lines=" + to_str(lines) + " points=" + to_str(points) + " unlit=" + to_str(use_unlit) + " nocull=" + to_str(use_nocull) + " gpu=" + to_str(_has_gpu) + " cpu=" + to_str(cpu_ptr != 0)) }
    _mesh_diag("before unlit")
@@ -9789,7 +9844,7 @@ fn _cpu_part_is_optical(any part) bool {
    def slab = part.get("material_slab", 0)
    if slab {
       def bsdf0, bsdf5 = load32(slab, 36), load32(slab, 148)
-      return(((bshr(bsdf0, 16) & 255) > 0) || ((bsdf5 & 255) > 0) || ((bshr(bsdf5, 8) & 255) > 0))
+      return (((bshr(bsdf0, 16) & 255) > 0) || ((bsdf5 & 255) > 0) || ((bshr(bsdf5, 8) & 255) > 0))
    }
    def mesh = part.get("mesh", 0)
    def mesh_is_dict = is_dict(mesh)
@@ -9797,7 +9852,7 @@ fn _cpu_part_is_optical(any part) bool {
    if mesh_is_dict { mslab = mesh.get("material_slab", 0) }
    if mslab {
       def bsdf0, bsdf5 = load32(mslab, 36), load32(mslab, 148)
-      return(((bshr(bsdf0, 16) & 255) > 0) || ((bsdf5 & 255) > 0) || ((bshr(bsdf5, 8) & 255) > 0))
+      return (((bshr(bsdf0, 16) & 255) > 0) || ((bsdf5 & 255) > 0) || ((bshr(bsdf5, 8) & 255) > 0))
    }
    def mesh_bsdf0 = mesh_is_dict ? int(mesh.get("bsdf0_u32", 0)) : 0
    def bsdf0 = int(part.get("bsdf0_u32", mesh_bsdf0))
@@ -9912,12 +9967,12 @@ fn _scene_cpu_part_draw_info(any part, any saved_model, bool have_saved_model, b
    if !_scene_part_frustum_visible(part, draw_model) { return 0 }
    [mesh,
       part.get("is_lines",
-      false),
+         false),
       part.get("unlit",
-      false),
+         false),
       float(part.get("width",
-      1.0)),
-   draw_model]
+            1.0)),
+      draw_model]
 }
 
 fn _scene_set_unlit_if_changed(bool part_unlit, int last_unlit) int {
@@ -10301,7 +10356,7 @@ fn draw_mesh_group(any group) bool {
          " gpu_slab=" + to_str(gpu_slab != 0) +
          " gpu_parts=" + to_str(is_list(gpu_parts_cached) ? gpu_parts_cached.len : -1) +
          " force_cpu=" + to_str(force_cpu_draw) +
-      " baked=" + to_str(group_parts_baked))
+         " baked=" + to_str(group_parts_baked))
    }
    if !is_list(render_parts) { return false }
    def render_count = (_active_scene_count > 0) ? _active_scene_count : render_parts.len

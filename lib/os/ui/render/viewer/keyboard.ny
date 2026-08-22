@@ -26,41 +26,41 @@ def ROWS = [
          [key.KEY_F6, 45.0, "F6"], [key.KEY_F7, 45.0, "F7"], [key.KEY_F8, 45.0, "F8"],
          [key.KEY_F9, 45.0, "F9"], [key.KEY_F10, 45.0, "F10"], [key.KEY_F11, 45.0, "F11"],
          [key.KEY_F12, 45.0, "F12"], [key.KEY_PRINT_SCREEN, 62.0, "PRINT"], [key.KEY_PAUSE, 45.0, "PAUSE"]
-   ]],
+      ]],
    [38.0, [
          [key.KEY_GRAVE, 25.0, "`"], [key.KEY_1, 45.0, "1"], [key.KEY_2, 45.0, "2"],
          [key.KEY_3, 45.0, "3"], [key.KEY_4, 45.0, "4"], [key.KEY_5, 45.0, "5"],
          [key.KEY_6, 45.0, "6"], [key.KEY_7, 45.0, "7"], [key.KEY_8, 45.0, "8"],
          [key.KEY_9, 45.0, "9"], [key.KEY_0, 45.0, "0"], [key.KEY_MINUS, 45.0, "-"],
          [key.KEY_EQUAL, 45.0, "="], [key.KEY_BACKSPACE, 82.0, "BACK"], [key.KEY_DELETE, 45.0, "DEL"]
-   ]],
+      ]],
    [38.0, [
          [key.KEY_TAB, 50.0, "TAB"], [key.KEY_Q, 45.0, "Q"], [key.KEY_W, 45.0, "W"],
          [key.KEY_E, 45.0, "E"], [key.KEY_R, 45.0, "R"], [key.KEY_T, 45.0, "T"],
          [key.KEY_Y, 45.0, "Y"], [key.KEY_U, 45.0, "U"], [key.KEY_I, 45.0, "I"],
          [key.KEY_O, 45.0, "O"], [key.KEY_P, 45.0, "P"], [key.KEY_LEFT_BRACKET, 45.0, "["],
          [key.KEY_RIGHT_BRACKET, 45.0, "]"], [key.KEY_BACKSLASH, 57.0, "\\"], [key.KEY_INSERT, 45.0, "INS"]
-   ]],
+      ]],
    [38.0, [
          [key.KEY_CAPS_LOCK, 68.0, "CAPS"], [key.KEY_A, 45.0, "A"], [key.KEY_S, 45.0, "S"],
          [key.KEY_D, 45.0, "D"], [key.KEY_F, 45.0, "F"], [key.KEY_G, 45.0, "G"],
          [key.KEY_H, 45.0, "H"], [key.KEY_J, 45.0, "J"], [key.KEY_K, 45.0, "K"],
          [key.KEY_L, 45.0, "L"], [key.KEY_SEMICOLON, 45.0, ";"], [key.KEY_APOSTROPHE, 45.0, "'"],
          [key.KEY_ENTER, 88.0, "ENTER"], [key.KEY_PAGE_UP, 45.0, "PGUP"]
-   ]],
+      ]],
    [38.0, [
          [key.KEY_LEFT_SHIFT, 80.0, "LSHIFT"], [key.KEY_Z, 45.0, "Z"], [key.KEY_X, 45.0, "X"],
          [key.KEY_C, 45.0, "C"], [key.KEY_V, 45.0, "V"], [key.KEY_B, 45.0, "B"],
          [key.KEY_N, 45.0, "N"], [key.KEY_M, 45.0, "M"], [key.KEY_COMMA, 45.0, ","],
          [key.KEY_PERIOD, 45.0, "."], [key.KEY_SLASH, 45.0, "/"], [key.KEY_RIGHT_SHIFT, 76.0, "RSHIFT"],
          [key.KEY_UP, 45.0, "UP"], [key.KEY_PAGE_DOWN, 45.0, "PGDN"]
-   ]],
+      ]],
    [38.0, [
          [key.KEY_LEFT_CONTROL, 80.0, "LCTRL"], [key.KEY_LEFT_SUPER, 45.0, "WIN"], [key.KEY_LEFT_ALT, 45.0, "LALT"],
          [key.KEY_SPACE, 208.0, "SPACE"], [key.KEY_RIGHT_ALT, 45.0, "ALTGR"], [key.KEY_MENU, 45.0, "MENU"],
          [key.KEY_NULL, 45.0, "FN"], [key.KEY_RIGHT_CONTROL, 60.0, "RCTRL"], [key.KEY_LEFT, 45.0, "LEFT"],
          [key.KEY_DOWN, 45.0, "DOWN"], [key.KEY_RIGHT, 45.0, "RIGHT"]
-   ]]
+      ]]
 ]
 
 fn row_width(any row) f64 {

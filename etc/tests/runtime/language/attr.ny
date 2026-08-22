@@ -8,7 +8,7 @@ if comptime { arch() == "x86_64" && os() == "windows" }{
       asm("
          lea -1(%rcx, %rdx), %rax
          ret
-      ", "")
+         ", "")
    }
 } elif comptime { arch() == "x86_64" }{
    @naked
@@ -16,7 +16,7 @@ if comptime { arch() == "x86_64" && os() == "windows" }{
       asm("
          lea -1(%rdi, %rsi), %rax
          ret
-      ", "")
+         ", "")
    }
 } elif comptime { arch() == "aarch64" || arch() == "arm64" }{
    @naked
@@ -25,7 +25,7 @@ if comptime { arch() == "x86_64" && os() == "windows" }{
          add x0, x0, x1
          sub x0, x0, #1
          ret
-      ", "")
+         ", "")
    }
 }
 
@@ -163,7 +163,6 @@ fn backend_fp_add(a, b) {
 }
 
 assert(backend_fp_add(8, 9) == 17, "@backend(name, value) function failed")
-
 assert(intrinsic("ctpop.i64", 0xf0f0) == 8, "intrinsic(...) ctpop intrinsic failed")
 assert(intrinsic("ctpop.i64", 0xf0f0) == 8, "intrinsic(...) shorthand intrinsic failed")
 assert(intrinsic("cttz.i64", 8, false) == 3, "intrinsic(...) cttz intrinsic failed")

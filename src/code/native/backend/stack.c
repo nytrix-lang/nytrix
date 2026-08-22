@@ -1,12 +1,18 @@
+/*
+ * Native backend stack manager: explicit stack-frame layout tracking
+ * for register spills, local variables, and ABI-mandated slots.
+ */
 #include "code/native/internal.h"
 
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
-/* Shared stack-machine text NYIR emitter for secondary ISAs (ARM / AArch64 /
+/*
+ * Shared stack-machine text NYIR emitter for secondary ISAs (ARM / AArch64 /
  * i386 / RISC-V). One implementation, per-ISA string/layout profiles — replaces
- * four near-copy backends. */
+ * four near-copy backends.
+ */
 
 typedef enum {
   NY_SM_ARM = 0,
@@ -171,13 +177,17 @@ static bool sm_movi(ny_sm_ctx_t *c, const char *reg, int64_t v) {
 }
 
 static bool sm_binop3(ny_sm_ctx_t *c, const char *op) {
-  /* t0 = t0 op t1 */
+  /*
+   * t0 = t0 op t1
+   */
   switch (c->kind) {
   case NY_SM_ARM:
   case NY_SM_A64:
     return ny_native_printf(c->w, "\t%s\t%s, %s, %s\n", op, c->t0, c->t0, c->t1);
   case NY_SM_I386:
-    /* op %t1, %t0  (AT&T) */
+    /*
+     * op %t1, %t0  (AT&T)
+     */
     return ny_native_printf(c->w, "\t%sl\t%s, %s\n", op, c->t1, c->t0);
   case NY_SM_RISCV:
     return ny_native_printf(c->w, "\t%s\t%s, %s, %s\n", op, c->t0, c->t0, c->t1);
@@ -235,7 +245,9 @@ static bool sm_cmp(ny_sm_ctx_t *c, const nyir_inst_t *in) {
            sm_stv(c, in->dst, c->t0);
   }
   case NY_SM_RISCV: {
-    /* slt-based materialize */
+    /*
+     * slt-based materialize
+     */
     if (in->cmp == NYIR_CMP_LT)
       return ny_native_put(c->w, "\tslt\ta0, a0, a1\n") &&
              sm_stv(c, in->dst, c->t0);
@@ -275,7 +287,9 @@ static bool sm_call(ny_sm_ctx_t *c, const nyir_inst_t *in) {
     return false;
   }
   if (c->kind == NY_SM_I386) {
-    /* push right-to-left, call, pop */
+    /*
+     * push right-to-left, call, pop
+     */
     for (int i = argc - 1; i >= 0; --i) {
       if (!sm_ldv(c, c->t0, args[i]) ||
           !ny_native_put(c->w, "\tpushl\t%eax\n"))
@@ -536,7 +550,9 @@ static bool sm_emit(ny_native_writer_t *w, const ny_native_target_info_t *target
   if (!ny_native_printf(w, "\t.globl\t%s%s\n%s%s:\n", pfx, name, pfx, name))
     return false;
 
-  /* prologue */
+  /*
+   * prologue
+   */
   switch (c.kind) {
   case NY_SM_ARM:
     if (!c.is_leaf && !ny_native_put(w, "\tpush\t{r4, r5, r6, r7, lr}\n"))

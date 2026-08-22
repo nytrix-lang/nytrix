@@ -179,7 +179,7 @@ fn _shot_in(any shot_name, list names) bool {
 fn _editor_plan(any tab=0, any inspector=false, any workspace=false, any center_tab=0, any model_filter="", any probe_overlay=false, any inspector_tab=1) dict {
    def workspace_mode = (bool(inspector) || bool(workspace) || int(center_tab) != 0) ? 1 : 0
    _shell_plan(true, false, false, false, inspector, false, workspace, false,
-   tab, workspace_mode, center_tab, 0, 0, 0, inspector_tab, model_filter, probe_overlay)
+      tab, workspace_mode, center_tab, 0, 0, 0, inspector_tab, model_filter, probe_overlay)
 }
 
 fn _tool_plan(str tool, any tab=0, any model_filter="", any probe_overlay=false) dict {
@@ -190,7 +190,7 @@ fn _tool_plan(str tool, any tab=0, any model_filter="", any probe_overlay=false)
       (tool == "gallery") ? tab : 0,
       (tool == "inspector") ? tab : 0,
       (tool == "browser") ? model_filter : "",
-   (tool == "probe") ? probe_overlay : false)
+      (tool == "probe") ? probe_overlay : false)
 }
 
 fn _inspector_tab(any shot_name) int {
@@ -201,7 +201,7 @@ fn _inspector_tab(any shot_name) int {
          "inspector_settings": 1,
          "inspector_diag": 2,
          "inspector_renderer": 2
-   }.get(to_str(shot_name), 0))
+      }.get(to_str(shot_name), 0))
 }
 
 fn shot_plan(any shot_name) dict {

@@ -1,3 +1,7 @@
+/*
+ * Module codegen: compiles Nytrix module declarations to LLVM IR,
+ * managing module-level metadata, imports, and symbol visibility.
+ */
 #include "base/loader.h"
 #include "base/util.h"
 #include "priv.h"
@@ -1236,16 +1240,20 @@ static void ny_add_module_alias_binding_unique(codegen_t *cg, const char *alias,
   vec_push(&cg->aliases, alias_bind);
 }
 
-/* Joins `base` and `leaf` into `buf` as "base.leaf". Returns true when the
- * result fits in `buf_size`, false otherwise (buf is left unspecified). */
+/*
+ * Joins `base` and `leaf` into `buf` as "base.leaf". Returns true when the
+ * result fits in `buf_size`, false otherwise (buf is left unspecified).
+ */
 static bool ny_join_scoped_name(char *buf, size_t buf_size, const char *base,
                                 const char *leaf) {
   int nw = snprintf(buf, buf_size, "%s.%s", base, leaf);
   return nw > 0 && (size_t)nw < buf_size;
 }
 
-/* Same join, but leaves `name` as-is (copied into `buf`) when it already
- * contains a '.' and is therefore already fully qualified. */
+/*
+ * Same join, but leaves `name` as-is (copied into `buf`) when it already
+ * contains a '.' and is therefore already fully qualified.
+ */
 static bool ny_join_scoped_name_unless_dotted(char *buf, size_t buf_size,
                                               const char *base,
                                               const char *name) {

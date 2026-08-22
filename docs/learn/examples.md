@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":20,"summary":"Practical Nytrix examples covering expressions, modules, native builds, and everyday patterns."} -->
 # Examples
 
 The checkout keeps runnable examples under `etc/projects/` and focused runtime
@@ -64,7 +65,7 @@ ny -o build/cache/bench/sieve etc/tests/bench/sieve.nshape
 
 ## Related
 
-- [start.md](start.md) for the first file.
-- [programs.md](programs.md) for script and module shape.
-- [testing.md](testing.md) for test commands.
-- [performance.md](performance.md) for measurement discipline.
+- [Start](start.md) for the first file.
+- [Programs](programs.md) for script and module shape.
+- [Testing](testing.md) for test commands.
+- [Performance](performance.md) for measurement discipline.

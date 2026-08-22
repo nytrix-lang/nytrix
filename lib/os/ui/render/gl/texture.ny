@@ -1,6 +1,6 @@
 ;; Keywords: render opengl gl texture readback
 ;; References: std.os.ui.render.gl.state std.os.ui.render.gl.constants
-module std.os.ui.render.gl.texture(_read_pixels_buffer, _readback_detail_score, _readback_rgb_score, alt, alt_detail, alt_score, b0, bytes, cp, create_texture, create_texture_ex, destroy_texture, dst, g0, i, id, last_created_texture_id, meta, off, out, pix, pixels, primary_buffer, primary_detail, primary_score, r0, raw, read_framebuffer, row_bytes, score, step, t, texture_count, texture_format, texture_size, tw, update_texture_rect, y)
+module std.os.ui.render.gl.texture(_read_pixels_buffer, _readback_detail_score, _readback_rgb_score, alt, alt_detail, alt_score, b0, bytes, cp, create_cubemap, create_texture, create_texture_ex, destroy_texture, dst, g0, i, id, last_created_texture_id, meta, off, out, pix, pixels, primary_buffer, primary_detail, primary_score, r0, raw, read_framebuffer, row_bytes, score, step, t, texture_count, texture_format, texture_size, tw, update_texture_rect, y)
 use std.core
 use std.math
 use std.os.ffi as ffi
@@ -101,6 +101,52 @@ fn texture_count() int { dict_keys(_tex_live).len }
 ;; Returns the result of the `last_created_texture_id` operation.
 fn last_created_texture_id() int { _last_tex }
 
+;; Real GL/WebGL2 cubemap creation (no unsupported stub). Uploads 6 RGBA8 face
+;; buffers to a GL_TEXTURE_CUBE_MAP; the software path keeps the 6 face buffers.
+fn create_cubemap(int face_size, list face_pixels_list) int {
+   "Creates a GL cubemap texture from 6 RGBA8 face buffers."
+   if face_size <= 0 { return -1 }
+   if !is_list(face_pixels_list) || face_pixels_list.len < 6 { return -1 }
+   def CUBE = 0x8513 ;; GL_TEXTURE_CUBE_MAP
+   def CUBE_PX = 0x8515 ;; GL_TEXTURE_CUBE_MAP_POSITIVE_X
+   if _soft_enabled() {
+      if _last_tex < 0 { _last_tex = 0 }
+      _last_tex += 1
+      def id = _last_tex
+      mut faces = list(0)
+      mut s_i = 0
+      while s_i < 6 {
+         def px = face_pixels_list.get(s_i, 0)
+         def cp = _soft_copy_texture_pixels(face_size, face_size, px, GL_RGBA)
+         if !cp { return -1 }
+         faces = faces.append(cp)
+         s_i += 1
+      }
+      _tex_live[id] = {"width": face_size, "height": face_size, "format": GL_RGBA, "filter": 1, "cubemap": true}
+      _tex_formats[id] = GL_RGBA
+      _tex_pixels[id] = faces
+      return id
+   }
+   def id = _gen_name("glGenTextures")
+   if id <= 0 { return -1 }
+   _bound_tex = -999999
+   _call2("glBindTexture", CUBE, id)
+   _call3("glTexParameteri", CUBE, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+   _call3("glTexParameteri", CUBE, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+   _call3("glTexParameteri", CUBE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+   _call3("glTexParameteri", CUBE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+   mut u_i = 0
+   while u_i < 6 {
+      if !_call9("glTexImage2D", CUBE_PX + u_i, 0, GL_RGBA8, face_size, face_size, 0, GL_RGBA, GL_UNSIGNED_BYTE, face_pixels_list.get(u_i, 0)) { return -1 }
+      u_i += 1
+   }
+   _tex_live[id] = {"width": face_size, "height": face_size, "format": GL_RGBA, "filter": 1, "cubemap": true}
+   _tex_formats[id] = GL_RGBA
+   _bound_tex = -999999
+   _last_tex = id
+   id
+}
+
 fn _read_pixels_buffer(int buffer, any raw) bool {
    if !raw || _w <= 0 || _h <= 0 { return false }
    _ny_glReadBuffer(buffer)
@@ -182,7 +228,7 @@ fn read_framebuffer() any {
                print("[gl:readback] switched buffer primary_score=" + to_str(primary_score) +
                   " primary_detail=" + to_str(primary_detail) +
                   " alt_score=" + to_str(alt_score) +
-               " alt_detail=" + to_str(alt_detail))
+                  " alt_detail=" + to_str(alt_detail))
             }
             free(raw)
             raw = alt

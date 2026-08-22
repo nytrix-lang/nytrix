@@ -1,0 +1,29 @@
+shape optcheck_aarch64_integer {
+  family "runtime-native"
+  generator "native"
+  features [native aarch64 oracle optcheck integer]
+  template ny-test-case
+  flags "--native-backend aarch64 --native-result-oracle=5168580067"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut acc = 0
+mut branch = 0
+for i in 1..250000 {
+   acc = acc + (i % 97) * (i % 89)
+   if i % 11 == 0 { branch = branch + i }
+}
+mut state = 7
+mut mixed = 0
+for i in 1..50000 {
+   state = (state * 1103515 + 12345) % 2147483647
+   if state % 13 == 0 { mixed = mixed + i }
+}
+mut signed = 0
+for i in 1..100000 {
+   def x = i * 1664525 + 1013904223
+   if x % 2 == 0 { signed = signed + (x % 65537) } else { signed = signed - (x % 32749) }
+}
+print(acc + branch + mixed + state + signed)
+NY
+}

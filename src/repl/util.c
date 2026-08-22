@@ -1,3 +1,7 @@
+/*
+ * REPL utilities: internal helpers shared by the completion, color,
+ * doc, and reader modules of the interactive environment.
+ */
 #include "base/util.h"
 #include "base/common.h"
 #include "priv.h"
@@ -383,6 +387,20 @@ static int repl_keep_rhs_keyword(const char *s) {
   return repl_word_at(s, "else") || repl_word_at(s, "elif") || repl_word_at(s, "catch");
 }
 
+static int repl_is_named_declaration(const char *code) {
+  static const char *const prefixes[] = {
+      "fn ",       "use ",       "module ",  "extern ",
+      "enum ",     "struct ",    "class ",   "layout ",
+      "operator ", "impl ",      "macro ",   "comptime table ",
+      "comptime template ", "comptime diagnostic ", NULL,
+  };
+  for (size_t i = 0; prefixes[i]; i++) {
+    if (!strncmp(code, prefixes[i], strlen(prefixes[i])))
+      return 1;
+  }
+  return 0;
+}
+
 static char *repl_trim_persistent_assignment(const char *stmt) {
   char *copy = ny_strdup(stmt);
   if (!copy)
@@ -391,7 +409,8 @@ static char *repl_trim_persistent_assignment(const char *stmt) {
   if (!*code)
     return copy;
   char *target = repl_assignment_target(code);
-  int starts_mutating = !strncmp(code, "def ", 4) || !strncmp(code, "mut ", 4) || target != NULL;
+  int starts_mutating = !strncmp(code, "def ", 4) || !strncmp(code, "mut ", 4) ||
+                        (!repl_is_named_declaration(code) && target != NULL);
   free(target);
   if (!starts_mutating)
     return copy;
@@ -833,6 +852,17 @@ int is_persistent_def(const char *src) {
       !strncmp(trimmed, "struct ", 7) || !strncmp(trimmed, "class ", 6) ||
       !strncmp(trimmed, "layout ", 7) || !strncmp(trimmed, "operator ", 9) ||
       !strncmp(trimmed, "impl ", 5) || !strncmp(trimmed, "macro ", 6)) {
+    return 1;
+  }
+  /*
+   * These introduce named declarations just like `fn` or `struct`.  Keep
+   * them when rebuilding a REPL session so later declarations can still
+   * resolve the generated table/template/diagnostic.  Do not retain a plain
+   * `comptime { ... }` expression: it is an evaluation, not session state.
+   */
+  if (!strncmp(trimmed, "comptime table ", 15) ||
+      !strncmp(trimmed, "comptime template ", 18) ||
+      !strncmp(trimmed, "comptime diagnostic ", 20)) {
     return 1;
   }
   char *an = repl_assignment_target(trimmed);

@@ -1,0 +1,23 @@
+shape oracle_closed_form_accumulator_runtime_bound_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime-bound regression]
+  template ny-test-case
+  flags "--native-result-oracle=4950 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn sum_to(n) i64 {
+  mut s = 0
+  mut i = 0
+  while i < n {
+    s = s + i
+    i = i + 1
+  }
+  s
+}
+
+sum_to(100)
+NY
+}

@@ -99,7 +99,7 @@ fn _git_change_rows(dict model, dict git) list {
       out = out.append({
             "name": ospath.basename(rel), "path": path, "rel": rel, "dir": false,
             "depth": 0, "git": to_str(git.get(rel, "")), "open": false, "kind": file_kind(rel)
-      })
+         })
       i += 1
    }
    out
@@ -193,7 +193,7 @@ fn _project_scan_tree(dict model, str dir, int depth, int max_depth, int limit) 
                   "name": name, "path": full, "rel": rel, "dir": dirp,
                   "depth": depth, "git": git_code(model, rel, dirp),
                   "open": opened, "kind": dirp ? "dir" : file_kind(name)
-            })
+               })
             if opened && depth < max_depth {
                def sub = _project_scan_tree(model, full, depth + 1, max_depth, limit - out.len)
                mut j = 0
@@ -222,7 +222,7 @@ fn refresh(dict model, int max_depth=4, int limit=0) dict {
    mut rows = [{
          "name": ospath.basename(r), "path": r, "rel": ".",
          "dir": true, "depth": 0, "git": "", "open": true, "kind": "dir"
-   }]
+      }]
    mut scan_limit = limit > 0 ? limit : MAX_TREE_ROWS
    mut sub_limit = scan_limit - 1
    if sub_limit < 0 { sub_limit = 0 }

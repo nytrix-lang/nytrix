@@ -1,3 +1,7 @@
+/*
+ * f64 expression codegen: lowers float, list, string, and compound
+ * expressions to LLVM IR, including stack-allocated list temporaries.
+ */
 LLVMValueRef gen_expr_list_stack_alloc(codegen_t *cg, scope *scopes,
                                        size_t depth, expr_t *e) {
   size_t item_count = e->as.list_like.len;
@@ -295,6 +299,14 @@ static bool ny_is_numeric_expr_like_limited(codegen_t *cg, scope *scopes, size_t
       return true;
     const char *fn_name = e->as.call.callee->as.ident.name;
     if (fn_name) {
+      const char *leaf = strrchr(fn_name, '.');
+      leaf = leaf ? leaf + 1 : fn_name;
+      if (strcmp(fn_name, "__flt_sqrt") == 0 || strcmp(leaf, "sqrt") == 0 ||
+          strcmp(fn_name, "__flt_abs") == 0 || strcmp(leaf, "fabs") == 0 ||
+          strcmp(leaf, "abs") == 0 ||
+          strcmp(fn_name, "__flt_sin") == 0 || strcmp(leaf, "sin") == 0 ||
+          strcmp(fn_name, "__flt_cos") == 0 || strcmp(leaf, "cos") == 0)
+        return true;
       fun_sig *sig = resolve_overload(cg, fn_name, e->as.call.args.len, 0);
       const char *ret_type =
           sig ? (sig->return_type ? sig->return_type
@@ -304,7 +316,8 @@ static bool ny_is_numeric_expr_like_limited(codegen_t *cg, scope *scopes, size_t
                           strcmp(ret_type, "i64") == 0 ||
                           strcmp(ret_type, "f32") == 0 ||
                           strcmp(ret_type, "f64") == 0 ||
-                          strcmp(ret_type, "float") == 0);
+                          strcmp(ret_type, "float") == 0 ||
+                          strcmp(ret_type, "number") == 0);
     }
   }
   if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
@@ -322,8 +335,16 @@ static bool ny_is_numeric_expr_like_limited(codegen_t *cg, scope *scopes, size_t
 
 static bool ny_is_numeric_expr_like(codegen_t *cg, scope *scopes, size_t depth,
                                     expr_t *e) {
-  return ny_is_numeric_expr_like_limited(cg, scopes, depth, e, 3);
+  /*
+   * Budget 8 handles binary-tree expressions up to depth 8 (e.g. a 4-term
+   * sum like (A + B + C + D) occupies depth 3 in the tree, but each leaf
+   * may be a call expression).  The original budget of 3 was exhausted by
+   * four-operand sums before reaching leaf call nodes, causing correct-but-
+   * slow fallback to the tagged runtime path.
+   */
+  return ny_is_numeric_expr_like_limited(cg, scopes, depth, e, 8);
 }
+
 
 static bool ny_is_f64_arith_op(const char *op) {
    return strcmp(op, "+") == 0 || strcmp(op, "-") == 0 || strcmp(op, "*") == 0 ||
@@ -1128,6 +1149,20 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
         leaf = leaf ? leaf + 1 : fn_name;
         const char *surface_leaf = surface ? strrchr(surface, '.') : NULL;
         surface_leaf = surface_leaf ? surface_leaf + 1 : surface;
+        if (!builtin_shadowed &&
+            (e->as.call.args.len == 2 || e->as.call.args.len == 3) &&
+            ((surface_leaf && strcmp(surface_leaf, "get") == 0) ||
+             strcmp(fn_name, "std.core.get") == 0 ||
+             strcmp(fn_name, "std.core.reflect.get") == 0 ||
+             strcmp(fn_name, "get") == 0)) {
+          expr_t *default_expr =
+              e->as.call.args.len == 3 ? e->as.call.args.data[2].val : NULL;
+          LLVMValueRef direct_get = ny_emit_f64_list_get_parts_as_f64(
+              cg, scopes, depth, e->as.call.args.data[0].val,
+              e->as.call.args.data[1].val, default_expr);
+          if (direct_get)
+            return direct_get;
+        }
         if (!builtin_shadowed && e->as.call.args.len == 1 &&
             ((surface_leaf && (strcmp(surface_leaf, "float") == 0 ||
                                strcmp(surface_leaf, "to_float") == 0 ||
@@ -1147,6 +1182,69 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
           }
           return gen_expr_as_f64(cg, scopes, depth, arg);
         }
+        if (!builtin_shadowed && e->as.call.args.len == 1 &&
+            ((surface_leaf && (strcmp(surface_leaf, "__flt_sqrt") == 0 ||
+                               strcmp(surface_leaf, "sqrt") == 0)) ||
+             strcmp(leaf, "__flt_sqrt") == 0 || strcmp(leaf, "sqrt") == 0 ||
+             strcmp(fn_name, "std.math.sqrt") == 0)) {
+          LLVMValueRef arg_f64 =
+              gen_expr_as_f64(cg, scopes, depth, e->as.call.args.data[0].val);
+          LLVMValueRef sqrt_fn =
+              LLVMGetNamedFunction(cg->module, "llvm.sqrt.f64");
+          LLVMTypeRef sqrt_ft =
+              LLVMFunctionType(f64_ty, (LLVMTypeRef[]){f64_ty}, 1, 0);
+          if (!sqrt_fn)
+            sqrt_fn = LLVMAddFunction(cg->module, "llvm.sqrt.f64", sqrt_ft);
+          return LLVMBuildCall2(cg->builder, sqrt_ft, sqrt_fn, &arg_f64, 1,
+                                "f64_sqrt");
+        }
+        if (!builtin_shadowed && e->as.call.args.len == 1 &&
+            ((surface_leaf && (strcmp(surface_leaf, "__flt_abs") == 0 ||
+                               strcmp(surface_leaf, "fabs") == 0)) ||
+             strcmp(leaf, "__flt_abs") == 0 || strcmp(leaf, "fabs") == 0)) {
+          LLVMValueRef arg_f64 =
+              gen_expr_as_f64(cg, scopes, depth, e->as.call.args.data[0].val);
+          LLVMValueRef fabs_fn =
+              LLVMGetNamedFunction(cg->module, "llvm.fabs.f64");
+          LLVMTypeRef fabs_ft =
+              LLVMFunctionType(f64_ty, (LLVMTypeRef[]){f64_ty}, 1, 0);
+          if (!fabs_fn)
+            fabs_fn = LLVMAddFunction(cg->module, "llvm.fabs.f64", fabs_ft);
+          return LLVMBuildCall2(cg->builder, fabs_ft, fabs_fn, &arg_f64, 1,
+                                "f64_fabs");
+        }
+        if (!builtin_shadowed && e->as.call.args.len == 1 &&
+            ((surface_leaf && (strcmp(surface_leaf, "__flt_sin") == 0 ||
+                               strcmp(surface_leaf, "sin") == 0)) ||
+             strcmp(leaf, "__flt_sin") == 0 || strcmp(leaf, "sin") == 0 ||
+             strcmp(fn_name, "std.math.sin") == 0)) {
+          LLVMValueRef arg_f64 =
+              gen_expr_as_f64(cg, scopes, depth, e->as.call.args.data[0].val);
+          LLVMValueRef sin_fn =
+              LLVMGetNamedFunction(cg->module, "llvm.sin.f64");
+          LLVMTypeRef sin_ft =
+              LLVMFunctionType(f64_ty, (LLVMTypeRef[]){f64_ty}, 1, 0);
+          if (!sin_fn)
+            sin_fn = LLVMAddFunction(cg->module, "llvm.sin.f64", sin_ft);
+          return LLVMBuildCall2(cg->builder, sin_ft, sin_fn, &arg_f64, 1,
+                                "f64_sin");
+        }
+        if (!builtin_shadowed && e->as.call.args.len == 1 &&
+            ((surface_leaf && (strcmp(surface_leaf, "__flt_cos") == 0 ||
+                               strcmp(surface_leaf, "cos") == 0)) ||
+             strcmp(leaf, "__flt_cos") == 0 || strcmp(leaf, "cos") == 0 ||
+             strcmp(fn_name, "std.math.cos") == 0)) {
+          LLVMValueRef arg_f64 =
+              gen_expr_as_f64(cg, scopes, depth, e->as.call.args.data[0].val);
+          LLVMValueRef cos_fn =
+              LLVMGetNamedFunction(cg->module, "llvm.cos.f64");
+          LLVMTypeRef cos_ft =
+              LLVMFunctionType(f64_ty, (LLVMTypeRef[]){f64_ty}, 1, 0);
+          if (!cos_fn)
+            cos_fn = LLVMAddFunction(cg->module, "llvm.cos.f64", cos_ft);
+          return LLVMBuildCall2(cg->builder, cos_ft, cos_fn, &arg_f64, 1,
+                                "f64_cos");
+        }
         fun_sig *sig = resolve_overload(cg, fn_name, e->as.call.args.len, 0);
         const char *ret_type =
             sig ? (sig->return_type ? sig->return_type
@@ -1156,14 +1254,17 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
           ret_type = infer_expr_type(cg, scopes, depth, e);
         if (sig && ret_type &&
             (strcmp(ret_type, "f64") == 0 || strcmp(ret_type, "f32") == 0 ||
-             strcmp(ret_type, "float") == 0)) {
+             strcmp(ret_type, "float") == 0 ||
+             strcmp(ret_type, "number") == 0)) {
           LLVMValueRef inlined =
               ny_try_inline_call_as_f64(cg, scopes, depth, e, sig);
           if (inlined)
             return inlined;
-          LLVMValueRef native = ny_try_native_call_as_f64(cg, scopes, depth, e);
-          if (native)
-            return native;
+          if (strcmp(ret_type, "number") != 0) {
+            LLVMValueRef native = ny_try_native_call_as_f64(cg, scopes, depth, e);
+            if (native)
+              return native;
+          }
           LLVMValueRef call_result = gen_call_expr(cg, scopes, depth, e);
           return ny_unbox_float(cg, call_result);
         }
@@ -1214,40 +1315,12 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
 
 static LLVMValueRef ny_try_emit_mono_raw_int_expr(codegen_t *cg, scope *scopes, size_t depth,
                                                   expr_t *e) {
-  if (!cg || !e || cg->mono_raw_expr_disabled)
+  if (!cg || !e || cg->mono_raw_expr_disabled || !cg->mono_emitting)
     return NULL;
-  bool mono_mode = cg->mono_emitting;
-  bool proven_fast =
-      !mono_mode && ny_fast_path_enabled(cg, "NYTRIX_PROVEN_RAW_INT_EXPR_FAST") &&
-      ny_is_proven_int(cg, scopes, depth, e, NULL);
-  if (!mono_mode && !proven_fast)
-    return NULL;
-  if (!mono_mode && e->kind == NY_E_BINARY && e->as.binary.op &&
-      (strcmp(e->as.binary.op, "+") == 0 ||
-       strcmp(e->as.binary.op, "-") == 0) &&
-      ((e->as.binary.left && e->as.binary.left->kind == NY_E_LITERAL &&
-        e->as.binary.left->as.literal.kind == NY_LIT_INT) ||
-       (e->as.binary.right && e->as.binary.right->kind == NY_E_LITERAL &&
-        e->as.binary.right->as.literal.kind == NY_LIT_INT))) {
-    return NULL;
-  }
-  if (!mono_mode && e->kind == NY_E_BINARY && e->as.binary.op &&
-      strcmp(e->as.binary.op, "%") == 0 && e->as.binary.right &&
-      e->as.binary.right->kind == NY_E_LITERAL &&
-      e->as.binary.right->as.literal.kind == NY_LIT_INT &&
-      e->as.binary.right->as.literal.as.i > 0) {
-    return NULL;
-  }
   LLVMValueRef raw = NULL;
   LLVMValueRef ok = NULL;
   if (!ny_build_mono_raw_int_expr(cg, scopes, depth, e, &raw, &ok) || !raw || !ok)
     return NULL;
-
-  if (!mono_mode) {
-    if (!LLVMIsAConstantInt(ok) || LLVMConstIntGetZExtValue(ok) == 0)
-      return NULL;
-    return ny_tag_int(cg, raw);
-  }
 
   LLVMValueRef cur_fn = ny_cur_fn(cg);
   if (!cur_fn)
@@ -1395,6 +1468,501 @@ static char *ny_int_literal_decimal_from_token(token_t tok, int64_t fallback) {
   return dec;
 }
 
+/*
+ * Expression-kind dispatch is intentionally thin; complex cases use helpers.
+ *
+ * Keep expression dispatch shallow.  Complex expression kinds live in focused
+ * helpers so control-flow and type-specific lowering can be reviewed in
+ * isolation without changing the shared LLVM builder translation unit.
+ */
+static LLVMValueRef gen_expr_literal_case(codegen_t *cg, scope *scopes __attribute__((unused)), size_t depth __attribute__((unused)), expr_t *e) {
+  if (e->as.literal.kind == NY_LIT_INT) {
+    /*
+     * The `nil` literal is parsed as LIT_INT with value 0 but token kind
+     * NY_T_NIL.  It must materialize as raw nil (0), NOT a tagged integer
+     * (which would be (0<<1)|1 == 1) — otherwise is_nil() on a nil value
+     * passed through an `any` parameter silently returns false because the
+     * value arrives as tagged-int-0 instead of raw nil.
+     */
+    if (e->tok.kind == NY_T_NIL)
+      return ny_c0(cg);
+    int64_t raw = e->as.literal.as.i;
+    if (ny_small_int_fits_i64(raw))
+      return LLVMConstInt(cg->type_i64, ((uint64_t)raw << 1) | 1, true);
+    char *dec = ny_int_literal_decimal_from_token(e->tok, raw);
+    const char *lit = dec ? dec : "0";
+    LLVMValueRef str_runtime_global = const_string_ptr(cg, lit, strlen(lit));
+    free(dec);
+    LLVMValueRef str_ptr = ny_load(cg, str_runtime_global, "big_lit_str");
+    fun_sig *big_from_str = lookup_fun(cg, "__bigint_from_str", 0);
+    if (!big_from_str)
+      return expr_fail(cg, e->tok, "builtin __bigint_from_str missing");
+    return LLVMBuildCall2(cg->builder, big_from_str->type,
+                          big_from_str->value, (LLVMValueRef[]){str_ptr}, 1,
+                          "big_lit");
+  }
+  if (e->as.literal.kind == NY_LIT_BOOL)
+    return e->as.literal.as.b ? ny_ctrue(cg) : ny_cfalse(cg);
+  if (e->as.literal.kind == NY_LIT_STR) {
+
+    LLVMValueRef str_runtime_global =
+        const_string_ptr(cg, e->as.literal.as.s.data, e->as.literal.as.s.len);
+
+    return ny_load(cg, str_runtime_global, "str_ptr");
+  }
+  if (e->as.literal.kind == NY_LIT_FLOAT) {
+    fun_sig *box_sig = ny_helper_flt_box(cg);
+    if (!box_sig) {
+      return expr_fail(cg, e->tok, "__flt_box_val not found");
+    }
+    double fval_d = e->as.literal.as.f;
+    if (e->as.literal.hint == NY_LIT_HINT_F32) {
+      float f32 = (float)fval_d;
+      fval_d = (double)f32;
+    }
+    LLVMValueRef fval =
+        LLVMConstReal(LLVMDoubleTypeInContext(cg->ctx), fval_d);
+    return LLVMBuildCall2(
+        cg->builder, box_sig->type, box_sig->value,
+        (LLVMValueRef[]){ny_bitcast(cg, fval, cg->type_i64, "")}, 1, "");
+  }
+  return ny_c0(cg);
+}
+
+static LLVMValueRef gen_expr_ident_case(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+  size_t name_len = (size_t)e->tok.len;
+  if (name_len == 0)
+    name_len = strlen(e->as.ident.name);
+  binding *b = expr_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len,
+                                   e->as.ident.hash);
+  if (b) {
+    if (cg->comptime && b->stmt_t && !ny_is_stdlib_tok(b->stmt_t->tok) &&
+        b->value && LLVMIsAGlobalVariable(b->value)) {
+      ny_ct_fast_val_t folded = ny_ct_fast_none();
+      if (ny_try_eval_binding_comptime_const(cg, b, e->as.ident.name,
+                                             &folded, 0)) {
+        LLVMValueRef v = ny_ct_fast_to_llvm_value(cg, &folded, e->tok);
+        ny_ct_fast_val_free(&folded);
+        if (v)
+          return v;
+      }
+      ny_ct_fast_val_free(&folded);
+      return expr_fail(cg, e->tok,
+                       "comptime cannot capture runtime global '%s'",
+                       e->as.ident.name);
+    }
+    return expr_value_from_binding(cg, b);
+  }
+
+  fun_sig *s = lookup_fun(cg, e->as.ident.name, e->as.ident.hash);
+  if (s) {
+    bool boxed_callable =
+        !s->is_extern && ny_named_callable_values_need_closure(cg);
+    LLVMValueRef sv =
+        (boxed_callable || ny_fun_sig_needs_tagged_callable_adapter(s))
+            ? ny_fun_sig_tagged_callable_adapter(cg, s, e->tok,
+                                                 boxed_callable, false)
+            : s->value;
+    if (boxed_callable) {
+      LLVMValueRef raw = ny_ptr2i64(cg, sv, "");
+      return ny_box_callable_closure(cg, raw, e->tok);
+    }
+
+    return ny_ptr2i64(cg, sv, "");
+  }
+
+  enum_member_def_t *emd = lookup_enum_member(cg, e->as.ident.name);
+  if (emd) {
+    return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1, true);
+  }
+
+  LLVMValueRef host_ident = ny_try_host_platform_ident(cg, e->as.ident.name);
+  if (host_ident)
+    return host_ident;
+
+  report_undef_symbol(cg, e->as.ident.name, e->tok);
+  return ny_c0(cg);
+}
+
+static LLVMValueRef gen_expr_binary_case(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+  const char *op = e->as.binary.op;
+  expr_t *le = e->as.binary.left, *re = e->as.binary.right;
+
+  if (op && strcmp(op, "..") == 0)
+    return gen_range_expr(cg, scopes, depth, e);
+
+  bool is_user_eq = op && (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0);
+  bool in_std_module = cg->current_module_name &&
+                       (strncmp(cg->current_module_name, "std.", 4) == 0 ||
+                        strncmp(cg->current_module_name, "lib.", 4) == 0);
+  if (is_user_eq && !in_std_module) {
+    ny_ct_fast_val_t folded = {0};
+    if (ny_try_eval_comptime_expr_fast(cg, e, &folded, 0) && folded.kind == NY_CT_FAST_BOOL) {
+      bool folded_bool = folded.b;
+      ny_ct_fast_val_free(&folded);
+      return folded_bool ? ny_ctrue(cg) : ny_cfalse(cg);
+    }
+    ny_ct_fast_val_free(&folded);
+    if (lookup_fun(cg, "std.core.eq", 0)) {
+      expr_t callee = {0};
+      callee.kind = NY_E_IDENT;
+      callee.tok = e->tok;
+      callee.as.ident.name = "std.core.eq";
+      call_arg_t args[2] = {{.val = le}, {.val = re}};
+      expr_t call = {0};
+      call.kind = NY_E_CALL;
+      call.tok = e->tok;
+      call.as.call.callee = &callee;
+      call.as.call.args.data = args;
+      call.as.call.args.len = 2;
+      call.as.call.args.cap = 2;
+      LLVMValueRef eq_res = gen_call_expr(cg, scopes, depth, &call);
+      if (strcmp(op, "!=") == 0)
+        return ny_select(cg, to_bool(cg, eq_res), ny_cfalse(cg), ny_ctrue(cg),
+                         "ne.user");
+      if (LLVMTypeOf(eq_res) == ny_i1_ty(cg))
+        return ny_select(cg, eq_res, ny_ctrue(cg), ny_cfalse(cg),
+                         "eq.user.tagged");
+      return eq_res;
+    }
+  }
+
+  LLVMValueRef mono_raw_int = ny_try_emit_mono_raw_int_expr(cg, scopes, depth, e);
+  if (mono_raw_int)
+    return mono_raw_int;
+
+  bool is_arith = ny_is_f64_arith_op(op);
+  bool is_cmp = (strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+                 strcmp(op, ">") == 0 || strcmp(op, ">=") == 0 ||
+                 strcmp(op, "==") == 0 || strcmp(op, "!=") == 0);
+
+  if (is_arith || is_cmp) {
+    if ((ny_is_f64_like(cg, scopes, depth, le) ||
+         ny_is_f64_like(cg, scopes, depth, re)) &&
+        ny_is_numeric_expr_like(cg, scopes, depth, le) &&
+        ny_is_numeric_expr_like(cg, scopes, depth, re)) {
+      ny_dbg_loc(cg, e->tok);
+      LLVMValueRef lf = gen_expr_as_f64(cg, scopes, depth, le);
+      LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, re);
+
+      if (is_arith) {
+        bool divisor_nonzero =
+            strcmp(op, "/") == 0 &&
+            ny_f64_expr_proven_nonzero(cg, scopes, depth, re);
+        LLVMValueRef res = ny_emit_f64_op(cg, op, lf, rf, divisor_nonzero);
+        fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
+        if (box_sig) {
+          return LLVMBuildCall2(
+              cg->builder, box_sig->type, box_sig->value,
+              (LLVMValueRef[]){ny_bitcast(cg, res, cg->type_i64, "")}, 1,
+              "box");
+        }
+      } else {
+        LLVMRealPredicate pred = LLVMRealOEQ;
+        if (strcmp(op, "<") == 0)
+          pred = LLVMRealOLT;
+        else if (strcmp(op, "<=") == 0)
+          pred = LLVMRealOLE;
+        else if (strcmp(op, ">") == 0)
+          pred = LLVMRealOGT;
+        else if (strcmp(op, ">=") == 0)
+          pred = LLVMRealOGE;
+        else if (strcmp(op, "==") == 0)
+          pred = LLVMRealOEQ;
+        else if (strcmp(op, "!=") == 0)
+          pred = LLVMRealUNE;
+
+        LLVMValueRef cmp = LLVMBuildFCmp(cg->builder, pred, lf, rf, "fcmp");
+        return ny_select(cg, cmp, ny_ctrue(cg), ny_cfalse(cg), "tag_bool");
+      }
+    }
+  }
+
+  LLVMValueRef l = gen_expr(cg, scopes, depth, le);
+  LLVMValueRef r = gen_expr(cg, scopes, depth, re);
+  ny_dbg_loc(cg, e->tok);
+  return gen_binary(cg, scopes, depth, op, l, r, le, re);
+}
+
+static LLVMValueRef gen_expr_member_case(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+
+  char *full_name = codegen_full_name(cg, e, cg->arena);
+  if (full_name) {
+    enum_member_def_t *emd = lookup_enum_member(cg, full_name);
+    if (emd) {
+      return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1,
+                          true);
+    }
+    if (!emd && cg->current_module_name && *cg->current_module_name) {
+      size_t cur_len = strlen(cg->current_module_name);
+      bool already_scoped =
+          strncmp(full_name, cg->current_module_name, cur_len) == 0 &&
+          full_name[cur_len] == '.';
+      if (already_scoped)
+        goto member_enum_scoped_done;
+      size_t scoped_len = strlen(cg->current_module_name) + 1 +
+                          strlen(full_name) + 1;
+      char *scoped_name = arena_alloc(cg->arena, scoped_len);
+      snprintf(scoped_name, scoped_len, "%s.%s", cg->current_module_name,
+               full_name);
+      emd = lookup_enum_member(cg, scoped_name);
+      if (emd) {
+        return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1,
+                            true);
+      }
+    }
+  member_enum_scoped_done:;
+    binding *gb = expr_lookup_binding(cg, NULL, 0, full_name, strlen(full_name),
+                                      ny_hash64(full_name, strlen(full_name)));
+    if (gb)
+      return expr_value_from_binding(cg, gb);
+  }
+  char alias_full_name[512];
+  if (e->as.member.target && e->as.member.name) {
+    char module_path[1024];
+    char resolved_fun[1280];
+    if (ny_resolve_module_expr_path(cg, scopes, depth, e->as.member.target,
+                                    module_path, sizeof(module_path)) &&
+        ny_resolve_module_function_path(cg, module_path, e->as.member.name,
+                                        resolved_fun,
+                                        sizeof(resolved_fun))) {
+      fun_sig *fs = lookup_fun(cg, resolved_fun, 0);
+      if (fs)
+        return ny_ptr2i64(cg, fs->value, "");
+    }
+  }
+  binding *alias_gb = expr_member_module_alias_global(cg, scopes, depth, e, alias_full_name,
+                                                      sizeof(alias_full_name));
+  if (alias_gb) {
+    alias_gb->is_used = true;
+    return expr_value_from_binding(cg, alias_gb);
+  }
+  const char *alias_module = expr_member_module_alias_target(cg, scopes, depth, e);
+  if (alias_module) {
+    const char *alias_name = e->as.member.target->as.ident.name;
+    ny_diag_error(e->tok, "module '%s' has no exported member '%s'",
+                  alias_module, e->as.member.name);
+    ny_diag_hint("alias '%s' resolves to module '%s'", alias_name, alias_module);
+    ny_diag_fix("export '%s' from '%s' or import the module that defines it",
+                e->as.member.name, alias_module);
+    cg->had_error = 1;
+    return ny_c0(cg);
+  }
+
+  LLVMValueRef typed_property = ny_try_member_property_expr(cg, scopes, depth, e);
+  if (typed_property)
+    return typed_property;
+
+  LLVMValueRef target = gen_expr(cg, scopes, depth, e->as.member.target);
+  LLVMValueRef key_str_global =
+      const_string_ptr(cg, e->as.member.name, strlen(e->as.member.name));
+  LLVMValueRef key_str = ny_load(cg, key_str_global, "");
+
+  fun_sig *get_sig = ny_helper_get(cg);
+  if (!get_sig) {
+    ny_diag_hint(
+        "the 'std.core' module provides the standard 'get' implementation");
+    ny_diag_fix("add 'use std.core' to your script");
+    return expr_fail(
+        cg, e->tok,
+        "Member access on a dynamic object requires the 'get' function.");
+  }
+
+  LLVMValueRef args[16];
+  args[0] = target;
+  args[1] = key_str;
+  unsigned arg_count = get_sig->arity;
+  if (arg_count < 2)
+    arg_count = 2;
+  if (arg_count > 16)
+    arg_count = 16;
+  for (unsigned i = 2; i < arg_count; i++) {
+    args[i] = ny_c1(cg);
+  }
+  ny_dbg_loc(cg, e->tok);
+  return LLVMBuildCall2(cg->builder, get_sig->type, get_sig->value, args,
+                        arg_count, "");
+}
+
+static LLVMValueRef gen_expr_sizeof_case(codegen_t *cg, scope *scopes __attribute__((unused)), size_t depth __attribute__((unused)), expr_t *e) {
+  const char *type_name = NULL;
+  if (e->as.szof.is_type)
+    type_name = e->as.szof.type_name;
+  if (!type_name && e->as.szof.target &&
+      e->as.szof.target->kind == NY_E_IDENT) {
+    type_name = e->as.szof.target->as.ident.name;
+  }
+  if (!type_name) {
+    ny_diag_error(e->tok, "sizeof expects a type name");
+    cg->had_error = 1;
+    return ny_c1(cg);
+  }
+  type_layout_t tl = resolve_raw_layout(cg, type_name, e->tok);
+  if (!tl.is_valid) {
+    cg->had_error = 1;
+    return ny_c1(cg);
+  }
+  uint64_t sz = (uint64_t)tl.size;
+  return LLVMConstInt(cg->type_i64, (sz << 1) | 1ULL, false);
+}
+
+static LLVMValueRef gen_expr_ternary_case(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+  LLVMValueRef cond = expr_gen_cond_i1(cg, scopes, depth, e->as.ternary.cond);
+  LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
+  LLVMValueRef f = LLVMGetBasicBlockParent(cur_bb);
+  LLVMBasicBlockRef true_bb = ny_bb_fn(f, "tern_true");
+  LLVMBasicBlockRef false_bb = ny_bb_fn(f, "tern_false");
+  LLVMBasicBlockRef end_bb = ny_bb_fn(f, "tern_end");
+  ny_dbg_loc(cg, e->tok);
+  ny_cond_br(cg, cond, true_bb, false_bb);
+
+  ny_pos(cg, true_bb);
+
+  LLVMValueRef true_val =
+      gen_expr(cg, scopes, depth, e->as.ternary.true_expr);
+  ny_br(cg, end_bb);
+  LLVMBasicBlockRef true_end_bb = ny_cur_block(cg);
+
+  ny_pos(cg, false_bb);
+
+  LLVMValueRef false_val =
+      gen_expr(cg, scopes, depth, e->as.ternary.false_expr);
+  ny_br(cg, end_bb);
+  LLVMBasicBlockRef false_end_bb = ny_cur_block(cg);
+
+  ny_pos(cg, end_bb);
+
+  ny_dbg_loc(cg, e->tok);
+  LLVMValueRef phi = ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "tern"));
+  LLVMAddIncoming(phi, (LLVMValueRef[]){true_val, false_val},
+                  (LLVMBasicBlockRef[]){true_end_bb, false_end_bb}, 2);
+  return phi;
+}
+
+static LLVMValueRef gen_expr_asm_case(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+  unsigned nargs = e->as.as_asm.args.len;
+  LLVMValueRef llvm_args[nargs > 0 ? nargs : 1];
+  LLVMTypeRef arg_types[nargs > 0 ? nargs : 1];
+  for (unsigned i = 0; i < nargs; ++i) {
+    llvm_args[i] = gen_expr(cg, scopes, depth, e->as.as_asm.args.data[i]);
+    arg_types[i] = cg->type_i64;
+  }
+  LLVMTypeRef func_type =
+      LLVMFunctionType(cg->type_i64, arg_types, nargs, false);
+  LLVMValueRef asm_val = LLVMConstInlineAsm(
+      func_type, e->as.as_asm.code, e->as.as_asm.constraints, true, false);
+  ny_dbg_loc(cg, e->tok);
+  return LLVMBuildCall2(cg->builder, func_type, asm_val, llvm_args, nargs,
+                        "");
+}
+
+static LLVMValueRef gen_expr_fstring_case(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+
+  LLVMValueRef empty_runtime_global = const_string_ptr(cg, "", 0);
+  LLVMValueRef res = ny_load(cg, empty_runtime_global, "");
+  fun_sig *cs = ny_helper_str_concat(cg), *ts = ny_helper_to_str(cg);
+  if (!cs || !cs->type || !cs->value)
+    return expr_fail(cg, e->tok, "__str_concat not found for f-string lowering");
+  for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
+    fstring_part_t p = e->as.fstring.parts.data[i];
+    LLVMValueRef pv;
+    if (p.kind == NY_FSP_STR) {
+      LLVMValueRef part_runtime_global =
+          const_string_ptr(cg, p.as.s.data, p.as.s.len);
+      pv = ny_load(cg, part_runtime_global, "");
+    } else {
+      if (!ts || !ts->type || !ts->value)
+        return expr_fail(cg, e->tok, "__to_str not found for f-string lowering");
+      pv = LLVMBuildCall2(
+          cg->builder, ts->type, ts->value,
+          (LLVMValueRef[]){gen_expr(cg, scopes, depth, p.as.e)}, 1, "");
+    }
+    ny_dbg_loc(cg, e->tok);
+    res = LLVMBuildCall2(cg->builder, cs->type, cs->value,
+                         (LLVMValueRef[]){res, pv}, 2, "");
+  }
+  return res;
+}
+
+static LLVMValueRef gen_expr_embed_case(codegen_t *cg, scope *scopes __attribute__((unused)), size_t depth __attribute__((unused)), expr_t *e) {
+  const char *fname = e->as.embed.path;
+  FILE *f = fopen(fname, "rb");
+  if (!f) {
+    char cwd[1024];
+    if (!getcwd(cwd, sizeof(cwd)))
+      cwd[0] = '\0';
+    return expr_fail(cg, e->tok,
+                     "failed to open file for embed: %s (cwd: %s)", fname,
+                     cwd);
+  }
+  fseek(f, 0, SEEK_END);
+  long size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  char *buf = malloc((size_t)size + 1);
+  if (!buf) {
+    fclose(f);
+    return expr_fail(cg, e->tok, "OOM reading file for embed");
+  }
+  if (fread(buf, 1, (size_t)size, f) != (size_t)size) {
+    free(buf);
+    fclose(f);
+    return expr_fail(cg, e->tok, "failed to read file for embed: %s", fname);
+  }
+  fclose(f);
+  LLVMValueRef g = const_string_ptr(cg, buf, (size_t)size);
+  free(buf);
+  return ny_load(cg, g, NY_LLVM_NAME(cg, "embed_ptr"));
+}
+
+static LLVMValueRef gen_expr_try_case(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+  LLVMValueRef res = gen_expr(cg, scopes, depth, e->as.unary.right);
+  LLVMValueRef f = ny_cur_fn(cg);
+  LLVMBasicBlockRef ok_bb = ny_bb_fn(f, "try_ok");
+  LLVMBasicBlockRef err_bb = ny_bb_fn(f, "try_err");
+
+  fun_sig *is_ok_sig = lookup_fun(cg, "__is_ok", 0);
+  if (!is_ok_sig) {
+    return expr_fail(cg, e->tok, "__is_ok not found for '?' operator");
+  }
+  LLVMValueRef is_ok = LLVMBuildCall2(cg->builder, is_ok_sig->type,
+                                      is_ok_sig->value, &res, 1, "");
+  ny_dbg_loc(cg, e->tok);
+  ny_cond_br(cg, to_bool(cg, is_ok), ok_bb, err_bb);
+
+  ny_pos(cg, err_bb);
+
+  if (cg->result_store_val) {
+    ny_store(cg, cg->result_store_val, res);
+  } else {
+    emit_defers(cg, scopes, depth, cg->func_root_idx);
+    ny_cg_emit_trace_return(cg, res, cg->current_fn_ret_type);
+    ny_cg_emit_trace_exit(cg);
+    LLVMBuildRet(cg->builder, res);
+  }
+
+  ny_pos(cg, ok_bb);
+
+  fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap", 0);
+  if (!unwrap_sig) {
+    return expr_fail(cg, e->tok, "__unwrap not found for '?' operator");
+  }
+  ny_dbg_loc(cg, e->tok);
+  return LLVMBuildCall2(cg->builder, unwrap_sig->type, unwrap_sig->value,
+                        &res, 1, "unwrapped");
+}
+
+static LLVMValueRef gen_expr_match_case(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+  LLVMValueRef old_store = cg->result_store_val;
+  LLVMValueRef slot = build_alloca(cg, "match_res", cg->type_i64);
+  ny_store(cg, slot, ny_c1(cg));
+  cg->result_store_val = slot;
+  stmt_t fake = {.kind = NY_S_MATCH, .as.match = e->as.match, .tok = e->tok};
+  size_t d = depth;
+  gen_stmt(cg, scopes, &d, &fake, cg->func_root_idx, true);
+  cg->result_store_val = old_store;
+  return ny_load(cg, slot, "");
+}
+
 static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
 
   if (cg->builder) {
@@ -1412,211 +1980,14 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
   case NY_E_COMPTIME:
     return gen_comptime_eval(cg, e->as.comptime_expr.body);
   case NY_E_LITERAL:
-    if (e->as.literal.kind == NY_LIT_INT) {
-      /* The `nil` literal is parsed as LIT_INT with value 0 but token kind
-         NY_T_NIL.  It must materialize as raw nil (0), NOT a tagged integer
-         (which would be (0<<1)|1 == 1) — otherwise is_nil() on a nil value
-         passed through an `any` parameter silently returns false because the
-         value arrives as tagged-int-0 instead of raw nil. */
-      if (e->tok.kind == NY_T_NIL)
-        return ny_c0(cg);
-      int64_t raw = e->as.literal.as.i;
-      if (ny_small_int_fits_i64(raw))
-        return LLVMConstInt(cg->type_i64, ((uint64_t)raw << 1) | 1, true);
-      char *dec = ny_int_literal_decimal_from_token(e->tok, raw);
-      const char *lit = dec ? dec : "0";
-      LLVMValueRef str_runtime_global = const_string_ptr(cg, lit, strlen(lit));
-      free(dec);
-      LLVMValueRef str_ptr = ny_load(cg, str_runtime_global, "big_lit_str");
-      fun_sig *big_from_str = lookup_fun(cg, "__bigint_from_str", 0);
-      if (!big_from_str)
-        return expr_fail(cg, e->tok, "builtin __bigint_from_str missing");
-      return LLVMBuildCall2(cg->builder, big_from_str->type,
-                            big_from_str->value, (LLVMValueRef[]){str_ptr}, 1,
-                            "big_lit");
-    }
-    if (e->as.literal.kind == NY_LIT_BOOL)
-      return e->as.literal.as.b ? ny_ctrue(cg) : ny_cfalse(cg);
-    if (e->as.literal.kind == NY_LIT_STR) {
-
-      LLVMValueRef str_runtime_global =
-          const_string_ptr(cg, e->as.literal.as.s.data, e->as.literal.as.s.len);
-
-      return ny_load(cg, str_runtime_global, "str_ptr");
-    }
-    if (e->as.literal.kind == NY_LIT_FLOAT) {
-      fun_sig *box_sig = ny_helper_flt_box(cg);
-      if (!box_sig) {
-        return expr_fail(cg, e->tok, "__flt_box_val not found");
-      }
-      double fval_d = e->as.literal.as.f;
-      if (e->as.literal.hint == NY_LIT_HINT_F32) {
-        float f32 = (float)fval_d;
-        fval_d = (double)f32;
-      }
-      LLVMValueRef fval =
-          LLVMConstReal(LLVMDoubleTypeInContext(cg->ctx), fval_d);
-      return LLVMBuildCall2(
-          cg->builder, box_sig->type, box_sig->value,
-          (LLVMValueRef[]){ny_bitcast(cg, fval, cg->type_i64, "")}, 1, "");
-    }
-    return ny_c0(cg);
-  case NY_E_IDENT: {
-    size_t name_len = (size_t)e->tok.len;
-    if (name_len == 0)
-      name_len = strlen(e->as.ident.name);
-    binding *b = expr_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len,
-                                     e->as.ident.hash);
-    if (b) {
-      if (cg->comptime && b->stmt_t && !ny_is_stdlib_tok(b->stmt_t->tok) &&
-          b->value && LLVMIsAGlobalVariable(b->value)) {
-        ny_ct_fast_val_t folded = ny_ct_fast_none();
-        if (ny_try_eval_binding_comptime_const(cg, b, e->as.ident.name,
-                                               &folded, 0)) {
-          LLVMValueRef v = ny_ct_fast_to_llvm_value(cg, &folded, e->tok);
-          ny_ct_fast_val_free(&folded);
-          if (v)
-            return v;
-        }
-        ny_ct_fast_val_free(&folded);
-        return expr_fail(cg, e->tok,
-                         "comptime cannot capture runtime global '%s'",
-                         e->as.ident.name);
-      }
-      return expr_value_from_binding(cg, b);
-    }
-
-    fun_sig *s = lookup_fun(cg, e->as.ident.name, e->as.ident.hash);
-    if (s) {
-      bool boxed_callable =
-          !s->is_extern && ny_named_callable_values_need_closure(cg);
-      LLVMValueRef sv =
-          (boxed_callable || ny_fun_sig_needs_tagged_callable_adapter(s))
-              ? ny_fun_sig_tagged_callable_adapter(cg, s, e->tok,
-                                                   boxed_callable, false)
-              : s->value;
-      if (boxed_callable) {
-        LLVMValueRef raw = ny_ptr2i64(cg, sv, "");
-        return ny_box_callable_closure(cg, raw, e->tok);
-      }
-
-      return ny_ptr2i64(cg, sv, "");
-    }
-
-    enum_member_def_t *emd = lookup_enum_member(cg, e->as.ident.name);
-    if (emd) {
-      return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1, true);
-    }
-
-    LLVMValueRef host_ident = ny_try_host_platform_ident(cg, e->as.ident.name);
-    if (host_ident)
-      return host_ident;
-
-    report_undef_symbol(cg, e->as.ident.name, e->tok);
-    return ny_c0(cg);
-  }
+    return gen_expr_literal_case(cg, scopes, depth, e);
+  case NY_E_IDENT:
+    return gen_expr_ident_case(cg, scopes, depth, e);
   case NY_E_UNARY: {
     return gen_expr_unary(cg, scopes, depth, e);
   }
-  case NY_E_BINARY: {
-    const char *op = e->as.binary.op;
-    expr_t *le = e->as.binary.left, *re = e->as.binary.right;
-
-    if (op && strcmp(op, "..") == 0)
-      return gen_range_expr(cg, scopes, depth, e);
-
-    bool is_user_eq = op && (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0);
-    bool in_std_module = cg->current_module_name &&
-                         (strncmp(cg->current_module_name, "std.", 4) == 0 ||
-                          strncmp(cg->current_module_name, "lib.", 4) == 0);
-    if (is_user_eq && !in_std_module) {
-      ny_ct_fast_val_t folded = {0};
-      if (ny_try_eval_comptime_expr_fast(cg, e, &folded, 0) && folded.kind == NY_CT_FAST_BOOL) {
-        bool folded_bool = folded.b;
-        ny_ct_fast_val_free(&folded);
-        return folded_bool ? ny_ctrue(cg) : ny_cfalse(cg);
-      }
-      ny_ct_fast_val_free(&folded);
-      if (lookup_fun(cg, "std.core.eq", 0)) {
-        expr_t callee = {0};
-        callee.kind = NY_E_IDENT;
-        callee.tok = e->tok;
-        callee.as.ident.name = "std.core.eq";
-        call_arg_t args[2] = {{.val = le}, {.val = re}};
-        expr_t call = {0};
-        call.kind = NY_E_CALL;
-        call.tok = e->tok;
-        call.as.call.callee = &callee;
-        call.as.call.args.data = args;
-        call.as.call.args.len = 2;
-        call.as.call.args.cap = 2;
-        LLVMValueRef eq_res = gen_call_expr(cg, scopes, depth, &call);
-        if (strcmp(op, "!=") == 0)
-          return ny_select(cg, to_bool(cg, eq_res), ny_cfalse(cg), ny_ctrue(cg),
-                           "ne.user");
-        if (LLVMTypeOf(eq_res) == ny_i1_ty(cg))
-          return ny_select(cg, eq_res, ny_ctrue(cg), ny_cfalse(cg),
-                           "eq.user.tagged");
-        return eq_res;
-      }
-    }
-
-    LLVMValueRef mono_raw_int = ny_try_emit_mono_raw_int_expr(cg, scopes, depth, e);
-    if (mono_raw_int)
-      return mono_raw_int;
-
-    bool is_arith = ny_is_f64_arith_op(op);
-    bool is_cmp = (strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
-                   strcmp(op, ">") == 0 || strcmp(op, ">=") == 0 ||
-                   strcmp(op, "==") == 0 || strcmp(op, "!=") == 0);
-
-    if (is_arith || is_cmp) {
-      if ((ny_is_f64_like(cg, scopes, depth, le) ||
-           ny_is_f64_like(cg, scopes, depth, re)) &&
-          ny_is_numeric_expr_like(cg, scopes, depth, le) &&
-          ny_is_numeric_expr_like(cg, scopes, depth, re)) {
-        ny_dbg_loc(cg, e->tok);
-        LLVMValueRef lf = gen_expr_as_f64(cg, scopes, depth, le);
-        LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, re);
-
-        if (is_arith) {
-          bool divisor_nonzero =
-              strcmp(op, "/") == 0 &&
-              ny_f64_expr_proven_nonzero(cg, scopes, depth, re);
-          LLVMValueRef res = ny_emit_f64_op(cg, op, lf, rf, divisor_nonzero);
-          fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
-          if (box_sig) {
-            return LLVMBuildCall2(
-                cg->builder, box_sig->type, box_sig->value,
-                (LLVMValueRef[]){ny_bitcast(cg, res, cg->type_i64, "")}, 1,
-                "box");
-          }
-        } else {
-          LLVMRealPredicate pred = LLVMRealOEQ;
-          if (strcmp(op, "<") == 0)
-            pred = LLVMRealOLT;
-          else if (strcmp(op, "<=") == 0)
-            pred = LLVMRealOLE;
-          else if (strcmp(op, ">") == 0)
-            pred = LLVMRealOGT;
-          else if (strcmp(op, ">=") == 0)
-            pred = LLVMRealOGE;
-          else if (strcmp(op, "==") == 0)
-            pred = LLVMRealOEQ;
-          else if (strcmp(op, "!=") == 0)
-            pred = LLVMRealUNE;
-
-          LLVMValueRef cmp = LLVMBuildFCmp(cg->builder, pred, lf, rf, "fcmp");
-          return ny_select(cg, cmp, ny_ctrue(cg), ny_cfalse(cg), "tag_bool");
-        }
-      }
-    }
-
-    LLVMValueRef l = gen_expr(cg, scopes, depth, le);
-    LLVMValueRef r = gen_expr(cg, scopes, depth, re);
-    ny_dbg_loc(cg, e->tok);
-    return gen_binary(cg, scopes, depth, op, l, r, le, re);
-  }
+  case NY_E_BINARY:
+    return gen_expr_binary_case(cg, scopes, depth, e);
   case NY_E_CALL:
     {
       LLVMValueRef adt = gen_adt_constructor_expr(cg, scopes, depth, e);
@@ -1683,204 +2054,19 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
                                              NY_LLVM_NAME(cg, "raw_ptr"));
     return ny_load(cg, raw_ptr, NY_LLVM_NAME(cg, "deref"));
   }
-  case NY_E_MEMBER: {
-
-    char *full_name = codegen_full_name(cg, e, cg->arena);
-    if (full_name) {
-      enum_member_def_t *emd = lookup_enum_member(cg, full_name);
-      if (emd) {
-        return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1,
-                            true);
-      }
-      if (!emd && cg->current_module_name && *cg->current_module_name) {
-        size_t cur_len = strlen(cg->current_module_name);
-        bool already_scoped =
-            strncmp(full_name, cg->current_module_name, cur_len) == 0 &&
-            full_name[cur_len] == '.';
-        if (already_scoped)
-          goto member_enum_scoped_done;
-        size_t scoped_len = strlen(cg->current_module_name) + 1 +
-                            strlen(full_name) + 1;
-        char *scoped_name = arena_alloc(cg->arena, scoped_len);
-        snprintf(scoped_name, scoped_len, "%s.%s", cg->current_module_name,
-                 full_name);
-        emd = lookup_enum_member(cg, scoped_name);
-        if (emd) {
-          return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1,
-                              true);
-        }
-      }
-    member_enum_scoped_done:;
-      binding *gb = expr_lookup_binding(cg, NULL, 0, full_name, strlen(full_name),
-                                        ny_hash64(full_name, strlen(full_name)));
-      if (gb)
-        return expr_value_from_binding(cg, gb);
-    }
-    char alias_full_name[512];
-    if (e->as.member.target && e->as.member.name) {
-      char module_path[1024];
-      char resolved_fun[1280];
-      if (ny_resolve_module_expr_path(cg, scopes, depth, e->as.member.target,
-                                      module_path, sizeof(module_path)) &&
-          ny_resolve_module_function_path(cg, module_path, e->as.member.name,
-                                          resolved_fun,
-                                          sizeof(resolved_fun))) {
-        fun_sig *fs = lookup_fun(cg, resolved_fun, 0);
-        if (fs)
-          return ny_ptr2i64(cg, fs->value, "");
-      }
-    }
-    binding *alias_gb = expr_member_module_alias_global(cg, scopes, depth, e, alias_full_name,
-                                                        sizeof(alias_full_name));
-    if (alias_gb) {
-      alias_gb->is_used = true;
-      return expr_value_from_binding(cg, alias_gb);
-    }
-    const char *alias_module = expr_member_module_alias_target(cg, scopes, depth, e);
-    if (alias_module) {
-      const char *alias_name = e->as.member.target->as.ident.name;
-      ny_diag_error(e->tok, "module '%s' has no exported member '%s'",
-                    alias_module, e->as.member.name);
-      ny_diag_hint("alias '%s' resolves to module '%s'", alias_name, alias_module);
-      ny_diag_fix("export '%s' from '%s' or import the module that defines it",
-                  e->as.member.name, alias_module);
-      cg->had_error = 1;
-      return ny_c0(cg);
-    }
-
-    LLVMValueRef typed_property = ny_try_member_property_expr(cg, scopes, depth, e);
-    if (typed_property)
-      return typed_property;
-
-    LLVMValueRef target = gen_expr(cg, scopes, depth, e->as.member.target);
-    LLVMValueRef key_str_global =
-        const_string_ptr(cg, e->as.member.name, strlen(e->as.member.name));
-    LLVMValueRef key_str = ny_load(cg, key_str_global, "");
-
-    fun_sig *get_sig = ny_helper_get(cg);
-    if (!get_sig) {
-      ny_diag_hint(
-          "the 'std.core' module provides the standard 'get' implementation");
-      ny_diag_fix("add 'use std.core' to your script");
-      return expr_fail(
-          cg, e->tok,
-          "Member access on a dynamic object requires the 'get' function.");
-    }
-
-    LLVMValueRef args[16];
-    args[0] = target;
-    args[1] = key_str;
-    unsigned arg_count = get_sig->arity;
-    if (arg_count < 2)
-      arg_count = 2;
-    if (arg_count > 16)
-      arg_count = 16;
-    for (unsigned i = 2; i < arg_count; i++) {
-      args[i] = ny_c1(cg);
-    }
-    ny_dbg_loc(cg, e->tok);
-    return LLVMBuildCall2(cg->builder, get_sig->type, get_sig->value, args,
-                          arg_count, "");
-  }
-  case NY_E_SIZEOF: {
-    const char *type_name = NULL;
-    if (e->as.szof.is_type)
-      type_name = e->as.szof.type_name;
-    if (!type_name && e->as.szof.target &&
-        e->as.szof.target->kind == NY_E_IDENT) {
-      type_name = e->as.szof.target->as.ident.name;
-    }
-    if (!type_name) {
-      ny_diag_error(e->tok, "sizeof expects a type name");
-      cg->had_error = 1;
-      return ny_c1(cg);
-    }
-    type_layout_t tl = resolve_raw_layout(cg, type_name, e->tok);
-    if (!tl.is_valid) {
-      cg->had_error = 1;
-      return ny_c1(cg);
-    }
-    uint64_t sz = (uint64_t)tl.size;
-    return LLVMConstInt(cg->type_i64, (sz << 1) | 1ULL, false);
-  }
+  case NY_E_MEMBER:
+    return gen_expr_member_case(cg, scopes, depth, e);
+  case NY_E_SIZEOF:
+    return gen_expr_sizeof_case(cg, scopes, depth, e);
   case NY_E_LOGICAL: {
     return gen_expr_logical(cg, scopes, depth, e);
   }
-  case NY_E_TERNARY: {
-    LLVMValueRef cond = expr_gen_cond_i1(cg, scopes, depth, e->as.ternary.cond);
-    LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
-    LLVMValueRef f = LLVMGetBasicBlockParent(cur_bb);
-    LLVMBasicBlockRef true_bb = ny_bb_fn(f, "tern_true");
-    LLVMBasicBlockRef false_bb = ny_bb_fn(f, "tern_false");
-    LLVMBasicBlockRef end_bb = ny_bb_fn(f, "tern_end");
-    ny_dbg_loc(cg, e->tok);
-    ny_cond_br(cg, cond, true_bb, false_bb);
-
-    ny_pos(cg, true_bb);
-
-    LLVMValueRef true_val =
-        gen_expr(cg, scopes, depth, e->as.ternary.true_expr);
-    ny_br(cg, end_bb);
-    LLVMBasicBlockRef true_end_bb = ny_cur_block(cg);
-
-    ny_pos(cg, false_bb);
-
-    LLVMValueRef false_val =
-        gen_expr(cg, scopes, depth, e->as.ternary.false_expr);
-    ny_br(cg, end_bb);
-    LLVMBasicBlockRef false_end_bb = ny_cur_block(cg);
-
-    ny_pos(cg, end_bb);
-
-    ny_dbg_loc(cg, e->tok);
-    LLVMValueRef phi = ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "tern"));
-    LLVMAddIncoming(phi, (LLVMValueRef[]){true_val, false_val},
-                    (LLVMBasicBlockRef[]){true_end_bb, false_end_bb}, 2);
-    return phi;
-  }
-  case NY_E_ASM: {
-    unsigned nargs = e->as.as_asm.args.len;
-    LLVMValueRef llvm_args[nargs > 0 ? nargs : 1];
-    LLVMTypeRef arg_types[nargs > 0 ? nargs : 1];
-    for (unsigned i = 0; i < nargs; ++i) {
-      llvm_args[i] = gen_expr(cg, scopes, depth, e->as.as_asm.args.data[i]);
-      arg_types[i] = cg->type_i64;
-    }
-    LLVMTypeRef func_type =
-        LLVMFunctionType(cg->type_i64, arg_types, nargs, false);
-    LLVMValueRef asm_val = LLVMConstInlineAsm(
-        func_type, e->as.as_asm.code, e->as.as_asm.constraints, true, false);
-    ny_dbg_loc(cg, e->tok);
-    return LLVMBuildCall2(cg->builder, func_type, asm_val, llvm_args, nargs,
-                          "");
-  }
-  case NY_E_FSTRING: {
-
-    LLVMValueRef empty_runtime_global = const_string_ptr(cg, "", 0);
-    LLVMValueRef res = ny_load(cg, empty_runtime_global, "");
-    fun_sig *cs = ny_helper_str_concat(cg), *ts = ny_helper_to_str(cg);
-    if (!cs || !cs->type || !cs->value)
-      return expr_fail(cg, e->tok, "__str_concat not found for f-string lowering");
-    for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
-      fstring_part_t p = e->as.fstring.parts.data[i];
-      LLVMValueRef pv;
-      if (p.kind == NY_FSP_STR) {
-        LLVMValueRef part_runtime_global =
-            const_string_ptr(cg, p.as.s.data, p.as.s.len);
-        pv = ny_load(cg, part_runtime_global, "");
-      } else {
-        if (!ts || !ts->type || !ts->value)
-          return expr_fail(cg, e->tok, "__to_str not found for f-string lowering");
-        pv = LLVMBuildCall2(
-            cg->builder, ts->type, ts->value,
-            (LLVMValueRef[]){gen_expr(cg, scopes, depth, p.as.e)}, 1, "");
-      }
-      ny_dbg_loc(cg, e->tok);
-      res = LLVMBuildCall2(cg->builder, cs->type, cs->value,
-                           (LLVMValueRef[]){res, pv}, 2, "");
-    }
-    return res;
-  }
+  case NY_E_TERNARY:
+    return gen_expr_ternary_case(cg, scopes, depth, e);
+  case NY_E_ASM:
+    return gen_expr_asm_case(cg, scopes, depth, e);
+  case NY_E_FSTRING:
+    return gen_expr_fstring_case(cg, scopes, depth, e);
   case NY_E_LAMBDA:
   case NY_E_FN: {
 
@@ -1888,82 +2074,12 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
                        e->as.lambda.body, e->as.lambda.is_variadic,
                        e->as.lambda.return_type, "__lambda");
   }
-  case NY_E_EMBED: {
-    const char *fname = e->as.embed.path;
-    FILE *f = fopen(fname, "rb");
-    if (!f) {
-      char cwd[1024];
-      if (!getcwd(cwd, sizeof(cwd)))
-        cwd[0] = '\0';
-      return expr_fail(cg, e->tok,
-                       "failed to open file for embed: %s (cwd: %s)", fname,
-                       cwd);
-    }
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *buf = malloc((size_t)size + 1);
-    if (!buf) {
-      fclose(f);
-      return expr_fail(cg, e->tok, "OOM reading file for embed");
-    }
-    if (fread(buf, 1, (size_t)size, f) != (size_t)size) {
-      free(buf);
-      fclose(f);
-      return expr_fail(cg, e->tok, "failed to read file for embed: %s", fname);
-    }
-    fclose(f);
-    LLVMValueRef g = const_string_ptr(cg, buf, (size_t)size);
-    free(buf);
-    return ny_load(cg, g, NY_LLVM_NAME(cg, "embed_ptr"));
-  }
-  case NY_E_TRY: {
-    LLVMValueRef res = gen_expr(cg, scopes, depth, e->as.unary.right);
-    LLVMValueRef f = ny_cur_fn(cg);
-    LLVMBasicBlockRef ok_bb = ny_bb_fn(f, "try_ok");
-    LLVMBasicBlockRef err_bb = ny_bb_fn(f, "try_err");
-
-    fun_sig *is_ok_sig = lookup_fun(cg, "__is_ok", 0);
-    if (!is_ok_sig) {
-      return expr_fail(cg, e->tok, "__is_ok not found for '?' operator");
-    }
-    LLVMValueRef is_ok = LLVMBuildCall2(cg->builder, is_ok_sig->type,
-                                        is_ok_sig->value, &res, 1, "");
-    ny_dbg_loc(cg, e->tok);
-    ny_cond_br(cg, to_bool(cg, is_ok), ok_bb, err_bb);
-
-    ny_pos(cg, err_bb);
-
-    if (cg->result_store_val) {
-      ny_store(cg, cg->result_store_val, res);
-    } else {
-      emit_defers(cg, scopes, depth, cg->func_root_idx);
-      ny_cg_emit_trace_return(cg, res, cg->current_fn_ret_type);
-      ny_cg_emit_trace_exit(cg);
-      LLVMBuildRet(cg->builder, res);
-    }
-
-    ny_pos(cg, ok_bb);
-
-    fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap", 0);
-    if (!unwrap_sig) {
-      return expr_fail(cg, e->tok, "__unwrap not found for '?' operator");
-    }
-    ny_dbg_loc(cg, e->tok);
-    return LLVMBuildCall2(cg->builder, unwrap_sig->type, unwrap_sig->value,
-                          &res, 1, "unwrapped");
-  }
-  case NY_E_MATCH: {
-    LLVMValueRef old_store = cg->result_store_val;
-    LLVMValueRef slot = build_alloca(cg, "match_res", cg->type_i64);
-    ny_store(cg, slot, ny_c1(cg));
-    cg->result_store_val = slot;
-    stmt_t fake = {.kind = NY_S_MATCH, .as.match = e->as.match, .tok = e->tok};
-    size_t d = depth;
-    gen_stmt(cg, scopes, &d, &fake, cg->func_root_idx, true);
-    cg->result_store_val = old_store;
-    return ny_load(cg, slot, "");
-  }
+  case NY_E_EMBED:
+    return gen_expr_embed_case(cg, scopes, depth, e);
+  case NY_E_TRY:
+    return gen_expr_try_case(cg, scopes, depth, e);
+  case NY_E_MATCH:
+    return gen_expr_match_case(cg, scopes, depth, e);
   default: {
     return expr_fail(cg, e->tok,
                      "unsupported expression kind %d (token kind %d)", e->kind,

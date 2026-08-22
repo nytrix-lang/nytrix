@@ -96,6 +96,6 @@ fn _thread_selftest_catches(fnptr thunk) bool {
    }
    assert(_thread_selftest_catches(fn() {
             thread_spawn_call(fn() { 0 }, too_many)
-   }), "thread_spawn_call diagnoses too many args")
+         }), "thread_spawn_call diagnoses too many args")
    print("✓ std.os.thread self-test passed")
 }

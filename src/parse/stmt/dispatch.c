@@ -1,8 +1,10 @@
-/* Parses a single 'def'/'mut' binding target (optional type + name) and
+/*
+ * Parses a single 'def'/'mut' binding target (optional type + name) and
  * pushes it onto s->as.var.names / s->as.var.types. Shared by the initial
  * binding-target list and by per-binding initializers like
  * 'def P1 = [0, 1], P2 = [1, 0]'. On failure, emits a parser error and
- * leaves cleanup (stmt_free_members) to the caller. */
+ * leaves cleanup (stmt_free_members) to the caller.
+ */
 static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
   const char *var_type = NULL;
   token_t ident = {0};
@@ -46,12 +48,25 @@ static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
   bool mangled = false;
   if (p->block_depth == 0 && p->current_module) {
     size_t mlen = strlen(p->current_module);
+    if (mlen > SIZE_MAX - nlen - 2) {
+      parser_error(p, ident, "qualified identifier is too long", NULL);
+      return false;
+    }
     size_t total = mlen + 1 + nlen + 1;
     char *prefixed = malloc(total);
-    snprintf(prefixed, total, "%s.%.*s", p->current_module, (int)nlen,
-             ident.lexeme);
+    if (!prefixed) {
+      parser_error(p, ident, "out of memory while qualifying identifier", NULL);
+      return false;
+    }
+    int written = snprintf(prefixed, total, "%s.%.*s", p->current_module,
+                           (int)nlen, ident.lexeme);
+    if (written < 0 || (size_t)written >= total) {
+      free(prefixed);
+      parser_error(p, ident, "qualified identifier is too long", NULL);
+      return false;
+    }
     final_name = prefixed;
-    nlen = strlen(prefixed);
+    nlen = (size_t)written;
     mangled = true;
   }
   const char *name_s = arena_strndup(p->arena, final_name, nlen);
@@ -61,7 +76,8 @@ static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
   return true;
 }
 
-/* Lookahead used inside a 'def'/'mut' initializer list: after consuming a
+/*
+ * Lookahead used inside a 'def'/'mut' initializer list: after consuming a
  * comma, decide whether what follows is another binding target owning its
  * own initializer ('P2 = ...') rather than just another expression in the
  * same initializer list ('def a, b = 1, 2'). Deliberately bounded to the
@@ -75,7 +91,8 @@ static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
  * statement looking for a token sequence that satisfies it, and can
  * misfire across that boundary (e.g. mistaking '0' followed by the next
  * statement's 'i = ...' for a fake 'Type name' binding). Keeping this
- * check to a fixed 2-token lookahead avoids that entirely. */
+ * check to a fixed 2-token lookahead avoids that entirely.
+ */
 static bool stmt_comma_starts_next_var_binding(parser_t *p) {
   return p->cur.kind == NY_T_IDENT && parser_peek(p).kind == NY_T_ASSIGN;
 }
@@ -262,11 +279,13 @@ stmt_t *p_parse_stmt(parser_t *p) {
         vec_push_arena(p->arena, &s->as.var.exprs, p_parse_expr(p, 0));
         if (!parser_match(p, NY_T_COMMA))
           break;
-        /* Support per-binding initializers: 'def P1 = [0,1], P2 = [1,0]'.
+        /*
+         * Support per-binding initializers: 'def P1 = [0,1], P2 = [1,0]'.
          * A comma inside the initializer list normally starts another
          * expression for the existing binding targets ('def a, b = 1, 2').
          * But if what follows is itself a fresh binding target owning its
-         * own '=', treat it as a new binding instead. */
+         * own '=', treat it as a new binding instead.
+         */
         if (!s->as.var.is_destructure &&
             s->as.var.names.len == s->as.var.exprs.len &&
             stmt_comma_starts_next_var_binding(p)) {

@@ -289,12 +289,11 @@ module CtGeneratedBackend generated from CtBackendSpec {
 assert(CtGeneratedBackend.gen_ctgen_backend_name() == "ctgen", "generated module string property")
 assert(CtGeneratedBackend.gen_ctgen_CtWindowContract_score() == 42, "generated module table properties")
 assert(CtGeneratedBackend.manual_backend_code() == 7, "generated module handwritten escape hatch")
-
-def comptime_dict = comptime {
+def comptime_dict = comptime{
    return {"ok":true, "nested":{"answer":42}}
 }
+
 assert(comptime_dict.get("ok"), "comptime dictionary boolean")
 assert(comptime_dict.get("nested").get("answer") == 42,
-       "comptime nested dictionary")
-
+   "comptime nested dictionary")
 print("✓ comptime ops tests passed")

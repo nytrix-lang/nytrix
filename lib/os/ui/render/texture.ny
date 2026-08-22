@@ -521,7 +521,7 @@ fn _importance_sample_ggx(any xi_x, any xi_y, any roughness, any N) list {
          tangent.get(0, 0.0) * H.get(0, 0.0) + bitangent.get(0, 0.0) * H.get(1, 0.0) + float(N.get(0, 0.0)) * H.get(2, 0.0),
          tangent.get(1, 0.0) * H.get(0, 0.0) + bitangent.get(1, 0.0) * H.get(1, 0.0) + float(N.get(1, 0.0)) * H.get(2, 0.0),
          tangent.get(2, 0.0) * H.get(0, 0.0) + bitangent.get(2, 0.0) * H.get(1, 0.0) + float(N.get(2, 0.0)) * H.get(2, 0.0)
-   ])
+      ])
 }
 
 fn generate_spec_env_slab(any im, int base_w=256) any {
@@ -585,7 +585,7 @@ fn generate_spec_env_slab(any im, int base_w=256) any {
                         2.0 * VoH * H.get(0, 0.0) - N.get(0, 0.0),
                         2.0 * VoH * H.get(1, 0.0) - N.get(1, 0.0),
                         2.0 * VoH * H.get(2, 0.0) - N.get(2, 0.0)
-                  ])
+                     ])
                   def NoL = max(_v3_dot(N, L), 0.0)
                   if NoL > 0.0 {
                      def uv = env_dir_to_uv(L)

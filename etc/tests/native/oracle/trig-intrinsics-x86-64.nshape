@@ -1,0 +1,15 @@
+shape oracle_trig_intrinsics_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle nyir sin cos f64]
+  template ny-test-case
+  flags_matrix "-O1 --native-result-oracle=0; -O2 --native-result-oracle=0; -O3 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+fn trig() i64 {
+  def x = __flt_sin(0.5) + __flt_cos(0.5)
+  int(x * 1000000.0)
+}
+if trig() == 1357008 { 0 } else { 1 }
+NY
+}

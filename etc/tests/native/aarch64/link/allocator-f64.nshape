@@ -1,0 +1,16 @@
+shape aarch64_elf64_internal_link_run_allocator_f64 {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 aarch64 internal-link qemu regalloc f64]
+  template ny-test-case
+  flags "--native-backend aarch64 -O3 -emit-only -o /tmp/nytrix-aarch64-link-allocator-f64.o"
+  expect object_link_run_f64_3.75
+  source ny <<'NY'
+fn combine(f64 a, f64 b) f64 {
+  def sum = a + b
+  sum
+}
+
+combine(1.5, 2.25)
+NY
+}

@@ -1,3 +1,7 @@
+/*
+ * Debug helpers: source-location lookup, line:col resolution, and
+ * debug-information utilities for diagnostics and LLVM DIBuilder.
+ */
 #include "base/common.h"
 #include "base/util.h"
 #include "code/priv.h"

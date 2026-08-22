@@ -618,7 +618,7 @@ fn get_monitor_physical_size(any monitor) list {
    def dpi = 96.0 * float(scale.get(0, 1.0))
    if dpi <= 0.0 { return [0, 0] }
    [int(float(mode.get("width", 0)) * 25.4 / dpi),
-   int(float(mode.get("height", 0)) * 25.4 / dpi)]
+      int(float(mode.get("height", 0)) * 25.4 / dpi)]
 }
 
 fn get_monitor_content_scale(any monitor) list {
@@ -981,7 +981,7 @@ fn next_event(any timeout=0) any {
    def date = (timeout > 0) ? objc_msgSend_ptr_f64(get_class("NSDate"), get_selector("dateWithTimeIntervalSinceNow:"), float(timeout)) :
    objc_msgSend(get_class("NSDate"), get_selector("distantPast"))
    def ev = objc_msgSend_ptr_u64_ptr_ptr_i64(app, get_selector("nextEventMatchingMask:untilDate:inMode:dequeue:"),
-   NSEventMaskAny, date, objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("kCFRunLoopDefaultMode")), 1)
+      NSEventMaskAny, date, objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("kCFRunLoopDefaultMode")), 1)
    if ev { return _translate_event(ev) }
    0
 }
@@ -1109,12 +1109,12 @@ fn _push_utf8_char_events(any win, any utf8, int mods=0) any {
          next = i + 2
       } elif band(b0, 0xf0) == 0xe0 && load8(utf8, i + 1) != 0 && load8(utf8, i + 2) != 0 {
          cp = bor(bshl(band(b0, 0x0f), 12),
-         bor(bshl(band(load8(utf8, i + 1), 0x3f), 6), band(load8(utf8, i + 2), 0x3f)))
+            bor(bshl(band(load8(utf8, i + 1), 0x3f), 6), band(load8(utf8, i + 2), 0x3f)))
          next = i + 3
       } elif band(b0, 0xf8) == 0xf0 && load8(utf8, i + 1) != 0 && load8(utf8, i + 2) != 0 && load8(utf8, i + 3) != 0 {
          cp = bor(bshl(band(b0, 0x07), 18),
             bor(bshl(band(load8(utf8, i + 1), 0x3f), 12),
-         bor(bshl(band(load8(utf8, i + 2), 0x3f), 6), band(load8(utf8, i + 3), 0x3f))))
+               bor(bshl(band(load8(utf8, i + 2), 0x3f), 6), band(load8(utf8, i + 3), 0x3f))))
          next = i + 4
       }
       if cp > 0 {
@@ -1415,7 +1415,7 @@ fn _cocoa_window_style(bool decorated, bool resizable, bool fullscreen=false, bo
    mut style = NSWindowStyleMaskBorderless
    if !fullscreen && decorated {
       style = bor(style, bor(NSWindowStyleMaskTitled,
-      bor(NSWindowStyleMaskClosable, NSWindowStyleMaskMiniaturizable)))
+            bor(NSWindowStyleMaskClosable, NSWindowStyleMaskMiniaturizable)))
    }
    if !fullscreen && resizable { style = bor(style, NSWindowStyleMaskResizable) }
    if transparent { style = bor(style, NSWindowStyleMaskFullSizeContentView) }
@@ -1426,13 +1426,13 @@ fn _cocoa_window_style_from_flags(int flags) int {
    _cocoa_window_style(!band(flags, WINDOW_NO_BORDER),
       !band(flags, WINDOW_NO_RESIZE),
       !!band(flags, WINDOW_FULLSCREEN),
-   !!band(flags, WINDOW_TRANSPARENT))
+      !!band(flags, WINDOW_TRANSPARENT))
 }
 
 fn _cocoa_set_frame(any hwnd, any x, any y, any w, any h) bool {
    if !available() || !hwnd { return false }
    objc_msgSend_rect_u64_i64_i8(hwnd, get_selector("setFrame:display:"),
-   float(x), float(y), float(w), float(h), 1, 1, 0)
+      float(x), float(y), float(w), float(h), 1, 1, 0)
    true
 }
 
@@ -1458,7 +1458,7 @@ fn _icon_image_pixels(any image) any {
    if !is_dict(image) { return 0 }
    image.get("pixels_ptr",
       image.get("pixels",
-   image.get("data", 0)))
+         image.get("data", 0)))
 }
 
 fn _icon_pixel_source_len(any pixels) int {
@@ -1525,11 +1525,11 @@ fn _cocoa_nsimage_from_rgba(any image) any {
    def img_cls = get_class("NSImage")
    if !rep_cls || !img_cls { return 0 }
    def color_space = objc_msgSend_ptr(get_class("NSString"),
-   get_selector("stringWithUTF8String:"), cstr("NSCalibratedRGBColorSpace"))
+      get_selector("stringWithUTF8String:"), cstr("NSCalibratedRGBColorSpace"))
    def rep = objc_msgSend_bitmap_init(objc_msgSend(rep_cls, get_selector("alloc")),
       get_selector("initWithBitmapDataPlanes:pixelsWide:pixelsHigh:bitsPerSample:samplesPerPixel:hasAlpha:isPlanar:colorSpaceName:bitmapFormat:bytesPerRow:bitsPerPixel:"),
       0, width, height, 8, 4, 1, 0, color_space,
-   NSBitmapFormatAlphaNonpremultiplied, width * 4, 32)
+      NSBitmapFormatAlphaNonpremultiplied, width * 4, 32)
    if !rep { return 0 }
    def data = objc_msgSend(rep, get_selector("bitmapData"))
    if !data || !_copy_rgba_pixels(data, pixels, bytes) {
@@ -1537,7 +1537,7 @@ fn _cocoa_nsimage_from_rgba(any image) any {
       return 0
    }
    def native = objc_msgSend_size(objc_msgSend(img_cls, get_selector("alloc")),
-   get_selector("initWithSize:"), width, height)
+      get_selector("initWithSize:"), width, height)
    if !native {
       objc_msgSend(rep, get_selector("release"))
       return 0
@@ -1702,7 +1702,7 @@ fn create_cursor(any image, int xhot=0, int yhot=0) any {
    mut handle = 0
    if cls {
       handle = objc_msgSend_ptr_point(objc_msgSend(cls, get_selector("alloc")),
-      get_selector("initWithImage:hotSpot:"), native, xhot, yhot)
+         get_selector("initWithImage:hotSpot:"), native, xhot, yhot)
    }
    objc_msgSend(native, get_selector("release"))
    drain_autorelease_pool(pool)
@@ -1847,7 +1847,7 @@ fn set_title(any win, str title) bool {
    if !hwnd { return false }
    def pool = create_autorelease_pool()
    objc_msgSend_ptr(hwnd, get_selector("setTitle:"),
-   objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(to_str(title))))
+      objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(to_str(title))))
    drain_autorelease_pool(pool)
    true
 }
@@ -2016,11 +2016,11 @@ fn create_basic_window(str title, int width, int height, int x=0, int y=0, int f
    }
    def style = _cocoa_window_style_from_flags(flags)
    def hwnd = objc_msgSend_rect_u64_i64_i8(win_obj, get_selector("initWithContentRect:styleMask:backing:defer:"),
-   float(x), float(y), float(width), float(height), style, 2, 0)
+      float(x), float(y), float(width), float(height), style, 2, 0)
    mut delegate = 0
    if hwnd {
       objc_msgSend_ptr(hwnd, get_selector("setTitle:"),
-      objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(to_str(title))))
+         objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(to_str(title))))
       def delegate_cls = create_window_delegate()
       delegate = objc_msgSend(objc_msgSend(delegate_cls, get_selector("alloc")), get_selector("init"))
       objc_msgSend_ptr(hwnd, get_selector("setDelegate:"), delegate)
@@ -2136,7 +2136,7 @@ fn poll_window_events(any win, int max_events=64) list {
    mut drained = 0
    while drained < max_events {
       def ev = objc_msgSend_ptr_u64_ptr_ptr_i64(app, get_selector("nextEventMatchingMask:untilDate:inMode:dequeue:"),
-      NSEventMaskAny, past_date, mode_str, 1)
+         NSEventMaskAny, past_date, mode_str, 1)
       if !ev { break }
       def translated = _translate_event(ev)
       if translated && is_list(translated) {

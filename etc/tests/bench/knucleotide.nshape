@@ -1,0 +1,72 @@
+shape knucleotide {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+use std.core.tbuf
+;; Knucleotide-style 2-mer histogram over a generated code stream.
+def N = 100000
+mut seed = 42
+def codes = u8buf_new(N)
+mut i = 0
+while i < N {
+   seed = (seed * 3877 + 29573) % 139968
+   u8buf_store(codes, i, seed % 4)
+   i += 1
+}
+def cnt = i64buf_new(16)
+def t0 = ticks()
+i = 0
+while i < N - 1 {
+   def idx = u8buf_load(codes, i) * 4 + u8buf_load(codes, i + 1)
+   i64buf_store(cnt, idx, i64buf_load(cnt, idx) + 1)
+   i += 1
+}
+mut ck = 0
+mut c = 0
+while c < 16 {
+   ck += i64buf_load(cnt, c) * (c + 1)
+   c += 1
+}
+def t1 = ticks()
+print("checksum=", ck)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int N = 100000;
+    unsigned char *codes = malloc((size_t)N);
+    int seed = 42;
+    for (int i = 0; i < N; i++) {
+        seed = (seed * 3877 + 29573) % 139968;
+        codes[i] = (unsigned char)(seed % 4);
+    }
+    int64_t cnt[16] = {0};
+    int64_t start = now_ns();
+    for (int i = 0; i < N - 1; i++) cnt[codes[i] * 4 + codes[i + 1]]++;
+    int64_t ck = 0;
+    for (int c = 0; c < 16; c++) ck += cnt[c] * (c + 1);
+    int64_t end = now_ns();
+    free(codes);
+    printf("checksum=%lld\n", (long long)ck);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

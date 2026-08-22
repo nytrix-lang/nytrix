@@ -1,0 +1,14 @@
+shape type_proof_range_division_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "range", "arithmetic", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "proof obligation failed"
+  source ny <<'NY'
+use std.core
+
+def int n = -12
+prove(n / 3 >= 0)
+NY
+}

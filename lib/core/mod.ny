@@ -1,7 +1,26 @@
 ;; Keywords: core runtime primitives containers list dict set tuple range string bytes result assert reflection queue channel memory
-;; Core runtime facade: primitives, containers, strings, assertions, Result values, queues, and channels.
+;; Foundational values, collections, text, iteration, explicit results, and memory primitives.
 ;; References:
 ;; - std
+;; Documentation:
+;; ## Scope
+;; `std.core` contains the process-independent part of the standard library:
+;; values, text, collections, iteration, errors, terminal output, and checks.
+;;
+;; ## Namespaces
+;; - **Text and conversion:** `std.core.str`
+;; - **Lists, dictionaries, sets, and tuples:** `std.core.collections`,
+;;   `std.core.dict`, `std.core.set`, and `std.core.tuple`
+;; - **Iteration and predicates:** `std.core.iter`
+;; - **Recoverable errors:** `std.core.error`
+;; - **Assertions and fixtures:** `std.core.test`
+;; - **Terminal output and formatting:** `std.core.term`
+;; - **Reflection and inspection:** `std.core.reflect` and `std.core.inspect`
+;;
+;; ## Notes
+;; Use aliases when a flat export surface would hide its owner, for example
+;; `use std.core.str as str`. Recoverable failures are explicit values;
+;; compiler diagnostics handle invalid Nytrix programs.
 module std.core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, free_raw, realloc, zalloc, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_nil, is_none, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_get, dict_set, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, print, eprint, chr, retain, rc_count, _pow2, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
 use std.core.primitives
 use std.core.reflect as core_ref

@@ -1,3 +1,7 @@
+/*
+ * OS runtime: filesystem I/O, process management, networking,
+ * time, threading, and platform-specific system-call wrappers.
+ */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -84,17 +88,10 @@ static char **ny_native_argv(intptr_t rargv, bool *needs_free) {
   return dst;
 }
 
-#ifndef _WIN32
-static char **ny_native_envp(intptr_t renvp, bool *needs_free) {
-  if (renvp == 0 || renvp == 1) {
-    if (needs_free)
-      *needs_free = false;
-    return NULL;
-  }
-  return ny_native_argv(renvp, needs_free);
-}
-#endif
 
+/*
+ * platform syscall boundary
+ */
 #if defined(__linux__) && (defined(__x86_64__) || defined(rt_x86_64__))
 int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_t e, int64_t f) {
   long rn = (n & 1) ? (n >> 1) : n;
@@ -152,6 +149,9 @@ int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_
 }
 #endif
 
+/*
+ * console and descriptor I/O
+ */
 #ifdef _WIN32
 static int64_t rt_write_console_utf8_fd(int fd, const char *ptr, size_t len) {
   if (!ptr)
@@ -493,6 +493,9 @@ int64_t rt_nanosleep(int64_t ts_ptr) {
 #endif
 }
 
+/*
+ * time and scheduler
+ */
 int64_t rt_time_seconds(void) {
 #ifdef _WIN32
   FILETIME ft;
@@ -572,6 +575,228 @@ int64_t rt_msleep_ms(int64_t ms) {
   return rt_tag_v(0);
 }
 
+int64_t rt_web_fetch(int64_t url) {
+  (void)url;
+  return rt_tag_v(0);
+}
+
+int64_t rt_web_clipboard_write(int64_t text) {
+  (void)text;
+  return rt_tag_v(0);
+}
+
+int64_t rt_web_clipboard_read(void) {
+  return rt_tag_v(0);
+}
+
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
+typedef struct nyWsSocket_t {
+  int fd;
+  bool open;
+} nyWsSocket_t;
+
+#define NY_MAX_WS_SOCKETS 64
+static nyWsSocket_t g_ws_sockets[NY_MAX_WS_SOCKETS] = {0};
+static atomic_flag g_ws_lock = ATOMIC_FLAG_INIT;
+
+static void ny_ws_lock(void) {
+  while (atomic_flag_test_and_set_explicit(&g_ws_lock, memory_order_acquire)) {
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__)
+    __asm__ __volatile__("yield");
+#endif
+  }
+}
+
+static void ny_ws_unlock(void) {
+  atomic_flag_clear_explicit(&g_ws_lock, memory_order_release);
+}
+
+static int ny_ws_alloc_handle(int fd) {
+  ny_ws_lock();
+  int res = -1;
+  for (int i = 1; i < NY_MAX_WS_SOCKETS; i++) {
+    if (!g_ws_sockets[i].open) {
+      g_ws_sockets[i].fd = fd;
+      g_ws_sockets[i].open = true;
+      res = i;
+      break;
+    }
+  }
+  ny_ws_unlock();
+  return res;
+}
+
+int64_t rt_websocket_open(int64_t rurl) {
+  const char *url = (const char *)(uintptr_t)rt_untag_v(rurl);
+  if (!url || !*url)
+    return rt_tag_v(-1);
+  const char *p = url;
+  if (strncmp(p, "ws://", 5) == 0)
+    p += 5;
+  else if (strncmp(p, "wss://", 6) == 0)
+    p += 6;
+  char host[256] = {0};
+  int port = 80;
+  const char *slash = strchr(p, '/');
+  const char *colon = strchr(p, ':');
+  size_t host_len = slash ? (size_t)(slash - p) : strlen(p);
+  if (colon && colon < (slash ? slash : p + host_len)) {
+    host_len = (size_t)(colon - p);
+    port = atoi(colon + 1);
+  }
+  if (host_len >= sizeof(host))
+    return rt_tag_v(-1);
+  memcpy(host, p, host_len);
+  host[host_len] = '\0';
+
+#ifdef _WIN32
+  return rt_tag_v(-1);
+#else
+  struct hostent *he = gethostbyname(host);
+  if (!he)
+    return rt_tag_v(-1);
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return rt_tag_v(-1);
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  memcpy(&addr.sin_addr, he->h_addr_list[0], (size_t)he->h_length);
+  if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    close(fd);
+    return rt_tag_v(-1);
+  }
+  char req[512];
+  snprintf(req, sizeof(req),
+           "GET / HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: "
+           "Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+           host);
+  if (send(fd, req, strlen(req), 0) < 0) {
+    close(fd);
+    return rt_tag_v(-1);
+  }
+  int h = ny_ws_alloc_handle(fd);
+  return rt_tag_v(h > 0 ? h : -1);
+#endif
+}
+
+int64_t rt_websocket_state(int64_t rhandle) {
+  int h = (int)(is_int(rhandle) ? (rhandle >> 1) : rhandle);
+  ny_ws_lock();
+  bool open = (h > 0 && h < NY_MAX_WS_SOCKETS) ? g_ws_sockets[h].open : false;
+  ny_ws_unlock();
+  return rt_tag_v(open ? 1 : 3);
+}
+
+int64_t rt_websocket_send(int64_t rhandle, int64_t rtext) {
+  int h = (int)(is_int(rhandle) ? (rhandle >> 1) : rhandle);
+  ny_ws_lock();
+  bool open = (h > 0 && h < NY_MAX_WS_SOCKETS) ? g_ws_sockets[h].open : false;
+  int fd = open ? g_ws_sockets[h].fd : -1;
+  ny_ws_unlock();
+  if (!open || fd < 0)
+    return rt_tag_v(-1);
+  const char *text = (const char *)(uintptr_t)rt_untag_v(rtext);
+  if (!text)
+    return rt_tag_v(-1);
+  size_t len = strlen(text);
+#ifdef _WIN32
+  return rt_tag_v(-1);
+#else
+  uint8_t header[10];
+  size_t hlen = 0;
+  header[0] = 0x81; /* Final text frame */
+  if (len <= 125) {
+    header[1] = 0x80 | (uint8_t)len; /* Masked bit set */
+    hlen = 2;
+  } else if (len <= 65535) {
+    header[1] = 0x80 | 126;
+    header[2] = (uint8_t)(len >> 8);
+    header[3] = (uint8_t)(len & 0xFF);
+    hlen = 4;
+  } else {
+    return rt_tag_v(-1);
+  }
+  uint8_t mask[4] = {0x12, 0x34, 0x56, 0x78};
+  memcpy(header + hlen, mask, 4);
+  hlen += 4;
+  if (send(fd, header, hlen, 0) < 0)
+    return rt_tag_v(-1);
+  uint8_t *masked_payload = malloc(len);
+  if (!masked_payload)
+    return rt_tag_v(-1);
+  for (size_t i = 0; i < len; i++)
+    masked_payload[i] = (uint8_t)text[i] ^ mask[i % 4];
+  ssize_t sent = send(fd, masked_payload, len, 0);
+  free(masked_payload);
+  return rt_tag_v(sent == (ssize_t)len ? 0 : -1);
+#endif
+}
+
+int64_t rt_websocket_receive(int64_t rhandle) {
+  int h = (int)(is_int(rhandle) ? (rhandle >> 1) : rhandle);
+  ny_ws_lock();
+  bool open = (h > 0 && h < NY_MAX_WS_SOCKETS) ? g_ws_sockets[h].open : false;
+  int fd = open ? g_ws_sockets[h].fd : -1;
+  ny_ws_unlock();
+  if (!open || fd < 0)
+    return rt_tag_v(0);
+#ifdef _WIN32
+  return rt_tag_v(0);
+#else
+  uint8_t hdr[2];
+  if (recv(fd, hdr, 2, 0) < 2)
+    return rt_tag_v(0);
+  size_t len = hdr[1] & 0x7F;
+  if (len == 126) {
+    uint8_t ext[2];
+    if (recv(fd, ext, 2, 0) < 2)
+      return rt_tag_v(0);
+    len = ((size_t)ext[0] << 8) | ext[1];
+  }
+  char *buf = malloc(len + 1);
+  if (!buf)
+    return rt_tag_v(0);
+  ssize_t read_bytes = recv(fd, buf, len, 0);
+  if (read_bytes < (ssize_t)len) {
+    free(buf);
+    return rt_tag_v(0);
+  }
+  buf[len] = '\0';
+  int64_t res = (int64_t)(uintptr_t)buf;
+  return rt_tag_v(res);
+#endif
+}
+
+int64_t rt_websocket_close(int64_t rhandle) {
+  int h = (int)(is_int(rhandle) ? (rhandle >> 1) : rhandle);
+  ny_ws_lock();
+  if (h <= 0 || h >= NY_MAX_WS_SOCKETS || !g_ws_sockets[h].open) {
+    ny_ws_unlock();
+    return rt_tag_v(0);
+  }
+  int fd = g_ws_sockets[h].fd;
+  g_ws_sockets[h].open = false;
+  g_ws_sockets[h].fd = 0;
+  ny_ws_unlock();
+#ifndef _WIN32
+  uint8_t close_frame[6] = {0x88, 0x80, 0x12, 0x34, 0x56, 0x78};
+  send(fd, close_frame, sizeof(close_frame), 0);
+  close(fd);
+#endif
+  return rt_tag_v(0);
+}
+
 int64_t rt_getpid(void) {
 #ifdef _WIN32
   int pid = _getpid();
@@ -639,6 +864,34 @@ int64_t rt_unlink(int64_t path) {
     r = -errno;
 #else
   int r = unlink((const char *)rpath);
+#endif
+  return rt_tag_v((int64_t)r);
+}
+
+int64_t rt_mkdir(int64_t path) {
+  intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
+#ifdef _WIN32
+  int r = _mkdir((const char *)rpath);
+  if (r < 0)
+    r = -errno;
+#else
+  int r = mkdir((const char *)rpath, 0755);
+  if (r < 0)
+    r = -errno;
+#endif
+  return rt_tag_v((int64_t)r);
+}
+
+int64_t rt_rmdir(int64_t path) {
+  intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
+#ifdef _WIN32
+  int r = _rmdir((const char *)rpath);
+  if (r < 0)
+    r = -errno;
+#else
+  int r = rmdir((const char *)rpath);
+  if (r < 0)
+    r = -errno;
 #endif
   return rt_tag_v((int64_t)r);
 }
@@ -755,6 +1008,9 @@ int64_t rt_enable_vt(void) {
 #endif
 }
 
+/*
+ * terminal state and signal cleanup
+ */
 #ifdef _WIN32
 static int rt_tty_mode_saved = 0;
 static DWORD rt_tty_mode_prev = 0;
@@ -1060,6 +1316,9 @@ int64_t rt_tty_size(int64_t out_ptr) {
 #endif
 }
 
+/*
+ * filesystem and directory operations
+ */
 int64_t rt_is_dir(int64_t path) {
   intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
 #ifdef _WIN32
@@ -1283,6 +1542,9 @@ static HANDLE rt_proc_handle_take(DWORD pid) {
 }
 #endif
 
+/*
+ * sockets and process launch
+ */
 int64_t rt_socket(int64_t domain, int64_t type, int64_t protocol) {
   if (is_int(domain))
     domain >>= 1;
@@ -1790,29 +2052,36 @@ int64_t rt_wait_process(int64_t pid) {
 }
 
 int64_t rt_execve(int64_t path, int64_t argv, int64_t envp) {
-  intptr_t rpath = (intptr_t)rt_untag_v(path);
-  intptr_t rargv = (intptr_t)rt_untag_v(argv);
-  intptr_t renvp = (intptr_t)rt_untag_v(envp);
+  intptr_t rpath = (intptr_t)(is_int(path) ? rt_untag_v(path) : path);
+  intptr_t rargv = (intptr_t)(is_int(argv) ? rt_untag_v(argv) : argv);
+  intptr_t renvp = (intptr_t)(is_int(envp) ? rt_untag_v(envp) : envp);
 #ifdef _WIN32
-  (void)rpath;
-  (void)rargv;
-  (void)renvp;
-  int64_t res = -1;
+  bool av_free = false;
+  bool env_free = false;
+  char **av = ny_native_argv(rargv, &av_free);
+  char **ev = renvp ? ny_native_argv(renvp, &env_free) : _environ;
+  int64_t res = _execvpe((const char *)rpath, (const char *const *)av,
+                         (const char *const *)ev);
+  if (res < 0)
+    res = (int64_t)-errno;
+  if (av_free)
+    free(av);
+  if (env_free && ev != _environ)
+    free(ev);
 #else
   bool av_free = false;
   bool env_free = false;
   char **av = ny_native_argv(rargv, &av_free);
-  char **ev = renvp ? ny_native_envp(renvp, &env_free) : environ;
+  char **ev = renvp ? ny_native_argv(renvp, &env_free) : environ;
   int64_t res = execve((const char *)rpath, (char *const *)av, (char *const *)ev);
-  if (res < 0) {
+  if (res < 0)
     perror("execve");
-  }
   if (av_free)
     free(av);
   if (env_free)
     free(ev);
 #endif
-  return (int64_t)(((uint64_t)res << 1) | 1);
+  return rt_tag_v(res);
 }
 
 static int64_t rt_thread_call_dispatch(int64_t fn, int64_t argc, const int64_t *argv) {
@@ -2104,9 +2373,11 @@ static void rt_async_complete(rt_async_task *t, int64_t result) {
   t->state = RT_ASYNC_DONE;
 }
 
-/* A pending send must not retain a caller-owned pointer across scheduler turns.
+/*
+ * A pending send must not retain a caller-owned pointer across scheduler turns.
  * Copying establishes an operation-local snapshot before any callback, close,
- * or allocation can invalidate/reuse the source storage. */
+ * or allocation can invalidate/reuse the source storage.
+ */
 static bool rt_async_snapshot_send(rt_async_task *t, const void *src,
                                    int64_t len) {
   if (!t || len < 0 || len > 64 * 1024 * 1024)
@@ -2761,6 +3032,7 @@ int64_t rt_async_state_of(int64_t handle) {
   return rt_tag_v((int64_t)t->state);
 }
 
+
 #ifdef _WIN32
 typedef struct rt_thread_state {
   HANDLE h;
@@ -2783,10 +3055,14 @@ static DWORD WINAPI rt_thread_trampoline(LPVOID p) {
   int64_t ret = 0;
   if (ta->argc >= 0) {
     ret = rt_thread_call_dispatch(fn, ta->argc, ta->argv);
+  } else if (ta->argc == -2) {
+    ret = ((int64_t (*)(int64_t))fn)(arg);
   } else {
     if (NY_NATIVE_IS(fn)) {
       int64_t (*f)(int64_t) = (int64_t (*)(int64_t))NY_NATIVE_DECODE(fn);
       ret = rt_tag_v(f(rt_untag_v(arg)));
+    } else if ((fn & 1) == 0) {
+      ret = ((int64_t (*)(int64_t))fn)(arg);
     } else if (is_heap_ptr(fn) && *(int64_t *)(rt_untag_v(fn) - 8) == TAG_CLOSURE) {
       int64_t base = rt_untag_v(fn);
       int64_t code = *(int64_t *)base;
@@ -2828,6 +3104,33 @@ int64_t rt_thread_spawn(int64_t fn, int64_t arg) {
   st->h = h;
   return (int64_t)(uintptr_t)st;
 }
+int64_t rt_native_thread_spawn_raw(int64_t fn, int64_t arg) {
+  if (!fn)
+    return -1;
+  rt_thread_state *st = (rt_thread_state *)malloc(sizeof(rt_thread_state));
+  if (!st)
+    return -1;
+  st->ret = 0;
+  rt_thread_arg *ta = (rt_thread_arg *)malloc(sizeof(rt_thread_arg));
+  if (!ta) {
+    free(st);
+    return -1;
+  }
+  ta->fn = fn;
+  ta->arg = arg;
+  ta->argc = -2;
+  ta->argv = NULL;
+  ta->st = st;
+  HANDLE h = CreateThread(NULL, 0, rt_thread_trampoline, ta, 0, NULL);
+  if (!h) {
+    free(ta);
+    free(st);
+    return -1;
+  }
+  st->h = h;
+  return (int64_t)(uintptr_t)st;
+}
+
 
 int64_t rt_thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   int64_t argc_raw = 0;
@@ -2942,10 +3245,14 @@ static void *rt_thread_trampoline(void *p) {
   int64_t res = 0;
   if (ta->argc >= 0) {
     res = rt_thread_call_dispatch(fn, ta->argc, ta->argv);
+  } else if (ta->argc == -2) {
+    res = ((int64_t (*)(int64_t))fn)(arg);
   } else {
     if (NY_NATIVE_IS(fn)) {
       int64_t (*f)(int64_t) = (int64_t (*)(int64_t))NY_NATIVE_DECODE(fn);
       res = rt_tag_v(f(rt_untag_v(arg)));
+    } else if ((fn & 1) == 0) {
+      res = ((int64_t (*)(int64_t))fn)(arg);
     } else if (is_heap_ptr(fn) && *(int64_t *)(rt_untag_v(fn) - 8) == TAG_CLOSURE) {
       int64_t base = rt_untag_v(fn);
       int64_t code = *(int64_t *)base;
@@ -2977,6 +3284,25 @@ int64_t rt_thread_spawn(int64_t fn, int64_t arg) {
   }
   return (int64_t)tid;
 }
+int64_t rt_native_thread_spawn_raw(int64_t fn, int64_t arg) {
+  if (!fn)
+    return -1;
+  pthread_t tid;
+  rt_thread_arg *ta = malloc(sizeof(rt_thread_arg));
+  if (!ta)
+    return -1;
+  ta->fn = fn;
+  ta->arg = arg;
+  ta->argc = -2;
+  ta->argv = NULL;
+  int r = pthread_create(&tid, NULL, rt_thread_trampoline, ta);
+  if (r != 0) {
+    free(ta);
+    return -r;
+  }
+  return (int64_t)tid;
+}
+
 
 int64_t rt_thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   int64_t argc_raw = 0;
@@ -3155,7 +3481,9 @@ int64_t rt_inotify_add_watch(int64_t fd, int64_t path, int64_t mask) { (void)fd;
 int64_t rt_inotify_rm_watch(int64_t fd, int64_t wd) { (void)fd; (void)wd; return rt_tag_v(-1); }
 #endif
 
-/* macOS / BSD kqueue for file/directory watching (EVFILT_VNODE) */
+/*
+ * macOS / BSD kqueue for file/directory watching (EVFILT_VNODE)
+ */
 #ifdef __APPLE__
 int64_t rt_kqueue(void) {
   int kq = kqueue();
@@ -3169,7 +3497,9 @@ int64_t rt_kevent(int64_t kq, int64_t ident, int64_t filter, int64_t flags, int6
   struct kevent *ch = NULL;
   int nch = 0;
   int do_wait = 1;
-  /* If ident or flags indicate register, setup changelist and do not wait for events. */
+  /*
+   * If ident or flags indicate register, setup changelist and do not wait for events.
+   */
   if (ident != 0 || flags != 0) {
     int16_t f = (int16_t)(filter ? (filter >> 1) : EVFILT_VNODE);
     uint16_t fl = (uint16_t)(flags ? (flags >> 1) : (EV_ADD | EV_CLEAR));
@@ -3198,7 +3528,9 @@ int64_t rt_kqueue_close(int64_t kq) {
   return 0;
 }
 
-/* helper to open a path for vnode watching (returns fd or 0) */
+/*
+ * helper to open a path for vnode watching (returns fd or 0)
+ */
 int64_t rt_watch_open_vnode(int64_t path) {
   const char *p = NULL;
   if (path && !is_int(path)) p = (const char*)path;
@@ -3215,7 +3547,9 @@ int64_t rt_kqueue_close(int64_t kq) { (void)kq; return 0; }
 int64_t rt_watch_open_vnode(int64_t path) { (void)path; return 0; }
 #endif
 
-/* Windows directory change notifications (basic support) */
+/*
+ * Windows directory change notifications (basic support)
+ */
 #ifdef _WIN32
 int64_t rt_win32_find_first_change(int64_t path, int64_t watch_subtree, int64_t filter) {
   const char *p = NULL;

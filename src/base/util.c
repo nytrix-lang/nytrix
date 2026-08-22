@@ -1,3 +1,7 @@
+/*
+ * General utility belt: path manipulation, temp files, base64, hex dump,
+ * env parsing, process identity, and small-string operations used everywhere.
+ */
 #ifndef _DARWIN_C_SOURCE
 #define _DARWIN_C_SOURCE 1
 #endif
@@ -170,12 +174,21 @@ typedef struct {
 } ny_curl_buf_t;
 
 static size_t ny_curl_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
-  size_t total = size * nmemb;
+  size_t total = 0;
+  if (!ny_size_mul_ok(size, nmemb, &total))
+    return 0;
   ny_curl_buf_t *buf = (ny_curl_buf_t *)userdata;
-  if (buf->len + total + 1 > buf->cap) {
-    size_t new_cap = buf->cap ? buf->cap * 2 : 8192;
-    while (buf->len + total + 1 > new_cap)
+  size_t required = 0;
+  if (!ny_size_add_ok(total, 1, &required) ||
+      !ny_size_add_ok(buf->len, required, &required))
+    return 0;
+  if (required > buf->cap) {
+    size_t new_cap = buf->cap ? buf->cap : 8192;
+    while (new_cap < required) {
+      if (new_cap > SIZE_MAX / 2)
+        return 0;
       new_cap *= 2;
+    }
     char *new_data = realloc(buf->data, new_cap);
     if (!new_data)
       return 0;
@@ -452,10 +465,13 @@ char *ny_strdup(const char *s) {
   if (!s)
     return NULL;
   size_t len = strlen(s);
-  char *copy = malloc(len + 1);
+  size_t bytes = 0;
+  if (!ny_size_add_ok(len, 1, &bytes))
+    return NULL;
+  char *copy = malloc(bytes);
   if (!copy)
     return NULL;
-  memcpy(copy, s, len + 1);
+  memcpy(copy, s, bytes);
   return copy;
 }
 
@@ -494,8 +510,10 @@ char *ny_ensure_shared_lib(const char *path) {
   if (!path || !*path)
     return NULL;
 
-  /* Only rewrite path-like shared objects that have a sibling .c. Bare names
-   * (curl, libz.so) and system libs stay as requested. */
+  /*
+   * Only rewrite path-like shared objects that have a sibling .c. Bare names
+   * (curl, libz.so) and system libs stay as requested.
+   */
   int is_shlib = ny_path_ends_with(path, ".so") ||
                  ny_path_ends_with(path, ".dll") ||
                  ny_path_ends_with(path, ".dylib");
@@ -561,7 +579,9 @@ char *ny_ensure_shared_lib(const char *path) {
         NULL,
     };
     if (ny_shlib_spawn(argv) != 0 || ny_access(out, R_OK) != 0) {
-      /* Fall back to the requested path if build failed (may still exist). */
+      /*
+       * Fall back to the requested path if build failed (may still exist).
+       */
       return ny_strdup(path);
     }
   }
@@ -617,9 +637,20 @@ int ny_env_int_range(const char *name, int fallback, int minv, int maxv) {
 }
 
 void ny_str_list_append(char ***list, size_t *len, size_t *cap, const char *str) {
+  if (!list || !len || !cap)
+    return;
   if (*len == *cap) {
+    if (*cap > SIZE_MAX / 2) {
+      fprintf(stderr, "OOM in str_list_append\n");
+      exit(1);
+    }
     size_t new_cap = *cap ? (*cap * 2) : 8;
-    char **tmp = realloc(*list, new_cap * sizeof(char *));
+    size_t bytes = 0;
+    if (!ny_size_mul_ok(new_cap, sizeof(char *), &bytes)) {
+      fprintf(stderr, "OOM in str_list_append\n");
+      exit(1);
+    }
+    char **tmp = realloc(*list, bytes);
     if (!tmp) {
       fprintf(stderr, "OOM in str_list_append\n");
       exit(1);
@@ -753,32 +784,37 @@ uint64_t ny_hash64_fast_cstr(const char *s) {
 }
 
 int ny_levenshtein(const char *s1, const char *s2) {
+  if (!s1 || !s2)
+    return -1;
   size_t l1 = strlen(s1);
   size_t l2 = strlen(s2);
-
-  if (l1 < l2) {
+  if (l1 < l2)
     return ny_levenshtein(s2, s1);
-  }
-
+  if (l1 > (size_t)INT_MAX || l2 > (size_t)INT_MAX)
+    return -1;
   if (l2 == 0)
-    return l1;
+    return (int)l1;
 
   int stack_v[2048];
   int *v = stack_v;
   bool v_heap = false;
-
-  if (l2 + 1 > 2048) {
-    v = malloc((l2 + 1) * sizeof(int));
+  size_t v_count = 0;
+  size_t v_bytes = 0;
+  if (!ny_size_add_ok(l2, 1, &v_count) ||
+      !ny_size_mul_ok(v_count, sizeof(int), &v_bytes))
+    return -1;
+  if (v_count > 2048) {
+    v = malloc(v_bytes);
     if (!v)
       exit(1);
     v_heap = true;
   }
 
   for (size_t i = 0; i <= l2; i++)
-    v[i] = i;
+    v[i] = (int)i;
 
   for (size_t i = 0; i < l1; i++) {
-    int current_left = i + 1;
+    int current_left = (int)i + 1;
     int prev_diag = v[0];
     v[0] = current_left;
 
@@ -822,6 +858,10 @@ bool ny_log_should_emit(const char *fmt) {
   if (g_log_seen_cap == 0) {
     g_log_seen_cap = 1024;
     g_log_seen = calloc(g_log_seen_cap, sizeof(log_entry_t));
+    if (!g_log_seen) {
+      g_log_seen_cap = 0;
+      return false;
+    }
   }
   uint64_t h = ny_hash64_cstr(fmt);
   size_t mask = g_log_seen_cap - 1;
@@ -833,12 +873,18 @@ bool ny_log_should_emit(const char *fmt) {
     }
     idx = (idx + 1) & mask;
   }
-  if (g_log_seen_len * 2 >= g_log_seen_cap) {
+  if (g_log_seen_len >= g_log_seen_cap / 2) {
+    if (g_log_seen_cap > SIZE_MAX / 2)
+      return false;
     size_t old_cap = g_log_seen_cap;
     log_entry_t *old_tbl = g_log_seen;
-    g_log_seen_cap *= 2;
-    g_log_seen = calloc(g_log_seen_cap, sizeof(log_entry_t));
-    mask = g_log_seen_cap - 1;
+    size_t new_cap = g_log_seen_cap * 2;
+    log_entry_t *new_tbl = calloc(new_cap, sizeof(log_entry_t));
+    if (!new_tbl)
+      return false;
+    g_log_seen = new_tbl;
+    g_log_seen_cap = new_cap;
+    mask = new_cap - 1;
     for (size_t i = 0; i < old_cap; i++) {
       if (old_tbl[i].hash == 0)
         continue;

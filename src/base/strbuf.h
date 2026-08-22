@@ -35,14 +35,19 @@ static inline void ny_strbuf_free(ny_strbuf_t *b) {
 static inline bool ny_strbuf_reserve(ny_strbuf_t *b, size_t need) {
   if (!b)
     return false;
-  if (b->len + need <= b->cap)
+  if (need > SIZE_MAX - b->len)
+    return false;
+  size_t required = b->len + need;
+  if (required <= b->cap)
     return true;
   size_t new_cap = b->cap ? b->cap : 256;
-  while (new_cap < b->len + need) {
-    if (new_cap > (SIZE_MAX / 2))
+  while (new_cap < required) {
+    if (new_cap > SIZE_MAX / 2)
       return false;
     new_cap *= 2;
   }
+  if (new_cap == SIZE_MAX)
+    return false;
   char *p = realloc(b->data, new_cap + 1);
   if (!p)
     return false;
@@ -56,7 +61,7 @@ static inline bool ny_strbuf_append_n(ny_strbuf_t *b, const char *s, size_t n) {
     return false;
   if (n == 0)
     return true;
-  if (!ny_strbuf_reserve(b, n + 1))
+  if (n == SIZE_MAX || !ny_strbuf_reserve(b, n + 1))
     return false;
   memcpy(b->data + b->len, s, n);
   b->len += n;
@@ -87,9 +92,8 @@ static inline bool ny_strbuf_appendf(ny_strbuf_t *b, const char *fmt, ...) {
   va_start(ap, fmt);
   int n = vsnprintf(NULL, 0, fmt, ap);
   va_end(ap);
-  if (n < 0)
-    return false;
-  if (!ny_strbuf_reserve(b, (size_t)n + 1))
+  if (n < 0 || (size_t)n == SIZE_MAX ||
+      !ny_strbuf_reserve(b, (size_t)n + 1))
     return false;
   va_start(ap, fmt);
   vsnprintf(b->data + b->len, (size_t)n + 1, fmt, ap);

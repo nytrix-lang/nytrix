@@ -405,7 +405,7 @@ fn gpu_offload_status(int work_items=0) dict {
    {"mode": GPU_MODE, "backend": GPU_BACKEND, "selected_backend": selected_backend, "offload": GPU_OFFLOAD,
       "available": GPU_AVAILABLE, "min_work": GPU_MIN_WORK, "effective_min_work": min_work_eff,
       "work_items": work_items, "async": GPU_ASYNC, "fast_math": GPU_FAST_MATH, "policy_selected": policy_selected,
-   "active": active, "reason": reason, "active_reason": active_reason}
+      "active": active, "reason": reason, "active_reason": active_reason}
 }
 
 fn gpu_should_offload(int work_items=0) bool {
@@ -493,7 +493,7 @@ fn accel_target_status(any target="") dict {
    {"configured_target": configured, "selected_target": selected, "triple": accel_target_triple(selected),
       "object_kind": accel_binary_kind(selected), "object_ext": accel_binary_ext(selected),
       "runtime_available": runtime_ok, "toolchain_available": toolchain_ok, "available": available,
-   "gpu_backend": GPU_BACKEND, "gpu_available": GPU_AVAILABLE, "reason": reason}
+      "gpu_backend": GPU_BACKEND, "gpu_available": GPU_AVAILABLE, "reason": reason}
 }
 
 fn accel_compile_plan(str input_path, any output_path="", any target="") dict {
@@ -524,7 +524,7 @@ fn accel_compile_plan(str input_path, any output_path="", any target="") dict {
       cmd = [cc, "-target", "amdgcn-amd-amdhsa", "--offload-arch=" + amd_arch, "-O" + opt, "-c", input_path, "-o", out_path]
    }
    {"target": t, "triple": triple, "object_kind": kind, "object_ext": ext, "input": input_path,
-   "output": out_path, "command": cmd, "status": accel_target_status(t)}
+      "output": out_path, "command": cmd, "status": accel_target_status(t)}
 }
 
 fn accel_emit_plan(any function_name, str ir_path, any out_dir="", any target="") dict {
@@ -539,7 +539,7 @@ fn accel_emit_plan(any function_name, str ir_path, any out_dir="", any target=""
    if is_str(out_dir) && strip(out_dir).len > 0 { output = out_dir + "/" + output }
    def plan = accel_compile_plan(ir_path, output, t)
    plan.merge({"function": function_name, "backend": accel_backend(t), "attribute": "@accel",
-   "emits_device_artifact": plan.get("command", list()).len > 0})
+         "emits_device_artifact": plan.get("command", list()).len > 0})
 }
 
 fn accel_emit_command(any function_name, str ir_path, any out_dir="", any target="") list {
@@ -622,7 +622,7 @@ fn opencl_status(int work_items=0) dict {
       "work_items": work_items, "effective_min_work": min_work, "async": gpu_async(), "fast_math": gpu_fast_math(),
       "policy_selected": selected, "active": false, "reason": reason, "active_reason": active_reason,
       "cpu_threads": _opencl_cpu_threads_guess(), "cpu_parallel_selected": false,
-   "cpu_parallel_reason": "gpu_module_no_parallel_import"}
+      "cpu_parallel_reason": "gpu_module_no_parallel_import"}
 }
 
 fn opencl_should_offload(int work_items=0) bool {
@@ -643,7 +643,7 @@ fn opencl_compile_plan(str input_path, any output_path="") dict {
 fn opencl_kernel_plan(any name, int global_size, int local_size=0) dict {
    "Returns normalized launch-shape metadata for an OpenCL-style kernel."
    opencl_status(global_size).merge({"kernel": name, "global_size": global_size, "local_size": local_size,
-   "work_groups": opencl_work_groups(global_size, local_size)})
+         "work_groups": opencl_work_groups(global_size, local_size)})
 }
 
 fn opencl_cpu_fallback_plan(int work_items=0, int item_cost=1) dict {
@@ -655,7 +655,7 @@ fn opencl_cpu_fallback_plan(int work_items=0, int item_cost=1) dict {
    if work_items > 0 { chunk = (work_items + threads - 1) / threads }
    {"backend": "cpu", "work_items": work_items, "threads": threads, "chunk_size": chunk, "item_cost": item_cost,
       "gpu_policy_selected": st.get("policy_selected", false), "gpu_active": st.get("active", false),
-   "reason": st.get("active_reason", st.get("reason", "policy_not_selected"))}
+      "reason": st.get("active_reason", st.get("reason", "policy_not_selected"))}
 }
 
 fn opencl_dispatch_plan(any name, int global_size, int local_size=0) dict {

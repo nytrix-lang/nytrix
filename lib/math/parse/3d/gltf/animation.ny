@@ -965,8 +965,8 @@ fn _gltf_sample_channel(any data, dict sampler, dict input_res, dict output_res,
       mut i = 0
       while i < n_comp {
          out[i] = h00 * (0.0 + vk.get(i, 0.0)) +
-            h10 * td * (0.0 + bk.get(i, 0.0)) +
-            h01 * (0.0 + vk1.get(i, 0.0)) +
+         h10 * td * (0.0 + bk.get(i, 0.0)) +
+         h01 * (0.0 + vk1.get(i, 0.0)) +
          h11 * td * (0.0 + ak1.get(i, 0.0))
          i += 1
       }
@@ -1488,7 +1488,7 @@ fn gltf_sample_animation(any gltf_data, int anim_idx, f64 time_sec) any {
             && (eq(path, "translation")
                || eq(path, "rotation")
                || eq(path, "scale")
-         || eq(path, "weights")))
+               || eq(path, "weights")))
          || is_visibility_pointer
          || is_material_pointer{
             def samp = samplers.get(samp_idx)
@@ -1644,7 +1644,6 @@ fn gltf_apply_morph_weights(any gltf_data, any overrides) list {
    [gltf_data, true]
 }
 
-
 fn _gltf_build_node_world_mats_animated_fast(list nodes, any base_local_mats, list world_list, any fast_node_overrides, int node_idx, list parent_m, dict node_world_mats, dict overrides) dict {
    if !is_list(nodes) || node_idx < 0 || node_idx >= nodes.len { return node_world_mats }
    def node = nodes[node_idx]
@@ -1678,7 +1677,7 @@ fn _gltf_build_node_world_mats_animated_fast(list nodes, any base_local_mats, li
                child_idx,
                world_m,
                node_world_mats,
-            overrides)
+               overrides)
          }
          i += 1
       }
@@ -1737,14 +1736,14 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
          mut ri = 0
          while ri < roots_n {
             def root_idx = int(roots[ri])
-          node_world_mats = _gltf_build_node_world_mats_animated_fast(nodes,
-             base_local_mats,
-             world_list,
-             fast_node_overrides,
-             root_idx,
-             id,
-             node_world_mats,
-          overrides)
+            node_world_mats = _gltf_build_node_world_mats_animated_fast(nodes,
+               base_local_mats,
+               world_list,
+               fast_node_overrides,
+               root_idx,
+               id,
+               node_world_mats,
+               overrides)
             ri += 1
          }
       }
@@ -1781,7 +1780,6 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    def interp_quarter = _gltf_anim_fast_value(rec, 0.25)
    assert(interp_quarter == [0.5, 1.0, 1.5], "gltf animation fast sampler keeps in-between vec3")
    assert(rec[8] == 0, "gltf animation fast sampler updates bracket cache")
-
    def q_ptr = malloc(32)
    ;; identity -> 180deg around Z should slerp to a smooth 90deg turn at t=0.5
    store32_f32(q_ptr, 0.0, 0)
@@ -1799,7 +1797,6 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    def qhalf = _gltf_anim_fast_value(qrec, 0.5)
    assert(abs(float(qhalf.get(2, 0.0)) - 0.70710678) < 0.0002, "gltf animation fast sampler slerps quat z")
    assert(abs(float(qhalf.get(3, 0.0)) - 0.70710678) < 0.0002, "gltf animation fast sampler slerps quat w")
-
    def br_q = _gltf_anim_record_bracket(qrec, 0.25)
    assert(int(br_q.get(0, -1)) == 0 && int(br_q.get(1, -1)) == 1 && abs(float(br_q.get(2, -1.0)) - 0.25) < 0.000001, "gltf animation bracket keeps fractional alpha")
    def qm = gltf_math.mat4_from_trs([0.0,0.0,0.0], qhalf, [1.0,1.0,1.0])
@@ -1808,7 +1805,6 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    free(q_ptr)
    free(in_ptr)
    free(out_ptr)
-
    def bind = malloc(shr._GLTF_VTX_STRIDE)
    def skinned = malloc(shr._GLTF_VTX_STRIDE)
    def joints = malloc(16)

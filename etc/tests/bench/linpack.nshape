@@ -1,0 +1,145 @@
+shape linpack {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "fp", "linpack", "lu", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+use std.core.tbuf
+;; Dense LU solve (no pivoting; diagonally-dominant matrix) - linpack-style.
+def N = 100
+def A = f64buf_new(N * N)
+def b = f64buf_new(N)
+mut i = 0
+while i < N {
+   mut j = 0
+   while j < N {
+      if i == j { f64buf_store(A, i * N + j, 100.0) } else { f64buf_store(A, i * N + j, 1.0) }
+      j += 1
+   }
+   i += 1
+}
+i = 0
+while i < N {
+   mut s = 0.0
+   mut j = 0
+   while j < N {
+      s += f64buf_load(A, i * N + j) * float(j + 1)
+      j += 1
+   }
+   f64buf_store(b, i, s)
+   i += 1
+}
+def t0 = ticks()
+;; LU factorize in place (Doolittle)
+mut k = 0
+while k < N {
+   mut r = k + 1
+   while r < N {
+      def piv = f64buf_load(A, k * N + k)
+      def m = f64buf_load(A, r * N + k) / piv
+      f64buf_store(A, r * N + k, m)
+      mut c = k + 1
+      while c < N {
+         f64buf_store(A, r * N + c, f64buf_load(A, r * N + c) - m * f64buf_load(A, k * N + c))
+         c += 1
+      }
+      r += 1
+   }
+   k += 1
+}
+;; forward solve Ly = b (in place on b)
+mut row = 0
+while row < N {
+   mut c = 0
+   while c < row {
+      f64buf_store(b, row, f64buf_load(b, row) - f64buf_load(A, row * N + c) * f64buf_load(b, c))
+      c += 1
+   }
+   row += 1
+}
+;; back solve Ux = y
+def x = f64buf_new(N)
+mut rr = N - 1
+while rr >= 0 {
+   mut s = f64buf_load(b, rr)
+   mut c = rr + 1
+   while c < N {
+      s -= f64buf_load(A, rr * N + c) * f64buf_load(x, c)
+      c += 1
+   }
+   f64buf_store(x, rr, s / f64buf_load(A, rr * N + rr))
+   rr -= 1
+}
+def t1 = ticks()
+mut total = 0.0
+i = 0
+while i < N {
+   total += f64buf_load(x, i)
+   i += 1
+}
+mut conv = 0
+mut diff = total - 5050.0
+if diff < 0.0 { diff = 0.0 - diff }
+if diff < 0.01 { conv = 1 }
+print("checksum=", conv)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    int N = 100;
+    double *A = (double *)malloc((size_t)N * N * sizeof(double));
+    double *b = (double *)malloc((size_t)N * sizeof(double));
+    for (int i = 0; i < N; i++)
+        for (int j = 0; j < N; j++)
+            A[i * N + j] = (i == j) ? 100.0 : 1.0;
+    for (int i = 0; i < N; i++) {
+        double s = 0.0;
+        for (int j = 0; j < N; j++) s += A[i * N + j] * (double)(j + 1);
+        b[i] = s;
+    }
+    int64_t t0 = now_ns();
+    for (int k = 0; k < N; k++) {
+        for (int r = k + 1; r < N; r++) {
+            double piv = A[k * N + k];
+            double m = A[r * N + k] / piv;
+            A[r * N + k] = m;
+            for (int c = k + 1; c < N; c++)
+                A[r * N + c] -= m * A[k * N + c];
+        }
+    }
+    for (int row = 0; row < N; row++)
+        for (int c = 0; c < row; c++)
+            b[row] -= A[row * N + c] * b[c];
+    double *x = (double *)malloc((size_t)N * sizeof(double));
+    for (int rr = N - 1; rr >= 0; rr--) {
+        double s = b[rr];
+        for (int c = rr + 1; c < N; c++) s -= A[rr * N + c] * x[c];
+        x[rr] = s / A[rr * N + rr];
+    }
+    int64_t t1 = now_ns();
+    double total = 0.0;
+    for (int i = 0; i < N; i++) total += x[i];
+    double diff = total - 5050.0;
+    if (diff < 0.0) diff = -diff;
+    int conv = (diff < 0.01) ? 1 : 0;
+    printf("checksum=%d\n", conv);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    return 0;
+}
+C
+}

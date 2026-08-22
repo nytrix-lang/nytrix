@@ -1,3 +1,7 @@
+/*
+ * Shape corpus: loads, validates, and counts .nshape fixture files
+ * used as fuzzing templates for program generation and mutation.
+ */
 #include "core.h"
 
 int cmd_shape_count(const char *path) {

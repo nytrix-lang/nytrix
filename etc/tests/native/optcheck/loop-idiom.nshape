@@ -1,0 +1,21 @@
+shape optcheck_loop_idiom {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck loop idiom pass-fires negative-path]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=112 --nyir-pass-stats"
+  expect compile_and_run
+  source ny <<'NY'
+fn fires() i64 {
+  mut sum = 0
+  for i in 0..8 { sum = sum + i * 2 }
+  sum
+}
+fn dynamic_bound(i64 n) i64 {
+  mut sum = 0
+  for i in 0..n { sum = sum + i * 2 }
+  sum
+}
+fires() + dynamic_bound(8)
+NY
+}

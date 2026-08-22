@@ -194,7 +194,7 @@ fn context(any options=0) dict {
          "timeout_ms": 1234,
          "chunk_size": 77,
          "color": false
-   })
+      })
    assert_eq(c.get("log_level", ""), "debug", "context log level")
    assert_eq(timeout_ms(0), 1234, "context timeout")
    assert_eq(chunk_size(), 77, "context chunk size")

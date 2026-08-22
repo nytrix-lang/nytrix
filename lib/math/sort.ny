@@ -1,11 +1,9 @@
 module std.math.sort
-
 use std.core
 
 ; Pure-Ny merge sort implementation.
 ; Demonstrates that Ny is powerful enough to implement its own algorithms.
 ; No C fallback needed — this runs entirely through the Ny runtime.
-
 fn merge(any xs, int left, int mid, int right) any {
    "Merge two sorted halves of xs[left..mid] and xs[mid..right]."
    def len1 = mid - left
@@ -52,14 +50,14 @@ fn _merge_sort(any xs, int left, int right) any {
 
 fn merge_sort(any xs) any {
    "Sort a list with merge sort and return the sorted value.
-    Time: O(n log n), space: O(n)."
+   Time: O(n log n), space: O(n)."
    def n = len(xs)
    if n <= 1 { return xs }
    return _merge_sort(xs, 0, n)
 }
 
 fn insertion_sort(any xs, int left, int right) any {
-   "Insertion sort for small slices (xs[left..right])."
+   "Insertion sort for small slices(xs[left..right])."
    mut i = left + 1
    while i < right {
       def key = xs.get(i)
@@ -76,7 +74,7 @@ fn insertion_sort(any xs, int left, int right) any {
 
 fn introsort(any xs) any {
    "Introsort: quicksort with insertion sort for small partitions.
-    Falls back to insertion sort for slices <= 16."
+   Falls back to insertion sort for slices <= 16."
    def n = len(xs)
    if n <= 1 { return xs }
    return insertion_sort(xs, 0, n)
@@ -197,8 +195,8 @@ fn argmax(seq xs) int {
 }
 
 fn nth(xs, int n) any {
-   "Return the n-th smallest element (0-indexed).
-    Uses a sorting-based approach."
+   "Return the n-th smallest element(0-indexed).
+   Uses a sorting-based approach."
    mut copy = []
    for item in xs { copy = copy.append(item) }
    copy = merge_sort(copy)

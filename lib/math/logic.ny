@@ -42,6 +42,7 @@ fn all(any xs) bool {
 
 ;; Creates the true proposition.
 fn prop_true() dict { {"kind": "true"} }
+
 ;; Creates the false proposition.
 fn prop_false() dict { {"kind": "false"} }
 
@@ -198,7 +199,7 @@ fn _prop_measure(dict proposition, dict state, int depth) bool {
    }
    if kind == "and" || kind == "or" || kind == "implies" || kind == "iff" {
       return _prop_measure(proposition.get("left"), state, depth + 1) &&
-         _prop_measure(proposition.get("right"), state, depth + 1)
+      _prop_measure(proposition.get("right"), state, depth + 1)
    }
    true
 }
@@ -241,7 +242,7 @@ fn prop_tautology_report(dict proposition, int max_variables=16,
    int max_memory=100000) dict {
    assert(prop_is(proposition), "prop_tautology_report expects a proposition")
    if max_variables < 0 || max_variables > 20 || max_steps <= 0 ||
-      max_depth <= 0 || max_nodes <= 0 || max_memory <= 0 {
+   max_depth <= 0 || max_nodes <= 0 || max_memory <= 0 {
       return {"decided":false, "valid":false, "variables":[],
          "reason":"invalid budget", "counterexample":{},
          "assignments_checked":0, "assignments_required":-1,
@@ -358,26 +359,26 @@ fn prop_certificate(dict proposition, int max_variables=16,
    def base = cert.envelope(encoded, LOGIC_MODULE_VERSION,
       LOGIC_DEPENDENCY_DIGEST)
    return base.merge({"version":"logic-cert-v1", "checker":"truth-table-v1",
-      "proposition":proposition, "canonical":encoded,
-      "digest":prop_digest(proposition), "max_variables":max_variables,
-      "max_steps":max_steps, "max_depth":max_depth,
-      "max_nodes":max_nodes, "max_memory":max_memory,
-      "decision":decision, "envelope_digest":base.get("digest")})
+         "proposition":proposition, "canonical":encoded,
+         "digest":prop_digest(proposition), "max_variables":max_variables,
+         "max_steps":max_steps, "max_depth":max_depth,
+         "max_nodes":max_nodes, "max_memory":max_memory,
+         "decision":decision, "envelope_digest":base.get("digest")})
 }
 
 ;; Checks the structure and decision recorded in a proposition certificate.
 fn prop_check_certificate(any value) bool {
    if !is_dict(value) || value.get("version", "") != "logic-cert-v1" ||
-      value.get("checker", "") != "truth-table-v1" ||
-      !prop_is(value.get("proposition", 0)) ||
-      !is_str(value.get("canonical", 0)) || !is_str(value.get("digest", 0)) ||
-      !is_int(value.get("envelope_digest", nil)) ||
-      !is_int(value.get("max_variables", nil)) ||
-      !is_int(value.get("max_steps", nil)) ||
-      !is_int(value.get("max_depth", nil)) ||
-      !is_int(value.get("max_nodes", nil)) ||
-      !is_int(value.get("max_memory", nil)) ||
-      !is_dict(value.get("decision", 0)) {
+   value.get("checker", "") != "truth-table-v1" ||
+   !prop_is(value.get("proposition", 0)) ||
+   !is_str(value.get("canonical", 0)) || !is_str(value.get("digest", 0)) ||
+   !is_int(value.get("envelope_digest", nil)) ||
+   !is_int(value.get("max_variables", nil)) ||
+   !is_int(value.get("max_steps", nil)) ||
+   !is_int(value.get("max_depth", nil)) ||
+   !is_int(value.get("max_nodes", nil)) ||
+   !is_int(value.get("max_memory", nil)) ||
+   !is_dict(value.get("decision", 0)) {
       return false
    }
    def proposition = value.get("proposition")
@@ -388,10 +389,10 @@ fn prop_check_certificate(any value) bool {
       "dependency_digest":value.get("dependency_digest", ""),
       "checker_version":value.get("checker_version", "")}
    if encoded != value.get("canonical") ||
-      prop_digest(proposition) != value.get("digest") ||
-      !cert.check(envelope, value.get("max_variables"), value.get("max_nodes"),
-         value.get("max_depth"), value.get("max_steps"),
-         value.get("max_memory")) {
+   prop_digest(proposition) != value.get("digest") ||
+   !cert.check(envelope, value.get("max_variables"), value.get("max_nodes"),
+      value.get("max_depth"), value.get("max_steps"),
+      value.get("max_memory")) {
       return false
    }
    def checked = prop_tautology_report(proposition, value.get("max_variables"),
@@ -399,37 +400,52 @@ fn prop_check_certificate(any value) bool {
       value.get("max_nodes"), value.get("max_memory"))
    def claimed = value.get("decision")
    checked.get("decided") && checked.get("valid") &&
-      claimed.get("decided", false) && claimed.get("valid", false)
+   claimed.get("decided", false) && claimed.get("valid", false)
 }
 
 ;; Compact public vocabulary. The prop_* names remain available when explicit
 ;; representation-oriented code is clearer.
 fn truth() dict { prop_true() }
+
 fn falsity() dict { prop_false() }
+
 fn atom(str name) dict { prop_atom(name) }
+
 fn neg(dict proposition) dict { prop_not(proposition) }
+
 fn conj(dict left, dict right) dict { prop_and(left, right) }
+
 fn disj(dict left, dict right) dict { prop_or(left, right) }
+
 fn implies(dict premise, dict conclusion) dict { prop_implies(premise, conclusion) }
+
 fn iff(dict left, dict right) dict { prop_iff(left, right) }
+
 ;; Returns the result of the `evaluate` operation.
 fn evaluate(dict proposition, dict environment={}) bool { prop_eval(proposition, environment) }
+
 fn simplify(dict proposition) dict { prop_simplify(proposition) }
+
 fn variables(dict proposition) list { prop_variables(proposition) }
+
 ;; Returns the result of the `decide` operation.
 fn decide(dict proposition, int max_variables=16, int max_steps=1000000,
    int max_depth=128, int max_nodes=100000, int max_memory=100000) dict {
    prop_tautology_report(proposition, max_variables, max_steps, max_depth,
       max_nodes, max_memory)
 }
+
 ;; Returns the result of the `valid` operation.
 fn valid(dict proposition, int max_variables=16, int max_steps=1000000,
    int max_depth=128, int max_nodes=100000, int max_memory=100000) bool {
    prop_tautology(proposition, max_variables, max_steps, max_depth, max_nodes,
       max_memory)
 }
+
 fn canonical(dict proposition) str { prop_canonical(proposition) }
+
 fn digest(dict proposition) str { prop_digest(proposition) }
+
 ;; Returns the result of the `certificate` operation.
 fn certificate(dict proposition, int max_variables=16,
    int max_steps=1000000, int max_depth=128, int max_nodes=100000,
@@ -437,4 +453,5 @@ fn certificate(dict proposition, int max_variables=16,
    prop_certificate(proposition, max_variables, max_steps, max_depth,
       max_nodes, max_memory)
 }
+
 fn check_certificate(any value) bool { prop_check_certificate(value) }

@@ -356,6 +356,13 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   switch (in->op) {
   case NYIR_NOP:
     return true;
+  case NYIR_BOUNDS_CHECK:
+    /*
+     * Portable backends don't emit runtime bounds checks.
+     * The NYIR VM (eval.c) validates bounds; native targets go
+     * through the machine-form encoder (x64.c / aarch64.c).
+     */
+    return true;
   case NYIR_CONST_I64:
     return ny_port_mov_imm(c, c->tmp0, in->imm) &&
            ny_port_store_value(c, in->dst, c->tmp0);
@@ -440,6 +447,9 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   case NYIR_SUB_F64:
   case NYIR_MUL_F64:
   case NYIR_DIV_F64:
+  case NYIR_SQRT_F64:
+  case NYIR_SIN_F64:
+  case NYIR_COS_F64:
   case NYIR_I64_TO_F64:
   case NYIR_CMP_F64:
   case NYIR_CONST_F32:
@@ -468,6 +478,7 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   case NYIR_VEC4_FMA_F64:
   case NYIR_VEC4_SET1_F64:
   case NYIR_VEC4_SHUFFLE_F64:
+  case NYIR_VEC4_REDUCE_ADD_F64:
   case NYIR_VEC8_LOAD_F32:
   case NYIR_VEC8_STORE_F32:
   case NYIR_VEC8_ADD_F32:
@@ -478,6 +489,7 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   case NYIR_VEC8_SET1_F32:
   case NYIR_VEC8_SHUFFLE_F32:
   case NYIR_VEC4_LOAD_I64:
+  case NYIR_VEC4_SET1_I64:
   case NYIR_VEC4_STORE_I64:
   case NYIR_VEC4_ADD_I64:
   case NYIR_VEC4_SUB_I64:
@@ -486,7 +498,15 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   case NYIR_VEC4_XOR_I64:
   case NYIR_VEC4_SHL_I64:
   case NYIR_VEC4_SAR_I64:
-  case NYIR_VEC4_SET1_I64:
+  case NYIR_VEC8_LOAD_I64:
+  case NYIR_VEC8_STORE_I64:
+  case NYIR_VEC8_ADD_I64:
+  case NYIR_VEC8_SUB_I64:
+  case NYIR_VEC8_AND_I64:
+  case NYIR_VEC8_OR_I64:
+  case NYIR_VEC8_XOR_I64:
+  case NYIR_VEC4_REDUCE_ADD_I64:
+  case NYIR_VEC8_REDUCE_ADD_I64:
   case NYIR_OP_COUNT:
     break;
   }

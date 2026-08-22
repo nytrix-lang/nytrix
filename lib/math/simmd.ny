@@ -378,7 +378,7 @@ fn i32_hash_put_ptr(ptr keys, ptr values, ptr used, int cap, int key, int value)
 fn i32_hash_probe_sum_ptr(ptr keys, ptr values, ptr used, int cap, ptr probe_keys, ptr probe_weights, int probe_n, int rounds=1) int {
    "Probes a raw i32 linear-probe table and returns the join checksum."
    __simmd_i32_hash_probe_sum_ptr(keys, values, used, cap, probe_keys, probe_weights,
-   probe_n, rounds)
+      probe_n, rounds)
 }
 
 fn i32_sqlscan_sum_ptr(ptr region, ptr tier, ptr amount, ptr flags, int n, int rounds=1) int {

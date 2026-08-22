@@ -1,3 +1,7 @@
+/*
+ * Native emit: converts NYIR to the target-specific machine-form
+ * representation, dispatching to per-backend encoder pipelines.
+ */
 #include "code/native/internal.h"
 #include "code/native/object/internal.h"
 #include "base/common.h"
@@ -12,8 +16,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-/* Native emission orchestration: target dispatch, assembly output, internal
- * object selection, and the explicit external-assembler fallback. */
+/*
+ * Native emission orchestration: target dispatch, assembly output, internal
+ * object selection, and the explicit external-assembler fallback.
+ */
 static bool ny_native_target_has(const ny_native_target_info_t *target,
                                  ny_native_target_cap_t cap) {
   return target && (target->caps & (unsigned)cap) != 0;
@@ -50,6 +56,30 @@ bool ny_native_ensure_parent_dir_for_path(const char *path) {
   return true;
 }
 
+#include "code/native/backend_interface.h"
+
+static const ny_backend_emitter_t g_backend_emitters[] = {
+    {"x86-64", NY_NATIVE_TARGET_X86_64, ny_native_x86_64_emit_nir, ny_native_x86_64_emit_mach_scalar},
+    {"aarch64", NY_NATIVE_TARGET_AARCH64, ny_native_aarch64_emit_nir, NULL},
+    {"i386", NY_NATIVE_TARGET_X86, ny_native_i386_emit_nir, NULL},
+    {"arm", NY_NATIVE_TARGET_ARM, ny_native_arm_emit_nir, NULL},
+    {"riscv", NY_NATIVE_TARGET_RISCV, ny_native_riscv_emit_nir, NULL},
+    {"bpf", NY_NATIVE_TARGET_BPF, ny_native_bpf_emit_nir, NULL},
+    {"mips", NY_NATIVE_TARGET_MIPS, ny_native_mips_emit_nir, NULL},
+    {"powerpc", NY_NATIVE_TARGET_POWERPC, ny_native_powerpc_emit_nir, NULL},
+    {"avr", NY_NATIVE_TARGET_AVR, ny_native_avr_emit_nir, NULL},
+    {"wasm", NY_NATIVE_TARGET_WASM, ny_native_wasm_emit_nir, NULL},
+};
+#define NUM_BACKEND_EMITTERS (sizeof(g_backend_emitters) / sizeof(g_backend_emitters[0]))
+
+const ny_backend_emitter_t *ny_backend_find_emitter(ny_native_target_t target) {
+  for (size_t i = 0; i < NUM_BACKEND_EMITTERS; i++) {
+    if (g_backend_emitters[i].target == target)
+      return &g_backend_emitters[i];
+  }
+  return NULL;
+}
+
 bool ny_native_emit_nir_func(ny_native_writer_t *w,
                                     const ny_native_target_info_t *target,
                                     const nyir_func_t *nyir,
@@ -57,73 +87,52 @@ bool ny_native_emit_nir_func(ny_native_writer_t *w,
                                     char *err, size_t err_len) {
   if (!target)
     return false;
-  /* The scalar machine form path is intentionally tried first on x86-64. It
+
+  const ny_backend_emitter_t *emitter = ny_backend_find_emitter(target->target);
+
+  /*
+   * The scalar machine form path is intentionally tried first when supported. It
    * writes into a temporary buffer, so an unsupported shape or allocation
    * failure cannot leave a partial function before the established NYIR
-   * fallback is selected. */
-  if (target->target == NY_NATIVE_TARGET_X86_64) {
+   * fallback is selected.
+   */
+  if (emitter && emitter->emit_mach_scalar) {
     ny_mach_func_t machine = {0};
     char machine_err[256] = {0};
-    if (ny_mach_lower_nir(nyir, &machine, machine_err, sizeof(machine_err))) {
+    if (ny_mach_lower_nir(nyir, &machine, target->caps, machine_err, sizeof(machine_err))) {
       ny_native_writer_t machine_out = {0};
-      if (ny_native_x86_64_emit_mach_scalar(&machine_out, target, &machine,
-                                            label, tag_return, machine_err,
-                                            sizeof(machine_err))) {
+      if (emitter->emit_mach_scalar(&machine_out, target, &machine,
+                                    label, tag_return, machine_err,
+                                    sizeof(machine_err))) {
         bool appended = ny_native_put(w, machine_out.data ? machine_out.data : "");
         free(machine_out.data);
         ny_mach_func_free(&machine);
         if (!appended)
           ny_native_set_err(err, err_len,
-                            "native x86-64 machine form emitter: out of memory");
+                            "native machine form emitter: out of memory");
         return appended;
       }
       free(machine_out.data);
     }
     ny_mach_func_free(&machine);
   }
-  switch (target->target) {
-  case NY_NATIVE_TARGET_X86_64:
-    return ny_native_x86_64_emit_nir(w, target, nyir, label, tag_return, err,
-                                     err_len);
-  case NY_NATIVE_TARGET_AARCH64:
-    return ny_native_aarch64_emit_nir(w, target, nyir, label, tag_return, err,
-                                      err_len);
-  case NY_NATIVE_TARGET_X86:
-    return ny_native_i386_emit_nir(w, target, nyir, label, tag_return, err,
-                                   err_len);
-  case NY_NATIVE_TARGET_ARM:
-    return ny_native_arm_emit_nir(w, target, nyir, label, tag_return, err,
-                                  err_len);
-  case NY_NATIVE_TARGET_RISCV:
-    return ny_native_riscv_emit_nir(w, target, nyir, label, tag_return, err,
-                                    err_len);
-  case NY_NATIVE_TARGET_BPF:
-    return ny_native_bpf_emit_nir(w, target, nyir, label, tag_return, err,
-                                  err_len);
-  case NY_NATIVE_TARGET_MIPS:
-    return ny_native_mips_emit_nir(w, target, nyir, label, tag_return, err,
-                                   err_len);
-  case NY_NATIVE_TARGET_POWERPC:
-    return ny_native_powerpc_emit_nir(w, target, nyir, label, tag_return, err,
-                                      err_len);
-  case NY_NATIVE_TARGET_AVR:
-    return ny_native_avr_emit_nir(w, target, nyir, label, tag_return, err,
-                                  err_len);
-  case NY_NATIVE_TARGET_WASM:
-    return ny_native_wasm_emit_nir(w, target, nyir, label, tag_return, err,
-                                   err_len);
-  default:
-    ny_native_set_err(err, err_len,
-                      "native backend target '%s' has no NYIR emitter",
-                      target->target_name ? target->target_name : "unknown");
-    return false;
+
+  if (emitter && emitter->emit_nir) {
+    nyir_phi_elim((nyir_func_t *)nyir);
+    return emitter->emit_nir(w, target, nyir, label, tag_return, err, err_len);
   }
+
+  ny_native_set_err(err, err_len,
+                    "native backend target '%s' has no NYIR emitter",
+                    target->target_name ? target->target_name : "unknown");
+  return false;
 }
 
 bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
                               const char *path, const char *entry_name,
                               bool tag_return, char *err, size_t err_len) {
   nyir_set_cf_mem2reg_enabled(!opt || opt->native_enable_cf_mem2reg);
+  nyir_set_preserve_phis(true);
   nyir_set_pass_controls(opt ? opt->nyir_disable_pass : NULL,
                            opt ? opt->nyir_stop_after : NULL);
   nyir_set_verify_each_pass(opt && opt->nyir_verify);
@@ -142,24 +151,35 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
                       target.object_format, target.pointer_bits);
     return false;
   }
-  if (!opt->native_dump_ir_path && !opt->nyir_dump_bin_path &&
-      !ny_native_dump_ir_for_program(prog, opt, err, err_len))
-    return false;
-
-  /* Try the NYIR-first codegen path: build, optimize, verify, emit from IR. */
+  /*
+   * Try the NYIR-first codegen path: build, optimize, verify, emit from IR.
+   */
   nyir_func_t rt_main_nir = {0};
   nyir_func_t func_nirs[NY_NATIVE_LIVE_MAX_FUNCS];
+  const char *func_names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
   size_t func_count = 0;
   char nir_err[512] = {0};
   bool nir_ok = ny_native_build_nir(prog, opt, &rt_main_nir, func_nirs,
-                                     &func_count, NY_NATIVE_LIVE_MAX_FUNCS,
-                                     nir_err, sizeof(nir_err));
+                                     &func_count, func_names,
+                                     NY_NATIVE_LIVE_MAX_FUNCS, nir_err,
+                                     sizeof(nir_err));
+
+  if (nir_ok &&
+      !ny_native_dump_ir_for_program(prog, opt, err, err_len))
+    return false;
+
+  /*
+   * Keep PHI instructions intact so machine lowerer (ny_mach_lower_nir) lowers
+   * them into register-level parallel copies without stack memory roundtrips.
+   */
 
   ny_native_writer_t w = {0};
   bool ok = false;
 
   if (nir_ok && rt_main_nir.len > 0) {
-    /* Emit header comment. */
+    /*
+     * Emit header comment.
+     */
     if (!ny_native_printf(&w, "# Nytrix native %s backend output (NYIR path)\n",
                           target.target_name))
       nir_ok = false;
@@ -181,33 +201,12 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
                           tier.prefer_ast_fallback ? "yes" : "no"))
       nir_ok = false;
 
-    /* Emit user functions (raw return, no tagging). */
+    /*
+     * Emit user functions (raw return, no tagging).
+     */
     if (nir_ok) {
       for (size_t i = 0; i < func_count; ++i) {
-        const char *fn_name = NULL;
-        /* Find the function name from the program AST. */
-        for (size_t j = 0; j < prog->body.len; ++j) {
-          const stmt_t *s = prog->body.data[j];
-          if (s && s->kind == NY_S_FUNC && s->as.fn.name) {
-            /* Match by order — the NYIR builder processes them in the same
-             * order as the program body. */
-            if (fn_name == NULL) {
-              /* Count functions before position j that are FUNC. */
-              size_t func_idx = 0;
-              for (size_t k = 0; k < j; ++k) {
-                if (prog->body.data[k] && prog->body.data[k]->kind == NY_S_FUNC)
-                  func_idx++;
-              }
-              if (func_idx == i) {
-                fn_name = s->as.fn.name;
-                break;
-              }
-            }
-          }
-        }
-        if (!fn_name)
-          fn_name = "unknown_fn";
-        /* Build the native label: ny_fn_<name>. */
+        const char *fn_name = func_names[i] ? func_names[i] : "unknown_fn";
         char label[256];
         snprintf(label, sizeof(label), "ny_fn_%s", fn_name);
         bool emitted = ny_native_emit_nir_func(&w, &target, &func_nirs[i],
@@ -219,7 +218,9 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
       }
     }
 
-    /* Emit the top-level entry. */
+    /*
+     * Emit the top-level entry.
+     */
     if (nir_ok) {
       const char *top_name = entry_name && entry_name[0] ? entry_name : "rt_main";
       bool emitted = ny_native_emit_nir_func(&w, &target, &rt_main_nir,
@@ -228,7 +229,10 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
       if (!emitted)
         nir_ok = false;
     }
-
+    if (nir_ok &&
+        (!ny_native_strtab_append_asm(&w, err, err_len) ||
+         !ny_native_arraytab_append_asm(&w, err, err_len)))
+      nir_ok = false;
     if (nir_ok)
       ok = ny_write_file(path, w.data ? w.data : "", w.len) == 0;
 
@@ -239,14 +243,20 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
               rt_main_nir.len, path ? path : "(stdout)", w.len);
     }
 
-    /* Clean up NYIR. */
+    /*
+     * Clean up NYIR.
+     */
     nyir_func_free(&rt_main_nir);
     for (size_t i = 0; i < func_count; ++i)
       nyir_func_free(&func_nirs[i]);
   }
 
   if (!nir_ok || !ok) {
-    /* NYIR path failed or produced no output; only x86-64 has AST fallback. */
+    /*
+     * NYIR path failed or produced no output; only x86-64 has AST fallback.
+     */
+    if (!nir_ok && nir_err[0] && err && err_len > 0 && err[0] == '\0')
+      ny_native_set_err(err, err_len, "%s", nir_err);
     nyir_func_free(&rt_main_nir);
     for (size_t i = 0; i < func_count; ++i)
       nyir_func_free(&func_nirs[i]);
@@ -293,10 +303,12 @@ bool ny_native_emit_asm(const program_t *prog, const ny_options *opt,
                                   err_len);
 }
 
-/* Assemble the same scalar machine form text stream used by --emit-asm into an
+/*
+ * Assemble the same scalar machine form text stream used by --emit-asm into an
  * object. This is a narrow bridge while the internal object encoders are
  * migrated; false means "not this supported subset", so callers retain their
- * established NYIR object writer. */
+ * established NYIR object writer.
+ */
 static bool ny_native_try_emit_x64_machine_object(
     const nyir_func_t *top, const nyir_func_t *funcs,
     const char *const *names, size_t func_count,
@@ -311,18 +323,21 @@ static bool ny_native_try_emit_x64_machine_object(
     ny_mach_func_t mach = {0};
     char label[256];
     snprintf(label, sizeof(label), "ny_fn_%s", names[i] ? names[i] : "unknown_fn");
-    ok = ny_mach_lower_nir(&funcs[i], &mach, machine_err, sizeof(machine_err)) &&
+    ok = ny_mach_lower_nir(&funcs[i], &mach, target->caps, machine_err, sizeof(machine_err)) &&
          ny_native_x86_64_emit_mach_scalar(&text, target, &mach, label, false,
                                            machine_err, sizeof(machine_err));
     ny_mach_func_free(&mach);
   }
   ny_mach_func_t top_mach = {0};
   if (ok)
-    ok = ny_mach_lower_nir(top, &top_mach, machine_err, sizeof(machine_err)) &&
+    ok = ny_mach_lower_nir(top, &top_mach, target->caps, machine_err, sizeof(machine_err)) &&
          ny_native_x86_64_emit_mach_scalar(&text, target, &top_mach,
                                            entry_symbol, tag_return, machine_err,
                                            sizeof(machine_err));
-  ny_mach_func_free(&top_mach);
+  if (ok &&
+      (!ny_native_strtab_append_asm(&text, machine_err, sizeof(machine_err)) ||
+       !ny_native_arraytab_append_asm(&text, machine_err, sizeof(machine_err))))
+    ok = false;
   if (!ok) {
     ny_native_set_err(err, err_len, "machine form: %s",
                       machine_err[0] ? machine_err : "unsupported machine shape");
@@ -349,7 +364,7 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
                            bool tag_return, char *err, size_t err_len) {
   nyir_set_cf_mem2reg_enabled(!opt || opt->native_enable_cf_mem2reg);
   nyir_set_pass_controls(opt ? opt->nyir_disable_pass : NULL,
-                           opt ? opt->nyir_stop_after : NULL);
+                         opt ? opt->nyir_stop_after : NULL);
   nyir_set_verify_each_pass(opt && opt->nyir_verify);
   nyir_set_tv_seed(opt ? opt->native_tv_seed_trials : 0);
   if (!prog || !opt || !path || !*path) {
@@ -368,26 +383,24 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
                       target.target_name ? target.target_name : "unknown");
     return false;
   }
+  if (!ny_native_dump_ir_for_program(prog, opt, err, err_len))
+    return false;
   if (ny_native_target_has(&target, NY_NATIVE_CAP_ELF_OBJECT) ||
       ny_native_target_has(&target, NY_NATIVE_CAP_COFF_OBJECT) ||
       ny_native_target_has(&target, NY_NATIVE_CAP_MACHO_OBJECT)) {
     nyir_func_t rt_main_nir = {0};
     nyir_func_t func_nirs[NY_NATIVE_LIVE_MAX_FUNCS] = {{0}};
+    const char *func_names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
     size_t func_count = 0;
     char nir_err[512] = {0};
-    if (ny_native_build_nir(prog, opt, &rt_main_nir, func_nirs, &func_count,
-                            NY_NATIVE_LIVE_MAX_FUNCS, nir_err,
-                            sizeof(nir_err)) &&
-        rt_main_nir.len > 0) {
+    bool nir_built = ny_native_build_nir(
+        prog, opt, &rt_main_nir, func_nirs, &func_count, func_names,
+        NY_NATIVE_LIVE_MAX_FUNCS, nir_err, sizeof(nir_err));
+    if (nir_built && rt_main_nir.len > 0) {
+      if (getenv("NY_DUMP_OBJ_NYIR"))
+        nyir_dump(stderr, &rt_main_nir, "obj-rt_main");
       const char *obj_symbol =
           entry_name && entry_name[0] ? entry_name : "rt_main";
-      const char *func_names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
-      size_t name_count = 0;
-      for (size_t i = 0; prog && i < prog->body.len && name_count < func_count; ++i) {
-        const stmt_t *s = prog->body.data[i];
-        if (s && s->kind == NY_S_FUNC)
-          func_names[name_count++] = s->as.fn.name ? s->as.fn.name : "unknown_fn";
-      }
       char obj_err[512] = {0};
       bool obj_ok = false;
       if (ny_native_target_has(&target, NY_NATIVE_CAP_ELF_OBJECT)) {
@@ -416,9 +429,18 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
       if (obj_ok) {
         if (opt && opt->nyir_dump_stats) {
           unsigned long long mach_ok = 0, nir_fb = 0;
+          unsigned long long ra_segments = 0, ra_colored = 0, ra_spilled = 0;
+          unsigned long long ra_reloads = 0, ra_peak_live = 0;
           ny_native_mach_encode_stats(&mach_ok, &nir_fb);
+          ny_native_mach_regalloc_stats(&ra_segments, &ra_colored, &ra_spilled,
+                                        &ra_reloads, &ra_peak_live);
           fprintf(stderr, "mach encode mach_ok=%llu nir_fallback=%llu\n", mach_ok,
                   nir_fb);
+          fprintf(stderr,
+                  "mach regalloc segments=%llu colored=%llu spilled=%llu "
+                  "reloads=%llu peak_live=%llu\n",
+                  ra_segments, ra_colored, ra_spilled, ra_reloads,
+                  ra_peak_live);
         }
         for (size_t i = 0; i < func_count; ++i)
           nyir_func_free(&func_nirs[i]);
@@ -427,9 +449,11 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
           err[0] = '\0';
         return true;
       }
-      /* Keep the host-assembler bridge behind the internal writers.  Native
+      /*
+       * Keep the host-assembler bridge behind the internal writers.  Native
        * object emission is normally self-contained; this only retains the
-       * existing machine form coverage while its direct byte encoder grows. */
+       * existing machine form coverage while its direct byte encoder grows.
+       */
       if (ny_native_try_emit_x64_machine_object(&rt_main_nir, func_nirs,
                                                 func_names, func_count, &target,
                                                 path, obj_symbol, tag_return,
@@ -461,6 +485,15 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
     for (size_t i = 0; i < func_count; ++i)
       nyir_func_free(&func_nirs[i]);
     nyir_func_free(&rt_main_nir);
+    if (!nir_built && nir_err[0]) {
+      /*
+       * A clean NYIR lowering error (R3: body-less stdlib/module calls) is
+       * the real diagnostic; surface it instead of masking it with the asm
+       * fallback's generic "before executable entry emission" message.
+       */
+      ny_native_set_err(err, err_len, "%s", nir_err);
+      return false;
+    }
     if (err && err_len > 0)
       err[0] = '\0';
   }

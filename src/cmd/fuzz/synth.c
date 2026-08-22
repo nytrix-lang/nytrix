@@ -1,3 +1,7 @@
+/*
+ * Fuzz synthesis: programmatic test-case synthesis for compiler
+ * corner cases, leveraging AST combinators and shape-driven generation.
+ */
 #include "core.h"
 
 #include <stdarg.h>

@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":120,"summary":"Explore networking modules, transport boundaries, and the capabilities available on each host."} -->
 # Networking
 
 `std.os.net` is the facade for HTTP, sockets, local servers, process tubes,
@@ -38,6 +39,42 @@ Log levels are `quiet`, `error`, `info`, `debug`, and `trace`.
 
 `net.request(options)` or `net.request(method, url, data, headers, options)`
 prepares a request and returns a response dictionary.
+
+## Browser fetch
+
+`std.os.fetch(url)` is the small body-only facade for browser code. On the
+`wasm-bare` target it performs a same-origin `fetch()`, yields through Asyncify,
+and resumes the same Wasm stack when the response arrives. It returns the body
+text for a successful response and `0` for an unavailable URL, a non-success
+status, or a blocked request.
+
+```ny
+use std.os as os
+
+def page = os.fetch("index.html")
+if is_str(page) { print(page.len) }
+```
+
+The browser runner exposes a small lifecycle-only WebSocket facade. It returns
+a handle, reports `CONNECTING`, `OPEN`, `CLOSING`, `CLOSED`, or `ERROR`, queues
+text messages, and can send or close an open socket. Browser permissions,
+cross-origin policy, and server availability still apply; failures are
+reported as handle `0`, state `ERROR`, or a failed send. The
+`websocket-lifecycle.ny` fixture covers the portable lifecycle path. The
+`websocket-echo.ny` fixture covers a complete local text round trip.
+Structured native networking APIs remain the right choice for raw sockets and
+desktop services.
+
+```ny
+use std.os.websocket as websocket
+
+def socket = websocket.open("wss://example.test/events")
+if socket > 0 {
+   def state = websocket.state(socket)
+   if state == "OPEN" { websocket.send(socket, "hello") }
+   websocket.close(socket)
+}
+```
 
 | Option | Meaning |
 | --- | --- |

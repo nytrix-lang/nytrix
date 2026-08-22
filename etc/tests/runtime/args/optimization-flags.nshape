@@ -1,0 +1,17 @@
+shape args-accept-optimization {
+  family "runtime/args"
+  generator "program"
+  features ["args", "cli", "positive", "optimization"]
+  template ny-test-case
+
+  flags_matrix "-O0; -O1; -O2; -O3; --profile=compile; --profile=balanced; --profile=size; --profile=speed; --profile=peak; --profile=default; --opt-loops; --opt-dce; --opt-autotune; --opt-internalize; --zero-init; --no-zero-init"
+  source ny <<'NY'
+use std.core
+mut int acc = 0
+for i in 1..8 {
+  acc = acc + i * 2
+}
+assert_eq(acc, 72, "optimization flag arithmetic")
+print("args optimization flags passed")
+NY
+}

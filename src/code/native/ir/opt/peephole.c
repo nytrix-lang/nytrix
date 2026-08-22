@@ -1,3 +1,7 @@
+/*
+ * Peephole optimizer: local instruction-sequence rewriting for
+ * common instruction patterns (identity ops, redundant moves, etc.).
+ */
 #include "code/native/ir/opt/util.h"
 #include "code/native/ir/internal.h"
 #include "base/compat.h"
@@ -12,6 +16,7 @@ typedef struct {
   nyir_func_t *f;
   const bool *known;
   const int64_t *value;
+  const nyir_value_fact_t *facts;
 } nir_peephole_parallel_ctx_t;
 
 static bool nir_peephole_parallel_task(size_t i, void *opaque) {
@@ -29,33 +34,65 @@ static bool nir_peephole_parallel_task(size_t i, void *opaque) {
     else if (ak && av == 0) nir_make_copy(in, in->b);
     break;
   case NYIR_SUB_I64:
-    if (bk && bv == 0) nir_make_copy(in, in->a);
+    if (in->a == in->b) nir_make_const(in, 0);
+    else if (bk && bv == 0) nir_make_copy(in, in->a);
     break;
   case NYIR_MUL_I64:
     if ((bk && bv == 0) || (ak && av == 0)) nir_make_const(in, 0);
     else if (bk && bv == 1) nir_make_copy(in, in->a);
     else if (ak && av == 1) nir_make_copy(in, in->b);
     break;
-  case NYIR_DIV_I64:
-    if (bk && bv == 1) nir_make_copy(in, in->a);
-    else if (ak && av == 0 && bk && bv != 0) nir_make_const(in, 0);
+  case NYIR_DIV_I64: {
+    if (bk && bv == 1) {
+      nir_make_copy(in, in->a);
+    } else if (ak && av == 0 && bk && bv != 0) {
+      nir_make_const(in, 0);
+    } else if (in->a == in->b) {
+      nyir_range_t range = {0};
+      if ((ak && av != 0) ||
+          (ctx->facts && nir_value_range_at(ctx->f, ctx->facts, in->a, i, &range) &&
+           nir_range_excludes_zero(&range)))
+        nir_make_const(in, 1);
+    }
     break;
-  case NYIR_MOD_I64:
-    if (bk && (bv == 1 || bv == -1)) nir_make_const(in, 0);
-    else if (ak && av == 0 && bk && bv != 0) nir_make_const(in, 0);
+  }
+  case NYIR_MOD_I64: {
+    if (bk && bv == 1) {
+      nir_make_const(in, 0);
+    } else if (bk && bv == -1) {
+      nyir_range_t range = {0};
+      bool safe = ak && av != INT64_MIN;
+      if (!safe && ctx->facts &&
+          nir_value_range_at(ctx->f, ctx->facts, in->a, i, &range))
+        safe = nir_range_excludes_int64_min(&range);
+      if (safe)
+        nir_make_const(in, 0);
+    } else if (ak && av == 0 && bk && bv != 0) {
+      nir_make_const(in, 0);
+    } else if (in->a == in->b) {
+      nyir_range_t range = {0};
+      if ((ak && av != 0) ||
+          (ctx->facts && nir_value_range_at(ctx->f, ctx->facts, in->a, i, &range) &&
+           nir_range_excludes_zero(&range)))
+        nir_make_const(in, 0);
+    }
     break;
+  }
   case NYIR_AND_I64:
-    if ((bk && bv == 0) || (ak && av == 0)) nir_make_const(in, 0);
+    if (in->a == in->b) nir_make_copy(in, in->a);
+    else if ((bk && bv == 0) || (ak && av == 0)) nir_make_const(in, 0);
     else if (bk && bv == -1) nir_make_copy(in, in->a);
     else if (ak && av == -1) nir_make_copy(in, in->b);
     break;
   case NYIR_OR_I64:
-    if ((bk && bv == -1) || (ak && av == -1)) nir_make_const(in, -1);
+    if (in->a == in->b) nir_make_copy(in, in->a);
+    else if ((bk && bv == -1) || (ak && av == -1)) nir_make_const(in, -1);
     else if (bk && bv == 0) nir_make_copy(in, in->a);
     else if (ak && av == 0) nir_make_copy(in, in->b);
     break;
   case NYIR_XOR_I64:
-    if (bk && bv == 0) nir_make_copy(in, in->a);
+    if (in->a == in->b) nir_make_const(in, 0);
+    else if (bk && bv == 0) nir_make_copy(in, in->a);
     else if (ak && av == 0) nir_make_copy(in, in->b);
     break;
   case NYIR_SHL_I64:
@@ -115,7 +152,7 @@ bool nyir_peephole(nyir_func_t *f) {
     free(facts);
     return false;
   }
-  nir_peephole_parallel_ctx_t parallel_ctx = {f, known, value};
+  nir_peephole_parallel_ctx_t parallel_ctx = {f, known, value, facts};
   if (!ny_parallel_for(f->len, f->len, nir_peephole_parallel_task,
                        &parallel_ctx)) {
     free(known);
@@ -152,7 +189,9 @@ bool nyir_peephole(nyir_func_t *f) {
       else if (ak && av == 1)
         nir_make_copy(in, in->b);
       else if (bk && bv == -1) {
-        /* x * -1 == 0 - x under Nytrix's wrapping i64 mul. */
+        /*
+         * x * -1 == 0 - x under Nytrix's wrapping i64 mul.
+         */
         if (!nir_rewrite_neg(f, &i, in->a)) {
           free(known);
           free(value);
@@ -168,6 +207,37 @@ bool nyir_peephole(nyir_func_t *f) {
           return false;
         }
         continue;
+      } else if (bk && bv > 1 && (bv & (bv - 1)) == 0) {
+        /*
+         * x * power_of_2 == x << log2(power_of_2).
+         * Only for shift amounts in [1, 62] to stay within defined i64
+         * shift behavior.
+         */
+        int shift = 0;
+        int64_t v = bv;
+        while (v > 1) { v >>= 1; shift++; }
+        if (shift >= 1 && shift <= 62) {
+          if (!nir_rewrite_shl(f, &i, in->a, shift)) {
+            free(known);
+            free(value);
+            free(facts);
+            return false;
+          }
+          continue;
+        }
+      } else if (ak && av > 1 && (av & (av - 1)) == 0) {
+        int shift = 0;
+        int64_t v = av;
+        while (v > 1) { v >>= 1; shift++; }
+        if (shift >= 1 && shift <= 62) {
+          if (!nir_rewrite_shl(f, &i, in->b, shift)) {
+            free(known);
+            free(value);
+            free(facts);
+            return false;
+          }
+          continue;
+        }
       }
       break;
     case NYIR_DIV_I64: {
@@ -182,7 +252,9 @@ bool nyir_peephole(nyir_func_t *f) {
              nir_range_excludes_zero(&range)))
           nir_make_const(in, 1);
       } else if (bk && bv == -1) {
-        /* x / -1 == 0 - x only when INT64_MIN is impossible (trap case). */
+        /*
+         * x / -1 == 0 - x only when INT64_MIN is impossible (trap case).
+         */
         nyir_range_t range = {0};
         bool safe = ak && av != INT64_MIN;
         if (!safe && nir_value_range_at(f, facts, in->a, i, &range))
@@ -200,8 +272,16 @@ bool nyir_peephole(nyir_func_t *f) {
       break;
     }
     case NYIR_MOD_I64: {
-      if (bk && (bv == 1 || bv == -1))
+      if (bk && bv == 1)
         nir_make_const(in, 0);
+      else if (bk && bv == -1) {
+        nyir_range_t range = {0};
+        bool safe = ak && av != INT64_MIN;
+        if (!safe && nir_value_range_at(f, facts, in->a, i, &range))
+          safe = nir_range_excludes_int64_min(&range);
+        if (safe)
+          nir_make_const(in, 0);
+      }
       else if (ak && av == 0 && bk && bv != 0)
         nir_make_const(in, 0);
       else if (nir_operands_same_value(f, in->a, in->b, i)) {
@@ -269,7 +349,9 @@ bool nyir_peephole(nyir_func_t *f) {
       }
       break;
     }
-    /* Float identity folds.  Constants are stored as int64 bitcasts. */
+    /*
+     * Float identity folds.  Constants are stored as int64 bitcasts.
+     */
 #define NY_F64_BITCAST_0   INT64_C(0)
 #define NY_F64_BITCAST_1   INT64_C(4607182418800017408)
 #define NY_F64_BITCAST_N1  INT64_C(-4616189618054758400)
@@ -301,7 +383,9 @@ bool nyir_peephole(nyir_func_t *f) {
       else if (nir_operands_same_value(f, in->a, in->b, i))
         nir_make_f64_const(in, NY_F64_BITCAST_1);
       break;
-    /* Float32 identity folds. */
+    /*
+     * Float32 identity folds.
+     */
 #define NY_F32_BITCAST_0   INT64_C(0)
 #define NY_F32_BITCAST_1   INT64_C(1065353216)
     case NYIR_ADD_F32:

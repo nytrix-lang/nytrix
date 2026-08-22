@@ -19,8 +19,7 @@ module std.math.bin(u8, u16le, u16be, u32le, u32be, u64le, u64be, f32le,
    pkcs7_pad, pkcs7_unpad, zero_pad, zero_unpad, bit_pad, bit_unpad,
    swap16, swap32, swap64, to_le16, to_le32, to_le64, to_be16, to_be32, to_be64,
    extract_bits, insert_bits, mask_bits, expand_bits, compress_bits,
-bigint_to_bin_fixed)
-
+   bigint_to_bin_fixed)
 use std.core
 use std.core.error
 use std.core.str
@@ -82,13 +81,13 @@ fn u16be(any s, int i=0) int {
 fn u32le(any s, int i=0) int {
    "Read unsigned 32-bit little-endian value."
    (load8(s, i) | (load8(s, i + 1) << 8) |
-   (load8(s, i + 2) << 16) | (load8(s, i + 3) << 24)) & 4294967295
+      (load8(s, i + 2) << 16) | (load8(s, i + 3) << 24)) & 4294967295
 }
 
 fn u32be(any s, int i=0) int {
    "Read unsigned 32-bit big-endian value."
    ((load8(s, i) << 24) | (load8(s, i + 1) << 16) |
-   (load8(s, i + 2) << 8) | load8(s, i + 3)) & 4294967295
+      (load8(s, i + 2) << 8) | load8(s, i + 3)) & 4294967295
 }
 
 fn _join_u64(int hi, int lo) int { (hi << 32) | lo }
@@ -106,13 +105,13 @@ fn u64be(any s, int i=0) int {
 fn unpack_le32(list b, int i=0) int {
    "Read 32-bit little-endian value from bytes list."
    (b[i] | (b[i + 1] << 8) |
-   (b[i + 2] << 16) | (b[i + 3] << 24)) & 4294967295
+      (b[i + 2] << 16) | (b[i + 3] << 24)) & 4294967295
 }
 
 fn unpack_be32(list b, int i=0) int {
    "Read 32-bit big-endian value from bytes list."
    ((b[i] << 24) | (b[i + 1] << 16) |
-   (b[i + 2] << 8) | b[i + 3]) & 4294967295
+      (b[i + 2] << 8) | b[i + 3]) & 4294967295
 }
 
 fn unpack_le64(list b, int i=0) int {

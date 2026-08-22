@@ -1,3 +1,7 @@
+/*
+ * Fuzz utilities: string-buffer helpers, file I/O, and cross-platform
+ * compatibility shims shared by all fuzzer submodules.
+ */
 #include "core.h"
 
 #include <stdarg.h>

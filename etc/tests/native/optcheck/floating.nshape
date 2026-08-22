@@ -1,0 +1,32 @@
+shape optcheck_floating_matrix {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle f64 optcheck matrix]
+  template ny-test-case
+  ; One source covers every optimizer level without four duplicated fixtures.
+  flags_matrix "-O0 --native-backend x86_64 --native-result-oracle=4; -O1 --native-backend x86_64 --native-result-oracle=4; -O2 --native-backend x86_64 --native-result-oracle=4; -O3 --native-backend x86_64 --native-result-oracle=4"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn score() int {
+mut a = 1.5
+mut b = 0.75
+mut hits = 0
+{
+   a = a + b * 0.000001
+   b = b + a * 0.0000005
+   if a > b { hits = hits + 1 }
+   a = a + b * 0.000001
+   b = b + a * 0.0000005
+   if a > b { hits = hits + 1 }
+   a = a + b * 0.000001
+   b = b + a * 0.0000005
+   if a > b { hits = hits + 1 }
+   a = a + b * 0.000001
+   b = b + a * 0.0000005
+   if a > b { hits = hits + 1 }
+}
+return hits
+}
+NY
+}

@@ -635,7 +635,7 @@ fn _transform_tab(any state) dict {
       }
       _prop("Current", _gizmo_label(mode) + " / " + _axis_label(axis) +
          " / snap " + _bool_text(st.get("gizmo_snap", false)) +
-      " / ruler " + _bool_text(st.get("gizmo_ruler", true)))
+         " / ruler " + _bool_text(st.get("gizmo_ruler", true)))
       st["gizmo_axis"] = axis
       if axis != axis0 { st["gizmo_axis_changed"] = true }
       def sel0 = bool(st.get("scene_selected", false))
@@ -810,7 +810,7 @@ fn draw_body(any state) dict {
    def rs = st.get("renderer", dict(0))
    gui.text_colored((scene_name.len > 0 ? scene_name : "No scene") +
       "  Parts " + to_str(_intv(st.get("part_count", 0))) +
-   "  Draws " + to_str(_intv(rs.get("draws", 0))), [0.64, 0.69, 0.72, 1.0])
+      "  Draws " + to_str(_intv(rs.get("draws", 0))), [0.64, 0.69, 0.72, 1.0])
    st["tab"] = gui.tab_strip("inspector_tabs", st.get("tab_items", TAB_ITEMS), int(st.get("tab", 0)))
    gui.separator()
    case int(st.get("tab", 0)){

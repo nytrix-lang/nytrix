@@ -1,0 +1,14 @@
+shape type_proof_solver_ge_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "solver", "comparison", "soundness"]
+  template ny-compile-fail
+  flags "--proof-solver=presburger"
+  expect compile_fail
+
+  expect_message "reject 5 >= 6"
+  source ny <<'NY'
+use std.core
+prove(5 >= 6, "reject 5 >= 6")
+NY
+}

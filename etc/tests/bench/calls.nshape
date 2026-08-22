@@ -7,19 +7,21 @@ shape calls {
   source ny <<'NY'
 use std.core
 use std.os.time
-
+fn mix(int x, int y) int {
+   def z = x + y
+   def low = z & 255
+   def raw = (x * 31) + (y * 17) + low
+   raw - ((raw / 1000003) * 1000003)
+}
+fn step(int acc, int i) int {
+   mix(acc + i, i + 7)
+}
 def n = 20000
-
 def start = ticks()
 mut acc = 1
 mut i = 0
 while i < n {
-   def x = acc + i
-   def y = i + 7
-   def z = x + y
-   def low = z & 255
-   def raw = (x * 31) + (y * 17) + low
-   acc = raw - ((raw / 1000003) * 1000003)
+   acc = step(acc, i)
    i += 1
 }
 def end = ticks()

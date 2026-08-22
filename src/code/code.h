@@ -323,6 +323,8 @@ typedef struct codegen_env_cache_t {
   int const_string_global_init;
   int print_proven_int_fast;
   int print_proven_str_fast;
+  int64_t comptime_fuel_total;
+  int64_t comptime_fuel_remaining;
 } codegen_env_cache_t;
 
 typedef struct codegen_symbols_t {
@@ -487,6 +489,7 @@ typedef struct codegen_options_t {
   bool opt_sys_mode;
   bool opt_unsafe_arith;
   const char *type_solver;
+  const char *proof_solver;
   const char *c_frontend;
   bool user_native_abi;
   bool skip_stdlib;
@@ -500,6 +503,7 @@ typedef struct codegen_registry_t {
   ny_operator_def_list operators;
   VEC(enum_def_t *) enums;
   VEC(layout_def_t *) layouts;
+  lemma_def_list lemmas;
   ny_mono_specialization_list mono_specs;
   bool mono_emitting;
   bool mono_raw_expr_disabled;
@@ -750,6 +754,7 @@ struct codegen_t {
       bool opt_sys_mode;
       bool opt_unsafe_arith;
       const char *type_solver;
+      const char *proof_solver;
       const char *c_frontend;
       bool user_native_abi;
       bool skip_stdlib;

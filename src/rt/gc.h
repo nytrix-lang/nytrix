@@ -88,6 +88,10 @@ typedef struct nyGcState {
   int64_t **remembered_set;
   size_t remembered_count;
   size_t remembered_capacity;
+  /* Open-addressed membership index for O(1) write-barrier deduplication. */
+  int64_t **remembered_index;
+  size_t remembered_index_count;
+  size_t remembered_index_capacity;
 
   /* Roots */
   int64_t **roots;
@@ -128,10 +132,9 @@ void nyGcAddRoot(int64_t *slot);
 void nyGcRemoveRoot(int64_t *slot);
 void nyGcWriteBarrier(int64_t *slot, int64_t value);
 
-/* Object management */
-void nyGcSetFinalizer(int64_t obj, void (*finalizer)(int64_t));
-bool nyGcIsMarked(int64_t obj);
-void nyGcMark(int64_t obj);
+/* Weak references */
+int64_t nyGcMakeWeak(int64_t target);
+int64_t nyGcGetWeak(int64_t weak_obj);
 
 /* Debug */
 void nyGcDumpStats(FILE *out);

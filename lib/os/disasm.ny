@@ -7,8 +7,7 @@ module std.os.disasm(assemble, asm_hex, disasm, disasm_lines, hexdump, unhex,
    arithmetic_operator, clean_operand, operand_kind, memory_operand_parts,
    operand_ny_expr, address_ny_expr, is_zero_register, is_zeroing_idiom, target_address,
    shell_sh, shellcode_sh, shellcode_execve, shellcode_exit, shellcode_write, shellcode_read,
-assembler_available, capstone_available)
-
+   assembler_available, capstone_available)
 use std.core
 use std.core.str
 use std.os (temp_dir, pid, file_write, file_read, file_remove)
@@ -432,13 +431,13 @@ fn is_zeroing_idiom(str arch, str mnemonic, str operands) bool {
    def parts = split_operands(operands)
    if parts.len < 2 { return false }
    if fam == "x86" {
-      return(startswith(m, "xor") || startswith(m, "sub")) && _same_operand(parts[0], parts[1])
+      return (startswith(m, "xor") || startswith(m, "sub")) && _same_operand(parts[0], parts[1])
    }
    if fam == "aarch64" || fam == "arm" {
-      return(startswith(m, "eor") || startswith(m, "sub")) && parts.len > 2 && _same_operand(parts[1], parts[2])
+      return (startswith(m, "eor") || startswith(m, "sub")) && parts.len > 2 && _same_operand(parts[1], parts[2])
    }
    if fam == "riscv" {
-      return(startswith(m, "xor") || startswith(m, "sub")) && parts.len > 2 && _same_operand(parts[1], parts[2])
+      return (startswith(m, "xor") || startswith(m, "sub")) && parts.len > 2 && _same_operand(parts[1], parts[2])
    }
    false
 }

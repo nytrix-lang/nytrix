@@ -73,7 +73,7 @@ fn _blank_vt(dict st) any {
          _fonts(st.get("font")),
          int(st.get("bg", 0xff070707)),
          int(st.get("fg", 0xfff0f0f0))
-   ))
+      ))
 }
 
 fn _ensure_vt(dict st) dict {
@@ -210,7 +210,7 @@ fn open_repl(dict st) dict {
    _spawn(st, "repl", tools.ny_command(), [], "", [
          "NYTRIX_REPL_QUIET=1",
          "NYTRIX_REPL_PLAIN=1"
-   ])
+      ])
 }
 
 fn _find_tab_mode(dict st, str m) int {

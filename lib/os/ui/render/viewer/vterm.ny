@@ -1325,7 +1325,7 @@ fn _kg_draw_image_run(dict vt,
             stripe_start_x,
             y_pix,
             cw,
-         ch)
+            ch)
          stripe_start_col = cur_col
          stripe_start_x = x
       }
@@ -1421,7 +1421,7 @@ fn _kg_draw_visible_images(dict vt,
                            1.0,
                            1.0,
                            1.0,
-                        1.0)
+                           1.0)
                      } else {
                         draw_rect_tex_uv(dx, dy, dw, dh, tex, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
                      }
@@ -1650,7 +1650,7 @@ fn _tputc_fast(dict vt, any st, int co, int ro, any g, any pal, int dfg, int dbg
       }
       if u == 68 { mut nvt = _tnewline_fast(vt, st, co, ro, g, dfg, dbg, false)
          store32(st, 0, OFF_ESC_STATE)
-      return nvt }
+         return nvt }
       if u == 69 {
          mut nvt = _tnewline_fast(vt, st, co, ro, g, dfg, dbg, true)
          store32(st, 0, OFF_ESC_STATE)
@@ -2303,7 +2303,7 @@ fn _tcsihandle_fast(dict vt, any st, int co, int ro, any g, any pal, int dfg, in
    elif u == 72 || u == 102 { _tmoveto_fast(st, co, ro, (a1 == 0) ? 0 : a1 - 1, (a0 == 0) ? 0 : a0 - 1) }
    elif u == 114 { if !pr { mut t=(a0==0)?1:a0 mut b=(a1==0)?ro:a1 store32(st, t-1, OFF_TOP)
          store32(st, b-1, OFF_BOT)
-   _tmoveto_fast(st, co, ro, 0, 0) } }
+         _tmoveto_fast(st, co, ro, 0, 0) } }
    elif u == 104 { vt = _tsetmode_fast(vt, st, co, ro, g, dfg, dbg, pr, true, ag) }
    elif u == 108 { vt = _tsetmode_fast(vt, st, co, ro, g, dfg, dbg, pr, false, ag) }
    elif u == 69 { _tmoveto_fast(st, co, ro, 0, load32(st, OFF_CY) + ((a0==0)?1:a0)) }
@@ -2777,7 +2777,7 @@ fn _kg_place_at_cursor(dict vt,
       y_off,
       z_index,
       insert_lines,
-   reserve_override)
+      reserve_override)
    if !do_not_move { store32(st, cx + cols, OFF_CX) }
    vt
 }
@@ -2890,7 +2890,7 @@ fn _kg_place_existing(dict vt, int image_id, int placement_id, int cols, int row
       explicit_pos,
       cell_x,
       cell_y,
-   do_not_move)
+      do_not_move)
 }
 
 fn _kg_transmit_direct(dict vt, int image_id, str payload, int cols, int rows, int fmt, int px_w, int px_h, int quiet, int more) dict {
@@ -2950,7 +2950,7 @@ fn _kg_place_transmitted(dict vt, int action, int virt, int image_id, int placem
       explicit_pos,
       cell_x,
       cell_y,
-   do_not_move)
+      do_not_move)
 }
 
 fn _kg_handle_apc(dict vt, str buf) dict {
@@ -3764,9 +3764,9 @@ fn _vterm_handle_mouse_release(dict vt, any st, int co, list history, int hist_l
          def cnt = load32(st, OFF_CLICK_COUNT)
          if moved || cnt >= 2 {
             def full_txt = _vt_selection_text(vt, history, load32(st, OFF_SEL_SY), load32(st, OFF_SEL_SX), load32(st, OFF_SEL_EY), load32(st,
-               OFF_SEL_EX),
+                  OFF_SEL_EX),
                hist_len,
-            co)
+               co)
             def keep_sticky = vt.get("sticky_selection", false)
             if keep_sticky {
                _vterm_stop_selection_drag(st, true)
@@ -3951,9 +3951,9 @@ fn _vterm_handle_ctrl_shift_key(dict vt, any st, int co, list history, int hist_
    if k == KEY_C {
       if load8(st, OFF_SEL_ACTIVE) == 0 { return _vterm_key_hit(vt) }
       def full_txt = _vt_selection_text(vt, history, load32(st, OFF_SEL_SY), load32(st, OFF_SEL_SX), load32(st, OFF_SEL_EY), load32(st,
-         OFF_SEL_EX),
+            OFF_SEL_EX),
          hist_len,
-      co)
+         co)
       if full_txt.len > 0 {
          vt = _vt_clip_set(vt, full_txt)
       }
@@ -3976,9 +3976,9 @@ fn _vterm_handle_ctrl_insert(dict vt, any st, int co, list history, int hist_len
    if k != KEY_INSERT { return _vterm_key_miss(vt) }
    if load8(st, OFF_SEL_ACTIVE) != 0 {
       def full_txt = _vt_selection_text(vt, history, load32(st, OFF_SEL_SY), load32(st, OFF_SEL_SX), load32(st, OFF_SEL_EY), load32(st,
-         OFF_SEL_EX),
+            OFF_SEL_EX),
          hist_len,
-      co)
+         co)
       if full_txt.len > 0 {
          vt = _vt_clip_set(vt, full_txt)
       }

@@ -1,0 +1,42 @@
+shape proof_cross_function {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "call-site", "postcondition", "pure", "range"]
+  template ny-test-case
+  flags "--color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+;; Call-site proof witnesses, postconditions, and pure-function ranges compose
+;; across function boundaries.
+fn require_positive(proof<5 > 0> p) int { 1 }
+def proof positive = prove(5 > 0)
+assert(require_positive(positive) == 1, "call-site satisfied proof")
+
+;; Callee-param-driven satisfaction: the proposition references param `m`,
+;; which maps to the call argument's range at the call site (decide == 1).
+fn needs_big_m(int m, proof<m > 100> p) int { 2 }
+def proof big200 = prove(200 > 100)
+assert(needs_big_m(200, big200) == 2, "callee-param satisfied proof")
+
+;; 5.2: @proves post-condition verified against return ranges
+;; Param-independent case: the return range [5,5] must satisfy result > 0
+;; (decide == 1, verified at compile time, not just accepted).
+@proves(result > 0)
+fn five() int { 5 }
+
+assert(five() == 5, "proves param-independent decide")
+
+;; 5.3: pure-function output range cache
+@pure
+fn double_it(int x) int { x * 2 }
+
+def int v = 21
+assert(double_it(v) == 42, "pure fn result correct")
+;; double_it(v) with v in [21,21] must range-track to [42,42]
+assert_compile_range(double_it(v), 42, 42, "pure fn output range")
+
+assert(true, "cross-function proofs complete")
+NY
+}

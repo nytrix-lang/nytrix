@@ -1,3 +1,7 @@
+/*
+ * Debug-info emission bridge: wraps LLVM DIBuilder calls to attach
+ * source locations, scopes, and lexical blocks during codegen.
+ */
 #include "dbg.h"
 #include "base/common.h"
 #include "code/code.h"

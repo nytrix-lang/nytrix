@@ -3,7 +3,6 @@
 ;; loader so every decompiler pass (disassembly, lifting, decompilation) works
 ;; on PE binaries unchanged.
 module std.os.rev.decomp.pe(pe_header, sections, segments, symbols, functions, imports, relocations, strings, entry, arch, load)
-
 use std.core
 use std.core.str as str
 use std.os.path as path
@@ -19,15 +18,12 @@ def _PE_MACHINE_ARM = 0x1c0
 def _PE_MACHINE_ARM64 = 0xaa64
 def _PE_MACHINE_RISCV32 = 0x5032
 def _PE_MACHINE_RISCV64 = 0x5064
-
 def _SCN_MEM_EXECUTE = 0x20000000
 def _SCN_MEM_READ = 0x40000000
 def _SCN_MEM_WRITE = 0x80000000
-
 def _RELOC_HIGHLOW = 3
 def _RELOC_DIR32 = 10
 def _RELOC_DIR64 = 4
-
 def _DIR_EXPORT = 0
 def _DIR_IMPORT = 1
 def _DIR_BASERELOC = 5
@@ -58,7 +54,7 @@ fn _file_type(int id) str {
 
 fn _sec_perms(int flags) str {
    ((flags & _SCN_MEM_READ) != 0 ? "r" : "-") + ((flags & _SCN_MEM_WRITE) != 0 ? "w" : "-") +
-      ((flags & _SCN_MEM_EXECUTE) != 0 ? "x" : "-")
+   ((flags & _SCN_MEM_EXECUTE) != 0 ? "x" : "-")
 }
 
 fn pe_header(any source) dict {
@@ -71,7 +67,7 @@ fn pe_header(any source) dict {
    }
    def lfanew = _u32(b, 0x3c, true)
    if lfanew + 24 > b.len || load8(b, lfanew) != 80 || load8(b, lfanew + 1) != 69 ||
-      load8(b, lfanew + 2) != 0 || load8(b, lfanew + 3) != 0 {
+   load8(b, lfanew + 2) != 0 || load8(b, lfanew + 3) != 0 {
       return {"ok": false, "format": "unknown", "reason": "no_pe_signature"}
    }
    def coff = lfanew + 4
@@ -144,9 +140,9 @@ fn _pe_section_table(str b, dict h) list {
       def flags = _u32(b, off + 36, true)
       def base = int(h.get("image_base", 0))
       out = out.append({"index": i + 1, "name": nm, "addr": base + vaddr, "rva": vaddr,
-         "offset": rawptr, "size": rsize, "vsize": vsize, "flags": flags,
-         "exec": (flags & _SCN_MEM_EXECUTE) != 0, "load": (flags & 0x00000020) != 0,
-         "perms": _sec_perms(flags)})
+            "offset": rawptr, "size": rsize, "vsize": vsize, "flags": flags,
+            "exec": (flags & _SCN_MEM_EXECUTE) != 0, "load": (flags & 0x00000020) != 0,
+            "perms": _sec_perms(flags)})
       i += 1
    }
    out
@@ -196,9 +192,9 @@ fn segments(any source) list {
       def s = ss[i]
       if int(s.get("size", 0)) > 0 {
          out = out.append({"index": i, "type": "section", "load": true,
-            "vaddr": int(s.get("addr", 0)), "offset": int(s.get("offset", 0)),
-            "filesz": int(s.get("size", 0)), "memsz": int(s.get("vsize", int(s.get("size", 0)))),
-            "perms": s.get("perms", "r--"), "name": s.get("name", "")})
+               "vaddr": int(s.get("addr", 0)), "offset": int(s.get("offset", 0)),
+               "filesz": int(s.get("size", 0)), "memsz": int(s.get("vsize", int(s.get("size", 0)))),
+               "perms": s.get("perms", "r--"), "name": s.get("name", "")})
       }
       i += 1
    }
@@ -227,8 +223,8 @@ fn _pe_symbol_table(str b, dict h, list ss) list {
       if nm.len > 0 && (sclass == 2 || sclass == 0x68) {
          def is_func = sclass == 2 && secnum > 0
          out = out.append({"index": i, "name": nm, "value": value, "size": 0,
-            "shndx": is_func ? secnum : 0, "bind": "global", "type": is_func ? "function" : "object",
-            "source": "coff", "storage_class": sclass, "section": secnum > 0 && secnum <= ss.len ? ss[secnum - 1].get("name", "") : ""})
+               "shndx": is_func ? secnum : 0, "bind": "global", "type": is_func ? "function" : "object",
+               "source": "coff", "storage_class": sclass, "section": secnum > 0 && secnum <= ss.len ? ss[secnum - 1].get("name", "") : ""})
       }
       i += 1 + aux
    }
@@ -263,15 +259,15 @@ fn _imports_from_directories(str b, dict h, list ss) list {
          if (bits == 64 && (entry & 0x8000000000000000) != 0) || (bits != 64 && (entry & 0x80000000) != 0) {
             def ord = bits == 64 ? (entry & 0xffff) : (entry & 0xffff)
             out = out.append({"name": "ordinal_" + to_str(ord), "raw_name": dll + "#ordinal_" + to_str(ord),
-               "dll": dll, "ordinal": ord, "iat_rva": thunk_rva + ti * (bits == 64 ? 8 : 4),
-               "iat_addr": base + thunk_rva + ti * (bits == 64 ? 8 : 4), "shndx": 0})
+                  "dll": dll, "ordinal": ord, "iat_rva": thunk_rva + ti * (bits == 64 ? 8 : 4),
+                  "iat_addr": base + thunk_rva + ti * (bits == 64 ? 8 : 4), "shndx": 0})
          } else {
             def byname_off = _rva_to_offset(ss, entry)
             def fn_name = byname_off >= 0 && byname_off + 2 <= b.len ? _cstring(b, byname_off + 2) : ""
             if fn_name.len > 0 {
                out = out.append({"name": fn_name, "raw_name": fn_name, "dll": dll,
-                  "iat_rva": thunk_rva + ti * (bits == 64 ? 8 : 4),
-                  "iat_addr": base + thunk_rva + ti * (bits == 64 ? 8 : 4), "shndx": 0})
+                     "iat_rva": thunk_rva + ti * (bits == 64 ? 8 : 4),
+                     "iat_addr": base + thunk_rva + ti * (bits == 64 ? 8 : 4), "shndx": 0})
             }
          }
          th_off += bits == 64 ? 8 : 4
@@ -284,7 +280,7 @@ fn _imports_from_directories(str b, dict h, list ss) list {
 }
 
 fn symbols(any source) list {
-   "Return PE symbol records (COFF symbols plus import thunks)."
+   "Return PE symbol records(COFF symbols plus import thunks)."
    if is_dict(source) && source.contains("symbols") { return source.get("symbols", []) }
    def b = _source_data(source)
    def h = pe_header(b)
@@ -298,8 +294,8 @@ fn symbols(any source) list {
    while i < imports.len {
       def im = imports[i]
       out = out.append({"index": 0, "name": im.get("name", ""), "value": int(im.get("iat_addr", 0)),
-         "size": 0, "shndx": 0, "bind": "global", "type": "function", "source": "pe_import",
-         "dll": im.get("dll", ""), "raw_name": im.get("raw_name", "")})
+            "size": 0, "shndx": 0, "bind": "global", "type": "function", "source": "pe_import",
+            "dll": im.get("dll", ""), "raw_name": im.get("raw_name", "")})
       i += 1
    }
    out
@@ -354,8 +350,8 @@ fn _base_relocations(str b, dict h, list ss) list {
          if typ != 0 {
             def addr = base + page + rel
             out = out.append({"index": out.len, "section": ".reloc", "offset": addr,
-               "info": ent, "sym_index": 0, "type": typ, "type_name": _reloc_type_name(typ),
-               "symbol": "", "symbol_record": dict(), "addend": 0, "rela": false})
+                  "info": ent, "sym_index": 0, "type": typ, "type_name": _reloc_type_name(typ),
+                  "symbol": "", "symbol_record": dict(), "addend": 0, "rela": false})
          }
          i += 2
       }
@@ -425,38 +421,42 @@ fn load(str p, any opts=dict()) dict {
       "sections": ss, "segments": segs, "symbols": sy, "functions": funs,
       "imports": imp, "relocations": rel, "import_sites": [],
       "strings": strings(data, int(opts.get("min_string", 4)), int(opts.get("string_limit", 256))),
-   "tools": tool_status()}
+      "tools": tool_status()}
    if bin.get("ok", false) {
       def e = int(h.get("entry", 0))
       if e != 0 && _vaddr_to_offset(ss, e) >= 0 {
          bin = bin.set("functions", funs.append({"name": "entry_" + str.to_hex(e, 0), "value": e,
-            "size": 0, "type": "function", "kind": "entry"}))
+                  "size": 0, "type": "function", "kind": "entry"}))
       }
    }
    bin
 }
 
 fn _pe_u16(int v) str { chr(v & 0xff) + chr((v >> 8) & 0xff) }
+
 fn _pe_u32(int v) str { _pe_u16(v) + _pe_u16(v >> 16) }
+
 fn _pe_u64(int v) str { _pe_u32(v) + _pe_u32(v >> 32) }
+
 fn _pe_name(str s, int n) str {
    mut out = s
    while out.len < n { out = out + "\x00" }
    out
 }
+
 fn _pe_sample() str {
    def dos = _pe_name("MZ", 0x3c) + _pe_u32(0x80)
    def coff = _pe_name("PE", 4) + _pe_u16(_PE_MACHINE_AMD64) + _pe_u16(1) +
-      _pe_u32(0) + _pe_u32(0) + _pe_u32(0) + _pe_u16(0xf0) + _pe_u16(0x22)
+   _pe_u32(0) + _pe_u32(0) + _pe_u32(0) + _pe_u16(0xf0) + _pe_u16(0x22)
    def oh = _pe_u16(0x20b) + _pe_u16(0) +
-      _pe_u32(0x40) + _pe_u32(0) + _pe_u32(0) + _pe_u32(0x1000) + _pe_u32(0x1000) +
-      _pe_u64(0x140000000) + _pe_u32(0x1000) + _pe_u32(0x200) +
-      _pe_name("", 12) + _pe_u32(0) +
-      _pe_u32(0x2000) + _pe_u32(0x400) + _pe_u32(0) + _pe_u16(3) + _pe_u16(0) +
-      _pe_u64(0x100000) + _pe_u64(0x1000) + _pe_u64(0x100000) + _pe_u64(0x1000) +
-      _pe_u32(0) + _pe_u32(16) + _pe_name("", 128)
+   _pe_u32(0x40) + _pe_u32(0) + _pe_u32(0) + _pe_u32(0x1000) + _pe_u32(0x1000) +
+   _pe_u64(0x140000000) + _pe_u32(0x1000) + _pe_u32(0x200) +
+   _pe_name("", 12) + _pe_u32(0) +
+   _pe_u32(0x2000) + _pe_u32(0x400) + _pe_u32(0) + _pe_u16(3) + _pe_u16(0) +
+   _pe_u64(0x100000) + _pe_u64(0x1000) + _pe_u64(0x100000) + _pe_u64(0x1000) +
+   _pe_u32(0) + _pe_u32(16) + _pe_name("", 128)
    def sec = _pe_name(".text", 8) + _pe_u32(0x40) + _pe_u32(0x1000) + _pe_u32(0x40) + _pe_u32(0x400) +
-      _pe_u32(0) + _pe_u32(0) + _pe_u16(0) + _pe_u16(0) + _pe_u32(0x60000020)
+   _pe_u32(0) + _pe_u32(0) + _pe_u16(0) + _pe_u16(0) + _pe_u32(0x60000020)
    dos + coff + oh + sec
 }
 

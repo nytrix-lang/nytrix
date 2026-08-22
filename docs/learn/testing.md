@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":50,"summary":"Write focused tests, run fixture suites, and verify that the intended compiler or browser path executed."} -->
 # Testing
 
 A Nytrix check is an executable source file that asserts behavior and exits
@@ -29,6 +30,29 @@ ny test --with-stdlib module-or-path
 `.nshape` checks may use `flags_matrix` when the same source must be compiled
 through several native backends. Rows are separated by `;` or escaped newlines,
 and each row is appended to the normal `flags` for one focused harness run.
+
+## Embedded Ny generators
+
+When a deterministic fixture needs repetitive Ny source, keep the generator in
+the `.nshape` instead of adding a companion script or expanding hundreds of
+near-identical lines:
+
+```text
+source ny generate awk <<'AWK'
+BEGIN {
+  print "use std.core"
+  for (i = 0; i < 100; i++)
+    print "print(" i ")"
+}
+AWK
+```
+
+The opener and closing marker follow the existing source-block convention.
+`ny-test` writes the block verbatim to a private temporary AWK program, runs
+`awk` with empty input using separate arguments (never a shell command), and
+uses standard output as the Ny source. A missing or malformed block, unavailable
+`awk`, nonzero generator exit, or empty output is a fixture failure. Literal
+`source ny` blocks remain supported and take precedence for compatibility.
 
 ## Native optimizer stress
 
@@ -75,6 +99,13 @@ Run a `.ny` file directly. Run a `.nshape` specification through `ny-test`;
 it is harness metadata, not source code for `ny` itself.
 `ny-test` executes the repository tree as one deterministic run while reporting
 Runtime, Native, and Interop ownership separately.
+
+Benchmark `.nshape` fixtures use their `checksum=` output as the cross-backend
+equivalence contract. For protected performance cases, fixture metadata may add
+`max_native_c_ratio` or `max_native_llvm_ratio`; the canonical benchmark runner
+fails the row when the measured median exceeds that fixture-specific ratio.
+Use `--bench-correctness` for the one-run semantic smoke path and at least five
+measured runs for noise-aware performance gating.
 
 ```bash
 ./make test --with-stdlib --failures-only

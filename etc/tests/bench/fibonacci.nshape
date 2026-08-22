@@ -8,9 +8,9 @@ shape fibonacci {
 use std.core
 use std.os.time
 def iters = 5000
-def fib_n = 40 + argc() - 1
+def fib_base = 36
 ;; Fibonacci (Benchmark)
-fn fib(n) {
+fn fib(int n) int {
    mut a = 0
    mut b = 1
    mut i = 2
@@ -24,9 +24,11 @@ fn fib(n) {
 }
 mut i = 0
 mut r = 0
+mut seed = argc()
 def t0 = ticks()
 while i < iters {
-   r = fib(fib_n)
+   seed = (seed * 17 + 11) % 97
+   r += fib(fib_base + seed % 5)
    i += 1
 }
 def t1 = ticks()
@@ -58,9 +60,13 @@ int main(int argc, char **argv) {
     (void)argv;
     int64_t start = now_ns();
     int64_t r = 0;
+    int64_t seed = argc;
     const int iters = 5000;
-    const int fib_n = 40 + argc - 1;
-    for (int i = 0; i < iters; i++) r = fib(fib_n);
+    const int fib_base = 36;
+    for (int i = 0; i < iters; i++) {
+        seed = (seed * 17 + 11) % 97;
+        r += fib((int)(fib_base + seed % 5));
+    }
     int64_t end = now_ns();
     printf("checksum=%lld\n", (long long)r);
     if (end <= start) end = start + 1;
@@ -86,8 +92,10 @@ def fib(n):
 
 start = time.process_time_ns()
 r = 0
+seed = 1
 for _ in range(ITERS):
-    r = fib(40)
+    seed = (seed * 17 + 11) % 97
+    r += fib(36 + seed % 5)
 end = time.process_time_ns()
 print(f"checksum={r}")
 print(f"elapsed_ns={max(1, end - start)}")

@@ -1,3 +1,7 @@
+/*
+ * BigFloat runtime: arbitrary-precision floating-point arithmetic
+ * with tagged-value boxing, GMP-backed ops, and NyValue interop.
+ */
 #include "base/common.h"
 #include "rt/runtime.h"
 #include "rt/shared.h"
@@ -760,6 +764,18 @@ int64_t rt_bigfloat_from_value(int64_t v, int64_t precision_v) {
   return bf_from_value_raw(v, bf_precision_clamp(p ? p : bf_default_precision()));
 }
 
+int64_t rt_native_bigfloat_from_value(int64_t v, int64_t precision) {
+  uint32_t p =
+      bf_precision_clamp(precision ? precision : bf_default_precision());
+  if (bf_ptr(v) ||
+      (is_ptr(v) && is_heap_ptr(v) &&
+       *(int64_t *)((char *)(uintptr_t)v - 8) == TAG_BIGINT))
+    return bf_from_value_raw(v, p);
+  uint64_t mag =
+      v < 0 ? (uint64_t)(-(v + 1)) + 1 : (uint64_t)v;
+  return bf_from_u64_raw(mag, v < 0 ? -1 : v > 0, 0, p);
+}
+
 int64_t rt_bigfloat_zero(int64_t precision_v) {
   int64_t p = is_int(precision_v) ? rt_untag_v(precision_v) : precision_v;
   return bf_from_u64_raw(0, 0, 0,
@@ -831,9 +847,17 @@ int64_t rt_bigfloat_cmp(int64_t av, int64_t bv) {
   return rt_tag_v(bf_cmp_obj(a, b));
 }
 
+int64_t rt_native_bigfloat_cmp(int64_t a, int64_t b) {
+  return rt_untag_v(rt_bigfloat_cmp(a, b));
+}
+
 int64_t rt_bigfloat_precision(int64_t av) {
   ny_bigfloat_t *a = bf_ptr(av);
   return rt_tag_v(a ? (int64_t)a->precision : 0);
+}
+
+int64_t rt_native_bigfloat_precision(int64_t a) {
+  return rt_untag_v(rt_bigfloat_precision(a));
 }
 
 int64_t rt_bigfloat_to_f64(int64_t av) {
@@ -860,6 +884,10 @@ int64_t rt_bigfloat_to_f64(int64_t av) {
     mag_free(&m);
   }
   return rt_flt_box_double(d);
+}
+
+double rt_native_bigfloat_to_f64(int64_t av) {
+  return rt_flt_unbox_double(rt_bigfloat_to_f64(av));
 }
 
 int64_t rt_bigfloat_sqrt(int64_t av) {
@@ -916,6 +944,10 @@ int64_t rt_bigfloat_pow_int(int64_t av, int64_t ev) {
     return bf_div_obj(bf_ptr(one), bf_ptr(result));
   }
   return result;
+}
+
+int64_t rt_native_bigfloat_pow_int(int64_t a, int64_t exponent) {
+  return rt_bigfloat_pow_int(a, rt_tag_v(exponent));
 }
 
 int64_t rt_bigfloat_to_str(int64_t av) {

@@ -56,6 +56,7 @@ fn socket_connect(str host, int port) { return sock.socket_connect(host, port) }
 fn socket_connect_async(str host, int port) { return sock.socket_connect_async(host, port) }
 
 fn socket_bind(str host, int port) { return sock.socket_bind(host, port) }
+
 fn socket_bound_port(int fd) { return sock.socket_bound_port(fd) }
 
 fn socket_accept(int fd) { return sock.socket_accept(fd) }
