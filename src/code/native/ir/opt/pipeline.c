@@ -535,6 +535,8 @@ static bool nyir_optimize_pipeline(nyir_func_t *f, nyir_opt_stats_t *stats,
       nyir_run_pass(f, nyir_loop_vectorize, stats, dump, &ok);
     if (ok && !nyir_pass_stopped)
       nyir_run_pass(f, nyir_iv_elim, stats, dump, &ok);
+    if (ok && !nyir_pass_stopped)
+      nyir_run_pass(f, nyir_loop_unroll, stats, dump, &ok);
     if (ok && !nyir_pass_stopped) {
       static bool (*const pre_slp[])(nyir_func_t *) = {
           nyir_redundant_load_elim, nyir_memory_ssa_forward,
@@ -611,9 +613,7 @@ static bool nyir_optimize_pipeline(nyir_func_t *f, nyir_opt_stats_t *stats,
         nyir_run_pass(f, nyir_iv_elim, stats, dump, &ok);
       if (ok && !nyir_pass_stopped)
         nyir_run_pass(f, nyir_cse, stats, dump, &ok);
-      if (ok && !nyir_pass_stopped &&
-          !(nyir_disabled_pass &&
-            strcmp(nyir_disabled_pass, "loop_unroll") == 0))
+      if (ok && !nyir_pass_stopped)
         nyir_run_pass(f, nyir_loop_unroll, stats, dump, &ok);
       if (ok && !nyir_pass_stopped) {
         static bool (*const pre_slp[])(nyir_func_t *) = {

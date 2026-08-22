@@ -49,9 +49,10 @@ int64_t rt_native_tbuf_new(int64_t count, int64_t elem_size) {
   unsigned char *base = calloc(1, bytes);
   if (!base)
     return 0;
-  memcpy(base, &count, sizeof(count));
-  memcpy(base + 8, &elem_size, sizeof(elem_size));
-  memcpy(base + 16, &capacity, sizeof(capacity));
+  int64_t *hdr = (int64_t *)base;
+  hdr[0] = count;
+  hdr[1] = elem_size;
+  hdr[2] = capacity;
   return (int64_t)(uintptr_t)(base + RT_NATIVE_TBUF_HEADER);
 }
 
@@ -59,12 +60,17 @@ int64_t rt_native_tbuf_append(int64_t buffer, int64_t value,
                               int64_t is_string) {
   if (!buffer)
     return 0;
+  int64_t *base = (int64_t *)((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER);
+  int64_t count = base[0];
+  int64_t elem_size = base[1];
+  int64_t capacity = base[2];
+  if (count >= 0 && count < capacity && elem_size == 8 && !is_string) {
+    base[0] = count + 1;
+    ((int64_t *)(uintptr_t)buffer)[count] = value;
+    return buffer;
+  }
   unsigned char *data = (unsigned char *)(uintptr_t)buffer;
-  unsigned char *base = data - RT_NATIVE_TBUF_HEADER;
-  int64_t count = 0, elem_size = 0, capacity = 0;
-  memcpy(&count, base, sizeof(count));
-  memcpy(&elem_size, base + 8, sizeof(elem_size));
-  memcpy(&capacity, base + 16, sizeof(capacity));
+  unsigned char *raw_base = data - RT_NATIVE_TBUF_HEADER;
   if (count < 0 || elem_size <= 0 || capacity < count ||
       (uint64_t)count >= (SIZE_MAX - RT_NATIVE_TBUF_HEADER) /
                              (uint64_t)elem_size)
@@ -84,29 +90,29 @@ int64_t rt_native_tbuf_append(int64_t buffer, int64_t value,
                        (size_t)capacity * (size_t)elem_size;
     size_t new_bytes = RT_NATIVE_TBUF_HEADER +
                        (size_t)new_capacity * (size_t)elem_size;
-    unsigned char *grown = realloc(base, new_bytes);
+    unsigned char *grown = realloc(raw_base, new_bytes);
     if (!grown)
       return 0;
     memset(grown + old_bytes, 0, new_bytes - old_bytes);
-    base = grown;
-    data = base + RT_NATIVE_TBUF_HEADER;
+    raw_base = grown;
+    base = (int64_t *)grown;
+    data = raw_base + RT_NATIVE_TBUF_HEADER;
     capacity = new_capacity;
-    memcpy(base + 16, &capacity, sizeof(capacity));
+    base[2] = capacity;
   }
   unsigned char *slot = data + (size_t)count * (size_t)elem_size;
   if (elem_size == 8 && !is_string) {
-    memcpy(base, &new_count, sizeof(new_count));
-    memcpy(data + (size_t)count * sizeof(value), &value, sizeof(value));
+    base[0] = new_count;
+    ((int64_t *)(uintptr_t)data)[count] = value;
     return (int64_t)(uintptr_t)data;
   }
-  memcpy(base, &new_count, sizeof(new_count));
+  base[0] = new_count;
   memset(slot, 0, (size_t)elem_size);
   memcpy(slot, &value, sizeof(value));
   if (elem_size >= 24 && is_string) {
     int64_t len = (int64_t)strlen((const char *)(uintptr_t)value);
     int64_t tag = 121;
     memcpy(slot + 8, &len, sizeof(len));
-
     memcpy(slot + 16, &tag, sizeof(tag));
   }
   return (int64_t)(uintptr_t)data;
@@ -114,39 +120,42 @@ int64_t rt_native_tbuf_append(int64_t buffer, int64_t value,
 int64_t rt_native_tbuf_append_i64(int64_t buffer, int64_t value) {
   if (!buffer)
     return 0;
+  int64_t *base = (int64_t *)((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER);
+  int64_t count = base[0];
+  int64_t capacity = base[2];
+  if (count >= 0 && count < capacity) {
+    base[0] = count + 1;
+    ((int64_t *)(uintptr_t)buffer)[count] = value;
+    return buffer;
+  }
   unsigned char *data = (unsigned char *)(uintptr_t)buffer;
-  unsigned char *base = data - RT_NATIVE_TBUF_HEADER;
-  int64_t count = 0, elem_size = 0, capacity = 0;
-  memcpy(&count, base, sizeof(count));
-  memcpy(&elem_size, base + 8, sizeof(elem_size));
-  memcpy(&capacity, base + 16, sizeof(capacity));
+  unsigned char *raw_base = data - RT_NATIVE_TBUF_HEADER;
+  int64_t elem_size = 0;
+  memcpy(&elem_size, raw_base + 8, sizeof(elem_size));
   if (count < 0 || elem_size != 8 || capacity < count ||
       (uint64_t)count >= (SIZE_MAX - RT_NATIVE_TBUF_HEADER) / 8u)
     return 0;
   int64_t new_count = count + 1;
-  if (new_count > capacity) {
-    int64_t new_capacity = capacity < 4 ? 4 : capacity;
-    if (new_capacity > INT64_MAX / 2)
-      new_capacity = INT64_MAX;
-    else
-      new_capacity *= 2;
-    if (new_capacity < new_count ||
-        (uint64_t)new_capacity >
-            (SIZE_MAX - RT_NATIVE_TBUF_HEADER) / 8u)
-      return 0;
-    size_t old_bytes = RT_NATIVE_TBUF_HEADER + (size_t)capacity * 8u;
-    size_t new_bytes = RT_NATIVE_TBUF_HEADER + (size_t)new_capacity * 8u;
-    unsigned char *grown = realloc(base, new_bytes);
-    if (!grown)
-      return 0;
-    memset(grown + old_bytes, 0, new_bytes - old_bytes);
-    base = grown;
-    data = base + RT_NATIVE_TBUF_HEADER;
-    capacity = new_capacity;
-    memcpy(base + 16, &capacity, sizeof(capacity));
-  }
-  memcpy(base, &new_count, sizeof(new_count));
-  memcpy(data + (size_t)count * sizeof(value), &value, sizeof(value));
+  int64_t new_capacity = capacity < 4 ? 4 : capacity;
+  if (new_capacity > INT64_MAX / 2)
+    new_capacity = INT64_MAX;
+  else
+    new_capacity *= 2;
+  if (new_capacity < new_count ||
+      (uint64_t)new_capacity >
+          (SIZE_MAX - RT_NATIVE_TBUF_HEADER) / 8u)
+    return 0;
+  size_t old_bytes = RT_NATIVE_TBUF_HEADER + (size_t)capacity * 8u;
+  size_t new_bytes = RT_NATIVE_TBUF_HEADER + (size_t)new_capacity * 8u;
+  unsigned char *grown = realloc(raw_base, new_bytes);
+  if (!grown)
+    return 0;
+  memset(grown + old_bytes, 0, new_bytes - old_bytes);
+  base = (int64_t *)grown;
+  data = grown + RT_NATIVE_TBUF_HEADER;
+  base[0] = new_count;
+  base[2] = new_capacity;
+  ((int64_t *)(uintptr_t)data)[count] = value;
   return (int64_t)(uintptr_t)data;
 }
 

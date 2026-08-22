@@ -3,6 +3,11 @@ shape bench_call_chain {
   generator "stress"
   features ["perf", "call", "c-vs-ny", "native", "checksum", "time"]
   template ny-test-case
+  tier "critical"
+  budget {
+    max_native_c_ratio 30.0
+    max_ny_compile_ms 3000
+  }
   expect compile_and_run
   source ny <<'NY'
 use std.core

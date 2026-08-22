@@ -65,7 +65,7 @@ static int64_t rt_proof_digest_value(int64_t canonical_v,
     hash = rt_proof_hash_bytes(hash, parts[i], lens[i]);
     hash = rt_proof_hash_bytes(hash, &separator, 1);
   }
-  return (int64_t)(hash & UINT64_C(0x1fffffffffffffff));
+  return (int64_t)(hash & UINT64_C(0x000fffffffffffff));
 }
 
 int64_t rt_proof_cert_digest(int64_t canonical_v, int64_t module_version_v,

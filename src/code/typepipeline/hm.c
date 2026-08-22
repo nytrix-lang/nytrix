@@ -630,12 +630,36 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
       strcmp(want->name, got->name) != 0 &&
       ny_proof_proposition_shape_matches(want->name, got->name))
     return true;
-  if (hm_is_name(got, "nil") &&
-      (want->kind == NY_HM_NULLABLE || want->kind == NY_HM_PTR))
+  if (hm_is_name(got, "nil")) {
+    if (want->kind == NY_HM_NAME && strcmp(want->name, "nil") == 0)
+      return true;
+    if (want->kind != NY_HM_NULLABLE && want->kind != NY_HM_PTR) {
+      ny_hm_type_t *inner = hm_type_new(hm, want->kind);
+      inner->id = want->id;
+      inner->name = want->name;
+      inner->a = want->a;
+      inner->b = want->b;
+      inner->args = want->args;
+      want->kind = NY_HM_NULLABLE;
+      want->a = inner;
+      want->name = NULL;
+    }
     return true;
-  if (hm_is_name(want, "nil") &&
-      (got->kind == NY_HM_NULLABLE || got->kind == NY_HM_PTR))
+  }
+  if (hm_is_name(want, "nil")) {
+    if (got->kind != NY_HM_NULLABLE && got->kind != NY_HM_PTR) {
+      want->kind = NY_HM_NULLABLE;
+      want->a = got;
+      want->name = NULL;
+    } else {
+      want->kind = got->kind;
+      want->a = got->a;
+      want->b = got->b;
+      want->args = got->args;
+      want->name = got->name;
+    }
     return true;
+  }
   if (want->kind == NY_HM_NAME && hm_name_accepts_kind(want->name, got->kind))
     return true;
   if (got->kind == NY_HM_NAME && hm_name_accepts_kind(got->name, want->kind))
@@ -1598,6 +1622,16 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
   const char *leaf = ny_name_leaf(name);
   bool allow_dynamic_literal_args = hm_call_is_layout_from(hm, name);
   if (!target && leaf && args) {
+    if (strcmp(leaf, "require_shape") == 0 && args->len == 2) {
+      if (args->data[1].val && args->data[1].val->kind == NY_E_LITERAL &&
+          args->data[1].val->as.literal.kind == NY_LIT_STR &&
+          args->data[1].val->as.literal.as.s.data) {
+        ny_hm_type_t *refined =
+            hm_parse_type_name(hm, args->data[1].val->as.literal.as.s.data, self_name);
+        if (refined)
+          return refined;
+      }
+    }
     if ((strcmp(leaf, "ok") == 0 || strcmp(leaf, "__result_ok") == 0) &&
         args->len == 1) {
       ny_hm_type_t *ok_t = hm_infer_expr(hm, env, args->data[0].val, self_name);
@@ -2430,6 +2464,19 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
         hm_check_fin_initializer(hm, decl, init, init ? init->tok : s->tok);
         hm_unify(hm, final_t, it, init ? init->tok : s->tok,
                  "variable declaration");
+      } else if (!s->as.var.is_decl && hm_is_any(final_t)) {
+        /*
+         * Reassignment without an annotation where the new value degrades to
+         * `any`: keep the binding's existing concrete collection type.
+         * Without this, a value flowing through a generic helper (e.g.
+         * append(any, any) -> any) would downgrade an explicitly typed list
+         * binding to `any`, and later uses (index reads, member access) would
+         * fall back to dynamic dispatch.  Only collections are preserved;
+         * scalar/nil bindings keep normal inference.
+         */
+        ny_hm_type_t *prev = hm_env_get(hm, env, name);
+        if (prev && hm_type_known_collection(prev) && prev != final_t)
+          final_t = prev;
       }
       if (decl && strcmp(decl, "proof") == 0 && it &&
           it->kind == NY_HM_NAME && it->name &&

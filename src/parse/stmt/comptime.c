@@ -180,7 +180,8 @@ static stmt_t *parse_hash_if_stmt(parser_t *p, token_t hash_tok) {
   token_t kw_tok = p->cur;
   if (!tok_is_hash_kw(kw_tok, "if", NY_T_IF) &&
       !tok_is_hash_kw(kw_tok, "elif", NY_T_ELIF)) {
-    parser_error(p, kw_tok, "expected 'if' or 'elif' after '#'", NULL);
+    parser_error(p, kw_tok, "expected 'if' or 'elif' after '#'",
+                 "write '#if condition' or '#elif condition'");
     return NULL;
   }
   parser_advance(p);
@@ -227,7 +228,8 @@ static stmt_t *parse_hash_if_stmt(parser_t *p, token_t hash_tok) {
 static stmt_t *parse_hash_main_guard_stmt(parser_t *p, token_t hash_tok) {
   token_t main_tok = p->cur;
   if (!tok_is_hash_kw(main_tok, "main", NY_T_IDENT)) {
-    parser_error(p, main_tok, "expected 'main' after '#'", NULL);
+    parser_error(p, main_tok, "expected 'main' after '#'",
+                 "write '#main { ... }' for top-level script guard");
     return NULL;
   }
   parser_advance(p);
@@ -251,7 +253,8 @@ static stmt_t *parse_hash_main_guard_stmt(parser_t *p, token_t hash_tok) {
 static stmt_t *parse_hash_platform_guard_stmt(parser_t *p, token_t hash_tok) {
   token_t guard_tok = p->cur;
   if (!tok_is_platform_guard(guard_tok)) {
-    parser_error(p, guard_tok, "expected platform guard after '#'", NULL);
+    parser_error(p, guard_tok, "expected platform guard after '#'",
+                 "supported guards are #linux, #macos, #windows, #wasm, #x86_64, #aarch64");
     return NULL;
   }
   parser_advance(p);
@@ -541,20 +544,21 @@ static stmt_t *parse_comptime_table_stmt(parser_t *p) {
 static int parse_diag_rule_call_arg_index(parser_t *p) {
   if (!tok_is_ident_text(p->cur, "call")) {
     parser_error(p, p->cur, "expected call.arg(n) in diagnostic rule predicate",
-                 NULL);
+                 "write 'when call.name == \"...\" && !is_literal(call.arg(0))'");
     return -1;
   }
   parser_advance(p);
   parser_expect(p, NY_T_DOT, "'.' before call predicate member", NULL);
   if (!tok_is_ident_text(p->cur, "arg")) {
-    parser_error(p, p->cur, "expected arg in call.arg(n)", NULL);
+    parser_error(p, p->cur, "expected arg in call.arg(n)",
+                 "use call.arg(0), call.arg(1), etc.");
     return -1;
   }
   parser_advance(p);
   parser_expect(p, NY_T_LPAREN, "'(' after call.arg", NULL);
   if (p->cur.kind != NY_T_NUMBER) {
     parser_error(p, p->cur, "expected integer argument index in call.arg(n)",
-                 NULL);
+                 "pass a 0-based argument index, e.g. call.arg(0)");
     return -1;
   }
   char buf[32];
@@ -573,20 +577,22 @@ static bool parse_diag_rule_when(parser_t *p, ny_diag_rule_t *rule) {
   parser_advance(p);
   if (!tok_is_ident_text(p->cur, "call")) {
     parser_error(p, p->cur, "expected call.name in diagnostic rule predicate",
-                 NULL);
+                 "write 'when call.name == \"target_function\"'");
     return false;
   }
   parser_advance(p);
   parser_expect(p, NY_T_DOT, "'.' before call predicate member", NULL);
   if (!tok_is_ident_text(p->cur, "name")) {
-    parser_error(p, p->cur, "expected name in call.name predicate", NULL);
+    parser_error(p, p->cur, "expected name in call.name predicate",
+                 "write 'call.name == \"target_function\"'");
     return false;
   }
   parser_advance(p);
   parser_expect(p, NY_T_EQ, "'==' after call.name", NULL);
   if (p->cur.kind != NY_T_STRING) {
     parser_error(p, p->cur,
-                 "diagnostic rule call.name expects a string literal", NULL);
+                 "diagnostic rule call.name expects a string literal",
+                 "wrap the function name in quotes, e.g. call.name == \"fn_name\"");
     return false;
   }
   size_t call_len = 0;
@@ -601,7 +607,8 @@ static bool parse_diag_rule_when(parser_t *p, ny_diag_rule_t *rule) {
   if (!tok_is_ident_text(p->cur, "is_literal")) {
     parser_error(
         p, p->cur,
-        "expected is_literal(call.arg(n)) in diagnostic rule predicate", NULL);
+        "expected is_literal(call.arg(n)) in diagnostic rule predicate",
+        "check literalness with !is_literal(call.arg(0))");
     return false;
   }
   parser_advance(p);
@@ -625,12 +632,13 @@ static stmt_t *parse_comptime_diagnostic_rule_stmt(parser_t *p) {
   parser_advance(p);
   if (!tok_is_ident_text(p->cur, "rule")) {
     parser_error(p, p->cur, "expected 'rule' after 'comptime diagnostic'",
-                 NULL);
+                 "write 'comptime diagnostic rule name { ... }'");
     return stmt_new(p->arena, NY_S_BLOCK, tok);
   }
   parser_advance(p);
   if (p->cur.kind != NY_T_IDENT) {
-    parser_error(p, p->cur, "expected diagnostic rule name", NULL);
+    parser_error(p, p->cur, "expected diagnostic rule name",
+                 "give the diagnostic rule a name identifier");
     return stmt_new(p->arena, NY_S_BLOCK, tok);
   }
   ny_diag_rule_t rule = {
@@ -650,7 +658,8 @@ static stmt_t *parse_comptime_diagnostic_rule_stmt(parser_t *p) {
       parser_advance(p);
       if (p->cur.kind != NY_T_STRING) {
         parser_error(p, p->cur,
-                     "diagnostic rule error expects a string literal", NULL);
+                     "diagnostic rule error expects a string literal",
+                     "provide an error message string, e.g. error \"message\"");
         parser_sync_stmt_boundary(p);
         continue;
       }
@@ -665,7 +674,7 @@ static stmt_t *parse_comptime_diagnostic_rule_stmt(parser_t *p) {
       parser_advance(p);
       if (p->cur.kind != NY_T_STRING) {
         parser_error(p, p->cur, "diagnostic rule fix expects a string literal",
-                     NULL);
+                     "provide a fix suggestion string, e.g. fix \"how to resolve\"");
         parser_sync_stmt_boundary(p);
         continue;
       }
@@ -2105,6 +2114,7 @@ static stmt_t *parse_hash_stmt(parser_t *p) {
     parser_error(p, p->cur,
                  "expected platform guard, 'main', 'link', 'include', "
                  "'define', or 'line' after '#'",
+                 "'#' is not a comment in Nytrix (comments start with ';'); "
                  "valid platform guards include #linux, #unix, #windows, "
                  "#macos, #x86, #x86_64, #arm, #aarch64");
     return NULL;

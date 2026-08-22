@@ -3842,12 +3842,18 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(suite_timeout_s))
     if rc == 0 and host_os() != "windows":
         rc = run_tool(build_root, kind, "ny-fuzz", ["validate-shapes", "etc/tests/shapes"], timeout=float(suite_timeout_s))
+    suite_rc = rc
+    if not _env_flag("NYTRIX_TEST_NO_BENCH", False):
+        step("run bench: appending the C-vs-Ny benchmark table (NYTRIX_TEST_NO_BENCH=1 to skip)")
+        bench_rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--bench"], timeout=float(suite_timeout_s))
+    else:
+        bench_rc = 0
     elapsed_ms = int((time.perf_counter() - started) * 1000.0)
-    if rc == 0:
+    if suite_rc == 0 and bench_rc == 0:
         ok(f"test suite completed in {elapsed_ms}ms")
     else:
-        log("TEST", f"test suite failed after {elapsed_ms}ms")
-    return rc
+        log("TEST", f"test suite failed after {elapsed_ms}ms (suite={suite_rc}, bench={bench_rc})")
+    return suite_rc or bench_rc
 
 def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
     """Run native optimization correctness nshape tests."""
@@ -4173,10 +4179,12 @@ _COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]
         [
             ("What it does", [
                 ("Suite", "runs ny-test over etc/tests/runtime|errors|bench|native|interop|shapes and lib"),
+                ("Bench", "after a green suite, appends the timed C-vs-Ny benchmark table (NYTRIX_TEST_NO_BENCH=1 to skip)"),
                 ("Native", "forces native fixtures/REPL/stdll runs (NYTRIX_TEST_NATIVE=1)"),
                 ("Shapes", "after the suite, runs ny-fuzz validate-shapes over etc/tests/shapes"),
             ]),
             ("ny-test options", [
+                ("--list-bench", "list bench fixture stems (discovery)"),
                 ("--bench", "run the C-vs-Ny benchmark suite instead of the test suite"),
                 ("--bench-run N", "timed samples per benchmark (default 5)"),
                 ("--bench-warmup N", "warm-up runs per benchmark (default 2)"),
@@ -4216,6 +4224,7 @@ _COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]
                 ("Runner", "runs the C-vs-Ny benchmark shapes (etc/tests/bench)"),
             ]),
             ("Options", [
+                ("--list-bench", "list bench fixture stems without running"),
                 ("PATTERN ...", "fixture name substring filter (repeatable)"),
                 ("--bench-run N", "timed samples per fixture (default 1; use 3+ for stable statistics)"),
                 ("--bench-warmup N", "warm-up runs before timing (default 0; use 1+ for hot-code measurements)"),

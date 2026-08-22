@@ -37,6 +37,29 @@ char *ny_type_pipeline_typed_json(program_t *prog, codegen_t *cg,
   return tp_take(&j, "{\"engine\":\"type-pipeline-v1\",\"functions\":[]}");
 }
 
+int ny_type_pipeline_list_fallbacks(program_t *prog, codegen_t *cg,
+                                    const char *source_name, bool include_std) {
+  ny_tp_ctx_t ctx;
+  tp_ctx_build(&ctx, prog, cg, source_name, include_std);
+  ny_hm_state_t hm;
+  hm_run(&hm, &ctx);
+  size_t total = ctx.fallbacks.len;
+  for (size_t i = 0; i < ctx.fallbacks.len; ++i) {
+    const ny_tp_fallback_t *fb = &ctx.fallbacks.data[i];
+    if (!fb || !fb->code)
+      continue;
+    const char *file = fb->tok.filename ? fb->tok.filename : "<source>";
+    printf("fallback %s stage=%s expr=%s at %s:%d:%d reason=%s\n", fb->code,
+           fb->stage ? fb->stage : "type",
+           fb->expr_kind ? fb->expr_kind : "expr", file, fb->tok.line,
+           fb->tok.col, fb->reason ? fb->reason : "");
+  }
+  printf("%zu fallbacks listed\n", total);
+  hm_dispose(&hm);
+  tp_ctx_dispose(&ctx);
+  return 0;
+}
+
 static void tp_validate_operator_decls(ny_tp_ctx_t *ctx);
 static void tp_validate_impl_coherence(ny_tp_ctx_t *ctx);
 static void tp_emit_operator_obligations_stmt(ny_tp_json_t *j, ny_tp_ctx_t *ctx,

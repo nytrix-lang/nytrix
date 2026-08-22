@@ -1,0 +1,44 @@
+defaults {
+  family "runtime-native"
+  generator "native"
+  template ny-test-case
+}
+
+shape aarch64_elf64_internal_link_run_f32_call {
+  features [native object elf64 aarch64 aapcs64 internal-link qemu f32 call]
+  flags "--native-backend aarch64 -emit-only -o /tmp/nytrix-aarch64-link-f32.o"
+  expect object_link_run_f32_5.0
+  source ny <<'NY'
+fn combine(f32 a, f32 b) f32 {
+  a + b
+}
+
+combine(2.0f32, 3.0f32)
+NY
+}
+
+shape aarch64_elf64_internal_link_run_f64_call {
+  features [native object elf64 aarch64 aapcs64 internal-link qemu f64 call]
+  flags "--native-backend aarch64 -emit-only -o /tmp/nytrix-aarch64-link-f64.o"
+  expect object_link_run_f64_6.75
+  source ny <<'NY'
+fn combine(f64 a, f64 b) f64 {
+  (a * b) + (a / b) - 0.75
+}
+
+combine(3.0, 2.0)
+NY
+}
+
+shape aarch64_elf64_internal_link_run_call8 {
+  features [native object elf64 aarch64 aapcs64 internal-link qemu call8]
+  flags "--native-backend aarch64 -emit-only -o /tmp/nytrix-aarch64-link-call8.o"
+  expect object_link_run_i64_36
+  source ny <<'NY'
+fn add8(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g, i64 h) i64 {
+  a + b + c + d + e + f + g + h
+}
+
+add8(1, 2, 3, 4, 5, 6, 7, 8)
+NY
+}

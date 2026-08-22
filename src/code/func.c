@@ -2959,9 +2959,31 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
     if (fn->as.fn.attr_naked) {
       LLVMBuildUnreachable(cg->builder);
     } else {
+      /*
+       * Fall-off-the-end: materialize nil (matching the native pipeline) so
+       * both backends return the same value. Previously this returned the
+       * constant 1 on the JIT/LLVM path while native returned nil — the same
+       * program produced different results per backend. For a concrete
+       * non-void return type this is also a latent bug the caller cannot
+       * observe safely, so warn at the declaration site.
+       */
+      const char *rt = fn->as.fn.return_type;
+      const char *dot = rt ? strrchr(rt, '.') : NULL;
+      const char *base = dot ? dot + 1 : rt;
+      if (base && *base && strcmp(base, "void") != 0 &&
+          strcmp(base, "any") != 0 && strcmp(base, "nil") != 0 &&
+          fn->tok.line > 0) {
+        /*
+         * W_MISSING_RETURN = 2006 (see diag_code_t in code/diag.c).
+         */
+        ny_diag_warning_code(fn->tok, 2006,
+                             "function '%s' may fall off the end without "
+                             "returning a %s value (returns nil)",
+                             fn->as.fn.name, base);
+      }
       ny_cg_emit_trace_return_void(cg);
       ny_cg_emit_trace_exit(cg);
-      LLVMBuildRet(cg->builder, ny_c1(cg));
+      LLVMBuildRet(cg->builder, ny_cnil(cg));
     }
   }
   scope_pop(scopes, &fd);

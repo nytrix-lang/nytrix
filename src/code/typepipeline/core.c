@@ -416,6 +416,17 @@ static bool tp_fallback_warning_interesting(const ny_tp_fallback_t *fb) {
     return true;
   if (strcmp(fb->code, "hm-result-payload-dynamic") == 0)
     return true;
+  /*
+   * Always-interesting degradation classes: the checker lost the element/return
+   * type entirely, which is exactly the dynamic-container "sieve" cliff (every
+   * read/write on the boxed path).  hm-unsupported-expr means HM gave up on the
+   * expression form altogether -- the strongest inference-gap signal we have.
+   * Std-lib fallbacks are filtered downstream by ny_diag_warning_code.
+   */
+  if (strcmp(fb->code, "hm-index-dynamic-result") == 0)
+    return true;
+  if (strcmp(fb->code, "hm-unsupported-expr") == 0)
+    return true;
   bool verbose = ny_diag_warn_level() >= 2 ||
                  ny_env_enabled("NYTRIX_TYPE_FALLBACK_WARN_VERBOSE");
   if (!verbose)
@@ -424,8 +435,6 @@ static bool tp_fallback_warning_interesting(const ny_tp_fallback_t *fb) {
     return true;
   if (strcmp(fb->code, "hm-dynamic-arithmetic") == 0 ||
       strcmp(fb->code, "hm-dynamic-comparison") == 0)
-    return true;
-  if (strcmp(fb->code, "hm-index-dynamic-result") == 0)
     return true;
   if (strcmp(fb->code, "hm-callable-return-any") == 0)
     return true;
@@ -457,6 +466,9 @@ static const char *tp_fallback_hint(const ny_tp_fallback_t *fb) {
            "call cannot be specialized";
   if (strcmp(code, "hm-result-payload-dynamic") == 0)
     return "the Result payload type is not known before unwrap or pattern bind";
+  if (strcmp(code, "hm-unsupported-expr") == 0)
+    return "the type checker has no inference rule for this expression form, so it "
+           "fell back to any";
   return "the program still compiles; the checker lost static evidence here";
 }
 
@@ -488,6 +500,9 @@ static const char *tp_fallback_fix(const ny_tp_fallback_t *fb) {
   if (strcmp(code, "hm-result-payload-dynamic") == 0)
     return "construct or annotate the value as Result<T,E> before unwrap or "
            "pattern binding";
+  if (strcmp(code, "hm-unsupported-expr") == 0)
+    return "annotate the binding with an explicit type or --strict-types to make "
+           "the gap a compile error instead of a silent any";
   return "add a local annotation/converter or use --strict-types to turn this "
          "class into an error";
 }

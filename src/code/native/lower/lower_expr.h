@@ -354,6 +354,11 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
               b, "rt_native_any_to_cstr", part_val, -1, -1, 1, 0);
           if (part_val < 0)
             return -1;
+        } else if (ny_native_nir_expr_is_bool(b, sub)) {
+          part_val = ny_native_nir_emit_runtime_call(
+              b, "rt_native_bool_to_cstr", part_val, -1, -1, 1, 0);
+          if (part_val < 0)
+            return -1;
         } else {
           /*
            * Raw i64 (matches print's is_cstr ? cstr : i64 convention).
@@ -623,6 +628,8 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b, const expr_t *e)
         e->as.index.start->kind == NY_E_LITERAL &&
         e->as.index.start->as.literal.kind == NY_LIT_INT &&
         e->as.index.start->as.literal.as.i == 0) {
+      if (e->as.index.target && e->as.index.target->kind == NY_E_IDENT)
+        return ny_native_nir_lower_expr(b, e->as.index.target);
       return ny_native_nir_lower_expr(b, direct_target->as.list_like.data[0]);
     }
     const expr_t *literal_target =

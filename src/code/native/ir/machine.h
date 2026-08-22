@@ -106,6 +106,7 @@ typedef enum {
   NY_MACH_XOR,
   NY_MACH_SHL,
   NY_MACH_SAR,
+  NY_MACH_ROR,
   NY_MACH_FMA,     /* dst = src0 * src1 + src2 (scalar or packed) */
   NY_MACH_SQRT,    /* dst = sqrt(src0) — scalar f64 */
   NY_MACH_SIN,     /* dst = sin(src0) — scalar f64 */

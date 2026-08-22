@@ -5,7 +5,7 @@
 #include "core.h"
 
 static bool line_has_call_symbol(const char *line, size_t len, const char *symbol) {
-  if (!memmem(line, len, "call", 4)) return false;
+  if (!ny_memmem(line, len, "call", 4)) return false;
   size_t sym_len = strlen(symbol);
   for (size_t i = 0; i + sym_len + 1 <= len; ++i) {
     if (line[i] != '@') continue;
@@ -29,7 +29,7 @@ static int call_count(const char *data, size_t len, const char *symbol) {
 }
 
 static bool call_prefix_on_line(const char *line, size_t len, const char *prefix) {
-  if (!memmem(line, len, "call", 4)) return false;
+  if (!ny_memmem(line, len, "call", 4)) return false;
   size_t prefix_len = strlen(prefix);
   for (size_t i = 0; i + prefix_len + 1 <= len; ++i) {
     if (line[i] == '@' && memcmp(line + i + 1, prefix, prefix_len) == 0) return true;

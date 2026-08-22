@@ -1,0 +1,74 @@
+defaults {
+  family "runtime-native"
+  generator "native"
+  template ny-test-case
+}
+
+shape x86_64_elf64_object_link_run_f64 {
+  features [native object elf64 x86_64 nyir link-run]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f64.o"
+  expect object_link_run_f64_3.75
+  source ny <<'NY'
+def a = 1.5
+def b = 2.25
+a + b
+NY
+}
+
+shape x86_64_elf64_object_link_run_f64_call {
+  features [native object elf64 x86_64 nyir link-run f64 call]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f64-call.o"
+  expect object_link_run_f64_3.75
+  source ny <<'NY'
+fn add(f64 x, f64 y) f64 { x + y }
+add(1.5, 2.25)
+NY
+}
+
+shape x86_64_elf64_object_link_run_f64_call8 {
+  features [native object elf64 x86_64 nyir link-run machine-ir sysv f64 call]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f64-call8.o"
+  expect object_link_run_f64_36.5
+  source ny <<'NY'
+fn sum8(f64 a, f64 b, f64 c, f64 d, f64 e, f64 f, f64 g, f64 h) f64 {
+  a + b + c + d + e + f + g + h
+}
+sum8(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.5)
+NY
+}
+
+shape x86_64_elf64_object_link_run_f64_call9 {
+  features [native object elf64 x86_64 nyir link-run]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f64-call9.o"
+  expect object_link_run_f64_45.5
+  source ny <<'NY'
+fn sum9(f64 a, f64 b, f64 c, f64 d, f64 e, f64 f, f64 g, f64 h, f64 i) f64 {
+  a + b + c + d + e + f + g + h + i
+}
+sum9(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.5)
+NY
+}
+
+shape x86_64_elf64_object_link_run_f64_call10 {
+  features [native object elf64 x86_64 nyir link-run]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f64-call10.o"
+  expect object_link_run_f64_56.0
+  source ny <<'NY'
+fn sum10(f64 a, f64 b, f64 c, f64 d, f64 e, f64 f, f64 g, f64 h, f64 i, f64 j) f64 {
+  a + b + c + d + e + f + g + h + i + j
+}
+sum10(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.5, 10.5)
+NY
+}
+
+shape x86_64_elf64_object_link_run_f64_branch_return {
+  features [native object elf64 x86_64 nyir link-run machine-ir f64 cfg]
+  flags "--native-backend x86_64 -emit-only -o /tmp/nytrix-link-run-f64-branch-return.o"
+  expect object_link_run_f64_2.0
+  source ny <<'NY'
+fn choose(int a, f64 left, int b, f64 right) f64 {
+  if a < b { left } else { right }
+}
+choose(1, 2.0, 3, 4.0)
+NY
+}

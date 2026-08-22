@@ -12,6 +12,32 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef enum {
+  E_SYNTAX = 1001,
+  E_UNDEFINED = 1002,
+  E_TYPE_MISMATCH = 1003,
+  E_ARITY = 1004,
+  E_DUPLICATE_NAME = 1005,
+  E_SHADOWING = 1006,
+  E_INVALID_LITERAL = 1007,
+  E_RETURN_MISMATCH = 1008,
+  E_IMMUTABLE_MODIFY = 1009,
+  E_NOT_CALLABLE = 1010,
+  E_INDEX_OOB = 1011,
+  E_MATCH_EXHAUSTIVE = 1012,
+  E_EFFECT_VIOLATION = 1013,
+  E_INVALID_ATTR = 1014,
+  E_LAYOUT_SIZE = 1015,
+  E_INVALID_FFI = 1016,
+
+  W_UNUSED = 2001,
+  W_SHADOWING = 2002,
+  W_DEPRECATED = 2003,
+  W_IMPLICIT_COERCE = 2004,
+  W_DIV_ZERO = 2005,
+  W_MISSING_RETURN = 2006,
+} diag_code_t;
+
 static inline const char *ny_llvm_name(codegen_t *cg, const char *name) {
   if (!name || !*name)
     return "";
@@ -439,6 +465,9 @@ bool ny_lazy_emit_stdlib_var_needed(codegen_t *cg, stmt_t *s,
                                     const char *cur_mod);
 void ny_diag_configure(int warn_level, bool compact_mode);
 int ny_diag_warn_level(void);
+void ny_diag_set_warn_as_error(bool value);
+void ny_diag_set_shadow_warnings(bool value);
+int ny_diag_warn_as_error_count(void);
 void ny_diag_error(token_t tok, const char *fmt, ...);
 void ny_diag_warning(token_t tok, const char *fmt, ...);
 void ny_diag_error_code(token_t tok, int code, const char *fmt, ...);
@@ -507,6 +536,7 @@ LLVMValueRef ny_unbox_float(codegen_t *cg, LLVMValueRef v);
 bool ny_module_target_is_apple_arm64(LLVMModuleRef module);
 bool ny_is_proven_int(codegen_t *cg, scope *scopes, size_t depth, expr_t *e, LLVMValueRef v);
 bool ny_is_proven_bool(codegen_t *cg, scope *scopes, size_t depth, expr_t *e, LLVMValueRef v);
+bool ny_expr_is_pure(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
 
 LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
 LLVMValueRef ny_native_callback_adapter_value(codegen_t *cg, expr_t *expr);
@@ -544,6 +574,13 @@ fun_sig *ny_gencall_lookup_attached_method(codegen_t *cg,
                                            const char *method_name);
 int ny_gencall_known_obj_tag(const char *type_name);
 int ny_gencall_known_tagof(const char *type_name);
+bool ny_expr_is_literal_int_list(expr_t *e);
+expr_t *ny_binding_flow_static_int_list_init(binding *b);
+binding *ny_static_int_list_target_binding(codegen_t *cg, scope *scopes,
+                                           size_t depth, expr_t *target);
+LLVMValueRef ny_static_int_list_global(codegen_t *cg, binding *b,
+                                       expr_t *init,
+                                       LLVMTypeRef *out_array_ty);
 bool ny_gencall_type_is_known_obj(const char *type_name);
 bool ny_gencall_type_is_known_non_obj(const char *type_name);
 LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth, const char *op, LLVMValueRef l,
@@ -587,6 +624,7 @@ void process_use_imports(codegen_t *cg, stmt_t *s);
 void collect_use_aliases(codegen_t *cg, stmt_t *s);
 void collect_use_modules(codegen_t *cg, stmt_t *s);
 void process_exports(codegen_t *cg, stmt_t *s);
+void ny_lint_unused_imports(codegen_t *cg, program_t *prog);
 bool ny_is_module_active(codegen_t *cg, const char *name);
 const char *ny_lookup_module_alias(codegen_t *cg, scope *scopes, size_t depth,
                                    const char *name, size_t name_len,

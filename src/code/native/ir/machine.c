@@ -485,6 +485,7 @@ const char *ny_mach_opcode_name(ny_mach_opcode_t op) {
   case NY_MACH_XOR:        return "xor";
   case NY_MACH_SHL:        return "shl";
   case NY_MACH_SAR:        return "sar";
+  case NY_MACH_ROR:        return "ror";
   case NY_MACH_FMA:        return "fma";
   case NY_MACH_SQRT:       return "sqrt";
   case NY_MACH_SIN:        return "sin";
@@ -1090,6 +1091,7 @@ static bool mach_opcode_from_nir(nyir_op_t op, ny_mach_opcode_t *out) {
   case NYIR_XOR_I64: *out = NY_MACH_XOR; return true;
   case NYIR_SHL_I64: *out = NY_MACH_SHL; return true;
   case NYIR_SAR_I64: *out = NY_MACH_SAR; return true;
+  case NYIR_ROR_I64: *out = NY_MACH_ROR; return true;
   case NYIR_CMP_I64: *out = NY_MACH_CMP; return true;
   case NYIR_I64_TO_F64:
   case NYIR_I64_TO_F32:
@@ -1193,6 +1195,7 @@ bool ny_mach_opcode_supported(nyir_op_t op) {
   case NYIR_XOR_I64:
   case NYIR_SHL_I64:
   case NYIR_SAR_I64:
+  case NYIR_ROR_I64:
   case NYIR_CMP_I64:
   case NYIR_LABEL:
   case NYIR_LOAD_LOCAL:

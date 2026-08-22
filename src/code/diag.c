@@ -13,31 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum {
-
-  E_SYNTAX = 1001,
-  E_UNDEFINED = 1002,
-  E_TYPE_MISMATCH = 1003,
-  E_ARITY = 1004,
-  E_DUPLICATE_NAME = 1005,
-  E_SHADOWING = 1006,
-  E_INVALID_LITERAL = 1007,
-  E_RETURN_MISMATCH = 1008,
-  E_IMMUTABLE_MODIFY = 1009,
-  E_NOT_CALLABLE = 1010,
-  E_INDEX_OOB = 1011,
-  E_MATCH_EXHAUSTIVE = 1012,
-  E_EFFECT_VIOLATION = 1013,
-  E_INVALID_ATTR = 1014,
-  E_LAYOUT_SIZE = 1015,
-  E_INVALID_FFI = 1016,
-
-  W_UNUSED = 2001,
-  W_SHADOWING = 2002,
-  W_DEPRECATED = 2003,
-  W_IMPLICIT_COERCE = 2004,
-  W_DIV_ZERO = 2005,
-} diag_code_t;
 
 /*
  * Diagnostic codes come in two ranges:
@@ -75,6 +50,9 @@ static size_t g_diag_seen_len = 0;
 static bool g_last_primary_emitted = false;
 static int g_warn_level = 1;
 static bool g_diag_compact_mode = false;
+static bool g_warn_as_error = false;
+static bool g_shadow_warnings = false;
+static int g_warn_error_count = 0;
 
 static char *g_diag_cached_file = NULL;
 static char *g_diag_cached_src = NULL;
@@ -101,6 +79,22 @@ void ny_diag_configure(int warn_level, bool compact_mode) {
 }
 
 int ny_diag_warn_level(void) { return g_warn_level; }
+
+/*
+ * --warn-all: every emitted warning counts as an error for the exit code
+ * (CI mode).  --warn-shadow: un-suppress the W2002 shadowing linter, which is
+ * otherwise classified as "noisy" at the default warn level.
+ */
+void ny_diag_set_warn_as_error(bool value) { g_warn_as_error = value; }
+
+void ny_diag_set_shadow_warnings(bool value) { g_shadow_warnings = value; }
+
+int ny_diag_warn_as_error_count(void) { return g_warn_error_count; }
+
+static void ny_diag_count_warn_as_error(void) {
+  if (g_warn_as_error)
+    g_warn_error_count++;
+}
 
 static const char *diag_load_source(const char *filename) {
   if (!filename || filename[0] == '<')
@@ -283,6 +277,8 @@ bool ny_strict_error_enabled(codegen_t *cg, token_t tok) {
 }
 
 static bool ny_warning_code_is_noisy(int code) {
+  if (code == (int)W_SHADOWING && g_shadow_warnings)
+    return false;
   return code == (int)W_SHADOWING;
 }
 
@@ -379,6 +375,7 @@ void ny_diag_warning(token_t tok, const char *fmt, ...) {
     g_last_primary_emitted = false;
     return;
   }
+  ny_diag_count_warn_as_error();
   char code_buf[16];
   int code = ny_diag_code_for_fmt(g_diag_warn_fmt_codes, &g_diag_next_warn_code, fmt);
   snprintf(code_buf, sizeof(code_buf), "W%04d", code);
@@ -410,6 +407,7 @@ void ny_diag_warning_code(token_t tok, int code, const char *fmt, ...) {
     g_last_primary_emitted = false;
     return;
   }
+  ny_diag_count_warn_as_error();
   char code_buf[16];
   if (code <= 0)
     code = (int)W_UNUSED;

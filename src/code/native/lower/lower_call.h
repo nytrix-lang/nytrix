@@ -467,7 +467,14 @@ static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
       return -1;
     return out;
   }
-  if ((strcmp(leaf, "to_str") == 0 || strcmp(leaf, "__to_str") == 0) &&
+  /*
+   * std.core.str is `@inline fn str(any v) str { to_str(v) }`, so routing it
+   * through the same formatter dispatch is semantically identical — and
+   * avoids compiling the stdlib body, which would hit the any-parameter ABI
+   * path.  A user-defined (non-stdlib) `str` skips this via the guard below.
+   */
+  if ((strcmp(leaf, "str") == 0 || strcmp(leaf, "to_str") == 0 ||
+       strcmp(leaf, "__to_str") == 0) &&
       !ny_native_nir_user_defined_fn(b, name)) {
     if (e->as.call.args.len != 1 || e->as.call.args.data[0].name) {
       ny_native_nir_fail(b, "native NYIR lower: to_str expects one positional value");
@@ -479,6 +486,25 @@ static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
       return -1;
     if (ny_native_nir_expr_is_cstr(b, arg_expr))
       return arg;
+    /*
+     * Route by the argument's actual kind: bools and floats must not go
+     * through rt_native_i64_to_cstr (which would print their raw bits as an
+     * integer).  f32 is widened to f64 first; everything else falls through
+     * to the tagged-any or i64 formatter.
+     */
+    if (ny_native_nir_expr_is_bool(b, arg_expr))
+      return ny_native_nir_emit_runtime_call(
+          b, "rt_native_bool_to_cstr", arg, -1, -1, 1, 0);
+    if (ny_native_nir_expr_is_f32(b, arg_expr)) {
+      int f64 = ny_native_nir_emit_f32_to_f64(b, arg);
+      if (f64 < 0)
+        return -1;
+      return ny_native_nir_emit_runtime_call(
+          b, "rt_native_f64_to_cstr", f64, -1, -1, 1, 0);
+    }
+    if (ny_native_nir_expr_is_f64(b, arg_expr))
+      return ny_native_nir_emit_runtime_call(
+          b, "rt_native_f64_to_cstr", arg, -1, -1, 1, 0);
     return ny_native_nir_emit_runtime_call(
         b, ny_native_nir_expr_is_any(b, arg_expr)
                ? "rt_native_any_to_cstr"
@@ -1491,13 +1517,7 @@ static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
         return -1;
       }
       const expr_t *arg = e->as.call.args.data[i].val;
-      nyir_cmp_t ignored_cmp;
-      bool is_bool =
-          (arg && arg->kind == NY_E_BINARY &&
-           ny_native_nir_cmp(arg->as.binary.op, &ignored_cmp)) ||
-          (arg && arg->kind == NY_E_LOGICAL) ||
-          (arg && arg->kind == NY_E_UNARY && arg->as.unary.op &&
-           strcmp(arg->as.unary.op, "!") == 0);
+      bool is_bool = ny_native_nir_expr_is_bool(b, arg);
       if (i > 0) {
         int space_ptr = ny_native_nir_emit_cstr_const(b, " ");
         if (space_ptr >= 0)
@@ -1720,16 +1740,28 @@ static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
       ny_native_nir_fail(b, "native NYIR lower: i64buf_new requires one positional length");
       return -1;
     }
+    int64_t const_count = 0;
+    if (ny_native_nir_fold_top_level_int(b->prog, e->as.call.args.data[0].val,
+                                         &const_count, 0) &&
+        const_count > 0 && const_count <= 256) {
+      int out = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ALLOCA,
+                                                   .dst = -1,
+                                                   .a = -1,
+                                                   .b = -1,
+                                                   .c = -1,
+                                                   .imm = const_count});
+      if (out >= 0) {
+        ny_native_nir_record_alloc_fact(b, out, const_count * 8);
+        return out;
+      }
+    }
     int count = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
     int width = ny_native_nir_emit_const(b, 8);
     if (count < 0 || width < 0)
       return -1;
     int out = ny_native_nir_emit_runtime_call(b, "rt_native_tbuf_new", count, width,
                                               -1, 2, 0);
-    int64_t const_count = 0;
-    if (ny_native_nir_fold_top_level_int(b->prog, e->as.call.args.data[0].val,
-                                         &const_count, 0) &&
-        const_count > 0 && out >= 0)
+    if (const_count > 0 && out >= 0)
       ny_native_nir_record_alloc_fact(b, out, const_count * 8);
     return out;
   }

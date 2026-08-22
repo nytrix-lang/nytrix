@@ -11,7 +11,8 @@ static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
   if (stmt_looks_type_first_binding(p)) {
     var_type = parse_type_ref(p, "expected type name");
     if (p->cur.kind != NY_T_IDENT) {
-      parser_error(p, p->cur, "expected variable name after type", NULL);
+      parser_error(p, p->cur, "expected variable name after type",
+                   "write 'def Type name = value' or 'mut Type name = value'");
       if (p->cur.kind != NY_T_EOF)
         parser_advance(p);
       return false;
@@ -27,7 +28,8 @@ static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
 
     }
     if (p->cur.kind != NY_T_IDENT) {
-      parser_error(p, p->cur, "expected variable name", NULL);
+      parser_error(p, p->cur, "expected variable name",
+                   "write 'def name = value' or 'mut name = value'");
       if (p->cur.kind != NY_T_EOF) parser_advance(p);
       return false;
     }
@@ -189,14 +191,15 @@ stmt_t *p_parse_stmt(parser_t *p) {
       parser_advance(p);
       attribute_t attr = parse_attr(p);
       if (!attr.name) {
-        parser_error(p, p->cur, "expected attribute name", NULL);
+        parser_error(p, p->cur, "expected attribute name",
+                     "attributes use '@name', e.g. @inline, @noinline, @c");
         return NULL;
       }
       vec_push_arena(p->arena, &attrs, attr);
     }
     if (p->cur.kind != NY_T_FN) {
       parser_error(p, p->cur, "function attributes must be followed by 'fn'",
-                   NULL);
+                   "place attributes directly before the 'fn' declaration");
       return NULL;
     }
     stmt_t *func = parse_func(p, attrs);
@@ -252,7 +255,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
       while (true) {
         if (p->cur.kind != NY_T_IDENT) {
           parser_error(p, p->cur, "expected identifier in destructuring list",
-                       NULL);
+                       "destructuring binds names, e.g. 'def [a, b] = pair'");
           if (p->cur.kind != NY_T_EOF)
             parser_advance(p);
           stmt_free_members(s);
@@ -294,7 +297,8 @@ stmt_t *p_parse_stmt(parser_t *p) {
             return NULL;
           }
           if (!parser_match(p, NY_T_ASSIGN)) {
-            parser_error(p, p->cur, "expected '=' after variable name", NULL);
+            parser_error(p, p->cur, "expected '=' after variable name",
+                         "initialize variables with '=', e.g. 'def a = 1, b = 2'");
             stmt_free_members(s);
             return NULL;
           }

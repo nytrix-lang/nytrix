@@ -2577,6 +2577,12 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       map_rt_syms_persistent(eval_mod, g_repl_ee);
       repl_debug_stage("jit-register-symbols");
       register_jit_symbols(g_repl_ee, eval_mod, &cg);
+      if (cg.had_error) {
+        last_status = 1;
+        LLVMRemoveModule(g_repl_ee, eval_mod, NULL, NULL);
+        codegen_dispose(&cg);
+        return 1;
+      }
       for (size_t i = 0; i < cg.interns.len; i++) {
         if (cg.interns.data[i].gv)
           LLVMAddGlobalMapping(g_repl_ee, cg.interns.data[i].gv,

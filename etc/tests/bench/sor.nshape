@@ -26,11 +26,14 @@ mut it = 0
 while it < ITERS {
    mut r = 1
    while r < N - 1 {
+      def r_prev = (r - 1) * N
+      def r_curr = r * N
+      def r_next = (r + 1) * N
       mut cc = 1
       while cc < N - 1 {
-         def v = (f64buf_load(grid, (r - 1) * N + cc) + f64buf_load(grid, (r + 1) * N + cc)
-                + f64buf_load(grid, r * N + cc - 1) + f64buf_load(grid, r * N + cc + 1)) / 4.0
-         f64buf_store(ngrid, r * N + cc, v)
+         def v = (f64buf_load(grid, r_prev + cc) + f64buf_load(grid, r_next + cc)
+                + f64buf_load(grid, r_curr + cc - 1) + f64buf_load(grid, r_curr + cc + 1)) * 0.25
+         f64buf_store(ngrid, r_curr + cc, v)
          cc += 1
       }
       r += 1
@@ -73,10 +76,13 @@ int main(void) {
     int64_t start = now_ns();
     for (int it = 0; it < ITERS; it++) {
         for (int r = 1; r < N - 1; r++) {
+            int r_prev = (r - 1) * N;
+            int r_curr = r * N;
+            int r_next = (r + 1) * N;
             for (int c = 1; c < N - 1; c++) {
-                double v = (grid[(r - 1) * N + c] + grid[(r + 1) * N + c]
-                          + grid[r * N + c - 1] + grid[r * N + c + 1]) / 4.0;
-                ngrid[r * N + c] = v;
+                double v = (grid[r_prev + c] + grid[r_next + c]
+                          + grid[r_curr + c - 1] + grid[r_curr + c + 1]) * 0.25;
+                ngrid[r_curr + c] = v;
             }
         }
         double *tmp = grid;

@@ -46,10 +46,10 @@ static void set_add(name_set_t *set, const char *name, size_t len) {
 }
 
 static bool line_declares_array(const char *line, size_t len) {
-  return (memmem(line, len, "int ", 4) || memmem(line, len, "long ", 5) ||
-          memmem(line, len, "char ", 5) || memmem(line, len, "bool ", 5) ||
-          memmem(line, len, "unsigned ", 9) || memmem(line, len, "const ", 6)) &&
-         memmem(line, len, "[", 1) && memmem(line, len, "]", 1);
+  return (ny_memmem(line, len, "int ", 4) || ny_memmem(line, len, "long ", 5) ||
+          ny_memmem(line, len, "char ", 5) || ny_memmem(line, len, "bool ", 5) ||
+          ny_memmem(line, len, "unsigned ", 9) || ny_memmem(line, len, "const ", 6)) &&
+         ny_memmem(line, len, "[", 1) && ny_memmem(line, len, "]", 1);
 }
 
 static void collect_array_before_bracket(const char *line, size_t len, name_set_t *set) {
@@ -64,8 +64,8 @@ static void collect_array_before_bracket(const char *line, size_t len, name_set_
 }
 
 static void collect_written_array(const char *line, size_t len, name_set_t *set) {
-  const char *br = memmem(line, len, "[", 1);
-  const char *rb = br ? memmem(br, (size_t)(line + len - br), "]", 1) : NULL;
+  const char *br = ny_memmem(line, len, "[", 1);
+  const char *rb = br ? ny_memmem(br, (size_t)(line + len - br), "]", 1) : NULL;
   if (!br || !rb) return;
   const char *p = rb + 1;
   while (p < line + len && (*p == ' ' || *p == '\t')) ++p;

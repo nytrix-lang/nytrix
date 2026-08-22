@@ -1,0 +1,22 @@
+shape lint-shadow-local-warn {
+  family "compiler-errors/lint"
+  generator "error"
+  features ["error", "lint", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--warn-all"
+
+  expect_message "shadows a previous local"
+  source ny <<'NY'
+use std.core
+
+def main() {
+  def x = 1
+  if true {
+    def x = 2
+    println(x)
+  }
+  println(x)
+}
+NY
+}

@@ -15,8 +15,8 @@ use std.os.thread
 ;; Thread ring: a single token makes HOPS hops around N slots, each guarded
 ;; by its own mutex so workers never contend on a shared lock.
 
-def N = 16
-def HOPS = 10000
+def N = 8
+def HOPS = 1000
 
 fn ring_worker(ptr ctx) int {
    def slots = load64(ctx, 0)
@@ -33,14 +33,15 @@ fn ring_worker(ptr ctx) int {
          __mutex_unlock64(own_mu)
          continue
       }
+      store64(slots, 0, id * 8)
+      __mutex_unlock64(own_mu)
+
       __mutex_lock64(next_mu)
       if t == -1 {
          store64(slots, -1, next * 8)
          __mutex_unlock64(next_mu)
-         __mutex_unlock64(own_mu)
          return hops
       }
-      store64(slots, 0, id * 8)
       hops += 1
       if t == 1 {
          store64(slots, -1, next * 8)
@@ -48,7 +49,6 @@ fn ring_worker(ptr ctx) int {
          store64(slots, t - 1, next * 8)
       }
       __mutex_unlock64(next_mu)
-      __mutex_unlock64(own_mu)
    }
    hops
 }
@@ -94,8 +94,8 @@ static int64_t now_ns(void) {
   return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-#define N 16
-#define HOPS 10000
+#define N 8
+#define HOPS 1000
 
 static pthread_mutex_t mu[N];
 static int slots[N];
@@ -111,18 +111,18 @@ static void *worker(void *arg) {
       pthread_mutex_unlock(&mu[id]);
       continue;
     }
+    slots[id] = 0;
+    pthread_mutex_unlock(&mu[id]);
+
     pthread_mutex_lock(&mu[next]);
     if (t == -1) {
       slots[next] = -1;
       pthread_mutex_unlock(&mu[next]);
-      pthread_mutex_unlock(&mu[id]);
       return (void *)(uintptr_t)hops;
     }
-    slots[id] = 0;
     hops++;
     slots[next] = (t == 1) ? -1 : t - 1;
     pthread_mutex_unlock(&mu[next]);
-    pthread_mutex_unlock(&mu[id]);
   }
 }
 

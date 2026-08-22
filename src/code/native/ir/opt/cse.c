@@ -47,10 +47,22 @@ static uint64_t cse_hash_symbol(const char *symbol) {
   return h;
 }
 
+static bool cse_is_commutative(nyir_op_t op) {
+  return op == NYIR_ADD_I64 || op == NYIR_MUL_I64 ||
+         op == NYIR_AND_I64 || op == NYIR_OR_I64 ||
+         op == NYIR_XOR_I64 || op == NYIR_ADD_F64 ||
+         op == NYIR_MUL_F64 || op == NYIR_ADD_F32 ||
+         op == NYIR_MUL_F32;
+}
+
 static size_t cse_hash(const nyir_inst_t *in, size_t cap) {
   uint64_t h = (uint64_t)(unsigned)in->op * UINT64_C(2654435761);
+  int a = in->a, b = in->b;
+  if (cse_is_commutative(in->op) && a > b) {
+    int tmp = a; a = b; b = tmp;
+  }
 #define CSE_MIX(v, k) h ^= (uint64_t)(unsigned)((v) + 1) * UINT64_C(k)
-  CSE_MIX(in->a, 1610612741); CSE_MIX(in->b, 805306457);
+  CSE_MIX(a, 1610612741); CSE_MIX(b, 805306457);
   CSE_MIX(in->c, 122949829); CSE_MIX(in->d, 433494437);
   CSE_MIX(in->e, 2971215073); CSE_MIX(in->f, 2777789003);
 #undef CSE_MIX
@@ -80,11 +92,16 @@ static bool cse_symbol_equal(const char *a, const char *b) {
 }
 
 static bool cse_same_key(const cse_entry_t *e, const nyir_inst_t *in) {
-  if (!e || !in || e->op != in->op || e->a != in->a || e->b != in->b ||
+  if (!e || !in || e->op != in->op ||
       e->c != in->c || e->d != in->d || e->e != in->e || e->f != in->f ||
       e->cmp != in->cmp || e->imm != in->imm || e->flags != in->flags ||
       !cse_symbol_equal(e->symbol, in->symbol) ||
       e->extra_args_len != in->extra_args_len)
+    return false;
+  
+  bool op_match = (e->a == in->a && e->b == in->b) || 
+                  (cse_is_commutative(in->op) && e->a == in->b && e->b == in->a);
+  if (!op_match)
     return false;
   for (size_t k = 0; k < in->extra_args_len; ++k)
     if (!e->extra_args || e->extra_args[k] != in->extra_args[k])
@@ -184,6 +201,7 @@ static bool cse_is_foldable(const nyir_inst_t *in) {
   case NYIR_DIV_F64: case NYIR_CMP_F64:
   case NYIR_ADD_F32: case NYIR_SUB_F32: case NYIR_MUL_F32:
   case NYIR_DIV_F32: case NYIR_CMP_F32:
+  case NYIR_SQRT_F64:
     return true;
   default:
     return false;

@@ -1002,7 +1002,7 @@ static ny_raw_int_expr_t ny_lower_raw_int_expr_with_params(codegen_t *cg, scope 
       LLVMValueRef raw = b->raw_int_value;
       return (ny_raw_int_expr_t){raw, LLVMConstInt(cg->type_i1, 1, false)};
     }
-    if (ny_env_enabled("NYTRIX_RAW_INT_SLOT_EXPR_FAST") && b &&
+    if ((cg->opt_enabled || ny_env_enabled("NYTRIX_RAW_INT_SLOT_EXPR_FAST")) && b &&
         b->raw_int_value && b->is_int_slot && !ny_binding_is_valid(cg, b)) {
       LLVMValueRef raw = ny_load(cg, b->raw_int_value, NY_LLVM_NAME(cg, "rawi.slot"));
       return (ny_raw_int_expr_t){raw, LLVMConstInt(cg->type_i1, 1, false)};
@@ -2268,12 +2268,28 @@ static LLVMValueRef ny_try_emit_direct_str_concat(codegen_t *cg, scope *scopes,
                                                   expr_t *le, expr_t *re) {
   if (kind != NY_BINOP_ADD)
     return NULL;
-  if (!ny_bin_expr_is_stringish(cg, scopes, depth, le) ||
-      !ny_bin_expr_is_stringish(cg, scopes, depth, re))
+  bool left_str = ny_bin_expr_is_stringish(cg, scopes, depth, le);
+  bool right_str = ny_bin_expr_is_stringish(cg, scopes, depth, re);
+  if (!left_str && !right_str)
     return NULL;
   fun_sig *s = lookup_fun(cg, "__str_concat", 0);
   if (!s || !s->type || !s->value)
     return NULL;
+  /*
+   * One-sided concat: when only one operand is a string, stringify the other
+   * through __to_str (matching the f-string part lowering) instead of letting
+   * it fall through to numeric add, which would add the raw string pointer.
+   */
+  fun_sig *ts = lookup_fun(cg, "__to_str", 0);
+  if (!ts || !ts->type || !ts->value)
+    return NULL;
+  if (!left_str) {
+    l = LLVMBuildCall2(cg->builder, ts->type, ts->value,
+                       (LLVMValueRef[]){l}, 1, "");
+  } else if (!right_str) {
+    r = LLVMBuildCall2(cg->builder, ts->type, ts->value,
+                       (LLVMValueRef[]){r}, 1, "");
+  }
   return LLVMBuildCall2(cg->builder, s->type, s->value,
                         (LLVMValueRef[]){l, r}, 2,
                         NY_LLVM_NAME(cg, "str_concat_direct"));

@@ -969,6 +969,13 @@ static expr_t *parse_primary(parser_t *p) {
     const char *sval = parser_decode_string(p, tok, &slen);
     lit->as.literal.as.s.data = sval;
     lit->as.literal.as.s.len = slen;
+    if ((p->cur.kind == NY_T_STRING || p->cur.kind == NY_T_FSTRING) &&
+        p->cur.line == tok.line && parser_peek(p).kind != NY_T_ARROW) {
+      parser_error(p, p->cur,
+                   "adjacent string literal (missing '+' or separator?)",
+                   "strings do not concatenate implicitly; join with '+'");
+      return NULL;
+    }
     return lit;
   }
   case NY_T_FSTRING:

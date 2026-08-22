@@ -190,6 +190,8 @@ typedef struct {
   bool safe_mode;
   bool strict_types;
   bool strict_types_explicit;
+  bool list_fallbacks;
+  bool warn_shadow;
   bool help_env;
   bool debug_symbols;
   bool no_std;
@@ -310,6 +312,20 @@ typedef struct {
   int jit_opt_level;       /* --jit-opt-level=N: JIT optimization level (0..3) */
   bool jit_perf_map;       /* --jit-perf-map: emit /tmp/perf-<pid>.map */
   bool zero_init;          /* --zero-init: zero all managed heap allocations */
+  bool trace_tokens;       /* --trace-tokens: lexer token stream */
+  bool trace_parse;        /* --trace-parse: parser rule execution trace */
+  bool trace_scope;        /* --trace-scope: binding resolution trace */
+  bool dump_ast_typed;     /* --dump-ast-typed: AST dump with inferred types */
+  bool trace_hm;           /* --trace-hm: HM type inference trace */
+  bool explain_any;        /* --explain-any: explain types degrading to any */
+  bool dump_escapes;       /* --dump-escapes: escape analysis verdict */
+  bool dump_proofs;        /* --dump-proofs: proven bounds and properties */
+  bool trace_llvm;         /* --trace-llvm: codegen LLVM IR trace */
+  bool dump_llvm_passes;   /* --dump-llvm-passes: LLVM IR after each pass */
+  bool trace_regalloc;     /* --trace-regalloc: machine vreg coloring trace */
+  bool dump_obj_full;      /* --dump-obj-full: full object file summary */
+  bool compile_profile_fn; /* --compile-profile-fn: per-fn compile time breakdown */
+  bool debug_everything;   /* --debug-everything: enable all debug traces */
 } ny_options;
 
 void ny_options_init(ny_options *opt);

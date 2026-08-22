@@ -2,7 +2,13 @@ shape n-body {
   family "perf-real"
   generator "stress"
   features ["perf", "fp", "simd", "c-vs-ny", "native", "checksum", "time"]
+  meta "spec:types:nbody-simd"
   template ny-test-case
+  tier "critical"
+  budget {
+    max_native_c_ratio 5.0
+    max_ny_compile_ms 3000
+  }
   expect compile_and_run
   source ny <<'NY'
 use std.core

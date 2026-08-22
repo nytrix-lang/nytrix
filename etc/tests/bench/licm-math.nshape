@@ -37,13 +37,13 @@ static int64_t now_ns(void) {
 
 int main(int argc, char **argv) {
     (void)argv;
-    long a = 123 + argc, b = 456 + argc, c = 1000 + argc, d = 7 + argc;
-    long N = 1000000L * argc;
+    int64_t a = 123 + argc, b = 456 + argc, c = 1000 + argc, d = 7 + argc;
+    int64_t N = 1000000LL * argc;
     int64_t start = now_ns();
-    volatile long acc = 0;
-    for (long i = 0; i < N; i++) acc += (a * b + c / d) + i;
+    volatile int64_t acc = 0;
+    for (int64_t i = 0; i < N; i++) acc += (a * b + c / d) + i;
     int64_t end = now_ns();
-    printf("checksum=%ld\n", (long)acc);
+    printf("checksum=%lld\n", (long long)acc);
     if (end <= start) end = start + 1;
     printf("elapsed_ns=%lld\n", (long long)(end - start));
     return 0;
