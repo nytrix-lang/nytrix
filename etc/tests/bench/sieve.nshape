@@ -7,25 +7,25 @@ shape sieve {
   source ny <<'NY'
 use std.core
 use std.os.time
+;; Sieve of Eratosthenes over a Ny list of flags.
 def N = 60000
-;; Sieve of Eratosthenes (Benchmark)
-fn sieve(n) {
+fn sieve(int n) int {
    if n < 2 { return 0 }
    def size = (n >> 1) + 1
-   def flags = malloc(size)
+   mut list<int> flags = []
    mut i = 0
    while i < size {
-      store8(flags, 1, i)
+      flags = append(flags, 1)
       i += 1
    }
    mut count = 1
    mut p = 3
    while p * p <= n {
-      if load8(flags, p >> 1) {
+      if flags[p >> 1] {
          def sq = p * p
          mut mul = sq
          while mul <= n {
-            store8(flags, 0, mul >> 1)
+            flags[mul >> 1] = 0
             mul += p * 2
          }
       }
@@ -33,11 +33,10 @@ fn sieve(n) {
    }
    i = 3
    while i <= n {
-      if load8(flags, i >> 1) { count += 1 }
+      if flags[i >> 1] { count += 1 }
       i += 2
    }
-   free(flags)
-   return count
+   count
 }
 def t0 = ticks()
 def r = sieve(N)

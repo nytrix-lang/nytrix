@@ -34,19 +34,7 @@ while d <= max_depth {
    mut i = 0
    mut local = 0
    while i < rounds / d {
-      mut x = i + d
-      mut acc = 1
-      mut j = 0
-      while j < d {
-         if (x & 1) == 0 {
-            acc = (acc * 3) + j + d
-         } else {
-            acc = (acc * 5) - j + d
-         }
-         x = (x / 2) + acc + j
-         j += 1
-      }
-      local += acc
+      local += branch_mix(d, i)
       i += 1
    }
    checksum += local

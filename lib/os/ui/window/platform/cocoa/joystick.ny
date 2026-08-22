@@ -131,7 +131,7 @@ def kCFTypeDictionaryValueCallBacks = 0
    }
    fn IOHIDDeviceGetValue(any _device, any _element, any _out) int {
       "Runs the IOHIDDeviceGetValue operation."
-      -1
+      return -1
    }
    fn IOHIDElementGetLogicalMax(any _elem) int {
       "Runs the IOHIDElementGetLogicalMax operation."
@@ -159,7 +159,7 @@ def kCFTypeDictionaryValueCallBacks = 0
    }
    fn IOHIDManagerOpen(any _mgr, int _options) int {
       "Runs the IOHIDManagerOpen operation."
-      -1
+      return -1
    }
    fn IOHIDManagerRegisterDeviceMatchingCallback(any _mgr, any _cb, any _ctx) any {
       "Runs the IOHIDManagerRegisterDeviceMatchingCallback operation."
@@ -385,7 +385,7 @@ fn _device_connected(any ctx, any result, any sender, any device) any {
       def lmin  = IOHIDElementGetLogicalMin(elem)
       def lmax  = IOHIDElementGetLogicalMax(elem)
       def is_axis = (page == kHIDPage_GenericDesktop &&
-      ((usage >= kHIDUsage_GD_X && usage <= kHIDUsage_GD_Rz) || usage == kHIDUsage_GD_Slider))
+         ((usage >= kHIDUsage_GD_X && usage <= kHIDUsage_GD_Rz) || usage == kHIDUsage_GD_Slider))
       def is_hat  = (page == kHIDPage_GenericDesktop && usage == kHIDUsage_GD_Hatswitch)
       def is_btn  = (page == kHIDPage_Button)
       if is_axis {

@@ -1,0 +1,18 @@
+shape native_x86_f64_regalloc_cfg {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 object oracle f64 regalloc cfg]
+  template ny-test-case
+  flags "--native-backend x86_64 --native-result-oracle=4627589354611539968"
+  expect compile_and_run
+  source ny <<'NY'
+fn branch_sum(f64 x, bool choose) f64 {
+  if choose {
+    (x * x) + (x * x)
+  } else {
+    (x * x) - (x * x)
+  }
+}
+branch_sum(3.5, true)
+NY
+}

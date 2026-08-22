@@ -1,3 +1,12 @@
+/*
+ * Proof runtime: compile-time proof evaluation and erasure bridge
+ * for proof<P>-annotated safe-mode operations and bounds checks.
+ *
+ * Fin<n> (NY_BT_FIN) compiles literal-bound checks and erases to
+ * plain int.  Symbolic bounds need the comptime evaluator.
+ * rt_proof_cert_check handles the remaining runtime proof-evaluation
+ * path until comptime covers every current prove() shape.
+ */
 #include "rt/shared.h"
 #include <limits.h>
 #include <stdlib.h>

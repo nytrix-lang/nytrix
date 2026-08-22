@@ -1,0 +1,21 @@
+shape oracle_f64_reduction_phi_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features ["native", "x86_64", "f64", "regalloc", "phi", "loop"]
+  template ny-test-case
+  flags "--native-result-oracle=45 -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn sum() int {
+  mut i = 0
+  mut acc = 0.0
+  while i < 10 {
+    acc = acc + float(i)
+    i += 1
+  }
+  int(acc)
+}
+sum()
+NY
+}

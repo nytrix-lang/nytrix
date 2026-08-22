@@ -1,0 +1,24 @@
+shape oracle_closed_form_runtime_step_two_init_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime step-two init regression]
+  template ny-test-case
+  flags "--native-result-oracle=44 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+; i = 0, 2 (i = 4 stops); s = 42 + 0 + 2 = 44.  Non-zero init with step 2
+; and a runtime bound whose trip count needs the ceil-with-remainder path.
+fn step2(n) i64 {
+  mut s = 42
+  mut i = 0
+  while i < n {
+    s = s + i
+    i = i + 2
+  }
+  s
+}
+step2(3)
+NY
+}

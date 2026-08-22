@@ -1,7 +1,14 @@
-# Standard Library
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":30,"summary":"A guided map of the standard library, its major namespaces, and how to choose the right module."} -->
+# Library
 
 Start with the facade that owns the problem, then ask generated docs for exact
 signatures and exported names.
+
+The façade modules carry their own source-adjacent guides: open `std.core` for
+values and collections, `std.os` for host services and portability boundaries,
+and `std.math` for numeric, parsing, algorithmic, and crypto namespaces. The
+generated reference renders those module-header guides directly, so the source
+file and the website stay in sync.
 
 ```bash
 ny doc search socket
@@ -21,6 +28,14 @@ ny doc get std.os.net.remote
 | Images, fonts, glTF, meshes | `std.math.parse.img`, `std.math.parse.font.truetype`, `std.math.parse.3d.gltf` |
 | Scalars, big ints, matrices, number theory, SIMD | `std.math` |
 | Encodings, hashes, ciphers, public-key helpers, analysis | `std.math.crypto` |
+
+### Clipboard
+
+Use `std.os.set_clipboard_text(text)` and `std.os.get_clipboard_text()` for
+plain-text copy and paste. Desktop targets use the platform clipboard tools.
+The browser target uses the Clipboard API, which requires a secure context,
+permission, and a user gesture; unavailable access returns `false` or an empty
+string instead of pretending that the operation succeeded.
 
 Use aliases when call sites would otherwise hide ownership:
 
@@ -43,6 +58,12 @@ def obj = json.json_decode("{\"ok\":true}")
 | Assets | `std.math.parse.img`, `std.math.parse.img.png`, `jpeg`, `gif`, `bmp`, `svg`, `tga`, `webp`, `exr`, `std.math.parse.font.truetype`, `std.math.parse.3d.gltf`, `meshopt`, `obj` |
 | Math | `std.math`, `integer`, `float`, `scalar`, `big`, `bigrat`, `bin`, `complex`, `ct`, `gf`, `hensel`, `logic`, `matrix`, `noise`, `nt`, `ntt`, `poly`, `quat`, `random`, `ring`, `simmd`, `smt`, `stat`, `vector` |
 | Crypto | `std.math.crypto.encoding`, `hash`, `symmetric`, `block.mode`, `block.stream`, `cipher`, `rsa`, `ecc`, `lattice`, `factorization`, `prng`, `analysis` |
+
+For constrained factor searches, use the focused
+`std.math.crypto.factorization.xor` module. It reports candidate pairs and
+the identity \(p+q=x+2c\), where \(x=p\mathbin{\oplus}q\) and
+\(c=p\mathbin{\&}q\), instead of presenting itself as a general-purpose
+factorization engine.
 
 `std.math.logic` provides self-hosted propositional reasoning. Propositions are
 ordinary explicit dictionaries created with `prop_true`, `prop_false`,
@@ -141,7 +162,7 @@ Use `future(work, arg)` or `async(work, arg)` for joinable work, then
 
 ## UI Notes
 
-Use [ui.md](ui.md) for a first window, frame loop, drawing, input, textures,
+Use [UI](ui.md) for a first window, frame loop, drawing, input, textures,
 and 3D start. Lower-level Vulkan modules are for renderer implementation and
 targeted probes, not normal app setup.
 
@@ -162,7 +183,7 @@ ny doc get std.math.parse.data.json
 
 Related guides:
 
-- [networking.md](networking.md)
-- [native.md](native.md)
-- [metaprogramming.md](metaprogramming.md)
-- [ui.md](ui.md)
+- [Networking](networking.md)
+- [Native](native.md)
+- [Comptime](comptime.md)
+- [UI](ui.md)

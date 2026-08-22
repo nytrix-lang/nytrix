@@ -1,10 +1,11 @@
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":11,"summary":"The complete source syntax: comments, literals, declarations, blocks, and expressions."} -->
 # Syntax
 
 Syntax records source spellings. Topic pages define behavior.
 
 ## Lexical
 
-```ny
+```text
 comment        := ";" text-until-newline | ";" marker text-block marker ";"
 marker         := [A-Za-z_][A-Za-z0-9_]*
 identifier     := [A-Za-z_][A-Za-z0-9_]*
@@ -13,6 +14,44 @@ block          := "{" source* "}"
 ```
 
 There are no standard C-style block comments. Heredoc-style multiline comments can be written as `;MARKER ... MARKER;`. Semicolons are comments, not statement terminators.
+
+## Grammar
+
+The statement grammar is a sequence of statements, declarations, or expressions
+separated by newlines. A block is `{` statements-and-expressions `}`.
+
+```text
+source          := (statement | declaration)*
+statement       := expression
+                 | "return" expression
+                 | "if" "(" condition ")" block ("elif" "(" condition ")" block)* ("else" block)?
+                 | "if" condition block ("elif" condition block)* ("else" block)?
+                 | "while" "(" condition ")" block
+                 | "while" "(" init condition update ")" block
+                 | "for" pattern "in" expression block
+                 | "for" pattern "," pattern "in" expression block
+                 | "for" "(" pattern "in" expression ")" block
+                 | "for" "(" init condition update ")" block
+                 | "match" expression "{" arm* "}"
+                 | "case" expression "{" arm* "}"
+                 | "try" block "catch" binding block
+                 | "defer" block
+                 | "with" type ":" binding "=" expression block
+                 | "break" | "continue"
+                 | label ":" statement
+                 | "goto" label
+arm             := pattern ("if" expression)? "->" expression
+init            := binding "=" expression
+condition       := expression
+update          := expression
+binding         := identifier | type identifier
+pattern         := literal | identifier | "(" pattern ")" | "_"
+```
+
+`if` with a condition and no parentheses uses the same branch forms as the
+parenthesized spelling. In binding or expression position each branch needs one
+value-producing statement, such as a final expression or a nested
+value-producing `if`.
 
 ## Literals
 
@@ -150,11 +189,11 @@ case expr { arms }
 try { body } catch name { body }
 try { body } catch(_) { handler }
 defer { body }
-with Type: name = expr { body }
+with Type name = expr { body }
 ```
 
-Declarations use `Type name`. Resource scopes are also type-first, but keep the
-colon separator: `with Type: name = value { ... }`.
+Declarations use `Type name`. Resource scopes are also type-first: write
+`with Type name = value { ... }`; the legacy colon spelling is rejected.
 
 ## Operators
 
@@ -170,7 +209,8 @@ fn_name(arg)  value[index]  value.member  module.helper(value)
 ```
 
 Unary `&expr` is borrow syntax. Binary `&` is bitwise-and. `^` is
-exponentiation. `^^` is bitwise XOR.
+exponentiation. `^^` is bitwise XOR. See [Operators](operators.md#precedence)
+for the precedence and associativity table.
 
 ## Dispatch
 
@@ -231,6 +271,16 @@ preserved by Nytrix independently of a particular machine-code backend.
 Choose behavior through typed APIs and standard-library modules first. Backend
 tuning annotations are compatibility details and are intentionally not the
 normal way to express program logic.
+
+## Proof declarations
+
+```ny
+fn lemma name(params) { proposition }
+```
+
+A lemma body is a single proposition. `A → B` is implication syntax and is
+equivalent to `!A || B`. See [Proofs](../learn/proofs.md) for witness
+construction and use.
 
 ## Compile Time
 
@@ -297,9 +347,9 @@ fn add(int a, int b) int {
 
 ## Related
 
-- [source.md](source.md)
-- [values.md](values.md)
-- [functions.md](functions.md)
-- [types.md](types.md)
-- [operators.md](operators.md)
-- [control-flow.md](control-flow.md)
+- [Units](units.md)
+- [Values](values.md)
+- [Functions](functions.md)
+- [Types](types.md)
+- [Operators](operators.md)
+- [Control Flow](control-flow.md)

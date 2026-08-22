@@ -63,7 +63,7 @@ assert(it.mapcat(fn(v) { v }, [(1, 2), "ab", it.range(2)]) == [1, 2, "a", "b", 0
 assert(it.filter_map([1, 2, 3, 4], fn(v) any {
          if (v % 2) == 0 { return v * 10 }
          nil
-}) == [20, 40], "filter map")
+      }) == [20, 40], "filter map")
 assert(it.compact([0, 1, "", "x", nil, 4]) == [1, "x", 4], "compact")
 assert(it.zip_with([1, 2], [10, 20], fn(a, b) { a + b }) == [11, 22], "zip with")
 assert(it.cycle([1, 2], 3) == [1, 2, 1, 2, 1, 2], "cycle")

@@ -1,3 +1,7 @@
+/*
+ * Command-line argument parsing helpers: match flags, consume values,
+ * color-mode routing, and option dispatch used by all ny CLI tools.
+ */
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif

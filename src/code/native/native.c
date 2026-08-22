@@ -1,3 +1,7 @@
+/*
+ * Native backend entry: orchestrates NYIR lowering, optimization,
+ * emission, object writing, and linking into a single compilation path.
+ */
 #include "code/native/internal.h"
 #include "code/native/ir.h"
 #include "code/c/c.h"
@@ -14,6 +18,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+
+extern int64_t rt_bigint_add(int64_t a, int64_t b);
+extern int64_t rt_ticks_ns(void);
 
 /*
  * Non-LLVM native backend entry point and target registry.
@@ -32,6 +39,57 @@ void ny_native_set_err(char *err, size_t err_len, const char *fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(err, err_len, fmt, ap);
   va_end(ap);
+}
+
+typedef struct {
+  int64_t *data;
+  size_t cap;
+} ny_native_local_slot_t;
+
+typedef struct {
+  ny_native_local_slot_t *slots;
+  size_t len;
+  size_t cap;
+} ny_native_local_pool_t;
+
+static _Thread_local ny_native_local_pool_t ny_native_local_pool;
+
+static int64_t *ny_native_locals_acquire(size_t depth, size_t count) {
+  if (depth >= ny_native_local_pool.len) {
+    size_t len = depth + 1;
+    if (len > SIZE_MAX / sizeof(*ny_native_local_pool.slots))
+      return NULL;
+    if (len > ny_native_local_pool.cap) {
+      size_t cap = ny_native_local_pool.cap ? ny_native_local_pool.cap * 2 : 8;
+      while (cap < len) {
+        if (cap > SIZE_MAX / 2)
+          return NULL;
+        cap *= 2;
+      }
+      ny_native_local_slot_t *slots =
+          realloc(ny_native_local_pool.slots, cap * sizeof(*slots));
+      if (!slots)
+        return NULL;
+      memset(slots + ny_native_local_pool.cap, 0,
+             (cap - ny_native_local_pool.cap) * sizeof(*slots));
+      ny_native_local_pool.slots = slots;
+      ny_native_local_pool.cap = cap;
+    }
+    ny_native_local_pool.len = len;
+  }
+  ny_native_local_slot_t *slot = &ny_native_local_pool.slots[depth];
+  if (count > slot->cap) {
+    if (count > SIZE_MAX / sizeof(*slot->data))
+      return NULL;
+    int64_t *data = realloc(slot->data, count * sizeof(*data));
+    if (!data)
+      return NULL;
+    slot->data = data;
+    slot->cap = count;
+  }
+  if (count)
+    memset(slot->data, 0, count * sizeof(*slot->data));
+  return slot->data;
 }
 
 static bool ny_native_reserve(ny_native_writer_t *w, size_t add) {
@@ -154,16 +212,14 @@ static bool ny_native_eval_ir_func(nyir_func_t *rt_main,
                                    const ny_options *opt, const char *name,
                                    char *err, size_t err_len) {
   size_t local_count = ny_native_nir_local_count(rt_main);
-  int64_t *locals = local_count ? (int64_t *)calloc(local_count, sizeof(*locals))
-                                : NULL;
+  int64_t *locals = ny_native_locals_acquire(0, local_count);
   if (local_count && !locals) {
     ny_native_set_err(err, err_len, NY_NATIVE_OOM);
     return false;
   }
   nyir_eval_result_t result = {0};
   bool ok = nyir_eval(rt_main, locals, local_count,
-                        ny_native_vm_max_steps(opt), &result, err, err_len);
-  free(locals);
+                      ny_native_vm_max_steps(opt), &result, err, err_len);
   if (!ok)
     return false;
   bool wrote = ny_native_write_eval_result(opt, &result, name, err, err_len);
@@ -242,6 +298,55 @@ static bool ny_native_vm_call_resolve(void *opaque, const char *symbol,
                              "native NYIR VM: recursive call limit exceeded at depth %zu",
                              ctx->depth),
            false;
+  if (strcmp(symbol, "rt_ticks_ns") == 0 && arg_count == 0) {
+    if (out)
+      *out = rt_ticks_ns();
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigint_from_i64_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_bigint_from_i64_raw(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigint_to_i64_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_bigint_to_i64_raw(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigint_add") == 0 && arg_count == 2) {
+    if (out)
+      *out = rt_bigint_add(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_native_is_int") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_native_is_int(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_native_has_tag") == 0 && arg_count == 2) {
+    if (out)
+      *out = rt_native_has_tag(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_native_tbuf_new") == 0 && arg_count == 2) {
+    int64_t count = args ? args[0] : 0;
+    int64_t elem_size = args ? args[1] : 0;
+    if (out)
+      *out = rt_native_tbuf_new(count, elem_size);
+    return true;
+  }
+  if (strcmp(symbol, "rt_native_cstr_builder_new") == 0 && arg_count == 1) {
+    if (out) *out = rt_native_cstr_builder_new(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_native_cstr_builder_append") == 0 && arg_count == 2) {
+    if (out) *out = rt_native_cstr_builder_append(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_native_cstr_builder_finalize") == 0 && arg_count == 1) {
+    if (out) *out = rt_native_cstr_builder_finalize(args ? args[0] : 0);
+    return true;
+  }
   if ((strcmp(symbol, "malloc") == 0 || strcmp(symbol, "__malloc") == 0) &&
       arg_count == 1) {
     void *p = malloc((size_t)(args ? args[0] : 0));
@@ -266,8 +371,8 @@ static bool ny_native_vm_call_resolve(void *opaque, const char *symbol,
     size_t local_count = ny_native_nir_local_count(callee);
     if (local_count < arg_count)
       local_count = arg_count;
-    int64_t *locals = local_count ? (int64_t *)calloc(local_count, sizeof(*locals))
-                                  : NULL;
+    int64_t *locals =
+        ny_native_locals_acquire(ctx->depth + 1, local_count);
     if (local_count && !locals)
       return ny_native_set_err(err, err_len, NY_NATIVE_OOM), false;
     for (size_t a = 0; a < arg_count; ++a)
@@ -275,11 +380,10 @@ static bool ny_native_vm_call_resolve(void *opaque, const char *symbol,
     nyir_eval_result_t r = {0};
     ctx->depth++;
     bool ok = nyir_eval_with_calls(callee, locals, local_count,
-                                     ctx->max_steps, &r,
-                                     ny_native_vm_call_resolve, ctx, err,
-                                     err_len);
+                                   ctx->max_steps, &r,
+                                   ny_native_vm_call_resolve, ctx, err,
+                                   err_len);
     ctx->depth--;
-    free(locals);
     if (!ok)
       return false;
     ny_native_vm_profile_merge(ctx->profile, &r);
@@ -308,26 +412,24 @@ static bool ny_native_eval_ir_func_with_calls(nyir_func_t *rt_main,
                                               const char *name, char *err,
                                               size_t err_len) {
   size_t local_count = ny_native_nir_local_count(rt_main);
-  int64_t *locals = local_count ? (int64_t *)calloc(local_count, sizeof(*locals))
-                                : NULL;
+  int64_t *locals = ny_native_locals_acquire(0, local_count);
   if (local_count && !locals) {
     ny_native_set_err(err, err_len, NY_NATIVE_OOM);
     return false;
   }
   ny_native_vm_call_ctx_t ctx = {.funcs = funcs,
-                                  .names = names,
-                                  .count = count,
-                                  .recursion_limit =
-                                      ny_native_vm_recursion_limit(opt),
-                                  .max_steps = ny_native_vm_max_steps(opt)};
+                                 .names = names,
+                                 .count = count,
+                                 .recursion_limit =
+                                     ny_native_vm_recursion_limit(opt),
+                                 .max_steps = ny_native_vm_max_steps(opt)};
   nyir_eval_result_t result = {0};
   nyir_eval_result_t nested_profile = {0};
   ctx.profile = &nested_profile;
   bool ok = nyir_eval_with_calls(rt_main, locals, local_count,
-                                   ny_native_vm_max_steps(opt), &result,
-                                   ny_native_vm_call_resolve, &ctx, err,
-                                   err_len);
-  free(locals);
+                                 ny_native_vm_max_steps(opt), &result,
+                                 ny_native_vm_call_resolve, &ctx, err,
+                                 err_len);
   if (!ok)
     return false;
   ny_native_vm_profile_merge(&nested_profile, &result);
@@ -350,26 +452,24 @@ bool ny_native_eval_ir_value(nyir_func_t *rt_main, nyir_func_t *funcs,
     return false;
   }
   size_t local_count = ny_native_nir_local_count(rt_main);
-  int64_t *locals = local_count ? (int64_t *)calloc(local_count, sizeof(*locals))
-                                : NULL;
+  int64_t *locals = ny_native_locals_acquire(0, local_count);
   if (local_count && !locals) {
     ny_native_set_err(err, err_len, "native oracle: out of memory");
     return false;
   }
   ny_native_vm_call_ctx_t ctx = {.funcs = funcs,
-                                  .names = names,
-                                  .count = count,
-                                  .recursion_limit =
-                                      ny_native_vm_recursion_limit(opt),
-                                  .max_steps = ny_native_vm_max_steps(opt)};
+                                 .names = names,
+                                 .count = count,
+                                 .recursion_limit =
+                                     ny_native_vm_recursion_limit(opt),
+                                 .max_steps = ny_native_vm_max_steps(opt)};
   nyir_eval_result_t top = {0};
   nyir_eval_result_t nested = {0};
   ctx.profile = &nested;
   bool ok = nyir_eval_with_calls(rt_main, locals, local_count,
-                                   ny_native_vm_max_steps(opt), &top,
-                                   ny_native_vm_call_resolve, &ctx, err,
-                                   err_len);
-  free(locals);
+                                 ny_native_vm_max_steps(opt), &top,
+                                 ny_native_vm_call_resolve, &ctx, err,
+                                 err_len);
   if (!ok)
     return false;
   ny_native_vm_profile_merge(&nested, &top);
@@ -391,26 +491,24 @@ bool ny_native_collect_vm_profile(nyir_func_t *rt_main,
     return false;
   memset(profile, 0, sizeof(*profile));
   size_t local_count = ny_native_nir_local_count(rt_main);
-  int64_t *locals = local_count ? (int64_t *)calloc(local_count, sizeof(*locals))
-                                : NULL;
+  int64_t *locals = ny_native_locals_acquire(0, local_count);
   if (local_count && !locals) {
     ny_native_set_err(err, err_len,
                       "native tier report VM profile: out of memory");
     return false;
   }
   ny_native_vm_call_ctx_t ctx = {.funcs = funcs,
-                                  .names = names,
-                                  .count = count,
-                                  .recursion_limit =
-                                      ny_native_vm_recursion_limit(opt),
-                                  .max_steps = ny_native_vm_max_steps(opt),
-                                  .profile = profile};
+                                 .names = names,
+                                 .count = count,
+                                 .recursion_limit =
+                                     ny_native_vm_recursion_limit(opt),
+                                 .max_steps = ny_native_vm_max_steps(opt),
+                                 .profile = profile};
   nyir_eval_result_t top = {0};
   bool ok = nyir_eval_with_calls(rt_main, locals, local_count,
-                                   ny_native_vm_max_steps(opt), &top,
-                                   ny_native_vm_call_resolve, &ctx, err,
-                                   err_len);
-  free(locals);
+                                 ny_native_vm_max_steps(opt), &top,
+                                 ny_native_vm_call_resolve, &ctx, err,
+                                 err_len);
   if (!ok)
     return false;
   ny_native_vm_profile_merge(profile, &top);
@@ -595,19 +693,13 @@ bool ny_native_eval_ir_for_program(const program_t *prog,
   nyir_func_t funcs[NY_NATIVE_LIVE_MAX_FUNCS] = {{0}};
   const char *names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
   size_t count = 0;
-  if (!ny_native_build_nir(prog, opt, &rt_main, funcs, &count,
-                           NY_NATIVE_LIVE_MAX_FUNCS, err,
-                           err_len))
+  if (!ny_native_build_nir(prog, opt, &rt_main, funcs, &count, names,
+                           NY_NATIVE_LIVE_MAX_FUNCS, err, err_len))
     return false;
-  size_t name_count = 0;
-  for (size_t i = 0; prog && i < prog->body.len && name_count < count; ++i) {
-    const stmt_t *s = prog->body.data[i];
-    if (!s || s->kind != NY_S_FUNC)
-      continue;
-    names[name_count++] = s->as.fn.name;
-  }
-  bool ok = ny_native_eval_ir_func_with_calls(
-      &rt_main, funcs, names, count, opt, "rt_main", err, err_len);
+  nyir_eval_result_t profile = {0};
+  bool ok = ny_native_collect_vm_profile(
+      &rt_main, funcs, names, count, opt, &profile, err, err_len);
+  nyir_eval_result_free(&profile);
   nyir_func_free(&rt_main);
   for (size_t i = 0; i < count; ++i)
     nyir_func_free(&funcs[i]);
@@ -688,9 +780,11 @@ bool ny_native_dump_ir_for_program(const program_t *prog,
     if (bout != stderr)
       fclose(bout);
     if (!bok) {
-      /* A named dump is an interchange artifact, not a best-effort log. Do
+      /*
+       * A named dump is an interchange artifact, not a best-effort log. Do
        * not leave an empty or partial file that a later --nyir-run-bin call
-       * could treat as the requested program. */
+       * could treat as the requested program.
+       */
       if (opt->nyir_dump_bin_path && opt->nyir_dump_bin_path[0])
         remove(opt->nyir_dump_bin_path);
       ny_native_set_err(err, err_len, "%s",
@@ -708,11 +802,13 @@ bool ny_native_dump_ir_for_program(const program_t *prog,
         return false;
     }
     if (defer_metadata_bin_report) {
-      /* The just-written NYIP bundle contains multiple NYIR members. Its
+      /*
+       * The just-written NYIP bundle contains multiple NYIR members. Its
        * metadata is the same freshly-built program view, while the legacy
        * --nyir-metadata-bin reader accepts one NYIR member. Avoid reopening
        * a multi-function bundle through that single-function compatibility
-       * reader. */
+       * reader.
+       */
       ny_options metadata_opt = *opt;
       metadata_opt.nyir_metadata_bin_path = NULL;
       if (!ny_native_write_nir_metadata_report(prog, &metadata_opt, err,
@@ -739,8 +835,8 @@ bool ny_native_dump_ir_for_program(const program_t *prog,
       continue;
     attempted_any = true;
     char local_err[512] = {0};
-    if (!ny_native_nir_dump_function(out, s, local_err, sizeof(local_err),
-                                     opt)) {
+    if (!ny_native_nir_dump_function(out, prog, s, local_err,
+                                     sizeof(local_err), opt)) {
       fprintf(out, "native NYIR dump unavailable for function %s: %s\n",
               s->as.fn.name ? s->as.fn.name : "<anon>",
               local_err[0] ? local_err : "unsupported shape");

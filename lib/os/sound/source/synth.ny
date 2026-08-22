@@ -42,7 +42,7 @@ fn _poly_blep(any t, any dt) f64 {
    }
    if x > 1.0 - d {
       x = (x - 1.0) / d
-      return(x * x) + x + x + 1.0
+      return (x * x) + x + x + 1.0
    }
    return 0.0
 }
@@ -219,7 +219,6 @@ fn make_supersaw_source(any freq, any dur_secs=2.0, any rate=44100, any amp=0.5,
    def bytes = frames * 4
    def ptr = malloc(bytes)
    if !ptr { return 0 }
-
    def a = clamp(amp + 0.0, 0.0, 1.0)
    def d = clamp(detune + 0.0, 0.0, 0.05)
    def w = clamp01(width + 0.0)
@@ -227,7 +226,6 @@ fn make_supersaw_source(any freq, any dur_secs=2.0, any rate=44100, any amp=0.5,
    if fade < 1 { fade = 1 }
    if fade > frames / 2 { fade = frames / 2 }
    def frames_f = frames + 0.0
-
    mut phases = []
    mut steps = []
    mut i = 0
@@ -242,7 +240,6 @@ fn make_supersaw_source(any freq, any dur_secs=2.0, any rate=44100, any amp=0.5,
       steps = steps.append(loop_step)
       i += 1
    }
-
    i = 0
    while i < frames {
       mut l = 0.0
@@ -266,20 +263,17 @@ fn make_supersaw_source(any freq, any dur_secs=2.0, any rate=44100, any amp=0.5,
          phases[v] = ph
          v += 1
       }
-
       mut env = 1.0
       if !loop_safe {
          if i < fade { env = (i + 0.0) / (fade + 0.0) }
          elif i >= frames - fade { env = ((frames - i) + 0.0) / (fade + 0.0) }
       }
-
       l = _soft_clip((l / (vc + 0.0)) * a * env * 1.32)
       rr = _soft_clip((rr / (vc + 0.0)) * a * env * 1.32)
       store16(ptr, _round_s16(l), i * 4)
       store16(ptr, _round_s16(rr), i * 4 + 2)
       i += 1
    }
-
    memory.make(ptr, bytes, 2, r, 16, 1, 1)
 }
 

@@ -1,7 +1,6 @@
 ;; Keywords: decompiler arithmetic expressions mba simplification
 ;; Arithmetic and mixed-boolean-arithmetic normalization for Ny pseudocode.
 module std.os.rev.decomp.arithmetic *
-
 use std.core
 use std.core.str as str
 use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_strip_outer_balanced_parens, _clean_strip_outer_parens, _clean_top_level_find, _clean_literal_int_value)
@@ -122,7 +121,9 @@ fn _clean_mba_pair_same_unordered(dict a, dict b) bool {
 }
 
 fn _clean_mba_pair_sum(dict pair) str { _clean_paren(pair.get("left", "")) + " + " + _clean_paren(pair.get("right", "")) }
+
 fn _clean_mba_pair_xor(dict pair) str { _clean_paren(pair.get("left", "")) + " ^^ " + _clean_paren(pair.get("right", "")) }
+
 fn _clean_mba_xor_pair_expr(str expr0) dict { _clean_mba_pair_expr(expr0, "^^") }
 
 fn _clean_mba_add_expr(str left0, str right0) str {

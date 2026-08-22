@@ -8,6 +8,7 @@ use std.core.str
 use std.core.primitives
 use std.core.primitives as prim
 use std.core.dict_mod
+use std.core.syntax.type
 
 @inline
 fn _has_tag(any x, any tag) bool {
@@ -41,7 +42,7 @@ fn _is_raw_ptr_like(any x) bool {
    if __eq(tag, runtime_tag_raw("ptr")) || __eq(tag, runtime_tag_raw("ffi_ptr")) { return true }
    if tag == 0 && prim.is_ptr(x) { return true }
    prim.is_ptr(x) && !_has_tag(x, runtime_tag_raw("set")) && !_is_bigint(x) && !_is_bigfloat(x)
-      && !_is_str_tag(tag) && !_is_seq_tag(tag) && !_has_tag(x, runtime_tag_raw("dict"))
+   && !_is_str_tag(tag) && !_is_seq_tag(tag) && !_has_tag(x, runtime_tag_raw("dict"))
 }
 
 @inline
@@ -476,7 +477,7 @@ fn type(any x) str {
    "Returns a string representing the **tag-type** of Nytrix value `x`.
    Return values: `nil`, `int`, `float`, `str`, `list`, `dict`, `set`,
    `tuple`, `bytes`, `bigint`, `bool`, `ptr`, `unknown`."
-   if __is_nil(x) { return "nil" }
+   if type.is_nil(x) { return "nil" }
    if __is_int(x) { return "int" }
    if __eq(x, true) || __eq(x, false) { return "bool" }
    if _is_float(x) { return "float" }
@@ -1312,7 +1313,15 @@ fn _set_impl(any obj, any key, any val) any {
       if !__is_int(k) { _type_error("set", "an integer index", key) }
       def n = obj.len
       if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { _index_error("set", k, n) }
+      if __lt(k, 0) || __ge(k, n) {
+         def cap = __load64_idx(obj, 8)
+         if k == n && k < cap {
+            __store_item_fast(obj, k, val)
+            store64(obj, n + 1, 0)
+            return obj
+         }
+         _index_error("set", k, n)
+      }
       else {
          __store_item_fast(obj, k, val)
          return obj
@@ -1492,7 +1501,7 @@ fn _str_items_depth(any its, bool pairs, int depth, str open="{", str close="}")
       if pairs {
          def p = its.get(i)
          _store_item_raw(parts, pos,
-         _to_str_depth(p.get(0), depth + 1) + ": " + _to_str_depth(p.get(1), depth + 1))
+            _to_str_depth(p.get(0), depth + 1) + ": " + _to_str_depth(p.get(1), depth + 1))
       } else {
          _store_item_raw(parts, pos, _to_str_depth(its.get(i), depth + 1))
       }

@@ -1,3 +1,7 @@
+/*
+ * Runtime core: NyValue constructors, tagged-value ops, type checks,
+ * comparison, hashing, printing, and the shared runtime dispatch table.
+ */
 #include "base/common.h"
 #include "rt/shared.h"
 #include <ctype.h>
@@ -23,23 +27,404 @@ int debug_enabled __attribute__((weak)) = 0;
 
 int64_t rt_globals_ptr = 1;
 
-/* LLVM-free native lowering uses this raw typed-buffer allocator directly.
- * The public std.core.tbuf API returns the data pointer (metadata lives in the
- * preceding 16 bytes), so keep this ABI raw and independent of NyValue tags. */
+/*
+ * LLVM-free native lowering uses this raw typed-buffer allocator directly.
+ * The public std.core.tbuf API returns the data pointer.  Its private 24-byte
+ * header is count, element size, and capacity, in that order.
+ */
+enum { RT_NATIVE_TBUF_HEADER = 24 };
+
+
 int64_t rt_native_tbuf_new(int64_t count, int64_t elem_size) {
   if (count < 0)
     count = 0;
   if (elem_size <= 0)
     elem_size = 1;
-  if ((uint64_t)count > (SIZE_MAX - 16u) / (uint64_t)elem_size)
+  int64_t capacity = count < 4 ? 4 : count;
+  if ((uint64_t)capacity >
+      (SIZE_MAX - RT_NATIVE_TBUF_HEADER) / (uint64_t)elem_size)
     return 0;
-  size_t bytes = 16u + (size_t)count * (size_t)elem_size;
+  size_t bytes = RT_NATIVE_TBUF_HEADER +
+                 (size_t)capacity * (size_t)elem_size;
   unsigned char *base = calloc(1, bytes);
   if (!base)
     return 0;
   memcpy(base, &count, sizeof(count));
   memcpy(base + 8, &elem_size, sizeof(elem_size));
-  return (int64_t)(uintptr_t)(base + 16);
+  memcpy(base + 16, &capacity, sizeof(capacity));
+  return (int64_t)(uintptr_t)(base + RT_NATIVE_TBUF_HEADER);
+}
+
+int64_t rt_native_tbuf_append(int64_t buffer, int64_t value,
+                              int64_t is_string) {
+  if (!buffer)
+    return 0;
+  unsigned char *data = (unsigned char *)(uintptr_t)buffer;
+  unsigned char *base = data - RT_NATIVE_TBUF_HEADER;
+  int64_t count = 0, elem_size = 0, capacity = 0;
+  memcpy(&count, base, sizeof(count));
+  memcpy(&elem_size, base + 8, sizeof(elem_size));
+  memcpy(&capacity, base + 16, sizeof(capacity));
+  if (count < 0 || elem_size <= 0 || capacity < count ||
+      (uint64_t)count >= (SIZE_MAX - RT_NATIVE_TBUF_HEADER) /
+                             (uint64_t)elem_size)
+    return 0;
+  int64_t new_count = count + 1;
+  if (new_count > capacity) {
+    int64_t new_capacity = capacity < 4 ? 4 : capacity;
+    if (new_capacity > INT64_MAX / 2)
+      new_capacity = INT64_MAX;
+    else
+      new_capacity *= 2;
+    if (new_capacity < new_count ||
+        (uint64_t)new_capacity >
+            (SIZE_MAX - RT_NATIVE_TBUF_HEADER) / (uint64_t)elem_size)
+      return 0;
+    size_t old_bytes = RT_NATIVE_TBUF_HEADER +
+                       (size_t)capacity * (size_t)elem_size;
+    size_t new_bytes = RT_NATIVE_TBUF_HEADER +
+                       (size_t)new_capacity * (size_t)elem_size;
+    unsigned char *grown = realloc(base, new_bytes);
+    if (!grown)
+      return 0;
+    memset(grown + old_bytes, 0, new_bytes - old_bytes);
+    base = grown;
+    data = base + RT_NATIVE_TBUF_HEADER;
+    capacity = new_capacity;
+    memcpy(base + 16, &capacity, sizeof(capacity));
+  }
+  unsigned char *slot = data + (size_t)count * (size_t)elem_size;
+  if (elem_size == 8 && !is_string) {
+    memcpy(base, &new_count, sizeof(new_count));
+    memcpy(data + (size_t)count * sizeof(value), &value, sizeof(value));
+    return (int64_t)(uintptr_t)data;
+  }
+  memcpy(base, &new_count, sizeof(new_count));
+  memset(slot, 0, (size_t)elem_size);
+  memcpy(slot, &value, sizeof(value));
+  if (elem_size >= 24 && is_string) {
+    int64_t len = (int64_t)strlen((const char *)(uintptr_t)value);
+    int64_t tag = 121;
+    memcpy(slot + 8, &len, sizeof(len));
+
+    memcpy(slot + 16, &tag, sizeof(tag));
+  }
+  return (int64_t)(uintptr_t)data;
+}
+int64_t rt_native_tbuf_append_i64(int64_t buffer, int64_t value) {
+  if (!buffer)
+    return 0;
+  unsigned char *data = (unsigned char *)(uintptr_t)buffer;
+  unsigned char *base = data - RT_NATIVE_TBUF_HEADER;
+  int64_t count = 0, elem_size = 0, capacity = 0;
+  memcpy(&count, base, sizeof(count));
+  memcpy(&elem_size, base + 8, sizeof(elem_size));
+  memcpy(&capacity, base + 16, sizeof(capacity));
+  if (count < 0 || elem_size != 8 || capacity < count ||
+      (uint64_t)count >= (SIZE_MAX - RT_NATIVE_TBUF_HEADER) / 8u)
+    return 0;
+  int64_t new_count = count + 1;
+  if (new_count > capacity) {
+    int64_t new_capacity = capacity < 4 ? 4 : capacity;
+    if (new_capacity > INT64_MAX / 2)
+      new_capacity = INT64_MAX;
+    else
+      new_capacity *= 2;
+    if (new_capacity < new_count ||
+        (uint64_t)new_capacity >
+            (SIZE_MAX - RT_NATIVE_TBUF_HEADER) / 8u)
+      return 0;
+    size_t old_bytes = RT_NATIVE_TBUF_HEADER + (size_t)capacity * 8u;
+    size_t new_bytes = RT_NATIVE_TBUF_HEADER + (size_t)new_capacity * 8u;
+    unsigned char *grown = realloc(base, new_bytes);
+    if (!grown)
+      return 0;
+    memset(grown + old_bytes, 0, new_bytes - old_bytes);
+    base = grown;
+    data = base + RT_NATIVE_TBUF_HEADER;
+    capacity = new_capacity;
+    memcpy(base + 16, &capacity, sizeof(capacity));
+  }
+  memcpy(base, &new_count, sizeof(new_count));
+  memcpy(data + (size_t)count * sizeof(value), &value, sizeof(value));
+  return (int64_t)(uintptr_t)data;
+}
+
+/*
+ * Repeat a raw typed buffer without re-boxing or re-tagging its elements.
+ * The source payload is immutable for the duration of this call; a fresh
+ * allocation is returned even for repeat_count == 1 so list-repeat keeps
+ * normal value semantics (mutating the result must not mutate the source).
+ */
+int64_t rt_native_tbuf_repeat(int64_t buffer, int64_t repeat_count) {
+  if (!buffer)
+    return 0;
+  unsigned char *src = (unsigned char *)(uintptr_t)buffer;
+  unsigned char *base = src - RT_NATIVE_TBUF_HEADER;
+  int64_t count = 0, elem_size = 0, capacity = 0;
+  memcpy(&count, base, sizeof(count));
+  memcpy(&elem_size, base + 8, sizeof(elem_size));
+  memcpy(&capacity, base + 16, sizeof(capacity));
+  if (count < 0 || elem_size <= 0 || capacity < count)
+    return 0;
+  if (repeat_count <= 0 || count == 0)
+    return rt_native_tbuf_new(0, elem_size);
+  if (count > INT64_MAX / repeat_count)
+    return 0;
+  int64_t total_count = count * repeat_count;
+  if ((uint64_t)total_count >
+      (SIZE_MAX - RT_NATIVE_TBUF_HEADER) / (uint64_t)elem_size)
+    return 0;
+  int64_t out = rt_native_tbuf_new(total_count, elem_size);
+  if (!out)
+    return 0;
+  size_t chunk = (size_t)count * (size_t)elem_size;
+  unsigned char *dst = (unsigned char *)(uintptr_t)out;
+  memcpy(dst, src, chunk);
+  /*
+   * Doubling copies already-produced bytes and avoids O(repeat_count) memcpy
+   * call overhead for large repeats while preserving exact byte layout.
+   */
+  size_t filled = chunk;
+  size_t total = (size_t)total_count * (size_t)elem_size;
+  while (filled < total) {
+    size_t copy = filled < total - filled ? filled : total - filled;
+    memcpy(dst + filled, dst, copy);
+    filled += copy;
+  }
+  return out;
+}
+
+int64_t rt_native_tbuf_len(int64_t buffer) {
+  if (!buffer)
+    return 0;
+  int64_t count = 0;
+  memcpy(&count, (unsigned char *)(uintptr_t)buffer - RT_NATIVE_TBUF_HEADER,
+         sizeof(count));
+  return count;
+}
+int64_t rt_native_tbuf_pop(int64_t buffer) {
+  if (!buffer)
+    return 0;
+  unsigned char *data = (unsigned char *)(uintptr_t)buffer;
+  int64_t count = 0, elem_size = 0;
+  memcpy(&count, data - RT_NATIVE_TBUF_HEADER, sizeof(count));
+  memcpy(&elem_size, data - 16, sizeof(elem_size));
+  if (count <= 0 || elem_size <= 0)
+    return 0;
+  unsigned char *slot =
+      data + (size_t)(count - 1) * (size_t)elem_size;
+  int64_t value = 0;
+  memcpy(&value, slot, sizeof(value));
+  int64_t new_count = count - 1;
+  memcpy(data - RT_NATIVE_TBUF_HEADER, &new_count, sizeof(new_count));
+  memset(slot, 0, (size_t)elem_size);
+  return value;
+}
+int64_t rt_native_load8_idx(int64_t addr, int64_t idx) {
+  if (addr == 0 || idx < 0 ||
+      (uint64_t)idx > UINTPTR_MAX - (uintptr_t)addr)
+    return 0;
+  return *(const uint8_t *)((uintptr_t)addr + (uintptr_t)idx);
+}
+
+int64_t rt_native_store8_idx(int64_t addr, int64_t idx, int64_t value) {
+  if (addr == 0 || idx < 0 ||
+      (uint64_t)idx > UINTPTR_MAX - (uintptr_t)addr)
+    return value;
+  *(uint8_t *)((uintptr_t)addr + (uintptr_t)idx) = (uint8_t)value;
+  return value;
+}
+
+int64_t rt_native_cstr_len(int64_t value) {
+  if (!value)
+    return 0;
+  return (int64_t)strlen((const char *)(uintptr_t)value);
+}
+int64_t rt_native_bool_to_cstr(int64_t value) {
+  return (int64_t)(uintptr_t)(value ? "true" : "false");
+}
+
+typedef struct {
+  int64_t key;
+  int64_t value;
+  uint64_t hash;
+  uint8_t control;
+} ny_native_dict_slot_t;
+
+/*
+ * SwissTable-style control bytes: 0 is empty, 1 is a tombstone, and occupied
+ * slots carry a 7-bit H2 fingerprint with the high bit set.  Keeping H2 in
+ * the slot's existing padding avoids a second metadata allocation.
+ */
+#define NY_NATIVE_DICT_EMPTY 0u
+#define NY_NATIVE_DICT_TOMBSTONE 1u
+#define NY_NATIVE_DICT_H2(hash) ((uint8_t)(0x80u | ((hash) >> 57)))
+
+typedef struct {
+  uint64_t magic;
+  int64_t capacity;
+  int64_t length;
+  ny_native_dict_slot_t *slots;
+} ny_native_dict_t;
+
+#define NY_NATIVE_DICT_MAGIC UINT64_C(0x4e59444943544d47)
+
+static ny_native_dict_t *ny_native_dict_ptr(int64_t value) {
+  ny_native_dict_t *dict = (ny_native_dict_t *)(uintptr_t)value;
+  return dict && dict->magic == NY_NATIVE_DICT_MAGIC ? dict : NULL;
+}
+
+static uint64_t ny_native_dict_hash(int64_t key) {
+  uintptr_t p = (uintptr_t)key;
+  if (p > 4096u) {
+    const unsigned char *s = (const unsigned char *)p;
+    uint64_t h = UINT64_C(1469598103934665603);
+    for (size_t i = 0; i < 4096 && s[i]; ++i)
+      h = (h ^ s[i]) * UINT64_C(1099511628211);
+    return h;
+  }
+  uint64_t x = (uint64_t)key;
+  x ^= x >> 33;
+  x *= UINT64_C(0xff51afd7ed558ccd);
+  x ^= x >> 33;
+  return x;
+}
+
+static bool ny_native_dict_resize(ny_native_dict_t *dict, int64_t capacity) {
+  if (!dict || capacity < 8 || (capacity & (capacity - 1)) != 0)
+    return false;
+  ny_native_dict_slot_t *slots =
+      (ny_native_dict_slot_t *)calloc((size_t)capacity, sizeof(*slots));
+  if (!slots)
+    return false;
+  ny_native_dict_slot_t *old = dict->slots;
+  int64_t old_cap = dict->capacity;
+  dict->slots = slots;
+  dict->capacity = capacity;
+  dict->length = 0;
+  if (old) {
+    uint64_t mask = (uint64_t)capacity - 1;
+    for (int64_t i = 0; i < old_cap; ++i) {
+      if (old[i].control < 0x80u)
+        continue;
+      uint64_t pos = old[i].hash & mask;
+      while (slots[pos].control >= 0x80u)
+        pos = (pos + 1) & mask;
+      slots[pos] = old[i];
+      dict->length++;
+    }
+    free(old);
+  }
+  return true;
+}
+
+int64_t rt_native_dict_new(int64_t capacity) {
+  if (capacity < 8)
+    capacity = 8;
+  int64_t actual = 8;
+  while (actual < capacity && actual <= INT64_MAX / 2)
+    actual *= 2;
+  ny_native_dict_t *dict = (ny_native_dict_t *)calloc(1, sizeof(*dict));
+  if (!dict || !ny_native_dict_resize(dict, actual)) {
+    free(dict);
+    return 0;
+  }
+  dict->magic = NY_NATIVE_DICT_MAGIC;
+  return (int64_t)(uintptr_t)dict;
+}
+
+static bool ny_native_dict_key_equal(int64_t a, int64_t b) {
+  if (a == b)
+    return true;
+  if ((uintptr_t)a > 4096u && (uintptr_t)b > 4096u)
+    return strcmp((const char *)(uintptr_t)a, (const char *)(uintptr_t)b) == 0;
+  return false;
+}
+
+static ny_native_dict_slot_t *ny_native_dict_find(ny_native_dict_t *dict,
+                                                   int64_t key,
+                                                   bool *found) {
+  if (found)
+    *found = false;
+  if (!dict || !dict->slots || dict->capacity <= 0)
+    return NULL;
+  uint64_t mask = (uint64_t)dict->capacity - 1;
+  uint64_t hash = ny_native_dict_hash(key);
+  uint8_t h2 = NY_NATIVE_DICT_H2(hash);
+  uint64_t pos = hash & mask;
+  ny_native_dict_slot_t *first_tomb = NULL;
+  for (int64_t i = 0; i < dict->capacity; ++i) {
+    ny_native_dict_slot_t *slot = &dict->slots[pos];
+    if (slot->control == NY_NATIVE_DICT_EMPTY)
+      return first_tomb ? first_tomb : slot;
+    if (slot->control >= 0x80u) {
+      if (slot->control == h2 && slot->hash == hash &&
+          ny_native_dict_key_equal(slot->key, key)) {
+        if (found)
+          *found = true;
+        return slot;
+      }
+    } else if (slot->control == NY_NATIVE_DICT_TOMBSTONE && !first_tomb) {
+      first_tomb = slot;
+    }
+    pos = (pos + 1) & mask;
+  }
+  return first_tomb;
+}
+
+int64_t rt_native_dict_get(int64_t value, int64_t key, int64_t fallback) {
+  ny_native_dict_t *dict = ny_native_dict_ptr(value);
+  bool found = false;
+  ny_native_dict_slot_t *slot = ny_native_dict_find(dict, key, &found);
+  return found && slot ? slot->value : fallback;
+}
+
+int64_t rt_native_dict_set(int64_t value, int64_t key, int64_t item) {
+  ny_native_dict_t *dict = ny_native_dict_ptr(value);
+  if (!dict)
+    return value;
+  if ((dict->length + 1) * 10 >= dict->capacity * 7) {
+    if (!ny_native_dict_resize(dict, dict->capacity * 2))
+      return value;
+  }
+  bool found = false;
+  ny_native_dict_slot_t *slot = ny_native_dict_find(dict, key, &found);
+  if (!slot)
+    return value;
+  if (!found) {
+    slot->key = key;
+    slot->hash = ny_native_dict_hash(key);
+    slot->control = NY_NATIVE_DICT_H2(slot->hash);
+    dict->length++;
+  }
+  slot->value = item;
+  return value;
+}
+
+int64_t rt_native_dict_has(int64_t value, int64_t key) {
+  ny_native_dict_t *dict = ny_native_dict_ptr(value);
+  bool found = false;
+  (void)ny_native_dict_find(dict, key, &found);
+  return found ? 1 : 0;
+}
+
+int64_t rt_native_dict_len(int64_t value) {
+  ny_native_dict_t *dict = ny_native_dict_ptr(value);
+  return dict ? dict->length : 0;
+}
+
+int64_t rt_native_dict_delete(int64_t value, int64_t key) {
+  ny_native_dict_t *dict = ny_native_dict_ptr(value);
+  bool found = false;
+  ny_native_dict_slot_t *slot = ny_native_dict_find(dict, key, &found);
+  if (found && slot) {
+    slot->control = NY_NATIVE_DICT_TOMBSTONE;
+    slot->key = 0;
+    slot->value = 0;
+    dict->length--;
+  }
+  return value;
 }
 
 int g_trace_requested = 0;
@@ -98,7 +483,6 @@ static NY_TLS size_t g_trace_len = 0;
 static NY_TLS size_t g_trace_idx = 0;
 static int g_index_read_probe_mode = -1;
 
-#define RT_SSO_MAX 23
 #define RT_SSO_SLOTS_PER_BLOCK 1024
 
 typedef struct rt_sso_slot {
@@ -140,6 +524,11 @@ static int64_t rt_alloc_small_string_len(const char *s, size_t len) {
 void rt_cleanup_small_strings(void) {
   rt_sso_block_t *block = g_sso_strings;
   g_sso_strings = NULL;
+  /*
+   * Clear the intern table and hash cache before freeing the SSO blocks they
+   * point into, so no stale pointer can survive the free.
+   */
+  rt_str_intern_clear();
   while (block) {
     rt_sso_block_t *next = block->next;
     free(block);
@@ -282,7 +671,9 @@ int64_t rt_print_str_raw(int64_t v) {
   return v;
 }
 
-/* Pure-native path: null-terminated C string pointer (no Nytrix string header). */
+/*
+ * Pure-native path: null-terminated C string pointer (no Nytrix string header).
+ */
 int64_t rt_print_cstr(int64_t p) {
   if (!p)
     return 0;
@@ -341,20 +732,37 @@ int64_t rt_print_i64_raw(int64_t val) {
   return val;
 }
 
+int64_t rt_print_f64_raw(double d) {
+  char buf[64];
+  int n = snprintf(buf, sizeof(buf), "%g", d);
+  if (n < 0)
+    return 0;
+  if ((size_t)n >= sizeof(buf))
+    n = (int)sizeof(buf) - 1;
+  rt_print_put(buf, (size_t)n);
+  return 0;
+}
+
 int64_t rt_print_int(int64_t v) {
   rt_print_i64_raw((int64_t)(v >> 1));
   return v;
 }
 
-/* Type-dispatched print: handles every Nytrix value correctly.
- * Used by the native backend and any path where the static type is unknown. */
+/*
+ * Type-dispatched print: handles every Nytrix value correctly.
+ * Used by the native backend and any path where the static type is unknown.
+ */
 int64_t rt_print_value(int64_t v) {
-  /* nil */
+  /*
+   * nil
+   */
   if (rt_is_nil_imm(v)) {
     rt_print_put("nil", 3);
     return v;
   }
-  /* booleans */
+  /*
+   * booleans
+   */
   if (rt_is_true_imm(v)) {
     rt_print_put("true", 4);
     return v;
@@ -363,15 +771,21 @@ int64_t rt_print_value(int64_t v) {
     rt_print_put("false", 5);
     return v;
   }
-  /* tagged integer — fast inline path */
+  /*
+   * tagged integer — fast inline path
+   */
   if (is_int(v)) {
     return rt_print_int(v);
   }
-  /* string */
+  /*
+   * string
+   */
   if (is_v_str(v)) {
     return rt_print_str_raw(v);
   }
-  /* pointer-tagged objects */
+  /*
+   * pointer-tagged objects
+   */
   if (is_ptr(v)) {
     if (is_v_flt(v)) {
       double d;
@@ -412,7 +826,9 @@ int64_t rt_print_value(int64_t v) {
       rt_print_put(buf, (size_t)n);
       return v;
     }
-    /* native/ffi pointer */
+    /*
+     * native/ffi pointer
+     */
     if (NY_NATIVE_IS(v)) {
       char buf[64];
       int n = snprintf(buf, sizeof(buf), "<ffi_ptr 0x%lx>",
@@ -420,7 +836,9 @@ int64_t rt_print_value(int64_t v) {
       rt_print_put(buf, (size_t)n);
       return v;
     }
-    /* function pointer */
+    /*
+     * function pointer
+     */
     if ((v & 3) == 2) {
       char buf[64];
       int n = snprintf(buf, sizeof(buf), "<fn 0x%lx>",
@@ -429,7 +847,9 @@ int64_t rt_print_value(int64_t v) {
       return v;
     }
   }
-  /* fallback */
+  /*
+   * fallback
+   */
   rt_print_put("nil", 3);
   return v;
 }
@@ -445,10 +865,15 @@ int64_t rt_print_newline(void) {
 int64_t rt_alloc_string_len(const char *s, size_t len) {
   if (!s)
     return 0;
+  int64_t existing = rt_str_intern_lookup(s, len);
+  if (existing)
+    return existing;
   if (len <= RT_SSO_MAX) {
     int64_t small = rt_alloc_small_string_len(s, len);
-    if (small)
+    if (small) {
+      rt_str_intern_insert(s, len, small);
       return small;
+    }
   }
   int64_t p = rt_malloc((int64_t)((len + 1) * sizeof(char) << 1) | 1);
   if (!p)
@@ -457,6 +882,7 @@ int64_t rt_alloc_string_len(const char *s, size_t len) {
   *(int64_t *)((char *)(uintptr_t)p - 16) = ((int64_t)len << 1) | 1;
   memcpy((void *)(uintptr_t)p, s, len);
   ((char *)(uintptr_t)p)[len] = '\0';
+  rt_str_intern_insert(s, len, p);
   return p;
 }
 
@@ -1207,6 +1633,7 @@ int64_t rt_tag(int64_t v) { return rt_tag_v(v); }
 int64_t rt_untag(int64_t v) { return rt_untag_v(v); }
 int64_t rt_is_nil(int64_t v) { return rt_is_nil_imm(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
 int64_t rt_is_int(int64_t v) { return is_int(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
+int64_t rt_native_is_int(int64_t v) { return is_int(v) ? 1 : 0; }
 int64_t rt_is_ptr(int64_t v) { return is_ptr(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
 int64_t rt_is_ny_obj(int64_t v) { return is_ny_obj(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
 int64_t rt_is_str_obj(int64_t v) { return is_v_str(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
@@ -1251,6 +1678,10 @@ int64_t rt_has_tag(int64_t v, int64_t tag_v) {
                                                                      : NY_IMM_FALSE;
   }
   return NY_IMM_FALSE;
+}
+
+int64_t rt_native_has_tag(int64_t v, int64_t tag) {
+  return rt_has_tag(v, rt_tag_v(tag)) == NY_IMM_TRUE ? 1 : 0;
 }
 int64_t rt_tagof(int64_t v) {
   if (v == 0)
@@ -1450,16 +1881,17 @@ int64_t rt_append(int64_t lst, int64_t val) {
   int64_t n = is_int(len_v) ? (len_v >> 1) : len_v;
   int64_t cap_v = *(int64_t *)((char *)(uintptr_t)lst + 8);
   int64_t cap = is_int(cap_v) ? (cap_v >> 1) : cap_v;
-
   if (n >= cap) {
-    int64_t new_cap = cap == 0 ? 8 : (cap * 2);
+    int64_t new_cap = cap == 0 ? 16 : (cap < 1024 ? cap * 2 : cap + (cap >> 1));
     int64_t new_p = rt_malloc_uninit(16 + new_cap * 8);
     if (!new_p)
       return lst;
     *(int64_t *)((char *)(uintptr_t)new_p - 8) = TAG_LIST;
     *(int64_t *)((char *)(uintptr_t)new_p + 0) = len_v;
     *(int64_t *)((char *)(uintptr_t)new_p + 8) = (new_cap << 1) | 1;
-    memcpy((char *)(uintptr_t)new_p + 16, (char *)(uintptr_t)lst + 16, n * 8);
+    if (n > 0)
+      memcpy((char *)(uintptr_t)new_p + 16, (char *)(uintptr_t)lst + 16,
+             (size_t)n * 8);
     lst = new_p;
   }
 
@@ -1550,14 +1982,8 @@ static uint64_t rt_dict_hash_raw(int64_t key) {
     return 0x4e494cULL;
   if (key == NY_IMM_FALSE)
     return 0x46414c5345ULL;
-  if (is_v_str(key)) {
-    size_t n = rt_tagged_str_len(key);
-    const unsigned char *s = (const unsigned char *)(uintptr_t)key;
-    uint64_t h = 2166136261u;
-    for (size_t i = 0; i < n; i++)
-      h = ((h ^ (uint64_t)s[i]) * 16777619u) & 2147483647u;
-    return h;
-  }
+  if (is_v_str(key))
+    return rt_untag_v(rt_str_hash(key));
   if (is_v_flt(key)) {
     uint64_t bits = (uint64_t)_rt_flt_unbox_val(key);
     if (bits == 0x8000000000000000ULL)
@@ -1576,31 +2002,23 @@ static inline int rt_dict_key_eq_fast(int64_t a, int64_t b) {
   return a == b || rt_eq(a, b) == NY_IMM_TRUE;
 }
 
-static int64_t rt_dict_new_raw_cap(int64_t cap) {
-  if (cap < 1)
-    cap = 1;
-  int64_t p = rt_malloc(16 + cap * 24);
-  if (!p)
-    return 0;
-  *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_DICT;
-  *(int64_t *)((char *)(uintptr_t)p + 0) = rt_tag_v(0);
-  *(int64_t *)((char *)(uintptr_t)p + 8) = rt_tag_v(cap);
-  return p;
+static inline int64_t rt_dict_table_base(int64_t d) {
+  return *(int64_t *)((char *)(uintptr_t)d + 16);
 }
 
-static int64_t rt_dict_find_off_fast(int64_t d, int64_t cap, int64_t key) {
-  if (cap <= 0)
+static int64_t rt_dict_find_off_table(int64_t t, int64_t cap, int64_t key) {
+  if (cap <= 0 || !t)
     return -1;
   uint64_t mask = (uint64_t)(cap - 1);
   uint64_t idx = rt_dict_hash_raw(key) & mask;
   int64_t first_tomb = -1;
   for (int64_t i = 0; i < cap; i++) {
-    int64_t off = 16 + (int64_t)idx * 24;
-    int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
+    int64_t off = (int64_t)idx * 24;
+    int64_t state = *(int64_t *)((char *)(uintptr_t)t + off + 16);
     if (!state)
       return first_tomb >= 0 ? first_tomb : off;
     if (state == rt_tag_v(1)) {
-      int64_t slot_key = *(int64_t *)((char *)(uintptr_t)d + off);
+      int64_t slot_key = *(int64_t *)((char *)(uintptr_t)t + off);
       if (rt_dict_key_eq_fast(slot_key, key))
         return off;
     } else if (state == rt_tag_v(2) && first_tomb < 0) {
@@ -1611,22 +2029,14 @@ static int64_t rt_dict_find_off_fast(int64_t d, int64_t cap, int64_t key) {
   return first_tomb;
 }
 
-static int64_t rt_dict_insert_no_resize_fast(int64_t d, int64_t key, int64_t value) {
-  int64_t cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
-  int64_t off = rt_dict_find_off_fast(d, cap, key);
+static void rt_dict_insert_raw_table(int64_t t, int64_t cap, int64_t key,
+                                     int64_t value) {
+  int64_t off = rt_dict_find_off_table(t, cap, key);
   if (off < 0)
-    return d;
-  int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
-  if (state != rt_tag_v(1)) {
-    int64_t count = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 0));
-    *(int64_t *)((char *)(uintptr_t)d + off) = key;
-    *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
-    *(int64_t *)((char *)(uintptr_t)d + off + 16) = rt_tag_v(1);
-    *(int64_t *)((char *)(uintptr_t)d + 0) = rt_tag_v(count + 1);
-  } else {
-    *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
-  }
-  return d;
+    return;
+  *(int64_t *)((char *)(uintptr_t)t + off) = key;
+  *(int64_t *)((char *)(uintptr_t)t + off + 8) = value;
+  *(int64_t *)((char *)(uintptr_t)t + off + 16) = rt_tag_v(1);
 }
 
 int64_t rt_dict_reserve(int64_t d, int64_t additional_v) {
@@ -1648,19 +2058,23 @@ int64_t rt_dict_reserve(int64_t d, int64_t additional_v) {
     want_cap *= 2;
   if (want_cap <= 0 || cap >= want_cap)
     return d;
-  int64_t nd = rt_dict_new_raw_cap(want_cap);
-  if (!nd)
+  int64_t t = rt_dict_table_base(d);
+  int64_t nt = rt_malloc(16 + want_cap * 24);
+  if (!nt)
     return d;
+  *(int64_t *)((char *)(uintptr_t)nt - 8) = TAG_DICT_TBL;
   for (int64_t i = 0; i < cap; i++) {
-    int64_t off = 16 + i * 24;
-    int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
+    int64_t off = (int64_t)i * 24;
+    int64_t state = *(int64_t *)((char *)(uintptr_t)t + off + 16);
     if (state == rt_tag_v(1)) {
-      int64_t key = *(int64_t *)((char *)(uintptr_t)d + off);
-      int64_t value = *(int64_t *)((char *)(uintptr_t)d + off + 8);
-      rt_dict_insert_no_resize_fast(nd, key, value);
+      int64_t key = *(int64_t *)((char *)(uintptr_t)t + off);
+      int64_t value = *(int64_t *)((char *)(uintptr_t)t + off + 8);
+      rt_dict_insert_raw_table(nt, want_cap, key, value);
     }
   }
-  return nd;
+  *(int64_t *)((char *)(uintptr_t)d + 8) = rt_tag_v(want_cap);
+  *(int64_t *)((char *)(uintptr_t)d + 16) = nt;
+  return d;
 }
 
 

@@ -1,0 +1,151 @@
+shape thread-ring {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "concurrency", "threads", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+ci optional
+  cflags "-pthread"
+  source ny <<'NY'
+use std.core
+use std.os.time
+use std.core.tbuf
+use std.os.thread
+
+;; Thread ring: a single token makes HOPS hops around N slots, each guarded
+;; by its own mutex so workers never contend on a shared lock.
+
+def N = 16
+def HOPS = 10000
+
+fn ring_worker(ptr ctx) int {
+   def slots = load64(ctx, 0)
+   def mus = load64(ctx, 8)
+   def id = load64(ctx, 16)
+   mut hops = 0
+   def next = (id + 1) % N
+   def own_mu = load64(mus, id * 8)
+   def next_mu = load64(mus, next * 8)
+   while true {
+      __mutex_lock64(own_mu)
+      def t = load64(slots, id * 8)
+      if t == 0 {
+         __mutex_unlock64(own_mu)
+         continue
+      }
+      __mutex_lock64(next_mu)
+      if t == -1 {
+         store64(slots, -1, next * 8)
+         __mutex_unlock64(next_mu)
+         __mutex_unlock64(own_mu)
+         return hops
+      }
+      store64(slots, 0, id * 8)
+      hops += 1
+      if t == 1 {
+         store64(slots, -1, next * 8)
+      } else {
+         store64(slots, t - 1, next * 8)
+      }
+      __mutex_unlock64(next_mu)
+      __mutex_unlock64(own_mu)
+   }
+   hops
+}
+
+def slots = i64buf_new(N)
+def mus = i64buf_new(N)
+mut i = 0
+while i < N {
+   store64(mus, __mutex_new(), i * 8)
+   i += 1
+}
+def t0 = ticks()
+store64(slots, HOPS, 0)
+def handles = i64buf_new(N)
+i = 0
+while i < N {
+   def ctx = malloc(24)
+   store64(ctx, slots, 0)
+   store64(ctx, mus, 8)
+   store64(ctx, i, 16)
+   store64(handles, thread_spawn(ring_worker, ctx), i * 8)
+   i += 1
+}
+i = 0
+while i < N {
+   __thread_join(load64(handles, i * 8))
+   i += 1
+}
+def t1 = ticks()
+print("checksum=", HOPS)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <pthread.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+#define N 16
+#define HOPS 10000
+
+static pthread_mutex_t mu[N];
+static int slots[N];
+
+static void *worker(void *arg) {
+  int id = (int)(long)arg;
+  int next = (id + 1) % N;
+  long hops = 0;
+  for (;;) {
+    pthread_mutex_lock(&mu[id]);
+    int t = slots[id];
+    if (t == 0) {
+      pthread_mutex_unlock(&mu[id]);
+      continue;
+    }
+    pthread_mutex_lock(&mu[next]);
+    if (t == -1) {
+      slots[next] = -1;
+      pthread_mutex_unlock(&mu[next]);
+      pthread_mutex_unlock(&mu[id]);
+      return (void *)(uintptr_t)hops;
+    }
+    slots[id] = 0;
+    hops++;
+    slots[next] = (t == 1) ? -1 : t - 1;
+    pthread_mutex_unlock(&mu[next]);
+    pthread_mutex_unlock(&mu[id]);
+  }
+}
+
+int main(void) {
+  pthread_t th[N];
+  for (int i = 0; i < N; i++) {
+    pthread_mutex_init(&mu[i], NULL);
+    slots[i] = 0;
+  }
+  int64_t t0 = now_ns();
+  slots[0] = HOPS;
+  for (int i = 0; i < N; i++)
+    pthread_create(&th[i], NULL, worker, (void *)(long)i);
+  long sum = 0;
+  for (int i = 0; i < N; i++) {
+    void *r;
+    pthread_join(th[i], &r);
+    sum += (long)(uintptr_t)r;
+  }
+  int64_t t1 = now_ns();
+  printf("checksum=%d\n", HOPS);
+  printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+  return 0;
+}
+C
+}

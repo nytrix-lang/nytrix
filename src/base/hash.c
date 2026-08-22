@@ -1,3 +1,7 @@
+/*
+ * Non-cryptographic hash primitives: FNV-1a, xxHash-style helpers,
+ * and incremental hashing for symbol tables, cache keys, and AST nodes.
+ */
 #include "base/hash.h"
 #include "base/util.h"
 #include <stdlib.h>

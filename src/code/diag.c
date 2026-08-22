@@ -1,3 +1,7 @@
+/*
+ * Compiler diagnostics: error/warning/note emission with source
+ * snippets, ANSI colorization, category routing, and max-error capping.
+ */
 
 #include "base/common.h"
 #include "base/intern.h"
@@ -35,7 +39,8 @@ typedef enum {
   W_DIV_ZERO = 2005,
 } diag_code_t;
 
-/* Diagnostic codes come in two ranges:
+/*
+ * Diagnostic codes come in two ranges:
  *   E1xxx / W2xxx-with-low-id — explicit semantic codes passed through
  *     ny_diag_error_code / ny_diag_warning_code (see diag_code_t above).
  *   E2xxx / W3xxx — stable codes derived from the diagnostic format string for
@@ -44,7 +49,8 @@ typedef enum {
  *     first use, so the same error kind always produces the same code across a
  *     run.  This keeps the AGENTS.md §4 "stable category" guarantee without
  *     retagging every call site, and it stops mislabeling every generic error
- *     as E_SYNTAX (E1001). */
+ *     as E_SYNTAX (E1001).
+ */
 enum { NY_DIAG_FMT_CAP = 512, NY_DIAG_FMT_MASK = NY_DIAG_FMT_CAP - 1 };
 
 typedef struct {
@@ -328,10 +334,12 @@ static void ny_secondary(const char *label, const char *label_color, const char 
     fprintf(stderr, "       %s%s%s  %s\n", clr(label_color), label, clr(NY_CLR_RESET), rendered);
 }
 
-/* Assign a stable code to a diagnostic format string.  The same format always
+/*
+ * Assign a stable code to a diagnostic format string.  The same format always
  * maps to the same code within a process, so error categories are stable without
  * each call site having to name one.  Codes are drawn from the caller-supplied
- * counter so the E2xxx (error) and W3xxx (warning) ranges stay distinct. */
+ * counter so the E2xxx (error) and W3xxx (warning) ranges stay distinct.
+ */
 static int ny_diag_code_for_fmt(diag_fmt_code_t *table, int *next_code,
                                 const char *fmt) {
   if (!fmt)

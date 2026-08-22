@@ -78,7 +78,9 @@ fn command_for(str path) list {
 }
 
 fn output_name(str path) str {
-   "*run: " + (path.len > 0 ? ospath.basename(path) : "untitled") + "*"
+   "Return the editor output label. A file uses `run: <basename>`; an empty path uses `run: untitled`."
+   def name = path.len > 0 ? ospath.basename(path) : "untitled"
+   str.join(["run: ", name], "")
 }
 
 ;; Returns the result of the `output_text` operation.
@@ -170,7 +172,8 @@ fn section_at(list lines, int row) dict {
 
 #main {
    assert(command_for("a.ny").len >= 2, "runner ny default")
-   assert(output_name("foo.py") == "*run: foo.py*", "runner output name")
+   assert(output_name("foo.py") == "run: foo.py", "runner output name")
+   assert(!str.str_contains(output_name("foo.py"), "*"), "runner output label is not markdown")
    def sec = section_at(["one", "# %%", "two", "three", "# %%", "four"], 2)
    assert(sec.get("found", false) && to_str(sec.get("text", "")) == "two\nthree", "runner section")
    print("✓ viewer editor runner test passed")

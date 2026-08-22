@@ -2,7 +2,6 @@
 ;; Persistent certificate index with strict version and dependency invalidation.
 module std.math.logic.index(
    open, lookup, put, save, size)
-
 use std.core
 use std.os
 use std.os.fs as fs
@@ -19,10 +18,10 @@ fn _fresh(str path, str module_version, str dependency_digest,
 
 fn _matches(dict index, any value) bool {
    is_dict(value) && value.get("format", "") == "ny-proof-index-v1" &&
-      value.get("module_version", "") == index.get("module_version") &&
-      value.get("dependency_digest", "") == index.get("dependency_digest") &&
-      value.get("checker_version", "") == index.get("checker_version") &&
-      is_dict(value.get("entries", nil))
+   value.get("module_version", "") == index.get("module_version") &&
+   value.get("dependency_digest", "") == index.get("dependency_digest") &&
+   value.get("checker_version", "") == index.get("checker_version") &&
+   is_dict(value.get("entries", nil))
 }
 
 ;; Returns the result of the `open` operation.
@@ -59,10 +58,10 @@ fn put(dict index, dict certificate, int max_variables=16,
    int max_nodes=100000, int max_depth=128, int max_steps=1000000,
    int max_memory=100000) bool {
    if certificate.get("module_version", "") != index.get("module_version") ||
-      certificate.get("dependency_digest", "") != index.get("dependency_digest") ||
-      certificate.get("checker_version", "") != index.get("checker_version") ||
-      !cert.check(certificate, max_variables, max_nodes, max_depth, max_steps,
-         max_memory) {
+   certificate.get("dependency_digest", "") != index.get("dependency_digest") ||
+   certificate.get("checker_version", "") != index.get("checker_version") ||
+   !cert.check(certificate, max_variables, max_nodes, max_depth, max_steps,
+      max_memory) {
       return false
    }
    index.get("entries")[cert.key(certificate)] = certificate
@@ -75,11 +74,11 @@ fn save(dict index) bool {
    if path.len == 0 { return false }
    def tmp = path + ".tmp-" + to_str(pid()) + "-" + to_str(ticks())
    match file_write(tmp, json.json_encode({
-      "format":index.get("format"),
-      "module_version":index.get("module_version"),
-      "dependency_digest":index.get("dependency_digest"),
-      "checker_version":index.get("checker_version"),
-      "entries":index.get("entries")})) {
+            "format":index.get("format"),
+            "module_version":index.get("module_version"),
+            "dependency_digest":index.get("dependency_digest"),
+            "checker_version":index.get("checker_version"),
+            "entries":index.get("entries")})) {
       ok(written) -> {
          written
          match fs.rename(tmp, path) {

@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":160,"summary":"Use the interactive REPL to explore values, modules, diagnostics, and small experiments."} -->
 # REPL
 
 The REPL evaluates Nytrix source interactively. It keeps imports, definitions,
@@ -135,6 +136,6 @@ hidden setup.
 
 ## Related
 
-- [tooling.md](tooling.md)
-- [troubleshooting.md](troubleshooting.md)
-- [programs.md](programs.md)
+- [Tooling](tooling.md)
+- [Troubleshooting](troubleshooting.md)
+- [Programs](programs.md)

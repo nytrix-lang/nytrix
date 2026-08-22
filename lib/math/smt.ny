@@ -32,8 +32,7 @@ module std.math.smt(z3_available, z3_version, z3_version_str, z3_global_param_se
    parser_ctx_new, parser_ctx_free,
    parser_ctx_add_decl, parser_ctx_parse, solver_assert_ast_vector, ast_vector_free, session_new,
    session_free, session_ctx, session_solver, session_check, solve_qf_bv_const_hex, solve_qf_bv_bytes,
-solve_qf_bv_bytes_hex, solve_qf_bv_ascii)
-
+   solve_qf_bv_bytes_hex, solve_qf_bv_ascii)
 use std.core
 use std.os.ffi (
    dlsym, dlopen_checked, RTLD_NOW, RTLD_GLOBAL, call0, call0_ptr, call1, call1_ptr, call2, call2_ptr, call2_ptr_u32, call3, call3_ptr,
@@ -1658,7 +1657,7 @@ fn solve_qf_bv_ascii(str script, str prefix, int n) any {
             solver_assert(ctx, solver, mk_eq(ctx, int_mod(ctx, int_add(ctx, [
                            int_mul(ctx, [int_val(ctx, 7), x]),
                            int_mul(ctx, [int_val(ctx, 5), y]),
-            ]), int_val(ctx, 11)), int_val(ctx, 8)))
+                        ]), int_val(ctx, 11)), int_val(ctx, 8)))
             solver_assert(ctx, solver, mk_eq(ctx, int_add(ctx, [x, y]), int_val(ctx, 3)))
             if solver_check(ctx, solver) {
                def xv = model_eval_u64(ctx, solver, x)

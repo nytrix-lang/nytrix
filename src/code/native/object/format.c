@@ -1,3 +1,7 @@
+/*
+ * Object format dispatch: routes machine-form to the correct object
+ * encoder (x64, aarch64) and format writer (ELF, COFF, Mach-O).
+ */
 #include "code/native/object/internal.h"
 #include "base/parallel.h"
 
@@ -7,28 +11,21 @@
 #include <string.h>
 
 
-typedef struct {
-  const nyir_func_t *funcs;
-  ny_mach_func_t *out;
-  char (*errors)[256];
-} ny_mach_lower_parallel_ctx_t;
-
-enum { NY_I386_OBJ_MAX_RELOCS = 10000 };
 
 static bool ny_i386_obj_reserve_relocs(ny_i386_obj_reloc_t **data,
                                        size_t *cap, size_t want,
                                        char *err, size_t err_len) {
-  if (!data || !cap || want > NY_I386_OBJ_MAX_RELOCS) {
+  if (!data || !cap || want > NY_NATIVE_MAX_RELOCS) {
     ny_native_set_err(err, err_len,
-                      "i386 ELF object writer: relocation limit is 10000");
+                      "i386 ELF object writer: relocation limit is 4096");
     return false;
   }
   if (want <= *cap)
     return true;
   size_t next = *cap ? *cap : 256;
   while (next < want) {
-    if (next > NY_I386_OBJ_MAX_RELOCS / 2) {
-      next = NY_I386_OBJ_MAX_RELOCS;
+    if (next > NY_NATIVE_MAX_RELOCS / 2) {
+      next = NY_NATIVE_MAX_RELOCS;
       break;
     }
     next *= 2;
@@ -44,50 +41,102 @@ static bool ny_i386_obj_reserve_relocs(ny_i386_obj_reloc_t **data,
   return true;
 }
 
-static bool ny_mach_lower_parallel_task(size_t i, void *opaque) {
-  ny_mach_lower_parallel_ctx_t *ctx = (ny_mach_lower_parallel_ctx_t *)opaque;
-  return ny_mach_lower_nir(&ctx->funcs[i], &ctx->out[i], ctx->errors[i], 256);
-}
 
-/* ELF32/ELF64, COFF, and Mach-O packaging over encoded code, symbols, and
- * relocation records produced by the architecture encoders. */
+/*
+ * ELF32/ELF64, COFF, and Mach-O packaging over encoded code, symbols, and
+ * relocation records produced by the architecture encoders.
+ */
 
-/* Independence metrics: machine form encode success vs NYIR object fallback. */
+/*
+ * Independence metrics: machine form encode success vs per-function NYIR
+ * object fallback. Unsupported machine shapes remain explicit in the
+ * per-function reason so a mixed bundle cannot hide its owner.
+ */
 unsigned long long ny_native_stat_mach_ok = 0;
 unsigned long long ny_native_stat_nir_fallback = 0;
+static char ny_native_first_mach_fallback[512];
+static int ny_native_first_mach_fallback_set = 0;
 unsigned long long ny_native_stat_regalloc_segments = 0;
 unsigned long long ny_native_stat_regalloc_colored = 0;
 unsigned long long ny_native_stat_regalloc_spilled = 0;
+unsigned long long ny_native_stat_regalloc_reloads = 0;
+unsigned long long ny_native_stat_regalloc_peak_live = 0;
 unsigned long long ny_native_stat_fpr_segments = 0;
 unsigned long long ny_native_stat_fpr_colored = 0;
 unsigned long long ny_native_stat_fpr_spilled = 0;
+unsigned long long ny_native_stat_fpr_reloads = 0;
+unsigned long long ny_native_stat_fpr_peak_live = 0;
 unsigned long long ny_native_stat_vector_segments = 0;
 unsigned long long ny_native_stat_vector_colored = 0;
 unsigned long long ny_native_stat_vector_spilled = 0;
+unsigned long long ny_native_stat_vector_reloads = 0;
+unsigned long long ny_native_stat_vector_peak_live = 0;
+
+
+static void ny_native_atomic_max_ull(unsigned long long *dst,
+                                     unsigned long long value) {
+  unsigned long long cur = __atomic_load_n(dst, __ATOMIC_RELAXED);
+  while (cur < value &&
+         !__atomic_compare_exchange_n(dst, &cur, value, false,
+                                      __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+  }
+}
+
+static void ny_native_mach_record(bool machine, const char *symbol,
+                                   const char *reason) {
+  if (machine) {
+    __atomic_fetch_add(&ny_native_stat_mach_ok, 1, __ATOMIC_RELAXED);
+    return;
+  }
+  __atomic_fetch_add(&ny_native_stat_nir_fallback, 1, __ATOMIC_RELAXED);
+  if (__sync_bool_compare_and_swap(&ny_native_first_mach_fallback_set, 0, 1))
+    snprintf(ny_native_first_mach_fallback,
+             sizeof(ny_native_first_mach_fallback), "%s: %s",
+             symbol && symbol[0] ? symbol : "<unknown>",
+             reason && reason[0] ? reason : "machine form unavailable");
+}
+
+void ny_native_mach_encode_fallback_detail(char *out, size_t out_len) {
+  if (!out || out_len == 0)
+    return;
+  snprintf(out, out_len, "%s",
+           ny_native_first_mach_fallback_set
+               ? ny_native_first_mach_fallback
+               : "none");
+}
 
 void ny_native_mach_encode_stats(unsigned long long *mach_ok,
                                 unsigned long long *nir_fallback) {
   if (mach_ok)
-    *mach_ok = ny_native_stat_mach_ok;
+    *mach_ok = __atomic_load_n(&ny_native_stat_mach_ok, __ATOMIC_RELAXED);
   if (nir_fallback)
-    *nir_fallback = ny_native_stat_nir_fallback;
+    *nir_fallback =
+        __atomic_load_n(&ny_native_stat_nir_fallback, __ATOMIC_RELAXED);
 }
 
 void ny_native_mach_regalloc_record(size_t segments, size_t colored,
-                                     size_t spilled);
-void ny_native_mach_regalloc_record(size_t segments, size_t colored,
-                                     size_t spilled) __attribute__((used)) {
+                                     size_t spilled, size_t reloads,
+                                     size_t peak_live);
+__attribute__((used)) void ny_native_mach_regalloc_record(
+    size_t segments, size_t colored, size_t spilled, size_t reloads,
+    size_t peak_live) {
   __atomic_fetch_add(&ny_native_stat_regalloc_segments,
                      (unsigned long long)segments, __ATOMIC_RELAXED);
   __atomic_fetch_add(&ny_native_stat_regalloc_colored,
                      (unsigned long long)colored, __ATOMIC_RELAXED);
   __atomic_fetch_add(&ny_native_stat_regalloc_spilled,
                      (unsigned long long)spilled, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ny_native_stat_regalloc_reloads,
+                     (unsigned long long)reloads, __ATOMIC_RELAXED);
+  ny_native_atomic_max_ull(&ny_native_stat_regalloc_peak_live,
+                           (unsigned long long)peak_live);
 }
 
 void ny_native_mach_regalloc_stats(unsigned long long *segments,
                                    unsigned long long *colored,
-                                   unsigned long long *spilled) {
+                                   unsigned long long *spilled,
+                                   unsigned long long *reloads,
+                                   unsigned long long *peak_live) {
   if (segments)
     *segments = __atomic_load_n(&ny_native_stat_regalloc_segments,
                                 __ATOMIC_RELAXED);
@@ -97,23 +146,36 @@ void ny_native_mach_regalloc_stats(unsigned long long *segments,
   if (spilled)
     *spilled = __atomic_load_n(&ny_native_stat_regalloc_spilled,
                                __ATOMIC_RELAXED);
+  if (reloads)
+    *reloads = __atomic_load_n(&ny_native_stat_regalloc_reloads,
+                               __ATOMIC_RELAXED);
+  if (peak_live)
+    *peak_live = __atomic_load_n(&ny_native_stat_regalloc_peak_live,
+                                 __ATOMIC_RELAXED);
 }
 
-void ny_native_mach_fpr_record(size_t segments, size_t colored,
-                                size_t spilled);
-void ny_native_mach_fpr_record(size_t segments, size_t colored,
-                                size_t spilled) __attribute__((used)) {
+void ny_native_mach_fpr_record(size_t segments, size_t colored, size_t spilled,
+                               size_t reloads, size_t peak_live);
+__attribute__((used)) void ny_native_mach_fpr_record(
+    size_t segments, size_t colored, size_t spilled, size_t reloads,
+    size_t peak_live) {
   __atomic_fetch_add(&ny_native_stat_fpr_segments,
                      (unsigned long long)segments, __ATOMIC_RELAXED);
   __atomic_fetch_add(&ny_native_stat_fpr_colored,
                      (unsigned long long)colored, __ATOMIC_RELAXED);
   __atomic_fetch_add(&ny_native_stat_fpr_spilled,
                      (unsigned long long)spilled, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ny_native_stat_fpr_reloads,
+                     (unsigned long long)reloads, __ATOMIC_RELAXED);
+  ny_native_atomic_max_ull(&ny_native_stat_fpr_peak_live,
+                           (unsigned long long)peak_live);
 }
 
 void ny_native_mach_fpr_stats(unsigned long long *segments,
                               unsigned long long *colored,
-                              unsigned long long *spilled) {
+                              unsigned long long *spilled,
+                              unsigned long long *reloads,
+                              unsigned long long *peak_live) {
   if (segments)
     *segments = __atomic_load_n(&ny_native_stat_fpr_segments,
                                 __ATOMIC_RELAXED);
@@ -123,23 +185,37 @@ void ny_native_mach_fpr_stats(unsigned long long *segments,
   if (spilled)
     *spilled = __atomic_load_n(&ny_native_stat_fpr_spilled,
                                __ATOMIC_RELAXED);
+  if (reloads)
+    *reloads = __atomic_load_n(&ny_native_stat_fpr_reloads,
+                               __ATOMIC_RELAXED);
+  if (peak_live)
+    *peak_live = __atomic_load_n(&ny_native_stat_fpr_peak_live,
+                                 __ATOMIC_RELAXED);
 }
 
 void ny_native_mach_vector_record(size_t segments, size_t colored,
-                                   size_t spilled);
-void ny_native_mach_vector_record(size_t segments, size_t colored,
-                                   size_t spilled) __attribute__((used)) {
+                                  size_t spilled, size_t reloads,
+                                  size_t peak_live);
+__attribute__((used)) void ny_native_mach_vector_record(
+    size_t segments, size_t colored, size_t spilled, size_t reloads,
+    size_t peak_live) {
   __atomic_fetch_add(&ny_native_stat_vector_segments,
                      (unsigned long long)segments, __ATOMIC_RELAXED);
   __atomic_fetch_add(&ny_native_stat_vector_colored,
                      (unsigned long long)colored, __ATOMIC_RELAXED);
   __atomic_fetch_add(&ny_native_stat_vector_spilled,
                      (unsigned long long)spilled, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&ny_native_stat_vector_reloads,
+                     (unsigned long long)reloads, __ATOMIC_RELAXED);
+  ny_native_atomic_max_ull(&ny_native_stat_vector_peak_live,
+                           (unsigned long long)peak_live);
 }
 
 void ny_native_mach_vector_stats(unsigned long long *segments,
                                  unsigned long long *colored,
-                                 unsigned long long *spilled) {
+                                 unsigned long long *spilled,
+                                 unsigned long long *reloads,
+                                 unsigned long long *peak_live) {
   if (segments)
     *segments = __atomic_load_n(&ny_native_stat_vector_segments,
                                 __ATOMIC_RELAXED);
@@ -149,6 +225,12 @@ void ny_native_mach_vector_stats(unsigned long long *segments,
   if (spilled)
     *spilled = __atomic_load_n(&ny_native_stat_vector_spilled,
                                __ATOMIC_RELAXED);
+  if (reloads)
+    *reloads = __atomic_load_n(&ny_native_stat_vector_reloads,
+                               __ATOMIC_RELAXED);
+  if (peak_live)
+    *peak_live = __atomic_load_n(&ny_native_stat_vector_peak_live,
+                                 __ATOMIC_RELAXED);
 }
 
 static bool ny_elf64_write_sym(ny_obj_buf_t *b, uint32_t name, unsigned info,
@@ -421,7 +503,7 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   bool ok = false;
   char reloc_symbols[NY_X64_OBJ_MAX_RELOCS][256];
   size_t reloc_symbol_count = 0;
-  uint32_t def_name_offs[256] = {0};
+  uint32_t def_name_offs[NY_NATIVE_MAX_DEFS] = {0};
   uint32_t reloc_name_offs[NY_X64_OBJ_MAX_RELOCS] = {0};
   if (!ny_x64_obj_collect_external_reloc_symbols(
           relocs, reloc_count, defs, def_count, reloc_symbols,
@@ -465,7 +547,9 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
         goto done;
       sym_index = (uint32_t)(1 + def_count + (size_t)ext_i);
     }
-    /* R_X86_64_PC32 = 2, R_X86_64_PLT32 = 4 */
+    /*
+     * R_X86_64_PC32 = 2, R_X86_64_PLT32 = 4
+     */
     uint64_t rtype = (relocs[i].type == NY_RELOC_PC32) ? 2u : 4u;
     uint64_t info = ((uint64_t)sym_index << 32) | rtype;
     if (!ny_obj_u64(&file, relocs[i].disp_off) || !ny_obj_u64(&file, info) ||
@@ -548,7 +632,7 @@ static bool ny_native_emit_coff_x64_object_bundle_code(
   bool ok = false;
   char reloc_symbols[NY_X64_OBJ_MAX_RELOCS][256];
   size_t reloc_symbol_count = 0;
-  uint32_t def_name_offs[256] = {0};
+  uint32_t def_name_offs[NY_NATIVE_MAX_DEFS] = {0};
   uint32_t reloc_name_offs[NY_X64_OBJ_MAX_RELOCS] = {0};
   const size_t header_size = 20;
   const size_t section_count = 1;
@@ -660,9 +744,9 @@ static bool ny_native_emit_macho_x64_object_bundle_code(
   bool ok = false;
   char reloc_symbols[NY_X64_OBJ_MAX_RELOCS][256];
   size_t reloc_symbol_count = 0;
-  uint32_t def_name_offs[256] = {0};
+  uint32_t def_name_offs[NY_NATIVE_MAX_DEFS] = {0};
   uint32_t reloc_name_offs[NY_X64_OBJ_MAX_RELOCS] = {0};
-  char macho_defs[256][256];
+  char macho_defs[NY_NATIVE_MAX_DEFS][256];
   char macho_relocs[NY_X64_OBJ_MAX_RELOCS][256];
 
   if (!ny_x64_obj_collect_external_reloc_symbols(
@@ -792,7 +876,100 @@ bool ny_x64_obj_build_bundle(
                                   rt_main, target, entry, tag_return, err,
                                   err_len))
     return false;
-  return ny_native_strtab_append_defs(code, defs, def_count, err, err_len);
+  if (!ny_native_strtab_append_defs(code, defs, def_count, err, err_len))
+    return false;
+  if (!ny_native_consttab_append_defs(code, defs, def_count, err, err_len))
+    return false;
+  return ny_native_arraytab_append_defs(code, defs, def_count, err, err_len);
+}
+
+/*
+ * Build an x86-64 object bundle one function at a time.  A machine-form
+ * failure is recorded with its symbol and owning reason, then only that
+ * function uses the established NYIR object encoder.
+ */
+static bool ny_native_x64_build_mixed_bundle(
+    const nyir_func_t *rt_main, const nyir_func_t *funcs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *entry_symbol,
+    bool tag_return, ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,
+    size_t *def_count, ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    char *err, size_t err_len) {
+  if (!rt_main || !target || !entry_symbol || !entry_symbol[0] || !code ||
+      !defs || !def_count || !relocs || !reloc_count ||
+      (func_count && !funcs))
+    return false;
+  code->len = 0;
+  *def_count = 0;
+  *reloc_count = 0;
+  for (size_t i = 0; i < func_count; ++i) {
+    const char *name = func_names && func_names[i] ? func_names[i] : "unknown_fn";
+    char symbol[256];
+    snprintf(symbol, sizeof(symbol), NY_FMT_FN,
+             target->symbol_prefix ? target->symbol_prefix : "", name);
+    if (ny_x64_obj_def_index(defs, *def_count, symbol) >= 0)
+      continue;
+    char reason[256] = {0};
+    ny_mach_func_t mach = {0};
+    bool machine = ny_mach_lower_nir(&funcs[i], &mach, target->caps, reason,
+                                     sizeof(reason));
+    if (machine)
+      machine = ny_x64_mach_append_function(
+          code, defs, def_count, relocs, reloc_count, &mach, target, symbol,
+          false, reason, sizeof(reason));
+    ny_mach_func_free(&mach);
+    if (machine) {
+      ny_native_mach_record(true, symbol, NULL);
+      continue;
+    }
+    ny_native_mach_record(false, symbol, reason);
+    char fallback_err[256] = {0};
+    if (!ny_x64_obj_append_function(code, defs, def_count, relocs, reloc_count,
+                                    &funcs[i], target, symbol, false,
+                                    fallback_err, sizeof(fallback_err))) {
+      ny_native_set_err(
+          err, err_len,
+          "native function %s: machine form failed: %s; NYIR fallback failed: %s",
+          symbol, reason[0] ? reason : "unsupported machine shape",
+          fallback_err[0] ? fallback_err : "object emission failed");
+      return false;
+    }
+  }
+  char entry[256];
+  snprintf(entry, sizeof(entry), "%s%s",
+           target->symbol_prefix ? target->symbol_prefix : "", entry_symbol);
+  char reason[256] = {0};
+  ny_mach_func_t top_mach = {0};
+  bool machine = ny_mach_lower_nir(rt_main, &top_mach, target->caps, reason,
+                                   sizeof(reason));
+  if (machine)
+    machine = ny_x64_mach_append_function(
+        code, defs, def_count, relocs, reloc_count, &top_mach, target, entry,
+        tag_return, reason, sizeof(reason));
+  ny_mach_func_free(&top_mach);
+  if (machine) {
+    ny_native_mach_record(true, entry, NULL);
+  } else {
+    if (getenv("NY_DUMP_MACH"))
+      fprintf(stderr, "ENTRY-FALLBACK %s reason=%s\n", entry, reason);
+    ny_native_mach_record(false, entry, reason);
+    char fallback_err[256] = {0};
+    if (!ny_x64_obj_append_function(code, defs, def_count, relocs, reloc_count,
+                                    rt_main, target, entry, tag_return,
+                                    fallback_err, sizeof(fallback_err))) {
+      ny_native_set_err(
+          err, err_len,
+          "native function %s: machine form failed: %s; NYIR fallback failed: %s",
+          entry, reason[0] ? reason : "unsupported machine shape",
+          fallback_err[0] ? fallback_err : "object emission failed");
+      return false;
+    }
+  }
+  if (!ny_native_strtab_append_defs(code, defs, def_count, err, err_len))
+    return false;
+  if (!ny_native_consttab_append_defs(code, defs, def_count, err, err_len))
+    return false;
+  return ny_native_arraytab_append_defs(code, defs, def_count, err, err_len);
 }
 
 bool ny_native_emit_elf64_object_from_nirs(
@@ -801,68 +978,18 @@ bool ny_native_emit_elf64_object_from_nirs(
     const ny_native_target_info_t *target, const char *path,
     const char *entry_symbol, bool tag_return, char *err, size_t err_len) {
   ny_obj_buf_t code = {0};
-  ny_x64_obj_symbol_def_t defs[256];
+  ny_x64_obj_symbol_def_t defs[NY_NATIVE_MAX_DEFS];
   ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS];
   size_t def_count = 0;
   size_t reloc_count = 0;
-  /* Prefer machine form-owned encoding into the same ELF writer (no host assembler). */
-  bool ok = false;
-  {
-    char mach_err[256] = {0};
-    ny_mach_func_t top_mach = {0};
-    ny_mach_func_t *fm = NULL;
-    bool mach_ok = rt_main &&
-                  ny_mach_lower_nir(rt_main, &top_mach, mach_err, sizeof(mach_err));
-    if (mach_ok && func_count) {
-      fm = (ny_mach_func_t *)calloc(func_count, sizeof(*fm));
-      char (*lower_errors)[256] = calloc(func_count, sizeof(*lower_errors));
-      if (!fm || !lower_errors) {
-        free(lower_errors);
-        mach_ok = false;
-      } else {
-        size_t work = 0;
-        for (size_t i = 0; i < func_count; ++i)
-          work += funcs[i].len;
-        ny_mach_lower_parallel_ctx_t lower_ctx = {funcs, fm, lower_errors};
-        mach_ok = ny_parallel_for(func_count, work,
-                                  ny_mach_lower_parallel_task, &lower_ctx);
-        if (!mach_ok)
-          for (size_t i = 0; i < func_count; ++i)
-            if (lower_errors[i][0]) {
-              snprintf(mach_err, sizeof(mach_err), "%s", lower_errors[i]);
-              break;
-            }
-        free(lower_errors);
-      }
-    }
-    if (mach_ok)
-      ok = ny_x64_mach_build_bundle(&top_mach, fm, func_names, func_count, target,
-                                   entry_symbol ? entry_symbol : "rt_main",
-                                   tag_return, &code, defs, &def_count, relocs,
-                                   &reloc_count, mach_err, sizeof(mach_err));
-    ny_mach_func_free(&top_mach);
-    if (fm) {
-      for (size_t i = 0; i < func_count; ++i)
-        ny_mach_func_free(&fm[i]);
-      free(fm);
-    }
-    if (!ok) {
-      ny_obj_free(&code);
-      code = (ny_obj_buf_t){0};
-      def_count = reloc_count = 0;
-    } else {
-      ny_native_stat_mach_ok++;
-    }
-  }
-  if (!ok) {
-    ny_native_stat_nir_fallback++;
-    ok = ny_x64_obj_build_bundle(rt_main, funcs, func_names, func_count,
-                                 target, entry_symbol, tag_return, &code,
-                                 defs, &def_count, relocs, &reloc_count, err,
-                                 err_len);
-  }
-  /* Prefer denser I-cache when NyP heat is high: keep hot entry last, sort
-   * helpers by ascending size (already emit order in machine form bundle). */
+  bool ok = ny_native_x64_build_mixed_bundle(
+      rt_main, funcs, func_names, func_count, target,
+      entry_symbol ? entry_symbol : "rt_main", tag_return, &code, defs,
+      &def_count, relocs, &reloc_count, err, err_len);
+  /*
+   * Prefer denser I-cache when NyP heat is high: keep hot entry last, sort
+   * helpers by ascending size (already emit order in machine form bundle).
+   */
   ok = ok && ny_native_emit_elf64_x64_object_bundle_code(
                  code.data, code.len, relocs, reloc_count, defs, def_count,
                  path, err, err_len);
@@ -889,60 +1016,12 @@ static bool ny_native_emit_x64_object_from_nirs(
     const char *entry_symbol, bool tag_return, char *err, size_t err_len,
     ny_x64_bundle_writer_fn write_bundle) {
   ny_obj_buf_t code = {0};
-  ny_x64_obj_symbol_def_t defs[256];
+  ny_x64_obj_symbol_def_t defs[NY_NATIVE_MAX_DEFS];
   ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS];
   size_t def_count = 0, reloc_count = 0;
-  bool built = false;
-  ny_mach_func_t top_mach = {0};
-  ny_mach_func_t *fm = NULL;
-  char mach_err[256] = {0};
-  bool mach_ok = rt_main &&
-                 ny_mach_lower_nir(rt_main, &top_mach, mach_err,
-                                   sizeof(mach_err));
-  if (mach_ok && func_count) {
-    fm = calloc(func_count, sizeof(*fm));
-    char (*lower_errors)[256] = calloc(func_count, sizeof(*lower_errors));
-    if (!fm || !lower_errors) {
-      free(lower_errors);
-      mach_ok = false;
-    } else {
-      size_t work = 0;
-      for (size_t i = 0; i < func_count; ++i)
-        work += funcs[i].len;
-      ny_mach_lower_parallel_ctx_t lower_ctx = {funcs, fm, lower_errors};
-      mach_ok = ny_parallel_for(func_count, work,
-                                ny_mach_lower_parallel_task, &lower_ctx);
-      if (!mach_ok)
-        for (size_t i = 0; i < func_count; ++i)
-          if (lower_errors[i][0]) {
-            snprintf(mach_err, sizeof(mach_err), "%s", lower_errors[i]);
-            break;
-          }
-      free(lower_errors);
-    }
-  }
-  if (mach_ok)
-    built = ny_x64_mach_build_bundle(
-        &top_mach, fm, func_names, func_count, target,
-        entry_symbol ? entry_symbol : "rt_main", tag_return, &code, defs,
-        &def_count, relocs, &reloc_count, mach_err, sizeof(mach_err));
-  ny_mach_func_free(&top_mach);
-  if (fm) {
-    for (size_t i = 0; i < func_count; ++i)
-      ny_mach_func_free(&fm[i]);
-    free(fm);
-  }
-  if (!built) {
-    ny_obj_free(&code);
-    code = (ny_obj_buf_t){0};
-    def_count = reloc_count = 0;
-    if (err && err_len)
-      err[0] = '\0';
-    built = ny_x64_obj_build_bundle(rt_main, funcs, func_names, func_count,
-                                    target, entry_symbol, tag_return, &code,
-                                    defs, &def_count, relocs, &reloc_count,
-                                    err, err_len);
-  }
+  bool built = ny_native_x64_build_mixed_bundle(
+      rt_main, funcs, func_names, func_count, target, entry_symbol, tag_return,
+      &code, defs, &def_count, relocs, &reloc_count, err, err_len);
   bool ok = built &&
             write_bundle(code.data, code.len, relocs, reloc_count, defs,
                          def_count, path, err, err_len);
@@ -1069,7 +1148,9 @@ bool ny_native_emit_elf64_object_from_nir(const nyir_func_t *nyir,
                                         ctx.relocs[i].symbol);
     if (sym_i < 0)
       goto done;
-    /* R_X86_64_PC32 = 2, R_X86_64_PLT32 = 4 */
+    /*
+     * R_X86_64_PC32 = 2, R_X86_64_PLT32 = 4
+     */
     uint64_t rtype = (ctx.relocs[i].type == NY_RELOC_PC32) ? 2u : 4u;
     uint64_t info = ((uint64_t)(2 + sym_i) << 32) | rtype;
     if (!ny_obj_u64(&file, ctx.relocs[i].disp_off) || !ny_obj_u64(&file, info) ||
@@ -1152,7 +1233,7 @@ bool ny_native_emit_elf32_i386_object_from_nirs(
   ny_obj_buf_t code = {0};
   ny_obj_buf_t file = {0};
   ny_obj_buf_t strtab = {0};
-  ny_i386_obj_symbol_def_t defs[256];
+  ny_i386_obj_symbol_def_t defs[NY_NATIVE_MAX_DEFS];
   ny_i386_obj_reloc_t *relocs = NULL;
   size_t def_count = 0;
   size_t reloc_count = 0;
@@ -1253,7 +1334,7 @@ bool ny_native_emit_elf32_i386_object_from_nirs(
   ny_i386_obj_ctx_free(&ctx);
 
   size_t reloc_symbol_count = 0;
-  uint32_t def_name_offs[256] = {0};
+  uint32_t def_name_offs[NY_NATIVE_MAX_DEFS] = {0};
   if (reloc_count > 0) {
     reloc_symbols = calloc(reloc_count, sizeof(*reloc_symbols));
     reloc_name_offs = calloc(reloc_count, sizeof(*reloc_name_offs));

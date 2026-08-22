@@ -1,0 +1,22 @@
+shape oracle_loop_block_phi_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop phi edge-copy block-layout regression]
+  template ny-test-case
+  flags_matrix "-O2 --nyir-verify --native-result-oracle=55; -O3 --nyir-verify --native-result-oracle=55"
+  expect compile_and_run
+  source ny <<'NY'
+fn main() int {
+  mut a = 0
+  mut b = 1
+  mut i = 0
+  while i < 10 {
+    mut t = a + b
+    a = b
+    b = t
+    i = i + 1
+  }
+  a
+}
+NY
+}

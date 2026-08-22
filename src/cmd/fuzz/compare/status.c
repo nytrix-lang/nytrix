@@ -1,3 +1,11 @@
+/*
+ * Fuzz status: queries fuzzer session state and produces JSON status
+ * reports with progress, runtime, and last-seen-anomaly timestamps.
+ */
+
+/*
+ * session state, freshness, and status serialization
+ */
 static int cmd_public_fuzz_all_status(int argc, char **argv) {
   char root[4096];
   if (!find_nytrix_root(root, sizeof(root))) {

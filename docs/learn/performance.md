@@ -1,142 +1,44 @@
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":140,"summary":"Measure a real workload, preserve result checks, and compare identical build paths."} -->
 # Performance
 
-Performance work answers two different questions:
+Measure the program you intend to improve. Separate compile time, startup, and
+runtime. Keep the input, flags, cache state, and result check fixed.
 
-1. how expensive the compiler/toolchain path is;
-2. how fast the produced program runs.
+## Build the right artifact
 
-Do not mix those numbers unless compile time is part of the workload.
-
-## Command Matrix
-
-| Command | Measures | Use |
-| --- | --- | --- |
-| `ny file.ny` | Compile plus JIT/runtime path. | Edit loop and behavior checks. |
-| `ny --native-only file.ny` | Host-selected LLVM-free NYIR, native object/JIT, and run path on x86-64 or AArch64. | Native compiler/startup comparisons. |
-| `ny -run file.ny` | Temporary native executable plus run. | Quick AOT smoke test. |
-| `ny -o app file.ny` | Native compilation only. | Stable runtime artifact. |
-| `ny -O3 --profile=peak -o app file.ny` | Peak native compilation only. | Upper-bound runtime check. |
-| `./app` | Runtime only. | Program comparisons without compile noise. |
-| `ny -time file.ny` | Compiler phases plus run time. | Find parse/import/codegen/cache regressions. |
-| `ny -prof file.ny` | Timing and compiler/runtime stats. | Broader toolchain profile. |
-| `ny perf` | Maintained perf checks. | Regression pass. |
-
-Native `-o`, JIT, and REPL default to `-O0` for edit latency. Use `-O1` for a
-quick compact native build, `-O2` for ordinary releases, and
-`-O3 --profile=peak` only when compile time can be traded for native speed.
-
-The internally executable host backends are x86-64 and AArch64. Other target
-names are explicit assembly/NYIR inspection backends; selecting one does not
-silently claim object, link, JIT, or runtime support. AArch64 internal-link
-regressions use QEMU only to execute already-linked machine code.
-
-## Compile Once, Run Many
-
-```bash
-ny -O3 --profile=peak -g -o build/cache/bench/app bench.ny
-build/cache/bench/app
-build/cache/bench/app
-build/cache/bench/app
-```
-
-`-g` keeps profiler symbols. Drop `-g` and add `-strip` only for distribution
-size checks.
-
-## Read `-time`
-
-| Area | Meaning |
+| Command | Use |
 | --- | --- |
-| read/import/stdlib | Source size, import graph, stdlib cache. |
-| parse/type/codegen | Compiler work from syntax, types, generated IR. |
-| native/JIT compile | Selected backend cost and cache behavior. |
-| run | Program runtime after execution starts. |
-| total | Whole edit-loop command cost. |
+| `ny file.ny` | Ordinary edit-loop execution. |
+| `ny -run file.ny` | Build and run a temporary native executable. |
+| `ny -O2 -o app file.ny` | Produce an ordinary native release artifact. |
+| `ny -O3 --profile=peak -o app file.ny` | Trade compiler time for a peak native build. |
+| `ny -O3 -flto -o app file.ny` | Enable aggressive whole-program NYIR optimization before native lowering. |
+| `ny -time file.ny` | Separate compiler phases from execution time. |
+| `ny perf` | Run maintained performance checks. |
+| `./make optcheck` | Compare maintained deterministic C, GMP, and Nytrix workloads. |
 
-If only `total` moved, the regression is not isolated. If `run` moves in a
-reused binary, the program behavior changed.
+For reproducible cross-tool measurements, use `./make optcheck` for deterministic
+C/GMP/Nytrix kernel comparisons or `ny perf compare` to compare executable
+targets and capture JSON/CSV/Markdown reports.
 
-## Native Profiling
-
-Linux `perf` flow:
-
-```bash
-ny -O3 --profile=peak -g -o build/cache/bench/app bench.ny
-perf record -F 997 -g -o build/cache/bench/perf.data -- build/cache/bench/app
-perf report -i build/cache/bench/perf.data
-```
-
-Compiler artifacts:
+Run a compiled artifact repeatedly when runtime is the question:
 
 ```bash
-ny -O3 -time -dump-stats bench.ny
-ny -O3 --emit-ir=build/cache/bench/app.ll -emit-only bench.ny
-ny -O3 --emit-asm=build/cache/bench/app.s -emit-only bench.ny
+ny -O3 --profile=peak -o build/cache/bench/app bench.ny
+build/cache/bench/app
 ```
 
-Use IR and assembly to confirm a hypothesis, not to start one.
+## JIT vs AOT startup
 
-## Cache Discipline
+`ny` provides an explicit execution mode for short programs:
 
-```bash
-ny --clean-cache
-ny -time bench.ny
-ny -time bench.ny
-```
+- `--run=auto` chooses the best default execution path.
+- `--run=aot` builds a temporary native executable and runs it, which avoids LLVM JIT startup overhead for short-lived workloads.
+- `--run=jit` uses the LLVM JIT path explicitly and is useful when compile-and-run latency is dominated by runtime rather than frontend/startup costs.
 
-Record cold/warm cache state. Public notes should prefer CLI flags; mention
-environment variables only when they are part of the experiment.
+For timing short programs, prefer `--run=aot` or `-O2 -o app` to avoid the fixed LLVM JIT startup cost unless you need the JIT path.
 
-Common knobs:
-
-| Setting | Use |
-| --- | --- |
-| `NYTRIX_JIT_CACHE_FORMAT=ir|bc` | Select JIT cache artifact format. |
-| `NYTRIX_JIT_CACHE_RUN=0` | Force a cold ordinary-file run; validated JIT bitcode reuse is enabled by default. |
-| `NYTRIX_JIT_NATIVE_CACHE=1` | Promote validated JIT bitcode into a native shared-object tier; later validated hits are reused automatically. |
-| `NYTRIX_LAZY_STDLIB_CODEGEN=1` | Demand-emit imported stdlib bodies. |
-| `NYTRIX_RUNTIME_OPT=3` or `speed` | Speed settings for runtime support. |
-| `NYTRIX_RUNTIME_NATIVE=1` | Native CPU tuning for speed-profile runtime objects. |
-
-### Warm JIT tier
-
-The native JIT cache is an edit-loop optimization, not a runtime-performance
-claim. On the first eligible file run, Nytrix writes the normal bitcode cache
-and, when `NYTRIX_JIT_NATIVE_CACHE=1` is set, promotes it to a shared object.
-Later ordinary file runs probe that validated artifact automatically; setting
-the variable is required only to create or refresh the native tier.
-Later processes validate the bitcode sidecar's exact expanded-source
-fingerprint and byte count before loading that object. The cache key also binds
-the semantic configuration, so a change such as `--strict-types`, solver,
-backend, ABI, or C frontend produces a miss rather than bypassing validation.
-A missing, stale, or partial marker falls back to normal compilation.
-With the native tier enabled, the compiler reports an early hit, a miss with
-its reason, a successful promotion, or a promotion failure; a fallback is not
-silent.
-
-Measure the two warm paths with the same source and cache state:
-
-```bash
-NYTRIX_JIT_NATIVE_CACHE=0 ny --no-progress bench.ny
-NYTRIX_JIT_NATIVE_CACHE=1 ny --no-progress bench.ny
-
-hyperfine --warmup 2 --runs 10 \
-  'NYTRIX_JIT_NATIVE_CACHE=0 ny --no-progress bench.ny' \
-  'NYTRIX_JIT_NATIVE_CACHE=1 ny --no-progress bench.ny'
-```
-
-Do not compare a cold native-cache promotion against a warm bitcode hit: the
-promotion includes one-time shared-object linking work.
-
-### AOT cache identity
-
-The AOT executable cache is only reused when the expanded source and complete
-code-generation configuration match. That identity includes semantic strictness
-and solver choices, runtime/heap policy, backend and ABI selection, sanitizer,
-debug/link settings, and relevant host environment. Changing any of those
-inputs deliberately recompiles rather than returning an executable produced
-under different rules.
-
-## Benchmark Shape
+## Write a checkable workload
 
 ```ny
 use std.core
@@ -149,139 +51,148 @@ fn work(list<int> xs) int {
    total
 }
 
-assert(work(data) == 10, "bench result")
+assert(work(data) == 10, "benchmark result")
 ```
 
-Benchmarks separate setup from timed work and assert the result.
+Keep setup outside the timed operation. Keep one assertion that proves the
+workload result. A faster wrong result is not an optimization.
 
-## Optimization Order
-
-Performance work requires evidence. Never optimize from a single timing.
-
-1. Establish a reproducible baseline with exact input, environment, flags, and
-   cache state.
-2. Capture a profile or direct counter identifying the dominant owned cost.
-3. Apply the smallest clear fix.
-4. Rerun identical correctness and performance commands.
-5. Keep complexity only when repeated measurements show a stable improvement.
-
-Separate startup, parsing, semantic analysis, lowering, optimization, code
-generation, JIT, object writing, linking, runtime, renderer, driver, and
-workload costs. If only `total` moved, the regression is not isolated.
-
-Common useful changes: typed internal helpers, direct indexed access after a
-type contract, fewer repeated `get` calls in loops, and precomputed
-`comptime` tables.
-
-## Report
-
-```text
-command: ny -O3 --profile=peak -g -o build/cache/bench/app bench.ny
-run: build/cache/bench/app
-input: rows=1024 cols=2048
-cache: warm std cache, native binary reused
-before: 185ms pipeline, 111ms solver
-after: 25ms pipeline, 25ms solver
-validation: ny test --pattern factorization
-```
-
-## Short benchmark template
+## Compare commands fairly
 
 ```bash
-hyperfine --warmup 2 --runs 10 --export-json /tmp/ny-bench.json \
-  'ny --native-only --native-backend=x86_64 --no-progress --color=never -c "print(42)"'
+hyperfine --warmup 2 --runs 10 \
+  'build/cache/bench/app' \
+  'build/cache/bench/app'
 ```
 
-Report mean, deviation, and range. Warm compared commands identically. Use
-`--prepare` or explicit cache control for cold comparisons.
+Compare the same source, input, flags, machine state, and cache state. Report
+the mean, variation, and exact command. Measure cold and warm runs separately.
 
-## Deterministic generated probes
-
-Generate repeatable workloads with `awk`. Put generation in `BEGIN`, pass
-parameters with `-v`, avoid unseeded randomness, and keep exact bytes stable.
-Use a temporary file once command-line or environment size could matter.
+## Inspect before changing code
 
 ```bash
-awk -v terms=5000 'BEGIN {
-  print "mut x = 0"
-  for (i = 1; i <= terms; i++) printf "x = x + %d\n", i
-  print "x"
-}' > /tmp/ny-straight.ny
-
-wc -lc /tmp/ny-straight.ny
-ny --native-only --native-backend=x86_64 \
-  --no-progress --color=never /tmp/ny-straight.ny
-
-hyperfine --warmup 2 --runs 10 --export-json /tmp/ny-straight.json \
-  'ny --native-only --native-backend=x86_64 --no-progress --color=never /tmp/ny-straight.ny'
+ny -O3 -time -dump-stats bench.ny
+ny -O3 --emit-ir=build/cache/bench/app.ll -emit-only bench.ny
+ny -O3 --emit-asm=build/cache/bench/app.s -emit-only bench.ny
 ```
 
-For branch-heavy NYIR or DCE scaling, precompile to `/dev/null` so object label
-capacity does not become the accidental benchmark.
+Use a profile or direct measurement to identify the owned cost. Inspect an
+artifact to test a hypothesis. Do not infer execution from emitted assembly.
 
-```bash
-SRC="$(awk 'BEGIN {
-  print "mut x = 0"
-  for (i = 0; i < 2000; i++)
-    print "if x == " i " { x = x + 1 } else { x = x + 2 }"
-  print "x"
-}')"
-export SRC
+## Language cost model
 
-hyperfine --warmup 2 --runs 10 --export-json /tmp/ny-dce.json \
-  'ny --native-only --native-precompile=/dev/null --no-progress --color=never -c "$SRC"'
-```
+The common hidden costs are representation changes and ownership/container
+work, not arithmetic syntax itself. Treat these as the default performance
+contract unless a narrower typed path is proven by the compiler:
 
-Use `--nyir-dump-stats` when pass behavior and instruction removal matter.
-Use `--nyir-dump-raw` (and asm/object dumps) when deciding whether a pass
-should change instruction shape, not only counts. See
-[tooling.md](tooling.md#ir-and-assembly-driven-optimization).
+- Typed `int`/`f32`/`f64` arithmetic stays in raw scalar form. Dynamic `any`
+  arithmetic may require tag checks, boxing/unboxing, runtime dispatch, and for
+  integer results outside the small tagged range, BigInt allocation/promotion.
+- Explicit `bigint` arithmetic may allocate result storage. Converting back to
+  fixed-width integers is an explicit narrowing operation; do not assume a
+  dynamic integer expression is allocation-free merely because benchmark inputs
+  happen to be small.
+- String construction, concatenation, normalization, and list-producing helpers
+  may allocate. A borrowed/raw byte view avoids a copy only when the owning API
+  explicitly returns a view and its lifetime remains valid.
+- Lists/dicts/sets are managed objects. Growth can allocate or reallocate backing
+  storage. `clone` creates detached mutable storage. Value-typed tuples/structs
+  cross ordinary function boundaries by value; `layout` is instead an ABI-shaped
+  physical record and may require ABI-mandated copies when passed/returned by
+  value.
+- A closure value keeps captured bindings alive. Creating or returning a closure
+  can therefore extend captured lifetimes and may allocate closure/environment
+  storage; a non-capturing direct function call is the cheaper baseline.
+- Iterator/map/filter/reduce helpers are not a promise of allocation. Optimized,
+  monomorphic loops may eliminate adapter layers, but code that depends on that
+  should verify the optimized NYIR/machine path and keep a benchmark guard.
+- FFI wrappers can add boxing, ownership bookkeeping, string conversion, and
+  aggregate copies. A typed raw C call is the zero-wrapper baseline, but only
+  when its ownership/effect/ABI contract is actually correct.
 
-### Native scalar allocation
+Use `-dump-stats`, NYIR dumps, native tier reports, and allocation/runtime-helper
+counters to verify which of these costs remain in a hot function. Performance
+guidance describes current compiler behavior; it is not permission to weaken
+source semantics to obtain a fast path.
 
-The LLVM-free x86-64 object path uses the machine-form linear-scan allocator.
-Colored values stay in callee-saved registers while they remain live in a
-block; stack homes are used at spills, joins, and ABI boundaries. Verify both
-the allocator path and the result with the focused native fixtures:
+`--native-tier-report[=PATH]` is the strict static-island inspection mode. In
+addition to aggregate backend facts, it emits one `static_island` row for every
+emitted native function. Each row counts dynamic operations and tag checks,
+box/unbox conversions, heap-allocation effects, runtime-helper calls, retained
+bounds checks, direct and unresolved/indirect calls, unknown effects, unresolved
+alias-sensitive memory sites, vectorization attempts/rejections/successes, and
+spill/reload pressure (including the profile-hot loop subset when available).
+A call is classified as direct only when NYIR carries a concrete symbol. Raw
+pointer memory operations and unknown calls remain visible as alias-unresolved
+sites instead of being silently presented as proven-independent memory.
 
-```bash
-./build/release/ny-test --with-stdlib --color=never \
-  etc/tests/native/oracle/cfg-regalloc-split-x86-64.nshape \
-  etc/tests/native/oracle/machine-scalar-control-flow-x86-64.nshape \
-  etc/tests/native/nyir/int-loop-native-only.nshape
-```
+## Performance-cliff triage
 
-`--nyir-dump-stats` reports `mach encode mach_ok=...` for native object
-emission. This proves that the machine path was selected; it does not claim
-parity with C or GMP. Compare end-to-end checksums, elapsed time, and emitted
-code before making a performance claim.
+Treat a large slowdown as a classification problem before changing code. Keep the
+workload, observable result, input, optimization level, target, and cache state
+equivalent, and use repeated medians rather than a single timing. Compare Nytrix
+native against Nytrix LLVM before comparing either against C: when both Nytrix
+paths are slow, start with source lowering, representation, and runtime semantics;
+when LLVM is fast but native is slow, start with NYIR optimization, machine
+lowering, register allocation, instruction selection, and object emission.
 
-## Profiling
+For the suspected hot function or loop, attribute the relevant costs explicitly:
+allocation count/bytes, runtime-helper traffic, retained bounds/tag checks, direct
+versus indirect calls and inlining, spills/reloads and peak live-register
+pressure, and vectorization legality/profitability failures. Record the smallest
+missing semantic fact or lowering capability that would remove the cost, then fix
+the general compiler path rather than special-casing the benchmark.
 
-```bash
-perf record -q -F 199 -g -o /tmp/ny-perf.data -- \
-  ny --no-progress --color=never -emit-only <representative-file>
-perf report --stdio --no-children -i /tmp/ny-perf.data
-perf report --stdio --children --sort symbol -i /tmp/ny-perf.data
-```
+The canonical `ny-test --bench` runner separates correctness smoke runs from
+performance measurements. `--bench-correctness` uses one non-warmup run; repeated
+performance runs report median, p95, min/max dispersion, and a p95-vs-median noise
+percentage. Five-sample runs are marked unstable, and fail, when noise exceeds
+`NYTRIX_BENCH_MAX_NOISE_PCT` (20% by default). JSON/Markdown output records CPU,
+OS/arch, target features, C compiler/version/flags, and compiler revision. A
+fixture can set `max_native_c_ratio` and/or `max_native_llvm_ratio` metadata to
+define its own runtime regression budget. It can also set `max_ny_compile_ms`,
+`max_ny_code_bytes`, `max_ny_specialization_code_bytes`,
+`max_ny_specialization_function_bytes`, and `max_ny_peak_compiler_rss_kb`;
+exceeding any available budget marks the row as a regression. Static-island
+quality limits deliberately accept zero: `max_ny_heap_allocations`,
+`max_ny_runtime_calls`, `max_ny_bounds_checks`, `max_ny_indirect_calls`,
+`max_ny_unknown_effects`, `max_ny_alias_unresolved`, `max_ny_spills`, and
+`max_ny_reloads` can therefore lock a known static path to an allocation-,
+helper-, check-, indirect-call-, or spill-free contract. For native/AOT
+measurements the runner performs one report-only compile after the timing samples
+and records actual emitted machine-code bytes, specialization bytes/count/max
+function size, static-island counters, and compiler peak RSS (KiB on supported
+POSIX hosts). Those compile diagnostics are intentionally outside the timed
+sample set and are exported to console, CSV, JSON, and Markdown reports.
+Repeated timing noise is still evaluated separately, so unstable samples are not
+silently accepted as a clean performance baseline.
 
-Use `strace -c -f` to separate process/filesystem startup from compiler work,
-and pair it with Nytrix phase timing. For hotspots that look like codegen
-shape rather than algorithm cost, dump NYIR/machine form first, then profile
-to confirm the dominant owned cost.
+On Linux, `ny-test --bench --bench-hw-counters` additionally runs the already
+`--bench-runtime-counters` samples the compiled report artifact once outside timed runs and exports its existing allocation/reallocation counters.
+compiled report artifact under `perf stat` outside the timed sample set and
+exports cycles, instructions, branches, branch misses, and cache misses. Missing
+`perf` support or permissions leave the hardware-counter fields unavailable
+rather than corrupting the timing run.
 
-```bash
-ny --native-only --native-backend=x86_64 \
-  --no-progress --color=never -time -vv -c 'print(42)'
-strace -c -f ny --native-only \
-  --native-backend=x86_64 --no-progress --color=never -c 'print(42)'
-```
+Benchmark equivalence is an executable contract: paired Nytrix/LLVM/C variants
+must emit the same `checksum=` marker. The runner records every backend checksum
+and fails a mismatch, so the exact semantic-equivalence check is visible in each
+result rather than being an informal timing assumption.
 
-Cache hits and constant-command fast paths can invalidate backend comparisons.
-Include a real function/call workload in addition to trivial startup.
+## Optimization loop
+
+1. Record a reproducible baseline.
+2. Identify one dominant owned cost.
+3. Apply the smallest clear change.
+4. Rerun the result check and the same benchmark.
+5. Keep complexity only after repeated improvement.
+
+Typed helpers, direct indexed access after a proven bound, smaller allocations,
+and compile-time tables are often more useful than a target-specific rewrite.
 
 ## Related
 
-- [tooling.md](tooling.md)
-- [testing.md](testing.md)
-- [runtime.md](../spec/runtime.md)
+- [Tooling](tooling.md)
+- [Testing](testing.md)
+- [SIMD and acceleration](simd.md)
+- [Native compilation](native.md)

@@ -1,3 +1,7 @@
+/*
+ * Native result oracle: compares VM-executed NYIR results against
+ * native-emitted code for correctness validation and fuzz testing.
+ */
 #include "code/native/internal.h"
 #include "base/common.h"
 #include "base/time.h"
@@ -13,9 +17,14 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
-/* Native-result oracle: emit, assemble, execute, capture, and compare the
- * selected backend result with the NYIR VM result. */
+/*
+ * Native-result oracle: emit, assemble, execute, capture, and compare the
+ * selected backend result with the NYIR VM result.
+ */
 
 static bool ny_native_result_oracle_emit_asm(
     const ny_native_target_info_t *target, const nyir_func_t *rt_main,
@@ -46,6 +55,9 @@ static bool ny_native_result_oracle_emit_asm(
   if (!ny_native_emit_nir_func(&w, target, rt_main, "rt_main", false, err,
                                err_len))
     goto done;
+  if (!ny_native_strtab_append_asm(&w, err, err_len) ||
+      !ny_native_arraytab_append_asm(&w, err, err_len))
+    goto done;
   ok = ny_write_file(path, w.data ? w.data : "", w.len) == 0;
   if (!ok)
     ny_native_set_err(err, err_len, "native oracle: failed to write %s: %s",
@@ -71,6 +83,29 @@ static bool ny_native_parse_i64(const char *s, int64_t *out) {
   return true;
 }
 
+
+static bool ny_native_oracle_has_runtime_call(const nyir_func_t *f) {
+  if (!f)
+    return false;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyir_inst_t *in = &f->data[i];
+    if (in->op == NYIR_CALL && in->symbol &&
+        strncmp(in->symbol, "rt_", 3) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool ny_native_oracle_has_runtime_calls(const nyir_func_t *rt_main,
+                                                const nyir_func_t *funcs,
+                                                size_t count) {
+  if (ny_native_oracle_has_runtime_call(rt_main))
+    return true;
+  for (size_t i = 0; i < count; ++i)
+    if (ny_native_oracle_has_runtime_call(&funcs[i]))
+      return true;
+  return false;
+}
 static unsigned ny_native_nir_return_float_flags(const nyir_func_t *f) {
   if (!f || f->next_value <= 0)
     return 0;
@@ -102,15 +137,81 @@ static unsigned ny_native_nir_return_float_flags(const nyir_func_t *f) {
   nyir_type_map_free(&types);
   return flags;
 }
-
 static int ny_native_run_capture_i64(const char *exe, int64_t *out,
                                      char *err, size_t err_len) {
 #ifdef _WIN32
-  (void)exe;
-  (void)out;
-  ny_native_set_err(err, err_len,
-                    "native oracle: result capture is not implemented on Windows");
-  return -1;
+  if (!exe || !*exe || !out) {
+    ny_native_set_err(err, err_len, "native oracle: invalid Windows capture input");
+    return -1;
+  }
+  char cmdline[4096];
+  int cmd_len = snprintf(cmdline, sizeof(cmdline), "\"%s\"", exe);
+  if (cmd_len < 0 || (size_t)cmd_len >= sizeof(cmdline)) {
+    ny_native_set_err(err, err_len, "native oracle: executable path is too long");
+    return -1;
+  }
+  SECURITY_ATTRIBUTES sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.nLength = sizeof(sa);
+  sa.bInheritHandle = TRUE;
+  HANDLE read_pipe = NULL;
+  HANDLE write_pipe = NULL;
+  if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0) ||
+      !SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0)) {
+    if (read_pipe)
+      CloseHandle(read_pipe);
+    if (write_pipe)
+      CloseHandle(write_pipe);
+    ny_native_set_err(err, err_len,
+                      "native oracle: CreatePipe failed (win32=%lu)",
+                      (unsigned long)GetLastError());
+    return -1;
+  }
+  STARTUPINFOA si;
+  PROCESS_INFORMATION pi;
+  memset(&si, 0, sizeof(si));
+  memset(&pi, 0, sizeof(pi));
+  si.cb = sizeof(si);
+  si.dwFlags = STARTF_USESTDHANDLES;
+  si.hStdOutput = write_pipe;
+  si.hStdError = write_pipe;
+  BOOL started = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE,
+                                CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+  CloseHandle(write_pipe);
+  if (!started) {
+    CloseHandle(read_pipe);
+    ny_native_set_err(err, err_len,
+                      "native oracle: CreateProcess failed (win32=%lu)",
+                      (unsigned long)GetLastError());
+    return -1;
+  }
+  char buf[256];
+  char sink[256];
+  size_t len = 0;
+  for (;;) {
+    DWORD got = 0;
+    void *dst = len < sizeof(buf) - 1 ? (void *)(buf + len) : (void *)sink;
+    DWORD cap = len < sizeof(buf) - 1
+                    ? (DWORD)(sizeof(buf) - 1 - len)
+                    : (DWORD)sizeof(sink);
+    if (!ReadFile(read_pipe, dst, cap, &got, NULL) || got == 0)
+      break;
+    if (len < sizeof(buf) - 1)
+      len += got;
+  }
+  CloseHandle(read_pipe);
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD exit_code = 1;
+  GetExitCodeProcess(pi.hProcess, &exit_code);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  buf[len] = '\0';
+  if (exit_code != 0) {
+    ny_native_set_err(err, err_len,
+                      "native oracle: harness failed (status=%lu output=%.*s)",
+                      (unsigned long)exit_code, 180, buf);
+    return -1;
+  }
 #else
   int pipefd[2];
   if (pipe(pipefd) != 0) {
@@ -159,6 +260,7 @@ static int ny_native_run_capture_i64(const char *exe, int64_t *out,
                       status, 180, buf);
     return -1;
   }
+#endif
   char *line = strstr(buf, "native result function=rt_main returned=yes result=");
   if (!line) {
     ny_native_set_err(err, err_len,
@@ -176,12 +278,13 @@ static int ny_native_run_capture_i64(const char *exe, int64_t *out,
     return -1;
   }
   return 0;
-#endif
 }
 
-/* Run the VM/native comparison on an already-built NYIR bundle.  This is used
+/*
+ * Run the VM/native comparison on an already-built NYIR bundle.  This is used
  * both for the end-to-end program oracle and for per-pass differential checks
- * during rt_main optimization. */
+ * during rt_main optimization.
+ */
 bool ny_native_result_oracle_for_nir(nyir_func_t *rt_main,
                                      nyir_func_t *funcs,
                                      const char **names, size_t count,
@@ -272,9 +375,34 @@ bool ny_native_result_oracle_for_nir(nyir_func_t *rt_main,
     ny_native_set_err(err, err_len, "native oracle: failed to write harness");
     goto done;
   }
-  const char *link_argv[] = {cc, c_path, obj_path, "-no-pie", "-o", exe_path,
-                             NULL};
-  if (ny_exec_spawn(link_argv) != 0) {
+  char runtime_obj[4096] = {0};
+  bool needs_runtime =
+      ny_native_oracle_has_runtime_calls(rt_main, funcs, count);
+  if (needs_runtime) {
+    char *exe_dir = ny_get_executable_dir();
+    if (!exe_dir ||
+        snprintf(runtime_obj, sizeof(runtime_obj),
+                 "%s/CMakeFiles/nytrix_runtime.dir/src/rt/init.c.o", exe_dir) < 0 ||
+        ny_access(runtime_obj, R_OK) != 0) {
+      ny_native_set_err(
+          err, err_len,
+          "native oracle: runtime object unavailable for NYIR runtime calls");
+      goto done;
+    }
+  }
+  int link_status;
+  if (needs_runtime) {
+    const char *link_argv[] = {
+        cc, c_path, obj_path, runtime_obj, "-Wl,--gc-sections",
+        "-Wl,--allow-multiple-definition", "-lm", "-lpthread", "-ldl", "-lz",
+        "-lgmp", "-no-pie", "-o", exe_path, NULL};
+    link_status = ny_exec_spawn(link_argv);
+  } else {
+    const char *link_argv[] = {cc, c_path, obj_path, "-no-pie", "-o", exe_path,
+                               NULL};
+    link_status = ny_exec_spawn(link_argv);
+  }
+  if (link_status != 0) {
     ny_native_set_err(err, err_len, "native oracle: harness link failed");
     goto done;
   }
@@ -332,17 +460,11 @@ bool ny_native_result_oracle_for_program(const program_t *prog,
   memset(names, 0, sizeof(names));
   size_t count = 0;
   char local_err[512] = {0};
-  if (!ny_native_build_nir(prog, opt, &rt_main, funcs, &count, 128, local_err,
-                           sizeof(local_err))) {
+  if (!ny_native_build_nir(prog, opt, &rt_main, funcs, &count, names, 128,
+                           local_err, sizeof(local_err))) {
     ny_native_set_err(err, err_len, "native oracle: %s",
                       local_err[0] ? local_err : "failed to build NYIR");
     return false;
-  }
-  size_t name_index = 0;
-  for (size_t i = 0; prog && i < prog->body.len && name_index < count; ++i) {
-    const stmt_t *stmt = prog->body.data[i];
-    if (stmt && stmt->kind == NY_S_FUNC)
-      names[name_index++] = stmt->as.fn.name ? stmt->as.fn.name : "<fn>";
   }
 
   bool ok = ny_native_result_oracle_for_nir(&rt_main, funcs, names, count, opt,
@@ -353,9 +475,11 @@ bool ny_native_result_oracle_for_program(const program_t *prog,
   return ok;
 }
 
-/* Deterministic scalar NYIR fuzzer for the VM/native oracle.
+/*
+ * Deterministic scalar NYIR fuzzer for the VM/native oracle.
  * Generates straight-line integer arithmetic with a seeded LCG and verifies
- * that the optimized native backend matches the NYIR VM on every program. */
+ * that the optimized native backend matches the NYIR VM on every program.
+ */
 
 typedef struct {
   uint64_t state;
@@ -373,7 +497,9 @@ static uint64_t ny_native_fuzz_rng_next(ny_native_fuzz_rng_t *rng) {
 static int64_t ny_native_fuzz_i64(ny_native_fuzz_rng_t *rng, int bits) {
   uint64_t mask = bits >= 64 ? UINT64_MAX : ((UINT64_C(1) << bits) - 1);
   int64_t v = (int64_t)(ny_native_fuzz_rng_next(rng) & mask);
-  /* Sign-extend. */
+  /*
+   * Sign-extend.
+   */
   if (bits < 64 && (v >> (bits - 1)) & 1)
     v |= ~mask;
   return v;
@@ -422,7 +548,9 @@ static bool ny_native_fuzz_program(ny_native_fuzz_rng_t *rng,
   bool ok = true;
   for (int i = 0; i < inst_count && ok; ++i) {
     if (value_count < 2 || (ny_native_fuzz_rng_next(rng) & 3) == 0) {
-      /* Emit a constant.  Keep values small so folds stay predictable. */
+      /*
+       * Emit a constant.  Keep values small so folds stay predictable.
+       */
       int64_t c = ny_native_fuzz_i64(rng, 16);
       int dst = out->next_value++;
       ok = ny_native_fuzz_emit_noerr(out, (nyir_inst_t){.op = NYIR_CONST_I64,
@@ -440,7 +568,9 @@ static bool ny_native_fuzz_program(ny_native_fuzz_rng_t *rng,
                                                           .effects = NYIR_EFFECT_NONE});
       values[value_count++] = dst;
     } else {
-      /* Emit a binary op on two existing values. */
+      /*
+       * Emit a binary op on two existing values.
+       */
       size_t li = ny_native_fuzz_pick(rng, (size_t)value_count);
       size_t ri = ny_native_fuzz_pick(rng, (size_t)value_count);
       int left = values[li];
@@ -455,7 +585,9 @@ static bool ny_native_fuzz_program(ny_native_fuzz_rng_t *rng,
         op = NYIR_CMP_I64;
         cmp = (nyir_cmp_t)ny_native_fuzz_pick(rng, 6);
       }
-      /* Avoid division/mod by zero: skip div/mod entirely for now. */
+      /*
+       * Avoid division/mod by zero: skip div/mod entirely for now.
+       */
       int dst = 0;
       if (op == NYIR_CMP_I64) {
         dst = out->next_value++;

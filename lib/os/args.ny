@@ -70,7 +70,7 @@ fn _args_value_from(list ag, str name, str fallback="") str {
       if tok == "--" { return fallback }
       def assigned = _args_assignment_value(tok, name)
       if assigned != nil { return to_str(assigned) }
-      if tok == name { return(i + 1 < ag.len) ? to_str(ag.get(i + 1)) : fallback }
+      if tok == name { return (i + 1 < ag.len) ? to_str(ag.get(i + 1)) : fallback }
       i += 1
    }
    fallback

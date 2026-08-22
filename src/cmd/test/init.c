@@ -1,3 +1,8 @@
+/*
+ * ny-test: parallel test runner with suite partitioning (benchmark,
+ * runtime, native, interop, error, std, repl, probe), caching, timing
+ * reports, bench comparison, and failure capture/replay.
+ */
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 700
 #endif
@@ -23,6 +28,7 @@
 #include <signal.h>
 #include <time.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,18 +62,55 @@
 #define PATH_MAX 4096
 #endif
 
+
 #define NY_TEST_DEFAULT_TIMEOUT_SEC 90
 #define NY_TEST_MAX_TIMEOUT_SEC 300
 #define NY_TEST_PARALLEL_TIMEOUT_GRACE_MS 1000.0
 #define NY_TEST_TIMEOUT_RC 124
 
-static double now_ms(void);
+#define NY_BENCH_MAX_RUNS 5
+#define NY_BENCH_TIMEOUT_SEC 300
+#define NY_BENCH_MAX_OUTPUT 8192
+
+typedef struct {
+    double c_time_ms;
+    double ny_time_ms;
+    double ratio;
+    double speedup;
+    int c_exit;
+    int ny_exit;
+    int c_runs;
+    int ny_runs;
+    double c_min;
+    double c_max;
+    double ny_min;
+    double ny_max;
+    double c_stddev;
+    double ny_stddev;
+} BenchResult;
+
+typedef struct {
+    const char *name;
+    const char *nshape_path;
+    const char *c_source;
+    const char *ny_source;
+    BenchResult result;
+} BenchmarkSpec;
+
 static const char *disp_path(const char *p);
+static double now_ms(void);
 static void print_section(const char *name);
 static uint64_t fnv1a_update(uint64_t h, const void *ptr, size_t n);
 static uint64_t test_sig(const char *path, const char *bin, const char *std_path,
                          const char *std_bc);
 static int path_lex_cmp(const void *a, const void *b);
+static int run_benchmarks(const char *bin, const char *pattern, const char *opt_level,
+                          const char *tier, const char *engine, const char *target, int runs,
+                          int warmup, int timeout_sec, int verbose, int show_ir, int show_asm,
+                          int show_passes, int profile, int compare_llvm, int correctness_only,
+                          const char *out_csv, const char *out_json, const char *out_md,
+                          const char *compile_profile,
+                          StrVec *files, StrVec *patterns);
 static void apply_test_child_env(void);
 static const char *test_warn_arg(void);
 static void push_test_warn_arg(char **argv, int *argc, int max);
@@ -78,8 +121,12 @@ static int native_backend_explicit(const char *flags);
 static int path_is_native_test(const char *p);
 static int path_is_stdlib_source(const char *p);
 static int run_progress_selftest(const char *bin, int timeout_sec);
+static int run_shape_generator_selftest(void);
 static int make_test_capture_tmp(char *tmp, size_t tmp_len,
                                  const char *prefix);
+static int bench_run_capture(char *const argv[], int timeout_sec,
+                             const char *output_path);
+static int test_command_available(const char *cmd);
 
 typedef struct {
   FILE *stream;
@@ -407,7 +454,9 @@ static void collect_ny(const char *path, StrVec *out) {
   }
   if (!is_dir(path))
     return;
-  /* Strip trailing slash so path joins produce no double-slash. */
+  /*
+   * Strip trailing slash so path joins produce no double-slash.
+   */
   size_t plen = strlen(path);
   while (plen > 1 && path[plen - 1] == '/')
     plen--;
@@ -637,7 +686,6 @@ static int ny_test_proc_valid(ny_test_proc_t p) { return p > 0; }
 static int ny_test_proc_eq(ny_test_proc_t a, ny_test_proc_t b) { return a == b; }
 static void ny_test_proc_close(ny_test_proc_t p) { (void)p; }
 #endif
-
 static void trim_inplace(char *s);
 static void error_meta_free(char *flags, char *expect);
 static void read_error_meta(const char *path, char **flags_out, char **expect_out);
@@ -646,8 +694,8 @@ static char *read_small_file(const char *path);
 static int run_debug_argv(char *const argv[], int timeout_sec, int use_path_lookup);
 static int test_env_truthy(const char *name);
 
-
 #include "elf.c"
+
 
 static int test_env_truthy(const char *name) {
   return ny_env_is_truthy(getenv(name)) ? 1 : 0;
@@ -843,8 +891,8 @@ static int test_archive_source_needs_m32(const char *src_path) {
 }
 
 static int test_compile_archive_source(const char *cc, const char *src_path,
-                                       const char *obj_path) {
-  int use_m32 = test_archive_source_needs_m32(src_path);
+                                       const char *obj_path, int force_m32) {
+  int use_m32 = force_m32 || test_archive_source_needs_m32(src_path);
   char *cc_argv[12];
   int cc_argc = 0;
   cc_argv[cc_argc++] = (char *)cc;
@@ -935,7 +983,7 @@ static int test_archive_sources_newer_than_archive(const char *archive_path, con
   return 0;
 }
 
-static int test_build_missing_archive(const char *archive_path) {
+static int test_build_missing_archive(const char *archive_path, int force_m32) {
   if (!archive_path || !*archive_path)
     return 0;
   size_t alen = strlen(archive_path);
@@ -946,21 +994,25 @@ static int test_build_missing_archive(const char *archive_path) {
   char single_src[PATH_MAX];
   snprintf(single_src, sizeof(single_src), "%s", archive_path);
   snprintf(single_src + alen - 2, sizeof(single_src) - alen + 2, ".c");
-  const char *single_base = strrchr(single_src, '/');
-  char *single_name = single_base ? (char *)single_base + 1 : single_src;
-#ifdef _WIN32
-  char *single_backslash = strrchr(single_src, '\\');
-  if (single_backslash && single_backslash + 1 > single_name)
-    single_name = single_backslash + 1;
-#endif
-  for (char *p = single_name; *p; ++p) {
-    if (*p == '_')
-      *p = '-';
-  }
-  if (nyt_is_file(single_src))
+  if (nyt_is_file(single_src)) {
     sv_push(&srcs, single_src);
-  else
-    test_collect_archive_sibling_sources(archive_path, &srcs);
+  } else {
+    char alternate_src[PATH_MAX];
+    snprintf(alternate_src, sizeof(alternate_src), "%s", single_src);
+    char *base = strrchr(alternate_src, '/');
+#ifdef _WIN32
+    char *backslash = strrchr(alternate_src, '\\');
+    if (!base || (backslash && backslash > base))
+      base = backslash;
+#endif
+    for (char *p = base ? base + 1 : alternate_src; *p; ++p)
+      if (*p == '_')
+        *p = '-';
+    if (nyt_is_file(alternate_src))
+      sv_push(&srcs, alternate_src);
+    else
+      test_collect_archive_sibling_sources(archive_path, &srcs);
+  }
 
   if (srcs.len == 0) {
     int exists = nyt_is_file(archive_path);
@@ -985,7 +1037,7 @@ static int test_build_missing_archive(const char *archive_path) {
     int fd = mkstemp(obj_path);
     if (fd < 0) { ok = 0; break; }
     close(fd);
-    if (!test_compile_archive_source(cc, srcs.items[i], obj_path)) {
+    if (!test_compile_archive_source(cc, srcs.items[i], obj_path, force_m32)) {
       remove(obj_path);
       ok = 0;
       break;
@@ -1148,7 +1200,9 @@ static int object_link_run_check(const char *shape_path) {
     return 1;
   }
 
-  // Collect all "link" entries (support multi-link for split archive tests etc.)
+  /*
+   * Collect all "link" entries (support multi-link for split archive tests etc.)
+   */
   StrVec links = {0};
   {
     char *data = read_small_file(shape_path);
@@ -1181,8 +1235,17 @@ static int object_link_run_check(const char *shape_path) {
       free(data);
     }
   }
+  int force_m32 = 0;
+  FILE *obj_file = fopen(obj_path, "rb");
+  if (obj_file) {
+    unsigned char ident[5] = {0};
+    if (fread(ident, 1, sizeof(ident), obj_file) == sizeof(ident) &&
+        memcmp(ident, "\177ELF", 4) == 0 && ident[4] == 1)
+      force_m32 = 1;
+    fclose(obj_file);
+  }
   for (size_t i = 0; i < links.len; i++) {
-    (void)test_build_missing_archive(links.items[i]);
+    (void)test_build_missing_archive(links.items[i], force_m32);
   }
 
 #ifdef _WIN32
@@ -1248,8 +1311,10 @@ static int object_link_run_check(const char *shape_path) {
   if (merged_archive[0]) remove(merged_archive);
 
 #if !defined(__linux__)
-  /* ELF execution/link validation belongs to the Linux internal linker.
-     A Mach-O host linker cannot consume these cross-format objects. */
+  /*
+   * ELF execution/link validation belongs to the Linux internal linker.
+   * A Mach-O host linker cannot consume these cross-format objects.
+   */
   sv_free(&links);
   free(expect_val);
   return 0;
@@ -1320,11 +1385,13 @@ static int object_link_run_check(const char *shape_path) {
   int link_argc = 0;
   link_argv[link_argc++] = (char *)cc;
 #if defined(__linux__)
-  /* Native test objects are linked as fixed-address ELF images by the
-     test harness.  Most modern Linux compilers default to PIE, which can
-     make archive members with .text relocations print DT_TEXTREL warnings
-     even when the test passes.  Link the throwaway harness as non-PIE so
-     the native-object tests stay deterministic and quiet. */
+  /*
+   * Native test objects are linked as fixed-address ELF images by the
+   * test harness.  Most modern Linux compilers default to PIE, which can
+   * make archive members with .text relocations print DT_TEXTREL warnings
+   * even when the test passes.  Link the throwaway harness as non-PIE so
+   * the native-object tests stay deterministic and quiet.
+   */
   link_argv[link_argc++] = "-no-pie";
 #endif
   link_argv[link_argc++] = obj_path;
@@ -1334,7 +1401,7 @@ static int object_link_run_check(const char *shape_path) {
   }
   link_argv[link_argc++] = "-o";
   link_argv[link_argc++] = exe_path;
-  if (ret_kind == NY_TEST_LINK_RET_F64)
+  if (ret_kind == NY_TEST_LINK_RET_F64 || ret_kind == NY_TEST_LINK_RET_F32)
     link_argv[link_argc++] = "-lm";
   link_argv[link_argc] = NULL;
   int link_rc = run_debug_argv(link_argv, 30, 1);
@@ -1686,49 +1753,191 @@ static int shape_skips_ci(const char *path) {
     return 0;
   char *ci = shape_meta_string(path, "ci");
   int skip = ci && (strcmp(ci, "skip") == 0 || strcmp(ci, "optional") == 0);
+#ifdef _WIN32
+  skip |= ci && strcmp(ci, "windows-skip") == 0;
+#endif
   free(ci);
   return skip;
 }
 
-static char *materialize_shape_ny_source(const char *shape_path) {
-  char *source = shape_source_block(shape_path, "ny");
-  if (!source)
+static char *shape_embedded_awk_block(const char *shape_path, int *declared,
+                                      char *why, size_t why_len) {
+  if (declared)
+    *declared = 0;
+  char *data = read_small_file(shape_path);
+  if (!data)
     return NULL;
+  const char *prefix = "source ny generate ";
+  char *line = data;
+  while (line && *line) {
+    char *next = strchr(line, '\n');
+    size_t line_len = next ? (size_t)(next - line) : strlen(line);
+    char *p = line;
+    while ((size_t)(p - line) < line_len && isspace((unsigned char)*p))
+      p++;
+    if ((size_t)(p - line) + strlen(prefix) <= line_len &&
+        memcmp(p, prefix, strlen(prefix)) == 0) {
+      if (declared)
+        *declared = 1;
+      char *spec = p + strlen(prefix);
+      if ((size_t)(spec - line) + 6 > line_len || memcmp(spec, "awk <<", 6) != 0) {
+        snprintf(why, why_len, "expected generator 'awk' after 'source ny generate'");
+        free(data);
+        return NULL;
+      }
+      char *quote = spec + 6;
+      if (quote >= line + line_len || *quote != '\'' ||
+          line + line_len <= quote + 2 || line[line_len - 1] != '\'') {
+        snprintf(why, why_len, "malformed embedded AWK block opener");
+        free(data);
+        return NULL;
+      }
+      char *marker = quote + 1;
+      size_t marker_len = (size_t)((line + line_len - 1) - marker);
+      if (!marker_len) {
+        snprintf(why, why_len, "embedded AWK block marker is empty");
+        free(data);
+        return NULL;
+      }
+      char *body = next ? next + 1 : NULL;
+      for (char *body_line = body; body_line && *body_line;) {
+        char *body_next = strchr(body_line, '\n');
+        size_t body_len = body_next ? (size_t)(body_next - body_line) : strlen(body_line);
+        if (body_len && body_line[body_len - 1] == '\r')
+          body_len--;
+        if (body_len == marker_len && memcmp(body_line, marker, marker_len) == 0) {
+          size_t n = (size_t)(body_line - body);
+          char *out = malloc(n + 1);
+          if (out) {
+            memcpy(out, body, n);
+            out[n] = '\0';
+          }
+          free(data);
+          return out;
+        }
+        body_line = body_next ? body_next + 1 : NULL;
+      }
+      snprintf(why, why_len, "unterminated embedded AWK block");
+      free(data);
+      return NULL;
+    }
+    line = next ? next + 1 : NULL;
+  }
+  free(data);
+  return NULL;
+}
+
+static char *shape_write_temp_source(const char *source) {
   char tmp[PATH_MAX];
 #ifdef _WIN32
-  /* Keep generated shape sources below the build tree.  MSYS's global temp
-   * directory can be mounted under a different Windows path from the test
-   * workspace, which makes a source path accepted by the test runner
-   * unreadable to the spawned compiler.  GetTempFileNameA creates the file
-   * atomically and gives every concurrent test a distinct relative path. */
-  if (!GetTempFileNameA("build", "nys", 0, tmp)) {
-    free(source);
+  if (!GetTempFileNameA("build", "nys", 0, tmp))
     return NULL;
-  }
   FILE *f = fopen(tmp, "wb");
-  if (!f) {
-    free(source);
-    return NULL;
-  }
 #else
   snprintf(tmp, sizeof(tmp), "%s/ny-shape-%ld-XXXXXX", nyt_temp_dir(), (long)getpid());
   int fd = mkstemp(tmp);
-  if (fd < 0) {
-    free(source);
+  if (fd < 0)
     return NULL;
-  }
   FILE *f = fdopen(fd, "wb");
   if (!f) {
     close(fd);
     remove(tmp);
-    free(source);
     return NULL;
   }
 #endif
-  fwrite(source, 1, strlen(source), f);
-  fclose(f);
-  free(source);
+  if (!f)
+    return NULL;
+  size_t n = strlen(source);
+  int ok = fwrite(source, 1, n, f) == n && fclose(f) == 0;
+  if (!ok) {
+    remove(tmp);
+    return NULL;
+  }
   return strdup(tmp);
+}
+
+static char *materialize_shape_ny_source(const char *shape_path) {
+  char *source = shape_source_block(shape_path, "ny");
+  if (source) {
+    char *path = shape_write_temp_source(source);
+    free(source);
+    return path;
+  }
+
+  int declared = 0;
+  char why[256] = {0};
+  char *program = shape_embedded_awk_block(shape_path, &declared, why, sizeof(why));
+  if (!program) {
+    fprintf(stderr, "ny-test: %s: %s\n", disp_path(shape_path),
+            why[0] ? why : "missing 'source ny' block or embedded AWK generator");
+    return NULL;
+  }
+  if (!test_command_available("awk")) {
+    fprintf(stderr, "ny-test: %s: embedded AWK generator requires 'awk' in PATH\n",
+            disp_path(shape_path));
+    free(program);
+    return NULL;
+  }
+
+  char program_path[PATH_MAX];
+  char output_path[PATH_MAX];
+  int program_fd = make_test_capture_tmp(program_path, sizeof(program_path), "shape-awk");
+  int output_fd = make_test_capture_tmp(output_path, sizeof(output_path), "shape-ny");
+#ifdef _WIN32
+  FILE *f = program_fd >= 0 ? fopen(program_path, "wb") : NULL;
+#else
+  if (output_fd >= 0)
+    close(output_fd);
+  FILE *f = program_fd >= 0 ? fdopen(program_fd, "wb") : NULL;
+#endif
+  if (!f) {
+#ifndef _WIN32
+    if (program_fd >= 0)
+      close(program_fd);
+#endif
+    fprintf(stderr, "ny-test: %s: cannot create embedded AWK program file\n",
+            disp_path(shape_path));
+    free(program);
+    if (output_fd >= 0)
+      remove(output_path);
+    return NULL;
+  }
+  size_t program_len = strlen(program);
+  int wrote = fwrite(program, 1, program_len, f) == program_len && fclose(f) == 0;
+  free(program);
+  if (!wrote) {
+    fprintf(stderr, "ny-test: %s: cannot write embedded AWK program\n",
+            disp_path(shape_path));
+    remove(program_path);
+    remove(output_path);
+    return NULL;
+  }
+
+#ifdef _WIN32
+  const char *empty_input = "NUL";
+#else
+  const char *empty_input = "/dev/null";
+#endif
+  char *argv[] = {"awk", "-f", program_path, (char *)empty_input, NULL};
+  int rc = bench_run_capture(argv, 30, output_path);
+  remove(program_path);
+  if (rc != 0) {
+    char *detail = read_small_file(output_path);
+    fprintf(stderr, "ny-test: %s: embedded AWK generator failed (rc=%d)%s%s\n",
+            disp_path(shape_path), rc, detail && *detail ? ": " : "",
+            detail && *detail ? detail : "");
+    free(detail);
+    remove(output_path);
+    return NULL;
+  }
+  struct stat st;
+  if (stat(output_path, &st) != 0 || st.st_size == 0) {
+    fprintf(stderr, "ny-test: %s: embedded AWK generator produced no Ny source\n",
+            disp_path(shape_path));
+    remove(output_path);
+    return NULL;
+  }
+  return strdup(output_path);
 }
 
 static void read_error_meta(const char *path, char **flags_out, char **expect_out) {
@@ -1991,21 +2200,6 @@ static int test_is_unsupported_native_platform(const char *path) {
   return 0;
 }
 
-static int test_is_host_sensitive_native_fp_link(const char *path) {
-  static const char *const cases[] = {
-      "f32.nshape", "f32-call.nshape", "f32-call9.nshape",
-      "f64.nshape", "f64-call.nshape", "f64-call9.nshape",
-      "f64-call10.nshape", "mixed-both-stack.nshape",
-      "mixed-f64-stack.nshape"};
-  const char *prefix = "etc/tests/native/elf64/link/";
-  if (!path || strncmp(path, prefix, strlen(prefix)) != 0)
-    return 0;
-  const char *base = path + strlen(prefix);
-  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
-    if (strcmp(base, cases[i]) == 0)
-      return 1;
-  return 0;
-}
 
 static void gh_group_begin(const char *kind, const char *path) {
   if (test_env_truthy("GITHUB_ACTIONS"))
@@ -2246,6 +2440,35 @@ static char *read_small_file(const char *path) {
   if (!buf) {
     fclose(f);
     return strdup("");
+  }
+  if (size > 0)
+    (void)fread(buf, 1, (size_t)size, f);
+  fclose(f);
+  return buf;
+}
+
+/*
+ * Read a whole file (any size) into a heap string.  Used for diagnostic dumps
+ * (NYIR text, assembly) that can exceed the small_file cap.
+ */
+static char *read_whole_file(const char *path) {
+  FILE *f = fopen(path, "rb");
+  if (!f)
+    return NULL;
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  long size = ftell(f);
+  if (size < 0) {
+    fclose(f);
+    return NULL;
+  }
+  rewind(f);
+  char *buf = (char *)calloc((size_t)size + 1, 1);
+  if (!buf) {
+    fclose(f);
+    return NULL;
   }
   if (size > 0)
     (void)fread(buf, 1, (size_t)size, f);
@@ -3135,8 +3358,8 @@ static int auto_test_jobs(void) {
     if (jobs > ram_jobs)
       jobs = ram_jobs;
   }
-  if (jobs > 8)
-    jobs = 8;
+  if (jobs > 32)
+    jobs = 32;
   return jobs;
 }
 
@@ -3168,12 +3391,39 @@ static uint64_t file_sig(const char *p) {
   return h;
 }
 
+/*
+ * Content hash of the compiler binary.  mtime/size alone can survive a
+ * rebuild (coarse timestamps, same-size relinks), which would let the
+ * result cache serve a stale row computed against an older compiler.
+ */
+static uint64_t file_content_hash(const char *p) {
+  uint64_t h = 1469598103934665603ULL;
+  if (!p)
+    return 0;
+  FILE *f = fopen(p, "rb");
+  if (!f)
+    return 0;
+  unsigned char buf[8192];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+    h = fnv1a_update(h, buf, n);
+  fclose(f);
+  return h;
+}
+
 static uint64_t test_sig(const char *path, const char *bin, const char *std_path, const char *std_bc) {
   uint64_t h = 1469598103934665603ULL;
+  static uint64_t bin_hash = 0;
+  static bool bin_hash_ready = false;
+  if (!bin_hash_ready) {
+    bin_hash = file_content_hash(bin);
+    bin_hash_ready = true;
+  }
   uint64_t a = file_sig(path), b = file_sig(bin), c = file_sig(std_path), d = file_sig(std_bc);
   const char *mode = path_is_native_test(path) ? "native:x86_64" : "default";
   h = fnv1a_update(h, &a, sizeof(a));
   h = fnv1a_update(h, &b, sizeof(b));
+  h = fnv1a_update(h, &bin_hash, sizeof(bin_hash));
   h = fnv1a_update(h, &c, sizeof(c));
   h = fnv1a_update(h, &d, sizeof(d));
   h = fnv1a_update(h, mode, strlen(mode));
@@ -3437,6 +3687,20 @@ static int path_is_stdlib_source(const char *p) {
   return strncmp(p, "lib/", 4) == 0 || strstr(p, "/lib/") != NULL;
 }
 
+/*
+ * UI and audio fixtures touch process-wide host resources (Vulkan/OpenGL,
+ * windows, audio devices, and their driver caches).  Running those modules
+ * beside another host-resource fixture can turn a healthy 2–5 second test
+ * into a false per-fixture timeout.  Keep this policy in the scheduler rather
+ * than relying on directory ordering or a larger global timeout.
+ */
+static int test_requires_host_exclusive(const char *p) {
+  if (!p)
+    return 0;
+  return strncmp(p, "lib/os/ui/", 10) == 0 ||
+         strncmp(p, "lib/os/sound/", 13) == 0;
+}
+
 static const char *suite_for_path(const char *p, const char *fallback) {
   if (p && strncmp(p, "etc/tests/bench/", 16) == 0)
     return "Benchmark";
@@ -3648,12 +3912,20 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
   StrVec selected = {0};
   for (size_t i = 0; i < files->len; i++) {
     const char *p = files->items[i];
-    /* Generator-only shape specifications are validated by ny-fuzz.  ny-test
-     * executes only shapes that embed Ny source. */
+    /*
+     * Generator-only fuzz shapes remain outside ny-test.  Executable shapes
+     * provide either a literal Ny block or an embedded AWK Ny generator.
+     */
     if (p && nyt_ends_with(p, ".nshape")) {
       char *source = shape_source_block(p, "ny");
-      if (!source)
-        continue;
+      if (!source) {
+        int declared = 0;
+        char why[128] = {0};
+        char *program = shape_embedded_awk_block(p, &declared, why, sizeof(why));
+        free(program);
+        if (!declared)
+          continue;
+      }
       free(source);
     }
     int match = 1;
@@ -3725,19 +3997,42 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
   } Running;
 
   Running *run = (Running *)calloc((size_t)jobs, sizeof(Running));
-  if (!run) {
+  unsigned char *started = (unsigned char *)calloc(total ? total : 1, sizeof(unsigned char));
+  if (!run || !started) {
+    free(run);
+    free(started);
     sv_free(&selected);
     return 1;
   }
 
-  size_t launched = 0;
   while (completed < total) {
-    for (int i = 0; i < jobs && launched < total; i++) {
+    int active_count = 0;
+    int exclusive_active = 0;
+    for (int i = 0; i < jobs; i++) {
+      if (!run[i].active)
+        continue;
+      active_count++;
+      if (test_requires_host_exclusive(run[i].path))
+        exclusive_active = 1;
+    }
+    for (int i = 0; i < jobs; i++) {
       if (run[i].active)
         continue;
-      const char *p = selected.items[launched++];
-      if (!p)
-        continue;
+      size_t candidate = total;
+      for (size_t k = 0; k < total; k++) {
+        const char *queued = selected.items[k];
+        if (!queued || started[k])
+          continue;
+        int exclusive = test_requires_host_exclusive(queued);
+        if (exclusive_active || (exclusive && active_count > 0))
+          continue;
+        candidate = k;
+        break;
+      }
+      if (candidate == total)
+        break;
+      const char *p = selected.items[candidate];
+      started[candidate] = 1;
       run[i].tmp_out[0] = '\0';
       run[i].materialized_path[0] = '\0';
       const char *exec_path = p;
@@ -3770,6 +4065,9 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
       run[i].path = p;
       run[i].start_ms = now_ms();
       run[i].active = 1;
+      active_count++;
+      if (test_requires_host_exclusive(p))
+        exclusive_active = 1;
     }
 
     int st = 0;
@@ -3904,8 +4202,80 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
     }
   }
   free(run);
+  free(started);
   sv_free(&selected);
   return 0;
+}
+
+static int shape_generator_write_fixture(char *path, size_t path_len,
+                                         const char *text) {
+  int fd = make_test_capture_tmp(path, path_len, "shape-generator-test");
+#ifdef _WIN32
+  FILE *f = fopen(path, "wb");
+#else
+  FILE *f = fd >= 0 ? fdopen(fd, "wb") : NULL;
+#endif
+  if (!f) {
+#ifndef _WIN32
+    if (fd >= 0)
+      close(fd);
+#endif
+    return 0;
+  }
+  size_t n = strlen(text);
+  return fwrite(text, 1, n, f) == n && fclose(f) == 0;
+}
+
+static int run_shape_generator_selftest(void) {
+  static const char success[] =
+      "shape embedded_awk {\n"
+      "  source ny generate awk <<'AWK'\n"
+      "BEGIN { print \"use std.core\"; print \"print(\\\"quoted\\\\nline\\\")\" }\n"
+      "AWK\n}\n";
+  static const char malformed[] =
+      "shape malformed {\n  source ny generate awk <<'AWK'\nBEGIN { print 1 }\n}\n";
+  static const char missing[] = "shape missing {\n  expect compile_and_run\n}\n";
+  char paths[3][PATH_MAX];
+  if (!shape_generator_write_fixture(paths[0], sizeof(paths[0]), success) ||
+      !shape_generator_write_fixture(paths[1], sizeof(paths[1]), malformed) ||
+      !shape_generator_write_fixture(paths[2], sizeof(paths[2]), missing)) {
+    fprintf(stderr, "shape generator selftest: fixture setup failed\n");
+    return 1;
+  }
+
+  int ok = 1;
+  char *generated = materialize_shape_ny_source(paths[0]);
+  char *text = generated ? read_small_file(generated) : NULL;
+  if (!text || strcmp(text, "use std.core\nprint(\"quoted\\nline\")\n") != 0) {
+    fprintf(stderr, "shape generator selftest: generated source mismatch\n");
+    ok = 0;
+  }
+  free(text);
+  if (generated) {
+    remove(generated);
+    free(generated);
+  }
+
+  int declared = 0;
+  char why[128] = {0};
+  char *program = shape_embedded_awk_block(paths[1], &declared, why, sizeof(why));
+  if (program || !declared || !strstr(why, "unterminated")) {
+    fprintf(stderr, "shape generator selftest: malformed block was not rejected\n");
+    ok = 0;
+  }
+  free(program);
+  declared = 0;
+  why[0] = '\0';
+  program = shape_embedded_awk_block(paths[2], &declared, why, sizeof(why));
+  if (program || declared) {
+    fprintf(stderr, "shape generator selftest: missing generator was not detected\n");
+    ok = 0;
+  }
+  free(program);
+  for (size_t i = 0; i < 3; i++)
+    remove(paths[i]);
+  printf("shape generator selftest: %s\n", ok ? "passed" : "failed");
+  return ok ? 0 : 1;
 }
 
 int ny_test_main(int argc, char **argv) {
@@ -3930,6 +4300,30 @@ int ny_test_main(int argc, char **argv) {
   CacheDb cache = {0};
   char err[256];
 
+  /*
+   * Benchmark mode options
+   */
+  int bench_mode = 0;
+  const char *bench_opt_level = "O2";
+  const char *bench_tier = "opt";
+  const char *bench_engine = "mcjit";
+  const char *bench_target = "x86_64";
+  const char *bench_compile_profile = "peak";
+  const char *bench_cache = NULL;
+  int bench_runs = 1;
+  int bench_warmup = 0;
+  int bench_timeout = 15;
+  int bench_verbose = 0;
+  int bench_show_ir = 0;
+  int bench_show_asm = 0;
+  int bench_show_passes = 0;
+  int bench_profile = 0;
+  int bench_compare_llvm = 1;
+  int bench_correctness = 0;
+  const char *bench_output_csv = NULL;
+  const char *bench_output_json = NULL;
+  const char *bench_output_md = NULL;
+
   const char *env_timeout = getenv("NYTRIX_TEST_TIMEOUT");
   if (env_timeout && *env_timeout) {
     int v = 0;
@@ -3951,9 +4345,22 @@ int ny_test_main(int argc, char **argv) {
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       printf("  %s--std PATH --std-bc PATH --triple T --emulator CMD%s\n",
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--phase-times --trace-ir --failures-only --debug-failures --debugger-all%s\n",
+      printf("  %s--bench [--bench-run N --bench-warmup N --bench-opt LVL --bench-tier TIER%s\n",
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--color MODE --no-color%s\n\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+      printf("  %s        --bench-engine aot|mcjit|orc|native|all (default mcjit) --bench-target TARGET%s\n",
+             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+      printf("  %s        --bench-cache cold|warm --bench-correctness%s\n",
+             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+      printf("  %s        --bench-compiler NAME --bench-compile-profile PROFILE%s\n",
+             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+      printf("  %s        --bench-timeout SEC --bench-verbose --bench-show-ir --bench-show-asm%s\n",
+             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+      printf("  %s        --bench-show-passes --bench-profile --bench-hw-counters --bench-runtime-counters%s\n",
+             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+      printf("  %s        --bench-compare-llvm --bench-no-compare-llvm%s\n",
+             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+      printf("  %s--bench-out-csv PATH --bench-out-json PATH --bench-out-md PATH%s\n",
+             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       printf("%snotes:%s timeout defaults to 60s and is capped at 300s; error tests live under %setc/tests/errors%s\n",
              nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
       return 0;
@@ -4047,13 +4454,120 @@ int ny_test_main(int argc, char **argv) {
       failures_only = 1;
     else if (!strcmp(a, "--progress-selftest"))
       return run_progress_selftest(bin, timeout_sec);
+    else if (!strcmp(a, "--shape-generator-selftest"))
+      return run_shape_generator_selftest();
     else if (!strcmp(a, "--debug-failures"))
       ny_setenv("NYTRIX_TEST_DEBUG_FAILURES", "1", 1);
     else if (!strcmp(a, "--no-debug-failures"))
       ny_setenv("NYTRIX_TEST_DEBUG_FAILURES", "0", 1);
     else if (!strcmp(a, "--debugger-all"))
       ny_setenv("NYTRIX_TEST_DEBUGGER_ALL", "1", 1);
-    else if (a[0] == '-') {
+    else if (!strcmp(a, "--bench") || !strcmp(a, "--bench-is")) {
+      bench_mode = 1;
+    } else if (ny_arg_match_with_value(a, "--bench-run")) {
+      int v = 0;
+      if (!ny_arg_take_int(a, &i, argc, argv, 1, 64, &v, "bench-run", err, sizeof(err)))
+        return 2;
+      bench_runs = v;
+    } else if (ny_arg_match_with_value(a, "--bench-warmup")) {
+      int v = 0;
+      if (!ny_arg_take_int(a, &i, argc, argv, 0, 16, &v, "bench-warmup", err, sizeof(err)))
+        return 2;
+      bench_warmup = v;
+    } else if (ny_arg_match_with_value(a, "--bench-opt")) {
+      const char *v = NULL;
+      if (!ny_arg_take_value(a, &i, argc, argv, &v, err, sizeof(err)))
+        return 2;
+      bench_opt_level = v;
+    } else if (ny_arg_match_with_value(a, "--bench-tier")) {
+      const char *v = NULL;
+      if (!ny_arg_take_value(a, &i, argc, argv, &v, err, sizeof(err)))
+        return 2;
+      bench_tier = v;
+    } else if (ny_arg_match_with_value(a, "--bench-engine")) {
+      const char *v = NULL;
+      if (!ny_arg_take_value(a, &i, argc, argv, &v, err, sizeof(err)))
+        return 2;
+      if (strcmp(v, "aot") != 0 && strcmp(v, "mcjit") != 0 && strcmp(v, "orc") != 0 &&
+          strcmp(v, "native") != 0 && strcmp(v, "all") != 0) {
+        nyt_err("ny-test", "--bench-engine: expected aot|mcjit|orc|native|all, got '%s'", v);
+        return 2;
+      }
+      bench_engine = v;
+    } else if (ny_arg_match_with_value(a, "--bench-cache")) {
+      const char *v = NULL;
+      if (!ny_arg_take_value(a, &i, argc, argv, &v, err, sizeof(err)))
+        return 2;
+      if (strcmp(v, "cold") != 0 && strcmp(v, "warm") != 0) {
+        nyt_err("ny-test", "--bench-cache: expected cold|warm, got '%s'", v);
+        return 2;
+      }
+      bench_cache = v;
+      if (strcmp(v, "cold") == 0) {
+        ny_setenv("NYTRIX_TEST_CACHE", "0", 1);
+        ny_setenv("NYTRIX_TEST_NO_NATIVE_CACHE", "1", 1);
+        ny_setenv("NYTRIX_JIT_CACHE", "0", 1);
+        ny_setenv("NYTRIX_AOT_CACHE", "0", 1);
+      } else {
+        ny_setenv("NYTRIX_TEST_CACHE", "1", 1);
+        ny_setenv("NYTRIX_TEST_NO_NATIVE_CACHE", "0", 1);
+        ny_setenv("NYTRIX_JIT_CACHE", "1", 1);
+        ny_setenv("NYTRIX_AOT_CACHE", "1", 1);
+      }
+    } else if (!strcmp(a, "--bench-correctness")) {
+      bench_correctness = 1;
+    } else if (ny_arg_match_with_value(a, "--bench-compiler")) {
+      const char *v = NULL;
+      if (!ny_arg_take_value(a, &i, argc, argv, &v, err, sizeof(err)))
+        return 2;
+      ny_setenv("NYTRIX_BENCH_CC", v, 1);
+    } else if (ny_arg_match_with_value(a, "--bench-target")) {
+      const char *v = NULL;
+      if (!ny_arg_take_value(a, &i, argc, argv, &v, err, sizeof(err)))
+        return 2;
+      bench_target = v;
+    } else if (ny_arg_match_with_value(a, "--bench-compile-profile")) {
+      const char *v = NULL;
+      if (!ny_arg_take_value(a, &i, argc, argv, &v, err, sizeof(err)))
+        return 2;
+      bench_compile_profile = v;
+    } else if (ny_arg_match_with_value(a, "--bench-timeout")) {
+      if (!ny_arg_take_int(a, &i, argc, argv, 1, 3600, &bench_timeout, "bench-timeout", err,
+                           sizeof(err)))
+        return 2;
+    } else if (!strcmp(a, "--bench-verbose"))
+      bench_verbose = 1;
+    else if (!strcmp(a, "--bench-show-ir"))
+      bench_show_ir = 1;
+    else if (!strcmp(a, "--bench-show-asm"))
+      bench_show_asm = 1;
+    else if (!strcmp(a, "--bench-show-passes"))
+      bench_show_passes = 1;
+    else if (!strcmp(a, "--bench-profile"))
+      bench_profile = 1;
+    else if (!strcmp(a, "--bench-hw-counters")) {
+      bench_mode = 1;
+      ny_setenv("NYTRIX_BENCH_HW_COUNTERS", "1", 1);
+    } else if (!strcmp(a, "--bench-runtime-counters")) {
+      bench_mode = 1;
+      ny_setenv("NYTRIX_BENCH_RUNTIME_COUNTERS", "1", 1);
+    } else if (!strcmp(a, "--bench-compare-llvm"))
+      bench_compare_llvm = 1;
+    else if (!strcmp(a, "--bench-no-compare-llvm"))
+      bench_compare_llvm = 0;
+    else if (ny_arg_match_with_value(a, "--bench-out-csv")) {
+      bench_mode = 1;
+      if (!ny_arg_take_value(a, &i, argc, argv, &bench_output_csv, err, sizeof(err)))
+        return 2;
+    } else if (ny_arg_match_with_value(a, "--bench-out-json")) {
+      bench_mode = 1;
+      if (!ny_arg_take_value(a, &i, argc, argv, &bench_output_json, err, sizeof(err)))
+        return 2;
+    } else if (ny_arg_match_with_value(a, "--bench-out-md")) {
+      bench_mode = 1;
+      if (!ny_arg_take_value(a, &i, argc, argv, &bench_output_md, err, sizeof(err)))
+        return 2;
+    } else if (a[0] == '-') {
       nyt_err("ny-test", "unknown option: %s", a);
       sv_free(&patterns);
       return 2;
@@ -4079,6 +4593,53 @@ int ny_test_main(int argc, char **argv) {
     ny_setenv("NYTRIX_TEST_JOBS", jb, 1);
   }
   configure_test_cache_defaults();
+
+  (void)bench_cache;
+  if (bench_mode) {
+    if (bench_engine && strcmp(bench_engine, "all") == 0) {
+      /*
+       * Sweep every execution engine in one run so all timings (aot, mcjit,
+       * orc, native) are visible side by side.  Each engine gets its own table
+       * with the same fixtures and C baseline; wall-time columns let you spot
+       * engine-specific regressions directly.
+       */
+      if (bench_output_csv || bench_output_json || bench_output_md) {
+        /*
+         * Multi-engine runs produce per-engine tables; file outputs would
+         * overwrite each other, so require a single engine for those.
+         */
+        nyt_err("ny-test", "bench: --bench-engine all cannot write --bench-out-* files; use one engine");
+        sv_free(&patterns);
+        sv_free(&files);
+        return 2;
+      }
+      const char *engines[] = {"aot", "mcjit", "orc", "native"};
+      int all_rc = 0;
+      for (size_t e = 0; e < sizeof(engines) / sizeof(engines[0]); e++) {
+        printf("\n");
+        int engine_rc = run_benchmarks(bin, NULL, bench_opt_level, bench_tier, engines[e],
+                                       bench_target, bench_runs, bench_warmup, bench_timeout,
+                                       bench_verbose, bench_show_ir, bench_show_asm,
+                                       bench_show_passes, bench_profile, bench_compare_llvm,
+                                       bench_correctness, NULL, NULL, NULL,
+                                       bench_compile_profile, &files, &patterns);
+        if (engine_rc != 0)
+          all_rc = engine_rc;
+      }
+      sv_free(&patterns);
+      sv_free(&files);
+      return all_rc;
+    }
+    int bench_rc = run_benchmarks(bin, NULL, bench_opt_level, bench_tier, bench_engine,
+                                  bench_target, bench_runs, bench_warmup, bench_timeout,
+                                  bench_verbose, bench_show_ir, bench_show_asm,
+                                  bench_show_passes, bench_profile, bench_compare_llvm,
+                                  bench_correctness, bench_output_csv, bench_output_json,
+                                  bench_output_md, bench_compile_profile, &files, &patterns);
+    sv_free(&patterns);
+    sv_free(&files);
+    return bench_rc;
+  }
 
   FailureOutputCapture failure_capture = {0};
   if (failures_only && !failure_output_capture_begin(&failure_capture)) {
@@ -4148,7 +4709,6 @@ int ny_test_main(int argc, char **argv) {
   size_t skipped_system_stdlib = 0;
   size_t skipped_native_host = 0;
   size_t skipped_native_platform = 0;
-  size_t skipped_native_fp_link = 0;
   size_t skipped_ci = 0;
   size_t skipped_web_browser = 0;
   const int ci_mode = test_env_truthy("CI") || test_env_truthy("GITHUB_ACTIONS");
@@ -4166,9 +4726,6 @@ int ny_test_main(int argc, char **argv) {
       skipped_ci++;
     else if (test_is_unsupported_native_platform(p))
       skipped_native_platform++;
-    else if (test_env_truthy("NYTRIX_TEST_SKIP_NATIVE_FP_LINK") &&
-        test_is_host_sensitive_native_fp_link(p))
-      skipped_native_fp_link++;
     else if (test_is_unsupported_native_host(p))
       skipped_native_host++;
     else if (strncmp(p, "etc/tests/bench/", 16) == 0)
@@ -4202,9 +4759,6 @@ int ny_test_main(int argc, char **argv) {
   if (skipped_native_platform > 0)
     printf("%s[note]%s skipped %zu native fixtures requiring another host object/runtime format\n",
            nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_platform);
-  if (skipped_native_fp_link > 0)
-    printf("%s[note]%s skipped %zu host-sensitive native FP link/run fixtures\n",
-           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_native_fp_link);
   if (skipped_ci > 0)
     printf("%s[note]%s skipped %zu nshape fixtures marked ci skip\n",
            nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_ci);
@@ -4336,5 +4890,2387 @@ int ny_test_main(int argc, char **argv) {
   sv_free(&files);
   if (failures_only)
     failure_output_capture_end(&failure_capture);
+
+  return failed ? 1 : 0;
+}
+
+
+/*
+ * Benchmark Comparison infrastructure
+ *
+ * `ny-test --bench [PATTERN ...]` runs the bench .nshape fixtures and compares
+ * the self-reported `elapsed_ns=` value of the Nytrix compile-and-run against
+ * the side-by-side C translation (c-vs-ny fixtures) built with the host cc.
+ * Shapes without a C block report timing only.
+ *
+ * Paths resolve dynamically: the bench directory comes from
+ * `NYTRIX_SHARE_ROOT`/`NYTRIX_ROOT` when set and that subtree contains benches,
+ * otherwise it is taken relative to the process CWD (the repository root).  No
+ * absolute install prefix is assumed, so the tool also works when installed
+ * system-wide (e.g. under /opt/nytrix).
+ */
+
+/*
+ * Per-benchmark result row.
+ */
+typedef struct {
+  char name[128];
+  char path[PATH_MAX];
+  double wall_ms;
+  double ny_ms;
+  double ny_compile_ms;
+  double ny_jit_compile_ms;
+  double ny_jit_run_ms;
+  double ny_opt_ms;
+  double ny_total_ms;
+  size_t ny_code_bytes;
+  int ny_code_bytes_seen;
+  size_t ny_specialization_code_bytes;
+  size_t ny_specialization_code_functions;
+  size_t ny_specialization_max_function_bytes;
+  int ny_specialization_metrics_seen;
+  size_t ny_peak_compiler_rss_kb;
+  int ny_peak_compiler_rss_seen;
+  size_t ny_runtime_calls;
+  size_t ny_dynamic_ops;
+  size_t ny_tag_checks;
+  size_t ny_box_unbox;
+  size_t ny_heap_allocations;
+  size_t ny_bounds_checks;
+  size_t ny_direct_calls;
+  size_t ny_indirect_calls;
+  size_t ny_unknown_effects;
+  size_t ny_alias_unresolved;
+  size_t ny_vector_attempted;
+  size_t ny_vector_rejected;
+  size_t ny_vectorized;
+  size_t ny_spills;
+  size_t ny_reloads;
+  int ny_static_metrics_seen;
+  uint64_t ny_hw_cycles;
+  uint64_t ny_hw_instructions;
+  uint64_t ny_hw_branches;
+  uint64_t ny_hw_branch_misses;
+  uint64_t ny_hw_cache_misses;
+  int ny_hw_counters_seen;
+  size_t ny_runtime_alloc_count;
+  size_t ny_runtime_realloc_count;
+  int ny_runtime_counters_seen;
+  double c_ms;
+  double c_total_ms;
+  double llvm_ms;
+  double llvm_total_ms;
+  int ny_runs;
+  int c_runs;
+  int llvm_runs;
+  int ny_rc;
+  int c_rc;
+  int llvm_rc;
+  int ny_failures;
+  int c_failures;
+  int llvm_failures;
+  int checksum_ok;
+  char checksum[128];
+  char ny_checksum[128];
+  char llvm_checksum[128];
+  char c_checksum[128];
+  char backend[32];
+  char engine[32];
+  char cache[24];
+  double ny_min, ny_max, c_min, c_max, llvm_min, llvm_max;
+  double ny_p95, c_p95, llvm_p95;
+  double ny_dispersion_pct, c_dispersion_pct, llvm_dispersion_pct;
+  double ny_noise_pct, c_noise_pct, llvm_noise_pct;
+  int ny_unstable, c_unstable, llvm_unstable;
+  double native_c_budget, native_llvm_budget;
+  double compile_ms_budget;
+  size_t code_bytes_budget;
+  size_t specialization_code_bytes_budget;
+  size_t specialization_function_bytes_budget;
+  size_t compiler_rss_budget_kb;
+  size_t heap_allocations_budget;
+  size_t runtime_calls_budget;
+  size_t bounds_checks_budget;
+  size_t indirect_calls_budget;
+  size_t unknown_effects_budget;
+  size_t alias_unresolved_budget;
+  size_t spills_budget;
+  size_t reloads_budget;
+  unsigned static_budget_mask;
+  int budget_failed;
+} BenchRow;
+
+typedef struct {
+  BenchRow *items;
+  size_t len;
+  size_t cap;
+} BenchTable;
+
+static void bench_rows_push(BenchTable *t, const BenchRow *r) {
+  if (!t)
+    return;
+  if (t->len == t->cap) {
+    size_t nc = t->cap ? t->cap * 2 : 32;
+    BenchRow *p = (BenchRow *)realloc(t->items, nc * sizeof(*p));
+    if (!p)
+      return;
+    t->items = p;
+    t->cap = nc;
+  }
+  t->items[t->len++] = *r;
+}
+
+static void bench_rows_free(BenchTable *t) {
+  free(t->items);
+  t->items = NULL;
+  t->len = 0;
+  t->cap = 0;
+}
+
+/*
+ * Locate the bench fixture directory without baking in an install prefix.
+ */
+static const char *bench_dir_root(void) {
+  static char root[PATH_MAX];
+  const char *envs[] = {getenv("NYTRIX_SHARE_ROOT"), getenv("NYTRIX_ROOT")};
+  for (size_t i = 0; i < sizeof(envs) / sizeof(envs[0]); i++) {
+    const char *e = envs[i];
+    if (!e || !*e)
+      continue;
+    char probe[PATH_MAX];
+    snprintf(probe, sizeof(probe), "%s/etc/tests/bench", e);
+    if (is_dir(probe)) {
+      nyt_path_copy(root, sizeof(root), e);
+      return root;
+    }
+  }
+  if (is_dir("etc/tests/bench")) {
+    if (getcwd(root, sizeof(root)))
+      return root;
+    return ".";
+  }
+  return NULL;
+}
+
+static double bench_parse_elapsed(const char *out) {
+  if (!out)
+    return -1.0;
+  const char *ns = strstr(out, "elapsed_ns=");
+  const char *ms = strstr(out, "elapsed_ms=");
+  const char *k = ns ? ns : (ms ? ms : NULL);
+  if (!k)
+    return -1.0;
+  k = strchr(k, '=');
+  if (!k)
+    return -1.0;
+  k++;
+  while (*k && isspace((unsigned char)*k))
+    k++;
+  if (!*k || !isdigit((unsigned char)*k))
+    return -1.0;
+  double v = 0.0;
+  while (*k && isdigit((unsigned char)*k))
+    v = v * 10.0 + (double)(*k++ - '0');
+  return ns ? v / 1e6 : v;
+}
+/*
+ * Copy a line-oriented result marker such as `checksum=...` without
+ * interpreting its payload.  Checksums are intentionally compared as text:
+ * fixtures choose their own scalar/string representation.
+ */
+static int bench_parse_marker(const char *out, const char *label, char *dst, size_t cap) {
+  if (!out || !label || !dst || cap == 0)
+    return 0;
+  const char *p = strstr(out, label);
+  if (!p)
+    return 0;
+  p += strlen(label);
+  while (*p && isspace((unsigned char)*p) && *p != '\n' && *p != '\r')
+    p++;
+  const char *end = p;
+  while (*end && *end != '\n' && *end != '\r')
+    end++;
+  while (end > p && isspace((unsigned char)end[-1]))
+    end--;
+  size_t len = (size_t)(end - p);
+  if (len == 0 || len >= cap)
+    return 0;
+  memcpy(dst, p, len);
+  dst[len] = '\0';
+  return 1;
+}
+
+static const char *bench_cache_state(void) {
+  const char *result = getenv("NYTRIX_TEST_CACHE");
+  const char *native = getenv("NYTRIX_TEST_NO_NATIVE_CACHE");
+  const char *jit = getenv("NYTRIX_JIT_CACHE");
+  const char *aot = getenv("NYTRIX_AOT_CACHE");
+  if (result && (*result == '0' || strcmp(result, "false") == 0))
+    return "cold";
+  if ((native && (*native == '1' || strcmp(native, "true") == 0)) ||
+      (jit && (*jit == '0' || strcmp(jit, "false") == 0)) ||
+      (aot && (*aot == '0' || strcmp(aot, "false") == 0)))
+    return "warm-no-exec";
+  return "warm";
+}
+
+/*
+ * Parse a compiler timing line such as `Optimization: 0.0123s`.
+ */
+static double bench_parse_phase_ms(const char *out, const char *label) {
+  if (!out || !label)
+    return -1.0;
+  const char *p = strstr(out, label);
+  if (!p)
+    return -1.0;
+  p += strlen(label);
+  while (*p && isspace((unsigned char)*p))
+    p++;
+  char *end = NULL;
+  double seconds = strtod(p, &end);
+  if (end == p || seconds < 0.0)
+    return -1.0;
+  while (*end && isspace((unsigned char)*end))
+    end++;
+  if (*end != 's')
+    return -1.0;
+  return seconds * 1000.0;
+}
+
+
+static double bench_median(double *xs, int n) {
+  if (n <= 0)
+    return -1.0;
+  for (int i = 0; i < n - 1; i++)
+    for (int j = i + 1; j < n; j++)
+      if (xs[j] < xs[i]) {
+        double t = xs[i];
+        xs[i] = xs[j];
+        xs[j] = t;
+      }
+  if (n % 2)
+    return xs[n / 2];
+  return (xs[n / 2 - 1] + xs[n / 2]) / 2.0;
+}
+
+static double bench_noise_limit_pct(void) {
+  const char *raw = getenv("NYTRIX_BENCH_MAX_NOISE_PCT");
+  if (!raw || !*raw)
+    return 20.0;
+  char *end = NULL;
+  double value = strtod(raw, &end);
+  if (end == raw || value < 0.0 || value > 500.0)
+    return 20.0;
+  return value;
+}
+
+/*
+ * Run argv, capturing stdout+stderr to output_path, waiting up to timeout_sec.
+ * Returns child status rc (NY_TEST_TIMEOUT_RC on timeout).  Works on POSIX via
+ * fork and on Windows via the spawn helper.
+ */
+static int bench_run_capture_usage(char *const argv[], int timeout_sec,
+                                   const char *output_path,
+                                   size_t *peak_rss_kb) {
+  if (peak_rss_kb)
+    *peak_rss_kb = 0;
+  fflush(NULL);
+#ifdef _WIN32
+  ny_test_proc_t proc = ny_test_spawn_argv(argv, output_path, 0);
+  if (!ny_test_proc_valid(proc))
+    return 127;
+  int timed_out = 0;
+  int rc = ny_test_wait_rc(proc, timeout_sec, &timed_out);
+  ny_test_proc_close(proc);
+  return timed_out ? NY_TEST_TIMEOUT_RC : rc;
+#else
+  ny_test_proc_t pid = fork();
+  if (pid == 0) {
+    apply_test_child_env();
+    if (output_path) {
+      int fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      if (fd >= 0) {
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+      }
+    } else {
+      int devnull = open("/dev/null", O_WRONLY);
+      if (devnull >= 0) {
+        dup2(devnull, STDOUT_FILENO);
+        dup2(devnull, STDERR_FILENO);
+        close(devnull);
+      }
+    }
+    execvp(argv[0], argv);
+    _exit(127);
+  }
+  if (pid <= 0)
+    return 127;
+  int status = 0;
+  double start_ms = now_ms();
+  double timeout_ms = (double)timeout_sec * 1000.0;
+  for (;;) {
+#if defined(__APPLE__) || defined(__linux__)
+    struct rusage usage;
+    memset(&usage, 0, sizeof(usage));
+    pid_t r = wait4(pid, &status, WNOHANG, &usage);
+#else
+    pid_t r = waitpid(pid, &status, WNOHANG);
+#endif
+    if (r == pid) {
+#if defined(__APPLE__) || defined(__linux__)
+      if (peak_rss_kb) {
+        unsigned long long rss =
+            usage.ru_maxrss > 0 ? (unsigned long long)usage.ru_maxrss : 0;
+#ifdef __APPLE__
+        rss /= 1024u; /* macOS reports bytes; Linux reports KiB. */
+#endif
+        *peak_rss_kb = rss > (unsigned long long)SIZE_MAX
+                           ? SIZE_MAX
+                           : (size_t)rss;
+      }
+#endif
+      if (WIFEXITED(status))
+        return WEXITSTATUS(status);
+      if (WIFSIGNALED(status))
+        return 128 + WTERMSIG(status);
+      return 128;
+    }
+    if (r < 0) {
+      if (errno == EINTR)
+        continue;
+      return 127;
+    }
+    if (now_ms() - start_ms >= timeout_ms) {
+      kill(pid, SIGKILL);
+#if defined(__APPLE__) || defined(__linux__)
+      struct rusage usage;
+      memset(&usage, 0, sizeof(usage));
+      while (wait4(pid, &status, 0, &usage) < 0 && errno == EINTR) {
+      }
+      if (peak_rss_kb) {
+        unsigned long long rss =
+            usage.ru_maxrss > 0 ? (unsigned long long)usage.ru_maxrss : 0;
+#ifdef __APPLE__
+        rss /= 1024u;
+#endif
+        *peak_rss_kb = rss > (unsigned long long)SIZE_MAX
+                           ? SIZE_MAX
+                           : (size_t)rss;
+      }
+#else
+      while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+      }
+#endif
+      return NY_TEST_TIMEOUT_RC;
+    }
+    poll_sleep();
+  }
+#endif
+}
+
+static int bench_run_capture(char *const argv[], int timeout_sec,
+                             const char *output_path) {
+  return bench_run_capture_usage(argv, timeout_sec, output_path, NULL);
+}
+
+typedef struct {
+  double values[64];
+  size_t count;
+  double median;
+  double min;
+  double max;
+  double p95;
+  double dispersion_pct;
+  double noise_pct;
+  int unstable;
+  double wall_ms;
+  int last_rc;
+  int failure_count;
+  int timeout_count;
+  int checksum_seen;
+  int checksum_consistent;
+  char checksum[128];
+  double compile_values[64];
+  size_t compile_count;
+  double compile_ms;
+  double jit_compile_values[64];
+  size_t jit_compile_count;
+  double jit_compile_ms;
+  double jit_run_values[64];
+  size_t jit_run_count;
+  double jit_run_ms;
+  double opt_values[64];
+  size_t opt_count;
+  double opt_ms;
+  size_t code_bytes;
+  int code_bytes_seen;
+  size_t specialization_code_bytes;
+  size_t specialization_code_functions;
+  size_t specialization_max_function_bytes;
+  int specialization_metrics_seen;
+  size_t peak_compiler_rss_kb;
+  int peak_compiler_rss_seen;
+  size_t runtime_calls;
+  size_t dynamic_ops;
+  size_t tag_checks;
+  size_t box_unbox;
+  size_t heap_allocations;
+  size_t bounds_checks;
+  size_t direct_calls;
+  size_t indirect_calls;
+  size_t unknown_effects;
+  size_t alias_unresolved;
+  size_t vector_attempted;
+  size_t vector_rejected;
+  size_t vectorized;
+  size_t spills;
+  size_t reloads;
+  int static_metrics_seen;
+  uint64_t hw_cycles;
+  uint64_t hw_instructions;
+  uint64_t hw_branches;
+  uint64_t hw_branch_misses;
+  uint64_t hw_cache_misses;
+  int hw_counters_seen;
+  size_t runtime_alloc_count;
+  size_t runtime_realloc_count;
+  int runtime_counters_seen;
+} bench_stats_t;
+
+static void bench_finalize_samples(bench_stats_t *s) {
+  if (!s || s->count == 0)
+    return;
+  s->median = bench_median(s->values, (int)s->count);
+  s->min = s->values[0];
+  s->max = s->values[s->count - 1];
+  if (s->median > 0.0)
+    s->dispersion_pct = ((s->max - s->min) / s->median) * 100.0;
+  if (s->count >= 5) {
+    size_t rank = (95 * s->count + 99) / 100;
+    if (rank == 0)
+      rank = 1;
+    if (rank > s->count)
+      rank = s->count;
+    s->p95 = s->values[rank - 1];
+    if (s->median > 0.0)
+      s->noise_pct = ((s->p95 - s->median) / s->median) * 100.0;
+    s->unstable = s->noise_pct > bench_noise_limit_pct();
+  } else {
+    s->p95 = -1.0;
+  }
+}
+
+/*
+ * Run `argv`, discard warm-ups, and measure self-reported runtime plus
+ * compiler timing over the requested samples.
+ */
+static bench_stats_t bench_measure_self_timed(char *const argv[], int timeout_sec, int warmup,
+                                              int runs) {
+  bench_stats_t s = {.checksum_consistent = 1, .last_rc = 127};
+  double wall_start = now_ms();
+  int total = warmup + runs;
+  for (int i = 0; i < total && s.count < 64; i++) {
+    char tmp[PATH_MAX];
+    if (make_test_capture_tmp(tmp, sizeof(tmp), "bench") < 0) {
+      if (i >= warmup)
+        s.failure_count++;
+      continue;
+    }
+    int rc = bench_run_capture(argv, timeout_sec, tmp);
+    char *out = read_small_file(tmp);
+    remove(tmp);
+    if (i < warmup) {
+      free(out);
+      continue;
+    }
+    s.last_rc = rc;
+    if (rc != 0) {
+      s.failure_count++;
+      if (rc == NY_TEST_TIMEOUT_RC)
+        s.timeout_count++;
+      free(out);
+      continue;
+    }
+    if (out) {
+      char checksum[sizeof(s.checksum)];
+      if (bench_parse_marker(out, "checksum=", checksum, sizeof(checksum))) {
+        if (!s.checksum_seen) {
+          snprintf(s.checksum, sizeof(s.checksum), "%s", checksum);
+          s.checksum_seen = 1;
+        } else if (strcmp(s.checksum, checksum) != 0) {
+          s.checksum_consistent = 0;
+        }
+      }
+      double v = bench_parse_elapsed(out);
+      if (v >= 0.0 && s.count < 64)
+        s.values[s.count++] = v;
+      double compile_ms = bench_parse_phase_ms(out, "Total time:");
+      if (compile_ms >= 0.0 && s.compile_count < 64)
+        s.compile_values[s.compile_count++] = compile_ms;
+      double jit_compile_ms = bench_parse_phase_ms(out, "JIT Compile:");
+      if (jit_compile_ms >= 0.0 && s.jit_compile_count < 64)
+        s.jit_compile_values[s.jit_compile_count++] = jit_compile_ms;
+      double jit_run_ms = bench_parse_phase_ms(out, "JIT Run:");
+      if (jit_run_ms >= 0.0 && s.jit_run_count < 64)
+        s.jit_run_values[s.jit_run_count++] = jit_run_ms;
+      double opt_ms = bench_parse_phase_ms(out, "Optimization:");
+      if (opt_ms >= 0.0 && s.opt_count < 64)
+        s.opt_values[s.opt_count++] = opt_ms;
+    }
+    free(out);
+  }
+  s.wall_ms = now_ms() - wall_start;
+  bench_finalize_samples(&s);
+  if (s.compile_count > 0)
+    s.compile_ms = bench_median(s.compile_values, (int)s.compile_count);
+  if (s.jit_compile_count > 0)
+    s.jit_compile_ms = bench_median(s.jit_compile_values, (int)s.jit_compile_count);
+  if (s.jit_run_count > 0)
+    s.jit_run_ms = bench_median(s.jit_run_values, (int)s.jit_run_count);
+  if (s.opt_count > 0)
+    s.opt_ms = bench_median(s.opt_values, (int)s.opt_count);
+  return s;
+}
+
+/*
+ * Per-side measurement
+ */
+
+/*
+ * Detect the host C compiler behind `NYTRIX_BENCH_CC` (or `CC`), defaulting to
+ * a coherent `cc -O{N}` invocation.
+ */
+static const char *bench_cc(void) {
+  const char *cc = getenv("NYTRIX_BENCH_CC");
+  if (!cc || !*cc)
+    cc = getenv("CC");
+  if (!cc || !*cc)
+    cc = "cc";
+  return cc;
+}
+
+static const char *bench_opt_for(const char *opt_level) {
+  static char buf[16];
+  if (opt_level && *opt_level) {
+    if (opt_level[0] == '-')
+      return opt_level;
+    if (opt_level[0] >= '0' && opt_level[0] <= '3' && opt_level[1] == '\0') {
+      snprintf(buf, sizeof(buf), "-O%c", opt_level[0]);
+      return buf;
+    }
+    if (opt_level[0] == '0' && opt_level[1] >= '0' && opt_level[1] <= '3' &&
+        opt_level[2] == '\0') {
+      snprintf(buf, sizeof(buf), "-O%c", opt_level[1]);
+      return buf;
+    }
+    if ((opt_level[0] == 'O' || opt_level[0] == 'o') && opt_level[1] >= '0' &&
+        opt_level[1] <= '3' && opt_level[2] == '\0') {
+      snprintf(buf, sizeof(buf), "-O%c", opt_level[1]);
+      return buf;
+    }
+    snprintf(buf, sizeof(buf), "-%s", opt_level);
+    return buf;
+  }
+  return "-O2";
+}
+
+/*
+ * Extract a `source c` block from an .nshape fixture.  Returns a heap-owning
+ * NUL-terminated copy, or NULL when the block is absent.
+ */
+static char *bench_c_block(const char *shape_path) {
+  return shape_source_block(shape_path, "c");
+}
+
+/*
+ * Extract the `source ny` block and materialize it via the shared helper.
+ */
+static char *bench_materialize_ny(const char *shape_path) {
+  return materialize_shape_ny_source(shape_path);
+}
+
+static int bench_find_cc(char *out, size_t cap) {
+  const char *cc = bench_cc();
+  if (test_command_available(cc)) {
+    nyt_path_copy(out, cap, cc);
+    return 1;
+  }
+  if (ny_access(cc, X_OK) == 0) {
+    nyt_path_copy(out, cap, cc);
+    return 1;
+  }
+  return 0;
+}
+
+
+typedef struct {
+  char os[32];
+  char arch[32];
+  char cpu_model[256];
+  char target[64];
+  char target_features[1024];
+  char c_compiler[PATH_MAX];
+  char c_compiler_version[256];
+  char c_flags[512];
+  char compiler_revision[128];
+} BenchEnvironment;
+
+static void bench_capture_first_line(char *const argv[], char *dst, size_t cap) {
+  if (!dst || cap == 0)
+    return;
+  snprintf(dst, cap, "unknown");
+  char tmp[PATH_MAX];
+  if (make_test_capture_tmp(tmp, sizeof(tmp), "bench-meta") < 0)
+    return;
+  int rc = bench_run_capture(argv, 10, tmp);
+  char *out = read_small_file(tmp);
+  remove(tmp);
+  if (rc != 0 || !out) {
+    free(out);
+    return;
+  }
+  char *end = strpbrk(out, "\r\n");
+  if (end)
+    *end = '\0';
+  trim_inplace(out);
+  if (*out)
+    snprintf(dst, cap, "%s", out);
+  free(out);
+}
+
+static void bench_target_features(char *dst, size_t cap) {
+  if (!dst || cap == 0)
+    return;
+  snprintf(dst, cap, "unknown");
+  const char *forced = getenv("NYTRIX_TARGET_FEATURES");
+  if (forced && *forced) {
+    snprintf(dst, cap, "%s", forced);
+    return;
+  }
+#ifdef __APPLE__
+  size_t n = cap;
+  if (sysctlbyname("machdep.cpu.features", dst, &n, NULL, 0) == 0 && *dst)
+    return;
+#elif defined(__linux__)
+  FILE *f = fopen("/proc/cpuinfo", "r");
+  if (!f)
+    return;
+  char line[4096];
+  while (fgets(line, sizeof(line), f)) {
+    if (strncmp(line, "flags", 5) != 0 && strncmp(line, "Features", 8) != 0)
+      continue;
+    char *colon = strchr(line, ':');
+    if (!colon)
+      continue;
+    colon++;
+    trim_inplace(colon);
+    if (*colon)
+      snprintf(dst, cap, "%s", colon);
+    break;
+  }
+  fclose(f);
+#elif defined(_WIN32)
+  const char *id = getenv("PROCESSOR_IDENTIFIER");
+  if (id && *id)
+    snprintf(dst, cap, "%s", id);
+#endif
+}
+
+static void bench_collect_environment(const char *root, const char *target,
+                                      const char *opt_level, BenchEnvironment *env) {
+  if (!env)
+    return;
+  memset(env, 0, sizeof(*env));
+  snprintf(env->os, sizeof(env->os), "%s", host_os_name());
+  snprintf(env->arch, sizeof(env->arch), "%s", host_arch_name());
+  host_cpu_name(env->cpu_model, sizeof(env->cpu_model));
+  snprintf(env->target, sizeof(env->target), "%s", target && *target ? target : "default");
+  bench_target_features(env->target_features, sizeof(env->target_features));
+
+  char cc[PATH_MAX];
+  if (bench_find_cc(cc, sizeof(cc))) {
+    snprintf(env->c_compiler, sizeof(env->c_compiler), "%s", cc);
+    char *cc_argv[] = {cc, "--version", NULL};
+    bench_capture_first_line(cc_argv, env->c_compiler_version,
+                             sizeof(env->c_compiler_version));
+  } else {
+    snprintf(env->c_compiler, sizeof(env->c_compiler), "unknown");
+    snprintf(env->c_compiler_version, sizeof(env->c_compiler_version), "unknown");
+  }
+  const char *extra = getenv("CFLAGS");
+  snprintf(env->c_flags, sizeof(env->c_flags), "%s -march=native%s%s",
+           bench_opt_for(opt_level), extra && *extra ? " " : "", extra && *extra ? extra : "");
+
+  const char *rev = getenv("NYTRIX_REVISION");
+  if (!rev || !*rev)
+    rev = getenv("GIT_COMMIT");
+  if (rev && *rev) {
+    snprintf(env->compiler_revision, sizeof(env->compiler_revision), "%s", rev);
+  } else if (root && *root) {
+    char *git_argv[] = {"git", "-C", (char *)root, "rev-parse", "HEAD", NULL};
+    bench_capture_first_line(git_argv, env->compiler_revision,
+                             sizeof(env->compiler_revision));
+  } else {
+    snprintf(env->compiler_revision, sizeof(env->compiler_revision), "unknown");
+  }
+}
+
+/*
+ * Compile `c_source` into `exe_path` with the host cc at `opt_level`, plus any
+ * per-fixture `cflags` tokens (e.g. "-pthread", "-lz", "-lregex") read from
+ * the shape meta so C references that need extra libraries link correctly.
+ */
+static int bench_compile_c(const char *c_source, const char *exe_path, const char *opt_level,
+                           const char *cflags) {
+  char src_tmp[PATH_MAX];
+  snprintf(src_tmp, sizeof(src_tmp), "%s/ny-benchc-%ld-%ld.c", nyt_temp_dir(), (long)getpid(),
+           (long)now_ms());
+  FILE *f = fopen(src_tmp, "wb");
+  if (!f)
+    return 0;
+  fwrite(c_source, 1, strlen(c_source), f);
+  fclose(f);
+  char cc[PATH_MAX];
+  if (!bench_find_cc(cc, sizeof(cc))) {
+    remove(src_tmp);
+    return 0;
+  }
+
+  char *cc_argv[24];
+  int k = 0;
+  cc_argv[k++] = (char *)cc;
+  cc_argv[k++] = (char *)bench_opt_for(opt_level);
+  cc_argv[k++] = "-march=native";
+  if (cflags && *cflags) {
+    char cflags_buf[512];
+    if (strlen(cflags) >= sizeof(cflags_buf)) {
+      remove(src_tmp);
+      return 0;
+    }
+    snprintf(cflags_buf, sizeof(cflags_buf), "%s", cflags);
+    trim_inplace(cflags_buf);
+    char *flagv[12];
+    int flagc = split_words(cflags_buf, flagv, 12);
+    for (int i = 0; i < flagc && k < 20; i++)
+      cc_argv[k++] = flagv[i];
+  }
+  cc_argv[k++] = (char *)src_tmp;
+  cc_argv[k++] = "-o";
+  cc_argv[k++] = (char *)exe_path;
+  cc_argv[k++] = "-lm";
+  cc_argv[k] = NULL;
+  int rc = bench_run_capture(cc_argv, NY_BENCH_TIMEOUT_SEC, NULL);
+  remove(src_tmp);
+  return rc == 0;
+}
+
+static int bench_parse_size_value(const char *text, const char *key,
+                                  size_t *out) {
+  if (!text || !key || !*key || !out)
+    return 0;
+  const char *p = strstr(text, key);
+  if (!p)
+    return 0;
+  p += strlen(key);
+  if (!isdigit((unsigned char)*p))
+    return 0;
+  errno = 0;
+  char *end = NULL;
+  unsigned long long value = strtoull(p, &end, 10);
+  if (errno != 0 || end == p || value > (unsigned long long)SIZE_MAX)
+    return 0;
+  *out = (size_t)value;
+  return 1;
+}
+
+/*
+ * Parse key=value from one named report line so repeated field names such as
+ * spilled=/reloads= can be attributed to the intended metric family.
+ */
+static int bench_parse_report_size(const char *text, const char *line_prefix,
+                                   const char *key, size_t *out) {
+  if (!text || !line_prefix || !*line_prefix || !key || !*key || !out)
+    return 0;
+  const char *line = text;
+  size_t prefix_len = strlen(line_prefix);
+  while (line && *line) {
+    const char *next = strchr(line, '\n');
+    size_t line_len = next ? (size_t)(next - line) : strlen(line);
+    if (line_len >= prefix_len && strncmp(line, line_prefix, prefix_len) == 0) {
+      const char *p = line + prefix_len;
+      const char *end_line = line + line_len;
+      size_t key_len = strlen(key);
+      while (p < end_line) {
+        const char *hit = strstr(p, key);
+        if (!hit || hit >= end_line || hit + key_len > end_line)
+          break;
+        if ((hit == line || isspace((unsigned char)hit[-1])) &&
+            hit + key_len < end_line && isdigit((unsigned char)hit[key_len])) {
+          errno = 0;
+          char *end = NULL;
+          unsigned long long value = strtoull(hit + key_len, &end, 10);
+          if (errno == 0 && end != hit + key_len && end <= end_line &&
+              value <= (unsigned long long)SIZE_MAX) {
+            *out = (size_t)value;
+            return 1;
+          }
+        }
+        p = hit + key_len;
+      }
+      return 0;
+    }
+    line = next ? next + 1 : NULL;
+  }
+  return 0;
+}
+
+static int bench_runtime_counters_requested(void) {
+  const char *v = getenv("NYTRIX_BENCH_RUNTIME_COUNTERS");
+  if (!v || !*v)
+    return 0;
+  return strcmp(v, "0") != 0 && strcmp(v, "false") != 0 &&
+         strcmp(v, "off") != 0;
+}
+
+static void bench_measure_runtime_counters(const char *exe_path, int timeout_sec,
+                                           bench_stats_t *stats) {
+  if (!exe_path || !stats || !bench_runtime_counters_requested())
+    return;
+  char capture_path[PATH_MAX];
+  if (make_test_capture_tmp(capture_path, sizeof(capture_path),
+                            "bench-runtime-counters") < 0)
+    return;
+  const char *old_env = getenv("NYTRIX_REPORT_RUNTIME_COUNTERS");
+  char *saved_env = old_env ? strdup(old_env) : NULL;
+  ny_setenv("NYTRIX_REPORT_RUNTIME_COUNTERS", "1", 1);
+  char *argv[] = {(char *)exe_path, NULL};
+  int rc = bench_run_capture(argv, timeout_sec, capture_path);
+  if (saved_env) {
+    ny_setenv("NYTRIX_REPORT_RUNTIME_COUNTERS", saved_env, 1);
+    free(saved_env);
+  } else {
+    ny_unsetenv("NYTRIX_REPORT_RUNTIME_COUNTERS");
+  }
+  char *out = read_small_file(capture_path);
+  remove(capture_path);
+  if (rc != 0 || !out) {
+    free(out);
+    return;
+  }
+  size_t allocs = 0, reallocs = 0;
+  int seen =
+      bench_parse_report_size(out, "ny_runtime_counters ", "alloc=", &allocs) |
+      bench_parse_report_size(out, "ny_runtime_counters ", "realloc=", &reallocs);
+  if (seen) {
+    stats->runtime_alloc_count = allocs;
+    stats->runtime_realloc_count = reallocs;
+    stats->runtime_counters_seen = 1;
+  }
+  free(out);
+}
+
+static int bench_hw_counters_requested(void) {
+  const char *v = getenv("NYTRIX_BENCH_HW_COUNTERS");
+  if (!v || !*v)
+    return 0;
+  return strcmp(v, "0") != 0 && strcmp(v, "false") != 0 &&
+         strcmp(v, "off") != 0;
+}
+
+static int bench_parse_perf_counter(const char *text, const char *event,
+                                    uint64_t *out) {
+  if (!text || !event || !*event || !out)
+    return 0;
+  const char *line = text;
+  while (line && *line) {
+    const char *next = strchr(line, '\n');
+    size_t line_len = next ? (size_t)(next - line) : strlen(line);
+    const char *hit = strstr(line, event);
+    if (hit && hit < line + line_len) {
+      const char *p = line;
+      while (p < line + line_len && isspace((unsigned char)*p))
+        ++p;
+      if (p < line + line_len && isdigit((unsigned char)*p)) {
+        errno = 0;
+        char *end = NULL;
+        unsigned long long value = strtoull(p, &end, 10);
+        if (errno == 0 && end != p) {
+          *out = (uint64_t)value;
+          return 1;
+        }
+      }
+    }
+    line = next ? next + 1 : NULL;
+  }
+  return 0;
+}
+
+static void bench_measure_hw_counters(const char *exe_path, int timeout_sec,
+                                      bench_stats_t *stats) {
+#if defined(__linux__)
+  if (!exe_path || !stats || !bench_hw_counters_requested() ||
+      !test_command_available("perf"))
+    return;
+  char capture_path[PATH_MAX];
+  if (make_test_capture_tmp(capture_path, sizeof(capture_path), "bench-perf-stat") < 0)
+    return;
+  char *argv[] = {"perf", "stat", "--no-big-num", "-x,", "-e",
+                  "cycles,instructions,branches,branch-misses,cache-misses",
+                  "--", (char *)exe_path, NULL};
+  int rc = bench_run_capture(argv, timeout_sec, capture_path);
+  char *out = read_small_file(capture_path);
+  remove(capture_path);
+  if (rc != 0 || !out) {
+    free(out);
+    return;
+  }
+  int seen = 0;
+  seen |= bench_parse_perf_counter(out, ",cycles,", &stats->hw_cycles);
+  seen |= bench_parse_perf_counter(out, ",instructions,", &stats->hw_instructions);
+  seen |= bench_parse_perf_counter(out, ",branches,", &stats->hw_branches);
+  seen |= bench_parse_perf_counter(out, ",branch-misses,", &stats->hw_branch_misses);
+  seen |= bench_parse_perf_counter(out, ",cache-misses,", &stats->hw_cache_misses);
+  stats->hw_counters_seen = seen;
+  free(out);
+#else
+  (void)exe_path;
+  (void)timeout_sec;
+  (void)stats;
+#endif
+}
+
+/*
+ * One report-only compile after timing samples records native static-island
+ * facts and, when applicable, actual machine-code bytes. It does not
+ * contaminate the measured compile/runtime samples.
+ */
+static void bench_measure_ny_code_size(const char *bin, const char *ny_path,
+                                       const char *opt_level, const char *tier,
+                                       const char *engine, const char *target,
+                                       bool force_native_report, int timeout_sec,
+                                       bench_stats_t *stats) {
+  if (!bin || !ny_path || !stats)
+    return;
+  bool native_report = engine &&
+                       (strcmp(engine, "aot") == 0 || strcmp(engine, "native") == 0);
+  if (!native_report && !force_native_report)
+    return;
+  if (target && strcmp(target, "llvm") == 0)
+    return;
+
+  char report_path[PATH_MAX];
+  char output_path[PATH_MAX];
+  char capture_path[PATH_MAX];
+  if (make_test_capture_tmp(report_path, sizeof(report_path), "bench-size-report") < 0 ||
+      make_test_capture_tmp(output_path, sizeof(output_path), "bench-size-bin") < 0 ||
+      make_test_capture_tmp(capture_path, sizeof(capture_path), "bench-size-log") < 0)
+    return;
+  remove(report_path);
+  remove(output_path);
+
+  char report_arg[PATH_MAX + 32];
+  snprintf(report_arg, sizeof(report_arg), "--native-tier-report=%s", report_path);
+  char *argv[28];
+  int k = 0;
+  argv[k++] = (char *)bin;
+  if (tier && *tier && strcmp(tier, "opt") != 0)
+    argv[k++] = (char *)tier;
+  if (opt_level && *opt_level)
+    argv[k++] = (char *)bench_opt_for(opt_level);
+  if (engine && strcmp(engine, "native") == 0) {
+    argv[k++] = "--native-only";
+    if (target && *target) {
+      argv[k++] = "--native-backend";
+      argv[k++] = (char *)target;
+    }
+  } else if (target && *target) {
+    argv[k++] = "--native-backend";
+    argv[k++] = (char *)target;
+  }
+  argv[k++] = report_arg;
+  argv[k++] = "-o";
+  argv[k++] = output_path;
+  argv[k++] = (char *)ny_path;
+  argv[k] = NULL;
+
+  size_t peak_rss_kb = 0;
+  int rc = bench_run_capture_usage(argv, timeout_sec, capture_path, &peak_rss_kb);
+  if (peak_rss_kb > 0) {
+    stats->peak_compiler_rss_kb = peak_rss_kb;
+    stats->peak_compiler_rss_seen = 1;
+  }
+  if (rc == 0) {
+    char *report = read_small_file(report_path);
+    size_t bytes = 0;
+    if (report && bench_parse_size_value(report, "code_bytes=", &bytes)) {
+      stats->code_bytes = bytes;
+      stats->code_bytes_seen = 1;
+    }
+    if (report) {
+      size_t spec_bytes = 0, spec_functions = 0, spec_max_bytes = 0;
+      int spec_seen =
+          bench_parse_report_size(report, "machine_lowering ",
+                                  "specialization_code_bytes=", &spec_bytes) |
+          bench_parse_report_size(report, "machine_lowering ",
+                                  "specialization_code_functions=", &spec_functions) |
+          bench_parse_report_size(report, "machine_lowering ",
+                                  "specialization_max_function_bytes=", &spec_max_bytes);
+      if (spec_seen) {
+        stats->specialization_code_bytes = spec_bytes;
+        stats->specialization_code_functions = spec_functions;
+        stats->specialization_max_function_bytes = spec_max_bytes;
+        stats->specialization_metrics_seen = 1;
+      }
+      size_t gpr_spills = 0, fpr_spills = 0, vec_spills = 0;
+      size_t gpr_reloads = 0, fpr_reloads = 0, vec_reloads = 0;
+      int facts_seen = 0;
+#define BENCH_PARSE_FACT(field, key)                                      \
+      do {                                                                 \
+        size_t value = 0;                                                  \
+        if (bench_parse_report_size(report, "facts ", key, &value)) {    \
+          stats->field = value;                                            \
+          facts_seen = 1;                                                  \
+        }                                                                  \
+      } while (0)
+      BENCH_PARSE_FACT(runtime_calls, "runtime_calls=");
+      BENCH_PARSE_FACT(dynamic_ops, "dynamic_ops=");
+      BENCH_PARSE_FACT(tag_checks, "tag_checks=");
+      BENCH_PARSE_FACT(box_unbox, "box_unbox=");
+      BENCH_PARSE_FACT(heap_allocations, "heap_allocations=");
+      BENCH_PARSE_FACT(bounds_checks, "bounds_checks=");
+      BENCH_PARSE_FACT(direct_calls, "direct_calls=");
+      BENCH_PARSE_FACT(indirect_calls, "indirect_calls=");
+      BENCH_PARSE_FACT(unknown_effects, "unknown_effects=");
+      BENCH_PARSE_FACT(alias_unresolved, "alias_unresolved=");
+      BENCH_PARSE_FACT(vector_attempted, "vector_attempted=");
+      BENCH_PARSE_FACT(vector_rejected, "vector_rejected=");
+      BENCH_PARSE_FACT(vectorized, "vectorized=");
+#undef BENCH_PARSE_FACT
+      int spill_seen =
+          bench_parse_report_size(report, "mach_regalloc ", "spilled=",
+                                  &gpr_spills) |
+          bench_parse_report_size(report, "mach_fpr_regalloc ", "spilled=",
+                                  &fpr_spills) |
+          bench_parse_report_size(report, "mach_vector_regalloc ", "spilled=",
+                                  &vec_spills);
+      int reload_seen =
+          bench_parse_report_size(report, "mach_regalloc ", "reloads=",
+                                  &gpr_reloads) |
+          bench_parse_report_size(report, "mach_fpr_regalloc ", "reloads=",
+                                  &fpr_reloads) |
+          bench_parse_report_size(report, "mach_vector_regalloc ", "reloads=",
+                                  &vec_reloads);
+      if (spill_seen)
+        stats->spills = gpr_spills + fpr_spills + vec_spills;
+      if (reload_seen)
+        stats->reloads = gpr_reloads + fpr_reloads + vec_reloads;
+      stats->static_metrics_seen = facts_seen || spill_seen || reload_seen;
+    }
+    free(report);
+  }
+  if (rc == 0) {
+    bench_measure_runtime_counters(output_path, timeout_sec, stats);
+    bench_measure_hw_counters(output_path, timeout_sec, stats);
+  }
+  remove(report_path);
+  remove(output_path);
+  remove(capture_path);
+}
+
+
+static bool bench_shape_has_static_budget(const char *shape_path) {
+  static const char *const keys[] = {
+      "max_ny_heap_allocations", "max_ny_runtime_calls",
+      "max_ny_bounds_checks", "max_ny_indirect_calls",
+      "max_ny_unknown_effects", "max_ny_alias_unresolved", "max_ny_spills",
+      "max_ny_reloads",
+  };
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+    char *value = shape_meta_string(shape_path, keys[i]);
+    if (value) {
+      free(value);
+      return true;
+    }
+  }
+  return false;
+}
+
+/*
+ * Run the Nytrix side of one bench fixture: materialize the ny source, invoke
+ * the `bin` compiler on it (which compiles and runs, printing elapsed_ns), and
+ * collect the self-reported elapsed.
+ */
+static bench_stats_t bench_measure_ny(const char *bin, const char *shape_path,
+                                      const char *opt_level, const char *tier,
+                                      const char *engine, const char *target,
+                                      const char *compile_profile, int warmup, int runs,
+                                      int timeout_sec) {
+  char *ny_path = bench_materialize_ny(shape_path);
+  if (!ny_path)
+    return (bench_stats_t){.checksum_consistent = 1, .last_rc = 127};
+  char *argv[24];
+  char jit_arg[32];
+  int k = 0;
+  argv[k++] = (char *)bin;
+  if (tier && *tier && strcmp(tier, "opt") != 0)
+    argv[k++] = (char *)tier;
+  if (opt_level && *opt_level)
+    argv[k++] = (char *)bench_opt_for(opt_level);
+  if (compile_profile && *compile_profile)
+    ny_setenv("NYTRIX_OPT_PROFILE", compile_profile, 1);
+  bool native_jit = engine && strcmp(engine, "native") == 0;
+  bool use_jit = engine && strcmp(engine, "aot") != 0 && !native_jit;
+  if (native_jit) {
+    argv[k++] = "--native-only";
+    if (target && *target) {
+      argv[k++] = "--native-backend";
+      argv[k++] = (char *)target;
+    }
+  } else if (use_jit) {
+    argv[k++] = "--jit";
+    snprintf(jit_arg, sizeof(jit_arg), "--jit-engine=%s", engine);
+    argv[k++] = jit_arg;
+  } else if (target && *target) {
+    argv[k++] = "--native-backend";
+    argv[k++] = (char *)target;
+  }
+  argv[k++] = "-time";
+  if (!use_jit && !native_jit)
+    argv[k++] = "-run";
+  argv[k++] = (char *)ny_path;
+  argv[k] = NULL;
+  bench_stats_t s = bench_measure_self_timed(argv, timeout_sec, warmup, runs);
+  bench_measure_ny_code_size(bin, ny_path, opt_level, tier, engine, target,
+                             bench_shape_has_static_budget(shape_path),
+                             timeout_sec, &s);
+  remove(ny_path);
+  free(ny_path);
+  return s;
+}
+
+/*
+ * Build the leading Nytrix compiler argv given bench settings (opt/tier/backend).
+ * Appends the file path and trailing flags separately by callers.
+ */
+static int bench_ny_argv(char *argv[], const char *bin, const char *opt_level,
+                         const char *tier, const char *engine, const char *target) {
+  static char jit_arg[32];
+  int k = 0;
+  argv[k++] = (char *)bin;
+  if (tier && *tier && strcmp(tier, "opt") != 0)
+    argv[k++] = (char *)tier;
+  if (opt_level && *opt_level)
+    argv[k++] = (char *)bench_opt_for(opt_level);
+  bool native_jit = engine && strcmp(engine, "native") == 0;
+  if (native_jit) {
+    argv[k++] = "--native-only";
+    if (target && *target) {
+      argv[k++] = "--native-backend";
+      argv[k++] = (char *)target;
+    }
+  } else if (engine && strcmp(engine, "aot") != 0) {
+    argv[k++] = "--jit";
+    snprintf(jit_arg, sizeof(jit_arg), "--jit-engine=%s", engine);
+    argv[k++] = jit_arg;
+  } else if (target && *target) {
+    argv[k++] = "--native-backend";
+    argv[k++] = (char *)target;
+  }
+  return k;
+}
+
+/*
+ * Run one diagnostic compile.  The bench (opt/tier/backend) and `extra` flags
+ * precede the input file, since they are compiler options rather than program
+ * arguments.  Captures stdout+stderr to one temp file.  Returns the joined
+ * output as a heap string or NULL.
+ */
+static char *bench_diag_capture(const char *bin, const char *opt_level, const char *tier,
+                                const char *engine, const char *target, char *const extra[],
+                                const char *ny_path) {
+  char *argv[40];
+  int k = bench_ny_argv(argv, bin, opt_level, tier, engine, target);
+  for (int i = 0; extra && extra[i]; i++) {
+    if (k < 38)
+      argv[k++] = extra[i];
+  }
+  argv[k++] = (char *)ny_path;
+  argv[k] = NULL;
+  char tmp[PATH_MAX];
+  if (make_test_capture_tmp(tmp, sizeof(tmp), "benchdiag") < 0)
+    return NULL;
+  int rc = bench_run_capture(argv, NY_BENCH_TIMEOUT_SEC, tmp);
+  char *out = read_whole_file(tmp);
+  remove(tmp);
+  (void)rc;
+  return out;
+}
+
+/*
+ * Run and print a labeled diagnostic block for one fixture in bench mode.
+ */
+static void bench_diag(const char *shape, int show_ir, int show_asm, int show_passes,
+                       int profile, int compare_llvm, const char *bin, const char *opt_level,
+                       const char *tier, const char *engine, const char *target) {
+  char *ny_path = bench_materialize_ny(shape);
+  if (!ny_path)
+    return;
+  if (profile) {
+    char *extra[] = {"-prof", NULL};
+    char *out = bench_diag_capture(bin, opt_level, tier, engine, target, extra, ny_path);
+    if (out) {
+      printf("\n[phase profile: %s]\n", shape);
+      printf("%s\n", out);
+      free(out);
+    }
+  }
+  if (show_passes || show_ir) {
+    char *extra[3];
+    int n = 0;
+    extra[n++] = "--nyir-dump-stats";
+    if (show_ir)
+      extra[n++] = "--nyir-dump";
+    if (show_passes)
+      extra[n++] = "--nyir-pass-stats";
+    extra[n] = NULL;
+    char *out = bench_diag_capture(bin, opt_level, tier, engine, target, extra, ny_path);
+    if (out) {
+      printf("\n[NYIR/pass diagnostics: %s]\n", shape);
+      printf("%s\n", out);
+      free(out);
+    }
+  }
+  if (show_asm) {
+    char asm_tmp[PATH_MAX];
+    char flag[PATH_MAX + 32];
+    snprintf(asm_tmp, sizeof(asm_tmp), "%s/ny-bench-asm-%ld-%ld.s", nyt_temp_dir(),
+             (long)getpid(), (long)now_ms());
+    snprintf(flag, sizeof(flag), "--emit-asm=%s", asm_tmp);
+    char *extra[] = {flag, NULL};
+    char *out = bench_diag_capture(bin, opt_level, tier, engine, target, extra, ny_path);
+    char *asmout = read_whole_file(asm_tmp);
+    if (asmout) {
+      printf("\n[assembly: %s (%zu bytes)]\n", shape, strlen(asmout));
+      printf("%s\n", asmout);
+      free(asmout);
+      remove(asm_tmp);
+    }
+    free(out);
+  }
+  (void)compare_llvm;
+  remove(ny_path);
+  free(ny_path);
+}
+
+/*
+ * Run the C side of a c-vs-ny fixture: extract the C block, compile it with
+ * the host cc, and collect its self-reported elapsed.
+ */
+static bench_stats_t bench_measure_c(const char *shape_path, const char *opt_level, int warmup,
+                                     int runs, int timeout_sec) {
+  char *c_src = bench_c_block(shape_path);
+  if (!c_src)
+    return (bench_stats_t){.checksum_consistent = 1, .last_rc = 0};
+  char *cflags = shape_meta_string(shape_path, "cflags");
+  char exe[PATH_MAX];
+  snprintf(exe, sizeof(exe), "%s/ny-bench-c-exe-%ld-%ld", nyt_temp_dir(), (long)getpid(),
+           (long)now_ms());
+  if (!bench_compile_c(c_src, exe, opt_level, cflags)) {
+    free(cflags);
+    free(c_src);
+    remove(exe);
+    return (bench_stats_t){.checksum_consistent = 1, .last_rc = 127, .failure_count = 1};
+  }
+  free(cflags);
+  free(c_src);
+  char *argv[2];
+  argv[0] = exe;
+  argv[1] = NULL;
+  bench_stats_t s = bench_measure_self_timed(argv, timeout_sec, warmup, runs);
+  remove(exe);
+  return s;
+}
+#ifndef _WIN32
+static int bench_stats_write_fd(int fd, const bench_stats_t *stats) {
+  const unsigned char *p = (const unsigned char *)stats;
+  size_t left = sizeof(*stats);
+  while (left > 0) {
+    ssize_t n = write(fd, p, left);
+    if (n < 0 && errno == EINTR)
+      continue;
+    if (n <= 0)
+      return 0;
+    p += (size_t)n;
+    left -= (size_t)n;
+  }
+  return 1;
+}
+
+static int bench_stats_read_fd(int fd, bench_stats_t *stats) {
+  unsigned char *p = (unsigned char *)stats;
+  size_t left = sizeof(*stats);
+  while (left > 0) {
+    ssize_t n = read(fd, p, left);
+    if (n < 0 && errno == EINTR)
+      continue;
+    if (n <= 0)
+      return 0;
+    p += (size_t)n;
+    left -= (size_t)n;
+  }
+  return 1;
+}
+#endif
+
+typedef enum {
+  BENCH_COMPONENT_NY,
+  BENCH_COMPONENT_LLVM,
+  BENCH_COMPONENT_C,
+} bench_component_t;
+
+static bench_stats_t bench_measure_component(const char *bin, const char *shape,
+                                             const char *opt_level, const char *tier,
+                                             const char *engine, const char *target,
+                                             const char *compile_profile, int warmup, int runs,
+                                             int timeout_sec, bench_component_t component) {
+  if (component == BENCH_COMPONENT_C)
+    return bench_measure_c(shape, opt_level, warmup, runs, timeout_sec);
+  return bench_measure_ny(bin, shape, opt_level, tier, engine, target, compile_profile, warmup,
+                          runs, timeout_sec);
+}
+
+typedef struct {
+  double wall_ms;
+  bench_stats_t ny;
+  bench_stats_t llvm;
+  bench_stats_t c;
+} bench_worker_result_t;
+
+static bench_worker_result_t bench_measure_shape(const char *bin, const char *shape,
+                                                 const char *opt_level, const char *tier,
+                                                 const char *engine, const char *target,
+                                                 const char *compile_profile, int compare_llvm,
+                                                 int warmup, int runs, int timeout_sec) {
+  bench_worker_result_t result = {0};
+  double wall_start = now_ms();
+#ifndef _WIN32
+  int pipes[3][2] = {{-1, -1}, {-1, -1}, {-1, -1}};
+  pid_t pids[3] = {0};
+  bench_component_t components[3] = {BENCH_COMPONENT_NY, BENCH_COMPONENT_C,
+                                     BENCH_COMPONENT_C};
+  int component_count = 1;
+  if (compare_llvm)
+    components[component_count++] = BENCH_COMPONENT_LLVM;
+  components[component_count++] = BENCH_COMPONENT_C;
+  bool parallel_ok = true;
+  for (int i = 0; i < component_count; i++) {
+    if (pipe(pipes[i]) != 0) {
+      parallel_ok = false;
+      break;
+    }
+    pids[i] = fork();
+    if (pids[i] < 0) {
+      parallel_ok = false;
+      break;
+    }
+    if (pids[i] == 0) {
+      close(pipes[i][0]);
+      const char *component_target =
+          components[i] == BENCH_COMPONENT_LLVM ? "llvm" : target;
+      const char *component_engine =
+          components[i] == BENCH_COMPONENT_LLVM &&
+                  (!engine || strcmp(engine, "aot") == 0 ||
+                   strcmp(engine, "native") == 0)
+              ? "mcjit"
+              : engine;
+      bench_stats_t stats =
+          bench_measure_component(bin, shape, opt_level, tier, component_engine,
+                                  component_target, compile_profile, warmup, runs,
+                                  timeout_sec, components[i]);
+      (void)bench_stats_write_fd(pipes[i][1], &stats);
+      close(pipes[i][1]);
+      _exit(0);
+    }
+    close(pipes[i][1]);
+  }
+  if (parallel_ok) {
+    for (int i = 0; i < component_count; i++) {
+      bench_stats_t stats = {0};
+      bool read_ok = bench_stats_read_fd(pipes[i][0], &stats);
+      close(pipes[i][0]);
+      waitpid(pids[i], NULL, 0);
+      if (!read_ok)
+        continue;
+      if (components[i] == BENCH_COMPONENT_NY)
+        result.ny = stats;
+      else if (components[i] == BENCH_COMPONENT_LLVM)
+        result.llvm = stats;
+      else
+        result.c = stats;
+    }
+  } else {
+    for (int i = 0; i < component_count; i++) {
+      if (pids[i] > 0)
+        waitpid(pids[i], NULL, 0);
+      close(pipes[i][0]);
+      close(pipes[i][1]);
+    }
+  }
+  if (!parallel_ok) {
+#endif
+    result.ny = bench_measure_ny(bin, shape, opt_level, tier, engine, target,
+                                 compile_profile, warmup, runs, timeout_sec);
+    if (compare_llvm) {
+      const char *llvm_engine =
+          (!engine || strcmp(engine, "aot") == 0 || strcmp(engine, "native") == 0)
+              ? "mcjit"
+              : engine;
+      result.llvm = bench_measure_ny(bin, shape, opt_level, tier, llvm_engine, "llvm",
+                                     compile_profile, warmup, runs, timeout_sec);
+    }
+    result.c = bench_measure_c(shape, opt_level, warmup, runs, timeout_sec);
+#ifndef _WIN32
+  }
+#endif
+  result.wall_ms = now_ms() - wall_start;
+  return result;
+}
+
+#ifndef _WIN32
+static int bench_write_result(int fd, const bench_worker_result_t *result) {
+  const unsigned char *p = (const unsigned char *)result;
+  size_t left = sizeof(*result);
+  while (left > 0) {
+    ssize_t n = write(fd, p, left);
+    if (n < 0 && errno == EINTR)
+      continue;
+    if (n <= 0)
+      return 0;
+    p += (size_t)n;
+    left -= (size_t)n;
+  }
+  return 1;
+}
+
+static int bench_read_result(int fd, bench_worker_result_t *result) {
+  unsigned char *p = (unsigned char *)result;
+  size_t left = sizeof(*result);
+  while (left > 0) {
+    ssize_t n = read(fd, p, left);
+    if (n < 0 && errno == EINTR)
+      continue;
+    if (n <= 0)
+      return 0;
+    p += (size_t)n;
+    left -= (size_t)n;
+  }
+  return 1;
+}
+#endif
+
+static void bench_print_row(const BenchRow *r, int show_c, int show_llvm);
+
+static double bench_shape_budget(const char *shape, const char *key) {
+  char *raw = shape_meta_string(shape, key);
+  if (!raw || !*raw) {
+    free(raw);
+    return 0.0;
+  }
+  char *end = NULL;
+  double value = strtod(raw, &end);
+  while (end && *end && isspace((unsigned char)*end))
+    ++end;
+  bool ok = end && end != raw && *end == '\0' && value > 0.0;
+  free(raw);
+  return ok ? value : 0.0;
+}
+
+static size_t bench_shape_size_budget(const char *shape, const char *key) {
+  char *raw = shape_meta_string(shape, key);
+  if (!raw || !*raw) {
+    free(raw);
+    return 0;
+  }
+  errno = 0;
+  char *end = NULL;
+  unsigned long long value = strtoull(raw, &end, 10);
+  while (end && *end && isspace((unsigned char)*end))
+    ++end;
+  bool ok = errno == 0 && end && end != raw && *end == '\0' && value > 0 &&
+            value <= (unsigned long long)SIZE_MAX;
+  free(raw);
+  return ok ? (size_t)value : 0;
+}
+
+/*
+ * Unlike time/code-size budgets, static-island quality limits deliberately
+ * accept zero so fixtures can require allocation/helper/check-free optimized
+ * paths. The boolean return distinguishes an explicit zero from no metadata.
+ */
+static int bench_shape_size_limit(const char *shape, const char *key,
+                                  size_t *out) {
+  if (out)
+    *out = 0;
+  if (!out)
+    return 0;
+  char *raw = shape_meta_string(shape, key);
+  if (!raw || !*raw) {
+    free(raw);
+    return 0;
+  }
+  errno = 0;
+  char *end = NULL;
+  unsigned long long value = strtoull(raw, &end, 10);
+  while (end && *end && isspace((unsigned char)*end))
+    ++end;
+  bool ok = errno == 0 && end && end != raw && *end == '\0' &&
+            value <= (unsigned long long)SIZE_MAX;
+  free(raw);
+  if (!ok)
+    return 0;
+  *out = (size_t)value;
+  return 1;
+}
+
+static void bench_record_result(BenchTable *table, int *measured, int verbose,
+                                int show_ir, int show_asm, int show_passes, int profile,
+                                int compare_llvm, const char *bin, const char *opt_level,
+                                const char *tier, const char *engine, const char *target,
+                                const char *compile_profile, int warmup, int runs,
+                                int timeout_sec, const char *shape, const char *name,
+                                const bench_worker_result_t *result) {
+  if (show_ir || show_asm || show_passes || profile)
+    bench_diag(shape, show_ir, show_asm, show_passes, profile, compare_llvm, bin, opt_level,
+               tier, engine, target);
+  BenchRow row = {0};
+  snprintf(row.name, sizeof(row.name), "%s", name);
+  snprintf(row.path, sizeof(row.path), "%s", shape);
+  snprintf(row.backend, sizeof(row.backend), "%s",
+           engine && strcmp(engine, "aot") != 0 && strcmp(engine, "native") != 0
+               ? "llvm"
+               : (target && *target ? target : "host"));
+  snprintf(row.engine, sizeof(row.engine), "%s", engine && *engine ? engine : "aot");
+  snprintf(row.cache, sizeof(row.cache), "%s", bench_cache_state());
+  row.wall_ms = result->wall_ms;
+  row.ny_ms = result->ny.median;
+  row.ny_compile_ms = result->ny.compile_ms;
+  row.ny_jit_compile_ms = result->ny.jit_compile_ms;
+  row.ny_jit_run_ms = result->ny.jit_run_ms;
+  row.ny_opt_ms = result->ny.opt_ms;
+  row.ny_total_ms = result->ny.wall_ms;
+  row.ny_code_bytes = result->ny.code_bytes;
+  row.ny_code_bytes_seen = result->ny.code_bytes_seen;
+  row.ny_specialization_code_bytes = result->ny.specialization_code_bytes;
+  row.ny_specialization_code_functions = result->ny.specialization_code_functions;
+  row.ny_specialization_max_function_bytes =
+      result->ny.specialization_max_function_bytes;
+  row.ny_specialization_metrics_seen = result->ny.specialization_metrics_seen;
+  row.ny_peak_compiler_rss_kb = result->ny.peak_compiler_rss_kb;
+  row.ny_peak_compiler_rss_seen = result->ny.peak_compiler_rss_seen;
+  row.ny_runtime_calls = result->ny.runtime_calls;
+  row.ny_dynamic_ops = result->ny.dynamic_ops;
+  row.ny_tag_checks = result->ny.tag_checks;
+  row.ny_box_unbox = result->ny.box_unbox;
+  row.ny_heap_allocations = result->ny.heap_allocations;
+  row.ny_bounds_checks = result->ny.bounds_checks;
+  row.ny_direct_calls = result->ny.direct_calls;
+  row.ny_indirect_calls = result->ny.indirect_calls;
+  row.ny_unknown_effects = result->ny.unknown_effects;
+  row.ny_alias_unresolved = result->ny.alias_unresolved;
+  row.ny_vector_attempted = result->ny.vector_attempted;
+  row.ny_vector_rejected = result->ny.vector_rejected;
+  row.ny_vectorized = result->ny.vectorized;
+  row.ny_spills = result->ny.spills;
+  row.ny_reloads = result->ny.reloads;
+  row.ny_static_metrics_seen = result->ny.static_metrics_seen;
+  row.ny_hw_cycles = result->ny.hw_cycles;
+  row.ny_hw_instructions = result->ny.hw_instructions;
+  row.ny_hw_branches = result->ny.hw_branches;
+  row.ny_hw_branch_misses = result->ny.hw_branch_misses;
+  row.ny_hw_cache_misses = result->ny.hw_cache_misses;
+  row.ny_hw_counters_seen = result->ny.hw_counters_seen;
+  row.ny_runtime_alloc_count = result->ny.runtime_alloc_count;
+  row.ny_runtime_realloc_count = result->ny.runtime_realloc_count;
+  row.ny_runtime_counters_seen = result->ny.runtime_counters_seen;
+  row.ny_runs = (int)result->ny.count;
+  row.ny_rc = result->ny.last_rc;
+  row.ny_failures = result->ny.failure_count;
+  row.ny_min = result->ny.min;
+  row.ny_max = result->ny.max;
+  row.ny_p95 = result->ny.p95;
+  row.ny_dispersion_pct = result->ny.dispersion_pct;
+  row.ny_noise_pct = result->ny.noise_pct;
+  row.ny_unstable = result->ny.unstable;
+  row.llvm_ms = result->llvm.median;
+  row.llvm_total_ms = result->llvm.wall_ms;
+  row.llvm_runs = (int)result->llvm.count;
+  row.llvm_rc = result->llvm.last_rc;
+  row.llvm_failures = result->llvm.failure_count;
+  row.llvm_min = result->llvm.min;
+  row.llvm_max = result->llvm.max;
+  row.llvm_p95 = result->llvm.p95;
+  row.llvm_dispersion_pct = result->llvm.dispersion_pct;
+  row.llvm_noise_pct = result->llvm.noise_pct;
+  row.llvm_unstable = result->llvm.unstable;
+  row.c_ms = result->c.median;
+  row.c_total_ms = result->c.wall_ms;
+  row.c_runs = (int)result->c.count;
+  row.c_rc = result->c.last_rc;
+  row.c_failures = result->c.failure_count;
+  row.c_min = result->c.min;
+  row.c_max = result->c.max;
+  row.c_p95 = result->c.p95;
+  row.c_dispersion_pct = result->c.dispersion_pct;
+  row.c_noise_pct = result->c.noise_pct;
+  row.c_unstable = result->c.unstable;
+  row.native_c_budget = bench_shape_budget(shape, "max_native_c_ratio");
+  row.native_llvm_budget = bench_shape_budget(shape, "max_native_llvm_ratio");
+  row.compile_ms_budget = bench_shape_budget(shape, "max_ny_compile_ms");
+  row.code_bytes_budget = bench_shape_size_budget(shape, "max_ny_code_bytes");
+  row.specialization_code_bytes_budget =
+      bench_shape_size_budget(shape, "max_ny_specialization_code_bytes");
+  row.specialization_function_bytes_budget =
+      bench_shape_size_budget(shape, "max_ny_specialization_function_bytes");
+  row.compiler_rss_budget_kb =
+      bench_shape_size_budget(shape, "max_ny_peak_compiler_rss_kb");
+  if (bench_shape_size_limit(shape, "max_ny_heap_allocations",
+                             &row.heap_allocations_budget))
+    row.static_budget_mask |= 1u << 0;
+  if (bench_shape_size_limit(shape, "max_ny_runtime_calls",
+                             &row.runtime_calls_budget))
+    row.static_budget_mask |= 1u << 1;
+  if (bench_shape_size_limit(shape, "max_ny_bounds_checks",
+                             &row.bounds_checks_budget))
+    row.static_budget_mask |= 1u << 2;
+  if (bench_shape_size_limit(shape, "max_ny_indirect_calls",
+                             &row.indirect_calls_budget))
+    row.static_budget_mask |= 1u << 3;
+  if (bench_shape_size_limit(shape, "max_ny_unknown_effects",
+                             &row.unknown_effects_budget))
+    row.static_budget_mask |= 1u << 4;
+  if (bench_shape_size_limit(shape, "max_ny_alias_unresolved",
+                             &row.alias_unresolved_budget))
+    row.static_budget_mask |= 1u << 5;
+  if (bench_shape_size_limit(shape, "max_ny_spills", &row.spills_budget))
+    row.static_budget_mask |= 1u << 6;
+  if (bench_shape_size_limit(shape, "max_ny_reloads", &row.reloads_budget))
+    row.static_budget_mask |= 1u << 7;
+  if (row.native_c_budget > 0.0 && row.ny_runs > 0 && row.c_runs > 0 &&
+      row.ny_ms >= 0.01 && row.c_ms >= 0.01 &&
+      row.ny_ms / row.c_ms > row.native_c_budget)
+    row.budget_failed = 1;
+  if (row.native_llvm_budget > 0.0 && row.ny_runs > 0 && row.llvm_runs > 0 &&
+      row.ny_ms >= 0.01 && row.llvm_ms >= 0.01 &&
+      row.ny_ms / row.llvm_ms > row.native_llvm_budget)
+    row.budget_failed = 1;
+  if (row.compile_ms_budget > 0.0 && row.ny_compile_ms > row.compile_ms_budget)
+    row.budget_failed = 1;
+  if (row.code_bytes_budget > 0 && row.ny_code_bytes_seen &&
+      row.ny_code_bytes > row.code_bytes_budget)
+    row.budget_failed = 1;
+  if ((row.specialization_code_bytes_budget > 0 ||
+       row.specialization_function_bytes_budget > 0) &&
+      !row.ny_specialization_metrics_seen)
+    row.budget_failed = 1;
+  if (row.specialization_code_bytes_budget > 0 &&
+      row.ny_specialization_code_bytes > row.specialization_code_bytes_budget)
+    row.budget_failed = 1;
+  if (row.specialization_function_bytes_budget > 0 &&
+      row.ny_specialization_max_function_bytes >
+          row.specialization_function_bytes_budget)
+    row.budget_failed = 1;
+  if (row.compiler_rss_budget_kb > 0 && row.ny_peak_compiler_rss_seen &&
+      row.ny_peak_compiler_rss_kb > row.compiler_rss_budget_kb)
+    row.budget_failed = 1;
+  if (row.static_budget_mask && !row.ny_static_metrics_seen)
+    row.budget_failed = 1;
+  if ((row.static_budget_mask & (1u << 0)) &&
+      row.ny_heap_allocations > row.heap_allocations_budget)
+    row.budget_failed = 1;
+  if ((row.static_budget_mask & (1u << 1)) &&
+      row.ny_runtime_calls > row.runtime_calls_budget)
+    row.budget_failed = 1;
+  if ((row.static_budget_mask & (1u << 2)) &&
+      row.ny_bounds_checks > row.bounds_checks_budget)
+    row.budget_failed = 1;
+  if ((row.static_budget_mask & (1u << 3)) &&
+      row.ny_indirect_calls > row.indirect_calls_budget)
+    row.budget_failed = 1;
+  if ((row.static_budget_mask & (1u << 4)) &&
+      row.ny_unknown_effects > row.unknown_effects_budget)
+    row.budget_failed = 1;
+  if ((row.static_budget_mask & (1u << 5)) &&
+      row.ny_alias_unresolved > row.alias_unresolved_budget)
+    row.budget_failed = 1;
+  if ((row.static_budget_mask & (1u << 6)) && row.ny_spills > row.spills_budget)
+    row.budget_failed = 1;
+  if ((row.static_budget_mask & (1u << 7)) && row.ny_reloads > row.reloads_budget)
+    row.budget_failed = 1;
+  row.checksum_ok = 1;
+  if (result->ny.checksum_seen)
+    snprintf(row.ny_checksum, sizeof(row.ny_checksum), "%s", result->ny.checksum);
+  if (result->llvm.checksum_seen)
+    snprintf(row.llvm_checksum, sizeof(row.llvm_checksum), "%s", result->llvm.checksum);
+  if (result->c.checksum_seen)
+    snprintf(row.c_checksum, sizeof(row.c_checksum), "%s", result->c.checksum);
+  const bench_stats_t *stats[] = {&result->ny, &result->llvm, &result->c};
+  const char *reference = NULL;
+  for (size_t i = 0; i < sizeof(stats) / sizeof(stats[0]); i++) {
+    const bench_stats_t *s = stats[i];
+    if (!s->checksum_seen)
+      continue;
+    if (!reference)
+      reference = s->checksum;
+    else if (strcmp(reference, s->checksum) != 0)
+      row.checksum_ok = 0;
+    if (!s->checksum_consistent)
+      row.checksum_ok = 0;
+  }
+  if (reference)
+    snprintf(row.checksum, sizeof(row.checksum), "%s", reference);
+  if (row.ny_runs > 0 || row.llvm_runs > 0 || row.c_runs > 0 ||
+      row.ny_rc == 0 || row.llvm_rc == 0 || row.c_rc == 0) {
+    (*measured)++;
+  }
+  bench_rows_push(table, &row);
+  bench_print_row(&row, 1, compare_llvm);
+  (void)verbose;
+  (void)compile_profile;
+  (void)warmup;
+  (void)runs;
+  (void)timeout_sec;
+}
+
+
+/*
+ * Reporting
+ */
+
+static const char *bench_ratio_color(double ratio) {
+  if (ratio > 0.0 && ratio <= 1.0)
+    return NYT_GREEN;
+  if (ratio > 1.5)
+    return NYT_RED;
+  return NYT_YELLOW;
+}
+
+static int bench_signal(double value) {
+  return value >= 0.01;
+}
+
+static int bench_row_unstable(const BenchRow *r) {
+  return r && (r->ny_unstable || r->llvm_unstable || r->c_unstable);
+}
+
+static void bench_ms_text(double value, int valid, char *out, size_t cap) {
+  if (!valid)
+    snprintf(out, cap, "n/a");
+  else if (!bench_signal(value))
+    snprintf(out, cap, "<0.010ms");
+  else
+    snprintf(out, cap, "%.3fms", value);
+}
+
+static void bench_print_ratio(double ratio, int valid) {
+  if (!valid) {
+    printf("%7s", "n/a");
+    return;
+  }
+  char value[32];
+  snprintf(value, sizeof(value), "%.2fx", ratio);
+  int pad = 7 - (int)strlen(value);
+  printf("%*s%s%s%s", pad > 0 ? pad : 0, "", nyt_clr(bench_ratio_color(ratio)), value,
+         nyt_clr(NYT_RESET));
+}
+
+static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
+  char compile[32], opt[32], native[32], llvm[32], c_host[32], wall[32];
+  bench_ms_text(r->ny_compile_ms, bench_signal(r->ny_compile_ms), compile, sizeof(compile));
+  bench_ms_text(r->ny_opt_ms, bench_signal(r->ny_opt_ms), opt, sizeof(opt));
+  bench_ms_text(r->ny_ms, r->ny_runs > 0, native, sizeof(native));
+  bench_ms_text(r->llvm_ms, r->llvm_runs > 0, llvm, sizeof(llvm));
+  bench_ms_text(r->c_ms, r->c_runs > 0, c_host, sizeof(c_host));
+  bench_ms_text(r->wall_ms, r->wall_ms > 0.0, wall, sizeof(wall));
+  int native_ratio_valid = show_c && r->c_runs > 0 && bench_signal(r->ny_ms) &&
+                           bench_signal(r->c_ms);
+  int llvm_ratio_valid = show_llvm && r->c_runs > 0 && r->llvm_runs > 0 &&
+                         bench_signal(r->llvm_ms) && bench_signal(r->c_ms);
+  double native_ratio = native_ratio_valid ? r->ny_ms / r->c_ms : 0.0;
+  double llvm_ratio = llvm_ratio_valid ? r->llvm_ms / r->c_ms : 0.0;
+  int common_runs = r->ny_runs > 0 ? r->ny_runs :
+                    (r->llvm_runs > 0 ? r->llvm_runs : r->c_runs);
+  if (r->c_runs > 0 && r->c_runs < common_runs)
+    common_runs = r->c_runs;
+  if (r->llvm_runs > 0 && r->llvm_runs < common_runs)
+    common_runs = r->llvm_runs;
+  const char *status =
+      (r->ny_failures || r->llvm_failures || r->c_failures) ? "FAIL"
+      : (r->budget_failed ? "REGRESS" : (bench_row_unstable(r) ? "NOISY" : "ok"));
+  printf("%-22s %-8s %-7s %-10s %-8s %-11s %-11s %-11s %-11s %-11s %-11s ",
+         r->name, r->backend, r->engine, r->cache, status, compile, opt, native, llvm, c_host,
+         wall);
+  bench_print_ratio(native_ratio, native_ratio_valid);
+  printf(" ");
+  bench_print_ratio(llvm_ratio, llvm_ratio_valid);
+  printf(" %4d checksum=%s|%s|%s%s", common_runs,
+         r->ny_checksum[0] ? r->ny_checksum : "n/a",
+         r->llvm_checksum[0] ? r->llvm_checksum : "n/a",
+         r->c_checksum[0] ? r->c_checksum : "n/a", r->checksum_ok ? "" : " (MISMATCH)");
+  if (strcmp(r->engine, "native") == 0)
+    printf(" jit_compile=%.3fms jit_run=%.3fms", r->ny_jit_compile_ms,
+           r->ny_jit_run_ms);
+  if (r->ny_code_bytes_seen)
+    printf(" code=%zub", r->ny_code_bytes);
+  if (r->ny_specialization_metrics_seen)
+    printf(" mono=functions:%zu,bytes:%zu,max:%zu",
+           r->ny_specialization_code_functions, r->ny_specialization_code_bytes,
+           r->ny_specialization_max_function_bytes);
+  if (r->ny_peak_compiler_rss_seen)
+    printf(" compile_peak_rss=%zuKiB", r->ny_peak_compiler_rss_kb);
+  if (r->ny_static_metrics_seen)
+    printf(" static=alloc:%zu,rt:%zu,bce:%zu,dyn:%zu,ind:%zu,alias?:%zu,spill:%zu,reload:%zu",
+           r->ny_heap_allocations, r->ny_runtime_calls, r->ny_bounds_checks,
+           r->ny_dynamic_ops, r->ny_indirect_calls, r->ny_alias_unresolved,
+           r->ny_spills, r->ny_reloads);
+  if (r->ny_runtime_counters_seen)
+    printf(" runtime=alloc:%zu,realloc:%zu", r->ny_runtime_alloc_count,
+           r->ny_runtime_realloc_count);
+  if (r->ny_hw_counters_seen)
+    printf(" hw=cycles:%" PRIu64 ",insns:%" PRIu64 ",branch-miss:%" PRIu64 ",cache-miss:%" PRIu64,
+           r->ny_hw_cycles, r->ny_hw_instructions, r->ny_hw_branch_misses,
+           r->ny_hw_cache_misses);
+  if (r->native_c_budget > 0.0)
+    printf(" budget(native/C<=%.2fx)", r->native_c_budget);
+  if (r->compile_ms_budget > 0.0)
+    printf(" budget(compile<=%.2fms)", r->compile_ms_budget);
+  if (r->code_bytes_budget > 0)
+    printf(" budget(code<=%zub)", r->code_bytes_budget);
+  if (r->specialization_code_bytes_budget > 0)
+    printf(" budget(mono-bytes<=%zub)", r->specialization_code_bytes_budget);
+  if (r->specialization_function_bytes_budget > 0)
+    printf(" budget(mono-fn<=%zub)", r->specialization_function_bytes_budget);
+  if (r->compiler_rss_budget_kb > 0)
+    printf(" budget(rss<=%zuKiB)", r->compiler_rss_budget_kb);
+  if (r->native_llvm_budget > 0.0)
+    printf(" budget(native/LLVM<=%.2fx)", r->native_llvm_budget);
+  if (r->static_budget_mask & (1u << 0))
+    printf(" budget(alloc<=%zu)", r->heap_allocations_budget);
+  if (r->static_budget_mask & (1u << 1))
+    printf(" budget(rt<=%zu)", r->runtime_calls_budget);
+  if (r->static_budget_mask & (1u << 2))
+    printf(" budget(bce<=%zu)", r->bounds_checks_budget);
+  if (r->static_budget_mask & (1u << 3))
+    printf(" budget(indirect<=%zu)", r->indirect_calls_budget);
+  if (r->static_budget_mask & (1u << 4))
+    printf(" budget(unknown-effects<=%zu)", r->unknown_effects_budget);
+  if (r->static_budget_mask & (1u << 5))
+    printf(" budget(alias-unresolved<=%zu)", r->alias_unresolved_budget);
+  if (r->static_budget_mask & (1u << 6))
+    printf(" budget(spills<=%zu)", r->spills_budget);
+  if (r->static_budget_mask & (1u << 7))
+    printf(" budget(reloads<=%zu)", r->reloads_budget);
+  printf("\n");
+}
+static void bench_print_hotspots(const BenchTable *t) {
+  if (!t || t->len == 0)
+    return;
+  const BenchRow *compile = NULL;
+  const BenchRow *opt = NULL;
+  const BenchRow *runtime = NULL;
+  const BenchRow *ratio = NULL;
+  const BenchRow *llvm_gap = NULL;
+  for (size_t i = 0; i < t->len; i++) {
+    const BenchRow *r = &t->items[i];
+    if (bench_signal(r->ny_compile_ms) &&
+        (!compile || r->ny_compile_ms > compile->ny_compile_ms))
+      compile = r;
+    if (bench_signal(r->ny_opt_ms) && (!opt || r->ny_opt_ms > opt->ny_opt_ms))
+      opt = r;
+    if (bench_signal(r->ny_ms) && (!runtime || r->ny_ms > runtime->ny_ms))
+      runtime = r;
+    if (r->c_runs > 0 && bench_signal(r->ny_ms) && bench_signal(r->c_ms) &&
+        (!ratio || r->ny_ms / r->c_ms > ratio->ny_ms / ratio->c_ms))
+      ratio = r;
+    if (r->llvm_runs > 0 && bench_signal(r->ny_ms) && bench_signal(r->llvm_ms) &&
+        (!llvm_gap || r->ny_ms / r->llvm_ms > llvm_gap->ny_ms / llvm_gap->llvm_ms))
+      llvm_gap = r;
+  }
+  printf("\n%sSlowest observed paths:%s compile=%s, opt=%s, runtime=%s\n",
+         nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), compile ? compile->name : "n/a",
+         opt ? opt->name : "n/a", runtime ? runtime->name : "n/a");
+  if (ratio)
+    printf("%slargest native/C gap:%s %s (%.2fx)\n", nyt_clr(NYT_BOLD),
+           nyt_clr(NYT_RESET), ratio->name, ratio->ny_ms / ratio->c_ms);
+  else
+    printf("%slargest native/C gap:%s n/a (low-signal or missing C baseline)\n",
+           nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
+  if (llvm_gap)
+    printf("%slargest native/LLVM gap:%s %s (%.2fx)\n", nyt_clr(NYT_BOLD),
+           nyt_clr(NYT_RESET), llvm_gap->name, llvm_gap->ny_ms / llvm_gap->llvm_ms);
+  else
+    printf("%slargest native/LLVM gap:%s n/a (low-signal or missing LLVM baseline)\n",
+           nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
+}
+
+
+static void bench_write_csv(FILE *f, const BenchTable *t) {
+  fprintf(f, "benchmark,backend,engine,cache,status,checksum,ny_checksum,llvm_checksum,c_checksum,checksum_ok,ny_native_ms,ny_compile_ms,ny_opt_ms,ny_total_ms,ny_code_bytes,ny_code_bytes_seen,ny_specialization_code_bytes,ny_specialization_code_functions,ny_specialization_max_function_bytes,ny_specialization_metrics_seen,ny_peak_compiler_rss_kb,ny_peak_compiler_rss_seen,ny_llvm_ms,llvm_total_ms,c_ms,c_total_ms,driver_wall_ms,native_ratio,llvm_ratio,ny_rc,llvm_rc,c_rc,ny_failures,llvm_failures,c_failures,ny_runs,llvm_runs,c_runs,ny_min,ny_max,ny_p95,ny_dispersion_pct,ny_noise_pct,ny_unstable,llvm_min,llvm_max,llvm_p95,llvm_dispersion_pct,llvm_noise_pct,llvm_unstable,c_min,c_max,c_p95,c_dispersion_pct,c_noise_pct,c_unstable,native_c_budget,native_llvm_budget,compile_ms_budget,code_bytes_budget,specialization_code_bytes_budget,specialization_function_bytes_budget,compiler_rss_budget_kb,ny_static_metrics_seen,ny_runtime_calls,ny_dynamic_ops,ny_tag_checks,ny_box_unbox,ny_heap_allocations,ny_bounds_checks,ny_direct_calls,ny_indirect_calls,ny_unknown_effects,ny_alias_unresolved,ny_vector_attempted,ny_vector_rejected,ny_vectorized,ny_spills,ny_reloads,ny_hw_counters_seen,ny_hw_cycles,ny_hw_instructions,ny_hw_branches,ny_hw_branch_misses,ny_hw_cache_misses,ny_runtime_counters_seen,ny_runtime_alloc_count,ny_runtime_realloc_count,static_budget_mask,heap_allocations_budget,runtime_calls_budget,bounds_checks_budget,indirect_calls_budget,unknown_effects_budget,alias_unresolved_budget,spills_budget,reloads_budget,budget_failed\n");
+  for (size_t i = 0; i < t->len; i++) {
+    const BenchRow *r = &t->items[i];
+    double native_ratio = (r->c_ms > 0.0) ? r->ny_ms / r->c_ms : 0.0;
+    double llvm_ratio = (r->c_ms > 0.0) ? r->llvm_ms / r->c_ms : 0.0;
+    const char *status = (r->ny_failures || r->llvm_failures || r->c_failures) ? "fail"
+                         : (r->budget_failed ? "regression" : (bench_row_unstable(r) ? "unstable" : "ok"));
+    fprintf(f,
+            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,"
+            "%.4f,%.4f,%.4f,%.4f,%zu,%d,%zu,%zu,%zu,%d,%zu,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
+            "%d,%d,%d,%d,%d,%d,%d,%d,%d,"
+            "%.4f,%.4f,%.4f,%.4f,%.4f,%d,"
+            "%.4f,%.4f,%.4f,%.4f,%.4f,%d,"
+            "%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%zu,%zu,%zu,%zu,"
+            "%d,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,"
+            "%d,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+            "%d,%zu,%zu,"
+            "%u,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%d\n",
+            r->name, r->backend, r->engine, r->cache, status, r->checksum,
+            r->ny_checksum, r->llvm_checksum, r->c_checksum, r->checksum_ok,
+            r->ny_ms, r->ny_compile_ms, r->ny_opt_ms, r->ny_total_ms,
+            r->ny_code_bytes, r->ny_code_bytes_seen,
+            r->ny_specialization_code_bytes, r->ny_specialization_code_functions,
+            r->ny_specialization_max_function_bytes, r->ny_specialization_metrics_seen,
+            r->ny_peak_compiler_rss_kb, r->ny_peak_compiler_rss_seen, r->llvm_ms,
+            r->llvm_total_ms, r->c_ms, r->c_total_ms, r->wall_ms, native_ratio, llvm_ratio,
+            r->ny_rc, r->llvm_rc, r->c_rc, r->ny_failures, r->llvm_failures, r->c_failures,
+            r->ny_runs, r->llvm_runs, r->c_runs,
+            r->ny_min, r->ny_max, r->ny_p95, r->ny_dispersion_pct, r->ny_noise_pct,
+            r->ny_unstable, r->llvm_min, r->llvm_max, r->llvm_p95,
+            r->llvm_dispersion_pct, r->llvm_noise_pct, r->llvm_unstable, r->c_min, r->c_max,
+            r->c_p95, r->c_dispersion_pct, r->c_noise_pct, r->c_unstable,
+            r->native_c_budget, r->native_llvm_budget, r->compile_ms_budget,
+            r->code_bytes_budget, r->specialization_code_bytes_budget,
+            r->specialization_function_bytes_budget, r->compiler_rss_budget_kb,
+            r->ny_static_metrics_seen, r->ny_runtime_calls, r->ny_dynamic_ops,
+            r->ny_tag_checks, r->ny_box_unbox, r->ny_heap_allocations,
+            r->ny_bounds_checks, r->ny_direct_calls, r->ny_indirect_calls,
+            r->ny_unknown_effects, r->ny_alias_unresolved, r->ny_vector_attempted,
+            r->ny_vector_rejected, r->ny_vectorized, r->ny_spills, r->ny_reloads,
+            r->ny_hw_counters_seen, r->ny_hw_cycles, r->ny_hw_instructions,
+            r->ny_hw_branches, r->ny_hw_branch_misses, r->ny_hw_cache_misses,
+            r->ny_runtime_counters_seen, r->ny_runtime_alloc_count,
+            r->ny_runtime_realloc_count, r->static_budget_mask,
+            r->heap_allocations_budget,
+            r->runtime_calls_budget, r->bounds_checks_budget,
+            r->indirect_calls_budget, r->unknown_effects_budget,
+            r->alias_unresolved_budget, r->spills_budget, r->reloads_budget,
+            r->budget_failed);
+  }
+}
+
+static void bench_write_json(FILE *f, const BenchTable *t, const BenchEnvironment *env) {
+  fprintf(f, "{\n");
+  if (env) {
+    fprintf(f,
+            "  \"environment\": {\"os\":\"%s\",\"arch\":\"%s\","
+            "\"cpu_model\":\"%s\",\"target\":\"%s\",\"target_features\":\"%s\","
+            "\"c_compiler\":\"%s\",\"c_compiler_version\":\"%s\","
+            "\"c_flags\":\"%s\",\"compiler_revision\":\"%s\"},\n",
+            env->os, env->arch, env->cpu_model, env->target, env->target_features,
+            env->c_compiler, env->c_compiler_version, env->c_flags, env->compiler_revision);
+  }
+  fprintf(f, "  \"noise_threshold_pct\": %.3f,\n", bench_noise_limit_pct());
+  fprintf(f, "  \"benchmarks\": [\n");
+  for (size_t i = 0; i < t->len; i++) {
+    const BenchRow *r = &t->items[i];
+    double native_ratio = (r->c_ms > 0.0) ? r->ny_ms / r->c_ms : 0.0;
+    double llvm_ratio = (r->c_ms > 0.0) ? r->llvm_ms / r->c_ms : 0.0;
+    const char *status = (r->ny_failures || r->llvm_failures || r->c_failures) ? "fail"
+                         : (r->budget_failed ? "regression" : (bench_row_unstable(r) ? "unstable" : "ok"));
+    fprintf(f,
+            "    {\"name\":\"%s\",\"backend\":\"%s\",\"engine\":\"%s\","
+            "\"cache\":\"%s\",\"status\":\"%s\",\"checksum\":\"%s\","
+            "\"ny_checksum\":\"%s\",\"llvm_checksum\":\"%s\",\"c_checksum\":\"%s\","
+            "\"checksum_ok\":%s,",
+            r->name, r->backend, r->engine, r->cache, status, r->checksum, r->ny_checksum,
+            r->llvm_checksum, r->c_checksum, r->checksum_ok ? "true" : "false");
+    fprintf(f,
+            "\"ny_native_ms\":%.4f,\"ny_compile_ms\":%.4f,\"ny_opt_ms\":%.4f,"
+            "\"ny_total_ms\":%.4f,\"ny_code_bytes\":%zu,\"ny_code_bytes_seen\":%s,"
+            "\"ny_specialization_code_bytes\":%zu,\"ny_specialization_code_functions\":%zu,"
+            "\"ny_specialization_max_function_bytes\":%zu,\"ny_specialization_metrics_seen\":%s,"
+            "\"ny_peak_compiler_rss_kb\":%zu,\"ny_peak_compiler_rss_seen\":%s,"
+            "\"ny_static_metrics_seen\":%s,\"ny_runtime_calls\":%zu,"
+            "\"ny_dynamic_ops\":%zu,\"ny_tag_checks\":%zu,"
+            "\"ny_box_unbox\":%zu,\"ny_heap_allocations\":%zu,"
+            "\"ny_bounds_checks\":%zu,\"ny_direct_calls\":%zu,"
+            "\"ny_indirect_calls\":%zu,\"ny_unknown_effects\":%zu,"
+            "\"ny_alias_unresolved\":%zu,\"ny_vector_attempted\":%zu,"
+            "\"ny_vector_rejected\":%zu,\"ny_vectorized\":%zu,"
+            "\"ny_spills\":%zu,\"ny_reloads\":%zu,"
+            "\"ny_hw_counters_seen\":%s,\"ny_hw_cycles\":%" PRIu64 ","
+            "\"ny_hw_instructions\":%" PRIu64 ",\"ny_hw_branches\":%" PRIu64 ","
+            "\"ny_hw_branch_misses\":%" PRIu64 ",\"ny_hw_cache_misses\":%" PRIu64 ","
+            "\"ny_runtime_counters_seen\":%s,\"ny_runtime_alloc_count\":%zu,"
+            "\"ny_runtime_realloc_count\":%zu,"
+            "\"ny_llvm_ms\":%.4f,\"llvm_total_ms\":%.4f,"
+            "\"c_ms\":%.4f,\"c_total_ms\":%.4f,\"driver_wall_ms\":%.4f,"
+            "\"native_ratio\":%.4f,\"llvm_ratio\":%.4f,",
+            r->ny_ms, r->ny_compile_ms, r->ny_opt_ms, r->ny_total_ms,
+            r->ny_code_bytes, r->ny_code_bytes_seen ? "true" : "false",
+            r->ny_specialization_code_bytes, r->ny_specialization_code_functions,
+            r->ny_specialization_max_function_bytes,
+            r->ny_specialization_metrics_seen ? "true" : "false",
+            r->ny_peak_compiler_rss_kb, r->ny_peak_compiler_rss_seen ? "true" : "false",
+            r->ny_static_metrics_seen ? "true" : "false", r->ny_runtime_calls,
+            r->ny_dynamic_ops, r->ny_tag_checks, r->ny_box_unbox,
+            r->ny_heap_allocations, r->ny_bounds_checks, r->ny_direct_calls,
+            r->ny_indirect_calls, r->ny_unknown_effects, r->ny_alias_unresolved,
+            r->ny_vector_attempted, r->ny_vector_rejected, r->ny_vectorized,
+            r->ny_spills, r->ny_reloads, r->ny_hw_counters_seen ? "true" : "false",
+            r->ny_hw_cycles, r->ny_hw_instructions, r->ny_hw_branches,
+            r->ny_hw_branch_misses, r->ny_hw_cache_misses,
+            r->ny_runtime_counters_seen ? "true" : "false",
+            r->ny_runtime_alloc_count, r->ny_runtime_realloc_count, r->llvm_ms,
+            r->llvm_total_ms, r->c_ms,
+            r->c_total_ms, r->wall_ms, native_ratio, llvm_ratio);
+    fprintf(f,
+            "\"ny_rc\":%d,\"llvm_rc\":%d,\"c_rc\":%d,\"ny_failures\":%d,"
+            "\"llvm_failures\":%d,\"c_failures\":%d,\"ny_runs\":%d,"
+            "\"llvm_runs\":%d,\"c_runs\":%d,",
+            r->ny_rc, r->llvm_rc, r->c_rc, r->ny_failures, r->llvm_failures, r->c_failures,
+            r->ny_runs, r->llvm_runs, r->c_runs);
+    fprintf(f,
+            "\"ny_min\":%.4f,\"ny_max\":%.4f,\"ny_p95\":%.4f,"
+            "\"ny_dispersion_pct\":%.4f,\"ny_noise_pct\":%.4f,\"ny_unstable\":%s,"
+            "\"llvm_min\":%.4f,\"llvm_max\":%.4f,\"llvm_p95\":%.4f,"
+            "\"llvm_dispersion_pct\":%.4f,\"llvm_noise_pct\":%.4f,\"llvm_unstable\":%s,"
+            "\"c_min\":%.4f,\"c_max\":%.4f,\"c_p95\":%.4f,"
+            "\"c_dispersion_pct\":%.4f,\"c_noise_pct\":%.4f,\"c_unstable\":%s,"
+            "\"native_c_budget\":%.4f,\"native_llvm_budget\":%.4f,"
+            "\"compile_ms_budget\":%.4f,\"code_bytes_budget\":%zu,"
+            "\"specialization_code_bytes_budget\":%zu,"
+            "\"specialization_function_bytes_budget\":%zu,"
+            "\"compiler_rss_budget_kb\":%zu,\"static_budget_mask\":%u,"
+            "\"heap_allocations_budget\":%zu,\"runtime_calls_budget\":%zu,"
+            "\"bounds_checks_budget\":%zu,\"indirect_calls_budget\":%zu,"
+            "\"unknown_effects_budget\":%zu,\"alias_unresolved_budget\":%zu,"
+            "\"spills_budget\":%zu,\"reloads_budget\":%zu,"
+            "\"budget_failed\":%s}%s\n",
+            r->ny_min, r->ny_max, r->ny_p95, r->ny_dispersion_pct, r->ny_noise_pct,
+            r->ny_unstable ? "true" : "false", r->llvm_min, r->llvm_max, r->llvm_p95,
+            r->llvm_dispersion_pct, r->llvm_noise_pct, r->llvm_unstable ? "true" : "false",
+            r->c_min, r->c_max, r->c_p95, r->c_dispersion_pct, r->c_noise_pct,
+            r->c_unstable ? "true" : "false", r->native_c_budget, r->native_llvm_budget,
+            r->compile_ms_budget, r->code_bytes_budget,
+            r->specialization_code_bytes_budget,
+            r->specialization_function_bytes_budget, r->compiler_rss_budget_kb,
+            r->static_budget_mask, r->heap_allocations_budget,
+            r->runtime_calls_budget, r->bounds_checks_budget,
+            r->indirect_calls_budget, r->unknown_effects_budget,
+            r->alias_unresolved_budget, r->spills_budget, r->reloads_budget,
+            r->budget_failed ? "true" : "false", (i + 1 < t->len) ? "," : "");
+  }
+  fprintf(f, "  ]\n}\n");
+}
+
+static void bench_write_md(FILE *f, const BenchTable *t, const BenchEnvironment *env) {
+  if (env) {
+    fprintf(f, "- OS/arch: `%s` / `%s`\n", env->os, env->arch);
+    fprintf(f, "- CPU: `%s`\n", env->cpu_model);
+    fprintf(f, "- target: `%s`\n", env->target);
+    fprintf(f, "- target features: `%s`\n", env->target_features);
+    fprintf(f, "- C compiler: `%s` — `%s`\n", env->c_compiler, env->c_compiler_version);
+    fprintf(f, "- C flags: `%s`\n", env->c_flags);
+    fprintf(f, "- compiler revision: `%s`\n", env->compiler_revision);
+    fprintf(f, "- unstable threshold: p95-median > %.1f%% of median (5+ samples)\n\n",
+            bench_noise_limit_pct());
+  }
+  fprintf(f, "| benchmark | backend | engine | status | Ny native ms | Ny p95 | Ny noise | Ny code bytes | mono bytes | mono max fn bytes | compiler peak RSS KiB | Ny LLVM ms | LLVM p95 | LLVM noise | C ms | C p95 | C noise | native/C | native/LLVM |\n");
+  fprintf(f, "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n");
+  for (size_t i = 0; i < t->len; i++) {
+    const BenchRow *r = &t->items[i];
+    double native_ratio = (r->c_ms > 0.0) ? r->ny_ms / r->c_ms : 0.0;
+    double native_llvm = (r->llvm_ms > 0.0) ? r->ny_ms / r->llvm_ms : 0.0;
+    const char *status = (r->ny_failures || r->llvm_failures || r->c_failures) ? "fail"
+                         : (r->budget_failed ? "regression" : (bench_row_unstable(r) ? "unstable" : "ok"));
+    fprintf(f, "| %s | %s | %s | %s | %.3f | %.3f | %.2f%% | %zu | %zu | %zu | %zu | %.3f | %.3f | %.2f%% | %.3f | %.3f | %.2f%% | %.2fx | %.2fx |\n",
+            r->name, r->backend, r->engine, status, r->ny_ms, r->ny_p95, r->ny_noise_pct,
+            r->ny_code_bytes_seen ? r->ny_code_bytes : 0,
+            r->ny_specialization_metrics_seen ? r->ny_specialization_code_bytes : 0,
+            r->ny_specialization_metrics_seen ? r->ny_specialization_max_function_bytes : 0,
+            r->ny_peak_compiler_rss_seen ? r->ny_peak_compiler_rss_kb : 0,
+            r->llvm_ms, r->llvm_p95,
+            r->llvm_noise_pct, r->c_ms, r->c_p95, r->c_noise_pct,
+            native_ratio, native_llvm);
+  }
+  fprintf(f, "\n| benchmark | alloc sites | runtime allocs | runtime reallocs | runtime helpers | bounds checks | dynamic ops | indirect calls | unknown effects | alias unresolved | spills | reloads | vectorized/attempted | cycles | instructions | branch misses | cache misses |\n");
+  fprintf(f, "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n");
+  for (size_t i = 0; i < t->len; i++) {
+    const BenchRow *r = &t->items[i];
+    char runtime_allocs[32], runtime_reallocs[32];
+    char hw_cycles[32], hw_instructions[32], hw_branch_misses[32], hw_cache_misses[32];
+    if (r->ny_runtime_counters_seen) {
+      snprintf(runtime_allocs, sizeof(runtime_allocs), "%zu", r->ny_runtime_alloc_count);
+      snprintf(runtime_reallocs, sizeof(runtime_reallocs), "%zu", r->ny_runtime_realloc_count);
+    } else {
+      snprintf(runtime_allocs, sizeof(runtime_allocs), "n/a");
+      snprintf(runtime_reallocs, sizeof(runtime_reallocs), "n/a");
+    }
+    if (r->ny_hw_counters_seen) {
+      snprintf(hw_cycles, sizeof(hw_cycles), "%" PRIu64, r->ny_hw_cycles);
+      snprintf(hw_instructions, sizeof(hw_instructions), "%" PRIu64, r->ny_hw_instructions);
+      snprintf(hw_branch_misses, sizeof(hw_branch_misses), "%" PRIu64, r->ny_hw_branch_misses);
+      snprintf(hw_cache_misses, sizeof(hw_cache_misses), "%" PRIu64, r->ny_hw_cache_misses);
+    } else {
+      snprintf(hw_cycles, sizeof(hw_cycles), "n/a");
+      snprintf(hw_instructions, sizeof(hw_instructions), "n/a");
+      snprintf(hw_branch_misses, sizeof(hw_branch_misses), "n/a");
+      snprintf(hw_cache_misses, sizeof(hw_cache_misses), "n/a");
+    }
+    if (!r->ny_static_metrics_seen)
+      fprintf(f, "| %s | n/a | %s | %s | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | %s | %s | %s | %s |\n",
+              r->name, runtime_allocs, runtime_reallocs,
+              hw_cycles, hw_instructions, hw_branch_misses, hw_cache_misses);
+    else
+      fprintf(f, "| %s | %zu | %s | %s | %zu | %zu | %zu | %zu | %zu | %zu | %zu | %zu | %zu/%zu | %s | %s | %s | %s |\n",
+              r->name, r->ny_heap_allocations, runtime_allocs, runtime_reallocs,
+              r->ny_runtime_calls, r->ny_bounds_checks, r->ny_dynamic_ops, r->ny_indirect_calls,
+              r->ny_unknown_effects, r->ny_alias_unresolved, r->ny_spills,
+              r->ny_reloads, r->ny_vectorized, r->ny_vector_attempted,
+              hw_cycles, hw_instructions, hw_branch_misses, hw_cache_misses);
+  }
+}
+
+/*
+ * Entrypoint
+ */
+
+/*
+ * `--bench` driver.  Collects bench shapes (from the positional files when the
+ * caller supplied some, otherwise from the default bench dir), filters by the
+ * `--pattern` values, measures each, and reports.
+ */
+static int run_benchmarks(const char *bin, const char *pattern, const char *opt_level,
+                          const char *tier, const char *engine, const char *target, int runs,
+                          int warmup, int timeout_sec, int verbose, int show_ir, int show_asm,
+                          int show_passes, int profile, int compare_llvm, int correctness_only,
+                          const char *out_csv, const char *out_json, const char *out_md,
+                          const char *compile_profile,
+                          StrVec *files, StrVec *patterns) {
+  if (correctness_only) {
+    runs = 1;
+    warmup = 0;
+  }
+  (void)pattern;
+
+  const char *root = bench_dir_root();
+  if (!root) {
+    nyt_err("ny-test", "bench: no bench fixtures found (set NYTRIX_ROOT or run from the repo)");
+    return 2;
+  }
+
+  BenchEnvironment bench_env;
+  bench_collect_environment(root, target, opt_level, &bench_env);
+
+  StrVec shapes = {0};
+  if (files && files->len > 0) {
+    for (size_t i = 0; i < files->len; i++) {
+      if (nyt_ends_with(files->items[i], ".nshape"))
+        sv_push(&shapes, files->items[i]);
+    }
+  } else {
+    char bench_dir[PATH_MAX];
+    snprintf(bench_dir, sizeof(bench_dir), "%s/etc/tests/bench", root);
+    collect_ny(bench_dir, &shapes);
+  }
+  if (shapes.len == 0) {
+    nyt_err("ny-test", "bench: no .nshape benches found");
+    sv_free(&shapes);
+    return 2;
+  }
+
+  /*
+   * Sort for deterministic output.
+   */
+  qsort(shapes.items, shapes.len, sizeof(char *), path_lex_cmp);
+
+  BenchTable table = {0};
+  int measured = 0;
+
+  nyt_heading("Nytrix Benchmark Suite");
+  printf("%scompiler:%s %s%s%s | %sopt:%s %s%s%s | %sprofile:%s %s%s%s | %stier:%s %s%s%s | %sengine:%s %s%s%s | %sbackend:%s %s%s%s | %scache:%s %s%s%s\n",
+         nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN), disp_path(bin),
+         nyt_clr(NYT_RESET), nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN),
+         opt_level ? opt_level : "default", nyt_clr(NYT_RESET), nyt_clr(NYT_BOLD),
+         nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN),
+         compile_profile ? compile_profile : "default", nyt_clr(NYT_RESET),
+         nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN),
+         tier ? tier : "default", nyt_clr(NYT_RESET), nyt_clr(NYT_BOLD),
+         nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN), engine ? engine : "aot",
+         nyt_clr(NYT_RESET), nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN),
+         target ? target : "default", nyt_clr(NYT_RESET), nyt_clr(NYT_BOLD),
+         nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN), bench_cache_state(), nyt_clr(NYT_RESET));
+  printf("%sruns:%s %s%d%s + %s%d%s warm-up\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET),
+         nyt_clr(NYT_CYAN), runs, nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN), warmup,
+         nyt_clr(NYT_RESET));
+  printf("%s%-22s %-8s %-7s %-10s %-8s %11s %11s %11s %11s %11s %11s %7s %7s %4s%s\n",
+         nyt_clr(NYT_BOLD), "benchmark", "backend", "engine", "cache", "status", "compiler",
+         "opt", "Ny native", "Ny LLVM", "C (host)", "wall", "native/C", "LLVM/C", "runs",
+         nyt_clr(NYT_RESET));
+
+  typedef struct {
+    const char *shape;
+    char name[128];
+    bench_worker_result_t result;
+    int fd;
+    int ok;
+#ifndef _WIN32
+    pid_t pid;
+#endif
+  } BenchJob;
+  BenchJob *bench_jobs = (BenchJob *)calloc(shapes.len ? shapes.len : 1, sizeof(*bench_jobs));
+  size_t bench_count = 0;
+  for (size_t i = 0; i < shapes.len; i++) {
+    const char *shape = shapes.items[i];
+    const char *base = strrchr(shape, '/');
+    base = base ? base + 1 : shape;
+    if (patterns && patterns->len > 0) {
+      int matched = 0;
+      for (size_t p = 0; p < patterns->len; p++)
+        if (strstr(base, patterns->items[p]))
+          matched = 1;
+      if (!matched)
+        continue;
+    }
+    BenchJob *job = &bench_jobs[bench_count++];
+    job->fd = -1;
+#ifndef _WIN32
+    job->pid = -1;
+#endif
+    job->shape = shape;
+    snprintf(job->name, sizeof(job->name), "%s", base);
+    size_t dot = strlen(job->name);
+    while (dot > 0 && job->name[dot - 1] != '.')
+      dot--;
+    if (dot > 0)
+      job->name[dot - 1] = '\0';
+  }
+  int bench_jobs_limit = auto_test_jobs() * 2;
+  if (bench_jobs_limit < 1)
+    bench_jobs_limit = 1;
+  if (bench_jobs_limit > 32)
+    bench_jobs_limit = 32;
+  if (bench_jobs_limit > (int)bench_count)
+    bench_jobs_limit = (int)bench_count;
+  printf("%s%d%s parallel fixture worker%s\n", nyt_clr(NYT_CYAN), bench_jobs_limit,
+         nyt_clr(NYT_RESET), bench_jobs_limit == 1 ? "" : "s");
+  for (size_t first = 0; first < bench_count; first += (size_t)bench_jobs_limit) {
+    size_t count = bench_count - first;
+    if (count > (size_t)bench_jobs_limit)
+      count = (size_t)bench_jobs_limit;
+#ifndef _WIN32
+    for (size_t j = 0; j < count; j++) {
+      BenchJob *job = &bench_jobs[first + j];
+      int pipefd[2] = {-1, -1};
+      if (pipe(pipefd) < 0) {
+        job->ok = 0;
+        continue;
+      }
+      fflush(NULL);
+      pid_t pid = fork();
+      if (pid == 0) {
+        close(pipefd[0]);
+        bench_worker_result_t result =
+            bench_measure_shape(bin, job->shape, opt_level, tier, engine, target,
+                                compile_profile, compare_llvm, warmup, runs, timeout_sec);
+        int ok = bench_write_result(pipefd[1], &result);
+        close(pipefd[1]);
+        _exit(ok ? 0 : 1);
+      }
+      close(pipefd[1]);
+      if (pid < 0) {
+        close(pipefd[0]);
+        job->ok = 0;
+      } else {
+        job->fd = pipefd[0];
+        job->pid = pid;
+      }
+    }
+    for (size_t j = 0; j < count; j++) {
+      BenchJob *job = &bench_jobs[first + j];
+      job->ok = job->fd >= 0 && bench_read_result(job->fd, &job->result);
+      if (job->fd >= 0)
+        close(job->fd);
+      if (job->pid > 0)
+        waitpid(job->pid, NULL, 0);
+      if (job->ok) {
+        bench_record_result(&table, &measured, verbose, show_ir, show_asm, show_passes,
+                            profile, compare_llvm, bin, opt_level, tier, engine, target,
+                            compile_profile, warmup, runs, timeout_sec, job->shape, job->name,
+                            &job->result);
+      } else {
+        bench_worker_result_t failed = {0};
+        failed.ny.last_rc = failed.llvm.last_rc = failed.c.last_rc = 127;
+        failed.ny.failure_count = failed.llvm.failure_count = failed.c.failure_count = 1;
+        bench_record_result(&table, &measured, verbose, show_ir, show_asm, show_passes,
+                            profile, compare_llvm, bin, opt_level, tier, engine, target,
+                            compile_profile, warmup, runs, timeout_sec, job->shape, job->name,
+                            &failed);
+      }
+    }
+#else
+    for (size_t j = 0; j < count; j++) {
+      BenchJob *job = &bench_jobs[first + j];
+      job->result = bench_measure_shape(bin, job->shape, opt_level, tier, engine, target,
+                                        compile_profile, compare_llvm, warmup, runs,
+                                        timeout_sec);
+      bench_record_result(&table, &measured, verbose, show_ir, show_asm, show_passes,
+                          profile, compare_llvm, bin, opt_level, tier, engine, target,
+                          compile_profile, warmup, runs, timeout_sec, job->shape, job->name,
+                          &job->result);
+    }
+#endif
+  }
+  int failed = measured == 0;
+  int unstable = 0;
+  for (size_t i = 0; i < table.len; i++) {
+    const BenchRow *r = &table.items[i];
+    if (!r->checksum_ok || r->ny_failures || r->llvm_failures || r->c_failures ||
+        r->budget_failed)
+      failed = 1;
+    if (!correctness_only && runs >= 5 && bench_row_unstable(r)) {
+      unstable = 1;
+      failed = 1;
+    }
+  }
+  bench_print_hotspots(&table);
+  if (out_csv) {
+    FILE *f = fopen(out_csv, "w");
+    if (f) {
+      bench_write_csv(f, &table);
+      fclose(f);
+    }
+  }
+  if (out_json) {
+    FILE *f = fopen(out_json, "w");
+    if (f) {
+      bench_write_json(f, &table, &bench_env);
+      fclose(f);
+    }
+  }
+  if (out_md) {
+    FILE *f = fopen(out_md, "w");
+    if (f) {
+      bench_write_md(f, &table, &bench_env);
+      fclose(f);
+    }
+  }
+  bench_rows_free(&table);
+  sv_free(&shapes);
+  if (unstable)
+    nyt_err("ny-test", "bench: unstable repeated measurement exceeded the configured noise threshold");
+  else if (failed)
+    nyt_err("ny-test", "bench: one or more components failed or checksums disagreed");
   return failed ? 1 : 0;
 }

@@ -1,0 +1,33 @@
+shape optcheck_relational_bounds {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck relational-bounds]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=10000 --nyir-pass-stats"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core.tbuf
+def n = 100
+def b = i64buf_new(n * n)
+mut r = 0
+while r < n {
+  mut c = 0
+  while c < n {
+    i64buf_store(b, r * n + c, 1)
+    c += 1
+  }
+  r += 1
+}
+mut sum = 0
+mut i = 0
+while i < n {
+  mut j = 0
+  while j < n {
+    sum += i64buf_load(b, i * n + j)
+    j += 1
+  }
+  i += 1
+}
+sum
+NY
+}

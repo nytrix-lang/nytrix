@@ -1,0 +1,228 @@
+shape splay {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "tree", "splay", "gc", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+use std.core.tbuf
+;; Top-down splay tree (array-based; node 0 = header, -1 = null).
+def N = 1000
+def M = 100000
+def key = i64buf_new(N + 1)
+def left = i64buf_new(N + 1)
+def right = i64buf_new(N + 1)
+mut i = 0
+fn rotate_right(ptr left, ptr right, int y) int {
+   def x = i64buf_load(left, y)
+   i64buf_store(left, y, i64buf_load(right, x))
+   i64buf_store(right, x, y)
+   x
+}
+fn rotate_left(ptr left, ptr right, int x) int {
+   def y = i64buf_load(right, x)
+   i64buf_store(right, x, i64buf_load(left, y))
+   i64buf_store(left, y, x)
+   y
+}
+fn splay(ptr key, ptr left, ptr right, int root, int k) int {
+   i64buf_store(left, 0, -1)
+   i64buf_store(right, 0, -1)
+   mut lmax = 0
+   mut rmin = 0
+   mut t = root
+   mut go = true
+   while go {
+      def kt = i64buf_load(key, t)
+      if k < kt {
+         def tl = i64buf_load(left, t)
+         if tl == -1 { go = false } else {
+            def ktl = i64buf_load(key, tl)
+            if k < ktl {
+               t = rotate_right(left, right, t)
+               if i64buf_load(left, t) == -1 { go = false }
+            }
+            if go {
+               i64buf_store(left, rmin, t)
+               rmin = t
+               t = i64buf_load(left, t)
+            }
+         }
+      } else if k > kt {
+         def tr = i64buf_load(right, t)
+         if tr == -1 { go = false } else {
+            def ktr = i64buf_load(key, tr)
+            if k > ktr {
+               t = rotate_left(left, right, t)
+               if i64buf_load(right, t) == -1 { go = false }
+            }
+            if go {
+               i64buf_store(right, lmax, t)
+               lmax = t
+               t = i64buf_load(right, t)
+            }
+         }
+      } else { go = false }
+   }
+   i64buf_store(right, lmax, i64buf_load(left, t))
+   i64buf_store(left, rmin, i64buf_load(right, t))
+   i64buf_store(left, t, i64buf_load(right, 0))
+   i64buf_store(right, t, i64buf_load(left, 0))
+   t
+}
+fn insert(ptr key, ptr left, ptr right, int root, int id) int {
+   def k = i64buf_load(key, id)
+   if root == -1 { return id }
+   mut cur = root
+   mut go = true
+   while go {
+      if k < i64buf_load(key, cur) {
+         if i64buf_load(left, cur) == -1 {
+            i64buf_store(left, cur, id)
+            go = false
+         } else { cur = i64buf_load(left, cur) }
+      } else {
+         if i64buf_load(right, cur) == -1 {
+            i64buf_store(right, cur, id)
+            go = false
+         } else { cur = i64buf_load(right, cur) }
+      }
+   }
+   root
+}
+mut root = -1
+i = 0
+while i < N {
+   def id = i + 1
+   i64buf_store(key, id, id)
+   i64buf_store(left, id, -1)
+   i64buf_store(right, id, -1)
+   root = insert(key, left, right, root, id)
+   i += 1
+}
+def t0 = ticks()
+mut checksum = 0
+i = 0
+while i < M {
+   def lk = (i * 7) % N + 1
+   root = splay(key, left, right, root, lk)
+   checksum += i64buf_load(key, root)
+   i += 1
+}
+def t1 = ticks()
+print("checksum=", checksum)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+#define KEY(i)  key[i]
+#define LEFT(i) left[i]
+#define RIGHT(i) right[i]
+
+static long *key, *left, *right;
+
+static long rotate_right(long y) {
+    long x = LEFT(y);
+    LEFT(y) = RIGHT(x);
+    RIGHT(x) = y;
+    return x;
+}
+static long rotate_left(long x) {
+    long y = RIGHT(x);
+    RIGHT(x) = LEFT(y);
+    LEFT(y) = x;
+    return y;
+}
+static long splay(long root, long k) {
+    LEFT(0) = -1; RIGHT(0) = -1;
+    long lmax = 0, rmin = 0, t = root;
+    int go = 1;
+    while (go) {
+        long kt = KEY(t);
+        if (k < kt) {
+            long tl = LEFT(t);
+            if (tl == -1) { go = 0; }
+            else {
+                long ktl = KEY(tl);
+                if (k < ktl) {
+                    t = rotate_right(t);
+                    if (LEFT(t) == -1) go = 0;
+                }
+                if (go) { LEFT(rmin) = t; rmin = t; t = LEFT(t); }
+            }
+        } else if (k > kt) {
+            long tr = RIGHT(t);
+            if (tr == -1) { go = 0; }
+            else {
+                long ktr = KEY(tr);
+                if (k > ktr) {
+                    t = rotate_left(t);
+                    if (RIGHT(t) == -1) go = 0;
+                }
+                if (go) { RIGHT(lmax) = t; lmax = t; t = RIGHT(t); }
+            }
+        } else { go = 0; }
+    }
+    RIGHT(lmax) = LEFT(t);
+    LEFT(rmin) = RIGHT(t);
+    LEFT(t) = RIGHT(0);
+    RIGHT(t) = LEFT(0);
+    return t;
+}
+static long insert(long root, long id) {
+    long k = KEY(id);
+    if (root == -1) return id;
+    long cur = root;
+    int go = 1;
+    while (go) {
+        if (k < KEY(cur)) {
+            if (LEFT(cur) == -1) { LEFT(cur) = id; go = 0; }
+            else cur = LEFT(cur);
+        } else {
+            if (RIGHT(cur) == -1) { RIGHT(cur) = id; go = 0; }
+            else cur = RIGHT(cur);
+        }
+    }
+    return root;
+}
+
+int main(void) {
+    int N = 1000, M = 100000;
+    key = (long *)malloc((size_t)(N + 1) * sizeof(long));
+    left = (long *)malloc((size_t)(N + 1) * sizeof(long));
+    right = (long *)malloc((size_t)(N + 1) * sizeof(long));
+    long root = -1;
+    for (int i = 0; i < N; i++) {
+        long id = i + 1;
+        KEY(id) = id;
+        LEFT(id) = -1;
+        RIGHT(id) = -1;
+        root = insert(root, id);
+    }
+    int64_t start = now_ns();
+    long checksum = 0;
+    for (int i = 0; i < M; i++) {
+        long lk = (i * 7) % N + 1;
+        root = splay(root, lk);
+        checksum += KEY(root);
+    }
+    int64_t end = now_ns();
+    printf("checksum=%ld\n", checksum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

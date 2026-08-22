@@ -1,0 +1,27 @@
+shape native_list_dynamic_integer_boundary {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "x86_64", "list", "append", "integer", "boundary"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+fn sum(list xs) int {
+  mut total = 0
+  mut i = 0
+  while i < xs.len {
+    total += xs[i]
+    i += 1
+  }
+  total
+}
+
+mut xs = []
+mut i = 0
+while i < 65 {
+  xs = xs.append(i * 1000)
+  i += 1
+}
+sum(xs) - 2080000
+NY
+}

@@ -1,0 +1,41 @@
+shape oracle_phi_elim_early_cond_edge_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle phi-elim phi loop conditional-edge first-terminator regression]
+  template ny-test-case
+  flags_matrix "-O2 --native-result-oracle=1884699; -O3 --native-result-oracle=1884699"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def N = 6
+mut values = []
+mut seed = 42
+mut i = 0
+while i < N {
+  seed = (seed * 3877 + 29573) % 139968
+  values = append(values, seed)
+  i += 1
+}
+
+i = 1
+while i < N {
+  def key = values[i]
+  mut j = i - 1
+  while j >= 0 && values[j] > key {
+    values[j + 1] = values[j]
+    j -= 1
+  }
+  values[j + 1] = key
+  i += 1
+}
+
+mut checksum = 0
+i = 0
+while i < N {
+  checksum += values[i] * (i + 1)
+  i += 1
+}
+checksum
+NY
+}

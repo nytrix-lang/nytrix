@@ -1,3 +1,7 @@
+/*
+ * Null-narrowing analysis: tracks nullable-to-nonnull flow facts
+ * through branches, assignments, and control flow for type refinement.
+ */
 #include "nullnarrow.h"
 #include "priv.h"
 #include <string.h>

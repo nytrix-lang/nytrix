@@ -738,7 +738,7 @@ fn _ui_apply_cli_options() bool {
    true
 }
 
-;; ---- core ----
+;; core
 fn from_env() dict {
    "Build the demo UI config from current CLI and environment state."
    mut dict cfg = dict(8)
@@ -3208,7 +3208,7 @@ fn exec_cmd(line) {
    if _exec_anim_cmd(cmd, parts) { return }
 }
 
-;; ---- panel ----
+;; panel
 fn _browser_apply_result(res) int {
    if !is_dict(res) { return 0 }
    def next_filter = to_str(res.get("filter", _gui_model_filter))
@@ -3989,7 +3989,7 @@ fn _draw_gui_workspace() {
    _apply_tool_close_state(st)
 }
 
-;; ---- overlay ----
+;; overlay
 fn _prepare_gui_overlay_pass() {
    viewer_overlay.prepare_pass(_win_w, _win_h, M_UI_OVERLAY)
    set_font(_ui_font())
@@ -4276,7 +4276,7 @@ fn _draw_editor_gui(phase) {
    return
 }
 
-;; ---- idle ----
+;; idle
 fn _idle_opts(gui_now_frame, want_auto_capture=false) dict {
    def anim_live = _anim_enabled || (is_dict(active_scene) && (bool(active_scene.get("anim_playing", false)) || bool(active_scene.get("anim_time_override", false))))
    def static_pose_ready = (!anim_live) && (_scene_static_pose_gpu_ready() || _scene_deform_idle_ready())
@@ -4331,7 +4331,7 @@ fn try_present(gui_now_frame, want_auto_capture=false) bool {
    true
 }
 
-;; ---- loop ----
+;; loop
 mut int _first_frame_begin_fail_count = 0
 mut bool _first_frame_begin_fail_reported = false
 mut bool _app_prep_gui = false

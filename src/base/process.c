@@ -1,3 +1,7 @@
+/*
+ * Subprocess runner: spawn, capture stdout/stderr, and wait with timeout
+ * for compiler self-tests, fuzzer workers, and native executable probes.
+ */
 #include "base/process.h"
 
 #include <stdint.h>

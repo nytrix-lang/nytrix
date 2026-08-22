@@ -78,7 +78,7 @@ fn pick_index_cached(any cache, any items, any value, any filter) dict {
          "filter": to_str(base.get("filter", "\x00")),
          "len": int(base.get("len", -1)),
          "idx": int(base.get("idx", -1)),
-   }, items, value, filter)
+      }, items, value, filter)
 }
 
 fn _row_id(name) str {
@@ -177,7 +177,7 @@ fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dic
    def last_row = min(total_rows, max(first_row + 1, int(range[1])))
    if first_row > 0 { gui.spacer_px(float(first_row) * row_step) }
    t_prof = ui_profile.mark_next(prof, "asset_grid_range", t_prof,
-   " rows=" + to_str(first_row) + ".." + to_str(last_row) + " cols=" + to_str(cols))
+      " rows=" + to_str(first_row) + ".." + to_str(last_row) + " cols=" + to_str(cols))
    def tile_id_prefix = to_str(idp) + "_" + to_str(suffix) + "_mdl_"
    def loaded_icon = (parity_lock || !show_icons) ? -1 : icons.icon_sprite("asset_loaded")
    mut clicked = ""

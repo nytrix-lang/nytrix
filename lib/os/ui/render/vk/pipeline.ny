@@ -290,7 +290,7 @@ fn _create_pipeline_ex(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGL
       _render_pass,
       0,
       0,
-   -1)
+      -1)
    mut pipe_ptr = _pipe_alloc(8)
    if _shader_trace_enabled() {
       ui_profile.print_line("vk:pipe", "ci_stype=" + to_str(load32(ci, 0)) +
@@ -305,7 +305,7 @@ fn _create_pipeline_ex(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGL
          " ms=" + to_str(load32(ms, 0)) +
          " dss=" + to_str(load32(dss, 0)) +
          " blend=" + to_str(load32(cb, 0)) +
-      " dyn=" + to_str(load32(ds, 0)))
+         " dyn=" + to_str(load32(ds, 0)))
    }
    if create_graphics_pipelines(_device, 0, 1, ci, 0, pipe_ptr) != 0 { return 0 }
    load64(pipe_ptr, 0)
@@ -323,7 +323,7 @@ fn create_pipeline(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, 
       depth_bias,
       depth_clamp,
       line_width,
-   1)
+      1)
 }
 
 fn create_pipeline_no_vertex_input(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0) any {
@@ -338,9 +338,9 @@ fn create_pipeline_no_vertex_input(any vert_mod, any frag_mod, int topology=_VK_
       depth_bias,
       depth_clamp,
       line_width,
-   0,
-   _VK_POLYGON_FILL,
-   0)
+      0,
+      _VK_POLYGON_FILL,
+      0)
 }
 
 fn _vk_eager_pipelines() bool { common.env_truthy("NY_VK_EAGER_PIPELINES") }
@@ -572,28 +572,28 @@ comptime template _mesh_frag_pipeline_ensure_fn(name, slot, ensure_frag, frag_mo
 
 comptime emit _mesh_frag_pipeline_ensure_fn(
    _ensure_mesh_fast_opaque_pipeline, _mesh_fast_opaque_pipeline,
-_ensure_fast_frag_module, _frag_fast_module, false, false, false)
+   _ensure_fast_frag_module, _frag_fast_module, false, false, false)
 comptime emit _mesh_frag_pipeline_ensure_fn(
    _ensure_mesh_fast_opaque_nocull_pipeline, _mesh_fast_opaque_nocull_pipeline,
-_ensure_fast_frag_module, _frag_fast_module, false, true, false)
+   _ensure_fast_frag_module, _frag_fast_module, false, true, false)
 comptime emit _mesh_frag_pipeline_ensure_fn(
    _ensure_mesh_fast_opaque_flip_pipeline, _mesh_fast_opaque_flip_pipeline,
-_ensure_fast_frag_module, _frag_fast_module, false, false, true)
+   _ensure_fast_frag_module, _frag_fast_module, false, false, true)
 comptime emit _mesh_frag_pipeline_ensure_fn(
    _ensure_mesh_fast_opaque_nocull_flip_pipeline, _mesh_fast_opaque_nocull_flip_pipeline,
-_ensure_fast_frag_module, _frag_fast_module, false, true, true)
+   _ensure_fast_frag_module, _frag_fast_module, false, true, true)
 comptime emit _mesh_frag_pipeline_ensure_fn(
    _ensure_mesh_fast_env_opaque_pipeline, _mesh_fast_env_opaque_pipeline,
-_ensure_fast_env_frag_module, _frag_fast_env_module, false, false, false)
+   _ensure_fast_env_frag_module, _frag_fast_env_module, false, false, false)
 comptime emit _mesh_frag_pipeline_ensure_fn(
    _ensure_mesh_fast_env_opaque_nocull_pipeline, _mesh_fast_env_opaque_nocull_pipeline,
-_ensure_fast_env_frag_module, _frag_fast_env_module, false, true, false)
+   _ensure_fast_env_frag_module, _frag_fast_env_module, false, true, false)
 comptime emit _mesh_frag_pipeline_ensure_fn(
    _ensure_mesh_fast_env_opaque_flip_pipeline, _mesh_fast_env_opaque_flip_pipeline,
-_ensure_fast_env_frag_module, _frag_fast_env_module, false, false, true)
+   _ensure_fast_env_frag_module, _frag_fast_env_module, false, false, true)
 comptime emit _mesh_frag_pipeline_ensure_fn(
    _ensure_mesh_fast_env_opaque_nocull_flip_pipeline, _mesh_fast_env_opaque_nocull_flip_pipeline,
-_ensure_fast_env_frag_module, _frag_fast_env_module, false, true, true)
+   _ensure_fast_env_frag_module, _frag_fast_env_module, false, true, true)
 
 fn _ensure_wire_pipeline() bool {
    if _wire_pipeline { return _wire_pipeline != 0 }
@@ -609,7 +609,7 @@ fn _ensure_wire_pipeline() bool {
       0,
       1.0,
       _PIPE_BLEND_UI,
-   _VK_POLYGON_LINE)
+      _VK_POLYGON_LINE)
    _wire_pipeline != 0
 }
 
@@ -720,11 +720,11 @@ fn _create_graphics_layouts() bool {
       _vk_descriptor_combined_image_sampler(),
       _max_textures_value(),
       _vk_shader_stage_fragment(),
-   0)
+      0)
    def tex_ci = VkDescriptorSetLayoutCreateInfo(1, tex_binding)
    if _shader_trace_enabled() {
       ui_profile.print_line("vk:layout", "tex_ci_stype=" + to_str(load32(tex_ci, 0)) +
-      " tex_count=" + to_str(load32(tex_binding, 8)))
+         " tex_count=" + to_str(load32(tex_binding, 8)))
    }
    if create_descriptor_set_layout(_device, tex_ci, 0, dsl_ptr) != 0 { free(scratch) return false }
    _descriptor_set_layout = load64_h(dsl_ptr, 0)
@@ -732,12 +732,12 @@ fn _create_graphics_layouts() bool {
       _vk_descriptor_uniform_buffer(),
       1,
       _vk_shader_stage_vertex() | _vk_shader_stage_fragment(),
-   0)
+      0)
    def ubo_ci = VkDescriptorSetLayoutCreateInfo(1, ubo_binding)
    if _shader_trace_enabled() {
       ui_profile.print_line("vk:layout", "ubo_ci_stype=" + to_str(load32(ubo_ci, 0)) +
          " ubo_type=" + to_str(load32(ubo_binding, 4)) +
-      " ubo_stages=" + to_str(load32(ubo_binding, 12)))
+         " ubo_stages=" + to_str(load32(ubo_binding, 12)))
    }
    if create_descriptor_set_layout(_device, ubo_ci, 0, ubo_ptr) != 0 { free(scratch) return false }
    _descriptor_set_layout_ubo = load64_h(ubo_ptr, 0)
@@ -751,7 +751,7 @@ fn _create_graphics_layouts() bool {
       ui_profile.print_line("vk:layout", "layout_ci_stype=" + to_str(load32(layout_ci, 0)) +
          " pc_stage=" + to_str(load32(pc_range, 0)) +
          " pc_off=" + to_str(load32(pc_range, 4)) +
-      " pc_size=" + to_str(load32(pc_range, 8)))
+         " pc_size=" + to_str(load32(pc_range, 8)))
    }
    def pl_res = create_pipeline_layout(_device, layout_ci, 0, layout_ptr)
    if pl_res != 0 { free(scratch) return false }
@@ -771,7 +771,7 @@ fn _create_default_lit_pipeline() any {
       0,
       0,
       1.0,
-   _PIPE_BLEND_UI)
+      _PIPE_BLEND_UI)
 }
 
 fn _create_eager_core_pipelines() bool {
@@ -786,7 +786,7 @@ fn _create_eager_core_pipelines() bool {
       0,
       0,
       1.0,
-   _PIPE_BLEND_UI)
+      _PIPE_BLEND_UI)
    if !_flip_pipeline { _flip_pipeline = _pipeline }
    _pipe_log_ms("create_flip_pipeline", _t)
    _t = _pipe_deep_trace_enabled() ? ticks() : 0
@@ -805,7 +805,7 @@ fn _create_eager_core_pipelines() bool {
       0,
       0,
       1.0,
-   _PIPE_BLEND_UI)
+      _PIPE_BLEND_UI)
    if !_flip_unlit_pipeline { _flip_unlit_pipeline = _unlit_pipeline }
    _pipe_log_ms("create_unlit_pipeline", _t)
    true

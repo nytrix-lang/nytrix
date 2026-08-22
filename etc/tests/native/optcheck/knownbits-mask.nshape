@@ -1,0 +1,18 @@
+shape optcheck_knownbits_mask {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck knownbits]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=1 --nyir-pass-stats"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut x = 123456789
+mut y = x & 10
+if y >= 0 && y <= 10 {
+  print(1)
+} else {
+  print(0)
+}
+NY
+}

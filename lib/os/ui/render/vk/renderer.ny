@@ -166,6 +166,7 @@ mut _last_persp_valid = false
 mut _last_persp_fovy, _last_persp_aspect, _last_persp_near, _last_persp_far = 0.0, 0.0, 0.0, 0.0
 mut _vk_markers_enabled, _ident_mat = false, 0
 mut _logged_suboptimal_acquire, _logged_suboptimal_present = false, false
+
 ;; One-shot per frame: when _vertex_limit_hit trips we used to silently drop
 ;; the rest of the frame's text with no diagnostic. Track whether we have
 ;; already logged the truncation for this frame so we surface the issue once
@@ -512,7 +513,7 @@ fn _vk_begin_false(str reason) bool {
          " fb=" + to_str(_framebuffers_count) +
          " cmd=" + to_str(_command_buffers_count) +
          " sem=" + to_str(_image_available_semaphores_count) +
-      " fence=" + to_str(_in_flight_fences_count))
+         " fence=" + to_str(_in_flight_fences_count))
    }
    false
 }
@@ -727,13 +728,13 @@ fn capture_scene_color_resume_pass() bool {
       0,
       VK_ACCESS_TRANSFER_READ_BIT,
       _frame_draw_image_pass_layout(),
-   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
    VkImageMemoryBarrierColor(dst_bar,
       dst_image,
       VK_ACCESS_SHADER_READ_BIT,
       VK_ACCESS_TRANSFER_WRITE_BIT,
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
    cmd_pipeline_barrier(_current_frame_cb,
       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
       VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -743,7 +744,7 @@ fn capture_scene_color_resume_pass() bool {
       0,
       0,
       1,
-   src_bar)
+      src_bar)
    cmd_pipeline_barrier(_current_frame_cb,
       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
       VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -753,7 +754,7 @@ fn capture_scene_color_resume_pass() bool {
       0,
       0,
       1,
-   dst_bar)
+      dst_bar)
    memset(copy_region, 0, 68)
    store32(copy_region, VK_IMAGE_ASPECT_COLOR_BIT, 0)
    store32(copy_region, 0, 4)
@@ -775,19 +776,19 @@ fn capture_scene_color_resume_pass() bool {
       dst_image,
       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
       1,
-   copy_region)
+      copy_region)
    VkImageMemoryBarrierColor(src_bar,
       src_image,
       VK_ACCESS_TRANSFER_READ_BIT,
       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
    VkImageMemoryBarrierColor(dst_bar,
       dst_image,
       VK_ACCESS_TRANSFER_WRITE_BIT,
       VK_ACCESS_SHADER_READ_BIT,
       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
    cmd_pipeline_barrier(_current_frame_cb,
       VK_PIPELINE_STAGE_TRANSFER_BIT,
       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -797,7 +798,7 @@ fn capture_scene_color_resume_pass() bool {
       0,
       0,
       1,
-   src_bar)
+      src_bar)
    cmd_pipeline_barrier(_current_frame_cb,
       VK_PIPELINE_STAGE_TRANSFER_BIT,
       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
@@ -807,7 +808,7 @@ fn capture_scene_color_resume_pass() bool {
       0,
       0,
       1,
-   dst_bar)
+      dst_bar)
    _active_scene_color_tex_id = _scene_color_capture_tex_id
    _pc_dirty = true
    _begin_load_render_pass()
@@ -992,19 +993,19 @@ comptime template _vk_init_run_checked(name, stage_fn, stage_label, check_fn, fa
 
 comptime emit _vk_init_run_checked(_vk_init_run_vertex_buffer,
    _vk_init_stage_create_vertex_buffer, "create_vertex_buffer",
-_vk_check_vertex_buffer, "[gfx:vulkan] vertex buffer creation failed: null handle")
+   _vk_check_vertex_buffer, "[gfx:vulkan] vertex buffer creation failed: null handle")
 comptime emit _vk_init_run_checked(_vk_init_run_staging_buffer,
    _vk_init_stage_create_staging_buffer, "create_staging_buffer",
-_vk_check_staging_buffer, "[gfx:vulkan] staging buffer creation failed: null handle")
+   _vk_check_staging_buffer, "[gfx:vulkan] staging buffer creation failed: null handle")
 comptime emit _vk_init_run_checked(_vk_init_run_descriptor_pool,
    _vk_init_stage_create_descriptor_pool, "create_descriptor_pool",
-_vk_check_descriptor_pool, "[gfx:vulkan] descriptor pool creation failed: null handle")
+   _vk_check_descriptor_pool, "[gfx:vulkan] descriptor pool creation failed: null handle")
 comptime emit _vk_init_run_checked(_vk_init_run_uniform_buffer,
    _vk_init_stage_create_uniform_buffer, "create_uniform_buffer",
-_vk_check_uniform_buffer, "[gfx:vulkan] uniform buffer creation failed: null handle")
+   _vk_check_uniform_buffer, "[gfx:vulkan] uniform buffer creation failed: null handle")
 comptime emit _vk_init_run_checked(_vk_init_run_ubo_descriptor_sets,
    _vk_init_stage_create_ubo_descriptor_sets, "create_ubo_descriptor_sets",
-_vk_check_ubo_descriptor_sets, "[gfx:vulkan] UBO descriptor sets allocation failed: none allocated")
+   _vk_check_ubo_descriptor_sets, "[gfx:vulkan] UBO descriptor sets allocation failed: none allocated")
 
 fn init(any win) bool {
    "Initializes the Vulkan renderer for the given window."
@@ -1437,7 +1438,7 @@ fn _sync_flat_part_shading(?ptr base, bool sync_tex=true, bool sync_mat=true, bo
          " matKey=" + to_str(load32_h(base, 128)) +
          " matTex=" + to_str(load32_h(mat_ptr, 20)) +
          " mat=0x" + text.to_hex(load32_h(mat_ptr, 4)) +
-      " normal=0x" + text.to_hex(load32_h(mat_ptr, 100)))
+         " normal=0x" + text.to_hex(load32_h(mat_ptr, 100)))
    }
    if mat_key != 0 { _set_material_from_part_slab_key(mat_ptr, mat_key) }
    else { _set_material_from_part_slab(mat_ptr) }
@@ -1698,7 +1699,7 @@ fn _draw_parts_flat_range_impl(
             " tex=" + to_str(load32_h(base, 0)) +
             " matKey=" + to_str(load32_h(base, 128)) +
             " matTex=" + to_str(load32_h(mat_ptr, 20)) +
-         " normal=0x" + text.to_hex(load32_h(mat_ptr, 100)))
+            " normal=0x" + text.to_hex(load32_h(mat_ptr, 100)))
       }
       drawn += _draw_flat_part_buffers_loaded(base, sbuf, soff, ibuf, ioff, idx_count, draw_count, index_type, topo, pipe, flat_fast_on)
       i += 1
@@ -1799,7 +1800,7 @@ fn _vk_begin_frame_acquire_image(bool has_surface, bool backend_is_wayland, bool
          def backend_name = lib_uiw.backend()
          ui_profile.print_text("[gfx:vulkan] begin_frame before acquire backend=" + backend_name +
             " extent=" + to_str(_swapchain_extent_w) + "x" + to_str(_swapchain_extent_h) +
-         " timeout_ns=" + to_str(acquire_timeout))
+            " timeout_ns=" + to_str(acquire_timeout))
       }
       if backend_is_win32 { _pump_host_messages_if_needed() }
       acq = acquire_next_image_khr(_device, _swapchain, acquire_timeout, sem, 0, _ptr_img_idx)
@@ -1811,7 +1812,7 @@ fn _vk_begin_frame_acquire_image(bool has_surface, bool backend_is_wayland, bool
             def backend_name = lib_uiw.backend()
             ui_profile.print_text("[gfx:vulkan] acquire waiting backend=" + backend_name +
                " extent=" + to_str(_swapchain_extent_w) + "x" + to_str(_swapchain_extent_h) +
-            " flags=0x" + text.to_hex(_current_window_flags))
+               " flags=0x" + text.to_hex(_current_window_flags))
          }
          return _vk_begin_false("acquire_wait")
       }
@@ -2467,7 +2468,7 @@ fn set_material_packed(
          " bsdf2=0x" + text.to_hex(_current_bsdf2_u32) +
          " bsdf3=0x" + text.to_hex(_current_bsdf3_u32) +
          " bsdf4=0x" + text.to_hex(_current_bsdf4_u32) +
-      " bsdf5=0x" + text.to_hex(_current_bsdf5_u32))
+         " bsdf5=0x" + text.to_hex(_current_bsdf5_u32))
    }
    _pc_dirty = true
    0
@@ -2612,7 +2613,7 @@ fn _trace_current_part_material(int key) any {
          " basePath=" + to_str(_base_tex_path) +
          " nrmTex=" + to_str(_current_normal_tex_id) +
          " ext2=0x" + text.to_hex(_current_ext2_tex_word) +
-      " vc=" + to_str(_current_vc_mode))
+         " vc=" + to_str(_current_vc_mode))
    }
    0
 }
@@ -3160,7 +3161,7 @@ fn _flush() any {
          " tex=" + to_str(_current_texture_id) +
          " btex=0x" + text.to_hex(_current_base_tex_word) +
          " alpha=0x" + text.to_hex(_current_alpha_u32) +
-      " vc=" + to_str(_current_vc_mode))
+         " vc=" + to_str(_current_vc_mode))
    }
    if _vk_markers_enabled { vk_debug_marker_begin(cb, "Flush Batch", 0x00FF00FF) }
    _flush_diag("before draw")
@@ -3186,7 +3187,7 @@ fn _check_flush(int bytes) bool {
       if !_logged_vertex_limit_hit {
          _logged_vertex_limit_hit = true
          if vk_state._debug_gfx_enabled {
-            ui_profile.print_text("[gfx:vulkan] vertex buffer full — text runs truncated for the rest of this frame (bytes=" + to_str(bytes) + ")")
+            ui_profile.print_text("[gfx:vulkan] vertex buffer full — text runs truncated for the rest of this frame(bytes=" + to_str(bytes) + ")")
          }
       }
       return false
@@ -3227,7 +3228,7 @@ fn _vk_end_frame_record_capture(any cb, bool has_surface) bool {
                   h,
                   barrier,
                   region,
-               VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT)
+                  VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT)
             }
          }
       }
@@ -3261,21 +3262,21 @@ fn _vk_end_frame_download_capture(bool has_surface) bool {
                      " img=" + to_str(_image_index) +
                      " surface=" + to_str(has_surface) +
                      " p0=0x" + text.to_hex(p0) +
-                  " pc=0x" + text.to_hex(c0))
+                     " pc=0x" + text.to_hex(c0))
                   if _local_vertex_map && _vertex_offset >= _VKR_VERT_STRIDE {
                      ui_profile.print_text("[vk:capture:geom] v0=(" +
                         to_str(load32_f32(_local_vertex_map, _VKR_OFF_X)) + "," +
                         to_str(load32_f32(_local_vertex_map, _VKR_OFF_Y)) + "," +
                         to_str(load32_f32(_local_vertex_map, _VKR_OFF_Z)) + ")" +
                         " c=0x" + text.to_hex(load32(_local_vertex_map, _VKR_OFF_C)) +
-                     " voff=" + to_str(_vertex_offset))
+                        " voff=" + to_str(_vertex_offset))
                   }
                   ui_profile.print_text("[vk:capture:mvp] m00=" + to_str(load32_f32(_pc_buffer, 0)) +
                      " m11=" + to_str(load32_f32(_pc_buffer, 20)) +
                      " m22=" + to_str(load32_f32(_pc_buffer, 40)) +
                      " m33=" + to_str(load32_f32(_pc_buffer, 60)) +
                      " isUnlit=" + to_str(load32(_pc_buffer, 132)) +
-                  " base=0x" + text.to_hex(load32(_pc_buffer, 136)))
+                     " base=0x" + text.to_hex(load32(_pc_buffer, 136)))
                }
                _capture_pixels = pixels
                _capture_w = w
@@ -3313,7 +3314,7 @@ fn _vk_end_frame_present_image(bool backend_is_win32, bool _deep_on) bool {
          " static=" + to_str(_frame_static_draw_calls) +
          " indexed=" + to_str(_frame_indexed_draw_calls) +
          " flush=" + to_str(_flush_total) +
-      " verts=" + to_str(_vertex_offset / _VKR_VERT_STRIDE))
+         " verts=" + to_str(_vertex_offset / _VKR_VERT_STRIDE))
       ui_profile.print_text("[gfx:vulkan] end_frame before present image=" + to_str(img_idx))
    }
    def _t_present = _deep_on ? ticks() : 0
@@ -3380,7 +3381,7 @@ fn _end_frame_internal(bool present) bool {
       store64_h(_ptr_sig_sems, sem_finish, 0)
       store32(_ptr_stages,
          _offscreen_draw_enabled() ? (VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT) : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-      0)
+         0)
    }
    store32(_ptr_sub, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
    store64_h(_ptr_sub, 0, 8)
@@ -3407,7 +3408,7 @@ fn _end_frame_internal(bool present) bool {
    def fence = load64_h(_fences_slab, _current_frame * 8)
    if _vk_debug_basic == 1 {
       ui_profile.print_text("[gfx:vulkan] end_frame before submit frame=" + to_str(_current_frame) +
-      " image=" + to_str(_image_index))
+         " image=" + to_str(_image_index))
    }
    def _t_submit = _deep_on ? ticks() : 0
    if backend_is_win32 { _pump_host_messages_if_needed() }
@@ -3479,7 +3480,7 @@ fn _end_frame_internal(bool present) bool {
          " flush_pipe=" + to_str(_flush_reason_pipe) +
          " flush_static=" + to_str(_flush_reason_static) +
          " flush_special=" + to_str(_flush_reason_special) +
-      " flush_full=" + to_str(_flush_reason_vertex_full))
+         " flush_full=" + to_str(_flush_reason_vertex_full))
    }
    if ui_profile.dump_trace_enabled() && _total_frames < 8 {
       ui_profile.print_text("[vk:dump] frame=" + to_str(_total_frames) +
@@ -3506,7 +3507,7 @@ fn _end_frame_internal(bool present) bool {
          " off=" + to_str(_vertex_offset) +
          " lastFlush=" + to_str(_last_flush_offset) +
          " limit=" + to_str(_vertex_limit_hit) +
-      " reason=" + to_str(_flush_reason))
+         " reason=" + to_str(_flush_reason))
    }
    true
 }
@@ -3863,7 +3864,7 @@ fn _record_draw_image_to_swapchain(any cb, bool has_surface) bool {
       0,
       VK_ACCESS_TRANSFER_WRITE_BIT,
       VK_IMAGE_LAYOUT_UNDEFINED,
-   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
    cmd_pipeline_barrier(cb,
       VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
       VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -3873,7 +3874,7 @@ fn _record_draw_image_to_swapchain(any cb, bool has_surface) bool {
       0,
       0,
       1,
-   dst_bar)
+      dst_bar)
    if _draw_image_format == _swapchain_format
    && _draw_extent_w == _swapchain_extent_w
    && _draw_extent_h == _swapchain_extent_h{
@@ -3884,7 +3885,7 @@ fn _record_draw_image_to_swapchain(any cb, bool has_surface) bool {
          dst_image,
          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
          1,
-      region)
+         region)
    } else {
       _store_present_blit_region(region, _draw_extent_w, _draw_extent_h, _swapchain_extent_w, _swapchain_extent_h)
       cmd_blit_image(cb,
@@ -3894,14 +3895,14 @@ fn _record_draw_image_to_swapchain(any cb, bool has_surface) bool {
          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
          1,
          region,
-      VK_FILTER_LINEAR)
+         VK_FILTER_LINEAR)
    }
    VkImageMemoryBarrierColor(dst_bar,
       dst_image,
       VK_ACCESS_TRANSFER_WRITE_BIT,
       0,
       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-   dst_final_layout)
+      dst_final_layout)
    cmd_pipeline_barrier(cb,
       VK_PIPELINE_STAGE_TRANSFER_BIT,
       has_surface ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -3911,7 +3912,7 @@ fn _record_draw_image_to_swapchain(any cb, bool has_surface) bool {
       0,
       0,
       1,
-   dst_bar)
+      dst_bar)
    true
 }
 
@@ -4488,7 +4489,7 @@ fn _create_headless_image(int w, int h) any {
    store32(img_ci, 0, 52)
    store32(img_ci,
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-   56)
+      56)
    store32(img_ci, 0, 60)
    store32(img_ci, 0, 80)
    mut p = _renderer_alloc(8)
@@ -4695,7 +4696,7 @@ fn _create_swapchain(any win) bool {
          " transform=" + to_str(pre_transform) +
          " fmt=" + to_str(sfmt) +
          " cs=" + to_str(scol) +
-      " present=" + to_str(present_mode))
+         " present=" + to_str(present_mode))
    }
    _vk_stage("swapchain.create_info")
    mut create_info = _renderer_alloc(128)
@@ -4742,7 +4743,7 @@ fn _create_swapchain(any win) bool {
          ui_profile.print_text("[gfx:vulkan] vkCreateSwapchainKHR failed attempt=" +
             to_str(create_attempt + 1) + "/" + to_str(retry_limit) +
             " code=" + to_str(res) +
-         " extent=" + to_str(w) + "x" + to_str(h))
+            " extent=" + to_str(w) + "x" + to_str(h))
       }
       create_attempt += 1
       if create_attempt < retry_limit { _settle_window_for_swapchain(win, create_attempt) }
@@ -4753,7 +4754,7 @@ fn _create_swapchain(any win) bool {
          " extent=" + to_str(w) + "x" + to_str(h) +
          " min=" + to_str(min_w) + "x" + to_str(min_h) +
          " max=" + to_str(max_w) + "x" + to_str(max_h) +
-      " present=" + to_str(present_mode))
+         " present=" + to_str(present_mode))
       return false
    }
    _swapchain = load64_h(sc_ptr, 0)
@@ -4991,7 +4992,7 @@ fn _create_draw_image_one(int width, int height, int format) any {
    store32(img_ci, 0, 52)
    store32(img_ci,
       VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-   56)
+      56)
    store32(img_ci, VK_SHARING_MODE_EXCLUSIVE, 60)
    store32(img_ci, 0, 80)
    mut img_ptr = _renderer_alloc(8)
@@ -5282,7 +5283,7 @@ fn _create_sync_objects() bool {
          ui_profile.print_text("[gfx:vulkan] sync slab allocation failed frames=" + to_str(_frames_in_flight()) +
             " sem_avail=" + to_str(_sem_avail_slab) +
             " sem_finish=" + to_str(_sem_finish_slab) +
-         " fences=" + to_str(_fences_slab))
+            " fences=" + to_str(_fences_slab))
       }
       return false
    }

@@ -1,0 +1,15 @@
+shape aarch64_elf64_internal_link_run_allocator_f64_cmp {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 aarch64 internal-link qemu regalloc f64 cmp]
+  template ny-test-case
+  flags "--native-backend aarch64 -O3 -emit-only -o /tmp/nytrix-aarch64-link-allocator-f64-cmp.o"
+  expect object_link_run_bool_1
+  source ny <<'NY'
+fn greater(f64 a, f64 b) bool {
+  a > b
+}
+
+greater(3.5, 2.0)
+NY
+}

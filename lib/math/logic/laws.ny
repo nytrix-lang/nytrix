@@ -1,7 +1,6 @@
 ;; Keywords: law certificate algebra property bounded counterexample
 ;; Certify laws over the values and operations of existing modules.
 module std.math.logic.laws(check, unary, binary, ternary)
-
 use std.core
 use std.core.reflect as reflect
 use std.math.logic.certificate as cert
@@ -19,11 +18,10 @@ fn check(str domain, str law, list cases, any left, any right, any equal,
    int max_variables=256, int max_memory=100000) dict {
    if domain == "" || law == "" { return _invalid("invalid identity") }
    if max_steps <= 0 || max_nodes <= 0 || max_depth <= 0 ||
-      max_variables <= 0 || max_memory <= 0 {
+   max_variables <= 0 || max_memory <= 0 {
       return _invalid("invalid budget")
    }
    if cases.len > max_variables { return _invalid("variable limit") }
-
    mut evidence = []
    mut i = 0
    mut steps = 0
@@ -49,13 +47,12 @@ fn check(str domain, str law, list cases, any left, any right, any equal,
       }
       i += 1
    }
-
    def dependency = to_str(hash(reflect.repr(
-      [domain, law, evidence, max_steps, max_nodes, max_depth,
-         max_variables, max_memory])))
+            [domain, law, evidence, max_steps, max_nodes, max_depth,
+               max_variables, max_memory])))
    def certificate = cert.envelope("T", LAW_VERSION, dependency).merge({
-      "domain":domain, "law":law, "evidence":evidence,
-      "cases_checked":i})
+         "domain":domain, "law":law, "evidence":evidence,
+         "cases_checked":i})
    return {"decided":true, "valid":true, "reason":"complete",
       "domain":domain, "law":law, "cases_checked":i, "steps":steps,
       "memory":memory, "certificate":certificate}

@@ -1,0 +1,19 @@
+shape native_oracle_fin_unproven_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle fin bounds check]
+  template ny-test-case
+  flags "--native-result-oracle=1 -O1"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn load_unknown(i64 idx) i64 {
+  def p = malloc(8)
+  store64_i(p, 42, 0)
+  load64_i(p, idx)
+}
+
+load_unknown(0) == 42
+NY
+}

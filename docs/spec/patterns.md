@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":170,"summary":"Pattern matching forms, bindings, ranges, and exhaustiveness behavior."} -->
 # Patterns
 
 Patterns describe value dispatch in `case` and `match` forms. A branch can be
@@ -102,6 +103,18 @@ Reversing the first two arms would make `404` unreachable as a special case.
 
 Place special cases before a broad range that catches many values.
 
+## Exhaustiveness and binding
+
+A `match` over an ADT is exhaustive when the arms cover every variant; the
+compiler rejects a non-exhaustive ADT match. A `case` is exhaustive only with a
+wildcard arm; without one, an unmatched value falls through. The compiler
+checks duplicate variants, payload arity, unknown constructors, and
+non-exhaustive ADT matches.
+
+Arm payload slots bind to an identifier or `_`. A payload binding is scoped to
+its arm. Guards evaluate after the pattern matches; a guard that fails falls
+through to the next arm in source order.
+
 ## Guards and clarity
 
 Use an `if` block when the dispatch depends on several boolean conditions or
@@ -149,6 +162,6 @@ Pattern bugs include:
 
 ## Related
 
-- [control-flow.md](control-flow.md) for `case`, `match`, loops, and cleanup.
-- [operators.md](operators.md) for comparisons and boolean operators.
-- [syntax.md](syntax.md) for source spellings.
+- [Control Flow](control-flow.md) for `case`, `match`, loops, and cleanup.
+- [Operators](operators.md) for comparisons and boolean operators.
+- [Syntax](syntax.md) for source spellings.

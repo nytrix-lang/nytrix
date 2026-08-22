@@ -54,7 +54,6 @@ fn _connect_backend(dict ctx, str backend) any {
    0
 }
 
-
 fn connect_backend(any ctx, str backend) any {
    "Connects `ctx` to one named backend without applying automatic fallback order."
    if !ctx { return 0 }

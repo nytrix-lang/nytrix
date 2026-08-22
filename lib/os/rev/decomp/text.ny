@@ -1,7 +1,6 @@
 ;; Keywords: decompiler text expressions delimiters parsing
 ;; Balanced-delimiter primitives used by safe pseudocode expression cleanup.
 module std.os.rev.decomp.text *
-
 use std.core
 use std.core.str as str
 

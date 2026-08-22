@@ -1,0 +1,21 @@
+shape proof_arithmetic_ranges {
+  family "runtime/proofs"
+  generator "program"
+  features ["proof", "range", "arithmetic"]
+  template ny-test-case
+  flags "--color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def int n = 12
+def proof quotient = prove(n / 3 == 4, "non-negative division range")
+assert(proof_matches(quotient, n / 3 == 4), "division proof digest")
+
+def int remainder = 10 % 3
+def proof modulo = prove(remainder == 1, "non-negative modulo range")
+assert(proof_matches(modulo, remainder == 1), "modulo proof digest")
+
+assert(true, "arithmetic range proofs complete")
+NY
+}

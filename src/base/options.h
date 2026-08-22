@@ -52,6 +52,13 @@ typedef enum {
 } ny_type_solver_t;
 
 typedef enum {
+  NY_PROOF_SOLVER_NONE = 0,
+  NY_PROOF_SOLVER_PRESBURGER = 1,
+  NY_PROOF_SOLVER_Z3 = 2,
+  NY_PROOF_SOLVER_AUTO = 3,
+} ny_proof_solver_t;
+
+typedef enum {
   NY_NATIVE_BACKEND_LLVM = 0,
   NY_NATIVE_BACKEND_X86_64 = 1,
   NY_NATIVE_BACKEND_X86 = 2,
@@ -132,6 +139,7 @@ typedef struct {
   const char *emit_ir_path;
   const char *emit_bc_path;
   const char *emit_asm_path;
+  const char *emit_wasm_path;
   const char *emit_module;
   bool ir_include_std;
   int verbose;
@@ -172,6 +180,8 @@ typedef struct {
   ny_stop_after_stage_t stop_after;
   const char *type_solver_raw;
   ny_type_solver_t type_solver;
+  const char *proof_solver_raw;
+  ny_proof_solver_t proof_solver;
   bool collect_errors;
   bool emit_shapes;
   ny_dump_scope_t dump_scope;
@@ -210,6 +220,9 @@ typedef struct {
   bool native_prefer_vm;
   bool native_prefer_asm;
   bool native_only;
+  /* Run LLVM optimization after independently compiled module bitcode is
+   * linked. This is an explicit whole-program/LTO build mode. */
+  bool llvm_lto;
   bool native_backend_explicit;
   bool native_enable_cf_mem2reg;
   bool native_tier_report;
@@ -290,8 +303,12 @@ typedef struct {
   ny_runtime_mode_t runtime_mode;
   const char *runtime_mode_raw;
   ny_safe_run_t safe_run;
-  const char *sanitize;  /* --sanitize=address|undefined|thread|leak */
-  const char *jit_engine; /* --jit-engine=orc|mcjit (default: mcjit) */
+  const char *sanitize;    /* --sanitize=address|undefined|thread|leak */
+  const char *jit_engine;  /* --jit-engine=orc|mcjit (default: mcjit) */
+  bool jit_fast_isel;      /* --jit-fast-isel: JIT fast instruction selection */
+  const char *jit_code_model; /* --jit-code-model=small|kernel|medium|large */
+  int jit_opt_level;       /* --jit-opt-level=N: JIT optimization level (0..3) */
+  bool jit_perf_map;       /* --jit-perf-map: emit /tmp/perf-<pid>.map */
   bool zero_init;          /* --zero-init: zero all managed heap allocations */
 } ny_options;
 

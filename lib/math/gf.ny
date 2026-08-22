@@ -14,8 +14,7 @@ module std.math.crypto.gf(gfp_elem, gfp_add, gfp_sub, gfp_neg, gfp_mul, gfp_div,
    gf_multiplicative_order, gf_is_primitive, gf_primitive_element, gf_discrete_log,
    solve_gf2, num2vec, vec2num, _clone_list,
    GF2BVBitVec, gf2bv_bitvec,
-GF2BVLinearSystem, gf2bv_linear_system, gf2bv_bv, gf2bv_linear)
-
+   GF2BVLinearSystem, gf2bv_linear_system, gf2bv_bv, gf2bv_linear)
 use std.core
 use std.core.primitives (bxor, bshl)
 use std.math.nt
@@ -734,7 +733,7 @@ fn GFElem(any field, any value) gfe {
       "kind":_gf_kind(field),
       "p":_gf_p(field),
       "modulus":_gf_modulus(field),
-   "value":_gf_normalize_value(field, value)}
+      "value":_gf_normalize_value(field, value)}
 }
 
 comptime emit _gfe_ctor_alias2(gfe, GFElem)

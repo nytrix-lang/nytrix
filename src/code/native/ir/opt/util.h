@@ -39,16 +39,37 @@ bool nir_operands_same_value(const nyir_func_t *f, int a, int b, size_t at);
 /* Rewriting helpers used by peephole and strength_reduce. */
 int nir_find_block_const0(const nyir_func_t *f, size_t at);
 bool nir_rewrite_neg(nyir_func_t *f, size_t *i, int src);
+bool nir_rewrite_shl(nyir_func_t *f, size_t *i, int src, int shift);
 bool nir_ensure_inst_space(nyir_func_t *f, size_t extra);
 size_t nir_next_non_nop(const nyir_func_t *f, size_t start);
 
 /* Value remapping used by compact. */
 bool nir_remap_value(const int *map, int map_len, int value, int *out);
 
+typedef struct {
+  bool address_taken;
+  bool passed_to_call;
+  bool returned;
+  bool stored_to_memory;
+  bool ffi_escape;
+  bool thread_escape;
+  bool unknown_call_escape;
+  bool escapes;
+  size_t first_escape_pc;
+} nyir_local_escape_info_t;
+
+/* Shared local-slot escape classification for SROA/alias/reporting passes. */
+size_t nyir_local_slot_count(const nyir_func_t *f);
+bool nyir_analyze_local_escapes(const nyir_func_t *f,
+                                nyir_local_escape_info_t *info,
+                                size_t slot_count);
+
 /* Function-level queries used by the optimization pipeline. */
 bool nyir_has_control_flow(const nyir_func_t *f);
 bool nyir_has_loop(const nyir_func_t *f);
 bool nyir_has_local_mem(const nyir_func_t *f);
+/* SSA def index shared by loop/vectorizer passes. */
+int *nyir_build_defs(const nyir_func_t *f);
 size_t nyir_count_nops(const nyir_func_t *f);
 bool nyir_compact_if_sparse(nyir_func_t *f);
 size_t nyir_block_count(const nyir_func_t *f);

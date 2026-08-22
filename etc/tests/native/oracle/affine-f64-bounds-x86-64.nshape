@@ -1,0 +1,32 @@
+shape oracle_affine_f64_bounds_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle f64-buffer affine bounds irce nested-loop]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=0; -O1 --native-result-oracle=0; -O2 --native-result-oracle=0; -O3 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.tbuf
+
+fn stencil() i64 {
+  def N = 8
+  def src = f64buf_new(N * N)
+  def dst = f64buf_new(N * N)
+  mut r = 1
+  while r < N - 1 {
+    mut c = 1
+    while c < N - 1 {
+      def v = (f64buf_load(src, (r - 1) * N + c) + f64buf_load(src, (r + 1) * N + c)
+             + f64buf_load(src, r * N + c - 1) + f64buf_load(src, r * N + c + 1)) / 4.0
+      f64buf_store(dst, r * N + c, v)
+      c += 1
+    }
+    r += 1
+  }
+  int(f64buf_load(dst, 3 * N + 3))
+}
+
+if stencil() == 0 { 0 } else { 1 }
+NY
+}

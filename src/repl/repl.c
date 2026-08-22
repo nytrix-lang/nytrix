@@ -1,3 +1,7 @@
+/*
+ * REPL main: read-eval-print loop orchestration, command dispatch
+ * (:help, :quit, :load), and the interactive compiler bridge.
+ */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -1506,9 +1510,11 @@ static char *repl_snapshot_payload_copy(const char *src) {
   return ny_strdup(payload);
 }
 
-/* New snapshots bind their header to the payload before it enters the
+/*
+ * New snapshots bind their header to the payload before it enters the
  * persistent REPL engine. Old v1 source-only snapshots intentionally remain
- * readable: the identity fields are an additive corruption/staleness guard. */
+ * readable: the identity fields are an additive corruption/staleness guard.
+ */
 static bool repl_snapshot_identity_matches(const char *src, const char *payload) {
   if (!src || !payload)
     return false;
@@ -1518,9 +1524,11 @@ static bool repl_snapshot_identity_matches(const char *src, const char *payload)
   const char *format_v2 = strstr(src, REPL_SNAPSHOT_FORMAT_V2);
   const char *fingerprint = strstr(src, REPL_SNAPSHOT_FINGERPRINT);
   const char *bytes = strstr(src, REPL_SNAPSHOT_BYTES);
-  /* Source-v1 snapshots had no integrity lines.  A declared source-v2 image
+  /*
+   * Source-v1 snapshots had no integrity lines.  A declared source-v2 image
    * must not silently downgrade to that compatibility path when truncation or
-   * editing removes one of its required header fields. */
+   * editing removes one of its required header fields.
+   */
   if (!fingerprint && !bytes)
     return format_v2 == NULL || format_v2 >= begin;
   if (format_v2 && format_v2 >= begin)

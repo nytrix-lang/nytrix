@@ -1,3 +1,21 @@
+/*
+ * CLI option definitions, parsing, validation, and --help output for
+ * the ny compiler and all bundled tools (test, perf, fmt, doc, make).
+ *
+ * All public performance/runtime flags are now documented CLI options with
+ * --help coverage (--zero-init, --plain-repl, --hot-reload, --watch,
+ * --watch-poll, --jit-fast-isel, --jit-opt-level, --jit-code-model,
+ * --jit-perf-map).  The remaining NYTRIX_* environment variables are
+ * deliberately internal: build-time toggles, diagnostics, or experimental
+ * probes that carry no stability contract and are not intended as public
+ * API surfaces.
+ *
+ * Argument-matrix coverage: reject cases live under
+ * etc/tests/errors/args/ (invalid flag values must fail with their
+ * diagnostic); accept cases live under etc/tests/runtime/args/ (valid
+ * values must compile and run).  Both categories are exercised by
+ * `./make test`.
+ */
 #include "base/options.h"
 #include <errno.h>
 #include "base/common.h"
@@ -208,6 +226,29 @@ static bool ny_parse_type_solver(const char *raw, ny_type_solver_t *out) {
   return false;
 }
 
+static bool ny_parse_proof_solver(const char *raw, ny_proof_solver_t *out) {
+  if (!raw || !*raw || !out)
+    return false;
+  if (strcmp(raw, "none") == 0 || strcmp(raw, "off") == 0) {
+    *out = NY_PROOF_SOLVER_NONE;
+    return true;
+  }
+  if (strcmp(raw, "presburger") == 0 || strcmp(raw, "fm") == 0 ||
+      strcmp(raw, "fourier-motzkin") == 0) {
+    *out = NY_PROOF_SOLVER_PRESBURGER;
+    return true;
+  }
+  if (strcmp(raw, "z3") == 0) {
+    *out = NY_PROOF_SOLVER_Z3;
+    return true;
+  }
+  if (strcmp(raw, "auto") == 0) {
+    *out = NY_PROOF_SOLVER_AUTO;
+    return true;
+  }
+  return false;
+}
+
 static bool ny_parse_native_backend(const char *raw, ny_native_backend_t *out) {
   if (!raw || !*raw || !out)
     return false;
@@ -375,6 +416,22 @@ static void ny_set_native_backend_or_die(ny_options *opt, const char *value,
   }
   opt->native_backend_raw = ny_native_backend_name(opt->native_backend);
   opt->native_backend_explicit = true;
+}
+
+/*
+ * Produced host artifacts use the owned native encoder unless the caller
+ * explicitly selected a backend. Interactive execution remains a managed/JIT
+ * workflow because it supports source shapes outside the native contract.
+ */
+static void ny_select_host_native_backend_for_artifact(ny_options *opt,
+                                                       const char *argv0) {
+  if (!opt || opt->native_backend_explicit)
+    return;
+#if defined(__x86_64__) || defined(_M_X64)
+  ny_set_native_backend_or_die(opt, "x86_64", argv0);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  ny_set_native_backend_or_die(opt, "aarch64", argv0);
+#endif
 }
 
 static void ny_set_native_abi_or_die(ny_options *opt, const char *value,
@@ -681,7 +738,8 @@ static void ny_sync_opt_profile_env(ny_options *opt) {
     ny_setenv("NYTRIX_PRINT_PROVEN_INT_FAST", "1", 0);
     ny_setenv("NYTRIX_PRINT_PROVEN_STR_FAST", "1", 0);
     ny_setenv("NYTRIX_RAW_INT_EXPR_FAST", "1", 0);
-    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST_OPS", "add,sub,mul,div,mod", 0);
+    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST_OPS",
+              "add,sub,mul,div,mod,and,or,xor,shl,shr,lt,le,gt,ge,eq,ne", 0);
     ny_setenv("NYTRIX_MONO_LIST_ARGS", "1", 0);
     ny_setenv("NYTRIX_MONO_IMPERATIVE", "1", 0);
   }
@@ -690,13 +748,24 @@ static void ny_sync_opt_profile_env(ny_options *opt) {
     ny_setenv("NYTRIX_PROVEN_INT_CAST_FAST", "1", 0);
     ny_setenv("NYTRIX_PROVEN_INT_BRANCH_FAST", "1", 0);
     ny_setenv("NYTRIX_PROVEN_INT_MOD_FAST", "1", 0);
+    /*
+     * Raw tagged-int expression lowering (elides the dynamic tag check and
+     * its slow BigInt fallback NIR for proven-int operands) is valuable at
+     * every runtime-oriented tier, not just Z3-proven peak.
+     */
+    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST", "1", 0);
+    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST_OPS",
+              "add,sub,mul,div,mod,and,or,xor,shl,shr,lt,le,gt,ge,eq,ne", 0);
   }
   if (profile == NY_OPT_PROFILE_PEAK) {
     ny_setenv("NYTRIX_MONO_IMPERATIVE", "1", 0);
-    ny_setenv("NYTRIX_PROVEN_RAW_INT_EXPR_FAST", "1", 0);
+    /*
+     * The separate PROVEN path lacks a complete small-int proof.
+     */
     ny_setenv("NYTRIX_RAW_INT_EXPR_FAST", "1", 0);
     ny_setenv("NYTRIX_RAW_INT_SLOT_EXPR_FAST", "1", 0);
-    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST_OPS", "add,sub,mul,div,mod", 0);
+    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST_OPS",
+              "add,sub,mul,div,mod,and,or,xor,shl,shr,lt,le,gt,ge,eq,ne", 0);
   }
 }
 
@@ -715,14 +784,18 @@ static const char *ny_option_value_or_die(const char *arg, const char *flag,
   exit(1);
 }
 
-/* Parse a --safe-run value string:
+/*
+ * Parse a --safe-run value string:
  * "cpu:10,wall:15,rss:256m,output:16m,files:128,nproc:32"
  * Units: seconds (default), k/K=KiB, m/M=MiB, g/G=GiB.  Unknown keys
  * produce a warning and are skipped.  An empty string sets safe defaults
- * (cpu=30s, rss=512m, files=256, nproc=64, process group containment). */
+ * (cpu=30s, rss=512m, files=256, nproc=64, process group containment).
+ */
 void ny_safe_run_parse(const char *spec, ny_safe_run_t *sr, const char *argv0) {
   (void)argv0;
-  /* Apply safe defaults when called with empty/NULL or "defaults" */
+  /*
+   * Apply safe defaults when called with empty/NULL or "defaults"
+   */
   if (!spec || !*spec || strcmp(spec, "defaults") == 0) {
     sr->cpu_seconds = 30;
     sr->wall_seconds = 30;
@@ -743,7 +816,9 @@ void ny_safe_run_parse(const char *spec, ny_safe_run_t *sr, const char *argv0) {
   if (sr->telemetry_window <= 0)
     sr->telemetry_window = 3;
 
-  /* Make a mutable copy for strtok_r. */
+  /*
+   * Make a mutable copy for strtok_r.
+   */
   size_t len = strlen(spec);
   char *buf = (char *)malloc(len + 1);
   if (!buf) {
@@ -765,12 +840,16 @@ void ny_safe_run_parse(const char *spec, ny_safe_run_t *sr, const char *argv0) {
     }
     *val++ = '\0';
 
-    /* Trim whitespace from key */
+    /*
+     * Trim whitespace from key
+     */
     while (*key == ' ') key++;
     char *kend = key + strlen(key) - 1;
     while (kend > key && *kend == ' ') *kend-- = '\0';
 
-    /* Parse numeric value with optional suffix */
+    /*
+     * Parse numeric value with optional suffix
+     */
     char *end = NULL;
     errno = 0;
     unsigned long long n = strtoull(val, &end, 10);
@@ -779,7 +858,9 @@ void ny_safe_run_parse(const char *spec, ny_safe_run_t *sr, const char *argv0) {
       free(buf);
       exit(1);
     }
-    /* Check for unit suffix */
+    /*
+     * Check for unit suffix
+     */
     uint64_t multiplier = 1;
     if (end && *end) {
       switch (*end) {
@@ -1176,6 +1257,20 @@ static void ny_set_type_solver_or_die(ny_options *opt, const char *value,
   opt->type_solver_raw = value;
 }
 
+static void ny_set_proof_solver_or_die(ny_options *opt, const char *value,
+                                       const char *argv0) {
+  ny_proof_solver_t solver = NY_PROOF_SOLVER_AUTO;
+  if (!ny_parse_proof_solver(value, &solver)) {
+    fprintf(stderr,
+            "invalid proof solver: %s (expected none|presburger|z3|auto)\n",
+            value ? value : "(null)");
+    ny_options_usage(argv0);
+    exit(1);
+  }
+  opt->proof_solver = solver;
+  opt->proof_solver_raw = value;
+}
+
 static bool ny_options_apply_common_codegen_option(ny_options *opt,
                                                    const char *a, int *i,
                                                    int argc, char **argv,
@@ -1220,6 +1315,11 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     ny_set_type_solver_or_die(opt, value, argv0);
     return true;
   }
+  if ((value = ny_option_value_or_die(a, "--proof-solver", i, argc, argv,
+                                      argv0)) != NULL) {
+    ny_set_proof_solver_or_die(opt, value, argv0);
+    return true;
+  }
   if ((value = ny_option_value_or_die(a, "--native-backend", i, argc, argv,
                                       argv0)) != NULL) {
     ny_set_native_backend_or_die(opt, value, argv0);
@@ -1259,6 +1359,41 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
         ny_parse_nonneg_int_or_die(value, "native cache score", argv0);
     return true;
   }
+  if ((value = ny_option_value_or_die(a, "--watch-poll", i, argc, argv,
+                                      argv0)) != NULL) {
+    int poll_ms =
+        ny_parse_nonneg_int_or_die(value, "watch poll interval", argv0);
+    if (poll_ms > 60000) {
+      fprintf(stderr, "invalid watch poll interval: %d (max 60000 ms)\n", poll_ms);
+      ny_options_usage(argv0);
+      exit(1);
+    }
+    opt->watch_poll_ms = poll_ms;
+    return true;
+  }
+  if ((value = ny_option_value_or_die(a, "--jit-opt-level", i, argc, argv,
+                                      argv0)) != NULL) {
+    int lvl = ny_parse_nonneg_int_or_die(value, "JIT opt level", argv0);
+    if (lvl > 3) {
+      fprintf(stderr, "invalid JIT opt level: %d (max 3)\n", lvl);
+      ny_options_usage(argv0);
+      exit(1);
+    }
+    opt->jit_opt_level = lvl;
+    return true;
+  }
+  if ((value = ny_option_value_or_die(a, "--jit-code-model", i, argc, argv,
+                                      argv0)) != NULL) {
+    if (strcmp(value, "small") != 0 && strcmp(value, "kernel") != 0 &&
+        strcmp(value, "medium") != 0 && strcmp(value, "large") != 0) {
+      fprintf(stderr, "%s: --jit-code-model: expected small|kernel|medium|large, got '%s'\n",
+              argv0, value);
+      ny_options_usage(argv0);
+      exit(1);
+    }
+    opt->jit_code_model = value;
+    return true;
+  }
   if (strcmp(a, "--native-prefer-vm") == 0) {
     opt->native_prefer_vm = true;
     opt->native_prefer_asm = false;
@@ -1280,6 +1415,10 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
   }
   if (strcmp(a, "--native-enable-cf-mem2reg") == 0) {
     opt->native_enable_cf_mem2reg = true;
+    return true;
+  }
+  if (strcmp(a, "-flto") == 0 || strcmp(a, "--llvm-lto") == 0) {
+    opt->llvm_lto = true;
     return true;
   }
   if (strcmp(a, "--native-disable-cf-mem2reg") == 0) {
@@ -1433,8 +1572,6 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
   if (strncmp(a, "--native-tv-seed=", 17) == 0) {
     opt->native_tv_seed_trials =
         ny_parse_nonneg_int_or_die(a + 17, "native TV seed trials", argv0);
-    if (opt->native_tv_seed_trials <= 0)
-      opt->native_tv_seed_trials = 16;
     return true;
   }
   if (strncmp(a, "--nyir-run=", 11) == 0) {
@@ -1508,6 +1645,14 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
   }
   if (strncmp(a, "--emit-asm=", 11) == 0) {
     opt->emit_asm_path = a + 11;
+    return true;
+  }
+  if (strncmp(a, "--emit-wasm=", 12) == 0) {
+    opt->emit_wasm_path = a + 12;
+    return true;
+  }
+  if (strcmp(a, "--emit-wasm") == 0) {
+    opt->emit_wasm_path = "a.out.wasm";
     return true;
   }
   if (strcmp(a, "-emit-only") == 0) {
@@ -1709,6 +1854,12 @@ static bool ny_options_apply_toggle(ny_options *opt, const char *a) {
       {"--plain-repl", offsetof(ny_options, repl_plain), 1, NY_OPT_TOGGLE_BOOL},
       {"--zero-init", offsetof(ny_options, zero_init), 1, NY_OPT_TOGGLE_BOOL},
       {"--no-zero-init", offsetof(ny_options, zero_init), 0, NY_OPT_TOGGLE_BOOL},
+      {"--jit-fast-isel", offsetof(ny_options, jit_fast_isel), 1, NY_OPT_TOGGLE_BOOL},
+      {"--no-jit-fast-isel", offsetof(ny_options, jit_fast_isel), 0, NY_OPT_TOGGLE_BOOL},
+      {"--jit-perf-map", offsetof(ny_options, jit_perf_map), 1, NY_OPT_TOGGLE_BOOL},
+      {"--no-jit-perf-map", offsetof(ny_options, jit_perf_map), 0, NY_OPT_TOGGLE_BOOL},
+      {"--hot-reload", offsetof(ny_options, hot_reload), 1, NY_OPT_TOGGLE_BOOL},
+      {"--watch", offsetof(ny_options, watch_files), 1, NY_OPT_TOGGLE_BOOL},
       {NULL, 0, 0, NY_OPT_TOGGLE_BOOL}};
   for (size_t i = 0; toggles[i].name; ++i) {
     if (strcmp(a, toggles[i].name) != 0)
@@ -1755,6 +1906,8 @@ void ny_options_init(ny_options *opt) {
   opt->stop_after = NY_STOP_AFTER_NONE;
   opt->type_solver = NY_TYPE_SOLVER_AUTO;
   opt->type_solver_raw = "auto";
+  opt->proof_solver = NY_PROOF_SOLVER_AUTO;
+  opt->proof_solver_raw = "auto";
   opt->native_backend = NY_NATIVE_BACKEND_LLVM;
   opt->native_backend_raw = "llvm";
   opt->native_abi = NY_NATIVE_ABI_AUTO;
@@ -1767,8 +1920,11 @@ void ny_options_init(ny_options *opt) {
   opt->native_cache_score = -1;
   opt->native_prefer_vm = false;
   opt->native_prefer_asm = false;
-  /* CF mem2reg is on by default: idom fix + RPO rename before SCCP
-   * make loop-carried locals safe. Disable with --native-disable-cf-mem2reg. */
+  opt->llvm_lto = false;
+  /*
+   * CF mem2reg is on by default: idom fix + RPO rename before SCCP
+   * make loop-carried locals safe. Disable with --native-disable-cf-mem2reg.
+   */
   opt->native_enable_cf_mem2reg = true;
   opt->nyir_run_max_steps = -1;
   opt->nyir_run_recursion_limit = -1;
@@ -1878,6 +2034,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_MAGENTA, "--borrow-check", "Enable advisory borrow/ownership diagnostics without RAII cleanup"},
       {NY_CLR_MAGENTA, "--no-borrow-check", "Disable borrow/ownership diagnostics"},
       {NY_CLR_MAGENTA, "--raii", "Alias for --ownership"},
+      {NY_CLR_MAGENTA, "--zero-init/--no-zero-init",
+       "Zero all managed heap allocations (default: off)"},
       {NY_CLR_MAGENTA, "Note",
        "Typed contracts are non-null by default (nil requires ?T or *T)"},
       {NULL, NULL, NULL}});
@@ -1933,7 +2091,7 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_GREEN, "--native-oracle-fuzz=N",
        "Generate N deterministic scalar NYIR programs and oracle-check each"},
       {NY_CLR_GREEN, "--native-tv-seed[=N]",
-       "After each NYIR pass, differential-eval pure i64 straight-line before/after (default N=16)"},
+       "After each NYIR pass, validate pure i64 NYIR (default N=16; N=0 disables)"},
       {NY_CLR_GREEN, "--c-frontend=C", "C frontend: auto | libclang | nytrix"},
       {NY_CLR_GREEN, "--arm-float-abi=A", "ARM ABI: soft | softfp | hard"},
       {NY_CLR_GREEN, "--host-cflags=F", "Extra host compiler flags"},
@@ -1964,6 +2122,14 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_GREEN, "--jit", "Run through LLVM JIT instead of native AOT"},
       {NY_CLR_GREEN, "--jit-engine=ENGINE",
        "LLVM JIT engine: orc | mcjit (default: mcjit)"},
+      {NY_CLR_GREEN, "--jit-fast-isel/--no-jit-fast-isel",
+       "Enable/disable JIT fast instruction selection"},
+      {NY_CLR_GREEN, "--jit-opt-level=N",
+       "JIT optimization level (0..3, default: 0)"},
+      {NY_CLR_GREEN, "--jit-code-model=M",
+       "LLVM JIT code model: small | kernel | medium | large"},
+      {NY_CLR_GREEN, "--jit-perf-map",
+       "Emit /tmp/perf-<pid>.map for Linux perf profiling"},
       {NY_CLR_GREEN, "--safe-run[=LIMITS]",
        "Run with CPU/memory/file/process limits (off by default)"},
       {NY_CLR_GREEN, "--sanitize=KIND",
@@ -1985,6 +2151,10 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
        "Execute inline code (`;` starts a comment; use shell newlines)"},
       {NY_CLR_GREEN, "-ic/-ci <code>, --eval-repl <code>",
        "Execute inline code, then enter the REPL"},
+      {NY_CLR_GREEN, "--hot-reload / --watch",
+       "Recompile and rerun on detected source changes"},
+      {NY_CLR_GREEN, "--watch-poll=N",
+       "File-watch polling interval in ms (default: 250)"},
       {NULL, NULL, NULL}});
   ny_usage_section("STDLIB");
   ny_usage_items((const ny_usage_entry_t[]){
@@ -2007,6 +2177,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_GREEN, "-i, --interactive",
        "Interactive REPL with line editing"},
       {NY_CLR_GREEN, "--repl", "Read source from stdin (one-shot)"},
+      {NY_CLR_GREEN, "--plain-repl",
+       "Disable line editing and ANSI escapes in the REPL"},
       {NULL, NULL, NULL}});
   ny_usage_section("DEBUGGING");
   ny_usage_items((const ny_usage_entry_t[]){
@@ -2032,6 +2204,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_BLUE, "--stop-after=STAGE",
        "Stop after parse|hm|trait|flow|abi|opt"},
       {NY_CLR_BLUE, "--type-solver=MODE", "Type solver: auto | hm | z3"},
+      {NY_CLR_BLUE, "--proof-solver=MODE",
+       "Proof solver: none | presburger | z3 | auto"},
       {NY_CLR_BLUE, "--emit-artifact=PATH",
        "Write the selected stage artifact JSON"},
       {NY_CLR_BLUE, "--verify-artifact=PATH",
@@ -2120,7 +2294,9 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_BLUE, "--native-prefer-vm / --native-prefer-asm",
        "Select the preferred native debug tier"},
       {NY_CLR_BLUE, "--native-tier-report[=PATH]",
-       "Write native tier facts and backend recommendation"},
+       "Write native tier/static-island cost facts and backend recommendation"},
+      {NY_CLR_BLUE, "-flto / --llvm-lto",
+       "Optimize linked LLVM module bitcode as a whole program"},
       {NY_CLR_BLUE, "--native-enable-cf-mem2reg",
        "Compatibility spelling for the default control-flow NYIR mem2reg pass"},
       {NY_CLR_BLUE, "--dump-on-error",
@@ -2137,6 +2313,14 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_BLUE, "-h, -help, --help", "Show this help message"},
       {NY_CLR_BLUE, "--help env", "Show supported environment variables"},
       {NY_CLR_BLUE, "-version", "Show version info"},
+      {NY_CLR_BLUE, "--doctor", "Run system toolchain diagnostics"},
+      {NY_CLR_BLUE, "--env", "Print effective paths, toolchain, and overrides"},
+      {NY_CLR_BLUE, "--targets", "List cross-compilation target presets"},
+      {NY_CLR_BLUE, "--wasm-info=<path>", "Show imports/exports of a .wasm binary"},
+      {NY_CLR_BLUE, "--profile-time", "Profile compilation: run N times and show timing (use --runs=N)"},
+      {NY_CLR_BLUE, "--wasm", "Compile to WebAssembly (shorthand for --native-backend=wasm --host-triple=wasm32-unknown-unknown)"},
+      {NY_CLR_BLUE, "--cross=<triple>", "Cross-compile with auto-detected toolchain (--cross-run to execute with QEMU)"},
+      {NY_CLR_BLUE, "--emit-wasm[=PATH]", "Emit .wasm binary via clang (requires --wasm or --native-backend=wasm)"},
       {NULL, NULL, NULL}});
   if (show_env) {
     ny_usage_section("ENVIRONMENT");
@@ -2180,6 +2364,9 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
          "Demand-emit imported stdlib bodies for user programs"},
         {NY_CLR_YELLOW, "NYTRIX_HM_DEBUG",
          "Trace HM diagnostics and fallback decisions"},
+        {NY_CLR_YELLOW, "NYTRIX_PROOF_DEBUG / NY_PROOF_DEBUG",
+         "Trace the proof system: 1 = lemma resolution + prove/assert path "
+         "decisions, 2 = ranges/digests/solver, 3 = canon-decide recursion"},
         {NY_CLR_YELLOW, "NYTRIX_DYNAMIC_INT_BINOPS",
          "Guard unproven std integer operators with inline tag fast paths"},
         {NY_CLR_YELLOW, "NYTRIX_RUNTIME_OPT",
@@ -2190,6 +2377,10 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
          "Let ./make ny replace itself with ny"},
         {NY_CLR_YELLOW, "NYTRIX_LINK_UI_DEFAULTS",
          "Link Linux X11/Wayland defaults for UI programs"},
+        {NY_CLR_YELLOW, "NYTRIX_CC",
+         "Override the C compiler (set by --cross=<triple>)"},
+        {NY_CLR_YELLOW, "NYTRIX_CROSS_RUNNER",
+         "QEMU or Wine runner for cross-compiled binaries (set by --cross-run)"},
         {NULL, NULL, NULL}});
   }
   ny_usage_section("EXAMPLES");
@@ -2281,10 +2472,12 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
           strcmp(a, "--safe") == 0) {
         opt->safe_mode = true;
       } else if (strcmp(a, "--native-only") == 0) {
-        /* Preserve an explicitly selected backend regardless of flag order.
+        /*
+         * Preserve an explicitly selected backend regardless of flag order.
          * The pipeline diagnoses an incompatible LLVM/native-only pairing;
          * silently replacing it with the host encoder makes `--native-backend`
-         * misleading and can select an unrelated cached artifact. */
+         * misleading and can select an unrelated cached artifact.
+         */
         if (!opt->native_backend_explicit) {
 #if defined(__x86_64__) || defined(_M_X64)
           ny_set_native_backend_or_die(opt, "x86_64", argv[0]);
@@ -2446,8 +2639,6 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       } else if (strncmp(a, "--native-tv-seed=", 17) == 0) {
         opt->native_tv_seed_trials = ny_parse_nonneg_int_or_die(
             a + 17, "native TV seed trials", argv[0]);
-        if (opt->native_tv_seed_trials <= 0)
-          opt->native_tv_seed_trials = 16;
       } else if (strncmp(a, "--nyir-run=", 11) == 0) {
         opt->native_dump_ir = true;
         opt->nyir_run = true;
@@ -2751,7 +2942,9 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         if (!opt->heap_policy_explicit)
           opt->heap_policy = NY_HEAP_RAII;
       } else if (strcmp(a, "--borrow-check") == 0) {
-        /* Explicitly retain the default advisory provenance pass. */
+        /*
+         * Explicitly retain the default advisory provenance pass.
+         */
         opt->borrow_check = true;
       } else if (strcmp(a, "--no-ownership-strict") == 0 ||
                  strcmp(a, "--no-borrow-check") == 0) {
@@ -2858,6 +3051,8 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
   }
   if (opt->output_file)
     opt->emit_only = true;
+  if (opt->output_file || opt->run_aot)
+    ny_select_host_native_backend_for_artifact(opt, opt->argv0 ? opt->argv0 : "ny");
   if (opt->run_aot)
     opt->run_jit = false;
   else if (opt->emit_only)

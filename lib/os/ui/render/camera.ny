@@ -155,7 +155,7 @@ fn fit_camera_space_pose(f64 tcx, f64 tcy, f64 tcz, f64 span_x, f64 span_y, f64 
       span_x, span_y, span_z,
       fit_fov_deg, aspect,
       yaw_deg, pitch_deg,
-   1.08, 0.06, 0.035, 1.18)
+      1.08, 0.06, 0.035, 1.18)
 }
 
 fn env_float_range(str name, f64 lo, f64 hi, f64 fallback) f64 {
@@ -199,7 +199,7 @@ fn fit_bounds_pose(f64 tcx, f64 tcy, f64 tcz, f64 span_x, f64 span_y, f64 span_z
       float(span_x), float(span_y), float(span_z),
       float(fov_deg), float(aspect),
       float(yaw_deg), float(pitch_deg),
-   float(margin_mul), 0.08, 0.05, 1.20)
+      float(margin_mul), 0.08, 0.05, 1.20)
 }
 
 fn angle_state(f64 sane_cam_x, f64 sane_cam_y, f64 sane_cam_z, f64 sane_target_x, f64 sane_target_y, f64 sane_target_z, f64 yaw, f64 pitch) list {
@@ -273,7 +273,7 @@ fn _auto_fit_state(f64 min_x, f64 min_y, f64 min_z, f64 max_x, f64 max_y, f64 ma
    safe_fov = clamp(safe_fov * float(shape.get("fov_mul", 1.0)), 15.0, 120.0)
    def pose = fit_bounds_pose(tcx, tcy, tcz,
       float(shape.get("span_x", span_x)), float(shape.get("span_y", span_y)), float(shape.get("span_z", span_z)),
-   safe_fov, safe_aspect, yaw, pitch, margin)
+      safe_fov, safe_aspect, yaw, pitch, margin)
    mut cam_x, cam_y = float(pose.get("x", tcx)), float(pose.get("y", tcy))
    mut cam_z = float(pose.get("z", tcz + max(span_x, max(span_y, span_z))))
    if dump_pose {

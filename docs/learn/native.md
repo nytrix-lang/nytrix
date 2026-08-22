@@ -1,4 +1,5 @@
-# Native interop
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":40,"summary":"Build, inspect, and troubleshoot native Nytrix programs across supported targets."} -->
+# Native
 
 Native interop uses layouts, externs, pointers, handles, ownership rules, and
 small boundary checks.
@@ -6,11 +7,11 @@ small boundary checks.
 Keep native wrappers explicit. A wrapper states the ABI shape, error shape, and
 ownership shape close to the declaration that crosses the boundary.
 
-Native execution does not change Nytrix semantics. Choose `--native-only` to
-check a supported program on Nytrix's native path, or use `-run`/`-o` when you
-need an executable. If a feature is not supported on the selected native path,
-the compiler reports that boundary instead of silently choosing a different
-mode.
+Native execution does not change Nytrix semantics. On supported hosts,
+`-run` and `-o` select the owned native object encoder by default; choose
+`--native-only` to require the native path from lowering through execution.
+If a feature is not supported on the selected native path, the compiler reports
+that boundary instead of silently choosing a different mode.
 
 ## Boundary contract
 
@@ -129,12 +130,27 @@ In safe mode, raw memory operations on compiler-tracked allocations must prove
 their byte range. Scoped buffers make the lifetime explicit:
 
 ```ny
-with ptr: buf = malloc(16){
+with ptr buf = malloc(16){
    def int off = 4
    assert_compile_range(off, 0, 15, "buffer byte offset")
    store8(buf, 1, off)
 }
 ```
+
+## Optimized debugging
+
+Native debug information is best-effort after optimization. Source line/file
+locations remain attached to NYIR diagnostics where available, and emitted
+symbols are intended to stay useful to debuggers and profilers, but an
+optimized binary does not promise one machine instruction per source statement
+or a continuously materialized location for every local variable. Inlining,
+constant folding, scalar replacement, register allocation, and dead-code
+elimination can merge, move, or erase source-level values.
+
+For source-faithful triage, reproduce with a lower optimization level and use
+NYIR/LLVM dumps to correlate the optimized form. Treat a missing optimized local
+or a line that covers several machine instructions as an optimization/debug-info
+limitation unless the unoptimized mapping is also wrong.
 
 ## Checks
 
@@ -160,6 +176,6 @@ import path works. That confirms the names users import from the wrapper.
 
 ## Related
 
-- [native.md](../spec/native.md) for the exact language boundary.
-- [runtime.md](../spec/runtime.md) for ownership and cleanup forms.
-- [troubleshooting.md](troubleshooting.md) for native crash triage.
+- [Native](../spec/native.md) for the exact language boundary.
+- [Runtime](../spec/runtime.md) for ownership and cleanup forms.
+- [Troubleshooting](troubleshooting.md) for native crash triage.

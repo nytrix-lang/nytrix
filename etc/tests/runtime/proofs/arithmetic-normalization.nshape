@@ -1,0 +1,51 @@
+shape proof_arithmetic_normalization {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "normalization", "arithmetic"]
+  template ny-test-case
+  flags "--color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+;; Arithmetic proof propositions normalize to stable canonical forms and
+;; matching proof digests.
+
+;; Comparison normalization: 5>3 and 3<5 → same canonical form
+def proof gt_witness = prove(5 > 3, "gt")
+def proof lt_witness = prove(3 < 5, "lt")
+assert(proof_matches(gt_witness, 5 > 3), "gt self-match")
+assert(proof_matches(lt_witness, 3 < 5), "lt self-match")
+assert(proof_matches(gt_witness, 3 < 5), "gt matches lt after normalization")
+
+;; Commutative sorting: a+b and b+a → same canonical form
+def proof add_37 = prove(3 + 7 == 10, "3+7")
+def proof add_73 = prove(7 + 3 == 10, "7+3")
+assert(proof_matches(add_37, 7 + 3 == 10), "add commutative")
+
+;; Identity folding in canonical form
+def proof id_add = prove(42 + 0 == 42, "identity add")
+def proof id_mul = prove(7 * 1 == 7, "identity mul")
+assert(proof_matches(id_add, 42 == 42), "identity add digest")
+assert(proof_matches(id_mul, 7 == 7), "identity mul digest")
+
+;; Boolean normalization: !true→false, !!true→true
+def proof not_true = prove(!true == false, "not true")
+def proof not_not = prove(!!true == true, "double not")
+
+;; Constant folding: arithmetic folds to same canonical form
+def proof fold_add = prove(2 + 3 == 5, "fold add")
+def proof fold_mul = prove(3 * 7 == 21, "fold mul")
+assert(proof_matches(fold_add, 5 == 5), "fold add digest")
+assert(proof_matches(fold_mul, 21 == 21), "fold mul digest")
+
+;; Negation normalization
+def proof neg7 = prove(-7 == -7, "neg literal")
+
+;; Distribution (3*(10+20) == 90 via folded canonical form)
+def proof dist = prove(3 * (10 + 20) == 90, "distribute")
+assert(proof_matches(dist, 90 == 90), "distribute digest")
+
+assert(true, "arithmetic normalization complete")
+NY
+}

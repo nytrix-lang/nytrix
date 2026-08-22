@@ -1,3 +1,7 @@
+/*
+ * Compilation cache: keyed storage of compiled artifacts (IR, BC,
+ * native objects) with invalidation based on source and flag hashes.
+ */
 #include "wire/cache.h"
 #include "wire/build.h"
 #include "base/common.h"
@@ -366,8 +370,13 @@ int ny_cache_clean(void) {
 
 bool ny_jit_cache_enabled(void) { return ny_env_enabled_default_on("NYTRIX_JIT_CACHE"); }
 
-enum { NY_JIT_CACHE_VERSION = 27 };
-enum { NY_STD_BC_CACHE_VERSION = 15 };
+enum { NY_JIT_CACHE_VERSION = 28 };
+/*
+ * Bitcode cache entries are invalidated whenever the cache protocol changes.
+ * Keep this independent from LLVM_VERSION_STRING: distributions can rebuild
+ * the same LLVM patch release with incompatible bitcode producers/readers.
+ */
+enum { NY_STD_BC_CACHE_VERSION = 16 };
 
 static bool ny_cache_strict_file_id_enabled(void) {
   return ny_env_enabled("NYTRIX_CACHE_STRICT_FILE_ID");
@@ -703,16 +712,20 @@ bool ny_cache_artifact_manifest_valid(const char *cache_path, const char *source
   size_t bytes = 0;
   int fields = fscanf(in, "nytrix-artifact-manifest-v1 %llx %zu", &fingerprint, &bytes);
   fclose(in);
-  /* Do not let a bad sidecar turn into a soft cache hit. Removing both sides
+  /*
+   * Do not let a bad sidecar turn into a soft cache hit. Removing both sides
    * makes the next compilation the single recovery path and keeps LLVM/native
-   * loaders away from an artifact with unknown provenance. */
+   * loaders away from an artifact with unknown provenance.
+   */
   if (fields != 2 || (uint64_t)fingerprint != ny_cache_semantic_fingerprint(source) ||
       bytes != strlen(source)) {
     remove(cache_path);
     remove(path);
-    /* Native JIT images are derived from bitcode. They must not survive a
+    /*
+     * Native JIT images are derived from bitcode. They must not survive a
      * rejected bitcode manifest, otherwise a repaired sidecar could bless a
-     * stale shared object without ever rebuilding it. */
+     * stale shared object without ever rebuilding it.
+     */
     ny_cache_remove_native_sibling(cache_path);
     return false;
   }
@@ -726,9 +739,11 @@ bool ny_cache_artifact_manifest_save(const char *cache_path, const char *source)
   char content[128];
   int n = snprintf(content, sizeof(content), "nytrix-artifact-manifest-v1 %016llx %zu\n",
                    (unsigned long long)ny_cache_semantic_fingerprint(source), strlen(source));
-  /* Publish after the artifact rename succeeds. A reader that sees an
+  /*
+   * Publish after the artifact rename succeeds. A reader that sees an
    * artifact without this sidecar treats it as a miss instead of racing a
-   * writer or accepting an entry produced by an older cache protocol. */
+   * writer or accepting an entry produced by an older cache protocol.
+   */
   return n > 0 && (size_t)n < sizeof(content) &&
          ny_write_text_file_atomic(path, content, (size_t)n);
 }
@@ -781,6 +796,21 @@ bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx, LLVMModuleRef
 bool ny_jit_cache_save(const char *cache_path, LLVMModuleRef module) {
   if (!cache_path || !module)
     return false;
+  /*
+   * Do not publish a module that LLVM itself cannot verify.  Some FFI-heavy
+   * programs can execute through the live JIT despite an ABI-typed call that
+   * cannot survive an LLVM bitcode round trip; caching that module turns a
+   * working first run into an "Invalid record" failure on the next run.
+   */
+  char *verify_msg = NULL;
+  if (LLVMVerifyModule(module, LLVMReturnStatusAction, &verify_msg) != 0) {
+    if (ny_trace_cache_enabled())
+      fprintf(stderr, "[cache] refusing invalid LLVM module: %s\n",
+              verify_msg ? verify_msg : "verification failed");
+    if (verify_msg)
+      LLVMDisposeMessage(verify_msg);
+    return false;
+  }
 
   if (ny_cache_path_is_ir(cache_path)) {
     char *ir = LLVMPrintModuleToString(module);
@@ -845,10 +875,12 @@ bool ny_jit_cache_save_ir(const char *cache_path, LLVMModuleRef module) {
 
 #ifndef _WIN32
 static bool ny_jit_cache_use_native(void) {
-  /* Native artifacts are guarded by the matching bitcode manifest. Looking
+  /*
+   * Native artifacts are guarded by the matching bitcode manifest. Looking
    * for an existing validated artifact is cheap and avoids making every later
    * edit-loop invocation repeat LLVM code generation. Creation remains an
-   * explicit policy choice in the pipeline because it adds cold-start work. */
+   * explicit policy choice in the pipeline because it adds cold-start work.
+   */
   return true;
 }
 
@@ -856,6 +888,8 @@ char *ny_jit_native_cache_path(const char *bc_path) {
   if (!bc_path)
     return NULL;
   size_t len = strlen(bc_path);
+  if (len > SIZE_MAX - 4)
+    return NULL;
   char *path = malloc(len + 4);
   if (!path)
     return NULL;
@@ -959,14 +993,20 @@ bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module, int opt
 
 bool ny_jit_native_cache_enabled(void) { return ny_jit_cache_use_native(); }
 
-/* Stencil-native cache: persist raw JIT code as a minimal ELF .so
+/*
+ * Stencil-native cache: persist raw JIT code as a minimal ELF .so
  * using objcopy (binary→.o) + ld -shared, same pattern as the LLVM
- * native cache but without any LLVM dependency. */
-char *ny_jit_stencil_cache_path(const char *source, int opt_level) {
+ * native cache but without any LLVM dependency.
+ */
+char *ny_jit_stencil_cache_path(const char *source, int opt_level,
+                                const char *backend, const char *tier) {
   if (!source || !*source)
     return NULL;
-  uint64_t src_hash = ny_hash64(source, strlen(source));
-  uint64_t key = ny_hash64_u64(src_hash, (uint64_t)opt_level);
+  uint64_t key = ny_hash64(source, strlen(source));
+  key = ny_fnv1a64_cstr("ny-stencil-cache-v2", key);
+  key = ny_hash64_u64(key, (uint64_t)(unsigned)opt_level);
+  key = ny_fnv1a64_cstr(backend && *backend ? backend : "unknown", key);
+  key = ny_fnv1a64_cstr(tier && *tier ? tier : "auto", key);
   const char *root = ny_cache_root_dir();
   if (!root || !*root)
     return NULL;
@@ -999,9 +1039,10 @@ bool ny_jit_stencil_cache_load(const char *so_path, void **out_handle,
 }
 
 
-/* Toolless native ELF64 .so writer — no ld, objcopy, or external tools.
- * Writes a minimal ELF64 shared object directly from raw code bytes,
- * inspired by mold's direct-emit philosophy. */
+/*
+ * Toolless native ELF64 .so writer — no ld, objcopy, or external tools.
+ * Writes a minimal ELF64 shared object directly from raw machine code bytes.
+ */
 static bool elf64_write_u16(unsigned char *p, uint16_t v) { memcpy(p, &v, 2); return true; }
 static bool elf64_write_u32(unsigned char *p, uint32_t v) { memcpy(p, &v, 4); return true; }
 static bool elf64_write_u64(unsigned char *p, uint64_t v) { memcpy(p, &v, 8); return true; }
@@ -1011,7 +1052,9 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
   (void)entry_symbol; /* reserved for future per-symbol cache keying */
   if (!so_path || !code || code_len == 0)
     return false;
-  /* Ensure cache directory exists. */
+  /*
+   * Ensure cache directory exists.
+   */
   {
     char dir[1024];
     snprintf(dir, sizeof(dir), "%s", so_path);
@@ -1020,7 +1063,9 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
   }
   const char *sym_name = "_ny_top_entry";
   size_t name_len = strlen(sym_name) + 1; /* include NUL */
-  /* --- Layout --- */
+  /*
+   * Layout
+   */
   size_t ehdr_sz  = 64;
   size_t phdr2_sz = 2 * 56;               /* 2 program headers */
   size_t text_off = ehdr_sz + phdr2_sz;   /* 176, already 16-aligned */
@@ -1031,16 +1076,22 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
   size_t sym_cnt  = 2;                    /* NULL + entry */
   size_t sym_sz   = sym_cnt * 24;
   size_t hash_off = sym_off + ((sym_sz + 7) & ~(size_t)7);
-  /* Minimal .hash: header(8) + bucket(4)*nbucket + chain(4)*nchain */
+  /*
+   * Minimal .hash: header(8) + bucket(4)*nbucket + chain(4)*nchain
+   */
   size_t hash_sz  = 8 + 4 * 1 + 4 * sym_cnt; /* = 8+4+8 = 20 */
   size_t dyn_off  = hash_off + hash_sz;
-  /* 6 dynamic entries × 16 bytes = 96 */
+  /*
+   * 6 dynamic entries × 16 bytes = 96
+   */
   size_t dyn_cnt  = 6;
   size_t dyn_sz   = dyn_cnt * 16;
   size_t total    = dyn_off + dyn_sz;
   unsigned char *buf = (unsigned char *)calloc(1, total);
   if (!buf) return false;
-  /* --- ELF header --- */
+  /*
+   * ELF header
+   */
   buf[0] = 0x7f; buf[1]='E'; buf[2]='L'; buf[3]='F';
   buf[4] = 2;    /* ELFCLASS64 */
   buf[5] = 1;    /* ELFDATA2LSB */
@@ -1055,7 +1106,9 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
   elf64_write_u16(buf + 52, ehdr_sz); /* e_ehsize */
   elf64_write_u16(buf + 54, 56);      /* e_phentsize */
   elf64_write_u16(buf + 56, 2);       /* e_phnum */
-  /* --- Phdr[0]: PT_LOAD (RX) --- */
+  /*
+   * Phdr[0]: PT_LOAD (RX)
+   */
   {
     unsigned char *p = buf + ehdr_sz;
     elf64_write_u32(p + 0,  1);       /* p_type = PT_LOAD */
@@ -1067,7 +1120,9 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
     elf64_write_u64(p + 40, total);   /* p_memsz */
     elf64_write_u64(p + 48, 0x1000);  /* p_align */
   }
-  /* --- Phdr[1]: PT_DYNAMIC --- */
+  /*
+   * Phdr[1]: PT_DYNAMIC
+   */
   {
     unsigned char *p = buf + ehdr_sz + 56;
     elf64_write_u32(p + 0,  2);       /* p_type = PT_DYNAMIC */
@@ -1079,17 +1134,27 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
     elf64_write_u64(p + 40, dyn_sz);  /* p_memsz */
     elf64_write_u64(p + 48, 8);       /* p_align */
   }
-  /* --- .text --- */
+  /*
+   * .text
+   */
   memcpy(buf + text_off, code, code_len);
-  /* --- .dynstr --- */
+  /*
+   * .dynstr
+   */
   buf[str_off] = '\0';                 /* index 0: empty */
   memcpy(buf + str_off + 1, sym_name, name_len); /* index 1: _ny_top_entry */
-  /* --- .dynsym --- */
+  /*
+   * .dynsym
+   */
   {
     unsigned char *s = buf + sym_off;
-    /* sym[0] = NULL (all zeros, already zeroed by calloc) */
+    /*
+     * sym[0] = NULL (all zeros, already zeroed by calloc)
+     */
     s += 24;
-    /* sym[1] = _ny_top_entry */
+    /*
+     * sym[1] = _ny_top_entry
+     */
     elf64_write_u32(s + 0, 1);        /* st_name = 1 */
     s[4] = 0x12;                       /* st_info = STB_GLOBAL<<4|STT_FUNC */
     s[5] = 0;                          /* st_other = STV_DEFAULT */
@@ -1097,7 +1162,9 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
     elf64_write_u64(s + 8, text_off);  /* st_value = code offset */
     elf64_write_u64(s + 16, code_len); /* st_size */
   }
-  /* --- .hash --- */
+  /*
+   * .hash
+   */
   {
     unsigned char *h = buf + hash_off;
     elf64_write_u32(h + 0, 1);         /* nbucket */
@@ -1106,23 +1173,39 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
     elf64_write_u32(h + 12, 0);        /* chain[0] = 0 (end of sym 0) */
     elf64_write_u32(h + 16, 0);        /* chain[1] = 0 (end of sym 1) */
   }
-  /* --- .dynamic --- */
+  /*
+   * .dynamic
+   */
   {
     unsigned char *d = buf + dyn_off;
-    /* DT_HASH */
+    /*
+     * DT_HASH
+     */
     elf64_write_u64(d + 0,  4);  elf64_write_u64(d + 8,  hash_off);  d += 16;
-    /* DT_STRTAB */
+    /*
+     * DT_STRTAB
+     */
     elf64_write_u64(d + 0,  5);  elf64_write_u64(d + 8,  str_off);   d += 16;
-    /* DT_STRSZ */
+    /*
+     * DT_STRSZ
+     */
     elf64_write_u64(d + 0,  10); elf64_write_u64(d + 8,  str_sz);    d += 16;
-    /* DT_SYMTAB */
+    /*
+     * DT_SYMTAB
+     */
     elf64_write_u64(d + 0,  6);  elf64_write_u64(d + 8,  sym_off);   d += 16;
-    /* DT_SYMENT */
+    /*
+     * DT_SYMENT
+     */
     elf64_write_u64(d + 0,  11); elf64_write_u64(d + 8, 24);         d += 16;
-    /* DT_NULL */
+    /*
+     * DT_NULL
+     */
     elf64_write_u64(d + 0,  0);  elf64_write_u64(d + 8,  0);
   }
-  /* --- Write atomically --- */
+  /*
+   * Write atomically
+   */
   char tmp[1080];
   snprintf(tmp, sizeof(tmp), "%s.tmp", so_path);
   FILE *f = fopen(tmp, "wb");

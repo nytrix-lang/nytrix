@@ -652,7 +652,7 @@ fn requests_parse_response(any raw) dict {
          "timeout": 5,
          "follow": false,
          "proxy": "http://127.0.0.1:9"
-   })
+      })
    assert_eq(p.get("method", ""), "POST", "prepared method")
    assert(str_contains(p.get("url", ""), "q=ny+request"), "prepared query")
    assert_eq(_header_get(p.get("headers", 0), "content-type", ""), "application/json", "json content type")

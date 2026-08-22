@@ -1,7 +1,6 @@
 ;; Keywords: source paths files bytes normalization
 ;; Source normalization for decompiler paths, bytes, and analysis records.
 module std.os.rev.decomp.source(_read, _source_data, _looks_path)
-
 use std.core
 use std.os (file_exists, file_read)
 

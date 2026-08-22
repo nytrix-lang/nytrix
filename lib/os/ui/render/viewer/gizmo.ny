@@ -453,7 +453,6 @@ fn _hit_test_metric(any mvp, any win_w, any win_h, any bounds, any mode, any mou
    }
 }
 
-
 fn hit_test(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, any mouse_y) dict {
    "Hit-tests the projected world gizmo. Returns mode, axis, and screen drag tangent."
    _hit_test_metric(mvp, win_w, win_h, bounds, mode, mouse_x, mouse_y, metrics(bounds, mode))

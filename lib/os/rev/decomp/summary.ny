@@ -1,7 +1,6 @@
 ;; Keywords: decompiler semantic summary findings analyst
 ;; Data-only summary helpers shared by the public decompiler facade.
 module std.os.rev.decomp.summary *
-
 use std.core
 use std.core.str as str
 use std.os.rev.decomp.elf
@@ -23,15 +22,15 @@ fn _summary_import_category(str name) str {
    if _summary_is_input_import(n) { return "input" }
    if (n == "ptrace" || n == "prctl" || n == "sysctl" || n == "uname" ||
       n == "getauxval" || n == "dlopen" || n == "dlsym" || n == "isdebuggerpresent" ||
-   str.find(n, "debug") >= 0){ return "anti_analysis" }
+      str.find(n, "debug") >= 0){ return "anti_analysis" }
    if (n == "strcmp" || n == "strncmp" || n == "memcmp" || n == "memchr" || n == "strstr" ||
-   n == "strlen" || n == "atoi" || n == "strtol" || n == "sscanf"){ return "compare_parse" }
+      n == "strlen" || n == "atoi" || n == "strtol" || n == "sscanf"){ return "compare_parse" }
    if n == "memcpy" || n == "memmove" || n == "memset" || n == "memfrob" { return "memory_transform" }
    if n == "uncompress" || n == "compress" || n == "crc32" || str.find(n, "zlib") >= 0 { return "compression" }
    if (str.find(n, "crypto") >= 0 || str.find(n, "aes") >= 0 || str.find(n, "sha") >= 0 ||
-   str.find(n, "md5") >= 0 || str.find(n, "evp") >= 0){ return "crypto" }
+      str.find(n, "md5") >= 0 || str.find(n, "evp") >= 0){ return "crypto" }
    if (n == "open" || n == "openat" || n == "read" || n == "write" || n == "close" ||
-   n == "stat" || n == "fstat" || n == "mmap" || n == "ioctl"){ return "os" }
+      n == "stat" || n == "fstat" || n == "mmap" || n == "ioctl"){ return "os" }
    "other"
 }
 
@@ -89,7 +88,7 @@ fn _summary_call_records(list calls) list {
          if category != "other" {
             out = out.append({"name": name, "category": category, "addr": int(call.get("addr", 0)),
                   "target": int(call.get("target", 0)), "argc": int(call.get("argc", 0)),
-            "effect": call.get("effect", "")})
+                  "effect": call.get("effect", "")})
          }
       }
       i += 1
@@ -104,7 +103,7 @@ fn _summary_syscall_records(list syscalls) list {
       def syscall = syscalls[i]
       def name = syscall.get("name", "")
       out = out.append({"name": name, "category": _summary_import_category(name), "addr": int(syscall.get("addr", 0)),
-      "nr": int(syscall.get("nr", -1)), "effect": syscall.get("effect", "")})
+            "nr": int(syscall.get("nr", -1)), "effect": syscall.get("effect", "")})
       i += 1
    }
    out
@@ -117,7 +116,7 @@ fn _summary_input_surfaces(dict model, list notable_calls, list syscalls) list {
       def call = notable_calls[i]
       if call.get("category", "") == "input" {
          out = out.append({"kind": "call", "name": call.get("name", ""), "addr": int(call.get("addr", 0)),
-         "effect": call.get("effect", "")})
+               "effect": call.get("effect", "")})
       }
       i += 1
    }
@@ -126,7 +125,7 @@ fn _summary_input_surfaces(dict model, list notable_calls, list syscalls) list {
       def syscall = syscalls[i]
       if syscall.get("name", "") == "read" || syscall.get("name", "") == "readv" || syscall.get("name", "") == "recvfrom" {
          out = out.append({"kind": "syscall", "name": syscall.get("name", ""), "addr": int(syscall.get("addr", 0)),
-         "effect": syscall.get("effect", "")})
+               "effect": syscall.get("effect", "")})
       }
       i += 1
    }
@@ -137,7 +136,7 @@ fn _summary_input_surfaces(dict model, list notable_calls, list syscalls) list {
       if (param.get("shape", "") == "buffer" || param.get("shape", "") == "struct_ptr" ||
          param.get("shape", "") == "pointer" || param.get("reg", "").len > 0){
          out = out.append({"kind": "abi_param", "name": param.get("name", ""), "reg": param.get("reg", ""),
-         "shape": param.get("shape", ""), "fields": param.get("fields", [])})
+               "shape": param.get("shape", ""), "fields": param.get("fields", [])})
       }
       i += 1
    }
@@ -154,7 +153,7 @@ fn _summary_hard_branches(dict facts0, int limit=12) list {
             "target": int(dep.get("target", 0)), "target_hex": _summary_hex(int(dep.get("target", 0))),
             "condition": dep.get("condition", ""), "expr": dep.get("expr", ""),
             "feeder_row": int(dep.get("feeder_row", -1)),
-      "feeder_mnemonic": dep.get("feeder_mnemonic", "")})
+            "feeder_mnemonic": dep.get("feeder_mnemonic", "")})
       i += 1
    }
    out
@@ -172,7 +171,7 @@ fn _summary_memory_shapes(dict facts0, int limit=12) list {
                "offsets": shape.get("offsets", []), "widths": shape.get("widths", []),
                "stride": int(shape.get("stride", 0)), "span": int(shape.get("span", 0)),
                "reads": int(shape.get("read_count", 0)), "writes": int(shape.get("write_count", 0)),
-         "accesses": int(shape.get("access_count", 0))})
+               "accesses": int(shape.get("access_count", 0))})
       }
       i += 1
    }
@@ -192,7 +191,7 @@ fn _summary_state_machines(dict model, int limit=8) list {
                "case_count": int(machine.get("case_count", 0)),
                "transition_count": int(machine.get("transition_count", 0)),
                "table": int(machine.get("table", 0)), "table_hex": _summary_hex(int(machine.get("table", 0))),
-         "cases": machine.get("cases", [])})
+               "cases": machine.get("cases", [])})
       }
       i += 1
    }
@@ -208,7 +207,7 @@ fn _summary_state_machines(dict model, int limit=8) list {
                "from": int(table.get("from", 0)), "from_hex": _summary_hex(int(table.get("from", 0))),
                "base": int(table.get("base", 0)), "base_hex": _summary_hex(int(table.get("base", 0))),
                "selector": table.get("index_reg", ""), "case_count": count,
-         "relative": table.get("relative", false), "loop_count": loop_count})
+               "relative": table.get("relative", false), "loop_count": loop_count})
       }
       i += 1
    }
@@ -241,7 +240,7 @@ fn _summary_score(dict summary) int {
 fn _summary_text(dict summary) str {
    mut lines = ["semantic summary " + summary.get("name", "") + " " + summary.get("arch", "") +
       " rows=" + to_str(summary.get("row_count", 0)) + " branches=" + to_str(summary.get("branch_count", 0)) +
-   " calls=" + to_str(summary.get("call_count", 0)) + " score=" + to_str(summary.get("score", 0))]
+      " calls=" + to_str(summary.get("call_count", 0)) + " score=" + to_str(summary.get("score", 0))]
    if summary.get("input_surface_count", 0) > 0 { lines = lines.append("input surfaces: " + to_str(summary.get("input_surface_count", 0))) }
    if summary.get("memory_shape_count", 0) > 0 { lines = lines.append("memory shapes: " + to_str(summary.get("memory_shape_count", 0))) }
    if summary.get("semantic_simplification_count", 0) > 0 { lines = lines.append("proved rewrites: " + to_str(summary.get("semantic_simplification_count", 0))) }

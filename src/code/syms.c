@@ -1,3 +1,7 @@
+/*
+ * Symbol table: manages the codegen-level symbol namespace, mapping
+ * Nytrix identifiers to LLVM values, types, and metadata entries.
+ */
 #include "base/util.h"
 #include "priv.h"
 #ifndef _WIN32

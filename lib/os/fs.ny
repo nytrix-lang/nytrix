@@ -3,6 +3,11 @@
 ;; References:
 ;; - std.os
 module std.os.fs
+
+;; The portable filesystem surface currently includes file checks, traversal,
+;; rename, and single-directory creation/removal. Unsupported platform-specific
+;; operations stay outside this module until their syscall contracts are
+;; available on every supported host.
 use std.core
 use std.core as core
 use std.os
@@ -73,6 +78,22 @@ fn rename(str old_path, str new_path) Result<int, int> {
    file_rename(old_path, new_path)
 }
 
+fn make_dir(str path) Result<int, int> {
+   "Creates one directory at `path`; returns `err(errno_like_code)` when it already exists or cannot be created."
+   if path.len <= 0 { return err(-22) }
+   def res = __mkdir(ospath.normalize(path))
+   if res >= 0 { return ok(0) }
+   err(res)
+}
+
+fn remove_dir(str path) Result<int, int> {
+   "Removes an empty directory at `path`; returns `err(errno_like_code)` otherwise."
+   if path.len <= 0 { return err(-22) }
+   def res = __rmdir(ospath.normalize(path))
+   if res >= 0 { return ok(0) }
+   err(res)
+}
+
 mut _fs_selftest_walk_hits = 0
 
 fn _fs_selftest_walk_hit(any _path) int {
@@ -90,6 +111,11 @@ fn _fs_selftest_walk_hit(any _path) int {
    unwrap(rename(fp, fp2))
    assert(!is_file(fp) && is_file(fp2), "fs rename")
    unwrap(rename(fp2, fp))
+   def dp = ospath.join(tmp, "nytrix_fs_selftest_dir_" + to_str(pid()) + "_" + to_str(ticks()))
+   unwrap(make_dir(dp))
+   assert(is_dir(dp), "fs make_dir")
+   unwrap(remove_dir(dp))
+   assert(!is_dir(dp), "fs remove_dir")
    def entries = list_dir(".")
    assert(entries.len > 0, "fs list_dir cwd")
    mut i = 0
@@ -112,7 +138,6 @@ fn _fs_selftest_walk_hit(any _path) int {
 
 ;; File watching via real platform watchers (inotify on linux; poll fallback elsewhere)
 ;; For language-level hot reloading of .so/.dylib/.dll modules.
-
 def IN_ACCESS = 0x00000001
 def IN_MODIFY = 0x00000002
 def IN_ATTRIB = 0x00000004
@@ -134,11 +159,8 @@ def IN_EXCL_UNLINK = 0x04000000
 def IN_MASK_ADD = 0x20000000
 def IN_ISDIR = 0x40000000
 def IN_ONESHOT = 0x80000000
-
-def O_NONBLOCK = 0x800  ;; O_NONBLOCK for inotify_init1 (and fallbacks); passed through as logical value (runtime >>1 yields host flag)
-
+def O_NONBLOCK = 0x800 ;; O_NONBLOCK for inotify_init1 (and fallbacks); passed through as logical value (runtime >>1 yields host flag)
 def IN_ALL_EVENTS = bor(bor(bor(IN_MODIFY, IN_CREATE), bor(IN_DELETE, IN_MOVED_TO)), IN_CLOSE_WRITE)
-
 #linux {
    #include <sys/inotify.h>
 } #else {
@@ -148,12 +170,12 @@ def IN_ALL_EVENTS = bor(bor(bor(IN_MODIFY, IN_CREATE), bor(IN_DELETE, IN_MOVED_T
 } #endif
 
 fn watch_init(int flags=0) int {
-   "Initialize an inotify instance (or -1 on unsupported platforms). Use nonblock via flags if supported."
+   "Initialize an inotify instance(or -1 on unsupported platforms). Use nonblock via flags if supported."
    __inotify_init(flags)
 }
 
 fn watch_add(int fd, str path, int mask=IN_ALL_EVENTS) int {
-   "Add a watch on `path` returning watch descriptor wd (>=0) or -1."
+   "Add a watch on `path` returning watch descriptor wd(>=0) or -1."
    if !is_str(path) || fd < 0 { return -1 }
    def p = ospath.normalize(path)
    __inotify_add_watch(fd, p, mask)
@@ -196,7 +218,7 @@ fn watch_read_events(int fd, any buf, int bufsz) list {
 }
 
 fn watch_has_change(any evs, int want_mask=IN_MODIFY) bool {
-   "Returns true if any event in list has bits from want_mask set (or create/delete/move)."
+   "Returns true if any event in list has bits from want_mask set(or create/delete/move)."
    if !is_list(evs) { return false }
    mut i = 0
    def n = evs.len
@@ -224,17 +246,13 @@ fn watch_has_change(any evs, int want_mask=IN_MODIFY) bool {
    }
 }
 
-;; ------------------------------------------------------------------
 ;; Portable watch facade with best-effort platform backends.
-;; ------------------------------------------------------------------
-
 use std.os.platform as platform
 
 def WATCH_MODIFY = 0x00000002
 def WATCH_CREATE = 0x00000100
 def WATCH_DELETE = 0x00000200
 def WATCH_ALL    = bor(bor(WATCH_MODIFY, WATCH_CREATE), WATCH_DELETE)
-
 #macos {
    def NOTE_WRITE  = 0x00000002
    def NOTE_DELETE = 0x00000001
@@ -243,7 +261,6 @@ def WATCH_ALL    = bor(bor(WATCH_MODIFY, WATCH_CREATE), WATCH_DELETE)
    def NOTE_EXTEND = 0x00000004
    def EV_ADD      = 0x0001
    def EV_CLEAR    = 0x0020
-
    fn _kqueue_vnode(str p) any {
       def fd = __watch_open_vnode(p)
       if fd <= 0 { return nil }
@@ -258,7 +275,6 @@ def WATCH_ALL    = bor(bor(WATCH_MODIFY, WATCH_CREATE), WATCH_DELETE)
       d = d.set("path", p)
       return d
    }
-
    fn _kqueue_read(any wh) list {
       if !is_dict(wh) { return [] }
       def kq = int(wh.get("kq", -1))
@@ -274,12 +290,10 @@ def WATCH_ALL    = bor(bor(WATCH_MODIFY, WATCH_CREATE), WATCH_DELETE)
    fn _kqueue_vnode(str _p) any { nil }
    fn _kqueue_read(any _w) list { [] }
 } #endif
-
 #windows {
    def FILE_NOTIFY_CHANGE_FILE_NAME  = 0x00000001
    def FILE_NOTIFY_CHANGE_DIR_NAME   = 0x00000002
    def FILE_NOTIFY_CHANGE_LAST_WRITE = 0x00000010
-
    fn _win32_watch(str p) any {
       def f = bor(FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_FILE_NAME)
       def h = __win32_find_first_change(p, 1, f)
@@ -290,12 +304,10 @@ def WATCH_ALL    = bor(bor(WATCH_MODIFY, WATCH_CREATE), WATCH_DELETE)
       d = d.set("path", p)
       return d
    }
-
    fn _win32_next(any h) bool {
       if !h || h == 0 { return false }
       return __win32_find_next_change(h) != 0
    }
-
    fn _win32_close(any h) int {
       if !h || h == 0 { return 0 }
       __win32_find_close_change(h)
@@ -308,7 +320,7 @@ def WATCH_ALL    = bor(bor(WATCH_MODIFY, WATCH_CREATE), WATCH_DELETE)
 } #endif
 
 fn watch_create(str path) any {
-   "Portable create (real when available)."
+   "Portable create(real when available)."
    if !is_str(path) { return nil }
    def p = ospath.normalize(path)
    if platform.is_linux() {

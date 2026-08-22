@@ -3,6 +3,10 @@
 ;; References:
 ;; - std.os
 module std.os.parallel(parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, hardware_threads, thread_budget, future, async, detach, future_wait, parallel_map, parallel_map_indexed, parallel_each, chunk_ranges, scheduler_policy, scheduler_status, work_stealing_enabled, work_stealing_plan, work_queue, work_queue_push, work_queue_pop, work_queue_steal, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK, SCHEDULER_POLICY, HARDWARE_THREADS)
+
+;; Work queues use the runtime queue abstraction and thread-budget policy.
+;; Queue ownership is explicit in each operation; callers can select direct or
+;; work-stealing scheduling through SCHEDULER_POLICY.
 use std.core
 use std.core.str
 use std.os.prim
@@ -100,7 +104,7 @@ fn _parallel_status_reason(str mode, int threads_eff, int work_items, int min_wo
    case mode {
       "off" -> "parallel_mode_off"
       _ -> (threads_eff <= 1 ? "single_thread_budget" :
-      ((work_items > 0 && work_items < min_work_eff) ? "below_min_work" : "eligible"))
+         ((work_items > 0 && work_items < min_work_eff) ? "below_min_work" : "eligible"))
    }
 }
 
@@ -111,7 +115,7 @@ fn parallel_status(int work_items=0) dict {
    def reason = _parallel_status_reason(PARALLEL_MODE, threads_eff, work_items, min_work_eff)
    {"mode": PARALLEL_MODE, "threads": PARALLEL_THREADS, "effective_threads": threads_eff,
       "min_work": PARALLEL_MIN_WORK, "effective_min_work": min_work_eff, "work_items": work_items,
-   "selected": reason == "eligible", "reason": reason}
+      "selected": reason == "eligible", "reason": reason}
 }
 
 fn parallel_should_threads(int work_items=0) bool {
@@ -146,7 +150,7 @@ fn scheduler_status(int work_items=0) dict {
    def stealing = work_stealing_enabled(work_items)
    def active_policy = _active_scheduler_policy(scheduler_policy(), stealing)
    pst.merge({"scheduler": active_policy, "configured_scheduler": SCHEDULER_POLICY,
-   "work_stealing": stealing, "runner": "@thread"})
+         "work_stealing": stealing, "runner": "@thread"})
 }
 
 fn hardware_threads() int {
@@ -246,7 +250,7 @@ fn work_stealing_plan(int work_items=0, int max_threads=0) dict {
    }
    {"scheduler": work_stealing_enabled(work_items) ? "work-stealing" : "direct",
       "workers": workers, "ranges": ranges, "queues": queues,
-   "status": scheduler_status(work_items)}
+      "status": scheduler_status(work_items)}
 }
 
 fn _serial_map(list xs, fnptr f) list {
@@ -383,8 +387,8 @@ fn parallel_each(list xs, fnptr f, int max_threads=0) int {
 def HARDWARE_THREADS = hardware_threads()
 
 #main {
-   fn _parallel_self_inc(any x) any { x + 1 }
-   fn _parallel_self_add_index(any x, any i) any { x + i }
+   fn _parallel_self_inc(int x) int { x + 1 }
+   fn _parallel_self_add_index(int x, int i) int { x + i }
    def mode = parallel_mode()
    assert((mode == "off" || mode == "auto" || mode == "threads") && parallel_threads() >= 0 && parallel_min_work() >= 0 && hardware_threads() >= 1, "parallel config")
    def st = parallel_status(4)

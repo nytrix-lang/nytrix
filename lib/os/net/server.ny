@@ -486,7 +486,7 @@ fn router(dict routes, any fallback=0) fnptr {
    def rr = route({
          "GET /ok": fn(r) { text("ok") },
          "/json": fn(r) { json({"ok": true}) }
-   }, parse_request("GET /json HTTP/1.1\r\nHost: local\r\n\r\n"))
+      }, parse_request("GET /json HTTP/1.1\r\nHost: local\r\n\r\n"))
    assert_eq(rr.get("status", 0), 200, "route response")
    assert(str_contains(rr.get("body", ""), "\"ok\":true") || str_contains(rr.get("body", ""), "\"ok\": true"), "route json body")
    def port = 56000 + ((ticks() / 1000000) % 1000)
@@ -503,7 +503,7 @@ fn router(dict routes, any fallback=0) fnptr {
                assert_eq(in_req.get("path", ""), "/echo", "server handler path")
                assert_eq(in_req.get("body", ""), "hello", "server handler body")
                text("echo:" + in_req.get("query_params", 0).get("name", ""))
-         })
+            })
          assert_eq(handled.get("ok", false), true, "server handled client")
          def raw_res = sock.read_socket(client, 4096)
          assert(str_contains(raw_res, "HTTP/1.1 200 OK"), "server response status")

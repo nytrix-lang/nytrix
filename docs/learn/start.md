@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":10,"summary":"Start here with the Nytrix toolchain, a first program, and the shortest path to a working project."} -->
 # Start
 
 Run one file and import one module before package setup, native linking, docs
@@ -123,16 +124,16 @@ matching C/linker flags:
 ```
 
 `cross-run` uses qemu or wine when present and otherwise leaves the compiled
-artifact in `build/cache/cross/`. See [tooling.md](tooling.md) for sysroot,
+artifact in `build/cache/cross/`. See [Tooling](tooling.md) for sysroot,
 qemu, and custom target flags.
 
 ## Next
 
 | If you need | Go to |
 | --- | --- |
-| A script, module, or import shape | [programs.md](programs.md) |
-| Copyable examples | [programs.md](programs.md#complete-project-examples) |
-| Standard-library APIs and parsers | [library.md](library.md) |
-| Command reference | [tooling.md](tooling.md) |
-| Windows or drawing | [ui.md](ui.md) |
-| Failure diagnosis | [troubleshooting.md](troubleshooting.md) |
+| A script, module, or import shape | [Programs](programs.md) |
+| Copyable examples | [Programs](programs.md#complete-project-examples) |
+| Standard-library APIs and parsers | [Library](library.md) |
+| Command reference | [Tooling](tooling.md) |
+| Windows or drawing | [UI](ui.md) |
+| Failure diagnosis | [Troubleshooting](troubleshooting.md) |

@@ -1,3 +1,7 @@
+/*
+ * Build system wire: orchestrates the compilation pipeline from
+ * source to artifact, managing phases, caching, and incremental builds.
+ */
 #include "wire/build.h"
 #include "base/common.h"
 #include "base/util.h"
@@ -372,9 +376,11 @@ static void ny_runtime_cache_path(char *out, size_t out_len, const char *cc, con
   const char *host_flags = getenv("NYTRIX_HOST_CFLAGS");
   const char *host_triple = getenv("NYTRIX_HOST_TRIPLE");
   const char *arm_float_abi = getenv("NYTRIX_ARM_FLOAT_ABI");
-  /* v7 invalidates objects written before sanitized runtime builds were
+  /*
+   * v7 invalidates objects written before sanitized runtime builds were
    * isolated from the ordinary cache.  Such objects carry unresolved ASan or
-   * UBSan symbols and must never be restored for an unsanitized link. */
+   * UBSan symbols and must never be restored for an unsanitized link.
+   */
   const char *cache_rev = "rtcache-v9-tree-shake";
   char dwarf_key[16];
   if (debug)
@@ -1527,7 +1533,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
     }
   }
 
-  char link_buf_storage[16][64];
+  char link_buf_storage[64][64];
   size_t link_buf_idx = 0;
   char *ensured_libs[64] = {NULL};
   size_t ensured_lib_count = 0;
@@ -1540,6 +1546,23 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
       if (resolved) {
         ensured_libs[ensured_lib_count++] = resolved;
         lib = resolved;
+      }
+    }
+    if (lib && strncmp(lib, "-llib", 5) == 0) {
+      const char *base = lib + 5;
+      size_t blen = strlen(base);
+      const char *dot = strstr(base, ".so");
+#ifdef __APPLE__
+      const char *dylib = strstr(base, ".dylib");
+      if (dylib && dylib > base && (!dot || dylib < dot))
+        dot = dylib;
+#endif
+      if (dot && dot > base)
+        blen = (size_t)(dot - base);
+      if (blen > 0 && blen < 64 && link_buf_idx < sizeof(link_buf_storage) / sizeof(link_buf_storage[0])) {
+        snprintf(link_buf_storage[link_buf_idx], 64, "-l%.*s", (int)blen, base);
+        argv[idx++] = link_buf_storage[link_buf_idx++];
+        continue;
       }
     }
     if (lib && lib[0] == '-' && strpbrk(lib, " \t") != NULL) {
@@ -1560,11 +1583,18 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
 #endif
       if (dot && dot > base)
         blen = (size_t)(dot - base);
-      if (blen > 0 && blen < 64 && link_buf_idx < 16) {
+      if (blen > 0 && blen < 64 && link_buf_idx < sizeof(link_buf_storage) / sizeof(link_buf_storage[0])) {
         snprintf(link_buf_storage[link_buf_idx], 64, "-l%.*s", (int)blen, base);
         argv[idx++] = link_buf_storage[link_buf_idx++];
         continue;
       }
+    }
+    if (lib && lib[0] != '-' && !strchr(lib, '/') && !strchr(lib, '\\') &&
+        !(isalpha((unsigned char)lib[0]) && lib[1] == ':') &&
+        link_buf_idx < sizeof(link_buf_storage) / sizeof(link_buf_storage[0])) {
+      snprintf(link_buf_storage[link_buf_idx], 64, "-l%s", lib);
+      argv[idx++] = link_buf_storage[link_buf_idx++];
+      continue;
     }
     append_link_arg_preserving_custom(lib, argv, &idx, NY_MAX_LINK_ARGS,
                                       custom_link_arg_copies, &custom_link_arg_copy_count,

@@ -1,0 +1,14 @@
+shape oracle_bigint_public_facade_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features ["native", "x86_64", "bigint", "facade", "reachability", "verifier"]
+  template ny-test-case
+  flags "--native-result-oracle=10 -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.big
+
+bigint_to_int(bigint_add(bigint_from_int(3), bigint_from_int(7)))
+NY
+}

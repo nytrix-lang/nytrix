@@ -1,0 +1,21 @@
+shape optcheck_licm_pure_call {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck licm pure-call pass-fires]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=112 --nyir-pass-stats"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn run() i64 {
+  mut sum = 0
+  mut i = 0
+  while i < 1000 {
+    sum = sum + min(3, 5) + i
+    i += 1
+  }
+  sum
+}
+run()
+NY
+}

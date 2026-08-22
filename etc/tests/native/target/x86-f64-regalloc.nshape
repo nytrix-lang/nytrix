@@ -1,0 +1,16 @@
+shape native_x86_f64_regalloc {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 object oracle f64 regalloc]
+  template ny-test-case
+  flags "--native-backend x86_64 --native-result-oracle=4626498639076786176"
+  expect compile_and_run
+  source ny <<'NY'
+fn combine(f64 a, f64 b, f64 c, f64 d) f64 {
+  def sum = a + b
+  def delta = c - d
+  sum * delta
+}
+combine(1.5, 2.25, 10.0, 4.5)
+NY
+}

@@ -1,0 +1,17 @@
+shape oracle_tbuf_scalar_len_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle tbuf scalar replacement length]
+  flags_matrix "-O2 --native-backend x86_64 --native-result-oracle=1 --nyir-verify; -O3 --native-backend x86_64 --native-result-oracle=1 --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn one() int {
+  mut xs = []
+  xs = append(xs, 7)
+  xs.len()
+}
+
+one()
+NY
+}

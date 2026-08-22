@@ -99,9 +99,7 @@ use std.os.ui.window.consts (EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CH
    EVENT_WINDOW_MAXIMIZED, EVENT_WINDOW_MINIMIZED, EVENT_WINDOW_RESTORED,
    EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_SCALE_UPDATED,
    EVENT_MONITOR_CONNECTED, EVENT_MONITOR_DISCONNECTED,
-
-EVENT_DATA_DROP, EVENT_QUIT)
-
+   EVENT_DATA_DROP, EVENT_QUIT)
 use std.os.ui.window.platform.api
 use std.os.ui.window.platform.api as api
 use std.os.ui.window.platform.state as platform_state
@@ -261,7 +259,6 @@ def PLATFORM_ERROR = int(api.PLATFORM_ERROR)
 fn _select_backend_name() str {
    def current = _get_platform_val("backend_name", "")
    if current != "" { return current }
-
    def requested = common.env_lower("NY_UI_BACKEND")
    mut name = ""
    if requested == "none" { name = "none" }
@@ -1764,13 +1761,13 @@ fn _window_size_event_data(any data) any {
 fn _normalize_native_event(any ev) any {
    if event_type(ev) == EVENT_WINDOW_RESIZED {
       def data = _window_size_event_data(event_data(ev))
-      return make_event(event_type(ev), event_window(ev), event_window_id(ev), data)
+      return make_event(event_type(ev), event_window_id(ev), event_window_id(ev), data)
    }
    if event_type(ev) != EVENT_MOUSE_SCROLL { return ev }
    def data = event_data(ev)
    if !is_dict(data) { return ev }
    def norm = _normalize_scroll_data(data)
-   make_event(event_type(ev), event_window(ev), event_window_id(ev), norm)
+   make_event(event_type(ev), event_window_id(ev), event_window_id(ev), norm)
 }
 
 comptime emit _set_win_cb_wrap(set_key_callback, "key")

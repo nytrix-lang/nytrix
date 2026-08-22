@@ -1,4 +1,5 @@
-# Control flow
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":150,"summary":"Branches, loops, pattern cases, exits, and control-flow expressions."} -->
+# Control Flow
 
 Control flow covers conditionals, loops, dispatch, cleanup, and error-control
 forms.
@@ -27,10 +28,19 @@ Expression-position `if` needs an `else` branch:
 def label = if(code == 200){ "ok" } else { "error" }
 ```
 
+### Truthiness
+
 Conditions use truthiness. `nil`, `false`, `0`, empty strings, and empty
 containers are false. Non-zero numbers, non-empty strings, non-empty
 containers, pointers, handles, and callable values are true. Use an explicit
 comparison in code that should stay readable under `--strict-types`.
+
+| Value | Truthiness |
+| --- | --- |
+| `nil`, `false`, `0`, `0.0` | False |
+| `""`, `[]`, `{}`, empty set/tuple/range | False |
+| Non-zero numbers, non-empty strings and containers | True |
+| Pointers, handles, callable values | True |
 
 ## Loops
 
@@ -48,6 +58,14 @@ continue
 
 `while` repeats while the condition stays true. The parser accepts
 `while(init cond update)`. Prefer `for(init cond update)` for counter loops.
+
+The `for(init cond update)` loop keeps an explicit counter binding:
+
+```ny
+mut total = 0
+for(mut i = 0 i < 5 ++i){ total += i }
+assert(total == 10, "counter loop")
+```
 
 `for` iterates over iterable values such as lists, ranges, strings, and
 standard-library iterable helpers. The comma form binds the current value first
@@ -87,7 +105,7 @@ for i in 1..10 {
 
 `case` is value dispatch.
 
-See [patterns.md](patterns.md) for full arm syntax and guards.
+See [Patterns](patterns.md#guards-and-clarity) for full arm syntax and guards.
 
 ```ny
 case value {
@@ -109,7 +127,7 @@ Use `case` in binding position when each selected arm produces a value.
 
 `match` is pattern dispatch.
 
-See [patterns.md](patterns.md) for full arm syntax and guards.
+See [Patterns](patterns.md#match-patterns) for full arm syntax and guards.
 
 ```ny
 match value {
@@ -142,6 +160,17 @@ defer { cleanup }
 processes, and native resources. The runtime runs multiple defers in
 last-in-first-out order and also runs them during panic unwinding.
 
+```ny
+mut order = []
+defer { order = order.append("a") }
+defer { order = order.append("b") }
+assert(order == ["b", "a"], "defers run LIFO at scope exit")
+```
+
+A `defer` runs when its enclosing scope exits, whether by falling through, an
+early `return`, a `goto` that leaves the scope, or panic unwinding. Defers do
+not run at program end for scopes that never exited normally.
+
 ## Labels and goto
 
 ```ny
@@ -163,7 +192,7 @@ loops make the control path harder to see. Prefer `while`, `for`, `break`, and
 ## With
 
 ```ny
-with type name = value { body }
+with Type name = value { body }
 ```
 
 `with` is a type-first resource binding. The colon separates the resource type
@@ -173,6 +202,6 @@ allocations from `malloc`.
 
 ## Related
 
-- [patterns.md](patterns.md) for `case` and `match` arm shapes.
-- [errors.md](errors.md) for failure behavior.
-- [runtime.md](runtime.md) for cleanup and resource boundaries.
+- [Patterns](patterns.md#guards-and-clarity) for `case` and `match` arm shapes.
+- [Errors](errors.md) for failure behavior.
+- [Runtime](runtime.md) for cleanup and resource boundaries.

@@ -295,14 +295,14 @@ fn mouse_pos(any win_ref=0) list {
 
 fn touch_count(any win_ref=0) int {
    "Returns the number of currently active touches. Native desktop builds without
-    a touch device report zero; browser builds report live touch state."
+   a touch device report zero ; browser builds report live touch state."
    def win = _resolve_window(win_ref)
    win ? window.touch_count(win) : 0
 }
 
 fn touch_pos(any index=0, any win_ref=0) list {
    "Returns [x, y] window coordinates of the touch at `index`, or [0, 0] when
-    the index is out of range or no touches are active."
+   the index is out of range or no touches are active."
    def win = _resolve_window(win_ref)
    def i = int(index)
    win ? window.touch_pos(win, i) : [0.0, 0.0]
@@ -310,7 +310,7 @@ fn touch_pos(any index=0, any win_ref=0) list {
 
 fn touch_active(any index=0, any win_ref=0) bool {
    "Returns true if a touch is currently active at `index`. Native desktop builds
-    without a touch device always return false."
+   without a touch device always return false."
    def win = _resolve_window(win_ref)
    def i = int(index)
    win ? window.touch_active(win, i) : false

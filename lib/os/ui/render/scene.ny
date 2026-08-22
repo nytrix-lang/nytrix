@@ -188,7 +188,7 @@ fn scene_fallbacks(dict tex, int env_tex, int env_spec_tex, bool scene_env_sensi
          out_env_spec_tex = first_ready([
                _tex(tex, "neutral_env_spec"), _tex(tex, "neutral_env"), _tex(tex, "compare_env_spec"),
                _tex(tex, "compare_env"), _tex(tex, "skybox_spec"), _tex(tex, "skybox"),
-         ])
+            ])
       }
    }
    [out_env_tex, out_env_spec_tex]
@@ -364,7 +364,7 @@ fn proof_fallbacks(
             out_env_spec_tex = first_ready([
                   _tex(tex, "compare_env_spec"), _tex(tex, "compare_env"), _tex(tex, "neutral_env_spec"),
                   _tex(tex, "neutral_env"), _tex(tex, "compare_visible_env"),
-            ])
+               ])
          }
       }
    }
@@ -1427,7 +1427,7 @@ fn _scene_bounds_accum_part(list state, any part, any bounds=0) list {
 
 fn _scene_bounds_accum_result(list state) list {
    [[state.get(0, 0.0), state.get(1, 0.0), state.get(2, 0.0)],
-   [state.get(3, 0.0), state.get(4, 0.0), state.get(5, 0.0)]]
+      [state.get(3, 0.0), state.get(4, 0.0), state.get(5, 0.0)]]
 }
 
 fn _scene_part_front_bias_xz(any part) list {
@@ -1888,7 +1888,7 @@ fn _scene_refresh_orbit_from_parts(any mesh, bool has_motion) any {
       orbit_face_x, orbit_face_z,
       orbit_face_count, orbit_part_count,
       has_motion,
-   orbit_has_blend || orbit_has_backdrop)
+      orbit_has_blend || orbit_has_backdrop)
    mut fit_cam_yaw = _scene_mesh_num(mesh, "fit_cam_yaw", 0.0)
    mut fit_cam_pitch = _scene_mesh_num(mesh, "fit_cam_pitch", 0.0)
    fit_cam_yaw = float(orbit_pick.get(2, fit_cam_yaw))
@@ -1905,9 +1905,9 @@ fn _scene_refresh_orbit_from_parts(any mesh, bool has_motion) any {
    if (orbit_has_backdrop
       || orbit_sheet_like
       || orbit_grid_like
-   || orbit_tall_flat_motion)
+      || orbit_tall_flat_motion)
    && !(orbit_column_like
-   && !orbit_tall_flat_motion)
+      && !orbit_tall_flat_motion)
    && !many_part_orbit_quick{
       def orbit_use_z = raw_sz <= raw_sx
       def orbit_fg_sign = _scene_sheet_foreground_axis_sign(parts, scene_area_like, orbit_use_z)
@@ -1923,7 +1923,7 @@ fn _scene_refresh_orbit_from_parts(any mesh, bool has_motion) any {
       || orbit_has_backdrop
       || orbit_sheet_like
       || orbit_grid_like
-   || orbit_tall_flat_motion)
+      || orbit_tall_flat_motion)
    && !(orbit_column_like
       && !orbit_tall_flat_motion){
       fit_cam_pitch = 0.0
@@ -2133,7 +2133,7 @@ fn scene_edit_transform_matrix_into(any mesh, list mt, list mr, list ms, list ou
       _scene_edit_axis_scale(mesh, "edit_sx", sc),
       _scene_edit_axis_scale(mesh, "edit_sy", sc),
       _scene_edit_axis_scale(mesh, "edit_sz", sc),
-   ms)
+      ms)
    mat4_rotate_x_into(rx, mr)
    mat4_mul_into(mr, ms, tmp)
    mat4_rotate_y_into(ry, mr)
@@ -2644,7 +2644,7 @@ fn _scene_fit_transform_from_bounds(dict mesh) list {
       wspan,
       tcx,
       tcy,
-   tcz]
+      tcz]
 }
 
 fn _scene_log_fit_camera(any label, any fit, any fit_cam_x, any fit_cam_y, any fit_cam_z, any fit_cam_yaw, any fit_cam_pitch) bool {
@@ -2663,7 +2663,7 @@ fn _scene_log_fit_camera(any label, any fit, any fit_cam_x, any fit_cam_y, any f
       " tz=" + to_str(_scene_fit_info_num(fit, 13, 0.0)) +
       " cam=(" + to_str(fit_cam_x) + "," + to_str(fit_cam_y) + "," + to_str(fit_cam_z) +
       ") yaw=" + to_str(fit_cam_yaw) +
-   " pitch=" + to_str(fit_cam_pitch))
+      " pitch=" + to_str(fit_cam_pitch))
    true
 }
 
@@ -2674,14 +2674,14 @@ fn _scene_store_solved_fit_camera(dict mesh, list fit, f64 fit_fov_deg, f64 fit_
       _scene_fit_info_num(fit, 14, 0.0),
       _scene_fit_info_num(fit, 15, 0.0),
       _scene_fit_info_num(fit, 16, 0.0),
-   fit_fov_deg, fit_aspect, fit_cam_yaw, fit_cam_pitch)
+      fit_fov_deg, fit_aspect, fit_cam_yaw, fit_cam_pitch)
    def fit_cam_x, fit_cam_y = _scene_mesh_num(fit_pose, "x", tcx), _scene_mesh_num(fit_pose, "y", tcy)
    def fit_cam_z = _scene_mesh_num(fit_pose, "z", tcz)
    fit_cam_yaw = _scene_mesh_num(fit_pose, "yaw", fit_cam_yaw)
    fit_cam_pitch = _scene_mesh_num(fit_pose, "pitch", fit_cam_pitch)
    _scene_log_fit_camera(label, fit, fit_cam_x, fit_cam_y, fit_cam_z, fit_cam_yaw, fit_cam_pitch)
    [_scene_store_fit_camera(mesh, fit_fov_deg, fit_aspect, fit_cam_x, fit_cam_y, fit_cam_z, fit_cam_yaw, fit_cam_pitch, tcx, tcy, tcz),
-   fit_cam_x, fit_cam_y, fit_cam_z, fit_cam_yaw, fit_cam_pitch]
+      fit_cam_x, fit_cam_y, fit_cam_z, fit_cam_yaw, fit_cam_pitch]
 }
 
 fn _scene_recompute_fit_from_bounds(any mesh) any {
@@ -2700,7 +2700,7 @@ fn _scene_recompute_fit_from_bounds(any mesh) any {
       fit_aspect,
       fit_cam_yaw,
       fit_cam_pitch,
-   "recompute")
+      "recompute")
    solved.get(0, mesh)
 }
 
@@ -2958,7 +2958,7 @@ fn scene_apply_fit(any mesh) any {
    if _gltf_debug_enabled() {
       terminal.log("[gltf] scene_apply_fit: scale=" + to_str(fit_scale) +
          " tx=" + to_str(fit_tx) + " ty=" + to_str(fit_ty) + " tz=" + to_str(fit_tz) +
-      " parts=" + to_str(gpu_parts.len))
+         " parts=" + to_str(gpu_parts.len))
    }
    if old_baked_slab && old_baked_slab != baked_slab { free(old_baked_slab) }
    mesh["gpu_parts"] = baked_parts
@@ -2975,7 +2975,7 @@ fn scene_apply_fit(any mesh) any {
       1,
       mesh.get("scene_lights_slab", 0),
       _scene_mesh_int(mesh, "scene_lights_count", 0),
-   _scene_mesh_bool(mesh, "has_optical", false) ? 1 : 0]
+      _scene_mesh_bool(mesh, "has_optical", false) ? 1 : 0]
    mesh
 }
 
@@ -3259,7 +3259,7 @@ fn _clone_cached_mesh_dict(dict mesh) dict {
          ["gpu_optical_start", 0], ["gpu_blend_start", 0], ["gpu_resources", []],
          ["gpu_draw_state", 0], ["scene_lights", []], ["scene_lights_slab", 0],
          ["scene_lights_count", 0],
-   ])
+      ])
 }
 
 fn _clone_cached_mesh(any mesh) any {
@@ -3387,7 +3387,7 @@ fn _mat_tex_req_realize(any req_map) any {
          if cached_tid >= 0 {
             if trace_on {
                ui_profile.print_text("[gltf:req] cache_only key=" + k + " path=" + to_str(v.get("path",
-               "")) + " tid=" + to_str(cached_tid))
+                        "")) + " tid=" + to_str(cached_tid))
             }
             req_map[k] = cached_tid
          } else {
@@ -3401,7 +3401,7 @@ fn _mat_tex_req_realize(any req_map) any {
    def t_decode0 = ticks()
    def decoded_map = _gltf_decode_texture_specs_parallel(specs)
    _scene_stage(stage_trace, "materials.predecode.decoded count=" + to_str(keys(decoded_map).len) +
-   " ms=" + to_str(ui_profile.elapsed_ms(t_decode0)))
+      " ms=" + to_str(ui_profile.elapsed_ms(t_decode0)))
    def t_upload0 = ticks()
    mut uploaded = dict(max(64, specs.len * 2 + 8))
    mut upload_hits = 0
@@ -3428,7 +3428,7 @@ fn _mat_tex_req_realize(any req_map) any {
             if trace_on {
                ui_profile.print_text("[gltf:req] key=" + key + " path=" + to_str(spec.get("path",
                         "")) + " fmt=" + to_str(int(spec.get("format",
-               37))) + " tid=" + to_str(tid))
+                           37))) + " tid=" + to_str(tid))
             }
             req_map[key] = tid
          }
@@ -3438,7 +3438,7 @@ fn _mat_tex_req_realize(any req_map) any {
    _scene_stage(stage_trace, "materials.predecode.uploaded count=" + to_str(specs.len)
       + " unique=" + to_str(upload_unique)
       + " reused=" + to_str(upload_hits)
-   + " ms=" + to_str(ui_profile.elapsed_ms(t_upload0)))
+      + " ms=" + to_str(ui_profile.elapsed_ms(t_upload0)))
    _gltf_free_decoded_texture_map(decoded_map)
    return req_map
 }
@@ -3497,7 +3497,7 @@ fn _mat_tex_resolved_slots(any tex_req_map, bool predecode_active, any spec, str
          slot,
          to_str(rec.get(1, "")),
          to_str(rec.get(2, "")),
-      slot == "clearcoat" || slot == "clearcoat_normal")
+         slot == "clearcoat" || slot == "clearcoat_normal")
       out[slot] = tid
       if tid >= 0 { loaded_count += 1 }
       i += 1
@@ -3526,7 +3526,7 @@ fn _apply_mat_record_to_part(any part, any mat_records) any {
    def normal_tex_id = int(rec.get("normal", -1))
    def normal_tex_word = int(rec.get("normal_tex_word", render_utils.pack_normal_tex_word(normal_tex_id,
             int(rec.get("normal_uv_set",
-   0)))))
+                  0)))))
    def normal_uv_set = int(rec.get("normal_uv_set", 0))
    def occlusion = int(rec.get("occlusion", -1))
    def occlusion_uv_set = int(rec.get("occlusion_uv_set", 0))
@@ -4011,7 +4011,7 @@ fn _gltf_decode_texture_specs_parallel(any specs) dict {
       def batch = slice(unique_specs, start, end, 1)
       def h = thread_spawn(fn() {
             _gltf_decode_texture_batch(batch)
-      })
+         })
       if h { handles = handles.append(h) }
       wi += 1
    }
@@ -4064,40 +4064,40 @@ fn _upload_decoded_tex(any spec, any decoded_map) int {
       def tex_id = _stable_loaded_texture_id(texture_upload_image_ex(img,
             path,
             int(spec.get("format",
-            37)),
+                  37)),
             bool(spec.get("use_mips",
-            false)),
+                  false)),
             bool(spec.get("allow_disk_cache",
-            true)),
+                  true)),
             int(spec.get("filter",
-            -1)),
+                  -1)),
             int(spec.get("wrap_s",
-            10497)),
+                  10497)),
             int(spec.get("wrap_t",
-            10497)),
+                  10497)),
             "",
-      false))
+            false))
       _scene_stage(upload_trace, "materials.tex_upload mode=decoded file=" + label +
          " tex=" + to_str(tex_id) +
-      " ms=" + to_str(ui_profile.elapsed_ms(t_direct0)))
+         " ms=" + to_str(ui_profile.elapsed_ms(t_direct0)))
       if tex_id >= 0 { return tex_id }
       if _gltf_tex_trace_enabled() { ui_profile.print_text("[gltf:req] direct_upload_fail path=" + path + " fmt=" + to_str(int(spec.get("format", 37)))) }
    }
    if _gltf_tex_trace_enabled() { ui_profile.print_text("[gltf:req] fallback_load path=" + path + " uri=" + to_str(spec.get("uri", path))) }
    def t_fallback0 = upload_trace ? ticks() : 0
    def fallback_tid = _stable_loaded_texture_id(texture_load_gltf(to_str(spec.get("uri",
-         path)),
+               path)),
          to_str(spec.get("base_path",
-         "")),
+               "")),
          to_str(spec.get("usage",
-         "color")),
+               "color")),
          int(spec.get("filter",
-         -1)),
+               -1)),
          spec.get("sampler",
-   0)))
+            0)))
    _scene_stage(upload_trace, "materials.tex_upload mode=fallback file=" + label +
       " tex=" + to_str(fallback_tid) +
-   " ms=" + to_str(ui_profile.elapsed_ms(t_fallback0)))
+      " ms=" + to_str(ui_profile.elapsed_ms(t_fallback0)))
    return fallback_tid
 }
 
@@ -4454,7 +4454,7 @@ fn _build_material_records_fast_core_pbr(list material_infos, str base_path, boo
             "ext2_tex_word": 0x80000000, "vc_mode": 0, "fast_core_pbr": true,
             "double_sided": minfo.get("double_sided", false) ? true : false,
             "base_color_texcoord": int(minfo.get("base_color_texcoord", 0))
-      })
+         })
       mi += 1
    }
    if diag_on { terminal.log("[gltf] Loaded " + to_str(loaded_tex_count) + " textures for " + to_str(mat_count) + " materials") }
@@ -4591,7 +4591,7 @@ fn _mat_log_request_summary(int mi, any spec, str base_path, str base_uri, str n
       " base_id=" + to_str(base_id) +
       " normal_id=" + to_str(normal_id) +
       " mr_id=" + to_str(met_rough_id) +
-   " occ_id=" + to_str(occlusion_id))
+      " occ_id=" + to_str(occlusion_id))
    true
 }
 
@@ -4611,7 +4611,7 @@ fn _mat_log_pack_summary(int mi, any spec, bool has_minfo, int base_id, int met_
       " bsdf5=0x" + str.to_hex(bsdf5_u32) +
       " trans=" + to_str(live_trans) +
       " thick=" + to_str(live_thick) +
-   " disp=" + to_str(live_disp))
+      " disp=" + to_str(live_disp))
    true
 }
 
@@ -4768,7 +4768,7 @@ fn _mat_slow_texture_state(dict st, any tex_req_map, bool predecode_active, str 
       int(out.get("base_id", -1)),
       int(out.get("normal_id", -1)),
       int(out.get("met_rough_id", -1)),
-   int(out.get("occlusion_id", -1)))
+      int(out.get("occlusion_id", -1)))
    out
 }
 
@@ -4884,7 +4884,7 @@ fn _mat_slow_apply_ext2(dict st) dict {
       out.get("anisotropy_uv_xf", [0, 0]),
       out.get("clearcoat_rough_uv_xf", [0, 0]),
       out.get("diffuse_transmission_uv_xf", [0, 0]),
-   out.get("diffuse_transmission_color_uv_xf", [0, 0]))
+      out.get("diffuse_transmission_color_uv_xf", [0, 0]))
    out["mr_uv_xf"] = ext2_state.get(0, out.get("mr_uv_xf", [0, 0]))
    out["emissive_id"] = int(ext2_state.get(1, out.get("emissive_id", -1)))
    out["emissive_texcoord"] = int(ext2_state.get(2, out.get("emissive_texcoord", 0)))
@@ -4960,12 +4960,12 @@ fn _mat_slow_finalize_record(dict st) dict {
       int(st.get("normal_id", -1)),
       int(st.get("normal_uv_set", 0)),
       float(st.get("active_normal_scale", 1.0)),
-   bool(st.get("clearcoat_normal_only", false)))
+      bool(st.get("clearcoat_normal_only", false)))
    def emissive_uv_set = _mat_emissive_uv_flags(
       has_minfo,
       int(st.get("emissive_texcoord", 0)),
       bool(st.get("emissive_is_transmission", false)),
-   bool(st.get("emissive_is_diffuse_transmission", false)))
+      bool(st.get("emissive_is_diffuse_transmission", false)))
    mut rec = _mat_slow_finalize_core_record(st, has_minfo, spec, normal_tex_word, emissive_uv_set)
    rec = _mat_slow_record_add_uv_fields(rec, st)
    _mat_slow_record_add_bsdf_fields(rec, st, has_minfo, spec)
@@ -4993,7 +4993,7 @@ fn _mat_slow_record_from_spec(any spec, any tex_req_map, bool predecode_active, 
       int(st.get("bsdf0_u32", 0)),
       int(st.get("bsdf2_u32", 0)),
       int(rec.get("bsdf4_u32", 0)),
-   int(rec.get("bsdf5_u32", 0)))
+      int(rec.get("bsdf5_u32", 0)))
    _mat_log_diag(
       mi,
       int(st.get("base_id", -1)),
@@ -5004,7 +5004,7 @@ fn _mat_slow_record_from_spec(any spec, any tex_req_map, bool predecode_active, 
       int(st.get("base_color_u32", 0xffffffff)),
       int(st.get("alpha_u32", 0)),
       int(rec.get("material_u32", 0x0000ff00)),
-   diag_on)
+      diag_on)
    return {"rec": rec, "loaded_count": int(st.get("loaded_count", 0))}
 }
 
@@ -5042,7 +5042,7 @@ fn build_material_records(list material_infos, str base_path) list {
 
 fn _packed_material_is_optical(int alpha_u32, int bsdf0_u32, int bsdf2_u32, int bsdf4_u32, int bsdf5_u32) bool {
    "Returns true when a material needs scene-color capture/refraction.
-   Alpha-blended transmission/refraction materials are still optical; routing them
+   Alpha-blended transmission/refraction materials are still optical ; routing them
    through the plain alpha pass drops refraction/dispersion and makes glassy sample
    models look milky, opaque, or missing their dark frame edges."
    def transmission_u8 = (int(bsdf0_u32) >> 16) & 255
@@ -5058,7 +5058,7 @@ fn _gpu_rec_is_optical(any rec) bool {
       int(rec.get(20, 0)),
       int(rec.get(22, 0)),
       int(rec.get(41, 0)),
-   int(rec.get(42, 0)))
+      int(rec.get(42, 0)))
 }
 
 fn _gpu_rec_fast_lit_ok(list rec, int alpha_u32, bool unlit, bool is_blend, bool is_optical) bool {
@@ -5130,7 +5130,7 @@ fn _cpu_part_is_optical(any part) bool {
          load32(slab, 36),
          load32(slab, 44),
          load32(slab, 144),
-      load32(slab, 148))
+         load32(slab, 148))
    }
    def mesh = part.get("mesh", 0)
    if is_dict(mesh) {
@@ -5141,7 +5141,7 @@ fn _cpu_part_is_optical(any part) bool {
             load32(mslab, 36),
             load32(mslab, 44),
             load32(mslab, 144),
-         load32(mslab, 148))
+            load32(mslab, 148))
       }
    }
    _packed_material_is_optical(
@@ -5149,7 +5149,7 @@ fn _cpu_part_is_optical(any part) bool {
       int(part.get("bsdf0_u32", 0)),
       int(part.get("bsdf2_u32", 0)),
       int(part.get("bsdf4_u32", 0)),
-   int(part.get("bsdf5_u32", 0)))
+      int(part.get("bsdf5_u32", 0)))
 }
 
 @inline
@@ -5614,7 +5614,7 @@ fn _scene_trace_gpu_part_slab(any base, list rec, int i, bool trace_slab) bool {
       " slabMat=0x" + str.to_hex(load32_h(base, 140)) +
       " slabBsdf4=0x" + str.to_hex(load32_h(base, 232)) +
       " slabBsdf5=0x" + str.to_hex(load32_h(base, 240)) +
-   " slabNormal=0x" + str.to_hex(load32_h(base, 236)))
+      " slabNormal=0x" + str.to_hex(load32_h(base, 236)))
    true
 }
 
@@ -5695,7 +5695,7 @@ fn _pack_scene_gpu_parts_slab(list parts, bool no_punctual_lights=false) any {
          " blend=" + to_str(trace_blend) +
          " special=" + to_str(trace_special) +
          " nocull=" + to_str(trace_nocull) +
-      " flip=" + to_str(trace_flip))
+         " flip=" + to_str(trace_flip))
    }
    slab
 }
@@ -5772,9 +5772,9 @@ fn _scene_part_bool_for_merge(any part, str key) int {
 
 fn _scene_part_normal_word(any part) int {
    int(part.get("normal_tex_word", render_utils.pack_normal_tex_word(int(part.get("normal_tex_id",
-            -1)),
+                  -1)),
             int(part.get("normal_uv_set",
-   0)))))
+                  0)))))
 }
 
 fn _scene_parts_same_normal_word(any first, any next) bool {
@@ -6016,7 +6016,7 @@ fn _scene_merge_log_fail(str reason, int start_idx, int end_idx, int total_vcnt,
       " start=" + to_str(start_idx) +
       " end=" + to_str(end_idx) +
       " total_v=" + to_str(total_vcnt) +
-   " total_i=" + to_str(total_icnt))
+      " total_i=" + to_str(total_icnt))
    true
 }
 
@@ -6051,7 +6051,7 @@ fn _scene_merge_copy_part(
             " vptr=" + to_str(vptr != 0) +
             " iptr=" + to_str(iptr != 0) +
             " vcnt=" + to_str(vcnt) +
-         " icnt=" + to_str(icnt))
+            " icnt=" + to_str(icnt))
       }
       return {"ok": false, "vbase": vbase, "iwrite": iwrite, "bounds_acc": bounds_acc}
    }
@@ -6061,7 +6061,7 @@ fn _scene_merge_copy_part(
       if _scene_merge_diag_enabled() {
          ui_profile.print_text("[group:merge:build_fail] reason=model_bake pi=" + to_str(pi) +
             " model_type=" + type(part.get("model", 0)) +
-         " model_len=" + to_str(is_list(part.get("model", 0)) ? part.get("model", 0).len : -1))
+            " model_len=" + to_str(is_list(part.get("model", 0)) ? part.get("model", 0).len : -1))
       }
       return {"ok": false, "vbase": vbase, "iwrite": iwrite, "bounds_acc": bounds_acc}
    }
@@ -6074,7 +6074,7 @@ fn _scene_merge_copy_part(
             ui_profile.print_text("[group:merge:build_fail] reason=index pi=" + to_str(pi) +
                " ii=" + to_str(ii) +
                " vi=" + to_str(vi) +
-            " vcnt=" + to_str(vcnt))
+               " vcnt=" + to_str(vcnt))
          }
          return {"ok": false, "vbase": vbase, "iwrite": write_i, "bounds_acc": bounds_acc}
       }
@@ -6171,7 +6171,7 @@ fn _merge_scene_static_indexed_parts(any parts, f64 scene_area_like) dict {
                   ui_profile.print_text("[group:merge:block] run=" + to_str(i) + " next=" + to_str(run_end) +
                      " model_same=" + to_str(_scene_part_same_model(first, next)) +
                      " first={" + _scene_merge_part_summary(first, scene_area_like) + "}" +
-                  " next={" + _scene_merge_part_summary(next, scene_area_like) + "}")
+                     " next={" + _scene_merge_part_summary(next, scene_area_like) + "}")
                }
                break
             }
@@ -6186,7 +6186,7 @@ fn _merge_scene_static_indexed_parts(any parts, f64 scene_area_like) dict {
             " iptr=" + to_str(is_dict(first) && first.get("iptr", 0) != 0) +
             " vcnt=" + to_str(total_vcnt) +
             " icnt=" + to_str(total_icnt) +
-         " indices=" + to_str(is_dict(first) && _scene_part_indices_valid(first)))
+            " indices=" + to_str(is_dict(first) && _scene_part_indices_valid(first)))
       }
       if run_end > i + 1 {
          mut run_sources = list(0)
@@ -6213,7 +6213,7 @@ fn _merge_scene_static_indexed_parts(any parts, f64 scene_area_like) dict {
                " total_i=" + to_str(total_icnt) +
                " idx32=" + to_str(idx_u32) +
                " ret_type=" + type(merged) +
-            " is_dict=" + to_str(is_dict(merged)))
+               " is_dict=" + to_str(is_dict(merged)))
          }
       }
       out = out.append(first)
@@ -6394,15 +6394,15 @@ fn _upload_scene_gpu_parts_vertex_material_batch(list parts, f64 scene_area_like
       gpu_part,
       sbuf_h,
       gpu_part.get("sbuf_offset",
-      0),
+         0),
       gpu_part.get("ibuf",
-      0),
+         0),
       gpu_part.get("ibuf_offset",
-      0),
+         0),
       total_v,
       total_i,
       flags,
-   1)
+      1)
    {
       "gpu_parts": [rec], "upload_ok": 1, "upload_fail": 0,
       "gpu_v_count": total_v, "gpu_i_count": total_i, "gpu_resources": source_resources.append(gpu_part),
@@ -6461,7 +6461,7 @@ fn _scene_gpu_record_for_part(
    ) ? 1 : 0
    mut normal_tex_word = int(part.get("normal_tex_word", render_utils.pack_normal_tex_word(normal_tex_id,
             int(part.get("normal_uv_set",
-   0)))))
+                  0)))))
    normal_tex_word = bor(normal_tex_word, 0x80000)
    if double_sided != 0 && flip_winding != 0 { normal_tex_word = bor(normal_tex_word, 0x20000) }
    if double_sided != 0 { normal_tex_word = bor(normal_tex_word, 0x40000) }
@@ -6580,7 +6580,7 @@ fn _upload_scene_gpu_parts_packed(any parts, f64 scene_area_like) any {
          vcnt,
          icnt,
          flags,
-      1)
+         1)
       gpu_parts = gpu_parts.append(rec)
       if _gpu_rec_is_optical(rec) { has_optical = true }
       if (alpha_u32 & 3)== 2 { has_blend = true }
@@ -6620,10 +6620,10 @@ fn _upload_scene_gpu_parts(any parts) dict {
    if is_dict(merge_state) {
       parts, gpu_resources = merge_state.get("parts", parts), merge_state.get("source_resources", gpu_resources)
       if (_scene_group_trace_enabled()
-      || _scene_force_group_diag_enabled())
+         || _scene_force_group_diag_enabled())
       && int(merge_state.get("merge_count", 0)) > 0{
          ui_profile.print_text("[group:merge] parts=" + to_str(parts.len) + " removed=" + to_str(int(merge_state.get("merge_count",
-         0))))
+                     0))))
       }
    }
    def packed_upload = _upload_scene_gpu_parts_packed(parts, scene_area_like)
@@ -6699,7 +6699,7 @@ fn _upload_scene_gpu_parts(any parts) dict {
          draw_cnt,
          idx_cnt,
          flags,
-      index_type_val)
+         index_type_val)
       if (_scene_group_trace_enabled() || _scene_force_group_diag_enabled()) && gpu_parts.len < 6 {
          ui_profile.print_text("[group:upload] part=" + to_str(pi) +
             " sbuf=" + to_str(sbuf_h) +
@@ -6709,7 +6709,7 @@ fn _upload_scene_gpu_parts(any parts) dict {
             " draw=" + to_str(draw_cnt) +
             " idx=" + to_str(idx_cnt) +
             " flags=0x" + str.to_hex(flags) +
-         " idx32=" + to_str(index_type_val))
+            " idx32=" + to_str(index_type_val))
       }
       gpu_parts = gpu_parts.append(gpu_rec)
       if _gpu_rec_is_optical(gpu_rec) { has_optical = true }
@@ -7001,7 +7001,7 @@ fn _build_scene_cpu_parts(any parts, bool fallback_unlit=false) list {
          parts = skin_merge.get("parts", parts)
          if diag_on || _scene_group_trace_enabled() {
             terminal.log("[cpu_parts:skin_merge] parts=" + to_str(parts.len) + " removed=" + to_str(int(skin_merge.get("merge_count",
-            0))))
+                        0))))
          }
       }
    }
@@ -7219,7 +7219,7 @@ fn _scene_render_has_optical(any render_parts) bool {
             " alpha=0x" + str.to_hex(ro_slab ? load32(ro_slab, 24) : int(ro_part.get("alpha_u32", 0))) +
             " bsdf0=0x" + str.to_hex(ro_slab ? load32(ro_slab, 36) : int(ro_part.get("bsdf0_u32", 0))) +
             " bsdf5=0x" + str.to_hex(ro_slab ? load32(ro_slab, 148) : int(ro_part.get("bsdf5_u32", 0))) +
-         " optical=" + to_str(ro_is_optical))
+            " optical=" + to_str(ro_is_optical))
       }
       if ro_is_optical { render_has_optical = true break }
       ro_i += 1
@@ -7234,7 +7234,7 @@ fn _scene_store_gpu_upload_state(dict mesh, bool usable, list gpu_parts, any gpu
          ["gpu_parts_count", usable ? gpu_parts.len : 0], ["gpu_optical_start", usable ? optical_start : 0],
          ["gpu_blend_start", usable ? blend_start : 0], ["gpu_resources", usable ? resources : []],
          ["has_optical", draw_optical], ["has_blend", upload_blend],
-   ])
+      ])
    mesh["gpu_draw_state"] = [
       usable ? gpu_slab : 0, usable ? gpu_parts.len : 0,
       usable ? optical_start : 0, usable ? blend_start : 0,
@@ -7347,7 +7347,7 @@ fn _scene_load_gltf_stage(str gltf_path, str scene_name, bool diag_on, bool stag
       if is_dict(gltf_data) { load_errors = gltf_data.get("errors", []) }
       if is_list(load_errors) && load_errors.len > 0 {
          terminal.log("[gltf] validation errors: first=" + to_str(load_errors.get(0,
-         "")) + " count=" + to_str(load_errors.len))
+                  "")) + " count=" + to_str(load_errors.len))
       }
       return {"ok": false, "gltf_data": gltf_data, "prefetched_raw_mesh": prefetched_raw_mesh, "parse_ms": t_parse_ms}
    }
@@ -7359,7 +7359,7 @@ fn _scene_load_gltf_stage(str gltf_path, str scene_name, bool diag_on, bool stag
          " meshes=" + to_str(is_dict(dbg_g) ? len(dbg_g.get("meshes", [])) : -1) +
          " nodes=" + to_str(is_dict(dbg_g) ? len(dbg_g.get("nodes", [])) : -1) +
          " accessors=" + to_str(is_dict(dbg_g) ? len(dbg_g.get("accessors", [])) : -1) +
-      " bufferViews=" + to_str(is_dict(dbg_g) ? len(dbg_g.get("bufferViews", [])) : -1))
+         " bufferViews=" + to_str(is_dict(dbg_g) ? len(dbg_g.get("bufferViews", [])) : -1))
    }
    return {"ok": true, "gltf_data": gltf_data, "prefetched_raw_mesh": prefetched_raw_mesh, "parse_ms": t_parse_ms}
 }
@@ -7529,7 +7529,7 @@ fn _scene_fit_orbit_camera(any src_parts, f64 raw_sx, f64 raw_sy, f64 raw_sz, f6
       orbit_face_x, orbit_face_z,
       orbit_face_count, orbit_part_count,
       false,
-   orbit_has_blend || orbit_has_backdrop)
+      orbit_has_blend || orbit_has_backdrop)
    fit_cam_yaw = float(orbit_pick.get(2, fit_cam_yaw))
    def orbit_raw_max = max(raw_sx, max(raw_sy, raw_sz))
    def orbit_raw_min = min(raw_sx, min(raw_sy, raw_sz))
@@ -7578,7 +7578,7 @@ fn _scene_initial_fit_stage(any mesh0, any src_parts, any cam3d, dict gltf_data,
       float(cam_seed.get(1, 16.0 / 9.0)),
       float(orbit_cam.get(0, 0.0)),
       float(orbit_cam.get(1, 0.0)),
-   "initial")
+      "initial")
    mesh = solved_fit.get(0, mesh)
    def fit_cam_x = _scene_fit_info_num(solved_fit, 1, tcx)
    def dcy = _scene_fit_info_num(solved_fit, 2, tcy)
@@ -7670,7 +7670,7 @@ fn _scene_load_finish_logs(dict mesh0, any gltf_data, str scene_name, any src_pa
          " parts_gpu=" + to_str(_scene_safe_count(mesh.get("gpu_parts", []))) +
          " parts_cpu=" + to_str(_scene_safe_count(mesh.get("parts", []))) +
          " gpu_on=" + to_str(gpu_upload_usable) +
-      " total_ms=" + to_str(ui_profile.elapsed_ms(t0)))
+         " total_ms=" + to_str(ui_profile.elapsed_ms(t0)))
    }
    if diag_on { terminal.log("[gltf] fit: scale=" + to_str(sp_sc) + " aabb=(" + to_str(raw_sx) + "x" + to_str(raw_sy) + "x" + to_str(raw_sz) + ")") }
    if diag_on { terminal.log("[gltf] Load complete in " + to_str(ui_profile.elapsed_ms(t0)) + "ms") }
@@ -7692,7 +7692,7 @@ fn load_scene_mesh(str gltf_path, str scene_name="Scene", any cam3d=0, any M_SP=
       _scene_stage(stage_trace, "mesh.path is_str=" + to_str(is_str(gltf_path)) +
          " len=" + to_str(gltf_path.len) +
          " dir=" + dbg_dir +
-      " dir_base=" + ospath.basename(dbg_dir))
+         " dir_base=" + ospath.basename(dbg_dir))
    }
    def prof_on = _scene_prof_enabled()
    def t0 = ticks()
@@ -7789,7 +7789,7 @@ fn load_scene_mesh(str gltf_path, str scene_name="Scene", any cam3d=0, any M_SP=
          " has_blend=" + to_str(upload_has_blend) +
          " render_parts=" + to_str(render_parts.len) +
          " render_baked=" + to_str(render_parts_baked) +
-      " gpu_baked=" + to_str(group_model_baked))
+         " gpu_baked=" + to_str(group_model_baked))
    }
    if is_list(cam3d) && cam3d.len >= 10 {
       cam3d[0] = _scene_mesh_num(mesh, "fit_cam_x", 0.0)
@@ -7814,7 +7814,7 @@ fn load_scene_mesh(str gltf_path, str scene_name="Scene", any cam3d=0, any M_SP=
          ["scene_lights_slab", scene_lights_slab], ["scene_lights_count", scene_lights_count],
          ["material_feature_mask", material_feature_mask],
          ["scene_env_sensitive_materials", scene_env_sensitive_materials],
-   ])
+      ])
    mesh = _scene_store_gpu_upload_state(mesh, gpu_upload_usable, upload_gpu_parts, upload_gpu_slab, upload_gpu_optical_start, upload_gpu_blend_start, upload_gpu_resources, upload_has_optical, upload_has_blend, render_has_optical, scene_lights_slab, scene_lights_count, group_model_baked)
    _scene_prof_elapsed(prof_on, "render_parts", t_render0)
    mesh = _scene_load_anim_fit_stage(mesh, anim_cnt, skin_cnt, morph_cnt, scene_lights_pipeline_raw, scene_name, sp_sc, fit_tx, fit_ty, fit_tz, prof_on)
@@ -7980,7 +7980,7 @@ fn _scene_fast_log_state(bool enabled) bool {
          " has_optical=" + to_str(_scene_fast_gpu_has_optical) +
          " has_blend=" + to_str(_scene_fast_gpu_has_blend) +
          " model_baked=" + to_str(_scene_fast_gpu_model_baked) +
-      " lights=" + to_str(_scene_fast_gpu_light_count))
+         " lights=" + to_str(_scene_fast_gpu_light_count))
    }
    true
 }
@@ -8137,7 +8137,7 @@ fn scene_fast_draw(any group, any model_matrix, bool log_enabled=false) bool {
    if !_scene_fast_gpu_ready {
       if log_enabled {
          ui_profile.print_text("[scene:fast] not-ready slab=" + to_str(_scene_fast_gpu_slab != 0) +
-         " count=" + to_str(_scene_fast_gpu_count))
+            " count=" + to_str(_scene_fast_gpu_count))
       }
       return _scene_fast_draw_generic(group, model_matrix)
    }
@@ -8188,7 +8188,7 @@ fn scene_fast_color_reuse_ready(any group) bool {
          1.0, 0.0, 0.0, 0.0,
          0.0, 1.0, 0.0, 0.0,
          0.0, 0.0, 1.0, 0.0,
-      10.0, 20.0, 30.0, 1.0]
+         10.0, 20.0, 30.0, 1.0]
    )
    assert(translated.get(0).get(0) == 11.0 && translated.get(1).get(2) == 34.0, "scene transform aabb")
    mut drag_scene = {"edit_tx": 0.0, "edit_ty": 0.0, "edit_tz": 0.0}
@@ -8204,21 +8204,21 @@ fn scene_fast_color_reuse_ready(any group) bool {
          "drag_world_per_pixel": 0.10,
          "drag_right_x": 1.0, "drag_right_y": 0.0, "drag_right_z": 0.0,
          "drag_up_x": 0.0, "drag_up_y": 1.0, "drag_up_z": 0.0
-   })
+      })
    cam_drag = scene_drag_apply(cam_drag_scene, cam_drag, 110.0, 80.0, 180.0, [0, 0, 0, 1, 1, 1], 99.0, 88.0, 77.0, 30.0, -45.0)
    assert(abs(float(cam_drag_scene.get("edit_tx", 0.0)) - 1.0) < 0.00001 && abs(float(cam_drag_scene.get("edit_ty", 0.0)) - 2.0) < 0.00001, "scene drag uses frozen camera plane")
    mut axis_drag_scene = {"edit_tx": 0.0, "edit_ty": 0.0, "edit_tz": 0.0}
    mut axis_drag = scene_drag_begin_state(axis_drag_scene, 100.0, 100.0, 0, {
          "axis": 1, "screen_axis_x": 0.0, "screen_axis_y": -1.0,
          "axis_world_per_pixel": 0.10, "drag_world_per_pixel": 0.10
-   })
+      })
    axis_drag = scene_drag_apply(axis_drag_scene, axis_drag, 100.0, 90.0, 0.0, [0, 0, 0, 1, 1, 1])
    assert(abs(float(axis_drag_scene.get("edit_tx", 0.0)) - 1.0) < 0.00001, "scene drag uses frozen axis tangent")
    mut y_ray_scene = {"edit_tx": 0.0, "edit_ty": 0.0, "edit_tz": 0.0}
    mut y_ray_drag = scene_drag_begin_state(y_ray_scene, 0.0, 0.0, 0, {
          "axis": 2, "screen_axis_x": 0.0, "screen_axis_y": -1.0,
          "axis_world_per_pixel": 0.01, "drag_world_per_pixel": 0.01
-   })
+      })
    y_ray_drag["axis_world_delta_ok"] = true
    y_ray_drag["axis_world_delta"] = 3.25
    y_ray_drag = scene_drag_apply(y_ray_scene, y_ray_drag, 0.0, -1.0, 0.0, [0, 0, 0, 1, 1, 1])
@@ -8227,7 +8227,7 @@ fn scene_fast_color_reuse_ready(any group) bool {
    mut stale_ray_drag = scene_drag_begin_state(stale_ray_scene, 0.0, 0.0, 0, {
          "axis": 2, "screen_axis_x": 0.0, "screen_axis_y": -1.0,
          "axis_world_per_pixel": 0.01, "drag_world_per_pixel": 0.01
-   })
+      })
    stale_ray_drag["axis_world_delta_ok"] = true
    stale_ray_drag["axis_world_delta"] = 99.0
    stale_ray_drag["ray_update_ok"] = false
@@ -8247,7 +8247,7 @@ fn scene_fast_color_reuse_ready(any group) bool {
       int(tweaked.get("mat_records", [dict(0)]).get(0).get("base_color_u32", 0)) != 0xffffffff &&
       int(tweaked.get("parts", [dict(0)]).get(0).get("material_u32", 0)) == int(tweaked.get("mat_records", [dict(0)]).get(0).get("material_u32", -1)) &&
       int(tweaked.get("gpu_parts", [[]]).get(0).get(13, -1)) == int(tweaked.get("mat_records", [dict(0)]).get(0).get("material_u32", -2)),
-   "scene material tweak updates records and parts")
+      "scene material tweak updates records and parts")
    def tex = {"compare_env": 10, "compare_env_spec": 11, "compare_reflect_spec": 12, "compare_visible_env": 13, "neutral_env": 20, "neutral_env_spec": 21, "skybox": 30, "skybox_spec": 31}
    assert(first_ready([-1, 0, 2]) == 0 && first_ready([]) == -1, "scene env first ready")
    assert(mode_flags(false, false, false, false, true, false, 0) == [false, false, true, false, true], "scene env optical mode")

@@ -84,7 +84,7 @@ fn mat4_from_trs(any t, any r, any s) list {
       (1.0 - 2.0*(yy+zz))*sx, (2.0*(xy+wz))*sx,       (2.0*(xz-wy))*sx,       0.0,
       (2.0*(xy-wz))*sy,       (1.0 - 2.0*(xx+zz))*sy, (2.0*(yz+wx))*sy,       0.0,
       (2.0*(xz+wy))*sz,       (2.0*(yz-wx))*sz,       (1.0 - 2.0*(xx+yy))*sz, 0.0,
-   tx,                      ty,                      tz,                      1.0, "mat4", 400 ]
+      tx,                      ty,                      tz,                      1.0, "mat4", 400 ]
 }
 
 fn mat4_inverse_affine(any m) list {
@@ -119,7 +119,7 @@ fn mat4_inverse_affine(any m) list {
    [b00, b10, b20, 0.0,
       b01, b11, b21, 0.0,
       b02, b12, b22, 0.0,
-   itx, ity, itz, 1.0, "mat4", 400]
+      itx, ity, itz, 1.0, "mat4", 400]
 }
 
 fn mat4_transform_point(any m, any p) list {

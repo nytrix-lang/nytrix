@@ -1,0 +1,17 @@
+shape oracle_range_inclusive_modulo_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop range modulo register-home regression]
+  template ny-test-case
+  flags_matrix "-O0 --nyir-verify --native-result-oracle=558389616; -O1 --nyir-verify --native-result-oracle=558389616; -O2 --nyir-verify --native-result-oracle=558389616; -O3 --nyir-verify --native-result-oracle=558389616"
+  expect compile_and_run
+  source ny <<'NY'
+fn main() int {
+  mut state = 7
+  for i in 1..10 {
+    state = (state * 1103515 + 12345) % 2147483647
+  }
+  state
+}
+NY
+}

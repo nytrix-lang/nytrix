@@ -740,14 +740,14 @@ fn test_layout_examples() {
    def ptr pair = malloc(__layout_size("TypeMethodPair"))
    store_layout(pair, "TypeMethodPair", 7, 11)
    assert(load32(pair, __layout_offset("TypeMethodPair", "x")) +
-   load32(pair, __layout_offset("TypeMethodPair", "y")) == 18, "layout-local pointer fields")
+      load32(pair, __layout_offset("TypeMethodPair", "y")) == 18, "layout-local pointer fields")
    free(pair)
    def *TypeMaterial mat = type_material_new(4, 7, 0.8, 0.25)
    assert(load32(mat, __layout_offset("TypeMaterial", "base_tex")) == 4, "material base tex")
    assert(load32(mat, __layout_offset("TypeMaterial", "flags")) != 0, "attached material texture flag")
    assert(load64_f64(mat, __layout_offset("TypeMaterial", "metallic")) *
       (1.0 - load64_f64(mat, __layout_offset("TypeMaterial", "roughness"))) == 0.6000000000000001,
-   "material score from layout fields")
+      "material score from layout fields")
    free(mat)
    def ptr derived_default = malloc(__layout_size("TypeDerivedMaterial"))
    store_layout(derived_default, "TypeDerivedMaterial", -1, -1, 0, 1.0, 0.5)
@@ -758,9 +758,9 @@ fn test_layout_examples() {
    store_layout(derived_a, "TypeDerivedMaterial", 4, 7, 1, 0.8, 0.25)
    store_layout(derived_b, "TypeDerivedMaterial", 4, 7, 1, 0.8, 0.25)
    assert(load32(derived_a, __layout_offset("TypeDerivedMaterial", "base_tex")) ==
-   load32(derived_b, __layout_offset("TypeDerivedMaterial", "base_tex")), "record raw field equality")
+      load32(derived_b, __layout_offset("TypeDerivedMaterial", "base_tex")), "record raw field equality")
    assert(load64_f64(derived_a, __layout_offset("TypeDerivedMaterial", "roughness")) ==
-   load64_f64(derived_b, __layout_offset("TypeDerivedMaterial", "roughness")), "record raw f64 equality")
+      load64_f64(derived_b, __layout_offset("TypeDerivedMaterial", "roughness")), "record raw f64 equality")
    free(derived_default)
    free(derived_a)
    free(derived_b)
@@ -833,7 +833,7 @@ fn test_layout_examples() {
    assert(load32(win, __layout_offset("TypeWindowState", "events")) == 1, "shared state updated")
    free(win)
    def ptr backend = contract.make(1, contract.REQUIRED_RENDER_WINDOW | contract.CAP_CURSOR | contract.CAP_CLIPBOARD,
-   contract.REQUIRED_RENDER_WINDOW)
+      contract.REQUIRED_RENDER_WINDOW)
    assert(contract.valid(backend), "complete backend contract")
    assert(contract.has(backend, contract.CAP_SURFACE), "contract surface capability")
    free(backend)
@@ -1102,7 +1102,7 @@ fn test_hm_principal_examples() {
       eq(config_shape, "dict<str, int|bool|str>") ||
       eq(config_shape, "dict<str, bool|str|int>") ||
       eq(config_shape, "dict<str, bool|int|str>"),
-   "HM heterogeneous dict runtime shape")
+      "HM heterogeneous dict runtime shape")
    mut ?int maybe = nil
    if true { maybe = 9 }
    assert(maybe == 9, "HM nullable merge shape")

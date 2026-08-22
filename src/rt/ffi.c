@@ -1,3 +1,7 @@
+/*
+ * FFI runtime: foreign-function interface glue for calling native
+ * C functions from Nytrix code with ABI-compliant argument marshalling.
+ */
 #include "rt/shared.h"
 #include <string.h>
 

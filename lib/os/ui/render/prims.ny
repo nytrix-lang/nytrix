@@ -23,8 +23,8 @@ fn draw_sphere_3d(any center, any radius, any color) {
    mut si = 0
    while si <= segs {
       def u = 2.0 * PI * float(si) / float(segs)
-         cu = cu.append(math.cos(u))
-         su = su.append(math.sin(u))
+      cu = cu.append(math.cos(u))
+      su = su.append(math.sin(u))
       si += 1
    }
    mut tris = []
@@ -68,8 +68,8 @@ fn draw_cylinder_3d(any center, any radiusTop, any radiusBottom, any height, any
    mut i = 0
    while i <= n {
       def a = 2.0 * PI * float(i) / float(n)
-         ca = ca.append(math.cos(a))
-         sa = sa.append(math.sin(a))
+      ca = ca.append(math.cos(a))
+      sa = sa.append(math.sin(a))
       i += 1
    }
    mut tris = []
@@ -112,8 +112,8 @@ fn draw_cylinder_between_3d(any start, any finish, any radiusStart, any radiusEn
    mut i = 0
    while i <= n {
       def a = 2.0 * PI * float(i) / float(n)
-         ca = ca.append(math.cos(a))
-         sa = sa.append(math.sin(a))
+      ca = ca.append(math.cos(a))
+      sa = sa.append(math.sin(a))
       i += 1
    }
    mut tris = []

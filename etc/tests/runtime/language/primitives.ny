@@ -115,9 +115,10 @@ while churn_i < 256 {
    churn.delete(churn_key)
    churn_i += 1
 }
+
 churn.set("live", 42)
 assert(churn_alias.get("live", 0) == 42 && churn_alias.len == 1,
-       "dict tombstone compaction preserves aliases")
+   "dict tombstone compaction preserves aliases")
 mut half_full = dict(20)
 mut fill_i = 0
 while fill_i < 16 {

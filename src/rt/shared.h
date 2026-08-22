@@ -514,6 +514,7 @@ static inline int64_t rt_mask_ptr(int64_t v) { return (int64_t)((uint64_t)v & ~N
 #define TAG_ERR 105
 #define TAG_RANGE 106
 #define TAG_CLOSURE 107
+#define TAG_DICT_TBL 108
 #define TAG_FLOAT 110
 #define TAG_COMPLEX 111
 #define TAG_STR 120
@@ -536,6 +537,8 @@ static inline int64_t rt_runtime_tag_raw_name(const char *s, size_t n) {
     return TAG_LIST;
   if (n == 4 && memcmp(s, "dict", 4) == 0)
     return TAG_DICT;
+  if (n == 8 && memcmp(s, "dict_tbl", 8) == 0)
+    return TAG_DICT_TBL;
   if (n == 3 && memcmp(s, "set", 3) == 0)
     return TAG_SET;
   if (n == 5 && memcmp(s, "tuple", 5) == 0)
@@ -742,6 +745,7 @@ int _ny_aot_set_args(int argc, char **argv, char **envp);
 int64_t rt_malloc(int64_t n);
 int64_t rt_malloc_uninit(int64_t n);
 int64_t rt_free(int64_t ptr);
+int64_t rt_pool_release(void);
 int64_t rt_ptr_key(int64_t ptr);
 int64_t rt_atomic_load64(int64_t addr, int64_t idx);
 int64_t rt_atomic_store64(int64_t addr, int64_t idx, int64_t value);
@@ -807,6 +811,14 @@ static inline int rt_check_oob(const char *op, int64_t addr, int64_t idx, size_t
 
 int64_t rt_alloc_string(const char *s);
 int64_t rt_alloc_string_len(const char *s, size_t len);
+
+/* Small-string optimization threshold and short-string interning. */
+#define RT_SSO_MAX 23
+int64_t rt_str_intern_lookup(const char *s, size_t len);
+void rt_str_intern_insert(const char *s, size_t len, int64_t str);
+void rt_str_intern_clear(void);
+int64_t rt_str_hash(int64_t v);
+
 int64_t rt_panic(int64_t msg_ptr);
 int64_t rt_division_by_zero(void);
 int64_t rt_modulo_by_zero(void);
@@ -831,9 +843,48 @@ int64_t rt_bigint_to_str(int64_t a);
 int64_t rt_bigfloat_to_str(int64_t a);
 int64_t rt_bigint_from_i64_raw(int64_t v);
 int64_t rt_bigint_to_i64_raw(int64_t a);
+int64_t rt_native_bigint_cmp(int64_t a, int64_t b);
+int64_t rt_native_has_tag(int64_t value, int64_t tag);
+int64_t rt_native_is_int(int64_t value);
+int64_t rt_native_bigfloat_from_value(int64_t v, int64_t precision);
+double rt_native_bigfloat_to_f64(int64_t a);
+int64_t rt_native_bigfloat_cmp(int64_t a, int64_t b);
+int64_t rt_native_bigfloat_precision(int64_t a);
+int64_t rt_native_bigfloat_pow_int(int64_t a, int64_t exponent);
+int64_t rt_native_f64_to_i64(double v);
+double rt_native_sin_f64(double value);
+double rt_native_cos_f64(double value);
 int64_t rt_print_i64_raw(int64_t v);
+int64_t rt_print_f64_raw(double d);
+/* Raw typed-buffer allocator used by the LLVM-free NYIR lowering. */
+int64_t rt_native_thread_spawn_raw(int64_t fn, int64_t arg);
+int64_t rt_native_tbuf_new(int64_t count, int64_t elem_size);
+int64_t rt_native_dict_new(int64_t capacity);
+int64_t rt_native_dict_get(int64_t dict, int64_t key, int64_t fallback);
+int64_t rt_native_dict_set(int64_t dict, int64_t key, int64_t value);
+int64_t rt_native_dict_has(int64_t dict, int64_t key);
+int64_t rt_native_dict_len(int64_t dict);
+int64_t rt_native_dict_delete(int64_t dict, int64_t key);
+int64_t rt_native_tbuf_append(int64_t buffer, int64_t value,
+                              int64_t is_string);
+int64_t rt_native_tbuf_append_i64(int64_t buffer, int64_t value);
+int64_t rt_native_tbuf_repeat(int64_t buffer, int64_t repeat_count);
+int64_t rt_native_tbuf_len(int64_t buffer);
+int64_t rt_native_tbuf_pop(int64_t buffer);
+int64_t rt_native_load8_idx(int64_t addr, int64_t idx);
+int64_t rt_native_store8_idx(int64_t addr, int64_t idx, int64_t value);
+int64_t rt_native_cstr_len(int64_t value);
+int64_t rt_native_cstr_builder_new(int64_t initial);
+int64_t rt_native_cstr_builder_append(int64_t builder, int64_t suffix);
+int64_t rt_native_cstr_builder_finalize(int64_t builder);
+int64_t rt_native_cstr_replace(int64_t s, int64_t old_s, int64_t new_s);
+int64_t rt_native_i64_min(int64_t a, int64_t b);
+int64_t rt_native_i64_max(int64_t a, int64_t b);
+double rt_native_f64_min(double a, double b);
+double rt_native_f64_max(double a, double b);
+int64_t rt_native_bool_to_cstr(int64_t value);
 
-/* Phase 4: GC and FFI Gates */
+/* GC and FFI gates. */
 #include "rt/ffigates.h"
 #include "rt/gc.h"
 
@@ -917,8 +968,7 @@ int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
                   int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
                   int64_t a12, int64_t a13, int64_t a14);
 
-/* ========================================================================
- * ny_value_* — the clean boundary between typed and dynamic worlds.
+/* ny_value_* — the clean boundary between typed and dynamic worlds.
  *
  * TYPED WORLD (compiler, NYIR, native codegen, layout slots):
  *   i64 = raw 64-bit. No tagging. No shifting.
@@ -932,7 +982,7 @@ int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
  *
  * These are the ONLY boundary points where tag/untag happens.
  * All tag masks, shifts, and encoding details are private here.
- * ======================================================================== */
+ */
 
 /* Value kind constants for ny_value_kind() */
 #define NY_VALUE_KIND_NIL     0
@@ -942,13 +992,13 @@ int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
 #define NY_VALUE_KIND_PTR     4
 #define NY_VALUE_KIND_NATIVE  5
 
-/* --- Typed world: raw i64 operations (NO tagging, NO allocation) --- */
+/* Typed world: raw i64 operations (NO tagging, NO allocation) */
 
 /* Identity: raw i64 is already raw i64. The typed world never tags. */
 static inline int64_t ny_value_from_i64_raw(int64_t raw) { return raw; }
 static inline int64_t ny_value_to_i64_raw(int64_t v) { return v; }
 
-/* --- Dynamic world: tagged NyValue operations --- */
+/* Dynamic world: tagged NyValue operations */
 
 /* Box a raw i64 into the tagged NyValue representation. */
 static inline int64_t ny_value_from_i64(int64_t raw) {
@@ -998,7 +1048,7 @@ static inline int64_t ny_value_heap_tag(int64_t v) {
   return *(int64_t *)((char *)(uintptr_t)hp - 8);
 }
 
-/* --- Boundary operations (the only places tagging happens) --- */
+/* Boundary operations (the only places tagging happens) */
 
 /* Box a raw i64 into a dynamic context. Values outside the tagged range use
  * the existing explicit bigint heap representation until a dedicated boxed

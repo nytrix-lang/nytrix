@@ -1,7 +1,6 @@
 ;; Keywords: smt z3 proofs equivalence bitvectors semantics
 ;; SMT-backed equivalence proofs used by semantic recovery.
 module std.os.rev.decomp.smt_proofs *
-
 use std.core
 use std.core.str as str
 use std.math.smt as smt
@@ -137,7 +136,7 @@ fn _smt_expr_to_ast(any ctx, any expr, int bits, dict env=dict()) any {
    if op == "extract" { return smt.bv_extract(ctx, int(expr.get("hi", 0)), int(expr.get("lo", 0)), _smt_expr_to_ast(ctx, expr.get("expr", args.len > 0 ? args[0] : 0), bits, env)) }
    if op == "zext" {
       return _smt_zext_to(ctx, _smt_expr_to_ast(ctx, expr.get("expr", args.len > 0 ? args[0] : 0), int(expr.get("from", 8)), env),
-      int(expr.get("from", 8)), int(expr.get("to", bits)))
+         int(expr.get("from", 8)), int(expr.get("to", bits)))
    }
    if op == "sext" {
       def from_bits = int(expr.get("from", 8))
@@ -195,7 +194,7 @@ fn _smt_prove_equal_with(str archetype, int bits, any lhs, any rhs, any ctx, lis
    smt.solver_del(ctx, sol)
    {"kind": "smt_expr_proof", "archetype": archetype, "proved": result == smt.UNSAT,
       "result": result, "bits": bits, "method": constraints.len > 0 ? "prove_unsat(constraints && lhs != rhs)" : "prove_unsat(lhs != rhs)",
-   "constraint_count": constraints.len, "translation": "expr_to_z3_ast"}
+      "constraint_count": constraints.len, "translation": "expr_to_z3_ast"}
 }
 
 fn _smt_prove_equal(str archetype, int bits, any lhs, any rhs, any ctx) dict {
@@ -230,7 +229,7 @@ fn _smt_signed_division_power2_nonnegative_proof(int bits) dict {
    def x_ast = _smt_expr_to_ast(ctx, x, bits)
    def guard = smt.bvsge(ctx, x_ast, _smt_bv(ctx, 0, bits))
    def out = _smt_prove_equal_with("signed_div_power2_nonnegative", bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx, [guard])
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx, [guard])
    .set("expr", "x >= 0 => sdiv(x, 8) == ashr(x, 3)").set("operator", "bvsdiv")
    .set("constant", 8).set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    smt.ctx_del(ctx)
@@ -244,7 +243,7 @@ fn _smt_remainder_power2_mask_proof(int bits) dict {
    def lhs_expr = {"op": "urem", "args": [x, {"op": "const", "value": 8, "bits": bits}], "bits": bits}
    def rhs_expr = {"op": "and", "args": [x, {"op": "const", "value": 7, "bits": bits}], "bits": bits}
    def out = _smt_prove_equal("unsigned_rem_power2_mask", bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
    .set("expr", "x % 8 == x & 7").set("operator", "bvurem").set("constant", 8)
    .set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    smt.ctx_del(ctx)
@@ -272,10 +271,10 @@ fn _smt_mask_byte_window_proof(int bits) dict {
    def x = {"op": "var", "name": "x", "bits": bits}
    def lhs_expr = {"op": "lshr", "args": [
          {"op": "and", "args": [x, {"op": "const", "value": 0xff00, "bits": bits}], "bits": bits},
-   {"op": "const", "value": 8, "bits": bits}], "bits": bits}
+         {"op": "const", "value": 8, "bits": bits}], "bits": bits}
    def rhs_expr = {"op": "zext", "from": 8, "to": bits, "expr": {"op": "extract", "hi": 15, "lo": 8, "expr": x}}
    def out = _smt_prove_equal("byte_window_mask", bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
    .set("expr", "((x & 0xff00) >> 8) == zext(extract(x, 15, 8))").set("operator", "bvand")
    .set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    smt.ctx_del(ctx)
@@ -291,11 +290,11 @@ fn _smt_bitfield_extract_proof(int bits) dict {
    def mask = (1 << width) - 1
    def lhs_expr = {"op": "and", "args": [
          {"op": "lshr", "args": [x, {"op": "const", "value": lo, "bits": bits}], "bits": bits},
-   {"op": "const", "value": mask, "bits": bits}], "bits": bits}
+         {"op": "const", "value": mask, "bits": bits}], "bits": bits}
    def rhs_expr = {"op": "zext", "from": width, "to": bits,
-   "expr": {"op": "extract", "hi": lo + width - 1, "lo": lo, "expr": x}}
+      "expr": {"op": "extract", "hi": lo + width - 1, "lo": lo, "expr": x}}
    def out = _smt_prove_equal("bitfield_extract", bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
    .set("expr", "((x >> 4) & 0xf) == zext(extract(x, 7, 4))").set("operator", "bits")
    .set("offset", lo).set("width", width).set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    smt.ctx_del(ctx)
@@ -309,7 +308,7 @@ fn _smt_self_mask_idempotent_proof(int bits) dict {
    def lhs_expr = {"op": "and", "args": [x, x], "bits": bits}
    def rhs_expr = x
    def out = _smt_prove_equal("self_mask_idempotent", bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
    .set("expr", "(x & x) == x").set("operator", "bvand")
    .set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    smt.ctx_del(ctx)
@@ -322,7 +321,7 @@ fn _smt_rotate_left_proof(int bits) dict {
    def x = {"op": "var", "name": "x", "bits": bits}
    def lhs_expr = {"op": "or", "args": [
          {"op": "shl", "args": [x, {"op": "const", "value": 5, "bits": bits}], "bits": bits},
-   {"op": "lshr", "args": [x, {"op": "const", "value": bits - 5, "bits": bits}], "bits": bits}], "bits": bits}
+         {"op": "lshr", "args": [x, {"op": "const", "value": bits - 5, "bits": bits}], "bits": bits}], "bits": bits}
    def rhs_expr = {"op": "rol", "args": [x], "shift": 5, "bits": bits}
    def lhs = _smt_expr_to_ast(ctx, lhs_expr, bits)
    def rhs = _smt_expr_to_ast(ctx, rhs_expr, bits)
@@ -339,10 +338,10 @@ fn _smt_rotate_right_proof(int bits) dict {
    def x = {"op": "var", "name": "x", "bits": bits}
    def lhs_expr = {"op": "or", "args": [
          {"op": "lshr", "args": [x, {"op": "const", "value": 7, "bits": bits}], "bits": bits},
-   {"op": "shl", "args": [x, {"op": "const", "value": bits - 7, "bits": bits}], "bits": bits}], "bits": bits}
+         {"op": "shl", "args": [x, {"op": "const", "value": bits - 7, "bits": bits}], "bits": bits}], "bits": bits}
    def rhs_expr = {"op": "ror", "args": [x], "shift": 7, "bits": bits}
    def out = _smt_prove_equal("rotate_right", bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
    .set("expr", "((x >> 7) | (x << (bits - 7))) == ror(x, 7)").set("operator", "ror")
    .set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    smt.ctx_del(ctx)
@@ -367,19 +366,19 @@ fn _smt_byte_pack_proof(int bits, str endian) dict {
             {"op": "or", "args": [z0, {"op": "shl", "args": [z1, {"op": "const", "value": 8, "bits": bits}], "bits": bits}], "bits": bits},
             {"op": "or", "args": [
                   {"op": "shl", "args": [z2, {"op": "const", "value": 16, "bits": bits}], "bits": bits},
-      {"op": "shl", "args": [z3, {"op": "const", "value": 24, "bits": bits}], "bits": bits}], "bits": bits}], "bits": bits}
+                  {"op": "shl", "args": [z3, {"op": "const", "value": 24, "bits": bits}], "bits": bits}], "bits": bits}], "bits": bits}
    } else {
       lhs_expr = {"op": "or", "args": [
             {"op": "or", "args": [
                   {"op": "shl", "args": [z0, {"op": "const", "value": 24, "bits": bits}], "bits": bits},
-            {"op": "shl", "args": [z1, {"op": "const", "value": 16, "bits": bits}], "bits": bits}], "bits": bits},
+                  {"op": "shl", "args": [z1, {"op": "const", "value": 16, "bits": bits}], "bits": bits}], "bits": bits},
             {"op": "or", "args": [
                   {"op": "shl", "args": [z2, {"op": "const", "value": 8, "bits": bits}], "bits": bits},
-      z3], "bits": bits}], "bits": bits}
+                  z3], "bits": bits}], "bits": bits}
       rhs_expr = {"op": "concat", "args": [b0, b1, b2, b3], "bits": bits}
    }
    def out = _smt_prove_equal("byte_pack_" + endian, bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
    .set("expr", "byte shifts/or == concat bytes").set("operator", "byte_pack").set("endianness", endian)
    .set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    smt.ctx_del(ctx)
@@ -392,7 +391,7 @@ fn _smt_unbounded_integer_wrap_proof(int bits) dict {
    def lhs_expr = {"op": "const", "value": _smt_wrapped_const_hex(42, bits), "bits": bits}
    def rhs_expr = {"op": "const", "value": 42, "bits": bits}
    def out = _smt_prove_equal("unbounded_integer_width_wrap", bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
    .set("expr", "(2^bits + 42) as bitvector == 42").set("operator", "const_width")
    .set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    smt.ctx_del(ctx)
@@ -409,17 +408,17 @@ fn _smt_byte_swap32_proof() dict {
          {"op": "or", "args": [
                {"op": "shl", "args": [
                      {"op": "and", "args": [x, {"op": "const", "value": 0xff, "bits": bits}], "bits": bits},
-               {"op": "const", "value": 24, "bits": bits}], "bits": bits},
+                     {"op": "const", "value": 24, "bits": bits}], "bits": bits},
                {"op": "shl", "args": [
                      {"op": "and", "args": [x, {"op": "const", "value": 0xff00, "bits": bits}], "bits": bits},
-         {"op": "const", "value": 8, "bits": bits}], "bits": bits}], "bits": bits},
+                     {"op": "const", "value": 8, "bits": bits}], "bits": bits}], "bits": bits},
          {"op": "or", "args": [
                {"op": "lshr", "args": [
                      {"op": "and", "args": [x, {"op": "const", "value": 0xff0000, "bits": bits}], "bits": bits},
-               {"op": "const", "value": 8, "bits": bits}], "bits": bits},
-   {"op": "lshr", "args": [x, {"op": "const", "value": 24, "bits": bits}], "bits": bits}], "bits": bits}], "bits": bits}
+                     {"op": "const", "value": 8, "bits": bits}], "bits": bits},
+               {"op": "lshr", "args": [x, {"op": "const", "value": 24, "bits": bits}], "bits": bits}], "bits": bits}], "bits": bits}
    def out = _smt_prove_equal("byte_swap32", bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
    .set("expr", "bswap32(x) == endian byte reshuffle").set("operator", "bswap32")
    .set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    smt.ctx_del(ctx)
@@ -433,11 +432,11 @@ fn _smt_magic_unsigned_div3_proof() dict {
    def x16 = {"op": "zext", "from": 8, "to": 16, "expr": x8}
    def lhs_expr = {"op": "lshr", "args": [
          {"op": "mul", "args": [x16, {"op": "const", "value": "0xab", "bits": 16}], "bits": 16},
-   {"op": "const", "value": 9, "bits": 16}], "bits": 16}
+         {"op": "const", "value": 9, "bits": 16}], "bits": 16}
    def rhs_expr = {"op": "zext", "from": 8, "to": 16,
-   "expr": {"op": "udiv", "args": [x8, {"op": "const", "value": 3, "bits": 8}], "bits": 8}}
+      "expr": {"op": "udiv", "args": [x8, {"op": "const", "value": 3, "bits": 8}], "bits": 8}}
    def out = _smt_prove_equal("magic_unsigned_div3", 16,
-   _smt_expr_to_ast(ctx, lhs_expr, 16), _smt_expr_to_ast(ctx, rhs_expr, 16), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, 16), _smt_expr_to_ast(ctx, rhs_expr, 16), ctx)
    .set("expr", "((zext(x8) * 0xab) >> 9) == x8 / 3").set("operator", "magic_udiv")
    .set("constant", 3).set("domain_bits", 8).set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    .set("replacement", "x / 3")
@@ -452,12 +451,12 @@ fn _smt_affine_byte_mix_proof() dict {
    def z = {"op": "zext", "from": 8, "to": 32, "expr": b}
    def mixed = {"op": "add", "args": [
          {"op": "xor", "args": [z, {"op": "const", "value": 0x5a, "bits": 32}], "bits": 32},
-   {"op": "const", "value": 17, "bits": 32}], "bits": 32}
+         {"op": "const", "value": 17, "bits": 32}], "bits": 32}
    def lhs_expr = {"op": "and", "args": [mixed, {"op": "const", "value": 0xff, "bits": 32}], "bits": 32}
    def rhs_expr = {"op": "zext", "from": 8, "to": 32,
-   "expr": {"op": "extract", "hi": 7, "lo": 0, "expr": mixed}}
+      "expr": {"op": "extract", "hi": 7, "lo": 0, "expr": mixed}}
    def out = _smt_prove_equal("affine_byte_mix", 32,
-   _smt_expr_to_ast(ctx, lhs_expr, 32), _smt_expr_to_ast(ctx, rhs_expr, 32), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, 32), _smt_expr_to_ast(ctx, rhs_expr, 32), ctx)
    .set("expr", "((zext(b) ^^ 0x5a) + 17) & 0xff == byte result")
    .set("operator", "byte_affine").set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    .set("replacement", "byte(((b ^^ 0x5a) + 17))")
@@ -471,13 +470,13 @@ fn _smt_rotate_xor_hash_round_proof(int bits) dict {
    def x = {"op": "var", "name": "x", "bits": bits}
    def base = {"op": "add", "args": [
          {"op": "xor", "args": [x, {"op": "const", "value": "0x9e3779b9", "bits": bits}], "bits": bits},
-   {"op": "const", "value": 0x85ebca6b, "bits": bits}], "bits": bits}
+         {"op": "const", "value": 0x85ebca6b, "bits": bits}], "bits": bits}
    def lhs_expr = {"op": "or", "args": [
          {"op": "shl", "args": [base, {"op": "const", "value": 5, "bits": bits}], "bits": bits},
-   {"op": "lshr", "args": [base, {"op": "const", "value": bits - 5, "bits": bits}], "bits": bits}], "bits": bits}
+         {"op": "lshr", "args": [base, {"op": "const", "value": bits - 5, "bits": bits}], "bits": bits}], "bits": bits}
    def rhs_expr = {"op": "rol", "args": [base], "shift": 5, "bits": bits}
    def out = _smt_prove_equal("rotate_xor_hash_round", bits,
-   _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
+      _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
    .set("expr", "shift/or hash round == rol((x ^^ k) + c, 5)")
    .set("operator", "hash_round").set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
    .set("replacement", "rol((x ^^ k) + c, 5)")
@@ -609,7 +608,7 @@ fn _smt_expression_proofs_from_facts(dict bundle, any opts=dict()) dict {
    {"kind": "smt_expression_proofs", "input": "facts", "backend": "z3",
       "ok": smt.z3_available(), "bits": proof_bits,
       "translation": "expr_to_z3_ast", "endianness_modes": endian_modes,
-   "proofs": proofs, "proof_count": proofs.len, "proved_count": proved}
+      "proofs": proofs, "proof_count": proofs.len, "proved_count": proved}
 }
 
 #main {

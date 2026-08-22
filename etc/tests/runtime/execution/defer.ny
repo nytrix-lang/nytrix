@@ -14,7 +14,7 @@ fn test_unwind() {
       log = log + "X"
    } catch err {
       _ = err
-   log = log + "C"  }
+      log = log + "C"  }
    log = log + "4"
 }
 

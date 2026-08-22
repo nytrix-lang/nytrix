@@ -115,7 +115,7 @@ fn ipv4_parse(str s) int {
          else { return 0 }
          val = val + oct * scale
          parts += 1
-         if c == 0 { return(parts == 4) ? val : 0 }
+         if c == 0 { return (parts == 4) ? val : 0 }
          oct = 0
          digits = 0
          shift = shift + 8

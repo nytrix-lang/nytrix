@@ -1,9 +1,15 @@
+/*
+ * Native tiering: classifies functions into baseline/stencil/fast/opt
+ * tiers based on call frequency, size, and cache-pressure heuristics.
+ */
 #include "code/native/native.h"
 
 #include <string.h>
 
-/* Tier defaults and NYIR handoff accounting are independent of lowering,
- * execution, and report formatting. */
+/*
+ * Tier defaults and NYIR handoff accounting are independent of lowering,
+ * execution, and report formatting.
+ */
 
 bool ny_native_tier_plan_init(ny_native_tier_plan_t *plan,
                               const ny_native_target_info_t *target,
@@ -13,14 +19,18 @@ bool ny_native_tier_plan_init(ny_native_tier_plan_t *plan,
   memset(plan, 0, sizeof(*plan));
   plan->backend_name = target && target->target_name ? target->target_name : "unknown";
   plan->requested_tier = opt && opt->native_tier_raw ? opt->native_tier_raw : "auto";
-  /* This planner is used only after a native target has been selected.
+  /*
+   * This planner is used only after a native target has been selected.
    * Experimental tier requests (including `llvm`) must not claim a different
    * executable path until that target actually has one. LLVM selection lives
-   * in the top-level backend choice, not in a native-target tier report. */
+   * in the top-level backend choice, not in a native-target tier report.
+   */
   plan->resolved_tier = "baseline";
-  /* Honour explicit tier requests as resolved labels even while the executable
+  /*
+   * Honour explicit tier requests as resolved labels even while the executable
    * path remains the shared NYIR→Machine IR→encode pipeline. Stencil/fast/opt
-   * select budgets; llvm remains a top-level backend choice. */
+   * select budgets; llvm remains a top-level backend choice.
+   */
   if (opt && opt->native_tier_raw && opt->native_tier_raw[0]) {
     if (strcmp(opt->native_tier_raw, "stencil") == 0)
       plan->resolved_tier = "stencil";

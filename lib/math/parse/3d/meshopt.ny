@@ -107,7 +107,7 @@ fn _build_adj(list indices, int idx_count, int vcnt) dict {
 }
 
 def _CACHE  = [0.0, 0.779, 0.791, 0.789, 0.981, 0.843, 0.726, 0.847,
-0.882, 0.867, 0.799, 0.642, 0.613, 0.600, 0.568, 0.372, 0.234]
+   0.882, 0.867, 0.799, 0.642, 0.613, 0.600, 0.568, 0.372, 0.234]
 def _VALENCE = [0.0, 0.995, 0.713, 0.450, 0.404, 0.059, 0.005, 0.147, 0.006]
 
 fn _vscore(int cache_pos, int live) any {
@@ -316,14 +316,14 @@ fn _qem_from_plane(any nx, any ny, any nz, any d) list {
    [nx*nx, nx*ny, nx*nz, nx*d,
       ny*ny, ny*nz, ny*d,
       nz*nz, nz*d,
-   d*d]
+      d*d]
 }
 
 fn _qem_add(list a, list b) list {
    [a.get(0)+b.get(0), a.get(1)+b.get(1), a.get(2)+b.get(2), a.get(3)+b.get(3),
       a.get(4)+b.get(4), a.get(5)+b.get(5), a.get(6)+b.get(6),
       a.get(7)+b.get(7), a.get(8)+b.get(8),
-   a.get(9)+b.get(9)]
+      a.get(9)+b.get(9)]
 }
 
 fn _qem_eval(list q, any x, any y, any z) any {
@@ -793,11 +793,11 @@ fn meshopt_select_lod_cut(dict lod_hierarchy, any cam_x, any cam_y, any cam_z, a
          def bnd = m.bounds
          def own_err = meshopt_cluster_screen_error(
             bnd.center_x, bnd.center_y, bnd.center_z, bnd.radius, m.cluster_error,
-         cam_x, cam_y, cam_z, cam_proj, cam_znear)
+            cam_x, cam_y, cam_z, cam_proj, cam_znear)
          def par_err = m.parent_error > 1e29 ? 1e30 :
          meshopt_cluster_screen_error(
             bnd.center_x, bnd.center_y, bnd.center_z, bnd.radius, m.parent_error,
-         cam_x, cam_y, cam_z, cam_proj, cam_znear)
+            cam_x, cam_y, cam_z, cam_proj, cam_znear)
          if own_err <= threshold && par_err > threshold { render_list = vec_push(render_list, m) }
          mi += 1
       }

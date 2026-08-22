@@ -27,14 +27,12 @@ ROOT = Path(__file__).resolve().parent
 QUIET_BOOTSTRAP = False
 LOADED_CONFIGS: list[Path] = []
 
-
 def _select_default_cc() -> str:
-    for name in ("clang", "cc", "gcc"):
+    for name in ("clang-20", "clang-19", "clang-18", "clang", "cc", "gcc"):
         path = shutil.which(name)
         if path:
             return path
     return ""
-
 
 def apply_builtin_env_defaults() -> None:
     """Apply the old top-level env.sh defaults inside ./make itself."""
@@ -284,7 +282,6 @@ def cmake_build_has_work(build_root: Path, kind: str, targets: list[str]) -> boo
             if not (bdir / f"{target}{exe}").exists():
                 return True
     return False
-
 
 def _vendor_env(build_root: Path) -> dict[str, str]:
     env = os.environ.copy()
@@ -1450,6 +1447,74 @@ def _windows_bootstrap_llvm_from_source() -> bool:
     _windows_configure_llvm_env(install_root)
     ok(f"Windows LLVM source build ready: {install_root}")
     return True
+def _clean_stale_cmake_caches() -> None:
+    build_root = ROOT / "build"
+    for bdir in (build_root / "release", build_root / "debug", build_root / "asan", build_root / "ubsan", build_root / "static"):
+        cache = bdir / "CMakeCache.txt"
+        if cache.exists():
+            cache.unlink(missing_ok=True)
+            shutil.rmtree(bdir / "CMakeFiles", ignore_errors=True)
+
+
+
+def _check_llvm_headers() -> tuple[bool, str | None]:
+    """Check if LLVM/Clang development headers exist. Returns (found, include_dir)."""
+    import subprocess
+    include_dirs = [
+        "/usr/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/usr/lib/llvm-22/include",
+        "/usr/lib/llvm-21/include",
+        "/usr/lib/llvm-20/include",
+        "/usr/lib/llvm-19/include",
+        "/usr/lib/llvm-18/include",
+        "/usr/lib/llvm-17/include",
+        "/usr/lib/llvm-16/include",
+        "/usr/lib/llvm-15/include",
+        "/usr/lib/llvm-14/include",
+    ]
+    
+    # Also check from llvm-config if available
+    llvm_config = os.environ.get("LLVM_CONFIG") or shutil.which("llvm-config")
+    if llvm_config:
+        try:
+            result = subprocess.run(
+                [llvm_config, "--includedir"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                include_dirs.insert(0, result.stdout.strip())
+        except Exception:
+            pass
+    
+    # Check LLVM_CONFIG env var with versioned configs
+    if "LLVM_CONFIG" in os.environ:
+        try:
+            result = subprocess.run(
+                [os.environ["LLVM_CONFIG"], "--includedir"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                include_dirs.insert(0, result.stdout.strip())
+        except Exception:
+            pass
+    
+    # Deduplicate
+    seen = set()
+    unique_dirs = []
+    for d in include_dirs:
+        if d not in seen:
+            seen.add(d)
+            unique_dirs.append(d)
+    
+    for inc_dir in unique_dirs:
+        llvm_core = Path(inc_dir) / "llvm-c" / "Core.h"
+        clang_index = Path(inc_dir) / "clang-c" / "Index.h"
+        if llvm_core.exists() and clang_index.exists():
+            return True, str(inc_dir)
+    
+    return False, None
 
 def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) -> None:
     if host_os() == "macos":
@@ -1468,7 +1533,22 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
         missing.append("pkg-config")
     if not which("ninja"):
         missing.append("ninja")
-    if not which("llvm-config") and host_os() != "windows":
+    has_llvm_config = False
+    if os.environ.get("LLVM_CONFIG") or which("llvm-config"):
+        has_llvm_config = True
+    else:
+        for ver in range(25, 13, -1):
+            cand = which(f"llvm-config-{ver}")
+            if cand:
+                has_llvm_config = True
+                os.environ["LLVM_CONFIG"] = cand
+                break
+    
+    # Also verify LLVM/Clang development headers exist (not just llvm-config binary)
+    llvm_headers_ok, _ = _check_llvm_headers()
+    if not llvm_headers_ok and host_os() != "windows":
+        missing.append("llvm")
+    elif not has_llvm_config and host_os() != "windows":
         missing.append("llvm")
     if host_os() == "windows":
         if not (which("clang") or Path(r"C:\Program Files\LLVM\bin\clang.exe").exists()):
@@ -1501,26 +1581,28 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             if v > 0:
                 pkgs += [f"clang-{v}", f"llvm-{v}", f"llvm-{v}-dev", f"llvm-{v}-runtime"]
                 if apt_has_pkg(f"libclang-{v}-dev"):
-                    pkgs += [f"libclang-{v}-dev"]
-                else:
-                    pkgs += ["libclang-dev"]
+                    pkgs.append(f"libclang-{v}-dev")
+                if apt_has_pkg("libclang-dev"):
+                    pkgs.append("libclang-dev")
             else:
                 pkgs += ["clang", "llvm-dev", "libclang-dev"]
-            step("deps: apt update")
             run(["sudo", "apt", "update"])
             step("deps: apt install")
             run(["sudo", "apt", "install", "-y", *pkgs])
             _install_optional_std_deps(force_optional_prompt)
+            _clean_stale_cmake_caches()
             return
         if distro in ("arch", "manjaro") or "arch" in like:
             step("deps: pacman install")
             run(["sudo", "pacman", "-Sy", "--noconfirm", "base-devel", "python", "clang", "cmake", "ninja", "git", "gdb", "llvm", "pkgconf", "zlib"])
             _install_optional_std_deps(force_optional_prompt)
+            _clean_stale_cmake_caches()
             return
         if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
             step("deps: dnf install")
             run(["sudo", "dnf", "install", "-y", "@development-tools", "clang", "llvm-devel", "cmake", "ninja-build", "git", "gdb", "pkgconf-pkg-config", "zlib-devel"])
             _install_optional_std_deps(force_optional_prompt)
+            _clean_stale_cmake_caches()
             return
     if os_name == "macos":
         if not which("brew"):
@@ -1539,6 +1621,7 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             run(["brew", "install", *_dedupe(pkgs)])
         configure_macos_llvm_env()
         _install_optional_std_deps(force_optional_prompt)
+        _clean_stale_cmake_caches()
         return
     if os_name == "windows":
         if _windows_deps_provider() == "msys2":
@@ -1550,10 +1633,9 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             if cmds:
                 log("DEPS", "installing Windows dependencies")
                 for cmd in cmds:
-                    _windows_run_install(cmd)
-        _windows_ensure_llvm()
-        pass
+                    run(cmd, shell=True)
         _install_optional_std_deps(force_optional_prompt)
+        _clean_stale_cmake_caches()
         return
     err(f"Unable to auto-install dependencies for host: {os_name}")
     raise SystemExit(1)
@@ -1810,10 +1892,12 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
     if host_os() == "windows":
         win_cc = _windows_cmake_tool(os.environ.get("CMAKE_C_COMPILER") or os.environ.get("CC") or "")
         win_cxx = _windows_cmake_tool(os.environ.get("CMAKE_CXX_COMPILER") or os.environ.get("CXX") or "")
+    use_llvm = os.environ.get("NYTRIX_USE_LLVM", "ON")
     if cache.exists():
         cache_matches_flags = (
             cmake_cache_value(bdir, "NYTRIX_HOST_CFLAGS", "") == host_cflags and
-            cmake_cache_value(bdir, "NYTRIX_HOST_LDFLAGS", "") == host_ldflags
+            cmake_cache_value(bdir, "NYTRIX_HOST_LDFLAGS", "") == host_ldflags and
+            (not ("NYTRIX_USE_LLVM" in os.environ) or cmake_cache_value(bdir, "NYTRIX_USE_LLVM", "ON") == use_llvm)
         )
         if host_os() == "windows":
             cached_cc = cmake_cache_value(bdir, "CMAKE_C_COMPILER", "")
@@ -1838,6 +1922,10 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
         f"-DNYTRIX_HOST_CFLAGS={host_cflags}",
         f"-DNYTRIX_HOST_LDFLAGS={host_ldflags}",
     ]
+    if "NYTRIX_USE_LLVM" in os.environ:
+        cmd.append(f"-DNYTRIX_USE_LLVM={os.environ['NYTRIX_USE_LLVM']}")
+    if "NYTRIX_USE_GMP" in os.environ:
+        cmd.append(f"-DNYTRIX_USE_GMP={os.environ['NYTRIX_USE_GMP']}")
     if host_os() == "windows":
         cc = win_cc or _windows_cmake_tool(os.environ.get("CC") or "")
         cxx = win_cxx or _windows_cmake_tool(os.environ.get("CXX") or "")
@@ -1958,221 +2046,6 @@ def bootstrap_needed_for_repl(build_root: Path, kind: str, cmds: list[str]) -> b
     exe = ".exe" if host_os() == "windows" else ""
     return not (bdir / "CMakeCache.txt").exists() or not (bdir / f"ny{exe}").exists()
 
-def ny_fast_run_args(args: list[str]) -> list[str]:
-    has_run = any(a == "-run" or a.startswith("--run") for a in args)
-    if not has_run:
-        return args
-    explicit_mode = any(
-        a in ("--jit", "-O0", "-O1", "-O2", "-O3", "-g")
-        or a.startswith("--profile=")
-        or a.startswith("--run=")
-        or a.startswith("-passes=")
-        for a in args
-    )
-    if explicit_mode:
-        return args
-    return ["--run=jit" if a == "-run" else a for a in args]
-
-NY_VALUE_OPTS = {
-    "-o", "--output", "-timeout", "--std-path", "--bundle-std", "--bundle-symbols",
-    "--emit-artifact", "--emit-ir", "--emit-bc", "--emit-asm", "--dump-dir",
-    "--entry-name", "--extract-at", "--extract-lang", "--host-triple",
-    "--host-cflags", "--host-ldflags", "--arm-float-abi", "--dwarf-version", "--gpu",
-    "--gpu-backend", "--gpu-offload", "--gpu-min-work", "--accel-target",
-    "--accel-object", "--gpu-target", "--parallel", "--threads",
-    "--parallel-min-work", "--heap", "--mode", "--max-errors", "--warn",
-    "--profile", "-passes",
-}
-
-NY_PREFIX_VALUE_OPTS = (
-    "--output=", "--std-path=", "--bundle-std=", "--bundle-symbols=",
-    "--emit-artifact=", "--emit-ir=", "--emit-bc=", "--emit-asm=", "--dump-dir=",
-    "--entry-name=", "--extract-at=", "--extract-lang=", "--host-triple=",
-    "--host-cflags=", "--host-ldflags=", "--arm-float-abi=", "--dwarf-version=", "--gpu=",
-    "--gpu-backend=", "--gpu-offload=", "--gpu-min-work=", "--accel-target=",
-    "--accel-object=", "--gpu-target=", "--parallel=", "--threads=",
-    "--parallel-min-work=", "--heap=", "--mode=", "--max-errors=", "--warn=",
-    "--profile=", "-passes=",
-)
-
-NY_RUN_CACHE_BLOCKERS = {
-    "--jit", "-emit-only", "-o", "--output", "-i", "--interactive", "--repl",
-    "-c", "-e", "--eval", "-ic", "-ci", "--eval-repl", "-dump-ast",
-    "--expand", "--expand-json", "-dump-llvm", "-dump-tokens", "--extract-code",
-    "--extract-json", "-dump-docs", "-dump-funcs", "-dump-symbols", "-dump-stats",
-    "-prof", "--prof", "-verify", "-g", "--emit-ir", "--emit-bc", "--emit-asm",
-    "--dump-on-error", "--dump-diagnose", "-trace",
-}
-
-NY_SUBCOMMANDS = {"fmt", "test", "doc", "web", "perf", "make", "pkg", "get", "install", "new", "c2ny", "py2ny", "ny-lsp"}
-
-def _ny_arg_takes_value(arg: str) -> bool:
-    return arg in NY_VALUE_OPTS
-
-def _ny_source_index(args: list[str]) -> int:
-    skip = False
-    for i, arg in enumerate(args):
-        if skip:
-            skip = False
-            continue
-        if _ny_arg_takes_value(arg):
-            skip = True
-            continue
-        if arg.startswith(NY_PREFIX_VALUE_OPTS):
-            continue
-        if arg.startswith("-L") or arg.startswith("-l"):
-            continue
-        if arg.startswith("-"):
-            continue
-        if arg in NY_SUBCOMMANDS:
-            return -1
-        p = (ROOT / arg).resolve() if not Path(arg).is_absolute() else Path(arg)
-        if arg.endswith(".ny") or p.exists():
-            return i
-    return -1
-
-_NY_USE_RE = re.compile(r"^\s*use\s+([A-Za-z_][A-Za-z0-9_.]*)")
-
-def _ny_module_path(mod: str) -> Path | None:
-    if not mod.startswith("std."):
-        return None
-    rel = Path(*mod[4:].split("."))
-    for cand in (ROOT / "lib" / rel.with_suffix(".ny"), ROOT / "lib" / rel / "mod.ny"):
-        if cand.exists():
-            return cand.resolve()
-    return None
-
-def _ny_import_graph(source: Path) -> list[Path]:
-    seen_files: set[Path] = set()
-    stack = [source.resolve()]
-    while stack:
-        path = stack.pop()
-        if path in seen_files or not path.exists():
-            continue
-        seen_files.add(path)
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        for line in text.splitlines():
-            m = _NY_USE_RE.match(line)
-            if not m:
-                continue
-            dep = _ny_module_path(m.group(1))
-            if dep is not None and dep not in seen_files:
-                stack.append(dep)
-    return sorted(seen_files)
-
-def _hash_file_identity(h: "hashlib._Hash", path: Path) -> None:
-    try:
-        st = path.stat()
-    except OSError:
-        return
-    rel = str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
-    h.update(rel.encode("utf-8", "ignore"))
-    h.update(str(st.st_size).encode())
-    h.update(str(st.st_mtime_ns).encode())
-
-def _ny_run_cache_key(launch: str, args: list[str], source: Path, build_root: Path, kind: str) -> str:
-    h = hashlib.sha256()
-    h.update(b"ny-run-cache-v3\0")
-    h.update((" ".join(args[:_ny_source_index(args) + 1])).encode("utf-8", "ignore"))
-    for name in (
-        "NYTRIX_STD_PATH",
-        "NYTRIX_BUILD_STD_PATH",
-        "NYTRIX_HOST_TRIPLE",
-        "NYTRIX_HOST_CFLAGS",
-        "NYTRIX_HOST_LDFLAGS",
-        "NYTRIX_ARM_FLOAT_ABI",
-    ):
-        h.update(name.encode())
-        h.update(b"=")
-        h.update((os.environ.get(name) or "").encode("utf-8", "ignore"))
-        h.update(b"\0")
-    for path in [
-        Path(launch),
-        cmake_build_dir(build_root, kind) / "std.ny",
-        *(Path(os.environ[name]).expanduser() for name in ("NYTRIX_STD_PATH", "NYTRIX_BUILD_STD_PATH") if os.environ.get(name)),
-        *_ny_import_graph(source),
-    ]:
-        _hash_file_identity(h, path)
-    return h.hexdigest()[:24]
-
-def run_ny_cached(build_root: Path, kind: str, args: list[str]) -> int | None:
-    if not _env_flag("NYTRIX_MAKE_NY_RUN_CACHE", True):
-        return None
-    if "-run" not in args:
-        return None
-    if any(a.startswith("--run=") for a in args):
-        return None
-    if any(a in NY_RUN_CACHE_BLOCKERS or a in ("-O1", "-O2", "-O3", "-O0") or a.startswith("--profile=") or a.startswith("-passes=") for a in args):
-        return None
-    src_i = _ny_source_index(args)
-    if src_i < 0:
-        return None
-    source_arg = args[src_i]
-    source = (ROOT / source_arg).resolve() if not Path(source_arg).is_absolute() else Path(source_arg)
-    if not source.exists():
-        return None
-    binp = resolve_tool_bin(build_root, kind, "ny")
-    launch = tool_launch_path(binp)
-    key = _ny_run_cache_key(launch, args, source, build_root, kind)
-    cache_dir = build_root / "cache" / "make-run" / key
-    exe = ".exe" if host_os() == "windows" else ""
-    cached = cache_dir / f"ny-run{exe}"
-    env = os.environ.copy()
-    env.setdefault("NYTRIX_STD_CACHE", "1")
-    env.setdefault("NYTRIX_STD_BC_CACHE_AUTO", "1")
-    program_args = args[src_i + 1:]
-    if program_args and program_args[0] == "--":
-        program_args = program_args[1:]
-    if not cached.exists():
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        compile_front = [a for a in args[:src_i] if a != "-run"]
-        compile_args = [launch, "--profile=compile", *compile_front, "-o", str(cached), source_arg]
-        rc = subprocess.Popen(compile_args, cwd=str(ROOT), env=env).wait()
-        if rc != 0:
-            cached.unlink(missing_ok=True)
-            return rc
-        chmod_executable(cached)
-    else:
-        # Validate the cached executable before reuse: a stale, corrupted, or
-        # CPU-incompatible binary would otherwise run silently.  This mirrors
-        # clean_bad_tool_build's guard on the compiler binary itself.  On signal
-        # death, drop the entry and rebuild instead of executing a bad binary.
-        if not cached_run_binary_ok(cached):
-            log("CACHE", f"ny -run cache entry {cached.relative_to(ROOT)} failed smoke check; rebuilding")
-            shutil.rmtree(cache_dir, ignore_errors=True)
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            compile_front = [a for a in args[:src_i] if a != "-run"]
-            compile_args = [launch, "--profile=compile", *compile_front, "-o", str(cached), source_arg]
-            rc = subprocess.Popen(compile_args, cwd=str(ROOT), env=env).wait()
-            if rc != 0:
-                cached.unlink(missing_ok=True)
-                return rc
-            chmod_executable(cached)
-        else:
-            log("CACHE", f"ny -run using {cached.relative_to(ROOT)}")
-    try:
-        return subprocess.Popen([str(cached), *program_args], cwd=str(ROOT), env=env).wait()
-    except KeyboardInterrupt:
-        return 130
-
-CROSS_PRESETS = {
-    "linux-x64": ("x86_64-linux-gnu", "qemu-x86_64", ""),
-    "linux-x86_64": ("x86_64-linux-gnu", "qemu-x86_64", ""),
-    "x86_64-linux": ("x86_64-linux-gnu", "qemu-x86_64", ""),
-    "linux-arm64": ("aarch64-linux-gnu", "qemu-aarch64", ""),
-    "linux-aarch64": ("aarch64-linux-gnu", "qemu-aarch64", ""),
-    "aarch64-linux": ("aarch64-linux-gnu", "qemu-aarch64", ""),
-    "linux-armhf": ("arm-linux-gnueabihf", "qemu-arm", "hard"),
-    "linux-arm": ("arm-linux-gnueabihf", "qemu-arm", "hard"),
-    "linux-riscv64": ("riscv64-linux-gnu", "qemu-riscv64", ""),
-    "riscv64-linux": ("riscv64-linux-gnu", "qemu-riscv64", ""),
-    "windows-x64": ("x86_64-w64-windows-gnu", "wine", ""),
-    "windows-x86_64": ("x86_64-w64-windows-gnu", "wine", ""),
-}
-
 WEB_DEMO_ASSET_DIR = ROOT / "etc" / "assets" / "website" / "wasm"
 WEB_DEMO_STATIC_ASSETS = (
     "index.html",
@@ -2214,16 +2087,14 @@ WEB_WASM_BARE_CAPABILITIES = {
 }
 
 def _web_target_descriptor(raw: str, command: str) -> dict[str, str]:
-    """Resolve the one implemented browser target at the command boundary."""
+    """Resolve the browser target supported by ny's Wasm emitter."""
     target = raw.strip().lower()
     if target == "wasm-bare":
         return dict(WEB_WASM_BARE_TARGET)
-    if target == "wasm-emscripten":
-        raise SystemExit(
-            f"{command}: wasm-emscripten needs its dedicated adapter; "
-            "use --target wasm-bare for the implemented browser runner"
-        )
-    raise SystemExit(f"{command}: unknown browser target {raw!r} (expected wasm-bare)")
+    raise SystemExit(
+        f"{command}: unknown browser target {raw!r} "
+        "(only wasm-bare is supported; use ny --wasm for the canonical emitter)"
+    )
 
 def _parse_web_check_args(args: list[str], build_root: Path) -> dict[str, object]:
     """Accept web-check target selection without teaching the general wasm parser."""
@@ -2284,44 +2155,36 @@ def _demo_area_from_source(source: str) -> str:
         return parts[2].upper()
     return "projects"
 
-def _demo_keywords_from_source(source: str) -> list[str]:
-    path = ROOT / source
+def _ny_doc_meta(source: str) -> dict[str, object]:
+    """Read source metadata through ny-doc rather than a second parser."""
+    binary = Path(os.environ.get("NYTRIX_NY_DOC", ROOT / "build" / "release" / "ny-doc"))
+    if not binary.exists():
+        return {}
+    path = _resolve_wasm_path(source) if "_resolve_wasm_path" in globals() else ROOT / source
     try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return []
-    for raw in lines[:24]:
-        line = raw.strip()
-        low = line.lower()
-        if low.startswith(";; keywords:"):
-            tail = line.split(":", 1)[1].strip()
-            return [w.strip().lower() for w in tail.replace(",", " ").split() if w.strip()]
-        if line and not line.startswith("#!") and not line.startswith(";;"):
-            break
-    return []
+        result = subprocess.run(
+            [str(binary), "meta", str(path)],
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode == 0:
+            value = json.loads(result.stdout)
+            return value if isinstance(value, dict) else {}
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        pass
+    return {}
+
+def _demo_keywords_from_source(source: str) -> list[str]:
+    value = _ny_doc_meta(source).get("keywords", [])
+    return [str(item) for item in value] if isinstance(value, list) else []
 
 def _demo_comment_title(source: str) -> str:
-    path = ROOT / source
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return ""
-    for raw in lines[:24]:
-        line = raw.strip()
-        low = line.lower()
-        if low.startswith(";; keywords:"):
-            continue
-        if line.startswith(";;"):
-            text = line[2:].strip()
-            if not text:
-                continue
-            if " - http" in text:
-                text = text.split(" - http", 1)[0].strip()
-            if len(text) <= 48:
-                return text.rstrip(".")
-        elif line and not line.startswith("#!"):
-            break
-    return ""
+    value = _ny_doc_meta(source).get("title", "")
+    return str(value).strip() if value else ""
 
 def _demo_mode_from_source(source: str) -> str:
     area = _demo_area_from_source(source).lower()
@@ -2366,6 +2229,48 @@ def _load_web_demo_manifest() -> list[dict[str, object]]:
         item["title"] = str(item.get("title", "")).strip() or (_demo_title_from_source(source) if source else Path(wasm).stem)
         item["area"] = str(item.get("area", "")).strip() or (_demo_area_from_source(source) if source else "WASM")
         item["mode"] = str(item.get("mode", "")).strip() or (_demo_mode_from_source(source) if source else "browser")
+        out.append(item)
+    return out
+
+def _load_web_test_manifest() -> list[dict[str, object]]:
+    path = ROOT / "etc" / "tests" / "native" / "web" / "tests.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"web-test: invalid {path.relative_to(ROOT)}: {exc}") from exc
+    if not isinstance(data, list):
+        raise SystemExit("web-test: tests.json must contain a list")
+    seen: set[str] = set()
+    out: list[dict[str, object]] = []
+    for index, raw in enumerate(data):
+        if not isinstance(raw, dict):
+            raise SystemExit(f"web-test: manifest item {index} is not an object")
+        item = dict(raw)
+        fixture_id = str(item.get("id", "")).strip()
+        source = str(item.get("source", "")).strip().replace("\\", "/")
+        if not fixture_id or not source:
+            raise SystemExit(f"web-test: manifest item {index} needs id and source")
+        if fixture_id in seen:
+            raise SystemExit(f"web-test: duplicate fixture id {fixture_id}")
+        if not (ROOT / source).is_file():
+            raise SystemExit(f"web-test: fixture source does not exist: {source}")
+        route = str(item.get("route", "app")).strip() or "app"
+        required = item.get("required", [])
+        required_regex = item.get("required_regex", [])
+        forbidden = item.get("forbidden", ["runtime error"])
+        if not isinstance(required, list) or not isinstance(required_regex, list) or not isinstance(forbidden, list):
+            raise SystemExit(f"web-test: fixture {fixture_id} markers must be lists")
+        if not isinstance(item.get("skip_headless", False), bool):
+            raise SystemExit(f"web-test: fixture {fixture_id} skip_headless must be boolean")
+        item["id"] = fixture_id
+        item["source"] = source
+        item["route"] = route
+        item["virtual_time_ms"] = int(item.get("virtual_time_ms", 8000))
+        item["required"] = [str(marker) for marker in required]
+        item["required_regex"] = [str(pattern) for pattern in required_regex]
+        item["forbidden"] = [str(marker) for marker in forbidden]
+        item["skip_headless"] = bool(item.get("skip_headless", False))
+        seen.add(fixture_id)
         out.append(item)
     return out
 
@@ -2453,6 +2358,12 @@ def _tail_text(value: object, limit: int = 4000) -> str:
     if isinstance(value, bytes):
         value = value.decode("utf-8", "replace")
     return str(value)[-limit:]
+def _resolve_wasm_path(path: Path | str) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = ROOT / resolved
+    return resolved.resolve()
+
 
 WASM_DEFAULT_EXPORTS = (
     "_ny_top_entry",
@@ -2463,157 +2374,78 @@ WASM_DEFAULT_EXPORTS = (
     "ny_web_render",
 )
 
-WASM_ASYNCIFY_FRAME_IMPORT = "env.std.os.ui.render.end_frame"
+WASM_ASYNCIFY_IMPORTS = (
+    "env.std.os.ui.render.end_frame,"
+    "env.std.os.time.msleep"
+)
 
-_WASM_CLANG_PROBE_CACHE: dict[str, tuple[bool, str]] = {}
-
-def _clang_supports_wasm(clang: str) -> tuple[bool, str]:
-    cached = _WASM_CLANG_PROBE_CACHE.get(clang)
-    if cached is not None:
-        return cached
-    with tempfile.TemporaryDirectory(prefix="nytrix-wasm-probe-") as td:
-        src = Path(td) / "probe.c"
-        obj = Path(td) / "probe.o"
-        src.write_text("int main(void){return 0;}\n", encoding="utf-8")
-        res = subprocess.run(
-            [clang, "--target=wasm32-unknown-unknown", "-x", "c", "-c", "-o", str(obj), str(src)],
-            cwd=str(ROOT),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=30,
-        )
-        if res.returncode != 0 or not obj.exists():
-            detail = _tail_text(res.stdout, 1000).strip() or "clang cannot emit wasm32 objects"
-            cached = (False, detail)
-        else:
-            cached = (True, "")
-    _WASM_CLANG_PROBE_CACHE[clang] = cached
-    return cached
-
-def _wasm_toolchain() -> tuple[str | None, str]:
-    clang = which("clang")
-    if not clang:
-        return None, "clang missing"
-    ok_wasm, wasm_issue = _clang_supports_wasm(clang)
-    if not ok_wasm:
-        return None, wasm_issue or "clang WebAssembly backend not available"
-    if not which("wasm-ld"):
-        return None, "wasm-ld missing"
-    return clang, ""
-
-def _ny_wasm_env(build_root: Path, kind: str) -> tuple[Path, Path, dict[str, str]]:
-    ny_bin = resolve_tool_bin(build_root, kind, "ny")
-    std_file = cmake_build_dir(build_root, kind) / "std.ny"
-    env = os.environ.copy()
-    env.setdefault("NYTRIX_ROOT", str(ROOT))
-    env["NYTRIX_STD_CACHE"] = "0"
-    env["NYTRIX_STD_BC_CACHE_AUTO"] = "0"
-    if std_file.exists():
-        env["NYTRIX_STD_PATH"] = str(std_file)
-        env["NYTRIX_BUILD_STD_PATH"] = str(std_file)
-    return ny_bin, std_file, env
-
-def _resolve_wasm_path(path: Path | str) -> Path:
-    p = Path(path)
-    if not p.is_absolute():
-        p = ROOT / p
-    return p
-
-def _compile_ny_to_wasm(
+def _run_ny_wasm(
     build_root: Path,
     kind: str,
     source: Path,
     wasm: Path,
-    ir: Path,
-    exports: tuple[str, ...] = WASM_DEFAULT_EXPORTS,
-    allow_undefined: bool = True,
-    initial_memory: int = 16777216,
-    max_memory: int = 67108864,
-    opt: str = "-O2",
     step_timeout: int = 120,
 ) -> dict[str, object]:
-    clang, tool_err = _wasm_toolchain()
-    if tool_err:
-        return {"ok": False, "stage": "toolchain", "detail": tool_err}
+    """Compile one source through ny's canonical Wasm emitter."""
     try:
-        ny_bin, std_file, env = _ny_wasm_env(build_root, kind)
+        ny_bin = resolve_tool_bin(build_root, kind, "ny")
     except SystemExit as exc:
         return {"ok": False, "stage": "toolchain", "detail": str(exc)}
     source = _resolve_wasm_path(source)
     wasm = _resolve_wasm_path(wasm)
-    ir = _resolve_wasm_path(ir)
+    wasm.parent.mkdir(parents=True, exist_ok=True)
     if not source.exists():
         return {"ok": False, "stage": "source", "detail": f"missing source {source}"}
-    wasm.parent.mkdir(parents=True, exist_ok=True)
-    ir.parent.mkdir(parents=True, exist_ok=True)
-    ny_cmd = [
-        str(ny_bin),
-        "--host-triple=wasm32-unknown-unknown",
-        f"--emit-ir={ir}",
-        "-emit-only",
-        str(source),
-    ]
-    if std_file.exists():
-        ny_cmd.insert(1, f"--std-path={std_file}")
+    env = os.environ.copy()
+    env.setdefault("NYTRIX_STDLIB", str(cmake_build_dir(build_root, kind) / "std.ny"))
     try:
-        ny_res = subprocess.run(ny_cmd, cwd=str(ROOT), env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=step_timeout)
+        result = subprocess.run(
+            [str(ny_bin), "--wasm", "--parallel=off", f"--emit-wasm={wasm}", str(source)],
+            cwd=str(ROOT),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=step_timeout,
+        )
     except subprocess.TimeoutExpired as exc:
-        return {"ok": False, "stage": "ny", "detail": "ny ir timed out", "output": _tail_text(exc.stdout), "timeout": step_timeout}
-    if ny_res.returncode != 0 or not ir.exists():
-        return {"ok": False, "stage": "ny", "detail": "ny ir failed", "output": _tail_text(ny_res.stdout)}
-    clang_cmd = [
-        str(clang),
-        "--target=wasm32",
-        opt,
-        "-nostdlib",
-        "-Wl,--no-entry",
-        "-Wl,--export-memory",
-    ]
-    clang_cmd.extend(f"-Wl,--export-if-defined={name}" for name in exports if name)
-    if allow_undefined:
-        clang_cmd.append("-Wl,--allow-undefined")
-    clang_cmd.extend([
-        f"-Wl,--initial-memory={initial_memory}",
-        f"-Wl,--max-memory={max_memory}",
-        "-o",
-        str(wasm),
-        str(ir),
-    ])
-    try:
-        clang_res = subprocess.run(clang_cmd, cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=step_timeout)
-    except subprocess.TimeoutExpired as exc:
-        return {"ok": False, "stage": "clang", "detail": "wasm link timed out", "output": _tail_text(exc.stdout), "timeout": step_timeout}
-    if clang_res.returncode != 0 or not wasm.exists():
-        return {"ok": False, "stage": "clang", "detail": "wasm link failed", "output": _tail_text(clang_res.stdout)}
-    return {"ok": True, "source": str(source), "ir": str(ir), "wasm": str(wasm)}
+        return {"ok": False, "stage": "ny", "detail": "ny wasm compilation timed out",
+                "output": _tail_text(exc.stdout), "timeout": step_timeout}
+    output = _tail_text(result.stdout)
+    if result.returncode != 0 or not wasm.exists():
+        return {"ok": False, "stage": "ny", "detail": "ny wasm compilation failed",
+                "output": output}
+    return {"ok": True, "source": str(source), "wasm": str(wasm), "output": output}
 
 def _instrument_wasm_asyncify(wasm: Path, step_timeout: int = 120) -> dict[str, object]:
+    """Apply browser asyncify after ny has emitted the Wasm module."""
     wasm_opt = which("wasm-opt")
     if not wasm_opt:
         return {"ok": False, "stage": "toolchain", "detail": "wasm-opt missing (install Binaryen for browser frame scheduling)"}
     tmp = wasm.with_suffix(".asyncify.wasm")
-    cmd = [
-        wasm_opt,
-        str(wasm),
-        "--asyncify",
-        "--pass-arg=" + "asyncify-imports@" + WASM_ASYNCIFY_FRAME_IMPORT,
-        "-o", str(tmp),
-    ]
     try:
-        res = subprocess.run(cmd, cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=step_timeout)
+        result = subprocess.run(
+            [wasm_opt, str(wasm), "--asyncify",
+             "--pass-arg=asyncify-imports@" + WASM_ASYNCIFY_IMPORTS,
+             "-o", str(tmp)],
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=step_timeout,
+        )
     except subprocess.TimeoutExpired as exc:
-        return {"ok": False, "stage": "asyncify", "detail": "wasm-opt asyncify timed out", "output": _tail_text(exc.stdout), "timeout": step_timeout}
-    if res.returncode != 0 or not tmp.exists():
-        return {"ok": False, "stage": "asyncify", "detail": "wasm-opt asyncify failed", "output": _tail_text(res.stdout)}
+        return {"ok": False, "stage": "asyncify", "detail": "wasm-opt asyncify timed out",
+                "output": _tail_text(exc.stdout), "timeout": step_timeout}
+    if result.returncode != 0 or not tmp.exists():
+        return {"ok": False, "stage": "asyncify", "detail": "wasm-opt asyncify failed",
+                "output": _tail_text(result.stdout)}
     tmp.replace(wasm)
     return {"ok": True}
 
 def _build_ny_demo_wasm(out_dir: Path, build_root: Path, kind: str, manifest: list[dict[str, object]]) -> tuple[int, int, str]:
     wasm_dir = out_dir / "wasm"
-    ir_dir = out_dir / "ny-ir"
     wasm_dir.mkdir(parents=True, exist_ok=True)
-    ir_dir.mkdir(parents=True, exist_ok=True)
     report: list[dict[str, object]] = []
     built = 0
     failed = 0
@@ -2626,59 +2458,42 @@ def _build_ny_demo_wasm(out_dir: Path, build_root: Path, kind: str, manifest: li
             continue
         compile_source = Path(source)
         if compile_source.suffix == ".nshape":
-            nshape_source = _resolve_wasm_path(compile_source)
+            nshape_source = compile_source
+            if not nshape_source.is_absolute():
+                nshape_source = ROOT / nshape_source
+            nshape_source = nshape_source.resolve()
             if not nshape_source.exists():
                 failed += 1
-                report.append({
-                    "id": demo_id,
-                    "source": source,
-                    "ok": False,
-                    "stage": "source",
-                    "detail": f"missing source {nshape_source}",
-                    "output": "",
-                })
+                report.append({"id": demo_id, "source": source, "ok": False,
+                               "stage": "source", "detail": f"missing source {nshape_source}",
+                               "output": ""})
                 continue
             compile_source, extract_err = _extract_nshape_ny_source(nshape_source, out_dir, demo_id)
             if compile_source is None:
                 failed += 1
                 item["wasmStatus"] = extract_err
-                report.append({
-                    "id": demo_id,
-                    "source": source,
-                    "ok": False,
-                    "stage": "source",
-                    "detail": extract_err,
-                    "output": "",
-                })
+                report.append({"id": demo_id, "source": source, "ok": False,
+                               "stage": "source", "detail": extract_err, "output": ""})
                 continue
-        ir = ir_dir / (Path(_demo_wasm_name(demo_id)).with_suffix(".ll").name)
         wasm = wasm_dir / _demo_wasm_name(demo_id)
-        res = _compile_ny_to_wasm(build_root, kind, compile_source, wasm, ir, step_timeout=step_timeout)
-        if not bool(res.get("ok", False)):
+        result = _run_ny_wasm(build_root, kind, compile_source, wasm, step_timeout)
+        if not bool(result.get("ok", False)):
             failed += 1
-            item["wasmStatus"] = str(res.get("detail", "wasm failed"))
-            report.append({
-                "id": demo_id,
-                "source": source,
-                "ok": False,
-                "stage": str(res.get("stage", "")),
-                "detail": str(res.get("detail", "")),
-                "output": _tail_text(res.get("output", "")),
-            })
+            item["wasmStatus"] = str(result.get("detail", "wasm failed"))
+            report.append({"id": demo_id, "source": source, "ok": False,
+                           "stage": str(result.get("stage", "ny")),
+                           "detail": str(result.get("detail", "wasm failed")),
+                           "output": _tail_text(result.get("output", ""))})
             continue
         if bool(item.get("asyncify", False)):
-            async_res = _instrument_wasm_asyncify(wasm, step_timeout=step_timeout)
-            if not bool(async_res.get("ok", False)):
+            async_result = _instrument_wasm_asyncify(wasm, step_timeout)
+            if not bool(async_result.get("ok", False)):
                 failed += 1
-                item["wasmStatus"] = str(async_res.get("detail", "asyncify failed"))
-                report.append({
-                    "id": demo_id,
-                    "source": source,
-                    "ok": False,
-                    "stage": str(async_res.get("stage", "asyncify")),
-                    "detail": str(async_res.get("detail", "asyncify failed")),
-                    "output": _tail_text(async_res.get("output", "")),
-                })
+                item["wasmStatus"] = str(async_result.get("detail", "asyncify failed"))
+                report.append({"id": demo_id, "source": source, "ok": False,
+                               "stage": str(async_result.get("stage", "asyncify")),
+                               "detail": str(async_result.get("detail", "asyncify failed")),
+                               "output": _tail_text(async_result.get("output", ""))})
                 continue
         built += 1
         item["wasm"] = "wasm/" + wasm.name
@@ -2687,7 +2502,9 @@ def _build_ny_demo_wasm(out_dir: Path, build_root: Path, kind: str, manifest: li
         item["wasmStatus"] = "ok"
         report.append({"id": demo_id, "source": source, "ok": True, "wasm": item["wasm"]})
     (out_dir / "ny-wasm-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    return built, failed, f"{built}/{len([x for x in manifest if str(x.get('source', '')).strip()])} manifest Ny sources emitted wasm"
+    source_count = len([x for x in manifest if str(x.get("source", "")).strip()])
+    return built, failed, f"{built}/{source_count} manifest Ny sources emitted wasm"
+
 
 def run_web_demos(build_root: Path, kind: str, args: list[str]) -> int:
     cfg = _parse_web_demo_args(args, build_root)
@@ -2714,8 +2531,7 @@ def run_web_demos(build_root: Path, kind: str, args: list[str]) -> int:
         if not src.exists():
             raise SystemExit(f"web-demos: missing {src.relative_to(ROOT)}")
         shutil.copy2(src, out_dir / name)
-    ny_built = 0
-    ny_failed = 0
+    ny_built = ny_failed = 0
     ny_detail = "disabled"
     if bool(cfg.get("compile_ny_wasm", True)):
         ny_built, ny_failed, ny_detail = _build_ny_demo_wasm(out_dir, build_root, kind, manifest)
@@ -2737,11 +2553,15 @@ def run_web_demos(build_root: Path, kind: str, args: list[str]) -> int:
 def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     """Prove a portable app runs and native-only imports fail before packaging."""
     if args and args[0] in ("-h", "--help"):
-        print("Usage: ./make web-test")
+        print("Usage: ./make web-test [--headless]")
         print("Builds the demo runner and deployable Pong app, then checks WebGL2 assets in a headless browser.")
+        print("--headless skips manifest fixtures that require a live browser lifecycle.")
         return 0
-    if args:
-        raise SystemExit("web-test: no options supported")
+    if args and args != ["--headless"]:
+        raise SystemExit("web-test: expected no options or --headless")
+    headless_mode = args == ["--headless"] or os.environ.get(
+        "NYTRIX_WEB_HEADLESS", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
     requested_browser = os.environ.get("NYTRIX_BROWSER", "").strip()
     browser_names = (requested_browser,) if requested_browser else (
         "chromium", "chromium-browser", "google-chrome")
@@ -2773,14 +2593,47 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         )
     print("WEB browser: " + _tail_text(browser_probe.stdout, 200).strip())
 
-    def run_browser(url: str, virtual_time_ms: int) -> subprocess.CompletedProcess[str]:
+    def run_browser(url: str, virtual_time_ms: int, real_time: bool = False, clipboard: bool = False) -> subprocess.CompletedProcess[str]:
         """Return the rendered DOM using Chromium or Firefox."""
-        if browser_kind == "chromium":
-            return subprocess.run([
-                browser, "--headless", "--no-sandbox", "--enable-webgl", "--ignore-gpu-blocklist",
-                "--enable-unsafe-swiftshader", "--use-gl=angle", "--use-angle=swiftshader",
-                f"--virtual-time-budget={virtual_time_ms}", "--dump-dom", url,
-            ], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+        # Chromium's --dump-dom virtual-time mode does not terminate while
+        # these apps keep requestAnimationFrame work pending. Drive Chromium
+        # through the runner's existing real-time Playwright path instead so
+        # lifecycle completion is bounded and the live DOM remains asserted.
+        if real_time or browser_kind == "chromium":
+            try:
+                from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+                from playwright.sync_api import sync_playwright
+            except ImportError as exc:
+                raise SystemExit("web-test: browser execution requires Python Playwright") from exc
+            try:
+                with sync_playwright() as playwright:
+                    launcher = playwright.chromium if browser_kind == "chromium" else playwright.firefox
+                    launch_args = [
+                        "--no-sandbox", "--no-proxy-server", "--enable-webgl",
+                        "--ignore-gpu-blocklist", "--enable-unsafe-swiftshader",
+                        "--use-gl=angle", "--use-angle=swiftshader",
+                    ] if browser_kind == "chromium" else []
+                    instance = launcher.launch(headless=True, executable_path=browser, args=launch_args)
+                    context_kwargs = {"viewport": None}
+                    if clipboard:
+                        context_kwargs["permissions"] = ["clipboard-read", "clipboard-write"]
+                    context = instance.new_context(**context_kwargs)
+                    page = context.new_page()
+                    page.goto(url, wait_until="load", timeout=30000)
+                    if clipboard:
+                        page.wait_for_timeout(1000)
+                        for _ in range(15):
+                            page.locator("#glCanvas").click(force=True)
+                            page.wait_for_timeout(1000)
+                    page.wait_for_timeout(virtual_time_ms)
+                    dom = page.content()
+                    context.close()
+                    instance.close()
+                    return subprocess.CompletedProcess([browser, url], 0, dom, "")
+            except PlaywrightTimeoutError as exc:
+                raise subprocess.TimeoutExpired([browser, url], 30) from exc
+            except Exception as exc:
+                raise SystemExit(f"web-test: browser could not run the page: {exc}") from exc
         try:
             from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
             from playwright.sync_api import sync_playwright
@@ -2793,9 +2646,17 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
                 # Playwright versions send when creating the default context.
                 # A non-emulated context keeps the browser test real and avoids
                 # that protocol mismatch.
-                context = instance.new_context(viewport=None)
+                context_kwargs = {"viewport": None}
+                if clipboard:
+                    context_kwargs["permissions"] = ["clipboard-read", "clipboard-write"]
+                context = instance.new_context(**context_kwargs)
                 page = context.new_page()
                 page.goto(url, wait_until="load", timeout=30000)
+                if clipboard:
+                    page.wait_for_timeout(1000)
+                    for _ in range(15):
+                        page.locator("#glCanvas").click(force=True)
+                        page.wait_for_timeout(1000)
                 page.wait_for_timeout(virtual_time_ms)
                 dom = page.content()
                 context.close()
@@ -2805,6 +2666,109 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             raise subprocess.TimeoutExpired([browser, url], 30) from exc
         except Exception as exc:
             raise SystemExit(f"web-test: browser could not run the page: {exc}") from exc
+
+    def run_browser_package(package_dir: Path, virtual_time_ms: int) -> subprocess.CompletedProcess[str]:
+        """Serve one packaged browser app and return its rendered DOM."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = int(probe.getsockname()[1])
+        server = subprocess.Popen(
+            [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1",
+             "--directory", str(package_dir)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            time.sleep(0.25)
+            return run_browser(f"http://127.0.0.1:{port}/index.html#app", virtual_time_ms)
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                server.kill()
+
+    def run_manifest_fixture(item: dict[str, object]) -> str | None:
+        fixture_id = str(item["id"])
+        if headless_mode and bool(item.get("skip_headless", False)):
+            print(f"WEB skip {fixture_id}: live browser lifecycle required")
+            return None
+        source = ROOT / str(item["source"])
+        fixture_dir = web_dir / fixture_id
+        if run_web_check(build_root, kind, [str(source)]) != 0:
+            raise SystemExit(f"web-test: portability check failed for {fixture_id}")
+        if run_web(build_root, kind, [str(source), "--out", str(fixture_dir)]) != 0:
+            raise SystemExit(f"web-test: build failed for {fixture_id}")
+        websocket_server = None
+        websocket_echo = bool(item.get("websocket_echo", False))
+        if websocket_echo:
+            handler = (
+                "def handler(connection):\n"
+                "    for message in connection:\n"
+                "        connection.send(message)\n"
+            )
+            server_code = (
+                "from websockets.sync.server import serve\n"
+                + handler +
+                "with serve(handler, '127.0.0.1', 18790, compression=None) as server:\n"
+                "    server.serve_forever()\n"
+            )
+            websocket_server = subprocess.Popen(
+                [sys.executable, "-c", server_code],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(0.25)
+            if websocket_server.poll() is not None:
+                raise SystemExit(
+                    "web-test: websocket echo fixture requires the Python websockets package"
+                )
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = int(probe.getsockname()[1])
+        server = subprocess.Popen(
+            [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(fixture_dir)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            time.sleep(0.25)
+            result = run_browser(
+                f"http://127.0.0.1:{port}/index.html#{item['route']}",
+                int(item["virtual_time_ms"]),
+                bool(item.get("real_time_browser", False) or item.get("clipboard", False)),
+                bool(item.get("clipboard", False)),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SystemExit(f"web-test: browser timed out for {fixture_id}") from exc
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                server.kill()
+            if websocket_server is not None:
+                websocket_server.terminate()
+                try:
+                    websocket_server.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    websocket_server.kill()
+        dom = result.stdout or ""
+        required = [str(marker) for marker in item["required"]]
+        required_regex = [str(pattern) for pattern in item["required_regex"]]
+        forbidden = [str(marker) for marker in item["forbidden"]]
+        missing = [marker for marker in required if marker not in dom]
+        missing_regex = [pattern for pattern in required_regex if re.search(pattern, dom) is None]
+        forbidden_found = [marker for marker in forbidden if marker in dom]
+        if result.returncode != 0 or missing or missing_regex or forbidden_found:
+            print(
+                f"web-test: fixture evidence: returncode={result.returncode} "
+                f"missing={missing} missing_regex={missing_regex} forbidden={forbidden_found}"
+            )
+            output = _tail_text(dom, 3000)
+            if output:
+                print(output)
+            raise SystemExit(f"web-test: browser fixture failed: {fixture_id}")
+        return dom
     web_dir = build_root / "web"
     shutil.rmtree(web_dir, ignore_errors=True)
     web_dir.mkdir(parents=True, exist_ok=True)
@@ -2953,7 +2917,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     )
     try:
         time.sleep(0.25)
-        decode_result = run_browser(f"http://127.0.0.1:{decode_port}/index.html#app", 16000)
+        decode_result = run_browser(f"http://127.0.0.1:{decode_port}/index.html#app", 32000)
     except subprocess.TimeoutExpired:
         raise SystemExit("web-test: browser timed out while checking audio decode")
     finally:
@@ -3044,40 +3008,32 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             print(output)
         raise SystemExit("web-test: browser virtual filesystem write/read/remove failed")
     ok("web-test: browser virtual filesystem persisted and removed a file")
+    test_manifest = _load_web_test_manifest()
+    for item in test_manifest:
+        if run_manifest_fixture(item) is None:
+            continue
+        ok(f"web-test: browser fixture passed: {item['id']}")
     renderer3d = ROOT / "etc" / "tests" / "native" / "web" / "renderer-3d.ny"
+    target = "wasm-bare"
     if run_web_check(build_root, kind, [str(renderer3d)]) != 0:
         return 1
-    renderer3d_dir = build_root / "web" / "renderer-3d"
+    renderer3d_dir = build_root / "web" / "renderer-3d-wasm-bare"
     if run_web(build_root, kind, [str(renderer3d), "--out", str(renderer3d_dir)]) != 0:
         return 1
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        renderer3d_port = int(probe.getsockname()[1])
-    renderer3d_server = subprocess.Popen(
-        [sys.executable, "-m", "http.server", str(renderer3d_port), "--bind", "127.0.0.1", "--directory", str(renderer3d_dir)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
     try:
-        time.sleep(0.25)
-        renderer3d_result = run_browser(f"http://127.0.0.1:{renderer3d_port}/index.html#app", 5000)
+        renderer3d_result = run_browser_package(renderer3d_dir, 5000)
     except subprocess.TimeoutExpired:
-        raise SystemExit("web-test: browser timed out while checking the 3D baseline")
-    finally:
-        renderer3d_server.terminate()
-        try:
-            renderer3d_server.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            renderer3d_server.kill()
-    renderer3d_dom = renderer3d_result.stdout if 'renderer3d_result' in locals() else ""
+        raise SystemExit(f"web-test: {target} browser timed out while checking the 3D baseline")
+    renderer3d_dom = renderer3d_result.stdout
     renderer3d_presented = re.search(r'data-presented="[1-9][0-9]*"', renderer3d_dom) is not None
     if (renderer3d_result.returncode != 0 or not renderer3d_presented or
             'data-webgl3d="1"' not in renderer3d_dom or 'data-webgl3d-alpha="1"' not in renderer3d_dom or "runtime error" in renderer3d_dom or
-            "WebGL2 missing" in renderer3d_dom):
+            "WebGL2 missing" in renderer3d_dom or "Load failed" in renderer3d_dom):
         output = _tail_text(renderer3d_dom, 3000)
         if output:
             print(output)
-        raise SystemExit("web-test: browser 3D baseline did not reach the WebGL2 draw path")
-    ok("web-test: browser 3D baseline reached the WebGL2 draw path")
+        raise SystemExit(f"web-test: {target} 3D baseline did not reach the WebGL2 draw path")
+    ok(f"web-test: {target} 3D baseline reached the WebGL2 draw path")
     pointer = ROOT / "etc" / "tests" / "native" / "web" / "input-pointer.ny"
     if run_web_check(build_root, kind, [str(pointer)]) != 0:
         return 1
@@ -3128,7 +3084,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         # #touch-selftest makes wasm.js synthesize a TouchEvent sequence; the
         # fixture echoes the observed touch state via test_report_touch into
         # data-touch-* attributes that this regex reads back from --dump-dom.
-        touch_result = run_browser(f"http://127.0.0.1:{touch_port}/index.html#touch-selftest", 5000)
+        touch_result = run_browser(f"http://127.0.0.1:{touch_port}/index.html#touch-selftest", 8000)
     except subprocess.TimeoutExpired:
         raise SystemExit("web-test: browser timed out while checking touch input")
     finally:
@@ -3139,7 +3095,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             touch_server.kill()
     touch_dom = touch_result.stdout if 'touch_result' in locals() else ""
     touch_presented = re.search(r'data-presented="[1-9][0-9]*"', touch_dom) is not None
-    touch_observed = re.search(r'data-touch-count="1"', touch_dom) is not None
+    touch_observed = re.search(r'data-touch-count="[1-9][0-9]*"', touch_dom) is not None
     if touch_result.returncode != 0 or not touch_presented or not touch_observed or "runtime error" in touch_dom:
         output = _tail_text(touch_dom, 3000)
         if output:
@@ -3262,20 +3218,6 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     ok("web-test: browser texture probe round-tripped through the host")
     return 0
 
-def print_wasm_help() -> None:
-    print(c("1;36", "Nytrix wasm compiler"))
-    print("")
-    print("Usage:")
-    print("  ./make wasm path/to/app.ny")
-    print("  ./make wasm path/to/app.ny --out build/web/wasm/app.wasm")
-    print("")
-    print("Flags:")
-    print("  -o, --out FILE      output wasm file")
-    print("  --ir FILE           output LLVM IR file")
-    print("  --timeout SEC       per-stage timeout")
-    print("  --export NAME       export an extra symbol")
-    print("  --no-undefined      reject unresolved host imports at link time")
-
 def _parse_wasm_args(args: list[str], build_root: Path) -> dict[str, object]:
     if not args or any(a in ("-h", "--help") for a in args):
         return {"help": True}
@@ -3284,6 +3226,7 @@ def _parse_wasm_args(args: list[str], build_root: Path) -> dict[str, object]:
     ir_path: Path | None = None
     exports = list(WASM_DEFAULT_EXPORTS)
     allow_undefined = True
+    target = "wasm-bare"
     timeout_sec = int((os.environ.get("NYTRIX_WASM_STEP_TIMEOUT") or "120").strip() or "120")
     i = 0
     while i < len(args):
@@ -3332,6 +3275,16 @@ def _parse_wasm_args(args: list[str], build_root: Path) -> dict[str, object]:
             allow_undefined = False
             i += 1
             continue
+        if a == "--target":
+            if i + 1 >= len(args):
+                raise SystemExit("wasm: missing value for --target")
+            target = args[i + 1].strip().lower()
+            i += 2
+            continue
+        if a.startswith("--target="):
+            target = a.split("=", 1)[1].strip().lower()
+            i += 1
+            continue
         if a.startswith("-"):
             raise SystemExit(f"wasm: unknown option {a}")
         if source is not None:
@@ -3340,7 +3293,12 @@ def _parse_wasm_args(args: list[str], build_root: Path) -> dict[str, object]:
         i += 1
     if source is None:
         raise SystemExit("wasm: missing Ny source")
-    src_abs = _resolve_wasm_path(source)
+    if target != "wasm-bare":
+        raise SystemExit(f"wasm: unsupported target {target!r} (only wasm-bare is supported)")
+    src_abs = Path(source)
+    if not src_abs.is_absolute():
+        src_abs = ROOT / src_abs
+    src_abs = src_abs.resolve()
     stem = src_abs.stem or "app"
     if out_path is None:
         out_path = build_root / "web" / "wasm" / (stem + ".wasm")
@@ -3351,48 +3309,13 @@ def _parse_wasm_args(args: list[str], build_root: Path) -> dict[str, object]:
     return {
         "help": False,
         "source": src_abs,
-        "out": _resolve_wasm_path(out_path),
-        "ir": _resolve_wasm_path(ir_path),
+        "out": (lambda p: (p if p.is_absolute() else ROOT / p).resolve())(out_path),
+        "ir": (lambda p: (p if p.is_absolute() else ROOT / p).resolve())(ir_path),
         "exports": tuple(dict.fromkeys(exports)),
         "allow_undefined": allow_undefined,
+        "target": target,
         "timeout": max(1, timeout_sec),
     }
-
-def run_wasm(build_root: Path, kind: str, args: list[str]) -> int:
-    cfg = _parse_wasm_args(args, build_root)
-    if bool(cfg.get("help", False)):
-        print_wasm_help()
-        return 0
-    source = cfg["source"]  # type: ignore[assignment]
-    assert isinstance(source, Path)
-    if source.suffix == ".nshape":
-        extracted, extract_err = _extract_nshape_ny_source(
-            source,
-            build_root / "web" / "extracted",
-            source.stem or "demo",
-        )
-        if extracted is None:
-            raise SystemExit("wasm: " + extract_err)
-        source = extracted
-    res = _compile_ny_to_wasm(
-        build_root,
-        kind,
-        source,
-        cfg["out"],     # type: ignore[arg-type]
-        cfg["ir"],      # type: ignore[arg-type]
-        exports=cfg["exports"],  # type: ignore[arg-type]
-        allow_undefined=bool(cfg.get("allow_undefined", True)),
-        step_timeout=int(cfg.get("timeout", 120)),
-    )
-    if not bool(res.get("ok", False)):
-        detail = str(res.get("detail", "wasm failed"))
-        output = _tail_text(res.get("output", ""), 1600)
-        if output:
-            print(output)
-        raise SystemExit("wasm: " + detail)
-    ok("wasm: " + _rel_or_abs(Path(str(res["wasm"]))))
-    log("WASM", "ir: " + _rel_or_abs(Path(str(res["ir"]))))
-    return 0
 
 def _web_host_import_names() -> set[str]:
     """Return the browser runner's explicitly implemented Wasm host functions."""
@@ -3401,31 +3324,33 @@ def _web_host_import_names() -> set[str]:
     bare = re.findall(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:', source, flags=re.MULTILINE)
     return set(quoted) | set(bare)
 
-def _wasm_function_imports(wasm: Path) -> tuple[set[str] | None, str]:
-    objdump = which("wasm-objdump")
-    if not objdump:
-        return None, "wasm-objdump missing (install wabt to inspect WebAssembly imports)"
-    res = subprocess.run([objdump, "-x", str(wasm)], text=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, timeout=30)
-    if res.returncode != 0:
-        return None, _tail_text(res.stdout, 1000) or "wasm-objdump failed"
+def _ny_wasm_info(
+    build_root: Path,
+    kind: str,
+    wasm: Path,
+) -> tuple[set[str] | None, set[str] | None, str]:
+    """Query imports and exports through ny's canonical Wasm introspector."""
+    try:
+        ny_bin = resolve_tool_bin(build_root, kind, "ny")
+    except SystemExit as exc:
+        return None, None, str(exc)
+    result = subprocess.run(
+        [str(ny_bin), f"--wasm-info={wasm}"],
+        cwd=str(ROOT),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return None, None, _tail_text(result.stdout, 1000) or "ny --wasm-info failed"
     imports: set[str] = set()
-    for line in res.stdout.splitlines():
-        match = re.search(r'<env\.([^>]+)>\s+<-\s+env\.([^\s]+)', line)
+    for line in result.stdout.splitlines():
+        match = re.search(r"<env\.([^>]+)>\s+<-\s+env\.([^\s]+)", line)
         if match:
             imports.add(match.group(2))
-    return imports, ""
-
-def _wasm_export_names(wasm: Path) -> tuple[set[str] | None, str]:
-    """Return exported Wasm symbols for browser event-loop safety checks."""
-    objdump = which("wasm-objdump")
-    if not objdump:
-        return None, "wasm-objdump missing (install wabt to inspect WebAssembly exports)"
-    res = subprocess.run([objdump, "-x", str(wasm)], text=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, timeout=30)
-    if res.returncode != 0:
-        return None, _tail_text(res.stdout, 1000) or "wasm-objdump failed"
-    return set(re.findall(r'-> "([^"]+)"', res.stdout)), ""
+    exports = set(re.findall(r'-> "([^"]+)"', result.stdout))
+    return imports, exports, ""
 
 def _web_import_category(name: str) -> str:
     if name.startswith("std.os.process."):
@@ -3453,16 +3378,20 @@ def run_web_check(build_root: Path, kind: str, args: list[str]) -> int:
         source = extracted
     out_dir.mkdir(parents=True, exist_ok=True)
     wasm = out_dir / (source.stem + ".wasm")
-    ir = out_dir / (source.stem + ".ll")
-    result = _compile_ny_to_wasm(build_root, kind, source, wasm, ir,
-                                 step_timeout=int(cfg.get("timeout", 120)))
+    result = _run_ny_wasm(
+        build_root,
+        kind,
+        source,
+        wasm,
+        step_timeout=int(cfg.get("timeout", 120)),
+    )
     if not bool(result.get("ok", False)):
         output = _tail_text(result.get("output", ""), 1600)
         if output:
             print(output)
         raise SystemExit("web-check: " + str(result.get("detail", "Wasm compilation failed")))
-    imports, detail = _wasm_function_imports(wasm)
-    if imports is None:
+    imports, exports, detail = _ny_wasm_info(build_root, kind, wasm)
+    if imports is None or exports is None:
         raise SystemExit("web-check: " + detail)
     missing = sorted(imports - _web_host_import_names())
     report = {
@@ -3571,10 +3500,16 @@ def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
         source = Path(a)
     if source is None:
         raise SystemExit("web: missing Ny source")
-    source = _resolve_wasm_path(source)
+    source = Path(source)
+    if not source.is_absolute():
+        source = ROOT / source
+    source = source.resolve()
     if out_dir is None:
         out_dir = build_root / "web" / (source.stem or "app")
-    out_dir = _resolve_wasm_path(out_dir)
+    out_dir = Path(out_dir)
+    if not out_dir.is_absolute():
+        out_dir = ROOT / out_dir
+    out_dir = out_dir.resolve()
     if preload_all and not assets:
         raise SystemExit("web: --preload-all requires at least one --assets directory")
     return {"help": False, "source": source, "out": out_dir, "assets": assets, "preload_all": preload_all,
@@ -3584,20 +3519,17 @@ def _parse_web_args(args: list[str], build_root: Path) -> dict[str, object]:
 def print_web_help() -> None:
     print(c("1;36", "Nytrix browser build"))
     print("")
-    print("Usage:")
-    print("  ./make web game.ny")
     print("  ./make web game.ny --out build/web/game --renderer webgl2")
     print("")
-    print("Builds a deployable wasm-bare WebGL2 directory. The target rejects host imports")
-    print("that the browser runner does not implement; wasm-emscripten is not silently substituted.")
+    print("Builds a deployable WebGL2 browser directory through ny --wasm.")
     print("")
     print("Flags:")
     print("  --out DIR            deployment output directory")
     print("  --renderer webgl2    required renderer target (default)")
+    print("  --target TARGET      wasm-bare (default)")
     print("  --assets DIR         package an asset root under assets/ (repeatable)")
     print("  --preload-all        package every regular file under each asset root")
-    print("  --no-asyncify        only for exported ny_web_frame/ny_web_render callbacks")
-    print("  --timeout SECONDS    per compiler/linker step limit")
+    print("  --timeout SECONDS    ny --wasm and browser post-processing limit")
 
 def _copy_web_runner_assets(out_dir: Path) -> None:
     for name in WEB_DEMO_STATIC_ASSETS:
@@ -3618,7 +3550,7 @@ def _copy_web_runner_assets(out_dir: Path) -> None:
         shutil.copy2(src, dst)
 
 def run_web(build_root: Path, kind: str, args: list[str]) -> int:
-    """Build one portable Ny source into a deployable wasm-bare WebGL2 directory."""
+    """Build one portable Ny source into a deployable WebGL2 directory."""
     cfg = _parse_web_args(args, build_root)
     if bool(cfg.get("help", False)):
         print_web_help()
@@ -3633,24 +3565,24 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
             raise SystemExit("web: " + extract_err)
     out_dir.mkdir(parents=True, exist_ok=True)
     wasm = out_dir / "app.wasm"
-    ir = build_root / "web" / "ir" / ((compile_source.stem or "app") + ".ll")
-    result = _compile_ny_to_wasm(build_root, kind, compile_source, wasm, ir,
-                                 step_timeout=int(cfg["timeout"]))
+    target = cfg["target"]
+    assert isinstance(target, dict)
+    result = _run_ny_wasm(
+        build_root,
+        kind,
+        compile_source,
+        wasm,
+        step_timeout=int(cfg["timeout"]),
+    )
     if not bool(result.get("ok", False)):
         output = _tail_text(result.get("output", ""), 1600)
         if output:
             print(output)
         raise SystemExit("web: " + str(result.get("detail", "Wasm compilation failed")))
-    imports, detail = _wasm_function_imports(wasm)
-    if imports is None:
+    imports, exports, detail = _ny_wasm_info(build_root, kind, wasm)
+    if imports is None or exports is None:
         raise SystemExit("web: " + detail)
-    missing = sorted(imports - _web_host_import_names())
-    if missing:
-        raise SystemExit("web: unsupported browser imports: " + ", ".join("env." + name for name in missing[:6]))
     if not bool(cfg["asyncify"]):
-        exports, detail = _wasm_export_names(wasm)
-        if exports is None:
-            raise SystemExit("web: " + detail)
         callbacks = {"ny_web_frame", "ny_web_render"}
         if not (callbacks & exports):
             raise SystemExit(
@@ -3658,9 +3590,15 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
                 "ordinary main loops must keep Asyncify enabled"
             )
     if bool(cfg["asyncify"]):
-        async_res = _instrument_wasm_asyncify(wasm, step_timeout=int(cfg["timeout"]))
-        if not bool(async_res.get("ok", False)):
-            raise SystemExit("web: " + str(async_res.get("detail", "asyncify failed")))
+        async_result = _instrument_wasm_asyncify(wasm, int(cfg["timeout"]))
+        if not bool(async_result.get("ok", False)):
+            output = _tail_text(async_result.get("output", ""), 1600)
+            if output:
+                print(output)
+            raise SystemExit("web: " + str(async_result.get("detail", "asyncify failed")))
+    missing = sorted(imports - _web_host_import_names())
+    if missing:
+        raise SystemExit("web: unsupported browser imports: " + ", ".join("env." + name for name in missing[:6]))
     _copy_web_runner_assets(out_dir)
     packaged_assets: list[dict[str, object]] = []
     source_text = source.read_text(encoding="utf-8", errors="replace")
@@ -3669,7 +3607,10 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
     referenced_assets: set[Path] = set()
     for raw in cfg["assets"]:
         assert isinstance(raw, Path)
-        src = _resolve_wasm_path(raw)
+        src = Path(raw)
+        if not src.is_absolute():
+            src = ROOT / src
+        src = src.resolve()
         if not src.is_dir():
             raise SystemExit("web: asset root is not a directory: " + _rel_or_abs(src))
         matched = 0
@@ -3685,7 +3626,10 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
                 selected_assets.add(candidate)
                 matched += 1
         for literal in asset_literals:
-            candidate = _resolve_wasm_path(Path(literal))
+            candidate = Path(literal)
+            if not candidate.is_absolute():
+                candidate = ROOT / candidate
+            candidate = candidate.resolve()
             try:
                 candidate.relative_to(src)
             except ValueError:
@@ -3726,8 +3670,6 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
             "wasm": "app.wasm", "wasmKind": "ny", "asyncify": bool(cfg["asyncify"]),
             "assets": packaged_assets, "assetPack": asset_pack}
     (out_dir / "demos-data.js").write_text("window.NYTRIX_WEB_DEMOS = " + json.dumps([demo], indent=2) + ";\n", encoding="utf-8")
-    target = cfg["target"]
-    assert isinstance(target, dict)
     report = {"source": source_display, "target": target,
               "capabilities": WEB_WASM_BARE_CAPABILITIES,
               "wasm": "app.wasm", "imports": sorted(imports), "unsupported": [], "assets": packaged_assets, "assetPack": asset_pack,
@@ -3735,7 +3677,8 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
     (out_dir / "web-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     build_manifest = {"source": source_display, "target": target,
                       "capabilities": WEB_WASM_BARE_CAPABILITIES, "artifact": "app.wasm",
-                      "toolchain": {"clang": which("clang") or "", "wasmOpt": which("wasm-opt") or ""},
+                      "toolchain": {"ny": _rel_or_abs(resolve_tool_bin(build_root, kind, "ny")),
+                                    "wasmOpt": which("wasm-opt") or ""},
                       "assets": packaged_assets, "assetPack": asset_pack,
                       "softDependencies": [], "asyncify": bool(cfg["asyncify"])}
     (out_dir / "build-manifest.json").write_text(json.dumps(build_manifest, indent=2) + "\n", encoding="utf-8")
@@ -3743,453 +3686,13 @@ def run_web(build_root: Path, kind: str, args: list[str]) -> int:
     log("WEB", "report: " + _rel_or_abs(out_dir / "web-report.json"))
     return 0
 
-def _cross_slug(triple: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.+-]+", "-", triple).strip("-") or "target"
-
-def _cross_qemu_for_triple(triple: str) -> str:
-    t = triple.lower()
-    if "w64-windows" in t or "windows" in t:
-        return "wine"
-    if t.startswith("aarch64") or t.startswith("arm64"):
-        return "qemu-aarch64"
-    if t.startswith("arm"):
-        return "qemu-arm"
-    if t.startswith("riscv64"):
-        return "qemu-riscv64"
-    if t.startswith("x86_64") or t.startswith("amd64"):
-        return "qemu-x86_64"
-    if t.startswith("i386") or t.startswith("i686"):
-        return "qemu-i386"
-    return ""
-
-def _cross_target(raw: str) -> tuple[str, str, str]:
-    key = raw.strip().lower()
-    if key in CROSS_PRESETS:
-        return CROSS_PRESETS[key]
-    return raw, _cross_qemu_for_triple(raw), ""
-
-def _cross_is_windows(triple: str) -> bool:
-    t = (triple or "").lower()
-    return "windows" in t or "mingw" in t or "w64" in t
-
-def _cross_default_output(build_root: Path, triple: str, source: Path) -> Path:
-    name = source.with_suffix("").name
-    if _cross_is_windows(triple) and not name.lower().endswith(".exe"):
-        name += ".exe"
-    return build_root / "cache" / "cross" / _cross_slug(triple) / name
-
-def _cross_first_word(raw: str) -> str:
-    raw = (raw or "").strip()
-    if not raw:
-        return ""
-    try:
-        parts = shlex.split(raw)
-    except ValueError:
-        parts = raw.split()
-    return parts[0] if parts else ""
-
-def _cross_tool_exists(raw: str) -> bool:
-    tool = _cross_first_word(raw)
-    if not tool:
-        return False
-    if "/" in tool or "\\" in tool:
-        return Path(tool).expanduser().exists()
-    return bool(_tool_path(tool))
-
-_LLVM_TARGETS_BUILT_CACHE: set[str] | None = None
-
-def _llvm_targets_built() -> set[str]:
-    global _LLVM_TARGETS_BUILT_CACHE
-    if _LLVM_TARGETS_BUILT_CACHE is not None:
-        return _LLVM_TARGETS_BUILT_CACHE
-    res = run_capture(["llvm-config", "--targets-built"])
-    if res.returncode != 0:
-        _LLVM_TARGETS_BUILT_CACHE = set()
-    else:
-        _LLVM_TARGETS_BUILT_CACHE = {item.strip() for item in res.stdout.split() if item.strip()}
-    return _LLVM_TARGETS_BUILT_CACHE
-
-def _cross_llvm_backend_for_triple(triple: str) -> str:
-    arch = (triple or "").split("-", 1)[0].lower()
-    if arch in ("x86_64", "amd64", "i386", "i486", "i586", "i686"):
-        return "X86"
-    if arch in ("aarch64", "arm64"):
-        return "AArch64"
-    if arch.startswith("arm") or arch in ("thumb", "thumbv7"):
-        return "ARM"
-    if arch.startswith("riscv"):
-        return "RISCV"
-    if arch.startswith("ppc") or arch.startswith("powerpc"):
-        return "PowerPC"
-    if arch.startswith("wasm"):
-        return "WebAssembly"
-    return ""
-
-def _cross_llvm_backend_issue(triple: str) -> str:
-    backend = _cross_llvm_backend_for_triple(triple)
-    built = _llvm_targets_built()
-    if backend and built and backend not in built:
-        return f"LLVM backend {backend} not built"
-    return ""
-
-def _mingw_prefix_for_triple(triple: str) -> str:
-    t = (triple or "").lower()
-    if t.startswith(("i686", "i386", "x86-w64")):
-        return "i686-w64-mingw32"
-    return "x86_64-w64-mingw32"
-
-def _mingw_sysroot_for_triple(triple: str, explicit: str = "") -> str:
-    for raw in (
-        explicit,
-        os.environ.get("NYTRIX_MINGW_SYSROOT", ""),
-        os.environ.get("MINGW_SYSROOT", ""),
-        os.environ.get("NYTRIX_CROSS_SYSROOT", ""),
-    ):
-        value = (raw or "").strip()
-        if value:
-            return os.path.expanduser(os.path.expandvars(value))
-    prefix = _mingw_prefix_for_triple(triple)
-    for path in (Path("/usr") / prefix, Path("/usr/local") / prefix):
-        if (path / "include").is_dir() and (path / "lib").is_dir():
-            return str(path)
-    return ""
-
-def _mingw_select_cc(triple: str, requested: str = "") -> tuple[str, str]:
-    candidates: list[tuple[str, str]] = []
-    if requested.strip():
-        candidates.append((requested.strip(), "argument"))
-    for env_name in ("NYTRIX_MINGW_CC", "NY_MINGW_CC"):
-        value = (os.environ.get(env_name) or "").strip()
-        if value:
-            candidates.append((value, env_name))
-    env_cc = (os.environ.get("NYTRIX_CC") or "").strip()
-    if env_cc and "mingw" in env_cc.lower():
-        candidates.append((env_cc, "NYTRIX_CC"))
-    prefix = _mingw_prefix_for_triple(triple)
-    candidates.extend([
-        (f"{prefix}-gcc", "PATH"),
-        (f"{prefix}-clang", "PATH"),
-    ])
-    for cc, source in candidates:
-        if _cross_tool_exists(cc):
-            return cc, source
-    return "", ""
-
-def _cross_compiler_needs_target_flag(cc: str, triple: str) -> bool:
-    tool = Path(_cross_first_word(cc)).name.lower()
-    prefix = (triple or "").lower()
-    if prefix and tool.startswith(prefix + "-"):
-        return False
-    if _cross_is_windows(triple) and "w64-mingw32" in tool:
-        return False
-    return True
-
-def _cross_is_linux(triple: str) -> bool:
-    t = (triple or "").lower()
-    return "linux" in t and not _cross_is_windows(t)
-
-def _cross_is_native_linux(triple: str) -> bool:
-    if host_os() != "linux" or not _cross_is_linux(triple):
-        return False
-    host_arch = (platform.machine() or "").lower()
-    target_arch = (triple or "").split("-", 1)[0].lower()
-    if host_arch in ("x86_64", "amd64"):
-        return target_arch in ("x86_64", "amd64")
-    if host_arch in ("aarch64", "arm64"):
-        return target_arch in ("aarch64", "arm64")
-    return host_arch == target_arch
-
-def _linux_cross_sysroot_for_triple(triple: str, explicit: str = "") -> str:
-    for raw in (
-        explicit,
-        os.environ.get("NYTRIX_CROSS_SYSROOT", ""),
-        os.environ.get("NYTRIX_SYSROOT", ""),
-    ):
-        value = (raw or "").strip()
-        if value:
-            return os.path.expanduser(os.path.expandvars(value))
-    if _cross_is_native_linux(triple):
-        return ""
-    for path in (Path("/usr") / triple, Path("/usr/local") / triple, Path("/opt") / triple):
-        if (path / "lib").is_dir() or (path / "usr" / "lib").is_dir():
-            return str(path)
-    return ""
-
-def _linux_cross_file_any(sysroot: str, triple: str, rels: tuple[str, ...]) -> bool:
-    if not sysroot:
-        return False
-    base = Path(sysroot)
-    triple_arch = (triple or "").split("-", 1)[0]
-    expanded: list[Path] = []
-    for rel in rels:
-        expanded.append(base / rel)
-        if rel.startswith("lib/"):
-            expanded.append(base / "lib" / triple_arch / rel[4:])
-            expanded.append(base / "usr" / "lib" / triple_arch / rel[4:])
-        if rel.startswith("include/"):
-            expanded.append(base / "usr" / rel)
-    return any(path.exists() for path in expanded)
-
-def _linux_select_cc(triple: str, requested: str = "") -> tuple[str, str]:
-    candidates: list[tuple[str, str]] = []
-    if requested.strip():
-        candidates.append((requested.strip(), "argument"))
-    for env_name in ("NYTRIX_CROSS_CC", "NYTRIX_CC"):
-        value = (os.environ.get(env_name) or "").strip()
-        if value:
-            candidates.append((value, env_name))
-    candidates.extend([
-        (f"{triple}-gcc", "PATH"),
-        (f"{triple}-clang", "PATH"),
-    ])
-    for cc, source in candidates:
-        if _cross_tool_exists(cc):
-            return cc, source
-    return "", ""
-
-def _linux_cross_missing(triple: str) -> list[str]:
-    if not _cross_is_linux(triple) or _cross_is_native_linux(triple):
-        return []
-    missing: list[str] = []
-    if not _linux_cross_sysroot_for_triple(triple):
-        missing.append(f"sysroot for {triple}")
-        return missing
-    sysroot = _linux_cross_sysroot_for_triple(triple)
-    if not _linux_cross_file_any(sysroot, triple, ("include/zlib.h",)):
-        missing.append("target zlib headers")
-    if not _linux_cross_file_any(sysroot, triple, ("lib/libz.so", "lib/libz.a")):
-        missing.append("target zlib library")
-    cc, _ = _linux_select_cc(triple)
-    if not cc and not _tool_path("clang"):
-        missing.append(f"clang or {triple}-gcc")
-    return missing
-
-def _cross_compile_issues(triple: str) -> list[str]:
-    issues: list[str] = []
-    backend_issue = _cross_llvm_backend_issue(triple)
-    if backend_issue:
-        issues.append(backend_issue)
-    if _cross_is_windows(triple):
-        issues.extend(_mingw_runtime_missing(triple))
-    else:
-        issues.extend(_linux_cross_missing(triple))
-    return issues
-
-def _cross_runner_issue(runner: str) -> str:
-    if not runner:
-        return ""
-    return "" if _tool_path(runner) else f"runner {runner} missing"
-
-def _cross_status_detail(triple: str, runner: str) -> tuple[bool, str]:
-    issues = _cross_compile_issues(triple)
-    runner_issue = _cross_runner_issue(runner)
-    if runner_issue:
-        issues.append(runner_issue)
-    if issues:
-        return False, "missing " + ", ".join(issues)
-    detail = "ready"
-    if _cross_is_windows(triple):
-        detail = _mingw_status_detail(triple)
-    elif _cross_is_linux(triple) and not _cross_is_native_linux(triple):
-        sysroot = _linux_cross_sysroot_for_triple(triple)
-        cc, source = _linux_select_cc(triple)
-        pieces: list[str] = []
-        if cc:
-            pieces.append(f"cc={cc} ({source})")
-        elif _tool_path("clang"):
-            pieces.append("cc=clang")
-        if sysroot:
-            pieces.append(f"sysroot={sysroot}")
-        detail = ", ".join(pieces) if pieces else detail
-    return True, detail
-
-def _mingw_file_any(sysroot: str, rels: tuple[str, ...]) -> bool:
-    if not sysroot:
-        return False
-    base = Path(sysroot)
-    return any((base / rel).exists() for rel in rels)
-
-def _mingw_runtime_missing(triple: str) -> list[str]:
-    missing: list[str] = []
-    cc, _ = _mingw_select_cc(triple)
-    if not cc:
-        missing.append(f"{_mingw_prefix_for_triple(triple)}-gcc")
-    sysroot = _mingw_sysroot_for_triple(triple)
-    if not _mingw_file_any(sysroot, ("include/zlib.h",)):
-        missing.append("mingw zlib headers")
-    if not _mingw_file_any(sysroot, ("lib/libz.dll.a", "lib/libz.a")):
-        missing.append("mingw zlib library")
-    return missing
-
-def _mingw_status_detail(triple: str) -> str:
-    cc, source = _mingw_select_cc(triple)
-    sysroot = _mingw_sysroot_for_triple(triple)
-    missing = _mingw_runtime_missing(triple)
-    if not cc:
-        return "missing compiler"
-    detail = f"{cc} ({source})"
-    if sysroot:
-        detail += f", sysroot={sysroot}"
-    if missing:
-        detail += "; missing " + ", ".join(missing)
-    return detail
-
-def _arg_needs_value(args: list[str], i: int, name: str) -> str:
-    if i + 1 >= len(args):
-        raise SystemExit(f"make cross: missing value for {name}")
-    return args[i + 1]
-
-def _merge_flag_words(base: str, extra: str) -> str:
-    base = (base or "").strip()
-    extra = (extra or "").strip()
-    if base and extra:
-        return base + " " + extra
-    return base or extra
-
-def _parse_cross_args(args: list[str]) -> dict[str, object]:
-    target = ""
-    output = ""
-    sysroot = ""
-    qemu = ""
-    cc = ""
-    extra_cflags = ""
-    extra_ldflags = ""
-    ny_args: list[str] = []
-    program_args: list[str] = []
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--":
-            program_args = args[i + 1:]
-            break
-        if a in ("-h", "--help"):
-            return {"help": True}
-        if a in ("--target", "-target"):
-            target = _arg_needs_value(args, i, a)
-            i += 2
-            continue
-        if a.startswith("--target="):
-            target = a.split("=", 1)[1]
-            i += 1
-            continue
-        if a == "--sysroot":
-            sysroot = _arg_needs_value(args, i, a)
-            i += 2
-            continue
-        if a.startswith("--sysroot="):
-            sysroot = a.split("=", 1)[1]
-            i += 1
-            continue
-        if a == "--qemu":
-            qemu = _arg_needs_value(args, i, a)
-            i += 2
-            continue
-        if a.startswith("--qemu="):
-            qemu = a.split("=", 1)[1]
-            i += 1
-            continue
-        if a == "--cc":
-            cc = _arg_needs_value(args, i, a)
-            i += 2
-            continue
-        if a.startswith("--cc="):
-            cc = a.split("=", 1)[1]
-            i += 1
-            continue
-        if a == "--host-cflags":
-            extra_cflags = _merge_flag_words(extra_cflags, _arg_needs_value(args, i, a))
-            i += 2
-            continue
-        if a.startswith("--host-cflags="):
-            extra_cflags = _merge_flag_words(extra_cflags, a.split("=", 1)[1])
-            i += 1
-            continue
-        if a == "--host-ldflags":
-            extra_ldflags = _merge_flag_words(extra_ldflags, _arg_needs_value(args, i, a))
-            i += 2
-            continue
-        if a.startswith("--host-ldflags="):
-            extra_ldflags = _merge_flag_words(extra_ldflags, a.split("=", 1)[1])
-            i += 1
-            continue
-        if a in ("-o", "--output"):
-            output = _arg_needs_value(args, i, a)
-            i += 2
-            continue
-        if a.startswith("--output="):
-            output = a.split("=", 1)[1]
-            i += 1
-            continue
-        if a == "-run" or a.startswith("--run="):
-            i += 1
-            continue
-        if not target and not a.startswith("-"):
-            maybe = a.lower()
-            if maybe in CROSS_PRESETS or "-" in maybe:
-                target = a
-                i += 1
-                continue
-        ny_args.append(a)
-        i += 1
-    return {
-        "help": False,
-        "target": target,
-        "output": output,
-        "sysroot": sysroot,
-        "qemu": qemu,
-        "cc": cc,
-        "cflags": extra_cflags,
-        "ldflags": extra_ldflags,
-        "ny_args": ny_args,
-        "program_args": program_args,
-    }
-
-def print_cross_help() -> None:
-    print(c("1;36", "Nytrix cross targets"))
-    print("")
-    print("Usage:")
-    print("  ./make cross TARGET file.ny")
-    print("  ./make cross-run TARGET file.ny -- program args")
-    print("  ./make cross --target aarch64-linux-gnu --sysroot /opt/sysroot file.ny")
-    print("  ./make cross-run windows-x64 hello.ny")
-    print("")
-    print("Presets:")
-    ready: list[tuple[str, str, str, str]] = []
-    setup: list[tuple[str, str, str, str]] = []
-    for name, (triple, runner, _) in sorted(CROSS_PRESETS.items()):
-        ok_now, detail = _cross_status_detail(triple, runner)
-        row = (name, triple, runner or "none", detail)
-        if ok_now:
-            ready.append(row)
-        else:
-            setup.append(row)
-    if ready:
-        print(c("32", "  ready now"))
-        for name, triple, runner, detail in ready:
-            print(f"    {name:<18} {triple:<24} runner={runner:<14} {detail}")
-    if setup:
-        print(c("33", "  setup needed"))
-        for name, triple, runner, detail in setup:
-            print(f"    {name:<18} {triple:<24} runner={runner:<14} {detail}")
-    print("")
-    print("Flags:")
-    print("  --target T       target triple or preset")
-    print("  --sysroot DIR    pass --sysroot to clang and -L DIR to qemu")
-    print("  --cc PATH        set NYTRIX_CC for the native runtime compiler")
-    print("  --qemu PATH      override qemu/wine runner for cross-run")
-    print("  --host-cflags F  append target C flags")
-    print("  --host-ldflags F append target linker flags")
-    print("")
-    print("Config/env:")
-    print("  NYTRIX_MINGW_CC       override MinGW compiler for windows-x64")
-    print("  NYTRIX_MINGW_SYSROOT  override MinGW sysroot")
-    print("  NYTRIX_STD_OVERLAY    path-list of project std/lib module override roots")
-
 def _rel_or_abs(path: Path) -> str:
     try:
         return str(path.resolve().relative_to(ROOT))
     except Exception:
         return str(path)
+
+_LLVM_TARGETS_BUILT_CACHE: set[str] | None = None
 
 def _tool_path(name: str) -> str:
     return shutil.which(name) or ""
@@ -4197,16 +3700,6 @@ def _tool_path(name: str) -> str:
 def _tool_status(name: str) -> str:
     path = _tool_path(name)
     return path if path else c("33", "missing")
-
-def _runner_names() -> list[str]:
-    names: list[str] = []
-    for _, runner, _ in CROSS_PRESETS.values():
-        if runner and runner not in names:
-            names.append(runner)
-    return names
-
-def _missing_runners() -> list[str]:
-    return [name for name in _runner_names() if not _tool_path(name)]
 
 def _kill_process_group(pid: int) -> None:
     try:
@@ -4225,726 +3718,37 @@ def _system_path_excluding_vendor(build_root: Path) -> str:
         if p and p != vendor_bin
     ) or "/usr/bin:/bin"
 
-def _linux_soft_runner_packages(distro: str, like: str, missing: list[str]) -> list[str]:
-    need_qemu = any(name.startswith("qemu-") for name in missing)
-    need_wine = "wine" in missing
-    pkgs: list[str] = []
-    if distro in ("debian", "ubuntu", "linuxmint", "pop", "raspbian") or "debian" in like:
-        if need_qemu:
-            pkgs.append("qemu-user")
-        if need_wine:
-            pkgs.append("wine64" if apt_has_pkg("wine64") else "wine")
-        return pkgs
-    if distro in ("arch", "manjaro") or "arch" in like:
-        if need_qemu:
-            pkgs.append("qemu-user")
-        if need_wine:
-            pkgs.append("wine")
-        return pkgs
-    if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
-        if need_qemu:
-            pkgs.append("qemu-user")
-        if need_wine:
-            pkgs.append("wine")
-        return pkgs
-    return []
-
-def _linux_mingw_packages(distro: str, like: str) -> list[str]:
-    if distro in ("debian", "ubuntu", "linuxmint", "pop", "raspbian") or "debian" in like:
-        return [
-            "gcc-mingw-w64-x86-64",
-            "binutils-mingw-w64-x86-64",
-            "libz-mingw-w64-dev",
-        ]
-    if distro in ("arch", "manjaro") or "arch" in like:
-        return [
-            "mingw-w64-gcc",
-            "mingw-w64-zlib",
-            "mingw-w64-gmp",
-        ]
-    if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
-        return [
-            "mingw64-gcc",
-            "mingw64-binutils",
-            "mingw64-zlib",
-            "mingw64-gmp",
-        ]
-    return []
-
-def _arch_aur_helper() -> str:
-    return which("yay") or which("paru")
-
-def _arch_install_packages(pkgs: list[str]) -> None:
-    repo_pkgs: list[str] = []
-    aur_pkgs: list[str] = []
-    for pkg in pkgs:
-        if pkg in ("mingw-w64-gmp", "mingw-w64-zlib"):
-            aur_pkgs.append(pkg)
-        else:
-            repo_pkgs.append(pkg)
-    if repo_pkgs:
-        step("soft deps: pacman install")
-        run(["sudo", "pacman", "-Sy", "--noconfirm", *_dedupe(repo_pkgs)])
-    if aur_pkgs:
-        helper = _arch_aur_helper()
-        if helper:
-            step(f"soft deps: {Path(helper).name} install")
-            run([helper, "-S", "--noconfirm", *_dedupe(aur_pkgs)])
-        else:
-            log("DEPS", "AUR helper not found; install manually: " + " ".join(_dedupe(aur_pkgs)))
-
-def install_soft_deps() -> None:
-    missing = _missing_runners()
-    mingw_missing = _mingw_runtime_missing("x86_64-w64-windows-gnu")
-    if not missing and not mingw_missing:
-        return
-    os_name = host_os()
-    if os_name == "linux":
-        info = read_os_release()
-        distro, like = info.get("ID", "").lower(), info.get("ID_LIKE", "").lower()
-        pkgs = _linux_soft_runner_packages(distro, like, missing)
-        if mingw_missing:
-            pkgs.extend(_linux_mingw_packages(distro, like))
-        pkgs = _dedupe(pkgs)
-        if not pkgs:
-            if missing:
-                log("DEPS", "missing optional runners: " + ", ".join(missing))
-            if mingw_missing:
-                log("DEPS", "missing MinGW pieces: " + ", ".join(mingw_missing))
-            log("DEPS", f"runner auto-install not configured for distro: {distro or os_name}")
-            return
-        if distro in ("debian", "ubuntu", "linuxmint", "pop", "raspbian") or "debian" in like:
-            step("soft deps: apt update")
-            run(["sudo", "apt", "update"])
-            step("soft deps: apt install")
-            run(["sudo", "apt", "install", "-y", *pkgs])
-            return
-        if distro in ("arch", "manjaro") or "arch" in like:
-            _arch_install_packages(pkgs)
-            return
-        if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
-            step("soft deps: dnf install")
-            run(["sudo", "dnf", "install", "-y", *pkgs])
-            return
-    if os_name == "macos":
-        if not which("brew"):
-            log("DEPS", "brew not found; install qemu/wine/mingw-w64 manually if needed")
-            return
-        pkgs: list[str] = []
-        if any(name.startswith("qemu-") for name in missing):
-            pkgs.append("qemu")
-        if mingw_missing:
-            pkgs.append("mingw-w64")
-        if "wine" in missing:
-            log("DEPS", "wine is not installed automatically on macOS; install a suitable wine package if needed")
-        if pkgs:
-            step("soft deps: brew install")
-            run(["brew", "install", *_dedupe(pkgs)])
-        return
-    if missing:
-        log("DEPS", "missing optional runners: " + ", ".join(missing))
-    if mingw_missing:
-        log("DEPS", "missing MinGW pieces: " + ", ".join(mingw_missing))
-    log("DEPS", f"runner auto-install not implemented for host: {os_name}")
-
-def _print_kv(key: str, value: str) -> None:
-    print(f"  {c('36', key):<28} {value}")
-
-def _built_tool_status(build_root: Path, kind: str, name: str) -> str:
-    try:
-        path = resolve_tool_bin(build_root, kind, name)
-        return _rel_or_abs(path)
-    except SystemExit:
-        return c("33", "missing (run ./make all)")
-
-def run_make_env(build_root: Path, kind: str, jobs: int, jobs_note: str) -> int:
-    bdir = cmake_build_dir(build_root, kind)
-    print(c("1;36", "Nytrix environment"))
-    _print_kv("root", str(ROOT))
-    _print_kv("host", f"{host_os()} {platform.machine() or 'unknown'}")
-    _print_kv("build.kind", kind)
-    _print_kv("build.dir", _rel_or_abs(bdir))
-    _print_kv("build.jobs", f"{jobs} ({jobs_note})")
-    _print_kv("cache.dir", _rel_or_abs(build_root / "cache"))
-    _print_kv("ccache.dir", _rel_or_abs(build_root / "cache" / "ccache"))
-    _print_kv("python.cache", os.environ.get("PYTHONPYCACHEPREFIX", ""))
-    _print_kv("config.loaded", os.environ.get("NYTRIX_CONFIG_LOADED", "none"))
-    print("")
-    print(c("1", "Tools"))
-    for name in ("ny", "ny-fmt", "ny-test", "ny-doc", "ny-perf"):
-        _print_kv(name, _built_tool_status(build_root, kind, name))
-    for name in ("cmake", "ninja", "clang", "llvm-config", "pkg-config", "pkgconf", "git", "gdb"):
-        _print_kv(name, _tool_status(name))
-    print("")
-    print(c("1", "Overrides"))
-    for name in (
-        "BUILD_DIR",
-        "NYTRIX_HOST_TRIPLE",
-        "NYTRIX_HOST_CFLAGS",
-        "NYTRIX_HOST_LDFLAGS",
-        "NYTRIX_CC",
-        "CC",
-        "CXX",
-        "LLVM_CONFIG",
-        "PKG_CONFIG_PATH",
-        "NYTRIX_STD_PATH",
-        "NYTRIX_BUILD_STD_PATH",
-        "NYTRIX_BUILD_JOBS",
-        "NYTRIX_CONFIG",
-        "NY_CONFIG",
-        "NYTRIX_PKG_HOME",
-        "NYTRIX_PKG_PATH",
-        "NYTRIX_PKG_REGISTRY",
-        "NYTRIX_MINGW_CC",
-        "NYTRIX_MINGW_SYSROOT",
-        "MINGW_SYSROOT",
-        "NYTRIX_CROSS_SYSROOT",
-        "NYTRIX_STD_OVERLAY",
-    ):
-        value = os.environ.get(name)
-        if value:
-            _print_kv(name, value)
-    return 0
-
 def run_make_targets() -> int:
-    print(c("1;36", "Nytrix target presets"))
-    print("")
-    print(f"  {c('1', 'preset'):<22} {c('1', 'triple'):<28} {c('1', 'runner'):<34} {c('1', 'status')}")
-    for name, (triple, runner, _) in sorted(CROSS_PRESETS.items()):
-        runner_status = "none"
-        if runner:
-            runner_status = runner
-            path = _tool_path(runner)
-            if path:
-                runner_status += f" ({path})"
-            else:
-                runner_status += " (missing)"
-        ok_now, detail = _cross_status_detail(triple, runner)
-        status = ("ok: " if ok_now else "setup: ") + detail
-        print(f"  {name:<22} {triple:<28} {runner_status:<34} {status}")
-    print("")
-    print("Use: ./make cross <preset> file.ny")
-    print("Run: ./make cross-run <preset> file.ny -- args")
-    return 0
-
-def _doctor_mark(ok_value: bool, required: bool) -> str:
-    if ok_value:
-        return c("32", "ok")
-    if required:
-        return c("31", "fail")
-    return c("33", "warn")
-
-def _doctor_check(label: str, ok_value: bool, detail: str = "", required: bool = True) -> int:
-    print(f"  {_doctor_mark(ok_value, required):<12} {label:<22} {detail}")
-    return 1 if required and not ok_value else 0
-
-def print_doctor_help() -> None:
-    print(c("1;36", "Nytrix doctor"))
-    print("")
-    print("Usage:")
-    print("  ./make doctor")
-    print("  ./make doctor --install")
-    print("")
-    print("Plain doctor is read-only. --install installs required deps, optional")
-    print("std/native deps, qemu/wine runners, and MinGW cross pieces.")
-
-def run_make_doctor(build_root: Path, kind: str, args: list[str]) -> int:
-    install = False
-    for a in args:
-        if a in ("-h", "--help"):
-            print_doctor_help()
-            return 0
-        if a in ("--install", "--fix"):
-            install = True
-            continue
-        raise SystemExit(f"make doctor: unknown option {a}")
-    if install:
-        prev = os.environ.get("NYTRIX_INSTALL_STD_DEPS")
-        os.environ["NYTRIX_INSTALL_STD_DEPS"] = "1"
-        try:
-            ensure_deps(force_optional_prompt=True, require_git=True)
-            install_soft_deps()
-        finally:
-            _set_env_value("NYTRIX_INSTALL_STD_DEPS", prev)
-    bdir = cmake_build_dir(build_root, kind)
-    cache_dir = build_root / "cache"
-    ccache_dir = cache_dir / "ccache"
-    failures = 0
-    print(c("1;36", "Nytrix doctor"))
-    failures += _doctor_check("project root", ROOT.exists(), str(ROOT))
-    failures += _doctor_check("build dir", ensure_dir_writable(build_root), _rel_or_abs(build_root))
-    failures += _doctor_check("cache dir", ensure_dir_writable(cache_dir), _rel_or_abs(cache_dir))
-    failures += _doctor_check("ccache dir", ensure_dir_writable(ccache_dir), _rel_or_abs(ccache_dir))
-    _doctor_check("config", bool(os.environ.get("NYTRIX_CONFIG_LOADED", "")), os.environ.get("NYTRIX_CONFIG_LOADED", "none"), required=False)
-    print("")
-    print(c("1", "Required tools"))
-    for name in ("cmake", "clang"):
-        failures += _doctor_check(name, bool(_tool_path(name)), _tool_status(name))
-    failures += _doctor_check("ninja", bool(_tool_path("ninja")), _tool_status("ninja"))
-    failures += _doctor_check("pkg-config", bool(_tool_path("pkg-config") or _tool_path("pkgconf")), _tool_status("pkg-config") if _tool_path("pkg-config") else _tool_status("pkgconf"))
-    failures += _doctor_check("llvm-config", bool(_tool_path("llvm-config")) or host_os() == "windows", _tool_status("llvm-config"), required=(host_os() != "windows"))
-    failures += _doctor_check("gmp", _gmp_available(), "headers/library discoverable", required=False)
-    print("")
-    print(c("1", "Optional std/native deps"))
-    optional_missing = _detect_optional_std_missing()
-    if optional_missing:
-        _doctor_check("stdlib extras", False, f"{len(optional_missing)} missing; run ./make doctor --install", required=False)
-        for item in optional_missing[:12]:
-            print(f"  {c('33', 'warn'):<12} {'':<22} {item}")
-        if len(optional_missing) > 12:
-            print(f"  {c('33', 'warn'):<12} {'':<22} ... {len(optional_missing) - 12} more")
-    else:
-        _doctor_check("stdlib extras", True, "all detected")
-    print("")
-    print(c("1", "Optional browser tooling"))
-    _doctor_check("wasm-ld", bool(_tool_path("wasm-ld")), _tool_status("wasm-ld"), required=False)
-    _doctor_check("wasm-opt", bool(_tool_path("wasm-opt")), _tool_status("wasm-opt") + " (needed for async browser frame loops)", required=False)
-    _doctor_check("wasm-objdump", bool(_tool_path("wasm-objdump")), _tool_status("wasm-objdump") + " (needed by web-check)", required=False)
-    _doctor_check("emcc", bool(_tool_path("emcc")), _tool_status("emcc") + " (optional Emscripten target SDK)", required=False)
-    print("")
-    print(c("1", "Built tools"))
-    for name in ("ny", "ny-fmt", "ny-test"):
-        path = _built_tool_status(build_root, kind, name)
-        failures += _doctor_check(name, "missing" not in path, path, required=False)
-    std_path = bdir / "std.ny"
-    failures += _doctor_check("std.ny", std_path.exists(), _rel_or_abs(std_path), required=False)
-    print("")
-    print(c("1", "Vendored libs"))
-    vendor_lib = build_root / "vendor" / "lib" / "host"
-    if vendor_lib.is_dir() and any(vendor_lib.glob("*.so*")):
-        ldd = which("ldd")
-        missing_deps: list[str] = []
-        for so in sorted(vendor_lib.glob("*.so*")):
-            if not so.is_file() or so.is_symlink():
-                continue
-            if not ldd:
-                break
-            res = subprocess.run([ldd, str(so)], capture_output=True, text=True, timeout=30)
-            for line in res.stdout.splitlines():
-                if "not found" in line and "=>" in line:
-                    lib_name = line.split("=>")[0].strip()
-                    missing_deps.append(f"{so.name}: {lib_name}")
-        if ldd is None:
-            _doctor_check("vendor libs", True, "ldd not available, skip check", required=False)
-        elif missing_deps:
-            _doctor_check("vendor libs", False, f"{len(missing_deps)} unresolved", required=True)
-            for d in missing_deps[:8]:
-                print(f"  {c('33', 'warn'):<12} {'':<22} {d}")
-            if len(missing_deps) > 8:
-                print(f"  {c('33', 'warn'):<12} {'':<22} ... {len(missing_deps) - 8} more")
-        else:
-            _doctor_check("vendor libs", True, "all deps satisfied", required=False)
-    print("")
-    print(c("1", "Runners"))
-    for name in _runner_names():
-        _doctor_check(name, bool(_tool_path(name)), _tool_status(name), required=False)
-    if host_os() == "linux":
-        display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY") or ""
-        _doctor_check("display", bool(display), display or "no DISPLAY/WAYLAND_DISPLAY for UI apps", required=False)
-    print("")
-    print(c("1", "Cross toolchains"))
-    seen_triples: set[str] = set()
-    for _, (triple, runner, _) in sorted(CROSS_PRESETS.items()):
-        if triple in seen_triples:
-            continue
-        seen_triples.add(triple)
-        ok_now, detail = _cross_status_detail(triple, runner)
-        _doctor_check(triple, ok_now, detail, required=False)
-    if _mingw_runtime_missing("x86_64-w64-windows-gnu"):
-        _doctor_check("mingw install", False, "run ./make doctor --install or set NYTRIX_MINGW_CC/NYTRIX_MINGW_SYSROOT", required=False)
-    print("")
-    if failures:
-        print(c("31", f"{failures} required check(s) failed"))
-        return 1
-    ok("doctor checks passed")
-    return 0
-
-def run_cross(build_root: Path, kind: str, args: list[str], run_after: bool) -> int:
-    cfg = _parse_cross_args(args)
-    if bool(cfg.get("help", False)) or not str(cfg.get("target", "")):
-        print_cross_help()
-        return 0 if bool(cfg.get("help", False)) else 2
-    ny_args = list(cfg.get("ny_args", []))
-    src_i = _ny_source_index(ny_args)
-    if src_i < 0:
-        raise SystemExit("make cross: pass a .ny source file after the target")
-    target_raw = str(cfg.get("target", ""))
-    triple, runner_name, arm_abi = _cross_target(target_raw)
-    source_arg = ny_args[src_i]
-    source = (ROOT / source_arg).resolve() if not Path(source_arg).is_absolute() else Path(source_arg)
-    out_raw = str(cfg.get("output", ""))
-    out_path = Path(out_raw) if out_raw else _cross_default_output(build_root, triple, source)
-    if not out_path.is_absolute():
-        out_path = ROOT / out_path
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    sysroot = str(cfg.get("sysroot", "")).strip()
-    cc = str(cfg.get("cc", "")).strip()
-    cc_source = ""
-    compile_issues: list[str] = []
-    backend_issue = _cross_llvm_backend_issue(triple)
-    if backend_issue:
-        compile_issues.append(backend_issue)
-    if _cross_is_windows(triple):
-        cc, cc_source = _mingw_select_cc(triple, cc)
-        if not cc:
-            raise SystemExit(
-                "make cross: windows-x64 needs MinGW-w64; run ./make doctor --install "
-                "or set NYTRIX_MINGW_CC"
-            )
-        if not sysroot:
-            sysroot = _mingw_sysroot_for_triple(triple)
-        missing = _mingw_runtime_missing(triple)
-        if missing and not _env_flag("NYTRIX_CROSS_ALLOW_MISSING_MINGW", False):
-            raise SystemExit(
-                "make cross: windows-x64 missing " + ", ".join(missing) +
-                "; run ./make doctor --install or set NYTRIX_MINGW_SYSROOT"
-            )
-    elif _cross_is_linux(triple):
-        if not sysroot:
-            sysroot = _linux_cross_sysroot_for_triple(triple)
-        if not cc:
-            cc, cc_source = _linux_select_cc(triple, "")
-        if not _cross_is_native_linux(triple):
-            if not sysroot:
-                compile_issues.append(f"sysroot for {triple}")
-            else:
-                if not _linux_cross_file_any(sysroot, triple, ("include/zlib.h",)):
-                    compile_issues.append("target zlib headers")
-                if not _linux_cross_file_any(sysroot, triple, ("lib/libz.so", "lib/libz.a")):
-                    compile_issues.append("target zlib library")
-            if not cc and not _tool_path("clang"):
-                compile_issues.append(f"clang or {triple}-gcc")
-    if compile_issues and not _env_flag("NYTRIX_CROSS_ALLOW_MISSING", False):
-        raise SystemExit(
-            f"make cross: {target_raw} unavailable: " + ", ".join(compile_issues) +
-            "; run ./make targets or ./make doctor"
-        )
-    if run_after:
-        runner = str(cfg.get("qemu", "")).strip() or runner_name
-        runner_issue = _cross_runner_issue(runner)
-        if runner_issue and not _env_flag("NYTRIX_CROSS_ALLOW_MISSING", False):
-            raise SystemExit(f"make cross-run: {target_raw} unavailable: {runner_issue}")
-    needs_target = _cross_compiler_needs_target_flag(cc, triple)
-    target_flag = f"--target={triple}"
-    target_cflags = target_flag if needs_target else ""
-    target_ldflags = target_flag if needs_target else ""
-    if sysroot and (needs_target or bool(str(cfg.get("sysroot", "")).strip())):
-        target_cflags = _merge_flag_words(target_cflags, f"--sysroot={sysroot}")
-        target_ldflags = _merge_flag_words(target_ldflags, f"--sysroot={sysroot}")
-    target_cflags = _merge_flag_words(target_cflags, str(cfg.get("cflags", "")))
-    target_ldflags = _merge_flag_words(target_ldflags, str(cfg.get("ldflags", "")))
-    binp = resolve_tool_bin(build_root, kind, "ny")
-    launch = tool_launch_path(binp)
-    compile_front = ny_args[:src_i]
-    compile_args = [
-        launch,
-        "--profile=compile",
-        "--host-triple", triple,
-        "--host-cflags", target_cflags,
-        "--host-ldflags", target_ldflags,
-    ]
-    if arm_abi:
-        compile_args.extend(["--arm-float-abi", arm_abi])
-    compile_args.extend([*compile_front, "-o", str(out_path), source_arg])
-    env = os.environ.copy()
-    ccache_dir = build_root / "cache" / "ccache"
-    ccache_dir.mkdir(parents=True, exist_ok=True)
-    env.setdefault("CCACHE_DIR", str(ccache_dir))
-    if cc:
-        env["NYTRIX_CC"] = cc
-    if cc_source:
-        log("CROSS", f"{target_raw} -> {triple}; cc={cc} ({cc_source})")
-    else:
-        log("CROSS", f"{target_raw} -> {triple}")
-    rc = subprocess.Popen(compile_args, cwd=str(ROOT), env=env).wait()
-    if rc != 0:
-        return rc
-    chmod_executable(out_path)
-    ok(f"cross binary: {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}")
-    if not run_after:
-        return 0
-    runner = str(cfg.get("qemu", "")).strip() or runner_name
-    if not runner:
-        log("CROSS", f"no runner preset for {triple}; compile completed")
-        return 0
-    runner_path = shutil.which(runner) or (runner if Path(runner).exists() else "")
-    if not runner_path:
-        log("CROSS", f"runner '{runner}' not found; install it to execute {triple} binaries")
-        return 0
-    run_cmd = [runner_path]
-    if sysroot and Path(runner_path).name.startswith("qemu-"):
-        run_cmd.extend(["-L", sysroot])
-    run_cmd.extend([str(out_path), *list(cfg.get("program_args", []))])
-    log("CROSS", "run " + " ".join(shlex.quote(x) for x in run_cmd))
-    return subprocess.Popen(run_cmd, cwd=str(ROOT), env=env).wait()
+    """Delegate to ny --targets for cross-compilation target presets."""
+    ny_bin = ROOT / "build" / "release" / "ny"
+    return subprocess.run([str(ny_bin), "--targets"]).returncode
 
 PROFILE_TIME_RE = re.compile(r"^\s*([A-Za-z][A-Za-z ]+):\s+([0-9]+(?:\.[0-9]+)?)s\s*$")
 
-def print_profile_help() -> None:
-    print(c("1;36", "Nytrix profile tooling"))
-    print("")
-    print("Usage:")
-    print("  ./make profile time [--runs N] -- <ny args>")
-    print("  ./make profile compile [--runs N] file.ny")
-    print("  ./make profile perf [--out perf.data] -- <ny args>")
-    print("  ./make profile report [perf.data]")
-    print("  ./make profile gdb -- <ny args>")
-    print("  ./make profile asan|ubsan [ny-test args]")
-    print("  ./make profile fuzz [ny-test args]")
-    print("  ./make profile afl -- <afl-fuzz args>")
-    print("")
-    print("Examples:")
-    print("  ./make profile compile --runs 5 etc/projects/ui/editor.ny")
-    print("  ./make profile perf -- --profile=compile -emit-only etc/projects/ui/editor.ny")
-    print("  ./make profile gdb -- -time -run etc/tests/runtime/compiler/comptime.ny")
-
-def _strip_dashdash(args: list[str]) -> list[str]:
-    return args[1:] if args and args[0] == "--" else args
-
-def _profile_has_time(args: list[str]) -> bool:
-    return any(a == "-time" or a == "--time" for a in args)
-
-def _profile_ny_env(build_root: Path, kind: str) -> dict[str, str]:
-    env = os.environ.copy()
-    env.setdefault("NYTRIX_ROOT", str(ROOT))
-    env.setdefault("NYTRIX_STD_CACHE", "1")
-    env.setdefault("NYTRIX_STD_BC_CACHE_AUTO", "1")
-    env.setdefault("NYTRIX_JIT_CACHE", "1")
-    if _env_flag("NYTRIX_MAKE_USE_PREBUILT_STD", False):
-        std_file = cmake_build_dir(build_root, kind) / "std.ny"
-        if std_file.exists():
-            std_path = str(std_file)
-            env.setdefault("NYTRIX_STD_PATH", std_path)
-            env.setdefault("NYTRIX_BUILD_STD_PATH", std_path)
-            env.setdefault("NYTRIX_STD_PREBUILT", std_path)
-    return env
-
-def _profile_parse_time_args(args: list[str]) -> tuple[int, bool, list[str]]:
-    runs = 3
-    show_output = False
-    out: list[str] = []
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a in ("--runs", "-n"):
-            i += 1
-            if i >= len(args):
-                raise SystemExit("make profile time: missing value for --runs")
-            runs = max(1, int(args[i]))
-        elif a.startswith("--runs="):
-            runs = max(1, int(a.split("=", 1)[1]))
-        elif a == "--show-output":
-            show_output = True
-        elif a == "--":
-            out.extend(args[i + 1:])
-            break
-        else:
-            out.append(a)
-        i += 1
-    return runs, show_output, out
-
-def _profile_parse_metric(output: str) -> dict[str, float]:
-    metrics: dict[str, float] = {}
-    for line in output.splitlines():
-        m = PROFILE_TIME_RE.match(line)
-        if not m:
-            continue
-        key = re.sub(r"\s+", "_", m.group(1).strip().lower())
-        try:
-            metrics[key] = float(m.group(2))
-        except ValueError:
-            pass
-    return metrics
-
-def _profile_time_summary(values: list[float]) -> str:
-    if not values:
-        return "n/a"
-    mean = sum(values) / len(values)
-    return f"min={min(values):.4f}s mean={mean:.4f}s max={max(values):.4f}s"
-
-def run_profile_time(build_root: Path, kind: str, args: list[str]) -> int:
-    runs, show_output, ny_args = _profile_parse_time_args(args)
-    ny_args = _strip_dashdash(ny_args)
-    if not ny_args:
-        print_profile_help()
-        return 2
-    if not _profile_has_time(ny_args):
-        ny_args = ["-time", *ny_args]
-    ny_bin = resolve_tool_bin(build_root, kind, "ny")
-    env = _profile_ny_env(build_root, kind)
-    totals: list[float] = []
-    codegen: list[float] = []
-    for idx in range(1, runs + 1):
-        started = time.perf_counter()
-        res = subprocess.run([str(ny_bin), *ny_args], cwd=str(ROOT), env=env,
-                             text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        elapsed = time.perf_counter() - started
-        if show_output or res.returncode != 0:
-            sys.stdout.write(res.stdout)
-        metrics = _profile_parse_metric(res.stdout)
-        total = metrics.get("total_time", elapsed)
-        cg_time = metrics.get("codegen")
-        totals.append(total)
-        if cg_time is not None:
-            codegen.append(cg_time)
-        cg_txt = f" codegen={cg_time:.4f}s" if cg_time is not None else ""
-        print(f"profile time run {idx}/{runs}: total={total:.4f}s{cg_txt}")
-        if res.returncode != 0:
-            return res.returncode
-    print("profile time summary:")
-    print(f"  total   {_profile_time_summary(totals)}")
-    if codegen:
-        print(f"  codegen {_profile_time_summary(codegen)}")
-    return 0
-
-def run_profile_compile(build_root: Path, kind: str, args: list[str]) -> int:
-    if not args or args[0] in ("-h", "--help"):
-        print_profile_help()
-        return 0
-    return run_profile_time(build_root, kind, ["--runs", "3", "--profile=compile", "-emit-only", *args])
-
-def _profile_parse_perf_args(args: list[str]) -> tuple[Path, str, float, list[str]]:
-    out = _nytrix_cache_root("profiles") / f"ny-perf-{int(time.time())}.data"
-    callgraph = "dwarf"
-    limit = 1.0
-    ny_args: list[str] = []
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--out":
-            i += 1
-            if i >= len(args):
-                raise SystemExit("make profile perf: missing value for --out")
-            out = Path(args[i]).expanduser()
-        elif a.startswith("--out="):
-            out = Path(a.split("=", 1)[1]).expanduser()
-        elif a == "--callgraph":
-            i += 1
-            if i >= len(args):
-                raise SystemExit("make profile perf: missing value for --callgraph")
-            callgraph = args[i]
-        elif a.startswith("--callgraph="):
-            callgraph = a.split("=", 1)[1]
-        elif a == "--limit":
-            i += 1
-            if i >= len(args):
-                raise SystemExit("make profile perf: missing value for --limit")
-            limit = float(args[i])
-        elif a.startswith("--limit="):
-            limit = float(a.split("=", 1)[1])
-        elif a == "--":
-            ny_args.extend(args[i + 1:])
-            break
-        else:
-            ny_args.append(a)
-        i += 1
-    return out, callgraph, limit, _strip_dashdash(ny_args)
-
-def run_profile_report(args: list[str]) -> int:
-    limit = "1"
-    perf_file = ""
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--limit":
-            i += 1
-            if i >= len(args):
-                raise SystemExit("make profile report: missing value for --limit")
-            limit = args[i]
-        elif a.startswith("--limit="):
-            limit = a.split("=", 1)[1]
-        elif not perf_file:
-            perf_file = a
-        i += 1
-    if not perf_file:
-        cands = sorted(_nytrix_cache_root("profiles").glob("*.data"),
-                       key=lambda p: p.stat().st_mtime if p.exists() else 0,
-                       reverse=True)
-        if cands:
-            perf_file = str(cands[0])
-    if not perf_file:
-        raise SystemExit("make profile report: pass a perf.data file or run profile perf first")
-    return subprocess.run([
-        "perf", "report", "--stdio", "-i", perf_file, "--sort", "symbol",
-        "--no-children", "--percent-limit", limit,
-    ], cwd=str(ROOT)).returncode
-
-def run_profile_perf(build_root: Path, kind: str, args: list[str]) -> int:
-    if not shutil.which("perf"):
-        raise SystemExit("make profile perf: perf not found")
-    out, callgraph, limit, ny_args = _profile_parse_perf_args(args)
-    if not ny_args:
-        print_profile_help()
-        return 2
-    if not _profile_has_time(ny_args):
-        ny_args = ["-time", *ny_args]
-    out.parent.mkdir(parents=True, exist_ok=True)
-    ny_bin = resolve_tool_bin(build_root, kind, "ny")
-    env = _profile_ny_env(build_root, kind)
-    cmd = ["perf", "record", "-g", "--call-graph", callgraph, "-o", str(out), "--",
-           str(ny_bin), *ny_args]
-    log("PROFILE", " ".join(shlex.quote(x) for x in cmd))
-    rc = subprocess.run(cmd, cwd=str(ROOT), env=env).returncode
-    if rc != 0:
-        return rc
-    ok(f"perf data: {out}")
-    return run_profile_report(["--limit", str(limit), str(out)])
-
-def run_profile_gdb(build_root: Path, kind: str, args: list[str]) -> int:
-    if not shutil.which("gdb"):
-        raise SystemExit("make profile gdb: gdb not found")
-    ny_args = _strip_dashdash(args)
-    if not ny_args:
-        print_profile_help()
-        return 2
-    ny_bin = resolve_tool_bin(build_root, kind, "ny")
-    return subprocess.run(["gdb", "--args", str(ny_bin), *ny_args], cwd=str(ROOT)).returncode
-
 def run_make_profile(build_root: Path, kind: str, jobs: int, args: list[str]) -> int:
+    """Delegate profiling to ny and ny-perf. Time mode uses ny --profile-time."""
     if not args or args[0] in ("-h", "--help"):
-        print_profile_help()
+        print("Usage: ./make profile <mode> [args]")
+        print("Modes: time (ny --profile-time), gprof/asan/ubsan/fuzz (via ny-perf/ny-test)")
+        print("  ./make profile time [--runs N] -- <ny args>")
         return 0
     mode = args[0]
     rest = args[1:]
     if mode in ("time", "bench"):
-        return run_profile_time(build_root, kind, rest)
-    if mode in ("compile", "comptime"):
-        return run_profile_compile(build_root, kind, rest)
-    if mode in ("perf", "callgraph"):
-        return run_profile_perf(build_root, kind, rest)
-    if mode == "report":
-        return run_profile_report(rest)
-    if mode == "gdb":
-        return run_profile_gdb(build_root, kind, rest)
-    if mode == "gprof":
-        cmake_build(build_root, kind, ["ny", "ny-perf"], jobs)
+        ny_bin = resolve_tool_bin(build_root, kind, "ny")
+        return subprocess.run([str(ny_bin), "--profile-time", *rest]).returncode
+    if mode in ("gprof", "fuzz"):
+        cmake_build(build_root, kind, ["ny", "ny-perf", "ny-test", "ny-fuzz"], jobs)
         return run_tool(build_root, kind, "ny-perf", ["profile", *rest])
     if mode in ("asan", "ubsan"):
-        base_host_cflags = os.environ.get("NYTRIX_HOST_CFLAGS")
-        base_host_ldflags = os.environ.get("NYTRIX_HOST_LDFLAGS")
-        base_skip_optional_gates = os.environ.get("NYTRIX_SKIP_OPTIONAL_GATES")
-        base_test_cache = os.environ.get("NYTRIX_TEST_CACHE")
-        base_test_cold = os.environ.get("NYTRIX_TEST_COLD")
-        san_kind = configure_command_environment(
-            mode, kind, base_host_cflags, base_host_ldflags,
-            base_skip_optional_gates, base_test_cache, base_test_cold,
-        )
+        san_kind = configure_command_environment(mode, kind,
+            os.environ.get("NYTRIX_HOST_CFLAGS"), os.environ.get("NYTRIX_HOST_LDFLAGS"),
+            os.environ.get("NYTRIX_SKIP_OPTIONAL_GATES"), os.environ.get("NYTRIX_TEST_CACHE"),
+            os.environ.get("NYTRIX_TEST_COLD"))
         cmake_build(build_root, san_kind, ["ny", "ny-full", "ny-test"], jobs)
         return run_test(build_root, san_kind, jobs, rest)
-    if mode == "fuzz":
-        cmake_build(build_root, kind, ["ny", "ny-test", "ny-fuzz"], jobs)
-        if rest:
-            return run_tool(build_root, kind, "ny-fuzz", rest)
-        return run_tool(build_root, kind, "ny-fuzz", ["validate-shapes", default_fuzz_shape_dir()])
-    if mode == "afl":
-        afl = shutil.which("afl-fuzz")
-        if not afl:
-            raise SystemExit("make profile afl: afl-fuzz not found")
-        afl_args = _strip_dashdash(rest)
-        if not afl_args:
-            raise SystemExit("make profile afl: pass afl-fuzz args after --")
-        return subprocess.run([afl, *afl_args], cwd=str(ROOT)).returncode
-    raise SystemExit(f"make profile: unknown mode '{mode}'")
+    print(f"make profile: mode '{mode}' not yet delegated. Use the full profile pipeline.", file=sys.stderr)
+    return 1
 
 def run_tool(build_root: Path, kind: str, name: str, args: list[str], timeout: float | None = None) -> int:
     binp = resolve_tool_bin(build_root, kind, name)
@@ -5045,8 +3849,36 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
         log("TEST", f"test suite failed after {elapsed_ms}ms")
     return rc
 
+def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
+    """Run native optimization correctness nshape tests."""
+    if args and args[0] in ("-h", "--help"):
+        print("Usage: ./make optcheck")
+        print("  Runs native oracle nshape tests from etc/tests/native/optcheck/")
+        print("  Add new kernels there as .nshape files with --native-result-oracle.")
+        return 0
+    if args:
+        raise SystemExit("optcheck: no arguments are supported")
+    test_bin = resolve_tool_bin(build_root, kind, "ny-test")
+    env = _vendor_env(build_root)
+    env.setdefault("NYTRIX_STD_CACHE", "0")
+    env.setdefault("NYTRIX_STD_BC_CACHE_AUTO", "0")
+    opt_dir = ROOT / "etc" / "tests" / "native" / "optcheck"
+    if not opt_dir.is_dir():
+        raise SystemExit("optcheck: missing fixture directory " + str(opt_dir))
+    result = subprocess.run(
+        [str(test_bin), "--with-stdlib", "--color=never", str(opt_dir)],
+        cwd=str(ROOT),
+        env=env,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        raise SystemExit("optcheck: ny-test directory run failed")
+    ok("optcheck: ny-test completed native oracle directory")
+    return 0
+
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
     known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    _PASSTHROUGH = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", "env", "targets", "doctor"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -5075,20 +3907,29 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
     jobs = 0
     verbose = False
     help_flag = False
+    help_target: str | None = None
     version = False
     color_mode: str | None = None
     bootstrap_logs: bool | None = None
     i = 0
     had_unknown_nonflag = False
+    last_cmd: str | None = None
     while i < len(argv):
         a = argv[i]
         if a in ("-h", "--help"):
-            if source_passthrough:
+            if source_passthrough or (last_cmd and last_cmd in _PASSTHROUGH):
                 extra.append(a)
             else:
                 help_flag = True
+                if last_cmd:
+                    help_target = last_cmd
         elif a == "help":
-            help_flag = True
+            if last_cmd and last_cmd in _PASSTHROUGH:
+                extra.append(a)
+            else:
+                help_flag = True
+                if last_cmd:
+                    help_target = last_cmd
         elif a == "--version":
             version = True
         elif a in ("-v", "--verbose"):
@@ -5125,14 +3966,20 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
                 raise SystemExit(f"make: invalid jobs value: {v}")
         elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web", "web-demos", "web-check", "web-test", "wasm"):
             cmds.append(a)
-            extra.extend(argv[i + 1 :])
+            last_cmd = a
+            rest = argv[i + 1 :]
+            extra.extend(rest)
             break
         elif a == "ny":
             cmds.append("ny")
-            extra.extend(argv[i + 1 :])
+            last_cmd = "ny"
+            rest = argv[i + 1 :]
+            extra.extend(rest)
             break
         elif a in known:
-            cmds.append("ny" if a == "run" else a)
+            mapped = "ny" if a == "run" else a
+            cmds.append(mapped)
+            last_cmd = mapped
         else:
             extra.append(a)
             if not a.startswith("-"):
@@ -5157,7 +4004,469 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
         cmds = [c for c in cmds if c != "release"]
     else:
         kind_debug = False
-    return cmds, extra, jobs, verbose, help_flag, version, kind_debug, color_mode, bootstrap_logs
+    return cmds, extra, jobs, verbose, help_flag, help_target, version, kind_debug, color_mode, bootstrap_logs
+
+# Per-command help registry. Each entry: (usage, summary, sections) where
+# sections is a list of (heading, rows) and rows are (left, right) text pairs.
+_COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]]]] = {
+    "all": (
+        "all",
+        "configure and build ny, std, and tools (default target)",
+        [
+            ("What it does", [
+                ("build", "forces the full tool set: ny, std, ny-fmt, ny-perf, ny-test, ny-doc, ny-make, ny-lsp"),
+                ("step x2/runs", "runs a conservative ny-fmt --bugs audit over lib/ (diagnostic only)"),
+            ]),
+            ("Build options", [
+                ("-j, --jobs N", "parallel build jobs"),
+                ("-v, --verbose", "print subcommands"),
+                ("--color MODE", "auto | always | never"),
+                ("--bootstrap-logs", "show bootstrap status"),
+                ("--debug", "build the debug, not release, configuration"),
+                ("--clean", "remove build artifacts first"),
+            ]),
+            ("Env overrides", [
+                ("NYTRIX_HOST_CFLAGS", "extra compiler flags for host build"),
+                ("NYTRIX_BUILD_JOBS", "default job count"),
+                ("CC / LC", "preferred host C compiler"),
+                ("LLVM_CONFIG", "preferred LLVM location"),
+            ]),
+            ("Examples", [
+                ("./make all", "build everything in release"),
+                ("./make --debug all", "build everything in debug"),
+            ]),
+        ],
+    ),
+    "bin": (
+        "Usage: ./make bin [options]",
+        "build the ny executable only",
+        [
+            ("What it does", [
+                ("Targets", "builds ny, std, ny-fmt, ny-perf, ny-test, ny-doc, ny-make, ny-lsp"),
+                ("Result", "writes the compiler to build/<kind>/ny"),
+            ]),
+            ("Options", [
+                ("-j, --jobs N", "parallel build jobs"),
+                ("-v, --verbose", "print subcommands"),
+                ("--debug", "build the debug configuration"),
+            ]),
+            ("Examples", [
+                ("./make bin", "build the compiler"),
+                ("./make --debug bin", "build the debug compiler"),
+            ]),
+        ],
+    ),
+    "static": (
+        "Usage: ./make static <subcommand> [args]",
+        "bundled/portable build operations (static bin, tar, vendor, check)",
+        [
+            ("Subcommands", [
+                ("bin", "build compiler/tools and bundle runtime .so files into build/static"),
+                ("libs [path]", "bundle shared libs beside build/release or a given path"),
+                ("check <binary>", "report whether an ELF is static or dynamic"),
+                ("ny <file.ny> [flags]", "compile a Ny program with static link flags"),
+                ("binstatic", "compile an arbitrary C program with the bundled toolchain"),
+            ]),
+            ("Environment", [
+                ("CC", "the C compiler to use for static builds"),
+                ("NYTRIX_ROOT", "repository root"),
+            ]),
+            ("Examples", [
+                ("./make static bin", "build everything statically"),
+                ("./make static libs build/release", "refresh bundled shared libs"),
+                ("./make static check build/release/ny", "check the ny ELF type"),
+            ]),
+        ],
+    ),
+    "bin-static": (
+        "Usage: ./make bin-static",
+        "alias for ./make static bin",
+        [
+            ("What it does", [
+                ("Result", "builds compiler/tools and bundles runtime .so files into build/static"),
+            ]),
+        ],
+    ),
+    "tar": (
+        "Usage: ./make tar [--with-binaries]",
+        "create a source (or self-contained binary) release tarball",
+        [
+            ("Options", [
+                ("--with-binaries", "also bundle prebuilt portable binaries into nytrix-static tarball"),
+                ("--out PATH", "override the output tarball path"),
+            ]),
+            ("Output", [
+                ("build/dist/nytrix-source.tar.gz", "source tarball by default"),
+                ("build/dist/nytrix-static.tar.gz", "binary tarball when --with-binaries"),
+            ]),
+        ],
+    ),
+    "vendor": (
+        "Usage: ./make vendor",
+        "bundle shared libraries into build/vendor/ for portability",
+        [
+            ("What it does", [
+                ("Bundle", "copies the auto-detected LLVM/GMP/runtime shared libraries beside the tools"),
+            ]),
+        ],
+    ),
+    "fmt": (
+        "Usage: ./make fmt [ny-fmt args]",
+        "format Nytrix sources with the ny-fmt formatter",
+        [
+            ("What it does", [
+                ("Formatter", "runs ny-fmt over the current sources"),
+            ]),
+            ("Options", [
+                ("--check", "verify formatting without rewriting"),
+                ("--audit", "run deep source audit/analysis"),
+                ("--bugs", "report suspicious code patterns"),
+                ("--limit N", "cap the number of reported findings"),
+            ]),
+            ("Examples", [
+                ("./make fmt", "format sources"),
+                ("./make fmt --check", "verify formatting in CI"),
+            ]),
+        ],
+    ),
+    "analyze": (
+        "Usage: ./make analyze [path]",
+        "run ny-fmt in an analysis/report mode",
+        [
+            ("Options", [
+                ("--limit N", "cap reported findings"),
+                ("path", "limit analysis to a file or directory"),
+            ]),
+        ],
+    ),
+    "check": (
+        "Usage: ./make check [path]",
+        "run ny-fmt in check (parse/verification) mode",
+        [
+            ("Examples", [
+                ("./make check", "verify the whole tree parses"),
+                ("./make check lib/math", "verify a subtree only"),
+            ]),
+        ],
+    ),
+    "tidy": (
+        "Usage: ./make tidy [ny-fmt args]",
+        "run ny-fmt --tidy to clean up diagnostics across sources",
+        [
+            ("Examples", [
+                ("./make tidy", "tidy all sources"),
+            ]),
+        ],
+    ),
+    "audit": (
+        "Usage: ./make audit [ny-fmt args]",
+        "run ny-fmt --audit deep source audit over lib/ and triggers",
+        [
+            ("What it does", [
+                ("Bug scan", "looks for unused bindings, missing errors, obvious smell patterns"),
+            ]),
+        ],
+    ),
+    "test": (
+        "Usage: ./make test [ny-test options] [patterns]",
+        "run the full Nytrix test suite (runtime, native, interop, probe, error, bench)",
+        [
+            ("What it does", [
+                ("Suite", "runs ny-test over etc/tests/runtime|errors|bench|native|interop|shapes and lib"),
+                ("Native", "forces native fixtures/REPL/stdll runs (NYTRIX_TEST_NATIVE=1)"),
+                ("Shapes", "after the suite, runs ny-fuzz validate-shapes over etc/tests/shapes"),
+            ]),
+            ("ny-test options", [
+                ("--bench", "run the C-vs-Ny benchmark suite instead of the test suite"),
+                ("--bench-run N", "timed samples per benchmark (default 5)"),
+                ("--bench-warmup N", "warm-up runs per benchmark (default 2)"),
+                ("--bench-opt LEVEL", "compiler opt flag, e.g. O2 (default)"),
+                ("--bench-target T", "native backend target (default x86_64)"),
+                ("--bench-out-csv F", "write benchmark results to CSV"),
+                ("--bench-out-js/io F", "write benchmark results to JSON"),
+                ("--bench-out-md F", "write benchmark results to Markdown"),
+                ("--smoke / --no-smoke", "restrict/allow the full suite"),
+                ("--with-stdlib / --no-stdlib", "include lib/ fixtures"),
+                ("--jobs N", "parallel fixture jobs"),
+                ("--timeout SEC", "per-fixture timeout cap"),
+                ("--pattern PAT", "run only fixtures whose path contains PAT"),
+                ("--phase-times", "report per-phase timing"),
+                ("--trace-ir", "trace NYIR through fixtures"),
+                ("--failures-only", "only print failing fixtures"),
+            ]),
+            ("Env overrides", [
+                ("NYTRIX_TEST_COLD=1", "cold run, disable caches"),
+                ("NYTRIX_TEST_EXEC_CACHE=1", "enable the binary cache during test"),
+                ("NYTRIX_TEST_SUITE_TIMEOUT", "outer suite deadline (default 1800s)"),
+                ("NYTRIX_TEST_TIMEOUT=NNN", "default per-fixture timeout"),
+            ]),
+            ("Examples", [
+                ("./make test", "run the whole suite"),
+                ("./make test --pattern dict", "run only the dict fixtures"),
+                ("./make test --bench", "run the benchmark suite"),
+                ("./make test --bench --bench-out-csv results.csv", "benchmark to CSV"),
+            ]),
+        ],
+    ),
+    "bench": (
+        "Usage: ./make bench [ny-test bench options]",
+        "run the public C-vs-value benchmark shapes via ny-test --bench default path",
+        [
+            ("What it does", [
+                ("Runner", "runs the C-vs-Ny benchmark shapes (etc/tests/bench)"),
+            ]),
+            ("Options", [
+                ("PATTERN ...", "fixture name substring filter (repeatable)"),
+                ("--bench-run N", "timed samples per fixture (default 1; use 3+ for stable statistics)"),
+                ("--bench-warmup N", "warm-up runs before timing (default 0; use 1+ for hot-code measurements)"),
+                ("--bench-opt LEVEL", "compiler opt level 0..3 (default 2)"),
+                ("--bench-target T", "restrict to a sub-target of fixtures"),
+                ("--bench-compile-profile P", "compiler opt profile (default/speed/balanced/peak); peak enables the proven fast int paths (~100x on int loops)"),
+                ("--bench-show-ir", "dump the optimized NYIR for each fixture"),
+                ("--bench-show-asm", "dump x86-64 asm for each fixture"),
+                ("--bench-show-passes", "show per-pass NYIR transformation stats"),
+                ("--bench-profile", "print per-phase compile timing (JIT profile)"),
+                ("--bench-out-csv PATH", "write a CSV results table"),
+                ("--bench-out-json PATH", "write a JSON results table"),
+                ("--bench-out-md PATH", "write a Markdown results table"),
+            ]),
+        ],
+    ),
+    "fuzz": (
+        "Usage: ./make fuzz [subcommand] [args]",
+        "run shape validation and smoke fuzzing",
+        [
+            ("Subcommands", [
+                ("validate-shapes DIR", "validate the deterministic test shapes (default: etc/tests/shapes)"),
+                ("afl", "launch afl-fuzz with the given arguments"),
+                ("<args>", "pass straight to ny-fuzz"),
+            ]),
+            ("Examples", [
+                ("./make fuzz", "validate default shapes"),
+                ("./make fuzz validate-shapes etc/tests/shapes", "validate shapes"),
+                ("./make fuzz afl -- -i in -o out -- bin", "launch afl-fuzz"),
+            ]),
+        ],
+    ),
+    "asan": ("Usage: ./make asan", "build with Address Sanitizer and run the test suite", []),
+    "ubsan": ("Usage: ./make ubsan", "build with Undefined Behavior Sanitizer and run the test suite", []),
+    "perf": (
+        "Usage: ./make perf [ny-perf args]",
+        "run the performance toolkit",
+        [
+            ("Subcommands", [
+                ("profile", "sample or linuz / flame the running program"),
+                ("report", "summarize a stored profile"),
+            ]),
+        ],
+    ),
+    "gprof": (
+        "Usage: ./make gprof [file.ny]",
+        "compile a source with -pg profiling enabled and run it",
+        [
+            ("What it does", [
+                ("Profile", "enables gprof (--gprof) instrumentation and runs the fixture"),
+            ]),
+        ],
+    ),
+    "profile": (
+        "Usage: ./make profile <mode> [options]",
+        "time, compile, perf, GDB, sanitizer, and fuzz wrappers around ny",
+        [
+            ("Modes", [
+                ("time <file.ny>", "time compile-and-run across N runs"),
+                ("compile <file.ny>", "time only the compile phase"),
+                ("perf <file.ny>", "run under linux perf / callgraph"),
+                ("report", "summarize stored profiles"),
+                ("gdb <file.ny>", "run under GDB"),
+                ("gprof <file.ny>", "profile with gprof"),
+                ("asan", "Address-Sanitizer build + test"),
+                ("ubsan", "UBSan build + test"),
+                ("fuzz [DIR]", "run ny-fuzz validate-shapes"),
+                ("afl --", "launch afl-fuzz with the given args"),
+            ]),
+        ],
+    ),
+    "optcheck": (
+        "Usage: ./make optcheck",
+        "run native oracle nshape tests from etc/tests/native/optcheck/",
+        [],
+    ),
+    "docs": (
+        "Usage: ./make docs [ny-doc args]",
+        "build the documentation portal",
+        [
+            ("Options", [
+                ("-o DIR", "output directory (default build/docs)"),
+            ]),
+            ("Examples", [
+                ("./make docs", "build the docs"),
+                ("./make docs -o build/docs/out", "build to a custom dir"),
+            ]),
+        ],
+    ),
+    "web": (
+        "Usage: ./make web <file.ny> [--out PATH]",
+        "compile one Ny source into a deployable WebGL2 browser app",
+        [
+            ("Options", [
+                ("--out PATH", "output deployment directory"),
+            ]),
+            ("Examples", [
+                ("./make web etc/projects/ui/pong.ny", "build a WebGL app"),
+            ]),
+        ],
+    ),
+    "wasm": (
+        "Usage: ./make wasm <file.ny> [--out PATH]",
+        "compile one Ny source file to WebAssembly",
+        [
+            ("Options", [
+                ("--out PATH", "output .wasm path"),
+            ]),
+        ],
+    ),
+    "web-check": ("Usage: ./make web-check <file.ny>", "verify a Ny source uses only implemented browser host APIs", []),
+    "web-test": ("Usage: ./make web-test", "build and prove a Pong app reaches the WebGL2 browser runner", []),
+    "web-demos": ("Usage: ./make web-demos", "build the browser WebGL/Wasm demo portal", []),
+    "c2ny": (
+        "Usage: ./make c2ny <file.c> [-o out.ny]",
+        "translate a C file to Nytrix source via ny-fmt --c2ny",
+        [
+            ("Examples", [
+                ("./make c2ny hello.c -o hello.ny", "translate hello.c"),
+            ]),
+        ],
+    ),
+    "py2ny": (
+        "Usage: ./make py2ny <file.py> [-o out.ny]",
+        "translate a Python file to Nytrix source via ny-fmt --py2ny",
+        [],
+    ),
+    "ny": (
+        "Usage: ./make ny [file.ny] [ny flags] [program args]",
+        "launch the compiler/REPL; runs a source directly with a cached start",
+        [
+            ("Arguments", [
+                ("file.ny", "source file to run; omit to open the REPL"),
+                ("ny flags", "compiler flags passed to ny (see ny --help)"),
+                ("-- [args]", "force all following to be program args"),
+            ]),
+            ("Examples", [
+                ("./make ny", "open the REPL"),
+                ("./make ny hello.ny", "compile and run hello.ny"),
+                ("./make ny engine.ny -v -gl", "run with compiler flags after the source"),
+            ]),
+        ],
+    ),
+    "repl": (
+        "Usage: ./make repl",
+        "launch the interactive REPL with a fast cached start",
+        [
+            ("Examples", [
+                ("./make repl", "start the interactive line-editing REPL"),
+            ]),
+        ],
+    ),
+    "run": (
+        "Usage: ./make run <file.ny> [args]",
+        "shorthand for ./make ny",
+        [],
+    ),
+    "install": (
+        "Usage: ./make install",
+        "install ny and ny-lsp (and tools) into the system prefix",
+        [],
+    ),
+    "uninstall": (
+        "Usage: ./make uninstall",
+        "remove the installfiles reported by the install manifest",
+        [],
+    ),
+    "clean": (
+        "Usage: ./make clean",
+        "remove the build/ directory and generated artifacts",
+        [],
+    ),
+    "deps": (
+        "Usage: ./make deps",
+        "ensure required build dependencies are installed",
+        [],
+    ),
+    "env": (
+        "Usage: ./make env",
+        "print effective paths, tools, overrides, and caches",
+        [
+            ("What it prints", [
+                ("Environment", "root, host, build.kind, build.dir, jobs, caches"),
+                ("Tools", "ny, ny-fmt, ny-test, ny-doc, ny-perf and cmake/ninja/clang/llvm"),
+                ("Overrides", "active NYTRIX_* environment overrides"),
+            ]),
+        ],
+    ),
+    "targets": (
+        "Usage: ./make targets",
+        "show cross-compilation target guidance (delegates to ny --doctor)",
+        [],
+    ),
+    "doctor": (
+        "Usage: ./make doctor",
+        "delegate to ny --doctor for system toolchain diagnostics",
+        [
+            ("Examples", [
+                ("./make doctor", "report setup issues"),
+                ("./make doctor --help", "show ny --doctor help"),
+            ]),
+        ],
+    ),
+}
+
+def _print_help_rows(rows: list[tuple[str, str]], indent: str = "  ") -> None:
+    # Split rows whose left column is too wide so the two columns stay aligned.
+    lefts = [l for l, _ in rows if l]
+    width = max(len(l) for l in lefts) if lefts else 1
+    for left, right in rows:
+        if not left:
+            print(indent + c("90", right))
+            continue
+        pad = max(1, 2 + width - len(left))
+        if len(left) <= width:
+            print(f"{indent}{c('36', left)}{' ' * pad}{c('2', right)}")
+        else:
+            # Left label itself exceeds the column width: put it on its own line.
+            print(f"{indent}{c('36', left)}")
+            print(f"{indent}{' ' * (width + 2)}{c('2', right)}")
+
+def print_command_help(cmd: str) -> None:
+    print(c("1;36", f"Nytrix build tool: {cmd}"))
+    print(c("90", "-" * 70))
+    if cmd not in _COMMAND_USAGE:
+        print(f"  {c('36', './make ' + cmd)}")
+        print("  (this command is supported; see './make --help' for the full command list)")
+        return
+    usage, summary, sections = _COMMAND_USAGE[cmd]
+    if usage.lower().startswith("usage:"):
+        print(f"{c('1', 'Usage:')} {c('1;32', usage[6:].strip())}")
+    else:
+        print(f"{c('1', 'Usage:')} {c('1;32', './make ' + usage)}")
+    print(f"  {c('90', summary)}")
+    for title, rows in sections:
+        print("")
+        print(c("1", title + ":"))
+        _print_help_rows(rows)
+    print("")
+    print(c("1", "Global options:"))
+    _print_help_rows([
+        ("-j, --jobs N", "parallel build jobs"),
+        ("-v, --verbose", "print subcommands"),
+        ("--color MODE", "auto | always | never"),
+        ("--no-color", "disable colored output"),
+        ("--bootstrap-logs", "show bootstrap status"),
+        ("--debug", "switch to the debug build configuration when supported"),
+        ("-h, --help", "show this command's help"),
+    ])
+    print("")
+    print(f"  {c('90', 'Sub-commands share this driver; run ./make <cmd> --help for each one.')}")
 
 def print_help() -> None:
     print(c("1;36", "Nytrix build tool"))
@@ -5197,43 +4506,47 @@ def print_help() -> None:
         )),
         ("Inspect", (
             ("env", "print effective paths, tools, and overrides"),
-            ("targets", "list cross presets and runner status"),
-            ("doctor", "diagnose setup; use --install to install known deps"),
+            ("targets", "show cross-compilation target guidance"),
+            ("doctor", "delegate to ny --doctor for toolchain diagnostics"),
         )),
         ("Cross", (
-            ("cross", "compile for a target preset or triple"),
-            ("cross-run", "compile, then run through qemu/wine when present"),
+            ("cross", "cross-compile (delegates to ny --cross=<triple>)"),
+            ("cross-run", "cross-compile and run via QEMU (delegates to ny)"),
         )),
     )
     for title, rows in groups:
         print(c("1", title + ":"))
-        for cmd, desc in rows:
-            print(f"  {c('36', cmd)}{' ' * max(1, 20 - len(cmd))}{desc}")
+        _print_help_rows(rows)
     print("")
     print(c("1", "Options:"))
-    for opt, desc in (
+    _print_help_rows([
         ("-j, --jobs N", "parallel build jobs"),
         ("-v, --verbose", "print subcommands"),
         ("-h, --help", "show this help"),
         ("--version", "print version"),
-        ("--color {auto,always,never}", "control colored output"),
+        ("--color MODE", "auto | always | never"),
         ("--no-color", "disable colored output"),
         ("--bootstrap-logs", "show bootstrap status"),
         ("--no-bootstrap-logs", "hide bootstrap status"),
-    ):
-        print(f"  {c('32', opt)}{' ' * max(1, 34 - len(opt))}{desc}")
+    ])
     print("")
     print(c("1", "Ny/runtime passthrough:"))
-    print(f"  {c('36', './make ny <file.ny> [ny flags] [program args]')}  run a Ny source")
-    print(f"  {c('36', './make <file.ny> [ny flags] [program args]')}     shorthand for ./make ny")
-    print(f"  {c('36', './make -trace ny <file.ny> ...')}              pass compiler flags before the source")
-    print(f"  {c('36', './make ny <file.ny> -v -gl')}                pass UI/app flags after the source")
-    print(f"  {c('36', './make ny <file.ny> -- [args]')}             force the rest to be program args")
+    print("  These target the `ny` command directly:")
+    _print_help_rows([
+        ("./make ny <file.ny> [flags]", "run a Ny source with compiler flags before/after the file"),
+        ("./make <file.ny> [flags]", "shorthand for ./make ny"),
+        ("./make -trace ny <file.ny> ...", "pass compiler flags before the source"),
+        ("./make ny <file.ny> -v -gl", "pass UI/app flags after the source"),
+        ("./make ny <file.ny> -- [args]", "force the rest to be program args"),
+    ])
+    print("")
+    print(c("1", "Per-command help:"))
+    print("  Run  ./make <command> --help   for command-specific options and examples.")
     print("")
     print(c("1", "Examples:"))
     print("  ./make doctor")
-    print("  ./make doctor --install")
     print("  ./make targets")
+    print("  ./make cross aarch64-linux-gnu file.ny")
     print("  ./make ny etc/projects/ui/term.ny -h")
     print("  ./make etc/projects/ui/term.ny -v -vk btop")
     print("  ./make -trace ny etc/projects/ui/engine.ny -vk")
@@ -5241,7 +4554,6 @@ def print_help() -> None:
     print("  ./make bin-static")
     print("  ./make static libs build/static")
     print("  ./make web-demos")
-    print("  ./make cross-run linux-x64 etc/projects/os/args.ny -- one two")
 
 def _set_env_value(name: str, value: str | None) -> None:
     if value is None:
@@ -6303,7 +5615,6 @@ def run_make_static(build_root: Path, kind: str, jobs: int, args: list[str]) -> 
     return run_tool(build_root, kind, "ny",
                     ["--host-ldflags", static_ldflags, *ny_args])
 
-
 def _vendor_lib_dir(build_root: Path) -> Path:
     return build_root / "vendor" / "lib" / "host"
 
@@ -6361,7 +5672,6 @@ def _create_linker_symlinks(lib_dir: Path, llvm_major: str) -> None:
         link.symlink_to(target)
         log("VENDOR", f"  symlink {link_name} -> {target}")
 
-
 def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> int:
     if args and args[0] in ("-h", "--help", "help"):
         print("usage: make vendor  -- bundle shared libs for build portability")
@@ -6402,7 +5712,7 @@ def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> 
     else:
         log("VENDOR", "no shared libs copied (already static link?)")
 
-    # ---- Detect bundled LLVM version from .so files ----
+    # Detect bundled LLVM version from .so files
     bundled_llvm_major = _detect_bundled_llvm_major(lib_dir)
     if bundled_llvm_major:
         log("VENDOR", f"detected bundled LLVM {bundled_llvm_major} from libLLVM.so.*")
@@ -6446,7 +5756,6 @@ def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> 
             if check_ver != bundled_llvm_major:
                 log("VENDOR", f"  {llvm_config_bin} reports LLVM {check_ver}, bundled libs are {bundled_llvm_major} — skipping incompatible headers")
                 llvm_config_bin = None
-
 
     if llvm_config_bin and bundled_llvm_major:
         boot_step("vendor: bundling LLVM/Clang headers for self-contained build")
@@ -6525,7 +5834,6 @@ def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> 
     ok(f"vendor ready: {_rel_or_abs(vendor_dir)}")
     return 0
 
-
 def _tar_source_ignore(dir: str, names: list[str]):
     ignored = {
         ".git", ".cache", "tmp", "__pycache__", ".pytest_cache",
@@ -6597,14 +5905,17 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
 
 def main() -> int:
     global COLOR, QUIET_BOOTSTRAP
-    cmds, extra, requested_jobs, verbose, want_help, want_version, debug_kind, cli_color_mode, cli_bootstrap_logs = parse(sys.argv[1:])
+    cmds, extra, requested_jobs, verbose, want_help, help_target, want_version, debug_kind, cli_color_mode, cli_bootstrap_logs = parse(sys.argv[1:])
     COLOR = apply_cli_color_mode(cli_color_mode)
     ensure_project_scripts_executable()
     if want_help:
+        if help_target and help_target in _COMMAND_USAGE:
+            print_command_help(help_target)
+            return 0
         print_help()
         return 0
     if want_version:
-        print("Nytrix Build Tool (python bootstrap)")
+        print("Nytrix Build Tool")
         return 0
 
     kind = "debug" if debug_kind else "release"
@@ -6641,10 +5952,21 @@ def main() -> int:
         vendored_include = build_root / "vendor" / "include"
         if vendored_include.exists():
             os.environ.setdefault("NYTRIX_LLVM_INCLUDE", str(vendored_include))
-        log("BUILD", "auto-activated vendored LLVM (python PATH/LLVM_CONFIG/NYTRIX_LLVM_INCLUDE)")
+        log("BUILD", "auto-activated vendored LLVM (PATH/LLVM_CONFIG/NYTRIX_LLVM_INCLUDE)")
 
-    deps_free_cmds = {*inspect_cmds, "static", "bin-static", "tar", "vendor"}
-    if not all(c in deps_free_cmds for c in cmds):
+    # Commands that don't need LLVM/deps (fast checks, clean, info)
+    deps_free_cmds = {*inspect_cmds, "fmt", "analyze", "check", "tidy", "audit",
+                      "clean", "deps", "env", "targets", "doctor",
+                      "static", "bin-static", "tar", "vendor"}
+
+    # Commands that need LLVM/deps (build, test, bench, etc.)
+    build_cmds = {"bin", "test", "bench", "asan", "ubsan", "debug", "release",
+                  "perf", "profile", "docs", "web", "web-demos", "wasm",
+                  "cross", "cross-run", "fuzz", "repl", "profile", "gprof",
+                  "ny", "run", "install", "uninstall", "profile"}
+
+    needs_deps = any(c in build_cmds for c in cmds)
+    if needs_deps or not all(c in deps_free_cmds for c in cmds):
         ensure_deps(force_optional_prompt=("deps" in cmds), require_git=("deps" in cmds))
     elif host_os() == "macos":
         configure_macos_tool_path()
@@ -6663,7 +5985,8 @@ def main() -> int:
             base_skip_optional_gates, base_test_cache, base_test_cold,
         )
         if cmd == "env":
-            rc = run_make_env(build_root, active_kind, jobs, jobs_note)
+            ny_bin = resolve_tool_bin(build_root, active_kind, "ny")
+            rc = subprocess.run([str(ny_bin), "--env"], env=os.environ).returncode
             if rc != 0:
                 return rc
             continue
@@ -6673,7 +5996,8 @@ def main() -> int:
                 return rc
             continue
         if cmd == "doctor":
-            rc = run_make_doctor(build_root, active_kind, extra)
+            ny_bin = resolve_tool_bin(build_root, active_kind, "ny")
+            rc = subprocess.run([str(ny_bin), "--doctor", *extra]).returncode
             if rc != 0:
                 return rc
             continue
@@ -6755,6 +6079,18 @@ def main() -> int:
         elif cmd == "check":
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--check", *extra])
         elif cmd == "tidy":
+            # Strip only NUL bytes from C/H sources so Clang does not
+            # crash with "null character ignored".  Keep all valid UTF-8
+            # (em-dashes, arrows, checkmarks, etc.).
+            import glob as _glob
+            _nul = b"\x00"
+            for _pattern in ("src/**/*.c", "src/**/*.h"):
+                for _f in _glob.glob(str(ROOT / _pattern), recursive=True):
+                    with open(_f, "rb") as _fh:
+                        _data = _fh.read()
+                    if _nul in _data:
+                        with open(_f, "wb") as _fh:
+                            _fh.write(_data.replace(_nul, b""))
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--tidy", *extra])
         elif cmd == "audit":
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--audit", *extra])
@@ -6783,7 +6119,8 @@ def main() -> int:
                 raise SystemExit(1)
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--py2ny", *extra])
         elif cmd == "wasm":
-            rc = run_wasm(build_root, active_kind, extra)
+            ny_bin = resolve_tool_bin(build_root, active_kind, "ny")
+            rc = subprocess.run([str(ny_bin), "--wasm", *extra]).returncode
         elif cmd == "install":
             rc = cmake_install(build_root, active_kind)
         elif cmd == "uninstall":
@@ -6810,8 +6147,7 @@ def main() -> int:
             rc = run_tool(build_root, active_kind, "ny", ["-i", *extra])
         elif cmd == "ny":
             if extra:
-                cached_rc = run_ny_cached(build_root, active_kind, extra)
-                rc = cached_rc if cached_rc is not None else run_tool(build_root, active_kind, "ny", ny_fast_run_args(extra))
+                rc = run_tool(build_root, active_kind, "ny", extra)
             else:
                 rc = run_tool(build_root, active_kind, "ny", ["-i"])
         elif cmd == "static":
@@ -6823,9 +6159,19 @@ def main() -> int:
         elif cmd == "tar":
             rc = run_make_tar(build_root, kind, jobs, extra)
         elif cmd == "cross":
-            rc = run_cross(build_root, active_kind, extra, False)
+            if not extra:
+                raise SystemExit("make cross: usage: ./make cross <triple-or-preset> [file.ny] [-- ny-flags]")
+            triple = extra[0]
+            rest = extra[1:]
+            ny_bin = resolve_tool_bin(build_root, active_kind, "ny")
+            rc = subprocess.run([str(ny_bin), f"--cross={triple}", *rest]).returncode
         elif cmd == "cross-run":
-            rc = run_cross(build_root, active_kind, extra, True)
+            if not extra:
+                raise SystemExit("make cross-run: usage: ./make cross-run <triple-or-preset> [file.ny] [-- program-args]")
+            triple = extra[0]
+            rest = extra[1:]
+            ny_bin = resolve_tool_bin(build_root, active_kind, "ny")
+            rc = subprocess.run([str(ny_bin), f"--cross={triple}", "--cross-run", *rest]).returncode
         elif cmd == "profile":
             rc = run_make_profile(build_root, active_kind, jobs, extra)
         elif cmd == "gprof":
@@ -6849,8 +6195,10 @@ def main() -> int:
             else:
                 rc = run_tool(build_root, active_kind, "ny-fuzz", ["validate-shapes", default_fuzz_shape_dir()])
         elif cmd == "bench":
-            rc = run_tool(build_root, active_kind, "ny-fuzz", ["bench", "real", *extra])
-        elif cmd in ("optcheck", "fb"):
+            rc = run_tool(build_root, active_kind, "ny-test", ["--bench", *extra])
+        elif cmd == "optcheck":
+            rc = run_optcheck(build_root, active_kind, extra)
+        elif cmd == "fb":
             raise SystemExit(
                 f"make: command '{cmd}' is not implemented on the native C path.\n"
                 "  For optimization correctness, use: ./make test\n"

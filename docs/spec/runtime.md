@@ -1,3 +1,4 @@
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":30,"summary":"Ownership, cleanup, receivers, asynchronous behavior, and the runtime guarantees programs rely on."} -->
 # Runtime
 
 Runtime behavior covers execution modes, memory boundaries, ownership,
@@ -33,12 +34,12 @@ ny --safe-mode file.ny
 ny --mode=safe file.ny
 ```
 
-In this profile, code scopes owned raw allocations with `with ptr: name` or
+In this profile, code scopes owned raw allocations with `with ptr name` or
 returns them through an ownership contract. Raw memory loads and stores against
 a compiler-tracked allocation require a proven byte range:
 
 ```ny
-with ptr: p = malloc(8){
+with ptr p = malloc(8){
    def int i = 3
    assert_compile_range(i, 0, 7, "byte index")
    store8(p, 65, i)
@@ -75,10 +76,20 @@ enabled, configure the nursery, tenured space, and large-object threshold with
 `NYTRIX_GC_NURSERY_SIZE`, `NYTRIX_GC_TENURED_SIZE`, and
 `NYTRIX_GC_LOS_THRESHOLD`. Size values accept bytes, `K`, `M`, or `G`.
 
+### Collector mechanics
+
+In GC mode the collector adds a 16-byte collector header before the ordinary
+runtime prefix and moves supported heap objects between the nursery and the
+tenured space. Managed Nytrix objects are scanned and relocated; the collector
+keeps its own header so the ordinary prefix and object layout stay unchanged.
+Large objects above `NYTRIX_GC_LOS_THRESHOLD` are not moved; they are tracked
+directly.
+
 GC mode changes allocation for managed Nytrix objects. Native handles and raw
 buffers still need cleanup. Pair native allocations that escape the managed
 object model with the owning API's cleanup function, `with` scopes, or a
-`release` / `forget` contract.
+`release` / `forget` contract. A raw buffer or handle is not traced and is not
+moved; do not cache its address across a GC boundary.
 
 ## Ownership
 
@@ -94,9 +105,14 @@ release(o)
 forget(o)
 ```
 
-`&expr` is the borrow operator and is equivalent to `borrow(expr)`. `own`
-marks a value as owned. `release` consumes and drops an owned value. `forget`
-consumes an owned value without dropping it.
+| Syntax | Meaning | Use |
+| --- | --- | --- |
+| `borrow(expr)` | Explicit borrow. | Named ownership boundary. |
+| `&expr` | Equivalent borrow shorthand. | Compact local call. |
+| `own(expr)` | Owned value. | Transfer or managed cleanup boundary. |
+
+`release` consumes and drops an owned value. `forget` consumes an owned value
+without dropping it.
 
 Ownership diagnostics run by default:
 
@@ -156,18 +172,26 @@ fn with_name(any input, str name) any {
 ## Scoped cleanup
 
 `defer` and `with` provide cleanup. `with` uses the resource spelling
-`with Type: name = value { ... }`.
+`with Type name = value { ... }`.
 
 ```ny
 defer { cleanup() }
-with Resource: r = open_resource() { use(r) }
+with Resource r = open_resource() { use(r) }
 ```
+
+`defer` runs its body when the current scope exits, including early returns and
+panic unwinding; multiple defers run in last-in-first-out order. `with` runs
+cleanup when the body falls through, returns, or unwinds. Use `defer` for
+several unrelated cleanups in one function and `with` for one resource whose
+scope should be visibly bounded.
 
 ## Concurrency
 
 The runtime and standard library include stackless async tasks, OS threads,
 atomics, queues, channels, and network async helpers. Shared state uses
 synchronization APIs from `std.core` and `std.os`.
+
+### Async tasks
 
 `async` starts a stackless task and `await` waits for its value:
 
@@ -189,6 +213,93 @@ async scheduling helpers in `std.os.async`.
 Async socket helpers return awaitable handles for connect, accept, read, write,
 and read-until operations.
 
+On the browser target, `std.os.time.msleep(ms)` uses the runner's Asyncify
+bridge to yield to the browser event loop and resume the suspended Wasm stack
+after the delay. It does not block the browser thread. The fixture
+`etc/tests/native/web/time-sleep.ny` verifies this behavior.
+
+### Threads and mutexes
+
+`std.os.thread` spawns OS threads. `thread_spawn(fn_value, arg)` joins with
+`thread_join(handle)`. `thread_spawn_call(fn_value, args)` passes a list of
+arguments. Protect shared mutable state with `mutex_new`, `mutex_lock`, and
+`mutex_unlock`; free the mutex with `mutex_free`.
+
+```ny
+use std.core
+use std.os.thread
+
+fn worker(any arg) any { arg }
+
+def handle = thread_spawn(worker, "ok")
+assert_eq(thread_join(handle), "ok", "thread")
+```
+
+`thread.spawn` is not exported.
+
+### Channels
+
+Cooperative channels move values between tasks. `channel(capacity)` creates a
+channel; `capacity=0` means unbounded. `chan_send` and `chan_recv` are the
+blocking forms, `chan_try_send` and `chan_try_recv` are nonblocking, and
+`chan_close`, `chan_closed`, and `chan_len` manage lifecycle and capacity.
+
+```ny
+use std.core
+
+def ch = channel(4)
+assert(chan_send(ch, "ny"), "send")
+assert_eq(chan_recv(ch), "ny", "recv")
+```
+
+### Queues
+
+`queue(xs)` builds a FIFO queue value. `queue_push` appends and returns the
+queue; `queue_pop` removes and returns the front (or a default); `queue_try_pop`
+returns a result dict; `queue_peek`, `queue_len`, `queue_empty`, and
+`queue_clear` cover inspection and reset.
+
+### Shared-memory model
+
+Nytrix uses a data-race-free shared-memory contract. Two threads must not access
+the same mutable location concurrently when at least one access is a write unless
+that location is protected by a mutex or accessed through the atomic API. A data
+race is outside the portable language contract; optimizers may assume ordinary
+non-atomic accesses are race-free.
+
+Thread creation publishes values prepared before the spawn to the worker, and a
+successful join makes the worker's completed writes visible to the joining
+thread. `mutex_unlock` on a mutex synchronizes with a later successful
+`mutex_lock` of the same mutex. These synchronization operations are compiler
+barriers for ordinary memory effects; transformations must not move observable
+loads/stores across them in a way that changes the happens-before relation.
+
+Values crossing a thread boundary must remain valid for the worker lifetime. A
+borrow may cross only when its owner is guaranteed to outlive the worker and no
+conflicting mutation/release can occur; otherwise transfer an owned/managed value
+or clone the data. Detached work must not capture a stack-local borrow whose
+owner can leave scope before the worker completes.
+
+### Atomics
+
+`std.os.atomic` provides lock-free cells for simple shared counters. The current
+`atomic_i64` operations are sequentially consistent: each atomic operation
+participates in one global order consistent with program order. There is no
+source-level relaxed/acquire/release ordering selector yet.
+
+`atomic_i64(initial)` creates a cell; `atomic_load`, `atomic_store`,
+`atomic_add`, `atomic_sub`, `atomic_exchange`, and `atomic_compare_exchange`
+operate on it, with an optional byte `offset` into the cell. Free the cell with
+`atomic_free`.
+
+```ny
+use std.os.atomic
+
+def counter = atomic_i64(0)
+assert(atomic_add(counter, 1) == 1, "atomic increment")
+atomic_free(counter)
+```
+
 ## Attributes and effects
 
 Attributes describe declaration metadata: linkage, codegen hints, purity,
@@ -205,6 +316,7 @@ contracts.
 
 ## Related
 
-- [control-flow.md](control-flow.md) for `defer` and `with`.
-- [native.md](native.md) for FFI boundary rules.
-- [tooling.md](../learn/tooling.md) for run modes and diagnostics.
+- [Control Flow](control-flow.md) for `defer` and `with`.
+- [Native](native.md) for FFI boundary rules.
+- [Concurrency](../learn/concurrency.md) for practical task and thread workflows.
+- [Tooling](../learn/tooling.md) for run modes and diagnostics.

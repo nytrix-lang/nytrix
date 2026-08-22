@@ -1,3 +1,11 @@
+/*
+ * Fuzz selftest: validates the fuzzer comparison infrastructure
+ * (nice/priority wrappers, command generation, output parsing).
+ */
+
+/*
+ * infrastructure self-tests and contract fixtures
+ */
 static bool selftest_command_uses_env_nice(const char *command) {
   return command &&
          strncmp(command, "env NYTRIX_LOW_PRIORITY=1", 24) == 0 &&

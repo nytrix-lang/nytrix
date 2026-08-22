@@ -1,3 +1,7 @@
+/*
+ * HM type checker: constraint-based Hindley-Milner inference engine
+ * with arena allocation, unification, and type-variable management.
+ */
 static char *hm_arena_strdup(ny_hm_state_t *hm, const char *s) {
   if (!s)
     s = "";
@@ -325,6 +329,14 @@ static bool hm_name_compatible(const char *want, const char *got) {
   if (strcmp(want, got) == 0 || strcmp(want, "any") == 0 ||
       strcmp(got, "any") == 0)
     return true;
+  /*
+   * Fin<N> has the integer ABI.  Keep the named bound in the environment
+   * for declaration checking, but allow it wherever an ordinary integer is
+   * required.
+   */
+  if ((strncmp(want, "Fin<", 4) == 0 && tp_is_int_type(got)) ||
+      (strncmp(got, "Fin<", 4) == 0 && tp_is_int_type(want)))
+    return true;
   if (hm_generic_name_compatible(want, got))
     return true;
   if ((hm_is_callable_name(want) && hm_is_callable_name(got)))
@@ -358,6 +370,38 @@ static bool hm_name_compatible(const char *want, const char *got) {
       (strcmp(got, "handle") == 0 && tp_is_int_type(want)))
     return true;
   return false;
+}
+
+static bool hm_fin_literal_bound(const char *type, int64_t *out) {
+  if (!type || !out || strncmp(type, "Fin<", 4) != 0)
+    return false;
+  const char *end = strchr(type + 4, '>');
+  if (!end || end == type + 4 || end[1] != '\0')
+    return false;
+  char *parsed = NULL;
+  long long bound = strtoll(type + 4, &parsed, 10);
+  if (parsed != end || bound <= 0)
+    return false;
+  *out = (int64_t)bound;
+  return true;
+}
+
+static void hm_check_fin_initializer(ny_hm_state_t *hm, const char *decl,
+                                     const expr_t *init, token_t tok) {
+  int64_t bound = 0;
+  if (!hm_fin_literal_bound(decl, &bound) || !init ||
+      init->kind != NY_E_LITERAL || init->as.literal.kind != NY_LIT_INT)
+    return;
+  int64_t value = init->as.literal.as.i;
+  if (value >= 0 && value < bound)
+    return;
+  tp_add_diag_ex(hm->ctx, tok, "hm", "hm-fin-literal-range",
+                 "variable declaration", decl, "int", "integer literal",
+                 "Fin<N> values must be in the half-open interval [0, N)",
+                 "use a literal in range or a checked Fin constructor",
+                 "Fin<%" PRId64 "> requires 0 <= value < %" PRId64
+                 ", got %" PRId64,
+                 bound, bound, value);
 }
 
 static bool hm_name_accepts_kind(const char *name, ny_hm_kind_t kind) {
@@ -565,11 +609,26 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
   }
   if (got->kind == NY_HM_VAR)
     return hm_unify(hm, got, want, tok, context);
-  /* A bare `proof` annotation preserves the proposition inferred from
-   * prove(...); indexed proof requirements remain exact below. */
+  /*
+   * A bare `proof` annotation preserves the proposition inferred from
+   * prove(...); indexed proof requirements remain exact below.
+   */
   if (want->kind == NY_HM_NAME && got->kind == NY_HM_NAME &&
       strcmp(want->name ? want->name : "", "proof") == 0 &&
       strncmp(got->name ? got->name : "", "proof<", 6) == 0)
+    return true;
+  /*
+   * Name-aware proof propositions: two indexed proofs unify when their
+   * canonical propositions match up to value-name renaming. Literal parts
+   * must be identical; `name:X` vs `name:Y` is accepted here because the
+   * range satisfaction is enforced at codegen (ny_proof_call_params_ok),
+   * where the caller-side value ranges are available.
+   */
+  if (want->kind == NY_HM_NAME && got->kind == NY_HM_NAME &&
+      strncmp(want->name ? want->name : "", "proof<", 6) == 0 &&
+      strncmp(got->name ? got->name : "", "proof<", 6) == 0 &&
+      strcmp(want->name, got->name) != 0 &&
+      ny_proof_proposition_shape_matches(want->name, got->name))
     return true;
   if (hm_is_name(got, "nil") &&
       (want->kind == NY_HM_NULLABLE || want->kind == NY_HM_PTR))
@@ -2367,9 +2426,11 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
                               : hm_var(hm);
       ny_hm_type_t *final_t =
           decl && *decl ? hm_parse_type_name(hm, decl, self_name) : it;
-      if (decl && *decl)
+      if (decl && *decl) {
+        hm_check_fin_initializer(hm, decl, init, init ? init->tok : s->tok);
         hm_unify(hm, final_t, it, init ? init->tok : s->tok,
                  "variable declaration");
+      }
       if (decl && strcmp(decl, "proof") == 0 && it &&
           it->kind == NY_HM_NAME && it->name &&
           strncmp(it->name, "proof<", 6) == 0)

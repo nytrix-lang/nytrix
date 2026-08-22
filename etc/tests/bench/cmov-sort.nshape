@@ -1,0 +1,81 @@
+shape cmov-sort {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "sort", "cmov", "branchless", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+;; Insertion sort (compare-exchange) over LCG data: tests branch/cmov lowering.
+def N = 2000
+mut a = []
+mut seed = 42
+mut i = 0
+while i < N {
+   seed = (seed * 3877 + 29573) % 139968
+   a = append(a, seed)
+   i += 1
+}
+def t0 = ticks()
+i = 1
+while i < N {
+   def key = a[i]
+   mut j = i - 1
+   while j >= 0 && a[j] > key {
+      a[j + 1] = a[j]
+      j -= 1
+   }
+   a[j + 1] = key
+   i += 1
+}
+def t1 = ticks()
+mut acc = 0
+i = 0
+while i < N {
+   acc += a[i] * (i + 1)
+   i += 1
+}
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    int N = 2000;
+    long *a = (long *)malloc((size_t)N * sizeof(long));
+    long seed = 42;
+    for (int i = 0; i < N; i++) {
+        seed = (seed * 3877 + 29573) % 139968;
+        a[i] = seed;
+    }
+    int64_t start = now_ns();
+    for (int i = 1; i < N; i++) {
+        long key = a[i];
+        int j = i - 1;
+        while (j >= 0 && a[j] > key) {
+            a[j + 1] = a[j];
+            j--;
+        }
+        a[j + 1] = key;
+    }
+    int64_t end = now_ns();
+    long long acc = 0;
+    for (int i = 0; i < N; i++) acc += (long long)a[i] * (i + 1);
+    printf("checksum=%lld\n", acc);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

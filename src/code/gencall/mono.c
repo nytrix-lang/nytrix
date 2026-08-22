@@ -1,3 +1,7 @@
+/*
+ * Monomorphization: type-driven function cloning and specialization
+ * for generic/template call sites with demand-driven clone generation.
+ */
 static int ny_mono_env_int(const char *name, int fallback) {
   const char *v = getenv(name);
   if (!v || !*v)
@@ -32,6 +36,20 @@ static bool ny_mono_trace_enabled(void) {
          ny_env_enabled("NYTRIX_TRACE_MONO_TYPES");
 }
 
+static void ny_mono_trace_reject(const expr_t *call, const fun_sig *sig,
+                                 const char *reason, size_t value,
+                                 size_t limit) {
+  if (!ny_mono_trace_enabled())
+    return;
+  fprintf(stderr, "[mono] reject %s at %s:%d: %s",
+          sig && sig->name ? sig->name : "<anon>",
+          call && call->tok.filename ? call->tok.filename : "<unknown>",
+          call ? call->tok.line : 0, reason ? reason : "unspecified");
+  if (limit)
+    fprintf(stderr, " (%zu > %zu)", value, limit);
+  fputc('\n', stderr);
+}
+
 static LLVMValueRef ny_try_inline_simple_raw_int_call(codegen_t *cg,
                                                       scope *scopes,
                                                       size_t depth, expr_t *e) {
@@ -48,10 +66,53 @@ static LLVMValueRef ny_try_inline_simple_raw_int_call(codegen_t *cg,
   if (!ny_build_mono_raw_int_expr(cg, scopes, depth, e, &raw, &ok) || !raw ||
       !ok)
     return NULL;
-  if (!LLVMIsAConstantInt(ok) || LLVMConstIntGetZExtValue(ok) == 0)
+  if (LLVMIsAConstantInt(ok)) {
+    if (LLVMConstIntGetZExtValue(ok) == 0)
+      return NULL;
+    cg->mono_inline_body_uses++;
+    return ny_tag_int(cg, raw);
+  }
+
+  fun_sig *sig = resolve_overload(cg, e->as.call.callee->as.ident.name,
+                                  e->as.call.args.len,
+                                  e->as.call.callee->as.ident.hash);
+  if (!sig || !sig->type || !sig->value)
     return NULL;
+
+  LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
+  LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
+  LLVMBasicBlockRef ok_bb = ny_bb_fn(fn, "raw_int_call.ok");
+  LLVMBasicBlockRef slow_bb = ny_bb_fn(fn, "raw_int_call.slow");
+  LLVMBasicBlockRef join_bb = ny_bb_fn(fn, "raw_int_call.join");
+
+  ny_cond_br(cg, ok, ok_bb, slow_bb);
+
+  ny_pos(cg, ok_bb);
+  LLVMValueRef fast_tagged = ny_tag_int(cg, raw);
+  LLVMBasicBlockRef ok_end = ny_cur_block(cg);
+  ny_br(cg, join_bb);
+
+  ny_pos(cg, slow_bb);
+  LLVMValueRef args[16];
+  for (size_t i = 0; i < e->as.call.args.len && i < 16; ++i) {
+    args[i] = gen_expr(cg, scopes, depth, e->as.call.args.data[i].val);
+    if (!args[i])
+      return NULL;
+  }
+  LLVMValueRef slow_val = LLVMBuildCall2(
+      cg->builder, sig->type, sig->value, args, (unsigned)e->as.call.args.len,
+      "raw_int_call_slow");
+  LLVMBasicBlockRef slow_end = ny_cur_block(cg);
+  ny_br(cg, join_bb);
+
+  ny_pos(cg, join_bb);
+  LLVMValueRef phi =
+      ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "raw_int_call_phi"));
+  LLVMValueRef incoming_vals[2] = {fast_tagged, slow_val};
+  LLVMBasicBlockRef incoming_bbs[2] = {ok_end, slow_end};
+  LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
   cg->mono_inline_body_uses++;
-  return ny_tag_int(cg, raw);
+  return phi;
 }
 
 static const char *ny_mono_type_name(uint8_t kind) {
@@ -64,6 +125,8 @@ static const char *ny_mono_type_name(uint8_t kind) {
     return "list";
   case NY_MONO_TYPE_F64_LIST:
     return "list";
+  case NY_MONO_TYPE_FIN:
+    return "Fin";
   default:
     return NULL;
   }
@@ -83,6 +146,8 @@ static char ny_mono_type_suffix(uint8_t kind) {
     return 'l';
   case NY_MONO_TYPE_F64_LIST:
     return 'q';
+  case NY_MONO_TYPE_FIN:
+    return 'f';
   default:
     return 'x';
   }
@@ -99,6 +164,8 @@ static ny_mono_type_kind_t ny_mono_expr_kind(codegen_t *cg, scope *scopes,
   const char *ty = infer_expr_type(cg, scopes, depth, expr);
   if (ny_type_is(ty, "f64"))
     return NY_MONO_TYPE_F64;
+  if (ty && ny_type_is_fin(ty))
+    return NY_MONO_TYPE_FIN;
   if (expr->kind == NY_E_IDENT && expr->as.ident.name) {
     size_t name_len = (size_t)expr->tok.len;
     if (name_len == 0)
@@ -780,30 +847,47 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
   if (cg->mono_emitting || !ny_mono_enabled(cg))
     return NULL;
   if (sig->is_extern || sig->is_variadic || sig->arity <= 0 ||
-      sig->arity > NY_MONO_MAX_ARITY)
+      sig->arity > NY_MONO_MAX_ARITY) {
+    ny_mono_trace_reject(call, sig, "unsupported signature/arity", 0, 0);
     return NULL;
-  if (call_argc != (size_t)sig->arity)
+  }
+  if (call_argc != (size_t)sig->arity) {
+    ny_mono_trace_reject(call, sig, "call arity mismatch", 0, 0);
     return NULL;
+  }
   stmt_t *fn = sig->stmt_t;
   if (fn->as.fn.attr_thread || fn->as.fn.attr_naked || fn->as.fn.attr_cache ||
-      fn->as.fn.attr_consteval)
+      fn->as.fn.attr_consteval) {
+    ny_mono_trace_reject(call, sig, "unsupported function attribute", 0, 0);
     return NULL;
-  if (sig->is_recursive)
+  }
+  if (sig->is_recursive) {
+    ny_mono_trace_reject(call, sig, "recursive specialization disabled", 0, 0);
     return NULL;
-  if (ny_is_stdlib_tok(fn->tok) && !ny_env_enabled("NYTRIX_MONO_STDLIB"))
+  }
+  if (ny_is_stdlib_tok(fn->tok) && !ny_env_enabled("NYTRIX_MONO_STDLIB")) {
+    ny_mono_trace_reject(call, sig, "stdlib specialization disabled", 0, 0);
     return NULL;
-  if (ny_mono_stmt_has_unsupported(fn->as.fn.body))
+  }
+  if (ny_mono_stmt_has_unsupported(fn->as.fn.body)) {
+    ny_mono_trace_reject(call, sig, "unsupported body shape", 0, 0);
     return NULL;
+  }
   const char *tail = sig->name ? strrchr(sig->name, '.') : NULL;
   tail = tail ? tail + 1 : sig->name;
-  if (ny_mono_stmt_refs_self(fn->as.fn.body, sig->name, tail))
+  if (ny_mono_stmt_refs_self(fn->as.fn.body, sig->name, tail)) {
+    ny_mono_trace_reject(call, sig, "self-recursive body", 0, 0);
     return NULL;
+  }
 
   size_t body_cost = ny_mono_stmt_cost(fn->as.fn.body);
   int max_cost =
       ny_mono_env_int("NYTRIX_MONO_MAX_COST", fn->as.fn.attr_hot ? 768 : 256);
-  if (max_cost > 0 && body_cost > (size_t)max_cost)
+  if (max_cost > 0 && body_cost > (size_t)max_cost) {
+    ny_mono_trace_reject(call, sig, "body cost exceeds specialization limit",
+                         body_cost, (size_t)max_cost);
     return NULL;
+  }
 
   uint8_t types[NY_MONO_MAX_ARITY] = {0};
   bool arg_list_len_min_known[NY_MONO_MAX_ARITY] = {0};
@@ -818,8 +902,10 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
       break;
     }
   }
-  if (has_keyword)
+  if (has_keyword) {
+    ny_mono_trace_reject(call, sig, "keyword arguments are not specialized", 0, 0);
     return NULL;
+  }
   for (int i = 0; i < sig->arity && i < NY_MONO_MAX_ARITY; i++) {
     expr_t *arg_expr = ny_mono_call_arg_for_param(c, mc, skip_target, (size_t)i);
     if (!fn->as.fn.params.data[i].type) {
@@ -837,8 +923,27 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
       arg_list_len_min_raw[i] = len_min;
     }
   }
-  if (!useful)
+  for (int i = 0; i < sig->arity && i < NY_MONO_MAX_ARITY; i++) {
+    const char *ptype = fn->as.fn.params.data[i].type;
+    if (!ptype) continue;
+    if (!ny_type_is_fin(ptype)) continue;
+    expr_t *arg_expr = ny_mono_call_arg_for_param(c, mc, skip_target, (size_t)i);
+    const char *atype = arg_expr ? infer_expr_type(cg, scopes, depth, arg_expr) : NULL;
+    if (!atype || !ny_type_is_fin(atype)) continue;
+    int64_t bound_arg = 0, bound_param = 0;
+    if (!ny_fin_resolve_bound(cg, scopes, depth, ptype, &bound_param)) continue;
+    if (!ny_fin_resolve_bound(cg, scopes, depth, atype, &bound_arg)) continue;
+    if (bound_arg != bound_param) {
+      ny_mono_trace_reject(call, sig, "Fin bound mismatch", 0, 0);
+      return NULL;
+    }
+    types[i] = (uint8_t)NY_MONO_TYPE_FIN;
+    useful = true;
+  }
+  if (!useful) {
+    ny_mono_trace_reject(call, sig, "no useful concrete argument facts", 0, 0);
     return NULL;
+  }
   bool list_args_only =
       ny_env_enabled("NYTRIX_MONO_LIST_ARGS") &&
       !ny_codegen_speed_profile_enabled(cg) &&
@@ -852,8 +957,10 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
         break;
       }
     }
-    if (!has_list_arg)
+    if (!has_list_arg) {
+      ny_mono_trace_reject(call, sig, "list-only specialization mode", 0, 0);
       return NULL;
+    }
   }
 
   int max_global = ny_mono_env_int("NYTRIX_MONO_MAX_GLOBAL", 128);
@@ -867,10 +974,17 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
                               sig->arity);
   if (existing)
     return existing;
-  if (max_global > 0 && cg->mono_specs.len >= (size_t)max_global)
+  if (max_global > 0 && cg->mono_specs.len >= (size_t)max_global) {
+    ny_mono_trace_reject(call, sig, "global specialization cap reached",
+                         cg->mono_specs.len, (size_t)max_global);
     return NULL;
-  if (max_per_fn > 0 && ny_mono_count_for_base(cg, fn) >= (size_t)max_per_fn)
+  }
+  if (max_per_fn > 0 && ny_mono_count_for_base(cg, fn) >= (size_t)max_per_fn) {
+    size_t count = ny_mono_count_for_base(cg, fn);
+    ny_mono_trace_reject(call, sig, "per-function specialization cap reached",
+                         count, (size_t)max_per_fn);
     return NULL;
+  }
 
   const char *mono_name =
       ny_mono_make_name(cg, sig->name, types, sig->arity, key_hash);
@@ -925,7 +1039,7 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
 
   bool old_emitting = cg->mono_emitting;
   cg->mono_emitting = true;
-  scope mono_scopes[64] = {0};
+  scope mono_scopes[NY_SCOPE_STACK_CAP] = {0};
   (void)scopes;
   gen_func(cg, clone, mono_name, mono_scopes, 0, NULL);
   cg->mono_emitting = old_emitting;

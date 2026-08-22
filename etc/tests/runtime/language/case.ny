@@ -167,7 +167,6 @@ assert(max_small > 0, "max_small")
 assert(min_small < 0, "min_small")
 def empty = ""
 assert(empty.len == 0, "empty string")
-
 mut l = list(0)
 assert(l.len == 0, "empty list")
 mut i = 0

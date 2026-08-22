@@ -1,0 +1,19 @@
+shape oracle_peephole_mul4_shl2_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop peephole mul-to-shl regression]
+  template ny-test-case
+  flags "--native-result-oracle=180 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+mut s = 0
+mut i = 0
+while i < 10 {
+  s = s + i * 4
+  i = i + 1
+}
+s
+NY
+}

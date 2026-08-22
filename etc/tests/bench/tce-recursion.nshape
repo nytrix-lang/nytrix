@@ -1,0 +1,48 @@
+shape tce-recursion {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "recursion", "tail-call", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+ci windows-skip
+  source ny <<'NY'
+use std.core
+use std.os.time
+;; Tail-recursive sum 1..N: tests tail-call elimination / deep call handling.
+fn tsum(int n, int acc) int {
+   if n == 0 { return acc }
+   tsum(n - 1, acc + n)
+}
+def t0 = ticks()
+def r = tsum(20000, 0)
+def t1 = ticks()
+print("checksum=", r)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static long tsum(long n, long acc) {
+    if (n == 0) return acc;
+    return tsum(n - 1, acc + n);
+}
+
+int main(void) {
+    int64_t start = now_ns();
+    long r = tsum(20000, 0);
+    int64_t end = now_ns();
+    printf("checksum=%ld\n", r);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

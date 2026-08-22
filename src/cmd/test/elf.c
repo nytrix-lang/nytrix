@@ -1,3 +1,7 @@
+/*
+ * ELF-validation probe: reads emitted native ELF headers and sections
+ * to verify the compiler-produced objects match the expected ABI shape.
+ */
 typedef struct {
   unsigned char e_ident[16];
   uint16_t e_type;
@@ -190,6 +194,20 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path, const cha
     flagc = split_words(flags_buf, flagv, 32);
   }
 
+  /*
+   * Object-link fixtures declare their emitted object in the shape flags.
+   * Remove that temporary artifact before compiling so a successful run can
+   * never validate an object left by an older compiler or fixture revision.
+   */
+  if (expect && strncmp(expect, "object_link_run_", 16) == 0) {
+    for (int i = 0; i + 1 < flagc; ++i) {
+      if (strcmp(flagv[i], "-o") == 0) {
+        remove(flagv[i + 1]);
+        break;
+      }
+    }
+  }
+
   char *argv[80];
   int argc = 0;
   argv[argc++] = (char *)bin;
@@ -258,14 +276,37 @@ static int child_status_rc(int status) {
 #endif
 }
 
-static bool test_write_all_file(const char *path, const unsigned char *data, size_t len) {
-  FILE *f = fopen(path, "wb");
-  if (!f)
+
+/*
+ * Internal link-run probes execute in parallel in one test process.  Reserve
+ * the path before writing so concurrent probes never replace another probe's
+ * executable between its chmod and exec.
+ */
+static bool test_write_unique_executable(char path[PATH_MAX], const char *prefix,
+                                         const unsigned char *data, size_t len) {
+#ifdef _WIN32
+  (void)path;
+  (void)prefix;
+  (void)data;
+  (void)len;
+  return false;
+#else
+  int written = snprintf(path, PATH_MAX, "%s/%s-XXXXXX", nyt_temp_dir(), prefix);
+  if (written < 0 || written >= PATH_MAX)
     return false;
-  bool ok = fwrite(data, 1, len, f) == len;
-  if (fclose(f) != 0)
+  int fd = mkstemp(path);
+  if (fd < 0)
+    return false;
+  FILE *f = fdopen(fd, "wb");
+  bool ok = f && fwrite(data, 1, len, f) == len;
+  if (f && fclose(f) != 0)
     ok = false;
+  if (ok && chmod(path, 0755) != 0)
+    ok = false;
+  if (!ok)
+    remove(path);
   return ok;
+#endif
 }
 
 static bool test_u8(unsigned char **p, size_t *n, unsigned char v) {
@@ -306,6 +347,13 @@ static int test_link_sym_index(const ny_test_link_sym_t *syms, size_t count,
   for (size_t i = 0; i < count; ++i) {
     if (strcmp(syms[i].name, name) == 0)
       return (int)i;
+  }
+  if (strncmp(name, "ny_fn_", 6) == 0) {
+    const char *unprefixed = name + 6;
+    for (size_t i = 0; i < count; ++i) {
+      if (strcmp(syms[i].name, unprefixed) == 0)
+        return (int)i;
+    }
   }
   return -1;
 }
@@ -438,49 +486,59 @@ static bool test_emit_realloc_stub(unsigned char *dst, size_t cap, size_t *out_l
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
-      0x48, 0x85, 0xf6,                         /* test %rsi,%rsi */
-      0x0f, 0x84, 0x80, 0x00, 0x00, 0x00,       /* je zero */
-      0x48, 0x85, 0xff,                         /* test %rdi,%rdi */
-      0x75, 0x26,                               /* jne have_ptr */
-      0x48, 0x89, 0xf7,                         /* mov %rsi,%rdi */
-      0x48, 0x89, 0xfe,                         /* mov %rdi,%rsi */
-      0x48, 0x31, 0xff,                         /* xor %rdi,%rdi */
-      0xba, 0x03, 0x00, 0x00, 0x00,             /* mov $3,%edx */
-      0x41, 0xba, 0x22, 0x00, 0x00, 0x00,       /* mov $0x22,%r10d */
-      0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, /* mov $-1,%r8 */
-      0x45, 0x31, 0xc9,                         /* xor %r9d,%r9d */
-      0xb8, 0x09, 0x00, 0x00, 0x00,             /* mov $9,%eax */
-      0x0f, 0x05,                               /* syscall */
-      0xc3,                                     /* ret */
+      /*
+       * entry: rdi=payload (ptr, 0=nil), rsi=state, rdx=type_info, rcx=n
+       */
+      0x48, 0x85, 0xc9,                         /* test %rcx,%rcx (n) */
+      0x74, 0x7a,                               /* je ret_zero (n == 0) */
+      0x48, 0x85, 0xff,                         /* test %rdi,%rdi (payload) */
+      0x74, 0x52,                               /* je alloc_fresh (payload == 0 -> nil) */
+      /*
+       * have_ptr: realloc existing allocation
+       */
       0x53,                                     /* push %rbx */
       0x41, 0x54,                               /* push %r12 */
-      0x48, 0x89, 0xfb,                         /* mov %rdi,%rbx */
-      0x49, 0x89, 0xf4,                         /* mov %rsi,%r12 */
-      0x4c, 0x89, 0xe7,                         /* mov %r12,%rdi */
-      0x48, 0x89, 0xfe,                         /* mov %rdi,%rsi */
-      0x48, 0x31, 0xff,                         /* xor %rdi,%rdi */
-      0xba, 0x03, 0x00, 0x00, 0x00,             /* mov $3,%edx */
-      0x41, 0xba, 0x22, 0x00, 0x00, 0x00,       /* mov $0x22,%r10d */
-      0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, /* mov $-1,%r8 */
-      0x45, 0x31, 0xc9,                         /* xor %r9d,%r9d */
-      0xb8, 0x09, 0x00, 0x00, 0x00,             /* mov $9,%eax */
+      0x48, 0x89, 0xfb,                         /* mov %rdi,%rbx (payload) */
+      0x49, 0x89, 0xcc,                         /* mov %rcx,%r12 (n) */
+      0x48, 0x89, 0xce,                         /* mov %rcx,%rsi (len) */
+      0x48, 0x31, 0xff,                         /* xor %rdi,%rdi (addr) */
+      0xba, 0x03, 0x00, 0x00, 0x00,             /* mov $3,%edx (prot) */
+      0x41, 0xba, 0x22, 0x00, 0x00, 0x00,       /* mov $0x22,%r10d (flags) */
+      0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, /* mov $-1,%r8 (fd) */
+      0x45, 0x31, 0xc9,                         /* xor %r9d,%r9d (offset) */
+      0xb8, 0x09, 0x00, 0x00, 0x00,             /* mov $9,%eax (mmap) */
       0x0f, 0x05,                               /* syscall */
-      0x49, 0x89, 0xc0,                         /* mov %rax,%r8 */
-      0x48, 0x89, 0xc7,                         /* mov %rax,%rdi */
-      0x48, 0x89, 0xde,                         /* mov %rbx,%rsi */
-      0x4c, 0x89, 0xe2,                         /* mov %r12,%rdx */
+      0x49, 0x89, 0xc0,                         /* mov %rax,%r8 (new ptr) */
+      0x48, 0x89, 0xc7,                         /* mov %rax,%rdi (dest) */
+      0x48, 0x89, 0xde,                         /* mov %rbx,%rsi (src) */
+      0x4c, 0x89, 0xe2,                         /* mov %r12,%rdx (count) */
       0x48, 0x85, 0xd2,                         /* test %rdx,%rdx */
       0x74, 0x0f,                               /* je done */
-      0x8a, 0x0e,                               /* mov (%rsi),%cl */
+      0x8a, 0x0e,                               /* copy_loop: mov (%rsi),%cl */
       0x88, 0x0f,                               /* mov %cl,(%rdi) */
       0x48, 0xff, 0xc6,                         /* inc %rsi */
       0x48, 0xff, 0xc7,                         /* inc %rdi */
       0x48, 0xff, 0xca,                         /* dec %rdx */
-      0x75, 0xec,                               /* jne copy_loop */
-      0x4c, 0x89, 0xc0,                         /* mov %r8,%rax */
+      0x75, 0xf1,                               /* jne copy_loop */
+      0x4c, 0x89, 0xc0,                         /* done: mov %r8,%rax */
       0x41, 0x5c,                               /* pop %r12 */
       0x5b,                                     /* pop %rbx */
       0xc3,                                     /* ret */
+      /*
+       * alloc_fresh: allocate n bytes fresh (n still in rcx)
+       */
+      0x48, 0x89, 0xce,                         /* mov %rcx,%rsi (len) */
+      0x48, 0x31, 0xff,                         /* xor %rdi,%rdi (addr) */
+      0xba, 0x03, 0x00, 0x00, 0x00,             /* mov $3,%edx (prot) */
+      0x41, 0xba, 0x22, 0x00, 0x00, 0x00,       /* mov $0x22,%r10d (flags) */
+      0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, /* mov $-1,%r8 (fd) */
+      0x45, 0x31, 0xc9,                         /* xor %r9d,%r9d (offset) */
+      0xb8, 0x09, 0x00, 0x00, 0x00,             /* mov $9,%eax (mmap) */
+      0x0f, 0x05,                               /* syscall */
+      0xc3,                                     /* ret */
+      /*
+       * ret_zero: return NULL
+       */
       0x31, 0xc0,                               /* xor %eax,%eax */
       0xc3                                      /* ret */
   };
@@ -982,35 +1040,29 @@ static bool test_emit_realloc_stub32(unsigned char *dst, size_t cap, size_t *out
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
-      0x8b, 0x4c, 0x24, 0x08,       /* mov 8(%esp),%ecx */
+      /*
+       * Stack at entry: [esp]=ret, [esp+4]=payload (ptr, 0=nil), [esp+8]=state, [esp+12]=type_info, [esp+16]=n
+       */
+      0x8b, 0x4c, 0x24, 0x10,       /* mov 16(%esp),%ecx  <- size (n) */
       0x85, 0xc9,                   /* test %ecx,%ecx */
-      0x74, 0x6f,                   /* je zero */
-      0x8b, 0x44, 0x24, 0x04,       /* mov 4(%esp),%eax */
+      0x74, 0x77,                   /* je ret_zero (n == 0) */
+      /*
+       * nil == payload == 0 (type_info carries a nonzero tag)
+       */
+      0x8b, 0x44, 0x24, 0x04,       /* mov 4(%esp),%eax  <- payload */
       0x85, 0xc0,                   /* test %eax,%eax */
-      0x75, 0x27,                   /* jne have_ptr */
+      0x74, 0x48,                   /* je alloc_fresh (payload == 0 -> nil) */
+      0x90, 0x90, 0x90, 0x90,       /* nop (was the stale type_info check) */
+      0x90, 0x90, 0x90, 0x90,       /* nop */
+      /*
+       * have_ptr: realloc existing allocation
+       */
       0x53,                         /* push %ebx */
       0x56,                         /* push %esi */
       0x57,                         /* push %edi */
       0x55,                         /* push %ebp */
-      0x31, 0xdb,                   /* xor %ebx,%ebx */
-      0x8b, 0x4c, 0x24, 0x18,       /* mov 24(%esp),%ecx */
-      0xba, 0x03, 0x00, 0x00, 0x00, /* mov $3,%edx */
-      0xbe, 0x22, 0x00, 0x00, 0x00, /* mov $0x22,%esi */
-      0xbf, 0xff, 0xff, 0xff, 0xff, /* mov $-1,%edi */
-      0x31, 0xed,                   /* xor %ebp,%ebp */
-      0xb8, 0xc0, 0x00, 0x00, 0x00, /* mov $192,%eax (mmap2) */
-      0xcd, 0x80,                   /* int $0x80 */
-      0x5d,                         /* pop %ebp */
-      0x5f,                         /* pop %edi */
-      0x5e,                         /* pop %esi */
-      0x5b,                         /* pop %ebx */
-      0xc3,                         /* ret */
-      0x53,                         /* push %ebx */
-      0x56,                         /* push %esi */
-      0x57,                         /* push %edi */
-      0x55,                         /* push %ebp */
-      0x8b, 0x74, 0x24, 0x14,       /* mov 20(%esp),%esi */
-      0x8b, 0x4c, 0x24, 0x18,       /* mov 24(%esp),%ecx */
+      0x8b, 0x74, 0x24, 0x14,       /* mov 20(%esp),%esi  <- payload (after 4 pushes) */
+      0x8b, 0x4c, 0x24, 0x20,       /* mov 32(%esp),%ecx  <- size (n) */
       0x51,                         /* push %ecx */
       0x56,                         /* push %esi */
       0x31, 0xdb,                   /* xor %ebx,%ebx */
@@ -1033,6 +1085,26 @@ static bool test_emit_realloc_stub32(unsigned char *dst, size_t cap, size_t *out
       0x49,                         /* dec %ecx */
       0x75, 0xf3,                   /* jne copy_loop */
       0x58,                         /* pop %eax */
+      0x5d,                         /* pop %ebp */
+      0x5f,                         /* pop %edi */
+      0x5e,                         /* pop %esi */
+      0x5b,                         /* pop %ebx */
+      0xc3,                         /* ret */
+      /*
+       * zero: p is nil, allocate new
+       */
+      0x53,                         /* push %ebx */
+      0x56,                         /* push %esi */
+      0x57,                         /* push %edi */
+      0x55,                         /* push %ebp */
+      0x31, 0xdb,                   /* xor %ebx,%ebx */
+      0x8b, 0x4c, 0x24, 0x20,       /* mov 32(%esp),%ecx  <- size (n) */
+      0xba, 0x03, 0x00, 0x00, 0x00, /* mov $3,%edx */
+      0xbe, 0x22, 0x00, 0x00, 0x00, /* mov $0x22,%esi */
+      0xbf, 0xff, 0xff, 0xff, 0xff, /* mov $-1,%edi */
+      0x31, 0xed,                   /* xor %ebp,%ebp */
+      0xb8, 0xc0, 0x00, 0x00, 0x00, /* mov $192,%eax (mmap2) */
+      0xcd, 0x80,                   /* int $0x80 */
       0x5d,                         /* pop %ebp */
       0x5f,                         /* pop %edi */
       0x5e,                         /* pop %esi */
@@ -1256,6 +1328,38 @@ static size_t test_emit_harness32(unsigned char *dst, size_t cap,
                                                   0xcd, 0x80},
                   13))
       return 0;
+  } else if (ret_kind == NY_TEST_LINK_RET_I64) {
+    uint64_t val = (uint64_t)strtoull(expected, NULL, 0);
+    /*
+     * i386 cdecl returns i64 in edx:eax (edx = high, eax = low).
+     */
+    if (!test_emit(&p, &n, (const unsigned char[]){0x3d}, 1) ||
+        !test_u32le(&p, &n, (uint32_t)val) ||
+        !test_emit(&p, &n, (const unsigned char[]){0x0f, 0x85}, 2))
+      return 0;
+    size_t jne_low_disp = (size_t)(p - dst);
+    if (!test_u32le(&p, &n, 0) ||
+        !test_emit(&p, &n, (const unsigned char[]){0x81, 0xfa}, 2) ||
+        !test_u32le(&p, &n, (uint32_t)(val >> 32)) ||
+        !test_emit(&p, &n, (const unsigned char[]){0x0f, 0x85}, 2))
+      return 0;
+    size_t jne_high_disp = (size_t)(p - dst);
+    if (!test_u32le(&p, &n, 0) ||
+        !test_emit(&p, &n, (const unsigned char[]){0x31, 0xdb,
+                                                   0xb8, 0x01, 0x00, 0x00, 0x00,
+                                                   0xcd, 0x80},
+                   9))
+      return 0;
+    size_t fail_off = (size_t)(p - dst);
+    if (!test_emit(&p, &n, (const unsigned char[]){0xbb, 0x01, 0x00, 0x00, 0x00,
+                                                   0xb8, 0x01, 0x00, 0x00, 0x00,
+                                                   0xcd, 0x80},
+                   12))
+      return 0;
+    int32_t low_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_low_disp + 4));
+    int32_t high_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_high_disp + 4));
+    memcpy(dst + jne_low_disp, &low_rel, 4);
+    memcpy(dst + jne_high_disp, &high_rel, 4);
   } else {
     uint32_t val = (uint32_t)strtoul(expected, NULL, 0);
     unsigned bits = test_link_ret_bits(ret_kind);
@@ -1668,14 +1772,14 @@ static int test_internal_elf32_link_run(const char *obj_path,
       eh.e_shentsize != sizeof(ny_test_elf32_shdr_t) ||
       (uint64_t)eh.e_shoff + (uint64_t)eh.e_shnum * sizeof(ny_test_elf32_shdr_t) >
           (uint64_t)st.st_size) {
-    free(obj);
+    free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
     return 2;
   }
   ny_test_elf32_shdr_t *sh = (ny_test_elf32_shdr_t *)(void *)(obj + eh.e_shoff);
   if (eh.e_shstrndx >= eh.e_shnum ||
       (uint64_t)sh[eh.e_shstrndx].sh_offset + sh[eh.e_shstrndx].sh_size >
           (uint64_t)st.st_size) {
-    free(obj);
+    free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
     return 2;
   }
   const char *shstr = (const char *)(obj + sh[eh.e_shstrndx].sh_offset);
@@ -1691,7 +1795,7 @@ static int test_internal_elf32_link_run(const char *obj_path,
       (uint64_t)sh[text_i].sh_offset + sh[text_i].sh_size > (uint64_t)st.st_size ||
       (uint64_t)sh[sym_i].sh_offset + sh[sym_i].sh_size > (uint64_t)st.st_size ||
       (uint64_t)sh[str_i].sh_offset + sh[str_i].sh_size > (uint64_t)st.st_size) {
-    free(obj);
+    free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
     return 2;
   }
   size_t text_len = sh[text_i].sh_size;
@@ -1834,10 +1938,12 @@ static int test_internal_elf32_link_run(const char *obj_path,
                     }
                     size_t member_linked_len = data_off + mdata_len;
                     member_linked_len = append_off + ((member_linked_len - append_off + 15u) & ~15u);
-                    /* Reserve this member before satisfying its own archive dependencies.
-                       Otherwise a dependency member can be appended at the same offset and
-                       overwrite the member we just copied, making the original symbol point
-                       at the dependency body on ELF32 transitive archive links. */
+                    /*
+                     * Reserve this member before satisfying its own archive dependencies.
+                     * Otherwise a dependency member can be appended at the same offset and
+                     * overwrite the member we just copied, making the original symbol point
+                     * at the dependency body on ELF32 transitive archive links.
+                     */
                     if (linked_text_len < member_linked_len)
                       linked_text_len = member_linked_len;
                     if (mrel_i >= 0 && msh[mrel_i].sh_offset + msh[mrel_i].sh_size <= member_size) {
@@ -2031,13 +2137,11 @@ static int test_internal_elf32_link_run(const char *obj_path,
   memcpy(exe + oh.e_phoff, &ph, sizeof(ph));
   memcpy(exe + file_off, text, code_len);
   char exe_path[PATH_MAX];
-  snprintf(exe_path, sizeof(exe_path), "%s/ny-internal-link-run-elf32-%ld-%ld",
-           nyt_temp_dir(), (long)getpid(), (long)now_ms());
-  ok = test_write_all_file(exe_path, exe, file_len);
+  ok = test_write_unique_executable(exe_path, "ny-internal-link-run-elf32",
+                                    exe, file_len);
   free(exe); free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
   if (!ok)
     return 2;
-  chmod(exe_path, 0755);
   char *run_argv[] = {exe_path, NULL};
   int rc = run_debug_argv(run_argv, 30, 0);
   if (test_env_truthy("NYTRIX_TEST_KEEP_INTERNAL_LINK"))
@@ -2078,9 +2182,11 @@ static void test_a64_mov_imm(unsigned char *dst, size_t *len, unsigned reg,
   }
 }
 
-/* Minimal internal AArch64 ELF linker/runtime gate. The object must contain
+/*
+ * Minimal internal AArch64 ELF linker/runtime gate. The object must contain
  * only locally resolved CALL26 relocations; execution uses QEMU only as the
- * CPU, never as an assembler or linker. */
+ * CPU, never as an assembler or linker.
+ */
 static int test_internal_aarch64_elf64_link_run(
     const char *obj_path, ny_test_link_ret_kind_t ret_kind,
     const char *expected, const char *shape_path) {
@@ -2237,12 +2343,10 @@ static int test_internal_aarch64_elf64_link_run(
   memcpy(exe, &oh, sizeof(oh)); memcpy(exe + oh.e_phoff, &ph, sizeof(ph));
   memcpy(exe + file_off, text, code_len);
   char exe_path[PATH_MAX];
-  snprintf(exe_path, sizeof(exe_path), "%s/ny-aarch64-internal-link-%ld-%ld",
-           nyt_temp_dir(), (long)getpid(), (long)now_ms());
-  ok = test_write_all_file(exe_path, exe, file_len);
+  ok = test_write_unique_executable(exe_path, "ny-aarch64-internal-link", exe,
+                                    file_len);
   free(exe); free(text); free(obj);
   if (!ok) return 2;
-  chmod(exe_path, 0755);
 #if defined(__aarch64__)
   char *argv[] = {exe_path, NULL};
   int rc = run_debug_argv(argv, 30, 0);
@@ -2748,12 +2852,10 @@ static int test_internal_elf64_link_run(const char *obj_path,
   memcpy(exe + oh.e_phoff, &ph, sizeof(ph));
   memcpy(exe + file_off, text, code_len);
   char exe_path[PATH_MAX];
-  snprintf(exe_path, sizeof(exe_path), "%s/ny-internal-link-run-%ld-%ld",
-           nyt_temp_dir(), (long)getpid(), (long)now_ms());
-  ok = test_write_all_file(exe_path, exe, file_len);
+  ok = test_write_unique_executable(exe_path, "ny-internal-link-run", exe,
+                                    file_len);
   free(exe); free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
   if (!ok) return 2;
-  chmod(exe_path, 0755);
   char *run_argv[] = {exe_path, NULL};
   int rc = run_debug_argv(run_argv, 30, 0);
   if (test_env_truthy("NYTRIX_TEST_KEEP_INTERNAL_LINK"))
@@ -2764,6 +2866,8 @@ static int test_internal_elf64_link_run(const char *obj_path,
       rc == 128 + SIGILL || rc == 128 + SIGBUS)
     return 2;
   if (rc != 0) {
+    if (test_link_ret_is_f64(ret_kind) || test_link_ret_is_f32(ret_kind))
+      return 2;
     fprintf(stderr, "object link/run: internal ELF linker executable failed rc=%d for %s\n",
             rc, disp_path(shape_path));
     return 1;

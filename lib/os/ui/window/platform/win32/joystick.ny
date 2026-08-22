@@ -711,7 +711,7 @@ fn _dinput_set_axis_range(any dev, int obj_type) bool {
    store32(dipr, -32768, 16)
    store32(dipr, 32767, 20)
    def hr = int(ffi.call3(_dinput_method(dev, 6), dev,
-   ffi.tag_native(_DINPUT_DIPROP_RANGE), dipr))
+         ffi.tag_native(_DINPUT_DIPROP_RANGE), dipr))
    free(dipr)
    !_hresult_failed(hr)
 }
@@ -725,7 +725,7 @@ fn _dinput_set_axis_mode_abs(any dev) bool {
    store32(dipd, _DINPUT_DIPH_DEVICE, 12)
    store32(dipd, _DINPUT_DIPROPAXISMODE_ABS, 16)
    def hr = int(ffi.call3(_dinput_method(dev, 6), dev,
-   ffi.tag_native(_DINPUT_DIPROP_AXISMODE), dipd))
+         ffi.tag_native(_DINPUT_DIPROP_AXISMODE), dipd))
    free(dipd)
    !_hresult_failed(hr)
 }
@@ -891,7 +891,7 @@ fn _dinput_scan() bool {
    if !_dinput_init() { return false }
    def hr = int(ffi.call5(_dinput_method(_dinput_api, 4), _dinput_api,
          _DINPUT_DI8DEVCLASS_GAMECTRL, ffi.tag_native(_dinput_device_cb), 0,
-   _DINPUT_DIEDFL_ALLDEVICES))
+         _DINPUT_DIEDFL_ALLDEVICES))
    !_hresult_failed(hr)
 }
 
@@ -1368,8 +1368,8 @@ fn _store_winmm_standard_axes(any js, any state_ptr) bool {
       store32_f32(state_ptr, _raw_button(buttons_ptr, button_count, 6) ? 1.0 : -1.0, 32)
       store32_f32(state_ptr,
          (_raw_button(buttons_ptr, button_count, 7) ||
-         _raw_button(buttons_ptr, button_count, 8)) ? 1.0 : -1.0,
-      36)
+            _raw_button(buttons_ptr, button_count, 8)) ? 1.0 : -1.0,
+         36)
    } else {
       store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 5), 32)
       store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 4), 36)
@@ -1471,7 +1471,7 @@ fn debug_joystick_objects(int jid) list {
             "slot": i,
             "type": int(obj.get("type", 0)),
             "offset": int(obj.get("offset", 0))
-      })
+         })
       i += 1
    }
    out
@@ -1504,7 +1504,7 @@ fn debug_joystick_state(int jid) list {
             "type": typ,
             "offset": offset,
             "value": value
-      })
+         })
       i += 1
    }
    out

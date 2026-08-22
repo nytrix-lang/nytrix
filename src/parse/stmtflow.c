@@ -1,3 +1,7 @@
+/*
+ * Statement-flow parser: if/else, for/while/loop, try/catch, defer,
+ * return, break, continue, and block-scope statement sequencing.
+ */
 #include "priv.h"
 
 stmt_t *ny_parse_stmt_or_block(parser_t *p) {
@@ -118,6 +122,7 @@ stmt_t *ny_parse_while_stmt(parser_t *p) {
   parser_expect(p, NY_T_WHILE, "'while'", NULL);
   stmt_t *s = stmt_new(p->arena, NY_S_WHILE, tok);
   s->as.whl.init = NULL;
+  s->as.whl.invariant = NULL;
 
   bool header_paren = false;
   if (p->cur.kind == NY_T_LPAREN) {
@@ -134,7 +139,13 @@ stmt_t *ny_parse_while_stmt(parser_t *p) {
   }
 
   s->as.whl.test = p_parse_expr(p, 0);
-
+  if (p->cur.kind == NY_T_IDENT &&
+      p->cur.len == 9 && memcmp(p->cur.lexeme, "invariant", 9) == 0) {
+    parser_advance(p);
+    parser_expect(p, NY_T_LPAREN, "'(' after invariant", NULL);
+    s->as.whl.invariant = p_parse_expr(p, 0);
+    parser_expect(p, NY_T_RPAREN, "')' after loop invariant", NULL);
+  }
   if (p->cur.kind == NY_T_PLUS_PLUS || p->cur.kind == NY_T_MINUS_MINUS) {
     s->as.whl.update = parse_incrdecr_stmt(p);
   } else if (header_paren && p->cur.kind != NY_T_RPAREN) {

@@ -1,0 +1,101 @@
+shape havlak {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "graph", "cycles", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+;; Havlak-style cyclic-graph analysis: count cycles in LCG functional graphs.
+def N = 1000
+def M = 200
+mut next_ = []
+mut vis = []
+mut i = 0
+while i < N {
+   next_ = append(next_, 0)
+   vis = append(vis, 0)
+   i += 1
+}
+def t0 = ticks()
+mut checksum = 0
+mut rep = 0
+mut seed = 42
+while rep < M {
+   i = 0
+   while i < N {
+      seed = (seed * 3877 + 29573) % 139968
+      next_[i] = seed % N
+      vis[i] = 0
+      i += 1
+   }
+   mut pass_id = 0
+   mut cycles = 0
+   i = 0
+   while i < N {
+      if vis[i] == 0 {
+         pass_id += 1
+         mut cur = i
+         while vis[cur] == 0 {
+            vis[cur] = pass_id
+            cur = next_[cur]
+         }
+         if vis[cur] == pass_id { cycles += 1 }
+      }
+      i += 1
+   }
+   checksum += cycles
+   rep += 1
+}
+def t1 = ticks()
+print("checksum=", checksum)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    int N = 1000, M = 200;
+    int *next_ = (int *)malloc((size_t)N * sizeof(int));
+    int *vis = (int *)malloc((size_t)N * sizeof(int));
+    int64_t t0 = now_ns();
+    long checksum = 0;
+    int seed = 42;
+    for (int rep = 0; rep < M; rep++) {
+        for (int i = 0; i < N; i++) {
+            seed = (seed * 3877 + 29573) % 139968;
+            next_[i] = seed % N;
+            vis[i] = 0;
+        }
+        int pass_id = 0, cycles = 0;
+        for (int i = 0; i < N; i++) {
+            if (vis[i] == 0) {
+                pass_id++;
+                int cur = i;
+                while (vis[cur] == 0) {
+                    vis[cur] = pass_id;
+                    cur = next_[cur];
+                }
+                if (vis[cur] == pass_id) cycles++;
+            }
+        }
+        checksum += cycles;
+    }
+    int64_t t1 = now_ns();
+    printf("checksum=%ld\n", checksum);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    return 0;
+}
+C
+}

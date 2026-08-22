@@ -1,0 +1,33 @@
+shape optcheck_if_merge_append {
+  family "runtime-native"
+  generator "native"
+  features ["native x86_64 oracle", "native-result-oracle", "native-oracle-per-pass"]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn fill(int n) list {
+  mut out = []
+  mut i = 0
+  while i < n {
+    out = append(out, i)
+    i += 1
+  }
+  return out
+}
+
+fn check(list values) bool {
+  mut sum = 0
+  for i in 0..values.len-1 {
+    sum += values[i]
+  }
+  sum == 45
+}
+
+def values = fill(10)
+assert(check(values))
+print("if-merge-append-ok")
+NY
+}

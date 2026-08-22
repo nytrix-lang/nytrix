@@ -1,3 +1,7 @@
+/*
+ * NYIR binary format: reads and writes the versioned, pointer-free
+ * NYIR program bundle for cross-session caching and diagnostics.
+ */
 #include "code/native/ir.h"
 #include "code/native/ir/internal.h"
 #include "code/native/internal.h"
@@ -7,25 +11,49 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Versioned NYIR binary serialization and loading. Keep byte-order codecs and
- * load-owned strings together so the core IR/optimizer does not own file I/O. */
+/*
+ * Versioned NYIR binary serialization and loading. Keep byte-order codecs and
+ * load-owned strings together so the core IR/optimizer does not own file I/O.
+ */
 
 enum {
-  NYIR_BINARY_VERSION = 10,
+  NYIR_BINARY_VERSION = 12,
   NYIR_BINARY_MIN_VERSION = 1,
   NYIR_PHI_VERSION = 8,
   NYIR_PARAM_TYPES_VERSION = 10,
-  /* Versions 1--7 predate NYIR_PHI, which was inserted after COPY. Their
+  /*
+   * Versions 1--7 predate NYIR_PHI, which was inserted after COPY. Their
    * wire opcode table therefore has 44 entries and must be normalized before
-   * the current verifier or a backend observes it. */
+   * the current verifier or a backend observes it.
+   */
   NYIR_LEGACY_OP_COUNT = 44,
+  /*
+   * Untrusted/stale cache artifacts are parsed before verification.  Bound the
+   * aggregate work done by the decoder so a structurally valid header cannot
+   * request unbounded allocations.  These ceilings are deliberately much
+   * larger than normal compilation units; they are corruption/DoS guards, not
+   * optimizer limits.
+   */
+  NYIR_BINARY_MAX_INSTRUCTIONS = 4 * 1024 * 1024,
+  NYIR_BINARY_MAX_VALUES = 16 * 1024 * 1024,
+  NYIR_BINARY_MAX_PARAMS = 64 * 1024,
+  NYIR_BINARY_MAX_AUX_ENTRIES = 16 * 1024 * 1024,
+  NYIR_BINARY_MAX_STRING_BYTES = 64 * 1024 * 1024,
 };
 
 static const char *nyir_func_own_symbol(nyir_func_t *f, char *s) {
   if (!f || !s)
     return NULL;
   if (f->owned_symbols_len >= f->owned_symbols_cap) {
+    if (f->owned_symbols_cap > SIZE_MAX / 2 / sizeof(*f->owned_symbols)) {
+      free(s);
+      return NULL;
+    }
     size_t cap = f->owned_symbols_cap ? f->owned_symbols_cap * 2 : 16;
+    if (cap > SIZE_MAX / sizeof(*f->owned_symbols)) {
+      free(s);
+      return NULL;
+    }
     char **data = realloc(f->owned_symbols, cap * sizeof(*data));
     if (!data) {
       free(s);
@@ -146,7 +174,9 @@ static bool nyir_decode_opcode(uint16_t encoded, uint16_t version,
   if (version < NYIR_PHI_VERSION) {
     if (encoded >= NYIR_LEGACY_OP_COUNT)
       return false;
-    /* PHI occupies current opcode 3; legacy opcode 3 was ADD_I64. */
+    /*
+     * PHI occupies current opcode 3; legacy opcode 3 was ADD_I64.
+     */
     if (encoded >= 3)
       ++encoded;
   }
@@ -159,7 +189,9 @@ static bool nyir_decode_opcode(uint16_t encoded, uint16_t version,
 bool nyir_dump_binary(FILE *out, const nyir_func_t *f, const char *name) {
   if (!out || !f)
     return false;
-  if (f->len > UINT32_MAX || f->param_count > UINT32_MAX ||
+  if (f->len > UINT32_MAX || f->len > NYIR_BINARY_MAX_INSTRUCTIONS ||
+      f->next_value < 0 || f->next_value > NYIR_BINARY_MAX_VALUES ||
+      f->param_count > UINT32_MAX || f->param_count > NYIR_BINARY_MAX_PARAMS ||
       (f->param_count && !f->param_types))
     return false;
   if (fwrite("NYIR", 1, 4, out) != 4)
@@ -257,11 +289,14 @@ bool nyir_load_binary(FILE *in, nyir_func_t *out, char *name,
       !nyir_read_i32le(in, &next_value) ||
       !nyir_read_u32le(in, &inst_count))
     goto malformed;
-  if (next_value < 0)
-    goto malformed;
+  if (next_value < 0 || next_value > NYIR_BINARY_MAX_VALUES ||
+      inst_count > NYIR_BINARY_MAX_INSTRUCTIONS)
+    return nyir_err(err, err_len,
+                    "native NYIR load: artifact exceeds decode budget");
   if (version >= NYIR_PARAM_TYPES_VERSION) {
     uint32_t param_count = 0;
-    if (!nyir_read_u32le(in, &param_count) || param_count > INT32_MAX)
+    if (!nyir_read_u32le(in, &param_count) || param_count > INT32_MAX ||
+        param_count > NYIR_BINARY_MAX_PARAMS)
       goto malformed;
     if (param_count) {
       loaded.param_types = malloc((size_t)param_count * sizeof(*loaded.param_types));
@@ -289,6 +324,10 @@ bool nyir_load_binary(FILE *in, nyir_func_t *out, char *name,
     loaded.cap = inst_count;
   }
   loaded.next_value = next_value;
+  size_t aux_entries = 0;
+  size_t owned_string_bytes = loaded_name ? strlen(loaded_name) + 1 : 0;
+  if (owned_string_bytes > NYIR_BINARY_MAX_STRING_BYTES)
+    goto malformed;
 
   for (uint32_t i = 0; i < inst_count; ++i) {
     nyir_inst_t inst = {.dst = -1,
@@ -347,10 +386,13 @@ bool nyir_load_binary(FILE *in, nyir_func_t *out, char *name,
     uint32_t *arg_sizes = NULL;
     if (version >= 5) {
       if (!nyir_read_u32le(in, &extra_len) ||
-          extra_len > NYIR_CALL_MAX_ARGS) {
+          extra_len > NYIR_CALL_MAX_ARGS ||
+          aux_entries > NYIR_BINARY_MAX_AUX_ENTRIES - extra_len) {
+        free(debug_file);
         free(symbol);
         goto malformed;
       }
+      aux_entries += extra_len;
       if (extra_len > 0) {
         extra = (int *)malloc((size_t)extra_len * sizeof(*extra));
         if (!extra) {
@@ -376,11 +418,14 @@ bool nyir_load_binary(FILE *in, nyir_func_t *out, char *name,
           (arg_sizes_len != 0 &&
            (op != NYIR_CALL || inst.imm <= 0 ||
             arg_sizes_len != (uint32_t)inst.imm ||
-            arg_sizes_len > NYIR_CALL_MAX_ARGS))) {
+            arg_sizes_len > NYIR_CALL_MAX_ARGS)) ||
+          aux_entries > NYIR_BINARY_MAX_AUX_ENTRIES - arg_sizes_len) {
+        free(debug_file);
         free(extra);
         free(symbol);
         goto malformed;
       }
+      aux_entries += arg_sizes_len;
       if (arg_sizes_len > 0) {
         arg_sizes = (uint32_t *)malloc((size_t)arg_sizes_len * sizeof(*arg_sizes));
         if (!arg_sizes) {
@@ -407,9 +452,11 @@ bool nyir_load_binary(FILE *in, nyir_func_t *out, char *name,
     uint32_t phi_len = 0;
     nyir_phi_incoming_t *phi = NULL;
     if (version >= 8 &&
-        (!nyir_read_u32le(in, &phi_len) || phi_len > inst_count)) {
-      free(arg_sizes); free(extra); free(symbol); goto malformed;
+        (!nyir_read_u32le(in, &phi_len) || phi_len > inst_count ||
+         aux_entries > NYIR_BINARY_MAX_AUX_ENTRIES - phi_len)) {
+      free(debug_file); free(arg_sizes); free(extra); free(symbol); goto malformed;
     }
+    aux_entries += phi_len;
     if (phi_len) {
       if (op != NYIR_PHI) { free(arg_sizes); free(extra); free(symbol); goto malformed; }
       phi = malloc((size_t)phi_len * sizeof(*phi));
@@ -446,9 +493,23 @@ bool nyir_load_binary(FILE *in, nyir_func_t *out, char *name,
     inst.debug.column = debug_column;
     inst.range.has_min = has_min != 0;
     inst.range.has_max = has_max != 0;
-    /* Version 8 serialized the earlier, coarser pointer-memory effect
+    size_t debug_bytes = debug_file ? strlen(debug_file) + 1 : 0;
+    size_t symbol_bytes = symbol ? strlen(symbol) + 1 : 0;
+    if (debug_bytes > NYIR_BINARY_MAX_STRING_BYTES - owned_string_bytes ||
+        symbol_bytes > NYIR_BINARY_MAX_STRING_BYTES - owned_string_bytes - debug_bytes) {
+      free(debug_file);
+      free(symbol);
+      free(inst.phi_incoming);
+      free(inst.arg_sizes);
+      free(inst.extra_args);
+      goto malformed;
+    }
+    owned_string_bytes += debug_bytes + symbol_bytes;
+    /*
+     * Version 8 serialized the earlier, coarser pointer-memory effect
      * classification.  Recompute it before verification so valid v8 IR
-     * remains loadable while v9 writes the precise canonical mask. */
+     * remains loadable while v9 writes the precise canonical mask.
+     */
     if (version == 8)
       inst.effects = nyir_inst_effects(&inst);
     if (debug_file && debug_file[0]) {

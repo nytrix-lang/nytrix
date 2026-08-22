@@ -1,0 +1,21 @@
+shape runtime_bigint_large_reduction {
+  family "runtime"
+  generator "bigint"
+  features [bigint division powmod barrett burnikel-ziegler no-gmp threshold]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.math.nt (Z)
+
+def a = Z("987654321098765432109876543210987654321098765432109876543210987654321")
+def b = Z("340282366920938463463374607431768211507")
+def base = Z("12345678901234567890123456789012345678901234567890")
+def modulus = Z("340282366920938463463374607431768211507")
+
+assert(a / b == Z("2902455187542050919628316526708"), "large quotient")
+assert(a % b == Z("51843648129446070542544857207629225365"), "large remainder")
+assert(base.powmod(12345, modulus) == Z("245572545632298471332105618712617712884"), "large Barrett powmod")
+print("bigint-large-reduction=ok")
+NY
+}

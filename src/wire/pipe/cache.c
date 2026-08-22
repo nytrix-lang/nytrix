@@ -1,3 +1,7 @@
+/*
+ * Pipeline cache helpers: debug-dump utilities for the compiler
+ * pipeline that write source and IR on diagnostic/error conditions.
+ */
 static void dump_debug_bundle(const ny_options *opt, const char *source,
                               LLVMModuleRef module) {
   if (!opt || !opt->dump_on_error)
@@ -183,7 +187,8 @@ static int ny_jit_effective_ir_opt_level(const ny_options *opt,
 }
 
 static bool ny_should_use_aot_cache(const ny_options *opt) {
-  if (!opt || !opt->output_file || opt->run_jit || !opt->emit_only)
+  if (!opt || !opt->output_file || opt->run_jit ||
+      (!opt->emit_only && !opt->run_aot))
     return false;
   if (opt->stop_after != NY_STOP_AFTER_NONE || opt->emit_artifact_path ||
       opt->collect_errors || opt->emit_shapes)
@@ -218,9 +223,11 @@ static bool ny_should_use_jit_cache(const ny_options *opt) {
   if (opt->output_file && !opt->run_jit &&
       !ny_env_enabled("NYTRIX_AOT_IR_CACHE"))
     return false;
-  /* File execution is the common edit-loop path. The cache manifest binds the
+  /*
+   * File execution is the common edit-loop path. The cache manifest binds the
    * exact expanded source and semantic configuration, so reuse is safe by
-   * default; NYTRIX_JIT_CACHE_RUN=0 remains an explicit cold-run escape. */
+   * default; NYTRIX_JIT_CACHE_RUN=0 remains an explicit cold-run escape.
+   */
   if (opt->run_jit && !opt->output_file &&
       !ny_env_enabled_default_on("NYTRIX_JIT_CACHE_RUN"))
     return false;
@@ -347,11 +354,13 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
         (unsigned)opt->dwarf_split_inlining,
         (unsigned)opt->dwarf_profile_info, (unsigned)opt->gprof,
         (unsigned)opt->native_backend,     (unsigned)opt->native_abi,
-        (unsigned)opt->native_only,        (unsigned)opt->c_frontend};
+        (unsigned)opt->native_only,        (unsigned)opt->llvm_lto,
+        (unsigned)opt->c_frontend};
     h = ny_hash_u32v(h, opt_fields, sizeof(opt_fields) / sizeof(opt_fields[0]));
   }
   h = ny_fnv1a64_cstr(opt->opt_pipeline, h);
   h = ny_fnv1a64_cstr(opt->type_solver_raw, h);
+  h = ny_fnv1a64_cstr(opt->proof_solver_raw, h);
   h = ny_fnv1a64_cstr(opt->host_triple, h);
   h = ny_fnv1a64_cstr(opt->host_cflags, h);
   h = ny_fnv1a64_cstr(opt->host_ldflags, h);
@@ -626,6 +635,8 @@ static void append_use(char ***uses, size_t *len, size_t *cap,
   }
   if (*len == *cap) {
     size_t new_cap = *cap ? (*cap * 2) : 8;
+    if (new_cap <= *cap) /* overflow */
+      return;
     char **tmp = realloc(*uses, new_cap * sizeof(char *));
     if (!tmp)
       return;
@@ -749,10 +760,12 @@ static void ny_build_llvm_used(LLVMModuleRef module, const LLVMValueRef *values,
 static bool ny_std_bc_symbol_is_mixed_codegen_artifact(const char *name) {
   if (!name || !*name)
     return false;
-  /* The stdlib cache is linked into unrelated user programs.  A script entry
+  /*
+   * The stdlib cache is linked into unrelated user programs.  A script entry
    * can only come from the user half of the joined module; accepting it here
    * makes the first program that populates the cache run for every later
-   * source with the same import set. */
+   * source with the same import set.
+   */
   return strcmp(name, "_ny_top_entry") == 0 ||
          strncmp(name, "__ny_callable_adapter_", 22) == 0 ||
          strncmp(name, "__ny_callable_adapter_env_", 26) == 0;
@@ -764,10 +777,12 @@ static bool ny_std_bc_module_is_link_safe(LLVMModuleRef module,
     *bad_symbol = NULL;
   if (!module)
     return false;
-  /* Every referenced function/global is also present in its module symbol
+  /*
+   * Every referenced function/global is also present in its module symbol
    * list, including declarations.  Checking those lists once proves that no
    * mixed-codegen artifact can be reached without recursively revisiting
-   * every instruction and constant operand in the module. */
+   * every instruction and constant operand in the module.
+   */
   for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;
        fn = LLVMGetNextFunction(fn)) {
     const char *name = LLVMGetValueName(fn);
@@ -855,10 +870,16 @@ static bool ny_std_bc_cache_save_links(const char *cache_path,
   size_t total = 0;
   for (size_t i = 0; i < cg->links.len; ++i) {
     const char *lib = cg->links.data[i];
-    if (lib && *lib)
-      total += strlen(lib) + 1;
+    if (lib && *lib) {
+      size_t lib_len = strlen(lib);
+      if (total > SIZE_MAX - lib_len - 1)
+        return false;
+      total += lib_len + 1;
+    }
   }
-  char *buf = malloc(total ? total : 1);
+  if (total == 0)
+    return true;
+  char *buf = malloc(total);
   if (!buf)
     return false;
   size_t off = 0;
@@ -880,13 +901,15 @@ static bool ny_save_std_bc_cache_from_module(LLVMModuleRef module,
                                              const char *cache_path) {
   if (!module || !cache_path || !*cache_path)
     return false;
-  /* Write the module to bitcode directly without LLVMCloneModule.  The old
+  /*
+   * Write the module to bitcode directly without LLVMCloneModule.  The old
    * path cloned the entire monolithic stdlib module (often > 10 GiB) just to
    * strip debug info, externalize non-std symbols, and run globaldce before
    * serialization.  That doubled peak RSS for no correctness benefit: the
    * load path already runs its own link-safety check, and the module will be
    * optimized after being linked back in.  Writing the original saves a full
-   * module copy. */
+   * module copy.
+   */
   const char *bad_symbol = NULL;
   if (!ny_std_bc_module_is_link_safe(module, &bad_symbol)) {
     if (verbose_enabled >= 2 && bad_symbol && *bad_symbol)
@@ -900,14 +923,21 @@ static bool ny_save_std_bc_cache_from_module(LLVMModuleRef module,
 }
 
 typedef struct {
-  char **names;
+  struct ny_module_cache_entry *entries;
   size_t len;
   size_t cap;
 } ny_module_list;
 
+typedef struct ny_module_cache_entry {
+  char *name;
+  uint64_t source_fingerprint;
+} ny_module_cache_entry;
+
 typedef struct {
   char *name;
   char *bc_path;
+  char *cache_path;
+  bool persistent;
 #ifndef _WIN32
   pid_t pid;
 #endif
@@ -918,18 +948,19 @@ static void ny_module_list_add(ny_module_list *list, const char *name) {
   if (!list || !name || !*name)
     return;
   for (size_t i = 0; i < list->len; i++) {
-    if (strcmp(list->names[i], name) == 0)
+    if (strcmp(list->entries[i].name, name) == 0)
       return;
   }
   if (list->len == list->cap) {
     size_t nc = list->cap ? list->cap * 2 : 8;
-    char **nn = realloc(list->names, nc * sizeof(char *));
+    ny_module_cache_entry *nn =
+        realloc(list->entries, nc * sizeof(ny_module_cache_entry));
     if (!nn)
       return;
-    list->names = nn;
+    list->entries = nn;
     list->cap = nc;
   }
-  list->names[list->len++] = ny_strdup(name);
+  list->entries[list->len++] = (ny_module_cache_entry){.name = ny_strdup(name)};
 }
 
 static NY_UNUSED_FUNC void ny_collect_top_modules(const program_t *prog,
@@ -948,10 +979,134 @@ static NY_UNUSED_FUNC void ny_free_module_list(ny_module_list *list) {
   if (!list)
     return;
   for (size_t i = 0; i < list->len; i++)
-    free(list->names[i]);
-  free(list->names);
-  list->names = NULL;
+    free(list->entries[i].name);
+  free(list->entries);
+  list->entries = NULL;
   list->len = list->cap = 0;
+}
+
+static long ny_module_list_index(const ny_module_list *list, const char *name) {
+  if (!list || !name)
+    return -1;
+  for (size_t i = 0; i < list->len; ++i) {
+    if (list->entries[i].name && strcmp(list->entries[i].name, name) == 0)
+      return (long)i;
+  }
+  return -1;
+}
+
+static long ny_module_list_index_for_use(const ny_module_list *list,
+                                         const char *raw_name) {
+  long exact = ny_module_list_index(list, raw_name);
+  if (exact >= 0 || !list || !raw_name)
+    return exact;
+  /*
+   * The parser preserves a quoted relative import such as "./provider.ny",
+   * while the loader assigns the declared module name ("provider"). Map that
+   * source spelling back to the unit declaration before building the cache
+   * dependency graph.
+   */
+  const char *leaf = strrchr(raw_name, '/');
+  leaf = leaf ? leaf + 1 : raw_name;
+  size_t leaf_len = strlen(leaf);
+  if (leaf_len > 3 && strcmp(leaf + leaf_len - 3, ".ny") == 0)
+    leaf_len -= 3;
+  if (leaf_len == 0 || leaf_len >= 512)
+    return -1;
+  char normalized[512];
+  memcpy(normalized, leaf, leaf_len);
+  normalized[leaf_len] = '\0';
+  for (size_t i = 0; i < list->len; ++i) {
+    const char *candidate = list->entries[i].name;
+    if (!candidate)
+      continue;
+    const char *candidate_leaf = strrchr(candidate, '.');
+    candidate_leaf = candidate_leaf ? candidate_leaf + 1 : candidate;
+    if (strcmp(candidate, normalized) == 0 ||
+        strcmp(candidate_leaf, normalized) == 0)
+      return (long)i;
+  }
+  return -1;
+}
+
+static const stmt_t *ny_module_stmt(const program_t *prog, const char *name) {
+  if (!prog || !name)
+    return NULL;
+  for (size_t i = 0; i < prog->body.len; ++i) {
+    const stmt_t *s = prog->body.data[i];
+    if (s && s->kind == NY_S_MODULE && s->as.module.name &&
+        strcmp(s->as.module.name, name) == 0)
+      return s;
+  }
+  return NULL;
+}
+
+static uint64_t ny_module_file_fingerprint(const stmt_t *mod,
+                                            const program_t *prog) {
+  uint64_t h = NY_FNV1A64_OFFSET_BASIS;
+  const char *path = mod && mod->tok.filename ? mod->tok.filename : NULL;
+  h = ny_fnv1a64_cstr(path, h);
+  char *contents = path ? ny_read_file(path) : NULL;
+  if (contents) {
+    h = ny_fnv1a64_cstr(contents, h);
+    free(contents);
+  } else if (prog && prog->raw_src) {
+    /*
+     * Synthetic/generated modules have no independently readable file. Keep
+     * them conservative: their enclosing parsed source owns the identity.
+     */
+    h = ny_fnv1a64_cstr(prog->raw_src, h);
+  }
+  return h;
+}
+
+static void ny_module_mark_dependency_closure(const program_t *prog,
+                                              const ny_module_list *list,
+                                              size_t idx, bool *marked) {
+  if (!prog || !list || !marked || idx >= list->len || marked[idx])
+    return;
+  marked[idx] = true;
+  const stmt_t *mod = ny_module_stmt(prog, list->entries[idx].name);
+  if (!mod)
+    return;
+  for (size_t i = 0; i < mod->as.module.body.len; ++i) {
+    const stmt_t *child = mod->as.module.body.data[i];
+    if (!child || child->kind != NY_S_USE || !child->as.use.module)
+      continue;
+    long dep = ny_module_list_index_for_use(list, child->as.use.module);
+    if (dep >= 0)
+      ny_module_mark_dependency_closure(prog, list, (size_t)dep, marked);
+  }
+}
+
+static void ny_module_list_fingerprint(const program_t *prog,
+                                       ny_module_list *list) {
+  if (!prog || !list)
+    return;
+  uint64_t *own = calloc(list->len ? list->len : 1, sizeof(uint64_t));
+  bool *marked = calloc(list->len ? list->len : 1, sizeof(bool));
+  if (!own || !marked) {
+    free(own);
+    free(marked);
+    return;
+  }
+  for (size_t i = 0; i < list->len; ++i)
+    own[i] = ny_module_file_fingerprint(
+        ny_module_stmt(prog, list->entries[i].name), prog);
+  for (size_t i = 0; i < list->len; ++i) {
+    memset(marked, 0, list->len * sizeof(bool));
+    ny_module_mark_dependency_closure(prog, list, i, marked);
+    uint64_t h = ny_fnv1a64_cstr("module-dependency-v1", NY_FNV1A64_OFFSET_BASIS);
+    for (size_t j = 0; j < list->len; ++j) {
+      if (!marked[j])
+        continue;
+      h = ny_fnv1a64_cstr(list->entries[j].name, h);
+      h = ny_hash64_u64(h, own[j]);
+    }
+    list->entries[i].source_fingerprint = h;
+  }
+  free(own);
+  free(marked);
 }
 
 static int ny_parallel_default_jobs(void) {
@@ -986,11 +1141,13 @@ static NY_UNUSED_FUNC bool ny_parallel_modules_enabled(const ny_options *opt) {
   if (opt->emit_only && !opt->output_file && !opt->run_jit)
     return false;
   bool explicit_modules = strcmp(opt->parallel_mode, "modules") == 0;
-  /* A module worker currently reparses and rebuilds the complete joined
+  /*
+   * A module worker currently reparses and rebuilds the complete joined
    * source, multiplying LLVM memory by the worker count. It also cannot yet
    * preserve every cross-module lazy/capture dependency. Keep that experiment
    * behind the explicit modules mode; auto uses bounded outer/test parallelism
-   * and the single shared compiler pipeline. */
+   * and the single shared compiler pipeline.
+   */
   if (!explicit_modules)
     return false;
   if (getenv("NYTRIX_PARALLEL_DISABLE"))
@@ -1008,8 +1165,10 @@ static void ny_module_job_free(ny_module_job *job) {
     return;
   free(job->name);
   free(job->bc_path);
+  free(job->cache_path);
   job->name = NULL;
   job->bc_path = NULL;
+  job->cache_path = NULL;
 }
 
 static char *ny_sanitize_modname(const char *name) {
@@ -1027,17 +1186,62 @@ static char *ny_sanitize_modname(const char *name) {
   return out;
 }
 
+static bool ny_module_cache_path(const ny_options *opt, const char *module_name,
+                                 uint64_t source_fingerprint, char *out,
+                                 size_t out_len) {
+  if (!opt || !module_name || !out || out_len == 0)
+    return false;
+  uint64_t h = NY_FNV1A64_OFFSET_BASIS;
+  h = ny_fnv1a64_cstr("module-bitcode-cache-v1", h);
+  h = ny_hash64_u64(h, ny_cache_compiler_source_fingerprint());
+  h = ny_fnv1a64_cstr(module_name, h);
+  h = ny_hash64_u64(h, source_fingerprint);
+  h = ny_hash64_u64(h, ny_file_cache_stamp(opt->input_file));
+  h = ny_hash64_u64(h, (uint64_t)opt->opt_level);
+  h = ny_hash64_u64(h, (uint64_t)opt->no_std);
+  h = ny_hash64_u64(h, (uint64_t)opt->debug_symbols);
+  h = ny_fnv1a64_cstr(opt->std_path, h);
+  h = ny_fnv1a64_cstr(opt->opt_pipeline, h);
+  char dir[4096];
+  int dn = snprintf(dir, sizeof(dir), "%s/modules", ny_cache_root_dir());
+  if (dn <= 0 || (size_t)dn >= sizeof(dir))
+    return false;
+  ny_ensure_dir_recursive(dir);
+  int n = snprintf(out, out_len, "%s/%016llx.bc", dir,
+                   (unsigned long long)h);
+  return n > 0 && (size_t)n < out_len;
+}
+
 static bool ny_spawn_module_job(const ny_options *opt, const char *module_name,
+                                uint64_t source_fingerprint,
                                 const char *tmp_dir, ny_module_job *job) {
   if (!opt || !module_name || !tmp_dir || !job)
     return false;
+  char cache_path[4096];
+  if (!ny_module_cache_path(opt, module_name, source_fingerprint, cache_path,
+                            sizeof(cache_path)))
+    return false;
+  if (ny_access(cache_path, R_OK) == 0) {
+    job->name = ny_strdup(module_name);
+    job->bc_path = ny_strdup(cache_path);
+    job->persistent = true;
+    job->exit_code = 0;
+    if (ny_env_enabled("NYTRIX_TRACE_CACHE"))
+      fprintf(stderr, "module cache hit: %s\n", module_name);
+    return job->name && job->bc_path;
+  }
   char *san = ny_sanitize_modname(module_name);
   if (!san)
     return false;
   static unsigned long long ny_mod_seq = 0;
   char bc_path[1024];
   unsigned long long seq = ++ny_mod_seq;
-  snprintf(bc_path, sizeof(bc_path), "%s/ny_mod_%s_%ld_%llu.bc", tmp_dir, san,
+  /*
+   * Keep the unpublished file beside its final name. rename(2) is then
+   * atomic even when the system temp directory and the cache use different
+   * filesystems.
+   */
+  snprintf(bc_path, sizeof(bc_path), "%s.tmp.%s.%ld.%llu", cache_path, san,
            (long)getpid(), (unsigned long long)seq);
   free(san);
   char emit_bc_arg[1100];
@@ -1091,8 +1295,28 @@ static bool ny_spawn_module_job(const ny_options *opt, const char *module_name,
   }
   job->name = ny_strdup(module_name);
   job->bc_path = ny_strdup(bc_path);
+  job->cache_path = ny_strdup(cache_path);
   job->pid = pid;
   job->exit_code = -1;
+  return job->name && job->bc_path && job->cache_path;
+}
+
+static bool ny_module_job_publish_cache(ny_module_job *job) {
+  if (!job || job->persistent || !job->bc_path || !job->cache_path)
+    return job && job->persistent;
+  if (rename(job->bc_path, job->cache_path) != 0) {
+    if (ny_env_enabled("NYTRIX_TRACE_CACHE"))
+      fprintf(stderr, "module cache publish failed: %s: %s\n",
+              job->name ? job->name : "<module>", strerror(errno));
+    return false;
+  }
+  free(job->bc_path);
+  job->bc_path = job->cache_path;
+  job->cache_path = NULL;
+  job->persistent = true;
+  if (ny_env_enabled("NYTRIX_TRACE_CACHE"))
+    fprintf(stderr, "module cache saved: %s\n",
+            job->name ? job->name : "<module>");
   return true;
 }
 

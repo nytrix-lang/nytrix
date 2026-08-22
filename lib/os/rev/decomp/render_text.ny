@@ -1,7 +1,6 @@
 ;; Keywords: decompiler pseudocode rendering tokens renames text
 ;; Quote-aware token replacement and symbol normalization for rendered Ny text.
 module std.os.rev.decomp.render_text *
-
 use std.core
 use std.core.str as str
 use std.os.rev.decomp.annotations (_safe_name)

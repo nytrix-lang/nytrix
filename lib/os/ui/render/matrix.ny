@@ -74,7 +74,7 @@ fn mat4_mul_vec4(list m, list v) list {
    [m[2]*vx  + m[6]*vy  + m[10]*vz + m[14]*vw,
       m[3]*vx  + m[7]*vy  + m[11]*vz + m[15]*vw,
       m[4]*vx  + m[8]*vy  + m[12]*vz + m[16]*vw,
-   m[5]*vx  + m[9]*vy  + m[13]*vz + m[17]*vw]
+      m[5]*vx  + m[9]*vy  + m[13]*vz + m[17]*vw]
 }
 
 fn mat4_add(list a, list b) list {

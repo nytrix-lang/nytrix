@@ -730,7 +730,7 @@ fn _png_join_idat_list(any idat_list) any {
 }
 
 fn _png_decode_stride(int w, int channels, int bit_depth, int bytes_per_sample) int {
-   if bit_depth < 8 { return((w * channels * bit_depth) + 7) / 8 }
+   if bit_depth < 8 { return ((w * channels * bit_depth) + 7) / 8 }
    w * channels * bytes_per_sample
 }
 
@@ -1192,7 +1192,7 @@ fn encode(any img) any {
          0, 255, 0, 255,
          0, 0, 255, 255,
          255, 255, 0, 128
-   ])
+      ])
    def encoded = encode({"width": 2, "height": 2, "channels": 4, "data": rgba})
    assert(is_str(encoded), "png encoded string")
    assert(load8(encoded, 0) == 137 && load8(encoded, 1) == 80 && load8(encoded, 2) == 78, "png signature")

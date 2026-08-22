@@ -41,6 +41,7 @@ use std.os.rev.decomp.elf (
    imports, import_sites, load, msleep, recover_functions, relocations, section,
    section_bytes, sections, segments, sleep, strings, symbols,
 )
+
 use std.os.rev.decomp.cfg (basic_blocks, cfg, cfg_control_dependence, cfg_dominators, cfg_loops, cfg_postdominators, jump_tables)
 use std.os.rev.decomp.abi
 use std.os.rev.decomp.smt_proofs
@@ -53,6 +54,7 @@ fn arch(any source) str {
    def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
    bin.get("header", dict()).get("machine", "unknown")
 }
+
 fn _line_comment(list row) str {
    "  ; " + _hex(row[0]) + "  " + row[1] + (row[2].len > 0 ? (" " + row[2]) : "")
 }
@@ -149,7 +151,7 @@ fn _string_for_vaddr(dict bin, int addr) dict {
          }
          if printable {
             return {"offset": off, "addr": addr, "delta": 0, "kind": "string",
-            "len": raw.len, "value": raw}
+               "len": raw.len, "value": raw}
          }
       }
    }
@@ -181,7 +183,7 @@ fn _data_ref_for_addr(dict bin, int target, bool require_file=false) dict {
       def sname = sec.get("name", "")
       if (sname == ".dynsym" || sname == ".dynstr" || sname == ".interp" ||
          str.startswith(sname, ".gnu") || str.startswith(sname, ".rel") ||
-      str.startswith(sname, ".note")){ return dict() }
+         str.startswith(sname, ".note")){ return dict() }
    }
    if sec.len == 0 && target < 0x10000 { return dict() }
    if sec.len > 0 && (int(sec.get("flags", 0)) & (SHF_ALLOC | SHF_EXECINSTR)) == 0 { return dict() }
@@ -288,7 +290,7 @@ fn _jump_table_refs(dict bin, any target, int max_bytes) list {
             "entries": jt.get("entries", []),
             "count": int(jt.get("count", 0)),
             "index_reg": jt.get("index_reg", ""),
-      })
+         })
       i += 1
    }
    out
@@ -318,7 +320,7 @@ fn _call_arg_refs(dict bin, any target, int max_bytes) list {
                      "site_kind": "call_arg",
                      "call": r.get("target_name", ""),
                      "arg": a,
-               })
+                  })
             }
             ai += 1
          }
@@ -429,7 +431,7 @@ fn globals(any source, any targets=0, int max_bytes=4096) list {
                "name": r.get("name", ""),
                "value": r.get("value", ""),
                "xrefs": [site],
-         })
+            })
       } else {
          def g = out[pos]
          out = out.set(pos, g.set("xrefs", g.get("xrefs", []).append(site)))
@@ -457,7 +459,7 @@ fn _search_addr_match(any q, any addr) bool {
 fn _call_search_match(dict call, any query) bool {
    def q = to_str(query)
    if (_search_text_match(call.get("name", ""), q) || _search_text_match(call.get("effect", ""), q) ||
-   _search_addr_match(query, call.get("addr", 0)) || _search_addr_match(query, call.get("target", 0))){ return true }
+      _search_addr_match(query, call.get("addr", 0)) || _search_addr_match(query, call.get("target", 0))){ return true }
    def args = call.get("args", [])
    mut i = 0
    while i < args.len {
@@ -465,7 +467,7 @@ fn _call_search_match(dict call, any query) bool {
       if (_search_text_match(a.get("name", ""), q) || _search_text_match(a.get("reg", ""), q) ||
          _search_text_match(a.get("value", ""), q) || _search_text_match(a.get("value_kind", ""), q) ||
          _search_text_match(a.get("ref_name", ""), q) || _search_text_match(a.get("string", ""), q) ||
-      _search_addr_match(query, a.get("value_int", -1)) || _search_addr_match(query, a.get("ref_target", 0))){ return true }
+         _search_addr_match(query, a.get("value_int", -1)) || _search_addr_match(query, a.get("ref_target", 0))){ return true }
       i += 1
    }
    false
@@ -627,7 +629,7 @@ fn _crackme_function_for_site(dict bin, int addr) dict {
    def f = function_at(bin.set("functions", fs), addr)
    if f.len == 0 { return dict() }
    {"name": _rename_addr(bin, int(f.get("value", 0)), _rename_name(bin, _safe_name(_display_symbol(f.get("name", "")), "sub_" + str.to_hex(int(f.get("value", 0)), 0)))),
-   "addr": int(f.get("value", 0)), "size": int(f.get("size", 0)), "source": f.get("source", "")}
+      "addr": int(f.get("value", 0)), "size": int(f.get("size", 0)), "source": f.get("source", "")}
 }
 
 fn _crackme_branch_for_site(dict bin, dict site, int max_bytes, bool include_slice=true) dict {
@@ -653,7 +655,7 @@ fn _crackme_branch_for_site(dict bin, dict site, int max_bytes, bool include_sli
             def baddr = int(r.get("addr", 0))
             mut out = {"addr": baddr, "target": site_addr, "condition": cond,
                "expr": cond.len > 0 && cond != "always" ? _branch_condition_expr(rows, i, cond) : cond,
-            "mnemonic": r.get("mnemonic", ""), "operand": r.get("operands", "")}
+               "mnemonic": r.get("mnemonic", ""), "operand": r.get("operands", "")}
             if include_slice { out = out.set("slice", backward_slice(bin, target, {"addr": baddr}, {"max_bytes": max_bytes})) }
             return out
          }
@@ -671,7 +673,7 @@ fn _crackme_sites_for_string(dict bin, list refs, int addr, int max_bytes, bool 
       if int(r.get("target", 0)) == addr {
          mut site = {"from": int(r.get("from", 0)), "range": r.get("range", ""),
             "mnemonic": r.get("mnemonic", ""), "operand": r.get("operand", ""),
-         "function": _crackme_function_for_site(bin, int(r.get("from", 0)))}
+            "function": _crackme_function_for_site(bin, int(r.get("from", 0)))}
          def br = _crackme_branch_for_site(bin, site, max_bytes, include_slice)
          if br.len > 0 { site = site.set("branch", br) }
          out = out.append(site)
@@ -706,7 +708,7 @@ fn crackme_targets(any source, any opts=dict()) dict {
       def cls = _crackme_classify_string(s.get("value", ""))
       def sites = _crackme_sites_for_string(bin, refs, addr, max_bytes, include_slice)
       mut rec = {"addr": addr, "value": s.get("value", ""), "class": cls.get("class", "neutral"),
-      "score": int(cls.get("score", 0)), "reasons": cls.get("reasons", []), "xrefs": sites}
+         "score": int(cls.get("score", 0)), "reasons": cls.get("reasons", []), "xrefs": sites}
       if sites.len > 0 { rec = rec.set("site", sites[0]).set("from", int(sites[0].get("from", 0))) }
       if rec.get("class", "") == "success" {
          success = success.append(rec)
@@ -721,7 +723,7 @@ fn crackme_targets(any source, any opts=dict()) dict {
       "success": success, "failure": failure, "neutral": neutral,
       "find": find, "avoid": avoid, "xrefs": refs,
       "find_predicate": {"kind": "addr", "addr": find},
-   "avoid_predicate": {"kind": "addr", "addr": avoid}}
+      "avoid_predicate": {"kind": "addr", "addr": avoid}}
 }
 
 fn _crackme_first_site(list xs) dict {
@@ -767,12 +769,12 @@ fn _crackme_solution_explain(dict targets, dict run) dict {
    def model_text = _crackme_model_text(solution)
    if model_text.len > 0 { lines = lines.append("model " + model_text) }
    {"success": target, "site": site, "branch": branch, "model": solution,
-   "model_text": model_text, "lines": lines, "text": str.join(lines, "\n")}
+      "model_text": model_text, "lines": lines, "text": str.join(lines, "\n")}
 }
 
 fn _crackme_has_input_opts(dict opts) bool {
    def keys = ["stdin", "symbolic_stdin", "argv", "symbolic_argv", "regs", "symbolic_regs",
-   "mem", "symbolic_mem", "assume", "constraints"]
+      "mem", "symbolic_mem", "assume", "constraints"]
    mut i = 0
    while i < keys.len {
       if opts.contains(keys[i]) { return true }
@@ -888,7 +890,7 @@ fn _crackme_auto_input(dict bin, any target, dict opts) list {
    if _crackme_uses_input_import(bin) {
       def spec = {"name": opts.get("input_name", "stdin"), "n": n, "lo": lo, "hi": hi}
       return [opts.set("symbolic_stdin", spec),
-      {"kind": "stdin", "name": spec.get("name", "stdin"), "n": n, "lo": lo, "hi": hi}]
+         {"kind": "stdin", "name": spec.get("name", "stdin"), "n": n, "lo": lo, "hi": hi}]
    }
    def regs = _crackme_auto_arg_regs(bin, target, opts)
    if regs.len == 0 { return [opts, {"kind": "none", "reason": "no_abi_argument"}] }
@@ -899,13 +901,13 @@ fn _crackme_auto_input(dict bin, any target, dict opts) list {
       def reg = regs[i]
       def name = opts.contains("input_name") ? opts.get("input_name", "arg") + "_" + reg : "arg" + to_str(i)
       def rec = {"name": name, "bits": int(opts.get("input_bits", 0)),
-      "lo": int(opts.get("input_lo", 0)), "hi": int(opts.get("input_hi", 255))}
+         "lo": int(opts.get("input_lo", 0)), "hi": int(opts.get("input_hi", 255))}
       spec = spec.set(reg, rec)
       plans = plans.append({"reg": reg, "name": name, "lo": int(rec.get("lo", 0)), "hi": int(rec.get("hi", 255))})
       i += 1
    }
    mut plan = {"kind": regs.len == 1 ? "arg_reg" : "arg_regs", "regs": regs, "items": plans,
-   "lo": int(opts.get("input_lo", 0)), "hi": int(opts.get("input_hi", 255))}
+      "lo": int(opts.get("input_lo", 0)), "hi": int(opts.get("input_hi", 255))}
    if regs.len == 1 { plan = plan.set("reg", regs[0]) }
    [opts.set("symbolic_regs", spec), plan]
 }
@@ -918,7 +920,7 @@ fn crackme_solve(any source, any target=0, any opts=dict()) dict {
    def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source), opts)
    if !bin.get("ok", false) { return {"ok": false, "kind": "crackme_solve", "reason": bin.get("reason", "load_failed")} }
    def t = crackme_targets(bin, {"range": opts.get("range", target == 0 ? ".text" : target),
-   "max_bytes": int(opts.get("target_bytes", opts.get("max_bytes", 65536)))})
+         "max_bytes": int(opts.get("target_bytes", opts.get("max_bytes", 65536)))})
    if t.get("find", []).len == 0 {
       return {"ok": false, "kind": "crackme_solve", "reason": "no_success_target", "targets": t}
    }
@@ -944,7 +946,7 @@ fn crackme_solve_all(any source, any target=0, any opts=dict()) dict {
    def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source), opts)
    if !bin.get("ok", false) { return {"ok": false, "kind": "crackme_solve_all", "reason": bin.get("reason", "load_failed")} }
    def t = crackme_targets(bin, {"range": opts.get("range", target == 0 ? ".text" : target),
-   "max_bytes": int(opts.get("target_bytes", opts.get("max_bytes", 65536)))})
+         "max_bytes": int(opts.get("target_bytes", opts.get("max_bytes", 65536)))})
    if t.get("find", []).len == 0 {
       return {"ok": false, "kind": "crackme_solve_all", "reason": "no_success_target", "targets": t}
    }
@@ -971,7 +973,7 @@ fn crackme_report(any source, any target=0, any opts=dict()) dict {
    if !bin.get("ok", false) { return {"ok": false, "kind": "crackme_report", "reason": bin.get("reason", "load_failed")} }
    def range = opts.get("range", target == 0 ? ".text" : target)
    def t = crackme_targets(bin, {"range": range,
-   "max_bytes": int(opts.get("target_bytes", opts.get("max_bytes", 65536)))})
+         "max_bytes": int(opts.get("target_bytes", opts.get("max_bytes", 65536)))})
    if t.get("find", []).len == 0 {
       return {"ok": false, "kind": "crackme_report", "reason": "no_success_target", "targets": t}
    }
@@ -994,7 +996,7 @@ fn crackme_report(any source, any target=0, any opts=dict()) dict {
       "model": solved.get("model", dict()), "symbolics": solved.get("symbolics", dict()), "inputs": solved.get("inputs", dict()),
       "decisions": path.get("decisions", []), "patch_plan": path.get("patch_plan", dict()),
       "constraint_notes": path.get("constraint_notes", []),
-   "explain": explain, "text": explain.get("text", "") + (path.get("text", "").len > 0 ? ("\n\n" + path.get("text", "")) : "")}
+      "explain": explain, "text": explain.get("text", "") + (path.get("text", "").len > 0 ? ("\n\n" + path.get("text", "")) : "")}
 }
 
 fn _name_for_addr(dict bin, int addr) str {
@@ -1048,6 +1050,7 @@ fn call_targets(any source, any target=0, int max_bytes=512) list {
    }
    out
 }
+
 fn _lift_op(str a, str m) str {
    dasm.instruction_kind(a, m)
 }
@@ -1348,7 +1351,7 @@ fn _attach_compare_context(dict bin, list rows) list {
          def jt = _relative_switch_for_lift_rows(bin, out, i, 32)
          if jt.len > 0 {
             out = out.set(i, row.set("kind", "switch").set("jump_table", jt)
-            .set("effect", "switch(" + jt.get("index_reg", "") + ")"))
+               .set("effect", "switch(" + jt.get("index_reg", "") + ")"))
          }
       }
       i += 1
@@ -1434,7 +1437,7 @@ fn _lift_row(dict bin, list r) dict {
       "dst": dst_raw, "src": src_raw,
       "dst_kind": dst_raw.len > 0 ? _operand_kind(dst_raw) : "none",
       "src_kind": src_raw.len > 0 ? _operand_kind(src_raw) : "none",
-   "target": 0, "target_name": "", "effect": ""}
+      "target": 0, "target_name": "", "effect": ""}
    if ref.len > 0 { row = row.set("ref", ref).set("ref_kind", ref.get("kind", "")).set("ref_name", ref.get("name", "")).set("ref_target", ref.get("target", 0)) }
    if op == "call" {
       def caddr = str.find(ops, "[") >= 0 ? 0 : _row_target(a, r)
@@ -1817,11 +1820,11 @@ fn _def_use_rows(list rows0, any target=0) dict {
          def symb = to_str(ruses[ui])
          def reaching = last_def.get(symb, dict())
          mut rec = {"symbol": symb, "addr": row.get("addr", 0), "index": i,
-         "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
+            "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
          if reaching.len > 0 {
             rec = rec.set("def_addr", reaching.get("addr", 0)).set("def_index", reaching.get("index", -1))
             edges = edges.append({"symbol": symb, "from": reaching.get("addr", 0), "from_index": reaching.get("index", -1),
-            "to": row.get("addr", 0), "to_index": i})
+                  "to": row.get("addr", 0), "to_index": i})
          }
          uses = uses.append(rec)
          by_symbol = _du_symbol_append(by_symbol, symb, "uses", rec)
@@ -1831,7 +1834,7 @@ fn _def_use_rows(list rows0, any target=0) dict {
       while di < rdefs.len {
          def symb = to_str(rdefs[di])
          def rec = {"symbol": symb, "addr": row.get("addr", 0), "index": i,
-         "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
+            "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
          defs = defs.append(rec)
          by_symbol = _du_symbol_append(by_symbol, symb, "defs", rec)
          last_def = last_def.set(symb, rec)
@@ -1841,7 +1844,7 @@ fn _def_use_rows(list rows0, any target=0) dict {
    }
    {"kind": "def_use", "target": target, "rows": rows, "defs": defs, "uses": uses,
       "edges": edges, "by_symbol": by_symbol, "symbols": by_symbol.keys(),
-   "row_count": rows.len, "def_count": defs.len, "use_count": uses.len, "edge_count": edges.len}
+      "row_count": rows.len, "def_count": defs.len, "use_count": uses.len, "edge_count": edges.len}
 }
 
 fn def_use(any source, any target=0, any opts=dict()) dict {
@@ -1943,7 +1946,7 @@ fn _fact_mem_expr(str op) dict {
    if !mp.get("ok", false) { return dict() }
    def expr = mp.get("expr", "")
    mut out = {"ok": true, "segment": mp.get("segment", ""), "expr": expr,
-   "base": mp.get("base", ""), "index": "", "scale": 0, "offset": 0}
+      "base": mp.get("base", ""), "index": "", "scale": 0, "offset": 0}
    if mp.contains("offset") { out = out.set("offset", _parse_int_piece(to_str(mp.get("offset", "0")))) }
    def terms = _fact_expr_terms(expr)
    mut i = 0
@@ -1980,7 +1983,7 @@ fn _fact_mem_access(dict row, str operand, str access) dict {
       "width": _fact_width(operand), "segment": mem.get("segment", ""),
       "expr": mem.get("expr", ""), "base": mem.get("base", ""),
       "index": mem.get("index", ""), "scale": int(mem.get("scale", 0)),
-   "offset": int(mem.get("offset", 0))}
+      "offset": int(mem.get("offset", 0))}
 }
 
 fn _fact_row_memory(list out0, dict row) list {
@@ -2063,7 +2066,7 @@ fn _fact_memory_shapes(list mems) list {
       def key = m.get("segment", "") + "|" + m.get("base", "") + "|" + m.get("index", "") + "|" + to_str(int(m.get("scale", 0)))
       mut g = groups.get(key, {"key": key, "segment": m.get("segment", ""), "base": m.get("base", ""),
             "index": m.get("index", ""), "scale": int(m.get("scale", 0)), "accesses": [],
-      "offsets": [], "widths": [], "read_count": 0, "write_count": 0, "execute_count": 0})
+            "offsets": [], "widths": [], "read_count": 0, "write_count": 0, "execute_count": 0})
       g = g.set("accesses", g.get("accesses", []).append(m))
       g = g.set("offsets", _int_insert_sorted_unique(g.get("offsets", []), int(m.get("offset", 0))))
       def w = int(m.get("width", 0))
@@ -2116,7 +2119,7 @@ fn _ssa_ensure_livein(dict st, str sym) dict {
    def id = _ssa_value_id(sym, 0)
    mut values = st.get("values", [])
    values = values.append({"id": id, "symbol": sym, "version": 0, "kind": "live_in",
-   "row": -1, "addr": 0, "mnemonic": ""})
+         "row": -1, "addr": 0, "mnemonic": ""})
    st.set("values", values).set("current", cur.set(sym, id)).set("versions", st.get("versions", dict()).set(sym, 0))
 }
 
@@ -2205,7 +2208,7 @@ fn _ssa_place_phis(dict bundle, list row_blocks, dict frontiers) list {
             if !has_phi.get(key, false) {
                has_phi = has_phi.set(key, true)
                phis = phis.append({"symbol": sym, "block": y,
-               "row": _ssa_first_row_for_block(row_blocks, y), "kind": "phi"})
+                     "row": _ssa_first_row_for_block(row_blocks, y), "kind": "phi"})
                if !_list_has(def_blocks.get(sym, []), y) { work = work.append(y) }
             }
             fi += 1
@@ -2269,12 +2272,12 @@ fn _ssa_ensure_livein_value(dict st, dict current, str sym) dict {
    mut liveins = st.get("liveins", dict())
    if !liveins.get(sym, false) {
       values = values.append({"id": id, "symbol": sym, "version": 0, "kind": "live_in",
-      "row": -1, "addr": 0, "mnemonic": ""})
+            "row": -1, "addr": 0, "mnemonic": ""})
       liveins = liveins.set(sym, true)
    }
    if !versions.contains(sym) { versions = versions.set(sym, 0) }
    {"state": st.set("values", values).set("versions", versions).set("liveins", liveins),
-   "current": current.set(sym, id), "id": id}
+      "current": current.set(sym, id), "id": id}
 }
 
 fn _ssa_phi_incoming(list phis, dict graph, dict exit_current) list {
@@ -2344,14 +2347,14 @@ fn _ssa_from_facts(dict bundle) dict {
          def addr = first_row >= 0 && first_row < rows.len ? int(rows[first_row].get("addr", block)) : block
          def rec = {"id": id, "symbol": sym, "version": next_version, "row": first_row,
             "addr": addr, "block": block, "mnemonic": "phi", "operand": "",
-         "kind": "phi", "source": "dominance_frontier"}
+            "kind": "phi", "source": "dominance_frontier"}
          defs = defs.append(rec)
          phi_defs = phi_defs.append(rec)
          st = st.set("versions", st.get("versions", dict()).set(sym, next_version))
          .set("values", st.get("values", []).append(rec))
          current = current.set(sym, id)
          by_value = by_value.set(id, by_value.get(id, {"id": id, "defs": [], "uses": []})
-         .set("defs", by_value.get(id, {"defs": []}).get("defs", []).append(rec)))
+            .set("defs", by_value.get(id, {"defs": []}).get("defs", []).append(rec)))
          phi_ids = phi_ids.set(_ssa_phi_key(p0), id)
          pi += 1
       }
@@ -2371,11 +2374,11 @@ fn _ssa_from_facts(dict bundle) dict {
                current = live.get("current", current)
                def id = live.get("id", current.get(symb, _ssa_value_id(symb, 0)))
                def rec = {"id": id, "symbol": symb, "row": i, "addr": int(row.get("addr", 0)),
-               "block": block, "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
+                  "block": block, "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
                uses = uses.append(rec)
                row_uses = _append_unique(row_uses, id)
                by_value = by_value.set(id, by_value.get(id, {"id": id, "defs": [], "uses": []})
-               .set("uses", by_value.get(id, {"uses": []}).get("uses", []).append(rec)))
+                  .set("uses", by_value.get(id, {"uses": []}).get("uses", []).append(rec)))
                ui += 1
             }
             mut row_defs = []
@@ -2387,24 +2390,24 @@ fn _ssa_from_facts(dict bundle) dict {
                def id = _ssa_value_id(symb, next_version)
                def rec = {"id": id, "symbol": symb, "version": next_version, "row": i,
                   "addr": int(row.get("addr", 0)), "block": block, "mnemonic": row.get("mnemonic", ""),
-               "operand": row.get("operands", ""), "kind": "row_def"}
+                  "operand": row.get("operands", ""), "kind": "row_def"}
                defs = defs.append(rec)
                row_defs = row_defs.append(id)
                st = st.set("versions", st.get("versions", dict()).set(symb, next_version))
                .set("values", st.get("values", []).append(rec))
                current = current.set(symb, id)
                by_value = by_value.set(id, by_value.get(id, {"id": id, "defs": [], "uses": []})
-               .set("defs", by_value.get(id, {"defs": []}).get("defs", []).append(rec)))
+                  .set("defs", by_value.get(id, {"defs": []}).get("defs", []).append(rec)))
                mut ri = 0
                while ri < row_uses.len {
                   deps = deps.append({"from": row_uses[ri], "to": id, "row": i,
-                  "addr": int(row.get("addr", 0)), "block": block, "kind": "row_dependency"})
+                        "addr": int(row.get("addr", 0)), "block": block, "kind": "row_dependency"})
                   ri += 1
                }
                di += 1
             }
             row_values = row_values.append({"row": i, "addr": int(row.get("addr", 0)),
-            "block": block, "uses": row_uses, "defs": row_defs})
+                  "block": block, "uses": row_uses, "defs": row_defs})
          }
          bri += 1
       }
@@ -2449,7 +2452,7 @@ fn _ssa_from_facts(dict bundle) dict {
          def from_id = incoming[ii].get("value", "")
          if id.len > 0 && from_id.len > 0 {
             deps = deps.append({"from": from_id, "to": id, "block": int(p.get("block", 0)),
-            "pred": int(incoming[ii].get("block", 0)), "kind": "phi_incoming"})
+                  "pred": int(incoming[ii].get("block", 0)), "kind": "phi_incoming"})
          }
          ii += 1
       }
@@ -2464,7 +2467,7 @@ fn _ssa_from_facts(dict bundle) dict {
       "dominators": dominfo, "idominators": idom, "dom_children": dom_children,
       "dominance_frontiers": frontiers, "exit_values": exit_current,
       "value_count": st.get("values", []).len, "def_count": defs.len,
-   "use_count": uses.len, "dep_count": deps.len}
+      "use_count": uses.len, "dep_count": deps.len}
 }
 
 fn _ssa_from_rows(list rows, any target=0) dict {
@@ -2485,11 +2488,11 @@ fn _ssa_from_rows(list rows, any target=0) dict {
          st = _ssa_ensure_livein(st, symb)
          def id = st.get("current", dict()).get(symb, _ssa_value_id(symb, 0))
          def rec = {"id": id, "symbol": symb, "row": i, "addr": int(row.get("addr", 0)),
-         "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
+            "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
          uses = uses.append(rec)
          row_uses = _append_unique(row_uses, id)
          by_value = by_value.set(id, by_value.get(id, {"id": id, "defs": [], "uses": []})
-         .set("uses", by_value.get(id, {"uses": []}).get("uses", []).append(rec)))
+            .set("uses", by_value.get(id, {"uses": []}).get("uses", []).append(rec)))
          ui += 1
       }
       mut row_defs = []
@@ -2501,31 +2504,31 @@ fn _ssa_from_rows(list rows, any target=0) dict {
          def id = _ssa_value_id(symb, next_version)
          def rec = {"id": id, "symbol": symb, "version": next_version, "row": i,
             "addr": int(row.get("addr", 0)), "mnemonic": row.get("mnemonic", ""),
-         "operand": row.get("operands", ""), "kind": "row_def"}
+            "operand": row.get("operands", ""), "kind": "row_def"}
          defs = defs.append(rec)
          row_defs = row_defs.append(id)
          st = st.set("versions", st.get("versions", dict()).set(symb, next_version))
          .set("current", st.get("current", dict()).set(symb, id))
          .set("values", st.get("values", []).append(rec))
          by_value = by_value.set(id, by_value.get(id, {"id": id, "defs": [], "uses": []})
-         .set("defs", by_value.get(id, {"defs": []}).get("defs", []).append(rec)))
+            .set("defs", by_value.get(id, {"defs": []}).get("defs", []).append(rec)))
          mut ri = 0
          while ri < row_uses.len {
             deps = deps.append({"from": row_uses[ri], "to": id, "row": i,
-            "addr": int(row.get("addr", 0)), "kind": "row_dependency"})
+                  "addr": int(row.get("addr", 0)), "kind": "row_dependency"})
             ri += 1
          }
          di += 1
       }
       row_values = row_values.append({"row": i, "addr": int(row.get("addr", 0)),
-      "uses": row_uses, "defs": row_defs})
+            "uses": row_uses, "defs": row_defs})
       i += 1
    }
    {"kind": "ssa", "target": target, "scope": "linear_function",
       "note": "legacy row-local helper; public ssa(...) uses facts-driven global_cfg SSA",
       "values": st.get("values", []), "defs": defs, "uses": uses, "deps": deps,
       "by_value": by_value, "rows": row_values, "value_count": st.get("values", []).len,
-   "def_count": defs.len, "use_count": uses.len, "dep_count": deps.len}
+      "def_count": defs.len, "use_count": uses.len, "dep_count": deps.len}
 }
 
 fn ssa(any source, any target=0, any opts=dict()) dict {
@@ -2581,7 +2584,7 @@ fn _vsa_shape_fields(dict sh) list {
       def width = widths.len > 0 ? int(widths[min(i, widths.len - 1)]) : 0
       fields = fields.append({"name": "field_" + str.to_hex(off, 0), "offset": off,
             "width": width, "read_count": int(sh.get("read_count", 0)),
-      "write_count": int(sh.get("write_count", 0))})
+            "write_count": int(sh.get("write_count", 0))})
       i += 1
    }
    fields
@@ -2599,13 +2602,13 @@ fn _vsa_interval_record(dict row, str symbol, int lower, int upper, int stride, 
       "lower": lower, "upper": upper, "stride": stride, "classification": cls,
       "role": cls == "mask_bound" ? "bounded_integer" : (cls == "constant" ? "constant" : "integer_interval"),
       "source": source, "kind": "vsa_value",
-   "notation": to_str(stride) + "[" + to_str(lower) + "," + to_str(upper) + "]"}
+      "notation": to_str(stride) + "[" + to_str(lower) + "," + to_str(upper) + "]"}
 }
 
 fn _vsa_shift_interval(dict prev, int delta, dict row, str symbol, str source) dict {
    _vsa_interval_record(row, symbol,
       int(prev.get("lower", 0)) + delta, int(prev.get("upper", 0)) + delta,
-   int(prev.get("stride", 0)), "affine_interval", source)
+      int(prev.get("stride", 0)), "affine_interval", source)
 }
 
 fn _vsa_value_intervals(list rows) list {
@@ -2684,11 +2687,11 @@ fn _vsa_from_shapes(list shapes, any target=0) dict {
             "source": sh.get("kind", ""),
             "read_count": int(sh.get("read_count", 0)), "write_count": int(sh.get("write_count", 0)),
             "access_count": int(sh.get("access_count", 0)),
-      "notation": to_str(stride) + "[" + to_str(min_off) + "," + to_str(max_off) + "]"})
+            "notation": to_str(stride) + "[" + to_str(min_off) + "," + to_str(max_off) + "]"})
       i += 1
    }
    {"kind": "vsa", "target": target, "intervals": intervals, "interval_count": intervals.len,
-   "note": "strided interval seed over recovered memory shapes"}
+      "note": "strided interval seed over recovered memory shapes"}
 }
 
 fn _vsa_from_rows(list rows, list shapes, any target=0) dict {
@@ -2734,7 +2737,7 @@ fn _branch_dependencies(list rows) list {
                out = out.append({"row": i, "addr": int(row.get("addr", 0)), "target": int(row.get("target", 0)),
                      "condition": cond, "expr": expr, "feeder_row": j, "feeder_addr": int(prev.get("addr", 0)),
                      "feeder_op": pop, "feeder_mnemonic": prev.get("mnemonic", ""),
-               "feeder_defs": prev.get("defs", []), "feeder_uses": prev.get("uses", [])})
+                     "feeder_defs": prev.get("defs", []), "feeder_uses": prev.get("uses", [])})
                found = true
             }
             j -= 1
@@ -2743,7 +2746,7 @@ fn _branch_dependencies(list rows) list {
             out = out.append({"row": i, "addr": int(row.get("addr", 0)), "target": int(row.get("target", 0)),
                   "condition": cond, "expr": expr, "feeder_row": i, "feeder_addr": int(row.get("addr", 0)),
                   "feeder_op": "branch", "feeder_mnemonic": row.get("mnemonic", ""),
-            "feeder_defs": row.get("defs", []), "feeder_uses": row.get("uses", [])})
+                  "feeder_defs": row.get("defs", []), "feeder_uses": row.get("uses", [])})
          }
       }
       i += 1
@@ -2765,7 +2768,7 @@ fn _fact_branch_conditions(dict bin, any target, list rows) list {
    def end = int(rows[rows.len - 1].get("addr", start)) + int(rows[rows.len - 1].get("size", 1))
    def maxb = max(32, end - start)
    def name = _name_for_addr(bin, start)
-   def sig = _signature_main_aliases(_function_signature_for (bin, target, rows, start, maxb), name)
+   def sig = _signature_main_aliases(_function_signature_for(bin, target, rows, start, maxb), name)
    mut out = []
    mut i = 0
    while i < rows.len {
@@ -2781,7 +2784,7 @@ fn _fact_branch_conditions(dict bin, any target, list rows) list {
                "condition": cond, "raw_expr": raw, "expr": clean,
                "taken_when": clean, "fallthrough_when": _clean_negated_condition_expr(clean),
                "role": _fact_condition_role(clean), "symbols": _symbols_from_text(clean),
-         "kind": "condition"})
+               "kind": "condition"})
       }
       i += 1
    }
@@ -2827,17 +2830,18 @@ fn _ssa_rewrite_candidates(list rows, dict ssa0) dict {
       if uses == 0 {
          dead = dead.append({"id": id, "symbol": d.get("symbol", ""), "row": int(d.get("row", -1)),
                "addr": int(d.get("addr", 0)), "mnemonic": d.get("mnemonic", ""),
-         "reason": "ssa value has no recorded use in this function"})
+               "reason": "ssa value has no recorded use in this function"})
       } elif uses == 1 && _row_pure_rewrite_candidate(row) {
          inline = inline.append({"id": id, "symbol": d.get("symbol", ""), "row": int(d.get("row", -1)),
                "addr": int(d.get("addr", 0)), "mnemonic": d.get("mnemonic", ""),
-         "reason": "pure row value has one recorded use"})
+               "reason": "pure row value has one recorded use"})
       }
       i += 1
    }
    {"kind": "rewrite_candidates", "dead_defs": dead, "inline_values": inline,
-   "dead_count": dead.len, "inline_count": inline.len}
+      "dead_count": dead.len, "inline_count": inline.len}
 }
+
 fn smt_expression_proofs(any source, any target=0, any opts=dict()) dict {
    "Prove expression archetype mappings using Z3 bitvectors.
    The input is always a facts(...) bundle: callers may pass one directly, or
@@ -2848,7 +2852,7 @@ fn smt_expression_proofs(any source, any target=0, any opts=dict()) dict {
    _smt_expression_proofs_from_facts(facts(source, target, opts), opts)
 }
 
-fn _smt_proof_for (list proofs, str archetype) dict {
+fn _smt_proof_for(list proofs, str archetype) dict {
    mut i = 0
    while i < proofs.len {
       if proofs[i].get("archetype", "") == archetype { return proofs[i] }
@@ -2858,17 +2862,17 @@ fn _smt_proof_for (list proofs, str archetype) dict {
 }
 
 fn _smt_proof_ok(list proofs, str archetype) bool {
-   _smt_proof_for (proofs, archetype).get("proved", false)
+   _smt_proof_for(proofs, archetype).get("proved", false)
 }
 
 fn _semantic_rewrite_record(list proofs, str archetype, dict row, str source_expr, str replacement, str reason, list consumes=[]) dict {
-   def proof = _smt_proof_for (proofs, archetype)
+   def proof = _smt_proof_for(proofs, archetype)
    {"kind": "semantic_simplification", "proved": proof.get("proved", false),
       "archetype": archetype, "proof": archetype, "proof_method": proof.get("method", ""),
       "row": int(row.get("index", -1)), "addr": int(row.get("addr", 0)),
       "mnemonic": row.get("mnemonic", ""), "source_expr": source_expr,
       "replacement": replacement, "reason": reason, "confidence": proof.get("proved", false) ? 100 : 0,
-   "constraint_count": int(proof.get("constraint_count", 0)), "consumes": consumes}
+      "constraint_count": int(proof.get("constraint_count", 0)), "consumes": consumes}
 }
 
 fn _semantic_base_before(list rows, int before_idx, str op0, int depth=0) str {
@@ -2897,7 +2901,7 @@ fn _semantic_shift_arm(list rows, int before_idx, str op0) dict {
    def bits = _clean_operand_bits(r.get("dst", ""))
    if amount <= 0 || bits <= 0 || amount >= bits { return dict() }
    {"ok": true, "row": idx, "dir": dir, "amount": amount, "bits": bits,
-   "base": _semantic_base_before(rows, idx - 1, r.get("dst", ""))}
+      "base": _semantic_base_before(rows, idx - 1, r.get("dst", ""))}
 }
 
 fn _semantic_rotate_or_candidate(list rows, int idx) dict {
@@ -2917,7 +2921,7 @@ fn _semantic_rotate_or_candidate(list rows, int idx) dict {
    def arch = la <= ra ? "rotate_left" : "rotate_right"
    def amt = la <= ra ? la : ra
    {"ok": true, "archetype": arch, "replacement": (arch == "rotate_left" ? "rol" : "ror") + "(" + a.get("base", "") + ", " + to_str(amt) + ")",
-   "consumes": [int(a.get("row", -1)), int(b.get("row", -1)), idx]}
+      "consumes": [int(a.get("row", -1)), int(b.get("row", -1)), idx]}
 }
 
 fn _semantic_pack_terms(list rows, int before_idx, str op0, int depth=0) list {
@@ -2986,7 +2990,7 @@ fn _semantic_byte_pack_candidate(list rows, int idx) dict {
    }
    {"ok": true, "archetype": "byte_pack_little",
       "replacement": "u" + to_str(terms.len * 8) + "_le(" + str.join(args, ", ") + ")",
-   "consumes": consumes}
+      "consumes": consumes}
 }
 
 fn _semantic_simplifications_from_facts(dict bundle, any opts=dict()) dict {
@@ -3013,7 +3017,7 @@ fn _semantic_simplifications_from_facts(dict bundle, any opts=dict()) dict {
          if amount > 0 && bits > 0 && amount < bits && amount <= 30 && _smt_proof_ok(proofs, "unsigned_div_power2") {
             rewrites = rewrites.append(_semantic_rewrite_record(proofs, "unsigned_div_power2", r,
                   dst + " >> " + to_str(amount), dst + " / " + to_str(1 << amount),
-            "logical right shift by a constant is an unsigned power-of-two division", [i]))
+                  "logical right shift by a constant is an unsigned power-of-two division", [i]))
          }
       }
       if op == "arith" && sym == "&" {
@@ -3021,13 +3025,13 @@ fn _semantic_simplifications_from_facts(dict bundle, any opts=dict()) dict {
          if modulus > 0 && _smt_proof_ok(proofs, "unsigned_rem_power2_mask") {
             rewrites = rewrites.append(_semantic_rewrite_record(proofs, "unsigned_rem_power2_mask", r,
                   dst + " & " + src, dst + " % " + to_str(modulus),
-            "low contiguous mask is a power-of-two remainder", [i]))
+                  "low contiguous mask is a power-of-two remainder", [i]))
          }
          def idx = _clean_byte_mask_index(r.get("src", ""))
          if idx >= 0 && _smt_proof_ok(proofs, idx == 0 ? "low_byte_mask" : "byte_window_mask") {
             rewrites = rewrites.append(_semantic_rewrite_record(proofs, idx == 0 ? "low_byte_mask" : "byte_window_mask", r,
                   dst + " & " + src, "byte_at(" + dst + ", " + to_str(idx) + ")",
-            "byte mask isolates a single byte lane", [i]))
+                  "byte mask isolates a single byte lane", [i]))
          }
          def width = _clean_low_mask_width(r.get("src", ""))
          def prev = _clean_prev_def_row(rows, i - 1, r.get("dst", ""))
@@ -3038,7 +3042,7 @@ fn _semantic_simplifications_from_facts(dict bundle, any opts=dict()) dict {
             rewrites = rewrites.append(_semantic_rewrite_record(proofs, "bitfield_extract", r,
                   "(" + _ny_operand(rows[prev].get("dst", "")) + " >> " + to_str(amount) + ") & " + src,
                   "bits(" + _ny_operand(rows[prev].get("dst", "")) + ", " + to_str(amount) + ", " + to_str(width) + ")",
-            "logical shift plus low mask is a field extraction", [prev, i]))
+                  "logical shift plus low mask is a field extraction", [prev, i]))
          }
       }
       if op == "arith" && sym == ">>" {
@@ -3050,7 +3054,7 @@ fn _semantic_simplifications_from_facts(dict bundle, any opts=dict()) dict {
             rewrites = rewrites.append(_semantic_rewrite_record(proofs, "byte_window_mask", r,
                   "(" + _ny_operand(rows[prev].get("dst", "")) + " & " + _ny_operand(rows[prev].get("src", "")) + ") >> " + to_str(idx * 8),
                   "byte_at(" + _ny_operand(rows[prev].get("dst", "")) + ", " + to_str(idx) + ")",
-            "masked byte window shifted to the low lane", [prev, i]))
+                  "masked byte window shifted to the low lane", [prev, i]))
          }
       }
       if op == "arith" && sym == "|" {
@@ -3058,13 +3062,13 @@ fn _semantic_simplifications_from_facts(dict bundle, any opts=dict()) dict {
          if rot.get("ok", false) && _smt_proof_ok(proofs, rot.get("archetype", "")) {
             rewrites = rewrites.append(_semantic_rewrite_record(proofs, rot.get("archetype", ""), r,
                   "complementary shift/or", rot.get("replacement", ""),
-            "complementary shifts over the same value form a rotate", rot.get("consumes", [])))
+                  "complementary shifts over the same value form a rotate", rot.get("consumes", [])))
          }
          def pack = _semantic_byte_pack_candidate(rows, i)
          if pack.get("ok", false) && _smt_proof_ok(proofs, "byte_pack_little") {
             rewrites = rewrites.append(_semantic_rewrite_record(proofs, "byte_pack_little", r,
                   "byte-load shift/or chain", pack.get("replacement", ""),
-            "adjacent byte loads form an endian-aware packed integer", pack.get("consumes", [])))
+                  "adjacent byte loads form an endian-aware packed integer", pack.get("consumes", [])))
          }
       }
       if op == "arith" && r.get("kind", "") == "rotate" {
@@ -3073,13 +3077,13 @@ fn _semantic_simplifications_from_facts(dict bundle, any opts=dict()) dict {
             rewrites = rewrites.append(_semantic_rewrite_record(proofs, arch, r,
                   dst + " " + r.get("operator", "") + " " + src,
                   r.get("operator", "") + "(" + dst + ", " + src + ")",
-            "native rotate carries the same semantic helper used for shift/or idioms", [i]))
+                  "native rotate carries the same semantic helper used for shift/or idioms", [i]))
          }
       }
       if op == "arith" && (r.get("kind", "") == "byte_swap32" || r.get("kind", "") == "byte_swap64") && _smt_proof_ok(proofs, "byte_swap32") {
          rewrites = rewrites.append(_semantic_rewrite_record(proofs, "byte_swap32", r,
                "byte-swap lowering", (r.get("kind", "") == "byte_swap64" ? "bswap64" : "bswap32") + "(" + dst + ")",
-         "byte-swap is endian reshaping, not arithmetic noise", [i]))
+               "byte-swap is endian reshaping, not arithmetic noise", [i]))
       }
       i += 1
    }
@@ -3092,7 +3096,7 @@ fn _semantic_simplifications_from_facts(dict bundle, any opts=dict()) dict {
    {"kind": "semantic_simplifications", "input": "facts", "backend": "z3",
       "ok": proof_bundle.get("ok", false), "rewrites": rewrites, "rewrite_count": rewrites.len,
       "proved_count": proved, "proof_count": proof_bundle.get("proof_count", proofs.len),
-   "note": "facts-backed semantic rewrites; replacements are emitted only when their archetype proof is available"}
+      "note": "facts-backed semantic rewrites; replacements are emitted only when their archetype proof is available"}
 }
 
 fn semantic_simplifications(any source, any target=0, any opts=dict()) dict {
@@ -3113,18 +3117,18 @@ fn _facts_from(dict bin, any target, list rows0, dict graph) dict {
       rows = rows.append(row)
       facts = _fact_add(facts, "row", {"row": i, "addr": int(row.get("addr", 0)),
             "mnemonic": row.get("mnemonic", ""), "op": row.get("op", ""),
-      "operands": row.get("operands", ""), "effect": row.get("effect", "")})
+            "operands": row.get("operands", ""), "effect": row.get("effect", "")})
       def op = row.get("op", "")
       if op == "call" {
          facts = _fact_add(facts, "call", {"row": i, "addr": int(row.get("addr", 0)),
-         "target": int(row.get("target", 0)), "name": row.get("target_name", "")})
+               "target": int(row.get("target", 0)), "name": row.get("target_name", "")})
       } elif op == "syscall" {
          facts = _fact_add(facts, "syscall", {"row": i, "addr": int(row.get("addr", 0)),
-         "nr": _syscall_nr(rows0, i), "family": row.get("family", _rows_family(rows0))})
+               "nr": _syscall_nr(rows0, i), "family": row.get("family", _rows_family(rows0))})
       } elif op == "branch" {
          facts = _fact_add(facts, "branch", {"row": i, "addr": int(row.get("addr", 0)),
                "target": int(row.get("target", 0)), "condition": row.get("condition", ""),
-         "kind": row.get("kind", "")})
+               "kind": row.get("kind", "")})
       }
       mems = _fact_row_memory(mems, row)
       i += 1
@@ -3135,7 +3139,7 @@ fn _facts_from(dict bin, any target, list rows0, dict graph) dict {
    while i < defs.len {
       def d = defs[i]
       facts = _fact_add(facts, "defines", {"row": int(d.get("index", -1)), "addr": int(d.get("addr", 0)),
-      "symbol": d.get("symbol", ""), "mnemonic": d.get("mnemonic", "")})
+            "symbol": d.get("symbol", ""), "mnemonic": d.get("mnemonic", "")})
       i += 1
    }
    def uses = du.get("uses", [])
@@ -3144,7 +3148,7 @@ fn _facts_from(dict bin, any target, list rows0, dict graph) dict {
       def u = uses[i]
       facts = _fact_add(facts, "uses", {"row": int(u.get("index", -1)), "addr": int(u.get("addr", 0)),
             "symbol": u.get("symbol", ""), "def_addr": int(u.get("def_addr", 0)),
-      "def_row": int(u.get("def_index", -1)), "mnemonic": u.get("mnemonic", "")})
+            "def_row": int(u.get("def_index", -1)), "mnemonic": u.get("mnemonic", "")})
       i += 1
    }
    def edges = du.get("edges", [])
@@ -3152,7 +3156,7 @@ fn _facts_from(dict bin, any target, list rows0, dict graph) dict {
    while i < edges.len {
       def e = edges[i]
       facts = _fact_add(facts, "flows", {"symbol": e.get("symbol", ""), "from": int(e.get("from", 0)),
-      "from_row": int(e.get("from_index", -1)), "to": int(e.get("to", 0)), "to_row": int(e.get("to_index", -1))})
+            "from_row": int(e.get("from_index", -1)), "to": int(e.get("to", 0)), "to_row": int(e.get("to_index", -1))})
       i += 1
    }
    def cfg_edges = graph.get("edges", [])
@@ -3160,7 +3164,7 @@ fn _facts_from(dict bin, any target, list rows0, dict graph) dict {
    while i < cfg_edges.len {
       def e = cfg_edges[i]
       facts = _fact_add(facts, "cfg_edge", {"from": int(e.get("from", 0)), "to": int(e.get("to", 0)),
-      "edge": e.get("kind", ""), "condition": e.get("condition", "")})
+            "edge": e.get("kind", ""), "condition": e.get("condition", "")})
       i += 1
    }
    i = 0
@@ -3206,7 +3210,7 @@ fn _facts_from(dict bin, any target, list rows0, dict graph) dict {
       "row_count": rows.len, "fact_count": facts.len, "memory_count": mems.len,
       "memory_shape_count": shapes.len, "vsa_interval_count": vsa0.get("interval_count", 0),
       "vsa_value_interval_count": vsa0.get("value_interval_count", 0),
-   "branch_dependency_count": branch_deps.len, "condition_count": conditions.len}
+      "branch_dependency_count": branch_deps.len, "condition_count": conditions.len}
    def ssa0 = _ssa_from_facts(base)
    def sdefs = ssa0.get("defs", [])
    i = 0
@@ -3274,7 +3278,7 @@ fn _facts_from(dict bin, any target, list rows0, dict graph) dict {
       "vsa_interval_count": vsa0.get("interval_count", 0),
       "vsa_value_interval_count": vsa0.get("value_interval_count", 0),
       "semantic_simplification_count": simp0.get("rewrite_count", 0),
-   "branch_dependency_count": branch_deps.len, "condition_count": conditions.len}
+      "branch_dependency_count": branch_deps.len, "condition_count": conditions.len}
 }
 
 fn facts(any source, any target=0, any opts=dict()) dict {
@@ -3395,6 +3399,7 @@ fn _simgr_at_first_row(dict manager, list rows) dict {
    }
    manager.set("active", out)
 }
+
 fn _label_name(int addr) str {
    "loc_" + str.to_hex(addr, 0)
 }
@@ -3533,9 +3538,9 @@ fn _frame_model(list rows) dict {
       def family = r.get("family", _rows_family(rows))
       if (r.get("mnemonic", "") == "mov" &&
          _canonical_value_reg(family, r.get("dst", "")) == "rbp" &&
-      _canonical_value_reg(family, r.get("src", "")) == "rsp"){ uses_frame_pointer = true }
+         _canonical_value_reg(family, r.get("src", "")) == "rsp"){ uses_frame_pointer = true }
       if (r.get("mnemonic", "") == "sub" &&
-      _canonical_value_reg(family, r.get("dst", "")) == "rsp"){ frame_size = max(frame_size, _imm_value(r.get("src", ""))) }
+         _canonical_value_reg(family, r.get("dst", "")) == "rsp"){ frame_size = max(frame_size, _imm_value(r.get("src", ""))) }
       def sl = _stack_slot_for_ops(r.get("operands", ""))
       if sl.len > 0 {
          def key = sl.get("base", "") + ":" + to_str(sl.get("offset", 0))
@@ -3579,7 +3584,7 @@ fn _signature_guess(list rows) dict {
          }
          j += 1
       }
-      def wr = _alias_reg_for (regs, r.get("dst", ""))
+      def wr = _alias_reg_for(regs, r.get("dst", ""))
       if wr.len > 0 { written = written.set(wr, true) }
       i += 1
    }
@@ -3637,7 +3642,7 @@ fn _incoming_call_signature(dict bin, int callee, int max_bytes=512) dict {
             def c = cs[ci]
             if int(c.get("target", 0)) == callee {
                calls = calls.append({"caller": _rename_name(bin, f.get("name", "sub_" + str.to_hex(faddr, 0))),
-               "caller_addr": faddr, "site": int(c.get("addr", 0)), "args": c.get("args", [])})
+                     "caller_addr": faddr, "site": int(c.get("addr", 0)), "args": c.get("args", [])})
                def args = c.get("args", [])
                mut ai = 0
                while ai < args.len {
@@ -3651,7 +3656,7 @@ fn _incoming_call_signature(dict bin, int callee, int max_bytes=512) dict {
                            "example": a.get("value", ""), "site": int(c.get("addr", 0)),
                            "caller": _rename_name(bin, f.get("name", "sub_" + str.to_hex(faddr, 0))),
                            "ref_kind": a.get("ref_kind", ""), "ref_name": a.get("ref_name", ""),
-                     "ref_target": int(a.get("ref_target", 0))})
+                           "ref_target": int(a.get("ref_target", 0))})
                   }
                   ai += 1
                }
@@ -3736,7 +3741,7 @@ fn _field_indexed_for_reg(str op, str reg) bool {
    def base = mem.get("base", "")
    def index = mem.get("index", "")
    if index.len == 0 { return false }
-   _alias_reg_for ([reg], base) == reg || _alias_reg_for ([reg], index) == reg
+   _alias_reg_for([reg], base) == reg || _alias_reg_for([reg], index) == reg
 }
 
 fn _field_pos(list fields, int offset) int {
@@ -3778,7 +3783,7 @@ fn _fields_for_param(dict bin, list rows, dict p) list {
          if _field_pos(fields, off) < 0 {
             def raw_name = "field_" + str.to_hex(_iabs(off), 0)
             def f = {"name": raw_name, "raw_name": raw_name, "offset": off,
-            "type": _field_type_guess(op), "accesses": [rec.set("operand", op)]}
+               "type": _field_type_guess(op), "accesses": [rec.set("operand", op)]}
             fields = fields.append(f.set("name", _field_rename(bin, p, f)))
          } else {
             def fp = _field_pos(fields, off)
@@ -3884,13 +3889,13 @@ fn _propagate_outgoing_struct_fields(dict bin, dict sig, list rows, int max_byte
                      params = params.append({"name": "arg" + to_str(idx), "reg": reg, "kind": "outgoing_call_struct_guess",
                            "type": "struct", "shape": "struct_ptr",
                            "fields": _copy_fields_for_param(bin, {"name": "arg" + to_str(idx), "reg": reg}, cp.get("fields", []), "callee_" + str.to_hex(int(r.get("target", 0)), 0)),
-                     "callee": int(r.get("target", 0)), "site": int(r.get("addr", 0))})
+                           "callee": int(r.get("target", 0)), "site": int(r.get("addr", 0))})
                   } else {
                      def p = params[pp]
                      if p.get("shape", "") != "struct_ptr" {
                         params = params.set(pp, p.set("type", "struct").set("shape", "struct_ptr")
                            .set("fields", _copy_fields_for_param(bin, p, cp.get("fields", []), "callee_" + str.to_hex(int(r.get("target", 0)), 0)))
-                        .set("callee", int(r.get("target", 0))).set("site", int(r.get("addr", 0))))
+                           .set("callee", int(r.get("target", 0))).set("site", int(r.get("addr", 0))))
                      }
                   }
                }
@@ -3967,7 +3972,7 @@ fn _x86_stack_param_for_operand(str op) dict {
    if off < 8 || off % 4 != 0 { return dict() }
    def idx = (off - 8) / 4
    {"name": "arg" + to_str(idx), "reg": "stack" + to_str(idx), "kind": "x86_stack_frame_guess",
-   "stack_offset": off, "abi_index": idx, "type": "unknown", "shape": "unknown"}
+      "stack_offset": off, "abi_index": idx, "type": "unknown", "shape": "unknown"}
 }
 
 fn _signature_stack_params(list rows) list {
@@ -4004,7 +4009,7 @@ fn _signature_stack_params(list rows) list {
       } else {
          out = out.append({"name": "arg" + to_str(i), "reg": "stack" + to_str(i),
                "kind": "x86_stack_frame_gap", "stack_offset": 8 + i * 4,
-         "abi_index": i, "type": "unknown", "shape": "unknown"})
+               "abi_index": i, "type": "unknown", "shape": "unknown"})
       }
       i += 1
    }
@@ -4025,10 +4030,10 @@ fn _merge_stack_signature(dict sig, list rows) dict {
    sig.set("params", params)
 }
 
-fn _function_signature_for (dict bin, any target, list rows, int addr, int max_bytes=512) dict {
+fn _function_signature_for(dict bin, any target, list rows, int addr, int max_bytes=512) dict {
    _signature_order_params(_merge_stack_signature(_propagate_outgoing_struct_fields(bin,
             _apply_signature_fields(bin, _merge_signature(_signature_guess(rows), _incoming_call_signature(bin, addr, max_bytes)), rows),
-   rows, max_bytes), rows))
+            rows, max_bytes), rows))
 }
 
 fn _signature_order_params(dict sig) dict {
@@ -4095,7 +4100,7 @@ fn _signature_main_aliases(dict sig, str name) dict {
          def family = _abi_family_from_name(abi)
          def stride = (abi == "sysv_x86_64" || family == "aarch64" || family == "riscv") ? 8 : 4
          params = params.set(i, params[i].set("name", "argv").set("type", "ptr")
-         .set("shape", "argv").set("role", "argv").set("pointer_index_stride", stride))
+            .set("shape", "argv").set("role", "argv").set("pointer_index_stride", stride))
       }
       i += 1
    }
@@ -4225,7 +4230,7 @@ fn _tracked_value_regs(str family) list {
 }
 
 fn _canonical_value_reg(str family, str op) str {
-   _alias_reg_for (_tracked_value_regs(family), str.strip(op))
+   _alias_reg_for(_tracked_value_regs(family), str.strip(op))
 }
 
 fn _stack_value_reg(str family, str reg0) bool {
@@ -4378,12 +4383,12 @@ fn _resolve_reg_value_cfg(dict bin, list rows, int before, str family, str reg, 
             clobbered = true
             break
          }
-         if _alias_reg_for ([reg], r.get("dst", "")) == reg {
+         if _alias_reg_for([reg], r.get("dst", "")) == reg {
             if (op == "assign" || op == "arith") && r.get("dst_kind", "") == "reg" {
                def value = _resolve_reg_row_value(bin, rows, j, r, depth)
                if _clean_row_saves_recent_call_result(rows, j) {
                   return _copy_ref_fields({"value": reg, "site": int(r.get("addr", 0)), "reg": reg,
-                  "crossed_call": false, "snapshot": "call_result"}, r)
+                        "crossed_call": false, "snapshot": "call_result"}, r)
                }
                def src_reg = _canonical_value_reg(family, value)
                if src_reg.len > 0 && src_reg != reg {
@@ -4391,14 +4396,14 @@ fn _resolve_reg_value_cfg(dict bin, list rows, int before, str family, str reg, 
                   if nested.len > 0 {
                      if _clean_value_symbols_redefined_between(bin, rows, j + 1, before - 1, family, nested.get("value", "")) {
                         return {"value": reg, "site": int(r.get("addr", 0)), "reg": reg, "stale": true,
-                        "crossed_call": false}
+                           "crossed_call": false}
                      }
                      return nested.set("via", value).set("resolved_site", int(r.get("addr", 0))).set("crossed_call", nested.get("crossed_call", false))
                   }
                }
                if _clean_value_symbols_redefined_between(bin, rows, j + 1, before - 1, family, value) {
                   return {"value": reg, "site": int(r.get("addr", 0)), "reg": reg, "stale": true,
-                  "crossed_call": false}
+                     "crossed_call": false}
                }
                return _copy_ref_fields({"value": value, "site": int(r.get("addr", 0)), "reg": reg, "crossed_call": false}, r)
             }
@@ -4446,7 +4451,7 @@ fn _resolve_reg_value(list rows, int before, str family, str reg, int depth=0, a
          continue
       }
       if op == "syscall" || op == "return" { break }
-      if _alias_reg_for ([reg], r.get("dst", "")) == reg {
+      if _alias_reg_for([reg], r.get("dst", "")) == reg {
          if (!((op == "assign" || op == "arith") && r.get("dst_kind", "") == "reg") &&
             !(op == "stack" && r.get("mnemonic", "") == "pop")){
             j -= 1
@@ -4455,7 +4460,7 @@ fn _resolve_reg_value(list rows, int before, str family, str reg, int depth=0, a
          def value = _resolve_reg_row_value(bin, rows, j, r, depth)
          if _clean_row_saves_recent_call_result(rows, j) {
             return _copy_ref_fields({"value": reg, "site": int(r.get("addr", 0)), "reg": reg,
-            "crossed_call": crossed_call, "snapshot": "call_result"}, r)
+                  "crossed_call": crossed_call, "snapshot": "call_result"}, r)
          }
          def src_reg = _canonical_value_reg(family, value)
          if src_reg.len > 0 && src_reg != reg {
@@ -4464,7 +4469,7 @@ fn _resolve_reg_value(list rows, int before, str family, str reg, int depth=0, a
                def nested_value = nested.get("value", "")
                if _clean_value_symbols_redefined_between(bin, rows, j + 1, before - 1, family, nested_value) {
                   return {"value": reg, "site": int(r.get("addr", 0)), "reg": reg, "stale": true,
-                  "crossed_call": crossed_call}
+                     "crossed_call": crossed_call}
                }
                def resolved = nested.set("via", value).set("resolved_site", int(r.get("addr", 0)))
                return resolved.set("crossed_call", crossed_call || nested.get("crossed_call", false))
@@ -4472,10 +4477,10 @@ fn _resolve_reg_value(list rows, int before, str family, str reg, int depth=0, a
          }
          if _clean_value_symbols_redefined_between(bin, rows, j + 1, before - 1, family, value) {
             return {"value": reg, "site": int(r.get("addr", 0)), "reg": reg, "stale": true,
-            "crossed_call": crossed_call}
+               "crossed_call": crossed_call}
          }
          return _copy_ref_fields({"value": value, "site": int(r.get("addr", 0)), "reg": reg,
-         "crossed_call": crossed_call}, r)
+               "crossed_call": crossed_call}, r)
       }
       j -= 1
    }
@@ -4532,7 +4537,7 @@ fn _call_stack_arg_model(dict bin, list rows, int idx) list {
          if slot >= 0 && !by_slot.contains(to_str(slot)) {
             def value = _clean_store_src_expr_at(bin, rows, j - 1, r.get("src", ""))
             mut arg = {"reg": "stack" + to_str(slot), "stack_index": slot, "value": value,
-            "site": int(r.get("addr", 0)), "effect": r.get("effect", "")}
+               "site": int(r.get("addr", 0)), "effect": r.get("effect", "")}
             if r.get("ref_kind", "").len > 0 {
                arg = arg.set("ref_kind", r.get("ref_kind", "")).set("ref_name", r.get("ref_name", ""))
                .set("ref_target", int(r.get("ref_target", 0))).set("ref", r.get("ref", dict()))
@@ -4579,7 +4584,7 @@ fn _arg_model_for_regs(list rows, int idx, list regs) list {
       def r = rows[j]
       if r.get("op", "") == "call" || r.get("op", "") == "branch" || r.get("op", "") == "syscall" { break }
       if r.get("op", "") == "stack" && r.get("mnemonic", "") == "push" { j -= 1 continue }
-      def wr = _alias_reg_for (regs, r.get("dst", ""))
+      def wr = _alias_reg_for(regs, r.get("dst", ""))
       if wr.len > 0 && !filled.get(wr, false) {
          def value = _effect_rhs(r.get("effect", ""), _ny_operand(r.get("src", "")))
          if value.len > 0 {
@@ -4617,7 +4622,6 @@ fn _value_for_reg(list args, str reg, str fallback) str {
    fallback
 }
 
-
 fn _syscall_profile_for_rows(list rows, int idx) dict {
    def family = (idx >= 0 && idx < rows.len) ? rows[idx].get("family", _rows_family(rows)) : _rows_family(rows)
    _syscall_profile_for_family(family)
@@ -4643,7 +4647,7 @@ fn _syscall_nr(list rows, int idx) int {
    while j >= 0 && idx - j <= 12 {
       def r = rows[j]
       if r.get("op", "") == "call" || r.get("op", "") == "branch" || r.get("op", "") == "syscall" { break }
-      if _alias_reg_for ([nr_reg], r.get("dst", "")) == nr_reg { return _imm_value(_effect_rhs(r.get("effect", ""), r.get("src", ""))) }
+      if _alias_reg_for([nr_reg], r.get("dst", "")) == nr_reg { return _imm_value(_effect_rhs(r.get("effect", ""), r.get("src", ""))) }
       j -= 1
    }
    -1
@@ -4656,7 +4660,7 @@ fn _syscall_render(list rows, int idx) str {
    def nr = _syscall_nr(rows, idx)
    def regs = prof.get("args", [])
    def ret = prof.get("ret", "rax")
-   def name = _syscall_name_for (family, nr)
+   def name = _syscall_name_for(family, nr)
    def a0 = _value_for_reg(args, regs.len > 0 ? regs[0] : "", "arg0")
    def a1 = _value_for_reg(args, regs.len > 1 ? regs[1] : "", "arg1")
    def a2 = _value_for_reg(args, regs.len > 2 ? regs[2] : "", "arg2")
@@ -4724,7 +4728,7 @@ fn _next_syscall_nr(list rows, int idx) int {
          while j >= 0 && i - j <= 12 {
             def r = rows[j]
             if r.get("op", "") == "call" || r.get("op", "") == "branch" || r.get("op", "") == "syscall" { break }
-            if _alias_reg_for ([nr_reg], r.get("dst", "")) == nr_reg { return _imm_value(_effect_rhs(r.get("effect", ""), r.get("src", ""))) }
+            if _alias_reg_for([nr_reg], r.get("dst", "")) == nr_reg { return _imm_value(_effect_rhs(r.get("effect", ""), r.get("src", ""))) }
             j -= 1
          }
          return -1
@@ -4753,7 +4757,7 @@ fn _syscall_setup_effect(list rows, int idx, dict row) str {
    if reg.len == 0 { return "" }
    def nr = _next_syscall_nr(rows, idx)
    if nr < 0 { return "" }
-   def label = _syscall_arg_label_for (_next_syscall_family(rows, idx), nr, reg)
+   def label = _syscall_arg_label_for(_next_syscall_family(rows, idx), nr, reg)
    label + " = " + (label == "syscall_nr" ? to_str(nr) : _effect_rhs(row.get("effect", ""), _ny_operand(row.get("src", ""))))
 }
 
@@ -4762,7 +4766,7 @@ fn _call_record(dict bin, dict sig, list rows, int idx) dict {
    def args = bin.len > 0 ? _call_arg_model_with_sig(bin, sig, rows, idx) : _call_arg_model(rows, idx)
    {"addr": r.get("addr", 0), "name": r.get("target_name", ""), "target": r.get("target", 0),
       "mem_target": r.get("mem_target", 0), "args": args,
-   "argc": args.len, "effect": _call_render(r.get("target_name", "call_target"), args, r.get("family", _rows_family(rows)))}
+      "argc": args.len, "effect": _call_render(r.get("target_name", "call_target"), args, r.get("family", _rows_family(rows)))}
 }
 
 fn _calls_model(list rows, any bin0=dict(), any sig0=dict()) list {
@@ -4780,7 +4784,6 @@ fn _calls_model(list rows, any bin0=dict(), any sig0=dict()) list {
    out
 }
 
-
 fn _type_fields_from_offsets_widths(list offsets, list widths) list {
    mut out = []
    mut i = 0
@@ -4789,7 +4792,7 @@ fn _type_fields_from_offsets_widths(list offsets, list widths) list {
       def width = i < widths.len ? int(widths[i]) : 0
       out = out.append({"name": "field_" + str.to_hex(_iabs(off), 0), "offset": off,
             "raw_name": "field_" + str.to_hex(_iabs(off), 0),
-      "type": _type_field_type_from_width(width), "width": width})
+            "type": _type_field_type_from_width(width), "width": width})
       i += 1
    }
    out
@@ -4988,7 +4991,7 @@ fn _type_local_record_for_arg(dict call, dict arg) dict {
    {"name": lname, "kind": "local", "type": typ, "shape": shape,
       "role": role, "buffer_size": sz, "source": cname,
       "evidence": [{"kind": "call_arg", "addr": int(call.get("addr", 0)),
-   "call": cname, "role": role, "size": sz, "value": arg.get("value", "")}]}
+            "call": cname, "role": role, "size": sz, "value": arg.get("value", "")}]}
 }
 
 fn _type_suggest_base(dict rec) str {
@@ -5112,14 +5115,14 @@ fn _type_expr_call_name(str expr0) str {
 fn _type_rendered_add_offset(dict groups0, str name, int off, str raw, str access, dict parts) dict {
    mut groups = groups0
    mut g = groups.get(name, {"name": name, "kind": "local", "type": "unknown", "shape": "unknown",
-   "offsets": [], "fields": [], "evidence": []})
+         "offsets": [], "fields": [], "evidence": []})
    g = g.set("offsets", _int_insert_sorted_unique(g.get("offsets", []), off))
    mut f = _type_default_field(off)
    def hint = _type_field_hint_for_access(name, off, str.strip(raw), access, parts)
    if hint.len > 0 { f = hint }
    g = g.set("fields", _type_merge_field(g.get("fields", []), f))
    g = g.set("evidence", g.get("evidence", []).append({"kind": "indexed_access", "offset": off,
-   "access": access, "text": str.strip(raw)}))
+            "access": access, "text": str.strip(raw)}))
    groups.set(name, g)
 }
 
@@ -5313,10 +5316,10 @@ fn _type_rendered_scanf_local(dict groups0, str text, str raw, str name) dict {
    }
    mut groups = groups0
    mut g = groups.get(lname, {"name": lname, "kind": "local", "type": typ, "shape": shape,
-   "offsets": [], "fields": [], "evidence": []})
+         "offsets": [], "fields": [], "evidence": []})
    g = g.set("type", typ).set("shape", shape).set("role", role).set("source", name)
    .set("evidence", g.get("evidence", []).append({"kind": "call_arg", "call": name,
-   "role": role, "format": fmt, "text": raw}))
+            "role": role, "format": fmt, "text": raw}))
    groups.set(lname, g)
 }
 
@@ -5358,7 +5361,7 @@ fn _type_rendered_loop_counters(list lines) list {
             out = out.append({"name": fname, "kind": "local", "type": "int", "shape": "scalar",
                   "role": "loop_counter", "source": "rendered_for", "range": fparts.get("range", ""),
                   "condition": fparts.get("condition", ""),
-            "evidence": [{"kind": "loop_counter_for", "line": i, "text": str.strip(lines[i])}]})
+                  "evidence": [{"kind": "loop_counter_for", "line": i, "text": str.strip(lines[i])}]})
          }
          i += 1
          continue
@@ -5377,7 +5380,7 @@ fn _type_rendered_loop_counters(list lines) list {
                      "bound": cond.get("bound", ""), "condition": cond.get("condition", ""),
                      "evidence": [{"kind": "loop_counter_init", "line": int(init.get("line", 0)), "text": init.get("text", "")},
                         {"kind": "loop_counter_condition", "line": i, "text": str.strip(lines[i])},
-               {"kind": "loop_counter_step", "line": int(step.get("line", 0)), "text": step.get("text", "")}]})
+                        {"kind": "loop_counter_step", "line": int(step.get("line", 0)), "text": step.get("text", "")}]})
             }
          }
       }
@@ -5405,10 +5408,10 @@ fn _type_rendered_local_layouts(str text) list {
                   def size = _type_alloc_size_from_args(cname, _args_from_values(args0))
                   def lname = parts.get("lhs", "")
                   mut g = groups.get(lname, {"name": lname, "kind": "local", "type": "void*", "shape": "heap_ptr",
-                  "offsets": [], "fields": [], "evidence": []})
+                        "offsets": [], "fields": [], "evidence": []})
                   g = g.set("type", "void*").set("shape", "heap_ptr").set("alloc_size", size)
                   .set("source", cname).set("evidence", g.get("evidence", []).append({"kind": "call_return",
-                  "call": cname, "size": size, "text": raw}))
+                           "call": cname, "size": size, "text": raw}))
                   groups = groups.set(lname, g)
                }
             }
@@ -5423,10 +5426,10 @@ fn _type_rendered_local_layouts(str text) list {
             if lname.len > 0 {
                def sz = _looks_int_literal(str.strip(fgets_args[1])) ? _parse_int_piece(str.strip(fgets_args[1])) : 0
                mut g = groups.get(lname, {"name": lname, "kind": "local", "type": "char[]", "shape": "input_buffer",
-               "offsets": [], "fields": [], "evidence": []})
+                     "offsets": [], "fields": [], "evidence": []})
                g = g.set("type", "char[]").set("shape", "input_buffer").set("buffer_size", sz)
                .set("source", "fgets").set("evidence", g.get("evidence", []).append({"kind": "call_arg",
-               "call": "fgets", "role": "input_buffer", "size": sz, "text": raw}))
+                        "call": "fgets", "role": "input_buffer", "size": sz, "text": raw}))
                groups = groups.set(lname, g)
             }
          }
@@ -5439,7 +5442,7 @@ fn _type_rendered_local_layouts(str text) list {
       def c = counters[i]
       def name = c.get("name", "")
       mut g = groups.get(name, {"name": name, "kind": "local", "type": "unknown", "shape": "unknown",
-      "offsets": [], "fields": [], "evidence": []})
+            "offsets": [], "fields": [], "evidence": []})
       g = _type_merge_local([g], c)[0]
       groups = groups.set(name, g)
       i += 1
@@ -5475,7 +5478,7 @@ fn _type_rendered_local_layouts(str text) list {
 fn _type_rendered_known_calls(str text) list {
    def names = ["malloc", "calloc", "realloc", "free", "fgets", "fread", "read",
       "memcpy", "memmove", "memset", "memfrob", "strcmp", "strncmp", "memcmp",
-   "strlen", "atoi", "strtol", "fopen", "fclose"]
+      "strlen", "atoi", "strtol", "fopen", "fclose"]
    def lines = str.split(text, "\n")
    mut out = []
    mut i = 0
@@ -5515,7 +5518,7 @@ fn _type_recovery_from_rows(dict bin, any target, list rows, dict factset, dict 
       if r.get("op", "") == "call" {
          def args = _call_arg_model_with_sig(bin, sig, rows, i)
          def rec = _type_known_call_record(r.get("target_name", ""), args,
-         {"source": "rows", "addr": int(r.get("addr", 0)), "target": int(r.get("target", 0))})
+            {"source": "rows", "addr": int(r.get("addr", 0)), "target": int(r.get("target", 0))})
          if rec.len > 0 {
             typed_calls = typed_calls.append(rec)
             def ret = rec.get("return", dict())
@@ -5526,7 +5529,7 @@ fn _type_recovery_from_rows(dict bin, any target, list rows, dict factset, dict 
                   locals = _type_merge_local(locals, {"name": dst, "kind": "local", "type": "void*",
                         "shape": "heap_ptr", "alloc_size": _type_alloc_size_from_args(rec.get("name", ""), args),
                         "source": rec.get("name", ""), "evidence": [{"kind": "call_return", "addr": int(r.get("addr", 0)),
-                  "call": rec.get("name", "")}]})
+                              "call": rec.get("name", "")}]})
                }
             }
             def targs = rec.get("args", [])
@@ -5547,7 +5550,7 @@ fn _type_recovery_from_rows(dict bin, any target, list rows, dict factset, dict 
       if p.get("fields", []).len > 0 {
          structs = structs.append({"name": p.get("name", "arg" + to_str(i)) + "_t",
                "owner": p.get("name", ""), "owner_kind": "param", "shape": p.get("shape", "struct_ptr"),
-         "type": p.get("type", "struct"), "fields": p.get("fields", []), "source": "signature"})
+               "type": p.get("type", "struct"), "fields": p.get("fields", []), "source": "signature"})
       }
       i += 1
    }
@@ -5559,14 +5562,14 @@ fn _type_recovery_from_rows(dict bin, any target, list rows, dict factset, dict 
          structs = structs.append({"name": "shape_" + to_str(i), "owner": sh.get("base", ""),
                "owner_kind": "memory_shape", "shape": sh.get("kind", ""), "type": sh.get("kind", "") == "strided_array" ? "array" : "struct",
                "fields": _type_fields_from_offsets_widths(sh.get("offsets", []), sh.get("widths", [])),
-         "stride": int(sh.get("stride", 0)), "span": int(sh.get("span", 0)), "source": "facts"})
+               "stride": int(sh.get("stride", 0)), "span": int(sh.get("span", 0)), "source": "facts"})
       }
       i += 1
    }
    _type_finalize_recovery({"kind": "type_recovery", "language": "ny", "target": target, "arch": arch(bin),
          "params": params, "locals": locals, "calls": typed_calls, "structs": structs,
          "memory_shapes": shapes, "source": "rows+facts", "max_bytes": max_bytes,
-   "call_count": typed_calls.len, "local_count": locals.len, "struct_count": structs.len})
+         "call_count": typed_calls.len, "local_count": locals.len, "struct_count": structs.len})
 }
 
 fn _type_recovery_with_rendered(dict rec0, str text) dict {
@@ -5593,14 +5596,14 @@ fn _type_recovery_with_rendered(dict rec0, str text) dict {
          structs = structs.append({"name": l.get("name", "") + "_t", "owner": l.get("name", ""),
                "owner_kind": "local", "shape": l.get("shape", "local_struct"),
                "type": l.get("type", "struct_like"), "alloc_size": int(l.get("alloc_size", 0)),
-         "fields": l.get("fields", []), "source": "rendered"})
+               "fields": l.get("fields", []), "source": "rendered"})
       }
       i += 1
    }
    _type_finalize_recovery(rec.set("locals", all).set("structs", structs)
       .set("calls", calls)
       .set("local_count", all.len).set("struct_count", structs.len)
-   .set("call_count", calls.len))
+      .set("call_count", calls.len))
 }
 
 fn _syscalls_model(list rows) list {
@@ -5610,8 +5613,8 @@ fn _syscalls_model(list rows) list {
       def r = rows[i]
       if r.get("op", "") == "syscall" {
          def nr = _syscall_nr(rows, i)
-         out = out.append({"addr": r.get("addr", 0), "nr": nr, "name": _syscall_name_for (r.get("family", _rows_family(rows)), nr),
-         "args": _syscall_args_model(rows, i), "effect": _syscall_render(rows, i)})
+         out = out.append({"addr": r.get("addr", 0), "nr": nr, "name": _syscall_name_for(r.get("family", _rows_family(rows)), nr),
+               "args": _syscall_args_model(rows, i), "effect": _syscall_render(rows, i)})
       }
       i += 1
    }
@@ -5629,7 +5632,7 @@ fn _var_pos(list vars, str kind, str name) int {
 
 fn _var_site(dict row, str access, str role="") dict {
    {"addr": row.get("addr", 0), "access": access, "role": role,
-   "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
+      "mnemonic": row.get("mnemonic", ""), "operand": row.get("operands", "")}
 }
 
 fn _var_add_use(list vars, str kind, str name, str storage, str type_guess, dict site) list {
@@ -5666,7 +5669,7 @@ fn _variables_from_rows(dict bin, list rows, dict sig0, str sig_name) list {
    while i < slots.len {
       def sl = slots[i]
       out = _var_add_use(out, "local", _rename_name(bin, sl.get("name", "")), sl.get("base", "") + to_str(sl.get("offset", 0)), "unknown",
-      {"addr": 0, "access": "declare", "role": "stack_slot", "mnemonic": "", "operand": ""})
+         {"addr": 0, "access": "declare", "role": "stack_slot", "mnemonic": "", "operand": ""})
       i += 1
    }
    def ps = sig.get("params", [])
@@ -5674,14 +5677,14 @@ fn _variables_from_rows(dict bin, list rows, dict sig0, str sig_name) list {
    while i < ps.len {
       def p = ps[i]
       out = _var_add_use(out, "param", _rename_name(bin, p.get("name", "")), p.get("reg", ""), p.get("type", "unknown"),
-      {"addr": 0, "access": "declare", "role": p.get("kind", ""), "mnemonic": "", "operand": ""})
+         {"addr": 0, "access": "declare", "role": p.get("kind", ""), "mnemonic": "", "operand": ""})
       def fs = p.get("fields", [])
       mut fi = 0
       while fi < fs.len {
          def f = fs[fi]
          out = _var_add_use(out, "field", f.get("name", ""), p.get("name", "") + "+" + to_str(int(f.get("offset", 0))),
             f.get("type", "unknown"),
-         {"addr": 0, "access": "declare", "role": "struct_field", "mnemonic": "", "operand": "", "param": p.get("name", ""), "offset": int(f.get("offset", 0))})
+            {"addr": 0, "access": "declare", "role": "struct_field", "mnemonic": "", "operand": "", "param": p.get("name", ""), "offset": int(f.get("offset", 0))})
          fi += 1
       }
       i += 1
@@ -5692,17 +5695,17 @@ fn _variables_from_rows(dict bin, list rows, dict sig0, str sig_name) list {
       def dslot = _stack_slot_for_ops(r.get("dst", ""))
       if dslot.len > 0 {
          out = _var_add_use(out, "local", _rename_name(bin, dslot.get("name", "")), dslot.get("base", "") + to_str(dslot.get("offset", 0)),
-         _slot_type_guess(r.get("dst", "")), _var_site(r, r.get("op", "") == "compare" ? "read" : "write", "dst"))
+            _slot_type_guess(r.get("dst", "")), _var_site(r, r.get("op", "") == "compare" ? "read" : "write", "dst"))
       }
       def sslot = _stack_slot_for_ops(r.get("src", ""))
       if sslot.len > 0 {
          out = _var_add_use(out, "local", _rename_name(bin, sslot.get("name", "")), sslot.get("base", "") + to_str(sslot.get("offset", 0)),
-         _slot_type_guess(r.get("src", "")), _var_site(r, "read", "src"))
+            _slot_type_guess(r.get("src", "")), _var_site(r, "read", "src"))
       }
       if r.get("ref_name", "").len > 0 {
          def rk = r.get("ref_kind", "global")
          out = _var_add_use(out, rk, r.get("ref_name", ""), _hex(r.get("ref_target", 0)), rk == "string" ? "str" : "ptr",
-         _var_site(r, _global_access(r), "rip_relative"))
+            _var_site(r, _global_access(r), "rip_relative"))
       }
       def op = r.get("op", "")
       if op == "branch" {
@@ -5742,7 +5745,7 @@ fn variables(any source, any target=0, int max_bytes=1024) list {
    def rows = lift(bin, target, max_bytes)
    def tb = _target_bytes(bin, target, max_bytes)
    def sig_name = is_str(target) ? _safe_name(target, "sub") : _safe_name(tb.get("name", ""), "sub")
-   _variables_from_rows(bin, rows, _function_signature_for (bin, target, rows, int(tb.get("addr", 0)), max_bytes), sig_name)
+   _variables_from_rows(bin, rows, _function_signature_for(bin, target, rows, int(tb.get("addr", 0)), max_bytes), sig_name)
 }
 
 fn _call_render(str name, list args, str family="x86") str {
@@ -5911,7 +5914,7 @@ fn _param_name_for_token(dict sig, str family, str tok) str {
    mut i = 0
    while i < ps.len {
       def p = ps[i]
-      if _alias_reg_for ([p.get("reg", "")], canon).len > 0 || _alias_reg_for ([p.get("reg", "")], tok).len > 0 {
+      if _alias_reg_for([p.get("reg", "")], canon).len > 0 || _alias_reg_for([p.get("reg", "")], tok).len > 0 {
          return p.get("name", "")
       }
       i += 1
@@ -6113,7 +6116,7 @@ fn _clean_stack_byte_value_at(dict bin, list rows, int idx, dict row) dict {
       while j >= 0 && guard < 5 && value.len == 0 {
          def prev = rows[j]
          if (prev.get("op", "") == "call" || prev.get("op", "") == "branch" ||
-         prev.get("op", "") == "return"){ break }
+            prev.get("op", "") == "return"){ break }
          if prev.get("dst_kind", "") == "reg" && prev.get("src_kind", "") == "imm" {
             def prev_reg = _canonical_value_reg(family, prev.get("dst", ""))
             def src_reg = _canonical_value_reg(family, src)
@@ -6530,7 +6533,7 @@ fn _clean_pic_seed_addr_for_term(list rows, str term0) int {
    while i < rows.len {
       if _clean_pic_base_setup_row(rows, i) {
          def dst = _ny_operand(rows[i].get("dst", ""))
-         if dst == term || _alias_reg_for ([term], dst) == term {
+         if dst == term || _alias_reg_for([term], dst) == term {
             def call = rows[i - 1]
             return int(call.get("addr", 0)) + int(call.get("size", 0))
          }
@@ -6584,7 +6587,7 @@ fn _clean_data_base_addr_for_term(list rows, str term0) int {
       def r = rows[i]
       if r.get("op", "") == "assign" && r.get("ref_kind", "") == "data" && int(r.get("ref_target", 0)) > 0 {
          def dst = _ny_operand(r.get("dst", ""))
-         if (dst == term || _alias_reg_for ([term], dst) == term) && !_clean_data_base_reg_mutated_after(rows, i) {
+         if (dst == term || _alias_reg_for([term], dst) == term) && !_clean_data_base_reg_mutated_after(rows, i) {
             return int(r.get("ref_target", 0))
          }
       }
@@ -6712,7 +6715,7 @@ fn _clean_scaled_index_term(str term0) dict {
 fn _clean_plain_index_reg(dict sig, str term0) bool {
    def term = str.strip(term0)
    if (term.len == 0 || str.find(term, " ") >= 0 || str.find(term, "*") >= 0 ||
-   str.find(term, "+") >= 0 || str.find(term, "-") >= 0){ return false }
+      str.find(term, "+") >= 0 || str.find(term, "-") >= 0){ return false }
    _canonical_value_reg(_abi_family_from_name(sig.get("abi", "sysv_x86_64")), term).len > 0
 }
 
@@ -6874,7 +6877,7 @@ fn _clean_x86_stack_param_text(str expr0) str {
 fn _clean_expr_with_sig_bin(dict bin, dict sig, list rows, str expr0) str {
    def base0 = _clean_stack_literal_text(bin, rows,
       _clean_param_index_text(sig, _clean_dynamic_data_text_with_rows(bin, rows,
-   _clean_local_param_alias_text(sig, rows, _clean_expr_with_sig(sig, rows, expr0)))))
+            _clean_local_param_alias_text(sig, rows, _clean_expr_with_sig(sig, rows, expr0)))))
    def pic = _clean_data_addr_expr_with_rows(bin, rows, base0)
    def base = pic.len > 0 ? pic : base0
    _clean_simplify_redundant_casts(_clean_strip_zext_literal_index(_clean_param_index_text(sig, _clean_x86_stack_param_text(base))))
@@ -6940,7 +6943,7 @@ fn _clean_redefined_param_name_text(dict bin, dict sig, list rows, int before_id
                      raw_loop_reg = true
                   } else {
                      repl = _clean_operand_expr_at(bin, rows, before_idx, reg, 0, true,
-                     _append_all_unique(_clean_enclosing_loop_symbols(rows, before_idx, bin), recent))
+                        _append_all_unique(_clean_enclosing_loop_symbols(rows, before_idx, bin), recent))
                   }
                   if repl.len > 0 && !raw_loop_reg { repl = _clean_expr_with_sig_bin(bin, sig, rows, repl) }
                }
@@ -7078,7 +7081,7 @@ fn _clean_magic_folded_stmt_expr(str expr0) bool {
    def expr = str.strip(expr0)
    if expr.len == 0 || expr.len > 160 { return false }
    if (str.find(expr, "smulhi") >= 0 || str.find(expr, "umulhi") >= 0 ||
-   str.find(expr, "smul_wide") >= 0 || str.find(expr, "umul_wide") >= 0){ return false }
+      str.find(expr, "smul_wide") >= 0 || str.find(expr, "umul_wide") >= 0){ return false }
    str.find(expr, " / 3") >= 0 || str.find(expr, " % 3") >= 0
 }
 
@@ -7204,7 +7207,7 @@ fn _call_arg_model_with_sig(dict bin, dict caller_sig, list rows, int idx) list 
                }
                if resolved.len > 0 && resolved != reg {
                   value = _clean_redefined_param_name_text(bin, caller_sig, rows, idx - 1,
-                  _clean_expr_with_sig_bin(bin, caller_sig, rows, resolved))
+                     _clean_expr_with_sig_bin(bin, caller_sig, rows, resolved))
                }
                args = args.append(_arg_enrich({"reg": reg, "value": value, "site": int(row.get("addr", 0)), "kind": "signature_live_in"}, cidx))
             }
@@ -7389,7 +7392,7 @@ fn _clean_call_arg_model_with_sig(dict bin, dict caller_sig, list rows, int idx)
    while i < args.len {
       def arg = _clean_call_arg_value(bin, rows, idx, args[i])
       mut clean_value = _clean_post_inc_index_value(bin, rows, idx,
-      _clean_expr_with_sig_bin(bin, caller_sig, rows, arg.get("value", "")))
+         _clean_expr_with_sig_bin(bin, caller_sig, rows, arg.get("value", "")))
       def stack_array_arg = _clean_stack_byte_array_arg_text(bin, rows, idx, clean_value)
       if stack_array_arg.len > 0 { clean_value = stack_array_arg }
       out = out.append(arg.set("value", clean_value))
@@ -7410,7 +7413,7 @@ fn type_recovery(any source, any target=0, any opts=dict()) dict {
    def rows = lift(bin, target, maxb)
    def graph = cfg(bin, target, maxb)
    def factset = _facts_from(bin, target, rows, graph)
-   def sig = _function_signature_for (bin, target, rows, int(tb.get("addr", 0)), maxb)
+   def sig = _function_signature_for(bin, target, rows, int(tb.get("addr", 0)), maxb)
    mut rec = _type_recovery_from_rows(bin, target, rows, factset, sig, maxb).set("ok", true)
    if opts.contains("rendered_text") {
       rec = _type_recovery_with_rendered(rec, opts.get("rendered_text", ""))
@@ -7430,7 +7433,7 @@ fn function_model(any source, any target=0, int max_bytes=1024) dict {
    def graph = _cfg_from_rows(bin, raw)
    def factset = _facts_from(bin, target, rows, graph)
    def machines = _state_machines_from_rows(bin, rows)
-   def sig = _function_signature_for (bin, target, rows, int(tb.get("addr", 0)), max_bytes)
+   def sig = _function_signature_for(bin, target, rows, int(tb.get("addr", 0)), max_bytes)
    def trec = _type_recovery_from_rows(bin, target, rows, factset, sig, max_bytes)
    mut local_notes = []
    def ns = notes(bin)
@@ -7457,7 +7460,7 @@ fn function_model(any source, any target=0, int max_bytes=1024) dict {
       "state_machines": machines,
       "frame": _frame_model(rows), "signature": sig,
       "calls": _calls_model(rows, bin, sig), "syscalls": _syscalls_model(rows), "variables": _variables_from_rows(bin, rows, sig, sig_name),
-   "def_use": factset.get("def_use", dict()), "facts": factset, "type_recovery": trec, "notes": local_notes}
+      "def_use": factset.get("def_use", dict()), "facts": factset, "type_recovery": trec, "notes": local_notes}
 }
 
 fn function_signature(any source, any target=0, any opts=dict()) dict {
@@ -7466,7 +7469,7 @@ fn function_signature(any source, any target=0, any opts=dict()) dict {
    def maxb = int(opts.get("max_bytes", 512))
    def tb = _target_bytes(bin, target, maxb)
    def rows = lift(bin, target, maxb)
-   _function_signature_for (bin, target, rows, int(tb.get("addr", 0)), maxb)
+   _function_signature_for(bin, target, rows, int(tb.get("addr", 0)), maxb)
 }
 
 fn structured(any source, any target=0, int max_bytes=1024) dict {
@@ -7540,7 +7543,7 @@ fn semantic_summary(any source, any target=0, any opts=dict()) dict {
       "crackme_success_count": targets.get("success", []).len,
       "crackme_failure_count": targets.get("failure", []).len,
       "findings": findings, "finding_count": findings.len,
-   "model": model}
+      "model": model}
    out = out.set("score", _summary_score(out))
    out = out.set("recommendations", _summary_recommendations(out))
    out.set("text", _summary_text(out))
@@ -7555,7 +7558,7 @@ fn _hook_import_sites(dict proj, dict bin) dict {
       def addr = int(s.get("addr", 0))
       if addr > 0 {
          out = sym.project_proc(out, addr, s.get("name", "import_" + str.to_hex(addr, 0)),
-         {"kind": "import", "site": s, "size": 16, "ret": addr + 16})
+            {"kind": "import", "site": s, "size": 16, "ret": addr + 16})
       }
       i += 1
    }
@@ -7684,16 +7687,16 @@ fn symbolic_project(any source, any target=0, int max_bytes=4096) dict {
       if s.get("load", false) && int(s.get("filesz", 0)) > 0 {
          def data = _slice(bin.get("data", ""), int(s.get("offset", 0)), int(s.get("filesz", 0)))
          loads = loads.append({"addr": int(s.get("vaddr", 0)), "size": data.len, "memsz": int(s.get("memsz", 0)),
-         "data": data, "perms": _seg_perms(int(s.get("flags", 0))), "offset": int(s.get("offset", 0))})
+               "data": data, "perms": _seg_perms(int(s.get("flags", 0))), "offset": int(s.get("offset", 0))})
       }
       i += 1
    }
    if loads.len == 0 {
       loads = [{"addr": tb.get("addr", 0), "size": tb.get("bytes", "").len, "memsz": tb.get("bytes", "").len,
-      "data": tb.get("bytes", ""), "perms": "r-x", "offset": tb.get("offset", 0)}]
+            "data": tb.get("bytes", ""), "perms": "r-x", "offset": tb.get("offset", 0)}]
    }
    mut proj = sym.blob_project(tb.get("bytes", ""), {"arch": arch(bin), "base": tb.get("addr", 0), "entry": tb.get("addr", 0),
-   "name": tb.get("name", ""), "loads": loads})
+         "name": tb.get("name", ""), "loads": loads})
    proj = _hook_import_sites(proj, bin)
    proj.set("ok", true).set("range", {"addr": tb.get("addr", 0), "size": tb.get("bytes", "").len, "name": tb.get("name", "")})
    .set("load_count", loads.len)
@@ -7786,7 +7789,7 @@ fn _apply_harness_stack_args(dict st, any opts) dict {
             def slot = int(v.get("slot", base + 8 + i * psz))
             out = sym.mem_write_bytes(out, slot, _harness_le_bytes(ptr, psz))
             out = sym.state_symbolic_mem(out, ptr, int(v.get("n", v.get("len", 0))),
-            v.get("name", "stack_arg" + to_str(i)), int(v.get("lo", 0)), int(v.get("hi", 255)))
+               v.get("name", "stack_arg" + to_str(i)), int(v.get("lo", 0)), int(v.get("hi", 255)))
          }
          i += 1
       }
@@ -7825,7 +7828,7 @@ fn _apply_harness_symbolic_regs(dict st, any spec) dict {
          if is_dict(v) {
             def reg = v.get("reg", v.get("name", ""))
             out = sym.state_symbolic_reg(out, reg,
-            v.get("symbol", v.get("sym", v.get("name", ""))), int(v.get("bits", 0)))
+               v.get("symbol", v.get("sym", v.get("name", ""))), int(v.get("bits", 0)))
             if v.contains("lo") || v.contains("hi") {
                out = sym.state_constrain_reg_range(out, reg, int(v.get("lo", 0)), int(v.get("hi", 255)))
             }
@@ -7847,11 +7850,11 @@ fn _apply_harness_assumption(dict st, any spec) dict {
       if spec.contains("eq") || spec.contains("bytes") || spec.contains("data") || spec.contains("value") {
          out = sym.state_constrain_symbolic_eq(out, name,
             spec.get("eq", spec.get("bytes", spec.get("data", spec.get("value", "")))),
-         int(spec.get("offset", -1)))
+            int(spec.get("offset", -1)))
       }
       if spec.contains("lo") || spec.contains("hi") {
          out = sym.state_constrain_symbolic_range(out, name, int(spec.get("lo", 0)), int(spec.get("hi", 255)),
-         int(spec.get("offset", 0)), int(spec.get("n", spec.get("len", 0))))
+            int(spec.get("offset", 0)), int(spec.get("n", spec.get("len", 0))))
       }
       return out
    }
@@ -7874,7 +7877,7 @@ fn _apply_harness_assumption(dict st, any spec) dict {
       }
       if spec.contains("lo") || spec.contains("hi") {
          out = sym.state_constrain_mem_range(out, addr, int(spec.get("n", spec.get("len", 1))),
-         int(spec.get("lo", 0)), int(spec.get("hi", 255)))
+            int(spec.get("lo", 0)), int(spec.get("hi", 255)))
       }
       return out
    }
@@ -7991,7 +7994,7 @@ fn symbolic_harness(any source, any target=0, any opts=dict()) dict {
          def m = sms[i]
          if is_dict(m) {
             st = sym.state_symbolic_mem(st, int(m.get("addr", 0)), int(m.get("n", m.get("len", 0))),
-            m.get("name", ""), int(m.get("lo", 0)), int(m.get("hi", 255)))
+               m.get("name", ""), int(m.get("lo", 0)), int(m.get("hi", 255)))
          }
          i += 1
       }
@@ -8010,7 +8013,7 @@ fn symbolic_harness(any source, any target=0, any opts=dict()) dict {
       "project": proj, "state": st, "simgr": mgr, "find": find_pred, "avoid": avoid_pred,
       "watch": watch_pred,
       "model": function_model(bin, target, int(opts.get("model_bytes", min(maxb, 1024)))),
-   "process": sym.state_process(st)}
+      "process": sym.state_process(st)}
 }
 
 fn symbolic_explore(any source, any target=0, any opts=dict()) dict {
@@ -8151,11 +8154,11 @@ fn _state_assignment(dict row, list aliases) dict {
    def lit = _state_literal_value(rhs)
    if lit.get("ok", false) {
       return {"ok": true, "value": int(lit.get("value", 0)), "expr": lit.get("expr", rhs),
-      "addr": int(row.get("addr", 0))}
+         "addr": int(row.get("addr", 0))}
    }
    if rhs.len > 0 {
       return {"ok": true, "value": -1, "expr": rhs, "symbolic": true,
-      "addr": int(row.get("addr", 0))}
+         "addr": int(row.get("addr", 0))}
    }
    {"ok": false, "expr": rhs, "addr": int(row.get("addr", 0))}
 }
@@ -8239,7 +8242,7 @@ fn _state_string_useful(str value) bool {
    while i < value.len {
       def c = load8(value, i)
       if (c == 32 || c == 45 || c == 95 || c == 58 || c == 33 || c == 63 || c == 46 ||
-      (c >= 97 && c <= 122) || str.ascii_is_digit(c)){ has_word_shape = true }
+         (c >= 97 && c <= 122) || str.ascii_is_digit(c)){ has_word_shape = true }
       i += 1
    }
    if !has_word_shape { return false }
@@ -8303,18 +8306,18 @@ fn _state_case_model(dict bin, list rows, dict swrow, dict entry, list entries, 
                transitions = _state_transition_unique(transitions, {"kind": "state_update",
                      "from_state": state, "to_state": int(last_assign.get("value", -1)),
                      "expr": last_assign.get("expr", ""), "guard": guard,
-               "site": int(r.get("addr", 0)), "assign_site": int(last_assign.get("addr", 0))})
+                     "site": int(r.get("addr", 0)), "assign_site": int(last_assign.get("addr", 0))})
             } else {
                transitions = _state_transition_unique(transitions, {"kind": "dispatcher_backedge",
                      "from_state": state, "to_state": state, "guard": guard,
-               "site": int(r.get("addr", 0))})
+                     "site": int(r.get("addr", 0))})
             }
          } elif to > 0 {
             def target_state = _state_target_case(entries, to)
             if target_state >= 0 {
                transitions = _state_transition_unique(transitions, {"kind": "case_jump",
                      "from_state": state, "to_state": target_state, "guard": guard,
-               "site": int(r.get("addr", 0)), "target": to})
+                     "site": int(r.get("addr", 0)), "target": to})
             }
          }
       } elif r.get("op", "") == "return" {
@@ -8326,14 +8329,14 @@ fn _state_case_model(dict bin, list rows, dict swrow, dict entry, list entries, 
       def fall_state = _state_target_case(entries, int(rows[end].get("addr", 0)))
       if fall_state >= 0 {
          transitions = transitions.append({"kind": "fallthrough", "from_state": state,
-         "to_state": fall_state, "guard": "", "site": int(rows[end - 1].get("addr", 0))})
+               "to_state": fall_state, "guard": "", "site": int(rows[end - 1].get("addr", 0))})
       }
    }
    {"state": state, "target": int(entry.get("target", 0)),
       "label": _rename_addr(bin, int(entry.get("target", 0)), entry.get("label", _label_name(int(entry.get("target", 0))))),
       "start_row": start, "end_row": end, "row_count": max(0, end - start),
       "strings": _state_case_strings(rows, start, end),
-   "transitions": transitions, "terminals": terminals}
+      "transitions": transitions, "terminals": terminals}
 }
 
 fn _state_transition_count(list cases) int {
@@ -8388,7 +8391,7 @@ fn _state_machines_from_rows(dict bin, list rows) list {
                      "family": r.get("family", _rows_family(rows)),
                      "relative": jt.get("relative", false), "case_count": cases.len,
                      "transition_count": _state_transition_count(cases),
-               "dispatcher_transition_count": dispatch_transitions, "cases": cases})
+                     "dispatcher_transition_count": dispatch_transitions, "cases": cases})
             }
          }
       }
@@ -8504,7 +8507,7 @@ fn _path_row_pseudo(list rows, int idx, dict row, dict trace) str {
    if op == "call" {
       def name = row.get("target_name", "")
       return _call_render(name.len > 0 ? name : "sub_" + str.to_hex(int(row.get("target", 0)), 0),
-      _call_arg_model(rows, idx), row.get("family", _rows_family(rows)))
+         _call_arg_model(rows, idx), row.get("family", _rows_family(rows)))
    }
    if op == "return" { return "return" }
    row.get("effect", "")
@@ -8523,7 +8526,7 @@ fn _path_trace_rows(list rows, list trace) list {
       mut rec = {"index": i, "addr": addr, "addr_hex": _hex(addr),
          "next": int(t.get("next", 0)), "next_hex": _hex(int(t.get("next", 0))),
          "backend": t.get("backend", ""), "condition": t.get("condition", ""),
-      "branch": t.get("branch", nil), "insn": t.get("insn", "")}
+         "branch": t.get("branch", nil), "insn": t.get("insn", "")}
       if r.len > 0 {
          rec = rec.set("mnemonic", r.get("mnemonic", "")).set("operands", r.get("operands", ""))
          .set("op", r.get("op", "")).set("effect", r.get("effect", ""))
@@ -8539,7 +8542,7 @@ fn _path_trace_rows(list rows, list trace) list {
             def args = _call_arg_model(rows, row_i)
             rec = rec.set("call", {"name": r.get("target_name", ""), "target": int(r.get("target", 0)),
                   "target_hex": _hex(int(r.get("target", 0))), "args": args,
-            "text": _call_render(r.get("target_name", "call_target"), args, r.get("family", _rows_family(rows)))})
+                  "text": _call_render(r.get("target_name", "call_target"), args, r.get("family", _rows_family(rows)))})
          }
       }
       out = out.append(rec)
@@ -8580,18 +8583,18 @@ fn _path_patch_candidates(dict branch) list {
    if chosen > 0 {
       out = out.append({"kind": "branch_patch", "action": "force_chosen",
             "addr": addr, "addr_hex": _hex(addr), "to": chosen, "to_hex": _hex(chosen),
-      "intent": "force solved route", "strategy": chosen == fall ? "nop_or_invert_to_fallthrough" : "make_unconditional_jump"})
+            "intent": "force solved route", "strategy": chosen == fall ? "nop_or_invert_to_fallthrough" : "make_unconditional_jump"})
    }
    if other > 0 {
       out = out.append({"kind": "branch_patch", "action": "force_alternate",
             "addr": addr, "addr_hex": _hex(addr), "to": other, "to_hex": _hex(other),
-      "intent": "force alternate route", "strategy": other == fall ? "nop_or_invert_to_fallthrough" : "make_unconditional_jump"})
+            "intent": "force alternate route", "strategy": other == fall ? "nop_or_invert_to_fallthrough" : "make_unconditional_jump"})
    }
    if target > 0 && fall > 0 {
       out = out.append({"kind": "branch_patch", "action": "invert_condition",
             "addr": addr, "addr_hex": _hex(addr), "target": target, "target_hex": _hex(target),
             "fallthrough": fall, "fallthrough_hex": _hex(fall),
-      "intent": "swap taken and fallthrough routes", "strategy": "invert_conditional_branch"})
+            "intent": "swap taken and fallthrough routes", "strategy": "invert_conditional_branch"})
    }
    out
 }
@@ -8616,7 +8619,7 @@ fn _path_decision_points(list branches) list {
          "taken": b.get("taken", b.get("branch", nil)), "chosen": chosen,
          "chosen_hex": _hex(chosen), "other": other, "other_hex": other > 0 ? _hex(other) : "",
          "target": target, "target_hex": b.get("target_hex", ""),
-      "fallthrough": fall, "fallthrough_hex": b.get("fallthrough_hex", "")}
+         "fallthrough": fall, "fallthrough_hex": b.get("fallthrough_hex", "")}
       rec = rec.set("patch_hints", _path_patch_hints(rec))
       rec = rec.set("patches", _path_patch_candidates(rec))
       out = out.append(rec)
@@ -8647,7 +8650,7 @@ fn _path_patch_plan(list decisions) dict {
    }
    {"kind": "path_patch_plan", "count": all.len, "patches": all,
       "solved_route": solved, "alternate_route": alternate, "invert": invert,
-   "recommended": solved}
+      "recommended": solved}
 }
 
 fn _path_condition_text(list pcs) str {
@@ -8683,7 +8686,7 @@ fn _path_explain_text(dict out) str {
    while i < branches.len {
       def b = branches[i]
       lines = lines.append("branch " + b.get("addr_hex", "") + " -> " + b.get("next_hex", "") +
-      " when " + b.get("condition", "") + " = " + to_str(b.get("branch", "")))
+         " when " + b.get("condition", "") + " = " + to_str(b.get("branch", "")))
       i += 1
    }
    def decisions = out.get("decisions", [])
@@ -8691,7 +8694,7 @@ fn _path_explain_text(dict out) str {
    while i < decisions.len {
       def d = decisions[i]
       lines = lines.append("decision " + d.get("addr_hex", "") + " chose " + d.get("chosen_hex", "") +
-      (d.get("other_hex", "").len > 0 ? (" other " + d.get("other_hex", "")) : ""))
+         (d.get("other_hex", "").len > 0 ? (" other " + d.get("other_hex", "")) : ""))
       i += 1
    }
    def conds = out.get("path_conditions_text", "")
@@ -8737,7 +8740,7 @@ fn path_explain(any source, any target=0, any opts=dict()) dict {
       "constraints": sol.get("constraints", 0), "model": sol,
       "inputs": sol.get("symbolics", dict()), "stdin": sol.get("stdin", nil),
       "argv": sol.get("argv", []), "regs": sol.get("regs", dict()),
-   "run": run}
+      "run": run}
    if out.get("path_text", "").len == 0 && path.len > 0 {
       mut ptext = ""
       mut i = 0
@@ -8759,7 +8762,7 @@ fn emulate(any source, any target=0, any regs=dict(), int count=0, int max_bytes
    def ap = arch_profile(bin)
    sym.unicorn_run(tb.get("bytes", ""), regs, {"arch": ap.get("arch", arch(bin)),
          "mode": ap.get("bits", 64) == 64 ? "64" : (ap.get("family", "") == "arm" ? "arm" : "32"),
-   "base": int(tb.get("addr", 0)), "count": count})
+         "base": int(tb.get("addr", 0)), "count": count})
 }
 
 fn _loop_header_map(list rows) dict {
@@ -8957,7 +8960,7 @@ fn _field_expr_for_operand(dict bin, dict sig, str op) str {
    while pi < params.len {
       def p = params[pi]
       def reg = p.get("reg", "")
-      if reg.len > 0 && p.get("shape", "") == "struct_ptr" && _alias_reg_for ([reg], mem.get("base", "")) == reg {
+      if reg.len > 0 && p.get("shape", "") == "struct_ptr" && _alias_reg_for([reg], mem.get("base", "")) == reg {
          def off = int(mem.get("offset", 0))
          def fs = p.get("fields", [])
          mut fi = 0
@@ -8994,7 +8997,7 @@ fn _clean_row_uses_loop_carried_param(dict sig, list rows, int idx, dict row) bo
    def loop_syms = _clean_enclosing_loop_symbols(rows, idx)
    if loop_syms.len == 0 { return false }
    def uses = _append_all_unique(_append_all_unique(_row_uses(row),
-   _symbols_from_text(row.get("dst", ""))), _symbols_from_text(row.get("src", "")))
+         _symbols_from_text(row.get("dst", ""))), _symbols_from_text(row.get("src", "")))
    def params = sig.get("params", [])
    mut i = 0
    while i < params.len {
@@ -9208,7 +9211,7 @@ fn _clean_loop_regions(list rows) list {
             def start = _row_index_for_addr(rows, to)
             if start >= 0 {
                out = out.append({"header_idx": start, "latch_idx": i,
-               "header": to, "latch": from})
+                     "header": to, "latch": from})
             }
          }
       }
@@ -9314,7 +9317,7 @@ fn _clean_callee_saved_stack_artifact_row(list rows, int idx) bool {
    if row.get("dst_kind", "") == "mem" {
       def lhs = _effect_lhs(row.get("effect", ""), _ny_operand(row.get("dst", "")))
       def src = _canonical_value_reg(family, row.get("src", ""))
-      return(str.startswith(lhs, "stack_") || str.startswith(lhs, "local_")) &&
+      return (str.startswith(lhs, "stack_") || str.startswith(lhs, "local_")) &&
       src.len > 0 && _callee_saved_value_reg(family, src)
    }
    if row.get("dst_kind", "") == "reg" {
@@ -9385,7 +9388,7 @@ fn _clean_skip_map(list rows, dict facts0) dict {
       }
       if ((!loop_keep || in_loop) && op == "assign" &&
          (_clean_byte_load_feeds_branch_compare(rows, i) ||
-         (_clean_byte_load_feeds_next_arith(rows, i) && !_clean_byte_load_feeds_loop_accumulator(rows, i)))){
+            (_clean_byte_load_feeds_next_arith(rows, i) && !_clean_byte_load_feeds_loop_accumulator(rows, i)))){
          out = out.set(to_str(i), true)
       }
       if !loop_keep && op == "assign" && r.get("kind", "") == "setcc" && _clean_setcc_feeds_branch(rows, i) {
@@ -9500,7 +9503,7 @@ fn _clean_row_feeds_call_arg(list rows, int idx) bool {
    if row.get("dst_kind", "") != "reg" { return false }
    def family = row.get("family", _rows_family(rows))
    def regs = _abi_profile(family).get("args", [])
-   def arg_reg = _alias_reg_for (regs, row.get("dst", ""))
+   def arg_reg = _alias_reg_for(regs, row.get("dst", ""))
    if arg_reg.len == 0 { return false }
    def aliases = _slice_symbol_aliases(arg_reg)
    mut j = idx + 1
@@ -9544,7 +9547,7 @@ fn _clean_row_feeds_return_expr(list rows, int idx) bool {
    if row.get("dst_kind", "") != "reg" { return false }
    def family = row.get("family", _rows_family(rows))
    def rets = _abi_profile(family).get("returns", [])
-   def ret_reg = _alias_reg_for (rets, row.get("dst", ""))
+   def ret_reg = _alias_reg_for(rets, row.get("dst", ""))
    if ret_reg.len == 0 { return false }
    def aliases = _slice_symbol_aliases(ret_reg)
    mut j = idx + 1
@@ -9584,7 +9587,7 @@ fn _clean_row_feeds_return_goto(list rows, int idx) bool {
    if row.get("dst_kind", "") != "reg" { return false }
    def family = row.get("family", _rows_family(rows))
    def rets = _abi_profile(family).get("returns", [])
-   def ret_reg = _alias_reg_for (rets, row.get("dst", ""))
+   def ret_reg = _alias_reg_for(rets, row.get("dst", ""))
    if ret_reg.len == 0 { return false }
    def aliases = _slice_symbol_aliases(ret_reg)
    mut j = idx + 1
@@ -9613,13 +9616,13 @@ fn _clean_call_result_saved_after(list rows, int idx) dict {
       def r = rows[j]
       def op = r.get("op", "")
       if op == "call" || op == "branch" || op == "syscall" || op == "return" { break }
-      if (op == "assign" || op == "arith") && r.get("dst_kind", "") == "reg" && _alias_reg_for (rets, r.get("src", "")).len > 0 {
+      if (op == "assign" || op == "arith") && r.get("dst_kind", "") == "reg" && _alias_reg_for(rets, r.get("src", "")).len > 0 {
          def dst = _ny_operand(r.get("dst", ""))
-         if _alias_reg_for (rets, dst).len == 0 {
+         if _alias_reg_for(rets, dst).len == 0 {
             return {"ok": true, "row": j, "dst": dst}
          }
       }
-      if _alias_reg_for (rets, r.get("dst", "")).len > 0 { break }
+      if _alias_reg_for(rets, r.get("dst", "")).len > 0 { break }
       j += 1
    }
    dict()
@@ -9629,7 +9632,7 @@ fn _clean_call_result_alias_operand(str op, str kind, list rets) str {
    if op.len == 0 { return "" }
    if kind.len > 0 && kind != "reg" { return "" }
    def n = str.lower(_ny_operand(op))
-   _alias_reg_for (rets, n).len > 0 ? n : ""
+   _alias_reg_for(rets, n).len > 0 ? n : ""
 }
 
 fn _clean_call_result_used_alias(list rets, dict row) str {
@@ -9906,7 +9909,7 @@ fn _clean_callee_saved_restore_row(list rows, int idx) bool {
       if op == "call" || op == "syscall" || (op == "branch" && r.get("condition", "") != "always") { return false }
       if op == "arith" && _ny_operand(r.get("dst", "")) == "rsp" && (m == "add" || m == "sub") { j += 1 continue }
       if op == "assign" && _clean_callee_saved_restore_row(rows, j) { j += 1 continue }
-      if (op == "assign" || op == "arith") && _alias_reg_for (_abi_profile(family).get("returns", []), r.get("dst", "")).len > 0 { j += 1 continue }
+      if (op == "assign" || op == "arith") && _alias_reg_for(_abi_profile(family).get("returns", []), r.get("dst", "")).len > 0 { j += 1 continue }
       return false
    }
    false
@@ -10031,7 +10034,7 @@ fn _clean_saved_param_alias_before(list rows, int before_idx, str family, str re
    while i <= before_idx && i < rows.len {
       def r = rows[i]
       def op = r.get("op", "")
-      if (_alias_reg_for ([reg], r.get("dst", "")) == reg &&
+      if (_alias_reg_for([reg], r.get("dst", "")) == reg &&
          ((op == "assign" || op == "arith") && r.get("dst_kind", "") == "reg")){
          def value = _effect_rhs(r.get("effect", ""), _ny_operand(r.get("src", "")))
          def value_reg = _canonical_value_reg(family, value)
@@ -10057,7 +10060,7 @@ fn _clean_nearest_callee_saved_param_alias(list rows, int before_idx, str family
    while j >= 0 {
       def r = rows[j]
       def op = r.get("op", "")
-      if _alias_reg_for ([reg], r.get("dst", "")) == reg {
+      if _alias_reg_for([reg], r.get("dst", "")) == reg {
          if (op == "assign" || op == "arith") && r.get("dst_kind", "") == "reg" {
             def value = _effect_rhs(r.get("effect", ""), _ny_operand(r.get("src", "")))
             def value_reg = _canonical_value_reg(family, value)
@@ -10415,7 +10418,7 @@ fn _clean_operand_expr_at(dict bin, list rows, int before_idx, str op0, int dept
          def family = r.get("family", _rows_family(rows))
          def canon = _canonical_value_reg(family, op)
          if (canon.len > 0 && (_callee_saved_value_reg(family, canon) ||
-            (bin.get("ok", false) && _local_call_preserves_reg(bin, r, family, canon)))){
+               (bin.get("ok", false) && _local_call_preserves_reg(bin, r, family, canon)))){
             j -= 1
             guard += 1
             continue
@@ -10517,7 +10520,7 @@ fn _clean_operand_expr_at(dict bin, list rows, int before_idx, str op0, int dept
             }
             if rk == "byte_swap32" || rk == "byte_swap64" {
                def prior = _clean_operand_expr_at(bin, rows, j - 1, dst, depth + 1, cross_forward_branches, preserve)
-               return(rk == "byte_swap64" ? "bswap64" : "bswap32") + "(" + prior + ")"
+               return (rk == "byte_swap64" ? "bswap64" : "bswap32") + "(" + prior + ")"
             }
             if rk == "unary" {
                def prior = _clean_operand_expr_at(bin, rows, j - 1, dst, depth + 1, cross_forward_branches, preserve)
@@ -10660,7 +10663,7 @@ fn _clean_setcc_feeds_bool_linear(list rows, int idx) bool {
    if !(next.get("op", "") == "arith" || (next.get("op", "") == "assign" && next.get("kind", "") == "lea")) { return false }
    if !_symbols_intersect(_slice_operand_symbols(next.get("dst", "")), _slice_operand_symbols(row.get("dst", ""))) { return false }
    def aliases = _append_all_unique(_slice_symbol_aliases(row.get("dst", "")),
-   _slice_symbol_aliases(next.get("dst", "")))
+      _slice_symbol_aliases(next.get("dst", "")))
    _clean_linear_bool_values(_effect_rhs(next.get("effect", ""), ""), aliases).get("ok", false)
 }
 
@@ -10862,7 +10865,7 @@ fn _clean_bool_linear_select_expr(dict bin, list rows, int row_idx, dict row) st
    if !_symbols_intersect(_slice_operand_symbols(row.get("dst", "")), _slice_operand_symbols(prev.get("dst", ""))) { return "" }
    def rhs = _effect_rhs(row.get("effect", ""), "")
    def aliases = _append_all_unique(_slice_symbol_aliases(prev.get("dst", "")),
-   _slice_symbol_aliases(row.get("dst", "")))
+      _slice_symbol_aliases(row.get("dst", "")))
    def vals = _clean_linear_bool_values(rhs, aliases)
    if !vals.get("ok", false) { return "" }
    def cond = _clean_bool_predicate_expr(_clean_setcc_expr(bin, rows, row_idx - 1, prev, 0))
@@ -10885,10 +10888,10 @@ fn _clean_cmov_minmax_expr(dict row, str lhs, str rhs, str moved, str kept) str 
       return ""
    }
    if _clean_same_expr(kept, lhs) && _clean_same_expr(moved, rhs) {
-      return(prefer_min ? (unsigned ? "umin" : "min") : (unsigned ? "umax" : "max")) + "(" + lhs + ", " + rhs + ")"
+      return (prefer_min ? (unsigned ? "umin" : "min") : (unsigned ? "umax" : "max")) + "(" + lhs + ", " + rhs + ")"
    }
    if _clean_same_expr(kept, rhs) && _clean_same_expr(moved, lhs) {
-      return(prefer_min ? (unsigned ? "umax" : "max") : (unsigned ? "umin" : "min")) + "(" + lhs + ", " + rhs + ")"
+      return (prefer_min ? (unsigned ? "umax" : "max") : (unsigned ? "umin" : "min")) + "(" + lhs + ", " + rhs + ")"
    }
    ""
 }
@@ -11030,7 +11033,7 @@ fn _clean_byte_reg_expr_at(dict bin, list rows, int before_idx, str op0, int dep
    _clean_operand_expr_at(bin, rows, before_idx, base, depth + 1, true, preserve)
    if expr.len > 0 {
       if (byte_lane == 0 && (str.find(expr, " ") >= 0 || str.find(expr, "[") >= 0 ||
-         str.startswith(expr, "zext") || str.startswith(expr, "sext"))){
+            str.startswith(expr, "zext") || str.startswith(expr, "sext"))){
          return expr
       }
       return _clean_byte_at_expr(expr, byte_lane)
@@ -11196,13 +11199,13 @@ fn _clean_operand_bits(str op) int {
    def s = str.lower(str.strip(_ny_operand(op)))
    if s.len == 0 { return 0 }
    if (s == "rax" || s == "rbx" || s == "rcx" || s == "rdx" || s == "rsi" || s == "rdi" ||
-   s == "rbp" || s == "rsp" || s == "rip"){ return 64 }
+      s == "rbp" || s == "rsp" || s == "rip"){ return 64 }
    if (s == "eax" || s == "ebx" || s == "ecx" || s == "edx" || s == "esi" || s == "edi" ||
-   s == "ebp" || s == "esp"){ return 32 }
+      s == "ebp" || s == "esp"){ return 32 }
    if (s == "ax" || s == "bx" || s == "cx" || s == "dx" || s == "si" || s == "di" ||
-   s == "bp" || s == "sp"){ return 16 }
+      s == "bp" || s == "sp"){ return 16 }
    if (s == "al" || s == "ah" || s == "bl" || s == "bh" || s == "cl" || s == "ch" ||
-   s == "dl" || s == "dh" || s == "sil" || s == "dil" || s == "bpl" || s == "spl"){ return 8 }
+      s == "dl" || s == "dh" || s == "sil" || s == "dil" || s == "bpl" || s == "spl"){ return 8 }
    if s.len >= 2 && load8(s, 0) == 120 && str.ascii_is_digit(load8(s, 1)) { return 64 }
    if s.len >= 2 && load8(s, 0) == 119 && str.ascii_is_digit(load8(s, 1)) { return 32 }
    if s.len >= 2 && load8(s, 0) == 101 { return 32 }
@@ -11227,7 +11230,7 @@ fn _clean_shift_arm(dict bin, list rows, int before_idx, str op0, int depth) dic
    def bits = _clean_operand_bits(r.get("dst", ""))
    if amount <= 0 || bits <= 0 || amount >= bits { return dict() }
    {"ok": true, "row": idx, "dir": dir, "amount": amount, "bits": bits,
-   "base": _clean_operand_expr_at(bin, rows, idx - 1, r.get("dst", ""), depth + 1)}
+      "base": _clean_operand_expr_at(bin, rows, idx - 1, r.get("dst", ""), depth + 1)}
 }
 
 fn _clean_rotate_or_expr(dict bin, list rows, int row_idx, str dst, str src, int depth) str {
@@ -11327,7 +11330,7 @@ fn _clean_bool_predicate_expr(str expr) str {
       if zb.len > 0 { return zb }
       if (str.find(z, " == ") >= 0 || str.find(z, " != ") >= 0 ||
          str.find(z, " <= ") >= 0 || str.find(z, " >= ") >= 0 ||
-      str.find(z, " < ") >= 0 || str.find(z, " > ") >= 0){ return z }
+         str.find(z, " < ") >= 0 || str.find(z, " > ") >= 0){ return z }
    }
    z = _clean_strip_unary_call(e, "zext8")
    if z.len > 0 {
@@ -11612,7 +11615,7 @@ fn _clean_condition_operand(str expr) str {
    def e = str.strip(expr)
    if (str.find(e, " & ") >= 0 || str.find(e, " | ") >= 0 ||
       str.find(e, " << ") >= 0 || str.find(e, " >> ") >= 0 ||
-   str.find(e, " ^^ ") >= 0){ return _clean_paren(e) }
+      str.find(e, " ^^ ") >= 0){ return _clean_paren(e) }
    e
 }
 
@@ -11655,10 +11658,10 @@ fn _clean_branch_condition_expr(dict bin, list rows, int idx, str cond) str {
                def simplified_bool = _clean_simplify_bool_expr(resolved_bool)
                def simplified_truth = _clean_expr_truth_value(simplified_bool)
                if simplified_bool == "true" || simplified_truth == 1 {
-                  return(cond == "zero" || cond == "eq") ? "false" : "true"
+                  return (cond == "zero" || cond == "eq") ? "false" : "true"
                }
                if simplified_bool == "false" || simplified_truth == 0 {
-                  return(cond == "zero" || cond == "eq") ? "true" : "false"
+                  return (cond == "zero" || cond == "eq") ? "true" : "false"
                }
             }
             def lhs = _clean_operand_expr_for_branch(bin, rows, idx, j - 1, r.get("dst", ""))
@@ -11757,7 +11760,7 @@ fn _clean_branch_condition_expr_deep(dict bin, list rows, int idx, str cond) str
 
 fn _clean_branch_recent_loop_param_aliases(dict bin, dict sig, list rows, int idx, str raw, str mapped) str {
    def recent = _append_all_unique(_clean_recent_loop_symbols(rows, idx - 1, bin),
-   _clean_enclosing_loop_symbols(rows, idx, bin))
+      _clean_enclosing_loop_symbols(rows, idx, bin))
    if recent.len == 0 { return mapped }
    def raw_syms = _symbols_from_text(raw)
    mut out = mapped
@@ -11784,7 +11787,7 @@ fn _clean_branch_condition_expr_sig(dict bin, dict sig, list rows, int idx, str 
       raw = _clean_branch_condition_expr(bin, rows, idx, cond)
    }
    def mapped = _clean_branch_recent_loop_param_aliases(bin, sig, rows, idx, raw,
-   _clean_expr_with_sig_bin(bin, sig, rows, raw))
+      _clean_expr_with_sig_bin(bin, sig, rows, raw))
    _clean_post_inc_index_value(bin, rows, idx, mapped)
 }
 
@@ -11793,7 +11796,7 @@ fn _clean_return_epilogue_noise_row(dict row) bool {
    def m = row.get("mnemonic", "")
    if op == "stack" && (m == "pop" || m == "leave") { return true }
    if (op == "assign" && _ny_operand(row.get("dst", "")) == "rbp" &&
-   _ny_operand(row.get("src", "")) == "rsp"){ return true }
+      _ny_operand(row.get("src", "")) == "rsp"){ return true }
    op == "arith" && _ny_operand(row.get("dst", "")) == "rsp" && (m == "add" || m == "sub")
 }
 
@@ -11990,14 +11993,14 @@ fn _clean_return_region(dict bin, list lifted, int start, int limit, str pad, di
          def out = str.builder_to_str(b)
          str.builder_free(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
-         "text": out, "row_count": rows_seen + 1}
+            "text": out, "row_count": rows_seen + 1}
       }
       if op == "call" && _clean_call_is_noreturn(bin, row) {
          b = str.builder_append(b, _render_ir_clean_row(bin, lifted, i, pad, skip, sig))
          def out = str.builder_to_str(b)
          str.builder_free(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
-         "text": out, "row_count": rows_seen + 1, "terminal": "noreturn_call"}
+            "text": out, "row_count": rows_seen + 1, "terminal": "noreturn_call"}
       }
       b = str.builder_append(b, _render_ir_clean_row(bin, lifted, i, pad, skip, sig))
       i += 1
@@ -12030,21 +12033,21 @@ fn _clean_terminal_return_region(dict bin, list lifted, int start, int limit, st
          def out = str.builder_to_str(b)
          str.builder_free(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
-         "text": out, "row_count": rows_seen + 1}
+            "text": out, "row_count": rows_seen + 1}
       }
       if op == "return" {
          b = str.builder_append(b, _render_ir_clean_row(bin, lifted, i, pad, skip, sig))
          def out = str.builder_to_str(b)
          str.builder_free(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
-         "text": out, "row_count": rows_seen + 1}
+            "text": out, "row_count": rows_seen + 1}
       }
       if op == "call" && _clean_call_is_noreturn(bin, row) {
          b = str.builder_append(b, _render_ir_clean_row(bin, lifted, i, pad, skip, sig))
          def out = str.builder_to_str(b)
          str.builder_free(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
-         "text": out, "row_count": rows_seen + 1, "terminal": "noreturn_call"}
+            "text": out, "row_count": rows_seen + 1, "terminal": "noreturn_call"}
       }
       b = str.builder_append(b, _render_ir_clean_row(bin, lifted, i, pad, skip, sig))
       i += 1
@@ -12099,7 +12102,7 @@ fn _clean_branch_return_shape(dict bin, list lifted, int idx, str pad, dict skip
    str.builder_free(b)
    {"ok": true, "target_idx": target_idx, "target_end": int(target.get("end", target_idx)),
       "fallthrough_end": int(fall.get("end", idx)), "next": max(int(target.get("next", target_idx + 1)), int(fall.get("next", idx + 1))),
-   "text": out}
+      "text": out}
 }
 
 fn _render_ir_simple_row(dict bin, list lifted, int i, str pad, any du0=dict(), any sig0=dict()) str {
@@ -12213,7 +12216,7 @@ fn _state_simplify_state_expr(str expr0) str {
    def vals = _clean_linear_bool_values(compact, ["b"])
    if !vals.get("ok", false) { return expr }
    _clean_select_expr(cond, _clean_small_int_text(int(vals.get("true", 0))),
-   _clean_small_int_text(int(vals.get("false", 0))))
+      _clean_small_int_text(int(vals.get("false", 0))))
 }
 
 fn _state_expr_dest_text(str expr0, int case_count) str {
@@ -12236,7 +12239,7 @@ fn _state_ternary_parts(str expr0) dict {
    if c < 0 { return dict() }
    {"ok": true, "cond": _clean_strip_outer_parens(str.strip(slice(e, 0, q, 1))),
       "then": str.strip(slice(tail, 0, c, 1)),
-   "else": str.strip(slice(tail, c + 3, tail.len, 1))}
+      "else": str.strip(slice(tail, c + 3, tail.len, 1))}
 }
 
 fn _state_branch_expr_parts(str expr0, int case_count) dict {
@@ -12245,13 +12248,13 @@ fn _state_branch_expr_parts(str expr0, int case_count) dict {
    if sel.get("ok", false) {
       return {"ok": true, "cond": sel.get("cond", ""),
          "then": _state_expr_dest_text(sel.get("then", ""), case_count),
-      "else": _state_expr_dest_text(sel.get("else", ""), case_count)}
+         "else": _state_expr_dest_text(sel.get("else", ""), case_count)}
    }
    def tern = _state_ternary_parts(expr)
    if tern.get("ok", false) {
       return {"ok": true, "cond": tern.get("cond", ""),
          "then": _state_expr_dest_text(tern.get("then", ""), case_count),
-      "else": _state_expr_dest_text(tern.get("else", ""), case_count)}
+         "else": _state_expr_dest_text(tern.get("else", ""), case_count)}
    }
    dict()
 }
@@ -12459,7 +12462,7 @@ fn _state_machine_check_lines(dict sm, int limit=10) list {
    i = 0
    while i < records.len {
       out = out.append("state " + to_str(records[i].get("state", i)) + ": " +
-      records[i].get("cond", "") + " -> " + records[i].get("dst", ""))
+         records[i].get("cond", "") + " -> " + records[i].get("dst", ""))
       i += 1
    }
    out
@@ -12487,7 +12490,7 @@ fn _render_state_machine_summary(dict sm, str pad) str {
    b = str.builder_append(b, pad + "state_machine selector=" + sm.get("selector", "") +
       " switch=" + sm.get("switch_label", _hex(int(sm.get("switch_addr", 0)))) +
       " cases=" + to_str(sm.get("case_count", 0)) +
-   " transitions=" + to_str(sm.get("transition_count", 0)) + " {\n")
+      " transitions=" + to_str(sm.get("transition_count", 0)) + " {\n")
    def checks = _state_machine_check_lines(sm, 10)
    if checks.len > 0 {
       b = str.builder_append(b, pad + "  checks {\n")
@@ -12997,7 +13000,7 @@ fn _clean_inline_noreturn_labels(str text) str {
          if blocks.contains(target) && _clean_goto_ref_count(lines, target) == 1 {
             def indent = _clean_line_indent(lines[i])
             replace = replace.set(to_str(i), indent + "if " + parts.get("expr", "") + "{\n" +
-            _clean_noreturn_block_text(blocks.get(target, dict()), indent) + indent + "}")
+               _clean_noreturn_block_text(blocks.get(target, dict()), indent) + indent + "}")
             remove = remove.set(target, true)
          }
       }
@@ -13155,7 +13158,7 @@ fn _clean_simple_return_label_expr(list lines, str label, int depth=0) str {
       def rexpr = str.strip(slice(ret_raw, 7, ret_raw.len, 1))
       if !_clean_render_text_has_alias(rexpr, lhs) { return "" }
       def inlined = _clean_replace_aliases_text(rexpr, _slice_symbol_aliases(lhs),
-      _clean_expr_subst_wrap(rhs))
+         _clean_expr_subst_wrap(rhs))
       def simp = _clean_simplify_bool_expr(inlined)
       raw = "return " + (simp.len > 0 ? simp : inlined)
       ret_idx = next
@@ -13256,7 +13259,7 @@ fn _clean_unused_label_protects_skip(list lines, int label_idx) bool {
    if _clean_raw_goto_label(raw).len > 0 { return false }
    if (str.startswith(raw, "local_") || str.find(raw, "dtor_") >= 0 ||
       str.find(raw, "_Unwind_Resume") >= 0 || str.find(raw, "__cxa_") >= 0 ||
-   str.find(raw, "__clang_call_terminate") >= 0){ return false }
+      str.find(raw, "__clang_call_terminate") >= 0){ return false }
    true
 }
 
@@ -13593,7 +13596,7 @@ fn _clean_unlabeled_tail_to_block_close(list lines, int start, int depth0) bool 
       if _clean_rendered_label_name(raw).len > 0 { return false }
       if str.startswith(raw, "if (") && str.find(raw, "goto loc_") < 0 { return false }
       if (str.startswith(raw, "while (") || str.startswith(raw, "while ") ||
-      str.startswith(raw, "for ")){ return false }
+         str.startswith(raw, "for ")){ return false }
       if raw.len > 0 { saw_code = true }
       depth += _clean_loop_depth_delta(raw)
       i += 1
@@ -13837,7 +13840,7 @@ fn _clean_goto_diamond_shape(list lines, int i) dict {
    if _clean_region_has_labels(lines, else_idx + 1, end_idx) { return {"ok": false} }
    if !_clean_region_structure_ok(lines, else_idx + 1, end_idx) { return {"ok": false} }
    {"ok": true, "expr": parts.get("expr", ""), "then_idx": then_idx, "else_idx": else_idx,
-   "tail_idx": tail_idx, "end_idx": end_idx}
+      "tail_idx": tail_idx, "end_idx": end_idx}
 }
 
 fn _clean_structure_goto_diamonds(str text) str {
@@ -13892,16 +13895,16 @@ fn _clean_fallthrough_if_else_shape(list lines, int i) dict {
    def end_idx = _clean_find_label_index(lines, end_label, else_idx + 1)
    if end_idx <= else_idx { return {"ok": false} }
    if (_clean_region_has_labels(lines, i + 1, jump_idx) ||
-   _clean_region_has_labels(lines, else_idx + 1, end_idx)){ return {"ok": false} }
+      _clean_region_has_labels(lines, else_idx + 1, end_idx)){ return {"ok": false} }
    if (_clean_first_raw_goto_index(lines, i + 1, jump_idx) >= 0 ||
-   _clean_first_raw_goto_index(lines, else_idx + 1, end_idx) >= 0){ return {"ok": false} }
+      _clean_first_raw_goto_index(lines, else_idx + 1, end_idx) >= 0){ return {"ok": false} }
    if (!_clean_region_structure_ok(lines, i + 1, jump_idx) ||
-   !_clean_region_structure_ok(lines, else_idx + 1, end_idx)){ return {"ok": false} }
+      !_clean_region_structure_ok(lines, else_idx + 1, end_idx)){ return {"ok": false} }
    if _clean_goto_ref_count_range(lines, end_label, i, end_idx) != 1 { return {"ok": false} }
    {"ok": true, "expr": parts.get("expr", ""), "then_start": i + 1,
       "then_end": jump_idx, "else_idx": else_idx, "end_idx": end_idx,
       "end_label": end_label,
-   "preserve_end_label": _clean_goto_ref_count(lines, end_label) > 1}
+      "preserve_end_label": _clean_goto_ref_count(lines, end_label) > 1}
 }
 
 fn _clean_structure_fallthrough_if_else(str text) str {
@@ -13967,7 +13970,7 @@ fn _clean_goto_skip_shape(list lines, int i) dict {
       j += 1
    }
    {"ok": true, "expr": parts.get("expr", ""), "label_idx": label_idx,
-   "indent": _clean_line_indent(lines[i])}
+      "indent": _clean_line_indent(lines[i])}
 }
 
 fn _clean_structure_goto_skips(str text) str {
@@ -14056,7 +14059,7 @@ fn _clean_guard_label_after_terminal_shape(list lines, list depths, int i) dict 
    if !_clean_region_structure_ok(lines, i + 1, label_idx) { return {"ok": false} }
    if !_clean_simple_terminal_region(lines, i + 1, label_idx) { return {"ok": false} }
    {"ok": true, "expr": parts.get("expr", ""), "label_idx": label_idx,
-   "indent": _clean_line_indent(lines[i])}
+      "indent": _clean_line_indent(lines[i])}
 }
 
 fn _clean_structure_guard_label_after_terminal(str text) str {
@@ -14148,7 +14151,7 @@ fn _clean_loop_inline_temp_guard_cond(list lines, int first, int close) dict {
    if cond.len == 0 || !_clean_render_text_has_token(cond, lhs) { return dict() }
    if !_clean_loop_guard_temp_dead_after(lines, guard, close, lhs) { return dict() }
    {"cond": _clean_replace_token(cond, lhs, _clean_inline_condition_copy_rhs(rhs)),
-   "guard": guard, "drop": first}
+      "guard": guard, "drop": first}
 }
 
 fn _clean_structure_top_break_loops(str text) str {
@@ -14230,7 +14233,7 @@ fn _clean_failstop_empty_loop_shape(list lines, int i) dict {
    if label_idx >= lines.len || _clean_rendered_label_name(lines[label_idx]) != target { return {"ok": false} }
    {"ok": true, "expr": parts.get("expr", ""), "loop_idx": loop_idx,
       "close": close, "label_idx": label_idx, "target": target,
-   "preserve_label": _clean_goto_ref_count(lines, target) > 1}
+      "preserve_label": _clean_goto_ref_count(lines, target) > 1}
 }
 
 fn _clean_structure_failstop_empty_loops(str text) str {
@@ -14319,7 +14322,7 @@ fn _clean_structure_loop_exit_gotos(str text) str {
                      def parts = _clean_if_goto_parts(rj)
                      if parts.len > 0 && parts.get("target", "") == target {
                         out = out.append(_clean_line_indent(lines[j]) + "if (" +
-                        parts.get("expr", "") + "){ break }")
+                           parts.get("expr", "") + "){ break }")
                         replaced = true
                      } elif _clean_raw_goto_label(rj) == target {
                         out = out.append(_clean_line_indent(lines[j]) + "break")
@@ -14406,9 +14409,9 @@ fn _clean_flat_prechecked_loop_shape(list lines, int i) dict {
    if _clean_first_raw_goto_index(lines, body_label_idx + 1, cond_label_idx) >= 0 { return {"ok": false} }
    if !_clean_region_structure_ok(lines, body_label_idx + 1, cond_label_idx) { return {"ok": false} }
    if (_clean_line_indent(lines[i]) != _clean_line_indent(lines[body_label_idx]) ||
-   _clean_line_indent(lines[i]) != _clean_line_indent(lines[cond_label_idx])){ return {"ok": false} }
+      _clean_line_indent(lines[i]) != _clean_line_indent(lines[cond_label_idx])){ return {"ok": false} }
    {"ok": true, "expr": parts.get("expr", ""), "body_start": body_label_idx + 1,
-   "body_end": cond_label_idx, "branch_idx": branch_idx}
+      "body_end": cond_label_idx, "branch_idx": branch_idx}
 }
 
 fn _clean_structure_flat_prechecked_loops(str text) str {
@@ -14931,7 +14934,7 @@ fn _clean_parenthesize_mixed_bitwise_assigns(str text) str {
             def right = str.strip(slice(rhs, p + 3, rhs.len, 1))
             if _clean_top_level_find(right, " ^^ ") > 0 && !_clean_outer_balanced_parens_wrap(right) {
                b = str.builder_append(b, _clean_line_indent(lines[i]) + parts.get("lhs", "") +
-               " = " + left + " | (" + right + ")\n")
+                  " = " + left + " | (" + right + ")\n")
                changed = true
                i += 1
                continue
@@ -14982,7 +14985,7 @@ fn _clean_stack_canary_condition(str expr0) str {
             if xl == "mem_fs(0x28)" && str.startswith(xr, "local_") { slot = xr }
             elif xr == "mem_fs(0x28)" && str.startswith(xl, "local_") { slot = xl }
             if slot.len > 0 {
-               return(op == "==" ? "" : "!") + "stack_canary_ok(" + slot + ")"
+               return (op == "==" ? "" : "!") + "stack_canary_ok(" + slot + ")"
             }
          }
       }
@@ -15482,7 +15485,7 @@ fn _clean_if_else_return_region(list lines, int start) dict {
             def else_expr = _clean_block_single_return_expr(lines, else_idx + 1, i)
             if then_expr.len > 0 && else_expr.len > 0 {
                return {"expr": open.get("expr", ""), "then": then_expr, "else": else_expr,
-               "end": i}
+                  "end": i}
             }
             return dict()
          }
@@ -15542,7 +15545,7 @@ fn _clean_if_else_assign_return_region(list lines, int start) dict {
                _clean_rendered_pure_temp_rhs(then_assign.get("rhs", "")) &&
                _clean_rendered_pure_temp_rhs(else_assign.get("rhs", ""))){
                return {"expr": open.get("expr", ""), "then": then_assign.get("rhs", ""),
-               "else": else_assign.get("rhs", ""), "end": next}
+                  "else": else_assign.get("rhs", ""), "end": next}
             }
             return dict()
          }
@@ -15621,13 +15624,13 @@ fn _clean_collapse_return_ifs(str text) str {
          if guards.len > 0 {
             return _clean_collapse_return_ifs(_clean_replace_line_region(lines, i,
                   int(guards.get("end", i)), _clean_line_indent(lines[i]) + "return " +
-            guards.get("expr", "")))
+                  guards.get("expr", "")))
          } elif _clean_if_else_return_region(lines, i).len > 0 {
             def ifelse = _clean_if_else_return_region(lines, i)
             changed = true
             b = str.builder_append(b, _clean_line_indent(lines[i]) + "return " +
                _clean_return_pair_expr(ifelse.get("expr", ""), ifelse.get("then", ""),
-            ifelse.get("else", "")) + "\n")
+                  ifelse.get("else", "")) + "\n")
             i = int(ifelse.get("end", i)) + 1
             handled = true
             continue
@@ -15642,7 +15645,7 @@ fn _clean_collapse_return_ifs(str text) str {
                   if then_expr.len > 0 && after_expr.len > 0 {
                      changed = true
                      b = str.builder_append(b, _clean_line_indent(lines[i]) + "return " +
-                     _clean_return_pair_expr(open.get("expr", ""), then_expr, after_expr) + "\n")
+                        _clean_return_pair_expr(open.get("expr", ""), then_expr, after_expr) + "\n")
                      i = next + 1
                      handled = true
                      continue
@@ -15731,7 +15734,7 @@ fn _clean_rendered_call_args(str raw) list {
    def head = str.strip(slice(raw, 0, p, 1))
    if (head.len == 0 || str.startswith(head, "if") || str.startswith(head, "while") ||
       str.startswith(head, "switch") || str.find(head, "=") >= 0 ||
-   _clean_rendered_helper_call_name(head)){ return [] }
+      _clean_rendered_helper_call_name(head)){ return [] }
    def end = raw.len - 1
    _clean_call_args(slice(raw, p + 1, end, 1))
 }
@@ -15836,7 +15839,7 @@ fn _clean_drop_rendered_call_setup_window(list lines, int idx) bool {
             return _clean_rendered_temp_unused_after_call(lines, j, first_lhs)
          }
          return _clean_call_args_contain_expr(args,
-         _clean_resolve_rendered_setup_rhs(first.get("rhs", ""), env)) &&
+            _clean_resolve_rendered_setup_rhs(first.get("rhs", ""), env)) &&
          _clean_rendered_temp_unused_after_call(lines, j, first_lhs)
       }
       def parts = _clean_rendered_assignment_parts(raw)
@@ -15846,7 +15849,7 @@ fn _clean_drop_rendered_call_setup_window(list lines, int idx) bool {
          return false
       }
       env = env.set(str.lower(parts.get("lhs", "")),
-      _clean_resolve_rendered_setup_rhs(parts.get("rhs", ""), env))
+         _clean_resolve_rendered_setup_rhs(parts.get("rhs", ""), env))
       j += 1
       steps += 1
    }
@@ -16036,7 +16039,7 @@ fn _clean_drop_errno_mirror_temps(str text) str {
       if (assign.len > 0 && str.strip(assign.get("rhs", "")) == "errno" &&
          _canonical_value_reg("x86", assign.get("lhs", "")).len > 0 &&
          (_clean_rendered_temp_dead_after(lines, i, assign.get("lhs", "")) ||
-         _clean_rendered_temp_dead_after_labels_ok(lines, i, assign.get("lhs", "")))){
+            _clean_rendered_temp_dead_after_labels_ok(lines, i, assign.get("lhs", "")))){
          changed = true
          i += 1
          continue
@@ -16337,7 +16340,7 @@ fn _clean_collapse_sprintf_printf_buffers(str text) str {
                      ai += 1
                   }
                   replace = replace.set(to_str(i), _clean_line_indent(lines[i]) + "printf(" +
-                  str.join(direct_args, ", ") + ")")
+                     str.join(direct_args, ", ") + ")")
                   skip = skip.set(to_str(j), true)
                   mut k = 0
                   while k < lines.len {
@@ -17158,7 +17161,7 @@ fn _clean_simplify_modsum_call_conditions(str text) str {
 fn _clean_normalize_modsum_terminal_success_fail(str text) str {
    if (str.find(text, "ascii_sum(slice(input,") < 0 ||
       str.find(text, "succeed(input)") < 0 ||
-   str.find(text, "fail(input)") < 0){ return text }
+      str.find(text, "fail(input)") < 0){ return text }
    def lines = str.split(text, "\n")
    mut b = str.Builder(text.len)
    mut changed = false
@@ -17196,7 +17199,7 @@ fn _clean_readable_negated_condition_expr(str expr0) str {
    def call = _clean_rendered_call_expr_parts(expr)
    if (call.len > 0 &&
       (call.get("name", "") == "startswith" || call.get("name", "") == "matches" ||
-      call.get("name", "") == "between")){
+         call.get("name", "") == "between")){
       return "!" + expr
    }
    _clean_negated_condition_expr(expr)
@@ -17305,7 +17308,7 @@ fn _clean_name_prompt_read_buffers(str text) str {
    if str.find(text, "read(0, &local_") < 0 { return text }
    def lower = str.lower(text)
    if (str.find(lower, "username") < 0 && str.find(lower, "password") < 0 &&
-   str.find(lower, "passphrase") < 0){ return text }
+      str.find(lower, "passphrase") < 0){ return text }
    def lines = str.split(text, "\n")
    mut prompt = ""
    mut renames = dict()
@@ -17426,7 +17429,7 @@ fn _clean_name_libc_resource_values(str text) str {
             if _clean_libc_buffer_expr_ok(buf) {
                aliases = aliases.set(buf, "input_buf")
                line = _clean_rendered_line_with_call_args(line, call,
-               _clean_list_replace_at(args, buf_idx, "input_buf"))
+                  _clean_list_replace_at(args, buf_idx, "input_buf"))
                changed = true
             }
          }
@@ -17651,14 +17654,14 @@ fn _clean_type_field_map(any trec0) dict {
       def shape = lr.get("shape", "")
       if (name.len > 0 && fields0.len >= 2 &&
          (shape == "heap_struct" || shape == "local_struct" || shape == "list_node" ||
-         lr.get("type", "") == "struct*")){
+            lr.get("type", "") == "struct*")){
          mut fields = dict()
          mut fi = 0
          while fi < fields0.len {
             def f = fields0[fi]
             def off = int(f.get("offset", 0))
             def fname = _safe_name(f.get("name", "field_" + str.to_hex(_iabs(off), 0)),
-            "field_" + str.to_hex(_iabs(off), 0))
+               "field_" + str.to_hex(_iabs(off), 0))
             fields = fields.set(to_str(off), fname)
             fi += 1
          }
@@ -17814,7 +17817,7 @@ fn _clean_render_shift_parts(str expr0) dict {
    def z8 = _clean_strip_unary_call(base, "zext8")
    if z8.len > 0 { base = str.strip(z8) }
    {"ok": true, "dir": dir, "base": base,
-   "amount": _clean_render_count_norm(slice(e, p + 4, e.len, 1))}
+      "amount": _clean_render_count_norm(slice(e, p + 4, e.len, 1))}
 }
 
 fn _clean_render_complement8_count(str amount0) str {
@@ -18241,7 +18244,7 @@ fn _clean_fold_direct_call_line(str line, dict consts) str {
    def name = str.strip(slice(raw, 0, p, 1))
    if (name == "if" || name == "while" || name == "switch" || name == "return" ||
       str.find(name, " ") >= 0 || str.find(name, "=") >= 0 ||
-   _clean_rendered_helper_call_name(name)){ return "" }
+      _clean_rendered_helper_call_name(name)){ return "" }
    mut ni = 0
    while ni < name.len {
       if !_symbol_is_name_char(load8(name, ni)) { return "" }
@@ -18361,7 +18364,7 @@ fn _clean_rendered_pure_temp_rhs(str rhs) bool {
             if (!(name == "bool" || name == "mem" || name == "mem_fs" || name == "mem_gs" ||
                   name == "zext" || name == "sext" || name == "zext8" || name == "sext8" ||
                   name == "zext16" || name == "sext16" || name == "zext32" || name == "sext32" ||
-               name == "rol" || name == "ror" || name == "byte_at" || name == "signbit")){
+                  name == "rol" || name == "ror" || name == "byte_at" || name == "signbit")){
                return false
             }
          }
@@ -18453,7 +18456,7 @@ fn _clean_rendered_temp_dead_after_block_close(list lines, int idx, str lhs) boo
          break
       }
       if (_clean_rendered_label_name(raw).len > 0 || _clean_raw_goto_label(raw).len > 0 ||
-      _clean_rendered_is_return(raw)){ return false }
+         _clean_rendered_is_return(raw)){ return false }
       def parts = _clean_rendered_assignment_parts(raw)
       if parts.len > 0 && _symbols_intersect(_slice_symbol_aliases(parts.get("lhs", "")), _slice_symbol_aliases(lhs)) {
          return !_clean_render_text_has_alias(parts.get("rhs", ""), lhs)
@@ -18527,13 +18530,13 @@ fn _clean_drop_dead_rendered_temps_once(str text) str {
          def rhs = parts.get("rhs", "")
          def removable_temp = ((_clean_rendered_dead_temp_reg(lhs) || _clean_rendered_bool_temp_reg(lhs)) &&
             (!_clean_rendered_return_value_reg(lhs) || _clean_rendered_work_after(lines, i) ||
-         _clean_rendered_explicit_return_after(lines, i))) ||
+               _clean_rendered_explicit_return_after(lines, i))) ||
          (_clean_rendered_value_temp_reg(lhs) && _clean_rendered_call_after(lines, i))
          if (removable_temp && _clean_rendered_pure_temp_rhs(rhs) &&
             !_clean_rendered_accumulator_rhs(lhs, rhs) &&
             (_clean_rendered_temp_dead_after(lines, i, lhs) ||
                _clean_rendered_temp_dead_after_labels_ok(lines, i, lhs) ||
-            _clean_rendered_temp_dead_after_block_close(lines, i, lhs))){
+               _clean_rendered_temp_dead_after_block_close(lines, i, lhs))){
             changed = true
             i += 1
             continue
@@ -18729,7 +18732,7 @@ fn _clean_branchless_byte_network_row_summary(str name, dict sig, list rows) str
       elif (op == "assign" && r.get("dst_kind", "") == "mem" &&
          r.get("ref_kind", "") == "data" && r.get("src_kind", "") == "reg" &&
          (_is_byte_operand(r.get("src", "")) ||
-         _clean_byte_reg_lane(r.get("src", "")).get("ok", false))){
+            _clean_byte_reg_lane(r.get("src", "")).get("ok", false))){
          def addr = int(r.get("ref_target", 0))
          if addr > 0 {
             if !seen || addr < lo { lo = addr }
@@ -18763,7 +18766,7 @@ fn _clean_terminal_opaque_even_product_scratch_at(list lines, int i) bool {
    if i + 4 >= lines.len { return false }
    def pad = _clean_line_indent(lines[i])
    if (_clean_line_indent(lines[i + 1]) != pad || _clean_line_indent(lines[i + 2]) != pad ||
-   _clean_line_indent(lines[i + 3]) != pad){ return false }
+      _clean_line_indent(lines[i + 3]) != pad){ return false }
    def a = _clean_rendered_assignment_parts(lines[i])
    def b = _clean_rendered_assignment_parts(lines[i + 1])
    def c = _clean_rendered_assignment_parts(lines[i + 2])
@@ -18893,7 +18896,7 @@ fn _clean_drop_condition_reg_setup(str text) str {
                def open = _clean_structured_if_open_parts(raw_next)
                if open.len > 0 && str.find(open.get("expr", ""), lhs) >= 0 {
                   b = str.builder_append(b, _clean_line_indent(lines[j]) + "if (" +
-                  _clean_replace_token(open.get("expr", ""), lhs, _clean_inline_condition_copy_rhs(rhs)) + "){\n")
+                     _clean_replace_token(open.get("expr", ""), lhs, _clean_inline_condition_copy_rhs(rhs)) + "){\n")
                   i = j + 1
                   continue
                }
@@ -18901,7 +18904,7 @@ fn _clean_drop_condition_reg_setup(str text) str {
                if inline.len > 0 && str.find(inline.get("expr", ""), lhs) >= 0 {
                   b = str.builder_append(b, _clean_line_indent(lines[j]) + "if (" +
                      _clean_replace_token(inline.get("expr", ""), lhs, _clean_inline_condition_copy_rhs(rhs)) +
-                  ")" + inline.get("tail", "") + "\n")
+                     ")" + inline.get("tail", "") + "\n")
                   i = j + 1
                   continue
                }
@@ -18909,7 +18912,7 @@ fn _clean_drop_condition_reg_setup(str text) str {
                if parts.len > 0 && str.find(parts.get("expr", ""), lhs) >= 0 {
                   b = str.builder_append(b, _clean_line_indent(lines[j]) + "if (" +
                      _clean_replace_token(parts.get("expr", ""), lhs, _clean_inline_condition_copy_rhs(rhs)) +
-                  "){ goto " + parts.get("target", "") + " }\n")
+                     "){ goto " + parts.get("target", "") + " }\n")
                   i = j + 1
                   continue
                }
@@ -18983,7 +18986,7 @@ fn _clean_inline_call_result_copy_conditions(str text) str {
                def open = _clean_structured_if_open_parts(raw)
                if open.len > 0 && _clean_render_text_has_token(open.get("expr", ""), call_assign.get("lhs", "")) {
                   b = str.builder_append(b, _clean_line_indent(lines[j]) + "if (" +
-                  _clean_replace_token(open.get("expr", ""), call_assign.get("lhs", ""), repl) + "){\n")
+                     _clean_replace_token(open.get("expr", ""), call_assign.get("lhs", ""), repl) + "){\n")
                   i = j + 1
                   continue
                }
@@ -18991,7 +18994,7 @@ fn _clean_inline_call_result_copy_conditions(str text) str {
                if inline.len > 0 && _clean_render_text_has_token(inline.get("expr", ""), call_assign.get("lhs", "")) {
                   b = str.builder_append(b, _clean_line_indent(lines[j]) + "if (" +
                      _clean_replace_token(inline.get("expr", ""), call_assign.get("lhs", ""), repl) + ")" +
-                  inline.get("tail", "") + "\n")
+                     inline.get("tail", "") + "\n")
                   i = j + 1
                   continue
                }
@@ -18999,7 +19002,7 @@ fn _clean_inline_call_result_copy_conditions(str text) str {
                if parts.len > 0 && _clean_render_text_has_token(parts.get("expr", ""), call_assign.get("lhs", "")) {
                   b = str.builder_append(b, _clean_line_indent(lines[j]) + "if (" +
                      _clean_replace_token(parts.get("expr", ""), call_assign.get("lhs", ""), repl) +
-                  "){ goto " + parts.get("target", "") + " }\n")
+                     "){ goto " + parts.get("target", "") + " }\n")
                   i = j + 1
                   continue
                }
@@ -19015,7 +19018,7 @@ fn _clean_inline_call_result_copy_conditions(str text) str {
                   def open = _clean_structured_if_open_parts(raw)
                   if open.len > 0 && _clean_render_text_has_token(open.get("expr", ""), copy.get("lhs", "")) {
                      b = str.builder_append(b, _clean_line_indent(lines[k]) + "if (" +
-                     _clean_replace_token(open.get("expr", ""), copy.get("lhs", ""), repl) + "){\n")
+                        _clean_replace_token(open.get("expr", ""), copy.get("lhs", ""), repl) + "){\n")
                      i = k + 1
                      continue
                   }
@@ -19023,7 +19026,7 @@ fn _clean_inline_call_result_copy_conditions(str text) str {
                   if inline.len > 0 && _clean_render_text_has_token(inline.get("expr", ""), copy.get("lhs", "")) {
                      b = str.builder_append(b, _clean_line_indent(lines[k]) + "if (" +
                         _clean_replace_token(inline.get("expr", ""), copy.get("lhs", ""), repl) + ")" +
-                     inline.get("tail", "") + "\n")
+                        inline.get("tail", "") + "\n")
                      i = k + 1
                      continue
                   }
@@ -19031,7 +19034,7 @@ fn _clean_inline_call_result_copy_conditions(str text) str {
                   if parts.len > 0 && _clean_render_text_has_token(parts.get("expr", ""), copy.get("lhs", "")) {
                      b = str.builder_append(b, _clean_line_indent(lines[k]) + "if (" +
                         _clean_replace_token(parts.get("expr", ""), copy.get("lhs", ""), repl) +
-                     "){ goto " + parts.get("target", "") + " }\n")
+                        "){ goto " + parts.get("target", "") + " }\n")
                      i = k + 1
                      continue
                   }
@@ -19230,7 +19233,7 @@ fn _clean_resolve_condition_temp_chain(list lines, int use_idx, str expr0) dict 
             break
          }
          expr = _clean_replace_aliases_text(expr, _slice_symbol_aliases(lhs),
-         _clean_rendered_inline_rhs(rhs))
+            _clean_rendered_inline_rhs(rhs))
          candidates = candidates.append({"idx": j, "lhs": lhs})
          guard += 1
       }
@@ -19356,7 +19359,7 @@ fn _clean_inline_arith_condition_reg_setup(str text) str {
                def direct = _clean_direct_condition_arith_expr(lhs, rhs)
                def rewritten = _clean_rewrite_condition_line(lines[j], lhs, direct)
                if (rewritten.len > 0 && (_clean_rendered_temp_dead_after(lines, j, lhs) ||
-                  _clean_rendered_temp_dead_after_labels_ok(lines, j, lhs))){
+                     _clean_rendered_temp_dead_after_labels_ok(lines, j, lhs))){
                   b = str.builder_append(b, rewritten + "\n")
                   i = j + 1
                   continue
@@ -19369,7 +19372,7 @@ fn _clean_inline_arith_condition_reg_setup(str text) str {
                if k < lines.len && _clean_rendered_label_name(lines[k]).len == 0 {
                   def rewritten2 = _clean_rewrite_condition_line(lines[k], lhs, expr)
                   if (rewritten2.len > 0 && (_clean_rendered_temp_dead_after(lines, k, lhs) ||
-                     _clean_rendered_temp_dead_after_labels_ok(lines, k, lhs))){
+                        _clean_rendered_temp_dead_after_labels_ok(lines, k, lhs))){
                      b = str.builder_append(b, rewritten2 + "\n")
                      i = k + 1
                      continue
@@ -19438,7 +19441,7 @@ fn _clean_rendered_boolish_expr(str expr0) bool {
    if str.find(low, "&&") >= 0 || str.find(low, "||") >= 0 { return true }
    if (str.find(low, " == ") >= 0 || str.find(low, " != ") >= 0 ||
       str.find(low, " <= ") >= 0 || str.find(low, " >= ") >= 0 ||
-   str.find(low, " < ") >= 0 || str.find(low, " > ") >= 0){ return true }
+      str.find(low, " < ") >= 0 || str.find(low, " > ") >= 0){ return true }
    if str.startswith(low, "!") { return true }
    false
 }
@@ -19752,7 +19755,7 @@ fn _clean_simplify_zero_trip_mod_returns(str text) str {
             if modret.len > 0 && _clean_later_zero_init_for_return_acc(lines, i, modret.get("acc", "")) {
                changed = true
                b = str.builder_append(b, _clean_line_indent(lines[i]) + "if (" + parts.get("expr", "") +
-               "){ return " + modret.get("value", "true") + " }\n")
+                  "){ return " + modret.get("value", "true") + " }\n")
                i += 1
                continue
             }
@@ -20260,7 +20263,7 @@ fn _clean_inline_preincrement_index_temps(str text) str {
             _clean_rendered_temp_dead_after(lines, i + 2, saved.get("lhs", ""))){
             def idx = saved.get("rhs", "")
             def expr = _clean_replace_token(cond.get("expr", ""), saved.get("lhs", ""),
-            "(" + idx + " - 1)")
+               "(" + idx + " - 1)")
             def next_cond = _clean_condition_expr_line(lines[i + 2], cond, expr)
             if next_cond.len > 0 {
                changed = true
@@ -20399,7 +20402,7 @@ fn _clean_string_sum_loop_vars_at(list lines, int i) dict {
    if add.len == 0 || inc.len == 0 { return dict() }
    if (add.get("lhs", "") != acc.get("lhs", "") ||
       !_clean_string_sum_loop_add_rhs(add.get("rhs", ""), acc.get("lhs", ""),
-      base.get("lhs", ""), idx.get("lhs", ""))){
+         base.get("lhs", ""), idx.get("lhs", ""))){
       return dict()
    }
    if inc.get("lhs", "") != idx.get("lhs", "") || !_clean_inc_one_rhs(inc.get("rhs", ""), idx.get("lhs", "")) {
@@ -20468,7 +20471,7 @@ fn _clean_pointer_range_limit_expr(str rhs0, str base0) str {
 fn _clean_cursor_sum_load_expr(str cursor0) list {
    def cursor = str.strip(cursor0)
    ["mem(" + cursor + ")", "sext8(mem(" + cursor + "))", "zext8(mem(" + cursor + "))",
-   cursor + "[0]", "sext8(" + cursor + "[0])", "zext8(" + cursor + "[0])"]
+      cursor + "[0]", "sext8(" + cursor + "[0])", "zext8(" + cursor + "[0])"]
 }
 
 fn _clean_pointer_range_sum_rhs(str rhs0, str acc0, str cursor0) bool {
@@ -20635,7 +20638,7 @@ fn _clean_name_heap_compare_buffers(str text) str {
 fn _clean_compare_call_expr(str expr0) bool {
    def expr = str.strip(expr0)
    (str.startswith(expr, "strcmp(") || str.startswith(expr, "strncmp(") ||
-   str.startswith(expr, "memcmp(")) &&
+      str.startswith(expr, "memcmp(")) &&
    str.endswith(expr, ")")
 }
 
@@ -20643,7 +20646,7 @@ fn _clean_condition_uses_compare_temp(str expr0, str lhs0) bool {
    def expr = str.strip(expr0)
    _clean_render_text_has_alias(expr, lhs0) &&
    (str.find(expr, " != 0") >= 0 || str.find(expr, " == 0") >= 0 ||
-   str.find(expr, " > 0") >= 0 || str.find(expr, " < 0") >= 0)
+      str.find(expr, " > 0") >= 0 || str.find(expr, " < 0") >= 0)
 }
 
 fn _clean_compare_result_temp_candidate(list lines, int i) str {
@@ -20763,7 +20766,7 @@ fn _clean_line_has_argv_string_compare(str line0) bool {
    (str.find(line, "strcmp(argv[1],") >= 0 ||
       str.find(line, "strncmp(argv[1],") >= 0 ||
       str.find(line, "memcmp(argv[1],") >= 0 ||
-   str.find(line, ", argv[1]") >= 0) &&
+      str.find(line, ", argv[1]") >= 0) &&
    (str.find(line, "\"") >= 0 || str.find(line, "&\"") >= 0)
 }
 
@@ -21067,7 +21070,7 @@ fn _clean_linked_lookup_decode_loop_parts(list lines, int for_idx) dict {
    if decoded_idx.len == 0 || !_clean_same_index_text(decoded_idx.get("idx", ""), idx) { return dict() }
    if _clean_next_nonblank_index(lines, j + 1) != close { return dict() }
    {"ok": true, "idx": idx, "lo": lo, "hi": hi, "head": head, "default": default_value,
-   "input": if_parts.get("input", ""), "decoded": decoded_idx.get("base", ""), "close": close}
+      "input": if_parts.get("input", ""), "decoded": decoded_idx.get("base", ""), "close": close}
 }
 
 fn _clean_recent_list_init_line(list lines, int before, str name, int len) int {
@@ -21618,7 +21621,7 @@ fn _clean_name_ioli_digit_sum_check(str text) str {
 fn _clean_drop_ioli_failure_tail(str text) str {
    if (str.find(text, "sscanf(&input[i], \"%d\", &digit)") < 0 ||
       str.find(text, "sum = sum + digit") < 0 ||
-   str.find(text, "fail()") < 0){ return text }
+      str.find(text, "fail()") < 0){ return text }
    def lines = str.split(text, "\n")
    mut b = str.Builder(text.len)
    mut changed = false
@@ -21701,7 +21704,7 @@ fn _clean_ioli_digit_prefix_hit_signature(str text) str {
 
 fn _clean_collapse_ioli_digit_prefix_hit_loops(str text) str {
    if (str.find(text, "sscanf(&input[i], \"%d\", &digit)") < 0 ||
-   str.find(text, "sum = sum + digit") < 0){ return text }
+      str.find(text, "sum = sum + digit") < 0){ return text }
    def lines = str.split(text, "\n")
    mut b = str.Builder(text.len)
    mut changed = false
@@ -21741,7 +21744,7 @@ fn _clean_collapse_ioli_digit_prefix_hit_loops(str text) str {
 
 fn _clean_fix_ioli_checksum_signature(str text) str {
    if (str.find(text, "sscanf(&input[i], \"%d\", &digit)") < 0 ||
-   str.find(text, "sum = sum + digit") < 0){ return text }
+      str.find(text, "sum = sum + digit") < 0){ return text }
    def lines = str.split(text, "\n")
    if lines.len == 0 { return text }
    def first = str.strip(lines[0])
@@ -21796,7 +21799,7 @@ fn _clean_name_ioli_even_password_check(str text) str {
 
 fn _clean_collapse_ioli_even_retry_loop(str text) str {
    if (str.find(text, "if (number & 1) == 0{") < 0 ||
-   str.find(text, "exit(0)") < 0){ return text }
+      str.find(text, "exit(0)") < 0){ return text }
    def lines = str.split(text, "\n")
    mut b = str.Builder(text.len)
    mut changed = false
@@ -21843,7 +21846,7 @@ fn _clean_collapse_ioli_even_retry_loop(str text) str {
 fn _clean_name_ioli_env_main(str text) str {
    if (str.find(text, "IOLI Crackme Level 0x0") < 0 ||
       (str.find(text, "scanf(\"%s\", &local_78)") < 0 &&
-      str.find(text, "scanf(\"%s\", &input)") < 0)){
+         str.find(text, "scanf(\"%s\", &input)") < 0)){
       return text
    }
    mut out = text
@@ -21959,7 +21962,7 @@ fn _clean_name_ioli_failure_helper(str text) str {
    if lines.len == 0 { return text }
    def first = str.strip(lines[0])
    if (!str.startswith(first, "fn sub_") && !str.startswith(first, "fn entry_") &&
-   !str.startswith(first, "fn che(")){ return text }
+      !str.startswith(first, "fn che(")){ return text }
    def p = str.find(lines[0], "(")
    if p <= 0 { return text }
    mut out = _clean_line_indent(lines[0]) + "fn fail" + slice(lines[0], p, lines[0].len, 1)
@@ -21975,7 +21978,7 @@ fn _clean_struct_ioli_lolo_argv_scan(str text) str {
    if (str.find(text, "\"LOLO\"") < 0 ||
       str.find(text, "while true{") < 0 ||
       str.find(text, "envp[i * 4]") < 0 ||
-   str.find(text, "envp[(i - 1) * 4]") < 0){ return text }
+      str.find(text, "envp[(i - 1) * 4]") < 0){ return text }
    def lines = str.split(text, "\n")
    mut while_i = -1
    mut i = 0
@@ -22067,7 +22070,7 @@ fn _clean_inline_expected_input_mismatch_gotos(str text) str {
    str.find(text, "printf(\"Yes, %s is correct!\", input)") >= 0
    if (str.find(text, "expected = ") < 0 ||
       str.find(text, "input = argv[1]") < 0 ||
-   !has_success_printf){ return text }
+      !has_success_printf){ return text }
    def lines = str.split(text, "\n")
    mut changed = false
    mut b = str.Builder(text.len + 64)
@@ -22197,7 +22200,7 @@ fn _clean_name_mod_checksum_helper(str text) str {
    if !str.startswith(str.strip(text), "fn check_with_mod(arg0, arg1, arg2){") { return text }
    if (str.find(text, "while (i < arg1)") < 0 ||
       str.find(text, "sum = sum + sext8(arg0[i])") < 0 ||
-   str.find(text, "return sum % arg2 == 0") < 0){ return text }
+      str.find(text, "return sum % arg2 == 0") < 0){ return text }
    mut out = text
    out = _clean_replace_token_code(out, "arg0", "input")
    out = _clean_replace_token_code(out, "arg1", "length")
@@ -22325,7 +22328,7 @@ fn _clean_name_byte_pack_helper(str text) str {
    if (str.find(text, "arg1[0] = byte_at(arg0, 0)") < 0 ||
       str.find(text, "arg1[1] = byte_at(arg0, 1)") < 0 ||
       str.find(text, "arg1[2] = byte_at(arg0, 2)") < 0 ||
-   str.find(text, "arg1[3] = byte_at(arg0, 3)") < 0){ return text }
+      str.find(text, "arg1[3] = byte_at(arg0, 3)") < 0){ return text }
    mut out = text
    out = _clean_replace_token_code(out, "arg0", "value")
    out = _clean_replace_token_code(out, "arg1", "out")
@@ -22337,7 +22340,7 @@ fn _clean_recover_cpuid_vendor_buffer(str text) str {
       str.find(text, "shift_int_to_char(ebx, expected") < 0 ||
       str.find(text, "shift_int_to_char(arg2, expected") < 0 ||
       str.find(text, "shift_int_to_char(arg3, expected") < 0 ||
-   str.find(text, "strcmp(expected, argv[1])") < 0){ return text }
+      str.find(text, "strcmp(expected, argv[1])") < 0){ return text }
    def lines = str.split(text, "\n")
    mut b = str.Builder(text.len + 160)
    mut changed = false
@@ -22390,7 +22393,7 @@ fn _clean_recover_cpuid_vendor_buffer(str text) str {
       b = str.builder_append(b, line + "\n")
       if (!tail_inserted &&
          (str.strip(line) == "shift_int_to_char(vendor.ecx, expected + 8)" ||
-         str.strip(line) == "shift_int_to_char(vendor.ecx, expected + 9)")){
+            str.strip(line) == "shift_int_to_char(vendor.ecx, expected + 9)")){
          if prefixed {
             b = str.builder_append(b, pad + "expected[13] = 0x51\n")
             b = str.builder_append(b, pad + "expected[14] = 0\n")
@@ -22415,7 +22418,7 @@ fn _clean_recover_cpuid_vendor_buffer(str text) str {
 
 fn _clean_drop_cpuid_main_phantom_args(str text) str {
    if (str.find(text, "vendor = cpuid_vendor(0)") < 0 &&
-   str.find(text, "cpuid_vendor_string(0)") < 0){ return text }
+      str.find(text, "cpuid_vendor_string(0)") < 0){ return text }
    str.str_replace(text, "fn main(argc, argv, arg2, arg3){", "fn main(argc, argv){")
 }
 
@@ -22423,7 +22426,7 @@ fn _clean_collapse_cpuid_vendor_string(str text) str {
    if (str.find(text, "expected = malloc(0xf)") < 0 ||
       str.find(text, "vendor = cpuid_vendor(0)") < 0 ||
       (str.find(text, "cmp = strcmp(expected, argv[1])") < 0 &&
-   str.find(text, "cmp = strcmp(expected, input)") < 0)){ return text }
+         str.find(text, "cmp = strcmp(expected, input)") < 0)){ return text }
    def suffix_shape = str.find(text, "shift_int_to_char(vendor.ebx, expected)") >= 0 &&
    str.find(text, "shift_int_to_char(vendor.edx, expected + 4)") >= 0 &&
    str.find(text, "shift_int_to_char(vendor.ecx, expected + 8)") >= 0 &&
@@ -22489,7 +22492,7 @@ fn _clean_inline_strcmp_compare_temps(str text) str {
          mut repl = ""
          if next.len > 0 {
             repl = _clean_strcmp_condition_expr(assign.get("rhs", ""), next.get("expr", ""),
-            assign.get("lhs", ""))
+               assign.get("lhs", ""))
          }
          if repl.len > 0 {
             b = str.builder_append(b, _clean_line_indent(lines[i + 1]) + "if " + repl + "{\n")
@@ -22696,7 +22699,7 @@ fn _clean_success_printf_line(str raw0) bool {
    def raw = str.strip(raw0)
    str.startswith(raw, "printf(") &&
    (str.find(raw, "Yes, ") >= 0 || str.find(raw, "correct!") >= 0 ||
-   str.find(raw, "Access granted") >= 0)
+      str.find(raw, "Access granted") >= 0)
 }
 
 fn _clean_return_after_missing_success_gotos(str text) str {
@@ -23293,14 +23296,14 @@ fn _clean_rendered_addr_base_score(str expr0) int {
    if str.find(expr, "[") >= 0 { return 6 }
    if (str.find(expr, " * ") >= 0 || str.find(expr, "*") >= 0 ||
       str.find(expr, " / ") >= 0 || str.find(expr, " % ") >= 0 ||
-   str.find(expr, "<<") >= 0 || str.find(expr, ">>") >= 0){ return 1 }
+      str.find(expr, "<<") >= 0 || str.find(expr, ">>") >= 0){ return 1 }
    if str.startswith(expr, "&") { return 5 }
    if str.startswith(expr, "arg") { return 5 }
    if str.startswith(expr, "local_") || str.startswith(expr, "stack_") { return 4 }
    def e = str.lower(expr)
    if (e == "rdi" || e == "rsi" || e == "rdx" || e == "rcx" ||
       e == "rbx" || e == "rax" || e == "x0" || e == "x1" ||
-   e == "x2" || e == "x3"){ return 3 }
+      e == "x2" || e == "x3"){ return 3 }
    2
 }
 
@@ -23590,7 +23593,7 @@ fn _clean_rendered_resolve_self_addr(list lines, int idx, str lhs, str rhs0) dic
    }
    if !_clean_rendered_pure_temp_rhs(base.get("rhs", "")) { return {"expr": rhs, "skip": []} }
    {"expr": _clean_replace_aliases_text(rhs, _slice_symbol_aliases(lhs),
-   _clean_rendered_inline_rhs(base.get("rhs", ""))), "skip": [k]}
+         _clean_rendered_inline_rhs(base.get("rhs", ""))), "skip": [k]}
 }
 
 fn _clean_rendered_address_loads(str text) str {
@@ -23613,11 +23616,11 @@ fn _clean_rendered_address_loads(str text) str {
                      _symbols_intersect(_slice_symbol_aliases(addr_parts.get("lhs", "")), _slice_symbol_aliases(addr)) &&
                      _clean_rendered_pure_temp_rhs(addr_parts.get("rhs", ""))){
                      def resolved = _clean_rendered_resolve_self_addr(lines, j,
-                     addr_parts.get("lhs", ""), addr_parts.get("rhs", ""))
+                        addr_parts.get("lhs", ""), addr_parts.get("rhs", ""))
                      def indexed = _clean_rendered_indexed_addr(resolved.get("expr", addr_parts.get("rhs", "")))
                      if indexed.len > 0 {
                         replace = replace.set(to_str(i), _clean_line_indent(lines[i]) + parts.get("lhs", "") +
-                        " = " + _clean_rendered_wrap_load(load.get("wrapper", ""), indexed))
+                           " = " + _clean_rendered_wrap_load(load.get("wrapper", ""), indexed))
                         def skips = resolved.get("skip", [])
                         mut si = 0
                         while si < skips.len {
@@ -23632,7 +23635,7 @@ fn _clean_rendered_address_loads(str text) str {
                def indexed_direct = _clean_rendered_indexed_addr(addr)
                if indexed_direct.len > 0 {
                   replace = replace.set(to_str(i), _clean_line_indent(lines[i]) + parts.get("lhs", "") +
-                  " = " + _clean_rendered_wrap_load(load.get("wrapper", ""), indexed_direct))
+                     " = " + _clean_rendered_wrap_load(load.get("wrapper", ""), indexed_direct))
                }
             }
          }
@@ -23672,7 +23675,7 @@ fn _clean_rendered_address_store_lhs(str lhs0, str reg0, str addr0) str {
    def inner = _clean_strip_outer_parens(inner0)
    if !_clean_render_text_has_alias(inner, reg) { return "" }
    def replaced = _clean_replace_aliases_text(inner, _slice_symbol_aliases(reg),
-   _clean_expr_subst_wrap(addr))
+      _clean_expr_subst_wrap(addr))
    "mem(" + replaced + ")"
 }
 
@@ -23756,7 +23759,7 @@ fn _clean_resolve_rendered_index_expr(list lines, int use_idx, str expr0) dict {
          }
          if _clean_rendered_rhs_redefined_between(lines, j + 1, use_idx, rhs) { break }
          expr = _clean_replace_aliases_text(expr, _slice_symbol_aliases(lhs),
-         _clean_rendered_inline_rhs(rhs))
+            _clean_rendered_inline_rhs(rhs))
          candidates = candidates.append({"idx": j, "lhs": lhs})
          guard += 1
       }
@@ -23873,7 +23876,7 @@ fn _clean_rendered_condition_index_temps(str text) str {
             if line.len > 0 {
                replace = replace.set(to_str(i), line)
                def local_skip = _clean_index_candidate_skip_map(lines, i, "",
-               resolved.get("candidates", []) + bracket.get("candidates", []))
+                  resolved.get("candidates", []) + bracket.get("candidates", []))
                def keys = local_skip.keys()
                mut ki = 0
                while ki < keys.len {
@@ -23925,7 +23928,7 @@ fn _clean_inline_index_value_conditions(str text) str {
             def cond = _clean_condition_expr_parts(lines[j])
             if cond.len > 0 && _clean_render_text_has_token(cond.get("expr", ""), assign.get("lhs", "")) {
                def expr = _clean_replace_token(cond.get("expr", ""), assign.get("lhs", ""),
-               _clean_inline_condition_copy_rhs(assign.get("rhs", "")))
+                  _clean_inline_condition_copy_rhs(assign.get("rhs", "")))
                def line = _clean_condition_expr_line(lines[j], cond, expr)
                if line.len > 0 {
                   changed = true
@@ -24115,7 +24118,7 @@ fn _clean_sub_condition_window_expr(list lines, int i) dict {
       return dict()
    }
    def left = _clean_replace_aliases_text(b.get("rhs", ""), _slice_symbol_aliases(a.get("lhs", "")),
-   _clean_rendered_inline_rhs(a.get("rhs", "")))
+      _clean_rendered_inline_rhs(a.get("rhs", "")))
    def right = _clean_simplify_nested_ext_expr(c.get("rhs", ""))
    def clean_left = _clean_simplify_nested_ext_expr(left)
    def expr = "(" + clean_left + " - " + right + ")"
@@ -24467,7 +24470,7 @@ fn _clean_normalize_inline_pointer_table_refs(str text) str {
                def br = _clean_bracket_span_at(text, j)
                if br.get("ok", false) {
                   b = str.builder_append(b, table.get("base", "") + "[" + table.get("idx", "") + "][" +
-                  _clean_rendered_castless_index(br.get("expr", "")) + "]")
+                     _clean_rendered_castless_index(br.get("expr", "")) + "]")
                   i = int(br.get("end", j + 1))
                   changed = true
                   continue
@@ -25191,7 +25194,7 @@ fn _clean_indexed_write_parts(str raw0) dict {
    def lb = str.find(lhs, "[")
    if lb <= 0 || !str.endswith(lhs, "]") { return dict() }
    {"base": str.strip(slice(lhs, 0, lb, 1)), "idx": str.strip(slice(lhs, lb + 1, lhs.len - 1, 1)),
-   "rhs": parts.get("rhs", ""), "lhs": lhs}
+      "rhs": parts.get("rhs", ""), "lhs": lhs}
 }
 
 fn _clean_char_shift_store_parts(str raw0, str idx, str src) dict {
@@ -25214,7 +25217,7 @@ fn _clean_char_shift_store_parts(str raw0, str idx, str src) dict {
    {"out": wr.get("base", ""), "idx": idx, "src": src, "delta": sign * int(right.get("value", 0))}
 }
 
-fn _clean_zero_terminator_for (str raw0, str out_name, str idx) bool {
+fn _clean_zero_terminator_for(str raw0, str out_name, str idx) bool {
    def wr = _clean_indexed_write_parts(raw0)
    wr.len > 0 && wr.get("base", "") == out_name && wr.get("idx", "") == idx &&
    _clean_literal_zero(wr.get("rhs", ""))
@@ -25247,7 +25250,7 @@ fn _clean_collapse_char_shift_loops(str text) str {
       def step = _clean_rendered_assignment_parts(lines[i + 3])
       if (shift.len == 0 || step.len == 0 || step.get("lhs", "") != idx ||
          str.strip(step.get("rhs", "")) != idx + " + 1" || str.strip(lines[i + 4]) != "}" ||
-         !_clean_zero_terminator_for (lines[i + 5], shift.get("out", ""), idx)){
+         !_clean_zero_terminator_for(lines[i + 5], shift.get("out", ""), idx)){
          i += 1
          continue
       }
@@ -25264,7 +25267,7 @@ fn _clean_collapse_char_shift_loops(str text) str {
       def amt = _clean_small_int_text(_iabs(delta))
       replace = replace.set(to_str(i), indent + "decoded = " + src + ".map(fn(ch){ ch" + op + amt + " })")
       replace = replace.set(to_str(i + 6), _clean_line_indent(lines[i + 6]) + "printf(" +
-      printed.get("fmt", "") + ", decoded)")
+         printed.get("fmt", "") + ", decoded)")
       skip = skip.set(to_str(i + 1), true).set(to_str(i + 2), true).set(to_str(i + 3), true)
       .set(to_str(i + 4), true).set(to_str(i + 5), true)
       i += 7
@@ -25390,7 +25393,7 @@ fn _clean_direct_call_parts(str raw0) dict {
    def name = str.strip(slice(raw, 0, p, 1))
    if (name == "if" || name == "while" || name == "switch" || name == "return" ||
       str.find(name, " ") >= 0 || str.find(name, "=") >= 0 ||
-   _clean_rendered_helper_call_name(name)){ return dict() }
+      _clean_rendered_helper_call_name(name)){ return dict() }
    mut i = 0
    while i < name.len {
       if !_symbol_is_name_char(load8(name, i)) { return dict() }
@@ -25726,7 +25729,7 @@ fn _clean_finish_render(str text, any opts=dict()) str {
    if is_dict(opts) && opts.get("strict_structure", false) && !report.get("ok", false) {
       panic("decompiler structure imbalance: depth=" + to_str(report.get("depth", 0)) +
          " min_depth=" + to_str(report.get("min_depth", 0)) +
-      " first_bad_line=" + to_str(report.get("first_bad_line", 0)))
+         " first_bad_line=" + to_str(report.get("first_bad_line", 0)))
    }
    mut final = _clean_balance_trailing_braces(cleaned)
    if is_dict(opts) && opts.get("auto_type_recovery", dict()).len > 0 {
@@ -25914,7 +25917,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
    if is_dict(opts) && is_dict(opts.get("signature", dict())) && opts.get("signature", dict()).len > 0 {
       sig = opts.get("signature", dict())
    } else {
-      sig = _function_signature_for (bin, opts.get("target", 0), lifted, int(lifted.len > 0 ? lifted[0].get("addr", 0) : 0), rows.len > 0 ? int(rows[rows.len - 1][0]) - int(rows[0][0]) + int(rows[rows.len - 1][3]) : 512)
+      sig = _function_signature_for(bin, opts.get("target", 0), lifted, int(lifted.len > 0 ? lifted[0].get("addr", 0) : 0), rows.len > 0 ? int(rows[rows.len - 1][0]) - int(rows[0][0]) + int(rows[rows.len - 1][3]) : 512)
    }
    mut factset = dict()
    if clean {
@@ -25922,7 +25925,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
          factset = opts.get("facts", dict())
       } else {
          factset = _facts_from(bin, opts.get("target", 0), lifted,
-         cfg(bin, opts.get("target", 0), int(opts.get("max_bytes", 512))))
+            cfg(bin, opts.get("target", 0), int(opts.get("max_bytes", 512))))
       }
    }
    def clean_skip = clean ? _clean_skip_map(lifted, factset) : dict()
@@ -25997,7 +26000,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
       def label_shared = _branch_target_count(lifted, int(ir.get("addr", 0))) > 1
       def label_key = to_str(int(ir.get("addr", 0)))
       if (lnow.len > 0 && !starts_loop && (forced_labels.get(label_key, false) ||
-      !structured_targets.get(label_key, false) || label_shared)){ b = str.builder_append(b, curpad + lnow + ":\n") }
+            !structured_targets.get(label_key, false) || label_shared)){ b = str.builder_append(b, curpad + lnow + ":\n") }
       if clean && _clean_skip_row(clean_skip, i) {
          i += 1
          continue
@@ -26215,7 +26218,7 @@ fn ny_pseudocode(any source, any target=0, any opts=dict()) str {
    if is_dict(opts) && is_dict(opts.get("signature", dict())) && opts.get("signature", dict()).len > 0 {
       sig = opts.get("signature", dict())
    } else {
-      sig = _function_signature_for (bin, target, lifted, addr_for_name, int(opts.get("max_bytes", 512)))
+      sig = _function_signature_for(bin, target, lifted, addr_for_name, int(opts.get("max_bytes", 512)))
    }
    sig = _signature_main_aliases(sig, name).set("name", name)
    mut popts = opts.set("target", target).set("lifted", lifted).set("signature", sig).set("analysis", bin)
@@ -26242,7 +26245,7 @@ fn ny_pseudocode(any source, any target=0, any opts=dict()) str {
       def base_opts = popts.set("auto_rename_locals", false).set("auto_renames", dict()).set("auto_type_recovery", dict())
       def base_text = _clean_finish_render(out, base_opts)
       def trec = type_recovery(bin, target, base_opts.set("max_bytes", int(opts.get("max_bytes", 512)))
-      .set("rendered_text", base_text))
+         .set("rendered_text", base_text))
       if trec.get("renames", dict()).len > 0 {
          popts = popts.set("auto_renames", trec.get("renames", dict()))
       }
@@ -26264,7 +26267,7 @@ fn decompile(any source, any target=0, any opts=dict()) dict {
    if !bin.get("ok", false) { return {"ok": false, "text": "", "analysis": bin} }
    def maxb = int(opts.get("max_bytes", 512))
    {"ok": true, "language": "ny", "text": ny_pseudocode(bin, target, opts),
-   "structured": structured(bin, target, maxb), "analysis": bin}
+      "structured": structured(bin, target, maxb), "analysis": bin}
 }
 
 fn _decompile_name_has(str name0, str needle) bool {
@@ -26274,9 +26277,9 @@ fn _decompile_name_has(str name0, str needle) bool {
 fn _decompile_runtime_name(str name0) bool {
    def name = str.lower(name0)
    if (name == "_start" || name == "_init" || name == "_fini" || name == ".text_start" ||
-   name == "_text_start"){ return true }
+      name == "_text_start"){ return true }
    if (_decompile_name_has(name, "__libc_") || _decompile_name_has(name, "__pthread_") ||
-   _decompile_name_has(name, "__gmon_") || _decompile_name_has(name, "__do_global")){ return true }
+      _decompile_name_has(name, "__gmon_") || _decompile_name_has(name, "__do_global")){ return true }
    if _decompile_name_has(name, "register_tm_clones") || _decompile_name_has(name, "deregister_tm_clones") { return true }
    if _decompile_name_has(name, "frame_dummy") || _decompile_name_has(name, "get_pc_thunk") { return true }
    if _decompile_name_has(name, "_init_start") || _decompile_name_has(name, "_fini_start") { return true }
@@ -26287,9 +26290,9 @@ fn _decompile_challenge_name(str name0) bool {
    def name = str.lower(name0)
    if name == "main" || name == "check" || name == "validate" || name == "verify" { return true }
    if (_decompile_name_has(name, "password") || _decompile_name_has(name, "serial") ||
-   _decompile_name_has(name, "license") || _decompile_name_has(name, "flag")){ return true }
+      _decompile_name_has(name, "license") || _decompile_name_has(name, "flag")){ return true }
    if (_decompile_name_has(name, "crack") || _decompile_name_has(name, "keygen") ||
-   _decompile_name_has(name, "gate") || _decompile_name_has(name, "stage")){ return true }
+      _decompile_name_has(name, "gate") || _decompile_name_has(name, "stage")){ return true }
    false
 }
 
@@ -26300,23 +26303,23 @@ fn _decompile_text_score(str text0) int {
    if (str.find(text, "flag") >= 0 || str.find(text, "success") >= 0 ||
       str.find(text, "correct") >= 0 || str.find(text, "congrat") >= 0 ||
       str.find(text, "welcome") >= 0 || str.find(text, "unlocked") >= 0 ||
-   str.find(text, "good job") >= 0){ score += 70 }
+      str.find(text, "good job") >= 0){ score += 70 }
    if (str.find(text, "wrong") >= 0 || str.find(text, "incorrect") >= 0 ||
       str.find(text, "invalid") >= 0 || str.find(text, "denied") >= 0 ||
       str.find(text, "failed") >= 0 || str.find(text, "try again") >= 0 ||
-   str.find(text, "nope") >= 0){ score += 45 }
+      str.find(text, "nope") >= 0){ score += 45 }
    if (str.find(text, "password") >= 0 || str.find(text, "passphrase") >= 0 ||
       str.find(text, "serial") >= 0 || str.find(text, "license") >= 0 ||
-   str.find(text, "key") >= 0 || str.find(text, "input") >= 0){ score += 45 }
+      str.find(text, "key") >= 0 || str.find(text, "input") >= 0){ score += 45 }
    if (str.find(text, "enter") >= 0 || str.find(text, "usage") >= 0 ||
-   str.find(text, "argv") >= 0 || str.find(text, "stdin") >= 0){ score += 20 }
+      str.find(text, "argv") >= 0 || str.find(text, "stdin") >= 0){ score += 20 }
    if (str.find(text, "/proc/self/status") >= 0 || str.find(text, "tracerpid") >= 0 ||
       str.find(text, "ptrace") >= 0 || str.find(text, "debug") >= 0 ||
-   str.find(text, "anti") >= 0){ score += 40 }
+      str.find(text, "anti") >= 0){ score += 40 }
    if (str.find(text, "deadc0de") >= 0 || str.find(text, "13371337") >= 0 ||
       str.find(text, "edb88320") >= 0 || str.find(text, "crc") >= 0 ||
       str.find(text, "zlib") >= 0 || str.find(text, "aes") >= 0 ||
-   str.find(text, "sha") >= 0 || str.find(text, "xor") >= 0){ score += 30 }
+      str.find(text, "sha") >= 0 || str.find(text, "xor") >= 0){ score += 30 }
    score
 }
 
@@ -26353,9 +26356,9 @@ fn _decompile_candidate_score(dict bin, dict f, int max_bytes) int {
       }
       elif kind == "syscall" { score += 8 }
       if (str.find(ops, "edb88320") >= 0 || str.find(ops, "deadc0de") >= 0 ||
-      str.find(ops, "13371337") >= 0){ score += 35 }
+         str.find(ops, "13371337") >= 0){ score += 35 }
       if (str.find(ops, "rol") >= 0 || str.find(ops, "ror") >= 0 ||
-      str.find(ops, "xor") >= 0 || str.find(ops, "crc") >= 0){ score += 2 }
+         str.find(ops, "xor") >= 0 || str.find(ops, "crc") >= 0){ score += 2 }
       i += 1
    }
    def refs = data_refs(bin, f, max_bytes)
@@ -26582,8 +26585,8 @@ fn decompile_all(any source, any opts=dict()) dict {
             li += 1
          }
          lifted = _attach_compare_context(bin, lifted)
-         def sig = _signature_main_aliases(_function_signature_for (bin, f, lifted, addr, maxb),
-         _safe_name(f.get("name", ""), "sub"))
+         def sig = _signature_main_aliases(_function_signature_for(bin, f, lifted, addr, maxb),
+            _safe_name(f.get("name", ""), "sub"))
          popts = popts.set("rows", rows).set("lifted", lifted)
          if sig.get("params", []).len > 0 { popts = popts.set("signature", sig) }
          mut graph = dict()
@@ -26604,7 +26607,7 @@ fn decompile_all(any source, any opts=dict()) dict {
                "name": _rename_addr(bin, addr, _rename_name(bin, _safe_name(f.get("name", ""), "sub_" + str.to_hex(addr, 0)))),
                "addr": addr, "rows": lifted, "cfg": graph, "loops": loops, "frame": _frame_model(lifted),
                "signature": sig, "facts": factset, "state_machines": machines,
-            "type_recovery": _type_recovery_from_rows(bin, f, lifted, factset, sig, maxb)}
+               "type_recovery": _type_recovery_from_rows(bin, f, lifted, factset, sig, maxb)}
          }
          popts = popts.set("model", model).set("loops", loops).set("facts", factset)
          if ext.get("clipped", false) { popts = popts.set("truncated_render", true) }
@@ -26613,14 +26616,14 @@ fn decompile_all(any source, any opts=dict()) dict {
                "addr": addr, "size": int(ext.get("size", f.get("size", 0))), "end": int(ext.get("end", addr)),
                "inferred_extent": ext.get("inferred", false), "source": f.get("source", ""),
                "rank_score": int(f.get("rank_score", 0)),
-         "language": "ny", "text": text, "structured": model})
+               "language": "ny", "text": text, "structured": model})
       }
       i += 1
    }
    def final_out = opts.get("clean", false) ? _decompile_prune_unused_generated_helpers(out) : out
    def text_all = _decompile_join_function_text(final_out)
    {"ok": true, "language": "ny", "functions": final_out, "text": text_all, "analysis": bin,
-   "truncated": fs.len > out.len, "recovered": fs.len}
+      "truncated": fs.len > out.len, "recovered": fs.len}
 }
 
 fn flatten_calls(any source, any root=0, int depth=2, int max_functions=24, int max_bytes=384) dict {
@@ -26724,7 +26727,7 @@ fn callgraph(any source, int max_functions=64) dict {
          def internal = node_by_addr.contains(to_str(target))
          def to_name = internal ? node_by_addr.get(to_str(target), "") : c.get("name", _name_for_addr(bin, target))
          edges = _cg_add_edge(edges, {"from": from_name, "from_addr": from_addr, "to": to_name, "to_addr": target,
-         "site": int(c.get("from", 0)), "operand": c.get("operand", ""), "kind": c.get("kind", "call"), "internal": internal})
+               "site": int(c.get("from", 0)), "operand": c.get("operand", ""), "kind": c.get("kind", "call"), "internal": internal})
          ci += 1
       }
       i += 1
@@ -26746,7 +26749,7 @@ fn callgraph(any source, int max_functions=64) dict {
       i += 1
    }
    {"nodes": nodes, "node_names": names, "edges": edges, "roots": roots, "leaves": leaves,
-   "sccs": sccs, "cycles": cycles, "node_count": nodes.len, "edge_count": edges.len}
+      "sccs": sccs, "cycles": cycles, "node_count": nodes.len, "edge_count": edges.len}
 }
 
 fn _call_query_name(dict bin, any query) str {
@@ -26805,7 +26808,7 @@ fn _triage_text(dict t) str {
    lines = lines.append("triage " + t.get("target", "") + " " + t.get("arch", "") +
       " functions=" + to_str(t.get("function_count", 0)) +
       " imports=" + to_str(t.get("import_count", 0)) +
-   " findings=" + to_str(t.get("finding_count", 0)))
+      " findings=" + to_str(t.get("finding_count", 0)))
    def cats = t.get("import_categories", dict())
    def cks = cats.keys()
    mut i = 0
@@ -26821,7 +26824,7 @@ fn _triage_text(dict t) str {
    while i < funcs.len {
       lines = lines.append("function " + funcs[i].get("name", "") + " rows=" + to_str(funcs[i].get("row_count", 0)) +
          " findings=" + to_str(funcs[i].get("finding_count", 0)) +
-      " score=" + to_str(funcs[i].get("score", 0)))
+         " score=" + to_str(funcs[i].get("score", 0)))
       i += 1
    }
    str.join(lines, "\n")
@@ -26853,7 +26856,7 @@ fn _triage_hotspots(list summaries, int limit) list {
          out = _triage_insert_hotspot(out, {"name": s.get("name", ""), "addr": int(s.get("addr", 0)),
                "score": int(s.get("score", 0)), "findings": int(s.get("finding_count", 0)),
                "inputs": int(s.get("input_surface_count", 0)), "branches": int(s.get("branch_count", 0)),
-         "calls": int(s.get("call_count", 0)), "memory_shapes": int(s.get("memory_shape_count", 0))}, limit)
+               "calls": int(s.get("call_count", 0)), "memory_shapes": int(s.get("memory_shape_count", 0))}, limit)
       }
       i += 1
    }
@@ -26876,7 +26879,7 @@ fn triage(any source, any opts=dict()) dict {
    def cats = _summary_count_categories(imps)
    def cg = callgraph(bin, max(max_funcs, 1) * 4)
    def crack = crackme_targets(bin, {"range": opts.get("range", ".text"),
-   "max_bytes": int(opts.get("target_bytes", opts.get("search_bytes", 65536)))})
+         "max_bytes": int(opts.get("target_bytes", opts.get("search_bytes", 65536)))})
    mut summaries = []
    mut findings = []
    mut i = 0
@@ -26897,14 +26900,14 @@ fn triage(any source, any opts=dict()) dict {
    }
    if crack.get("success", []).len > 0 {
       findings = _summary_add_finding(findings, "high", "crackme_targets",
-      "binary contains success/failure string targets", crack)
+         "binary contains success/failure string targets", crack)
    }
    i = 0
    while i < imps.len {
       def cat = imps[i].get("category", "")
       if cat == "anti_analysis" || cat == "crypto" || cat == "compression" || cat == "input" {
          findings = _summary_add_finding(findings, cat == "anti_analysis" ? "medium" : "info",
-         "import_" + cat, "notable import " + imps[i].get("name", ""), imps[i])
+            "import_" + cat, "notable import " + imps[i].get("name", ""), imps[i])
       }
       i += 1
    }
@@ -26917,7 +26920,7 @@ fn triage(any source, any opts=dict()) dict {
       "hotspots": hotspots,
       "functions": summaries, "function_count": summaries.len,
       "recovered_function_count": fs.len,
-   "findings": findings, "finding_count": findings.len}
+      "findings": findings, "finding_count": findings.len}
    out.set("text", _triage_text(out))
 }
 
@@ -26931,7 +26934,7 @@ fn plan(str p="", any opts=dict()) dict {
          "render compact Nytrix analyst pseudocode",
          "feed addresses and byte ranges into lib.os.symbolic for solving/emulation",
       ], "inspiration_note": "clone angr, ghidra, or vex into /tmp only when inspecting upstream implementations",
-   "options": opts}
+      "options": opts}
 }
 
 fn workspace(str p, any opts=dict()) dict {
@@ -26943,10 +26946,10 @@ fn workspace(str p, any opts=dict()) dict {
    def scan_bytes = int(opts.get("search_bytes", 1024))
    mut ws = {"target": p, "analysis": a, "callgraph": callgraph(a), "globals": globals(a, scan_range, scan_bytes),
       "crackme": crackme_targets(a, {"range": scan_range, "max_bytes": scan_bytes, "with_slices": false}),
-   "notes": notes(a), "plan": plan(p, opts)}
+      "notes": notes(a), "plan": plan(p, opts)}
    if opts.contains("search") {
       ws = ws.set("search", search(a, opts.get("search", ""), {"limit": int(opts.get("search_limit", 32)),
-      "range": scan_range, "max_bytes": scan_bytes}))
+               "range": scan_range, "max_bytes": scan_bytes}))
    }
    ws
 }

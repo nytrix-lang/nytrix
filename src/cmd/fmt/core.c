@@ -1,3 +1,7 @@
+/*
+ * Formatter core: AST-preserving pretty-printer with line-width tracking,
+ * indentation, and comment reattachment for Nytrix source files.
+ */
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -9,6 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "base/util.h"
 #include "cscan.h"
 #include "cscan.c"
 
@@ -259,6 +264,7 @@ typedef struct {
   int min_len;
 } DupStats;
 
+static char *format_c_text(const char *in);
 static int audit_patterns_selftest(void);
 
 static int cscan_selftest(void) {
@@ -294,10 +300,22 @@ static int cscan_selftest(void) {
     fprintf(stderr, "ny-fmt C scanner selftest: failed\n");
     return 1;
   }
-  cscan_functions_free(&functions);
+  char *comment_once = format_c_text("/* first */\n// second\n/*\n * third\n */\n");
+  const char *comment_expected =
+      "/*\n * first\n * second\n *\n * third\n */\n";
+  char *comment_twice = comment_once ? format_c_text(comment_once) : NULL;
+  if (!comment_once || strcmp(comment_once, comment_expected) != 0 ||
+      !comment_twice || strcmp(comment_twice, comment_once) != 0) {
+    fprintf(stderr, "ny-fmt C comment selftest: canonicalization failed\n");
+    free(comment_once);
+    free(comment_twice);
+    return 1;
+  }
+  free(comment_once);
+  free(comment_twice);
   if (audit_patterns_selftest() != 0)
     return 1;
-  printf("ny-fmt selftest: C scanner and semantic pattern checks: ok\n");
+  printf("ny-fmt selftest: C scanner, comments, and semantic pattern checks: ok\n");
   return 0;
 }
 
@@ -672,14 +690,6 @@ static void collect_cloc_files_rec(const char *path, StrVec *out) {
   collect_matching_rec(path, out, is_cloc_ext, is_cloc_skip_dir);
 }
 
-static int write_file(const char *path, const char *data, size_t len) {
-  FILE *f = fopen(path, "wb");
-  if (!f)
-    return 0;
-  size_t wr = fwrite(data, 1, len, f);
-  fclose(f);
-  return wr == len;
-}
 
 static void buf_append_char(char **buf, size_t *len, size_t *cap, char c) {
   if (*len + 1 >= *cap) {
@@ -2264,7 +2274,213 @@ static char *format_ny_text(const char *in) {
   return out;
 }
 
-static int format_file(const char *path, int *changed) {
+static void c_comment_body_push(StrVec *body, const char *start, size_t len) {
+  size_t begin = 0;
+  while (begin < len && (start[begin] == ' ' || start[begin] == '\t'))
+    begin++;
+  if (begin < len && start[begin] == '*') {
+    begin++;
+    if (begin < len && start[begin] == ' ')
+      begin++;
+  }
+  while (len > begin && (start[len - 1] == ' ' || start[len - 1] == '\t'))
+    len--;
+  sv_push_n(body, start + begin, len - begin);
+}
+
+static void c_comment_body_append(StrVec *body, const char *start, const char *end) {
+  const char *line = start;
+  while (line < end) {
+    const char *nl = memchr(line, '\n', (size_t)(end - line));
+    const char *line_end = nl ? nl : end;
+    c_comment_body_push(body, line, (size_t)(line_end - line));
+    line = nl ? nl + 1 : end;
+  }
+  if (start == end)
+    sv_push_n(body, "", 0);
+}
+
+static void c_comment_body_trim_edges(StrVec *body, int trim_first, int trim_last) {
+  if (!body)
+    return;
+  if (trim_first && body->len > 0 && body->items[0][0] == '\0') {
+    free(body->items[0]);
+    memmove(body->items, body->items + 1, (body->len - 1) * sizeof(body->items[0]));
+    body->len--;
+  }
+  if (trim_last && body->len > 0 && body->items[body->len - 1][0] == '\0') {
+    free(body->items[--body->len]);
+  }
+}
+
+static int c_comment_block(const char *src, size_t n, size_t start, size_t *next,
+                           StrVec *body) {
+  const char *open = src + start;
+  const char *close = strstr(open + 2, "*/");
+  if (!close)
+    return 0;
+  const char *line_end = memchr(close + 2, '\n', n - (size_t)(close + 2 - src));
+  const char *tail = line_end ? line_end : src + n;
+  for (const char *p = close + 2; p < tail; p++)
+    if (*p != ' ' && *p != '\t' && *p != '\r')
+      return 0;
+  const char *body_start = open + 2;
+  while (*body_start == ' ' || *body_start == '\t')
+    body_start++;
+  const char *body_end = close;
+  while (body_end > body_start && (body_end[-1] == ' ' || body_end[-1] == '\t'))
+    body_end--;
+  c_comment_body_append(body, open + 2, close);
+  c_comment_body_trim_edges(body, *body_start == '\n',
+                            body_end > body_start && body_end[-1] == '\n');
+  *next = line_end ? (size_t)(line_end + 1 - src) : n;
+  return 1;
+}
+
+static int c_comment_group(const char *src, size_t n, size_t start, size_t *next,
+                           char **indent_out, StrVec *body) {
+  size_t line_end = start;
+  while (line_end < n && src[line_end] != '\n')
+    line_end++;
+  size_t indent_len = 0;
+  while (start + indent_len < line_end &&
+         (src[start + indent_len] == ' ' || src[start + indent_len] == '\t'))
+    indent_len++;
+  const char *trimmed = src + start + indent_len;
+  if ((size_t)(line_end - (size_t)(trimmed - src)) < 2 ||
+      (strncmp(trimmed, "//", 2) != 0 && strncmp(trimmed, "/*", 2) != 0))
+    return 0;
+
+  char *indent = (char *)malloc(indent_len + 1);
+  if (!indent)
+    return 0;
+  memcpy(indent, src + start, indent_len);
+  indent[indent_len] = '\0';
+  size_t cursor = start + indent_len;
+  if (strncmp(trimmed, "//", 2) == 0) {
+    c_comment_body_push(body, trimmed + 2, line_end - (size_t)(trimmed + 2 - src));
+    cursor = line_end < n ? line_end + 1 : n;
+  } else if (!c_comment_block(src, n, cursor, &cursor, body)) {
+    free(indent);
+    return 0;
+  }
+
+  while (cursor < n) {
+    size_t next_line_end = cursor;
+    while (next_line_end < n && src[next_line_end] != '\n')
+      next_line_end++;
+    size_t next_indent_len = 0;
+    while (cursor + next_indent_len < next_line_end &&
+           (src[cursor + next_indent_len] == ' ' ||
+            src[cursor + next_indent_len] == '\t'))
+      next_indent_len++;
+    const char *next_trimmed = src + cursor + next_indent_len;
+    size_t next_len = next_line_end - (size_t)(next_trimmed - src);
+    if (next_len < 2)
+      break;
+    if (strncmp(next_trimmed, "//", 2) == 0) {
+      c_comment_body_push(body, next_trimmed + 2, next_len - 2);
+      cursor = next_line_end < n ? next_line_end + 1 : n;
+      continue;
+    }
+    if (strncmp(next_trimmed, "/*", 2) == 0) {
+      size_t after = cursor + next_indent_len;
+      if (!c_comment_block(src, n, after, &after, body))
+        break;
+      cursor = after;
+      continue;
+    }
+    break;
+  }
+
+  *indent_out = indent;
+  *next = cursor;
+  return 1;
+}
+
+static char *format_c_text(const char *in) {
+  size_t n = strlen(in), out_len = 0, out_cap = 0;
+  char *out = NULL;
+  size_t pos = 0;
+  while (pos < n) {
+    char *indent = NULL;
+    StrVec body = {0};
+    size_t next = pos;
+    if (c_comment_group(in, n, pos, &next, &indent, &body)) {
+      buf_append_str(&out, &out_len, &out_cap, indent);
+      buf_append_str(&out, &out_len, &out_cap, "/*\n");
+      for (size_t i = 0; i < body.len; i++) {
+        buf_append_str(&out, &out_len, &out_cap, indent);
+        buf_append_str(&out, &out_len, &out_cap, " *");
+        if (body.items[i][0]) {
+          buf_append_char(&out, &out_len, &out_cap, ' ');
+          buf_append_str(&out, &out_len, &out_cap, body.items[i]);
+        }
+        buf_append_char(&out, &out_len, &out_cap, '\n');
+      }
+      buf_append_str(&out, &out_len, &out_cap, indent);
+      buf_append_str(&out, &out_len, &out_cap, " */\n");
+      free(indent);
+      sv_free(&body);
+      pos = next;
+      continue;
+    }
+    size_t line_end = pos;
+    while (line_end < n && in[line_end] != '\n')
+      line_end++;
+    for (size_t i = pos; i < line_end; i++)
+      buf_append_char(&out, &out_len, &out_cap, in[i]);
+    if (line_end < n)
+      buf_append_char(&out, &out_len, &out_cap, '\n');
+    pos = line_end < n ? line_end + 1 : n;
+  }
+  if (!out)
+    return strdup("");
+  out[out_len] = '\0';
+  return out;
+}
+
+static size_t fmt_diff_line_count(const char *text) {
+  if (!text || !*text)
+    return 0;
+  size_t lines = 1;
+  for (const char *p = text; *p; ++p)
+    if (*p == '\n')
+      lines++;
+  if (text[strlen(text) - 1] == '\n')
+    lines--;
+  return lines;
+}
+
+static void fmt_emit_diff_lines(char prefix, const char *text) {
+  if (!text || !*text)
+    return;
+  const char *p = text;
+  while (*p) {
+    const char *end = strchr(p, '\n');
+    size_t len = end ? (size_t)(end - p) : strlen(p);
+    putchar(prefix);
+    if (len)
+      fwrite(p, 1, len, stdout);
+    putchar('\n');
+    if (!end)
+      break;
+    p = end + 1;
+  }
+}
+
+static void fmt_emit_unified_diff(const char *path, const char *before,
+                                  const char *after) {
+  size_t old_lines = fmt_diff_line_count(before);
+  size_t new_lines = fmt_diff_line_count(after);
+  printf("--- %s\n+++ %s\n@@ -1,%zu +1,%zu @@\n", path, path, old_lines,
+         new_lines);
+  fmt_emit_diff_lines('-', before);
+  fmt_emit_diff_lines('+', after);
+}
+
+static int format_file_mode(const char *path, int *changed, int write_back,
+                            int show_diff) {
   *changed = 0;
   size_t n = 0;
   char *before = ny_read_file_raw(path, &n);
@@ -2279,6 +2495,8 @@ static int format_file(const char *path, int *changed) {
   char *after = NULL;
   if (is_ny(path))
     after = format_ny_text(norm);
+  else if (nyt_ends_with(path, ".c"))
+    after = format_c_text(norm);
   else
     after = strdup(norm);
   free(norm);
@@ -2287,7 +2505,9 @@ static int format_file(const char *path, int *changed) {
     return 0;
   }
   if (strcmp(before, after) != 0) {
-    if (!write_file(path, after, strlen(after))) {
+    if (show_diff)
+      fmt_emit_unified_diff(path, before, after);
+    if (write_back && ny_write_file(path, after, strlen(after)) != 0) {
       free(before);
       free(after);
       return 0;
@@ -2297,6 +2517,14 @@ static int format_file(const char *path, int *changed) {
   free(before);
   free(after);
   return 1;
+}
+
+static int format_file(const char *path, int *changed) {
+  return format_file_mode(path, changed, 1, 0);
+}
+
+static int format_file_diff(const char *path, int *changed, int apply) {
+  return format_file_mode(path, changed, apply, 1);
 }
 
 typedef struct {
@@ -2461,7 +2689,7 @@ static int brace_check_file(const char *path, int fix, int verbose, int *has_iss
         l++;
       }
       if (strcmp(fixed, txt) != 0) {
-        write_file(path, fixed, strlen(fixed));
+        ny_write_file(path, fixed, strlen(fixed));
         printf("  %sfixed%s semicolon removed\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
       }
       free(fixed);
@@ -5918,9 +6146,11 @@ static int audit_ident_char(unsigned char ch) {
   return isalnum(ch) || ch == '_';
 }
 
-/* Lists are persistent values in Nytrix: append/extend return a replacement
+/*
+ * Lists are persistent values in Nytrix: append/extend return a replacement
  * list. Restrict this to a standalone receiver call so passing an appended
- * value onward (or assigning it) remains silent. */
+ * value onward (or assigning it) remains silent.
+ */
 static int audit_ny_discarded_list_update(const char *line, char *receiver,
                                           size_t receiver_sz,
                                           char *method, size_t method_sz) {

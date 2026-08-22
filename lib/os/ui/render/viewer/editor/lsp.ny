@@ -214,7 +214,9 @@ fn diagnostics_text(dict st) str {
 }
 
 fn output_name(str path) str {
-   "*lsp: " + (path.len > 0 ? ospath.basename(path) : "status") + "*"
+   "Build the language-server output title from `path`. A file uses `lsp: basename`; an empty path uses `lsp: status`."
+   def name = path.len > 0 ? ospath.basename(path) : "status"
+   str.join(["lsp: ", name], "")
 }
 
 #main {

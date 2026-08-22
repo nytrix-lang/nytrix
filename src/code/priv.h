@@ -1,7 +1,11 @@
+/*
+ * Private internal headers for Nytrix codegen.
+ */
 #ifndef CODEGEN_INTERNAL_H
 #define CODEGEN_INTERNAL_H
 
 #include "code/code.h"
+#include "priv_llvm.h"
 #include "rt/shared.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
@@ -15,6 +19,10 @@ static inline const char *ny_llvm_name(codegen_t *cg, const char *name) {
 }
 #define NY_LLVM_NAME(cg, name) ny_llvm_name((cg), (name))
 
+/* Scope arrays are stack allocated by each code-generation entry point.
+ * Deeply nested blocks use two entries per loop (loop plus body). */
+#define NY_SCOPE_STACK_CAP 256
+
 static inline LLVMValueRef ny_ptr2i64(codegen_t *cg, LLVMValueRef v,
                                       const char *n);
 
@@ -22,6 +30,9 @@ static inline LLVMValueRef ny_llvm_cast_to_i64(codegen_t *cg, LLVMValueRef v,
                                                 const char *name) {
   if (!cg || !v || LLVMTypeOf(v) == cg->type_i64)
     return v;
+  if (LLVMTypeOf(v) == cg->type_f64)
+    return LLVMBuildBitCast(cg->builder, v, cg->type_i64,
+                            NY_LLVM_NAME(cg, name ? name : ""));
   return ny_ptr2i64(cg, v, ny_llvm_name(cg, name));
 }
 
@@ -74,26 +85,6 @@ static inline const char *ny_host_arch_name(void) {
 #endif
 }
 
-static inline LLVMBasicBlockRef ny_llvm_append_block(LLVMValueRef fn, const char *name) {
-  return LLVMAppendBasicBlockInContext(LLVMGetModuleContext(LLVMGetGlobalParent(fn)), fn, name);
-}
-
-/* ── LLVM helpers ─────────────────────────────────────────── */
-static inline LLVMBasicBlockRef ny_cur_block(codegen_t *cg) {
-  return LLVMGetInsertBlock(cg->builder);
-}
-static inline LLVMValueRef ny_cur_fn(codegen_t *cg) {
-  return LLVMGetBasicBlockParent(ny_cur_block(cg));
-}
-static inline LLVMValueRef ny_has_terminator(codegen_t *cg) {
-  return LLVMGetBasicBlockTerminator(ny_cur_block(cg));
-}
-static inline LLVMValueRef ny_get_named_fn(codegen_t *cg, const char *n) {
-  return LLVMGetNamedFunction(cg->module, n);
-}
-static inline LLVMTypeRef ny_i1_ty(codegen_t *cg) { return LLVMInt1TypeInContext(cg->ctx); }
-static inline LLVMTypeRef ny_i8_ty(codegen_t *cg) { return LLVMInt8TypeInContext(cg->ctx); }
-static inline LLVMTypeRef ny_ptr_i64_ty(codegen_t *cg) { return LLVMPointerType(cg->type_i64, 0); }
 static inline const char *ny_type_leaf(const char *type_name) {
   if (!type_name)
     return NULL;
@@ -257,6 +248,7 @@ static inline bool ny_expr_init_replay_safe_depth(expr_t *e, unsigned depth) {
   if (!e || depth > 32)
     return false;
   switch (e->kind) {
+  case NY_E_IDENT:
   case NY_E_LITERAL:
     return true;
   case NY_E_COMPTIME:
@@ -374,16 +366,6 @@ static inline LLVMValueRef ny_i642ptr(codegen_t *cg, LLVMValueRef v, const char 
 static inline LLVMValueRef ny_bitcast(codegen_t *cg, LLVMValueRef v, LLVMTypeRef t, const char *n) {
   return LLVMBuildBitCast(cg->builder, v, t, NY_LLVM_NAME(cg, n));
 }
-static inline LLVMValueRef ny_phi(codegen_t *cg, LLVMTypeRef t, const char *n) {
-  return LLVMBuildPhi(cg->builder, t, NY_LLVM_NAME(cg, n));
-}
-static inline void ny_phi_add(LLVMValueRef p, LLVMValueRef v, LLVMBasicBlockRef b) {
-  LLVMAddIncoming(p, &v, &b, 1);
-}
-static inline LLVMValueRef ny_cbool(codegen_t *cg, int v) {
-  return LLVMConstInt(ny_i1_ty(cg), !!v, false);
-}
-
 void add_builtins(codegen_t *cg);
 bool builtin_allowed_comptime(const char *name);
 
@@ -424,6 +406,28 @@ void scope_pop(scope *scopes, size_t *depth);
 uint64_t ny_hash_name(const char *s, size_t len);
 uint32_t ny_binding_name_len(binding *b);
 uint64_t ny_binding_name_hash(binding *b);
+
+/* Proof-system tracing (implemented in src/code/proof_smt.c). Enabled by
+ * NYTRIX_PROOF_DEBUG (fallback NY_PROOF_DEBUG); "0"/"false"/"off"/"no"
+ * disable it, an integer n sets the trace level (1..9), anything else sets
+ * level 1. Levels: 1 = lemma resolution and prove/assert path decisions;
+ * 2 = range decisions, digests, solver attempts; 3 = canonical-decide
+ * recursion and binding lookups. Trace output is written to stderr with a
+ * "[proof debug]" prefix and never affects normal diagnostics or output. */
+int ny_proof_debug_level(void);
+bool ny_proof_debug_enabled(void);
+void ny_proof_debug_at(int level, token_t tok, const char *fmt, ...);
+void ny_proof_debug(int level, const char *fmt, ...);
+
+/* Solver-backed proofs (src/code/proof_smt.c). Returns true only when the
+ * negation of `proposition` is proven unsatisfiable under the known binding
+ * ranges; unknown results fall through to the existing const-eval path.
+ * `cex` (optional) receives a counterexample description when the solver
+ * finds one. */
+bool ny_proof_try_solver(codegen_t *cg, scope *scopes, size_t depth,
+                         expr_t *proposition, char *cex, size_t cex_cap);
+bool ny_proof_check_lemma_definition(codegen_t *cg, stmt_t *lemma_stmt);
+int ny_proof_solver_differential_selftest(void);
 void ny_scope_bloom_add(scope *sc, uint64_t hash);
 bool ny_scope_bloom_maybe_has(const scope *sc, uint64_t hash);
 void report_undef_symbol(codegen_t *cg, const char *name, token_t tok);
@@ -465,6 +469,11 @@ bool ny_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth, const c
 bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth, const char *want,
                                  expr_t *expr, token_t tok, const char *ctx);
 layout_def_t *lookup_layout(codegen_t *cg, const char *name);
+layout_def_t *ny_layout_instantiate(codegen_t *cg, const char *inst_name,
+                                    const char *generic_name, int64_t bound);
+bool ny_fin_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
+                          const char *type_name, int64_t *out_bound);
+bool ny_type_is_fin(const char *type_name);
 type_layout_t resolve_raw_layout(codegen_t *cg, const char *name, token_t tok);
 const char *codegen_qname(codegen_t *cg, const char *name, const char *module_name);
 void ny_dbg_loc(codegen_t *cg, token_t tok);
@@ -514,6 +523,10 @@ bool ny_build_mono_raw_int_expr(codegen_t *cg, scope *scopes, size_t depth, expr
 LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes, size_t depth,
                                           expr_t *e, const char *callee_name,
                                           bool shadowed, expr_call_t *c);
+void ny_proof_check_fn_proves(codegen_t *cg, scope *scopes, size_t depth,
+                              stmt_t *fn_stmt);
+bool ny_proof_check_loop_invariant(codegen_t *cg, scope *scopes,
+                                   size_t depth, expr_t *invariant);
 bool ny_gencall_type_is_nullable(const char *type_name);
 bool ny_gencall_type_is(const char *type_name, const char *want_tail);
 bool ny_gencall_type_is_real_number(const char *type_name);
@@ -600,236 +613,5 @@ void add_fn_enum_attr(codegen_t *cg, LLVMValueRef fn, const char *name, uint64_t
 void ny_apply_rt_fn_attrs(codegen_t *cg, LLVMValueRef fn);
 void ny_apply_decl_fn_attrs(codegen_t *cg, LLVMValueRef fn, stmt_t *fn_stmt);
 void ny_apply_longjmp_fn_attrs(codegen_t *cg, LLVMValueRef fn);
-
-/* ── Position & branching ───────────────────────────────────── */
-
-static inline void ny_pos(codegen_t *cg, LLVMBasicBlockRef bb) {
-  LLVMPositionBuilderAtEnd(cg->builder, bb);
-}
-
-static inline LLVMValueRef ny_br(codegen_t *cg, LLVMBasicBlockRef dest) {
-  return LLVMBuildBr(cg->builder, dest);
-}
-
-static inline LLVMValueRef ny_cond_br(codegen_t *cg, LLVMValueRef cond, LLVMBasicBlockRef tb,
-                                      LLVMBasicBlockRef fb) {
-  return LLVMBuildCondBr(cg->builder, cond, tb, fb);
-}
-
-/* ── Loads & Stores ─────────────────────────────────────────── */
-
-static inline LLVMValueRef ny_load(codegen_t *cg, LLVMValueRef ptr, const char *name) {
-  return LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, NY_LLVM_NAME(cg, name));
-}
-
-static inline LLVMValueRef ny_load_type(codegen_t *cg, LLVMTypeRef ty, LLVMValueRef ptr,
-                                        const char *name) {
-  return LLVMBuildLoad2(cg->builder, ty, ptr, NY_LLVM_NAME(cg, name));
-}
-
-static inline LLVMValueRef ny_store(codegen_t *cg, LLVMValueRef ptr, LLVMValueRef val) {
-  return LLVMBuildStore(cg->builder, val, ptr);
-}
-
-/* ── Globals ────────────────────────────────────────────────── */
-
-static inline LLVMValueRef ny_get_global(codegen_t *cg, const char *name) {
-  return LLVMGetNamedGlobal(cg->module, name);
-}
-
-/* ── Constants ──────────────────────────────────────────────── */
-
-static inline LLVMValueRef ny_c0(codegen_t *cg) { return LLVMConstInt(cg->type_i64, 0, false); }
-
-static inline LLVMValueRef ny_c1(codegen_t *cg) { return LLVMConstInt(cg->type_i64, 1, false); }
-
-static inline LLVMValueRef ny_cnil(codegen_t *cg) { return LLVMConstInt(cg->type_i64, NY_IMM_NIL, false); }
-
-static inline LLVMValueRef ny_ctrue(codegen_t *cg) {
-  return LLVMConstInt(cg->type_i64, NY_IMM_TRUE, false);
-}
-
-static inline LLVMValueRef ny_cfalse(codegen_t *cg) {
-  return LLVMConstInt(cg->type_i64, NY_IMM_FALSE, false);
-}
-
-static inline LLVMValueRef ny_ci(codegen_t *cg, uint64_t v) {
-  return LLVMConstInt(cg->type_i64, v, false);
-}
-
-/* ── Type helpers ───────────────────────────────────────────── */
-
-static inline int ny_is_i64(codegen_t *cg, LLVMValueRef v) { return LLVMTypeOf(v) == cg->type_i64; }
-
-static inline int ny_is_ptr(codegen_t *cg, LLVMValueRef v) {
-  (void)cg;
-  return LLVMGetTypeKind(LLVMTypeOf(v)) == LLVMPointerTypeKind;
-}
-
-static inline int ny_is_i1(codegen_t *cg, LLVMValueRef v) {
-  return LLVMTypeOf(v) == LLVMInt1TypeInContext(cg->ctx);
-}
-
-static inline LLVMTypeRef ny_ptr_i64(codegen_t *cg) { return LLVMPointerType(cg->type_i64, 0); }
-
-/* ── Conversions ────────────────────────────────────────────── */
-
-/* ── Comparisons ────────────────────────────────────────────── */
-
-static inline LLVMValueRef ny_icmp(codegen_t *cg, LLVMIntPredicate pred, LLVMValueRef lhs,
-                                   LLVMValueRef rhs, const char *name) {
-  return LLVMBuildICmp(cg->builder, pred, lhs, rhs, ny_llvm_name(cg, name));
-}
-
-#define ny_eq(cg, a, b, n) ny_icmp(cg, LLVMIntEQ, a, b, n)
-#define ny_ne(cg, a, b, n) ny_icmp(cg, LLVMIntNE, a, b, n)
-#define ny_slt(cg, a, b, n) ny_icmp(cg, LLVMIntSLT, a, b, n)
-#define ny_sle(cg, a, b, n) ny_icmp(cg, LLVMIntSLE, a, b, n)
-#define ny_sgt(cg, a, b, n) ny_icmp(cg, LLVMIntSGT, a, b, n)
-#define ny_sge(cg, a, b, n) ny_icmp(cg, LLVMIntSGE, a, b, n)
-#define ny_ult(cg, a, b, n) ny_icmp(cg, LLVMIntULT, a, b, n)
-#define ny_ugt(cg, a, b, n) ny_icmp(cg, LLVMIntUGT, a, b, n)
-
-/* ── Arithmetic ─────────────────────────────────────────────── */
-
-static inline LLVMValueRef ny_add(codegen_t *cg, LLVMValueRef a, LLVMValueRef b, const char *n) {
-  return LLVMBuildAdd(cg->builder, a, b, ny_llvm_name(cg, n));
-}
-
-static inline LLVMValueRef ny_sub(codegen_t *cg, LLVMValueRef a, LLVMValueRef b, const char *n) {
-  return LLVMBuildSub(cg->builder, a, b, ny_llvm_name(cg, n));
-}
-
-static inline LLVMValueRef ny_mul(codegen_t *cg, LLVMValueRef a, LLVMValueRef b, const char *n) {
-  return LLVMBuildMul(cg->builder, a, b, ny_llvm_name(cg, n));
-}
-
-static inline LLVMValueRef ny_shl(codegen_t *cg, LLVMValueRef a, LLVMValueRef b, const char *n) {
-  return LLVMBuildShl(cg->builder, a, b, ny_llvm_name(cg, n));
-}
-
-static inline LLVMValueRef ny_ashr(codegen_t *cg, LLVMValueRef a, LLVMValueRef b, const char *n) {
-  return LLVMBuildAShr(cg->builder, a, b, ny_llvm_name(cg, n));
-}
-
-static inline LLVMValueRef ny_and(codegen_t *cg, LLVMValueRef a, LLVMValueRef b, const char *n) {
-  return LLVMBuildAnd(cg->builder, a, b, ny_llvm_name(cg, n));
-}
-
-static inline LLVMValueRef ny_or(codegen_t *cg, LLVMValueRef a, LLVMValueRef b, const char *n) {
-  return LLVMBuildOr(cg->builder, a, b, ny_llvm_name(cg, n));
-}
-
-static inline LLVMValueRef ny_xor(codegen_t *cg, LLVMValueRef a, LLVMValueRef b, const char *n) {
-  return LLVMBuildXor(cg->builder, a, b, ny_llvm_name(cg, n));
-}
-
-static inline LLVMValueRef ny_select(codegen_t *cg, LLVMValueRef cond, LLVMValueRef t,
-                                     LLVMValueRef f, const char *n) {
-  return LLVMBuildSelect(cg->builder, cond, t, f, ny_llvm_name(cg, n));
-}
-
-/* ── Calls ──────────────────────────────────────────────────── */
-
-static inline LLVMValueRef ny_call0(codegen_t *cg, LLVMTypeRef ft, LLVMValueRef fn) {
-  return LLVMBuildCall2(cg->builder, ft, fn, NULL, 0, "");
-}
-
-static inline LLVMValueRef ny_call1(codegen_t *cg, LLVMTypeRef ft, LLVMValueRef fn,
-                                    LLVMValueRef a0) {
-  return LLVMBuildCall2(cg->builder, ft, fn, &a0, 1, "");
-}
-
-static inline LLVMValueRef ny_call2(codegen_t *cg, LLVMTypeRef ft, LLVMValueRef fn, LLVMValueRef a0,
-                                    LLVMValueRef a1) {
-  LLVMValueRef args[2] = {a0, a1};
-  return LLVMBuildCall2(cg->builder, ft, fn, args, 2, "");
-}
-
-static inline LLVMValueRef ny_call3(codegen_t *cg, LLVMTypeRef ft, LLVMValueRef fn, LLVMValueRef a0,
-                                    LLVMValueRef a1, LLVMValueRef a2) {
-  LLVMValueRef args[3] = {a0, a1, a2};
-  return LLVMBuildCall2(cg->builder, ft, fn, args, 3, "");
-}
-
-/* ── GEP / indexing ─────────────────────────────────────────── */
-
-static inline LLVMValueRef ny_gep1(codegen_t *cg, LLVMTypeRef ty, LLVMValueRef ptr,
-                                   LLVMValueRef idx, const char *name) {
-  return LLVMBuildGEP2(cg->builder, ty, ptr, &idx, 1, ny_llvm_name(cg, name));
-}
-
-static inline LLVMValueRef ny_gep2(codegen_t *cg, LLVMTypeRef ty, LLVMValueRef ptr, LLVMValueRef i0,
-                                   LLVMValueRef i1, const char *name) {
-  LLVMValueRef idx[2] = {i0, i1};
-  return LLVMBuildGEP2(cg->builder, ty, ptr, idx, 2, ny_llvm_name(cg, name));
-}
-
-/* ── PHI nodes ──────────────────────────────────────────────── */
-
-/* ── Block creation ─────────────────────────────────────────── */
-
-static inline LLVMBasicBlockRef ny_bb(codegen_t *cg, const char *name) {
-  return ny_llvm_append_block(LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder)), name);
-}
-
-static inline LLVMBasicBlockRef ny_bb_fn(LLVMValueRef fn, const char *name) {
-  return ny_llvm_append_block(fn, name);
-}
-
-/* ── Metadata (LLVM 21+ API) ────────────────────────────────── */
-
-static inline void ny_loop_metadata_set(codegen_t *cg, LLVMValueRef branch,
-                                        LLVMMetadataRef *attrs,
-                                        size_t attr_count) {
-  if (!cg || !branch || !attrs || attr_count == 0)
-    return;
-  LLVMContextRef ctx = cg->ctx;
-  LLVMMetadataRef tmp = LLVMTemporaryMDNode(ctx, NULL, 0);
-  LLVMMetadataRef *ops =
-      (LLVMMetadataRef *)alloca(sizeof(LLVMMetadataRef) * (attr_count + 1));
-  ops[0] = tmp;
-  for (size_t i = 0; i < attr_count; ++i)
-    ops[i + 1] = attrs[i];
-  LLVMMetadataRef md = LLVMMDNodeInContext2(ctx, ops, attr_count + 1);
-  LLVMMetadataReplaceAllUsesWith(tmp, md);
-  unsigned kind = LLVMGetMDKindIDInContext(ctx, "llvm.loop", 9);
-  LLVMSetMetadata(branch, kind, LLVMMetadataAsValue(ctx, md));
-  /* Do not dispose tmp here: LLVM may still reference the RAUW placeholder
-     while finalizing cyclic loop metadata through the C API. */
-}
-
-static inline LLVMMetadataRef ny_loop_flag_attr(LLVMContextRef ctx,
-                                                const char *name) {
-  LLVMMetadataRef s = LLVMMDStringInContext2(ctx, name, strlen(name));
-  return LLVMMDNodeInContext2(ctx, &s, 1);
-}
-
-static inline LLVMMetadataRef ny_loop_bool_attr(codegen_t *cg,
-                                                const char *name, bool value) {
-  LLVMContextRef ctx = cg->ctx;
-  LLVMMetadataRef s = LLVMMDStringInContext2(ctx, name, strlen(name));
-  LLVMMetadataRef v = LLVMValueAsMetadata(ny_cbool(cg, value ? 1 : 0));
-  LLVMMetadataRef ops[2] = {s, v};
-  return LLVMMDNodeInContext2(ctx, ops, 2);
-}
-
-static inline void ny_loop_unroll_hint(codegen_t *cg, LLVMValueRef branch) {
-  LLVMContextRef ctx = cg->ctx;
-  LLVMMetadataRef attr = ny_loop_flag_attr(ctx, "llvm.loop.unroll.full");
-  ny_loop_metadata_set(cg, branch, &attr, 1);
-}
-
-static inline void ny_loop_nounroll_hint(codegen_t *cg, LLVMValueRef branch) {
-  LLVMContextRef ctx = cg->ctx;
-  LLVMMetadataRef attr = ny_loop_flag_attr(ctx, "llvm.loop.unroll.disable");
-  ny_loop_metadata_set(cg, branch, &attr, 1);
-}
-
-static inline void ny_loop_vectorize_hint(codegen_t *cg, LLVMValueRef branch) {
-  LLVMMetadataRef attr =
-      ny_loop_bool_attr(cg, "llvm.loop.vectorize.enable", true);
-  ny_loop_metadata_set(cg, branch, &attr, 1);
-}
 
 #endif /* CODEGEN_INTERNAL_H */

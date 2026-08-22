@@ -1,0 +1,15 @@
+shape oracle_peephole_mul8_shl3_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle peephole mul-to-shl mul8 regression]
+  template ny-test-case
+  flags "--native-result-oracle=88 -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+; 11 * 8 = 88
+fn octal(i64 x) i64 { x * 8 }
+octal(11)
+NY
+}

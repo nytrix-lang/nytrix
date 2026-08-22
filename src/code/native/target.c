@@ -1,3 +1,7 @@
+/*
+ * Native target selection: resolves the target triple, ABI, and
+ * CPU features for the selected native backend and optimization tier.
+ */
 #include "code/native/native.h"
 
 #include <stdlib.h>
@@ -144,7 +148,8 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
     info->red_zone = false;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_AST_FALLBACK |
                  NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_NIR_VM |
-                 NY_NATIVE_CAP_LIVE_JIT;
+                 NY_NATIVE_CAP_LIVE_JIT | NY_NATIVE_CAP_MACH_BYTE |
+                 NY_NATIVE_CAP_MACH_TRAP;
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ELF_OBJECT;
     else if (strcmp(info->object_format, "coff") == 0)
@@ -165,7 +170,8 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
     info->red_zone = true;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_AST_FALLBACK |
                  NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_NIR_VM |
-                 NY_NATIVE_CAP_LIVE_JIT;
+                 NY_NATIVE_CAP_LIVE_JIT | NY_NATIVE_CAP_MACH_BYTE |
+                 NY_NATIVE_CAP_MACH_TRAP;
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ELF_OBJECT;
     else if (strcmp(info->object_format, "coff") == 0)
@@ -187,7 +193,7 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
     info->red_zone = false;
     info->pointer_bits = 64;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_NIR_VM |
-                 NY_NATIVE_CAP_LIVE_JIT;
+                 NY_NATIVE_CAP_LIVE_JIT | NY_NATIVE_CAP_MACH_TRAP;
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_ELF_OBJECT;
   } else if (info->target == NY_NATIVE_TARGET_X86) {

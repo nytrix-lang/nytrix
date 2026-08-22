@@ -184,7 +184,7 @@ fn _gltf_scene_bounds_accum_part(list state, list world_bounds) list {
       float(world_bounds.get(2, 0.0)),
       float(world_bounds.get(3, 0.0)),
       float(world_bounds.get(4, 0.0)),
-   float(world_bounds.get(5, 0.0)))
+      float(world_bounds.get(5, 0.0)))
 }
 
 fn _gltf_image_name_lower(any img, str resolved="") str {
@@ -546,7 +546,7 @@ fn _gltf_u8_round(any v) int {
 
 fn _gltf_pack_u8x4(any a, any b, any c, any d) int {
    bor(bor(band(int(a), 255), bshl(band(int(b), 255), 8)),
-   bor(bshl(band(int(c), 255), 16), bshl(band(int(d), 255), 24)))
+      bor(bshl(band(int(c), 255), 16), bshl(band(int(d), 255), 24)))
 }
 
 fn _gltf_pack_vec3_lane(any c, f64 default, int lane3) int {
@@ -702,7 +702,7 @@ fn gltf_material_infos(any gltf_data) list {
       cache_key,
       out,
       shr._GLTF_CACHE_LIMIT_SMALL,
-   32)
+      32)
    out
 }
 
@@ -729,7 +729,7 @@ fn gltf_material_infos_limited(any gltf_data, int limit=0) list {
       cache_key,
       out,
       shr._GLTF_CACHE_LIMIT_SMALL,
-   32)
+      32)
    out
 }
 
@@ -914,7 +914,7 @@ fn _gltf_indexed_part_material_apply_record(dict st, any mat_state) dict {
          ["occlusion_uv_xf0"], ["occlusion_uv_xf1"], ["emissive_uv_xf0"], ["emissive_uv_xf1"],
          ["bsdf0_u32"], ["bsdf1_u32"], ["bsdf2_u32"], ["bsdf3_u32"], ["bsdf4_u32"], ["bsdf5_u32"],
          ["ext2_tex_word"], ["uv_set"],
-   ])
+      ])
    st["is_unlit"] = mat_state.get("unlit", false)
    st["is_nocull"] = mat_state.get("nocull", false)
    st["is_double_sided"] = mat_state.get("double_sided", false)
@@ -930,7 +930,7 @@ fn _gltf_indexed_part_material_apply_texrec(dict st, dict texrec) dict {
          ["occlusion_uv_set"], ["alpha_u32"], ["base_uv_xf0"], ["base_uv_xf1"],
          ["normal_uv_xf0"], ["normal_uv_xf1"], ["mr_uv_xf0"], ["mr_uv_xf1"],
          ["occlusion_uv_xf0"], ["occlusion_uv_xf1"], ["emissive_uv_xf0"], ["emissive_uv_xf1"],
-   ])
+      ])
    st["tex_id"] = int(texrec.get("base_color", texrec.get("base", st.get("tex_id", -1))))
    st = _gltf_keep_indexed_bsdf_fields(st, texrec)
    st["ext2_tex_word"] = _gltf_keep_ext2_record_value(int(texrec.get("ext2_tex_word", 0x80000000)), int(st.get("ext2_tex_word", 0x80000000)))

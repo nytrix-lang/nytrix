@@ -1,3 +1,7 @@
+/*
+ * ny-perf: performance harness with gate/compare/profile/elf-compare
+ * modes, Linux perf integration, baseline tracking, and benchmark matrix.
+ */
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -26,6 +30,7 @@ int ny_perf_main(int argc, char **argv) {
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -42,6 +47,11 @@ typedef struct {
 typedef struct {
   char id[256];
   double median_ms;
+  double p95_ms;
+  double min_ms;
+  double max_ms;
+  double noise_pct;
+  int unstable;
 } PerfResult;
 
 typedef struct {
@@ -58,6 +68,11 @@ typedef struct {
   int ok;
   int rc;
   double wall_ms;
+  double wall_p95_ms;
+  double wall_min_ms;
+  double wall_max_ms;
+  double wall_noise_pct;
+  int unstable;
   double bench_ms;
   double total_ms;
   double codegen_ms;
@@ -80,9 +95,25 @@ typedef struct {
   int ok;
   int rc;
   double wall_ms;
+  double wall_p95_ms;
+  double wall_min_ms;
+  double wall_max_ms;
+  double wall_noise_pct;
+  int unstable;
   char stdout_path[PATH_MAX];
   char stderr_path[PATH_MAX];
 } PerfExecRow;
+
+typedef struct {
+  char os[256];
+  char cpu_model[256];
+  char target[128];
+  char target_features[1024];
+  char c_compiler[128];
+  char c_compiler_version[256];
+  char c_flags[512];
+  char compiler_revision[128];
+} PerfEnvironment;
 
 enum { PERF_MAX_EXEC_TARGETS = 64 };
 
@@ -137,6 +168,138 @@ static char *read_small_file(const char *path) {
   return buf;
 }
 
+static void perf_trim_line(char *s) {
+  if (!s)
+    return;
+  size_t n = strlen(s);
+  while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r' ||
+                   isspace((unsigned char)s[n - 1])))
+    s[--n] = '\0';
+}
+
+static int perf_capture_first_line(char *const argv[], char *out,
+                                   size_t out_len) {
+  if (!argv || !argv[0] || !out || out_len == 0)
+    return 0;
+  int pfd[2];
+  if (pipe(pfd) != 0)
+    return 0;
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(pfd[0]);
+    close(pfd[1]);
+    return 0;
+  }
+  if (pid == 0) {
+    close(pfd[0]);
+    dup2(pfd[1], STDOUT_FILENO);
+    dup2(pfd[1], STDERR_FILENO);
+    close(pfd[1]);
+    execvp(argv[0], argv);
+    _exit(127);
+  }
+  close(pfd[1]);
+  size_t used = 0;
+  while (used + 1 < out_len) {
+    char ch = 0;
+    ssize_t n = read(pfd[0], &ch, 1);
+    if (n <= 0 || ch == '\n' || ch == '\r')
+      break;
+    out[used++] = ch;
+  }
+  out[used] = '\0';
+  close(pfd[0]);
+  int status = 0;
+  (void)waitpid(pid, &status, 0);
+  perf_trim_line(out);
+  return used > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static void perf_proc_cpu_field(const char *text, const char *key, char *out,
+                                size_t out_len) {
+  if (!text || !key || !out || out_len == 0)
+    return;
+  const char *p = text;
+  size_t key_len = strlen(key);
+  while (*p) {
+    const char *line_end = strchr(p, '\n');
+    if (!line_end)
+      line_end = p + strlen(p);
+    const char *colon = memchr(p, ':', (size_t)(line_end - p));
+    if (colon) {
+      const char *name_end = colon;
+      while (name_end > p && isspace((unsigned char)name_end[-1]))
+        --name_end;
+      if ((size_t)(name_end - p) == key_len &&
+          strncmp(p, key, key_len) == 0) {
+        const char *v = colon + 1;
+        while (v < line_end && isspace((unsigned char)*v))
+          ++v;
+        size_t n = (size_t)(line_end - v);
+        if (n >= out_len)
+          n = out_len - 1;
+        memcpy(out, v, n);
+        out[n] = '\0';
+        return;
+      }
+    }
+    if (!*line_end)
+      break;
+    p = line_end + 1;
+  }
+}
+
+static void perf_collect_environment(const char *repo, PerfEnvironment *env) {
+  if (!env)
+    return;
+  memset(env, 0, sizeof(*env));
+  struct utsname un = {0};
+  if (uname(&un) == 0) {
+    snprintf(env->os, sizeof(env->os), "%s %s", un.sysname, un.release);
+    snprintf(env->target, sizeof(env->target), "%s", un.machine);
+  }
+  char *cpuinfo = read_small_file("/proc/cpuinfo");
+  if (cpuinfo) {
+    perf_proc_cpu_field(cpuinfo, "model name", env->cpu_model,
+                        sizeof(env->cpu_model));
+    if (!env->cpu_model[0])
+      perf_proc_cpu_field(cpuinfo, "Hardware", env->cpu_model,
+                          sizeof(env->cpu_model));
+    perf_proc_cpu_field(cpuinfo, "flags", env->target_features,
+                        sizeof(env->target_features));
+    if (!env->target_features[0])
+      perf_proc_cpu_field(cpuinfo, "Features", env->target_features,
+                          sizeof(env->target_features));
+    free(cpuinfo);
+  }
+  if (!env->cpu_model[0])
+    snprintf(env->cpu_model, sizeof(env->cpu_model), "%s",
+             env->target[0] ? env->target : "unknown");
+  const char *cc = getenv("CC");
+  if (!cc || !*cc)
+    cc = "cc";
+  snprintf(env->c_compiler, sizeof(env->c_compiler), "%s", cc);
+  char *cc_argv[] = {(char *)cc, "--version", NULL};
+  (void)perf_capture_first_line(cc_argv, env->c_compiler_version,
+                                sizeof(env->c_compiler_version));
+  const char *cflags = getenv("CFLAGS");
+  snprintf(env->c_flags, sizeof(env->c_flags), "%s", cflags ? cflags : "");
+  const char *rev = getenv("NYTRIX_REVISION");
+  if (!rev || !*rev)
+    rev = getenv("GIT_COMMIT");
+  if (rev && *rev) {
+    snprintf(env->compiler_revision, sizeof(env->compiler_revision), "%s",
+             rev);
+  } else if (repo && *repo) {
+    char *git_argv[] = {"git", "-C", (char *)repo, "rev-parse", "HEAD", NULL};
+    (void)perf_capture_first_line(git_argv, env->compiler_revision,
+                                  sizeof(env->compiler_revision));
+  }
+  if (!env->compiler_revision[0])
+    snprintf(env->compiler_revision, sizeof(env->compiler_revision),
+             "unknown");
+}
+
 static int mkdir_p(const char *path) {
   char tmp[PATH_MAX];
   snprintf(tmp, sizeof(tmp), "%s", path);
@@ -163,6 +326,48 @@ static double median(double *vals, int n) {
   if (n % 2)
     return vals[n / 2];
   return 0.5 * (vals[n / 2 - 1] + vals[n / 2]);
+}
+
+typedef struct {
+  double median_ms;
+  double p95_ms;
+  double min_ms;
+  double max_ms;
+  double noise_pct;
+  int unstable;
+} PerfSampleStats;
+
+static double perf_noise_limit_pct(void) {
+  const char *v = getenv("NYTRIX_PERF_MAX_NOISE_PCT");
+  if (!v || !*v)
+    return 20.0;
+  char *end = NULL;
+  double n = strtod(v, &end);
+  if (end == v || n < 0.0)
+    return 20.0;
+  if (n > 500.0)
+    n = 500.0;
+  return n;
+}
+
+static PerfSampleStats perf_sample_stats(double *vals, int n) {
+  PerfSampleStats out = {0};
+  if (!vals || n <= 0)
+    return out;
+  out.median_ms = median(vals, n);
+  out.min_ms = vals[0];
+  out.max_ms = vals[n - 1];
+  int p95_index = (95 * n + 99) / 100 - 1;
+  if (p95_index < 0)
+    p95_index = 0;
+  if (p95_index >= n)
+    p95_index = n - 1;
+  out.p95_ms = vals[p95_index];
+  if (out.median_ms > 0.0)
+    out.noise_pct =
+        (out.p95_ms - out.median_ms) * 100.0 / out.median_ms;
+  out.unstable = n >= 5 && out.noise_pct > perf_noise_limit_pct();
+  return out;
 }
 
 static void json_string(FILE *f, const char *s) {
@@ -1020,10 +1225,28 @@ static int run_gate_mode(const char *repo, const char *bin, int write_bl) {
     if (rc)
       break;
     snprintf(results[i].id, sizeof(results[i].id), "%s::%s", k_cases[i].path, k_cases[i].profile);
-    results[i].median_ms = median(samples, sample_n);
-    printf("%s✓%s %-35s %s%-10s%s med=%s%.2fms%s\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET),
-           k_cases[i].path, nyt_clr(NYT_CYAN), k_cases[i].profile, nyt_clr(NYT_RESET),
-           nyt_clr(NYT_BOLD), results[i].median_ms, nyt_clr(NYT_RESET));
+    PerfSampleStats st = perf_sample_stats(samples, sample_n);
+    results[i].median_ms = st.median_ms;
+    results[i].p95_ms = st.p95_ms;
+    results[i].min_ms = st.min_ms;
+    results[i].max_ms = st.max_ms;
+    results[i].noise_pct = st.noise_pct;
+    results[i].unstable = st.unstable;
+    printf("%s%s%s %-35s %s%-10s%s med=%s%.2fms%s p95=%.2fms noise=%.1f%%\n",
+           st.unstable ? nyt_clr(NYT_YELLOW) : nyt_clr(NYT_GREEN),
+           st.unstable ? "!" : "✓", nyt_clr(NYT_RESET), k_cases[i].path,
+           nyt_clr(NYT_CYAN), k_cases[i].profile, nyt_clr(NYT_RESET),
+           nyt_clr(NYT_BOLD), results[i].median_ms, nyt_clr(NYT_RESET),
+           results[i].p95_ms, results[i].noise_pct);
+    if (st.unstable) {
+      nyt_err("ny-perf",
+              "unstable official measurement for %s: p95 %.2fms vs median %.2fms "
+              "(noise %.1f%% > %.1f%%; override with NYTRIX_PERF_MAX_NOISE_PCT)",
+              results[i].id, results[i].p95_ms, results[i].median_ms,
+              results[i].noise_pct, perf_noise_limit_pct());
+      rc = 1;
+      break;
+    }
   }
   if (rc)
     return rc;
@@ -1101,7 +1324,8 @@ static int cmp_exec_wall_asc(const void *a, const void *b) {
 }
 
 static int write_compare_reports(const char *out_root, const PerfCompareRow *rows, int row_count,
-                                 int samples, int scale_percent) {
+                                 int samples, int scale_percent,
+                                 const PerfEnvironment *env) {
   char csv_path[PATH_MAX], json_path[PATH_MAX], md_path[PATH_MAX];
   nyt_path_join(csv_path, sizeof(csv_path), out_root, "summary.csv");
   nyt_path_join(json_path, sizeof(json_path), out_root, "summary.json");
@@ -1110,17 +1334,21 @@ static int write_compare_reports(const char *out_root, const PerfCompareRow *row
   FILE *csv = fopen(csv_path, "w");
   if (!csv)
     return 1;
-  fputs("case,variant,ok,rc,wall_ms,benchmark_ms,total_ms,"
+  fputs("case,variant,ok,rc,wall_ms,wall_p95_ms,wall_min_ms,wall_max_ms,"
+        "wall_noise_pct,unstable,benchmark_ms,total_ms,"
         "codegen_ms,opt_ms,jit_compile_ms,jit_run_ms,"
         "suspect,stdout,stderr\n", csv);
   for (int i = 0; i < row_count; i++) {
     csv_string(csv, rows[i].case_name);
     fputc(',', csv);
     csv_string(csv, rows[i].variant);
-    fprintf(csv, ",%s,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,",
-            rows[i].ok ? "true" : "false", rows[i].rc, rows[i].wall_ms, rows[i].bench_ms,
-            rows[i].total_ms, rows[i].codegen_ms, rows[i].opt_ms, rows[i].jit_compile_ms,
-            rows[i].jit_run_ms);
+    fprintf(csv,
+            ",%s,%d,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,",
+            rows[i].ok ? "true" : "false", rows[i].rc, rows[i].wall_ms,
+            rows[i].wall_p95_ms, rows[i].wall_min_ms, rows[i].wall_max_ms,
+            rows[i].wall_noise_pct, rows[i].unstable ? "true" : "false",
+            rows[i].bench_ms, rows[i].total_ms, rows[i].codegen_ms,
+            rows[i].opt_ms, rows[i].jit_compile_ms, rows[i].jit_run_ms);
     csv_string(csv, rows[i].suspect);
     fputc(',', csv);
     csv_string(csv, rows[i].stdout_path);
@@ -1134,6 +1362,23 @@ static int write_compare_reports(const char *out_root, const PerfCompareRow *row
   if (!js)
     return 1;
   fprintf(js, "{\n  \"engine\": \"ny-perf\",\n  \"samples\": %d,\n  \"scale_percent\": %d,\n", samples, scale_percent);
+  fprintf(js, "  \"environment\": {\"os\": ");
+  json_string(js, env ? env->os : "");
+  fprintf(js, ", \"cpu_model\": ");
+  json_string(js, env ? env->cpu_model : "");
+  fprintf(js, ", \"target\": ");
+  json_string(js, env ? env->target : "");
+  fprintf(js, ", \"target_features\": ");
+  json_string(js, env ? env->target_features : "");
+  fprintf(js, ", \"c_compiler\": ");
+  json_string(js, env ? env->c_compiler : "");
+  fprintf(js, ", \"c_compiler_version\": ");
+  json_string(js, env ? env->c_compiler_version : "");
+  fprintf(js, ", \"c_flags\": ");
+  json_string(js, env ? env->c_flags : "");
+  fprintf(js, ", \"compiler_revision\": ");
+  json_string(js, env ? env->compiler_revision : "");
+  fprintf(js, "},\n");
   fprintf(js, "  \"artifacts\": {\"csv\": ");
   json_string(js, csv_path);
   fprintf(js, ", \"markdown\": ");
@@ -1146,12 +1391,19 @@ static int write_compare_reports(const char *out_root, const PerfCompareRow *row
     json_string(js, rows[i].path);
     fprintf(js, ", \"variant\": ");
     json_string(js, rows[i].variant);
-    fprintf(js, ", \"ok\": %s, \"rc\": %d, \"wall_ms\": %.3f, \"benchmark_ms\": %.3f, "
-                "\"total_ms\": %.3f, \"codegen_ms\": %.3f, \"optimization_ms\": %.3f, "
-                "\"jit_compile_ms\": %.3f, \"jit_run_ms\": %.3f, \"suspect\": ",
-            rows[i].ok ? "true" : "false", rows[i].rc, rows[i].wall_ms, rows[i].bench_ms,
-            rows[i].total_ms, rows[i].codegen_ms, rows[i].opt_ms, rows[i].jit_compile_ms,
-            rows[i].jit_run_ms);
+    fprintf(js,
+            ", \"ok\": %s, \"rc\": %d, \"wall_ms\": %.3f, "
+            "\"wall_p95_ms\": %.3f, \"wall_min_ms\": %.3f, "
+            "\"wall_max_ms\": %.3f, \"wall_noise_pct\": %.2f, "
+            "\"unstable\": %s, \"benchmark_ms\": %.3f, "
+            "\"total_ms\": %.3f, \"codegen_ms\": %.3f, "
+            "\"optimization_ms\": %.3f, \"jit_compile_ms\": %.3f, "
+            "\"jit_run_ms\": %.3f, \"suspect\": ",
+            rows[i].ok ? "true" : "false", rows[i].rc, rows[i].wall_ms,
+            rows[i].wall_p95_ms, rows[i].wall_min_ms, rows[i].wall_max_ms,
+            rows[i].wall_noise_pct, rows[i].unstable ? "true" : "false",
+            rows[i].bench_ms, rows[i].total_ms, rows[i].codegen_ms,
+            rows[i].opt_ms, rows[i].jit_compile_ms, rows[i].jit_run_ms);
     json_string(js, rows[i].suspect);
     fprintf(js, "}%s\n", (i + 1 < row_count) ? "," : "");
   }
@@ -1173,18 +1425,28 @@ static int write_compare_reports(const char *out_root, const PerfCompareRow *row
     return 1;
   }
   fprintf(md, "# Nytrix Benchmark Matrix Report\n\n");
+  if (env) {
+    fprintf(md, "- OS: `%s`\n- CPU: `%s`\n- target: `%s`\n",
+            env->os, env->cpu_model, env->target);
+    fprintf(md, "- C compiler: `%s` (%s)\n- CFLAGS: `%s`\n- compiler revision: `%s`\n",
+            env->c_compiler, env->c_compiler_version, env->c_flags,
+            env->compiler_revision);
+  }
   fprintf(md, "- samples: %d\n- benchmark scale: %d%%\n- rows: %d\n\n", samples, scale_percent, row_count);
   fprintf(md, "## Ny Runtime And Compiler Hotspots\n\n");
-  fprintf(md, "| rank | case | variant | wall ms | bench ms | total ms |"
+  fprintf(md, "| rank | case | variant | wall ms | p95 ms | noise | stable | bench ms | total ms |"
             " codegen ms | opt ms | jit compile ms | jit run ms |"
             " suspected subsystem |\n");
-  fprintf(md, "| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
+  fprintf(md, "| ---: | --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
   int top = row_count < 20 ? row_count : 20;
   for (int i = 0; i < top; i++) {
     const PerfCompareRow *r = ranked[i];
-    fprintf(md, "| %d | `%s` | `%s` | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %s |\n",
-            i + 1, r->case_name, r->variant, r->wall_ms, r->bench_ms, r->total_ms,
-            r->codegen_ms, r->opt_ms, r->jit_compile_ms, r->jit_run_ms, r->suspect);
+    fprintf(md,
+            "| %d | `%s` | `%s` | %.2f | %.2f | %.1f%% | %s | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %s |\n",
+            i + 1, r->case_name, r->variant, r->wall_ms, r->wall_p95_ms,
+            r->wall_noise_pct, r->unstable ? "no" : "yes", r->bench_ms,
+            r->total_ms, r->codegen_ms, r->opt_ms, r->jit_compile_ms,
+            r->jit_run_ms, r->suspect);
   }
   fprintf(md, "\n## Fastest Variant Per Case\n\n");
   fprintf(md, "| case | fastest variant | wall ms | total ms | codegen ms | opt ms | jit compile ms | bench ms |\n");
@@ -1219,7 +1481,8 @@ static int write_compare_reports(const char *out_root, const PerfCompareRow *row
 
 static int write_exec_compare_reports(const char *out_root, const PerfExecTarget *targets,
                                       int target_count, const PerfExecRow *rows, int row_count,
-                                      const StrVec *common_args, int samples, int timeout_sec) {
+                                      const StrVec *common_args, int samples, int timeout_sec,
+                                      const PerfEnvironment *env) {
   char csv_path[PATH_MAX], json_path[PATH_MAX], md_path[PATH_MAX];
   nyt_path_join(csv_path, sizeof(csv_path), out_root, "summary.csv");
   nyt_path_join(json_path, sizeof(json_path), out_root, "summary.json");
@@ -1234,14 +1497,17 @@ static int write_exec_compare_reports(const char *out_root, const PerfExecTarget
   FILE *csv = fopen(csv_path, "w");
   if (!csv)
     return 1;
-  fputs("label,path,ok,rc,wall_ms,ratio_to_fastest,stdout,stderr\n", csv);
+  fputs("label,path,ok,rc,wall_ms,wall_p95_ms,wall_min_ms,wall_max_ms,"
+        "wall_noise_pct,unstable,ratio_to_fastest,stdout,stderr\n", csv);
   for (int i = 0; i < row_count; i++) {
     double ratio = (fastest > 0.0 && rows[i].ok) ? rows[i].wall_ms / fastest : 0.0;
     csv_string(csv, rows[i].label);
     fputc(',', csv);
     csv_string(csv, rows[i].path);
-    fprintf(csv, ",%s,%d,%.3f,%.4f,",
-            rows[i].ok ? "true" : "false", rows[i].rc, rows[i].wall_ms, ratio);
+    fprintf(csv, ",%s,%d,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%.4f,",
+            rows[i].ok ? "true" : "false", rows[i].rc, rows[i].wall_ms,
+            rows[i].wall_p95_ms, rows[i].wall_min_ms, rows[i].wall_max_ms,
+            rows[i].wall_noise_pct, rows[i].unstable ? "true" : "false", ratio);
     csv_string(csv, rows[i].stdout_path);
     fputc(',', csv);
     csv_string(csv, rows[i].stderr_path);
@@ -1254,6 +1520,23 @@ static int write_exec_compare_reports(const char *out_root, const PerfExecTarget
     return 1;
   fprintf(js, "{\n  \"engine\": \"ny-perf\",\n  \"kind\": \"executable-compare\",\n");
   fprintf(js, "  \"samples\": %d,\n  \"timeout_sec\": %d,\n", samples, timeout_sec);
+  fprintf(js, "  \"environment\": {\"os\": ");
+  json_string(js, env ? env->os : "");
+  fprintf(js, ", \"cpu_model\": ");
+  json_string(js, env ? env->cpu_model : "");
+  fprintf(js, ", \"target\": ");
+  json_string(js, env ? env->target : "");
+  fprintf(js, ", \"target_features\": ");
+  json_string(js, env ? env->target_features : "");
+  fprintf(js, ", \"c_compiler\": ");
+  json_string(js, env ? env->c_compiler : "");
+  fprintf(js, ", \"c_compiler_version\": ");
+  json_string(js, env ? env->c_compiler_version : "");
+  fprintf(js, ", \"c_flags\": ");
+  json_string(js, env ? env->c_flags : "");
+  fprintf(js, ", \"compiler_revision\": ");
+  json_string(js, env ? env->compiler_revision : "");
+  fprintf(js, "},\n");
   fprintf(js, "  \"artifacts\": {\"csv\": ");
   json_string(js, csv_path);
   fprintf(js, ", \"markdown\": ");
@@ -1280,8 +1563,15 @@ static int write_exec_compare_reports(const char *out_root, const PerfExecTarget
     json_string(js, rows[i].label);
     fprintf(js, ", \"path\": ");
     json_string(js, rows[i].path);
-    fprintf(js, ", \"ok\": %s, \"rc\": %d, \"wall_ms\": %.3f, \"ratio_to_fastest\": %.4f, \"stdout\": ",
-            rows[i].ok ? "true" : "false", rows[i].rc, rows[i].wall_ms, ratio);
+    fprintf(js,
+            ", \"ok\": %s, \"rc\": %d, \"wall_ms\": %.3f, "
+            "\"wall_p95_ms\": %.3f, \"wall_min_ms\": %.3f, "
+            "\"wall_max_ms\": %.3f, \"wall_noise_pct\": %.2f, "
+            "\"unstable\": %s, \"ratio_to_fastest\": %.4f, \"stdout\": ",
+            rows[i].ok ? "true" : "false", rows[i].rc, rows[i].wall_ms,
+            rows[i].wall_p95_ms, rows[i].wall_min_ms, rows[i].wall_max_ms,
+            rows[i].wall_noise_pct, rows[i].unstable ? "true" : "false",
+            ratio);
     json_string(js, rows[i].stdout_path);
     fprintf(js, ", \"stderr\": ");
     json_string(js, rows[i].stderr_path);
@@ -1303,7 +1593,17 @@ static int write_exec_compare_reports(const char *out_root, const PerfExecTarget
     return 1;
   }
   fprintf(md, "# Executable Performance Report\n\n");
-  fprintf(md, "- samples: %d\n- timeout: %ds\n- targets: %d\n", samples, timeout_sec, target_count);
+  if (env) {
+    fprintf(md, "- OS: `%s`\n- CPU: `%s`\n- target: `%s`\n",
+            env->os, env->cpu_model, env->target);
+    fprintf(md, "- C compiler: `%s` (%s)\n- CFLAGS: `%s`\n- compiler revision: `%s`\n",
+            env->c_compiler, env->c_compiler_version, env->c_flags,
+            env->compiler_revision);
+  }
+  fprintf(md,
+          "- samples: %d\n- timeout: %ds\n- targets: %d\n"
+          "- instability threshold: p95-median > %.1f%% of median (>=5 samples)\n",
+          samples, timeout_sec, target_count, perf_noise_limit_pct());
   if (arg_count > 0) {
     fprintf(md, "- common args:");
     for (size_t i = 0; i < arg_count; i++)
@@ -1311,13 +1611,15 @@ static int write_exec_compare_reports(const char *out_root, const PerfExecTarget
     fputc('\n', md);
   }
   fputc('\n', md);
-  fprintf(md, "| rank | target | ok | rc | median wall ms | x fastest |\n");
-  fprintf(md, "| ---: | --- | --- | ---: | ---: | ---: |\n");
+  fprintf(md, "| rank | target | ok | rc | median wall ms | p95 ms | noise | stable | x fastest |\n");
+  fprintf(md, "| ---: | --- | --- | ---: | ---: | ---: | ---: | --- | ---: |\n");
   for (int i = 0; i < row_count; i++) {
     const PerfExecRow *r = ranked[i];
     double ratio = (fastest > 0.0 && r->ok) ? r->wall_ms / fastest : 0.0;
-    fprintf(md, "| %d | `%s` | %s | %d | %.3f | %.4f |\n",
-            i + 1, r->label, r->ok ? "true" : "false", r->rc, r->wall_ms, ratio);
+    fprintf(md, "| %d | `%s` | %s | %d | %.3f | %.3f | %.1f%% | %s | %.4f |\n",
+            i + 1, r->label, r->ok ? "true" : "false", r->rc, r->wall_ms,
+            r->wall_p95_ms, r->wall_noise_pct, r->unstable ? "no" : "yes",
+            ratio);
   }
   fprintf(md, "\n## Artifacts\n\n");
   fprintf(md, "- CSV: `%s`\n", csv_path);
@@ -1331,9 +1633,10 @@ static int write_exec_compare_reports(const char *out_root, const PerfExecTarget
   return 0;
 }
 
-static int run_exec_compare_mode(const char *out_root, const PerfExecTarget *targets,
-                                 int target_count, const StrVec *common_args,
-                                 int samples, int timeout_sec) {
+static int run_exec_compare_mode(const char *repo, const char *out_root,
+                                 const PerfExecTarget *targets, int target_count,
+                                 const StrVec *common_args, int samples,
+                                 int timeout_sec) {
   if (target_count <= 0) {
     nyt_err("ny-perf", "executable compare requires at least one target");
     return 2;
@@ -1406,14 +1709,26 @@ static int run_exec_compare_mode(const char *out_root, const PerfExecTarget *tar
     free(command_argv);
 
     row->ok = !sample_failed && wall_n > 0;
-    row->wall_ms = median(wall_samples, wall_n);
-    printf("%s%s%s %-18s wall=%8.3fms rc=%d %s\n",
-           row->ok ? nyt_clr(NYT_GREEN) : nyt_clr(NYT_RED), row->ok ? "✓" : "✗",
-           nyt_clr(NYT_RESET), row->label, row->wall_ms, row->rc, row->path);
+    PerfSampleStats wall_st = perf_sample_stats(wall_samples, wall_n);
+    row->wall_ms = wall_st.median_ms;
+    row->wall_p95_ms = wall_st.p95_ms;
+    row->wall_min_ms = wall_st.min_ms;
+    row->wall_max_ms = wall_st.max_ms;
+    row->wall_noise_pct = wall_st.noise_pct;
+    row->unstable = wall_st.unstable;
+    printf("%s%s%s %-18s wall=%8.3fms p95=%8.3fms noise=%5.1f%% rc=%d %s\n",
+           !row->ok ? nyt_clr(NYT_RED)
+                    : (row->unstable ? nyt_clr(NYT_YELLOW) : nyt_clr(NYT_GREEN)),
+           !row->ok ? "✗" : (row->unstable ? "!" : "✓"),
+           nyt_clr(NYT_RESET), row->label, row->wall_ms, row->wall_p95_ms,
+           row->wall_noise_pct, row->rc, row->path);
   }
 
-  int wr = write_exec_compare_reports(out_root, targets, target_count, rows, target_count,
-                                      common_args, samples, timeout_sec);
+  PerfEnvironment env = {0};
+  perf_collect_environment(repo, &env);
+  int wr = write_exec_compare_reports(out_root, targets, target_count, rows,
+                                      target_count, common_args, samples,
+                                      timeout_sec, &env);
   free(rows);
   if (wr != 0)
     return wr;
@@ -1425,8 +1740,10 @@ static int run_exec_compare_mode(const char *out_root, const PerfExecTarget *tar
   return 0;
 }
 
-static int run_compare_mode(const char *bin, const char *out_root, const char *single_case,
-                            int samples, int scale_percent, int limit, int timeout_sec) {
+static int run_compare_mode(const char *repo, const char *bin,
+                            const char *out_root, const char *single_case,
+                            int samples, int scale_percent, int limit,
+                            int timeout_sec) {
   if (!mkdir_p(out_root)) {
     nyt_err("ny-perf", "could not create output dir: %s", out_root);
     return 1;
@@ -1541,25 +1858,40 @@ static int run_compare_mode(const char *bin, const char *out_root, const char *s
         free(err_text);
       }
       row->ok = !sample_failed && wall_n > 0;
-      row->wall_ms = median(wall_samples, wall_n);
+      PerfSampleStats wall_st = perf_sample_stats(wall_samples, wall_n);
+      row->wall_ms = wall_st.median_ms;
+      row->wall_p95_ms = wall_st.p95_ms;
+      row->wall_min_ms = wall_st.min_ms;
+      row->wall_max_ms = wall_st.max_ms;
+      row->wall_noise_pct = wall_st.noise_pct;
+      row->unstable = wall_st.unstable;
       row->bench_ms = median(bench_samples, bench_n);
       row->total_ms = median(total_samples, total_n);
       row->codegen_ms = median(codegen_samples, codegen_n);
       row->opt_ms = median(opt_samples, opt_n);
       row->jit_compile_ms = median(jit_compile_samples, jit_compile_n);
       row->jit_run_ms = median(jit_run_samples, jit_run_n);
-      printf("%s%s%s %-12s %-16s wall=%8.2fms bench=%8.2fms total=%8.2fms\n",
-             row->ok ? nyt_clr(NYT_GREEN) : nyt_clr(NYT_RED), row->ok ? "✓" : "✗",
-             nyt_clr(NYT_RESET), row->case_name, row->variant, row->wall_ms, row->bench_ms,
+      printf("%s%s%s %-12s %-16s wall=%8.2fms p95=%8.2fms noise=%5.1f%% "
+             "bench=%8.2fms total=%8.2fms\n",
+             !row->ok ? nyt_clr(NYT_RED)
+                      : (row->unstable ? nyt_clr(NYT_YELLOW) : nyt_clr(NYT_GREEN)),
+             !row->ok ? "✗" : (row->unstable ? "!" : "✓"),
+             nyt_clr(NYT_RESET), row->case_name, row->variant, row->wall_ms,
+             row->wall_p95_ms, row->wall_noise_pct, row->bench_ms,
              row->total_ms);
     }
   }
 
-  int wr = write_compare_reports(out_root, rows, row_count, samples, scale_percent);
+  PerfEnvironment env = {0};
+  perf_collect_environment(repo, &env);
+  int wr = write_compare_reports(out_root, rows, row_count, samples,
+                                 scale_percent, &env);
   if (wr == 0) {
     for (int i = 0; i < row_count; i++) {
         if (!rows[i].ok) continue;
-        // Search for a matching C variant if we are a Ny variant
+        /*
+         * Search for a matching C variant if we are a Ny variant
+         */
         if (strncmp(rows[i].variant, "ny-", 3) == 0) {
             for (int j = 0; j < row_count; j++) {
                 if (rows[j].ok && strcmp(rows[i].case_name, rows[j].case_name) == 0 &&
@@ -1829,12 +2161,14 @@ int ny_perf_main(int argc, char **argv) {
 
   if (strcmp(mode, "compare") == 0) {
     if (exec_target_count > 0) {
-      int rc = run_exec_compare_mode(out_dir, exec_targets, exec_target_count,
-                                     &script_args, samples, timeout_sec);
+      int rc = run_exec_compare_mode(repo, out_dir, exec_targets,
+                                     exec_target_count, &script_args, samples,
+                                     timeout_sec);
       sv_free(&script_args);
       return rc;
     }
-    int rc = run_compare_mode(bin, out_dir, single_compare_case, samples, scale_percent, limit, timeout_sec);
+    int rc = run_compare_mode(repo, bin, out_dir, single_compare_case, samples,
+                              scale_percent, limit, timeout_sec);
     sv_free(&script_args);
     return rc;
   }

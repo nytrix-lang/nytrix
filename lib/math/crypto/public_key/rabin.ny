@@ -12,6 +12,7 @@ module std.math.crypto.public_key.rabin(
    rabin_select_candidate, rabin_decrypt_with_padding,
    rabin_sign_int, rabin_verify_int, rabin_sign, rabin_verify
 )
+
 use std.core
 use std.math.nt
 use std.math.crypto.hash (sha256_bytes)
@@ -64,7 +65,7 @@ fn rabin_principal_decrypt_blum(any c, any p, any q) any {
 
 fn rabin_decrypt_candidates(any c, any p, any q) list {
    "Return all square roots of c modulo n = p*q.
-   Rabin decryption is ambiguous; callers normally select a candidate with
+   Rabin decryption is ambiguous ; callers normally select a candidate with
    padding or a known prefix."
    def pp = Z(p)
    def qq = Z(q)
@@ -129,7 +130,7 @@ fn rabin_sign_int(any m, dict key) list {
 
 fn rabin_verify_int(any m, list sig, any n) bool {
    "Verify a Rabin-Williams signature [s, tweak] on integer representative m.
-   Returns true iff s^2 ≡ m + tweak (mod n)."
+   Returns true iff s^2 ≡ m + tweak(mod n)."
    def s, tweak = Z(sig.get(0)), Z(sig.get(1))
    def nn = Z(n)
    mod(s * s, nn) == mod(Z(m) + tweak, nn)
@@ -171,16 +172,13 @@ fn rabin_verify(str msg, list sig, any n) bool {
    assert(rabin_decrypt_with_padding(c, key, 18, 22) == Z(20), "rabin range padding")
    assert(rabin_decrypt_with_padding(c, key, nil, nil, 2, 9) == Z(20), "rabin residue padding")
    assert(rabin_decrypt_with_padding(c, key, 1, 3) == nil, "rabin no padding match")
-
    def sig = rabin_sign_int(5, key)
    def s, t = Z(sig.get(0)), Z(sig.get(1))
    assert(rabin_verify_int(5, sig, key.get("n")), "rabin-williams verify int")
    assert(mod(s * s, key.get("n")) == mod(Z(5) + t, key.get("n")), "rabin-williams signature property")
    assert(!rabin_verify_int(6, sig, key.get("n")), "rabin-williams wrong message")
-
    def msg_sig = rabin_sign("hello", key)
    assert(rabin_verify("hello", msg_sig, key.get("n")), "rabin-williams verify string")
    assert(!rabin_verify("world", msg_sig, key.get("n")), "rabin-williams wrong string")
-
    print("✓ std.math.crypto.public_key.rabin self-test passed")
 }

@@ -15,7 +15,7 @@ module std.core.query(from, where, select, select_as, order_by, limit, offset,
 use std.core
 
 fn from(any rows) dict {
-   "Start a query from a list of dicts (or any sequence)."
+   "Start a query from a list of dicts(or any sequence)."
    {"_type": "query", "_rows": rows, "_steps": []}
 }
 
@@ -297,27 +297,22 @@ fn _filter_salary_90k(any r) bool {
       {"name": "Dave",    "dept": "mkt",  "salary": 75000},
       {"name": "Eve",     "dept": "eng",  "salary": 110000}
    ]
-
    def q1 = from(rows)
    def q1b = pipe(q1, where(_filter_salary_90k))
    def q1c = pipe(q1b, select(["name", "salary"]))
    def result1 = run(q1c)
    assert_eq(len(result1), 3, "filter: 3 employees with salary > 90k")
-
    def q3 = pipe(pipe(from(rows), group_by("dept")), count_agg())
    def counts = run(q3)
    assert_eq(counts.get("eng"), 3, "eng dept has 3")
    assert_eq(counts.get("mkt"), 2, "mkt dept has 2")
-
    def q4 = pipe(pipe(from(rows), group_by("dept")), sum_agg("salary"))
    def sums = run(q4)
    assert_eq(sums.get("eng"), 325000, "eng total salary")
-
    def depts = [{"dept": "eng", "head": "Frank"}, {"dept": "mkt", "head": "Grace"}]
    def q5 = pipe(pipe(from(rows), join(depts, "dept", "dept")), select(["name", "head"]))
    def joined = run(q5)
    assert_eq(len(joined), 5, "join: all 5 rows matched")
    assert(joined.get(0).get("head") != nil, "join: head column present")
-
    print("✓ std.core.query self-test passed")
 }

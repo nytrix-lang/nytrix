@@ -1,7 +1,26 @@
 ;; Keywords: os filesystem path process subprocess io time thread async parallel atomic clipboard gpu opencl hardware platform
-;; Operating-system facade: paths, files, processes, time, threads, async tasks, hardware status, acceleration, and clipboard.
+;; Portable host services for files, processes, time, concurrency, networking, and integration.
 ;; References:
 ;; - std
+;; Documentation:
+;; ## Scope
+;; `std.os` is the host-services facade. Use a focused module rather than an
+;; implementation hook so portability and failure behavior remain visible.
+;;
+;; ## Namespaces
+;; - **Files and directories:** `std.os.fs`
+;; - **Paths:** `std.os.path`
+;; - **Wall-clock and monotonic time:** `std.os.time` and `std.os.clock`
+;; - **Processes and pipes:** `std.os.process` and `std.os.subprocess`
+;; - **Threads and atomics:** `std.os.thread` and `std.os.atomic`
+;; - **Async work:** `std.os.async` and `std.os.parallel`
+;; - **Browser fetch and clipboard:** `std.os` and `std.os.clipboard`
+;; - **Browser WebSockets:** `std.os.websocket`
+;;
+;; ## Notes
+;; Native and browser targets share this facade, but not every host capability.
+;; Browser fetch, clipboard, and WebSockets depend on origin policy and
+;; permissions. Unavailable operations return documented failure values.
 module std.os(pid, ppid, env, environ, getcwd, uid, gid, file_read, file_write, file_exists, file_append, file_remove, file_rename, os, arch, argv, args, path_sep, path_has_sep, path_is_abs, path_join, path_normalize, path_basename, path_dirname, path_extname, path_splitext, path_resolve_repo_asset, temp_dir, home_dir, config_dir, data_dir, cache_dir, is_file, is_dir, list_dir, walk, time, now, unix, now_ms, sleep, msleep, ticks, monotonic_ns, Instant, instant, since_ns, since_ms, Timer, timer, timer_start, elapsed_ns, elapsed_ms, elapsed_sec, format, format_time, run, popen, waitpid, spawn, send, sendline, recv, recv_line, recv_all, shutdown_send, close, run_capture, check_output, output, check_lines, shell, shell_lines, gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_backend, accel_target_status, accel_compile_plan, accel_emit_plan, accel_emit_command, parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, scheduler_policy, scheduler_status, work_stealing_enabled, work_stealing_plan, work_queue, work_queue_push, work_queue_pop, work_queue_steal, thread_spawn, thread_spawn_call, thread_launch, thread_launch_call, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free, hardware_threads, atomic_i64, atomic_free, atomic_load, atomic_store, atomic_add, atomic_sub, atomic_exchange, atomic_compare_exchange, thread_budget, future, async, await, await_all, detach, future_wait, async_yield_now, async_sleep_ms, async_run, async_backend, async_state, parallel_map, parallel_map_indexed, parallel_each, chunk_ranges, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK, SCHEDULER_POLICY, HARDWARE_THREADS, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE, hardware_status, set_clipboard_text, get_clipboard_text, exit, fetch)
 use std.core
 use std.core.common as common
@@ -58,6 +77,9 @@ fn _clipboard_tmp_file(str tag) str {
 
 fn set_clipboard_text(any text) bool {
    "Sets the system clipboard text."
+   if os() == "web" {
+      return __web_clipboard_write(text) != 0
+   }
    def tmp = _clipboard_tmp_file("w")
    def qtmp = "\"" + tmp + "\""
    match file_write(tmp, text) {
@@ -91,6 +113,10 @@ fn set_clipboard_text(any text) bool {
 
 fn get_clipboard_text() str {
    "Retrieves text from the system clipboard."
+   if os() == "web" {
+      def text = __web_clipboard_read()
+      return is_str(text) ? text : ""
+   }
    mut res = ""
    def tmp = _clipboard_tmp_file("r")
    def qtmp = "\"" + tmp + "\""
@@ -126,6 +152,7 @@ fn fetch(any url) any {
    HTTPS and redirects use the libcurl-backed client when available.
    On failure returns 0(so runtime tests can skip cleanly)."
    if !is_str(url) || url.len == 0 { return 0 }
+   if os() == "web" { return __web_fetch(url) }
    def r = requests_get_parsed(url)
    if r == nil { return 0 }
    if r.get("ok", false) { return r.get("body", "") }
@@ -540,7 +567,7 @@ fn hardware_status(int work_items=0) dict {
    "Returns a cross-platform hardware facade summary for CPU parallelism, GPU, and OpenCL policy."
    {"os": OS, "arch": ARCH, "parallel": parallel_status(work_items), "scheduler": scheduler_status(work_items),
       "hardware_threads": hardware_threads(),
-   "thread_budget": thread_budget(work_items), "gpu": gpu_offload_status(work_items), "opencl": opencl_status(work_items)}
+      "thread_budget": thread_budget(work_items), "gpu": gpu_offload_status(work_items), "opencl": opencl_status(work_items)}
 }
 
 fn thread_spawn(fnptr target, any arg=0) any { osthread.thread_spawn(target, arg) }

@@ -1,0 +1,22 @@
+shape type_lemma_composition_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "lemma", "composition", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "could not prove"
+  source ny <<'NY'
+use std.core
+
+fn lemma positive_sum(int x, int y) {
+  x > 0 && y > 0 → x + y > 0
+}
+
+fn lemma inherited_positive(int x, int y) {
+  positive_sum(x, y)
+}
+
+fn read_value() int { 3 }
+prove(inherited_positive(read_value(), 4))
+NY
+}

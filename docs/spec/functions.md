@@ -1,4 +1,5 @@
-# Functions and blocks
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":140,"summary":"Function declarations, calls, closures, returns, receivers, and parameter behavior."} -->
+# Functions
 
 Functions cover bindings, parameters, lambdas, return behavior, docstrings, and
 block values.
@@ -57,6 +58,38 @@ Type name = default
 Parameter types belong to the callable surface. The call path evaluates
 defaults according to the function definition.
 
+## Argument evaluation
+
+Arguments are evaluated left to right before the call. Default parameters are
+evaluated when the argument is omitted, at the call site, in declaration order.
+A rest parameter collects the remaining positional arguments into a list.
+
+```ny
+fn log(str tag, str message = "ok", ...rest) str {
+   tag + ":" + message
+}
+
+assert_eq(log("t"), "t:ok", "default parameter")
+assert_eq(log("t", "hi", 1, 2), "t:hi", "rest parameter")
+```
+
+## Closures and capture
+
+`fn(...) { ... }` values capture the bindings they reference from the enclosing
+scope. A captured binding keeps its value for the lifetime of the closure; a
+closure that mutates a captured `mut` binding changes that binding for the
+caller too, so keep captures read-only unless the shared state is intended.
+
+```ny
+def offset = 10
+def add_offset = fn(int x) int { x + offset }
+assert_eq(add_offset(5), 15, "closure capture")
+```
+
+Closures are first-class values: they can be stored in lists, passed to
+higher-order helpers such as `map`, `filter`, and `reduce`, and returned from
+functions. A function that returns a closure keeps the captured bindings alive.
+
 ## Blocks
 
 Blocks use braces:
@@ -79,6 +112,23 @@ fn clamp(number x, number lo, number hi) number {
    if(x > hi){ return hi }
    x
 }
+```
+
+## Value and container behavior
+
+Scalars, structs, tuples, and ranges cross function boundaries by value. Lists,
+dicts, and sets cross as references to the same managed object: a function that
+mutates an argument list or dict changes the caller's object. When a function
+must not change the caller's container, clone it first with `clone(value)`.
+
+```ny
+fn bump(dict cfg) {
+   cfg.set("hits", cfg.get("hits", 0) + 1)
+}
+
+mut cfg = {"hits": 0}
+bump(cfg)
+assert_eq(cfg.get("hits", 0), 1, "caller sees mutation")
 ```
 
 ## Attributes
@@ -203,6 +253,6 @@ fn normalize_port(int raw) int {
 
 ## Related
 
-- [types.md](types.md) for typed parameters and return types.
-- [control-flow.md](control-flow.md) for early exits and cleanup forms.
-- [programs.md](../learn/programs.md) for script/module file shape.
+- [Types](types.md) for typed parameters and return types.
+- [Control Flow](control-flow.md) for early exits and cleanup forms.
+- [Programs](../learn/programs.md) for script/module file shape.

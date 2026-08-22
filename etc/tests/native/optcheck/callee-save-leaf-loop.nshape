@@ -1,0 +1,21 @@
+shape optcheck_callee_save_leaf_loop {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck callee-save loop]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-result-oracle=6 --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn sum(ptr p, int n) int {
+  mut s = 0
+  for i in 0..n-1 { s += load64_i(p, i * 8) }
+  s
+}
+mut p = zalloc(24)
+store64_i(p, 0, 1)
+store64_i(p, 8, 2)
+store64_i(p, 16, 3)
+sum(p, 3)
+NY
+}

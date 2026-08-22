@@ -1,0 +1,18 @@
+shape optcheck_wide_indirect_store {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck memory store64]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-result-oracle=4294967297 --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+fn fill(ptr p) int {
+  store64_i(p, 0x100000000, 0)
+  store64_i(p, 0x100000001, 8)
+  load64_i(p, 8)
+}
+mut p = zalloc(16)
+fill(p)
+NY
+}

@@ -18,7 +18,7 @@ fn cps_run(fnptr c, ?fnptr k=nil) any {
    if !k {
       return c(fn(v) {
             v
-      })
+         })
    }
    c(k)
 }
@@ -42,7 +42,7 @@ fn cps_map(fnptr c, fnptr f) fnptr {
    return fn(k) {
       c(fn(v) {
             k(f(v))
-      })
+         })
    }
 }
 
@@ -53,7 +53,7 @@ fn cps_bind(fnptr c, fnptr f) fnptr {
       c(fn(v) {
             def next = f(v)
             next(k)
-      })
+         })
    }
 }
 
@@ -61,7 +61,7 @@ fn cps_apply(fnptr cf, fnptr ca) fnptr {
    "Applies a CPS computation containing a function `cf` to a CPS computation containing an argument `ca`."
    cps_bind(cf, fn(f) {
          cps_map(ca, f)
-   })
+      })
 }
 
 fn cps_lift2(fnptr f, fnptr ca, fnptr cb) fnptr {
@@ -69,8 +69,8 @@ fn cps_lift2(fnptr f, fnptr ca, fnptr cb) fnptr {
    cps_bind(ca, fn(a) {
          cps_map(cb, fn(b) {
                f(a, b)
-         })
-   })
+            })
+      })
 }
 
 fn cps_pipe(any v, list funcs) fnptr {

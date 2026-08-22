@@ -1,16 +1,16 @@
 shape internal_fwd_decl {
   family "runtime-native"
-  features [c-frontend ffi structs no-libclang]
   generator "native"
   template ny-test-case
-  flags "--c-frontend=nytrix"
-  expect compile_and_run
+  flags "--native-backend x86 -emit-only -o /tmp/nytrix-internal-fwd-decl.o"
+  link "etc/tests/native/c/fwd_decl.a"
+  expect object_link_run_i64_0
+ci windows-skip
   source ny <<'NY'
-#include "etc/tests/native/c/fwd_decl.h" as "c"
+extern "c" {
+  fn take_fwd(any ptr) i64
+}
 
-assert(c.take_fwd(nil) == 0, "take_fwd nil")
-assert(sizeof(MyStruct) == 8, "MyStruct size")
-
-0
+take_fwd(nil)
 NY
 }

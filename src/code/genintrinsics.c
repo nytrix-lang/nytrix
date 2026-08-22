@@ -1,3 +1,7 @@
+/*
+ * Generic intrinsic dispatch: maps runtime intrinsic calls to the
+ * appropriate lowering path (inline, libcall, or native builtin).
+ */
 #include "base/util.h"
 #include "priv.h"
 

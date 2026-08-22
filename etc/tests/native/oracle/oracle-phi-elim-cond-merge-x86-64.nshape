@@ -1,0 +1,25 @@
+shape oracle_phi_elim_cond_merge_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle phi-elim phi mem2reg loop if-merge multi-path swap regression]
+  template ny-test-case
+  flags_matrix "-O2 --native-enable-cf-mem2reg --native-result-oracle=66; -O3 --native-enable-cf-mem2reg --native-result-oracle=66"
+  expect compile_and_run
+  source ny <<'NY'
+mut a = 1
+mut b = 2
+mut i = 0
+while i < 6 {
+  if i % 2 == 0 {
+    mut saved = a
+    a = b
+    b = saved
+  } else {
+    a = a + 1
+    b = b + 2
+  }
+  i = i + 1
+}
+a * 10 + b
+NY
+}

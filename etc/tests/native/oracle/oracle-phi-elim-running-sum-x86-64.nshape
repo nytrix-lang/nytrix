@@ -1,0 +1,21 @@
+shape oracle_phi_elim_running_sum_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle phi-elim phi mem2reg loop accumulator merge regression]
+  template ny-test-case
+  flags_matrix "-O2 --native-enable-cf-mem2reg --native-result-oracle=4950; -O3 --native-enable-cf-mem2reg --native-result-oracle=4950"
+  expect compile_and_run
+  source ny <<'NY'
+fn sum_to(i64 n) i64 {
+  mut s = 0
+  mut i = 0
+  while i < n {
+    s = s + i
+    i = i + 1
+  }
+  s
+}
+
+sum_to(100)
+NY
+}

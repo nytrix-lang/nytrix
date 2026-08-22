@@ -1,0 +1,85 @@
+shape n-body {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "fp", "simd", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+;; Two-body circular orbit (leapfrog): tests FP/sqrt throughput.
+def STEPS = 100000
+def dt = 0.001
+def t0 = ticks()
+mut px = 10.0
+mut py = 0.0
+mut vx = 0.0
+mut vy = 10.0
+mut sx = 0.0
+mut sy = 0.0
+mut step = 0
+while step < STEPS {
+   def dx = px - sx
+   def dy = py - sy
+   def dist = __flt_sqrt(dx * dx + dy * dy)
+   def dist3 = dist * dist * dist
+   def ax = -1000.0 * dx / dist3
+   def ay = -1000.0 * dy / dist3
+   vx += ax * dt
+   vy += ay * dt
+   px += vx * dt
+   py += vy * dt
+   step += 1
+}
+def ke = 0.5 * (vx * vx + vy * vy)
+def dxf = px - sx
+def dyf = py - sy
+def rf = __flt_sqrt(dxf * dxf + dyf * dyf)
+def pe = -1000.0 / rf
+def energy = ke + pe
+mut conv = 0
+if energy < 0.0 { conv = 1 } else { conv = 0 }
+def t1 = ticks()
+print("checksum=", conv)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <math.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    int STEPS = 100000;
+    double dt = 0.001;
+    int64_t start = now_ns();
+    double px = 10.0, py = 0.0, vx = 0.0, vy = 10.0;
+    double sx = 0.0, sy = 0.0;
+    for (int step = 0; step < STEPS; step++) {
+        double dx = px - sx, dy = py - sy;
+        double dist = sqrt(dx * dx + dy * dy);
+        double dist3 = dist * dist * dist;
+        double ax = -1000.0 * dx / dist3, ay = -1000.0 * dy / dist3;
+        vx += ax * dt; vy += ay * dt;
+        px += vx * dt; py += vy * dt;
+    }
+    double ke = 0.5 * (vx * vx + vy * vy);
+    double dxf = px - sx, dyf = py - sy;
+    double rf = sqrt(dxf * dxf + dyf * dyf);
+    double pe = -1000.0 / rf;
+    double energy = ke + pe;
+    int64_t end = now_ns();
+    int conv = (energy < 0.0) ? 1 : 0;
+    printf("checksum=%d\n", conv);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

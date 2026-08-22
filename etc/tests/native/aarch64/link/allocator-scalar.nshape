@@ -1,0 +1,18 @@
+shape aarch64_elf64_internal_link_run_allocator_scalar {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 aarch64 internal-link qemu regalloc scalar]
+  template ny-test-case
+  flags "--native-backend aarch64 -O3 -emit-only -o /tmp/nytrix-aarch64-link-allocator-v3.o"
+  expect object_link_run_i64_11
+  source ny <<'NY'
+fn combine(i64 a, i64 b) i64 {
+  def sum = a + b
+  def scaled = sum * 3
+  def remainder = scaled % 7
+  remainder + sum * 2
+}
+
+combine(2, 3)
+NY
+}

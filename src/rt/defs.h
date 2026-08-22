@@ -24,6 +24,8 @@ RT_DEF("__rc_count", rt_rc_count, 1, "fn __rc_count(p)",
 RT_DEF("__realloc", rt_realloc, 2, "fn __realloc(p, n)", "Reallocates memory to a new size.")
 RT_DEF("__runtime_cleanup", rt_runtime_cleanup, 0, "fn __runtime_cleanup()",
        "Frees runtime-owned allocations and argument buffers at shutdown.")
+RT_DEF("__pool_release", rt_pool_release, 0, "fn __pool_release()",
+       "Releases thread-local allocation pools back to the OS.")
 
 RT_DEF("__load8_idx", rt_load8_idx, 2, "fn __load8(p, i)",
        "Loads a single byte from memory address p + i.")
@@ -78,6 +80,14 @@ RT_DEF("__time_seconds", rt_time_seconds, 0, "fn __time_seconds()", "Returns Uni
 RT_DEF("__time_milliseconds", rt_time_milliseconds, 0, "fn __time_milliseconds()", "Returns Unix milliseconds.")
 RT_DEF("__ticks_ns", rt_ticks_ns, 0, "fn __ticks_ns()", "Returns monotonic nanoseconds.")
 RT_DEF("__msleep_ms", rt_msleep_ms, 1, "fn __msleep_ms(ms)", "Sleeps for milliseconds.")
+RT_DEF("__web_fetch", rt_web_fetch, 1, "fn __web_fetch(url)", "Fetches a browser URL through the web host bridge; native hosts return failure.")
+RT_DEF("__web_clipboard_write", rt_web_clipboard_write, 1, "fn __web_clipboard_write(text)", "Writes browser clipboard text; native hosts return failure.")
+RT_DEF("__web_clipboard_read", rt_web_clipboard_read, 0, "fn __web_clipboard_read()", "Reads browser clipboard text; native hosts return failure.")
+RT_DEF("__websocket_open", rt_websocket_open, 1, "fn __websocket_open(url)", "Opens a browser WebSocket; native hosts return failure.")
+RT_DEF("__websocket_state", rt_websocket_state, 1, "fn __websocket_state(handle)", "Returns browser WebSocket state.")
+RT_DEF("__websocket_send", rt_websocket_send, 2, "fn __websocket_send(handle, text)", "Sends text over a browser WebSocket.")
+RT_DEF("__websocket_receive", rt_websocket_receive, 1, "fn __websocket_receive(handle)", "Receives the next browser WebSocket message.")
+RT_DEF("__websocket_close", rt_websocket_close, 1, "fn __websocket_close(handle)", "Closes a browser WebSocket.")
 RT_DEF("__getpid", rt_getpid, 0, "fn __getpid()", "Portable getpid wrapper.")
 RT_DEF("__getppid", rt_getppid, 0, "fn __getppid()", "Portable getppid wrapper.")
 RT_DEF("__getuid", rt_getuid, 0, "fn __getuid()", "Portable getuid wrapper.")
@@ -86,6 +96,8 @@ RT_DEF("__getcwd", rt_getcwd, 2, "fn __getcwd(buf, size)", "Portable getcwd wrap
 RT_DEF("__access", rt_access, 2, "fn __access(path, mode)", "Portable access wrapper.")
 RT_DEF("__unlink", rt_unlink, 1, "fn __unlink(path)", "Portable unlink wrapper.")
 RT_DEF("__rename", rt_rename, 2, "fn __rename(old_path, new_path)", "Portable rename wrapper.")
+RT_DEF("__mkdir", rt_mkdir, 1, "fn __mkdir(path)", "Portable mkdir wrapper.")
+RT_DEF("__rmdir", rt_rmdir, 1, "fn __rmdir(path)", "Portable rmdir wrapper.")
 RT_DEF("__pipe", rt_pipe, 1, "fn __pipe(fds_ptr)", "Portable pipe wrapper.")
 RT_DEF("__dup2", rt_dup2, 2, "fn __dup2(oldfd, newfd)", "Portable dup2 wrapper.")
 RT_DEF("__fork", rt_fork, 0, "fn __fork()", "Portable fork wrapper (non-Windows).")
@@ -620,6 +632,10 @@ RT_DEF("__result_err", rt_result_err, 1, "fn __result_err(e)", "Creates an Err r
 RT_DEF("__is_ok", rt_is_ok, 1, "fn __is_ok(v)", "Checks if value is an Ok result.")
 RT_DEF("__is_err", rt_is_err, 1, "fn __is_err(v)", "Checks if value is an Err result.")
 RT_DEF("__unwrap", rt_unwrap, 1, "fn __unwrap(v)", "Unwraps a Result or returns the value.")
+
+RT_DEF("__native_thread_spawn_raw", rt_native_thread_spawn_raw, 2,
+       "fn __native_thread_spawn_raw(fn, arg)",
+       "Spawns an LLVM-free native callback with raw arguments.")
 
 RT_DEF("__thread_spawn", rt_thread_spawn, 2, "fn __thread_spawn(fn, arg)", "Spawns a new thread.")
 RT_DEF("__thread_spawn_call", rt_thread_spawn_call, 3, "fn __thread_spawn_call(fn, argc, argv)",

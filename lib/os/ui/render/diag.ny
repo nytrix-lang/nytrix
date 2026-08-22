@@ -12,6 +12,7 @@ use std.core.common as common
 fn probe() dict {
    "Returns a dictionary describing detected backend and graphics capabilities."
    def caps = render.backend_capabilities()
+   def contract = render.portable_contract()
    return {
       "os": __os_name(),
       "window_backend": window.backend(),
@@ -21,7 +22,8 @@ fn probe() dict {
       "opengl": caps.get("opengl", false),
       "webgl": caps.get("webgl", false),
       "software": caps.get("software", false),
-      "double_buffered": caps.get("double_buffered", false)
+      "double_buffered": caps.get("double_buffered", false),
+      "rendering_contract": contract.get("version", 0)
    }
 }
 
@@ -98,6 +100,9 @@ fn print_snapshot(any win=0) any {
 #main {
    def d = probe()
    assert(is_dict(d) && is_str(d.get("os", "")) && is_str(d.get("window_backend", "")), "ui diag probe")
+   def contract = render.portable_contract()
+   assert(int(contract.get("version", 0)) == 1 && contract.get("alpha_blend", "") == "source-alpha", "ui rendering contract")
+   assert(contract.get("primitives", {}).get("texture", false) && contract.get("frame", {}).get("present", false), "ui contract primitives")
    assert(probe_text().contains("os="), "ui diag text")
    assert(snapshot_text().contains("ui.snapshot"), "ui diag snapshot")
    print("✓ std.os.ui.render.diag self-test passed")

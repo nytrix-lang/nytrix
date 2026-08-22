@@ -1,0 +1,33 @@
+shape remote-process-recvuntil {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+ci windows-skip
+  source ny <<'NY'
+use std.core
+use std.os.net.remote as net
+
+net.context({"log_level": "quiet", "timeout_ms": 1000, "color": false})
+
+fn round_trip(int chunk) int {
+   mut path = "/bin/cat"
+   mut args = []
+   #windows {
+      path = "python"
+      args = ["python", "-c", "import sys; sys.stdout.write(sys.stdin.read()); sys.stdout.flush()"]
+   } #endif
+   def io = net.process(path, args, "quiet", 1000, chunk)
+   assert(io != 0, "cat process starts")
+   assert(net.sendline(io, "ny") == 3, "sendline writes all bytes")
+   assert(net.recvuntil(io, "ny\n") == "ny\n", "recvuntil returns delimiter")
+   assert(net.close(io) >= 0, "process tube closes and reaps child")
+   0
+}
+
+round_trip(4096)
+round_trip(1)
+print("ok remote_process_recvuntil")
+NY
+}

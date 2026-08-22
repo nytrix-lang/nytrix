@@ -99,7 +99,7 @@ fn probe_body(state) dict {
    gui.text("last rect: x=" + to_str(int(r.get(0, 0.0))) +
       " y=" + to_str(int(r.get(1, 0.0))) +
       " w=" + to_str(int(r.get(2, 0.0))) +
-   " h=" + to_str(int(r.get(3, 0.0))))
+      " h=" + to_str(int(r.get(3, 0.0))))
    gui.text("scene: " + scene)
    gui.text("fps: " + to_str(fps))
    gui.stat_card("probe_hover_card", "Hover", hovered, "active " + active, card_w, 64.0, [0.58, 0.86, 1.0, 1.0])
@@ -126,7 +126,7 @@ fn workspace_body(canvas_h, grid, major, cam_x, cam_y, cam_z, font) list {
    mut out_major = gui.slider_int("workspace_major", "Major Step", int(major), 2, 8)
    gui.text_colored("Grid " + f"{out_grid:.0f}px" + "   Major " + to_str(out_major) +
       "   Camera(" + f"{float(cam_x):.1f}" + ", " + f"{float(cam_y):.1f}" + ", " + f"{float(cam_z):.1f}" + ")",
-   [0.68, 0.68, 0.68, 1.0])
+      [0.68, 0.68, 0.68, 1.0])
    def rect = gui.grid_canvas("workspace_canvas", "Viewport overlay grid", 0.0, float(canvas_h), out_grid, out_major)
    def rx, ry, rw, rh = float(rect.get(0, 0.0)), float(rect.get(1, 0.0)), float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
    def cx, cy = rx + rw * 0.5, ry + rh * 0.5

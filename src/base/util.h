@@ -30,12 +30,17 @@ static inline char *ny_read_file_raw(const char *path, size_t *out_len) {
     fclose(f);
     return NULL;
   }
-  char *content = malloc((size_t)size + 1);
+  size_t file_size = (size_t)size;
+  if (file_size == SIZE_MAX) {
+    fclose(f);
+    return NULL;
+  }
+  char *content = malloc(file_size + 1);
   if (!content) {
     fclose(f);
     return NULL;
   }
-  size_t read = fread(content, 1, (size_t)size, f);
+  size_t read = fread(content, 1, file_size, f);
   content[read] = '\0';
   fclose(f);
   if (out_len)
@@ -195,7 +200,12 @@ static inline char *ny_path_join_alloc(const char *dir, const char *name) {
   size_t dlen = strlen(dir);
   int needs_sep = (dir[dlen - 1] != '/' && dir[dlen - 1] != '\\') ? 1 : 0;
   size_t nlen = name ? strlen(name) : 0;
-  char *out = (char *)malloc(dlen + (size_t)needs_sep + nlen + 1);
+  size_t out_len = 0;
+  if (!ny_size_add_ok(dlen, (size_t)needs_sep, &out_len) ||
+      !ny_size_add_ok(out_len, nlen, &out_len) ||
+      !ny_size_add_ok(out_len, 1, &out_len))
+    return NULL;
+  char *out = (char *)malloc(out_len);
   if (!out) return NULL;
   memcpy(out, dir, dlen);
   if (needs_sep) out[dlen] = '/';
@@ -289,7 +299,10 @@ static inline char *ny_generic_type_arg_owned(const char *name, size_t index) {
       while (p > start && (p[-1] == ' ' || p[-1] == '\t'))
         p--;
       size_t n = (size_t)(p - start);
-      char *out = malloc(n + 1);
+      size_t bytes = 0;
+      if (!ny_size_add_ok(n, 1, &bytes))
+        return NULL;
+      char *out = malloc(bytes);
       if (!out)
         return NULL;
       memcpy(out, start, n);

@@ -20,7 +20,7 @@ fn _result(str filter, bool filter_changed, int tab, bool show_paths, str action
 
 fn _ctx_result(dict ctx, str action="", str model="") dict {
    def out = _result(to_str(ctx.get("filter", "")), bool(ctx.get("filter_changed", false)),
-   int(ctx.get("tab", 0)), bool(ctx.get("show_paths", false)), action, model)
+      int(ctx.get("tab", 0)), bool(ctx.get("show_paths", false)), action, model)
    if action == "load" {
       out["press_seq"] = gui.mouse_press_seq()
    }
@@ -161,7 +161,7 @@ fn _grid(dict ctx, str suffix, list names, f64 win_w, f64 list_h, bool compact, 
          "parity_lock": bool(state.get("parity_lock", false)),
          "hide_detail": hide_detail,
          "file_list": file_list
-   })
+      })
    def clicked = to_str(res.get("clicked", ""))
    clicked.len > 0 ? _ctx_result(ctx, "load", clicked) : _ctx_result(ctx)
 }
@@ -196,7 +196,7 @@ fn _compact_catalog(dict ctx, f64 win_w, f64 win_h, list names, list filtered_na
    gui.text_colored("Catalog " + to_str(shown_total) + " / " + to_str(names.len), [0.68, 0.68, 0.68, 1.0])
    def compact_h = max(82.0, gui.remaining_h(4.0))
    def grid_res = _grid(ctx, "compact", filtered_names, win_w, viewer_catalog.grid_h(compact_h, true, false, 4.0),
-   true, draw_state)
+      true, draw_state)
    if nav_action.len > 0 { return nav }
    if to_str(grid_res.get("action", "")).len > 0 { return grid_res }
    filter_res
@@ -248,7 +248,7 @@ fn _full(dict ctx, f64 win_w, f64 win_h, list names, list filtered_names, int sh
    ;; the asset list.  Use the actual panel height budget instead.
    def requested_h = embedded ? max(160.0, win_h - 150.0) : max(140.0, win_h - 166.0)
    def out = _grid(ctx, "main", filtered_names, win_w, viewer_catalog.grid_h(requested_h, grid_compact, embedded, 4.0),
-   grid_compact, draw_state, embedded && !bool(ctx.get("show_paths", false)))
+      grid_compact, draw_state, embedded && !bool(ctx.get("show_paths", false)))
    ui_profile.mark_done(prof, "asset_full_grid", t_prof)
    if nav_action.len > 0 { return nav }
    out

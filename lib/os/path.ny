@@ -272,13 +272,13 @@ comptime template _env_root_getter(name, env_key, doc){
 
 comptime emit _env_root_getter(_repo_root_env,
    "NYTRIX_ROOT",
-"Internal: prefers an explicit launcher-provided repo root when available.")
+   "Internal: prefers an explicit launcher-provided repo root when available.")
 comptime emit _env_root_getter(_share_root_env,
    "NYTRIX_SHARE_ROOT",
-"Internal: optional override for installed share root(e.g. `/usr/share/nytrix`).")
+   "Internal: optional override for installed share root(e.g. `/usr/share/nytrix`).")
 comptime emit _env_root_getter(_asset_root_env,
    "NYTRIX_ASSET_ROOT",
-"Internal: optional override for direct asset root(e.g. `/usr/share/nytrix/etc/assets`).")
+   "Internal: optional override for direct asset root(e.g. `/usr/share/nytrix/etc/assets`).")
 
 fn _prefix_eq(any s, any prefix) bool {
    if !is_str(s) || !is_str(prefix) { return false }

@@ -1,0 +1,24 @@
+shape oracle_loop_vector_runtime_guard_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop vector runtime remainder heap guard]
+  template ny-test-case
+  flags_matrix "-O2 --native-result-oracle; -O3 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.tbuf
+
+fn fill_runtime(i64 n) f64 {
+  def b = f64buf_new(8)
+  mut i = 0
+  while i < n {
+    f64buf_store(b, i, float(i + 1))
+    i += 1
+  }
+  f64buf_load(b, n - 1)
+}
+
+fill_runtime(3) == 3.0
+NY
+}

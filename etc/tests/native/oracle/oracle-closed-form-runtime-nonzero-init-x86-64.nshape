@@ -1,0 +1,23 @@
+shape oracle_closed_form_runtime_nonzero_init_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime nonzero-init regression]
+  template ny-test-case
+  flags "--native-result-oracle=200 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+; s = 10 + sum(0..19) = 10 + 190 = 200
+fn acc_init(n) i64 {
+  mut s = 10
+  mut i = 0
+  while i < n {
+    s = s + i
+    i = i + 1
+  }
+  s
+}
+acc_init(20)
+NY
+}

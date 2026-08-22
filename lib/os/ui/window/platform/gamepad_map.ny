@@ -509,7 +509,7 @@ fn get_gamepad_state(any js, any state_ptr) bool {
          store8(state_ptr, _mapped_state_value(
                e, false, js, axis_reader, button_reader, hat_reader,
                axes_ptr, buttons_ptr, hats_ptr, axis_count, button_count, hat_count
-         ), i)
+            ), i)
       }
       i += 1
    }

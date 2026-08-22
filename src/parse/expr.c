@@ -1,3 +1,7 @@
+/*
+ * Expression parser: infix/precedence-climbing expression parsing
+ * including operators, calls, lambdas, and dotted-field access.
+ */
 #include "priv.h"
 #include <ctype.h>
 #include <errno.h>
@@ -231,8 +235,9 @@ static bool parse_type_name(parser_t *p, char **out_name) {
   size_t len = 0;
   char *buf = malloc(cap);
   if (!buf) {
-    fprintf(stderr, "oom\n");
-    exit(1);
+    parser_error(p, p->cur, "out of memory", NULL);
+    *p = save;
+    return false;
   }
   memcpy(buf, p->cur.lexeme, p->cur.len);
   len += p->cur.len;
@@ -248,8 +253,9 @@ static bool parse_type_name(parser_t *p, char **out_name) {
       char *nb = realloc(buf, cap);
       if (!nb) {
         free(buf);
-        fprintf(stderr, "oom\n");
-        exit(1);
+        parser_error(p, p->cur, "out of memory", NULL);
+        *p = save;
+        return false;
       }
       buf = nb;
     }
@@ -269,8 +275,9 @@ static bool parse_type_name(parser_t *p, char **out_name) {
     char *owner_buf = malloc(owner_len + 1);
     if (!owner_buf) {
       free(buf);
-      fprintf(stderr, "oom\n");
-      exit(1);
+      parser_error(p, p->cur, "out of memory", NULL);
+      *p = save;
+      return false;
     }
     memcpy(owner_buf, owner, owner_len + 1);
     free(buf);
@@ -306,8 +313,8 @@ static const char *expr_parse_type_ref(parser_t *p, const char *err_msg) {
   size_t len = 0;
   char *buf = malloc(cap);
   if (!buf) {
-    fprintf(stderr, "oom\n");
-    exit(1);
+    parser_error(p, p->cur, "out of memory", NULL);
+    return NULL;
   }
   memcpy(buf, p->cur.lexeme, p->cur.len);
   len += p->cur.len;
@@ -323,8 +330,8 @@ static const char *expr_parse_type_ref(parser_t *p, const char *err_msg) {
       char *nb = realloc(buf, cap);
       if (!nb) {
         free(buf);
-        fprintf(stderr, "oom\n");
-        exit(1);
+        parser_error(p, p->cur, "out of memory", NULL);
+        return NULL;
       }
       buf = nb;
     }
@@ -339,8 +346,8 @@ static const char *expr_parse_type_ref(parser_t *p, const char *err_msg) {
     char *owner_buf = malloc(owner_len + 1);
     if (!owner_buf) {
       free(buf);
-      fprintf(stderr, "oom\n");
-      exit(1);
+      parser_error(p, p->cur, "out of memory", NULL);
+      return NULL;
     }
     memcpy(owner_buf, owner, owner_len + 1);
     free(buf);
@@ -365,8 +372,8 @@ static const char *expr_parse_type_ref(parser_t *p, const char *err_msg) {
     char *generic = malloc(gcap);
     if (!generic) {
       free(buf);
-      fprintf(stderr, "oom\n");
-      exit(1);
+      parser_error(p, p->cur, "out of memory", NULL);
+      return NULL;
     }
     memcpy(generic, buf, len);
     generic[len++] = '<';
@@ -386,8 +393,8 @@ static const char *expr_parse_type_ref(parser_t *p, const char *err_msg) {
         char *nb = realloc(generic, gcap);
         if (!nb) {
           free(generic);
-          fprintf(stderr, "oom\n");
-          exit(1);
+          parser_error(p, p->cur, "out of memory", NULL);
+          return NULL;
         }
         generic = nb;
       }
@@ -416,8 +423,8 @@ static const char *expr_parse_type_ref(parser_t *p, const char *err_msg) {
       char *nb = realloc(generic, len + 2);
       if (!nb) {
         free(generic);
-        fprintf(stderr, "oom\n");
-        exit(1);
+        parser_error(p, p->cur, "out of memory", NULL);
+        return NULL;
       }
       generic = nb;
     }
@@ -1459,8 +1466,10 @@ expr_t *p_parse_expr(parser_t *p, int prec) {
     if (p->stop_expr_at_newline && p->skipped_newline)
       break;
     if (p->proof_type_depth > 0 && p->cur.kind == NY_T_GT) {
-      /* A proof type ends in `> name`, `> )`, `> {`, or `> =`.  Looking two
-       * tokens ahead keeps ordinary `left > right` comparisons intact. */
+      /*
+       * A proof type ends in `> name`, `> )`, `> {`, or `> =`.  Looking two
+       * tokens ahead keeps ordinary `left > right` comparisons intact.
+       */
       parser_t look = *p;
       parser_advance(&look);
       token_kind after = look.cur.kind;

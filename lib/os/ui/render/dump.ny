@@ -269,7 +269,7 @@ fn apply_verbose_argv(int start_index=1) bool {
             "NY_TEX_TRACE", "NY_UI_GUI_DUMP_TRACE", "NY_TRACE_SPAM",
             "NY_TRACE_PROC", "NY_UI_PROFILE", "NY_UI_PROFILE_TRACE",
             "NY_VK_PROFILE_TRACE", "NY_VK_PROFILE_DUMP"
-      ], false)
+         ], false)
    }
    if level >= 2 {
       ;; Compact profiler summaries only.  No Vulkan stage breadcrumbs, no
@@ -284,7 +284,7 @@ fn apply_verbose_argv(int start_index=1) bool {
             "NY_GFX_FRAME_TRACE", "NY_VK_BEGIN_TRACE", "NY_VK_STAGE_TRACE",
             "NY_UI_GUI_DUMP_TRACE", "NY_GL_TEXT_TRACE", "NY_VK_DESCRIPTOR_TRACE",
             "NY_UI_TEX_TRACE", "NY_TEX_TRACE", "NY_TRACE_SPAM"
-      ], true)
+         ], true)
    }
    if level >= 2 {
       eprint_text(level >= 3 ? "[ui:verbose] enabled spam tracing by --trace-spam" :
@@ -542,7 +542,7 @@ fn headless_sim_enabled() bool {
    "Returns true when headless simulation mode is enabled."
    if _headless_sim_mode != -1 { return _headless_sim_mode == 1 }
    _headless_sim_mode = (env_truthy_cached("NY_UI_REAL_HEADLESS_SIM") ||
-   env_truthy_cached("NY_UI_HEADLESS_SIM")) ? 1 : 0
+      env_truthy_cached("NY_UI_HEADLESS_SIM")) ? 1 : 0
    _headless_sim_mode == 1
 }
 
@@ -597,7 +597,7 @@ fn fast_surface_bench_enabled(int timeout_ns, int auto_dump_enabled, bool batch_
    _fast_surface_bench_mode = (bench_loop_ready(timeout_ns, auto_dump_enabled, batch_dump_enabled) &&
       !nosurface_enabled() &&
       !headless_sim_enabled() &&
-   !gui_dump_suite_active) ? 1 : 0
+      !gui_dump_suite_active) ? 1 : 0
    _fast_surface_bench_mode == 1
 }
 
@@ -776,7 +776,7 @@ fn event_trace(int typ, any data, any tag="event", bool close_state=false) bool 
       " y=" + to_str(y) +
       " dx=" + to_str(dx) +
       " dy=" + to_str(dy) +
-   " close=" + to_str(bool(close_state)))
+      " close=" + to_str(bool(close_state)))
    true
 }
 
@@ -791,7 +791,7 @@ fn stage_log(any prefix, any model_name, any stage, int t0) bool {
    "Prints a batch/scene stage timing line."
    if !stage_enabled() { return false }
    print_line(prefix, "model=" + to_str(model_name) +
-   " stage=" + to_str(stage) + " ms=" + to_str(stage_ms_since(t0)))
+      " stage=" + to_str(stage) + " ms=" + to_str(stage_ms_since(t0)))
    true
 }
 
@@ -1189,7 +1189,7 @@ fn trace_process_sample(int frame=0, str label="") bool {
       " d=" + _proc_fmt_kib(delta) + " peak=" + _proc_fmt_kib(_proc_trace_peak_rss) +
       " vsz=" + _proc_fmt_kib(vsz) + " anon=" + _proc_fmt_kib(anon) +
       " file=" + _proc_fmt_kib(file) + " data=" + _proc_fmt_kib(data) +
-   " thr=" + to_str(threads) + " tag=" + to_str(label) + smaps)
+      " thr=" + to_str(threads) + " tag=" + to_str(label) + smaps)
    true
 }
 
@@ -1500,8 +1500,8 @@ fn set_framebuffer_hash_line(any line) bool {
    assert(counter_add("draws", 2.0) == 2.0 && counter_value("draws") == 2.0, "ui profile counters")
    assert(safe_name("a/b\\c:d") == "a_b_c_d", "dump safe name")
    assert(safe_name("Unicode❤♻Test") == "Unicode❤♻Test", "dump safe name utf8")
-    assert(root_dir("build/cache/out") == "build/cache/out" && path_named("a/b", "build/cache/out") == "build/cache/out/a_b", "dump root and named path")
-    assert(snapshot_path("Box/Model", "", "build/cache/out") == "build/cache/out/Box_Model.png", "dump snapshot path")
+   assert(root_dir("build/cache/out") == "build/cache/out" && path_named("a/b", "build/cache/out") == "build/cache/out/a_b", "dump root and named path")
+   assert(snapshot_path("Box/Model", "", "build/cache/out") == "build/cache/out/Box_Model.png", "dump snapshot path")
    assert(auto_dump_path("fallback.png").len > 0, "dump auto path")
    assert(parse_skip_list("Fox|Cube, Duck") == ["Fox", "Cube", "Duck"], "dump skip list")
    assert(split_model_list("Fox,Cube|Duck") == ["Fox", "Cube", "Duck"], "dump model list")

@@ -1,0 +1,23 @@
+shape type_proof_call_site_unknown_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "unknown", "soundness", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "mapped value ranges do not prove it"
+  source ny <<'NY'
+use std.core
+
+;; The proposition references no mapped callee parameter and no caller
+;; binding with a known range: `n` is an unconstrained function parameter,
+;; so its range is unknown at the call site.  Unknown must not be accepted
+;; as proof even though the supplied witness proves a literal fact.
+fn needs_big(proof<n > 100> p) int { 2 }
+fn caller(int n) {
+  def proof big = prove(200 > 100)
+  needs_big(big)
+}
+caller(200)
+NY
+}

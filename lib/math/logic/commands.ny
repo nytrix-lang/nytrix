@@ -2,7 +2,6 @@
 ;; Ordinary module-defined reasoning commands backed by the syntax registry.
 module std.math.logic.commands(
    new_registry, register, standard_registry, run, metadata, names)
-
 use std.core
 use std.core.syntax as syntax
 use std.math.logic.solve as solve
@@ -87,7 +86,7 @@ fn metadata(dict registry, str name="") any {
    mut i = 0
    while i < registry.get("order").len {
       out = out.append(registry.get("metadata").get(
-         registry.get("order")[i]))
+            registry.get("order")[i]))
       i += 1
    }
    out

@@ -1272,7 +1272,7 @@ fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=
       if _color_alpha(stroke, opacity) > 0.0 {
          def m = st.get("transform", _mat_identity())
          def scale = max(math.sqrt(float(m[0]) * float(m[0]) + float(m[1]) * float(m[1])), math.sqrt(float(m[2]) * float(m[2]) + float(m[3]) * float(m[3])))
-          _draw_paths(out, w, h, paths, stroke, opacity, "stroke", max(0.5, float(st.get("stroke_width", 1.0)) * scale), "nonzero", to_str(st.get("stroke_linecap", "butt")), to_str(st.get("stroke_linejoin", "miter")))
+         _draw_paths(out, w, h, paths, stroke, opacity, "stroke", max(0.5, float(st.get("stroke_width", 1.0)) * scale), "nonzero", to_str(st.get("stroke_linecap", "butt")), to_str(st.get("stroke_linejoin", "miter")))
       }
    }
    def children = node.get("children", [])

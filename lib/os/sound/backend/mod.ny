@@ -193,7 +193,6 @@ fn _open_current_stream() bool {
    def count = get_output_device_count(_ctx)
    if _is_debug() { print("Sound: Found " + to_str(count) + " output devices for " + io_backend_name(_ctx) + ".") }
    if count == 0 { return false }
-
    def dev = get_output_device(_ctx, get_default_output_device_index(_ctx))
    if !dev { return false }
    mut stream = outstream_create(dev)
@@ -201,7 +200,6 @@ fn _open_current_stream() bool {
    mut out_format = _get_output_format_pref()
    def out_rate = _get_output_rate()
    mut nstream = outstream_open(stream, out_format, out_rate, 2, nil)
-
    if !nstream {
       out_format = FORMAT_S16LE
       nstream = outstream_open(stream, out_format, out_rate, 2, nil)
@@ -211,7 +209,6 @@ fn _open_current_stream() bool {
       outstream_destroy(stream)
       return false
    }
-
    stream = nstream
    _out_format = out_format
    if !outstream_start(stream) {
@@ -220,7 +217,6 @@ fn _open_current_stream() bool {
       _stream = 0
       return false
    }
-
    _stream = stream
    true
 }
@@ -233,11 +229,9 @@ fn _try_backend(str name) bool {
       if ctx { disconnect(ctx) }
       return false
    }
-
    _ctx = nctx
    if _is_debug() { print("Sound: trying backend " + io_backend_name(_ctx) + "...") }
    if _open_current_stream() { return true }
-
    _cleanup_partial()
    false
 }
@@ -245,7 +239,6 @@ fn _try_backend(str name) bool {
 fn _do_init(bool force_async=false) bool {
    if _ctx != 0 { return true }
    if _is_debug() { print("Sound: Initializing auto backend...") }
-
    def order = _backend_try_order()
    mut i = 0
    while i < order.len {
@@ -262,7 +255,6 @@ fn _do_init(bool force_async=false) bool {
       }
       i += 1
    }
-
    if _is_debug() { print("Sound: Failed to open any output backend.") }
    false
 }
@@ -312,10 +304,15 @@ fn stop_all() any {
 }
 
 fn set_fx_enabled(bool enabled=true) any { mixer.set_fx_enabled(enabled) }
+
 fn fx_enabled() bool { mixer.fx_enabled() }
+
 fn set_fx_param(str name, any value) any { mixer.set_fx_param(name, value) }
+
 fn get_fx_param(str name) f64 { mixer.get_fx_param(name) }
+
 fn reset_fx() any { mixer.reset_fx() }
+
 fn fx_preset(str name) any { mixer.fx_preset(name) }
 
 fn shutdown() any {

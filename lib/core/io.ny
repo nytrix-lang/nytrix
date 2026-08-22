@@ -3,12 +3,51 @@
 ;; References:
 ;; - std.core
 module std.core.io(_print_write, print)
+
+;; Buffered stdout writer: _write_str appends to a module buffer and flushes
+;; per newline-terminated write (or at the 4 KiB mark); print flushes at the
+;; end of every call. Small frequent writes batch into far fewer syscalls.
 use std.core
 use std.core.primitives as prim
 
-fn _write_str(str s) int {
+mut _io_buf = 0
+mut _io_len = 0
+mut _io_cap = 0
+
+fn _io_append(str s) int {
    def n = load64(s, -16)
-   if n > 0 { __write_off(1, s, n, 0) }
+   if n <= 0 { return 0 }
+   if _io_len + n > _io_cap {
+      def need = _io_len + n
+      mut ncap = _io_cap > 0 ? _io_cap * 2 : 4096
+      while ncap < need { ncap *= 2 }
+      def nb = realloc(_io_buf, ncap)
+      if !nb { return 0 }
+      _io_buf = nb
+      _io_cap = ncap
+   }
+   memcpy(_io_buf + _io_len, s, n)
+   _io_len += n
+   0
+}
+
+fn _io_flush() int {
+   if _io_len <= 0 { return 0 }
+   def n = __write_off(1, _io_buf, _io_len, 0)
+   _io_len = 0
+   n
+}
+
+fn _write_str(str s) int {
+   ;; Buffered stdout writer: appends to the module buffer and flushes once
+   ;; per newline-terminated write (or when the buffer exceeds 4 KiB), so a
+   ;; `print(a, b, c)` costs a small constant number of syscalls instead of
+   ;; one per value/separator. `print` also flushes at the end of every call,
+   ;; so no output is ever left pending at process exit.
+   _io_append(s)
+   def n = load64(s, -16)
+   if n > 0 && load8(s, n - 1) == 10 { _io_flush() }
+   elif _io_len >= 4096 { _io_flush() }
    0
 }
 
@@ -91,6 +130,7 @@ fn print(...args) int {
       i += 1
    }
    _write_str(end)
+   _io_flush()
    0
 }
 

@@ -319,9 +319,9 @@ fn _gltf_anim_pack_uv_xf_state(dict st) list {
    def scl_x = float(scl.get(0, 1.0))
    def scl_y = float(scl.get(1, 1.0))
    def identity_xf =
-      abs(off_x) <= 0.000001 && abs(off_y) <= 0.000001 &&
-      abs(scl_x - 1.0) <= 0.000001 && abs(scl_y - 1.0) <= 0.000001 &&
-      abs(rot) <= 0.000001
+   abs(off_x) <= 0.000001 && abs(off_y) <= 0.000001 &&
+   abs(scl_x - 1.0) <= 0.000001 && abs(scl_y - 1.0) <= 0.000001 &&
+   abs(rot) <= 0.000001
    if identity_xf {
       return [0, uv_set == 1 ? 0x40000000 : 0]
    }
@@ -642,9 +642,9 @@ fn gltf_sync_drawable_parts_from_raw(any existing_parts, any raw_parts, bool upd
    mut i = 0
    while i < existing_parts.len && i < raw_parts.len {
       def part = gltf_sync_drawable_part_from_raw(existing_parts.get(i, 0), raw_parts.get(i,
-         0),
+            0),
          update_part_tex,
-      update_part_material)
+         update_part_material)
       out[i] = part
       i += 1
    }
@@ -671,7 +671,7 @@ fn gltf_expand_indexed_vertices(?ptr vptr, int vcnt, ?ptr iptr, int icnt, bool i
          " raw16=" + to_str(load16(iptr, 0)) + "," + to_str(load16(iptr, 2)) + "," + to_str(load16(iptr, 4)) + "," + to_str(load16(iptr, 6)) +
          " raw8=" + to_str(load8(iptr, 0)) + "," + to_str(load8(iptr, 1)) + "," + to_str(load8(iptr, 2)) + "," + to_str(load8(iptr, 3)) +
          " bidx=" + to_str(idx_bytes[0]) + "," + to_str(idx_bytes[1]) + "," + to_str(idx_bytes[2]) + "," + to_str(idx_bytes[3]) +
-      " bload=" + to_str(load8(idx_bytes, 0)) + "," + to_str(load8(idx_bytes, 1)) + "," + to_str(load8(idx_bytes, 2)) + "," + to_str(load8(idx_bytes, 3)))
+         " bload=" + to_str(load8(idx_bytes, 0)) + "," + to_str(load8(idx_bytes, 1)) + "," + to_str(load8(idx_bytes, 2)) + "," + to_str(load8(idx_bytes, 3)))
    }
    mut idx_off = 0
    mut dst_off = 0
@@ -690,7 +690,7 @@ fn gltf_expand_indexed_vertices(?ptr vptr, int vcnt, ?ptr iptr, int icnt, bool i
          ui_profile.print_text("[render:expand] i=" + to_str(i) +
             " vi=" + to_str(vi) +
             " idx_off=" + to_str(idx_off) +
-         " vcnt=" + to_str(vcnt))
+            " vcnt=" + to_str(vcnt))
       }
       def dst_ptr = out + dst_off
       if vi >= 0 && vi < vcnt { __copy_mem(dst_ptr, vptr + vi * render_shared.VERTEX_STRIDE, render_shared.VERTEX_STRIDE) } else { __copy_mem(dst_ptr, out, render_shared.VERTEX_STRIDE) }
@@ -791,6 +791,6 @@ fn pack_material_slab(any part) any {
       base_uv_xf0, base_uv_xf1, normal_uv_xf0, normal_uv_xf1, mr_uv_xf0, mr_uv_xf1,
       occlusion_uv_xf0, occlusion_uv_xf1, emissive_uv_xf0, emissive_uv_xf1, visible,
       node_idx, normal_tex_word, mesh, model, is_lines, width, unlit, bsdf_ext_slab,
-   is_points, bsdf4_u32, bsdf5_u32, ext2_tex_word, flip_winding)
+      is_points, bsdf4_u32, bsdf5_u32, ext2_tex_word, flip_winding)
    slab
 }

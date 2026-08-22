@@ -1,3 +1,7 @@
+/*
+ * Runtime AST bridge: JSON-serializable AST representation used by
+ * tooling, LSP, and debug introspection of the parse tree at runtime.
+ */
 #include "parse/json.h"
 #include "parse/parser.h"
 #include "rt/shared.h"

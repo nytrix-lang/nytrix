@@ -815,7 +815,6 @@ fn _gltf_copy_part_opts(any opts) dict {
    out
 }
 
-
 fn _gltf_node_or_mesh_morph_weights(any g, int mesh_idx, int node_idx, int target_count) list {
    "Returns the morph weights that apply to one mesh instance. Node weights override mesh defaults."
    mut out = anim._gltf_mesh_morph_weights(g, mesh_idx, target_count)
@@ -945,7 +944,7 @@ fn _gltf_indexed_append_instance_parts(
                has_gpu_instancing,
                prim_mode,
                world_bounds,
-         packed_color))
+               packed_color))
          smi += 1
       }
       mi += 1
@@ -982,7 +981,7 @@ fn _gltf_indexed_finish_result(list parts, list scene_bounds) dict {
    {"parts": parts,
       "min": final_bounds.get(0),
       "max": final_bounds.get(1),
-   "loader_bounds_ready": true}
+      "loader_bounds_ready": true}
 }
 
 fn gltf_to_mesh_group_indexed(any gltf_data, any color=0, any material_tex_ids=0) any {
@@ -1051,7 +1050,7 @@ fn gltf_to_mesh_group_indexed(any gltf_data, any color=0, any material_tex_ids=0
                material_tex_ids_n,
                mat_records,
                packed_color,
-            meta)
+               meta)
             def uv_set = int(material_state.get("uv_set", 0))
             def uv_xform = material_state.get("uv_xform", 0)
             def tex_id = int(material_state.get("tex_id", -1))
@@ -1094,7 +1093,7 @@ fn gltf_to_mesh_group_indexed(any gltf_data, any color=0, any material_tex_ids=0
                   def emit_instances = has_morph_targets ? [inst_pair] : instance_mats
                   def emitted = _gltf_indexed_append_instance_parts(parts, scene_bounds, gltf_data, g, data, nodes, emit_instances,
                      node_vis_map, meta_inst, vptr, vcnt, iptr, icnt, mesh_opts, material_state,
-                  uv_set, packed_color, prim_mode, lbs)
+                     uv_set, packed_color, prim_mode, lbs)
                   parts = emitted.get(0, parts)
                   scene_bounds = emitted.get(1, scene_bounds)
                }

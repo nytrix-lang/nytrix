@@ -1,3 +1,12 @@
+/*
+ * Fuzz compare utilities: shared helpers for the fuzz-all comparison
+ * subsystem including path resolution, scratch root, and resource limits.
+ */
+
+/*
+ * path, process, JSON, and report helpers
+ * campaign guards and shell command generation
+ */
 #include <limits.h>
 #include <sys/resource.h>
 
@@ -318,6 +327,9 @@ typedef struct {
   int cap;
 } generated_case_list_t;
 
+/*
+ * report models, JSON parsing, and row aggregation
+ */
 static char *generated_cases_fingerprint(const generated_case_list_t *cases);
 
 typedef struct {
@@ -1499,6 +1511,9 @@ static int report_add_rows_from_report_json(report_rows_t *report, const char *j
   }
   return added;
 }
+/*
+ * corpus, tree, and filesystem helpers
+ */
 
 static bool collect_files_with_suffix(const char *dir, const char *suffix, string_list_t *out) {
   DIR *d = opendir(dir);
@@ -2214,6 +2229,9 @@ typedef struct {
   char *err;
 } perf_run_result_t;
 
+/*
+ * performance runs and native report construction
+ */
 static void perf_run_result_free(perf_run_result_t *r) {
   if (!r) return;
   free(r->out);

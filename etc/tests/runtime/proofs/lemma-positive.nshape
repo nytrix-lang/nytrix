@@ -1,0 +1,18 @@
+shape lemma_positive {
+  family "runtime/proofs"
+  generator "program"
+  features ["proof", "lemma", "positive"]
+  template ny-test-case
+  flags "--color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn lemma positive_sum(int x, int y) {
+  x > 0 && y > 0 → x + y > 0
+}
+
+def proof p = prove(positive_sum(3, 4))
+assert(proof_matches(p, positive_sum(3, 4)), "lemma proof digest")
+NY
+}

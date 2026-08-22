@@ -1,0 +1,20 @@
+shape oracle_inliner_loop_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle inliner cfg loop phi regression]
+  template ny-test-case
+  flags_matrix "-O2 --nyir-verify --native-result-oracle=45; -O3 --nyir-verify --native-result-oracle=45"
+  expect compile_and_run
+  source ny <<'NY'
+fn sum(i64 n) i64 {
+  mut i = 0
+  mut s = 0
+  while i < n {
+    s = s + i
+    i = i + 1
+  }
+  s
+}
+sum(10)
+NY
+}

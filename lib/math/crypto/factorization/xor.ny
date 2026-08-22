@@ -1,19 +1,21 @@
-;; Keywords: factorization xor-factor math crypto number-theory
-;; Integer-factorization routines for factorization with XOR constraints.
+;; Keywords: factorization xor math crypto number-theory
+;; Recover factors subject to an XOR constraint with bounded, auditable reports.
+;; Use the report variants when callers need scan limits, counters, or proof data;
+;; the short variants return only the factor pairs or first matching pair.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
 ;; - std.math.crypto.factorization
 ;; - std.math.crypto
-module std.math.crypto.factorization.xor_factor(xor_check, xor_factor_pairs, xor_factor_pairs_report, xor_factor_pairs_with_target, xor_factor_with_target_report, xor_factor_from_target)
+module std.math.crypto.factorization.xor(xor_check, xor_factor_pairs, xor_factor_pairs_report, xor_factor_pairs_with_target, xor_factor_with_target_report, xor_factor_from_target)
 use std.core
 use std.math.nt
 use std.math.crypto.factorization.known_phi
 use std.os.clock (ticks)
 
 fn xor_check(any a, any b) any {
-   "Compute the bitwise XOR of a and b."
+   "Compute the bitwise XOR \\(a \\mathbin{\\oplus} b\\)."
    a ^^ b
 }
 
@@ -27,8 +29,10 @@ fn _xorfac_pair(any a, any b) list {
 }
 
 fn xor_factor_pairs_report(any n, int max_divisor_scan=0) dict {
-   "Scan factor pairs of n and report [p, q, p^q] entries plus audit counters.
-   max_divisor_scan=0 means scan to sqrt(n)."
+   "Scan factor pairs of \\(n\\) and return an audit report.
+   Each entry is \\([p,q,x]\\), where \\(p q=n\\) and
+   \\(x=p \\mathbin{\\oplus} q\\). `max_divisor_scan=0` scans through
+   \\(\\lfloor\\sqrt{n}\\rfloor\\)."
    def t0 = ticks()
    def nz = _xorfac_z(n)
    mut out = dict(14)
@@ -64,14 +68,16 @@ fn xor_factor_pairs_report(any n, int max_divisor_scan=0) dict {
 }
 
 fn xor_factor_pairs(any n) list {
-   "Find all factor pairs(p, q) of n and return [p, q, p^q] entries."
+   "Return all \\([p,q,x]\\) factor-pair entries for \\(n\\), with
+   \\(p q=n\\) and \\(x=p \\mathbin{\\oplus} q\\)."
    xor_factor_pairs_report(n).get("pairs", [])
 }
 
 fn xor_factor_with_target_report(any n, any target, int max_shared_masks=0) dict {
-   "Recover factor pairs of n with p^q == target using the shared-bit sum identity.
-   If x = p^q and c = p&q, then p+q = x + 2c and c&x == 0.
-   For each compatible shared-bit candidate c, solve t^2 - (x+2c)t + n = 0."
+   "Recover pairs satisfying \\(p \\mathbin{\\oplus} q=x\\) with the
+   shared-bit identity. If \\(c=p \\mathbin{\\&}q\\), then
+   \\(p+q=x+2c\\) and \\(c \\mathbin{\\&}x=0\\). For each compatible
+   \\(c\\), solve \\(t^2-(x+2c)t+n=0\\)."
    def t0 = ticks()
    def nz = _xorfac_z(n)
    def xz = _xorfac_z(target)
@@ -127,12 +133,13 @@ fn xor_factor_with_target_report(any n, any target, int max_shared_masks=0) dict
 }
 
 fn xor_factor_pairs_with_target(any n, any target) list {
-   "Find factor pairs(p, q) of n where p^q equals target."
+   "Return factor pairs \\([p,q]\\) of \\(n\\) whose XOR equals `target`:\n\\(p \\mathbin{\\oplus} q=target\\)."
    xor_factor_with_target_report(n, target).get("pairs", [])
 }
 
 fn xor_factor_from_target(any n, any target) any {
-   "Return one [p, q] pair where p*q == n and p^q == target, or nil."
+   "Return one pair \\([p,q]\\) with \\(p \\mathbin{\\cdot}q=n\\) and
+   \\(p \\mathbin{\\oplus}q=target\\), or `nil`."
    def pairs = xor_factor_pairs_with_target(n, target)
    if pairs.len == 0 { return nil }
    def first = pairs.get(0)

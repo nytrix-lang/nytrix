@@ -1,3 +1,7 @@
+/*
+ * BigInt runtime: arbitrary-precision integer arithmetic with optional
+ * GMP backend, tagged-value boxing, and NyValue conversion helpers.
+ */
 #ifdef NYTRIX_USE_GMP
 #include <gmp.h>
 #endif
@@ -130,6 +134,7 @@ typedef struct {
 
 static size_t _bn_bitlen(const _bn_t *a);
 static void _bn_shl1(_bn_t *a);
+static void _bn_shr(_bn_t *r, const _bn_t *a, size_t bits);
 
 static inline void _bn_init(_bn_t *a) {
   a->sign = 0;
@@ -407,52 +412,23 @@ static void _bn_mul(_bn_t *r, const _bn_t *a, const _bn_t *b) {
   _bn_clear(&bb);
 }
 
-/* Unsigned binary long division helper: computes a / b and a % b
-   where a, b >= 0. */
-static int _bn_get_bit(const _bn_t *a, size_t bit) {
-  size_t word = bit / 64;
-  size_t off = bit % 64;
-  if (word >= a->count)
-    return 0;
-  return (int)((a->d[word] >> off) & 1u);
-}
-
-static void _bn_divmod_unsigned(_bn_t *q, _bn_t *r, const _bn_t *a,
-                                const _bn_t *b) {
-  /* Unsigned binary long division: q = a / b, r = a % b (a,b >= 0, b != 0). */
-  if (_bn_is_zero(b)) {
-    _bn_set_zero(q);
-    _bn_copy(r, a);
-    return;
-  }
-  int cmp = _bn_cmp_mag(a, b);
-  if (cmp < 0) {
-    _bn_set_zero(q);
-    _bn_copy(r, a);
-    if (!_bn_is_zero(r) && r->sign == 0)
-      r->sign = 1;
-    return;
-  }
-  if (cmp == 0) {
-    _bn_set_i64(q, 1);
-    _bn_set_zero(r);
-    return;
-  }
-  if (_bn_is_zero(a)) {
-    _bn_set_zero(q);
-    _bn_set_zero(r);
-    return;
-  }
+/*
+ * Binary fallback retained for allocation failure in the normalized divider.
+ */
+static void _bn_divmod_binary(_bn_t *q, _bn_t *r, const _bn_t *a,
+                              const _bn_t *b) {
   size_t abits = _bn_bitlen(a);
   _bn_set_zero(q);
   _bn_set_zero(r);
-  for (int i = (int)abits - 1; i >= 0; i--) {
+  for (size_t bit = abits; bit-- > 0;) {
     _bn_shl1(r);
-    if (_bn_get_bit(a, (size_t)i)) {
+    size_t word = bit / 64, off = bit % 64;
+    if (word < a->count && ((a->d[word] >> off) & 1u)) {
       if (r->count == 0) {
         _bn_grow(r, 1);
+        if (r->count == 0)
+          return;
         r->d[0] = 0;
-        r->count = 1;
       }
       r->sign = 1;
       r->d[0] |= 1u;
@@ -462,12 +438,12 @@ static void _bn_divmod_unsigned(_bn_t *q, _bn_t *r, const _bn_t *a,
       _bn_t tmp = {0};
       _bn_sub_mag(&tmp, r, b);
       _bn_clear(r);
-      _bn_copy(r, &tmp);
-      _bn_clear(&tmp);
+      *r = tmp;
       if (q->count == 0) {
         _bn_grow(q, 1);
+        if (q->count == 0)
+          return;
         q->d[0] = 0;
-        q->count = 1;
       }
       q->sign = 1;
       q->d[0] |= 1u;
@@ -475,17 +451,277 @@ static void _bn_divmod_unsigned(_bn_t *q, _bn_t *r, const _bn_t *a,
   }
   _bn_trim(q);
   _bn_trim(r);
-  if (_bn_is_zero(q))
-    q->sign = 0;
-  else
-    q->sign = 1;
-  if (_bn_is_zero(r))
-    r->sign = 0;
-  else
-    r->sign = 1;
+  q->sign = _bn_is_zero(q) ? 0 : 1;
+  r->sign = _bn_is_zero(r) ? 0 : 1;
 }
 
-/* Truncated division: q = trunc(a/b), r = a - q*b, |r| < |b| */
+/*
+ * Knuth Algorithm D over the native base-2^64 limbs.  Normalizing the divisor
+ * makes the two-limb quotient estimate exact or at most two too large; the
+ * correction step then avoids the bit-at-a-time allocation/copy loop.
+ */
+static void _bn_divmod_knuth(_bn_t *q, _bn_t *r, const _bn_t *a,
+                             const _bn_t *b) {
+  if (_bn_is_zero(b)) {
+    _bn_set_zero(q);
+    _bn_copy(r, a);
+    return;
+  }
+  int cmp = _bn_cmp_mag(a, b);
+  if (cmp < 0) {
+    _bn_set_zero(q);
+    _bn_copy(r, a);
+    r->sign = _bn_is_zero(r) ? 0 : 1;
+    return;
+  }
+  if (cmp == 0) {
+    _bn_set_i64(q, 1);
+    _bn_set_zero(r);
+    return;
+  }
+
+  size_t n = b->count;
+  if (n == 1) {
+    uint64_t divisor = b->d[0], rem = 0;
+    _bn_grow(q, a->count);
+    if (q->count < a->count) {
+      _bn_divmod_binary(q, r, a, b);
+      return;
+    }
+    for (size_t i = a->count; i-- > 0;) {
+      __uint128_t cur = ((__uint128_t)rem << 64) | a->d[i];
+      q->d[i] = (uint64_t)(cur / divisor);
+      rem = (uint64_t)(cur % divisor);
+    }
+    q->count = a->count;
+    q->sign = 1;
+    _bn_trim(q);
+    if (rem)
+      _bn_set_i64(r, (int64_t)rem), r->d[0] = rem, r->sign = 1;
+    else
+      _bn_set_zero(r);
+    return;
+  }
+
+  size_t m = a->count - n;
+  unsigned shift = (unsigned)__builtin_clzll(b->d[n - 1]);
+  uint64_t *vn = calloc(n, sizeof(*vn));
+  uint64_t *un = calloc(a->count + 1, sizeof(*un));
+  uint64_t *qd = calloc(m + 1, sizeof(*qd));
+  if (!vn || !un || !qd) {
+    free(vn); free(un); free(qd);
+    _bn_divmod_binary(q, r, a, b);
+    return;
+  }
+  if (shift == 0) {
+    memcpy(vn, b->d, n * sizeof(*vn));
+    memcpy(un, a->d, a->count * sizeof(*un));
+  } else {
+    uint64_t carry = 0;
+    for (size_t i = 0; i < n; ++i) {
+      uint64_t x = b->d[i];
+      vn[i] = (x << shift) | carry;
+      carry = x >> (64 - shift);
+    }
+    carry = 0;
+    for (size_t i = 0; i < a->count; ++i) {
+      uint64_t x = a->d[i];
+      un[i] = (x << shift) | carry;
+      carry = x >> (64 - shift);
+    }
+    un[a->count] = carry;
+  }
+
+  for (size_t jj = m + 1; jj-- > 0;) {
+    size_t j = jj;
+    uint64_t qhat, rhat;
+    bool rhat_carried = false;
+    if (un[j + n] == vn[n - 1]) {
+      qhat = UINT64_MAX;
+      rhat = un[j + n - 1] + vn[n - 1];
+      /*
+       * rhat may carry past 2^64 here (un[j+n-1] + vn[n-1] >= B).  A carried
+       * rhat makes B*rhat + un[j+n-2] >= B^2 > qhat*vn[n-2], so qhat = B-1 is
+       * already exact and the correction loop must be skipped: evaluating it
+       * against the wrapped rhat would wrongly decrement qhat.
+       */
+      rhat_carried = rhat < vn[n - 1];
+    } else {
+      __uint128_t top = ((__uint128_t)un[j + n] << 64) | un[j + n - 1];
+      qhat = (uint64_t)(top / vn[n - 1]);
+      rhat = (uint64_t)(top % vn[n - 1]);
+    }
+    if (!rhat_carried) {
+      while ((__uint128_t)qhat * vn[n - 2] >
+             ((__uint128_t)rhat << 64) + un[j + n - 2]) {
+        --qhat;
+        uint64_t old = rhat;
+        rhat += vn[n - 1];
+        if (rhat < old)
+          break;
+      }
+    }
+
+    uint64_t borrow = 0;
+    for (size_t i = 0; i < n; ++i) {
+      __uint128_t product = (__uint128_t)qhat * vn[i] + borrow;
+      uint64_t low = (uint64_t)product, old = un[j + i];
+      un[j + i] = old - low;
+      borrow = (uint64_t)(product >> 64) + (old < low);
+    }
+    bool negative = un[j + n] < borrow;
+    un[j + n] -= borrow;
+    if (negative) {
+      --qhat;
+      uint64_t carry = 0;
+      for (size_t i = 0; i < n; ++i) {
+        __uint128_t sum = (__uint128_t)un[j + i] + vn[i] + carry;
+        un[j + i] = (uint64_t)sum;
+        carry = (uint64_t)(sum >> 64);
+      }
+      un[j + n] += carry;
+    }
+    qd[j] = qhat;
+  }
+
+  _bn_grow(q, m + 1);
+  _bn_grow(r, n);
+  if (q->count < m + 1 || r->count < n) {
+    free(vn); free(un); free(qd);
+    _bn_divmod_binary(q, r, a, b);
+    return;
+  }
+  memcpy(q->d, qd, (m + 1) * sizeof(*qd));
+  q->count = m + 1;
+  q->sign = 1;
+  if (shift == 0) {
+    memcpy(r->d, un, n * sizeof(*un));
+  } else {
+    uint64_t carry = 0;
+    for (size_t i = n; i-- > 0;) {
+      uint64_t x = un[i];
+      r->d[i] = (x >> shift) | carry;
+      carry = x << (64 - shift);
+    }
+  }
+  r->count = n;
+  r->sign = 1;
+  _bn_trim(q);
+  _bn_trim(r);
+  q->sign = _bn_is_zero(q) ? 0 : 1;
+  r->sign = _bn_is_zero(r) ? 0 : 1;
+  free(vn); free(un); free(qd);
+}
+
+#ifndef BURNIKEL_ZIEGLER_THRESHOLD
+#define BURNIKEL_ZIEGLER_THRESHOLD 32u
+#endif
+
+/*
+ * Copy limbs [first, first + count) without changing their base-2^64 value.
+ */
+static bool _bn_limb_slice(_bn_t *r, const _bn_t *a, size_t first,
+                           size_t count) {
+  if (first >= a->count || count == 0) {
+    _bn_set_zero(r);
+    return true;
+  }
+  if (count > a->count - first)
+    count = a->count - first;
+  _bn_grow(r, count);
+  if (r->count < count)
+    return false;
+  memcpy(r->d, a->d + first, count * sizeof(*r->d));
+  r->count = count;
+  r->sign = 1;
+  _bn_trim(r);
+  return true;
+}
+
+/*
+ * r = high * B^low.count + low, where B=2^64 and both inputs are positive.
+ */
+static bool _bn_join_limbs(_bn_t *r, const _bn_t *high, const _bn_t *low,
+                           size_t low_count) {
+  size_t n = high->count + low_count;
+  if (n < low_count)
+    return false;
+  _bn_grow(r, n);
+  if (r->count < n)
+    return false;
+  memset(r->d, 0, n * sizeof(*r->d));
+  if (low->count)
+    memcpy(r->d, low->d, low->count * sizeof(*r->d));
+  if (high->count)
+    memcpy(r->d + low_count, high->d, high->count * sizeof(*r->d));
+  r->count = n;
+  r->sign = n ? 1 : 0;
+  _bn_trim(r);
+  return true;
+}
+
+/*
+ * Burnikel-Ziegler block division.  Large dividends are consumed in divisor-
+ * sized base-B blocks, reducing each 2n/n subproblem with normalized Algorithm
+ * D.  This keeps temporary operands bounded to two divisor blocks and is the
+ * dedicated large-operand path; the threshold below prevents small values from
+ * paying its block assembly cost.
+ */
+static void _bn_divmod_burnikel_ziegler(_bn_t *q, _bn_t *r, const _bn_t *a,
+                                        const _bn_t *b) {
+  size_t block = b->count;
+  size_t blocks = (a->count + block - 1) / block;
+  _bn_t rem = {0}, quotient = {0};
+  _bn_grow(&quotient, blocks * block);
+  if (quotient.count < blocks * block) {
+    _bn_clear(&quotient);
+    _bn_divmod_knuth(q, r, a, b);
+    return;
+  }
+  memset(quotient.d, 0, quotient.count * sizeof(*quotient.d));
+  for (size_t bi = blocks; bi-- > 0;) {
+    _bn_t chunk = {0}, partial = {0}, digit = {0}, next_rem = {0};
+    if (!_bn_limb_slice(&chunk, a, bi * block, block) ||
+        !_bn_join_limbs(&partial, &rem, &chunk, block)) {
+      _bn_clear(&chunk); _bn_clear(&partial); _bn_clear(&digit);
+      _bn_clear(&next_rem); _bn_clear(&rem); _bn_clear(&quotient);
+      _bn_divmod_knuth(q, r, a, b);
+      return;
+    }
+    _bn_divmod_knuth(&digit, &next_rem, &partial, b);
+    if (digit.count > block) {
+      _bn_clear(&chunk); _bn_clear(&partial); _bn_clear(&digit);
+      _bn_clear(&next_rem); _bn_clear(&rem); _bn_clear(&quotient);
+      _bn_divmod_knuth(q, r, a, b);
+      return;
+    }
+    if (digit.count)
+      memcpy(quotient.d + bi * block, digit.d,
+             digit.count * sizeof(*quotient.d));
+    _bn_clear(&rem);
+    rem = next_rem;
+    _bn_clear(&chunk); _bn_clear(&partial); _bn_clear(&digit);
+  }
+  quotient.sign = 1;
+  _bn_trim(&quotient);
+  _bn_copy(q, &quotient);
+  _bn_copy(r, &rem);
+  _bn_clear(&quotient);
+  _bn_clear(&rem);
+}
+
+static void _bn_divmod_unsigned(_bn_t *q, _bn_t *r, const _bn_t *a,
+                                const _bn_t *b) {
+  if (b->count >= BURNIKEL_ZIEGLER_THRESHOLD &&
+      a->count >= b->count + BURNIKEL_ZIEGLER_THRESHOLD)
+    _bn_divmod_burnikel_ziegler(q, r, a, b);
+  else
+    _bn_divmod_knuth(q, r, a, b);
+}
+
+/*
+ * Truncated division: q = trunc(a/b), r = a - q*b, |r| < |b|
+ */
 static void _bn_tdiv_qr(_bn_t *q, _bn_t *r, const _bn_t *a,
                          const _bn_t *b) {
   _bn_t abs_a = {0};
@@ -497,12 +733,16 @@ static void _bn_tdiv_qr(_bn_t *q, _bn_t *r, const _bn_t *a,
   _bn_init(&rq);
   _bn_init(&rr);
   _bn_divmod_unsigned(&rq, &rr, &abs_a, &abs_b);
-  /* quotient sign */
+  /*
+   * quotient sign
+   */
   if (_bn_is_zero(&rq))
     rq.sign = 0;
   else
     rq.sign = (a->sign == b->sign || a->sign == 0 || b->sign == 0) ? 1 : -1;
-  /* remainder sign follows dividend */
+  /*
+   * remainder sign follows dividend
+   */
   rr.sign = _bn_is_zero(&rr) ? 0 : a->sign;
   _bn_copy(q, &rq);
   _bn_copy(r, &rr);
@@ -512,7 +752,9 @@ static void _bn_tdiv_qr(_bn_t *q, _bn_t *r, const _bn_t *a,
   _bn_clear(&rr);
 }
 
-/* Floor division: q = floor(a/b), r = a - q*b, 0 <= r < |b| */
+/*
+ * Floor division: q = floor(a/b), r = a - q*b, 0 <= r < |b|
+ */
 static void _bn_fdiv_qr(_bn_t *q, _bn_t *r, const _bn_t *a,
                          const _bn_t *b) {
   _bn_t abs_a = {0};
@@ -524,7 +766,9 @@ static void _bn_fdiv_qr(_bn_t *q, _bn_t *r, const _bn_t *a,
   _bn_init(&rq);
   _bn_init(&rr);
   _bn_divmod_unsigned(&rq, &rr, &abs_a, &abs_b);
-  /* Floor adjust: if signs differ and r != 0, q -= 1, r += |b| */
+  /*
+   * Floor adjust: if signs differ and r != 0, q -= 1, r += |b|
+   */
   int need_adj = (!_bn_is_zero(&rr)) &&
                  ((a->sign < 0 && b->sign > 0) ||
                   (a->sign > 0 && b->sign < 0));
@@ -557,7 +801,9 @@ static void _bn_fdiv_qr(_bn_t *q, _bn_t *r, const _bn_t *a,
 }
 
 
-/* In-place left shift by 1 bit (safe). */
+/*
+ * In-place left shift by 1 bit (safe).
+ */
 static void _bn_shl1(_bn_t *a) {
   if (_bn_is_zero(a))
     return;
@@ -576,7 +822,9 @@ static void _bn_shl1(_bn_t *a) {
   }
 }
 
-/* Left shift by arbitrary bits */
+/*
+ * Left shift by arbitrary bits
+ */
 static void _bn_shl(_bn_t *r, const _bn_t *a, size_t bits) {
   if (_bn_is_zero(a) || bits == 0) {
     _bn_copy(r, a);
@@ -610,7 +858,9 @@ static void _bn_shl(_bn_t *r, const _bn_t *a, size_t bits) {
   _bn_trim(r);
   _bn_clear(&src);
 }
-/* Right shift (unsigned floor division by 2^bits) */
+/*
+ * Right shift (unsigned floor division by 2^bits)
+ */
 static void _bn_shr(_bn_t *r, const _bn_t *a, size_t bits) {
   if (_bn_is_zero(a) || bits == 0) {
     _bn_copy(r, a);
@@ -652,7 +902,9 @@ static size_t _bn_popcount(const _bn_t *a) {
   return r;
 }
 
-/* Two's complement bitwise AND */
+/*
+ * Two's complement bitwise AND
+ */
 static void _bn_and(_bn_t *r, const _bn_t *a, const _bn_t *b) {
   size_t n = a->count > b->count ? a->count : b->count;
   _bn_grow(r, n);
@@ -666,7 +918,9 @@ static void _bn_and(_bn_t *r, const _bn_t *a, const _bn_t *b) {
   r->sign = (aneg && bneg) ? -1 : 1;
   _bn_trim(r);
 }
-/* Two's complement bitwise OR */
+/*
+ * Two's complement bitwise OR
+ */
 static void _bn_or(_bn_t *r, const _bn_t *a, const _bn_t *b) {
   size_t n = a->count > b->count ? a->count : b->count;
   _bn_grow(r, n);
@@ -680,7 +934,9 @@ static void _bn_or(_bn_t *r, const _bn_t *a, const _bn_t *b) {
   r->sign = (aneg || bneg) ? -1 : 1;
   _bn_trim(r);
 }
-/* Two's complement bitwise XOR */
+/*
+ * Two's complement bitwise XOR
+ */
 static void _bn_xor(_bn_t *r, const _bn_t *a, const _bn_t *b) {
   size_t n = a->count > b->count ? a->count : b->count;
   _bn_grow(r, n);
@@ -694,7 +950,9 @@ static void _bn_xor(_bn_t *r, const _bn_t *a, const _bn_t *b) {
   r->sign = (aneg != bneg) ? -1 : 1;
   _bn_trim(r);
 }
-/* Bitwise complement: ~a = -(a+1) */
+/*
+ * Bitwise complement: ~a = -(a+1)
+ */
 static void _bn_com(_bn_t *r, const _bn_t *a) {
   _bn_t one = {0};
   _bn_t neg_a = {0};
@@ -705,34 +963,63 @@ static void _bn_com(_bn_t *r, const _bn_t *a) {
   _bn_clear(&neg_a);
 }
 
-/* GCD (always returns non-negative) */
+/*
+ * GCD (always returns non-negative)
+ */
 
-/* GCD (always returns non-negative) */
-static void _bn_gcd(_bn_t *r, const _bn_t *a, const _bn_t *b) {
-  _bn_t u = {0};
-  _bn_t v = {0};
-  _bn_abs(&u, a);
-  _bn_abs(&v, b);
-  while (!_bn_is_zero(&v)) {
-    _bn_t rq = {0};
-    _bn_t rr = {0};
-    _bn_init(&rq);
-    _bn_init(&rr);
-    _bn_divmod_unsigned(&rq, &rr, &u, &v);
-    _bn_clear(&rq);
-    _bn_clear(&u);
-    _bn_copy(&u, &v);
-    _bn_clear(&v);
-    _bn_copy(&v, &rr);
-    _bn_clear(&rr);
+/*
+ * GCD (always returns non-negative)
+ */
+static size_t _bn_ctz_mag(const _bn_t *a) {
+  size_t bits = 0;
+  for (size_t i = 0; i < a->count; ++i) {
+    if (a->d[i] != 0)
+      return bits + (size_t)__builtin_ctzll(a->d[i]);
+    bits += 64;
   }
-  _bn_copy(r, &u);
-  r->sign = _bn_is_zero(r) ? 0 : 1;
-  _bn_clear(&u);
-  _bn_clear(&v);
+  return bits;
 }
 
-/* String conversion: base 10 */
+/*
+ * Stein's binary GCD: shifts and subtraction replace repeated division.
+ */
+static void _bn_gcd(_bn_t *r, const _bn_t *a, const _bn_t *b) {
+  _bn_t u = {0}, v = {0};
+  _bn_abs(&u, a);
+  _bn_abs(&v, b);
+  if (_bn_is_zero(&u)) {
+    _bn_copy(r, &v);
+    _bn_clear(&u); _bn_clear(&v);
+    return;
+  }
+  if (_bn_is_zero(&v)) {
+    _bn_copy(r, &u);
+    _bn_clear(&u); _bn_clear(&v);
+    return;
+  }
+  size_t uz = _bn_ctz_mag(&u), vz = _bn_ctz_mag(&v);
+  size_t common = uz < vz ? uz : vz;
+  _bn_shr(&u, &u, uz);
+  _bn_shr(&v, &v, vz);
+  while (!_bn_is_zero(&v)) {
+    if (_bn_cmp_mag(&u, &v) > 0) {
+      _bn_t swap = u; u = v; v = swap;
+    }
+    _bn_t diff = {0};
+    _bn_sub_mag(&diff, &v, &u);
+    _bn_clear(&v);
+    v = diff;
+    if (!_bn_is_zero(&v))
+      _bn_shr(&v, &v, _bn_ctz_mag(&v));
+  }
+  _bn_shl(r, &u, common);
+  r->sign = _bn_is_zero(r) ? 0 : 1;
+  _bn_clear(&u); _bn_clear(&v);
+}
+
+/*
+ * String conversion: base 10
+ */
 static char *_bn_to_str(const _bn_t *a) {
   if (_bn_is_zero(a)) {
     char *s = (char *)malloc(2);
@@ -750,7 +1037,9 @@ static char *_bn_to_str(const _bn_t *a) {
     _bn_t rr = {0};
     _bn_init(&rq);
     _bn_init(&rr);
-    /* divide by 10 */
+    /*
+     * divide by 10
+     */
     {
       _bn_t ten = {0};
       _bn_set_i64(&ten, 10);
@@ -780,7 +1069,9 @@ static char *_bn_to_str(const _bn_t *a) {
   return buf;
 }
 
-/* Parse decimal string */
+/*
+ * Parse decimal string
+ */
 static void _bn_from_str(_bn_t *r, const char *s) {
   _bn_set_zero(r);
   if (!s || !*s)
@@ -802,7 +1093,9 @@ static void _bn_from_str(_bn_t *r, const char *s) {
     if (*s < '0' || *s > '9')
       break;
     int digit = *s - '0';
-    /* r = r * 10 + digit */
+    /*
+     * r = r * 10 + digit
+     */
     _bn_t tmp = {0};
     _bn_mul(&tmp, r, &ten);
     if (digit) {
@@ -828,7 +1121,9 @@ static void _bn_from_str(_bn_t *r, const char *s) {
   _bn_trim(r);
 }
 
-/* Convert native to tagged int64 (small int or heap BigInt) */
+/*
+ * Convert native to tagged int64 (small int or heap BigInt)
+ */
 static int64_t _bi_from_native(_bn_t *a) {
   _bn_trim(a);
   if (_bn_is_zero(a))
@@ -849,7 +1144,9 @@ static int64_t _bi_from_native(_bn_t *a) {
   return p;
 }
 
-/* Convert tagged int64 to native bigint */
+/*
+ * Convert tagged int64 to native bigint
+ */
 static void _bi_val_to_native(int64_t v, _bn_t *out) {
   if (is_int(v)) {
     _bn_set_i64(out, rt_untag_v(v));
@@ -883,26 +1180,34 @@ static void _bi_val_to_native(int64_t v, _bn_t *out) {
   out->count = (size_t)words;
 }
 
-/* Integer square root (floor) via Newton's method */
+/*
+ * Integer square root (floor) via Newton's method
+ */
 static void _bn_isqrt(_bn_t *r, const _bn_t *a) {
   if (_bn_is_zero(a) || a->sign < 0) {
     _bn_set_zero(r);
     return;
   }
-  /* Initial guess: 2^(bitlen/2) */
+  /*
+   * Initial guess: 2^(bitlen/2)
+   */
   size_t bits = _bn_bitlen(a);
   _bn_set_i64(r, 1);
   if (bits > 1)
     _bn_shl(r, r, bits / 2);
   for (int iter = 0; iter < (int)(bits + 2); iter++) {
-    /* q = a / r */
+    /*
+     * q = a / r
+     */
     _bn_t rq = {0};
     _bn_t rr = {0};
     _bn_init(&rq);
     _bn_init(&rr);
     _bn_divmod_unsigned(&rq, &rr, a, r);
     _bn_clear(&rr);
-    /* new_r = (r + q) / 2 */
+    /*
+     * new_r = (r + q) / 2
+     */
     _bn_t sum = {0};
     _bn_add(&sum, r, &rq);
     _bn_clear(&rq);
@@ -910,10 +1215,14 @@ static void _bn_isqrt(_bn_t *r, const _bn_t *a) {
     _bn_clear(&sum);
     _bn_trim(r);
   }
-  /* Newton converges to floor(sqrt(a)) from below, check result */
+  /*
+   * Newton converges to floor(sqrt(a)) from below, check result
+   */
   _bn_t sq = {0};
   _bn_mul(&sq, r, r);
-  /* if r*r > a, decrement */
+  /*
+   * if r*r > a, decrement
+   */
   while (_bn_cmp(&sq, a) > 0) {
     _bn_t one = {0};
     _bn_set_i64(&one, 1);
@@ -929,7 +1238,9 @@ static void _bn_isqrt(_bn_t *r, const _bn_t *a) {
   _bn_clear(&sq);
 }
 
-/* Integer k-th root (floor) via Newton's method */
+/*
+ * Integer k-th root (floor) via Newton's method
+ */
 static void _bn_iroot(_bn_t *r, const _bn_t *a, unsigned long k) {
   if (k == 0 || _bn_is_zero(a)) {
     _bn_set_zero(r);
@@ -948,7 +1259,9 @@ static void _bn_iroot(_bn_t *r, const _bn_t *a, unsigned long k) {
   if (bits > k)
     _bn_shl(r, r, (bits + k - 1) / k);
   for (int iter = 0; iter < (int)(bits / k + 10); iter++) {
-    /* Compute r^k and r^(k-1) */
+    /*
+     * Compute r^k and r^(k-1)
+     */
     _bn_t rk = {0};
     _bn_t rk1 = {0};
     _bn_set_i64(&rk, 1);
@@ -967,14 +1280,18 @@ static void _bn_iroot(_bn_t *r, const _bn_t *a, unsigned long k) {
       _bn_copy(&rk1, &tmp);
       _bn_clear(&tmp);
     }
-    /* a / r^(k-1) */
+    /*
+     * a / r^(k-1)
+     */
     _bn_t q = {0};
     _bn_t rem = {0};
     _bn_init(&q);
     _bn_init(&rem);
     _bn_divmod_unsigned(&q, &rem, a, &rk1);
     _bn_clear(&rem);
-    /* new_r = ((k-1)*r + a/r^(k-1)) / k */
+    /*
+     * new_r = ((k-1)*r + a/r^(k-1)) / k
+     */
     _bn_t km1 = {0};
     _bn_set_i64(&km1, (int64_t)(k - 1));
     _bn_t t1 = {0};
@@ -986,7 +1303,9 @@ static void _bn_iroot(_bn_t *r, const _bn_t *a, unsigned long k) {
     _bn_clear(&q);
     _bn_clear(&rk);
     _bn_clear(&rk1);
-    /* divide by k */
+    /*
+     * divide by k
+     */
     {
       _bn_t kbn = {0};
       _bn_set_i64(&kbn, (int64_t)k);
@@ -1010,7 +1329,9 @@ static void _bn_iroot(_bn_t *r, const _bn_t *a, unsigned long k) {
   }
 }
 
-/* Perfect square test */
+/*
+ * Perfect square test
+ */
 static bool _bn_perfect_square_p(const _bn_t *a) {
   if (_bn_is_zero(a))
     return true;
@@ -1026,7 +1347,9 @@ static bool _bn_perfect_square_p(const _bn_t *a) {
   return ok;
 }
 
-/* Modular inverse via extended Euclidean (unsigned) */
+/*
+ * Modular inverse via extended Euclidean (unsigned)
+ */
 static bool _bn_modinv(_bn_t *r, const _bn_t *a, const _bn_t *m) {
   _bn_t s0 = {0};
   _bn_t s1 = {0};
@@ -1063,7 +1386,9 @@ static bool _bn_modinv(_bn_t *r, const _bn_t *a, const _bn_t *m) {
     _bn_copy(&s1, &ns);
     _bn_clear(&ns);
   }
-  /* r0 is GCD */
+  /*
+   * r0 is GCD
+   */
   _bn_t one = {0};
   _bn_set_i64(&one, 1);
   bool ok = (_bn_cmp(&r0, &one) == 0);
@@ -1078,7 +1403,9 @@ static bool _bn_modinv(_bn_t *r, const _bn_t *a, const _bn_t *m) {
   }
   _bn_copy(r, &s0);
   r->sign = _bn_is_zero(r) ? 0 : 1;
-  /* Ensure result is in [0, |m|) */
+  /*
+   * Ensure result is in [0, |m|)
+   */
   if (r->sign < 0) {
     _bn_t abs_m = {0};
     _bn_abs(&abs_m, m);
@@ -1095,7 +1422,132 @@ static bool _bn_modinv(_bn_t *r, const _bn_t *a, const _bn_t *m) {
   return ok;
 }
 
-/* Modular exponentiation */
+#ifndef BARRETT_REDUCTION_THRESHOLD
+#define BARRETT_REDUCTION_THRESHOLD 8u
+#endif
+
+typedef struct {
+  _bn_t modulus;
+  _bn_t mu;
+  size_t limbs;
+  bool ready;
+} _bn_barrett_t;
+
+static void _bn_barrett_clear(_bn_barrett_t *ctx) {
+  if (!ctx)
+    return;
+  _bn_clear(&ctx->modulus);
+  _bn_clear(&ctx->mu);
+  memset(ctx, 0, sizeof(*ctx));
+}
+
+/*
+ * Precompute mu=floor(B^(2k)/m), B=2^64, for one powmod modulus.
+ */
+static bool _bn_barrett_init(_bn_barrett_t *ctx, const _bn_t *mod) {
+  if (!ctx || !mod || mod->count < BARRETT_REDUCTION_THRESHOLD)
+    return false;
+  memset(ctx, 0, sizeof(*ctx));
+  _bn_abs(&ctx->modulus, mod);
+  ctx->limbs = ctx->modulus.count;
+  _bn_t power = {0}, rem = {0};
+  _bn_grow(&power, 2 * ctx->limbs + 1);
+  if (power.count < 2 * ctx->limbs + 1) {
+    _bn_clear(&power);
+    _bn_barrett_clear(ctx);
+    return false;
+  }
+  memset(power.d, 0, power.count * sizeof(*power.d));
+  power.d[2 * ctx->limbs] = 1;
+  power.sign = 1;
+  _bn_divmod_unsigned(&ctx->mu, &rem, &power, &ctx->modulus);
+  _bn_clear(&power);
+  _bn_clear(&rem);
+  ctx->ready = !_bn_is_zero(&ctx->mu);
+  if (!ctx->ready)
+    _bn_barrett_clear(ctx);
+  return ctx->ready;
+}
+
+static bool _bn_low_limbs(_bn_t *out, const _bn_t *a, size_t count) {
+  return _bn_limb_slice(out, a, 0, count);
+}
+
+/*
+ * Barrett reduction for nonnegative x < B^(2k).
+ */
+static bool _bn_barrett_reduce(_bn_t *out, const _bn_t *x,
+                               const _bn_barrett_t *ctx) {
+  if (!out || !x || !ctx || !ctx->ready || x->sign < 0 ||
+      x->count > 2 * ctx->limbs)
+    return false;
+  if (_bn_cmp_mag(x, &ctx->modulus) < 0) {
+    _bn_copy(out, x);
+    out->sign = _bn_is_zero(out) ? 0 : 1;
+    return true;
+  }
+  size_t k = ctx->limbs;
+  _bn_t q1 = {0}, q2 = {0}, q3 = {0};
+  _bn_t r1 = {0}, product = {0}, r2 = {0}, reduced = {0};
+  if (!_bn_limb_slice(&q1, x, k - 1, x->count) ||
+      !_bn_low_limbs(&r1, x, k + 1))
+    goto fail;
+  _bn_mul(&q2, &q1, &ctx->mu);
+  if (!_bn_limb_slice(&q3, &q2, k + 1, q2.count))
+    goto fail;
+  _bn_mul(&product, &q3, &ctx->modulus);
+  if (!_bn_low_limbs(&r2, &product, k + 1))
+    goto fail;
+  if (_bn_cmp_mag(&r1, &r2) >= 0) {
+    _bn_sub_mag(&reduced, &r1, &r2);
+  } else {
+    _bn_t base = {0}, sum = {0};
+    _bn_grow(&base, k + 2);
+    if (base.count < k + 2) {
+      _bn_clear(&base);
+      goto fail;
+    }
+    memset(base.d, 0, base.count * sizeof(*base.d));
+    base.d[k + 1] = 1;
+    base.sign = 1;
+    _bn_add_mag(&sum, &r1, &base);
+    _bn_sub_mag(&reduced, &sum, &r2);
+    _bn_clear(&base);
+    _bn_clear(&sum);
+  }
+  while (_bn_cmp_mag(&reduced, &ctx->modulus) >= 0) {
+    _bn_t next = {0};
+    _bn_sub_mag(&next, &reduced, &ctx->modulus);
+    _bn_clear(&reduced);
+    reduced = next;
+  }
+  _bn_copy(out, &reduced);
+  out->sign = _bn_is_zero(out) ? 0 : 1;
+  _bn_clear(&q1); _bn_clear(&q2); _bn_clear(&q3);
+  _bn_clear(&r1); _bn_clear(&product); _bn_clear(&r2);
+  _bn_clear(&reduced);
+  return true;
+fail:
+  _bn_clear(&q1); _bn_clear(&q2); _bn_clear(&q3);
+  _bn_clear(&r1); _bn_clear(&product); _bn_clear(&r2);
+  _bn_clear(&reduced);
+  return false;
+}
+
+static void _bn_reduce_product(_bn_t *out, const _bn_t *product,
+                               const _bn_t *mod,
+                               const _bn_barrett_t *barrett) {
+  if (barrett && _bn_barrett_reduce(out, product, barrett))
+    return;
+  _bn_t q = {0};
+  _bn_divmod_unsigned(&q, out, product, mod);
+  _bn_clear(&q);
+}
+
+/*
+ * Modular exponentiation. Large repeated products use one modulus-specific
+ * Barrett reciprocal; unsupported sizes retain exact division reduction.
+ */
 static void _bn_powmod(_bn_t *r, const _bn_t *base, const _bn_t *exp,
                        const _bn_t *mod) {
   if (_bn_is_zero(mod)) {
@@ -1104,7 +1556,11 @@ static void _bn_powmod(_bn_t *r, const _bn_t *base, const _bn_t *exp,
   }
   _bn_t result = {0};
   _bn_set_i64(&result, 1);
-  /* Reduce base mod mod */
+  _bn_barrett_t barrett = {0};
+  bool have_barrett = _bn_barrett_init(&barrett, mod);
+  /*
+   * Reduce base mod mod
+   */
   _bn_t b = {0};
   {
     _bn_t rq = {0};
@@ -1124,39 +1580,38 @@ static void _bn_powmod(_bn_t *r, const _bn_t *base, const _bn_t *exp,
     if (word < exp->count && (exp->d[word] >> bit & 1)) {
       _bn_t prod = {0};
       _bn_mul(&prod, &result, &b);
-      _bn_t rq2 = {0};
-      _bn_t rr2 = {0};
-      _bn_init(&rq2);
-      _bn_init(&rr2);
-      _bn_divmod_unsigned(&rq2, &rr2, &prod, mod);
-      _bn_clear(&rq2);
+      _bn_t reduced = {0};
+      _bn_reduce_product(&reduced, &prod, mod,
+                         have_barrett ? &barrett : NULL);
       _bn_clear(&result);
-      _bn_copy(&result, &rr2);
+      _bn_copy(&result, &reduced);
       result.sign = _bn_is_zero(&result) ? 0 : 1;
-      _bn_clear(&rr2);
+      _bn_clear(&reduced);
       _bn_clear(&prod);
     }
-    /* square b */
+    /*
+     * square b
+     */
     _bn_t sq = {0};
     _bn_mul(&sq, &b, &b);
-    _bn_t rq3 = {0};
-    _bn_t rr3 = {0};
-    _bn_init(&rq3);
-    _bn_init(&rr3);
-    _bn_divmod_unsigned(&rq3, &rr3, &sq, mod);
-    _bn_clear(&rq3);
+    _bn_t reduced = {0};
+    _bn_reduce_product(&reduced, &sq, mod,
+                       have_barrett ? &barrett : NULL);
     _bn_clear(&b);
-    _bn_copy(&b, &rr3);
+    _bn_copy(&b, &reduced);
     b.sign = _bn_is_zero(&b) ? 0 : 1;
-    _bn_clear(&rr3);
+    _bn_clear(&reduced);
     _bn_clear(&sq);
   }
   _bn_copy(r, &result);
   _bn_clear(&result);
   _bn_clear(&b);
+  _bn_barrett_clear(&barrett);
 }
 
-/* xgcd: g = gcd(a,b), g = ax + by */
+/*
+ * xgcd: g = gcd(a,b), g = ax + by
+ */
 static void _bn_xgcd(_bn_t *g, _bn_t *x, _bn_t *y, const _bn_t *a,
                       const _bn_t *b) {
   _bn_t old_r = {0};
@@ -1216,7 +1671,9 @@ static void _bn_xgcd(_bn_t *g, _bn_t *x, _bn_t *y, const _bn_t *a,
   _bn_clear(&new_t);
 }
 
-/* Jacobi symbol (a/n) for n > 0, odd */
+/*
+ * Jacobi symbol (a/n) for n > 0, odd
+ */
 static int _bn_jacobi_val(const _bn_t *a, const _bn_t *n) {
   _bn_t u = {0};
   _bn_t v = {0};
@@ -1234,14 +1691,18 @@ static int _bn_jacobi_val(const _bn_t *a, const _bn_t *n) {
     _bn_trim(&u);
     if (_bn_is_zero(&u))
       break;
-    /* Remove factors of 2 from u */
+    /*
+     * Remove factors of 2 from u
+     */
     while (u.count > 0 && (u.d[0] & 1) == 0) {
       _bn_shr(&u, &u, 1);
       int vmod8 = v.count > 0 ? (int)(v.d[0] & 7) : 0;
       if (vmod8 == 3 || vmod8 == 5)
         result = -result;
     }
-    /* Swap u, v */
+    /*
+     * Swap u, v
+     */
     _bn_t tmp = {0};
     _bn_copy(&tmp, &u);
     _bn_clear(&u);
@@ -1255,7 +1716,9 @@ static int _bn_jacobi_val(const _bn_t *a, const _bn_t *n) {
       if (vmod4 == 3)
         result = -result;
     }
-    /* u = u mod v */
+    /*
+     * u = u mod v
+     */
     {
       _bn_t rq = {0};
       _bn_t rr = {0};
@@ -1274,13 +1737,17 @@ static int _bn_jacobi_val(const _bn_t *a, const _bn_t *n) {
   return result;
 }
 
-/* GF(2) polynomial degree */
+/*
+ * GF(2) polynomial degree
+ */
 static long _bn_gf2_deg(const _bn_t *a) {
   if (_bn_is_zero(a))
     return -1;
   return (long)(_bn_bitlen(a) - 1);
 }
-/* GF(2) reduce: out = a mod m */
+/*
+ * GF(2) reduce: out = a mod m
+ */
 static void _bn_gf2_mod(_bn_t *out, const _bn_t *a, const _bn_t *m) {
   _bn_copy(out, a);
   long m_deg = _bn_gf2_deg(m);
@@ -1298,7 +1765,9 @@ static void _bn_gf2_mod(_bn_t *out, const _bn_t *a, const _bn_t *m) {
     _bn_clear(&shifted);
   }
 }
-/* GF(2) carryless multiply mod m */
+/*
+ * GF(2) carryless multiply mod m
+ */
 static void _bn_gf2_mulmod(_bn_t *out, const _bn_t *a, const _bn_t *b,
                            const _bn_t *m) {
   long m_deg = _bn_gf2_deg(m);
@@ -1333,7 +1802,9 @@ static void _bn_gf2_mulmod(_bn_t *out, const _bn_t *a, const _bn_t *b,
   _bn_clear(&vb);
 }
 
-/* GF(2) polynomial division: a = q*b + r in GF(2) */
+/*
+ * GF(2) polynomial division: a = q*b + r in GF(2)
+ */
 static void _bn_gf2_div_qr(_bn_t *q, _bn_t *r, const _bn_t *a,
                            const _bn_t *b) {
   _bn_set_zero(q);
@@ -1358,7 +1829,9 @@ static void _bn_gf2_div_qr(_bn_t *q, _bn_t *r, const _bn_t *a,
   }
 }
 
-/* Convert big-endian bytes to native */
+/*
+ * Convert big-endian bytes to native
+ */
 static void _bn_from_bytes_be(_bn_t *r, const uint8_t *bytes, size_t len) {
   _bn_set_zero(r);
   if (!bytes || len == 0)
@@ -1380,7 +1853,9 @@ static void _bn_from_bytes_be(_bn_t *r, const uint8_t *bytes, size_t len) {
   r->sign = _bn_is_zero(r) ? 0 : 1;
 }
 
-/* Convert to big-endian bytes */
+/*
+ * Convert to big-endian bytes
+ */
 static uint8_t *_bn_to_bytes_be(const _bn_t *a, size_t *count) {
   if (_bn_is_zero(a)) {
     *count = 1;
@@ -1437,9 +1912,9 @@ static int64_t _bi_popcount_native(int64_t a) {
 
 #endif /* NYTRIX_USE_GMP */
 
-/* ------------------------------------------------------------------ */
-/*  Fast-path helpers (shared by both backends)                       */
-/* ------------------------------------------------------------------ */
+/*
+ * Fast-path helpers (shared by both backends)
+ */
 
 static inline bool _bi_read_limb2(int64_t v, int *sign, uint64_t limbs[2],
                                   size_t *words) {
@@ -1930,9 +2405,9 @@ static inline bool _bi_try_submul_i64_limb2(int64_t a, int64_t q_raw,
   return true;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Public API                                                         */
-/* ------------------------------------------------------------------ */
+/*
+ * Public API
+ */
 
 int64_t rt_bigint_add(int64_t a, int64_t b) {
   int64_t fast = 0;
@@ -2357,6 +2832,10 @@ int64_t rt_bigint_cmp(int64_t a, int64_t b) {
 #endif
 }
 
+int64_t rt_native_bigint_cmp(int64_t a, int64_t b) {
+  return rt_untag_v(rt_bigint_cmp(a, b));
+}
+
 int64_t rt_bigint_to_str(int64_t a) {
 #ifdef NYTRIX_USE_GMP
   mpz_t ma;
@@ -2379,8 +2858,13 @@ int64_t rt_bigint_to_str(int64_t a) {
 }
 
 int64_t rt_bigint_from_str(int64_t str_ptr) {
-  if (!is_v_str(str_ptr))
+  if (!str_ptr)
     return 0;
+  /*
+   * The interpreter/LLVM tiers pass tagged Ny strings, while direct native
+   * NYIR uses raw NUL-terminated C strings.  Both representations point at
+   * the first character, so parsing is identical once NULL is rejected.
+   */
   const char *s = (const char *)(uintptr_t)str_ptr;
 #ifdef NYTRIX_USE_GMP
   mpz_t val;
@@ -2732,6 +3216,12 @@ int64_t rt_long(int64_t v) {
       return _bi_from_i64(0);
     memcpy(&tag, (const void *)tag_ptr, sizeof(tag));
   }
+  if (tag == TAG_FLOAT) {
+    int64_t bits = *(int64_t *)((char *)(uintptr_t)v + 0);
+    double d = 0.0;
+    memcpy(&d, &bits, sizeof(d));
+    return _bi_from_i64((int64_t)d);
+  }
   if (tag == TAG_BIGINT)
     return v;
   if (tag == TAG_BYTES)
@@ -2811,7 +3301,9 @@ int64_t rt_bigint_pow(int64_t b, int64_t e) {
   _bn_init(&nr);
   _bi_val_to_native(b, &nb);
   _bi_val_to_native(e, &ne);
-  /* Repeated squaring */
+  /*
+   * Repeated squaring
+   */
   _bn_set_i64(&nr, 1);
   size_t ebits = _bn_bitlen(&ne);
   for (size_t i = 0; i < ebits; i++) {
@@ -3076,7 +3568,9 @@ int64_t rt_bigint_ctz(int64_t a) {
       }
     }
     if (r == 0 && na.count > 0) {
-      /* all zero — shouldn't happen after trim */
+      /*
+       * all zero — shouldn't happen after trim
+       */
     }
   }
   _bn_clear(&na);
@@ -3232,7 +3726,9 @@ int64_t rt_bigint_gf2_mulmod(int64_t a, int64_t b, int64_t m) {
       mpz_t va, vb2;
       mpz_init(va);
       mpz_init_set(vb2, mb);
-      /* reduce va */
+      /*
+       * reduce va
+       */
       mpz_set(va, ma);
       {
         mpz_t shifted;
@@ -3293,12 +3789,16 @@ int64_t rt_bigint_gf2_inv(int64_t a, int64_t m) {
   mpz_t ma, mm;
   _bi_val_to_mpz(a, ma);
   _bi_val_to_mpz(m, mm);
-  /* Extended GCD over GF(2) */
+  /*
+   * Extended GCD over GF(2)
+   */
   mpz_t r0, r1, t0, t1, q, rem, prod, next_t;
   mpz_init_set(r0, mm);
   mpz_init(r1);
   mpz_set(r1, ma);
-  /* reduce r1 mod m */
+  /*
+   * reduce r1 mod m
+   */
   {
     mpz_t shifted;
     mpz_init(shifted);
@@ -3320,7 +3820,9 @@ int64_t rt_bigint_gf2_inv(int64_t a, int64_t m) {
   mpz_init_set_ui(t1, 1);
   mpz_inits(q, rem, prod, next_t, NULL);
   while (mpz_sgn(r1) != 0) {
-    /* div_qr over GF(2) */
+    /*
+     * div_qr over GF(2)
+     */
     mpz_set_ui(q, 0);
     mpz_set(rem, r0);
     long b_deg = (long)mpz_sizeinbase(r1, 2) - 1;
@@ -3344,9 +3846,13 @@ int64_t rt_bigint_gf2_inv(int64_t a, int64_t m) {
     }
     mpz_set(r0, r1);
     mpz_set(r1, rem);
-    /* prod = q * t1 mod m */
+    /*
+     * prod = q * t1 mod m
+     */
     mpz_mul(prod, q, t1);
-    /* reduce prod mod m */
+    /*
+     * reduce prod mod m
+     */
     {
       mpz_t shifted;
       mpz_init(shifted);
@@ -3365,7 +3871,9 @@ int64_t rt_bigint_gf2_inv(int64_t a, int64_t m) {
       mpz_clear(shifted);
     }
     mpz_xor(next_t, t0, prod);
-    /* reduce next_t mod m */
+    /*
+     * reduce next_t mod m
+     */
     {
       mpz_t shifted;
       mpz_init(shifted);
@@ -3402,14 +3910,18 @@ int64_t rt_bigint_gf2_inv(int64_t a, int64_t m) {
   _bn_init(&nm);
   _bi_val_to_native(a, &na);
   _bi_val_to_native(m, &nm);
-  /* GF(2) extended GCD */
+  /*
+   * GF(2) extended GCD
+   */
   _bn_t r0, r1, t0, t1;
   _bn_copy(&r0, &nm);
   _bn_gf2_mod(&r1, &na, &nm);
   _bn_set_i64(&t0, 0);
   _bn_set_i64(&t1, 1);
   while (!_bn_is_zero(&r1)) {
-    /* GF(2) div_qr */
+    /*
+     * GF(2) div_qr
+     */
     _bn_t q, rem;
     _bn_set_zero(&q);
     _bn_gf2_div_qr(&q, &rem, &r0, &r1);

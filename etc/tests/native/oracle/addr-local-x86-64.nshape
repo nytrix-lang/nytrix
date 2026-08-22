@@ -3,7 +3,7 @@ shape oracle_addr_local_x86_64 {
   generator "native"
   features [native x86_64 oracle result pointer addr-local]
   template ny-test-case
-  flags "--native-result-oracle=42"
+  flags "--native-result-oracle=42 -O0"
   expect compile_and_run
   source ny <<'NY'
 use std.core

@@ -5,7 +5,17 @@
 #include "code/native/ir.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+
+static inline bool ny_native_size_mul_ok(size_t count, size_t size,
+                                         size_t *out) {
+  if (size != 0 && count > SIZE_MAX / size)
+    return false;
+  if (out)
+    *out = count * size;
+  return true;
+}
 
 typedef struct ny_native_writer_t {
   char *data;
@@ -34,7 +44,17 @@ typedef struct ny_native_writer_t {
  * a NYIP or language limit; making it dynamic requires changing all of those
  * owners together.
  */
-#define NY_NATIVE_LIVE_MAX_FUNCS 128u
+#define NY_NATIVE_LIVE_MAX_FUNCS 4095u
+
+/* Shared native transport capacities. Architecture encoders, live JIT, and
+ * object writers use these bounds so an accepted bundle is not rejected by a
+ * later backend with a smaller private table. */
+#define NY_NATIVE_MAX_SYMBOLS 4096u
+#define NY_NATIVE_MAX_RELOCS 4096u
+#define NY_NATIVE_MAX_STRINGS 4096u
+#define NY_NATIVE_MAX_CONSTANTS 256u
+#define NY_NATIVE_MAX_ARRAYS 256u
+#define NY_NATIVE_MAX_ARRAY_ELEMS 128u
 
 bool ny_native_put(ny_native_writer_t *w, const char *s);
 bool ny_native_printf(ny_native_writer_t *w, const char *fmt, ...)
@@ -42,6 +62,10 @@ bool ny_native_printf(ny_native_writer_t *w, const char *fmt, ...)
 void ny_native_set_err(char *err, size_t err_len, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 size_t ny_native_nir_local_count(const nyir_func_t *f);
+bool ny_native_strtab_append_asm(ny_native_writer_t *w, char *err,
+                                 size_t err_len);
+bool ny_native_arraytab_append_asm(ny_native_writer_t *w, char *err,
+                                   size_t err_len);
 bool ny_native_ensure_parent_dir_for_path(const char *path);
 bool ny_native_emit_nir_func(ny_native_writer_t *w,
                              const ny_native_target_info_t *target,
@@ -58,8 +82,9 @@ bool ny_native_eval_ir_value(nyir_func_t *rt_main, nyir_func_t *funcs,
                              const ny_options *opt,
                              nyir_eval_result_t *out, char *err,
                              size_t err_len);
-bool ny_native_nir_dump_function(FILE *out, const stmt_t *fn, char *err,
-                                 size_t err_len, const ny_options *opt);
+bool ny_native_nir_dump_function(FILE *out, const program_t *prog,
+                                 const stmt_t *fn, char *err, size_t err_len,
+                                 const ny_options *opt);
 bool ny_native_nir_dump_rt_main(FILE *out, const program_t *prog, char *err,
                                 size_t err_len, const ny_options *opt);
 bool ny_native_nir_dump_program_binary(FILE *out, const program_t *prog,
@@ -68,6 +93,8 @@ bool ny_native_nir_dump_program_binary(FILE *out, const program_t *prog,
 bool ny_native_write_nir_metadata_report(const program_t *prog,
                                          const ny_options *opt, char *err,
                                          size_t err_len);
+bool ny_native_target_eval_bool(const ny_options *opt, const expr_t *e,
+                                bool *out);
 
 bool ny_native_x86_64_emit_rt_main(ny_native_writer_t *w,
                                    const ny_native_target_info_t *target,
@@ -92,6 +119,26 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
 void ny_native_strtab_clear(void);
 const char *ny_native_strtab_intern(const char *s, size_t len, char *name_out,
                                     size_t name_cap);
+
+/* Session-local pool of foldable top-level def constants emitted as
+ * 8-byte .data definitions in object files. */
+void ny_native_consttab_clear(void);
+bool ny_native_consttab_add(const char *name, int64_t value);
+bool ny_native_consttab_has(const char *name);
+
+typedef struct {
+  int64_t value;
+  const char *str;
+  size_t str_len;
+} ny_native_array_elem_t;
+
+/* Session-local pool of constant list storage. Scalar lists use one 8-byte
+ * word per element. String lists use explicit 24-byte dynamic descriptors:
+ * payload-relative pointer, byte length, and runtime string tag. */
+void ny_native_arraytab_clear(void);
+const char *ny_native_arraytab_intern(const ny_native_array_elem_t *values,
+                                      size_t count, size_t stride,
+                                      char *name_out, size_t name_cap);
 
 bool ny_native_aarch64_emit_nir(ny_native_writer_t *w,
                                 const ny_native_target_info_t *target,
@@ -210,6 +257,9 @@ bool ny_native_result_oracle_for_nir(nyir_func_t *rt_main,
 bool ny_native_oracle_fuzz(const ny_options *opt, int count, char *err,
                             size_t err_len);
 
+/* Backend regression probe used by the native test command. */
+bool ny_native_vector_selftest(char *err, size_t err_len);
+
 /* Shared string literals used by multiple native subsystems. */
 #define NY_NATIVE_ALLOC_FAIL "native NYIR lower: allocation failed"
 #define NY_NATIVE_OOM        "native NYIR VM: out of memory"
@@ -223,7 +273,8 @@ static inline bool nyir_op_is_f64(nyir_op_t op) {
   return op == NYIR_CONST_F64 || op == NYIR_ADD_F64 ||
          op == NYIR_SUB_F64 || op == NYIR_MUL_F64 ||
          op == NYIR_DIV_F64 || op == NYIR_I64_TO_F64 ||
-         op == NYIR_F32_TO_F64;
+         op == NYIR_F32_TO_F64 || op == NYIR_SQRT_F64 ||
+         op == NYIR_SIN_F64 || op == NYIR_COS_F64;
 }
 static inline bool nyir_op_is_f32(nyir_op_t op) {
   return op == NYIR_CONST_F32 || op == NYIR_ADD_F32 ||

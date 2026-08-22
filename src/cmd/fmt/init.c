@@ -1,3 +1,7 @@
+/*
+ * ny-fmt entry point: CLI dispatch for the formatter, source converter
+ * (c2ny/py2ny), and code extraction tools bundled under `ny fmt`.
+ */
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -11,6 +15,105 @@
 
 
 #include "core.c"
+
+/*
+ * Deterministic Nytrix formatter property smoke tests.  The formatter is used
+ * on partially typed editor buffers as well as complete source files, so its
+ * strongest always-on contract is: formatting must not crash, a second format
+ * must be a no-op, and comments / multiline string contents must survive.
+ *
+ * This is intentionally generated from a fixed PRNG seed rather than depending
+ * on a fuzzing framework: `ny fmt --selftest` remains reproducible on every
+ * platform while still exercising hundreds of whitespace/layout variants.
+ */
+static uint32_t ny_fmt_selftest_rand(uint32_t *state) {
+  uint32_t x = *state ? *state : UINT32_C(0x9e3779b9);
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  *state = x;
+  return x;
+}
+
+static void ny_fmt_selftest_ws(char *out, size_t cap, uint32_t *state) {
+  if (!out || cap == 0)
+    return;
+  size_t n = (size_t)(ny_fmt_selftest_rand(state) % 5u);
+  if (n + 1 > cap)
+    n = cap - 1;
+  for (size_t i = 0; i < n; ++i)
+    out[i] = (ny_fmt_selftest_rand(state) & 1u) ? ' ' : '\t';
+  out[n] = '\0';
+}
+
+static int ny_fmt_ny_selftest(void) {
+  static const char *const malformed[] = {
+      "def broken = {\n",
+      "if true {\n  print(1)\n",
+      "def x = \"unterminated\n",
+      "def x = \"\"\"unterminated multiline\n",
+      ";; comment-only editor buffer\n}\n}\n",
+      "[1, 2, 3\n",
+      "def f(x) = {\n  if x { return (x + 1\n}\n",
+  };
+  uint32_t state = UINT32_C(0x4e595452); /* 'NYTR' */
+  for (size_t i = 0; i < 256; ++i) {
+    char a[16], b[16], c[16], d[16], e[16], f[16];
+    ny_fmt_selftest_ws(a, sizeof(a), &state);
+    ny_fmt_selftest_ws(b, sizeof(b), &state);
+    ny_fmt_selftest_ws(c, sizeof(c), &state);
+    ny_fmt_selftest_ws(d, sizeof(d), &state);
+    ny_fmt_selftest_ws(e, sizeof(e), &state);
+    ny_fmt_selftest_ws(f, sizeof(f), &state);
+    char src[4096];
+    int n = snprintf(src, sizeof(src),
+                     ";; ny-fmt-selftest comment %zu\n"
+                     "def%svalue%s=%s1\n"
+                     "def%smessage%s=%s\"\"\"doc-%zu\\nkept\"\"\"\n"
+                     "if%svalue%s>%s0%s{%s\n"
+                     "%sdef%snext%s=%svalue%s+%s1\n"
+                     "%s}\n",
+                     i, a, b, c, d, e, f, i, a, b, c, d, e,
+                     (i & 1u) ? "\t" : "  ", a, b, c, d, e,
+                     (i & 2u) ? "\t" : "  ");
+    if (n < 0 || (size_t)n >= sizeof(src)) {
+      fprintf(stderr, "ny-fmt Nytrix selftest: generated probe overflow\n");
+      return 1;
+    }
+    char *once = format_ny_text(src);
+    char *twice = once ? format_ny_text(once) : NULL;
+    char comment[96], doc[96];
+    snprintf(comment, sizeof(comment), ";; ny-fmt-selftest comment %zu", i);
+    snprintf(doc, sizeof(doc), "doc-%zu\\nkept", i);
+    if (!once || !twice || strcmp(once, twice) != 0 ||
+        !strstr(once, comment) || !strstr(once, doc)) {
+      fprintf(stderr,
+              "ny-fmt Nytrix selftest: idempotence/comment preservation failed at seed-case %zu\n",
+              i);
+      free(once);
+      free(twice);
+      return 1;
+    }
+    free(once);
+    free(twice);
+  }
+  for (size_t i = 0; i < sizeof(malformed) / sizeof(malformed[0]); ++i) {
+    char *once = format_ny_text(malformed[i]);
+    char *twice = once ? format_ny_text(once) : NULL;
+    if (!once || !twice || strcmp(once, twice) != 0) {
+      fprintf(stderr,
+              "ny-fmt Nytrix selftest: malformed-buffer recovery failed at case %zu\n",
+              i);
+      free(once);
+      free(twice);
+      return 1;
+    }
+    free(once);
+    free(twice);
+  }
+  printf("ny-fmt selftest: Nytrix idempotence/recovery generated corpus: ok (263 cases)\n");
+  return 0;
+}
 static void usage(void) {
   nyt_heading("Nytrix Format And Audit");
   printf("%susage:%s %sny fmt%s %s[mode] [options] [paths ...]%s\n",
@@ -163,7 +266,7 @@ static int run_py2ny(const char *input_path, const char *output_path) {
     nyt_err("ny-fmt", "py2ny: unsupported constructs remain in %s; see markers in output", input_path);
   }
 
-  if (!write_file(output_path, out.data, out.len)) {
+  if (ny_write_file(output_path, out.data, out.len) != 0) {
     nyt_err("ny-fmt", "py2ny: failed to write %s", output_path);
     free(out.data);
     return 1;
@@ -171,7 +274,7 @@ static int run_py2ny(const char *input_path, const char *output_path) {
 
   printf("py2ny: %s -> %s (%zu bytes)\n", input_path, output_path, out.len);
   free(out.data);
-  return 0;
+  return rc;
 }
 
 static int run_c2ny(const char *input_path, const char *output_path) {
@@ -195,7 +298,7 @@ static int run_c2ny(const char *input_path, const char *output_path) {
     nyt_err("ny-fmt", "c2ny: unsupported constructs remain in %s; see markers in output", input_path);
   }
 
-  if (!write_file(output_path, out.data, out.len)) {
+  if (ny_write_file(output_path, out.data, out.len) != 0) {
     nyt_err("ny-fmt", "c2ny: failed to write %s", output_path);
     free(out.data);
     return 1;
@@ -203,7 +306,7 @@ static int run_c2ny(const char *input_path, const char *output_path) {
 
   printf("c2ny: %s -> %s (%zu bytes)\n", input_path, output_path, out.len);
   free(out.data);
-  return 0;
+  return rc;
 }
 
 static int run_conv(const FmtOpts *o) {
@@ -226,7 +329,7 @@ static int run_conv(const FmtOpts *o) {
   }
   int rc = 0;
   if (o->conv_output) {
-    if (!write_file(o->conv_output, out, strlen(out))) {
+    if (ny_write_file(o->conv_output, out, strlen(out)) != 0) {
       nyt_err("ny-fmt", "conv: failed to write %s", o->conv_output);
       rc = 1;
     }
@@ -534,7 +637,7 @@ static int run_align_macros_mode(const FmtOpts *opts) {
     }
     dst[di] = '\0';
     if (block_changed) {
-      if (write_file(files.items[i], dst, di))
+      if (ny_write_file(files.items[i], dst, di) == 0)
         changed++;
     }
     free(dst);
@@ -580,6 +683,9 @@ int ny_fmt_main(int argc, char **argv) {
   if (opts.selftest) {
     sv_free(&opts.paths);
     int rc = cscan_selftest();
+    if (rc != 0)
+      return rc;
+    rc = ny_fmt_ny_selftest();
     if (rc != 0)
       return rc;
     rc = c2ny_selftest();
@@ -673,7 +779,7 @@ int ny_fmt_main(int argc, char **argv) {
     audit_rc = run_audit_simple(&opts.paths, opts.audit_mode, opts.json, opts.limit,
                                 opts.min_sev, opts.types_strict);
 
-  if (opts.optimize && opts.apply) {
+  if (opts.optimize && (opts.apply || opts.diff)) {
     StrVec files = {0};
     if (opts.paths.len == 0) {
       collect_files_rec("src", &files, 1);
@@ -686,12 +792,14 @@ int ny_fmt_main(int argc, char **argv) {
     int changed = 0;
     for (size_t i = 0; i < files.len; i++) {
       int chg = 0;
-      if (format_file(files.items[i], &chg) && chg)
+      int ok = opts.diff ? format_file_diff(files.items[i], &chg, opts.apply)
+                         : format_file(files.items[i], &chg);
+      if (ok && chg)
         changed++;
     }
-    if (opts.diff)
-      nyt_warn("ny-fmt", "optimize --diff is not yet implemented in C mode");
-    nyt_msg("OPT", NYT_GREEN, "applied updates to %d file(s)", changed);
+    nyt_msg("OPT", NYT_GREEN, "%s %d file(s)",
+            opts.diff && !opts.apply ? "previewed" : "applied updates to",
+            changed);
     sv_free(&files);
   }
 

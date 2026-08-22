@@ -1,0 +1,14 @@
+shape oracle_result_list_mutate_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle result list mutation]
+  template ny-test-case
+  flags "--native-result-oracle=42"
+  expect compile_and_run
+  source ny <<'NY'
+mut values = [20]
+values = values.append(22)
+def popped = values.pop()
+values[0] + popped
+NY
+}

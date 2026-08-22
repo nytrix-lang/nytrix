@@ -1,3 +1,7 @@
+/*
+ * In-tree C parser: recursive-descent C header parser for the internal
+ * C frontend, handling typedefs, structs, functions, and macro expansion.
+ */
 #include "code/c/c.h"
 #include <stdint.h>
 #include <stdarg.h>
@@ -106,13 +110,17 @@ int ny_ctype_layout(const ny_ctype_t *ty, const char *abi, ny_c_layout_t *out) {
     base.is_pointer = 1;
     base.is_integer = 1;
   } else if (ty->flags & NY_CTYPEF_INT128) {
-    /* __int128 / unsigned __int128: 16-byte integer regardless of base kind. */
+    /*
+     * __int128 / unsigned __int128: 16-byte integer regardless of base kind.
+     */
     base.size = 16;
     base.align = 16;
     base.is_integer = 1;
   } else if (ty->flags & NY_CTYPEF_COMPLEX) {
-    /* _Complex T is 2 * sizeof(T): complex half = 4, complex float = 8, complex double = 16,
-     * complex long double = 32. Alignment follows the element type. */
+    /*
+     * _Complex T is 2 * sizeof(T): complex half = 4, complex float = 8, complex double = 16,
+     * complex long double = 32. Alignment follows the element type.
+     */
     if (ty->kind == NY_CTYPE_HALF) {
       base.size = 4;
       base.align = 2;
@@ -130,7 +138,9 @@ int ny_ctype_layout(const ny_ctype_t *ty, const char *abi, ny_c_layout_t *out) {
       base.align = ny_c_abi_is_win64(abi) ? 8 : 16;
       base.is_float = 1;
     } else {
-      /* _Complex int/short: 2 * sizeof(integer). */
+      /*
+       * _Complex int/short: 2 * sizeof(integer).
+       */
       base.size = 8;
       base.align = 4;
       base.is_integer = 1;
@@ -298,8 +308,10 @@ static void skip_balanced(ny_parser_t *p, const char *open, const char *close) {
   }
 }
 
-/* P-2 fix: intern a string into stable storage so that tokens from included
- * files survive after free(inc_src). */
+/*
+ * P-2 fix: intern a string into stable storage so that tokens from included
+ * files survive after free(inc_src).
+ */
 static const char *parser_intern(ny_parser_t *p, const char *s, size_t len) {
   if (!p || !s || len == 0)
     return s;
@@ -321,11 +333,13 @@ static const char *parser_intern(ny_parser_t *p, const char *s, size_t len) {
   return dst;
 }
 
-/* Return a stable copy of a token's name bytes. For tokens that originate
+/*
+ * Return a stable copy of a token's name bytes. For tokens that originate
  * from included-file source buffers that will be freed, the returned pointer
  * lives in the parser's intern arena. For tokens already in stable storage
- * (e.g. the main source), this is a no-op. */
-static ny_ctok_t ctok_intern(ny_parser_t *p, ny_ctok_t tok) {
+ * (e.g. the main source), this is a no-op.
+ */
+static __attribute__((unused)) ny_ctok_t ctok_intern(ny_parser_t *p, ny_ctok_t tok) {
   if (tok.kind != NY_CTOK_IDENT || !tok.start || tok.len == 0)
     return tok;
   tok.start = parser_intern(p, tok.start, tok.len);
@@ -376,11 +390,13 @@ static int parse_attribute(ny_parser_t *p, ny_ctype_t *ty) {
         else if (parse_is(p, ")"))
           depth--;
         else if (ty && (parse_kw(p, "packed") || parse_kw(p, "__packed__"))) {
-          /* __attribute__((packed)) is equivalent to #pragma pack(1): it both
+          /*
+           * __attribute__((packed)) is equivalent to #pragma pack(1): it both
            * sets the packed flag (size selection uses packed_size, align=1) and
            * caps every field's alignment to 1 (field offset/storage helpers
            * read aggregate_pack_align). Setting both keeps the two paths in
-           * sync; the size-selection block accepts either signal. */
+           * sync; the size-selection block accepts either signal.
+           */
           ty->flags |= NY_CTYPEF_PACKED;
           ty->aggregate_pack_align = 1;
         }
@@ -393,25 +409,43 @@ static int parse_attribute(ny_parser_t *p, ny_ctype_t *ty) {
           }
           continue;
         } else if (parse_kw(p, "unused") || parse_kw(p, "__unused__")) {
-          /* Recognized, skipped */
+          /*
+           * Recognized, skipped
+           */
         } else if (parse_kw(p, "deprecated") || parse_kw(p, "__deprecated__")) {
-          /* Recognized, skipped */
+          /*
+           * Recognized, skipped
+           */
         } else if (parse_kw(p, "weak") || parse_kw(p, "__weak__")) {
-          /* Recognized, skipped */
+          /*
+           * Recognized, skipped
+           */
         } else if (parse_kw(p, "const") || parse_kw(p, "__const__")) {
-          /* Recognized, skipped */
+          /*
+           * Recognized, skipped
+           */
         } else if (parse_kw(p, "pure") || parse_kw(p, "__pure__")) {
-          /* Recognized, skipped */
+          /*
+           * Recognized, skipped
+           */
         } else if (parse_kw(p, "noreturn") || parse_kw(p, "__noreturn__") ||
                    parse_kw(p, "__NORETURN__")) {
-          /* Recognized, skipped */
+          /*
+           * Recognized, skipped
+           */
         } else if (parse_kw(p, "malloc") || parse_kw(p, "__malloc__")) {
-          /* Recognized, skipped */
+          /*
+           * Recognized, skipped
+           */
         } else if (parse_kw(p, "warn_unused_result") ||
                    parse_kw(p, "__warn_unused_result__")) {
-          /* Recognized, skipped */
+          /*
+           * Recognized, skipped
+           */
         } else if (parse_kw(p, "format") || parse_kw(p, "__format__")) {
-          /* __format__(type, str_idx, first_arg) — skip 3 args */
+          /*
+           * __format__(type, str_idx, first_arg) — skip 3 args
+           */
           if (depth == 2 && parse_accept(p, "(")) {
             depth++;
             while (depth > 2 && p->tok.kind != NY_CTOK_EOF) {
@@ -545,10 +579,12 @@ static int c_type_is_anonymous_aggregate_field(const ny_ctype_t *ty,
          (ty->kind == NY_CTYPE_STRUCT || ty->kind == NY_CTYPE_UNION);
 }
 
-/* Flatten child fields of an anonymous struct/union into the parent.
+/*
+ * Flatten child fields of an anonymous struct/union into the parent.
  * base_offset is where the anonymous aggregate itself starts within the parent.
  * For union parents base_offset is always 0; for struct parents it is the
- * aligned start of the anonymous member. */
+ * aligned start of the anonymous member.
+ */
 static void aggregate_flatten_anonymous(ny_ctype_t *parent,
                                         const ny_ctype_t *anon,
                                         size_t base_offset) {
@@ -586,17 +622,21 @@ static void skip_to_decl_end(ny_parser_t *p) {
   }
 }
 
-/* Forward declarations for statement/expression skipping. */
+/*
+ * Forward declarations for statement/expression skipping.
+ */
 static void skip_expr(ny_parser_t *p);
 static void skip_stmt(ny_parser_t *p);
 static void skip_compound_stmt(ny_parser_t *p);
 static void skip_initializer(ny_parser_t *p);
 
 static void skip_postfix_expr(ny_parser_t *p) {
-  /* Consume the primary expression first: an identifier, number, string, or
+  /*
+   * Consume the primary expression first: an identifier, number, string, or
    * character literal. Without this, an expression that begins with one of
    * these (the common case, e.g. `return a + b;`) left the primary unconsumed
-   * and skip_expr made no progress, hanging the C frontend forever. */
+   * and skip_expr made no progress, hanging the C frontend forever.
+   */
   if (p->tok.kind == NY_CTOK_IDENT || p->tok.kind == NY_CTOK_NUMBER ||
       p->tok.kind == NY_CTOK_STRING || p->tok.kind == NY_CTOK_CHAR) {
     parse_advance(p);
@@ -1069,7 +1109,9 @@ static void parser_forget_define(ny_parser_t *p, const char *name,
     p->define_count--;
     return;
   }
-  /* Also forget string defines. */
+  /*
+   * Also forget string defines.
+   */
   for (unsigned i = 0; i < p->str_define_count; ++i) {
     if (!ctok_is_ident_slice(p->str_define_names[i], name, name_len))
       continue;
@@ -1087,8 +1129,7 @@ static void parser_forget_define(ny_parser_t *p, const char *name,
 static void parser_note_str_define(ny_parser_t *p, const char *name,
                                    size_t name_len, const char *value,
                                    size_t value_len) {
-  if (!p || !name || name_len == 0 || !value || value_len == 0 ||
-      value_len >= 64)
+  if (!p || !name || name_len == 0 || !value || value_len >= 64)
     return;
   for (unsigned i = 0; i < p->str_define_count; ++i) {
     if (ctok_is_ident_slice(p->str_define_names[i], name, name_len)) {
@@ -1408,6 +1449,22 @@ static int macro_lookup_name(ny_parser_t *p, const char *name, size_t name_len,
   return 0;
 }
 
+static int macro_name_is_defined(ny_parser_t *p, const char *name,
+                                 size_t name_len) {
+  if (!p || !name || name_len == 0)
+    return 0;
+  for (unsigned i = 0; i < p->define_count; ++i)
+    if (ctok_is_ident_slice(p->define_names[i], name, name_len))
+      return 1;
+  for (unsigned i = 0; i < p->str_define_count; ++i)
+    if (ctok_is_ident_slice(p->str_define_names[i], name, name_len))
+      return 1;
+  for (unsigned i = 0; i < p->func_macro_count; ++i)
+    if (ctok_is_ident_slice(p->func_macro_names[i], name, name_len))
+      return 1;
+  return 0;
+}
+
 static int macro_parse_expr(ny_parser_t *p, const char *s, size_t n, size_t *i,
                             int64_t *out);
 static int macro_parse_expr_impl(ny_parser_t *p, const char *s, size_t n,
@@ -1481,8 +1538,7 @@ static int macro_parse_primary(ny_parser_t *p, const char *s, size_t n,
           return 0;
         (*i)++;
       }
-      int64_t value = 0;
-      *out = macro_lookup_name(p, s + def_name, def_name_len, &value) ? 1 : 0;
+      *out = macro_name_is_defined(p, s + def_name, def_name_len) ? 1 : 0;
       return 1;
     }
     size_t name_len = *i - name;
@@ -1907,8 +1963,7 @@ static int parser_preproc_ident_defined(ny_parser_t *p, const char *s,
   size_t name = i;
   while (i < n && c_ident_char(s[i]))
     i++;
-  int64_t value = 0;
-  return macro_lookup_name(p, s + name, i - name, &value);
+  return macro_name_is_defined(p, s + name, i - name);
 }
 
 static void parser_push_preproc_cond(ny_parser_t *p, int active) {
@@ -1968,6 +2023,280 @@ static void parser_note_conditional_preproc(ny_parser_t *p, const char *s,
   }
 }
 
+typedef enum {
+  NY_C_INCLUDE_NORMAL = 0,
+  NY_C_INCLUDE_PRAGMA_ONCE = 1,
+  NY_C_INCLUDE_GUARD = 2,
+} ny_c_include_policy_t;
+
+typedef struct {
+  char *path;
+  char *guard;
+  unsigned policy;
+} ny_c_include_cache_entry_t;
+
+typedef struct {
+  ny_c_include_cache_entry_t *entries;
+  size_t len;
+  size_t cap;
+  char **owned_sources;
+  size_t owned_len;
+  size_t owned_cap;
+} ny_c_include_cache_t;
+
+static ny_c_include_policy_t
+parser_header_include_policy(const char *src, size_t len, char *guard_out,
+                             size_t guard_cap) {
+  if (guard_out && guard_cap)
+    guard_out[0] = '\0';
+  if (!src || len == 0)
+    return NY_C_INCLUDE_NORMAL;
+
+  char guard[128] = {0};
+  unsigned state = 0;
+  bool in_block_comment = false;
+  size_t pos = 0;
+  unsigned logical_lines = 0;
+  while (pos < len && logical_lines++ < 64) {
+    size_t end = pos;
+    while (end < len && src[end] != '\n')
+      end++;
+    const char *line = src + pos;
+    size_t n = end - pos;
+    while (n && (*line == ' ' || *line == '\t' || *line == '\r')) {
+      line++;
+      n--;
+    }
+    while (n && (line[n - 1] == ' ' || line[n - 1] == '\t' ||
+                 line[n - 1] == '\r'))
+      n--;
+    pos = end < len ? end + 1 : end;
+
+    if (!n || (n >= 2 && line[0] == '/' && line[1] == '/'))
+      continue;
+
+    /*
+     * License banners commonly precede include guards. Strip leading block
+     * comments, including multi-line ones, without accepting source text.
+     */
+    for (;;) {
+      if (in_block_comment) {
+        const char *close = NULL;
+        for (size_t j = 0; j + 1 < n; ++j) {
+          if (line[j] == '*' && line[j + 1] == '/') {
+            close = line + j + 2;
+            break;
+          }
+        }
+        if (!close) {
+          n = 0;
+          break;
+        }
+        n -= (size_t)(close - line);
+        line = close;
+        in_block_comment = false;
+        while (n && (*line == ' ' || *line == '\t' || *line == '\r')) {
+          line++;
+          n--;
+        }
+        if (!n)
+          break;
+      }
+      if (n >= 2 && line[0] == '/' && line[1] == '*') {
+        const char *close = NULL;
+        for (size_t j = 2; j + 1 < n; ++j) {
+          if (line[j] == '*' && line[j + 1] == '/') {
+            close = line + j + 2;
+            break;
+          }
+        }
+        if (!close) {
+          in_block_comment = true;
+          n = 0;
+          break;
+        }
+        n -= (size_t)(close - line);
+        line = close;
+        while (n && (*line == ' ' || *line == '\t' || *line == '\r')) {
+          line++;
+          n--;
+        }
+        continue;
+      }
+      break;
+    }
+    if (!n)
+      continue;
+    if (line[0] != '#')
+      return NY_C_INCLUDE_NORMAL;
+
+    size_t i = 1;
+    while (i < n && (line[i] == ' ' || line[i] == '\t'))
+      i++;
+    size_t word = i;
+    while (i < n && c_ident_char(line[i]))
+      i++;
+    size_t word_len = i - word;
+    while (i < n && (line[i] == ' ' || line[i] == '\t'))
+      i++;
+
+    if (word_len == 6 && !strncmp(line + word, "pragma", 6)) {
+      if (i + 4 <= n && !strncmp(line + i, "once", 4) &&
+          (i + 4 == n || !c_ident_char(line[i + 4])))
+        return NY_C_INCLUDE_PRAGMA_ONCE;
+      if (state == 0)
+        continue;
+    }
+
+    if (state == 0 && word_len == 6 && !strncmp(line + word, "ifndef", 6)) {
+      size_t start = i;
+      if (start >= n || !c_ident_start_char(line[start]))
+        return NY_C_INCLUDE_NORMAL;
+      while (i < n && c_ident_char(line[i]))
+        i++;
+      size_t glen = i - start;
+      if (glen == 0 || glen >= sizeof(guard))
+        return NY_C_INCLUDE_NORMAL;
+      memcpy(guard, line + start, glen);
+      guard[glen] = '\0';
+      state = 1;
+      continue;
+    }
+
+    if (state == 1 && word_len == 6 && !strncmp(line + word, "define", 6)) {
+      size_t start = i;
+      while (i < n && c_ident_char(line[i]))
+        i++;
+      size_t glen = i - start;
+      if (glen != strlen(guard) || strncmp(line + start, guard, glen))
+        return NY_C_INCLUDE_NORMAL;
+      if (guard_out && guard_cap) {
+        size_t copy = glen < guard_cap - 1 ? glen : guard_cap - 1;
+        memcpy(guard_out, guard, copy);
+        guard_out[copy] = '\0';
+      }
+      return NY_C_INCLUDE_GUARD;
+    }
+
+    return NY_C_INCLUDE_NORMAL;
+  }
+  return NY_C_INCLUDE_NORMAL;
+}
+
+static ny_c_include_cache_t *parser_include_cache(ny_parser_t *p, bool create) {
+  if (!p)
+    return NULL;
+  if (!p->include_cache && create) {
+    ny_c_include_cache_t *cache = calloc(1, sizeof(*cache));
+    if (cache) {
+      p->include_cache = cache;
+      p->include_cache_owner = 1;
+    }
+  }
+  return (ny_c_include_cache_t *)p->include_cache;
+}
+
+static bool parser_include_cache_should_skip(ny_parser_t *p, const char *path) {
+  ny_c_include_cache_t *cache = parser_include_cache(p, false);
+  if (!cache || !path)
+    return false;
+  for (size_t i = 0; i < cache->len; ++i) {
+    ny_c_include_cache_entry_t *entry = &cache->entries[i];
+    if (strcmp(entry->path, path))
+      continue;
+    if (entry->policy == NY_C_INCLUDE_PRAGMA_ONCE)
+      return true;
+    if (entry->policy == NY_C_INCLUDE_GUARD && entry->guard)
+      return macro_name_is_defined(p, entry->guard, strlen(entry->guard));
+  }
+  return false;
+}
+
+static bool parser_include_cache_note(ny_parser_t *p, const char *path,
+                                      ny_c_include_policy_t policy,
+                                      const char *guard) {
+  if (!p || !path || policy == NY_C_INCLUDE_NORMAL)
+    return true;
+  ny_c_include_cache_t *cache = parser_include_cache(p, true);
+  if (!cache)
+    return false;
+  for (size_t i = 0; i < cache->len; ++i) {
+    if (!strcmp(cache->entries[i].path, path)) {
+      cache->entries[i].policy = (unsigned)policy;
+      if (policy == NY_C_INCLUDE_GUARD && guard && !cache->entries[i].guard) {
+        size_t n = strlen(guard) + 1;
+        cache->entries[i].guard = malloc(n);
+        if (!cache->entries[i].guard)
+          return false;
+        memcpy(cache->entries[i].guard, guard, n);
+      }
+      return true;
+    }
+  }
+  if (cache->len == cache->cap) {
+    size_t next = cache->cap ? cache->cap * 2 : 64;
+    ny_c_include_cache_entry_t *entries =
+        realloc(cache->entries, next * sizeof(*entries));
+    if (!entries)
+      return false;
+    cache->entries = entries;
+    cache->cap = next;
+  }
+  size_t pn = strlen(path) + 1;
+  char *path_copy = malloc(pn);
+  char *guard_copy = NULL;
+  if (!path_copy)
+    return false;
+  memcpy(path_copy, path, pn);
+  if (policy == NY_C_INCLUDE_GUARD && guard) {
+    size_t gn = strlen(guard) + 1;
+    guard_copy = malloc(gn);
+    if (!guard_copy) {
+      free(path_copy);
+      return false;
+    }
+    memcpy(guard_copy, guard, gn);
+  }
+  cache->entries[cache->len++] = (ny_c_include_cache_entry_t){
+      .path = path_copy, .guard = guard_copy, .policy = (unsigned)policy};
+  return true;
+}
+
+static bool parser_include_cache_own_source(ny_parser_t *p, char *source) {
+  if (!p || !source)
+    return false;
+  ny_c_include_cache_t *cache = parser_include_cache(p, true);
+  if (!cache)
+    return false;
+  if (cache->owned_len == cache->owned_cap) {
+    size_t next = cache->owned_cap ? cache->owned_cap * 2 : 64;
+    char **owned = realloc(cache->owned_sources, next * sizeof(*owned));
+    if (!owned)
+      return false;
+    cache->owned_sources = owned;
+    cache->owned_cap = next;
+  }
+  cache->owned_sources[cache->owned_len++] = source;
+  return true;
+}
+
+static void parser_include_cache_free(ny_parser_t *p) {
+  if (!p || !p->include_cache || !p->include_cache_owner)
+    return;
+  ny_c_include_cache_t *cache = (ny_c_include_cache_t *)p->include_cache;
+  for (size_t i = 0; i < cache->len; ++i) {
+    free(cache->entries[i].path);
+    free(cache->entries[i].guard);
+  }
+  for (size_t i = 0; i < cache->owned_len; ++i)
+    free(cache->owned_sources[i]);
+  free(cache->owned_sources);
+  free(cache->entries);
+  free(cache);
+  p->include_cache = NULL;
+  p->include_cache_owner = 0;
+}
+
 static void parser_note_preproc(ny_parser_t *p, ny_ctok_t tok) {
   if (!p || tok.kind != NY_CTOK_PREPROC || !tok.start || tok.len == 0)
     return;
@@ -2021,73 +2350,118 @@ static void parser_note_preproc(ny_parser_t *p, ny_ctok_t tok) {
       }
       if (path_len > 0) {
         char path_buf[4096];
+        int path_written;
         if (!is_sys && p->source_dir && path_start[0] != '/') {
-          snprintf(path_buf, sizeof(path_buf), "%s/%.*s",
-                   p->source_dir, (int)path_len, path_start);
+          path_written = snprintf(path_buf, sizeof(path_buf), "%s/%.*s",
+                                  p->source_dir, (int)path_len, path_start);
         } else {
-          snprintf(path_buf, sizeof(path_buf), "%.*s", (int)path_len, path_start);
+          path_written = snprintf(path_buf, sizeof(path_buf), "%.*s",
+                                  (int)path_len, path_start);
         }
+        if (path_written < 0 || (size_t)path_written >= sizeof(path_buf))
+          return;
+        if (parser_include_cache_should_skip(p, path_buf))
+          return;
         char *inc_src = p->include_read(path_buf, is_sys, p->include_userdata);
         if (inc_src) {
-          /* Skip large transitive includes — let libclang handle them.
-           * The nytrix frontend is too slow for deep include trees. */
           size_t inc_size = strlen(inc_src);
-          if (inc_size > 32768) {
+          char guard[128] = {0};
+          ny_c_include_policy_t policy =
+              parser_header_include_policy(inc_src, inc_size, guard, sizeof(guard));
+          /*
+           * Register include-once metadata before descending. #pragma once can
+           * break cycles immediately; conventional guards become skippable as
+           * soon as their #define is processed by the shared macro state.
+           */
+          if (!parser_include_cache_note(p, path_buf, policy, guard) ||
+              !parser_include_cache_own_source(p, inc_src)) {
             free(inc_src);
-            goto skip_include;
+            if (!p->fatal_error) {
+              snprintf(p->error, sizeof(p->error),
+                       "include cache allocation failed");
+              p->fatal_error = 1;
+            }
+            return;
           }
-          ny_parser_t inc_p;
-          ny_parse_init_abi(&inc_p, inc_src, inc_size, p->abi);
-          inc_p.deadline_ns = p->deadline_ns;
-          inc_p.token_limit = p->token_limit;
-          inc_p.token_count = p->token_count;
-          inc_p.include_read = p->include_read;
-          inc_p.include_userdata = p->include_userdata;
-          inc_p.source_file = path_buf;
+
+          /*
+           * ny_parser_t is intentionally large (~10 MiB with the current
+           * typedef tables). Reuse it for includes and save only the active
+           * lexer/source cursor, rather than allocating one full parser per
+           * transitive include depth. Macro/type/tag state is correctly shared
+           * across the include boundary as a side effect.
+           */
+          ny_lexer_t parent_lx = p->lx;
+          ny_ctok_t parent_tok = p->tok;
+          const char *parent_file = p->source_file;
+          const char *parent_dir = p->source_dir;
+          unsigned parent_include_depth = p->include_depth;
+          unsigned parent_pp_depth = p->pp_depth;
+          unsigned parent_pp_parent[NY_C_MAX_COND_STACK];
+          unsigned parent_pp_taken[NY_C_MAX_COND_STACK];
+          unsigned parent_pp_active[NY_C_MAX_COND_STACK];
+          memcpy(parent_pp_parent, p->pp_parent_active, sizeof(parent_pp_parent));
+          memcpy(parent_pp_taken, p->pp_branch_taken, sizeof(parent_pp_taken));
+          memcpy(parent_pp_active, p->pp_active, sizeof(parent_pp_active));
+          unsigned parent_skip_expr_depth = p->skip_expr_depth;
+          unsigned parent_macro_expr_depth = p->macro_expr_depth;
+          unsigned parent_array_expr_depth = p->array_expr_depth;
+
+          p->source_file = path_buf;
+          char dir_buf[4096];
+          p->source_dir = NULL;
           const char *slash = strrchr(path_buf, '/');
           if (slash) {
-            static char dir_buf[4096];
             size_t dlen = (size_t)(slash - path_buf);
             if (dlen < sizeof(dir_buf)) {
               memcpy(dir_buf, path_buf, dlen);
               dir_buf[dlen] = '\0';
-              inc_p.source_dir = dir_buf;
+              p->source_dir = dir_buf;
             }
           }
-          inc_p.include_depth = p->include_depth + 1;
-          while (inc_p.tok.kind != NY_CTOK_EOF) {
-            ny_cdecl_t inc_decl;
-            int rc = ny_parse_decl(&inc_p, &inc_decl);
-            if (rc > 0) {
-              if (inc_decl.kind == NY_CDECL_TYPEDEF &&
-                  inc_decl.name.kind == NY_CTOK_IDENT &&
-                  p->typedef_count < NY_C_MAX_TYPEDEFS) {
-                parser_note_typedef(p, ctok_intern(p, inc_decl.name),
-                                    &inc_decl.type);
-              }
-              if ((inc_decl.type.kind == NY_CTYPE_STRUCT ||
-                   inc_decl.type.kind == NY_CTYPE_UNION ||
-                   inc_decl.type.kind == NY_CTYPE_ENUM) &&
-                  inc_decl.type.name.kind == NY_CTOK_IDENT &&
-                  p->tag_count < NY_C_MAX_TAGS) {
-                parser_note_tag(p, ctok_intern(p, inc_decl.type.name),
-                                &inc_decl.type);
-              }
-              if (inc_decl.type.aggregate_has_layout &&
-                  p->tag_count < NY_C_MAX_TAGS &&
-                  inc_decl.type.name.kind == NY_CTOK_IDENT) {
-                parser_note_tag(p, ctok_intern(p, inc_decl.type.name),
-                                &inc_decl.type);
-              }
-            } else if (rc < 0) {
-              continue;
-            } else {
-              break;
+          p->include_depth = parent_include_depth + 1;
+          /*
+           * Conditional groups cannot legally cross include-file boundaries.
+           */
+          p->pp_depth = 0;
+          p->skip_expr_depth = 0;
+          p->macro_expr_depth = 0;
+          p->array_expr_depth = 0;
+          ny_lex_init(&p->lx, inc_src, inc_size);
+          p->tok = ny_lex_next(&p->lx);
+
+          ny_cdecl_t *inc_decl = malloc(sizeof(*inc_decl));
+          if (!inc_decl) {
+            if (!p->fatal_error) {
+              snprintf(p->error, sizeof(p->error),
+                       "include declaration allocation failed");
+              p->fatal_error = 1;
             }
+          } else {
+            while (p->tok.kind != NY_CTOK_EOF && !p->fatal_error) {
+              int rc = ny_parse_decl(p, inc_decl);
+              if (rc == 0)
+                break;
+              /*
+               * rc < 0 is recoverable: ny_parse_decl has advanced or set an
+               * error, matching top-level parser behavior.
+               */
+            }
+            free(inc_decl);
           }
-          free(inc_src);
-          p->token_count = inc_p.token_count;
-        skip_include:;
+
+          p->lx = parent_lx;
+          p->tok = parent_tok;
+          p->source_file = parent_file;
+          p->source_dir = parent_dir;
+          p->include_depth = parent_include_depth;
+          p->pp_depth = parent_pp_depth;
+          memcpy(p->pp_parent_active, parent_pp_parent, sizeof(parent_pp_parent));
+          memcpy(p->pp_branch_taken, parent_pp_taken, sizeof(parent_pp_taken));
+          memcpy(p->pp_active, parent_pp_active, sizeof(parent_pp_active));
+          p->skip_expr_depth = parent_skip_expr_depth;
+          p->macro_expr_depth = parent_macro_expr_depth;
+          p->array_expr_depth = parent_array_expr_depth;
         }
       }
     }
@@ -2149,9 +2523,11 @@ static void parser_note_preproc(ny_parser_t *p, ny_ctok_t tok) {
     if (parser_eval_define_value(p, s, n, i, &value)) {
       parser_note_define(p, s + name, name_len, value);
     } else {
-      /* Non-integer define: store the body as a string define if it's a
+      /*
+       * Non-integer define: store the body as a string define if it's a
        * storage-class keyword or a simple identifier. This handles macros
-       * like `#define CURL_EXTERN extern` or `#define CURL_EXTERN static`. */
+       * like `#define CURL_EXTERN extern` or `#define CURL_EXTERN static`.
+       */
       const char *body = s + i;
       size_t body_len = n - i;
       while (body_len > 0 && (body[body_len - 1] == ' ' ||
@@ -2159,9 +2535,8 @@ static void parser_note_preproc(ny_parser_t *p, ny_ctok_t tok) {
                                body[body_len - 1] == '\n' ||
                                body[body_len - 1] == '\r'))
         body_len--;
-      if (body_len > 0 && body_len < 64) {
+      if (body_len < 64)
         parser_note_str_define(p, s + name, name_len, body, body_len);
-      }
     }
   } else if (word_len == 5 && strncmp(s + word, "undef", 5) == 0) {
     if (i >= n || !c_ident_start_char(s[i]))
@@ -2352,7 +2727,9 @@ static int type_qual(ny_parser_t *p, ny_ctype_t *ty) {
 }
 
 static int parse_storage(ny_parser_t *p, ny_cdecl_t *decl) {
-  /* Expand string macros for storage-class keywords (e.g. CURL_EXTERN). */
+  /*
+   * Expand string macros for storage-class keywords (e.g. CURL_EXTERN).
+   */
   if (p->tok.kind == NY_CTOK_IDENT) {
     const char *macro = parser_lookup_str_define(p, p->tok);
     if (macro) {
@@ -2372,7 +2749,9 @@ static int parse_storage(ny_parser_t *p, ny_cdecl_t *decl) {
         parse_advance(p);
         return 1;
       }
-      /* Other string macros (e.g. __declspec(dllexport)): skip and continue. */
+      /*
+       * Other string macros (e.g. __declspec(dllexport)): skip and continue.
+       */
       parse_advance(p);
       return 1;
     }
@@ -2431,7 +2810,9 @@ static int parse_enum_body(ny_parser_t *p, ny_ctype_t *ty) {
         skip_balanced(p, "{", "}");
         return 1;
       }
-      /* Check if the value is negative (was written as a negative literal). */
+      /*
+       * Check if the value is negative (was written as a negative literal).
+       */
       if (p->tok.start && p->tok.start > name.start && p->tok.start[-1] == '-')
         has_negative = 1;
     }
@@ -2445,8 +2826,10 @@ static int parse_enum_body(ny_parser_t *p, ny_ctype_t *ty) {
   if (!parse_accept(p, "}"))
     return parse_errorf(p, "expected '}' after C enum body at %u:%u",
                         p->tok.line, p->tok.col);
-  /* Determine enum underlying type from max value. C enums are int by default,
-   * but can be unsigned int, long, or unsigned long for large values. */
+  /*
+   * Determine enum underlying type from max value. C enums are int by default,
+   * but can be unsigned int, long, or unsigned long for large values.
+   */
   if (ty && ty->kind == NY_CTYPE_ENUM) {
     if (has_negative || max_value <= 0x7FFFFFFF)
       ty->enum_underlying = 0; /* int */
@@ -2530,7 +2913,9 @@ static int parse_tag_body(ny_parser_t *p, ny_ctype_t *ty) {
               bitfield_used_bits = 0;
             }
             bitfield_used_bits += width;
-            /* L-4: Record named bitfield fields so they appear in the layout. */
+            /*
+             * L-4: Record named bitfield fields so they appear in the layout.
+             */
             if (field_name.kind == NY_CTOK_IDENT) {
               aggregate_note_field(ty, field_name, &field_ty, &field_layout,
                                    aggregate_field_offset(ty, &field_layout,
@@ -2539,9 +2924,11 @@ static int parse_tag_body(ny_parser_t *p, ny_ctype_t *ty) {
                                    width);
             }
           } else if (ty->kind == NY_CTYPE_STRUCT) {
-            /* Zero-width unnamed bitfield: pad size to the next boundary of
-               the storage type, but do NOT increase struct alignment.
-               E.g. struct { char x; int : 0; } → sizeof=4, alignof=1. */
+            /*
+             * Zero-width unnamed bitfield: pad size to the next boundary of
+             * the storage type, but do NOT increase struct alignment.
+             * E.g. struct { char x; int : 0; } → sizeof=4, alignof=1.
+             */
             size_t storage_align = field_layout.align > 0 ? field_layout.align : 1;
             size = ny_c_align_up(size, storage_align);
             bitfield_unit_bits = 0;
@@ -3461,18 +3848,26 @@ static int parse_non_import_decl(ny_parser_t *p) {
   if (parse_kw(p, "_Static_assert") || parse_kw(p, "static_assert")) {
     parse_advance(p);
     if (parse_is(p, "(")) {
-      /* _Static_assert(expr, "msg"): evaluate expr and fail if 0. */
+      /*
+       * _Static_assert(expr, "msg"): evaluate expr and fail if 0.
+       */
       const char *expr_start = NULL;
       size_t expr_len = 0;
       const char *msg_str = NULL;
       size_t msg_len = 0;
-      /* Save position before the '(' */
+      /*
+       * Save position before the '('
+       */
       ny_ctok_t open_tok = p->tok;
       skip_balanced(p, "(", ")");
-      /* Now extract the text between parens from the source */
+      /*
+       * Now extract the text between parens from the source
+       */
       if (open_tok.start && open_tok.len == 1) {
         const char *src = open_tok.start + 1; /* skip '(' */
-        /* Find the matching ')' by counting parens */
+        /*
+         * Find the matching ')' by counting parens
+         */
         int depth = 1;
         const char *end = src;
         while (*end && depth > 0) {
@@ -3481,7 +3876,9 @@ static int parse_non_import_decl(ny_parser_t *p) {
           if (depth > 0) end++;
         }
         size_t inner_len = (size_t)(end - src);
-        /* Find the last comma to split expr from message */
+        /*
+         * Find the last comma to split expr from message
+         */
         const char *last_comma = NULL;
         {
           int d = 0;
@@ -3495,7 +3892,9 @@ static int parse_non_import_decl(ny_parser_t *p) {
         if (last_comma) {
           expr_start = src;
           expr_len = (size_t)(last_comma - src);
-          /* Skip whitespace after comma to find message string */
+          /*
+           * Skip whitespace after comma to find message string
+           */
           const char *mp = last_comma + 1;
           while (mp < end && (*mp == ' ' || *mp == '\t'))
             mp++;
@@ -3512,7 +3911,9 @@ static int parse_non_import_decl(ny_parser_t *p) {
             }
           }
         } else {
-          /* Single-arg form: _Static_assert(expr) */
+          /*
+           * Single-arg form: _Static_assert(expr)
+           */
           expr_start = src;
           expr_len = inner_len;
         }
@@ -3548,11 +3949,15 @@ static int parse_non_import_decl(ny_parser_t *p) {
 static void parser_seed_predefined_macros(ny_parser_t *p) {
   if (!p)
     return;
-  /* Standard compliance */
+  /*
+   * Standard compliance
+   */
   parser_note_define(p, "__STDC__", 7, 1);
   parser_note_define(p, "__STDC_VERSION__", 16, 201710L);
   parser_note_define(p, "__STDC_HOSTED__", 15, 1);
-  /* Platform detection (linux x86-64) */
+  /*
+   * Platform detection (linux x86-64)
+   */
 #ifdef __linux__
   parser_note_define(p, "__linux__", 9, 1);
   parser_note_define(p, "linux", 5, 1);
@@ -3587,7 +3992,9 @@ static void parser_seed_predefined_macros(ny_parser_t *p) {
   parser_note_define(p, "__unix__", 8, 1);
   parser_note_define(p, "__unix", 6, 1);
   parser_note_define(p, "unix", 4, 1);
-  /* GCC compatibility */
+  /*
+   * GCC compatibility
+   */
   parser_note_define(p, "__GNUC__", 8, 4);
   parser_note_define(p, "__GNUC_MINOR__", 14, 2);
   parser_note_define(p, "__GNUC_PATCHLEVEL__", 20, 0);
@@ -3616,6 +4023,7 @@ void ny_parse_cleanup(ny_parser_t *p) {
   p->intern_buf = NULL;
   p->intern_len = 0;
   p->intern_cap = 0;
+  parser_include_cache_free(p);
 }
 
 int ny_parse_decl(ny_parser_t *p, ny_cdecl_t *out) {
@@ -3756,7 +4164,9 @@ static void ny_c_preproc_note_define_summary(ny_parser_t *p, const char *src,
   size_t name_len = i - name;
   if (i < line_end && src[i] == '(') {
     summary->function_like_define_lines++;
-    /* function-like macros are noted but not expanded by internal frontend yet */
+    /*
+     * function-like macros are noted but not expanded by internal frontend yet
+     */
     return;
   }
   summary->object_like_define_lines++;
@@ -3925,10 +4335,12 @@ int ny_parse_header_summary(const char *src, size_t len,
     }
     break;
   summary_next:
-    /* Stall guard: if ny_parse_decl returned without advancing the lexer
+    /*
+     * Stall guard: if ny_parse_decl returned without advancing the lexer
      * (e.g. pathological macro expansion that never consumes input), force a
      * single token of progress and mark the declaration unsupported so the
-     * header falls back to libclang instead of looping forever. */
+     * header falls back to libclang instead of looping forever.
+     */
     if (p.tok.kind != NY_CTOK_EOF && p.tok.start == stall_pos) {
       parse_advance(&p);
       local.unsupported++;

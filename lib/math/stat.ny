@@ -54,7 +54,7 @@ fn mode(seq xs) any {
 }
 
 fn variance(seq xs, bool sample=true) f64 {
-   "Returns the variance of a sequence. sample=true computes sample variance (N-1)."
+   "Returns the variance of a sequence. sample=true computes sample variance(N-1)."
    def n = len(xs)
    if n <= 1 { return 0.0 }
    def m = mean(xs)
@@ -100,7 +100,7 @@ fn corr(seq xs, seq ys) f64 {
 }
 
 fn quantile(seq xs, f64 q) f64 {
-   "Returns the q-th quantile (0.0 to 1.0) using linear interpolation."
+   "Returns the q-th quantile(0.0 to 1.0) using linear interpolation."
    def n = len(xs)
    if n == 0 { return 0.0 }
    if n == 1 { return float(xs.get(0)) }
@@ -115,7 +115,7 @@ fn quantile(seq xs, f64 q) f64 {
 }
 
 fn zscore(seq xs) list {
-   "Standardize sequence elements to z-scores (val - mean)/stddev."
+   "Standardize sequence elements to z-scores(val - mean)/stddev."
    def m = mean(xs)
    def sd = stddev(xs, true)
    def n = len(xs)
@@ -154,20 +154,15 @@ fn describe(seq xs) dict {
    assert_eq(median(data), 30.0, "median of [10..50]")
    assert_eq(variance(data, true), 250.0, "sample variance of [10..50]")
    assert(stddev(data, true) > 15.8 && stddev(data, true) < 15.9, "stddev of [10..50]")
-
    def even_data = [1, 2, 3, 4]
    assert_eq(median(even_data), 2.5, "median of even length sequence")
-
    def modes = [1, 2, 2, 3, 3, 3, 4]
    assert_eq(mode(modes), 3, "mode of sequence")
-
    def x = [1, 2, 3, 4, 5]
    def y = [2, 4, 6, 8, 10]
    assert(corr(x, y) > 0.999, "perfect positive linear correlation")
-
    def stats = describe(data)
    assert_eq(stats.get("count"), 5, "describe count")
    assert_eq(stats.get("mean"), 30.0, "describe mean")
-
    print("✓ std.math.stat self-test passed")
 }

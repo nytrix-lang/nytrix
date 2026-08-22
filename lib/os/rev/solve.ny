@@ -103,8 +103,8 @@ fn _bit_sliced_window_has_reg_imm(list rows, int lo, int hi, str mnemonic, str r
    while i < end {
       def r = rows[i]
       if r.get("mnemonic", "") == mnemonic &&
-         _bit_sliced_same_reg(_bit_sliced_row_arg(r, 0), reg) &&
-         _bit_sliced_arg_is_imm(r, 1, imm) {
+      _bit_sliced_same_reg(_bit_sliced_row_arg(r, 0), reg) &&
+      _bit_sliced_arg_is_imm(r, 1, imm) {
          return true
       }
       i += 1
@@ -179,7 +179,7 @@ fn _bit_sliced_mapper_candidate_at(list rows, int row, int store_row) dict {
    _bit_sliced_window_has_imm(rows, row + 1, min(store_row, row + 16), "sar", 5) &&
    _bit_sliced_window_has_mnemonic(rows, row + 1, min(store_row, row + 80), "imul") &&
    (_bit_sliced_window_has_const(rows, row + 1, min(store_row, row + 96), "0x39") ||
-   _bit_sliced_window_has_const(rows, row + 1, min(store_row, row + 96), "0x40"))
+      _bit_sliced_window_has_const(rows, row + 1, min(store_row, row + 96), "0x40"))
    if branchless_window {
       score += 4
       if mode == "candidate" { mode = "branchless-ascii-window" }
@@ -203,8 +203,8 @@ fn _bit_sliced_best_mapper_candidate(list candidates) dict {
    while i < candidates.len {
       def cand = candidates[i]
       if best.len == 0 ||
-         int(cand.get("score", 0)) > int(best.get("score", 0)) ||
-         (int(cand.get("score", 0)) == int(best.get("score", 0)) &&
+      int(cand.get("score", 0)) > int(best.get("score", 0)) ||
+      (int(cand.get("score", 0)) == int(best.get("score", 0)) &&
          int(cand.get("row", -1)) > int(best.get("row", -1))) {
          best = cand
       }
@@ -374,7 +374,7 @@ fn _bit_sliced_compact_output_writes(dict summary, bool include_raw=false) dict 
             "src": rec.get("src", ""),
             "dst": rec.get("dst", ""),
             "mapper": _bit_sliced_compact_mapper(rec.get("mapper", dict())),
-      })
+         })
       i += 1
    }
    {
@@ -529,7 +529,7 @@ fn solve_input_eq(str target, any opts=dict()) dict {
    "Solve a decompiler-reduced direct input equality predicate."
    _sat_result("input_equality", target,
       [{"op": "eq", "target": "input", "value": target, "count": target.len}],
-   {"proof": "literal-equality"})
+      {"proof": "literal-equality"})
 }
 
 fn _hex_digit(int c) int {
@@ -768,11 +768,11 @@ fn solve_parse_int_eq(int value, int base=10, any opts=dict()) dict {
    def input = _int_to_base(value, base)
    _sat_result("parse_int_equality", input,
       [{"op": "parse_int_eq", "target": "input", "base": base, "value": value}],
-   {"proof": "integer-format-equality"})
+      {"proof": "integer-format-equality"})
 }
 
 fn _extract_startswith_input(str text) dict {
-   if(_find_from(text, "between(", 0) >= 0 || _find_from(text, "envp.", 0) >= 0 || _find_from(text, "fs.read(", 0) >= 0){
+   if _find_from(text, "between(", 0) >= 0 || _find_from(text, "envp.", 0) >= 0 || _find_from(text, "fs.read(", 0) >= 0 {
       return {"ok": false, "reason": "predicate has external conditions"}
    }
    def direct = "startswith(input,"
@@ -807,7 +807,7 @@ fn solve_startswith(str prefix, any opts=dict()) dict {
    "Solve `startswith(input, prefix)` by returning the shortest accepted witness."
    _sat_result("startswith_input", prefix,
       [{"op": "startswith", "target": "input", "prefix": prefix}],
-   {"proof": "prefix-witness"})
+      {"proof": "prefix-witness"})
 }
 
 fn _tz_for_local_hour(int hour) str {
@@ -825,7 +825,7 @@ fn _tz_for_local_hour(int hour) str {
 }
 
 fn _extract_time_window_startswith(str text) dict {
-   if(_find_from(text, "between(", 0) < 0){ return {"ok": false} }
+   if _find_from(text, "between(", 0) < 0 { return {"ok": false} }
    def direct = "startswith(input,"
    def dpos = _find_from(text, direct, 0)
    if dpos < 0 { return {"ok": false} }
@@ -852,7 +852,7 @@ fn solve_time_window_startswith(str prefix, int lo, int hi, any opts=dict()) dic
    out = out.set("constraints", [
          {"op": "startswith", "target": "input", "prefix": prefix},
          {"op": "time_between", "symbol": "hour", "lo": lo, "hi": hi, "chosen": target_hour},
-   ])
+      ])
    out = out.set("kind", "time_window_startswith")
    out.set("proof", "prefix-plus-timezone-witness")
 }
@@ -880,7 +880,7 @@ fn solve_fs_read_startswith(str prefix, any opts=dict()) dict {
    def content = prefix
    _sat_result("fs_read_startswith", "",
       [{"op": "fs.read.startswith", "path": path, "prefix": prefix, "read_len": int(o.get("read_len", prefix.len))}],
-   {"proof": "file-prefix-witness"}).set("args", [path]).set("files", [{"path": path, "content": content}])
+      {"proof": "file-prefix-witness"}).set("args", [path]).set("files", [{"path": path, "content": content}])
 }
 
 fn _regex_class_witness(str body) dict {
@@ -987,7 +987,7 @@ fn _regex_witness(str pattern) dict {
 }
 
 fn _extract_regex_accepts_input(str text) dict {
-   if(_find_from(text, "between(", 0) >= 0 || _find_from(text, "envp.", 0) >= 0 || _find_from(text, "fs.read(", 0) >= 0){
+   if _find_from(text, "between(", 0) >= 0 || _find_from(text, "envp.", 0) >= 0 || _find_from(text, "fs.read(", 0) >= 0 {
       return {"ok": false}
    }
    def needle = "regex_accepts(input, \""
@@ -1003,11 +1003,11 @@ fn solve_regex_accepts(str pattern, any opts=dict()) dict {
    def w = _regex_witness(pattern)
    if !w.get("ok", false) {
       return _fail_result("regex_accepts", "unknown", "unsupported regex subset",
-      [{"op": "regex_accepts", "pattern": pattern}], opts)
+         [{"op": "regex_accepts", "pattern": pattern}], opts)
    }
    _sat_result("regex_accepts", w.get("value", ""),
       [{"op": "regex_accepts", "pattern": pattern}],
-   {"proof": "constructive-regex-subset-witness"})
+      {"proof": "constructive-regex-subset-witness"})
 }
 
 fn _trim_identifier(str text) str {
@@ -1096,12 +1096,12 @@ fn solve_read_int_chars_eq(str target, any opts=dict()) dict {
    def n = int(opts.get("count", target.len))
    if n > 0 && n != target.len {
       return _fail_result("read_int_chars_equality", "unknown", "target length does not match read_ints count",
-      [{"op": "chars_eq", "target": target, "count": n}], opts)
+         [{"op": "chars_eq", "target": target, "count": n}], opts)
    }
    def input = _decimal_lines_for_bytes(target)
    _sat_result("read_int_chars_equality", input,
       [{"op": "read_ints", "count": target.len}, {"op": "chars_eq", "target": target}],
-   {"proof": "constructive-decimal-byte-vector"})
+      {"proof": "constructive-decimal-byte-vector"})
 }
 
 fn _extract_stdin_reads(str text) list {
@@ -1213,13 +1213,13 @@ fn solve_stdin_read_literal_eq(str value, list reads, int target_index, any opts
    }
    _sat_result("stdin_read_literal_equality", input,
       [{"op": "stdin.read.sequence", "reads": reads}, {"op": "eq", "target": reads[target_index].get("name", ""), "value": value}],
-   {"proof": "constructive-fixed-stdin-read-sequence"})
+      {"proof": "constructive-fixed-stdin-read-sequence"})
 }
 
 fn _extract_stdin_read_line_palindrome(str text) dict {
    def needle = "stdin.read_line("
    def pos = _find_from(text, needle, 0)
-   if(pos < 0 || _find_from(text, "is_palindrome(", 0) < 0){ return {"ok": false} }
+   if pos < 0 || _find_from(text, "is_palindrome(", 0) < 0 { return {"ok": false} }
    def start = _line_start(text, pos)
    def eq = _find_from(text, "=", start)
    if eq < 0 || eq > pos { return {"ok": false} }
@@ -1234,7 +1234,7 @@ fn solve_stdin_read_line_palindrome(any opts=dict()) dict {
    "Solve `input = stdin.read_line(...); is_palindrome(input)` with a short line witness."
    _sat_result("stdin_read_line_palindrome", "aba\n",
       [{"op": "stdin.read_line"}, {"op": "is_palindrome", "value": "aba"}],
-   {"proof": "constructive-palindrome-line-witness"})
+      {"proof": "constructive-palindrome-line-witness"})
 }
 
 fn _has_all(str text, list needles) bool {
@@ -1278,11 +1278,11 @@ fn solve_product_key_arithmetic(str name="product_key", any opts=dict()) dict {
    def input = _product_key_arithmetic_candidate()
    _sat_result("product_key_arithmetic", input,
       [{"op": "product_key_arithmetic", "target": name, "len": 16}],
-   {"proof": "constructive-product-key-byte-constraints"})
+      {"proof": "constructive-product-key-byte-constraints"})
 }
 
 fn _extract_digit_prefix_sum(str text) dict {
-   if(_find_from(text, "between(", 0) >= 0 || _find_from(text, "fs.read(", 0) >= 0){
+   if _find_from(text, "between(", 0) >= 0 || _find_from(text, "fs.read(", 0) >= 0 {
       return {"ok": false, "reason": "predicate has external conditions"}
    }
    def needle = "digit_prefix_sum_reaches(input,"
@@ -1333,11 +1333,11 @@ fn solve_digit_prefix_sum_reaches(int target, bool even_int=false, any opts=dict
    def input = even_int ? _digits_for_sum_even_int(target) : _digits_for_sum(target)
    if input.len == 0 {
       return _fail_result("digit_prefix_sum", "unknown", "could not construct a decimal witness",
-      [{"op": "digit_prefix_sum_reaches", "target": target, "even_int": even_int}], opts)
+         [{"op": "digit_prefix_sum_reaches", "target": target, "even_int": even_int}], opts)
    }
    _sat_result("digit_prefix_sum", input,
       [{"op": "digit_prefix_sum_reaches", "target": target}, {"op": "int_even", "enabled": even_int}],
-   {"proof": "constructive-decimal-digit-sum"})
+      {"proof": "constructive-decimal-digit-sum"})
 }
 
 fn _extract_cpuid_vendor_input_eq(str text, any opts) dict {
@@ -1444,7 +1444,7 @@ fn _extract_segment_mods(str text) list {
             "end": int(end_rec.get("value", 0)),
             "mod": int(mod_rec.get("value", 1)),
             "rem": int(rem_rec.get("value", 0)),
-      })
+         })
       pos = rem_rec.get("end", hit + 1)
    }
    out
@@ -1541,7 +1541,7 @@ fn solve_segment_sum_mods(int n, list fixed_chars, list segment_mods, any opts=d
    def input = _bytes_to_ascii(bytes)
    _sat_result("segment_sum_mods", input,
       [{"op": "fixed_chars", "items": fixed_chars}, {"op": "segment_mods", "items": segment_mods}],
-   {"proof": "constructive-segment-ascii-sum-mod"})
+      {"proof": "constructive-segment-ascii-sum-mod"})
 }
 
 fn solve_ascii_sum_eq(int n, int target_sum, any opts=dict()) dict {
@@ -1593,8 +1593,8 @@ fn solve_ascii_sum_eq(int n, int target_sum, any opts=dict()) dict {
    def input = _bytes_to_ascii(bytes)
    _sat_result("ascii_sum_equality", input,
       [{"op": "len_eq", "value": n}, {"op": "ascii_sum_eq", "value": target_sum, "lo": lo, "hi": hi,
-      "charset": charset}],
-   {"proof": "constructive-printable-ascii-sum"})
+            "charset": charset}],
+      {"proof": "constructive-printable-ascii-sum"})
 }
 
 fn _parse_int_assignment(str text) dict {
@@ -1925,8 +1925,8 @@ fn solve_mbrainfuzz_template(str prefix_hex, any raw_template, any opts=dict()) 
       [{"op": "mbrainfuzz_template_accepts", "prefix_bytes": prefix_bytes,
             "fixed_bytes": int(template.get("fixed_bytes", 0)), "wildcards": template.get("wildcards", []),
             "base": int(template.get("base", 0)), "payload_bytes": int(template.get("payload_bytes", 0)),
-      "sha256": template.get("sha256", ""), "shell": template.get("shell", "")}],
-   {"proof": "semantic-mbrainfuzz-template"}).set("args", [exploit])
+            "sha256": template.get("sha256", ""), "shell": template.get("shell", "")}],
+      {"proof": "semantic-mbrainfuzz-template"}).set("args", [exploit])
 }
 
 fn _range_values(str text) list {
@@ -1962,7 +1962,7 @@ fn _range_values(str text) list {
 }
 
 fn _extract_byte_domains(str text) dict {
-   if(_find_from(text, "byte_domains(", 0) < 0){ return {"ok": false} }
+   if _find_from(text, "byte_domains(", 0) < 0 { return {"ok": false} }
    mut count = _extract_dict_int_field(text, "bytes", -1)
    if count <= 0 {
       def reads = _extract_stdin_reads(text)
@@ -2117,7 +2117,7 @@ fn _line_hash_k_range(int length, int multiplier, int modulus, int target, str a
    }
    def base_big = big.bigint_from_int(multiplier)
    def span = big.bigint_div(big.bigint_sub(_line_hash_pow_big(multiplier, length), _big_one()),
-   big.bigint_sub(base_big, _big_one()))
+      big.bigint_sub(base_big, _big_one()))
    def min_p = big.bigint_mul(big.bigint_from_int(lo_ch), span)
    def max_p = big.bigint_mul(big.bigint_from_int(hi_ch), span)
    def target_big = big.bigint_from_int(target)
@@ -2244,7 +2244,7 @@ fn solve_byte_domains(int count, dict domains, int expected=0, any opts=dict()) 
          def allowed = _byte_domains_values(domains, keys[i])
          if allowed.len == 0 {
             return _fail_result("byte_domains", "unsat", "empty domain",
-            [{"op": "byte_domains", "index": idx}], opts)
+               [{"op": "byte_domains", "index": idx}], opts)
          }
          values.set(idx, _byte_domains_choose(allowed))
       }
@@ -2260,11 +2260,11 @@ fn solve_byte_domains(int count, dict domains, int expected=0, any opts=dict()) 
    str.builder_free(b)
    if !_byte_domains_verify(input, domains) {
       return _fail_result("byte_domains", "unsat", "constructed witness failed verification",
-      [{"op": "byte_domains", "bytes": count, "domains": domains}], opts)
+         [{"op": "byte_domains", "bytes": count, "domains": domains}], opts)
    }
    _sat_result("byte_domains", input,
       [{"op": "byte_domains", "bytes": count, "constrained": keys.len, "domains": domains}],
-   {"proof": "constructive-byte-domain-witness"})
+      {"proof": "constructive-byte-domain-witness"})
 }
 
 fn _line_hash_seed_term(int seed, int multiplier, int modulus, int length) int {
@@ -2290,7 +2290,7 @@ fn _line_hash_try_suffix(int suffix, int suffix_mod, int inv_modulus, int kmin, 
    while k <= kmax {
       tries += 1
       def value = big.bigint_add(big.bigint_from_int(adjusted_target),
-      big.bigint_mul(big.bigint_from_int(k), big.bigint_from_int(modulus)))
+         big.bigint_mul(big.bigint_from_int(k), big.bigint_from_int(modulus)))
       def decoded = _line_hash_decode_candidate(value, length, multiplier, alphabet)
       if decoded.get("ok", false) {
          def input = decoded.get("input", "")
@@ -2312,7 +2312,7 @@ fn _line_hash_try_suffixes(int suffix_len, int suffix_mod, int inv_modulus, int 
       while i < alphabet.len {
          def suffix = load8(alphabet, i) & 255
          def res = _line_hash_try_suffix(suffix, suffix_mod, inv_modulus, kmin, kmax,
-         adjusted_target, length, multiplier, modulus, target, seed, alphabet)
+            adjusted_target, length, multiplier, modulus, target, seed, alphabet)
          tries += int(res.get("tries", 0))
          if res.get("ok", false) { return res.set("tries", tries) }
          i += 1
@@ -2326,7 +2326,7 @@ fn _line_hash_try_suffixes(int suffix_len, int suffix_mod, int inv_modulus, int 
          while j < alphabet.len {
             def suffix = a * multiplier + (load8(alphabet, j) & 255)
             def res = _line_hash_try_suffix(suffix, suffix_mod, inv_modulus, kmin, kmax,
-            adjusted_target, length, multiplier, modulus, target, seed, alphabet)
+               adjusted_target, length, multiplier, modulus, target, seed, alphabet)
             tries += int(res.get("tries", 0))
             if res.get("ok", false) { return res.set("tries", tries) }
             j += 1
@@ -2344,7 +2344,7 @@ fn _line_hash_try_suffixes(int suffix_len, int suffix_mod, int inv_modulus, int 
          while k < alphabet.len {
             def suffix = ab * multiplier + (load8(alphabet, k) & 255)
             def res = _line_hash_try_suffix(suffix, suffix_mod, inv_modulus, kmin, kmax,
-            adjusted_target, length, multiplier, modulus, target, seed, alphabet)
+               adjusted_target, length, multiplier, modulus, target, seed, alphabet)
             tries += int(res.get("tries", 0))
             if res.get("ok", false) { return res.set("tries", tries) }
             k += 1
@@ -2364,11 +2364,11 @@ fn solve_line_hash_matches(str source, str allow, int seed, int multiplier,
    def alphabet = _line_hash_alphabet(allow)
    if alphabet.len == 0 {
       return _fail_result("line_hash_matches", "unknown", "unsupported character predicate",
-      [{"op": "line_hash_matches", "source": source, "allow": allow}], opts)
+         [{"op": "line_hash_matches", "source": source, "allow": allow}], opts)
    }
    if multiplier <= 126 || modulus <= 0 {
       return _fail_result("line_hash_matches", "unknown", "unsupported rolling hash geometry",
-      [{"op": "line_hash_matches", "multiplier": multiplier, "modulus": modulus}], opts)
+         [{"op": "line_hash_matches", "multiplier": multiplier, "modulus": modulus}], opts)
    }
    def o = _plan_opts(opts)
    def min_len = max(1, int(o.get("min_len", 1)))
@@ -2386,7 +2386,7 @@ fn solve_line_hash_matches(str source, str allow, int seed, int multiplier,
          if inv_modulus != 0 {
             def res = _line_hash_try_suffixes(suffix_len, suffix_mod, inv_modulus,
                int(range.get("min", 0)), int(range.get("max", -1)), adjusted_target,
-            length, multiplier, modulus, target, seed, alphabet)
+               length, multiplier, modulus, target, seed, alphabet)
             total_tries += int(res.get("tries", 0))
             if res.get("ok", false) {
                def input = res.get("input", "")
@@ -2394,8 +2394,8 @@ fn solve_line_hash_matches(str source, str allow, int seed, int multiplier,
                   [{"op": "line_hash_matches", "source": source, "allow": allow,
                         "seed": seed, "multiplier": multiplier, "modulus": modulus,
                         "target": target, "length": length, "k": int(res.get("k", 0)),
-                  "suffix_digits": suffix_len, "tries": total_tries}],
-               {"proof": "base-polynomial-modular-suffix"})
+                        "suffix_digits": suffix_len, "tries": total_tries}],
+                  {"proof": "base-polynomial-modular-suffix"})
             }
          }
       }
@@ -2403,7 +2403,7 @@ fn solve_line_hash_matches(str source, str allow, int seed, int multiplier,
    }
    _fail_result("line_hash_matches", "unknown", "no alnum preimage in bounded length",
       [{"op": "line_hash_matches", "source": source, "allow": allow, "max_len": max_len,
-   "tries": total_tries}], opts)
+            "tries": total_tries}], opts)
 }
 
 fn _big_inv_mod(any a0, any m0) any {
@@ -2517,7 +2517,7 @@ fn _verify_numeric_residue_candidate(str binary, str n_text, int base, int shift
          return {"ok": true, "result": _sat_result("numeric_residue_words_flag", n_text,
                [{"op": "numeric_residue_words", "base": base, "shift": shift, "qwords": qwords,
                      "first_multiplier": mul, "prefix": prefix, "tries": tries, "oracle_checks": oracle_checks,
-         "output": out}], {"proof": "binary-oracle-modular-inverse"}).set("output", out)}
+                     "output": out}], {"proof": "binary-oracle-modular-inverse"}).set("output", out)}
       }
    }
    {"ok": false}
@@ -2577,13 +2577,13 @@ fn solve_numeric_residue_words_flag(int base, int shift, int qwords, any opts=di
       def cand = deferred[di]
       oracle_checks += 1
       def verified = _verify_numeric_residue_candidate(binary, cand.get("n", ""), base, shift, qwords, mul,
-      cand.get("prefix", ""), int(cand.get("tries", tries)), oracle_checks)
+         cand.get("prefix", ""), int(cand.get("tries", tries)), oracle_checks)
       if verified.get("ok", false) { return verified.get("result", dict()) }
       di += 1
    }
    _fail_result("numeric_residue_words_flag", "unknown", "no flag-shaped output found",
       [{"op": "numeric_residue_words", "tries": tries, "oracle_checks": oracle_checks,
-   "max_oracle_checks": max_oracle_checks}], opts)
+            "max_oracle_checks": max_oracle_checks}], opts)
 }
 
 fn solve_decompiled_input(str text, any opts=dict()) dict {
@@ -2592,23 +2592,23 @@ fn solve_decompiled_input(str text, any opts=dict()) dict {
    if bit_sliced.get("ok", false) {
       return solve_bit_sliced_ascii_transform(bit_sliced.get("target", ""),
          int(bit_sliced.get("input_len", 0)), int(bit_sliced.get("output_len", 0)),
-      bit_sliced.get("opts", opts))
+         bit_sliced.get("opts", opts))
    }
    def numeric_words = _extract_numeric_residue_words(text)
    if numeric_words.get("ok", false) {
       return solve_numeric_residue_words_flag(int(numeric_words.get("base", 10)),
-      int(numeric_words.get("shift", 0)), int(numeric_words.get("qwords", 0)), opts)
+         int(numeric_words.get("shift", 0)), int(numeric_words.get("qwords", 0)), opts)
    }
    def line_hash = _extract_line_hash_matches(text)
    if line_hash.get("ok", false) {
       return solve_line_hash_matches(line_hash.get("source", ""), line_hash.get("allow", ""),
          int(line_hash.get("seed", 0)), int(line_hash.get("multiplier", 0)),
-      int(line_hash.get("modulus", 0)), int(line_hash.get("target", 0)), opts)
+         int(line_hash.get("modulus", 0)), int(line_hash.get("target", 0)), opts)
    }
    def byte_domains = _extract_byte_domains(text)
    if byte_domains.get("ok", false) {
       return solve_byte_domains(int(byte_domains.get("bytes", 0)), byte_domains.get("domains", dict()),
-      int(byte_domains.get("constrained", 0)), opts)
+         int(byte_domains.get("constrained", 0)), opts)
    }
    def mbrainfuzz = _extract_mbrainfuzz_template_accepts(text)
    if mbrainfuzz.get("ok", false) {
@@ -2618,25 +2618,25 @@ fn solve_decompiled_input(str text, any opts=dict()) dict {
    if lit.get("ok", false) {
       return _sat_result("decompiled_input_equality", lit.get("value", ""),
          [{"op": "eq", "target": "input", "value": lit.get("value", ""), "source": "decompiled"}],
-      {"proof": "parsed-decompiled-equality"})
+         {"proof": "parsed-decompiled-equality"})
    }
    def param_lit = _extract_main_param_eq_literal(text)
    if param_lit.get("ok", false) {
       return _sat_result("decompiled_param_equality", param_lit.get("value", ""),
          [{"op": "eq", "target": param_lit.get("name", ""), "value": param_lit.get("value", ""), "source": "decompiled"}],
-      {"proof": "parsed-main-param-equality"})
+         {"proof": "parsed-main-param-equality"})
    }
    def valid_case = _extract_valid_case_literal(text)
    if valid_case.get("ok", false) {
       return _sat_result("decompiled_valid_case_literal", valid_case.get("value", ""),
          [{"op": "case_valid_literal", "target": "input", "value": valid_case.get("value", ""), "source": "decompiled"}],
-      {"proof": "parsed-valid-match-literal"})
+         {"proof": "parsed-valid-match-literal"})
    }
    def cpuid = _extract_cpuid_vendor_input_eq(text, opts)
    if cpuid.get("ok", false) {
       return _sat_result("decompiled_cpuid_equality", cpuid.get("value", ""),
          [{"op": "cpuid_vendor_string", "leaf": 0, "vendor": cpuid.get("vendor", "")}],
-      {"proof": "host-cpuid-vendor-evaluation"})
+         {"proof": "host-cpuid-vendor-evaluation"})
    }
    def timed = _extract_time_window_startswith(text)
    if timed.get("ok", false) {
@@ -2653,7 +2653,7 @@ fn solve_decompiled_input(str text, any opts=dict()) dict {
    def file_prefix = _extract_fs_read_startswith(text)
    if file_prefix.get("ok", false) {
       return solve_fs_read_startswith(file_prefix.get("value", ""),
-      _plan_opts(opts).set("read_len", int(file_prefix.get("read_len", 0))))
+         _plan_opts(opts).set("read_len", int(file_prefix.get("read_len", 0))))
    }
    def regex = _extract_regex_accepts_input(text)
    if regex.get("ok", false) {
@@ -2887,9 +2887,9 @@ fn _x86_known_shift(int v, int bits, int shift, bool arithmetic=false) int {
    def s = shift % max(1, bits)
    if s == 0 { return _x86_mask(v, bits) }
    if !arithmetic { return _x86_mask(v, bits) >> s }
-   if bits == 8 && (v & 128) != 0 { return((v | -256) >> s) & 255 }
-   if bits == 16 && (v & 32768) != 0 { return((v | -65536) >> s) & 65535 }
-   if bits == 32 && (v & 2147483648) != 0 { return((v | -4294967296) >> s) & 4294967295 }
+   if bits == 8 && (v & 128) != 0 { return ((v | -256) >> s) & 255 }
+   if bits == 16 && (v & 32768) != 0 { return ((v | -65536) >> s) & 65535 }
+   if bits == 32 && (v & 2147483648) != 0 { return ((v | -4294967296) >> s) & 4294967295 }
    _x86_mask(v, bits) >> s
 }
 
@@ -2958,7 +2958,7 @@ fn _x86_resize(any ctx, dict v, int bits, bool signed=false) dict {
       out_ast = signed ? smt.bvsext(ctx, ast, bits - from_bits) : smt.bvzext(ctx, ast, bits - from_bits)
    }
    _x86_val(out_ast, bits, v.get("known", false), int(v.get("value", 0)), v.get("cuts", []),
-   int(v.get("depth", 0)) + (from_bits == bits ? 0 : 1))
+      int(v.get("depth", 0)) + (from_bits == bits ? 0 : 1))
 }
 
 fn _x86_cut(any ctx, any solver, dict st, dict v, int bits) dict {
@@ -2974,7 +2974,7 @@ fn _x86_cut(any ctx, any solver, dict st, dict v, int bits) dict {
             "lhs": out,
             "rhs": r.get("ast", 0),
             "deps": r.get("cuts", []),
-   }))
+         }))
    _x86_val(out, bits, false, 0, [name])
 }
 
@@ -3149,7 +3149,7 @@ fn _x86_mem_expr(any ctx, dict st, dict row, str op0) dict {
          def rv = _x86_read_reg(ctx, st, reg, 64)
          term_v = _x86_val(smt.bvmul(ctx, rv.get("ast", 0), _x86_bv(ctx, int(sc.get("value", 1)), 64)),
             64, rv.get("known", false) && sc.get("ok", false), int(rv.get("value", 0)) * int(sc.get("value", 1)), rv.get("cuts", []),
-         int(rv.get("depth", 0)) + 1)
+            int(rv.get("depth", 0)) + 1)
       } elif _x86_is_reg(term) {
          term_v = _x86_read_reg(ctx, st, term, 64)
       } else {
@@ -3275,7 +3275,7 @@ fn _x86_binop(any ctx, str op, dict a0, dict b0, int bits) dict {
    }
    if a.get("known", false) && b.get("known", false) { return _x86_val(_x86_bv(ctx, value, bits), bits, true, value) }
    _x86_val(ast, bits, a.get("known", false) && b.get("known", false), value,
-   _x86_cut_union(a.get("cuts", []), b.get("cuts", [])), _x86_depth2(a, b))
+      _x86_cut_union(a.get("cuts", []), b.get("cuts", [])), _x86_depth2(a, b))
 }
 
 fn _x86_shift(any ctx, str mnemonic, dict a0, dict b0, int bits) dict {
@@ -3296,7 +3296,7 @@ fn _x86_shift(any ctx, str mnemonic, dict a0, dict b0, int bits) dict {
    }
    if a.get("known", false) && b0.get("known", false) { return _x86_val(_x86_bv(ctx, value, bits), bits, true, value) }
    _x86_val(ast, bits, a.get("known", false) && b0.get("known", false), value,
-   _x86_cut_union(a.get("cuts", []), b0.get("cuts", [])), _x86_depth2(a, b0))
+      _x86_cut_union(a.get("cuts", []), b0.get("cuts", [])), _x86_depth2(a, b0))
 }
 
 fn _x86_row_args(dict row) list {
@@ -3493,7 +3493,7 @@ fn _bit_sliced_trace_points(any opts=dict()) list {
                   "mode": cand.get("mode", ""),
                   "score": int(cand.get("score", 0)),
                   "distance": int(cand.get("distance", 0)),
-            })
+               })
          }
          j += 1
       }
@@ -3705,7 +3705,7 @@ fn _bit_sliced_calibrate_mapper_inputs(any ctx, any solver, list rows, int input
    def input = _bit_sliced_calibration_input(input_len, opts)
    def inputs = _bit_sliced_const_input_bytes(ctx, input, input_len)
    def exec = _bit_sliced_execute_lifted(ctx, solver, rows, inputs, input_len, output_addr,
-   _bit_sliced_exec_opts_for_concrete(opts, input))
+      _bit_sliced_exec_opts_for_concrete(opts, input))
    def known_output = _bit_sliced_known_output_string(exec.get("outputs", dict()), output_addr, output_len)
    if !known_output.get("ok", false) {
       return {
@@ -3716,7 +3716,7 @@ fn _bit_sliced_calibrate_mapper_inputs(any ctx, any solver, list rows, int input
       }
    }
    def validation = _bit_sliced_mapper_validation(exec.get("mapper_input_events", []), known_output.get("text", ""),
-   opts.get("mapper_validation_events", false))
+      opts.get("mapper_validation_events", false))
    {
       "ok": true,
       "input": input,
@@ -3747,7 +3747,7 @@ fn _bit_sliced_assert_mapper_relation(any ctx, any solver, dict event, dict sele
    def rel = selected.get("relation", "")
    def idx = base64_index(target_ch)
    def raw = _x86_val(event.get("ast", 0), int(event.get("bits", 32)), event.get("known", false),
-   int(event.get("value", 0)), event.get("cuts", []), int(event.get("depth", 0)))
+      int(event.get("value", 0)), event.get("cuts", []), int(event.get("depth", 0)))
    def v = _x86_resize(ctx, raw, 8)
    def ast = v.get("ast", 0)
    mut ok = false
@@ -3757,7 +3757,7 @@ fn _bit_sliced_assert_mapper_relation(any ctx, any solver, dict event, dict sele
    } elif rel == "double_low6" && idx >= 0 {
       smt.solver_assert(ctx, solver, smt.mk_eq(ctx, smt.bvand(ctx, ast, smt.bv_u8(ctx, 1)), smt.bv_u8(ctx, 0)))
       smt.solver_assert(ctx, solver, smt.mk_eq(ctx,
-      smt.bvand(ctx, smt.bvlshr(ctx, ast, smt.bv_u8(ctx, 1)), smt.bv_u8(ctx, 63)), smt.bv_u8(ctx, idx)))
+            smt.bvand(ctx, smt.bvlshr(ctx, ast, smt.bv_u8(ctx, 1)), smt.bv_u8(ctx, 63)), smt.bv_u8(ctx, idx)))
       ok = true
    } elif rel == "ascii" {
       smt.solver_assert(ctx, solver, smt.mk_eq(ctx, ast, smt.bv_u8(ctx, target_ch & 255)))
@@ -4073,7 +4073,7 @@ fn _solve_bit_sliced_lifted_x86_qfbv(str target, int input_len, int output_len, 
    }
    def exec = _bit_sliced_execute_lifted(ctx, solver, exec_rows, inputs, input_len, output_addr, exec_opts)
    def mapper_validation = _bit_sliced_mapper_validation(exec.get("mapper_input_events", []), core_target,
-   o.get("mapper_validation_events", false))
+      o.get("mapper_validation_events", false))
    def outputs = exec.get("outputs", dict())
    mut constraints = _bit_sliced_base_constraints(input_len, int(o.get("argv_index", 1)), lo, hi, output_addr, core_target, concrete_input, shape_constraints)
    def missing = _bit_sliced_missing_outputs(outputs, output_addr, core_target.len)
@@ -4084,7 +4084,7 @@ fn _solve_bit_sliced_lifted_x86_qfbv(str target, int input_len, int output_len, 
          _fail_result("bit_sliced_ascii_transform", "unknown", "lifted executor did not materialize all output bytes", constraints, o).
          set("missing_outputs", missing),
          target, core_target, input_len, output_addr, rows, exec_rows, exec, o,
-      result_output_summary, mapper_validation, mapper_calibration)
+         result_output_summary, mapper_validation, mapper_calibration)
    }
    if has_concrete_input {
       def concrete_check = _bit_sliced_concrete_output_check(outputs, output_addr, core_target)
@@ -4104,25 +4104,25 @@ fn _solve_bit_sliced_lifted_x86_qfbv(str target, int input_len, int output_len, 
          set("asserted_cuts", 0).
          set("materialized_output", concrete_check.get("materialized_output", "")),
          target, core_target, input_len, output_addr, rows, exec_rows, exec, o,
-      result_output_summary, mapper_validation, mapper_calibration)
+         result_output_summary, mapper_validation, mapper_calibration)
       smt.solver_del(ctx, solver)
       smt.ctx_del(ctx)
       return concrete_result
    }
    mut mapper_inverse = {"asserted": 0, "covered": dict(), "roots": [], "used": [], "skipped": []}
    if mapper_calibration.get("ok", false) &&
-      int(mapper_calibration.get("selected_count", 0)) >= int(o.get("mapper_inverse_min_selected", 8)) {
+   int(mapper_calibration.get("selected_count", 0)) >= int(o.get("mapper_inverse_min_selected", 8)) {
       mapper_inverse = _bit_sliced_assert_mapper_inverse(ctx, solver, exec.get("mapper_input_events", []),
-      mapper_calibration.get("selected", []), core_target)
+         mapper_calibration.get("selected", []), core_target)
       constraints = constraints.append({
             "kind": "mapper_inverse",
             "asserted": int(mapper_inverse.get("asserted", 0)),
             "calibrated": int(mapper_calibration.get("selected_count", 0)),
-      })
+         })
    }
    def output_constraints = _bit_sliced_assert_output_constraints(ctx, solver, outputs, output_addr, core_target, mapper_inverse)
    def asserted_cuts = _x86_assert_needed_cuts(ctx, solver, exec.get("cut_constraints", []),
-   output_constraints.get("roots", []), o.get("lazy_cuts", true))
+      output_constraints.get("roots", []), o.get("lazy_cuts", true))
    def check = smt.solver_check_result(ctx, solver)
    mut result = dict()
    if check == smt.SAT {
@@ -4137,7 +4137,7 @@ fn _solve_bit_sliced_lifted_x86_qfbv(str target, int input_len, int output_len, 
       set("asserted_cuts", asserted_cuts).
       set("mapper_inverse", mapper_inverse),
       target, core_target, input_len, output_addr, rows, exec_rows, exec, o,
-   result_output_summary, mapper_validation, mapper_calibration)
+      result_output_summary, mapper_validation, mapper_calibration)
    smt.solver_del(ctx, solver)
    smt.ctx_del(ctx)
    result
@@ -4146,19 +4146,19 @@ fn _solve_bit_sliced_lifted_x86_qfbv(str target, int input_len, int output_len, 
 fn solve_ascii_xor_eq(str target, any key, any opts=dict()) dict {
    "Solve bytes where `(input[i] xor key[i]) == target[i]`."
    solve_byte_constraints(_bytewise_transform_constraints("xor_eq", target, key),
-   _plan_opts(opts).set("len", target.len))
+      _plan_opts(opts).set("len", target.len))
 }
 
 fn solve_ascii_add_eq(str target, int delta, any opts=dict()) dict {
    "Solve bytes where `(input[i] + delta) mod 256 == target[i]`."
    solve_byte_constraints(_bytewise_transform_constraints("add_eq", target, delta),
-   _plan_opts(opts).set("len", target.len))
+      _plan_opts(opts).set("len", target.len))
 }
 
 fn solve_ascii_sub_eq(str target, int delta, any opts=dict()) dict {
    "Solve bytes where `(input[i] - delta) mod 256 == target[i]`."
    solve_byte_constraints(_bytewise_transform_constraints("sub_eq", target, delta),
-   _plan_opts(opts).set("len", target.len))
+      _plan_opts(opts).set("len", target.len))
 }
 
 fn bit_sliced_ascii_plan(str target, int input_len, int output_len, any opts=dict()) dict {

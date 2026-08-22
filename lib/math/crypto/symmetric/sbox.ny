@@ -31,6 +31,7 @@ module std.math.crypto.symmetric.sbox(
    sbox_differential_branch_number, sbox_linear_branch_number,
    sbox_algebraic_degree, sbox_max_degree, sbox_min_degree
 )
+
 use std.math.bin as bin
 use std.math.matrix as matrix
 

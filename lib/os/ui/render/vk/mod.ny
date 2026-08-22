@@ -253,7 +253,7 @@ fn draw_vertices_indexed_raw(any p,
       is_lines,
       width,
       pipe_override,
-   is_points)
+      is_points)
 }
 
 fn draw_lines_raw(any p, int line_count, f64 _line_width) bool {
@@ -470,7 +470,7 @@ fn draw_static_buffer_indexed_raw(any buf,
       width,
       pipe_override,
       index_type,
-   is_points)
+      is_points)
 }
 
 fn draw_text_batch(int font_id, any lines, f64 x, f64 y, f64 spacing, int color_u32) any {
@@ -742,7 +742,7 @@ fn set_material_packed(int base_color_u32, int material_u32, int emissive_u32 = 
       emissive_uv_xf1,
       normal_tex_id,
       ext2_tex_word,
-   vc_mode)
+      vc_mode)
 }
 
 fn set_material_from_slab(?ptr p, int vc_mode = 0) any {
@@ -819,7 +819,7 @@ fn create_pipeline(any vert_mod,
       cull_mode,
       front_face,
       depth_bias,
-   depth_clamp)
+      depth_clamp)
 }
 
 fn bind_pipeline(any pipe) any {
@@ -914,7 +914,9 @@ def INDIRECT_DRAW_BYTES = 16
 def INDIRECT_CMD_BYTES = 20
 
 fn gltf_pass_plan(int feature_mask, str alpha_mode="OPAQUE") list {
-   "Runs the pass plan operation."
+   "Vulkan mesh-pipeline pass planner. Documented GL/WebGL2 subset: advanced
+   material passes are not_guaranteed on the shared portable_contract and the
+   GL backend uses its simpler fallback pipeline instead."
    mut passes = list(0)
    def am = to_str(alpha_mode)
    if am == "BLEND" {
@@ -930,7 +932,9 @@ fn gltf_pass_plan(int feature_mask, str alpha_mode="OPAQUE") list {
 }
 
 fn gltf_material_layout() dict {
-   "Runs the material layout operation."
+   "Vulkan material-layout descriptor(packed-material byte offsets). GL/WebGL2
+   advanced-material layouts are a documented subset limitation of the shared
+   contract(advanced-materials not_guaranteed)."
    {
       "base_material_bytes": 152,
       "ext_sidecar_bytes": 256,
@@ -1080,13 +1084,13 @@ fn indirect_write_group_cmds(?ptr out, any groups, bool indexed=true) int {
                int(g.get("instance_count", 0)),
                int(g.get("first_index", 0)),
                int(g.get("vertex_offset", 0)),
-            int(g.get("first_instance", 0)))
+               int(g.get("first_instance", 0)))
          } else {
             indirect_write_draw_cmd(out, i * stride,
                int(g.get("vertex_count", g.get("index_count", 0))),
                int(g.get("instance_count", 0)),
                int(g.get("first_vertex", g.get("vertex_offset", 0))),
-            int(g.get("first_instance", 0)))
+               int(g.get("first_instance", 0)))
          }
       }
       i += 1

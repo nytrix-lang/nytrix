@@ -1,12 +1,14 @@
 shape nyir_extern_call {
   family "runtime-native"
   generator "native"
-  features ["native", "nyir", "extern", "call"]
+  features [native nyir extern call]
   template ny-test-case
-  flags "--nyir-dump --native-backend x86_64"
-  expect compile_and_run
+  flags "--native-backend x86 -no-std -emit-only -o /tmp/nytrix-extern-call.o"
+  link "etc/tests/native/nyir/extern-functions.a"
+  expect object_link_run_i64_5
+ci windows-skip
   source ny <<'NY'
-extern {
+extern "c" {
   fn add(i64 a, i64 b) i64
 }
 add(2, 3)

@@ -1,7 +1,6 @@
 ;; Keywords: collections lists symbols deduplication
 ;; Small immutable-list helpers shared by decompiler analysis passes.
 module std.os.rev.decomp.collections(_list_has, _append_unique, _append_all_unique, _symbols_intersect)
-
 use std.core
 
 fn _list_has(list xs, any value) bool {

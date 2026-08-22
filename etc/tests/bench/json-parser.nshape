@@ -1,0 +1,92 @@
+shape json-parser {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "parse", "string", "branch", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+;; Recursive-descent-style number parser over a flat JSON array.
+mut json = "["
+mut i = 1
+while i <= 200 {
+   if i > 1 { json = json + "," }
+   json = json + to_str(i)
+   i += 1
+}
+json = json + "]"
+def n = json.len()
+def t0 = ticks()
+mut rep = 0
+mut count = 0
+mut sum = 0
+while rep < 20000 {
+   mut pos = 1
+   mut cnt = 0
+   mut s = 0
+   while pos < n - 1 {
+      mut num = 0
+      while pos < n && load8(json, pos) >= 48 && load8(json, pos) <= 57 {
+         num = num * 10 + (load8(json, pos) - 48)
+         pos += 1
+      }
+      cnt += 1
+      s += num
+      if load8(json, pos) == 44 { pos += 1 }
+   }
+   count = cnt
+   sum = s
+   rep += 1
+}
+def t1 = ticks()
+print("checksum=", count * 1000000 + sum)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    char json[2048] = "[";
+    for (int i = 1; i <= 200; i++) {
+        if (i > 1) strcat(json, ",");
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d", i);
+        strcat(json, buf);
+    }
+    strcat(json, "]");
+    int n = (int)strlen(json);
+    int64_t start = now_ns();
+    int count = 0, sum = 0;
+    for (int rep = 0; rep < 20000; rep++) {
+        int pos = 1, cnt = 0, s = 0;
+        while (pos < n - 1) {
+            int num = 0;
+            while (pos < n && json[pos] >= '0' && json[pos] <= '9') {
+                num = num * 10 + (json[pos] - '0');
+                pos++;
+            }
+            cnt++;
+            s += num;
+            if (json[pos] == ',') pos++;
+        }
+        count = cnt;
+        sum = s;
+    }
+    int64_t end = now_ns();
+    printf("checksum=%d\n", count * 1000000 + sum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

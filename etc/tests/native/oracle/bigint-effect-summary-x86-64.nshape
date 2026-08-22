@@ -1,0 +1,13 @@
+shape oracle_bigint_effect_summary_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features ["native", "x86_64", "bigint", "effects", "verifier"]
+  template ny-test-case
+  flags "--native-result-oracle=10 -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+__bigint_to_int(__bigint_add(__bigint_from_int(3), __bigint_from_int(7)))
+NY
+}
