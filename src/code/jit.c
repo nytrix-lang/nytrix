@@ -59,11 +59,22 @@ extern int64_t rt_simmd_byte_class_reduce_raw(int64_t ptr_raw, int64_t len_raw,
 extern int64_t rt_simmd_i32_sqlscan_sum_raw(int64_t region_raw, int64_t tier_raw,
                                             int64_t amount_raw, int64_t flags_raw,
                                             int64_t n_raw, int64_t rounds_raw);
-_Noreturn static void ny_missing_extern_fail(const char *symbol) {
-  fprintf(stderr, "Nytrix JIT error: unresolved external symbol '%s'\n",
-          symbol && *symbol ? symbol : "<unknown>");
-  fflush(stderr);
-  abort();
+/*
+ * A referenced extern symbol could not be resolved against the process image
+ * or any linked library.  Report it as a proper compile diagnostic (with the
+ * declaration site when known) and fail the compile instead of aborting the
+ * whole process with SIGABRT.
+ */
+static void ny_missing_extern_fail(codegen_t *cg, token_t tok,
+                                   const char *symbol) {
+  ny_diag_error(tok, "unresolved external symbol '%s' (JIT could not find it "
+                     "in the process image or linked libraries)",
+                symbol && *symbol ? symbol : "<unknown>");
+  ny_diag_hint("%s", "declare the extern with the exact C link name, link the "
+                     "library with 'use' / -l, or export the symbol from a "
+                     "shared object before running");
+  if (cg)
+    cg->had_error = 1;
 }
 
 
@@ -889,9 +900,10 @@ static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod
       void *ptr = resolve_symbol_with_fallback(name);
       if (!ptr) {
         NY_LOG_DEBUG("extern symbol '%s' not found (cache fallback)", name);
-        ny_missing_extern_fail(name);
+        ny_missing_extern_fail(cg, (token_t){0}, name);
+      } else {
+        LLVMAddGlobalMapping(ee, f, ptr);
       }
-      LLVMAddGlobalMapping(ee, f, ptr);
     }
     return;
   }
@@ -913,9 +925,12 @@ static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod
       continue;
 
     void *ptr = resolve_symbol_with_fallback(symbol);
-    if (!ptr)
-      ny_missing_extern_fail(symbol);
-    LLVMAddGlobalMapping(ee, val, ptr);
+    if (!ptr) {
+      token_t tok = sig->stmt_t ? sig->stmt_t->tok : (token_t){0};
+      ny_missing_extern_fail(cg, tok, symbol);
+    } else {
+      LLVMAddGlobalMapping(ee, val, ptr);
+    }
   }
 }
 

@@ -399,6 +399,9 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   case NYIR_SAR_I64:
     return ny_port_binop(c, in, ">>", "dsrav", "srad", "__ny_avr_i64_sar",
                          "i64.shr_s");
+  case NYIR_ROR_I64:
+    return ny_port_binop(c, in, ">>", "dsrav", "srad", "__ny_avr_i64_ror",
+                         "i64.rotr");
   case NYIR_CMP_I64:
     return ny_port_cmp(c, in);
   case NYIR_LABEL:

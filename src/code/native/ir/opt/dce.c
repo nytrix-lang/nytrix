@@ -98,9 +98,10 @@ bool nyir_dce(nyir_func_t *f) {
       nyir_inst_t *in = &f->data[i - 1];
       unsigned eff = nyir_effective_effects(in);
       bool side_effect =
-          (eff & ~(NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION)) != NYIR_EFFECT_NONE ||
-                         in->op == NYIR_RET || in->op == NYIR_BR ||
-                         in->op == NYIR_BR_IF;
+          (eff & ~(NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION |
+                   NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_READ_LOCAL |
+                   NYIR_EFFECT_MAY_TRAP)) != NYIR_EFFECT_NONE ||
+          in->op == NYIR_RET || in->op == NYIR_BR || in->op == NYIR_BR_IF;
       if (in->op == NYIR_LABEL)
         side_effect = NIR_LABEL_REFERENCED(in->imm);
       bool keep = side_effect || (in->dst >= 0 && used[in->dst]);
@@ -131,9 +132,10 @@ bool nyir_dce(nyir_func_t *f) {
     nyir_inst_t *in = &f->data[i - 1];
     unsigned eff = nyir_effective_effects(in);
     bool side_effect =
-        (eff & ~(NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION)) != NYIR_EFFECT_NONE ||
-                       in->op == NYIR_RET || in->op == NYIR_BR ||
-                       in->op == NYIR_BR_IF;
+        (eff & ~(NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION |
+                 NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_READ_LOCAL |
+                 NYIR_EFFECT_MAY_TRAP)) != NYIR_EFFECT_NONE ||
+        in->op == NYIR_RET || in->op == NYIR_BR || in->op == NYIR_BR_IF;
     if (in->op == NYIR_LABEL)
       side_effect = NIR_LABEL_REFERENCED(in->imm);
     if (!side_effect && !(in->dst >= 0 && used[in->dst]))

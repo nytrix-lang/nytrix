@@ -230,6 +230,22 @@ int64_t rt_native_i64_to_cstr(int64_t v) {
 }
 
 /*
+ * Format a raw f64 as a freshly-allocated C string (mirrors the runtime's
+ * %g formatting so to_str(f) agrees with print(f) and the JIT path).
+ */
+int64_t rt_native_f64_to_cstr(double v) {
+  char buf[64];
+  int n = snprintf(buf, sizeof(buf), "%g", v);
+  if (n < 0 || (size_t)n >= sizeof(buf))
+    return 0;
+  char *s = malloc((size_t)n + 1);
+  if (!s)
+    return 0;
+  memcpy(s, buf, (size_t)n + 1);
+  return (int64_t)(uintptr_t)s;
+}
+
+/*
  * Convert a tagged Nytrix value to an owned raw C string for native-only
  * interpolation.  This preserves the runtime's bool, nil, integer, float,
  * string, bigint, and pointer formatting instead of treating the tagged word

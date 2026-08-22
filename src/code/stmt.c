@@ -799,6 +799,14 @@ static bool stmt_expr_static_list_only_uses(codegen_t *cg, scope *scopes,
            stmt_call_args_static_list_only_uses(cg, scopes, depth,
                                                 &e->as.memcall.args, 0, name);
   case NY_E_INDEX:
+    if (stmt_expr_is_static_list_builtin_target(e->as.index.target, name)) {
+      return stmt_expr_static_list_only_uses(cg, scopes, depth, e->as.index.start,
+                                             name) &&
+             stmt_expr_static_list_only_uses(cg, scopes, depth, e->as.index.stop,
+                                             name) &&
+             stmt_expr_static_list_only_uses(cg, scopes, depth, e->as.index.step,
+                                             name);
+    }
     return stmt_expr_static_list_only_uses(cg, scopes, depth,
                                            e->as.index.target, name) &&
            stmt_expr_static_list_only_uses(cg, scopes, depth, e->as.index.start,
@@ -1459,6 +1467,281 @@ static void stmt_update_static_int_list_elide_metadata(
   b->static_int_list_elide_bail_reason = lowered ? NULL : bail_reason;
   if (candidate && lowered)
     b->static_indexable_invalid = false;
+}
+
+/*
+ * Single-element list elision (LLVM path): `def p = [i]` followed only by
+ * `p[0]` reads (literal zero index) is lowered to the bare element value, so
+ * the transient list object is never allocated.  This mirrors the NIR path in
+ * native/lower/lower_stmt.h + lower_expr.h.  The violation walkers below are
+ * deliberately conservative: any use of `name` that is not a literal `name[0]`
+ * read (bare ident, get()/len(), .len/.get, dynamic index, member access)
+ * makes the elision bail.
+ */
+static bool stmt_expr_single_elem_elide_violates(codegen_t *cg, scope *scopes,
+                                                  size_t depth, expr_t *e,
+                                                  const char *name) {
+  if (!e)
+    return false;
+  switch (e->kind) {
+  case NY_E_IDENT:
+    return ny_expr_ident_is_name(e, name);
+  case NY_E_INDEX:
+    if (stmt_expr_is_static_list_builtin_target(e->as.index.target, name)) {
+      int64_t lit = 0;
+      bool ok = e->as.index.start &&
+                ny_expr_literal_i64(e->as.index.start, &lit) && lit == 0 &&
+                !e->as.index.stop && !e->as.index.step;
+      if (!ok)
+        return true;
+      return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                   e->as.index.start, name) ||
+             stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                   e->as.index.stop, name) ||
+             stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                   e->as.index.step, name);
+    }
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.index.target, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.index.start, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.index.stop, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.index.step, name);
+  case NY_E_MEMBER:
+    if (stmt_expr_is_static_list_builtin_target(e->as.member.target, name) &&
+        e->as.member.name)
+      return true; /* any member read (incl. .len) touches the object */
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.member.target, name);
+  case NY_E_CALL: {
+    if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT &&
+        e->as.call.args.len >= 1 &&
+        stmt_expr_is_static_list_builtin_target(e->as.call.args.data[0].val,
+                                                name)) {
+      const char *callee = e->as.call.callee->as.ident.name;
+      if (callee && (strcmp(callee, "get") == 0 || strcmp(callee, "len") == 0))
+        return true; /* get(name, ...) / len(name) dereference the object */
+    }
+    if (stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                             e->as.call.callee, name))
+      return true;
+    for (size_t i = 0; i < e->as.call.args.len; ++i)
+      if (stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                               e->as.call.args.data[i].val,
+                                               name))
+        return true;
+    return false;
+  }
+  case NY_E_MEMCALL:
+    if (stmt_expr_is_static_list_builtin_target(e->as.memcall.target, name))
+      return true; /* p.get(...) etc. dereference the object */
+    if (stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                             e->as.memcall.target, name))
+      return true;
+    for (size_t i = 0; i < e->as.memcall.args.len; ++i)
+      if (stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                               e->as.memcall.args.data[i].val,
+                                               name))
+        return true;
+    return false;
+  case NY_E_UNARY:
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.unary.right, name);
+  case NY_E_BINARY:
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.binary.left, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.binary.right, name);
+  case NY_E_LOGICAL:
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.logical.left, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.logical.right, name);
+  case NY_E_TERNARY:
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.ternary.cond, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.ternary.true_expr, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.ternary.false_expr, name);
+  case NY_E_LIST:
+  case NY_E_TUPLE:
+  case NY_E_SET:
+    for (size_t i = 0; i < e->as.list_like.len; ++i)
+      if (stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                               e->as.list_like.data[i], name))
+        return true;
+    return false;
+  case NY_E_DICT:
+    for (size_t i = 0; i < e->as.dict.pairs.len; ++i)
+      if (stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                               e->as.dict.pairs.data[i].key,
+                                               name) ||
+          stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                               e->as.dict.pairs.data[i].value,
+                                               name))
+        return true;
+    return false;
+  case NY_E_TRY:
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 e->as.try_expr.target, name);
+  case NY_E_LAMBDA:
+  case NY_E_FN:
+    /*
+     * Uses inside a nested function are dynamic; reject conservatively.
+     */
+    return stmt_expr_contains_ident_name(e, name);
+  default:
+    return stmt_expr_contains_ident_name(e, name);
+  }
+}
+
+static bool stmt_single_elem_elide_violates(codegen_t *cg, scope *scopes,
+                                             size_t depth, stmt_t *s,
+                                             stmt_t *decl_stmt,
+                                             const char *name) {
+  if (!s)
+    return false;
+  switch (s->kind) {
+  case NY_S_BLOCK:
+    for (size_t i = 0; i < s->as.block.body.len; ++i) {
+      if (!stmt_static_list_should_scan_stmt(decl_stmt,
+                                             s->as.block.body.data[i]))
+        continue;
+      if (stmt_single_elem_elide_violates(cg, scopes, depth,
+                                          s->as.block.body.data[i], decl_stmt,
+                                          name))
+        return true;
+    }
+    return false;
+  case NY_S_MODULE:
+    for (size_t i = 0; i < s->as.module.body.len; ++i) {
+      if (!stmt_static_list_should_scan_stmt(decl_stmt,
+                                             s->as.module.body.data[i]))
+        continue;
+      if (stmt_single_elem_elide_violates(cg, scopes, depth,
+                                          s->as.module.body.data[i], decl_stmt,
+                                          name))
+        return true;
+    }
+    return false;
+  case NY_S_VAR:
+    if (stmt_static_list_is_decl_stmt(s, decl_stmt, name))
+      return false;
+    for (size_t i = 0; i < s->as.var.names.len; ++i)
+      if (s->as.var.names.data[i] &&
+          strcmp(s->as.var.names.data[i], name) == 0)
+        return true; /* rebinding the name is a violation */
+    for (size_t i = 0; i < s->as.var.exprs.len; ++i)
+      if (stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                               s->as.var.exprs.data[i], name))
+        return true;
+    return false;
+  case NY_S_EXPR:
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 s->as.expr.expr, name);
+  case NY_S_IF:
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 s->as.iff.test, name) ||
+           stmt_single_elem_elide_violates(cg, scopes, depth, s->as.iff.init,
+                                           decl_stmt, name) ||
+           stmt_single_elem_elide_violates(cg, scopes, depth, s->as.iff.conseq,
+                                           decl_stmt, name) ||
+           stmt_single_elem_elide_violates(cg, scopes, depth, s->as.iff.alt,
+                                           decl_stmt, name);
+  case NY_S_GUARD:
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 s->as.guard.value, name) ||
+           stmt_single_elem_elide_violates(cg, scopes, depth,
+                                           s->as.guard.fallback, decl_stmt,
+                                           name);
+  case NY_S_WHILE:
+    return stmt_single_elem_elide_violates(cg, scopes, depth, s->as.whl.init,
+                                           decl_stmt, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 s->as.whl.test, name) ||
+           stmt_single_elem_elide_violates(cg, scopes, depth, s->as.whl.body,
+                                           decl_stmt, name) ||
+           stmt_single_elem_elide_violates(cg, scopes, depth,
+                                           s->as.whl.update, decl_stmt, name);
+  case NY_S_FOR:
+    if ((s->as.fr.iter_var && strcmp(s->as.fr.iter_var, name) == 0) ||
+        (s->as.fr.iter_index_var &&
+         strcmp(s->as.fr.iter_index_var, name) == 0))
+      return true;
+    return stmt_single_elem_elide_violates(cg, scopes, depth, s->as.fr.init,
+                                           decl_stmt, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 s->as.fr.cond, name) ||
+           stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 s->as.fr.iterable, name) ||
+           stmt_single_elem_elide_violates(cg, scopes, depth, s->as.fr.body,
+                                           decl_stmt, name) ||
+           stmt_single_elem_elide_violates(cg, scopes, depth, s->as.fr.update,
+                                           decl_stmt, name);
+  case NY_S_TRY:
+    return stmt_single_elem_elide_violates(cg, scopes, depth, s->as.tr.body,
+                                           decl_stmt, name) ||
+           stmt_single_elem_elide_violates(cg, scopes, depth, s->as.tr.handler,
+                                           decl_stmt, name);
+  case NY_S_RETURN:
+    return stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                                 s->as.ret.value, name);
+  case NY_S_DEFER:
+    return stmt_single_elem_elide_violates(cg, scopes, depth, s->as.de.body,
+                                           decl_stmt, name);
+  case NY_S_MATCH:
+    if (stmt_expr_single_elem_elide_violates(cg, scopes, depth,
+                                             s->as.match.test, name))
+      return true;
+    for (size_t i = 0; i < s->as.match.arms.len; ++i) {
+      if (stmt_single_elem_elide_violates(
+              cg, scopes, depth, s->as.match.arms.data[i].conseq, decl_stmt,
+              name))
+        return true;
+    }
+    return stmt_single_elem_elide_violates(cg, scopes, depth,
+                                           s->as.match.default_conseq,
+                                           decl_stmt, name);
+  default:
+    return stmt_contains_ident_name(s, name);
+  }
+}
+
+static bool stmt_can_elide_single_elem_list(
+    codegen_t *cg, scope *scopes, size_t depth, stmt_t *decl_stmt,
+    const char *name, bool escapes, expr_t *init) {
+  if (!cg || !decl_stmt || !name || escapes)
+    return false;
+  if (!init || init->kind != NY_E_LIST || init->as.list_like.len != 1)
+    return false;
+  /*
+   * The element becomes the binding's whole value, so it must be side-effect
+   * free: `def p = [f()]` must call f() exactly once, and every `p[0]` read
+   * (which re-derives the value from the init in the SROA path) must not
+   * re-evaluate it.
+   */
+  if (!ny_expr_is_pure(cg, scopes, depth, init->as.list_like.data[0]))
+    return false;
+  stmt_t *root = cg->current_fn_body;
+  if (root)
+    return !stmt_single_elem_elide_violates(cg, scopes, depth, root, decl_stmt,
+                                            name);
+  /*
+   * Top-level scope (bench shapes, scripts): walk the whole program body.
+   * The declaration itself is skipped by the walker.
+   */
+  if (!cg->prog)
+    return false;
+  for (size_t i = 0; i < cg->prog->body.len; ++i) {
+    if (stmt_single_elem_elide_violates(cg, scopes, depth,
+                                        cg->prog->body.data[i], decl_stmt,
+                                        name))
+      return false;
+  }
+  return true;
 }
 
 static bool stmt_expr_raw_mut_list_only_uses(codegen_t *cg, scope *scopes,
@@ -5917,9 +6200,15 @@ static bool stmt_match_list_sum_loop(codegen_t *cg, scope *scopes,
                  (!requires_int_list_proof &&
                   (list_b->is_list_storage || ny_type_is(list_type, "list") ||
                    ny_type_is(list_type, "tuple"))));
-  if (!list_b || !idx_b || !acc_b || !idx_b->is_slot || !acc_b->is_slot ||
-      !list_b->value || !idx_b->value || !acc_b->value || !list_ok ||
-      !idx_b->is_int_slot ||
+  /*
+   * An elided static int list has no runtime object: its binding value is a
+   * null marker and elements live in a static constant array.  The list-sum
+   * fast path loads .len through the object pointer, which would read null;
+   * fall back to the generic loop (whose element reads handle elision).
+   */
+  if (!list_b || list_b->static_indexable_object_elided || !idx_b || !acc_b ||
+      !idx_b->is_slot || !acc_b->is_slot || !list_b->value || !idx_b->value ||
+      !acc_b->value || !list_ok || !idx_b->is_int_slot ||
       !acc_b->is_int_slot)
     return false;
 
@@ -6686,8 +6975,7 @@ static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
   codegen_debug_pop_block(cg, dbg_scope);
 }
 
-static bool stmt_auto_simd_expr_safe(codegen_t *cg, scope *scopes, size_t depth,
-                                     expr_t *e);
+bool ny_expr_is_pure(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
 
 static bool stmt_auto_simd_call_is_typed_buffer(const char *name, size_t argc) {
   if (!name)
@@ -6735,8 +7023,7 @@ static bool stmt_auto_simd_call_is_effect_free(codegen_t *cg,
   return sig->is_pure;
 }
 
-static bool stmt_auto_simd_expr_safe(codegen_t *cg, scope *scopes, size_t depth,
-                                     expr_t *e) {
+bool ny_expr_is_pure(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   if (!e)
     return true;
   switch (e->kind) {
@@ -6748,18 +7035,18 @@ static bool stmt_auto_simd_expr_safe(codegen_t *cg, scope *scopes, size_t depth,
     if (e->as.unary.op && (strcmp(e->as.unary.op, "async") == 0 ||
                            strcmp(e->as.unary.op, "await") == 0))
       return false;
-    return stmt_auto_simd_expr_safe(cg, scopes, depth, e->as.unary.right);
+    return ny_expr_is_pure(cg, scopes, depth, e->as.unary.right);
   case NY_E_BINARY:
-    return stmt_auto_simd_expr_safe(cg, scopes, depth, e->as.binary.left) &&
-           stmt_auto_simd_expr_safe(cg, scopes, depth, e->as.binary.right);
+    return ny_expr_is_pure(cg, scopes, depth, e->as.binary.left) &&
+           ny_expr_is_pure(cg, scopes, depth, e->as.binary.right);
   case NY_E_LOGICAL:
-    return stmt_auto_simd_expr_safe(cg, scopes, depth, e->as.logical.left) &&
-           stmt_auto_simd_expr_safe(cg, scopes, depth, e->as.logical.right);
+    return ny_expr_is_pure(cg, scopes, depth, e->as.logical.left) &&
+           ny_expr_is_pure(cg, scopes, depth, e->as.logical.right);
   case NY_E_TERNARY:
-    return stmt_auto_simd_expr_safe(cg, scopes, depth, e->as.ternary.cond) &&
-           stmt_auto_simd_expr_safe(cg, scopes, depth,
+    return ny_expr_is_pure(cg, scopes, depth, e->as.ternary.cond) &&
+           ny_expr_is_pure(cg, scopes, depth,
                                     e->as.ternary.true_expr) &&
-           stmt_auto_simd_expr_safe(cg, scopes, depth,
+           ny_expr_is_pure(cg, scopes, depth,
                                     e->as.ternary.false_expr);
   case NY_E_INDEX: {
     if (e->as.index.stop || e->as.index.step || !e->as.index.start ||
@@ -6775,13 +7062,13 @@ static bool stmt_auto_simd_expr_safe(codegen_t *cg, scope *scopes, size_t depth,
     if (!b || (!b->is_int_list_storage && !b->raw_int_list_ptr &&
                !b->static_int_list_global))
       return false;
-    return stmt_auto_simd_expr_safe(cg, scopes, depth, e->as.index.start);
+    return ny_expr_is_pure(cg, scopes, depth, e->as.index.start);
   }
   case NY_E_CALL:
     if (!stmt_auto_simd_call_is_effect_free(cg, &e->as.call))
       return false;
     for (size_t i = 0; i < e->as.call.args.len; ++i) {
-      if (!stmt_auto_simd_expr_safe(cg, scopes, depth,
+      if (!ny_expr_is_pure(cg, scopes, depth,
                                     e->as.call.args.data[i].val))
         return false;
     }
@@ -6812,14 +7099,14 @@ static bool stmt_auto_simd_body_safe(codegen_t *cg, scope *scopes, size_t depth,
     if (s->as.var.is_del || s->as.var.is_destructure)
       return false;
     for (size_t i = 0; i < s->as.var.exprs.len; ++i) {
-      if (!stmt_auto_simd_expr_safe(cg, scopes, depth, s->as.var.exprs.data[i]))
+      if (!ny_expr_is_pure(cg, scopes, depth, s->as.var.exprs.data[i]))
         return false;
     }
     return true;
   case NY_S_EXPR:
-    return stmt_auto_simd_expr_safe(cg, scopes, depth, s->as.expr.expr);
+    return ny_expr_is_pure(cg, scopes, depth, s->as.expr.expr);
   case NY_S_IF:
-    return stmt_auto_simd_expr_safe(cg, scopes, depth, s->as.iff.test) &&
+    return ny_expr_is_pure(cg, scopes, depth, s->as.iff.test) &&
            stmt_auto_simd_body_safe(cg, scopes, depth, s->as.iff.init) &&
            stmt_auto_simd_body_safe(cg, scopes, depth, s->as.iff.conseq) &&
            stmt_auto_simd_body_safe(cg, scopes, depth, s->as.iff.alt);
@@ -6842,7 +7129,7 @@ static bool stmt_auto_simd_cond_shape(codegen_t *cg, scope *scopes,
   expr_t *rhs = cond->as.binary.right;
   if (!lhs || lhs->kind != NY_E_IDENT || !lhs->as.ident.name || !rhs)
     return false;
-  if (!stmt_auto_simd_expr_safe(cg, scopes, depth, rhs))
+  if (!ny_expr_is_pure(cg, scopes, depth, rhs))
     return false;
   int64_t lhs_min = 0, lhs_max = 0;
   if (stmt_expr_int_range(cg, scopes, depth, lhs, &lhs_min, &lhs_max) &&
@@ -7846,6 +8133,7 @@ static void gen_stmt_var(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s)
   const char *first_raw_int_list_bail_reason = NULL;
   bool first_raw_f64_list_mutation = false;
   const char *first_raw_f64_list_bail_reason = NULL;
+  bool first_single_elem_elided = false;
   if (parallel && s->as.var.names.len == 1 && s->as.var.exprs.len == 1) {
     expr_t *e0 = s->as.var.exprs.data[0];
     bool first_escapes =
@@ -7879,11 +8167,17 @@ static void gen_stmt_var(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s)
       first_val = ny_c0(cg);
       first_raw_f64_list_mutation = true;
       parallel = false;
+    } else if (!s->as.var.is_mut &&
+               stmt_can_elide_single_elem_list(
+                   cg, scopes, *depth, s, first_name, first_escapes, e0)) {
+      first_val = gen_expr(cg, scopes, *depth, e0->as.list_like.data[0]);
+      first_single_elem_elided = true;
+      parallel = false;
     }
   }
   if (!parallel && !first_static_list_object_elided &&
       !first_raw_int_list_mutation && !first_raw_f64_list_mutation &&
-      s->as.var.exprs.len > 0) {
+      !first_single_elem_elided && s->as.var.exprs.len > 0) {
     expr_t *e0 = s->as.var.exprs.data[0];
     bool first_escapes =
         sema && sema->escapes.len > 0 && sema->escapes.data[0];
@@ -7920,7 +8214,12 @@ static void gen_stmt_var(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s)
                !first_escapes &&
                stmt_expr_is_int_list_literal(cg, scopes, *depth, e0))
       first_val = gen_expr_list_stack_alloc(cg, scopes, *depth, e0);
-    else
+    else if (!dest && first_name &&
+             stmt_can_elide_single_elem_list(
+                 cg, scopes, *depth, s, first_name, first_escapes, e0)) {
+      first_val = gen_expr(cg, scopes, *depth, e0->as.list_like.data[0]);
+      first_single_elem_elided = true;
+    } else
       first_val = gen_expr(cg, scopes, *depth, e0);
   }
   fun_sig *gs = NULL;

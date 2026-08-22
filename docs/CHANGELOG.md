@@ -1,16 +1,8 @@
 # Changelog
 
-## Native optimizer hardening (2026-08-21)
-
-- Hardened GVN/CSE/LICM around audited call effects and complete call-argument semantics.
-- Unified natural-loop discovery across loop analyses/transforms; fixed SCEV wrap/CFG edge cases and safe IRCE/LICM preheader motion.
-- Repaired guarded variable-trip vector tails: real preheader insertion, stable CFG labels/PHIs, scalar-IV remapping, and no duplicate exit labels.
-- Expanded native performance diagnostics, regalloc attribution, runtime/static counters, and enforceable benchmark budgets.
-
-
 Nytrix uses dated milestones. Use `ny --version` for snapshots.
 
-## [0.9.0] - 2026-07-21 → 2026-08-21 - Language security, native tooling, and runtime reliability
+## [0.9] - 2026-07-21 → 2026-08-21 - Language security, native tooling, and runtime reliability
 
 ### Added
 - Repaired SSA PHI and parameter promotion in `nyir_mem2reg`: parameters preserved as initial reaching definitions instead of uninitialized zero rewrites, and added safe rollback on failure.
@@ -37,6 +29,8 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
   solving, and string analysis.
 
 ### Changed
+- Expanded native performance diagnostics, regalloc attribution,
+  runtime/static counters, and enforceable benchmark budgets.
 - Canonical benchmarks can opt into runtime allocation/reallocation sampling with `--bench-runtime-counters`; the report artifact is sampled outside timed runs and the counts are exported to console, CSV, JSON, and Markdown.
 - Native static-island reporting now distinguishes direct from unresolved calls,
   reports alias-uncertain raw-memory/unknown-call sites, and the canonical bench
@@ -87,106 +81,137 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - The maintained performance-cliff triage procedure moved from recurring TODO
   checkboxes into the performance guide.
 - JIT and standard-library bitcode caches now reject LLVM-invalid modules before
- publication and invalidate prior cache protocols, preventing repeated
- `Invalid record` failures after a cache hit.
+  publication and invalidate prior cache protocols, preventing repeated
+  `Invalid record` failures after a cache hit.
 - Argument-matrix coverage for documented `ny` options is now committed as
- ny-test fixtures: `etc/tests/errors/args/` asserts invalid flag values fail
- with their diagnostic, and `etc/tests/runtime/args/` asserts valid
- performance/runtime flag combinations compile and run. Both run under
- `./make test`.
+  ny-test fixtures: `etc/tests/errors/args/` asserts invalid flag values fail
+  with their diagnostic, and `etc/tests/runtime/args/` asserts valid
+  performance/runtime flag combinations compile and run. Both run under
+  `./make test`.
 - Tagged-int binary fast paths now cover bitwise ops (`&`, `|`, `^^`),
- provably-safe shifts (`<<`, `>>` with the shift count known in `[0, 64)`),
- and ordered comparisons, in addition to add/sub/mul/div/mod. Proven-operand
- expressions emit inline raw-int IR with no tag-check guard or BigInt
- fallback PHI (verified: 28 `bin.runtime.slow` blocks to 0 for a mixed
- operator function under `--profile=peak`).
+  provably-safe shifts (`<<`, `>>` with the shift count known in `[0, 64)`),
+  and ordered comparisons, in addition to add/sub/mul/div/mod. Proven-operand
+  expressions emit inline raw-int IR with no tag-check guard or BigInt
+  fallback PHI (verified: 28 `bin.runtime.slow` blocks to 0 for a mixed
+  operator function under `--profile=peak`).
 - `--profile=speed` now enables the same raw tagged-int expression fast paths
- as `peak` (`NYTRIX_RAW_INT_EXPR_FAST` and the `NYTRIX_RAW_INT_EXPR_FAST_OPS`
- operator list, whose default now covers every supported operator kind).
-- Added a `wasm-emscripten` target to `./make web`. It emits standalone Wasm
- with `_ny_top_entry`, explicit Nytrix `env.__MD_ITALIC_2__` namespace. Explicit aliases opt into namespacing, while existing Nytrix
- declarations retain precedence.
-- `prove(condition[, message]) -> proof` introduces compile-time proof
- witnesses; false or dynamic obligations fail compilation, and ordinary values
- cannot satisfy proof parameters. `std.math.logic` adds evaluation,
- simplification, certificates, bounded solvers, rewriting, and Prolog-style
- unification and backtracking.
-- Kernel-backed file watching and hot reload use inotify, kqueue, and Windows
- change notifications behind `std.os.fs.watch`, with an mtime fallback.
-- Opt-in `--safe-run` supervision covers CPU, memory, processes, wall time,
- output, and supported file limits, including suspended Windows Job Object
- startup and explicit unsupported-limit reporting.
-- Test tooling gained `--failures-only`, portable replay, separate fixture and
- suite timeouts, and host-aware concurrency capped at eight workers with
- 6 GiB reserved per worker.
-
-### Changed
-
-- Native lowering, targets, tiers, reporting, NYIR passes, object formats,
- result oracles, JIT loading, and proof analysis now live in focused modules.
-- Native-only compile and run modes are now distinct: `-o` writes an executable
- without running it, while ordinary files and `-c` execute through the selected
- host-native path.
-- NYIR now coalesces copy/local chains, allocates scalar registers, selects
- immediate operands, indexes DCE label references once, and preserves floating
- types across collapsed equivalence classes.
-- Precomputed x86-64 call boundaries and immediate constants reduced a focused
- call body and frame-relative accesses in the native encoder.
-- Compiler and backend performance claims are now exercised through maintained
- benchmark and native-oracle fixtures rather than release-note timing samples.
-- Stdlib source sweeps stop after optimized IR instead of materializing MCJIT,
- and cache format updates reject mixed stdlib/user entries and
- sanitizer-contaminated native objects.
-- Default builds run a bounded, advisory `ny-fmt --bugs` audit after producing
- the compiler and standard bundle.
-- `ny-fmt --cloc` now reports tracked additions/deletions and per-file totals.
-- Hot reload blocks on native events instead of busy mtime polling, reducing
- idle CPU use and edit-to-recompile latency.
-- The opt-in JIT shared-object tier now validates the matching bitcode
- provenance sidecar before loading, so interrupted or stale cache entries
- return to normal compilation instead of being trusted.
+  as `peak` (`NYTRIX_RAW_INT_EXPR_FAST` and the `NYTRIX_RAW_INT_EXPR_FAST_OPS`
+  operator list, whose default now covers every supported operator kind).
+- FFI headers are processed directly by the in-tree C frontend instead of being
+  staged through the previous FFI pipeline.
+- Typed `extern` declarations may expose the same native symbol through multiple
+  valid Nytrix signatures without LLVM symbol collisions.
+- macOS JIT library discovery now checks standard Homebrew locations.
+- Windows native-only execution bypasses ELF-specific caching while retaining
+  the in-memory JIT path.
+- Panic traces now include the active source location.
 
 ### Fixed
+- Hardened GVN/CSE/LICM around audited call effects and complete
+  call-argument semantics.
+- Unified natural-loop discovery across loop analyses/transforms; fixed SCEV
+  wrap/CFG edge cases and safe IRCE/LICM preheader motion.
+- Repaired guarded variable-trip vector tails: real preheader insertion,
+  stable CFG labels/PHIs, scalar-IV remapping, and no duplicate exit labels.
+- Restored the syscall filter and hardware `rdrand` paths by correcting invalid
+  architecture and inline-assembly guards.
+- Verified that managed collections do not hide allocations, Nytrix exposes no
+  unrestricted `unsafe` escape hatch, and unsupported C constructs are rejected.
+- Prevented `std.core.report` from leaking a `report` name into every
+  `use std.core` consumer.
+- Corrected C array-extent conversion, rejected negative extents, and fixed C11
+  portability issues in the frontend.
+- Fixed bigint heap corruption, integer-root convergence, and inconsistent
+  native/GMP bigint allocation behavior.
+- Corrected AArch64 inverted-condition encoding, unreachable predecessor
+  handling, JIT exit-code propagation, and stencil cold/warm cache detection.
+- Removed quadratic symbol lookup during large-ELF relocation analysis.
 
+## [0.8] - 2026-07-13 - Native execution, proof tooling, and platform parity
+
+### Added
+- Added a `wasm-emscripten` target to `./make web`. It emits standalone Wasm
+  with `_ny_top_entry`, explicit Nytrix `env.__MD_ITALIC_2__` namespace. Explicit aliases opt into namespacing, while existing Nytrix
+  declarations retain precedence.
+- `prove(condition[, message]) -> proof` introduces compile-time proof
+  witnesses; false or dynamic obligations fail compilation, and ordinary values
+  cannot satisfy proof parameters. `std.math.logic` adds evaluation,
+  simplification, certificates, bounded solvers, rewriting, and Prolog-style
+  unification and backtracking.
+- Kernel-backed file watching and hot reload use inotify, kqueue, and Windows
+  change notifications behind `std.os.fs.watch`, with an mtime fallback.
+- Opt-in `--safe-run` supervision covers CPU, memory, processes, wall time,
+  output, and supported file limits, including suspended Windows Job Object
+  startup and explicit unsupported-limit reporting.
+- Test tooling gained `--failures-only`, portable replay, separate fixture and
+  suite timeouts, and host-aware concurrency capped at eight workers with
+  6 GiB reserved per worker.
+
+### Changed
+- Native lowering, targets, tiers, reporting, NYIR passes, object formats,
+  result oracles, JIT loading, and proof analysis now live in focused modules.
+- Native-only compile and run modes are now distinct: `-o` writes an executable
+  without running it, while ordinary files and `-c` execute through the selected
+  host-native path.
+- NYIR now coalesces copy/local chains, allocates scalar registers, selects
+  immediate operands, indexes DCE label references once, and preserves floating
+  types across collapsed equivalence classes.
+- Precomputed x86-64 call boundaries and immediate constants reduced a focused
+  call body and frame-relative accesses in the native encoder.
+- Compiler and backend performance claims are now exercised through maintained
+  benchmark and native-oracle fixtures rather than release-note timing samples.
+- Stdlib source sweeps stop after optimized IR instead of materializing MCJIT,
+  and cache format updates reject mixed stdlib/user entries and
+  sanitizer-contaminated native objects.
+- Default builds run a bounded, advisory `ny-fmt --bugs` audit after producing
+  the compiler and standard bundle.
+- `ny-fmt --cloc` now reports tracked additions/deletions and per-file totals.
+- Hot reload blocks on native events instead of busy mtime polling, reducing
+  idle CPU use and edit-to-recompile latency.
+- The opt-in JIT shared-object tier now validates the matching bitcode
+  provenance sidecar before loading, so interrupted or stale cache entries
+  return to normal compilation instead of being trusted.
+
+### Fixed
 - Stage artifacts now carry a pointer-free expanded-source identity and
- `--verify-artifact` rejects stale or malformed snapshots before reuse.
+  `--verify-artifact` rejects stale or malformed snapshots before reuse.
 - New REPL snapshots bind their source payload to a fingerprint and byte length;
- `:load` rejects corrupted v2 images before rebuilding persistent state while
- continuing to accept older source-only snapshots.
+  `:load` rejects corrupted v2 images before rebuilding persistent state while
+  continuing to accept older source-only snapshots.
 - `ny-fmt` C analysis now shares one lexical scanner across function ranges,
- structural rankings, and duplicate detection. It ignores strings, comments,
- multiline macros, control conditions, and call continuations rather than
- reporting phantom C functions. `ny-fmt --selftest` validates that scanner
- together with high-confidence language-pattern checks.
+  structural rankings, and duplicate detection. It ignores strings, comments,
+  multiline macros, control conditions, and call continuations rather than
+  reporting phantom C functions. `ny-fmt --selftest` validates that scanner
+  together with high-confidence language-pattern checks.
 - `ny-fmt --bugs` now reports discarded value-typed `list.append`/`extend`
- results and `set()` calls on dictionaries initialized as frozen `{}` literals,
- with stable `NYAUD1120` and `NYAUD1119` diagnostics and practical fixes.
+  results and `set()` calls on dictionaries initialized as frozen `{}` literals,
+  with stable `NYAUD1120` and `NYAUD1119` diagnostics and practical fixes.
 - x86-64 internal JIT/object emission now carries up to 1,024 call/data
- relocations per program bundle, so large straight-line call sites no longer
- fail at the old 256-relocation transport ceiling.
+  relocations per program bundle, so large straight-line call sites no longer
+  fail at the old 256-relocation transport ceiling.
 - Live native JIT/object requests now support up to 128 lowered user functions
- (previously 64) and reject larger requests before lowering. Portable NYIP
- bundles retain their separate 4,096-function NYIR VM boundary.
+  (previously 64) and reject larger requests before lowering. Portable NYIP
+  bundles retain their separate 4,096-function NYIR VM boundary.
 - macOS transitive libc aggregates now materialize named return and parameter
- layouts on demand, without registering anonymous carriers as builtin scalars.
- Installed system headers recover useful declarations from unsupported syntax;
- project headers remain strict.
+  layouts on demand, without registering anonymous carriers as builtin scalars.
+  Installed system headers recover useful declarations from unsupported syntax;
+  project headers remain strict.
 - Apple-arm64 comptime MCJIT now uses managed invocation so indirect callees
- finalize before entry. Native-only link discovery also matches JIT behavior
- and deduplicates source annotations.
+  finalize before entry. Native-only link discovery also matches JIT behavior
+  and deduplicates source annotations.
 - Corrected x86-64 floating constant placement and typed f32/f64 local
- preservation, eliminating nondeterministic native ELF results.
+  preservation, eliminating nondeterministic native ELF results.
 - Hardened sanitizer AOT temporary output, cache isolation, cleanup, and UBSan
- handling.
+  handling.
 - Failure replay now preserves fixture flags, target matrices, exit status,
- plain output, and valid LLDB diagnostics.
+  plain output, and valid LLDB diagnostics.
 - Corrected Windows JIT compatibility, target-width libc fixtures, variadic C
- imports, trace/debug progress suppression, ELF32 return bounds, watcher
- lifetime, parser recovery, and dictionary helper ambiguity.
+  imports, trace/debug progress suppression, ELF32 return bounds, watcher
+  lifetime, parser recovery, and dictionary helper ambiguity.
 - The full suite passes on Linux, macOS, and Windows through the manual
- multi-platform workflow.
+  multi-platform workflow.
 
-## [0.7.0] - 2026-06-30 - LLVM-free native backend and C interoperability
+## [0.7] - 2026-06-30 - LLVM-free native backend and C interoperability
 
 ### Added
 

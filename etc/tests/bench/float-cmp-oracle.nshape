@@ -1,0 +1,65 @@
+shape float_cmp_oracle {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "cmp", "float", "c-vs-ny", "native", "checksum", "correctness"]
+  template ny-test-case
+  tier "critical"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.os.time
+;; Correctness oracle: encodes f64 <, <=, >, >=, ==, != into an integer
+;; checksum so native/LLVM/C disagreements are caught by checksum diffing
+;; instead of requiring a human to read printed booleans.
+def start = ticks()
+mut checksum = 0
+mut i = 0
+while i < 2000 {
+   mut a = float(i % 37) * 0.5
+   mut b = float(i % 41) * 0.5
+   if a < b { checksum = checksum * 2 + 1 } else { checksum = checksum * 2 }
+   if a <= b { checksum = checksum * 2 + 1 } else { checksum = checksum * 2 }
+   if a > b { checksum = checksum * 2 + 1 } else { checksum = checksum * 2 }
+   if a >= b { checksum = checksum * 2 + 1 } else { checksum = checksum * 2 }
+   if a == b { checksum = checksum * 2 + 1 } else { checksum = checksum * 2 }
+   if a != b { checksum = checksum * 2 + 1 } else { checksum = checksum * 2 }
+   checksum = checksum % 1000000007
+   i += 1
+}
+def end = ticks()
+print("checksum=", checksum)
+print("elapsed_ns=", end - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+  int64_t start = now_ns();
+  int64_t checksum = 0;
+  for (int i = 0; i < 2000; i++) {
+    double a = (double)(i % 37) * 0.5;
+    double b = (double)(i % 41) * 0.5;
+    checksum = checksum * 2 + (a < b ? 1 : 0);
+    checksum = checksum * 2 + (a <= b ? 1 : 0);
+    checksum = checksum * 2 + (a > b ? 1 : 0);
+    checksum = checksum * 2 + (a >= b ? 1 : 0);
+    checksum = checksum * 2 + (a == b ? 1 : 0);
+    checksum = checksum * 2 + (a != b ? 1 : 0);
+    checksum = checksum % 1000000007;
+  }
+  int64_t end = now_ns();
+  printf("checksum=%lld\n", (long long)checksum);
+  if (end <= start) end = start + 1;
+  printf("elapsed_ns=%lld\n", (long long)(end - start));
+  return 0;
+}
+C
+}

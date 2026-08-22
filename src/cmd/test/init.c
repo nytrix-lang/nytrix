@@ -109,11 +109,17 @@ static int run_benchmarks(const char *bin, const char *pattern, const char *opt_
                           int warmup, int timeout_sec, int verbose, int show_ir, int show_asm,
                           int show_passes, int profile, int compare_llvm, int correctness_only,
                           const char *out_csv, const char *out_json, const char *out_md,
-                          const char *compile_profile,
+                          const char *compile_profile, int budget_fail,
                           StrVec *files, StrVec *patterns);
 static void apply_test_child_env(void);
+static char *read_small_file(const char *path);
 static const char *test_warn_arg(void);
 static void push_test_warn_arg(char **argv, int *argc, int max);
+static bool shape_path_is_nshape(const char *p);
+static const char *shape_path_split(const char *p, char *file_out,
+                                    size_t file_cap, const char **shape_out);
+static int shape_block_span(const char *data, size_t data_len, const char *name,
+                            size_t *out_start, size_t *out_end);
 static char *shape_source_block(const char *shape_path, const char *name);
 static char *materialize_shape_ny_source(const char *shape_path);
 static char *shape_meta_string(const char *shape_path, const char *key);
@@ -444,6 +450,87 @@ static void cache_free(CacheDb *db) {
 static int is_dir(const char *path) {
   struct stat st;
   return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/*
+ * Collect every top-level `shape X {` block name in an .nshape file.
+ * Returns the names in the order they appear, or 0 when the file has no
+ * named shapes (single implicit shape / plain nshape).
+ */
+static size_t shape_names_in_file(const char *path, StrVec *names) {
+  if (!path || !names)
+    return 0;
+  char *data = read_small_file(path);
+  if (!data)
+    return 0;
+  size_t data_len = strlen(data);
+  size_t count = 0;
+  const char *p = data;
+  const char *end = data + data_len;
+  const char *needle = "shape ";
+  size_t needle_len = 6;
+  while (p < end) {
+    const char *hit = ny_memmem(p, (size_t)(end - p), needle, needle_len);
+    if (!hit)
+      break;
+    if (hit == data || !(isalnum((unsigned char)hit[-1]) || hit[-1] == '_')) {
+      const char *q = hit + needle_len;
+      const char *ns = q;
+      while (q < end && (isalnum((unsigned char)*q) || *q == '_' || *q == '-'))
+        q++;
+      if (q > ns) {
+        size_t name_len = (size_t)(q - ns);
+        const char *r = q;
+        while (r < end && (*r == ' ' || *r == '\t'))
+          r++;
+        if (r < end && *r == '{') {
+          char *name = (char *)malloc(name_len + 1);
+          if (name) {
+            memcpy(name, ns, name_len);
+            name[name_len] = '\0';
+            sv_push(names, name);
+            count++;
+          }
+        }
+      }
+    }
+    p = hit + needle_len;
+  }
+  free(data);
+  return count;
+}
+
+/*
+ * Expand discovered .nshape files into per-shape test entries.  A file with
+ * more than one `shape X {` block becomes one entry per shape, addressed as
+ * `path:shape`; single-shape and .ny files stay untouched.
+ */
+static void expand_multi_shape_files(StrVec *files) {
+  StrVec out = {0};
+  for (size_t i = 0; i < files->len; i++) {
+    const char *p = files->items[i];
+    if (!nyt_ends_with(p, ".nshape")) {
+      sv_push(&out, p);
+      continue;
+    }
+    StrVec names = {0};
+    size_t n = shape_names_in_file(p, &names);
+    if (n <= 1) {
+      sv_free(&names);
+      sv_push(&out, p);
+      continue;
+    }
+    for (size_t k = 0; k < names.len; k++) {
+      char *entry = (char *)malloc(strlen(p) + strlen(names.items[k]) + 2);
+      if (entry) {
+        sprintf(entry, "%s:%s", p, names.items[k]);
+        sv_push(&out, entry);
+      }
+    }
+    sv_free(&names);
+  }
+  sv_free(files);
+  *files = out;
 }
 
 static void collect_ny(const char *path, StrVec *out) {
@@ -1119,7 +1206,7 @@ static int test_merge_link_archives(const StrVec *links, char *out,
 #endif
 
 static int object_link_run_check(const char *shape_path) {
-  if (!shape_path || !nyt_ends_with(shape_path, ".nshape"))
+  if (!shape_path || !shape_path_is_nshape(shape_path))
     return 0;
   char *expect_val = shape_meta_string(shape_path, "expect");
   if (!expect_val || strncmp(expect_val, "object_link_run_", 16) != 0) {
@@ -1205,34 +1292,45 @@ static int object_link_run_check(const char *shape_path) {
    */
   StrVec links = {0};
   {
-    char *data = read_small_file(shape_path);
+    char file[PATH_MAX];
+    const char *shape = NULL;
+    shape_path_split(shape_path, file, sizeof(file), &shape);
+    char *data = read_small_file(file);
     if (data) {
-      char *line = data;
-      while (line && *line) {
-        char *nxt = strchr(line, '\n');
-        if (nxt) *nxt = '\0';
-        char *p = line;
-        trim_inplace(p);
-        if (strncmp(p, "link ", 5) == 0) {
-          p += 5;
+      size_t data_len = strlen(data);
+      size_t start = 0, end = data_len;
+      if (shape && *shape && !shape_block_span(data, data_len, shape, &start, &end)) {
+        free(data);
+      } else {
+        char *line = data + start;
+        char *region_end = data + end;
+        while (line && line < region_end) {
+          char *nxt = memchr(line, '\n', (size_t)(region_end - line));
+          if (nxt)
+            *nxt = '\0';
+          char *p = line;
           trim_inplace(p);
-          if (*p == '"') {
-            char *st = ++p;
-            char *en = st;
-            while (*en && (*en != '"' || (en > st && en[-1] == '\\')))
-              en++;
-            char *val = decode_shape_quoted_string(st, (size_t)(en - st));
-            if (val && *val) {
-              sv_push(&links, val);
-              free(val);
+          if (strncmp(p, "link ", 5) == 0) {
+            p += 5;
+            trim_inplace(p);
+            if (*p == '"') {
+              char *st = ++p;
+              char *en = st;
+              while (*en && (*en != '"' || (en > st && en[-1] == '\\')))
+                en++;
+              char *val = decode_shape_quoted_string(st, (size_t)(en - st));
+              if (val && *val) {
+                sv_push(&links, val);
+                free(val);
+              }
+            } else if (*p) {
+              sv_push(&links, p);
             }
-          } else if (*p) {
-            sv_push(&links, p);
           }
+          line = nxt ? nxt + 1 : NULL;
         }
-        line = nxt ? nxt + 1 : NULL;
+        free(data);
       }
-      free(data);
     }
   }
   int force_m32 = 0;
@@ -1435,7 +1533,7 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
                                  const char *matrix_flags) {
   char *materialized_path = NULL;
   const char *exec_path = path;
-  if (nyt_ends_with(path, ".nshape")) {
+  if (shape_path_is_nshape(path)) {
     materialized_path = materialize_shape_ny_source(path);
     if (!materialized_path)
       return 127;
@@ -1601,7 +1699,7 @@ static int split_flag_matrix_rows(char *s, char **out, int max) {
 
 static int run_one_blocking(const char *bin, const char *path, const char *std_path, const char *std_bc,
                             int timeout_sec, int trace_exec) {
-  char *matrix = (path && nyt_ends_with(path, ".nshape"))
+  char *matrix = (path && shape_path_is_nshape(path))
                      ? shape_meta_string(path, "flags_matrix")
                      : NULL;
   if (!matrix || !*matrix) {
@@ -1643,31 +1741,266 @@ static void error_meta_free(char *flags, char *expect) {
   free(expect);
 }
 
+/*
+ * Multi-shape discovery: a single .nshape file may contain several
+ * `shape X { ... }` blocks.  The runner addresses one shape inside a file as
+ * `path:shape`, so every consumer splits the string back into the file path
+ * and the optional shape name (NULL when the path is a plain file).
+ */
+static const char *shape_path_split(const char *p, char *file_out,
+                                    size_t file_cap, const char **shape_out) {
+  *shape_out = NULL;
+  if (!p) {
+    file_out[0] = '\0';
+    return file_out;
+  }
+  const char *colon = strrchr(p, ':');
+  if (colon && colon > p && strchr(colon + 1, '/') == NULL &&
+      strchr(colon + 1, ':') == NULL) {
+    /*
+     * Only treat the suffix as a shape selector when the file part is an
+     * nshape/ny path (plain files never carry a ':' in this repo).
+     */
+    size_t flen = (size_t)(colon - p);
+    bool file_is_shape =
+        (flen >= 7 && memcmp(p + flen - 7, ".nshape", 7) == 0) ||
+        (flen >= 3 && memcmp(p + flen - 3, ".ny", 3) == 0);
+    if (file_is_shape && flen + 1 < file_cap) {
+      memcpy(file_out, p, flen);
+      file_out[flen] = '\0';
+      *shape_out = colon + 1;
+      return file_out;
+    }
+  }
+  snprintf(file_out, file_cap, "%s", p);
+  return file_out;
+}
+
+/*
+ * True when the file part of a (possibly `path:shape`) test path is .nshape.
+ */
+static bool shape_path_is_nshape(const char *p) {
+  if (!p)
+    return false;
+  char file[PATH_MAX];
+  const char *shape = NULL;
+  shape_path_split(p, file, sizeof(file), &shape);
+  return nyt_ends_with(file, ".nshape");
+}
+
+/*
+ * Byte span of a named `shape X { ... }` block inside a .nshape file.  The
+ * block is delimited by brace counting so nested braces inside a source
+ * heredoc do not confuse the span.  Returns 1 and fills *out_start and
+ * *out_end (offsets of '{' and matching '}') on success.
+ */
+static int shape_block_span(const char *data, size_t data_len, const char *name,
+                            size_t *out_start, size_t *out_end) {
+  if (!data || !name || !*name)
+    return 0;
+  char needle[160];
+  snprintf(needle, sizeof(needle), "shape %s", name);
+  size_t needle_len = strlen(needle);
+  const char *p = data;
+  const char *end = data + data_len;
+  while (p < end) {
+    const char *hit = ny_memmem(p, (size_t)(end - p), needle, needle_len);
+    if (!hit)
+      return 0;
+    /*
+     * must be a word-boundary match: preceding char is not ident-ish
+     */
+    if (hit == data || !(isalnum((unsigned char)hit[-1]) || hit[-1] == '_')) {
+      const char *q = hit + needle_len;
+      while (q < end && (*q == ' ' || *q == '\t'))
+        q++;
+      if (q < end && *q == '{') {
+        *out_start = (size_t)(q - data);
+        int depth = 1;
+        const char *c = q + 1;
+        for (; c < end; c++) {
+          if (*c == '{')
+            depth++;
+          else if (*c == '}') {
+            depth--;
+            if (depth == 0) {
+              *out_end = (size_t)(c - data);
+              return 1;
+            }
+          }
+        }
+        return 0;
+      }
+    }
+    p = hit + needle_len;
+  }
+  return 0;
+}
+
+/*
+ * Search a line-oriented region [start, end) of an nshape file for a
+ * `key ...` field.  Stops at the first `source ` line (heredocs begin there).
+ * Returns a freshly allocated value, or NULL when absent.
+ */
+static char *shape_meta_in_region(const char *data, size_t start, size_t end,
+                                  const char *key) {
+  size_t key_len = strlen(key);
+  size_t i = start;
+  while (i < end) {
+    size_t line_end = i;
+    while (line_end < end && data[line_end] != '\n')
+      line_end++;
+    size_t line_len = line_end - i;
+    const char *line = data + i;
+    if (line_len && line[line_len - 1] == '\r')
+      line_len--;
+    /*
+     * trim leading space
+     */
+    size_t ls = 0;
+    while (ls < line_len && (line[ls] == ' ' || line[ls] == '\t'))
+      ls++;
+    const char *tp = line + ls;
+    size_t tlen = line_len - ls;
+    if (tlen >= 7 && strncmp(tp, "source ", 7) == 0)
+      break;
+    /*
+     * Recurse into named sub-blocks (budget { }, static_island { },
+     * rep_hints { }) so keys inside them resolve like top-level keys.
+     */
+    if (tlen >= 2 && tp[tlen - 1] == '{') {
+      size_t depth = 1;
+      size_t j = line_end + 1;
+      size_t close_at = end;
+      while (j < end && depth > 0) {
+        size_t je = j;
+        while (je < end && data[je] != '\n')
+          je++;
+        for (size_t k = j; k < je; ++k) {
+          if (data[k] == '{')
+            depth++;
+          else if (data[k] == '}' && --depth == 0) {
+            close_at = k;
+            break;
+          }
+        }
+        if (depth == 0)
+          break;
+        j = je + 1;
+      }
+      if (depth == 0 && close_at > line_end + 1) {
+        char *inner = shape_meta_in_region(data, line_end + 1, close_at, key);
+        if (inner)
+          return inner;
+      }
+      i = line_end + 1;
+      continue;
+    }
+    if (tlen > key_len && strncmp(tp, key, key_len) == 0 &&
+        isspace((unsigned char)tp[key_len])) {
+      const char *vp = tp + key_len;
+      while (vp < line + line_len && (*vp == ' ' || *vp == '\t'))
+        vp++;
+      if (vp < line + line_len && *vp == '"') {
+        const char *vs = vp + 1;
+        const char *ve = vs;
+        while (ve < line + line_len &&
+               (*ve != '"' || (ve > vs && ve[-1] == '\\')))
+          ve++;
+        return decode_shape_quoted_string(vs, (size_t)(ve - vs));
+      }
+      char *out = (char *)malloc((size_t)(line + line_len - vp) + 1);
+      if (out) {
+        memcpy(out, vp, (size_t)(line + line_len - vp));
+        out[(size_t)(line + line_len - vp)] = '\0';
+        trim_inplace(out);
+      }
+      return out;
+    }
+    i = line_end + 1;
+  }
+  return NULL;
+}
+
+/*
+ * Byte range covered by the file-level `defaults { ... }` block, when one
+ * exists.  Used as a fallback source of metadata for every shape in the file.
+ */
+static int shape_defaults_span(const char *data, size_t data_len,
+                               size_t *out_start, size_t *out_end) {
+  const char *needle = "defaults {";
+  const char *hit = ny_memmem(data, data_len, needle, strlen(needle));
+  if (!hit)
+    return 0;
+  /*
+   * word boundary: only match at line start (after whitespace)
+   */
+  const char *line = hit;
+  while (line > data && line[-1] != '\n')
+    line--;
+  const char *lp = line;
+  while (lp < hit && (*lp == ' ' || *lp == '\t'))
+    lp++;
+  if (lp != hit)
+    return 0;
+  size_t start = (size_t)(hit - data);
+  int depth = 1;
+  const char *c = hit + strlen(needle);
+  const char *end = data + data_len;
+  for (; c < end; c++) {
+    if (*c == '{')
+      depth++;
+    else if (*c == '}') {
+      depth--;
+      if (depth == 0) {
+        *out_start = start;
+        *out_end = (size_t)(c - data);
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 static char *shape_source_block(const char *shape_path, const char *name) {
   if (!shape_path || !name || !*name)
     return NULL;
-  char *data = read_small_file(shape_path);
+  char file[PATH_MAX];
+  const char *shape = NULL;
+  shape_path_split(shape_path, file, sizeof(file), &shape);
+  char *data = read_small_file(file);
   if (!data)
     return NULL;
+  size_t data_len = strlen(data);
+  size_t start = 0, end = data_len;
+  if (shape && *shape) {
+    if (!shape_block_span(data, data_len, shape, &start, &end)) {
+      free(data);
+      return NULL;
+    }
+  }
   char needle[128];
   snprintf(needle, sizeof(needle), "source %s <<'", name);
-  char *p = strstr(data, needle);
-  if (!p) {
+  size_t needle_len = strlen(needle);
+  const char *p = data + start;
+  const char *region_end = data + end;
+  const char *hit = ny_memmem(p, (size_t)(region_end - p), needle, needle_len);
+  if (!hit) {
     free(data);
     return NULL;
   }
-  char *marker = p + strlen(needle);
-  char *marker_end = strchr(marker, '\'');
-  char *body = marker_end ? strchr(marker_end, '\n') : NULL;
+  const char *marker = hit + needle_len;
+  const char *marker_end = strchr(marker, '\'');
+  const char *body = marker_end ? strchr(marker_end, '\n') : NULL;
   if (!marker_end || !body || marker_end == marker) {
     free(data);
     return NULL;
   }
   body++;
   size_t marker_len = (size_t)(marker_end - marker);
-  for (char *line = body; line && *line;) {
-    char *next = strchr(line, '\n');
-    size_t line_len = next ? (size_t)(next - line) : strlen(line);
+  for (const char *line = body; line && line < region_end;) {
+    const char *next = strchr(line, '\n');
+    size_t line_len = next ? (size_t)(next - line) : (size_t)(region_end - line);
     if (line_len && line[line_len - 1] == '\r')
       line_len--;
     if (line_len == marker_len && memcmp(line, marker, marker_len) == 0) {
@@ -1714,42 +2047,35 @@ static char *decode_shape_quoted_string(const char *start, size_t len) {
 static char *shape_meta_string(const char *shape_path, const char *key) {
   if (!shape_path || !key || !*key)
     return NULL;
-  char *data = read_small_file(shape_path);
+  char file[PATH_MAX];
+  const char *shape = NULL;
+  shape_path_split(shape_path, file, sizeof(file), &shape);
+  char *data = read_small_file(file);
   if (!data)
     return NULL;
-  size_t key_len = strlen(key);
-  for (char *line = data; line && *line;) {
-    char *next = strchr(line, '\n');
-    if (next)
-      *next = '\0';
-    char *p = line;
-    trim_inplace(p);
-    if (strncmp(p, "source ", 7) == 0)
-      break;
-    if (strncmp(p, key, key_len) == 0 && isspace((unsigned char)p[key_len])) {
-      p += key_len;
-      trim_inplace(p);
-      if (*p == '"') {
-        char *start = ++p;
-        char *end = start;
-        while (*end && (*end != '"' || (end > start && end[-1] == '\\')))
-          end++;
-        char *out = decode_shape_quoted_string(start, (size_t)(end - start));
-        free(data);
-        return out;
-      }
-      char *out = strdup(p);
-      free(data);
-      return out;
+  size_t data_len = strlen(data);
+  char *found = NULL;
+  if (shape && *shape) {
+    size_t start = 0, end = data_len;
+    if (shape_block_span(data, data_len, shape, &start, &end))
+      found = shape_meta_in_region(data, start, end, key);
+    if (!found) {
+      /*
+       * fall back to the file-level defaults block
+       */
+      size_t dstart = 0, dend = 0;
+      if (shape_defaults_span(data, data_len, &dstart, &dend))
+        found = shape_meta_in_region(data, dstart, dend, key);
     }
-    line = next ? next + 1 : NULL;
+  } else {
+    found = shape_meta_in_region(data, 0, data_len, key);
   }
   free(data);
-  return NULL;
+  return found;
 }
 
 static int shape_skips_ci(const char *path) {
-  if (!path || !nyt_ends_with(path, ".nshape"))
+  if (!path || !shape_path_is_nshape(path))
     return 0;
   char *ci = shape_meta_string(path, "ci");
   int skip = ci && (strcmp(ci, "skip") == 0 || strcmp(ci, "optional") == 0);
@@ -1943,7 +2269,7 @@ static char *materialize_shape_ny_source(const char *shape_path) {
 static void read_error_meta(const char *path, char **flags_out, char **expect_out) {
   *flags_out = NULL;
   *expect_out = NULL;
-  if (path && nyt_ends_with(path, ".nshape")) {
+  if (path && shape_path_is_nshape(path)) {
     *flags_out = shape_meta_string(path, "flags");
     *expect_out = shape_meta_string(path, "expect_message");
     return;
@@ -2366,7 +2692,7 @@ static void debug_replay_failed_tests(StrVec *failed_paths, const char *bin, con
     const char *path = failed_paths->items[i];
     char *materialized_path = NULL;
     const char *exec_path = path;
-    if (path && nyt_ends_with(path, ".nshape")) {
+    if (path && shape_path_is_nshape(path)) {
       materialized_path = materialize_shape_ny_source(path);
       if (!materialized_path) {
         printf("%s[debug]%s cannot materialize shape source for %s\n", nyt_clr(NYT_GRAY),
@@ -2376,7 +2702,7 @@ static void debug_replay_failed_tests(StrVec *failed_paths, const char *bin, con
       exec_path = materialized_path;
     }
 
-    char *matrix = path && nyt_ends_with(path, ".nshape")
+    char *matrix = path && shape_path_is_nshape(path)
                        ? shape_meta_string(path, "flags_matrix")
                        : NULL;
     char matrix_buf[4096] = {0};
@@ -3033,7 +3359,7 @@ static int run_error_case(const char *bin, const char *path, const char *std_pat
                           const char *expect, int *dur_ms, char *why, size_t why_len) {
   char *materialized_path = NULL;
   const char *exec_path = path;
-  if (path && nyt_ends_with(path, ".nshape")) {
+  if (path && shape_path_is_nshape(path)) {
     materialized_path = materialize_shape_ny_source(path);
     if (!materialized_path) {
       snprintf(why, why_len, "shape source ny block missing");
@@ -3916,7 +4242,7 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
      * Generator-only fuzz shapes remain outside ny-test.  Executable shapes
      * provide either a literal Ny block or an embedded AWK Ny generator.
      */
-    if (p && nyt_ends_with(p, ".nshape")) {
+    if (p && shape_path_is_nshape(p)) {
       char *source = shape_source_block(p, "ny");
       if (!source) {
         int declared = 0;
@@ -4037,7 +4363,7 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
       run[i].materialized_path[0] = '\0';
       const char *exec_path = p;
       int is_bench = strncmp(p, "etc/tests/bench/", 16) == 0;
-      if (p && nyt_ends_with(p, ".nshape")) {
+      if (p && shape_path_is_nshape(p)) {
         char *mat = materialize_shape_ny_source(p);
         if (!mat) {
           (*failed)++;
@@ -4278,6 +4604,221 @@ static int run_shape_generator_selftest(void) {
   return ok ? 0 : 1;
 }
 
+static char *atoms_block_field(const char *block, const char *block_end, const char *key) {
+  size_t key_len = strlen(key);
+  for (const char *line = block; line && line < block_end;) {
+    const char *next = memchr(line, '\n', (size_t)(block_end - line));
+    const char *lend = next ? next : block_end;
+    while (line < lend && (*line == ' ' || *line == '\t'))
+      line++;
+    if ((size_t)(lend - line) > key_len && strncmp(line, key, key_len) == 0 &&
+        (line[key_len] == ' ' || line[key_len] == '\t')) {
+      const char *p = line + key_len;
+      while (p < lend && (*p == ' ' || *p == '\t'))
+        p++;
+      if (p < lend && *p == '"') {
+        p++;
+        const char *end = p;
+        while (end < lend && (*end != '"' || end[-1] == '\\'))
+          end++;
+        if (end <= lend)
+          return decode_shape_quoted_string(p, (size_t)(end - p));
+      }
+      return NULL;
+    }
+    line = next ? next + 1 : NULL;
+  }
+  return NULL;
+}
+
+static int run_reader_atoms_nshape(const char *bin, const char *path) {
+  if (!path || !*path)
+    path = "etc/tests/runtime/reader/atoms.nshape";
+  char *data = read_small_file(path);
+  if (!data) {
+    fprintf(stderr, "reader-atoms: cannot open %s\n", path);
+    return 1;
+  }
+  char *atoms_start = NULL;
+  for (char *line = data; line && *line; line = strchr(line, '\n') + 1) {
+    const char *p = line;
+    while (*p == ' ' || *p == '\t')
+      p++;
+    if (strncmp(p, "atoms", 5) == 0) {
+      char *brace = strchr(line, '{');
+      if (brace) {
+        atoms_start = brace + 1;
+        break;
+      }
+    }
+  }
+  if (!atoms_start) {
+    fprintf(stderr, "reader-atoms: %s: missing 'atoms {' block\n", path);
+    free(data);
+    return 1;
+  }
+  int depth = 1;
+  char *atoms_end = atoms_start;
+  while (*atoms_end && depth > 0) {
+    if (*atoms_end == '{')
+      depth++;
+    else if (*atoms_end == '}')
+      depth--;
+    atoms_end++;
+  }
+
+  int total = 0, passed = 0, failed = 0, xfailed = 0;
+  char *cursor = atoms_start;
+  while (cursor && cursor < atoms_end) {
+    char *atom_line = strstr(cursor, "\n    atom ");
+    if (!atom_line || atom_line >= atoms_end)
+      break;
+    atom_line += 10;
+    char *name_end = strpbrk(atom_line, " {");
+    if (!name_end)
+      break;
+    char name[128];
+    size_t nlen = (size_t)(name_end - atom_line);
+    if (nlen >= sizeof(name))
+      nlen = sizeof(name) - 1;
+    memcpy(name, atom_line, nlen);
+    name[nlen] = '\0';
+    char *body = strchr(name_end, '{');
+    if (!body || body >= atoms_end)
+      break;
+    body++;
+    int adepth = 1;
+    char *abody = body;
+    while (abody < atoms_end && adepth > 0) {
+      if (*abody == '{')
+        adepth++;
+      else if (*abody == '}')
+        adepth--;
+      abody++;
+    }
+    char *block_end = abody - 1;
+
+    total++;
+    char *source = atoms_block_field(body, block_end, "source");
+    char *expect = atoms_block_field(body, block_end, "expect");
+    char *diagnostic = atoms_block_field(body, block_end, "diagnostic");
+    char *purpose = atoms_block_field(body, block_end, "purpose");
+
+    if (!source || !*source) {
+      fprintf(stderr, "FAIL: %s (%s) - missing source\n", name,
+              purpose && *purpose ? purpose : "");
+      failed++;
+      free(source);
+      free(expect);
+      free(diagnostic);
+      free(purpose);
+      cursor = abody;
+      continue;
+    }
+
+    int ok = 0;
+    int xfail = 0;
+    char *status = atoms_block_field(body, block_end, "status");
+    xfail = status && strcmp(status, "known-bug") == 0;
+    free(status);
+    char out_path[PATH_MAX];
+    out_path[0] = '\0';
+#ifdef _WIN32
+    FILE *of = fopen(out_path, "wb");
+    (void)of;
+#else
+    int have_out_fd = make_test_capture_tmp(out_path, sizeof(out_path), "reader-atom");
+    if (have_out_fd >= 0)
+      close(have_out_fd);
+#endif
+    char cmd[8192];
+    if (expect && *expect) {
+      snprintf(cmd, sizeof(cmd), "%s -e '%s' > '%s' 2>&1", bin, source,
+               out_path[0] ? out_path : "/dev/null");
+      int rc = system(cmd);
+      char *out = rc == 0 ? read_small_file(out_path) : NULL;
+      if (out) {
+        trim_inplace(out);
+        ok = strcmp(out, expect) == 0;
+      }
+      if (!ok && !xfail)
+        fprintf(stderr, "FAIL: %s (%s): rc=%d want=\"%s\" got=\"%s\"\n", name,
+                purpose && *purpose ? purpose : "", rc, expect,
+                out ? out : "<no output>");
+      free(out);
+    } else {
+      snprintf(cmd, sizeof(cmd), "%s -e '%s' > /dev/null 2>&1", bin, source);
+      int rc = system(cmd);
+      if (diagnostic && *diagnostic)
+        ok = rc != 0;
+      else
+        ok = rc == 0;
+      if (!ok && !xfail)
+        fprintf(stderr, "FAIL: %s (%s): rc=%d%s%s\n", name,
+                purpose && *purpose ? purpose : "", rc,
+                diagnostic && *diagnostic ? " expected diagnostic: " : "",
+                diagnostic && *diagnostic ? diagnostic : "");
+    }
+    if (ok) {
+      passed++;
+    } else if (xfail) {
+      xfailed++;
+      printf("XFAIL: %s (%s)\n", name, purpose && *purpose ? purpose : "");
+    } else {
+      failed++;
+    }
+    free(source);
+    free(expect);
+    free(diagnostic);
+    free(purpose);
+    cursor = abody;
+  }
+  free(data);
+  printf("Reader atoms: %d total | %d passed | %d failed | %d xfail (%s)\n", total,
+         passed, failed, xfailed, path);
+  return failed ? 1 : 0;
+}
+
+static const char *bench_dir_root(void);
+static int run_list_bench(const char *root_dir) {
+  const char *root = bench_dir_root();
+  if (!root)
+    root = ".";
+  StrVec shapes = {0};
+  char bench_dir[PATH_MAX];
+  snprintf(bench_dir, sizeof(bench_dir), "%s/etc/tests/bench",
+           root_dir && *root_dir ? root_dir : root);
+  collect_ny(bench_dir, &shapes);
+  qsort(shapes.items, shapes.len, sizeof(char *), path_lex_cmp);
+  for (size_t i = 0; i < shapes.len; ++i) {
+    const char *base = strrchr(shapes.items[i], '/');
+    base = base ? base + 1 : shapes.items[i];
+    char stem[128];
+    snprintf(stem, sizeof(stem), "%s", base);
+    char *dot = strrchr(stem, '.');
+    if (dot)
+      *dot = '\0';
+    printf("%s\n", stem);
+  }
+  printf("%zu fixtures\n", shapes.len);
+  sv_free(&shapes);
+  return 0;
+}
+
+static int run_list_meta(const char *root_dir) {
+  StrVec shapes = {0};
+  collect_ny(root_dir && *root_dir ? root_dir : "etc/tests/", &shapes);
+  for (size_t i = 0; i < shapes.len; ++i) {
+    char *m = shape_meta_string(shapes.items[i], "meta");
+    if (m && *m) {
+      printf("%s: %s\n", shapes.items[i], m);
+    }
+    free(m);
+  }
+  sv_free(&shapes);
+  return 0;
+}
+
 int ny_test_main(int argc, char **argv) {
   double suite_started_ms = now_ms();
   const char *bin = "build/release/ny";
@@ -4323,6 +4864,7 @@ int ny_test_main(int argc, char **argv) {
   const char *bench_output_csv = NULL;
   const char *bench_output_json = NULL;
   const char *bench_output_md = NULL;
+  int bench_budget_fail = 0;
 
   const char *env_timeout = getenv("NYTRIX_TEST_TIMEOUT");
   if (env_timeout && *env_timeout) {
@@ -4456,6 +4998,12 @@ int ny_test_main(int argc, char **argv) {
       return run_progress_selftest(bin, timeout_sec);
     else if (!strcmp(a, "--shape-generator-selftest"))
       return run_shape_generator_selftest();
+    else if (!strcmp(a, "--reader-atoms"))
+      return run_reader_atoms_nshape(bin, i + 1 < argc ? argv[++i] : NULL);
+    else if (!strcmp(a, "--list-bench"))
+      return run_list_bench(i + 1 < argc ? argv[++i] : NULL);
+    else if (!strcmp(a, "--list-meta"))
+      return run_list_meta(i + 1 < argc ? argv[++i] : "etc/tests/");
     else if (!strcmp(a, "--debug-failures"))
       ny_setenv("NYTRIX_TEST_DEBUG_FAILURES", "1", 1);
     else if (!strcmp(a, "--no-debug-failures"))
@@ -4559,7 +5107,9 @@ int ny_test_main(int argc, char **argv) {
       bench_mode = 1;
       if (!ny_arg_take_value(a, &i, argc, argv, &bench_output_csv, err, sizeof(err)))
         return 2;
-    } else if (ny_arg_match_with_value(a, "--bench-out-json")) {
+    }    else if (!strcmp(a, "--budget-fail"))
+      bench_budget_fail = 1;
+    else if (ny_arg_match_with_value(a, "--bench-out-json")) {
       bench_mode = 1;
       if (!ny_arg_take_value(a, &i, argc, argv, &bench_output_json, err, sizeof(err)))
         return 2;
@@ -4567,6 +5117,17 @@ int ny_test_main(int argc, char **argv) {
       bench_mode = 1;
       if (!ny_arg_take_value(a, &i, argc, argv, &bench_output_md, err, sizeof(err)))
         return 2;
+    } else if (!strcmp(a, "--show-materialized")) {
+      ny_setenv("NYTRIX_TEST_SHOW_MATERIALIZED", "1", 1);
+    } else if (!strcmp(a, "--trace-shape-cmd")) {
+      ny_setenv("NYTRIX_TEST_TRACE_SHAPE_CMD", "1", 1);
+    } else if (!strcmp(a, "--diff-failure")) {
+      ny_setenv("NYTRIX_TEST_DIFF_FAILURE", "1", 1);
+    } else if (ny_arg_match_with_value(a, "--keep-artifacts")) {
+      const char *dir = NULL;
+      if (ny_arg_take_value(a, &i, argc, argv, &dir, err, sizeof(err))) {
+        ny_setenv("NYTRIX_TEST_KEEP", dir, 1);
+      }
     } else if (a[0] == '-') {
       nyt_err("ny-test", "unknown option: %s", a);
       sv_free(&patterns);
@@ -4622,7 +5183,8 @@ int ny_test_main(int argc, char **argv) {
                                        bench_verbose, bench_show_ir, bench_show_asm,
                                        bench_show_passes, bench_profile, bench_compare_llvm,
                                        bench_correctness, NULL, NULL, NULL,
-                                       bench_compile_profile, &files, &patterns);
+                                       bench_compile_profile, bench_budget_fail,
+                                       &files, &patterns);
         if (engine_rc != 0)
           all_rc = engine_rc;
       }
@@ -4635,7 +5197,8 @@ int ny_test_main(int argc, char **argv) {
                                   bench_verbose, bench_show_ir, bench_show_asm,
                                   bench_show_passes, bench_profile, bench_compare_llvm,
                                   bench_correctness, bench_output_csv, bench_output_json,
-                                  bench_output_md, bench_compile_profile, &files, &patterns);
+                                  bench_output_md, bench_compile_profile, bench_budget_fail,
+                                  &files, &patterns);
     sv_free(&patterns);
     sv_free(&files);
     return bench_rc;
@@ -4660,8 +5223,15 @@ int ny_test_main(int argc, char **argv) {
     collect_ny("etc/tests/native", &files);
     collect_ny("etc/tests/interop", &files);
     collect_ny("etc/tests/shapes", &files);
+    collect_ny("etc/tests/runtime/reader", &files);
     if (with_stdlib)
       collect_ny("lib", &files);
+    expand_multi_shape_files(&files);
+  } else {
+    /*
+     * Explicitly selected files may also be multi-shape files.
+     */
+    expand_multi_shape_files(&files);
   }
 
   if (jobs <= 0) {
@@ -6643,17 +7213,16 @@ static void bench_record_result(BenchTable *table, int *measured, int verbose,
   (void)timeout_sec;
 }
 
-
-/*
- * Reporting
- */
-
 static const char *bench_ratio_color(double ratio) {
-  if (ratio > 0.0 && ratio <= 1.0)
+  if (ratio <= 0.0)
+    return NYT_GRAY;
+  if (ratio <= 1.0)
+    return NYT_BOLD;
+  if (ratio <= 2.0)
     return NYT_GREEN;
-  if (ratio > 1.5)
-    return NYT_RED;
-  return NYT_YELLOW;
+  if (ratio <= 3.0)
+    return NYT_YELLOW;
+  return NYT_RED;
 }
 
 static int bench_signal(double value) {
@@ -6664,113 +7233,84 @@ static int bench_row_unstable(const BenchRow *r) {
   return r && (r->ny_unstable || r->llvm_unstable || r->c_unstable);
 }
 
+static size_t bench_disp_width(const char *s) {
+  size_t w = 0;
+  for (; s && *s; s++)
+    if (((unsigned char)*s & 0xC0) != 0x80)
+      w++;
+  return w;
+}
+
+static void bench_cell(const char *s, int width) {
+  int pad = width - (int)bench_disp_width(s);
+  printf("%*s%s ", pad > 0 ? pad : 0, "", s);
+}
+
 static void bench_ms_text(double value, int valid, char *out, size_t cap) {
-  if (!valid)
+  if (!valid || value <= 0.0)
     snprintf(out, cap, "n/a");
-  else if (!bench_signal(value))
-    snprintf(out, cap, "<0.010ms");
+  else if (value < 0.01)
+    snprintf(out, cap, "<10µs");
+  else if (value < 1.0)
+    snprintf(out, cap, "%.0fµs", value * 1000.0);
+  else if (value < 10.0)
+    snprintf(out, cap, "%.2fms", value);
+  else if (value < 100.0)
+    snprintf(out, cap, "%.1fms", value);
+  else if (value < 1000.0)
+    snprintf(out, cap, "%.0fms", value);
   else
-    snprintf(out, cap, "%.3fms", value);
+    snprintf(out, cap, "%.2fs", value / 1000.0);
 }
 
 static void bench_print_ratio(double ratio, int valid) {
   if (!valid) {
-    printf("%7s", "n/a");
+    printf("%s%8s%s", nyt_clr(NYT_GRAY), "n/a", nyt_clr(NYT_RESET));
     return;
   }
   char value[32];
   snprintf(value, sizeof(value), "%.2fx", ratio);
-  int pad = 7 - (int)strlen(value);
+  int pad = 8 - (int)strlen(value);
   printf("%*s%s%s%s", pad > 0 ? pad : 0, "", nyt_clr(bench_ratio_color(ratio)), value,
          nyt_clr(NYT_RESET));
 }
 
 static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
-  char compile[32], opt[32], native[32], llvm[32], c_host[32], wall[32];
+  char compile[32], opt[32], native[32], llvm[32], c_host[32];
   bench_ms_text(r->ny_compile_ms, bench_signal(r->ny_compile_ms), compile, sizeof(compile));
   bench_ms_text(r->ny_opt_ms, bench_signal(r->ny_opt_ms), opt, sizeof(opt));
   bench_ms_text(r->ny_ms, r->ny_runs > 0, native, sizeof(native));
   bench_ms_text(r->llvm_ms, r->llvm_runs > 0, llvm, sizeof(llvm));
   bench_ms_text(r->c_ms, r->c_runs > 0, c_host, sizeof(c_host));
-  bench_ms_text(r->wall_ms, r->wall_ms > 0.0, wall, sizeof(wall));
   int native_ratio_valid = show_c && r->c_runs > 0 && bench_signal(r->ny_ms) &&
                            bench_signal(r->c_ms);
   int llvm_ratio_valid = show_llvm && r->c_runs > 0 && r->llvm_runs > 0 &&
                          bench_signal(r->llvm_ms) && bench_signal(r->c_ms);
   double native_ratio = native_ratio_valid ? r->ny_ms / r->c_ms : 0.0;
   double llvm_ratio = llvm_ratio_valid ? r->llvm_ms / r->c_ms : 0.0;
-  int common_runs = r->ny_runs > 0 ? r->ny_runs :
-                    (r->llvm_runs > 0 ? r->llvm_runs : r->c_runs);
-  if (r->c_runs > 0 && r->c_runs < common_runs)
-    common_runs = r->c_runs;
-  if (r->llvm_runs > 0 && r->llvm_runs < common_runs)
-    common_runs = r->llvm_runs;
-  const char *status =
-      (r->ny_failures || r->llvm_failures || r->c_failures) ? "FAIL"
-      : (r->budget_failed ? "REGRESS" : (bench_row_unstable(r) ? "NOISY" : "ok"));
-  printf("%-22s %-8s %-7s %-10s %-8s %-11s %-11s %-11s %-11s %-11s %-11s ",
-         r->name, r->backend, r->engine, r->cache, status, compile, opt, native, llvm, c_host,
-         wall);
+  bool is_fail = r->ny_failures || r->llvm_failures || r->c_failures ||
+                 !r->checksum_ok;
+  const char *status_str =
+      is_fail ? (r->ny_failures || r->llvm_failures || r->c_failures
+                     ? "FAIL"
+                     : "MISMATCH")
+              : (r->budget_failed ? "REGRESS" : (bench_row_unstable(r) ? "NOISY" : "ok"));
+  const char *status_clr =
+      is_fail ? NYT_RED : (r->budget_failed ? NYT_YELLOW : NYT_GREEN);
+
+  printf("%-22s %s%-6s%s ", r->name, nyt_clr(status_clr), status_str,
+         nyt_clr(NYT_RESET));
+  bench_cell(compile, 10);
+  bench_cell(opt, 9);
+  bench_cell(native, 11);
+  bench_cell(llvm, 11);
+  bench_cell(c_host, 10);
   bench_print_ratio(native_ratio, native_ratio_valid);
   printf(" ");
   bench_print_ratio(llvm_ratio, llvm_ratio_valid);
-  printf(" %4d checksum=%s|%s|%s%s", common_runs,
-         r->ny_checksum[0] ? r->ny_checksum : "n/a",
-         r->llvm_checksum[0] ? r->llvm_checksum : "n/a",
-         r->c_checksum[0] ? r->c_checksum : "n/a", r->checksum_ok ? "" : " (MISMATCH)");
-  if (strcmp(r->engine, "native") == 0)
-    printf(" jit_compile=%.3fms jit_run=%.3fms", r->ny_jit_compile_ms,
-           r->ny_jit_run_ms);
-  if (r->ny_code_bytes_seen)
-    printf(" code=%zub", r->ny_code_bytes);
-  if (r->ny_specialization_metrics_seen)
-    printf(" mono=functions:%zu,bytes:%zu,max:%zu",
-           r->ny_specialization_code_functions, r->ny_specialization_code_bytes,
-           r->ny_specialization_max_function_bytes);
-  if (r->ny_peak_compiler_rss_seen)
-    printf(" compile_peak_rss=%zuKiB", r->ny_peak_compiler_rss_kb);
-  if (r->ny_static_metrics_seen)
-    printf(" static=alloc:%zu,rt:%zu,bce:%zu,dyn:%zu,ind:%zu,alias?:%zu,spill:%zu,reload:%zu",
-           r->ny_heap_allocations, r->ny_runtime_calls, r->ny_bounds_checks,
-           r->ny_dynamic_ops, r->ny_indirect_calls, r->ny_alias_unresolved,
-           r->ny_spills, r->ny_reloads);
-  if (r->ny_runtime_counters_seen)
-    printf(" runtime=alloc:%zu,realloc:%zu", r->ny_runtime_alloc_count,
-           r->ny_runtime_realloc_count);
-  if (r->ny_hw_counters_seen)
-    printf(" hw=cycles:%" PRIu64 ",insns:%" PRIu64 ",branch-miss:%" PRIu64 ",cache-miss:%" PRIu64,
-           r->ny_hw_cycles, r->ny_hw_instructions, r->ny_hw_branch_misses,
-           r->ny_hw_cache_misses);
-  if (r->native_c_budget > 0.0)
-    printf(" budget(native/C<=%.2fx)", r->native_c_budget);
-  if (r->compile_ms_budget > 0.0)
-    printf(" budget(compile<=%.2fms)", r->compile_ms_budget);
-  if (r->code_bytes_budget > 0)
-    printf(" budget(code<=%zub)", r->code_bytes_budget);
-  if (r->specialization_code_bytes_budget > 0)
-    printf(" budget(mono-bytes<=%zub)", r->specialization_code_bytes_budget);
-  if (r->specialization_function_bytes_budget > 0)
-    printf(" budget(mono-fn<=%zub)", r->specialization_function_bytes_budget);
-  if (r->compiler_rss_budget_kb > 0)
-    printf(" budget(rss<=%zuKiB)", r->compiler_rss_budget_kb);
-  if (r->native_llvm_budget > 0.0)
-    printf(" budget(native/LLVM<=%.2fx)", r->native_llvm_budget);
-  if (r->static_budget_mask & (1u << 0))
-    printf(" budget(alloc<=%zu)", r->heap_allocations_budget);
-  if (r->static_budget_mask & (1u << 1))
-    printf(" budget(rt<=%zu)", r->runtime_calls_budget);
-  if (r->static_budget_mask & (1u << 2))
-    printf(" budget(bce<=%zu)", r->bounds_checks_budget);
-  if (r->static_budget_mask & (1u << 3))
-    printf(" budget(indirect<=%zu)", r->indirect_calls_budget);
-  if (r->static_budget_mask & (1u << 4))
-    printf(" budget(unknown-effects<=%zu)", r->unknown_effects_budget);
-  if (r->static_budget_mask & (1u << 5))
-    printf(" budget(alias-unresolved<=%zu)", r->alias_unresolved_budget);
-  if (r->static_budget_mask & (1u << 6))
-    printf(" budget(spills<=%zu)", r->spills_budget);
-  if (r->static_budget_mask & (1u << 7))
-    printf(" budget(reloads<=%zu)", r->reloads_budget);
+  if (!r->checksum_ok)
+    printf(" %s(MISMATCH: %s|%s|%s)%s", nyt_clr(NYT_RED),
+           r->ny_checksum, r->llvm_checksum, r->c_checksum, nyt_clr(NYT_RESET));
   printf("\n");
 }
 static void bench_print_hotspots(const BenchTable *t) {
@@ -6800,16 +7340,20 @@ static void bench_print_hotspots(const BenchTable *t) {
   printf("\n%sSlowest observed paths:%s compile=%s, opt=%s, runtime=%s\n",
          nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), compile ? compile->name : "n/a",
          opt ? opt->name : "n/a", runtime ? runtime->name : "n/a");
-  if (ratio)
-    printf("%slargest native/C gap:%s %s (%.2fx)\n", nyt_clr(NYT_BOLD),
-           nyt_clr(NYT_RESET), ratio->name, ratio->ny_ms / ratio->c_ms);
-  else
+  if (ratio) {
+    double gap = ratio->ny_ms / ratio->c_ms;
+    printf("%slargest native/C gap:%s %s (%s%.2fx%s)\n", nyt_clr(NYT_BOLD),
+           nyt_clr(NYT_RESET), ratio->name, nyt_clr(bench_ratio_color(gap)), gap,
+           nyt_clr(NYT_RESET));
+  } else
     printf("%slargest native/C gap:%s n/a (low-signal or missing C baseline)\n",
            nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
-  if (llvm_gap)
-    printf("%slargest native/LLVM gap:%s %s (%.2fx)\n", nyt_clr(NYT_BOLD),
-           nyt_clr(NYT_RESET), llvm_gap->name, llvm_gap->ny_ms / llvm_gap->llvm_ms);
-  else
+  if (llvm_gap) {
+    double gap = llvm_gap->ny_ms / llvm_gap->llvm_ms;
+    printf("%slargest native/LLVM gap:%s %s (%s%.2fx%s)\n", nyt_clr(NYT_BOLD),
+           nyt_clr(NYT_RESET), llvm_gap->name, nyt_clr(bench_ratio_color(gap)), gap,
+           nyt_clr(NYT_RESET));
+  } else
     printf("%slargest native/LLVM gap:%s n/a (low-signal or missing LLVM baseline)\n",
            nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
 }
@@ -7056,8 +7600,9 @@ static int run_benchmarks(const char *bin, const char *pattern, const char *opt_
                           int warmup, int timeout_sec, int verbose, int show_ir, int show_asm,
                           int show_passes, int profile, int compare_llvm, int correctness_only,
                           const char *out_csv, const char *out_json, const char *out_md,
-                          const char *compile_profile,
+                          const char *compile_profile, int budget_fail,
                           StrVec *files, StrVec *patterns) {
+  (void)budget_fail;
   if (correctness_only) {
     runs = 1;
     warmup = 0;
@@ -7074,20 +7619,76 @@ static int run_benchmarks(const char *bin, const char *pattern, const char *opt_
   bench_collect_environment(root, target, opt_level, &bench_env);
 
   StrVec shapes = {0};
-  if (files && files->len > 0) {
-    for (size_t i = 0; i < files->len; i++) {
-      if (nyt_ends_with(files->items[i], ".nshape"))
-        sv_push(&shapes, files->items[i]);
-    }
-  } else {
+  {
     char bench_dir[PATH_MAX];
     snprintf(bench_dir, sizeof(bench_dir), "%s/etc/tests/bench", root);
-    collect_ny(bench_dir, &shapes);
+    StrVec all = {0};
+    collect_ny(bench_dir, &all);
+    qsort(all.items, all.len, sizeof(char *), path_lex_cmp);
+    if (files && files->len > 0) {
+      for (size_t i = 0; i < files->len; i++) {
+        const char *want = files->items[i];
+        if (nyt_ends_with(want, ".nshape")) {
+          sv_push(&shapes, want);
+          continue;
+        }
+        size_t matches = 0;
+        for (size_t j = 0; j < all.len; j++) {
+          const char *base = strrchr(all.items[j], '/');
+          base = base ? base + 1 : all.items[j];
+          char stem[128];
+          snprintf(stem, sizeof(stem), "%s", base);
+          char *dot = strrchr(stem, '.');
+          if (dot)
+            *dot = '\0';
+          if (strstr(all.items[j], want) || strcmp(stem, want) == 0) {
+            sv_push(&shapes, all.items[j]);
+            matches++;
+          }
+        }
+        if (!matches)
+          nyt_err("ny-test", want, ": no matching bench fixture");
+      }
+      qsort(shapes.items, shapes.len, sizeof(char *), path_lex_cmp);
+      for (size_t i = 1; i < shapes.len; i++) {
+        if (strcmp(shapes.items[i], shapes.items[i - 1]) == 0) {
+          memmove(&shapes.items[i - 1], &shapes.items[i],
+                  (shapes.len - i) * sizeof(char *));
+          shapes.len--;
+          i--;
+        }
+      }
+    } else {
+      int ci_mode = test_env_truthy("CI") || test_env_truthy("GITHUB_ACTIONS");
+      for (size_t j = 0; j < all.len; j++) {
+        if (ci_mode && shape_skips_ci(all.items[j]))
+          continue;
+        sv_push(&shapes, all.items[j]);
+      }
+    }
+    sv_free(&all);
   }
   if (shapes.len == 0) {
     nyt_err("ny-test", "bench: no .nshape benches found");
     sv_free(&shapes);
     return 2;
+  }
+  {
+    StrVec pats = {0};
+    if (files)
+      for (size_t i = 0; i < files->len; i++)
+        if (!nyt_ends_with(files->items[i], ".nshape"))
+          sv_push(&pats, files->items[i]);
+    printf("%sbench:%s %zu fixture%s%s", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET),
+           shapes.len, shapes.len == 1 ? "" : "s",
+           pats.len ? "" : "\n");
+    if (pats.len) {
+      printf(" matching ");
+      for (size_t i = 0; i < pats.len; i++)
+        printf("%s'%s'%s", i ? ", " : "", pats.items[i],
+               i + 1 < pats.len ? "" : "\n");
+    }
+    sv_free(&pats);
   }
 
   /*
@@ -7114,9 +7715,9 @@ static int run_benchmarks(const char *bin, const char *pattern, const char *opt_
   printf("%sruns:%s %s%d%s + %s%d%s warm-up\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET),
          nyt_clr(NYT_CYAN), runs, nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN), warmup,
          nyt_clr(NYT_RESET));
-  printf("%s%-22s %-8s %-7s %-10s %-8s %11s %11s %11s %11s %11s %11s %7s %7s %4s%s\n",
-         nyt_clr(NYT_BOLD), "benchmark", "backend", "engine", "cache", "status", "compiler",
-         "opt", "Ny native", "Ny LLVM", "C (host)", "wall", "native/C", "LLVM/C", "runs",
+  printf("%s%-22s %-6s %10s %9s %11s %11s %11s %8s %8s%s\n",
+         nyt_clr(NYT_BOLD), "benchmark", "status", "compiler", "opt",
+         "Ny native", "Ny LLVM", "C (host)", "native/C", "LLVM/C",
          nyt_clr(NYT_RESET));
 
   typedef struct {
@@ -7236,9 +7837,15 @@ static int run_benchmarks(const char *bin, const char *pattern, const char *opt_
   int unstable = 0;
   for (size_t i = 0; i < table.len; i++) {
     const BenchRow *r = &table.items[i];
-    if (!r->checksum_ok || r->ny_failures || r->llvm_failures || r->c_failures ||
-        r->budget_failed)
+    if (!r->checksum_ok || r->ny_failures || r->llvm_failures || r->c_failures)
       failed = 1;
+    if (r->budget_failed) {
+      if (budget_fail)
+        failed = 1;
+      else
+        printf("%sbudget miss (not fatal without --budget-fail): %s%s\n",
+               nyt_clr(NYT_YELLOW), r->name, nyt_clr(NYT_RESET));
+    }
     if (!correctness_only && runs >= 5 && bench_row_unstable(r)) {
       unstable = 1;
       failed = 1;

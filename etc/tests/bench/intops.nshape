@@ -13,11 +13,11 @@ mut acc = 0
 mut i = 1
 def xs = [3, 7, 11, 13]
 while i < n {
-   def x = xs.get(i % 4)
-   acc = acc + x
-   acc = acc - (x / 3)
-   acc = acc + ((x * 7) % 97)
-   i = i + 1
+   def x = xs[i & 3]
+   acc += x
+   acc -= x / 3
+   acc += (x * 7) % 97
+   i += 1
 }
 def end = ticks()
 print("checksum=", acc)

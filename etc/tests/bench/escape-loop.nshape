@@ -3,6 +3,11 @@ shape escape-loop {
   generator "stress"
   features ["perf", "escape", "sroa", "alloc", "c-vs-ny", "native", "checksum", "time"]
   template ny-test-case
+  tier "critical"
+  budget {
+    max_native_c_ratio 10.0
+    max_ny_compile_ms 3000
+  }
   expect compile_and_run
   source ny <<'NY'
 use std.core
@@ -36,13 +41,13 @@ int main(int argc, char **argv) {
     (void)argv;
     int N = 1000000 * argc;
     int64_t start = now_ns();
-    volatile long acc = 0;
+    volatile int64_t acc = 0;
     for (int i = 0; i < N; i++) {
-        long t = (long)i; /* transient scalar: C keeps it in a register (SROA) */
+        int64_t t = (int64_t)i; /* transient scalar: C keeps it in a register (SROA) */
         acc += t;
     }
     int64_t end = now_ns();
-    printf("checksum=%ld\n", (long)acc);
+    printf("checksum=%lld\n", (long long)acc);
     if (end <= start) end = start + 1;
     printf("elapsed_ns=%lld\n", (long long)(end - start));
     return 0;

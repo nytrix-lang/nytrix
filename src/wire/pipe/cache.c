@@ -190,6 +190,13 @@ static bool ny_should_use_aot_cache(const ny_options *opt) {
   if (!opt || !opt->output_file || opt->run_jit ||
       (!opt->emit_only && !opt->run_aot))
     return false;
+  /*
+   * Lint modes (--warn-shadow, --warn-all) must run codegen so the
+   * unused-import / shadowing diagnostics are emitted; a cached artifact
+   * would silently skip them.
+   */
+  if (opt->warn_shadow || opt->warn_level >= 2)
+    return false;
   if (opt->stop_after != NY_STOP_AFTER_NONE || opt->emit_artifact_path ||
       opt->collect_errors || opt->emit_shapes)
     return false;
@@ -208,6 +215,13 @@ static bool ny_should_use_aot_cache(const ny_options *opt) {
 
 static bool ny_should_use_jit_cache(const ny_options *opt) {
   if (!opt)
+    return false;
+  /*
+   * Lint modes (--warn-shadow, --warn-all) must run codegen so the
+   * unused-import / shadowing diagnostics are emitted; a cached artifact
+   * would silently skip them.
+   */
+  if (opt->warn_shadow || opt->warn_level >= 2)
     return false;
   if (opt->emit_only && !opt->output_file && !opt->run_jit && !opt->run_aot)
     return false;

@@ -1,0 +1,131 @@
+shape reader_atoms {
+  family "reader-syntax"
+  generator "native"
+  features ["ny", "reader", "syntax", "atoms"]
+  template ny-test-case
+  expect compile_and_run
+
+  atoms {
+    atom literal_int_hex {
+      context  "spec.values"
+      purpose  "Integer hex parses and prints"
+      source   "use std.core\nprint(0xFF)"
+      expect   "255"
+      tier     "future"
+      status   "baseline"
+    }
+    atom literal_string_adjacent {
+      context    "spec.values"
+      purpose    "Adjacent string literals rejected with diagnostic"
+      source     "use std.core\ndef adj = \"a\"\"b\"\nprint(adj)"
+      diagnostic "adjacent string"
+      tier       "future"
+      status     "baseline"
+    }
+    atom literal_int_zero {
+      context  "spec.values"
+      purpose  "Integer literal zero parses"
+      source   "0"
+      tier     "future"
+      status   "baseline"
+    }
+    atom literal_int_pos {
+      context  "spec.values"
+      purpose  "Integer literal positive parses"
+      source   "123"
+      tier     "future"
+      status   "baseline"
+    }
+    atom literal_float_simple {
+      context  "spec.values"
+      purpose  "Decimal float literal parses and prints"
+      source   "use std.core\nprint(3.14)"
+      expect   "3.14"
+      tier     "future"
+      status   "baseline"
+    }
+    atom literal_string_simple {
+      context  "spec.values"
+      purpose  "Simple string literal parses and prints"
+      source   "use std.core\nprint(\"hello\")"
+      expect   "hello"
+      tier     "future"
+      status   "baseline"
+    }
+    atom bool_true {
+      context  "spec.values"
+      purpose  "Boolean true parses and prints"
+      source   "use std.core\nprint(true)"
+      expect   "true"
+      tier     "future"
+      status   "baseline"
+    }
+    atom bool_false {
+      context  "spec.values"
+      purpose  "Boolean false parses and prints"
+      source   "use std.core\nprint(false)"
+      expect   "false"
+      tier     "future"
+      status   "baseline"
+    }
+    atom array_empty {
+      context  "spec.values"
+      purpose  "Empty array literal has length zero"
+      source   "use std.core\nprint(len([]))"
+      expect   "0"
+      tier     "future"
+      status   "baseline"
+    }
+    atom array_numbers {
+      context  "spec.values"
+      purpose  "Array of numbers parses and prints"
+      source   "use std.core\nprint([1, 2, 3])"
+      expect   "[1, 2, 3]"
+      tier     "future"
+      status   "baseline"
+    }
+    atom invalid_syntax {
+      context    "spec.syntax"
+      purpose    "Invalid operator sequence errors"
+      source     "1+*2"
+      diagnostic "syntax error"
+      tier       "future"
+      status     "baseline"
+    }
+  }
+
+  source ny <<'NY'
+use std.core
+
+;; Integer hex parses
+def hex_val = 0xFF
+assert(hex_val == 255, "hex parsing")
+
+;; Zero and positive integer literals
+def z = 0
+def p = 123
+assert(z == 0, "zero literal")
+assert(p == 123, "pos literal")
+
+;; Float literals
+def flt = 3.14
+assert(flt > 3.13 && flt < 3.15, "float literal")
+
+;; String literals
+def s = "hello"
+assert(s == "hello", "string literal")
+
+;; Boolean literals
+def t = true
+def f = false
+assert(t && !f, "boolean literals")
+
+;; Array / list literals
+def empty_arr = []
+def num_arr = [1, 2, 3]
+assert(len(empty_arr) == 0, "empty array")
+assert(len(num_arr) == 3 && num_arr[0] == 1 && num_arr[2] == 3, "number array")
+
+print("ok reader atoms")
+NY
+}

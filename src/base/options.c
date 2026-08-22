@@ -148,9 +148,9 @@ static void ny_warn_inline_code_semicolon(const ny_options *opt) {
     return;
   if (!ny_inline_code_semicolon_can_swallow(opt->command_string))
     return;
-  NY_LOG_WARN("inline -c code uses ';', which starts a line comment in Nytrix; "
-              "text after it is ignored. Use real newlines or spaces as "
-              "statement separators, for example: "
+  NY_LOG_WARN("';' is a comment in Nytrix, not a statement separator, so "
+              "everything after it on this line is ignored. To split "
+              "statements just use a space (or a newline), for example: "
               "ny -c $'use std.core\\nassert(true, \"ok\")'\n");
 }
 
@@ -1537,6 +1537,75 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     opt->nyir_run = true;
     return true;
   }
+  if (strcmp(a, "--trace-tokens") == 0) {
+    opt->trace_tokens = true;
+    return true;
+  }
+  if (strcmp(a, "--trace-parse") == 0) {
+    opt->trace_parse = true;
+    return true;
+  }
+  if (strcmp(a, "--trace-scope") == 0) {
+    opt->trace_scope = true;
+    return true;
+  }
+  if (strcmp(a, "--dump-ast-typed") == 0) {
+    opt->dump_ast_typed = true;
+    return true;
+  }
+  if (strcmp(a, "--trace-hm") == 0) {
+    opt->trace_hm = true;
+    return true;
+  }
+  if (strcmp(a, "--explain-any") == 0) {
+    opt->explain_any = true;
+    return true;
+  }
+  if (strcmp(a, "--dump-escapes") == 0) {
+    opt->dump_escapes = true;
+    return true;
+  }
+  if (strcmp(a, "--dump-proofs") == 0) {
+    opt->dump_proofs = true;
+    return true;
+  }
+  if (strcmp(a, "--trace-llvm") == 0) {
+    opt->trace_llvm = true;
+    return true;
+  }
+  if (strcmp(a, "--dump-llvm-passes") == 0) {
+    opt->dump_llvm_passes = true;
+    return true;
+  }
+  if (strcmp(a, "--trace-regalloc") == 0) {
+    opt->trace_regalloc = true;
+    return true;
+  }
+  if (strcmp(a, "--dump-obj-full") == 0) {
+    opt->dump_obj_full = true;
+    return true;
+  }
+  if (strcmp(a, "--compile-profile-fn") == 0) {
+    opt->compile_profile_fn = true;
+    return true;
+  }
+  if (strcmp(a, "--debug-everything") == 0) {
+    opt->debug_everything = true;
+    opt->trace_tokens = true;
+    opt->trace_parse = true;
+    opt->trace_scope = true;
+    opt->dump_ast_typed = true;
+    opt->trace_hm = true;
+    opt->explain_any = true;
+    opt->dump_escapes = true;
+    opt->dump_proofs = true;
+    opt->trace_llvm = true;
+    opt->dump_llvm_passes = true;
+    opt->trace_regalloc = true;
+    opt->dump_obj_full = true;
+    opt->compile_profile_fn = true;
+    return true;
+  }
   if (strcmp(a, "--native-result-oracle") == 0) {
     opt->native_result_oracle = true;
     opt->native_backend = NY_NATIVE_BACKEND_X86_64;
@@ -1686,6 +1755,14 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
   if (strcmp(a, "--no-strict-types") == 0) {
     opt->strict_types = false;
     opt->strict_types_explicit = true;
+    return true;
+  }
+  if (strcmp(a, "--list-fallbacks") == 0) {
+    opt->list_fallbacks = true;
+    return true;
+  }
+  if (strcmp(a, "--warn-shadow") == 0) {
+    opt->warn_shadow = true;
     return true;
   }
   if ((value = ny_option_value_or_die(a, "--max-errors", i, argc, argv,
@@ -2003,6 +2080,12 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
        "Reject dynamic type cliffs at compile time"},
       {NY_CLR_MAGENTA, "--no-strict-types",
        "Allow legacy dynamic type cliffs"},
+      {NY_CLR_MAGENTA, "--list-fallbacks",
+       "Dump every dynamic-any degradation (code, expr kind, line:col)"},
+      {NY_CLR_MAGENTA, "--warn-shadow",
+       "Warn when a declaration shadows an outer local (W2002)"},
+      {NY_CLR_MAGENTA, "--warn-all",
+       "Emit all lints and exit non-zero on any warning (CI mode)"},
       {NY_CLR_MAGENTA, "--max-errors=N",
        "Stop parsing after N errors (0 disables the cap)"},
       {NULL, NULL, NULL}});

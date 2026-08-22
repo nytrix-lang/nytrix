@@ -5,7 +5,7 @@ shape parser-missing-brace {
   template ny-compile-fail
   expect compile_fail
 
-  expect_message "check for missing ';' or unmatched brace"
+  expect_message "missing '}'"
   source ny <<'NY'
 use std.core
 

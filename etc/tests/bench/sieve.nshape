@@ -1,42 +1,43 @@
 shape sieve {
   family "perf-real"
   generator "stress"
-  features ["perf", "c-vs-ny", "checksum"]
+  features ["perf", "raw-buffer", "c-vs-ny", "native", "checksum", "time"]
+  meta "spec:types:array-vs-raw"
   template ny-test-case
+  tier "critical"
+  budget {
+    max_native_c_ratio 10.0
+    max_ny_compile_ms 3000
+  }
   expect compile_and_run
   source ny <<'NY'
 use std.core
 use std.os.time
-;; Sieve of Eratosthenes over a Ny list of flags.
 def N = 60000
 fn sieve(int n) int {
-   if n < 2 { return 0 }
-   def size = (n >> 1) + 1
-   mut list<int> flags = []
-   mut i = 0
-   while i < size {
-      flags = append(flags, 1)
-      i += 1
+ if n < 2 { return 0 }
+ def size = (n >> 1) + 1
+ def flags = malloc(size)
+ memset(flags, 1, size)
+ mut count = 1
+ mut p = 3
+ while p * p <= n {
+  if load8(flags, p >> 1) {
+   mut idx = (p * p) >> 1
+   while idx < size {
+    store8(flags, 0, idx)
+    idx += p
    }
-   mut count = 1
-   mut p = 3
-   while p * p <= n {
-      if flags[p >> 1] {
-         def sq = p * p
-         mut mul = sq
-         while mul <= n {
-            flags[mul >> 1] = 0
-            mul += p * 2
-         }
-      }
-      p += 2
-   }
-   i = 3
-   while i <= n {
-      if flags[i >> 1] { count += 1 }
-      i += 2
-   }
-   count
+  }
+  p += 2
+ }
+ mut i = 3
+ while i <= n {
+  if load8(flags, i >> 1) { count += 1 }
+  i += 2
+ }
+ free(flags)
+ count
 }
 def t0 = ticks()
 def r = sieve(N)
@@ -66,7 +67,7 @@ static int sieve(int n) {
     int count = 1;
     for (int p = 3; p * p <= n; p += 2) {
         if (flags[p >> 1]) {
-            for (int mul = p * p; mul <= n; mul += p * 2) flags[mul >> 1] = 0;
+            for (int idx = (p * p) >> 1; idx < size; idx += p) flags[idx] = 0;
         }
     }
     for (int i = 3; i <= n; i += 2) if (flags[i >> 1]) count++;

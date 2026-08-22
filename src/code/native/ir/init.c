@@ -669,6 +669,8 @@ const char *nyir_op_name(nyir_op_t op) {
     return "shl.i64";
   case NYIR_SAR_I64:
     return "sar.i64";
+  case NYIR_ROR_I64:
+    return "ror.i64";
   case NYIR_CMP_I64:
     return "cmp.i64";
   case NYIR_LABEL:
@@ -1037,6 +1039,7 @@ static void nyir_normalize_operands(nyir_inst_t *inst) {
   case NYIR_XOR_I64:
   case NYIR_SHL_I64:
   case NYIR_SAR_I64:
+  case NYIR_ROR_I64:
   case NYIR_CMP_I64:
   case NYIR_CMP_F64:
   case NYIR_CMP_F32:
@@ -1196,6 +1199,7 @@ static const char *nyir_op_short(const nyir_inst_t *in) {
   case NYIR_XOR_I64: return "xor";
   case NYIR_SHL_I64: return "shl";
   case NYIR_SAR_I64: return "sar";
+  case NYIR_ROR_I64: return "ror";
   case NYIR_CMP_I64: return nyir_cmp_i64_name(in->cmp);
   case NYIR_LABEL: return "L";
   case NYIR_LOAD_LOCAL: return "ld";

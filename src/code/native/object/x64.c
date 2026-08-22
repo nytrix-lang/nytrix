@@ -238,7 +238,7 @@ static int mach_carried_vreg_preg(const ny_x64_mach_enc_t *e, uint32_t vreg);
 static bool mach_vreg_can_forward_to_next_rax(const ny_x64_mach_enc_t *e,
                                               uint32_t vreg);
 
-#define MFP_COLOR_N 8
+#define MFP_COLOR_N 14
 #define MVEC_COLOR_N 8
 #define MACH_SEEDED_STACK_MAX 64
 
@@ -952,6 +952,7 @@ static bool mach_use_requires_home(const ny_mach_func_t *m,
     case NY_MACH_XOR:
     case NY_MACH_SHL:
     case NY_MACH_SAR:
+    case NY_MACH_ROR:
     case NY_MACH_CMP:
     case NY_MACH_STORE:
     case NY_MACH_RET:
@@ -2153,10 +2154,12 @@ static bool mach_float_fast_eligible(const ny_mach_func_t *mach) {
         in->opcode != NY_MACH_SUB && in->opcode != NY_MACH_MUL &&
         in->opcode != NY_MACH_DIV && in->opcode != NY_MACH_FMA &&
         in->opcode != NY_MACH_SQRT && in->opcode != NY_MACH_SIN &&
-        in->opcode != NY_MACH_COS &&
+        in->opcode != NY_MACH_COS && in->opcode != NY_MACH_CONVERT &&
+        in->opcode != NY_MACH_SHUFFLE &&
         in->opcode != NY_MACH_LOAD && in->opcode != NY_MACH_STORE &&
-        in->opcode != NY_MACH_CMP &&
-        in->opcode != NY_MACH_CALL && in->opcode != NY_MACH_RET)
+        in->opcode != NY_MACH_CMP && in->opcode != NY_MACH_BR &&
+        in->opcode != NY_MACH_BR_IF && in->opcode != NY_MACH_NOP &&
+        in->opcode != NY_MACH_RET)
       return false;
   }
   return has_float;
@@ -2985,22 +2988,47 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
           }
           break;
         }
-        if (!mach_load_op_rax(e, &in->src0))
-          return false;
         if (in->dst.kind == NY_MACH_OPERAND_FRAME) {
-          if (!mach_store_rax(e, dst))
+          if (!mach_load_op_rax(e, &in->src0) || !mach_store_rax(e, dst))
             return false;
         } else {
-          if (!mach_mov_reg_rax(e, 10) ||
-              !mach_load_op_rax(e, &in->dst))
-            return false;
-          if (in->byte_width) {
-            if (!mach_rex(e, false, true, false, false) ||
-                !mach_u8(e, 0x88) || !mach_u8(e, 0x10))
+          int64_t simm = 0;
+          bool is_imm = false;
+          if (in->src0.kind == NY_MACH_OPERAND_IMM) {
+            simm = in->src0.as.imm;
+            is_imm = true;
+          } else if (in->src0.kind == NY_MACH_OPERAND_VREG && imm_fold &&
+                     imm_fold_known && in->src0.as.reg < mach->vreg_len &&
+                     imm_fold_known[in->src0.as.reg]) {
+            simm = imm_fold[in->src0.as.reg];
+            is_imm = true;
+          }
+          if (is_imm && (int64_t)(int32_t)simm == simm) {
+            if (!mach_load_op_rax(e, &in->dst))
               return false;
-          } else if (!mach_rex(e, true, true, false, false) ||
-                     !mach_u8(e, 0x89) || !mach_u8(e, 0x10)) {
-            return false;
+            if (in->byte_width) {
+              if (!mach_u8(e, 0xc6) || !mach_u8(e, 0x00) ||
+                  !mach_u8(e, (unsigned char)simm))
+                return false;
+            } else {
+              if (!mach_rex(e, true, false, false, false) ||
+                  !mach_u8(e, 0xc7) || !mach_u8(e, 0x00) ||
+                  !mach_i32(e, (int32_t)simm))
+                return false;
+            }
+          } else {
+            if (!mach_load_op_rax(e, &in->src0) ||
+                !mach_mov_reg_rax(e, 10) ||
+                !mach_load_op_rax(e, &in->dst))
+              return false;
+            if (in->byte_width) {
+              if (!mach_rex(e, false, true, false, false) ||
+                  !mach_u8(e, 0x88) || !mach_u8(e, 0x10))
+                return false;
+            } else if (!mach_rex(e, true, true, false, false) ||
+                       !mach_u8(e, 0x89) || !mach_u8(e, 0x10)) {
+              return false;
+            }
           }
         }
         break;
@@ -3023,31 +3051,97 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
       case NY_MACH_CONVERT:
         if (mach_is_f64(mach, &in->dst) && mach_is_i64(mach, &in->src0)) {
           /*
-           * cvtsi2sdq %rax, %xmm0
+           * cvtsi2sdq %rax, %xmm0.  The i64 source may be a colored GPR
+           * vreg whose home slot was never written (const COPY commits only
+           * the preg), so load through mach_load_op_rax which seeds the
+           * colored preg instead of reading a stale home.
            */
-          if (!mach_load_rax(e, a) || !mach_u8(e, 0xf2) || !mach_rex(e, true, false, false, false) ||
-              !mach_u8(e, 0x0f) || !mach_u8(e, 0x2a) || !mach_u8(e, 0xc0) ||
-              !mach_store_xmm0(e, dst, false))
+          unsigned dreg = in->dst.kind == NY_MACH_OPERAND_VREG
+                              ? mach_vreg_fpreg(e, in->dst.as.reg)
+                              : -1;
+          unsigned d = dreg >= 0 ? (unsigned)dreg : 0;
+          if (!mach_load_op_rax(e, &in->src0) || !mach_u8(e, 0xf2) ||
+              !mach_rex(e, true, dreg >= 8, false, false) ||
+              !mach_u8(e, 0x0f) || !mach_u8(e, 0x2a) ||
+              !mach_u8(e, (unsigned)(0xc0 | (d & 7))) ||
+              (dreg >= 0 ? true : !mach_store_xmm0(e, dst, false)))
             return false;
+          if (dreg >= 0) {
+            if (e->fp_color_seeded)
+              e->fp_color_seeded[in->dst.as.reg] = true;
+          }
+          break;
         } else if (mach_is_f32(mach, &in->dst) && mach_is_i64(mach, &in->src0)) {
-          if (!mach_load_rax(e, a) || !mach_u8(e, 0xf3) || !mach_rex(e, true, false, false, false) ||
-              !mach_u8(e, 0x0f) || !mach_u8(e, 0x2a) || !mach_u8(e, 0xc0) ||
-              !mach_store_xmm0(e, dst, true))
+          unsigned dreg = in->dst.kind == NY_MACH_OPERAND_VREG
+                              ? mach_vreg_fpreg(e, in->dst.as.reg)
+                              : -1;
+          unsigned d = dreg >= 0 ? (unsigned)dreg : 0;
+          if (!mach_load_op_rax(e, &in->src0) || !mach_u8(e, 0xf3) ||
+              !mach_rex(e, true, dreg >= 8, false, false) ||
+              !mach_u8(e, 0x0f) || !mach_u8(e, 0x2a) ||
+              !mach_u8(e, (unsigned)(0xc0 | (d & 7))) ||
+              (dreg >= 0 ? true : !mach_store_xmm0(e, dst, true)))
             return false;
+          if (dreg >= 0) {
+            if (e->fp_color_seeded)
+              e->fp_color_seeded[in->dst.as.reg] = true;
+          }
+          break;
         } else if (mach_is_f64(mach, &in->dst) && mach_is_f32(mach, &in->src0)) {
-          if (!mach_load_xmm0(e, a, true) || !mach_u8(e, 0xf3) || !mach_u8(e, 0x0f) ||
-              !mach_u8(e, 0x5a) || !mach_u8(e, 0xc0) || !mach_store_xmm0(e, dst, false))
+          /*
+           * cvtss2sd: the source may be a fast-path-colored float vreg whose
+           * home slot was never written (mach_float_copy skips the home store
+           * for colored vregs), so load through mach_load_float_operand and
+           * keep the result in the destination color when assigned.
+           */
+          unsigned d = 14, src_reg = 14;
+          int assigned = in->dst.kind == NY_MACH_OPERAND_VREG
+                             ? mach_vreg_fpreg(e, in->dst.as.reg)
+                             : -1;
+          if (assigned >= 0)
+            d = (unsigned)assigned;
+          if (!mach_load_float_operand(e, &in->src0, true, d, &src_reg))
+            return false;
+          if (src_reg != d && !mach_sse_mov_reg(e, d, src_reg, true))
+            return false;
+          if (!mach_sse_op_reg(e, d, d, true, 0x5a))
+            return false;
+          if (assigned >= 0) {
+            if (e->fp_color_seeded)
+              e->fp_color_seeded[in->dst.as.reg] = true;
+          } else if (!mach_store_xmm(e, dst, false, d))
             return false;
         } else if (mach_is_f32(mach, &in->dst) && mach_is_f64(mach, &in->src0)) {
-          if (!mach_load_xmm0(e, a, false) || !mach_u8(e, 0xf2) || !mach_u8(e, 0x0f) ||
-              !mach_u8(e, 0x5a) || !mach_u8(e, 0xc0) || !mach_store_xmm0(e, dst, true))
+          /*
+           * cvtsd2ss: same colored-source handling as cvtss2sd above.
+           */
+          unsigned d = 14, src_reg = 14;
+          int assigned = in->dst.kind == NY_MACH_OPERAND_VREG
+                             ? mach_vreg_fpreg(e, in->dst.as.reg)
+                             : -1;
+          if (assigned >= 0)
+            d = (unsigned)assigned;
+          if (!mach_load_float_operand(e, &in->src0, false, d, &src_reg))
+            return false;
+          if (src_reg != d && !mach_sse_mov_reg(e, d, src_reg, false))
+            return false;
+          if (!mach_sse_op_reg(e, d, d, false, 0x5a))
+            return false;
+          if (assigned >= 0) {
+            if (e->fp_color_seeded)
+              e->fp_color_seeded[in->dst.as.reg] = true;
+          } else if (!mach_store_xmm(e, dst, true, d))
             return false;
         } else if (mach_is_i64(mach, &in->dst) &&
                    (mach_is_f64(mach, &in->src0) ||
                     mach_is_f32(mach, &in->src0))) {
           bool f32 = mach_is_f32(mach, &in->src0);
-          if (!mach_load_xmm0(e, a, f32) ||
-              !mach_u8(e, f32 ? 0xf3 : 0xf2) ||
+          unsigned src_reg = 15;
+          if (!mach_load_float_operand(e, &in->src0, f32, 15, &src_reg))
+            return false;
+          if (src_reg != 0 && !mach_sse_mov_reg(e, 0, src_reg, f32))
+            return false;
+          if (!mach_u8(e, f32 ? 0xf3 : 0xf2) ||
               !mach_rex(e, true, false, false, false) ||
               !mach_u8(e, 0x0f) || !mach_u8(e, 0x2c) ||
               !mach_u8(e, 0xc0) ||
@@ -3056,22 +3150,37 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
         } else
           return mach_err(e, "x64 machine form encode: unsupported CONVERT");
         break;
-      case NY_MACH_SQRT:
+      case NY_MACH_SQRT: {
+        bool is_f32 = false;
         if (mach_is_f64(mach, &in->dst) && mach_is_f64(mach, &in->src0)) {
-          if (!mach_load_xmm0(e, a, false) ||
-              !mach_u8(e, 0xf2) || !mach_u8(e, 0x0f) ||
-              !mach_u8(e, 0x51) || !mach_u8(e, 0xc0) ||
-              !mach_store_xmm0(e, dst, false))
-            return false;
+          is_f32 = false;
         } else if (mach_is_f32(mach, &in->dst) && mach_is_f32(mach, &in->src0)) {
-          if (!mach_load_xmm0(e, a, true) ||
-              !mach_u8(e, 0xf3) || !mach_u8(e, 0x0f) ||
-              !mach_u8(e, 0x51) || !mach_u8(e, 0xc0) ||
-              !mach_store_xmm0(e, dst, true))
-            return false;
+          is_f32 = true;
         } else
           return mach_err(e, "x64 machine form encode: unsupported SQRT type");
+
+        unsigned d = 14, src_reg = 14;
+        int assigned = in->dst.kind == NY_MACH_OPERAND_VREG
+                           ? mach_vreg_fpreg(e, in->dst.as.reg)
+                           : -1;
+        if (assigned >= 0)
+          d = (unsigned)assigned;
+
+        if (!mach_load_float_operand(e, &in->src0, is_f32, d, &src_reg))
+          return false;
+        if (src_reg != d && !mach_sse_mov_reg(e, d, src_reg, is_f32))
+          return false;
+        
+        if (!mach_sse_op_reg(e, d, d, is_f32, 0x51))
+          return false;
+
+        if (assigned >= 0) {
+          if (e->fp_color_seeded)
+            e->fp_color_seeded[in->dst.as.reg] = true;
+        } else if (!mach_store_xmm(e, dst, is_f32, d))
+          return false;
         break;
+      }
       case NY_MACH_SIN:
       case NY_MACH_COS:
         if (!mach_is_f64(mach, &in->dst) || !mach_is_f64(mach, &in->src0))
@@ -3173,8 +3282,8 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
              * addpd/subpd/mulpd/divpd — 66 0F opc
              */
             if (in->opcode == NY_MACH_AND || in->opcode == NY_MACH_OR ||
-                in->opcode == NY_MACH_XOR)
-              return mach_err(e, "x64 machine form encode: no packed f64 bitwise");
+                in->opcode == NY_MACH_XOR || in->opcode == NY_MACH_SHL || in->opcode == NY_MACH_SAR || in->opcode == NY_MACH_ROR)
+              return mach_err(e, "x64 machine form encode: no packed f64 bitwise/shift");
             unsigned char opc = in->opcode == NY_MACH_ADD ? 0x58
                               : in->opcode == NY_MACH_SUB ? 0x5c
                               : in->opcode == NY_MACH_MUL ? 0x59
@@ -3189,8 +3298,8 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
              * addps/subps/mulps/divps — 0F opc
              */
             if (in->opcode == NY_MACH_AND || in->opcode == NY_MACH_OR ||
-                in->opcode == NY_MACH_XOR)
-              return mach_err(e, "x64 machine form encode: no packed f32 bitwise");
+                in->opcode == NY_MACH_XOR || in->opcode == NY_MACH_SHL || in->opcode == NY_MACH_SAR || in->opcode == NY_MACH_ROR)
+              return mach_err(e, "x64 machine form encode: no packed f32 bitwise/shift");
             unsigned char opc = in->opcode == NY_MACH_ADD ? 0x58
                               : in->opcode == NY_MACH_SUB ? 0x5c
                               : in->opcode == NY_MACH_MUL ? 0x59
@@ -3204,7 +3313,7 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
             return mach_err(e, "x64 machine form encode: bad v128 ALU type");
           break;
         }
-        if (in->opcode == NY_MACH_SHL || in->opcode == NY_MACH_SAR) {
+        if (in->opcode == NY_MACH_SHL || in->opcode == NY_MACH_SAR || in->opcode == NY_MACH_ROR) {
           if (mach_is_v128(mach, &in->dst)) {
             if (!e->vec_fast_path)
               return mach_err(e, "x64 machine form encode: vector shift requires fast path");
@@ -3214,9 +3323,9 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
                                vt == NY_MACH_TYPE_V128_F64) ? 0x66 : 0;
             unsigned opc;
             if (vt == NY_MACH_TYPE_V128_I64 || vt == NY_MACH_TYPE_V128_F64) {
-              opc = is_shift_left ? 0xf3 : 0xe3;
+              opc = is_shift_left ? 0xf3 : (in->opcode == NY_MACH_ROR ? 0x30 : 0xe3);
             } else if (vt == NY_MACH_TYPE_V128_F32) {
-              opc = is_shift_left ? 0xf2 : 0xe2;
+              opc = is_shift_left ? 0xf2 : (in->opcode == NY_MACH_ROR ? 0x30 : 0xe2);
             } else {
               return mach_err(e, "x64 machine form encode: unsupported vector shift type");
             }
@@ -3225,13 +3334,13 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
             break;
           }
           /*
-           * Scalar 64-bit shift: dst = a (<op> count) with count in cl or imm.
+           * Scalar 64-bit shift/rotate: dst = a (<op> count) with count in cl or imm.
            */
           if (!mach_is_i64(mach, &in->dst))
-            return mach_err(e, "x64 machine form encode: scalar shift needs i64");
+            return mach_err(e, "x64 machine form encode: scalar shift/rotate needs i64");
           if (!mach_load_op_rax(e, &in->src0))
             return false;
-          unsigned op = in->opcode == NY_MACH_SHL ? 0xe0 : 0xf8; /* /4|/7 */
+          unsigned op = in->opcode == NY_MACH_SHL ? 0xe0 : in->opcode == NY_MACH_SAR ? 0xf8 : 0xc8; /* /4|/7|/1 */
           int64_t fold = 0;
           bool fold_ok = false;
           if (in->src1.kind == NY_MACH_OPERAND_IMM) {
@@ -3899,7 +4008,7 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
             return mach_err(e, "x64 machine form encode: bad float cond");
           if (!mach_u8(e, 0x0f) || !mach_u8(e, setcc) || !mach_u8(e, 0xc0) ||
               !mach_rex(e, true, false, false, false) || !mach_u8(e, 0x0f) || !mach_u8(e, 0xb6) ||
-              !mach_u8(e, 0xc0) || !mach_store_rax(e, dst))
+              !mach_u8(e, 0xc0) || !mach_commit_vreg(e, &in->dst, dst))
             return false;
           break;
         }
@@ -4077,6 +4186,8 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
           else
             ++stack_n;
         }
+        if (!mach_flush_float_to_home(e) || !mach_flush_vector_to_home(e))
+          return false;
         size_t shadow = is_win && e->target ? e->target->shadow_space_bytes : 0;
         size_t stack_bytes = ((stack_n * 8 + shadow) + 15) & ~(size_t)15;
         if (stack_bytes) {

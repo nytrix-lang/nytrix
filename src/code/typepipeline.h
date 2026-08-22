@@ -23,6 +23,8 @@ char *ny_type_pipeline_lowered_json(program_t *prog, codegen_t *cg, const char *
                                     bool include_std);
 int ny_type_pipeline_validate_hm(program_t *prog, codegen_t *cg, const char *source_name,
                                  bool include_std, bool emit_diagnostics);
+int ny_type_pipeline_list_fallbacks(program_t *prog, codegen_t *cg, const char *source_name,
+                                    bool include_std);
 int ny_type_pipeline_validate_trait(program_t *prog, codegen_t *cg, const char *source_name,
                                     bool include_std, bool emit_diagnostics);
 int ny_type_pipeline_validate_abi(program_t *prog, codegen_t *cg, const char *source_name,

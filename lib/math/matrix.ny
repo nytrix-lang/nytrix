@@ -969,16 +969,273 @@ fn matrix_hnf(any m) list {
    return matrix_hermite_form(m)
 }
 
-; TODO(A-ν): Implement unimodular transform matrix
-fn matrix_hnf_transform(any m) any {
-   "Reserved transform-returning HNF surface. Returns [H, U] once unimodular transforms are implemented."
-   panic("matrix_hnf_transform: unimodular transform matrix is not implemented")
+fn matrix_hnf_transform(any m) list {
+   "Return [H, U] where H is the Hermite normal form of m and U is a unimodular
+   transformation matrix such that U * m = H."
+   mut src = m
+   mut nrows = 0
+   mut ncols = 0
+   if is_matrix(m) {
+      nrows = int(m.get(0))
+      ncols = int(m.get(1))
+      src = m.get(2)
+   } else {
+      nrows = len(m)
+      ncols = nrows > 0 ? len(m.get(0)) : 0
+   }
+   mut rows_data = []
+   mut u_data = []
+   mut ii = 0
+   while ii < nrows {
+      mut row_copy = []
+      mut u_row = []
+      mut jj = 0
+      while jj < ncols {
+         row_copy = row_copy.append(Z(src.get(ii).get(jj)))
+         jj += 1
+      }
+      mut kk = 0
+      while kk < nrows {
+         u_row = u_row.append(Z(kk == ii ? 1 : 0))
+         kk += 1
+      }
+      rows_data = rows_data.append(row_copy)
+      u_data = u_data.append(u_row)
+      ii += 1
+   }
+   mut prow = 0
+   mut col = 0
+   while col < ncols && prow < nrows {
+      mut pivot_row = -1
+      mut i = prow
+      while i < nrows && pivot_row < 0 {
+         if rows_data.get(i).get(col) != Z(0) { pivot_row = i }
+         i += 1
+      }
+      if pivot_row >= 0 {
+         if pivot_row != prow {
+            def tmp_r = rows_data.get(prow)
+            rows_data[prow] = rows_data.get(pivot_row)
+            rows_data[pivot_row] = tmp_r
+            def tmp_u = u_data.get(prow)
+            u_data[prow] = u_data.get(pivot_row)
+            u_data[pivot_row] = tmp_u
+         }
+         mut changed = true
+         while changed {
+            changed = false
+            i = prow + 1
+            while i < nrows && !changed {
+               if rows_data.get(i).get(col) != Z(0) {
+                  def rp, ri = rows_data.get(prow), rows_data.get(i)
+                  def up, ui = u_data.get(prow), u_data.get(i)
+                  def aa = rp.get(col)
+                  def bb = ri.get(col)
+                  mut eg = xgcd(aa, bb)
+                  mut g = eg.get(0)
+                  mut s = eg.get(1)
+                  mut t = eg.get(2)
+                  if g < Z(0) {
+                     g, s = 0 - g, 0 - s
+                     t = 0 - t
+                  }
+                  rows_data[prow] = _matrix_row_linear(rp, ri, s, t)
+                  rows_data[i] = _matrix_row_linear(rp, ri, (0 - bb) / g, aa / g)
+                  u_data[prow] = _matrix_row_linear(up, ui, s, t)
+                  u_data[i] = _matrix_row_linear(up, ui, (0 - bb) / g, aa / g)
+                  changed = true
+               }
+               i += 1
+            }
+         }
+         if rows_data.get(prow).get(col) < Z(0) {
+            mut row = []
+            mut urow = []
+            mut j = 0
+            while j < ncols {
+               row = row.append(0 - rows_data.get(prow).get(j))
+               j += 1
+            }
+            j = 0
+            while j < nrows {
+               urow = urow.append(0 - u_data.get(prow).get(j))
+               j += 1
+            }
+            rows_data[prow] = row
+            u_data[prow] = urow
+         }
+         def pivot = rows_data.get(prow).get(col)
+         i = 0
+         while i < prow {
+            def q = _matrix_floor_div_pos(rows_data.get(i).get(col), pivot)
+            if q != Z(0) {
+               rows_data[i] = _matrix_row_linear(rows_data.get(i), rows_data.get(prow), Z(1), 0 - q)
+               u_data[i] = _matrix_row_linear(u_data.get(i), u_data.get(prow), Z(1), 0 - q)
+            }
+            i += 1
+         }
+         prow += 1
+      }
+      col += 1
+   }
+   return [[nrows, ncols, rows_data], [nrows, nrows, u_data]]
 }
 
-; TODO(A-ν): Implement unimodular transform matrices
-fn matrix_snf_transform(any m) any {
-   "Reserved transform-returning SNF surface. Returns [S, U, V] once unimodular transforms are implemented."
-   panic("matrix_snf_transform: unimodular transform matrices are not implemented")
+fn matrix_snf_transform(any m) list {
+   "Return [S, U, V] where S is the Smith normal form of m and U, V are unimodular
+   integer matrices such that U * m * V = S."
+   mut src = m
+   mut nrows = 0
+   mut ncols = 0
+   if is_matrix(m) {
+      nrows = int(m.get(0))
+      ncols = int(m.get(1))
+      src = m.get(2)
+   } else {
+      nrows = len(m)
+      ncols = nrows > 0 ? len(m.get(0)) : 0
+   }
+   mut A = []
+   mut U = []
+   mut V = []
+   mut ii = 0
+   while ii < nrows {
+      mut row = []
+      mut u_row = []
+      mut jj = 0
+      while jj < ncols {
+         row = row.append(Z(src.get(ii).get(jj)))
+         jj += 1
+      }
+      mut kk = 0
+      while kk < nrows {
+         u_row = u_row.append(Z(kk == ii ? 1 : 0))
+         kk += 1
+      }
+      A = A.append(row)
+      U = U.append(u_row)
+      ii += 1
+   }
+   ii = 0
+   while ii < ncols {
+      mut v_row = []
+      mut jj = 0
+      while jj < ncols {
+         v_row = v_row.append(Z(jj == ii ? 1 : 0))
+         jj += 1
+      }
+      V = V.append(v_row)
+      ii += 1
+   }
+   mut step = 0
+   def min_dim = nrows < ncols ? nrows : ncols
+   while step < min_dim {
+      mut progress = true
+      while progress {
+         progress = false
+         mut p_row = -1
+         mut p_col = -1
+         mut min_val = nil
+         mut r = step
+         while r < nrows {
+            mut c = step
+            while c < ncols {
+               def val = A.get(r).get(c)
+               if val != Z(0) {
+                  def abs_val = val < Z(0) ? 0 - val : val
+                  if min_val == nil || abs_val < min_val {
+                     min_val = abs_val
+                     p_row = r
+                     p_col = c
+                  }
+               }
+               c += 1
+            }
+            r += 1
+         }
+         if p_row >= 0 {
+            if p_row != step {
+               def tmp_a = A.get(step)
+               A[step] = A.get(p_row)
+               A[p_row] = tmp_a
+               def tmp_u = U.get(step)
+               U[step] = U.get(p_row)
+               U[p_row] = tmp_u
+            }
+            if p_col != step {
+               mut row_i = 0
+               while row_i < nrows {
+                  def tmp_v = A.get(row_i).get(step)
+                  A[row_i][step] = A.get(row_i).get(p_col)
+                  A[row_i][p_col] = tmp_v
+                  row_i += 1
+               }
+               mut col_i = 0
+               while col_i < ncols {
+                  def tmp_v = V.get(col_i).get(step)
+                  V[col_i][step] = V.get(col_i).get(p_col)
+                  V[col_i][p_col] = tmp_v
+                  col_i += 1
+               }
+            }
+            if A.get(step).get(step) < Z(0) {
+               mut c = 0
+               while c < ncols {
+                  A[step][c] = 0 - A.get(step).get(c)
+                  c += 1
+               }
+               mut c_u = 0
+               while c_u < nrows {
+                  U[step][c_u] = 0 - U.get(step).get(c_u)
+                  c_u += 1
+               }
+            }
+            def pivot = A.get(step).get(step)
+            mut row_k = step + 1
+            while row_k < nrows {
+               if A.get(row_k).get(step) != Z(0) {
+                  def q = Z(A.get(row_k).get(step)) / pivot
+                  A[row_k] = _matrix_row_linear(A.get(row_k), A.get(step), Z(1), 0 - q)
+                  U[row_k] = _matrix_row_linear(U.get(row_k), U.get(step), Z(1), 0 - q)
+                  if A.get(row_k).get(step) != Z(0) { progress = true }
+               }
+               row_k += 1
+            }
+            mut col_k = step + 1
+            while col_k < ncols {
+               if A.get(step).get(col_k) != Z(0) {
+                  def q = Z(A.get(step).get(col_k)) / pivot
+                  mut ri = 0
+                  while ri < nrows {
+                     A[ri][col_k] = A.get(ri).get(col_k) - q * A.get(ri).get(step)
+                     ri += 1
+                  }
+                  mut vi = 0
+                  while vi < ncols {
+                     V[vi][col_k] = V.get(vi).get(col_k) - q * V.get(vi).get(step)
+                     vi += 1
+                  }
+                  if A.get(step).get(col_k) != Z(0) { progress = true }
+               }
+               col_k += 1
+            }
+         }
+      }
+      step += 1
+   }
+   mut S_rows = []
+   ii = 0
+   while ii < nrows {
+      mut s_row = []
+      mut jj = 0
+      while jj < ncols {
+         s_row = s_row.append(ii == jj ? A.get(ii).get(jj) : Z(0))
+         jj += 1
+      }
+      S_rows = S_rows.append(s_row)
+      ii += 1
+   }
+   return [[nrows, ncols, S_rows], [nrows, nrows, U], [ncols, ncols, V]]
 }
 
 fn matrix_change_ring(any m, any ring) list {

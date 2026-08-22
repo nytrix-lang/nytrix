@@ -4,20 +4,20 @@ shape bench_straight {
   features ["perf", "straight-line", "c-vs-ny", "native", "checksum", "time"]
   template ny-test-case
   expect compile_and_run
-ci windows-skip
-  source ny generate awk <<'AWK'
-BEGIN {
-  print "use std.core"
-  print "use std.os.time"
-  print "def t0 = ticks()"
-  print "mut x = 0"
-  for (i = 1; i <= 100; i++)
-    print "x = x + " i
-  print "def t1 = ticks()"
-  print "print(\"checksum=\", x)"
-  print "print(\"elapsed_ns=\", t1 - t0)"
+  source ny <<'NY'
+use std.core
+use std.os.time
+def t0 = ticks()
+mut x = 0
+mut i = 1
+while i <= 100 {
+  x += i
+  i += 1
 }
-AWK
+def t1 = ticks()
+print("checksum=", x)
+print("elapsed_ns=", t1 - t0)
+NY
   source c <<'C'
 #include <stdint.h>
 #include <stdio.h>

@@ -507,7 +507,7 @@ static LLVMValueRef ny_try_emit_direct_list_ctor(codegen_t *cg, scope *scopes,
                         NY_LLVM_NAME(cg, "list_direct"));
 }
 
-static bool ny_expr_is_literal_int_list(expr_t *e) {
+bool ny_expr_is_literal_int_list(expr_t *e) {
   if (!ny_expr_is_list_or_tuple_lit(e))
     return false;
   for (size_t i = 0; i < e->as.list_like.len; ++i) {
@@ -518,7 +518,7 @@ static bool ny_expr_is_literal_int_list(expr_t *e) {
   return true;
 }
 
-static expr_t *ny_binding_flow_static_int_list_init(binding *b) {
+expr_t *ny_binding_flow_static_int_list_init(binding *b) {
   if (!b || b->static_indexable_invalid || !b->is_int_list_storage)
     return NULL;
   if (b->escapes && !b->static_indexable_object_elided)
@@ -527,9 +527,9 @@ static expr_t *ny_binding_flow_static_int_list_init(binding *b) {
   return ny_expr_is_literal_int_list(init) ? init : NULL;
 }
 
-static binding *ny_static_int_list_target_binding(codegen_t *cg, scope *scopes,
-                                                  size_t depth,
-                                                  expr_t *target) {
+binding *ny_static_int_list_target_binding(codegen_t *cg, scope *scopes,
+                                            size_t depth,
+                                            expr_t *target) {
   if (!target || target->kind != NY_E_IDENT || !target->as.ident.name)
     return NULL;
   size_t name_len = (size_t)target->tok.len;
@@ -551,9 +551,9 @@ static bool ny_static_int_list_in_std_origin(codegen_t *cg) {
   return mod && (strncmp(mod, "std.", 4) == 0 || strncmp(mod, "lib.", 4) == 0);
 }
 
-static LLVMValueRef ny_static_int_list_global(codegen_t *cg, binding *b,
-                                              expr_t *init,
-                                              LLVMTypeRef *out_array_ty) {
+LLVMValueRef ny_static_int_list_global(codegen_t *cg, binding *b,
+                                        expr_t *init,
+                                        LLVMTypeRef *out_array_ty) {
   if (!cg || !b || !init || !ny_expr_is_literal_int_list(init))
     return NULL;
   size_t len = init->as.list_like.len;

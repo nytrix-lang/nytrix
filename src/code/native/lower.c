@@ -274,6 +274,7 @@ typedef struct {
   bool is_f64;
   bool is_f32;
   bool is_cstr;
+  bool is_bool; /* raw 0/1 i64 from a comparison/logical/boolean literal */
   bool is_sb;   /* cstr backed by an amortized-growth builder (self-concat) */
   bool sb_candidate; /* unobserved mutable local initialized from a literal */
   int sb_slot;  /* slot holding the native builder handle, or -1 */
@@ -994,6 +995,7 @@ static bool ny_native_nir_expr_is_list(const ny_native_nir_builder_t *b,
                                        const expr_t *e);
 static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b, const expr_t *e);
 static bool ny_native_nir_expr_is_cstr(ny_native_nir_builder_t *b, const expr_t *e);
+static bool ny_native_nir_expr_is_bool(ny_native_nir_builder_t *b, const expr_t *e);
 static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b, const expr_t *e);
 static const expr_t *ny_native_nir_find_top_level_value(const ny_native_nir_builder_t *b, const char *name);
 static const expr_t *ny_native_nir_resolve_member_expr(const ny_native_nir_builder_t *b, const expr_t *e);
@@ -1625,6 +1627,48 @@ static bool ny_native_nir_expr_is_cstr(ny_native_nir_builder_t *b,
                            : NULL;
     return fn && fn->as.fn.return_type &&
            strcmp(fn->as.fn.return_type, "str") == 0;
+  }
+  default:
+    return false;
+  }
+}
+
+/*
+ * True when the expression produces a boolean value (a comparison, logical
+ * operation, boolean literal, or boolean unary).  These lower to a raw 0/1
+ * i64 in NYIR, so string formatting must route them through
+ * rt_native_bool_to_cstr rather than the i64 formatter, which would print
+ * the raw 0/1 bits.
+ */
+static bool ny_native_nir_expr_is_bool(ny_native_nir_builder_t *b,
+                                       const expr_t *e) {
+  if (!e)
+    return false;
+  switch (e->kind) {
+  case NY_E_LITERAL:
+    return e->as.literal.kind == NY_LIT_BOOL;
+  case NY_E_BINARY:
+    return ny_native_nir_cmp(e->as.binary.op, &(nyir_cmp_t){0});
+  case NY_E_LOGICAL:
+    return true;
+  case NY_E_UNARY:
+    return e->as.unary.op && strcmp(e->as.unary.op, "!") == 0;
+  case NY_E_TERNARY:
+    return ny_native_nir_expr_is_bool(b, e->as.ternary.true_expr) &&
+           ny_native_nir_expr_is_bool(b, e->as.ternary.false_expr);
+  case NY_E_IDENT: {
+    /*
+     * A binding initialized from a boolean expression keeps the raw 0/1
+     * value, so follow its initializer for classification.  Do not chase
+     * ident->ident chains (bounded, cycle-free).
+     */
+    ny_native_nir_local_t *l = ny_native_nir_find_local(b, e->as.ident.name);
+    if (l)
+      return l->is_bool;
+    const expr_t *g = ny_native_nir_find_top_level_value(b, e->as.ident.name);
+    if (g && g != e && g->kind != NY_E_IDENT)
+      return ny_native_nir_expr_is_bool(b, g);
+    return false;
   }
   default:
     return false;

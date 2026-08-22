@@ -113,18 +113,129 @@ static bool parser_block_allows_file_level_decls(parser_t *p, token_t lbrace) {
          (line[6] == ' ' || line[6] == '\t' || line[6] == '(');
 }
 
+/*
+ * In Nytrix a ';' followed by whitespace (or end of line) starts a line
+ * comment, so a C-style separator such as `{ 1; 2 }` silently drops `2 }` and
+ * yields a confusing "missing '}'" at EOF. Returns true when a line comment
+ * between the block-open line and EOF likely swallowed the closing '}'.
+ */
+static bool parser_semicolon_swallowed_rbrace(parser_t *p, int opened_line,
+                                              int *semi_line, int *semi_col) {
+  if (semi_line)
+    *semi_line = 0;
+  if (semi_col)
+    *semi_col = 0;
+  if (!p || !p->src || opened_line < 1)
+    return false;
+  /*
+   * The pipeline concatenates [stdlib][#line 1 "file"][user source] into one
+   * buffer; split_pos marks where the user region begins. The lexer resets
+   * its line counter to 1 at split_pos, so a raw scan from p->src would
+   * count stdlib lines and report a bogus "line 7563". Start the scan at the
+   * user region and skip the leading #line directive (if any), exactly the
+   * way the lexer maps the region.
+   */
+  const char *line = p->src;
+  int line_no = 1;
+  if (p->lex.split_pos > 0) {
+    const char *region = p->src + p->lex.split_pos;
+    if (strncmp(region, "#line ", 6) == 0) {
+      const char *nl = strchr(region, '\n');
+      if (nl)
+        region = nl + 1;
+    }
+    line = region;
+  } else {
+    while (line_no < opened_line && *line) {
+      if (*line == '\n')
+        line_no++;
+      line++;
+    }
+  }
+  while (*line) {
+    const char *eol = line;
+    while (*eol && *eol != '\n')
+      eol++;
+    bool in_str = false;
+    for (const char *c = line; c < eol; c++) {
+      char ch = *c;
+      if (in_str) {
+        if (ch == '\\') {
+          c++;
+        } else if (ch == '"') {
+          in_str = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        in_str = true;
+        continue;
+      }
+      if (ch != ';')
+        continue;
+      char nx = (c + 1 < eol) ? c[1] : '\0';
+      /*
+       * ';{', ';<', ';[', ';(' and ';MARKER' start block comments that the
+       * lexer diagnoses on its own; every other ';' is a line comment that
+       * swallows the rest of its line.
+       */
+      if (nx == '{' || nx == '<' || nx == '[' || nx == '(' ||
+          (nx >= 'a' && nx <= 'z') || (nx >= 'A' && nx <= 'Z') || nx == '_')
+        continue;
+      bool has_rbrace = false;
+      for (const char *q = c + 1; q < eol; q++) {
+        if (*q == '}') {
+          has_rbrace = true;
+          break;
+        }
+      }
+      if (has_rbrace) {
+        if (semi_line)
+          *semi_line = line_no;
+        if (semi_col)
+          *semi_col = (int)(c - line) + 1;
+        return true;
+      }
+    }
+    if (!*eol)
+      break;
+    line = eol + 1;
+    line_no++;
+  }
+  return false;
+}
+
 static void parser_report_missing_rbrace_once(parser_t *p, token_t at,
                                               const char *msg,
                                               int opened_line) {
   if (p->last_error_line == at.line && p->last_error_col == at.col &&
       strcmp(p->last_error_msg, msg) == 0)
     return;
-  char hint[192];
+  char hint[256];
   if (at.kind == NY_T_EOF) {
-    snprintf(hint, sizeof(hint),
-             "check for missing ';' or unmatched brace; close the block opened "
-             "at line %d",
-             opened_line);
+    int s_line = 0, s_col = 0;
+    if (parser_semicolon_swallowed_rbrace(p, opened_line, &s_line, &s_col)) {
+      if (s_line > 0 && s_col > 0) {
+        snprintf(hint, sizeof(hint),
+                 "';' is a comment in Nytrix (at line %d:%d), so everything "
+                 "after it on that line (including the closing '}') was "
+                 "ignored; to split statements just use a space instead, or "
+                 "put the closing '}' of the block opened at line %d on its "
+                 "own line",
+                 s_line, s_col, opened_line);
+      } else {
+        snprintf(hint, sizeof(hint),
+                 "';' is a comment in Nytrix, so everything after it on that line "
+                 "(including the closing '}') was ignored; to split statements "
+                 "just use a space instead, or put the closing '}' of the block "
+                 "opened at line %d on its own line",
+                 opened_line);
+      }
+    } else {
+      snprintf(hint, sizeof(hint),
+               "check for an unmatched brace; close the block opened at line %d",
+               opened_line);
+    }
   } else {
     snprintf(hint, sizeof(hint),
              "close the block opened at line %d before starting this top-level "

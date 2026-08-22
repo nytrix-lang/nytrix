@@ -524,6 +524,7 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
     case NYIR_XOR_I64:
     case NYIR_SHL_I64:
     case NYIR_SAR_I64:
+    case NYIR_ROR_I64:
       if (!nyir_eval_read_value(values, known, in->a, &a) ||
           !nyir_eval_read_value(values, known, in->b, &b))
         goto missing_value;
@@ -986,6 +987,7 @@ bool nyir_is_pure_i64_straightline(const nyir_func_t *f) {
     case NYIR_XOR_I64:
     case NYIR_SHL_I64:
     case NYIR_SAR_I64:
+    case NYIR_ROR_I64:
     case NYIR_CMP_I64:
     case NYIR_ADD_F64:
     case NYIR_SUB_F64:

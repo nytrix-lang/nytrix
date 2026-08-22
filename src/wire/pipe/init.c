@@ -1807,6 +1807,17 @@ int ny_pipeline_run(ny_options *opt) {
   if (handle_non_compile_modes(opt, &exit_code))
     return exit_code;
   ny_diag_configure(opt ? opt->warn_level : 1, opt ? opt->diag_compact : false);
+  if (opt && opt->warn_shadow)
+    ny_diag_set_shadow_warnings(true);
+  /*
+   * --warn-all is warn level 2 (the table-driven option sets warn_level):
+   * full lint output, shadow warnings un-suppressed, and every warning
+   * counts as an error for the exit code (CI mode).
+   */
+  if (opt && opt->warn_level >= 2) {
+    ny_diag_set_shadow_warnings(true);
+    ny_diag_set_warn_as_error(true);
+  }
   if (opt && opt->dump_diagnose)
     ny_ensure_dir_recursive(ny_dump_dir(opt));
   ny_pipeline_configure_worker(opt);
@@ -2203,6 +2214,13 @@ int ny_pipeline_run(ny_options *opt) {
     goto exit_success;
   }
 
+  if ((opt->nyir_dump_text || opt->nyir_dump_bin || opt->nyir_verify) &&
+      !opt->native_only) {
+    NY_LOG_WARN("--nyir-dump/--nyir-verify operate on the native NIR pipeline "
+                "and are ignored on the JIT/LLVM path; add --native-only "
+                "(or --native-backend x86_64 --native-only) to see them\n");
+  }
+
   ny_tick_t t_codegen = opt->do_timing ? ny_ticks_now() : 0;
   NY_LOG_V2("Initializing codegen_t for module 'nytrix'\n");
   codegen_init(&cg, &prog, arena, "nytrix");
@@ -2357,6 +2375,15 @@ int ny_pipeline_run(ny_options *opt) {
   progress_node = ny_progress_task_begin("validate types", 1);
   ny_tick_t t_type_validation = opt->do_timing ? ny_ticks_now() : 0;
   int type_errors = 0;
+  if (opt && opt->list_fallbacks && !reuse_semantic_artifact) {
+    ny_type_pipeline_list_fallbacks(
+        &prog, &cg, parse_name,
+        opt && opt->dump_scope != NY_DUMP_SCOPE_PROGRAM);
+    ny_progress_task_end(progress_node);
+    codegen_dispose(&cg);
+    program_free(&prog, arena);
+    return 0;
+  }
   if (!reuse_semantic_artifact) {
     type_errors = ny_type_pipeline_validate_semantics(
         &prog, &cg, parse_name,
@@ -3023,6 +3050,18 @@ skip_compilation:
         (void)unlink(output_path);
     }
   }
+  /*
+   * Lint runs after all codegen passes (including the lazy script-entry
+   * emit, which fires shadowing warnings while emitting main) so that every
+   * compile-time diagnostic has been counted.  --warn-all turns each
+   * warning into a non-zero exit (CI mode).
+   */
+  ny_lint_unused_imports(&cg, &prog);
+  if (ny_diag_warn_as_error_count() > 0) {
+    exit_code = 1;
+    goto exit_success;
+  }
+  fflush(stderr);
   if (opt->run_jit) {
     ny_sanitize_setup_env(opt->sanitize);
 #ifndef _WIN32
@@ -3170,6 +3209,14 @@ skip_compilation:
         }
       }
       register_jit_symbols(ee, jmod, &cg);
+      if (cg.had_error) {
+        ny_progress_task_end(progress_node);
+        if (show_progress)
+          ny_progress_finish();
+        LLVMDisposeExecutionEngine(ee);
+        exit_code = 1;
+        goto exit_success;
+      }
       ny_jit_map_unresolved_symbols(ee, jmod, NULL);
       ny_jit_write_perf_map(ee, jmod);
       maybe_log_phase_time(opt->do_timing, "JIT Init:", t_jit);
